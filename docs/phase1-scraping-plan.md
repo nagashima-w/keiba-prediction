@@ -44,6 +44,8 @@ fixtures/
   odds_{race_id}.json        # APIの場合
 ```
 
+**保存形式**: フィクスチャは**デコード済みUTF-8テキスト**として保存する(生バイト列は保存しない)。`HttpClient.fetchText` はレスポンスをエンコーディング(Content-Type または明示指定)に従ってデコードしたJS文字列を返し、パーサーはそのJS文字列を入力とする。フィクスチャも同じ文字列をそのままUTF-8で書き出すことで、テスト入力と本番入力の形を一致させる。EUC-JP配信の `db.netkeiba.com`(馬個別ページ)も取得時点でデコード済みのため、保存物はUTF-8になる。
+
 ### 選定基準(テストの境界値を意識)
 
 - **レースA**: 芝・多頭数(16〜18頭)の重賞。過去走が豊富でnewspaperページの情報量が多い
@@ -65,6 +67,10 @@ fixtures/
 
 > ネットワーク解除後にここへ追記する。
 > 要素ごとの「静的/API/Playwright」対応表、および各ページの主要セレクタのメモを記録する。
+
+### TODO(ネットワーク解除後に実測する項目)
+
+- **`race.netkeiba.com` 各ページのcharset実測**: `race_list_sub` / `newspaper` / `oikiri` / `comment` 各ページの HTTPレスポンス `Content-Type` charset(および実バイトのエンコーディング)を実測する。現状これらは `HttpClient.fetchText` の既定(Content-Type由来 → 未指定ならUTF-8)に任せているが、`db.netkeiba.com` 同様にEUC-JP等で配信される場合は `planFixtureTargets` 側で該当ページに `encoding` を明示指定する必要がある。実測結果に応じて `packages/core/src/scraper/fixture-plan.ts` のエンコーディング指定を追加・修正すること。
 
 ## ネットワーク解除待ちの間の先行実装
 

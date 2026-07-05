@@ -1,0 +1,11 @@
+{
+  // ルート直下の scripts/ 配下(フィクスチャ取得スクリプト等)を型検査するための設定。
+  // packages/core は自前の tsconfig で検査されるが、scripts/ はどの package にも
+  // 属さないため単独で検査対象に含める必要がある。noEmit で型検査のみ行う。
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["scripts"]
+}
