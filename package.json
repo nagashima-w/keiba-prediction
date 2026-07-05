@@ -1,14 +1,19 @@
 {
   "name": "keiba-ev-tool",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "description": "netkeibaのデータから複勝期待値プラスの馬券を抽出する分析ツール(個人利用専用)",
   "scripts": {
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.scripts.json"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
