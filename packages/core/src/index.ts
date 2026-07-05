@@ -12,3 +12,14 @@ export {
   type HttpClientOptions,
   type SupportedEncoding,
 } from "./scraper/http-client.js";
+export {
+  CachedFetcher,
+  ScrapeCache,
+  type CacheEntry,
+  type CachedFetcherOptions,
+  type CachedFetchTextOptions,
+  type NowFn,
+  type ScrapeCacheGetOptions,
+  type ScrapeCacheOptions,
+  type TextFetcher,
+} from "./scraper/cache.js";
