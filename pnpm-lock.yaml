@@ -16,6 +16,9 @@ importers:
       cheerio:
         specifier: ^1.2.0
         version: 1.2.0
+      iconv-lite:
+        specifier: ^0.6.3
+        version: 0.6.3
       undici:
         specifier: ^8.7.0
         version: 8.7.0
