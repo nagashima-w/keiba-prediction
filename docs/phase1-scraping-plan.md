@@ -1,13 +1,9 @@
 # Phase 1: HTML構造調査とフィクスチャ取得計画
 
-## 現状のブロッカー(要ユーザー対応)
+## ブロッカー(解消済み)
 
-この実行環境のネットワークポリシーでは netkeiba への到達が拒否される(CONNECT に対しゲートウェイが 403 を返す。curl / WebFetch とも不可)。
-
-- `race.netkeiba.com` → 403(ポリシー拒否)
-- `db.netkeiba.com` → 403(ポリシー拒否)
-
-**対応**: 環境設定の Network access を netkeiba に到達できる設定に変更する(GETTING_STARTED.md 記載の通り、デフォルトの Trusted はパッケージレジストリのみ許可)。解除されるまで、実HTMLに依存するパーサー実装は保留し、ネットワーク非依存の基盤(HTTPクライアント・キャッシュ・型定義)を先行実装する。
+~~この実行環境のネットワークポリシーでは netkeiba への到達が拒否される~~
+→ 2026-07-05、ユーザーが環境の Network access を変更し解消。同日に構造調査とフィクスチャ取得を実施した(結果は「調査結果」節)。
 
 ## 対象ページとURL一覧
 
@@ -63,14 +59,71 @@ fixtures/
 - 取得回数は最小限: 上記フィクスチャ一式で 10リクエスト前後を想定
 - 実行はネットワークポリシー解除後、1回のみ
 
-## 調査結果(未実施)
+## 調査結果(2026-07-05 実測)
 
-> ネットワーク解除後にここへ追記する。
-> 要素ごとの「静的/API/Playwright」対応表、および各ページの主要セレクタのメモを記録する。
+### 要素→取得方式の確定表
 
-### TODO(ネットワーク解除後に実測する項目)
+| 要素 | 方式 | URL | charset | 備考 |
+|------|------|-----|---------|------|
+| レース一覧(日付→race_id) | **静的HTML** | `race.netkeiba.com/top/race_list_sub.html?kaisai_date=YYYYMMDD` | UTF-8(ヘッダ明示) | race_id・レース名・条件(芝/ダ・距離)・頭数・グレードアイコンが含まれる |
+| 出馬表 | **静的HTML** | `race.netkeiba.com/race/shutuba.html?race_id={race_id}` | UTF-8(ヘッダ明示) | **newspaper.html は不採用**(下記) 。枠・馬番・馬名+horse_id・性齢・斤量・騎手+jockey_id・厩舎所在地(美浦/栗東)+trainer_id・馬体重(増減)がすべて静的に含まれる。オッズ列のみ `---.-` プレースホルダ(JS) |
+| 各馬の全戦績 | **内部API** | `db.netkeiba.com/horse/ajax_horse_results.html?input=UTF-8&output=json&id={horse_id}` | UTF-8(JSON) | `{status:"OK", data:"<HTMLフラグメント>"}`。全戦績テーブル(下記列構成)が入る。馬ページ本体の戦績はこのAjaxで遅延描画されるため直接APIを叩く |
+| 馬プロフィール | **静的HTML** | `db.netkeiba.com/horse/{horse_id}/` | **EUC-JP。ただしContent-Typeにcharsetなし(`text/html`のみ)→ 呼び出し側で `encoding: "euc-jp"` の明示指定が必須** | `db_prof_table`: 生年月日・調教師(美浦/栗東)・馬主・通算成績など。戦績テーブルは含まれない(上記Ajaxで取得) |
+| 単勝・複勝オッズ | **内部API** | `race.netkeiba.com/api/api_get_jra_odds.html?race_id={race_id}&type=1&action=init` | UTF-8(JSON) | `data.odds["1"]` = 単勝 `{馬番(2桁): [オッズ, "0.0", 人気]}`、`data.odds["2"]` = 複勝 `{馬番: [下限, 上限, 人気]}`。`data.official_datetime` 付き。**複勝下限が直接取れる**(EV計算の要件に合致) |
+| 調教(追い切り) | **静的HTML(無料範囲)** | `race.netkeiba.com/race/oikiri.html?race_id={race_id}` | UTF-8(ヘッダ明示) | 無料で取れるのは**評価テキスト(`td.Training_Critic` 例「動き良化」)と評価ランク(例「B」)**。調教タイム・ラップはプレミアム領域 → スキーマ上optional(仕様想定通り) |
+| 厩舎コメント | **プレミアム限定** | `race.netkeiba.com/race/comment.html?race_id={race_id}` | UTF-8 | 無料ではコメント本文が含まれない(ナビのみ)。スキーマ上optionalとし、無料実装ではスキップ。analyzerは調教評価のみで動く設計にする |
+| 騎手・調教師コース成績 | 未調査 | `db.netkeiba.com/jockey/result/recent/{jockey_id}/` へのリンクを出馬表から確認済み | - | scorer実装時(Phase 2)に調査 |
 
-- **`race.netkeiba.com` 各ページのcharset実測**: `race_list_sub` / `newspaper` / `oikiri` / `comment` 各ページの HTTPレスポンス `Content-Type` charset(および実バイトのエンコーディング)を実測する。現状これらは `HttpClient.fetchText` の既定(Content-Type由来 → 未指定ならUTF-8)に任せているが、`db.netkeiba.com` 同様にEUC-JP等で配信される場合は `planFixtureTargets` 側で該当ページに `encoding` を明示指定する必要がある。実測結果に応じて `packages/core/src/scraper/fixture-plan.ts` のエンコーディング指定を追加・修正すること。
+- Playwrightフォールバックは**全要素で不要**と確定。
+- `rapl.netkeiba.com`(newspaper系のAPL)は使用しない。
+
+### newspaper.html を不採用にした理由
+
+仕様書はスクレイピング起点に `newspaper.html` を挙げていたが、実測の結果、出馬表・各馬過去走テーブルは **Riot.js によるクライアントサイド描画**(`riot-shutuba-past` タグ + `race.netkeiba.com/race_api/`)で、静的HTMLには含まれない(タイム表記0件)。代替として:
+- 出馬表 → `shutuba.html`(静的で全項目が取れる)
+- 各馬過去走 → `ajax_horse_results.html`(全戦績が取れるので過去5走に限らずスコアリング要件をすべて満たす)
+
+で同等以上の情報が取得できるため、こちらを正式ルートとする。取得済みの `fixtures/newspaper_202603020211.html` は不採用判断の証跡として保持。
+
+### 戦績HTMLフラグメントの列構成(ajax_horse_results)
+
+1行=1走、33セル。主要列: 日付(`2026/06/28`)・開催(`2福島2`)・天候・R・レース名(+race_idリンク)・頭数・枠・馬番・オッズ・人気・**着順**・騎手(+jockey_idリンク)・斤量・**距離(`芝1800`: 種別と距離が結合)**・馬場・タイム(`1:45.9`)・着差・**通過(`2-3-4-3`)**・ペース・**上り3F(`35.0`)**・**馬体重(`464(-8)`)**・勝ち馬名。
+地方・海外出走の変則行は今回のサンプルには含まれず(3頭とも中央のみ)。**パーサーは空セル・欠損を許容する設計とし、変則行に遭遇した時点でフィクスチャを追加**する。
+
+### 出馬表(shutuba.html)の主要セレクタメモ
+
+- 行: `tr.HorseList`
+- 枠: `td[class^="Waku"] span`、馬番: `td[class^="Umaban"]`
+- 馬名+horse_id: `td.HorseInfo span.HorseName a[href*="/horse/"]`(title属性=馬名)
+- 性齢: `td.Barei`、斤量: 性齢の次の `td.Txt_C`
+- 騎手: `td.Jockey a[href*="/jockey/result/recent/"]`(URL末尾がjockey_id)
+- 厩舎: `td.Trainer span.Label1`(美浦/栗東)+ `a[href*="/trainer/"]`
+- 馬体重(増減): `td.Weight`(例 `464<small>(-8)</small>`。出走前は未発表の場合あり)
+- レース名・条件(距離/コース/発走時刻/馬場): ページ上部 `div.RaceList_Item02`(RaceName / RaceData01 / RaceData02)
+
+### 取得済みフィクスチャ(2026-06-28開催、fixtures/)
+
+| ファイル | 内容 |
+|---|---|
+| `race_list_sub_20260628.html` | 3場36レースの一覧 |
+| `shutuba_202603020211.html` | レースA: ラジオNIKKEI賞(GIII) 福島芝1800・16頭 |
+| `shutuba_202602010607.html` | レースB: 函館ダ1700・3歳以上1勝クラス・10頭 |
+| `shutuba_202602010601.html` | レースC: 函館芝1200・2歳未勝利・8頭(キャリア浅い馬の供給源) |
+| `oikiri_202603020211.html` | 調教評価(16頭分、評価+ランク) |
+| `comment_202603020211.html` | プレミアム壁の確認用(本文なし) |
+| `newspaper_202603020211.html` | 不採用判断の証跡(Riot描画) |
+| `horse_2023103386.html` | 馬プロフィール: ルージュボヤージュ(牝3、EUC-JP→UTF-8デコード済み) |
+| `horse_2021105857.html` | 馬プロフィール: ウィンターガーデン(牝5) |
+| `horse_results_2023103386.json` | 戦績5走(3歳・中堅サンプル) |
+| `horse_results_2021105857.json` | 戦績22走(フル構造・古馬) |
+| `horse_results_2024104976.json` | 戦績2走(サンプル不足境界: チカバリエンテ 牝2) |
+| `odds_202603020211.json` | 単勝+複勝(下限/上限)+人気、official_datetime付き |
+
+### 実装への反映事項(パーサー実装時に対応)
+
+1. `urls.ts` を確定URLに更新: `shutubaUrl` を追加(newspaperUrl は非推奨化 or 削除)、`horseResultsApiUrl`、`oddsApiUrl` を追加。`oikiriUrl`/`commentUrl` は実URL一致を確認済み(コメントの「調査未了」注記を解除)
+2. `fixture-plan.ts` を確定URL・確定エンコーディングに更新(horse ページに `encoding: "euc-jp"` 明示。Content-Typeにcharsetがないため必須)
+3. セレクタは仕様通り `selectors.ts` に集約する
 
 ## ネットワーク解除待ちの間の先行実装
 
