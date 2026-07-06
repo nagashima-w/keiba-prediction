@@ -34,11 +34,24 @@ export {
 } from "./scraper/ids.js";
 export {
   commentUrl,
+  horseResultsApiUrl,
   horseUrl,
-  newspaperUrl,
+  oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
+  shutubaUrl,
 } from "./scraper/urls.js";
+export { parseRaceList } from "./scraper/parse-race-list.js";
+export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
+export type {
+  BodyWeight,
+  CourseType,
+  RaceListEntry,
+  Shutuba,
+  ShutubaHorse,
+  ShutubaRaceInfo,
+  StableLocation,
+} from "./scraper/types.js";
 // 注: フィクスチャ取得の純粋ロジック(parseFetchArgs / planFixtureTargets)は
 // 取得スクリプト専用の内部ユーティリティであり、ライブラリの公開APIには含めない。
 // scripts/fetch-fixtures.ts は ./scraper/fixture-plan.js を直接importする。

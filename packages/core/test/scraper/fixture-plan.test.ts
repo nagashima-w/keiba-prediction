@@ -100,14 +100,14 @@ describe("planFixtureTargets(取得対象とファイル名・URLの対応)", ()
     expect(t.encoding).toBeUndefined();
   });
 
-  it("レースIDから競馬新聞・追い切り・厩舎コメントの3対象を生成すること", () => {
+  it("レースIDから出馬表・追い切り・厩舎コメント・オッズの4対象を生成すること", () => {
     const targets = planFixtureTargets({
       date: undefined,
       races: [race("202605020811")],
       horses: [],
     });
-    expect(find(targets, "newspaper_202605020811.html").url).toBe(
-      "https://race.netkeiba.com/race/newspaper.html?race_id=202605020811",
+    expect(find(targets, "shutuba_202605020811.html").url).toBe(
+      "https://race.netkeiba.com/race/shutuba.html?race_id=202605020811",
     );
     expect(find(targets, "oikiri_202605020811.html").url).toBe(
       "https://race.netkeiba.com/race/oikiri.html?race_id=202605020811",
@@ -115,17 +115,28 @@ describe("planFixtureTargets(取得対象とファイル名・URLの対応)", ()
     expect(find(targets, "comment_202605020811.html").url).toBe(
       "https://race.netkeiba.com/race/comment.html?race_id=202605020811",
     );
+    expect(find(targets, "odds_202605020811.json").url).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=1&action=init",
+    );
   });
 
-  it("馬IDから馬個別ページの取得対象を生成し、EUC-JPを指定すること", () => {
+  it("馬IDから馬個別ページ(EUC-JP)と全戦績JSONの2対象を生成すること", () => {
     const targets = planFixtureTargets({
       date: undefined,
       races: [],
       horses: [horse("2019105219")],
     });
-    const t = find(targets, "horse_2019105219.html");
-    expect(t.url).toBe("https://db.netkeiba.com/horse/2019105219/");
-    expect(t.encoding).toBe("euc-jp");
+    const prof = find(targets, "horse_2019105219.html");
+    expect(prof.url).toBe("https://db.netkeiba.com/horse/2019105219/");
+    // Content-Typeにcharsetが無いため、明示的にEUC-JPを指定する必要がある。
+    expect(prof.encoding).toBe("euc-jp");
+
+    const results = find(targets, "horse_results_2019105219.json");
+    expect(results.url).toBe(
+      "https://db.netkeiba.com/horse/ajax_horse_results.html?input=UTF-8&output=json&id=2019105219",
+    );
+    // 全戦績APIはUTF-8のJSONを返すため、エンコーディング指定は不要。
+    expect(results.encoding).toBeUndefined();
   });
 
   it("複数の対象をまとめて計画できること(件数の確認)", () => {
@@ -134,8 +145,8 @@ describe("planFixtureTargets(取得対象とファイル名・URLの対応)", ()
       races: [race("202605020811"), race("202601020811")],
       horses: [horse("2019105219")],
     });
-    // 開催日1 + レース2×3 + 馬1 = 8対象
-    expect(targets).toHaveLength(8);
+    // 開催日1 + レース2×4 + 馬1×2 = 11対象
+    expect(targets).toHaveLength(11);
   });
 
   it("開催日なし・レースなし・馬なしのときは空配列を返すこと", () => {
@@ -153,8 +164,8 @@ describe("planFixtureTargets(取得対象とファイル名・URLの対応)", ()
       races: [race("202605020811"), race("202605020811")],
       horses: [],
     });
-    // 重複を除けば新聞・追い切り・コメントの3対象のみ。
-    expect(targets).toHaveLength(3);
+    // 重複を除けば出馬表・追い切り・コメント・オッズの4対象のみ。
+    expect(targets).toHaveLength(4);
     const urls = targets.map((t) => t.url);
     expect(new Set(urls).size).toBe(urls.length);
   });
@@ -165,7 +176,9 @@ describe("planFixtureTargets(取得対象とファイル名・URLの対応)", ()
       races: [],
       horses: [horse("2019105219"), horse("2019105219")],
     });
-    expect(targets).toHaveLength(1);
-    expect(targets[0]!.url).toBe("https://db.netkeiba.com/horse/2019105219/");
+    // 重複を除けば馬個別ページ・全戦績JSONの2対象のみ。
+    expect(targets).toHaveLength(2);
+    const urls = targets.map((t) => t.url);
+    expect(new Set(urls).size).toBe(urls.length);
   });
 });

@@ -17,10 +17,12 @@ import {
 import type { SupportedEncoding } from "./http-client.js";
 import {
   commentUrl,
+  horseResultsApiUrl,
   horseUrl,
-  newspaperUrl,
+  oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
+  shutubaUrl,
 } from "./urls.js";
 
 /** パース済みのフィクスチャ取得引数。 */
@@ -108,8 +110,8 @@ export function parseFetchArgs(argv: string[]): FetchFixturesArgs {
  * 取得引数から、実際に取得すべき対象(URL・ファイル名・エンコーディング)の一覧を決める。
  *
  * - 開催日: レース一覧サブHTML(1件)
- * - 各レース: 競馬新聞・追い切り・厩舎コメント(3件)
- * - 各馬: 馬個別ページ(1件、EUC-JP指定)
+ * - 各レース: 出馬表・追い切り・厩舎コメント・オッズJSON(4件)
+ * - 各馬: 馬個別ページ(EUC-JP指定)・全戦績JSON(2件)
  *
  * 同一の `--race` / `--horse` が重複指定された場合、同一URLの取得対象は
  * 最初の1回だけ計画する(同じページを二重にGETしない)。
@@ -139,8 +141,8 @@ export function planFixtureTargets(args: FetchFixturesArgs): FixtureTarget[] {
 
   for (const raceId of args.races) {
     add({
-      url: newspaperUrl(raceId),
-      filename: `newspaper_${raceId}.html`,
+      url: shutubaUrl(raceId),
+      filename: `shutuba_${raceId}.html`,
     });
     add({
       url: oikiriUrl(raceId),
@@ -150,14 +152,23 @@ export function planFixtureTargets(args: FetchFixturesArgs): FixtureTarget[] {
       url: commentUrl(raceId),
       filename: `comment_${raceId}.html`,
     });
+    add({
+      url: oddsApiUrl(raceId),
+      filename: `odds_${raceId}.json`,
+    });
   }
 
   for (const horseId of args.horses) {
     add({
       url: horseUrl(horseId),
       filename: `horse_${horseId}.html`,
-      // db.netkeiba.com はEUC-JPで配信されるため明示する。
+      // db.netkeiba.com はEUC-JPで配信され、Content-Typeにcharsetが無いため明示する。
       encoding: "euc-jp",
+    });
+    add({
+      url: horseResultsApiUrl(horseId),
+      filename: `horse_results_${horseId}.json`,
+      // 全戦績APIはUTF-8のJSONを返すため、エンコーディング指定は不要。
     });
   }
 
