@@ -95,15 +95,47 @@ export class HttpError extends Error {
 }
 
 /**
- * デフォルトの fetch 実装を遅延ロードする。
+ * undici本体のロードは1度だけ行い、以降は同じPromiseを再利用する遅延シングルトン。
  * テスト等で fetch を注入する場合はこの経路を通らないため、undiciのロードコストは発生しない。
+ */
+let undiciModulePromise: Promise<typeof import("undici")> | undefined;
+
+/**
+ * 環境変数(HTTPS_PROXY/NO_PROXY等)を参照するdispatcher。
+ * プロセス内で1つだけ生成して全リクエストで使い回す(リクエストごとには生成しない)。
+ */
+let sharedDispatcher: import("undici").Dispatcher | undefined;
+
+/** undici本体を遅延ロードする(初回のみ実import、以降はキャッシュ)。 */
+function loadUndici(): Promise<typeof import("undici")> {
+  if (undiciModulePromise === undefined) {
+    undiciModulePromise = import("undici");
+  }
+  return undiciModulePromise;
+}
+
+/**
+ * デフォルトの fetch 実装。
+ *
+ * undiciの素のfetchは HTTPS_PROXY / NO_PROXY 環境変数を自動では参照しないため、
+ * プロキシ経由必須の環境では全リクエストが失敗する。これを避けるため、
+ * EnvHttpProxyAgent を dispatcher として渡し、環境変数に従ってプロキシを利用させる。
+ * EnvHttpProxyAgent は該当環境変数が無ければ通常のAgentと同等に振る舞うため、
+ * プロキシ無し環境でも安全に動作する。
+ * dispatcher はプロセス内で1つを再利用する(リクエストごとに生成しない)。
  */
 async function defaultFetch(
   url: string,
   init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ): Promise<FetchResponse> {
-  const { fetch } = await import("undici");
-  return fetch(url, init) as unknown as Promise<FetchResponse>;
+  const { fetch, EnvHttpProxyAgent } = await loadUndici();
+  if (sharedDispatcher === undefined) {
+    sharedDispatcher = new EnvHttpProxyAgent();
+  }
+  return fetch(url, {
+    ...init,
+    dispatcher: sharedDispatcher,
+  }) as unknown as Promise<FetchResponse>;
 }
 
 /**
