@@ -78,6 +78,23 @@ export {
   type DateDumpCommand,
   type RaceDumpCommand,
 } from "./scraper/cli.js";
+export {
+  classifyFrameZone,
+  classifyRotationInterval,
+  classifySeason,
+  classifyTrackWetness,
+  daysBetweenDates,
+  deriveRaceFeatures,
+  isPlaced,
+  REST_MIN_DAYS,
+  SHORT_ROTATION_MAX_DAYS,
+  type DerivedRaceFeature,
+  type FrameZone,
+  type PlacedResult,
+  type RotationInterval,
+  type Season,
+  type TrackWetness,
+} from "./scorer/derive-features.js";
 export type {
   BodyWeight,
   CourseType,
