@@ -61,6 +61,48 @@ export const SHUTUBA_SELECTORS = {
   weight: "td.Weight",
 } as const;
 
+/** 馬プロフィール(db.netkeiba.com/horse/{id}/)のセレクタ。 */
+export const HORSE_PROFILE_SELECTORS = {
+  /** 馬名(ページ見出し)。 */
+  name: "div.horse_title h1",
+  /** プロフィールテーブル(生年月日・調教師・通算成績など)。 */
+  profTable: "table.db_prof_table",
+  /** テーブル各行の見出しセル。 */
+  rowHeader: "th",
+  /** テーブル各行のデータセル。 */
+  rowData: "td",
+  /** 調教師リンク(href が /trainer/{id}/、title が調教師名)。 */
+  trainerLink: 'a[href*="/trainer/"]',
+} as const;
+
+/** 全戦績(ajax_horse_results)のセレクタ。 */
+export const HORSE_RESULTS_SELECTORS = {
+  /** 戦績テーブル。 */
+  table: "table.db_h_race_results",
+  /** 行(ヘッダ行含む)。 */
+  row: "tr",
+  /** ヘッダ列セル(列数の基準にする)。 */
+  headerCell: "th",
+  /** データセル。 */
+  dataCell: "td",
+} as const;
+
+/** 調教(oikiri.html)のセレクタ。 */
+export const OIKIRI_SELECTORS = {
+  /** 調教テーブル。 */
+  table: "table.OikiriTable",
+  /** 出走馬の行。 */
+  row: "tr.HorseList",
+  /** 馬番セル。 */
+  umaban: "td.Umaban",
+  /** 馬名+horse_idリンク。 */
+  horseLink: "td.Horse_Info div.Horse_Name a",
+  /** 調教評価テキスト(例: 動き良化)。 */
+  critic: "td.Training_Critic",
+  /** 調教評価ランク(class が Rank_〜 と可変のため前方一致。例: B)。 */
+  rank: 'td[class^="Rank_"]',
+} as const;
+
 /** パースに用いる正規表現。 */
 export const PATTERNS = {
   /** href から race_id(12桁)を取り出す。 */
@@ -87,4 +129,22 @@ export const PATTERNS = {
   weather: /天候\s*[:：]\s*([^\s<>/]+)/,
   /** 馬場状態を取り出す(例: 馬場:良 → 良)。 */
   trackCondition: /馬場\s*[:：]\s*([^\s<>/]+)/,
+  /** href から trainer_id を取り出す(プロフィール表: /trainer/01126/ 形式)。 */
+  trainerIdFromProfileHref: /\/trainer\/(\d+)/,
+  /** 括弧内の値を取り出す(例: 木村哲也 (美浦) → 美浦)。半角・全角括弧に対応。 */
+  parenContent: /[(（]\s*([^)）]+?)\s*[)）]/,
+  /** 全戦績の距離表記(例: 芝1800 / ダ1700 / 障3000。m 表記なし)。 */
+  courseAndDistanceCompact: /(芝|ダ|障)\s*(\d+)/,
+  /** 開催表記を回次・会場・日目に分解する(例: 2福島2 → 2, 福島, 2)。 */
+  venueRound: /^(\d+)(\D+?)(\d+)$/,
+  /** 通過順位を分解する区切り(例: 2-3-4-3)。 */
+  passingSeparator: /-/,
+  /**
+   * href からレースIDセグメントを英数字ごと取り出す(戦績のレース名リンク: /race/{id}/ 形式)。
+   * 海外走は `2026J0010109` のように英字が混じるため、数字のみでは途中で切れる。
+   * 区分判定は取り出した生セグメントに対して行う。
+   */
+  raceIdSegmentFromRacePath: /\/race\/([0-9A-Za-z]+)/,
+  /** 降着表記の着順(例: 5(降) / 3(降))から確定順位を取り出す。半角・全角括弧に対応。 */
+  demotedFinish: /^(\d+)\s*[(（]\s*降\s*[)）]$/,
 } as const;
