@@ -43,14 +43,35 @@ export {
 } from "./scraper/urls.js";
 export { parseRaceList } from "./scraper/parse-race-list.js";
 export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
+export {
+  HorseProfileParseError,
+  parseHorseProfile,
+} from "./scraper/parse-horse-profile.js";
+export {
+  HorseResultsParseError,
+  parseHorseResults,
+} from "./scraper/parse-horse-results.js";
+export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
+export { OikiriParseError, parseOikiri } from "./scraper/parse-oikiri.js";
 export type {
   BodyWeight,
   CourseType,
+  FinishPosition,
+  HorseProfile,
+  HorseRaceResult,
+  OddsSnapshot,
+  OikiriEntry,
+  OikiriResult,
+  OikiriSkippedRow,
+  PlaceOdds,
   RaceListEntry,
+  RaceVenue,
   Shutuba,
   ShutubaHorse,
   ShutubaRaceInfo,
   StableLocation,
+  VenueKind,
+  WinOdds,
 } from "./scraper/types.js";
 // 注: フィクスチャ取得の純粋ロジック(parseFetchArgs / planFixtureTargets)は
 // 取得スクリプト専用の内部ユーティリティであり、ライブラリの公開APIには含めない。
