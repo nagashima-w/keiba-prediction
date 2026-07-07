@@ -53,6 +53,31 @@ export {
 } from "./scraper/parse-horse-results.js";
 export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
 export { OikiriParseError, parseOikiri } from "./scraper/parse-oikiri.js";
+export {
+  DEFAULT_ODDS_TTL_MS,
+  DEFAULT_OIKIRI_TTL_MS,
+  DEFAULT_RACE_LIST_TTL_MS,
+  DEFAULT_RESULTS_TTL_MS,
+  DEFAULT_SHUTUBA_TTL_MS,
+  listRaces,
+  scrapeRace,
+  type RaceData,
+  type RaceDataMeta,
+  type RaceFetcher,
+  type RaceHorseData,
+  type ScrapeDeps,
+  type ScrapeRaceOptions,
+  type ScrapeTtlConfig,
+  type ScrapeWarning,
+  type ScrapeWarningKind,
+} from "./scraper/scrape-race.js";
+export {
+  DEFAULT_CACHE_DB,
+  parseCliArgs,
+  type CliCommand,
+  type DateDumpCommand,
+  type RaceDumpCommand,
+} from "./scraper/cli.js";
 export type {
   BodyWeight,
   CourseType,
