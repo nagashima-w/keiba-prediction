@@ -95,6 +95,48 @@ export {
   type Season,
   type TrackWetness,
 } from "./scorer/derive-features.js";
+export {
+  aggregatePlaceRate,
+  computeDifferenceCorrection,
+  type BiasContribution,
+  type DifferenceCorrectionParams,
+  type PlaceRateAggregate,
+} from "./scorer/aggregate.js";
+export {
+  DEFAULT_SCORER_CONFIG,
+  type BiasWeights,
+  type ScorerConfig,
+  type SummerFatigueConfig,
+  type VenueBiasConfig,
+} from "./scorer/config.js";
+export {
+  COURSE_TRAITS,
+  courseSimilarity,
+  isCentralVenue,
+  type CourseTraits,
+  type TurfKind,
+  type TurnDirection,
+} from "./scorer/course-traits.js";
+export {
+  computeTrackConditionBias,
+  type TrackConditionInput,
+} from "./scorer/bias-track-condition.js";
+export {
+  computeVenueBias,
+  type VenueBiasContribution,
+  type VenueBiasKind,
+  type VenueInput,
+} from "./scorer/bias-venue.js";
+export {
+  computeSeasonBias,
+  computeSummerFatigueBias,
+  type SeasonInput,
+  type SummerFatigueContribution,
+} from "./scorer/bias-season.js";
+export {
+  computeFrameBias,
+  type FrameInput,
+} from "./scorer/bias-frame.js";
 export type {
   BodyWeight,
   CourseType,
