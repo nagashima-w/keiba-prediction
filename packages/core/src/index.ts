@@ -191,6 +191,31 @@ export {
   type ScoreContribution,
   type TodayRaceConditions,
 } from "./scorer/prior.js";
+export {
+  computeRaceEv,
+  DEFAULT_EV_CONFIG,
+  type EvConfig,
+  type HorseEv,
+  type HorsePrior,
+} from "./ev/expected-value.js";
+export {
+  AnalysisStore,
+  type AnalysisFilter,
+  type AnalysisHorseRecord,
+  type AnalysisRecord,
+  type AnalysisStoreOptions,
+  type RaceResultEntry,
+  type StoredAnalysis,
+  type StoredAnalysisHorse,
+} from "./ev/analysis-store.js";
+export {
+  computeVerifyReport,
+  DEFAULT_VERIFY_CONFIG,
+  type CalibrationBin,
+  type VerifyBetSummary,
+  type VerifyConfig,
+  type VerifyReport,
+} from "./ev/verify.js";
 export type {
   BodyWeight,
   CourseType,

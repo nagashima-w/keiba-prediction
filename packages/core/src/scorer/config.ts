@@ -17,6 +17,8 @@
  *   寄与度ログで監視し、必要なら重みで調整する。
  */
 
+import type { CourseType } from "../scraper/types.js";
+
 /** 夏負けフラグの設定。 */
 export interface SummerFatigueConfig {
   /**
@@ -79,8 +81,6 @@ export interface VenueBiasConfig {
    */
   readonly similarityDecay: number;
 }
-
-import type { CourseType } from "../scraper/types.js";
 
 /** 基礎スコア6項目の重み係数。各項目の補正値に乗算する。 */
 export interface BaseScoreWeights {

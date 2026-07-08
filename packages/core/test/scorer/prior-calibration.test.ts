@@ -141,22 +141,39 @@ describe("computeFieldPriors 正規化の巻き添え防止(要修正2)", () => 
     expect(priors[0]!.prior).toBeGreaterThan(0.5);
   });
 
-  it("正規化後になおmaxPriorを超える馬はクランプされること", () => {
-    const strong: PriorInput = {
-      features: deriveRaceFeatures([
-        makeResult({ date: "2025/01/01", finishPosition: rank(1) }),
-      ]),
+  it("全馬弱め(scale>1が実際に発動)で、正規化後にmaxPriorを超える馬がクランプされること", () => {
+    // 全馬弱め(raw合計が目標を大きく下回る)ケースで一律スケール(scale>1)を実発動させ、
+    // 「正規化後になお maxPrior を超える馬はクランプ」の分岐を実効化する。
+    // 構成: fieldSize=10。平均馬1頭(補正0 → clamped=中立0.3)+ 弱い馬9頭(大敗続き → clamped=minPrior0.02)。
+    //   target = min(3,10) = 3、sumClamped = 0.3 + 9×0.02 = 0.48、逸脱比率 |0.48-3|/3 ≈ 0.84 > 許容0.1 →
+    //   scale = 3/0.48 = 6.25。
+    //   平均馬: 0.3×6.25 = 1.875 → maxPrior(0.95)へ再クランプ(スケール前0.3は上限未満だった点が要点)。
+    //   弱い馬: 0.02×6.25 = 0.125(上限未満)。
+    const fieldSize = 10;
+    const average: PriorInput = {
+      features: deriveRaceFeatures([]),
       today: NEUTRAL_TODAY,
-      fieldSize: 2,
+      fieldSize,
       config: strongConfig(),
     };
     const weak: PriorInput = {
-      features: deriveRaceFeatures([]),
+      features: deriveRaceFeatures([
+        makeResult({ date: "2025/01/01", finishPosition: rank(18) }),
+      ]),
       today: NEUTRAL_TODAY,
-      fieldSize: 2,
+      fieldSize,
+      config: strongConfig(),
     };
-    const priors = computeFieldPriors([strong, weak]);
+    const priors = computeFieldPriors([average, ...new Array(9).fill(weak)]);
+
+    // 平均馬(index0)はスケール前0.3(上限未満)からスケールアップで上限超過 → maxPriorにクランプ。
     expect(priors[0]!.prior).toBeCloseTo(DEFAULT_SCORER_CONFIG.prior.maxPrior, 10);
+    // 弱い馬はスケール前0.02から実際にスケールアップ(scale>1の実発動)し、かつ上限未満のまま。
+    for (let i = 1; i < priors.length; i++) {
+      expect(priors[i]!.prior).toBeCloseTo(0.125, 10);
+      expect(priors[i]!.prior).toBeGreaterThan(DEFAULT_SCORER_CONFIG.prior.minPrior);
+      expect(priors[i]!.prior).toBeLessThan(DEFAULT_SCORER_CONFIG.prior.maxPrior);
+    }
   });
 });
 
