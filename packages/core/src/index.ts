@@ -216,6 +216,49 @@ export {
   type VerifyConfig,
   type VerifyReport,
 } from "./ev/verify.js";
+export {
+  classifyHorseLegStyle,
+  classifyRunLegStyle,
+  countFrontRunners,
+  estimatePace,
+  type ClassifyHorseOptions,
+  type HorseRunPassing,
+  type LegStyle,
+} from "./analyzer/leg-style.js";
+export {
+  buildPrompt,
+  type BuildPromptInput,
+  type BuildPromptRaceInfo,
+  type PromptHorse,
+  type PromptOikiri,
+} from "./analyzer/build-prompt.js";
+export {
+  AnalyzerResponseParseError,
+  extractJsonObject,
+  MAX_ADJUST,
+  parseAnalyzerResponse,
+  type ParseAnalyzerOptions,
+  type ParseAnalyzerResult,
+  type ParsedHorseResult,
+  type PriorRef,
+} from "./analyzer/parse-response.js";
+export {
+  analyzeRace,
+  type AnalyzeRaceDeps,
+  type AnalyzeRaceResult,
+  type LlmClient,
+} from "./analyzer/analyze-race.js";
+export {
+  AnthropicLlmClient,
+  buildRequestParams,
+  DEFAULT_ANALYZER_CONFIG,
+  extractText,
+  type AnalyzerConfig,
+  type AnthropicLlmClientDeps,
+  type AnthropicMessageResponse,
+  type AnthropicRequestParams,
+  type MessageSender,
+} from "./analyzer/anthropic-client.js";
 export type {
   BodyWeight,
   CourseType,

@@ -1,0 +1,143 @@
+/**
+ * Anthropic 実装 — LlmClient を @anthropic-ai/sdk で実装する。
+ *
+ * 設計方針(タスク指示):
+ *  - SDK 呼び出しはこのファイルに閉じ込める。単体テストは「SDKへ渡すパラメータの組み立て」
+ *    (buildRequestParams)と「レスポンスからのテキスト抽出」(extractText)を検証できるよう、
+ *    純関数として切り出し、実際の送信は注入可能な MessageSender 経由にする。
+ *  - モデルは config で指定可能。デフォルトは仕様どおり claude-sonnet-4-6。
+ *  - max_tokens・temperature も config で調整可能。
+ *  - APIキー未設定でもインスタンス化はエラーにしない。SDK クライアントは complete() 呼び出し時に
+ *    遅延生成するため、キーの解決失敗は「呼び出し時」に初めて発生する。
+ */
+
+import Anthropic from "@anthropic-ai/sdk";
+import type { LlmClient } from "./analyze-race.js";
+
+/** analyzer(Anthropic呼び出し)の設定。 */
+export interface AnalyzerConfig {
+  /** 使用するモデルID(既定: claude-sonnet-4-6)。 */
+  readonly model: string;
+  /** 応答の最大トークン数。 */
+  readonly maxTokens: number;
+  /** サンプリング温度(claude-sonnet-4-6 は指定可)。 */
+  readonly temperature: number;
+  /**
+   * 補正の最大幅(prior からの絶対値)。既定0.10(仕様「±10%以内」を絶対値0.10と解釈)。
+   * analyzeRace の deps.maxAdjust にそのまま渡してクリップ幅を制御する。
+   */
+  readonly maxAdjust: number;
+  /** APIキー(省略時は環境変数 ANTHROPIC_API_KEY)。 */
+  readonly apiKey?: string;
+}
+
+/**
+ * 既定の analyzer 設定。モデルは仕様指定の claude-sonnet-4-6。
+ * temperature=0 は補正の再現性を高めるための既定(チューニング対象)。
+ * maxTokens は最大18頭分の JSON(reason 付き)を収める余裕として 2048。
+ */
+export const DEFAULT_ANALYZER_CONFIG: AnalyzerConfig = {
+  model: "claude-sonnet-4-6",
+  maxTokens: 2048,
+  temperature: 0,
+  maxAdjust: 0.1,
+};
+
+/** SDK の messages.create へ渡す(このモジュールが組み立てる)パラメータ。 */
+export interface AnthropicRequestParams {
+  /** モデルID。 */
+  readonly model: string;
+  /** 最大トークン数。 */
+  readonly max_tokens: number;
+  /** サンプリング温度。 */
+  readonly temperature: number;
+  /** メッセージ列(analyzer は user 1メッセージのみ)。 */
+  readonly messages: ReadonlyArray<{ readonly role: "user"; readonly content: string }>;
+}
+
+/** SDK レスポンスの最小共通形(text抽出に必要な部分のみ)。 */
+export interface AnthropicMessageResponse {
+  /** コンテンツブロック列(text ブロックのみ使う)。 */
+  readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+}
+
+/** パラメータを受け取り Anthropic へ送信してレスポンスを返す関数(注入・モック可能)。 */
+export type MessageSender = (
+  params: AnthropicRequestParams,
+) => Promise<AnthropicMessageResponse>;
+
+/** AnthropicLlmClient の依存(注入)。 */
+export interface AnthropicLlmClientDeps {
+  /** 実送信関数。省略時は @anthropic-ai/sdk を遅延生成して使う。 */
+  readonly sender?: MessageSender;
+}
+
+/**
+ * プロンプトと設定から SDK 呼び出しパラメータを組み立てる純関数。
+ * @param prompt LLMへ渡すプロンプト全文
+ * @param config 部分設定(省略項目は DEFAULT_ANALYZER_CONFIG で補完)
+ */
+export function buildRequestParams(
+  prompt: string,
+  config: Partial<AnalyzerConfig> = {},
+): AnthropicRequestParams {
+  const merged = { ...DEFAULT_ANALYZER_CONFIG, ...config };
+  return {
+    model: merged.model,
+    max_tokens: merged.maxTokens,
+    temperature: merged.temperature,
+    messages: [{ role: "user", content: prompt }],
+  };
+}
+
+/** レスポンスの text ブロックを連結して1本のテキストにする(text以外は無視)。 */
+export function extractText(res: AnthropicMessageResponse): string {
+  return res.content
+    .filter((b) => b.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("");
+}
+
+/**
+ * LlmClient の Anthropic 実装。SDK 呼び出しはこのクラスに閉じ込める。
+ * sender を注入すると SDK に触れずにテストできる(パラメータ組み立ての検証用)。
+ */
+export class AnthropicLlmClient implements LlmClient {
+  private readonly config: AnalyzerConfig;
+  private readonly sender: MessageSender;
+
+  constructor(config: Partial<AnalyzerConfig> = {}, deps: AnthropicLlmClientDeps = {}) {
+    this.config = { ...DEFAULT_ANALYZER_CONFIG, ...config };
+    // sender 未注入なら、SDK クライアントを遅延生成する既定 sender を組み立てる
+    // (ここでは生成しない = APIキー未設定でもインスタンス化はエラーにしない)。
+    this.sender = deps.sender ?? this.createDefaultSender();
+  }
+
+  /** プロンプトを送り、LLM の生出力テキストを返す。 */
+  async complete(prompt: string): Promise<string> {
+    const params = buildRequestParams(prompt, this.config);
+    const res = await this.sender(params);
+    return extractText(res);
+  }
+
+  /**
+   * 既定 sender: 初回呼び出し時に @anthropic-ai/sdk のクライアントを生成する。
+   * APIキー未解決の場合、SDK のエラーは「呼び出し時」に発生する(インスタンス化時ではない)。
+   */
+  private createDefaultSender(): MessageSender {
+    let client: Anthropic | null = null;
+    const apiKey = this.config.apiKey;
+    return async (params) => {
+      if (client === null) {
+        client = new Anthropic(apiKey === undefined ? {} : { apiKey });
+      }
+      const res = await client.messages.create({
+        model: params.model,
+        max_tokens: params.max_tokens,
+        temperature: params.temperature,
+        messages: params.messages.map((m) => ({ role: m.role, content: m.content })),
+      });
+      return res;
+    };
+  }
+}
