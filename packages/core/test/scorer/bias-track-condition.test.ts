@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseHorseResults } from "../../src/scraper/parse-horse-results.js";
 import { deriveRaceFeatures } from "../../src/scorer/derive-features.js";
 import { computeTrackConditionBias } from "../../src/scorer/bias-track-condition.js";
+import { DEFAULT_SCORER_CONFIG } from "../../src/scorer/config.js";
 import { makeResult, rank } from "./helpers.js";
 
 function loadFixture(name: string): string {
@@ -290,24 +291,8 @@ describe("computeTrackConditionBias(馬場状態適性)", () => {
       features,
       { courseType: "ダ", isWet: true },
       {
-        minSampleForBias: 2,
-        weights: {
-          trackCondition: 2,
-          venue: 1,
-          season: 1,
-          frame: 1,
-          summerFatigue: 1,
-          transport: 1,
-          rotation: 1,
-        },
-        summerFatigue: { avgWeightDiffThreshold: -6, penalty: 0.05 },
-        venue: { similarityThreshold: 0.5, similarityDecay: 0.5 },
-        transport: {
-          stayBonus: 0.05,
-          weakWeightDropThreshold: -10,
-          weakDropMinCount: 2,
-        },
-        rotation: { clearlyLowerThreshold: 0.1, unknownRestPenalty: 0.05 },
+        ...DEFAULT_SCORER_CONFIG,
+        weights: { ...DEFAULT_SCORER_CONFIG.weights, trackCondition: 2 },
       },
     );
     expect(doubled.correction).toBeCloseTo(base.correction * 2, 10);

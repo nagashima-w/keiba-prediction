@@ -80,6 +80,107 @@ export interface VenueBiasConfig {
   readonly similarityDecay: number;
 }
 
+import type { CourseType } from "../scraper/types.js";
+
+/** 基礎スコア6項目の重み係数。各項目の補正値に乗算する。 */
+export interface BaseScoreWeights {
+  /** 近走着順(重み減衰付き)。 */
+  readonly recentForm: number;
+  /** 上がり3F水準(代替評価)。 */
+  readonly last3f: number;
+  /** コース・距離適性(同条件での複勝率)。 */
+  readonly courseDistance: number;
+  /** 騎手の当該コース複勝率。 */
+  readonly jockey: number;
+  /** 斤量変化・馬体重増減。 */
+  readonly weightChange: number;
+  /** コースレベル枠順バイアス(定数テーブル・仕様の枠2層のうち①)。 */
+  readonly courseFrameBias: number;
+}
+
+/**
+ * 基礎スコアの設定。
+ *
+ * 近走着順・コース距離適性・騎手複勝率などの「複勝率系」項目は、対象複勝率と中立基準
+ * (neutralPlaceRate)の差分に重みを掛けて補正を作る(バイアス補正と同じ差分パターン)。
+ * 中立基準はリーグ平均的な複勝率の目安であり、頭数正規化(prior.ts)で系統的な偏りは吸収するため
+ * 概算で足りる。すべてチューニング対象(verifyの寄与度ログを見て調整する)。
+ *
+ * 既定重みの較正根拠(過剰補正・クランプ飽和の防止。仕様L135):
+ * - recentForm・courseDistance・jockey はいずれも「馬の総合能力」を別スライスで測る相関の強い
+ *   推定であり、中立0.33に対し重み1で単純加算すると同じ能力を多重計上して prior が容易に飽和する。
+ *   そこでこれらの既定重みは 0.15〜0.2 と控えめにし、合算しても中立確率スケール(頭数16なら約0.19)
+ *   に対して過大にならないようにする。強馬でも prior が天井(0.95)に張り付かず、中堅馬が床に
+ *   張り付かない分布(analyzerの±10%補正が意味を持つ範囲)を狙う。
+ */
+export interface BaseScoreConfig {
+  /** 各項目の重み係数。 */
+  readonly weights: BaseScoreWeights;
+  /**
+   * 複勝率系項目(近走着順・コース距離・騎手)の中立基準となる複勝率。
+   * 平均的な馬の複勝率の目安(既定0.33)。差分 = 対象複勝率 − この値。
+   */
+  readonly neutralPlaceRate: number;
+  /**
+   * 近走着順の幾何減衰率(0<r≤1)。直近走の重み1、1走ごとに r 倍に減衰する(既定0.8)。
+   */
+  readonly recentFormDecay: number;
+  /** 近走着順の評価に使う直近走数の上限(既定6)。これより古い走は使わない。 */
+  readonly recentFormMaxRuns: number;
+  /**
+   * 圏外着の着順スコアの線形減衰ステップ。複勝圏内(3着以内)は満点1.0、圏外は
+   * 4着から1着悪化するごとに outOfPlaceStep だけ下げ、床は0(既定0.1 → 13着で0)。
+   */
+  readonly outOfPlaceStep: number;
+  /**
+   * 上がり3Fを「速い」とみなす閾値(秒)をコース種別ごとに持つ。各過去走のコース種別に応じた
+   * 閾値で判定することで、ダート走を芝基準で不当に「遅い」と扱う系統オフセットを避ける。
+   * 既定は芝34.9・ダ36.5・障38.0(概算・チューニング対象)。コース種別が取れない走は芝閾値で代替する。
+   */
+  readonly fastLast3fThresholdSec: Record<CourseType, number>;
+  /**
+   * 速い上がり率の中立基準(既定0.15)。差分 = 速い上がり率 − この値。
+   * 上がりタイムはコース・距離・ペースに強く依存するため中立基準は低めに置く(重みも控えめ)。
+   */
+  readonly neutralFastLast3fRate: number;
+  /** コース・距離適性で同距離帯とみなす許容差(m、片側)。既定200(±200m)。 */
+  readonly distanceBandMeters: number;
+  /** 斤量1kgあたりの補正スケール(増でマイナス方向)。既定0.01。 */
+  readonly kinryoScale: number;
+  /** 斤量変化の絶対値の上限(kg)。極端な値を抑える。既定3。 */
+  readonly kinryoCapKg: number;
+  /** 馬体重減1kgあたりの補正スケール(減でマイナス方向)。既定0.004。 */
+  readonly bodyWeightDropScale: number;
+  /** 馬体重減補正の下限(kg、負値)。これより大きい減は同じ扱いにする。既定-20。 */
+  readonly bodyWeightDropCapKg: number;
+}
+
+/** prior(事前複勝確率)合成の設定。 */
+export interface PriorConfig {
+  /** prior の下限(既定0.02)。 */
+  readonly minPrior: number;
+  /** prior の上限(既定0.95)。 */
+  readonly maxPrior: number;
+  /**
+   * 頭数レベル正規化の目標となる「1レースの複勝圏内数」(既定3)。
+   * 実際の目標は min(この値, 頭数)。全馬のraw合計をこの目標に寄せる。
+   */
+  readonly targetPlaceCount: number;
+  /**
+   * 頭数正規化を発動する逸脱の許容比率(既定0.1)。
+   * |raw合計 − 目標| / 目標 がこの値を超えたときだけ正規化する(仕様「大きく逸脱する場合は正規化」)。
+   */
+  readonly normalizeTolerance: number;
+  /**
+   * 環境・状態バイアス7項目(馬場・競馬場・季節・夏負け・枠順個別・輸送滞在・ローテ)の補正合計に
+   * 掛ける減衰係数(既定0.3)。各バイアスは小さいバケットの複勝率差でノイズが乗りやすく、重み1のまま
+   * 確率空間へ単純加算すると過剰補正になりやすい(例: 休み明けカーブから -0.2 超の補正)。仕様L135の
+   * 過剰補正防止として、prior合成でバイアス寄与を一律に減衰する。個々のバイアス関数(および単体テスト)は
+   * この係数の影響を受けず、prior.ts が合成時にのみ適用する(バイアス重みへ乗算する形)。チューニング対象。
+   */
+  readonly biasCorrectionScale: number;
+}
+
 /** 各バイアスの重み係数。差分ベース補正に乗算する。 */
 export interface BiasWeights {
   /** 馬場状態適性(道悪)。 */
@@ -107,6 +208,10 @@ export interface ScorerConfig {
   readonly minSampleForBias: number;
   /** 各バイアスの重み係数。 */
   readonly weights: BiasWeights;
+  /** 基礎スコアの設定。 */
+  readonly baseScore: BaseScoreConfig;
+  /** prior(事前複勝確率)合成の設定。 */
+  readonly prior: PriorConfig;
   /** 夏負けフラグの設定。 */
   readonly summerFatigue: SummerFatigueConfig;
   /** 競馬場適性(代替評価)の設定。 */
@@ -132,6 +237,37 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
     summerFatigue: 1,
     transport: 1,
     rotation: 1,
+  },
+  baseScore: {
+    weights: {
+      // recentForm/courseDistance/jockey は相関の強い総合能力推定のため多重計上を避けて控えめに。
+      recentForm: 0.2,
+      // 上がり3Fはコース・距離・ペース依存が強い代替評価のため最も控えめに。
+      last3f: 0.1,
+      courseDistance: 0.15,
+      jockey: 0.15,
+      // 斤量・馬体重・コース枠順は補正値自体が小さい(±0.05以内)ため重み1でよい。
+      weightChange: 1,
+      courseFrameBias: 1,
+    },
+    neutralPlaceRate: 0.33,
+    recentFormDecay: 0.8,
+    recentFormMaxRuns: 6,
+    outOfPlaceStep: 0.1,
+    fastLast3fThresholdSec: { 芝: 34.9, ダ: 36.5, 障: 38.0 },
+    neutralFastLast3fRate: 0.15,
+    distanceBandMeters: 200,
+    kinryoScale: 0.01,
+    kinryoCapKg: 3,
+    bodyWeightDropScale: 0.004,
+    bodyWeightDropCapKg: -20,
+  },
+  prior: {
+    minPrior: 0.02,
+    maxPrior: 0.95,
+    targetPlaceCount: 3,
+    normalizeTolerance: 0.1,
+    biasCorrectionScale: 0.3,
   },
   summerFatigue: {
     avgWeightDiffThreshold: -6,

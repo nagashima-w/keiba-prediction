@@ -104,7 +104,10 @@ export {
 } from "./scorer/aggregate.js";
 export {
   DEFAULT_SCORER_CONFIG,
+  type BaseScoreConfig,
+  type BaseScoreWeights,
   type BiasWeights,
+  type PriorConfig,
   type RotationBiasConfig,
   type ScorerConfig,
   type SummerFatigueConfig,
@@ -156,6 +159,38 @@ export {
   type RotationInput,
   type RotationTypeFlags,
 } from "./scorer/bias-rotation.js";
+export {
+  COURSE_FRAME_BIAS_TABLE,
+  courseFrameBiasValue,
+  type CourseFrameBiasRow,
+} from "./scorer/frame-bias-table.js";
+export {
+  computeBaseScore,
+  computeCourseDistanceScore,
+  computeCourseFrameBiasScore,
+  computeJockeyScore,
+  computeLast3fScore,
+  computeRecentFormScore,
+  computeWeightChangeScore,
+  type BaseScoreContribution,
+  type BaseScoreInput,
+  type BaseScoreResult,
+  type CourseDistanceInput,
+  type CourseFrameInput,
+  type JockeyCourseStats,
+  type WeightChangeInput,
+} from "./scorer/base-score.js";
+export {
+  buildPriorInput,
+  computeFieldPriors,
+  computePrior,
+  type BuildPriorInputArgs,
+  type BuildPriorRaceInfo,
+  type PriorInput,
+  type PriorResult,
+  type ScoreContribution,
+  type TodayRaceConditions,
+} from "./scorer/prior.js";
 export type {
   BodyWeight,
   CourseType,
