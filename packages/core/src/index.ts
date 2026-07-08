@@ -105,8 +105,10 @@ export {
 export {
   DEFAULT_SCORER_CONFIG,
   type BiasWeights,
+  type RotationBiasConfig,
   type ScorerConfig,
   type SummerFatigueConfig,
+  type TransportBiasConfig,
   type VenueBiasConfig,
 } from "./scorer/config.js";
 export {
@@ -137,6 +139,23 @@ export {
   computeFrameBias,
   type FrameInput,
 } from "./scorer/bias-frame.js";
+export {
+  classifyTransportLoad,
+  computeTransportBias,
+  type TransportBiasContribution,
+  type TransportInput,
+  type TransportKind,
+  type TransportLoad,
+} from "./scorer/bias-transport.js";
+export {
+  buildRotationCurve,
+  classifyRotationType,
+  computeRotationBias,
+  type RotationBiasContribution,
+  type RotationCurve,
+  type RotationInput,
+  type RotationTypeFlags,
+} from "./scorer/bias-rotation.js";
 export type {
   BodyWeight,
   CourseType,
