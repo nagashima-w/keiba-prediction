@@ -297,9 +297,17 @@ describe("computeTrackConditionBias(馬場状態適性)", () => {
           season: 1,
           frame: 1,
           summerFatigue: 1,
+          transport: 1,
+          rotation: 1,
         },
         summerFatigue: { avgWeightDiffThreshold: -6, penalty: 0.05 },
         venue: { similarityThreshold: 0.5, similarityDecay: 0.5 },
+        transport: {
+          stayBonus: 0.05,
+          weakWeightDropThreshold: -10,
+          weakDropMinCount: 2,
+        },
+        rotation: { clearlyLowerThreshold: 0.1, unknownRestPenalty: 0.05 },
       },
     );
     expect(doubled.correction).toBeCloseTo(base.correction * 2, 10);

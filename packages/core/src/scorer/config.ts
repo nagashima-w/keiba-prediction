@@ -31,6 +31,43 @@ export interface SummerFatigueConfig {
   readonly penalty: number;
 }
 
+/** 輸送・滞在バイアスの設定。 */
+export interface TransportBiasConfig {
+  /**
+   * 滞在競馬(札幌・函館)で「輸送弱」フラグの馬に与えるプラス補正の大きさ(正の値)。
+   * 実際の補正は +stayBonus × 重み。複勝率差分と同じスケール(控えめに 0.05 を既定)。
+   * 仕様「輸送に弱い馬は滞在競馬でプラス補正」に対応する。
+   */
+  readonly stayBonus: number;
+  /**
+   * 「輸送弱」判定の馬体重減の閾値(kg、負値)。輸送を伴う過去走でこの値以下(=より大きい減)の
+   * 馬体重減をカウントする。仕様「-10kg以上の馬体重減」→ diff ≤ -10(=-10ちょうどを含む)。
+   */
+  readonly weakWeightDropThreshold: number;
+  /**
+   * 「輸送弱」と判定するのに必要な大幅減の最小回数。仕様「複数回(2回以上)」→ 既定2。
+   */
+  readonly weakDropMinCount: number;
+}
+
+/** ローテーション適性の設定。 */
+export interface RotationBiasConfig {
+  /**
+   * タイプ判定で「明確に低い」とみなす複勝率差の閾値。
+   * 叩き良化型(1走目が2〜3走目より明確に低い)・使い込み下降型(4走目以降がピークより明確に低い)の
+   * 判定に使う。設計判断: バケット母数が小さく(数走)ノイズが乗りやすいため、偶然の1走差を吸収できるよう
+   * 既定0.1(複勝率差10ポイント)に設定。verifyの寄与度ログを見て調整する。
+   */
+  readonly clearlyLowerThreshold: number;
+  /**
+   * 休み明け実績が2走未満で型判定できない(不明)とき、今回が休み明けの場合に適用する
+   * 弱いマイナス補正の大きさ(正の値)。実際の補正は -unknownRestPenalty × 重み。
+   * 仕様「休み明け実績2走未満は不明として弱いマイナス補正のみ(休み明けは平均的に割引が妥当)」。
+   * 控えめに 0.05 を既定とする(チューニング対象)。
+   */
+  readonly unknownRestPenalty: number;
+}
+
 /** 競馬場適性(代替評価)の設定。 */
 export interface VenueBiasConfig {
   /**
@@ -55,6 +92,10 @@ export interface BiasWeights {
   readonly frame: number;
   /** 夏負けフラグ。 */
   readonly summerFatigue: number;
+  /** 輸送・滞在バイアス。 */
+  readonly transport: number;
+  /** ローテーション適性。 */
+  readonly rotation: number;
 }
 
 /** scorer 全体の調整可能設定。 */
@@ -70,6 +111,10 @@ export interface ScorerConfig {
   readonly summerFatigue: SummerFatigueConfig;
   /** 競馬場適性(代替評価)の設定。 */
   readonly venue: VenueBiasConfig;
+  /** 輸送・滞在バイアスの設定。 */
+  readonly transport: TransportBiasConfig;
+  /** ローテーション適性の設定。 */
+  readonly rotation: RotationBiasConfig;
 }
 
 /**
@@ -85,6 +130,8 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
     season: 1,
     frame: 1,
     summerFatigue: 1,
+    transport: 1,
+    rotation: 1,
   },
   summerFatigue: {
     avgWeightDiffThreshold: -6,
@@ -93,5 +140,14 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
   venue: {
     similarityThreshold: 0.5,
     similarityDecay: 0.5,
+  },
+  transport: {
+    stayBonus: 0.05,
+    weakWeightDropThreshold: -10,
+    weakDropMinCount: 2,
+  },
+  rotation: {
+    clearlyLowerThreshold: 0.1,
+    unknownRestPenalty: 0.05,
   },
 };
