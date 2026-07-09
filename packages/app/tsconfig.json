@@ -1,0 +1,14 @@
+{
+  // アプリ(Electron main / preload / React renderer / 共有ロジック)の型検査設定。
+  // main/preload は Node 環境、renderer はブラウザ環境のため lib に DOM を含める。
+  // 実際のバンドルは Vite(renderer)と esbuild(main/preload)が行い、tsc は型検査のみ。
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "resolveJsonModule": true
+  },
+  "include": ["src", "test", "scripts", "vite.config.ts", "vitest.config.ts"]
+}

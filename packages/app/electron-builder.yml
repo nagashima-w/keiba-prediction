@@ -1,0 +1,36 @@
+# electron-builder 設定(Windows 向け配布)。
+#
+# ターゲットに portable を選択した理由:
+# - 単一の実行可能 exe をダウンロードしてそのまま起動できる。インストール/アンインストール不要。
+# - 「常に Releases から最新 exe をダウンロードして即実行」という UI 開発中の運用に最も合う
+#   (ローリングプレリリースを繰り返し差し替えても、テスターは毎回インストールし直さなくてよい)。
+appId: com.keiba.evtool
+productName: 競馬期待値分析ツール
+
+# 生成物の出力先(リポジトリの .gitignore 対象 dist とは別ディレクトリ)。
+directories:
+  output: release
+  buildResources: build
+
+# 配布物に含めるファイル。renderer/main/preload のビルド成果物と package.json のみ。
+# node_modules の本番依存(better-sqlite3)は electron-builder が自動で収集・同梱する。
+files:
+  - dist/**/*
+  - package.json
+
+# ネイティブモジュール(better-sqlite3)は asar 内から実行できないため展開して同梱する。
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+
+# 本番依存のネイティブモジュールを Electron の ABI 向けに再ビルドする(既定 true を明示)。
+npmRebuild: true
+
+win:
+  target:
+    - portable
+  # exe ファイル名は ASCII 固定(日本語 productName だと配布ファイル名が文字化けしうるため)。
+  artifactName: keiba-ev-tool-${version}-portable.${ext}
+
+portable:
+  # 起動時に展開する一時ディレクトリ名(既定でよいが固定して安定させる)。
+  unpackDirName: keiba-ev-tool
