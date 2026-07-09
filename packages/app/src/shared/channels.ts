@@ -8,6 +8,12 @@
 export const IPC_CHANNELS = {
   /** アプリ情報(名称・バージョン・core要約)を取得する。 */
   getAppInfo: "app:get-info",
+  /** 開催日(YYYYMMDD)のレース一覧を取得する。 */
+  listRaces: "race:list",
+  /** レースの分析を実行する(スクレイピング→スコアリング→LLM→EV→保存)。 */
+  runAnalysis: "analysis:run",
+  /** 分析の進捗イベント(main→renderer への一方向通知)。 */
+  analysisProgress: "analysis:progress",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */
