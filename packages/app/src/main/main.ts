@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { app, BrowserWindow } from "electron";
 
-import { registerIpcHandlers } from "./ipc.js";
+import { closeResources, registerIpcHandlers } from "./ipc.js";
 
 // main は esbuild で CommonJS にバンドルされるため __dirname が利用できる
 // (dist/main/main.cjs を基準に preload/renderer への相対パスを解決する)。
@@ -52,4 +52,9 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+// 終了時に分析パイプラインの依存(SQLite接続など)を解放する。
+app.on("will-quit", () => {
+  closeResources();
 });

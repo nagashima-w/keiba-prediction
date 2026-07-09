@@ -14,4 +14,10 @@ describe("IPCチャネル定義", () => {
       expect(channel).toMatch(/^[a-z]+:[a-z-]+$/);
     }
   });
+
+  it("Phase4で追加したチャネル(レース一覧・分析実行・進捗)が定義されている", () => {
+    expect(IPC_CHANNELS.listRaces).toBe("race:list");
+    expect(IPC_CHANNELS.runAnalysis).toBe("analysis:run");
+    expect(IPC_CHANNELS.analysisProgress).toBe("analysis:progress");
+  });
 });

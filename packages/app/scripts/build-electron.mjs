@@ -13,6 +13,11 @@ import { readFile } from "node:fs/promises";
 
 import { build } from "esbuild";
 
+// external 指定は bundle.test.ts と共有(externals.json)してドリフトを防ぐ。
+const NATIVE_EXTERNALS = JSON.parse(
+  await readFile(new URL("./externals.json", import.meta.url), "utf8"),
+);
+
 /** @type {import("esbuild").BuildOptions} */
 const common = {
   bundle: true,
@@ -20,7 +25,7 @@ const common = {
   format: "cjs",
   target: "node20",
   sourcemap: true,
-  external: ["electron", "better-sqlite3"],
+  external: NATIVE_EXTERNALS,
 };
 
 await build({
@@ -35,13 +40,15 @@ await build({
   outfile: "dist/preload/preload.cjs",
 });
 
-// 回帰防止のガード: DB 未使用の骨格段階では main に better-sqlite3 の require が残ってはならない
-// (バレル import への逆戻りで native 依存を巻き込むとここで気づける)。
+// 回帰防止のガード: main は分析パイプラインで better-sqlite3 を正当に使うため、external の
+// require として維持されていること(= asarUnpack 同梱の前提が保たれること)を確認する。
+// external から外して誤ってインライン展開しようとすると、esbuild が .node バインディングを
+// バンドルできず build 自体が失敗するため、ここでは「external require が残っていること」を保証する。
 const mainBundle = await readFile("dist/main/main.cjs", "utf8");
-if (mainBundle.includes("better-sqlite3")) {
+if (!/require\(["']better-sqlite3["']\)/.test(mainBundle)) {
   throw new Error(
-    "dist/main/main.cjs に better-sqlite3 への参照が含まれています。" +
-      "@keiba/core のバレル import ではなく narrow import(@keiba/core/scorer/config)を使ってください。",
+    "dist/main/main.cjs に better-sqlite3 の external require が見当たりません。" +
+      "external 指定(build-electron.mjs / electron-builder.yml の asarUnpack)が壊れていないか確認してください。",
   );
 }
 
