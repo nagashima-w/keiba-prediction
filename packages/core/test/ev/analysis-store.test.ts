@@ -142,6 +142,45 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       expect(store.getResult("未保存")).toBeUndefined();
       store.close();
     });
+
+    it("複勝の確定払戻(placePayout)を保存・取得できること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [
+        { umaban: 4, finishPosition: 1, placePayout: 210 },
+        { umaban: 2, finishPosition: 2, placePayout: 170 },
+        { umaban: 9, finishPosition: 3, placePayout: 1060 },
+        { umaban: 5, finishPosition: 4 }, // 複勝圏外は払戻なし
+      ]);
+      const byUmaban = new Map(
+        store.getResult("R1")!.map((r) => [r.umaban, r.placePayout]),
+      );
+      expect(byUmaban.get(4)).toBe(210);
+      expect(byUmaban.get(9)).toBe(1060);
+      // placePayout を省略した馬は null。
+      expect(byUmaban.get(5)).toBeNull();
+      store.close();
+    });
+
+    it("placePayout を指定せず保存した既存互換の呼び出しでは placePayout が null になること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      expect(store.getResult("R1")![0]!.placePayout).toBeNull();
+      store.close();
+    });
+
+    it("払戻なしで取り込んだ後、払戻ありで再取込すると placePayout が更新されること", () => {
+      const store = new AnalysisStore();
+      // 確定直前: 着順のみ(払戻なし)。
+      store.saveResult("R1", [{ umaban: 4, finishPosition: 1 }]);
+      expect(store.getResult("R1")![0]!.placePayout).toBeNull();
+      // 確定後の再取込: 複勝払戻が付く。
+      store.saveResult("R1", [{ umaban: 4, finishPosition: 1, placePayout: 210 }]);
+      const updated = store.getResult("R1")!;
+      expect(updated).toHaveLength(1);
+      expect(updated[0]!.finishPosition).toBe(1);
+      expect(updated[0]!.placePayout).toBe(210);
+      store.close();
+    });
   });
 
   describe("外部キー制約の実効化", () => {

@@ -39,6 +39,7 @@ export {
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
+  raceResultUrl,
   shutubaUrl,
 } from "./scraper/urls.js";
 export { parseRaceList } from "./scraper/parse-race-list.js";
@@ -52,6 +53,10 @@ export {
   parseHorseResults,
 } from "./scraper/parse-horse-results.js";
 export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
+export {
+  parseRaceResult,
+  RaceResultParseError,
+} from "./scraper/parse-race-result.js";
 export { OikiriParseError, parseOikiri } from "./scraper/parse-oikiri.js";
 export {
   DEFAULT_ODDS_TTL_MS,
@@ -271,6 +276,9 @@ export type {
   OikiriSkippedRow,
   PlaceOdds,
   RaceListEntry,
+  RacePayoutEntry,
+  RaceResult,
+  RaceResultHorse,
   RaceVenue,
   Shutuba,
   ShutubaHorse,

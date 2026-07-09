@@ -5,9 +5,12 @@ import { app, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { parseKaisaiDate, parseRaceId, type KaisaiDate } from "@keiba/core";
 
 import type {
+  AnalysisHistoryItem,
   AnalysisProgress,
   AnalysisResult,
+  ImportResultOutcome,
   RaceListItem,
+  VerifyReportView,
 } from "../shared/analysis-types.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 import { buildAppInfo } from "./app-info.js";
@@ -34,6 +37,14 @@ export function registerIpcHandlers(): void {
     (event, raceId: unknown, date: unknown) =>
       handleRunAnalysis(event, String(raceId), String(date)),
   );
+
+  ipcMain.handle(IPC_CHANNELS.importResult, (_event, raceId: unknown) =>
+    handleImportResult(String(raceId)),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.getVerifyReport, () => handleGetVerifyReport());
+
+  ipcMain.handle(IPC_CHANNELS.listAnalyses, () => handleListAnalyses());
 }
 
 /**
@@ -91,4 +102,22 @@ async function handleRunAnalysis(
   return runAnalysis(raceId, kaisaiDate, deps, (progress: AnalysisProgress) => {
     event.sender.send(IPC_CHANNELS.analysisProgress, progress);
   });
+}
+
+/** 結果取込ハンドラの実処理(result.html取得→パース→実着順+複勝払戻を保存)。 */
+async function handleImportResult(
+  raceIdStr: string,
+): Promise<ImportResultOutcome> {
+  const raceId = parseRaceId(raceIdStr);
+  return getResources().importResult(raceId);
+}
+
+/** 検証レポート取得ハンドラの実処理。 */
+function handleGetVerifyReport(): VerifyReportView {
+  return getResources().getVerifyReport();
+}
+
+/** 分析履歴一覧取得ハンドラの実処理。 */
+function handleListAnalyses(): AnalysisHistoryItem[] {
+  return getResources().listAnalysisHistory();
 }

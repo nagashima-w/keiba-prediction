@@ -16,10 +16,13 @@
  *   同一レースを複数回分析している場合は上記の二重計上が起きる点に注意。集計対象の重複を意図する
  *   バックテスト等で使う。このモードでは supersededAnalysisCount は常に0。
  *
- * 回収率の近似(重要):
- * - 複勝の最終配当は保存時点の下限〜上限のレンジで確定するが、確定配当は保存していないため、
- *   的中時の払戻を「保存済み複勝オッズ下限 × 賭け金」で近似する。下限を使うため回収率は
- *   保守的(実際よりやや低め)に出る。verifyでの重み調整の相対比較には十分だが、絶対値は近似。
+ * 回収率(実配当優先・近似フォールバック):
+ * - 結果取込で複勝の確定払戻(placePayout。100円あたりの円)を保存していれば、的中時の払戻に
+ *   実配当を用いる(賭け金が100円以外でも 100円あたりで按分)。これが本来の回収率。
+ * - 実配当が未取込(旧データ・払戻テーブル欠損)の場合のみ、「保存済み複勝オッズ下限 × 賭け金」で
+ *   近似する。下限を使うため近似時の回収率は保守的(実際よりやや低め)に出る。
+ * - どちらで払戻を計上したかは bet.actualPayoutCount / bet.approximatePayoutCount に内訳を出す
+ *   (的中して払戻を計上した点のみが対象。不的中は払戻0でどちらのカウンタにも入らない)。
  * - 的中判定は実着順3着以内(複勝圏)。着順不明・非数値(finishPosition=null)は集計対象外とし、
  *   賭け金・払戻の双方から除外する(勝敗が確定できないため)。
  *
@@ -71,10 +74,17 @@ export interface VerifyBetSummary {
   readonly betCount: number;
   /** 賭け金合計(円)。 */
   readonly totalStake: number;
-  /** 払戻合計(円、複勝オッズ下限で近似)。 */
+  /**
+   * 払戻合計(円)。的中時の払戻は、実配当(placePayout)があればそれを、無ければ
+   * 複勝オッズ下限で近似する(下記2カウンタの内訳を参照)。
+   */
   readonly totalReturn: number;
   /** 回収率(totalReturn/totalStake)。購入0点なら null。 */
   readonly recoveryRate: number | null;
+  /** 的中時の払戻を実配当(placePayout)で計上した件数。 */
+  readonly actualPayoutCount: number;
+  /** 的中時の払戻を複勝オッズ下限で近似計上した件数(実配当が未取込の分)。 */
+  readonly approximatePayoutCount: number;
 }
 
 /** verifyレポート。 */
@@ -126,6 +136,8 @@ export function computeVerifyReport(
   let betCount = 0;
   let totalStake = 0;
   let totalReturn = 0;
+  let actualPayoutCount = 0;
+  let approximatePayoutCount = 0;
 
   for (const analysis of analyses) {
     const results = store.getResult(analysis.raceId);
@@ -145,6 +157,10 @@ export function computeVerifyReport(
     const finishByUmaban = new Map<number, number | null>(
       results.map((r) => [r.umaban, r.finishPosition]),
     );
+    // 馬番 → 複勝確定払戻(100円あたりの円)。未取込は null/undefined。
+    const payoutByUmaban = new Map<number, number | null | undefined>(
+      results.map((r) => [r.umaban, r.placePayout]),
+    );
 
     for (const horse of analysis.horses) {
       const finish = finishByUmaban.get(horse.umaban);
@@ -161,12 +177,21 @@ export function computeVerifyReport(
         bins[binIndex]!.placed += 1;
       }
 
-      // 回収率: EVプラス馬券のみ複勝100円で購入したと仮定。
+      // 回収率: EVプラス馬券のみ複勝を stakePerBet 円で購入したと仮定。
       if (horse.isPositive && horse.placeOddsMin !== null) {
         betCount += 1;
         totalStake += stakePerBet;
         if (isPlaced) {
-          totalReturn += stakePerBet * horse.placeOddsMin;
+          // 的中時の払戻: 実配当(placePayout)があればそれを100円あたりで按分して用い、
+          // 無ければ複勝オッズ下限で近似する。どちらを使ったかを件数で記録する。
+          const actualPayout = payoutByUmaban.get(horse.umaban);
+          if (actualPayout !== undefined && actualPayout !== null) {
+            totalReturn += actualPayout * (stakePerBet / 100);
+            actualPayoutCount += 1;
+          } else {
+            totalReturn += stakePerBet * horse.placeOddsMin;
+            approximatePayoutCount += 1;
+          }
         }
       }
     }
@@ -181,6 +206,8 @@ export function computeVerifyReport(
       totalStake,
       totalReturn,
       recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
+      actualPayoutCount,
+      approximatePayoutCount,
     },
     calibration: bins.map((c, i) => finalizeBin(c, i, calibrationBins)),
   };

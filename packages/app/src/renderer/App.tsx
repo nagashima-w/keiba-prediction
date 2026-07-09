@@ -3,6 +3,12 @@ import { useCallback, useEffect, useReducer } from "react";
 import { analysisReducer, createInitialState } from "./analysis-reducer.js";
 import { AnalysisView } from "./AnalysisView.js";
 import { RaceSelection } from "./RaceSelection.js";
+import { VerifyView } from "./VerifyView.js";
+import {
+  createInitialVerifyState,
+  verifyReducer,
+  type TabKey,
+} from "./verify-reducer.js";
 
 /** 今日を YYYYMMDD で返す(日付ピッカーの初期値)。 */
 function todayYyyymmdd(): string {
@@ -29,6 +35,11 @@ export function App(): React.JSX.Element {
     todayYyyymmdd(),
     createInitialState,
   );
+  const [verify, verifyDispatch] = useReducer(
+    verifyReducer,
+    undefined,
+    createInitialVerifyState,
+  );
 
   // 進捗イベント(main→renderer)の購読。マウント中1度だけ登録し、アンマウントで解除する。
   useEffect(() => {
@@ -37,6 +48,55 @@ export function App(): React.JSX.Element {
     });
     return unsubscribe;
   }, []);
+
+  // 検証タブの履歴+レポートを取得する(タブ切替時・取込後・再読み込み時に呼ぶ)。
+  const loadVerifyData = useCallback(() => {
+    verifyDispatch({ type: "履歴取得開始" });
+    window.keibaApi
+      .listAnalyses()
+      .then((history) => verifyDispatch({ type: "履歴取得成功", history }))
+      .catch((e: unknown) =>
+        verifyDispatch({ type: "履歴取得失敗", message: errorMessage(e) }),
+      );
+    verifyDispatch({ type: "レポート取得開始" });
+    window.keibaApi
+      .getVerifyReport()
+      .then((report) => verifyDispatch({ type: "レポート取得成功", report }))
+      .catch((e: unknown) =>
+        verifyDispatch({ type: "レポート取得失敗", message: errorMessage(e) }),
+      );
+  }, []);
+
+  const handleTabChange = useCallback(
+    (tab: TabKey) => {
+      verifyDispatch({ type: "タブ切替", tab });
+      if (tab === "検証") {
+        loadVerifyData();
+      }
+    },
+    [loadVerifyData],
+  );
+
+  const handleImport = useCallback(
+    (raceId: string) => {
+      verifyDispatch({ type: "取込開始", raceId });
+      window.keibaApi
+        .importResult(raceId)
+        .then(() => {
+          verifyDispatch({ type: "取込成功", raceId });
+          // 取込済みフラグ・回収率・キャリブレーションを更新するため再取得する。
+          loadVerifyData();
+        })
+        .catch((e: unknown) =>
+          verifyDispatch({
+            type: "取込失敗",
+            raceId,
+            message: errorMessage(e),
+          }),
+        );
+    },
+    [loadVerifyData],
+  );
 
   const handleFetch = useCallback(() => {
     const date = state.selection.date;
@@ -82,31 +142,63 @@ export function App(): React.JSX.Element {
         ハイライトします。
       </p>
 
+      {/* タブ切替(分析/検証)。 */}
+      <nav style={{ display: "flex", gap: "0.5rem", margin: "0.75rem 0" }}>
+        {(["分析", "検証"] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => handleTabChange(tab)}
+            style={{
+              padding: "0.35rem 0.9rem",
+              border: "1px solid #ccc",
+              borderBottom:
+                verify.activeTab === tab ? "2px solid #4c8bf5" : "1px solid #ccc",
+              background: verify.activeTab === tab ? "#eef4ff" : "#f7f7f7",
+              fontWeight: verify.activeTab === tab ? 700 : 400,
+              cursor: "pointer",
+            }}
+          >
+            {tab}
+          </button>
+        ))}
+      </nav>
+
       <hr
-        style={{ margin: "1rem 0", border: "none", borderTop: "1px solid #ddd" }}
+        style={{ margin: "0 0 1rem", border: "none", borderTop: "1px solid #ddd" }}
       />
 
-      <RaceSelection
-        date={state.selection.date}
-        loading={state.selection.loadingRaces}
-        races={state.selection.races}
-        error={state.selection.racesError}
-        selectedRaceId={state.selection.selectedRaceId}
-        // 分析実行中は日付変更・取得・レース切替を禁止し、in-flight の取り違えを防ぐ。
-        disabled={state.analysis.running}
-        onDateChange={(date) => dispatch({ type: "日付変更", date })}
-        onFetch={handleFetch}
-        onSelect={(raceId) => dispatch({ type: "レース選択", raceId })}
-      />
+      {verify.activeTab === "分析" ? (
+        <>
+          <RaceSelection
+            date={state.selection.date}
+            loading={state.selection.loadingRaces}
+            races={state.selection.races}
+            error={state.selection.racesError}
+            selectedRaceId={state.selection.selectedRaceId}
+            // 分析実行中は日付変更・取得・レース切替を禁止し、in-flight の取り違えを防ぐ。
+            disabled={state.analysis.running}
+            onDateChange={(date) => dispatch({ type: "日付変更", date })}
+            onFetch={handleFetch}
+            onSelect={(raceId) => dispatch({ type: "レース選択", raceId })}
+          />
 
-      <AnalysisView
-        raceId={state.selection.selectedRaceId}
-        running={state.analysis.running}
-        progress={state.analysis.progress}
-        result={state.analysis.result}
-        error={state.analysis.analysisError}
-        onRun={handleRun}
-      />
+          <AnalysisView
+            raceId={state.selection.selectedRaceId}
+            running={state.analysis.running}
+            progress={state.analysis.progress}
+            result={state.analysis.result}
+            error={state.analysis.analysisError}
+            onRun={handleRun}
+          />
+        </>
+      ) : (
+        <VerifyView
+          state={verify}
+          onImport={handleImport}
+          onRefresh={loadVerifyData}
+        />
+      )}
     </main>
   );
 }
