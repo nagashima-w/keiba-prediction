@@ -74,6 +74,86 @@ export interface AnalysisResult {
   readonly analyzedAt: string;
 }
 
+/** 検証画面: 分析履歴の1件(一覧表示用)。 */
+export interface AnalysisHistoryItem {
+  /** 分析ID(採番)。 */
+  readonly analysisId: number;
+  /** レースID(12桁)。 */
+  readonly raceId: string;
+  /** 分析日時(ISO8601)。 */
+  readonly analyzedAt: string;
+  /** この分析での総頭数。 */
+  readonly horseCount: number;
+  /** EVプラス(is_positive)の馬数。 */
+  readonly positiveCount: number;
+  /** このレースの結果(実着順)が取込済みか。 */
+  readonly hasResult: boolean;
+  /**
+   * このレースの複勝確定払戻が取込済みか。着順のみ取込(確定直前など払戻テーブル欠損)では
+   * hasResult=true でも hasPayout=false になり、UIは実配当への更新導線(再取込)を出し続ける。
+   */
+  readonly hasPayout: boolean;
+}
+
+/** 検証画面: キャリブレーション帯(表示用。core CalibrationBin のプレーン写し)。 */
+export interface CalibrationBinView {
+  /** 帯の下限(含む)。 */
+  readonly lowerBound: number;
+  /** 帯の上限(含まない。最終帯のみ 1.0 を含む)。 */
+  readonly upperBound: number;
+  /** この帯の予測件数。 */
+  readonly predictedCount: number;
+  /** うち実際に複勝圏に入った件数。 */
+  readonly placedCount: number;
+  /** 実際の複勝率。予測0件なら null。 */
+  readonly actualPlaceRate: number | null;
+}
+
+/** 検証画面: 回収率サマリ(表示用)。 */
+export interface VerifyBetView {
+  /** 購入点数(着順確定分のみ)。 */
+  readonly betCount: number;
+  /** 賭け金合計(円)。 */
+  readonly totalStake: number;
+  /** 払戻合計(円)。 */
+  readonly totalReturn: number;
+  /** 回収率。購入0点なら null。 */
+  readonly recoveryRate: number | null;
+  /** 実配当で払戻計上した点数。 */
+  readonly actualPayoutCount: number;
+  /** 近似(複勝下限)で払戻計上した点数。 */
+  readonly approximatePayoutCount: number;
+}
+
+/**
+ * 検証画面: 検証レポート(表示用)。
+ * core の VerifyReport は既にプレーン構造なので、main はそれを構造的にこの型として返す。
+ */
+export interface VerifyReportView {
+  /** 集計に含めた分析件数。 */
+  readonly includedAnalysisCount: number;
+  /** 結果未取込で除外した分析件数。 */
+  readonly excludedAnalysisCount: number;
+  /** 同一レースの新しい分析に取って代わられ集計しなかった件数。 */
+  readonly supersededAnalysisCount: number;
+  /** 累積回収率サマリ。 */
+  readonly bet: VerifyBetView;
+  /** 推定確率帯ごとのキャリブレーション表。 */
+  readonly calibration: readonly CalibrationBinView[];
+}
+
+/** 結果取込の結果(1レース分)。 */
+export interface ImportResultOutcome {
+  /** レースID(12桁)。 */
+  readonly raceId: string;
+  /** 取り込んだ着順の頭数。 */
+  readonly horseCount: number;
+  /** 取り込んだ複勝払戻の点数。 */
+  readonly placePayoutCount: number;
+  /** 複勝の払戻テーブルが取得できたか(未確定レースは false)。 */
+  readonly hasPayout: boolean;
+}
+
 /** レース一覧の1レース(renderer 表示用)。 */
 export interface RaceListItem {
   /** レースID(12桁)。 */

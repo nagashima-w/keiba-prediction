@@ -269,4 +269,77 @@ describe("computeVerifyReport(verify集計)", () => {
       store.close();
     });
   });
+
+  describe("実配当による回収率(actualPayout優先・近似フォールバック)", () => {
+    it("実配当(placePayout)があれば近似ではなく実配当で払戻を計上すること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        // 複勝下限2.0(近似では的中で200円)。EVプラスで購入。
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      });
+      // 実際の複勝確定払戻は300円(100円あたり)。的中(3着以内)。
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1, placePayout: 300 }]);
+      const report = computeVerifyReport(store);
+      expect(report.bet.betCount).toBe(1);
+      expect(report.bet.totalStake).toBe(100);
+      // 近似(下限2.0 → 200円)ではなく実配当300円で計上される。
+      expect(report.bet.totalReturn).toBe(300);
+      expect(report.bet.actualPayoutCount).toBe(1);
+      expect(report.bet.approximatePayoutCount).toBe(0);
+      store.close();
+    });
+
+    it("実配当が無ければ従来どおり複勝オッズ下限で近似すること(後方互換)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      });
+      // placePayout を保存しない(旧データ相当)。
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const report = computeVerifyReport(store);
+      expect(report.bet.totalReturn).toBe(200); // 下限2.0 × 100円
+      expect(report.bet.actualPayoutCount).toBe(0);
+      expect(report.bet.approximatePayoutCount).toBe(1);
+      store.close();
+    });
+
+    it("賭け金が100円以外でも実配当を100円あたりで按分して計上すること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1, placePayout: 300 }]);
+      const report = computeVerifyReport(store, {
+        ...DEFAULT_VERIFY_CONFIG,
+        stakePerBet: 200,
+      });
+      expect(report.bet.totalStake).toBe(200);
+      // 実配当300円/100円 × 200円 = 600円。
+      expect(report.bet.totalReturn).toBe(600);
+      expect(report.bet.actualPayoutCount).toBe(1);
+      store.close();
+    });
+
+    it("不的中の購入は実配当・近似いずれの件数にも計上しないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 5 }]); // 圏外
+      const report = computeVerifyReport(store);
+      expect(report.bet.betCount).toBe(1);
+      expect(report.bet.totalReturn).toBe(0);
+      expect(report.bet.actualPayoutCount).toBe(0);
+      expect(report.bet.approximatePayoutCount).toBe(0);
+      store.close();
+    });
+  });
 });

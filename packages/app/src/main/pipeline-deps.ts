@@ -17,8 +17,10 @@ import {
   analyzeRace,
   AnthropicLlmClient,
   CachedFetcher,
+  computeVerifyReport,
   HttpClient,
   listRaces,
+  parseRaceResult,
   ScrapeCache,
   scrapeRace,
   type BuildPromptInput,
@@ -27,7 +29,14 @@ import {
   type RaceListEntry,
 } from "@keiba/core";
 
+import type {
+  AnalysisHistoryItem,
+  ImportResultOutcome,
+  VerifyReportView,
+} from "../shared/analysis-types.js";
 import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
+import { importRaceResult } from "./result-import.js";
+import { buildAnalysisHistory } from "./verify-history.js";
 
 /** createPipelineDeps の設定。 */
 export interface PipelineWiringConfig {
@@ -37,15 +46,25 @@ export interface PipelineWiringConfig {
   readonly apiKey?: string;
 }
 
-/** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 後始末)。 */
+/** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
 export interface PipelineResources {
   /** runAnalysis に渡す依存。 */
   readonly deps: AnalysisPipelineDeps;
   /** 開催日のレース一覧を取得する(キャッシュ経由)。 */
   readonly listRaces: (kaisaiDate: KaisaiDate) => Promise<RaceListEntry[]>;
+  /** レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。 */
+  readonly importResult: (raceId: RaceId) => Promise<ImportResultOutcome>;
+  /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
+  readonly getVerifyReport: () => VerifyReportView;
+  /** 分析履歴一覧(検証画面用)を取得する。 */
+  readonly listAnalysisHistory: () => AnalysisHistoryItem[];
   /** DB接続などを閉じる。 */
   readonly close: () => void;
 }
+
+// 注: 以前は結果ページに長TTL(90日)キャッシュを設けていたが、発走前に取込を押すと未確定HTMLが
+// キャッシュに載り確定後も再取得されない「キャッシュ毒化」が起きるため廃止した。取込は手動・低頻度で
+// 常に確定済み最新が欲しいので、importRaceResult は毎回 bypassCache: true でライブ取得する。
 
 /** APIキーが実効値(空白のみでない)を持つかどうか。 */
 export function shouldUseLlm(apiKey: string | undefined): boolean {
@@ -86,6 +105,31 @@ export function createPipelineDeps(
   return {
     deps,
     listRaces: (kaisaiDate: KaisaiDate) => listRaces(kaisaiDate, { fetcher }),
+    importResult: (raceId: RaceId): Promise<ImportResultOutcome> =>
+      importRaceResult(raceId, {
+        // 常にライブ取得(キャッシュ毒化回避)。パース失敗時は saveResult に到達しない。
+        fetchText: (url, options) => fetcher.fetchText(url, options),
+        parse: parseRaceResult,
+        saveResult: (rid, entries) => store.saveResult(rid, entries),
+      }),
+    getVerifyReport: (): VerifyReportView => computeVerifyReport(store),
+    listAnalysisHistory: (): AnalysisHistoryItem[] => {
+      const analyses = store.listAnalyses();
+      // 結果取込済み(実着順あり)/払戻取込済み(複勝払戻あり)のレースID集合を作る。
+      // 重複レースIDは1回だけ getResult する。着順のみで払戻が無いレースは hasPayout=false になる。
+      const resultRaceIds = new Set<string>();
+      const payoutRaceIds = new Set<string>();
+      for (const raceId of new Set(analyses.map((a) => a.raceId))) {
+        const results = store.getResult(raceId);
+        if (results !== undefined) {
+          resultRaceIds.add(raceId);
+          if (results.some((r) => r.placePayout !== null && r.placePayout !== undefined)) {
+            payoutRaceIds.add(raceId);
+          }
+        }
+      }
+      return buildAnalysisHistory(analyses, resultRaceIds, payoutRaceIds);
+    },
     close: () => db.close(),
   };
 }

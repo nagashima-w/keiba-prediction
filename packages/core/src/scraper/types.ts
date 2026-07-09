@@ -225,6 +225,46 @@ export interface HorseRaceResult {
   readonly winnerName: string | null;
 }
 
+/** レース結果(result.html)の全着順テーブルから得る1頭分。 */
+export interface RaceResultHorse {
+  /** 馬番。 */
+  readonly umaban: number;
+  /**
+   * 着順(数値順位 or 非数値種別)。中止・除外などは非数値、着順表示が空の場合は null。
+   * 判別方式は全戦績(HorseRaceResult.finishPosition)と同じ FinishPosition 流儀に揃える。
+   */
+  readonly finishPosition: FinishPosition | null;
+  /** 馬名。 */
+  readonly horseName: string;
+}
+
+/**
+ * 確定払戻の1点(複勝・単勝など)。
+ * payout は「100円あたりの払戻額(円)」。netkeiba の払戻表記(例: 210円)がそのまま
+ * 100円購入時の払戻であり、複勝オッズ=payout/100 に対応する。
+ */
+export interface RacePayoutEntry {
+  /** 的中馬番。 */
+  readonly umaban: number;
+  /** 100円あたりの払戻額(円)。 */
+  readonly payout: number;
+}
+
+/**
+ * レース結果ページ(result.html)のパース結果。
+ *
+ * 全着順テーブル(#All_Result_Table)から各馬の着順を、払戻テーブルから複勝・単勝の
+ * 確定払戻を取り出す。未確定レース等で払戻テーブルが無い場合、payout類は空配列になる。
+ */
+export interface RaceResult {
+  /** 各馬の着順(全着順テーブルの並び順)。 */
+  readonly horses: RaceResultHorse[];
+  /** 複勝の確定払戻(払戻テーブル欠損時は空配列)。 */
+  readonly placePayouts: RacePayoutEntry[];
+  /** 単勝の確定払戻(払戻テーブル欠損時は空配列)。 */
+  readonly winPayouts: RacePayoutEntry[];
+}
+
 /** 単勝オッズ(1頭分)。未確定・非数値は null。 */
 export interface WinOdds {
   /** 単勝オッズ。未確定・非数値は null。 */

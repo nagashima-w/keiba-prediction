@@ -14,6 +14,12 @@ export const IPC_CHANNELS = {
   runAnalysis: "analysis:run",
   /** 分析の進捗イベント(main→renderer への一方向通知)。 */
   analysisProgress: "analysis:progress",
+  /** レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。 */
+  importResult: "result:import",
+  /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
+  getVerifyReport: "verify:report",
+  /** 分析履歴一覧(検証画面用)を取得する。 */
+  listAnalyses: "analysis:list",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

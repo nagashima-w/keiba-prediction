@@ -80,3 +80,12 @@ export function horseResultsApiUrl(horseId: HorseId): string {
 export function oddsApiUrl(raceId: RaceId): string {
   return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=1&action=init`;
 }
+
+/**
+ * レース結果ページのURL。
+ * 全着順(着順・馬番・馬名)と確定払戻(単勝・複勝ほか)が静的HTMLに含まれる
+ * (発走後に確定するため、未確定レースでは払戻テーブルが欠ける)。verify(実配当)の入力に用いる。
+ */
+export function raceResultUrl(raceId: RaceId): string {
+  return `${RACE_BASE}/race/result.html?race_id=${raceId}`;
+}

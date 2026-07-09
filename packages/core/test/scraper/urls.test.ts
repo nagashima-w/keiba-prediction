@@ -11,6 +11,7 @@ import {
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
+  raceResultUrl,
   shutubaUrl,
 } from "../../src/scraper/urls.js";
 
@@ -60,6 +61,12 @@ describe("URL構築の集約(urls.ts)", () => {
       "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=1&action=init",
     );
   });
+
+  it("raceResultUrlはレース結果ページのURLを返すこと", () => {
+    expect(raceResultUrl(raceId)).toBe(
+      "https://race.netkeiba.com/race/result.html?race_id=202605020811",
+    );
+  });
 });
 
 describe("公開API(index.tsからの再エクスポート)", () => {
@@ -72,6 +79,7 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.horseUrl).toBe(horseUrl);
     expect(mod.horseResultsApiUrl).toBe(horseResultsApiUrl);
     expect(mod.oddsApiUrl).toBe(oddsApiUrl);
+    expect(mod.raceResultUrl).toBe(raceResultUrl);
   });
 
   it("不採用となったnewspaperUrlは公開されないこと", async () => {

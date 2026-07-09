@@ -17,6 +17,10 @@ const api: KeibaApi = {
   listRaces: (date) => ipcRenderer.invoke(IPC_CHANNELS.listRaces, date),
   runAnalysis: (raceId, date) =>
     ipcRenderer.invoke(IPC_CHANNELS.runAnalysis, raceId, date),
+  importResult: (raceId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.importResult, raceId),
+  getVerifyReport: () => ipcRenderer.invoke(IPC_CHANNELS.getVerifyReport),
+  listAnalyses: () => ipcRenderer.invoke(IPC_CHANNELS.listAnalyses),
   onAnalysisProgress: (listener) => {
     const handler = (_event: IpcRendererEvent, progress: AnalysisProgress): void => {
       listener(progress);

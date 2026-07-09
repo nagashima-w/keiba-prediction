@@ -78,6 +78,11 @@ export interface RaceResultEntry {
   readonly umaban: number;
   /** 実着順。非数値着順(中止・除外・着順不明)は null。 */
   readonly finishPosition: number | null;
+  /**
+   * 複勝の確定払戻(100円あたりの円)。verifyで回収率を実配当ベースで算出するために用いる。
+   * 複勝圏外の馬・未取込(旧データ)は null。省略時も null 扱い(後方互換)。
+   */
+  readonly placePayout?: number | null;
 }
 
 /** listAnalyses の絞り込み条件。 */
@@ -146,9 +151,27 @@ export class AnalysisStore {
         race_id TEXT NOT NULL,
         umaban INTEGER NOT NULL,
         finish_position INTEGER,
+        place_payout REAL,
         PRIMARY KEY (race_id, umaban)
       );
     `);
+    this.migrateResultPayoutColumn();
+  }
+
+  /**
+   * 実配当列(place_payout)を後付けするマイグレーション。
+   * 旧バージョンで作成済みの race_results には place_payout 列が無いため、存在しなければ追加する
+   * (既存行は NULL=未取込となり、verifyは従来どおり近似にフォールバックする=後方互換)。
+   */
+  private migrateResultPayoutColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "place_payout")) {
+      this.db.exec(
+        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN place_payout REAL`,
+      );
+    }
   }
 
   /**
@@ -189,40 +212,50 @@ export class AnalysisStore {
   }
 
   /**
-   * レース後の実着順を保存する。(race_id, umaban) 主キーで再保存は上書きする。
+   * レース後の実着順(と複勝確定払戻)を保存する。(race_id, umaban) 主キーで再保存は上書きする。
+   * placePayout を省略した場合は null で保存する(実配当未取込=verifyは近似にフォールバック)。
    * @param raceId レースID
-   * @param results 馬番→着順(非数値着順は finishPosition=null)
+   * @param results 馬番→着順・複勝払戻(非数値着順は finishPosition=null)
    */
   saveResult(raceId: string, results: readonly RaceResultEntry[]): void {
     const upsert = this.db.prepare(
-      `INSERT INTO ${RACE_RESULTS_TABLE} (race_id, umaban, finish_position)
-       VALUES (?, ?, ?)
+      `INSERT INTO ${RACE_RESULTS_TABLE} (race_id, umaban, finish_position, place_payout)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(race_id, umaban) DO UPDATE SET
-         finish_position = excluded.finish_position`,
+         finish_position = excluded.finish_position,
+         place_payout = excluded.place_payout`,
     );
     const tx = this.db.transaction((rows: readonly RaceResultEntry[]) => {
       for (const r of rows) {
-        upsert.run(raceId, r.umaban, r.finishPosition);
+        upsert.run(raceId, r.umaban, r.finishPosition, r.placePayout ?? null);
       }
     });
     tx(results);
   }
 
   /**
-   * レースの実着順を取得する。1件も保存されていなければ undefined を返す。
+   * レースの実着順(と複勝確定払戻)を取得する。1件も保存されていなければ undefined を返す。
    * @param raceId レースID
    */
   getResult(raceId: string): RaceResultEntry[] | undefined {
     const rows = this.db
       .prepare(
-        `SELECT umaban, finish_position AS finishPosition
+        `SELECT umaban, finish_position AS finishPosition, place_payout AS placePayout
            FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`,
       )
-      .all(raceId) as Array<{ umaban: number; finishPosition: number | null }>;
+      .all(raceId) as Array<{
+      umaban: number;
+      finishPosition: number | null;
+      placePayout: number | null;
+    }>;
     if (rows.length === 0) {
       return undefined;
     }
-    return rows.map((r) => ({ umaban: r.umaban, finishPosition: r.finishPosition }));
+    return rows.map((r) => ({
+      umaban: r.umaban,
+      finishPosition: r.finishPosition,
+      placePayout: r.placePayout,
+    }));
   }
 
   /**

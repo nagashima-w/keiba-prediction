@@ -1,8 +1,11 @@
 import type { AppInfo } from "../main/app-info.js";
 import type {
+  AnalysisHistoryItem,
   AnalysisProgress,
   AnalysisResult,
+  ImportResultOutcome,
   RaceListItem,
+  VerifyReportView,
 } from "./analysis-types.js";
 
 /**
@@ -33,4 +36,16 @@ export interface KeibaApi {
    * @returns 購読を解除する関数
    */
   onAnalysisProgress(listener: (progress: AnalysisProgress) => void): () => void;
+
+  /**
+   * レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。
+   * @param raceId レースID(12桁)
+   */
+  importResult(raceId: string): Promise<ImportResultOutcome>;
+
+  /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
+  getVerifyReport(): Promise<VerifyReportView>;
+
+  /** 分析履歴一覧(検証画面用)を取得する。 */
+  listAnalyses(): Promise<AnalysisHistoryItem[]>;
 }

@@ -46,4 +46,15 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
     expect(result.appName).toBe("競馬期待値分析ツール");
     expect(result.core.minSampleForBias).toBe(DEFAULT_SCORER_CONFIG.minSampleForBias);
   });
+
+  it("検証画面用のチャネル(結果取込・検証レポート・分析履歴)をハンドラ付きで登録する", () => {
+    registerIpcHandlers();
+    for (const channel of [
+      IPC_CHANNELS.importResult,
+      IPC_CHANNELS.getVerifyReport,
+      IPC_CHANNELS.listAnalyses,
+    ]) {
+      expect(handleMock).toHaveBeenCalledWith(channel, expect.any(Function));
+    }
+  });
 });

@@ -87,6 +87,39 @@ export const HORSE_RESULTS_SELECTORS = {
   dataCell: "td",
 } as const;
 
+/**
+ * レース結果(result.html)のセレクタ。
+ *
+ * 注意: 文書全体には結果本体(全着順)以外にも tr.HorseList を持つテーブルが複数ある
+ * (プレミアムのラップサマリー等)。誤って余分な行を取り込まないよう、結果本体は
+ * id=All_Result_Table にスコープする(resultTable 配下でのみ resultRow を探す)。
+ */
+export const RACE_RESULT_SELECTORS = {
+  /** 全着順テーブル(結果本体)。他テーブルの HorseList 行と区別するため id で限定する。 */
+  resultTable: "#All_Result_Table",
+  /** 出走馬の結果行(resultTable 配下でのみ使用)。 */
+  resultRow: "tr.HorseList",
+  /** 着順表示(td.Result_Num 内の順位)。 */
+  finishRank: "td.Result_Num div.Rank",
+  /**
+   * 枠・馬番のセル(いずれも td.Num)。枠セルは class に Waku{n} を持つため、
+   * パーサー側で Waku を持たない td.Num を馬番として選ぶ(枠と馬番の取り違え防止)。
+   */
+  numCell: "td.Num",
+  /** 馬名リンク(title属性が馬名)。 */
+  horseNameLink: "td.Horse_Info span.Horse_Name a",
+  /** 払戻テーブル(単勝・複勝・馬連…を含む。ページ内に複数ある)。 */
+  payoutTable: "table.Payout_Detail_Table",
+  /** 単勝の払戻行。 */
+  winRow: "tr.Tansho",
+  /** 複勝の払戻行。 */
+  placeRow: "tr.Fukusho",
+  /** 払戻行の的中馬番セル(内部の空でない span が馬番)。 */
+  payoutResult: "td.Result",
+  /** 払戻行の払戻金額セル(内部で <br> 区切り。複数点あり)。 */
+  payoutAmount: "td.Payout",
+} as const;
+
 /** 調教(oikiri.html)のセレクタ。 */
 export const OIKIRI_SELECTORS = {
   /** 調教テーブル。 */
@@ -147,4 +180,6 @@ export const PATTERNS = {
   raceIdSegmentFromRacePath: /\/race\/([0-9A-Za-z]+)/,
   /** 降着表記の着順(例: 5(降) / 3(降))から確定順位を取り出す。半角・全角括弧に対応。 */
   demotedFinish: /^(\d+)\s*[(（]\s*降\s*[)）]$/,
+  /** 結果テーブルの枠セル判定(class に Waku{n} を含むか)。 */
+  wakuClass: /\bWaku\d/,
 } as const;
