@@ -1,0 +1,75 @@
+# Windows 向け exe を electron-builder でビルドし、Releases にローリング公開するワークフロー。
+#
+# 方針(ユーザー指示):
+#   UI 実装中は常に Releases から最新 exe をダウンロードできる状態を維持する。
+#   そのため固定タグ `dev-latest` のプレリリースを毎回作り直して差し替える(ローリングプレリリース)。
+name: Windows ビルドと Releases 公開
+
+on:
+  # 開発ブランチへの push で自動ビルド。
+  push:
+    branches:
+      - claude/keiba-ev-tool-dev-cvagiu
+  # 手動実行も可能にする。
+  workflow_dispatch:
+
+# Releases(タグ/リリース)へ書き込むための権限を明示的に付与する。
+permissions:
+  contents: write
+
+# 同一ワークフローの多重実行を抑止し、走行中の古いビルドはキャンセルする。
+concurrency:
+  group: build-windows
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Windows ネイティブの exe を作るため windows-latest 上でビルドする。
+    runs-on: windows-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      # pnpm はバージョン未指定にして package.json の packageManager フィールド(pnpm@10.33.0)に従わせる。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 依存をインストール
+        run: pnpm install --frozen-lockfile
+
+      # 全パッケージ(core + app)のテストが通ることをビルド前の関門にする。
+      - name: テストを実行
+        run: pnpm -r test
+
+      # renderer(Vite)+ main/preload(esbuild)をビルドする。
+      - name: app をビルド
+        run: pnpm --filter @keiba/app build
+
+      # electron-builder で portable exe を生成する。
+      # better-sqlite3(ネイティブ)は electron-builder が Electron 向けに rebuild して同梱する。
+      # electron-builder 自身の自動公開は無効化(--publish never)し、公開は後段の action-gh-release に一本化する。
+      - name: electron-builder で exe を生成
+        run: pnpm --filter @keiba/app exec electron-builder --win --config electron-builder.yml --publish never
+
+      # 生成した exe を dev-latest プレリリースとして公開する。
+      # 既存の dev-latest を delete→create せず、action-gh-release の in-place 更新で差し替える
+      # (delete 方式だと公開失敗時に dev-latest が消えたまま残る非アトミック性があるため)。
+      # 同名アセット(keiba-ev-tool-<version>-portable.exe)は上書き設定で置き換える。
+      - name: Releases に公開(dev-latest を in-place 更新)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-latest
+          name: 開発版(最新ビルド)
+          prerelease: true
+          # artifactName はバージョン固定(keiba-ev-tool-<version>-portable.exe)のため、
+          # action-gh-release が同名の既存アセットを上書きし、in-place で最新 exe に差し替わる。
+          body: |
+            claude/keiba-ev-tool-dev-cvagiu ブランチの最新コミットから自動ビルドした開発版です。
+            UI 実装中の動作確認用に、常に最新の exe をここから入手できます(個人利用専用)。
+          files: packages/app/release/*.exe
