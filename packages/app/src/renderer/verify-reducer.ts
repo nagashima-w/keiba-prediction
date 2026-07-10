@@ -12,7 +12,7 @@ import type {
 } from "../shared/analysis-types.js";
 
 /** タブの種別。 */
-export type TabKey = "分析" | "検証";
+export type TabKey = "分析" | "検証" | "設定";
 
 /** 検証タブの状態。 */
 export interface VerifyState {

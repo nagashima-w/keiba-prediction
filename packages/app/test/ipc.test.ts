@@ -57,4 +57,15 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
       expect(handleMock).toHaveBeenCalledWith(channel, expect.any(Function));
     }
   });
+
+  it("設定画面用のチャネル(取得・保存・初期化)をハンドラ付きで登録する", () => {
+    registerIpcHandlers();
+    for (const channel of [
+      IPC_CHANNELS.getSettings,
+      IPC_CHANNELS.saveSettings,
+      IPC_CHANNELS.resetSettings,
+    ]) {
+      expect(handleMock).toHaveBeenCalledWith(channel, expect.any(Function));
+    }
+  });
 });

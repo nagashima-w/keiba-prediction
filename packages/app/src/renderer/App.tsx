@@ -3,6 +3,7 @@ import { useCallback, useEffect, useReducer } from "react";
 import { analysisReducer, createInitialState } from "./analysis-reducer.js";
 import { AnalysisView } from "./AnalysisView.js";
 import { RaceSelection } from "./RaceSelection.js";
+import { SettingsView } from "./SettingsView.js";
 import { VerifyView } from "./VerifyView.js";
 import {
   createInitialVerifyState,
@@ -142,9 +143,9 @@ export function App(): React.JSX.Element {
         ハイライトします。
       </p>
 
-      {/* タブ切替(分析/検証)。 */}
+      {/* タブ切替(分析/検証/設定)。 */}
       <nav style={{ display: "flex", gap: "0.5rem", margin: "0.75rem 0" }}>
-        {(["分析", "検証"] as const).map((tab) => (
+        {(["分析", "検証", "設定"] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -168,7 +169,7 @@ export function App(): React.JSX.Element {
         style={{ margin: "0 0 1rem", border: "none", borderTop: "1px solid #ddd" }}
       />
 
-      {verify.activeTab === "分析" ? (
+      {verify.activeTab === "分析" && (
         <>
           <RaceSelection
             date={state.selection.date}
@@ -192,13 +193,17 @@ export function App(): React.JSX.Element {
             onRun={handleRun}
           />
         </>
-      ) : (
+      )}
+
+      {verify.activeTab === "検証" && (
         <VerifyView
           state={verify}
           onImport={handleImport}
           onRefresh={loadVerifyData}
         />
       )}
+
+      {verify.activeTab === "設定" && <SettingsView />}
     </main>
   );
 }

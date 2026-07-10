@@ -1,3 +1,4 @@
+import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
   buildPriorInput,
   parseHorseId,
@@ -180,6 +181,28 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(calls.length).toBe(3);
     for (const call of calls) {
       expect(call[0].race.date).toBe("2025/01/15");
+    }
+  });
+
+  it("deps.scorerConfig(重み変更済み)が buildPriorInput 経由で全頭のスコアリングに渡る", async () => {
+    // 設定→パイプライン反映の検証: 重みを変えた ScorerConfig が各馬の PriorInput.config に載り、
+    // その PriorInput が computeFieldPriors に渡る(buildPriorInput はその config を素通しする)。
+    const scorerConfig = {
+      ...DEFAULT_SCORER_CONFIG,
+      weights: { ...DEFAULT_SCORER_CONFIG.weights, trackCondition: 0.42 },
+    };
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      { ...baseDeps(), scorerConfig },
+      onProgress,
+    );
+
+    const calls = (buildPriorInput as unknown as Mock).mock.calls;
+    expect(calls.length).toBe(3);
+    for (const call of calls) {
+      expect(call[0].config).toBe(scorerConfig);
+      expect(call[0].config.weights.trackCondition).toBe(0.42);
     }
   });
 

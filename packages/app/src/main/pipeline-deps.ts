@@ -24,9 +24,11 @@ import {
   ScrapeCache,
   scrapeRace,
   type BuildPromptInput,
+  type EvConfig,
   type KaisaiDate,
   type RaceId,
   type RaceListEntry,
+  type ScorerConfig,
 } from "@keiba/core";
 
 import type {
@@ -44,6 +46,13 @@ export interface PipelineWiringConfig {
   readonly dbPath: string;
   /** Anthropic APIキー。未設定・空文字なら LLM分析をスキップする。 */
   readonly apiKey?: string;
+  /**
+   * scorer設定(設定画面の重みを DEFAULT_SCORER_CONFIG へマージしたもの)。
+   * 省略時は runAnalysis 側で core の既定を用いる。
+   */
+  readonly scorerConfig?: ScorerConfig;
+  /** EV設定(設定画面のEV閾値)。省略時は runAnalysis 側で既定(閾値1.0)を用いる。 */
+  readonly evConfig?: EvConfig;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -97,6 +106,9 @@ export function createPipelineDeps(
     scrape: (raceId: RaceId) => scrapeRace(raceId, { fetcher }),
     analyze,
     saveAnalysis: (record) => store.saveAnalysis(record),
+    // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
+    scorerConfig: config.scorerConfig,
+    evConfig: config.evConfig,
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",

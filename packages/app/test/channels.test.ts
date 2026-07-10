@@ -20,4 +20,10 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.runAnalysis).toBe("analysis:run");
     expect(IPC_CHANNELS.analysisProgress).toBe("analysis:progress");
   });
+
+  it("設定画面用のチャネル(取得・保存・初期化)が定義されている", () => {
+    expect(IPC_CHANNELS.getSettings).toBe("settings:get");
+    expect(IPC_CHANNELS.saveSettings).toBe("settings:save");
+    expect(IPC_CHANNELS.resetSettings).toBe("settings:reset");
+  });
 });
