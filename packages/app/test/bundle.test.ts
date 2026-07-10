@@ -35,6 +35,12 @@ describe("main バンドルの native 依存(better-sqlite3)の external 維持"
     expect(output).toMatch(/require\(["']better-sqlite3["']\)/);
   });
 
+  // 注: undici と Electron 内蔵 Node の非互換に対する回帰ガードは、ビルド後バンドルの正規表現走査では
+  // 実バンドル形態(esbuild のインライン化で `require_undici2()` 等になる)と一致せず実効性が無かった。
+  // 現在は (1) net.fetch 注入(net-fetch-adapter)を net-fetch-injection-guard.test.ts のソース走査で担保し、
+  // (2) core の undici を cheerio 互換の ^7(Node>=20.18.1)へ整合させて多層防御としている。
+  // このためバンドル内容に対する undici ガードはここには置かない。
+
   it("electron-builder.yml が better-sqlite3 を asarUnpack で同梱する設定を持つ", () => {
     const yml = readFileSync(
       path.join(currentDir, "../electron-builder.yml"),

@@ -14,6 +14,12 @@ directories:
 
 # 配布物に含めるファイル。renderer/main/preload のビルド成果物と package.json のみ。
 # node_modules の本番依存(better-sqlite3)は electron-builder が自動で収集・同梱する。
+#
+# 【engines 不整合の注意】Electron 内蔵 Node とバンドル依存の engines がずれると、Electron 内でのみ
+# 実行時に失敗しうる(素の Node で回る CI/テストでは検出できない)。元バグ: core が直接依存していた
+# undici 8(engines Node>=22.19.0)が Electron 34 の内蔵 Node(20.18.x)と非互換で、undici の fetch を
+# 呼ぶと Electron 内で失敗した。対策は2層 = (a) 主: HttpClient / Discord 送信へ Electron の net.fetch を注入、
+# (b) 従: core の undici を cheerio 互換の ^7(Node>=20.18.1)へ整合。詳細は scripts/build-electron.mjs 参照。
 files:
   - dist/**/*
   - package.json

@@ -25,6 +25,7 @@ import {
   scrapeRace,
   type BuildPromptInput,
   type EvConfig,
+  type FetchLike,
   type KaisaiDate,
   type RaceId,
   type RaceListEntry,
@@ -53,6 +54,16 @@ export interface PipelineWiringConfig {
   readonly scorerConfig?: ScorerConfig;
   /** EV設定(設定画面のEV閾値)。省略時は runAnalysis 側で既定(閾値1.0)を用いる。 */
   readonly evConfig?: EvConfig;
+  /**
+   * HTTP取得に使う fetch(注入)。
+   *
+   * Electron main では Electron の net.fetch アダプタ(net-fetch-adapter)を渡し、
+   * Chromium ネットワークスタック(システムプロキシ・OS TLS・Node バージョン非依存)で取得する。
+   * 省略時は HttpClient が undici 既定を用いる。core の undici は Electron 互換の ^7 へ整合済みだが、
+   * net.fetch の実利を得るため main では必ず渡す。
+   * この層を electron 非依存に保つため、アダプタ生成は呼び出し側(ipc.ts)が担う。
+   */
+  readonly fetch?: FetchLike;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -89,11 +100,16 @@ export function createPipelineDeps(
 ): PipelineResources {
   const db = new Database(config.dbPath);
   const cache = new ScrapeCache({ database: db });
-  const httpClient = new HttpClient();
+  // fetch を注入すると undici 既定経路を通らず、Electron main では net.fetch(Chromium スタック)で取得する。
+  const httpClient = new HttpClient({ fetch: config.fetch });
   const fetcher = new CachedFetcher({ fetcher: httpClient, cache });
   const store = new AnalysisStore({ database: db });
 
   // APIキー有無で LLM分析を分岐する。
+  // 注(net.fetch 注入の見送り記録): Anthropic SDK には HttpClient/Discord と同様の net.fetch 注入は
+  // していない。SDK は globalThis.fetch(= Electron 内蔵 Node の undici)を使い、Node 20 互換で動作する
+  // ことを確認済みのため、現時点で注入は不要。将来システムプロキシ整合(社内プロキシ経由の LLM 呼び出し)が
+  // 必要になった場合に SDK の fetch 差し替え注入を再検討する。
   const useLlm = shouldUseLlm(config.apiKey);
   const analyze = useLlm
     ? (input: BuildPromptInput) =>

@@ -218,6 +218,50 @@ describe("HttpClient", () => {
       // 初回1回 + リトライ1回 = 合計2回
       expect(fetch).toHaveBeenCalledTimes(2);
     });
+
+    it("リトライ枯渇時に投げるHttpErrorのメッセージへ根本原因(causeのmessage)を含めること", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      // Electron内蔵Node(20)でundici8をロードした際のような実行時エラーを模す。
+      const rootCause = new Error(
+        "The provided value is not of type 'AbortSignal'",
+      );
+      const fetch = vi.fn<FetchLike>(async () => {
+        throw rootCause;
+      });
+      const client = new HttpClient({ fetch, minIntervalMs: 0, maxRetries: 1 });
+
+      const p = client.fetchText("https://example.test/down");
+      const assertion = expect(p).rejects.toMatchObject({
+        name: "HttpError",
+        // 「ネットワークエラーにより…」の丸めで根本原因が消えず、原因メッセージが読み取れること。
+        message: expect.stringContaining(
+          "原因: The provided value is not of type 'AbortSignal'",
+        ),
+        // 元例外は cause として保持され、診断に使えること。
+        cause: rootCause,
+      });
+      await vi.advanceTimersByTimeAsync(10000);
+      await assertion;
+    });
+
+    it("最終フォールバック(試行が一度も実行されず原因を特定できない場合)でも原因付きのHttpErrorを投げること", async () => {
+      // maxRetries が負だと初回試行も実行されず lastError を特定できないが、
+      // それでも「リクエストに失敗しました(原因: …)」の原因付きHttpErrorで終わること(防御的フォールバック)。
+      const fetch = vi.fn<FetchLike>(async () => {
+        throw new Error("到達しないはず");
+      });
+      const client = new HttpClient({ fetch, minIntervalMs: 0, maxRetries: -1 });
+
+      await expect(
+        client.fetchText("https://example.test/never"),
+      ).rejects.toMatchObject({
+        name: "HttpError",
+        message: expect.stringContaining("リクエストに失敗しました(原因:"),
+      });
+      // 試行自体が行われないため fetch は呼ばれない。
+      expect(fetch).not.toHaveBeenCalled();
+    });
   });
 
   describe("リクエストタイムアウト", () => {

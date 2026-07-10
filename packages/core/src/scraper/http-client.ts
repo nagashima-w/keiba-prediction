@@ -211,11 +211,14 @@ export class HttpClient {
       } catch (error) {
         // タイムアウトは既に HttpError 化されているためそのまま、
         // それ以外のネットワークエラーは一時的エラーとして包む。いずれもリトライ対象。
+        // 丸めたメッセージに根本原因(cause の message)を織り込む。これが無いと、
+        // 例えば Electron 内蔵 Node と undici の非互換で fetch 実装が投げる実行時エラーが
+        // 「ネットワークエラーにより…」に潰れ、UI から原因が読み取れなくなる。
         lastError =
           error instanceof HttpError
             ? error
             : new HttpError(
-                `ネットワークエラーによりリクエストに失敗しました: ${url}`,
+                `ネットワークエラーによりリクエストに失敗しました(原因: ${describeCause(error)}): ${url}`,
                 { url, cause: error },
               );
         continue;
@@ -249,10 +252,12 @@ export class HttpClient {
     if (lastError instanceof HttpError) {
       throw lastError;
     }
-    throw new HttpError(`リクエストに失敗しました: ${url}`, {
-      url,
-      cause: lastError,
-    });
+    // 通常ここへは到達しない(失敗時は必ず HttpError を lastError に積む)が、
+    // 防御的フォールバックとしても根本原因を握りつぶさず「(原因: …)」を添えて投げる。
+    throw new HttpError(
+      `リクエストに失敗しました(原因: ${describeCause(lastError)}): ${url}`,
+      { url, cause: lastError },
+    );
   }
 
   /**
@@ -315,6 +320,20 @@ export class HttpClient {
 /** setTimeout ベースの待機(vitestのフェイクタイマーで制御可能)。 */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 例外を人間可読な原因文字列へ変換する(エラーメッセージ埋め込み用)。
+ * Error は message を、それ以外は String() を用いる。
+ */
+function describeCause(error: unknown): string {
+  if (error === undefined || error === null) {
+    return "不明";
+  }
+  if (error instanceof Error && error.message !== "") {
+    return error.message;
+  }
+  return String(error);
 }
 
 /**
