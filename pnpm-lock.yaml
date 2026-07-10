@@ -79,8 +79,8 @@ importers:
         specifier: ^0.6.3
         version: 0.6.3
       undici:
-        specifier: ^8.7.0
-        version: 8.7.0
+        specifier: ^7.19.0
+        version: 7.28.0
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -2637,10 +2637,6 @@ packages:
   undici@7.28.0:
     resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
     engines: {node: '>=20.18.1'}
-
-  undici@8.7.0:
-    resolution: {integrity: sha512-N7iQtfyLhIMOFgQubvmLV26svHpO0bqKnAiWotTQCVKCmWrcGbBotPuW1x+xwYZ2VHdSTVUfPQQnlEt1/LouTQ==}
-    engines: {node: '>=22.19.0'}
 
   unique-filename@2.0.1:
     resolution: {integrity: sha512-ODWHtkkdx3IAR+veKxFV+VBkUMcN+FaqzUUd7IZzt+0zhDZFPFxhlqwPF3YQvMHx1TD0tdgYl+kuPnJ8E6ql7A==}
@@ -5464,8 +5460,6 @@ snapshots:
     optional: true
 
   undici@7.28.0: {}
-
-  undici@8.7.0: {}
 
   unique-filename@2.0.1:
     dependencies:

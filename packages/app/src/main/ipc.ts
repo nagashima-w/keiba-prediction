@@ -24,6 +24,7 @@ import { IPC_CHANNELS } from "../shared/channels.js";
 import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
 import { buildAppInfo } from "./app-info.js";
 import { runAnalysis } from "./analysis-pipeline.js";
+import { netFetchAdapter } from "./net-fetch-adapter.js";
 import { createPipelineDeps, type PipelineResources } from "./pipeline-deps.js";
 import { ResourceManager } from "./resource-manager.js";
 import {
@@ -103,6 +104,8 @@ const resourceManager = new ResourceManager<PipelineResources>({
       apiKey: resolveEffectiveApiKey(settings, process.env.ANTHROPIC_API_KEY),
       scorerConfig: buildScorerConfig(settings),
       evConfig: buildEvConfig(settings),
+      // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
+      fetch: netFetchAdapter,
     });
   },
   close: (resources) => resources.close(),
@@ -222,7 +225,10 @@ async function handleSendDiscord(result: AnalysisResult): Promise<void> {
     );
   }
   try {
-    await sendDiscordNotification(webhookUrl, buildDiscordPayload(result));
+    // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
+    await sendDiscordNotification(webhookUrl, buildDiscordPayload(result), {
+      fetch: netFetchAdapter,
+    });
   } catch (error) {
     // core の例外(DiscordNotifyError)はユーザー向けメッセージを持つのでそのまま伝える。
     // それ以外(ネットワーク例外等)は簡潔なメッセージに包む。

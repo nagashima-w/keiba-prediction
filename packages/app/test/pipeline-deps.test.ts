@@ -1,5 +1,6 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
-import { afterEach, describe, expect, it } from "vitest";
+import { parseKaisaiDate, type FetchLike, type FetchResponse } from "@keiba/core";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createPipelineDeps,
@@ -57,5 +58,31 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     resources.push(r);
     expect(r.deps.scorerConfig).toBe(scorerConfig);
     expect(r.deps.evConfig).toBe(evConfig);
+  });
+
+  it("config.fetch を渡すと、実HTTP取得(undici既定)ではなく注入した fetch が使われる", async () => {
+    // 空HTMLを返す euc-jp レスポンス。parseRaceList は対象要素が無ければ空配列を返す。
+    const emptyResponse: FetchResponse = {
+      status: 200,
+      ok: true,
+      headers: {
+        get: (name: string): string | null =>
+          name.toLowerCase() === "content-type"
+            ? "text/html; charset=euc-jp"
+            : null,
+      },
+      arrayBuffer: async (): Promise<ArrayBuffer> => new ArrayBuffer(0),
+    };
+    const fetch = vi.fn<FetchLike>(async () => emptyResponse);
+
+    const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+    resources.push(r);
+
+    const entries = await r.listRaces(parseKaisaiDate("20260101"));
+
+    // 注入した fetch がレース一覧サブHTMLの URL で呼ばれ、undici 既定経路を通らないこと。
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]![0]).toContain("race_list_sub.html");
+    expect(entries).toEqual([]);
   });
 });
