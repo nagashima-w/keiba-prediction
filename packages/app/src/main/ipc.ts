@@ -2,7 +2,14 @@ import path from "node:path";
 
 import { app, ipcMain, type IpcMainInvokeEvent } from "electron";
 
-import { parseKaisaiDate, parseRaceId, type KaisaiDate } from "@keiba/core";
+import {
+  DiscordNotifyError,
+  isDiscordWebhookUrl,
+  parseKaisaiDate,
+  parseRaceId,
+  sendDiscordNotification,
+  type KaisaiDate,
+} from "@keiba/core";
 
 import type {
   AnalysisHistoryItem,
@@ -12,6 +19,7 @@ import type {
   RaceListItem,
   VerifyReportView,
 } from "../shared/analysis-types.js";
+import { buildDiscordPayload } from "./discord-payload.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
 import { buildAppInfo } from "./app-info.js";
@@ -64,6 +72,10 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.resetSettings, () => handleResetSettings());
+
+  ipcMain.handle(IPC_CHANNELS.sendDiscord, (_event, result: unknown) =>
+    handleSendDiscord(result as AnalysisResult),
+  );
 }
 
 /**
@@ -189,6 +201,38 @@ function handleSaveSettings(update: SettingsUpdate): MaskedSettings {
   store.save(next);
   resourceManager.markDirty();
   return maskSettings(next, process.env.ANTHROPIC_API_KEY);
+}
+
+/**
+ * Discord送信ハンドラの実処理。
+ * DBを触らないため runExclusive は不要だが、Webhook URL は必ず最新設定から読む(設定変更を即反映)。
+ * URL未設定・検証NG・送信失敗はユーザー向けメッセージの Error にして reject する(renderer が表示)。
+ */
+async function handleSendDiscord(result: AnalysisResult): Promise<void> {
+  const settings = getSettingsStore().load();
+  const webhookUrl = settings.discordWebhookUrl.trim();
+  if (webhookUrl === "") {
+    throw new Error(
+      "Discord Webhook URL が未設定です。設定画面で登録してください。",
+    );
+  }
+  if (!isDiscordWebhookUrl(webhookUrl)) {
+    throw new Error(
+      "Discord Webhook URL が不正です(https://discord.com/api/webhooks/ で始まる必要があります)。",
+    );
+  }
+  try {
+    await sendDiscordNotification(webhookUrl, buildDiscordPayload(result));
+  } catch (error) {
+    // core の例外(DiscordNotifyError)はユーザー向けメッセージを持つのでそのまま伝える。
+    // それ以外(ネットワーク例外等)は簡潔なメッセージに包む。
+    if (error instanceof DiscordNotifyError) {
+      throw new Error(error.message);
+    }
+    throw new Error(
+      `Discord への送信に失敗しました: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /** 設定初期化ハンドラの実処理。既定へ戻して保存し、マスク済み結果を返す。 */

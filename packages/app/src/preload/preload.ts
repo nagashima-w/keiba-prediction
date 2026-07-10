@@ -25,6 +25,8 @@ const api: KeibaApi = {
   saveSettings: (update) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveSettings, update),
   resetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.resetSettings),
+  sendDiscord: (result) =>
+    ipcRenderer.invoke(IPC_CHANNELS.sendDiscord, result),
   onAnalysisProgress: (listener) => {
     const handler = (_event: IpcRendererEvent, progress: AnalysisProgress): void => {
       listener(progress);

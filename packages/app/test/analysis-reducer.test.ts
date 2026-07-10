@@ -152,6 +152,46 @@ describe("analysisReducer(レース選択+分析の状態遷移)", () => {
     expect(s.analysis.analysisError).toBeNull();
   });
 
+  it("Discord送信: 開始→成功でステータスが sending→success へ遷移する", () => {
+    let s = analysisReducer(init(), { type: "レース選択", raceId: "A" });
+    s = analysisReducer(s, {
+      type: "分析成功",
+      raceId: "A",
+      result: fakeResult("A"),
+    });
+    // 分析成功直後は送信していない(idle)。
+    expect(s.analysis.discordSend.status).toBe("idle");
+
+    s = analysisReducer(s, { type: "Discord送信開始" });
+    expect(s.analysis.discordSend.status).toBe("sending");
+
+    s = analysisReducer(s, { type: "Discord送信成功" });
+    expect(s.analysis.discordSend.status).toBe("success");
+    expect(s.analysis.discordSend.message).toBeNull();
+  });
+
+  it("Discord送信: 失敗でエラーメッセージを保持する", () => {
+    let s = analysisReducer(init(), { type: "Discord送信開始" });
+    s = analysisReducer(s, {
+      type: "Discord送信失敗",
+      message: "レート制限により送信できませんでした",
+    });
+    expect(s.analysis.discordSend.status).toBe("error");
+    expect(s.analysis.discordSend.message).toBe(
+      "レート制限により送信できませんでした",
+    );
+  });
+
+  it("分析開始で前回のDiscord送信ステータスはリセットされる", () => {
+    let s = analysisReducer(init(), { type: "レース選択", raceId: "A" });
+    s = analysisReducer(s, { type: "Discord送信開始" });
+    s = analysisReducer(s, { type: "Discord送信成功" });
+    expect(s.analysis.discordSend.status).toBe("success");
+
+    s = analysisReducer(s, { type: "分析開始" });
+    expect(s.analysis.discordSend.status).toBe("idle");
+  });
+
   it("状態遷移は元の state を破壊的に変更しない(不変性)", () => {
     const before = init();
     const snapshot = JSON.stringify(before);

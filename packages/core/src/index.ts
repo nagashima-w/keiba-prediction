@@ -264,6 +264,24 @@ export {
   type AnthropicRequestParams,
   type MessageSender,
 } from "./analyzer/anthropic-client.js";
+export {
+  buildAnalysisEmbed,
+  DEFAULT_DISCORD_TIMEOUT_MS,
+  DISCORD_EMBED_DESCRIPTION_MAX,
+  DISCORD_EMBED_TITLE_MAX,
+  DiscordNotifyError,
+  isDiscordWebhookUrl,
+  parseRetryAfterMs,
+  sendDiscordNotification,
+  truncate,
+  type DiscordEmbed,
+  type DiscordFetchLike,
+  type DiscordFetchResponse,
+  type DiscordPayload,
+  type EmbedHorse,
+  type EmbedRaceInfo,
+  type SendDiscordDeps,
+} from "./notify/discord.js";
 export type {
   BodyWeight,
   CourseType,

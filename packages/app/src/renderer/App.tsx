@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
+import type { AnalysisResult } from "../shared/analysis-types.js";
 import { analysisReducer, createInitialState } from "./analysis-reducer.js";
 import { AnalysisView } from "./AnalysisView.js";
 import { RaceSelection } from "./RaceSelection.js";
@@ -42,12 +43,57 @@ export function App(): React.JSX.Element {
     createInitialVerifyState,
   );
 
+  // Discord通知の設定スナップショット(送信ボタンの有効化判定・自動送信の判定に使う)。
+  // 設定画面での変更を反映するため、マウント時と「分析」タブへの切替時に読み直す。
+  const [notify, setNotify] = useState({
+    webhookConfigured: false,
+    autoSend: false,
+  });
+
+  // 分析完了時(非同期の解決時)に最新の選択レースを参照して自動送信の可否を判定するための ref。
+  const selectedRaceIdRef = useRef(state.selection.selectedRaceId);
+  selectedRaceIdRef.current = state.selection.selectedRaceId;
+  // 自動送信判定でも最新の設定値を参照できるようにする(解決時の値を使うため ref に保持)。
+  const notifyRef = useRef(notify);
+  notifyRef.current = notify;
+
   // 進捗イベント(main→renderer)の購読。マウント中1度だけ登録し、アンマウントで解除する。
   useEffect(() => {
     const unsubscribe = window.keibaApi.onAnalysisProgress((progress) => {
       dispatch({ type: "進捗更新", progress });
     });
     return unsubscribe;
+  }, []);
+
+  // Discord通知設定(Webhook URL 設定有無・自動送信ON/OFF)を読み込む。
+  const loadNotifySettings = useCallback(() => {
+    window.keibaApi
+      .getSettings()
+      .then((s) =>
+        setNotify({
+          webhookConfigured: s.discordWebhookUrl.trim() !== "",
+          autoSend: s.autoSendDiscord,
+        }),
+      )
+      .catch(() => {
+        // 設定取得失敗時は送信を無効側に倒す(誤って送信可能にしない)。
+        setNotify({ webhookConfigured: false, autoSend: false });
+      });
+  }, []);
+
+  useEffect(() => {
+    loadNotifySettings();
+  }, [loadNotifySettings]);
+
+  // Discord送信(手動・自動共通)。失敗しても分析結果表示は保持し、送信失敗のみ通知する。
+  const handleSendDiscord = useCallback((result: AnalysisResult) => {
+    dispatch({ type: "Discord送信開始" });
+    window.keibaApi
+      .sendDiscord(result)
+      .then(() => dispatch({ type: "Discord送信成功" }))
+      .catch((e: unknown) =>
+        dispatch({ type: "Discord送信失敗", message: errorMessage(e) }),
+      );
   }, []);
 
   // 検証タブの履歴+レポートを取得する(タブ切替時・取込後・再読み込み時に呼ぶ)。
@@ -74,8 +120,12 @@ export function App(): React.JSX.Element {
       if (tab === "検証") {
         loadVerifyData();
       }
+      if (tab === "分析") {
+        // 設定タブでWebhook URL・自動送信を変更した可能性があるため読み直す。
+        loadNotifySettings();
+      }
     },
-    [loadVerifyData],
+    [loadVerifyData, loadNotifySettings],
   );
 
   const handleImport = useCallback(
@@ -121,11 +171,26 @@ export function App(): React.JSX.Element {
       .runAnalysis(raceId, date)
       // 実行を開始したレース(raceId)を成否アクションに添えて、reducer 側で
       // in-flight ガード(切替後の旧結果表示防止)を効かせる。
-      .then((result) => dispatch({ type: "分析成功", raceId, result }))
+      .then((result) => {
+        dispatch({ type: "分析成功", raceId, result });
+        // 自動送信: ONかつWebhook設定済みで、開始したレースが今も選択中(結果が表示される)なら送信。
+        // 実行中に別レースへ切替えた場合は送らない(表示されない結果を送らないため)。
+        if (
+          notifyRef.current.autoSend &&
+          notifyRef.current.webhookConfigured &&
+          raceId === selectedRaceIdRef.current
+        ) {
+          handleSendDiscord(result);
+        }
+      })
       .catch((e: unknown) =>
         dispatch({ type: "分析失敗", raceId, message: errorMessage(e) }),
       );
-  }, [state.selection.selectedRaceId, state.selection.date]);
+  }, [
+    state.selection.selectedRaceId,
+    state.selection.date,
+    handleSendDiscord,
+  ]);
 
   return (
     <main
@@ -191,6 +256,13 @@ export function App(): React.JSX.Element {
             result={state.analysis.result}
             error={state.analysis.analysisError}
             onRun={handleRun}
+            webhookConfigured={notify.webhookConfigured}
+            discordSend={state.analysis.discordSend}
+            onSendDiscord={() => {
+              if (state.analysis.result !== null) {
+                handleSendDiscord(state.analysis.result);
+              }
+            }}
           />
         </>
       )}

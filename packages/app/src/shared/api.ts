@@ -61,4 +61,12 @@ export interface KeibaApi {
 
   /** 設定を既定へ初期化し、初期化後のマスク済み設定を返す。 */
   resetSettings(): Promise<MaskedSettings>;
+
+  /**
+   * 分析結果を Discord Webhook へ送信する。
+   * Webhook URL は main 側が最新設定から読み、送信前に検証する。
+   * 成功時は解決、失敗時(URL未設定・検証NG・送信エラー)はユーザー向けメッセージで reject する。
+   * @param result 送信する分析結果
+   */
+  sendDiscord(result: AnalysisResult): Promise<void>;
 }

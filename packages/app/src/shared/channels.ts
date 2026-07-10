@@ -26,6 +26,8 @@ export const IPC_CHANNELS = {
   saveSettings: "settings:save",
   /** 設定を既定へ初期化する(マスク済みの初期化後設定を返す)。 */
   resetSettings: "settings:reset",
+  /** 分析結果を Discord Webhook へ送信する。 */
+  sendDiscord: "notify:discord",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

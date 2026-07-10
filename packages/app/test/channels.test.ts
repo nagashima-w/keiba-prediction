@@ -26,4 +26,8 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.saveSettings).toBe("settings:save");
     expect(IPC_CHANNELS.resetSettings).toBe("settings:reset");
   });
+
+  it("Phase5で追加したDiscord通知チャネルが定義されている", () => {
+    expect(IPC_CHANNELS.sendDiscord).toBe("notify:discord");
+  });
 });
