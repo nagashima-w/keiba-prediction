@@ -20,6 +20,12 @@ export const IPC_CHANNELS = {
   getVerifyReport: "verify:report",
   /** 分析履歴一覧(検証画面用)を取得する。 */
   listAnalyses: "analysis:list",
+  /** 設定(マスク済み)を取得する。 */
+  getSettings: "settings:get",
+  /** 設定を保存する(マスク済みの更新後設定を返す)。 */
+  saveSettings: "settings:save",
+  /** 設定を既定へ初期化する(マスク済みの初期化後設定を返す)。 */
+  resetSettings: "settings:reset",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

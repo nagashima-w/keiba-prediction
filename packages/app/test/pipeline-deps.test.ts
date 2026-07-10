@@ -1,3 +1,4 @@
+import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -40,5 +41,21 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
     resources.push(r);
     expect(typeof r.deps.analyze).toBe("function");
+  });
+
+  it("scorerConfig / evConfig を渡すと deps にそのまま反映される(設定の適用)", () => {
+    const scorerConfig = {
+      ...DEFAULT_SCORER_CONFIG,
+      weights: { ...DEFAULT_SCORER_CONFIG.weights, trackCondition: 0.5 },
+    };
+    const evConfig = { threshold: 1.4 };
+    const r = createPipelineDeps({
+      dbPath: ":memory:",
+      scorerConfig,
+      evConfig,
+    });
+    resources.push(r);
+    expect(r.deps.scorerConfig).toBe(scorerConfig);
+    expect(r.deps.evConfig).toBe(evConfig);
   });
 });

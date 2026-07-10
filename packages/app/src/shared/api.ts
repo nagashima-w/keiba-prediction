@@ -7,6 +7,7 @@ import type {
   RaceListItem,
   VerifyReportView,
 } from "./analysis-types.js";
+import type { MaskedSettings, SettingsUpdate } from "./settings.js";
 
 /**
  * preload の contextBridge でレンダラーに公開する API の型。
@@ -48,4 +49,16 @@ export interface KeibaApi {
 
   /** 分析履歴一覧(検証画面用)を取得する。 */
   listAnalyses(): Promise<AnalysisHistoryItem[]>;
+
+  /** 設定(マスク済み。平文APIキーは含まない)を取得する。 */
+  getSettings(): Promise<MaskedSettings>;
+
+  /**
+   * 設定を保存し、保存後のマスク済み設定を返す。
+   * @param update 更新内容(apiKey は省略で現在値保持、文字列で差し替え)
+   */
+  saveSettings(update: SettingsUpdate): Promise<MaskedSettings>;
+
+  /** 設定を既定へ初期化し、初期化後のマスク済み設定を返す。 */
+  resetSettings(): Promise<MaskedSettings>;
 }
