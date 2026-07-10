@@ -153,6 +153,11 @@ export function resolveEffectiveApiKey(
 /**
  * レンダラー向けにマスク済み設定を組み立てる純関数。
  * 環境変数優先(fromEnv)を反映し、マスク対象は実効キー(環境変数 or 保存キー)。
+ *
+ * discordWebhookUrl は APIキーと違い平文でレンダラーへ返す(意図的な設計判断)。
+ * 設定画面で編集フィールドとして表示する必要があり、かつ機微度が APIキーより低い
+ * (漏えい時の影響は「当該チャンネルへの投稿」に限られ、Discord 側で容易に再発行・無効化できる)ため、
+ * マスクせず往復させる。APIキーのみ maskApiKey でマスクし、main の外に平文を出さない。
  */
 export function maskSettings(
   settings: AppSettings,

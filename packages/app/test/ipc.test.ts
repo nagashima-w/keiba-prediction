@@ -68,4 +68,12 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
       expect(handleMock).toHaveBeenCalledWith(channel, expect.any(Function));
     }
   });
+
+  it("Discord通知チャネル(notify:discord)をハンドラ付きで登録する", () => {
+    registerIpcHandlers();
+    expect(handleMock).toHaveBeenCalledWith(
+      IPC_CHANNELS.sendDiscord,
+      expect.any(Function),
+    );
+  });
 });

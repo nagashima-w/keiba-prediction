@@ -26,6 +26,17 @@ export interface RaceSelectionState {
   readonly selectedRaceId: string | null;
 }
 
+/** Discord送信の状態。 */
+export type DiscordSendStatus = "idle" | "sending" | "success" | "error";
+
+/** Discord送信の状態(ステータス+失敗理由)。 */
+export interface DiscordSendState {
+  /** 送信状態。 */
+  readonly status: DiscordSendStatus;
+  /** 失敗時のメッセージ(それ以外は null)。 */
+  readonly message: string | null;
+}
+
 /** 分析画面の状態。 */
 export interface AnalysisState {
   /** 分析実行中か。 */
@@ -36,6 +47,8 @@ export interface AnalysisState {
   readonly result: AnalysisResult | null;
   /** 分析エラー(無ければ null)。 */
   readonly analysisError: string | null;
+  /** Discord送信の状態。 */
+  readonly discordSend: DiscordSendState;
 }
 
 /** 画面全体の状態。 */
@@ -62,7 +75,13 @@ export type AppAction =
       readonly type: "分析失敗";
       readonly raceId: string;
       readonly message: string;
-    };
+    }
+  | { readonly type: "Discord送信開始" }
+  | { readonly type: "Discord送信成功" }
+  | { readonly type: "Discord送信失敗"; readonly message: string };
+
+/** Discord送信の初期状態(未送信)。 */
+const IDLE_DISCORD_SEND: DiscordSendState = { status: "idle", message: null };
 
 /** 分析状態の初期値(未実行)。 */
 const EMPTY_ANALYSIS: AnalysisState = {
@@ -70,6 +89,7 @@ const EMPTY_ANALYSIS: AnalysisState = {
   progress: null,
   result: null,
   analysisError: null,
+  discordSend: IDLE_DISCORD_SEND,
 };
 
 /** 指定日付で初期状態を作る。 */
@@ -143,6 +163,7 @@ export function analysisReducer(state: AppState, action: AppAction): AppState {
           progress: null,
           result: null,
           analysisError: null,
+          discordSend: IDLE_DISCORD_SEND,
         },
       };
 
@@ -165,6 +186,35 @@ export function analysisReducer(state: AppState, action: AppAction): AppState {
           progress: null,
           result: action.result,
           analysisError: null,
+          // 新しい結果を得たので、前回の送信ステータスは無効化して未送信に戻す。
+          discordSend: IDLE_DISCORD_SEND,
+        },
+      };
+
+    case "Discord送信開始":
+      return {
+        ...state,
+        analysis: {
+          ...state.analysis,
+          discordSend: { status: "sending", message: null },
+        },
+      };
+
+    case "Discord送信成功":
+      return {
+        ...state,
+        analysis: {
+          ...state.analysis,
+          discordSend: { status: "success", message: null },
+        },
+      };
+
+    case "Discord送信失敗":
+      return {
+        ...state,
+        analysis: {
+          ...state.analysis,
+          discordSend: { status: "error", message: action.message },
         },
       };
 

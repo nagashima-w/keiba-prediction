@@ -2,6 +2,7 @@ import type {
   AnalysisProgress,
   AnalysisResult,
 } from "../shared/analysis-types.js";
+import type { DiscordSendState } from "./analysis-reducer.js";
 import {
   formatEv,
   formatOdds,
@@ -24,6 +25,12 @@ export interface AnalysisViewProps {
   readonly error: string | null;
   /** 「分析実行」操作。 */
   readonly onRun: () => void;
+  /** Discord Webhook URL が設定済みか(未設定なら送信ボタンを無効化する)。 */
+  readonly webhookConfigured: boolean;
+  /** Discord送信の状態。 */
+  readonly discordSend: DiscordSendState;
+  /** 「Discordに送信」操作。 */
+  readonly onSendDiscord: () => void;
 }
 
 /** 進捗を人間向けの1行にする(n/N が分かる場合は付与)。 */
@@ -152,6 +159,37 @@ export function AnalysisView(props: AnalysisViewProps): React.JSX.Element {
               </ul>
             </div>
           )}
+
+          {/* Discord送信(仕様「Discordに送信」ボタン)。URL未設定なら無効化+理由表示。 */}
+          <div style={{ marginTop: "0.75rem" }}>
+            <button
+              type="button"
+              onClick={props.onSendDiscord}
+              disabled={
+                !props.webhookConfigured ||
+                props.discordSend.status === "sending"
+              }
+            >
+              {props.discordSend.status === "sending"
+                ? "Discordに送信中…"
+                : "Discordに送信"}
+            </button>
+            {!props.webhookConfigured && (
+              <span style={{ color: "#666", marginLeft: "0.5rem", fontSize: "0.85rem" }}>
+                設定画面で Discord Webhook URL を登録すると送信できます。
+              </span>
+            )}
+            {props.discordSend.status === "success" && (
+              <span style={{ color: "#0a7f2e", marginLeft: "0.5rem" }}>
+                送信しました。
+              </span>
+            )}
+            {props.discordSend.status === "error" && (
+              <span style={{ color: "#c00", marginLeft: "0.5rem" }}>
+                送信に失敗しました: {props.discordSend.message}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </section>
