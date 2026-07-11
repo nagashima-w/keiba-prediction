@@ -20,6 +20,7 @@ export function buildDiscordPayload(result: AnalysisResult): DiscordPayload {
       courseType: result.courseType,
       distance: result.distance,
       llmUsed: result.llmUsed,
+      oddsStatus: result.oddsStatus,
     },
     result.rows,
   );

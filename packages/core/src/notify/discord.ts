@@ -171,6 +171,28 @@ export interface EmbedRaceInfo {
   readonly distance: number;
   /** LLM補正を実行したか。 */
   readonly llmUsed: boolean;
+  /**
+   * オッズの発売状態(確定/発売中/予想)。
+   * middle/yoso は確定オッズではない旨を embed 説明文に注記する(確定 result は注記しない)。
+   */
+  readonly oddsStatus: "result" | "middle" | "yoso";
+}
+
+/**
+ * オッズ発売状態の embed 用注記(確定 result は注記なしで null)。
+ * UI 表示(app 側 oddsStatusNote)より短い文言で、embed 説明文の1行として使う。
+ */
+function embedOddsStatusNote(
+  status: EmbedRaceInfo["oddsStatus"],
+): string | null {
+  switch (status) {
+    case "middle":
+      return "※オッズは発売中(暫定)";
+    case "yoso":
+      return "※複勝未発売のためEV計算不可";
+    default:
+      return null;
+  }
 }
 
 /** embed 整形に用いる1頭分の情報(app の AnalysisRow と構造互換の部分集合)。 */
@@ -233,8 +255,12 @@ export function buildAnalysisEmbed(
 
   const llmLine = `LLM補正: ${raceInfo.llmUsed ? "実行" : "スキップ"}`;
 
+  // 確定前(middle/yoso)はオッズ状態の注記をメタ行の直後に差し込む(result は注記なし)。
+  const statusNote = embedOddsStatusNote(raceInfo.oddsStatus);
+  const metaLines = statusNote === null ? [metaLine] : [metaLine, statusNote];
+
   const description = truncate(
-    [metaLine, "", ...horseLines, "", llmLine].join("\n"),
+    [...metaLines, "", ...horseLines, "", llmLine].join("\n"),
     DISCORD_EMBED_DESCRIPTION_MAX,
   );
 

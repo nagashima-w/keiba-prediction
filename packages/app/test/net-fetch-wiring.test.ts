@@ -121,6 +121,7 @@ describe("ipc: net.fetch アダプタの注入", () => {
       llmUsed: false,
       llmSkippedReason: null,
       fallback: false,
+      oddsStatus: "result",
       rows: [],
       warnings: [],
       analyzedAt: "2026-01-01T00:00:00.000Z",

@@ -82,10 +82,14 @@ function fakeHorse(umaban: number): ShutubaHorse {
   };
 }
 
-/** 3頭・複勝オッズ付きのフェイクレースデータを作る。resultsByUmaban で戦績を差し込める。 */
+/**
+ * 3頭・複勝オッズ付きのフェイクレースデータを作る。resultsByUmaban で戦績を差し込める。
+ * oddsStatus="yoso" のときは複勝未発売を模して place を空にする(全馬EV対象外の検証用)。
+ */
 function fakeRaceData(
   raceId: string,
   resultsByUmaban: Record<number, HorseRaceResult[]> = {},
+  oddsStatus: "result" | "middle" | "yoso" = "result",
 ): RaceData {
   const horses: RaceHorseData[] = [1, 2, 3].map((n) => ({
     shutuba: fakeHorse(n),
@@ -94,13 +98,18 @@ function fakeRaceData(
   }));
   const odds: OddsSnapshot = {
     officialDatetime: "2026-07-09 09:00:00",
+    oddsStatus,
     win: {},
-    place: {
-      1: { oddsMin: 5.0, oddsMax: 6.0, ninki: 3 },
-      2: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 },
-      // 3番は複勝オッズ下限が欠損 → EV対象外になること。
-      3: { oddsMin: null, oddsMax: null, ninki: null },
-    },
+    place:
+      oddsStatus === "yoso"
+        ? // 予想オッズ(yoso)は複勝未発売のため place が空 → 全馬EV対象外になる。
+          {}
+        : {
+            1: { oddsMin: 5.0, oddsMax: 6.0, ninki: 3 },
+            2: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 },
+            // 3番は複勝オッズ下限が欠損 → EV対象外になること。
+            3: { oddsMin: null, oddsMax: null, ninki: null },
+          },
   };
   return {
     raceId: parseRaceId(raceId),
@@ -254,6 +263,47 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(saved[0]!.raceId).toBe(RACE_ID);
     expect(saved[0]!.horses).toHaveLength(3);
     expect(result.analyzedAt).toBe(FIXED_NOW.toISOString());
+  });
+
+  it("オッズ発売状態(oddsStatus)を結果メタに反映する(middle)", async () => {
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "middle")),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    expect(result.oddsStatus).toBe("middle");
+  });
+
+  it("予想オッズ(yoso・複勝未発売)では全馬EVが null になるが prior 分析自体は成功する", async () => {
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "yoso")),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+
+    expect(result.oddsStatus).toBe("yoso");
+    expect(result.rows).toHaveLength(3);
+    for (const row of result.rows) {
+      // 複勝オッズが無いため EV は計算できない(全馬 null・非プラス)。
+      expect(row.ev).toBeNull();
+      expect(row.placeOddsMin).toBeNull();
+      expect(row.isPositive).toBe(false);
+      // prior(事前確率)自体は算出できている。
+      expect(row.prior).toBeGreaterThan(0);
+      expect(row.prior).toBeLessThanOrEqual(1);
+    }
+    // 保存まで到達している(分析は成功扱い)。
+    expect(saved).toHaveLength(1);
   });
 
   it("進捗コールバックは4段階(スクレイピング→スコアリング→LLM分析→保存)を通知し、スコアリングは n/N頭 を報告する", async () => {

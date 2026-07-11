@@ -139,6 +139,7 @@ const raceInfo: EmbedRaceInfo = {
   courseType: "芝",
   distance: 1600,
   llmUsed: true,
+  oddsStatus: "result",
 };
 
 /** EVプラス2頭・非該当1頭を含む馬リスト。 */
@@ -220,6 +221,26 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
     expect(
       buildAnalysisEmbed({ ...raceInfo, llmUsed: false }, horses).description,
     ).toContain("LLM補正: スキップ");
+  });
+
+  it("確定(result)ではオッズ状態の注記を含めない", () => {
+    const desc = buildAnalysisEmbed(raceInfo, horses).description ?? "";
+    expect(desc).not.toContain("暫定");
+    expect(desc).not.toContain("複勝未発売");
+  });
+
+  it("発売中(middle)は暫定である旨の注記を含める", () => {
+    const desc =
+      buildAnalysisEmbed({ ...raceInfo, oddsStatus: "middle" }, horses)
+        .description ?? "";
+    expect(desc).toContain("※オッズは発売中(暫定)");
+  });
+
+  it("予想オッズ(yoso)は複勝未発売でEV計算不可の注記を含める", () => {
+    const desc =
+      buildAnalysisEmbed({ ...raceInfo, oddsStatus: "yoso" }, horses)
+        .description ?? "";
+    expect(desc).toContain("※複勝未発売のためEV計算不可");
   });
 
   it("説明・タイトルは Discord の文字数上限を超えない", () => {

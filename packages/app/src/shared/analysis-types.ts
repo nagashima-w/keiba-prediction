@@ -10,6 +10,14 @@
 /** 分析パイプラインの進捗段階(仕様「5. ui」の進捗表示要件)。 */
 export type ProgressStage = "スクレイピング" | "スコアリング" | "LLM分析" | "保存";
 
+/**
+ * オッズの発売状態(core OddsSnapshot.oddsStatus のプレーン写し)。
+ * - "result": 確定オッズ。
+ * - "middle": 発売中の暫定オッズ。
+ * - "yoso":   前売り前の予想オッズ(複勝未発売のためEV計算不可)。
+ */
+export type OddsStatus = "result" | "middle" | "yoso";
+
 /** 進捗イベント(main→renderer に webContents.send で通知)。 */
 export interface AnalysisProgress {
   /** 現在の段階。 */
@@ -36,7 +44,11 @@ export interface AnalysisRow {
   readonly adjustedProb: number;
   /** 使用した複勝オッズ下限。欠損なら null。 */
   readonly placeOddsMin: number | null;
-  /** 期待値(補正後確率 × 複勝下限)。オッズ欠損なら null。 */
+  /**
+   * 期待値(補正後確率 × 複勝下限)。オッズ欠損なら null。
+   * TODO(将来改善): EV=null の行に対し、core HorseEv.excludedReason(「複勝オッズに該当馬番が無い」等)を
+   * 行レベルでUI表示する。現状は null を一律「-」表示にしており、対象外の理由までは画面に出していない。
+   */
   readonly ev: number | null;
   /** EVが閾値を上回るか(ハイライト対象)。 */
   readonly isPositive: boolean;
@@ -66,6 +78,11 @@ export interface AnalysisResult {
   readonly llmSkippedReason: string | null;
   /** LLM分析がフェイルセーフで prior にフォールバックしたか。 */
   readonly fallback: boolean;
+  /**
+   * オッズの発売状態(確定/発売中/予想)。
+   * "yoso" は複勝未発売のため全馬のEVが null になる(UIで注記表示)。
+   */
+  readonly oddsStatus: OddsStatus;
   /** 結果行(馬番昇順)。 */
   readonly rows: readonly AnalysisRow[];
   /** スクレイピング時の非致命的警告(戦績・調教の取得失敗など)。 */

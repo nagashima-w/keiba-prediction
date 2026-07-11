@@ -31,6 +31,7 @@ const fakeResult = (raceId: string): AnalysisResult => ({
   llmUsed: false,
   llmSkippedReason: "APIキー未設定",
   fallback: false,
+  oddsStatus: "result",
   rows: [],
   warnings: [],
   analyzedAt: "2026-07-09T00:00:00.000Z",

@@ -69,7 +69,7 @@ fixtures/
 | 出馬表 | **静的HTML** | `race.netkeiba.com/race/shutuba.html?race_id={race_id}` | UTF-8(ヘッダ明示) | **newspaper.html は不採用**(下記) 。枠・馬番・馬名+horse_id・性齢・斤量・騎手+jockey_id・厩舎所在地(美浦/栗東)+trainer_id・馬体重(増減)がすべて静的に含まれる。オッズ列のみ `---.-` プレースホルダ(JS) |
 | 各馬の全戦績 | **内部API** | `db.netkeiba.com/horse/ajax_horse_results.html?input=UTF-8&output=json&id={horse_id}` | UTF-8(JSON) | `{status:"OK", data:"<HTMLフラグメント>"}`。全戦績テーブル(下記列構成)が入る。馬ページ本体の戦績はこのAjaxで遅延描画されるため直接APIを叩く |
 | 馬プロフィール | **静的HTML** | `db.netkeiba.com/horse/{horse_id}/` | **EUC-JP。ただしContent-Typeにcharsetなし(`text/html`のみ)→ 呼び出し側で `encoding: "euc-jp"` の明示指定が必須** | `db_prof_table`: 生年月日・調教師(美浦/栗東)・馬主・通算成績など。戦績テーブルは含まれない(上記Ajaxで取得) |
-| 単勝・複勝オッズ | **内部API** | `race.netkeiba.com/api/api_get_jra_odds.html?race_id={race_id}&type=1&action=init` | UTF-8(JSON) | `data.odds["1"]` = 単勝 `{馬番(2桁): [オッズ, "0.0", 人気]}`、`data.odds["2"]` = 複勝 `{馬番: [下限, 上限, 人気]}`。`data.official_datetime` 付き。**複勝下限が直接取れる**(EV計算の要件に合致) |
+| 単勝・複勝オッズ | **内部API** | `race.netkeiba.com/api/api_get_jra_odds.html?race_id={race_id}&type=1&action=init` | UTF-8(JSON) | `data.odds["1"]` = 単勝 `{馬番(2桁): [オッズ, "0.0", 人気]}`、`data.odds["2"]` = 複勝 `{馬番: [下限, 上限, 人気]}`。`data.official_datetime` 付き。**複勝下限が直接取れる**(EV計算の要件に合致)。**`status` は実測で3種**: `"result"`(確定)/`"middle"`(発売中の暫定。単勝セル第2要素は `"0"`)/`"yoso"`(前売り前の予想オッズ。`odds["2"]`複勝が無く単勝のみ・第2要素は空文字)。**発走前分析が主用途のため result 以外も受理する**(yoso は複勝未発売でEV計算対象外) |
 | 調教(追い切り) | **静的HTML(無料範囲)** | `race.netkeiba.com/race/oikiri.html?race_id={race_id}` | UTF-8(ヘッダ明示) | 無料で取れるのは**評価テキスト(`td.Training_Critic` 例「動き良化」)と評価ランク(例「B」)**。調教タイム・ラップはプレミアム領域 → スキーマ上optional(仕様想定通り) |
 | 厩舎コメント | **プレミアム限定** | `race.netkeiba.com/race/comment.html?race_id={race_id}` | UTF-8 | 無料ではコメント本文が含まれない(ナビのみ)。スキーマ上optionalとし、無料実装ではスキップ。analyzerは調教評価のみで動く設計にする |
 | 騎手・調教師コース成績 | 未調査 | `db.netkeiba.com/jockey/result/recent/{jockey_id}/` へのリンクを出馬表から確認済み | - | scorer実装時(Phase 2)に調査 |
@@ -131,7 +131,9 @@ fixtures/
 | `horse_results_2021105857.json` | 戦績22走(フル構造・古馬) |
 | `horse_results_2024104976.json` | 戦績2走(サンプル不足境界: チカバリエンテ 牝2) |
 | `horse_results_2021105727.json` | 戦績15走(**地方交流・海外遠征の変則行を含む**: フォーエバーヤング。地方=船橋/大井/門別/川崎、海外=メイダン/デルマー等) |
-| `odds_202603020211.json` | 単勝+複勝(下限/上限)+人気、official_datetime付き |
+| `odds_202603020211.json` | 単勝+複勝(下限/上限)+人気、official_datetime付き(`status:"result"` 確定) |
+| `odds_middle_202603020611.json` | `status:"middle"` 発売中。単勝16頭+複勝16頭で構造は result と同一。単勝セル第2要素が `"0"`(result の `"0.0"` と揺れる) |
+| `odds_yoso_202602011011.json` | `status:"yoso"` 前売り前の予想オッズ。**`odds["1"]`(単勝)のみで `odds["2"]`(複勝)が存在しない**。単勝セル第2要素は空文字 `""`。複勝未発売のためEV計算対象外 |
 
 ### 実装への反映事項(パーサー実装時に対応)
 

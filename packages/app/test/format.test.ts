@@ -6,6 +6,7 @@ import {
   formatPercent,
   formatReason,
   isHighlightRow,
+  oddsStatusNote,
 } from "../src/renderer/format.js";
 import type { AnalysisRow } from "../src/shared/analysis-types.js";
 
@@ -57,5 +58,21 @@ describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
   it("isPositive の行のみハイライト対象", () => {
     expect(isHighlightRow(row(true))).toBe(true);
     expect(isHighlightRow(row(false))).toBe(false);
+  });
+});
+
+describe("oddsStatusNote(オッズ発売状態の注記)", () => {
+  it("確定(result)は注記なし(null)", () => {
+    expect(oddsStatusNote("result")).toBeNull();
+  });
+
+  it("発売中(middle)は暫定である旨を返す", () => {
+    expect(oddsStatusNote("middle")).toBe("オッズは発売中(暫定)");
+  });
+
+  it("予想オッズ(yoso)は複勝未発売でEV計算不可+再分析の案内を返す", () => {
+    expect(oddsStatusNote("yoso")).toBe(
+      "複勝オッズ未発売(予想オッズのみ)のためEV計算不可。複勝発売開始後に再分析してください",
+    );
   });
 });
