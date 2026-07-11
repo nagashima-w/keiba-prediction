@@ -332,6 +332,7 @@ export async function runAnalysis(
     llmUsed,
     llmSkippedReason,
     fallback,
+    oddsStatus: race.odds.oddsStatus,
     rows,
     warnings: race.meta.warnings.map((w) => w.message),
     analyzedAt,

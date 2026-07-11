@@ -9,6 +9,7 @@ import {
   formatPercent,
   formatReason,
   isHighlightRow,
+  oddsStatusNote,
 } from "./format.js";
 
 /** 分析画面のプロパティ。 */
@@ -104,6 +105,11 @@ export function AnalysisView(props: AnalysisViewProps): React.JSX.Element {
                 : "実行"
               : `スキップ(${result.llmSkippedReason ?? "理由不明"})`}
           </p>
+          {oddsStatusNote(result.oddsStatus) !== null && (
+            <p style={{ margin: "0.25rem 0", color: "#a60", fontSize: "0.9rem" }}>
+              ※{oddsStatusNote(result.oddsStatus)}
+            </p>
+          )}
 
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>

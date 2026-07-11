@@ -14,7 +14,7 @@ function place(oddsMin: number | null, oddsMax: number | null = null): PlaceOdds
 
 /** 馬番→複勝オッズの OddsSnapshot を組み立てる(単勝は空でよい)。 */
 function oddsSnapshot(place: Record<number, PlaceOdds>): OddsSnapshot {
-  return { officialDatetime: null, win: {}, place };
+  return { officialDatetime: null, oddsStatus: "result", win: {}, place };
 }
 
 describe("computeRaceEv(複勝期待値計算)", () => {

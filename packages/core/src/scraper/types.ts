@@ -284,15 +284,28 @@ export interface PlaceOdds {
 }
 
 /**
+ * オッズAPI(api_get_jra_odds)の発売状態。
+ * - "result": 確定オッズ(レース確定後)。単勝・複勝ともに揃う。
+ * - "middle": 発売中の暫定オッズ。単勝・複勝ともに揃う(EV計算は暫定値で可能)。
+ * - "yoso":   前売り前の予想オッズ。単勝(odds[1])のみで複勝(odds[2])が存在しない。
+ *
+ * 発走前分析(翌日開催の事前分析)が本ツールの主用途のため、確定前の middle/yoso も受理する。
+ * EV/UI 側が確定・暫定・予想を判別できるよう、この状態をスナップショットに保持する。
+ */
+export type OddsStatus = "result" | "middle" | "yoso";
+
+/**
  * 単勝・複勝オッズのスナップショット(api_get_jra_odds)。
  * 馬番(数値)をキーに単勝・複勝を引ける。EV計算では複勝下限(oddsMin)を用いる。
  */
 export interface OddsSnapshot {
   /** オッズ確定時刻(例: 2026-06-28 15:52:30)。取得できない場合は null。 */
   readonly officialDatetime: string | null;
+  /** オッズの発売状態(確定/発売中/予想)。 */
+  readonly oddsStatus: OddsStatus;
   /** 馬番 → 単勝オッズ。 */
   readonly win: Record<number, WinOdds>;
-  /** 馬番 → 複勝オッズ。 */
+  /** 馬番 → 複勝オッズ。予想(yoso)では複勝未発売のため空オブジェクトになる。 */
   readonly place: Record<number, PlaceOdds>;
 }
 

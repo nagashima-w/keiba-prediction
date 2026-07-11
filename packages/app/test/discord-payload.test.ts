@@ -21,6 +21,7 @@ const result: AnalysisResult = {
   llmUsed: true,
   llmSkippedReason: null,
   fallback: false,
+  oddsStatus: "result",
   rows: [
     {
       umaban: 3,
@@ -65,5 +66,13 @@ describe("buildDiscordPayload(分析結果→Discordペイロード)", () => {
     // EVプラスでない馬は載らない。
     expect(desc).not.toContain("ウマC");
     expect(desc).toContain("LLM補正: 実行");
+  });
+
+  it("オッズ発売状態(oddsStatus)を embed へ橋渡しする(yoso→注記あり)", () => {
+    const embed = buildDiscordPayload({
+      ...result,
+      oddsStatus: "yoso",
+    }).embeds[0]!;
+    expect(embed.description ?? "").toContain("※複勝未発売のためEV計算不可");
   });
 });
