@@ -5,7 +5,10 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IPC_CHANNELS } from "../src/shared/channels.js";
-import type { AnalysisResult } from "../src/shared/analysis-types.js";
+import type {
+  AnalysisResult,
+  BatchRaceOutcome,
+} from "../src/shared/analysis-types.js";
 import type { SettingsUpdate } from "../src/shared/settings.js";
 import { DEFAULT_APP_SETTINGS } from "../src/main/settings-store.js";
 
@@ -96,7 +99,7 @@ describe("ipc: net.fetch アダプタの注入", () => {
     expect(typeof config.fetch).toBe("function");
   });
 
-  it("Discord 送信(sendDiscordNotification)へ fetch(net.fetch アダプタ)を注入する", async () => {
+  it("一括サマリのDiscord 送信(sendDiscordNotification)へ fetch(net.fetch アダプタ)を注入する", async () => {
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -126,8 +129,17 @@ describe("ipc: net.fetch アダプタの注入", () => {
       warnings: [],
       analyzedAt: "2026-01-01T00:00:00.000Z",
     };
+    const outcomes: BatchRaceOutcome[] = [
+      {
+        raceId: "202601010101",
+        raceName: "テストレース",
+        status: "success",
+        result,
+        error: null,
+      },
+    ];
 
-    await handlerFor(IPC_CHANNELS.sendDiscord)(fakeEvent, result);
+    await handlerFor(IPC_CHANNELS.sendBatchDiscord)(fakeEvent, outcomes);
 
     expect(sendDiscordMock).toHaveBeenCalledTimes(1);
     const deps = sendDiscordMock.mock.calls[0]![2] as { fetch?: unknown };

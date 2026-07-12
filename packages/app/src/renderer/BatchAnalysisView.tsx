@@ -1,0 +1,373 @@
+import type { AnalysisResult, BatchProgress } from "../shared/analysis-types.js";
+import type {
+  BatchRaceEntry,
+  DiscordSendState,
+} from "./batch-analysis-reducer.js";
+import { collectEvPlusSummary, summarizeBatch } from "./batch-summary.js";
+import {
+  formatEv,
+  formatOdds,
+  formatPercent,
+  formatReason,
+  isHighlightRow,
+  oddsStatusNote,
+} from "./format.js";
+
+/** 一括分析画面のプロパティ。状態と操作は親(App)から受け取る。 */
+export interface BatchAnalysisViewProps {
+  /** 選択中のレース数(実行ボタンの有効判定に使う)。 */
+  readonly selectedCount: number;
+  /** 一括分析の実行中か。 */
+  readonly running: boolean;
+  /** 中断要求済み(境界での停止待ち)か。 */
+  readonly canceling: boolean;
+  /** 全体進捗(無ければ null)。 */
+  readonly progress: BatchProgress | null;
+  /** 実行対象レースのエントリ(実行順)。 */
+  readonly outcomes: readonly BatchRaceEntry[];
+  /** 詳細を展開中のレースID群。 */
+  readonly expandedRaceIds: readonly string[];
+  /** 「一括分析実行」操作。 */
+  readonly onRun: () => void;
+  /** 「中断」操作。 */
+  readonly onCancel: () => void;
+  /** レース詳細の開閉トグル。 */
+  readonly onToggleDetail: (raceId: string) => void;
+  /** Discord Webhook URL が設定済みか。 */
+  readonly webhookConfigured: boolean;
+  /** Discord送信の状態。 */
+  readonly discordSend: DiscordSendState;
+  /** 「Discordに送信」操作(サマリ1通)。 */
+  readonly onSendDiscord: () => void;
+}
+
+const thStyle: React.CSSProperties = {
+  borderBottom: "2px solid #999",
+  padding: "0.3rem 0.5rem",
+  textAlign: "left",
+  whiteSpace: "nowrap",
+};
+const tdStyle: React.CSSProperties = {
+  borderBottom: "1px solid #ddd",
+  padding: "0.25rem 0.5rem",
+};
+
+/** 全体進捗を人間向けの1行にする。 */
+function batchProgressText(progress: BatchProgress): string {
+  const head = `全体 ${progress.completedRaces}/${progress.totalRaces}`;
+  const race =
+    progress.currentRaceName !== null
+      ? ` — ${progress.currentRaceName}`
+      : progress.currentRaceId !== null
+        ? ` — ${progress.currentRaceId}`
+        : "";
+  const stage = progress.stage;
+  const stagePart =
+    stage !== null
+      ? `: ${stage.stage}${
+          stage.current !== null && stage.total !== null
+            ? `(${stage.current}/${stage.total})`
+            : ""
+        } ${stage.message}`
+      : "";
+  return `${head}${race}${stagePart}`;
+}
+
+/** 1レース分の結果テーブル(成功時の詳細)。 */
+function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
+  const { result } = props;
+  return (
+    <div>
+      <p style={{ margin: "0.25rem 0", color: "#555", fontSize: "0.85rem" }}>
+        LLM補正:{" "}
+        {result.llmUsed
+          ? result.fallback
+            ? "実行(フェイルセーフでpriorに復帰)"
+            : "実行"
+          : `スキップ(${result.llmSkippedReason ?? "理由不明"})`}
+        {result.dateApproximate && (
+          <span style={{ color: "#a60", marginLeft: "0.5rem" }}>
+            ※開催日は当日日付での近似({result.date})
+          </span>
+        )}
+      </p>
+      {oddsStatusNote(result.oddsStatus) !== null && (
+        <p style={{ margin: "0.25rem 0", color: "#a60", fontSize: "0.85rem" }}>
+          ※{oddsStatusNote(result.oddsStatus)}
+        </p>
+      )}
+      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={thStyle}>馬番</th>
+            <th style={thStyle}>馬名</th>
+            <th style={thStyle}>prior</th>
+            <th style={thStyle}>補正後</th>
+            <th style={thStyle}>複勝下限</th>
+            <th style={thStyle}>EV</th>
+            <th style={thStyle}>LLM根拠</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.rows.map((row) => (
+            <tr
+              key={row.umaban}
+              style={isHighlightRow(row) ? { background: "#e6ffea" } : undefined}
+            >
+              <td style={tdStyle}>{row.umaban}</td>
+              <td style={tdStyle}>{row.horseName}</td>
+              <td style={tdStyle}>{formatPercent(row.prior)}</td>
+              <td style={tdStyle}>{formatPercent(row.adjustedProb)}</td>
+              <td style={tdStyle}>{formatOdds(row.placeOddsMin)}</td>
+              <td
+                style={{
+                  ...tdStyle,
+                  fontWeight: isHighlightRow(row) ? 700 : 400,
+                  color: isHighlightRow(row) ? "#0a7f2e" : undefined,
+                }}
+              >
+                {formatEv(row.ev)}
+              </td>
+              <td style={tdStyle}>{formatReason(row.reason)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {result.warnings.length > 0 && (
+        <ul style={{ margin: "0.5rem 0 0", color: "#a60", fontSize: "0.8rem" }}>
+          {result.warnings.map((warning, i) => (
+            <li key={i}>{warning}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** 実行状態のバッジ表示。 */
+function statusBadge(entry: BatchRaceEntry): React.JSX.Element {
+  const map: Record<
+    BatchRaceEntry["status"],
+    { label: string; color: string }
+  > = {
+    pending: { label: "待機", color: "#888" },
+    success: { label: "成功", color: "#0a7f2e" },
+    failure: { label: "失敗", color: "#c00" },
+    skipped: { label: "スキップ", color: "#a60" },
+  };
+  const { label, color } = map[entry.status];
+  return <span style={{ color, fontWeight: 700 }}>[{label}]</span>;
+}
+
+/**
+ * 一括分析画面。選択したレースを直列に分析し、最上部に全レース横断の「EVプラス馬サマリ」、
+ * その下にレースごとの詳細(折りたたみ)を表示する。Discord送信はサマリ1通にまとめる。
+ */
+export function BatchAnalysisView(
+  props: BatchAnalysisViewProps,
+): React.JSX.Element {
+  const { outcomes } = props;
+  const evPlus = collectEvPlusSummary(outcomes);
+  const counts = summarizeBatch(outcomes);
+  const expandedSet = new Set(props.expandedRaceIds);
+  // 実行前スナップショット(全pending)だけの状態では結果表示はまだ出さない。
+  const hasCompleted = outcomes.some((o) => o.status !== "pending");
+
+  return (
+    <section style={{ marginTop: "1.5rem" }}>
+      <h2 style={{ fontSize: "1.05rem" }}>一括分析</h2>
+
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={props.onRun}
+          disabled={props.selectedCount === 0 || props.running}
+        >
+          {props.running
+            ? "分析中…"
+            : `一括分析実行(${props.selectedCount}件)`}
+        </button>
+        {props.running && (
+          <button
+            type="button"
+            onClick={props.onCancel}
+            disabled={props.canceling}
+          >
+            {props.canceling ? "中断待ち(現在のレースを完走中)…" : "中断"}
+          </button>
+        )}
+        {props.selectedCount === 0 && !props.running && (
+          <span style={{ color: "#666", fontSize: "0.9rem" }}>
+            分析するレースを1つ以上選択してください。
+          </span>
+        )}
+      </div>
+
+      {props.running && props.progress !== null && (
+        <p style={{ color: "#0a58ca" }}>{batchProgressText(props.progress)}</p>
+      )}
+
+      {hasCompleted && (
+        <>
+          <p style={{ margin: "0.75rem 0 0.25rem", color: "#333" }}>
+            対象{counts.total}レース(成功{counts.success} / 失敗
+            {counts.failure} / スキップ{counts.skipped})
+          </p>
+
+          {/* 最上部: 全レース横断のEVプラス馬サマリ(EV降順)。 */}
+          <div style={{ marginTop: "0.5rem" }}>
+            <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.35rem" }}>
+              EVプラス馬サマリ(横断・EV降順)
+            </h3>
+            {evPlus.length === 0 ? (
+              <p style={{ color: "#666" }}>該当なし</p>
+            ) : (
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>レース</th>
+                    <th style={thStyle}>馬番</th>
+                    <th style={thStyle}>馬名</th>
+                    <th style={thStyle}>補正後</th>
+                    <th style={thStyle}>複勝下限</th>
+                    <th style={thStyle}>EV</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evPlus.map((row) => (
+                    <tr
+                      key={`${row.raceId}-${row.umaban}`}
+                      style={{ background: "#e6ffea" }}
+                    >
+                      <td style={tdStyle}>{row.raceName}</td>
+                      <td style={tdStyle}>{row.umaban}</td>
+                      <td style={tdStyle}>{row.horseName}</td>
+                      <td style={tdStyle}>{formatPercent(row.adjustedProb)}</td>
+                      <td style={tdStyle}>{formatOdds(row.placeOddsMin)}</td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          fontWeight: 700,
+                          color: "#0a7f2e",
+                        }}
+                      >
+                        {formatEv(row.ev)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Discord送信(サマリ1通)。 */}
+          <div style={{ marginTop: "0.75rem" }}>
+            <button
+              type="button"
+              onClick={props.onSendDiscord}
+              disabled={
+                !props.webhookConfigured ||
+                props.discordSend.status === "sending"
+              }
+            >
+              {props.discordSend.status === "sending"
+                ? "Discordに送信中…"
+                : "サマリをDiscordに送信"}
+            </button>
+            {!props.webhookConfigured && (
+              <span
+                style={{
+                  color: "#666",
+                  marginLeft: "0.5rem",
+                  fontSize: "0.85rem",
+                }}
+              >
+                設定画面で Discord Webhook URL を登録すると送信できます。
+              </span>
+            )}
+            {props.discordSend.status === "success" && (
+              <span style={{ color: "#0a7f2e", marginLeft: "0.5rem" }}>
+                送信しました。
+              </span>
+            )}
+            {props.discordSend.status === "error" && (
+              <span style={{ color: "#c00", marginLeft: "0.5rem" }}>
+                送信に失敗しました: {props.discordSend.message}
+              </span>
+            )}
+          </div>
+
+          {/* レースごとの詳細(折りたたみ。既定は閉)。 */}
+          <div style={{ marginTop: "1rem" }}>
+            <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.35rem" }}>
+              レースごとの詳細
+            </h3>
+            {outcomes.map((entry) => {
+              const expanded = expandedSet.has(entry.raceId);
+              const label =
+                entry.result?.raceName ?? entry.raceName ?? entry.raceId;
+              return (
+                <div
+                  key={entry.raceId}
+                  style={{
+                    border: "1px solid #ddd",
+                    borderRadius: "4px",
+                    margin: "0 0 0.4rem",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => props.onToggleDetail(entry.raceId)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "0.4rem 0.6rem",
+                      background: "#f7f7f7",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "flex",
+                      gap: "0.5rem",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span>{expanded ? "▼" : "▶"}</span>
+                    {statusBadge(entry)}
+                    <span>{label}</span>
+                    {entry.result !== null && (
+                      <span style={{ color: "#666", fontSize: "0.85rem" }}>
+                        ({entry.result.venueName} {entry.result.courseType}
+                        {entry.result.distance}m)
+                      </span>
+                    )}
+                  </button>
+                  {expanded && (
+                    <div style={{ padding: "0.5rem 0.6rem" }}>
+                      {entry.status === "success" && entry.result !== null && (
+                        <ResultTable result={entry.result} />
+                      )}
+                      {entry.status === "failure" && (
+                        <p style={{ color: "#c00", margin: 0 }}>
+                          分析に失敗しました: {entry.error}
+                        </p>
+                      )}
+                      {entry.status === "skipped" && (
+                        <p style={{ color: "#a60", margin: 0 }}>
+                          中断によりスキップされました。
+                        </p>
+                      )}
+                      {entry.status === "pending" && (
+                        <p style={{ color: "#888", margin: 0 }}>
+                          未実行です。
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}

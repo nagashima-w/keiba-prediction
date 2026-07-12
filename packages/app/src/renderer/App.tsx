@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import type { AnalysisResult } from "../shared/analysis-types.js";
-import { analysisReducer, createInitialState } from "./analysis-reducer.js";
-import { AnalysisView } from "./AnalysisView.js";
+import type { BatchRaceOutcome } from "../shared/analysis-types.js";
+import {
+  batchAnalysisReducer,
+  createInitialBatchState,
+} from "./batch-analysis-reducer.js";
+import { collectEvPlusSummary } from "./batch-summary.js";
+import { BatchAnalysisView } from "./BatchAnalysisView.js";
 import { RaceSelection } from "./RaceSelection.js";
 import { SettingsView } from "./SettingsView.js";
 import { VerifyView } from "./VerifyView.js";
@@ -27,15 +31,15 @@ function errorMessage(e: unknown): string {
 }
 
 /**
- * ルート画面。レース選択(日付→一覧→選択)と分析(実行→進捗→結果テーブル)を束ねる。
- * 状態遷移は純関数 reducer(analysis-reducer)に委ね、ここでは IPC 呼び出し(副作用)と
- * dispatch の橋渡しに徹する。
+ * ルート画面。レース選択(日付→一覧→複数選択)と一括分析(直列実行→全体進捗→横断サマリ+
+ * レースごとの詳細)を束ねる。状態遷移は純関数 reducer(batch-analysis-reducer)に委ね、
+ * ここでは IPC 呼び出し(副作用)と dispatch の橋渡しに徹する。
  */
 export function App(): React.JSX.Element {
   const [state, dispatch] = useReducer(
-    analysisReducer,
+    batchAnalysisReducer,
     todayYyyymmdd(),
-    createInitialState,
+    createInitialBatchState,
   );
   const [verify, verifyDispatch] = useReducer(
     verifyReducer,
@@ -44,23 +48,27 @@ export function App(): React.JSX.Element {
   );
 
   // Discord通知の設定スナップショット(送信ボタンの有効化判定・自動送信の判定に使う)。
-  // 設定画面での変更を反映するため、マウント時と「分析」タブへの切替時に読み直す。
   const [notify, setNotify] = useState({
     webhookConfigured: false,
     autoSend: false,
   });
-
-  // 分析完了時(非同期の解決時)に最新の選択レースを参照して自動送信の可否を判定するための ref。
-  const selectedRaceIdRef = useRef(state.selection.selectedRaceId);
-  selectedRaceIdRef.current = state.selection.selectedRaceId;
-  // 自動送信判定でも最新の設定値を参照できるようにする(解決時の値を使うため ref に保持)。
+  // 自動送信判定で解決時の最新設定を参照するための ref。
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
 
-  // 進捗イベント(main→renderer)の購読。マウント中1度だけ登録し、アンマウントで解除する。
+  // 実行中バッチの世代ID。一括分析開始時に固定し、完了で null に戻す。
+  // 進捗イベントにはこの「開始時に固定した runId」を添えるため、完了後に遅れて届いた
+  // 旧バッチの進捗は reducer の runId ガードで確実に弾かれる(恒真ガードにならない)。
+  const activeBatchRunIdRef = useRef<number | null>(null);
+
   useEffect(() => {
-    const unsubscribe = window.keibaApi.onAnalysisProgress((progress) => {
-      dispatch({ type: "進捗更新", progress });
+    const unsubscribe = window.keibaApi.onBatchProgress((progress) => {
+      // バッチ非実行中(null)は現状の runId と一致しない -1 を渡し、reducer 側で無視させる。
+      dispatch({
+        type: "一括進捗更新",
+        runId: activeBatchRunIdRef.current ?? -1,
+        progress,
+      });
     });
     return unsubscribe;
   }, []);
@@ -76,7 +84,6 @@ export function App(): React.JSX.Element {
         }),
       )
       .catch(() => {
-        // 設定取得失敗時は送信を無効側に倒す(誤って送信可能にしない)。
         setNotify({ webhookConfigured: false, autoSend: false });
       });
   }, []);
@@ -85,18 +92,17 @@ export function App(): React.JSX.Element {
     loadNotifySettings();
   }, [loadNotifySettings]);
 
-  // Discord送信(手動・自動共通)。失敗しても分析結果表示は保持し、送信失敗のみ通知する。
-  const handleSendDiscord = useCallback((result: AnalysisResult) => {
+  // 一括サマリの Discord送信(手動・自動共通)。EVプラスが横断で1頭も無ければ送らない。
+  const handleSendDiscord = useCallback((outcomes: readonly BatchRaceOutcome[]) => {
     dispatch({ type: "Discord送信開始" });
     window.keibaApi
-      .sendDiscord(result)
+      .sendBatchDiscord(outcomes)
       .then(() => dispatch({ type: "Discord送信成功" }))
       .catch((e: unknown) =>
         dispatch({ type: "Discord送信失敗", message: errorMessage(e) }),
       );
   }, []);
 
-  // 検証タブの履歴+レポートを取得する(タブ切替時・取込後・再読み込み時に呼ぶ)。
   const loadVerifyData = useCallback(() => {
     verifyDispatch({ type: "履歴取得開始" });
     window.keibaApi
@@ -121,7 +127,6 @@ export function App(): React.JSX.Element {
         loadVerifyData();
       }
       if (tab === "分析") {
-        // 設定タブでWebhook URL・自動送信を変更した可能性があるため読み直す。
         loadNotifySettings();
       }
     },
@@ -135,7 +140,6 @@ export function App(): React.JSX.Element {
         .importResult(raceId)
         .then(() => {
           verifyDispatch({ type: "取込成功", raceId });
-          // 取込済みフラグ・回収率・キャリブレーションを更新するため再取得する。
           loadVerifyData();
         })
         .catch((e: unknown) =>
@@ -161,36 +165,71 @@ export function App(): React.JSX.Element {
   }, [state.selection.date]);
 
   const handleRun = useCallback(() => {
-    const raceId = state.selection.selectedRaceId;
-    if (raceId === null) {
+    const raceIds = state.selection.races
+      .filter((r) => state.selection.selectedRaceIds.includes(r.raceId))
+      .map((r) => r.raceId);
+    if (raceIds.length === 0) {
       return;
     }
     const date = state.selection.date;
-    dispatch({ type: "分析開始" });
+    // 開始と同時に実行世代を1つ進める。この runId を進捗・完了アクションに添えて in-flight ガードを効かせる。
+    const runId = state.run.runId + 1;
+    activeBatchRunIdRef.current = runId;
+    dispatch({ type: "一括分析開始" });
     window.keibaApi
-      .runAnalysis(raceId, date)
-      // 実行を開始したレース(raceId)を成否アクションに添えて、reducer 側で
-      // in-flight ガード(切替後の旧結果表示防止)を効かせる。
-      .then((result) => {
-        dispatch({ type: "分析成功", raceId, result });
-        // 自動送信: ONかつWebhook設定済みで、開始したレースが今も選択中(結果が表示される)なら送信。
-        // 実行中に別レースへ切替えた場合は送らない(表示されない結果を送らないため)。
+      .runBatchAnalysis(raceIds, date)
+      .then((outcomes) => {
+        // このバッチは完了。以降に遅れて届く進捗イベントは無視させる。
+        activeBatchRunIdRef.current = null;
+        dispatch({ type: "一括分析完了", runId, outcomes });
+        // 自動送信: ON かつ Webhook 設定済みで、横断EVプラスが1頭以上あれば1通送る。
         if (
           notifyRef.current.autoSend &&
           notifyRef.current.webhookConfigured &&
-          raceId === selectedRaceIdRef.current
+          collectEvPlusSummary(outcomes).length > 0
         ) {
-          handleSendDiscord(result);
+          handleSendDiscord(outcomes);
         }
       })
-      .catch((e: unknown) =>
-        dispatch({ type: "分析失敗", raceId, message: errorMessage(e) }),
-      );
+      .catch((e: unknown) => {
+        // 一括分析そのものの失敗(通常は個別レース失敗として outcomes に入るため稀)。
+        activeBatchRunIdRef.current = null;
+        dispatch({
+          type: "一括分析完了",
+          runId,
+          outcomes: raceIds.map((raceId) => ({
+            raceId,
+            raceName: null,
+            status: "failure" as const,
+            result: null,
+            error: errorMessage(e),
+          })),
+        });
+      });
   }, [
-    state.selection.selectedRaceId,
+    state.selection.races,
+    state.selection.selectedRaceIds,
     state.selection.date,
+    state.run.runId,
     handleSendDiscord,
   ]);
+
+  const handleCancel = useCallback(() => {
+    dispatch({ type: "中断要求" });
+    // main 側の中断フラグを立てる(次のレース境界で停止)。失敗は無視(UI表示は境界停止で反映)。
+    window.keibaApi.cancelBatchAnalysis().catch(() => {});
+  }, []);
+
+  // 完了済みアウトカムを BatchRaceOutcome 形へ(送信・自動送信で使う)。
+  const completedOutcomes: BatchRaceOutcome[] = state.run.outcomes
+    .filter((o) => o.status !== "pending")
+    .map((o) => ({
+      raceId: o.raceId,
+      raceName: o.raceName,
+      status: o.status === "pending" ? "skipped" : o.status,
+      result: o.result,
+      error: o.error,
+    }));
 
   return (
     <main
@@ -204,11 +243,10 @@ export function App(): React.JSX.Element {
         競馬期待値分析ツール
       </h1>
       <p style={{ color: "#666", marginTop: 0, fontSize: "0.9rem" }}>
-        レースを選んで分析すると、複勝の期待値(EV)を推定します。EVプラスの行を
-        ハイライトします。
+        レースを複数選んで一括分析すると、各レースの複勝期待値(EV)を推定し、
+        EVプラスの馬を横断でまとめて表示します。
       </p>
 
-      {/* タブ切替(分析/検証/設定)。 */}
       <nav style={{ display: "flex", gap: "0.5rem", margin: "0.75rem 0" }}>
         {(["分析", "検証", "設定"] as const).map((tab) => (
           <button
@@ -241,28 +279,38 @@ export function App(): React.JSX.Element {
             loading={state.selection.loadingRaces}
             races={state.selection.races}
             error={state.selection.racesError}
-            selectedRaceId={state.selection.selectedRaceId}
-            // 分析実行中は日付変更・取得・レース切替を禁止し、in-flight の取り違えを防ぐ。
-            disabled={state.analysis.running}
+            selectedRaceIds={state.selection.selectedRaceIds}
+            // 一括分析実行中は日付変更・取得・選択変更を禁止し、in-flight の取り違えを防ぐ。
+            disabled={state.run.running}
             onDateChange={(date) => dispatch({ type: "日付変更", date })}
             onFetch={handleFetch}
-            onSelect={(raceId) => dispatch({ type: "レース選択", raceId })}
+            onToggle={(raceId) =>
+              dispatch({ type: "レース選択トグル", raceId })
+            }
+            onSelectVenue={(raceIds) =>
+              dispatch({ type: "会場全選択", raceIds })
+            }
+            onDeselectVenue={(raceIds) =>
+              dispatch({ type: "会場全解除", raceIds })
+            }
+            onClearAll={() => dispatch({ type: "全解除" })}
           />
 
-          <AnalysisView
-            raceId={state.selection.selectedRaceId}
-            running={state.analysis.running}
-            progress={state.analysis.progress}
-            result={state.analysis.result}
-            error={state.analysis.analysisError}
+          <BatchAnalysisView
+            selectedCount={state.selection.selectedRaceIds.length}
+            running={state.run.running}
+            canceling={state.run.canceling}
+            progress={state.run.progress}
+            outcomes={state.run.outcomes}
+            expandedRaceIds={state.run.expandedRaceIds}
             onRun={handleRun}
+            onCancel={handleCancel}
+            onToggleDetail={(raceId) =>
+              dispatch({ type: "詳細開閉トグル", raceId })
+            }
             webhookConfigured={notify.webhookConfigured}
-            discordSend={state.analysis.discordSend}
-            onSendDiscord={() => {
-              if (state.analysis.result !== null) {
-                handleSendDiscord(state.analysis.result);
-              }
-            }}
+            discordSend={state.run.discordSend}
+            onSendDiscord={() => handleSendDiscord(completedOutcomes)}
           />
         </>
       )}

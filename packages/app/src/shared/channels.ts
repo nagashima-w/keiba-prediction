@@ -10,10 +10,12 @@ export const IPC_CHANNELS = {
   getAppInfo: "app:get-info",
   /** 開催日(YYYYMMDD)のレース一覧を取得する。 */
   listRaces: "race:list",
-  /** レースの分析を実行する(スクレイピング→スコアリング→LLM→EV→保存)。 */
-  runAnalysis: "analysis:run",
-  /** 分析の進捗イベント(main→renderer への一方向通知)。 */
-  analysisProgress: "analysis:progress",
+  /** 複数レースを一括分析する(選択レースID配列+開催日。直列実行)。 */
+  runBatchAnalysis: "analysis:run-batch",
+  /** 実行中の一括分析に中断を要求する(次のレース境界で停止)。 */
+  cancelBatchAnalysis: "analysis:cancel-batch",
+  /** 一括分析の全体進捗イベント(main→renderer への一方向通知)。 */
+  batchProgress: "analysis:batch-progress",
   /** レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。 */
   importResult: "result:import",
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
@@ -26,8 +28,8 @@ export const IPC_CHANNELS = {
   saveSettings: "settings:save",
   /** 設定を既定へ初期化する(マスク済みの初期化後設定を返す)。 */
   resetSettings: "settings:reset",
-  /** 分析結果を Discord Webhook へ送信する。 */
-  sendDiscord: "notify:discord",
+  /** 一括分析の横断サマリを Discord Webhook へ1通で送信する。 */
+  sendBatchDiscord: "notify:discord-batch",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */
