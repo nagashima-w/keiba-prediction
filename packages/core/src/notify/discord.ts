@@ -249,7 +249,7 @@ export function buildAnalysisEmbed(
     positives.length > 0
       ? positives.map((h) => {
           const name = truncate(h.horseName, HORSE_NAME_MAX);
-          return `${h.umaban}番 ${name} 補正後${formatPercent(h.adjustedProb)} 複勝下限${formatOdds(h.placeOddsMin)} EV${formatEv(h.ev)}`;
+          return `${h.umaban}番 ${name} AI補正後${formatPercent(h.adjustedProb)} 複勝下限${formatOdds(h.placeOddsMin)} EV${formatEv(h.ev)}`;
         })
       : ["EVプラスの馬はありません(該当なし)"];
 

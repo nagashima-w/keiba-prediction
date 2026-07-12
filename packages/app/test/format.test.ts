@@ -3,12 +3,34 @@ import { describe, expect, it } from "vitest";
 import {
   formatEv,
   formatOdds,
+  formatOpportunityScore,
   formatPercent,
   formatReason,
   isHighlightRow,
+  LABEL_ADJUSTED_PROB,
+  LABEL_PRIOR,
   oddsStatusNote,
 } from "../src/renderer/format.js";
 import type { AnalysisRow } from "../src/shared/analysis-types.js";
+
+describe("表示ラベル(prior→3着内率 / 補正後→AI補正後 の統一)", () => {
+  it("prior 列のラベルは「3着内率」", () => {
+    expect(LABEL_PRIOR).toBe("3着内率");
+  });
+  it("補正後 列のラベルは「AI補正後」", () => {
+    expect(LABEL_ADJUSTED_PROB).toBe("AI補正後");
+  });
+});
+
+describe("formatOpportunityScore(妙味スコアの表示)", () => {
+  it("スコアを小数第2位まで表示する", () => {
+    expect(formatOpportunityScore(0.5)).toBe("0.50");
+    expect(formatOpportunityScore(0.123)).toBe("0.12");
+  });
+  it("スコアが null(対象外)のときは「-」", () => {
+    expect(formatOpportunityScore(null)).toBe("-");
+  });
+});
 
 describe("formatPercent(確率のパーセント表示)", () => {
   it("0〜1の確率を小数第1位までのパーセントに整形する", () => {
@@ -53,6 +75,7 @@ describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
     ev: isPositive ? 1.2 : 0.8,
     isPositive,
     reason: null,
+    careerRunCount: 10,
   });
 
   it("isPositive の行のみハイライト対象", () => {

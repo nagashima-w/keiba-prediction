@@ -54,6 +54,13 @@ export interface AnalysisRow {
   readonly isPositive: boolean;
   /** LLMの補正根拠。LLM未使用・prior採用なら null(表示は「-」)。 */
   readonly reason: string | null;
+  /**
+   * この馬のキャリア走数(戦績 results.length)。0 は新馬相当(=判明した低データ)。
+   * 戦績が取得できなかった(不明な)馬は null とし、低データ判定の集計から除外する
+   * (取得失敗を新馬と混同しないため。スクレイピング警告は result.warnings に別途載る)。
+   * レース妙味スコア(computeRaceOpportunity)の低データ判定に用いる。
+   */
+  readonly careerRunCount: number | null;
 }
 
 /** 1レース分の分析結果。 */

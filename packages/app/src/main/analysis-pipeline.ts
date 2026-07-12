@@ -317,6 +317,9 @@ export async function runAnalysis(
         ev: ev.ev,
         isPositive: ev.isPositive,
         reason: adjusted.reason,
+        // 戦績走数(低データ判定用)。戦績取得失敗(results=null)は不明として null にし、
+        // 新馬(results=[] → 0走)と区別する(妙味スコアの低データ集計から除外させる)。
+        careerRunCount: h.results === null ? null : h.results.length,
       };
     })
     .sort((a, b) => a.umaban - b.umaban);

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   collectEvPlusSummary,
+  rankRaceOpportunities,
   summarizeBatch,
 } from "../src/renderer/batch-summary.js";
 import type {
@@ -28,6 +29,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   ev: 0.6,
   isPositive: false,
   reason: null,
+  careerRunCount: 10,
   ...over,
 });
 
@@ -186,5 +188,62 @@ describe("summarizeBatch(部分失敗の集計)", () => {
       skipped: 0,
       evPlusCount: 0,
     });
+  });
+});
+
+describe("rankRaceOpportunities(妙味レースランキング)", () => {
+  /** EVプラス1頭を持つ成功レースを作る。 */
+  const opp = (
+    raceId: string,
+    raceName: string,
+    ev: number,
+    prob: number,
+    careerRunCount = 10,
+  ): BatchRaceOutcome =>
+    success(raceId, raceName, [
+      row({ umaban: 1, ev, adjustedProb: prob, isPositive: true, careerRunCount }),
+    ]);
+
+  it("スコアが算出できたレースを降順に並べ、算出できないレースを末尾に置く", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      // B: raw=(1.5−1)×0.6=0.30
+      opp("202601010102", "B特別", 1.5, 0.6),
+      // A: raw=(2.0−1)×0.5=0.50
+      opp("202601010101", "A特別", 2.0, 0.5),
+      // C: EVプラス0頭 → スコアnull
+      success("202601010103", "C特別", [
+        row({ umaban: 1, ev: 0.8, isPositive: false }),
+      ]),
+    ];
+    const ranked = rankRaceOpportunities(outcomes);
+    expect(ranked.map((r) => r.raceName)).toEqual(["A特別", "B特別", "C特別"]);
+    expect(ranked[0]!.opportunity.score).toBeCloseTo(0.5, 10);
+    expect(ranked[0]!.opportunity.bestPick?.umaban).toBe(1);
+    expect(ranked[1]!.opportunity.score).toBeCloseTo(0.3, 10);
+    // 末尾のスコアnullレースは理由付き。
+    expect(ranked[2]!.opportunity.score).toBeNull();
+    expect(ranked[2]!.opportunity.excludedReason).toContain("EVプラス");
+  });
+
+  it("失敗・スキップのレースはランキングに含めない", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      opp("202601010101", "A特別", 2.0, 0.5),
+      failure("202601010102", "取得失敗"),
+      skipped("202601010103"),
+    ];
+    const ranked = rankRaceOpportunities(outcomes);
+    expect(ranked.map((r) => r.raceName)).toEqual(["A特別"]);
+  });
+
+  it("同スコアのレースは raceId 昇順で決定的に並ぶ", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      opp("202601010109", "遅ID", 2.0, 0.5),
+      opp("202601010101", "早ID", 2.0, 0.5),
+    ];
+    const ranked = rankRaceOpportunities(outcomes);
+    expect(ranked.map((r) => r.raceId)).toEqual([
+      "202601010101",
+      "202601010109",
+    ]);
   });
 });

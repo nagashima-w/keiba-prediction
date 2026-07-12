@@ -7,6 +7,23 @@
 
 import type { AnalysisRow, OddsStatus } from "../shared/analysis-types.js";
 
+/**
+ * 事前推定値(scorer の prior)の表示ラベル。
+ * ユーザー要望により、画面では出力がパッとわかるよう「3着内率」と表記する
+ * (内部のコード識別子 prior は変更しない)。
+ */
+export const LABEL_PRIOR = "3着内率";
+
+/**
+ * LLM補正後確率の表示ラベル。「AI補正後」と表記して、AIが補正した値であることを明示する。
+ */
+export const LABEL_ADJUSTED_PROB = "AI補正後";
+
+/** 妙味スコアを小数第2位まで表示する。対象外(null)は "-"。 */
+export function formatOpportunityScore(score: number | null): string {
+  return score === null ? "-" : score.toFixed(2);
+}
+
 /** 0〜1の確率を小数第1位までのパーセント文字列にする(例: 0.423 → "42.3%")。 */
 export function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;

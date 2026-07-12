@@ -3,13 +3,20 @@ import type {
   BatchRaceEntry,
   DiscordSendState,
 } from "./batch-analysis-reducer.js";
-import { collectEvPlusSummary, summarizeBatch } from "./batch-summary.js";
+import {
+  collectEvPlusSummary,
+  rankRaceOpportunities,
+  summarizeBatch,
+} from "./batch-summary.js";
 import {
   formatEv,
   formatOdds,
+  formatOpportunityScore,
   formatPercent,
   formatReason,
   isHighlightRow,
+  LABEL_ADJUSTED_PROB,
+  LABEL_PRIOR,
   oddsStatusNote,
 } from "./format.js";
 
@@ -82,7 +89,7 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
         LLM補正:{" "}
         {result.llmUsed
           ? result.fallback
-            ? "実行(フェイルセーフでpriorに復帰)"
+            ? "実行(フェイルセーフで3着内率に復帰)"
             : "実行"
           : `スキップ(${result.llmSkippedReason ?? "理由不明"})`}
         {result.dateApproximate && (
@@ -101,8 +108,18 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
           <tr>
             <th style={thStyle}>馬番</th>
             <th style={thStyle}>馬名</th>
-            <th style={thStyle}>prior</th>
-            <th style={thStyle}>補正後</th>
+            <th
+              style={thStyle}
+              title="モデルが数値データから推定した3着以内に入る確率(実績値ではありません)"
+            >
+              {LABEL_PRIOR}
+            </th>
+            <th
+              style={thStyle}
+              title="上記の3着内率をAI(LLM)が調教・コメント・展開から補正した確率"
+            >
+              {LABEL_ADJUSTED_PROB}
+            </th>
             <th style={thStyle}>複勝下限</th>
             <th style={thStyle}>EV</th>
             <th style={thStyle}>LLM根拠</th>
@@ -169,6 +186,11 @@ export function BatchAnalysisView(
   const { outcomes } = props;
   const evPlus = collectEvPlusSummary(outcomes);
   const counts = summarizeBatch(outcomes);
+  // 妙味レースランキング(スコア降順、スコアnullは末尾)。詳細ヘッダ用に raceId→スコアの対応も作る。
+  const ranking = rankRaceOpportunities(outcomes);
+  const opportunityByRaceId = new Map(
+    ranking.map((r) => [r.raceId, r.opportunity]),
+  );
   const expandedSet = new Set(props.expandedRaceIds);
   // 実行前スナップショット(全pending)だけの状態では結果表示はまだ出さない。
   const hasCompleted = outcomes.some((o) => o.status !== "pending");
@@ -214,8 +236,74 @@ export function BatchAnalysisView(
             {counts.failure} / スキップ{counts.skipped})
           </p>
 
-          {/* 最上部: 全レース横断のEVプラス馬サマリ(EV降順)。 */}
+          {/* 最上部: 妙味レースランキング(スコア降順。大穴一辺倒を避け、買う価値の高いレースを上位に)。 */}
           <div style={{ marginTop: "0.5rem" }}>
+            <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.35rem" }}>
+              妙味レースランキング
+            </h3>
+            {ranking.length === 0 ? (
+              <p style={{ color: "#666" }}>該当なし</p>
+            ) : (
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>レース</th>
+                    <th style={thStyle}>妙味スコア</th>
+                    <th style={thStyle}>EVプラス頭数</th>
+                    <th style={thStyle}>筆頭候補</th>
+                    <th style={thStyle}>備考</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranking.map((r) => {
+                    const op = r.opportunity;
+                    const scored = op.score !== null;
+                    return (
+                      <tr
+                        key={r.raceId}
+                        style={
+                          scored ? undefined : { color: "#999" }
+                        }
+                      >
+                        <td style={tdStyle}>{r.raceName}</td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            fontWeight: scored ? 700 : 400,
+                          }}
+                        >
+                          {formatOpportunityScore(op.score)}
+                        </td>
+                        <td style={tdStyle}>{op.evPlusCount}</td>
+                        <td style={tdStyle}>
+                          {op.bestPick !== null
+                            ? `${op.bestPick.umaban}番 ${op.bestPick.horseName}`
+                            : "-"}
+                        </td>
+                        <td style={{ ...tdStyle, fontSize: "0.8rem" }}>
+                          {op.excludedReason !== null ? (
+                            <span style={{ color: "#a60" }}>
+                              {op.excludedReason}
+                            </span>
+                          ) : op.lowDataRatio >= 0.5 ? (
+                            <span style={{ color: "#a60" }}>
+                              低データ馬{Math.round(op.lowDataRatio * 100)}%
+                              (推定不確実)
+                            </span>
+                          ) : (
+                            ""
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* 全レース横断のEVプラス馬サマリ(EV降順)。 */}
+          <div style={{ marginTop: "1rem" }}>
             <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.35rem" }}>
               EVプラス馬サマリ(横断・EV降順)
             </h3>
@@ -228,7 +316,12 @@ export function BatchAnalysisView(
                     <th style={thStyle}>レース</th>
                     <th style={thStyle}>馬番</th>
                     <th style={thStyle}>馬名</th>
-                    <th style={thStyle}>補正後</th>
+                    <th
+                      style={thStyle}
+                      title="3着内率をAI(LLM)が調教・コメント・展開から補正した確率"
+                    >
+                      {LABEL_ADJUSTED_PROB}
+                    </th>
                     <th style={thStyle}>複勝下限</th>
                     <th style={thStyle}>EV</th>
                   </tr>
@@ -337,6 +430,14 @@ export function BatchAnalysisView(
                       <span style={{ color: "#666", fontSize: "0.85rem" }}>
                         ({entry.result.venueName} {entry.result.courseType}
                         {entry.result.distance}m)
+                      </span>
+                    )}
+                    {opportunityByRaceId.has(entry.raceId) && (
+                      <span style={{ color: "#0a58ca", fontSize: "0.85rem" }}>
+                        妙味スコア{" "}
+                        {formatOpportunityScore(
+                          opportunityByRaceId.get(entry.raceId)!.score,
+                        )}
                       </span>
                     )}
                   </button>

@@ -7,6 +7,13 @@
  * を副作用なく導出する。表示(JSX)から集計ロジックを切り離し、単体テストで固定する。
  */
 
+import {
+  computeRaceOpportunity,
+  DEFAULT_RACE_OPPORTUNITY_CONFIG,
+  type RaceOpportunity,
+  type RaceOpportunityConfig,
+} from "@keiba/core/ev/race-opportunity";
+
 import type {
   AnalysisResult,
   EvPlusSummaryRow,
@@ -76,6 +83,71 @@ export interface BatchSummaryCounts {
   readonly skipped: number;
   /** 横断でのEVプラス馬の総数。 */
   readonly evPlusCount: number;
+}
+
+/**
+ * 妙味レースランキングの1行(1レース分の妙味スコアと筆頭候補)。
+ * BatchAnalysisView の最上部と Discord サマリで共有する。
+ */
+export interface RaceOpportunityRankRow {
+  /** レースID。 */
+  readonly raceId: string;
+  /** レース名(表示用)。 */
+  readonly raceName: string;
+  /** そのレースの妙味スコア計算結果(スコア・筆頭候補・除外理由など)。 */
+  readonly opportunity: RaceOpportunity;
+}
+
+/**
+ * 成功レースそれぞれの妙味スコアを計算し、ランキング(降順)にして返す。
+ * - スコアが算出できたレースをスコア降順で先頭に、算出できないレース(EVプラス0頭・yoso)を
+ *   末尾に理由つきで置く。
+ * - 同スコア(または双方スコアnull)は raceId 昇順で決定的に並べる(表示のブレを防ぐ)。
+ * - 失敗・スキップ・未実行(pending)のレースは対象に含めない。
+ * @param outcomes レースごとのアウトカム
+ * @param config 妙味スコア設定(省略時は core の既定)
+ */
+export function rankRaceOpportunities(
+  outcomes: readonly EvSummarySource[],
+  config: RaceOpportunityConfig = DEFAULT_RACE_OPPORTUNITY_CONFIG,
+): RaceOpportunityRankRow[] {
+  const rows: RaceOpportunityRankRow[] = [];
+  for (const outcome of outcomes) {
+    if (outcome.status !== "success" || outcome.result === null) {
+      continue;
+    }
+    const result = outcome.result;
+    const opportunity = computeRaceOpportunity(
+      result.rows.map((r) => ({
+        umaban: r.umaban,
+        horseName: r.horseName,
+        ev: r.ev,
+        adjustedProb: r.adjustedProb,
+        isPositive: r.isPositive,
+        careerRunCount: r.careerRunCount,
+      })),
+      { oddsStatus: result.oddsStatus },
+      config,
+    );
+    rows.push({ raceId: result.raceId, raceName: result.raceName, opportunity });
+  }
+  return rows.sort((a, b) => {
+    const sa = a.opportunity.score;
+    const sb = b.opportunity.score;
+    // スコアありをスコアなしより前に置く。
+    if (sa !== null && sb === null) {
+      return -1;
+    }
+    if (sa === null && sb !== null) {
+      return 1;
+    }
+    // 双方スコアありならスコア降順。
+    if (sa !== null && sb !== null && sa !== sb) {
+      return sb - sa;
+    }
+    // 同スコア(または双方null)は raceId 昇順で決定的に。
+    return a.raceId < b.raceId ? -1 : a.raceId > b.raceId ? 1 : 0;
+  });
 }
 
 /** 成功/失敗/スキップの件数とEVプラス総数を数える。 */

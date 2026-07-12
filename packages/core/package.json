@@ -6,10 +6,11 @@
   "main": "./src/index.ts",
   "//sideEffects": "副作用のないモジュール群のため、バンドラのツリーシェイクを許可する(未使用のscraper/ev一式を落とせる)。",
   "sideEffects": false,
-  "//exports": "バレル(.)に加え、scorer設定だけを取り込む narrow import 用サブパスを公開する(app側でnative依存を巻き込まないため)。",
+  "//exports": "バレル(.)に加え、native依存を巻き込まない純ロジックだけを取り込む narrow import 用サブパスを公開する(app の renderer/main が native依存を巻き込まないため)。",
   "exports": {
     ".": "./src/index.ts",
-    "./scorer/config": "./src/scorer/config.ts"
+    "./scorer/config": "./src/scorer/config.ts",
+    "./ev/race-opportunity": "./src/ev/race-opportunity.ts"
   },
   "scripts": {
     "test": "vitest run",

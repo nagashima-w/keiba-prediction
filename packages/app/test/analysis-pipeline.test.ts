@@ -265,6 +265,53 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(result.analyzedAt).toBe(FIXED_NOW.toISOString());
   });
 
+  it("各行に careerRunCount(戦績走数=results.length)を伝搬する(妙味スコアの低データ判定用)", async () => {
+    // 1番は2走、2番は0走(新馬相当)、3番は既定(空)の戦績を差し込む。
+    const results = {
+      1: [fakeResult("2026/06/01"), fakeResult("2026/05/01")],
+      2: [],
+    };
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID, results, "middle")),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    expect(byUmaban.get(1)!.careerRunCount).toBe(2);
+    expect(byUmaban.get(2)!.careerRunCount).toBe(0);
+    expect(byUmaban.get(3)!.careerRunCount).toBe(0);
+  });
+
+  it("戦績取得失敗(results=null)の馬は careerRunCount=null にする(新馬0走と区別)", async () => {
+    const base = fakeRaceData(RACE_ID, { 1: [fakeResult("2026/06/01")] }, "middle");
+    // 3番だけ戦績取得失敗(results=null)を模す。
+    const race: RaceData = {
+      ...base,
+      horses: base.horses.map((h) =>
+        h.shutuba.umaban === 3 ? { ...h, results: null } : h,
+      ),
+    };
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => race),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    expect(byUmaban.get(1)!.careerRunCount).toBe(1); // 1走(判明)
+    expect(byUmaban.get(2)!.careerRunCount).toBe(0); // 新馬(判明・0走)
+    expect(byUmaban.get(3)!.careerRunCount).toBeNull(); // 取得失敗(不明)
+  });
+
   it("オッズ発売状態(oddsStatus)を結果メタに反映する(middle)", async () => {
     const deps: AnalysisPipelineDeps = {
       ...baseDeps(),

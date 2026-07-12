@@ -24,6 +24,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   ev: 0.6,
   isPositive: false,
   reason: null,
+  careerRunCount: 10,
   ...over,
 });
 
@@ -83,6 +84,51 @@ describe("buildBatchDiscordPayload(一括サマリ→Discordペイロード)", (
     expect(desc).toContain("中山2R");
     // EV降順(ベータ EV1.6 が先)。
     expect(desc.indexOf("ベータ")).toBeLessThan(desc.indexOf("アルファ"));
+  });
+
+  it("補正後確率のラベルは「AI補正後」に統一する", () => {
+    const outcomes = [
+      success("111111111111", "1R", [
+        row({ umaban: 4, horseName: "アルファ", ev: 1.2, isPositive: true }),
+      ]),
+    ];
+    const desc = buildBatchDiscordPayload(outcomes).embeds[0]!.description ?? "";
+    expect(desc).toContain("AI補正後");
+    // 旧ラベル(「AI」の付かない裸の 補正後)が残っていないこと。
+    expect(desc.replaceAll("AI補正後", "")).not.toContain("補正後");
+  });
+
+  it("妙味レースランキング(上位)をスコア降順で先頭付近に載せる", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      // 東京1R: 筆頭 raw=(1.1−1)×0.3=0.03
+      success("111111111111", "東京1R", [
+        row({ umaban: 4, horseName: "アルファ", ev: 1.1, adjustedProb: 0.3, isPositive: true }),
+      ]),
+      // 中山2R: 筆頭 raw=(1.6−1)×0.5=0.30(こちらが上位)
+      success("222222222222", "中山2R", [
+        row({ umaban: 7, horseName: "ベータ", ev: 1.6, adjustedProb: 0.5, isPositive: true }),
+      ]),
+    ];
+    const desc = buildBatchDiscordPayload(outcomes).embeds[0]!.description ?? "";
+    expect(desc).toContain("妙味レースランキング");
+    // ランキング行(先頭が "N. ")のうち先頭は中山2R。
+    const rankLines = desc.split("\n").filter((l) => /^\d+\. /.test(l));
+    expect(rankLines.length).toBe(2);
+    expect(rankLines[0]).toContain("中山2R");
+    expect(rankLines[1]).toContain("東京1R");
+    // 筆頭候補の馬名も添える。
+    expect(rankLines[0]).toContain("ベータ");
+  });
+
+  it("妙味レースランキングは上位3件までに絞る", () => {
+    const outcomes: BatchRaceOutcome[] = [1, 2, 3, 4].map((i) =>
+      success(`${i}${i}${i}${i}${i}${i}${i}${i}${i}${i}${i}${i}`, `${i}R`, [
+        row({ umaban: 1, ev: 1 + i * 0.2, adjustedProb: 0.5, isPositive: true }),
+      ]),
+    );
+    const desc = buildBatchDiscordPayload(outcomes).embeds[0]!.description ?? "";
+    const rankLines = desc.split("\n").filter((l) => /^\d+\. /.test(l));
+    expect(rankLines.length).toBe(3);
   });
 
   it("EVプラスが1頭も無ければ該当なしを表記する", () => {

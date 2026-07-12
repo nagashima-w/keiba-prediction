@@ -148,12 +148,17 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push("");
 
   // 各馬。
-  lines.push("【出走馬(prior は scorer が数値データから算出した複勝圏内確率の事前推定値)】");
+  // 「3着内率」= scorer が数値データから算出した複勝圏内(3着以内)確率の事前推定値。
+  // ユーザー要望により、モデルに提示する語彙とモデルの出力(reason)を「3着内率」で統一する
+  // (内部の変数・型名 prior は変更しない。JSONスキーマのキー place_prob も英語のまま)。
+  lines.push(
+    "【出走馬(3着内率 は scorer が数値データから算出した複勝圏内〈3着以内〉確率の事前推定値)】",
+  );
   for (const h of horses) {
     const style = styles.get(h.umaban);
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
-        `prior=${h.prior.toFixed(2)}, ` +
+        `3着内率=${h.prior.toFixed(2)}, ` +
         `脚質=${style ?? "不明"}, ` +
         `レース間隔=${orText(h.restInterval, "不明")}, ` +
         `調教=${oikiriText(h.oikiri)}, ` +
@@ -168,10 +173,15 @@ export function buildPrompt(input: BuildPromptInput): string {
     "各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。",
   );
   lines.push(
-    "補正は各馬の prior から ±10%(絶対値0.10)以内に留めてください。priorから大きく離れた値は禁止です。",
+    "補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。",
   );
   lines.push(
     "補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。",
+  );
+  // reason 文中の表記統一(ユーザー要望): 出力を見てパッとわかるよう、事前推定値は「3着内率」で書かせる。
+  // 指示文自体にも英語表記(prior)を出さず「3着内率」に統一する。
+  lines.push(
+    "reason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。",
   );
   if (wetScenario) {
     lines.push(
