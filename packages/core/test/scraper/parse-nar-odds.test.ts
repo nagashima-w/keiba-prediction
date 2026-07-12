@@ -114,3 +114,99 @@ describe("parseNarOdds(複勝ブロックのみ・単勝ブロックが無いケ
     expect(() => parseNarOdds(html)).toThrow(NarOddsParseError);
   });
 });
+
+/** #odds_tan_block/#odds_fuku_block の1行を、馬番を指定して組み立てる(複数頭の合成用)。 */
+function buildOddsRowFor(umaban: number, oddsText: string): string {
+  return `
+    <tr>
+      <td class="Waku1">1</td>
+      <td>${umaban}</td>
+      <td class="Mark_User"><span class="MarkIcon Mark00"></span></td>
+      <td class="Horse_Name">テスト馬${umaban}</td>
+      <td class="Odds"><span class="Odds ">${oddsText}</span></td>
+    </tr>`;
+}
+
+describe("parseNarOdds(非数値セル(取消・未確定)は該当馬のみnullで温存する)", () => {
+  // 中央(parse-odds.ts の toOddsNumber)と契約を揃える: セル値の異常(取消・未確定等)は
+  // 該当馬のオッズをnullにするだけで、行/レース全体を落とさない(WinOdds/PlaceOddsは
+  // number|null契約のため)。馬番セル自体が壊れている場合(構造異常)は従来どおり例外。
+  const nonNumericCases: Array<[string, string]> = [
+    ["取消", "出走取消表記"],
+    ["---", "未確定のハイフン表記"],
+    ["", "空文字"],
+  ];
+
+  it.each(nonNumericCases)(
+    "単勝(#odds_tan_block)のオッズセルが「%s」(%s)の場合、該当馬はodds:nullになり、他馬・レース全体は影響を受けないこと",
+    (oddsText) => {
+      const html = `<div id="odds_tan_block">${buildOddsTable(
+        buildOddsRowFor(1, oddsText) + buildOddsRowFor(2, "12.3"),
+      )}</div>`;
+      const odds = parseNarOdds(html);
+      // (c) レース全体は失敗しない(例外が投げられずここに到達する)。
+      // (a) 非数値セルの馬はnullで温存される。
+      expect(odds.win[1]).toEqual({ odds: null, ninki: null });
+      // (b) 他馬の正常値は影響を受けない。
+      expect(odds.win[2]).toEqual({ odds: 12.3, ninki: null });
+    },
+  );
+
+  it.each(nonNumericCases)(
+    "複勝(#odds_fuku_block)のオッズセルが「%s」(%s)の場合、該当馬はoddsMin/oddsMax:nullになり、他馬・レース全体は影響を受けないこと",
+    (oddsText) => {
+      const html = `
+        <div id="odds_tan_block">${buildOddsTable(
+          buildOddsRowFor(1, "5.0") + buildOddsRowFor(2, "12.3"),
+        )}</div>
+        <div id="odds_fuku_block">${buildOddsTable(
+          buildOddsRowFor(1, oddsText) + buildOddsRowFor(2, "3.0 - 4.0"),
+        )}</div>`;
+      const odds = parseNarOdds(html);
+      expect(odds.place[1]).toEqual({
+        oddsMin: null,
+        oddsMax: null,
+        ninki: null,
+      });
+      expect(odds.place[2]).toEqual({ oddsMin: 3.0, oddsMax: 4.0, ninki: null });
+    },
+  );
+
+  it.each(nonNumericCases)(
+    "予想オッズ(発売前)のオッズセルが「%s」(%s)の場合、該当馬はodds:nullになり、他馬・レース全体は影響を受けないこと",
+    (oddsText) => {
+      const yosoRow = (umaban: number, ninki: number, odds: string) => `
+        <tr>
+          <td class="Ninki">${ninki}</td>
+          <td class="Waku1">${umaban}</td>
+          <td class="Mark_User"></td>
+          <td class="Horse_Name">テスト馬${umaban}</td>
+          <td class="Odds">${odds}</td>
+        </tr>`;
+      const html = `
+        <table class="RaceOdds_HorseList_Table Ninki">
+          <tr class="col_label"><th>人気</th><th>馬番</th><th>印</th><th>馬名</th><th>予想オッズ</th></tr>
+          ${yosoRow(1, 1, oddsText)}
+          ${yosoRow(2, 2, "8.5")}
+        </table>`;
+      const odds = parseNarOdds(html);
+      expect(odds.win[1]).toEqual({ odds: null, ninki: 1 });
+      expect(odds.win[2]).toEqual({ odds: 8.5, ninki: 2 });
+    },
+  );
+
+  it("実測フィクスチャ由来の混在ケース: 1頭だけ取消でも他11頭・複勝は正常に取得できること", () => {
+    // フィクスチャ(12頭)の単勝2番目(馬番2)を「取消」に差し替えた合成HTML。
+    const html = loadFixture("nar_odds_b1_202654071210.html").replace(
+      '<td class="Odds"><span class="Odds ">10.4</span></td>',
+      '<td class="Odds"><span class="Odds ">取消</span></td>',
+    );
+    const odds = parseNarOdds(html);
+    expect(odds.win[2]).toEqual({ odds: null, ninki: null });
+    // 他馬(馬番1・馬番3)は正常値のまま。
+    expect(odds.win[1]).toEqual({ odds: 24.8, ninki: null });
+    expect(odds.win[3]).toEqual({ odds: 5.1, ninki: null });
+    // 複勝は単勝の異常と無関係に12頭とも正常。
+    expect(Object.keys(odds.place)).toHaveLength(12);
+  });
+});
