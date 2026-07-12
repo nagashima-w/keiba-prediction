@@ -228,3 +228,56 @@ describe("parseShutuba(騎手・調教師IDの欠損はnull)", () => {
     expect(result.horses[0]!.jockeyId).toBeNull();
   });
 });
+
+describe("parseShutuba(地方(NAR)フィクスチャの互換性)", () => {
+  const raceNar1: Shutuba = parseShutuba(
+    loadFixture("nar_shutuba_202654071210.html"),
+  );
+  const raceNar2: Shutuba = parseShutuba(
+    loadFixture("nar_shutuba_202642071301.html"),
+  );
+
+  it("高知10R(202654071210・終了後・12頭)を頭数12でパースできること", () => {
+    expect(raceNar1.horses).toHaveLength(12);
+    expect(raceNar1.race.courseType).toBe("ダ");
+    expect(raceNar1.race.distance).toBe(1400);
+  });
+
+  it("浦和1R(202642071301・発走前・10頭)を頭数10でパースできること", () => {
+    expect(raceNar2.horses).toHaveLength(10);
+  });
+
+  it("性齢(td.Barei classが無くspan.Ageで入る)を正しく分解すること", () => {
+    // 高知10R1頭目: ジャスタースパーク 牡6。
+    const h = raceNar1.horses.find((x) => x.umaban === 1)!;
+    expect(h.name).toBe("ジャスタースパーク");
+    expect(h.sex).toBe("牡");
+    expect(h.age).toBe(6);
+  });
+
+  it("斤量(性齢セルの次列、位置ベース)を正しく抽出すること", () => {
+    const h = raceNar1.horses.find((x) => x.umaban === 1)!;
+    expect(h.kinryo).toBe(57.0);
+  });
+
+  it("厩舎所在地(span.LabelGrayに会場名が入る)を生の地名として保持すること", () => {
+    const h = raceNar1.horses.find((x) => x.umaban === 1)!;
+    expect(h.stableLocation).toBe("高知");
+  });
+
+  it("騎手ID・調教師IDが英数字混じり(例: a01bb)でも抽出できること", () => {
+    const h = raceNar1.horses.find((x) => x.umaban === 1)!;
+    expect(h.jockeyId).toBe("a01bb");
+    expect(h.trainerId).toBe("a030b");
+  });
+
+  it("馬体重(増減)が正しく分解できること", () => {
+    const h = raceNar1.horses.find((x) => x.umaban === 1)!;
+    expect(h.bodyWeight).toEqual({ weight: 467, diff: 3 });
+  });
+
+  it("発走前(浦和1R)の厩舎所在地も生の地名として保持すること", () => {
+    const h = raceNar2.horses.find((x) => x.umaban === 1)!;
+    expect(h.stableLocation).toBe("浦和");
+  });
+});

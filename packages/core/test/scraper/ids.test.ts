@@ -4,6 +4,7 @@ import {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  venueKindOfRaceId,
 } from "../../src/scraper/ids.js";
 
 describe("parseRaceId(レースIDのパースと検証)", () => {
@@ -72,6 +73,69 @@ describe("parseRaceId(レースIDのパースと検証)", () => {
     expect(() => parseRaceId("202611020811")).toThrow(/競馬場コード/);
     expect(() => parseRaceId("202605020813")).toThrow(/レース番号/);
     expect(() => parseRaceId("20260502081")).toThrow(/12桁/);
+  });
+
+  describe("地方競馬場コード(5〜6桁目)の範囲30〜64", () => {
+    // [レースID, 有効か, 補足]
+    const cases: Array<[string, boolean, string]> = [
+      ["202629071201", false, "コード29は中央でも地方でもない"],
+      ["202630071201", true, "コード30(地方の下限)"],
+      ["202654071210", true, "コード54=高知(実測値)"],
+      ["202664071201", true, "コード64(地方の上限)"],
+      ["202666071201", false, "コード66は地方の上限(64)を超える"],
+    ];
+    it.each(cases)("%s → 有効性%s(%s)", (input, valid) => {
+      if (valid) {
+        expect(parseRaceId(input)).toBe(input);
+      } else {
+        expect(() => parseRaceId(input)).toThrow(InvalidIdError);
+      }
+    });
+  });
+
+  describe("帯広(ばんえい競馬・コード65)は明示的に拒否", () => {
+    it("コード65はInvalidIdErrorになり、理由にばんえい/帯広が含まれること", () => {
+      expect(() => parseRaceId("202665071201")).toThrow(InvalidIdError);
+      expect(() => parseRaceId("202665071201")).toThrow(/ばんえい|帯広/);
+    });
+  });
+
+  describe("地方レースIDの月日部(7〜10桁目)は実在日として検証する", () => {
+    // [レースID, 有効か, 補足]
+    const cases: Array<[string, boolean, string]> = [
+      ["202654071210", true, "7月12日は実在する(高知10R実測値)"],
+      ["202654130101", false, "13月は不正"],
+      ["202654000101", false, "0月は不正"],
+      ["202654023001", false, "2月30日は常に不正(2026年は平年)"],
+      ["202454022901", true, "2024年は閏年なので2月29日は正当"],
+      ["202654022901", false, "2026年は平年なので2月29日は不正"],
+      ["202654063001", true, "6月30日は実在する"],
+      ["202654063101", false, "6月は30日までなので31日は不正"],
+    ];
+    it.each(cases)("%s → 有効性%s(%s)", (input, valid) => {
+      if (valid) {
+        expect(parseRaceId(input)).toBe(input);
+      } else {
+        expect(() => parseRaceId(input)).toThrow(InvalidIdError);
+      }
+    });
+  });
+
+  describe("中央レースIDの7〜10桁目は回次・日次であり、実在日検証の対象外", () => {
+    it("中央コード(01〜10)では7〜10桁目が実在日でなくても有効であること", () => {
+      // 202605130811: 場コード05・7〜8桁目=13(13月相当だが中央は回次のため無関係)。
+      expect(parseRaceId("202605130811")).toBe("202605130811");
+    });
+  });
+});
+
+describe("venueKindOfRaceId(レースIDから開催区分を判定)", () => {
+  it("中央(場コード01〜10)は\"central\"を返すこと", () => {
+    expect(venueKindOfRaceId(parseRaceId("202605020811"))).toBe("central");
+  });
+
+  it("地方(場コード30〜64)は\"nar\"を返すこと", () => {
+    expect(venueKindOfRaceId(parseRaceId("202654071210"))).toBe("nar");
   });
 });
 
@@ -152,5 +216,6 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.parseKaisaiDate).toBe(parseKaisaiDate);
     expect(mod.parseHorseId).toBe(parseHorseId);
     expect(mod.InvalidIdError).toBe(InvalidIdError);
+    expect(mod.venueKindOfRaceId).toBe(venueKindOfRaceId);
   });
 });

@@ -157,6 +157,14 @@ export function parseRaceResult(html: string): RaceResult {
     });
   });
 
+  // 結果テーブルはあるのに結果行が1件も取れないのは構造変更・誤パースの兆候。
+  // silentに空配列で隠さず、失敗させる(parseShutubaの出走馬0頭チェックと同じ方針)。
+  if (horses.length === 0) {
+    throw new RaceResultParseError(
+      "結果テーブル(#All_Result_Table)から結果行を1件も抽出できませんでした",
+    );
+  }
+
   return {
     horses,
     placePayouts: parsePayoutRow($, SEL.placeRow, "複勝"),
