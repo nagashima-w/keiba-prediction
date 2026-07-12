@@ -181,4 +181,55 @@ describe("planFixtureTargets(取得対象とファイル名・URLの対応)", ()
     const urls = targets.map((t) => t.url);
     expect(new Set(urls).size).toBe(urls.length);
   });
+
+  describe("地方(NAR)race_idの計画(oikiri/commentは存在しないため除外)", () => {
+    it("NARレースIDからは出馬表・NARオッズページの2対象のみを生成し、クラッシュしないこと", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [race("202654071210")],
+        horses: [],
+      });
+      expect(targets).toHaveLength(2);
+      expect(find(targets, "shutuba_202654071210.html").url).toBe(
+        "https://nar.netkeiba.com/race/shutuba.html?race_id=202654071210",
+      );
+      expect(find(targets, "nar_odds_b1_202654071210.html").url).toBe(
+        "https://nar.netkeiba.com/odds/index.html?type=b1&race_id=202654071210",
+      );
+    });
+
+    it("NARレースIDでは追い切り・厩舎コメントの取得対象を生成しないこと(ページ自体が存在しないため)", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [race("202654071210")],
+        horses: [],
+      });
+      expect(
+        targets.find((t) => t.filename === "oikiri_202654071210.html"),
+      ).toBeUndefined();
+      expect(
+        targets.find((t) => t.filename === "comment_202654071210.html"),
+      ).toBeUndefined();
+      // 中央用のJSON APIオッズも計画されないこと(NARには存在しないため)。
+      expect(
+        targets.find((t) => t.filename === "odds_202654071210.json"),
+      ).toBeUndefined();
+    });
+
+    it("中央race_idと地方race_idを混在指定しても、それぞれ正しい対象を生成すること", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [race("202605020811"), race("202654071210")],
+        horses: [],
+      });
+      // 中央: 出馬表・追い切り・コメント・オッズの4対象。地方: 出馬表・NARオッズの2対象。
+      expect(targets).toHaveLength(6);
+      expect(find(targets, "shutuba_202605020811.html").url).toContain(
+        "race.netkeiba.com",
+      );
+      expect(find(targets, "shutuba_202654071210.html").url).toContain(
+        "nar.netkeiba.com",
+      );
+    });
+  });
 });
