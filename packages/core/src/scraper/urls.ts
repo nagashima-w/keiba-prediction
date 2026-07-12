@@ -124,12 +124,16 @@ export function horseResultsApiUrl(horseId: HorseId): string {
 }
 
 /**
- * 単勝・複勝オッズを返す内部API(JSON)のURL。
+ * 単勝・複勝オッズを返す内部API(JSON、中央のみ)。
  *
  * `data.odds["1"]` が単勝、`data.odds["2"]` が複勝(下限/上限)で、複勝下限が直接取れる。
  * 発走直前の再取得にも同一エンドポイントを使う。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(実測404。docs/nar-scraping-plan.md「オッズの取得方式」)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narOddsPageUrl を使うこと)。
  */
 export function oddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "単勝・複勝オッズJSON API(api_get_jra_odds)");
   return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=1&action=init`;
 }
 

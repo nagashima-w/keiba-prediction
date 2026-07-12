@@ -10,6 +10,7 @@ import {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  venueKindOfRaceId,
   type HorseId,
   type KaisaiDate,
   type RaceId,
@@ -19,6 +20,7 @@ import {
   commentUrl,
   horseResultsApiUrl,
   horseUrl,
+  narOddsPageUrl,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
@@ -110,8 +112,13 @@ export function parseFetchArgs(argv: string[]): FetchFixturesArgs {
  * 取得引数から、実際に取得すべき対象(URL・ファイル名・エンコーディング)の一覧を決める。
  *
  * - 開催日: レース一覧サブHTML(1件)
- * - 各レース: 出馬表・追い切り・厩舎コメント・オッズJSON(4件)
- * - 各馬: 馬個別ページ(EUC-JP指定)・全戦績JSON(2件)
+ * - 各レース(中央race_id): 出馬表・追い切り・厩舎コメント・オッズJSON(4件)
+ * - 各レース(地方race_id): 出馬表・NARオッズページ(2件)。
+ *   調教(oikiri)・厩舎コメント(comment)はNARにページ自体が存在しない
+ *   (oikiriUrl/commentUrlはNAR race_idに対しNarUnsupportedErrorを投げる)ため、
+ *   計画対象から除外する。オッズも中央用JSON API(oddsApiUrl)ではなく
+ *   NAR用の静的HTMLページ(narOddsPageUrl)を計画する。詳細: docs/nar-scraping-plan.md。
+ * - 各馬: 馬個別ページ(EUC-JP指定)・全戦績JSON(2件、中央・地方共通)
  *
  * 同一の `--race` / `--horse` が重複指定された場合、同一URLの取得対象は
  * 最初の1回だけ計画する(同じページを二重にGETしない)。
@@ -140,10 +147,22 @@ export function planFixtureTargets(args: FetchFixturesArgs): FixtureTarget[] {
   }
 
   for (const raceId of args.races) {
+    // 出馬表はshutubaUrlが場コードに応じてrace/nar.netkeiba.comを自動選択するため共通。
     add({
       url: shutubaUrl(raceId),
       filename: `shutuba_${raceId}.html`,
     });
+
+    if (venueKindOfRaceId(raceId) === "nar") {
+      // 地方: 調教・厩舎コメントは対象外。オッズはNAR用の静的HTMLページを計画する。
+      add({
+        url: narOddsPageUrl(raceId),
+        filename: `nar_odds_b1_${raceId}.html`,
+      });
+      continue;
+    }
+
+    // 中央: 従来通り出馬表以外に追い切り・厩舎コメント・オッズJSONを計画する。
     add({
       url: oikiriUrl(raceId),
       filename: `oikiri_${raceId}.html`,

@@ -70,3 +70,47 @@ describe("parseNarOdds(構造異常)", () => {
     );
   });
 });
+
+/** #odds_tan_block/#odds_fuku_block の最小行(単勝または複勝の1頭分)を組み立てる。 */
+function buildOddsRow(oddsText: string): string {
+  return `
+    <tr>
+      <td class="Waku1">1</td>
+      <td>1</td>
+      <td class="Mark_User"><span class="MarkIcon Mark00"></span></td>
+      <td class="Horse_Name">テスト馬</td>
+      <td class="Odds"><span class="Odds ">${oddsText}</span></td>
+    </tr>`;
+}
+
+/** ヘッダ行(thのみ)を持つ最小オッズテーブル。 */
+function buildOddsTable(rows: string): string {
+  return `
+    <table class="RaceOdds_HorseList_Table">
+      <tr><th class="Waku">枠</th><th class="W31">馬番</th><th class="Mark">印</th><th>馬名</th><th>オッズ</th></tr>
+      ${rows}
+    </table>`;
+}
+
+describe("parseNarOdds(単勝ブロックのみ・複勝ブロックが無いケース)", () => {
+  it("#odds_tan_blockのみ存在する場合、place:{}(空)として返すこと(仕様として固定)", () => {
+    const html = `<div id="odds_tan_block">${buildOddsTable(
+      buildOddsRow("5.0"),
+    )}</div>`;
+    const odds = parseNarOdds(html);
+    expect(odds.oddsStatus).toBe("middle");
+    expect(odds.win[1]).toEqual({ odds: 5.0, ninki: null });
+    expect(odds.place).toEqual({});
+  });
+});
+
+describe("parseNarOdds(複勝ブロックのみ・単勝ブロックが無いケース)", () => {
+  it("#odds_fuku_blockのみ存在する場合、単勝も予想オッズも無い構造異常としてNarOddsParseErrorになること", () => {
+    // 実サイトでは単勝(odds_tan_block)を欠いて複勝のみが存在する構成は無い
+    // (発売前後どちらの正常系にも当てはまらない)ため、silentに受理せず失敗させる。
+    const html = `<div id="odds_fuku_block">${buildOddsTable(
+      buildOddsRow("3.0 - 4.0"),
+    )}</div>`;
+    expect(() => parseNarOdds(html)).toThrow(NarOddsParseError);
+  });
+});

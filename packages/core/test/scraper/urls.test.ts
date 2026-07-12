@@ -115,7 +115,7 @@ describe("narOddsPageUrl(地方オッズページ)", () => {
   });
 });
 
-describe("oikiriUrl/commentUrl(地方では存在しないページ)", () => {
+describe("oikiriUrl/commentUrl/oddsApiUrl(地方では存在しないページ)", () => {
   it("oikiriUrlに地方race_idを渡すとNarUnsupportedErrorになること", () => {
     expect(() => oikiriUrl(narRaceId)).toThrow(NarUnsupportedError);
   });
@@ -124,12 +124,19 @@ describe("oikiriUrl/commentUrl(地方では存在しないページ)", () => {
     expect(() => commentUrl(narRaceId)).toThrow(NarUnsupportedError);
   });
 
-  it("中央race_idでは従来通りoikiriUrl/commentUrlが取得できること(既存動作)", () => {
+  it("oddsApiUrlに地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => oddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+
+  it("中央race_idでは従来通りoikiriUrl/commentUrl/oddsApiUrlが取得できること(既存動作)", () => {
     expect(oikiriUrl(raceId)).toBe(
       "https://race.netkeiba.com/race/oikiri.html?race_id=202605020811",
     );
     expect(commentUrl(raceId)).toBe(
       "https://race.netkeiba.com/race/comment.html?race_id=202605020811",
+    );
+    expect(oddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=1&action=init",
     );
   });
 });

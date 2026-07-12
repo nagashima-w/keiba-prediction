@@ -359,6 +359,16 @@ export function buildPriorInput(args: BuildPriorInputArgs): PriorInput {
   const month = monthOf(race.date);
   const season: Season = (month === null ? null : classifySeason(month)) ?? "春秋";
 
+  // 注意(Task #20→#21への申し送り): ShutubaHorse.stableLocation は string型に拡張済みで、
+  // NAR(地方競馬)の出馬表では「高知」「浦和」等の所属会場名がそのまま入り得る。
+  // その場合ここは「美浦/栗東のいずれでもない」に該当し、silentに美浦扱いへフォールバックする
+  // ため、NAR馬の輸送バイアスが正しくない前提(美浦所属)で計算されてしまう。
+  // 現状は呼び出し元(app側 analysis-pipeline.ts の venueNameFromRaceId)が中央10場以外の
+  // race_idで例外を投げるため、この関数にNARレースが渡ってくることは無く実害は無いが、
+  // これはあくまで呼び出し側の副作用による偶然の到達不能であり、本関数自体がNARを想定した
+  // ガードを持っているわけではない。docs/nar-scraping-plan.md「スコアラーへの影響」の通り、
+  // Task #21で「NARでは輸送バイアスを適用しない」分岐を buildPriorInput 側に入れるまでは、
+  // 中央レース以外でこの関数を呼んではならない。
   const stableLocation: StableLocation =
     horse.stableLocation === "美浦" || horse.stableLocation === "栗東"
       ? horse.stableLocation
