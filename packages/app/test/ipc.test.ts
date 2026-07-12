@@ -69,11 +69,14 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
     }
   });
 
-  it("Discord通知チャネル(notify:discord)をハンドラ付きで登録する", () => {
+  it("一括分析チャネル(実行・中断・サマリ送信)をハンドラ付きで登録する", () => {
     registerIpcHandlers();
-    expect(handleMock).toHaveBeenCalledWith(
-      IPC_CHANNELS.sendDiscord,
-      expect.any(Function),
-    );
+    for (const channel of [
+      IPC_CHANNELS.runBatchAnalysis,
+      IPC_CHANNELS.cancelBatchAnalysis,
+      IPC_CHANNELS.sendBatchDiscord,
+    ]) {
+      expect(handleMock).toHaveBeenCalledWith(channel, expect.any(Function));
+    }
   });
 });

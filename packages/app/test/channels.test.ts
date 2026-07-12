@@ -15,10 +15,8 @@ describe("IPCチャネル定義", () => {
     }
   });
 
-  it("Phase4で追加したチャネル(レース一覧・分析実行・進捗)が定義されている", () => {
+  it("レース一覧チャネルが定義されている", () => {
     expect(IPC_CHANNELS.listRaces).toBe("race:list");
-    expect(IPC_CHANNELS.runAnalysis).toBe("analysis:run");
-    expect(IPC_CHANNELS.analysisProgress).toBe("analysis:progress");
   });
 
   it("設定画面用のチャネル(取得・保存・初期化)が定義されている", () => {
@@ -27,7 +25,13 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.resetSettings).toBe("settings:reset");
   });
 
-  it("Phase5で追加したDiscord通知チャネルが定義されている", () => {
-    expect(IPC_CHANNELS.sendDiscord).toBe("notify:discord");
+  it("一括分析用のチャネル(実行・中断・全体進捗)が定義されている", () => {
+    expect(IPC_CHANNELS.runBatchAnalysis).toBe("analysis:run-batch");
+    expect(IPC_CHANNELS.cancelBatchAnalysis).toBe("analysis:cancel-batch");
+    expect(IPC_CHANNELS.batchProgress).toBe("analysis:batch-progress");
+  });
+
+  it("一括サマリのDiscord送信チャネルが定義されている", () => {
+    expect(IPC_CHANNELS.sendBatchDiscord).toBe("notify:discord-batch");
   });
 });

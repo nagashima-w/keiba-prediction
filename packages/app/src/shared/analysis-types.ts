@@ -91,6 +91,63 @@ export interface AnalysisResult {
   readonly analyzedAt: string;
 }
 
+/**
+ * 一括分析: 1レース分の最終結果(main→renderer に invoke の戻り値として返す)。
+ * - "success": result に AnalysisResult が入る(error は null)。
+ * - "failure": error にユーザー向けメッセージが入る(result は null)。
+ * - "skipped": 中断により未実行(result・error ともに null)。
+ */
+export interface BatchRaceOutcome {
+  /** レースID(12桁)。 */
+  readonly raceId: string;
+  /** レース名(一覧から引けない場合は null。成功時は result.raceName を優先表示)。 */
+  readonly raceName: string | null;
+  /** 実行結果の区分。 */
+  readonly status: "success" | "failure" | "skipped";
+  /** 成功時の分析結果(それ以外は null)。 */
+  readonly result: AnalysisResult | null;
+  /** 失敗時のエラーメッセージ(それ以外は null)。 */
+  readonly error: string | null;
+}
+
+/**
+ * 一括分析の全体進捗(main→renderer に webContents.send で通知)。
+ * 既存の1レース内段階(AnalysisProgress)を stage に内包し、全体の何レース目かを併せて伝える。
+ */
+export interface BatchProgress {
+  /** 完了したレース数(0起点。実行中レースは含まない)。 */
+  readonly completedRaces: number;
+  /** 対象レースの総数。 */
+  readonly totalRaces: number;
+  /** 現在実行中のレースID(境界・完了時は null)。 */
+  readonly currentRaceId: string | null;
+  /** 現在実行中のレース名(引けない場合・完了時は null)。 */
+  readonly currentRaceName: string | null;
+  /** 現在のレース内段階(レース境界・全体完了時は null)。 */
+  readonly stage: AnalysisProgress | null;
+}
+
+/**
+ * 横断「EVプラス馬サマリ」の1行(全レースのEVプラス馬を1つに集約したもの)。
+ * EV降順に並べて画面最上部に表示する。
+ */
+export interface EvPlusSummaryRow {
+  /** そのEVプラス馬が属するレースID。 */
+  readonly raceId: string;
+  /** レース名(表示用)。 */
+  readonly raceName: string;
+  /** 馬番。 */
+  readonly umaban: number;
+  /** 馬名。 */
+  readonly horseName: string;
+  /** 補正後複勝確率(0〜1)。 */
+  readonly adjustedProb: number;
+  /** 複勝オッズ下限(欠損なら null)。 */
+  readonly placeOddsMin: number | null;
+  /** 期待値(EVプラスなので閾値超え)。 */
+  readonly ev: number;
+}
+
 /** 検証画面: 分析履歴の1件(一覧表示用)。 */
 export interface AnalysisHistoryItem {
   /** 分析ID(採番)。 */

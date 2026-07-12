@@ -8,22 +8,24 @@ import {
   parseKaisaiDate,
   parseRaceId,
   sendDiscordNotification,
+  type DiscordPayload,
   type KaisaiDate,
 } from "@keiba/core";
 
 import type {
   AnalysisHistoryItem,
-  AnalysisProgress,
-  AnalysisResult,
+  BatchProgress,
+  BatchRaceOutcome,
   ImportResultOutcome,
   RaceListItem,
   VerifyReportView,
 } from "../shared/analysis-types.js";
-import { buildDiscordPayload } from "./discord-payload.js";
+import { buildBatchDiscordPayload } from "./batch-discord-payload.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
 import { buildAppInfo } from "./app-info.js";
 import { runAnalysis } from "./analysis-pipeline.js";
+import { runBatchAnalysis } from "./analysis-batch.js";
 import { netFetchAdapter } from "./net-fetch-adapter.js";
 import { createPipelineDeps, type PipelineResources } from "./pipeline-deps.js";
 import { ResourceManager } from "./resource-manager.js";
@@ -53,9 +55,17 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(
-    IPC_CHANNELS.runAnalysis,
-    (event, raceId: unknown, date: unknown) =>
-      handleRunAnalysis(event, String(raceId), String(date)),
+    IPC_CHANNELS.runBatchAnalysis,
+    (event, raceIds: unknown, date: unknown) =>
+      handleRunBatchAnalysis(
+        event,
+        (Array.isArray(raceIds) ? raceIds : []).map(String),
+        String(date),
+      ),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.cancelBatchAnalysis, () =>
+    handleCancelBatchAnalysis(),
   );
 
   ipcMain.handle(IPC_CHANNELS.importResult, (_event, raceId: unknown) =>
@@ -74,8 +84,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.resetSettings, () => handleResetSettings());
 
-  ipcMain.handle(IPC_CHANNELS.sendDiscord, (_event, result: unknown) =>
-    handleSendDiscord(result as AnalysisResult),
+  ipcMain.handle(IPC_CHANNELS.sendBatchDiscord, (_event, outcomes: unknown) =>
+    handleSendBatchDiscord(
+      (Array.isArray(outcomes) ? outcomes : []) as BatchRaceOutcome[],
+    ),
   );
 }
 
@@ -149,21 +161,44 @@ function parseKaisaiDateOrNull(dateStr: string): KaisaiDate | null {
   }
 }
 
-/** 分析実行ハンドラの実処理(進捗は event.sender へ送る)。 */
-async function handleRunAnalysis(
+/**
+ * 一括分析の中断フラグ(main プロセス内の単一実行を前提とした module 状態)。
+ * runBatchAnalysis 開始時に false へリセットし、cancel チャネルで true にする。
+ * runBatchAnalysis は各レース境界でこの値を参照し、要求されていれば残りをスキップする。
+ * 同時に複数の一括分析は走らない(実行中は UI が再実行を無効化する)前提のため単一フラグで足りる。
+ */
+let batchCancelRequested = false;
+
+/**
+ * 一括分析ハンドラの実処理。選択レースを直列に分析し、per-race のアウトカムを返す。
+ * 全体を runExclusive 1回で包む(粗い粒度)ことで、バッチ実行中は DB を閉じさせない。
+ * 設定保存(markDirty)はバッチ完了後の次アイドルまで反映されない(バッチ内の設定は一貫)。
+ * 進捗は batch-progress チャネルで renderer へ一方向通知する。
+ */
+async function handleRunBatchAnalysis(
   event: IpcMainInvokeEvent,
-  raceIdStr: string,
+  raceIdStrs: readonly string[],
   dateStr: string,
-): Promise<AnalysisResult> {
-  const raceId = parseRaceId(raceIdStr);
+): Promise<BatchRaceOutcome[]> {
   const kaisaiDate = parseKaisaiDateOrNull(dateStr);
-  // runExclusive で実行中フラグを立て、この分析の最中に設定保存が来ても DB を閉じさせない
-  // (実行中の破棄を防ぎ「connection is not open」を回避する)。
+  // 新しいバッチの開始時に前回の中断要求を必ずクリアする(残留で即スキップにならないように)。
+  batchCancelRequested = false;
   return resourceManager.runExclusive(({ deps }) =>
-    runAnalysis(raceId, kaisaiDate, deps, (progress: AnalysisProgress) => {
-      event.sender.send(IPC_CHANNELS.analysisProgress, progress);
+    runBatchAnalysis(raceIdStrs, {
+      // 個別レースは既存の runAnalysis を1件ずつ実行し、レース内段階を全体進捗へ転送する。
+      analyzeOne: (raceIdStr, onStage) =>
+        runAnalysis(parseRaceId(raceIdStr), kaisaiDate, deps, onStage),
+      shouldCancel: () => batchCancelRequested,
+      onProgress: (progress: BatchProgress) => {
+        event.sender.send(IPC_CHANNELS.batchProgress, progress);
+      },
     }),
   );
+}
+
+/** 一括分析の中断要求ハンドラ。次のレース境界で停止させるためフラグを立てる。 */
+function handleCancelBatchAnalysis(): void {
+  batchCancelRequested = true;
 }
 
 /** 結果取込ハンドラの実処理(result.html取得→パース→実着順+複勝払戻を保存)。 */
@@ -207,11 +242,20 @@ function handleSaveSettings(update: SettingsUpdate): MaskedSettings {
 }
 
 /**
- * Discord送信ハンドラの実処理。
+ * 一括サマリ Discord送信ハンドラの実処理。横断EVプラス一覧を embed 1件にまとめて1通で送る。
  * DBを触らないため runExclusive は不要だが、Webhook URL は必ず最新設定から読む(設定変更を即反映)。
+ */
+async function handleSendBatchDiscord(
+  outcomes: readonly BatchRaceOutcome[],
+): Promise<void> {
+  await sendPayloadToDiscord(buildBatchDiscordPayload(outcomes));
+}
+
+/**
+ * 最新設定の Webhook URL を検証してからペイロードを送信する共通処理。
  * URL未設定・検証NG・送信失敗はユーザー向けメッセージの Error にして reject する(renderer が表示)。
  */
-async function handleSendDiscord(result: AnalysisResult): Promise<void> {
+async function sendPayloadToDiscord(payload: DiscordPayload): Promise<void> {
   const settings = getSettingsStore().load();
   const webhookUrl = settings.discordWebhookUrl.trim();
   if (webhookUrl === "") {
@@ -226,7 +270,7 @@ async function handleSendDiscord(result: AnalysisResult): Promise<void> {
   }
   try {
     // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
-    await sendDiscordNotification(webhookUrl, buildDiscordPayload(result), {
+    await sendDiscordNotification(webhookUrl, payload, {
       fetch: netFetchAdapter,
     });
   } catch (error) {
