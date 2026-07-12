@@ -14,7 +14,14 @@ import {
 } from "@keiba/core";
 
 import type { BatchRaceOutcome } from "../shared/analysis-types.js";
-import { collectEvPlusSummary, summarizeBatch } from "../renderer/batch-summary.js";
+import {
+  collectEvPlusSummary,
+  rankRaceOpportunities,
+  summarizeBatch,
+} from "../renderer/batch-summary.js";
+
+/** Discordサマリに載せる妙味レースランキングの最大件数(上位数件で十分)。 */
+const RANKING_TOP_N = 3;
 
 /** EVプラスがあるときの帯色(緑)。 */
 const COLOR_POSITIVE = 0x2ecc71;
@@ -91,16 +98,45 @@ export function buildBatchDiscordPayload(
 
   const countLine = `対象${counts.total}レース(成功${counts.success} / 失敗${counts.failure} / スキップ${counts.skipped})`;
 
+  // 妙味レースランキング(上位数件)。スコアが算出できたレースだけを対象にする。
+  const ranked = rankRaceOpportunities(outcomes).filter(
+    (r) => r.opportunity.score !== null,
+  );
+  const rankingLines: string[] = [];
+  if (ranked.length > 0) {
+    rankingLines.push("【妙味レースランキング】");
+    ranked.slice(0, RANKING_TOP_N).forEach((r, i) => {
+      const op = r.opportunity;
+      const pick =
+        op.bestPick !== null
+          ? `筆頭${truncate(op.bestPick.horseName, HORSE_NAME_MAX)}(${op.bestPick.umaban}番)`
+          : "筆頭なし";
+      // 低データが多いレースは注記する(モデル過信への注意喚起)。
+      const lowNote = op.lowDataRatio >= 0.5 ? " ※低データ多" : "";
+      rankingLines.push(
+        `${i + 1}. ${r.raceName} スコア${op.score!.toFixed(2)}(EVプラス${op.evPlusCount}頭)${pick}${lowNote}`,
+      );
+    });
+  }
+
   const horseLines =
     evPlus.length > 0
       ? evPlus.map((r) => {
           const name = truncate(r.horseName, HORSE_NAME_MAX);
-          return `${r.raceName} ${r.umaban}番 ${name} 補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}`;
+          return `${r.raceName} ${r.umaban}番 ${name} AI補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}`;
         })
       : ["EVプラスの馬はありません(該当なし)"];
 
+  // 件数行とランキング(固定して残す部分)を1つのヘッダにまとめ、EVプラス馬行だけを省略対象にする。
+  const header =
+    rankingLines.length > 0
+      ? [countLine, "", ...rankingLines, "", "【EVプラス馬(横断・EV降順)】"].join(
+          "\n",
+        )
+      : countLine;
+
   const description = fitWithOmissionNote(
-    countLine,
+    header,
     horseLines,
     DISCORD_EMBED_DESCRIPTION_MAX,
   );

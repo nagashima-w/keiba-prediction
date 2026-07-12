@@ -204,6 +204,16 @@ export {
   type HorsePrior,
 } from "./ev/expected-value.js";
 export {
+  computeRaceOpportunity,
+  DEFAULT_RACE_OPPORTUNITY_CONFIG,
+  type RaceOddsStatus,
+  type RaceOpportunity,
+  type RaceOpportunityBestPick,
+  type RaceOpportunityConfig,
+  type RaceOpportunityHorse,
+  type RaceOpportunityMeta,
+} from "./ev/race-opportunity.js";
+export {
   AnalysisStore,
   type AnalysisFilter,
   type AnalysisHorseRecord,

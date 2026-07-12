@@ -187,6 +187,8 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
   it("EVプラス馬のみを馬番・馬名・補正後確率・複勝下限・EVで列挙する", () => {
     const embed = buildAnalysisEmbed(raceInfo, horses);
     const desc = embed.description ?? "";
+    // 補正後確率のラベルは「AI補正後」で統一する(ユーザー要望)。
+    expect(desc).toContain("AI補正後");
     // EVプラスの2頭は載る
     expect(desc).toContain("ウマA");
     expect(desc).toContain("ウマB");

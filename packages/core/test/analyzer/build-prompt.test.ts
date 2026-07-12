@@ -114,6 +114,27 @@ describe("buildPrompt(1レース分のプロンプト)", () => {
     expect(p).toContain("horses");
   });
 
+  it("出力テキストに『prior』という語を使わない(3着内率表記に統一)", () => {
+    // ユーザー要望: LLM出力を見てパッとわかるよう、prior ではなく「3着内率」表記に統一する。
+    // JSONスキーマのキー(place_prob 等)は英語のまま変えないので、それらは影響しない。
+    const p = buildPrompt(baseInput());
+    expect(p).not.toContain("prior");
+  });
+
+  it("各馬の事前推定値を『3着内率』という表記で提示すること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain("3着内率");
+    // 値自体は従来どおり載る。
+    expect(p).toContain("0.42");
+  });
+
+  it("reason にも『prior』ではなく『3着内率』と書くよう明示指示すること", () => {
+    const p = buildPrompt(baseInput());
+    // 根拠(reason)文中の表記指示があり、3着内率 を使うよう促している。
+    expect(p).toContain("reason");
+    expect(p).toContain("3着内率");
+  });
+
   it("天候・馬場が未取得なら不明表記で落ちないこと", () => {
     const input = baseInput();
     const noWeather: BuildPromptInput = {
