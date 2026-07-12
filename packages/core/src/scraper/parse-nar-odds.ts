@@ -65,23 +65,31 @@ function umabanOf($row: CheerioSelection): number {
 }
 
 /**
+ * オッズ文字列(単一の数値)を数値化する。
+ * 出走取消・除外・未確定等の非数値表記(例: 「取消」「---」「空文字」)はセル値の異常であり
+ * 行/レース全体を落とす理由にはならないため、例外を投げず null に落とす
+ * (中央 parse-odds.ts の toOddsNumber と契約を揃える。WinOdds.odds は number|null契約)。
+ */
+function toWinOddsNumber(raw: string): number | null {
+  const m = PATTERNS.narWinOdds.exec(raw);
+  return m ? Number(raw) : null;
+}
+
+/**
  * 発売後(#odds_tan_block)の1行から単勝オッズを取り出す。
  * オッズ列は最終列(span.Oddsに包まれるが .text() で透過的に取れる)。人気列は無いため null。
+ * オッズセルが非数値(取消等)の場合は odds:null で温存する(構造異常ではない)。
  */
 function parseTanRow($row: CheerioSelection): { umaban: number; win: WinOdds } {
   const umaban = umabanOf($row);
   const oddsText = $row.find("td").last().text().trim();
-  const m = PATTERNS.narWinOdds.exec(oddsText);
-  if (!m) {
-    throw new NarOddsParseError(
-      `単勝オッズを数値として解釈できませんでした(馬番${umaban}, 値: "${oddsText}")`,
-    );
-  }
-  return { umaban, win: { odds: Number(oddsText), ninki: null } };
+  return { umaban, win: { odds: toWinOddsNumber(oddsText), ninki: null } };
 }
 
 /**
  * 発売後(#odds_fuku_block)の1行から複勝オッズ(下限-上限)を取り出す。人気列は無いため null。
+ * オッズセルが「下限 - 上限」形式に一致しない(取消等)場合は oddsMin/oddsMax とも null で
+ * 温存する(構造異常ではない。中央 parse-odds.ts の toOddsNumber と契約を揃える)。
  */
 function parseFukuRow(
   $row: CheerioSelection,
@@ -89,33 +97,27 @@ function parseFukuRow(
   const umaban = umabanOf($row);
   const oddsText = $row.find("td").last().text().trim();
   const m = PATTERNS.narPlaceOddsRange.exec(oddsText);
-  if (!m) {
-    throw new NarOddsParseError(
-      `複勝オッズ(下限-上限)を解釈できませんでした(馬番${umaban}, 値: "${oddsText}")`,
-    );
-  }
   return {
     umaban,
-    place: { oddsMin: Number(m[1]!), oddsMax: Number(m[2]!), ninki: null },
+    place: {
+      oddsMin: m ? Number(m[1]!) : null,
+      oddsMax: m ? Number(m[2]!) : null,
+      ninki: null,
+    },
   };
 }
 
 /**
  * 発売前(予想オッズ)の1行から単勝相当オッズを取り出す。
  * 列構成: 人気(列0) / 馬番(列1) / 印(列2) / 馬名(列3) / 予想オッズ(列4=最終列)。
+ * オッズセルが非数値(取消等)の場合は odds:null で温存する(構造異常ではない)。
  */
 function parseYosoRow($row: CheerioSelection): { umaban: number; win: WinOdds } {
   const umaban = umabanOf($row);
   const ninkiText = $row.find("td").eq(0).text().trim();
   const ninki = /^[0-9]+$/.test(ninkiText) ? Number(ninkiText) : null;
   const oddsText = $row.find("td").last().text().trim();
-  const m = PATTERNS.narWinOdds.exec(oddsText);
-  if (!m) {
-    throw new NarOddsParseError(
-      `予想オッズを数値として解釈できませんでした(馬番${umaban}, 値: "${oddsText}")`,
-    );
-  }
-  return { umaban, win: { odds: Number(oddsText), ninki } };
+  return { umaban, win: { odds: toWinOddsNumber(oddsText), ninki } };
 }
 
 /**
