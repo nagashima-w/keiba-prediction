@@ -21,10 +21,13 @@ export const RACE_LIST_SELECTORS = {
   raceNumber: ".Race_Num",
   /** レース名(切り詰められている場合あり)。 */
   itemTitle: ".ItemTitle",
-  /** 時刻・距離・頭数を含むデータ枠。 */
+  /**
+   * 時刻・距離・頭数を含むデータ枠。
+   * 頭数(例: 16頭)は中央では span.RaceList_Itemnumber でラップされるが、地方(NAR)では
+   * ラップの無いプレーンテキストで入るため、専用セレクタは持たずこの枠のテキスト全体
+   * (PATTERNS.entryCount)から正規表現で取り出す(中央・地方で共通のロジックにするため)。
+   */
   raceData: ".RaceData",
-  /** 頭数(例: 16頭)。 */
-  entryCount: ".RaceList_Itemnumber",
   /** 会場見出し内の回次・日次の注記(<small>2回</small> など)。会場名抽出時に除去する。 */
   titleAnnotation: "small",
 } as const;
@@ -39,21 +42,31 @@ export const SHUTUBA_SELECTORS = {
   raceData02: ".RaceData02",
   /** 出走馬の行。 */
   horseRow: "tr.HorseList",
-  /** 枠番(class が Waku1〜Waku8 と可変のため前方一致)。 */
-  waku: 'td[class^="Waku"] span',
+  /**
+   * 枠番(class が Waku1〜Waku8 と可変のため前方一致)。
+   * 中央は数字が span で包まれるが、地方(NAR)は td 直下にテキストが入るため、
+   * span を要求せず td 自体のテキスト(descendant textを含む .text()で両対応)を取る。
+   */
+  waku: 'td[class^="Waku"]',
   /** 馬番(class が Umaban1〜Umaban18 と可変のため前方一致)。 */
   umaban: 'td[class^="Umaban"]',
   /** 馬情報セル(実データ行の判定にも使う)。 */
   horseInfo: "td.HorseInfo",
   /** 馬名+horse_idリンク(title属性が馬名)。 */
   horseLink: "td.HorseInfo span.HorseName a",
-  /** 性齢(例: 牝3)。 */
-  barei: "td.Barei",
-  /** 斤量セル: 性齢セル(Barei)の直後のtd(専用classが無く位置依存で取得する)。 */
+  /**
+   * 性齢セル(例: 牝3)・斤量セルの取得はいずれも位置依存(horseInfoの直後のtd = 性齢、
+   * その次のtd = 斤量)。中央は性齢セルに class="Barei" が付くが、地方(NAR)は
+   * class無しのtd内にspan.Ageで入るため、classに依存せず horseInfo からの相対位置で取る
+   * (中央・地方で共通のロジックにするため)。
+   */
   kinryoCell: "td",
   /** 騎手リンク(URL末尾が jockey_id、title属性が騎手名)。 */
   jockeyLink: "td.Jockey a",
-  /** 厩舎所在地ラベル(Label1=美浦 / Label2=栗東)。 */
+  /**
+   * 厩舎所在地ラベル。中央は Label1=美浦 / Label2=栗東、地方(NAR)は LabelGray に
+   * 所属会場名(例: 高知・浦和)が入る。[class^="Label"] で両対応する。
+   */
   trainerLabel: 'td.Trainer span[class^="Label"]',
   /** 調教師リンク(URL末尾が trainer_id、title属性が調教師名)。 */
   trainerLink: "td.Trainer a",
@@ -90,15 +103,20 @@ export const HORSE_RESULTS_SELECTORS = {
 /**
  * レース結果(result.html)のセレクタ。
  *
- * 注意: 文書全体には結果本体(全着順)以外にも tr.HorseList を持つテーブルが複数ある
+ * 注意: 文書全体には結果本体(全着順)以外にも tr を持つテーブルが複数ある
  * (プレミアムのラップサマリー等)。誤って余分な行を取り込まないよう、結果本体は
  * id=All_Result_Table にスコープする(resultTable 配下でのみ resultRow を探す)。
  */
 export const RACE_RESULT_SELECTORS = {
-  /** 全着順テーブル(結果本体)。他テーブルの HorseList 行と区別するため id で限定する。 */
+  /** 全着順テーブル(結果本体)。他テーブルの行と区別するため id で限定する。 */
   resultTable: "#All_Result_Table",
-  /** 出走馬の結果行(resultTable 配下でのみ使用)。 */
-  resultRow: "tr.HorseList",
+  /**
+   * 出走馬の結果行(resultTable 配下でのみ使用)。
+   * 中央は行に class="HorseList" が付くが、地方(NAR)は付かない(<tr >のみ)ため、
+   * class に依存せず tbody の直接の子trを結果行とする(ヘッダ行はtheadにあり除外される。
+   * resultTable スコープ内に他テーブルは無いため、余分な行を拾う心配もない)。
+   */
+  resultRow: "tbody > tr",
   /** 着順表示(td.Result_Num 内の順位)。 */
   finishRank: "td.Result_Num div.Rank",
   /**
@@ -118,6 +136,27 @@ export const RACE_RESULT_SELECTORS = {
   payoutResult: "td.Result",
   /** 払戻行の払戻金額セル(内部で <br> 区切り。複数点あり)。 */
   payoutAmount: "td.Payout",
+} as const;
+
+/**
+ * 地方(NAR)オッズページ(odds/index.html?type=b1)のセレクタ。
+ *
+ * 発売後は #odds_tan_block(単勝)・#odds_fuku_block(複勝)の2ブロックが静的に入る。
+ * 発売前(前売り前)はこの2ブロックが存在せず、代わりに「予想オッズ」テーブル
+ * (class に Ninki が付く)のみが単勝相当として表示される。
+ * いずれの行も「馬番」列は先頭から2列目(0始まりで列インデックス1)に固定で現れるため、
+ * 枠/人気など1列目の意味が発売前後で違っても位置ベースで共通に取り出せる。
+ * 詳細: docs/nar-scraping-plan.md「オッズの取得方式」。
+ */
+export const NAR_ODDS_SELECTORS = {
+  /** 発売後・単勝ブロック。 */
+  tanBlock: "#odds_tan_block table.RaceOdds_HorseList_Table",
+  /** 発売後・複勝ブロック。 */
+  fukuBlock: "#odds_fuku_block table.RaceOdds_HorseList_Table",
+  /** 発売前・予想オッズ(単勝相当)テーブル。 */
+  yosoTable: "table.RaceOdds_HorseList_Table.Ninki",
+  /** データ行(ヘッダ行はthのみでtdを持たないため、tdを持つ行をデータ行とみなす)。 */
+  row: "tr",
 } as const;
 
 /** 調教(oikiri.html)のセレクタ。 */
@@ -148,10 +187,17 @@ export const PATTERNS = {
   raceNumber: /(\d+)\s*R/,
   /** href から horse_id を取り出す。 */
   horseIdFromHref: /\/horse\/(\d+)/,
-  /** href から jockey_id を取り出す。 */
-  jockeyIdFromHref: /\/jockey\/result\/recent\/(\d+)/,
-  /** href から trainer_id を取り出す。 */
-  trainerIdFromHref: /\/trainer\/result\/recent\/(\d+)/,
+  /**
+   * href から jockey_id を取り出す。
+   * 中央は数字のみ(例: 01043)だが、地方(NAR)は英字混じりの5桁ID(例: a01bb)もあるため
+   * 英数字で受理する。
+   */
+  jockeyIdFromHref: /\/jockey\/result\/recent\/([0-9a-zA-Z]+)/,
+  /**
+   * href から trainer_id を取り出す。
+   * 中央は数字のみだが、地方(NAR)は英字混じりのID(例: a030b)もあるため英数字で受理する。
+   */
+  trainerIdFromHref: /\/trainer\/result\/recent\/([0-9a-zA-Z]+)/,
   /** 性齢を性別と年齢に分解する(例: 牝3 → 牝, 3)。 */
   sexAndAge: /^(\D+)(\d+)$/,
   /** 馬体重表記を体重と増減に分解する(例: 464(-8) → 464, -8)。 */
@@ -182,4 +228,8 @@ export const PATTERNS = {
   demotedFinish: /^(\d+)\s*[(（]\s*降\s*[)）]$/,
   /** 結果テーブルの枠セル判定(class に Waku{n} を含むか)。 */
   wakuClass: /\bWaku\d/,
+  /** NARオッズの単勝セル(単一の数値。例: 24.8)。 */
+  narWinOdds: /^[0-9]+(\.[0-9]+)?$/,
+  /** NARオッズの複勝セル(下限 - 上限。例: 6.8 - 8.5)。 */
+  narPlaceOddsRange: /^([0-9]+(?:\.[0-9]+)?)\s*-\s*([0-9]+(?:\.[0-9]+)?)$/,
 } as const;

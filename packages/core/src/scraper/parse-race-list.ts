@@ -6,7 +6,7 @@
  */
 
 import * as cheerio from "cheerio";
-import { parseRaceId } from "./ids.js";
+import { InvalidIdError, parseRaceId } from "./ids.js";
 import { PATTERNS, RACE_LIST_SELECTORS as SEL } from "./selectors.js";
 import type { CourseType, RaceListEntry } from "./types.js";
 
@@ -54,7 +54,18 @@ export function parseRaceList(html: string): RaceListEntry[] {
       if (!raceIdMatch) {
         return; // レースリンクの無い項目はスキップ。
       }
-      const raceId = parseRaceId(raceIdMatch[1]!);
+      // 場コードが対象外(帯広ばんえい等)の項目は一覧から除外する(silentにスキップ)。
+      // 一覧パースは「構造として完全な項目のみ列挙する」既存方針(距離不明行等も同様にスキップ)
+      // に沿った振る舞いであり、個別の理由を区別する必要はない。
+      let raceId;
+      try {
+        raceId = parseRaceId(raceIdMatch[1]!);
+      } catch (error) {
+        if (error instanceof InvalidIdError) {
+          return;
+        }
+        throw error;
+      }
 
       // コース種別・距離: データ枠のテキストから抽出(障害はclassが付かないため)。
       const dataText = $item.find(SEL.raceData).text();
@@ -65,11 +76,10 @@ export function parseRaceList(html: string): RaceListEntry[] {
       const courseType = toCourseType(cdMatch[1]!);
       const distance = Number(cdMatch[2]!);
 
-      // 頭数。
-      const entryCountText = $item.find(SEL.entryCount).text();
-      const entryCount = Number(
-        PATTERNS.entryCount.exec(entryCountText)?.[1] ?? "0",
-      );
+      // 頭数。中央は span.RaceList_Itemnumber でラップされるが、地方(NAR)はラップの無い
+      // プレーンテキストで入るため、共通のデータ枠テキスト(dataText)から正規表現で取り出す
+      // (どちらの構造でも dataText に頭数の文言が含まれる)。
+      const entryCount = Number(PATTERNS.entryCount.exec(dataText)?.[1] ?? "0");
 
       // レース番号(例: 11R)。
       const raceNumber = Number(

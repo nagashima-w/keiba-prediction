@@ -62,8 +62,12 @@ export interface ShutubaHorse {
   readonly jockeyName: string;
   /** 騎手ID。騎手未定・リンク欠損などで抽出できない場合は null。 */
   readonly jockeyId: string | null;
-  /** 厩舎所在地(美浦/栗東)。 */
-  readonly stableLocation: StableLocation;
+  /**
+   * 厩舎所在地。中央は美浦/栗東が代表値だが、地方(NAR)では所属会場名(例: 高知・浦和)が
+   * 入るため、値を丸めず取得した文字列をそのまま保持する(HorseProfile.stableLocation と
+   * 同じ方針。中央限定の輸送バイアス計算では StableLocation 型に絞り込んで利用する)。
+   */
+  readonly stableLocation: string;
   /** 調教師名。 */
   readonly trainerName: string;
   /** 調教師ID。リンク欠損などで抽出できない場合は null。 */

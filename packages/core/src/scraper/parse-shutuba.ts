@@ -21,7 +21,6 @@ import type {
   Shutuba,
   ShutubaHorse,
   ShutubaRaceInfo,
-  StableLocation,
 } from "./types.js";
 
 /** 枠番の上限(1〜8)。 */
@@ -88,12 +87,19 @@ function parseBodyWeight(raw: string): BodyWeight | null {
   return { weight: Number(m[1]!), diff: Number(m[2]!) };
 }
 
-/** 厩舎所在地ラベルをドメイン型に対応付ける。 */
-function toStableLocation(raw: string): StableLocation {
-  if (raw === "美浦" || raw === "栗東") {
-    return raw;
+/**
+ * 厩舎所在地ラベルを整形する。
+ *
+ * 中央は美浦/栗東が代表値だが、地方(NAR)では所属会場名(高知・浦和など)が入るため、
+ * 値を丸めず取得した文字列をそのまま保持する(HorseProfile.stableLocation と同じ方針。
+ * 詳細: docs/nar-scraping-plan.md)。ラベル自体が空(構造異常)の場合のみ失敗させる。
+ */
+function toStableLocation(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    throw new ShutubaParseError("厩舎所在地ラベルが空です");
   }
-  throw new ShutubaParseError(`未知の厩舎所在地です: ${raw}`);
+  return trimmed;
 }
 
 /** cheerio の選択結果(1要素をラップした Cheerio オブジェクト)の型。 */
@@ -128,8 +134,10 @@ function parseHorseRow($r: CheerioSelection): ShutubaHorse {
   }
   const horseId = parseHorseId(horseIdRaw);
 
-  // 性齢(例: 牝3)。
-  const bareiText = $r.find(SEL.barei).first().text().trim();
+  // 性齢(例: 牝3)。中央/地方でclassが異なる(Barei有無)ため、
+  // horseInfoセルの直後のtdを性齢セルとして位置ベースで取る(中央・地方で共通)。
+  const $barei = $r.find(SEL.horseInfo).first().next("td");
+  const bareiText = $barei.text().trim();
   const saMatch = PATTERNS.sexAndAge.exec(bareiText);
   if (!saMatch) {
     throw new ShutubaParseError(
@@ -139,10 +147,8 @@ function parseHorseRow($r: CheerioSelection): ShutubaHorse {
   const sex = saMatch[1]!;
   const age = Number(saMatch[2]!);
 
-  // 斤量: 性齢セル(Barei)の直後のtd(位置依存)。
-  const kinryo = Number(
-    $r.find(SEL.barei).first().next(SEL.kinryoCell).text().trim(),
-  );
+  // 斤量: 性齢セルの直後のtd(位置依存)。
+  const kinryo = Number($barei.next(SEL.kinryoCell).text().trim());
 
   // 騎手。リンク(jockey_id)が無い行(騎手未定など)では jockeyId は null。
   const $jockey = $r.find(SEL.jockeyLink).first();

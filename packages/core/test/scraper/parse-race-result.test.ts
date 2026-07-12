@@ -145,6 +145,12 @@ describe("parseRaceResult(レース結果パーサー)", () => {
       ).toThrow(RaceResultParseError);
     });
 
+    it("結果テーブルはあるが結果行が1件も無い場合は例外を投げること(空を silent に返さない)", () => {
+      expect(() => parseRaceResult(buildResultHtml([]))).toThrow(
+        RaceResultParseError,
+      );
+    });
+
     it("馬番セル(td.Num)が想定形(2セル・うち1つがWaku)でない場合は例外を投げること", () => {
       // 枠セルの Waku クラスが落ちた行(td.Num が2つとも非Waku)。
       // 枠番を馬番として silent 採用せず、loud に失敗させる。
@@ -163,6 +169,35 @@ describe("parseRaceResult(レース結果パーサー)", () => {
         RaceResultParseError,
       );
     });
+  });
+});
+
+describe("parseRaceResult(地方(NAR)フィクスチャの互換性)", () => {
+  // 高知1R(202654071201): 結果行に class="HorseList" が付かない(<tr >のみ)構造差分がある。
+  let result: RaceResult;
+  it("パースが成功すること(行に class が無くてもtbody直下のtrとして拾えること)", () => {
+    result = parseRaceResult(loadFixture("nar_result_202654071201.html"));
+    expect(result).toBeDefined();
+    expect(result.horses).toHaveLength(10);
+  });
+
+  it("1着馬(馬番3・ライゾマティクス)の着順・馬名が正しく対応すること", () => {
+    const byUmaban = new Map(result.horses.map((h) => [h.umaban, h]));
+    const first = byUmaban.get(3)!;
+    expect(first.finishPosition).toEqual({ kind: "順位", value: 1 });
+    expect(first.horseName).toBe("ライゾマティクス");
+  });
+
+  it("単勝の確定払戻(馬番3:150円)を返すこと", () => {
+    expect(result.winPayouts).toEqual([{ umaban: 3, payout: 150 }]);
+  });
+
+  it("複勝の確定払戻(馬番3:100円, 馬番4:110円, 馬番8:170円)を返すこと", () => {
+    expect(result.placePayouts).toEqual([
+      { umaban: 3, payout: 100 },
+      { umaban: 4, payout: 110 },
+      { umaban: 8, payout: 170 },
+    ]);
   });
 });
 

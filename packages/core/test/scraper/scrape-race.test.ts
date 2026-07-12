@@ -9,6 +9,7 @@ import {
   DEFAULT_RACE_LIST_TTL_MS,
   DEFAULT_RESULTS_TTL_MS,
   DEFAULT_SHUTUBA_TTL_MS,
+  listNarRaces,
   listRaces,
   scrapeRace,
   type RaceFetcher,
@@ -272,6 +273,94 @@ describe("listRaces(開催日→レース一覧)", () => {
     expect(entries).toHaveLength(36);
     expect(fetcher.callFor("race_list_sub").options?.maxAgeMs).toBe(
       DEFAULT_RACE_LIST_TTL_MS,
+    );
+  });
+});
+
+/** テストで使う地方(NAR)レース(高知10R・終了後・12頭)。 */
+const NAR_RACE_ID = parseRaceId("202654071210");
+
+/** URL種別ごとに対応する地方(NAR)フィクスチャ。 */
+const NAR_FIXTURES = {
+  shutuba: loadFixture("nar_shutuba_202654071210.html"),
+  odds: loadFixture("nar_odds_b1_202654071210.html"),
+  // 戦績は「NARドメイン経由の通常フローが動くこと」の確認が目的で、馬IDごとの内容一致は
+  // 検証しないため、全馬に同一の実フィクスチャを返す(既存 resultsFallback と同じ考え方)。
+  results: loadFixture("horse_results_2021104387.json"),
+  raceList: loadFixture("nar_race_list_sub_20260712.html"),
+};
+
+/** 地方(NAR)フィクスチャを返す既定ハンドラ。 */
+function narHandler(url: string): string {
+  if (url.includes("shutuba.html")) return NAR_FIXTURES.shutuba;
+  if (url.includes("ajax_horse_results")) return NAR_FIXTURES.results;
+  if (url.includes("odds/index.html")) return NAR_FIXTURES.odds;
+  if (url.includes("race_list_sub")) return NAR_FIXTURES.raceList;
+  throw new Error(`未知のURL(NARテスト): ${url}`);
+}
+
+describe("scrapeRace(地方(NAR)対応)", () => {
+  it("oikiriを取得試行せず、警告も出さずに全馬oikiri:nullで返すこと(NAR対象外)", async () => {
+    const fetcher = new RecordingFetcher(narHandler);
+    const data = await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW });
+
+    expect(data.horses).toHaveLength(12);
+    expect(data.horses.every((h) => h.oikiri === null)).toBe(true);
+    expect(data.meta.warnings.filter((w) => w.kind === "調教")).toEqual([]);
+    // oikiriページへの取得試行そのものが無いこと(警告でもなく単に対象外)。
+    expect(
+      fetcher.calls.some((c) => c.url.includes("oikiri.html")),
+    ).toBe(false);
+  });
+
+  it("オッズはnarOddsPageUrl(type=b1)経由でparseNarOddsを使い取得できること", async () => {
+    const fetcher = new RecordingFetcher(narHandler);
+    const data = await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW });
+
+    // NARページ単体では確定判別できないため middle 相当として正規化される。
+    expect(data.odds.oddsStatus).toBe("middle");
+    expect(Object.keys(data.odds.win)).toHaveLength(12);
+    expect(data.odds.win[1]).toEqual({ odds: 24.8, ninki: null });
+    expect(data.odds.place[1]).toEqual({
+      oddsMin: 6.8,
+      oddsMax: 8.5,
+      ninki: null,
+    });
+    // 中央用JSON APIは呼ばれないこと。
+    expect(
+      fetcher.calls.some((c) => c.url.includes("api_get_jra_odds")),
+    ).toBe(false);
+    expect(fetcher.callFor("odds/index.html").url).toContain("type=b1");
+  });
+
+  it("出馬表・戦績はNAR/dbドメイン経由の通常フローのまま取得できること", async () => {
+    const fetcher = new RecordingFetcher(narHandler);
+    const data = await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW });
+
+    expect(data.race.courseType).toBe("ダ");
+    expect(data.race.distance).toBe(1400);
+    expect(fetcher.callFor("shutuba.html").url).toContain(
+      "nar.netkeiba.com",
+    );
+    expect(fetcher.callFor("ajax_horse_results").url).toContain(
+      "db.netkeiba.com",
+    );
+    expect(data.horses.every((h) => h.results !== null)).toBe(true);
+    // 戦績・オッズとも正常なので、oikiri対象外以外の警告は出ない。
+    expect(data.meta.warnings).toEqual([]);
+  });
+});
+
+describe("listNarRaces(地方の開催日→レース一覧)", () => {
+  it("narRaceListSubUrl(nar.netkeiba.com)経由で取得し、ばんえいを除いた一覧を返すこと", async () => {
+    const fetcher = new RecordingFetcher(narHandler);
+    const entries = await listNarRaces(parseKaisaiDate("20260712"), {
+      fetcher,
+    });
+    // フィクスチャは4場44レース中、帯広(ばんえい・場コード65)12レースを除く32レース。
+    expect(entries).toHaveLength(32);
+    expect(fetcher.callFor("race_list_sub").url).toContain(
+      "nar.netkeiba.com",
     );
   });
 });

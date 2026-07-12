@@ -16,7 +16,9 @@
 
 import type { CachedFetchTextOptions } from "./cache.js";
 import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
+import { venueKindOfRaceId } from "./ids.js";
 import { parseHorseResults } from "./parse-horse-results.js";
+import { parseNarOdds } from "./parse-nar-odds.js";
 import { parseOdds } from "./parse-odds.js";
 import { parseOikiri } from "./parse-oikiri.js";
 import { parseRaceList } from "./parse-race-list.js";
@@ -31,6 +33,8 @@ import type {
 } from "./types.js";
 import {
   horseResultsApiUrl,
+  narOddsPageUrl,
+  narRaceListSubUrl,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
@@ -193,14 +197,18 @@ export async function scrapeRace(
   const now = deps.now ?? (() => new Date());
   const fetchedAt = now().toISOString();
   const warnings: ScrapeWarning[] = [];
+  const isNar = venueKindOfRaceId(raceId) === "nar";
 
   // (1) 出馬表(必須): 失敗は throw。
+  // shutubaUrl は race_id の場コードに応じて race.netkeiba.com / nar.netkeiba.com を
+  // 自動選択するため、中央・地方でこのステップの呼び出し自体は変わらない。
   const shutubaText = await deps.fetcher.fetchText(shutubaUrl(raceId), {
     maxAgeMs: ttl.shutubaMs,
   });
   const shutuba = parseShutuba(shutubaText);
 
   // (2) 各馬の全戦績: 馬単位で握る(1頭の失敗で全体を落とさない)。
+  // horseResultsApiUrl は db.netkeiba.com 共通で中央・地方の区別が無い(常に同じ呼び出し)。
   const results = new Map<string, HorseRaceResult[]>();
   for (const horse of shutuba.horses) {
     try {
@@ -218,28 +226,39 @@ export async function scrapeRace(
     }
   }
 
-  // (3) 調教(optional): 失敗しても null+警告でレースは継続。
+  // (3) 調教(optional・中央のみ): 地方(NAR)にはページ自体が存在しないため、
+  // 取得を試みず・警告も出さず「対象外」として空(全馬null)のまま扱う。
+  // 中央では従来通り、失敗しても null+警告でレースは継続する。
   const oikiriByHorse = new Map<string, OikiriEntry>();
-  try {
-    const oikiriText = await deps.fetcher.fetchText(oikiriUrl(raceId), {
-      maxAgeMs: ttl.oikiriMs,
-    });
-    for (const entry of parseOikiri(oikiriText).entries) {
-      oikiriByHorse.set(entry.horseId, entry);
+  if (!isNar) {
+    try {
+      const oikiriText = await deps.fetcher.fetchText(oikiriUrl(raceId), {
+        maxAgeMs: ttl.oikiriMs,
+      });
+      for (const entry of parseOikiri(oikiriText).entries) {
+        oikiriByHorse.set(entry.horseId, entry);
+      }
+    } catch (error) {
+      warnings.push({
+        kind: "調教",
+        message: `調教(追い切り)の取得に失敗しました: ${errorMessage(error)}`,
+      });
     }
-  } catch (error) {
-    warnings.push({
-      kind: "調教",
-      message: `調教(追い切り)の取得に失敗しました: ${errorMessage(error)}`,
-    });
   }
 
   // (4) オッズ(必須): 失敗は throw。bypassOddsCache 指定時はキャッシュを迂回。
-  const oddsText = await deps.fetcher.fetchText(oddsApiUrl(raceId), {
+  // 地方(NAR)はJSON APIが存在しないため、静的HTML(narOddsPageUrl)をparseNarOddsで解釈する。
+  const oddsFetchOptions: CachedFetchTextOptions = {
     maxAgeMs: ttl.oddsMs,
     bypassCache: options.bypassOddsCache ?? false,
-  });
-  const odds = parseOdds(oddsText);
+  };
+  const odds = isNar
+    ? parseNarOdds(
+        await deps.fetcher.fetchText(narOddsPageUrl(raceId), oddsFetchOptions),
+      )
+    : parseOdds(
+        await deps.fetcher.fetchText(oddsApiUrl(raceId), oddsFetchOptions),
+      );
   // オッズ取得直後の時刻。着手時刻(fetchedAt)とは別に記録する。
   const oddsFetchedAt = now().toISOString();
 
@@ -270,6 +289,27 @@ export async function listRaces(
 ): Promise<RaceListEntry[]> {
   const ttl: ScrapeTtlConfig = { ...DEFAULT_TTL, ...deps.ttl };
   const text = await deps.fetcher.fetchText(raceListSubUrl(kaisaiDate), {
+    maxAgeMs: ttl.raceListMs,
+  });
+  return parseRaceList(text);
+}
+
+/**
+ * 開催日の地方(NAR)レース一覧を取得する。
+ *
+ * kaisaiDate自体は中央・地方の区別を持たないため(YYYYMMDDのみ)、URL選択は
+ * listRaces と別関数に分ける。パース(parseRaceList)は中央と共通で、
+ * 帯広(ばんえい・場コード65)は parseRaceId が拒否するため一覧から自動的に除外される。
+ *
+ * @param kaisaiDate 開催日(検証済み)
+ * @param deps フェッチャ・TTLの注入
+ */
+export async function listNarRaces(
+  kaisaiDate: KaisaiDate,
+  deps: ScrapeDeps,
+): Promise<RaceListEntry[]> {
+  const ttl: ScrapeTtlConfig = { ...DEFAULT_TTL, ...deps.ttl };
+  const text = await deps.fetcher.fetchText(narRaceListSubUrl(kaisaiDate), {
     maxAgeMs: ttl.raceListMs,
   });
   return parseRaceList(text);

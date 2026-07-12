@@ -8,6 +8,9 @@ import {
   commentUrl,
   horseResultsApiUrl,
   horseUrl,
+  narOddsPageUrl,
+  NarUnsupportedError,
+  narRaceListSubUrl,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
@@ -16,6 +19,7 @@ import {
 } from "../../src/scraper/urls.js";
 
 const raceId = parseRaceId("202605020811");
+const narRaceId = parseRaceId("202654071210");
 const kaisaiDate = parseKaisaiDate("20260628");
 const horseId = parseHorseId("2019105219");
 
@@ -69,6 +73,67 @@ describe("URL構築の集約(urls.ts)", () => {
   });
 });
 
+describe("URL構築のドメイン自動選択(中央/地方)", () => {
+  it("shutubaUrlは地方race_idではnar.netkeiba.comを返すこと", () => {
+    expect(shutubaUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/race/shutuba.html?race_id=202654071210",
+    );
+  });
+
+  it("shutubaUrlは中央race_idではrace.netkeiba.comを返すこと(既存動作)", () => {
+    expect(shutubaUrl(raceId)).toBe(
+      "https://race.netkeiba.com/race/shutuba.html?race_id=202605020811",
+    );
+  });
+
+  it("raceResultUrlは地方race_idではnar.netkeiba.comを返すこと", () => {
+    expect(raceResultUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/race/result.html?race_id=202654071210",
+    );
+  });
+
+  it("raceResultUrlは中央race_idではrace.netkeiba.comを返すこと(既存動作)", () => {
+    expect(raceResultUrl(raceId)).toBe(
+      "https://race.netkeiba.com/race/result.html?race_id=202605020811",
+    );
+  });
+});
+
+describe("narRaceListSubUrl(地方レース一覧サブHTML)", () => {
+  it("開催日クエリ付きの地方レース一覧サブURL(nar.netkeiba.com)を返すこと", () => {
+    expect(narRaceListSubUrl(kaisaiDate)).toBe(
+      "https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=20260628",
+    );
+  });
+});
+
+describe("narOddsPageUrl(地方オッズページ)", () => {
+  it("type=b1固定のクエリ付き地方オッズページURLを返すこと", () => {
+    expect(narOddsPageUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/odds/index.html?type=b1&race_id=202654071210",
+    );
+  });
+});
+
+describe("oikiriUrl/commentUrl(地方では存在しないページ)", () => {
+  it("oikiriUrlに地方race_idを渡すとNarUnsupportedErrorになること", () => {
+    expect(() => oikiriUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+
+  it("commentUrlに地方race_idを渡すとNarUnsupportedErrorになること", () => {
+    expect(() => commentUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+
+  it("中央race_idでは従来通りoikiriUrl/commentUrlが取得できること(既存動作)", () => {
+    expect(oikiriUrl(raceId)).toBe(
+      "https://race.netkeiba.com/race/oikiri.html?race_id=202605020811",
+    );
+    expect(commentUrl(raceId)).toBe(
+      "https://race.netkeiba.com/race/comment.html?race_id=202605020811",
+    );
+  });
+});
+
 describe("公開API(index.tsからの再エクスポート)", () => {
   it("URL構築関数がindexから再エクスポートされていること", async () => {
     const mod = await import("../../src/index.js");
@@ -80,6 +145,9 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.horseResultsApiUrl).toBe(horseResultsApiUrl);
     expect(mod.oddsApiUrl).toBe(oddsApiUrl);
     expect(mod.raceResultUrl).toBe(raceResultUrl);
+    expect(mod.narRaceListSubUrl).toBe(narRaceListSubUrl);
+    expect(mod.narOddsPageUrl).toBe(narOddsPageUrl);
+    expect(mod.NarUnsupportedError).toBe(NarUnsupportedError);
   });
 
   it("不採用となったnewspaperUrlは公開されないこと", async () => {

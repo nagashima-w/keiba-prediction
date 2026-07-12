@@ -28,14 +28,19 @@ export {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  venueKindOfRaceId,
   type HorseId,
   type KaisaiDate,
   type RaceId,
+  type RaceIdVenueKind,
 } from "./scraper/ids.js";
 export {
   commentUrl,
   horseResultsApiUrl,
   horseUrl,
+  narOddsPageUrl,
+  narRaceListSubUrl,
+  NarUnsupportedError,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
@@ -53,6 +58,7 @@ export {
   parseHorseResults,
 } from "./scraper/parse-horse-results.js";
 export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
+export { NarOddsParseError, parseNarOdds } from "./scraper/parse-nar-odds.js";
 export {
   parseRaceResult,
   RaceResultParseError,
@@ -64,6 +70,7 @@ export {
   DEFAULT_RACE_LIST_TTL_MS,
   DEFAULT_RESULTS_TTL_MS,
   DEFAULT_SHUTUBA_TTL_MS,
+  listNarRaces,
   listRaces,
   scrapeRace,
   type RaceData,
