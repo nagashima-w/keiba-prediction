@@ -85,4 +85,30 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(fetch.mock.calls[0]![0]).toContain("race_list_sub.html");
     expect(entries).toEqual([]);
   });
+
+  it("listNarRaces は地方(nar.netkeiba.com)のURLで注入fetchを呼ぶこと", async () => {
+    const emptyResponse: FetchResponse = {
+      status: 200,
+      ok: true,
+      headers: {
+        get: (name: string): string | null =>
+          name.toLowerCase() === "content-type"
+            ? "text/html; charset=euc-jp"
+            : null,
+      },
+      arrayBuffer: async (): Promise<ArrayBuffer> => new ArrayBuffer(0),
+    };
+    const fetch = vi.fn<FetchLike>(async () => emptyResponse);
+
+    const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+    resources.push(r);
+
+    expect(typeof r.listNarRaces).toBe("function");
+    const entries = await r.listNarRaces(parseKaisaiDate("20260101"));
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]![0]).toContain("nar.netkeiba.com");
+    expect(fetch.mock.calls[0]![0]).toContain("race_list_sub.html");
+    expect(entries).toEqual([]);
+  });
 });

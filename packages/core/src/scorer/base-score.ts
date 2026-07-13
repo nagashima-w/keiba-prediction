@@ -19,6 +19,7 @@
  */
 
 import type { DerivedRaceFeature, FrameZone } from "./derive-features.js";
+import type { RaceIdVenueKind } from "../scraper/ids.js";
 import type { CourseType } from "../scraper/types.js";
 import { aggregatePlaceRate } from "./aggregate.js";
 import { DEFAULT_SCORER_CONFIG, type ScorerConfig } from "./config.js";
@@ -387,6 +388,12 @@ export interface CourseFrameInput {
   readonly courseType: CourseType;
   /** 今回の枠ゾーン(内/中/外)。 */
   readonly frameZone: FrameZone;
+  /**
+   * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
+   * "nar"(地方競馬)では COURSE_FRAME_BIAS_TABLE が中央10場前提のため、コースレベル
+   * 枠順バイアスを一律対象外とする。
+   */
+  readonly venueKind?: RaceIdVenueKind;
 }
 
 /**
@@ -399,6 +406,18 @@ export function computeCourseFrameBiasScore(
   config: ScorerConfig = DEFAULT_SCORER_CONFIG,
 ): BaseScoreContribution {
   const weight = config.baseScore.weights.courseFrameBias;
+
+  // 地方(NAR)レースはテーブルが中央10場前提のため一律対象外とする。
+  if (today.venueKind === "nar") {
+    return {
+      biasName: COURSE_FRAME_NAME,
+      applied: false,
+      reason: "NARのため対象外(コースレベル枠順バイアスの補正なし)",
+      weight,
+      correction: 0,
+    };
+  }
+
   const value = courseFrameBiasValue(
     today.venueName,
     today.courseType,
@@ -434,6 +453,11 @@ export interface BaseScoreInput {
   readonly kinryo: number;
   /** 今回の馬体重増減(kg、前走比)。未発表なら null。 */
   readonly bodyWeightDiff: number | null;
+  /**
+   * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
+   * computeCourseFrameBiasScore にそのまま渡す(NARではコースレベル枠順バイアスを対象外にする)。
+   */
+  readonly venueKind?: RaceIdVenueKind;
 }
 
 /** 基礎スコアの集計結果(全項目の寄与度ログと補正合計)。 */
@@ -476,6 +500,7 @@ export function computeBaseScore(
         venueName: today.venueName,
         courseType: today.courseType,
         frameZone: today.frameZone,
+        venueKind: today.venueKind,
       },
       config,
     ),

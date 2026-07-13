@@ -328,6 +328,26 @@ describe("computeCourseFrameBiasScore(コースレベル枠順バイアス)", ()
     expect(c.applied).toBe(false);
     expect(c.correction).toBe(0);
   });
+
+  it("venueKind が nar のときはテーブルに登録があっても補正しないこと", () => {
+    // 中山は本来テーブル登録済み(内枠プラス)だが、地方(NAR)レースでは対象外。
+    const c = computeCourseFrameBiasScore(
+      { venueName: "中山", courseType: "芝", frameZone: "内", venueKind: "nar" },
+      cfg({ weights: { courseFrameBias: 2 } }),
+    );
+    expect(c.applied).toBe(false);
+    expect(c.correction).toBe(0);
+    expect(c.reason).toContain("NARのため対象外");
+  });
+
+  it("venueKind を省略した場合は従来どおり中央として扱われること(既定値は central)", () => {
+    const c = computeCourseFrameBiasScore(
+      { venueName: "中山", courseType: "芝", frameZone: "内" },
+      cfg({ weights: { courseFrameBias: 2 } }),
+    );
+    expect(c.applied).toBe(true);
+    expect(c.reason).not.toContain("NARのため対象外");
+  });
 });
 
 describe("computeBaseScore(基礎スコア統合)", () => {
@@ -352,6 +372,29 @@ describe("computeBaseScore(基礎スコア統合)", () => {
     expect(r.contributions).toHaveLength(6);
     const sum = r.contributions.reduce((s, c) => s + c.correction, 0);
     expect(r.correctionSum).toBeCloseTo(sum, 10);
+  });
+
+  it("venueKind: nar を computeCourseFrameBiasScore にそのまま渡すこと(NARでは対象外)", () => {
+    const features = deriveRaceFeatures([
+      makeResult({ date: "2025/03/01", courseType: "ダ", distance: 1800, finishPosition: rank(1), last3f: 36, kinryo: 55 }),
+    ]);
+    const r = computeBaseScore(
+      features,
+      {
+        courseType: "ダ",
+        distance: 1800,
+        venueName: "中山",
+        frameZone: "内",
+        kinryo: 55,
+        bodyWeightDiff: 0,
+        venueKind: "nar",
+      },
+      undefined,
+      cfg({ weights: { courseFrameBias: 2 } }),
+    );
+    const cf = r.contributions.find((c) => c.biasName === "コース枠順バイアス");
+    expect(cf?.applied).toBe(false);
+    expect(cf?.reason).toContain("NARのため対象外");
   });
 });
 

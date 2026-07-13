@@ -174,3 +174,30 @@ describe("computeVenueBias(競馬場適性・代替評価)", () => {
     expect(c.correction).toBe(0);
   });
 });
+
+describe("computeVenueBias(NAR: 地方レースは補正対象外)", () => {
+  it("venueKind が nar のときは当該場実績があっても補正しないこと", () => {
+    // 中央の京都実績が豊富にあっても、今回が地方(NAR)レースなら競馬場適性補正は対象外。
+    const features = deriveRaceFeatures([
+      centralRun("2025/05/01", "京都", 1),
+      centralRun("2025/04/01", "京都", 3),
+      centralRun("2025/03/01", "京都", 8),
+    ]);
+    const c = computeVenueBias(features, {
+      venueName: "高知",
+      venueKind: "nar",
+    });
+    expect(c.applied).toBe(false);
+    expect(c.correction).toBe(0);
+    expect(c.kind).toBe("不明");
+    expect(c.reason).toContain("NARのため対象外");
+  });
+
+  it("venueKind を省略した場合は従来どおり中央として扱われること(既定値は central)", () => {
+    // 既定(central)では今回の会場が中央10場かどうかで判定する従来ロジックのまま。
+    const features = deriveRaceFeatures([centralRun("2025/01/01", "京都", 1)]);
+    const c = computeVenueBias(features, { venueName: "高知" });
+    expect(c.applied).toBe(false);
+    expect(c.reason).not.toContain("NARのため対象外");
+  });
+});

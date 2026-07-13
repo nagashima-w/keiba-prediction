@@ -170,6 +170,39 @@ describe("computeTransportBias(近距離・長距離)", () => {
   });
 });
 
+describe("computeTransportBias(NAR: 地方レースは補正対象外)", () => {
+  it("venueKind が nar のときは輸送弱フラグを含め補正しないこと", () => {
+    // 中央での長距離輸送実績・輸送弱に該当する馬体重減があっても、今回が地方(NAR)なら
+    // 輸送・滞在バイアスは一律対象外(美浦/栗東所属フォールバックの実害を防ぐ)。
+    const features = deriveRaceFeatures([
+      tRun("新潟", 8, -12),
+      tRun("函館", 9, -14),
+    ]);
+    const c = computeTransportBias(features, {
+      stableLocation: "美浦",
+      venueName: "高知",
+      venueKind: "nar",
+    });
+    expect(c.kind).toBe("不明");
+    expect(c.applied).toBe(false);
+    expect(c.todayLoad).toBeNull();
+    expect(c.transportWeakFlag).toBe(false);
+    expect(c.weakDropCount).toBe(0);
+    expect(c.correction).toBe(0);
+    expect(c.reason).toContain("NARのため対象外");
+  });
+
+  it("venueKind を省略した場合は従来どおり中央として扱われること(既定値は central)", () => {
+    const features = deriveRaceFeatures([tRun("京都", 1), tRun("阪神", 3)]);
+    const c = computeTransportBias(features, {
+      stableLocation: "栗東",
+      venueName: "高知",
+    });
+    expect(c.applied).toBe(false);
+    expect(c.reason).not.toContain("NARのため対象外");
+  });
+});
+
 describe("computeTransportBias(滞在競馬・札幌函館)", () => {
   it("滞在実績2走以上なら滞在走の複勝率で差分補正されること", () => {
     // 栗東所属、今回函館。過去の函館2走(2圏内)=滞在実績。新潟2走(圏外)。

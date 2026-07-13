@@ -19,6 +19,7 @@ import {
   CachedFetcher,
   computeVerifyReport,
   HttpClient,
+  listNarRaces,
   listRaces,
   parseRaceResult,
   ScrapeCache,
@@ -70,8 +71,10 @@ export interface PipelineWiringConfig {
 export interface PipelineResources {
   /** runAnalysis に渡す依存。 */
   readonly deps: AnalysisPipelineDeps;
-  /** 開催日のレース一覧を取得する(キャッシュ経由)。 */
+  /** 開催日の中央競馬レース一覧を取得する(キャッシュ経由)。 */
   readonly listRaces: (kaisaiDate: KaisaiDate) => Promise<RaceListEntry[]>;
+  /** 開催日の地方競馬(NAR)レース一覧を取得する(キャッシュ経由)。 */
+  readonly listNarRaces: (kaisaiDate: KaisaiDate) => Promise<RaceListEntry[]>;
   /** レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。 */
   readonly importResult: (raceId: RaceId) => Promise<ImportResultOutcome>;
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
@@ -133,6 +136,8 @@ export function createPipelineDeps(
   return {
     deps,
     listRaces: (kaisaiDate: KaisaiDate) => listRaces(kaisaiDate, { fetcher }),
+    listNarRaces: (kaisaiDate: KaisaiDate) =>
+      listNarRaces(kaisaiDate, { fetcher }),
     importResult: (raceId: RaceId): Promise<ImportResultOutcome> =>
       importRaceResult(raceId, {
         // 常にライブ取得(キャッシュ毒化回避)。パース失敗時は saveResult に到達しない。

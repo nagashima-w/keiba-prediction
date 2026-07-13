@@ -70,6 +70,70 @@ describe("createInitialBatchState(初期状態)", () => {
     expect(s.run.outcomes).toEqual([]);
     expect(s.run.expandedRaceIds).toEqual([]);
   });
+
+  it("開催区分(venueKind)は既定で中央(central)になる", () => {
+    const s = createInitialBatchState("20260712");
+    expect(s.selection.venueKind).toBe("central");
+  });
+});
+
+describe("開催区分変更(中央/地方の切替)", () => {
+  /** 選択済みレースがある状態(T1・T2選択済み、central)を作る。 */
+  function withSelection(): BatchAppState {
+    let s = withRaces();
+    s = batchAnalysisReducer(s, { type: "レース選択トグル", raceId: "T1" });
+    s = batchAnalysisReducer(s, { type: "レース選択トグル", raceId: "T2" });
+    return s;
+  }
+
+  it("開催区分を変更すると venueKind が更新され、旧選択・旧バッチ結果がクリアされる", () => {
+    const before = withSelection();
+    expect(before.selection.selectedRaceIds.length).toBeGreaterThan(0);
+
+    const s = batchAnalysisReducer(before, {
+      type: "開催区分変更",
+      venueKind: "nar",
+    });
+    expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.selectedRaceIds).toEqual([]);
+    expect(s.run.outcomes).toEqual([]);
+  });
+
+  it("実行中は開催区分変更を無視する(in-flightガード)", () => {
+    let s = withSelection();
+    s = batchAnalysisReducer(s, { type: "一括分析開始" });
+    const before = s;
+    s = batchAnalysisReducer(s, { type: "開催区分変更", venueKind: "nar" });
+    expect(s).toBe(before);
+  });
+
+  it("同じ開催区分を指定した場合はno-op(状態を参照等価のまま返し、選択も維持される)", () => {
+    const before = withSelection();
+    expect(before.selection.venueKind).toBe("central");
+    expect(before.selection.selectedRaceIds).toEqual(["T1", "T2"]);
+
+    const s = batchAnalysisReducer(before, {
+      type: "開催区分変更",
+      venueKind: "central",
+    });
+    // 参照等価(no-op): 同一venueKind指定では新しいオブジェクトを作らない。
+    expect(s).toBe(before);
+    expect(s.selection.venueKind).toBe("central");
+    expect(s.selection.selectedRaceIds).toEqual(["T1", "T2"]);
+  });
+
+  it("異なる開催区分を指定した場合は選択・旧バッチ結果がクリアされる(no-opとの対比)", () => {
+    const before = withSelection();
+    expect(before.selection.selectedRaceIds).toEqual(["T1", "T2"]);
+
+    const s = batchAnalysisReducer(before, {
+      type: "開催区分変更",
+      venueKind: "nar",
+    });
+    expect(s).not.toBe(before);
+    expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.selectedRaceIds).toEqual([]);
+  });
 });
 
 describe("複数選択(トグル・会場一括・全解除)", () => {

@@ -131,6 +131,7 @@ function fakeRaceData(
 }
 
 const RACE_ID = "202605020811"; // 場コード05 → 東京。
+const NAR_RACE_ID = "202654071210"; // 場コード54 → 高知(2026/07/12・10R。docs/nar-scraping-plan.mdの実例)。
 const KAISAI = "20260709"; // 開催日(選択済みとして渡す)。
 const FIXED_NOW = new Date("2026-07-09T12:34:56.000Z");
 
@@ -492,5 +493,77 @@ describe("runAnalysis(分析パイプライン)", () => {
     );
     expect(result.llmUsed).toBe(true);
     expect(result.fallback).toBe(true);
+  });
+});
+
+describe("runAnalysis(NAR: 地方レースの分析)", () => {
+  let saved: AnalysisRecord[];
+  let progress: AnalysisProgress[];
+  let baseDeps: () => AnalysisPipelineDeps;
+
+  beforeEach(() => {
+    (buildPriorInput as unknown as Mock).mockClear();
+    saved = [];
+    progress = [];
+    baseDeps = () => ({
+      scrape: vi.fn(async () => fakeRaceData(NAR_RACE_ID)),
+      analyze: null,
+      saveAnalysis: vi.fn((rec: AnalysisRecord) => {
+        saved.push(rec);
+        return saved.length;
+      }),
+      now: () => FIXED_NOW,
+      llmSkipReason: "APIキー未設定",
+    });
+  });
+
+  const onProgress = (p: AnalysisProgress): void => {
+    progress.push(p);
+  };
+
+  it("地方(NAR)のレースIDでも分析が貫通し、会場名が地方の対応表から解決されること", async () => {
+    const result = await runAnalysis(
+      parseRaceId(NAR_RACE_ID),
+      parseKaisaiDate("20260712"),
+      baseDeps(),
+      onProgress,
+    );
+    expect(result.venueName).toBe("高知");
+    expect(result.rows).toHaveLength(3);
+    expect(result.date).toBe("2026/07/12");
+    expect(result.dateApproximate).toBe(false);
+  });
+
+  it("buildPriorInput に venueKind: nar が渡ること", async () => {
+    await runAnalysis(
+      parseRaceId(NAR_RACE_ID),
+      parseKaisaiDate("20260712"),
+      baseDeps(),
+      onProgress,
+    );
+    const calls = (buildPriorInput as unknown as Mock).mock.calls;
+    expect(calls.length).toBe(3);
+    for (const call of calls) {
+      expect(call[0].race.venueKind).toBe("nar");
+      expect(call[0].race.venueName).toBe("高知");
+    }
+  });
+
+  it("中央レースでは buildPriorInput に venueKind: central が渡ること(回帰確認)", async () => {
+    const centralDeps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID)),
+    };
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      centralDeps,
+      onProgress,
+    );
+    const calls = (buildPriorInput as unknown as Mock).mock.calls;
+    expect(calls.length).toBe(3);
+    for (const call of calls) {
+      expect(call[0].race.venueKind).toBe("central");
+    }
   });
 });

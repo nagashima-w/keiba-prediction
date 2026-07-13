@@ -155,14 +155,15 @@ export function App(): React.JSX.Element {
 
   const handleFetch = useCallback(() => {
     const date = state.selection.date;
+    const venueKind = state.selection.venueKind;
     dispatch({ type: "レース取得開始" });
     window.keibaApi
-      .listRaces(date)
+      .listRaces(date, venueKind)
       .then((races) => dispatch({ type: "レース取得成功", races }))
       .catch((e: unknown) =>
         dispatch({ type: "レース取得失敗", message: errorMessage(e) }),
       );
-  }, [state.selection.date]);
+  }, [state.selection.date, state.selection.venueKind]);
 
   const handleRun = useCallback(() => {
     const raceIds = state.selection.races
@@ -276,6 +277,7 @@ export function App(): React.JSX.Element {
         <>
           <RaceSelection
             date={state.selection.date}
+            venueKind={state.selection.venueKind}
             loading={state.selection.loadingRaces}
             races={state.selection.races}
             error={state.selection.racesError}
@@ -283,6 +285,9 @@ export function App(): React.JSX.Element {
             // 一括分析実行中は日付変更・取得・選択変更を禁止し、in-flight の取り違えを防ぐ。
             disabled={state.run.running}
             onDateChange={(date) => dispatch({ type: "日付変更", date })}
+            onVenueKindChange={(venueKind) =>
+              dispatch({ type: "開催区分変更", venueKind })
+            }
             onFetch={handleFetch}
             onToggle={(raceId) =>
               dispatch({ type: "レース選択トグル", raceId })

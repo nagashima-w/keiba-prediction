@@ -14,7 +14,8 @@ import { IPC_CHANNELS } from "../shared/channels.js";
  */
 const api: KeibaApi = {
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.getAppInfo),
-  listRaces: (date) => ipcRenderer.invoke(IPC_CHANNELS.listRaces, date),
+  listRaces: (date, venueKind) =>
+    ipcRenderer.invoke(IPC_CHANNELS.listRaces, date, venueKind),
   importResult: (raceId) =>
     ipcRenderer.invoke(IPC_CHANNELS.importResult, raceId),
   getVerifyReport: () => ipcRenderer.invoke(IPC_CHANNELS.getVerifyReport),
