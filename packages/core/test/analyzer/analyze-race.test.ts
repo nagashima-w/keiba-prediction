@@ -5,7 +5,9 @@
  *  - 1レース1リクエスト。LLMクライアントは注入(モックのみ、実APIは呼ばない)。
  *  - フェイルセーフ: JSONパース失敗時は1回だけ同一プロンプトでリトライ、再失敗で prior をそのまま採用し
  *    fallback:true と理由を返す。LLM呼び出し自体の例外も同様。
- *  - 出力: 馬ごと {umaban, prior, adjustedProb, reason, clipped} + メタ(fallback有無・リトライ回数)。
+ *  - 出力: 馬ごと {umaban, prior, adjustedProb, reason, clipped, mark} + メタ(fallback有無・リトライ回数)。
+ *
+ * Task#22(予想印): 成功時はLLM応答のmarkを反映し、フォールバック時は全馬mark=nullで返すことを検証する。
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -19,6 +21,11 @@ function input(): BuildPromptInput {
     horses: [
       { umaban: 1, horseName: "アルファ", prior: 0.4, runs: [{ passing: [1], fieldSize: 16 }] },
       { umaban: 2, horseName: "ブラボー", prior: 0.2, runs: [{ passing: [8], fieldSize: 16 }] },
+      // 予想印の頭数制約(◎〇▲△を最低1頭ずつ)を満たすための埋め合わせ馬(3〜6番)。
+      { umaban: 3, horseName: "チャーリー", prior: 0.3, runs: [] },
+      { umaban: 4, horseName: "デルタ", prior: 0.3, runs: [] },
+      { umaban: 5, horseName: "エコー", prior: 0.3, runs: [] },
+      { umaban: 6, horseName: "フォックス", prior: 0.3, runs: [] },
     ],
   };
 }
@@ -35,10 +42,21 @@ function fixedLlm(...responses: string[]): LlmClient {
   };
 }
 
+/** 予想印の頭数制約(◎〇▲△を1頭ずつ)を満たすための埋め合わせ馬(3〜6番)のJSON片。 */
+function fillerMarkHorses(): unknown[] {
+  return [
+    { number: 3, place_prob: 0.3, reason: "filler", mark: "◎" },
+    { number: 4, place_prob: 0.3, reason: "filler", mark: "〇" },
+    { number: 5, place_prob: 0.3, reason: "filler", mark: "▲" },
+    { number: 6, place_prob: 0.3, reason: "filler", mark: "△" },
+  ];
+}
+
 const okBody = JSON.stringify({
   horses: [
     { number: 1, place_prob: 0.45, reason: "調教良化" },
     { number: 2, place_prob: 0.15, reason: "展開不利" },
+    ...fillerMarkHorses(),
   ],
 });
 
@@ -119,6 +137,7 @@ describe("analyzeRace(1レース分の分析)", () => {
       horses: [
         { number: 1, place_prob: 0.99, reason: "過大" },
         { number: 2, place_prob: 0.2, reason: "据置" },
+        ...fillerMarkHorses(),
       ],
     });
     const r = await analyzeRace(input(), { llm: fixedLlm(clipBody) });
@@ -151,11 +170,59 @@ describe("analyzeRace(1レース分の分析)", () => {
       horses: [
         { number: 1, place_prob: 0.48, reason: "x" },
         { number: 2, place_prob: 0.2, reason: "y" },
+        ...fillerMarkHorses(),
       ],
     });
     const r = await analyzeRace(input(), { llm: fixedLlm(bodyText), maxAdjust: 0.05 });
     const h1 = r.horses.find((h) => h.umaban === 1)!;
     expect(h1.adjustedProb).toBeCloseTo(0.45, 9);
     expect(h1.clipped).toBe(true);
+  });
+});
+
+describe("analyzeRace(予想印 mark の統合・Task#22)", () => {
+  it("初回成功: LLM応答の mark が各馬に反映されること", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm(okBody) });
+    expect(r.fallback).toBe(false);
+    expect(r.horses.find((h) => h.umaban === 3)!.mark).toBe("◎");
+    expect(r.horses.find((h) => h.umaban === 4)!.mark).toBe("〇");
+    expect(r.horses.find((h) => h.umaban === 5)!.mark).toBe("▲");
+    expect(r.horses.find((h) => h.umaban === 6)!.mark).toBe("△");
+    // 馬番1・2はokBodyでmark未指定 → 印なし(null)。
+    expect(r.horses.find((h) => h.umaban === 1)!.mark).toBeNull();
+    expect(r.horses.find((h) => h.umaban === 2)!.mark).toBeNull();
+  });
+
+  it("mark の頭数制約違反(◎が2頭)はパース失敗としてリトライ→フォールバックに乗ること", async () => {
+    const badMarkBody = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.15, reason: "y", mark: "◎" }, // ◎が2頭で制約違反。
+        ...fillerMarkHorses(),
+      ],
+    });
+    const llm = fixedLlm(badMarkBody, badMarkBody);
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.retryCount).toBe(1);
+    expect(llm.complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("フォールバック時(LLM例外2回)は全馬 mark=null で返すこと", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new Error("常に失敗");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
+  });
+
+  it("フォールバック時(パース2回失敗)も全馬 mark=null で返すこと", async () => {
+    const llm = fixedLlm("こわれ1", "こわれ2");
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
   });
 });

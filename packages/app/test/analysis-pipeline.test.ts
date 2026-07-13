@@ -99,7 +99,14 @@ function fakeRaceData(
   const odds: OddsSnapshot = {
     officialDatetime: "2026-07-09 09:00:00",
     oddsStatus,
-    win: {},
+    // 単勝オッズ・人気(Task#22: LLMプロンプトの市場データに配線される)。
+    // yoso(予想オッズ)でも単勝は値が入るため oddsStatus に関わらず同じ値を用意する。
+    win: {
+      1: { odds: 5.2, ninki: 3 },
+      2: { odds: 1.3, ninki: 1 },
+      // 3番は取消等で単勝オッズが欠損 → winOdds/popularity が null になること。
+      3: { odds: null, ninki: null },
+    },
     place:
       oddsStatus === "yoso"
         ? // 予想オッズ(yoso)は複勝未発売のため place が空 → 全馬EV対象外になる。
@@ -398,6 +405,7 @@ describe("runAnalysis(分析パイプライン)", () => {
           reason: `根拠${h.umaban}`,
           clipped: false,
           usedPrior: false,
+          mark: null,
         })),
         fallback: false,
         retryCount: 0,
@@ -443,6 +451,7 @@ describe("runAnalysis(分析パイプライン)", () => {
             reason: null,
             clipped: false,
             usedPrior: true,
+            mark: null,
           })),
           fallback: false,
           retryCount: 0,
@@ -469,6 +478,92 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(horse2.restInterval ?? null).toBeNull();
   });
 
+  it("LLMプロンプトへ単勝オッズ・人気・複勝オッズ下限・参考EVを供給する(Task#22)", async () => {
+    let captured: BuildPromptInput | null = null;
+    const analyze = vi.fn(
+      async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => {
+        captured = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      },
+    );
+    const deps: AnalysisPipelineDeps = { ...baseDeps(), analyze };
+
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+
+    // 1番: 単勝5.2倍・3番人気、複勝下限5.0 → 参考EV = prior × 5.0。
+    const horse1 = captured!.horses.find((h) => h.umaban === 1)!;
+    expect(horse1.winOdds).toBe(5.2);
+    expect(horse1.popularity).toBe(3);
+    expect(horse1.placeOddsMin).toBe(5.0);
+    expect(horse1.referenceEv).toBeCloseTo(horse1.prior * 5.0, 8);
+
+    // 3番: 単勝・複勝ともオッズ欠損 → winOdds/popularity/placeOddsMin/referenceEv すべて null。
+    const horse3 = captured!.horses.find((h) => h.umaban === 3)!;
+    expect(horse3.winOdds).toBeNull();
+    expect(horse3.popularity).toBeNull();
+    expect(horse3.placeOddsMin).toBeNull();
+    expect(horse3.referenceEv).toBeNull();
+  });
+
+  it("予想オッズ(yoso・複勝未発売)でも単勝オッズは供給し、複勝オッズ下限・参考EVはnullにする(Task#22)", async () => {
+    let captured: BuildPromptInput | null = null;
+    const analyze = vi.fn(
+      async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => {
+        captured = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      },
+    );
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      analyze,
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "yoso")),
+    };
+
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+
+    const horse1 = captured!.horses.find((h) => h.umaban === 1)!;
+    expect(horse1.winOdds).toBe(5.2); // yosoでも単勝オッズは供給される。
+    expect(horse1.popularity).toBe(3);
+    expect(horse1.placeOddsMin).toBeNull(); // 複勝未発売。
+    expect(horse1.referenceEv).toBeNull(); // 複勝オッズ下限が無いため算出不可。
+  });
+
   it("LLMがフェイルセーフで prior にフォールバックした場合、result.fallback=true を返す", async () => {
     const analyze = vi.fn(
       async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
@@ -479,6 +574,7 @@ describe("runAnalysis(分析パイプライン)", () => {
           reason: null,
           clipped: false,
           usedPrior: true,
+          mark: null,
         })),
         fallback: true,
         retryCount: 1,

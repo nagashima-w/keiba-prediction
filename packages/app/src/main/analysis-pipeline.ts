@@ -33,6 +33,7 @@ import {
   classifyTrackWetness,
   computeFieldPriors,
   computeRaceEv,
+  computeReferenceEv,
   daysBetweenDates,
   DEFAULT_EV_CONFIG,
   venueKindOfRaceId,
@@ -233,20 +234,34 @@ export async function runAnalysis(
         weather: race.race.weather ?? null,
         trackCondition: race.race.trackCondition ?? null,
       },
-      horses: race.horses.map((horseData) => ({
-        umaban: horseData.shutuba.umaban,
-        horseName: horseData.shutuba.name,
-        prior: priorByUmaban.get(horseData.shutuba.umaban)!.prior,
-        oikiri: horseData.oikiri
-          ? { critic: horseData.oikiri.critic, rank: horseData.oikiri.rank }
-          : null,
-        runs: (horseData.results ?? []).map((r) => ({
-          passing: r.passing,
-          fieldSize: r.entryCount,
-        })),
-        // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
-        restInterval: restIntervalOf(horseData.results ?? [], analysisDate),
-      })),
+      horses: race.horses.map((horseData) => {
+        const umaban = horseData.shutuba.umaban;
+        const prior = priorByUmaban.get(umaban)!.prior;
+        // 市場データ(Task#22: 予想印の判断材料)。oddsStatus="yoso"(複勝未発売)では
+        // race.odds.place が空になるため placeOddsMin/referenceEv は自然に null になる。
+        // winOdds(単勝)は yoso でも予想オッズ値が入るためそのまま渡す。
+        const winOdds = race.odds.win[umaban]?.odds ?? null;
+        const popularity = race.odds.win[umaban]?.ninki ?? null;
+        const placeOddsMin = race.odds.place[umaban]?.oddsMin ?? null;
+        return {
+          umaban,
+          horseName: horseData.shutuba.name,
+          prior,
+          oikiri: horseData.oikiri
+            ? { critic: horseData.oikiri.critic, rank: horseData.oikiri.rank }
+            : null,
+          runs: (horseData.results ?? []).map((r) => ({
+            passing: r.passing,
+            fieldSize: r.entryCount,
+          })),
+          // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
+          restInterval: restIntervalOf(horseData.results ?? [], analysisDate),
+          winOdds,
+          popularity,
+          placeOddsMin,
+          referenceEv: computeReferenceEv(prior, placeOddsMin),
+        };
+      }),
     };
     const analysis = await deps.analyze(promptInput);
     llmUsed = true;

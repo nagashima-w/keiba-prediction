@@ -249,6 +249,7 @@ export {
 } from "./analyzer/leg-style.js";
 export {
   buildPrompt,
+  computeReferenceEv,
   type BuildPromptInput,
   type BuildPromptRaceInfo,
   type PromptHorse,
@@ -259,9 +260,11 @@ export {
   extractJsonObject,
   MAX_ADJUST,
   parseAnalyzerResponse,
+  PREDICTION_MARKS,
   type ParseAnalyzerOptions,
   type ParseAnalyzerResult,
   type ParsedHorseResult,
+  type PredictionMark,
   type PriorRef,
 } from "./analyzer/parse-response.js";
 export {
