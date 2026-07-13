@@ -10,6 +10,7 @@ import {
 } from "./batch-summary.js";
 import {
   formatEv,
+  formatMark,
   formatOdds,
   formatOpportunityScore,
   formatPercent,
@@ -17,6 +18,7 @@ import {
   isHighlightRow,
   LABEL_ADJUSTED_PROB,
   LABEL_PRIOR,
+  MARK_LEGEND,
   oddsStatusNote,
 } from "./format.js";
 
@@ -106,6 +108,9 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
+            <th style={thStyle} title={MARK_LEGEND}>
+              印
+            </th>
             <th style={thStyle}>馬番</th>
             <th style={thStyle}>馬名</th>
             <th
@@ -131,6 +136,7 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
               key={row.umaban}
               style={isHighlightRow(row) ? { background: "#e6ffea" } : undefined}
             >
+              <td style={tdStyle}>{formatMark(row.mark)}</td>
               <td style={tdStyle}>{row.umaban}</td>
               <td style={tdStyle}>{row.horseName}</td>
               <td style={tdStyle}>{formatPercent(row.prior)}</td>
@@ -313,6 +319,9 @@ export function BatchAnalysisView(
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
                 <thead>
                   <tr>
+                    <th style={thStyle} title={MARK_LEGEND}>
+                      印
+                    </th>
                     <th style={thStyle}>レース</th>
                     <th style={thStyle}>馬番</th>
                     <th style={thStyle}>馬名</th>
@@ -332,6 +341,7 @@ export function BatchAnalysisView(
                       key={`${row.raceId}-${row.umaban}`}
                       style={{ background: "#e6ffea" }}
                     >
+                      <td style={tdStyle}>{formatMark(row.mark)}</td>
                       <td style={tdStyle}>{row.raceName}</td>
                       <td style={tdStyle}>{row.umaban}</td>
                       <td style={tdStyle}>{row.horseName}</td>

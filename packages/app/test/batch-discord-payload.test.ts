@@ -25,6 +25,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   isPositive: false,
   reason: null,
   careerRunCount: 10,
+  mark: null,
   ...over,
 });
 
@@ -84,6 +85,38 @@ describe("buildBatchDiscordPayload(一括サマリ→Discordペイロード)", (
     expect(desc).toContain("中山2R");
     // EV降順(ベータ EV1.6 が先)。
     expect(desc.indexOf("ベータ")).toBeLessThan(desc.indexOf("アルファ"));
+  });
+
+  it("予想印(mark)が付いた馬は行頭に印を含め、無い馬は従来どおりであること(Task#23)", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("111111111111", "1R", [
+        row({
+          umaban: 4,
+          horseName: "アルファ",
+          ev: 1.1,
+          isPositive: true,
+          mark: "◎",
+        }),
+        row({
+          umaban: 7,
+          horseName: "ベータ",
+          ev: 1.6,
+          isPositive: true,
+          mark: null,
+        }),
+      ]),
+    ];
+    const desc = buildBatchDiscordPayload(outcomes).embeds[0]!.description ?? "";
+    // 妙味レースランキングにも同名の馬が現れうるため、馬の詳細行(AI補正後を含む行)に絞って検証する。
+    const lineAlpha = desc
+      .split("\n")
+      .find((l) => l.includes("アルファ") && l.includes("AI補正後"))!;
+    const lineBeta = desc
+      .split("\n")
+      .find((l) => l.includes("ベータ") && l.includes("AI補正後"))!;
+    expect(lineAlpha).toContain("◎ 1R 4番");
+    // 印なし馬は従来どおり(印の接頭辞が付かない)。
+    expect(lineBeta.trimStart().startsWith("1R")).toBe(true);
   });
 
   it("補正後確率のラベルは「AI補正後」に統一する", () => {

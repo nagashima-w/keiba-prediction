@@ -18,6 +18,7 @@ function horse(
     ev,
     isPositive,
     contributions: null,
+    mark: null,
   };
 }
 

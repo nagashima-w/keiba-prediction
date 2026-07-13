@@ -57,6 +57,7 @@ export function collectEvPlusSummary(
         adjustedProb: row.adjustedProb,
         placeOddsMin: row.placeOddsMin,
         ev: row.ev,
+        mark: row.mark,
       });
     }
   }

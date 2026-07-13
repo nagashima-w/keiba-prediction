@@ -151,6 +151,7 @@ const horses: readonly EmbedHorse[] = [
     placeOddsMin: 2.5,
     ev: 1.05,
     isPositive: true,
+    mark: "◎",
   },
   {
     umaban: 7,
@@ -159,6 +160,7 @@ const horses: readonly EmbedHorse[] = [
     placeOddsMin: 4.2,
     ev: 1.31,
     isPositive: true,
+    mark: null,
   },
   {
     umaban: 1,
@@ -167,6 +169,7 @@ const horses: readonly EmbedHorse[] = [
     placeOddsMin: 1.4,
     ev: 0.7,
     isPositive: false,
+    mark: null,
   },
 ];
 
@@ -201,6 +204,23 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
     expect(desc).not.toContain("ウマC");
   });
 
+  it("予想印(mark)が付いた馬は行頭に印を含める(Task#23)", () => {
+    const embed = buildAnalysisEmbed(raceInfo, horses);
+    const desc = embed.description ?? "";
+    // ウマA(mark=◎)は行頭に「◎」が付くこと。
+    const lineA = desc.split("\n").find((l) => l.includes("ウマA"))!;
+    expect(lineA.trimStart().startsWith("◎")).toBe(true);
+    expect(lineA).toContain("◎ 3番");
+  });
+
+  it("印なし馬は従来どおり(印の接頭辞を付けない)", () => {
+    const embed = buildAnalysisEmbed(raceInfo, horses);
+    const desc = embed.description ?? "";
+    // ウマB(mark=null)は印の接頭辞が付かず、従来どおり馬番から始まること。
+    const lineB = desc.split("\n").find((l) => l.includes("ウマB"))!;
+    expect(lineB.trimStart().startsWith("7番")).toBe(true);
+  });
+
   it("EVプラスが無い場合は「該当なし」を示す", () => {
     const noneHorses: readonly EmbedHorse[] = [
       {
@@ -210,6 +230,7 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
         placeOddsMin: 1.4,
         ev: 0.7,
         isPositive: false,
+        mark: null,
       },
     ];
     const embed = buildAnalysisEmbed(raceInfo, noneHorses);
@@ -254,6 +275,7 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
       placeOddsMin: 2.0,
       ev: 1.2,
       isPositive: true,
+      mark: null,
     }));
     const embed = buildAnalysisEmbed(
       { ...raceInfo, raceName: longName },
@@ -276,6 +298,7 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
         placeOddsMin: null,
         ev: null,
         isPositive: true,
+        mark: null,
       },
     ];
     const desc = buildAnalysisEmbed(raceInfo, withNull).description ?? "";

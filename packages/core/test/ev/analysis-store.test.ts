@@ -20,6 +20,7 @@ function makeRecord(overrides: Partial<AnalysisRecord> = {}): AnalysisRecord {
         ev: 0.75,
         isPositive: false,
         contributions: [{ biasName: "近走着順", correction: 0.05 }],
+        mark: "◎",
       },
       {
         umaban: 2,
@@ -29,6 +30,7 @@ function makeRecord(overrides: Partial<AnalysisRecord> = {}): AnalysisRecord {
         ev: 1.1,
         isPositive: true,
         contributions: [{ biasName: "近走着順", correction: 0.12 }],
+        mark: null,
       },
     ],
     ...overrides,
@@ -58,6 +60,10 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       expect(h2.isPositive).toBe(true);
       // 寄与度ログはJSONとして往復する。
       expect(h2.contributions).toEqual([{ biasName: "近走着順", correction: 0.12 }]);
+      // 予想印(Task#23)も往復する。
+      expect(h2.mark).toBeNull();
+      const h1 = a.horses.find((h) => h.umaban === 1)!;
+      expect(h1.mark).toBe("◎");
 
       store.close();
     });
@@ -75,6 +81,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               ev: null,
               isPositive: false,
               contributions: null,
+              mark: null,
             },
           ],
         }),
@@ -202,6 +209,58 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           )
           .run(9999, 1, 0.3, 0.3, null, null, 0, null);
       }).toThrow();
+      store.close();
+    });
+  });
+
+  describe("予想印(mark)列の後方互換マイグレーション(Task#23)", () => {
+    it("mark列が無い旧スキーマのDBを開いても、既存馬行はmark=nullで読め、新規保存は印付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // Task#23より前のバージョン相当のスキーマ(analysis_horsesにmark列が無い)を直接作る。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      // 旧バージョンで保存済みの既存データ(mark列自体が存在しない状態での保存を模す)。
+      const info = db
+        .prepare(`INSERT INTO analyses (race_id, analyzed_at) VALUES (?, ?)`)
+        .run("旧レース", "2026-01-01T00:00:00.000Z");
+      const oldAnalysisId = Number(info.lastInsertRowid);
+      db.prepare(
+        `INSERT INTO analysis_horses
+           (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(oldAnalysisId, 1, 0.4, 0.4, 2.0, 0.8, 0, null);
+
+      // 新バージョンの AnalysisStore で開く(mark列が無ければ ALTER TABLE で追加されるはず)。
+      const store = new AnalysisStore({ database: db });
+
+      // 旧レースの馬行はmark列を後付けしても既存行はmark=nullとして読める。
+      const old = store.listAnalyses({ raceId: "旧レース" })[0]!;
+      expect(old.horses[0]!.mark).toBeNull();
+
+      // 新規保存(印あり)も問題なく動作する(後方互換を確認)。
+      const newId = store.saveAnalysis(makeRecord({ raceId: "新レース" }));
+      const saved = store.listAnalyses({ raceId: "新レース" })[0]!;
+      expect(saved.id).toBe(newId);
+      expect(saved.horses.find((h) => h.umaban === 1)!.mark).toBe("◎");
+      expect(saved.horses.find((h) => h.umaban === 2)!.mark).toBeNull();
+
       store.close();
     });
   });

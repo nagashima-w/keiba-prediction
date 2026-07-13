@@ -44,6 +44,7 @@ import {
   type HorsePrior,
   type HorseRaceResult,
   type KaisaiDate,
+  type PredictionMark,
   type PriorInput,
   type RaceData,
   type RaceId,
@@ -84,6 +85,8 @@ export interface AnalysisPipelineDeps {
 interface AdjustedHorse {
   readonly adjustedProb: number;
   readonly reason: string | null;
+  /** 予想印(Task#23)。LLM未使用・分析結果に含まれない馬番は null。 */
+  readonly mark: PredictionMark | null;
 }
 
 /** Date を YYYY/MM/DD に整形する(buildPriorInput の date 形式に合わせる)。 */
@@ -216,6 +219,7 @@ export async function runAnalysis(
       adjustedByUmaban.set(h.shutuba.umaban, {
         adjustedProb: priorByUmaban.get(h.shutuba.umaban)!.prior,
         reason: null,
+        mark: null,
       });
     }
   } else {
@@ -270,6 +274,7 @@ export async function runAnalysis(
       adjustedByUmaban.set(h.umaban, {
         adjustedProb: h.adjustedProb,
         reason: h.reason,
+        mark: h.mark,
       });
     }
     // 分析結果に含まれない馬番(理論上は無いが安全側)は prior を採用する。
@@ -278,6 +283,7 @@ export async function runAnalysis(
         adjustedByUmaban.set(h.shutuba.umaban, {
           adjustedProb: priorByUmaban.get(h.shutuba.umaban)!.prior,
           reason: null,
+          mark: null,
         });
       }
     }
@@ -319,6 +325,7 @@ export async function runAnalysis(
         ev: ev.ev,
         isPositive: ev.isPositive,
         contributions: prior.contributions,
+        mark: adjusted.mark,
       };
     }),
   };
@@ -344,6 +351,7 @@ export async function runAnalysis(
         // 戦績走数(低データ判定用)。戦績取得失敗(results=null)は不明として null にし、
         // 新馬(results=[] → 0走)と区別する(妙味スコアの低データ集計から除外させる)。
         careerRunCount: h.results === null ? null : h.results.length,
+        mark: adjusted.mark,
       };
     })
     .sort((a, b) => a.umaban - b.umaban);

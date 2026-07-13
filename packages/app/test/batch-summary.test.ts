@@ -30,6 +30,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   isPositive: false,
   reason: null,
   careerRunCount: 10,
+  mark: null,
   ...over,
 });
 
@@ -121,6 +122,18 @@ describe("collectEvPlusSummary(横断EVプラス馬の集約)", () => {
       success("111111111111", "1R", [row({ ev: 0.5, isPositive: false })]),
     ];
     expect(collectEvPlusSummary(outcomes)).toEqual([]);
+  });
+
+  it("各馬の予想印(mark)をサマリへ伝播すること(Task#23)", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("111111111111", "1R", [
+        row({ umaban: 1, horseName: "アルファ", ev: 1.2, isPositive: true, mark: "◎" }),
+        row({ umaban: 2, horseName: "ベータ", ev: 1.1, isPositive: true, mark: null }),
+      ]),
+    ];
+    const rows = collectEvPlusSummary(outcomes);
+    expect(rows.find((r) => r.horseName === "アルファ")!.mark).toBe("◎");
+    expect(rows.find((r) => r.horseName === "ベータ")!.mark).toBeNull();
   });
 
   it("失敗・スキップのレースは集約対象に含めない", () => {

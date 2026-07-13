@@ -6,7 +6,7 @@
  * - `analyses`(レース単位): id・race_id・analyzed_at。同一レースを複数回分析しうるため
  *   (発走前/直前オッズ再取得など)、race_id では一意にせず analyzed_at ごとに別行(別id)とする。
  * - `analysis_horses`(馬単位): analysis_id(FK)・umaban・prior・adjusted_prob・place_odds_min・ev・
- *   is_positive・contributions_json。Phase3(analyzer)まで adjusted_prob は prior と同値で保存する。
+ *   is_positive・contributions_json・mark。Phase3(analyzer)まで adjusted_prob は prior と同値で保存する。
  *   寄与度ログ(仕様L135)は構造が可変のため JSON 文字列で保持する。
  * - `race_results`(レース結果): race_id・umaban・finish_position。(race_id, umaban) を主キーとし
  *   再保存は上書き。非数値着順(中止・除外)は finish_position を NULL で保持する。
@@ -14,11 +14,17 @@
  * 今後の拡張(LLM補正値・Discord送信履歴)は列/テーブル追加で対応する前提とし、今は必要列のみ持つ。
  * adjusted_prob 列は将来のLLM補正値の受け皿を兼ねる(現状は prior と同値)。
  *
+ * 予想印(mark)列(Task#23): analysis_horses に mark TEXT(nullable)を持つ。旧バージョンで
+ * 作成済みのDBファイルにはこの列が無いため、起動時に PRAGMA table_info で存在確認し、
+ * 無ければ ALTER TABLE ADD COLUMN で後付けする(既存行は NULL=印なしとして読める。後方互換)。
+ *
  * DB共有: ScrapeCache と同じ better-sqlite3 Database インスタンスを注入して共有できる。
  * テーブル名を分離しているため互いに干渉しない(scrape_cache とは独立)。
  */
 
 import Database from "better-sqlite3";
+
+import type { PredictionMark } from "../analyzer/parse-response.js";
 
 const ANALYSES_TABLE = "analyses";
 const ANALYSIS_HORSES_TABLE = "analysis_horses";
@@ -40,6 +46,8 @@ export interface AnalysisHorseRecord {
   readonly isPositive: boolean;
   /** 寄与度ログ(JSON化して保存)。無ければ null。 */
   readonly contributions: unknown;
+  /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。Task#23。 */
+  readonly mark: PredictionMark | null;
 }
 
 /** 保存する分析(レース単位)。 */
@@ -61,6 +69,8 @@ export interface StoredAnalysisHorse {
   readonly ev: number | null;
   readonly isPositive: boolean;
   readonly contributions: unknown;
+  /** 予想印(◎〇▲△☆注のいずれか。印なし・旧レコード(列追加前の保存)は null)。Task#23。 */
+  readonly mark: PredictionMark | null;
 }
 
 /** 復元した分析(レース単位)。 */
@@ -108,6 +118,7 @@ interface HorseRow {
   ev: number | null;
   is_positive: number;
   contributions_json: string | null;
+  mark: string | null;
 }
 
 /**
@@ -144,6 +155,7 @@ export class AnalysisStore {
         ev REAL,
         is_positive INTEGER NOT NULL,
         contributions_json TEXT,
+        mark TEXT,
         PRIMARY KEY (analysis_id, umaban),
         FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
       );
@@ -156,6 +168,21 @@ export class AnalysisStore {
       );
     `);
     this.migrateResultPayoutColumn();
+    this.migrateMarkColumn();
+  }
+
+  /**
+   * 予想印(mark)列を後付けするマイグレーション(Task#23)。
+   * 旧バージョンで作成済みの analysis_horses には mark 列が無いため、存在しなければ追加する
+   * (既存行は NULL=印なしとなり、UI・Discord通知は「印なし」表示にフォールバックする=後方互換)。
+   */
+  private migrateMarkColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "mark")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN mark TEXT`);
+    }
   }
 
   /**
@@ -184,8 +211,8 @@ export class AnalysisStore {
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
-         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     const tx = this.db.transaction((rec: AnalysisRecord): number => {
@@ -203,6 +230,7 @@ export class AnalysisStore {
           h.contributions === undefined || h.contributions === null
             ? null
             : JSON.stringify(h.contributions),
+          h.mark,
         );
       }
       return analysisId;
@@ -281,7 +309,7 @@ export class AnalysisStore {
     ) as Array<{ id: number; raceId: string; analyzedAt: string }>;
 
     const horseStmt = this.db.prepare(
-      `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json
+      `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark
          FROM ${ANALYSIS_HORSES_TABLE} WHERE analysis_id = ? ORDER BY umaban`,
     );
 
@@ -318,5 +346,8 @@ function toStoredHorse(row: HorseRow): StoredAnalysisHorse {
     isPositive: row.is_positive !== 0,
     contributions:
       row.contributions_json === null ? null : JSON.parse(row.contributions_json),
+    // DBには自前で書き込んだ値(またはNULL)のみが入るため、素通しでキャストする
+    // (未知の文字列が紛れ込む経路は無い。念のため未知値でも「印なし扱い」にはせず型どおり通す)。
+    mark: row.mark as PredictionMark | null,
   };
 }

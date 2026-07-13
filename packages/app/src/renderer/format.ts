@@ -5,7 +5,11 @@
  * 見た目(JSX)から切り離して純関数化する。表示規則をここに集約し、単体テストで固定する。
  */
 
-import type { AnalysisRow, OddsStatus } from "../shared/analysis-types.js";
+import type {
+  AnalysisRow,
+  OddsStatus,
+  PredictionMark,
+} from "../shared/analysis-types.js";
 
 /**
  * 事前推定値(scorer の prior)の表示ラベル。
@@ -43,6 +47,22 @@ export function formatEv(ev: number | null): string {
 export function formatReason(reason: string | null): string {
   return reason === null ? "-" : reason;
 }
+
+/**
+ * 予想印(Task#23)を表示する。印があればそのまま、無い(null)場合は空欄。
+ * 「-」ではなく空欄にするのは、印は「無いのが普通」の列であり、他列の「値が取れなかった」
+ * ダッシュ表示と混同させないため。
+ */
+export function formatMark(mark: PredictionMark | null): string {
+  return mark ?? "";
+}
+
+/**
+ * 予想印の凡例(結果テーブルの列見出し title 属性に使う短文)。
+ * ◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)の意味を簡潔に示す。
+ */
+export const MARK_LEGEND =
+  "◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)";
 
 /** EVプラス行(ハイライト対象)かどうか。 */
 export function isHighlightRow(row: AnalysisRow): boolean {

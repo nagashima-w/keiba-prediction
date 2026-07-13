@@ -17,6 +17,12 @@ export type ProgressStage = "スクレイピング" | "スコアリング" | "LL
 export type RaceVenueKind = "central" | "nar";
 
 /**
+ * 予想印(core PredictionMark のプレーン写し。IPC越しの共有用)。
+ * ◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)。印なし・LLM未使用時は null。
+ */
+export type PredictionMark = "◎" | "〇" | "▲" | "△" | "☆" | "注";
+
+/**
  * オッズの発売状態(core OddsSnapshot.oddsStatus のプレーン写し)。
  * - "result": 確定オッズ。
  * - "middle": 発売中の暫定オッズ。
@@ -67,6 +73,8 @@ export interface AnalysisRow {
    * レース妙味スコア(computeRaceOpportunity)の低データ判定に用いる。
    */
   readonly careerRunCount: number | null;
+  /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。Task#23。 */
+  readonly mark: PredictionMark | null;
 }
 
 /** 1レース分の分析結果。 */
@@ -159,6 +167,8 @@ export interface EvPlusSummaryRow {
   readonly placeOddsMin: number | null;
   /** 期待値(EVプラスなので閾値超え)。 */
   readonly ev: number;
+  /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。Task#23。 */
+  readonly mark: PredictionMark | null;
 }
 
 /** 検証画面: 分析履歴の1件(一覧表示用)。 */

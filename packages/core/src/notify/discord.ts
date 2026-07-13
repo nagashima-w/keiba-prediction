@@ -12,6 +12,7 @@
  *    メッセージ化して表示する。レート制限(429)は Retry-After を尊重して1回だけ待機リトライする。
  */
 
+import type { PredictionMark } from "../analyzer/parse-response.js";
 import { DEFAULT_USER_AGENT } from "../scraper/http-client.js";
 
 /** Discord embed(送信ペイロードの1要素)。 */
@@ -209,6 +210,8 @@ export interface EmbedHorse {
   readonly ev: number | null;
   /** EVが閾値を上回るか。 */
   readonly isPositive: boolean;
+  /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。Task#23。 */
+  readonly mark: PredictionMark | null;
 }
 
 /** 0〜1の確率を小数第1位までのパーセント文字列にする。 */
@@ -249,7 +252,9 @@ export function buildAnalysisEmbed(
     positives.length > 0
       ? positives.map((h) => {
           const name = truncate(h.horseName, HORSE_NAME_MAX);
-          return `${h.umaban}番 ${name} AI補正後${formatPercent(h.adjustedProb)} 複勝下限${formatOdds(h.placeOddsMin)} EV${formatEv(h.ev)}`;
+          // 予想印(Task#23): 印が付いた馬は行頭に「◎ 」のように添える。印なし馬は従来どおり。
+          const markPrefix = h.mark !== null ? `${h.mark} ` : "";
+          return `${markPrefix}${h.umaban}番 ${name} AI補正後${formatPercent(h.adjustedProb)} 複勝下限${formatOdds(h.placeOddsMin)} EV${formatEv(h.ev)}`;
         })
       : ["EVプラスの馬はありません(該当なし)"];
 
