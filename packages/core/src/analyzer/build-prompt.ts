@@ -7,7 +7,10 @@
  *  - 厩舎コメント(プレミアム限定で未取得のため既定「なし」。将来の受け皿として stableComment を optional に用意)
  *  - レース間隔、脚質と展開想定の材料(直近走の通過順から脚質を分類し、逃げ馬の数を明示)
  *  - 当日の天候・馬場状態
+ *  - 単勝オッズ・人気・複勝オッズ下限・参考EV(市場データ。呼び出し側〈analysis-pipeline.ts〉が
+ *    OddsSnapshot から算出して渡す。詳細は各フィールドのコメント参照)
  *  - LLMへの指示(複勝圏内確率をJSONのみで出力・prior±10%以内・根拠明記)と出力スキーマ指定
+ *  - 予想印(◎〇▲△☆注)の定義・頭数制約・判断材料の指示(Task#22: ユーザー要望)
  *
  * ネットワーク・LLM・SDK には一切依存しない(テキストを組み立てて返すだけ)。
  */
@@ -46,6 +49,42 @@ export interface PromptHorse {
   readonly runs: readonly HorseRunPassing[];
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
+  /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
+  readonly winOdds?: number | null;
+  /** 人気。取得できない場合は null/undefined(「不明(オッズ値から判断)」と表記)。 */
+  readonly popularity?: number | null;
+  /**
+   * 複勝オッズ下限。複勝未発売(oddsStatus=yoso)やオッズ欠損時は null/undefined
+   * (「複勝未発売」と表記)。
+   */
+  readonly placeOddsMin?: number | null;
+  /**
+   * 参考EV(= 3着内率〈prior〉× 複勝オッズ下限)。呼び出し側が computeReferenceEv で算出して渡す。
+   * どちらか欠落なら null/undefined(「算出不可」と表記)。
+   * あくまでLLM補正前の参考値であり、最終的なEVはLLMが出す補正後確率で別途(ev/expected-value.ts の
+   * computeRaceEv で)再計算される。プロンプトにもその旨を明記し、市場オッズへのアンカリングを防ぐ。
+   */
+  readonly referenceEv?: number | null;
+}
+
+/**
+ * 参考EV(= 3着内率〈prior〉× 複勝オッズ下限)を計算する純関数。
+ * ev/expected-value.ts の computeRaceEv(全馬・OddsSnapshot前提)を呼び回す必要はなく、
+ * analyzer 層に閉じた単純計算で済む(呼び出し側が PromptHorse.referenceEv に渡す値の算出に使う)。
+ * @param prior 3着内率(scorerのprior)
+ * @param placeOddsMin 複勝オッズ下限。欠損(null)なら参考EVは算出不可としてnullを返す。
+ */
+export function computeReferenceEv(
+  prior: number,
+  placeOddsMin: number | null,
+): number | null {
+  if (placeOddsMin === null || !Number.isFinite(placeOddsMin)) {
+    return null;
+  }
+  if (!Number.isFinite(prior)) {
+    return null;
+  }
+  return prior * placeOddsMin;
 }
 
 /** レース全体の条件。 */
@@ -99,6 +138,30 @@ function oikiriText(oikiri: PromptOikiri | null | undefined): string {
 /** 天候が雨系(「雨」を含む: 雨・小雨・大雨など)なら true。 */
 function isRainyWeather(weather: string | null | undefined): boolean {
   return typeof weather === "string" && weather.includes("雨");
+}
+
+/** 有限数値でなければ fallback、そうでなければ倍率表記(小数1桁+「倍」)にする。 */
+function oddsText(value: number | null | undefined, fallback: string): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return `${value.toFixed(1)}倍`;
+}
+
+/** 人気を「N番人気」表記にする(未取得は「不明(オッズ値から判断)」)。 */
+function popularityText(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "不明(オッズ値から判断)";
+  }
+  return `${value}番人気`;
+}
+
+/** 参考EVを小数2桁で表記する(算出不可なら「算出不可」)。 */
+function referenceEvText(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "算出不可";
+  }
+  return value.toFixed(2);
 }
 
 /**
@@ -162,9 +225,25 @@ export function buildPrompt(input: BuildPromptInput): string {
         `脚質=${style ?? "不明"}, ` +
         `レース間隔=${orText(h.restInterval, "不明")}, ` +
         `調教=${oikiriText(h.oikiri)}, ` +
-        `厩舎コメント=${orText(h.stableComment, "なし")}`,
+        `厩舎コメント=${orText(h.stableComment, "なし")}, ` +
+        `単勝オッズ=${oddsText(h.winOdds, "不明")}, ` +
+        `人気=${popularityText(h.popularity)}, ` +
+        `複勝オッズ下限=${oddsText(h.placeOddsMin, "複勝未発売")}, ` +
+        `参考EV=${referenceEvText(h.referenceEv)}`,
     );
   }
+  lines.push("");
+  lines.push(
+    "注記: 参考EVは 3着内率(LLM補正前の事前推定値)× 複勝オッズ下限 の参考値です。" +
+      "あなたが出す補正後確率(place_prob)で最終的なEVは別途再計算されるため、参考EV自体を出力する必要はありません。",
+  );
+  lines.push(
+    "重要: 単勝オッズ・人気・参考EVは、予想印の☆・注(人気薄判定)や妙味の把握に使ってください。" +
+      "3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。" +
+      "補正の根拠はあくまで脚質・展開・調教・レース間隔・厩舎コメント等のデータに基づいてください。" +
+      "本ツールは市場から独立した確率推定と市場オッズを掛け合わせて妙味を見つけることが目的であり、" +
+      "確率推定が市場に迎合すると妙味が失われます。",
+  );
   lines.push("");
 
   // 指示。
@@ -192,10 +271,41 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push("place_prob は 0 以上 1 以下の小数です。全馬について出力してください。");
   lines.push("");
 
+  // 予想印(Task#22: ユーザー要望による同一LLM呼び出しでの印決定)。
+  lines.push("【予想印】");
+  lines.push(
+    "各馬に以下6種類の予想印(mark)のいずれか、または印なし(null)を1つ付けてください" +
+      "(1頭に複数の印を付けることはできません)。",
+  );
+  lines.push("◎(本命): 1着になりそうな最有力の馬。必ずちょうど1頭。");
+  lines.push("〇(対抗): 本命に対抗できそうな2番手の馬。必ずちょうど1頭。");
+  lines.push(
+    "▲(単穴): 本命と対抗を差し置いて勝てる可能性がある3番手の馬。必ずちょうど1頭。",
+  );
+  lines.push(
+    "△(連下): 上記3つの印よりは劣るが、2着や3着に入りそうな馬。1〜3頭。",
+  );
+  lines.push(
+    "☆(星): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば勝てる可能性のある穴馬。0〜1頭。",
+  );
+  lines.push(
+    "注(注意): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば3着に入る可能性のある穴馬。0〜1頭。",
+  );
+  lines.push(
+    "判断材料: 3着内率・参考EV・単勝オッズ/人気・脚質と展開想定、およびここまでの分析(各馬の place_prob と reason)を総合して判断してください。",
+  );
+  lines.push(
+    "頭数制約は厳守してください: ◎〇▲はちょうど1頭ずつ、△は1〜3頭、☆と注はそれぞれ0〜1頭。この条件を満たさない出力は不可です。",
+  );
+  lines.push("");
+
   // 出力スキーマ。
   lines.push("【出力スキーマ(この形式の JSON のみ)】");
   lines.push(
-    '{"horses": [{"number": 1, "place_prob": 0.42, "reason": "..."}]}',
+    '{"horses": [' +
+      '{"number": 1, "place_prob": 0.42, "reason": "...", "mark": "◎"}, ' +
+      '{"number": 2, "place_prob": 0.30, "reason": "...", "mark": null}' +
+      "]}",
   );
 
   return lines.join("\n");

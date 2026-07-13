@@ -7,6 +7,16 @@
  *  - 全馬番が揃っているか、place_prob が [0,1] か、prior から ±10%(絶対値0.10)以内か検証し、
  *    逸脱した馬は prior±0.10(かつ [0,1])にクリップして clipped を記録する。
  *  - 欠けた馬番(および place_prob が不正な馬)は prior をそのまま採用し記録する。
+ *
+ * Task#22(予想印: ユーザー要望による同一LLM呼び出しでの印決定):
+ *  - 各馬の mark(◎〇▲△☆注のいずれか、または印なしの null)を検証する。
+ *  - 頭数制約: ◎・〇・▲はちょうど1頭ずつ、△は1〜3頭、☆・注は0〜1頭。
+ *  - 未知の印文字列、または頭数制約違反は AnalyzerResponseParseError
+ *    (analyze-race の既存リトライ1回→フォールバックに乗せる)。
+ *  - mark がJSON上に完全に欠けている(旧形式の応答)場合、全馬 mark=null となり◎が0頭のため
+ *    自動的に制約違反としてエラーになる(意図した挙動)。
+ *  - priors に無い余分な馬番の mark は place_prob と同様に無視する(制約カウントに含めない)。
+ *  - 馬番が重複した場合は最初の出現のみを採用する(place_prob と同じ挙動を流用)。
  */
 
 /**
@@ -44,6 +54,15 @@ export interface PriorRef {
   readonly prior: number;
 }
 
+/**
+ * 予想印(Task#22: ユーザー要望)。
+ * ◎本命/〇対抗/▲単穴/△連下/☆星/注注意。定義・頭数制約は build-prompt.ts のプロンプト指示を参照。
+ */
+export const PREDICTION_MARKS = ["◎", "〇", "▲", "△", "☆", "注"] as const;
+
+/** 予想印の型(PREDICTION_MARKS のいずれか)。 */
+export type PredictionMark = (typeof PREDICTION_MARKS)[number];
+
 /** 1頭分のパース結果。 */
 export interface ParsedHorseResult {
   /** 馬番。 */
@@ -58,6 +77,8 @@ export interface ParsedHorseResult {
   readonly clipped: boolean;
   /** LLM値が使えず(馬番欠け or 不正値)prior をそのまま採用した場合 true。 */
   readonly usedPrior: boolean;
+  /** 予想印(LLMが判定。印なし・フォールバック時は null)。 */
+  readonly mark: PredictionMark | null;
 }
 
 /** parseAnalyzerResponse の結果(全馬 + メタ)。 */
@@ -151,6 +172,7 @@ export function parseAnalyzerResponse(
   // 馬番 → LLMの place_prob(最初の出現を採用、重複は無視)。
   const byNumber = new Map<number, number>();
   const reasonByNumber = new Map<number, string | null>();
+  const rawMarkByNumber = new Map<number, unknown>();
   for (const entry of rawHorses) {
     if (typeof entry !== "object" || entry === null) continue;
     const rec = entry as Record<string, unknown>;
@@ -161,6 +183,8 @@ export function parseAnalyzerResponse(
     byNumber.set(num, typeof prob === "number" ? prob : NaN);
     const reason = rec["reason"];
     reasonByNumber.set(num, typeof reason === "string" ? reason : null);
+    // mark キー自体が無い場合(旧形式)は undefined のまま登録され、resolveMark で null 扱いになる。
+    rawMarkByNumber.set(num, rec["mark"]);
   }
 
   let clippedCount = 0;
@@ -168,6 +192,9 @@ export function parseAnalyzerResponse(
 
   const horses: ParsedHorseResult[] = priors.map((p) => {
     const value = byNumber.get(p.umaban);
+    // mark は priors に無い馬番のものを無視するため、ここ(priorsループ内)で初めて解決する。
+    // 未知の印文字列はここで AnalyzerResponseParseError を投げる。
+    const mark = resolveMark(rawMarkByNumber.get(p.umaban));
 
     // 馬番欠け or 不正な place_prob → prior をそのまま採用。
     if (value === undefined || !Number.isFinite(value)) {
@@ -179,6 +206,7 @@ export function parseAnalyzerResponse(
         reason: null,
         clipped: false,
         usedPrior: true,
+        mark,
       };
     }
 
@@ -206,6 +234,7 @@ export function parseAnalyzerResponse(
       reason: reasonByNumber.get(p.umaban) ?? null,
       clipped,
       usedPrior: false,
+      mark,
     };
   });
 
@@ -217,7 +246,76 @@ export function parseAnalyzerResponse(
     );
   }
 
+  // 予想印の頭数制約を検証(Task#22)。違反はリトライ→フォールバックに乗せるため例外にする。
+  validateMarkConstraints(horses);
+
   return { horses, clippedCount, missingCount };
+}
+
+/**
+ * 生の mark 値を PredictionMark | null に解決する。
+ * null/undefined(キー欠落含む)は「印なし」として null。既知の6種以外の値は未知の印として例外。
+ */
+function resolveMark(raw: unknown): PredictionMark | null {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (
+    typeof raw === "string" &&
+    (PREDICTION_MARKS as readonly string[]).includes(raw)
+  ) {
+    return raw as PredictionMark;
+  }
+  throw new AnalyzerResponseParseError(
+    `未知の予想印です: ${JSON.stringify(raw)}`,
+  );
+}
+
+/** 予想印ごとの頭数制約(下限・上限とも含む)。 */
+const MARK_COUNT_RANGES: ReadonlyArray<{
+  readonly mark: PredictionMark;
+  readonly min: number;
+  readonly max: number;
+}> = [
+  { mark: "◎", min: 1, max: 1 },
+  { mark: "〇", min: 1, max: 1 },
+  { mark: "▲", min: 1, max: 1 },
+  { mark: "△", min: 1, max: 3 },
+  { mark: "☆", min: 0, max: 1 },
+  { mark: "注", min: 0, max: 1 },
+];
+
+/**
+ * 予想印の頭数制約を検証する(Task#22)。
+ * ◎・〇・▲はちょうど1頭ずつ、△は1〜3頭、☆・注は0〜1頭。違反時は AnalyzerResponseParseError。
+ * priors が空(horses.length===0)の場合は印を割り当てる馬がいないため検証しない。
+ */
+function validateMarkConstraints(horses: readonly ParsedHorseResult[]): void {
+  if (horses.length === 0) {
+    return;
+  }
+  const counts: Record<PredictionMark, number> = {
+    "◎": 0,
+    "〇": 0,
+    "▲": 0,
+    "△": 0,
+    "☆": 0,
+    注: 0,
+  };
+  for (const h of horses) {
+    if (h.mark !== null) {
+      counts[h.mark]++;
+    }
+  }
+  for (const { mark, min, max } of MARK_COUNT_RANGES) {
+    const count = counts[mark];
+    if (count < min || count > max) {
+      const expected = min === max ? `ちょうど${min}頭` : `${min}〜${max}頭`;
+      throw new AnalyzerResponseParseError(
+        `予想印${mark}は${expected}である必要がありますが${count}頭でした`,
+      );
+    }
+  }
 }
 
 /** パース済みオブジェクトから horses 配列を取り出す(形不正は空配列扱い)。 */

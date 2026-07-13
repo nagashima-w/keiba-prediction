@@ -48,7 +48,10 @@ export interface AnalyzeRaceResult {
   readonly fallbackReason: string | null;
 }
 
-/** 全馬を prior のまま採用する(フォールバック用)結果を組み立てる。 */
+/**
+ * 全馬を prior のまま採用する(フォールバック用)結果を組み立てる。
+ * 予想印(mark)はLLM判断が本質のため機械生成の代替はせず、全馬 null とする(Task#22: ユーザー決定事項)。
+ */
 function priorFallbackHorses(priors: readonly PriorRef[]): ParsedHorseResult[] {
   return priors.map((p) => ({
     umaban: p.umaban,
@@ -57,6 +60,7 @@ function priorFallbackHorses(priors: readonly PriorRef[]): ParsedHorseResult[] {
     reason: null,
     clipped: false,
     usedPrior: true,
+    mark: null,
   }));
 }
 
