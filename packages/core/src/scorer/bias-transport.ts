@@ -21,6 +21,7 @@
  */
 
 import type { DerivedRaceFeature } from "./derive-features.js";
+import type { RaceIdVenueKind } from "../scraper/ids.js";
 import type { StableLocation } from "../scraper/types.js";
 import { aggregatePlaceRate } from "./aggregate.js";
 import { DEFAULT_SCORER_CONFIG, type ScorerConfig } from "./config.js";
@@ -100,6 +101,12 @@ export interface TransportInput {
   readonly stableLocation: StableLocation;
   /** 今回の中央競馬場名(新潟・函館など)。 */
   readonly venueName: string;
+  /**
+   * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
+   * "nar"(地方競馬)では美浦/栗東の輸送負荷テーブルが中央10場前提のため、
+   * 輸送・滞在バイアス(輸送弱フラグ・滞在ボーナスを含む)を一律対象外とする。
+   */
+  readonly venueKind?: RaceIdVenueKind;
 }
 
 /** 輸送・滞在バイアスの評価種別。 */
@@ -199,6 +206,28 @@ export function computeTransportBias(
   config: ScorerConfig = DEFAULT_SCORER_CONFIG,
 ): TransportBiasContribution {
   const weight = config.weights.transport;
+
+  // 地方(NAR)レースは輸送負荷テーブルが中央10場前提のため一律対象外とする。
+  // 輸送弱フラグ・weakDropCount の算出(厩舎所在地の仮定に依存)も行わない。
+  if (today.venueKind === "nar") {
+    return {
+      biasName: BIAS_NAME,
+      kind: "不明",
+      todayLoad: null,
+      weight,
+      transportWeakFlag: false,
+      weakDropCount: 0,
+      applied: false,
+      reason: "NARのため対象外(輸送・滞在バイアスの補正なし)",
+      sampleCount: 0,
+      targetRate: null,
+      overallRate: null,
+      differenceCorrection: 0,
+      stayBonus: 0,
+      correction: 0,
+    };
+  }
+
   const todayLoad = classifyTransportLoad(today.stableLocation, today.venueName);
 
   const central = centralKnownRuns(features);

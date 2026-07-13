@@ -11,6 +11,12 @@
 export type ProgressStage = "スクレイピング" | "スコアリング" | "LLM分析" | "保存";
 
 /**
+ * レースの開催区分(中央/地方)。core RaceIdVenueKind のプレーン写し(IPC越しの共有用)。
+ * UI表記は「中央」「地方」とし、"NAR" という略語は画面に出さない(コード内は central/nar のまま)。
+ */
+export type RaceVenueKind = "central" | "nar";
+
+/**
  * オッズの発売状態(core OddsSnapshot.oddsStatus のプレーン写し)。
  * - "result": 確定オッズ。
  * - "middle": 発売中の暫定オッズ。

@@ -11,7 +11,7 @@ import {
   type PriorInput,
   type TodayRaceConditions,
 } from "../../src/scorer/prior.js";
-import { makeResult, rank } from "./helpers.js";
+import { makeResult, rank, venue } from "./helpers.js";
 import type { ShutubaHorse } from "../../src/scraper/types.js";
 
 function loadFixture(name: string): string {
@@ -142,6 +142,78 @@ describe("computePrior(prior合成式)", () => {
     }
     expect(r.contributions).toHaveLength(13);
   });
+
+  it("venueKindを明示的にcentralにしても省略時(既定値)と結果が完全に同一であること(中央レースの回帰確認)", () => {
+    const features = deriveRaceFeatures([
+      makeResult({ date: "2025/01/01", finishPosition: rank(1) }),
+    ]);
+    const withKind = computePrior({
+      features,
+      today: { ...NEUTRAL_TODAY, venueKind: "central" },
+      fieldSize: 10,
+    });
+    const omitted = computePrior({
+      features,
+      today: NEUTRAL_TODAY, // venueKind 未指定(既定値 = central のはず)。
+      fieldSize: 10,
+    });
+    expect(withKind).toEqual(omitted);
+  });
+
+  it("venueKindがnarのとき、競馬場適性・コース枠順バイアス・輸送滞在バイアスは対象外になり、他の項目は通常どおり計算されること", () => {
+    // 会場名を敢えて中央10場と同じ「中山」にする(中央10場テーブル・輸送テーブルには本来ヒットする条件)。
+    // それでも venueKind: "nar" を渡すだけで対象外になることを確認し、
+    // 「会場名が中央10場に一致しないから偶然対象外になる」のではなく venueKind による明示的な分岐であることを示す。
+    const narToday: TodayRaceConditions = {
+      ...NEUTRAL_TODAY,
+      venueName: "中山",
+      venueKind: "nar",
+    };
+    const input: PriorInput = {
+      features: deriveRaceFeatures([
+        makeResult({
+          date: "2025/01/01",
+          finishPosition: rank(1),
+          venue: venue("中山"),
+          venueKind: "中央",
+        }),
+        makeResult({
+          date: "2024/12/01",
+          finishPosition: rank(2),
+          venue: venue("中山"),
+          venueKind: "中央",
+        }),
+      ]),
+      today: narToday,
+      fieldSize: 10,
+    };
+    const r = computePrior(input);
+    const byName = new Map(r.contributions.map((c) => [c.biasName, c]));
+
+    expect(byName.get("競馬場適性")?.applied).toBe(false);
+    expect(byName.get("競馬場適性")?.reason).toContain("NARのため対象外");
+    expect(byName.get("コース枠順バイアス")?.applied).toBe(false);
+    expect(byName.get("コース枠順バイアス")?.reason).toContain("NARのため対象外");
+    expect(byName.get("輸送・滞在バイアス")?.applied).toBe(false);
+    expect(byName.get("輸送・滞在バイアス")?.reason).toContain("NARのため対象外");
+
+    // venueKind に依存しない項目は引き続き寄与度ログに含まれる(対象外にならない)。
+    for (const n of [
+      "近走着順",
+      "上がり3F",
+      "コース・距離適性",
+      "騎手当該コース",
+      "斤量・馬体重",
+      "馬場状態適性",
+      "季節適性",
+      "夏負けフラグ",
+      "枠順適性",
+      "ローテーション適性",
+    ]) {
+      expect(byName.has(n)).toBe(true);
+    }
+    expect(r.contributions).toHaveLength(13);
+  });
 });
 
 describe("computeFieldPriors(頭数レベルの健全性)", () => {
@@ -211,6 +283,7 @@ describe("buildPriorInput(scraper出力からの組み立て)", () => {
         venueName: "函館",
         isWet: false,
         date: "2025/07/06",
+        venueKind: "central",
       },
       fieldSize: 12,
     });
@@ -219,7 +292,48 @@ describe("buildPriorInput(scraper出力からの組み立て)", () => {
     expect(input.today.stableLocation).toBe("栗東");
     expect(input.today.kinryo).toBe(57);
     expect(input.today.bodyWeightDiff).toBe(-4);
+    expect(input.today.venueKind).toBe("central");
     expect(input.fieldSize).toBe(12);
+  });
+
+  it("venueKind: nar のレース条件を渡すと today.venueKind に nar が伝播すること(地方の所属会場名をstableLocationに持つ馬)", () => {
+    // NARの出馬表では stableLocation に「高知」等の所属会場名が入り得る(美浦/栗東ではない)。
+    const horse: ShutubaHorse = {
+      wakuban: 1,
+      umaban: 1,
+      name: "地方馬",
+      horseId: "2020100001" as ShutubaHorse["horseId"],
+      sex: "牝",
+      age: 4,
+      kinryo: 54,
+      jockeyName: "騎手",
+      jockeyId: null,
+      stableLocation: "高知",
+      trainerName: "調教師",
+      trainerId: null,
+      bodyWeight: null,
+    };
+    const input = buildPriorInput({
+      horse,
+      raceResults: [],
+      race: {
+        courseType: "ダ",
+        distance: 1400,
+        venueName: "高知",
+        isWet: false,
+        date: "2025/07/12",
+        venueKind: "nar",
+      },
+      fieldSize: 10,
+    });
+    expect(input.today.venueKind).toBe("nar");
+    // NARでは輸送・滞在バイアスが venueKind ゲートで対象外になるため、stableLocation の値自体は
+    // computePrior の結果に影響しない(prior.ts の申し送りコメント参照)。例外なく計算できることのみ確認する。
+    expect(() => computePrior(input)).not.toThrow();
+    const r = computePrior(input);
+    const transport = r.contributions.find((c) => c.biasName === "輸送・滞在バイアス");
+    expect(transport?.applied).toBe(false);
+    expect(transport?.reason).toContain("NARのため対象外");
   });
 });
 

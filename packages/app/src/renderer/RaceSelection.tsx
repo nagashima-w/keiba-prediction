@@ -1,4 +1,4 @@
-import type { RaceListItem } from "../shared/analysis-types.js";
+import type { RaceListItem, RaceVenueKind } from "../shared/analysis-types.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { groupRacesByVenue } from "./group-races.js";
 
@@ -6,6 +6,8 @@ import { groupRacesByVenue } from "./group-races.js";
 export interface RaceSelectionProps {
   /** 日付(YYYYMMDD)。 */
   readonly date: string;
+  /** 開催区分(中央/地方)。 */
+  readonly venueKind: RaceVenueKind;
   /** 一覧取得中か。 */
   readonly loading: boolean;
   /** 取得済みレース一覧。 */
@@ -18,6 +20,8 @@ export interface RaceSelectionProps {
   readonly disabled?: boolean;
   /** 日付変更(YYYYMMDD)。 */
   readonly onDateChange: (yyyymmdd: string) => void;
+  /** 開催区分変更(中央/地方の切替)。 */
+  readonly onVenueKindChange: (venueKind: RaceVenueKind) => void;
   /** 「取得」操作。 */
   readonly onFetch: () => void;
   /** レース選択のトグル。 */
@@ -43,6 +47,41 @@ export function RaceSelection(props: RaceSelectionProps): React.JSX.Element {
   return (
     <section>
       <h2 style={{ fontSize: "1.05rem" }}>レース選択(複数選択可)</h2>
+
+      <div
+        role="group"
+        aria-label="開催区分"
+        style={{ display: "flex", gap: "0", marginBottom: "0.5rem" }}
+      >
+        {(
+          [
+            { key: "central", label: "中央" },
+            { key: "nar", label: "地方" },
+          ] as const
+        ).map((opt) => {
+          const active = props.venueKind === opt.key;
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => props.onVenueKindChange(opt.key)}
+              disabled={disabled}
+              style={{
+                padding: "0.3rem 0.9rem",
+                border: "1px solid #888",
+                borderRight: opt.key === "central" ? "none" : "1px solid #888",
+                background: active ? "#0a58ca" : "#fff",
+                color: active ? "#fff" : "#333",
+                fontWeight: active ? 700 : 400,
+                cursor: disabled ? "not-allowed" : "pointer",
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
 
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
         <label>

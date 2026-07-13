@@ -16,6 +16,7 @@
  */
 
 import type { DerivedRaceFeature } from "./derive-features.js";
+import type { RaceIdVenueKind } from "../scraper/ids.js";
 import {
   aggregatePlaceRate,
   computeDifferenceCorrection,
@@ -28,6 +29,12 @@ import { courseSimilarity, isCentralVenue } from "./course-traits.js";
 export interface VenueInput {
   /** 今回の中央競馬場名(福島・京都など)。 */
   readonly venueName: string;
+  /**
+   * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
+   * "nar"(地方競馬)では COURSE_TRAITS が中央10場前提のため、コース類似度による
+   * 競馬場適性補正(当該場実績・代替評価とも)を一律対象外とする。
+   */
+  readonly venueKind?: RaceIdVenueKind;
 }
 
 /** 競馬場適性の評価種別。 */
@@ -79,6 +86,11 @@ export function computeVenueBias(
     weight,
     correction: 0,
   });
+
+  // 地方(NAR)レースはコース特性テーブルが中央10場前提のため一律対象外とする。
+  if (today.venueKind === "nar") {
+    return unknown("NARのため対象外(コース類似度による競馬場適性の補正なし)");
+  }
 
   // 今回の会場が中央10場でなければ評価不能。
   if (!isCentralVenue(today.venueName)) {

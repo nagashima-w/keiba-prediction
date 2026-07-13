@@ -12,6 +12,7 @@ import type {
   BatchProgress,
   BatchRaceOutcome,
   RaceListItem,
+  RaceVenueKind,
 } from "../shared/analysis-types.js";
 
 /** Discord送信の状態。 */
@@ -58,6 +59,8 @@ export interface BatchSelectionState {
   readonly racesError: string | null;
   /** 選択中のレースID群(選択操作順。実行時は一覧順に整列してスナップショットする)。 */
   readonly selectedRaceIds: readonly string[];
+  /** 開催区分(中央/地方)。既定は "central"。切替に応じて listRaces / listNarRaces を呼び分ける。 */
+  readonly venueKind: RaceVenueKind;
 }
 
 /** 一括分析の実行状態。 */
@@ -87,6 +90,7 @@ export interface BatchAppState {
 /** reducer が処理するアクション。 */
 export type BatchAppAction =
   | { readonly type: "日付変更"; readonly date: string }
+  | { readonly type: "開催区分変更"; readonly venueKind: RaceVenueKind }
   | { readonly type: "レース取得開始" }
   | { readonly type: "レース取得成功"; readonly races: readonly RaceListItem[] }
   | { readonly type: "レース取得失敗"; readonly message: string }
@@ -142,6 +146,7 @@ export function createInitialBatchState(date: string): BatchAppState {
       races: [],
       racesError: null,
       selectedRaceIds: [],
+      venueKind: "central",
     },
     run: EMPTY_RUN,
   };
@@ -192,6 +197,28 @@ export function batchAnalysisReducer(
         selection: {
           ...state.selection,
           date: action.date,
+          selectedRaceIds: [],
+        },
+        run: clearedRun(state.run),
+      };
+
+    case "開催区分変更":
+      // 実行中の開催区分変更は禁止(in-flight の取り違え防止。日付変更と同じ扱い)。
+      if (state.run.running) {
+        return state;
+      }
+      // no-op: 現在値と同じ開催区分を指定した場合は状態をそのまま返す(参照等価)。
+      // トグルの再クリック等で選択・旧結果が意図せず消えるのを防ぐ。
+      if (action.venueKind === state.selection.venueKind) {
+        return state;
+      }
+      // 開催区分が変わると一覧の意味が変わるため、日付変更と同様に選択・旧バッチ結果をクリアする
+      // (一覧自体は次の「取得」操作まで残る。呼び出し側が listRaces / listNarRaces を呼び分ける)。
+      return {
+        ...state,
+        selection: {
+          ...state.selection,
+          venueKind: action.venueKind,
           selectedRaceIds: [],
         },
         run: clearedRun(state.run),

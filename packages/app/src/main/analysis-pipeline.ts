@@ -14,10 +14,16 @@
  *   正当に使うため、main バンドルにネイティブ依存が入るのはこのファイルからが起点となる
  *   (bundle.test.ts は「external 指定の維持」を検証する方針へ更新済み)。
  *
- * 会場名・開催日の扱い:
- * - 会場名は scrapeRace のレース情報に含まれないため、レースIDの場コードから導出する(venue-codes)。
- * - 開催日(カレンダー日付)は出馬表・レース一覧のいずれからも取得できない。UI 側で選択済みの
- *   開催日(kaisaiDate)を受け取り、これを race.date(季節分類・休み明け走目の起点)に用いる。
+ * 会場名・開催日・開催区分(中央/地方)の扱い:
+ * - 会場名は scrapeRace のレース情報に含まれないため、レースIDの場コードから導出する(venue-codes。
+ *   中央10場・地方(NAR)いずれにも対応する)。
+ * - 開催区分(venueKind: "central" | "nar")もレースIDの場コードから venueKindOfRaceId で導出し、
+ *   buildPriorInput の race.venueKind に渡す(NARでは競馬場適性・コース枠順バイアス・輸送滞在
+ *   バイアスを対象外にする。詳細は core prior.ts の TodayRaceConditions.venueKind コメント参照)。
+ * - 開催日(カレンダー日付)は出馬表・レース一覧のいずれからも取得できない(NARのレースIDには
+ *   月日が直接埋め込まれているが、UI側で選択済みの日付と過不足なく一致する保証がないため、
+ *   中央と同様に kaisaiDate をそのまま用いる方式で統一する)。UI 側で選択済みの開催日(kaisaiDate)を
+ *   受け取り、これを race.date(季節分類・休み明け走目の起点)に用いる。
  *   万一 kaisaiDate が渡らなかった場合のみ、当日日付で近似し dateApproximate=true を結果に含める。
  */
 
@@ -29,6 +35,7 @@ import {
   computeRaceEv,
   daysBetweenDates,
   DEFAULT_EV_CONFIG,
+  venueKindOfRaceId,
   type AnalysisRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
@@ -152,8 +159,9 @@ export async function runAnalysis(
     message: `レースデータを取得しました(${horseCount}頭)`,
   });
 
-  // 会場名はレースIDの場コードから、開催日は選択済み kaisaiDate から解決する。
+  // 会場名・開催区分(中央/地方)はレースIDの場コードから、開催日は選択済み kaisaiDate から解決する。
   const venueName = venueNameFromRaceId(raceId);
+  const venueKind = venueKindOfRaceId(raceId);
   const { date: analysisDate, approximate: dateApproximate } =
     resolveAnalysisDate(kaisaiDate, now);
   const isWet =
@@ -177,6 +185,7 @@ export async function runAnalysis(
         venueName,
         isWet,
         date: analysisDate,
+        venueKind,
       },
       fieldSize: horseCount,
       config: deps.scorerConfig,

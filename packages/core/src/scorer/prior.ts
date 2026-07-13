@@ -27,6 +27,7 @@ import {
   daysBetweenDates,
   deriveRaceFeatures,
 } from "./derive-features.js";
+import type { RaceIdVenueKind } from "../scraper/ids.js";
 import type {
   CourseType,
   HorseRaceResult,
@@ -88,6 +89,15 @@ export interface TodayRaceConditions {
   readonly kinryo: number;
   /** 今回の馬体重増減(kg、前走比)。未発表なら null。 */
   readonly bodyWeightDiff: number | null;
+  /**
+   * 今回レースの開催区分(中央/地方)。省略時は "central"(従来どおり)。
+   * "nar"(地方競馬)では COURSE_TRAITS・COURSE_FRAME_BIAS_TABLE・美浦/栗東輸送負荷テーブルが
+   * いずれも中央10場前提のため、competeVenueBias(競馬場適性)・computeCourseFrameBiasScore
+   * (コース枠順バイアス)・computeTransportBias(輸送・滞在バイアス)の3項目を一律対象外にする
+   * (寄与度ログには「NARのため対象外」等の理由を残す)。それ以外の基礎スコア・バイアス項目は
+   * venueKind に関わらず従来どおり計算する。
+   */
+  readonly venueKind?: RaceIdVenueKind;
 }
 
 /** computePrior の入力(1頭分)。 */
@@ -136,6 +146,7 @@ function collectContributions(input: PriorInput): {
       frameZone: today.frameZone,
       kinryo: today.kinryo,
       bodyWeightDiff: today.bodyWeightDiff,
+      venueKind: today.venueKind,
     },
     input.jockeyCourseStats,
     config,
@@ -165,13 +176,21 @@ function collectContributions(input: PriorInput): {
       { courseType: today.courseType, isWet: today.isWet },
       biasConfig,
     ),
-    computeVenueBias(features, { venueName: today.venueName }, biasConfig),
+    computeVenueBias(
+      features,
+      { venueName: today.venueName, venueKind: today.venueKind },
+      biasConfig,
+    ),
     computeSeasonBias(features, { season: today.season }, biasConfig),
     computeSummerFatigueBias(features, { season: today.season }, biasConfig),
     computeFrameBias(features, { frameZone: today.frameZone }, biasConfig),
     computeTransportBias(
       features,
-      { stableLocation: today.stableLocation, venueName: today.venueName },
+      {
+        stableLocation: today.stableLocation,
+        venueName: today.venueName,
+        venueKind: today.venueKind,
+      },
       biasConfig,
     ),
     computeRotationBias(
@@ -294,6 +313,13 @@ export interface BuildPriorRaceInfo {
   readonly isWet: boolean;
   /** 今回のレース日(YYYY/MM/DD)。季節分類・休み明け走目の算出に使う。 */
   readonly date: string;
+  /**
+   * 今回レースの開催区分(中央/地方)。呼び出し側(app側 analysis-pipeline.ts)は
+   * venueKindOfRaceId(raceId) 等で判定した値を必ず明示的に渡すこと(TodayRaceConditions.venueKind
+   * と異なり省略不可)。NARでは競馬場適性・コース枠順バイアス・輸送滞在バイアスを対象外にする
+   * (詳細は TodayRaceConditions.venueKind のコメント参照)。
+   */
+  readonly venueKind: RaceIdVenueKind;
 }
 
 /** buildPriorInput の引数。 */
@@ -359,16 +385,14 @@ export function buildPriorInput(args: BuildPriorInputArgs): PriorInput {
   const month = monthOf(race.date);
   const season: Season = (month === null ? null : classifySeason(month)) ?? "春秋";
 
-  // 注意(Task #20→#21への申し送り): ShutubaHorse.stableLocation は string型に拡張済みで、
-  // NAR(地方競馬)の出馬表では「高知」「浦和」等の所属会場名がそのまま入り得る。
-  // その場合ここは「美浦/栗東のいずれでもない」に該当し、silentに美浦扱いへフォールバックする
-  // ため、NAR馬の輸送バイアスが正しくない前提(美浦所属)で計算されてしまう。
-  // 現状は呼び出し元(app側 analysis-pipeline.ts の venueNameFromRaceId)が中央10場以外の
-  // race_idで例外を投げるため、この関数にNARレースが渡ってくることは無く実害は無いが、
-  // これはあくまで呼び出し側の副作用による偶然の到達不能であり、本関数自体がNARを想定した
-  // ガードを持っているわけではない。docs/nar-scraping-plan.md「スコアラーへの影響」の通り、
-  // Task #21で「NARでは輸送バイアスを適用しない」分岐を buildPriorInput 側に入れるまでは、
-  // 中央レース以外でこの関数を呼んではならない。
+  // 実装済み(Task #21): ShutubaHorse.stableLocation は string型に拡張済みで、NAR(地方競馬)の
+  // 出馬表では「高知」「浦和」等の所属会場名がそのまま入り得る。その場合ここは「美浦/栗東の
+  // いずれでもない」に該当し、便宜上「美浦」へフォールバックする。以前はこのフォールバックが
+  // 輸送バイアスの誤補正につながる懸念があったが、collectContributions が
+  // race.venueKind === "nar" を computeTransportBias に明示的に渡すことで、輸送・滞在バイアス
+  // 自体がstableLocationの値を参照する前に対象外(correction=0)として短絡評価されるようになった
+  // (bias-transport.ts の venueKind ガード参照)。そのためこのフォールバック値はNARレースの
+  // prior計算結果に一切影響しない(値は保持されるがcomputeTransportBias内で未参照)。
   const stableLocation: StableLocation =
     horse.stableLocation === "美浦" || horse.stableLocation === "栗東"
       ? horse.stableLocation
@@ -385,6 +409,7 @@ export function buildPriorInput(args: BuildPriorInputArgs): PriorInput {
     stableLocation,
     kinryo: horse.kinryo,
     bodyWeightDiff: horse.bodyWeight?.diff ?? null,
+    venueKind: race.venueKind,
   };
 
   return {

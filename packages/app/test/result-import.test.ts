@@ -143,4 +143,21 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
     ).rejects.toBeInstanceOf(RaceResultParseError);
     expect(saveResult).not.toHaveBeenCalled();
   });
+
+  it("地方(NAR)のレースIDでも取得URLが nar.netkeiba.com に切り替わり、保存まで動作すること(race_id形式非依存の確認)", async () => {
+    const narRaceId = parseRaceId("202654071210"); // 場コード54 → 高知(docs/nar-scraping-plan.mdの実例)。
+    const fetchText = vi.fn().mockResolvedValue("<html>ok</html>");
+    const saveResult = vi.fn();
+    const outcome = await importRaceResult(narRaceId, {
+      fetchText,
+      parse: () => buildRaceResult(),
+      saveResult,
+    });
+    const [url] = fetchText.mock.calls[0]!;
+    expect(url).toBe(
+      "https://nar.netkeiba.com/race/result.html?race_id=202654071210",
+    );
+    expect(saveResult).toHaveBeenCalledTimes(1);
+    expect(outcome.raceId).toBe("202654071210");
+  });
 });

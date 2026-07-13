@@ -18,6 +18,7 @@ import type {
   BatchRaceOutcome,
   ImportResultOutcome,
   RaceListItem,
+  RaceVenueKind,
   VerifyReportView,
 } from "../shared/analysis-types.js";
 import { buildBatchDiscordPayload } from "./batch-discord-payload.js";
@@ -50,8 +51,10 @@ import { toRaceListItem } from "./to-race-list-item.js";
 export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => buildAppInfo(app.getVersion()));
 
-  ipcMain.handle(IPC_CHANNELS.listRaces, (_event, date: unknown) =>
-    handleListRaces(String(date)),
+  ipcMain.handle(
+    IPC_CHANNELS.listRaces,
+    (_event, date: unknown, venueKind: unknown) =>
+      handleListRaces(String(date), venueKind === "nar" ? "nar" : "central"),
   );
 
   ipcMain.handle(
@@ -141,13 +144,22 @@ function getResources(): PipelineResources {
   return resourceManager.acquire();
 }
 
-/** レース一覧取得ハンドラの実処理。 */
-async function handleListRaces(dateStr: string): Promise<RaceListItem[]> {
+/**
+ * レース一覧取得ハンドラの実処理。
+ * 開催区分(venueKind)に応じて資源(PipelineResources)の listRaces / listNarRaces を呼び分ける
+ * (仕様「選択に応じて listRaces / listNarRaces を呼び分ける」。既定は central)。
+ */
+async function handleListRaces(
+  dateStr: string,
+  venueKind: RaceVenueKind,
+): Promise<RaceListItem[]> {
   const kaisaiDate = parseKaisaiDate(dateStr);
   // キャッシュミス時に取得→scrape_cache へ書き込む await があるため runExclusive で保護する
   // (実行中の設定保存で DB を閉じられて「connection is not open」になるのを防ぐ)。
   const entries = await resourceManager.runExclusive((resources) =>
-    resources.listRaces(kaisaiDate),
+    venueKind === "nar"
+      ? resources.listNarRaces(kaisaiDate)
+      : resources.listRaces(kaisaiDate),
   );
   return entries.map(toRaceListItem);
 }

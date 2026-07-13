@@ -5,6 +5,7 @@ import type {
   BatchRaceOutcome,
   ImportResultOutcome,
   RaceListItem,
+  RaceVenueKind,
   VerifyReportView,
 } from "./analysis-types.js";
 import type { MaskedSettings, SettingsUpdate } from "./settings.js";
@@ -21,8 +22,10 @@ export interface KeibaApi {
   /**
    * 開催日(YYYYMMDD)のレース一覧を取得する。
    * @param date 開催日(YYYYMMDD形式)
+   * @param venueKind 開催区分(中央/地方)。省略時は "central"(中央)。
+   *   "nar"(地方)を指定すると main 側で listNarRaces を呼び分ける。
    */
-  listRaces(date: string): Promise<RaceListItem[]>;
+  listRaces(date: string, venueKind?: RaceVenueKind): Promise<RaceListItem[]>;
 
   /**
    * 複数レースを一括分析する(直列実行)。全体進捗は onBatchProgress で購読する。
