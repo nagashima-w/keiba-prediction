@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatEv,
+  formatMark,
   formatOdds,
   formatOpportunityScore,
   formatPercent,
@@ -9,6 +10,7 @@ import {
   isHighlightRow,
   LABEL_ADJUSTED_PROB,
   LABEL_PRIOR,
+  MARK_LEGEND,
   oddsStatusNote,
 } from "../src/renderer/format.js";
 import type { AnalysisRow } from "../src/shared/analysis-types.js";
@@ -76,11 +78,35 @@ describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
     isPositive,
     reason: null,
     careerRunCount: 10,
+    mark: null,
   });
 
   it("isPositive の行のみハイライト対象", () => {
     expect(isHighlightRow(row(true))).toBe(true);
     expect(isHighlightRow(row(false))).toBe(false);
+  });
+});
+
+describe("formatMark(予想印の表示・Task#23)", () => {
+  it("印があればそのまま表示し、無ければ(null)空欄にすること", () => {
+    expect(formatMark("◎")).toBe("◎");
+    expect(formatMark("〇")).toBe("〇");
+    expect(formatMark("▲")).toBe("▲");
+    expect(formatMark("△")).toBe("△");
+    expect(formatMark("☆")).toBe("☆");
+    expect(formatMark("注")).toBe("注");
+    expect(formatMark(null)).toBe("");
+  });
+});
+
+describe("MARK_LEGEND(予想印の凡例文言・Task#23)", () => {
+  it("各印の意味を短文で説明していること", () => {
+    expect(MARK_LEGEND).toContain("◎本命");
+    expect(MARK_LEGEND).toContain("〇対抗");
+    expect(MARK_LEGEND).toContain("▲単穴");
+    expect(MARK_LEGEND).toContain("△連下");
+    expect(MARK_LEGEND).toContain("☆");
+    expect(MARK_LEGEND).toContain("注");
   });
 });
 

@@ -123,7 +123,9 @@ export function buildBatchDiscordPayload(
     evPlus.length > 0
       ? evPlus.map((r) => {
           const name = truncate(r.horseName, HORSE_NAME_MAX);
-          return `${r.raceName} ${r.umaban}番 ${name} AI補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}`;
+          // 予想印(Task#23): 印が付いた馬は行頭に「◎ 」のように添える。印なし馬は従来どおり。
+          const markPrefix = r.mark !== null ? `${r.mark} ` : "";
+          return `${markPrefix}${r.raceName} ${r.umaban}番 ${name} AI補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}`;
         })
       : ["EVプラスの馬はありません(該当なし)"];
 

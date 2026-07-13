@@ -351,3 +351,42 @@ describe("parseAnalyzerResponse(予想印 mark の検証・Task#22)", () => {
     );
   });
 });
+
+describe("parseAnalyzerResponse(予想印 mark の同形異字正規化・Task#23)", () => {
+  /** umaban 1..n の PriorRef を作る(place_prob=prior=0.3固定でクリップ・欠け判定に影響させない)。 */
+  function priorsN(n: number): PriorRef[] {
+    return Array.from({ length: n }, (_, i) => ({ umaban: i + 1, prior: 0.3 }));
+  }
+
+  // 「〇」(U+3007 IDEOGRAPHIC NUMBER ZERO)と見た目が似た同形異字は正規化して受理する。
+  const acceptedAliasCases: ReadonlyArray<{ label: string; raw: string }> = [
+    { label: "U+25CB WHITE CIRCLE(○)は〇として受理される", raw: "○" },
+    { label: "U+25EF LARGE CIRCLE(◯)は〇として受理される", raw: "◯" },
+  ];
+  it.each(acceptedAliasCases)("$label", ({ raw }) => {
+    const text = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.3, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.3, reason: "y", mark: raw },
+        { number: 3, place_prob: 0.3, reason: "z", mark: "▲" },
+        { number: 4, place_prob: 0.3, reason: "w", mark: "△" },
+      ],
+    });
+    const r = parseAnalyzerResponse(text, priorsN(4));
+    expect(r.horses.find((h) => h.umaban === 2)!.mark).toBe("〇");
+  });
+
+  it("正規化対象以外の未知の同形異字(●黒丸)は従来どおりエラーになること", () => {
+    const text = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.3, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.3, reason: "y", mark: "●" }, // U+25CF BLACK CIRCLE(正規化対象外)
+        { number: 3, place_prob: 0.3, reason: "z", mark: "▲" },
+        { number: 4, place_prob: 0.3, reason: "w", mark: "△" },
+      ],
+    });
+    expect(() => parseAnalyzerResponse(text, priorsN(4))).toThrow(
+      AnalyzerResponseParseError,
+    );
+  });
+});

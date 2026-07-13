@@ -17,6 +17,11 @@
  *    自動的に制約違反としてエラーになる(意図した挙動)。
  *  - priors に無い余分な馬番の mark は place_prob と同様に無視する(制約カウントに含めない)。
  *  - 馬番が重複した場合は最初の出現のみを採用する(place_prob と同じ挙動を流用)。
+ *
+ * Task#23(予想印: 堅牢性向上・bossの非ブロッキング観察へのPM採用対応):
+ *  - LLMが「〇」(U+3007 IDEOGRAPHIC NUMBER ZERO)の代わりに見た目の似た同形異字
+ *    (○ U+25CB WHITE CIRCLE・◯ U+25EF LARGE CIRCLE)を出力した場合、既知の印として正規化して受理する。
+ *    正規化後も PREDICTION_MARKS のいずれとも一致しなければ、従来どおり未知の印としてエラーにする。
  */
 
 /**
@@ -253,18 +258,34 @@ export function parseAnalyzerResponse(
 }
 
 /**
+ * 印の同形異字(Unicode類似字形)→正規表記への正規化マップ(Task#23)。
+ * 「〇」(U+3007)と見た目が近い字形をキーに、正式な印文字を値として持つ。
+ */
+const MARK_CHAR_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["○", "〇"], // U+25CB WHITE CIRCLE
+  ["◯", "〇"], // U+25EF LARGE CIRCLE
+]);
+
+/** 印の同形異字を正規表記へ正規化する(該当しない文字列はそのまま返す)。 */
+function normalizeMarkChar(raw: string): string {
+  return MARK_CHAR_ALIASES.get(raw) ?? raw;
+}
+
+/**
  * 生の mark 値を PredictionMark | null に解決する。
- * null/undefined(キー欠落含む)は「印なし」として null。既知の6種以外の値は未知の印として例外。
+ * null/undefined(キー欠落含む)は「印なし」として null。
+ * 文字列は同形異字の正規化(Task#23)を経てから既知の6種と照合し、それでも一致しなければ
+ * 未知の印として例外にする。
  */
 function resolveMark(raw: unknown): PredictionMark | null {
   if (raw === null || raw === undefined) {
     return null;
   }
-  if (
-    typeof raw === "string" &&
-    (PREDICTION_MARKS as readonly string[]).includes(raw)
-  ) {
-    return raw as PredictionMark;
+  if (typeof raw === "string") {
+    const normalized = normalizeMarkChar(raw);
+    if ((PREDICTION_MARKS as readonly string[]).includes(normalized)) {
+      return normalized as PredictionMark;
+    }
   }
   throw new AnalyzerResponseParseError(
     `未知の予想印です: ${JSON.stringify(raw)}`,

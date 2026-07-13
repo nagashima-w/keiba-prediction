@@ -395,6 +395,49 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(llm[0]!.message).toContain("スキップ");
   });
 
+  it("LLMスキップ時は全馬 mark が null になること(Task#23)", async () => {
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      baseDeps(),
+      onProgress,
+    );
+    expect(result.rows.every((r) => r.mark === null)).toBe(true);
+    expect(saved[0]!.horses.every((h) => h.mark === null)).toBe(true);
+  });
+
+  it("LLMのmarkを分析結果(rows)と保存レコード(AnalysisRecord)へ伝播すること(Task#23)", async () => {
+    const analyze = vi.fn(
+      async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+        horses: input.horses.map((h) => ({
+          umaban: h.umaban,
+          prior: h.prior,
+          adjustedProb: h.prior,
+          reason: null,
+          clipped: false,
+          usedPrior: true,
+          mark: h.umaban === 1 ? "◎" : h.umaban === 2 ? "〇" : null,
+        })),
+        fallback: false,
+        retryCount: 0,
+        fallbackReason: null,
+      }),
+    );
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      { ...baseDeps(), analyze },
+      onProgress,
+    );
+    expect(result.rows.find((r) => r.umaban === 1)!.mark).toBe("◎");
+    expect(result.rows.find((r) => r.umaban === 2)!.mark).toBe("〇");
+    expect(result.rows.find((r) => r.umaban === 3)!.mark).toBeNull();
+
+    expect(saved[0]!.horses.find((h) => h.umaban === 1)!.mark).toBe("◎");
+    expect(saved[0]!.horses.find((h) => h.umaban === 2)!.mark).toBe("〇");
+    expect(saved[0]!.horses.find((h) => h.umaban === 3)!.mark).toBeNull();
+  });
+
   it("LLM有り(analyze注入): 補正後確率と根拠を採用し、EVは補正後確率で計算する", async () => {
     const analyze = vi.fn(
       async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({

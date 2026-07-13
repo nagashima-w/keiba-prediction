@@ -20,6 +20,7 @@ function analysis(
       ev: isPositive ? 1.2 : 0.8,
       isPositive,
       contributions: null,
+      mark: null,
     })),
   };
 }
