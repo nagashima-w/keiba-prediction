@@ -75,6 +75,13 @@ export interface AnalysisRow {
   readonly careerRunCount: number | null;
   /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。Task#23。 */
   readonly mark: PredictionMark | null;
+  /**
+   * このEV(ev/placeOddsMin)が推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。
+   * true のときは確定EVより誤差が大きい(±20〜30%程度)概算であり、UIで「(推定)」等の
+   * 表記により確定EVと明確に区別する。レース単位(oddsStatus=yoso)で一律に決まるため、
+   * 同一レース内の全行で同じ値になる。
+   */
+  readonly evEstimated: boolean;
 }
 
 /** 1レース分の分析結果。 */
@@ -169,6 +176,8 @@ export interface EvPlusSummaryRow {
   readonly ev: number;
   /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。Task#23。 */
   readonly mark: PredictionMark | null;
+  /** このEVが推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。 */
+  readonly evEstimated: boolean;
 }
 
 /** 検証画面: 分析履歴の1件(一覧表示用)。 */
@@ -233,6 +242,8 @@ export interface VerifyReportView {
   readonly excludedAnalysisCount: number;
   /** 同一レースの新しい分析に取って代わられ集計しなかった件数。 */
   readonly supersededAnalysisCount: number;
+  /** 推定EV(発売前の概算)のため集計から除外した分析件数(Task#25)。 */
+  readonly excludedEstimatedCount: number;
   /** 累積回収率サマリ。 */
   readonly bet: VerifyBetView;
   /** 推定確率帯ごとのキャリブレーション表。 */

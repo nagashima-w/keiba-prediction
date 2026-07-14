@@ -27,6 +27,20 @@
  *   賭け金・払戻の双方から除外する(勝敗が確定できないため)。
  *
  * 結果が保存されていない分析はレポートから除外し、その件数を報告する(仕様の要件)。
+ *
+ * 推定EV分析の除外(Task#25):
+ * - 発売前(oddsStatus=yoso)は単勝オッズから推定した複勝下限でEVを概算するため、確定EVより
+ *   誤差が大きい(±20〜30%程度)。回収率・キャリブレーションの数値に紛れ込むと指標の信頼性を
+ *   損なうため、evEstimated=true の分析は既定でレポートから丸ごと除外する
+ *   (回収率集計だけでなくキャリブレーション表からも除外する設計判断。理由: verifyは元々
+ *   「確定した実績で精度を検証する」機能であり、確定オッズでの再分析が前提の推定値をキャリブレー
+ *   ションに混ぜると「確率推定は当たっているが価格は外れている」ケースと見分けが付かなくなる)。
+ *   除外件数は excludedEstimatedCount に計上する(結果未保存の excludedAnalysisCount とは別カウンタ)。
+ * - 同一レースが推定EV分析の後に確定EV分析で再分析されている場合、latestモードでは通常
+ *   確定EV分析の方が新しいため、そちらが「最新」として採用され、推定EV分析は
+ *   supersededAnalysisCount(旧分析扱い)に計上される(excludedEstimatedCountには計上しない)。
+ *   確定EVへの再分析が行われないまま結果だけが記録された場合にのみ、推定EV分析自体が
+ *   「最新」として選ばれ、excludedEstimatedCount に計上される。
  */
 
 import type { AnalysisStore, StoredAnalysis } from "./analysis-store.js";
@@ -98,6 +112,12 @@ export interface VerifyReport {
    * includeAllAnalyses=true(全件モード)では常に0。
    */
   readonly supersededAnalysisCount: number;
+  /**
+   * 推定EV(evEstimated=true)のため集計から除外した分析件数(Task#25)。
+   * 結果未保存(excludedAnalysisCount)・旧分析(supersededAnalysisCount)のいずれにも
+   * 該当しないが、推定EVという理由だけで除外された件数。
+   */
+  readonly excludedEstimatedCount: number;
   /** 累積回収率サマリ。 */
   readonly bet: VerifyBetSummary;
   /** 推定確率帯ごとのキャリブレーション表。 */
@@ -133,6 +153,7 @@ export function computeVerifyReport(
   let includedAnalysisCount = 0;
   let excludedAnalysisCount = 0;
   let supersededAnalysisCount = 0;
+  let excludedEstimatedCount = 0;
   let betCount = 0;
   let totalStake = 0;
   let totalReturn = 0;
@@ -149,6 +170,11 @@ export function computeVerifyReport(
     // latestモードで最新に取って代わられた同一レースの旧分析(結果はあるが集計しない)。
     if (chosenIds !== null && !chosenIds.has(analysis.id)) {
       supersededAnalysisCount += 1;
+      continue;
+    }
+    // 推定EV(Task#25): 確定EVより誤差が大きいため、既定でレポートから丸ごと除外する。
+    if (analysis.evEstimated) {
+      excludedEstimatedCount += 1;
       continue;
     }
     includedAnalysisCount += 1;
@@ -201,6 +227,7 @@ export function computeVerifyReport(
     includedAnalysisCount,
     excludedAnalysisCount,
     supersededAnalysisCount,
+    excludedEstimatedCount,
     bet: {
       betCount,
       totalStake,

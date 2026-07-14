@@ -18,6 +18,15 @@
  * 作成済みのDBファイルにはこの列が無いため、起動時に PRAGMA table_info で存在確認し、
  * 無ければ ALTER TABLE ADD COLUMN で後付けする(既存行は NULL=印なしとして読める。後方互換)。
  *
+ * 推定EVフラグ(ev_estimated)列(Task#25): analyses に ev_estimated INTEGER(nullable)を持つ。
+ * 発売前(oddsStatus=yoso)は複勝オッズが無いため単勝オッズから推定した複勝下限でEVを概算するが、
+ * この推定EVは確定EVより誤差が大きく、verify(回収率集計)では既定で除外する必要がある(仕様Task#25)。
+ * 複勝オッズ有無は馬ごとではなくレース単位(オッズ発売状態)で決まるため、馬単位ではなく
+ * analyses(レース単位)テーブルに1列だけ持たせれば足りる(analysis_horgesへの追加は不要)。
+ * 旧バージョンで作成済みのDBにはこの列が無いため、mark列と同じ流儀でALTER TABLEにより後付けし、
+ * 既存行は NULL→false(確定EV扱い)として読む(後方互換。旧データは本機能導入前の分析のため
+ * すべて確定EV経路で計算されている)。
+ *
  * DB共有: ScrapeCache と同じ better-sqlite3 Database インスタンスを注入して共有できる。
  * テーブル名を分離しているため互いに干渉しない(scrape_cache とは独立)。
  */
@@ -58,6 +67,12 @@ export interface AnalysisRecord {
   readonly analyzedAt: string;
   /** 各馬の推定結果。 */
   readonly horses: readonly AnalysisHorseRecord[];
+  /**
+   * この分析が推定EV(単勝オッズからの複勝下限概算)によるものか(Task#25)。
+   * 省略時は false(確定EV。既存呼び出し元との後方互換のため任意項目とする)。
+   * verify は既定でこのフラグが true の分析を回収率集計から除外する。
+   */
+  readonly evEstimated?: boolean;
 }
 
 /** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
@@ -80,6 +95,10 @@ export interface StoredAnalysis {
   readonly raceId: string;
   readonly analyzedAt: string;
   readonly horses: StoredAnalysisHorse[];
+  /**
+   * 推定EV(Task#25)による分析か。旧レコード(列追加前の保存)は false(確定EV扱い)として復元する。
+   */
+  readonly evEstimated: boolean;
 }
 
 /** レース結果の1頭分。 */
@@ -142,7 +161,8 @@ export class AnalysisStore {
       CREATE TABLE IF NOT EXISTS ${ANALYSES_TABLE} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         race_id TEXT NOT NULL,
-        analyzed_at TEXT NOT NULL
+        analyzed_at TEXT NOT NULL,
+        ev_estimated INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -169,6 +189,21 @@ export class AnalysisStore {
     `);
     this.migrateResultPayoutColumn();
     this.migrateMarkColumn();
+    this.migrateEvEstimatedColumn();
+  }
+
+  /**
+   * 推定EVフラグ(ev_estimated)列を後付けするマイグレーション(Task#25)。
+   * 旧バージョンで作成済みの analyses には ev_estimated 列が無いため、存在しなければ追加する
+   * (既存行は NULL=false=確定EV扱いとなり、verifyは従来どおり集計対象になる=後方互換)。
+   */
+  private migrateEvEstimatedColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "ev_estimated")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN ev_estimated INTEGER`);
+    }
   }
 
   /**
@@ -207,7 +242,7 @@ export class AnalysisStore {
    */
   saveAnalysis(record: AnalysisRecord): number {
     const insertAnalysis = this.db.prepare(
-      `INSERT INTO ${ANALYSES_TABLE} (race_id, analyzed_at) VALUES (?, ?)`,
+      `INSERT INTO ${ANALYSES_TABLE} (race_id, analyzed_at, ev_estimated) VALUES (?, ?, ?)`,
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
@@ -216,7 +251,11 @@ export class AnalysisStore {
     );
 
     const tx = this.db.transaction((rec: AnalysisRecord): number => {
-      const info = insertAnalysis.run(rec.raceId, rec.analyzedAt);
+      const info = insertAnalysis.run(
+        rec.raceId,
+        rec.analyzedAt,
+        rec.evEstimated ? 1 : 0,
+      );
       const analysisId = Number(info.lastInsertRowid);
       for (const h of rec.horses) {
         insertHorse.run(
@@ -296,17 +335,22 @@ export class AnalysisStore {
       filter.raceId === undefined
         ? this.db
             .prepare(
-              `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt
+              `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated
                  FROM ${ANALYSES_TABLE} ORDER BY id`,
             )
             .all()
         : this.db
             .prepare(
-              `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt
+              `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated
                  FROM ${ANALYSES_TABLE} WHERE race_id = ? ORDER BY id`,
             )
             .all(filter.raceId)
-    ) as Array<{ id: number; raceId: string; analyzedAt: string }>;
+    ) as Array<{
+      id: number;
+      raceId: string;
+      analyzedAt: string;
+      evEstimated: number | null;
+    }>;
 
     const horseStmt = this.db.prepare(
       `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark
@@ -320,6 +364,8 @@ export class AnalysisStore {
         raceId: a.raceId,
         analyzedAt: a.analyzedAt,
         horses: horseRows.map(toStoredHorse),
+        // NULL(旧レコード・未指定保存)は false(確定EV扱い)として復元する。
+        evEstimated: a.evEstimated === 1,
       };
     });
   }

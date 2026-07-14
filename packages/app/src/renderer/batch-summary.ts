@@ -58,6 +58,7 @@ export function collectEvPlusSummary(
         placeOddsMin: row.placeOddsMin,
         ev: row.ev,
         mark: row.mark,
+        evEstimated: row.evEstimated,
       });
     }
   }
@@ -97,6 +98,11 @@ export interface RaceOpportunityRankRow {
   readonly raceName: string;
   /** そのレースの妙味スコア計算結果(スコア・筆頭候補・除外理由など)。 */
   readonly opportunity: RaceOpportunity;
+  /**
+   * このレースのEVが推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。
+   * true のときUIは「発売前推定」の備考を表示し、確定EVレースと区別する。
+   */
+  readonly evEstimated: boolean;
 }
 
 /**
@@ -130,7 +136,12 @@ export function rankRaceOpportunities(
       { oddsStatus: result.oddsStatus },
       config,
     );
-    rows.push({ raceId: result.raceId, raceName: result.raceName, opportunity });
+    rows.push({
+      raceId: result.raceId,
+      raceName: result.raceName,
+      opportunity,
+      evEstimated: result.oddsStatus === "yoso",
+    });
   }
   return rows.sort((a, b) => {
     const sa = a.opportunity.score;
@@ -149,6 +160,29 @@ export function rankRaceOpportunities(
     // 同スコア(または双方null)は raceId 昇順で決定的に。
     return a.raceId < b.raceId ? -1 : a.raceId > b.raceId ? 1 : 0;
   });
+}
+
+/**
+ * 妙味レースランキングの備考列に表示する文言を組み立てる(Task#25)。
+ * - 発売前推定(evEstimated=true)なら「発売前推定」を含める。
+ * - 除外理由(excludedReason)があればそれを優先して含める(低データ注記より優先。
+ *   除外レースでは「なぜ算出できなかったか」の説明の方が重要なため、既存挙動を維持する)。
+ * - 除外理由が無く低データ割合が0.5以上ならその注記を含める。
+ * - 該当する注記が無ければ空文字(表示側は空欄にする)。
+ * 複数該当する場合は " / " で連結する。
+ */
+export function raceOpportunityRemark(row: RaceOpportunityRankRow): string {
+  const parts: string[] = [];
+  if (row.evEstimated) {
+    parts.push("発売前推定");
+  }
+  const op = row.opportunity;
+  if (op.excludedReason !== null) {
+    parts.push(op.excludedReason);
+  } else if (op.lowDataRatio >= 0.5) {
+    parts.push(`低データ馬${Math.round(op.lowDataRatio * 100)}%(推定不確実)`);
+  }
+  return parts.join(" / ");
 }
 
 /** 成功/失敗/スキップの件数とEVプラス総数を数える。 */

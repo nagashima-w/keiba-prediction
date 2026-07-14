@@ -12,6 +12,7 @@ function analysis(
     id,
     raceId,
     analyzedAt: `2026-07-0${id}T00:00:00.000Z`,
+    evEstimated: false,
     horses: positives.map((isPositive, i) => ({
       umaban: i + 1,
       prior: 0.3,

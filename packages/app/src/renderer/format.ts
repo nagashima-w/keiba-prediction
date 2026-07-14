@@ -72,15 +72,24 @@ export function isHighlightRow(row: AnalysisRow): boolean {
 /**
  * オッズ発売状態の注記文言。確定(result)は注記不要のため null。
  * - "middle": 発売中の暫定オッズである旨。
- * - "yoso":   複勝未発売でEV計算ができない旨(全馬EVが「-」になる)。
+ * - "yoso":   発売前のため単勝オッズからの推定EVである旨(Task#25)。
+ *   複勝オッズ発売後に再分析すれば確定EVで上書きされる(既存の「レースごと最新分析」挙動)。
  */
 export function oddsStatusNote(status: OddsStatus): string | null {
   switch (status) {
     case "middle":
       return "オッズは発売中(暫定)";
     case "yoso":
-      return "複勝オッズ未発売(予想オッズのみ)のためEV計算不可。複勝発売開始後に再分析してください";
+      return "発売前のため予想単勝オッズからの推定EV(発売後に再分析推奨)";
     default:
       return null;
   }
+}
+
+/**
+ * 推定EVの表記接尾辞(Task#25)。evEstimated=true のときだけ「(推定)」を返し、
+ * 確定EVとの区別をEV列に明示する。false のときは空文字(通常表示に何も付け足さない)。
+ */
+export function formatEstimatedEvSuffix(evEstimated: boolean): string {
+  return evEstimated ? "(推定)" : "";
 }

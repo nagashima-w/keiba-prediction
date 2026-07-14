@@ -38,6 +38,24 @@ function makeRecord(overrides: Partial<AnalysisRecord> = {}): AnalysisRecord {
 }
 
 describe("AnalysisStore(分析結果のSQLite保存)", () => {
+  describe("推定EVフラグ(evEstimated)の保存・復元(Task#25)", () => {
+    it("evEstimatedを指定して保存すると、そのまま復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "推定レース", evEstimated: true }));
+      const a = store.listAnalyses({ raceId: "推定レース" })[0]!;
+      expect(a.evEstimated).toBe(true);
+      store.close();
+    });
+
+    it("evEstimatedを省略して保存すると false として保存・復元されること(後方互換の既定値)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "確定レース" }));
+      const a = store.listAnalyses({ raceId: "確定レース" })[0]!;
+      expect(a.evEstimated).toBe(false);
+      store.close();
+    });
+  });
+
   describe("saveAnalysis / listAnalyses", () => {
     it("保存した分析を馬ごと復元でき、寄与度ログ(JSON)も往復すること", () => {
       const store = new AnalysisStore();
@@ -260,6 +278,60 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       expect(saved.id).toBe(newId);
       expect(saved.horses.find((h) => h.umaban === 1)!.mark).toBe("◎");
       expect(saved.horses.find((h) => h.umaban === 2)!.mark).toBeNull();
+
+      store.close();
+    });
+  });
+
+  describe("推定EVフラグ(ev_estimated)列の後方互換マイグレーション(Task#25)", () => {
+    it("ev_estimated列が無い旧スキーマのDBを開いても、既存分析はevEstimated=falseで読め、新規保存は推定フラグ付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // Task#25より前のバージョン相当のスキーマ(analysesにev_estimated列が無い)を直接作る。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      // 旧バージョンで保存済みの既存データ(ev_estimated列自体が存在しない状態での保存を模す)。
+      const info = db
+        .prepare(`INSERT INTO analyses (race_id, analyzed_at) VALUES (?, ?)`)
+        .run("旧レース", "2026-01-01T00:00:00.000Z");
+      const oldAnalysisId = Number(info.lastInsertRowid);
+      db.prepare(
+        `INSERT INTO analysis_horses
+           (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(oldAnalysisId, 1, 0.4, 0.4, 2.0, 0.8, 0, null, null);
+
+      // 新バージョンの AnalysisStore で開く(ev_estimated列が無ければ ALTER TABLE で追加されるはず)。
+      const store = new AnalysisStore({ database: db });
+
+      // 旧分析はev_estimated列を後付けしても既存行はfalse(未推定=確定EV扱い)として読める。
+      const old = store.listAnalyses({ raceId: "旧レース" })[0]!;
+      expect(old.evEstimated).toBe(false);
+
+      // 新規保存(推定EVあり)も問題なく動作する(後方互換を確認)。
+      const newId = store.saveAnalysis(
+        makeRecord({ raceId: "新レース", evEstimated: true }),
+      );
+      const saved = store.listAnalyses({ raceId: "新レース" })[0]!;
+      expect(saved.id).toBe(newId);
+      expect(saved.evEstimated).toBe(true);
 
       store.close();
     });

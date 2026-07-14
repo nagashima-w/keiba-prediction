@@ -26,8 +26,16 @@
  *    evPlusCount として結果に持たせるだけ(表示・ランキングの参考情報)に留める。
  *
  * 対象外(スコア null + 理由):
- *  - oddsStatus=yoso(複勝未発売): EV が計算できないため妙味評価不可(EVプラス判定より優先)。
  *  - EVプラス0頭: そもそも妙味のある馬がいない。
+ *
+ * oddsStatus=yoso(複勝未発売)の扱い(Task#25):
+ *  当初は「EVが計算できない」ことを理由に yoso を一律スコア対象外にしていたが、Task#25で
+ *  単勝オッズから複勝下限を推定してEVを概算できるようになったため、この特別扱いは廃止した。
+ *  呼び出し側(analysis-pipeline/batch-summary)が推定EVで horses[].ev を埋めていれば、
+ *  yoso のレースも他のレースと全く同じスコア式・除外判定(EVプラス0頭なら null)で扱う。
+ *  推定EVである旨(「発売前推定」表記)はこの関数の対象ではなく、呼び出し側がレース単位で
+ *  oddsStatus を見て表示する(推定EVは確定EVより誤差が大きいため、UIで明示的に区別する)。
+ *  RaceOpportunityMeta.oddsStatus は将来の判定拡張に備えて残すが、現状スコア計算には使わない。
  *
  * ネットワーク・LLM・SQLite には一切依存しない(与えられた数値から決定的に算出するだけ)。
  */
@@ -111,8 +119,6 @@ export interface RaceOpportunity {
   readonly excludedReason: string | null;
 }
 
-/** yoso(複勝未発売)の除外理由。 */
-const REASON_YOSO = "複勝オッズ未発売(予想オッズのみ)のため妙味評価不可";
 /** EVプラス0頭の除外理由。 */
 const REASON_NO_EV_PLUS = "EVプラスの馬がいないため妙味なし";
 
@@ -147,16 +153,8 @@ export function computeRaceOpportunity(
   );
   const evPlusCount = evPlus.length;
 
-  // 対象外の判定(yoso を EVプラス判定より優先: 未発売では EV 自体が信用できないため)。
-  if (meta.oddsStatus === "yoso") {
-    return {
-      score: null,
-      bestPick: null,
-      evPlusCount,
-      lowDataRatio,
-      excludedReason: REASON_YOSO,
-    };
-  }
+  // 対象外の判定。yoso(複勝未発売)であっても horses[].ev に推定EVが入っていれば通常どおり
+  // 算出する(Task#25。特別扱いは廃止、evPlusCount=0 の通常ルートに一本化)。
   if (evPlusCount === 0) {
     return {
       score: null,

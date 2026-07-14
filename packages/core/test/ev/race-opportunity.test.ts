@@ -174,12 +174,24 @@ describe("computeRaceOpportunity(レース妙味スコア)", () => {
     expect(r.excludedReason).toContain("EVプラス");
   });
 
-  it("oddsStatus=yoso(複勝未発売)はスコア null + 専用理由(EVプラス判定より優先)", () => {
+  it("oddsStatus=yoso(複勝未発売)でもEV(推定EV)が与えられていれば通常どおりスコア算出する(Task#25)", () => {
+    // Task#25: 発売前(yoso)は推定EV(単勝オッズから複勝下限を概算したEV)で妙味レースランキングに
+    // 掲載できるようにする。呼び出し側(analysis-pipeline/batch-summary)が推定EVで ev を埋めていれば、
+    // yoso であること自体はスコア算出を妨げない(除外判定は evPlusCount=0 の通常ルートに一本化)。
     const horses = [horse({ umaban: 1, ev: 3.0, adjustedProb: 0.5 })];
     const r = computeRaceOpportunity(horses, { oddsStatus: "yoso" }, DEFAULT_RACE_OPPORTUNITY_CONFIG);
+    expect(r.score).toBeCloseTo((3.0 - 1) * 0.5, 10);
+    expect(r.bestPick?.umaban).toBe(1);
+    expect(r.excludedReason).toBeNull();
+  });
+
+  it("oddsStatus=yoso でも EV が算出できていない(全馬 ev=null)ならEVプラス0頭と同じ理由で除外される", () => {
+    // 単勝オッズも欠損している等、推定EVすら算出できなかった場合の自然なフォールバック。
+    const horses = [horse({ umaban: 1, ev: null, isPositive: false })];
+    const r = computeRaceOpportunity(horses, { oddsStatus: "yoso" }, DEFAULT_RACE_OPPORTUNITY_CONFIG);
     expect(r.score).toBeNull();
-    expect(r.bestPick).toBeNull();
-    expect(r.excludedReason).toContain("複勝オッズ未発売");
+    expect(r.evPlusCount).toBe(0);
+    expect(r.excludedReason).toContain("EVプラス");
   });
 
   it("同スコアのときは馬番昇順で筆頭候補を決める(決定性)", () => {

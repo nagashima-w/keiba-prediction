@@ -10,7 +10,9 @@ import { describe, expect, it } from "vitest";
 import {
   collectEvPlusSummary,
   rankRaceOpportunities,
+  raceOpportunityRemark,
   summarizeBatch,
+  type RaceOpportunityRankRow,
 } from "../src/renderer/batch-summary.js";
 import type {
   AnalysisResult,
@@ -31,6 +33,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   reason: null,
   careerRunCount: 10,
   mark: null,
+  evEstimated: false,
   ...over,
 });
 
@@ -258,5 +261,97 @@ describe("rankRaceOpportunities(妙味レースランキング)", () => {
       "202601010101",
       "202601010109",
     ]);
+  });
+
+  it("発売前(yoso・推定EV)のレースもスコアが算出でき、evEstimated=trueで返ること(Task#25)", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("202601010101", "推定EVレース", [
+        row({
+          umaban: 1,
+          ev: 2.0,
+          adjustedProb: 0.5,
+          isPositive: true,
+          evEstimated: true,
+        }),
+      ]),
+    ];
+    const result = outcomes[0]!.result!;
+    const yosoOutcome: BatchRaceOutcome = {
+      ...outcomes[0]!,
+      result: { ...result, oddsStatus: "yoso" },
+    };
+    const ranked = rankRaceOpportunities([yosoOutcome]);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]!.opportunity.score).toBeCloseTo((2.0 - 1) * 0.5, 10);
+    expect(ranked[0]!.evEstimated).toBe(true);
+  });
+
+  it("確定EV(result/middle)のレースはevEstimated=falseで返ること(回帰確認)", () => {
+    const outcomes: BatchRaceOutcome[] = [opp("202601010101", "確定EVレース", 2.0, 0.5)];
+    const ranked = rankRaceOpportunities(outcomes);
+    expect(ranked[0]!.evEstimated).toBe(false);
+  });
+});
+
+describe("raceOpportunityRemark(妙味レースランキングの備考文言・Task#25)", () => {
+  /** テスト用のランキング行を最小構成で組み立てる。 */
+  const rankRow = (
+    over: Partial<Omit<RaceOpportunityRankRow, "opportunity">> & {
+      opportunity?: Partial<RaceOpportunityRankRow["opportunity"]>;
+    },
+  ): RaceOpportunityRankRow => ({
+    raceId: "111111111111",
+    raceName: "1R",
+    evEstimated: false,
+    ...over,
+    opportunity: {
+      score: null,
+      bestPick: null,
+      evPlusCount: 0,
+      lowDataRatio: 0,
+      excludedReason: null,
+      ...over.opportunity,
+    },
+  });
+
+  it("発売前推定(evEstimated=true)のときは「発売前推定」を含めること", () => {
+    const row = rankRow({ evEstimated: true });
+    expect(raceOpportunityRemark(row)).toContain("発売前推定");
+  });
+
+  it("確定EV(evEstimated=false)・除外なし・低データなしのときは空文字であること", () => {
+    const row = rankRow({ evEstimated: false });
+    expect(raceOpportunityRemark(row)).toBe("");
+  });
+
+  it("除外理由(excludedReason)があるときはそれを含めること", () => {
+    const row = rankRow({
+      opportunity: { excludedReason: "EVプラスの馬がいないため妙味なし" },
+    });
+    expect(raceOpportunityRemark(row)).toContain("EVプラスの馬がいないため妙味なし");
+  });
+
+  it("低データ割合が0.5以上のときは低データ注記を含めること", () => {
+    const row = rankRow({ opportunity: { lowDataRatio: 0.6 } });
+    expect(raceOpportunityRemark(row)).toContain("低データ馬60%");
+  });
+
+  it("発売前推定と低データ注記は両方含め、区切り文字で結合すること", () => {
+    const row = rankRow({ evEstimated: true, opportunity: { lowDataRatio: 0.6 } });
+    const remark = raceOpportunityRemark(row);
+    expect(remark).toContain("発売前推定");
+    expect(remark).toContain("低データ馬60%");
+  });
+
+  it("除外理由がある場合は低データ注記より除外理由を優先すること(既存挙動の維持)", () => {
+    const row = rankRow({
+      opportunity: {
+        excludedReason: "EVプラスの馬がいないため妙味なし",
+        lowDataRatio: 0.9,
+      },
+    });
+    const remark = raceOpportunityRemark(row);
+    expect(remark).toContain("EVプラスの馬がいないため妙味なし");
+    expect(remark).not.toContain("低データ馬");
   });
 });
