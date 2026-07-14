@@ -110,6 +110,7 @@ describe("ipc: net.fetch アダプタの注入", () => {
       biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
+      additionalInstruction: "",
     };
     handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 

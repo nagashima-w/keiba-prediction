@@ -28,6 +28,8 @@ describe("DEFAULT_APP_SETTINGS(既定設定)", () => {
     expect(DEFAULT_APP_SETTINGS.apiKey).toBe("");
     expect(DEFAULT_APP_SETTINGS.discordWebhookUrl).toBe("");
     expect(DEFAULT_APP_SETTINGS.autoSendDiscord).toBe(false);
+    // プロンプト追加指示(Task#28)は既定で空(何も注入しない)。
+    expect(DEFAULT_APP_SETTINGS.additionalInstruction).toBe("");
   });
 });
 
@@ -83,6 +85,19 @@ describe("coerceSettings(バリデーション+デフォルトマージ)", () =>
     expect(coerceSettings({ autoSendDiscord: true }).autoSendDiscord).toBe(true);
     expect(coerceSettings({ apiKey: "sk-ant-xxx" }).apiKey).toBe("sk-ant-xxx");
   });
+
+  it("プロンプト追加指示(additionalInstruction)は文字列であればそのまま採用し、型違い・欠損はデフォルト(空文字)にする(Task#28)", () => {
+    expect(
+      coerceSettings({ additionalInstruction: "人気薄の複勝率は慎重に見積もること" })
+        .additionalInstruction,
+    ).toBe("人気薄の複勝率は慎重に見積もること");
+    expect(coerceSettings({ additionalInstruction: 123 }).additionalInstruction).toBe("");
+    expect(coerceSettings({}).additionalInstruction).toBe("");
+    // 複数行の指示もそのまま保持する。
+    expect(
+      coerceSettings({ additionalInstruction: "1行目\n2行目" }).additionalInstruction,
+    ).toBe("1行目\n2行目");
+  });
 });
 
 describe("maskApiKey(APIキーのマスク)", () => {
@@ -103,6 +118,7 @@ describe("maskSettings(レンダラー向けマスク+環境変数優先)", () =
     ...DEFAULT_APP_SETTINGS,
     apiKey: "sk-ant-stored-key-value",
     discordWebhookUrl: "https://discord.com/api/webhooks/1/a",
+    additionalInstruction: "人気薄の複勝率は慎重に見積もること",
   };
 
   it("環境変数が未設定なら保存キーをマスクして返す(fromEnv=false)", () => {
@@ -113,6 +129,11 @@ describe("maskSettings(レンダラー向けマスク+環境変数優先)", () =
     expect(masked.discordWebhookUrl).toBe(base.discordWebhookUrl);
     // 平文キーはマスク済み結果に含まれない。
     expect(JSON.stringify(masked)).not.toContain("sk-ant-stored-key-value");
+  });
+
+  it("プロンプト追加指示はAPIキーと違い平文のまま返す(Discord URLと同様の設計判断、Task#28)", () => {
+    const masked = maskSettings(base, undefined);
+    expect(masked.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
   });
 
   it("環境変数が設定済みなら環境変数を優先し fromEnv=true・環境キーをマスク", () => {
@@ -157,6 +178,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: true,
+      additionalInstruction: "",
     });
     expect(next.apiKey).toBe("keep-me");
     expect(next.discordWebhookUrl).toBe("https://new.example.com/x");
@@ -172,6 +194,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
+      additionalInstruction: "",
     });
     expect(replaced.apiKey).toBe("new-key");
 
@@ -182,6 +205,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
+      additionalInstruction: "",
     });
     expect(cleared.apiKey).toBe("");
   });
@@ -195,6 +219,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
+      additionalInstruction: "",
     });
     expect(withNull.apiKey).toBe("keep-me");
 
@@ -205,6 +230,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
+      additionalInstruction: "",
     });
     expect(withNumber.apiKey).toBe("keep-me");
   });
@@ -216,9 +242,22 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       biasWeights: { ...DEFAULT_APP_SETTINGS.biasWeights, venue: -3 },
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
+      additionalInstruction: "",
     });
     expect(next.evThreshold).toBe(1.0);
     expect(next.biasWeights.venue).toBe(DEFAULT_SCORER_CONFIG.weights.venue);
+  });
+
+  it("additionalInstructionを渡すとそのまま反映される(Task#28)", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "人気薄の複勝率は慎重に見積もること",
+    });
+    expect(next.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
   });
 });
 

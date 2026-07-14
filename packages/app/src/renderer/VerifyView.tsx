@@ -1,5 +1,7 @@
 import type { VerifyState } from "./verify-reducer.js";
 import {
+  additionalInstructionsFullText,
+  additionalInstructionsSummary,
   calibrationBarWidthPercent,
   directionLabel,
   formatAdjustment,
@@ -118,6 +120,7 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
           <thead>
             <tr>
               <th style={thStyle}>プロンプト版</th>
+              <th style={thStyle}>追加指示</th>
               <th style={thStyle}>集計件数</th>
               <th style={thStyle}>賭け数</th>
               <th style={thStyle}>投資額</th>
@@ -126,18 +129,26 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {state.reportsByPromptVersion.map(({ promptVersion, report: r }) => (
-              <tr key={promptVersion ?? "版不明"}>
-                <td style={tdStyle}>{promptVersionLabel(promptVersion)}</td>
-                <td style={tdStyle}>{r.includedAnalysisCount}</td>
-                <td style={tdStyle}>{r.bet.betCount}点</td>
-                <td style={tdStyle}>{formatYen(r.bet.totalStake)}</td>
-                <td style={tdStyle}>{formatYen(r.bet.totalReturn)}</td>
-                <td style={tdStyle}>
-                  <strong>{formatRate(r.bet.recoveryRate)}</strong>
-                </td>
-              </tr>
-            ))}
+            {state.reportsByPromptVersion.map(
+              ({ promptVersion, report: r, additionalInstructions }) => (
+                <tr key={promptVersion ?? "版不明"}>
+                  <td style={tdStyle}>{promptVersionLabel(promptVersion)}</td>
+                  <td
+                    style={tdStyle}
+                    title={additionalInstructionsFullText(additionalInstructions)}
+                  >
+                    {additionalInstructionsSummary(additionalInstructions)}
+                  </td>
+                  <td style={tdStyle}>{r.includedAnalysisCount}</td>
+                  <td style={tdStyle}>{r.bet.betCount}点</td>
+                  <td style={tdStyle}>{formatYen(r.bet.totalStake)}</td>
+                  <td style={tdStyle}>{formatYen(r.bet.totalReturn)}</td>
+                  <td style={tdStyle}>
+                    <strong>{formatRate(r.bet.recoveryRate)}</strong>
+                  </td>
+                </tr>
+              ),
+            )}
           </tbody>
         </table>
       )}

@@ -510,6 +510,107 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(saved[0]!.promptVersion).toBe(PROMPT_VERSION);
   });
 
+  describe("追加指示(additionalInstruction)の配線(Task#28 プロンプト改善C)", () => {
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("deps.additionalInstruction を BuildPromptInput.additionalInstruction として渡すこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        additionalInstruction: "人気薄の複勝率は慎重に見積もること",
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(captured.value!.additionalInstruction).toBe(
+        "人気薄の複勝率は慎重に見積もること",
+      );
+    });
+
+    it("deps.additionalInstructionが未指定ならBuildPromptInput.additionalInstructionはundefinedになること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(captured.value!.additionalInstruction).toBeUndefined();
+    });
+
+    it("deps.additionalInstructionが空白のみならBuildPromptInput.additionalInstructionはundefinedになること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        additionalInstruction: "   \n  ",
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(captured.value!.additionalInstruction).toBeUndefined();
+    });
+
+    it("前後の空白をトリムして渡すこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        additionalInstruction: "  トリム対象  ",
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(captured.value!.additionalInstruction).toBe("トリム対象");
+    });
+
+    it("LLM有り: 保存レコードのadditionalInstructionに設定値(トリム済み)を記録すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        additionalInstruction: "  人気薄の複勝率は慎重に見積もること  ",
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(saved[0]!.additionalInstruction).toBe(
+        "人気薄の複勝率は慎重に見積もること",
+      );
+    });
+
+    it("設定が空なら保存レコードのadditionalInstructionはnullになること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(saved[0]!.additionalInstruction).toBeNull();
+    });
+
+    it("LLMスキップ時は保存レコードのadditionalInstructionがnullになること(プロンプト未使用)", async () => {
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        additionalInstruction: "設定されているがLLM未使用のため使われない",
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(saved[0]!.additionalInstruction).toBeNull();
+    });
+  });
+
   it("LLM有り(analyze注入): 補正後確率と根拠を採用し、EVは補正後確率で計算する", async () => {
     const analyze = vi.fn(
       async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({

@@ -48,6 +48,12 @@ const weightInputStyle: React.CSSProperties = {
   ...inputStyle,
   width: "6rem",
 };
+const textareaStyle: React.CSSProperties = {
+  ...inputStyle,
+  minHeight: "5rem",
+  resize: "vertical",
+  fontFamily: "inherit",
+};
 
 /**
  * 設定画面(仕様「5. ui」設定画面 / scorer末尾の重みconfig調整)。
@@ -203,6 +209,29 @@ export function SettingsView(): React.JSX.Element {
           />{" "}
           分析結果を自動でDiscordに送信する(Phase 5 で使用)
         </label>
+      </div>
+
+      {/* プロンプト追加指示(Task#28 プロンプト改善C)。 */}
+      <div style={fieldStyle}>
+        <label style={labelStyle} htmlFor="additional-instruction">
+          プロンプト追加指示(任意)
+        </label>
+        <textarea
+          id="additional-instruction"
+          style={textareaStyle}
+          value={state.additionalInstruction}
+          placeholder="例: 人気薄の複勝率は慎重に見積もること"
+          onChange={(e) =>
+            dispatch({ type: "追加指示入力", value: e.target.value })
+          }
+        />
+        <p style={{ ...noteStyle, color: "#a60" }}>
+          ここに書いた指示はLLMにそのまま渡されます。3着内率の推定を市場オッズ(人気)に近づける方向の指示は、
+          本ツールの妙味検出を損なうため避けてください(市場から独立した確率推定×市場オッズで妙味を取る設計です)。
+        </p>
+        <p style={noteStyle}>
+          空欄なら何も注入しません。次回の分析から反映され、どの追加指示で分析したかは検証画面に記録されます。
+        </p>
       </div>
 
       {/* 重み(折りたたみ)。バイアス7種 + 基礎6種。 */}

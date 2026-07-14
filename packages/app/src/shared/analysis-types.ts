@@ -320,6 +320,13 @@ export interface PromptVersionVerifyReportView {
   readonly promptVersion: string | null;
   /** その版の分析集合のみを対象とした検証レポート(全体レポートと同型)。 */
   readonly report: VerifyReportView;
+  /**
+   * この版グループ内で実際に使われた追加指示(表示用。core PromptVersionVerifyReport の
+   * additionalInstructions のプレーン写し)。Task#28。非null値は文字列昇順、
+   * 追加指示なし(null)は末尾という決定的な順序。「同じ版でも追加指示が違えば別条件」であることを
+   * 版別比較の解釈時に把握できるようにするための情報。
+   */
+  readonly additionalInstructions: readonly (string | null)[];
 }
 
 /** 結果取込の結果(1レース分)。 */

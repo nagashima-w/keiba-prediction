@@ -97,6 +97,13 @@ export interface AnalysisPipelineDeps {
   readonly scorerConfig?: ScorerConfig;
   /** LLMスキップ理由(analyze=null のとき結果メタに載せる文言)。 */
   readonly llmSkipReason?: string;
+  /**
+   * プロンプト追加指示(設定画面、Task#28 プロンプト改善C)。省略時・空文字・空白のみは
+   * 何も注入しない(undefinedとしてBuildPromptInputへ渡す)。トリムした値を
+   * BuildPromptInput.additionalInstruction に渡し、LLM使用時のみ分析レコードにも保存する
+   * (LLMスキップ時はプロンプト自体を使っていないため null を保存する。promptVersionと同じ方針)。
+   */
+  readonly additionalInstruction?: string | null;
 }
 
 /** LLM分析後の1頭分(補正後確率と根拠)。 */
@@ -164,6 +171,8 @@ export async function runAnalysis(
   const notify = (progress: AnalysisProgress): void => {
     onProgress?.(progress);
   };
+  // プロンプト追加指示(Task#28): 空文字・空白のみ・未指定は「注入なし」として扱う。
+  const trimmedInstruction = (deps.additionalInstruction ?? "").trim();
 
   // (1) スクレイピング。
   notify({
@@ -284,6 +293,8 @@ export async function runAnalysis(
           referenceEv: computeReferenceEv(prior, placeOddsMin),
         };
       }),
+      additionalInstruction:
+        trimmedInstruction === "" ? undefined : trimmedInstruction,
     };
     const analysis = await deps.analyze(promptInput);
     llmUsed = true;
@@ -341,6 +352,10 @@ export async function runAnalysis(
     // 記録する。LLMスキップ(prior採用)はプロンプト自体を使っていないため null(版不明とは別の
     // 「該当なし」だが、verifyの版別集計では版不明と同じ null グループにまとめて扱う)。
     promptVersion: llmUsed ? PROMPT_VERSION : null,
+    // 追加指示(Task#28): プロンプトを実際に送った(LLMを使った)分析のみ記録する。
+    // LLMスキップ(prior採用)はプロンプト自体を使っていないため null(promptVersionと同じ方針)。
+    additionalInstruction:
+      llmUsed && trimmedInstruction !== "" ? trimmedInstruction : null,
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;
