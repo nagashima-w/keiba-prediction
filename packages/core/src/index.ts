@@ -238,10 +238,15 @@ export {
 export {
   computeVerifyReport,
   DEFAULT_VERIFY_CONFIG,
+  type AdjustmentDirection,
+  type CalibrationBiasBin,
   type CalibrationBin,
+  type DirectionGroupStat,
+  type MarkStat,
   type VerifyBetSummary,
   type VerifyConfig,
   type VerifyReport,
+  type VerifyTrendReport,
 } from "./ev/verify.js";
 export {
   classifyHorseLegStyle,

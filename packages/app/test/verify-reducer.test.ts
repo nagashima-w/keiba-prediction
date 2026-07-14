@@ -37,6 +37,11 @@ const sampleReport: VerifyReportView = {
     approximatePayoutCount: 0,
   },
   calibration: [],
+  trend: {
+    directionGroups: [],
+    calibrationBias: [],
+    markStats: [],
+  },
 };
 
 describe("verifyReducer(検証タブの状態遷移)", () => {

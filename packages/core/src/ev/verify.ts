@@ -41,9 +41,24 @@
  *   supersededAnalysisCount(旧分析扱い)に計上される(excludedEstimatedCountには計上しない)。
  *   確定EVへの再分析が行われないまま結果だけが記録された場合にのみ、推定EV分析自体が
  *   「最新」として選ばれ、excludedEstimatedCount に計上される。
+ *
+ * 補正傾向サマリ(VerifyTrendReport、Task#26 プロンプト改善B):
+ * - 回収率・キャリブレーションと同じ母集団(latest選択・推定EV除外・着順不明除外・結果未保存除外)
+ *   を対象に、「補正がどう外れているか」を機械可読な構造体で算出する(将来Task#26案Dで
+ *   LLMに改善提案を出させる際にそのまま渡せるよう、表示専用の整形文字列は含めない設計)。
+ * - (1) 補正方向×結果: 各馬を adjustedProb と prior の差(diff)で「上げ(raised, diff>ε)」
+ *   「下げ(lowered, diff<-ε)」「据え置き(unchanged, |diff|<=ε)」の3群に分類し、群ごとに
+ *   件数・実複勝率(finish<=placeMaxRank)・平均補正幅(diffの単純平均)を算出する。
+ *   ε(directionEpsilon)は VerifyConfig で調整可能(既定0.005)。
+ * - (2) 過信バイアス: 既存キャリブレーション表の各帯について、代表予測値(帯の中央値。
+ *   例 20-30%帯→0.25)と actualPlaceRate の差(overconfidenceGap = 代表予測値 − 実績。
+ *   正なら過信、負なら過小評価)を算出する。予測0件の帯は null。
+ * - (3) 印別的中率: mark(◎〇▲△☆注)ごとに件数・複勝率(finish<=placeMaxRank)・
+ *   勝率(finish=1)を算出する。mark=null(印なし)も1群として必ず含める。
  */
 
 import type { AnalysisStore, StoredAnalysis } from "./analysis-store.js";
+import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
 
 /** verify集計の設定。 */
 export interface VerifyConfig {
@@ -58,6 +73,12 @@ export interface VerifyConfig {
    * レースごとに最新分析1件のみ)。true では同一レースの複数分析が二重計上されうる点に注意。
    */
   readonly includeAllAnalyses: boolean;
+  /**
+   * 補正傾向サマリ(1) 補正方向×結果の分類しきい値ε(Task#26)。
+   * adjustedProb − prior の差(diff)が ε より大きければ「上げ」、−ε より小さければ「下げ」、
+   * それ以外(|diff|<=ε、境界含む)は「据え置き」に分類する。既定0.005。
+   */
+  readonly directionEpsilon: number;
 }
 
 /** 既定のverify設定(latestモード: レースごとに最新分析のみ集計)。 */
@@ -66,6 +87,7 @@ export const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
   placeMaxRank: 3,
   calibrationBins: 10,
   includeAllAnalyses: false,
+  directionEpsilon: 0.005,
 };
 
 /** キャリブレーション表の1帯。 */
@@ -80,6 +102,62 @@ export interface CalibrationBin {
   readonly placedCount: number;
   /** 実際の複勝率(placedCount/predictedCount)。予測0件なら null。 */
   readonly actualPlaceRate: number | null;
+}
+
+/** 補正方向の分類(Task#26)。「上げ」「下げ」「据え置き」の3値。 */
+export type AdjustmentDirection = "raised" | "lowered" | "unchanged";
+
+/** 補正方向×結果の1群(Task#26)。 */
+export interface DirectionGroupStat {
+  /** 補正方向の分類。 */
+  readonly direction: AdjustmentDirection;
+  /** この群に入った件数(着順不明は除く)。 */
+  readonly count: number;
+  /** 実際の複勝率(finish<=placeMaxRank)。件数0なら null。 */
+  readonly actualPlaceRate: number | null;
+  /** 平均補正幅(adjustedProb − prior の単純平均。符号付き)。件数0なら null。 */
+  readonly averageAdjustment: number | null;
+}
+
+/** キャリブレーション帯ごとの過信バイアス(Task#26)。既存 CalibrationBin を拡張した構造。 */
+export interface CalibrationBiasBin {
+  /** 帯の下限(含む)。 */
+  readonly lowerBound: number;
+  /** 帯の上限(含まない。最終帯のみ 1.0 を含む)。 */
+  readonly upperBound: number;
+  /** 代表予測値(帯の中央値。例 20-30%帯→0.25)。 */
+  readonly representativeProb: number;
+  /** この帯に入った予測件数。 */
+  readonly predictedCount: number;
+  /** 実際の複勝率。予測0件なら null。 */
+  readonly actualPlaceRate: number | null;
+  /** 過信バイアス(代表予測値 − actualPlaceRate)。正なら過信、負なら過小評価。予測0件なら null。 */
+  readonly overconfidenceGap: number | null;
+}
+
+/** 印(mark)別の的中率(Task#26)。mark=null(印なし)も1群として含む。 */
+export interface MarkStat {
+  /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。 */
+  readonly mark: PredictionMark | null;
+  /** この印が付いた件数(着順不明は除く)。 */
+  readonly count: number;
+  /** 複勝率(finish<=placeMaxRank)。件数0なら null。 */
+  readonly placeRate: number | null;
+  /** 勝率(finish=1)。件数0なら null。 */
+  readonly winRate: number | null;
+}
+
+/**
+ * 補正傾向サマリ(Task#26 プロンプト改善B)。将来LLMへ改善提案を出させる際にそのまま渡せるよう、
+ * 数値と分類のみで構成する(表示専用の整形文字列は含めない)。
+ */
+export interface VerifyTrendReport {
+  /** (1) 補正方向×結果。raised・lowered・unchanged の3群(必ずこの順で3件)。 */
+  readonly directionGroups: readonly DirectionGroupStat[];
+  /** (2) キャリブレーションの過信バイアス。既存 calibration と同じ帯構成・同じ順序。 */
+  readonly calibrationBias: readonly CalibrationBiasBin[];
+  /** (3) 印別的中率。PREDICTION_MARKS の順 + 印なし(null)を末尾に付けた7群。 */
+  readonly markStats: readonly MarkStat[];
 }
 
 /** 回収率サマリ。 */
@@ -122,6 +200,8 @@ export interface VerifyReport {
   readonly bet: VerifyBetSummary;
   /** 推定確率帯ごとのキャリブレーション表。 */
   readonly calibration: CalibrationBin[];
+  /** 補正傾向サマリ(Task#26)。 */
+  readonly trend: VerifyTrendReport;
 }
 
 /** 帯集計の可変カウンタ。 */
@@ -139,12 +219,24 @@ export function computeVerifyReport(
   store: AnalysisStore,
   config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
 ): VerifyReport {
-  const { stakePerBet, placeMaxRank, calibrationBins, includeAllAnalyses } = config;
+  const { stakePerBet, placeMaxRank, calibrationBins, includeAllAnalyses, directionEpsilon } =
+    config;
 
   const bins: BinCounter[] = Array.from({ length: calibrationBins }, () => ({
     predicted: 0,
     placed: 0,
   }));
+
+  // 補正傾向サマリ(Task#26)の可変カウンタ。回収率・キャリブレーションと同じループで計上する
+  // (母集団を既存verifyと揃えるため)。
+  const directionCounters: Record<AdjustmentDirection, DirectionCounter> = {
+    raised: { count: 0, placed: 0, adjustmentSum: 0 },
+    lowered: { count: 0, placed: 0, adjustmentSum: 0 },
+    unchanged: { count: 0, placed: 0, adjustmentSum: 0 },
+  };
+  const markCounters = new Map<PredictionMark | null, MarkCounter>(
+    [...PREDICTION_MARKS, null].map((mark) => [mark, { count: 0, placed: 0, won: 0 }]),
+  );
 
   const analyses = store.listAnalyses();
   // latestモードでは「レースごとに最新1件」の分析idを選ぶ。全件モードでは null(全採用)。
@@ -203,6 +295,27 @@ export function computeVerifyReport(
         bins[binIndex]!.placed += 1;
       }
 
+      // 補正傾向サマリ(1) 補正方向×結果: diff の符号とεで3群に分類する(Task#26)。
+      const diff = horse.adjustedProb - horse.prior;
+      const direction: AdjustmentDirection =
+        diff > directionEpsilon ? "raised" : diff < -directionEpsilon ? "lowered" : "unchanged";
+      const dCounter = directionCounters[direction];
+      dCounter.count += 1;
+      dCounter.adjustmentSum += diff;
+      if (isPlaced) {
+        dCounter.placed += 1;
+      }
+
+      // 補正傾向サマリ(3) 印別的中率: mark(印なしのnullを含む)ごとに計上する(Task#26)。
+      const mCounter = markCounters.get(horse.mark)!;
+      mCounter.count += 1;
+      if (isPlaced) {
+        mCounter.placed += 1;
+      }
+      if (finish === 1) {
+        mCounter.won += 1;
+      }
+
       // 回収率: EVプラス馬券のみ複勝を stakePerBet 円で購入したと仮定。
       if (horse.isPositive && horse.placeOddsMin !== null) {
         betCount += 1;
@@ -223,6 +336,8 @@ export function computeVerifyReport(
     }
   }
 
+  const calibration = bins.map((c, i) => finalizeBin(c, i, calibrationBins));
+
   return {
     includedAnalysisCount,
     excludedAnalysisCount,
@@ -236,7 +351,70 @@ export function computeVerifyReport(
       actualPayoutCount,
       approximatePayoutCount,
     },
-    calibration: bins.map((c, i) => finalizeBin(c, i, calibrationBins)),
+    calibration,
+    trend: {
+      directionGroups: (["raised", "lowered", "unchanged"] as const).map((direction) =>
+        finalizeDirectionGroup(direction, directionCounters[direction]),
+      ),
+      calibrationBias: calibration.map(toCalibrationBiasBin),
+      markStats: [...PREDICTION_MARKS, null].map((mark) =>
+        finalizeMarkStat(mark, markCounters.get(mark)!),
+      ),
+    },
+  };
+}
+
+/** 補正方向×結果の可変カウンタ(Task#26)。 */
+interface DirectionCounter {
+  count: number;
+  placed: number;
+  adjustmentSum: number;
+}
+
+/** 印別的中率の可変カウンタ(Task#26)。 */
+interface MarkCounter {
+  count: number;
+  placed: number;
+  won: number;
+}
+
+/** DirectionCounter を DirectionGroupStat(件数0は null)へ確定する。 */
+function finalizeDirectionGroup(
+  direction: AdjustmentDirection,
+  counter: DirectionCounter,
+): DirectionGroupStat {
+  return {
+    direction,
+    count: counter.count,
+    actualPlaceRate: counter.count === 0 ? null : counter.placed / counter.count,
+    averageAdjustment: counter.count === 0 ? null : counter.adjustmentSum / counter.count,
+  };
+}
+
+/** MarkCounter を MarkStat(件数0は null)へ確定する。 */
+function finalizeMarkStat(mark: PredictionMark | null, counter: MarkCounter): MarkStat {
+  return {
+    mark,
+    count: counter.count,
+    placeRate: counter.count === 0 ? null : counter.placed / counter.count,
+    winRate: counter.count === 0 ? null : counter.won / counter.count,
+  };
+}
+
+/**
+ * 確定済み CalibrationBin から CalibrationBiasBin(代表予測値・過信バイアス付き)を導出する。
+ * 既存キャリブレーションと同じ集計(母集団・件数・実複勝率)をそのまま再利用する。
+ */
+function toCalibrationBiasBin(bin: CalibrationBin): CalibrationBiasBin {
+  const representativeProb = (bin.lowerBound + bin.upperBound) / 2;
+  return {
+    lowerBound: bin.lowerBound,
+    upperBound: bin.upperBound,
+    representativeProb,
+    predictedCount: bin.predictedCount,
+    actualPlaceRate: bin.actualPlaceRate,
+    overconfidenceGap:
+      bin.actualPlaceRate === null ? null : representativeProb - bin.actualPlaceRate,
   };
 }
 
