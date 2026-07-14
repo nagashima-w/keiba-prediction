@@ -1,12 +1,16 @@
 import type { VerifyState } from "./verify-reducer.js";
 import {
   calibrationBarWidthPercent,
+  directionLabel,
+  formatAdjustment,
   formatBinRange,
   formatPayoutBreakdown,
   formatRate,
   formatYen,
   importButtonLabel,
+  markLabel,
   needsImport,
+  overconfidenceLabel,
 } from "./verify-format.js";
 
 /** 検証画面のプロパティ。 */
@@ -36,6 +40,9 @@ const tdStyle: React.CSSProperties = {
  * - 分析履歴一覧(レースID・日時・EVプラス数・結果取込済みか)と未取込レースの取込ボタン。
  * - 累積回収率(賭け数・投資額・回収額・回収率。実配当/近似の内訳注記)。
  * - キャリブレーション表(確率帯ごとの予測件数・実複勝率。CSSバーの簡易帯グラフ)。
+ * - 補正傾向サマリ(Task#26 プロンプト改善B): 補正方向×結果・キャリブレーションの過信バイアス
+ *   (既存キャリブレーション表に「予測−実績」列を追加)・印別的中率。いずれも report.trend
+ *   (機械可読な構造体)を純関数(verify-format.ts)で整形して表示するのみで、JSXは配線のみ。
  */
 export function VerifyView(props: VerifyViewProps): React.JSX.Element {
   const { state } = props;
@@ -83,9 +90,38 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         </div>
       )}
 
-      {/* キャリブレーション表(推定確率帯ごとの実複勝率)。 */}
+      {/* 補正方向×結果(AIが確率を上げた馬/下げた馬/据え置いた馬が実際に来たか)。Task#26。 */}
       <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
-        キャリブレーション(推定確率帯ごとの実複勝率)
+        補正方向×結果
+      </h3>
+      {report === null ? (
+        <p style={{ color: "#666" }}>データがありません。</p>
+      ) : (
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={thStyle}>分類</th>
+              <th style={thStyle}>件数</th>
+              <th style={thStyle}>実複勝率</th>
+              <th style={thStyle}>平均補正幅</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.trend.directionGroups.map((group) => (
+              <tr key={group.direction}>
+                <td style={tdStyle}>{directionLabel(group.direction)}</td>
+                <td style={tdStyle}>{group.count}</td>
+                <td style={tdStyle}>{formatRate(group.actualPlaceRate)}</td>
+                <td style={tdStyle}>{formatAdjustment(group.averageAdjustment)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* キャリブレーション表(推定確率帯ごとの実複勝率)+ 過信バイアス列(Task#26)。 */}
+      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
+        キャリブレーション(推定確率帯ごとの実複勝率・過信バイアス)
       </h3>
       {report === null || report.calibration.length === 0 ? (
         <p style={{ color: "#666" }}>データがありません。</p>
@@ -97,35 +133,77 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               <th style={thStyle}>予測件数</th>
               <th style={thStyle}>複勝件数</th>
               <th style={thStyle}>実複勝率</th>
-              <th style={{ ...thStyle, width: "40%" }}>帯グラフ</th>
+              <th style={thStyle}>予測−実績</th>
+              <th style={{ ...thStyle, width: "30%" }}>帯グラフ</th>
             </tr>
           </thead>
           <tbody>
-            {report.calibration.map((bin) => (
-              <tr key={bin.lowerBound}>
-                <td style={tdStyle}>{formatBinRange(bin)}</td>
-                <td style={tdStyle}>{bin.predictedCount}</td>
-                <td style={tdStyle}>{bin.placedCount}</td>
-                <td style={tdStyle}>{formatRate(bin.actualPlaceRate)}</td>
-                <td style={tdStyle}>
-                  <div
-                    style={{
-                      background: "#eee",
-                      borderRadius: 3,
-                      height: "0.8rem",
-                      width: "100%",
-                    }}
-                  >
+            {report.calibration.map((bin, index) => {
+              const bias = report.trend.calibrationBias[index] ?? null;
+              return (
+                <tr key={bin.lowerBound}>
+                  <td style={tdStyle}>{formatBinRange(bin)}</td>
+                  <td style={tdStyle}>{bin.predictedCount}</td>
+                  <td style={tdStyle}>{bin.placedCount}</td>
+                  <td style={tdStyle}>{formatRate(bin.actualPlaceRate)}</td>
+                  <td style={tdStyle}>
+                    {formatAdjustment(bias?.overconfidenceGap ?? null)}
+                    {bias !== null && bias.overconfidenceGap !== null && (
+                      <span style={{ color: "#666" }}>
+                        {" "}
+                        ({overconfidenceLabel(bias.overconfidenceGap)})
+                      </span>
+                    )}
+                  </td>
+                  <td style={tdStyle}>
                     <div
                       style={{
-                        background: "#4c8bf5",
+                        background: "#eee",
                         borderRadius: 3,
-                        height: "100%",
-                        width: `${calibrationBarWidthPercent(bin.actualPlaceRate)}%`,
+                        height: "0.8rem",
+                        width: "100%",
                       }}
-                    />
-                  </div>
-                </td>
+                    >
+                      <div
+                        style={{
+                          background: "#4c8bf5",
+                          borderRadius: 3,
+                          height: "100%",
+                          width: `${calibrationBarWidthPercent(bin.actualPlaceRate)}%`,
+                        }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {/* 印別的中率(印付けが機能しているか)。Task#26。 */}
+      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
+        印別的中率
+      </h3>
+      {report === null ? (
+        <p style={{ color: "#666" }}>データがありません。</p>
+      ) : (
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={thStyle}>印</th>
+              <th style={thStyle}>件数</th>
+              <th style={thStyle}>複勝率</th>
+              <th style={thStyle}>勝率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.trend.markStats.map((stat) => (
+              <tr key={stat.mark ?? "null"}>
+                <td style={tdStyle}>{markLabel(stat.mark)}</td>
+                <td style={tdStyle}>{stat.count}</td>
+                <td style={tdStyle}>{formatRate(stat.placeRate)}</td>
+                <td style={tdStyle}>{formatRate(stat.winRate)}</td>
               </tr>
             ))}
           </tbody>

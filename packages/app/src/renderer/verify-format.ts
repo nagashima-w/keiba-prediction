@@ -6,8 +6,10 @@
  */
 
 import type {
+  AdjustmentDirection,
   AnalysisHistoryItem,
   CalibrationBinView,
+  PredictionMark,
   VerifyBetView,
 } from "../shared/analysis-types.js";
 
@@ -55,4 +57,52 @@ export function needsImport(item: AnalysisHistoryItem): boolean {
  */
 export function importButtonLabel(item: AnalysisHistoryItem): string {
   return item.hasResult ? "再取込(払戻待ち)" : "結果を取り込む";
+}
+
+/** 補正方向(raised/lowered/unchanged)を日本語ラベルにする(Task#26)。 */
+export function directionLabel(direction: AdjustmentDirection): string {
+  switch (direction) {
+    case "raised":
+      return "上げ";
+    case "lowered":
+      return "下げ";
+    case "unchanged":
+      return "据え置き";
+  }
+}
+
+/**
+ * 補正幅・過信バイアス(0〜1スケールの確率差)を符号付きポイント表示にする(Task#26)。
+ * 例: 0.052 → "+5.2pt"、-0.031 → "-3.1pt"。null(件数0の群・予測0件の帯)は "-"。
+ */
+export function formatAdjustment(value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+  const pt = value * 100;
+  const sign = pt >= 0 ? "+" : "";
+  return `${sign}${pt.toFixed(1)}pt`;
+}
+
+/**
+ * 過信バイアス(代表予測値−実複勝率)の符号をラベル化する(Task#26)。
+ * 正なら「過信」(予測が実績を上回る)、負なら「過小評価」、0ちょうどなら「一致」。
+ * null(予測0件の帯)は "-"。
+ */
+export function overconfidenceLabel(gap: number | null): string {
+  if (gap === null) {
+    return "-";
+  }
+  if (gap > 0) {
+    return "過信";
+  }
+  if (gap < 0) {
+    return "過小評価";
+  }
+  return "一致";
+}
+
+/** 印別的中率の印表示(Task#26)。印なし(null)は「印なし」。 */
+export function markLabel(mark: PredictionMark | null): string {
+  return mark === null ? "印なし" : mark;
 }

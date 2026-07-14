@@ -215,6 +215,65 @@ export interface CalibrationBinView {
   readonly actualPlaceRate: number | null;
 }
 
+/**
+ * 検証画面: 補正方向の分類(core AdjustmentDirection のプレーン写し。IPC越しの共有用)。
+ * "raised"=上げ(adjustedProb>prior)/"lowered"=下げ/"unchanged"=据え置き。Task#26。
+ */
+export type AdjustmentDirection = "raised" | "lowered" | "unchanged";
+
+/** 検証画面: 補正方向×結果の1群(表示用。core DirectionGroupStat のプレーン写し)。Task#26。 */
+export interface DirectionGroupView {
+  /** 補正方向の分類。 */
+  readonly direction: AdjustmentDirection;
+  /** この群に入った件数。 */
+  readonly count: number;
+  /** 実際の複勝率。件数0なら null。 */
+  readonly actualPlaceRate: number | null;
+  /** 平均補正幅(符号付き)。件数0なら null。 */
+  readonly averageAdjustment: number | null;
+}
+
+/**
+ * 検証画面: キャリブレーション帯の過信バイアス(表示用。core CalibrationBiasBin のプレーン写し)。
+ * Task#26。
+ */
+export interface CalibrationBiasBinView {
+  /** 帯の下限(含む)。 */
+  readonly lowerBound: number;
+  /** 帯の上限(含まない。最終帯のみ 1.0 を含む)。 */
+  readonly upperBound: number;
+  /** 代表予測値(帯の中央値)。 */
+  readonly representativeProb: number;
+  /** この帯の予測件数。 */
+  readonly predictedCount: number;
+  /** 実際の複勝率。予測0件なら null。 */
+  readonly actualPlaceRate: number | null;
+  /** 過信バイアス(代表予測値 − 実複勝率)。正なら過信、負なら過小評価。予測0件なら null。 */
+  readonly overconfidenceGap: number | null;
+}
+
+/** 検証画面: 印別的中率の1群(表示用。core MarkStat のプレーン写し)。Task#26。 */
+export interface MarkStatView {
+  /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。 */
+  readonly mark: PredictionMark | null;
+  /** この印が付いた件数。 */
+  readonly count: number;
+  /** 複勝率。件数0なら null。 */
+  readonly placeRate: number | null;
+  /** 勝率(finish=1)。件数0なら null。 */
+  readonly winRate: number | null;
+}
+
+/** 検証画面: 補正傾向サマリ(表示用。core VerifyTrendReport のプレーン写し)。Task#26。 */
+export interface VerifyTrendReportView {
+  /** (1) 補正方向×結果。raised・lowered・unchanged の3群。 */
+  readonly directionGroups: readonly DirectionGroupView[];
+  /** (2) キャリブレーションの過信バイアス。 */
+  readonly calibrationBias: readonly CalibrationBiasBinView[];
+  /** (3) 印別的中率。 */
+  readonly markStats: readonly MarkStatView[];
+}
+
 /** 検証画面: 回収率サマリ(表示用)。 */
 export interface VerifyBetView {
   /** 購入点数(着順確定分のみ)。 */
@@ -248,6 +307,8 @@ export interface VerifyReportView {
   readonly bet: VerifyBetView;
   /** 推定確率帯ごとのキャリブレーション表。 */
   readonly calibration: readonly CalibrationBinView[];
+  /** 補正傾向サマリ(Task#26)。 */
+  readonly trend: VerifyTrendReportView;
 }
 
 /** 結果取込の結果(1レース分)。 */

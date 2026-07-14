@@ -6,12 +6,16 @@ import type {
 } from "../src/shared/analysis-types.js";
 import {
   calibrationBarWidthPercent,
+  directionLabel,
+  formatAdjustment,
   formatBinRange,
   formatPayoutBreakdown,
   formatRate,
   formatYen,
   importButtonLabel,
+  markLabel,
   needsImport,
+  overconfidenceLabel,
 } from "../src/renderer/verify-format.js";
 
 /** テスト用の履歴項目を最小構成で組み立てる。 */
@@ -112,6 +116,54 @@ describe("verify画面の表示整形(純関数)", () => {
       expect(
         importButtonLabel(historyItem({ hasResult: true, hasPayout: false })),
       ).toBe("再取込(払戻待ち)");
+    });
+  });
+
+  describe("directionLabel(補正方向×結果、Task#26)", () => {
+    it("raised/lowered/unchangedを日本語ラベルにすること", () => {
+      expect(directionLabel("raised")).toBe("上げ");
+      expect(directionLabel("lowered")).toBe("下げ");
+      expect(directionLabel("unchanged")).toBe("据え置き");
+    });
+  });
+
+  describe("formatAdjustment(平均補正幅・過信バイアスのpt表示、Task#26)", () => {
+    it("正の値は符号付きでポイント表示にすること", () => {
+      expect(formatAdjustment(0.052)).toBe("+5.2pt");
+    });
+    it("負の値も符号付きでポイント表示にすること", () => {
+      expect(formatAdjustment(-0.031)).toBe("-3.1pt");
+    });
+    it("0は+0.0ptにすること", () => {
+      expect(formatAdjustment(0)).toBe("+0.0pt");
+    });
+    it("nullは'-'にすること(件数0の群)", () => {
+      expect(formatAdjustment(null)).toBe("-");
+    });
+  });
+
+  describe("overconfidenceLabel(過信/過小評価のラベル、Task#26)", () => {
+    it("正なら『過信』にすること", () => {
+      expect(overconfidenceLabel(0.1)).toBe("過信");
+    });
+    it("負なら『過小評価』にすること", () => {
+      expect(overconfidenceLabel(-0.1)).toBe("過小評価");
+    });
+    it("0なら『一致』にすること", () => {
+      expect(overconfidenceLabel(0)).toBe("一致");
+    });
+    it("nullは'-'にすること(予測0件の帯)", () => {
+      expect(overconfidenceLabel(null)).toBe("-");
+    });
+  });
+
+  describe("markLabel(印別的中率の印表示、Task#26)", () => {
+    it("印はそのまま表示すること", () => {
+      expect(markLabel("◎")).toBe("◎");
+      expect(markLabel("注")).toBe("注");
+    });
+    it("印なし(null)は『印なし』にすること", () => {
+      expect(markLabel(null)).toBe("印なし");
     });
   });
 });
