@@ -17,6 +17,7 @@ import type {
   BatchProgress,
   BatchRaceOutcome,
   ImportResultOutcome,
+  PromptVersionVerifyReportView,
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
@@ -76,6 +77,10 @@ export function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC_CHANNELS.getVerifyReport, () => handleGetVerifyReport());
+
+  ipcMain.handle(IPC_CHANNELS.getVerifyReportByPromptVersion, () =>
+    handleGetVerifyReportByPromptVersion(),
+  );
 
   ipcMain.handle(IPC_CHANNELS.listAnalyses, () => handleListAnalyses());
 
@@ -227,6 +232,11 @@ async function handleImportResult(
 /** 検証レポート取得ハンドラの実処理。 */
 function handleGetVerifyReport(): VerifyReportView {
   return getResources().getVerifyReport();
+}
+
+/** プロンプト版別検証レポート取得ハンドラの実処理(Task#27)。 */
+function handleGetVerifyReportByPromptVersion(): readonly PromptVersionVerifyReportView[] {
+  return getResources().getVerifyReportByPromptVersion();
 }
 
 /** 分析履歴一覧取得ハンドラの実処理。 */

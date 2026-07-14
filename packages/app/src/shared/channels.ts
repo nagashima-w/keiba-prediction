@@ -20,6 +20,8 @@ export const IPC_CHANNELS = {
   importResult: "result:import",
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
   getVerifyReport: "verify:report",
+  /** プロンプト版別の検証レポート一覧を取得する(Task#27)。 */
+  getVerifyReportByPromptVersion: "verify:report-by-prompt-version",
   /** 分析履歴一覧(検証画面用)を取得する。 */
   listAnalyses: "analysis:list",
   /** 設定(マスク済み)を取得する。 */

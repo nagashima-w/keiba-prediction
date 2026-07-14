@@ -4,6 +4,7 @@ import type {
   BatchProgress,
   BatchRaceOutcome,
   ImportResultOutcome,
+  PromptVersionVerifyReportView,
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
@@ -59,6 +60,13 @@ export interface KeibaApi {
 
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
   getVerifyReport(): Promise<VerifyReportView>;
+
+  /**
+   * プロンプト版別の検証レポート一覧を取得する(Task#27)。
+   * プロンプトを改善したときに版ごとの成績(回収率等)を比較するために使う。
+   * 版不明(旧データ・LLM未使用の分析)は promptVersion=null の1グループとして含まれる。
+   */
+  getVerifyReportByPromptVersion(): Promise<readonly PromptVersionVerifyReportView[]>;
 
   /** 分析履歴一覧(検証画面用)を取得する。 */
   listAnalyses(): Promise<AnalysisHistoryItem[]>;

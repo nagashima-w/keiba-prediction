@@ -11,6 +11,7 @@ import {
   markLabel,
   needsImport,
   overconfidenceLabel,
+  promptVersionLabel,
 } from "./verify-format.js";
 
 /** 検証画面のプロパティ。 */
@@ -43,6 +44,9 @@ const tdStyle: React.CSSProperties = {
  * - 補正傾向サマリ(Task#26 プロンプト改善B): 補正方向×結果・キャリブレーションの過信バイアス
  *   (既存キャリブレーション表に「予測−実績」列を追加)・印別的中率。いずれも report.trend
  *   (機械可読な構造体)を純関数(verify-format.ts)で整形して表示するのみで、JSXは配線のみ。
+ * - プロンプト版別比較(Task#27 プロンプト改善A): state.reportsByPromptVersion(版ごとの
+ *   VerifyReport一覧)を表にし、回収率等を版ごとに並べて比較できるようにする。全体レポート
+ *   (上記の累積回収率等)は従来どおり残し、版別は別セクションとして追加する。
  */
 export function VerifyView(props: VerifyViewProps): React.JSX.Element {
   const { state } = props;
@@ -88,6 +92,54 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
             {report.excludedEstimatedCount}件
           </p>
         </div>
+      )}
+
+      {/*
+       * プロンプト版別比較(Task#27 プロンプト改善A)。
+       * プロンプトを改善したときに「本当に良くなったか」を版ごとの成績(回収率・集計件数)で
+       * 比較できる土台。版が1つ(または版不明のみ)でも表を1行で表示するだけで破綻しない。
+       */}
+      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
+        プロンプト版別比較
+      </h3>
+      {state.reportsByPromptVersionError !== null && (
+        <p style={{ color: "#c00" }}>
+          版別レポート取得に失敗しました: {state.reportsByPromptVersionError}
+        </p>
+      )}
+      {state.reportsByPromptVersion.length === 0 ? (
+        <p style={{ color: "#666" }}>
+          {state.loadingReportsByPromptVersion
+            ? "読み込み中…"
+            : "集計対象がありません。"}
+        </p>
+      ) : (
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={thStyle}>プロンプト版</th>
+              <th style={thStyle}>集計件数</th>
+              <th style={thStyle}>賭け数</th>
+              <th style={thStyle}>投資額</th>
+              <th style={thStyle}>回収額</th>
+              <th style={thStyle}>回収率</th>
+            </tr>
+          </thead>
+          <tbody>
+            {state.reportsByPromptVersion.map(({ promptVersion, report: r }) => (
+              <tr key={promptVersion ?? "版不明"}>
+                <td style={tdStyle}>{promptVersionLabel(promptVersion)}</td>
+                <td style={tdStyle}>{r.includedAnalysisCount}</td>
+                <td style={tdStyle}>{r.bet.betCount}点</td>
+                <td style={tdStyle}>{formatYen(r.bet.totalStake)}</td>
+                <td style={tdStyle}>{formatYen(r.bet.totalReturn)}</td>
+                <td style={tdStyle}>
+                  <strong>{formatRate(r.bet.recoveryRate)}</strong>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
 
       {/* 補正方向×結果(AIが確率を上げた馬/下げた馬/据え置いた馬が実際に来たか)。Task#26。 */}

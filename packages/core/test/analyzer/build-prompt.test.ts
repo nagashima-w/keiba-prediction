@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPrompt,
   computeReferenceEv,
+  PROMPT_VERSION,
   type BuildPromptInput,
 } from "../../src/analyzer/build-prompt.js";
 
@@ -303,5 +304,15 @@ describe("buildPrompt(予想印の指示)", () => {
   it("出力スキーマに mark フィールドを含むこと", () => {
     const p = buildPrompt(baseInput());
     expect(p).toContain("mark");
+  });
+});
+
+describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
+  it("YYYY-MM-DD.N 形式の版番号文字列であること", () => {
+    expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
+  });
+
+  it("現行プロンプトの初版として 2026-07-14.1 が付与されていること", () => {
+    expect(PROMPT_VERSION).toBe("2026-07-14.1");
   });
 });

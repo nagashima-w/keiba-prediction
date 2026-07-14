@@ -4,6 +4,7 @@ import {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  PROMPT_VERSION,
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type HorseRaceResult,
@@ -473,6 +474,42 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(saved[0]!.horses.find((h) => h.umaban === 3)!.mark).toBeNull();
   });
 
+  it("LLMスキップ時は保存レコードの promptVersion が null になること(プロンプト未使用、Task#27)", async () => {
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      baseDeps(),
+      onProgress,
+    );
+    expect(saved[0]!.promptVersion).toBeNull();
+  });
+
+  it("LLM有り: 保存レコードの promptVersion に PROMPT_VERSION を記録すること(Task#27)", async () => {
+    const analyze = vi.fn(
+      async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+        horses: input.horses.map((h) => ({
+          umaban: h.umaban,
+          prior: h.prior,
+          adjustedProb: h.prior,
+          reason: null,
+          clipped: false,
+          usedPrior: true,
+          mark: null,
+        })),
+        fallback: false,
+        retryCount: 0,
+        fallbackReason: null,
+      }),
+    );
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      { ...baseDeps(), analyze },
+      onProgress,
+    );
+    expect(saved[0]!.promptVersion).toBe(PROMPT_VERSION);
+  });
+
   it("LLM有り(analyze注入): 補正後確率と根拠を採用し、EVは補正後確率で計算する", async () => {
     const analyze = vi.fn(
       async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
@@ -667,6 +704,10 @@ describe("runAnalysis(分析パイプライン)", () => {
     );
     expect(result.llmUsed).toBe(true);
     expect(result.fallback).toBe(true);
+    // フォールバック(LLM応答が不正でpriorへフォールバック)でも、プロンプト自体は送信されている
+    // ため promptVersion は記録される(Task#27)。llmUsed に連動する仕様であり、fallback有無では
+    // 変わらないことをここで固定する(code-reviewer指摘: 既存はresult.fallbackのみ検証していた)。
+    expect(saved[0]!.promptVersion).toBe(PROMPT_VERSION);
   });
 });
 
