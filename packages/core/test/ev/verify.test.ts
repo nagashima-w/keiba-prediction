@@ -271,6 +271,70 @@ describe("computeVerifyReport(verify集計)", () => {
     });
   });
 
+  describe("推定EVフラグ付き分析の除外(Task#25)", () => {
+    it("evEstimated:trueの分析は既定で集計から除外され、excludedEstimatedCountに計上されること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        evEstimated: true,
+        horses: [horse(1, 0.5, 2.8, 1.4, true)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const report = computeVerifyReport(store);
+      expect(report.includedAnalysisCount).toBe(0);
+      expect(report.excludedEstimatedCount).toBe(1);
+      // 回収率集計(bet)からも除外される。
+      expect(report.bet.betCount).toBe(0);
+      // キャリブレーション表にも計上しない(推定EV分析は丸ごと除外する設計判断)。
+      expect(report.calibration.every((bin) => bin.predictedCount === 0)).toBe(
+        true,
+      );
+      store.close();
+    });
+
+    it("evEstimated未指定(既定false)の分析は従来どおり集計されること(回帰確認)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.5, 1.25, true)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const report = computeVerifyReport(store);
+      expect(report.includedAnalysisCount).toBe(1);
+      expect(report.excludedEstimatedCount).toBe(0);
+      expect(report.bet.betCount).toBe(1);
+      store.close();
+    });
+
+    it("同一レースで推定EV分析の後に確定EV分析が行われた場合、最新(確定)分析のみ集計されること", () => {
+      const store = new AnalysisStore();
+      // 発売前(推定EV)。
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "2026-07-08T09:00:00.000Z",
+        evEstimated: true,
+        horses: [horse(1, 0.5, 2.8, 1.4, true)],
+      });
+      // 発売後の再分析(確定EV)。
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "2026-07-08T15:00:00.000Z",
+        horses: [horse(1, 0.5, 2.5, 1.25, true)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const report = computeVerifyReport(store);
+      expect(report.includedAnalysisCount).toBe(1);
+      expect(report.supersededAnalysisCount).toBe(1);
+      expect(report.excludedEstimatedCount).toBe(0);
+      expect(report.bet.betCount).toBe(1);
+      // 最新(確定EV, oddsMin=2.5)で払戻される。
+      expect(report.bet.totalReturn).toBeCloseTo(250, 10);
+      store.close();
+    });
+  });
+
   describe("実配当による回収率(actualPayout優先・近似フォールバック)", () => {
     it("実配当(placePayout)があれば近似ではなく実配当で払戻を計上すること", () => {
       const store = new AnalysisStore();

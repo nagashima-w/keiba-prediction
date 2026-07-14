@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatEstimatedEvSuffix,
   formatEv,
   formatMark,
   formatOdds,
@@ -79,6 +80,7 @@ describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
     reason: null,
     careerRunCount: 10,
     mark: null,
+    evEstimated: false,
   });
 
   it("isPositive の行のみハイライト対象", () => {
@@ -119,9 +121,19 @@ describe("oddsStatusNote(オッズ発売状態の注記)", () => {
     expect(oddsStatusNote("middle")).toBe("オッズは発売中(暫定)");
   });
 
-  it("予想オッズ(yoso)は複勝未発売でEV計算不可+再分析の案内を返す", () => {
+  it("予想オッズ(yoso)は発売前推定EVである旨+再分析の案内を返す(Task#25)", () => {
     expect(oddsStatusNote("yoso")).toBe(
-      "複勝オッズ未発売(予想オッズのみ)のためEV計算不可。複勝発売開始後に再分析してください",
+      "発売前のため予想単勝オッズからの推定EV(発売後に再分析推奨)",
     );
+  });
+});
+
+describe("formatEstimatedEvSuffix(推定EVの表記・Task#25)", () => {
+  it("推定EV(evEstimated=true)のときは「(推定)」を返す", () => {
+    expect(formatEstimatedEvSuffix(true)).toBe("(推定)");
+  });
+
+  it("確定EV(evEstimated=false)のときは空文字を返す", () => {
+    expect(formatEstimatedEvSuffix(false)).toBe("");
   });
 });

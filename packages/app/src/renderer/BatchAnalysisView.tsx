@@ -5,10 +5,12 @@ import type {
 } from "./batch-analysis-reducer.js";
 import {
   collectEvPlusSummary,
+  raceOpportunityRemark,
   rankRaceOpportunities,
   summarizeBatch,
 } from "./batch-summary.js";
 import {
+  formatEstimatedEvSuffix,
   formatEv,
   formatMark,
   formatOdds,
@@ -150,6 +152,11 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
                 }}
               >
                 {formatEv(row.ev)}
+                {row.evEstimated && (
+                  <span style={{ color: "#a60", marginLeft: "0.25rem" }}>
+                    {formatEstimatedEvSuffix(row.evEstimated)}
+                  </span>
+                )}
               </td>
               <td style={tdStyle}>{formatReason(row.reason)}</td>
             </tr>
@@ -287,18 +294,14 @@ export function BatchAnalysisView(
                             : "-"}
                         </td>
                         <td style={{ ...tdStyle, fontSize: "0.8rem" }}>
-                          {op.excludedReason !== null ? (
-                            <span style={{ color: "#a60" }}>
-                              {op.excludedReason}
-                            </span>
-                          ) : op.lowDataRatio >= 0.5 ? (
-                            <span style={{ color: "#a60" }}>
-                              低データ馬{Math.round(op.lowDataRatio * 100)}%
-                              (推定不確実)
-                            </span>
-                          ) : (
-                            ""
-                          )}
+                          {(() => {
+                            const remark = raceOpportunityRemark(r);
+                            return remark === "" ? (
+                              ""
+                            ) : (
+                              <span style={{ color: "#a60" }}>{remark}</span>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );
@@ -355,6 +358,11 @@ export function BatchAnalysisView(
                         }}
                       >
                         {formatEv(row.ev)}
+                        {row.evEstimated && (
+                          <span style={{ color: "#a60", marginLeft: "0.25rem" }}>
+                            {formatEstimatedEvSuffix(row.evEstimated)}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}

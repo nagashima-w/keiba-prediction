@@ -204,8 +204,13 @@ export {
   type TodayRaceConditions,
 } from "./scorer/prior.js";
 export {
+  computeEstimatedRaceEv,
   computeRaceEv,
+  DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
+  estimatePlaceOddsMinFromWin,
+  type EstimatedHorseEv,
+  type EstimatedPlaceConfig,
   type EvConfig,
   type HorseEv,
   type HorsePrior,

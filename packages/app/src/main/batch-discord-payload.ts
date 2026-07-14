@@ -125,7 +125,9 @@ export function buildBatchDiscordPayload(
           const name = truncate(r.horseName, HORSE_NAME_MAX);
           // 予想印(Task#23): 印が付いた馬は行頭に「◎ 」のように添える。印なし馬は従来どおり。
           const markPrefix = r.mark !== null ? `${r.mark} ` : "";
-          return `${markPrefix}${r.raceName} ${r.umaban}番 ${name} AI補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}`;
+          // 推定EV(Task#25): 発売前の概算EVである旨を「(推定)」で明示する。
+          const estimatedSuffix = r.evEstimated ? "(推定)" : "";
+          return `${markPrefix}${r.raceName} ${r.umaban}番 ${name} AI補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}${estimatedSuffix}`;
         })
       : ["EVプラスの馬はありません(該当なし)"];
 

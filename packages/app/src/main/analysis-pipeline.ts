@@ -14,6 +14,15 @@
  *   正当に使うため、main バンドルにネイティブ依存が入るのはこのファイルからが起点となる
  *   (bundle.test.ts は「external 指定の維持」を検証する方針へ更新済み)。
  *
+ * 推定EV(Task#25): 発売前(race.odds.oddsStatus === "yoso")は複勝オッズが常に空
+ * (scraper/parse-odds.ts・parse-nar-odds.ts の仕様により odds.place = {})になるため、
+ * 通常の computeRaceEv(確定EV)では全馬 ev=null になってしまう。そこで yoso のときだけ
+ * core computeEstimatedRaceEv(単勝オッズから複勝下限を概算)を使い、EVプラス判定を含めた
+ * 概算EVをレース単位で計算する。結果・保存レコードには evEstimated フラグ(レース単位、
+ * oddsStatus=yoso と等価)を持たせ、確定EVと明確に区別できるようにする(UI表示・verify集計の
+ * 両方でこのフラグを参照する)。中央・地方(NAR)いずれも odds.win に予想単勝オッズが入るため、
+ * この分岐だけで両者に対応できる。
+ *
  * 会場名・開催日・開催区分(中央/地方)の扱い:
  * - 会場名は scrapeRace のレース情報に含まれないため、レースIDの場コードから導出する(venue-codes。
  *   中央10場・地方(NAR)いずれにも対応する)。
@@ -31,15 +40,18 @@ import {
   buildPriorInput,
   classifyRotationInterval,
   classifyTrackWetness,
+  computeEstimatedRaceEv,
   computeFieldPriors,
   computeRaceEv,
   computeReferenceEv,
   daysBetweenDates,
+  DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
   venueKindOfRaceId,
   type AnalysisRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
+  type EstimatedPlaceConfig,
   type EvConfig,
   type HorsePrior,
   type HorseRaceResult,
@@ -75,6 +87,11 @@ export interface AnalysisPipelineDeps {
   readonly now?: () => Date;
   /** EV設定(閾値)。省略時は既定(閾値1.0)。 */
   readonly evConfig?: EvConfig;
+  /**
+   * 推定複勝下限の換算係数(Task#25)。省略時は既定(coef=0.2)。
+   * oddsStatus="yoso"(発売前)のときだけ使われる。
+   */
+  readonly estimatedPlaceConfig?: EstimatedPlaceConfig;
   /** scorer設定。省略時は core の既定。 */
   readonly scorerConfig?: ScorerConfig;
   /** LLMスキップ理由(analyze=null のとき結果メタに載せる文言)。 */
@@ -290,15 +307,21 @@ export async function runAnalysis(
   }
 
   // (4) EV計算(補正後確率 × 複勝オッズ下限)。
+  // 発売前(yoso)は複勝オッズが常に空のため、単勝オッズからの推定EV(computeEstimatedRaceEv)に
+  // 切り替える。それ以外(result/middle)は従来どおり確定EV(computeRaceEv)。
   const evPriors: HorsePrior[] = race.horses.map((h) => ({
     umaban: h.shutuba.umaban,
     placeProb: adjustedByUmaban.get(h.shutuba.umaban)!.adjustedProb,
   }));
-  const evResults = computeRaceEv(
-    evPriors,
-    race.odds,
-    deps.evConfig ?? DEFAULT_EV_CONFIG,
-  );
+  const evEstimated = race.odds.oddsStatus === "yoso";
+  const evResults = evEstimated
+    ? computeEstimatedRaceEv(
+        evPriors,
+        race.odds,
+        deps.evConfig ?? DEFAULT_EV_CONFIG,
+        deps.estimatedPlaceConfig ?? DEFAULT_ESTIMATED_PLACE_CONFIG,
+      )
+    : computeRaceEv(evPriors, race.odds, deps.evConfig ?? DEFAULT_EV_CONFIG);
   const evByUmaban = new Map(evResults.map((e) => [e.umaban, e]));
 
   // (5) 保存。
@@ -312,6 +335,7 @@ export async function runAnalysis(
   const record: AnalysisRecord = {
     raceId,
     analyzedAt,
+    evEstimated,
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;
@@ -352,6 +376,7 @@ export async function runAnalysis(
         // 新馬(results=[] → 0走)と区別する(妙味スコアの低データ集計から除外させる)。
         careerRunCount: h.results === null ? null : h.results.length,
         mark: adjusted.mark,
+        evEstimated,
       };
     })
     .sort((a, b) => a.umaban - b.umaban);

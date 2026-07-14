@@ -212,6 +212,13 @@ export interface EmbedHorse {
   readonly isPositive: boolean;
   /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。Task#23。 */
   readonly mark: PredictionMark | null;
+  /**
+   * このEV(ev/placeOddsMin)が推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。
+   * 省略時は false 扱い(確定EV)。true のとき EV 表記の末尾に「(推定)」を付ける。
+   * app側 batch-discord-payload.ts と表示ロジックを揃えるための項目(Task#23で mark を
+   * 両実装に入れたのと同じ考え方。兄弟実装パリティ)。
+   */
+  readonly evEstimated?: boolean;
 }
 
 /** 0〜1の確率を小数第1位までのパーセント文字列にする。 */
@@ -254,7 +261,9 @@ export function buildAnalysisEmbed(
           const name = truncate(h.horseName, HORSE_NAME_MAX);
           // 予想印(Task#23): 印が付いた馬は行頭に「◎ 」のように添える。印なし馬は従来どおり。
           const markPrefix = h.mark !== null ? `${h.mark} ` : "";
-          return `${markPrefix}${h.umaban}番 ${name} AI補正後${formatPercent(h.adjustedProb)} 複勝下限${formatOdds(h.placeOddsMin)} EV${formatEv(h.ev)}`;
+          // 推定EV(Task#25): 発売前の概算EVである旨を末尾に「(推定)」で明示する(印の前置と共存)。
+          const estimatedSuffix = h.evEstimated === true ? "(推定)" : "";
+          return `${markPrefix}${h.umaban}番 ${name} AI補正後${formatPercent(h.adjustedProb)} 複勝下限${formatOdds(h.placeOddsMin)} EV${formatEv(h.ev)}${estimatedSuffix}`;
         })
       : ["EVプラスの馬はありません(該当なし)"];
 

@@ -77,7 +77,8 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
           <p style={{ margin: "0.15rem 0", color: "#666" }}>
             集計{report.includedAnalysisCount}件 / 結果未取込で除外
             {report.excludedAnalysisCount}件 / 旧分析除外
-            {report.supersededAnalysisCount}件
+            {report.supersededAnalysisCount}件 / 発売前推定のため除外
+            {report.excludedEstimatedCount}件
           </p>
         </div>
       )}

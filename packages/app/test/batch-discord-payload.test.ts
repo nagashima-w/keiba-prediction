@@ -26,6 +26,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   reason: null,
   careerRunCount: 10,
   mark: null,
+  evEstimated: false,
   ...over,
 });
 
@@ -117,6 +118,36 @@ describe("buildBatchDiscordPayload(一括サマリ→Discordペイロード)", (
     expect(lineAlpha).toContain("◎ 1R 4番");
     // 印なし馬は従来どおり(印の接頭辞が付かない)。
     expect(lineBeta.trimStart().startsWith("1R")).toBe(true);
+  });
+
+  it("推定EV(evEstimated=true)の馬行には「(推定)」を付けること(Task#25)", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("111111111111", "1R", [
+        row({
+          umaban: 4,
+          horseName: "アルファ",
+          ev: 1.4,
+          isPositive: true,
+          evEstimated: true,
+        }),
+        row({
+          umaban: 7,
+          horseName: "ベータ",
+          ev: 1.6,
+          isPositive: true,
+          evEstimated: false,
+        }),
+      ]),
+    ];
+    const desc = buildBatchDiscordPayload(outcomes).embeds[0]!.description ?? "";
+    const lineAlpha = desc
+      .split("\n")
+      .find((l) => l.includes("アルファ") && l.includes("AI補正後"))!;
+    const lineBeta = desc
+      .split("\n")
+      .find((l) => l.includes("ベータ") && l.includes("AI補正後"))!;
+    expect(lineAlpha).toContain("(推定)");
+    expect(lineBeta).not.toContain("(推定)");
   });
 
   it("補正後確率のラベルは「AI補正後」に統一する", () => {

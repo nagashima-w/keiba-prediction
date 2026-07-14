@@ -334,7 +334,7 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(result.oddsStatus).toBe("middle");
   });
 
-  it("予想オッズ(yoso・複勝未発売)では全馬EVが null になるが prior 分析自体は成功する", async () => {
+  it("予想オッズ(yoso・複勝未発売)では単勝オッズから推定した複勝下限でEVを概算し、evEstimated=trueになること(Task#25)", async () => {
     const deps: AnalysisPipelineDeps = {
       ...baseDeps(),
       scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "yoso")),
@@ -348,17 +348,52 @@ describe("runAnalysis(分析パイプライン)", () => {
 
     expect(result.oddsStatus).toBe("yoso");
     expect(result.rows).toHaveLength(3);
+    // 全行が「推定EV」であることを示す(レース単位で一律)。
     for (const row of result.rows) {
-      // 複勝オッズが無いため EV は計算できない(全馬 null・非プラス)。
-      expect(row.ev).toBeNull();
-      expect(row.placeOddsMin).toBeNull();
-      expect(row.isPositive).toBe(false);
+      expect(row.evEstimated).toBe(true);
+    }
+
+    // 1番: 単勝5.2倍 → 推定複勝下限 = 1.0+(5.2-1)×0.2 = 1.84。
+    const row1 = result.rows.find((r) => r.umaban === 1)!;
+    expect(row1.placeOddsMin).toBeCloseTo(1.84, 8);
+    expect(row1.ev).toBeCloseTo(row1.prior * 1.84, 8);
+    expect(row1.isPositive).toBe(row1.ev! > 1.0);
+
+    // 2番: 単勝1.3倍 → 推定複勝下限 = 1.0+(1.3-1)×0.2 = 1.06。
+    const row2 = result.rows.find((r) => r.umaban === 2)!;
+    expect(row2.placeOddsMin).toBeCloseTo(1.06, 8);
+
+    // 3番: 単勝オッズ自体が欠損 → 推定不可のためEVはnull(それでもevEstimated=trueのまま)。
+    const row3 = result.rows.find((r) => r.umaban === 3)!;
+    expect(row3.ev).toBeNull();
+    expect(row3.placeOddsMin).toBeNull();
+    expect(row3.isPositive).toBe(false);
+
+    for (const row of result.rows) {
       // prior(事前確率)自体は算出できている。
       expect(row.prior).toBeGreaterThan(0);
       expect(row.prior).toBeLessThanOrEqual(1);
     }
-    // 保存まで到達している(分析は成功扱い)。
+    // 保存まで到達している(分析は成功扱い)。分析レコードにも推定フラグが立つ。
     expect(saved).toHaveLength(1);
+    expect(saved[0]!.evEstimated).toBe(true);
+  });
+
+  it("確定・発売中(oddsStatus!==yoso)ではevEstimated=falseになること(回帰確認)", async () => {
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "middle")),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    for (const row of result.rows) {
+      expect(row.evEstimated).toBe(false);
+    }
+    expect(saved[0]!.evEstimated).toBe(false);
   });
 
   it("進捗コールバックは4段階(スクレイピング→スコアリング→LLM分析→保存)を通知し、スコアリングは n/N頭 を報告する", async () => {
@@ -671,6 +706,25 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
     expect(result.rows).toHaveLength(3);
     expect(result.date).toBe("2026/07/12");
     expect(result.dateApproximate).toBe(false);
+  });
+
+  it("地方(NAR)の予想オッズ(yoso)でも単勝オッズから推定EVを算出できること(Task#25)", async () => {
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(NAR_RACE_ID, {}, "yoso")),
+    };
+    const result = await runAnalysis(
+      parseRaceId(NAR_RACE_ID),
+      parseKaisaiDate("20260712"),
+      deps,
+      onProgress,
+    );
+    expect(result.oddsStatus).toBe("yoso");
+    const row1 = result.rows.find((r) => r.umaban === 1)!;
+    expect(row1.evEstimated).toBe(true);
+    // NARのyosoも中央と同じ単勝オッズ(5.2倍)を使うフィクスチャなので同じ推定値になる。
+    expect(row1.placeOddsMin).toBeCloseTo(1.84, 8);
+    expect(row1.ev).not.toBeNull();
   });
 
   it("buildPriorInput に venueKind: nar が渡ること", async () => {

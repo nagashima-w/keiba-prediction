@@ -305,6 +305,49 @@ describe("buildAnalysisEmbed(分析結果→Discord embed 整形)", () => {
     expect(desc).toContain("ウマD");
     expect(desc).toContain("-");
   });
+
+  it("推定EV(evEstimated:true)の馬はEV表記の末尾に「(推定)」を付ける(Task#25)", () => {
+    const estimatedHorses: readonly EmbedHorse[] = [
+      {
+        umaban: 5,
+        horseName: "ウマE",
+        adjustedProb: 0.4,
+        placeOddsMin: 1.84,
+        ev: 1.4,
+        isPositive: true,
+        mark: null,
+        evEstimated: true,
+      },
+    ];
+    const desc = buildAnalysisEmbed(raceInfo, estimatedHorses).description ?? "";
+    const line = desc.split("\n").find((l) => l.includes("ウマE"))!;
+    expect(line).toContain("EV1.40(推定)");
+  });
+
+  it("確定EV(evEstimated未指定・false)の馬は従来どおり「(推定)」を付けない(回帰確認)", () => {
+    const desc = buildAnalysisEmbed(raceInfo, horses).description ?? "";
+    const lineA = desc.split("\n").find((l) => l.includes("ウマA"))!;
+    expect(lineA).not.toContain("(推定)");
+  });
+
+  it("予想印と推定EV表記は共存できる(印は行頭、推定はEV末尾)", () => {
+    const markedEstimated: readonly EmbedHorse[] = [
+      {
+        umaban: 5,
+        horseName: "ウマF",
+        adjustedProb: 0.4,
+        placeOddsMin: 1.84,
+        ev: 1.4,
+        isPositive: true,
+        mark: "◎",
+        evEstimated: true,
+      },
+    ];
+    const desc = buildAnalysisEmbed(raceInfo, markedEstimated).description ?? "";
+    const line = desc.split("\n").find((l) => l.includes("ウマF"))!;
+    expect(line.trimStart().startsWith("◎")).toBe(true);
+    expect(line).toContain("EV1.40(推定)");
+  });
 });
 
 describe("sendDiscordNotification(Webhook送信)", () => {
