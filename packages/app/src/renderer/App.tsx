@@ -118,6 +118,18 @@ export function App(): React.JSX.Element {
       .catch((e: unknown) =>
         verifyDispatch({ type: "レポート取得失敗", message: errorMessage(e) }),
       );
+    verifyDispatch({ type: "版別レポート取得開始" });
+    window.keibaApi
+      .getVerifyReportByPromptVersion()
+      .then((reports) =>
+        verifyDispatch({ type: "版別レポート取得成功", reports }),
+      )
+      .catch((e: unknown) =>
+        verifyDispatch({
+          type: "版別レポート取得失敗",
+          message: errorMessage(e),
+        }),
+      );
   }, []);
 
   const handleTabChange = useCallback(

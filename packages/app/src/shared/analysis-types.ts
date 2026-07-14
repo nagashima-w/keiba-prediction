@@ -311,6 +311,17 @@ export interface VerifyReportView {
   readonly trend: VerifyTrendReportView;
 }
 
+/**
+ * 検証画面: プロンプト版別verifyレポートの1件(表示用。core PromptVersionVerifyReport の
+ * プレーン写し)。Task#27。版ごとに回収率・主要指標を並べて比較するために使う。
+ */
+export interface PromptVersionVerifyReportView {
+  /** プロンプト版番号。版不明(旧データ・LLM未使用の分析)は null。 */
+  readonly promptVersion: string | null;
+  /** その版の分析集合のみを対象とした検証レポート(全体レポートと同型)。 */
+  readonly report: VerifyReportView;
+}
+
 /** 結果取込の結果(1レース分)。 */
 export interface ImportResultOutcome {
   /** レースID(12桁)。 */

@@ -19,6 +19,8 @@ const api: KeibaApi = {
   importResult: (raceId) =>
     ipcRenderer.invoke(IPC_CHANNELS.importResult, raceId),
   getVerifyReport: () => ipcRenderer.invoke(IPC_CHANNELS.getVerifyReport),
+  getVerifyReportByPromptVersion: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.getVerifyReportByPromptVersion),
   listAnalyses: () => ipcRenderer.invoke(IPC_CHANNELS.listAnalyses),
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings),
   saveSettings: (update) =>

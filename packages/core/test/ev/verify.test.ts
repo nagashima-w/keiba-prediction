@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { AnalysisStore, type AnalysisHorseRecord } from "../../src/ev/analysis-store.js";
 import type { PredictionMark } from "../../src/analyzer/parse-response.js";
-import { computeVerifyReport, DEFAULT_VERIFY_CONFIG } from "../../src/ev/verify.js";
+import {
+  computeVerifyReport,
+  computeVerifyReportByPromptVersion,
+  DEFAULT_VERIFY_CONFIG,
+} from "../../src/ev/verify.js";
 
 /** 分析馬レコードを最小構成で組み立てる(prior=adjustedProb はPhase3まで同値)。 */
 function horse(
@@ -721,6 +725,213 @@ describe("computeVerifyReport(verify集計)", () => {
         expect(taikou.count).toBe(1);
         store.close();
       });
+    });
+  });
+
+  describe("未知のmark文字列に対する防御(Task#26 boss観察1 / Task#27)", () => {
+    it("PREDICTION_MARKSに無い想定外のmark文字列が保存されていてもクラッシュしないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [
+          // 型システムを迂回し、将来のスキーマ変更・手動DB改変で紛れ込みうる未知のmark値を模す。
+          { ...trendHorse(1, 0.5, 0.6), mark: "×" as unknown as PredictionMark },
+        ],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      expect(() => computeVerifyReport(store)).not.toThrow();
+      store.close();
+    });
+
+    it("未知のmark文字列は「印なし」群に集計されること(専用の集計外扱いにはしない)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [
+          { ...trendHorse(1, 0.5, 0.6), mark: "×" as unknown as PredictionMark },
+        ],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const report = computeVerifyReport(store);
+      const noMark = report.trend.markStats.find((m) => m.mark === null)!;
+      expect(noMark.count).toBe(1);
+      expect(noMark.placeRate).toBeCloseTo(1, 10);
+      // 既知の印(◎など)には計上されない。
+      const total = report.trend.markStats.reduce((sum, m) => sum + m.count, 0);
+      expect(total).toBe(1);
+      store.close();
+    });
+  });
+});
+
+describe("computeVerifyReportByPromptVersion(プロンプト版別のverify集計、Task#27)", () => {
+  it("prompt_versionごとに分析を分けて集計すること(版が互いに影響しないこと)", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "R1",
+      analyzedAt: "t",
+      promptVersion: "2026-07-01.1",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+    });
+    store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+    store.saveAnalysis({
+      raceId: "R2",
+      analyzedAt: "t",
+      promptVersion: "2026-07-14.1",
+      horses: [horse(1, 0.5, 4.0, 2.0, true)],
+    });
+    store.saveResult("R2", [{ umaban: 1, finishPosition: 5 }]);
+
+    const reports = computeVerifyReportByPromptVersion(store);
+    expect(reports).toHaveLength(2);
+
+    const v1 = reports.find((r) => r.promptVersion === "2026-07-01.1")!;
+    expect(v1.report.includedAnalysisCount).toBe(1);
+    expect(v1.report.bet.recoveryRate).toBeCloseTo(2.0, 10); // 的中(複勝下限2.0倍)
+
+    const v2 = reports.find((r) => r.promptVersion === "2026-07-14.1")!;
+    expect(v2.report.includedAnalysisCount).toBe(1);
+    expect(v2.report.bet.recoveryRate).toBeCloseTo(0, 10); // 不的中
+    store.close();
+  });
+
+  it("版不明(promptVersion=null)の分析は1グループとして集計されること", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "R1",
+      analyzedAt: "t",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+    });
+    store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+
+    const reports = computeVerifyReportByPromptVersion(store);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.promptVersion).toBeNull();
+    expect(reports[0]!.report.includedAnalysisCount).toBe(1);
+    store.close();
+  });
+
+  it("版番号は昇順で返し、版不明(null)は末尾に来ること", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "R1",
+      analyzedAt: "t",
+      promptVersion: "2026-07-14.1",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+    });
+    store.saveAnalysis({
+      raceId: "R2",
+      analyzedAt: "t",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+    });
+    store.saveAnalysis({
+      raceId: "R3",
+      analyzedAt: "t",
+      promptVersion: "2026-07-01.1",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+    });
+
+    const reports = computeVerifyReportByPromptVersion(store);
+    expect(reports.map((r) => r.promptVersion)).toEqual([
+      "2026-07-01.1",
+      "2026-07-14.1",
+      null,
+    ]);
+    store.close();
+  });
+
+  it("同一版内でも同一レースの二重計上防止(latestモード)が独立して適用されること", () => {
+    const store = new AnalysisStore();
+    // 同一版・同一レースの新旧分析。
+    store.saveAnalysis({
+      raceId: "R1",
+      analyzedAt: "2026-07-08T09:00:00.000Z",
+      promptVersion: "2026-07-14.1",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+    });
+    store.saveAnalysis({
+      raceId: "R1",
+      analyzedAt: "2026-07-08T15:00:00.000Z",
+      promptVersion: "2026-07-14.1",
+      horses: [horse(1, 0.5, 3.0, 1.5, true)],
+    });
+    store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+
+    const reports = computeVerifyReportByPromptVersion(store);
+    const v1 = reports.find((r) => r.promptVersion === "2026-07-14.1")!;
+    expect(v1.report.includedAnalysisCount).toBe(1);
+    expect(v1.report.supersededAnalysisCount).toBe(1);
+    // 最新分析(複勝下限3.0倍)の払戻が採用される。
+    expect(v1.report.bet.totalReturn).toBeCloseTo(300, 10);
+    store.close();
+  });
+
+  it("分析が1件も保存されていなければ空配列を返すこと", () => {
+    const store = new AnalysisStore();
+    expect(computeVerifyReportByPromptVersion(store)).toEqual([]);
+    store.close();
+  });
+
+  describe("同一レースが異なる版で複数回分析された場合(版をまたいだ最新判定はしないこと)", () => {
+    // 同一raceIdを版A(旧・先に分析)と版B(新・後で再分析)の両方で保存する状況を作る。
+    // computeVerifyReportByPromptVersion は「版ごとに独立した母集団」で latest選択するため、
+    // 版Aの分析は版Bの分析に取って代わられず、両方の版グループにそれぞれ計上されるはず。
+    // 一方、既存の computeVerifyReport(全体集計)は従来どおり版をまたいで最新1件に絞り込む。
+    function setupTwoVersionsOfSameRace(): AnalysisStore {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "2026-07-01T09:00:00.000Z",
+        promptVersion: "2026-07-01.1",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      });
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "2026-07-14T09:00:00.000Z",
+        promptVersion: "2026-07-14.1",
+        horses: [horse(1, 0.5, 5.0, 2.5, true)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      return store;
+    }
+
+    it("(a) 版A・版Bそれぞれのグループにincluded=1で計上されること", () => {
+      const store = setupTwoVersionsOfSameRace();
+      const reports = computeVerifyReportByPromptVersion(store);
+
+      const versionA = reports.find((r) => r.promptVersion === "2026-07-01.1")!;
+      expect(versionA.report.includedAnalysisCount).toBe(1);
+      expect(versionA.report.bet.totalReturn).toBeCloseTo(200, 10); // 複勝下限2.0倍
+
+      const versionB = reports.find((r) => r.promptVersion === "2026-07-14.1")!;
+      expect(versionB.report.includedAnalysisCount).toBe(1);
+      expect(versionB.report.bet.totalReturn).toBeCloseTo(500, 10); // 複勝下限5.0倍
+      store.close();
+    });
+
+    it("(b) 版をまたいだsuperseded判定は起きないこと(各版内では最新のみで、supersededは0)", () => {
+      const store = setupTwoVersionsOfSameRace();
+      const reports = computeVerifyReportByPromptVersion(store);
+
+      const versionA = reports.find((r) => r.promptVersion === "2026-07-01.1")!;
+      expect(versionA.report.supersededAnalysisCount).toBe(0);
+
+      const versionB = reports.find((r) => r.promptVersion === "2026-07-14.1")!;
+      expect(versionB.report.supersededAnalysisCount).toBe(0);
+      store.close();
+    });
+
+    it("(c) 全体集計(computeVerifyReport)は従来どおり版をまたいで最新1件のみに絞ること(回帰確認)", () => {
+      const store = setupTwoVersionsOfSameRace();
+      const overall = computeVerifyReport(store);
+
+      expect(overall.includedAnalysisCount).toBe(1);
+      expect(overall.supersededAnalysisCount).toBe(1);
+      // 最新(版B・analyzedAtが新しい方、複勝下限5.0倍)の払戻が採用される。
+      expect(overall.bet.totalReturn).toBeCloseTo(500, 10);
+      store.close();
     });
   });
 });

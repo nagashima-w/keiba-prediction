@@ -16,6 +16,7 @@ import {
   markLabel,
   needsImport,
   overconfidenceLabel,
+  promptVersionLabel,
 } from "../src/renderer/verify-format.js";
 
 /** テスト用の履歴項目を最小構成で組み立てる。 */
@@ -164,6 +165,15 @@ describe("verify画面の表示整形(純関数)", () => {
     });
     it("印なし(null)は『印なし』にすること", () => {
       expect(markLabel(null)).toBe("印なし");
+    });
+  });
+
+  describe("promptVersionLabel(プロンプト版番号の表示、Task#27)", () => {
+    it("版番号はそのまま表示すること", () => {
+      expect(promptVersionLabel("2026-07-14.1")).toBe("2026-07-14.1");
+    });
+    it("版不明(null)は『版不明』にすること", () => {
+      expect(promptVersionLabel(null)).toBe("版不明");
     });
   });
 });

@@ -237,12 +237,14 @@ export {
 } from "./ev/analysis-store.js";
 export {
   computeVerifyReport,
+  computeVerifyReportByPromptVersion,
   DEFAULT_VERIFY_CONFIG,
   type AdjustmentDirection,
   type CalibrationBiasBin,
   type CalibrationBin,
   type DirectionGroupStat,
   type MarkStat,
+  type PromptVersionVerifyReport,
   type VerifyBetSummary,
   type VerifyConfig,
   type VerifyReport,
@@ -260,6 +262,7 @@ export {
 export {
   buildPrompt,
   computeReferenceEv,
+  PROMPT_VERSION,
   type BuildPromptInput,
   type BuildPromptRaceInfo,
   type PromptHorse,

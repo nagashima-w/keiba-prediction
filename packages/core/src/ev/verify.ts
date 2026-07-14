@@ -55,6 +55,19 @@
  *   正なら過信、負なら過小評価)を算出する。予測0件の帯は null。
  * - (3) 印別的中率: mark(◎〇▲△☆注)ごとに件数・複勝率(finish<=placeMaxRank)・
  *   勝率(finish=1)を算出する。mark=null(印なし)も1群として必ず含める。
+ *
+ * プロンプト版別集計(computeVerifyReportByPromptVersion、Task#27 プロンプト改善A):
+ * - 「プロンプトを改善したときに本当に良くなったか」を版ごとの成績で比較できる土台。
+ *   analyses.prompt_version(analyzer/build-prompt.ts の PROMPT_VERSION の保存値)でグループ化し、
+ *   グループごとに既存 computeVerifyReport と同じロジック(latestモード・推定EV除外等)を
+ *   独立に適用する。比較軸は prompt_version のみ(model 別比較は入れない。2026-07-14合意)。
+ * - 版不明(promptVersion=null。列追加前の旧データ・LLM未使用の分析)も1グループとして扱う。
+ *
+ * 未知mark文字列への防御(Task#26 boss観察1 / Task#27):
+ * - markStats の集計は markCounters(PREDICTION_MARKS+nullの固定キー)への参照を前提にしていたが、
+ *   DBのmark列は将来のスキーマ変更・手動DB改変で想定外の文字列が入りうる(analysis-store.ts の
+ *   toStoredHorse は型どおりキャストするのみで値の検証はしていない)。非nullアサーション(!)での
+ *   参照はその場合にクラッシュするため、未知のキーは「印なし」群にフォールバックする。
  */
 
 import type { AnalysisStore, StoredAnalysis } from "./analysis-store.js";
@@ -204,6 +217,18 @@ export interface VerifyReport {
   readonly trend: VerifyTrendReport;
 }
 
+/**
+ * プロンプト版別verifyレポートの1件(Task#27)。
+ * computeVerifyReportByPromptVersion が返す配列の要素。report は既存 VerifyReport と同型
+ * (回収率・キャリブレーション・trend を含む)で、その版番号の分析集合のみを対象に算出したもの。
+ */
+export interface PromptVersionVerifyReport {
+  /** プロンプト版番号(analyzer/build-prompt.ts の PROMPT_VERSION)。版不明は null。 */
+  readonly promptVersion: string | null;
+  /** その版の分析集合のみを対象とした verifyレポート。 */
+  readonly report: VerifyReport;
+}
+
 /** 帯集計の可変カウンタ。 */
 interface BinCounter {
   predicted: number;
@@ -218,6 +243,64 @@ interface BinCounter {
 export function computeVerifyReport(
   store: AnalysisStore,
   config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+): VerifyReport {
+  return computeVerifyReportForAnalyses(store, store.listAnalyses(), config);
+}
+
+/**
+ * プロンプト版番号(prompt_version)ごとに分析を分けて集計する(Task#27 プロンプト改善A)。
+ * 「プロンプトを改善したときに本当に良くなったか」を版ごとの成績で比較できるようにする土台。
+ *
+ * 比較軸は prompt_version のみ(model 別比較は入れない。docs/prompt-improvement-plan.md
+ * 2026-07-14合意)。版不明(promptVersion=null。列追加前の旧データ・LLM未使用の分析)も
+ * 1グループとして必ず扱う。各グループには既存 computeVerifyReport と同じロジック
+ * (latestモードの二重計上防止・推定EV除外等)をそのグループ内の分析のみに適用する
+ * (=版をまたいだ「最新」判定は行わない。同一版内での重複分析のみ防止する)。
+ *
+ * 返す配列は版番号の昇順([...String比較])で並べ、版不明(null)は末尾に置く決定的な順序とする。
+ * @param store 分析・結果を保持する AnalysisStore
+ * @param config verify設定(省略時は既定)
+ */
+export function computeVerifyReportByPromptVersion(
+  store: AnalysisStore,
+  config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+): readonly PromptVersionVerifyReport[] {
+  const analyses = store.listAnalyses();
+  const groups = new Map<string | null, StoredAnalysis[]>();
+  for (const analysis of analyses) {
+    const key = analysis.promptVersion;
+    const group = groups.get(key);
+    if (group === undefined) {
+      groups.set(key, [analysis]);
+    } else {
+      group.push(analysis);
+    }
+  }
+
+  const sortedVersions = [...groups.keys()]
+    .filter((v): v is string => v !== null)
+    .sort((a, b) => a.localeCompare(b));
+  const orderedKeys: Array<string | null> = groups.has(null)
+    ? [...sortedVersions, null]
+    : sortedVersions;
+
+  return orderedKeys.map((key) => ({
+    promptVersion: key,
+    report: computeVerifyReportForAnalyses(store, groups.get(key)!, config),
+  }));
+}
+
+/**
+ * verifyレポート算出の共通本体。computeVerifyReport(全体集計)と
+ * computeVerifyReportByPromptVersion(版別集計)の両方から、集計対象の分析集合だけを変えて呼ばれる。
+ * @param store 実結果(getResult)の取得に使う AnalysisStore
+ * @param analyses 集計対象の分析集合(呼び出し側で絞り込み済み)
+ * @param config verify設定
+ */
+function computeVerifyReportForAnalyses(
+  store: AnalysisStore,
+  analyses: readonly StoredAnalysis[],
+  config: VerifyConfig,
 ): VerifyReport {
   const { stakePerBet, placeMaxRank, calibrationBins, includeAllAnalyses, directionEpsilon } =
     config;
@@ -237,8 +320,9 @@ export function computeVerifyReport(
   const markCounters = new Map<PredictionMark | null, MarkCounter>(
     [...PREDICTION_MARKS, null].map((mark) => [mark, { count: 0, placed: 0, won: 0 }]),
   );
+  // 印なし群のカウンタ(未知mark文字列のフォールバック先として使い回す。Task#26 boss観察1対応)。
+  const noMarkCounter = markCounters.get(null)!;
 
-  const analyses = store.listAnalyses();
   // latestモードでは「レースごとに最新1件」の分析idを選ぶ。全件モードでは null(全採用)。
   const chosenIds = includeAllAnalyses ? null : chooseLatestPerRace(analyses);
 
@@ -307,7 +391,10 @@ export function computeVerifyReport(
       }
 
       // 補正傾向サマリ(3) 印別的中率: mark(印なしのnullを含む)ごとに計上する(Task#26)。
-      const mCounter = markCounters.get(horse.mark)!;
+      // 防御(Task#26 boss観察1 / Task#27): DBの mark 列は型どおりの値のみ書き込む前提だが、
+      // 将来のスキーマ変更・手動DB改変で PREDICTION_MARKS に無い未知の文字列が紛れ込んでも
+      // 集計処理自体がクラッシュしないよう、markCounters に無いキーは「印なし」群にフォールバックする。
+      const mCounter = markCounters.get(horse.mark) ?? noMarkCounter;
       mCounter.count += 1;
       if (isPlaced) {
         mCounter.placed += 1;

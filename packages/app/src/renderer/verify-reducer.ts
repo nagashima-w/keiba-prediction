@@ -8,6 +8,7 @@
 
 import type {
   AnalysisHistoryItem,
+  PromptVersionVerifyReportView,
   VerifyReportView,
 } from "../shared/analysis-types.js";
 
@@ -30,6 +31,12 @@ export interface VerifyState {
   readonly loadingReport: boolean;
   /** レポート取得エラー(無ければ null)。 */
   readonly reportError: string | null;
+  /** プロンプト版別の検証レポート一覧(Task#27。未取得は空配列)。 */
+  readonly reportsByPromptVersion: readonly PromptVersionVerifyReportView[];
+  /** 版別レポート取得中か。 */
+  readonly loadingReportsByPromptVersion: boolean;
+  /** 版別レポート取得エラー(無ければ null)。 */
+  readonly reportsByPromptVersionError: string | null;
   /** 結果取込中のレースID(ボタン二重押下防止・表示用)。 */
   readonly importingRaceIds: readonly string[];
   /** 直近の取込エラー(無ければ null)。 */
@@ -48,6 +55,12 @@ export type VerifyAction =
   | { readonly type: "レポート取得開始" }
   | { readonly type: "レポート取得成功"; readonly report: VerifyReportView }
   | { readonly type: "レポート取得失敗"; readonly message: string }
+  | { readonly type: "版別レポート取得開始" }
+  | {
+      readonly type: "版別レポート取得成功";
+      readonly reports: readonly PromptVersionVerifyReportView[];
+    }
+  | { readonly type: "版別レポート取得失敗"; readonly message: string }
   | { readonly type: "取込開始"; readonly raceId: string }
   | { readonly type: "取込成功"; readonly raceId: string }
   | { readonly type: "取込失敗"; readonly raceId: string; readonly message: string };
@@ -62,6 +75,9 @@ export function createInitialVerifyState(): VerifyState {
     report: null,
     loadingReport: false,
     reportError: null,
+    reportsByPromptVersion: [],
+    loadingReportsByPromptVersion: false,
+    reportsByPromptVersionError: null,
     importingRaceIds: [],
     importError: null,
   };
@@ -113,6 +129,28 @@ export function verifyReducer(
 
     case "レポート取得失敗":
       return { ...state, loadingReport: false, reportError: action.message };
+
+    case "版別レポート取得開始":
+      return {
+        ...state,
+        loadingReportsByPromptVersion: true,
+        reportsByPromptVersionError: null,
+      };
+
+    case "版別レポート取得成功":
+      return {
+        ...state,
+        loadingReportsByPromptVersion: false,
+        reportsByPromptVersion: action.reports,
+        reportsByPromptVersionError: null,
+      };
+
+    case "版別レポート取得失敗":
+      return {
+        ...state,
+        loadingReportsByPromptVersion: false,
+        reportsByPromptVersionError: action.message,
+      };
 
     case "取込開始":
       return {

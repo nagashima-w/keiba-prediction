@@ -58,6 +58,14 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
     }
   });
 
+  it("プロンプト版別検証レポートのチャネルをハンドラ付きで登録する(Task#27)", () => {
+    registerIpcHandlers();
+    expect(handleMock).toHaveBeenCalledWith(
+      IPC_CHANNELS.getVerifyReportByPromptVersion,
+      expect.any(Function),
+    );
+  });
+
   it("設定画面用のチャネル(取得・保存・初期化)をハンドラ付きで登録する", () => {
     registerIpcHandlers();
     for (const channel of [

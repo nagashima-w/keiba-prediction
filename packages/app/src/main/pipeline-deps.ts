@@ -18,6 +18,7 @@ import {
   AnthropicLlmClient,
   CachedFetcher,
   computeVerifyReport,
+  computeVerifyReportByPromptVersion,
   HttpClient,
   listNarRaces,
   listRaces,
@@ -36,6 +37,7 @@ import {
 import type {
   AnalysisHistoryItem,
   ImportResultOutcome,
+  PromptVersionVerifyReportView,
   VerifyReportView,
 } from "../shared/analysis-types.js";
 import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
@@ -79,6 +81,8 @@ export interface PipelineResources {
   readonly importResult: (raceId: RaceId) => Promise<ImportResultOutcome>;
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
   readonly getVerifyReport: () => VerifyReportView;
+  /** プロンプト版別の検証レポート一覧を取得する(Task#27)。 */
+  readonly getVerifyReportByPromptVersion: () => readonly PromptVersionVerifyReportView[];
   /** 分析履歴一覧(検証画面用)を取得する。 */
   readonly listAnalysisHistory: () => AnalysisHistoryItem[];
   /** DB接続などを閉じる。 */
@@ -146,6 +150,8 @@ export function createPipelineDeps(
         saveResult: (rid, entries) => store.saveResult(rid, entries),
       }),
     getVerifyReport: (): VerifyReportView => computeVerifyReport(store),
+    getVerifyReportByPromptVersion: (): readonly PromptVersionVerifyReportView[] =>
+      computeVerifyReportByPromptVersion(store),
     listAnalysisHistory: (): AnalysisHistoryItem[] => {
       const analyses = store.listAnalyses();
       // 結果取込済み(実着順あり)/払戻取込済み(複勝払戻あり)のレースID集合を作る。

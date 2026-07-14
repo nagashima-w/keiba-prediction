@@ -106,3 +106,10 @@ export function overconfidenceLabel(gap: number | null): string {
 export function markLabel(mark: PredictionMark | null): string {
   return mark === null ? "印なし" : mark;
 }
+
+/**
+ * プロンプト版番号の表示(Task#27)。版不明(null。旧データ・LLM未使用の分析)は「版不明」。
+ */
+export function promptVersionLabel(promptVersion: string | null): string {
+  return promptVersion === null ? "版不明" : promptVersion;
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   AnalysisHistoryItem,
+  PromptVersionVerifyReportView,
   VerifyReportView,
 } from "../src/shared/analysis-types.js";
 import {
@@ -44,6 +45,11 @@ const sampleReport: VerifyReportView = {
   },
 };
 
+const samplePromptVersionReports: PromptVersionVerifyReportView[] = [
+  { promptVersion: "2026-07-14.1", report: sampleReport },
+  { promptVersion: null, report: sampleReport },
+];
+
 describe("verifyReducer(検証タブの状態遷移)", () => {
   it("初期状態は分析タブ・履歴空・取込中なし", () => {
     const s = init();
@@ -51,6 +57,34 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     expect(s.history).toEqual([]);
     expect(s.report).toBeNull();
     expect(s.importingRaceIds).toEqual([]);
+  });
+
+  it("初期状態は版別レポートも空・未ローディングであること(Task#27)", () => {
+    const s = init();
+    expect(s.reportsByPromptVersion).toEqual([]);
+    expect(s.loadingReportsByPromptVersion).toBe(false);
+    expect(s.reportsByPromptVersionError).toBeNull();
+  });
+
+  it("版別レポート取得開始→成功で reportsByPromptVersion を格納しローディング解除する(Task#27)", () => {
+    const loading = verifyReducer(init(), { type: "版別レポート取得開始" });
+    expect(loading.loadingReportsByPromptVersion).toBe(true);
+    const done = verifyReducer(loading, {
+      type: "版別レポート取得成功",
+      reports: samplePromptVersionReports,
+    });
+    expect(done.loadingReportsByPromptVersion).toBe(false);
+    expect(done.reportsByPromptVersion).toEqual(samplePromptVersionReports);
+    expect(done.reportsByPromptVersionError).toBeNull();
+  });
+
+  it("版別レポート取得失敗でエラーを保持しローディング解除する(Task#27)", () => {
+    const s = verifyReducer(
+      { ...init(), loadingReportsByPromptVersion: true },
+      { type: "版別レポート取得失敗", message: "失敗" },
+    );
+    expect(s.loadingReportsByPromptVersion).toBe(false);
+    expect(s.reportsByPromptVersionError).toBe("失敗");
   });
 
   it("タブ切替: activeTab を更新する", () => {

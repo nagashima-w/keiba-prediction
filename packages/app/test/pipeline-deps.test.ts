@@ -38,6 +38,13 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(typeof r.listRaces).toBe("function");
   });
 
+  it("getVerifyReportByPromptVersion が組み立てられ、未分析なら空配列を返すこと(Task#27)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(typeof r.getVerifyReportByPromptVersion).toBe("function");
+    expect(r.getVerifyReportByPromptVersion()).toEqual([]);
+  });
+
   it("APIキーがあれば analyze は関数として組み立てられる", () => {
     const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
     resources.push(r);

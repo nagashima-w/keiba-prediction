@@ -47,6 +47,7 @@ import {
   daysBetweenDates,
   DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
+  PROMPT_VERSION,
   venueKindOfRaceId,
   type AnalysisRecord,
   type AnalyzeRaceResult,
@@ -336,6 +337,10 @@ export async function runAnalysis(
     raceId,
     analyzedAt,
     evEstimated,
+    // プロンプト版番号(Task#27): LLMを実際に使った(プロンプトを送った)分析のみ PROMPT_VERSION を
+    // 記録する。LLMスキップ(prior採用)はプロンプト自体を使っていないため null(版不明とは別の
+    // 「該当なし」だが、verifyの版別集計では版不明と同じ null グループにまとめて扱う)。
+    promptVersion: llmUsed ? PROMPT_VERSION : null,
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;
