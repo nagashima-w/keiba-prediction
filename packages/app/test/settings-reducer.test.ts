@@ -34,6 +34,7 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
       courseFrameBias: 1,
     },
     autoSendDiscord: false,
+    additionalInstruction: "",
     ...overrides,
   };
 }
@@ -66,6 +67,13 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.apiKeyInput).toBe("");
   });
 
+  it("読込成功でプロンプト追加指示を反映すること(Task#28)", () => {
+    const s = loadedState(
+      fakeMasked({ additionalInstruction: "人気薄の複勝率は慎重に見積もること" }),
+    );
+    expect(s.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
+  });
+
   it("各フィールドの入力アクションで値を更新する", () => {
     let s = loadedState();
     s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
@@ -82,6 +90,10 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
       value: "0.9",
     });
     s = settingsReducer(s, { type: "自動送信切替", value: true });
+    s = settingsReducer(s, {
+      type: "追加指示入力",
+      value: "人気薄の複勝率は慎重に見積もること",
+    });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -89,6 +101,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.biasWeights.venue).toBe("0.4");
     expect(s.baseScoreWeights.jockey).toBe("0.9");
     expect(s.autoSendDiscord).toBe(true);
+    expect(s.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -138,6 +151,16 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(update.apiKey).toBe("sk-ant-new");
     expect(update.evThreshold).toBe(1.4);
     expect(update.biasWeights.venue).toBe(0.4);
+  });
+
+  it("プロンプト追加指示を含めること(Task#28)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, {
+      type: "追加指示入力",
+      value: "人気薄の複勝率は慎重に見積もること",
+    });
+    const update = buildUpdate(s);
+    expect(update.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
   });
 });
 

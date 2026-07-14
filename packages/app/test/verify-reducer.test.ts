@@ -46,8 +46,12 @@ const sampleReport: VerifyReportView = {
 };
 
 const samplePromptVersionReports: PromptVersionVerifyReportView[] = [
-  { promptVersion: "2026-07-14.1", report: sampleReport },
-  { promptVersion: null, report: sampleReport },
+  {
+    promptVersion: "2026-07-14.1",
+    report: sampleReport,
+    additionalInstructions: [null],
+  },
+  { promptVersion: null, report: sampleReport, additionalInstructions: [null] },
 ];
 
 describe("verifyReducer(検証タブの状態遷移)", () => {

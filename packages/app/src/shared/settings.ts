@@ -107,6 +107,15 @@ export interface AppSettings {
   readonly baseScoreWeights: BaseScoreWeightValues;
   /** 分析結果の自動Discord送信ON/OFF(Phase 5 で使用。現状は保存のみ)。 */
   readonly autoSendDiscord: boolean;
+  /**
+   * プロンプト追加指示(Task#28 プロンプト改善C)。設定画面の自由記述欄。
+   * buildPrompt の BuildPromptInput.additionalInstruction にそのまま渡され、プロンプト末尾の
+   * 指示ブロックに差し込まれる。空文字(既定)は何も注入しない。
+   * 注意: ここに書いた指示はLLMにそのまま渡される。3着内率の推定を市場オッズ(人気)に
+   * 近づける方向の指示は、本ツールの妙味検出(市場から独立した確率推定×市場オッズ)を
+   * 損なうため避けるべき(設定画面に同旨の注意書きを表示する)。
+   */
+  readonly additionalInstruction: string;
 }
 
 /**
@@ -127,6 +136,11 @@ export interface MaskedSettings {
   readonly baseScoreWeights: BaseScoreWeightValues;
   /** 自動Discord送信ON/OFF。 */
   readonly autoSendDiscord: boolean;
+  /**
+   * プロンプト追加指示。Discord Webhook URLと同様、機微度が低いため平文のまま返す
+   * (往復編集フォームとして表示する必要があるため)。
+   */
+  readonly additionalInstruction: string;
 }
 
 /**
@@ -147,6 +161,8 @@ export interface SettingsUpdate {
   readonly baseScoreWeights: BaseScoreWeightValues;
   /** 自動Discord送信ON/OFF。 */
   readonly autoSendDiscord: boolean;
+  /** プロンプト追加指示。空文字なら注入しない。 */
+  readonly additionalInstruction: string;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */

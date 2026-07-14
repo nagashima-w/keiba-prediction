@@ -63,6 +63,15 @@
  *   独立に適用する。比較軸は prompt_version のみ(model 別比較は入れない。2026-07-14合意)。
  * - 版不明(promptVersion=null。列追加前の旧データ・LLM未使用の分析)も1グループとして扱う。
  *
+ * 追加指示の要約(additionalInstructions、Task#28 プロンプト改善C):
+ * - 追加指示(analyzer/build-prompt.ts の BuildPromptInput.additionalInstruction)は実質的に
+ *   プロンプトを変えるため、PROMPT_VERSION(テンプレート本体の版)が同じでも追加指示が異なれば
+ *   別条件として扱う必要がある(docs/prompt-improvement-plan.md 方式C)。そこで
+ *   computeVerifyReportByPromptVersion は各版グループについて、そのグループ内の全分析
+ *   (report集計時の絞り込み前。結果未保存・推定EV除外等とは無関係に「その版で実際に使われた
+ *   追加指示」を把握する目的のため)から additionalInstruction の重複しない値を集めて返す。
+ * - 順序は決定的: 非null値は文字列昇順、null(追加指示なし)は末尾。
+ *
  * 未知mark文字列への防御(Task#26 boss観察1 / Task#27):
  * - markStats の集計は markCounters(PREDICTION_MARKS+nullの固定キー)への参照を前提にしていたが、
  *   DBのmark列は将来のスキーマ変更・手動DB改変で想定外の文字列が入りうる(analysis-store.ts の
@@ -227,6 +236,13 @@ export interface PromptVersionVerifyReport {
   readonly promptVersion: string | null;
   /** その版の分析集合のみを対象とした verifyレポート。 */
   readonly report: VerifyReport;
+  /**
+   * この版グループ内で実際に使われた追加指示(Task#28)の重複しない値の一覧。
+   * 非null値は文字列昇順、追加指示なし(null)は末尾という決定的な順序。
+   * 「同じ版でも追加指示が違えば別条件」であることを版別比較の解釈時に把握できるようにするための情報で、
+   * report集計の絞り込み(結果未保存除外・推定EV除外等)とは独立に、その版の全分析を対象に算出する。
+   */
+  readonly additionalInstructions: readonly (string | null)[];
 }
 
 /** 帯集計の可変カウンタ。 */
@@ -287,7 +303,22 @@ export function computeVerifyReportByPromptVersion(
   return orderedKeys.map((key) => ({
     promptVersion: key,
     report: computeVerifyReportForAnalyses(store, groups.get(key)!, config),
+    additionalInstructions: distinctAdditionalInstructions(groups.get(key)!),
   }));
+}
+
+/**
+ * 分析集合から additionalInstruction の重複しない値を取り出す(Task#28)。
+ * 非null値は文字列昇順、null(追加指示なし)は末尾という決定的な順序で返す。
+ */
+function distinctAdditionalInstructions(
+  analyses: readonly StoredAnalysis[],
+): readonly (string | null)[] {
+  const values = new Set(analyses.map((a) => a.additionalInstruction));
+  const nonNull = [...values]
+    .filter((v): v is string => v !== null)
+    .sort((a, b) => a.localeCompare(b));
+  return values.has(null) ? [...nonNull, null] : nonNull;
 }
 
 /**

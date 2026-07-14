@@ -58,6 +58,11 @@ export interface PipelineWiringConfig {
   /** EV設定(設定画面のEV閾値)。省略時は runAnalysis 側で既定(閾値1.0)を用いる。 */
   readonly evConfig?: EvConfig;
   /**
+   * プロンプト追加指示(設定画面、Task#28 プロンプト改善C)。省略時・空文字・空白のみは
+   * runAnalysis 側で「注入なし」として扱われる。
+   */
+  readonly additionalInstruction?: string;
+  /**
    * HTTP取得に使う fetch(注入)。
    *
    * Electron main では Electron の net.fetch アダプタ(net-fetch-adapter)を渡し、
@@ -132,6 +137,7 @@ export function createPipelineDeps(
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
+    additionalInstruction: config.additionalInstruction,
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",

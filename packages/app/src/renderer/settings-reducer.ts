@@ -49,6 +49,8 @@ export interface SettingsFormState {
   readonly baseScoreWeights: Record<BaseScoreWeightKey, string>;
   /** 自動Discord送信ON/OFF。 */
   readonly autoSendDiscord: boolean;
+  /** プロンプト追加指示(Task#28)。 */
+  readonly additionalInstruction: string;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -74,6 +76,7 @@ export type SettingsAction =
       readonly value: string;
     }
   | { readonly type: "自動送信切替"; readonly value: boolean }
+  | { readonly type: "追加指示入力"; readonly value: string }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
   | { readonly type: "保存失敗"; readonly message: string };
@@ -123,6 +126,7 @@ export function createInitialSettingsState(): SettingsFormState {
     biasWeights: emptyRecord(BIAS_WEIGHT_KEYS),
     baseScoreWeights: emptyRecord(BASE_SCORE_WEIGHT_KEYS),
     autoSendDiscord: false,
+    additionalInstruction: "",
     status: "idle",
     message: null,
   };
@@ -148,6 +152,7 @@ function applyMasked(
       settings.baseScoreWeights,
     ),
     autoSendDiscord: settings.autoSendDiscord,
+    additionalInstruction: settings.additionalInstruction,
   };
 }
 
@@ -193,6 +198,9 @@ export function settingsReducer(
     case "自動送信切替":
       return { ...state, autoSendDiscord: action.value };
 
+    case "追加指示入力":
+      return { ...state, additionalInstruction: action.value };
+
     case "保存開始":
       return { ...state, status: "saving", message: null };
 
@@ -231,6 +239,7 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     biasWeights,
     baseScoreWeights,
     autoSendDiscord: state.autoSendDiscord,
+    additionalInstruction: state.additionalInstruction,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }

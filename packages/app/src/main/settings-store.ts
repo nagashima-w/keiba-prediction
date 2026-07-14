@@ -44,6 +44,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   biasWeights: { ...DEFAULT_SCORER_CONFIG.weights },
   baseScoreWeights: { ...DEFAULT_SCORER_CONFIG.baseScore.weights },
   autoSendDiscord: false,
+  additionalInstruction: "",
 };
 
 /** raw が number かつ有限かつ述語を満たせば採用、さもなくば fallback。 */
@@ -118,6 +119,11 @@ export function coerceSettings(raw: unknown): AppSettings {
       typeof rec.autoSendDiscord === "boolean"
         ? rec.autoSendDiscord
         : DEFAULT_APP_SETTINGS.autoSendDiscord,
+    // プロンプト追加指示(Task#28)。文字列であればそのまま採用し、型違い・欠損はデフォルト(空文字)。
+    additionalInstruction:
+      typeof rec.additionalInstruction === "string"
+        ? rec.additionalInstruction
+        : DEFAULT_APP_SETTINGS.additionalInstruction,
   };
 }
 
@@ -173,6 +179,8 @@ export function maskSettings(
     biasWeights: settings.biasWeights,
     baseScoreWeights: settings.baseScoreWeights,
     autoSendDiscord: settings.autoSendDiscord,
+    // プロンプト追加指示はDiscord URLと同様、平文のまま返す(編集フォーム表示のため)。
+    additionalInstruction: settings.additionalInstruction,
   };
 }
 
@@ -193,6 +201,7 @@ export function applyUpdate(
     biasWeights: update.biasWeights,
     baseScoreWeights: update.baseScoreWeights,
     autoSendDiscord: update.autoSendDiscord,
+    additionalInstruction: update.additionalInstruction,
   });
 }
 

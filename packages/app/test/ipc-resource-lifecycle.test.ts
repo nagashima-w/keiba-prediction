@@ -56,6 +56,7 @@ const validUpdate: SettingsUpdate = {
   biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
   baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
   autoSendDiscord: false,
+  additionalInstruction: "",
 };
 
 /** 登録済みハンドラを取得する。 */

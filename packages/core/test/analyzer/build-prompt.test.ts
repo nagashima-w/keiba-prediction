@@ -316,3 +316,81 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toBe("2026-07-14.1");
   });
 });
+
+describe("buildPrompt(追加指示の注入口・Task#28 プロンプト改善C)", () => {
+  // Task#27時点(コミット09fa1f0)の buildPrompt(baseInput()) の出力をそのまま固定した回帰用リテラル。
+  // additionalInstruction が空/未指定のときにこの文字列と完全一致することを保証し、
+  // 注入口を追加してもデフォルト挙動(既存プロンプト)が一切変わらないことを担保する。
+  const UNCHANGED_BASE_PROMPT =
+    "あなたは競馬の複勝圏内(3着以内)確率を評価するアナリストです。\n\n【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】\n逃げ馬の数: 1頭\nペース想定: 逃げ馬1頭で平均ペース想定\n\n【出走馬(3着内率 は scorer が数値データから算出した複勝圏内〈3着以内〉確率の事前推定値)】\n馬番1 アルファ: 3着内率=0.42, 脚質=逃げ, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可\n馬番2 ブラボー: 3着内率=0.18, 脚質=差し, レース間隔=休み明け, 調教=情報なし, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可\n\n注記: 参考EVは 3着内率(LLM補正前の事前推定値)× 複勝オッズ下限 の参考値です。あなたが出す補正後確率(place_prob)で最終的なEVは別途再計算されるため、参考EV自体を出力する必要はありません。\n重要: 単勝オッズ・人気・参考EVは、予想印の☆・注(人気薄判定)や妙味の把握に使ってください。3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。補正の根拠はあくまで脚質・展開・調教・レース間隔・厩舎コメント等のデータに基づいてください。本ツールは市場から独立した確率推定と市場オッズを掛け合わせて妙味を見つけることが目的であり、確率推定が市場に迎合すると妙味が失われます。\n\n【指示】\n各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。\n補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。\n補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。\nreason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。\nplace_prob は 0 以上 1 以下の小数です。全馬について出力してください。\n\n【予想印】\n各馬に以下6種類の予想印(mark)のいずれか、または印なし(null)を1つ付けてください(1頭に複数の印を付けることはできません)。\n◎(本命): 1着になりそうな最有力の馬。必ずちょうど1頭。\n〇(対抗): 本命に対抗できそうな2番手の馬。必ずちょうど1頭。\n▲(単穴): 本命と対抗を差し置いて勝てる可能性がある3番手の馬。必ずちょうど1頭。\n△(連下): 上記3つの印よりは劣るが、2着や3着に入りそうな馬。1〜3頭。\n☆(星): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば勝てる可能性のある穴馬。0〜1頭。\n注(注意): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば3着に入る可能性のある穴馬。0〜1頭。\n判断材料: 3着内率・参考EV・単勝オッズ/人気・脚質と展開想定、およびここまでの分析(各馬の place_prob と reason)を総合して判断してください。\n頭数制約は厳守してください: ◎〇▲はちょうど1頭ずつ、△は1〜3頭、☆と注はそれぞれ0〜1頭。この条件を満たさない出力は不可です。\n\n【出力スキーマ(この形式の JSON のみ)】\n{\"horses\": [{\"number\": 1, \"place_prob\": 0.42, \"reason\": \"...\", \"mark\": \"◎\"}, {\"number\": 2, \"place_prob\": 0.30, \"reason\": \"...\", \"mark\": null}]}";
+
+  it("回帰: additionalInstruction未指定なら既存プロンプトと完全一致すること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toBe(UNCHANGED_BASE_PROMPT);
+  });
+
+  it("回帰: additionalInstructionが空文字なら既存プロンプトと完全一致すること(差し込まない)", () => {
+    const p = buildPrompt({ ...baseInput(), additionalInstruction: "" });
+    expect(p).toBe(UNCHANGED_BASE_PROMPT);
+  });
+
+  it("additionalInstructionが空白のみなら差し込まないこと(既存プロンプトと完全一致)", () => {
+    const p = buildPrompt({ ...baseInput(), additionalInstruction: "   \n  " });
+    expect(p).toBe(UNCHANGED_BASE_PROMPT);
+  });
+
+  it("additionalInstructionを指定すると本文を含むこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      additionalInstruction: "人気薄の複勝率は慎重に見積もること",
+    });
+    expect(p).toContain("人気薄の複勝率は慎重に見積もること");
+  });
+
+  it("additionalInstructionの見出し【追加指示】を含むこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      additionalInstruction: "テスト指示",
+    });
+    expect(p).toContain("【追加指示");
+  });
+
+  it("差し込み位置は【予想印】セクションより後、【出力スキーマ】セクションより前であること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      additionalInstruction: "テスト指示",
+    });
+    const markIndex = p.indexOf("【予想印】");
+    const instructionIndex = p.indexOf("【追加指示");
+    const schemaIndex = p.indexOf("【出力スキーマ");
+    expect(markIndex).toBeGreaterThanOrEqual(0);
+    expect(instructionIndex).toBeGreaterThan(markIndex);
+    expect(schemaIndex).toBeGreaterThan(instructionIndex);
+  });
+
+  it("追加指示によって既存のアンカリング禁止・±10%制約等を上書きしない旨を明示すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      additionalInstruction: "テスト指示",
+    });
+    expect(p).toContain("上書き");
+    expect(p).toContain("アンカリング");
+  });
+
+  it("前後の空白をトリムして本文のみ差し込むこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      additionalInstruction: "  トリム対象  \n",
+    });
+    expect(p).toContain("トリム対象");
+    expect(p).not.toContain("  トリム対象  ");
+  });
+
+  it("複数行の追加指示をそのまま(改行を保持して)差し込めること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      additionalInstruction: "1行目の指示\n2行目の指示",
+    });
+    expect(p).toContain("1行目の指示\n2行目の指示");
+  });
+});

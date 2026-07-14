@@ -37,6 +37,15 @@
  * 旧バージョンで作成済みのDBにはこの列が無いため、mark/ev_estimated列と同じ流儀でALTER TABLEに
  * より後付けし、既存行は NULL=版不明として読む(後方互換。旧データは版記録導入前の分析のため
  * どのプロンプト文面で分析したか特定できない)。
+ *
+ * 追加指示(additional_instruction)列(Task#28 プロンプト改善C): analyses に
+ * additional_instruction TEXT(nullable)を持つ。設定画面の自由記述欄(analyzer/build-prompt.ts の
+ * BuildPromptInput.additionalInstruction)の内容をそのまま保存する。追加指示は実質的にプロンプトを
+ * 変えるため、PROMPT_VERSION(テンプレート本体の版)とは別軸でこの列を記録し、
+ * 「同じ版でも追加指示が違えば別条件」であることをverifyの版別比較の解釈時に追えるようにする
+ * (PROMPT_VERSION定数自体は追加指示では更新しない運用)。LLM未使用・設定が空の分析は null を渡す想定。
+ * 旧バージョンで作成済みのDBにはこの列が無いため、他の列と同じ流儀でALTER TABLEにより後付けし、
+ * 既存行は NULL=追加指示なしとして読む(後方互換)。
  */
 
 import Database from "better-sqlite3";
@@ -87,6 +96,12 @@ export interface AnalysisRecord {
    * 省略時も null(版不明。既存呼び出し元との後方互換のため任意項目とする)。
    */
   readonly promptVersion?: string | null;
+  /**
+   * 追加指示(analyzer/build-prompt.ts の BuildPromptInput.additionalInstruction、Task#28)。
+   * 設定画面の自由記述欄が空、またはLLMを使わず prior をそのまま採用した分析(プロンプト自体を
+   * 使っていない)は null を渡す。省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly additionalInstruction?: string | null;
 }
 
 /** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
@@ -117,6 +132,10 @@ export interface StoredAnalysis {
    * プロンプト版番号(Task#27)。旧レコード(列追加前の保存)・LLM未使用の分析は null(版不明)。
    */
   readonly promptVersion: string | null;
+  /**
+   * 追加指示(Task#28)。旧レコード(列追加前の保存)・設定が空・LLM未使用の分析は null。
+   */
+  readonly additionalInstruction: string | null;
 }
 
 /** レース結果の1頭分。 */
@@ -181,7 +200,8 @@ export class AnalysisStore {
         race_id TEXT NOT NULL,
         analyzed_at TEXT NOT NULL,
         ev_estimated INTEGER,
-        prompt_version TEXT
+        prompt_version TEXT,
+        additional_instruction TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -210,6 +230,7 @@ export class AnalysisStore {
     this.migrateMarkColumn();
     this.migrateEvEstimatedColumn();
     this.migratePromptVersionColumn();
+    this.migrateAdditionalInstructionColumn();
   }
 
   /**
@@ -223,6 +244,22 @@ export class AnalysisStore {
       .all() as Array<{ name: string }>;
     if (!columns.some((c) => c.name === "prompt_version")) {
       this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN prompt_version TEXT`);
+    }
+  }
+
+  /**
+   * 追加指示(additional_instruction)列を後付けするマイグレーション(Task#28)。
+   * 旧バージョンで作成済みの analyses には additional_instruction 列が無いため、存在しなければ追加する
+   * (既存行は NULL=追加指示なしとして読める=後方互換)。
+   */
+  private migrateAdditionalInstructionColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "additional_instruction")) {
+      this.db.exec(
+        `ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN additional_instruction TEXT`,
+      );
     }
   }
 
@@ -276,7 +313,9 @@ export class AnalysisStore {
    */
   saveAnalysis(record: AnalysisRecord): number {
     const insertAnalysis = this.db.prepare(
-      `INSERT INTO ${ANALYSES_TABLE} (race_id, analyzed_at, ev_estimated, prompt_version) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO ${ANALYSES_TABLE}
+         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction)
+       VALUES (?, ?, ?, ?, ?)`,
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
@@ -290,6 +329,7 @@ export class AnalysisStore {
         rec.analyzedAt,
         rec.evEstimated ? 1 : 0,
         rec.promptVersion ?? null,
+        rec.additionalInstruction ?? null,
       );
       const analysisId = Number(info.lastInsertRowid);
       for (const h of rec.horses) {
@@ -371,14 +411,14 @@ export class AnalysisStore {
         ? this.db
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
-                      prompt_version AS promptVersion
+                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction
                  FROM ${ANALYSES_TABLE} ORDER BY id`,
             )
             .all()
         : this.db
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
-                      prompt_version AS promptVersion
+                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction
                  FROM ${ANALYSES_TABLE} WHERE race_id = ? ORDER BY id`,
             )
             .all(filter.raceId)
@@ -388,6 +428,7 @@ export class AnalysisStore {
       analyzedAt: string;
       evEstimated: number | null;
       promptVersion: string | null;
+      additionalInstruction: string | null;
     }>;
 
     const horseStmt = this.db.prepare(
@@ -406,6 +447,8 @@ export class AnalysisStore {
         evEstimated: a.evEstimated === 1,
         // NULL(旧レコード・列追加前の保存・LLM未使用)は版不明としてnullのまま復元する。
         promptVersion: a.promptVersion,
+        // NULL(旧レコード・列追加前の保存・設定が空・LLM未使用)は追加指示なしとしてnullのまま復元する。
+        additionalInstruction: a.additionalInstruction,
       };
     });
   }

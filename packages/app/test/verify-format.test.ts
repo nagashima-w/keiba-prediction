@@ -5,6 +5,8 @@ import type {
   VerifyBetView,
 } from "../src/shared/analysis-types.js";
 import {
+  additionalInstructionsFullText,
+  additionalInstructionsSummary,
   calibrationBarWidthPercent,
   directionLabel,
   formatAdjustment,
@@ -174,6 +176,62 @@ describe("verify画面の表示整形(純関数)", () => {
     });
     it("版不明(null)は『版不明』にすること", () => {
       expect(promptVersionLabel(null)).toBe("版不明");
+    });
+  });
+
+  describe("additionalInstructionsSummary(版内で使われた追加指示の要約表示、Task#28)", () => {
+    it("[null]のみ(追加指示なし)なら『なし』にすること", () => {
+      expect(additionalInstructionsSummary([null])).toBe("なし");
+    });
+
+    it("空配列でも『なし』にすること(データ無し)", () => {
+      expect(additionalInstructionsSummary([])).toBe("なし");
+    });
+
+    it("1件の追加指示のみならその全文を表示すること", () => {
+      expect(additionalInstructionsSummary(["人気薄の複勝率は慎重に見積もること"])).toBe(
+        "人気薄の複勝率は慎重に見積もること",
+      );
+    });
+
+    it("長い追加指示は30文字を超えたら省略記号(…)を付けて切り詰めること", () => {
+      const long = "あ".repeat(40);
+      const summary = additionalInstructionsSummary([long]);
+      expect(summary.length).toBe(31); // 30文字 + "…"
+      expect(summary.endsWith("…")).toBe(true);
+      expect(summary.startsWith("あ".repeat(30))).toBe(true);
+    });
+
+    it("複数件が混在すれば『/』区切りで並べ、追加指示なし(null)は『なし』として表示すること", () => {
+      expect(additionalInstructionsSummary(["指示A", "指示B", null])).toBe(
+        "指示A / 指示B / なし",
+      );
+    });
+  });
+
+  describe("additionalInstructionsFullText(title属性用のフルテキスト、Task#28 code-reviewer提案対応)", () => {
+    // additionalInstructionsSummary はセル表示用に30文字で省略するが、
+    // title属性(ホバー時のツールチップ)は省略なしの全文を表示したい。
+    // また join(" / ") を直接使うと null 要素が空文字になり "指示A / "(末尾空)のような
+    // 表示不整合が起きるため、null→「なし」変換をこちらにも適用する。
+
+    it("null混在なら『なし』に変換して連結すること(末尾が空文字にならない)", () => {
+      expect(additionalInstructionsFullText(["指示A", null])).toBe("指示A / なし");
+    });
+
+    it("全てnullなら『なし』のみになること", () => {
+      expect(additionalInstructionsFullText([null])).toBe("なし");
+    });
+
+    it("空配列でも『なし』になること", () => {
+      expect(additionalInstructionsFullText([])).toBe("なし");
+    });
+
+    it("非null複数件は省略せず全文を『/』区切りで連結すること(30字省略はしない)", () => {
+      const long = "あ".repeat(40);
+      expect(additionalInstructionsFullText(["指示A", long])).toBe(
+        `指示A / ${long}`,
+      );
     });
   });
 });

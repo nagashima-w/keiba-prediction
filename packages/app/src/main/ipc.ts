@@ -124,6 +124,7 @@ const resourceManager = new ResourceManager<PipelineResources>({
       apiKey: resolveEffectiveApiKey(settings, process.env.ANTHROPIC_API_KEY),
       scorerConfig: buildScorerConfig(settings),
       evConfig: buildEvConfig(settings),
+      additionalInstruction: settings.additionalInstruction,
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,
     });

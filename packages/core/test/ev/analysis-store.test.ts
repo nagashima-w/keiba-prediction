@@ -424,6 +424,100 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("追加指示(additionalInstruction)の保存・復元(Task#28 プロンプト改善C)", () => {
+    it("additionalInstructionを指定して保存すると、そのまま復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "追加指示レース",
+          additionalInstruction: "人気薄の複勝率は慎重に見積もること",
+        }),
+      );
+      const a = store.listAnalyses({ raceId: "追加指示レース" })[0]!;
+      expect(a.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
+      store.close();
+    });
+
+    it("additionalInstructionを省略して保存するとnullとして保存・復元されること(後方互換の既定値)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "追加指示なしレース" }));
+      const a = store.listAnalyses({ raceId: "追加指示なしレース" })[0]!;
+      expect(a.additionalInstruction).toBeNull();
+      store.close();
+    });
+
+    it("additionalInstructionにnullを明示しても null として保存・復元されること(設定が空の想定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({ raceId: "設定空レース", additionalInstruction: null }),
+      );
+      const a = store.listAnalyses({ raceId: "設定空レース" })[0]!;
+      expect(a.additionalInstruction).toBeNull();
+      store.close();
+    });
+  });
+
+  describe("additional_instruction列の後方互換マイグレーション(Task#28)", () => {
+    it("additional_instruction列が無い旧スキーマのDBを開いても、既存分析はadditionalInstruction=nullで読め、新規保存は追加指示付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // Task#28より前のバージョン相当のスキーマ(analysesにadditional_instruction列が無い)を直接作る。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL,
+          ev_estimated INTEGER,
+          prompt_version TEXT
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      // 旧バージョンで保存済みの既存データ(additional_instruction列自体が存在しない状態での保存を模す)。
+      const info = db
+        .prepare(
+          `INSERT INTO analyses (race_id, analyzed_at, ev_estimated, prompt_version) VALUES (?, ?, ?, ?)`,
+        )
+        .run("旧レース", "2026-01-01T00:00:00.000Z", 0, null);
+      const oldAnalysisId = Number(info.lastInsertRowid);
+      db.prepare(
+        `INSERT INTO analysis_horses
+           (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(oldAnalysisId, 1, 0.4, 0.4, 2.0, 0.8, 0, null, null);
+
+      // 新バージョンの AnalysisStore で開く(additional_instruction列が無ければ ALTER TABLE で追加されるはず)。
+      const store = new AnalysisStore({ database: db });
+
+      // 旧分析はadditional_instruction列を後付けしても既存行はnullとして読める。
+      const old = store.listAnalyses({ raceId: "旧レース" })[0]!;
+      expect(old.additionalInstruction).toBeNull();
+
+      // 新規保存(追加指示あり)も問題なく動作する(後方互換を確認)。
+      const newId = store.saveAnalysis(
+        makeRecord({
+          raceId: "新レース",
+          additionalInstruction: "テスト用の追加指示",
+        }),
+      );
+      const saved = store.listAnalyses({ raceId: "新レース" })[0]!;
+      expect(saved.id).toBe(newId);
+      expect(saved.additionalInstruction).toBe("テスト用の追加指示");
+
+      store.close();
+    });
+  });
+
   describe("ScrapeCache とのDB共有(テーブル独立)", () => {
     it("同一のbetter-sqlite3 DBを共有しても互いのテーブルを壊さないこと", () => {
       const db = new Database(":memory:");

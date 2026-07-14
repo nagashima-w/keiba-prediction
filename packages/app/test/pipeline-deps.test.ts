@@ -67,6 +67,23 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.deps.evConfig).toBe(evConfig);
   });
 
+  it("additionalInstruction を渡すと deps にそのまま反映される(設定の適用、Task#28)", () => {
+    const r = createPipelineDeps({
+      dbPath: ":memory:",
+      additionalInstruction: "人気薄の複勝率は慎重に見積もること",
+    });
+    resources.push(r);
+    expect(r.deps.additionalInstruction).toBe(
+      "人気薄の複勝率は慎重に見積もること",
+    );
+  });
+
+  it("additionalInstruction未指定ならdeps.additionalInstructionはundefinedのまま(Task#28)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(r.deps.additionalInstruction).toBeUndefined();
+  });
+
   it("config.fetch を渡すと、実HTTP取得(undici既定)ではなく注入した fetch が使われる", async () => {
     // 空HTMLを返す euc-jp レスポンス。parseRaceList は対象要素が無ければ空配列を返す。
     const emptyResponse: FetchResponse = {

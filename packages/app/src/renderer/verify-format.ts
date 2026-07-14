@@ -113,3 +113,49 @@ export function markLabel(mark: PredictionMark | null): string {
 export function promptVersionLabel(promptVersion: string | null): string {
   return promptVersion === null ? "版不明" : promptVersion;
 }
+
+/** 追加指示の1件を30文字までに切り詰める(超過分は「…」に置き換える)。 */
+function truncateInstruction(instruction: string): string {
+  const LIMIT = 30;
+  return instruction.length > LIMIT
+    ? `${instruction.slice(0, LIMIT)}…`
+    : instruction;
+}
+
+/**
+ * 版内で使われた追加指示(core PromptVersionVerifyReport.additionalInstructions)を
+ * 検証画面の版別比較テーブルに1セルで収まるよう整形する(Task#28)。
+ * - データ無し(空配列)・追加指示なしのみ([null])は「なし」。
+ * - 各要素は30文字を超えたら省略記号(…)で切り詰める。
+ * - 複数件(追加指示なしの null を含む)は「 / 」区切りで並べ、null は「なし」として表示する。
+ */
+export function additionalInstructionsSummary(
+  instructions: readonly (string | null)[],
+): string {
+  if (instructions.length === 0) {
+    return "なし";
+  }
+  return instructions
+    .map((instruction) =>
+      instruction === null ? "なし" : truncateInstruction(instruction),
+    )
+    .join(" / ");
+}
+
+/**
+ * 版内で使われた追加指示の省略なしフルテキスト(title属性・ツールチップ用、Task#28)。
+ * additionalInstructionsSummary と違い30文字での切り詰めは行わない(全文表示が目的)。
+ * null要素を単純に join(" / ") すると空文字として連結され、セル本文(additionalInstructionsSummary
+ * は null を「なし」と表示する)と食い違う表示不整合が起きるため、こちらも null→「なし」変換してから
+ * 連結する(code-reviewer提案対応)。
+ */
+export function additionalInstructionsFullText(
+  instructions: readonly (string | null)[],
+): string {
+  if (instructions.length === 0) {
+    return "なし";
+  }
+  return instructions
+    .map((instruction) => (instruction === null ? "なし" : instruction))
+    .join(" / ");
+}

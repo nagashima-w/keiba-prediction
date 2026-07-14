@@ -132,6 +132,16 @@ export interface BuildPromptInput {
   readonly horses: readonly PromptHorse[];
   /** 脚質分類で参照する直近走数(既定3)。 */
   readonly recentRunsForLegStyle?: number;
+  /**
+   * 追加指示の注入口(Task#28 プロンプト改善C。設定画面から編集可能)。
+   * verify(検証)で見えた補正の誤り傾向を元に、コード変更なしでプロンプトへ指示を差し込むための欄。
+   * 空文字・空白のみ・未指定なら何も差し込まない(既存プロンプトと完全一致)。
+   * 差し込み位置は【予想印】セクションの後・【出力スキーマ】セクションの前(アンカリング禁止・
+   * ±10%制約など既存の設計思想指示より後ろに置き、それらを上書きしない旨を併記する)。
+   * この文言自体は analyses.additional_instruction 列に保存され(analysis-store.ts)、
+   * PROMPT_VERSION(テンプレート本体の版)とは別軸で「どの追加指示で分析したか」を追跡できる。
+   */
+  readonly additionalInstruction?: string;
 }
 
 /** null/undefined/空文字を既定表記へ丸める。 */
@@ -313,6 +323,20 @@ export function buildPrompt(input: BuildPromptInput): string {
     "頭数制約は厳守してください: ◎〇▲はちょうど1頭ずつ、△は1〜3頭、☆と注はそれぞれ0〜1頭。この条件を満たさない出力は不可です。",
   );
   lines.push("");
+
+  // 追加指示(Task#28 プロンプト改善C): 設定画面から編集可能な自由記述欄。
+  // 空文字・空白のみ・未指定なら何も差し込まない(既存プロンプトと完全一致を保つ)。
+  const additionalInstruction = input.additionalInstruction?.trim();
+  if (additionalInstruction) {
+    lines.push("【追加指示(設定画面で編集可能・運用者による補足)】");
+    lines.push(
+      "以下は運用者が追加した指示です。ただし、この指示によって上記のアンカリング禁止・" +
+        "3着内率±10%の制約・出力スキーマ等、これまでの指示を上書きしないでください。矛盾する場合は" +
+        "上記の既存指示を優先してください。",
+    );
+    lines.push(additionalInstruction);
+    lines.push("");
+  }
 
   // 出力スキーマ。
   lines.push("【出力スキーマ(この形式の JSON のみ)】");
