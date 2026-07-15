@@ -4,7 +4,8 @@ import type {
   DiscordSendState,
 } from "./batch-analysis-reducer.js";
 import {
-  collectEvPlusSummary,
+  collectPerRaceHighlights,
+  raceNumberFromRaceId,
   raceOpportunityRemark,
   rankRaceOpportunities,
   summarizeBatch,
@@ -22,6 +23,7 @@ import {
   LABEL_PRIOR,
   MARK_LEGEND,
   oddsStatusNote,
+  raceHeading,
 } from "./format.js";
 
 /** 一括分析画面のプロパティ。状態と操作は親(App)から受け取る。 */
@@ -190,17 +192,19 @@ function statusBadge(entry: BatchRaceEntry): React.JSX.Element {
 }
 
 /**
- * 一括分析画面。選択したレースを直列に分析し、最上部に全レース横断の「EVプラス馬サマリ」、
- * その下にレースごとの詳細(折りたたみ)を表示する。Discord送信はサマリ1通にまとめる。
+ * 一括分析画面。選択したレースを直列に分析し、最上部に妙味レースランキング、
+ * その下にレース別ハイライト(印あり・EVプラス馬をレースごとにブロック化。Task#29)、
+ * さらにその下にレースごとの詳細(折りたたみ)を表示する。Discord送信はサマリ1通にまとめる。
  */
 export function BatchAnalysisView(
   props: BatchAnalysisViewProps,
 ): React.JSX.Element {
   const { outcomes } = props;
-  const evPlus = collectEvPlusSummary(outcomes);
   const counts = summarizeBatch(outcomes);
   // 妙味レースランキング(スコア降順、スコアnullは末尾)。詳細ヘッダ用に raceId→スコアの対応も作る。
   const ranking = rankRaceOpportunities(outcomes);
+  // レース別ハイライト(印あり ∪ EVプラス馬)。並びは妙味レースランキングと同じ妙味スコア降順。
+  const highlights = collectPerRaceHighlights(outcomes);
   const opportunityByRaceId = new Map(
     ranking.map((r) => [r.raceId, r.opportunity]),
   );
@@ -278,7 +282,7 @@ export function BatchAnalysisView(
                           scored ? undefined : { color: "#999" }
                         }
                       >
-                        <td style={tdStyle}>{r.raceName}</td>
+                        <td style={tdStyle}>{raceHeading(r)}</td>
                         <td
                           style={{
                             ...tdStyle,
@@ -311,63 +315,124 @@ export function BatchAnalysisView(
             )}
           </div>
 
-          {/* 全レース横断のEVプラス馬サマリ(EV降順)。 */}
+          {/*
+            レース別ハイライト(印あり ∪ EVプラス馬・Task#29)。
+            従来は全レースの馬を1つの表に混在させていたため「どのレースの馬か分からない」という
+            問題があった(ユーザー実機で判明)。レースごとにブロック化し、見出し(会場+R+レース名)を
+            必ず添えることで、raceName が空でもレースを識別できるようにする。
+            レースの並びは妙味レースランキングと同じ妙味スコア降順。
+          */}
           <div style={{ marginTop: "1rem" }}>
             <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.35rem" }}>
-              EVプラス馬サマリ(横断・EV降順)
+              レース別ハイライト(印あり・EVプラス)
             </h3>
-            {evPlus.length === 0 ? (
+            {highlights.length === 0 ? (
               <p style={{ color: "#666" }}>該当なし</p>
             ) : (
-              <table style={{ borderCollapse: "collapse", width: "100%" }}>
-                <thead>
-                  <tr>
-                    <th style={thStyle} title={MARK_LEGEND}>
-                      印
-                    </th>
-                    <th style={thStyle}>レース</th>
-                    <th style={thStyle}>馬番</th>
-                    <th style={thStyle}>馬名</th>
-                    <th
-                      style={thStyle}
-                      title="3着内率をAI(LLM)が調教・コメント・展開から補正した確率"
-                    >
-                      {LABEL_ADJUSTED_PROB}
-                    </th>
-                    <th style={thStyle}>複勝下限</th>
-                    <th style={thStyle}>EV</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {evPlus.map((row) => (
-                    <tr
-                      key={`${row.raceId}-${row.umaban}`}
-                      style={{ background: "#e6ffea" }}
-                    >
-                      <td style={tdStyle}>{formatMark(row.mark)}</td>
-                      <td style={tdStyle}>{row.raceName}</td>
-                      <td style={tdStyle}>{row.umaban}</td>
-                      <td style={tdStyle}>{row.horseName}</td>
-                      <td style={tdStyle}>{formatPercent(row.adjustedProb)}</td>
-                      <td style={tdStyle}>{formatOdds(row.placeOddsMin)}</td>
-                      <td
+              highlights.map((highlight) => (
+                <div
+                  key={highlight.raceId}
+                  style={{
+                    border: "1px solid #ddd",
+                    borderRadius: "4px",
+                    margin: "0 0 0.6rem",
+                    padding: "0.4rem 0.6rem",
+                  }}
+                >
+                  <p style={{ margin: "0 0 0.35rem", fontWeight: 700 }}>
+                    {raceHeading(highlight)}
+                    {highlight.opportunity.score !== null && (
+                      <span
                         style={{
-                          ...tdStyle,
-                          fontWeight: 700,
-                          color: "#0a7f2e",
+                          color: "#0a58ca",
+                          fontWeight: 400,
+                          marginLeft: "0.5rem",
+                          fontSize: "0.85rem",
                         }}
                       >
-                        {formatEv(row.ev)}
-                        {row.evEstimated && (
-                          <span style={{ color: "#a60", marginLeft: "0.25rem" }}>
-                            {formatEstimatedEvSuffix(row.evEstimated)}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        妙味スコア{" "}
+                        {formatOpportunityScore(highlight.opportunity.score)}
+                      </span>
+                    )}
+                    {highlight.evEstimated && (
+                      <span
+                        style={{
+                          color: "#a60",
+                          fontWeight: 400,
+                          marginLeft: "0.5rem",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        発売前推定
+                      </span>
+                    )}
+                  </p>
+                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle} title={MARK_LEGEND}>
+                          印
+                        </th>
+                        <th style={thStyle}>馬番</th>
+                        <th style={thStyle}>馬名</th>
+                        <th
+                          style={thStyle}
+                          title="3着内率をAI(LLM)が調教・コメント・展開から補正した確率"
+                        >
+                          {LABEL_ADJUSTED_PROB}
+                        </th>
+                        <th style={thStyle}>複勝下限</th>
+                        <th style={thStyle}>EV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {highlight.horses.map((horse) => (
+                        <tr
+                          key={horse.umaban}
+                          // ハイライト(緑背景)は isPositive(EVプラス判定)基準にする。
+                          // ev !== null だけを条件にすると、印はあるがEVプラスでない馬
+                          // (isPositive=false かつ ev≠null)まで誤って妙味ありと示唆してしまう
+                          // (ResultTable の isHighlightRow と意味論を揃える)。
+                          style={
+                            horse.isPositive
+                              ? { background: "#e6ffea" }
+                              : undefined
+                          }
+                        >
+                          <td style={tdStyle}>{formatMark(horse.mark)}</td>
+                          <td style={tdStyle}>{horse.umaban}</td>
+                          <td style={tdStyle}>{horse.horseName}</td>
+                          <td style={tdStyle}>
+                            {formatPercent(horse.adjustedProb)}
+                          </td>
+                          <td style={tdStyle}>
+                            {formatOdds(horse.placeOddsMin)}
+                          </td>
+                          <td
+                            style={{
+                              ...tdStyle,
+                              fontWeight: horse.isPositive ? 700 : 400,
+                              color: horse.isPositive ? "#0a7f2e" : undefined,
+                            }}
+                          >
+                            {formatEv(horse.ev)}
+                            {horse.ev !== null && horse.evEstimated && (
+                              <span
+                                style={{
+                                  color: "#a60",
+                                  marginLeft: "0.25rem",
+                                }}
+                              >
+                                {formatEstimatedEvSuffix(horse.evEstimated)}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))
             )}
           </div>
 
@@ -415,8 +480,17 @@ export function BatchAnalysisView(
             </h3>
             {outcomes.map((entry) => {
               const expanded = expandedSet.has(entry.raceId);
+              // raceName が空文字でも会場+レース番号で識別できるよう見出しヘルパーを共有する(Task#29)。
+              // 成功時(result あり)はこちらを優先し、失敗・スキップ・未実行は従来どおりの
+              // フォールバック(レース一覧のレース名→raceId)を使う。
               const label =
-                entry.result?.raceName ?? entry.raceName ?? entry.raceId;
+                entry.result !== null
+                  ? raceHeading({
+                      venueName: entry.result.venueName,
+                      raceNumber: raceNumberFromRaceId(entry.result.raceId),
+                      raceName: entry.result.raceName,
+                    })
+                  : (entry.raceName ?? entry.raceId);
               return (
                 <div
                   key={entry.raceId}

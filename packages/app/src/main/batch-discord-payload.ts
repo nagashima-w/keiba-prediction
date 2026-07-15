@@ -19,6 +19,7 @@ import {
   rankRaceOpportunities,
   summarizeBatch,
 } from "../renderer/batch-summary.js";
+import { raceHeading } from "../renderer/format.js";
 
 /** Discordサマリに載せる妙味レースランキングの最大件数(上位数件で十分)。 */
 const RANKING_TOP_N = 3;
@@ -114,7 +115,7 @@ export function buildBatchDiscordPayload(
       // 低データが多いレースは注記する(モデル過信への注意喚起)。
       const lowNote = op.lowDataRatio >= 0.5 ? " ※低データ多" : "";
       rankingLines.push(
-        `${i + 1}. ${r.raceName} スコア${op.score!.toFixed(2)}(EVプラス${op.evPlusCount}頭)${pick}${lowNote}`,
+        `${i + 1}. ${raceHeading(r)} スコア${op.score!.toFixed(2)}(EVプラス${op.evPlusCount}頭)${pick}${lowNote}`,
       );
     });
   }
@@ -127,7 +128,8 @@ export function buildBatchDiscordPayload(
           const markPrefix = r.mark !== null ? `${r.mark} ` : "";
           // 推定EV(Task#25): 発売前の概算EVである旨を「(推定)」で明示する。
           const estimatedSuffix = r.evEstimated ? "(推定)" : "";
-          return `${markPrefix}${r.raceName} ${r.umaban}番 ${name} AI補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}${estimatedSuffix}`;
+          // レース識別(Task#29): raceName が空でも会場+レース番号で識別できるよう見出しヘルパーを使う。
+          return `${markPrefix}${raceHeading(r)} ${r.umaban}番 ${name} AI補正後${formatPercent(r.adjustedProb)} 複勝下限${formatOdds(r.placeOddsMin)} EV${formatEv(r.ev)}${estimatedSuffix}`;
         })
       : ["EVプラスの馬はありません(該当なし)"];
 

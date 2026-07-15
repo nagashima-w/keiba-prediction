@@ -162,7 +162,11 @@ export interface BatchProgress {
 export interface EvPlusSummaryRow {
   /** そのEVプラス馬が属するレースID。 */
   readonly raceId: string;
-  /** レース名(表示用)。 */
+  /** 会場名(レース見出しの組み立てに使う。Task#29)。 */
+  readonly venueName: string;
+  /** レース番号(1〜12。レース見出しの組み立てに使う。Task#29)。 */
+  readonly raceNumber: number;
+  /** レース名(表示用)。空文字の場合があるため、識別には venueName+raceNumber も併用する(Task#29)。 */
   readonly raceName: string;
   /** 馬番。 */
   readonly umaban: number;

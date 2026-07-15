@@ -115,9 +115,10 @@ describe("buildBatchDiscordPayload(一括サマリ→Discordペイロード)", (
     const lineBeta = desc
       .split("\n")
       .find((l) => l.includes("ベータ") && l.includes("AI補正後"))!;
-    expect(lineAlpha).toContain("◎ 1R 4番");
-    // 印なし馬は従来どおり(印の接頭辞が付かない)。
-    expect(lineBeta.trimStart().startsWith("1R")).toBe(true);
+    // レース識別部(会場+R+レース名。Task#29)の後ろに印+馬番が続くこと。
+    expect(lineAlpha).toContain("◎ 東京 11R 1R 4番");
+    // 印なし馬は従来どおり(印の接頭辞が付かず、レース識別部からそのまま始まる)。
+    expect(lineBeta.trimStart().startsWith("東京 11R 1R")).toBe(true);
   });
 
   it("推定EV(evEstimated=true)の馬行には「(推定)」を付けること(Task#25)", () => {
@@ -193,6 +194,20 @@ describe("buildBatchDiscordPayload(一括サマリ→Discordペイロード)", (
     const desc = buildBatchDiscordPayload(outcomes).embeds[0]!.description ?? "";
     const rankLines = desc.split("\n").filter((l) => /^\d+\. /.test(l));
     expect(rankLines.length).toBe(3);
+  });
+
+  it("raceNameが空文字でも会場+レース番号でレースを識別できること(Task#29)", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("202601014211", "", [
+        row({ umaban: 4, horseName: "アルファ", ev: 1.1, isPositive: true }),
+      ]),
+    ];
+    const desc = buildBatchDiscordPayload(outcomes).embeds[0]!.description ?? "";
+    const lineAlpha = desc
+      .split("\n")
+      .find((l) => l.includes("アルファ") && l.includes("AI補正後"))!;
+    // raceName が空でも「会場名 11R」で識別できる(末尾に空のレース名が付かない)。
+    expect(lineAlpha.trimStart().startsWith("東京 11R 4番")).toBe(true);
   });
 
   it("EVプラスが1頭も無ければ該当なしを表記する", () => {

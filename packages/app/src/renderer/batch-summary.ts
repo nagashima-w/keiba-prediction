@@ -1,8 +1,10 @@
 /**
- * 一括分析の横断サマリ(純関数)。
+ * 一括分析のサマリ(純関数)。
  *
  * 複数レースを一括分析した結果(BatchRaceOutcome[])から、
- * - 全レース横断の「EVプラス馬サマリ」(EV降順)
+ * - レース別ハイライト(印あり ∪ EVプラス馬。レースごとにまとめ、妙味スコア降順。Task#29)
+ * - 妙味レースランキング(レース単位の妙味スコア降順)
+ * - 全レース横断の「EVプラス馬サマリ」(EV降順。Discordサマリ等で引き続き使用)
  * - 成功/失敗/スキップの件数(部分失敗の集計)
  * を副作用なく導出する。表示(JSX)から集計ロジックを切り離し、単体テストで固定する。
  */
@@ -17,7 +19,18 @@ import {
 import type {
   AnalysisResult,
   EvPlusSummaryRow,
+  PredictionMark,
 } from "../shared/analysis-types.js";
+
+/**
+ * レースID(12桁)の末尾2桁からレース番号(1〜12)を取り出す(Task#29)。
+ * netkeibaのレースID体系(YYYY+場コード2桁+□□2桁+□□2桁+レース番号2桁)に従い、
+ * 末尾2桁を単純に数値化するだけの純関数(core の parseRaceId のような形式検証は行わない。
+ * 呼び出し元は既に検証済みの AnalysisResult.raceId を渡す前提のため)。
+ */
+export function raceNumberFromRaceId(raceId: string): number {
+  return Number(raceId.slice(10, 12));
+}
 
 /**
  * 集計が必要とする最小構造。共有の BatchRaceOutcome と renderer の BatchRaceEntry
@@ -51,6 +64,8 @@ export function collectEvPlusSummary(
       }
       rows.push({
         raceId: result.raceId,
+        venueName: result.venueName,
+        raceNumber: raceNumberFromRaceId(result.raceId),
         raceName: result.raceName,
         umaban: row.umaban,
         horseName: row.horseName,
@@ -94,7 +109,11 @@ export interface BatchSummaryCounts {
 export interface RaceOpportunityRankRow {
   /** レースID。 */
   readonly raceId: string;
-  /** レース名(表示用)。 */
+  /** 会場名(レース見出しの組み立てに使う。Task#29)。 */
+  readonly venueName: string;
+  /** レース番号(1〜12。レース見出しの組み立てに使う。Task#29)。 */
+  readonly raceNumber: number;
+  /** レース名(表示用)。空文字の場合があるため、識別には venueName+raceNumber も併用する(Task#29)。 */
   readonly raceName: string;
   /** そのレースの妙味スコア計算結果(スコア・筆頭候補・除外理由など)。 */
   readonly opportunity: RaceOpportunity;
@@ -138,6 +157,8 @@ export function rankRaceOpportunities(
     );
     rows.push({
       raceId: result.raceId,
+      venueName: result.venueName,
+      raceNumber: raceNumberFromRaceId(result.raceId),
       raceName: result.raceName,
       opportunity,
       evEstimated: result.oddsStatus === "yoso",
@@ -183,6 +204,142 @@ export function raceOpportunityRemark(row: RaceOpportunityRankRow): string {
     parts.push(`低データ馬${Math.round(op.lowDataRatio * 100)}%(推定不確実)`);
   }
   return parts.join(" / ");
+}
+
+/**
+ * レース別ハイライトの1頭分(Task#29)。
+ * 表示対象は「印あり(mark≠null)」∪「EVプラス(isPositive かつ ev≠null)」の和集合。
+ */
+export interface RaceHighlightHorseRow {
+  /** 馬番。 */
+  readonly umaban: number;
+  /** 馬名。 */
+  readonly horseName: string;
+  /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。 */
+  readonly mark: PredictionMark | null;
+  /** 補正後複勝確率(0〜1)。 */
+  readonly adjustedProb: number;
+  /** 複勝オッズ下限(欠損なら null)。 */
+  readonly placeOddsMin: number | null;
+  /** 期待値。オッズ欠損なら null(印だけで表示対象になった馬はこちらに該当し得る)。 */
+  readonly ev: number | null;
+  /**
+   * EVが閾値を上回るか(EVプラス判定)。表示対象馬は「印あり ∪ EVプラス」の和集合のため、
+   * 印はあるがEVプラスではない馬(isPositive=false かつ ev≠null。例: 本命だが過剰人気でEV1.0未満)
+   * も含まれ得る。表示側のハイライト(緑背景・太字)はこの値を条件にし、ev≠null だけを条件に
+   * すると「印はあるがEVプラスでない馬」を誤って妙味ありと示唆してしまうため区別する。
+   */
+  readonly isPositive: boolean;
+  /** このEVが推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。 */
+  readonly evEstimated: boolean;
+}
+
+/**
+ * レース別ハイライトの1レース分(Task#29)。
+ * ユーザー実機で「EVプラス馬サマリ(横断)」が全レース混在で見えづらいと判明したため、
+ * レースごとにブロック化して表示できるよう、レース識別情報+表示対象馬をまとめて返す。
+ */
+export interface RaceHighlight {
+  /** レースID。 */
+  readonly raceId: string;
+  /** 会場名。 */
+  readonly venueName: string;
+  /** レース名(空文字の場合がある。識別には venueName+raceNumber も併用する)。 */
+  readonly raceName: string;
+  /** コース種別(芝/ダ/障)。 */
+  readonly courseType: string;
+  /** 距離(m)。 */
+  readonly distance: number;
+  /** レース番号(1〜12)。 */
+  readonly raceNumber: number;
+  /** このレースのEVが推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。 */
+  readonly evEstimated: boolean;
+  /** このレースの妙味スコア計算結果(スコア・筆頭候補・除外理由など)。 */
+  readonly opportunity: RaceOpportunity;
+  /**
+   * 表示対象馬(印あり ∪ EVプラス)。レース内はEV降順、EVがnull(印だけの馬)は末尾。
+   * 同EV(またはEVが双方null)は馬番昇順で安定に並べる。
+   */
+  readonly horses: readonly RaceHighlightHorseRow[];
+}
+
+/**
+ * 成功レースごとの表示対象馬(印あり ∪ EVプラス)をレース別にまとめる(Task#29)。
+ *
+ * - レースの並びは rankRaceOpportunities と同じ妙味スコア降順(算出不可レースは末尾、
+ *   同スコア・双方nullは raceId 昇順で決定的)。ランキングの並び順をそのまま再利用することで、
+ *   「妙味レースランキング」の並びとレース別ハイライトの並びが一致するようにする。
+ * - 表示対象馬が1頭も無いレース(印なし・EVプラスなし)はハイライトに含めない
+ *   (空ブロックを出さないため)。
+ * - 失敗・スキップ・未実行(pending)のレースは対象に含めない(rankRaceOpportunities と同じ)。
+ * @param outcomes レースごとのアウトカム
+ * @param config 妙味スコア設定(省略時は core の既定。レースの並び順に影響する)
+ */
+export function collectPerRaceHighlights(
+  outcomes: readonly EvSummarySource[],
+  config: RaceOpportunityConfig = DEFAULT_RACE_OPPORTUNITY_CONFIG,
+): RaceHighlight[] {
+  const resultByRaceId = new Map<string, AnalysisResult>();
+  for (const outcome of outcomes) {
+    if (outcome.status === "success" && outcome.result !== null) {
+      resultByRaceId.set(outcome.result.raceId, outcome.result);
+    }
+  }
+
+  const highlights: RaceHighlight[] = [];
+  for (const ranked of rankRaceOpportunities(outcomes, config)) {
+    const result = resultByRaceId.get(ranked.raceId);
+    if (result === undefined) {
+      // rankRaceOpportunities は成功レースだけを返すため理論上到達しないが、安全側に読み飛ばす。
+      continue;
+    }
+    const horses = result.rows
+      .filter((r) => r.mark !== null || (r.isPositive && r.ev !== null))
+      .map(
+        (r): RaceHighlightHorseRow => ({
+          umaban: r.umaban,
+          horseName: r.horseName,
+          mark: r.mark,
+          adjustedProb: r.adjustedProb,
+          placeOddsMin: r.placeOddsMin,
+          ev: r.ev,
+          isPositive: r.isPositive,
+          evEstimated: r.evEstimated,
+        }),
+      )
+      .sort((a, b) => {
+        if (a.ev === null && b.ev === null) {
+          return a.umaban - b.umaban;
+        }
+        if (a.ev === null) {
+          return 1;
+        }
+        if (b.ev === null) {
+          return -1;
+        }
+        if (b.ev !== a.ev) {
+          return b.ev - a.ev;
+        }
+        return a.umaban - b.umaban;
+      });
+
+    if (horses.length === 0) {
+      continue;
+    }
+
+    highlights.push({
+      raceId: ranked.raceId,
+      venueName: ranked.venueName,
+      raceName: ranked.raceName,
+      courseType: result.courseType,
+      distance: result.distance,
+      raceNumber: ranked.raceNumber,
+      evEstimated: ranked.evEstimated,
+      opportunity: ranked.opportunity,
+      horses,
+    });
+  }
+  return highlights;
 }
 
 /** 成功/失敗/スキップの件数とEVプラス総数を数える。 */
