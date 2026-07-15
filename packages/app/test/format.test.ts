@@ -13,6 +13,7 @@ import {
   LABEL_PRIOR,
   MARK_LEGEND,
   oddsStatusNote,
+  raceHeading,
 } from "../src/renderer/format.js";
 import type { AnalysisRow } from "../src/shared/analysis-types.js";
 
@@ -135,5 +136,35 @@ describe("formatEstimatedEvSuffix(推定EVの表記・Task#25)", () => {
 
   it("確定EV(evEstimated=false)のときは空文字を返す", () => {
     expect(formatEstimatedEvSuffix(false)).toBe("");
+  });
+});
+
+describe("raceHeading(レース見出しの組み立て・Task#29)", () => {
+  it("会場名+レース番号+レース名を「会場名 NR レース名」の形式で組み立てること", () => {
+    expect(
+      raceHeading({
+        venueName: "浦和",
+        raceNumber: 11,
+        raceName: "ランチタイム(C3)",
+      }),
+    ).toBe("浦和 11R ランチタイム(C3)");
+  });
+
+  it("レース名が空文字のときは会場名+レース番号だけになり、それでもレースを識別できること", () => {
+    expect(
+      raceHeading({ venueName: "浦和", raceNumber: 11, raceName: "" }),
+    ).toBe("浦和 11R");
+  });
+
+  it("レース番号1桁でも「NR」の形式は変わらないこと", () => {
+    expect(
+      raceHeading({ venueName: "東京", raceNumber: 1, raceName: "3歳未勝利" }),
+    ).toBe("東京 1R 3歳未勝利");
+  });
+
+  it("レース名が空白のみのときも会場名+レース番号だけになること(空文字と同様に扱う)", () => {
+    expect(
+      raceHeading({ venueName: "浦和", raceNumber: 11, raceName: "   " }),
+    ).toBe("浦和 11R");
   });
 });

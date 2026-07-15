@@ -93,3 +93,24 @@ export function oddsStatusNote(status: OddsStatus): string | null {
 export function formatEstimatedEvSuffix(evEstimated: boolean): string {
   return evEstimated ? "(推定)" : "";
 }
+
+/**
+ * レース見出し(Task#29)。「会場名 + レース番号R + (レース名があれば付す)」の形式で組み立てる。
+ *
+ * raceName はスクレイピング元(netkeiba)で発売前の地方レース等に空文字になり得るため、
+ * raceName に依存せず「会場名+レース番号」だけでも必ずレースを識別できるようにする
+ * (raceName が空なら末尾を付けず、会場名+レース番号のみを返す)。
+ * 一括分析画面の各セクション(妙味レースランキング/レース別ハイライト/レースごとの詳細)と
+ * Discordサマリで共有し、レース見出しの表記が個別実装ごとにばらつかないようにする。
+ */
+export function raceHeading(input: {
+  readonly venueName: string;
+  readonly raceNumber: number;
+  readonly raceName: string;
+}): string {
+  const base = `${input.venueName} ${input.raceNumber}R`;
+  // 空白のみのレース名も「実質空」として扱う(暗黙の前提=スクレイピング側でtrim済み、に
+  // 依存しないための防御的な trim)。
+  const raceName = input.raceName.trim();
+  return raceName === "" ? base : `${base} ${raceName}`;
+}
