@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - claude/keiba-ev-tool-dev-cvagiu
+      - claude/handover-next-session-x5ki6o
   # 手動実行も可能にする。
   workflow_dispatch:
 
