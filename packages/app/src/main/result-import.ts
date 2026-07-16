@@ -8,6 +8,7 @@
 
 import {
   raceResultUrl,
+  RaceResultNotConfirmedError,
   type RaceId,
   type RaceResult,
   type RaceResultEntry,
@@ -38,7 +39,8 @@ export function toResultEntries(result: RaceResult): RaceResultEntry[] {
 }
 
 /**
- * 取込結果の要約(UI通知用)を作る。
+ * 取込結果の要約(UI通知用)を作る。結果が確定している場合のみ呼ばれる
+ * (未確定は importRaceResult 側で RaceResultNotConfirmedError を捕捉して別応答を返す)。
  * @param raceId 取り込んだレースID
  * @param result パース済みのレース結果
  */
@@ -47,6 +49,7 @@ export function summarizeImport(
   result: RaceResult,
 ): ImportResultOutcome {
   return {
+    status: "imported",
     raceId,
     horseCount: result.horses.length,
     placePayoutCount: result.placePayouts.length,
@@ -78,8 +81,13 @@ export interface ImportResultDeps {
  *
  * - 常にライブ取得(bypassCache: true)。結果は発走後に確定し以後不変だが、発走前に押した際に
  *   未確定HTMLをキャッシュへ載せて後続を毒化しないよう、キャッシュを迂回して毎回取得する。
- * - パースが失敗(結果テーブル欠落=着順が得られない)した場合は例外をそのまま伝播し、
- *   saveResult を呼ばない(DBを汚さない)。呼び出し側(UI)がエラーを表示する。
+ * - パースが RaceResultNotConfirmedError(未確定レース。#All_Result_Table はあるが結果行が
+ *   0件)を投げた場合は例外を伝播せず、saveResult も呼ばずに { status: "not_confirmed" } を
+ *   正常応答として返す。着順を保存しないため取込済み扱いにはならず、確定後に再取込できる。
+ *   IPC越しに例外でなく正常応答で返すのは、一括取込(Task#31)が未確定レースを例外ハンドリング
+ *   無しで自動スキップできるようにするため。
+ * - それ以外のパース失敗(RaceResultParseError等。結果テーブル欠落=構造異常)は例外をそのまま
+ *   伝播し、saveResult を呼ばない(DBを汚さない)。呼び出し側(UI)がエラーを表示する。
  * - 着順は取れるが払戻テーブルが無い場合は保存する(hasPayout=false のまま残り、UIが再取込導線を出す)。
  *
  * @param raceId 取り込むレースID(検証済み)
@@ -92,8 +100,17 @@ export async function importRaceResult(
   const html = await deps.fetchText(raceResultUrl(raceId), {
     bypassCache: true,
   });
-  // パース失敗(結果テーブル欠落)はここで例外送出 → 以降の保存に到達しない。
-  const result = deps.parse(html);
+  let result: RaceResult;
+  try {
+    result = deps.parse(html);
+  } catch (e) {
+    if (e instanceof RaceResultNotConfirmedError) {
+      // 未確定レース: 保存せず正常応答として返す(取込済み扱いにしない)。
+      return { status: "not_confirmed", raceId };
+    }
+    // 構造異常等はそのまま伝播 → 以降の保存に到達しない。
+    throw e;
+  }
   deps.saveResult(raceId, toResultEntries(result));
   return summarizeImport(raceId, result);
 }

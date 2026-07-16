@@ -150,7 +150,13 @@ export function App(): React.JSX.Element {
       verifyDispatch({ type: "取込開始", raceId });
       window.keibaApi
         .importResult(raceId)
-        .then(() => {
+        .then((outcome) => {
+          // 未確定レース(発走前・確定前)は例外ではなく正常応答で返る。
+          // 赤エラーにはせず、穏やかな案内を出すだけで取込済み扱いにはしない(履歴再読込も不要)。
+          if (outcome.status === "not_confirmed") {
+            verifyDispatch({ type: "取込未確定", raceId });
+            return;
+          }
           verifyDispatch({ type: "取込成功", raceId });
           loadVerifyData();
         })

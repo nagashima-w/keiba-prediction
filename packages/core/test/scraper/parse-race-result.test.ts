@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   parseRaceResult,
+  RaceResultNotConfirmedError,
   RaceResultParseError,
 } from "../../src/scraper/parse-race-result.js";
 import type { RaceResult } from "../../src/scraper/types.js";
@@ -145,12 +146,6 @@ describe("parseRaceResult(レース結果パーサー)", () => {
       ).toThrow(RaceResultParseError);
     });
 
-    it("結果テーブルはあるが結果行が1件も無い場合は例外を投げること(空を silent に返さない)", () => {
-      expect(() => parseRaceResult(buildResultHtml([]))).toThrow(
-        RaceResultParseError,
-      );
-    });
-
     it("馬番セル(td.Num)が想定形(2セル・うち1つがWaku)でない場合は例外を投げること", () => {
       // 枠セルの Waku クラスが落ちた行(td.Num が2つとも非Waku)。
       // 枠番を馬番として silent 採用せず、loud に失敗させる。
@@ -168,6 +163,33 @@ describe("parseRaceResult(レース結果パーサー)", () => {
       expect(() => parseRaceResult(buildResultHtml([brokenRow]))).toThrow(
         RaceResultParseError,
       );
+    });
+  });
+
+  describe("未確定レース(発走前・確定前)は構造異常と区別すること", () => {
+    it("結果テーブル(#All_Result_Table)は存在するが結果行が0件の場合はRaceResultNotConfirmedErrorを投げること(構造異常のRaceResultParseErrorとは区別する)", () => {
+      expect(() => parseRaceResult(buildResultHtml([]))).toThrow(
+        RaceResultNotConfirmedError,
+      );
+    });
+
+    it("結果テーブル(#All_Result_Table)が無い場合はRaceResultNotConfirmedErrorにはならないこと(従来どおりRaceResultParseError)", () => {
+      let caught: unknown;
+      try {
+        parseRaceResult("<html><body>なし</body></html>");
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(RaceResultParseError);
+      expect(caught).not.toBeInstanceOf(RaceResultNotConfirmedError);
+    });
+
+    it("実データ(発走前NARレース・#All_Result_Table あり/tbody空/払戻テーブルなし)でRaceResultNotConfirmedErrorを投げること", () => {
+      expect(() =>
+        parseRaceResult(
+          loadFixture("nar_result_presale_202642071612.html"),
+        ),
+      ).toThrow(RaceResultNotConfirmedError);
     });
   });
 });
@@ -202,9 +224,10 @@ describe("parseRaceResult(地方(NAR)フィクスチャの互換性)", () => {
 });
 
 describe("公開API(index.tsからの再エクスポート)", () => {
-  it("parseRaceResult / RaceResultParseError がindexから再エクスポートされていること", async () => {
+  it("parseRaceResult / RaceResultParseError / RaceResultNotConfirmedError がindexから再エクスポートされていること", async () => {
     const mod = await import("../../src/index.js");
     expect(mod.parseRaceResult).toBe(parseRaceResult);
     expect(mod.RaceResultParseError).toBe(RaceResultParseError);
+    expect(mod.RaceResultNotConfirmedError).toBe(RaceResultNotConfirmedError);
   });
 });

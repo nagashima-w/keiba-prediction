@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseRaceId, RaceResultParseError, type RaceResult } from "@keiba/core";
+import {
+  parseRaceId,
+  RaceResultNotConfirmedError,
+  RaceResultParseError,
+  type RaceResult,
+} from "@keiba/core";
 import {
   importRaceResult,
   summarizeImport,
@@ -72,9 +77,10 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
 });
 
 describe("summarizeImport(取込サマリ)", () => {
-  it("頭数・複勝払戻点数・払戻有無を集計すること", () => {
+  it("頭数・複勝払戻点数・払戻有無を集計し、status='imported' で返すこと", () => {
     const outcome = summarizeImport("202602010607", buildRaceResult());
     expect(outcome).toEqual({
+      status: "imported",
       raceId: "202602010607",
       horseCount: 4,
       placePayoutCount: 3,
@@ -82,11 +88,15 @@ describe("summarizeImport(取込サマリ)", () => {
     });
   });
 
-  it("払戻テーブルが無い(未確定)場合は hasPayout=false になること", () => {
+  it("払戻テーブルが無い(着順のみ確定)場合は hasPayout=false になること", () => {
     const outcome = summarizeImport(
       "202602010607",
       buildRaceResult({ placePayouts: [], winPayouts: [] }),
     );
+    expect(outcome.status).toBe("imported");
+    if (outcome.status !== "imported") {
+      throw new Error("unreachable");
+    }
     expect(outcome.hasPayout).toBe(false);
     expect(outcome.placePayoutCount).toBe(0);
   });
@@ -123,6 +133,7 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
     expect(savedRaceId).toBe(raceId);
     expect(entries).toEqual(toResultEntries(buildRaceResult()));
     expect(outcome).toEqual({
+      status: "imported",
       raceId: "202602010607",
       horseCount: 4,
       placePayoutCount: 3,
@@ -130,11 +141,11 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
     });
   });
 
-  it("結果テーブル欠落(パース失敗)時は保存せずエラーを伝播する(DBを汚さない)", async () => {
+  it("結果テーブル欠落(構造異常のパース失敗)時は保存せずエラーを伝播する(DBを汚さない)", async () => {
     const saveResult = vi.fn();
     await expect(
       importRaceResult(raceId, {
-        fetchText: vi.fn().mockResolvedValue("<html>未確定</html>"),
+        fetchText: vi.fn().mockResolvedValue("<html>構造異常</html>"),
         parse: () => {
           throw new RaceResultParseError("結果テーブルが見つかりませんでした");
         },
@@ -142,6 +153,24 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
       }),
     ).rejects.toBeInstanceOf(RaceResultParseError);
     expect(saveResult).not.toHaveBeenCalled();
+  });
+
+  it("未確定レース(RaceResultNotConfirmedError)は例外を伝播せず保存もせず status='not_confirmed' を返すこと", async () => {
+    const saveResult = vi.fn();
+    const outcome = await importRaceResult(raceId, {
+      fetchText: vi.fn().mockResolvedValue("<html>未確定</html>"),
+      parse: () => {
+        throw new RaceResultNotConfirmedError(
+          "結果テーブルはありますが結果行がありません",
+        );
+      },
+      saveResult,
+    });
+    expect(saveResult).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      status: "not_confirmed",
+      raceId: "202602010607",
+    });
   });
 
   it("地方(NAR)のレースIDでも取得URLが nar.netkeiba.com に切り替わり、保存まで動作すること(race_id形式非依存の確認)", async () => {

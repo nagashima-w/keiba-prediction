@@ -41,7 +41,16 @@ export interface VerifyState {
   readonly importingRaceIds: readonly string[];
   /** 直近の取込エラー(無ければ null)。 */
   readonly importError: string | null;
+  /**
+   * 直近の取込案内(無ければ null)。未確定レース(発走前・確定前)を取り込もうとした際に、
+   * importError(赤エラー)とは別に穏やかな案内として表示するためのメッセージ。
+   */
+  readonly importNotice: string | null;
 }
+
+/** 未確定レース(発走前・確定前)取込時の案内メッセージ(赤エラーではなく穏やかな案内として表示)。 */
+export const IMPORT_NOT_CONFIRMED_MESSAGE =
+  "まだ結果が確定していません(発走前・確定前)。確定後に再度取り込んでください";
 
 /** reducer が処理するアクション。 */
 export type VerifyAction =
@@ -63,7 +72,8 @@ export type VerifyAction =
   | { readonly type: "版別レポート取得失敗"; readonly message: string }
   | { readonly type: "取込開始"; readonly raceId: string }
   | { readonly type: "取込成功"; readonly raceId: string }
-  | { readonly type: "取込失敗"; readonly raceId: string; readonly message: string };
+  | { readonly type: "取込失敗"; readonly raceId: string; readonly message: string }
+  | { readonly type: "取込未確定"; readonly raceId: string };
 
 /** 初期状態(分析タブ・空)。 */
 export function createInitialVerifyState(): VerifyState {
@@ -80,6 +90,7 @@ export function createInitialVerifyState(): VerifyState {
     reportsByPromptVersionError: null,
     importingRaceIds: [],
     importError: null,
+    importNotice: null,
   };
 }
 
@@ -157,6 +168,7 @@ export function verifyReducer(
         ...state,
         importingRaceIds: addImporting(state.importingRaceIds, action.raceId),
         importError: null,
+        importNotice: null,
       };
 
     case "取込成功":
@@ -170,6 +182,15 @@ export function verifyReducer(
         ...state,
         importingRaceIds: removeImporting(state.importingRaceIds, action.raceId),
         importError: action.message,
+      };
+
+    case "取込未確定":
+      // 赤エラー(importError)ではなく穏やかな案内(importNotice)として表示する。
+      // 未確定は「取込済み」にはならない(saveResultを呼んでいないため history 側も未取込のまま)。
+      return {
+        ...state,
+        importingRaceIds: removeImporting(state.importingRaceIds, action.raceId),
+        importNotice: IMPORT_NOT_CONFIRMED_MESSAGE,
       };
 
     default: {

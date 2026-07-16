@@ -61,6 +61,7 @@ export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
 export { NarOddsParseError, parseNarOdds } from "./scraper/parse-nar-odds.js";
 export {
   parseRaceResult,
+  RaceResultNotConfirmedError,
   RaceResultParseError,
 } from "./scraper/parse-race-result.js";
 export { OikiriParseError, parseOikiri } from "./scraper/parse-oikiri.js";

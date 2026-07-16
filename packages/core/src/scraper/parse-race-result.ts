@@ -16,6 +16,10 @@
  * - 払戻テーブルは発走後に確定するため、未確定レースでは欠ける。欠損時は payout類を空配列に
  *   して耐性を持たせる(未確定レースを渡しても着順部分は取れる)。ただし払戻が存在する場合に
  *   「的中馬番数」と「払戻件数」が食い違う構造異常は silent に隠さず失敗させる。
+ * - #All_Result_Table 自体が存在する状態で結果行(tbody 配下の tr)が0件の場合は、発走前・
+ *   確定前でまだ結果行が出ていない可能性があるため、構造異常(RaceResultParseError)とは
+ *   区別して RaceResultNotConfirmedError を投げる。#All_Result_Table 自体が無い場合は
+ *   従来どおり RaceResultParseError(構造異常)。
  */
 
 import * as cheerio from "cheerio";
@@ -28,6 +32,22 @@ export class RaceResultParseError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RaceResultParseError";
+  }
+}
+
+/**
+ * 未確定レース(発走前・確定前)を表す例外。
+ *
+ * netkeiba の result.html は発走前・結果確定前のレースでも200で返り、
+ * #All_Result_Table 自体は存在するが結果行(tbody 配下の tr)が0件になる。
+ * これは構造変更・誤パースを示す RaceResultParseError とは原因が異なる
+ * (パーサー・サイト構造は正常で、単に「まだ結果が無い」だけ)ため、
+ * 呼び出し側が区別して扱えるよう別クラスとして投げる。
+ */
+export class RaceResultNotConfirmedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RaceResultNotConfirmedError";
   }
 }
 
@@ -157,11 +177,17 @@ export function parseRaceResult(html: string): RaceResult {
     });
   });
 
-  // 結果テーブルはあるのに結果行が1件も取れないのは構造変更・誤パースの兆候。
-  // silentに空配列で隠さず、失敗させる(parseShutubaの出走馬0頭チェックと同じ方針)。
+  // 結果テーブルはあるのに結果行が1件も取れない場合、原因は主に2通りある:
+  // (a) 発走前・確定前で netkeiba がまだ結果行を出していない(#All_Result_Table はあるが
+  //     tbody が空。200で返り、構造自体は正常)。
+  // (b) サイト構造の変更・誤パース(本来は行があるはずなのに取れていない)。
+  // (a) を (b) と同じ「構造異常」として扱うと、取込前に検証できない未確定レースを
+  // 押しただけでUIが赤エラーになってしまう。(b) と区別できる決定的な判定はできないため、
+  // 「行0件」はまず (a) とみなし、呼び出し側が区別して扱えるよう別例外を投げる
+  // (silentに空配列で隠しはしない。parseShutubaの出走馬0頭チェックと同じ方針で失敗はさせる)。
   if (horses.length === 0) {
-    throw new RaceResultParseError(
-      "結果テーブル(#All_Result_Table)から結果行を1件も抽出できませんでした",
+    throw new RaceResultNotConfirmedError(
+      "結果テーブル(#All_Result_Table)はありますが結果行がありません(発走前・確定前の可能性があります)",
     );
   }
 

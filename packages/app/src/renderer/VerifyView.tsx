@@ -70,6 +70,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       {state.importError !== null && (
         <p style={{ color: "#c00" }}>結果取込に失敗しました: {state.importError}</p>
       )}
+      {state.importNotice !== null && (
+        <p style={{ color: "#666" }}>{state.importNotice}</p>
+      )}
 
       {/* 累積回収率サマリ。 */}
       <h3 style={{ fontSize: "0.95rem", marginBottom: "0.25rem" }}>累積回収率</h3>

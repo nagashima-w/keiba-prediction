@@ -333,17 +333,32 @@ export interface PromptVersionVerifyReportView {
   readonly additionalInstructions: readonly (string | null)[];
 }
 
-/** 結果取込の結果(1レース分)。 */
-export interface ImportResultOutcome {
-  /** レースID(12桁)。 */
-  readonly raceId: string;
-  /** 取り込んだ着順の頭数。 */
-  readonly horseCount: number;
-  /** 取り込んだ複勝払戻の点数。 */
-  readonly placePayoutCount: number;
-  /** 複勝の払戻テーブルが取得できたか(未確定レースは false)。 */
-  readonly hasPayout: boolean;
-}
+/**
+ * 結果取込の結果(1レース分)。status で確定/未確定を判別する判別共用体。
+ *
+ * - "imported": 結果が確定していて着順を保存した(複勝払戻は無いこともある。hasPayout で判別)。
+ * - "not_confirmed": まだ発走前・結果確定前で着順を取得できなかった(何も保存していない)。
+ *   例外ではなく正常応答として返すことで、一括取込側が自動スキップしやすくする(Task#31)。
+ */
+export type ImportResultOutcome =
+  | {
+      /** 結果を確定・取込済み。 */
+      readonly status: "imported";
+      /** レースID(12桁)。 */
+      readonly raceId: string;
+      /** 取り込んだ着順の頭数。 */
+      readonly horseCount: number;
+      /** 取り込んだ複勝払戻の点数。 */
+      readonly placePayoutCount: number;
+      /** 複勝の払戻テーブルが取得できたか(着順は取れたが払戻未確定なら false)。 */
+      readonly hasPayout: boolean;
+    }
+  | {
+      /** まだ結果が確定していない(発走前・確定前)。何も保存していない。 */
+      readonly status: "not_confirmed";
+      /** レースID(12桁)。 */
+      readonly raceId: string;
+    };
 
 /** レース一覧の1レース(renderer 表示用)。 */
 export interface RaceListItem {

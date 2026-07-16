@@ -6,6 +6,7 @@ import type {
 } from "../src/shared/analysis-types.js";
 import {
   createInitialVerifyState,
+  IMPORT_NOT_CONFIRMED_MESSAGE,
   verifyReducer,
   type VerifyState,
 } from "../src/renderer/verify-reducer.js";
@@ -149,5 +150,27 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     });
     expect(s2.importingRaceIds).toEqual([]);
     expect(s2.importError).toBe("取得失敗");
+  });
+
+  it("初期状態は取込案内(importNotice)も無いこと", () => {
+    const s = init();
+    expect(s.importNotice).toBeNull();
+  });
+
+  it("取込未確定で importingRaceIds から取り除き、赤エラーではなく案内メッセージを importNotice に設定すること", () => {
+    const s1 = verifyReducer(init(), { type: "取込開始", raceId: "R1" });
+    const s2 = verifyReducer(s1, { type: "取込未確定", raceId: "R1" });
+    expect(s2.importingRaceIds).toEqual([]);
+    expect(s2.importNotice).toBe(IMPORT_NOT_CONFIRMED_MESSAGE);
+    // 未確定は失敗ではないので importError は立てない。
+    expect(s2.importError).toBeNull();
+  });
+
+  it("取込開始で前回の importNotice をクリアすること(再取込時に古い案内を残さない)", () => {
+    const s1 = verifyReducer(init(), { type: "取込開始", raceId: "R1" });
+    const s2 = verifyReducer(s1, { type: "取込未確定", raceId: "R1" });
+    expect(s2.importNotice).not.toBeNull();
+    const s3 = verifyReducer(s2, { type: "取込開始", raceId: "R1" });
+    expect(s3.importNotice).toBeNull();
   });
 });
