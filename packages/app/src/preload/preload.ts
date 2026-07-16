@@ -41,6 +41,8 @@ const api: KeibaApi = {
       ipcRenderer.removeListener(IPC_CHANNELS.batchProgress, handler);
     };
   },
+  logRendererError: (payload) =>
+    ipcRenderer.invoke(IPC_CHANNELS.logRendererError, payload),
   runBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.runBulkImport),
   cancelBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.cancelBulkImport),
   onBulkImportProgress: (listener) => {

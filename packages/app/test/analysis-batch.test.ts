@@ -86,6 +86,54 @@ describe("runBatchAnalysis(一括分析オーケストレータ)", () => {
     expect(failed.result).toBeNull();
   });
 
+  it("1レースの失敗時にonErrorへraceIdと例外を渡す(ログ用フック、Task#35)", async () => {
+    const original = new Error("Bの取得に失敗");
+    const analyzeOne = vi.fn(async (raceId: string) => {
+      if (raceId === "B") {
+        throw original;
+      }
+      return fakeResult(raceId);
+    });
+    const onError = vi.fn();
+
+    await runBatchAnalysis(["A", "B", "C"], {
+      analyzeOne,
+      shouldCancel: () => false,
+      onError,
+    });
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith("B", original);
+  });
+
+  it("onError自体が例外を投げても後続レースの処理とoutcomes記録は壊れない(防御的try/catch)", async () => {
+    const analyzeOne = vi.fn(async (raceId: string) => {
+      if (raceId === "B") {
+        throw new Error("Bの取得に失敗");
+      }
+      return fakeResult(raceId);
+    });
+    // onError自体がログ記録の失敗等で例外を投げるケースを模擬する。
+    const onError = vi.fn(() => {
+      throw new Error("ログ記録自体が失敗");
+    });
+
+    const outcomes = await runBatchAnalysis(["A", "B", "C"], {
+      analyzeOne,
+      shouldCancel: () => false,
+      onError,
+    });
+
+    // onErrorが投げた例外はrunBatchAnalysis全体を止めず、Cまで処理が継続する。
+    expect(analyzeOne).toHaveBeenCalledTimes(3);
+    expect(outcomes.map((o) => o.status)).toEqual([
+      "success",
+      "failure",
+      "success",
+    ]);
+    expect(outcomes[1]!.error).toBe("Bの取得に失敗");
+  });
+
   it("中断要求後は次のレース境界で停止し、残りをスキップする(実行中レースは完走)", async () => {
     let canceled = false;
     const analyzeOne = vi.fn(async (raceId: string) => {

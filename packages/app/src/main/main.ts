@@ -3,6 +3,7 @@ import path from "node:path";
 import { app, BrowserWindow } from "electron";
 
 import { closeResources, registerIpcHandlers } from "./ipc.js";
+import { logInfo } from "./logger.js";
 
 // main は esbuild で CommonJS にバンドルされるため __dirname が利用できる
 // (dist/main/main.cjs を基準に preload/renderer への相対パスを解決する)。
@@ -37,6 +38,9 @@ function createMainWindow(): void {
 // アプリ起動時に IPC ハンドラを登録してからウィンドウを開く。
 void app.whenReady().then(() => {
   registerIpcHandlers();
+  // 起動をログに残す(Task#35)。正常な起動時刻がログに残ることで、
+  // 「エラーがいつからのログか」「その前に正常起動していたか」をAIが読み取りやすくする。
+  logInfo("app:start", `起動しました(バージョン ${app.getVersion()})`);
   createMainWindow();
 
   // macOS 対応: Dock からの再アクティブ化でウィンドウが無ければ再生成。

@@ -40,4 +40,8 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.cancelBulkImport).toBe("result:cancel-bulk-import");
     expect(IPC_CHANNELS.bulkImportProgress).toBe("result:bulk-import-progress");
   });
+
+  it("rendererのエラーをmain側のログファイルへ集約するチャネルが定義されている(Task#35)", () => {
+    expect(IPC_CHANNELS.logRendererError).toBe("log:renderer-error");
+  });
 });

@@ -39,6 +39,12 @@ export interface BatchRunnerDeps {
   readonly raceNameOf?: (raceId: string) => string | null;
   /** 全体進捗の通知(省略可)。 */
   readonly onProgress?: (progress: BatchProgress) => void;
+  /**
+   * 1レースの分析が失敗したときの通知(省略可、Task#35 ログ基盤)。
+   * ipc.ts が構造化エラーログ(raceId付き)を残すために使う。失敗アウトカムの記録には影響しない
+   * (この関数が例外を投げても呼び出し元は無視し、全体処理は継続する)。
+   */
+  readonly onError?: (raceId: string, error: unknown) => void;
 }
 
 /** エラー値から表示用メッセージを取り出す。 */
@@ -108,6 +114,12 @@ export async function runBatchAnalysis(
         error: null,
       });
     } catch (e) {
+      // ログ通知はベストエフォート: onError 自体が例外を投げても全体処理を止めない(防御的)。
+      try {
+        deps.onError?.(raceId, e);
+      } catch {
+        // 無視する(ログ記録の失敗で分析処理そのものを壊さない)。
+      }
       outcomes.push({
         raceId,
         raceName,

@@ -21,9 +21,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IPC_CHANNELS } from "../src/shared/channels.js";
 import type { BulkImportRaceOutcome } from "../src/shared/analysis-types.js";
 
-const { handleMock, createPipelineDepsMock, ctx } = vi.hoisted(() => ({
+const { handleMock, createPipelineDepsMock, logErrorMock, ctx } = vi.hoisted(() => ({
   handleMock: vi.fn(),
   createPipelineDepsMock: vi.fn(),
+  logErrorMock: vi.fn(),
   ctx: { userData: "" },
 }));
 
@@ -37,6 +38,12 @@ vi.mock("electron", () => ({
 
 vi.mock("../src/main/pipeline-deps.js", () => ({
   createPipelineDeps: createPipelineDepsMock,
+}));
+
+// Task#35: ログ基盤の実electron-logへは触れず、失敗時にlogErrorが呼ばれることだけを検証する。
+vi.mock("../src/main/logger.js", () => ({
+  logError: logErrorMock,
+  setSecretsProvider: vi.fn(),
 }));
 
 const senderSend = vi.fn();
@@ -59,6 +66,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   handleMock.mockReset();
   createPipelineDepsMock.mockReset();
+  logErrorMock.mockReset();
   senderSend.mockReset();
   tempDir = mkdtempSync(path.join(tmpdir(), "keiba-ipc-bulk-import-"));
   ctx.userData = tempDir;
@@ -181,6 +189,16 @@ describe("ipc 一括取込ハンドラ(Task#31)", () => {
       "imported",
     ]);
     expect(outcomes[1]!.error).toContain("R2の取込に失敗");
+
+    // Task#35: 失敗レースは操作名・raceId・URL付きでログされる(AIが原因特定できる粒度の受け入れ条件)。
+    expect(logErrorMock).toHaveBeenCalledTimes(1);
+    const [operation, error, context] = logErrorMock.mock.calls[0]!;
+    expect(operation).toBe("result:run-bulk-import:race");
+    expect((error as Error).message).toBe("R2の取込に失敗");
+    expect(context).toEqual({
+      raceId: R2,
+      url: expect.stringContaining(R2) as unknown as string,
+    });
   });
 
   it("中断チャネルを叩くと次のレース境界で停止し、残りをスキップする", async () => {

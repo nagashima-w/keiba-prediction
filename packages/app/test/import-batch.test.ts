@@ -153,6 +153,73 @@ describe("runBulkImport(一括結果取込オーケストレータ)", () => {
     expect(outcomes.map((o) => o.status)).toEqual(["skipped", "skipped"]);
   });
 
+  it("1レースの失敗時にonErrorへraceIdと例外を渡す(ログ用フック、Task#35)", async () => {
+    const original = new Error("Bの取込に失敗");
+    const importOne = vi.fn(async (raceId: string) => {
+      if (raceId === "B") {
+        throw original;
+      }
+      return imported(raceId);
+    });
+    const onError = vi.fn();
+
+    await runBulkImport(["A", "B", "C"], {
+      importOne,
+      shouldCancel: () => false,
+      sleep: vi.fn(async () => {}),
+      onError,
+    });
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith("B", original);
+  });
+
+  it("onError自体が例外を投げても後続レースの処理とoutcomes記録は壊れない(防御的try/catch)", async () => {
+    const importOne = vi.fn(async (raceId: string) => {
+      if (raceId === "B") {
+        throw new Error("Bの取込に失敗");
+      }
+      return imported(raceId);
+    });
+    // onError自体がログ記録の失敗等で例外を投げるケースを模擬する。
+    const onError = vi.fn(() => {
+      throw new Error("ログ記録自体が失敗");
+    });
+
+    const outcomes = await runBulkImport(["A", "B", "C"], {
+      importOne,
+      shouldCancel: () => false,
+      sleep: vi.fn(async () => {}),
+      onError,
+    });
+
+    // onErrorが投げた例外はrunBulkImport全体を止めず、Cまで処理が継続する。
+    expect(importOne).toHaveBeenCalledTimes(3);
+    expect(outcomes.map((o) => o.status)).toEqual([
+      "imported",
+      "failure",
+      "imported",
+    ]);
+    expect(outcomes[1]!.error).toBe("Bの取込に失敗");
+  });
+
+  it("onErrorが与えられなくても失敗時の挙動は変わらない(省略可)", async () => {
+    const importOne = vi.fn(async (raceId: string) => {
+      if (raceId === "B") {
+        throw new Error("Bの取込に失敗");
+      }
+      return imported(raceId);
+    });
+
+    const outcomes = await runBulkImport(["A", "B"], {
+      importOne,
+      shouldCancel: () => false,
+      sleep: vi.fn(async () => {}),
+    });
+
+    expect(outcomes.map((o) => o.status)).toEqual(["imported", "failure"]);
+  });
+
   it("対象レースが0件なら importOne を呼ばず空配列を返す", async () => {
     const importOne = vi.fn(async (raceId: string) => imported(raceId));
     const outcomes = await runBulkImport([], {

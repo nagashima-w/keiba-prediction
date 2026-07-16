@@ -7,6 +7,7 @@ import {
   isDiscordWebhookUrl,
   parseKaisaiDate,
   parseRaceId,
+  raceResultUrl,
   sendDiscordNotification,
   type DiscordPayload,
   type KaisaiDate,
@@ -31,6 +32,7 @@ import { buildAppInfo } from "./app-info.js";
 import { runAnalysis } from "./analysis-pipeline.js";
 import { runBatchAnalysis } from "./analysis-batch.js";
 import { runBulkImport } from "./import-batch.js";
+import { logError, logWarn, setSecretsProvider } from "./logger.js";
 import { netFetchAdapter } from "./net-fetch-adapter.js";
 import { createPipelineDeps, type PipelineResources } from "./pipeline-deps.js";
 import { ResourceManager } from "./resource-manager.js";
@@ -44,6 +46,7 @@ import {
   SettingsStore,
 } from "./settings-store.js";
 import { toRaceListItem } from "./to-race-list-item.js";
+import { withErrorLogging } from "./with-error-logging.js";
 
 /**
  * main プロセスの IPC ハンドラをまとめて登録する。
@@ -53,6 +56,17 @@ import { toRaceListItem } from "./to-race-list-item.js";
  * 進捗は event.sender.send で renderer へ一方向通知する。実IOの配線はテスト対象外(結線層)。
  */
 export function registerIpcHandlers(): void {
+  // ログのマスキング(Task#35)に使う「既知の秘密値」を登録する。設定変更を都度反映するため、
+  // 値ではなく関数で渡す(ログ出力の直前に毎回 getSettingsStore().load() を呼ぶ)。
+  setSecretsProvider(() => {
+    const settings = getSettingsStore().load();
+    return [
+      settings.apiKey,
+      settings.discordWebhookUrl,
+      process.env.ANTHROPIC_API_KEY ?? "",
+    ];
+  });
+
   ipcMain.handle(IPC_CHANNELS.getAppInfo, () => buildAppInfo(app.getVersion()));
 
   ipcMain.handle(
@@ -108,6 +122,11 @@ export function registerIpcHandlers(): void {
       (Array.isArray(outcomes) ? outcomes : []) as BatchRaceOutcome[],
     ),
   );
+
+  // renderer側のエラーをmain側のログファイルへ集約する(Task#35 受け入れ条件6)。
+  ipcMain.handle(IPC_CHANNELS.logRendererError, (_event, payload: unknown) =>
+    handleLogRendererError(payload),
+  );
 }
 
 /**
@@ -138,6 +157,8 @@ const resourceManager = new ResourceManager<PipelineResources>({
       additionalInstruction: settings.additionalInstruction,
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,
+      // HttpClient(core)のサポート外charset警告をログ基盤へ接続する(要修正4)。
+      onWarn: (message: string) => logWarn(HTTP_CLIENT_WARN_OPERATION, message),
     });
   },
   close: (resources) => resources.close(),
@@ -170,15 +191,21 @@ async function handleListRaces(
   dateStr: string,
   venueKind: RaceVenueKind,
 ): Promise<RaceListItem[]> {
-  const kaisaiDate = parseKaisaiDate(dateStr);
-  // キャッシュミス時に取得→scrape_cache へ書き込む await があるため runExclusive で保護する
-  // (実行中の設定保存で DB を閉じられて「connection is not open」になるのを防ぐ)。
-  const entries = await resourceManager.runExclusive((resources) =>
-    venueKind === "nar"
-      ? resources.listNarRaces(kaisaiDate)
-      : resources.listRaces(kaisaiDate),
+  return withErrorLogging(
+    IPC_CHANNELS.listRaces,
+    { date: dateStr, venueKind },
+    async () => {
+      const kaisaiDate = parseKaisaiDate(dateStr);
+      // キャッシュミス時に取得→scrape_cache へ書き込む await があるため runExclusive で保護する
+      // (実行中の設定保存で DB を閉じられて「connection is not open」になるのを防ぐ)。
+      const entries = await resourceManager.runExclusive((resources) =>
+        venueKind === "nar"
+          ? resources.listNarRaces(kaisaiDate)
+          : resources.listRaces(kaisaiDate),
+      );
+      return entries.map(toRaceListItem);
+    },
   );
-  return entries.map(toRaceListItem);
 }
 
 /** 開催日文字列を検証する。妥当な YYYYMMDD でなければ null(パイプライン側で当日近似)。 */
@@ -198,6 +225,16 @@ function parseKaisaiDateOrNull(dateStr: string): KaisaiDate | null {
  */
 let batchCancelRequested = false;
 
+/** 一括分析の per-race 失敗ログの操作名(全体起動の失敗ログとは区別する)。 */
+const BATCH_ANALYSIS_RACE_OPERATION = `${IPC_CHANNELS.runBatchAnalysis}:race`;
+
+/**
+ * HttpClient(core)のサポート外charset警告の操作名(要修正4)。
+ * core は electron に依存できないため console.warn が既定だが、main プロセスでは
+ * ログ基盤(logWarn)へ接続する(resourceManager.create() で HttpClient へ onWarn として注入)。
+ */
+const HTTP_CLIENT_WARN_OPERATION = "http-client:unsupported-charset";
+
 /**
  * 一括分析ハンドラの実処理。選択レースを直列に分析し、per-race のアウトカムを返す。
  * 全体を runExclusive 1回で包む(粗い粒度)ことで、バッチ実行中は DB を閉じさせない。
@@ -209,20 +246,27 @@ async function handleRunBatchAnalysis(
   raceIdStrs: readonly string[],
   dateStr: string,
 ): Promise<BatchRaceOutcome[]> {
-  const kaisaiDate = parseKaisaiDateOrNull(dateStr);
-  // 新しいバッチの開始時に前回の中断要求を必ずクリアする(残留で即スキップにならないように)。
-  batchCancelRequested = false;
-  return resourceManager.runExclusive(({ deps }) =>
-    runBatchAnalysis(raceIdStrs, {
-      // 個別レースは既存の runAnalysis を1件ずつ実行し、レース内段階を全体進捗へ転送する。
-      analyzeOne: (raceIdStr, onStage) =>
-        runAnalysis(parseRaceId(raceIdStr), kaisaiDate, deps, onStage),
-      shouldCancel: () => batchCancelRequested,
-      onProgress: (progress: BatchProgress) => {
-        event.sender.send(IPC_CHANNELS.batchProgress, progress);
-      },
-    }),
-  );
+  return withErrorLogging(IPC_CHANNELS.runBatchAnalysis, undefined, async () => {
+    const kaisaiDate = parseKaisaiDateOrNull(dateStr);
+    // 新しいバッチの開始時に前回の中断要求を必ずクリアする(残留で即スキップにならないように)。
+    batchCancelRequested = false;
+    return resourceManager.runExclusive(({ deps }) =>
+      runBatchAnalysis(raceIdStrs, {
+        // 個別レースは既存の runAnalysis を1件ずつ実行し、レース内段階を全体進捗へ転送する。
+        analyzeOne: (raceIdStr, onStage) =>
+          runAnalysis(parseRaceId(raceIdStr), kaisaiDate, deps, onStage),
+        shouldCancel: () => batchCancelRequested,
+        onProgress: (progress: BatchProgress) => {
+          event.sender.send(IPC_CHANNELS.batchProgress, progress);
+        },
+        // per-race の失敗はここで構造化ログを残す(操作名・raceId・例外スタック)。
+        // outcomes には既存どおり failure として記録され、renderer 側の挙動は変わらない。
+        onError: (raceId, error) => {
+          logError(BATCH_ANALYSIS_RACE_OPERATION, error, { raceId });
+        },
+      }),
+    );
+  });
 }
 
 /** 一括分析の中断要求ハンドラ。次のレース境界で停止させるためフラグを立てる。 */
@@ -230,14 +274,32 @@ function handleCancelBatchAnalysis(): void {
   batchCancelRequested = true;
 }
 
+/**
+ * raceId文字列から result.html の URL を求める(ログのコンテキスト用)。
+ * raceIdStr がレースID形式として不正な場合でも、ログ記録自体を失敗させないよう null にフォールバックする。
+ */
+function safeRaceResultUrl(raceIdStr: string): string | null {
+  try {
+    return raceResultUrl(parseRaceId(raceIdStr));
+  } catch {
+    return null;
+  }
+}
+
 /** 結果取込ハンドラの実処理(result.html取得→パース→実着順+複勝払戻を保存)。 */
 async function handleImportResult(
   raceIdStr: string,
 ): Promise<ImportResultOutcome> {
-  const raceId = parseRaceId(raceIdStr);
-  // 取得→parse→saveResult の await を含むため runExclusive で保護する(実行中の DB クローズを防ぐ)。
-  return resourceManager.runExclusive((resources) =>
-    resources.importResult(raceId),
+  return withErrorLogging(
+    IPC_CHANNELS.importResult,
+    { raceId: raceIdStr, url: safeRaceResultUrl(raceIdStr) },
+    async () => {
+      const raceId = parseRaceId(raceIdStr);
+      // 取得→parse→saveResult の await を含むため runExclusive で保護する(実行中の DB クローズを防ぐ)。
+      return resourceManager.runExclusive((resources) =>
+        resources.importResult(raceId),
+      );
+    },
   );
 }
 
@@ -247,6 +309,9 @@ async function handleImportResult(
  * 一括分析(batchCancelRequested)とは別のフラグを持つ(同時に走らない前提だが、意味的に独立させる)。
  */
 let bulkImportCancelRequested = false;
+
+/** 一括取込の per-race 失敗ログの操作名(全体起動の失敗ログとは区別する)。 */
+const BULK_IMPORT_RACE_OPERATION = `${IPC_CHANNELS.runBulkImport}:race`;
 
 /**
  * 一括取込ハンドラの実処理(Task#31)。分析済みで結果未取込のレース(listUnimportedRaceIds、
@@ -265,16 +330,25 @@ let bulkImportCancelRequested = false;
 async function handleRunBulkImport(
   event: IpcMainInvokeEvent,
 ): Promise<BulkImportRaceOutcome[]> {
-  // 新しい実行の開始時に前回の中断要求を必ずクリアする(残留で即スキップにならないように)。
-  bulkImportCancelRequested = false;
-  return resourceManager.runExclusive((resources) => {
-    const raceIds = resources.listUnimportedRaceIds();
-    return runBulkImport(raceIds, {
-      importOne: (raceIdStr) => resources.importResult(parseRaceId(raceIdStr)),
-      shouldCancel: () => bulkImportCancelRequested,
-      onProgress: (progress: BulkImportProgress) => {
-        event.sender.send(IPC_CHANNELS.bulkImportProgress, progress);
-      },
+  return withErrorLogging(IPC_CHANNELS.runBulkImport, undefined, async () => {
+    // 新しい実行の開始時に前回の中断要求を必ずクリアする(残留で即スキップにならないように)。
+    bulkImportCancelRequested = false;
+    return resourceManager.runExclusive((resources) => {
+      const raceIds = resources.listUnimportedRaceIds();
+      return runBulkImport(raceIds, {
+        importOne: (raceIdStr) => resources.importResult(parseRaceId(raceIdStr)),
+        shouldCancel: () => bulkImportCancelRequested,
+        onProgress: (progress: BulkImportProgress) => {
+          event.sender.send(IPC_CHANNELS.bulkImportProgress, progress);
+        },
+        // per-race の失敗はここで構造化ログを残す(操作名・raceId・URL・例外スタック)。
+        onError: (raceId, error) => {
+          logError(BULK_IMPORT_RACE_OPERATION, error, {
+            raceId,
+            url: safeRaceResultUrl(raceId),
+          });
+        },
+      });
     });
   });
 }
@@ -285,18 +359,28 @@ function handleCancelBulkImport(): void {
 }
 
 /** 検証レポート取得ハンドラの実処理。 */
-function handleGetVerifyReport(): VerifyReportView {
-  return getResources().getVerifyReport();
+async function handleGetVerifyReport(): Promise<VerifyReportView> {
+  return withErrorLogging(IPC_CHANNELS.getVerifyReport, undefined, () =>
+    getResources().getVerifyReport(),
+  );
 }
 
 /** プロンプト版別検証レポート取得ハンドラの実処理(Task#27)。 */
-function handleGetVerifyReportByPromptVersion(): readonly PromptVersionVerifyReportView[] {
-  return getResources().getVerifyReportByPromptVersion();
+async function handleGetVerifyReportByPromptVersion(): Promise<
+  readonly PromptVersionVerifyReportView[]
+> {
+  return withErrorLogging(
+    IPC_CHANNELS.getVerifyReportByPromptVersion,
+    undefined,
+    () => getResources().getVerifyReportByPromptVersion(),
+  );
 }
 
 /** 分析履歴一覧取得ハンドラの実処理。 */
-function handleListAnalyses(): AnalysisHistoryItem[] {
-  return getResources().listAnalysisHistory();
+async function handleListAnalyses(): Promise<AnalysisHistoryItem[]> {
+  return withErrorLogging(IPC_CHANNELS.listAnalyses, undefined, () =>
+    getResources().listAnalysisHistory(),
+  );
 }
 
 /** 設定取得ハンドラの実処理。マスク済み(環境変数優先を反映)で返す。 */
@@ -310,12 +394,14 @@ function handleGetSettings(): MaskedSettings {
  * 依存の再構築は markDirty で予約する(分析実行中は破棄を遅延し、実行中の DB を閉じない。
  * 次のアイドル時の分析で最新設定=重み・EV閾値・APIキーが反映される。再起動不要)。
  */
-function handleSaveSettings(update: SettingsUpdate): MaskedSettings {
-  const store = getSettingsStore();
-  const next = applyUpdate(store.load(), update);
-  store.save(next);
-  resourceManager.markDirty();
-  return maskSettings(next, process.env.ANTHROPIC_API_KEY);
+async function handleSaveSettings(update: SettingsUpdate): Promise<MaskedSettings> {
+  return withErrorLogging(IPC_CHANNELS.saveSettings, undefined, () => {
+    const store = getSettingsStore();
+    const next = applyUpdate(store.load(), update);
+    store.save(next);
+    resourceManager.markDirty();
+    return maskSettings(next, process.env.ANTHROPIC_API_KEY);
+  });
 }
 
 /**
@@ -351,6 +437,9 @@ async function sendPayloadToDiscord(payload: DiscordPayload): Promise<void> {
       fetch: netFetchAdapter,
     });
   } catch (error) {
+    // 送信失敗はログに残す(webhookUrl自体は既知の秘密フィールド名ではないコンテキストに積まないよう
+    // 意図的に省略し、formatLogEntry の秘密値スキャン(secretsProvider経由)による二重防御に委ねる)。
+    logError(IPC_CHANNELS.sendBatchDiscord, error);
     // core の例外(DiscordNotifyError)はユーザー向けメッセージを持つのでそのまま伝える。
     // それ以外(ネットワーク例外等)は簡潔なメッセージに包む。
     if (error instanceof DiscordNotifyError) {
@@ -363,9 +452,64 @@ async function sendPayloadToDiscord(payload: DiscordPayload): Promise<void> {
 }
 
 /** 設定初期化ハンドラの実処理。既定へ戻して保存し、マスク済み結果を返す。 */
-function handleResetSettings(): MaskedSettings {
-  const store = getSettingsStore();
-  store.save(DEFAULT_APP_SETTINGS);
-  resourceManager.markDirty();
-  return maskSettings(DEFAULT_APP_SETTINGS, process.env.ANTHROPIC_API_KEY);
+async function handleResetSettings(): Promise<MaskedSettings> {
+  return withErrorLogging(IPC_CHANNELS.resetSettings, undefined, () => {
+    const store = getSettingsStore();
+    store.save(DEFAULT_APP_SETTINGS);
+    resourceManager.markDirty();
+    return maskSettings(DEFAULT_APP_SETTINGS, process.env.ANTHROPIC_API_KEY);
+  });
+}
+
+/**
+ * renderer由来のログ入力(message/stack)の長さ上限(提案採用1)。
+ * renderer側の例外は原理上どれだけ長いメッセージ・スタックを積んでくるか制御できないため、
+ * ログファイルの肥大化・可読性低下を防ぐために切り詰める。
+ */
+const MAX_RENDERER_LOG_FIELD_LENGTH = 10_000;
+
+/** 長さ上限超過時に末尾へ付記する省略の目印。 */
+const RENDERER_LOG_TRUNCATION_SUFFIX = "…(省略)";
+
+/**
+ * renderer から届いた値を安全な文字列へ変換する(非文字列型の防御)。
+ * undefined はそのまま undefined を返す(値自体が省略されたことを区別するため)。
+ */
+function toSafeString(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return typeof value === "string" ? value : String(value);
+}
+
+/** 上限を超えた文字列を切り詰め、省略した旨を付記する(提案採用1)。 */
+function truncateForRendererLog(value: string): string {
+  if (value.length <= MAX_RENDERER_LOG_FIELD_LENGTH) {
+    return value;
+  }
+  return value.slice(0, MAX_RENDERER_LOG_FIELD_LENGTH) + RENDERER_LOG_TRUNCATION_SUFFIX;
+}
+
+/**
+ * renderer から届いたエラー情報(unknown、IPC越し)を安全に検証してログへ委譲する(受け入れ条件6)。
+ * 形状が不正でも例外を投げず、可能な範囲の情報だけでログを残す(ログ集約自体を落とさない)。
+ * message/stack は非文字列型なら String() 変換し(提案採用1)、長さ上限で切り詰めてから委譲する。
+ */
+function handleLogRendererError(payload: unknown): void {
+  const rec =
+    typeof payload === "object" && payload !== null
+      ? (payload as Record<string, unknown>)
+      : {};
+  const operation =
+    typeof rec.operation === "string" && rec.operation !== ""
+      ? rec.operation
+      : "renderer:unknown";
+  // message は「値の省略」を区別する必要が無い(空でも "undefined" 等の文字列表現でよい)ため、
+  // toSafeString の undefined フォールバックを経由せず String() で直接変換する(冗長な二重変換を排除)。
+  const message = truncateForRendererLog(String(rec.message));
+  const stackRaw = toSafeString(rec.stack);
+  const stack = stackRaw !== undefined ? truncateForRendererLog(stackRaw) : undefined;
+  const raceId = typeof rec.raceId === "string" ? rec.raceId : null;
+  const url = typeof rec.url === "string" ? rec.url : null;
+  logError(operation, { message, stack }, { raceId, url });
 }

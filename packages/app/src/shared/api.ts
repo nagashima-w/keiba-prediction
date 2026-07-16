@@ -111,4 +111,23 @@ export interface KeibaApi {
    * @param outcomes 一括分析のレースごとのアウトカム
    */
   sendBatchDiscord(outcomes: readonly BatchRaceOutcome[]): Promise<void>;
+
+  /**
+   * renderer側で発生したエラーをmain側のログファイルへ集約する(Task#35 受け入れ条件6)。
+   * ユーザーがログをそのままAIに渡して原因特定できるようにするため、renderer側の console.error の
+   * 代わりに使う。呼び出し失敗(main側の一時的な不調等)はUI表示に影響させないため、
+   * 呼び出し側で reject を無視してよい(ログ集約自体のベストエフォート性)。
+   */
+  logRendererError(payload: {
+    /** どの操作で発生したか(例: "renderer:bulk-import")。 */
+    operation: string;
+    /** エラーメッセージ。 */
+    message: string;
+    /** スタックトレース(取得できれば)。 */
+    stack?: string | null;
+    /** 関連するレースID(あれば)。 */
+    raceId?: string | null;
+    /** 関連するURL(あれば)。 */
+    url?: string | null;
+  }): Promise<void>;
 }

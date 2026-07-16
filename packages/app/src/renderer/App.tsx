@@ -7,6 +7,7 @@ import {
 } from "./batch-analysis-reducer.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
+import { buildRendererErrorPayload } from "./renderer-error-payload.js";
 import { RaceSelection } from "./RaceSelection.js";
 import { SettingsView } from "./SettingsView.js";
 import { VerifyView } from "./VerifyView.js";
@@ -201,7 +202,11 @@ export function App(): React.JSX.Element {
       .catch((e: unknown) => {
         // 通常は per-race の失敗として outcomes に記録されるため、ここに到達するのは
         // resourceManager 取得失敗等の予期しない全体失敗のみ(稀)。
-        console.error("一括取込に失敗しました:", errorMessage(e));
+        // main側のログファイルへ集約する(Task#35)。ログ集約自体の失敗はUI表示に影響させない
+        // (ベストエフォート。呼び出し失敗を無視する)。
+        window.keibaApi
+          .logRendererError(buildRendererErrorPayload("renderer:bulk-import", e))
+          .catch(() => {});
         activeBulkImportRunIdRef.current = null;
         verifyDispatch({ type: "一括取込完了", runId, outcomes: [] });
         // 一部のレースは取込に成功した後で全体例外が伝播した可能性があるため、
@@ -257,6 +262,11 @@ export function App(): React.JSX.Element {
       })
       .catch((e: unknown) => {
         // 一括分析そのものの失敗(通常は個別レース失敗として outcomes に入るため稀)。
+        // main側のログファイルへ集約する(Task#35 code-reviewer指摘: 要修正3-a)。
+        // ログ集約自体の失敗はUI表示に影響させない(ベストエフォート。呼び出し失敗を無視する)。
+        window.keibaApi
+          .logRendererError(buildRendererErrorPayload("renderer:batch-analysis", e))
+          .catch(() => {});
         activeBatchRunIdRef.current = null;
         dispatch({
           type: "一括分析完了",
