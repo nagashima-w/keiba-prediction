@@ -45,6 +45,24 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.getVerifyReportByPromptVersion()).toEqual([]);
   });
 
+  it("listUnimportedRaceIds が組み立てられ、未分析なら空配列を返すこと(Task#31)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(typeof r.listUnimportedRaceIds).toBe("function");
+    expect(r.listUnimportedRaceIds()).toEqual([]);
+  });
+
+  it("listUnimportedRaceIds が分析済みだが結果未取込のレースIDを返すこと(Task#31)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    r.deps.saveAnalysis({
+      raceId: "202605020811",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+    });
+    expect(r.listUnimportedRaceIds()).toEqual(["202605020811"]);
+  });
+
   it("APIキーがあれば analyze は関数として組み立てられる", () => {
     const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
     resources.push(r);

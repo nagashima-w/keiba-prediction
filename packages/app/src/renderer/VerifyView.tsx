@@ -1,4 +1,5 @@
 import type { VerifyState } from "./verify-reducer.js";
+import { summarizeBulkImport } from "./import-batch-summary.js";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
@@ -10,6 +11,7 @@ import {
   formatRate,
   formatYen,
   importButtonLabel,
+  isRowImportDisabled,
   markLabel,
   needsImport,
   overconfidenceLabel,
@@ -24,6 +26,10 @@ export interface VerifyViewProps {
   readonly onImport: (raceId: string) => void;
   /** 履歴・レポートを再取得する操作。 */
   readonly onRefresh: () => void;
+  /** 「未取込をまとめて取り込む」操作(Task#31)。 */
+  readonly onRunBulkImport: () => void;
+  /** 一括取込の中断操作(Task#31)。 */
+  readonly onCancelBulkImport: () => void;
 }
 
 const thStyle: React.CSSProperties = {
@@ -276,6 +282,62 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         </table>
       )}
 
+      {/*
+       * 結果の一括取込(Task#31)。分析済みで結果未取込(race_results に行が1件も無い)の
+       * レースを列挙し、直列に取り込む。境界でキャンセル可能。実行中は再実行を無効化する。
+       */}
+      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>結果の一括取込</h3>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+        <button
+          type="button"
+          onClick={props.onRunBulkImport}
+          disabled={state.bulkImport.running}
+        >
+          {state.bulkImport.running ? "取込中…" : "未取込をまとめて取り込む"}
+        </button>
+        {state.bulkImport.running && (
+          <button
+            type="button"
+            onClick={props.onCancelBulkImport}
+            disabled={state.bulkImport.canceling}
+          >
+            {state.bulkImport.canceling ? "中断待ち…" : "中断"}
+          </button>
+        )}
+        {state.bulkImport.progress !== null && (
+          <span style={{ color: "#666", fontSize: "0.9rem" }}>
+            {state.bulkImport.progress.completedRaces}/
+            {state.bulkImport.progress.totalRaces}
+            {state.bulkImport.progress.currentRaceId !== null &&
+              ` — ${state.bulkImport.progress.currentRaceId}`}
+          </span>
+        )}
+      </div>
+      {!state.bulkImport.running && state.bulkImport.outcomes.length > 0 && (
+        (() => {
+          const summary = summarizeBulkImport(state.bulkImport.outcomes);
+          return (
+            <div style={{ color: "#333", fontSize: "0.9rem", marginTop: "0.35rem" }}>
+              <p style={{ margin: "0.15rem 0" }}>
+                完了: 取込{summary.importedCount}件 / 未確定スキップ
+                {summary.notConfirmedCount}件 / 失敗{summary.failureCount}件
+                {summary.skippedCount > 0 && ` / 中断スキップ${summary.skippedCount}件`}
+              </p>
+              {summary.notConfirmedRaceIds.length > 0 && (
+                <p style={{ margin: "0.15rem 0", color: "#a60" }}>
+                  未確定スキップ: {summary.notConfirmedRaceIds.join(", ")}
+                </p>
+              )}
+              {summary.failedRaceIds.length > 0 && (
+                <p style={{ margin: "0.15rem 0", color: "#c00" }}>
+                  失敗: {summary.failedRaceIds.join(", ")}
+                </p>
+              )}
+            </div>
+          );
+        })()
+      )}
+
       {/* 分析履歴一覧。 */}
       <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>分析履歴</h3>
       {state.historyError !== null && (
@@ -320,7 +382,10 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
                       <button
                         type="button"
                         onClick={() => props.onImport(item.raceId)}
-                        disabled={importing}
+                        disabled={isRowImportDisabled(
+                          importing,
+                          state.bulkImport.running,
+                        )}
                       >
                         {importing ? "取込中…" : importButtonLabel(item)}
                       </button>

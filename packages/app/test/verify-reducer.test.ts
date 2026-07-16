@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   AnalysisHistoryItem,
+  BulkImportRaceOutcome,
   PromptVersionVerifyReportView,
   VerifyReportView,
 } from "../src/shared/analysis-types.js";
@@ -172,5 +173,93 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     expect(s2.importNotice).not.toBeNull();
     const s3 = verifyReducer(s2, { type: "取込開始", raceId: "R1" });
     expect(s3.importNotice).toBeNull();
+  });
+
+  describe("一括取込(bulkImport)の状態遷移(Task#31)", () => {
+    const sampleOutcomes: BulkImportRaceOutcome[] = [
+      { raceId: "R1", status: "imported", error: null },
+      { raceId: "R2", status: "not_confirmed", error: null },
+      { raceId: "R3", status: "failure", error: "取得失敗" },
+    ];
+
+    it("初期状態は未実行・進捗なし・結果空であること", () => {
+      const s = init();
+      expect(s.bulkImport.running).toBe(false);
+      expect(s.bulkImport.canceling).toBe(false);
+      expect(s.bulkImport.progress).toBeNull();
+      expect(s.bulkImport.outcomes).toEqual([]);
+    });
+
+    it("一括取込開始で running=true・runId が進み、旧結果・進捗がクリアされること", () => {
+      const before = init();
+      const s = verifyReducer(before, { type: "一括取込開始" });
+      expect(s.bulkImport.running).toBe(true);
+      expect(s.bulkImport.canceling).toBe(false);
+      expect(s.bulkImport.progress).toBeNull();
+      expect(s.bulkImport.outcomes).toEqual([]);
+      expect(s.bulkImport.runId).toBe(before.bulkImport.runId + 1);
+    });
+
+    it("実行中でない状態での一括取込開始でも running=true になり多重起動を妨げないが、" +
+      "既に実行中の状態からの再度の開始は現状維持であること(二重実行防止)", () => {
+      const started = verifyReducer(init(), { type: "一括取込開始" });
+      const again = verifyReducer(started, { type: "一括取込開始" });
+      expect(again).toBe(started);
+    });
+
+    it("一括取込進捗更新: 現在の実行世代の進捗のみ反映すること(in-flightガード)", () => {
+      const started = verifyReducer(init(), { type: "一括取込開始" });
+      const progress = { completedRaces: 1, totalRaces: 3, currentRaceId: "R2" };
+      const updated = verifyReducer(started, {
+        type: "一括取込進捗更新",
+        runId: started.bulkImport.runId,
+        progress,
+      });
+      expect(updated.bulkImport.progress).toEqual(progress);
+
+      // 古い世代の進捗は無視される。
+      const ignored = verifyReducer(updated, {
+        type: "一括取込進捗更新",
+        runId: started.bulkImport.runId - 1,
+        progress: { completedRaces: 99, totalRaces: 99, currentRaceId: "旧" },
+      });
+      expect(ignored.bulkImport.progress).toEqual(progress);
+    });
+
+    it("一括取込完了: running=false・outcomes を格納し、進捗をクリアすること", () => {
+      const started = verifyReducer(init(), { type: "一括取込開始" });
+      const done = verifyReducer(started, {
+        type: "一括取込完了",
+        runId: started.bulkImport.runId,
+        outcomes: sampleOutcomes,
+      });
+      expect(done.bulkImport.running).toBe(false);
+      expect(done.bulkImport.canceling).toBe(false);
+      expect(done.bulkImport.progress).toBeNull();
+      expect(done.bulkImport.outcomes).toEqual(sampleOutcomes);
+    });
+
+    it("一括取込完了: 古い実行世代の完了は無視すること(in-flightガード)", () => {
+      const started = verifyReducer(init(), { type: "一括取込開始" });
+      const ignored = verifyReducer(started, {
+        type: "一括取込完了",
+        runId: started.bulkImport.runId - 1,
+        outcomes: sampleOutcomes,
+      });
+      expect(ignored).toBe(started);
+    });
+
+    it("一括取込中断要求: 実行中のみ canceling=true にすること", () => {
+      const started = verifyReducer(init(), { type: "一括取込開始" });
+      const canceling = verifyReducer(started, { type: "一括取込中断要求" });
+      expect(canceling.bulkImport.canceling).toBe(true);
+      expect(canceling.bulkImport.running).toBe(true);
+    });
+
+    it("一括取込中断要求: 未実行中は何もしないこと", () => {
+      const s = init();
+      const result = verifyReducer(s, { type: "一括取込中断要求" });
+      expect(result).toBe(s);
+    });
   });
 });

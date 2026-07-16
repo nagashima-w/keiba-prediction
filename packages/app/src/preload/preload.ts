@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import type { KeibaApi } from "../shared/api.js";
-import type { BatchProgress } from "../shared/analysis-types.js";
+import type { BatchProgress, BulkImportProgress } from "../shared/analysis-types.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 
 /**
@@ -39,6 +39,20 @@ const api: KeibaApi = {
     ipcRenderer.on(IPC_CHANNELS.batchProgress, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.batchProgress, handler);
+    };
+  },
+  runBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.runBulkImport),
+  cancelBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.cancelBulkImport),
+  onBulkImportProgress: (listener) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      progress: BulkImportProgress,
+    ): void => {
+      listener(progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.bulkImportProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.bulkImportProgress, handler);
     };
   },
 };

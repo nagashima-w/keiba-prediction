@@ -15,6 +15,7 @@ import {
   formatRate,
   formatYen,
   importButtonLabel,
+  isRowImportDisabled,
   markLabel,
   needsImport,
   overconfidenceLabel,
@@ -206,6 +207,21 @@ describe("verify画面の表示整形(純関数)", () => {
       expect(additionalInstructionsSummary(["指示A", "指示B", null])).toBe(
         "指示A / 指示B / なし",
       );
+    });
+  });
+
+  describe("isRowImportDisabled(行単位の取込ボタンの無効化判定、Task#31 code-reviewer提案対応)", () => {
+    it("その行が取込中なら無効化すること", () => {
+      expect(isRowImportDisabled(true, false)).toBe(true);
+    });
+    it("一括取込が実行中なら、その行が取込中でなくても無効化すること", () => {
+      expect(isRowImportDisabled(false, true)).toBe(true);
+    });
+    it("行取込中かつ一括取込中でも無効化すること", () => {
+      expect(isRowImportDisabled(true, true)).toBe(true);
+    });
+    it("どちらでもなければ無効化しないこと", () => {
+      expect(isRowImportDisabled(false, false)).toBe(false);
     });
   });
 
