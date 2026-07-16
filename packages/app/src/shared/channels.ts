@@ -41,6 +41,12 @@ export const IPC_CHANNELS = {
   cancelBulkImport: "result:cancel-bulk-import",
   /** 一括取込の全体進捗イベント(main→renderer への一方向通知)。 */
   bulkImportProgress: "result:bulk-import-progress",
+  /**
+   * renderer側で発生したエラーをmain側のログファイルへ集約する(Task#35)。
+   * renderer → main の一方向通知だが、他チャネルと同様に invoke/handle で統一する
+   * (ipcMain.on を新たに使わずに済み、既存の結線テストのモック形状を変えなくて良いため)。
+   */
+  logRendererError: "log:renderer-error",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

@@ -66,6 +66,13 @@ export interface HttpClientOptions {
   timeoutMs?: number;
   /** デコード時のデフォルトエンコーディング。charset未指定時に使う。デフォルト utf-8。 */
   defaultEncoding?: SupportedEncoding;
+  /**
+   * サポート外charset検出時などの警告メッセージを受け取るコールバック(要修正4)。
+   * core パッケージは electron に依存できないため、呼び出し側(app の main プロセス)が
+   * ログ基盤(main/logger.ts の logWarn)へ接続する際に注入する。未指定時は従来どおり
+   * console.warn を使う(後方互換)。
+   */
+  onWarn?: (message: string) => void;
 }
 
 /** fetchText の呼び出しオプション。 */
@@ -154,6 +161,7 @@ export class HttpClient {
   private readonly maxRetries: number;
   private readonly timeoutMs: number;
   private readonly defaultEncoding: SupportedEncoding;
+  private readonly onWarn: (message: string) => void;
 
   /** 直近リクエストの発火時刻(未発火なら負の無限大)。 */
   private lastStart = Number.NEGATIVE_INFINITY;
@@ -167,6 +175,8 @@ export class HttpClient {
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.defaultEncoding = options.defaultEncoding ?? "utf-8";
+    // eslint-disable-next-line no-console
+    this.onWarn = options.onWarn ?? ((message) => console.warn(message));
   }
 
   /**
@@ -182,7 +192,7 @@ export class HttpClient {
       } else {
         // charsetが明示されているのにサポート外の場合は、黙ってフォールバックせず警告する。
         if (raw) {
-          console.warn(
+          this.onWarn(
             `サポート外のcharset(${raw})を検出したため、${this.defaultEncoding}にフォールバックします: ${url}`,
           );
         }

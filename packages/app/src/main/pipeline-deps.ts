@@ -72,6 +72,13 @@ export interface PipelineWiringConfig {
    * この層を electron 非依存に保つため、アダプタ生成は呼び出し側(ipc.ts)が担う。
    */
   readonly fetch?: FetchLike;
+  /**
+   * HttpClient のサポート外charset警告等を受け取るコールバック(要修正4)。
+   * core パッケージ(HttpClient)は electron に依存できないため、ここで受け取った関数を
+   * そのまま HttpClient へ注入する。呼び出し側(ipc.ts)がログ基盤(logWarn)へ接続する。
+   * 省略時は HttpClient の既定(console.warn)が使われる。
+   */
+  readonly onWarn?: (message: string) => void;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -118,7 +125,7 @@ export function createPipelineDeps(
   const db = new Database(config.dbPath);
   const cache = new ScrapeCache({ database: db });
   // fetch を注入すると undici 既定経路を通らず、Electron main では net.fetch(Chromium スタック)で取得する。
-  const httpClient = new HttpClient({ fetch: config.fetch });
+  const httpClient = new HttpClient({ fetch: config.fetch, onWarn: config.onWarn });
   const fetcher = new CachedFetcher({ fetcher: httpClient, cache });
   const store = new AnalysisStore({ database: db });
 

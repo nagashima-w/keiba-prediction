@@ -18,14 +18,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IPC_CHANNELS } from "../src/shared/channels.js";
 import type { BatchRaceOutcome } from "../src/shared/analysis-types.js";
 
-const { handleMock, createPipelineDepsMock, runAnalysisMock, ctx } = vi.hoisted(
-  () => ({
+const { handleMock, createPipelineDepsMock, runAnalysisMock, logErrorMock, ctx } =
+  vi.hoisted(() => ({
     handleMock: vi.fn(),
     createPipelineDepsMock: vi.fn(),
     runAnalysisMock: vi.fn(),
+    logErrorMock: vi.fn(),
     ctx: { userData: "" },
-  }),
-);
+  }));
 
 vi.mock("electron", () => ({
   app: {
@@ -42,6 +42,12 @@ vi.mock("../src/main/pipeline-deps.js", () => ({
 // runAnalysis 本体は実IOを伴うためモックする(結線=一括オーケストレーションのみ検証)。
 vi.mock("../src/main/analysis-pipeline.js", () => ({
   runAnalysis: runAnalysisMock,
+}));
+
+// Task#35: ログ基盤の実electron-logへは触れず、失敗時にlogErrorが呼ばれることだけを検証する。
+vi.mock("../src/main/logger.js", () => ({
+  logError: logErrorMock,
+  setSecretsProvider: vi.fn(),
 }));
 
 /** 最小の分析結果を返す。 */
@@ -82,6 +88,7 @@ beforeEach(() => {
   handleMock.mockReset();
   createPipelineDepsMock.mockReset();
   runAnalysisMock.mockReset();
+  logErrorMock.mockReset();
   senderSend.mockReset();
   tempDir = mkdtempSync(path.join(tmpdir(), "keiba-ipc-batch-"));
   ctx.userData = tempDir;
@@ -180,6 +187,13 @@ describe("ipc 一括分析ハンドラ", () => {
       "success",
     ]);
     expect(outcomes[1]!.error).toContain("R2の取得に失敗");
+
+    // Task#35: 失敗レースは操作名・raceId付きでログされる(AIが原因特定できる粒度の受け入れ条件)。
+    expect(logErrorMock).toHaveBeenCalledTimes(1);
+    const [operation, error, context] = logErrorMock.mock.calls[0]!;
+    expect(operation).toBe("analysis:run-batch:race");
+    expect((error as Error).message).toBe("R2の取得に失敗");
+    expect(context).toEqual({ raceId: R2 });
   });
 
   it("連続実行で前回の中断フラグが残らない(新しい実行は全レースを処理する)", async () => {

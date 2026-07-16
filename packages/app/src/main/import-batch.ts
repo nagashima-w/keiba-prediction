@@ -46,6 +46,12 @@ export interface BulkImportRunnerDeps {
    * テストではモック(vi.fn(async () => {}))に差し替え、実時間を消費せずに検証する。
    */
   readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * 1レースの取込が失敗したときの通知(省略可、Task#35 ログ基盤)。
+   * ipc.ts が構造化エラーログ(raceId付き)を残すために使う。失敗アウトカムの記録には影響しない
+   * (この関数が例外を投げても呼び出し元は無視し、全体処理は継続する)。
+   */
+  readonly onError?: (raceId: string, error: unknown) => void;
 }
 
 /** setTimeout ベースの既定の待機。 */
@@ -104,6 +110,12 @@ export async function runBulkImport(
           : { raceId, status: "not_confirmed", error: null },
       );
     } catch (e) {
+      // ログ通知はベストエフォート: onError 自体が例外を投げても全体処理を止めない(防御的)。
+      try {
+        deps.onError?.(raceId, e);
+      } catch {
+        // 無視する(ログ記録の失敗で取込処理そのものを壊さない)。
+      }
       outcomes.push({ raceId, status: "failure", error: errorMessage(e) });
     }
     processed += 1;

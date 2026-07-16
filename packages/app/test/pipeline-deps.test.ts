@@ -153,4 +153,28 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(fetch.mock.calls[0]![0]).toContain("race_list_sub.html");
     expect(entries).toEqual([]);
   });
+
+  it("config.onWarn を渡すと、HttpClientのサポート外charset警告がconsole.warnではなくonWarnへ届くこと(要修正4: coreはelectronに依存できないため注入経路を組み立てる)", async () => {
+    const shiftJisResponse: FetchResponse = {
+      status: 200,
+      ok: true,
+      headers: {
+        get: (name: string): string | null =>
+          name.toLowerCase() === "content-type"
+            ? "text/html; charset=shift_jis"
+            : null,
+      },
+      arrayBuffer: async (): Promise<ArrayBuffer> => new ArrayBuffer(0),
+    };
+    const fetch = vi.fn<FetchLike>(async () => shiftJisResponse);
+    const onWarn = vi.fn();
+
+    const r = createPipelineDeps({ dbPath: ":memory:", fetch, onWarn });
+    resources.push(r);
+
+    await r.listRaces(parseKaisaiDate("20260101"));
+
+    expect(onWarn).toHaveBeenCalledTimes(1);
+    expect(onWarn.mock.calls[0]![0]).toContain("shift_jis");
+  });
 });

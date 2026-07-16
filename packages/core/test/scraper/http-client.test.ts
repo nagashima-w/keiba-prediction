@@ -424,6 +424,23 @@ describe("HttpClient", () => {
         text,
       );
     });
+
+    it("onWarnを指定した場合、サポート外charset検出時の警告はconsole.warnではなくonWarnへ渡されること(要修正4: core はelectronに依存できないため注入可能にする)", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const onWarn = vi.fn();
+      const text = "有馬記念";
+      const fetch = vi.fn<FetchLike>(async () =>
+        makeResponse(200, text, "text/html; charset=shift_jis"),
+      );
+      const client = new HttpClient({ fetch, minIntervalMs: 0, onWarn });
+
+      await expect(client.fetchText("https://example.test/sjis")).resolves.toBe(
+        text,
+      );
+      expect(onWarn).toHaveBeenCalledTimes(1);
+      expect(onWarn.mock.calls[0]![0]).toContain("shift_jis");
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 
   describe("公開API(index.tsからの再エクスポート)", () => {
