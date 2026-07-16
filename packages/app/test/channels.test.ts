@@ -34,4 +34,10 @@ describe("IPCチャネル定義", () => {
   it("一括サマリのDiscord送信チャネルが定義されている", () => {
     expect(IPC_CHANNELS.sendBatchDiscord).toBe("notify:discord-batch");
   });
+
+  it("結果の一括取込用のチャネル(実行・中断・全体進捗)が定義されている(Task#31)", () => {
+    expect(IPC_CHANNELS.runBulkImport).toBe("result:run-bulk-import");
+    expect(IPC_CHANNELS.cancelBulkImport).toBe("result:cancel-bulk-import");
+    expect(IPC_CHANNELS.bulkImportProgress).toBe("result:bulk-import-progress");
+  });
 });

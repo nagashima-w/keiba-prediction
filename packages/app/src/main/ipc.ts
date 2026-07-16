@@ -16,6 +16,8 @@ import type {
   AnalysisHistoryItem,
   BatchProgress,
   BatchRaceOutcome,
+  BulkImportProgress,
+  BulkImportRaceOutcome,
   ImportResultOutcome,
   PromptVersionVerifyReportView,
   RaceListItem,
@@ -28,6 +30,7 @@ import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
 import { buildAppInfo } from "./app-info.js";
 import { runAnalysis } from "./analysis-pipeline.js";
 import { runBatchAnalysis } from "./analysis-batch.js";
+import { runBulkImport } from "./import-batch.js";
 import { netFetchAdapter } from "./net-fetch-adapter.js";
 import { createPipelineDeps, type PipelineResources } from "./pipeline-deps.js";
 import { ResourceManager } from "./resource-manager.js";
@@ -74,6 +77,14 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.importResult, (_event, raceId: unknown) =>
     handleImportResult(String(raceId)),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.runBulkImport, (event) =>
+    handleRunBulkImport(event),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.cancelBulkImport, () =>
+    handleCancelBulkImport(),
   );
 
   ipcMain.handle(IPC_CHANNELS.getVerifyReport, () => handleGetVerifyReport());
@@ -228,6 +239,49 @@ async function handleImportResult(
   return resourceManager.runExclusive((resources) =>
     resources.importResult(raceId),
   );
+}
+
+/**
+ * 一括取込の中断フラグ(main プロセス内の単一実行を前提とした module 状態)。
+ * runBulkImport 開始時に false へリセットし、cancel チャネルで true にする。
+ * 一括分析(batchCancelRequested)とは別のフラグを持つ(同時に走らない前提だが、意味的に独立させる)。
+ */
+let bulkImportCancelRequested = false;
+
+/**
+ * 一括取込ハンドラの実処理(Task#31)。分析済みで結果未取込のレース(listUnimportedRaceIds、
+ * NOT EXISTSで判定済み)を直列に取り込み、per-race のアウトカムを返す。
+ * 全体を runExclusive 1回で包む(粗い粒度)ことで、取込中は DB を閉じさせない。
+ * 進捗は bulk-import-progress チャネルで renderer へ一方向通知する。
+ *
+ * 設計判断(code-reviewer提案対応): 一括分析(handleRunBatchAnalysis)と一括取込は互いの
+ * running 状態を見ておらず、同時実行を妨げない。これは意図した許容であり修正不要と判断した。
+ * 理由は次の2点で、同時実行しても実害が無いため:
+ * 1. 実HTTPリクエストは共有 HttpClient のレート制限(1.5秒間隔)で直列化される
+ *    (resourceManager.runExclusive 自体は名前に反して排他しないが、HttpClient 側で律速される)。
+ * 2. 結果保存(saveResult)は upsert であり冪等なため、仮に同一レースへ競合して書き込まれても
+ *    最終状態が壊れることはない。
+ */
+async function handleRunBulkImport(
+  event: IpcMainInvokeEvent,
+): Promise<BulkImportRaceOutcome[]> {
+  // 新しい実行の開始時に前回の中断要求を必ずクリアする(残留で即スキップにならないように)。
+  bulkImportCancelRequested = false;
+  return resourceManager.runExclusive((resources) => {
+    const raceIds = resources.listUnimportedRaceIds();
+    return runBulkImport(raceIds, {
+      importOne: (raceIdStr) => resources.importResult(parseRaceId(raceIdStr)),
+      shouldCancel: () => bulkImportCancelRequested,
+      onProgress: (progress: BulkImportProgress) => {
+        event.sender.send(IPC_CHANNELS.bulkImportProgress, progress);
+      },
+    });
+  });
+}
+
+/** 一括取込の中断要求ハンドラ。次のレース境界で停止させるためフラグを立てる。 */
+function handleCancelBulkImport(): void {
+  bulkImportCancelRequested = true;
 }
 
 /** 検証レポート取得ハンドラの実処理。 */

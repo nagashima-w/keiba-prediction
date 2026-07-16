@@ -518,6 +518,75 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("listUnimportedRaceIds(分析済みで結果未取込のレース列挙。Task#31)", () => {
+    it("分析済みだが race_results に行が1件も無いレースを列挙すること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "未取込レース" }));
+      const ids = store.listUnimportedRaceIds();
+      expect(ids).toEqual(["未取込レース"]);
+      store.close();
+    });
+
+    it("race_results に行があるレースは列挙されないこと(着順が数値の通常ケース)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "取込済みレース" }));
+      store.saveResult("取込済みレース", [
+        { umaban: 1, finishPosition: 1 },
+        { umaban: 2, finishPosition: 2 },
+      ]);
+      expect(store.listUnimportedRaceIds()).toEqual([]);
+      store.close();
+    });
+
+    it("境界値: 全馬 finish_position=NULL(中止・除外のみ)のレースは行が存在するため取込済み扱いになること" +
+      "(COUNT(finish_position)によるNULL数え落としのバグを再発させないための回帰テスト)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "全馬中止レース" }));
+      store.saveResult("全馬中止レース", [
+        { umaban: 1, finishPosition: null },
+        { umaban: 2, finishPosition: null },
+      ]);
+      // race_results に行(値はNULLでも)が存在するので「行の有無」判定では取込済み扱い。
+      expect(store.listUnimportedRaceIds()).toEqual([]);
+      store.close();
+    });
+
+    it("同一レースを複数回分析していても重複せず1回だけ列挙すること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({ raceId: "複数回分析レース", analyzedAt: "2026-07-08T09:00:00.000Z" }),
+      );
+      store.saveAnalysis(
+        makeRecord({ raceId: "複数回分析レース", analyzedAt: "2026-07-08T15:00:00.000Z" }),
+      );
+      expect(store.listUnimportedRaceIds()).toEqual(["複数回分析レース"]);
+      store.close();
+    });
+
+    it("分析が1件も無ければ空配列を返すこと", () => {
+      const store = new AnalysisStore();
+      expect(store.listUnimportedRaceIds()).toEqual([]);
+      store.close();
+    });
+
+    it("分析の無いレースにだけ結果があっても列挙対象にならないこと(analyses起点で列挙するため)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("分析なしレース", [{ umaban: 1, finishPosition: 1 }]);
+      expect(store.listUnimportedRaceIds()).toEqual([]);
+      store.close();
+    });
+
+    it("未取込・取込済みが混在する場合、未取込のレースだけをレースID昇順で列挙すること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "B未取込" }));
+      store.saveAnalysis(makeRecord({ raceId: "A未取込" }));
+      store.saveAnalysis(makeRecord({ raceId: "C取込済み" }));
+      store.saveResult("C取込済み", [{ umaban: 1, finishPosition: 1 }]);
+      expect(store.listUnimportedRaceIds()).toEqual(["A未取込", "B未取込"]);
+      store.close();
+    });
+  });
+
   describe("ScrapeCache とのDB共有(テーブル独立)", () => {
     it("同一のbetter-sqlite3 DBを共有しても互いのテーブルを壊さないこと", () => {
       const db = new Database(":memory:");

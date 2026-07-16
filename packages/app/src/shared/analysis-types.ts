@@ -360,6 +360,35 @@ export type ImportResultOutcome =
       readonly raceId: string;
     };
 
+/**
+ * 一括取込: 1レース分の結果(main→renderer に invoke の戻り値として返す)。Task#31。
+ * - "imported": 結果を確定・取込済み(複勝払戻の有無は問わない)。
+ * - "not_confirmed": まだ発走前・確定前(#30の判定を自動スキップとして扱う。エラーではない)。
+ * - "failure": 取込処理中に例外が発生した(error にメッセージが入る)。
+ * - "skipped": 中断要求により未実行のまま打ち切られた。
+ */
+export interface BulkImportRaceOutcome {
+  /** レースID(12桁)。 */
+  readonly raceId: string;
+  /** 実行結果の区分。 */
+  readonly status: "imported" | "not_confirmed" | "failure" | "skipped";
+  /** 失敗時のエラーメッセージ(それ以外は null)。 */
+  readonly error: string | null;
+}
+
+/**
+ * 一括取込の全体進捗(main→renderer に webContents.send で通知)。Task#31。
+ * 既存の一括分析(BatchProgress)と異なり、取込にはレース内段階が無いため単純な件数のみ持つ。
+ */
+export interface BulkImportProgress {
+  /** 完了したレース数(0起点。実行中レースは含まない)。 */
+  readonly completedRaces: number;
+  /** 対象レースの総数。 */
+  readonly totalRaces: number;
+  /** 現在処理中のレースID(境界・完了時は null)。 */
+  readonly currentRaceId: string | null;
+}
+
 /** レース一覧の1レース(renderer 表示用)。 */
 export interface RaceListItem {
   /** レースID(12桁)。 */

@@ -59,6 +59,18 @@ export function importButtonLabel(item: AnalysisHistoryItem): string {
   return item.hasResult ? "再取込(払戻待ち)" : "結果を取り込む";
 }
 
+/**
+ * 分析履歴一覧の行単位「取込」ボタンを無効化するか(Task#31 code-reviewer提案対応)。
+ * その行自体が取込中の場合に加え、一括取込が実行中の場合も無効化する
+ * (一括取込と同じレースへの行単位取込が競合して二重に保存されるのを防ぐため)。
+ */
+export function isRowImportDisabled(
+  importing: boolean,
+  bulkImportRunning: boolean,
+): boolean {
+  return importing || bulkImportRunning;
+}
+
 /** 補正方向(raised/lowered/unchanged)を日本語ラベルにする(Task#26)。 */
 export function directionLabel(direction: AdjustmentDirection): string {
   switch (direction) {

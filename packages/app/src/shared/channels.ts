@@ -32,6 +32,15 @@ export const IPC_CHANNELS = {
   resetSettings: "settings:reset",
   /** 一括分析の横断サマリを Discord Webhook へ1通で送信する。 */
   sendBatchDiscord: "notify:discord-batch",
+  /**
+   * 分析済みで結果未取込のレースを列挙し直列に一括取込する(Task#31)。
+   * 未取込判定は NOT EXISTS(race_results に行が1件も無い)を用いる。
+   */
+  runBulkImport: "result:run-bulk-import",
+  /** 実行中の一括取込に中断を要求する(次のレース境界で停止)。 */
+  cancelBulkImport: "result:cancel-bulk-import",
+  /** 一括取込の全体進捗イベント(main→renderer への一方向通知)。 */
+  bulkImportProgress: "result:bulk-import-progress",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

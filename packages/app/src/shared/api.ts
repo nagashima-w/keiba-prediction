@@ -3,6 +3,8 @@ import type {
   AnalysisHistoryItem,
   BatchProgress,
   BatchRaceOutcome,
+  BulkImportProgress,
+  BulkImportRaceOutcome,
   ImportResultOutcome,
   PromptVersionVerifyReportView,
   RaceListItem,
@@ -57,6 +59,26 @@ export interface KeibaApi {
    * @param raceId レースID(12桁)
    */
   importResult(raceId: string): Promise<ImportResultOutcome>;
+
+  /**
+   * 分析済みで結果未取込のレースを列挙し、直列に一括取込する(Task#31)。
+   * 全体進捗は onBulkImportProgress で購読する。1レースの失敗で全体を止めず、
+   * per-race の取込/未確定スキップ/失敗/中断スキップを配列で返す。
+   */
+  runBulkImport(): Promise<readonly BulkImportRaceOutcome[]>;
+
+  /**
+   * 実行中の一括取込に中断を要求する。次のレース境界で停止する
+   * (実行中のレースは完走させる)。実行していないときは無視される。
+   */
+  cancelBulkImport(): Promise<void>;
+
+  /**
+   * 一括取込の全体進捗イベントを購読する。
+   * @param listener 全体進捗(完了レース数・総数・現在レースID)を受け取るコールバック
+   * @returns 購読を解除する関数
+   */
+  onBulkImportProgress(listener: (progress: BulkImportProgress) => void): () => void;
 
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
   getVerifyReport(): Promise<VerifyReportView>;

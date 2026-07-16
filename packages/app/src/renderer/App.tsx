@@ -73,6 +73,20 @@ export function App(): React.JSX.Element {
     return unsubscribe;
   }, []);
 
+  // 実行中一括取込(Task#31)の世代ID。一括分析と同じ in-flight ガードの仕組み。
+  const activeBulkImportRunIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = window.keibaApi.onBulkImportProgress((progress) => {
+      verifyDispatch({
+        type: "一括取込進捗更新",
+        runId: activeBulkImportRunIdRef.current ?? -1,
+        progress,
+      });
+    });
+    return unsubscribe;
+  }, []);
+
   // Discord通知設定(Webhook URL 設定有無・自動送信ON/OFF)を読み込む。
   const loadNotifySettings = useCallback(() => {
     window.keibaApi
@@ -170,6 +184,37 @@ export function App(): React.JSX.Element {
     },
     [loadVerifyData],
   );
+
+  // 「未取込をまとめて取り込む」(Task#31)。main側でNOT EXISTS判定した未取込レースを直列取込する。
+  const handleRunBulkImport = useCallback(() => {
+    const runId = verify.bulkImport.runId + 1;
+    activeBulkImportRunIdRef.current = runId;
+    verifyDispatch({ type: "一括取込開始" });
+    window.keibaApi
+      .runBulkImport()
+      .then((outcomes) => {
+        activeBulkImportRunIdRef.current = null;
+        verifyDispatch({ type: "一括取込完了", runId, outcomes });
+        // 取込後に検証レポート・履歴を再読込する(取込結果を画面に反映する)。
+        loadVerifyData();
+      })
+      .catch((e: unknown) => {
+        // 通常は per-race の失敗として outcomes に記録されるため、ここに到達するのは
+        // resourceManager 取得失敗等の予期しない全体失敗のみ(稀)。
+        console.error("一括取込に失敗しました:", errorMessage(e));
+        activeBulkImportRunIdRef.current = null;
+        verifyDispatch({ type: "一括取込完了", runId, outcomes: [] });
+        // 一部のレースは取込に成功した後で全体例外が伝播した可能性があるため、
+        // 画面が古いまま残らないよう安全側でレポート・履歴を再読込する(code-reviewer提案対応)。
+        loadVerifyData();
+      });
+  }, [verify.bulkImport.runId, loadVerifyData]);
+
+  const handleCancelBulkImport = useCallback(() => {
+    verifyDispatch({ type: "一括取込中断要求" });
+    // main 側の中断フラグを立てる(次のレース境界で停止)。失敗は無視(UI表示は境界停止で反映)。
+    window.keibaApi.cancelBulkImport().catch(() => {});
+  }, []);
 
   const handleFetch = useCallback(() => {
     const date = state.selection.date;
@@ -343,6 +388,8 @@ export function App(): React.JSX.Element {
           state={verify}
           onImport={handleImport}
           onRefresh={loadVerifyData}
+          onRunBulkImport={handleRunBulkImport}
+          onCancelBulkImport={handleCancelBulkImport}
         />
       )}
 

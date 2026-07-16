@@ -453,6 +453,31 @@ export class AnalysisStore {
     });
   }
 
+  /**
+   * 分析済み(analyses に行がある)だが結果未取込(race_results に行が1件も無い)のレースIDを
+   * レースID昇順で列挙する(Task#31 一括取込)。
+   *
+   * 判定は必ず `NOT EXISTS`(race_results 側に行そのものが存在するか)で行う。
+   * `COUNT(finish_position)` 等の値の個数で判定してはならない: finish_position は
+   * 中止・除外で NULL を許容する列であり、COUNTはNULLを数えないため、全馬が中止・除外で
+   * finish_position が全行NULLのレース(=取込済み)を誤って未取込と判定してしまう
+   * (「値の有無」と「行の有無」の混同。docs/handover-next-session.md 4章)。
+   * DISTINCT により、同一レースを複数回分析していても1回だけ返す。
+   */
+  listUnimportedRaceIds(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT race_id AS raceId
+           FROM ${ANALYSES_TABLE} a
+           WHERE NOT EXISTS (
+             SELECT 1 FROM ${RACE_RESULTS_TABLE} r WHERE r.race_id = a.race_id
+           )
+           ORDER BY race_id`,
+      )
+      .all() as Array<{ raceId: string }>;
+    return rows.map((r) => r.raceId);
+  }
+
   /** 内部の better-sqlite3 Database への参照(検証・拡張用)。 */
   get rawDatabase(): Database.Database {
     return this.db;
