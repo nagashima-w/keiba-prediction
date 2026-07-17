@@ -145,6 +145,38 @@ export function venueKindOfRaceId(raceId: RaceId): RaceIdVenueKind {
 }
 
 /**
+ * 地方(NAR)のレースIDから開催日(YYYYMMDD)を導出する。
+ *
+ * 地方(場コード30〜64)は7〜10桁目に開催日(月日)が直接埋め込まれているため、YYYY(1〜4桁目)+
+ * 月日(7〜10桁目)から KaisaiDate を復元できる。中央(場コード01〜10)の7〜10桁目は回次・日次であり
+ * 日付ではないため、日付を復元できず null を返す。
+ *
+ * parseRaceId とは異なり、不正な入力(12桁でない・場コードが地方の範囲外・月日が実在日でない等)でも
+ * 例外を投げず null を返す。表示側(旧データの開催日補完)で「復元できなければ日付不明にフォールバック」
+ * という使い方をするための設計(検証済みの RaceId を要求せず、生の raceId 文字列をそのまま受け取れる)。
+ *
+ * @param raceId レースID(12桁数字の文字列。未検証でよい)
+ * @returns 導出できた開催日(KaisaiDate)。地方でない・復元不可・不正な場合は null
+ */
+export function kaisaiDateFromNarRaceId(raceId: string): KaisaiDate | null {
+  try {
+    // 場コード判定・月日の実在日チェックは parseRaceId 側の検証済みロジックに委譲する。
+    // ここで場コード範囲を独自に再実装しないことで、parseRaceId の場コード判定が
+    // 将来変わった際の追従漏れ(このヘルパだけ判定がずれる事故)を防ぐ。
+    const parsed = parseRaceId(raceId);
+    if (venueKindOfRaceId(parsed) !== "nar") {
+      return null;
+    }
+
+    const candidate =
+      parsed.slice(0, 4) + parsed.slice(6, 8) + parsed.slice(8, 10);
+    return parseKaisaiDate(candidate);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 開催日(YYYYMMDD)をパースする。不正な入力は理由付きの InvalidIdError を投げる。
  * 月・日の範囲に加え、閏年判定を含む実在日チェックを行う(2月30日等は不正)。
  *
