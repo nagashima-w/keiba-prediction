@@ -3,6 +3,7 @@ import type {
   BatchRaceEntry,
   DiscordSendState,
 } from "./batch-analysis-reducer.js";
+import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   collectPerRaceHighlights,
   raceNumberFromRaceId,
@@ -469,6 +470,12 @@ export function BatchAnalysisView(
             {props.discordSend.status === "error" && (
               <span style={{ color: "#c00", marginLeft: "0.5rem" }}>
                 送信に失敗しました: {props.discordSend.message}
+                {props.discordSend.message !== null && (
+                  <CopyErrorButton
+                    operation="一括分析:Discord送信"
+                    message={props.discordSend.message}
+                  />
+                )}
               </span>
             )}
           </div>
@@ -541,6 +548,13 @@ export function BatchAnalysisView(
                       {entry.status === "failure" && (
                         <p style={{ color: "#c00", margin: 0 }}>
                           分析に失敗しました: {entry.error}
+                          {entry.error !== null && (
+                            <CopyErrorButton
+                              operation="一括分析:レース"
+                              message={entry.error}
+                              context={{ raceId: entry.raceId }}
+                            />
+                          )}
                         </p>
                       )}
                       {entry.status === "skipped" && (

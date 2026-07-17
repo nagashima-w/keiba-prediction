@@ -1,4 +1,5 @@
 import type { RaceListItem, RaceVenueKind } from "../shared/analysis-types.js";
+import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { groupRacesByVenue } from "./group-races.js";
 
@@ -117,7 +118,14 @@ export function RaceSelection(props: RaceSelectionProps): React.JSX.Element {
       </div>
 
       {props.error !== null && (
-        <p style={{ color: "#c00" }}>一覧の取得に失敗しました: {props.error}</p>
+        <p style={{ color: "#c00" }}>
+          一覧の取得に失敗しました: {props.error}
+          <CopyErrorButton
+            operation="レース一覧:取得"
+            message={props.error}
+            context={{ date: props.date, venueKind: props.venueKind }}
+          />
+        </p>
       )}
 
       {!props.loading && props.error === null && props.races.length === 0 && (

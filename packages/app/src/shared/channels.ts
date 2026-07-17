@@ -47,6 +47,10 @@ export const IPC_CHANNELS = {
    * (ipcMain.on を新たに使わずに済み、既存の結線テストのモック形状を変えなくて良いため)。
    */
   logRendererError: "log:renderer-error",
+  /** ログ保存ディレクトリを OS のファイラーで開く(Task#36 受け入れ条件1)。 */
+  openLogFolder: "log:open-folder",
+  /** 現行ログ+ローテーション済みログを1ファイルに集約して保存する(Task#36 受け入れ条件2)。 */
+  exportLogs: "log:export",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

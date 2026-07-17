@@ -29,6 +29,17 @@ export type SettingsStatus =
   | "saved"
   | "error";
 
+/** 「ログフォルダを開く」操作の状態(Task#36 受け入れ条件1)。 */
+export type LogFolderStatus = "idle" | "opening" | "success" | "error";
+
+/** 「最新ログをエクスポート」操作の状態(Task#36 受け入れ条件2)。 */
+export type LogExportStatus =
+  | "idle"
+  | "exporting"
+  | "saved"
+  | "canceled"
+  | "error";
+
 /** 設定フォームの状態。数値は文字列で保持する。 */
 export interface SettingsFormState {
   /** 読込済みか(未読込ならフォームを描画しない)。 */
@@ -55,6 +66,17 @@ export interface SettingsFormState {
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
   readonly message: string | null;
+  /** 「ログフォルダを開く」操作の状態(Task#36)。 */
+  readonly logFolderStatus: LogFolderStatus;
+  /** ログフォルダを開く操作の失敗メッセージ(無ければ null)。 */
+  readonly logFolderMessage: string | null;
+  /** 「最新ログをエクスポート」操作の状態(Task#36)。 */
+  readonly logExportStatus: LogExportStatus;
+  /**
+   * ログエクスポート操作のメッセージ(無ければ null)。
+   * status="saved" のときは保存先パス、status="error" のときは失敗メッセージを保持する。
+   */
+  readonly logExportMessage: string | null;
 }
 
 /** reducer が処理するアクション。 */
@@ -79,7 +101,14 @@ export type SettingsAction =
   | { readonly type: "追加指示入力"; readonly value: string }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
-  | { readonly type: "保存失敗"; readonly message: string };
+  | { readonly type: "保存失敗"; readonly message: string }
+  | { readonly type: "ログフォルダを開く開始" }
+  | { readonly type: "ログフォルダを開く成功" }
+  | { readonly type: "ログフォルダを開く失敗"; readonly message: string }
+  | { readonly type: "ログエクスポート開始" }
+  | { readonly type: "ログエクスポート成功"; readonly filePath: string }
+  | { readonly type: "ログエクスポートキャンセル" }
+  | { readonly type: "ログエクスポート失敗"; readonly message: string };
 
 /** 全キーを空文字で初期化したレコードを作る。 */
 function emptyRecord<K extends string>(keys: readonly K[]): Record<K, string> {
@@ -129,6 +158,10 @@ export function createInitialSettingsState(): SettingsFormState {
     additionalInstruction: "",
     status: "idle",
     message: null,
+    logFolderStatus: "idle",
+    logFolderMessage: null,
+    logExportStatus: "idle",
+    logExportMessage: null,
   };
 }
 
@@ -210,6 +243,39 @@ export function settingsReducer(
 
     case "保存失敗":
       return { ...state, status: "error", message: action.message };
+
+    case "ログフォルダを開く開始":
+      return { ...state, logFolderStatus: "opening", logFolderMessage: null };
+
+    case "ログフォルダを開く成功":
+      return { ...state, logFolderStatus: "success", logFolderMessage: null };
+
+    case "ログフォルダを開く失敗":
+      return {
+        ...state,
+        logFolderStatus: "error",
+        logFolderMessage: action.message,
+      };
+
+    case "ログエクスポート開始":
+      return { ...state, logExportStatus: "exporting", logExportMessage: null };
+
+    case "ログエクスポート成功":
+      return {
+        ...state,
+        logExportStatus: "saved",
+        logExportMessage: action.filePath,
+      };
+
+    case "ログエクスポートキャンセル":
+      return { ...state, logExportStatus: "canceled", logExportMessage: null };
+
+    case "ログエクスポート失敗":
+      return {
+        ...state,
+        logExportStatus: "error",
+        logExportMessage: action.message,
+      };
 
     default: {
       // 網羅性チェック(未知のアクションはコンパイル時に検出)。

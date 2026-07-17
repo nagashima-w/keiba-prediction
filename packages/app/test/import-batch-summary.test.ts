@@ -9,7 +9,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { BulkImportRaceOutcome } from "../src/shared/analysis-types.js";
-import { summarizeBulkImport } from "../src/renderer/import-batch-summary.js";
+import {
+  formatFailedRaceErrors,
+  summarizeBulkImport,
+} from "../src/renderer/import-batch-summary.js";
 
 describe("summarizeBulkImport(一括取込の件数集計)", () => {
   it("取込/未確定スキップ/失敗/中断スキップの件数を数えること", () => {
@@ -58,6 +61,47 @@ describe("summarizeBulkImport(一括取込の件数集計)", () => {
       skippedCount: 0,
       notConfirmedRaceIds: [],
       failedRaceIds: [],
+      failedRaceErrors: [],
     });
+  });
+
+  // code-reviewer指摘(Task#36 要修正1): 一括取込失敗一覧にコピー導線が無い前提が誤りだった。
+  // BulkImportRaceOutcome.error に個別エラーメッセージが保持されているため、
+  // raceId+エラーメッセージの一覧を組み立てられるようにする。
+  it("失敗レースのraceIdとエラーメッセージの一覧(failedRaceErrors)を持つこと", () => {
+    const outcomes: BulkImportRaceOutcome[] = [
+      { raceId: "R1", status: "failure", error: "エラーA" },
+      { raceId: "R2", status: "imported", error: null },
+      { raceId: "R3", status: "failure", error: "エラーB" },
+    ];
+    const summary = summarizeBulkImport(outcomes);
+    expect(summary.failedRaceErrors).toEqual([
+      { raceId: "R1", message: "エラーA" },
+      { raceId: "R3", message: "エラーB" },
+    ]);
+  });
+
+  it("失敗レースのエラーメッセージがnullの場合はフォールバック文言を使うこと", () => {
+    const outcomes: BulkImportRaceOutcome[] = [
+      { raceId: "R1", status: "failure", error: null },
+    ];
+    const summary = summarizeBulkImport(outcomes);
+    expect(summary.failedRaceErrors).toEqual([
+      { raceId: "R1", message: "(エラーメッセージなし)" },
+    ]);
+  });
+});
+
+describe("formatFailedRaceErrors(失敗レース一覧のコピー用テキスト整形)", () => {
+  it("raceIdとエラーメッセージを1行ずつ「raceId: message」形式で並べること", () => {
+    const text = formatFailedRaceErrors([
+      { raceId: "R1", message: "エラーA" },
+      { raceId: "R3", message: "エラーB" },
+    ]);
+    expect(text).toBe("R1: エラーA\nR3: エラーB");
+  });
+
+  it("空配列なら空文字列を返すこと", () => {
+    expect(formatFailedRaceErrors([])).toBe("");
   });
 });
