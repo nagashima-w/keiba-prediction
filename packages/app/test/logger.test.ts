@@ -8,6 +8,8 @@
  * このモックはファイルスコープなので、他のテストファイル(ipc.tsを実体で読み込むもの)には影響しない。
  */
 
+import path from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { errorMock, warnMock, infoMock, ctx } = vi.hoisted(() => ({
@@ -45,7 +47,9 @@ beforeEach(() => {
 describe("getLogDirectory(ログディレクトリの取得)", () => {
   it("app.getPath('userData') 配下の logs ディレクトリを返す", async () => {
     const { getLogDirectory } = await import("../src/main/logger.js");
-    expect(getLogDirectory()).toBe("/tmp/keiba-logger-test/logs");
+    // 期待値はnode:pathのjoinで組み立てる(実装側もpath.joinでネイティブのセパレータを
+    // 使ったパスを返すため、期待値をPOSIX形式で固定するとWindows実行時に一致しなくなる)。
+    expect(getLogDirectory()).toBe(path.join(ctx.userData, "logs"));
   });
 });
 
