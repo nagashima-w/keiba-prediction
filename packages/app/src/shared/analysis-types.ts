@@ -17,6 +17,12 @@ export type ProgressStage = "スクレイピング" | "スコアリング" | "LL
 export type RaceVenueKind = "central" | "nar";
 
 /**
+ * 検証レポートの母集団を開催区分で絞り込むフィルタ(core VerifyVenueFilter のプレーン写し。Task#32)。
+ * "all" は絞り込みなし(既定・従来どおりの全体集計)。"central"/"nar" は RaceVenueKind と同じ意味。
+ */
+export type VerifyVenueFilter = "all" | RaceVenueKind;
+
+/**
  * 予想印(core PredictionMark のプレーン写し。IPC越しの共有用)。
  * ◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)。印なし・LLM未使用時は null。
  */

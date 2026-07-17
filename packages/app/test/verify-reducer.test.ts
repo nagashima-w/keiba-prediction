@@ -83,6 +83,42 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     expect(s.importingRaceIds).toEqual([]);
   });
 
+  it("初期状態の地域フィルタは全体(all)であること(Task#32)", () => {
+    const s = init();
+    expect(s.venueFilter).toBe("all");
+  });
+
+  it("地域フィルタ変更で venueFilter を更新すること(Task#32)", () => {
+    const initial = init();
+    const s = verifyReducer(initial, {
+      type: "地域フィルタ変更",
+      venueFilter: "central",
+    });
+    expect(s.venueFilter).toBe("central");
+    // 他の状態フィールド(activeTab等)は元の state 由来のまま(action自体を誤って返していないこと)。
+    expect(s.activeTab).toBe(initial.activeTab);
+    expect(s.history).toBe(initial.history);
+
+    const s2 = verifyReducer(s, {
+      type: "地域フィルタ変更",
+      venueFilter: "nar",
+    });
+    expect(s2.venueFilter).toBe("nar");
+    expect(s2.activeTab).toBe(initial.activeTab);
+  });
+
+  it("地域フィルタ変更は report 等の他フィールドを変えないこと(Task#32)", () => {
+    const withReport = verifyReducer(init(), {
+      type: "レポート取得成功",
+      report: sampleReport,
+    });
+    const s = verifyReducer(withReport, {
+      type: "地域フィルタ変更",
+      venueFilter: "central",
+    });
+    expect(s.report).toEqual(sampleReport);
+  });
+
   it("初期状態は版別レポートも空・未ローディングであること(Task#27)", () => {
     const s = init();
     expect(s.reportsByPromptVersion).toEqual([]);

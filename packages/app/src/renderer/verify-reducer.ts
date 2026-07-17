@@ -13,6 +13,7 @@ import type {
   PromptVersionVerifyReportView,
   RaceBreakdownView,
   VerifyReportView,
+  VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 
 /** タブの種別。 */
@@ -30,6 +31,12 @@ export interface VerifyState {
   readonly historyError: string | null;
   /** 検証レポート(無ければ null)。 */
   readonly report: VerifyReportView | null;
+  /**
+   * 検証レポートの地域フィルタ(Task#32)。既定 "all"(全体)。"central"/"nar" に切り替えると
+   * トータル集計・キャリブレーション・傾向(report)の表示対象が絞り込まれる
+   * (プロンプト版別比較・レース別予実はスコープ外で常に全体のまま)。
+   */
+  readonly venueFilter: VerifyVenueFilter;
   /** レポート取得中か。 */
   readonly loadingReport: boolean;
   /** レポート取得エラー(無ければ null)。 */
@@ -107,6 +114,10 @@ export type VerifyAction =
   | { readonly type: "レポート取得開始" }
   | { readonly type: "レポート取得成功"; readonly report: VerifyReportView }
   | { readonly type: "レポート取得失敗"; readonly message: string }
+  | {
+      readonly type: "地域フィルタ変更";
+      readonly venueFilter: VerifyVenueFilter;
+    }
   | { readonly type: "版別レポート取得開始" }
   | {
       readonly type: "版別レポート取得成功";
@@ -144,6 +155,7 @@ export function createInitialVerifyState(): VerifyState {
     loadingHistory: false,
     historyError: null,
     report: null,
+    venueFilter: "all",
     loadingReport: false,
     reportError: null,
     reportsByPromptVersion: [],
@@ -206,6 +218,12 @@ export function verifyReducer(
 
     case "レポート取得失敗":
       return { ...state, loadingReport: false, reportError: action.message };
+
+    case "地域フィルタ変更":
+      // venueFilter のみ更新する(実際のレポート再取得は呼び出し側がこのあと
+      // 「レポート取得開始」→ IPC呼び出し→「レポート取得成功/失敗」を別途dispatchする。
+      // タブ切替でloadVerifyDataを別途呼ぶ既存の設計と同じ責務分離)。
+      return { ...state, venueFilter: action.venueFilter };
 
     case "版別レポート取得開始":
       return {

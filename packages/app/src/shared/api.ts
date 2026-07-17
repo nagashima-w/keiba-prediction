@@ -12,6 +12,7 @@ import type {
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
+  VerifyVenueFilter,
 } from "./analysis-types.js";
 import type { MaskedSettings, SettingsUpdate } from "./settings.js";
 
@@ -82,8 +83,14 @@ export interface KeibaApi {
    */
   onBulkImportProgress(listener: (progress: BulkImportProgress) => void): () => void;
 
-  /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
-  getVerifyReport(): Promise<VerifyReportView>;
+  /**
+   * 検証レポート(累積回収率・キャリブレーション表)を取得する。
+   * @param venueKind 開催区分フィルタ(Task#32)。省略時は "all"(全体、従来どおり)。
+   *   "central"/"nar" を指定すると raceId 由来の開催区分でレポート母集団を絞り込む
+   *   (listRaces(date, venueKind) と同じ「同一チャネルに引数を追加する」流儀。
+   *   プロンプト版別比較・レース別予実への適用はスコープ外のため channel/引数を増やさない)。
+   */
+  getVerifyReport(venueKind?: VerifyVenueFilter): Promise<VerifyReportView>;
 
   /**
    * プロンプト版別の検証レポート一覧を取得する(Task#27)。

@@ -1321,4 +1321,155 @@ describe("computeRaceBreakdown(レース単位の予実ブレークダウン、T
       store.close();
     });
   });
+
+  describe("開催区分(venueKind)別集計(Task#32)", () => {
+    describe("境界値のテーブル駆動テスト(raceId場コードから中央/地方/未知を判定)", () => {
+      const cases: Array<{
+        readonly label: string;
+        readonly raceId: string;
+        /** 期待される開催区分。中央・地方いずれにも属さない場コードは null。 */
+        readonly expected: "central" | "nar" | null;
+      }> = [
+        { label: "場コード01(中央の下限)", raceId: "202601010101", expected: "central" },
+        { label: "場コード10(中央の上限)", raceId: "202610010101", expected: "central" },
+        { label: "場コード30(地方の下限)", raceId: "202630070101", expected: "nar" },
+        { label: "場コード64(地方の上限)", raceId: "202664070101", expected: "nar" },
+        {
+          label: "場コード20(中央・地方いずれの範囲にも属さない未知コード)",
+          raceId: "202620010101",
+          expected: null,
+        },
+        {
+          label: "場コード65(帯広・ばんえい。地方範囲直上だが対象外の未知コード)",
+          raceId: "202665070101",
+          expected: null,
+        },
+      ];
+
+      it.each(cases)(
+        "$label: venueKind=central/nar/all それぞれの集計対象への含まれ方が正しいこと",
+        ({ raceId, expected }) => {
+          const store = new AnalysisStore();
+          store.saveAnalysis({
+            raceId,
+            analyzedAt: "t",
+            horses: [horse(1, 0.5, 2.5, 1.25, true)],
+          });
+          store.saveResult(raceId, [{ umaban: 1, finishPosition: 1 }]);
+
+          // "all"(既定)は場コードの妥当性に関わらず常に集計対象へ含まれる
+          // (raceId のパース失敗で全体集計がクラッシュしないことも兼ねて確認する)。
+          expect(computeVerifyReport(store).includedAnalysisCount).toBe(1);
+
+          expect(
+            computeVerifyReport(store, DEFAULT_VERIFY_CONFIG, "central")
+              .includedAnalysisCount,
+          ).toBe(expected === "central" ? 1 : 0);
+          expect(
+            computeVerifyReport(store, DEFAULT_VERIFY_CONFIG, "nar")
+              .includedAnalysisCount,
+          ).toBe(expected === "nar" ? 1 : 0);
+          store.close();
+        },
+      );
+    });
+
+    it("venueKind省略時は従来どおり全体集計(all相当)であること(後方互換)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "202601010101",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.5, 1.25, true)],
+      });
+      store.saveResult("202601010101", [{ umaban: 1, finishPosition: 1 }]);
+
+      const omitted = computeVerifyReport(store);
+      const explicitAll = computeVerifyReport(store, DEFAULT_VERIFY_CONFIG, "all");
+      expect(omitted).toEqual(explicitAll);
+      store.close();
+    });
+
+    it("raceIdが12桁の妥当な形式でない既存データでもvenueKind省略(all)なら従来どおり集計されること", () => {
+      // 場コード判定のための raceId パースは venueKind!=='all' のときのみ行うため、
+      // 12桁形式でない旧来のテストデータ("R1"等)を使っても all集計は落ちない
+      // (既存882件のテストが全て通っていること自体がこの回帰確認の主だが、明示的にも固定する)。
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.5, 1.25, true)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.includedAnalysisCount).toBe(1);
+      expect(report.bet.betCount).toBe(1);
+      store.close();
+    });
+
+    it("不変条件: 中央のみ+地方のみ=全体(件数・賭け金・払戻の合算が一致すること)", () => {
+      const store = new AnalysisStore();
+
+      // 中央のレース×2(1件は的中で実配当あり、1件は不的中)。
+      store.saveAnalysis({
+        raceId: "202601010101",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.5, 1.25, true)],
+      });
+      store.saveResult("202601010101", [
+        { umaban: 1, finishPosition: 1, placePayout: 280 },
+      ]);
+      store.saveAnalysis({
+        raceId: "202605020801",
+        analyzedAt: "t",
+        horses: [horse(1, 0.4, 2.0, 0.8, true)],
+      });
+      store.saveResult("202605020801", [{ umaban: 1, finishPosition: 5 }]);
+
+      // 地方のレース×2(近似払戻1件・着順不明1頭を含むレース1件)。
+      store.saveAnalysis({
+        raceId: "202630070101",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 3.0, 1.5, true)],
+      });
+      store.saveResult("202630070101", [{ umaban: 1, finishPosition: 2 }]);
+      store.saveAnalysis({
+        raceId: "202664070201",
+        analyzedAt: "t",
+        horses: [
+          horse(1, 0.5, 2.2, 1.1, true),
+          horse(2, 0.3, 1.8, 0.54, false),
+        ],
+      });
+      store.saveResult("202664070201", [
+        { umaban: 1, finishPosition: null },
+        { umaban: 2, finishPosition: 4 },
+      ]);
+
+      const all = computeVerifyReport(store, DEFAULT_VERIFY_CONFIG, "all");
+      const central = computeVerifyReport(store, DEFAULT_VERIFY_CONFIG, "central");
+      const nar = computeVerifyReport(store, DEFAULT_VERIFY_CONFIG, "nar");
+
+      // 見かけ上0=0で一致してしまう「トリビアルな一致」を防ぐため、絶対値も固定する。
+      expect(central.includedAnalysisCount).toBe(2);
+      expect(nar.includedAnalysisCount).toBe(2);
+      expect(all.includedAnalysisCount).toBe(4);
+
+      expect(central.includedAnalysisCount + nar.includedAnalysisCount).toBe(
+        all.includedAnalysisCount,
+      );
+      expect(central.bet.betCount + nar.bet.betCount).toBe(all.bet.betCount);
+      expect(central.bet.totalStake + nar.bet.totalStake).toBe(all.bet.totalStake);
+      expect(central.bet.totalReturn + nar.bet.totalReturn).toBe(all.bet.totalReturn);
+      expect(all.bet.totalStake).toBeGreaterThan(0);
+      expect(all.bet.totalReturn).toBeGreaterThan(0);
+
+      // trend(補正傾向サマリ)も同じ母集団から算出されるため、印別的中率の件数合算も一致すること。
+      const sumMarkCount = (report: typeof all) =>
+        report.trend.markStats.reduce((sum, s) => sum + s.count, 0);
+      expect(sumMarkCount(central) + sumMarkCount(nar)).toBe(sumMarkCount(all));
+
+      store.close();
+    });
+  });
 });

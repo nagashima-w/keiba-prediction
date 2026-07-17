@@ -92,6 +92,29 @@
  *   あるため行自体は残す。仕様注意点「値の有無」と「行の有無」の混同に注意)。
  * - 会場名・レース番号・開催日の見出し情報は raceId 由来(app層で venueNameFromRaceId 等により解決)
  *   のため、この core 層では raceId・kaisaiDate(analyses.kaisai_date)・promptVersion のみを返す。
+ *
+ * 開催区分(venueKind)別集計(Task#32):
+ * 地方(毎日開催)を分析対象に入れると検証データが早く貯まる一方、中央と地方は条件が異なるため
+ * 混ぜて見ると回収率・キャリブレーションの解釈を誤りうる。そこで computeVerifyReport に
+ * 任意の venueKind 絞り込み(第3引数、既定 "all"=絞り込みなし)を追加し、「中央だけ」
+ * 「地方だけ」でも同じ集計(累積回収率・キャリブレーション・trend)を出せるようにする。
+ * 判定は raceId の場コードから既存の venueKindOfRaceId(scraper/ids.ts)を再利用する
+ * (中央/地方の判定ロジックを二重実装しない)。DB変更は不要(raceId から都度導出するため)。
+ * 絞り込みは selectIncludedAnalyses に渡す analyses 配列を事前にフィルタするだけで実現し、
+ * 「結果未保存除外→latestモードの二重計上防止→推定EV除外」という既存の選定順序・ロジックには
+ * 一切手を入れない。ある raceId の開催区分は raceId のみで決まり分析ごとに変わらないため、
+ * 「中央のみ」「地方のみ」の chooseLatestPerRace は互いに素なレース集合に対して独立に動作し、
+ * 両者の合算は「全体集計」の chooseLatestPerRace と完全に一致する。したがって件数・賭け金・払戻
+ * いずれも「中央+地方=全体」が保証される(境界を跨ぐ二重計上・漏れは起きない)。
+ * スコープ制限(ユーザー合意): 比較軸はここまで。プロンプト版別比較
+ * (computeVerifyReportByPromptVersion)・レース単位の予実ブレークダウン(computeRaceBreakdown)への
+ * venueKind 適用は行わない(全体のみのまま)。
+ * venueKind="all"(既定)では従来どおり raceId を一切パースせず素通しする(既存挙動・既存テストの
+ * raceId="R1" 等の非12桁フィクスチャに影響しない)。venueKind="central"/"nar" 指定時のみ判定のため
+ * raceId のパースが必要になるが、通常運用では分析保存前に parseRaceId 済みの値しか raceId に
+ * 入らない。それでも万一DBに不正な raceId が紛れ込んでいた場合に集計全体をクラッシュさせないよう、
+ * 判定不能は「どちらの絞り込みにも含めない」(null)扱いにする防御を入れる(印別的中率の
+ * 未知mark文字列フォールバックと同じ設計判断)。
  */
 
 import type {
@@ -101,6 +124,14 @@ import type {
   StoredAnalysisHorse,
 } from "./analysis-store.js";
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
+import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
+
+/**
+ * verifyレポートの母集団を開催区分で絞り込むフィルタ(Task#32)。
+ * "all" は絞り込みなし(既定・従来どおりの全体集計)。"central"/"nar" は raceId から
+ * venueKindOfRaceId で判定した開催区分が一致する分析のみに絞り込む。
+ */
+export type VerifyVenueFilter = "all" | RaceIdVenueKind;
 
 /** verify集計の設定。 */
 export interface VerifyConfig {
@@ -341,12 +372,48 @@ interface BinCounter {
  * 保存済み分析と実結果から verifyレポートを算出する。
  * @param store 分析・結果を保持する AnalysisStore
  * @param config verify設定(省略時は既定)
+ * @param venueKind 開催区分フィルタ(Task#32、省略時は "all"=絞り込みなし)。
+ *   "central"/"nar" を指定すると raceId から判定した開催区分が一致する分析のみを集計する
+ *   (「中央+地方=全体」が不変条件として成り立つ。ファイル先頭コメント参照)。
  */
 export function computeVerifyReport(
   store: AnalysisStore,
   config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+  venueKind: VerifyVenueFilter = "all",
 ): VerifyReport {
-  return computeVerifyReportForAnalyses(store, store.listAnalyses(), config);
+  const analyses = filterAnalysesByVenueKind(store.listAnalyses(), venueKind);
+  return computeVerifyReportForAnalyses(store, analyses, config);
+}
+
+/**
+ * 分析集合を開催区分(venueKind)で絞り込む(Task#32)。
+ * "all" は raceId を一切パースせず素通しする(既存の非12桁raceIdフィクスチャに影響しないため)。
+ * "central"/"nar" は raceIdVenueKindSafe で判定し、一致するもののみを残す
+ * (判定不能=null の分析はどちらの絞り込みにも含めない。ファイル先頭コメント参照)。
+ */
+function filterAnalysesByVenueKind(
+  analyses: readonly StoredAnalysis[],
+  venueKind: VerifyVenueFilter,
+): readonly StoredAnalysis[] {
+  if (venueKind === "all") {
+    return analyses;
+  }
+  return analyses.filter((a) => raceIdVenueKindSafe(a.raceId) === venueKind);
+}
+
+/**
+ * raceId から開催区分を判定する(非throw版、Task#32)。
+ * 通常運用では分析保存前に parseRaceId 済みの値しか raceId に入らないため常に成功するはずだが、
+ * 万一DBに不正な raceId(12桁数字でない・場コードが中央01〜10/地方30〜64のいずれでもない)が
+ * 紛れ込んでいても集計全体をクラッシュさせないよう、判定不能は null で返す
+ * (印別的中率の未知mark文字列フォールバックと同じ設計判断)。
+ */
+function raceIdVenueKindSafe(raceId: string): RaceIdVenueKind | null {
+  try {
+    return venueKindOfRaceId(parseRaceId(raceId));
+  } catch {
+    return null;
+  }
 }
 
 /**
