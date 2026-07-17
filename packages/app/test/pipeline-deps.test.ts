@@ -45,6 +45,37 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.getVerifyReportByPromptVersion()).toEqual([]);
   });
 
+  it("getRaceBreakdown が組み立てられ、未分析なら空配列を返すこと(Task#34)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(typeof r.getRaceBreakdown).toBe("function");
+    expect(r.getRaceBreakdown()).toEqual([]);
+  });
+
+  it("getRaceBreakdown は結果未取込の分析を対象外(空配列)にすること(Task#34。verifyと同じ母集団)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    r.deps.saveAnalysis({
+      raceId: "202605020811", // 場コード05 → 東京、末尾2桁11 → 11R。
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      kaisaiDate: "20260708",
+      horses: [
+        {
+          umaban: 1,
+          prior: 0.5,
+          adjustedProb: 0.5,
+          placeOddsMin: 2.0,
+          ev: 1.0,
+          isPositive: true,
+          contributions: null,
+          mark: null,
+        },
+      ],
+    });
+    // 結果はまだ未取込なので対象外(空配列)。
+    expect(r.getRaceBreakdown()).toEqual([]);
+  });
+
   it("listUnimportedRaceIds が組み立てられ、未分析なら空配列を返すこと(Task#31)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);

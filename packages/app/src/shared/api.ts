@@ -8,6 +8,7 @@ import type {
   ImportResultOutcome,
   LogExportOutcome,
   PromptVersionVerifyReportView,
+  RaceBreakdownView,
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
@@ -90,6 +91,13 @@ export interface KeibaApi {
    * 版不明(旧データ・LLM未使用の分析)は promptVersion=null の1グループとして含まれる。
    */
   getVerifyReportByPromptVersion(): Promise<readonly PromptVersionVerifyReportView[]>;
+
+  /**
+   * レース単位の予実ブレークダウン一覧を取得する(Task#34)。
+   * verifyと同じ母集団(latest選択・推定EV除外・結果未保存除外)のレースを、開催日降順
+   * (null は最後)→レースID昇順で返す。
+   */
+  getRaceBreakdown(): Promise<readonly RaceBreakdownView[]>;
 
   /** 分析履歴一覧(検証画面用)を取得する。 */
   listAnalyses(): Promise<AnalysisHistoryItem[]>;

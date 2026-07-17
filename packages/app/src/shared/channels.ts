@@ -22,6 +22,12 @@ export const IPC_CHANNELS = {
   getVerifyReport: "verify:report",
   /** プロンプト版別の検証レポート一覧を取得する(Task#27)。 */
   getVerifyReportByPromptVersion: "verify:report-by-prompt-version",
+  /**
+   * レース単位の予実ブレークダウン一覧を取得する(Task#34)。
+   * verifyと同じ母集団(latest選択・推定EV除外・結果未保存除外)のレースを、開催日降順
+   * (null は最後)→レースID昇順で返す。
+   */
+  getRaceBreakdown: "verify:race-breakdown",
   /** 分析履歴一覧(検証画面用)を取得する。 */
   listAnalyses: "analysis:list",
   /** 設定(マスク済み)を取得する。 */

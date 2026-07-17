@@ -398,6 +398,69 @@ export type LogExportOutcome =
   | { readonly status: "saved"; readonly filePath: string }
   | { readonly status: "canceled" };
 
+/**
+ * 検証画面: レース単体の予実ブレークダウンの1頭分(表示用。core RaceBreakdownHorse の
+ * プレーン写し)。Task#34。
+ */
+export interface RaceBreakdownHorseView {
+  /** 馬番。 */
+  readonly umaban: number;
+  /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。 */
+  readonly mark: PredictionMark | null;
+  /** 補正後複勝確率(AI補正後3着内率)。 */
+  readonly adjustedProb: number;
+  /** 使用した複勝オッズ下限。欠損なら null。 */
+  readonly placeOddsMin: number | null;
+  /** 期待値。オッズ欠損なら null。 */
+  readonly ev: number | null;
+  /** EVが閾値を上回るか(EVプラス馬の判定)。 */
+  readonly isPositive: boolean;
+  /** 実着順。非数値着順(中止・除外)・結果に馬番が無い場合は null(着順不明)。 */
+  readonly finishPosition: number | null;
+  /** 複勝的中の有無。finishPosition が null(着順不明)なら判定不能のため null。 */
+  readonly isPlaced: boolean | null;
+  /** この馬に賭けた金額(円)。賭けていない・着順不明なら0。 */
+  readonly stake: number;
+  /** この馬の払戻(円)。的中でなければ0。 */
+  readonly payout: number;
+  /** payout の算出根拠。的中かつ賭けた馬のみ非null。 */
+  readonly payoutSource: "actual" | "approximate" | null;
+}
+
+/**
+ * 検証画面: レース単体の予実ブレークダウン(表示用。core RaceBreakdown に会場名・レース番号を
+ * 加えたもの)。Task#34。見出し(会場+R+開催日)の組み立てに使う。
+ */
+export interface RaceBreakdownView {
+  /** レースID(12桁)。 */
+  readonly raceId: string;
+  /** 会場名(レースIDの場コードから導出)。 */
+  readonly venueName: string;
+  /** レース番号(1〜12。レースIDの末尾2桁から導出)。 */
+  readonly raceNumber: number;
+  /**
+   * 開催日(YYYYMMDD)。旧データ・選択済み開催日が渡らなかった分析は null(日付不明。中央のレースIDから
+   * は開催日を復元できないため)。
+   */
+  readonly kaisaiDate: string | null;
+  /** この予実の元になった分析ID。 */
+  readonly analysisId: number;
+  /** 分析日時(ISO8601)。 */
+  readonly analyzedAt: string;
+  /** プロンプト版番号。版不明(旧データ・LLM未使用)は null。 */
+  readonly promptVersion: string | null;
+  /** 各馬の予実(馬番昇順)。 */
+  readonly horses: readonly RaceBreakdownHorseView[];
+  /** このレースの賭け金合計(円)。 */
+  readonly totalStake: number;
+  /** このレースの払戻合計(円)。 */
+  readonly totalReturn: number;
+  /** このレースの回収率。賭け0点なら null。 */
+  readonly recoveryRate: number | null;
+  /** このレースで賭けた点数。 */
+  readonly betCount: number;
+}
+
 /** レース一覧の1レース(renderer 表示用)。 */
 export interface RaceListItem {
   /** レースID(12桁)。 */

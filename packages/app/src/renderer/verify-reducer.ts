@@ -11,6 +11,7 @@ import type {
   BulkImportProgress,
   BulkImportRaceOutcome,
   PromptVersionVerifyReportView,
+  RaceBreakdownView,
   VerifyReportView,
 } from "../shared/analysis-types.js";
 
@@ -39,6 +40,12 @@ export interface VerifyState {
   readonly loadingReportsByPromptVersion: boolean;
   /** 版別レポート取得エラー(無ければ null)。 */
   readonly reportsByPromptVersionError: string | null;
+  /** レース単位の予実ブレークダウン一覧(Task#34。未取得は空配列)。 */
+  readonly raceBreakdown: readonly RaceBreakdownView[];
+  /** レース別予実取得中か。 */
+  readonly loadingRaceBreakdown: boolean;
+  /** レース別予実取得エラー(無ければ null)。 */
+  readonly raceBreakdownError: string | null;
   /** 結果取込中のレースID(ボタン二重押下防止・表示用)。 */
   readonly importingRaceIds: readonly string[];
   /** 直近の取込エラー(無ければ null)。 */
@@ -106,6 +113,12 @@ export type VerifyAction =
       readonly reports: readonly PromptVersionVerifyReportView[];
     }
   | { readonly type: "版別レポート取得失敗"; readonly message: string }
+  | { readonly type: "レース別予実取得開始" }
+  | {
+      readonly type: "レース別予実取得成功";
+      readonly raceBreakdown: readonly RaceBreakdownView[];
+    }
+  | { readonly type: "レース別予実取得失敗"; readonly message: string }
   | { readonly type: "取込開始"; readonly raceId: string }
   | { readonly type: "取込成功"; readonly raceId: string }
   | { readonly type: "取込失敗"; readonly raceId: string; readonly message: string }
@@ -136,6 +149,9 @@ export function createInitialVerifyState(): VerifyState {
     reportsByPromptVersion: [],
     loadingReportsByPromptVersion: false,
     reportsByPromptVersionError: null,
+    raceBreakdown: [],
+    loadingRaceBreakdown: false,
+    raceBreakdownError: null,
     importingRaceIds: [],
     importError: null,
     importErrorRaceId: null,
@@ -211,6 +227,24 @@ export function verifyReducer(
         ...state,
         loadingReportsByPromptVersion: false,
         reportsByPromptVersionError: action.message,
+      };
+
+    case "レース別予実取得開始":
+      return { ...state, loadingRaceBreakdown: true, raceBreakdownError: null };
+
+    case "レース別予実取得成功":
+      return {
+        ...state,
+        loadingRaceBreakdown: false,
+        raceBreakdown: action.raceBreakdown,
+        raceBreakdownError: null,
+      };
+
+    case "レース別予実取得失敗":
+      return {
+        ...state,
+        loadingRaceBreakdown: false,
+        raceBreakdownError: action.message,
       };
 
     case "取込開始":

@@ -1,5 +1,6 @@
 import type { VerifyState } from "./verify-reducer.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
+import { formatEv, MARK_LEGEND } from "./format.js";
 import {
   formatFailedRaceErrors,
   summarizeBulkImport,
@@ -11,6 +12,7 @@ import {
   directionLabel,
   formatAdjustment,
   formatBinRange,
+  formatFinishPosition,
   formatPayoutBreakdown,
   formatRate,
   formatYen,
@@ -19,7 +21,10 @@ import {
   markLabel,
   needsImport,
   overconfidenceLabel,
+  payoutSourceLabel,
+  placedLabel,
   promptVersionLabel,
+  raceBreakdownHeading,
 } from "./verify-format.js";
 
 /** 検証画面のプロパティ。 */
@@ -298,6 +303,107 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
             ))}
           </tbody>
         </table>
+      )}
+
+      {/*
+       * レース別予実(Task#34)。トータル集計(累積回収率・キャリブレーション等)だけでなく、
+       * レース単体ごとに予測(印・EVプラス馬・AI補正後3着内率)と結果(実着順・複勝的中の有無・
+       * そのレースの賭け金/払戻/回収)を並べて表示する。母集団・賭け判定ロジックは既存verifyの
+       * computeVerifyReport と共通(core computeRaceBreakdown。数値の乖離を防ぐため共有)。
+       * 件数が多くなるため details/summary で1レースずつ開ける形にする(既存UIの流儀。
+       * SettingsView.tsx の重み設定折りたたみと同じ形式)。
+       */}
+      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
+        レース別予実
+      </h3>
+      {state.raceBreakdownError !== null ? (
+        <p style={{ color: "#c00" }}>
+          レース別予実の取得に失敗しました: {state.raceBreakdownError}
+          <CopyErrorButton
+            operation="検証:レース別予実取得"
+            message={state.raceBreakdownError}
+          />
+        </p>
+      ) : state.raceBreakdown.length === 0 ? (
+        <p style={{ color: "#666" }}>
+          {state.loadingRaceBreakdown ? "読み込み中…" : "該当レースがありません。"}
+        </p>
+      ) : (
+        state.raceBreakdown.map((rb) => (
+          <details
+            key={rb.raceId}
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: "4px",
+              margin: "0 0 0.4rem",
+              padding: "0.3rem 0.6rem",
+            }}
+          >
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+              {raceBreakdownHeading(rb)}
+              <span
+                style={{
+                  color: "#666",
+                  fontWeight: 400,
+                  fontSize: "0.85rem",
+                  marginLeft: "0.5rem",
+                }}
+              >
+                賭け{rb.betCount}点 / 投資額 {formatYen(rb.totalStake)} / 回収額{" "}
+                {formatYen(rb.totalReturn)} / 回収率{" "}
+                <strong>{formatRate(rb.recoveryRate)}</strong>
+              </span>
+            </summary>
+            <table
+              style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.4rem" }}
+            >
+              <thead>
+                <tr>
+                  <th style={thStyle} title={MARK_LEGEND}>
+                    印
+                  </th>
+                  <th style={thStyle}>馬番</th>
+                  <th style={thStyle}>AI補正後3着内率</th>
+                  <th style={thStyle}>EV</th>
+                  <th style={thStyle}>実着順</th>
+                  <th style={thStyle}>複勝的中</th>
+                  <th style={thStyle}>賭け金</th>
+                  <th style={thStyle}>払戻</th>
+                  <th style={thStyle}>払戻根拠</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rb.horses.map((horse) => (
+                  <tr
+                    key={horse.umaban}
+                    // ハイライト(緑背景)はisPositive基準(ev!==nullではない。仕様注意点)。
+                    style={
+                      horse.isPositive ? { background: "#e6ffea" } : undefined
+                    }
+                  >
+                    <td style={tdStyle}>{markLabel(horse.mark)}</td>
+                    <td style={tdStyle}>{horse.umaban}</td>
+                    <td style={tdStyle}>{formatRate(horse.adjustedProb)}</td>
+                    <td
+                      style={{
+                        ...tdStyle,
+                        fontWeight: horse.isPositive ? 700 : 400,
+                        color: horse.isPositive ? "#0a7f2e" : undefined,
+                      }}
+                    >
+                      {formatEv(horse.ev)}
+                    </td>
+                    <td style={tdStyle}>{formatFinishPosition(horse.finishPosition)}</td>
+                    <td style={tdStyle}>{placedLabel(horse.isPlaced)}</td>
+                    <td style={tdStyle}>{formatYen(horse.stake)}</td>
+                    <td style={tdStyle}>{formatYen(horse.payout)}</td>
+                    <td style={tdStyle}>{payoutSourceLabel(horse.payoutSource)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        ))
       )}
 
       {/*
