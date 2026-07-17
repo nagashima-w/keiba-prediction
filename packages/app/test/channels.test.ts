@@ -44,4 +44,9 @@ describe("IPCチャネル定義", () => {
   it("rendererのエラーをmain側のログファイルへ集約するチャネルが定義されている(Task#35)", () => {
     expect(IPC_CHANNELS.logRendererError).toBe("log:renderer-error");
   });
+
+  it("ログフォルダを開く・ログエクスポート用のチャネルが定義されている(Task#36)", () => {
+    expect(IPC_CHANNELS.openLogFolder).toBe("log:open-folder");
+    expect(IPC_CHANNELS.exportLogs).toBe("log:export");
+  });
 });

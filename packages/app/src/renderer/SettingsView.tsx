@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer } from "react";
 
+import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   BASE_SCORE_WEIGHT_KEYS,
   BASE_SCORE_WEIGHT_LABELS,
@@ -100,6 +101,34 @@ export function SettingsView(): React.JSX.Element {
       );
   }, []);
 
+  // ログフォルダを開く(Task#36 受け入れ条件1)。main側でディレクトリ未作成なら作成してから開く。
+  const handleOpenLogFolder = useCallback(() => {
+    dispatch({ type: "ログフォルダを開く開始" });
+    window.keibaApi
+      .openLogFolder()
+      .then(() => dispatch({ type: "ログフォルダを開く成功" }))
+      .catch((e: unknown) =>
+        dispatch({ type: "ログフォルダを開く失敗", message: errorMessage(e) }),
+      );
+  }, []);
+
+  // 最新ログをエクスポート(Task#36 受け入れ条件2)。保存先はmain側のダイアログで選ばせる。
+  const handleExportLogs = useCallback(() => {
+    dispatch({ type: "ログエクスポート開始" });
+    window.keibaApi
+      .exportLogs()
+      .then((outcome) => {
+        if (outcome.status === "canceled") {
+          dispatch({ type: "ログエクスポートキャンセル" });
+          return;
+        }
+        dispatch({ type: "ログエクスポート成功", filePath: outcome.filePath });
+      })
+      .catch((e: unknown) =>
+        dispatch({ type: "ログエクスポート失敗", message: errorMessage(e) }),
+      );
+  }, []);
+
   if (!state.loaded) {
     return (
       <section style={{ marginTop: "1rem" }}>
@@ -107,6 +136,12 @@ export function SettingsView(): React.JSX.Element {
           {state.status === "error"
             ? `設定の読み込みに失敗しました: ${state.message}`
             : "設定を読み込んでいます…"}
+          {state.status === "error" && state.message !== null && (
+            <CopyErrorButton
+              operation="設定:読込"
+              message={state.message}
+            />
+          )}
         </p>
       </section>
     );
@@ -337,7 +372,69 @@ export function SettingsView(): React.JSX.Element {
         {state.status === "error" && (
           <span style={{ color: "#c00", fontSize: "0.85rem" }}>
             失敗しました: {state.message}
+            {state.message !== null && (
+              <CopyErrorButton operation="設定:保存" message={state.message} />
+            )}
           </span>
+        )}
+      </div>
+
+      {/*
+       * ログ取り出し導線(Task#36)。ユーザーが「ログを見て自分で対処+AIにログを添付して丸投げ」
+       * できるよう、ログフォルダを直接開く操作と、現行ログ+ローテーション済みログを1ファイルに
+       * まとめて保存する操作を提供する。
+       */}
+      <div style={{ marginTop: "1.5rem", maxWidth: 480 }}>
+        <h3 style={{ fontSize: "0.9rem", margin: "0 0 0.4rem" }}>ログ</h3>
+        <p style={noteStyle}>
+          エラーが起きたときは、ログフォルダを開いて中身を確認するか、ログをエクスポートしてAIに貼り付けて
+          相談できます。
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <button
+            type="button"
+            onClick={handleOpenLogFolder}
+            disabled={state.logFolderStatus === "opening"}
+          >
+            {state.logFolderStatus === "opening" ? "開いています…" : "ログフォルダを開く"}
+          </button>
+          <button
+            type="button"
+            onClick={handleExportLogs}
+            disabled={state.logExportStatus === "exporting"}
+          >
+            {state.logExportStatus === "exporting"
+              ? "エクスポート中…"
+              : "最新ログをエクスポート"}
+          </button>
+        </div>
+        {state.logFolderStatus === "error" && state.logFolderMessage !== null && (
+          <p style={{ color: "#c00", fontSize: "0.85rem" }}>
+            ログフォルダを開けませんでした: {state.logFolderMessage}
+            <CopyErrorButton
+              operation="設定:ログフォルダを開く"
+              message={state.logFolderMessage}
+            />
+          </p>
+        )}
+        {state.logExportStatus === "saved" && state.logExportMessage !== null && (
+          <p style={{ color: "#0a7f2e", fontSize: "0.85rem" }}>
+            保存しました: {state.logExportMessage}
+          </p>
+        )}
+        {state.logExportStatus === "canceled" && (
+          <p style={{ color: "#666", fontSize: "0.85rem" }}>
+            エクスポートをキャンセルしました。
+          </p>
+        )}
+        {state.logExportStatus === "error" && state.logExportMessage !== null && (
+          <p style={{ color: "#c00", fontSize: "0.85rem" }}>
+            エクスポートに失敗しました: {state.logExportMessage}
+            <CopyErrorButton
+              operation="設定:ログエクスポート"
+              message={state.logExportMessage}
+            />
+          </p>
         )}
       </div>
     </section>

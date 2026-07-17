@@ -389,6 +389,15 @@ export interface BulkImportProgress {
   readonly currentRaceId: string | null;
 }
 
+/**
+ * ログエクスポート(main→renderer に invoke の戻り値として返す)。Task#36。
+ * - "saved": 保存先ダイアログでファイルを選び、集約ログ(現行+ローテーション済み)を書き出した。
+ * - "canceled": 保存先ダイアログをキャンセルした(何もしていない)。
+ */
+export type LogExportOutcome =
+  | { readonly status: "saved"; readonly filePath: string }
+  | { readonly status: "canceled" };
+
 /** レース一覧の1レース(renderer 表示用)。 */
 export interface RaceListItem {
   /** レースID(12桁)。 */

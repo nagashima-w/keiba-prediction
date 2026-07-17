@@ -153,6 +153,27 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     expect(s2.importError).toBe("取得失敗");
   });
 
+  it("取込失敗で失敗したレースIDを importErrorRaceId に保持する(Task#36 エラーコピー用)", () => {
+    const s1 = verifyReducer(init(), { type: "取込開始", raceId: "R1" });
+    const s2 = verifyReducer(s1, {
+      type: "取込失敗",
+      raceId: "R1",
+      message: "取得失敗",
+    });
+    expect(s2.importErrorRaceId).toBe("R1");
+  });
+
+  it("取込開始で前回の importErrorRaceId をクリアすること(再取込時に古い紐付けを残さない)", () => {
+    const s1 = verifyReducer(init(), { type: "取込開始", raceId: "R1" });
+    const s2 = verifyReducer(s1, {
+      type: "取込失敗",
+      raceId: "R1",
+      message: "取得失敗",
+    });
+    const s3 = verifyReducer(s2, { type: "取込開始", raceId: "R2" });
+    expect(s3.importErrorRaceId).toBeNull();
+  });
+
   it("初期状態は取込案内(importNotice)も無いこと", () => {
     const s = init();
     expect(s.importNotice).toBeNull();

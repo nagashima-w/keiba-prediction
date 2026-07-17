@@ -1,6 +1,14 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { app, ipcMain, type IpcMainInvokeEvent } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  shell,
+  type IpcMainInvokeEvent,
+} from "electron";
 
 import {
   DiscordNotifyError,
@@ -20,6 +28,7 @@ import type {
   BulkImportProgress,
   BulkImportRaceOutcome,
   ImportResultOutcome,
+  LogExportOutcome,
   PromptVersionVerifyReportView,
   RaceListItem,
   RaceVenueKind,
@@ -32,7 +41,8 @@ import { buildAppInfo } from "./app-info.js";
 import { runAnalysis } from "./analysis-pipeline.js";
 import { runBatchAnalysis } from "./analysis-batch.js";
 import { runBulkImport } from "./import-batch.js";
-import { logError, logWarn, setSecretsProvider } from "./logger.js";
+import { buildDefaultLogExportFileName, collectLogExportContent } from "./log-export.js";
+import { getLogDirectory, logError, logWarn, setSecretsProvider } from "./logger.js";
 import { netFetchAdapter } from "./net-fetch-adapter.js";
 import { createPipelineDeps, type PipelineResources } from "./pipeline-deps.js";
 import { ResourceManager } from "./resource-manager.js";
@@ -127,6 +137,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.logRendererError, (_event, payload: unknown) =>
     handleLogRendererError(payload),
   );
+
+  // ログ取り出し導線(Task#36)。
+  ipcMain.handle(IPC_CHANNELS.openLogFolder, () => handleOpenLogFolder());
+  ipcMain.handle(IPC_CHANNELS.exportLogs, (event) => handleExportLogs(event));
 }
 
 /**
@@ -512,4 +526,53 @@ function handleLogRendererError(payload: unknown): void {
   const raceId = typeof rec.raceId === "string" ? rec.raceId : null;
   const url = typeof rec.url === "string" ? rec.url : null;
   logError(operation, { message, stack }, { raceId, url });
+}
+
+/**
+ * 「ログフォルダを開く」ハンドラの実処理(Task#36 受け入れ条件1)。
+ * ディレクトリが未作成(初回起動直後等)でも安全に開けるよう、開く前に必ず作成する
+ * (settings-store.ts と同じ mkdirSync({ recursive: true }) の流儀)。
+ * shell.openPath は失敗時に例外を投げず、空でないエラーメッセージ文字列を返す仕様のため、
+ * それを検知して Error に変換し、他のIPCハンドラと同様にrendererへ失敗を伝える。
+ */
+async function handleOpenLogFolder(): Promise<void> {
+  return withErrorLogging(IPC_CHANNELS.openLogFolder, undefined, async () => {
+    const dir = getLogDirectory();
+    mkdirSync(dir, { recursive: true });
+    const result = await shell.openPath(dir);
+    if (result !== "") {
+      throw new Error(`ログフォルダを開けませんでした: ${result}`);
+    }
+  });
+}
+
+/**
+ * 「最新ログをエクスポート」ハンドラの実処理(Task#36 受け入れ条件2)。
+ * 保存先は dialog.showSaveDialog でユーザーに選ばせる(既定ファイル名は当日日付付き)。
+ * キャンセル時(canceled または filePath 未指定)は何もせず "canceled" を返す。
+ * 集約(log-export.ts の純関数)は現行ログ+ローテーション済みログを old→current の順で結合する。
+ *
+ * dialog.showSaveDialog に渡す親ウィンドウは、呼び出し元の webContents から解決する
+ * (main.ts はウィンドウ参照をグローバルに保持していないため。取れなければウィンドウ無しで呼ぶ)。
+ */
+async function handleExportLogs(
+  event: IpcMainInvokeEvent,
+): Promise<LogExportOutcome> {
+  return withErrorLogging(IPC_CHANNELS.exportLogs, undefined, async () => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const dialogOptions = {
+      defaultPath: buildDefaultLogExportFileName(new Date()),
+      filters: [{ name: "テキスト", extensions: ["txt"] }],
+    };
+    const result =
+      window !== null
+        ? await dialog.showSaveDialog(window, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions);
+    if (result.canceled || result.filePath === undefined || result.filePath === "") {
+      return { status: "canceled" };
+    }
+    const content = collectLogExportContent(getLogDirectory());
+    writeFileSync(result.filePath, content, "utf8");
+    return { status: "saved", filePath: result.filePath };
+  });
 }

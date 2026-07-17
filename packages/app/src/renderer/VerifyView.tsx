@@ -1,5 +1,9 @@
 import type { VerifyState } from "./verify-reducer.js";
-import { summarizeBulkImport } from "./import-batch-summary.js";
+import { CopyErrorButton } from "./CopyErrorButton.js";
+import {
+  formatFailedRaceErrors,
+  summarizeBulkImport,
+} from "./import-batch-summary.js";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
@@ -74,7 +78,14 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       </div>
 
       {state.importError !== null && (
-        <p style={{ color: "#c00" }}>結果取込に失敗しました: {state.importError}</p>
+        <p style={{ color: "#c00" }}>
+          結果取込に失敗しました: {state.importError}
+          <CopyErrorButton
+            operation="検証:結果取込"
+            message={state.importError}
+            context={{ raceId: state.importErrorRaceId }}
+          />
+        </p>
       )}
       {state.importNotice !== null && (
         <p style={{ color: "#666" }}>{state.importNotice}</p>
@@ -83,7 +94,10 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       {/* 累積回収率サマリ。 */}
       <h3 style={{ fontSize: "0.95rem", marginBottom: "0.25rem" }}>累積回収率</h3>
       {state.reportError !== null ? (
-        <p style={{ color: "#c00" }}>レポート取得に失敗しました: {state.reportError}</p>
+        <p style={{ color: "#c00" }}>
+          レポート取得に失敗しました: {state.reportError}
+          <CopyErrorButton operation="検証:レポート取得" message={state.reportError} />
+        </p>
       ) : report === null ? (
         <p style={{ color: "#666" }}>集計対象がありません。</p>
       ) : (
@@ -116,6 +130,10 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       {state.reportsByPromptVersionError !== null && (
         <p style={{ color: "#c00" }}>
           版別レポート取得に失敗しました: {state.reportsByPromptVersionError}
+          <CopyErrorButton
+            operation="検証:版別レポート取得"
+            message={state.reportsByPromptVersionError}
+          />
         </p>
       )}
       {state.reportsByPromptVersion.length === 0 ? (
@@ -328,10 +346,27 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
                   未確定スキップ: {summary.notConfirmedRaceIds.join(", ")}
                 </p>
               )}
-              {summary.failedRaceIds.length > 0 && (
-                <p style={{ margin: "0.15rem 0", color: "#c00" }}>
-                  失敗: {summary.failedRaceIds.join(", ")}
-                </p>
+              {summary.failedRaceErrors.length > 0 && (
+                <div style={{ margin: "0.15rem 0", color: "#c00" }}>
+                  <p style={{ margin: "0.15rem 0" }}>
+                    失敗: {summary.failedRaceIds.join(", ")}
+                    <CopyErrorButton
+                      operation="検証:結果の一括取込"
+                      message={formatFailedRaceErrors(summary.failedRaceErrors)}
+                    />
+                  </p>
+                  {/*
+                   * 各レースの失敗理由(AIに渡す前に人が見ても分かるように、
+                   * コピーせずとも画面上でそのまま確認できるようにする)。
+                   */}
+                  <ul style={{ margin: "0.15rem 0", paddingLeft: "1.2rem" }}>
+                    {summary.failedRaceErrors.map((failedRace) => (
+                      <li key={failedRace.raceId}>
+                        {failedRace.raceId}: {failedRace.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           );
@@ -341,7 +376,10 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       {/* 分析履歴一覧。 */}
       <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>分析履歴</h3>
       {state.historyError !== null && (
-        <p style={{ color: "#c00" }}>履歴取得に失敗しました: {state.historyError}</p>
+        <p style={{ color: "#c00" }}>
+          履歴取得に失敗しました: {state.historyError}
+          <CopyErrorButton operation="検証:履歴取得" message={state.historyError} />
+        </p>
       )}
       {state.history.length === 0 ? (
         <p style={{ color: "#666" }}>

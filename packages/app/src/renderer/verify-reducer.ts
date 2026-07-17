@@ -44,6 +44,11 @@ export interface VerifyState {
   /** 直近の取込エラー(無ければ null)。 */
   readonly importError: string | null;
   /**
+   * importError が発生したレースID(無ければ null)。Task#36「このエラーのログをコピー」で
+   * コンテキストとして添えるために保持する(importError 自体は文字列のみで raceId を含まないため)。
+   */
+  readonly importErrorRaceId: string | null;
+  /**
    * 直近の取込案内(無ければ null)。未確定レース(発走前・確定前)を取り込もうとした際に、
    * importError(赤エラー)とは別に穏やかな案内として表示するためのメッセージ。
    */
@@ -133,6 +138,7 @@ export function createInitialVerifyState(): VerifyState {
     reportsByPromptVersionError: null,
     importingRaceIds: [],
     importError: null,
+    importErrorRaceId: null,
     importNotice: null,
     bulkImport: EMPTY_BULK_IMPORT,
   };
@@ -212,6 +218,7 @@ export function verifyReducer(
         ...state,
         importingRaceIds: addImporting(state.importingRaceIds, action.raceId),
         importError: null,
+        importErrorRaceId: null,
         importNotice: null,
       };
 
@@ -226,6 +233,7 @@ export function verifyReducer(
         ...state,
         importingRaceIds: removeImporting(state.importingRaceIds, action.raceId),
         importError: action.message,
+        importErrorRaceId: action.raceId,
       };
 
     case "取込未確定":

@@ -6,6 +6,7 @@ import type {
   BulkImportProgress,
   BulkImportRaceOutcome,
   ImportResultOutcome,
+  LogExportOutcome,
   PromptVersionVerifyReportView,
   RaceListItem,
   RaceVenueKind,
@@ -130,4 +131,18 @@ export interface KeibaApi {
     /** 関連するURL(あれば)。 */
     url?: string | null;
   }): Promise<void>;
+
+  /**
+   * ログ保存ディレクトリを OS のファイラーで開く(Task#36 受け入れ条件1)。
+   * ディレクトリが未作成でも安全に開けるよう、main 側で開く前に作成する。
+   */
+  openLogFolder(): Promise<void>;
+
+  /**
+   * 現行ログ(main.log)+ローテーション済みログ(main.old.log、存在すれば)を1ファイルに
+   * 集約し、ユーザーが選んだ保存先へ書き出す(Task#36 受け入れ条件2)。
+   * 保存先は main 側の dialog.showSaveDialog で選ばせる。キャンセル時は "canceled" を返し、
+   * 何も書き込まない。
+   */
+  exportLogs(): Promise<LogExportOutcome>;
 }

@@ -128,6 +128,68 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
   });
 });
 
+describe("ログフォルダを開く・ログエクスポートの状態遷移(Task#36)", () => {
+  it("初期状態はどちらも idle・メッセージ無し", () => {
+    const s = createInitialSettingsState();
+    expect(s.logFolderStatus).toBe("idle");
+    expect(s.logFolderMessage).toBeNull();
+    expect(s.logExportStatus).toBe("idle");
+    expect(s.logExportMessage).toBeNull();
+  });
+
+  it("ログフォルダを開く: 開始→成功で status=success になる", () => {
+    let s = createInitialSettingsState();
+    s = settingsReducer(s, { type: "ログフォルダを開く開始" });
+    expect(s.logFolderStatus).toBe("opening");
+    s = settingsReducer(s, { type: "ログフォルダを開く成功" });
+    expect(s.logFolderStatus).toBe("success");
+    expect(s.logFolderMessage).toBeNull();
+  });
+
+  it("ログフォルダを開く: 開始→失敗でエラーメッセージを保持する", () => {
+    let s = createInitialSettingsState();
+    s = settingsReducer(s, { type: "ログフォルダを開く開始" });
+    s = settingsReducer(s, {
+      type: "ログフォルダを開く失敗",
+      message: "権限がありません",
+    });
+    expect(s.logFolderStatus).toBe("error");
+    expect(s.logFolderMessage).toBe("権限がありません");
+  });
+
+  it("ログエクスポート: 開始→保存成功で保存先パスをメッセージに保持する", () => {
+    let s = createInitialSettingsState();
+    s = settingsReducer(s, { type: "ログエクスポート開始" });
+    expect(s.logExportStatus).toBe("exporting");
+    s = settingsReducer(s, {
+      type: "ログエクスポート成功",
+      filePath: "/home/user/keiba-ev-tool-logs-20260716.txt",
+    });
+    expect(s.logExportStatus).toBe("saved");
+    expect(s.logExportMessage).toBe(
+      "/home/user/keiba-ev-tool-logs-20260716.txt",
+    );
+  });
+
+  it("ログエクスポート: キャンセルで status=canceled になり何もしていない旨を保持する", () => {
+    let s = createInitialSettingsState();
+    s = settingsReducer(s, { type: "ログエクスポート開始" });
+    s = settingsReducer(s, { type: "ログエクスポートキャンセル" });
+    expect(s.logExportStatus).toBe("canceled");
+  });
+
+  it("ログエクスポート: 開始→失敗でエラーメッセージを保持する", () => {
+    let s = createInitialSettingsState();
+    s = settingsReducer(s, { type: "ログエクスポート開始" });
+    s = settingsReducer(s, {
+      type: "ログエクスポート失敗",
+      message: "書き込みに失敗しました",
+    });
+    expect(s.logExportStatus).toBe("error");
+    expect(s.logExportMessage).toBe("書き込みに失敗しました");
+  });
+});
+
 describe("buildUpdate(フォーム→更新ペイロード)", () => {
   it("APIキー入力が空なら apiKey を含めない(現在値を保持させる)", () => {
     const update = buildUpdate(loadedState());
