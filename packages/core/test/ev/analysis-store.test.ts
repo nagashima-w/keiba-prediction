@@ -518,6 +518,96 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("開催日(kaisaiDate)の保存・復元(Task#34)", () => {
+    it("kaisaiDateを指定して保存すると、そのまま復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({ raceId: "開催日指定レース", kaisaiDate: "20260714" }),
+      );
+      const a = store.listAnalyses({ raceId: "開催日指定レース" })[0]!;
+      expect(a.kaisaiDate).toBe("20260714");
+      store.close();
+    });
+
+    it("kaisaiDateを省略して保存するとnull(日付不明)として保存・復元されること(後方互換の既定値)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "開催日不明レース" }));
+      const a = store.listAnalyses({ raceId: "開催日不明レース" })[0]!;
+      expect(a.kaisaiDate).toBeNull();
+      store.close();
+    });
+
+    it("kaisaiDateにnullを明示しても日付不明として保存・復元されること(選択済み開催日が渡らなかった場合の想定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({ raceId: "近似日付レース", kaisaiDate: null }),
+      );
+      const a = store.listAnalyses({ raceId: "近似日付レース" })[0]!;
+      expect(a.kaisaiDate).toBeNull();
+      store.close();
+    });
+  });
+
+  describe("kaisai_date列の後方互換マイグレーション(Task#34)", () => {
+    it("kaisai_date列が無い旧スキーマのDBを開いても、既存分析はkaisaiDate=nullで読め、新規保存は開催日付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // Task#34より前のバージョン相当のスキーマ(analysesにkaisai_date列が無い)を直接作る。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL,
+          ev_estimated INTEGER,
+          prompt_version TEXT,
+          additional_instruction TEXT
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      // 旧バージョンで保存済みの既存データ(kaisai_date列自体が存在しない状態での保存を模す)。
+      const info = db
+        .prepare(
+          `INSERT INTO analyses (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run("旧レース", "2026-01-01T00:00:00.000Z", 0, null, null);
+      const oldAnalysisId = Number(info.lastInsertRowid);
+      db.prepare(
+        `INSERT INTO analysis_horses
+           (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(oldAnalysisId, 1, 0.4, 0.4, 2.0, 0.8, 0, null, null);
+
+      // 新バージョンの AnalysisStore で開く(kaisai_date列が無ければ ALTER TABLE で追加されるはず)。
+      const store = new AnalysisStore({ database: db });
+
+      // 旧分析はkaisai_date列を後付けしても既存行はnull(日付不明)として読める。
+      const old = store.listAnalyses({ raceId: "旧レース" })[0]!;
+      expect(old.kaisaiDate).toBeNull();
+
+      // 新規保存(開催日あり)も問題なく動作する(後方互換を確認)。
+      const newId = store.saveAnalysis(
+        makeRecord({ raceId: "新レース", kaisaiDate: "20260714" }),
+      );
+      const saved = store.listAnalyses({ raceId: "新レース" })[0]!;
+      expect(saved.id).toBe(newId);
+      expect(saved.kaisaiDate).toBe("20260714");
+
+      store.close();
+    });
+  });
+
   describe("listUnimportedRaceIds(分析済みで結果未取込のレース列挙。Task#31)", () => {
     it("分析済みだが race_results に行が1件も無いレースを列挙すること", () => {
       const store = new AnalysisStore();

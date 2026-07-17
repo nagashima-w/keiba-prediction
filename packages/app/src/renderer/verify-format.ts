@@ -10,6 +10,7 @@ import type {
   AnalysisHistoryItem,
   CalibrationBinView,
   PredictionMark,
+  RaceBreakdownView,
   VerifyBetView,
 } from "../shared/analysis-types.js";
 
@@ -170,4 +171,63 @@ export function additionalInstructionsFullText(
   return instructions
     .map((instruction) => (instruction === null ? "なし" : instruction))
     .join(" / ");
+}
+
+/** YYYYMMDD形式かどうか(8桁数字)。 */
+function isYyyymmdd(value: string): boolean {
+  return /^[0-9]{8}$/.test(value);
+}
+
+/**
+ * 開催日(YYYYMMDD)をYYYY/MM/DDに整形する(Task#34)。
+ * null(日付不明。旧データ・選択済み開催日が渡らなかった分析)は「日付不明」。
+ * YYYYMMDD形式でない値は防御的に素通しで表示する(DB異常値でも画面が壊れないように)。
+ */
+export function formatKaisaiDate(kaisaiDate: string | null): string {
+  if (kaisaiDate === null) {
+    return "日付不明";
+  }
+  if (!isYyyymmdd(kaisaiDate)) {
+    return kaisaiDate;
+  }
+  return `${kaisaiDate.slice(0, 4)}/${kaisaiDate.slice(4, 6)}/${kaisaiDate.slice(6, 8)}`;
+}
+
+/**
+ * レース単位の予実ブレークダウンの見出し(会場名・R番号・開催日の3点、Task#34)。
+ * 例: "東京 11R (2026/07/08)"。開催日不明は formatKaisaiDate の「日付不明」を含める。
+ */
+export function raceBreakdownHeading(
+  input: Pick<RaceBreakdownView, "venueName" | "raceNumber" | "kaisaiDate">,
+): string {
+  return `${input.venueName} ${input.raceNumber}R (${formatKaisaiDate(input.kaisaiDate)})`;
+}
+
+/** 実着順の表示整形(Task#34)。null(着順不明。中止・除外・結果に馬番が無い)は「不明」。 */
+export function formatFinishPosition(finishPosition: number | null): string {
+  return finishPosition === null ? "不明" : `${finishPosition}着`;
+}
+
+/**
+ * 複勝的中の有無の表示整形(Task#34)。
+ * null(finishPositionが着順不明で判定不能)は「-」。true/falseはそれぞれ「的中」「不的中」。
+ */
+export function placedLabel(isPlaced: boolean | null): string {
+  if (isPlaced === null) {
+    return "-";
+  }
+  return isPlaced ? "的中" : "不的中";
+}
+
+/**
+ * 払戻算出根拠(実配当/近似)の表示整形(Task#34)。
+ * null(賭けていない・不的中で払戻が発生していない)は「-」。
+ */
+export function payoutSourceLabel(
+  source: "actual" | "approximate" | null,
+): string {
+  if (source === null) {
+    return "-";
+  }
+  return source === "actual" ? "実配当" : "近似";
 }

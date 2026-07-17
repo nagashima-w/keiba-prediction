@@ -77,9 +77,29 @@
  *   DBのmark列は将来のスキーマ変更・手動DB改変で想定外の文字列が入りうる(analysis-store.ts の
  *   toStoredHorse は型どおりキャストするのみで値の検証はしていない)。非nullアサーション(!)での
  *   参照はその場合にクラッシュするため、未知のキーは「印なし」群にフォールバックする。
+ *
+ * レース単位の予実ブレークダウン(computeRaceBreakdown、Task#34):
+ * - 検証画面にトータル集計だけでなく、レース単体ごとの予測(印・EVプラス馬・AI補正後3着内率)と
+ *   結果(実着順・複勝的中の有無・そのレースの賭け金/払戻/回収)を並べて表示するための土台。
+ * - 母集団は既存 computeVerifyReport(latestモードの二重計上防止・推定EV除外・結果未保存除外)と
+ *   完全に一致させる(selectIncludedAnalyses に選定ロジックを集約し両関数で共有。個別に再実装すると
+ *   母集団がズレて「合計と内訳が一致しない」事故になるため)。
+ * - 1頭ごとの賭け判定・払戻計算(EVプラス馬に stakePerBet 円賭ける・実配当優先/複勝オッズ下限近似
+ *   フォールバック)も computeHorseBetOutcome に集約し、computeVerifyReportForAnalyses と
+ *   computeRaceBreakdown の両方から呼ぶことで数値の完全一致を保証する。
+ * - 着順不明(finishPosition=null。中止・除外)の馬は isPlaced=null・賭け金/払戻0として表示に含める
+ *   (verifyの集計対象からは除外されるが、レース単位の表示では「結果不明」であることを示す必要が
+ *   あるため行自体は残す。仕様注意点「値の有無」と「行の有無」の混同に注意)。
+ * - 会場名・レース番号・開催日の見出し情報は raceId 由来(app層で venueNameFromRaceId 等により解決)
+ *   のため、この core 層では raceId・kaisaiDate(analyses.kaisai_date)・promptVersion のみを返す。
  */
 
-import type { AnalysisStore, StoredAnalysis } from "./analysis-store.js";
+import type {
+  AnalysisStore,
+  RaceResultEntry,
+  StoredAnalysis,
+  StoredAnalysisHorse,
+} from "./analysis-store.js";
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
 
 /** verify集計の設定。 */
@@ -245,6 +265,72 @@ export interface PromptVersionVerifyReport {
   readonly additionalInstructions: readonly (string | null)[];
 }
 
+/**
+ * レース単体の予実ブレークダウンの1頭分(Task#34)。
+ * 予測側(mark・adjustedProb・isPositive)と結果側(finishPosition・isPlaced)を並べ、
+ * 賭け判定の結果(stake・payout・payoutSource)も添える。
+ */
+export interface RaceBreakdownHorse {
+  /** 馬番。 */
+  readonly umaban: number;
+  /** 予想印(◎〇▲△☆注のいずれか。印なし・LLM未使用時は null)。 */
+  readonly mark: PredictionMark | null;
+  /** 補正後複勝確率(AI補正後3着内率)。 */
+  readonly adjustedProb: number;
+  /** 使用した複勝オッズ下限。欠損なら null。 */
+  readonly placeOddsMin: number | null;
+  /** 期待値。オッズ欠損なら null。 */
+  readonly ev: number | null;
+  /** EVが閾値を上回るか(EVプラス馬の判定)。 */
+  readonly isPositive: boolean;
+  /** 実着順。非数値着順(中止・除外)・結果に馬番が無い場合は null(着順不明)。 */
+  readonly finishPosition: number | null;
+  /**
+   * 複勝的中(finishPosition <= placeMaxRank)の有無。finishPosition が null(着順不明)なら
+   * 判定不能のため null(verifyの集計対象外と対応する)。
+   */
+  readonly isPlaced: boolean | null;
+  /**
+   * この馬に賭けた金額(円)。EVプラス馬(isPositive かつ placeOddsMin!==null)かつ着順確定分のみ
+   * stakePerBet が入り、それ以外は0(verifyの賭け判定と同一条件)。
+   */
+  readonly stake: number;
+  /** この馬の払戻(円)。的中でなければ0。的中時は実配当優先・複勝オッズ下限近似のフォールバック。 */
+  readonly payout: number;
+  /** payout の算出根拠。的中かつ賭けた馬のみ "actual"/"approximate"、それ以外は null。 */
+  readonly payoutSource: "actual" | "approximate" | null;
+}
+
+/**
+ * レース単体の予実ブレークダウン(Task#34)。
+ * 見出し情報(会場名・レース番号・開催日の表示整形)は app 層で raceId・kaisaiDate から組み立てる。
+ */
+export interface RaceBreakdown {
+  /** レースID。 */
+  readonly raceId: string;
+  /** この予実の元になった分析ID。 */
+  readonly analysisId: number;
+  /** 分析日時(ISO文字列など)。 */
+  readonly analyzedAt: string;
+  /**
+   * 開催日(YYYYMMDD、analyses.kaisai_date)。旧データ・選択済み開催日が渡らなかった分析は null
+   * (日付不明。中央のレースIDからは開催日を復元できないため)。
+   */
+  readonly kaisaiDate: string | null;
+  /** プロンプト版番号。版不明(旧データ・LLM未使用)は null。 */
+  readonly promptVersion: string | null;
+  /** 各馬の予実(馬番昇順)。 */
+  readonly horses: readonly RaceBreakdownHorse[];
+  /** このレースの賭け金合計(円。horses の stake 合計と一致)。 */
+  readonly totalStake: number;
+  /** このレースの払戻合計(円。horses の payout 合計と一致)。 */
+  readonly totalReturn: number;
+  /** このレースの回収率(totalReturn/totalStake)。賭け0点なら null。 */
+  readonly recoveryRate: number | null;
+  /** このレースで賭けた点数。 */
+  readonly betCount: number;
+}
+
 /** 帯集計の可変カウンタ。 */
 interface BinCounter {
   predicted: number;
@@ -308,6 +394,216 @@ export function computeVerifyReportByPromptVersion(
 }
 
 /**
+ * レース単体の予実ブレークダウン(Task#34)を算出する。
+ * 母集団は computeVerifyReport と同じ(selectIncludedAnalyses を共有。結果未保存除外・
+ * latestモードの二重計上防止・推定EV除外)。既定(latestモード)ではレースごとに1件、
+ * includeAllAnalyses=true では分析ごとに1件を返す(全件モードのオプトインは既存verifyと同じ)。
+ * 呼び出し側(app層)で会場名・レース番号・開催日の表示整形と並び順の決定を行う想定。
+ * @param store 分析・結果を保持する AnalysisStore
+ * @param config verify設定(省略時は既定。母集団・賭け判定の条件を既存verifyと揃えるため共有する)
+ */
+export function computeRaceBreakdown(
+  store: AnalysisStore,
+  config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+): readonly RaceBreakdown[] {
+  const analyses = store.listAnalyses();
+  const { included } = selectIncludedAnalyses(store, analyses, config);
+  return included.map(({ analysis, results }) =>
+    buildRaceBreakdown(analysis, results, config),
+  );
+}
+
+/**
+ * 分析集合から集計対象を選び、除外件数の内訳とともに返す(Task#34)。
+ * computeVerifyReportForAnalyses(全体集計・版別集計)と computeRaceBreakdown(レース単位表示)の
+ * 両方から呼ばれる共通の母集団選定ロジック。ここを分岐点にすることで、2つの関数が独立に
+ * 選定条件を再実装して数値がズレる事故を防ぐ。
+ * 選定順序(結果未保存→latestモードの二重計上防止→推定EV除外)は元の computeVerifyReportForAnalyses
+ * のループ順をそのまま保持する(除外件数の内訳が既存挙動と一致することを保証するため)。
+ */
+function selectIncludedAnalyses(
+  store: AnalysisStore,
+  analyses: readonly StoredAnalysis[],
+  config: VerifyConfig,
+): {
+  included: ReadonlyArray<{
+    analysis: StoredAnalysis;
+    results: readonly RaceResultEntry[];
+  }>;
+  excludedAnalysisCount: number;
+  supersededAnalysisCount: number;
+  excludedEstimatedCount: number;
+} {
+  // latestモードでは「レースごとに最新1件」の分析idを選ぶ。全件モードでは null(全採用)。
+  const chosenIds = config.includeAllAnalyses ? null : chooseLatestPerRace(analyses);
+
+  let excludedAnalysisCount = 0;
+  let supersededAnalysisCount = 0;
+  let excludedEstimatedCount = 0;
+  const included: Array<{
+    analysis: StoredAnalysis;
+    results: readonly RaceResultEntry[];
+  }> = [];
+
+  for (const analysis of analyses) {
+    const results = store.getResult(analysis.raceId);
+    if (results === undefined) {
+      // 実結果が未保存の分析はレポートから除外(件数のみ計上)。
+      excludedAnalysisCount += 1;
+      continue;
+    }
+    // latestモードで最新に取って代わられた同一レースの旧分析(結果はあるが集計しない)。
+    if (chosenIds !== null && !chosenIds.has(analysis.id)) {
+      supersededAnalysisCount += 1;
+      continue;
+    }
+    // 推定EV(Task#25): 確定EVより誤差が大きいため、既定でレポートから丸ごと除外する。
+    if (analysis.evEstimated) {
+      excludedEstimatedCount += 1;
+      continue;
+    }
+    included.push({ analysis, results });
+  }
+
+  return { included, excludedAnalysisCount, supersededAnalysisCount, excludedEstimatedCount };
+}
+
+/** computeHorseBetOutcome の算出結果(Task#34)。 */
+interface HorseBetOutcome {
+  /** 複勝的中の有無。finishPosition が null(着順不明)なら null。 */
+  readonly isPlaced: boolean | null;
+  /** EVプラス馬に賭けたか(isPositive かつ placeOddsMin!==null)。 */
+  readonly betPlaced: boolean;
+  /** 賭け金(円)。betPlaced かつ着順確定分のみ stakePerBet、それ以外は0。 */
+  readonly stake: number;
+  /** 払戻(円)。的中でなければ0。 */
+  readonly payout: number;
+  /** payout の算出根拠。的中かつ賭けた馬のみ非null。 */
+  readonly payoutSource: "actual" | "approximate" | null;
+}
+
+/**
+ * 1頭分の賭け判定・払戻計算(Task#34)。
+ * computeVerifyReportForAnalyses の回収率集計ループと computeRaceBreakdown の両方から呼ばれる
+ * 共通ロジック(「EVプラス馬に stakePerBet 円賭ける・的中時は実配当優先/複勝オッズ下限で近似
+ * フォールバック」)。呼び出し元でのロジック分岐(if文の条件・払戻計算式)の重複を無くし、
+ * 両者の数値が常に一致することを保証する。
+ * @param horse 分析馬(prior/adjustedProb/placeOddsMin/isPositive等)
+ * @param finishPosition 実着順。呼び出し元で既に「着順不明(undefined/null)」を弾いている場合は
+ *   非null値を渡す想定だが、念のためnullも受け付け、その場合は判定不能として扱う。
+ * @param actualPayout 複勝確定払戻(100円あたりの円)。未取込は null/undefined。
+ * @param config verify設定(stakePerBet・placeMaxRank)
+ */
+function computeHorseBetOutcome(
+  horse: StoredAnalysisHorse,
+  finishPosition: number | null,
+  actualPayout: number | null | undefined,
+  config: VerifyConfig,
+): HorseBetOutcome {
+  const { stakePerBet, placeMaxRank } = config;
+  const betPlaced = horse.isPositive && horse.placeOddsMin !== null;
+
+  if (finishPosition === null) {
+    // 着順不明(中止・除外・結果に馬番が無い)は判定不能。集計対象外(stake/payoutは0)。
+    return { isPlaced: null, betPlaced, stake: 0, payout: 0, payoutSource: null };
+  }
+  const isPlaced = finishPosition <= placeMaxRank;
+  if (!betPlaced) {
+    return { isPlaced, betPlaced, stake: 0, payout: 0, payoutSource: null };
+  }
+  if (!isPlaced) {
+    // 賭けたが不的中: 賭け金のみ計上、払戻は0。
+    return { isPlaced, betPlaced, stake: stakePerBet, payout: 0, payoutSource: null };
+  }
+  // 的中時の払戻: 実配当(placePayout)があればそれを100円あたりで按分して用い、
+  // 無ければ複勝オッズ下限で近似する。
+  if (actualPayout !== undefined && actualPayout !== null) {
+    return {
+      isPlaced,
+      betPlaced,
+      stake: stakePerBet,
+      payout: actualPayout * (stakePerBet / 100),
+      payoutSource: "actual",
+    };
+  }
+  return {
+    isPlaced,
+    betPlaced,
+    stake: stakePerBet,
+    // betPlaced=true は horse.placeOddsMin!==null を含意するため非nullアサーションで安全に参照できる。
+    payout: stakePerBet * horse.placeOddsMin!,
+    payoutSource: "approximate",
+  };
+}
+
+/**
+ * 1分析(1レース)分の RaceBreakdown を組み立てる(Task#34)。
+ * @param analysis 集計対象として選定済みの分析
+ * @param results その分析の実結果(馬番→着順・複勝確定払戻)
+ * @param config verify設定
+ */
+function buildRaceBreakdown(
+  analysis: StoredAnalysis,
+  results: readonly RaceResultEntry[],
+  config: VerifyConfig,
+): RaceBreakdown {
+  const finishByUmaban = new Map<number, number | null>(
+    results.map((r) => [r.umaban, r.finishPosition]),
+  );
+  const payoutByUmaban = new Map<number, number | null | undefined>(
+    results.map((r) => [r.umaban, r.placePayout]),
+  );
+
+  let totalStake = 0;
+  let totalReturn = 0;
+  let betCount = 0;
+
+  const horses: RaceBreakdownHorse[] = analysis.horses.map((horse) => {
+    // 結果に馬番が無い(undefined)場合も着順不明(null)として扱う
+    // (「行の有無」と「値の有無」のどちらも「着順不明」表示に正規化する。仕様注意点)。
+    const rawFinish = finishByUmaban.get(horse.umaban);
+    const finishPosition = rawFinish === undefined ? null : rawFinish;
+    const outcome = computeHorseBetOutcome(
+      horse,
+      finishPosition,
+      payoutByUmaban.get(horse.umaban),
+      config,
+    );
+    if (outcome.betPlaced && outcome.stake > 0) {
+      betCount += 1;
+    }
+    totalStake += outcome.stake;
+    totalReturn += outcome.payout;
+    return {
+      umaban: horse.umaban,
+      mark: horse.mark,
+      adjustedProb: horse.adjustedProb,
+      placeOddsMin: horse.placeOddsMin,
+      ev: horse.ev,
+      isPositive: horse.isPositive,
+      finishPosition,
+      isPlaced: outcome.isPlaced,
+      stake: outcome.stake,
+      payout: outcome.payout,
+      payoutSource: outcome.payoutSource,
+    };
+  });
+
+  return {
+    raceId: analysis.raceId,
+    analysisId: analysis.id,
+    analyzedAt: analysis.analyzedAt,
+    kaisaiDate: analysis.kaisaiDate,
+    promptVersion: analysis.promptVersion,
+    horses,
+    totalStake,
+    totalReturn,
+    recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
+    betCount,
+  };
+}
+
+/**
  * 分析集合から additionalInstruction の重複しない値を取り出す(Task#28)。
  * 非null値は文字列昇順、null(追加指示なし)は末尾という決定的な順序で返す。
  */
@@ -333,8 +629,7 @@ function computeVerifyReportForAnalyses(
   analyses: readonly StoredAnalysis[],
   config: VerifyConfig,
 ): VerifyReport {
-  const { stakePerBet, placeMaxRank, calibrationBins, includeAllAnalyses, directionEpsilon } =
-    config;
+  const { calibrationBins, directionEpsilon } = config;
 
   const bins: BinCounter[] = Array.from({ length: calibrationBins }, () => ({
     predicted: 0,
@@ -354,38 +649,18 @@ function computeVerifyReportForAnalyses(
   // 印なし群のカウンタ(未知mark文字列のフォールバック先として使い回す。Task#26 boss観察1対応)。
   const noMarkCounter = markCounters.get(null)!;
 
-  // latestモードでは「レースごとに最新1件」の分析idを選ぶ。全件モードでは null(全採用)。
-  const chosenIds = includeAllAnalyses ? null : chooseLatestPerRace(analyses);
+  // 集計対象の選定(結果未保存除外・latestモードの二重計上防止・推定EV除外)は
+  // selectIncludedAnalyses に集約する(Task#34: レース単位ブレークダウン computeRaceBreakdown と
+  // 母集団の選定ロジックを共有し、二重実装による数値の乖離を防ぐ)。
+  const selected = selectIncludedAnalyses(store, analyses, config);
 
-  let includedAnalysisCount = 0;
-  let excludedAnalysisCount = 0;
-  let supersededAnalysisCount = 0;
-  let excludedEstimatedCount = 0;
   let betCount = 0;
   let totalStake = 0;
   let totalReturn = 0;
   let actualPayoutCount = 0;
   let approximatePayoutCount = 0;
 
-  for (const analysis of analyses) {
-    const results = store.getResult(analysis.raceId);
-    if (results === undefined) {
-      // 実結果が未保存の分析はレポートから除外(件数のみ計上)。
-      excludedAnalysisCount += 1;
-      continue;
-    }
-    // latestモードで最新に取って代わられた同一レースの旧分析(結果はあるが集計しない)。
-    if (chosenIds !== null && !chosenIds.has(analysis.id)) {
-      supersededAnalysisCount += 1;
-      continue;
-    }
-    // 推定EV(Task#25): 確定EVより誤差が大きいため、既定でレポートから丸ごと除外する。
-    if (analysis.evEstimated) {
-      excludedEstimatedCount += 1;
-      continue;
-    }
-    includedAnalysisCount += 1;
-
+  for (const { analysis, results } of selected.included) {
     // 馬番 → 実着順(finishPosition)。非数値着順は null。
     const finishByUmaban = new Map<number, number | null>(
       results.map((r) => [r.umaban, r.finishPosition]),
@@ -401,7 +676,12 @@ function computeVerifyReportForAnalyses(
       if (finish === undefined || finish === null) {
         continue;
       }
-      const isPlaced = finish <= placeMaxRank;
+      // 賭け判定・払戻計算・複勝的中判定(isPlaced)は computeHorseBetOutcome に集約
+      // (賭け判定・払戻計算は Task#34 でレース単位ブレークダウンと共有。isPlaced も同関数の
+      // 戻り値を再利用することで、同じ式(finish <= placeMaxRank)をこのループ内で二重に
+      // 計算しない)。finish は上で non-null 確定済みのため isPlaced も必ず non-null。
+      const outcome = computeHorseBetOutcome(horse, finish, payoutByUmaban.get(horse.umaban), config);
+      const isPlaced = outcome.isPlaced!;
 
       // キャリブレーション: 全馬(推定確率帯ごと)に計上する。
       const binIndex = binIndexFor(horse.adjustedProb, calibrationBins);
@@ -434,21 +714,17 @@ function computeVerifyReportForAnalyses(
         mCounter.won += 1;
       }
 
-      // 回収率: EVプラス馬券のみ複勝を stakePerBet 円で購入したと仮定。
-      if (horse.isPositive && horse.placeOddsMin !== null) {
+      // 回収率: EVプラス馬券のみ複勝を stakePerBet 円で購入したと仮定
+      // (outcome は上で計算済み。賭け判定・払戻計算は computeHorseBetOutcome に集約し、
+      // Task#34でレース単位ブレークダウンと共有)。
+      if (outcome.betPlaced) {
         betCount += 1;
-        totalStake += stakePerBet;
-        if (isPlaced) {
-          // 的中時の払戻: 実配当(placePayout)があればそれを100円あたりで按分して用い、
-          // 無ければ複勝オッズ下限で近似する。どちらを使ったかを件数で記録する。
-          const actualPayout = payoutByUmaban.get(horse.umaban);
-          if (actualPayout !== undefined && actualPayout !== null) {
-            totalReturn += actualPayout * (stakePerBet / 100);
-            actualPayoutCount += 1;
-          } else {
-            totalReturn += stakePerBet * horse.placeOddsMin;
-            approximatePayoutCount += 1;
-          }
+        totalStake += outcome.stake;
+        totalReturn += outcome.payout;
+        if (outcome.payoutSource === "actual") {
+          actualPayoutCount += 1;
+        } else if (outcome.payoutSource === "approximate") {
+          approximatePayoutCount += 1;
         }
       }
     }
@@ -457,10 +733,10 @@ function computeVerifyReportForAnalyses(
   const calibration = bins.map((c, i) => finalizeBin(c, i, calibrationBins));
 
   return {
-    includedAnalysisCount,
-    excludedAnalysisCount,
-    supersededAnalysisCount,
-    excludedEstimatedCount,
+    includedAnalysisCount: selected.included.length,
+    excludedAnalysisCount: selected.excludedAnalysisCount,
+    supersededAnalysisCount: selected.supersededAnalysisCount,
+    excludedEstimatedCount: selected.excludedEstimatedCount,
     bet: {
       betCount,
       totalStake,

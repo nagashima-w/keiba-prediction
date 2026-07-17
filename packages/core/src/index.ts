@@ -237,6 +237,7 @@ export {
   type StoredAnalysisHorse,
 } from "./ev/analysis-store.js";
 export {
+  computeRaceBreakdown,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
   DEFAULT_VERIFY_CONFIG,
@@ -246,6 +247,8 @@ export {
   type DirectionGroupStat,
   type MarkStat,
   type PromptVersionVerifyReport,
+  type RaceBreakdown,
+  type RaceBreakdownHorse,
   type VerifyBetSummary,
   type VerifyConfig,
   type VerifyReport,

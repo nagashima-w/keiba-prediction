@@ -15,6 +15,7 @@ function analysis(
     evEstimated: false,
     promptVersion: null,
     additionalInstruction: null,
+    kaisaiDate: null,
     horses: positives.map((isPositive, i) => ({
       umaban: i + 1,
       prior: 0.3,

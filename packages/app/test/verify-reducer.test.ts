@@ -3,6 +3,7 @@ import type {
   AnalysisHistoryItem,
   BulkImportRaceOutcome,
   PromptVersionVerifyReportView,
+  RaceBreakdownView,
   VerifyReportView,
 } from "../src/shared/analysis-types.js";
 import {
@@ -56,6 +57,23 @@ const samplePromptVersionReports: PromptVersionVerifyReportView[] = [
   { promptVersion: null, report: sampleReport, additionalInstructions: [null] },
 ];
 
+const sampleRaceBreakdown: RaceBreakdownView[] = [
+  {
+    raceId: "202605020811",
+    venueName: "東京",
+    raceNumber: 11,
+    kaisaiDate: "20260708",
+    analysisId: 1,
+    analyzedAt: "2026-07-08T10:00:00.000Z",
+    promptVersion: "2026-07-14.1",
+    horses: [],
+    totalStake: 100,
+    totalReturn: 300,
+    recoveryRate: 3.0,
+    betCount: 1,
+  },
+];
+
 describe("verifyReducer(検証タブの状態遷移)", () => {
   it("初期状態は分析タブ・履歴空・取込中なし", () => {
     const s = init();
@@ -91,6 +109,34 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     );
     expect(s.loadingReportsByPromptVersion).toBe(false);
     expect(s.reportsByPromptVersionError).toBe("失敗");
+  });
+
+  it("初期状態はレース別予実も空・未ローディングであること(Task#34)", () => {
+    const s = init();
+    expect(s.raceBreakdown).toEqual([]);
+    expect(s.loadingRaceBreakdown).toBe(false);
+    expect(s.raceBreakdownError).toBeNull();
+  });
+
+  it("レース別予実取得開始→成功で raceBreakdown を格納しローディング解除する(Task#34)", () => {
+    const loading = verifyReducer(init(), { type: "レース別予実取得開始" });
+    expect(loading.loadingRaceBreakdown).toBe(true);
+    const done = verifyReducer(loading, {
+      type: "レース別予実取得成功",
+      raceBreakdown: sampleRaceBreakdown,
+    });
+    expect(done.loadingRaceBreakdown).toBe(false);
+    expect(done.raceBreakdown).toEqual(sampleRaceBreakdown);
+    expect(done.raceBreakdownError).toBeNull();
+  });
+
+  it("レース別予実取得失敗でエラーを保持しローディング解除する(Task#34)", () => {
+    const s = verifyReducer(
+      { ...init(), loadingRaceBreakdown: true },
+      { type: "レース別予実取得失敗", message: "失敗" },
+    );
+    expect(s.loadingRaceBreakdown).toBe(false);
+    expect(s.raceBreakdownError).toBe("失敗");
   });
 
   it("タブ切替: activeTab を更新する", () => {

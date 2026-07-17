@@ -356,6 +356,10 @@ export async function runAnalysis(
     // LLMスキップ(prior採用)はプロンプト自体を使っていないため null(promptVersionと同じ方針)。
     additionalInstruction:
       llmUsed && trimmedInstruction !== "" ? trimmedInstruction : null,
+    // 開催日(Task#34): 選択済み開催日(kaisaiDate引数)をそのまま保存する。渡らなかった場合は
+    // resolveAnalysisDate が当日日付で近似するが、その近似値は不確かなため保存しない
+    // (analysisDate は季節分類等のスコアリングにのみ使い、DB保存は生の kaisaiDate 引数のみ参照する)。
+    kaisaiDate,
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;

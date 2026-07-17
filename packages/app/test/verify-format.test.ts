@@ -4,6 +4,7 @@ import type {
   CalibrationBinView,
   VerifyBetView,
 } from "../src/shared/analysis-types.js";
+import type { RaceBreakdownView } from "../src/shared/analysis-types.js";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
@@ -11,6 +12,8 @@ import {
   directionLabel,
   formatAdjustment,
   formatBinRange,
+  formatFinishPosition,
+  formatKaisaiDate,
   formatPayoutBreakdown,
   formatRate,
   formatYen,
@@ -19,7 +22,10 @@ import {
   markLabel,
   needsImport,
   overconfidenceLabel,
+  payoutSourceLabel,
+  placedLabel,
   promptVersionLabel,
+  raceBreakdownHeading,
 } from "../src/renderer/verify-format.js";
 
 /** テスト用の履歴項目を最小構成で組み立てる。 */
@@ -248,6 +254,64 @@ describe("verify画面の表示整形(純関数)", () => {
       expect(additionalInstructionsFullText(["指示A", long])).toBe(
         `指示A / ${long}`,
       );
+    });
+  });
+
+  describe("formatKaisaiDate(開催日の表示整形、Task#34)", () => {
+    it("YYYYMMDDをYYYY/MM/DDに整形すること", () => {
+      expect(formatKaisaiDate("20260708")).toBe("2026/07/08");
+    });
+    it("null(日付不明)は「日付不明」にすること", () => {
+      expect(formatKaisaiDate(null)).toBe("日付不明");
+    });
+    it("YYYYMMDD形式でない不正値は素通しで表示すること(防御的フォールバック)", () => {
+      expect(formatKaisaiDate("不正な値")).toBe("不正な値");
+    });
+  });
+
+  describe("raceBreakdownHeading(レース別予実の見出し、Task#34)", () => {
+    const base: Pick<RaceBreakdownView, "venueName" | "raceNumber" | "kaisaiDate"> = {
+      venueName: "東京",
+      raceNumber: 11,
+      kaisaiDate: "20260708",
+    };
+    it("会場名・R番号・開催日の3点を含む見出しにすること", () => {
+      expect(raceBreakdownHeading(base)).toBe("東京 11R (2026/07/08)");
+    });
+    it("開催日不明(null)は「日付不明」を含めること", () => {
+      expect(raceBreakdownHeading({ ...base, kaisaiDate: null })).toBe(
+        "東京 11R (日付不明)",
+      );
+    });
+  });
+
+  describe("formatFinishPosition(実着順の表示整形、Task#34)", () => {
+    it("数値はそのまま「N着」にすること", () => {
+      expect(formatFinishPosition(1)).toBe("1着");
+      expect(formatFinishPosition(12)).toBe("12着");
+    });
+    it("null(着順不明・中止/除外)は「不明」にすること", () => {
+      expect(formatFinishPosition(null)).toBe("不明");
+    });
+  });
+
+  describe("placedLabel(複勝的中の表示整形、Task#34)", () => {
+    it("trueは「的中」、falseは「不的中」にすること", () => {
+      expect(placedLabel(true)).toBe("的中");
+      expect(placedLabel(false)).toBe("不的中");
+    });
+    it("null(着順不明で判定不能)は「-」にすること", () => {
+      expect(placedLabel(null)).toBe("-");
+    });
+  });
+
+  describe("payoutSourceLabel(払戻算出根拠の表示整形、Task#34)", () => {
+    it("actualは「実配当」、approximateは「近似」にすること", () => {
+      expect(payoutSourceLabel("actual")).toBe("実配当");
+      expect(payoutSourceLabel("approximate")).toBe("近似");
+    });
+    it("null(賭けていない・不的中)は「-」にすること", () => {
+      expect(payoutSourceLabel(null)).toBe("-");
     });
   });
 });

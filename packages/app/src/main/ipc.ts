@@ -30,6 +30,7 @@ import type {
   ImportResultOutcome,
   LogExportOutcome,
   PromptVersionVerifyReportView,
+  RaceBreakdownView,
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
@@ -116,6 +117,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getVerifyReportByPromptVersion, () =>
     handleGetVerifyReportByPromptVersion(),
   );
+
+  ipcMain.handle(IPC_CHANNELS.getRaceBreakdown, () => handleGetRaceBreakdown());
 
   ipcMain.handle(IPC_CHANNELS.listAnalyses, () => handleListAnalyses());
 
@@ -394,6 +397,13 @@ async function handleGetVerifyReportByPromptVersion(): Promise<
 async function handleListAnalyses(): Promise<AnalysisHistoryItem[]> {
   return withErrorLogging(IPC_CHANNELS.listAnalyses, undefined, () =>
     getResources().listAnalysisHistory(),
+  );
+}
+
+/** レース単位の予実ブレークダウン取得ハンドラの実処理(Task#34)。 */
+async function handleGetRaceBreakdown(): Promise<readonly RaceBreakdownView[]> {
+  return withErrorLogging(IPC_CHANNELS.getRaceBreakdown, undefined, () =>
+    getResources().getRaceBreakdown(),
   );
 }
 

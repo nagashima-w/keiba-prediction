@@ -145,6 +145,18 @@ export function App(): React.JSX.Element {
           message: errorMessage(e),
         }),
       );
+    verifyDispatch({ type: "レース別予実取得開始" });
+    window.keibaApi
+      .getRaceBreakdown()
+      .then((raceBreakdown) =>
+        verifyDispatch({ type: "レース別予実取得成功", raceBreakdown }),
+      )
+      .catch((e: unknown) =>
+        verifyDispatch({
+          type: "レース別予実取得失敗",
+          message: errorMessage(e),
+        }),
+      );
   }, []);
 
   const handleTabChange = useCallback(

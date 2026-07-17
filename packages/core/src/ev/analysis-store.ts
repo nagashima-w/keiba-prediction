@@ -46,6 +46,17 @@
  * (PROMPT_VERSION定数自体は追加指示では更新しない運用)。LLM未使用・設定が空の分析は null を渡す想定。
  * 旧バージョンで作成済みのDBにはこの列が無いため、他の列と同じ流儀でALTER TABLEにより後付けし、
  * 既存行は NULL=追加指示なしとして読む(後方互換)。
+ *
+ * 開催日(kaisai_date)列(Task#34 レース単位の予実ブレークダウン): analyses に
+ * kaisai_date TEXT(nullable、YYYYMMDD)を持つ。検証画面でレース単位に予実を表示する際、
+ * 見出しに開催日を出したいが、中央のレースIDは回次・日次のみを埋め込み開催日を復元できない
+ * (packages/core/src/scraper/ids.ts のコメント参照)。app 側は分析実行時に選択済みの開催日
+ * (kaisaiDate)を保持しているため、それをそのまま保存する経路をこの列で持たせる。
+ * 選択済み開催日が渡らなかった場合(kaisaiDateがnull)は、この列もnull(日付不明)として保存する
+ * (analysis-pipeline.ts の当日近似日付はUI表示専用の近似値であり、実際の開催日ではないため
+ * kaisai_date列には保存しない=不確かな値で上書きしない)。
+ * 旧バージョンで作成済みのDBにはこの列が無いため、他の列と同じ流儀でALTER TABLEにより後付けし、
+ * 既存行は NULL=日付不明として読む(後方互換)。
  */
 
 import Database from "better-sqlite3";
@@ -102,6 +113,12 @@ export interface AnalysisRecord {
    * 使っていない)は null を渡す。省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
    */
   readonly additionalInstruction?: string | null;
+  /**
+   * 開催日(YYYYMMDD、Task#34)。app 側で選択済みの開催日(kaisaiDate)をそのまま渡す想定。
+   * 選択済み開催日が渡らなかった(当日日付で近似した)場合は null を渡す。
+   * 省略時も null(日付不明。既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly kaisaiDate?: string | null;
 }
 
 /** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
@@ -136,6 +153,11 @@ export interface StoredAnalysis {
    * 追加指示(Task#28)。旧レコード(列追加前の保存)・設定が空・LLM未使用の分析は null。
    */
   readonly additionalInstruction: string | null;
+  /**
+   * 開催日(YYYYMMDD、Task#34)。旧レコード(列追加前の保存)・選択済み開催日が渡らなかった分析は
+   * null(日付不明)。
+   */
+  readonly kaisaiDate: string | null;
 }
 
 /** レース結果の1頭分。 */
@@ -201,7 +223,8 @@ export class AnalysisStore {
         analyzed_at TEXT NOT NULL,
         ev_estimated INTEGER,
         prompt_version TEXT,
-        additional_instruction TEXT
+        additional_instruction TEXT,
+        kaisai_date TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -231,6 +254,22 @@ export class AnalysisStore {
     this.migrateEvEstimatedColumn();
     this.migratePromptVersionColumn();
     this.migrateAdditionalInstructionColumn();
+    this.migrateKaisaiDateColumn();
+  }
+
+  /**
+   * 開催日(kaisai_date)列を後付けするマイグレーション(Task#34)。
+   * 旧バージョンで作成済みの analyses には kaisai_date 列が無いため、存在しなければ追加する
+   * (既存行は NULL=日付不明となり、検証画面のレース単位ブレークダウンは「日付不明」表示に
+   * フォールバックする=後方互換)。
+   */
+  private migrateKaisaiDateColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "kaisai_date")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN kaisai_date TEXT`);
+    }
   }
 
   /**
@@ -314,8 +353,8 @@ export class AnalysisStore {
   saveAnalysis(record: AnalysisRecord): number {
     const insertAnalysis = this.db.prepare(
       `INSERT INTO ${ANALYSES_TABLE}
-         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction)
-       VALUES (?, ?, ?, ?, ?)`,
+         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
@@ -330,6 +369,7 @@ export class AnalysisStore {
         rec.evEstimated ? 1 : 0,
         rec.promptVersion ?? null,
         rec.additionalInstruction ?? null,
+        rec.kaisaiDate ?? null,
       );
       const analysisId = Number(info.lastInsertRowid);
       for (const h of rec.horses) {
@@ -411,14 +451,16 @@ export class AnalysisStore {
         ? this.db
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
-                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction
+                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
+                      kaisai_date AS kaisaiDate
                  FROM ${ANALYSES_TABLE} ORDER BY id`,
             )
             .all()
         : this.db
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
-                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction
+                      prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
+                      kaisai_date AS kaisaiDate
                  FROM ${ANALYSES_TABLE} WHERE race_id = ? ORDER BY id`,
             )
             .all(filter.raceId)
@@ -429,6 +471,7 @@ export class AnalysisStore {
       evEstimated: number | null;
       promptVersion: string | null;
       additionalInstruction: string | null;
+      kaisaiDate: string | null;
     }>;
 
     const horseStmt = this.db.prepare(
@@ -449,6 +492,8 @@ export class AnalysisStore {
         promptVersion: a.promptVersion,
         // NULL(旧レコード・列追加前の保存・設定が空・LLM未使用)は追加指示なしとしてnullのまま復元する。
         additionalInstruction: a.additionalInstruction,
+        // NULL(旧レコード・列追加前の保存・選択済み開催日が渡らなかった分析)は日付不明としてnullのまま復元する。
+        kaisaiDate: a.kaisaiDate,
       };
     });
   }

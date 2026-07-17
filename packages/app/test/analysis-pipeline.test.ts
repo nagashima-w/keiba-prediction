@@ -235,6 +235,21 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(result.dateApproximate).toBe(true);
   });
 
+  it("選択済み開催日(kaisaiDate)を保存レコードにそのまま記録すること(Task#34)", async () => {
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      baseDeps(),
+      onProgress,
+    );
+    expect(saved[0]!.kaisaiDate).toBe(KAISAI);
+  });
+
+  it("開催日が渡らない(null)場合は保存レコードのkaisaiDateもnullにすること(当日近似日付は保存しない、Task#34)", async () => {
+    await runAnalysis(parseRaceId(RACE_ID), null, baseDeps(), onProgress);
+    expect(saved[0]!.kaisaiDate).toBeNull();
+  });
+
   it("LLM無し(analyze=null): prior をそのまま採用し、EV・保存まで実行して結果を返す", async () => {
     const result = await runAnalysis(
       parseRaceId(RACE_ID),

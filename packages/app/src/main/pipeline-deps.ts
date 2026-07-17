@@ -17,6 +17,7 @@ import {
   analyzeRace,
   AnthropicLlmClient,
   CachedFetcher,
+  computeRaceBreakdown,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
   HttpClient,
@@ -38,9 +39,11 @@ import type {
   AnalysisHistoryItem,
   ImportResultOutcome,
   PromptVersionVerifyReportView,
+  RaceBreakdownView,
   VerifyReportView,
 } from "../shared/analysis-types.js";
 import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
+import { buildRaceBreakdownView } from "./race-breakdown-view.js";
 import { importRaceResult } from "./result-import.js";
 import { buildAnalysisHistory } from "./verify-history.js";
 
@@ -100,6 +103,11 @@ export interface PipelineResources {
   readonly getVerifyReport: () => VerifyReportView;
   /** プロンプト版別の検証レポート一覧を取得する(Task#27)。 */
   readonly getVerifyReportByPromptVersion: () => readonly PromptVersionVerifyReportView[];
+  /**
+   * レース単位の予実ブレークダウン一覧を取得する(Task#34)。verifyと同じ母集団のレースを、
+   * 開催日降順(null は最後)→レースID昇順で返す。
+   */
+  readonly getRaceBreakdown: () => readonly RaceBreakdownView[];
   /** 分析履歴一覧(検証画面用)を取得する。 */
   readonly listAnalysisHistory: () => AnalysisHistoryItem[];
   /** DB接続などを閉じる。 */
@@ -171,6 +179,8 @@ export function createPipelineDeps(
     getVerifyReport: (): VerifyReportView => computeVerifyReport(store),
     getVerifyReportByPromptVersion: (): readonly PromptVersionVerifyReportView[] =>
       computeVerifyReportByPromptVersion(store),
+    getRaceBreakdown: (): readonly RaceBreakdownView[] =>
+      buildRaceBreakdownView(computeRaceBreakdown(store)),
     listAnalysisHistory: (): AnalysisHistoryItem[] => {
       const analyses = store.listAnalyses();
       // 結果取込済み(実着順あり)/払戻取込済み(複勝払戻あり)のレースID集合を作る。

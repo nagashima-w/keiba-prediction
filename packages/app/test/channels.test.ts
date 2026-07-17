@@ -49,4 +49,8 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.openLogFolder).toBe("log:open-folder");
     expect(IPC_CHANNELS.exportLogs).toBe("log:export");
   });
+
+  it("レース単位の予実ブレークダウン取得チャネルが定義されている(Task#34)", () => {
+    expect(IPC_CHANNELS.getRaceBreakdown).toBe("verify:race-breakdown");
+  });
 });

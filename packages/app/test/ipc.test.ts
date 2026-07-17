@@ -66,6 +66,14 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
     );
   });
 
+  it("レース単位の予実ブレークダウン取得チャネルをハンドラ付きで登録する(Task#34)", () => {
+    registerIpcHandlers();
+    expect(handleMock).toHaveBeenCalledWith(
+      IPC_CHANNELS.getRaceBreakdown,
+      expect.any(Function),
+    );
+  });
+
   it("設定画面用のチャネル(取得・保存・初期化)をハンドラ付きで登録する", () => {
     registerIpcHandlers();
     for (const channel of [
