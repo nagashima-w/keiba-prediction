@@ -23,6 +23,11 @@ export const IPC_CHANNELS = {
   /** プロンプト版別の検証レポート一覧を取得する(Task#27)。 */
   getVerifyReportByPromptVersion: "verify:report-by-prompt-version",
   /**
+   * プロンプト版不明(prompt_version が null)の分析をまとめて削除する(Task#33)。
+   * 関連する analysis_horses(馬単位の子行)も併せて削除する。race_results は削除しない。
+   */
+  deleteUnknownPromptVersionAnalyses: "verify:delete-unknown-prompt-version-analyses",
+  /**
    * レース単位の予実ブレークダウン一覧を取得する(Task#34)。
    * verifyと同じ母集団(latest選択・推定EV除外・結果未保存除外)のレースを、開催日降順
    * (null は最後)→レースID昇順で返す。

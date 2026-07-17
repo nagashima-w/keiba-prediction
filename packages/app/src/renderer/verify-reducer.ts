@@ -69,6 +69,18 @@ export interface VerifyState {
   readonly importNotice: string | null;
   /** 一括取込(Task#31)の実行状態。 */
   readonly bulkImport: BulkImportState;
+  /** 版不明(prompt_version=null)分析の削除(Task#33)を実行中か。 */
+  readonly deletingUnknownPromptVersion: boolean;
+  /** 直近の版不明削除エラー(無ければ null)。 */
+  readonly deleteUnknownPromptVersionError: string | null;
+  /**
+   * 直近に完了した版不明削除の件数(IPCの戻り値をそのまま格納。Task#33)。
+   * 未実行・実行中は null(「まだ完了フィードバックを表示すべきでない」ことと「0件削除した」ことを
+   * 区別するため、削除0件は 0 として区別可能に保つ)。表示整形は
+   * verify-format.ts の deleteUnknownPromptVersionResultMessage に委ねる(他フィールドと同じく
+   * reducerには生データだけを持たせる)。
+   */
+  readonly deleteUnknownPromptVersionDeletedCount: number | null;
 }
 
 /**
@@ -145,7 +157,10 @@ export type VerifyAction =
       readonly runId: number;
       readonly outcomes: readonly BulkImportRaceOutcome[];
     }
-  | { readonly type: "一括取込中断要求" };
+  | { readonly type: "一括取込中断要求" }
+  | { readonly type: "版不明削除開始" }
+  | { readonly type: "版不明削除成功"; readonly deletedCount: number }
+  | { readonly type: "版不明削除失敗"; readonly message: string };
 
 /** 初期状態(分析タブ・空)。 */
 export function createInitialVerifyState(): VerifyState {
@@ -169,6 +184,9 @@ export function createInitialVerifyState(): VerifyState {
     importErrorRaceId: null,
     importNotice: null,
     bulkImport: EMPTY_BULK_IMPORT,
+    deletingUnknownPromptVersion: false,
+    deleteUnknownPromptVersionError: null,
+    deleteUnknownPromptVersionDeletedCount: null,
   };
 }
 
@@ -347,6 +365,31 @@ export function verifyReducer(
       return {
         ...state,
         bulkImport: { ...state.bulkImport, canceling: true },
+      };
+
+    case "版不明削除開始":
+      // 直前の完了フィードバック(エラー・削除件数)を新しい実行の開始でクリアする
+      // (他の「〜開始」アクションと同じ流儀)。
+      return {
+        ...state,
+        deletingUnknownPromptVersion: true,
+        deleteUnknownPromptVersionError: null,
+        deleteUnknownPromptVersionDeletedCount: null,
+      };
+
+    case "版不明削除成功":
+      return {
+        ...state,
+        deletingUnknownPromptVersion: false,
+        deleteUnknownPromptVersionDeletedCount: action.deletedCount,
+        deleteUnknownPromptVersionError: null,
+      };
+
+    case "版不明削除失敗":
+      return {
+        ...state,
+        deletingUnknownPromptVersion: false,
+        deleteUnknownPromptVersionError: action.message,
       };
 
     default: {

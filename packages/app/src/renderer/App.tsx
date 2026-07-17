@@ -16,6 +16,10 @@ import {
   verifyReducer,
   type TabKey,
 } from "./verify-reducer.js";
+import {
+  deleteUnknownPromptVersionConfirmMessage,
+  unknownPromptVersionAnalysisCount,
+} from "./verify-format.js";
 
 /** 今日を YYYYMMDD で返す(日付ピッカーの初期値)。 */
 function todayYyyymmdd(): string {
@@ -251,6 +255,30 @@ export function App(): React.JSX.Element {
     window.keibaApi.cancelBulkImport().catch(() => {});
   }, []);
 
+  // 版不明(prompt_version=null)分析の削除(Task#33)。取り消せない破壊的操作のため、
+  // window.confirm で件数付きの確認を必ず経てから呼ぶ。件数は既に読み込み済みの版別レポート
+  // (reportsByPromptVersion)から求め、追加のIPC往復は行わない。
+  const handleDeleteUnknownPromptVersionAnalyses = useCallback(() => {
+    const count = unknownPromptVersionAnalysisCount(verify.reportsByPromptVersion);
+    if (!window.confirm(deleteUnknownPromptVersionConfirmMessage(count))) {
+      return;
+    }
+    verifyDispatch({ type: "版不明削除開始" });
+    window.keibaApi
+      .deleteUnknownPromptVersionAnalyses()
+      .then(({ deletedCount }) => {
+        verifyDispatch({ type: "版不明削除成功", deletedCount });
+        // 削除後に検証データ(レポート・版別比較・履歴・レース別予実)を再読込する(仕様の受け入れ条件)。
+        loadVerifyData();
+      })
+      .catch((e: unknown) =>
+        verifyDispatch({
+          type: "版不明削除失敗",
+          message: errorMessage(e),
+        }),
+      );
+  }, [verify.reportsByPromptVersion, loadVerifyData]);
+
   const handleFetch = useCallback(() => {
     const date = state.selection.date;
     const venueKind = state.selection.venueKind;
@@ -431,6 +459,9 @@ export function App(): React.JSX.Element {
           onVenueFilterChange={handleVenueFilterChange}
           onRunBulkImport={handleRunBulkImport}
           onCancelBulkImport={handleCancelBulkImport}
+          onDeleteUnknownPromptVersionAnalyses={
+            handleDeleteUnknownPromptVersionAnalyses
+          }
         />
       )}
 

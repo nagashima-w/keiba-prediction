@@ -5,6 +5,7 @@ import type {
   BatchRaceOutcome,
   BulkImportProgress,
   BulkImportRaceOutcome,
+  DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
   PromptVersionVerifyReportView,
@@ -98,6 +99,14 @@ export interface KeibaApi {
    * 版不明(旧データ・LLM未使用の分析)は promptVersion=null の1グループとして含まれる。
    */
   getVerifyReportByPromptVersion(): Promise<readonly PromptVersionVerifyReportView[]>;
+
+  /**
+   * プロンプト版不明(prompt_version が null)の分析をまとめて削除する(Task#33)。
+   * 破壊的操作(取り消せない)であり、呼び出し側(renderer)が確認ダイアログを出したうえで
+   * 呼ぶことを前提とする。関連する analysis_horses(馬単位の子行)も併せて削除するが、
+   * race_results(結果データ)は版と無関係に再利用できるため削除しない。
+   */
+  deleteUnknownPromptVersionAnalyses(): Promise<DeleteUnknownPromptVersionAnalysesResult>;
 
   /**
    * レース単位の予実ブレークダウン一覧を取得する(Task#34)。

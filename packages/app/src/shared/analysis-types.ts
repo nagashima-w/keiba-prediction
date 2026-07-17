@@ -340,6 +340,16 @@ export interface PromptVersionVerifyReportView {
 }
 
 /**
+ * プロンプト版不明(prompt_version が null)の分析を削除した結果(表示用。Task#33)。
+ * 削除操作の直後に検証データ(レポート・版別比較・履歴・レース別予実)を再読込したうえで、
+ * この件数を画面にフィードバック表示する。
+ */
+export interface DeleteUnknownPromptVersionAnalysesResult {
+  /** 削除した分析(analyses行)の件数。関連する analysis_horses(馬単位の子行)も併せて削除される。 */
+  readonly deletedCount: number;
+}
+
+/**
  * 結果取込の結果(1レース分)。status で確定/未確定を判別する判別共用体。
  *
  * - "imported": 結果が確定していて着順を保存した(複勝払戻は無いこともある。hasPayout で判別)。
