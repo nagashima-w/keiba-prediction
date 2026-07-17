@@ -12,6 +12,7 @@ import type {
   PredictionMark,
   RaceBreakdownView,
   VerifyBetView,
+  VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 
 /** 0〜1の割合を小数第1位までのパーセント文字列にする。null は "-"。 */
@@ -125,6 +126,18 @@ export function markLabel(mark: PredictionMark | null): string {
  */
 export function promptVersionLabel(promptVersion: string | null): string {
   return promptVersion === null ? "版不明" : promptVersion;
+}
+
+/** 検証画面の地域フィルタ(全体/中央のみ/地方のみ)の表示ラベル(Task#32)。 */
+export function venueFilterLabel(venueFilter: VerifyVenueFilter): string {
+  switch (venueFilter) {
+    case "all":
+      return "全体";
+    case "central":
+      return "中央のみ";
+    case "nar":
+      return "地方のみ";
+  }
 }
 
 /** 追加指示の1件を30文字までに切り詰める(超過分は「…」に置き換える)。 */

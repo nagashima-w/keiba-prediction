@@ -26,6 +26,7 @@ import {
   placedLabel,
   promptVersionLabel,
   raceBreakdownHeading,
+  venueFilterLabel,
 } from "../src/renderer/verify-format.js";
 
 /** テスト用の履歴項目を最小構成で組み立てる。 */
@@ -183,6 +184,18 @@ describe("verify画面の表示整形(純関数)", () => {
     });
     it("版不明(null)は『版不明』にすること", () => {
       expect(promptVersionLabel(null)).toBe("版不明");
+    });
+  });
+
+  describe("venueFilterLabel(検証画面の地域フィルタ表示、Task#32)", () => {
+    it("all は『全体』にすること", () => {
+      expect(venueFilterLabel("all")).toBe("全体");
+    });
+    it("central は『中央のみ』にすること", () => {
+      expect(venueFilterLabel("central")).toBe("中央のみ");
+    });
+    it("nar は『地方のみ』にすること", () => {
+      expect(venueFilterLabel("nar")).toBe("地方のみ");
     });
   });
 

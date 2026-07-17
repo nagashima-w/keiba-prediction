@@ -253,6 +253,7 @@ export {
   type VerifyConfig,
   type VerifyReport,
   type VerifyTrendReport,
+  type VerifyVenueFilter,
 } from "./ev/verify.js";
 export {
   classifyHorseLegStyle,

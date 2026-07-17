@@ -34,6 +34,7 @@ import type {
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
+  VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 import { buildBatchDiscordPayload } from "./batch-discord-payload.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
@@ -112,7 +113,9 @@ export function registerIpcHandlers(): void {
     handleCancelBulkImport(),
   );
 
-  ipcMain.handle(IPC_CHANNELS.getVerifyReport, () => handleGetVerifyReport());
+  ipcMain.handle(IPC_CHANNELS.getVerifyReport, (_event, venueKind: unknown) =>
+    handleGetVerifyReport(normalizeVerifyVenueFilter(venueKind)),
+  );
 
   ipcMain.handle(IPC_CHANNELS.getVerifyReportByPromptVersion, () =>
     handleGetVerifyReportByPromptVersion(),
@@ -375,10 +378,21 @@ function handleCancelBulkImport(): void {
   bulkImportCancelRequested = true;
 }
 
+/**
+ * IPC越しに届いた venueKind 引数を検証済みの VerifyVenueFilter へ正規化する(Task#32)。
+ * renderer からの入力は unknown として扱い、"central"/"nar" 以外(未指定・不正値)は
+ * 既定の "all"(全体、従来どおり)にフォールバックする(listRaces の venueKind 正規化と同じ方針)。
+ */
+function normalizeVerifyVenueFilter(value: unknown): VerifyVenueFilter {
+  return value === "central" || value === "nar" ? value : "all";
+}
+
 /** 検証レポート取得ハンドラの実処理。 */
-async function handleGetVerifyReport(): Promise<VerifyReportView> {
-  return withErrorLogging(IPC_CHANNELS.getVerifyReport, undefined, () =>
-    getResources().getVerifyReport(),
+async function handleGetVerifyReport(
+  venueKind: VerifyVenueFilter,
+): Promise<VerifyReportView> {
+  return withErrorLogging(IPC_CHANNELS.getVerifyReport, { venueKind }, () =>
+    getResources().getVerifyReport(venueKind),
   );
 }
 

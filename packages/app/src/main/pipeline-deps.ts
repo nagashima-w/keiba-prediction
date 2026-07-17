@@ -41,6 +41,7 @@ import type {
   PromptVersionVerifyReportView,
   RaceBreakdownView,
   VerifyReportView,
+  VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
 import { buildRaceBreakdownView } from "./race-breakdown-view.js";
@@ -99,8 +100,11 @@ export interface PipelineResources {
    * (Task#31 一括取込)。判定は AnalysisStore.listUnimportedRaceIds(NOT EXISTS)に委ねる。
    */
   readonly listUnimportedRaceIds: () => readonly string[];
-  /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
-  readonly getVerifyReport: () => VerifyReportView;
+  /**
+   * 検証レポート(累積回収率・キャリブレーション表)を取得する。
+   * @param venueKind 開催区分フィルタ(Task#32)。省略時は "all"(全体、従来どおり)。
+   */
+  readonly getVerifyReport: (venueKind?: VerifyVenueFilter) => VerifyReportView;
   /** プロンプト版別の検証レポート一覧を取得する(Task#27)。 */
   readonly getVerifyReportByPromptVersion: () => readonly PromptVersionVerifyReportView[];
   /**
@@ -176,7 +180,8 @@ export function createPipelineDeps(
         saveResult: (rid, entries) => store.saveResult(rid, entries),
       }),
     listUnimportedRaceIds: (): readonly string[] => store.listUnimportedRaceIds(),
-    getVerifyReport: (): VerifyReportView => computeVerifyReport(store),
+    getVerifyReport: (venueKind?: VerifyVenueFilter): VerifyReportView =>
+      computeVerifyReport(store, undefined, venueKind),
     getVerifyReportByPromptVersion: (): readonly PromptVersionVerifyReportView[] =>
       computeVerifyReportByPromptVersion(store),
     getRaceBreakdown: (): readonly RaceBreakdownView[] =>

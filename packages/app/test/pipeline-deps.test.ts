@@ -76,6 +76,31 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.getRaceBreakdown()).toEqual([]);
   });
 
+  it("getVerifyReport が組み立てられ、未分析なら includedAnalysisCount=0 を返すこと", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(typeof r.getVerifyReport).toBe("function");
+    expect(r.getVerifyReport().includedAnalysisCount).toBe(0);
+  });
+
+  it("getVerifyReport は venueKind 引数を computeVerifyReport へそのまま伝え、開催区分で絞り込むこと(Task#32)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    // 中央(場コード05)の分析を1件、結果未取込のまま保存する。
+    r.deps.saveAnalysis({
+      raceId: "202605020811",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+    });
+
+    // venueKind未指定("all"相当)・central はこの分析を対象に含める(結果未取込のため除外件数として)。
+    expect(r.getVerifyReport().excludedAnalysisCount).toBe(1);
+    expect(r.getVerifyReport("central").excludedAnalysisCount).toBe(1);
+    // nar で絞り込むと、この中央分析はそもそも母集団に入らない(除外件数にも計上されない)。
+    expect(r.getVerifyReport("nar").excludedAnalysisCount).toBe(0);
+    expect(r.getVerifyReport("nar").includedAnalysisCount).toBe(0);
+  });
+
   it("listUnimportedRaceIds が組み立てられ、未分析なら空配列を返すこと(Task#31)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);

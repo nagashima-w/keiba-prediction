@@ -1,3 +1,4 @@
+import type { VerifyVenueFilter } from "../shared/analysis-types.js";
 import type { VerifyState } from "./verify-reducer.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { formatEv, MARK_LEGEND } from "./format.js";
@@ -25,6 +26,7 @@ import {
   placedLabel,
   promptVersionLabel,
   raceBreakdownHeading,
+  venueFilterLabel,
 } from "./verify-format.js";
 
 /** 検証画面のプロパティ。 */
@@ -35,6 +37,12 @@ export interface VerifyViewProps {
   readonly onImport: (raceId: string) => void;
   /** 履歴・レポートを再取得する操作。 */
   readonly onRefresh: () => void;
+  /**
+   * 検証レポートの地域フィルタ(全体/中央のみ/地方のみ)を切り替える操作(Task#32)。
+   * トータル集計・キャリブレーション・傾向(report)の表示対象のみに効く
+   * (プロンプト版別比較・レース別予実はスコープ外。全体のまま)。
+   */
+  readonly onVenueFilterChange: (venueFilter: VerifyVenueFilter) => void;
   /** 「未取込をまとめて取り込む」操作(Task#31)。 */
   readonly onRunBulkImport: () => void;
   /** 一括取込の中断操作(Task#31)。 */
@@ -95,6 +103,43 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       {state.importNotice !== null && (
         <p style={{ color: "#666" }}>{state.importNotice}</p>
       )}
+
+      {/*
+       * 検証レポートの地域フィルタ(全体/中央のみ/地方のみ、Task#32)。
+       * 中央と地方は開催条件が異なるため、混ぜて見ると回収率・キャリブレーションの解釈を誤りうる
+       * (docs/handover-next-session.md「プロンプト改善の運用目安」)。切替は下の累積回収率・
+       * 補正方向×結果・キャリブレーション・印別的中率(いずれも report 由来)の表示対象に効く。
+       * プロンプト版別比較・レース別予実はスコープ外(常に全体)。
+       * RaceSelection の開催区分トグル(role=group + aria-pressed のボタン群)と同じ流儀。
+       */}
+      <div
+        role="group"
+        aria-label="検証レポートの地域フィルタ"
+        style={{ display: "flex", gap: "0", margin: "0.5rem 0" }}
+      >
+        {(["all", "central", "nar"] as const).map((venueKind, index) => {
+          const active = state.venueFilter === venueKind;
+          return (
+            <button
+              key={venueKind}
+              type="button"
+              aria-pressed={active}
+              onClick={() => props.onVenueFilterChange(venueKind)}
+              style={{
+                padding: "0.3rem 0.9rem",
+                border: "1px solid #888",
+                borderRight: index === 2 ? "1px solid #888" : "none",
+                background: active ? "#0a58ca" : "#fff",
+                color: active ? "#fff" : "#333",
+                fontWeight: active ? 700 : 400,
+                cursor: "pointer",
+              }}
+            >
+              {venueFilterLabel(venueKind)}
+            </button>
+          );
+        })}
+      </div>
 
       {/* 累積回収率サマリ。 */}
       <h3 style={{ fontSize: "0.95rem", marginBottom: "0.25rem" }}>累積回収率</h3>

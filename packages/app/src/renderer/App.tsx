@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import type { BatchRaceOutcome } from "../shared/analysis-types.js";
+import type { BatchRaceOutcome, VerifyVenueFilter } from "../shared/analysis-types.js";
 import {
   batchAnalysisReducer,
   createInitialBatchState,
@@ -128,7 +128,7 @@ export function App(): React.JSX.Element {
       );
     verifyDispatch({ type: "レポート取得開始" });
     window.keibaApi
-      .getVerifyReport()
+      .getVerifyReport(verify.venueFilter)
       .then((report) => verifyDispatch({ type: "レポート取得成功", report }))
       .catch((e: unknown) =>
         verifyDispatch({ type: "レポート取得失敗", message: errorMessage(e) }),
@@ -157,7 +157,25 @@ export function App(): React.JSX.Element {
           message: errorMessage(e),
         }),
       );
-  }, []);
+  }, [verify.venueFilter]);
+
+  // 検証画面の地域フィルタ切替(Task#32)。venueFilter を更新したうえで、
+  // トータル集計・キャリブレーション・傾向(report)のみを絞り込み条件で再取得する
+  // (履歴・版別比較・レース別予実はスコープ外のため呼び直さない。loadVerifyDataの
+  // 全量再取得より軽い)。
+  const handleVenueFilterChange = useCallback(
+    (venueFilter: VerifyVenueFilter) => {
+      verifyDispatch({ type: "地域フィルタ変更", venueFilter });
+      verifyDispatch({ type: "レポート取得開始" });
+      window.keibaApi
+        .getVerifyReport(venueFilter)
+        .then((report) => verifyDispatch({ type: "レポート取得成功", report }))
+        .catch((e: unknown) =>
+          verifyDispatch({ type: "レポート取得失敗", message: errorMessage(e) }),
+        );
+    },
+    [],
+  );
 
   const handleTabChange = useCallback(
     (tab: TabKey) => {
@@ -410,6 +428,7 @@ export function App(): React.JSX.Element {
           state={verify}
           onImport={handleImport}
           onRefresh={loadVerifyData}
+          onVenueFilterChange={handleVenueFilterChange}
           onRunBulkImport={handleRunBulkImport}
           onCancelBulkImport={handleCancelBulkImport}
         />
