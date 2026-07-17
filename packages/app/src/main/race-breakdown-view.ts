@@ -15,12 +15,34 @@
  *
  * 並び順(docs/handover-next-session.md の「#34 レース単位の予実ブレークダウン」節):
  * 開催日降順(null は最後)→レースID昇順の決定的な順序。
+ *
+ * 開催日不明の補完(ユーザーフィードバック対応。#34以前の旧データはkaisaiDateがnullで
+ * すべて「日付不明」になっていた):
+ * kaisaiDateがnullかつ地方(NAR)レースの場合、raceIdの YYYY+MMDD から開催日を導出して補う
+ * (core kaisaiDateFromNarRaceId を再利用。地方は開催日がraceIdに直接埋め込まれているため復元可能。
+ * 中央は回次・日次のみで日付を復元できないため、中央かつnullは従来どおり「日付不明」のまま)。
+ * kaisaiDateが記録済み(非null)の場合は補完せず記録値を優先する。DBは書き換えず表示時のみの
+ * 導出とすることで、冪等・可逆(いつでも表示ロジックを変更・撤回できる)にしている。
  */
 
-import type { RaceBreakdown } from "@keiba/core";
+import { kaisaiDateFromNarRaceId, type RaceBreakdown } from "@keiba/core";
 
 import type { RaceBreakdownView } from "../shared/analysis-types.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
+
+/**
+ * kaisaiDateがnullかつ地方(NAR)レースの場合、raceIdから開催日を補完する。
+ * 記録済み(非null)ならそのまま優先し、中央または導出不可(暦不正等)ならnull(日付不明)のまま返す。
+ */
+function resolveKaisaiDate(
+  raceId: string,
+  kaisaiDate: string | null,
+): string | null {
+  if (kaisaiDate !== null) {
+    return kaisaiDate;
+  }
+  return kaisaiDateFromNarRaceId(raceId);
+}
 
 /**
  * レースID末尾2桁からレース番号(1〜12)を取り出す。
@@ -63,7 +85,7 @@ export function buildRaceBreakdownView(
         raceId: b.raceId,
         venueName: venueNameFromRaceId(b.raceId),
         raceNumber: raceNumberFromRaceId(b.raceId),
-        kaisaiDate: b.kaisaiDate,
+        kaisaiDate: resolveKaisaiDate(b.raceId, b.kaisaiDate),
         analysisId: b.analysisId,
         analyzedAt: b.analyzedAt,
         promptVersion: b.promptVersion,

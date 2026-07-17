@@ -86,6 +86,55 @@ describe("buildRaceBreakdownView(検証画面: レース単位の予実ブレー
     expect(views.map((v) => v.raceId)).toEqual(["202605020802", "202605020801"]);
   });
 
+  it("地方(NAR)レースでkaisaiDateがnullの場合、raceIdから開催日を補完すること(ユーザーフィードバック対応)", () => {
+    // 場コード54 → 高知(地方)。7〜10桁目 0712 → 7月12日。
+    const [view] = buildRaceBreakdownView([
+      breakdown({ raceId: "202654071210", kaisaiDate: null }),
+    ]);
+    expect(view!.kaisaiDate).toBe("20260712");
+  });
+
+  it("中央レースでkaisaiDateがnullの場合は補完せず日付不明(null)のままとすること", () => {
+    // 場コード05 → 東京(中央)。7〜10桁目は回次・日次であり日付ではないため復元不可。
+    const [view] = buildRaceBreakdownView([
+      breakdown({ raceId: "202605020811", kaisaiDate: null }),
+    ]);
+    expect(view!.kaisaiDate).toBeNull();
+  });
+
+  it("kaisaiDateが記録済み(非null)の場合は補完せず記録値を優先すること", () => {
+    const [view] = buildRaceBreakdownView([
+      breakdown({ raceId: "202654071210", kaisaiDate: "20260701" }),
+    ]);
+    expect(view!.kaisaiDate).toBe("20260701"); // raceId由来の20260712ではなく記録値
+  });
+
+  it("地方レースでもraceIdの月日が暦として不正なら補完せず日付不明にフォールバックすること", () => {
+    // 場コード54(地方)だが、7〜10桁目が1332(13月32日)で実在しない。
+    // parseRaceIdでは弾かれる値だが、buildRaceBreakdownViewはcore側で検証済みの値を
+    // そのまま受け取る前提のため、防御的にフォールバックを確認する。
+    const [view] = buildRaceBreakdownView([
+      breakdown({ raceId: "202654133201", kaisaiDate: null }),
+    ]);
+    expect(view!.kaisaiDate).toBeNull();
+  });
+
+  it("補完後の開催日がソートに反映されること(地方レースが正しい日付位置に並ぶ)", () => {
+    // 場コード54(高知)、raceIdから7/12に補完される地方レース。
+    const narUnknown = breakdown({ raceId: "202654071210", kaisaiDate: null });
+    // 記録済みkaisaiDateが7/1の中央レース(7/12より古い)。
+    const centralKnown = breakdown({
+      raceId: "202605020801",
+      kaisaiDate: "20260701",
+    });
+    const views = buildRaceBreakdownView([centralKnown, narUnknown]);
+    // 補完された7/12(NAR)が7/1(中央)より新しいので先に並ぶこと。
+    expect(views.map((v) => v.raceId)).toEqual([
+      "202654071210",
+      "202605020801",
+    ]);
+  });
+
   it("開催日が同じ(または双方null)場合はレースID昇順で決定的に並べること", () => {
     const a = breakdown({ raceId: "202605020802", kaisaiDate: "20260701" });
     const b = breakdown({ raceId: "202605020801", kaisaiDate: "20260701" });

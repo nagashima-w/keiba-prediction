@@ -25,6 +25,7 @@ export {
 } from "./scraper/cache.js";
 export {
   InvalidIdError,
+  kaisaiDateFromNarRaceId,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,

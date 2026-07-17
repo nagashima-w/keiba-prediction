@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   InvalidIdError,
+  kaisaiDateFromNarRaceId,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
@@ -136,6 +137,50 @@ describe("venueKindOfRaceId(レースIDから開催区分を判定)", () => {
 
   it("地方(場コード30〜64)は\"nar\"を返すこと", () => {
     expect(venueKindOfRaceId(parseRaceId("202654071210"))).toBe("nar");
+  });
+});
+
+describe("kaisaiDateFromNarRaceId(地方レースIDから開催日を導出)", () => {
+  it("地方(場コード30〜64)のレースIDから開催日(YYYYMMDD)を導出すること", () => {
+    // 場コード54 → 高知。7〜10桁目 0712 → 7月12日。
+    expect(kaisaiDateFromNarRaceId("202654071210")).toBe("20260712");
+  });
+
+  describe("地方場コードの境界値(30・64)でも開催日を導出できること", () => {
+    // [レースID, 期待する開催日, 補足]
+    const cases: Array<[string, string, string]> = [
+      ["202630071201", "20260712", "コード30(地方の下限)"],
+      ["202664071201", "20260712", "コード64(地方の上限)"],
+    ];
+    it.each(cases)("%s → %s(%s)", (raceId, expected) => {
+      expect(kaisaiDateFromNarRaceId(raceId)).toBe(expected);
+    });
+  });
+
+  it("中央(場コード01〜10)のレースIDはnullを返すこと(回次・日次からは日付を復元できない)", () => {
+    expect(kaisaiDateFromNarRaceId("202605020811")).toBeNull();
+  });
+
+  it("12桁の数字でない入力はnullを返すこと", () => {
+    expect(kaisaiDateFromNarRaceId("2026540712101")).toBeNull(); // 13桁
+    expect(kaisaiDateFromNarRaceId("20265407121")).toBeNull(); // 11桁
+    expect(kaisaiDateFromNarRaceId("20265407121a")).toBeNull(); // 非数字混在
+  });
+
+  it("場コードが地方の範囲(30〜64)外(帯広65含む)ならnullを返すこと", () => {
+    expect(kaisaiDateFromNarRaceId("202665071210")).toBeNull(); // 帯広(ばんえい)
+    expect(kaisaiDateFromNarRaceId("202629071210")).toBeNull(); // 範囲外(29)
+    expect(kaisaiDateFromNarRaceId("202665071265")).toBeNull(); // 65
+  });
+
+  it("月日部が暦として実在しない場合はnullを返すこと(既存のKaisaiDate検証を再利用)", () => {
+    expect(kaisaiDateFromNarRaceId("202654133201")).toBeNull(); // 13月32日は存在しない
+    expect(kaisaiDateFromNarRaceId("202654023001")).toBeNull(); // 2026年2月30日は存在しない(平年)
+  });
+
+  it("閏年の2月29日は有効な開催日として導出すること", () => {
+    // 2024年は閏年。場コード54(高知)の2月29日。
+    expect(kaisaiDateFromNarRaceId("202454022901")).toBe("20240229");
   });
 });
 
