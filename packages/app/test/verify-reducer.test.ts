@@ -175,6 +175,56 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     expect(s.raceBreakdownError).toBe("失敗");
   });
 
+  it("初期状態は版不明削除も未実行・未エラー・未完了であること(Task#33)", () => {
+    const s = init();
+    expect(s.deletingUnknownPromptVersion).toBe(false);
+    expect(s.deleteUnknownPromptVersionError).toBeNull();
+    expect(s.deleteUnknownPromptVersionDeletedCount).toBeNull();
+  });
+
+  it("版不明削除開始でローディングを立て、直前のエラー・完了件数をクリアすること(Task#33)", () => {
+    const withStale = {
+      ...init(),
+      deleteUnknownPromptVersionError: "前回の失敗",
+      deleteUnknownPromptVersionDeletedCount: 5,
+    };
+    const s = verifyReducer(withStale, { type: "版不明削除開始" });
+    expect(s.deletingUnknownPromptVersion).toBe(true);
+    expect(s.deleteUnknownPromptVersionError).toBeNull();
+    expect(s.deleteUnknownPromptVersionDeletedCount).toBeNull();
+  });
+
+  it("版不明削除成功でローディング解除し、削除件数(IPC戻り値そのまま)を格納すること(Task#33)", () => {
+    const loading = verifyReducer(init(), { type: "版不明削除開始" });
+    const s = verifyReducer(loading, {
+      type: "版不明削除成功",
+      deletedCount: 3,
+    });
+    expect(s.deletingUnknownPromptVersion).toBe(false);
+    expect(s.deleteUnknownPromptVersionDeletedCount).toBe(3);
+    expect(s.deleteUnknownPromptVersionError).toBeNull();
+  });
+
+  it("版不明削除成功は削除0件でも区別できるよう0を格納すること(境界値、Task#33)", () => {
+    const loading = verifyReducer(init(), { type: "版不明削除開始" });
+    const s = verifyReducer(loading, {
+      type: "版不明削除成功",
+      deletedCount: 0,
+    });
+    expect(s.deleteUnknownPromptVersionDeletedCount).toBe(0);
+  });
+
+  it("版不明削除失敗でローディング解除し、エラーを保持すること(Task#33)", () => {
+    const loading = verifyReducer(init(), { type: "版不明削除開始" });
+    const s = verifyReducer(loading, {
+      type: "版不明削除失敗",
+      message: "削除に失敗",
+    });
+    expect(s.deletingUnknownPromptVersion).toBe(false);
+    expect(s.deleteUnknownPromptVersionError).toBe("削除に失敗");
+    expect(s.deleteUnknownPromptVersionDeletedCount).toBeNull();
+  });
+
   it("タブ切替: activeTab を更新する", () => {
     const s = verifyReducer(init(), { type: "タブ切替", tab: "検証" });
     expect(s.activeTab).toBe("検証");

@@ -22,6 +22,8 @@ const api: KeibaApi = {
     ipcRenderer.invoke(IPC_CHANNELS.getVerifyReport, venueKind),
   getVerifyReportByPromptVersion: () =>
     ipcRenderer.invoke(IPC_CHANNELS.getVerifyReportByPromptVersion),
+  deleteUnknownPromptVersionAnalyses: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.deleteUnknownPromptVersionAnalyses),
   getRaceBreakdown: () => ipcRenderer.invoke(IPC_CHANNELS.getRaceBreakdown),
   listAnalyses: () => ipcRenderer.invoke(IPC_CHANNELS.listAnalyses),
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings),

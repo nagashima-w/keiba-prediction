@@ -523,6 +523,56 @@ export class AnalysisStore {
     return rows.map((r) => r.raceId);
   }
 
+  /**
+   * プロンプト版不明(prompt_version が null)の分析をまとめて削除する(Task#33)。
+   *
+   * 削除対象の母集団が持つ「二重の意味」(code-reviewer指摘対応): prompt_version IS NULL には
+   * 由来の異なる2種類の分析が混在し、DB上はどちらか区別できない。
+   *   (1) 版記録導入前(Task#27より前)に保存された旧データ。列追加前は promptVersion を
+   *       保存する手段自体が無かった。
+   *   (2) APIキー未設定でLLMを使わず prior をそのまま採用した現行の分析。この経路は
+   *       プロンプト自体を使わないため、常に promptVersion=null で保存される(現行でも今後も
+   *       発生し続ける。上のクラスコメント・StoredAnalysis.promptVersion のJSDoc参照)。
+   * 削除してよい理由(ユーザー合意済み・PM決定): プロンプト文面は予想印導入等で実質変わっており、
+   * 版不明(上記(1))は旧文面が混在しうるため版別比較の信頼性を損なう。検証画面の版別比較は
+   * 従来からこの母集団((1)+(2))をまとめて「版不明」グループとして表示しており、ユーザーが
+   * 合意した削除対象はこの表示グループ全体(=このメソッドが削除する範囲そのもの)である。
+   * (2)のLLM未使用分析は再分析(通常の分析実行、または一括取込 Task#31)によって復元できるため、
+   * 削除しても実質的な損失にならない。削除で減った件数は一括取込(Task#31)で埋め直せる。
+   *
+   * FK実装メモ(削除順序の根拠): analysis_horses の外部キー宣言
+   * (`FOREIGN KEY (analysis_id) REFERENCES analyses (id)`)には ON DELETE 句が無く、
+   * SQLite既定の NO ACTION になる。initSchema で foreign_keys=ON にしているため、
+   * 子行(analysis_horses)を残したまま親行(analyses)だけを削除しようとすると
+   * FOREIGN KEY constraint failed で失敗する。CASCADE化はテーブル再作成を要し既存DBファイルとの
+   * 互換性を崩す恐れがあるためスキーマは変更せず、このメソッド側で明示的に
+   * analysis_horses → analyses の順に削除することで対処する。
+   *
+   * race_results は削除しない: race_id は analyses への外部キーではない自由文字列であり、
+   * 結果データ(実着順・複勝払戻)はプロンプト版と無関係に他の分析(取込済みの版あり分析等)からも
+   * 再利用できるため、意図的に対象外とする。
+   *
+   * @returns 削除した分析(analyses行)の件数
+   */
+  deleteAnalysesWithUnknownPromptVersion(): number {
+    const deleteHorses = this.db.prepare(
+      `DELETE FROM ${ANALYSIS_HORSES_TABLE}
+         WHERE analysis_id IN (
+           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
+         )`,
+    );
+    const deleteAnalyses = this.db.prepare(
+      `DELETE FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL`,
+    );
+    const tx = this.db.transaction((): number => {
+      // 先に子行(analysis_horses)を消してから親行(analyses)を消す(FK制約違反を避けるため)。
+      deleteHorses.run();
+      const info = deleteAnalyses.run();
+      return info.changes;
+    });
+    return tx();
+  }
+
   /** 内部の better-sqlite3 Database への参照(検証・拡張用)。 */
   get rawDatabase(): Database.Database {
     return this.db;

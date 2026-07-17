@@ -10,6 +10,7 @@ import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
   calibrationBarWidthPercent,
+  deleteUnknownPromptVersionResultMessage,
   directionLabel,
   formatAdjustment,
   formatBinRange,
@@ -17,6 +18,7 @@ import {
   formatPayoutBreakdown,
   formatRate,
   formatYen,
+  hasUnknownPromptVersionGroup,
   importButtonLabel,
   isRowImportDisabled,
   markLabel,
@@ -47,6 +49,11 @@ export interface VerifyViewProps {
   readonly onRunBulkImport: () => void;
   /** 一括取込の中断操作(Task#31)。 */
   readonly onCancelBulkImport: () => void;
+  /**
+   * 版不明(prompt_version=null)分析の削除操作(Task#33)。取り消せない破壊的操作のため、
+   * 呼び出し元(App.tsx)で確認ダイアログを出したうえで呼ぶ想定。
+   */
+  readonly onDeleteUnknownPromptVersionAnalyses: () => void;
 }
 
 const thStyle: React.CSSProperties = {
@@ -174,9 +181,56 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
        * プロンプトを改善したときに「本当に良くなったか」を版ごとの成績(回収率・集計件数)で
        * 比較できる土台。版が1つ(または版不明のみ)でも表を1行で表示するだけで破綻しない。
        */}
-      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
-        プロンプト版別比較
-      </h3>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          margin: "1rem 0 0.25rem",
+        }}
+      >
+        <h3 style={{ fontSize: "0.95rem", margin: 0 }}>プロンプト版別比較</h3>
+        {/*
+         * 版不明分析の削除(Task#33)。版不明(prompt_version=null)グループが存在するときだけ
+         * ボタンを表示する(hasUnknownPromptVersionGroup。存在しなければ削除対象が無い)。
+         * 確認(取り消せない旨・件数)は呼び出し元(App.tsx の onDeleteUnknownPromptVersionAnalyses)が
+         * window.confirm で行う。
+         * ボタン文言は簡潔さを優先し、削除対象の詳細(版記録導入前の旧データ+LLM未使用の分析の
+         * 2種類が混在する点。区別不能な理由は AnalysisStore.deleteAnalysesWithUnknownPromptVersion の
+         * JSDoc参照)は title属性(ホバー説明)と下の注記文で補う(code-reviewer指摘対応)。
+         */}
+        {hasUnknownPromptVersionGroup(state.reportsByPromptVersion) && (
+          <button
+            type="button"
+            onClick={props.onDeleteUnknownPromptVersionAnalyses}
+            disabled={state.deletingUnknownPromptVersion}
+            title="版不明=版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析(DB上は区別できません)"
+          >
+            {state.deletingUnknownPromptVersion ? "削除中…" : "版不明の分析を削除"}
+          </button>
+        )}
+      </div>
+      {hasUnknownPromptVersionGroup(state.reportsByPromptVersion) && (
+        <p style={{ margin: "0.15rem 0", color: "#666", fontSize: "0.85rem" }}>
+          「版不明」は版記録導入前の旧データと、APIキー未設定で実行したLLM未使用の分析の両方を含みます(DB上は区別できません)。削除しても再分析(一括取込)で復元できます。
+        </p>
+      )}
+      {state.deleteUnknownPromptVersionError !== null && (
+        <p style={{ color: "#c00" }}>
+          版不明分析の削除に失敗しました: {state.deleteUnknownPromptVersionError}
+          <CopyErrorButton
+            operation="検証:版不明分析の削除"
+            message={state.deleteUnknownPromptVersionError}
+          />
+        </p>
+      )}
+      {state.deleteUnknownPromptVersionDeletedCount !== null && (
+        <p style={{ color: "#666" }}>
+          {deleteUnknownPromptVersionResultMessage(
+            state.deleteUnknownPromptVersionDeletedCount,
+          )}
+        </p>
+      )}
       {state.reportsByPromptVersionError !== null && (
         <p style={{ color: "#c00" }}>
           版別レポート取得に失敗しました: {state.reportsByPromptVersionError}

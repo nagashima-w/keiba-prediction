@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 import type {
   AnalysisHistoryItem,
   CalibrationBinView,
+  PromptVersionVerifyReportView,
   VerifyBetView,
+  VerifyReportView,
 } from "../src/shared/analysis-types.js";
 import type { RaceBreakdownView } from "../src/shared/analysis-types.js";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
   calibrationBarWidthPercent,
+  deleteUnknownPromptVersionConfirmMessage,
+  deleteUnknownPromptVersionResultMessage,
   directionLabel,
   formatAdjustment,
   formatBinRange,
@@ -17,6 +21,7 @@ import {
   formatPayoutBreakdown,
   formatRate,
   formatYen,
+  hasUnknownPromptVersionGroup,
   importButtonLabel,
   isRowImportDisabled,
   markLabel,
@@ -26,8 +31,42 @@ import {
   placedLabel,
   promptVersionLabel,
   raceBreakdownHeading,
+  unknownPromptVersionAnalysisCount,
   venueFilterLabel,
 } from "../src/renderer/verify-format.js";
+
+/** テスト用の検証レポートを最小構成で組み立てる。 */
+function verifyReport(over: Partial<VerifyReportView> = {}): VerifyReportView {
+  return {
+    includedAnalysisCount: 0,
+    excludedAnalysisCount: 0,
+    supersededAnalysisCount: 0,
+    excludedEstimatedCount: 0,
+    bet: {
+      betCount: 0,
+      totalStake: 0,
+      totalReturn: 0,
+      recoveryRate: null,
+      actualPayoutCount: 0,
+      approximatePayoutCount: 0,
+    },
+    calibration: [],
+    trend: { directionGroups: [], calibrationBias: [], markStats: [] },
+    ...over,
+  };
+}
+
+/** テスト用の版別レポート1件を最小構成で組み立てる。 */
+function promptVersionReport(
+  over: Partial<PromptVersionVerifyReportView> = {},
+): PromptVersionVerifyReportView {
+  return {
+    promptVersion: null,
+    report: verifyReport(),
+    additionalInstructions: [],
+    ...over,
+  };
+}
 
 /** テスト用の履歴項目を最小構成で組み立てる。 */
 function historyItem(
@@ -325,6 +364,87 @@ describe("verify画面の表示整形(純関数)", () => {
     });
     it("null(賭けていない・不的中)は「-」にすること", () => {
       expect(payoutSourceLabel(null)).toBe("-");
+    });
+  });
+
+  describe("hasUnknownPromptVersionGroup(版不明グループの有無判定、Task#33)", () => {
+    it("promptVersion=nullのグループが含まれていればtrueにすること", () => {
+      const reports = [
+        promptVersionReport({ promptVersion: "2026-07-14.1" }),
+        promptVersionReport({ promptVersion: null }),
+      ];
+      expect(hasUnknownPromptVersionGroup(reports)).toBe(true);
+    });
+
+    it("版不明グループが無ければfalseにすること", () => {
+      const reports = [promptVersionReport({ promptVersion: "2026-07-14.1" })];
+      expect(hasUnknownPromptVersionGroup(reports)).toBe(false);
+    });
+
+    it("空配列(未取得・集計対象なし)はfalseにすること", () => {
+      expect(hasUnknownPromptVersionGroup([])).toBe(false);
+    });
+  });
+
+  describe("unknownPromptVersionAnalysisCount(版不明グループの分析件数、Task#33)", () => {
+    it("版不明グループの4つの内訳(集計・結果未取込除外・旧分析除外・推定EV除外)の合計を返すこと", () => {
+      const reports = [
+        promptVersionReport({
+          promptVersion: null,
+          report: verifyReport({
+            includedAnalysisCount: 3,
+            excludedAnalysisCount: 2,
+            supersededAnalysisCount: 1,
+            excludedEstimatedCount: 4,
+          }),
+        }),
+      ];
+      // 3+2+1+4=10件がprompt_version=nullのanalyses総数(削除対象件数)と一致する。
+      expect(unknownPromptVersionAnalysisCount(reports)).toBe(10);
+    });
+
+    it("版不明グループが無ければ0を返すこと", () => {
+      const reports = [
+        promptVersionReport({
+          promptVersion: "2026-07-14.1",
+          report: verifyReport({ includedAnalysisCount: 5 }),
+        }),
+      ];
+      expect(unknownPromptVersionAnalysisCount(reports)).toBe(0);
+    });
+
+    it("空配列は0を返すこと", () => {
+      expect(unknownPromptVersionAnalysisCount([])).toBe(0);
+    });
+  });
+
+  describe("deleteUnknownPromptVersionConfirmMessage(削除確認メッセージ、Task#33 code-reviewer指摘対応)", () => {
+    it("取り消せない旨・削除対象の内訳(旧データ+LLM未使用分析)・件数が概算表示である旨・件数を含むメッセージにすること", () => {
+      expect(deleteUnknownPromptVersionConfirmMessage(5)).toBe(
+        "取り消せません。版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)" +
+          "5件(画面表示時点)と関連馬データを削除します。よろしいですか?",
+      );
+    });
+
+    it("0件でも同じ形式でメッセージを組み立てること", () => {
+      expect(deleteUnknownPromptVersionConfirmMessage(0)).toBe(
+        "取り消せません。版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)" +
+          "0件(画面表示時点)と関連馬データを削除します。よろしいですか?",
+      );
+    });
+  });
+
+  describe("deleteUnknownPromptVersionResultMessage(削除完了フィードバック、Task#33 code-reviewer指摘対応)", () => {
+    it("削除対象の内訳(旧データ+LLM未使用分析)と削除件数を含む完了メッセージにすること", () => {
+      expect(deleteUnknownPromptVersionResultMessage(3)).toBe(
+        "版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)3件を削除しました。",
+      );
+    });
+
+    it("0件でも同じ形式でメッセージを組み立てること", () => {
+      expect(deleteUnknownPromptVersionResultMessage(0)).toBe(
+        "版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)0件を削除しました。",
+      );
     });
   });
 });

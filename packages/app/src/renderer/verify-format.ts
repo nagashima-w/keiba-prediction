@@ -10,6 +10,7 @@ import type {
   AnalysisHistoryItem,
   CalibrationBinView,
   PredictionMark,
+  PromptVersionVerifyReportView,
   RaceBreakdownView,
   VerifyBetView,
   VerifyVenueFilter,
@@ -126,6 +127,74 @@ export function markLabel(mark: PredictionMark | null): string {
  */
 export function promptVersionLabel(promptVersion: string | null): string {
   return promptVersion === null ? "版不明" : promptVersion;
+}
+
+/**
+ * プロンプト版別比較(state.reportsByPromptVersion)に版不明(promptVersion=null)グループが
+ * 含まれるか(Task#33)。computeVerifyReportByPromptVersion(core)は分析が1件以上存在する版のみを
+ * グループとして返す(空グループは作られない)ため、この判定はそのまま「削除対象の分析が存在するか」
+ * の判定を兼ねる。削除ボタンの表示/有効化条件として使う。
+ */
+export function hasUnknownPromptVersionGroup(
+  reports: readonly PromptVersionVerifyReportView[],
+): boolean {
+  return reports.some((r) => r.promptVersion === null);
+}
+
+/**
+ * 版不明(promptVersion=null)グループに属する分析の総件数(Task#33)。
+ * 削除確認ダイアログに表示する「版不明の分析N件」の N を、追加のIPC往復無しで
+ * 既に読み込み済みの版別レポートから求める。
+ *
+ * VerifyReportView の4つの内訳(集計対象・結果未取込で除外・旧分析除外・推定EVのため除外)は
+ * その版グループの分析集合を余さず分割する(selectIncludedAnalyses、core/ev/verify.ts)ため、
+ * 4つの合計がその版(=prompt_version IS NULL)の analyses 総数と一致する
+ * (AnalysisStore.deleteAnalysesWithUnknownPromptVersion が実際に削除する件数と同じ母集団)。
+ * 版不明グループが無ければ0(削除対象なし)。
+ */
+export function unknownPromptVersionAnalysisCount(
+  reports: readonly PromptVersionVerifyReportView[],
+): number {
+  const unknownGroup = reports.find((r) => r.promptVersion === null);
+  if (unknownGroup === undefined) {
+    return 0;
+  }
+  const { report } = unknownGroup;
+  return (
+    report.includedAnalysisCount +
+    report.excludedAnalysisCount +
+    report.supersededAnalysisCount +
+    report.excludedEstimatedCount
+  );
+}
+
+/**
+ * 「版不明」の削除対象の説明(Task#33 code-reviewer指摘対応)。
+ * prompt_version IS NULL は「版記録導入前(Task#27より前)の旧データ」と「APIキー未設定でLLMを
+ * 使わずpriorをそのまま採用した現行分析」の両方を含み、DB上は区別できない(AnalysisStore.
+ * deleteAnalysesWithUnknownPromptVersion のJSDoc参照)。確認・完了メッセージの両方で同じ説明を使い、
+ * 削除対象の範囲をユーザーに明確に伝える。
+ */
+const UNKNOWN_PROMPT_VERSION_DESCRIPTION =
+  "版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)";
+
+/**
+ * 版不明分析の削除確認ダイアログのメッセージ(Task#33 code-reviewer指摘対応)。
+ * 「取り消せません」という不可逆性の明示、削除対象の説明(旧データ+LLM未使用分析)、
+ * 削除件数(分析N件+関連馬データ)を必ず含める。件数は呼び出し元が既に読み込み済みの版別レポート
+ * から算出するため、押下時点のDB最新状態とズレうる(実削除は常にDB最新に対して行われる。
+ * unknownPromptVersionAnalysisCount のコメント参照)。そのため「画面表示時点」の概算である旨を明記する。
+ */
+export function deleteUnknownPromptVersionConfirmMessage(count: number): string {
+  return `取り消せません。${UNKNOWN_PROMPT_VERSION_DESCRIPTION}${count}件(画面表示時点)と関連馬データを削除します。よろしいですか?`;
+}
+
+/**
+ * 版不明分析の削除完了フィードバックメッセージ(Task#33 code-reviewer指摘対応)。
+ * 実際に削除された件数(IPC戻り値。DB最新に対する正確な件数)を、削除対象の説明とともに表示する。
+ */
+export function deleteUnknownPromptVersionResultMessage(deletedCount: number): string {
+  return `${UNKNOWN_PROMPT_VERSION_DESCRIPTION}${deletedCount}件を削除しました。`;
 }
 
 /** 検証画面の地域フィルタ(全体/中央のみ/地方のみ)の表示ラベル(Task#32)。 */

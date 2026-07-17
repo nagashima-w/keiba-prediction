@@ -27,6 +27,7 @@ import type {
   BatchRaceOutcome,
   BulkImportProgress,
   BulkImportRaceOutcome,
+  DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
   PromptVersionVerifyReportView,
@@ -119,6 +120,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getVerifyReportByPromptVersion, () =>
     handleGetVerifyReportByPromptVersion(),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.deleteUnknownPromptVersionAnalyses, () =>
+    handleDeleteUnknownPromptVersionAnalyses(),
   );
 
   ipcMain.handle(IPC_CHANNELS.getRaceBreakdown, () => handleGetRaceBreakdown());
@@ -404,6 +409,23 @@ async function handleGetVerifyReportByPromptVersion(): Promise<
     IPC_CHANNELS.getVerifyReportByPromptVersion,
     undefined,
     () => getResources().getVerifyReportByPromptVersion(),
+  );
+}
+
+/**
+ * 版不明(prompt_version が null)の分析をまとめて削除するハンドラの実処理(Task#33)。
+ * 破壊的な DB 書き込み(analyses・analysis_horses からの DELETE)を伴うため、既存の
+ * 他の書き込み操作(handleImportResult 等)と同様に runExclusive で保護する(実行中の設定保存で
+ * DB を閉じられて「connection is not open」になるのを防ぐ)。
+ */
+async function handleDeleteUnknownPromptVersionAnalyses(): Promise<DeleteUnknownPromptVersionAnalysesResult> {
+  return withErrorLogging(
+    IPC_CHANNELS.deleteUnknownPromptVersionAnalyses,
+    undefined,
+    async () =>
+      resourceManager.runExclusive((resources) =>
+        Promise.resolve(resources.deleteUnknownPromptVersionAnalyses()),
+      ),
   );
 }
 

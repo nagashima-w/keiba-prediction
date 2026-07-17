@@ -37,6 +37,7 @@ import {
 
 import type {
   AnalysisHistoryItem,
+  DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   PromptVersionVerifyReportView,
   RaceBreakdownView,
@@ -107,6 +108,12 @@ export interface PipelineResources {
   readonly getVerifyReport: (venueKind?: VerifyVenueFilter) => VerifyReportView;
   /** プロンプト版別の検証レポート一覧を取得する(Task#27)。 */
   readonly getVerifyReportByPromptVersion: () => readonly PromptVersionVerifyReportView[];
+  /**
+   * プロンプト版不明(prompt_version が null)の分析をまとめて削除する(Task#33)。
+   * AnalysisStore.deleteAnalysesWithUnknownPromptVersion に委譲する(analysis_horses も併せて削除、
+   * race_results は削除しない)。
+   */
+  readonly deleteUnknownPromptVersionAnalyses: () => DeleteUnknownPromptVersionAnalysesResult;
   /**
    * レース単位の予実ブレークダウン一覧を取得する(Task#34)。verifyと同じ母集団のレースを、
    * 開催日降順(null は最後)→レースID昇順で返す。
@@ -184,6 +191,9 @@ export function createPipelineDeps(
       computeVerifyReport(store, undefined, venueKind),
     getVerifyReportByPromptVersion: (): readonly PromptVersionVerifyReportView[] =>
       computeVerifyReportByPromptVersion(store),
+    deleteUnknownPromptVersionAnalyses: (): DeleteUnknownPromptVersionAnalysesResult => ({
+      deletedCount: store.deleteAnalysesWithUnknownPromptVersion(),
+    }),
     getRaceBreakdown: (): readonly RaceBreakdownView[] =>
       buildRaceBreakdownView(computeRaceBreakdown(store)),
     listAnalysisHistory: (): AnalysisHistoryItem[] => {

@@ -45,6 +45,35 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.getVerifyReportByPromptVersion()).toEqual([]);
   });
 
+  it("deleteUnknownPromptVersionAnalyses が組み立てられ、分析が無ければ削除0件を返すこと(Task#33)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(typeof r.deleteUnknownPromptVersionAnalyses).toBe("function");
+    expect(r.deleteUnknownPromptVersionAnalyses()).toEqual({ deletedCount: 0 });
+  });
+
+  it("deleteUnknownPromptVersionAnalyses が版不明の分析だけをAnalysisStoreから削除し、版ありは残すこと(Task#33)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    r.deps.saveAnalysis({
+      raceId: "版不明レース",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+    });
+    r.deps.saveAnalysis({
+      raceId: "版ありレース",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+      promptVersion: "2026-07-14.1",
+    });
+
+    const result = r.deleteUnknownPromptVersionAnalyses();
+
+    expect(result).toEqual({ deletedCount: 1 });
+    expect(r.getVerifyReportByPromptVersion()).toHaveLength(1);
+    expect(r.getVerifyReportByPromptVersion()[0]!.promptVersion).toBe("2026-07-14.1");
+  });
+
   it("getRaceBreakdown が組み立てられ、未分析なら空配列を返すこと(Task#34)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);

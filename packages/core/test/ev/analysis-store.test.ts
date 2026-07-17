@@ -677,6 +677,97 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("deleteAnalysesWithUnknownPromptVersion(版不明分析の削除。Task#33)", () => {
+    it("版不明が0件のとき、削除0件を返しエラーにならないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "版ありレース", promptVersion: "2026-07-14.1" }));
+      const deletedCount = store.deleteAnalysesWithUnknownPromptVersion();
+      expect(deletedCount).toBe(0);
+      expect(store.listAnalyses()).toHaveLength(1);
+      store.close();
+    });
+
+    it("分析が1件も無くても削除0件を返しエラーにならないこと", () => {
+      const store = new AnalysisStore();
+      const deletedCount = store.deleteAnalysesWithUnknownPromptVersion();
+      expect(deletedCount).toBe(0);
+      store.close();
+    });
+
+    it("版不明と版ありが混在する場合、版不明の分析だけを削除し版ありは残ること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "版不明レース1" }));
+      store.saveAnalysis(makeRecord({ raceId: "版不明レース2", promptVersion: null }));
+      const keptId = store.saveAnalysis(
+        makeRecord({ raceId: "版ありレース", promptVersion: "2026-07-14.1" }),
+      );
+
+      const deletedCount = store.deleteAnalysesWithUnknownPromptVersion();
+
+      expect(deletedCount).toBe(2);
+      const remaining = store.listAnalyses();
+      expect(remaining).toHaveLength(1);
+      expect(remaining[0]!.id).toBe(keptId);
+      expect(remaining[0]!.raceId).toBe("版ありレース");
+      store.close();
+    });
+
+    it("削除した分析に紐づく analysis_horses(子行)も確実に消えること", () => {
+      const store = new AnalysisStore();
+      const deletedId = store.saveAnalysis(makeRecord({ raceId: "版不明レース" }));
+
+      store.deleteAnalysesWithUnknownPromptVersion();
+
+      const horseRows = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS count FROM analysis_horses WHERE analysis_id = ?`)
+        .get(deletedId) as { count: number };
+      expect(horseRows.count).toBe(0);
+      store.close();
+    });
+
+    it("版ありの analysis_horses(子行)は削除されず残ること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "版不明レース" }));
+      const keptId = store.saveAnalysis(
+        makeRecord({ raceId: "版ありレース", promptVersion: "2026-07-14.1" }),
+      );
+
+      store.deleteAnalysesWithUnknownPromptVersion();
+
+      const horseRows = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS count FROM analysis_horses WHERE analysis_id = ?`)
+        .get(keptId) as { count: number };
+      expect(horseRows.count).toBe(2);
+      store.close();
+    });
+
+    it("race_results は版不明分析の削除後も消えずに残ること(結果データは版と無関係に再利用できるため)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "版不明レース" }));
+      store.saveResult("版不明レース", [
+        { umaban: 1, finishPosition: 1, placePayout: 210 },
+        { umaban: 2, finishPosition: 2 },
+      ]);
+
+      store.deleteAnalysesWithUnknownPromptVersion();
+
+      const results = store.getResult("版不明レース");
+      expect(results).toHaveLength(2);
+      store.close();
+    });
+
+    it("外部キー制約が有効(foreign_keys=ON)でも、子行を先に消すため制約違反にならないこと", () => {
+      // initSchemaで foreign_keys=ON にしているため、子行(analysis_horses)を残したまま
+      // 親行(analyses)だけを消そうとすると FOREIGN KEY constraint failed で例外になる
+      // (analysis_horsesのFK宣言にON DELETE句が無くSQLite既定のNO ACTIONになるため)。
+      // この回帰を検知するため、削除操作自体が例外を投げないことを確認する。
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "版不明レース" }));
+      expect(() => store.deleteAnalysesWithUnknownPromptVersion()).not.toThrow();
+      store.close();
+    });
+  });
+
   describe("ScrapeCache とのDB共有(テーブル独立)", () => {
     it("同一のbetter-sqlite3 DBを共有しても互いのテーブルを壊さないこと", () => {
       const db = new Database(":memory:");
