@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type {
-  AnalysisHistoryItem,
   CalibrationBinView,
   PromptVersionVerifyReportView,
   VerifyBetView,
   VerifyReportView,
 } from "../src/shared/analysis-types.js";
-import type { RaceBreakdownView } from "../src/shared/analysis-types.js";
+import type { RaceBreakdownHorseView, RaceLedgerView } from "../src/shared/analysis-types.js";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
@@ -31,6 +30,8 @@ import {
   placedLabel,
   promptVersionLabel,
   raceBreakdownHeading,
+  raceLedgerPositiveCount,
+  raceLedgerStatusLabel,
   unknownPromptVersionAnalysisCount,
   venueFilterLabel,
 } from "../src/renderer/verify-format.js";
@@ -68,16 +69,15 @@ function promptVersionReport(
   };
 }
 
-/** テスト用の履歴項目を最小構成で組み立てる。 */
-function historyItem(
-  over: Partial<AnalysisHistoryItem> = {},
-): AnalysisHistoryItem {
+/**
+ * テスト用の結果ステータス(hasResult/hasPayoutのみ)を最小構成で組み立てる。
+ * needsImport/importButtonLabel は hasResult・hasPayout のみの構造的部分型を受け取るため、
+ * 特定の型(AnalysisHistoryItem等)に依存しない最小オブジェクトで足りる。
+ */
+function resultStatus(
+  over: { hasResult?: boolean; hasPayout?: boolean } = {},
+): { hasResult: boolean; hasPayout: boolean } {
   return {
-    analysisId: 1,
-    raceId: "R1",
-    analyzedAt: "2026-07-01T00:00:00.000Z",
-    horseCount: 10,
-    positiveCount: 2,
     hasResult: false,
     hasPayout: false,
     ...over,
@@ -142,29 +142,29 @@ describe("verify画面の表示整形(純関数)", () => {
 
   describe("needsImport(再取込が必要か)", () => {
     it("結果未取込なら true", () => {
-      expect(needsImport(historyItem({ hasResult: false }))).toBe(true);
+      expect(needsImport(resultStatus({ hasResult: false }))).toBe(true);
     });
     it("結果取込済みでも払戻が未取込なら true(実配当への更新導線を残す)", () => {
       expect(
-        needsImport(historyItem({ hasResult: true, hasPayout: false })),
+        needsImport(resultStatus({ hasResult: true, hasPayout: false })),
       ).toBe(true);
     });
     it("結果も払戻も取込済みなら false", () => {
       expect(
-        needsImport(historyItem({ hasResult: true, hasPayout: true })),
+        needsImport(resultStatus({ hasResult: true, hasPayout: true })),
       ).toBe(false);
     });
   });
 
   describe("importButtonLabel(取込ボタンの文言)", () => {
     it("未取込は『結果を取り込む』", () => {
-      expect(importButtonLabel(historyItem({ hasResult: false }))).toBe(
+      expect(importButtonLabel(resultStatus({ hasResult: false }))).toBe(
         "結果を取り込む",
       );
     });
     it("着順は取込済みだが払戻が無い場合は『再取込(払戻待ち)』", () => {
       expect(
-        importButtonLabel(historyItem({ hasResult: true, hasPayout: false })),
+        importButtonLabel(resultStatus({ hasResult: true, hasPayout: false })),
       ).toBe("再取込(払戻待ち)");
     });
   });
@@ -321,8 +321,8 @@ describe("verify画面の表示整形(純関数)", () => {
     });
   });
 
-  describe("raceBreakdownHeading(レース別予実の見出し、Task#34)", () => {
-    const base: Pick<RaceBreakdownView, "venueName" | "raceNumber" | "kaisaiDate"> = {
+  describe("raceBreakdownHeading(レース一覧統合の見出し)", () => {
+    const base: Pick<RaceLedgerView, "venueName" | "raceNumber" | "kaisaiDate"> = {
       venueName: "東京",
       raceNumber: 11,
       kaisaiDate: "20260708",
@@ -364,6 +364,51 @@ describe("verify画面の表示整形(純関数)", () => {
     });
     it("null(賭けていない・不的中)は「-」にすること", () => {
       expect(payoutSourceLabel(null)).toBe("-");
+    });
+  });
+
+  describe("raceLedgerStatusLabel(検証画面: レース一覧統合の結果ステータス表示)", () => {
+    it("hasResult=falseは『未取込』にすること", () => {
+      expect(raceLedgerStatusLabel({ hasResult: false, hasPayout: false })).toBe(
+        "未取込",
+      );
+    });
+    it("hasResult=trueかつhasPayout=falseは『未確定』にすること(着順のみ取込・払戻未確定)", () => {
+      expect(raceLedgerStatusLabel({ hasResult: true, hasPayout: false })).toBe(
+        "未確定",
+      );
+    });
+    it("hasResult=trueかつhasPayout=trueは『取込済』にすること", () => {
+      expect(raceLedgerStatusLabel({ hasResult: true, hasPayout: true })).toBe(
+        "取込済",
+      );
+    });
+  });
+
+  describe("raceLedgerPositiveCount(検証画面: レース一覧統合のEVプラス数)", () => {
+    const horse = (isPositive: boolean): RaceBreakdownHorseView => ({
+      umaban: 1,
+      mark: null,
+      adjustedProb: 0.3,
+      placeOddsMin: 2.0,
+      ev: isPositive ? 1.2 : 0.8,
+      isPositive,
+      finishPosition: null,
+      isPlaced: null,
+      stake: 0,
+      payout: 0,
+      payoutSource: null,
+    });
+    it("EVプラス(isPositive=true)の頭数を数えること", () => {
+      expect(raceLedgerPositiveCount([horse(true), horse(false), horse(true)])).toBe(
+        2,
+      );
+    });
+    it("EVプラスが0頭なら0を返すこと", () => {
+      expect(raceLedgerPositiveCount([horse(false), horse(false)])).toBe(0);
+    });
+    it("空配列なら0を返すこと", () => {
+      expect(raceLedgerPositiveCount([])).toBe(0);
     });
   });
 

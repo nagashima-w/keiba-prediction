@@ -28,13 +28,11 @@ export const IPC_CHANNELS = {
    */
   deleteUnknownPromptVersionAnalyses: "verify:delete-unknown-prompt-version-analyses",
   /**
-   * レース単位の予実ブレークダウン一覧を取得する(Task#34)。
-   * verifyと同じ母集団(latest選択・推定EV除外・結果未保存除外)のレースを、開催日降順
-   * (null は最後)→レースID昇順で返す。
+   * レース単位の統合リスト(検証画面UI統合)を取得する。旧 getRaceBreakdown(結果取込済みのみ)と
+   * 旧 listAnalyses(分析単位・重複あり)を置き換える。母集団は「分析済みの全レース」
+   * (latest統合済み・結果取込の有無を問わない)を、開催日降順(null は最後)→レースID昇順で返す。
    */
-  getRaceBreakdown: "verify:race-breakdown",
-  /** 分析履歴一覧(検証画面用)を取得する。 */
-  listAnalyses: "analysis:list",
+  getRaceLedger: "verify:race-ledger",
   /** 設定(マスク済み)を取得する。 */
   getSettings: "settings:get",
   /** 設定を保存する(マスク済みの更新後設定を返す)。 */

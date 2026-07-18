@@ -1,6 +1,5 @@
 import type { AppInfo } from "../main/app-info.js";
 import type {
-  AnalysisHistoryItem,
   BatchProgress,
   BatchRaceOutcome,
   BulkImportProgress,
@@ -9,7 +8,7 @@ import type {
   ImportResultOutcome,
   LogExportOutcome,
   PromptVersionVerifyReportView,
-  RaceBreakdownView,
+  RaceLedgerView,
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
@@ -89,7 +88,7 @@ export interface KeibaApi {
    * @param venueKind 開催区分フィルタ(Task#32)。省略時は "all"(全体、従来どおり)。
    *   "central"/"nar" を指定すると raceId 由来の開催区分でレポート母集団を絞り込む
    *   (listRaces(date, venueKind) と同じ「同一チャネルに引数を追加する」流儀。
-   *   プロンプト版別比較・レース別予実への適用はスコープ外のため channel/引数を増やさない)。
+   *   プロンプト版別比較・レース一覧への適用はスコープ外のため channel/引数を増やさない)。
    */
   getVerifyReport(venueKind?: VerifyVenueFilter): Promise<VerifyReportView>;
 
@@ -109,14 +108,11 @@ export interface KeibaApi {
   deleteUnknownPromptVersionAnalyses(): Promise<DeleteUnknownPromptVersionAnalysesResult>;
 
   /**
-   * レース単位の予実ブレークダウン一覧を取得する(Task#34)。
-   * verifyと同じ母集団(latest選択・推定EV除外・結果未保存除外)のレースを、開催日降順
-   * (null は最後)→レースID昇順で返す。
+   * レース単位の統合リスト(検証画面UI統合)を取得する。旧 getRaceBreakdown(結果取込済みのみ)と
+   * 旧 listAnalyses(分析単位・重複あり)を置き換える。母集団は「分析済みの全レース」
+   * (latest統合済み・結果取込の有無を問わない)を、開催日降順(null は最後)→レースID昇順で返す。
    */
-  getRaceBreakdown(): Promise<readonly RaceBreakdownView[]>;
-
-  /** 分析履歴一覧(検証画面用)を取得する。 */
-  listAnalyses(): Promise<AnalysisHistoryItem[]>;
+  getRaceLedger(): Promise<readonly RaceLedgerView[]>;
 
   /** 設定(マスク済み。平文APIキーは含まない)を取得する。 */
   getSettings(): Promise<MaskedSettings>;

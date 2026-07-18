@@ -7,11 +7,10 @@
  */
 
 import type {
-  AnalysisHistoryItem,
   BulkImportProgress,
   BulkImportRaceOutcome,
   PromptVersionVerifyReportView,
-  RaceBreakdownView,
+  RaceLedgerView,
   VerifyReportView,
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
@@ -23,18 +22,12 @@ export type TabKey = "分析" | "検証" | "設定";
 export interface VerifyState {
   /** 現在のタブ。 */
   readonly activeTab: TabKey;
-  /** 分析履歴一覧。 */
-  readonly history: readonly AnalysisHistoryItem[];
-  /** 履歴取得中か。 */
-  readonly loadingHistory: boolean;
-  /** 履歴取得エラー(無ければ null)。 */
-  readonly historyError: string | null;
   /** 検証レポート(無ければ null)。 */
   readonly report: VerifyReportView | null;
   /**
    * 検証レポートの地域フィルタ(Task#32)。既定 "all"(全体)。"central"/"nar" に切り替えると
    * トータル集計・キャリブレーション・傾向(report)の表示対象が絞り込まれる
-   * (プロンプト版別比較・レース別予実はスコープ外で常に全体のまま)。
+   * (プロンプト版別比較・レース一覧はスコープ外で常に全体のまま)。
    */
   readonly venueFilter: VerifyVenueFilter;
   /** レポート取得中か。 */
@@ -47,12 +40,17 @@ export interface VerifyState {
   readonly loadingReportsByPromptVersion: boolean;
   /** 版別レポート取得エラー(無ければ null)。 */
   readonly reportsByPromptVersionError: string | null;
-  /** レース単位の予実ブレークダウン一覧(Task#34。未取得は空配列)。 */
-  readonly raceBreakdown: readonly RaceBreakdownView[];
-  /** レース別予実取得中か。 */
-  readonly loadingRaceBreakdown: boolean;
-  /** レース別予実取得エラー(無ければ null)。 */
-  readonly raceBreakdownError: string | null;
+  /**
+   * レース単位の統合リスト(検証画面UI統合。未取得は空配列)。
+   * 旧「分析履歴」テーブル(history)と旧「レース別予実」セクション(raceBreakdown)を
+   * レースID単位(latest統合)の1リストへ統合したもの。母集団は「分析済みの全レース」
+   * (結果取込の有無を問わない)。
+   */
+  readonly raceLedger: readonly RaceLedgerView[];
+  /** レース一覧取得中か。 */
+  readonly loadingRaceLedger: boolean;
+  /** レース一覧取得エラー(無ければ null)。 */
+  readonly raceLedgerError: string | null;
   /** 結果取込中のレースID(ボタン二重押下防止・表示用)。 */
   readonly importingRaceIds: readonly string[];
   /** 直近の取込エラー(無ければ null)。 */
@@ -117,12 +115,6 @@ export const IMPORT_NOT_CONFIRMED_MESSAGE =
 /** reducer が処理するアクション。 */
 export type VerifyAction =
   | { readonly type: "タブ切替"; readonly tab: TabKey }
-  | { readonly type: "履歴取得開始" }
-  | {
-      readonly type: "履歴取得成功";
-      readonly history: readonly AnalysisHistoryItem[];
-    }
-  | { readonly type: "履歴取得失敗"; readonly message: string }
   | { readonly type: "レポート取得開始" }
   | { readonly type: "レポート取得成功"; readonly report: VerifyReportView }
   | { readonly type: "レポート取得失敗"; readonly message: string }
@@ -136,12 +128,12 @@ export type VerifyAction =
       readonly reports: readonly PromptVersionVerifyReportView[];
     }
   | { readonly type: "版別レポート取得失敗"; readonly message: string }
-  | { readonly type: "レース別予実取得開始" }
+  | { readonly type: "レース一覧取得開始" }
   | {
-      readonly type: "レース別予実取得成功";
-      readonly raceBreakdown: readonly RaceBreakdownView[];
+      readonly type: "レース一覧取得成功";
+      readonly raceLedger: readonly RaceLedgerView[];
     }
-  | { readonly type: "レース別予実取得失敗"; readonly message: string }
+  | { readonly type: "レース一覧取得失敗"; readonly message: string }
   | { readonly type: "取込開始"; readonly raceId: string }
   | { readonly type: "取込成功"; readonly raceId: string }
   | { readonly type: "取込失敗"; readonly raceId: string; readonly message: string }
@@ -166,9 +158,6 @@ export type VerifyAction =
 export function createInitialVerifyState(): VerifyState {
   return {
     activeTab: "分析",
-    history: [],
-    loadingHistory: false,
-    historyError: null,
     report: null,
     venueFilter: "all",
     loadingReport: false,
@@ -176,9 +165,9 @@ export function createInitialVerifyState(): VerifyState {
     reportsByPromptVersion: [],
     loadingReportsByPromptVersion: false,
     reportsByPromptVersionError: null,
-    raceBreakdown: [],
-    loadingRaceBreakdown: false,
-    raceBreakdownError: null,
+    raceLedger: [],
+    loadingRaceLedger: false,
+    raceLedgerError: null,
     importingRaceIds: [],
     importError: null,
     importErrorRaceId: null,
@@ -208,20 +197,6 @@ export function verifyReducer(
   switch (action.type) {
     case "タブ切替":
       return { ...state, activeTab: action.tab };
-
-    case "履歴取得開始":
-      return { ...state, loadingHistory: true, historyError: null };
-
-    case "履歴取得成功":
-      return {
-        ...state,
-        loadingHistory: false,
-        history: action.history,
-        historyError: null,
-      };
-
-    case "履歴取得失敗":
-      return { ...state, loadingHistory: false, historyError: action.message };
 
     case "レポート取得開始":
       return { ...state, loadingReport: true, reportError: null };
@@ -265,22 +240,22 @@ export function verifyReducer(
         reportsByPromptVersionError: action.message,
       };
 
-    case "レース別予実取得開始":
-      return { ...state, loadingRaceBreakdown: true, raceBreakdownError: null };
+    case "レース一覧取得開始":
+      return { ...state, loadingRaceLedger: true, raceLedgerError: null };
 
-    case "レース別予実取得成功":
+    case "レース一覧取得成功":
       return {
         ...state,
-        loadingRaceBreakdown: false,
-        raceBreakdown: action.raceBreakdown,
-        raceBreakdownError: null,
+        loadingRaceLedger: false,
+        raceLedger: action.raceLedger,
+        raceLedgerError: null,
       };
 
-    case "レース別予実取得失敗":
+    case "レース一覧取得失敗":
       return {
         ...state,
-        loadingRaceBreakdown: false,
-        raceBreakdownError: action.message,
+        loadingRaceLedger: false,
+        raceLedgerError: action.message,
       };
 
     case "取込開始":
@@ -308,7 +283,7 @@ export function verifyReducer(
 
     case "取込未確定":
       // 赤エラー(importError)ではなく穏やかな案内(importNotice)として表示する。
-      // 未確定は「取込済み」にはならない(saveResultを呼んでいないため history 側も未取込のまま)。
+      // 未確定は「取込済み」にはならない(saveResultを呼んでいないためレース一覧側も未取込のまま)。
       return {
         ...state,
         importingRaceIds: removeImporting(state.importingRaceIds, action.raceId),

@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type {
-  AnalysisHistoryItem,
   BulkImportRaceOutcome,
   PromptVersionVerifyReportView,
-  RaceBreakdownView,
+  RaceLedgerView,
   VerifyReportView,
 } from "../src/shared/analysis-types.js";
 import {
@@ -14,18 +13,6 @@ import {
 } from "../src/renderer/verify-reducer.js";
 
 const init = (): VerifyState => createInitialVerifyState();
-
-const sampleHistory: AnalysisHistoryItem[] = [
-  {
-    analysisId: 1,
-    raceId: "R1",
-    analyzedAt: "2026-07-01T00:00:00.000Z",
-    horseCount: 10,
-    positiveCount: 2,
-    hasResult: false,
-    hasPayout: false,
-  },
-];
 
 const sampleReport: VerifyReportView = {
   includedAnalysisCount: 1,
@@ -57,7 +44,7 @@ const samplePromptVersionReports: PromptVersionVerifyReportView[] = [
   { promptVersion: null, report: sampleReport, additionalInstructions: [null] },
 ];
 
-const sampleRaceBreakdown: RaceBreakdownView[] = [
+const sampleRaceLedger: RaceLedgerView[] = [
   {
     raceId: "202605020811",
     venueName: "東京",
@@ -66,6 +53,8 @@ const sampleRaceBreakdown: RaceBreakdownView[] = [
     analysisId: 1,
     analyzedAt: "2026-07-08T10:00:00.000Z",
     promptVersion: "2026-07-14.1",
+    hasResult: true,
+    hasPayout: true,
     horses: [],
     totalStake: 100,
     totalReturn: 300,
@@ -75,10 +64,10 @@ const sampleRaceBreakdown: RaceBreakdownView[] = [
 ];
 
 describe("verifyReducer(検証タブの状態遷移)", () => {
-  it("初期状態は分析タブ・履歴空・取込中なし", () => {
+  it("初期状態は分析タブ・レース一覧空・取込中なし", () => {
     const s = init();
     expect(s.activeTab).toBe("分析");
-    expect(s.history).toEqual([]);
+    expect(s.raceLedger).toEqual([]);
     expect(s.report).toBeNull();
     expect(s.importingRaceIds).toEqual([]);
   });
@@ -97,7 +86,7 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     expect(s.venueFilter).toBe("central");
     // 他の状態フィールド(activeTab等)は元の state 由来のまま(action自体を誤って返していないこと)。
     expect(s.activeTab).toBe(initial.activeTab);
-    expect(s.history).toBe(initial.history);
+    expect(s.raceLedger).toBe(initial.raceLedger);
 
     const s2 = verifyReducer(s, {
       type: "地域フィルタ変更",
@@ -147,32 +136,32 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
     expect(s.reportsByPromptVersionError).toBe("失敗");
   });
 
-  it("初期状態はレース別予実も空・未ローディングであること(Task#34)", () => {
+  it("初期状態はレース一覧も空・未ローディングであること(検証画面UI統合)", () => {
     const s = init();
-    expect(s.raceBreakdown).toEqual([]);
-    expect(s.loadingRaceBreakdown).toBe(false);
-    expect(s.raceBreakdownError).toBeNull();
+    expect(s.raceLedger).toEqual([]);
+    expect(s.loadingRaceLedger).toBe(false);
+    expect(s.raceLedgerError).toBeNull();
   });
 
-  it("レース別予実取得開始→成功で raceBreakdown を格納しローディング解除する(Task#34)", () => {
-    const loading = verifyReducer(init(), { type: "レース別予実取得開始" });
-    expect(loading.loadingRaceBreakdown).toBe(true);
+  it("レース一覧取得開始→成功で raceLedger を格納しローディング解除する(検証画面UI統合)", () => {
+    const loading = verifyReducer(init(), { type: "レース一覧取得開始" });
+    expect(loading.loadingRaceLedger).toBe(true);
     const done = verifyReducer(loading, {
-      type: "レース別予実取得成功",
-      raceBreakdown: sampleRaceBreakdown,
+      type: "レース一覧取得成功",
+      raceLedger: sampleRaceLedger,
     });
-    expect(done.loadingRaceBreakdown).toBe(false);
-    expect(done.raceBreakdown).toEqual(sampleRaceBreakdown);
-    expect(done.raceBreakdownError).toBeNull();
+    expect(done.loadingRaceLedger).toBe(false);
+    expect(done.raceLedger).toEqual(sampleRaceLedger);
+    expect(done.raceLedgerError).toBeNull();
   });
 
-  it("レース別予実取得失敗でエラーを保持しローディング解除する(Task#34)", () => {
+  it("レース一覧取得失敗でエラーを保持しローディング解除する(検証画面UI統合)", () => {
     const s = verifyReducer(
-      { ...init(), loadingRaceBreakdown: true },
-      { type: "レース別予実取得失敗", message: "失敗" },
+      { ...init(), loadingRaceLedger: true },
+      { type: "レース一覧取得失敗", message: "失敗" },
     );
-    expect(s.loadingRaceBreakdown).toBe(false);
-    expect(s.raceBreakdownError).toBe("失敗");
+    expect(s.loadingRaceLedger).toBe(false);
+    expect(s.raceLedgerError).toBe("失敗");
   });
 
   it("初期状態は版不明削除も未実行・未エラー・未完了であること(Task#33)", () => {
@@ -228,27 +217,6 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
   it("タブ切替: activeTab を更新する", () => {
     const s = verifyReducer(init(), { type: "タブ切替", tab: "検証" });
     expect(s.activeTab).toBe("検証");
-  });
-
-  it("履歴取得開始→成功で history を格納しローディング解除する", () => {
-    const loading = verifyReducer(init(), { type: "履歴取得開始" });
-    expect(loading.loadingHistory).toBe(true);
-    const done = verifyReducer(loading, {
-      type: "履歴取得成功",
-      history: sampleHistory,
-    });
-    expect(done.loadingHistory).toBe(false);
-    expect(done.history).toEqual(sampleHistory);
-    expect(done.historyError).toBeNull();
-  });
-
-  it("履歴取得失敗でエラーを保持しローディング解除する", () => {
-    const s = verifyReducer(
-      { ...init(), loadingHistory: true },
-      { type: "履歴取得失敗", message: "失敗" },
-    );
-    expect(s.loadingHistory).toBe(false);
-    expect(s.historyError).toBe("失敗");
   });
 
   it("レポート取得成功で report を格納する", () => {

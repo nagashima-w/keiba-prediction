@@ -47,12 +47,12 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
     expect(result.core.minSampleForBias).toBe(DEFAULT_SCORER_CONFIG.minSampleForBias);
   });
 
-  it("検証画面用のチャネル(結果取込・検証レポート・分析履歴)をハンドラ付きで登録する", () => {
+  it("検証画面用のチャネル(結果取込・検証レポート・レース一覧統合)をハンドラ付きで登録する", () => {
     registerIpcHandlers();
     for (const channel of [
       IPC_CHANNELS.importResult,
       IPC_CHANNELS.getVerifyReport,
-      IPC_CHANNELS.listAnalyses,
+      IPC_CHANNELS.getRaceLedger,
     ]) {
       expect(handleMock).toHaveBeenCalledWith(channel, expect.any(Function));
     }
@@ -62,14 +62,6 @@ describe("registerIpcHandlers(IPCハンドラの結線)", () => {
     registerIpcHandlers();
     expect(handleMock).toHaveBeenCalledWith(
       IPC_CHANNELS.getVerifyReportByPromptVersion,
-      expect.any(Function),
-    );
-  });
-
-  it("レース単位の予実ブレークダウン取得チャネルをハンドラ付きで登録する(Task#34)", () => {
-    registerIpcHandlers();
-    expect(handleMock).toHaveBeenCalledWith(
-      IPC_CHANNELS.getRaceBreakdown,
       expect.any(Function),
     );
   });

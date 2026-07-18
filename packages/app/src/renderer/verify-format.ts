@@ -7,11 +7,11 @@
 
 import type {
   AdjustmentDirection,
-  AnalysisHistoryItem,
   CalibrationBinView,
   PredictionMark,
   PromptVersionVerifyReportView,
-  RaceBreakdownView,
+  RaceBreakdownHorseView,
+  RaceLedgerView,
   VerifyBetView,
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
@@ -50,20 +50,29 @@ export function formatPayoutBreakdown(bet: VerifyBetView): string {
  * 取込ボタンを出す(再取込が必要)か。
  * 結果が未取込、または着順は取れているが複勝払戻が未取込(確定直前など)なら true。
  * 後者は実配当への更新導線を残すため、取込済み表示でもボタンを出し続ける。
+ *
+ * 引数は hasResult・hasPayout のみの構造的部分型(検証画面UI統合。RaceLedgerViewが
+ * この2フィールドを持つためそのまま渡せる。特定の型に依存させず判定ロジックを1箇所に保つ)。
  */
-export function needsImport(item: AnalysisHistoryItem): boolean {
+export function needsImport(item: {
+  readonly hasResult: boolean;
+  readonly hasPayout: boolean;
+}): boolean {
   return !item.hasResult || !item.hasPayout;
 }
 
 /**
  * 取込ボタンの文言。未取込は「結果を取り込む」、着順のみ取込(払戻待ち)は「再取込(払戻待ち)」。
+ * 引数は hasResult のみの構造的部分型(needsImport と同じ理由)。
  */
-export function importButtonLabel(item: AnalysisHistoryItem): string {
+export function importButtonLabel(item: {
+  readonly hasResult: boolean;
+}): string {
   return item.hasResult ? "再取込(払戻待ち)" : "結果を取り込む";
 }
 
 /**
- * 分析履歴一覧の行単位「取込」ボタンを無効化するか(Task#31 code-reviewer提案対応)。
+ * レース一覧の行単位「取込」ボタンを無効化するか(Task#31 code-reviewer提案対応)。
  * その行自体が取込中の場合に加え、一括取込が実行中の場合も無効化する
  * (一括取込と同じレースへの行単位取込が競合して二重に保存されるのを防ぐため)。
  */
@@ -276,13 +285,43 @@ export function formatKaisaiDate(kaisaiDate: string | null): string {
 }
 
 /**
- * レース単位の予実ブレークダウンの見出し(会場名・R番号・開催日の3点、Task#34)。
+ * レース一覧統合の見出し(会場名・R番号・開催日の3点)。
  * 例: "東京 11R (2026/07/08)"。開催日不明は formatKaisaiDate の「日付不明」を含める。
  */
 export function raceBreakdownHeading(
-  input: Pick<RaceBreakdownView, "venueName" | "raceNumber" | "kaisaiDate">,
+  input: Pick<RaceLedgerView, "venueName" | "raceNumber" | "kaisaiDate">,
 ): string {
   return `${input.venueName} ${input.raceNumber}R (${formatKaisaiDate(input.kaisaiDate)})`;
+}
+
+/**
+ * 検証画面: レース一覧統合(旧「分析履歴」「レース別予実」を統合したレースID単位の折りたたみリスト)の
+ * 結果ステータス表示。
+ * - hasResult=false(結果未取込) → 「未取込」
+ * - hasResult=true かつ hasPayout=false(着順のみ取込・複勝払戻は未確定) → 「未確定」
+ * - hasResult=true かつ hasPayout=true(着順・払戻とも取込済み) → 「取込済」
+ * 判定は needsImport と同じ hasResult/hasPayout の2値に基づく
+ * (「着順のみ(払戻待ち)」の既存概念を「未確定」という短いラベルで表す)。
+ */
+export function raceLedgerStatusLabel(entry: {
+  readonly hasResult: boolean;
+  readonly hasPayout: boolean;
+}): string {
+  if (!entry.hasResult) {
+    return "未取込";
+  }
+  return entry.hasPayout ? "取込済" : "未確定";
+}
+
+/**
+ * 検証画面: レース一覧統合の見出しに出すEVプラス数(印付け・EV判定が効いた頭数)。
+ * horses配列から都度数える(旧AnalysisHistoryItemのpositiveCountのような事前集計フィールドを
+ * RaceLedgerViewには持たせず、常にhorsesを単一の情報源とする)。
+ */
+export function raceLedgerPositiveCount(
+  horses: readonly RaceBreakdownHorseView[],
+): number {
+  return horses.filter((h) => h.isPositive).length;
 }
 
 /** 実着順の表示整形(Task#34)。null(着順不明。中止・除外・結果に馬番が無い)は「不明」。 */

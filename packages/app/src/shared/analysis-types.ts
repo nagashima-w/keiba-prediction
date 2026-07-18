@@ -190,27 +190,6 @@ export interface EvPlusSummaryRow {
   readonly evEstimated: boolean;
 }
 
-/** 検証画面: 分析履歴の1件(一覧表示用)。 */
-export interface AnalysisHistoryItem {
-  /** 分析ID(採番)。 */
-  readonly analysisId: number;
-  /** レースID(12桁)。 */
-  readonly raceId: string;
-  /** 分析日時(ISO8601)。 */
-  readonly analyzedAt: string;
-  /** この分析での総頭数。 */
-  readonly horseCount: number;
-  /** EVプラス(is_positive)の馬数。 */
-  readonly positiveCount: number;
-  /** このレースの結果(実着順)が取込済みか。 */
-  readonly hasResult: boolean;
-  /**
-   * このレースの複勝確定払戻が取込済みか。着順のみ取込(確定直前など払戻テーブル欠損)では
-   * hasResult=true でも hasPayout=false になり、UIは実配当への更新導線(再取込)を出し続ける。
-   */
-  readonly hasPayout: boolean;
-}
-
 /** 検証画面: キャリブレーション帯(表示用。core CalibrationBin のプレーン写し)。 */
 export interface CalibrationBinView {
   /** 帯の下限(含む)。 */
@@ -341,7 +320,7 @@ export interface PromptVersionVerifyReportView {
 
 /**
  * プロンプト版不明(prompt_version が null)の分析を削除した結果(表示用。Task#33)。
- * 削除操作の直後に検証データ(レポート・版別比較・履歴・レース別予実)を再読込したうえで、
+ * 削除操作の直後に検証データ(レポート・版別比較・レース一覧)を再読込したうえで、
  * この件数を画面にフィードバック表示する。
  */
 export interface DeleteUnknownPromptVersionAnalysesResult {
@@ -444,10 +423,16 @@ export interface RaceBreakdownHorseView {
 }
 
 /**
- * 検証画面: レース単体の予実ブレークダウン(表示用。core RaceBreakdown に会場名・レース番号を
- * 加えたもの)。Task#34。見出し(会場+R+開催日)の組み立てに使う。
+ * 検証画面: レース単位の統合リストの1件(表示用。core RaceLedgerEntry に会場名・レース番号を
+ * 加えたもの。検証画面UI統合)。
+ *
+ * 旧「分析履歴」テーブル(分析単位・未取込含む)と旧「レース別予実」セクション(レース単位・
+ * 結果取込済みのみ)を、レースID単位(latest統合)の折りたたみリスト1つに統合するための型。
+ * 旧セクションと異なり、母集団は「分析済みの全レース」(結果取込の有無を問わない)。
+ * hasResult=false のときは horses の finishPosition・isPlaced が全馬 null、
+ * totalStake・totalReturn・betCount は 0、recoveryRate は null になる(予測側のみ有効)。
  */
-export interface RaceBreakdownView {
+export interface RaceLedgerView {
   /** レースID(12桁)。 */
   readonly raceId: string;
   /** 会場名(レースIDの場コードから導出)。 */
@@ -455,25 +440,32 @@ export interface RaceBreakdownView {
   /** レース番号(1〜12。レースIDの末尾2桁から導出)。 */
   readonly raceNumber: number;
   /**
-   * 開催日(YYYYMMDD)。旧データ・選択済み開催日が渡らなかった分析は null(日付不明。中央のレースIDから
-   * は開催日を復元できないため)。
+   * 開催日(YYYYMMDD)。旧データ・選択済み開催日が渡らなかった分析は null(日付不明。地方レースは
+   * raceIdから補完済み。race-ledger-view.ts 参照)。
    */
   readonly kaisaiDate: string | null;
-  /** この予実の元になった分析ID。 */
+  /** この統合エントリの元になった分析ID(latest統合後の1件)。 */
   readonly analysisId: number;
   /** 分析日時(ISO8601)。 */
   readonly analyzedAt: string;
   /** プロンプト版番号。版不明(旧データ・LLM未使用)は null。 */
   readonly promptVersion: string | null;
-  /** 各馬の予実(馬番昇順)。 */
+  /** このレースの実結果(実着順)が取込済みか。 */
+  readonly hasResult: boolean;
+  /**
+   * このレースの複勝確定払戻が取込済みか。着順のみ取込(確定直前など払戻テーブル欠損)では
+   * hasResult=true でも hasPayout=false になる。
+   */
+  readonly hasPayout: boolean;
+  /** 各馬の予測・結果(馬番昇順)。結果未取込なら finishPosition・isPlaced は全馬 null。 */
   readonly horses: readonly RaceBreakdownHorseView[];
-  /** このレースの賭け金合計(円)。 */
+  /** このレースの賭け金合計(円)。結果未取込なら0。 */
   readonly totalStake: number;
-  /** このレースの払戻合計(円)。 */
+  /** このレースの払戻合計(円)。結果未取込なら0。 */
   readonly totalReturn: number;
-  /** このレースの回収率。賭け0点なら null。 */
+  /** このレースの回収率。賭け0点(結果未取込を含む)なら null。 */
   readonly recoveryRate: number | null;
-  /** このレースで賭けた点数。 */
+  /** このレースで賭けた点数。結果未取込なら0。 */
   readonly betCount: number;
 }
 

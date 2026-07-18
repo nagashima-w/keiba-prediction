@@ -74,14 +74,14 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.getVerifyReportByPromptVersion()[0]!.promptVersion).toBe("2026-07-14.1");
   });
 
-  it("getRaceBreakdown が組み立てられ、未分析なら空配列を返すこと(Task#34)", () => {
+  it("getRaceLedger が組み立てられ、未分析なら空配列を返すこと(検証画面UI統合: 旧listAnalysisHistory+getRaceBreakdownの置換)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);
-    expect(typeof r.getRaceBreakdown).toBe("function");
-    expect(r.getRaceBreakdown()).toEqual([]);
+    expect(typeof r.getRaceLedger).toBe("function");
+    expect(r.getRaceLedger()).toEqual([]);
   });
 
-  it("getRaceBreakdown は結果未取込の分析を対象外(空配列)にすること(Task#34。verifyと同じ母集団)", () => {
+  it("getRaceLedger は結果未取込の分析も対象に含めること(旧getRaceBreakdownとの違い。母集団は分析済みの全レース)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);
     r.deps.saveAnalysis({
@@ -101,8 +101,14 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         },
       ],
     });
-    // 結果はまだ未取込なので対象外(空配列)。
-    expect(r.getRaceBreakdown()).toEqual([]);
+    // 結果はまだ未取込だが、レース一覧統合の母集団には含まれ、hasResult=falseで返ること。
+    const [entry] = r.getRaceLedger();
+    expect(entry).toBeDefined();
+    expect(entry!.raceId).toBe("202605020811");
+    expect(entry!.venueName).toBe("東京");
+    expect(entry!.raceNumber).toBe(11);
+    expect(entry!.hasResult).toBe(false);
+    expect(entry!.hasPayout).toBe(false);
   });
 
   it("getVerifyReport が組み立てられ、未分析なら includedAnalysisCount=0 を返すこと", () => {
