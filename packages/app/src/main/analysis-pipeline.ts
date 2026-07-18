@@ -281,9 +281,14 @@ export async function runAnalysis(
           oikiri: horseData.oikiri
             ? { critic: horseData.oikiri.critic, rank: horseData.oikiri.rank }
             : null,
+          // 展開想定の強化(脚質精緻化・過去のペース傾向)に使う材料。pace/last3f は
+          // 未取得走(海外走・地方の変則行など)では null のことがあり、その走はペース傾向の
+          // 集計から自然に除外される(core analyzeHorseLegStyle/summarizePastPaceTendency側で対応)。
           runs: (horseData.results ?? []).map((r) => ({
             passing: r.passing,
             fieldSize: r.entryCount,
+            pace: r.pace,
+            last3f: r.last3f,
           })),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),

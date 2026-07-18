@@ -10,8 +10,12 @@
  * 初期値 "2026-07-14.1" は、この記録の仕組み(Task#27)を導入した時点の現行プロンプトに
  * 対する初版として付与した(このプロンプト文面自体はTask#27より前から存在するが、
  * 版番号による追跡はここから開始する)。
+ *
+ * "2026-07-18.1": 展開想定の強化(印・prior・参考EV・±10%クリップ・出力スキーマは不変)。
+ * 【展開想定】を「逃げ馬の数+ペース想定の1文」から「脚質分布・主導権候補・想定ペースの根拠・
+ * 恵まれる/損する脚質」の構造化情報に拡充し、各馬行にも脚質の安定度・過去のペース傾向を追加した。
  */
-export const PROMPT_VERSION = "2026-07-14.1";
+export const PROMPT_VERSION = "2026-07-18.1";
 
 /**
  * プロンプト構築 — 1レース分の情報を LLM 用の1つのテキストにまとめる純関数。
@@ -20,7 +24,8 @@ export const PROMPT_VERSION = "2026-07-14.1";
  *  - 各馬の prior(scorer出力)
  *  - 調教評価(OikiriResult 由来: 評価テキスト+ランク。無い馬は「情報なし」)
  *  - 厩舎コメント(プレミアム限定で未取得のため既定「なし」。将来の受け皿として stableComment を optional に用意)
- *  - レース間隔、脚質と展開想定の材料(直近走の通過順から脚質を分類し、逃げ馬の数を明示)
+ *  - レース間隔、脚質と展開想定の材料(全コーナーの通過順から脚質を分類し、脚質分布・主導権候補・
+ *    想定ペースの根拠・恵まれる/損する脚質を明示。Task「展開強化」)
  *  - 当日の天候・馬場状態
  *  - 単勝オッズ・人気・複勝オッズ下限・参考EV(市場データ。呼び出し側〈analysis-pipeline.ts〉が
  *    OddsSnapshot から算出して渡す。詳細は各フィールドのコメント参照)
@@ -33,11 +38,11 @@ export const PROMPT_VERSION = "2026-07-14.1";
 import type { CourseType } from "../scraper/types.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
 import {
-  classifyHorseLegStyle,
-  countFrontRunners,
-  estimatePace,
+  analyzeHorseLegStyle,
+  buildRaceDevelopment,
+  summarizePastPaceTendency,
   type HorseRunPassing,
-  type LegStyle,
+  type RaceDevelopmentHorseInput,
 } from "./leg-style.js";
 
 /** プロンプトに載せる調教評価(無い馬は null/undefined)。 */
@@ -60,7 +65,11 @@ export interface PromptHorse {
   readonly oikiri?: PromptOikiri | null;
   /** 厩舎コメント(将来の受け皿)。未取得なら null/undefined(「なし」と表記)。 */
   readonly stableComment?: string | null;
-  /** 脚質分類に使う過去走の通過情報(新しい順)。 */
+  /**
+   * 脚質・展開想定に使う過去走の情報(新しい順)。通過順(全コーナー)に加え、
+   * pace(前半3F-後半3F)・last3f(上がり3F)があれば「過去のペース傾向」の算出に使う
+   * (いずれも省略可。未指定の走はその走のペース傾向判定から除外されるだけで落ちない)。
+   */
   readonly runs: readonly HorseRunPassing[];
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
@@ -198,12 +207,25 @@ export function buildPrompt(input: BuildPromptInput): string {
   const horses = [...input.horses].sort((a, b) => a.umaban - b.umaban);
   const recentRuns = input.recentRunsForLegStyle ?? 3;
 
-  // 各馬の脚質を分類し、逃げ馬の数を数える(展開想定)。
-  const styles = new Map<number, LegStyle | null>();
-  for (const h of horses) {
-    styles.set(h.umaban, classifyHorseLegStyle(h.runs, { recentRuns }));
-  }
-  const frontRunnerCount = countFrontRunners([...styles.values()]);
+  // 各馬の脚質・安定度・先行力スコアを分析する(全コーナーの位置取り推移を使う精緻化版。
+  // leg-style.ts の analyzeHorseLegStyle。第1コーナーだけで判定していた旧ロジックと違い、
+  // 「先頭コーナーで先頭に立ったが道中で失速した」ような馬を実態に近い脚質へ分類できる)。
+  const legStyleAnalyses = new Map(
+    horses.map((h) => [h.umaban, analyzeHorseLegStyle(h.runs, { recentRuns })]),
+  );
+  // 各馬の脚質分析から、レース全体の展開想定(脚質分布・主導権候補・想定ペースの根拠・
+  // 恵まれる/損する脚質)を構造化する。LLMに「なぜそのペースを想定したか」まで示すことで、
+  // 展開解釈の妥当性を検証しやすくし、予想印(特に☆・注)の判断材料にもなる。
+  const developmentInputs: RaceDevelopmentHorseInput[] = horses.map((h) => {
+    const a = legStyleAnalyses.get(h.umaban)!;
+    return {
+      umaban: h.umaban,
+      style: a.style,
+      stability: a.stability,
+      frontRunningScore: a.frontRunningScore,
+    };
+  });
+  const development = buildRaceDevelopment(developmentInputs);
 
   // 馬場悪化シナリオ(仕様L104): 現在の天候が雨系、または馬場が稍重以下、または前日想定の
   // wetForecast=true の場合に、道悪適性を織り込む指示を追加する。良馬場かつ予報なしは通常指示のみ。
@@ -229,10 +251,42 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push(...raceHeader);
   lines.push("");
 
-  // 展開想定。
+  // 展開想定(Task「展開強化」)。
+  // 従来は「逃げ馬の数」と粗いペース想定文の2行のみだったが、以下の4行に拡充する:
+  //  1) 脚質分布: レース全体の隊列構成(どの脚質が何頭いるか)を数値でLLMに渡す。
+  //  2) 主導権候補: ハナを切る可能性が最も高い馬を明示し、隊列のイメージを具体化する。
+  //  3) ペース想定+根拠: 想定ペースだけでなく「なぜそう推定したか」(逃げ馬の頭数・主導権候補)
+  //     を示し、LLMがその妥当性を検証したり、根拠が薄い場合は独自判断で補正できるようにする。
+  //  4) 恵まれる/損する脚質: 想定ペースの定石(スロー=前残り、ハイ=差し追込有利)を明示し、
+  //     予想印(特に☆・注の展開ハマり判定)の判断材料にする。
   lines.push("【展開想定】");
-  lines.push(`逃げ馬の数: ${frontRunnerCount}頭`);
-  lines.push(`ペース想定: ${estimatePace(frontRunnerCount)}`);
+  lines.push(
+    `脚質分布: 逃げ${development.styleCounts.逃げ}頭 / 先行${development.styleCounts.先行}頭 / ` +
+      `差し${development.styleCounts.差し}頭 / 追込${development.styleCounts.追込}頭` +
+      (development.unknownCount > 0 ? ` / 不明${development.unknownCount}頭` : ""),
+  );
+  lines.push(
+    `主導権候補: ${
+      development.paceSetterUmaban !== null
+        ? `馬番${development.paceSetterUmaban}`
+        : "該当馬なし(逃げ・先行タイプ不在)"
+    }`,
+  );
+  lines.push(`ペース想定: ${development.pace}(根拠: ${development.paceReason})`);
+  lines.push(
+    `恵まれる脚質: ${
+      development.favoredStyles.length > 0
+        ? development.favoredStyles.join("・")
+        : "特になし"
+    }`,
+  );
+  lines.push(
+    `損する脚質: ${
+      development.disfavoredStyles.length > 0
+        ? development.disfavoredStyles.join("・")
+        : "特になし"
+    }`,
+  );
   lines.push("");
 
   // 各馬。
@@ -243,11 +297,16 @@ export function buildPrompt(input: BuildPromptInput): string {
     "【出走馬(3着内率 は scorer が数値データから算出した複勝圏内〈3着以内〉確率の事前推定値)】",
   );
   for (const h of horses) {
-    const style = styles.get(h.umaban);
+    const a = legStyleAnalyses.get(h.umaban)!;
+    // 脚質の「安定度」: 直近走で脚質がどれだけ一貫しているかを添え、LLMが展開読みの
+    // 確度を判断できるようにする(例: 安定して差してくる馬か、その場その場で脚質が変わる馬か)。
+    // 「過去ペース傾向」: その馬がこれまで速い/遅い流れをどれだけ経験しているか(展開への
+    // 対応力の参考材料)を summarizePastPaceTendency で要約して添える。
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
-        `脚質=${style ?? "不明"}, ` +
+        `脚質=${a.style ?? "不明"}(安定度:${a.stability}), ` +
+        `過去ペース傾向=${summarizePastPaceTendency(h.runs, { recentRuns })}, ` +
         `レース間隔=${orText(h.restInterval, "不明")}, ` +
         `調教=${oikiriText(h.oikiri)}, ` +
         `厩舎コメント=${orText(h.stableComment, "なし")}, ` +
@@ -361,6 +420,8 @@ export function buildPrompt(input: BuildPromptInput): string {
  * 単純・安定させる狙いがある。頭数も3頭に固定し(多すぎても少なすぎてもプレビューとして見づらいため)、
  * 各馬にオッズ・prior・調教評価等の実データ相当の値を持たせることで「単勝オッズ=不明」等の
  * フォールバック表記が出ない(=実運用に近い見た目になる)ようにしている。
+ * 各馬の runs には pace/last3f も持たせ、各馬行の「過去ペース傾向」が「データ不足」の
+ * フォールバック表記のままにならず、実運用に近い内容で確認できるようにしている。
  */
 const PREVIEW_SAMPLE_RACE: BuildPromptRaceInfo = {
   raceName: "サンプルレース(プレビュー用)",
@@ -379,8 +440,8 @@ const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
     oikiri: { critic: "動き抜群", rank: "A" },
     stableComment: "仕上がり良好",
     runs: [
-      { passing: [1, 1, 1, 1], fieldSize: 16 },
-      { passing: [2, 2, 1, 1], fieldSize: 14 },
+      { passing: [1, 1, 1, 1], fieldSize: 16, pace: "36.5-35.8", last3f: 35.8 },
+      { passing: [2, 2, 1, 1], fieldSize: 14, pace: "35.9-36.4", last3f: 34.9 },
     ],
     restInterval: "中2週",
     winOdds: 3.2,
@@ -395,8 +456,8 @@ const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
     oikiri: { critic: "順調", rank: "B" },
     stableComment: null,
     runs: [
-      { passing: [6, 6, 5, 4], fieldSize: 16 },
-      { passing: [7, 6, 5, 5], fieldSize: 15 },
+      { passing: [6, 6, 5, 4], fieldSize: 16, pace: "35.5-36.9", last3f: 36.2 },
+      { passing: [7, 6, 5, 5], fieldSize: 15, pace: "36.2-36.5", last3f: 36.0 },
     ],
     restInterval: "中4週",
     winOdds: 6.8,
@@ -411,8 +472,8 @@ const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
     oikiri: { critic: "平凡", rank: "C" },
     stableComment: null,
     runs: [
-      { passing: [12, 11, 10, 9], fieldSize: 16 },
-      { passing: [13, 12, 11, 10], fieldSize: 15 },
+      { passing: [12, 11, 10, 9], fieldSize: 16, pace: "34.9-37.8", last3f: 36.8 },
+      { passing: [13, 12, 11, 10], fieldSize: 15, pace: "35.2-37.5", last3f: 37.0 },
     ],
     restInterval: "休み明け",
     winOdds: 24.5,

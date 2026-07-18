@@ -31,8 +31,12 @@ vi.mock("@keiba/core", async (importOriginal) => {
 
 // ---- テスト用フェイクデータ組み立て ----------------------------------------
 
-/** テスト用の全戦績1走分を作る(指定した日付・通過順以外は空)。 */
-function fakeResult(date: string, passing: number[] = []): HorseRaceResult {
+/** テスト用の全戦績1走分を作る(指定した日付・通過順以外は空。pace/last3fは省略時null)。 */
+function fakeResult(
+  date: string,
+  passing: number[] = [],
+  extra: { pace?: string | null; last3f?: number | null } = {},
+): HorseRaceResult {
   return {
     date,
     venue: null,
@@ -57,8 +61,8 @@ function fakeResult(date: string, passing: number[] = []): HorseRaceResult {
     time: null,
     margin: null,
     passing,
-    pace: null,
-    last3f: null,
+    pace: extra.pace ?? null,
+    last3f: extra.last3f ?? null,
     bodyWeight: null,
     winnerName: null,
   };
@@ -707,6 +711,51 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(horse1.restInterval).toBe("連闘〜中3週");
     const horse2 = captured!.horses.find((h) => h.umaban === 2)!;
     expect(horse2.restInterval ?? null).toBeNull();
+  });
+
+  it("LLMプロンプトへ runs.pace/runs.last3f(展開想定強化の材料)を供給する", async () => {
+    let captured: BuildPromptInput | null = null;
+    const analyze = vi.fn(
+      async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => {
+        captured = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      },
+    );
+    const scrape = vi.fn(async () =>
+      fakeRaceData(RACE_ID, {
+        1: [
+          fakeResult("2026/06/28", [1, 1], { pace: "29.9-37.6", last3f: 35.0 }),
+        ],
+      }),
+    );
+    const deps: AnalysisPipelineDeps = { ...baseDeps(), analyze, scrape };
+
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+
+    const horse1 = captured!.horses.find((h) => h.umaban === 1)!;
+    expect(horse1.runs[0]!.pace).toBe("29.9-37.6");
+    expect(horse1.runs[0]!.last3f).toBe(35.0);
+    // 戦績が無い馬(2・3番)は runs が空配列のまま(落ちない)。
+    const horse2 = captured!.horses.find((h) => h.umaban === 2)!;
+    expect(horse2.runs).toEqual([]);
   });
 
   it("LLMプロンプトへ単勝オッズ・人気・複勝オッズ下限・参考EVを供給する(Task#22)", async () => {
