@@ -30,6 +30,7 @@ import {
   placedLabel,
   promptVersionLabel,
   raceBreakdownHeading,
+  raceLedgerFilterSummary,
   raceLedgerPositiveCount,
   raceLedgerStatusLabel,
   unknownPromptVersionAnalysisCount,
@@ -490,6 +491,21 @@ describe("verify画面の表示整形(純関数)", () => {
       expect(deleteUnknownPromptVersionResultMessage(0)).toBe(
         "版不明(版記録導入前の旧データ、およびAPIキー未設定で実行したLLM未使用の分析)0件を削除しました。",
       );
+    });
+  });
+
+  describe("raceLedgerFilterSummary(レース一覧の絞り込み結果件数表示)", () => {
+    it("『全N件中M件表示』の形式にすること", () => {
+      expect(raceLedgerFilterSummary(12, 5)).toBe("全12件中5件表示");
+    });
+    it("絞り込みなし(全件表示)でも同じ形式にすること", () => {
+      expect(raceLedgerFilterSummary(3, 3)).toBe("全3件中3件表示");
+    });
+    it("該当0件でも同じ形式にすること(穏やかな案内はUI側で別途出す)", () => {
+      expect(raceLedgerFilterSummary(3, 0)).toBe("全3件中0件表示");
+    });
+    it("元データ自体が0件でも同じ形式にすること", () => {
+      expect(raceLedgerFilterSummary(0, 0)).toBe("全0件中0件表示");
     });
   });
 });

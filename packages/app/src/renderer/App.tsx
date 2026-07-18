@@ -7,6 +7,7 @@ import {
 } from "./batch-analysis-reducer.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
+import type { RaceLedgerFilter } from "./race-ledger-filter.js";
 import { buildRendererErrorPayload } from "./renderer-error-payload.js";
 import { RaceSelection } from "./RaceSelection.js";
 import { SettingsView } from "./SettingsView.js";
@@ -174,6 +175,17 @@ export function App(): React.JSX.Element {
     },
     [],
   );
+
+  // レース一覧の検索/絞り込み(表示専用)。IPC往復を伴わないため、reducerへdispatchするだけの
+  // 薄い橋渡し(handleVenueFilterChangeと違いレポート再取得は行わない。state.raceLedger自体・
+  // report等は変えない)。
+  const handleRaceLedgerFilterChange = useCallback((filter: RaceLedgerFilter) => {
+    verifyDispatch({ type: "レース一覧フィルタ変更", filter });
+  }, []);
+
+  const handleRaceLedgerFilterClear = useCallback(() => {
+    verifyDispatch({ type: "レース一覧フィルタクリア" });
+  }, []);
 
   const handleTabChange = useCallback(
     (tab: TabKey) => {
@@ -451,6 +463,8 @@ export function App(): React.JSX.Element {
           onImport={handleImport}
           onRefresh={loadVerifyData}
           onVenueFilterChange={handleVenueFilterChange}
+          onRaceLedgerFilterChange={handleRaceLedgerFilterChange}
+          onRaceLedgerFilterClear={handleRaceLedgerFilterClear}
           onRunBulkImport={handleRunBulkImport}
           onCancelBulkImport={handleCancelBulkImport}
           onDeleteUnknownPromptVersionAnalyses={

@@ -1,11 +1,17 @@
 import type { VerifyVenueFilter } from "../shared/analysis-types.js";
 import type { VerifyState } from "./verify-reducer.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
+import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { formatEv, MARK_LEGEND } from "./format.js";
 import {
   formatFailedRaceErrors,
   summarizeBulkImport,
 } from "./import-batch-summary.js";
+import {
+  distinctVenueNames,
+  filterRaceLedger,
+  type RaceLedgerFilter,
+} from "./race-ledger-filter.js";
 import {
   additionalInstructionsFullText,
   additionalInstructionsSummary,
@@ -28,6 +34,7 @@ import {
   placedLabel,
   promptVersionLabel,
   raceBreakdownHeading,
+  raceLedgerFilterSummary,
   raceLedgerPositiveCount,
   raceLedgerStatusLabel,
   venueFilterLabel,
@@ -47,6 +54,14 @@ export interface VerifyViewProps {
    * (プロンプト版別比較・レース一覧はスコープ外。全体のまま)。
    */
   readonly onVenueFilterChange: (venueFilter: VerifyVenueFilter) => void;
+  /**
+   * レース一覧の検索/絞り込み条件を変更する操作。IPC往復を伴わない表示専用の絞り込みのため、
+   * verify-reducerへの dispatch を橋渡しするだけの薄いコールバック(onVenueFilterChangeと違い
+   * report等の再取得は行わない)。
+   */
+  readonly onRaceLedgerFilterChange: (filter: RaceLedgerFilter) => void;
+  /** レース一覧の検索/絞り込み条件をクリアする操作。 */
+  readonly onRaceLedgerFilterClear: () => void;
   /** 「未取込をまとめて取り込む」操作(Task#31)。 */
   readonly onRunBulkImport: () => void;
   /** 一括取込の中断操作(Task#31)。 */
@@ -83,10 +98,18 @@ const tdStyle: React.CSSProperties = {
  * - プロンプト版別比較(Task#27 プロンプト改善A): state.reportsByPromptVersion(版ごとの
  *   VerifyReport一覧)を表にし、回収率等を版ごとに並べて比較できるようにする。全体レポート
  *   (上記の累積回収率等)は従来どおり残し、版別は別セクションとして追加する。
+ * - レース一覧の検索/絞り込み: 分析が貯まって一覧が縦に長くなる問題への対応。日付・期間/会場
+ *   (中央地方の別・競馬場名)/レースID・会場名キーワードの3軸(race-ledger-filter.ts の
+ *   filterRaceLedger、純関数)で**表示のみ**を絞り込む。上部の「検証レポートの地域フィルタ」
+ *   (#32 venueFilter。累積回収率等の集計対象を切替)とは役割が異なるため、混同を避けるため
+ *   セクションを離し文言も変える(下記「レース一覧の絞り込み」参照)。
  */
 export function VerifyView(props: VerifyViewProps): React.JSX.Element {
   const { state } = props;
   const report = state.report;
+  // レース一覧の検索/絞り込み(表示専用)。state.raceLedger自体・reportは一切変えない。
+  const filteredRaceLedger = filterRaceLedger(state.raceLedger, state.raceLedgerFilter);
+  const venueNameOptions = distinctVenueNames(state.raceLedger);
 
   return (
     <section style={{ marginTop: "1rem" }}>
@@ -490,6 +513,118 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
        * 出す(件数が多くなるため details/summary で1レースずつ開ける形。既存UIの流儀を踏襲)。
        */}
       <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>レース一覧</h3>
+
+      {/*
+       * レース一覧の検索/絞り込み(表示専用)。上の「検証レポートの地域フィルタ」(#32
+       * venueFilter)とは役割が別: あちらは累積回収率・キャリブレーション等の**集計対象**を
+       * 切り替え、こちらは既に取得済みのレース一覧の**見た目の表示件数**を絞り込むだけで
+       * state.raceLedger自体・report等の集計には一切影響しない。見出し・配置を離して
+       * 混同を避ける。
+       */}
+      <div
+        role="group"
+        aria-label="レース一覧の絞り込み"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "0.5rem",
+          margin: "0.25rem 0 0.5rem",
+          padding: "0.4rem 0.6rem",
+          border: "1px solid #ddd",
+          borderRadius: "4px",
+          fontSize: "0.85rem",
+        }}
+      >
+        <label>
+          開催日{" "}
+          <input
+            type="date"
+            aria-label="開催日(開始)"
+            value={yyyymmddToInput(state.raceLedgerFilter.dateFrom ?? "")}
+            onChange={(e) => {
+              const raw = inputToYyyymmdd(e.target.value);
+              props.onRaceLedgerFilterChange({
+                ...state.raceLedgerFilter,
+                dateFrom: raw === "" ? null : raw,
+              });
+            }}
+          />
+        </label>
+        <span>〜</span>
+        <input
+          type="date"
+          aria-label="開催日(終了)"
+          value={yyyymmddToInput(state.raceLedgerFilter.dateTo ?? "")}
+          onChange={(e) => {
+            const raw = inputToYyyymmdd(e.target.value);
+            props.onRaceLedgerFilterChange({
+              ...state.raceLedgerFilter,
+              dateTo: raw === "" ? null : raw,
+            });
+          }}
+        />
+        <label>
+          会場区分{" "}
+          <select
+            aria-label="会場区分(中央/地方)"
+            value={state.raceLedgerFilter.venueKind}
+            onChange={(e) =>
+              props.onRaceLedgerFilterChange({
+                ...state.raceLedgerFilter,
+                venueKind: e.target.value as VerifyVenueFilter,
+              })
+            }
+          >
+            {(["all", "central", "nar"] as const).map((venueKind) => (
+              <option key={venueKind} value={venueKind}>
+                {venueFilterLabel(venueKind)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          競馬場{" "}
+          <select
+            aria-label="競馬場"
+            value={state.raceLedgerFilter.venueName ?? ""}
+            onChange={(e) =>
+              props.onRaceLedgerFilterChange({
+                ...state.raceLedgerFilter,
+                venueName: e.target.value === "" ? null : e.target.value,
+              })
+            }
+          >
+            <option value="">すべて</option>
+            {venueNameOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <input
+          type="text"
+          aria-label="レースID・会場名で検索"
+          placeholder="レースID・会場名で検索"
+          value={state.raceLedgerFilter.keyword}
+          onChange={(e) =>
+            props.onRaceLedgerFilterChange({
+              ...state.raceLedgerFilter,
+              keyword: e.target.value,
+            })
+          }
+        />
+        <button type="button" onClick={props.onRaceLedgerFilterClear}>
+          絞り込みをクリア
+        </button>
+      </div>
+      {state.raceLedger.length > 0 && (
+        <p style={{ color: "#666", margin: "0 0 0.5rem" }}>
+          {raceLedgerFilterSummary(state.raceLedger.length, filteredRaceLedger.length)}
+        </p>
+      )}
+
       {state.raceLedgerError !== null ? (
         <p style={{ color: "#c00" }}>
           レース一覧の取得に失敗しました: {state.raceLedgerError}
@@ -502,8 +637,12 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         <p style={{ color: "#666" }}>
           {state.loadingRaceLedger ? "読み込み中…" : "分析済みのレースがありません。"}
         </p>
+      ) : filteredRaceLedger.length === 0 ? (
+        <p style={{ color: "#666" }}>
+          絞り込み条件に一致するレースがありません。条件を変えるか「絞り込みをクリア」をお試しください。
+        </p>
       ) : (
-        state.raceLedger.map((rb) => {
+        filteredRaceLedger.map((rb) => {
           const importing = state.importingRaceIds.includes(rb.raceId);
           return (
             <details

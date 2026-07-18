@@ -383,4 +383,83 @@ describe("verifyReducer(検証タブの状態遷移)", () => {
       expect(result).toBe(s);
     });
   });
+
+  describe("レース一覧の検索/絞り込み(表示専用。#32venueFilterとは別の状態)", () => {
+    it("初期状態は絞り込みなし(EMPTY_RACE_LEDGER_FILTER相当)であること", () => {
+      const s = init();
+      expect(s.raceLedgerFilter).toEqual({
+        dateFrom: null,
+        dateTo: null,
+        venueKind: "all",
+        venueName: null,
+        keyword: "",
+      });
+    });
+
+    it("レース一覧フィルタ変更で raceLedgerFilter を丸ごと更新すること", () => {
+      const initial = init();
+      const s = verifyReducer(initial, {
+        type: "レース一覧フィルタ変更",
+        filter: {
+          dateFrom: "20260701",
+          dateTo: "20260710",
+          venueKind: "central",
+          venueName: "東京",
+          keyword: "11R",
+        },
+      });
+      expect(s.raceLedgerFilter).toEqual({
+        dateFrom: "20260701",
+        dateTo: "20260710",
+        venueKind: "central",
+        venueName: "東京",
+        keyword: "11R",
+      });
+      // 他の状態フィールド(raceLedger等)は元の state 由来のまま(絞り込みは表示専用で
+      // 取得済みの一覧データそのものは変えないこと)。
+      expect(s.raceLedger).toBe(initial.raceLedger);
+      expect(s.activeTab).toBe(initial.activeTab);
+    });
+
+    it("レース一覧フィルタクリアで絞り込み条件を初期状態に戻すこと", () => {
+      const filtered = verifyReducer(init(), {
+        type: "レース一覧フィルタ変更",
+        filter: {
+          dateFrom: "20260701",
+          dateTo: null,
+          venueKind: "nar",
+          venueName: "高知",
+          keyword: "10R",
+        },
+      });
+      const cleared = verifyReducer(filtered, { type: "レース一覧フィルタクリア" });
+      expect(cleared.raceLedgerFilter).toEqual({
+        dateFrom: null,
+        dateTo: null,
+        venueKind: "all",
+        venueName: null,
+        keyword: "",
+      });
+    });
+
+    it("レース一覧フィルタ変更・クリアは検証レポート(report)等の他フィールドを変えないこと", () => {
+      const withReport = verifyReducer(init(), {
+        type: "レポート取得成功",
+        report: sampleReport,
+      });
+      const filtered = verifyReducer(withReport, {
+        type: "レース一覧フィルタ変更",
+        filter: {
+          dateFrom: null,
+          dateTo: null,
+          venueKind: "all",
+          venueName: null,
+          keyword: "東京",
+        },
+      });
+      expect(filtered.report).toEqual(sampleReport);
+      const cleared = verifyReducer(filtered, { type: "レース一覧フィルタクリア" });
+      expect(cleared.report).toEqual(sampleReport);
+    });
+  });
 });
