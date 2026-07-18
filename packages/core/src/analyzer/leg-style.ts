@@ -386,6 +386,13 @@ function classifyRunPaceTendency(pace: string | null | undefined): RunPaceTenden
  * 直近複数走のペース傾向を集計した日本語の要約テキストを返す(展開想定の各馬行に付記する材料)。
  * 「その馬がこれまで速い/遅い流れをどれだけ経験しているか」をLLMに伝える狙い。
  * ペース情報が1件も解析できなければ「データ不足」。上がり3Fの平均が取れれば括弧書きで付記する。
+ *
+ * 集計対象は「pace が有効(classifyRunPaceTendency が判定可能)な走」であり、passing(通過順)の
+ * 有無とは無関係に判定する(passing と pace は netkeiba 上で独立に取得可否が決まるため。例:
+ * 海外遠征・障害戦などで通過順欄が無く前後半ラップだけ取れる走がある)。「直近N走(recentRuns)」も
+ * この基準に合わせ、pace が判定可能な走を新しい順に N 件数える(pace 無効な走はスキップして
+ * より過去の走を見に行く。ただしそれによって recentRuns の計数自体が進むことはない)。
+ * 上がり3F平均も、この pace 判定対象と同じ走から取れた値のみを対象にする。
  */
 export function summarizePastPaceTendency(
   runs: readonly HorseRunPassing[],
@@ -397,12 +404,14 @@ export function summarizePastPaceTendency(
   let seen = 0;
   for (const run of runs) {
     if (seen >= recentRuns) break;
-    if (run.passing.length === 0) continue;
-    seen += 1;
     const t = classifyRunPaceTendency(run.pace);
-    if (t !== null) {
-      tendencies.push(t);
+    if (t === null) {
+      // pace が判定不能な走(未解析、または passing はあるが pace が無い/壊れている等)は
+      // recentRuns の計数に含めず、次の走(より過去)を見て判定対象を探す。
+      continue;
     }
+    seen += 1;
+    tendencies.push(t);
     if (typeof run.last3f === "number" && Number.isFinite(run.last3f)) {
       last3fs.push(run.last3f);
     }
