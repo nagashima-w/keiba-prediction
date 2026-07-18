@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPrompt,
+  buildPromptPreview,
   computeReferenceEv,
   PROMPT_VERSION,
   type BuildPromptInput,
@@ -392,5 +393,109 @@ describe("buildPrompt(追加指示の注入口・Task#28 プロンプト改善C)
       additionalInstruction: "1行目の指示\n2行目の指示",
     });
     expect(p).toContain("1行目の指示\n2行目の指示");
+  });
+});
+
+/**
+ * buildPromptPreview(設定画面のプロンプトプレビュー用。実レース不要の決定論的サンプル)のテスト。
+ * 設定画面で「実際にLLMへ送る文面」を確認できるようにする機能の一部(ユーザーフィードバック対応)。
+ * 【レース情報】【出走馬】はサンプル(動的)だが、【指示】【予想印】制約・±10%・アンカリング禁止・
+ * 【出力スキーマ】は buildPrompt がそのまま組み立てる固定文面であり、それらが含まれることを検証する。
+ */
+describe("buildPromptPreview(設定画面向けプロンプトプレビュー)", () => {
+  it("固定の指示・制約・出力スキーマを含むこと", () => {
+    const p = buildPromptPreview();
+    expect(p).toContain("【指示】");
+    expect(p).toContain("10%");
+    expect(p).toContain("アンカリング");
+    expect(p).toContain("【予想印】");
+    expect(p).toContain("◎");
+    expect(p).toContain("頭数制約");
+    expect(p).toContain("【出力スキーマ");
+    expect(p).toContain("place_prob");
+  });
+
+  it("サンプルのレース情報・出走馬(固定3頭、オッズ・prior付き)を含むこと", () => {
+    const p = buildPromptPreview();
+    expect(p).toContain("【レース情報】");
+    expect(p).toContain("【出走馬");
+    expect(p).toContain("芝");
+    expect(p).toContain("晴");
+    expect(p).toContain("良");
+    // サンプルは固定3頭(頭数が意図せず変わったら退行として検知できるよう厳密に比較する)。
+    const horseLines = p
+      .split("\n")
+      .filter((line) => line.startsWith("馬番"));
+    expect(horseLines.length).toBe(3);
+    for (const line of horseLines) {
+      expect(line).toContain("3着内率=");
+      expect(line).toContain("単勝オッズ=");
+      expect(line).not.toContain("単勝オッズ=不明");
+    }
+  });
+
+  it("同じ引数なら常に同一の文面を返すこと(決定論的)", () => {
+    expect(buildPromptPreview()).toBe(buildPromptPreview());
+  });
+
+  it.each([
+    { label: "追加指示なし(未指定)", additionalInstruction: undefined },
+    { label: "追加指示なし(空文字)", additionalInstruction: "" },
+    { label: "追加指示なし(空白のみ)", additionalInstruction: "   " },
+  ])("$label なら【追加指示】セクションを含まないこと", ({ additionalInstruction }) => {
+    const p = buildPromptPreview(additionalInstruction);
+    expect(p).not.toContain("【追加指示");
+  });
+
+  it("additionalInstruction を渡すと【追加指示】セクションと本文を含むこと", () => {
+    const p = buildPromptPreview("人気薄の複勝率は慎重に見積もること");
+    expect(p).toContain("【追加指示");
+    expect(p).toContain("人気薄の複勝率は慎重に見積もること");
+  });
+
+  /** プレビュー本文からセクション見出し(行頭「【」)のラベル部分(括弧内の説明文を除く)だけを抜き出す。 */
+  function sectionHeadingKeys(text: string): string[] {
+    return text
+      .split("\n")
+      .filter((line) => line.startsWith("【"))
+      .map((line) => line.match(/^【([^(（】]+)/)?.[1] ?? line);
+  }
+
+  it(
+    "出力されるセクション見出しの集合が固定であること" +
+      "(設定画面〈SettingsView.tsx〉のプレビュー注記が列挙するセクションと1対1で対応させる必要があるため、" +
+      "buildPrompt のセクション構成が変わったらこのテストで検知し、注記側の見直しを促す)",
+    () => {
+      const withoutAdditional = sectionHeadingKeys(buildPromptPreview());
+      expect(withoutAdditional).toEqual([
+        "レース情報",
+        "展開想定",
+        "出走馬",
+        "指示",
+        "予想印",
+        "出力スキーマ",
+      ]);
+
+      const withAdditional = sectionHeadingKeys(
+        buildPromptPreview("テスト追加指示"),
+      );
+      expect(withAdditional).toEqual([
+        "レース情報",
+        "展開想定",
+        "出走馬",
+        "指示",
+        "予想印",
+        "追加指示",
+        "出力スキーマ",
+      ]);
+    },
+  );
+
+  it("サンプルレースは晴・良のため馬場悪化シナリオの指示(条件付き1行)を含まないこと", () => {
+    // 馬場悪化シナリオは独立したセクション見出しではなく【指示】内の条件付き1行のため、
+    // 上のセクション見出し集合のテストでは検知できない。SettingsView の注記が「馬場悪化」に
+    // 触れていないことと矛盾しないよう、サンプル入力(晴・良)では出ないことを別途固定する。
+    const p = buildPromptPreview();
+    expect(p).not.toContain("馬場悪化");
   });
 });
