@@ -352,3 +352,15 @@ export function payoutSourceLabel(
   }
   return source === "actual" ? "実配当" : "近似";
 }
+
+/**
+ * レース一覧の絞り込み結果件数表示(検索/絞り込み機能)。
+ * 絞り込みなし(全件表示)・該当0件のいずれも同じ「全N件中M件表示」の形式にし、
+ * 該当0件時の穏やかな案内文はUI側(VerifyView)で別途出す(この関数は件数表示のみを担う)。
+ */
+export function raceLedgerFilterSummary(
+  totalCount: number,
+  shownCount: number,
+): string {
+  return `全${totalCount}件中${shownCount}件表示`;
+}

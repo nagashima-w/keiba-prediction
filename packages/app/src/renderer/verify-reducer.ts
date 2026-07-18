@@ -14,6 +14,10 @@ import type {
   VerifyReportView,
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
+import {
+  EMPTY_RACE_LEDGER_FILTER,
+  type RaceLedgerFilter,
+} from "./race-ledger-filter.js";
 
 /** タブの種別。 */
 export type TabKey = "分析" | "検証" | "設定";
@@ -51,6 +55,13 @@ export interface VerifyState {
   readonly loadingRaceLedger: boolean;
   /** レース一覧取得エラー(無ければ null)。 */
   readonly raceLedgerError: string | null;
+  /**
+   * レース一覧の検索/絞り込み条件(表示専用。分析が貯まって縦に長くなる一覧から目的のレースを
+   * 見つけやすくするためのもの)。#32 の venueFilter(検証レポート集計の母集団の絞り込み)とは
+   * 役割が別で、こちらは raceLedger 自体には影響しない(表示直前に race-ledger-filter.ts の
+   * filterRaceLedger に通すだけ)。初期値は絞り込みなし(EMPTY_RACE_LEDGER_FILTER)。
+   */
+  readonly raceLedgerFilter: RaceLedgerFilter;
   /** 結果取込中のレースID(ボタン二重押下防止・表示用)。 */
   readonly importingRaceIds: readonly string[];
   /** 直近の取込エラー(無ければ null)。 */
@@ -134,6 +145,11 @@ export type VerifyAction =
       readonly raceLedger: readonly RaceLedgerView[];
     }
   | { readonly type: "レース一覧取得失敗"; readonly message: string }
+  | {
+      readonly type: "レース一覧フィルタ変更";
+      readonly filter: RaceLedgerFilter;
+    }
+  | { readonly type: "レース一覧フィルタクリア" }
   | { readonly type: "取込開始"; readonly raceId: string }
   | { readonly type: "取込成功"; readonly raceId: string }
   | { readonly type: "取込失敗"; readonly raceId: string; readonly message: string }
@@ -168,6 +184,7 @@ export function createInitialVerifyState(): VerifyState {
     raceLedger: [],
     loadingRaceLedger: false,
     raceLedgerError: null,
+    raceLedgerFilter: EMPTY_RACE_LEDGER_FILTER,
     importingRaceIds: [],
     importError: null,
     importErrorRaceId: null,
@@ -257,6 +274,13 @@ export function verifyReducer(
         loadingRaceLedger: false,
         raceLedgerError: action.message,
       };
+
+    case "レース一覧フィルタ変更":
+      // raceLedgerFilter のみ更新する(表示専用。raceLedger自体・report等は一切変えない)。
+      return { ...state, raceLedgerFilter: action.filter };
+
+    case "レース一覧フィルタクリア":
+      return { ...state, raceLedgerFilter: EMPTY_RACE_LEDGER_FILTER };
 
     case "取込開始":
       return {
