@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useReducer } from "react";
 
+import {
+  buildPromptPreview,
+  PROMPT_VERSION,
+} from "@keiba/core/analyzer/build-prompt";
+
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   BASE_SCORE_WEIGHT_KEYS,
@@ -54,6 +59,18 @@ const textareaStyle: React.CSSProperties = {
   minHeight: "5rem",
   resize: "vertical",
   fontFamily: "inherit",
+};
+const promptPreviewStyle: React.CSSProperties = {
+  background: "#f7f7f7",
+  border: "1px solid #ddd",
+  borderRadius: 4,
+  padding: "0.6rem 0.75rem",
+  maxHeight: "24rem",
+  overflow: "auto",
+  fontFamily: "monospace",
+  fontSize: "0.8rem",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
 };
 
 /**
@@ -268,6 +285,52 @@ export function SettingsView(): React.JSX.Element {
           空欄なら何も注入しません。次回の分析から反映され、どの追加指示で分析したかは検証画面に記録されます。
         </p>
       </div>
+
+      {/*
+       * LLMへ送るプロンプトのプレビュー(ユーザーフィードバック対応)。
+       * 上の追加指示入力欄(state.additionalInstruction)をそのまま core の buildPromptPreview に
+       * 渡すことで、編集内容が即座にプレビューへ反映される(保存前でも確認できる)。
+       * このプレビューは core 側が持つ固定サンプルレースで生成する。buildPrompt が組み立てる
+       * セクションのうち【レース情報】【展開想定】【出走馬】はサンプル入力から導出される値
+       * (展開想定の逃げ馬数・ペース想定もサンプル馬の通過順から算出)であり、実際の分析では
+       * 分析対象レースの実データに置き換わる。一方【予想印】【追加指示】【出力スキーマ】は
+       * 固定文面(または本画面の追加指示欄の内容)であり、実際の分析でもこのまま送られる。
+       * 「サンプルか否か」ではなく「実分析でどう変わるか」を注記で伝える(code-reviewer-boss
+       * 差し戻し対応: 旧文言はサンプル/実送信の対比が「レース情報・出走馬は送られない」という
+       * 逆の誤読を招き、かつ【展開想定】の列挙漏れがあった)。
+       *
+       * 【指示】は上記3セクションと違い完全な固定文面ではない: build-prompt.ts の wetScenario
+       * 条件(天候が雨系 / 馬場が稍重以下 / wetForecast=true)が成立すると「馬場悪化シナリオ」の
+       * 1文が追加される(build-prompt.ts:290-295)。サンプルレースは晴・良固定のためこの1文は
+       * プレビューに出ない(build-prompt.test.ts で固定済み)。雨天・道悪の実レースを分析すると
+       * プレビューに無い1文が追加送信されるため、「このまま送られる」と断定せず条件付き追加が
+       * ある旨を明記する(code-reviewer 再指摘対応: boss差し戻しと同種の断定ミスを他セクションでも
+       * 洗い出した結果、この1点のみ該当。他の条件分岐〈raceHeader のraceName/venueName省略等〉は
+       * サンプル置換対象セクション内なので実分析との差異注記は不要)。
+       *
+       * 【追加指示】について: プレビューは編集中(未保存)の state.additionalInstruction を
+       * 即時反映する(入力確認用途としてこれは維持する)。一方、実際の分析への反映は保存後・
+       * 次回の分析からであり(上の追加指示欄の既存注記「次回の分析から反映され」と同じ)、
+       * 「このまま送られます」だけだと未保存の入力がそのまま次の分析に飛ぶ誤解を招きうるため、
+       * 「保存後、次回の分析から反映」である旨を注記に明記する(code-reviewer 提案採用)。
+       */}
+      <details style={{ margin: "0.5rem 0 1rem", maxWidth: 640 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+          LLMへ送るプロンプトのプレビュー
+        </summary>
+        <p style={{ ...noteStyle, marginTop: "0.5rem" }}>
+          ※このプレビューはサンプルレースで生成した例です。実際の分析では【レース情報】【展開想定】
+          【出走馬】は分析対象レースの実データに置き換わります。【予想印】【出力スキーマ】は、
+          実際の分析でもこのままLLMへ送られます。【追加指示(この画面の追加指示欄の内容。保存後、
+          次回の分析から反映)】はこのプレビューには入力中の内容が即座に反映されますが、実際の分析に
+          使われるのは保存済みの内容です。【指示】も基本的にこのまま送られますが、天候・馬場が悪化条件
+          (雨・稍重以下等)のレースでは「馬場悪化シナリオ」の指示が1文追加されます(このサンプルは
+          晴・良のため表示されていません)。(プロンプト版: {PROMPT_VERSION})
+        </p>
+        <pre style={promptPreviewStyle}>
+          {buildPromptPreview(state.additionalInstruction)}
+        </pre>
+      </details>
 
       {/* 重み(折りたたみ)。バイアス7種 + 基礎6種。 */}
       <details style={{ margin: "0.5rem 0 1rem", maxWidth: 480 }}>

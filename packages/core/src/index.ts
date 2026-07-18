@@ -268,6 +268,7 @@ export {
 } from "./analyzer/leg-style.js";
 export {
   buildPrompt,
+  buildPromptPreview,
   computeReferenceEv,
   PROMPT_VERSION,
   type BuildPromptInput,

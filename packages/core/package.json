@@ -10,7 +10,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./scorer/config": "./src/scorer/config.ts",
-    "./ev/race-opportunity": "./src/ev/race-opportunity.ts"
+    "./ev/race-opportunity": "./src/ev/race-opportunity.ts",
+    "./analyzer/build-prompt": "./src/analyzer/build-prompt.ts"
   },
   "scripts": {
     "test": "vitest run",
