@@ -349,3 +349,89 @@ export function buildPrompt(input: BuildPromptInput): string {
 
   return lines.join("\n");
 }
+
+/**
+ * 設定画面のプロンプトプレビュー用サンプル(固定3頭)。
+ * 実レースのデータを持たない設定画面でも「実際にLLMへ送る文面に近いもの」を確認できるように、
+ * 決定論的な固定入力を buildPrompt に通すためだけに存在する(analysis-pipeline 等の実処理では使わない)。
+ *
+ * サンプル条件は意図的に「天候: 晴」「馬場状態: 良」に固定している。これは馬場悪化シナリオ
+ * (buildPrompt の wetScenario 判定: 雨天候・稍重以下・wetForecast のいずれかで発火する条件付き1行)を
+ * 出さないためで、プレビューの見出し構成(SettingsView.tsx の注記が列挙するセクション集合)を
+ * 単純・安定させる狙いがある。頭数も3頭に固定し(多すぎても少なすぎてもプレビューとして見づらいため)、
+ * 各馬にオッズ・prior・調教評価等の実データ相当の値を持たせることで「単勝オッズ=不明」等の
+ * フォールバック表記が出ない(=実運用に近い見た目になる)ようにしている。
+ */
+const PREVIEW_SAMPLE_RACE: BuildPromptRaceInfo = {
+  raceName: "サンプルレース(プレビュー用)",
+  courseType: "芝",
+  distance: 1600,
+  venueName: "東京",
+  weather: "晴",
+  trackCondition: "良",
+};
+
+const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
+  {
+    umaban: 1,
+    horseName: "サンプルホース1",
+    prior: 0.55,
+    oikiri: { critic: "動き抜群", rank: "A" },
+    stableComment: "仕上がり良好",
+    runs: [
+      { passing: [1, 1, 1, 1], fieldSize: 16 },
+      { passing: [2, 2, 1, 1], fieldSize: 14 },
+    ],
+    restInterval: "中2週",
+    winOdds: 3.2,
+    popularity: 1,
+    placeOddsMin: 1.2,
+    referenceEv: computeReferenceEv(0.55, 1.2),
+  },
+  {
+    umaban: 2,
+    horseName: "サンプルホース2",
+    prior: 0.35,
+    oikiri: { critic: "順調", rank: "B" },
+    stableComment: null,
+    runs: [
+      { passing: [6, 6, 5, 4], fieldSize: 16 },
+      { passing: [7, 6, 5, 5], fieldSize: 15 },
+    ],
+    restInterval: "中4週",
+    winOdds: 6.8,
+    popularity: 2,
+    placeOddsMin: 1.6,
+    referenceEv: computeReferenceEv(0.35, 1.6),
+  },
+  {
+    umaban: 3,
+    horseName: "サンプルホース3",
+    prior: 0.18,
+    oikiri: { critic: "平凡", rank: "C" },
+    stableComment: null,
+    runs: [
+      { passing: [12, 11, 10, 9], fieldSize: 16 },
+      { passing: [13, 12, 11, 10], fieldSize: 15 },
+    ],
+    restInterval: "休み明け",
+    winOdds: 24.5,
+    popularity: 8,
+    placeOddsMin: 3.4,
+    referenceEv: computeReferenceEv(0.18, 3.4),
+  },
+];
+
+/**
+ * 設定画面向けプロンプトプレビュー — 固定サンプルレースを buildPrompt に通した文面を返す純関数。
+ * additionalInstruction はそのまま buildPrompt の input.additionalInstruction に渡す
+ * (空文字・空白のみ・未指定なら【追加指示】セクションは出ない。buildPrompt 側の挙動に委ねる)。
+ * 入力が固定のため、同じ additionalInstruction を渡せば常に同一の文字列を返す(決定論的)。
+ */
+export function buildPromptPreview(additionalInstruction?: string): string {
+  return buildPrompt({
+    race: PREVIEW_SAMPLE_RACE,
+    horses: PREVIEW_SAMPLE_HORSES,
+    additionalInstruction,
+  });
+}
