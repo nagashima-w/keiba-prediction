@@ -258,13 +258,26 @@ export {
   type VerifyVenueFilter,
 } from "./ev/verify.js";
 export {
+  analyzeHorseLegStyle,
+  buildRaceDevelopment,
   classifyHorseLegStyle,
+  classifyHorseLegStyleFull,
   classifyRunLegStyle,
+  classifyRunLegStyleFull,
+  computeFrontRunningScore,
+  computeLegStyleStability,
   countFrontRunners,
   estimatePace,
+  summarizePastPaceTendency,
   type ClassifyHorseOptions,
+  type HorseLegStyleAnalysis,
   type HorseRunPassing,
   type LegStyle,
+  type LegStyleStability,
+  type PaceEstimate,
+  type RaceDevelopment,
+  type RaceDevelopmentHorseInput,
+  type RunLegStyleDetail,
 } from "./analyzer/leg-style.js";
 export {
   buildPrompt,
