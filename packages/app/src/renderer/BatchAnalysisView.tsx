@@ -322,6 +322,8 @@ export function BatchAnalysisView(
             問題があった(ユーザー実機で判明)。レースごとにブロック化し、見出し(会場+R+レース名)を
             必ず添えることで、raceName が空でもレースを識別できるようにする。
             レースの並びは妙味レースランキングと同じ妙味スコア降順。
+            さらに、レース数が多いと縦に長くなりすぎるとのユーザー要望を受け、検証画面のレース一覧
+            (VerifyView.tsx)と同じ流儀で details/summary によりレースごとに折りたたむ(既定は閉)。
           */}
           <div style={{ marginTop: "1rem" }}>
             <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.35rem" }}>
@@ -331,7 +333,7 @@ export function BatchAnalysisView(
               <p style={{ color: "#666" }}>該当なし</p>
             ) : (
               highlights.map((highlight) => (
-                <div
+                <details
                   key={highlight.raceId}
                   style={{
                     border: "1px solid #ddd",
@@ -340,7 +342,7 @@ export function BatchAnalysisView(
                     padding: "0.4rem 0.6rem",
                   }}
                 >
-                  <p style={{ margin: "0 0 0.35rem", fontWeight: 700 }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 700 }}>
                     {raceHeading(highlight)}
                     {highlight.opportunity.score !== null && (
                       <span
@@ -367,8 +369,14 @@ export function BatchAnalysisView(
                         発売前推定
                       </span>
                     )}
-                  </p>
-                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                  </summary>
+                  <table
+                    style={{
+                      borderCollapse: "collapse",
+                      width: "100%",
+                      marginTop: "0.4rem",
+                    }}
+                  >
                     <thead>
                       <tr>
                         <th style={thStyle} title={MARK_LEGEND}>
@@ -432,7 +440,7 @@ export function BatchAnalysisView(
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </details>
               ))
             )}
           </div>
