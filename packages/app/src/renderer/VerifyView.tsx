@@ -28,6 +28,8 @@ import {
   placedLabel,
   promptVersionLabel,
   raceBreakdownHeading,
+  raceLedgerPositiveCount,
+  raceLedgerStatusLabel,
   venueFilterLabel,
 } from "./verify-format.js";
 
@@ -42,7 +44,7 @@ export interface VerifyViewProps {
   /**
    * 検証レポートの地域フィルタ(全体/中央のみ/地方のみ)を切り替える操作(Task#32)。
    * トータル集計・キャリブレーション・傾向(report)の表示対象のみに効く
-   * (プロンプト版別比較・レース別予実はスコープ外。全体のまま)。
+   * (プロンプト版別比較・レース一覧はスコープ外。全体のまま)。
    */
   readonly onVenueFilterChange: (venueFilter: VerifyVenueFilter) => void;
   /** 「未取込をまとめて取り込む」操作(Task#31)。 */
@@ -70,7 +72,9 @@ const tdStyle: React.CSSProperties = {
 /**
  * 検証画面(仕様「5. ui」検証画面 / 注意事項のキャリブレーション表)。
  *
- * - 分析履歴一覧(レースID・日時・EVプラス数・結果取込済みか)と未取込レースの取込ボタン。
+ * - レース一覧(検証画面UI統合): レースID単位(latest統合)の折りたたみリスト。旧「分析履歴」
+ *   テーブル(分析単位・重複あり)と旧「レース別予実」セクション(結果取込済みのみ)を統合し、
+ *   母集団は「分析済みの全レース」(結果取込の有無を問わない。state.raceLedger)。
  * - 累積回収率(賭け数・投資額・回収額・回収率。実配当/近似の内訳注記)。
  * - キャリブレーション表(確率帯ごとの予測件数・実複勝率。CSSバーの簡易帯グラフ)。
  * - 補正傾向サマリ(Task#26 プロンプト改善B): 補正方向×結果・キャリブレーションの過信バイアス
@@ -91,7 +95,7 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         <button
           type="button"
           onClick={props.onRefresh}
-          disabled={state.loadingHistory || state.loadingReport}
+          disabled={state.loadingRaceLedger || state.loadingReport}
         >
           再読み込み
         </button>
@@ -116,7 +120,7 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
        * 中央と地方は開催条件が異なるため、混ぜて見ると回収率・キャリブレーションの解釈を誤りうる
        * (docs/handover-next-session.md「プロンプト改善の運用目安」)。切替は下の累積回収率・
        * 補正方向×結果・キャリブレーション・印別的中率(いずれも report 由来)の表示対象に効く。
-       * プロンプト版別比較・レース別予実はスコープ外(常に全体)。
+       * プロンプト版別比較・レース一覧はスコープ外(常に全体)。
        * RaceSelection の開催区分トグル(role=group + aria-pressed のボタン群)と同じ流儀。
        */}
       <div
@@ -405,107 +409,6 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       )}
 
       {/*
-       * レース別予実(Task#34)。トータル集計(累積回収率・キャリブレーション等)だけでなく、
-       * レース単体ごとに予測(印・EVプラス馬・AI補正後3着内率)と結果(実着順・複勝的中の有無・
-       * そのレースの賭け金/払戻/回収)を並べて表示する。母集団・賭け判定ロジックは既存verifyの
-       * computeVerifyReport と共通(core computeRaceBreakdown。数値の乖離を防ぐため共有)。
-       * 件数が多くなるため details/summary で1レースずつ開ける形にする(既存UIの流儀。
-       * SettingsView.tsx の重み設定折りたたみと同じ形式)。
-       */}
-      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
-        レース別予実
-      </h3>
-      {state.raceBreakdownError !== null ? (
-        <p style={{ color: "#c00" }}>
-          レース別予実の取得に失敗しました: {state.raceBreakdownError}
-          <CopyErrorButton
-            operation="検証:レース別予実取得"
-            message={state.raceBreakdownError}
-          />
-        </p>
-      ) : state.raceBreakdown.length === 0 ? (
-        <p style={{ color: "#666" }}>
-          {state.loadingRaceBreakdown ? "読み込み中…" : "該当レースがありません。"}
-        </p>
-      ) : (
-        state.raceBreakdown.map((rb) => (
-          <details
-            key={rb.raceId}
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: "4px",
-              margin: "0 0 0.4rem",
-              padding: "0.3rem 0.6rem",
-            }}
-          >
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-              {raceBreakdownHeading(rb)}
-              <span
-                style={{
-                  color: "#666",
-                  fontWeight: 400,
-                  fontSize: "0.85rem",
-                  marginLeft: "0.5rem",
-                }}
-              >
-                賭け{rb.betCount}点 / 投資額 {formatYen(rb.totalStake)} / 回収額{" "}
-                {formatYen(rb.totalReturn)} / 回収率{" "}
-                <strong>{formatRate(rb.recoveryRate)}</strong>
-              </span>
-            </summary>
-            <table
-              style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.4rem" }}
-            >
-              <thead>
-                <tr>
-                  <th style={thStyle} title={MARK_LEGEND}>
-                    印
-                  </th>
-                  <th style={thStyle}>馬番</th>
-                  <th style={thStyle}>AI補正後3着内率</th>
-                  <th style={thStyle}>EV</th>
-                  <th style={thStyle}>実着順</th>
-                  <th style={thStyle}>複勝的中</th>
-                  <th style={thStyle}>賭け金</th>
-                  <th style={thStyle}>払戻</th>
-                  <th style={thStyle}>払戻根拠</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rb.horses.map((horse) => (
-                  <tr
-                    key={horse.umaban}
-                    // ハイライト(緑背景)はisPositive基準(ev!==nullではない。仕様注意点)。
-                    style={
-                      horse.isPositive ? { background: "#e6ffea" } : undefined
-                    }
-                  >
-                    <td style={tdStyle}>{markLabel(horse.mark)}</td>
-                    <td style={tdStyle}>{horse.umaban}</td>
-                    <td style={tdStyle}>{formatRate(horse.adjustedProb)}</td>
-                    <td
-                      style={{
-                        ...tdStyle,
-                        fontWeight: horse.isPositive ? 700 : 400,
-                        color: horse.isPositive ? "#0a7f2e" : undefined,
-                      }}
-                    >
-                      {formatEv(horse.ev)}
-                    </td>
-                    <td style={tdStyle}>{formatFinishPosition(horse.finishPosition)}</td>
-                    <td style={tdStyle}>{placedLabel(horse.isPlaced)}</td>
-                    <td style={tdStyle}>{formatYen(horse.stake)}</td>
-                    <td style={tdStyle}>{formatYen(horse.payout)}</td>
-                    <td style={tdStyle}>{payoutSourceLabel(horse.payoutSource)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </details>
-        ))
-      )}
-
-      {/*
        * 結果の一括取込(Task#31)。分析済みで結果未取込(race_results に行が1件も無い)の
        * レースを列挙し、直列に取り込む。境界でキャンセル可能。実行中は再実行を無効化する。
        */}
@@ -578,69 +481,141 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         })()
       )}
 
-      {/* 分析履歴一覧。 */}
-      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>分析履歴</h3>
-      {state.historyError !== null && (
+      {/*
+       * レース一覧(検証画面UI統合)。旧「分析履歴」テーブル(分析単位・重複あり・未取込含む)と
+       * 旧「レース別予実」セクション(レース単位・結果取込済みのみ)を、レースID単位(latest統合)の
+       * 折りたたみリスト1つに統合する。母集団は「分析済みの全レース」(結果取込の有無を問わない。
+       * core computeRaceLedger)。予測側(印・馬番・AI補正後3着内率・EV)は常に表示し、
+       * 結果取込済みなら実着順・複勝的中・賭け金・払戻・払戻根拠の列を追加、未取込なら案内+取込ボタンを
+       * 出す(件数が多くなるため details/summary で1レースずつ開ける形。既存UIの流儀を踏襲)。
+       */}
+      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>レース一覧</h3>
+      {state.raceLedgerError !== null ? (
         <p style={{ color: "#c00" }}>
-          履歴取得に失敗しました: {state.historyError}
-          <CopyErrorButton operation="検証:履歴取得" message={state.historyError} />
+          レース一覧の取得に失敗しました: {state.raceLedgerError}
+          <CopyErrorButton
+            operation="検証:レース一覧取得"
+            message={state.raceLedgerError}
+          />
         </p>
-      )}
-      {state.history.length === 0 ? (
+      ) : state.raceLedger.length === 0 ? (
         <p style={{ color: "#666" }}>
-          {state.loadingHistory ? "読み込み中…" : "分析履歴がありません。"}
+          {state.loadingRaceLedger ? "読み込み中…" : "分析済みのレースがありません。"}
         </p>
       ) : (
-        <table style={{ borderCollapse: "collapse", width: "100%" }}>
-          <thead>
-            <tr>
-              <th style={thStyle}>レースID</th>
-              <th style={thStyle}>分析日時</th>
-              <th style={thStyle}>EVプラス</th>
-              <th style={thStyle}>結果</th>
-              <th style={thStyle}>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.history.map((item) => {
-              const importing = state.importingRaceIds.includes(item.raceId);
-              return (
-                <tr key={item.analysisId}>
-                  <td style={tdStyle}>{item.raceId}</td>
-                  <td style={tdStyle}>{item.analyzedAt}</td>
-                  <td style={tdStyle}>
-                    {item.positiveCount}/{item.horseCount}
-                  </td>
-                  <td style={tdStyle}>
-                    {!item.hasResult ? (
-                      <span style={{ color: "#a60" }}>未取込</span>
-                    ) : item.hasPayout ? (
-                      <span style={{ color: "#0a7f2e" }}>取込済</span>
-                    ) : (
-                      <span style={{ color: "#a60" }}>着順のみ(払戻待ち)</span>
+        state.raceLedger.map((rb) => {
+          const importing = state.importingRaceIds.includes(rb.raceId);
+          return (
+            <details
+              key={rb.raceId}
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: "4px",
+                margin: "0 0 0.4rem",
+                padding: "0.3rem 0.6rem",
+              }}
+            >
+              <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                {raceBreakdownHeading(rb)}
+                <span
+                  style={{
+                    color: "#666",
+                    fontWeight: 400,
+                    fontSize: "0.85rem",
+                    marginLeft: "0.5rem",
+                  }}
+                >
+                  分析日時 {rb.analyzedAt} / EVプラス{" "}
+                  {raceLedgerPositiveCount(rb.horses)}/{rb.horses.length} / 結果{" "}
+                  {raceLedgerStatusLabel(rb)}
+                  {rb.hasResult && (
+                    <>
+                      {" "}
+                      / 賭け{rb.betCount}点 / 投資額 {formatYen(rb.totalStake)} /
+                      回収額 {formatYen(rb.totalReturn)} / 回収率{" "}
+                      <strong>{formatRate(rb.recoveryRate)}</strong>
+                    </>
+                  )}
+                </span>
+              </summary>
+              <table
+                style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.4rem" }}
+              >
+                <thead>
+                  <tr>
+                    <th style={thStyle} title={MARK_LEGEND}>
+                      印
+                    </th>
+                    <th style={thStyle}>馬番</th>
+                    <th style={thStyle}>AI補正後3着内率</th>
+                    <th style={thStyle}>EV</th>
+                    {rb.hasResult && (
+                      <>
+                        <th style={thStyle}>実着順</th>
+                        <th style={thStyle}>複勝的中</th>
+                        <th style={thStyle}>賭け金</th>
+                        <th style={thStyle}>払戻</th>
+                        <th style={thStyle}>払戻根拠</th>
+                      </>
                     )}
-                  </td>
-                  <td style={tdStyle}>
-                    {needsImport(item) ? (
-                      <button
-                        type="button"
-                        onClick={() => props.onImport(item.raceId)}
-                        disabled={isRowImportDisabled(
-                          importing,
-                          state.bulkImport.running,
-                        )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rb.horses.map((horse) => (
+                    <tr
+                      key={horse.umaban}
+                      // ハイライト(緑背景)はisPositive基準(ev!==nullではない。仕様注意点)。
+                      style={
+                        horse.isPositive ? { background: "#e6ffea" } : undefined
+                      }
+                    >
+                      <td style={tdStyle}>{markLabel(horse.mark)}</td>
+                      <td style={tdStyle}>{horse.umaban}</td>
+                      <td style={tdStyle}>{formatRate(horse.adjustedProb)}</td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          fontWeight: horse.isPositive ? 700 : 400,
+                          color: horse.isPositive ? "#0a7f2e" : undefined,
+                        }}
                       >
-                        {importing ? "取込中…" : importButtonLabel(item)}
-                      </button>
-                    ) : (
-                      <span style={{ color: "#666" }}>-</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                        {formatEv(horse.ev)}
+                      </td>
+                      {rb.hasResult && (
+                        <>
+                          <td style={tdStyle}>
+                            {formatFinishPosition(horse.finishPosition)}
+                          </td>
+                          <td style={tdStyle}>{placedLabel(horse.isPlaced)}</td>
+                          <td style={tdStyle}>{formatYen(horse.stake)}</td>
+                          <td style={tdStyle}>{formatYen(horse.payout)}</td>
+                          <td style={tdStyle}>
+                            {payoutSourceLabel(horse.payoutSource)}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!rb.hasResult && (
+                <p style={{ color: "#a60", margin: "0.4rem 0 0" }}>
+                  結果が未取込です
+                </p>
+              )}
+              {needsImport(rb) && (
+                <button
+                  type="button"
+                  onClick={() => props.onImport(rb.raceId)}
+                  disabled={isRowImportDisabled(importing, state.bulkImport.running)}
+                  style={{ marginTop: "0.4rem" }}
+                >
+                  {importing ? "取込中…" : importButtonLabel(rb)}
+                </button>
+              )}
+            </details>
+          );
+        })
       )}
     </section>
   );

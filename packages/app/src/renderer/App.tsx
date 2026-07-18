@@ -123,13 +123,6 @@ export function App(): React.JSX.Element {
   }, []);
 
   const loadVerifyData = useCallback(() => {
-    verifyDispatch({ type: "履歴取得開始" });
-    window.keibaApi
-      .listAnalyses()
-      .then((history) => verifyDispatch({ type: "履歴取得成功", history }))
-      .catch((e: unknown) =>
-        verifyDispatch({ type: "履歴取得失敗", message: errorMessage(e) }),
-      );
     verifyDispatch({ type: "レポート取得開始" });
     window.keibaApi
       .getVerifyReport(verify.venueFilter)
@@ -149,15 +142,16 @@ export function App(): React.JSX.Element {
           message: errorMessage(e),
         }),
       );
-    verifyDispatch({ type: "レース別予実取得開始" });
+    // レース一覧(検証画面UI統合。旧「分析履歴」+旧「レース別予実」を1本化)。
+    verifyDispatch({ type: "レース一覧取得開始" });
     window.keibaApi
-      .getRaceBreakdown()
-      .then((raceBreakdown) =>
-        verifyDispatch({ type: "レース別予実取得成功", raceBreakdown }),
+      .getRaceLedger()
+      .then((raceLedger) =>
+        verifyDispatch({ type: "レース一覧取得成功", raceLedger }),
       )
       .catch((e: unknown) =>
         verifyDispatch({
-          type: "レース別予実取得失敗",
+          type: "レース一覧取得失敗",
           message: errorMessage(e),
         }),
       );
@@ -165,7 +159,7 @@ export function App(): React.JSX.Element {
 
   // 検証画面の地域フィルタ切替(Task#32)。venueFilter を更新したうえで、
   // トータル集計・キャリブレーション・傾向(report)のみを絞り込み条件で再取得する
-  // (履歴・版別比較・レース別予実はスコープ外のため呼び直さない。loadVerifyDataの
+  // (版別比較・レース一覧はスコープ外のため呼び直さない。loadVerifyDataの
   // 全量再取得より軽い)。
   const handleVenueFilterChange = useCallback(
     (venueFilter: VerifyVenueFilter) => {
@@ -201,7 +195,7 @@ export function App(): React.JSX.Element {
         .importResult(raceId)
         .then((outcome) => {
           // 未確定レース(発走前・確定前)は例外ではなく正常応答で返る。
-          // 赤エラーにはせず、穏やかな案内を出すだけで取込済み扱いにはしない(履歴再読込も不要)。
+          // 赤エラーにはせず、穏やかな案内を出すだけで取込済み扱いにはしない(レース一覧再読込も不要)。
           if (outcome.status === "not_confirmed") {
             verifyDispatch({ type: "取込未確定", raceId });
             return;
@@ -230,7 +224,7 @@ export function App(): React.JSX.Element {
       .then((outcomes) => {
         activeBulkImportRunIdRef.current = null;
         verifyDispatch({ type: "一括取込完了", runId, outcomes });
-        // 取込後に検証レポート・履歴を再読込する(取込結果を画面に反映する)。
+        // 取込後に検証レポート・レース一覧を再読込する(取込結果を画面に反映する)。
         loadVerifyData();
       })
       .catch((e: unknown) => {
@@ -244,7 +238,7 @@ export function App(): React.JSX.Element {
         activeBulkImportRunIdRef.current = null;
         verifyDispatch({ type: "一括取込完了", runId, outcomes: [] });
         // 一部のレースは取込に成功した後で全体例外が伝播した可能性があるため、
-        // 画面が古いまま残らないよう安全側でレポート・履歴を再読込する(code-reviewer提案対応)。
+        // 画面が古いまま残らないよう安全側でレポート・レース一覧を再読込する(code-reviewer提案対応)。
         loadVerifyData();
       });
   }, [verify.bulkImport.runId, loadVerifyData]);
@@ -268,7 +262,7 @@ export function App(): React.JSX.Element {
       .deleteUnknownPromptVersionAnalyses()
       .then(({ deletedCount }) => {
         verifyDispatch({ type: "版不明削除成功", deletedCount });
-        // 削除後に検証データ(レポート・版別比較・履歴・レース別予実)を再読込する(仕様の受け入れ条件)。
+        // 削除後に検証データ(レポート・版別比較・レース一覧)を再読込する(仕様の受け入れ条件)。
         loadVerifyData();
       })
       .catch((e: unknown) =>

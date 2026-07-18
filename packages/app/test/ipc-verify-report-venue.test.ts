@@ -59,9 +59,8 @@ beforeEach(() => {
     importResult: vi.fn(async () => ({})),
     getVerifyReport: getVerifyReportMock,
     getVerifyReportByPromptVersion: vi.fn(() => []),
-    getRaceBreakdown: vi.fn(() => []),
+    getRaceLedger: vi.fn(() => []),
     listUnimportedRaceIds: vi.fn(() => []),
-    listAnalysisHistory: vi.fn(() => []),
     close: vi.fn(),
     deps: {},
   }));

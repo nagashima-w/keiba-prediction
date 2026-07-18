@@ -17,7 +17,7 @@ import {
   analyzeRace,
   AnthropicLlmClient,
   CachedFetcher,
-  computeRaceBreakdown,
+  computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
   HttpClient,
@@ -36,18 +36,16 @@ import {
 } from "@keiba/core";
 
 import type {
-  AnalysisHistoryItem,
   DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   PromptVersionVerifyReportView,
-  RaceBreakdownView,
+  RaceLedgerView,
   VerifyReportView,
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
-import { buildRaceBreakdownView } from "./race-breakdown-view.js";
+import { buildRaceLedgerView } from "./race-ledger-view.js";
 import { importRaceResult } from "./result-import.js";
-import { buildAnalysisHistory } from "./verify-history.js";
 
 /** createPipelineDeps の設定。 */
 export interface PipelineWiringConfig {
@@ -115,12 +113,11 @@ export interface PipelineResources {
    */
   readonly deleteUnknownPromptVersionAnalyses: () => DeleteUnknownPromptVersionAnalysesResult;
   /**
-   * レース単位の予実ブレークダウン一覧を取得する(Task#34)。verifyと同じ母集団のレースを、
-   * 開催日降順(null は最後)→レースID昇順で返す。
+   * レース単位の統合リスト(検証画面UI統合)を取得する。旧 getRaceBreakdown(結果取込済みのみ)と
+   * 旧 listAnalysisHistory(分析単位・重複あり)を置き換える。母集団は「分析済みの全レース」
+   * (latest統合済み・結果取込の有無を問わない)を、開催日降順(null は最後)→レースID昇順で返す。
    */
-  readonly getRaceBreakdown: () => readonly RaceBreakdownView[];
-  /** 分析履歴一覧(検証画面用)を取得する。 */
-  readonly listAnalysisHistory: () => AnalysisHistoryItem[];
+  readonly getRaceLedger: () => readonly RaceLedgerView[];
   /** DB接続などを閉じる。 */
   readonly close: () => void;
 }
@@ -194,25 +191,8 @@ export function createPipelineDeps(
     deleteUnknownPromptVersionAnalyses: (): DeleteUnknownPromptVersionAnalysesResult => ({
       deletedCount: store.deleteAnalysesWithUnknownPromptVersion(),
     }),
-    getRaceBreakdown: (): readonly RaceBreakdownView[] =>
-      buildRaceBreakdownView(computeRaceBreakdown(store)),
-    listAnalysisHistory: (): AnalysisHistoryItem[] => {
-      const analyses = store.listAnalyses();
-      // 結果取込済み(実着順あり)/払戻取込済み(複勝払戻あり)のレースID集合を作る。
-      // 重複レースIDは1回だけ getResult する。着順のみで払戻が無いレースは hasPayout=false になる。
-      const resultRaceIds = new Set<string>();
-      const payoutRaceIds = new Set<string>();
-      for (const raceId of new Set(analyses.map((a) => a.raceId))) {
-        const results = store.getResult(raceId);
-        if (results !== undefined) {
-          resultRaceIds.add(raceId);
-          if (results.some((r) => r.placePayout !== null && r.placePayout !== undefined)) {
-            payoutRaceIds.add(raceId);
-          }
-        }
-      }
-      return buildAnalysisHistory(analyses, resultRaceIds, payoutRaceIds);
-    },
+    getRaceLedger: (): readonly RaceLedgerView[] =>
+      buildRaceLedgerView(computeRaceLedger(store)),
     close: () => db.close(),
   };
 }

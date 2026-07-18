@@ -78,15 +78,20 @@
  *   toStoredHorse は型どおりキャストするのみで値の検証はしていない)。非nullアサーション(!)での
  *   参照はその場合にクラッシュするため、未知のキーは「印なし」群にフォールバックする。
  *
- * レース単位の予実ブレークダウン(computeRaceBreakdown、Task#34):
+ * レース単体の予実ブレークダウン(private buildRaceBreakdown。Task#34。旧公開関数
+ * computeRaceBreakdown は検証画面UI統合でレース一覧(computeRaceLedger)に置き換えられ廃止したが、
+ * 1レース分の予実を組み立てる下位ロジック自体は computeRaceLedger が引き続き再利用しているため
+ * private ヘルパーとして残している):
  * - 検証画面にトータル集計だけでなく、レース単体ごとの予測(印・EVプラス馬・AI補正後3着内率)と
  *   結果(実着順・複勝的中の有無・そのレースの賭け金/払戻/回収)を並べて表示するための土台。
  * - 母集団は既存 computeVerifyReport(latestモードの二重計上防止・推定EV除外・結果未保存除外)と
- *   完全に一致させる(selectIncludedAnalyses に選定ロジックを集約し両関数で共有。個別に再実装すると
- *   母集団がズレて「合計と内訳が一致しない」事故になるため)。
+ *   完全に一致させる(selectIncludedAnalyses に選定ロジックを集約し両者で共有。個別に再実装すると
+ *   母集団がズレて「合計と内訳が一致しない」事故になるため)。computeRaceLedger はこの
+ *   selectIncludedAnalyses による絞り込みを使わず(結果未保存・推定EVも母集団に含めるため)、
+ *   latest選択(chooseLatestPerRace)のみを共有する点が異なる。
  * - 1頭ごとの賭け判定・払戻計算(EVプラス馬に stakePerBet 円賭ける・実配当優先/複勝オッズ下限近似
  *   フォールバック)も computeHorseBetOutcome に集約し、computeVerifyReportForAnalyses と
- *   computeRaceBreakdown の両方から呼ぶことで数値の完全一致を保証する。
+ *   buildRaceBreakdown の両方から呼ぶことで数値の完全一致を保証する。
  * - 着順不明(finishPosition=null。中止・除外)の馬は isPlaced=null・賭け金/払戻0として表示に含める
  *   (verifyの集計対象からは除外されるが、レース単位の表示では「結果不明」であることを示す必要が
  *   あるため行自体は残す。仕様注意点「値の有無」と「行の有無」の混同に注意)。
@@ -107,7 +112,7 @@
  * 両者の合算は「全体集計」の chooseLatestPerRace と完全に一致する。したがって件数・賭け金・払戻
  * いずれも「中央+地方=全体」が保証される(境界を跨ぐ二重計上・漏れは起きない)。
  * スコープ制限(ユーザー合意): 比較軸はここまで。プロンプト版別比較
- * (computeVerifyReportByPromptVersion)・レース単位の予実ブレークダウン(computeRaceBreakdown)への
+ * (computeVerifyReportByPromptVersion)・レース単位の統合リスト(computeRaceLedger)への
  * venueKind 適用は行わない(全体のみのまま)。
  * venueKind="all"(既定)では従来どおり raceId を一切パースせず素通しする(既存挙動・既存テストの
  * raceId="R1" 等の非12桁フィクスチャに影響しない)。venueKind="central"/"nar" 指定時のみ判定のため
@@ -362,6 +367,90 @@ export interface RaceBreakdown {
   readonly betCount: number;
 }
 
+/**
+ * レース単位の統合リストの1件(検証画面UI統合)。
+ * computeVerifyReport の母集団(結果取込済みのみ・推定EV除外。selectIncludedAnalyses)と異なり、
+ * 母集団は「分析済みの全レース」(結果取込の有無・推定EVかどうかを問わない)。latest統合(同一
+ * レースIDは最新分析のみ採用。chooseLatestPerRace を共有し、既存verifyの「最新」判定規則
+ * (analyzedAt文字列比較、同時刻タイは id大)と完全に一致させる)。
+ * horses・totalStake・totalReturn・recoveryRate・betCount は private buildRaceBreakdown をそのまま
+ * 再利用する(結果未保存の場合は空配列 [] を渡すことで、全馬 finishPosition=null・stake/payout=0 として
+ * 自然に「予測のみ・結果不明」を表現できる。二重実装を避け、数値算出ロジックを1箇所に保つ)。
+ */
+export interface RaceLedgerEntry {
+  /** レースID。 */
+  readonly raceId: string;
+  /** この統合エントリの元になった分析ID(latest統合後の1件)。 */
+  readonly analysisId: number;
+  /** 分析日時(ISO文字列など)。 */
+  readonly analyzedAt: string;
+  /** 開催日(YYYYMMDD)。旧データ・選択済み開催日が渡らなかった分析は null。 */
+  readonly kaisaiDate: string | null;
+  /** プロンプト版番号。版不明(旧データ・LLM未使用)は null。 */
+  readonly promptVersion: string | null;
+  /** このレースの実結果(実着順)が取込済みか。 */
+  readonly hasResult: boolean;
+  /**
+   * このレースの複勝確定払戻が取込済みか。着順のみ取込(確定直前など払戻テーブル欠損)では
+   * hasResult=true でも hasPayout=false になる。
+   */
+  readonly hasPayout: boolean;
+  /** 各馬の予測・結果(馬番昇順)。結果未取込なら finishPosition・isPlaced は全馬 null。 */
+  readonly horses: readonly RaceBreakdownHorse[];
+  /** このレースの賭け金合計(円)。結果未取込なら0。 */
+  readonly totalStake: number;
+  /** このレースの払戻合計(円)。結果未取込なら0。 */
+  readonly totalReturn: number;
+  /** このレースの回収率。賭け0点(結果未取込を含む)なら null。 */
+  readonly recoveryRate: number | null;
+  /** このレースで賭けた点数。結果未取込なら0。 */
+  readonly betCount: number;
+}
+
+/**
+ * レース単位の統合リスト(検証画面UI統合)を算出する。
+ * computeVerifyReport(selectIncludedAnalysesによる絞り込み)と異なり、次の2点で母集団が広い:
+ * - 結果未取込のレースも含める(hasResult=false として、予測側のみ返す)。
+ * - 推定EV(evEstimated=true)の分析も除外しない(統合リストには予測として出してよい設計判断)。
+ * latest統合(同一レースIDは最新分析のみ採用)は常に適用する(includeAllAnalyses相当のオプトインは
+ * このビューには無い。統合リストの目的が「レースIDごとに最新の1件へまとめる」ことそのものであるため)。
+ * 並び順は analyses の内部順序(id昇順→latestで絞り込んだ残り)のままで、開催日降順等の表示用の
+ * 並び替えは呼び出し側(app層)に委ねる(private buildRaceBreakdownと同じ責務分担)。
+ * @param store 分析・結果を保持する AnalysisStore
+ * @param config verify設定(stakePerBet・placeMaxRank。省略時は既定)
+ */
+export function computeRaceLedger(
+  store: AnalysisStore,
+  config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
+): readonly RaceLedgerEntry[] {
+  const analyses = store.listAnalyses();
+  const chosenIds = chooseLatestPerRace(analyses);
+  const latest = analyses.filter((a) => chosenIds.has(a.id));
+
+  return latest.map((analysis) => {
+    const results = store.getResult(analysis.raceId);
+    const hasResult = results !== undefined;
+    const hasPayout =
+      hasResult &&
+      results!.some((r) => r.placePayout !== null && r.placePayout !== undefined);
+    const breakdown = buildRaceBreakdown(analysis, results ?? [], config);
+    return {
+      raceId: breakdown.raceId,
+      analysisId: breakdown.analysisId,
+      analyzedAt: breakdown.analyzedAt,
+      kaisaiDate: breakdown.kaisaiDate,
+      promptVersion: breakdown.promptVersion,
+      hasResult,
+      hasPayout,
+      horses: breakdown.horses,
+      totalStake: breakdown.totalStake,
+      totalReturn: breakdown.totalReturn,
+      recoveryRate: breakdown.recoveryRate,
+      betCount: breakdown.betCount,
+    };
+  });
+}
+
 /** 帯集計の可変カウンタ。 */
 interface BinCounter {
   predicted: number;
@@ -461,32 +550,12 @@ export function computeVerifyReportByPromptVersion(
 }
 
 /**
- * レース単体の予実ブレークダウン(Task#34)を算出する。
- * 母集団は computeVerifyReport と同じ(selectIncludedAnalyses を共有。結果未保存除外・
- * latestモードの二重計上防止・推定EV除外)。既定(latestモード)ではレースごとに1件、
- * includeAllAnalyses=true では分析ごとに1件を返す(全件モードのオプトインは既存verifyと同じ)。
- * 呼び出し側(app層)で会場名・レース番号・開催日の表示整形と並び順の決定を行う想定。
- * @param store 分析・結果を保持する AnalysisStore
- * @param config verify設定(省略時は既定。母集団・賭け判定の条件を既存verifyと揃えるため共有する)
- */
-export function computeRaceBreakdown(
-  store: AnalysisStore,
-  config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
-): readonly RaceBreakdown[] {
-  const analyses = store.listAnalyses();
-  const { included } = selectIncludedAnalyses(store, analyses, config);
-  return included.map(({ analysis, results }) =>
-    buildRaceBreakdown(analysis, results, config),
-  );
-}
-
-/**
  * 分析集合から集計対象を選び、除外件数の内訳とともに返す(Task#34)。
- * computeVerifyReportForAnalyses(全体集計・版別集計)と computeRaceBreakdown(レース単位表示)の
- * 両方から呼ばれる共通の母集団選定ロジック。ここを分岐点にすることで、2つの関数が独立に
- * 選定条件を再実装して数値がズレる事故を防ぐ。
- * 選定順序(結果未保存→latestモードの二重計上防止→推定EV除外)は元の computeVerifyReportForAnalyses
- * のループ順をそのまま保持する(除外件数の内訳が既存挙動と一致することを保証するため)。
+ * computeVerifyReportForAnalyses(全体集計・版別集計)から呼ばれる母集団選定ロジック
+ * (結果未保存除外→latestモードの二重計上防止→推定EV除外)。
+ * 旧公開関数 computeRaceBreakdown もかつてこのロジックを共有していたが、検証画面UI統合で
+ * computeRaceBreakdown は廃止された。computeRaceLedger は結果未保存・推定EVも母集団に含める
+ * 設計のため、この selectIncludedAnalyses は使わず chooseLatestPerRace のみを共有する(下記参照)。
  */
 function selectIncludedAnalyses(
   store: AnalysisStore,
@@ -551,10 +620,10 @@ interface HorseBetOutcome {
 
 /**
  * 1頭分の賭け判定・払戻計算(Task#34)。
- * computeVerifyReportForAnalyses の回収率集計ループと computeRaceBreakdown の両方から呼ばれる
- * 共通ロジック(「EVプラス馬に stakePerBet 円賭ける・的中時は実配当優先/複勝オッズ下限で近似
- * フォールバック」)。呼び出し元でのロジック分岐(if文の条件・払戻計算式)の重複を無くし、
- * 両者の数値が常に一致することを保証する。
+ * computeVerifyReportForAnalyses の回収率集計ループと private buildRaceBreakdown(computeRaceLedgerが
+ * 内部で再利用)の両方から呼ばれる共通ロジック(「EVプラス馬に stakePerBet 円賭ける・的中時は
+ * 実配当優先/複勝オッズ下限で近似フォールバック」)。呼び出し元でのロジック分岐(if文の条件・
+ * 払戻計算式)の重複を無くし、両者の数値が常に一致することを保証する。
  * @param horse 分析馬(prior/adjustedProb/placeOddsMin/isPositive等)
  * @param finishPosition 実着順。呼び出し元で既に「着順不明(undefined/null)」を弾いている場合は
  *   非null値を渡す想定だが、念のためnullも受け付け、その場合は判定不能として扱う。
@@ -717,8 +786,7 @@ function computeVerifyReportForAnalyses(
   const noMarkCounter = markCounters.get(null)!;
 
   // 集計対象の選定(結果未保存除外・latestモードの二重計上防止・推定EV除外)は
-  // selectIncludedAnalyses に集約する(Task#34: レース単位ブレークダウン computeRaceBreakdown と
-  // 母集団の選定ロジックを共有し、二重実装による数値の乖離を防ぐ)。
+  // selectIncludedAnalyses に集約する(Task#34)。
   const selected = selectIncludedAnalyses(store, analyses, config);
 
   let betCount = 0;

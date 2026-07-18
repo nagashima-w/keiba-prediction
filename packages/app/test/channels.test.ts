@@ -50,7 +50,7 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.exportLogs).toBe("log:export");
   });
 
-  it("レース単位の予実ブレークダウン取得チャネルが定義されている(Task#34)", () => {
-    expect(IPC_CHANNELS.getRaceBreakdown).toBe("verify:race-breakdown");
+  it("レース単位の統合リスト取得チャネルが定義されている(検証画面UI統合。旧getRaceBreakdown+listAnalysesの置換)", () => {
+    expect(IPC_CHANNELS.getRaceLedger).toBe("verify:race-ledger");
   });
 });

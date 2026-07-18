@@ -22,7 +22,6 @@ import {
 } from "@keiba/core";
 
 import type {
-  AnalysisHistoryItem,
   BatchProgress,
   BatchRaceOutcome,
   BulkImportProgress,
@@ -31,7 +30,7 @@ import type {
   ImportResultOutcome,
   LogExportOutcome,
   PromptVersionVerifyReportView,
-  RaceBreakdownView,
+  RaceLedgerView,
   RaceListItem,
   RaceVenueKind,
   VerifyReportView,
@@ -126,9 +125,7 @@ export function registerIpcHandlers(): void {
     handleDeleteUnknownPromptVersionAnalyses(),
   );
 
-  ipcMain.handle(IPC_CHANNELS.getRaceBreakdown, () => handleGetRaceBreakdown());
-
-  ipcMain.handle(IPC_CHANNELS.listAnalyses, () => handleListAnalyses());
+  ipcMain.handle(IPC_CHANNELS.getRaceLedger, () => handleGetRaceLedger());
 
   ipcMain.handle(IPC_CHANNELS.getSettings, () => handleGetSettings());
 
@@ -429,17 +426,14 @@ async function handleDeleteUnknownPromptVersionAnalyses(): Promise<DeleteUnknown
   );
 }
 
-/** 分析履歴一覧取得ハンドラの実処理。 */
-async function handleListAnalyses(): Promise<AnalysisHistoryItem[]> {
-  return withErrorLogging(IPC_CHANNELS.listAnalyses, undefined, () =>
-    getResources().listAnalysisHistory(),
-  );
-}
-
-/** レース単位の予実ブレークダウン取得ハンドラの実処理(Task#34)。 */
-async function handleGetRaceBreakdown(): Promise<readonly RaceBreakdownView[]> {
-  return withErrorLogging(IPC_CHANNELS.getRaceBreakdown, undefined, () =>
-    getResources().getRaceBreakdown(),
+/**
+ * レース単位の統合リスト取得ハンドラの実処理(検証画面UI統合)。
+ * 旧 handleGetRaceBreakdown(結果取込済みのみ)と旧 handleListAnalyses(分析単位・重複あり)を
+ * 1つのチャネルへ統合したもの。
+ */
+async function handleGetRaceLedger(): Promise<readonly RaceLedgerView[]> {
+  return withErrorLogging(IPC_CHANNELS.getRaceLedger, undefined, () =>
+    getResources().getRaceLedger(),
   );
 }
 

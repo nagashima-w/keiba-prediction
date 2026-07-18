@@ -1,6 +1,6 @@
 /**
- * 検証画面: レース単体の予実ブレークダウン(core RaceBreakdown)を表示用(RaceBreakdownView)へ
- * 変換する純関数(Task#34)。
+ * 検証画面: レース単位の統合リスト(core RaceLedgerEntry)を表示用(RaceLedgerView)へ変換する
+ * 純関数(検証画面UI統合)。
  *
  * 会場名(場コード由来)は raceId から導出する。既存の会場名解決ロジック(venue-codes.ts の
  * venueNameFromRaceId。analysis-pipeline.ts が会場名の一次情報として使っているのと同じ関数)を
@@ -10,24 +10,27 @@
  * batch-summary.ts の raceNumberFromRaceId(renderer)と同じ式を main 層でも用いる。
  *
  * 開催日(kaisaiDate)・プロンプト版番号・馬ごとの予実(horses)・レース単位の賭け金/払戻/回収は
- * core RaceBreakdown の値をそのまま引き継ぐ(この層では加工しない。表示整形はrenderer側の
+ * core RaceLedgerEntry の値をそのまま引き継ぐ(この層では加工しない。表示整形はrenderer側の
  * verify-format.ts に委ねる)。
  *
- * 並び順(docs/handover-next-session.md の「#34 レース単位の予実ブレークダウン」節):
- * 開催日降順(null は最後)→レースID昇順の決定的な順序。
+ * 並び順: 開催日降順(null は最後)→レースID昇順の決定的な順序。
  *
- * 開催日不明の補完(ユーザーフィードバック対応。#34以前の旧データはkaisaiDateがnullで
- * すべて「日付不明」になっていた):
+ * 開催日不明の補完(ユーザーフィードバック対応。旧データはkaisaiDateがnullですべて
+ * 「日付不明」になっていた):
  * kaisaiDateがnullかつ地方(NAR)レースの場合、raceIdの YYYY+MMDD から開催日を導出して補う
  * (core kaisaiDateFromNarRaceId を再利用。地方は開催日がraceIdに直接埋め込まれているため復元可能。
  * 中央は回次・日次のみで日付を復元できないため、中央かつnullは従来どおり「日付不明」のまま)。
  * kaisaiDateが記録済み(非null)の場合は補完せず記録値を優先する。DBは書き換えず表示時のみの
  * 導出とすることで、冪等・可逆(いつでも表示ロジックを変更・撤回できる)にしている。
+ *
+ * (旧 buildRaceBreakdownView は検証画面UI統合により廃止し、この buildRaceLedgerView に統合した。
+ * 会場名・レース番号の導出、開催日不明の補完、並び順の各ロジックは旧関数と完全に同じ規則で、
+ * 廃止時にそのままこのファイルの private ヘルパーとして残している。)
  */
 
-import { kaisaiDateFromNarRaceId, type RaceBreakdown } from "@keiba/core";
+import { kaisaiDateFromNarRaceId, type RaceLedgerEntry } from "@keiba/core";
 
-import type { RaceBreakdownView } from "../shared/analysis-types.js";
+import type { RaceLedgerView } from "../shared/analysis-types.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
 
 /**
@@ -54,11 +57,11 @@ function raceNumberFromRaceId(raceId: string): number {
 
 /**
  * 開催日降順(null は最後)→レースID昇順で比較する(Array.prototype.sort 用)。
+ * raceId・kaisaiDate を持つ型であれば何でも比較できるよう総称化してある。
  */
-function compareByKaisaiDateDescThenRaceIdAsc(
-  a: RaceBreakdownView,
-  b: RaceBreakdownView,
-): number {
+function compareByKaisaiDateDescThenRaceIdAsc<
+  T extends { readonly raceId: string; readonly kaisaiDate: string | null },
+>(a: T, b: T): number {
   if (a.kaisaiDate !== b.kaisaiDate) {
     if (a.kaisaiDate === null) {
       return 1;
@@ -72,28 +75,30 @@ function compareByKaisaiDateDescThenRaceIdAsc(
 }
 
 /**
- * core RaceBreakdown の一覧を検証画面表示用(RaceBreakdownView)へ変換し、
+ * core RaceLedgerEntry の一覧を検証画面表示用(RaceLedgerView)へ変換し、
  * 開催日降順(null は最後)→レースID昇順に並べ替える。
- * @param breakdowns core computeRaceBreakdown の結果(verifyと同じ母集団に絞り込み済み)
+ * @param entries core computeRaceLedger の結果(latest統合済み。結果取込の有無を問わない)
  */
-export function buildRaceBreakdownView(
-  breakdowns: readonly RaceBreakdown[],
-): RaceBreakdownView[] {
-  return breakdowns
+export function buildRaceLedgerView(
+  entries: readonly RaceLedgerEntry[],
+): RaceLedgerView[] {
+  return entries
     .map(
-      (b): RaceBreakdownView => ({
-        raceId: b.raceId,
-        venueName: venueNameFromRaceId(b.raceId),
-        raceNumber: raceNumberFromRaceId(b.raceId),
-        kaisaiDate: resolveKaisaiDate(b.raceId, b.kaisaiDate),
-        analysisId: b.analysisId,
-        analyzedAt: b.analyzedAt,
-        promptVersion: b.promptVersion,
-        horses: b.horses,
-        totalStake: b.totalStake,
-        totalReturn: b.totalReturn,
-        recoveryRate: b.recoveryRate,
-        betCount: b.betCount,
+      (e): RaceLedgerView => ({
+        raceId: e.raceId,
+        venueName: venueNameFromRaceId(e.raceId),
+        raceNumber: raceNumberFromRaceId(e.raceId),
+        kaisaiDate: resolveKaisaiDate(e.raceId, e.kaisaiDate),
+        analysisId: e.analysisId,
+        analyzedAt: e.analyzedAt,
+        promptVersion: e.promptVersion,
+        hasResult: e.hasResult,
+        hasPayout: e.hasPayout,
+        horses: e.horses,
+        totalStake: e.totalStake,
+        totalReturn: e.totalReturn,
+        recoveryRate: e.recoveryRate,
+        betCount: e.betCount,
       }),
     )
     .sort(compareByKaisaiDateDescThenRaceIdAsc);

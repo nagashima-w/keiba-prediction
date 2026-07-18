@@ -24,8 +24,7 @@ const api: KeibaApi = {
     ipcRenderer.invoke(IPC_CHANNELS.getVerifyReportByPromptVersion),
   deleteUnknownPromptVersionAnalyses: () =>
     ipcRenderer.invoke(IPC_CHANNELS.deleteUnknownPromptVersionAnalyses),
-  getRaceBreakdown: () => ipcRenderer.invoke(IPC_CHANNELS.getRaceBreakdown),
-  listAnalyses: () => ipcRenderer.invoke(IPC_CHANNELS.listAnalyses),
+  getRaceLedger: () => ipcRenderer.invoke(IPC_CHANNELS.getRaceLedger),
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings),
   saveSettings: (update) =>
     ipcRenderer.invoke(IPC_CHANNELS.saveSettings, update),
