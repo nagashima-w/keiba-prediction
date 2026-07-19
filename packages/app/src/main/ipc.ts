@@ -181,6 +181,12 @@ const resourceManager = new ResourceManager<PipelineResources>({
       fetch: netFetchAdapter,
       // HttpClient(core)のサポート外charset警告をログ基盤へ接続する(要修正4)。
       onWarn: (message: string) => logWarn(HTTP_CLIENT_WARN_OPERATION, message),
+      // LLMフォールバック発生時の診断ログをログ基盤へ接続する(論点E・#35診断ログ保持)。
+      // message(diagnosticMessage)には例外の生詳細が入りうるが、logWarn→formatLogEntry
+      // (shared/log-formatter.ts)で apiKey・Webhook等の既知の秘密値を必ずマスキングしてから
+      // 出力するため、この配線自体は生の詳細を持ち回ってよい(UI/DBには一切渡さない)。
+      onFallback: (message: string, context: { raceId: string; stopReason: string | null }) =>
+        logWarn(ANALYSIS_FALLBACK_OPERATION, message, context),
     });
   },
   close: (resources) => resources.close(),
@@ -256,6 +262,12 @@ const BATCH_ANALYSIS_RACE_OPERATION = `${IPC_CHANNELS.runBatchAnalysis}:race`;
  * ログ基盤(logWarn)へ接続する(resourceManager.create() で HttpClient へ onWarn として注入)。
  */
 const HTTP_CLIENT_WARN_OPERATION = "http-client:unsupported-charset";
+
+/**
+ * LLMフォールバック(prior復帰)発生時の診断ログの操作名(論点E・#35診断ログ保持)。
+ * grepで「LLM呼び出し失敗・JSON解析失敗の原因を辿りたい」場面を見つけやすくするための固定文字列。
+ */
+const ANALYSIS_FALLBACK_OPERATION = "analysis:fallback";
 
 /**
  * 一括分析ハンドラの実処理。選択レースを直列に分析し、per-race のアウトカムを返す。

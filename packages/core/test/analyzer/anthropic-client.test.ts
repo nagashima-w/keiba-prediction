@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { AnalyzerTruncationError } from "../../src/analyzer/parse-response.js";
 import {
   AnthropicLlmClient,
   buildRequestParams,
@@ -24,6 +25,12 @@ describe("buildRequestParams(SDKへ渡すパラメータの組み立て)", () =>
     expect(DEFAULT_ANALYZER_CONFIG.model).toBe("claude-sonnet-4-6");
     const p = buildRequestParams("PROMPT");
     expect(p.model).toBe("claude-sonnet-4-6");
+  });
+
+  it("デフォルトの maxTokens は8192であること(小倉記念18頭切り詰め事故を踏まえた引き上げ)", () => {
+    expect(DEFAULT_ANALYZER_CONFIG.maxTokens).toBe(8192);
+    const p = buildRequestParams("PROMPT");
+    expect(p.max_tokens).toBe(8192);
   });
 
   it("クリップ幅 maxAdjust のデフォルトは絶対値0.10であること", () => {
@@ -98,4 +105,46 @@ describe("AnthropicLlmClient", () => {
     expect(params.max_tokens).toBe(777);
     expect(params.messages[0]).toEqual({ role: "user", content: "プロンプト本体" });
   });
+
+  it("complete: stop_reason='max_tokens' のとき text を返さず AnalyzerTruncationError を投げること", async () => {
+    const sender = vi.fn<(params: AnthropicRequestParams) => Promise<AnthropicMessageResponse>>(
+      async () => ({
+        content: [{ type: "text", text: "切り詰められた途中まで" }],
+        stop_reason: "max_tokens",
+      }),
+    );
+    const client = new AnthropicLlmClient({}, { sender });
+    await expect(client.complete("プロンプト")).rejects.toThrow(AnalyzerTruncationError);
+  });
+
+  it("complete: stop_reason='max_tokens' で投げる AnalyzerTruncationError が生の stop_reason を保持すること", async () => {
+    const sender = vi.fn<(params: AnthropicRequestParams) => Promise<AnthropicMessageResponse>>(
+      async () => ({
+        content: [{ type: "text", text: "切り詰められた途中まで" }],
+        stop_reason: "max_tokens",
+      }),
+    );
+    const client = new AnthropicLlmClient({}, { sender });
+    try {
+      await client.complete("プロンプト");
+      throw new Error("AnalyzerTruncationError が投げられませんでした");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AnalyzerTruncationError);
+      expect((e as AnalyzerTruncationError).stopReason).toBe("max_tokens");
+    }
+  });
+
+  it.each(["end_turn", "tool_use", "stop_sequence", undefined, null] as const)(
+    "complete: stop_reason=%s では切り詰め扱いにせずテキストを返すこと",
+    async (stopReason) => {
+      const sender = vi.fn<
+        (params: AnthropicRequestParams) => Promise<AnthropicMessageResponse>
+      >(async () => ({
+        content: [{ type: "text", text: "通常応答" }],
+        stop_reason: stopReason ?? undefined,
+      }));
+      const client = new AnthropicLlmClient({}, { sender });
+      await expect(client.complete("プロンプト")).resolves.toBe("通常応答");
+    },
+  );
 });

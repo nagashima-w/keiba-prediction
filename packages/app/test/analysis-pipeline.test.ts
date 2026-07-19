@@ -267,6 +267,7 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(result.llmUsed).toBe(false);
     expect(result.llmSkippedReason).toBe("APIキー未設定");
     expect(result.fallback).toBe(false);
+    expect(result.fallbackReason).toBeNull(); // fallback:false ⇒ fallbackReason:null(不変条件)。
     expect(result.marksDropped).toBe(false); // LLMスキップ時はA救済も発生しない。
     expect(result.marksDroppedReason).toBeNull();
 
@@ -871,6 +872,8 @@ describe("runAnalysis(分析パイプライン)", () => {
     );
     expect(result.llmUsed).toBe(true);
     expect(result.fallback).toBe(true);
+    // core(analyzeRace)が返した fallbackReason をそのまま AnalysisResult に伝播すること(論点C)。
+    expect(result.fallbackReason).toBe("JSONパースに2回失敗");
     // フォールバック(LLM応答が不正でpriorへフォールバック)でも、プロンプト自体は送信されている
     // ため promptVersion は記録される(Task#27)。llmUsed に連動する仕様であり、fallback有無では
     // 変わらないことをここで固定する(code-reviewer指摘: 既存はresult.fallbackのみ検証していた)。
@@ -878,6 +881,165 @@ describe("runAnalysis(分析パイプライン)", () => {
     // 印と無関係な失敗(JSON破損等)のフォールバックでは marksDropped は発生しない。
     expect(result.marksDropped).toBe(false);
     expect(result.marksDroppedReason).toBeNull();
+  });
+
+  it("fallbackReason は保存レコード(AnalysisRecord)には含めないこと(論点D: marksDroppedReasonと同方針・live専用)", async () => {
+    const analyze = vi.fn(
+      async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+        horses: input.horses.map((h) => ({
+          umaban: h.umaban,
+          prior: h.prior,
+          adjustedProb: h.prior,
+          reason: null,
+          clipped: false,
+          usedPrior: true,
+          mark: null,
+        })),
+        fallback: true,
+        retryCount: 1,
+        fallbackReason: "JSONパースに2回失敗",
+      }),
+    );
+    await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      { ...baseDeps(), analyze },
+      onProgress,
+    );
+    expect(saved[0]).not.toHaveProperty("fallbackReason");
+  });
+
+  it("LLM成功時(fallback:false)は result.fallbackReason=null であること(不変条件)", async () => {
+    const analyze = vi.fn(
+      async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+        horses: input.horses.map((h) => ({
+          umaban: h.umaban,
+          prior: h.prior,
+          adjustedProb: h.prior + 0.01,
+          reason: "通常補正",
+          clipped: false,
+          usedPrior: false,
+          mark: null,
+        })),
+        fallback: false,
+        retryCount: 0,
+        fallbackReason: null,
+      }),
+    );
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      { ...baseDeps(), analyze },
+      onProgress,
+    );
+    expect(result.fallback).toBe(false);
+    expect(result.fallbackReason).toBeNull();
+  });
+
+  describe("onFallback(診断ログ配線用フック・論点E)", () => {
+    it("fallback:true のとき onFallback を raceId・stopReason・診断メッセージ付きで1回呼ぶこと", async () => {
+      const onFallback = vi.fn();
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: true,
+          retryCount: 1,
+          fallbackReason: "応答が長さ上限(max_tokens)で切り詰められたため、3着内率をそのまま採用しました",
+          truncated: true,
+          stopReason: "max_tokens",
+          diagnosticMessage:
+            "応答が長さ上限(max_tokens)で切り詰められたため、3着内率をそのまま採用しました",
+        }),
+      );
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze, onFallback },
+        onProgress,
+      );
+      expect(onFallback).toHaveBeenCalledTimes(1);
+      expect(onFallback).toHaveBeenCalledWith({
+        raceId: parseRaceId(RACE_ID),
+        stopReason: "max_tokens",
+        diagnosticMessage:
+          "応答が長さ上限(max_tokens)で切り詰められたため、3着内率をそのまま採用しました",
+      });
+    });
+
+    it("LLM成功時(fallback:false)は onFallback を呼ばないこと", async () => {
+      const onFallback = vi.fn();
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: "通常補正",
+            clipped: false,
+            usedPrior: false,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        }),
+      );
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze, onFallback },
+        onProgress,
+      );
+      expect(onFallback).not.toHaveBeenCalled();
+    });
+
+    it("印関連違反によるA救済(fallback:false・marksDropped:true)でも onFallback を呼ばないこと", async () => {
+      const onFallback = vi.fn();
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: "通常補正",
+            clipped: false,
+            usedPrior: false,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 1,
+          fallbackReason: null,
+          marksDropped: true,
+          marksDroppedReason: "印関連の制約違反のため確率補正のみ採用",
+        }),
+      );
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze, onFallback },
+        onProgress,
+      );
+      expect(onFallback).not.toHaveBeenCalled();
+    });
+
+    it("LLM無し(analyze=null)では onFallback を呼ばないこと", async () => {
+      const onFallback = vi.fn();
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), onFallback },
+        onProgress,
+      );
+      expect(onFallback).not.toHaveBeenCalled();
+    });
   });
 
   describe("予想印の制約緩和後フォールバック分離(A: marksDropped伝播・2026-07-19合意)", () => {

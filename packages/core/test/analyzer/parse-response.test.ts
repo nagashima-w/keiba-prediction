@@ -28,6 +28,7 @@ import { describe, expect, it } from "vitest";
 import {
   AnalyzerMarkViolationError,
   AnalyzerResponseParseError,
+  AnalyzerTruncationError,
   extractJsonObject,
   parseAnalyzerResponse,
   type ParsedHorseResult,
@@ -91,6 +92,20 @@ describe("extractJsonObject(JSON抽出の揺れ耐性)", () => {
     expect(() => extractJsonObject('{"horses": [')).toThrow(
       AnalyzerResponseParseError,
     );
+  });
+});
+
+describe("AnalyzerTruncationError(応答がmax_tokensで切り詰められたことを表すエラー)", () => {
+  it("AnalyzerResponseParseError のサブクラスであること(既存のinstanceof判定・リトライ意味論を壊さない)", () => {
+    const e = new AnalyzerTruncationError("切り詰められました", "max_tokens");
+    expect(e).toBeInstanceOf(AnalyzerResponseParseError);
+    expect(e).toBeInstanceOf(AnalyzerTruncationError);
+    expect(e.name).toBe("AnalyzerTruncationError");
+  });
+
+  it("検出した生の stop_reason を保持すること(診断用)", () => {
+    const e = new AnalyzerTruncationError("切り詰められました", "max_tokens");
+    expect(e.stopReason).toBe("max_tokens");
   });
 });
 

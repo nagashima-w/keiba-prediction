@@ -96,6 +96,7 @@ const outcomes: BatchRaceOutcome[] = [
       llmUsed: false,
       llmSkippedReason: null,
       fallback: false,
+      fallbackReason: null,
       oddsStatus: "result",
       rows: [],
       warnings: [],

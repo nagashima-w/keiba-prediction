@@ -45,6 +45,7 @@ const result = (
   llmUsed: true,
   llmSkippedReason: null,
   fallback: false,
+  fallbackReason: null,
   oddsStatus: "result",
   rows,
   warnings: [],

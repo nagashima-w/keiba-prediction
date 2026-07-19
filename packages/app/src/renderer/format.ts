@@ -125,6 +125,30 @@ export function llmCorrectionStatusText(result: {
 }
 
 /**
+ * 「LLM補正:」行のtooltip(title属性)に表示する理由文言(論点C: fallbackReasonのUI伝播、
+ * 2026-07-19合意)。llmCorrectionStatusText と同じ優先順位で、fallback:true(確率補正自体が
+ * 無効・より重大)を marksDropped:true(印だけ非表示・確率補正は有効)より優先する。
+ * 両方とも理由が無ければ title 属性を付けない意図で undefined を返す
+ * (呼び出し側の React の title={undefined} は属性自体を出力しない)。
+ * fallbackReason は core analyzeRace が返す固定分類文言のみ(秘密非混入・論点C)なので、
+ * ここでは追加の加工なしにそのまま表示できる。
+ */
+export function llmCorrectionTooltip(result: {
+  readonly fallback: boolean;
+  readonly fallbackReason: string | null;
+  readonly marksDropped?: boolean;
+  readonly marksDroppedReason?: string | null;
+}): string | undefined {
+  if (result.fallback && result.fallbackReason) {
+    return result.fallbackReason;
+  }
+  if (result.marksDropped === true && result.marksDroppedReason) {
+    return result.marksDroppedReason;
+  }
+  return undefined;
+}
+
+/**
  * レース見出し(Task#29)。「会場名 + レース番号R + (レース名があれば付す)」の形式で組み立てる。
  *
  * raceName はスクレイピング元(netkeiba)で発売前の地方レース等に空文字になり得るため、

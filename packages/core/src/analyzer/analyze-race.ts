@@ -16,16 +16,47 @@
  * marksDroppedReason フィールドに入れる。
  * 印と無関係な失敗(JSON破損・horses配列なし・有効な補正0件など)は従来どおり
  * priorFallbackHorses で全馬 prior を採用し、fallback:true・marksDropped:false のまま返す。
+ *
+ * maxTokens引き上げ・切り詰め検出の可視化(2026-07-19改定・小倉記念18頭切り詰め事故の再発防止):
+ * AnthropicLlmClient.complete() が stop_reason==="max_tokens" を検出すると
+ * AnalyzerTruncationError(AnalyzerResponseParseError のサブクラス)を投げる。この分岐は
+ * 汎用のJSON解析失敗より必ず先に判定し、専用の理由文言・truncated:true・生のstop_reasonを
+ * 返す(汎用の「パース失敗」に埋もれて根本原因〈max_tokens不足〉の特定が遅れるのを防ぐ)。
+ * fallbackReason(UI/DB向け)は秘密安全性のため常に固定分類文言(FALLBACK_REASON_*)のみとし、
+ * 生の例外詳細は diagnosticMessage に別途保持してログ経路(main側onFallback)でのみ使う
+ * (詳細は各定数・AnalyzeRaceResultのフィールドコメントを参照)。
  */
 
 import { buildPrompt, type BuildPromptInput } from "./build-prompt.js";
 import {
   AnalyzerMarkViolationError,
   AnalyzerResponseParseError,
+  AnalyzerTruncationError,
   parseAnalyzerResponse,
   type ParsedHorseResult,
   type PriorRef,
 } from "./parse-response.js";
+
+/**
+ * fallbackReason(UI/DB向け)に使う固定分類文言(2026-07-19改定: 秘密安全性のための再設計)。
+ *
+ * 背景: 従来は生の例外メッセージ(lastError.message等)をそのまま fallbackReason に埋め込んでいたが、
+ * これは analyzeRace 内部専用のフィールドで、UI/DBには露出していなかった。今回 fallbackReason を
+ * UI(BatchAnalysisView の「LLM補正:」行tooltip)へ新規露出させるにあたり、CLAUDE.mdに記録された
+ * 過去の秘密漏洩事故の重さを踏まえ、生の例外内容(万一 apiKey・プロンプト本文の断片等を含んでいても)が
+ * 構造的にUI/DBへ混入しないよう、fallbackReason は必ずこの3種の固定文字列のいずれかとする
+ * (診断に必要な生の詳細は diagnosticMessage に別途保持し、ログ経路〈main/pipeline-deps.ts の
+ * onFallback→main/logger.ts の logWarn〉でのみ、既存の秘密マスキング〈log-formatter.ts〉を通して使う。
+ * UI/DB(AnalysisResult/AnalysisRecord)へは diagnosticMessage を一切渡さない)。
+ */
+export const FALLBACK_REASON_TRUNCATED =
+  "応答が長さ上限(max_tokens)で切り詰められたため、3着内率をそのまま採用しました";
+/** 汎用のJSON解析失敗(horses配列なし・有効な補正0件を含む)時の固定分類文言。 */
+export const FALLBACK_REASON_PARSE_ERROR =
+  "LLM応答のJSON解析に失敗したため、3着内率をそのまま採用しました";
+/** LLM呼び出し自体の例外(認証エラー・レート制限・ネットワーク断等)時の固定分類文言。 */
+export const FALLBACK_REASON_INVOCATION_ERROR =
+  "LLM呼び出しに失敗したため、3着内率をそのまま採用しました";
 
 /**
  * analyzer が使う LLM クライアントの最小インターフェース。
@@ -70,6 +101,30 @@ export interface AnalyzeRaceResult {
   readonly marksDropped?: boolean;
   /** marksDropped:true の場合の理由説明(通常時・非印失敗時は null)。 */
   readonly marksDroppedReason?: string | null;
+  /**
+   * fallback:true の原因が応答の切り詰め(stop_reason==="max_tokens")だった場合 true
+   * (2026-07-19改定: 小倉記念18頭切り詰め事故の再発防止・可視化)。切り詰め以外の失敗では
+   * 明示的に false を返す。成功時・印救済時(AnalyzerMarkViolationError経由)はこのフィールド
+   * 自体を省略する(値は undefined。既存呼び出し元との互換のため optional にしている)。
+   */
+  readonly truncated?: boolean;
+  /**
+   * 切り詰め検出時に AnthropicLlmClient が観測した生の stop_reason(現状は常に "max_tokens")。
+   * truncated:true の場合のみ値が入る。診断ログ(main側のonFallback経由)向けの構造化情報であり、
+   * 秘密を含まないため fallbackReason 同様 UI に出しても安全(ただし今回はログ配線のみで使う)。
+   * 切り詰め以外の失敗では明示的に null、成功時・印救済時は省略(undefined)。
+   */
+  readonly stopReason?: string | null;
+  /**
+   * fallback:true 時の診断用の生詳細(例外メッセージ等)。UI(AnalysisResult)にもDB
+   * (AnalysisRecord)にも絶対に伝播させないこと。main/analysis-pipeline.ts の onFallback
+   * コールバック経由で main/logger.ts の logWarn に渡し、既存の秘密マスキング
+   * (shared/log-formatter.ts)を通してのみ記録する(#35 ログ基盤: LLM呼び出し失敗の原因を
+   * 完全不可視にしないための診断ログ保持)。truncated:true の場合は stopReason で診断可能なため
+   * 生の例外メッセージではなく固定文言(FALLBACK_REASON_TRUNCATED)を入れる。fallback:true の
+   * 失敗時は必ず値が入り、成功時・印救済時(fallback:false)は省略(undefined)。
+   */
+  readonly diagnosticMessage?: string | null;
 }
 
 /**
@@ -145,11 +200,34 @@ export async function analyzeRace(
     };
   }
 
-  // 印と無関係な失敗 → prior をそのまま採用(フェイルセーフ)。
-  const reason =
-    lastError instanceof AnalyzerResponseParseError
-      ? `JSONパースに2回失敗したため prior を採用: ${lastError.message}`
-      : `LLM呼び出しに2回失敗したため prior を採用: ${errorMessage(lastError)}`;
+  // 応答の切り詰め(stop_reason==="max_tokens")は、汎用のJSON解析失敗より必ず先に判定する
+  // (2026-07-19改定: 小倉記念18頭切り詰め事故の再発防止)。汎用文言に埋もれると「パース失敗」と
+  // 誤表示され、根本原因(max_tokens不足)の特定が遅れるため。stopReasonは構造化フィールドで
+  // 拾えるため診断上生の例外メッセージを別途保持する必要は無い(diagnosticMessageは固定文言と同一)。
+  if (lastError instanceof AnalyzerTruncationError) {
+    return {
+      horses: priorFallbackHorses(priors),
+      fallback: true,
+      retryCount: maxAttempts - 1,
+      fallbackReason: FALLBACK_REASON_TRUNCATED,
+      marksDropped: false,
+      marksDroppedReason: null,
+      truncated: true,
+      stopReason: lastError.stopReason,
+      diagnosticMessage: FALLBACK_REASON_TRUNCATED,
+    };
+  }
+
+  // 印・切り詰めのいずれとも無関係な失敗 → prior をそのまま採用(フェイルセーフ)。
+  // fallbackReason(UI/DB向け)は固定分類文言のみとし、生の例外メッセージ(万一秘密を含んでいても)が
+  // 構造的に混入しないようにする。生の詳細は diagnosticMessage に保持し、ログ経路
+  // (main/analysis-pipeline.ts の onFallback → main/logger.ts の logWarn)でのみ、
+  // 既存の秘密マスキング(shared/log-formatter.ts)を通して使う(#35 診断ログ保持)。
+  const isParseError = lastError instanceof AnalyzerResponseParseError;
+  const reason = isParseError ? FALLBACK_REASON_PARSE_ERROR : FALLBACK_REASON_INVOCATION_ERROR;
+  const diagnosticMessage = isParseError
+    ? (lastError as AnalyzerResponseParseError).message
+    : errorMessage(lastError);
 
   return {
     horses: priorFallbackHorses(priors),
@@ -158,6 +236,9 @@ export async function analyzeRace(
     fallbackReason: reason,
     marksDropped: false,
     marksDroppedReason: null,
+    truncated: false,
+    stopReason: null,
+    diagnosticMessage,
   };
 }
 

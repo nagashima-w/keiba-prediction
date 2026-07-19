@@ -1,5 +1,5 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
-import { parseKaisaiDate, type FetchLike, type FetchResponse } from "@keiba/core";
+import { parseKaisaiDate, parseRaceId, type FetchLike, type FetchResponse } from "@keiba/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -36,6 +36,28 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(typeof r.deps.saveAnalysis).toBe("function");
     expect(typeof r.deps.scrape).toBe("function");
     expect(typeof r.listRaces).toBe("function");
+  });
+
+  it("onFallback 未指定なら deps.onFallback は undefined であること(論点E)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(r.deps.onFallback).toBeUndefined();
+  });
+
+  it("onFallback を渡すと deps.onFallback から診断メッセージ・raceId・stopReason で呼ばれること(論点E: ログ配線用)", () => {
+    const onFallback = vi.fn();
+    const r = createPipelineDeps({ dbPath: ":memory:", onFallback });
+    resources.push(r);
+    r.deps.onFallback?.({
+      raceId: parseRaceId("202605020811"),
+      stopReason: "max_tokens",
+      diagnosticMessage: "テスト診断メッセージ",
+    });
+    expect(onFallback).toHaveBeenCalledTimes(1);
+    expect(onFallback).toHaveBeenCalledWith("テスト診断メッセージ", {
+      raceId: "202605020811",
+      stopReason: "max_tokens",
+    });
   });
 
   it("getVerifyReportByPromptVersion が組み立てられ、未分析なら空配列を返すこと(Task#27)", () => {

@@ -13,6 +13,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { LlmClient } from "./analyze-race.js";
+import { AnalyzerTruncationError } from "./parse-response.js";
 
 /** analyzer(Anthropic呼び出し)の設定。 */
 export interface AnalyzerConfig {
@@ -34,11 +35,23 @@ export interface AnalyzerConfig {
 /**
  * 既定の analyzer 設定。モデルは仕様指定の claude-sonnet-4-6。
  * temperature=0 は補正の再現性を高めるための既定(チューニング対象)。
- * maxTokens は最大18頭分の JSON(reason 付き)を収める余裕として 2048。
+ *
+ * maxTokens=8192(2026-07-19改定): 旧値2048は誤りだった。予想印(mark)+馬ごとの和文根拠(reason)を
+ * 追加した現行スキーマでは、18頭分の応答が実測で2048トークン付近に達し、実際に小倉記念18頭で
+ * 応答がmax_tokensで切り詰められ→JSON破損→パース失敗が2回続いて全馬prior採用になる事故が発生した
+ * (fallbackReason/stop_reasonが可視化されていなかったため原因特定が遅れた。可視化は
+ * analyze-race.ts/analysis-pipeline.ts側で別途対応)。8192は実測(概算1500〜2700トークン)の
+ * 3〜6倍の余裕を持つ値として採用する。16384ではなく8192を選んだ理由: このクライアントは
+ * ストリーミングを行わない `messages.create` を使っている。claude-api skill(Anthropic API
+ * リファレンス)の記載では、非ストリーミング呼び出しで max_tokens が概ね16000を超えると
+ * SDKのHTTPタイムアウトが起きうる目安とされており(この数値自体を本実装で実測検証したもの
+ * ではない・出典: 上記skillの案内)、その目安を大きく下回る8192を保守的な安全側の上限とした
+ * (ストリーミング化は本改定のスコープ外。将来 reason をさらに長くする等で8192超が必要になった
+ * 場合は、ストリーミング化とあわせて要検証)。
  */
 export const DEFAULT_ANALYZER_CONFIG: AnalyzerConfig = {
   model: "claude-sonnet-4-6",
-  maxTokens: 2048,
+  maxTokens: 8192,
   temperature: 0,
   maxAdjust: 0.1,
 };
@@ -59,6 +72,13 @@ export interface AnthropicRequestParams {
 export interface AnthropicMessageResponse {
   /** コンテンツブロック列(text ブロックのみ使う)。 */
   readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+  /**
+   * 応答が停止した理由(SDKの生レスポンスが持つ値をそのまま透過する)。
+   * "max_tokens" のときは max_tokens 上限により応答が途中で切り詰められたことを意味し、
+   * 本文(content)のJSONが不完全で信頼できない(2026-07-19改定・小倉記念18頭切り詰め事故対応)。
+   * 未提供(旧テストのモック等)の場合もあるため optional・null許容にする。
+   */
+  readonly stop_reason?: string | null;
 }
 
 /** パラメータを受け取り Anthropic へ送信してレスポンスを返す関数(注入・モック可能)。 */
@@ -113,10 +133,22 @@ export class AnthropicLlmClient implements LlmClient {
     this.sender = deps.sender ?? this.createDefaultSender();
   }
 
-  /** プロンプトを送り、LLM の生出力テキストを返す。 */
+  /**
+   * プロンプトを送り、LLM の生出力テキストを返す。
+   * stop_reason==="max_tokens"(応答が長さ上限で切り詰められた)場合は、本文JSONが不完全で
+   * 信頼できないため text を返さず AnalyzerTruncationError を投げる(2026-07-19改定)。
+   * analyze-race側はこれを AnalyzerResponseParseError のサブクラスとして受け取り、
+   * 通常のリトライ/フォールバック判定に乗せつつ、専用の理由文言・stop_reasonを伝播する。
+   */
   async complete(prompt: string): Promise<string> {
     const params = buildRequestParams(prompt, this.config);
     const res = await this.sender(params);
+    if (res.stop_reason === "max_tokens") {
+      throw new AnalyzerTruncationError(
+        "LLM応答が長さ上限(max_tokens)で切り詰められました",
+        res.stop_reason,
+      );
+    }
     return extractText(res);
   }
 
