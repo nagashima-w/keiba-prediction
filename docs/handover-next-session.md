@@ -26,6 +26,29 @@
 > - 任意フォローアップ(未対応): BatchAnalysisView の title 出し分けに防御的 `!result.fallback` を加える(fallback と marksDropped の
 >   排他は現状ランタイム不変条件のみでテスト固定済み。型保証はしていない)。
 
+> **2026-07-19 追加実装(妙味まわり・後半セッション)**: 開発ブランチ `claude/handover-next-session-x5ki6o` に以下を
+> コミット済み(各タスクとも 着手前ゲート〈boss〉→ TDD 実装 → code-reviewer → boss メタレビュー承認 → CI success → exe更新 を実物確認)。
+> **いずれも main 未マージ・PR未作成**(#30〜#36・予想印改善と同様、新規 PR で main へ取り込む想定)。
+> - **`bd02a33` LLM根拠が出ない(fallback:true)の根本修正+可視化**: 18頭等の多頭数レースで `maxTokens=2048` に応答が収まらず
+>   切り詰め→JSON破損→パース2回失敗→全馬 prior 復帰(印・LLM根拠が全損)していた問題。`DEFAULT_ANALYZER_CONFIG.maxTokens` を
+>   **8192** に引き上げ(16384 は非ストリーミング呼び出しのHTTPタイムアウト目安16000に近く見送り)。加えて `stop_reason==="max_tokens"` を
+>   `AnalyzerTruncationError`(AnalyzerResponseParseError サブクラス)で検出し、`fallbackReason` を固定分類文言3種(切り詰め/JSON解析失敗/
+>   呼び出し失敗)で UI ツールチップに可視化。生の例外原因は `diagnosticMessage` 経由でマスク済みログ(log-formatter)にのみ流し UI/DB 非露出。
+> - **`bd38df2` 条件替わりの可視化(妙味材料)**: 新規 `condition-change.ts`。サーフェス替わり(前走の芝/ダと違えば「◯替わり(前走△)」、
+>   経験0なら「初ダート/初芝」、現レース障はタグなし)/距離延長・短縮(国内平地の直近有効走〈最大3件〉平均と現距離の差 |Δ|≥400m、生平均判定・
+>   整数丸め表示)/中央⇄地方替わり(前走 venueKind 比較、語彙 中央↔central・地方↔nar をモジュール内で吸収、海外スキップ)。プロンプト各馬行の
+>   「条件替わり=」+ UI(妙味ランキング筆頭候補バッジ・レース別ハイライト新規列)。DB 非保存。`PROMPT_VERSION="2026-07-19.2"`。
+> - **`19482ad` 展開想定の有利脚質を地方前残り・馬場不良に対応**: `favoredStylesForPace` を venueKind+trackCondition 対応に。地方(nar)通常馬場は
+>   スロー/平均=有利[逃げ先行]・不利[追込]、ハイ=有利[逃げ先行差し]・不利[追込](ハイでも逃げ先行を不利にしない)。地方・馬場不良(先頭文字「不」判定=
+>   `isFuryoTrackCondition`。"不良"/"不"に強く "重"/"稍重" は含めない)は全ペース 不利[差し追込]。中央は従来どおり。プロンプト【展開想定】末尾に
+>   「コース形態の前後有利は自ら判断せよ」(全venue共通)+「地方は前残り傾向を加味」(nar限定)の2行を追加。`PROMPT_VERSION="2026-07-19.3"`。
+> - **初ブリンカー(タスクC)は見送り**: 調査の結論=**現状の無料・静的データソースでは今走のブリンカー着用も着用履歴も取得不可**。
+>   無料の出馬表HTMLに馬具の列・アイコンが無い(カラムは 枠/馬番/馬名/性齢/騎手/斤量/厩舎/人気 等)。過去走の戦績には netkeiba の
+>   データモデル上「blinker」列が存在する(新聞ページの表示可能列リスト `senseki_data` に含まれる)が、過去走テーブルは Riot.js の
+>   クライアント描画(`race_api` 経由)で、取得している戦績フラグメント(horse API の `{status:"OK",data:"<HTML>"}`)には含まれない。
+>   プレミアム/JS壁の可能性が高い(厩舎コメント・調教タイムと同じ構造。`phase1-scraping-plan.md`「newspaper.html 不採用」参照)。
+>   → 将来プレミアム対応やデータ源追加時に再検討。確定には netkeiba への実リクエストで `race_api` 戦績に blinker が無料で取れるか叩く必要がある。
+
 ## 0. まず現状を実物で確認する(鉄則)
 - リモート `claude/handover-next-session-x5ki6o` の最新コミットを `mcp__github__list_commits` で確認する。
 - 実装成果はリモートに #19〜#36 まで揃っている。main には #29 まで(PR #1 マージ済み)、
