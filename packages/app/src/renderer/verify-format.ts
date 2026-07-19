@@ -264,6 +264,18 @@ export function additionalInstructionsFullText(
     .join(" / ");
 }
 
+/**
+ * プロンプト版別キャリブレーション表(D-1)の折りたたみ見出し。
+ * 版番号(promptVersionLabel)にその版で使われた追加指示の要約(additionalInstructionsSummary)を
+ * 併記し、「どの条件の較正か」を展開前から一目で分かるようにする。
+ */
+export function promptVersionCalibrationHeading(
+  promptVersion: string | null,
+  additionalInstructions: readonly (string | null)[],
+): string {
+  return `${promptVersionLabel(promptVersion)} (追加指示: ${additionalInstructionsSummary(additionalInstructions)})`;
+}
+
 /** YYYYMMDD形式かどうか(8桁数字)。 */
 function isYyyymmdd(value: string): boolean {
   return /^[0-9]{8}$/.test(value);

@@ -28,6 +28,7 @@ import {
   overconfidenceLabel,
   payoutSourceLabel,
   placedLabel,
+  promptVersionCalibrationHeading,
   promptVersionLabel,
   raceBreakdownHeading,
   raceLedgerFilterSummary,
@@ -226,6 +227,35 @@ describe("verify画面の表示整形(純関数)", () => {
       expect(promptVersionLabel(null)).toBe("版不明");
     });
   });
+
+  describe(
+    "promptVersionCalibrationHeading(版別キャリブレーション表の折りたたみ見出し、D-1)",
+    () => {
+      it("版番号と追加指示の要約を併記すること", () => {
+        expect(
+          promptVersionCalibrationHeading("2026-07-14.1", [
+            "人気薄の複勝率は慎重に見積もること",
+          ]),
+        ).toBe("2026-07-14.1 (追加指示: 人気薄の複勝率は慎重に見積もること)");
+      });
+
+      it("版不明(null)は『版不明』と表示すること", () => {
+        expect(promptVersionCalibrationHeading(null, [])).toBe(
+          "版不明 (追加指示: なし)",
+        );
+      });
+
+      it("追加指示が複数件でもadditionalInstructionsSummaryと同じ形式で連結すること", () => {
+        expect(
+          promptVersionCalibrationHeading("2026-07-14.1", [
+            "指示A",
+            "指示B",
+            null,
+          ]),
+        ).toBe("2026-07-14.1 (追加指示: 指示A / 指示B / なし)");
+      });
+    },
+  );
 
   describe("venueFilterLabel(検証画面の地域フィルタ表示、Task#32)", () => {
     it("all は『全体』にすること", () => {
