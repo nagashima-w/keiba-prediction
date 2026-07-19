@@ -98,7 +98,7 @@
 - undici 8 は Node≥22.19 必須で Electron 34(Node 20)と非互換 → net.fetch アダプタ注入+undici ^7 整合で対応済み(既存コミットにあり)。
 
 ## 5. エージェント体制・報告方針(CLAUDE.md にも記載済み)
-- 実装=tdd-implementer(sonnet)、レビュー=code-reviewer(sonnet)→ code-reviewer-boss(opus, 敵対的メタレビュー)。
-  bossの承認まで次に進まない。**各タスク承認後に必ず実際にコミットし、GitHubの記録で反映を確認してから次へ**。
+- 着手前ゲート=boss(opus)→ 実装=tdd-implementer(sonnet)→ レビュー=code-reviewer(sonnet)→ boss(opus, 敵対的メタレビュー)。
+  bossの承認まで次に進まない。3体はタスク単位で運用し、完了で破棄(次タスクは新規起動)。**各タスク承認後に必ず実際にコミットし、GitHubの記録で反映を確認してから次へ**。
 - 自律進行してよいが、課金操作(実Claude API分析・netkeibaへのまとまった実リクエスト)は事前承認。
   節目で軽く進捗報告。
