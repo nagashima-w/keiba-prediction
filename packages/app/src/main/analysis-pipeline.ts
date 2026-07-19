@@ -104,6 +104,22 @@ export interface AnalysisPipelineDeps {
    * (LLMスキップ時はプロンプト自体を使っていないため null を保存する。promptVersionと同じ方針)。
    */
   readonly additionalInstruction?: string | null;
+  /**
+   * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
+   * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(marksDroppedのみの
+   * A救済を含む)では呼ばない。
+   *
+   * 秘密安全性: context に相当する raceId・stopReason は構造化情報のみで apiKey・Webhook等は
+   * 一切積まない。diagnosticMessage は LLM呼び出し例外・JSONパース失敗時の生の詳細を含みうる
+   * ため、UI(AnalysisResult.fallbackReason)・DB(AnalysisRecord)には絶対に渡さず、
+   * このフック経由でのみ main/logger.ts の logWarn(既存の秘密マスキング〈shared/log-formatter.ts〉
+   * を通す)へ配線すること(呼び出し側は pipeline-deps.ts/ipc.ts)。
+   */
+  readonly onFallback?: (info: {
+    readonly raceId: RaceId;
+    readonly stopReason: string | null;
+    readonly diagnosticMessage: string;
+  }) => void;
 }
 
 /** LLM分析後の1頭分(補正後確率と根拠)。 */
@@ -232,6 +248,8 @@ export async function runAnalysis(
   let llmUsed = false;
   let llmSkippedReason: string | null = null;
   let fallback = false;
+  // フォールバックの理由(固定分類文言。論点C)。不変条件: fallback:false の場合は必ず null。
+  let fallbackReason: string | null = null;
   // A(フォールバック分離・2026-07-19合意): 予想印の制約違反により印だけを諦めた場合 true。
   // fallback(確率補正そのものを prior に戻す)とは意味が異なるため別フィールドで伝播する。
   let marksDropped = false;
@@ -308,11 +326,23 @@ export async function runAnalysis(
     const analysis = await deps.analyze(promptInput);
     llmUsed = true;
     fallback = analysis.fallback;
+    // fallbackReason は core 側が必ず不変条件(fallback:false ⇒ null)を守って返すため、
+    // そのまま伝播する(固定分類文言のみ・秘密非混入。論点C)。
+    fallbackReason = analysis.fallbackReason;
     // core AnalyzeRaceResult.marksDropped/marksDroppedReason は既存呼び出し元との互換のため
     // optional になっている(未設定=印関連の救済は発生していない)。ここで明示的に false/null へ
     // 正規化してから AnalysisResult に伝播する(呼び出し元は必ず true/false を受け取れる)。
     marksDropped = analysis.marksDropped ?? false;
     marksDroppedReason = analysis.marksDroppedReason ?? null;
+    // フォールバック発生時のみ診断ログ用フックを呼ぶ(論点E)。生の診断詳細
+    // (diagnosticMessage)はUI/DBへは渡さず、このフック経由でのみログ基盤へ渡す。
+    if (fallback) {
+      deps.onFallback?.({
+        raceId,
+        stopReason: analysis.stopReason ?? null,
+        diagnosticMessage: analysis.diagnosticMessage ?? analysis.fallbackReason ?? "",
+      });
+    }
     for (const h of analysis.horses) {
       adjustedByUmaban.set(h.umaban, {
         adjustedProb: h.adjustedProb,
@@ -430,6 +460,7 @@ export async function runAnalysis(
     llmUsed,
     llmSkippedReason,
     fallback,
+    fallbackReason,
     marksDropped,
     marksDroppedReason,
     oddsStatus: race.odds.oddsStatus,

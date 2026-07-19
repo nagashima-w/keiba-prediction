@@ -292,6 +292,7 @@ export {
 export {
   AnalyzerMarkViolationError,
   AnalyzerResponseParseError,
+  AnalyzerTruncationError,
   extractJsonObject,
   MAX_ADJUST,
   parseAnalyzerResponse,
@@ -304,6 +305,9 @@ export {
 } from "./analyzer/parse-response.js";
 export {
   analyzeRace,
+  FALLBACK_REASON_INVOCATION_ERROR,
+  FALLBACK_REASON_PARSE_ERROR,
+  FALLBACK_REASON_TRUNCATED,
   type AnalyzeRaceDeps,
   type AnalyzeRaceResult,
   type LlmClient,

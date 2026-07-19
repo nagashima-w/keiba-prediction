@@ -82,6 +82,17 @@ export interface PipelineWiringConfig {
    * 省略時は HttpClient の既定(console.warn)が使われる。
    */
   readonly onWarn?: (message: string) => void;
+  /**
+   * フォールバック発生時(論点E)の診断ログ用コールバック。第1引数が診断メッセージ
+   * (LLM呼び出し例外・JSONパース失敗の生詳細。truncated時は固定文言)、第2引数が
+   * raceId・stopReason のみの構造化コンテキスト(apiKey・Webhookは含めない)。
+   * 呼び出し側(ipc.ts)がログ基盤(logWarn)へ接続する。省略時は診断ログを残さない
+   * (AnalysisPipelineDeps.onFallback は undefined のまま)。
+   */
+  readonly onFallback?: (
+    message: string,
+    context: { readonly raceId: string; readonly stopReason: string | null },
+  ) => void;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -169,6 +180,13 @@ export function createPipelineDeps(
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",
+    onFallback: config.onFallback
+      ? (info) =>
+          config.onFallback!(info.diagnosticMessage, {
+            raceId: info.raceId,
+            stopReason: info.stopReason,
+          })
+      : undefined,
   };
 
   return {

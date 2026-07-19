@@ -49,6 +49,7 @@ const fakeResult = (raceId: string): AnalysisResult => ({
   llmUsed: false,
   llmSkippedReason: null,
   fallback: false,
+  fallbackReason: null,
   oddsStatus: "result",
   rows: [],
   warnings: [],

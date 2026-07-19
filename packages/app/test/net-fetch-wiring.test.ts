@@ -125,6 +125,7 @@ describe("ipc: net.fetch アダプタの注入", () => {
       llmUsed: false,
       llmSkippedReason: null,
       fallback: false,
+      fallbackReason: null,
       oddsStatus: "result",
       rows: [],
       warnings: [],

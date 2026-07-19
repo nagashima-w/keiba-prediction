@@ -113,6 +113,15 @@ export interface AnalysisResult {
   /** LLM分析がフェイルセーフで prior にフォールバックしたか。 */
   readonly fallback: boolean;
   /**
+   * フォールバックの理由(通常時・fallback:falseの場合は必ず null。不変条件)。
+   * 秘密安全性のため、生のLLM例外メッセージ等は含まない固定分類文言のみが入る
+   * (core analyzeRace の FALLBACK_REASON_TRUNCATED / FALLBACK_REASON_PARSE_ERROR /
+   * FALLBACK_REASON_INVOCATION_ERROR のいずれか。論点C: 2026-07-19合意)。
+   * DB(AnalysisRecord)には保存しない(marksDroppedReasonと同方針。論点D)。
+   * UI(BatchAnalysisView)では「LLM補正:」行のtooltip(title)に表示する。
+   */
+  readonly fallbackReason: string | null;
+  /**
    * 予想印の制約違反(頭数・優先順位・未知の印文字)によりリトライ後も印を採用できず、
    * 確率補正(AI補正後確率)は有効なまま全馬の印だけを非表示にした場合 true
    * (A: フォールバック分離・2026-07-19合意)。fallback とは意味が異なる点に注意:

@@ -19,9 +19,15 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { analyzeRace } from "../../src/analyzer/analyze-race.js";
+import {
+  analyzeRace,
+  FALLBACK_REASON_INVOCATION_ERROR,
+  FALLBACK_REASON_PARSE_ERROR,
+  FALLBACK_REASON_TRUNCATED,
+} from "../../src/analyzer/analyze-race.js";
 import type { LlmClient } from "../../src/analyzer/analyze-race.js";
 import type { BuildPromptInput } from "../../src/analyzer/build-prompt.js";
+import { AnalyzerTruncationError } from "../../src/analyzer/parse-response.js";
 
 function input(): BuildPromptInput {
   return {
@@ -107,6 +113,13 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.fallback).toBe(true);
     expect(r.retryCount).toBe(1);
     expect(r.fallbackReason).not.toBeNull();
+    // 固定分類文言(UI/DBに秘密が混入しない設計)の厳密表明。
+    expect(r.fallbackReason).toBe(FALLBACK_REASON_PARSE_ERROR);
+    // 診断用の生詳細(UI/DB非公開・ログ専用)は非空文字列で残ること。
+    expect(typeof r.diagnosticMessage).toBe("string");
+    expect(r.diagnosticMessage!.length).toBeGreaterThan(0);
+    expect(r.truncated).toBe(false);
+    expect(r.stopReason ?? null).toBeNull();
     expect(r.marksDropped).toBe(false); // 印と無関係な失敗(JSON破損)は従来どおりの全馬prior。
     expect(llm.complete).toHaveBeenCalledTimes(2);
     const h1 = r.horses.find((h) => h.umaban === 1)!;
@@ -140,6 +153,35 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.retryCount).toBe(1);
     expect(r.marksDropped).toBe(false); // 印と無関係な失敗(LLM例外)は従来どおりの全馬prior。
     expect(r.horses.find((h) => h.umaban === 1)!.adjustedProb).toBeCloseTo(0.4, 10);
+    // 固定分類文言(UI/DBに秘密が混入しない設計)の厳密表明。
+    expect(r.fallbackReason).toBe(FALLBACK_REASON_INVOCATION_ERROR);
+    expect(r.truncated).toBe(false);
+    expect(r.stopReason ?? null).toBeNull();
+    // 診断用の生詳細(UI/DB非公開・ログ専用)には元の例外メッセージがそのまま残ること。
+    expect(r.diagnosticMessage).toBe("常に失敗");
+  });
+
+  it("秘密混入テスト: LLM呼び出し例外のメッセージに秘密様の文字列が含まれても fallbackReason(UI/DB向け)には混入しないこと", async () => {
+    const secretLike = "sk-ant-FAKESECRET-do-not-leak-1234567890";
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new Error(`認証エラー: ${secretLike}`);
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    // UI/DB向けの fallbackReason は固定分類文言のみで、秘密様文字列を含まないこと。
+    expect(r.fallbackReason).toBe(FALLBACK_REASON_INVOCATION_ERROR);
+    expect(r.fallbackReason).not.toContain(secretLike);
+    // 診断用の生詳細(ログ専用・マスキングは main/logger.ts 側で行う)には残ってよい。
+    expect(r.diagnosticMessage).toContain(secretLike);
+  });
+
+  it("秘密混入テスト: JSONパース失敗時も fallbackReason(UI/DB向け)は固定分類文言のみであること", async () => {
+    // パースエラーメッセージ自体に秘密が混入することは通常無いが、固定文言であることを構造的に保証する。
+    const llm = fixedLlm("こわれ1", "こわれ2");
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallbackReason).toBe(FALLBACK_REASON_PARSE_ERROR);
   });
 
   it("±10%逸脱はクリップされ clipped が伝播すること", async () => {
@@ -189,6 +231,47 @@ describe("analyzeRace(1レース分の分析)", () => {
     const h1 = r.horses.find((h) => h.umaban === 1)!;
     expect(h1.adjustedProb).toBeCloseTo(0.45, 9);
     expect(h1.clipped).toBe(true);
+  });
+});
+
+describe("analyzeRace(応答の切り詰め検出・小倉記念18頭切り詰め事故の再発防止)", () => {
+  it("切り詰め(AnalyzerTruncationError)2回: fallback:true・固定分類文言・truncated:true・stopReason='max_tokens' で prior を採用すること", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new AnalyzerTruncationError("応答がmax_tokensで切り詰められました", "max_tokens");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.retryCount).toBe(1);
+    expect(llm.complete).toHaveBeenCalledTimes(2);
+    expect(r.fallbackReason).toBe(FALLBACK_REASON_TRUNCATED);
+    expect(r.truncated).toBe(true);
+    expect(r.stopReason).toBe("max_tokens");
+    expect(r.marksDropped).toBe(false);
+    expect(r.horses.every((h) => h.usedPrior)).toBe(true);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
+  });
+
+  it("切り詰め後のリトライで成功すれば通常成功として扱うこと(fallback:false)", async () => {
+    const llm: LlmClient = {
+      complete: vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce(
+          new AnalyzerTruncationError("応答がmax_tokensで切り詰められました", "max_tokens"),
+        )
+        .mockResolvedValueOnce(okBody),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.retryCount).toBe(1);
+    expect(r.fallbackReason).toBeNull();
+    expect(llm.complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("切り詰めは汎用のJSON解析失敗文言(FALLBACK_REASON_PARSE_ERROR)に埋もれないこと(先に判定)", () => {
+    // 切り詰め専用文言と汎用パース失敗文言が異なる(=判定順序の取り違えを防ぐ)ことを固定する。
+    expect(FALLBACK_REASON_TRUNCATED).not.toBe(FALLBACK_REASON_PARSE_ERROR);
   });
 });
 

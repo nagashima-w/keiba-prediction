@@ -23,6 +23,7 @@ import {
   LABEL_ADJUSTED_PROB,
   LABEL_PRIOR,
   llmCorrectionStatusText,
+  llmCorrectionTooltip,
   MARK_LEGEND,
   oddsStatusNote,
   raceHeading,
@@ -95,13 +96,10 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
     <div>
       <p
         style={{ margin: "0.25rem 0", color: "#555", fontSize: "0.85rem" }}
-        // marksDropped(印の制約違反による救済)のときだけ、詳細理由をtitleで補足する
-        // (fallbackとは違い確率補正自体は有効なため、主文言は簡潔にしつつ理由は必要なら参照できるようにする)。
-        title={
-          result.marksDropped === true && result.marksDroppedReason
-            ? result.marksDroppedReason
-            : undefined
-        }
+        // fallback(フェイルセーフでpriorに復帰)・marksDropped(印の制約違反による救済)の
+        // 詳細理由をtitleで補足する(論点C: fallbackReasonのUI伝播・2026-07-19合意)。
+        // 主文言(llmCorrectionStatusText)は簡潔にしつつ、理由は必要なら参照できるようにする。
+        title={llmCorrectionTooltip(result)}
       >
         LLM補正: {llmCorrectionStatusText(result)}
         {result.dateApproximate && (

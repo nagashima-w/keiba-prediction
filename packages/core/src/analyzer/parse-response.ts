@@ -77,6 +77,28 @@ export class AnalyzerResponseParseError extends Error {
 }
 
 /**
+ * LLM応答がAPI側のトークン上限(max_tokens)で切り詰められたことを表すエラー
+ * (小倉記念18頭切り詰め事故の再発防止・2026-07-19合意)。
+ * AnthropicLlmClient.complete()(anthropic-client.ts)が SDK レスポンスの
+ * stop_reason==="max_tokens" を検出した際に投げる。切り詰められた本文は
+ * JSON として不完全で信頼できないため、テキストをそのまま返さずこの例外を投げて
+ * analyze-race側のリトライ/フォールバック判定に委ねる。
+ * AnalyzerResponseParseError のサブクラスなので、既存の
+ * `instanceof AnalyzerResponseParseError` 判定・リトライ意味論(1回だけ同一プロンプトで
+ * リトライ)を壊さない。
+ */
+export class AnalyzerTruncationError extends AnalyzerResponseParseError {
+  /** 検出した生の stop_reason(現状は常に "max_tokens")。診断用に保持する。 */
+  readonly stopReason: string;
+
+  constructor(message: string, stopReason: string) {
+    super(message);
+    this.name = "AnalyzerTruncationError";
+    this.stopReason = stopReason;
+  }
+}
+
+/**
  * 予想印関連の違反(頭数制約・優先順位・未知の印文字の3種)を表すエラー(A: フォールバック分離)。
  * AnalyzerResponseParseError のサブクラスなので既存の `toThrow(AnalyzerResponseParseError)` は
  * 引き続き成立する。印以外は正常に計算できた確率補正(adjustedProb/clipped/reason/usedPrior)を
