@@ -10,9 +10,15 @@
  *
  * Task#22(予想印: ユーザー要望による同一LLM呼び出しでの印決定):
  *  - 各馬の mark(◎〇▲△☆注のいずれか、または印なしの null)を検証する。
- *  - 頭数制約: ◎・〇・▲はちょうど1頭ずつ、△は1〜3頭、☆・注は0〜1頭。
- *  - 未知の印文字列、または頭数制約違反は AnalyzerResponseParseError
- *    (analyze-race の既存リトライ1回→フォールバックに乗せる)。
+ *  - 頭数制約(2026-07-19合意のB-1で緩和後): ◎はちょうど1頭のみ必須。〇・▲は0〜1頭、
+ *    △は0〜3頭、☆・注は0〜1頭。加えて本線印(◎〇▲△)は gapless な優先順位を持ち、
+ *    ▲を付けるなら〇が1頭以上必要、△を付けるなら▲が1頭以上必要(詳細はファイル末尾の
+ *    「予想印の制約緩和(B-1)とフォールバック分離(A)」を参照)。
+ *  - 未知の印文字列、または頭数制約・優先順位の違反は、専用の AnalyzerMarkViolationError
+ *    (AnalyzerResponseParseError のサブクラス)で送出する。このエラーは印以外の確率補正
+ *    (adjustedProb/clipped/reason)を保持したまま全馬 mark=null にした horses を運び、
+ *    analyze-race 側がリトライしてもなお印関連違反ならその horses を採用して
+ *    fallback:false・marksDropped:true として救済する(prior には戻さない。A: フォールバック分離)。
  *  - mark がJSON上に完全に欠けている(旧形式の応答)場合、全馬 mark=null となり◎が0頭のため
  *    自動的に制約違反としてエラーになる(意図した挙動)。
  *  - priors に無い余分な馬番の mark は place_prob と同様に無視する(制約カウントに含めない)。
@@ -22,6 +28,25 @@
  *  - LLMが「〇」(U+3007 IDEOGRAPHIC NUMBER ZERO)の代わりに見た目の似た同形異字
  *    (○ U+25CB WHITE CIRCLE・◯ U+25EF LARGE CIRCLE)を出力した場合、既知の印として正規化して受理する。
  *    正規化後も PREDICTION_MARKS のいずれとも一致しなければ、従来どおり未知の印としてエラーにする。
+ *
+ * 予想印の制約緩和(B-1)とフォールバック分離(A)(2026-07-19合意):
+ *  - 頭数制約緩和: ◎はちょうど1頭のまま。〇・▲は0〜1頭、△は0〜3頭に緩和(☆・注は0〜1頭で不変)。
+ *  - 本線印(◎〇▲△)は gapless な優先順位を持つ: ▲を付けるなら〇が1頭以上必要、
+ *    △を付けるなら▲が1頭以上必要(結果として △≥1 ⇒ 〇≥1)。合法集合は
+ *    {◎}/{◎〇}/{◎〇▲}/{◎〇▲+△(1〜3)}のいずれか。☆・注は本線と独立(◎〇▲△の有無に
+ *    関わらず各0〜1頭)で、☆注間の順序依存もない。
+ *  - A(フォールバック分離): 印関連の違反(頭数・優先順位・未知の印文字の3種)は、確率補正
+ *    (adjustedProb/clipped/reason)自体は計算できているため捨てない。専用の
+ *    AnalyzerMarkViolationError で「確率補正は保持したまま全馬 mark=null にした horses」を運び、
+ *    analyze-race 側がリトライしてもなお印関連違反なら、その horses を fallback:false・
+ *    marksDropped:true として採用できるようにする(印と無関係な失敗は従来どおり汎用の
+ *    AnalyzerResponseParseError のみを投げ、全馬 prior フォールバックに回る)。
+ *  - 判定順序: 「有効な補正0件(全馬 usedPrior)」チェックは印関連チェックより必ず先に行う。
+ *    そのため、全馬の place_prob が不正な応答は、mark が違反していても印救済の対象にはならず、
+ *    従来どおり汎用のフォールバックに回る。
+ *  - 未知の印文字は、その馬1頭の判定を諦める(mark=null 扱い)だけで他馬の確率補正計算は継続し、
+ *    horses 配列全体を最後まで構築してから違反として例外を投げる(1頭の不正のために他馬の
+ *    確率補正まで失うことを防ぐ)。
  */
 
 /**
@@ -48,6 +73,28 @@ export class AnalyzerResponseParseError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AnalyzerResponseParseError";
+  }
+}
+
+/**
+ * 予想印関連の違反(頭数制約・優先順位・未知の印文字の3種)を表すエラー(A: フォールバック分離)。
+ * AnalyzerResponseParseError のサブクラスなので既存の `toThrow(AnalyzerResponseParseError)` は
+ * 引き続き成立する。印以外は正常に計算できた確率補正(adjustedProb/clipped/reason/usedPrior)を
+ * 失わないよう、全馬 mark=null にした horses をペイロードとして運ぶ。
+ * analyze-race 側は、リトライしてもなおこのエラーなら horses をそのまま採用し、
+ * fallback:false・marksDropped:true として返す(prior に戻さない)。
+ */
+export class AnalyzerMarkViolationError extends AnalyzerResponseParseError {
+  /**
+   * 印以外の確率補正を保持したまま全馬 mark=null にした horses(prior順)。
+   * ParseAnalyzerResult.horses と型を揃え(ParsedHorseResult[])、呼び出し側でキャスト不要にする。
+   */
+  readonly horses: ParsedHorseResult[];
+
+  constructor(message: string, horses: ParsedHorseResult[]) {
+    super(message);
+    this.name = "AnalyzerMarkViolationError";
+    this.horses = horses;
   }
 }
 
@@ -188,18 +235,25 @@ export function parseAnalyzerResponse(
     byNumber.set(num, typeof prob === "number" ? prob : NaN);
     const reason = rec["reason"];
     reasonByNumber.set(num, typeof reason === "string" ? reason : null);
-    // mark キー自体が無い場合(旧形式)は undefined のまま登録され、resolveMark で null 扱いになる。
+    // mark キー自体が無い場合(旧形式)は undefined のまま登録され、classifyMark で null 扱いになる。
     rawMarkByNumber.set(num, rec["mark"]);
   }
 
   let clippedCount = 0;
   let missingCount = 0;
+  // 未知の印文字が見つかった馬の説明文(A: 他馬の確率補正計算は止めず、最後にまとめて例外にする)。
+  const unknownMarkMessages: string[] = [];
 
   const horses: ParsedHorseResult[] = priors.map((p) => {
     const value = byNumber.get(p.umaban);
     // mark は priors に無い馬番のものを無視するため、ここ(priorsループ内)で初めて解決する。
-    // 未知の印文字列はここで AnalyzerResponseParseError を投げる。
-    const mark = resolveMark(rawMarkByNumber.get(p.umaban));
+    // 未知の印文字列は例外にせず mark=null 扱いにして、他馬の確率補正計算を継続する(A)。
+    const { mark, isUnknown } = classifyMark(rawMarkByNumber.get(p.umaban));
+    if (isUnknown) {
+      unknownMarkMessages.push(
+        `未知の予想印です(馬番${p.umaban}): ${JSON.stringify(rawMarkByNumber.get(p.umaban))}`,
+      );
+    }
 
     // 馬番欠け or 不正な place_prob → prior をそのまま採用。
     if (value === undefined || !Number.isFinite(value)) {
@@ -245,14 +299,30 @@ export function parseAnalyzerResponse(
 
   // 有効な補正が1件も無い(全馬 prior のまま)場合は、スキーマ妥当でも実質失敗とみなす。
   // 例: {"horses":[]} や余分な馬番のみ。analyzer 本体でリトライ→フォールバックに回すため例外にする。
+  // (L2: この判定は印関連の判定より必ず先に行う。全馬 prior のまま=確率補正を救済する意味が
+  //  無いため、mark 違反があっても AnalyzerMarkViolationError にはせず汎用エラーのみ投げる。)
   if (priors.length > 0 && horses.every((h) => h.usedPrior)) {
     throw new AnalyzerResponseParseError(
       "有効な補正が0件(全馬 prior のまま)でした",
     );
   }
 
-  // 予想印の頭数制約を検証(Task#22)。違反はリトライ→フォールバックに乗せるため例外にする。
-  validateMarkConstraints(horses);
+  // 予想印の頭数制約・優先順位・未知の印文字を検証する(B-1+A)。
+  // horses が空(priorsが空)の場合は印を割り当てる馬がいないため検証しない(従来どおり)。
+  // 3種いずれかの違反があれば、印以外の確率補正(adjustedProb/clipped/reason)は保持したまま
+  // 全馬 mark=null にした horses を AnalyzerMarkViolationError で運ぶ(捨てずにレスキューする)。
+  if (horses.length > 0) {
+    const counts = countMarks(horses);
+    const violations = [
+      ...unknownMarkMessages,
+      ...collectMarkCountViolations(counts),
+      ...collectMarkPriorityViolations(counts),
+    ];
+    if (violations.length > 0) {
+      const rescuedHorses = horses.map((h) => ({ ...h, mark: null }));
+      throw new AnalyzerMarkViolationError(violations.join("; "), rescuedHorses);
+    }
+  }
 
   return { horses, clippedCount, missingCount };
 }
@@ -272,49 +342,41 @@ function normalizeMarkChar(raw: string): string {
 }
 
 /**
- * 生の mark 値を PredictionMark | null に解決する。
- * null/undefined(キー欠落含む)は「印なし」として null。
- * 文字列は同形異字の正規化(Task#23)を経てから既知の6種と照合し、それでも一致しなければ
- * 未知の印として例外にする。
+ * 生の mark 値を PredictionMark | null に分類する(例外を投げない: A)。
+ * null/undefined(キー欠落含む)は「印なし」として isUnknown:false, mark:null。
+ * 文字列は同形異字の正規化(Task#23)を経てから既知の6種と照合し、一致すれば mark にセット。
+ * それ以外(既知6種と一致しない文字列・文字列以外の値)は isUnknown:true, mark:null とし、
+ * 呼び出し側(priors.map)で違反として集約させる(その馬1頭のためにmap全体を止めない)。
  */
-function resolveMark(raw: unknown): PredictionMark | null {
+function classifyMark(raw: unknown): { mark: PredictionMark | null; isUnknown: boolean } {
   if (raw === null || raw === undefined) {
-    return null;
+    return { mark: null, isUnknown: false };
   }
   if (typeof raw === "string") {
     const normalized = normalizeMarkChar(raw);
     if ((PREDICTION_MARKS as readonly string[]).includes(normalized)) {
-      return normalized as PredictionMark;
+      return { mark: normalized as PredictionMark, isUnknown: false };
     }
   }
-  throw new AnalyzerResponseParseError(
-    `未知の予想印です: ${JSON.stringify(raw)}`,
-  );
+  return { mark: null, isUnknown: true };
 }
 
-/** 予想印ごとの頭数制約(下限・上限とも含む)。 */
+/** 予想印ごとの頭数(下限・上限とも含む)。頭数制約緩和(B-1): ◎のみちょうど1頭が必須。 */
 const MARK_COUNT_RANGES: ReadonlyArray<{
   readonly mark: PredictionMark;
   readonly min: number;
   readonly max: number;
 }> = [
   { mark: "◎", min: 1, max: 1 },
-  { mark: "〇", min: 1, max: 1 },
-  { mark: "▲", min: 1, max: 1 },
-  { mark: "△", min: 1, max: 3 },
+  { mark: "〇", min: 0, max: 1 },
+  { mark: "▲", min: 0, max: 1 },
+  { mark: "△", min: 0, max: 3 },
   { mark: "☆", min: 0, max: 1 },
   { mark: "注", min: 0, max: 1 },
 ];
 
-/**
- * 予想印の頭数制約を検証する(Task#22)。
- * ◎・〇・▲はちょうど1頭ずつ、△は1〜3頭、☆・注は0〜1頭。違反時は AnalyzerResponseParseError。
- * priors が空(horses.length===0)の場合は印を割り当てる馬がいないため検証しない。
- */
-function validateMarkConstraints(horses: readonly ParsedHorseResult[]): void {
-  if (horses.length === 0) {
-    return;
-  }
+/** horses から予想印ごとの頭数を集計する。 */
+function countMarks(horses: readonly ParsedHorseResult[]): Record<PredictionMark, number> {
   const counts: Record<PredictionMark, number> = {
     "◎": 0,
     "〇": 0,
@@ -328,15 +390,45 @@ function validateMarkConstraints(horses: readonly ParsedHorseResult[]): void {
       counts[h.mark]++;
     }
   }
+  return counts;
+}
+
+/**
+ * 予想印の頭数制約(B-1で緩和後)を検証し、違反があれば理由文の配列を返す(例外は投げない)。
+ * horses が空の場合は印を割り当てる馬がいないため検証しない。
+ */
+function collectMarkCountViolations(counts: Record<PredictionMark, number>): string[] {
+  const violations: string[] = [];
   for (const { mark, min, max } of MARK_COUNT_RANGES) {
     const count = counts[mark];
     if (count < min || count > max) {
       const expected = min === max ? `ちょうど${min}頭` : `${min}〜${max}頭`;
-      throw new AnalyzerResponseParseError(
+      violations.push(
         `予想印${mark}は${expected}である必要がありますが${count}頭でした`,
       );
     }
   }
+  return violations;
+}
+
+/**
+ * 本線印(◎〇▲△)の gapless な優先順位を検証する。
+ * ▲を付けるなら〇が1頭以上必要、△を付けるなら▲が1頭以上必要(結果として △≥1 ⇒ 〇≥1)。
+ * ☆・注は本線と独立のため対象外。違反があれば理由文の配列を返す(例外は投げない)。
+ */
+function collectMarkPriorityViolations(counts: Record<PredictionMark, number>): string[] {
+  const violations: string[] = [];
+  if (counts["▲"] >= 1 && counts["〇"] < 1) {
+    violations.push(
+      "予想印▲を付けるには〇が1頭以上必要です(〇が0頭でした)",
+    );
+  }
+  if (counts["△"] >= 1 && counts["▲"] < 1) {
+    violations.push(
+      "予想印△を付けるには▲が1頭以上必要です(▲が0頭でした)",
+    );
+  }
+  return violations;
 }
 
 /** パース済みオブジェクトから horses 配列を取り出す(形不正は空配列扱い)。 */

@@ -267,6 +267,8 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(result.llmUsed).toBe(false);
     expect(result.llmSkippedReason).toBe("APIキー未設定");
     expect(result.fallback).toBe(false);
+    expect(result.marksDropped).toBe(false); // LLMスキップ時はA救済も発生しない。
+    expect(result.marksDroppedReason).toBeNull();
 
     expect(result.rows).toHaveLength(3);
     expect(result.rows.map((r) => r.umaban)).toEqual([1, 2, 3]);
@@ -873,6 +875,111 @@ describe("runAnalysis(分析パイプライン)", () => {
     // ため promptVersion は記録される(Task#27)。llmUsed に連動する仕様であり、fallback有無では
     // 変わらないことをここで固定する(code-reviewer指摘: 既存はresult.fallbackのみ検証していた)。
     expect(saved[0]!.promptVersion).toBe(PROMPT_VERSION);
+    // 印と無関係な失敗(JSON破損等)のフォールバックでは marksDropped は発生しない。
+    expect(result.marksDropped).toBe(false);
+    expect(result.marksDroppedReason).toBeNull();
+  });
+
+  describe("予想印の制約緩和後フォールバック分離(A: marksDropped伝播・2026-07-19合意)", () => {
+    it("通常成功(core側でmarksDropped未指定)は result.marksDropped=false になること", async () => {
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: "通常補正",
+            clipped: false,
+            usedPrior: false,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+          // marksDropped は core 側の型では optional のため、ここでは意図的に未指定にする。
+        }),
+      );
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze },
+        onProgress,
+      );
+      expect(result.fallback).toBe(false);
+      expect(result.marksDropped).toBe(false);
+      expect(result.marksDroppedReason).toBeNull();
+    });
+
+    it("印関連違反によるA救済(core側でfallback:false・marksDropped:true)を result にそのまま伝播すること", async () => {
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior + 0.05, // prior に戻さず、確率補正が有効なままであることを示す。
+            reason: "調教良化",
+            clipped: false,
+            usedPrior: false,
+            mark: null, // A救済では全馬 mark=null。
+          })),
+          fallback: false,
+          retryCount: 1,
+          fallbackReason: null,
+          marksDropped: true,
+          marksDroppedReason:
+            "印関連の制約違反のため2回目応答でも印を採用できず、確率補正のみ採用して印は全馬nullにしました",
+        }),
+      );
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze },
+        onProgress,
+      );
+      // fallback:false のまま(確率補正は有効)、marksDropped:true が伝播すること。
+      expect(result.fallback).toBe(false);
+      expect(result.marksDropped).toBe(true);
+      expect(result.marksDroppedReason).toBe(
+        "印関連の制約違反のため2回目応答でも印を採用できず、確率補正のみ採用して印は全馬nullにしました",
+      );
+      // 確率補正(prior+0.05)が反映され、prior に戻されていないこと。
+      const row1 = result.rows.find((r) => r.umaban === 1)!;
+      expect(row1.adjustedProb).toBeCloseTo(row1.prior + 0.05, 8);
+      // 全馬 mark=null が rows・保存レコードの双方に伝播すること。
+      expect(result.rows.every((r) => r.mark === null)).toBe(true);
+      expect(saved[0]!.horses.every((h) => h.mark === null)).toBe(true);
+    });
+
+    it("印関連違反によるA救済でも保存レコード(AnalysisRecord)には marksDropped を含めないこと(live専用、fallbackと同じ扱い)", async () => {
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: false,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 1,
+          fallbackReason: null,
+          marksDropped: true,
+          marksDroppedReason: "テスト理由",
+        }),
+      );
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze },
+        onProgress,
+      );
+      // fallback 同様、DB保存レコード(AnalysisRecord)には marksDropped 系のキーを持たせない
+      // (live結果〈AnalysisResult〉専用のシグナルとする)。
+      expect(saved[0]).not.toHaveProperty("marksDropped");
+      expect(saved[0]).not.toHaveProperty("marksDroppedReason");
+    });
   });
 });
 

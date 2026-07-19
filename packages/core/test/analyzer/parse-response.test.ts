@@ -7,16 +7,30 @@
  *  - 欠けた馬番は prior をそのまま使用(記録)
  *
  * Task#22(予想印): mark フィールドの検証を追加。
- *  - ◎・〇・▲はちょうど1頭ずつ、△は1〜3頭、☆・注は0〜1頭。違反は AnalyzerResponseParseError。
+ *  - ◎はちょうど1頭。〇・▲は0〜1頭、△は0〜3頭、☆・注は0〜1頭(頭数制約緩和B-1)。
+ *  - 本線印(◎〇▲△)は gapless な優先順位を持つ: ▲を付けるなら〇が1頭以上必要、
+ *    △を付けるなら▲が1頭以上必要(結果として △≥1 ⇒ 〇≥1)。合法集合は
+ *    {◎}/{◎〇}/{◎〇▲}/{◎〇▲+△(1〜3)}のいずれか。優先順位違反も AnalyzerResponseParseError。
+ *  - ☆・注は本線と独立(◎〇▲△の有無に関わらず各0〜1頭、☆注間の順序依存もなし)。
  *  - 未知の印文字列も AnalyzerResponseParseError。
  *  - mark がJSONに完全に欠けている(旧形式)場合は◎が0頭になり制約違反としてエラー。
+ *
+ * A(フォールバック分離・2026-07-19合意): 印関連の違反(頭数・優先順位・未知の印文字の3種)は、
+ * 確率補正(adjustedProb/clipped/reason)の計算自体は正常に完了しているため、それを捨てずに
+ * 専用エラー AnalyzerMarkViolationError で「確率補正は保持したまま全馬 mark=null にした結果」を
+ * 一緒に運ぶ(analyze-race側がリトライ後もこの違反ならその結果を採用する)。
+ * これに対し、印と無関係な失敗(JSON破損・horses配列なし・有効な補正0件)は従来どおり
+ * 汎用の AnalyzerResponseParseError のみを投げ、analyze-race側は全馬 prior フォールバックへ回す
+ * (この判定順序: 「有効な補正0件」チェックは印関連チェックより必ず先に行う)。
  */
 
 import { describe, expect, it } from "vitest";
 import {
+  AnalyzerMarkViolationError,
   AnalyzerResponseParseError,
   extractJsonObject,
   parseAnalyzerResponse,
+  type ParsedHorseResult,
   type PredictionMark,
   type PriorRef,
 } from "../../src/analyzer/parse-response.js";
@@ -256,59 +270,57 @@ describe("parseAnalyzerResponse(予想印 mark の検証・Task#22)", () => {
     expect(r.horses.filter((h) => h.mark === "〇")).toHaveLength(1);
   });
 
-  // 頭数制約違反のテーブル駆動テスト(境界値含む)。違反があれば必ず AnalyzerResponseParseError。
+  // 頭数制約違反のテーブル駆動テスト(境界値含む)。違反があれば必ず AnalyzerResponseParseError
+  // (頭数制約緩和B-1後、〇・▲・△単体の頭数違反として残るのは「下限を持つ上限超過」または
+  // 「◎の exactly 1」のみ。〇0頭・▲0頭は下限撤廃により単体では合法になったため、
+  // 代わりに△やその上位印との優先順位違反として throw する〈理由コメント更新〉)。
   const violationCases: ReadonlyArray<{
     label: string;
     priorsCount: number;
     marks: ReadonlyArray<PredictionMark | null | undefined>;
   }> = [
     {
-      label: "◎が0頭",
+      label: "◎が0頭(頭数違反: ◎はちょうど1頭が必須)",
       priorsCount: 6,
       marks: [null, "〇", "▲", "△", "☆", "注"],
     },
     {
-      label: "◎が2頭",
+      label: "◎が2頭(頭数違反: ◎はちょうど1頭が必須)",
       priorsCount: 6,
       marks: ["◎", "◎", "▲", "△", "☆", "注"],
     },
     {
-      label: "〇が0頭",
+      label: "〇が0頭かつ▲△あり(優先順位違反: ▲を付けるには〇が1頭以上必要)",
       priorsCount: 6,
       marks: ["◎", null, "▲", "△", "☆", "注"],
     },
     {
-      label: "〇が2頭",
+      label: "〇が2頭(頭数違反: 上限1を超える)",
       priorsCount: 6,
       marks: ["◎", "〇", "〇", "△", "☆", "注"],
     },
     {
-      label: "▲が0頭",
+      label: "▲が0頭かつ△あり(優先順位違反: △を付けるには▲が1頭以上必要)",
       priorsCount: 6,
       marks: ["◎", "〇", null, "△", "☆", "注"],
     },
     {
-      label: "▲が2頭",
+      label: "▲が2頭(頭数違反: 上限1を超える)",
       priorsCount: 6,
       marks: ["◎", "〇", "▲", "▲", "☆", "注"],
     },
     {
-      label: "△が0頭(境界: 下限1に満たない)",
-      priorsCount: 6,
-      marks: ["◎", "〇", "▲", null, "☆", "注"],
-    },
-    {
-      label: "△が4頭(境界: 上限3を超える)",
+      label: "△が4頭(境界: 上限3を超える頭数違反)",
       priorsCount: 7,
       marks: ["◎", "〇", "▲", "△", "△", "△", "△"],
     },
     {
-      label: "☆が2頭(境界: 上限1を超える)",
+      label: "☆が2頭(境界: 上限1を超える頭数違反)",
       priorsCount: 6,
       marks: ["◎", "〇", "▲", "△", "☆", "☆"],
     },
     {
-      label: "注が2頭(境界: 上限1を超える)",
+      label: "注が2頭(境界: 上限1を超える頭数違反)",
       priorsCount: 6,
       marks: ["◎", "〇", "▲", "△", "注", "注"],
     },
@@ -324,6 +336,29 @@ describe("parseAnalyzerResponse(予想印 mark の検証・Task#22)", () => {
     ).toThrow(AnalyzerResponseParseError);
   });
 
+  // 本線印(◎〇▲△)の gapless 優先順位の違反テーブル(頭数は境界内でも順序が飛んでいれば違反)。
+  const priorityViolationCases: ReadonlyArray<{
+    label: string;
+    marks: ReadonlyArray<PredictionMark | null | undefined>;
+  }> = [
+    {
+      label: "{◎▲}: 〇を飛ばして▲のみ付与",
+      marks: ["◎", null, "▲", null, null, null],
+    },
+    {
+      label: "{◎〇△}: ▲を飛ばして△のみ付与",
+      marks: ["◎", "〇", null, "△", null, null],
+    },
+  ];
+  it.each(priorityViolationCases)(
+    "$label は優先順位違反として AnalyzerResponseParseError",
+    ({ marks }) => {
+      expect(() => parseAnalyzerResponse(markBody(marks), priorsN(6))).toThrow(
+        AnalyzerResponseParseError,
+      );
+    },
+  );
+
   it("未知の印文字列は AnalyzerResponseParseError を投げること", () => {
     const text = JSON.stringify({
       horses: [
@@ -337,8 +372,9 @@ describe("parseAnalyzerResponse(予想印 mark の検証・Task#22)", () => {
   });
 
   it("priorsに無い余分な馬番のmarkは無視され、制約カウントに含まれないこと", () => {
-    // 実質2頭(◎〇のみ必須が満たせない)だが、余分な馬番(99)の印は無視されるため
-    // 全体の制約違反(◎〇▲が各1頭に満たない)としてエラーになる。
+    // 実質2頭(◎〇のみで▲△の優先順位を満たせない状態ではない)が、
+    // 余分な馬番(99)の▲は無視されるため◎〇のみの状態になり、本線としては合法
+    // (△を付けていないため優先順位違反にもならない)→ここでは例外にならないことを確認する。
     const text = JSON.stringify({
       horses: [
         { number: 1, place_prob: 0.4, reason: "x", mark: "◎" },
@@ -346,7 +382,93 @@ describe("parseAnalyzerResponse(予想印 mark の検証・Task#22)", () => {
         { number: 99, place_prob: 0.5, reason: "存在しない", mark: "▲" },
       ],
     });
+    expect(() => parseAnalyzerResponse(text, priors)).not.toThrow();
+  });
+
+  it("priorsに無い余分な馬番の▲が無視された結果、本線の優先順位違反になる場合は例外を投げること", () => {
+    // 馬番1,2の印は◎〇だが、馬番99(priorsに無い)の△は無視される。
+    // 結果、本線は{◎〇}のみで△は実質0頭 → 単体では合法だが、
+    // ここでは馬番2をnullにして〇0頭のまま▲を付けた状態を作り、優先順位違反を明示的に確認する。
+    const text = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.4, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.2, reason: "y", mark: "▲" },
+        { number: 99, place_prob: 0.5, reason: "存在しない", mark: "〇" },
+      ],
+    });
     expect(() => parseAnalyzerResponse(text, priors)).toThrow(
+      AnalyzerResponseParseError,
+    );
+  });
+});
+
+describe("parseAnalyzerResponse(予想印: 頭数制約緩和後の正常系・優先順位・☆注独立/Task#B-1)", () => {
+  /** umaban 1..n の PriorRef を作る(place_prob=prior=0.3固定でクリップ・欠け判定に影響させない)。 */
+  function priorsN(n: number): PriorRef[] {
+    return Array.from({ length: n }, (_, i) => ({ umaban: i + 1, prior: 0.3 }));
+  }
+
+  function markBody(
+    marks: ReadonlyArray<PredictionMark | null | undefined>,
+  ): string {
+    const horses = marks.map((m, i) => ({
+      number: i + 1,
+      place_prob: 0.3,
+      reason: "x",
+      mark: m,
+    }));
+    return JSON.stringify({ horses });
+  }
+
+  // 本線印(◎〇▲△)の合法4集合。gapless優先順位さえ満たせば頭数下限は撤廃されているため通ること。
+  const legalMainLineCases: ReadonlyArray<{
+    label: string;
+    marks: ReadonlyArray<PredictionMark | null | undefined>;
+  }> = [
+    { label: "{◎}のみ", marks: ["◎", null, null, null, null, null] },
+    { label: "{◎〇}", marks: ["◎", "〇", null, null, null, null] },
+    { label: "{◎〇▲}", marks: ["◎", "〇", "▲", null, null, null] },
+    {
+      label: "{◎〇▲+△1頭}",
+      marks: ["◎", "〇", "▲", "△", null, null],
+    },
+    {
+      label: "{◎〇▲+△3頭}(上限3頭ちょうど)",
+      marks: ["◎", "〇", "▲", "△", "△", "△"],
+    },
+  ];
+  it.each(legalMainLineCases)("$label は合法(例外を投げない)", ({ marks }) => {
+    const r = parseAnalyzerResponse(markBody(marks), priorsN(6));
+    expect(r.horses.find((h) => h.umaban === 1)!.mark).toBe("◎");
+  });
+
+  // ☆・注は本線(◎〇▲△)と独立し、☆注間の順序依存もない(各0〜1頭)。
+  const independentStarNoteCases: ReadonlyArray<{
+    label: string;
+    marks: ReadonlyArray<PredictionMark | null | undefined>;
+  }> = [
+    { label: "☆のみ(注なし)", marks: ["◎", null, null, null, "☆", null] },
+    { label: "注のみ(☆なし)", marks: ["◎", null, null, null, null, "注"] },
+    { label: "☆と注の両方", marks: ["◎", null, null, null, "☆", "注"] },
+    { label: "☆も注もなし", marks: ["◎", null, null, null, null, null] },
+  ];
+  it.each(independentStarNoteCases)(
+    "$label は合法(本線の印の有無と無関係に成立)",
+    ({ marks }) => {
+      expect(() => parseAnalyzerResponse(markBody(marks), priorsN(6))).not.toThrow();
+    },
+  );
+
+  it("◎が欠けていれば☆・注があっても違反になること(☆・注は◎の必須制約を免除しない)", () => {
+    const marks: Array<PredictionMark | null> = [
+      null,
+      null,
+      null,
+      null,
+      "☆",
+      "注",
+    ];
+    expect(() => parseAnalyzerResponse(markBody(marks), priorsN(6))).toThrow(
       AnalyzerResponseParseError,
     );
   });
@@ -388,5 +510,95 @@ describe("parseAnalyzerResponse(予想印 mark の同形異字正規化・Task#2
     expect(() => parseAnalyzerResponse(text, priorsN(4))).toThrow(
       AnalyzerResponseParseError,
     );
+  });
+});
+
+describe("parseAnalyzerResponse(A: 印関連違反時のフォールバック分離・確率補正のレスキュー)", () => {
+  /** umaban 1..n の PriorRef を作る(prior=0.3固定)。 */
+  function priorsN(n: number): PriorRef[] {
+    return Array.from({ length: n }, (_, i) => ({ umaban: i + 1, prior: 0.3 }));
+  }
+
+  /** 印以外は正常な確率補正を持つ horses から、AnalyzerMarkViolationError を捕捉して返す。 */
+  function captureMarkViolation(text: string, priors: PriorRef[]): AnalyzerMarkViolationError {
+    try {
+      parseAnalyzerResponse(text, priors);
+    } catch (e) {
+      expect(e).toBeInstanceOf(AnalyzerMarkViolationError);
+      return e as AnalyzerMarkViolationError;
+    }
+    throw new Error("AnalyzerMarkViolationError が投げられませんでした");
+  }
+
+  it("頭数違反(◎が2頭)でもA救済: 確率補正(adjustedProb/reason)を保持し全馬mark=nullでエラーを投げること", () => {
+    const text = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.35, reason: "根拠1", mark: "◎" },
+        { number: 2, place_prob: 0.25, reason: "根拠2", mark: "◎" }, // ◎が2頭で頭数違反。
+        { number: 3, place_prob: 0.3, reason: "根拠3", mark: "▲" },
+        { number: 4, place_prob: 0.3, reason: "根拠4", mark: "△" },
+      ],
+    });
+    const err = captureMarkViolation(text, priorsN(4));
+    expect(err.horses.every((h: ParsedHorseResult) => h.mark === null)).toBe(true);
+    const h1 = err.horses.find((h: ParsedHorseResult) => h.umaban === 1)!;
+    expect(h1.adjustedProb).toBeCloseTo(0.35, 10); // priorに戻さずクリップ済み補正値を保持。
+    expect(h1.clipped).toBe(false);
+    expect(h1.usedPrior).toBe(false);
+    expect(h1.reason).toBe("根拠1");
+  });
+
+  it("優先順位違反(〇を飛ばして▲のみ)でもA救済: 確率補正を保持し全馬mark=nullでエラーを投げること", () => {
+    const text = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.32, reason: "根拠1", mark: "◎" },
+        { number: 2, place_prob: 0.28, reason: "根拠2", mark: "▲" }, // 〇を飛ばして▲→優先順位違反。
+        { number: 3, place_prob: 0.3, reason: "根拠3", mark: null },
+        { number: 4, place_prob: 0.3, reason: "根拠4", mark: null },
+      ],
+    });
+    const err = captureMarkViolation(text, priorsN(4));
+    expect(err.horses.every((h: ParsedHorseResult) => h.mark === null)).toBe(true);
+    const h2 = err.horses.find((h: ParsedHorseResult) => h.umaban === 2)!;
+    expect(h2.adjustedProb).toBeCloseTo(0.28, 10);
+    expect(h2.reason).toBe("根拠2");
+  });
+
+  it("未知の印文字でもA救済: 該当馬を含め全馬の確率補正を保持し全馬mark=nullでエラーを投げること", () => {
+    const text = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.33, reason: "根拠1", mark: "◎" },
+        { number: 2, place_prob: 0.27, reason: "根拠2", mark: "◇" }, // 未知の印文字。
+        { number: 3, place_prob: 0.3, reason: "根拠3", mark: "▲" },
+        { number: 4, place_prob: 0.3, reason: "根拠4", mark: "△" },
+      ],
+    });
+    const err = captureMarkViolation(text, priorsN(4));
+    expect(err.horses.every((h: ParsedHorseResult) => h.mark === null)).toBe(true);
+    // 未知の印を付けられた馬自身の確率補正も、他馬の計算継続に巻き込まれず保持されること。
+    const h2 = err.horses.find((h: ParsedHorseResult) => h.umaban === 2)!;
+    expect(h2.adjustedProb).toBeCloseTo(0.27, 10);
+    expect(h2.reason).toBe("根拠2");
+    expect(h2.usedPrior).toBe(false);
+  });
+
+  it("有効な補正0件(全馬prior採用)が優先: 印違反があっても AnalyzerMarkViolationError にはならないこと(L2の判定順序)", () => {
+    // 全馬 place_prob が不正(prior採用)の場合、mark重複違反(◎が2頭)があっても
+    // 「有効な補正0件」チェックが先に働き、汎用の AnalyzerResponseParseError を投げる
+    // (AnalyzerMarkViolationError ではない = マーク救済の対象にしない)。
+    const text = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: "たかい", reason: "x", mark: "◎" },
+        { number: 2, place_prob: "たかい", reason: "y", mark: "◎" },
+      ],
+    });
+    let caught: unknown;
+    try {
+      parseAnalyzerResponse(text, priorsN(2));
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(AnalyzerResponseParseError);
+    expect(caught).not.toBeInstanceOf(AnalyzerMarkViolationError);
   });
 });

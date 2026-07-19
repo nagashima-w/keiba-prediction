@@ -22,6 +22,7 @@ import {
   isHighlightRow,
   LABEL_ADJUSTED_PROB,
   LABEL_PRIOR,
+  llmCorrectionStatusText,
   MARK_LEGEND,
   oddsStatusNote,
   raceHeading,
@@ -92,13 +93,17 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
   const { result } = props;
   return (
     <div>
-      <p style={{ margin: "0.25rem 0", color: "#555", fontSize: "0.85rem" }}>
-        LLM補正:{" "}
-        {result.llmUsed
-          ? result.fallback
-            ? "実行(フェイルセーフで3着内率に復帰)"
-            : "実行"
-          : `スキップ(${result.llmSkippedReason ?? "理由不明"})`}
+      <p
+        style={{ margin: "0.25rem 0", color: "#555", fontSize: "0.85rem" }}
+        // marksDropped(印の制約違反による救済)のときだけ、詳細理由をtitleで補足する
+        // (fallbackとは違い確率補正自体は有効なため、主文言は簡潔にしつつ理由は必要なら参照できるようにする)。
+        title={
+          result.marksDropped === true && result.marksDroppedReason
+            ? result.marksDroppedReason
+            : undefined
+        }
+      >
+        LLM補正: {llmCorrectionStatusText(result)}
         {result.dateApproximate && (
           <span style={{ color: "#a60", marginLeft: "0.5rem" }}>
             ※開催日は当日日付での近似({result.date})

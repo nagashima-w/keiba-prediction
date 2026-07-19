@@ -290,6 +290,7 @@ export {
   type PromptOikiri,
 } from "./analyzer/build-prompt.js";
 export {
+  AnalyzerMarkViolationError,
   AnalyzerResponseParseError,
   extractJsonObject,
   MAX_ADJUST,
