@@ -7,6 +7,7 @@
 
 import type {
   AnalysisRow,
+  ConditionChangeTagView,
   OddsStatus,
   PredictionMark,
 } from "../shared/analysis-types.js";
@@ -67,6 +68,18 @@ export const MARK_LEGEND =
 /** EVプラス行(ハイライト対象)かどうか。 */
 export function isHighlightRow(row: AnalysisRow): boolean {
   return row.isPositive;
+}
+
+/**
+ * 条件替わり(妙味材料)タグを表示用テキストに整形する(「・」区切り)。
+ * タグが無い(空配列)場合は空文字を返す。UIはこれを利用して、タグが無いときは
+ * バッジ等のノイズを一切出さず、既存の表示のままにする(タグの並び順は呼び出し側
+ * 〈core computeConditionChangeTags〉がサーフェス→距離→開催の固定順で渡す前提)。
+ */
+export function formatConditionChangeTags(
+  tags: readonly ConditionChangeTagView[],
+): string {
+  return tags.map((t) => t.label).join("・");
 }
 
 /**

@@ -36,6 +36,23 @@ export type PredictionMark = "◎" | "〇" | "▲" | "△" | "☆" | "注";
  */
 export type OddsStatus = "result" | "middle" | "yoso";
 
+/**
+ * 条件替わり(妙味材料)タグの種別(core ConditionChangeTagKind のプレーン写し)。
+ * サーフェス替わり/距離延長・短縮/中央⇄地方替わりの3種。表示順(サーフェス→距離→開催)と対応する。
+ */
+export type ConditionChangeTagKind = "surface" | "distance" | "venue";
+
+/**
+ * 条件替わり(妙味材料)タグ1件(表示用。core ConditionChangeTag のプレーン写し)。
+ * 例: {kind:"surface", label:"ダ替わり(前走芝)"}。
+ */
+export interface ConditionChangeTagView {
+  /** タグ種別。 */
+  readonly kind: ConditionChangeTagKind;
+  /** 表示テキスト。 */
+  readonly label: string;
+}
+
 /** 進捗イベント(main→renderer に webContents.send で通知)。 */
 export interface AnalysisProgress {
   /** 現在の段階。 */
@@ -88,6 +105,12 @@ export interface AnalysisRow {
    * 同一レース内の全行で同じ値になる。
    */
   readonly evEstimated: boolean;
+  /**
+   * 条件替わり(妙味材料)タグ(サーフェス→距離→開催の固定順)。該当なしは空配列。
+   * core computeConditionChangeTags(analyzer/condition-change.ts)の算出結果をそのまま写す。
+   * DBには保存しない(ライブ分析結果からのみ導出する派生表示データ)。
+   */
+  readonly conditionChangeTags: readonly ConditionChangeTagView[];
 }
 
 /** 1レース分の分析結果。 */

@@ -280,6 +280,15 @@ export {
   type RunLegStyleDetail,
 } from "./analyzer/leg-style.js";
 export {
+  computeConditionChangeTags,
+  DISTANCE_CHANGE_LOOKBACK_RUNS,
+  DISTANCE_CHANGE_THRESHOLD_METERS,
+  type ConditionChangeInput,
+  type ConditionChangeRun,
+  type ConditionChangeTag,
+  type ConditionChangeTagKind,
+} from "./analyzer/condition-change.js";
+export {
   buildPrompt,
   buildPromptPreview,
   computeReferenceEv,

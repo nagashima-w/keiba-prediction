@@ -12,6 +12,7 @@ import {
   summarizeBatch,
 } from "./batch-summary.js";
 import {
+  formatConditionChangeTags,
   formatEstimatedEvSuffix,
   formatEv,
   formatMark,
@@ -300,6 +301,20 @@ export function BatchAnalysisView(
                           {op.bestPick !== null
                             ? `${op.bestPick.umaban}番 ${op.bestPick.horseName}`
                             : "-"}
+                          {/* 筆頭候補馬の条件替わり(妙味材料)タグ。タグが無ければ何も表示しない
+                              (raceId+umabanで自身のタグを引く。空バッジ等のノイズを出さない)。 */}
+                          {formatConditionChangeTags(r.bestPickConditionChangeTags) !==
+                            "" && (
+                            <span
+                              style={{
+                                color: "#0a58ca",
+                                marginLeft: "0.4rem",
+                                fontSize: "0.8rem",
+                              }}
+                            >
+                              {formatConditionChangeTags(r.bestPickConditionChangeTags)}
+                            </span>
+                          )}
                         </td>
                         <td style={{ ...tdStyle, fontSize: "0.8rem" }}>
                           {(() => {
@@ -395,6 +410,7 @@ export function BatchAnalysisView(
                         </th>
                         <th style={thStyle}>複勝下限</th>
                         <th style={thStyle}>EV</th>
+                        <th style={thStyle}>条件替わり</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -438,6 +454,9 @@ export function BatchAnalysisView(
                                 {formatEstimatedEvSuffix(horse.evEstimated)}
                               </span>
                             )}
+                          </td>
+                          <td style={{ ...tdStyle, fontSize: "0.85rem" }}>
+                            {formatConditionChangeTags(horse.conditionChangeTags)}
                           </td>
                         </tr>
                       ))}

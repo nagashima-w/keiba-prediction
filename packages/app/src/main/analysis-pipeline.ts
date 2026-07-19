@@ -40,6 +40,7 @@ import {
   buildPriorInput,
   classifyRotationInterval,
   classifyTrackWetness,
+  computeConditionChangeTags,
   computeEstimatedRaceEv,
   computeFieldPriors,
   computeRaceEv,
@@ -52,6 +53,7 @@ import {
   type AnalysisRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
+  type ConditionChangeRun,
   type EstimatedPlaceConfig,
   type EvConfig,
   type HorsePrior,
@@ -171,6 +173,22 @@ function restIntervalOf(
 }
 
 /**
+ * 戦績(新しい順)から条件替わり(妙味材料)判定用の ConditionChangeRun 配列を作る。
+ * courseType/distance/venueKind をそのまま写すだけの薄いマッピング(条件替わりタグの実際の判定は
+ * core computeConditionChangeTags が行う)。戦績が取得できなかった(results=null/undefined)馬は
+ * 空配列を返し、新馬相当(全タグなし)として扱う(computeConditionChangeTags側の仕様どおり)。
+ */
+function conditionChangeRunsOf(
+  results: readonly HorseRaceResult[] | null | undefined,
+): ConditionChangeRun[] {
+  return (results ?? []).map((r) => ({
+    courseType: r.courseType,
+    distance: r.distance,
+    venueKind: r.venueKind,
+  }));
+}
+
+/**
  * 1レースを分析する。
  * @param raceId 対象レースID(検証済み)
  * @param kaisaiDate 選択済み開催日(YYYYMMDD)。null の場合のみ当日日付で近似する。
@@ -286,6 +304,8 @@ export async function runAnalysis(
         venueName,
         weather: race.race.weather ?? null,
         trackCondition: race.race.trackCondition ?? null,
+        // 条件替わり(妙味材料)の中央⇄地方替わり判定に使う(build-prompt.ts computeConditionChangeTags)。
+        venueKind,
       },
       horses: race.horses.map((horseData) => {
         const umaban = horseData.shutuba.umaban;
@@ -312,6 +332,8 @@ export async function runAnalysis(
             pace: r.pace,
             last3f: r.last3f,
           })),
+          // 条件替わり(妙味材料)判定用の過去走条件(既存runsとは別配列。互いに影響しない)。
+          runConditions: conditionChangeRunsOf(horseData.results),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),
           winOdds,
@@ -445,6 +467,15 @@ export async function runAnalysis(
         careerRunCount: h.results === null ? null : h.results.length,
         mark: adjusted.mark,
         evEstimated,
+        // 条件替わり(妙味材料)。promptInput.horses[].runConditions と同一の元データ
+        // (race.race.courseType/distance・venueKind・h.results)から算出するため、
+        // LLM分析を使った場合のプロンプト行(【出走馬】の「条件替わり=」)と必ず一致する。
+        conditionChangeTags: computeConditionChangeTags({
+          currentCourseType: race.race.courseType,
+          currentDistance: race.race.distance,
+          currentVenueKind: venueKind,
+          pastRuns: conditionChangeRunsOf(h.results),
+        }),
       };
     })
     .sort((a, b) => a.umaban - b.umaban);

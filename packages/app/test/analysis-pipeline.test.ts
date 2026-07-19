@@ -1,6 +1,7 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
   buildPriorInput,
+  buildPrompt,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
@@ -31,11 +32,21 @@ vi.mock("@keiba/core", async (importOriginal) => {
 
 // ---- テスト用フェイクデータ組み立て ----------------------------------------
 
-/** テスト用の全戦績1走分を作る(指定した日付・通過順以外は空。pace/last3fは省略時null)。 */
+/**
+ * テスト用の全戦績1走分を作る(指定した日付・通過順以外は空。pace/last3fは省略時null)。
+ * courseType/distance/venueKind を extra 経由で上書きできる(条件替わりの配線テスト用。
+ * 省略時は従来どおり courseType=null, distance=null, venueKind="中央" のまま=既存回帰は無変更)。
+ */
 function fakeResult(
   date: string,
   passing: number[] = [],
-  extra: { pace?: string | null; last3f?: number | null } = {},
+  extra: {
+    pace?: string | null;
+    last3f?: number | null;
+    courseType?: HorseRaceResult["courseType"];
+    distance?: number | null;
+    venueKind?: HorseRaceResult["venueKind"];
+  } = {},
 ): HorseRaceResult {
   return {
     date,
@@ -45,7 +56,7 @@ function fakeResult(
     raceName: null,
     raceId: null,
     raceIdRaw: null,
-    venueKind: "中央",
+    venueKind: extra.venueKind ?? "中央",
     entryCount: 12,
     wakuban: null,
     umaban: null,
@@ -55,8 +66,8 @@ function fakeResult(
     jockeyName: null,
     jockeyId: null,
     kinryo: null,
-    courseType: null,
-    distance: null,
+    courseType: extra.courseType ?? null,
+    distance: extra.distance ?? null,
     trackCondition: null,
     time: null,
     margin: null,
@@ -530,6 +541,116 @@ describe("runAnalysis(分析パイプライン)", () => {
       onProgress,
     );
     expect(saved[0]!.promptVersion).toBe(PROMPT_VERSION);
+  });
+
+  describe("条件替わり(妙味材料)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(追加指示テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("BuildPromptInput.race.venueKind と各馬の runConditions が実際に populate されること(optional省略で黙って劣化しないことの担保)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/01", [1, 1], {
+                courseType: "ダ",
+                distance: 2000,
+                venueKind: "地方",
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      // RACE_ID(場コード05・東京)は中央のレースのため venueKind は "central" になる。
+      expect(captured.value!.race.venueKind).toBe("central");
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.runConditions).toEqual([
+        { courseType: "ダ", distance: 2000, venueKind: "地方" },
+      ]);
+    });
+
+    it("runConditions未指定(戦績なし)の馬は空配列になり、条件替わりタグが全て「なし」になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      for (const h of captured.value!.horses) {
+        expect(h.runConditions).toEqual([]);
+      }
+    });
+
+    it("プロンプト行の『条件替わり=』とAnalysisRow.conditionChangeTagsが同一馬で一致すること(同一ソースデータを2箇所に配線する事故防止)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/01", [1, 1], {
+                courseType: "ダ",
+                distance: 2000,
+                venueKind: "地方",
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      // このレース条件(芝1600・中央)+馬1の過去走(ダ2000・地方)なら、
+      // サーフェス(初芝: 芝経験0)・距離短縮(平均比-400m)・開催(地方→中央)の3タグが立つ想定。
+      const row1 = result.rows.find((r) => r.umaban === 1)!;
+      expect(row1.conditionChangeTags).toEqual([
+        { kind: "surface", label: "初芝" },
+        { kind: "distance", label: "距離短縮(平均比-400m)" },
+        { kind: "venue", label: "地方→中央" },
+      ]);
+
+      // buildPrompt が実際に組み立てるプロンプト本文でも、同じ馬番の行に同じラベル列(・区切り)が
+      // 現れることを確認する(pipeline側とbuild-prompt側の2箇所呼び出しがずれていないことの担保)。
+      const promptText = buildPrompt(captured.value!);
+      const horse1Line = promptText
+        .split("\n")
+        .find((line) => line.startsWith("馬番1 "))!;
+      const expectedTagsText = row1.conditionChangeTags
+        .map((t) => t.label)
+        .join("・");
+      expect(horse1Line).toContain(`条件替わり=${expectedTagsText}`);
+    });
   });
 
   describe("追加指示(additionalInstruction)の配線(Task#28 プロンプト改善C)", () => {
