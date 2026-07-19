@@ -535,3 +535,97 @@ describe("buildRaceDevelopment(展開想定の構造化)", () => {
     expect(d.paceReason).toContain("1");
   });
 });
+
+describe("buildRaceDevelopment(地方/コース形態の有利脚質補正)", () => {
+  // pace(想定ペース)は styleCounts.逃げ の頭数のみで決まる(paceEstimateFromFrontRunnerCount)。
+  // スロー=逃げ0頭・平均=逃げ1頭・ハイ=逃げ2頭以上、となる最小構成を用意する。
+  const slowHorses: RaceDevelopmentHorseInput[] = [
+    { umaban: 1, style: "先行", stability: "安定", frontRunningScore: 0.2 },
+  ];
+  const mediumHorses: RaceDevelopmentHorseInput[] = [
+    { umaban: 1, style: "逃げ", stability: "安定", frontRunningScore: 0.1 },
+  ];
+  const highHorses: RaceDevelopmentHorseInput[] = [
+    { umaban: 1, style: "逃げ", stability: "安定", frontRunningScore: 0.05 },
+    { umaban: 2, style: "逃げ", stability: "安定", frontRunningScore: 0.1 },
+  ];
+
+  it("venueKind省略(第3引数なし)は従来表のまま(後方互換)", () => {
+    const d = buildRaceDevelopment(highHorses);
+    expect(d.favoredStyles).toEqual(["差し", "追込"]);
+    expect(d.disfavoredStyles).toEqual(["逃げ"]);
+  });
+
+  it("venueKind=undefinedを明示しても従来表のまま(trackConditionを渡しても中央には不良ルール非適用)", () => {
+    const d = buildRaceDevelopment(highHorses, undefined, "不良");
+    expect(d.favoredStyles).toEqual(["差し", "追込"]);
+    expect(d.disfavoredStyles).toEqual(["逃げ"]);
+  });
+
+  it("中央(central)は馬場不良でも従来表のまま(不良ルールは地方専用で中央には非適用)", () => {
+    const d = buildRaceDevelopment(highHorses, "central", "不良");
+    expect(d.favoredStyles).toEqual(["差し", "追込"]);
+    expect(d.disfavoredStyles).toEqual(["逃げ"]);
+  });
+
+  it.each([
+    { label: "スロー", horses: slowHorses, favored: ["逃げ", "先行"], disfavored: ["追込"] },
+    { label: "平均", horses: mediumHorses, favored: ["逃げ", "先行"], disfavored: ["追込"] },
+    {
+      label: "ハイ",
+      horses: highHorses,
+      favored: ["逃げ", "先行", "差し"],
+      disfavored: ["追込"],
+    },
+  ])(
+    "地方(nar)・通常馬場(良)の$labelペースは有利=$favored/不利=$disfavored になること(ハイでも逃げは不利に入らない)",
+    ({ horses, favored, disfavored }) => {
+      const d = buildRaceDevelopment(horses, "nar", "良");
+      expect(d.favoredStyles).toEqual(favored);
+      expect(d.disfavoredStyles).toEqual(disfavored);
+    },
+  );
+
+  it.each([
+    { label: "スロー", horses: slowHorses },
+    { label: "平均", horses: mediumHorses },
+    { label: "ハイ", horses: highHorses },
+  ])(
+    "地方(nar)・馬場不良の$labelペースは全ペースで有利=逃げ・先行/不利=差し・追込になること(ハイでも差しが不利)",
+    ({ horses }) => {
+      const d = buildRaceDevelopment(horses, "nar", "不良");
+      expect(d.favoredStyles).toEqual(["逃げ", "先行"]);
+      expect(d.disfavoredStyles).toEqual(["差し", "追込"]);
+    },
+  );
+
+  it.each(["不良", "不"])(
+    "地方(nar)・馬場状態の表記ゆれ(%s)でも不良として同一挙動になること",
+    (trackCondition) => {
+      const d = buildRaceDevelopment(mediumHorses, "nar", trackCondition);
+      expect(d.favoredStyles).toEqual(["逃げ", "先行"]);
+      expect(d.disfavoredStyles).toEqual(["差し", "追込"]);
+    },
+  );
+
+  it("地方(nar)でtrackCondition=nullは通常馬場表になること(不良ルール非適用)", () => {
+    const d = buildRaceDevelopment(mediumHorses, "nar", null);
+    expect(d.favoredStyles).toEqual(["逃げ", "先行"]);
+    expect(d.disfavoredStyles).toEqual(["追込"]);
+  });
+
+  it("地方(nar)でtrackCondition省略(第3引数なし)も通常馬場表になること", () => {
+    const d = buildRaceDevelopment(mediumHorses, "nar");
+    expect(d.favoredStyles).toEqual(["逃げ", "先行"]);
+    expect(d.disfavoredStyles).toEqual(["追込"]);
+  });
+
+  it.each(["稍重", "重", "良"])(
+    "地方(nar)・馬場状態=%sは不良ではないため通常馬場表になること",
+    (trackCondition) => {
+      const d = buildRaceDevelopment(mediumHorses, "nar", trackCondition);
+      expect(d.favoredStyles).toEqual(["逃げ", "先行"]);
+      expect(d.disfavoredStyles).toEqual(["追込"]);
+    },
+  );
+});

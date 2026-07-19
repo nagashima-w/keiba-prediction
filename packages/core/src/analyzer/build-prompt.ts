@@ -25,8 +25,16 @@
  * 各馬行に「条件替わり=」項目を追加し、サーフェス替わり・距離延長/短縮・中央⇄地方替わりを
  * 決定論的に判定して表示する(analyzer/condition-change.ts の computeConditionChangeTags)。
  * 該当なしの馬は「条件替わり=なし」。他セクション・出力スキーマ・予想印の指示は不変。
+ *
+ * "2026-07-19.3": 地方/コース形態の有利脚質補正(タスクB。2026-07-19 boss着手前ゲート合意)。
+ * 【展開想定】セクションの末尾に2行追加する。(a) 全venue共通: コース形態(会場・回り・距離)
+ * による前後有利はLLM自身でも判断するよう促す1行。(b) 地方(venueKind="nar")限定: 地方は
+ * 前残り傾向が強く馬場不良時は差しも届きにくい旨の1行(中央には出さない)。恵まれる/損する脚質
+ * (favoredStyles/disfavoredStyles)自体の対応表も、地方(nar)向けに leg-style.ts の
+ * buildRaceDevelopment(venueKind/trackCondition引数追加)側で切り替わるようにした
+ * (中央/venueKind未指定は従来表のまま変更なし)。既存4行の文言・出力スキーマ・予想印の指示は不変。
  */
-export const PROMPT_VERSION = "2026-07-19.2";
+export const PROMPT_VERSION = "2026-07-19.3";
 
 /**
  * プロンプト構築 — 1レース分の情報を LLM 用の1つのテキストにまとめる純関数。
@@ -265,7 +273,13 @@ export function buildPrompt(input: BuildPromptInput): string {
       frontRunningScore: a.frontRunningScore,
     };
   });
-  const development = buildRaceDevelopment(developmentInputs);
+  // venueKind・trackCondition を渡すと、地方(nar)向けの恵まれる/損する脚質の対応表に切り替わる
+  // (中央/venueKind未指定は従来表のまま。leg-style.ts の favoredStylesForPace 参照)。
+  const development = buildRaceDevelopment(
+    developmentInputs,
+    race.venueKind,
+    race.trackCondition,
+  );
 
   // 馬場悪化シナリオ(仕様L104): 現在の天候が雨系、または馬場が稍重以下、または前日想定の
   // wetForecast=true の場合に、道悪適性を織り込む指示を追加する。良馬場かつ予報なしは通常指示のみ。
@@ -327,6 +341,18 @@ export function buildPrompt(input: BuildPromptInput): string {
         : "特になし"
     }`,
   );
+  // (a) 全venue共通: 上記は逃げ馬の頭数から機械的に推定した想定であり、会場・回り(右/左)・
+  // 距離によるコース形態的な前後有利までは織り込んでいない。LLM自身の判断も促す。
+  lines.push(
+    "コース形態(会場・回り・距離)による前後有利は、上記に加えてあなた自身でも判断してください。",
+  );
+  // (b) 地方(venueKind="nar")限定: 地方競馬は中央より前残り傾向が強く、馬場が不良の場合は
+  // 差しも届きにくくなる(タスクB)。中央には出さない。
+  if (race.venueKind === "nar") {
+    lines.push(
+      "地方競馬は前残り(先行有利)傾向が強く、馬場不良時は差しも届きにくい点を加味してください。",
+    );
+  }
   lines.push("");
 
   // 各馬。

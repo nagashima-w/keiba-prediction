@@ -20,6 +20,8 @@
  *   - field 不明時(絶対位置):  pos<=4 → 先行 / pos<=8 → 差し / それ以外 → 追込
  */
 
+import type { RaceIdVenueKind } from "../scraper/ids.js";
+
 /** 脚質(粗い4分類)。 */
 export type LegStyle = "逃げ" | "先行" | "差し" | "追込";
 
@@ -492,13 +494,53 @@ function paceEstimateFromFrontRunnerCount(frontRunnerCount: number): PaceEstimat
 }
 
 /**
+ * 馬場状態が「不良」かどうかを判定する。
+ * classifyTrackWetness(scorer/derive-features.ts)と同じ「先頭1文字判定」方式を踏襲するが、
+ * あちらは稍重・重も含めて「道悪(isWet)」とまとめるのに対し、こちらは不良のみを対象にする
+ * (地方競馬の「不良馬場限定」の脚質補正〈差しも不利へ〉のため、稍重・重は対象外とする)。
+ * trackCondition が null/undefined、または先頭文字が「不」以外なら false。
+ */
+function isFuryoTrackCondition(trackCondition: string | null | undefined): boolean {
+  if (!trackCondition) {
+    return false;
+  }
+  return trackCondition.trim().charAt(0) === "不";
+}
+
+/**
  * 想定ペースごとに「恵まれる脚質」「損する脚質」を対応付ける(競馬の定石: スローペースは
  * 前(逃げ・先行)が残りやすく追込は届きにくい、ハイペースは前が止まりやすく差し・追込が届きやすい)。
+ *
+ * 地方(nar)は中央と前残り傾向の強さが異なるため、venueKind="nar" のときは専用の対応表を使う
+ * (2026-07-19 boss着手前ゲート合意のタスクB):
+ *   - 通常馬場(良/稍重/重、またはtrackCondition不明): スロー/平均は 有利=逃げ・先行/不利=追込、
+ *     ハイは 有利=逃げ・先行・差し/不利=追込(中央と異なり、ハイでも逃げは不利に入らない)。
+ *   - 馬場不良(trackCondition先頭文字が「不」): 全ペースで 有利=逃げ・先行/不利=差し・追込
+ *     (通常表でハイのとき有利だった差しを不利側へ上書きする)。
+ * venueKind が "central" または未指定(中央相当)のときは、このtrackConditionによる分岐は行わず
+ * 従来の対応表を一切変えない(不良ルールは地方専用)。
  */
-function favoredStylesForPace(pace: PaceEstimate): {
+function favoredStylesForPace(
+  pace: PaceEstimate,
+  venueKind?: RaceIdVenueKind,
+  trackCondition?: string | null,
+): {
   favored: readonly LegStyle[];
   disfavored: readonly LegStyle[];
 } {
+  if (venueKind === "nar") {
+    if (isFuryoTrackCondition(trackCondition)) {
+      return { favored: ["逃げ", "先行"], disfavored: ["差し", "追込"] };
+    }
+    switch (pace) {
+      case "ハイ":
+        return { favored: ["逃げ", "先行", "差し"], disfavored: ["追込"] };
+      case "スロー":
+      case "平均":
+      default:
+        return { favored: ["逃げ", "先行"], disfavored: ["追込"] };
+    }
+  }
   switch (pace) {
     case "スロー":
       return { favored: ["逃げ", "先行"], disfavored: ["追込"] };
@@ -514,9 +556,17 @@ function favoredStylesForPace(pace: PaceEstimate): {
  * 出走馬全頭の脚質分析(analyzeHorseLegStyle の結果)から、展開想定を構造化して返す。
  * 脚質分布・主導権候補・想定ペースとその根拠・恵まれる/損する脚質をまとめ、
  * build-prompt.ts の【展開想定】セクションの材料として使う。
+ *
+ * venueKind・trackCondition は「恵まれる/損する脚質」の対応表切り替え(地方/馬場不良の補正、
+ * タスクB)にのみ使う任意引数。省略時(未指定)は venueKind="central"相当として扱われ、
+ * 従来の対応表のまま変わらない(後方互換)。
+ * @param venueKind 現レースの開催区分(中央/地方)。省略時は中央相当。
+ * @param trackCondition 当日の馬場状態。省略時は不明(不良ルール非適用)扱い。
  */
 export function buildRaceDevelopment(
   horses: readonly RaceDevelopmentHorseInput[],
+  venueKind?: RaceIdVenueKind,
+  trackCondition?: string | null,
 ): RaceDevelopment {
   const styleCounts: Record<LegStyle, number> = { 逃げ: 0, 先行: 0, 差し: 0, 追込: 0 };
   let unknownCount = 0;
@@ -557,7 +607,7 @@ export function buildRaceDevelopment(
     `${estimatePace(styleCounts.逃げ)}(逃げ${styleCounts.逃げ}頭` +
     (paceSetterUmaban !== null ? `・主導権候補は馬番${paceSetterUmaban}` : "") +
     `)`;
-  const { favored, disfavored } = favoredStylesForPace(pace);
+  const { favored, disfavored } = favoredStylesForPace(pace, venueKind, trackCondition);
 
   return {
     styleCounts,
