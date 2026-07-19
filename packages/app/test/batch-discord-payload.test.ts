@@ -27,6 +27,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   careerRunCount: 10,
   mark: null,
   evEstimated: false,
+  conditionChangeTags: [],
   ...over,
 });
 

@@ -20,8 +20,13 @@
  * 〇▲=0〜1頭、△=0〜3頭」に緩和し、本線印(◎〇▲△)は◎→〇→▲→△の順で上位を飛ばさず
  * 途切れなく付ける(該当なしはそこで打ち止め・下位省略)gapless な優先順位を明記した。
  * ☆・注は本線と独立の人気薄枠であることも明記(prior・参考EV・±10%クリップ・出力スキーマは不変)。
+ *
+ * "2026-07-19.2": 条件替わり(妙味材料)の追加(2026-07-19 boss着手前ゲート合意)。
+ * 各馬行に「条件替わり=」項目を追加し、サーフェス替わり・距離延長/短縮・中央⇄地方替わりを
+ * 決定論的に判定して表示する(analyzer/condition-change.ts の computeConditionChangeTags)。
+ * 該当なしの馬は「条件替わり=なし」。他セクション・出力スキーマ・予想印の指示は不変。
  */
-export const PROMPT_VERSION = "2026-07-19.1";
+export const PROMPT_VERSION = "2026-07-19.2";
 
 /**
  * プロンプト構築 — 1レース分の情報を LLM 用の1つのテキストにまとめる純関数。
@@ -42,7 +47,13 @@ export const PROMPT_VERSION = "2026-07-19.1";
  */
 
 import type { CourseType } from "../scraper/types.js";
+import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
+import {
+  computeConditionChangeTags,
+  type ConditionChangeRun,
+  type ConditionChangeTag,
+} from "./condition-change.js";
 import {
   analyzeHorseLegStyle,
   buildRaceDevelopment,
@@ -77,6 +88,12 @@ export interface PromptHorse {
    * (いずれも省略可。未指定の走はその走のペース傾向判定から除外されるだけで落ちない)。
    */
   readonly runs: readonly HorseRunPassing[];
+  /**
+   * 条件替わり(妙味材料)判定に使う過去走の条件(新しい順)。既存の runs(脚質・展開想定用)とは
+   * 別配列であり、互いの意味論・挙動には一切影響しない。未指定(省略)は新馬相当として扱われ、
+   * 条件替わりタグは全て「なし」になる(例外にはならない)。
+   */
+  readonly runConditions?: readonly ConditionChangeRun[];
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
   /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
@@ -137,6 +154,12 @@ export interface BuildPromptRaceInfo {
    * scraper 側の予報連携は将来対応のため、当面は呼び出し側が任意指定する。
    */
   readonly wetForecast?: boolean;
+  /**
+   * 現レースの開催区分(中央/地方)。条件替わり(妙味材料)の中央⇄地方替わり判定にのみ使う。
+   * 省略時はこのタグの判定だけをスキップする(サーフェス替わり・距離延長/短縮の判定には影響しない。
+   * condition-change.ts の computeConditionChangeTags 参照)。
+   */
+  readonly venueKind?: RaceIdVenueKind;
 }
 
 /** buildPrompt の入力。 */
@@ -194,6 +217,17 @@ function popularityText(value: number | null | undefined): string {
     return "不明(オッズ値から判断)";
   }
   return `${value}番人気`;
+}
+
+/**
+ * 条件替わりタグ配列を1行のテキストにする(該当なしは「なし」)。
+ * 複数タグは「・」区切りで、computeConditionChangeTags が返す順序(サーフェス→距離→開催)のまま並べる。
+ */
+function conditionChangeText(tags: readonly ConditionChangeTag[]): string {
+  if (tags.length === 0) {
+    return "なし";
+  }
+  return tags.map((t) => t.label).join("・");
 }
 
 /** 参考EVを小数2桁で表記する(算出不可なら「算出不可」)。 */
@@ -304,6 +338,15 @@ export function buildPrompt(input: BuildPromptInput): string {
   );
   for (const h of horses) {
     const a = legStyleAnalyses.get(h.umaban)!;
+    // 条件替わり(妙味材料): サーフェス替わり・距離延長/短縮・中央⇄地方替わりを決定論的に判定する
+    // (condition-change.ts。runConditions未指定の馬は新馬相当としてpastRuns=[]扱いになり、
+    // 全タグなし=「なし」表記に自然に落ちる)。
+    const conditionChangeTags = computeConditionChangeTags({
+      currentCourseType: race.courseType,
+      currentDistance: race.distance,
+      currentVenueKind: race.venueKind,
+      pastRuns: h.runConditions ?? [],
+    });
     // 脚質の「安定度」: 直近走で脚質がどれだけ一貫しているかを添え、LLMが展開読みの
     // 確度を判断できるようにする(例: 安定して差してくる馬か、その場その場で脚質が変わる馬か)。
     // 「過去ペース傾向」: その馬がこれまで速い/遅い流れをどれだけ経験しているか(展開への
@@ -319,7 +362,8 @@ export function buildPrompt(input: BuildPromptInput): string {
         `単勝オッズ=${oddsText(h.winOdds, "不明")}, ` +
         `人気=${popularityText(h.popularity)}, ` +
         `複勝オッズ下限=${oddsText(h.placeOddsMin, "複勝未発売")}, ` +
-        `参考EV=${referenceEvText(h.referenceEv)}`,
+        `参考EV=${referenceEvText(h.referenceEv)}, ` +
+        `条件替わり=${conditionChangeText(conditionChangeTags)}`,
     );
   }
   lines.push("");

@@ -39,6 +39,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   careerRunCount: 10,
   mark: null,
   evEstimated: false,
+  conditionChangeTags: [],
   ...over,
 });
 
@@ -267,6 +268,42 @@ describe("rankRaceOpportunities(妙味レースランキング)", () => {
     expect(ranked.map((r) => r.raceName)).toEqual(["A特別"]);
   });
 
+  it("筆頭候補馬(bestPick)の条件替わりタグを bestPickConditionChangeTags として持たせること(raceId+umabanで自身のタグを引く)", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("202601010101", "A特別", [
+        row({
+          umaban: 1,
+          ev: 2.0,
+          adjustedProb: 0.5,
+          isPositive: true,
+          conditionChangeTags: [{ kind: "surface", label: "ダ替わり(前走芝)" }],
+        }),
+      ]),
+    ];
+    const ranked = rankRaceOpportunities(outcomes);
+    expect(ranked[0]!.opportunity.bestPick?.umaban).toBe(1);
+    expect(ranked[0]!.bestPickConditionChangeTags).toEqual([
+      { kind: "surface", label: "ダ替わり(前走芝)" },
+    ]);
+  });
+
+  it("筆頭候補馬に条件替わりタグが無ければ bestPickConditionChangeTags は空配列であること(タグ無しでノイズを出さない)", () => {
+    const outcomes: BatchRaceOutcome[] = [opp("202601010101", "A特別", 2.0, 0.5)];
+    const ranked = rankRaceOpportunities(outcomes);
+    expect(ranked[0]!.bestPickConditionChangeTags).toEqual([]);
+  });
+
+  it("bestPickが無い(スコア算出不可)レースは bestPickConditionChangeTags が空配列であること", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("202601010101", "C特別", [
+        row({ umaban: 1, ev: 0.8, isPositive: false }),
+      ]),
+    ];
+    const ranked = rankRaceOpportunities(outcomes);
+    expect(ranked[0]!.opportunity.bestPick).toBeNull();
+    expect(ranked[0]!.bestPickConditionChangeTags).toEqual([]);
+  });
+
   it("レース見出しに使う venueName・raceNumber を各行に持たせること(Task#29)", () => {
     const outcomes: BatchRaceOutcome[] = [opp("202601010101", "A特別", 2.0, 0.5)];
     const ranked = rankRaceOpportunities(outcomes);
@@ -327,6 +364,7 @@ describe("raceOpportunityRemark(妙味レースランキングの備考文言・
     raceNumber: 11,
     raceName: "1R",
     evEstimated: false,
+    bestPickConditionChangeTags: [],
     ...over,
     opportunity: {
       score: null,
@@ -585,5 +623,38 @@ describe("collectPerRaceHighlights(レース別ハイライト・Task#29)", () =
       umaban: 1,
       horseName: "アルファ",
     });
+  });
+
+  it("各馬の条件替わり(妙味材料)タグ(conditionChangeTags)を伝播すること", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("202601010101", "1R", [
+        row({
+          umaban: 1,
+          horseName: "条件替わり馬",
+          ev: 1.2,
+          isPositive: true,
+          mark: "◎",
+          conditionChangeTags: [
+            { kind: "surface", label: "ダ替わり(前走芝)" },
+            { kind: "venue", label: "地方→中央" },
+          ],
+        }),
+      ]),
+    ];
+    const highlights = collectPerRaceHighlights(outcomes);
+    expect(highlights[0]!.horses[0]!.conditionChangeTags).toEqual([
+      { kind: "surface", label: "ダ替わり(前走芝)" },
+      { kind: "venue", label: "地方→中央" },
+    ]);
+  });
+
+  it("条件替わりタグが無い馬は空配列のまま伝播すること", () => {
+    const outcomes: BatchRaceOutcome[] = [
+      success("202601010101", "1R", [
+        row({ umaban: 1, horseName: "タグ無し馬", ev: 1.2, isPositive: true }),
+      ]),
+    ];
+    const highlights = collectPerRaceHighlights(outcomes);
+    expect(highlights[0]!.horses[0]!.conditionChangeTags).toEqual([]);
   });
 });

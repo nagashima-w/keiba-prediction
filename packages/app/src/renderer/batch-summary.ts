@@ -18,6 +18,7 @@ import {
 
 import type {
   AnalysisResult,
+  ConditionChangeTagView,
   EvPlusSummaryRow,
   PredictionMark,
 } from "../shared/analysis-types.js";
@@ -122,6 +123,13 @@ export interface RaceOpportunityRankRow {
    * true のときUIは「発売前推定」の備考を表示し、確定EVレースと区別する。
    */
   readonly evEstimated: boolean;
+  /**
+   * 筆頭候補馬(opportunity.bestPick)自身の条件替わり(妙味材料)タグ(妙味レースランキング用)。
+   * raceId+umaban で当該レースの result.rows から筆頭候補馬自身の行を引いて取り出す。
+   * bestPick が無い(スコア算出不可)、または該当馬にタグが無い場合は空配列(UIはこの場合バッジ等の
+   * ノイズを出さず、筆頭候補セルを従来どおりの表示のままにする)。
+   */
+  readonly bestPickConditionChangeTags: readonly ConditionChangeTagView[];
 }
 
 /**
@@ -155,6 +163,13 @@ export function rankRaceOpportunities(
       { oddsStatus: result.oddsStatus },
       config,
     );
+    // 筆頭候補馬自身の条件替わりタグを、同じレースの result.rows から raceId+umaban で引く
+    // (bestPickが無ければ空配列。UIはこの場合ノイズを出さず筆頭候補セルを従来どおりにする)。
+    const bestPickConditionChangeTags =
+      opportunity.bestPick !== null
+        ? (result.rows.find((r) => r.umaban === opportunity.bestPick!.umaban)
+            ?.conditionChangeTags ?? [])
+        : [];
     rows.push({
       raceId: result.raceId,
       venueName: result.venueName,
@@ -162,6 +177,7 @@ export function rankRaceOpportunities(
       raceName: result.raceName,
       opportunity,
       evEstimated: result.oddsStatus === "yoso",
+      bestPickConditionChangeTags,
     });
   }
   return rows.sort((a, b) => {
@@ -232,6 +248,8 @@ export interface RaceHighlightHorseRow {
   readonly isPositive: boolean;
   /** このEVが推定値(発売前・単勝オッズからの複勝下限概算)によるものか(Task#25)。 */
   readonly evEstimated: boolean;
+  /** 条件替わり(妙味材料)タグ(サーフェス→距離→開催の固定順)。該当なしは空配列。 */
+  readonly conditionChangeTags: readonly ConditionChangeTagView[];
 }
 
 /**
@@ -305,6 +323,7 @@ export function collectPerRaceHighlights(
           ev: r.ev,
           isPositive: r.isPositive,
           evEstimated: r.evEstimated,
+          conditionChangeTags: r.conditionChangeTags,
         }),
       )
       .sort((a, b) => {
