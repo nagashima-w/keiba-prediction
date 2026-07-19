@@ -113,6 +113,18 @@ export interface AnalysisResult {
   /** LLM分析がフェイルセーフで prior にフォールバックしたか。 */
   readonly fallback: boolean;
   /**
+   * 予想印の制約違反(頭数・優先順位・未知の印文字)によりリトライ後も印を採用できず、
+   * 確率補正(AI補正後確率)は有効なまま全馬の印だけを非表示にした場合 true
+   * (A: フォールバック分離・2026-07-19合意)。fallback とは意味が異なる点に注意:
+   * fallback は確率補正そのものを prior に戻す(補正無効)のに対し、marksDropped は
+   * 確率補正は有効なまま印だけを諦めた状態を示す(fallback:false のまま true になり得る)。
+   * optional なのは既存の AnalysisResult リテラルを使うテストを無改変で通すため
+   * (runAnalysis 自身は必ず true/false のいずれかを明示的に返す)。
+   */
+  readonly marksDropped?: boolean;
+  /** marksDropped:true の場合の理由説明(通常時・非印失敗時は null)。 */
+  readonly marksDroppedReason?: string | null;
+  /**
    * オッズの発売状態(確定/発売中/予想)。
    * "yoso" は複勝未発売のため全馬のEVが null になる(UIで注記表示)。
    */

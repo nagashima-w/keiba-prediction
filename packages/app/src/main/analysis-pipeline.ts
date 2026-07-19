@@ -232,6 +232,10 @@ export async function runAnalysis(
   let llmUsed = false;
   let llmSkippedReason: string | null = null;
   let fallback = false;
+  // A(フォールバック分離・2026-07-19合意): 予想印の制約違反により印だけを諦めた場合 true。
+  // fallback(確率補正そのものを prior に戻す)とは意味が異なるため別フィールドで伝播する。
+  let marksDropped = false;
+  let marksDroppedReason: string | null = null;
   const adjustedByUmaban = new Map<number, AdjustedHorse>();
 
   if (deps.analyze === null) {
@@ -304,6 +308,11 @@ export async function runAnalysis(
     const analysis = await deps.analyze(promptInput);
     llmUsed = true;
     fallback = analysis.fallback;
+    // core AnalyzeRaceResult.marksDropped/marksDroppedReason は既存呼び出し元との互換のため
+    // optional になっている(未設定=印関連の救済は発生していない)。ここで明示的に false/null へ
+    // 正規化してから AnalysisResult に伝播する(呼び出し元は必ず true/false を受け取れる)。
+    marksDropped = analysis.marksDropped ?? false;
+    marksDroppedReason = analysis.marksDroppedReason ?? null;
     for (const h of analysis.horses) {
       adjustedByUmaban.set(h.umaban, {
         adjustedProb: h.adjustedProb,
@@ -421,6 +430,8 @@ export async function runAnalysis(
     llmUsed,
     llmSkippedReason,
     fallback,
+    marksDropped,
+    marksDroppedReason,
     oddsStatus: race.odds.oddsStatus,
     rows,
     warnings: race.meta.warnings.map((w) => w.message),

@@ -14,6 +14,18 @@
 > llmUsed 列の追加で分離可能)。
 > 以下の残タスク記述は完了済みタスクの仕様記録として保持する。
 
+> **2026-07-19 追加合意・実装(予想印まわりの改善)**:
+> - **B-1 頭数制約緩和 + 本線印 gapless 優先順位**: ◎=ちょうど1(必須)/〇=0〜1/▲=0〜1/△=0〜3/☆=0〜1/注=0〜1。
+>   本線印は ◎→〇→▲→△ の順で上位を飛ばさない(▲≥1⇒〇≥1、△≥1⇒▲≥1)。☆・注は人気薄の独立枠(本線と別軸、☆注間も順序依存なし)。
+> - **A フォールバック分離**: 印関連違反(頭数/優先順位/未知の印文字)は、リトライ後も違反なら確率補正(adjustedProb/clipped/reason)を
+>   捨てず全馬 mark=null で救済(`AnalyzerMarkViolationError`、`fallback:false`・`marksDropped:true`・`marksDroppedReason`)。
+>   非印失敗(JSON破損/horses配列なし/有効な補正0件)は従来どおり全馬 prior(`fallback:true`)。`PROMPT_VERSION="2026-07-19.1"`。
+> - **A救済の観測性(app)**: marksDropped を analyze→pipeline→AnalysisResult→UI(BatchAnalysisView)へ伝播し、
+>   「実行(印: 制約不成立のため非表示。確率補正は有効)」と区別表示(DB=AnalysisRecord には非保存、既存 fallback と同方針)。
+> - 背景: 「印が入らないレースがある」原因は旧実装の頭数制約違反→全馬 prior フォールバックで印も確率補正も全損していたこと。
+> - 任意フォローアップ(未対応): BatchAnalysisView の title 出し分けに防御的 `!result.fallback` を加える(fallback と marksDropped の
+>   排他は現状ランタイム不変条件のみでテスト固定済み。型保証はしていない)。
+
 ## 0. まず現状を実物で確認する(鉄則)
 - リモート `claude/handover-next-session-x5ki6o` の最新コミットを `mcp__github__list_commits` で確認する。
 - 実装成果はリモートに #19〜#36 まで揃っている。main には #29 まで(PR #1 マージ済み)、

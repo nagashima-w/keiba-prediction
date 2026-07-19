@@ -8,6 +8,14 @@
  *  - 出力: 馬ごと {umaban, prior, adjustedProb, reason, clipped, mark} + メタ(fallback有無・リトライ回数)。
  *
  * Task#22(予想印): 成功時はLLM応答のmarkを反映し、フォールバック時は全馬mark=nullで返すことを検証する。
+ *
+ * A(フォールバック分離・2026-07-19合意): 印関連の違反(頭数・優先順位・未知の印文字)は
+ * リトライしてもなお印関連違反なら、その応答の確率補正(adjustedProb/clipped/reason)を採用したまま
+ * 全馬 mark=null で返し、fallback:false・marksDropped:true とする(prior には戻さない)。
+ * fallback は「通常時は false」の不変条件を保つため fallbackReason は null のままとし、
+ * 印救済の理由は専用フィールド marksDroppedReason に入れる。
+ * 印と無関係な失敗(JSON破損・horses配列なし・有効な補正0件)は従来どおり全馬 prior・fallback:true・
+ * marksDropped:false とする。
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -67,6 +75,7 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.fallback).toBe(false);
     expect(r.retryCount).toBe(0);
     expect(r.fallbackReason).toBeNull();
+    expect(r.marksDropped).toBe(false);
     const h1 = r.horses.find((h) => h.umaban === 1)!;
     expect(h1.adjustedProb).toBeCloseTo(0.45, 10);
     expect(h1.prior).toBeCloseTo(0.4, 10);
@@ -98,6 +107,7 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.fallback).toBe(true);
     expect(r.retryCount).toBe(1);
     expect(r.fallbackReason).not.toBeNull();
+    expect(r.marksDropped).toBe(false); // 印と無関係な失敗(JSON破損)は従来どおりの全馬prior。
     expect(llm.complete).toHaveBeenCalledTimes(2);
     const h1 = r.horses.find((h) => h.umaban === 1)!;
     expect(h1.adjustedProb).toBeCloseTo(0.4, 10); // prior
@@ -128,6 +138,7 @@ describe("analyzeRace(1レース分の分析)", () => {
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(true);
     expect(r.retryCount).toBe(1);
+    expect(r.marksDropped).toBe(false); // 印と無関係な失敗(LLM例外)は従来どおりの全馬prior。
     expect(r.horses.find((h) => h.umaban === 1)!.adjustedProb).toBeCloseTo(0.4, 10);
   });
 
@@ -154,6 +165,7 @@ describe("analyzeRace(1レース分の分析)", () => {
     expect(r.retryCount).toBe(1);
     expect(llm.complete).toHaveBeenCalledTimes(2);
     expect(r.horses.every((h) => h.usedPrior)).toBe(true);
+    expect(r.marksDropped).toBe(false); // 有効な補正0件(印と無関係)は従来どおりの全馬prior。
   });
 
   it("空の horses→リトライで有効応答なら成功すること", async () => {
@@ -193,22 +205,7 @@ describe("analyzeRace(予想印 mark の統合・Task#22)", () => {
     expect(r.horses.find((h) => h.umaban === 2)!.mark).toBeNull();
   });
 
-  it("mark の頭数制約違反(◎が2頭)はパース失敗としてリトライ→フォールバックに乗ること", async () => {
-    const badMarkBody = JSON.stringify({
-      horses: [
-        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
-        { number: 2, place_prob: 0.15, reason: "y", mark: "◎" }, // ◎が2頭で制約違反。
-        ...fillerMarkHorses(),
-      ],
-    });
-    const llm = fixedLlm(badMarkBody, badMarkBody);
-    const r = await analyzeRace(input(), { llm });
-    expect(r.fallback).toBe(true);
-    expect(r.retryCount).toBe(1);
-    expect(llm.complete).toHaveBeenCalledTimes(2);
-  });
-
-  it("フォールバック時(LLM例外2回)は全馬 mark=null で返すこと", async () => {
+  it("フォールバック時(LLM例外2回)は全馬 mark=null で返すこと(印と無関係な失敗)", async () => {
     const llm: LlmClient = {
       complete: vi.fn(async () => {
         throw new Error("常に失敗");
@@ -216,13 +213,104 @@ describe("analyzeRace(予想印 mark の統合・Task#22)", () => {
     };
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(true);
+    expect(r.marksDropped).toBe(false);
     expect(r.horses.every((h) => h.mark === null)).toBe(true);
   });
 
-  it("フォールバック時(パース2回失敗)も全馬 mark=null で返すこと", async () => {
+  it("フォールバック時(パース2回失敗)も全馬 mark=null で返すこと(印と無関係な失敗)", async () => {
     const llm = fixedLlm("こわれ1", "こわれ2");
     const r = await analyzeRace(input(), { llm });
     expect(r.fallback).toBe(true);
+    expect(r.marksDropped).toBe(false);
     expect(r.horses.every((h) => h.mark === null)).toBe(true);
+  });
+});
+
+describe("analyzeRace(A: 印関連違反時のフォールバック分離・確率補正のレスキュー・2026-07-19合意)", () => {
+  it("頭数違反(◎が2頭)はA救済: fallback:false・fallbackReason:null・marksDropped:true・確率補正保持・全馬mark=null", async () => {
+    const badMarkBody = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.15, reason: "y", mark: "◎" }, // ◎が2頭で頭数違反。
+        ...fillerMarkHorses(),
+      ],
+    });
+    const llm = fixedLlm(badMarkBody, badMarkBody);
+    const r = await analyzeRace(input(), { llm });
+    // fallback は「通常時は false」の不変条件を保つため、印救済でも fallbackReason は null のまま。
+    expect(r.fallback).toBe(false);
+    expect(r.fallbackReason).toBeNull();
+    expect(r.marksDropped).toBe(true);
+    expect(r.marksDroppedReason).not.toBeNull();
+    expect(r.retryCount).toBe(1);
+    expect(llm.complete).toHaveBeenCalledTimes(2);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
+    // prior に戻さず、クリップ済みの補正値・reason をそのまま保持すること。
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    expect(h1.adjustedProb).toBeCloseTo(0.45, 10);
+    expect(h1.usedPrior).toBe(false);
+    expect(h1.reason).toBe("x");
+  });
+
+  it("優先順位違反(〇を飛ばして▲のみ)はA救済: fallback:false・marksDropped:true・確率補正保持", async () => {
+    const badPriorityBody = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.18, reason: "y", mark: "▲" }, // 〇を飛ばして▲→優先順位違反。
+        { number: 3, place_prob: 0.3, reason: "z", mark: null },
+        { number: 4, place_prob: 0.3, reason: "w", mark: null },
+        { number: 5, place_prob: 0.3, reason: "v", mark: null },
+        { number: 6, place_prob: 0.3, reason: "u", mark: null },
+      ],
+    });
+    const llm = fixedLlm(badPriorityBody, badPriorityBody);
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.fallbackReason).toBeNull();
+    expect(r.marksDropped).toBe(true);
+    expect(r.retryCount).toBe(1);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
+    const h2 = r.horses.find((h) => h.umaban === 2)!;
+    expect(h2.adjustedProb).toBeCloseTo(0.18, 10);
+    expect(h2.usedPrior).toBe(false);
+  });
+
+  it("未知の印文字はA救済: fallback:false・marksDropped:true・確率補正保持", async () => {
+    const badUnknownMarkBody = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.18, reason: "y", mark: "◇" }, // 未知の印文字。
+        { number: 3, place_prob: 0.3, reason: "z", mark: "〇" },
+        { number: 4, place_prob: 0.3, reason: "w", mark: "▲" },
+        { number: 5, place_prob: 0.3, reason: "v", mark: "△" },
+        { number: 6, place_prob: 0.3, reason: "u", mark: null },
+      ],
+    });
+    const llm = fixedLlm(badUnknownMarkBody, badUnknownMarkBody);
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.fallbackReason).toBeNull();
+    expect(r.marksDropped).toBe(true);
+    expect(r.retryCount).toBe(1);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
+    const h2 = r.horses.find((h) => h.umaban === 2)!;
+    expect(h2.adjustedProb).toBeCloseTo(0.18, 10);
+    expect(h2.usedPrior).toBe(false);
+  });
+
+  it("印関連違反が初回のみでリトライが成功すれば通常成功として扱うこと(marksDropped:falseでmark反映)", async () => {
+    const badMarkBody = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.15, reason: "y", mark: "◎" }, // ◎が2頭で頭数違反(初回のみ)。
+        ...fillerMarkHorses(),
+      ],
+    });
+    const llm = fixedLlm(badMarkBody, okBody); // リトライ(2回目)は正常応答。
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.marksDropped).toBe(false);
+    expect(r.retryCount).toBe(1);
+    expect(r.horses.find((h) => h.umaban === 3)!.mark).toBe("◎");
   });
 });

@@ -11,6 +11,7 @@ import {
   isHighlightRow,
   LABEL_ADJUSTED_PROB,
   LABEL_PRIOR,
+  llmCorrectionStatusText,
   MARK_LEGEND,
   oddsStatusNote,
   raceHeading,
@@ -166,5 +167,85 @@ describe("raceHeading(レース見出しの組み立て・Task#29)", () => {
     expect(
       raceHeading({ venueName: "浦和", raceNumber: 11, raceName: "   " }),
     ).toBe("浦和 11R");
+  });
+});
+
+describe("llmCorrectionStatusText(LLM補正状態の表示文言・A: フォールバック分離2026-07-19合意)", () => {
+  // fallback(確率補正そのものをpriorに戻す)と marksDropped(確率補正は有効なまま印だけを
+  // 諦める)は意味が異なるため、組み合わせごとに文言が区別されることをテーブル駆動で固定する。
+  const cases: ReadonlyArray<{
+    label: string;
+    input: {
+      llmUsed: boolean;
+      llmSkippedReason: string | null;
+      fallback: boolean;
+      marksDropped?: boolean;
+    };
+    expected: string;
+  }> = [
+    {
+      label: "LLMスキップ時はスキップ理由を表示すること",
+      input: {
+        llmUsed: false,
+        llmSkippedReason: "APIキー未設定",
+        fallback: false,
+      },
+      expected: "スキップ(APIキー未設定)",
+    },
+    {
+      label: "LLMスキップ理由が無いときは「理由不明」と表示すること",
+      input: { llmUsed: false, llmSkippedReason: null, fallback: false },
+      expected: "スキップ(理由不明)",
+    },
+    {
+      label: "実行・fallbackなし・marksDroppedなしは「実行」のみ",
+      input: {
+        llmUsed: true,
+        llmSkippedReason: null,
+        fallback: false,
+        marksDropped: false,
+      },
+      expected: "実行",
+    },
+    {
+      label: "実行・marksDropped未指定(optional省略)も「実行」のみ扱いにすること",
+      input: { llmUsed: true, llmSkippedReason: null, fallback: false },
+      expected: "実行",
+    },
+    {
+      label: "実行・fallback:trueは「フェイルセーフで3着内率に復帰」",
+      input: {
+        llmUsed: true,
+        llmSkippedReason: null,
+        fallback: true,
+        marksDropped: false,
+      },
+      expected: "実行(フェイルセーフで3着内率に復帰)",
+    },
+    {
+      label:
+        "実行・fallback:false かつ marksDropped:true は印だけ非表示である旨(fallbackとは別文言)",
+      input: {
+        llmUsed: true,
+        llmSkippedReason: null,
+        fallback: false,
+        marksDropped: true,
+      },
+      expected: "実行(印: 制約不成立のため非表示。確率補正は有効)",
+    },
+    {
+      label:
+        "fallback:true が marksDropped:true より優先されること(fallbackは確率補正自体が無効なためより重大)",
+      input: {
+        llmUsed: true,
+        llmSkippedReason: null,
+        fallback: true,
+        marksDropped: true,
+      },
+      expected: "実行(フェイルセーフで3着内率に復帰)",
+    },
+  ];
+  it.each(cases)("$label", ({ input, expected }) => {
+    expect(llmCorrectionStatusText(input)).toBe(expected);
   });
 });

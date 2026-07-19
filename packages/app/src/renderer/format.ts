@@ -95,6 +95,36 @@ export function formatEstimatedEvSuffix(evEstimated: boolean): string {
 }
 
 /**
+ * LLM補正状態の表示文言(BatchAnalysisView の「LLM補正:」行、A: フォールバック分離2026-07-19合意)。
+ *
+ * fallback(確率補正そのものを prior に戻す)と marksDropped(確率補正〈AI補正後確率〉は
+ * 有効なまま、印の制約違反により印だけを全馬非表示にする)は意味が異なるため、区別した文言にする。
+ * fallback:true は確率補正自体が無効という、より重大な事象のため marksDropped より優先表示する
+ * (両方 true になるケースは通常発生しないが、優先順位を明示しておく)。
+ * - LLMスキップ: 「スキップ(理由)」
+ * - 実行・fallback:false かつ marksDropped が true でない: 「実行」
+ * - 実行・fallback:true: 「実行(フェイルセーフで3着内率に復帰)」
+ * - 実行・fallback:false かつ marksDropped:true: 「実行(印: 制約不成立のため非表示。確率補正は有効)」
+ */
+export function llmCorrectionStatusText(result: {
+  readonly llmUsed: boolean;
+  readonly llmSkippedReason: string | null;
+  readonly fallback: boolean;
+  readonly marksDropped?: boolean;
+}): string {
+  if (!result.llmUsed) {
+    return `スキップ(${result.llmSkippedReason ?? "理由不明"})`;
+  }
+  if (result.fallback) {
+    return "実行(フェイルセーフで3着内率に復帰)";
+  }
+  if (result.marksDropped === true) {
+    return "実行(印: 制約不成立のため非表示。確率補正は有効)";
+  }
+  return "実行";
+}
+
+/**
  * レース見出し(Task#29)。「会場名 + レース番号R + (レース名があれば付す)」の形式で組み立てる。
  *
  * raceName はスクレイピング元(netkeiba)で発売前の地方レース等に空文字になり得るため、
