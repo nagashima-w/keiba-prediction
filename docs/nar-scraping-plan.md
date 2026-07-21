@@ -90,6 +90,58 @@
 | `fixtures/nar_result_202654071201.html` | 高知1R結果(`All_Result_Table`+払戻) |
 | `fixtures/horse_results_2021104387.json` | 地方所属馬の全戦績(南関東→高知の転厩例) |
 
+## 交流重賞(Jpn1/2/3)の定義とレース一覧の3択絞り込み(タスクB1)
+
+- 「交流重賞」とは、地方(NAR)開催で中央馬も出走できる格上げ重賞を指し、netkeibaのレース一覧では
+  grade表記が `Jpn1`/`Jpn2`/`Jpn3`(アラビア数字。ローマ数字ではない。実測:
+  `fixtures/nar_race_list_sub_20260624.html` のさきたま杯=Jpn1)になる。地方独自の「重賞」・OP・L
+  とは区別し、`isJpnGrade`/`filterJpnOnlyEntries`(`packages/core/src/scraper/jpn-grade.ts`)は
+  Jpn表記のみを対象とする(中央の数値クラス→gradeマッピングはスコープ外)。
+- レース一覧の取得対象はUI上「中央」「地方(全て)」「地方(Jpnのみ)」の3択(`RaceListTarget`、
+  `packages/app/src/renderer/race-list-target.ts`)。内部的には `venueKind`("central"|"nar") +
+  `jpnOnly`(bool)の組で表現し、`venueKind="central"` のときは `jpnOnly` の値に関わらず絞り込みを
+  適用しない(中央+Jpn限定で一覧が全滅する事故を防ぐガード。IPC層でも二重にガードする)。
+
+## 期間バッチ方針(タスクB2)
+
+単日ではなく期間(from〜to)を指定して複数日分のレースをまとめて分析対象に収集するバッチ機能。
+「期間内のレースID収集」(B2a、純ロジック層)と「UI/IPC結線・進捗表示・>100件警告」(B2b)を分離する。
+
+- **収集の流れ**: `enumerateDates(from, to)`(`packages/core/src/scraper/enumerate-dates.ts`)で
+  期間内の開催日を列挙 → 日ごとに日次lister(`date, target`)を呼び出してレース一覧を取得 →
+  `target="nar-jpn"` のときのみ `filterJpnOnlyEntries` を適用 → dedup判定を経て実行対象レースIDを
+  確定する(`collectRaceIdsOverRange`、`packages/app/src/main/range-collect.ts`)。
+- **この層はLLMを知らない**: `collectRaceIdsOverRange` の依存型(`RangeCollectDeps`)に
+  `analyzeOne` 相当のフィールドを一切持たせない設計とし、「確定前(収集フェーズ)にLLM呼出が
+  発生しない」ことを型レベルで構造的に担保する。分析(LLM呼出)の実行は収集結果を受け取った
+  B2b側が別途 `runBatchAnalysis`(既存の単日一括分析、`analysis-batch.ts`)に委譲する。
+- **部分失敗の扱い**: 日次listerがネットワークエラー等でthrowした日は `failure` として記録し、
+  他の日の処理は継続する(全体を止めない)。レースが0件の日(`entries=[]`)は `empty` として記録し、
+  `failure` とは明確に区別する(どちらも収集ゼロだが原因が異なるため)。
+- **中断(キャンセル)**: `shouldCancel` を日の境界(次の日に着手する前)で確認し、要求されていれば
+  残りの日を打ち切り、収集済みまでで結果を確定する(`cancelled=true`)。これは分析フェーズの
+  `batchCancelRequested`(既存の一括分析中断)とは別概念で、収集フェーズ専用の中断フラグである。
+- **181日包含上限**: 1回の期間指定で許容する最大日数は、from・to両端を**含む**日数(包含日数。
+  to−fromの差分日数ではない)で数え、**181日ちょうどはOK・182日以上はエラー**とする
+  (`enumerateDates` が投げる)。上限を設ける理由は、期間が長すぎると1回の収集・分析対象件数が
+  膨大になり、netkeibaへのリクエスト量やLLM呼出コストが予測不能になるのを防ぐため。
+
+## dedup方針(既分析との突合、タスクB2a)
+
+期間バッチで収集したレースIDのうち、既に現行のプロンプト版(`promptVersion`、Task#27)で分析済みの
+レースは実行対象から除外し、無駄な再分析(netkeibaへの再アクセス・LLM再呼出のコスト)を避ける。
+
+- 判定は「レースIDに対する既存分析の `promptVersion` 一覧」を1件ずつ確認し、**1件でも現行版と
+  一致すれば除外**(`skippedAlreadyAnalyzed` にカウント)する。同一レースに複数回分析した履歴が
+  あっても、そのうち1件が現行版なら「既に現行版で分析済み」とみなす。
+- 別版の `promptVersion` のみで分析済み(現行版とは不一致)のレースは実行対象に**含める**
+  (プロンプト改訂後の再分析を妨げないため)。
+- `promptVersion=null`(Task#27より前の旧データ、またはLLM完全スキップでプロンプト自体を
+  使っていない分析。`AnalysisStore`/`StoredAnalysis.promptVersion` と同じ方針)のレースも
+  実行対象に**含める**(「版不明」は「現行版で分析済み」と同一視しない)。
+- 突合に使う現行版は、収集の開始時に渡された1つの値をスナップショットとして全日・全レースの
+  判定に一貫して使う(判定の途中で現行版が変わることはない)。
+
 ## 実装方針(Task #20)
 
 1. `ids.ts`: `parseRaceId` を場コード01〜10限定から拡張する。中央/地方を判別する `raceVenueKind(raceId)`(01〜10=中央、30以上=地方)を追加し、**ばんえい(65)は明示的に拒否**する
