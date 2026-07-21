@@ -151,6 +151,23 @@ export function filterRaceLedger(
 }
 
 /**
+ * 絞り込み条件が何か入力されているか(EMPTY_RACE_LEDGER_FILTERから変化しているか)を判定する。
+ *
+ * 検証画面のレース一覧は、デフォルト(絞り込み未入力)では1件も表示しない仕様(Task#25)の
+ * ゲート条件として使う。5つの軸のいずれか1つでも既定値から変化していればtrue(絞り込み中)。
+ * keywordの空判定はmatchesKeywordと同じtrim()基準を使う(空白のみの入力は未入力扱い)。
+ */
+export function isRaceLedgerFilterActive(filter: RaceLedgerFilter): boolean {
+  return (
+    filter.dateFrom !== null ||
+    filter.dateTo !== null ||
+    filter.venueKind !== "all" ||
+    filter.venueName !== null ||
+    filter.keyword.trim() !== ""
+  );
+}
+
+/**
  * レース一覧に登場する会場名を重複なく列挙する(競馬場名ドロップダウンの選択肢生成用)。
  * 五十音順(ja ロケール)で安定した並びにする。
  */

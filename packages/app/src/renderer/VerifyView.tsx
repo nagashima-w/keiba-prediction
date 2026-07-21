@@ -14,6 +14,7 @@ import {
 import {
   distinctVenueNames,
   filterRaceLedger,
+  isRaceLedgerFilterActive,
   type RaceLedgerFilter,
 } from "./race-ledger-filter.js";
 import {
@@ -182,6 +183,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
   const report = state.report;
   // レース一覧の検索/絞り込み(表示専用)。state.raceLedger自体・reportは一切変えない。
   const filteredRaceLedger = filterRaceLedger(state.raceLedger, state.raceLedgerFilter);
+  // デフォルト(絞り込み未入力)では一覧を表示しない(Task#25)。入力があるときだけ絞り込み結果を出す。
+  const isFiltering = isRaceLedgerFilterActive(state.raceLedgerFilter);
+  const displayedRaceLedger = isFiltering ? filteredRaceLedger : [];
   const venueNameOptions = distinctVenueNames(state.raceLedger);
 
   return (
@@ -700,7 +704,7 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       </div>
       {state.raceLedger.length > 0 && (
         <p style={{ color: "#666", margin: "0 0 0.5rem" }}>
-          {raceLedgerFilterSummary(state.raceLedger.length, filteredRaceLedger.length)}
+          {raceLedgerFilterSummary(state.raceLedger.length, displayedRaceLedger.length)}
         </p>
       )}
 
@@ -716,12 +720,14 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         <p style={{ color: "#666" }}>
           {state.loadingRaceLedger ? "読み込み中…" : "分析済みのレースがありません。"}
         </p>
+      ) : !isFiltering ? (
+        <p style={{ color: "#666" }}>検索条件を入力するとレースが表示されます。</p>
       ) : filteredRaceLedger.length === 0 ? (
         <p style={{ color: "#666" }}>
           絞り込み条件に一致するレースがありません。条件を変えるか「絞り込みをクリア」をお試しください。
         </p>
       ) : (
-        filteredRaceLedger.map((rb) => {
+        displayedRaceLedger.map((rb) => {
           const importing = state.importingRaceIds.includes(rb.raceId);
           return (
             <details

@@ -367,8 +367,11 @@ export function payoutSourceLabel(
 
 /**
  * レース一覧の絞り込み結果件数表示(検索/絞り込み機能)。
- * 絞り込みなし(全件表示)・該当0件のいずれも同じ「全N件中M件表示」の形式にし、
- * 該当0件時の穏やかな案内文はUI側(VerifyView)で別途出す(この関数は件数表示のみを担う)。
+ * shownCountには表示中の件数(Task#25以降は絞り込み未入力時も含めてVerifyViewが実際に描画する
+ * 件数=displayedRaceLedger.lengthを渡す)を受け取り、「全N件中M件表示」の形式で返す。
+ * 絞り込み未入力(=一覧を表示しない)なら「全N件中0件表示」、該当0件の絞り込み結果も
+ * 同様に「全N件中0件表示」になる(両者の穏やかな案内文の出し分けはUI側(VerifyView)が担う。
+ * この関数は件数表示のみを担う)。
  */
 export function raceLedgerFilterSummary(
   totalCount: number,
