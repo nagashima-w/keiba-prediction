@@ -111,6 +111,7 @@ describe("ipc: net.fetch アダプタの注入", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
       additionalInstruction: "",
+      clipVariant: "default",
     };
     handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 

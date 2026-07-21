@@ -2,6 +2,7 @@ import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
   buildPriorInput,
   buildPrompt,
+  CLIP_VARIANTS,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
@@ -541,6 +542,90 @@ describe("runAnalysis(分析パイプライン)", () => {
       onProgress,
     );
     expect(saved[0]!.promptVersion).toBe(PROMPT_VERSION);
+  });
+
+  describe("クリップ幅版(clipVariant)の配線(タスクD-2: ±10%↔±15%のA/B・新版並走)", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(条件替わり配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("deps.clipVariant='wide15' なら BuildPromptInput.clipVariant='wide15' が buildPrompt へ渡ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze: analyzeCapturing(captured), clipVariant: "wide15" },
+        onProgress,
+      );
+      expect(captured.value!.clipVariant).toBe("wide15");
+    });
+
+    it("deps.clipVariant未指定なら BuildPromptInput.clipVariant は既定('default')が渡ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze: analyzeCapturing(captured) },
+        onProgress,
+      );
+      expect(captured.value!.clipVariant).toBe("default");
+    });
+
+    it("LLM有り・deps.clipVariant='wide15': 保存レコードのpromptVersionが新版文字列になること", async () => {
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        }),
+      );
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze, clipVariant: "wide15" },
+        onProgress,
+      );
+      expect(saved[0]!.promptVersion).toBe(CLIP_VARIANTS.wide15.promptVersion);
+      expect(saved[0]!.promptVersion).not.toBe(PROMPT_VERSION);
+    });
+
+    it("LLMスキップ時はdeps.clipVariant='wide15'でも保存レコードのpromptVersionはnullのまま(プロンプト未使用)", async () => {
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), clipVariant: "wide15" },
+        onProgress,
+      );
+      expect(saved[0]!.promptVersion).toBeNull();
+    });
   });
 
   describe("条件替わり(妙味材料)の配線", () => {

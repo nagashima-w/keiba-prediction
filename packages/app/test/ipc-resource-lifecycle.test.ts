@@ -57,6 +57,7 @@ const validUpdate: SettingsUpdate = {
   baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
   autoSendDiscord: false,
   additionalInstruction: "",
+  clipVariant: "default",
 };
 
 /** 登録済みハンドラを取得する。 */

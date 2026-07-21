@@ -25,7 +25,12 @@ export interface AnalyzerConfig {
   readonly temperature: number;
   /**
    * 補正の最大幅(prior からの絶対値)。既定0.10(仕様「±10%以内」を絶対値0.10と解釈)。
-   * analyzeRace の deps.maxAdjust にそのまま渡してクリップ幅を制御する。
+   *
+   * 注意(タスクD-2で判明した設計上の記録): この値は AnthropicLlmClient.complete() 内では
+   * 一切参照されない(実際のクリップは parseAnalyzerResponse が受け取る
+   * AnalyzeRaceDeps.maxAdjust〈analyze-race.ts〉で行われ、そちらは呼び出し側〈pipeline-deps.ts〉が
+   * clip-variants.ts の CLIP_VARIANTS から別途解決して渡す設計にした)。このフィールドは
+   * 後方互換のために残すが、実際のクリップ幅制御には使われない(デッド。将来削除を検討)。
    */
   readonly maxAdjust: number;
   /** APIキー(省略時は環境変数 ANTHROPIC_API_KEY)。 */

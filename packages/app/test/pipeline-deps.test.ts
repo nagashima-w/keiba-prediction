@@ -1,5 +1,15 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
-import { parseKaisaiDate, parseRaceId, type FetchLike, type FetchResponse } from "@keiba/core";
+import {
+  CLIP_VARIANTS,
+  parseKaisaiDate,
+  parseRaceId,
+  resolveClipVariant,
+  type AnthropicMessageResponse,
+  type BuildPromptInput,
+  type FetchLike,
+  type FetchResponse,
+  type MessageSender,
+} from "@keiba/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -36,6 +46,99 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(typeof r.deps.saveAnalysis).toBe("function");
     expect(typeof r.deps.scrape).toBe("function");
     expect(typeof r.listRaces).toBe("function");
+  });
+
+  it("clipVariant未指定なら deps.clipVariant は対照('default')になること(タスクD-2: 配線疎通)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(r.deps.clipVariant).toBe("default");
+    // 実際に parseAnalyzerResponse へ渡る maxAdjust(analyzeRace の deps.maxAdjust)は、
+    // この deps.clipVariant を resolveClipVariant で解決した値と単一ソースで一致する
+    // (pipeline-deps.ts が config.clipVariant を1回だけ解決し、analyzeRace束縛とこのフィールドの
+    // 両方に同じ変数を使っているため。build-prompt.test.ts・clip-variants.test.ts の
+    // 「文面==クリップ幅」一致テストと合わせて全体の単一ソース性を保証する)。
+    expect(resolveClipVariant(r.deps.clipVariant).maxAdjust).toBe(CLIP_VARIANTS.default.maxAdjust);
+  });
+
+  it("clipVariant='wide15' を渡すと deps.clipVariant='wide15'(maxAdjust=0.15)が届くこと(タスクD-2: 配線疎通)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:", clipVariant: "wide15" });
+    resources.push(r);
+    expect(r.deps.clipVariant).toBe("wide15");
+    expect(resolveClipVariant(r.deps.clipVariant).maxAdjust).toBe(0.15);
+  });
+
+  it("clipVariantに不正な値を渡しても対照('default')へフォールバックすること(タスクD-2: 不正値フォールバック)", () => {
+    const r = createPipelineDeps({
+      dbPath: ":memory:",
+      clipVariant: "bogus" as unknown as Parameters<typeof createPipelineDeps>[0]["clipVariant"],
+    });
+    resources.push(r);
+    expect(r.deps.clipVariant).toBe("default");
+  });
+
+  describe("clipVariant→maxAdjustの配線が実際にparseAnalyzerResponseへ届くこと(タスクD-2: code-reviewer指摘対応の回帰テスト)", () => {
+    /**
+     * 常に prior+0.20 相当の place_prob(0.60。prior=0.40固定)を返す固定LLM応答。
+     * config.llmSender(テスト専用の差し替え口。AnthropicLlmClient の既存 deps.sender 注入口を
+     * pipeline-deps.ts が通すだけ)経由で、実ネットワーク・実API課金なしに deps.analyze を
+     * 実際に呼び出して検証できる。◎〇▲△の頭数制約(parseAnalyzerResponseの予想印検証)を
+     * 満たす埋め合わせ馬(馬番2〜4)も含める。
+     */
+    const fixedSender: MessageSender = async (): Promise<AnthropicMessageResponse> => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            horses: [
+              { number: 1, place_prob: 0.6, reason: "テスト応答", mark: "◎" },
+              { number: 2, place_prob: 0.3, reason: "x", mark: "〇" },
+              { number: 3, place_prob: 0.3, reason: "x", mark: "▲" },
+              { number: 4, place_prob: 0.3, reason: "x", mark: "△" },
+            ],
+          }),
+        },
+      ],
+    });
+
+    /** 馬番1(prior=0.40)が対象。2〜4は印の頭数制約を満たすための埋め合わせ。 */
+    function samplePromptInput(): BuildPromptInput {
+      return {
+        race: { courseType: "芝", distance: 1600 },
+        horses: [
+          { umaban: 1, horseName: "対象馬", prior: 0.4, runs: [] },
+          { umaban: 2, horseName: "馬2", prior: 0.3, runs: [] },
+          { umaban: 3, horseName: "馬3", prior: 0.3, runs: [] },
+          { umaban: 4, horseName: "馬4", prior: 0.3, runs: [] },
+        ],
+      };
+    }
+
+    it("clipVariant='wide15': prior+0.20の応答が実際にprior+0.15(0.55)へクリップされること", async () => {
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        clipVariant: "wide15",
+        llmSender: fixedSender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      const h1 = result.horses.find((h) => h.umaban === 1)!;
+      expect(h1.clipped).toBe(true);
+      expect(h1.adjustedProb).toBeCloseTo(0.4 + CLIP_VARIANTS.wide15.maxAdjust, 9); // 0.55
+    });
+
+    it("clipVariant既定(default): 同じprior+0.20の応答がprior+0.10(0.50)へクリップされること(wide15との差分確認)", async () => {
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: fixedSender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      const h1 = result.horses.find((h) => h.umaban === 1)!;
+      expect(h1.clipped).toBe(true);
+      expect(h1.adjustedProb).toBeCloseTo(0.4 + CLIP_VARIANTS.default.maxAdjust, 9); // 0.50
+    });
   });
 
   it("onFallback 未指定なら deps.onFallback は undefined であること(論点E)", () => {

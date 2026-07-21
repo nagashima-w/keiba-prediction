@@ -48,11 +48,12 @@ import {
   daysBetweenDates,
   DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
-  PROMPT_VERSION,
+  resolveClipVariant,
   venueKindOfRaceId,
   type AnalysisRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
+  type ClipVariantId,
   type ConditionChangeRun,
   type EstimatedPlaceConfig,
   type EvConfig,
@@ -106,6 +107,16 @@ export interface AnalysisPipelineDeps {
    * (LLMスキップ時はプロンプト自体を使っていないため null を保存する。promptVersionと同じ方針)。
    */
   readonly additionalInstruction?: string | null;
+  /**
+   * クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B・新版並走・2026-07-21 boss着手前ゲート合意)。
+   * 省略時・不正値は対照("default"、±10%)へフォールバックする(core resolveClipVariant に委譲)。
+   * この値を BuildPromptInput.clipVariant としてそのまま buildPrompt へ渡し(文面の許容幅表記に反映)、
+   * 保存する promptVersion もこの値から解決した ClipVariant.promptVersion を使う(単一ソース。D-3)。
+   * 呼び出し側(main/pipeline-deps.ts)は、parseAnalyzerResponse へ渡す
+   * AnalyzeRaceDeps.maxAdjust も同じ版から解決した値を deps.analyze の束縛時に渡す必要がある
+   * (文面とクリップ幅の食い違いを防ぐため、両者は同じ CLIP_VARIANTS エントリに由来させること)。
+   */
+  readonly clipVariant?: ClipVariantId;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
    * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(marksDroppedのみの
@@ -207,6 +218,10 @@ export async function runAnalysis(
   };
   // プロンプト追加指示(Task#28): 空文字・空白のみ・未指定は「注入なし」として扱う。
   const trimmedInstruction = (deps.additionalInstruction ?? "").trim();
+  // クリップ幅版(タスクD-2): 未指定・不正値は対照(default)へフォールバックする。
+  // buildPrompt へ渡す clipVariant と、保存する promptVersion の両方をこの1回の解決結果から使う
+  // (単一ソース。deps.clipVariant の文字列が不正でも resolveClipVariant が対照へ安全に丸める)。
+  const clipVariant = resolveClipVariant(deps.clipVariant);
 
   // (1) スクレイピング。
   notify({
@@ -344,6 +359,8 @@ export async function runAnalysis(
       }),
       additionalInstruction:
         trimmedInstruction === "" ? undefined : trimmedInstruction,
+      // クリップ幅版(タスクD-2)。buildPrompt の【指示】【追加指示】ブロックの許容幅表記に反映される。
+      clipVariant: clipVariant.id,
     };
     const analysis = await deps.analyze(promptInput);
     llmUsed = true;
@@ -414,10 +431,13 @@ export async function runAnalysis(
     raceId,
     analyzedAt,
     evEstimated,
-    // プロンプト版番号(Task#27): LLMを実際に使った(プロンプトを送った)分析のみ PROMPT_VERSION を
-    // 記録する。LLMスキップ(prior採用)はプロンプト自体を使っていないため null(版不明とは別の
-    // 「該当なし」だが、verifyの版別集計では版不明と同じ null グループにまとめて扱う)。
-    promptVersion: llmUsed ? PROMPT_VERSION : null,
+    // プロンプト版番号(Task#27。タスクD-2でクリップ幅版に対応): LLMを実際に使った(プロンプトを
+    // 送った)分析のみ、実際に使った clipVariant の promptVersion を記録する(対照なら従来どおり
+    // PROMPT_VERSION と同じ値。新版〈wide15〉ならその版専用の文字列になり、verifyの版別集計
+    // 〈computeVerifyReportByPromptVersion〉で対照と自動的に別グループとして比較できる)。
+    // LLMスキップ(prior採用)はプロンプト自体を使っていないため null(版不明とは別の「該当なし」だが、
+    // verifyの版別集計では版不明と同じ null グループにまとめて扱う)。
+    promptVersion: llmUsed ? clipVariant.promptVersion : null,
     // 追加指示(Task#28): プロンプトを実際に送った(LLMを使った)分析のみ記録する。
     // LLMスキップ(prior採用)はプロンプト自体を使っていないため null(promptVersionと同じ方針)。
     additionalInstruction:

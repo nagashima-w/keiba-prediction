@@ -291,10 +291,17 @@ export {
 export {
   buildPrompt,
   buildPromptPreview,
+  CLIP_VARIANTS,
+  clipAbsoluteLabel,
+  clipPercentLabel,
   computeReferenceEv,
+  DEFAULT_CLIP_VARIANT_ID,
   PROMPT_VERSION,
+  resolveClipVariant,
   type BuildPromptInput,
   type BuildPromptRaceInfo,
+  type ClipVariant,
+  type ClipVariantId,
   type PromptHorse,
   type PromptOikiri,
 } from "./analyzer/build-prompt.js";

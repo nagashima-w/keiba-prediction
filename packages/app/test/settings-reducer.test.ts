@@ -35,6 +35,7 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
     },
     autoSendDiscord: false,
     additionalInstruction: "",
+    clipVariant: "default",
     ...overrides,
   };
 }
@@ -74,6 +75,11 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
   });
 
+  it("読込成功でクリップ幅版(clipVariant)を反映すること(タスクD-2)", () => {
+    const s = loadedState(fakeMasked({ clipVariant: "wide15" }));
+    expect(s.clipVariant).toBe("wide15");
+  });
+
   it("各フィールドの入力アクションで値を更新する", () => {
     let s = loadedState();
     s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
@@ -94,6 +100,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
       type: "追加指示入力",
       value: "人気薄の複勝率は慎重に見積もること",
     });
+    s = settingsReducer(s, { type: "クリップ幅版選択", value: "wide15" });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -102,6 +109,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.baseScoreWeights.jockey).toBe("0.9");
     expect(s.autoSendDiscord).toBe(true);
     expect(s.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
+    expect(s.clipVariant).toBe("wide15");
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -223,6 +231,18 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     });
     const update = buildUpdate(s);
     expect(update.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
+  });
+
+  it("クリップ幅版(clipVariant)を含めること(タスクD-2)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "クリップ幅版選択", value: "wide15" });
+    const update = buildUpdate(s);
+    expect(update.clipVariant).toBe("wide15");
+  });
+
+  it("クリップ幅版未選択(既定)は'default'を含めること(タスクD-2)", () => {
+    const update = buildUpdate(loadedState());
+    expect(update.clipVariant).toBe("default");
   });
 });
 

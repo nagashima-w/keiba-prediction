@@ -24,12 +24,15 @@ import {
   listNarRaces,
   listRaces,
   parseRaceResult,
+  resolveClipVariant,
   ScrapeCache,
   scrapeRace,
   type BuildPromptInput,
+  type ClipVariantId,
   type EvConfig,
   type FetchLike,
   type KaisaiDate,
+  type MessageSender,
   type RaceId,
   type RaceListEntry,
   type ScorerConfig,
@@ -65,6 +68,24 @@ export interface PipelineWiringConfig {
    * runAnalysis 側で「注入なし」として扱われる。
    */
   readonly additionalInstruction?: string;
+  /**
+   * クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B・新版並走・2026-07-21 boss着手前ゲート合意)。
+   * 省略時・不正値は対照("default"、±10%)へフォールバックする(resolveClipVariant)。
+   * この設定から解決した単一の ClipVariant を、(a) analyzeRace へ渡す deps.maxAdjust の束縛、
+   * (b) AnalysisPipelineDeps.clipVariant(analysis-pipeline.ts が promptInput.clipVariant・
+   * 保存する promptVersion の解決に使う)の両方に用いる(文面とクリップ幅の食い違いを構造的に防ぐ。D-3)。
+   */
+  readonly clipVariant?: ClipVariantId;
+  /**
+   * テスト専用: LLM実送信関数の差し替え(code-reviewer指摘対応・2026-07-21)。
+   * 省略時(本番既定)は AnthropicLlmClient の既定sender(実SDK呼び出し)を使う。
+   * 指定すると、createPipelineDeps が組み立てる deps.analyze の LLM呼び出しがこの関数を経由する
+   * ようになり、実ネットワーク・実API課金なしに「clipVariant→maxAdjust→parseAnalyzerResponseの
+   * クリップ反映」という配線の核心区間(D-2)を単体テストで実際に踏んで検証できる
+   * (AnthropicLlmClient コンストラクタの既存 deps.sender 注入口〈anthropic-client.ts〉をそのまま
+   * 通すだけで、AnthropicLlmClient 自体・本番の既定挙動には一切手を入れない)。
+   */
+  readonly llmSender?: MessageSender;
   /**
    * HTTP取得に使う fetch(注入)。
    *
@@ -162,10 +183,20 @@ export function createPipelineDeps(
   // ことを確認済みのため、現時点で注入は不要。将来システムプロキシ整合(社内プロキシ経由の LLM 呼び出し)が
   // 必要になった場合に SDK の fetch 差し替え注入を再検討する。
   const useLlm = shouldUseLlm(config.apiKey);
+  // クリップ幅版(タスクD-2)を1回だけ解決し、analyzeRace への束縛(maxAdjust)と
+  // deps.clipVariant(analysis-pipeline.ts が promptInput.clipVariant・promptVersion の解決に使う)の
+  // 両方に同じ変数を使う(単一ソース。文面とクリップ幅が別々の値を参照して食い違う余地を無くす)。
+  const clipVariant = resolveClipVariant(config.clipVariant);
   const analyze = useLlm
     ? (input: BuildPromptInput) =>
         analyzeRace(input, {
-          llm: new AnthropicLlmClient({ apiKey: config.apiKey }),
+          // config.llmSender はテスト専用の差し替え口(省略時 undefined なら
+          // AnthropicLlmClient の既定sender=実SDK呼び出しのまま。本番挙動は不変)。
+          llm: new AnthropicLlmClient(
+            { apiKey: config.apiKey },
+            config.llmSender ? { sender: config.llmSender } : {},
+          ),
+          maxAdjust: clipVariant.maxAdjust,
         })
     : null;
 
@@ -177,6 +208,7 @@ export function createPipelineDeps(
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
     additionalInstruction: config.additionalInstruction,
+    clipVariant: clipVariant.id,
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",

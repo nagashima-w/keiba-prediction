@@ -177,6 +177,9 @@ const resourceManager = new ResourceManager<PipelineResources>({
       scorerConfig: buildScorerConfig(settings),
       evConfig: buildEvConfig(settings),
       additionalInstruction: settings.additionalInstruction,
+      // クリップ幅版(タスクD-2)。設定画面のセレクタで選んだ版をそのまま渡す
+      // (未設定・不正値は pipeline-deps.ts 側の resolveClipVariant が対照へフォールバックする)。
+      clipVariant: settings.clipVariant,
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,
       // HttpClient(core)のサポート外charset警告をログ基盤へ接続する(要修正4)。

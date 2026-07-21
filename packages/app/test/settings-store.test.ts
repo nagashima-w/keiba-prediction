@@ -30,6 +30,8 @@ describe("DEFAULT_APP_SETTINGS(既定設定)", () => {
     expect(DEFAULT_APP_SETTINGS.autoSendDiscord).toBe(false);
     // プロンプト追加指示(Task#28)は既定で空(何も注入しない)。
     expect(DEFAULT_APP_SETTINGS.additionalInstruction).toBe("");
+    // クリップ幅版(タスクD-2)は既定で対照("default"、±10%)。
+    expect(DEFAULT_APP_SETTINGS.clipVariant).toBe("default");
   });
 });
 
@@ -98,6 +100,18 @@ describe("coerceSettings(バリデーション+デフォルトマージ)", () =>
       coerceSettings({ additionalInstruction: "1行目\n2行目" }).additionalInstruction,
     ).toBe("1行目\n2行目");
   });
+
+  it("クリップ幅版(clipVariant)はCLIP_VARIANT_IDSに含まれる値ならそのまま採用すること(タスクD-2)", () => {
+    expect(coerceSettings({ clipVariant: "wide15" }).clipVariant).toBe("wide15");
+    expect(coerceSettings({ clipVariant: "default" }).clipVariant).toBe("default");
+  });
+
+  it("クリップ幅版(clipVariant)は未知の文字列・型違い・欠損はdefaultへフォールバックすること(タスクD-2: 不正値/未設定フォールバック)", () => {
+    expect(coerceSettings({ clipVariant: "bogus" }).clipVariant).toBe("default");
+    expect(coerceSettings({ clipVariant: 123 }).clipVariant).toBe("default");
+    expect(coerceSettings({ clipVariant: null }).clipVariant).toBe("default");
+    expect(coerceSettings({}).clipVariant).toBe("default");
+  });
 });
 
 describe("maskApiKey(APIキーのマスク)", () => {
@@ -134,6 +148,11 @@ describe("maskSettings(レンダラー向けマスク+環境変数優先)", () =
   it("プロンプト追加指示はAPIキーと違い平文のまま返す(Discord URLと同様の設計判断、Task#28)", () => {
     const masked = maskSettings(base, undefined);
     expect(masked.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
+  });
+
+  it("クリップ幅版(clipVariant)をそのまま返す(タスクD-2)", () => {
+    const masked = maskSettings({ ...base, clipVariant: "wide15" }, undefined);
+    expect(masked.clipVariant).toBe("wide15");
   });
 
   it("環境変数が設定済みなら環境変数を優先し fromEnv=true・環境キーをマスク", () => {
@@ -179,6 +198,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: true,
       additionalInstruction: "",
+      clipVariant: "default",
     });
     expect(next.apiKey).toBe("keep-me");
     expect(next.discordWebhookUrl).toBe("https://new.example.com/x");
@@ -195,6 +215,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
       additionalInstruction: "",
+      clipVariant: "default",
     });
     expect(replaced.apiKey).toBe("new-key");
 
@@ -206,6 +227,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
       additionalInstruction: "",
+      clipVariant: "default",
     });
     expect(cleared.apiKey).toBe("");
   });
@@ -220,6 +242,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
       additionalInstruction: "",
+      clipVariant: "default",
     });
     expect(withNull.apiKey).toBe("keep-me");
 
@@ -231,6 +254,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
       additionalInstruction: "",
+      clipVariant: "default",
     });
     expect(withNumber.apiKey).toBe("keep-me");
   });
@@ -243,6 +267,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
       additionalInstruction: "",
+      clipVariant: "default",
     });
     expect(next.evThreshold).toBe(1.0);
     expect(next.biasWeights.venue).toBe(DEFAULT_SCORER_CONFIG.weights.venue);
@@ -256,8 +281,35 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
       autoSendDiscord: false,
       additionalInstruction: "人気薄の複勝率は慎重に見積もること",
+      clipVariant: "default",
     });
     expect(next.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
+  });
+
+  it("clipVariantを渡すとそのまま反映される(タスクD-2)", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "wide15",
+    });
+    expect(next.clipVariant).toBe("wide15");
+  });
+
+  it("clipVariantに不正な値(未知の文字列・型違い)を渡すとdefaultへフォールバックすること(タスクD-2)", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "bogus" as unknown as AppSettings["clipVariant"],
+    });
+    expect(next.clipVariant).toBe("default");
   });
 });
 

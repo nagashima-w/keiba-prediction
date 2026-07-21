@@ -15,6 +15,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildPrompt,
   buildPromptPreview,
+  CLIP_VARIANTS,
+  clipAbsoluteLabel,
+  clipPercentLabel,
   computeReferenceEv,
   PROMPT_VERSION,
   type BuildPromptInput,
@@ -594,6 +597,72 @@ describe("buildPrompt(追加指示の注入口・Task#28 プロンプト改善C)
 });
 
 /**
+ * clipVariant(タスクD-2: ±10%↔±15%クリップ幅のA/B・新版並走)のテスト。
+ * 対照(clipVariant未指定 or "default")のバイト完全不変・新版(wide15)の文面反映・
+ * 単一ソース(CLIP_VARIANTS)からの機械導出・anti-anchoring等の非破壊を検証する。
+ */
+describe("clipVariant(タスクD-2: クリップ幅の版切替)", () => {
+  it("未指定は対照(±10%・絶対値0.10)のままで、明示的に'default'を渡した場合とバイト完全一致すること", () => {
+    const withoutVariant = buildPrompt(baseInput());
+    const withDefaultVariant = buildPrompt({ ...baseInput(), clipVariant: "default" });
+    expect(withoutVariant).toBe(withDefaultVariant);
+    expect(withoutVariant).toContain("±10%(絶対値0.10)以内に留めてください");
+  });
+
+  it("不正な版ID・未知の値は対照(±10%)へフォールバックすること(受け入れ条件: 不正値/未設定フォールバック)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      clipVariant: "bogus" as unknown as BuildPromptInput["clipVariant"],
+    });
+    expect(p).toBe(buildPrompt(baseInput()));
+  });
+
+  it("新版(wide15)は【指示】セクションの許容幅が「±15%(絶対値0.15)」になること", () => {
+    const p = buildPrompt({ ...baseInput(), clipVariant: "wide15" });
+    expect(p).toContain("±15%(絶対値0.15)以内に留めてください");
+    expect(p).not.toContain("±10%(絶対値0.10)");
+  });
+
+  it("新版(wide15)は追加指示ブロックの「3着内率±X%の制約」表記も±15%へ連動すること(D-6: 取りこぼし防止)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      clipVariant: "wide15",
+      additionalInstruction: "テスト指示",
+    });
+    expect(p).toContain("3着内率±15%の制約");
+    expect(p).not.toContain("3着内率±10%の制約");
+  });
+
+  it("文面の許容幅数値はCLIP_VARIANTSレジストリのmaxAdjustから機械導出されること(単一ソース保証・D-3)", () => {
+    const variant = CLIP_VARIANTS.wide15;
+    expect(variant.maxAdjust).toBe(0.15);
+    const p = buildPrompt({ ...baseInput(), clipVariant: variant.id });
+    // この期待文字列自体を variant.maxAdjust(=parseAnalyzerResponseへ渡るmaxAdjustと同一値。
+    // clip-variants.test.ts / pipeline-deps.test.ts の配線疎通テストと合わせて一致を保証する)から
+    // 動的に組み立てることで、ハードコードした数値同士の偶然の一致ではないことを示す。
+    expect(p).toContain(
+      `±${clipPercentLabel(variant.maxAdjust)}(絶対値${clipAbsoluteLabel(variant.maxAdjust)})`,
+    );
+  });
+
+  it("新版と対照の文面差分はクリップ幅の数値のみに局所化されること(anti-anchoring・出力スキーマ等は非破壊)", () => {
+    const defaultPrompt = buildPrompt(baseInput());
+    const wide15Prompt = buildPrompt({ ...baseInput(), clipVariant: "wide15" });
+    const normalizedWide15 = wide15Prompt
+      .replaceAll("±15%(絶対値0.15)", "±10%(絶対値0.10)")
+      .replaceAll("3着内率±15%の制約", "3着内率±10%の制約");
+    expect(normalizedWide15).toBe(defaultPrompt);
+  });
+
+  it("新版でもアンカリング禁止の指示文言が変わらず残ること", () => {
+    const p = buildPrompt({ ...baseInput(), clipVariant: "wide15" });
+    expect(p).toContain(
+      "3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。",
+    );
+  });
+});
+
+/**
  * buildPromptPreview(設定画面のプロンプトプレビュー用。実レース不要の決定論的サンプル)のテスト。
  * 設定画面で「実際にLLMへ送る文面」を確認できるようにする機能の一部(ユーザーフィードバック対応)。
  * 【レース情報】【出走馬】はサンプル(動的)だが、【指示】【予想印】制約・±10%・アンカリング禁止・
@@ -648,6 +717,15 @@ describe("buildPromptPreview(設定画面向けプロンプトプレビュー)",
     const p = buildPromptPreview("人気薄の複勝率は慎重に見積もること");
     expect(p).toContain("【追加指示");
     expect(p).toContain("人気薄の複勝率は慎重に見積もること");
+  });
+
+  it("clipVariant未指定は既定(±10%)のままであること(タスクD-2: 設定画面のプレビューにも版反映)", () => {
+    expect(buildPromptPreview(undefined)).toContain("±10%(絶対値0.10)以内に留めてください");
+  });
+
+  it("clipVariant='wide15' を渡すとプレビューにも±15%(絶対値0.15)が反映されること(タスクD-2)", () => {
+    const p = buildPromptPreview(undefined, "wide15");
+    expect(p).toContain("±15%(絶対値0.15)以内に留めてください");
   });
 
   /** プレビュー本文からセクション見出し(行頭「【」)のラベル部分(括弧内の説明文を除く)だけを抜き出す。 */

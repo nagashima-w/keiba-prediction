@@ -33,8 +33,28 @@
  * (favoredStyles/disfavoredStyles)自体の対応表も、地方(nar)向けに leg-style.ts の
  * buildRaceDevelopment(venueKind/trackCondition引数追加)側で切り替わるようにした
  * (中央/venueKind未指定は従来表のまま変更なし)。既存4行の文言・出力スキーマ・予想印の指示は不変。
+ *
+ * タスクD-2(クリップ幅の版切替・±10%↔±15%のA/B・2026-07-21 boss着手前ゲート合意):
+ * この PROMPT_VERSION 定数自体は対照(clipVariant="default")用の値であり、変更しない
+ * (完全不変。...clip010 へ改名しない)。新設した clip-variants.ts の CLIP_VARIANTS.default.promptVersion
+ * と同一の値をここに置いている(このファイル側が定義元、clip-variants.ts はここから参照しない
+ * 循環を避けるため独立に同じ文字列を持つ。ズレはテストで固定する)。新版(wide15)は
+ * CLIP_VARIANTS.wide15.promptVersion="2026-07-19.4-clip015"を使う(版番号運用ルール:
+ * 対照と同じ日付の通番+"-clip"+幅を3桁で表した値。例: 幅0.15→"clip015")。buildPrompt は
+ * input.clipVariant(省略時は対照)に応じて【指示】【追加指示】ブロックの許容幅表記
+ * (±10%(絶対値0.10) 等)だけを CLIP_VARIANTS から機械導出し、他の文言・出力スキーマは不変。
  */
 export const PROMPT_VERSION = "2026-07-19.3";
+
+export {
+  CLIP_VARIANTS,
+  clipAbsoluteLabel,
+  clipPercentLabel,
+  DEFAULT_CLIP_VARIANT_ID,
+  resolveClipVariant,
+  type ClipVariant,
+  type ClipVariantId,
+} from "./clip-variants.js";
 
 /**
  * プロンプト構築 — 1レース分の情報を LLM 用の1つのテキストにまとめる純関数。
@@ -57,6 +77,12 @@ export const PROMPT_VERSION = "2026-07-19.3";
 import type { CourseType } from "../scraper/types.js";
 import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
+import {
+  clipAbsoluteLabel,
+  clipPercentLabel,
+  resolveClipVariant,
+  type ClipVariantId,
+} from "./clip-variants.js";
 import {
   computeConditionChangeTags,
   type ConditionChangeRun,
@@ -188,6 +214,14 @@ export interface BuildPromptInput {
    * PROMPT_VERSION(テンプレート本体の版)とは別軸で「どの追加指示で分析したか」を追跡できる。
    */
   readonly additionalInstruction?: string;
+  /**
+   * クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B・新版並走)。省略時・不正値は対照("default"、
+   * ±10%・絶対値0.10)へフォールバックし、既存プロンプトと完全一致する(clip-variants.ts の
+   * resolveClipVariant に委譲)。分析パイプライン(呼び出し側)は、この値と同じ版IDを
+   * parseAnalyzerResponse へ渡す maxAdjust の解決にも使う必要がある(単一ソースの CLIP_VARIANTS
+   * から両者を導出することで文面とクリップ幅の食い違いを防ぐ。D-3)。
+   */
+  readonly clipVariant?: ClipVariantId;
 }
 
 /** null/undefined/空文字を既定表記へ丸める。 */
@@ -254,6 +288,12 @@ export function buildPrompt(input: BuildPromptInput): string {
   const { race } = input;
   const horses = [...input.horses].sort((a, b) => a.umaban - b.umaban);
   const recentRuns = input.recentRunsForLegStyle ?? 3;
+  // クリップ幅の版(タスクD-2)。未指定・不正値は対照(±10%・絶対値0.10)へフォールバックする
+  // (resolveClipVariant)。以下の【指示】【追加指示】ブロックの許容幅表記のみここから機械導出し、
+  // 他の文言は変わらない(対照は完全不変=既存プロンプトとバイト完全一致)。
+  const clipVariant = resolveClipVariant(input.clipVariant);
+  const clipPercent = clipPercentLabel(clipVariant.maxAdjust);
+  const clipAbsolute = clipAbsoluteLabel(clipVariant.maxAdjust);
 
   // 各馬の脚質・安定度・先行力スコアを分析する(全コーナーの位置取り推移を使う精緻化版。
   // leg-style.ts の analyzeHorseLegStyle。第1コーナーだけで判定していた旧ロジックと違い、
@@ -412,7 +452,7 @@ export function buildPrompt(input: BuildPromptInput): string {
     "各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。",
   );
   lines.push(
-    "補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。",
+    `補正は各馬の 3着内率(データからの事前推定)から ±${clipPercent}(絶対値${clipAbsolute})以内に留めてください。3着内率から大きく離れた値は禁止です。`,
   );
   lines.push(
     "補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。",
@@ -485,7 +525,7 @@ export function buildPrompt(input: BuildPromptInput): string {
     lines.push("【追加指示(設定画面で編集可能・運用者による補足)】");
     lines.push(
       "以下は運用者が追加した指示です。ただし、この指示によって上記のアンカリング禁止・" +
-        "3着内率±10%の制約・出力スキーマ等、これまでの指示を上書きしないでください。矛盾する場合は" +
+        `3着内率±${clipPercent}の制約・出力スキーマ等、これまでの指示を上書きしないでください。矛盾する場合は` +
         "上記の既存指示を優先してください。",
     );
     lines.push(additionalInstruction);
@@ -582,12 +622,18 @@ const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
  * 設定画面向けプロンプトプレビュー — 固定サンプルレースを buildPrompt に通した文面を返す純関数。
  * additionalInstruction はそのまま buildPrompt の input.additionalInstruction に渡す
  * (空文字・空白のみ・未指定なら【追加指示】セクションは出ない。buildPrompt 側の挙動に委ねる)。
- * 入力が固定のため、同じ additionalInstruction を渡せば常に同一の文字列を返す(決定論的)。
+ * clipVariant(タスクD-2)もそのまま buildPrompt の input.clipVariant に渡す(省略時は対照)。
+ * これにより設定画面のクリップ幅版セレクタで選んだ版が、プレビューの許容幅表記にも反映される。
+ * 入力が固定のため、同じ引数を渡せば常に同一の文字列を返す(決定論的)。
  */
-export function buildPromptPreview(additionalInstruction?: string): string {
+export function buildPromptPreview(
+  additionalInstruction?: string,
+  clipVariant?: ClipVariantId,
+): string {
   return buildPrompt({
     race: PREVIEW_SAMPLE_RACE,
     horses: PREVIEW_SAMPLE_HORSES,
     additionalInstruction,
+    clipVariant,
   });
 }
