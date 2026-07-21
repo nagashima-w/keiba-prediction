@@ -82,6 +82,7 @@
 |---|---|
 | `fixtures/nar_race_list_sub_20260712.html` | 終了日ベースの一覧(result.htmlリンク) |
 | `fixtures/nar_race_list_sub_20260713.html` | 発走前の一覧(shutuba.htmlリンク) |
+| `fixtures/nar_race_list_sub_20260624.html` | 2026-06-24の一覧。**さきたま杯(浦和・Jpn1、race_id=202642062411)**を含む(取得日: 2026-07-21、ユーザー許可のもと`narRaceListSubUrl`で最小限の実取得。当初候補にしていた帝王賞・大井はこの日程では非開催で、実際は浦和開催だった)。交流重賞(Jpn1)のグレード表記実物確認用。`Icon_Grade_None_Text Icon_GradeType Icon_GradeType19 Icon_GradePos01` の内テキストが `"Jpn1"`(アラビア数字。ローマ数字ではない)であることを確認(タスクB: jpnOnly絞り込みで有用) |
 | `fixtures/nar_shutuba_202654071210.html` | 高知10R(終了後)の出馬表 |
 | `fixtures/nar_shutuba_202642071301.html` | 浦和1R(発走前)の出馬表 |
 | `fixtures/nar_odds_b1_202654071210.html` | 発売後オッズ(単勝+複勝下限-上限が静的) |

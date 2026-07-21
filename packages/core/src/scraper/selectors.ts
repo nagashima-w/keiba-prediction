@@ -30,6 +30,16 @@ export const RACE_LIST_SELECTORS = {
   raceData: ".RaceData",
   /** 会場見出し内の回次・日次の注記(<small>2回</small> など)。会場名抽出時に除去する。 */
   titleAnnotation: "small",
+  /**
+   * グレードラベル(テキスト方式)。
+   * 実測(2026-06-24 浦和さきたま杯 Jpn1・2026-07-12 盛岡やまびこ賞 重賞・2026-07-13 瑞鳳賞 OP)で、
+   * NARは `Icon_Grade_None_Text Icon_GradeType Icon_GradeType{N} Icon_GradePos01` の内テキストに
+   * "Jpn1"/"重賞"/"OP" 等がそのまま入ることを確認済み(class番号も併記されるがテキストを優先採用)。
+   * 中央は同じ枠が `Icon_GradeType` のみ(Icon_Grade_None_Text クラス無し)で内テキストが常に空の
+   * 画像アイコン方式のため、このセレクタではマッチせず自然に undefined になる。
+   * 詳細: docs/nar-scraping-plan.md。
+   */
+  grade: ".Icon_Grade_None_Text",
 } as const;
 
 /** 出馬表(shutuba.html)のセレクタ。 */

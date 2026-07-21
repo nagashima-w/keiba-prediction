@@ -32,6 +32,14 @@ export interface RaceListEntry {
   readonly venue?: string;
   /** レース番号(1〜12)。 */
   readonly raceNumber: number;
+  /**
+   * グレードラベル(生テキストのまま)。交流重賞(例: Jpn1)・地方重賞(例: 重賞)・OP等。
+   * 実測(2026-06-24 浦和さきたま杯): アラビア数字の "Jpn1"(ローマ数字ではない)。
+   * 中央は画像アイコン方式で内テキストが常に空のため、常に undefined になる
+   * (中央の数値クラス→gradeマッピングは今回スコープ外)。
+   * grade span が存在しない/内テキストが空の行は undefined(空文字では拾わない)。
+   */
+  readonly grade?: string;
 }
 
 /** 馬体重とその増減(前走比)。未発表の場合は null で表す。 */
