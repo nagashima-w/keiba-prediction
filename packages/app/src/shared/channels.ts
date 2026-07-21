@@ -28,6 +28,13 @@ export const IPC_CHANNELS = {
    * 一括分析の中断(cancelBatchAnalysis)とは別の独立フラグ・別チャネル(bulkImportCancelRequestedに倣う)。
    */
   cancelCollectPeriodBatch: "analysis:period-batch-collect-cancel",
+  /**
+   * 期間バッチ「実行」(phase2。タスクC1)。phase1(collectPeriodBatch)が確定した
+   * targetRaces(raceId+その開催日の組)を受け取り、レースごとに自分の開催日で分析する。
+   * オーケストレーション本体・進捗(batchProgress)・中断(cancelBatchAnalysis)は
+   * 単日一括分析(runBatchAnalysis)とそのまま共有する(新規チャネルは実行の起点のみ)。
+   */
+  runPeriodBatchAnalysis: "analysis:run-period-batch",
   /** レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。 */
   importResult: "result:import",
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */

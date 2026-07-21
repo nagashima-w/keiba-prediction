@@ -484,7 +484,7 @@ export interface PeriodBatchState {
   readonly collectError: string | null;
   /**
    * 実行対象数が閾値(100件)を超え、実行前にユーザーへ再確認を促すべきか(boss合意の閾値)。
-   * collectResult取得時に targetRaceIds.length から算出して固定する。
+   * collectResult取得時に targetRaces.length から算出して固定する。
    */
   readonly needsReconfirmation: boolean;
   /** 先取得(phase1)の中断が要求され、日境界での停止を待っているか。 */
@@ -572,7 +572,7 @@ export function periodBatchReducer(
         collectResult: action.result,
         collectError: null,
         needsReconfirmation:
-          action.result.targetRaceIds.length >
+          action.result.targetRaces.length >
           PERIOD_BATCH_RECONFIRMATION_THRESHOLD,
         collectCanceling: false,
       };

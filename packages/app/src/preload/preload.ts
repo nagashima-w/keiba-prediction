@@ -35,6 +35,8 @@ const api: KeibaApi = {
     ipcRenderer.invoke(IPC_CHANNELS.runBatchAnalysis, raceIds, date),
   cancelBatchAnalysis: () =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelBatchAnalysis),
+  runPeriodBatchAnalysis: (targetRaces) =>
+    ipcRenderer.invoke(IPC_CHANNELS.runPeriodBatchAnalysis, targetRaces),
   onBatchProgress: (listener) => {
     const handler = (_event: IpcRendererEvent, progress: BatchProgress): void => {
       listener(progress);

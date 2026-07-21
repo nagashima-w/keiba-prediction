@@ -7,6 +7,7 @@ import type {
   DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
+  PeriodBatchTargetRace,
   PromptVersionVerifyReportView,
   RaceLedgerView,
   RaceListItem,
@@ -62,6 +63,18 @@ export interface KeibaApi {
    * @returns 購読を解除する関数
    */
   onBatchProgress(listener: (progress: BatchProgress) => void): () => void;
+
+  /**
+   * 期間バッチ「実行」(phase2。タスクC1)。phase1(collectPeriodBatch)が確定した
+   * targetRaces(raceId+その開催日の組)を渡すと、main側でレースごとに自分の開催日で分析する
+   * (単一の date を全レースへ使い回すと日跨ぎで開催日を取り違えるため、単日一括分析用の
+   * runBatchAnalysis とはシグネチャを分ける)。全体進捗・中断は既存の onBatchProgress /
+   * cancelBatchAnalysis をそのまま再利用する(同時に両方は走らない前提)。
+   * @param targetRaces 実行対象(phase1の PeriodBatchCollectResult.targetRaces をそのまま渡す)
+   */
+  runPeriodBatchAnalysis(
+    targetRaces: readonly PeriodBatchTargetRace[],
+  ): Promise<BatchRaceOutcome[]>;
 
   /**
    * レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。

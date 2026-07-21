@@ -20,6 +20,12 @@
  * - 各日の「境界」(次の日の処理に入る前)で shouldCancel() を確認し、要求されていれば
  *   残りの日を打ち切り、収集済みまでで確定する(cancelled=true)。
  *   分析フェーズの batchCancelRequested とは別概念で、この層は独自の shouldCancel 注入のみを見る。
+ *
+ * targetRaces(タスクC1で targetRaceIds から変更):
+ * - 中央のraceIdは暦日を含まず、raceId自体から開催日を復元できない。日跨ぎの期間バッチで
+ *   全レースに単一の date を後で割り当てると、日をまたぐレースの開催日を取り違える
+ *   (過去日較正が壊れる致命的バグ)。これを防ぐため、各実行対象レースに「そのレースが
+ *   見つかった列挙日(このループの date)」を kaisaiDate として1件ずつ添えて運ぶ。
  */
 
 import { enumerateDates, filterJpnOnlyEntries } from "@keiba/core";
@@ -60,14 +66,26 @@ export interface RangeCollectDeps {
   readonly shouldCancel?: () => boolean;
 }
 
+/**
+ * 実行対象1レース(raceId+そのレースが見つかった開催日の組。タスクC1)。
+ * 中央のraceIdは暦日を持たないため、phase2(実行)で各レースの正しい開催日を使えるよう、
+ * 収集時点の列挙日をレース単位で運ぶ。
+ */
+export interface RangeCollectTargetRace {
+  /** レースID。 */
+  readonly raceId: RaceId;
+  /** このレースが見つかった開催日(enumerateDatesの列挙日)。 */
+  readonly kaisaiDate: KaisaiDate;
+}
+
 /** collectRaceIdsOverRange の戻り値。 */
 export interface RangeCollectResult {
   /** 収集成功レース総数(dedup前)。failureになった日のレースは含まれない。 */
   readonly totalRaces: number;
   /** dedupにより除外(現行版で分析済み)された件数。 */
   readonly skippedAlreadyAnalyzed: number;
-  /** 実行対象のレースID(dedup後、収集順)。 */
-  readonly targetRaceIds: readonly RaceId[];
+  /** 実行対象のレース(dedup後、収集順。raceIdごとに自分の開催日を持つ。タスクC1)。 */
+  readonly targetRaces: readonly RangeCollectTargetRace[];
   /** lister が失敗(throw)した日の一覧。 */
   readonly failureDays: readonly KaisaiDate[];
   /** 日ごとのアウトカム(処理した日のみ。shouldCancelで打ち切られた残りは含まない)。 */
@@ -112,7 +130,7 @@ export async function collectRaceIdsOverRange(
 
   let totalRaces = 0;
   let skippedAlreadyAnalyzed = 0;
-  const targetRaceIds: RaceId[] = [];
+  const targetRaces: RangeCollectTargetRace[] = [];
   const failureDays: KaisaiDate[] = [];
   const perDayOutcome: DayOutcome[] = [];
   let cancelled = false;
@@ -145,7 +163,8 @@ export async function collectRaceIdsOverRange(
           if (isAlreadyAnalyzedWithCurrentVersion(entryItem.raceId, deps)) {
             skippedAlreadyAnalyzed += 1;
           } else {
-            targetRaceIds.push(entryItem.raceId);
+            // このレースが見つかった列挙日(date)を、レースIDと一緒に1件ずつ運ぶ(タスクC1)。
+            targetRaces.push({ raceId: entryItem.raceId, kaisaiDate: date });
           }
         }
       }
@@ -160,7 +179,7 @@ export async function collectRaceIdsOverRange(
   return {
     totalRaces,
     skippedAlreadyAnalyzed,
-    targetRaceIds,
+    targetRaces,
     failureDays,
     perDayOutcome,
     cancelled,

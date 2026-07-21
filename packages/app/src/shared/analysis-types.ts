@@ -536,8 +536,22 @@ export type PeriodBatchDayOutcomeView =
   | { readonly date: string; readonly status: "failure"; readonly error: string };
 
 /**
- * 期間バッチ「先取得+件数算出」フェーズ(phase1)の結果(タスクB2b-1)。
- * 実際の分析実行(phase2)は行わず、対象レースIDと件数の算出までを表す
+ * 期間バッチの実行対象1レース(表示用・IPC共有用。タスクC1)。
+ * 中央のraceIdは暦日を持たないため、収集時にそのレースが見つかった開催日(kaisaiDate)を
+ * レースごとに運ぶ(main/range-collect.ts の RangeCollectTargetRace のプレーン写し)。
+ * phase2(期間バッチ実行ハンドラ)はこの kaisaiDate でレースごとに runAnalysis を呼び分け、
+ * 日跨ぎのレースで開催日を取り違えない(単一共有dateを渡すバグを構造的に防ぐ)。
+ */
+export interface PeriodBatchTargetRace {
+  /** レースID(12桁)。 */
+  readonly raceId: string;
+  /** このレースが見つかった開催日(YYYYMMDD)。 */
+  readonly kaisaiDate: string;
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」フェーズ(phase1)の結果(タスクB2b-1、targetRacesはタスクC1で導入)。
+ * 実際の分析実行(phase2)は行わず、対象レース(raceId+kaisaiDate)と件数の算出までを表す
  * (main/range-collect.ts の RangeCollectResult のプレーン写し。IPC越しの共有用)。
  */
 export interface PeriodBatchCollectResult {
@@ -545,8 +559,8 @@ export interface PeriodBatchCollectResult {
   readonly totalRaces: number;
   /** dedupにより除外(現行版で分析済み)された件数。 */
   readonly skippedAlreadyAnalyzed: number;
-  /** 実行対象のレースID(dedup後、収集順)。 */
-  readonly targetRaceIds: readonly string[];
+  /** 実行対象のレース(dedup後、収集順。raceIdごとに自分のkaisaiDateを持つ。タスクC1)。 */
+  readonly targetRaces: readonly PeriodBatchTargetRace[];
   /** lister が失敗(throw)した日の一覧。 */
   readonly failureDays: readonly string[];
   /** 日ごとのアウトカム(処理した日のみ)。 */

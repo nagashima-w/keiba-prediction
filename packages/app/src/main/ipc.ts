@@ -33,6 +33,7 @@ import type {
   LogExportOutcome,
   PeriodBatchCollectResult,
   PeriodBatchDayOutcomeView,
+  PeriodBatchTargetRace,
   PromptVersionVerifyReportView,
   RaceLedgerView,
   RaceListItem,
@@ -123,6 +124,12 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.cancelCollectPeriodBatch, () =>
     handleCancelCollectPeriodBatch(),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.runPeriodBatchAnalysis,
+    (event, targetRaces: unknown) =>
+      handleRunPeriodBatchAnalysis(event, normalizePeriodBatchTargetRaces(targetRaces)),
   );
 
   ipcMain.handle(IPC_CHANNELS.importResult, (_event, raceId: unknown) =>
@@ -291,6 +298,9 @@ let batchCancelRequested = false;
 /** 一括分析の per-race 失敗ログの操作名(全体起動の失敗ログとは区別する)。 */
 const BATCH_ANALYSIS_RACE_OPERATION = `${IPC_CHANNELS.runBatchAnalysis}:race`;
 
+/** 期間バッチ実行(phase2)の per-race 失敗ログの操作名(タスクC1)。 */
+const PERIOD_BATCH_ANALYSIS_RACE_OPERATION = `${IPC_CHANNELS.runPeriodBatchAnalysis}:race`;
+
 /**
  * HttpClient(core)のサポート外charset警告の操作名(要修正4)。
  * core は electron に依存できないため console.warn が既定だが、main プロセスでは
@@ -379,7 +389,11 @@ function toPeriodBatchCollectResult(
   return {
     totalRaces: result.totalRaces,
     skippedAlreadyAnalyzed: result.skippedAlreadyAnalyzed,
-    targetRaceIds: result.targetRaceIds.map(String),
+    // ブランド型(RaceId/KaisaiDate)からプレーンな string へ(タスクC1: レースごとのkaisaiDateを保持)。
+    targetRaces: result.targetRaces.map((t) => ({
+      raceId: String(t.raceId),
+      kaisaiDate: String(t.kaisaiDate),
+    })),
     failureDays: result.failureDays.map(String),
     perDayOutcome,
     cancelled: result.cancelled,
@@ -439,6 +453,94 @@ async function handleCollectPeriodBatch(
 /** 期間バッチ先取得(phase1)の中断要求ハンドラ。次の日境界で停止させるためフラグを立てる。 */
 function handleCancelCollectPeriodBatch(): void {
   periodBatchCollectCancelRequested = true;
+}
+
+/**
+ * renderer から渡された targetRaces(unknown)を、プレーンな PeriodBatchTargetRace[] へ
+ * 防御的に正規化する(要修正2)。IPC引数は信頼できない外部入力のため:
+ * - 配列でなければ空配列を返す。
+ * - 要素が非オブジェクト・null(typeof null は"object"のため明示的に除外)なら、その要素を
+ *   安全側で読み飛ばす(raceId/kaisaiDate に触れず素通しで例外を投げない)。
+ * - 有効な要素は raceId/kaisaiDate を String() 化する(既存 handleRunBatchAnalysis の
+ *   `(Array.isArray(raceIds)?raceIds:[]).map(String)` と同じ「信頼しない」流儀)。
+ */
+function normalizePeriodBatchTargetRaces(value: unknown): PeriodBatchTargetRace[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: PeriodBatchTargetRace[] = [];
+  for (const v of value) {
+    if (typeof v !== "object" || v === null) {
+      continue;
+    }
+    const t = v as { raceId?: unknown; kaisaiDate?: unknown };
+    result.push({ raceId: String(t.raceId), kaisaiDate: String(t.kaisaiDate) });
+  }
+  return result;
+}
+
+/**
+ * 期間バッチ「実行」(phase2。タスクC1)ハンドラの実処理。
+ *
+ * phase1(collectPeriodBatch)が確定した targetRaces(raceId+そのレースの開催日)を受け取り、
+ * レースごとに自分の kaisaiDate で runAnalysis を呼び分ける。単日一括分析の
+ * handleRunBatchAnalysis(全レース共通の単一 date)をそのまま使うと、日跨ぎの期間バッチでは
+ * 一部レースの開催日を取り違える(過去日較正が壊れる致命的バグ)ため、専用ハンドラとして分離する。
+ *
+ * オーケストレーション本体(runBatchAnalysis)・進捗チャネル(batchProgress)・
+ * 中断フラグ(batchCancelRequested)は単日一括分析とそのまま共有する(両者は同時に走らない前提。
+ * bulkImportCancelRequested のような別フラグを新設するほどの独立性は不要という boss合意)。
+ *
+ * 開催日の束縛は raceId をキーにした Map ではなく「位置(呼び出し順)」で行う(要修正1)。
+ * raceId をキーにすると、targetRaces に同一 raceId が複数回出現した場合に後勝ちで
+ * 上書きされ、先に出現したレースが誤った開催日で分析されてしまう(較正データの正しさを
+ * 「raceIdの一意性」という暗黙の前提に委ねてしまう)。runBatchAnalysis の analyzeOne は
+ * raceIds を渡した順に、境界(中断判定)ごとに最大1回ずつ・欠番無く呼ばれる
+ * (中断時は残り全部をまとめてスキップするだけで、途中の呼び出しを飛ばすことは無い)ため、
+ * 呼ばれた回数をそのまま targetRaces の添字として使えば、raceId の重複があっても
+ * 各出現が自分の開催日を正しく引ける。万一 targetRaces と呼び出し順がずれた場合は
+ * (raceIds 生成ロジックが変わる等の将来の実装ミスを検知するため)raceId 不一致を
+ * 明示的なエラーとして投げ、黙って誤った開催日を使わない。
+ */
+async function handleRunPeriodBatchAnalysis(
+  event: IpcMainInvokeEvent,
+  targetRaces: readonly PeriodBatchTargetRace[],
+): Promise<BatchRaceOutcome[]> {
+  return withErrorLogging(
+    IPC_CHANNELS.runPeriodBatchAnalysis,
+    undefined,
+    async () => {
+      const raceIds = targetRaces.map((t) => t.raceId);
+      // 新しいバッチの開始時に前回の中断要求を必ずクリアする(単日一括分析と共有するフラグ)。
+      batchCancelRequested = false;
+      let callIndex = 0;
+      return resourceManager.runExclusive(({ deps }) =>
+        runBatchAnalysis(raceIds, {
+          // 位置(呼び出し順)でその出現の開催日に束縛する(日跨ぎ・raceId重複の取り違え防止の核心)。
+          analyzeOne: (raceIdStr, onStage) => {
+            const target = targetRaces[callIndex];
+            callIndex += 1;
+            if (target === undefined || target.raceId !== raceIdStr) {
+              throw new Error(
+                `期間バッチ実行: targetRacesとの対応がずれています(index=${
+                  callIndex - 1
+                }, raceId=${raceIdStr})`,
+              );
+            }
+            const kaisaiDate = parseKaisaiDateOrNull(target.kaisaiDate);
+            return runAnalysis(parseRaceId(raceIdStr), kaisaiDate, deps, onStage);
+          },
+          shouldCancel: () => batchCancelRequested,
+          onProgress: (progress: BatchProgress) => {
+            event.sender.send(IPC_CHANNELS.batchProgress, progress);
+          },
+          onError: (raceId, error) => {
+            logError(PERIOD_BATCH_ANALYSIS_RACE_OPERATION, error, { raceId });
+          },
+        }),
+      );
+    },
+  );
 }
 
 /**

@@ -436,15 +436,18 @@ describe("不変性", () => {
   });
 });
 
-/** テスト用のphase1収集結果を組み立てる(targetRaceIds件数だけ指定できる)。 */
+/** テスト用のphase1収集結果を組み立てる(targetRaces件数だけ指定できる)。 */
 function fakeCollectResult(
-  targetRaceIdCount: number,
+  targetRaceCount: number,
   overrides: Partial<PeriodBatchCollectResult> = {},
 ): PeriodBatchCollectResult {
   return {
-    totalRaces: targetRaceIdCount,
+    totalRaces: targetRaceCount,
     skippedAlreadyAnalyzed: 0,
-    targetRaceIds: Array.from({ length: targetRaceIdCount }, (_, i) => `R${i}`),
+    targetRaces: Array.from({ length: targetRaceCount }, (_, i) => ({
+      raceId: `R${i}`,
+      kaisaiDate: "20260710",
+    })),
     failureDays: [],
     perDayOutcome: [],
     cancelled: false,
@@ -478,7 +481,7 @@ describe("periodBatchReducer(期間バッチの状態遷移。タスクB2b-1)", 
       expect(s.collectError).toBeNull();
     });
 
-    it("収集成功でphaseがcollectedになり、収集結果(3値+failureDays+cancelled+targetRaceIds)を保持すること", () => {
+    it("収集成功でphaseがcollectedになり、収集結果(3値+failureDays+cancelled+targetRaces)を保持すること", () => {
       let s = createInitialPeriodBatchState();
       s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
       const result = fakeCollectResult(3, {
@@ -493,7 +496,7 @@ describe("periodBatchReducer(期間バッチの状態遷移。タスクB2b-1)", 
       expect(s.collectResult).toEqual(result);
       expect(s.collectResult?.totalRaces).toBe(5);
       expect(s.collectResult?.skippedAlreadyAnalyzed).toBe(2);
-      expect(s.collectResult?.targetRaceIds).toHaveLength(3);
+      expect(s.collectResult?.targetRaces).toHaveLength(3);
       expect(s.collectResult?.failureDays).toEqual(["20260711"]);
       expect(s.collectResult?.cancelled).toBe(true);
     });
