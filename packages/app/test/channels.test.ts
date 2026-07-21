@@ -35,6 +35,12 @@ describe("IPCチャネル定義", () => {
     expect(IPC_CHANNELS.runPeriodBatchAnalysis).toBe("analysis:run-period-batch");
   });
 
+  it("期間バッチの先取得(phase1)進捗チャネルが定義されている(タスクC2)", () => {
+    expect(IPC_CHANNELS.periodBatchCollectProgress).toBe(
+      "analysis:period-batch-collect-progress",
+    );
+  });
+
   it("一括サマリのDiscord送信チャネルが定義されている", () => {
     expect(IPC_CHANNELS.sendBatchDiscord).toBe("notify:discord-batch");
   });

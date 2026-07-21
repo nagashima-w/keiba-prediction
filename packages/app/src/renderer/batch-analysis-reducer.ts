@@ -532,7 +532,8 @@ export type PeriodBatchAction =
   | {
       readonly type: "期間バッチ実行完了";
       readonly outcomes: readonly BatchRaceOutcome[];
-    };
+    }
+  | { readonly type: "期間バッチリセット" };
 
 /** 期間バッチの状態遷移(純関数)。単日一括分析(batchAnalysisReducer)には一切影響しない。 */
 export function periodBatchReducer(
@@ -623,6 +624,16 @@ export function periodBatchReducer(
         phase: "done",
         run: { running: false, progress: null, outcomes: action.outcomes },
       };
+
+    case "期間バッチリセット":
+      // 「表示中のfrom/to/targetは常に確定実行対象(collectResult)と一致する」不変条件を
+      // 守るための「やり直す」導線(タスクC2重大修正)。収集中(collecting)・実行中(running)は
+      // 中断してからでないとやり直せない(in-flight の取り違え防止。no-op)。
+      // それ以外(idle/collected/done)は常に初期状態(idle)へ戻し、フォーム編集を再び可能にする。
+      if (state.phase === "collecting" || state.phase === "running") {
+        return state;
+      }
+      return createInitialPeriodBatchState();
 
     default: {
       // 網羅性チェック(未知のアクションはコンパイル時に検出)。

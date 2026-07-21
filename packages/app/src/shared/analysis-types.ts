@@ -536,6 +536,18 @@ export type PeriodBatchDayOutcomeView =
   | { readonly date: string; readonly status: "failure"; readonly error: string };
 
 /**
+ * 期間バッチ「先取得」(phase1)の全体進捗(main→renderer に webContents.send で通知。タスクC2)。
+ * main/range-collect.ts の onProgress コールバックのペイロードと同じ形(日単位の単純な件数。
+ * レース内段階が無い点は BulkImportProgress と同じ流儀)。
+ */
+export interface PeriodBatchCollectProgress {
+  /** 収集を完了した日数(0起点ではなく、処理し終えた日数。1件目完了時点で1)。 */
+  readonly completedDays: number;
+  /** 期間内の総日数。 */
+  readonly totalDays: number;
+}
+
+/**
  * 期間バッチの実行対象1レース(表示用・IPC共有用。タスクC1)。
  * 中央のraceIdは暦日を持たないため、収集時にそのレースが見つかった開催日(kaisaiDate)を
  * レースごとに運ぶ(main/range-collect.ts の RangeCollectTargetRace のプレーン写し)。

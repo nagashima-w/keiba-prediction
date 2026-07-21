@@ -114,8 +114,9 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.collectPeriodBatch,
-    (_event, from: unknown, to: unknown, target: unknown) =>
+    (event, from: unknown, to: unknown, target: unknown) =>
       handleCollectPeriodBatch(
+        event,
         String(from),
         String(to),
         normalizeRaceListTarget(target),
@@ -413,8 +414,13 @@ function toPeriodBatchCollectResult(
  * 収集ループ全体(bulk query・dedup判定)で使い回す。実行中に設定のクリップ版が変わっても
  * このphase1呼び出し内では変わらない(実行〈phase2〉は実行時点の版で走るため実害はないbest-effort最適化。
  * boss合意の非ブロッキング留意事項)。
+ *
+ * 進捗(タスクC2): collectRaceIdsOverRange の onProgress(日ごとの completedDays/totalDays)を
+ * periodBatchCollectProgress チャネルで renderer へ一方向通知する(一括分析のbatchProgressとは
+ * 別チャネル。日単位の先取得と、レース単位の実行は意味が異なるため)。
  */
 async function handleCollectPeriodBatch(
+  event: IpcMainInvokeEvent,
   fromStr: string,
   toStr: string,
   target: RaceListTarget,
@@ -437,6 +443,9 @@ async function handleCollectPeriodBatch(
           resources.listAnalyzedRaceIdsByPromptVersion(currentPromptVersion),
         );
         return collectRaceIdsOverRange(from, to, target, {
+          onProgress: (progress) => {
+            event.sender.send(IPC_CHANNELS.periodBatchCollectProgress, progress);
+          },
           listDayRaces: (date, t) =>
             t === "central" ? resources.listRaces(date) : resources.listNarRaces(date),
           analyzedPromptVersionsOf: (raceId) =>

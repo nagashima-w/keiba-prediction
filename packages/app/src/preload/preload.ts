@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import type { KeibaApi } from "../shared/api.js";
-import type { BatchProgress, BulkImportProgress } from "../shared/analysis-types.js";
+import type {
+  BatchProgress,
+  BulkImportProgress,
+  PeriodBatchCollectProgress,
+} from "../shared/analysis-types.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 
 /**
@@ -37,6 +41,22 @@ const api: KeibaApi = {
     ipcRenderer.invoke(IPC_CHANNELS.cancelBatchAnalysis),
   runPeriodBatchAnalysis: (targetRaces) =>
     ipcRenderer.invoke(IPC_CHANNELS.runPeriodBatchAnalysis, targetRaces),
+  collectPeriodBatch: (from, to, target) =>
+    ipcRenderer.invoke(IPC_CHANNELS.collectPeriodBatch, from, to, target),
+  cancelCollectPeriodBatch: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelCollectPeriodBatch),
+  onPeriodBatchCollectProgress: (listener) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      progress: PeriodBatchCollectProgress,
+    ): void => {
+      listener(progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.periodBatchCollectProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.periodBatchCollectProgress, handler);
+    };
+  },
   onBatchProgress: (listener) => {
     const handler = (_event: IpcRendererEvent, progress: BatchProgress): void => {
       listener(progress);

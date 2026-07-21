@@ -29,6 +29,13 @@ export const IPC_CHANNELS = {
    */
   cancelCollectPeriodBatch: "analysis:period-batch-collect-cancel",
   /**
+   * 期間バッチ「先取得」(phase1)の全体進捗イベント(main→renderer への一方向通知。タスクC2)。
+   * 一括分析の全体進捗(batchProgress)とは別チャネル(先取得は日単位、実行はレース単位で
+   * 意味が異なるため)。ペイロードは {completedDays, totalDays} のみの単純な件数
+   * (bulkImportProgressと同じ「レース内段階の無い単純な件数」の流儀)。
+   */
+  periodBatchCollectProgress: "analysis:period-batch-collect-progress",
+  /**
    * 期間バッチ「実行」(phase2。タスクC1)。phase1(collectPeriodBatch)が確定した
    * targetRaces(raceId+その開催日の組)を受け取り、レースごとに自分の開催日で分析する。
    * オーケストレーション本体・進捗(batchProgress)・中断(cancelBatchAnalysis)は

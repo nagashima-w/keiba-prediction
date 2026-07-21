@@ -654,6 +654,67 @@ describe("periodBatchReducer(期間バッチの状態遷移。タスクB2b-1)", 
     });
   });
 
+  describe("リセット(やり直す。タスクC2重大修正: 表示中のfrom/to/targetと確定実行対象の不一致を防ぐ導線)", () => {
+    it("収集済み(collected)状態でリセットするとidleへ戻り、collectResultがnullになること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(3),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s.phase).toBe("idle");
+      expect(s.collectResult).toBeNull();
+      expect(s.needsReconfirmation).toBe(false);
+    });
+
+    it("完了(done)状態でリセットするとidleへ戻ること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(1),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      s = periodBatchReducer(s, { type: "期間バッチ実行完了", outcomes: [] });
+      expect(s.phase).toBe("done");
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s.phase).toBe("idle");
+      expect(s.collectResult).toBeNull();
+      expect(s.run.outcomes).toEqual([]);
+    });
+
+    it("収集中(collecting)のリセットは無視されること(中断してからでないとやり直せない)", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      const collectingState = s;
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s).toBe(collectingState);
+      expect(s.phase).toBe("collecting");
+    });
+
+    it("実行中(running)のリセットは無視されること(中断してからでないとやり直せない)", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(1),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      const runningState = s;
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s).toBe(runningState);
+      expect(s.phase).toBe("running");
+    });
+
+    it("idle状態でのリセットも安全に初期状態を返すこと", () => {
+      const s = createInitialPeriodBatchState();
+      const after = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(after.phase).toBe("idle");
+      expect(after.collectResult).toBeNull();
+    });
+  });
+
   describe("単日一括分析の状態遷移への回帰影響が無いこと", () => {
     it("periodBatchReducerはBatchAppState(単日)を一切変更しない(別スライス)", () => {
       const batchState = withRaces();

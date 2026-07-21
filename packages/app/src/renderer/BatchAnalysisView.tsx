@@ -34,6 +34,11 @@ import {
 export interface BatchAnalysisViewProps {
   /** 選択中のレース数(実行ボタンの有効判定に使う)。 */
   readonly selectedCount: number;
+  /**
+   * 期間バッチが収集中/実行中などの理由で、実行ボタンを外部から無効化するか(タスクC2、
+   * deriveBatchAvailability由来)。省略時は false(従来どおり)。
+   */
+  readonly disabledByOtherBatch?: boolean;
   /** 一括分析の実行中か。 */
   readonly running: boolean;
   /** 中断要求済み(境界での停止待ち)か。 */
@@ -225,7 +230,11 @@ export function BatchAnalysisView(
         <button
           type="button"
           onClick={props.onRun}
-          disabled={props.selectedCount === 0 || props.running}
+          disabled={
+            props.selectedCount === 0 ||
+            props.running ||
+            (props.disabledByOtherBatch ?? false)
+          }
         >
           {props.running
             ? "分析中…"

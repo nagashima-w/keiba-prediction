@@ -7,10 +7,13 @@ import type {
   DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
+  PeriodBatchCollectProgress,
+  PeriodBatchCollectResult,
   PeriodBatchTargetRace,
   PromptVersionVerifyReportView,
   RaceLedgerView,
   RaceListItem,
+  RaceListTarget,
   RaceVenueKind,
   VerifyReportView,
   VerifyVenueFilter,
@@ -75,6 +78,35 @@ export interface KeibaApi {
   runPeriodBatchAnalysis(
     targetRaces: readonly PeriodBatchTargetRace[],
   ): Promise<BatchRaceOutcome[]>;
+
+  /**
+   * 期間バッチ「先取得+件数算出」(phase1。タスクB2b-1/C2)。指定期間・取得対象からレースIDを
+   * 収集し件数を返すのみで、LLM分析(runPeriodBatchAnalysis/runBatchAnalysis)は一切呼ばない。
+   * 全体進捗は onPeriodBatchCollectProgress で購読する。
+   * @param from 開始日(YYYYMMDD)
+   * @param to 終了日(YYYYMMDD)
+   * @param target 取得対象(中央/地方(全て)/地方(Jpnのみ))
+   */
+  collectPeriodBatch(
+    from: string,
+    to: string,
+    target: RaceListTarget,
+  ): Promise<PeriodBatchCollectResult>;
+
+  /**
+   * 実行中の期間バッチ先取得(phase1)に中断を要求する。次の日境界で停止する
+   * (一括分析の中断=cancelBatchAnalysisとは独立。実行していないときは無視される)。
+   */
+  cancelCollectPeriodBatch(): Promise<void>;
+
+  /**
+   * 期間バッチ先取得(phase1)の全体進捗イベントを購読する。
+   * @param listener 全体進捗(完了日数・総日数)を受け取るコールバック
+   * @returns 購読を解除する関数
+   */
+  onPeriodBatchCollectProgress(
+    listener: (progress: PeriodBatchCollectProgress) => void,
+  ): () => void;
 
   /**
    * レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。
