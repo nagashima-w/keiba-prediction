@@ -132,6 +132,11 @@ export interface PipelineResources {
    */
   readonly listUnimportedRaceIds: () => readonly string[];
   /**
+   * 指定したプロンプト版で分析済みのレースIDをレースID昇順で列挙する(タスクB2b-1 期間バッチの
+   * dedup bulk query)。AnalysisStore.listAnalyzedRaceIdsByPromptVersion に委ねる。
+   */
+  readonly listAnalyzedRaceIdsByPromptVersion: (version: string) => readonly string[];
+  /**
    * 検証レポート(累積回収率・キャリブレーション表)を取得する。
    * @param venueKind 開催区分フィルタ(Task#32)。省略時は "all"(全体、従来どおり)。
    */
@@ -234,6 +239,8 @@ export function createPipelineDeps(
         saveResult: (rid, entries) => store.saveResult(rid, entries),
       }),
     listUnimportedRaceIds: (): readonly string[] => store.listUnimportedRaceIds(),
+    listAnalyzedRaceIdsByPromptVersion: (version: string): readonly string[] =>
+      store.listAnalyzedRaceIdsByPromptVersion(version),
     getVerifyReport: (venueKind?: VerifyVenueFilter): VerifyReportView =>
       computeVerifyReport(store, undefined, venueKind),
     getVerifyReportByPromptVersion: (): readonly PromptVersionVerifyReportView[] =>

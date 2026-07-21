@@ -524,6 +524,28 @@ export class AnalysisStore {
   }
 
   /**
+   * 指定したプロンプト版(prompt_version)で分析済みのレースIDをレースID昇順で列挙する
+   * (タスクB2b-1 期間バッチのdedup bulk query)。
+   *
+   * `listUnimportedRaceIds` と同じ流儀で DISTINCT により、同一レースを同じ版で複数回
+   * 分析していても1回だけ返す。`prompt_version = ?` の等価比較は SQLite の NULL 比較の
+   * 性質上 NULL 行(版不明・LLM未使用)にはマッチしないため、版不明のレースは列挙されない
+   * (呼び出し側〈期間バッチのdedup〉は「別版のみ/null」を実行対象に含める前提のため、
+   * この非マッチは意図した挙動)。
+   */
+  listAnalyzedRaceIdsByPromptVersion(version: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT race_id AS raceId
+           FROM ${ANALYSES_TABLE}
+           WHERE prompt_version = ?
+           ORDER BY race_id`,
+      )
+      .all(version) as Array<{ raceId: string }>;
+    return rows.map((r) => r.raceId);
+  }
+
+  /**
    * プロンプト版不明(prompt_version が null)の分析をまとめて削除する(Task#33)。
    *
    * 削除対象の母集団が持つ「二重の意味」(code-reviewer指摘対応): prompt_version IS NULL には

@@ -16,6 +16,18 @@ export const IPC_CHANNELS = {
   cancelBatchAnalysis: "analysis:cancel-batch",
   /** 一括分析の全体進捗イベント(main→renderer への一方向通知)。 */
   batchProgress: "analysis:batch-progress",
+  /**
+   * 期間バッチ「先取得+件数算出」(phase1。タスクB2b-1)。指定期間・取得対象からレースIDを
+   * 収集し件数を返すのみで、LLM分析(runBatchAnalysis/analyzeOne)は一切呼ばない。
+   * 実行対象が確定した後の分析実行(phase2)は既存 runBatchAnalysis(runBatchAnalysisチャネル)を
+   * そのまま再利用する(新規の実行チャネルは設けない)。
+   */
+  collectPeriodBatch: "analysis:period-batch-collect",
+  /**
+   * 実行中の期間バッチ先取得(phase1)に中断を要求する(次の日境界で停止)。
+   * 一括分析の中断(cancelBatchAnalysis)とは別の独立フラグ・別チャネル(bulkImportCancelRequestedに倣う)。
+   */
+  cancelCollectPeriodBatch: "analysis:period-batch-collect-cancel",
   /** レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。 */
   importResult: "result:import",
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */

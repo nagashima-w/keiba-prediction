@@ -11,6 +11,7 @@ import type {
   AnalysisResult,
   BatchProgress,
   BatchRaceOutcome,
+  PeriodBatchCollectResult,
   RaceListItem,
   RaceVenueKind,
 } from "../shared/analysis-types.js";
@@ -426,6 +427,201 @@ export function batchAnalysisReducer(
           ...state.run,
           discordSend: { status: "error", message: action.message },
         },
+      };
+
+    default: {
+      // 網羅性チェック(未知のアクションはコンパイル時に検出)。
+      const _exhaustive: never = action;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * 期間バッチ(タスクB2b-1)の状態遷移。
+ *
+ * 単日一括分析(BatchAppState/batchAnalysisReducer、上記)とは完全に独立したスライスとして
+ * 同ファイルに新設する(既存の単日フローに一切手を入れず「壊さない」ことを構造的に担保する)。
+ * 期間バッチは複数日にまたがりレース名の一覧を持たないため、既存 BatchRunState(races由来の
+ * raceNameルックアップ前提)をそのまま流用せず、専用の軽量な実行状態(PeriodBatchRunState)を持つ。
+ *
+ * フェーズ(実行確定ゲート):
+ *   idle → collecting(先取得中)→ collected(件数算出済み、確定待ち)
+ *        → running(「実行確定」アクションを経て初めて到達。ここで初めてphase2=既存runBatchAnalysis
+ *          が呼ばれる想定。呼び出し側コンポーネントはこのphase遷移を見てIPCを叩く)→ done(完了)。
+ * 「実行確定」アクションは phase==="collected" のときだけ running へ遷移させ、それ以外
+ * (idle/collecting/running/done)では state をそのまま返す(no-op)。これにより、収集成功前は
+ * もちろん、二重確定でも phase2 が再発火しない。実行進捗更新・実行完了アクションも
+ * phase==="running" のときだけ反映し、確定前(collected以前)に届いても無視する
+ * (「確定前LLM呼出ゼロ」をreducerレベルでも固定する)。
+ */
+
+/** 期間バッチのフェーズ。 */
+export type PeriodBatchPhase =
+  | "idle"
+  | "collecting"
+  | "collected"
+  | "running"
+  | "done";
+
+/** 期間バッチの実行(phase2)状態。既存 runBatchAnalysis をそのまま再利用する想定。 */
+export interface PeriodBatchRunState {
+  /** 実行中か。 */
+  readonly running: boolean;
+  /** 直近の全体進捗(無ければ null)。 */
+  readonly progress: BatchProgress | null;
+  /** 完了時のアウトカム(未完了は空配列)。 */
+  readonly outcomes: readonly BatchRaceOutcome[];
+}
+
+/** 期間バッチの画面状態。 */
+export interface PeriodBatchState {
+  /** 現在のフェーズ。 */
+  readonly phase: PeriodBatchPhase;
+  /** phase1(先取得+件数算出)の結果(未取得・古い結果は null)。 */
+  readonly collectResult: PeriodBatchCollectResult | null;
+  /** phase1が失敗した場合のエラーメッセージ(それ以外は null)。 */
+  readonly collectError: string | null;
+  /**
+   * 実行対象数が閾値(100件)を超え、実行前にユーザーへ再確認を促すべきか(boss合意の閾値)。
+   * collectResult取得時に targetRaceIds.length から算出して固定する。
+   */
+  readonly needsReconfirmation: boolean;
+  /** 先取得(phase1)の中断が要求され、日境界での停止を待っているか。 */
+  readonly collectCanceling: boolean;
+  /** 実行(phase2)の状態。 */
+  readonly run: PeriodBatchRunState;
+}
+
+/** 実行対象数がこれを超えると「要再確認」フラグが立つ閾値(boss着手前ゲート合意)。 */
+const PERIOD_BATCH_RECONFIRMATION_THRESHOLD = 100;
+
+/** 期間バッチの実行状態の初期値(未実行)。 */
+const EMPTY_PERIOD_BATCH_RUN: PeriodBatchRunState = {
+  running: false,
+  progress: null,
+  outcomes: [],
+};
+
+/** 期間バッチの初期状態(未収集)。 */
+export function createInitialPeriodBatchState(): PeriodBatchState {
+  return {
+    phase: "idle",
+    collectResult: null,
+    collectError: null,
+    needsReconfirmation: false,
+    collectCanceling: false,
+    run: EMPTY_PERIOD_BATCH_RUN,
+  };
+}
+
+/** periodBatchReducer が処理するアクション。 */
+export type PeriodBatchAction =
+  | { readonly type: "期間バッチ収集開始" }
+  | { readonly type: "期間バッチ収集中断要求" }
+  | {
+      readonly type: "期間バッチ収集成功";
+      readonly result: PeriodBatchCollectResult;
+    }
+  | { readonly type: "期間バッチ収集失敗"; readonly message: string }
+  | { readonly type: "期間バッチ実行確定" }
+  | {
+      readonly type: "期間バッチ実行進捗更新";
+      readonly progress: BatchProgress;
+    }
+  | {
+      readonly type: "期間バッチ実行完了";
+      readonly outcomes: readonly BatchRaceOutcome[];
+    };
+
+/** 期間バッチの状態遷移(純関数)。単日一括分析(batchAnalysisReducer)には一切影響しない。 */
+export function periodBatchReducer(
+  state: PeriodBatchState,
+  action: PeriodBatchAction,
+): PeriodBatchState {
+  switch (action.type) {
+    case "期間バッチ収集開始":
+      // 実行中(phase2実行中)の再収集は禁止する(in-flight の取り違え防止)。
+      if (state.phase === "running") {
+        return state;
+      }
+      return {
+        phase: "collecting",
+        collectResult: null,
+        collectError: null,
+        needsReconfirmation: false,
+        collectCanceling: false,
+        run: EMPTY_PERIOD_BATCH_RUN,
+      };
+
+    case "期間バッチ収集中断要求":
+      // 収集中のみ有効。
+      if (state.phase !== "collecting") {
+        return state;
+      }
+      return { ...state, collectCanceling: true };
+
+    case "期間バッチ収集成功":
+      // 収集中でなければ古い(遅延)イベントとして無視する。
+      if (state.phase !== "collecting") {
+        return state;
+      }
+      return {
+        ...state,
+        phase: "collected",
+        collectResult: action.result,
+        collectError: null,
+        needsReconfirmation:
+          action.result.targetRaceIds.length >
+          PERIOD_BATCH_RECONFIRMATION_THRESHOLD,
+        collectCanceling: false,
+      };
+
+    case "期間バッチ収集失敗":
+      // 収集中でなければ古い(遅延)イベントとして無視する。
+      if (state.phase !== "collecting") {
+        return state;
+      }
+      return {
+        ...state,
+        phase: "idle",
+        collectResult: null,
+        collectError: action.message,
+        needsReconfirmation: false,
+        collectCanceling: false,
+      };
+
+    case "期間バッチ実行確定":
+      // 実行確定ゲート: collected(件数算出済み・未実行)のときだけ running へ進める。
+      // 収集前(idle/collecting)・二重確定(running/done)はno-op(state据え置き)。
+      if (state.phase !== "collected") {
+        return state;
+      }
+      return {
+        ...state,
+        phase: "running",
+        run: { running: true, progress: null, outcomes: [] },
+      };
+
+    case "期間バッチ実行進捗更新":
+      // 実行確定ゲート: running中でなければ(確定前の遅延イベント等は)無視する。
+      if (state.phase !== "running") {
+        return state;
+      }
+      return {
+        ...state,
+        run: { ...state.run, progress: action.progress },
+      };
+
+    case "期間バッチ実行完了":
+      // 実行確定ゲート: running中でなければ(確定前の遅延イベント等は)無視する。
+      if (state.phase !== "running") {
+        return state;
+      }
+      return {
+        ...state,
+        phase: "done",
+        run: { running: false, progress: null, outcomes: action.outcomes },
       };
 
     default: {

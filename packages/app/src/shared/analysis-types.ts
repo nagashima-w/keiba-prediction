@@ -23,6 +23,19 @@ export type RaceVenueKind = "central" | "nar";
 export type VerifyVenueFilter = "all" | RaceVenueKind;
 
 /**
+ * レース一覧の取得対象(UI表示用の3択。タスクB1で導入、タスクB2b-1でrendererからshared移設)。
+ * main(期間バッチのlistDayRaces呼び分け)・renderer(3択UI)双方が参照するためshared層に置く。
+ * 写像関数(raceListTargetToSelection/selectionToRaceListTarget)は shared/race-list-target.ts。
+ */
+export type RaceListTarget = "central" | "nar-all" | "nar-jpn";
+
+/** venueKind と jpnOnly の組(内部状態。タスクB1)。 */
+export interface RaceListSelection {
+  readonly venueKind: RaceVenueKind;
+  readonly jpnOnly: boolean;
+}
+
+/**
  * 予想印(core PredictionMark のプレーン写し。IPC越しの共有用)。
  * ◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)。印なし・LLM未使用時は null。
  */
@@ -511,6 +524,35 @@ export interface RaceLedgerView {
   readonly recoveryRate: number | null;
   /** このレースで賭けた点数。結果未取込なら0。 */
   readonly betCount: number;
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」フェーズ(phase1)の日ごとのアウトカム(表示用。タスクB2b-1)。
+ * core RangeCollectResult.perDayOutcome(main/range-collect.ts)のプレーン写し(IPC越しの共有用)。
+ */
+export type PeriodBatchDayOutcomeView =
+  | { readonly date: string; readonly status: "hasRaces"; readonly raceCount: number }
+  | { readonly date: string; readonly status: "empty" }
+  | { readonly date: string; readonly status: "failure"; readonly error: string };
+
+/**
+ * 期間バッチ「先取得+件数算出」フェーズ(phase1)の結果(タスクB2b-1)。
+ * 実際の分析実行(phase2)は行わず、対象レースIDと件数の算出までを表す
+ * (main/range-collect.ts の RangeCollectResult のプレーン写し。IPC越しの共有用)。
+ */
+export interface PeriodBatchCollectResult {
+  /** 収集成功レース総数(dedup前)。failureになった日のレースは含まれない。 */
+  readonly totalRaces: number;
+  /** dedupにより除外(現行版で分析済み)された件数。 */
+  readonly skippedAlreadyAnalyzed: number;
+  /** 実行対象のレースID(dedup後、収集順)。 */
+  readonly targetRaceIds: readonly string[];
+  /** lister が失敗(throw)した日の一覧。 */
+  readonly failureDays: readonly string[];
+  /** 日ごとのアウトカム(処理した日のみ)。 */
+  readonly perDayOutcome: readonly PeriodBatchDayOutcomeView[];
+  /** 先取得の中断要求により途中で打ち切られたか。 */
+  readonly cancelled: boolean;
 }
 
 /** レース一覧の1レース(renderer 表示用)。 */

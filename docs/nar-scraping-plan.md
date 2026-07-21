@@ -98,7 +98,8 @@
   とは区別し、`isJpnGrade`/`filterJpnOnlyEntries`(`packages/core/src/scraper/jpn-grade.ts`)は
   Jpn表記のみを対象とする(中央の数値クラス→gradeマッピングはスコープ外)。
 - レース一覧の取得対象はUI上「中央」「地方(全て)」「地方(Jpnのみ)」の3択(`RaceListTarget`、
-  `packages/app/src/renderer/race-list-target.ts`)。内部的には `venueKind`("central"|"nar") +
+  `packages/app/src/shared/race-list-target.ts`。タスクB2b-1でrendererからshared層へ移設)。
+  内部的には `venueKind`("central"|"nar") +
   `jpnOnly`(bool)の組で表現し、`venueKind="central"` のときは `jpnOnly` の値に関わらず絞り込みを
   適用しない(中央+Jpn限定で一覧が全滅する事故を防ぐガード。IPC層でも二重にガードする)。
 

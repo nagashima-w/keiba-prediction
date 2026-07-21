@@ -11,8 +11,8 @@ import { describe, expect, it } from "vitest";
 import {
   raceListTargetToSelection,
   selectionToRaceListTarget,
-  type RaceListTarget,
-} from "../src/renderer/race-list-target.js";
+} from "../src/shared/race-list-target.js";
+import type { RaceListTarget } from "../src/shared/analysis-types.js";
 
 describe("raceListTargetToSelection(3択→venueKind/jpnOnlyへの写像)", () => {
   const cases: Array<[RaceListTarget, { venueKind: "central" | "nar"; jpnOnly: boolean }]> = [

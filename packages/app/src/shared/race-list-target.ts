@@ -1,22 +1,16 @@
 /**
- * レース選択画面の3択(中央/地方(全て)/地方(Jpnのみ))と、内部状態(venueKind, jpnOnly)の
- * 相互変換を行う純関数(タスクB1)。
+ * レース一覧の3択(中央/地方(全て)/地方(Jpnのみ))と、内部状態(venueKind, jpnOnly)の
+ * 相互変換を行う純関数(タスクB1で導入、タスクB2b-1でrendererからshared層へ移設)。
+ *
+ * main(期間バッチの listDayRaces 呼び分け)・renderer(3択UI)双方から参照するため、
+ * electron非依存のshared層に置く(型自体は analysis-types.ts の RaceListTarget/RaceListSelection)。
  *
  * RaceVenueKind(shared/analysis-types.ts)は central/nar の2値のまま据え置く
  * (verify/scorer等の下流を無改修にするため)。3択目の「地方(Jpnのみ)」は
  * venueKind="nar" + jpnOnly=true という組み合わせで表現し、UI層だけがこの3択を意識する。
  */
 
-import type { RaceVenueKind } from "../shared/analysis-types.js";
-
-/** レース一覧の取得対象(UI表示用の3択)。 */
-export type RaceListTarget = "central" | "nar-all" | "nar-jpn";
-
-/** venueKind と jpnOnly の組(内部状態)。 */
-export interface RaceListSelection {
-  readonly venueKind: RaceVenueKind;
-  readonly jpnOnly: boolean;
-}
+import type { RaceListSelection, RaceListTarget } from "./analysis-types.js";
 
 /**
  * 3択を内部状態(venueKind, jpnOnly)へ写像する。
@@ -41,7 +35,7 @@ export function raceListTargetToSelection(
  * (central+jpnOnly=trueという不整合値が万一渡っても、地方Jpnのみを誤って選択済み表示しない)。
  */
 export function selectionToRaceListTarget(
-  venueKind: RaceVenueKind,
+  venueKind: RaceListSelection["venueKind"],
   jpnOnly: boolean,
 ): RaceListTarget {
   if (venueKind === "central") {

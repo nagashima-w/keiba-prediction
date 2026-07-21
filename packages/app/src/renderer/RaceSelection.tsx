@@ -1,8 +1,7 @@
-import type { RaceListItem } from "../shared/analysis-types.js";
+import type { RaceListItem, RaceListTarget } from "../shared/analysis-types.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { groupRacesByVenue } from "./group-races.js";
-import type { RaceListTarget } from "./race-list-target.js";
 
 /** レース選択画面(複数選択)のプロパティ。状態と操作はすべて親(App)から受け取る。 */
 export interface RaceSelectionProps {

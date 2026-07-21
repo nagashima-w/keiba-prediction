@@ -17,6 +17,7 @@ import {
   parseKaisaiDate,
   parseRaceId,
   raceResultUrl,
+  resolveClipVariant,
   sendDiscordNotification,
   type DiscordPayload,
   type KaisaiDate,
@@ -30,13 +31,17 @@ import type {
   DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
+  PeriodBatchCollectResult,
+  PeriodBatchDayOutcomeView,
   PromptVersionVerifyReportView,
   RaceLedgerView,
   RaceListItem,
+  RaceListTarget,
   RaceVenueKind,
   VerifyReportView,
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
+import { collectRaceIdsOverRange, type RangeCollectResult } from "./range-collect.js";
 import { buildBatchDiscordPayload } from "./batch-discord-payload.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
@@ -104,6 +109,20 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.cancelBatchAnalysis, () =>
     handleCancelBatchAnalysis(),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.collectPeriodBatch,
+    (_event, from: unknown, to: unknown, target: unknown) =>
+      handleCollectPeriodBatch(
+        String(from),
+        String(to),
+        normalizeRaceListTarget(target),
+      ),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.cancelCollectPeriodBatch, () =>
+    handleCancelCollectPeriodBatch(),
   );
 
   ipcMain.handle(IPC_CHANNELS.importResult, (_event, raceId: unknown) =>
@@ -322,6 +341,104 @@ async function handleRunBatchAnalysis(
 /** 一括分析の中断要求ハンドラ。次のレース境界で停止させるためフラグを立てる。 */
 function handleCancelBatchAnalysis(): void {
   batchCancelRequested = true;
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」(phase1)の中断フラグ(タスクB2b-1)。
+ * 一括分析の中断(batchCancelRequested)とは独立したモジュール変数で、
+ * bulkImportCancelRequested と同じ流儀(専用フラグ・専用チャネル)を踏襲する。
+ */
+let periodBatchCollectCancelRequested = false;
+
+/**
+ * IPC越しに届いた RaceListTarget 引数を検証済みの値へ正規化する(タスクB2b-1)。
+ * 未指定・不正値は既定の "central" にフォールバックする(handleListRaces の venueKind 正規化と同じ方針)。
+ */
+function normalizeRaceListTarget(value: unknown): RaceListTarget {
+  return value === "nar-all" || value === "nar-jpn" ? value : "central";
+}
+
+/**
+ * core の RangeCollectResult(RaceId/KaisaiDateブランド型を含む)を、IPCシリアライズ用の
+ * プレーンな PeriodBatchCollectResult(すべて素の string)へ変換する(タスクB2b-1)。
+ */
+function toPeriodBatchCollectResult(
+  result: RangeCollectResult,
+): PeriodBatchCollectResult {
+  const perDayOutcome: PeriodBatchDayOutcomeView[] = result.perDayOutcome.map(
+    (o) => {
+      if (o.status === "hasRaces") {
+        return { date: String(o.date), status: "hasRaces", raceCount: o.raceCount };
+      }
+      if (o.status === "empty") {
+        return { date: String(o.date), status: "empty" };
+      }
+      return { date: String(o.date), status: "failure", error: o.error };
+    },
+  );
+  return {
+    totalRaces: result.totalRaces,
+    skippedAlreadyAnalyzed: result.skippedAlreadyAnalyzed,
+    targetRaceIds: result.targetRaceIds.map(String),
+    failureDays: result.failureDays.map(String),
+    perDayOutcome,
+    cancelled: result.cancelled,
+  };
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」(phase1)ハンドラの実処理(タスクB2b-1)。
+ * B2aの collectRaceIdsOverRange(純ロジック)を呼ぶだけで、LLM分析(runBatchAnalysis/analyzeOne)は
+ * 一切呼ばない(実行〈phase2〉は対象確定後に既存 runBatchAnalysis を再利用する。別ハンドラ)。
+ *
+ * 収集ループ全体を runExclusive 1回で包む(handleRunBulkImport と同じ粗い粒度)ことで、
+ * 収集中は DB を閉じさせない。bulk query(listAnalyzedRaceIdsByPromptVersion)はこの
+ * runExclusive コールバック内で1回だけ発行し、Set化してから収集ループへ束縛する。
+ *
+ * currentPromptVersion は設定(clipVariant)から resolveClipVariant で1回だけ解決してスナップショットし、
+ * 収集ループ全体(bulk query・dedup判定)で使い回す。実行中に設定のクリップ版が変わっても
+ * このphase1呼び出し内では変わらない(実行〈phase2〉は実行時点の版で走るため実害はないbest-effort最適化。
+ * boss合意の非ブロッキング留意事項)。
+ */
+async function handleCollectPeriodBatch(
+  fromStr: string,
+  toStr: string,
+  target: RaceListTarget,
+): Promise<PeriodBatchCollectResult> {
+  return withErrorLogging(
+    IPC_CHANNELS.collectPeriodBatch,
+    { from: fromStr, to: toStr, target },
+    async () => {
+      const from = parseKaisaiDate(fromStr);
+      const to = parseKaisaiDate(toStr);
+      // 新しい収集の開始時に前回の中断要求を必ずクリアする(残留で即打ち切りにならないように)。
+      periodBatchCollectCancelRequested = false;
+      const result = await resourceManager.runExclusive((resources) => {
+        const settings = getSettingsStore().load();
+        const currentPromptVersion = resolveClipVariant(
+          settings.clipVariant,
+        ).promptVersion;
+        // bulk queryは1回だけ発行し、Set化してdedup判定を束縛する(4ケースの集合意味論を保存)。
+        const analyzedSet = new Set(
+          resources.listAnalyzedRaceIdsByPromptVersion(currentPromptVersion),
+        );
+        return collectRaceIdsOverRange(from, to, target, {
+          listDayRaces: (date, t) =>
+            t === "central" ? resources.listRaces(date) : resources.listNarRaces(date),
+          analyzedPromptVersionsOf: (raceId) =>
+            analyzedSet.has(raceId) ? [currentPromptVersion] : [],
+          currentPromptVersion,
+          shouldCancel: () => periodBatchCollectCancelRequested,
+        });
+      });
+      return toPeriodBatchCollectResult(result);
+    },
+  );
+}
+
+/** 期間バッチ先取得(phase1)の中断要求ハンドラ。次の日境界で停止させるためフラグを立てる。 */
+function handleCancelCollectPeriodBatch(): void {
+  periodBatchCollectCancelRequested = true;
 }
 
 /**

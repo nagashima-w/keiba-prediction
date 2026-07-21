@@ -11,7 +11,7 @@ import type { RaceLedgerFilter } from "./race-ledger-filter.js";
 import {
   raceListTargetToSelection,
   selectionToRaceListTarget,
-} from "./race-list-target.js";
+} from "../shared/race-list-target.js";
 import { buildRendererErrorPayload } from "./renderer-error-payload.js";
 import { RaceSelection } from "./RaceSelection.js";
 import { SettingsView } from "./SettingsView.js";

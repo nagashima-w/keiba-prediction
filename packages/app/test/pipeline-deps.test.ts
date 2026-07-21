@@ -279,6 +279,31 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.listUnimportedRaceIds()).toEqual(["202605020811"]);
   });
 
+  it("listAnalyzedRaceIdsByPromptVersion が組み立てられ、該当なしなら空配列を返すこと(タスクB2b-1)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(typeof r.listAnalyzedRaceIdsByPromptVersion).toBe("function");
+    expect(r.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+  });
+
+  it("listAnalyzedRaceIdsByPromptVersion が指定版で分析済みのレースIDを返すこと(タスクB2b-1)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    r.deps.saveAnalysis({
+      raceId: "202605020811",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+      promptVersion: "v1",
+    });
+    r.deps.saveAnalysis({
+      raceId: "202605020812",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+      promptVersion: "v2",
+    });
+    expect(r.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual(["202605020811"]);
+  });
+
   it("APIキーがあれば analyze は関数として組み立てられる", () => {
     const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
     resources.push(r);

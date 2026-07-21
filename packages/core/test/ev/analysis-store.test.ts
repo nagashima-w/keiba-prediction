@@ -677,6 +677,63 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("listAnalyzedRaceIdsByPromptVersion(指定版で分析済みのレース列挙。タスクB2b-1)", () => {
+    it("指定した版と一致する分析があるレースIDをDISTINCTで列挙すること(同一レースの複数分析でも1件)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "複数回分析レース",
+          promptVersion: "v1",
+          analyzedAt: "2026-07-08T09:00:00.000Z",
+        }),
+      );
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "複数回分析レース",
+          promptVersion: "v1",
+          analyzedAt: "2026-07-08T15:00:00.000Z",
+        }),
+      );
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([
+        "複数回分析レース",
+      ]);
+      store.close();
+    });
+
+    it("別版のみで分析済みのレースは列挙されないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "別版レース", promptVersion: "v2" }));
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+      store.close();
+    });
+
+    it("prompt_versionがnull(LLM未使用・旧データ)の分析は列挙されないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "版不明レース", promptVersion: null }));
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+      store.close();
+    });
+
+    it("該当する分析が1件も無ければ空配列を返すこと", () => {
+      const store = new AnalysisStore();
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+      store.close();
+    });
+
+    it("指定版のレースIDのみをレースID昇順で列挙すること(別版・null混在)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "B対象", promptVersion: "v1" }));
+      store.saveAnalysis(makeRecord({ raceId: "A対象", promptVersion: "v1" }));
+      store.saveAnalysis(makeRecord({ raceId: "C別版", promptVersion: "v2" }));
+      store.saveAnalysis(makeRecord({ raceId: "D版不明", promptVersion: null }));
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([
+        "A対象",
+        "B対象",
+      ]);
+      store.close();
+    });
+  });
+
   describe("deleteAnalysesWithUnknownPromptVersion(版不明分析の削除。Task#33)", () => {
     it("版不明が0件のとき、削除0件を返しエラーにならないこと", () => {
       const store = new AnalysisStore();
