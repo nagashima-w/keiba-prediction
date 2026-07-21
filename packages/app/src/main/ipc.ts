@@ -12,6 +12,7 @@ import {
 
 import {
   DiscordNotifyError,
+  filterJpnOnlyEntries,
   isDiscordWebhookUrl,
   parseKaisaiDate,
   parseRaceId,
@@ -83,8 +84,12 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.listRaces,
-    (_event, date: unknown, venueKind: unknown) =>
-      handleListRaces(String(date), venueKind === "nar" ? "nar" : "central"),
+    (_event, date: unknown, venueKind: unknown, jpnOnly: unknown) =>
+      handleListRaces(
+        String(date),
+        venueKind === "nar" ? "nar" : "central",
+        jpnOnly === true,
+      ),
   );
 
   ipcMain.handle(
@@ -217,14 +222,20 @@ function getResources(): PipelineResources {
  * レース一覧取得ハンドラの実処理。
  * 開催区分(venueKind)に応じて資源(PipelineResources)の listRaces / listNarRaces を呼び分ける
  * (仕様「選択に応じて listRaces / listNarRaces を呼び分ける」。既定は central)。
+ *
+ * jpnOnly=true かつ venueKind='nar' のときのみ、交流重賞(Jpn1/2/3)だけに絞り込む(タスクB1)。
+ * venueKind='central' のときは jpnOnly の値に関わらず無視する(中央+Jpn限定で全滅させる事故防止。
+ * 3択UI側でも central 選択時は jpnOnly=false 固定にしているが、IPC層でも二重にガードする)。
+ * core の listRaces/listNarRaces 自体は無改修で、フィルタは取得結果に対しmain層で適用する。
  */
 async function handleListRaces(
   dateStr: string,
   venueKind: RaceVenueKind,
+  jpnOnly: boolean,
 ): Promise<RaceListItem[]> {
   return withErrorLogging(
     IPC_CHANNELS.listRaces,
-    { date: dateStr, venueKind },
+    { date: dateStr, venueKind, jpnOnly },
     async () => {
       const kaisaiDate = parseKaisaiDate(dateStr);
       // キャッシュミス時に取得→scrape_cache へ書き込む await があるため runExclusive で保護する
@@ -234,7 +245,9 @@ async function handleListRaces(
           ? resources.listNarRaces(kaisaiDate)
           : resources.listRaces(kaisaiDate),
       );
-      return entries.map(toRaceListItem);
+      const filtered =
+        venueKind === "nar" && jpnOnly ? filterJpnOnlyEntries(entries) : entries;
+      return filtered.map(toRaceListItem);
     },
   );
 }

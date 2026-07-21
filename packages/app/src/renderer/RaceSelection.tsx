@@ -1,14 +1,18 @@
-import type { RaceListItem, RaceVenueKind } from "../shared/analysis-types.js";
+import type { RaceListItem } from "../shared/analysis-types.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { groupRacesByVenue } from "./group-races.js";
+import type { RaceListTarget } from "./race-list-target.js";
 
 /** レース選択画面(複数選択)のプロパティ。状態と操作はすべて親(App)から受け取る。 */
 export interface RaceSelectionProps {
   /** 日付(YYYYMMDD)。 */
   readonly date: string;
-  /** 開催区分(中央/地方)。 */
-  readonly venueKind: RaceVenueKind;
+  /**
+   * レース一覧の取得対象(3択: 中央/地方(全て)/地方(Jpnのみ)。タスクB1)。
+   * venueKind/jpnOnlyへの写像は race-list-target.ts に集約する。
+   */
+  readonly raceListTarget: RaceListTarget;
   /** 一覧取得中か。 */
   readonly loading: boolean;
   /** 取得済みレース一覧。 */
@@ -21,8 +25,8 @@ export interface RaceSelectionProps {
   readonly disabled?: boolean;
   /** 日付変更(YYYYMMDD)。 */
   readonly onDateChange: (yyyymmdd: string) => void;
-  /** 開催区分変更(中央/地方の切替)。 */
-  readonly onVenueKindChange: (venueKind: RaceVenueKind) => void;
+  /** レース一覧取得対象の変更(3択トグル)。 */
+  readonly onRaceListTargetChange: (target: RaceListTarget) => void;
   /** 「取得」操作。 */
   readonly onFetch: () => void;
   /** レース選択のトグル。 */
@@ -57,21 +61,22 @@ export function RaceSelection(props: RaceSelectionProps): React.JSX.Element {
         {(
           [
             { key: "central", label: "中央" },
-            { key: "nar", label: "地方" },
+            { key: "nar-all", label: "地方(全て)" },
+            { key: "nar-jpn", label: "地方(Jpnのみ)" },
           ] as const
-        ).map((opt) => {
-          const active = props.venueKind === opt.key;
+        ).map((opt, index, all) => {
+          const active = props.raceListTarget === opt.key;
           return (
             <button
               key={opt.key}
               type="button"
               aria-pressed={active}
-              onClick={() => props.onVenueKindChange(opt.key)}
+              onClick={() => props.onRaceListTargetChange(opt.key)}
               disabled={disabled}
               style={{
                 padding: "0.3rem 0.9rem",
                 border: "1px solid #888",
-                borderRight: opt.key === "central" ? "none" : "1px solid #888",
+                borderRight: index === all.length - 1 ? "1px solid #888" : "none",
                 background: active ? "#0a58ca" : "#fff",
                 color: active ? "#fff" : "#333",
                 fontWeight: active ? 700 : 400,
@@ -123,7 +128,10 @@ export function RaceSelection(props: RaceSelectionProps): React.JSX.Element {
           <CopyErrorButton
             operation="レース一覧:取得"
             message={props.error}
-            context={{ date: props.date, venueKind: props.venueKind }}
+            context={{
+              date: props.date,
+              raceListTarget: props.raceListTarget,
+            }}
           />
         </p>
       )}

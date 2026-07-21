@@ -49,6 +49,7 @@ export {
   shutubaUrl,
 } from "./scraper/urls.js";
 export { parseRaceList } from "./scraper/parse-race-list.js";
+export { filterJpnOnlyEntries, isJpnGrade } from "./scraper/jpn-grade.js";
 export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
 export {
   HorseProfileParseError,

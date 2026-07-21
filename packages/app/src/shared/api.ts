@@ -30,8 +30,14 @@ export interface KeibaApi {
    * @param date 開催日(YYYYMMDD形式)
    * @param venueKind 開催区分(中央/地方)。省略時は "central"(中央)。
    *   "nar"(地方)を指定すると main 側で listNarRaces を呼び分ける。
+   * @param jpnOnly 交流重賞(Jpn1/2/3)のみに絞り込むか(タスクB1)。省略時は false(後方互換)。
+   *   venueKind="nar" のときのみ有効(main 側で判定)。venueKind="central" のときは無視される。
    */
-  listRaces(date: string, venueKind?: RaceVenueKind): Promise<RaceListItem[]>;
+  listRaces(
+    date: string,
+    venueKind?: RaceVenueKind,
+    jpnOnly?: boolean,
+  ): Promise<RaceListItem[]>;
 
   /**
    * 複数レースを一括分析する(直列実行)。全体進捗は onBatchProgress で購読する。

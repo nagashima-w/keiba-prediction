@@ -61,6 +61,13 @@ export interface BatchSelectionState {
   readonly selectedRaceIds: readonly string[];
   /** 開催区分(中央/地方)。既定は "central"。切替に応じて listRaces / listNarRaces を呼び分ける。 */
   readonly venueKind: RaceVenueKind;
+  /**
+   * 交流重賞(Jpn1/2/3)のみに絞り込むか(タスクB1)。既定は false。
+   * venueKind="nar" のときのみ意味を持つ(3択UI「地方(Jpnのみ)」選択時にtrueになる)。
+   * venueKind="central" のときは常に false(中央+Jpn限定で一覧が全滅する事故を防ぐガード。
+   * race-list-target.ts の raceListTargetToSelection がこの不変条件を担保する)。
+   */
+  readonly jpnOnly: boolean;
 }
 
 /** 一括分析の実行状態。 */
@@ -90,7 +97,11 @@ export interface BatchAppState {
 /** reducer が処理するアクション。 */
 export type BatchAppAction =
   | { readonly type: "日付変更"; readonly date: string }
-  | { readonly type: "開催区分変更"; readonly venueKind: RaceVenueKind }
+  | {
+      readonly type: "開催区分変更";
+      readonly venueKind: RaceVenueKind;
+      readonly jpnOnly: boolean;
+    }
   | { readonly type: "レース取得開始" }
   | { readonly type: "レース取得成功"; readonly races: readonly RaceListItem[] }
   | { readonly type: "レース取得失敗"; readonly message: string }
@@ -147,6 +158,7 @@ export function createInitialBatchState(date: string): BatchAppState {
       racesError: null,
       selectedRaceIds: [],
       venueKind: "central",
+      jpnOnly: false,
     },
     run: EMPTY_RUN,
   };
@@ -207,18 +219,25 @@ export function batchAnalysisReducer(
       if (state.run.running) {
         return state;
       }
-      // no-op: 現在値と同じ開催区分を指定した場合は状態をそのまま返す(参照等価)。
+      // no-op: 現在値と同じ開催区分・同じjpnOnlyを指定した場合は状態をそのまま返す(参照等価)。
       // トグルの再クリック等で選択・旧結果が意図せず消えるのを防ぐ。
-      if (action.venueKind === state.selection.venueKind) {
+      // タスクB1: 3択(中央/地方(全て)/地方(Jpnのみ))のうち「地方(全て)→地方(Jpnのみ)」の
+      // ようにvenueKindが同じでjpnOnlyだけ変わる遷移も「一覧の意味が変わる」ため no-op としない。
+      if (
+        action.venueKind === state.selection.venueKind &&
+        action.jpnOnly === state.selection.jpnOnly
+      ) {
         return state;
       }
-      // 開催区分が変わると一覧の意味が変わるため、日付変更と同様に選択・旧バッチ結果をクリアする
-      // (一覧自体は次の「取得」操作まで残る。呼び出し側が listRaces / listNarRaces を呼び分ける)。
+      // 開催区分(またはjpnOnly)が変わると一覧の意味が変わるため、日付変更と同様に選択・
+      // 旧バッチ結果をクリアする(一覧自体は次の「取得」操作まで残る。呼び出し側が
+      // listRaces / listNarRaces を呼び分け、jpnOnly は main 層でのフィルタ適用に使う)。
       return {
         ...state,
         selection: {
           ...state.selection,
           venueKind: action.venueKind,
+          jpnOnly: action.jpnOnly,
           selectedRaceIds: [],
         },
         run: clearedRun(state.run),

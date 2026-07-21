@@ -114,3 +114,90 @@ describe("race:list ハンドラ(開催区分による呼び分け)", () => {
     ]);
   });
 });
+
+describe("race:list ハンドラ(jpnOnly=交流重賞のみ絞り込み。既定false・後方互換)", () => {
+  beforeEach(() => {
+    // 地方一覧をJpn1・重賞・無印混在にして、jpnOnly絞り込みの効果を確認できるようにする。
+    listNarRacesMock = vi.fn(async () => [
+      {
+        raceId: "202642062411",
+        name: "さきたま杯",
+        courseType: "ダ",
+        distance: 1400,
+        entryCount: 12,
+        venue: "浦和",
+        raceNumber: 11,
+        grade: "Jpn1",
+      },
+      {
+        raceId: "202635071211",
+        name: "やまびこ賞",
+        courseType: "ダ",
+        distance: 1600,
+        entryCount: 10,
+        venue: "盛岡",
+        raceNumber: 11,
+        grade: "重賞",
+      },
+      {
+        raceId: "202654071210",
+        name: "地方レース",
+        courseType: "ダ",
+        distance: 1400,
+        entryCount: 10,
+        venue: "高知",
+        raceNumber: 10,
+      },
+    ]);
+    createPipelineDepsMock.mockImplementation(() => ({
+      listRaces: listRacesMock,
+      listNarRaces: listNarRacesMock,
+      importResult: vi.fn(async () => ({})),
+      getVerifyReport: vi.fn(() => ({})),
+      listAnalysisHistory: vi.fn(() => []),
+      close: vi.fn(),
+      deps: {},
+    }));
+  });
+
+  it("jpnOnlyを省略した場合は従来どおり全件返る(後方互換)", async () => {
+    const { registerIpcHandlers } = await import("../src/main/ipc.js");
+    registerIpcHandlers();
+    const handler = handlerFor(IPC_CHANNELS.listRaces);
+
+    const result = (await handler(fakeEvent, "20260712", "nar")) as Array<{
+      raceId: string;
+    }>;
+
+    expect(result.map((r) => r.raceId)).toEqual([
+      "202642062411",
+      "202635071211",
+      "202654071210",
+    ]);
+  });
+
+  it("venueKind='nar' かつ jpnOnly=true の場合はJpnのみに絞り込まれる", async () => {
+    const { registerIpcHandlers } = await import("../src/main/ipc.js");
+    registerIpcHandlers();
+    const handler = handlerFor(IPC_CHANNELS.listRaces);
+
+    const result = (await handler(fakeEvent, "20260712", "nar", true)) as Array<{
+      raceId: string;
+    }>;
+
+    expect(result.map((r) => r.raceId)).toEqual(["202642062411"]);
+  });
+
+  it("venueKind='central' のときは jpnOnly=true を渡しても無視される(central全滅防止ガード)", async () => {
+    const { registerIpcHandlers } = await import("../src/main/ipc.js");
+    registerIpcHandlers();
+    const handler = handlerFor(IPC_CHANNELS.listRaces);
+
+    const result = await handler(fakeEvent, "20260712", "central", true);
+
+    expect(listRacesMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([
+      { raceId: "202605020811", name: "中央レース", courseType: "芝", distance: 1600, entryCount: 12, venue: "東京", raceNumber: 11 },
+    ]);
+  });
+});

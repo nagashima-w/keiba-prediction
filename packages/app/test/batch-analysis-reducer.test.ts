@@ -76,10 +76,15 @@ describe("createInitialBatchState(初期状態)", () => {
     const s = createInitialBatchState("20260712");
     expect(s.selection.venueKind).toBe("central");
   });
+
+  it("Jpnのみ絞り込み(jpnOnly)は既定でfalseになる(タスクB1)", () => {
+    const s = createInitialBatchState("20260712");
+    expect(s.selection.jpnOnly).toBe(false);
+  });
 });
 
-describe("開催区分変更(中央/地方の切替)", () => {
-  /** 選択済みレースがある状態(T1・T2選択済み、central)を作る。 */
+describe("開催区分変更(中央/地方(全て)/地方(Jpnのみ)の切替。タスクB1でjpnOnlyを追加)", () => {
+  /** 選択済みレースがある状態(T1・T2選択済み、central・jpnOnly=false)を作る。 */
   function withSelection(): BatchAppState {
     let s = withRaces();
     s = batchAnalysisReducer(s, { type: "レース選択トグル", raceId: "T1" });
@@ -94,8 +99,10 @@ describe("開催区分変更(中央/地方の切替)", () => {
     const s = batchAnalysisReducer(before, {
       type: "開催区分変更",
       venueKind: "nar",
+      jpnOnly: false,
     });
     expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.jpnOnly).toBe(false);
     expect(s.selection.selectedRaceIds).toEqual([]);
     expect(s.run.outcomes).toEqual([]);
   });
@@ -104,20 +111,26 @@ describe("開催区分変更(中央/地方の切替)", () => {
     let s = withSelection();
     s = batchAnalysisReducer(s, { type: "一括分析開始" });
     const before = s;
-    s = batchAnalysisReducer(s, { type: "開催区分変更", venueKind: "nar" });
+    s = batchAnalysisReducer(s, {
+      type: "開催区分変更",
+      venueKind: "nar",
+      jpnOnly: false,
+    });
     expect(s).toBe(before);
   });
 
-  it("同じ開催区分を指定した場合はno-op(状態を参照等価のまま返し、選択も維持される)", () => {
+  it("同じ開催区分・同じjpnOnlyを指定した場合はno-op(状態を参照等価のまま返し、選択も維持される)", () => {
     const before = withSelection();
     expect(before.selection.venueKind).toBe("central");
+    expect(before.selection.jpnOnly).toBe(false);
     expect(before.selection.selectedRaceIds).toEqual(["T1", "T2"]);
 
     const s = batchAnalysisReducer(before, {
       type: "開催区分変更",
       venueKind: "central",
+      jpnOnly: false,
     });
-    // 参照等価(no-op): 同一venueKind指定では新しいオブジェクトを作らない。
+    // 参照等価(no-op): 同一venueKind・同一jpnOnly指定では新しいオブジェクトを作らない。
     expect(s).toBe(before);
     expect(s.selection.venueKind).toBe("central");
     expect(s.selection.selectedRaceIds).toEqual(["T1", "T2"]);
@@ -130,9 +143,31 @@ describe("開催区分変更(中央/地方の切替)", () => {
     const s = batchAnalysisReducer(before, {
       type: "開催区分変更",
       venueKind: "nar",
+      jpnOnly: false,
     });
     expect(s).not.toBe(before);
     expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.selectedRaceIds).toEqual([]);
+  });
+
+  it("同じ開催区分(nar)でもjpnOnlyだけが変わる場合はno-opにならず、選択がクリアされる(地方全て→地方Jpnのみの切替)", () => {
+    let before = withRaces();
+    before = batchAnalysisReducer(before, {
+      type: "開催区分変更",
+      venueKind: "nar",
+      jpnOnly: false,
+    });
+    before = batchAnalysisReducer(before, { type: "レース選択トグル", raceId: "T1" });
+    expect(before.selection.selectedRaceIds).toEqual(["T1"]);
+
+    const s = batchAnalysisReducer(before, {
+      type: "開催区分変更",
+      venueKind: "nar",
+      jpnOnly: true,
+    });
+    expect(s).not.toBe(before);
+    expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.jpnOnly).toBe(true);
     expect(s.selection.selectedRaceIds).toEqual([]);
   });
 });
