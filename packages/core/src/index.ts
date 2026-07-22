@@ -304,6 +304,7 @@ export {
   type SameDayTrendSampleSize,
   type SameDayTrendSummary,
 } from "./analyzer/same-day-trend.js";
+export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
 export {
   buildPrompt,
   buildPromptPreview,

@@ -37,6 +37,7 @@
  */
 
 import {
+  assessTurfWear,
   buildPriorInput,
   classifyRotationInterval,
   classifyTrackWetness,
@@ -321,6 +322,9 @@ export async function runAnalysis(
         trackCondition: race.race.trackCondition ?? null,
         // 条件替わり(妙味材料)の中央⇄地方替わり判定に使う(build-prompt.ts computeConditionChangeTags)。
         venueKind,
+        // 芝の傷み目安(タスク#26-P3): 中央芝のときだけ開催回・日次・柵の事実を1行渡す
+        // (turf-wear.ts の assessTurfWear。地方・ダート・障害は null になり行自体が出ない)。
+        turfWearHint: assessTurfWear(raceId, race.race.courseType, race.race.fence),
       },
       horses: race.horses.map((horseData) => {
         const umaban = horseData.shutuba.umaban;

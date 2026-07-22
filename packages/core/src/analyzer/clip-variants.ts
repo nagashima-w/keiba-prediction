@@ -12,19 +12,25 @@
  * 各エントリが {maxAdjust, promptVersion} を同一オブジェクトから持つことで、文面とクリップ幅の
  * 食い違いが構造的に起こらない(呼び出し側が別々の値を個別にハードコードする余地を無くす)。
  *
- * 対照(default)は完全不変(boss合意スコープ2): 幅0.10・PROMPT_VERSION="2026-07-19.3"のまま
- * (...clip010 へ改名しない)。この値は build-prompt.ts の既存 PROMPT_VERSION 定数と同一の文字列で、
- * このファイルが唯一の定義元(build-prompt.ts 側はこのレジストリから re-export する)。
+ * 対照(default)の幅0.10 は完全不変(boss合意スコープ2、D-2。...clip010 へ改名しない)。
+ * PROMPT_VERSION 文字列は build-prompt.ts の PROMPT_VERSION 定数と同一の値を保つ運用とする
+ * (このファイルが唯一の定義元だが、build-prompt.ts 側からこのレジストリを参照する循環を避けるため、
+ * 互いを import しない独立したリテラルとして持つ。build-prompt.ts のプロンプト文面が変わり
+ * PROMPT_VERSION が更新されたら、こちらも手動で追随して同じ値に更新すること。ズレはテストで固定する
+ * 〈clip-variants.test.ts・analysis-pipeline.test.ts の promptVersion 一致アサーション〉)。
+ * #26-P3(芝の傷み目安)で build-prompt.ts の PROMPT_VERSION が "2026-07-19.3" → "2026-07-22.1"
+ * に更新されたため、この対照(default)の値もここで追随した。
  *
- * 新版(wide15)は幅0.15(絶対値)・PROMPT_VERSION="2026-07-19.4-clip015"(版文字列に幅を内包し、
- * 対照と必ず異なる値にする。DB列は追加しない: analyses.prompt_version は既存の文字列カラムのまま
- * この新しい版文字列を保存でき、verify.ts の computeVerifyReportByPromptVersion は既に
+ * 新版(wide15)は幅0.15(絶対値)・PROMPT_VERSION="{対照のPROMPT_VERSION}-clip015"(版文字列に幅を
+ * 内包し、対照と必ず異なる値にする。DB列は追加しない: analyses.prompt_version は既存の文字列カラムの
+ * まま新しい版文字列を保存でき、verify.ts の computeVerifyReportByPromptVersion は既に
  * promptVersion 文字列でグループ化する実装のため無改修で新版を別グループとして扱える)。
  *
- * 版番号運用ルール(build-prompt.ts 冒頭JSDocの追記): 新版のPROMPT_VERSION文字列は
- * "{対照と同じ日付}.{通番}-clip{幅を3桁で表した値}" の形式とする(例: 幅0.15→"clip015")。
- * 対照のPROMPT_VERSIONを更新した場合(プロンプト文面の他の変更)は、新版側も追随するかは
- * その時点の合意による(本タスクでは対照="2026-07-19.3"/新版="2026-07-19.4-clip015"の組で固定)。
+ * 版番号運用ルール(ユーザー確定事項A、#26-P3で確定): 対照(default)のPROMPT_VERSIONを更新した場合
+ * (プロンプト文面の変更全般)、新版(wide15)は必ず追随し "{対照の新しいPROMPT_VERSION}-clip015" に
+ * 更新する(対照・新版とも同じ buildPrompt を経由するため、プロンプト文面自体は常に同時に変わる。
+ * 版文字列だけが追随せず乖離する状態を作らない)。旧ルール(追随するかはその時点の合意による)は
+ * #26-P3でこの固定ルールに置き換えた。
  */
 
 /** クリップ幅の版ID。±0.15 の1新版のみ(±0.12/±0.20 は作らない。ユーザー確定事項)。 */
@@ -49,12 +55,14 @@ export const CLIP_VARIANTS: Readonly<Record<ClipVariantId, ClipVariant>> = {
   default: {
     id: "default",
     maxAdjust: 0.1,
-    promptVersion: "2026-07-19.3",
+    // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(#26-P3で追随)。
+    promptVersion: "2026-07-22.1",
   },
   wide15: {
     id: "wide15",
     maxAdjust: 0.15,
-    promptVersion: "2026-07-19.4-clip015",
+    // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(#26-P3で追随)。
+    promptVersion: "2026-07-22.1-clip015",
   },
 };
 

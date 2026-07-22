@@ -343,8 +343,58 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("地方/コース形態の有利脚質補正(タスクB)追加版として 2026-07-19.3 が付与されていること", () => {
-    expect(PROMPT_VERSION).toBe("2026-07-19.3");
+  it("芝の傷み目安(タスク#26-P3)追加版として 2026-07-22.1 が付与されていること", () => {
+    expect(PROMPT_VERSION).toBe("2026-07-22.1");
+  });
+});
+
+describe("buildPrompt(芝の傷み目安、タスク#26-P3b)", () => {
+  const turfWearHint = {
+    開催日次: 8,
+    開催回次: 2,
+    柵: "A",
+    note: "中央2回8日目(柵A)。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。",
+  };
+
+  it("race.turfWearHintが指定されているとき、【レース情報】末尾に「芝コースの開催進行」行を1行追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint },
+    });
+    expect(p).toContain(`芝コースの開催進行: ${turfWearHint.note}`);
+  });
+
+  it("追加した行が【レース情報】ブロック内、馬場状態の直後に来ること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint },
+    });
+    const trackConditionIndex = p.indexOf("馬場状態: 良");
+    const turfWearIndex = p.indexOf("芝コースの開催進行:");
+    const nextSectionIndex = p.indexOf("【展開想定】");
+    expect(trackConditionIndex).toBeGreaterThanOrEqual(0);
+    expect(turfWearIndex).toBeGreaterThan(trackConditionIndex);
+    expect(nextSectionIndex).toBeGreaterThan(turfWearIndex);
+  });
+
+  it("race.turfWearHintがundefined(未指定)のとき、「芝コースの開催進行」行を含まないこと(既存文面バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).not.toContain("芝コースの開催進行");
+  });
+
+  it("race.turfWearHintがnull(呼び出し側がnullを渡した)のとき、「芝コースの開催進行」行を含まないこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint: null },
+    });
+    expect(p).not.toContain("芝コースの開催進行");
+  });
+
+  it("回帰: turfWearHint未指定なら既存プロンプト(UNCHANGED_BASE_PROMPT相当)の【レース情報】ブロックが不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】",
+    );
   });
 });
 

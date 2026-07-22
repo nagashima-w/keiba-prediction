@@ -35,16 +35,22 @@
  * (中央/venueKind未指定は従来表のまま変更なし)。既存4行の文言・出力スキーマ・予想印の指示は不変。
  *
  * タスクD-2(クリップ幅の版切替・±10%↔±15%のA/B・2026-07-21 boss着手前ゲート合意):
- * この PROMPT_VERSION 定数自体は対照(clipVariant="default")用の値であり、変更しない
- * (完全不変。...clip010 へ改名しない)。新設した clip-variants.ts の CLIP_VARIANTS.default.promptVersion
- * と同一の値をここに置いている(このファイル側が定義元、clip-variants.ts はここから参照しない
- * 循環を避けるため独立に同じ文字列を持つ。ズレはテストで固定する)。新版(wide15)は
- * CLIP_VARIANTS.wide15.promptVersion="2026-07-19.4-clip015"を使う(版番号運用ルール:
- * 対照と同じ日付の通番+"-clip"+幅を3桁で表した値。例: 幅0.15→"clip015")。buildPrompt は
- * input.clipVariant(省略時は対照)に応じて【指示】【追加指示】ブロックの許容幅表記
- * (±10%(絶対値0.10) 等)だけを CLIP_VARIANTS から機械導出し、他の文言・出力スキーマは不変。
+ * この PROMPT_VERSION 定数自体は対照(clipVariant="default")用の値であり、D-2自身のスコープでは
+ * 変更しない(...clip010 へ改名しない、の意)。新設した clip-variants.ts の
+ * CLIP_VARIANTS.default.promptVersion と同一の値をここに置いている(このファイル側が定義元、
+ * clip-variants.ts はここから参照しない循環を避けるため独立に同じ文字列を持つ。ズレはテストで固定する)。
+ * 新版(wide15)は CLIP_VARIANTS.wide15.promptVersion(対照の値+"-clip"+幅を3桁で表した値。
+ * 例: 幅0.15→"clip015")を使う。buildPrompt は input.clipVariant(省略時は対照)に応じて
+ * 【指示】【追加指示】ブロックの許容幅表記(±10%(絶対値0.10) 等)だけを CLIP_VARIANTS から
+ * 機械導出し、他の文言・出力スキーマは不変。
+ *
+ * #26-P3: 中央芝で芝コースの開催進行(開催回・日次・柵の事実)を1行追加。方向は断定せず材料として
+ * 提示。他文面・出力スキーマ不変。この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随した(ユーザー確定事項A: 対照更新時、
+ * 新版は必ず追随する運用に確定。D-2時点の「追随するかはその時点の合意による」という運用は
+ * この固定ルールに置き換えた。詳細は clip-variants.ts 冒頭コメント参照)。
  */
-export const PROMPT_VERSION = "2026-07-19.3";
+export const PROMPT_VERSION = "2026-07-22.1";
 
 export {
   CLIP_VARIANTS,
@@ -77,6 +83,7 @@ export {
 import type { CourseType } from "../scraper/types.js";
 import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
+import type { TurfWearHint } from "./turf-wear.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -194,6 +201,15 @@ export interface BuildPromptRaceInfo {
    * condition-change.ts の computeConditionChangeTags 参照)。
    */
   readonly venueKind?: RaceIdVenueKind;
+  /**
+   * 芝の傷み目安(タスク#26-P3。turf-wear.ts の assessTurfWear が返すヒント)。
+   * 呼び出し側(analysis-pipeline.ts)が raceId・courseType・fence から算出して渡す
+   * (このモジュール自体は raceId を保持しないため算出しない)。値がある(non-null)ときだけ
+   * 【レース情報】末尾に1行追加する。undefined/null なら行自体を出さない(既存文面バイト不変。
+   * weather 等と同じ spread-omit 流儀)。段階分け・方向判定はせず、事実(開催回・日次・柵)のみの
+   * 中立な材料文を渡すため、ここでの整形も「行を出す/出さない」の判定のみに留める。
+   */
+  readonly turfWearHint?: TurfWearHint | null;
 }
 
 /** buildPrompt の入力。 */
@@ -340,6 +356,9 @@ export function buildPrompt(input: BuildPromptInput): string {
     race.venueName ? `競馬場: ${race.venueName}` : null,
     `天候: ${orText(race.weather, "不明")}`,
     `馬場状態: ${orText(race.trackCondition, "不明")}`,
+    // 芝の傷み目安(タスク#26-P3): 値がある(non-null)ときだけ1行追加する。
+    // undefined/null(raceId非保持のプレビュー等)なら行自体を出さず、既存文面バイト不変を保つ。
+    race.turfWearHint ? `芝コースの開催進行: ${race.turfWearHint.note}` : null,
   ].filter((x): x is string => x !== null);
   lines.push("【レース情報】");
   lines.push(...raceHeader);

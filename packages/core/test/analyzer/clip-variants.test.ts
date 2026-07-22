@@ -2,8 +2,10 @@
  * クリップ幅の版(clip variant)registry の純関数テスト(タスクD-2: ±10%↔±15%のA/B・新版並走)。
  *
  * このレジストリ(CLIP_VARIANTS)が「単一の真実源」であることを検証する:
- *  - 対照(default)は幅0.10・版文字列"2026-07-19.3"(build-prompt.ts の既存PROMPT_VERSIONと同一)。
- *  - 新版(wide15)は幅0.15(絶対値)・対照と異なる版文字列。
+ *  - 対照(default)は幅0.10・版文字列(build-prompt.ts の既存PROMPT_VERSIONと同一の値を手動同期。
+ *    #26-P3で"2026-07-22.1"に更新)。
+ *  - 新版(wide15)は幅0.15(絶対値)・対照と同じ日付系列+"-clip015"接尾辞の版文字列
+ *    (ユーザー確定事項A: 対照のPROMPT_VERSION更新に新版も追随する運用。#26-P3で"2026-07-22.1-clip015"に更新)。
  *  - resolveClipVariant は未指定・不正値を対照へフォールバックする。
  *  - clipPercentLabel/clipAbsoluteLabel は build-prompt.ts のプロンプト文面生成と
  *    parseAnalyzerResponse への maxAdjust 受け渡しの双方が同じ数値から導出するための整形関数。
@@ -19,10 +21,10 @@ import {
 } from "../../src/analyzer/clip-variants.js";
 
 describe("CLIP_VARIANTS(クリップ幅の版registry)", () => {
-  it("対照(default)は幅0.10・版文字列が既存PROMPT_VERSIONと同一の2026-07-19.3であること", () => {
+  it("対照(default)は幅0.10・版文字列が既存PROMPT_VERSIONと同一の2026-07-22.1であること(#26-P3で追随)", () => {
     expect(CLIP_VARIANTS.default.id).toBe("default");
     expect(CLIP_VARIANTS.default.maxAdjust).toBe(0.1);
-    expect(CLIP_VARIANTS.default.promptVersion).toBe("2026-07-19.3");
+    expect(CLIP_VARIANTS.default.promptVersion).toBe("2026-07-22.1");
   });
 
   it("新版(wide15)は幅0.15(絶対値)・対照と異なる版文字列を持つこと", () => {
@@ -31,6 +33,14 @@ describe("CLIP_VARIANTS(クリップ幅の版registry)", () => {
     expect(CLIP_VARIANTS.wide15.promptVersion).not.toBe(CLIP_VARIANTS.default.promptVersion);
     // 版文字列に幅を内包する運用(D-4合意)。
     expect(CLIP_VARIANTS.wide15.promptVersion).toContain("clip015");
+  });
+
+  it("新版(wide15)の版文字列は「対照と同じ日付系列」+「-clip015」接尾辞であること(#26-P3で対照に追随。ユーザー確定事項A)", () => {
+    // 対照が"2026-07-22.1"に更新されたら、新版は"2026-07-22.1-clip015"(対照の値+接尾辞)になる。
+    expect(CLIP_VARIANTS.wide15.promptVersion).toBe(
+      `${CLIP_VARIANTS.default.promptVersion}-clip015`,
+    );
+    expect(CLIP_VARIANTS.wide15.promptVersion).toBe("2026-07-22.1-clip015");
   });
 
   it("登録エントリはdefault/wide15の2件のみであること(±0.15の1新版のみ、ユーザー確定事項)", () => {

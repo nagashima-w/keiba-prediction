@@ -9,6 +9,7 @@ import {
   PROMPT_VERSION,
   type AnalyzeRaceResult,
   type BuildPromptInput,
+  type CourseType,
   type HorseRaceResult,
   type OddsSnapshot,
   type RaceData,
@@ -107,6 +108,9 @@ function fakeRaceData(
   raceId: string,
   resultsByUmaban: Record<number, HorseRaceResult[]> = {},
   oddsStatus: "result" | "middle" | "yoso" = "result",
+  // レース自体のcourseType/fenceを上書きできる(芝の傷み目安#26-P3の配線テスト用)。
+  // 省略時は従来どおり courseType="芝"・fenceキー無し(undefined)のまま=既存回帰は無変更。
+  raceOverrides: { courseType?: CourseType; fence?: string | null } = {},
 ): RaceData {
   const horses: RaceHorseData[] = [1, 2, 3].map((n) => ({
     shutuba: fakeHorse(n),
@@ -139,10 +143,12 @@ function fakeRaceData(
     raceId: parseRaceId(raceId),
     race: {
       raceName: "テスト特別",
-      courseType: "芝",
+      courseType: raceOverrides.courseType ?? "芝",
       distance: 1600,
       weather: "晴",
       trackCondition: "良",
+      // fenceは"fence"キーが指定されたときだけ持たせる(既存テストはキー自体を持たない=undefined相当を維持)。
+      ...("fence" in raceOverrides ? { fence: raceOverrides.fence } : {}),
     },
     horses,
     odds,
@@ -735,6 +741,105 @@ describe("runAnalysis(分析パイプライン)", () => {
         .map((t) => t.label)
         .join("・");
       expect(horse1Line).toContain(`条件替わり=${expectedTagsText}`);
+    });
+  });
+
+  describe("芝の傷み目安(タスク#26-P3)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("中央芝: BuildPromptInput.race.turfWearHintが populate され、プロンプト本文に「芝コースの開催進行」行が出ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        // RACE_ID(場コード05・東京・回次02・日次08)。fence未指定(芝だが柵不明)。
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "result", { fence: null })),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.turfWearHint).toEqual({
+        開催日次: 8,
+        開催回次: 2,
+        柵: null,
+        note:
+          "中央2回8日目。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。",
+      });
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).toContain(
+        "芝コースの開催進行: 中央2回8日目。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。",
+      );
+    });
+
+    it("中央ダート: turfWearHintがnullになり、プロンプト本文に「芝コースの開催進行」行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {}, "result", { courseType: "ダ" }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.turfWearHint ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("芝コースの開催進行");
+    });
+
+    it("中央障害: turfWearHintがnullになり、プロンプト本文に「芝コースの開催進行」行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {}, "result", { courseType: "障" }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.turfWearHint ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("芝コースの開催進行");
+    });
+
+    it("地方(NAR): turfWearHintがnullになり、プロンプト本文に「芝コースの開催進行」行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(NAR_RACE_ID)),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(
+        parseRaceId(NAR_RACE_ID),
+        parseKaisaiDate("20260712"),
+        deps,
+        onProgress,
+      );
+
+      expect(captured.value!.race.turfWearHint ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("芝コースの開催進行");
     });
   });
 
