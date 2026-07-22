@@ -98,6 +98,15 @@ export interface ShutubaRaceInfo {
   readonly weather?: string;
   /** 馬場状態。取得できない場合は未定義。 */
   readonly trackCondition?: string;
+  /**
+   * 芝コースの柵(内外の移動位置)を表す単一の大文字(例: "A"〜"D")。
+   * 三状態を持つ非破壊optionalフィールド(タスク#26-P1: 芝の傷み目安の土台):
+   * - このキー自体が無い(undefined): 芝以外(ダート・障害)。柵の概念が無いため省略する
+   *   (既存の startTime/weather/trackCondition と同じ spread-omit 流儀)。
+   * - null: 芝だが柵letterを判別できなかった(例: 直線コースで内外・回り方向のみの表記)。
+   * - 単一の大文字文字列: 判別できた柵(例: "A")。
+   */
+  readonly fence?: string | null;
 }
 
 /** 出馬表のパース結果(レース情報+出走馬)。 */

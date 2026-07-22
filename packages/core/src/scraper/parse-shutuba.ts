@@ -48,6 +48,21 @@ function toCourseType(raw: string): CourseType {
   }
 }
 
+/**
+ * 芝コース区分(柵)を抽出する。芝以外(ダート・障害)は概念が無いため undefined。
+ * 芝でも「芝XXXXm」直後の括弧が無い・括弧内に柵letterが無い場合は判別不能として null。
+ */
+function parseFence(courseType: CourseType, data01: string): string | null | undefined {
+  if (courseType !== "芝") {
+    return undefined;
+  }
+  const parenContent = PATTERNS.turfFenceParen.exec(data01)?.[1];
+  if (parenContent === undefined) {
+    return null;
+  }
+  return PATTERNS.fenceLetterToken.exec(parenContent)?.[1] ?? null;
+}
+
 /** レース情報(ページ上部)を抽出する。 */
 function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
   const raceName = $(SEL.raceName).first().text().trim();
@@ -65,6 +80,7 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
   const startTime = PATTERNS.startTime.exec(data01)?.[1];
   const weather = PATTERNS.weather.exec(data01)?.[1];
   const trackCondition = PATTERNS.trackCondition.exec(data01)?.[1];
+  const fence = parseFence(courseType, data01);
 
   return {
     raceName,
@@ -73,6 +89,7 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
     ...(startTime !== undefined ? { startTime } : {}),
     ...(weather !== undefined ? { weather } : {}),
     ...(trackCondition !== undefined ? { trackCondition } : {}),
+    ...(fence !== undefined ? { fence } : {}),
   };
 }
 

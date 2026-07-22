@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  centralVenueInfoFromRaceId,
   InvalidIdError,
   kaisaiDateFromNarRaceId,
   parseHorseId,
@@ -184,6 +185,61 @@ describe("kaisaiDateFromNarRaceId(地方レースIDから開催日を導出)", (
   });
 });
 
+describe("centralVenueInfoFromRaceId(中央レースIDから開催情報を導出)", () => {
+  it("中央レースIDから場コード・回次・日次を2桁ゼロ埋め文字列で導出すること", () => {
+    // 202605020811 → 場コード05・回次02・日次08(11R)。
+    expect(centralVenueInfoFromRaceId("202605020811")).toEqual({
+      trackCode: "05",
+      round: "02",
+      day: "08",
+    });
+  });
+
+  it("回次・日次が1桁相当の値でも2桁ゼロ埋め文字列のまま保持すること(P3のレースID再構築で桁を誤らないため)", () => {
+    // 202601010109 → 場コード01・回次01・日次01。
+    expect(centralVenueInfoFromRaceId("202601010109")).toEqual({
+      trackCode: "01",
+      round: "01",
+      day: "01",
+    });
+  });
+
+  describe("中央場コードの境界値(01・10)でも開催情報を導出できること", () => {
+    // [レースID, 期待する開催情報, 補足]
+    const cases: Array<
+      [string, { trackCode: string; round: string; day: string }, string]
+    > = [
+      ["202601020811", { trackCode: "01", round: "02", day: "08" }, "コード01(中央の下限)"],
+      ["202610020811", { trackCode: "10", round: "02", day: "08" }, "コード10(中央の上限)"],
+    ];
+    it.each(cases)("%s → %j(%s)", (raceId, expected) => {
+      expect(centralVenueInfoFromRaceId(raceId)).toEqual(expected);
+    });
+  });
+
+  it("地方(場コード30〜64)のレースIDはnullを返すこと(対象外)", () => {
+    expect(centralVenueInfoFromRaceId("202654071210")).toBeNull();
+  });
+
+  it("12桁の数字でない・場コード不正など parseRaceId が拒否する入力はnullを返すこと", () => {
+    expect(centralVenueInfoFromRaceId("2026050208111")).toBeNull(); // 13桁
+    expect(centralVenueInfoFromRaceId("20260502081")).toBeNull(); // 11桁
+    expect(centralVenueInfoFromRaceId("202611020811")).toBeNull(); // 場コード11(中央でも地方でもない)
+    expect(centralVenueInfoFromRaceId("202605020813")).toBeNull(); // レース番号13は不正
+  });
+
+  it("回次・日次が「00」等の異常桁でも、parseRaceIdが回次・日次の範囲を検証しないため例外にせずそのまま返すこと", () => {
+    // parseRaceId は場コード・レース番号のみ検証し、回次・日次(7〜10桁目)の範囲は検証しない
+    // (ids.ts のコメント参照)。本関数もその検証方針を踏襲し、独自の範囲チェックを追加しない
+    // (検証ロジックの二重管理を避けるため)。202601000811 → 回次00・日次08。
+    expect(centralVenueInfoFromRaceId("202601000811")).toEqual({
+      trackCode: "01",
+      round: "00",
+      day: "08",
+    });
+  });
+});
+
 describe("parseKaisaiDate(開催日のパースと検証)", () => {
   it("正当な8桁の開催日をそのままの文字列として返すこと", () => {
     expect(parseKaisaiDate("20260628")).toBe("20260628");
@@ -262,5 +318,6 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.parseHorseId).toBe(parseHorseId);
     expect(mod.InvalidIdError).toBe(InvalidIdError);
     expect(mod.venueKindOfRaceId).toBe(venueKindOfRaceId);
+    expect(mod.centralVenueInfoFromRaceId).toBe(centralVenueInfoFromRaceId);
   });
 });

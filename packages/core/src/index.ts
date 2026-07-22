@@ -24,12 +24,14 @@ export {
   type TextFetcher,
 } from "./scraper/cache.js";
 export {
+  centralVenueInfoFromRaceId,
   InvalidIdError,
   kaisaiDateFromNarRaceId,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
   venueKindOfRaceId,
+  type CentralVenueInfo,
   type HorseId,
   type KaisaiDate,
   type RaceId,
