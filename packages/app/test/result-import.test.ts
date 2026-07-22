@@ -66,11 +66,39 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
       umaban: 4,
       finishPosition: 1,
       placePayout: 210,
+      passing: [],
+      last3f: null,
     });
     expect(byUmaban.get(9)).toEqual({
       umaban: 9,
       finishPosition: 3,
       placePayout: 1060,
+      passing: [],
+      last3f: null,
+    });
+  });
+
+  it("各馬の通過順・上がり3F(タスク#27-A2)をそのまま保存レコードへ詰めること", () => {
+    const entries = toResultEntries(
+      buildRaceResult({
+        horses: [
+          {
+            umaban: 4,
+            finishPosition: { kind: "順位", value: 1 },
+            horseName: "A",
+            wakuban: 4,
+            passing: [2, 2, 4, 2],
+            last3f: 37.2,
+          },
+        ],
+      }),
+    );
+    expect(entries[0]).toEqual({
+      umaban: 4,
+      finishPosition: 1,
+      placePayout: 210,
+      passing: [2, 2, 4, 2],
+      last3f: 37.2,
     });
   });
 
@@ -170,6 +198,29 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
       placePayoutCount: 3,
       hasPayout: true,
     });
+  });
+
+  it("パース結果の面(courseType、タスク#27-A2)を saveResult の第3引数へそのまま渡すこと", async () => {
+    const saveResult = vi.fn();
+    await importRaceResult(raceId, {
+      fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+      parse: () => buildRaceResult({ courseType: "ダ" }),
+      saveResult,
+    });
+    expect(saveResult).toHaveBeenCalledTimes(1);
+    const [, , courseType] = saveResult.mock.calls[0]!;
+    expect(courseType).toBe("ダ");
+  });
+
+  it("パース結果に面(courseType)が無い(未解決)場合は saveResult の第3引数に undefined を渡すこと", async () => {
+    const saveResult = vi.fn();
+    await importRaceResult(raceId, {
+      fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+      parse: () => buildRaceResult(),
+      saveResult,
+    });
+    const [, , courseType] = saveResult.mock.calls[0]!;
+    expect(courseType).toBeUndefined();
   });
 
   it("結果テーブル欠落(構造異常のパース失敗)時は保存せずエラーを伝播する(DBを汚さない)", async () => {

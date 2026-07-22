@@ -1,5 +1,6 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
+  AnalysisStore,
   CLIP_VARIANTS,
   parseKaisaiDate,
   parseRaceId,
@@ -36,6 +37,10 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     for (const r of resources.splice(0)) {
       r.close();
     }
+    // vi.spyOn(AnalysisStore.prototype, ...) 等のスパイをテストごとに必ず復元する
+    // (code-reviewer指摘対応: テスト本体末尾の mockRestore() はアサーション失敗時に
+    // 到達せず、スパイが後続テストへ漏れ残る恐れがあったため afterEach に一本化する)。
+    vi.restoreAllMocks();
   });
 
   it("APIキー未設定なら analyze=null・スキップ理由付きで組み立てる", () => {
@@ -160,6 +165,66 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(onFallback).toHaveBeenCalledWith("テスト診断メッセージ", {
       raceId: "202605020811",
       stopReason: "max_tokens",
+    });
+  });
+
+  describe("importResult の saveResult DI 配線(タスク#27-A2: 配線落ち検出)", () => {
+    /**
+     * 型だけでは検出できない配線落ち(DIラムダが引数を静かに落としても型検査は通る)を防ぐための
+     * 結合寄りテスト。AnalysisStore.prototype.saveResult をスパイに差し替え、
+     * createPipelineDeps が組み立てる importResult(内部で result-import.ts の
+     * importRaceResult → deps.saveResult → store.saveResult と繋がる)を実際に実行し、
+     * パース結果の courseType(面)がスパイの第3引数まで実際に届くことを確認する。
+     * DIラムダが `(rid, entries) => store.saveResult(rid, entries)` のように引数を落としても
+     * TypeScript 上は合法(コールバック型は少ない引数の実装を許容する)なため、この検出には
+     * 実行時アサーションが必須(型検査だけでは再発を防げない)。
+     */
+    it("合成HTML(芝1200m見出し+最小結果行)を取り込むと、courseType='芝'がstore.saveResultの第3引数まで届くこと", async () => {
+      const saveResultSpy = vi.spyOn(AnalysisStore.prototype, "saveResult");
+
+      // 実サイトアクセスなしの合成HTML。.RaceData01(芝1200m)+ #All_Result_Table の最小行。
+      const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type"
+              ? "text/html; charset=utf-8"
+              : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> =>
+          new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      const outcome = await r.importResult(parseRaceId("202602010607"));
+
+      expect(outcome.status).toBe("imported");
+      expect(saveResultSpy).toHaveBeenCalledTimes(1);
+      const [, , courseType] = saveResultSpy.mock.calls[0]!;
+      expect(courseType).toBe("芝");
+      // スパイの復元は afterEach の vi.restoreAllMocks() に一本化する
+      // (このアサーションが失敗しても復元が漏れないようにするため)。
     });
   });
 

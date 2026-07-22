@@ -300,6 +300,13 @@ export interface RaceResult {
   readonly placePayouts: RacePayoutEntry[];
   /** 単勝の確定払戻(払戻テーブル欠損時は空配列)。 */
   readonly winPayouts: RacePayoutEntry[];
+  /**
+   * コース種別(芝/ダ/障、タスク#27-A2)。
+   * `.RaceData01` のテキストから解決する。parseRaceResult は常にこのフィールドを populate するが、
+   * ヘッダ欠損・非マッチ時は解決不能として null にする(非throwフォールバック)。
+   * optional にしているのは既存の RaceResult リテラル(テスト等)を非破壊にするため。
+   */
+  readonly courseType?: CourseType | null;
 }
 
 /** 単勝オッズ(1頭分)。未確定・非数値は null。 */

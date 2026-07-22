@@ -236,7 +236,11 @@ export function createPipelineDeps(
         // 常にライブ取得(キャッシュ毒化回避)。パース失敗時は saveResult に到達しない。
         fetchText: (url, options) => fetcher.fetchText(url, options),
         parse: parseRaceResult,
-        saveResult: (rid, entries) => store.saveResult(rid, entries),
+        // courseType(面、タスク#27-A2)を素通しする。ここで引数を落とすと、
+        // importRaceResult が渡す result.courseType が本番経路で握り潰される
+        // (テストは緑でも実際にはrace_result_metaへ書かれない)ため、必ず転送する。
+        saveResult: (rid, entries, courseType) =>
+          store.saveResult(rid, entries, courseType),
       }),
     listUnimportedRaceIds: (): readonly string[] => store.listUnimportedRaceIds(),
     listAnalyzedRaceIdsByPromptVersion: (version: string): readonly string[] =>

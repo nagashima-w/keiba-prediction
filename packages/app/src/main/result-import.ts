@@ -9,6 +9,7 @@
 import {
   raceResultUrl,
   RaceResultNotConfirmedError,
+  type CourseType,
   type RaceId,
   type RaceResult,
   type RaceResultEntry,
@@ -20,6 +21,8 @@ import type { ImportResultOutcome } from "../shared/analysis-types.js";
  * - 着順(FinishPosition)は数値順位のみ number にし、非数値(中止など)・null は null にする。
  *   降着(demoted)でも確定着順 value を採用する。
  * - 複勝の確定払戻(placePayout)を馬番で対応付ける。払戻の無い馬は null。
+ * - 通過順(passing)・上がり3F(last3f、タスク#27-A2)は各馬の値をそのまま詰める
+ *   (parseRaceResult が既に非throwフォールバック済みのため、ここでの追加変換は不要)。
  */
 export function toResultEntries(result: RaceResult): RaceResultEntry[] {
   const payoutByUmaban = new Map(
@@ -34,6 +37,8 @@ export function toResultEntries(result: RaceResult): RaceResultEntry[] {
       umaban: h.umaban,
       finishPosition,
       placePayout: payoutByUmaban.get(h.umaban) ?? null,
+      passing: h.passing,
+      last3f: h.last3f,
     };
   });
 }
@@ -69,10 +74,16 @@ export interface ImportResultDeps {
   ) => Promise<string>;
   /** 取得HTMLをパースする(通常は core parseRaceResult)。結果テーブル欠落時は例外を投げる。 */
   readonly parse: (html: string) => RaceResult;
-  /** 実着順+複勝払戻を保存する(通常は AnalysisStore.saveResult)。 */
+  /**
+   * 実着順・通過順・上がり3F・複勝払戻を保存する(通常は AnalysisStore.saveResult)。
+   * courseType(面、タスク#27-A2)はレース単位の別引数として渡す。パース結果に面が
+   * 無い(未解決)場合は undefined を渡し、AnalysisStore 側が race_result_meta へ
+   * 書き込まないようにする。
+   */
   readonly saveResult: (
     raceId: RaceId,
     entries: readonly RaceResultEntry[],
+    courseType?: CourseType | null,
   ) => void;
 }
 
@@ -111,6 +122,6 @@ export async function importRaceResult(
     // 構造異常等はそのまま伝播 → 以降の保存に到達しない。
     throw e;
   }
-  deps.saveResult(raceId, toResultEntries(result));
+  deps.saveResult(raceId, toResultEntries(result), result.courseType);
   return summarizeImport(raceId, result);
 }

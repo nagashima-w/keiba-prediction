@@ -241,6 +241,8 @@ export {
   type AnalysisHorseRecord,
   type AnalysisRecord,
   type AnalysisStoreOptions,
+  type RaceResultDetail,
+  type RaceResultDetailHorse,
   type RaceResultEntry,
   type StoredAnalysis,
   type StoredAnalysisHorse,

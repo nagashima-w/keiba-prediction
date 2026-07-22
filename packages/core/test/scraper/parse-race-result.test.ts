@@ -52,6 +52,20 @@ function buildResultHtml(rows: string[], payoutTables = ""): string {
 }
 
 /**
+ * `.RaceData01` を任意で付与した結果HTML(タスク#27-A2: 面〈course_type〉パース検証用)。
+ * raceData01 が null の場合はヘッダ自体を出力しない(欠損ケースの再現)。
+ */
+function buildResultHtmlWithRaceData(
+  raceData01: string | null,
+  rows: string[],
+): string {
+  return `<html><body>
+    ${raceData01 !== null ? `<div class="RaceData01">${raceData01}</div>` : ""}
+    <table id="All_Result_Table"><tbody>${rows.join("")}</tbody></table>
+  </body></html>`;
+}
+
+/**
  * 結果テーブルのヘッダ行(実データ相当の完全版)。
  * 後3F・コーナー通過順のヘッダテキストを含み、列インデックス解決の対象になる。
  * includePassing=false でコーナー通過順の見出し自体を落とし、NARのような列欠落を再現する。
@@ -215,6 +229,10 @@ describe("parseRaceResult(レース結果パーサー)", () => {
         expect(h.last3f).not.toBeNull();
         expect(h.wakuban).not.toBeNull();
       }
+    });
+
+    it("コース種別(面)が .RaceData01(ダ1700m)から'ダ'として取れること(タスク#27-A2)", () => {
+      expect(result.courseType).toBe("ダ");
     });
   });
 
@@ -504,6 +522,58 @@ describe("parseRaceResult(地方(NAR)フィクスチャの互換性)", () => {
     const third = byUmaban.get(8)!;
     expect(third.finishPosition).toEqual({ kind: "順位", value: 3 });
     expect(third.wakuban).toBe(7);
+  });
+
+  it("地方(NAR)フィクスチャでもコース種別(面)が.RaceData01(ダ1300m)から'ダ'として取れること(タスク#27-A2)", () => {
+    expect(result.courseType).toBe("ダ");
+  });
+});
+
+describe("コース種別(面)のパース(タスク#27-A2・非throwフォールバック)", () => {
+  it("芝1200mの見出しから courseType='芝' が取れること", () => {
+    const result = parseRaceResult(
+      buildResultHtmlWithRaceData(
+        "15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良",
+        [buildResultRow({ umaban: "1" })],
+      ),
+    );
+    expect(result.courseType).toBe("芝");
+  });
+
+  it("ダ1700mの見出しから courseType='ダ' が取れること", () => {
+    const result = parseRaceResult(
+      buildResultHtmlWithRaceData(
+        "13:10発走 /<span> ダ1700m</span> (右) / 天候:晴 / 馬場:稍",
+        [buildResultRow({ umaban: "1" })],
+      ),
+    );
+    expect(result.courseType).toBe("ダ");
+  });
+
+  it("障3000mの見出しから courseType='障' が取れること", () => {
+    const result = parseRaceResult(
+      buildResultHtmlWithRaceData(
+        "14:20発走 /<span> 障3000m</span> (外) / 天候:曇 / 馬場:重",
+        [buildResultRow({ umaban: "1" })],
+      ),
+    );
+    expect(result.courseType).toBe("障");
+  });
+
+  it(".RaceData01 自体が無い(ヘッダ欠損)場合は courseType=null になり、throwしないこと", () => {
+    const result = parseRaceResult(
+      buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]),
+    );
+    expect(result.courseType).toBeNull();
+  });
+
+  it(".RaceData01 はあるがコース・距離表記に非マッチな場合は courseType=null になり、throwしないこと", () => {
+    const result = parseRaceResult(
+      buildResultHtmlWithRaceData("15:35発走 / 天候:晴 / 馬場:良", [
+        buildResultRow({ umaban: "1" }),
+      ]),
+    );
+    expect(result.courseType).toBeNull();
   });
 });
 

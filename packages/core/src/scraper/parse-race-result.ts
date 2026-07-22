@@ -44,7 +44,12 @@ import {
   RACE_RESULT_HEADER_LABELS,
   RACE_RESULT_SELECTORS as SEL,
 } from "./selectors.js";
-import type { FinishPosition, RacePayoutEntry, RaceResult } from "./types.js";
+import type {
+  CourseType,
+  FinishPosition,
+  RacePayoutEntry,
+  RaceResult,
+} from "./types.js";
 
 /** レース結果のパース失敗(結果テーブル欠損・払戻の件数不整合等)を表す例外。 */
 export class RaceResultParseError extends Error {
@@ -202,6 +207,36 @@ function columnsAligned(
   return expectedColumnCount > 0 && $cells.length === expectedColumnCount;
 }
 
+/**
+ * コース種別文字をドメイン型に変換する(タスク#27-A2)。
+ * parse-shutuba の toCourseType と異なり、結果ページは面が解決できなくても着順本体は
+ * 取れているべきで構造異常として扱いたくないため、未知値は throw せず null にフォールバックする。
+ */
+function toCourseTypeOrNull(raw: string): CourseType | null {
+  switch (raw) {
+    case "芝":
+    case "ダ":
+    case "障":
+      return raw;
+    default:
+      return null;
+  }
+}
+
+/**
+ * `.RaceData01` のテキストからコース種別(面)を解決する(タスク#27-A2)。
+ * ヘッダ自体が無い・コース距離表記に非マッチな場合は null(非throwフォールバック。
+ * 面が取れなくても着順・払戻本体のパースは続行できるべきため)。
+ */
+function parseCourseType($: CheerioAPI): CourseType | null {
+  const $raceData01 = $(SEL.raceData01).first();
+  if ($raceData01.length === 0) {
+    return null;
+  }
+  const match = PATTERNS.courseAndDistance.exec($raceData01.text());
+  return match ? toCourseTypeOrNull(match[1]!) : null;
+}
+
 /** 払戻金額文字列(例: "1,060円")を数値化する。数字が無ければ null。 */
 function toPayoutNumber(raw: string): number | null {
   const digits = raw.replace(/[^0-9]/g, "");
@@ -322,5 +357,6 @@ export function parseRaceResult(html: string): RaceResult {
     horses,
     placePayouts: parsePayoutRow($, SEL.placeRow, "複勝"),
     winPayouts: parsePayoutRow($, SEL.winRow, "単勝"),
+    courseType: parseCourseType($),
   };
 }

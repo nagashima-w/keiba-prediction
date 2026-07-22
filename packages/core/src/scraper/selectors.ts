@@ -118,6 +118,12 @@ export const HORSE_RESULTS_SELECTORS = {
  * id=All_Result_Table にスコープする(resultTable 配下でのみ resultRow を探す)。
  */
 export const RACE_RESULT_SELECTORS = {
+  /**
+   * 発走時刻・距離・コース・天候・馬場を含む行(タスク#27-A2: 面〈course_type〉解決に使う)。
+   * SHUTUBA_SELECTORS.raceData01 と値は重複するが、セレクタ群はページ単位で自己完結させる
+   * 既存規約(RACE_LIST_SELECTORS/SHUTUBA_SELECTORS等の作法)に合わせ、ここにも独立して持つ。
+   */
+  raceData01: ".RaceData01",
   /** 全着順テーブル(結果本体)。他テーブルの行と区別するため id で限定する。 */
   resultTable: "#All_Result_Table",
   /**
