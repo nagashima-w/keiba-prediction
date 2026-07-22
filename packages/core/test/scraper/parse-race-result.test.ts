@@ -51,6 +51,99 @@ function buildResultHtml(rows: string[], payoutTables = ""): string {
   </body></html>`;
 }
 
+/**
+ * 結果テーブルのヘッダ行(実データ相当の完全版)。
+ * 後3F・コーナー通過順のヘッダテキストを含み、列インデックス解決の対象になる。
+ * includePassing=false でコーナー通過順の見出し自体を落とし、NARのような列欠落を再現する。
+ */
+function buildFullHeaderRow(includePassing = true): string {
+  return `
+    <tr class="Header">
+      <th class="Result_Num">着<br>順</th>
+      <th class="Waku">枠</th>
+      <th class="Num">馬<br>番</th>
+      <th class="Horse_Info"><div class="Horse_Name">馬名</div></th>
+      <th>性齢</th>
+      <th>斤量</th>
+      <th>騎手</th>
+      <th class="Time">タイム</th>
+      <th>着差</th>
+      <th>人<br>気</th>
+      <th class="Odds">単勝<br>オッズ</th>
+      <th>後3F</th>
+      ${includePassing ? "<th>コーナー<br>通過順</th>" : ""}
+      <th>厩舎</th>
+      <th class="Weight">馬体重<br/><small>(増減)</small></th>
+    </tr>`;
+}
+
+/**
+ * ヘッダ(buildFullHeaderRow)の列位置に対応する結果行を構築する。
+ * 後3F・コーナー通過順・枠のセル内容を個別に指定でき、異常系(空・非数値)を検証できる。
+ * last3f/passingText を null にするとそのセル自体を省略する(セル欠損の再現)。
+ */
+function buildFullResultRow(
+  opts: {
+    rank?: string;
+    wakuClass?: string;
+    wakuText?: string;
+    umaban?: string;
+    name?: string;
+    last3fText?: string | null;
+    passingText?: string | null;
+    includePassing?: boolean;
+  } = {},
+): string {
+  const rank = opts.rank ?? "1";
+  const wakuClass = opts.wakuClass ?? "1";
+  const wakuText = opts.wakuText ?? wakuClass;
+  const umaban = opts.umaban ?? "1";
+  const name = opts.name ?? "テスト馬";
+  const includePassing = opts.includePassing ?? true;
+  const last3fCell =
+    opts.last3fText === null
+      ? ""
+      : `<td class="Time">${opts.last3fText ?? "37.0"}</td>`;
+  const passingCell =
+    !includePassing || opts.passingText === null
+      ? ""
+      : `<td class="PassageRate">${opts.passingText ?? "2-2-2-2"}</td>`;
+  return `
+    <tr class="HorseList">
+      <td class="Result_Num"><div class="Rank">${rank}</div></td>
+      <td class="Num Waku${wakuClass}"><div>${wakuText}</div></td>
+      <td class="Num Txt_C"><div>${umaban}</div></td>
+      <td class="Horse_Info">
+        <span class="Horse_Name">
+          <a href="https://db.netkeiba.com/horse/2022101678" title="${name}">
+            <span class="HorseNameSpan">${name}</span>
+          </a>
+        </span>
+      </td>
+      <td>牝4</td>
+      <td>52.0</td>
+      <td>騎手</td>
+      <td>1:44.9</td>
+      <td></td>
+      <td>1</td>
+      <td>1.0</td>
+      ${last3fCell}
+      ${passingCell}
+      <td>栗東</td>
+      <td>480(+2)</td>
+    </tr>`;
+}
+
+/** ヘッダ付きの結果テーブルHTMLを構築する。 */
+function buildFullResultHtml(headerRow: string, rows: string[]): string {
+  return `<html><body>
+    <table id="All_Result_Table">
+      <thead>${headerRow}</thead>
+      <tbody>${rows.join("")}</tbody>
+    </table>
+  </body></html>`;
+}
+
 describe("parseRaceResult(レース結果パーサー)", () => {
   describe("フィクスチャ(函館7R・10頭)の実データ検証", () => {
     let result: RaceResult;
@@ -90,6 +183,38 @@ describe("parseRaceResult(レース結果パーサー)", () => {
 
     it("単勝の確定払戻(馬番4:670円)を返すこと", () => {
       expect(result.winPayouts).toEqual([{ umaban: 4, payout: 670 }]);
+    });
+
+    it("各馬の通過順・後3F・枠が正しく取れること(ハイライト行でもクラスに依存せず後3Fを数値化すること)", () => {
+      const byUmaban = new Map(result.horses.map((h) => [h.umaban, h]));
+      // 1着(後3Fセルに BgBlue02 が付く)=馬番4。
+      const first = byUmaban.get(4)!;
+      expect(first.passing).toEqual([2, 2, 4, 2]);
+      expect(first.last3f).toBe(37.2);
+      expect(first.wakuban).toBe(4);
+      // 2着(後3Fセルに BgYellow が付く)=馬番2。
+      const second = byUmaban.get(2)!;
+      expect(second.passing).toEqual([9, 9, 8, 6]);
+      expect(second.last3f).toBe(36.8);
+      expect(second.wakuban).toBe(2);
+      // 3着(後3Fセルに BgOrange が付く・枠8≠馬番9)=馬番9。
+      const third = byUmaban.get(9)!;
+      expect(third.passing).toEqual([1, 1, 1, 1]);
+      expect(third.last3f).toBe(37.8);
+      expect(third.wakuban).toBe(8);
+      // 10着(ハイライト無し)=馬番6。
+      const last = byUmaban.get(6)!;
+      expect(last.passing).toEqual([2, 2, 2, 4]);
+      expect(last.last3f).toBe(40);
+      expect(last.wakuban).toBe(6);
+    });
+
+    it("全10頭で通過順・後3F・枠がすべて欠損なく取れること", () => {
+      for (const h of result.horses) {
+        expect(h.passing.length).toBeGreaterThan(0);
+        expect(h.last3f).not.toBeNull();
+        expect(h.wakuban).not.toBeNull();
+      }
     });
   });
 
@@ -194,6 +319,145 @@ describe("parseRaceResult(レース結果パーサー)", () => {
   });
 });
 
+describe("通過順・後3F・枠の異常系(空/非数値/列欠落)は例外を投げずフォールバックすること", () => {
+  it("後3Fセルが空文字の場合は null になること", () => {
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildFullResultRow({ last3fText: "" }),
+    ]);
+    expect(parseRaceResult(html).horses[0]!.last3f).toBeNull();
+  });
+
+  it("後3Fセルが非数値の場合は null になること", () => {
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildFullResultRow({ last3fText: "計不" }),
+    ]);
+    expect(parseRaceResult(html).horses[0]!.last3f).toBeNull();
+  });
+
+  it("後3Fの見出し列が無い場合は null になること(ヘッダから列を解決できない)", () => {
+    // buildFullHeaderRow をベースに「後3F」見出しを含まない特別なヘッダを組み立てる。
+    const headerWithoutLast3f = `
+      <tr class="Header">
+        <th class="Result_Num">着<br>順</th>
+        <th class="Waku">枠</th>
+        <th class="Num">馬<br>番</th>
+        <th class="Horse_Info"><div class="Horse_Name">馬名</div></th>
+        <th class="Weight">馬体重<br/><small>(増減)</small></th>
+      </tr>`;
+    const row = `
+      <tr class="HorseList">
+        <td class="Result_Num"><div class="Rank">1</div></td>
+        <td class="Num Waku1"><div>1</div></td>
+        <td class="Num Txt_C"><div>1</div></td>
+        <td class="Horse_Info">
+          <span class="Horse_Name">
+            <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+              <span class="HorseNameSpan">テスト馬</span>
+            </a>
+          </span>
+        </td>
+        <td>480(+2)</td>
+      </tr>`;
+    const html = buildFullResultHtml(headerWithoutLast3f, [row]);
+    expect(parseRaceResult(html).horses[0]!.last3f).toBeNull();
+  });
+
+  it("通過順セルが空文字の場合は空配列になること", () => {
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildFullResultRow({ passingText: "" }),
+    ]);
+    expect(parseRaceResult(html).horses[0]!.passing).toEqual([]);
+  });
+
+  it("通過順セルが非数値(例: 取消)の場合は空配列になること", () => {
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildFullResultRow({ passingText: "取消" }),
+    ]);
+    expect(parseRaceResult(html).horses[0]!.passing).toEqual([]);
+  });
+
+  it("枠セルが空文字の場合は null になること", () => {
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildFullResultRow({ wakuText: "" }),
+    ]);
+    expect(parseRaceResult(html).horses[0]!.wakuban).toBeNull();
+  });
+
+  it("枠セルが非数値の場合は null になること", () => {
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildFullResultRow({ wakuText: "X" }),
+    ]);
+    expect(parseRaceResult(html).horses[0]!.wakuban).toBeNull();
+  });
+
+  it("ヘッダはあるが結果行のセル数が短い(欠損している)場合は後3F=null・通過順=空配列になること", () => {
+    // 既存の最小行ビルダー(4セルのみ)をヘッダ付きテーブルに差し込み、セル欠損を再現する。
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildResultRow({ umaban: "1" }),
+    ]);
+    const horse = parseRaceResult(html).horses[0]!;
+    expect(horse.last3f).toBeNull();
+    expect(horse.passing).toEqual([]);
+  });
+
+  it("行の途中のセルが欠けて後続列がズレている場合、ズレた別列の値を後3F・通過順としてsilentに拾わないこと(列インデックスは合っていても行のセル数がヘッダ列数と不一致なら読まない)", () => {
+    // ヘッダは15列(着差列を含む)だが、この行だけ「着差」セルが丸ごと欠落し14セルになっている
+    // (取消・除外等で中間セルが抜けるケースを想定)。素朴に列インデックス(後3F=11, 通過順=12)
+    // だけで読むと、後続列が1つずつ前へズレて別の値(かつ数値/ハイフン区切りとして"もっともらしい"
+    // 値)を誤って拾ってしまう。それを防ぎ、この行は後3F=null・通過順=空配列になることを確認する。
+    const misalignedRow = `
+      <tr class="HorseList">
+        <td class="Result_Num"><div class="Rank">4</div></td>
+        <td class="Num Waku2"><div>2</div></td>
+        <td class="Num Txt_C"><div>7</div></td>
+        <td class="Horse_Info">
+          <span class="Horse_Name">
+            <a href="https://db.netkeiba.com/horse/2022101678" title="ズレ馬">
+              <span class="HorseNameSpan">ズレ馬</span>
+            </a>
+          </span>
+        </td>
+        <td>牡5</td>
+        <td>55.0</td>
+        <td>騎手</td>
+        <td>1:45.0</td>
+        <td>4</td>
+        <td>6.7</td>
+        <td>1.5</td>
+        <td>42.5</td>
+        <td>3-2-1-4</td>
+        <td>480(+2)</td>
+      </tr>`;
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      misalignedRow,
+      buildFullResultRow({ umaban: "1" }),
+    ]);
+    const horses = parseRaceResult(html).horses;
+    const byUmaban = new Map(horses.map((h) => [h.umaban, h]));
+
+    // セル数がズレた行(馬番7): インデックス11には本来コーナー通過順欄だった "42.5" が、
+    // インデックス12には本来厩舎欄だった "3-2-1-4" が来てしまうが、これらを拾わない。
+    const misaligned = byUmaban.get(7)!;
+    expect(misaligned.last3f).toBeNull();
+    expect(misaligned.passing).toEqual([]);
+
+    // 同一テーブル内の正常行(馬番1・15セル)は従来どおり値が取れること。
+    const normal = byUmaban.get(1)!;
+    expect(normal.last3f).toBe(37);
+    expect(normal.passing).toEqual([2, 2, 2, 2]);
+  });
+
+  it("中止・除外・降着など非数値着順の行でも通過順・後3F・枠の抽出でthrowしないこと", () => {
+    const html = buildFullResultHtml(buildFullHeaderRow(), [
+      buildFullResultRow({ rank: "中止", last3fText: "36.5", passingText: "3-3-3-3" }),
+    ]);
+    const horse = parseRaceResult(html).horses[0]!;
+    expect(horse.finishPosition).toEqual({ kind: "非数値", text: "中止" });
+    expect(horse.last3f).toBe(36.5);
+    expect(horse.passing).toEqual([3, 3, 3, 3]);
+  });
+});
+
 describe("parseRaceResult(地方(NAR)フィクスチャの互換性)", () => {
   // 高知1R(202654071201): 結果行に class="HorseList" が付かない(<tr >のみ)構造差分がある。
   let result: RaceResult;
@@ -220,6 +484,26 @@ describe("parseRaceResult(地方(NAR)フィクスチャの互換性)", () => {
       { umaban: 4, payout: 110 },
       { umaban: 8, payout: 170 },
     ]);
+  });
+
+  it("コーナー通過順の見出し列が無いため、全頭とも通過順は空配列になること(throwしない)", () => {
+    for (const h of result.horses) {
+      expect(h.passing).toEqual([]);
+    }
+  });
+
+  it("コーナー通過順が無い構造でも後3F・枠は取得できること(1着=馬番3: 後3F 38.8・枠3)", () => {
+    const byUmaban = new Map(result.horses.map((h) => [h.umaban, h]));
+    const first = byUmaban.get(3)!;
+    expect(first.last3f).toBe(38.8);
+    expect(first.wakuban).toBe(3);
+  });
+
+  it("枠と馬番が異なる行でも取り違えないこと(3着=馬番8・枠7)", () => {
+    const byUmaban = new Map(result.horses.map((h) => [h.umaban, h]));
+    const third = byUmaban.get(8)!;
+    expect(third.finishPosition).toEqual({ kind: "順位", value: 3 });
+    expect(third.wakuban).toBe(7);
   });
 });
 

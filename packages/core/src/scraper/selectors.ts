@@ -136,6 +136,17 @@ export const RACE_RESULT_SELECTORS = {
   numCell: "td.Num",
   /** 馬名リンク(title属性が馬名)。 */
   horseNameLink: "td.Horse_Info span.Horse_Name a",
+  /**
+   * ヘッダ行(thead 配下)。後3F・コーナー通過順の列インデックス解決に使う。
+   * これらの列は複数セルが同じ class(class="Time" 等)を共有し class だけでは区別できないため、
+   * ヘッダテキストから列位置を解決し、データ行側は同じ位置の td を位置ベースで読む
+   * (parse-horse-results がヘッダ列数を基準に検証する流儀に準拠)。
+   */
+  headerRow: "thead tr.Header",
+  /** ヘッダ列セル。 */
+  headerCell: "th",
+  /** データセル(位置ベースで後3F・コーナー通過順を取り出すために使う。resultRow 配下)。 */
+  dataCell: "td",
   /** 払戻テーブル(単勝・複勝・馬連…を含む。ページ内に複数ある)。 */
   payoutTable: "table.Payout_Detail_Table",
   /** 単勝の払戻行。 */
@@ -146,6 +157,18 @@ export const RACE_RESULT_SELECTORS = {
   payoutResult: "td.Result",
   /** 払戻行の払戻金額セル(内部で <br> 区切り。複数点あり)。 */
   payoutAmount: "td.Payout",
+} as const;
+
+/**
+ * レース結果(result.html)のヘッダテキストラベル。
+ * 後3F・コーナー通過順の列インデックスをこのテキストから解決する
+ * (地方(NAR)ではコーナー通過順の列自体が存在しない場合がある)。
+ */
+export const RACE_RESULT_HEADER_LABELS = {
+  /** 後3F列のヘッダテキスト。 */
+  last3f: "後3F",
+  /** コーナー通過順列のヘッダテキスト。 */
+  passing: "コーナー通過順",
 } as const;
 
 /**

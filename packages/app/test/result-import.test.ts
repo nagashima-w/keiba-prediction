@@ -15,10 +15,38 @@ import {
 function buildRaceResult(overrides: Partial<RaceResult> = {}): RaceResult {
   return {
     horses: [
-      { umaban: 4, finishPosition: { kind: "順位", value: 1 }, horseName: "A" },
-      { umaban: 2, finishPosition: { kind: "順位", value: 2 }, horseName: "B" },
-      { umaban: 9, finishPosition: { kind: "順位", value: 3 }, horseName: "C" },
-      { umaban: 5, finishPosition: { kind: "非数値", text: "中止" }, horseName: "D" },
+      {
+        umaban: 4,
+        finishPosition: { kind: "順位", value: 1 },
+        horseName: "A",
+        wakuban: null,
+        passing: [],
+        last3f: null,
+      },
+      {
+        umaban: 2,
+        finishPosition: { kind: "順位", value: 2 },
+        horseName: "B",
+        wakuban: null,
+        passing: [],
+        last3f: null,
+      },
+      {
+        umaban: 9,
+        finishPosition: { kind: "順位", value: 3 },
+        horseName: "C",
+        wakuban: null,
+        passing: [],
+        last3f: null,
+      },
+      {
+        umaban: 5,
+        finishPosition: { kind: "非数値", text: "中止" },
+        horseName: "D",
+        wakuban: null,
+        passing: [],
+        last3f: null,
+      },
     ],
     placePayouts: [
       { umaban: 4, payout: 210 },
@@ -66,6 +94,9 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
             umaban: 1,
             finishPosition: { kind: "順位", value: 5, demoted: true },
             horseName: "X",
+            wakuban: null,
+            passing: [],
+            last3f: null,
           },
         ],
         placePayouts: [],

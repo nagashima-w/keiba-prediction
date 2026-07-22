@@ -248,6 +248,22 @@ export interface RaceResultHorse {
   readonly finishPosition: FinishPosition | null;
   /** 馬名。 */
   readonly horseName: string;
+  /**
+   * 枠番。枠・馬番はどちらも td.Num だが class の Waku{n} で判別する(umaban との取り違え防止)。
+   * セルのテキストが空・非数値の場合は null(構造自体が想定外の場合は umaban 同様に例外)。
+   */
+  readonly wakuban: number | null;
+  /**
+   * 通過順位(例: 2-2-4-2 → [2,2,4,2])。
+   * 見出し(コーナー通過順)列が無い構造(地方の一部レース等)・セル値が空/非数値の場合は空配列。
+   */
+  readonly passing: number[];
+  /**
+   * 後3F(上がり3F)。上位馬の行は class にハイライト(BgBlue02/BgYellow/BgOrange 等)が付くが、
+   * 列インデックスをヘッダテキストから解決して値を取るためクラスに依存せず数値化できる。
+   * 見出し列が解決できない・セル値が空/非数値の場合は null。
+   */
+  readonly last3f: number | null;
 }
 
 /**
