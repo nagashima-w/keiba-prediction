@@ -297,6 +297,14 @@ export {
   type ConditionChangeTagKind,
 } from "./analyzer/condition-change.js";
 export {
+  summarizeSameDayTrend,
+  type ClosingTrend,
+  type InOutTrend,
+  type PaceLeaningTrend,
+  type SameDayTrendSampleSize,
+  type SameDayTrendSummary,
+} from "./analyzer/same-day-trend.js";
+export {
   buildPrompt,
   buildPromptPreview,
   CLIP_VARIANTS,
