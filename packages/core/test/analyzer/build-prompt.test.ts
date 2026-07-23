@@ -22,6 +22,7 @@ import {
   PROMPT_VERSION,
   type BuildPromptInput,
 } from "../../src/analyzer/build-prompt.js";
+import type { SameDayTrendSummary } from "../../src/analyzer/same-day-trend.js";
 
 function baseInput(): BuildPromptInput {
   return {
@@ -343,8 +344,8 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("芝の傷み目安(タスク#26-P3)追加版として 2026-07-22.1 が付与されていること", () => {
-    expect(PROMPT_VERSION).toBe("2026-07-22.1");
+  it("当日の同一場・同一面傾向の反映(タスク#27-C)追加版として 2026-07-23.1 が付与されていること", () => {
+    expect(PROMPT_VERSION).toBe("2026-07-23.1");
   });
 });
 
@@ -391,6 +392,134 @@ describe("buildPrompt(芝の傷み目安、タスク#26-P3b)", () => {
   });
 
   it("回帰: turfWearHint未指定なら既存プロンプト(UNCHANGED_BASE_PROMPT相当)の【レース情報】ブロックが不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】",
+    );
+  });
+});
+
+describe("buildPrompt(当日の同一場・同一面傾向、タスク#27-C)", () => {
+  /** テスト用の SameDayTrendSummary を組み立てるヘルパー(既定は脚質のみ・確定3R)。 */
+  function sameDayTrend(overrides: Partial<SameDayTrendSummary> = {}): SameDayTrendSummary {
+    return {
+      脚質傾向: "前残り優勢",
+      内外傾向: null,
+      上がり傾向: null,
+      サンプル数: { レース数: 3, 複勝圏内馬数: 9 },
+      ...overrides,
+    };
+  }
+
+  it("脚質傾向のみ(内外・上がりが共にnull)のとき、脚質だけの1行を追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, courseType: "芝", sameDayTrend: sameDayTrend() },
+    });
+    expect(p).toContain("当日の同場・同面傾向(芝、確定3R): 脚質=前残り優勢");
+  });
+
+  it("内外傾向がある場合、「/ 内外=」を末尾に追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        courseType: "芝",
+        sameDayTrend: sameDayTrend({ 内外傾向: "内有利" }),
+      },
+    });
+    expect(p).toContain("当日の同場・同面傾向(芝、確定3R): 脚質=前残り優勢 / 内外=内有利");
+  });
+
+  it("上がり傾向がある場合、「/ 上がり=」を末尾に追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        courseType: "ダ",
+        sameDayTrend: sameDayTrend({ 上がり傾向: "差し・上がり優勢の示唆" }),
+      },
+    });
+    expect(p).toContain(
+      "当日の同場・同面傾向(ダ、確定3R): 脚質=前残り優勢 / 上がり=差し・上がり優勢の示唆",
+    );
+  });
+
+  it("内外・上がり両方あるとき、両方を「/」区切りで追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        courseType: "芝",
+        sameDayTrend: sameDayTrend({ 内外傾向: "外有利", 上がり傾向: "顕著な傾向なし" }),
+      },
+    });
+    expect(p).toContain(
+      "当日の同場・同面傾向(芝、確定3R): 脚質=前残り優勢 / 内外=外有利 / 上がり=顕著な傾向なし",
+    );
+  });
+
+  it("内外・上がりが共にnullのときはそれぞれ省略し、脚質のみの行になること(該当項目のみスキップ)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        sameDayTrend: sameDayTrend({ 内外傾向: null, 上がり傾向: null }),
+      },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("当日の同場・同面傾向"));
+    expect(line).toBe(
+      `当日の同場・同面傾向(${baseInput().race.courseType}、確定3R): 脚質=前残り優勢`,
+    );
+  });
+
+  it("脚質傾向がデータ不足のとき、ブロックを一切出さないこと(サンプル不足時非描画)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        sameDayTrend: sameDayTrend({
+          脚質傾向: "データ不足",
+          サンプル数: { レース数: 1, 複勝圏内馬数: 2 },
+        }),
+      },
+    });
+    expect(p).not.toContain("当日の同場・同面傾向");
+  });
+
+  it("追加した行が【レース情報】ブロック内、末尾(turfWearHintの後)に来ること", () => {
+    const turfWearHint = {
+      開催日次: 8,
+      開催回次: 2,
+      柵: "A",
+      note: "中央2回8日目(柵A)。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。",
+    };
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint, sameDayTrend: sameDayTrend() },
+    });
+    const turfWearIndex = p.indexOf("芝コースの開催進行:");
+    const sameDayTrendIndex = p.indexOf("当日の同場・同面傾向");
+    const nextSectionIndex = p.indexOf("【展開想定】");
+    expect(turfWearIndex).toBeGreaterThanOrEqual(0);
+    expect(sameDayTrendIndex).toBeGreaterThan(turfWearIndex);
+    expect(nextSectionIndex).toBeGreaterThan(sameDayTrendIndex);
+  });
+
+  it("race.sameDayTrendが未指定のとき、行を含まないこと(既存文面バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).not.toContain("当日の同場・同面傾向");
+  });
+
+  it("race.sameDayTrendがnull(呼び出し側がnullを渡した)のとき、行を含まないこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, sameDayTrend: null },
+    });
+    expect(p).not.toContain("当日の同場・同面傾向");
+  });
+
+  it("回帰: sameDayTrend未指定なら既存プロンプト(【レース情報】ブロック)が不変であること", () => {
     const p = buildPrompt(baseInput());
     expect(p).toContain(
       "【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】",
@@ -752,6 +881,10 @@ describe("buildPromptPreview(設定画面向けプロンプトプレビュー)",
 
   it("同じ引数なら常に同一の文面を返すこと(決定論的)", () => {
     expect(buildPromptPreview()).toBe(buildPromptPreview());
+  });
+
+  it("固定サンプルはsameDayTrendを持たないため「当日の同場・同面傾向」行を含まないこと(タスク#27-C: 不変)", () => {
+    expect(buildPromptPreview()).not.toContain("当日の同場・同面傾向");
   });
 
   it.each([

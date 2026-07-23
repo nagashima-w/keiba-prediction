@@ -30,6 +30,7 @@ export {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  siblingRaceIdsSameDay,
   venueKindOfRaceId,
   type CentralVenueInfo,
   type HorseId,
@@ -299,10 +300,15 @@ export {
   type ConditionChangeTagKind,
 } from "./analyzer/condition-change.js";
 export {
+  collectSameDayTrend,
   summarizeSameDayTrend,
   type ClosingTrend,
   type InOutTrend,
   type PaceLeaningTrend,
+  type SameDayTrendRace,
+  type SameDayTrendRaceDetailHorseLike,
+  type SameDayTrendRaceDetailLike,
+  type SameDayTrendRaceHorse,
   type SameDayTrendSampleSize,
   type SameDayTrendSummary,
 } from "./analyzer/same-day-trend.js";

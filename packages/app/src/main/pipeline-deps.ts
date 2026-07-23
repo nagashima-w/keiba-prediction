@@ -214,6 +214,9 @@ export function createPipelineDeps(
     evConfig: config.evConfig,
     additionalInstruction: config.additionalInstruction,
     clipVariant: clipVariant.id,
+    // 当日の同一場・同一面傾向(タスク#27-C)。store.getRaceResultDetail をそのまま束縛するだけで、
+    // 新規スクレイピング・実リクエスト・DB書き込みは一切増えない(既存の取込済みデータの読み出しのみ)。
+    getRaceResultDetail: (raceId: RaceId) => store.getRaceResultDetail(raceId),
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",

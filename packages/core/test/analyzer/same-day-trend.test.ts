@@ -8,8 +8,19 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { summarizeSameDayTrend } from "../../src/analyzer/same-day-trend.js";
-import type { FinishPosition, RaceResult, RaceResultHorse } from "../../src/scraper/types.js";
+import {
+  collectSameDayTrend,
+  summarizeSameDayTrend,
+  type SameDayTrendRaceDetailHorseLike,
+  type SameDayTrendRaceDetailLike,
+} from "../../src/analyzer/same-day-trend.js";
+import { parseRaceId, type RaceId } from "../../src/scraper/ids.js";
+import type {
+  CourseType,
+  FinishPosition,
+  RaceResult,
+  RaceResultHorse,
+} from "../../src/scraper/types.js";
 
 /** 数値着順の FinishPosition を作る簡易ヘルパー。 */
 function rank(value: number, demoted = false): FinishPosition {
@@ -381,6 +392,213 @@ describe("summarizeSameDayTrend", () => {
         ]);
       const result = summarizeSameDayTrend([makeRace(), makeRace()]);
       expect(result.上がり傾向).toBeNull();
+    });
+  });
+});
+
+/**
+ * collectSameDayTrend(タスク#27-C: 当日・同一場・同一面の確定済み結果を集める収集ヘルパー)のテスト。
+ *
+ * 「兄弟レースID列挙(先頭10桁+01〜12、自番号除外)→lookupで確定済み詳細を引く→面フィルタ
+ * (対象面一致・非null のみ)→finishPosition変換(number→{kind:"順位"}、null→null)→
+ * summarizeSameDayTrend呼び出し」の配線を検証する。summarizeSameDayTrend自体の閾値・境界値は
+ * 上記の summarizeSameDayTrend テストで検証済みのため、ここでは収集・変換・フィルタの正しさに絞る。
+ */
+describe("collectSameDayTrend(当日・同一場・同一面の確定済み結果を集める収集ヘルパー)", () => {
+  const TARGET_CENTRAL = parseRaceId("202605020811"); // 中央・場コード05・回次02・日次08・11R。
+  const TARGET_NAR = parseRaceId("202654071210"); // 地方・場コード54(高知)・2026/07/12・10R。
+
+  /** collectSameDayTrend の lookup 引数に必要な最小限の1頭分を組み立てるヘルパー。 */
+  function detailHorse(
+    umaban: number,
+    finishPosition: number | null,
+    passing: number[] = [],
+    last3f: number | null = null,
+  ): SameDayTrendRaceDetailHorseLike {
+    return { umaban, finishPosition, passing, last3f };
+  }
+
+  /** collectSameDayTrend の lookup 引数に必要な最小限のレース結果詳細を組み立てるヘルパー。 */
+  function detail(
+    courseType: CourseType | null,
+    horses: SameDayTrendRaceDetailHorseLike[],
+  ): SameDayTrendRaceDetailLike {
+    return { courseType, horses };
+  }
+
+  /**
+   * raceId(文字列)→SameDayTrendRaceDetailLike の対応表から lookup 関数を作る
+   * (RaceId は string の分岐型のため、素の Record インデックスアクセスで型上の摩擦なく引ける)。
+   */
+  function lookupFromMap(
+    map: Record<string, SameDayTrendRaceDetailLike>,
+  ): (raceId: RaceId) => SameDayTrendRaceDetailLike | undefined {
+    return (raceId) => map[raceId];
+  }
+
+  /** 頭数4・複勝圏内(1〜3着)が前目(r=1/4=0.25)に集中する「前残り優勢」確定レース(#27-Bと同型)。 */
+  function frontLeaningRace(): SameDayTrendRaceDetailLike {
+    return detail("芝", [
+      detailHorse(1, 1, [1, 1, 1, 1]),
+      detailHorse(2, 2, [1, 1, 1, 1]),
+      detailHorse(3, 3, [1, 1, 1, 1]),
+      detailHorse(4, 4, [4, 4, 4, 4]),
+    ]);
+  }
+
+  describe("観点1: 兄弟レースID列挙(先頭10桁+01〜12、自番号除外)", () => {
+    it("中央: lookupを兄弟レースID11件(自番号11を除く01〜12)にちょうど1回ずつ呼ぶこと", () => {
+      const calledWith: string[] = [];
+      collectSameDayTrend(TARGET_CENTRAL, "芝", (raceId) => {
+        calledWith.push(raceId);
+        return undefined;
+      });
+      expect(calledWith).toEqual([
+        "202605020801",
+        "202605020802",
+        "202605020803",
+        "202605020804",
+        "202605020805",
+        "202605020806",
+        "202605020807",
+        "202605020808",
+        "202605020809",
+        "202605020810",
+        "202605020812",
+      ]);
+    });
+
+    it("地方: lookupを兄弟レースID11件(自番号10を除く01〜12)にちょうど1回ずつ呼ぶこと", () => {
+      const calledWith: string[] = [];
+      collectSameDayTrend(TARGET_NAR, "ダ", (raceId) => {
+        calledWith.push(raceId);
+        return undefined;
+      });
+      expect(calledWith).toEqual([
+        "202654071201",
+        "202654071202",
+        "202654071203",
+        "202654071204",
+        "202654071205",
+        "202654071206",
+        "202654071207",
+        "202654071208",
+        "202654071209",
+        "202654071211",
+        "202654071212",
+      ]);
+    });
+  });
+
+  describe("観点2: 面フィルタ(対象面一致のみ、非null限定)", () => {
+    it("面不一致(対象=芝、他レース=ダ)のレースは集計から除外されること", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": frontLeaningRace(), // 芝→対象
+        "202605020802": detail("ダ", [detailHorse(1, 1, [1, 1, 1, 1])]), // ダ→対象外
+      };
+      const result = collectSameDayTrend(TARGET_CENTRAL, "芝", lookupFromMap(map));
+      // 対象面一致は1本のみ(2本未満)→データ不足でnullに丸められる。
+      expect(result).toBeNull();
+    });
+
+    it("面不明(courseType=null)のレースは対象面と一致しないものとして除外されること", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": frontLeaningRace(),
+        "202605020802": detail(null, [detailHorse(1, 1, [1, 1, 1, 1])]),
+      };
+      const result = collectSameDayTrend(TARGET_CENTRAL, "芝", lookupFromMap(map));
+      expect(result).toBeNull();
+    });
+
+    it("面一致が2本以上あれば集計対象に含め、不一致・null混在があっても正しくレース数をカウントすること", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": frontLeaningRace(), // 芝→対象
+        "202605020802": detail("ダ", [detailHorse(1, 1, [1, 1, 1, 1])]), // 面不一致→対象外
+        "202605020803": detail(null, [detailHorse(1, 1, [1, 1, 1, 1])]), // 面不明→対象外
+        "202605020805": frontLeaningRace(), // 芝→対象
+      };
+      const result = collectSameDayTrend(TARGET_CENTRAL, "芝", lookupFromMap(map));
+      expect(result).not.toBeNull();
+      expect(result!.サンプル数.レース数).toBe(2);
+      expect(result!.脚質傾向).toBe("前残り優勢");
+    });
+  });
+
+  describe("観点3: 確定済みのみを対象にする(lookupがundefinedを返すものはスキップ)", () => {
+    it("lookupが全てundefinedを返す(取込済みの兄弟レースが無い) → null", () => {
+      const result = collectSameDayTrend(TARGET_CENTRAL, "芝", () => undefined);
+      expect(result).toBeNull();
+    });
+
+    it("面一致の確定済みレースが1本のみ(2本未満の閾値未達) → データ不足としてnullを返す", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": frontLeaningRace(),
+      };
+      const result = collectSameDayTrend(TARGET_CENTRAL, "芝", lookupFromMap(map));
+      expect(result).toBeNull();
+    });
+
+    it("面一致の確定済みレースが2本以上 → summarizeSameDayTrendの結果(データ不足ではない値)を返すこと", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": frontLeaningRace(),
+        "202605020805": frontLeaningRace(),
+      };
+      const result = collectSameDayTrend(TARGET_CENTRAL, "芝", lookupFromMap(map));
+      expect(result).not.toBeNull();
+      expect(result!.脚質傾向).not.toBe("データ不足");
+      expect(result!.脚質傾向).toBe("前残り優勢");
+      expect(result!.サンプル数).toEqual({ レース数: 2, 複勝圏内馬数: 6 });
+    });
+  });
+
+  describe("観点4: finishPosition変換(number→{kind:順位}、null→null)", () => {
+    it("数値着順はisPlacedが複勝圏内(3着以内)と判定できる{kind:順位}へ変換されること", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": detail("ダ", [
+          detailHorse(1, 1, [1, 1, 1, 1]), // 1着→複勝圏内
+          detailHorse(2, 2, [1, 1, 1, 1]), // 2着→複勝圏内
+          detailHorse(3, 4, [4, 4, 4, 4]), // 4着→対象外
+        ]),
+        "202605020805": detail("ダ", [
+          detailHorse(1, 3, [1, 1, 1, 1]), // 3着→複勝圏内
+          detailHorse(2, 5, [5, 5, 5, 5]), // 5着→対象外
+        ]),
+      };
+      const result = collectSameDayTrend(TARGET_CENTRAL, "ダ", lookupFromMap(map));
+      expect(result).not.toBeNull();
+      // 複勝圏内馬数 = 1本目の2頭(1着・2着) + 2本目の1頭(3着) = 3頭。
+      expect(result!.サンプル数).toEqual({ レース数: 2, 複勝圏内馬数: 3 });
+    });
+
+    it("着順null(DB上は中止・除外・未確定等をnullで保存)はFinishPosition側もnullのまま渡り、isPlacedにより対象外になること", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": detail("ダ", [
+          detailHorse(1, 1, [1, 1, 1, 1]), // 1着→複勝圏内
+          detailHorse(2, null, []), // 着順null→対象外(例外にもならない)
+        ]),
+        "202605020805": detail("ダ", [
+          detailHorse(1, 2, [1, 1, 1, 1]), // 2着→複勝圏内
+        ]),
+      };
+      expect(() =>
+        collectSameDayTrend(TARGET_CENTRAL, "ダ", lookupFromMap(map)),
+      ).not.toThrow();
+      const result = collectSameDayTrend(TARGET_CENTRAL, "ダ", lookupFromMap(map));
+      expect(result).not.toBeNull();
+      expect(result!.サンプル数).toEqual({ レース数: 2, 複勝圏内馬数: 2 });
+    });
+  });
+
+  describe("観点5: 決定論性(同一入力なら常に同一の結果)", () => {
+    it("同じlookup結果を渡せば、複数回呼び出しても常に同一の結果を返すこと", () => {
+      const map: Record<string, SameDayTrendRaceDetailLike> = {
+        "202605020801": frontLeaningRace(),
+        "202605020805": frontLeaningRace(),
+      };
+      const lookup = lookupFromMap(map);
+      const first = collectSameDayTrend(TARGET_CENTRAL, "芝", lookup);
+      const second = collectSameDayTrend(TARGET_CENTRAL, "芝", lookup);
+      expect(second).toEqual(first);
     });
   });
 });

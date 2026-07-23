@@ -228,6 +228,57 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     });
   });
 
+  describe("deps.getRaceResultDetail の配線(タスク#27-C: 当日傾向をプロンプトに反映する配線)", () => {
+    // importResult の saveResult DI 配線テストと同じ合成HTML(芝1200m見出し+最小結果行。実サイト非アクセス)。
+    const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+
+    it("importResultで取り込んだレースの結果詳細(面・着順)をgetRaceResultDetailが返すこと", async () => {
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> => new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      await r.importResult(parseRaceId("202602010607"));
+
+      expect(typeof r.deps.getRaceResultDetail).toBe("function");
+      const detail = r.deps.getRaceResultDetail!(parseRaceId("202602010607"));
+      expect(detail).toBeDefined();
+      expect(detail!.courseType).toBe("芝");
+      expect(detail!.horses).toHaveLength(1);
+      expect(detail!.horses[0]).toMatchObject({ umaban: 1, finishPosition: 1 });
+    });
+
+    it("未取込のレースIDにはundefinedを返すこと", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      expect(r.deps.getRaceResultDetail!(parseRaceId("202605020811"))).toBeUndefined();
+    });
+  });
+
   it("getVerifyReportByPromptVersion が組み立てられ、未分析なら空配列を返すこと(Task#27)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);

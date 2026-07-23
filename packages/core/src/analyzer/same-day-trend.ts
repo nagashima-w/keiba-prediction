@@ -19,10 +19,20 @@
  *      「後方脚質(相対位置後ろめ)」は脚質傾向と同じ閾値(0.6)を個々の馬の相対位置に
  *      適用して判定する。両方を満たす複勝圏内馬の比率が過半数なら
  *      「差し・上がり優勢の示唆」、そうでなければ「顕著な傾向なし」。絶対タイム閾値は使わない。
+ *
+ * タスク#27-C(当日傾向をプロンプトに反映する配線。2026-07-23 boss着手前ゲート合意・案b' widening):
+ * summarizeSameDayTrend の引数型は、実際に読む4フィールド(umaban/finishPosition/passing/last3f)
+ * だけの構造的最小インターフェース SameDayTrendRace へ広げてある(RaceResult[] はこの上位型に
+ * 構造的に代入可能なため、#27-Bの既存テストは本widening後も無改変で緑になる)。
+ * さらに、当日・同一場・同一面の確定済みレース結果からこの入力を組み立てる収集ヘルパー
+ * collectSameDayTrend をこのファイルに併設する(兄弟レースID列挙は scraper/ids.ts の
+ * siblingRaceIdsSameDay に委譲)。呼び出し側(app/analysis-pipeline.ts)は、注入した
+ * getRaceResultDetail をそのまま collectSameDayTrend の lookup として渡すだけでよい。
  */
 
 import { isPlaced } from "../scorer/derive-features.js";
-import type { RaceResult, RaceResultHorse } from "../scraper/types.js";
+import { siblingRaceIdsSameDay, type RaceId } from "../scraper/ids.js";
+import type { CourseType, FinishPosition } from "../scraper/types.js";
 import { classifyRunLegStyleFull } from "./leg-style.js";
 
 /**
@@ -58,6 +68,25 @@ export interface SameDayTrendSummary {
   readonly サンプル数: SameDayTrendSampleSize;
 }
 
+/**
+ * summarizeSameDayTrend が受け取る1レース分の構造的最小インターフェース(タスク#27-C・案b' widening)。
+ * 実際に読む4フィールド(umaban/finishPosition/passing/last3f)だけに絞ってあり、
+ * scraper/types.ts の RaceResult はこの上位型に構造的に代入可能(RaceResult[] をそのまま渡せる)。
+ * finishPosition は isPlaced が直接読む FinishPosition|null のまま維持し、horseName・wakuban 等の
+ * 偽値(プレースホルダ)は一切導入しない。
+ */
+export interface SameDayTrendRace {
+  readonly horses: readonly SameDayTrendRaceHorse[];
+}
+
+/** SameDayTrendRace の1頭分(集計に使う4フィールドのみ)。 */
+export interface SameDayTrendRaceHorse {
+  readonly umaban: number;
+  readonly finishPosition: FinishPosition | null;
+  readonly passing: readonly number[];
+  readonly last3f: number | null;
+}
+
 /** 集計に必要な最小レース数(面ごと独立の閾値2)。これ未満は全体を「データ不足」とする。 */
 const MIN_RACE_COUNT = 2;
 
@@ -90,7 +119,7 @@ function average(values: readonly number[]): number | null {
 }
 
 /** 1レース分の複勝圏内(3着以内、降着は確定着順)馬を抽出する(derive-features の isPlaced 基準)。 */
-function placedHorsesOf(race: RaceResult): RaceResultHorse[] {
+function placedHorsesOf(race: SameDayTrendRace): SameDayTrendRaceHorse[] {
   return race.horses.filter((h) => {
     const p = isPlaced(h.finishPosition);
     return p.kind === "判定" && p.placed;
@@ -136,9 +165,12 @@ function classifyClosing(hits: readonly boolean[]): ClosingTrend | null {
 
 /**
  * 当日レース結果の傾向(脚質傾向・内外傾向・上がり傾向)を要約する。
- * @param results 「同一場・同一面・確定済み」に絞り込み済みのレース結果配列(1面分)。
+ * @param results 「同一場・同一面・確定済み」に絞り込み済みのレース結果配列(1面分。SameDayTrendRace
+ *   構造的最小型に適合していれば、実引数として RaceResult[] をそのまま渡せる)。
  */
-export function summarizeSameDayTrend(results: readonly RaceResult[]): SameDayTrendSummary {
+export function summarizeSameDayTrend(
+  results: readonly SameDayTrendRace[],
+): SameDayTrendSummary {
   const raceCount = results.length;
 
   // 複勝圏内馬(プール、全レース横断)を先に集める。サンプル数は閾値の成否に関わらず実数を返す。
@@ -203,4 +235,83 @@ export function summarizeSameDayTrend(results: readonly RaceResult[]): SameDayTr
   const 上がり傾向 = classifyClosing(closingHits);
 
   return { 脚質傾向, 内外傾向, 上がり傾向, サンプル数 };
+}
+
+// ---------------------------------------------------------------------------
+// collectSameDayTrend(タスク#27-C: 当日・同一場・同一面の確定済み結果を集める収集ヘルパー)
+// ---------------------------------------------------------------------------
+
+/**
+ * collectSameDayTrend の lookup が返す、当日傾向の集計に必要な最小限のレース結果詳細
+ * (構造的最小型)。ev/analysis-store.ts の RaceResultDetail はこの形を満たすため、
+ * 呼び出し側(app/pipeline-deps.ts)は実際の getRaceResultDetail をそのまま lookup として
+ * 注入できる(analyzer層からev層への実importはせず、循環依存を避ける設計)。
+ */
+export interface SameDayTrendRaceDetailLike {
+  /** レース単位の面(芝/ダ/障)。未取得・未保存(面テーブルに行が無い)は null。 */
+  readonly courseType: CourseType | null;
+  /** 各馬の着順・通過順・上がり3F。 */
+  readonly horses: readonly SameDayTrendRaceDetailHorseLike[];
+}
+
+/** SameDayTrendRaceDetailLike の1頭分。 */
+export interface SameDayTrendRaceDetailHorseLike {
+  readonly umaban: number;
+  /** 実着順。中止・除外・着順不明・非数値着順は null(DB保存済みの数値のみ、FinishPosition化前)。 */
+  readonly finishPosition: number | null;
+  readonly passing: readonly number[];
+  readonly last3f: number | null;
+}
+
+/**
+ * 当日・同一場・同一面の確定済みレース結果から当日傾向を集計する(タスク#27-C)。
+ *
+ * targetRaceId の先頭10桁+レース番号01〜12(自番号を除く)を兄弟レースIDとして列挙し
+ * (scraper/ids.ts の siblingRaceIdsSameDay)、lookup で取得できた(=取込済み・確定済みの)
+ * ものだけを対象にする。さらに courseType が targetCourseType と一致する(かつ非null)
+ * レースのみを集計に使う(面不一致・面不明〈null〉は除外)。
+ *
+ * finishPosition は DB由来の number|null を正直に FinishPosition|null へ再構築する
+ * (number→{kind:"順位",value:n}、null→null)。降着は確定着順の value をそのまま
+ * 順位として扱うため isPlaced の判定・#27-Bの既存挙動と整合し、中止・除外は元々DB側で
+ * null として保存されているため isPlaced が「対象外」として自然に除外する
+ * (horseName・wakuban 等の偽値は一切導入しない)。
+ *
+ * summarizeSameDayTrend が「データ不足」(集計対象0〜1レース)を返した場合は null に丸める。
+ * これにより呼び出し側(build-prompt.ts)は 脚質傾向 の値を見なくても「材料なし」を
+ * 判別できる(ただし build-prompt.ts 側もこの丸めに依存せず自前で同じ判定を行う。
+ * defense in depth)。
+ *
+ * @param targetRaceId 分析対象のレースID(検証済み)
+ * @param targetCourseType 分析対象の面(芝/ダ/障。出馬表由来の非null値)
+ * @param lookup レースID→確定済み結果詳細(未取込・未確定は undefined)を返す注入関数
+ */
+export function collectSameDayTrend(
+  targetRaceId: RaceId,
+  targetCourseType: CourseType,
+  lookup: (raceId: RaceId) => SameDayTrendRaceDetailLike | undefined,
+): SameDayTrendSummary | null {
+  const races: SameDayTrendRace[] = [];
+
+  for (const siblingId of siblingRaceIdsSameDay(targetRaceId)) {
+    const detail = lookup(siblingId);
+    if (detail === undefined) {
+      continue; // 未取込・未確定はスキップ(新規取得・DB書き込みは行わない)。
+    }
+    if (detail.courseType === null || detail.courseType !== targetCourseType) {
+      continue; // 面不一致・面不明(null)は除外。
+    }
+    races.push({
+      horses: detail.horses.map((h) => ({
+        umaban: h.umaban,
+        finishPosition:
+          h.finishPosition === null ? null : { kind: "順位", value: h.finishPosition },
+        passing: h.passing,
+        last3f: h.last3f,
+      })),
+    });
+  }
+
+  const summary = summarizeSameDayTrend(races);
+  return summary.脚質傾向 === "データ不足" ? null : summary;
 }

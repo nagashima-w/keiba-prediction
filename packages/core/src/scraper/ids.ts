@@ -145,6 +145,39 @@ export function venueKindOfRaceId(raceId: RaceId): RaceIdVenueKind {
 }
 
 /**
+ * 同一場・同一開催日の兄弟レースID(自身のレース番号を除く01〜12)を列挙する
+ * (タスク#27-C: 当日の同一場・同一面傾向の集計対象探索に使う)。
+ *
+ * レースIDの先頭10桁(中央: 場コード+回次+日次、地方: 場コード+月+日)が同一なら
+ * 同一場・同一開催日であることを利用し、11〜12桁目(レース番号)だけを01〜12へ
+ * 振り替えて候補を作る。実在しないレース番号(例: 8レース制の開催の09〜12)の候補も
+ * 構文的には妥当なレースIDになるため含めて返す(実在性の検証はしない。呼び出し側が
+ * 結果取得〈lookup〉で「該当データなし」として自然にスキップする前提)。
+ *
+ * @param raceId 検証済みのレースID(基準となる自レース)
+ * @returns 兄弟レースID(レース番号昇順、自番号は含まない)
+ */
+export function siblingRaceIdsSameDay(raceId: RaceId): RaceId[] {
+  const head = raceId.slice(0, 10);
+  const ownRaceNumber = raceId.slice(10, 12);
+  const siblings: RaceId[] = [];
+  for (let n = 1; n <= 12; n++) {
+    const raceNumber = String(n).padStart(2, "0");
+    if (raceNumber === ownRaceNumber) {
+      continue;
+    }
+    const candidate = head + raceNumber;
+    try {
+      siblings.push(parseRaceId(candidate));
+    } catch {
+      // raceId(検証済み)の先頭10桁から作った候補は理論上必ず妥当な12桁レースIDになるが、
+      // 防御的に(想定外の入力に備えて)無効な候補はスキップする。
+    }
+  }
+  return siblings;
+}
+
+/**
  * 地方(NAR)のレースIDから開催日(YYYYMMDD)を導出する。
  *
  * 地方(場コード30〜64)は7〜10桁目に開催日(月日)が直接埋め込まれているため、YYYY(1〜4桁目)+

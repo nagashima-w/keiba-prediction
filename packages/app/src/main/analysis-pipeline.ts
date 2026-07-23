@@ -41,6 +41,7 @@ import {
   buildPriorInput,
   classifyRotationInterval,
   classifyTrackWetness,
+  collectSameDayTrend,
   computeConditionChangeTags,
   computeEstimatedRaceEv,
   computeFieldPriors,
@@ -65,6 +66,7 @@ import {
   type PriorInput,
   type RaceData,
   type RaceId,
+  type RaceResultDetail,
   type ScorerConfig,
 } from "@keiba/core";
 
@@ -118,6 +120,14 @@ export interface AnalysisPipelineDeps {
    * (文面とクリップ幅の食い違いを防ぐため、両者は同じ CLIP_VARIANTS エントリに由来させること)。
    */
   readonly clipVariant?: ClipVariantId;
+  /**
+   * 確定済みレース結果詳細の取得(タスク#27-C: 当日の同一場・同一面傾向をプロンプトに反映する配線)。
+   * 通常は AnalysisStore.getRaceResultDetail を束縛したもの(pipeline-deps.ts が
+   * store.getRaceResultDetail をそのまま渡す)。省略時は当日傾向を算出せず、既存のプロンプト文面・
+   * 既存テストを非破壊のまま保つ(機能オフ)。LLM分析をスキップする経路(deps.analyze===null)では、
+   * この依存が注入されていても当日傾向を算出しない(prior採用経路で無駄なDB読み出しを増やさないため)。
+   */
+  readonly getRaceResultDetail?: (raceId: RaceId) => RaceResultDetail | undefined;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
    * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(marksDroppedのみの
@@ -312,6 +322,12 @@ export async function runAnalysis(
       total: null,
       message: "LLMで複勝確率を補正しています…",
     });
+    // 当日の同一場・同一面傾向(タスク#27-C)。getRaceResultDetail が注入されているときだけ算出する
+    // (未注入・prior採用のLLMスキップ経路では算出しない=無駄なDB読み出しを増やさない)。
+    const sameDayTrend = deps.getRaceResultDetail
+      ? collectSameDayTrend(raceId, race.race.courseType, deps.getRaceResultDetail)
+      : null;
+
     const promptInput: BuildPromptInput = {
       race: {
         raceName: race.race.raceName,
@@ -325,6 +341,8 @@ export async function runAnalysis(
         // 芝の傷み目安(タスク#26-P3): 中央芝のときだけ開催回・日次・柵の事実を1行渡す
         // (turf-wear.ts の assessTurfWear。地方・ダート・障害は null になり行自体が出ない)。
         turfWearHint: assessTurfWear(raceId, race.race.courseType, race.race.fence),
+        // 当日の同一場・同一面傾向(タスク#27-C。same-day-trend.ts の collectSameDayTrend)。
+        sameDayTrend,
       },
       horses: race.horses.map((horseData) => {
         const umaban = horseData.shutuba.umaban;

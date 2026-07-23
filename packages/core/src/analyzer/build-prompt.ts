@@ -49,8 +49,17 @@
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随した(ユーザー確定事項A: 対照更新時、
  * 新版は必ず追随する運用に確定。D-2時点の「追随するかはその時点の合意による」という運用は
  * この固定ルールに置き換えた。詳細は clip-variants.ts 冒頭コメント参照)。
+ *
+ * #27-C(当日傾向をプロンプトに反映する配線。2026-07-23 boss着手前ゲート合意): 【レース情報】末尾
+ * (turfWearHintの後)に、当日・同一場・同一面の確定済み結果から集計した傾向(same-day-trend.ts の
+ * summarizeSameDayTrend)を1行追加できるようにした。呼び出し側(analysis-pipeline.ts)が
+ * collectSameDayTrend で算出した SameDayTrendSummary を race.sameDayTrend として渡したときだけ描画し、
+ * 脚質傾向が「データ不足」ならブロックごと非表示、内外傾向・上がり傾向は値がある指標だけ列挙する
+ * (turfWearHintと同じ非破壊optionalの spread-omit 流儀。未指定なら既存文面バイト不変)。
+ * 他文面・出力スキーマは不変。この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-22.1";
+export const PROMPT_VERSION = "2026-07-23.1";
 
 export {
   CLIP_VARIANTS,
@@ -83,6 +92,7 @@ export {
 import type { CourseType } from "../scraper/types.js";
 import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
+import type { SameDayTrendSummary } from "./same-day-trend.js";
 import type { TurfWearHint } from "./turf-wear.js";
 import {
   clipAbsoluteLabel,
@@ -210,6 +220,16 @@ export interface BuildPromptRaceInfo {
    * 中立な材料文を渡すため、ここでの整形も「行を出す/出さない」の判定のみに留める。
    */
   readonly turfWearHint?: TurfWearHint | null;
+  /**
+   * 当日の同一場・同一面傾向(タスク#27-C。same-day-trend.ts の collectSameDayTrend が返す集計結果)。
+   * 呼び出し側(analysis-pipeline.ts)が当日・同一場・同一面の確定済み結果から算出して渡す
+   * (このモジュール自体は raceId・DBを保持しないため算出しない)。undefined/null なら行自体を出さない
+   * (turfWearHintと同じ spread-omit 流儀。既存文面バイト不変)。値があっても 脚質傾向 が
+   * 「データ不足」ならブロックを一切出さない(呼び出し側の collectSameDayTrend は既にこのケースを
+   * null に丸めて返すが、本関数はそれに依存せず自前でも判定する。defense in depth)。
+   * 内外傾向・上がり傾向が null の指標は該当項目のみ省く。
+   */
+  readonly sameDayTrend?: SameDayTrendSummary | null;
 }
 
 /** buildPrompt の入力。 */
@@ -297,6 +317,31 @@ function referenceEvText(value: number | null | undefined): string {
 }
 
 /**
+ * 当日の同一場・同一面傾向(タスク#27-C)を【レース情報】の1行にする。
+ * summary が無い(undefined/null)、または脚質傾向が「データ不足」なら null(行を出さない)。
+ * 内外傾向・上がり傾向は値がある(non-null)指標だけ「/」区切りで列挙する。
+ */
+function sameDayTrendText(
+  courseType: CourseType,
+  summary: SameDayTrendSummary | null | undefined,
+): string | null {
+  if (!summary || summary.脚質傾向 === "データ不足") {
+    return null;
+  }
+  const parts = [`脚質=${summary.脚質傾向}`];
+  if (summary.内外傾向 !== null) {
+    parts.push(`内外=${summary.内外傾向}`);
+  }
+  if (summary.上がり傾向 !== null) {
+    parts.push(`上がり=${summary.上がり傾向}`);
+  }
+  return (
+    `当日の同場・同面傾向(${courseType}、確定${summary.サンプル数.レース数}R): ` +
+    parts.join(" / ")
+  );
+}
+
+/**
  * 1レース分のプロンプトを組み立てる。
  * 出力は決定論的(同一入力→同一文字列)。馬番昇順で各馬行を並べる。
  */
@@ -359,6 +404,7 @@ export function buildPrompt(input: BuildPromptInput): string {
     // 芝の傷み目安(タスク#26-P3): 値がある(non-null)ときだけ1行追加する。
     // undefined/null(raceId非保持のプレビュー等)なら行自体を出さず、既存文面バイト不変を保つ。
     race.turfWearHint ? `芝コースの開催進行: ${race.turfWearHint.note}` : null,
+    sameDayTrendText(race.courseType, race.sameDayTrend),
   ].filter((x): x is string => x !== null);
   lines.push("【レース情報】");
   lines.push(...raceHeader);

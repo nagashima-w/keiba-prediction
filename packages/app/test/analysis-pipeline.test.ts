@@ -14,6 +14,7 @@ import {
   type OddsSnapshot,
   type RaceData,
   type RaceHorseData,
+  type RaceResultDetail,
   type ShutubaHorse,
 } from "@keiba/core";
 import type { AnalysisRecord } from "@keiba/core";
@@ -840,6 +841,139 @@ describe("runAnalysis(分析パイプライン)", () => {
       expect(captured.value!.race.turfWearHint ?? null).toBeNull();
       const promptText = buildPrompt(captured.value!);
       expect(promptText).not.toContain("芝コースの開催進行");
+    });
+  });
+
+  describe("当日の同一場・同一面傾向(タスク#27-C)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    /**
+     * RaceResultDetail相当の最小フィクスチャ(#27-Bの「前残り優勢」パターンと同型: 頭数4・
+     * 複勝圏内〈1〜3着〉が前目〈r=1/4=0.25〉に集中)。collectSameDayTrend経由で
+     * summarizeSameDayTrend に渡すと決定論的に「前残り優勢」になる。
+     */
+    function frontLeaningDetail(courseType: CourseType): RaceResultDetail {
+      return {
+        courseType,
+        horses: [
+          { umaban: 1, finishPosition: 1, passing: [1, 1, 1, 1], last3f: null },
+          { umaban: 2, finishPosition: 2, passing: [1, 1, 1, 1], last3f: null },
+          { umaban: 3, finishPosition: 3, passing: [1, 1, 1, 1], last3f: null },
+          { umaban: 4, finishPosition: 4, passing: [4, 4, 4, 4], last3f: null },
+        ],
+      };
+    }
+
+    it("getRaceResultDetailが2本以上の確定済み同面兄弟レースを返すとき、プロンプトに当日傾向行が出ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      // RACE_ID(場コード05・東京・回次02・日次08・11R)の兄弟は先頭10桁+01〜12(11番を除く)。
+      const map: Record<string, RaceResultDetail> = {
+        "202605020801": frontLeaningDetail("芝"),
+        "202605020802": frontLeaningDetail("芝"),
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID)), // courseType既定=芝
+        analyze: analyzeCapturing(captured),
+        getRaceResultDetail: (raceId) => map[raceId],
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.sameDayTrend).not.toBeNull();
+      expect(captured.value!.race.sameDayTrend!.脚質傾向).toBe("前残り優勢");
+      expect(captured.value!.race.sameDayTrend!.サンプル数.レース数).toBe(2);
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).toContain("当日の同場・同面傾向(芝、確定2R): 脚質=前残り優勢");
+    });
+
+    it("getRaceResultDetail未注入(deps側で省略)のとき、当日傾向は算出されずプロンプトに行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        // getRaceResultDetail は意図的に省略(機能オフ)。
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.sameDayTrend ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("当日の同場・同面傾向");
+    });
+
+    it("面一致の確定済み兄弟レースが1本のみ(2本未満の閾値未達)のとき、当日傾向はnullでプロンプトに行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const map: Record<string, RaceResultDetail> = {
+        "202605020801": frontLeaningDetail("芝"),
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getRaceResultDetail: (raceId) => map[raceId],
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.sameDayTrend ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("当日の同場・同面傾向");
+    });
+
+    it("面フィルタ: 異面(ダ)の兄弟レースが混ざっていても除外され、同面(芝)のみで集計されること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const map: Record<string, RaceResultDetail> = {
+        "202605020801": frontLeaningDetail("芝"), // 対象面(一致)
+        "202605020802": frontLeaningDetail("ダ"), // 面不一致→除外
+        "202605020803": frontLeaningDetail("芝"), // 対象面(一致)
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getRaceResultDetail: (raceId) => map[raceId],
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.sameDayTrend).not.toBeNull();
+      // 面不一致の1本(202)は除外され、面一致の2本(01・03)のみが集計対象になること。
+      expect(captured.value!.race.sameDayTrend!.サンプル数.レース数).toBe(2);
+    });
+
+    it("LLMスキップ経路(analyze=null)では当日傾向を算出しない(従来どおり、無駄なDB読み出しを増やさない)", async () => {
+      const getRaceResultDetail = vi.fn(
+        (_raceId: string): RaceResultDetail | undefined => undefined,
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(), // analyze: null(既定)
+        getRaceResultDetail,
+      };
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.llmUsed).toBe(false);
+      expect(getRaceResultDetail).not.toHaveBeenCalled();
     });
   });
 

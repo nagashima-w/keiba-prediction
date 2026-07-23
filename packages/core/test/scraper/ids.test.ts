@@ -6,6 +6,7 @@ import {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  siblingRaceIdsSameDay,
   venueKindOfRaceId,
 } from "../../src/scraper/ids.js";
 
@@ -138,6 +139,71 @@ describe("venueKindOfRaceId(レースIDから開催区分を判定)", () => {
 
   it("地方(場コード30〜64)は\"nar\"を返すこと", () => {
     expect(venueKindOfRaceId(parseRaceId("202654071210"))).toBe("nar");
+  });
+});
+
+describe("siblingRaceIdsSameDay(同一場・同一開催日の兄弟レースID列挙、タスク#27-C)", () => {
+  it("中央: 先頭10桁を保ったまま01〜12を列挙し、自レース番号(11)を除外すること", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020811"));
+    expect(siblings).toEqual([
+      "202605020801",
+      "202605020802",
+      "202605020803",
+      "202605020804",
+      "202605020805",
+      "202605020806",
+      "202605020807",
+      "202605020808",
+      "202605020809",
+      "202605020810",
+      "202605020812",
+    ]);
+    expect(siblings).not.toContain("202605020811");
+  });
+
+  it("地方: 先頭10桁(場コード+月日)を保ったまま01〜12を列挙し、自レース番号(10)を除外すること", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202654071210"));
+    expect(siblings).toEqual([
+      "202654071201",
+      "202654071202",
+      "202654071203",
+      "202654071204",
+      "202654071205",
+      "202654071206",
+      "202654071207",
+      "202654071208",
+      "202654071209",
+      "202654071211",
+      "202654071212",
+    ]);
+    expect(siblings).not.toContain("202654071210");
+  });
+
+  it("自レース番号が01(先頭)のときも01を除外し、02〜12のみ返すこと(境界値)", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020801"));
+    expect(siblings).toHaveLength(11);
+    expect(siblings[0]).toBe("202605020802");
+    expect(siblings).not.toContain("202605020801");
+  });
+
+  it("自レース番号が12(末尾)のときも12を除外し、01〜11のみ返すこと(境界値)", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020812"));
+    expect(siblings).toHaveLength(11);
+    expect(siblings[siblings.length - 1]).toBe("202605020811");
+    expect(siblings).not.toContain("202605020812");
+  });
+
+  it("常にレース番号昇順(決定論的な順序)で返すこと", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020811"));
+    const raceNumbers = siblings.map((id) => Number(id.slice(10, 12)));
+    expect(raceNumbers).toEqual([...raceNumbers].sort((a, b) => a - b));
+  });
+
+  it("戻り値の各要素が parseRaceId を通過済みの妥当なレースIDであること", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202654071210"));
+    for (const id of siblings) {
+      expect(() => parseRaceId(id)).not.toThrow();
+    }
   });
 });
 
@@ -319,5 +385,6 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.InvalidIdError).toBe(InvalidIdError);
     expect(mod.venueKindOfRaceId).toBe(venueKindOfRaceId);
     expect(mod.centralVenueInfoFromRaceId).toBe(centralVenueInfoFromRaceId);
+    expect(mod.siblingRaceIdsSameDay).toBe(siblingRaceIdsSameDay);
   });
 });
