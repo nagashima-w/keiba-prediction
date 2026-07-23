@@ -7,6 +7,7 @@ import {
   parseKaisaiDate,
   parseRaceId,
   PROMPT_VERSION,
+  summarizeBodyWeightTrend,
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type CourseType,
@@ -49,6 +50,7 @@ function fakeResult(
     courseType?: HorseRaceResult["courseType"];
     distance?: number | null;
     venueKind?: HorseRaceResult["venueKind"];
+    bodyWeight?: HorseRaceResult["bodyWeight"];
   } = {},
 ): HorseRaceResult {
   return {
@@ -77,7 +79,7 @@ function fakeResult(
     passing,
     pace: extra.pace ?? null,
     last3f: extra.last3f ?? null,
-    bodyWeight: null,
+    bodyWeight: extra.bodyWeight ?? null,
     winnerName: null,
   };
 }
@@ -742,6 +744,148 @@ describe("runAnalysis(分析パイプライン)", () => {
         .map((t) => t.label)
         .join("・");
       expect(horse1Line).toContain(`条件替わり=${expectedTagsText}`);
+    });
+  });
+
+  describe("馬体重トレンド(タスク#6・未使用パラメータ活用①)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("過去走のbodyWeightと当日shutuba.bodyWeightが純関数へ写され、BuildPromptInput.horses[].bodyWeightTrendに載ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], { bodyWeight: { weight: 456, diff: 4 } }),
+              fakeResult("2026/06/01", [2, 2], { bodyWeight: { weight: 452, diff: -2 } }),
+              fakeResult("2026/05/15", [3, 3], { bodyWeight: { weight: 454, diff: 0 } }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      // fakeHorse(1) の当日 bodyWeight は既定 { weight: 480, diff: 0 }。
+      const expected = summarizeBodyWeightTrend(
+        [
+          { weight: 456, diff: 4 },
+          { weight: 452, diff: -2 },
+          { weight: 454, diff: 0 },
+        ],
+        { weight: 480, diff: 0 },
+      );
+      expect(horse1.bodyWeightTrend).toEqual(expected);
+      expect(horse1.bodyWeightTrend).not.toBeNull();
+    });
+
+    it("戦績なし(過去走0件)の馬でも当日実測(shutuba.bodyWeight)だけを載せたbodyWeightTrendになること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      for (const h of captured.value!.horses) {
+        // baseDeps() の戦績は空(results未指定→[])。fakeHorse の当日 bodyWeight は既定 {480, 0}。
+        expect(h.bodyWeightTrend).toEqual(summarizeBodyWeightTrend([], { weight: 480, diff: 0 }));
+        expect(h.bodyWeightTrend).not.toBeNull();
+      }
+    });
+
+    it("プロンプト行の『馬体重推移=』が実際に描画され、bodyWeightTrend.noteと一致すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], { bodyWeight: { weight: 456, diff: 4 } }),
+              fakeResult("2026/06/01", [2, 2], { bodyWeight: { weight: 452, diff: -2 } }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const promptText = buildPrompt(captured.value!);
+      const horse1Line = promptText.split("\n").find((line) => line.startsWith("馬番1 "))!;
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1Line).toContain(`馬体重推移=${horse1.bodyWeightTrend!.note}`);
+    });
+
+    it("horseData.resultsがnull(戦績取得失敗)でも例外にならず、当日実測のみのbodyWeightTrendになること(code-reviewer提案3)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {});
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1 ? { ...h, results: null } : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+
+      // results: null の馬でも例外にならず解析が完走すること自体も確認する。
+      await expect(
+        runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+      ).resolves.toBeDefined();
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      // 過去走が(null経由で)無いため、fakeHorse既定の当日 bodyWeight {480, 0} のみを持つ結果になる。
+      expect(horse1.bodyWeightTrend).toEqual(summarizeBodyWeightTrend([], { weight: 480, diff: 0 }));
+    });
+
+    it("horseData.resultsがnullかつ当日bodyWeightもnullの馬は、bodyWeightTrendがnull(材料なし)になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {});
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1
+                ? { ...h, results: null, shutuba: { ...h.shutuba, bodyWeight: null } }
+                : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.bodyWeightTrend).toBeNull();
     });
   });
 

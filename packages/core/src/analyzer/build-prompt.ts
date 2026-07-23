@@ -58,8 +58,19 @@
  * (turfWearHintと同じ非破壊optionalの spread-omit 流儀。未指定なら既存文面バイト不変)。
  * 他文面・出力スキーマは不変。この対照(default)のPROMPT_VERSION更新に伴い、
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #6(馬体重トレンドをプロンプトに反映。未使用パラメータ活用①。2026-07-23 boss着手前ゲート合意):
+ * 各馬行の「過去ペース傾向」の直後に「馬体重推移=」を1項目追加できるようにした。呼び出し側
+ * (analysis-pipeline.ts)が body-weight-trend.ts の summarizeBodyWeightTrend で算出した
+ * BodyWeightTrendSummary を PromptHorse.bodyWeightTrend として渡したときだけ、その馬の行に
+ * この項目を描画する(turfWearHint/sameDayTrendと同じ非破壊optionalの spread-omit 流儀。
+ * 未指定〈undefined/null〉の馬はこの項目自体を出さず、既存行バイト不変)。bodyWeight.diff
+ * (前走比の増減)は既にscorerが使用済みのため、この配線はweight(絶対値)の推移をLLM向けに
+ * 表出するプロンプト専用の追加であり、scorer側の計算(base-score.ts等)には一切影響しない。
+ * 他文面・出力スキーマは不変。この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-23.1";
+export const PROMPT_VERSION = "2026-07-23.2";
 
 export {
   CLIP_VARIANTS,
@@ -94,6 +105,7 @@ import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
 import type { SameDayTrendSummary } from "./same-day-trend.js";
 import type { TurfWearHint } from "./turf-wear.js";
+import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -145,6 +157,16 @@ export interface PromptHorse {
    * 条件替わりタグは全て「なし」になる(例外にはならない)。
    */
   readonly runConditions?: readonly ConditionChangeRun[];
+  /**
+   * 馬体重トレンド(タスク#6・未使用パラメータ活用①。body-weight-trend.ts の
+   * summarizeBodyWeightTrend が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「過去ペース傾向」の直後に「馬体重推移=」として1項目追加する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(turfWearHint/sameDayTrendと同じ spread-omit 流儀。
+   * 未指定なら既存行バイト不変)。bodyWeight.diff(増減)は既にscorerが使用済みのため、
+   * このフィールドはweight(絶対値)の推移をLLMプロンプト用に表出する専用の配線であり、
+   * scorer側の計算には一切影響しない。
+   */
+  readonly bodyWeightTrend?: BodyWeightTrendSummary | null;
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
   /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
@@ -482,11 +504,16 @@ export function buildPrompt(input: BuildPromptInput): string {
     // 確度を判断できるようにする(例: 安定して差してくる馬か、その場その場で脚質が変わる馬か)。
     // 「過去ペース傾向」: その馬がこれまで速い/遅い流れをどれだけ経験しているか(展開への
     // 対応力の参考材料)を summarizePastPaceTendency で要約して添える。
+    // 馬体重トレンド(タスク#6): 値がある(non-null)ときだけ「過去ペース傾向」の直後に挿入する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const bodyWeightTrendSegment =
+      h.bodyWeightTrend != null ? `馬体重推移=${h.bodyWeightTrend.note}, ` : "";
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
         `脚質=${a.style ?? "不明"}(安定度:${a.stability}), ` +
         `過去ペース傾向=${summarizePastPaceTendency(h.runs, { recentRuns })}, ` +
+        bodyWeightTrendSegment +
         `レース間隔=${orText(h.restInterval, "不明")}, ` +
         `調教=${oikiriText(h.oikiri)}, ` +
         `厩舎コメント=${orText(h.stableComment, "なし")}, ` +

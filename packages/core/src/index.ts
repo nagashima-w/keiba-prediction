@@ -314,6 +314,13 @@ export {
 } from "./analyzer/same-day-trend.js";
 export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
 export {
+  summarizeBodyWeightTrend,
+  type BodyWeightTrendLabel,
+  type BodyWeightTrendSummary,
+  type BodyWeightTrendToday,
+  type SummarizeBodyWeightTrendOptions,
+} from "./analyzer/body-weight-trend.js";
+export {
   buildPrompt,
   buildPromptPreview,
   CLIP_VARIANTS,

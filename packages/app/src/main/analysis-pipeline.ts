@@ -51,6 +51,7 @@ import {
   DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
   resolveClipVariant,
+  summarizeBodyWeightTrend,
   venueKindOfRaceId,
   type AnalysisRecord,
   type AnalyzeRaceResult,
@@ -371,6 +372,14 @@ export async function runAnalysis(
           })),
           // 条件替わり(妙味材料)判定用の過去走条件(既存runsとは別配列。互いに影響しない)。
           runConditions: conditionChangeRunsOf(horseData.results),
+          // 馬体重トレンド(タスク#6): 過去走のbodyWeight(新しい順)と当日のshutuba.bodyWeightを
+          // summarizeBodyWeightTrend(core)へそのまま写す。diff(前走比の増減)は既にscorerが
+          // 使用済みのため、ここではweight(絶対値)の推移をプロンプト用に表出するだけで、
+          // scorer側の計算には一切影響しない。
+          bodyWeightTrend: summarizeBodyWeightTrend(
+            (horseData.results ?? []).map((r) => r.bodyWeight),
+            horseData.shutuba.bodyWeight,
+          ),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),
           winOdds,

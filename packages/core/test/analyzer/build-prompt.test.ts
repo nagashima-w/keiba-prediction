@@ -23,6 +23,7 @@ import {
   type BuildPromptInput,
 } from "../../src/analyzer/build-prompt.js";
 import type { SameDayTrendSummary } from "../../src/analyzer/same-day-trend.js";
+import type { BodyWeightTrendSummary } from "../../src/analyzer/body-weight-trend.js";
 
 function baseInput(): BuildPromptInput {
   return {
@@ -344,8 +345,8 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("当日の同一場・同一面傾向の反映(タスク#27-C)追加版として 2026-07-23.1 が付与されていること", () => {
-    expect(PROMPT_VERSION).toBe("2026-07-23.1");
+  it("馬体重トレンドの反映(タスク#6)追加版として 2026-07-23.2 が付与されていること", () => {
+    expect(PROMPT_VERSION).toBe("2026-07-23.2");
   });
 });
 
@@ -687,6 +688,95 @@ describe("buildPrompt(条件替わり・妙味材料)", () => {
     expect(p).toContain("脚質=逃げ");
     expect(p).toContain("脚質=差し");
     expect(p).toContain("中2週");
+  });
+});
+
+describe("buildPrompt(馬体重トレンド、タスク#6・未使用パラメータ活用①)", () => {
+  /** テスト用の BodyWeightTrendSummary を組み立てるヘルパー(既定は増加傾向・当日あり)。 */
+  function bodyWeightTrend(
+    overrides: Partial<BodyWeightTrendSummary> = {},
+  ): BodyWeightTrendSummary {
+    return {
+      過去実測: [456, 452, 448],
+      傾向: "増加傾向",
+      当日: { 体重: 458, 前走比: 2 },
+      note: "448→452→456kg(増加傾向)、当日458kg・前走比+2kg",
+      ...overrides,
+    };
+  }
+
+  it("h.bodyWeightTrendが指定されているとき、その馬の行に「馬体重推移=」+noteを含むこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: bodyWeightTrend() },
+        input.horses[1]!,
+      ],
+    });
+    expect(p).toContain(
+      "馬体重推移=448→452→456kg(増加傾向)、当日458kg・前走比+2kg",
+    );
+  });
+
+  it("「馬体重推移=」が「過去ペース傾向」の隣(直後、レース間隔の前)に来ること", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: bodyWeightTrend() },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).toContain(
+      "過去ペース傾向=データ不足, 馬体重推移=448→452→456kg(増加傾向)、当日458kg・前走比+2kg, レース間隔=中2週",
+    );
+  });
+
+  it("h.bodyWeightTrendが未指定(undefined)の馬の行には「馬体重推移=」を含まないこと(既存行バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("馬体重推移");
+  });
+
+  it("h.bodyWeightTrendがnull(呼び出し側がnullを渡した)の馬の行にも「馬体重推移=」を含まないこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: null },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("馬体重推移");
+  });
+
+  it("1頭だけbodyWeightTrend指定・もう1頭は未指定のとき、それぞれ独立に反映されること(馬ごとの非破壊optional)", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: bodyWeightTrend({ 傾向: "減少傾向" }) },
+        input.horses[1]!,
+      ],
+    });
+    const line1 = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    const line2 = p.split("\n").find((l) => l.startsWith("馬番2 "))!;
+    expect(line1).toContain("馬体重推移=");
+    expect(line2).not.toContain("馬体重推移");
+  });
+
+  it("回帰: bodyWeightTrend未指定なら既存プロンプト(【出走馬】各行)が不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "馬番1 アルファ: 3着内率=0.42, 脚質=逃げ(安定度:不明), 過去ペース傾向=データ不足, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし",
+    );
+  });
+
+  it("buildPromptPreview()は「馬体重推移」を含まないこと(PREVIEW_SAMPLE_HORSESに新フィールドを設定しないため不変)", () => {
+    expect(buildPromptPreview()).not.toContain("馬体重推移");
   });
 });
 
