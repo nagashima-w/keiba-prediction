@@ -82,8 +82,22 @@
  * ②は過去走由来の材料で当日オッズとは別軸)。他文面・出力スキーマは不変。
  * この対照(default)のPROMPT_VERSION更新に伴い、
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #8(乗り替わり〈騎手の継続/変更〉をプロンプトに反映。未使用パラメータ活用③。
+ * 2026-07-23 boss着手前ゲート合意): 各馬行の「人気着順乖離(#7)」の直後に、今走騎手と前走
+ * (results[0])騎手の継続/乗り替わりを1項目追加できるようにした。呼び出し側
+ * (analysis-pipeline.ts)が jockey-change.ts の summarizeJockeyChange で算出した
+ * JockeyChangeSummary を PromptHorse.jockeyChange として渡したときだけ、その馬の行に
+ * note の内容(例:「騎手=武豊(前走から継続)」)をそのまま追記する(marketGap/bodyWeightTrend/
+ * turfWearHintと同じ非破壊optionalの spread-omit 流儀。未指定〈undefined/null〉の馬はこの項目
+ * 自体を出さず、既存行バイト不変)。jockeyId/jockeyNameは既にscraperがパース済みだが
+ * scorer側は騎手継続性を判定材料として使っていない未使用のパラメータであり、この配線は
+ * それらをLLM向けに表出するプロンプト専用の追加であって、scorer/prior.ts・base-score.ts・
+ * bias-*.ts の計算には一切影響しない。他文面・出力スキーマは不変。
+ * この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-23.3";
+export const PROMPT_VERSION = "2026-07-23.4";
 
 export {
   CLIP_VARIANTS,
@@ -120,6 +134,7 @@ import type { SameDayTrendSummary } from "./same-day-trend.js";
 import type { TurfWearHint } from "./turf-wear.js";
 import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
 import type { MarketGapSummary } from "./market-gap.js";
+import type { JockeyChangeSummary } from "./jockey-change.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -191,6 +206,16 @@ export interface PromptHorse {
    * 表出する専用の配線であり、scorer側の計算には一切影響しない。
    */
   readonly marketGap?: MarketGapSummary | null;
+  /**
+   * 乗り替わり(騎手の継続/変更、タスク#8・未使用パラメータ活用③。jockey-change.ts の
+   * summarizeJockeyChange が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「人気着順乖離」の直後に note の内容をそのまま追記する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(marketGap/bodyWeightTrend/turfWearHintと同じ
+   * spread-omit 流儀。未指定なら既存行バイト不変)。jockeyId/jockeyNameは既にscraperが
+   * パース済みだがscorer側で未使用のパラメータであり、このフィールドはそれらをLLMプロンプト用に
+   * 表出する専用の配線であり、scorer側の計算には一切影響しない。
+   */
+  readonly jockeyChange?: JockeyChangeSummary | null;
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
   /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
@@ -536,6 +561,10 @@ export function buildPrompt(input: BuildPromptInput): string {
     // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
     const marketGapSegment =
       h.marketGap != null ? `, 人気着順乖離=${h.marketGap.note}` : "";
+    // 乗り替わり(タスク#8): 値がある(non-null)ときだけ「人気着順乖離」の直後に追記する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const jockeyChangeSegment =
+      h.jockeyChange != null ? `, ${h.jockeyChange.note}` : "";
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
@@ -550,7 +579,8 @@ export function buildPrompt(input: BuildPromptInput): string {
         `複勝オッズ下限=${oddsText(h.placeOddsMin, "複勝未発売")}, ` +
         `参考EV=${referenceEvText(h.referenceEv)}, ` +
         `条件替わり=${conditionChangeText(conditionChangeTags)}` +
-        marketGapSegment,
+        marketGapSegment +
+        jockeyChangeSegment,
     );
   }
   lines.push("");

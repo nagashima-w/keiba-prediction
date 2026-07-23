@@ -8,6 +8,7 @@ import {
   parseRaceId,
   PROMPT_VERSION,
   summarizeBodyWeightTrend,
+  summarizeJockeyChange,
   summarizeMarketGap,
   type AnalyzeRaceResult,
   type BuildPromptInput,
@@ -55,6 +56,8 @@ function fakeResult(
     ninki?: HorseRaceResult["ninki"];
     finishPosition?: HorseRaceResult["finishPosition"];
     entryCount?: HorseRaceResult["entryCount"];
+    jockeyId?: HorseRaceResult["jockeyId"];
+    jockeyName?: HorseRaceResult["jockeyName"];
   } = {},
 ): HorseRaceResult {
   return {
@@ -72,8 +75,8 @@ function fakeResult(
     odds: null,
     ninki: extra.ninki ?? null,
     finishPosition: extra.finishPosition ?? null,
-    jockeyName: null,
-    jockeyId: null,
+    jockeyName: extra.jockeyName ?? null,
+    jockeyId: extra.jockeyId ?? null,
     kinryo: null,
     courseType: extra.courseType ?? null,
     distance: extra.distance ?? null,
@@ -1048,6 +1051,168 @@ describe("runAnalysis(分析パイプライン)", () => {
       expect(horse1.marketGap?.過去走).toEqual([
         { 人気: 8, 着順: 2, 頭数: 11, 判定: "人気を上回る着順" },
       ]);
+    });
+  });
+
+  describe("乗り替わり(タスク#8・未使用パラメータ活用③)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("今走shutuba.jockeyId/jockeyNameと前走(results[0])jockeyId/jockeyNameが純関数へ写され、BuildPromptInput.horses[].jockeyChangeに載ること(継続)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                jockeyId: "j001",
+                jockeyName: "武豊",
+              }),
+            ],
+          });
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1
+                ? { ...h, shutuba: { ...h.shutuba, jockeyId: "j001", jockeyName: "武豊" } }
+                : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      const expected = summarizeJockeyChange(
+        { jockeyId: "j001", jockeyName: "武豊" },
+        { jockeyId: "j001", jockeyName: "武豊" },
+      );
+      expect(horse1.jockeyChange).toEqual(expected);
+      expect(horse1.jockeyChange?.区分).toBe("継続");
+    });
+
+    it("今走と前走のjockeyIdが異なるとき、jockeyChangeの区分が「乗り替わり」になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                jockeyId: "j002",
+                jockeyName: "川田将雅",
+              }),
+            ],
+          });
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1
+                ? { ...h, shutuba: { ...h.shutuba, jockeyId: "j001", jockeyName: "武豊" } }
+                : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.jockeyChange?.区分).toBe("乗り替わり");
+      expect(horse1.jockeyChange?.note).toBe("騎手=武豊(前走川田将雅から乗り替わり)");
+    });
+
+    it("戦績なし(前走なし)の馬はjockeyChangeがnull(材料なし)になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      for (const h of captured.value!.horses) {
+        // baseDeps() の戦績は空(results未指定→[])。
+        expect(h.jockeyChange).toBeNull();
+      }
+    });
+
+    it("horseData.resultsがnull(戦績取得失敗)でも例外にならず、jockeyChangeがnull(材料なし)になること(marketGap配線と同型の防御)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {});
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1 ? { ...h, results: null } : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+
+      await expect(
+        runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+      ).resolves.toBeDefined();
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.jockeyChange).toBeNull();
+    });
+
+    it("プロンプト行に実際に描画され、「人気着順乖離」の直後(marketGap未指定時は「条件替わり」の直後)に来ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                jockeyId: "j001",
+                jockeyName: "武豊",
+              }),
+            ],
+          });
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1
+                ? { ...h, shutuba: { ...h.shutuba, jockeyId: "j001", jockeyName: "武豊" } }
+                : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const promptText = buildPrompt(captured.value!);
+      const horse1Line = promptText.split("\n").find((line) => line.startsWith("馬番1 "))!;
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1Line).toContain(`条件替わり=なし, ${horse1.jockeyChange!.note}`);
+      expect(horse1Line.endsWith(horse1.jockeyChange!.note)).toBe(true);
     });
   });
 

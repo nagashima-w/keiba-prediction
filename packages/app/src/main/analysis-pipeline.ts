@@ -52,6 +52,7 @@ import {
   DEFAULT_EV_CONFIG,
   resolveClipVariant,
   summarizeBodyWeightTrend,
+  summarizeJockeyChange,
   summarizeMarketGap,
   venueKindOfRaceId,
   type AnalysisRecord,
@@ -63,6 +64,7 @@ import {
   type EvConfig,
   type HorsePrior,
   type HorseRaceResult,
+  type JockeyChangePrevRunInput,
   type KaisaiDate,
   type PredictionMark,
   type PriorInput,
@@ -194,6 +196,23 @@ function restIntervalOf(
   const days = daysBetweenDates(last.date, analysisDate);
   const interval = classifyRotationInterval(days);
   return interval === "不明" ? null : interval;
+}
+
+/**
+ * 戦績(新しい順)の先頭(前走=results[0])から、乗り替わり(騎手の継続/変更、タスク#8)判定用の
+ * 入力を作る。戦績が取得できなかった/空(results=null/undefined/[])の馬は前走なし相当として
+ * null を返す(summarizeJockeyChange側の「前走なし→null」仕様どおり)。前走(results[0])の
+ * jockeyId/jockeyNameが判定不能でも、さらに過去へ遡ることはしない(「前走」ラベルに忠実。
+ * summarizeJockeyChange側の設計に合わせる)。
+ */
+function jockeyChangePrevRunOf(
+  results: readonly HorseRaceResult[] | null | undefined,
+): JockeyChangePrevRunInput | null {
+  const last = (results ?? [])[0];
+  if (last === undefined) {
+    return null;
+  }
+  return { jockeyId: last.jockeyId, jockeyName: last.jockeyName };
 }
 
 /**
@@ -392,6 +411,18 @@ export async function runAnalysis(
               finishPosition: r.finishPosition,
               entryCount: r.entryCount,
             })),
+          ),
+          // 乗り替わり(タスク#8): 今走騎手(shutuba.jockeyId/jockeyName)と前走(results[0])騎手を
+          // summarizeJockeyChange(core)へそのまま写す。jockeyId/jockeyNameは既にscraperが
+          // パース済みだがscorer側で未使用のパラメータであり、ここではLLMプロンプト用に
+          // 表出するだけで、scorer側の計算(prior.ts・base-score.ts・bias-*.ts等)には
+          // 一切影響しない(scorerは騎手継続性を判定材料として使っていない)。
+          jockeyChange: summarizeJockeyChange(
+            {
+              jockeyId: horseData.shutuba.jockeyId,
+              jockeyName: horseData.shutuba.jockeyName,
+            },
+            jockeyChangePrevRunOf(horseData.results),
           ),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),

@@ -330,6 +330,14 @@ export {
   type SummarizeMarketGapOptions,
 } from "./analyzer/market-gap.js";
 export {
+  summarizeJockeyChange,
+  type JockeyChangeBasis,
+  type JockeyChangeCategory,
+  type JockeyChangePrevRunInput,
+  type JockeyChangeSummary,
+  type JockeyChangeTodayInput,
+} from "./analyzer/jockey-change.js";
+export {
   buildPrompt,
   buildPromptPreview,
   CLIP_VARIANTS,
