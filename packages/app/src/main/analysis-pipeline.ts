@@ -52,6 +52,7 @@ import {
   DEFAULT_EV_CONFIG,
   resolveClipVariant,
   summarizeBodyWeightTrend,
+  summarizeMarketGap,
   venueKindOfRaceId,
   type AnalysisRecord,
   type AnalyzeRaceResult,
@@ -379,6 +380,18 @@ export async function runAnalysis(
           bodyWeightTrend: summarizeBodyWeightTrend(
             (horseData.results ?? []).map((r) => r.bodyWeight),
             horseData.shutuba.bodyWeight,
+          ),
+          // 人気・着順の乖離(タスク#7): 過去走のninki/finishPosition/entryCount(新しい順)を
+          // summarizeMarketGap(core)へそのまま写す。ninki/entryCountは既にscraperがパース済みだが
+          // scorer側で未使用のパラメータであり、ここではLLMプロンプト用に表出するだけで、
+          // scorer側の計算(prior.ts・base-score.ts・bias-*.ts等)には一切影響しない。
+          // 当日オッズ(winOdds/popularity)への波及もない(②は過去走由来で別軸)。
+          marketGap: summarizeMarketGap(
+            (horseData.results ?? []).map((r) => ({
+              ninki: r.ninki,
+              finishPosition: r.finishPosition,
+              entryCount: r.entryCount,
+            })),
           ),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),

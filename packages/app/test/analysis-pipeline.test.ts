@@ -8,6 +8,7 @@ import {
   parseRaceId,
   PROMPT_VERSION,
   summarizeBodyWeightTrend,
+  summarizeMarketGap,
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type CourseType,
@@ -51,6 +52,9 @@ function fakeResult(
     distance?: number | null;
     venueKind?: HorseRaceResult["venueKind"];
     bodyWeight?: HorseRaceResult["bodyWeight"];
+    ninki?: HorseRaceResult["ninki"];
+    finishPosition?: HorseRaceResult["finishPosition"];
+    entryCount?: HorseRaceResult["entryCount"];
   } = {},
 ): HorseRaceResult {
   return {
@@ -62,12 +66,12 @@ function fakeResult(
     raceId: null,
     raceIdRaw: null,
     venueKind: extra.venueKind ?? "中央",
-    entryCount: 12,
+    entryCount: extra.entryCount ?? 12,
     wakuban: null,
     umaban: null,
     odds: null,
-    ninki: null,
-    finishPosition: null,
+    ninki: extra.ninki ?? null,
+    finishPosition: extra.finishPosition ?? null,
     jockeyName: null,
     jockeyId: null,
     kinryo: null,
@@ -886,6 +890,164 @@ describe("runAnalysis(分析パイプライン)", () => {
 
       const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
       expect(horse1.bodyWeightTrend).toBeNull();
+    });
+  });
+
+  describe("人気・着順の乖離(タスク#7・未使用パラメータ活用②)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("過去走のninki/finishPosition/entryCountが純関数へ写され、BuildPromptInput.horses[].marketGapに載ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                ninki: 5,
+                finishPosition: { kind: "順位", value: 3 },
+                entryCount: 11,
+              }),
+              fakeResult("2026/06/01", [2, 2], {
+                ninki: 8,
+                finishPosition: { kind: "順位", value: 2 },
+                entryCount: 11,
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      const expected = summarizeMarketGap([
+        { ninki: 5, finishPosition: { kind: "順位", value: 3 }, entryCount: 11 },
+        { ninki: 8, finishPosition: { kind: "順位", value: 2 }, entryCount: 11 },
+      ]);
+      expect(horse1.marketGap).toEqual(expected);
+      expect(horse1.marketGap).not.toBeNull();
+    });
+
+    it("戦績なし(過去走0件)の馬はmarketGapがnull(材料なし)になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      for (const h of captured.value!.horses) {
+        // baseDeps() の戦績は空(results未指定→[])。
+        expect(h.marketGap).toBeNull();
+      }
+    });
+
+    it("プロンプト行の『人気着順乖離=』が実際に描画され、marketGap.noteと一致すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                ninki: 5,
+                finishPosition: { kind: "順位", value: 3 },
+                entryCount: 11,
+              }),
+              fakeResult("2026/06/01", [2, 2], {
+                ninki: 8,
+                finishPosition: { kind: "順位", value: 2 },
+                entryCount: 11,
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const promptText = buildPrompt(captured.value!);
+      const horse1Line = promptText.split("\n").find((line) => line.startsWith("馬番1 "))!;
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1Line).toContain(`人気着順乖離=${horse1.marketGap!.note}`);
+    });
+
+    it("horseData.resultsがnull(戦績取得失敗)でも例外にならず、marketGapがnull(材料なし)になること(bodyWeightTrend配線と同型の防御)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {});
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1 ? { ...h, results: null } : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+
+      await expect(
+        runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+      ).resolves.toBeDefined();
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.marketGap).toBeNull();
+    });
+
+    it("欠損走(ninki欠損・非数値着順)が混在しても純関数側のスキップが配線経由でも維持されること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/20", [], { ninki: null, finishPosition: { kind: "順位", value: 1 }, entryCount: 11 }),
+              fakeResult("2026/06/15", [1, 1], {
+                ninki: 5,
+                finishPosition: { kind: "非数値", text: "中止" },
+                entryCount: 11,
+              }),
+              fakeResult("2026/06/01", [2, 2], {
+                ninki: 8,
+                finishPosition: { kind: "順位", value: 2 },
+                entryCount: 11,
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      // 1走目(ninki欠損)・2走目(非数値着順)はともにスキップされ、有効走は3走目の1件のみ。
+      expect(horse1.marketGap?.過去走).toEqual([
+        { 人気: 8, 着順: 2, 頭数: 11, 判定: "人気を上回る着順" },
+      ]);
     });
   });
 

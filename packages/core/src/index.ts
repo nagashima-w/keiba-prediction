@@ -321,6 +321,15 @@ export {
   type SummarizeBodyWeightTrendOptions,
 } from "./analyzer/body-weight-trend.js";
 export {
+  summarizeMarketGap,
+  type MarketGapJudgement,
+  type MarketGapPastRun,
+  type MarketGapRun,
+  type MarketGapSummary,
+  type MarketGapTrendLabel,
+  type SummarizeMarketGapOptions,
+} from "./analyzer/market-gap.js";
+export {
   buildPrompt,
   buildPromptPreview,
   CLIP_VARIANTS,

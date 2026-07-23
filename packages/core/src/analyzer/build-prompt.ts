@@ -69,8 +69,21 @@
  * 表出するプロンプト専用の追加であり、scorer側の計算(base-score.ts等)には一切影響しない。
  * 他文面・出力スキーマは不変。この対照(default)のPROMPT_VERSION更新に伴い、
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #7(過去走の人気・オッズ乖離をプロンプトに反映。未使用パラメータ活用②。
+ * 2026-07-23 boss着手前ゲート合意): 各馬行の「条件替わり(#19)」の直後に「人気着順乖離=」を
+ * 1項目追加できるようにした。呼び出し側(analysis-pipeline.ts)が market-gap.ts の
+ * summarizeMarketGap で算出した MarketGapSummary を PromptHorse.marketGap として渡したときだけ、
+ * その馬の行にこの項目を描画する(bodyWeightTrend/turfWearHintと同じ非破壊optionalの spread-omit
+ * 流儀。未指定〈undefined/null〉の馬はこの項目自体を出さず、既存行バイト不変)。
+ * ninki/finishPosition/entryCountは既にscraperがパース済みだがscorer側で未使用のパラメータであり、この配線は
+ * それらを LLM 向けに表出するプロンプト専用の追加であって、scorer/prior.ts・base-score.ts・
+ * bias-*.ts の計算には一切影響しない(当日オッズ〈winOdds/popularity〉にも波及しない。
+ * ②は過去走由来の材料で当日オッズとは別軸)。他文面・出力スキーマは不変。
+ * この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-23.2";
+export const PROMPT_VERSION = "2026-07-23.3";
 
 export {
   CLIP_VARIANTS,
@@ -106,6 +119,7 @@ import { classifyTrackWetness } from "../scorer/derive-features.js";
 import type { SameDayTrendSummary } from "./same-day-trend.js";
 import type { TurfWearHint } from "./turf-wear.js";
 import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
+import type { MarketGapSummary } from "./market-gap.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -167,6 +181,16 @@ export interface PromptHorse {
    * scorer側の計算には一切影響しない。
    */
   readonly bodyWeightTrend?: BodyWeightTrendSummary | null;
+  /**
+   * 過去走の人気・着順の乖離(タスク#7・未使用パラメータ活用②。market-gap.ts の
+   * summarizeMarketGap が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「条件替わり」の直後に「人気着順乖離=」として1項目追加する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(bodyWeightTrend/turfWearHintと同じ spread-omit 流儀。
+   * 未指定なら既存行バイト不変)。ninki/finishPosition/entryCountは既にscraperが
+   * パース済みだがscorer側で未使用のパラメータであり、このフィールドはそれらをLLMプロンプト用に
+   * 表出する専用の配線であり、scorer側の計算には一切影響しない。
+   */
+  readonly marketGap?: MarketGapSummary | null;
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
   /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
@@ -508,6 +532,10 @@ export function buildPrompt(input: BuildPromptInput): string {
     // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
     const bodyWeightTrendSegment =
       h.bodyWeightTrend != null ? `馬体重推移=${h.bodyWeightTrend.note}, ` : "";
+    // 人気・着順の乖離(タスク#7): 値がある(non-null)ときだけ「条件替わり」の直後に追記する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const marketGapSegment =
+      h.marketGap != null ? `, 人気着順乖離=${h.marketGap.note}` : "";
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
@@ -521,7 +549,8 @@ export function buildPrompt(input: BuildPromptInput): string {
         `人気=${popularityText(h.popularity)}, ` +
         `複勝オッズ下限=${oddsText(h.placeOddsMin, "複勝未発売")}, ` +
         `参考EV=${referenceEvText(h.referenceEv)}, ` +
-        `条件替わり=${conditionChangeText(conditionChangeTags)}`,
+        `条件替わり=${conditionChangeText(conditionChangeTags)}` +
+        marketGapSegment,
     );
   }
   lines.push("");
