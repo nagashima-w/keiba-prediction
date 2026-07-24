@@ -70,6 +70,8 @@ const api: KeibaApi = {
     ipcRenderer.invoke(IPC_CHANNELS.logRendererError, payload),
   openLogFolder: () => ipcRenderer.invoke(IPC_CHANNELS.openLogFolder),
   exportLogs: () => ipcRenderer.invoke(IPC_CHANNELS.exportLogs),
+  exportAnalysis: (raceId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.exportAnalysis, raceId),
   runBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.runBulkImport),
   cancelBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.cancelBulkImport),
   onBulkImportProgress: (listener) => {

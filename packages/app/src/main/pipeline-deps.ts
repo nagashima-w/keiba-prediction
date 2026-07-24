@@ -20,6 +20,7 @@ import {
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
+  DEFAULT_ANALYZER_CONFIG,
   HttpClient,
   listNarRaces,
   listRaces,
@@ -47,8 +48,10 @@ import type {
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
+import { pickLatestAnalysis, type AnalysisExportSource } from "./analysis-export.js";
 import { buildRaceLedgerView } from "./race-ledger-view.js";
 import { importRaceResult } from "./result-import.js";
+import { venueNameFromRaceId } from "./venue-codes.js";
 
 /** createPipelineDeps の設定。 */
 export interface PipelineWiringConfig {
@@ -155,6 +158,16 @@ export interface PipelineResources {
    * (latest統合済み・結果取込の有無を問わない)を、開催日降順(null は最後)→レースID昇順で返す。
    */
   readonly getRaceLedger: () => readonly RaceLedgerView[];
+  /**
+   * 分析データのエクスポート(Issue#10)用の材料を組み立てる。指定レースの分析が1件も無ければ
+   * null。複数回分析済みなら最新(id最大)を対象にする(pickLatestAnalysis。決定的な選択)。
+   * 会場名(venueName)はレースIDの場コードから解決し、結果(results/resultDetail)は
+   * 取込済みならAnalysisStoreからそのまま渡す(未取込ならundefinedのまま)。
+   * ツール名・ツール版・エクスポート実行時刻(electron/main固有の情報)は含まないため、
+   * 呼び出し側(main/ipc.ts)がこれらを補って analysis-export.ts の
+   * buildAnalysisExportDocument へ渡す。
+   */
+  readonly getAnalysisExportInput: (raceId: RaceId) => AnalysisExportSource | null;
   /** DB接続などを閉じる。 */
   readonly close: () => void;
 }
@@ -214,6 +227,11 @@ export function createPipelineDeps(
     evConfig: config.evConfig,
     additionalInstruction: config.additionalInstruction,
     clipVariant: clipVariant.id,
+    // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定モデル名(anthropic-client.tsの
+    // DEFAULT_ANALYZER_CONFIG.model)を注入する。LLM未使用時はundefinedのまま
+    // (analysis-pipeline.ts側でllmUsed===falseのため、設定されていても保存レコードには使われない。
+    // 二重の安全策として、そもそも注入自体もLLM使用時に限定する)。
+    modelName: useLlm ? DEFAULT_ANALYZER_CONFIG.model : undefined,
     // 当日の同一場・同一面傾向(タスク#27-C)。store.getRaceResultDetail をそのまま束縛するだけで、
     // 新規スクレイピング・実リクエスト・DB書き込みは一切増えない(既存の取込済みデータの読み出しのみ)。
     getRaceResultDetail: (raceId: RaceId) => store.getRaceResultDetail(raceId),
@@ -257,6 +275,18 @@ export function createPipelineDeps(
     }),
     getRaceLedger: (): readonly RaceLedgerView[] =>
       buildRaceLedgerView(computeRaceLedger(store)),
+    getAnalysisExportInput: (raceId: RaceId): AnalysisExportSource | null => {
+      const latest = pickLatestAnalysis(store.listAnalyses({ raceId }));
+      if (latest === null) {
+        return null;
+      }
+      return {
+        analysis: latest,
+        venueName: venueNameFromRaceId(raceId),
+        results: store.getResult(raceId),
+        resultDetail: store.getRaceResultDetail(raceId),
+      };
+    },
     close: () => db.close(),
   };
 }

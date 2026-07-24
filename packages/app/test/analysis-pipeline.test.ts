@@ -562,6 +562,100 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(saved[0]!.promptVersion).toBe(PROMPT_VERSION);
   });
 
+  describe("エクスポート用列(model/rawResponse/reason/raceSnapshot)の配線(Issue#10 分析データのエクスポート)", () => {
+    it("LLM有り: deps.modelNameを保存レコードのmodelに、LLM応答のrawResponseを保存レコードのrawResponseに記録すること", async () => {
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+          rawResponse: "LLMの生応答テキスト",
+        }),
+      );
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze, modelName: "claude-sonnet-4-6" },
+        onProgress,
+      );
+      expect(saved[0]!.model).toBe("claude-sonnet-4-6");
+      expect(saved[0]!.rawResponse).toBe("LLMの生応答テキスト");
+    });
+
+    it("LLMスキップ時は保存レコードのmodel/rawResponseがnullになること(deps.modelNameが設定されていても偽値混入なし)", async () => {
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), modelName: "claude-sonnet-4-6" },
+        onProgress,
+      );
+      expect(saved[0]!.model).toBeNull();
+      expect(saved[0]!.rawResponse).toBeNull();
+    });
+
+    it("LLM有り: 各馬のLLM根拠(reason)を保存レコードのhorses[].reasonに記録すること", async () => {
+      const analyze = vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: `馬番${h.umaban}の根拠`,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+          rawResponse: "raw",
+        }),
+      );
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        { ...baseDeps(), analyze },
+        onProgress,
+      );
+      expect(saved[0]!.horses.find((h) => h.umaban === 1)!.reason).toBe("馬番1の根拠");
+    });
+
+    it("LLMスキップ時は保存レコードの各馬reasonがnullになること", async () => {
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        baseDeps(),
+        onProgress,
+      );
+      expect(saved[0]!.horses.every((h) => h.reason === null)).toBe(true);
+    });
+
+    it("取得したレース情報のスナップショットをrace_snapshot_json保存用のraceSnapshotに記録すること(LLM有無に関わらず保存)", async () => {
+      await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        baseDeps(), // LLMスキップでもスナップショットは保存されること。
+        onProgress,
+      );
+      const snapshot = saved[0]!.raceSnapshot as {
+        race: { raceName: string | null };
+        horses: Array<{ umaban: number; name: string | null }>;
+      };
+      expect(snapshot.race.raceName).toBe("テスト特別");
+      expect(snapshot.horses.find((h) => h.umaban === 1)!.name).toBe("テスト馬1");
+      expect(snapshot.horses).toHaveLength(3);
+    });
+  });
+
   describe("クリップ幅版(clipVariant)の配線(タスクD-2: ±10%↔±15%のA/B・新版並走)", () => {
     /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(条件替わり配線テストと同型)。 */
     function analyzeCapturing(

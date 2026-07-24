@@ -106,6 +106,11 @@ export interface AnalysisHorseRecord {
   readonly contributions: unknown;
   /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。Task#23。 */
   readonly mark: PredictionMark | null;
+  /**
+   * LLMが返した和文根拠(Issue#10 分析データのエクスポート)。LLM未使用(prior採用)の分析は
+   * null を渡す想定。省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly reason?: string | null;
 }
 
 /** 保存する分析(レース単位)。 */
@@ -140,6 +145,27 @@ export interface AnalysisRecord {
    * 省略時も null(日付不明。既存呼び出し元との後方互換のため任意項目とする)。
    */
   readonly kaisaiDate?: string | null;
+  /**
+   * 使用したLLMモデル名(Issue#10 分析データのエクスポート、例: "claude-sonnet-4-6")。
+   * LLMを使わず prior をそのまま採用した分析(LLMスキップ)は null を渡す想定(偽値を混入させない)。
+   * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly model?: string | null;
+  /**
+   * LLMの生応答テキスト(Issue#10)。LLMスキップ時は null を渡す想定。
+   * 秘密安全性: これはLLMが返したモデル出力テキストのみで、プロンプト本文・apiKey等は含まない
+   * (呼び出し側〈analysis-pipeline.ts〉が analyzeRace の結果からそのまま転送する)。
+   * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly rawResponse?: string | null;
+  /**
+   * 取得したレース情報のスナップショット(Issue#10。エクスポート用、過去戦績は含めない)。
+   * JSON化して保存する(contributions と同じ流儀)。LLM使用有無に関わらず、取得済みレース情報が
+   * あれば保存してよい。省略時・undefinedは null(スナップショット無し)として保存する。
+   * 型は analysis-store 側では意図的に unknown のまま扱う(スキーマは呼び出し側
+   * 〈main/analysis-export.ts の RaceSnapshot〉が定義・検証する)。
+   */
+  readonly raceSnapshot?: unknown;
 }
 
 /** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
@@ -153,6 +179,10 @@ export interface StoredAnalysisHorse {
   readonly contributions: unknown;
   /** 予想印(◎〇▲△☆注のいずれか。印なし・旧レコード(列追加前の保存)は null)。Task#23。 */
   readonly mark: PredictionMark | null;
+  /**
+   * LLMが返した和文根拠(Issue#10)。LLM未使用・旧レコード(列追加前の保存)は null。
+   */
+  readonly reason: string | null;
 }
 
 /** 復元した分析(レース単位)。 */
@@ -179,6 +209,19 @@ export interface StoredAnalysis {
    * null(日付不明)。
    */
   readonly kaisaiDate: string | null;
+  /**
+   * 使用したLLMモデル名(Issue#10)。LLMスキップ・旧レコード(列追加前の保存)は null。
+   */
+  readonly model: string | null;
+  /**
+   * LLMの生応答テキスト(Issue#10)。LLMスキップ・旧レコード(列追加前の保存)は null。
+   */
+  readonly rawResponse: string | null;
+  /**
+   * 取得したレース情報のスナップショット(Issue#10。JSONからパース済み)。未保存・
+   * 旧レコード(列追加前の保存)・破損JSONは null(防御的復元。getRaceResultDetailと同方針)。
+   */
+  readonly raceSnapshot: unknown;
 }
 
 /** レース結果の1頭分。 */
@@ -252,6 +295,7 @@ interface HorseRow {
   is_positive: number;
   contributions_json: string | null;
   mark: string | null;
+  reason: string | null;
 }
 
 /**
@@ -279,7 +323,10 @@ export class AnalysisStore {
         ev_estimated INTEGER,
         prompt_version TEXT,
         additional_instruction TEXT,
-        kaisai_date TEXT
+        kaisai_date TEXT,
+        model TEXT,
+        raw_response TEXT,
+        race_snapshot_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -293,6 +340,7 @@ export class AnalysisStore {
         is_positive INTEGER NOT NULL,
         contributions_json TEXT,
         mark TEXT,
+        reason TEXT,
         PRIMARY KEY (analysis_id, umaban),
         FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
       );
@@ -315,6 +363,45 @@ export class AnalysisStore {
     this.migrateAdditionalInstructionColumn();
     this.migrateKaisaiDateColumn();
     this.migrateResultDetailColumns();
+    this.migrateAnalysisExportColumns();
+    this.migrateHorseReasonColumn();
+  }
+
+  /**
+   * エクスポート用列(model・raw_response・race_snapshot_json)を後付けするマイグレーション
+   * (Issue#10 分析データのエクスポート)。
+   * 旧バージョンで作成済みの analyses にはこれらの列が無いため、存在しなければ追加する
+   * (既存行は全列NULL=LLM未使用・スナップショット未保存として読める=後方互換)。
+   */
+  private migrateAnalysisExportColumns(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "model")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN model TEXT`);
+    }
+    if (!columns.some((c) => c.name === "raw_response")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN raw_response TEXT`);
+    }
+    if (!columns.some((c) => c.name === "race_snapshot_json")) {
+      this.db.exec(
+        `ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN race_snapshot_json TEXT`,
+      );
+    }
+  }
+
+  /**
+   * LLM根拠(reason)列を後付けするマイグレーション(Issue#10)。
+   * 旧バージョンで作成済みの analysis_horses には reason 列が無いため、存在しなければ追加する
+   * (既存行は NULL=根拠なしとして読める=後方互換)。
+   */
+  private migrateHorseReasonColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "reason")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN reason TEXT`);
+    }
   }
 
   /**
@@ -432,13 +519,14 @@ export class AnalysisStore {
   saveAnalysis(record: AnalysisRecord): number {
     const insertAnalysis = this.db.prepare(
       `INSERT INTO ${ANALYSES_TABLE}
-         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date,
+          model, raw_response, race_snapshot_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
-         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     const tx = this.db.transaction((rec: AnalysisRecord): number => {
@@ -449,6 +537,11 @@ export class AnalysisStore {
         rec.promptVersion ?? null,
         rec.additionalInstruction ?? null,
         rec.kaisaiDate ?? null,
+        rec.model ?? null,
+        rec.rawResponse ?? null,
+        rec.raceSnapshot === undefined || rec.raceSnapshot === null
+          ? null
+          : JSON.stringify(rec.raceSnapshot),
       );
       const analysisId = Number(info.lastInsertRowid);
       for (const h of rec.horses) {
@@ -464,6 +557,7 @@ export class AnalysisStore {
             ? null
             : JSON.stringify(h.contributions),
           h.mark,
+          h.reason ?? null,
         );
       }
       return analysisId;
@@ -605,7 +699,8 @@ export class AnalysisStore {
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
                       prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
-                      kaisai_date AS kaisaiDate
+                      kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
+                      race_snapshot_json AS raceSnapshotJson
                  FROM ${ANALYSES_TABLE} ORDER BY id`,
             )
             .all()
@@ -613,7 +708,8 @@ export class AnalysisStore {
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
                       prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
-                      kaisai_date AS kaisaiDate
+                      kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
+                      race_snapshot_json AS raceSnapshotJson
                  FROM ${ANALYSES_TABLE} WHERE race_id = ? ORDER BY id`,
             )
             .all(filter.raceId)
@@ -625,10 +721,13 @@ export class AnalysisStore {
       promptVersion: string | null;
       additionalInstruction: string | null;
       kaisaiDate: string | null;
+      model: string | null;
+      rawResponse: string | null;
+      raceSnapshotJson: string | null;
     }>;
 
     const horseStmt = this.db.prepare(
-      `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark
+      `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason
          FROM ${ANALYSIS_HORSES_TABLE} WHERE analysis_id = ? ORDER BY umaban`,
     );
 
@@ -647,6 +746,13 @@ export class AnalysisStore {
         additionalInstruction: a.additionalInstruction,
         // NULL(旧レコード・列追加前の保存・選択済み開催日が渡らなかった分析)は日付不明としてnullのまま復元する。
         kaisaiDate: a.kaisaiDate,
+        // NULL(旧レコード・列追加前の保存・LLM未使用)はモデル不明としてnullのまま復元する(Issue#10)。
+        model: a.model,
+        // NULL(旧レコード・列追加前の保存・LLM未使用)は応答なしとしてnullのまま復元する(Issue#10)。
+        rawResponse: a.rawResponse,
+        // NULL・破損JSON(旧レコード・未保存)はスナップショットなしとしてnullで復元する(Issue#10。
+        // 防御的復元。getRaceResultDetailと同方針)。
+        raceSnapshot: toStoredRaceSnapshot(a.raceSnapshotJson),
       };
     });
   }
@@ -808,5 +914,23 @@ function toStoredHorse(row: HorseRow): StoredAnalysisHorse {
     // DBには自前で書き込んだ値(またはNULL)のみが入るため、素通しでキャストする
     // (未知の文字列が紛れ込む経路は無い。念のため未知値でも「印なし扱い」にはせず型どおり通す)。
     mark: row.mark as PredictionMark | null,
+    reason: row.reason,
   };
+}
+
+/**
+ * analyses.race_snapshot_json(JSON文字列)をレース情報スナップショットへ復元する(Issue#10)。
+ * NULL(未保存・旧レコード)・JSON parseの失敗は、silentにthrowせず null にフォールバックする
+ * (getRaceResultDetail/toStoredPassingと同じ防御的復元方針)。スキーマの妥当性検証は行わない
+ * (呼び出し側〈main/analysis-export.ts〉が必要に応じて構造を検証する)。
+ */
+function toStoredRaceSnapshot(raw: string | null): unknown {
+  if (raw === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }

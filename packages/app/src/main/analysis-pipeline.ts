@@ -80,6 +80,7 @@ import type {
   AnalysisResult,
   AnalysisRow,
 } from "../shared/analysis-types.js";
+import { buildRaceSnapshot } from "./analysis-export.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
 
 /** runAnalysis に注入する依存。すべて関数注入でモック可能。 */
@@ -108,6 +109,13 @@ export interface AnalysisPipelineDeps {
   readonly scorerConfig?: ScorerConfig;
   /** LLMスキップ理由(analyze=null のとき結果メタに載せる文言)。 */
   readonly llmSkipReason?: string;
+  /**
+   * 使用するLLMモデル名(Issue#10 分析データのエクスポート。例: "claude-sonnet-4-6")。
+   * LLM使用時(deps.analyze!==null)のみ保存レコードの model 列に記録する。LLMスキップ時は
+   * この値が設定されていても保存レコードの model は null にする(偽値混入を避けるため。
+   * 呼び出し側〈pipeline-deps.ts〉は useLlm===true のときだけこの値を注入する想定)。
+   */
+  readonly modelName?: string;
   /**
    * プロンプト追加指示(設定画面、Task#28 プロンプト改善C)。省略時・空文字・空白のみは
    * 何も注入しない(undefinedとしてBuildPromptInputへ渡す)。トリムした値を
@@ -320,6 +328,10 @@ export async function runAnalysis(
   // fallback(確率補正そのものを prior に戻す)とは意味が異なるため別フィールドで伝播する。
   let marksDropped = false;
   let marksDroppedReason: string | null = null;
+  // LLMの生応答テキスト(Issue#10 分析データのエクスポート)。LLMスキップ時は保存しない
+  // (record組み立て時に llmUsed で判定して null にする。偽値混入を避けるため、この変数自体は
+  // LLM使用時のみ analyzeRace の結果で上書きする)。
+  let rawResponse: string | null = null;
   const adjustedByUmaban = new Map<number, AdjustedHorse>();
 
   if (deps.analyze === null) {
@@ -459,6 +471,9 @@ export async function runAnalysis(
     // 正規化してから AnalysisResult に伝播する(呼び出し元は必ず true/false を受け取れる)。
     marksDropped = analysis.marksDropped ?? false;
     marksDroppedReason = analysis.marksDroppedReason ?? null;
+    // LLMの生応答テキスト(Issue#10)。core AnalyzeRaceResult.rawResponse は既存呼び出し元との
+    // 互換のため optional(未設定時はtext未取得の失敗)なので、明示的にnullへ正規化する。
+    rawResponse = analysis.rawResponse ?? null;
     // フォールバック発生時のみ診断ログ用フックを呼ぶ(論点E)。生の診断詳細
     // (diagnosticMessage)はUI/DBへは渡さず、このフック経由でのみログ基盤へ渡す。
     if (fallback) {
@@ -532,6 +547,15 @@ export async function runAnalysis(
     // resolveAnalysisDate が当日日付で近似するが、その近似値は不確かなため保存しない
     // (analysisDate は季節分類等のスコアリングにのみ使い、DB保存は生の kaisaiDate 引数のみ参照する)。
     kaisaiDate,
+    // 使用したLLMモデル名(Issue#10)。LLMを実際に使った分析のみ記録する(promptVersionと同じ方針。
+    // LLMスキップ時は deps.modelName が設定されていても null にし、偽値を混入させない)。
+    model: llmUsed ? (deps.modelName ?? null) : null,
+    // LLMの生応答テキスト(Issue#10)。LLMスキップ時は null(rawResponse変数はLLM使用時のみ
+    // analyzeRaceの結果で上書きされる。上記(3)参照)。
+    rawResponse: llmUsed ? rawResponse : null,
+    // 取得したレース情報のスナップショット(Issue#10。エクスポート用、過去戦績は含めない)。
+    // LLM使用有無に関わらず保存する(取得済みレース情報のため)。
+    raceSnapshot: buildRaceSnapshot(race),
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;
@@ -546,6 +570,9 @@ export async function runAnalysis(
         isPositive: ev.isPositive,
         contributions: prior.contributions,
         mark: adjusted.mark,
+        // LLMが返した和文根拠(Issue#10)。LLMスキップ時は adjusted.reason が既に null
+        // (LLMスキップ経路の初期化ループ参照)のため、ここで追加のllmUsed分岐は不要。
+        reason: adjusted.reason,
       };
     }),
   };

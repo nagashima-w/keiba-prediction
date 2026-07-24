@@ -282,6 +282,32 @@ export function App(): React.JSX.Element {
     [loadVerifyData],
   );
 
+  /**
+   * 分析データのエクスポート(第一版・GitHub Issue#10)。対象は指定レースの「保存済みの最新分析」
+   * (main側で決定的に選ぶ)。成功時はJSON・CSVの保存先を、失敗時はエラーメッセージを
+   * window.alertで簡潔に案内する(第一版はダイアログのみのシンプルな実装。専用の状態管理・
+   * データ再取得は不要な一回限りの操作のため、他の操作のようなreducer連携は行わない)。
+   */
+  const handleExportAnalysis = useCallback((raceId: string) => {
+    window.keibaApi
+      .exportAnalysis(raceId)
+      .then((outcome) => {
+        if (outcome.status === "canceled") {
+          return;
+        }
+        if (outcome.status === "error") {
+          window.alert(`分析データのエクスポートに失敗しました: ${outcome.message}`);
+          return;
+        }
+        window.alert(
+          `分析データを書き出しました。\nJSON: ${outcome.jsonPath}\nCSV: ${outcome.csvPath}`,
+        );
+      })
+      .catch((e: unknown) => {
+        window.alert(`分析データのエクスポートに失敗しました: ${errorMessage(e)}`);
+      });
+  }, []);
+
   // 「未取込をまとめて取り込む」(Task#31)。main側でNOT EXISTS判定した未取込レースを直列取込する。
   const handleRunBulkImport = useCallback(() => {
     const runId = verify.bulkImport.runId + 1;
@@ -614,6 +640,7 @@ export function App(): React.JSX.Element {
             webhookConfigured={notify.webhookConfigured}
             discordSend={state.run.discordSend}
             onSendDiscord={() => handleSendDiscord(completedOutcomes)}
+            onExportAnalysis={handleExportAnalysis}
           />
 
           <PeriodBatchView
@@ -642,6 +669,7 @@ export function App(): React.JSX.Element {
         <VerifyView
           state={verify}
           onImport={handleImport}
+          onExportAnalysis={handleExportAnalysis}
           onRefresh={loadVerifyData}
           onVenueFilterChange={handleVenueFilterChange}
           onRaceLedgerFilterChange={handleRaceLedgerFilterChange}

@@ -24,6 +24,7 @@ import {
 } from "@keiba/core";
 
 import type {
+  AnalysisExportOutcome,
   BatchProgress,
   BatchRaceOutcome,
   BulkImportProgress,
@@ -46,9 +47,16 @@ import { collectRaceIdsOverRange, type RangeCollectResult } from "./range-collec
 import { buildBatchDiscordPayload } from "./batch-discord-payload.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
-import { buildAppInfo } from "./app-info.js";
+import { APP_NAME, buildAppInfo } from "./app-info.js";
 import { runAnalysis } from "./analysis-pipeline.js";
 import { runBatchAnalysis } from "./analysis-batch.js";
+import {
+  buildAnalysisExportDocument,
+  buildDefaultAnalysisExportFileName,
+  deriveCsvPathFromJsonPath,
+  serializeAnalysisExportCsv,
+  serializeAnalysisExportJson,
+} from "./analysis-export.js";
 import { runBulkImport } from "./import-batch.js";
 import { buildDefaultLogExportFileName, collectLogExportContent } from "./log-export.js";
 import { getLogDirectory, logError, logWarn, setSecretsProvider } from "./logger.js";
@@ -181,6 +189,11 @@ export function registerIpcHandlers(): void {
   // ログ取り出し導線(Task#36)。
   ipcMain.handle(IPC_CHANNELS.openLogFolder, () => handleOpenLogFolder());
   ipcMain.handle(IPC_CHANNELS.exportLogs, (event) => handleExportLogs(event));
+
+  // 分析データのエクスポート(第一版・GitHub Issue#10)。
+  ipcMain.handle(IPC_CHANNELS.exportAnalysis, (event, raceId: unknown) =>
+    handleExportAnalysis(event, String(raceId)),
+  );
 }
 
 /**
@@ -871,4 +884,71 @@ async function handleExportLogs(
     writeFileSync(result.filePath, content, "utf8");
     return { status: "saved", filePath: result.filePath };
   });
+}
+
+/**
+ * 「分析データのエクスポート」ハンドラの実処理(第一版・GitHub Issue#10)。
+ * 保存先はJSON側だけ dialog.showSaveDialog でユーザーに選ばせ(既定ファイル名はレースID+当日日付付き)、
+ * CSVは同じ場所へ拡張子違い(deriveCsvPathFromJsonPath)で自動的に書き出す
+ * (「JSON と CSV を両方出す。実装者判断でシンプルに」の承認済み方針。ダイアログを2回出さない)。
+ * キャンセル時(canceled または filePath 未指定)は何もせず "canceled" を返す(log-exportと同契約)。
+ *
+ * 対象は指定レースの「保存済みの最新分析」(getResources().getAnalysisExportInput が
+ * pickLatestAnalysisで決定的に選ぶ。同一レースに複数分析があれば最新〈id最大〉)。
+ * 対象の分析が1件も無ければ例外を投げる(withErrorLoggingがログに残したうえで呼び出し元へ伝播する。
+ * renderer側はボタンを分析済みレースにのみ出す前提のため、通常到達しない防御的経路)。
+ */
+async function handleExportAnalysis(
+  event: IpcMainInvokeEvent,
+  raceIdStr: string,
+): Promise<AnalysisExportOutcome> {
+  return withErrorLogging(
+    IPC_CHANNELS.exportAnalysis,
+    { raceId: raceIdStr },
+    async () => {
+      const raceId = parseRaceId(raceIdStr);
+      const source = getResources().getAnalysisExportInput(raceId);
+      if (source === null) {
+        throw new Error(
+          `このレースの保存済み分析が見つかりません(raceId: ${raceIdStr})`,
+        );
+      }
+      const doc = buildAnalysisExportDocument({
+        ...source,
+        toolName: APP_NAME,
+        toolVersion: buildAppInfo(app.getVersion()).appVersion,
+        exportedAt: new Date().toISOString(),
+      });
+
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const dialogOptions = {
+        defaultPath: buildDefaultAnalysisExportFileName(raceIdStr, new Date()),
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      };
+      const result =
+        window !== null
+          ? await dialog.showSaveDialog(window, dialogOptions)
+          : await dialog.showSaveDialog(dialogOptions);
+      if (result.canceled || result.filePath === undefined || result.filePath === "") {
+        return { status: "canceled" };
+      }
+
+      const jsonPath = result.filePath;
+      const csvPath = deriveCsvPathFromJsonPath(jsonPath);
+      // 防御ガード(code-reviewer指摘対応・多層防御): 正規化した上でcsvPathがjsonPathと
+      // 一致する場合は一切書き込まずエラーで打ち切る。analysis-export.tsの
+      // deriveCsvPathFromJsonPathは構造的にこの衝突を起こさない設計だが、万一の再発
+      // (将来のリファクタ等)でJSONがCSV書き込みにより無確認で上書き消失する事故を防ぐ。
+      if (path.resolve(csvPath) === path.resolve(jsonPath)) {
+        return {
+          status: "error",
+          message:
+            "CSV保存先がJSON保存先と同じパスになるため書き込みを中止しました(データ消失防止)。別のファイル名で保存し直してください。",
+        };
+      }
+      writeFileSync(jsonPath, serializeAnalysisExportJson(doc), "utf8");
+      writeFileSync(csvPath, serializeAnalysisExportCsv(doc), "utf8");
+      return { status: "saved", jsonPath, csvPath };
+    },
+  );
 }

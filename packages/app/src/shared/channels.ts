@@ -86,6 +86,12 @@ export const IPC_CHANNELS = {
   openLogFolder: "log:open-folder",
   /** 現行ログ+ローテーション済みログを1ファイルに集約して保存する(Task#36 受け入れ条件2)。 */
   exportLogs: "log:export",
+  /**
+   * 分析データのエクスポート(第一版、GitHub Issue#10)。指定レースの「保存済みの最新分析」
+   * (同一レースに複数分析があれば最新〈id最大〉)を、schemaVersion=1のJSON+馬別CSVの2ファイルへ
+   * 書き出す。保存先はJSON側をダイアログで選ばせ、CSVは同じ場所へ拡張子違いで自動保存する。
+   */
+  exportAnalysis: "analysis:export",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

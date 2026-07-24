@@ -52,6 +52,11 @@ export interface VerifyViewProps {
   readonly state: VerifyState;
   /** レース結果を取り込む操作。 */
   readonly onImport: (raceId: string) => void;
+  /**
+   * 分析データをエクスポートする操作(第一版・GitHub Issue#10)。対象は指定レースの
+   * 「保存済みの最新分析」(main側で決定的に選ぶ。同一レースに複数分析があれば最新〈id最大〉)。
+   */
+  readonly onExportAnalysis: (raceId: string) => void;
   /** 履歴・レポートを再取得する操作。 */
   readonly onRefresh: () => void;
   /**
@@ -837,6 +842,16 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
                   {importing ? "取込中…" : importButtonLabel(rb)}
                 </button>
               )}
+              {/* 分析データのエクスポート(第一版・GitHub Issue#10)。結果取込の有無に関わらず、
+                  分析済みレースであれば常に出せる(このレース単位の統合リスト自体が分析済みレースのみを
+                  対象とするため、rb.analysisId は必ず存在する)。 */}
+              <button
+                type="button"
+                onClick={() => props.onExportAnalysis(rb.raceId)}
+                style={{ marginTop: "0.4rem", marginLeft: "0.4rem" }}
+              >
+                分析データをエクスポート
+              </button>
             </details>
           );
         })

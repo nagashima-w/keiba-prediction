@@ -2,6 +2,7 @@ import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
   AnalysisStore,
   CLIP_VARIANTS,
+  DEFAULT_ANALYZER_CONFIG,
   parseKaisaiDate,
   parseRaceId,
   resolveClipVariant,
@@ -377,6 +378,121 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.getVerifyReport("nar").includedAnalysisCount).toBe(0);
   });
 
+  describe("getAnalysisExportInput(分析データのエクスポート用の材料組み立て。Issue#10)", () => {
+    it("対象レースの分析が無ければnullを返すこと", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      expect(r.getAnalysisExportInput(parseRaceId("202605020811"))).toBeNull();
+    });
+
+    it("分析済みレースは会場名・スナップショット付きのStoredAnalysisを返すこと(結果未取込ならresults/resultDetailはundefined)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      r.deps.saveAnalysis({
+        raceId: "202605020811", // 場コード05 → 東京。
+        analyzedAt: "2026-07-08T10:00:00.000Z",
+        model: "claude-sonnet-4-6",
+        rawResponse: "raw",
+        raceSnapshot: { race: { raceName: "テスト" }, horses: [] },
+        horses: [
+          {
+            umaban: 1,
+            prior: 0.5,
+            adjustedProb: 0.5,
+            placeOddsMin: 2.0,
+            ev: 1.0,
+            isPositive: true,
+            contributions: null,
+            mark: null,
+            reason: "根拠",
+          },
+        ],
+      });
+      const input = r.getAnalysisExportInput(parseRaceId("202605020811"))!;
+      expect(input.venueName).toBe("東京");
+      expect(input.analysis.model).toBe("claude-sonnet-4-6");
+      expect(input.analysis.rawResponse).toBe("raw");
+      expect(input.analysis.horses[0]!.reason).toBe("根拠");
+      expect(input.results).toBeUndefined();
+      expect(input.resultDetail).toBeUndefined();
+    });
+
+    it("同一レースを複数回分析していたら最新(id最大)の分析を対象にすること(決定的な選択)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      r.deps.saveAnalysis({
+        raceId: "202605020811",
+        analyzedAt: "2026-07-08T09:00:00.000Z",
+        horses: [],
+      });
+      r.deps.saveAnalysis({
+        raceId: "202605020811",
+        analyzedAt: "2026-07-08T15:00:00.000Z",
+        model: "後発分析",
+        horses: [],
+      });
+      const input = r.getAnalysisExportInput(parseRaceId("202605020811"))!;
+      expect(input.analysis.model).toBe("後発分析");
+    });
+
+    it("結果取込済みならresults/resultDetailが渡ること(importResult経由で実際にrace_resultsへ保存したレース)", async () => {
+      // importResultのsaveResult DI配線テストと同じ合成HTML(芝1200m見出し+最小結果行。実サイト非アクセス)。
+      const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> => new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      r.deps.saveAnalysis({
+        raceId: "202602010607",
+        analyzedAt: "2026-07-08T10:00:00.000Z",
+        horses: [
+          {
+            umaban: 1,
+            prior: 0.5,
+            adjustedProb: 0.5,
+            placeOddsMin: 2.0,
+            ev: 1.0,
+            isPositive: true,
+            contributions: null,
+            mark: null,
+          },
+        ],
+      });
+      await r.importResult(parseRaceId("202602010607"));
+
+      const input = r.getAnalysisExportInput(parseRaceId("202602010607"))!;
+      expect(input.results).toBeDefined();
+      expect(input.results![0]!.finishPosition).toBe(1);
+      expect(input.resultDetail).toBeDefined();
+      expect(input.resultDetail!.courseType).toBe("芝");
+    });
+  });
+
   it("listUnimportedRaceIds が組み立てられ、未分析なら空配列を返すこと(Task#31)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);
@@ -424,6 +540,20 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
     resources.push(r);
     expect(typeof r.deps.analyze).toBe("function");
+  });
+
+  describe("deps.modelName の配線(Issue#10 分析データのエクスポート)", () => {
+    it("APIキーがあれば deps.modelName が既定モデル名(DEFAULT_ANALYZER_CONFIG.model)になること", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
+      resources.push(r);
+      expect(r.deps.modelName).toBe(DEFAULT_ANALYZER_CONFIG.model);
+    });
+
+    it("APIキー未設定なら deps.modelName は undefined のまま(LLM未使用)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      expect(r.deps.modelName).toBeUndefined();
+    });
   });
 
   it("scorerConfig / evConfig を渡すと deps にそのまま反映される(設定の適用)", () => {

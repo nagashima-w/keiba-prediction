@@ -1,5 +1,6 @@
 import type { AppInfo } from "../main/app-info.js";
 import type {
+  AnalysisExportOutcome,
   BatchProgress,
   BatchRaceOutcome,
   BulkImportProgress,
@@ -216,4 +217,14 @@ export interface KeibaApi {
    * 何も書き込まない。
    */
   exportLogs(): Promise<LogExportOutcome>;
+
+  /**
+   * 分析データのエクスポート(第一版、GitHub Issue#10)。指定レースの「保存済みの最新分析」
+   * (同一レースに複数分析があれば最新〈id最大〉が対象。main側で決定的に選ぶ)を、
+   * schemaVersion=1のJSON+馬別CSVの2ファイルへ書き出す。保存先はmain側のダイアログで
+   * JSON側を選ばせ、CSVは同じ場所へ拡張子違いで自動保存する。キャンセル時は "canceled" を返し、
+   * 何も書き込まない。対象レースの分析が1件も無い場合は例外(reject)になる。
+   * @param raceId 対象レースID(12桁)
+   */
+  exportAnalysis(raceId: string): Promise<AnalysisExportOutcome>;
 }

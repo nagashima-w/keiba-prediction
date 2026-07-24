@@ -451,6 +451,22 @@ export type LogExportOutcome =
   | { readonly status: "canceled" };
 
 /**
+ * 分析データのエクスポート(第一版、GitHub Issue#10。main→renderer に invoke の戻り値として返す)。
+ * - "saved": 保存先ダイアログでJSONの保存先を選び、schemaVersion=1のJSON+馬別CSVの2ファイルを
+ *   書き出した(CSVパスはJSON保存先から拡張子を置き換えて自動決定。log-exportとの契約差分は
+ *   filePathが2本〈jsonPath/csvPath〉になる点のみ)。
+ * - "canceled": 保存先ダイアログをキャンセルした(何も書き込んでいない)。
+ * - "error": 保存先パスの検証に失敗し、書き込みを行わなかった(code-reviewer指摘対応。
+ *   例: 導出したCSV保存先〈csvPath〉がJSON保存先〈jsonPath〉と一致してしまう異常なケースの
+ *   多層防御。通常はanalysis-export.tsのderiveCsvPathFromJsonPathが構造的にこの衝突を
+ *   起こさない設計のため到達しない想定だが、万一の再発防止として例外の代わりにこの状態を返す)。
+ */
+export type AnalysisExportOutcome =
+  | { readonly status: "saved"; readonly jsonPath: string; readonly csvPath: string }
+  | { readonly status: "canceled" }
+  | { readonly status: "error"; readonly message: string };
+
+/**
  * 検証画面: レース単体の予実ブレークダウンの1頭分(表示用。core RaceBreakdownHorse の
  * プレーン写し)。Task#34。
  */
