@@ -34,6 +34,9 @@ npmRebuild: true
 win:
   target:
     - portable
+  # アプリ/exe アイコン。build/icon.svg を唯一の正とし、`pnpm gen:icon` で生成した
+  # マルチ解像度 .ico を使う(16〜256px を内包)。パスは packages/app プロジェクトからの相対。
+  icon: build/icon.ico
   # exe ファイル名は ASCII 固定(日本語 productName だと配布ファイル名が文字化けしうるため)。
   artifactName: keiba-ev-tool-${version}-portable.${ext}
 

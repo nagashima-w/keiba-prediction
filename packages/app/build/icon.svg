@@ -1,0 +1,57 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    アプリアイコンのデザインソース(唯一の正)。
+    馬蹄(競馬)× 上昇矢印(期待値プラス)を深緑グラデの角丸スクエアに載せたマーク。
+    このSVGを scripts/gen-icon.mjs が icon.ico / icon.png へラスタライズする。
+    アイコンを変えるときはこのSVGを編集し `pnpm gen:icon` を実行する。
+  -->
+  <defs>
+    <linearGradient id="bg" x1="80" y1="40" x2="440" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12B981"/>
+      <stop offset="1" stop-color="#04543A"/>
+    </linearGradient>
+    <linearGradient id="shoe" x1="256" y1="150" x2="256" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D9F2E6"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="256" y1="96" x2="256" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FCD34D"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#022C1C" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- 背景: 芝を思わせる深緑グラデーションの角丸スクエア -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="#FFFFFF" opacity="0.06"/>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="115.5" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="1"/>
+
+  <!-- 馬蹄(下向きU・上が開く)。太い丸キャップのストロークで表現 -->
+  <g filter="url(#sh)">
+    <path d="M 316 176 A 128 128 0 1 1 196 176"
+          fill="none" stroke="url(#shoe)" stroke-width="50" stroke-linecap="round"/>
+  </g>
+  <!-- 釘穴のディテール -->
+  <g fill="#0A5A3C" opacity="0.55">
+    <circle cx="150" cy="238" r="9"/>
+    <circle cx="164" cy="316" r="9"/>
+    <circle cx="212" cy="372" r="9"/>
+    <circle cx="362" cy="238" r="9"/>
+    <circle cx="348" cy="316" r="9"/>
+    <circle cx="300" cy="372" r="9"/>
+  </g>
+
+  <!-- 期待値プラス: 馬蹄の口から立ち上がる上昇の矢印 -->
+  <g filter="url(#sh)">
+    <path d="M 256 116
+             L 322 196
+             L 288 196
+             L 288 300
+             L 224 300
+             L 224 196
+             L 190 196 Z"
+          fill="url(#arrow)"/>
+  </g>
+</svg>
