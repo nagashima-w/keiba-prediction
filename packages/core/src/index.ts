@@ -338,6 +338,16 @@ export {
   type JockeyChangeTodayInput,
 } from "./analyzer/jockey-change.js";
 export {
+  summarizeMarginTrend,
+  type MarginTrendLabel,
+  type MarginTrendLevel,
+  type MarginTrendPastRun,
+  type MarginTrendResult,
+  type MarginTrendRun,
+  type MarginTrendSummary,
+  type SummarizeMarginTrendOptions,
+} from "./analyzer/margin-trend.js";
+export {
   buildPrompt,
   buildPromptPreview,
   CLIP_VARIANTS,

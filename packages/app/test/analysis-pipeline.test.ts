@@ -9,6 +9,7 @@ import {
   PROMPT_VERSION,
   summarizeBodyWeightTrend,
   summarizeJockeyChange,
+  summarizeMarginTrend,
   summarizeMarketGap,
   type AnalyzeRaceResult,
   type BuildPromptInput,
@@ -58,6 +59,7 @@ function fakeResult(
     entryCount?: HorseRaceResult["entryCount"];
     jockeyId?: HorseRaceResult["jockeyId"];
     jockeyName?: HorseRaceResult["jockeyName"];
+    margin?: HorseRaceResult["margin"];
   } = {},
 ): HorseRaceResult {
   return {
@@ -82,7 +84,7 @@ function fakeResult(
     distance: extra.distance ?? null,
     trackCondition: null,
     time: null,
-    margin: null,
+    margin: extra.margin ?? null,
     passing,
     pace: extra.pace ?? null,
     last3f: extra.last3f ?? null,
@@ -1213,6 +1215,157 @@ describe("runAnalysis(分析パイプライン)", () => {
       const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
       expect(horse1Line).toContain(`条件替わり=なし, ${horse1.jockeyChange!.note}`);
       expect(horse1Line.endsWith(horse1.jockeyChange!.note)).toBe(true);
+    });
+  });
+
+  describe("過去走の着差傾向(タスク#9・未使用パラメータ活用④)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    it("過去走のfinishPosition/marginが純関数へ写され、BuildPromptInput.horses[].marginTrendに載ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                finishPosition: { kind: "順位", value: 2 },
+                margin: 0.2,
+              }),
+              fakeResult("2026/06/01", [2, 2], {
+                finishPosition: { kind: "順位", value: 1 },
+                margin: -3.5,
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      const expected = summarizeMarginTrend([
+        { finishPosition: { kind: "順位", value: 2 }, margin: 0.2 },
+        { finishPosition: { kind: "順位", value: 1 }, margin: -3.5 },
+      ]);
+      expect(horse1.marginTrend).toEqual(expected);
+      expect(horse1.marginTrend).not.toBeNull();
+    });
+
+    it("戦績なし(過去走0件)の馬はmarginTrendがnull(材料なし)になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      for (const h of captured.value!.horses) {
+        // baseDeps() の戦績は空(results未指定→[])。
+        expect(h.marginTrend).toBeNull();
+      }
+    });
+
+    it("プロンプト行の『着差傾向=』が実際に描画され、marginTrend.noteと一致すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                finishPosition: { kind: "順位", value: 2 },
+                margin: 0.2,
+              }),
+              fakeResult("2026/06/01", [2, 2], {
+                finishPosition: { kind: "順位", value: 1 },
+                margin: -3.5,
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const promptText = buildPrompt(captured.value!);
+      const horse1Line = promptText.split("\n").find((line) => line.startsWith("馬番1 "))!;
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1Line).toContain(`着差傾向=${horse1.marginTrend!.note}`);
+    });
+
+    it("horseData.resultsがnull(戦績取得失敗)でも例外にならず、marginTrendがnull(材料なし)になること(marketGap配線と同型の防御)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {});
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1 ? { ...h, results: null } : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+
+      await expect(
+        runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+      ).resolves.toBeDefined();
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.marginTrend).toBeNull();
+    });
+
+    it("プロンプト行に実際に描画され、「乗り替わり」の直後(jockeyChange未指定時は「条件替わり」の直後)に来ること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              fakeResult("2026/06/15", [1, 1], {
+                finishPosition: { kind: "順位", value: 3 },
+                margin: 0.2,
+              }),
+              fakeResult("2026/06/01", [2, 2], {
+                finishPosition: { kind: "順位", value: 4 },
+                margin: 0.1,
+              }),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const promptText = buildPrompt(captured.value!);
+      const horse1Line = promptText.split("\n").find((line) => line.startsWith("馬番1 "))!;
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1Line).toContain(`条件替わり=なし, 着差傾向=${horse1.marginTrend!.note}`);
+      expect(horse1Line.endsWith(horse1.marginTrend!.note)).toBe(true);
     });
   });
 

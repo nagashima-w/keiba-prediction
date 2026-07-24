@@ -28,6 +28,8 @@
  * "2026-07-23.2" → "2026-07-23.3" に更新されたため、この対照(default)の値もここで追随した。
  * #8(乗り替わり〈騎手の継続/変更〉のプロンプト反映)で build-prompt.ts の PROMPT_VERSION が
  * "2026-07-23.3" → "2026-07-23.4" に更新されたため、この対照(default)の値もここで追随した。
+ * #9(過去走の着差のプロンプト反映)で build-prompt.ts の PROMPT_VERSION が
+ * "2026-07-23.4" → "2026-07-23.5" に更新されたため、この対照(default)の値もここで追随した。
  *
  * 新版(wide15)は幅0.15(絶対値)・PROMPT_VERSION="{対照のPROMPT_VERSION}-clip015"(版文字列に幅を
  * 内包し、対照と必ず異なる値にする。DB列は追加しない: analyses.prompt_version は既存の文字列カラムの
@@ -63,14 +65,14 @@ export const CLIP_VARIANTS: Readonly<Record<ClipVariantId, ClipVariant>> = {
   default: {
     id: "default",
     maxAdjust: 0.1,
-    // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(#8で追随)。
-    promptVersion: "2026-07-23.4",
+    // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(#9で追随)。
+    promptVersion: "2026-07-23.5",
   },
   wide15: {
     id: "wide15",
     maxAdjust: 0.15,
-    // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(#8で追随)。
-    promptVersion: "2026-07-23.4-clip015",
+    // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(#9で追随)。
+    promptVersion: "2026-07-23.5-clip015",
   },
 };
 

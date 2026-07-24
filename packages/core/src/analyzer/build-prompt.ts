@@ -96,8 +96,22 @@
  * bias-*.ts の計算には一切影響しない。他文面・出力スキーマは不変。
  * この対照(default)のPROMPT_VERSION更新に伴い、
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #9(過去走の着差をプロンプトに反映。未使用パラメータ活用④。
+ * 2026-07-23 boss着手前ゲート合意・ユーザー確定): 各馬行の「乗り替わり(#8)」の直後に
+ * 「着差傾向=」を1項目追加できるようにした。呼び出し側(analysis-pipeline.ts)が
+ * margin-trend.ts の summarizeMarginTrend で算出した MarginTrendSummary を
+ * PromptHorse.marginTrend として渡したときだけ、その馬の行にこの項目を描画する
+ * (jockeyChange/marketGap/bodyWeightTrend/turfWearHintと同じ非破壊optionalの spread-omit
+ * 流儀。未指定〈undefined/null〉の馬はこの項目自体を出さず、既存行バイト不変)。marginは
+ * 既にscraperがパース済みだがscorer側で未使用のパラメータであり、この配線はそれをLLM向けに
+ * 表出するプロンプト専用の追加であって、scorer/prior.ts・base-score.ts・bias-*.ts の計算には
+ * 一切影響しない。勝敗は着差の符号ではなく finishPosition で分類する(margin==0の勝ち/敗け
+ * 両方が実在するため。詳細は margin-trend.ts 冒頭コメント参照)。他文面・出力スキーマは不変。
+ * この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-23.4";
+export const PROMPT_VERSION = "2026-07-23.5";
 
 export {
   CLIP_VARIANTS,
@@ -135,6 +149,7 @@ import type { TurfWearHint } from "./turf-wear.js";
 import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
 import type { MarketGapSummary } from "./market-gap.js";
 import type { JockeyChangeSummary } from "./jockey-change.js";
+import type { MarginTrendSummary } from "./margin-trend.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -216,6 +231,16 @@ export interface PromptHorse {
    * 表出する専用の配線であり、scorer側の計算には一切影響しない。
    */
   readonly jockeyChange?: JockeyChangeSummary | null;
+  /**
+   * 過去走の着差傾向(タスク#9・未使用パラメータ活用④。margin-trend.ts の
+   * summarizeMarginTrend が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「乗り替わり」の直後に「着差傾向=」として1項目追加する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(jockeyChange/marketGap/bodyWeightTrend/
+   * turfWearHintと同じ spread-omit 流儀。未指定なら既存行バイト不変)。marginは
+   * 既にscraperがパース済みだがscorer側で未使用のパラメータであり、このフィールドは
+   * それをLLMプロンプト用に表出する専用の配線であり、scorer側の計算には一切影響しない。
+   */
+  readonly marginTrend?: MarginTrendSummary | null;
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
   /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
@@ -565,6 +590,10 @@ export function buildPrompt(input: BuildPromptInput): string {
     // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
     const jockeyChangeSegment =
       h.jockeyChange != null ? `, ${h.jockeyChange.note}` : "";
+    // 過去走の着差傾向(タスク#9): 値がある(non-null)ときだけ「乗り替わり」の直後に追記する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const marginTrendSegment =
+      h.marginTrend != null ? `, 着差傾向=${h.marginTrend.note}` : "";
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
@@ -580,7 +609,8 @@ export function buildPrompt(input: BuildPromptInput): string {
         `参考EV=${referenceEvText(h.referenceEv)}, ` +
         `条件替わり=${conditionChangeText(conditionChangeTags)}` +
         marketGapSegment +
-        jockeyChangeSegment,
+        jockeyChangeSegment +
+        marginTrendSegment,
     );
   }
   lines.push("");

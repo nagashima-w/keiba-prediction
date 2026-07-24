@@ -53,6 +53,7 @@ import {
   resolveClipVariant,
   summarizeBodyWeightTrend,
   summarizeJockeyChange,
+  summarizeMarginTrend,
   summarizeMarketGap,
   venueKindOfRaceId,
   type AnalysisRecord,
@@ -423,6 +424,16 @@ export async function runAnalysis(
               jockeyName: horseData.shutuba.jockeyName,
             },
             jockeyChangePrevRunOf(horseData.results),
+          ),
+          // 過去走の着差傾向(タスク#9): 過去走のfinishPosition/margin(新しい順)を
+          // summarizeMarginTrend(core)へそのまま写す。marginは既にscraperがパース済みだが
+          // scorer側で未使用のパラメータであり、ここではLLMプロンプト用に表出するだけで、
+          // scorer側の計算(prior.ts・base-score.ts・bias-*.ts等)には一切影響しない。
+          marginTrend: summarizeMarginTrend(
+            (horseData.results ?? []).map((r) => ({
+              finishPosition: r.finishPosition,
+              margin: r.margin,
+            })),
           ),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),
