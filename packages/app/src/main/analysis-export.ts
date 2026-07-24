@@ -34,8 +34,6 @@
  * プロンプト本文は一切経由しない。
  */
 
-import path from "node:path";
-
 import type {
   RaceData,
   RaceResultDetail,
@@ -552,13 +550,20 @@ export function buildDefaultAnalysisExportFileName(
  * 万一ユーザーが保存ダイアログでJSON保存先に ".csv" 拡張子を選んでも、この関数だけで
  * jsonPath===csvPath(CSV書き込みがJSONを無確認上書きする事故)を起こしえない設計にしている
  * (呼び出し側 main/ipc.ts の handleExportAnalysis 側にも念のための同値チェックを残す。多層防御)。
+ *
+ * クロスプラットフォーム対応(Windows CI障害の再発防止): node:path モジュール(path.dirname/
+ * path.basename/path.join等)は区切り文字をOS依存で正規化してしまい、Windows実行時には入力の
+ * "/" を "\" に変換してしまう(dialog.showSaveDialogが返す実際のパスはOS流儀のままなので
+ * 本番では問題にならないが、"/"区切りのテスト入力がWindows CIでのみ失敗する事故があった)。
+ * この関数は path モジュールを一切使わず、入力文字列の区切り文字をそのまま保持する
+ * 純文字列操作のみで実装する(OS非依存。ipc.ts側の衝突比較〈path.resolve〉はパスの実体比較が
+ * 目的のため path 使用のままで問題ない)。
  * @param jsonPath ユーザーが選んだJSON保存先の絶対パス
  */
 export function deriveCsvPathFromJsonPath(jsonPath: string): string {
-  const dir = path.dirname(jsonPath);
-  const base = path.basename(jsonPath);
-  if (/\.json$/i.test(base)) {
-    return path.join(dir, `${base.slice(0, -".json".length)}.csv`);
+  const jsonSuffix = ".json";
+  if (jsonPath.toLowerCase().endsWith(jsonSuffix)) {
+    return jsonPath.slice(0, jsonPath.length - jsonSuffix.length) + ".csv";
   }
-  return path.join(dir, `${base}.csv`);
+  return jsonPath + ".csv";
 }
