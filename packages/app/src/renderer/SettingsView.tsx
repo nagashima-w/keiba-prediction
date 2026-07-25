@@ -23,6 +23,7 @@ import {
 import {
   buildUpdate,
   createInitialSettingsState,
+  isDirty,
   isFormValid,
   settingsReducer,
 } from "./settings-reducer.js";
@@ -174,6 +175,8 @@ export function SettingsView(): React.JSX.Element {
   }
 
   const canSave = isFormValid(state) && state.status !== "saving";
+  // 未保存(dirty)インジケータ(Issue #11)。読込/保存済みの値との差分を純関数isDirtyで判定する。
+  const dirty = isDirty(state);
 
   return (
     <section style={{ marginTop: "1rem" }}>
@@ -463,7 +466,15 @@ export function SettingsView(): React.JSX.Element {
         ))}
       </details>
 
-      {/* 操作。 */}
+      {/*
+       * 操作(Issue #11: 保存ボタンのスコープ明示・未保存インジケータ)。
+       * 「保存」はこの画面に表示している設定項目をすべてまとめて保存する操作であることを近傍の注記で明示する。
+       * 未保存インジケータ(dirty)と「保存しました」緑表示は、保存直後に値を編集すると両方が同時に出て
+       * 矛盾しないよう、緑表示側を `status==="saved" && !dirty` の条件で出す(dirtyなら緑は隠す)。
+       */}
+      <p style={{ ...noteStyle, marginBottom: "0.4rem" }}>
+        「保存」はこの画面の設定項目をまとめて保存します。
+      </p>
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
         <button type="button" onClick={handleSave} disabled={!canSave}>
           {state.status === "saving" ? "保存中…" : "保存"}
@@ -475,7 +486,12 @@ export function SettingsView(): React.JSX.Element {
         >
           デフォルトに戻す
         </button>
-        {state.status === "saved" && (
+        {dirty && (
+          <span style={{ color: "#a60", fontSize: "0.85rem" }}>
+            未保存の変更があります
+          </span>
+        )}
+        {state.status === "saved" && !dirty && (
           <span style={{ color: "#0a7f2e", fontSize: "0.85rem" }}>
             保存しました(次回の分析から反映されます)。
           </span>

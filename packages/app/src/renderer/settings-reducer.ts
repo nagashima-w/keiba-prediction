@@ -80,6 +80,11 @@ export interface SettingsFormState {
    * status="saved" のときは保存先パス、status="error" のときは失敗メッセージを保持する。
    */
   readonly logExportMessage: string | null;
+  /**
+   * 未保存(dirty)判定の基準となるスナップショット(Issue #11)。
+   * 読込成功・保存成功のたびに applyMasked 内で更新され、フォームの現在値との差分が isDirty の判定に使われる。
+   */
+  readonly savedSnapshot: SettingsSnapshot;
 }
 
 /** reducer が処理するアクション。 */
@@ -147,6 +152,37 @@ function stringRecordToNumbers<K extends string>(
   return out;
 }
 
+/**
+ * 未保存(dirty)判定の基準となるスナップショット(Issue #11)。
+ * applyMasked がフォームへ反映するのと同じ正規化済み文字列表現(String()/numberRecordToStrings済み)を
+ * 保持する。MaskedSettings の数値をそのまま比較すると "1" vs "1.0" のような表記揺れで誤 dirty になるため、
+ * 必ず applyMasked の生成結果と同じ経路を通した値をここに置く。
+ * APIキーはスナップショットを持たない(apiKeyInput !== "" 自体を dirty 条件にするため、shared/settings.ts の
+ * SettingsUpdate/isFormValid には一切影響しない)。
+ */
+export interface SettingsSnapshot {
+  readonly discordWebhookUrl: string;
+  readonly evThreshold: string;
+  readonly biasWeights: Record<BiasWeightKey, string>;
+  readonly baseScoreWeights: Record<BaseScoreWeightKey, string>;
+  readonly autoSendDiscord: boolean;
+  readonly additionalInstruction: string;
+  readonly clipVariant: ClipVariantId;
+}
+
+/** 空文字ベースの初期スナップショットを作る。 */
+function emptySnapshot(): SettingsSnapshot {
+  return {
+    discordWebhookUrl: "",
+    evThreshold: "",
+    biasWeights: emptyRecord(BIAS_WEIGHT_KEYS),
+    baseScoreWeights: emptyRecord(BASE_SCORE_WEIGHT_KEYS),
+    autoSendDiscord: false,
+    additionalInstruction: "",
+    clipVariant: "default",
+  };
+}
+
 /** 初期状態(未読込・空)。 */
 export function createInitialSettingsState(): SettingsFormState {
   return {
@@ -167,14 +203,33 @@ export function createInitialSettingsState(): SettingsFormState {
     logFolderMessage: null,
     logExportStatus: "idle",
     logExportMessage: null,
+    savedSnapshot: emptySnapshot(),
   };
 }
 
-/** マスク済み設定をフォーム状態へ反映する(読込成功・保存成功で共通利用)。 */
+/**
+ * マスク済み設定をフォーム状態へ反映する(読込成功・保存成功で共通利用)。
+ * 反映と同時に savedSnapshot(dirty判定の基準)も同じ正規化済み文字列で更新する(Issue #11)。
+ * こうすることで読込直後・保存直後は必ず isDirty=false になり、
+ * スナップショット更新箇所がこの1関数に集約される。
+ */
 function applyMasked(
   state: SettingsFormState,
   settings: MaskedSettings,
 ): SettingsFormState {
+  const discordWebhookUrl = settings.discordWebhookUrl;
+  const evThreshold = String(settings.evThreshold);
+  const biasWeights = numberRecordToStrings(
+    BIAS_WEIGHT_KEYS,
+    settings.biasWeights,
+  );
+  const baseScoreWeights = numberRecordToStrings(
+    BASE_SCORE_WEIGHT_KEYS,
+    settings.baseScoreWeights,
+  );
+  const autoSendDiscord = settings.autoSendDiscord;
+  const additionalInstruction = settings.additionalInstruction;
+  const clipVariant = settings.clipVariant;
   return {
     ...state,
     loaded: true,
@@ -182,16 +237,22 @@ function applyMasked(
     apiKeyInput: "",
     apiKeyMasked: settings.apiKeyMasked,
     apiKeyFromEnv: settings.apiKeyFromEnv,
-    discordWebhookUrl: settings.discordWebhookUrl,
-    evThreshold: String(settings.evThreshold),
-    biasWeights: numberRecordToStrings(BIAS_WEIGHT_KEYS, settings.biasWeights),
-    baseScoreWeights: numberRecordToStrings(
-      BASE_SCORE_WEIGHT_KEYS,
-      settings.baseScoreWeights,
-    ),
-    autoSendDiscord: settings.autoSendDiscord,
-    additionalInstruction: settings.additionalInstruction,
-    clipVariant: settings.clipVariant,
+    discordWebhookUrl,
+    evThreshold,
+    biasWeights,
+    baseScoreWeights,
+    autoSendDiscord,
+    additionalInstruction,
+    clipVariant,
+    savedSnapshot: {
+      discordWebhookUrl,
+      evThreshold,
+      biasWeights,
+      baseScoreWeights,
+      autoSendDiscord,
+      additionalInstruction,
+      clipVariant,
+    },
   };
 }
 
@@ -320,6 +381,46 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
     : update;
+}
+
+/**
+ * フォームに未保存の変更があるか(Issue #11「未保存(dirty)インジケータ」)。
+ * savedSnapshot(最後に読込/保存した値)と現在のフォーム値を項目ごとに比較する。
+ * APIキーはマスク値と比較せず、apiKeyInput が空文字でないこと自体を独立した dirty 条件とする
+ * (apiKeyFromEnv=true のときは入力欄が disabled で apiKeyInput は常に空のため、dirty化しない)。
+ * isFormValid とは独立(不正な入力でも dirty は成立しうる)。canSave の判定には使わない。
+ */
+export function isDirty(state: SettingsFormState): boolean {
+  if (state.apiKeyInput !== "") {
+    return true;
+  }
+  const snap = state.savedSnapshot;
+  if (state.discordWebhookUrl !== snap.discordWebhookUrl) {
+    return true;
+  }
+  if (state.evThreshold !== snap.evThreshold) {
+    return true;
+  }
+  if (state.autoSendDiscord !== snap.autoSendDiscord) {
+    return true;
+  }
+  if (state.additionalInstruction !== snap.additionalInstruction) {
+    return true;
+  }
+  if (state.clipVariant !== snap.clipVariant) {
+    return true;
+  }
+  for (const key of BIAS_WEIGHT_KEYS) {
+    if (state.biasWeights[key] !== snap.biasWeights[key]) {
+      return true;
+    }
+  }
+  for (const key of BASE_SCORE_WEIGHT_KEYS) {
+    if (state.baseScoreWeights[key] !== snap.baseScoreWeights[key]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** フォーム全体が妥当か(EV閾値・全重み・Webhook URL)。 */

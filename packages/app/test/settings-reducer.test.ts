@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { MaskedSettings } from "../src/shared/settings.js";
+import {
+  BASE_SCORE_WEIGHT_KEYS,
+  BIAS_WEIGHT_KEYS,
+  type MaskedSettings,
+} from "../src/shared/settings.js";
 import {
   buildUpdate,
   createInitialSettingsState,
+  isDirty,
   isFormValid,
   settingsReducer,
+  type SettingsAction,
   type SettingsFormState,
 } from "../src/renderer/settings-reducer.js";
 
@@ -243,6 +249,111 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
   it("クリップ幅版未選択(既定)は'default'を含めること(タスクD-2)", () => {
     const update = buildUpdate(loadedState());
     expect(update.clipVariant).toBe("default");
+  });
+});
+
+describe("isDirty(未保存インジケータ、Issue #11)", () => {
+  it("未読込の初期状態は非dirty", () => {
+    expect(isDirty(createInitialSettingsState())).toBe(false);
+  });
+
+  it("読込成功直後は非dirty(数値の表記揺れ'1'と'1.0'で誤dirtyにならない)", () => {
+    const s = loadedState(fakeMasked({ evThreshold: 1.0 }));
+    expect(isDirty(s)).toBe(false);
+  });
+
+  const singleFieldCases: { name: string; action: SettingsAction }[] = [
+    {
+      name: "Webhook入力",
+      action: { type: "Webhook入力", value: "https://x.example/y" },
+    },
+    { name: "EV閾値入力", action: { type: "EV閾値入力", value: "1.3" } },
+    { name: "自動送信切替", action: { type: "自動送信切替", value: true } },
+    {
+      name: "追加指示入力",
+      action: { type: "追加指示入力", value: "テスト指示" },
+    },
+    {
+      name: "クリップ幅版選択",
+      action: { type: "クリップ幅版選択", value: "wide15" },
+    },
+    ...BIAS_WEIGHT_KEYS.map((key) => ({
+      name: `バイアス重み入力(${key})`,
+      action: {
+        type: "バイアス重み入力",
+        key,
+        value: "0.4",
+      } as SettingsAction,
+    })),
+    ...BASE_SCORE_WEIGHT_KEYS.map((key) => ({
+      name: `基礎重み入力(${key})`,
+      action: {
+        type: "基礎重み入力",
+        key,
+        value: "0.4",
+      } as SettingsAction,
+    })),
+  ];
+
+  it.each(singleFieldCases)("$name 単独でdirtyになる", ({ action }) => {
+    const s = settingsReducer(loadedState(), action);
+    expect(isDirty(s)).toBe(true);
+  });
+
+  it("APIキー入力が非空でdirty、空に戻すと非dirtyに戻る(他フィールド不変の場合)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "APIキー入力", value: "" });
+    expect(isDirty(s)).toBe(false);
+  });
+
+  it("apiKeyFromEnv=trueのときは入力欄が空のままなのでdirty化しない", () => {
+    const s = loadedState(fakeMasked({ apiKeyFromEnv: true }));
+    expect(isDirty(s)).toBe(false);
+  });
+
+  it("保存成功でdirtyが解消し、以後の再編集で再度dirtyになる", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "EV閾値入力", value: "1.5" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "保存開始" });
+    s = settingsReducer(s, {
+      type: "保存成功",
+      settings: fakeMasked({ evThreshold: 1.5 }),
+    });
+    expect(isDirty(s)).toBe(false);
+    s = settingsReducer(s, {
+      type: "Webhook入力",
+      value: "https://y.example/z",
+    });
+    expect(isDirty(s)).toBe(true);
+  });
+
+  it("保存失敗ではスナップショットが更新されないためdirtyを維持する", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "EV閾値入力", value: "1.5" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "保存開始" });
+    s = settingsReducer(s, { type: "保存失敗", message: "書き込み失敗" });
+    expect(isDirty(s)).toBe(true);
+  });
+
+  it("デフォルトに戻す(保存成功経由)でdirtyが解消する", () => {
+    // handleReset は「保存開始」→(resetSettings成功時)「保存成功」を dispatch する(SettingsView.tsx参照)。
+    let s = loadedState();
+    s = settingsReducer(s, { type: "EV閾値入力", value: "1.5" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "保存開始" });
+    s = settingsReducer(s, { type: "保存成功", settings: fakeMasked() });
+    expect(isDirty(s)).toBe(false);
+  });
+
+  it("isDirtyはstateを破壊しない(不変性)", () => {
+    const s = loadedState();
+    const before = JSON.stringify(s);
+    isDirty(s);
+    expect(JSON.stringify(s)).toBe(before);
   });
 });
 
