@@ -84,3 +84,16 @@
 ## その他
 - netkeibaへの実リクエストを伴う動作確認は、ユーザーに確認してから最小限の回数で行う
 - 依存パッケージの追加時は理由を一言記録する
+
+## ドキュメント一覧
+本リポジトリの主要ドキュメント。参照漏れを防ぐため一箇所に集約する(規約の唯一の正は本 `CLAUDE.md`)。
+
+- [`keiba-ev-tool-spec.md`](./keiba-ev-tool-spec.md) — 当初の設計・計画(Phase 1→6)の記録。中央競馬前提。
+- [`docs/current-spec.md`](./docs/current-spec.md) — **実装済みの現状仕様(v1)**。取得・スコアリング・LLM分析・検証・エクスポート・Discord・配布を実コードに基づき記述。
+- [`docs/development-workflow.md`](./docs/development-workflow.md) — 開発ワークフローの導線・要約(3体のサブエージェント・着手前ゲート・TDD・2段レビュー・報告方針)。詳細は本 `CLAUDE.md` と `.claude/agents/*.md`。
+- [`docs/lessons-learned.md`](./docs/lessons-learned.md) — 過去セッションの重大失敗(ツール結果・ユーザー同意の捏造等)の記録と再発防止の鉄則。本ファイル冒頭「最重要」の詳細。
+- [`docs/nar-scraping-plan.md`](./docs/nar-scraping-plan.md) — 地方競馬(NAR)スクレイピングの実測調査結果と対応方針(URL・HTML構造・race_id体系の中央との差分)。
+- [`docs/phase1-scraping-plan.md`](./docs/phase1-scraping-plan.md) — Phase 1 の中央競馬 HTML 構造調査・対象ページ URL・セレクタ・フィクスチャ取得計画。
+- [`docs/prompt-improvement-plan.md`](./docs/prompt-improvement-plan.md) — 検証結果(回収率)に基づく LLM プロンプト改善の仕組みの検討メモ(過学習リスク・記録/可視化を先行する方針)。
+- [`docs/handover-next-session.md`](./docs/handover-next-session.md) — 過去セッションから次セッションへの引き継ぎ(実装済みタスクの仕様記録・技術メモ)。
+- 補足: [`README.md`](./README.md) は利用者向けの概要・ダウンロード・Discord 設定・開発コマンド、[`GETTING_STARTED.md`](./GETTING_STARTED.md) はクラウド版の開始手順。
