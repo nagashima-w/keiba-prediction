@@ -12,16 +12,19 @@ import {
 
 import {
   DiscordNotifyError,
+  filterJpnOnlyEntries,
   isDiscordWebhookUrl,
   parseKaisaiDate,
   parseRaceId,
   raceResultUrl,
+  resolveClipVariant,
   sendDiscordNotification,
   type DiscordPayload,
   type KaisaiDate,
 } from "@keiba/core";
 
 import type {
+  AnalysisExportOutcome,
   BatchProgress,
   BatchRaceOutcome,
   BulkImportProgress,
@@ -29,19 +32,31 @@ import type {
   DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
+  PeriodBatchCollectResult,
+  PeriodBatchDayOutcomeView,
+  PeriodBatchTargetRace,
   PromptVersionVerifyReportView,
   RaceLedgerView,
   RaceListItem,
+  RaceListTarget,
   RaceVenueKind,
   VerifyReportView,
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
+import { collectRaceIdsOverRange, type RangeCollectResult } from "./range-collect.js";
 import { buildBatchDiscordPayload } from "./batch-discord-payload.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 import type { MaskedSettings, SettingsUpdate } from "../shared/settings.js";
-import { buildAppInfo } from "./app-info.js";
+import { APP_NAME, buildAppInfo } from "./app-info.js";
 import { runAnalysis } from "./analysis-pipeline.js";
 import { runBatchAnalysis } from "./analysis-batch.js";
+import {
+  buildAnalysisExportDocument,
+  buildDefaultAnalysisExportFileName,
+  deriveCsvPathFromJsonPath,
+  serializeAnalysisExportCsv,
+  serializeAnalysisExportJson,
+} from "./analysis-export.js";
 import { runBulkImport } from "./import-batch.js";
 import { buildDefaultLogExportFileName, collectLogExportContent } from "./log-export.js";
 import { getLogDirectory, logError, logWarn, setSecretsProvider } from "./logger.js";
@@ -83,8 +98,12 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.listRaces,
-    (_event, date: unknown, venueKind: unknown) =>
-      handleListRaces(String(date), venueKind === "nar" ? "nar" : "central"),
+    (_event, date: unknown, venueKind: unknown, jpnOnly: unknown) =>
+      handleListRaces(
+        String(date),
+        venueKind === "nar" ? "nar" : "central",
+        jpnOnly === true,
+      ),
   );
 
   ipcMain.handle(
@@ -99,6 +118,27 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.cancelBatchAnalysis, () =>
     handleCancelBatchAnalysis(),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.collectPeriodBatch,
+    (event, from: unknown, to: unknown, target: unknown) =>
+      handleCollectPeriodBatch(
+        event,
+        String(from),
+        String(to),
+        normalizeRaceListTarget(target),
+      ),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.cancelCollectPeriodBatch, () =>
+    handleCancelCollectPeriodBatch(),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.runPeriodBatchAnalysis,
+    (event, targetRaces: unknown) =>
+      handleRunPeriodBatchAnalysis(event, normalizePeriodBatchTargetRaces(targetRaces)),
   );
 
   ipcMain.handle(IPC_CHANNELS.importResult, (_event, raceId: unknown) =>
@@ -149,6 +189,11 @@ export function registerIpcHandlers(): void {
   // ログ取り出し導線(Task#36)。
   ipcMain.handle(IPC_CHANNELS.openLogFolder, () => handleOpenLogFolder());
   ipcMain.handle(IPC_CHANNELS.exportLogs, (event) => handleExportLogs(event));
+
+  // 分析データのエクスポート(第一版・GitHub Issue#10)。
+  ipcMain.handle(IPC_CHANNELS.exportAnalysis, (event, raceId: unknown) =>
+    handleExportAnalysis(event, String(raceId)),
+  );
 }
 
 /**
@@ -177,6 +222,9 @@ const resourceManager = new ResourceManager<PipelineResources>({
       scorerConfig: buildScorerConfig(settings),
       evConfig: buildEvConfig(settings),
       additionalInstruction: settings.additionalInstruction,
+      // クリップ幅版(タスクD-2)。設定画面のセレクタで選んだ版をそのまま渡す
+      // (未設定・不正値は pipeline-deps.ts 側の resolveClipVariant が対照へフォールバックする)。
+      clipVariant: settings.clipVariant,
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,
       // HttpClient(core)のサポート外charset警告をログ基盤へ接続する(要修正4)。
@@ -214,14 +262,20 @@ function getResources(): PipelineResources {
  * レース一覧取得ハンドラの実処理。
  * 開催区分(venueKind)に応じて資源(PipelineResources)の listRaces / listNarRaces を呼び分ける
  * (仕様「選択に応じて listRaces / listNarRaces を呼び分ける」。既定は central)。
+ *
+ * jpnOnly=true かつ venueKind='nar' のときのみ、交流重賞(Jpn1/2/3)だけに絞り込む(タスクB1)。
+ * venueKind='central' のときは jpnOnly の値に関わらず無視する(中央+Jpn限定で全滅させる事故防止。
+ * 3択UI側でも central 選択時は jpnOnly=false 固定にしているが、IPC層でも二重にガードする)。
+ * core の listRaces/listNarRaces 自体は無改修で、フィルタは取得結果に対しmain層で適用する。
  */
 async function handleListRaces(
   dateStr: string,
   venueKind: RaceVenueKind,
+  jpnOnly: boolean,
 ): Promise<RaceListItem[]> {
   return withErrorLogging(
     IPC_CHANNELS.listRaces,
-    { date: dateStr, venueKind },
+    { date: dateStr, venueKind, jpnOnly },
     async () => {
       const kaisaiDate = parseKaisaiDate(dateStr);
       // キャッシュミス時に取得→scrape_cache へ書き込む await があるため runExclusive で保護する
@@ -231,7 +285,9 @@ async function handleListRaces(
           ? resources.listNarRaces(kaisaiDate)
           : resources.listRaces(kaisaiDate),
       );
-      return entries.map(toRaceListItem);
+      const filtered =
+        venueKind === "nar" && jpnOnly ? filterJpnOnlyEntries(entries) : entries;
+      return filtered.map(toRaceListItem);
     },
   );
 }
@@ -255,6 +311,9 @@ let batchCancelRequested = false;
 
 /** 一括分析の per-race 失敗ログの操作名(全体起動の失敗ログとは区別する)。 */
 const BATCH_ANALYSIS_RACE_OPERATION = `${IPC_CHANNELS.runBatchAnalysis}:race`;
+
+/** 期間バッチ実行(phase2)の per-race 失敗ログの操作名(タスクC1)。 */
+const PERIOD_BATCH_ANALYSIS_RACE_OPERATION = `${IPC_CHANNELS.runPeriodBatchAnalysis}:race`;
 
 /**
  * HttpClient(core)のサポート外charset警告の操作名(要修正4)。
@@ -306,6 +365,204 @@ async function handleRunBatchAnalysis(
 /** 一括分析の中断要求ハンドラ。次のレース境界で停止させるためフラグを立てる。 */
 function handleCancelBatchAnalysis(): void {
   batchCancelRequested = true;
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」(phase1)の中断フラグ(タスクB2b-1)。
+ * 一括分析の中断(batchCancelRequested)とは独立したモジュール変数で、
+ * bulkImportCancelRequested と同じ流儀(専用フラグ・専用チャネル)を踏襲する。
+ */
+let periodBatchCollectCancelRequested = false;
+
+/**
+ * IPC越しに届いた RaceListTarget 引数を検証済みの値へ正規化する(タスクB2b-1)。
+ * 未指定・不正値は既定の "central" にフォールバックする(handleListRaces の venueKind 正規化と同じ方針)。
+ */
+function normalizeRaceListTarget(value: unknown): RaceListTarget {
+  return value === "nar-all" || value === "nar-jpn" ? value : "central";
+}
+
+/**
+ * core の RangeCollectResult(RaceId/KaisaiDateブランド型を含む)を、IPCシリアライズ用の
+ * プレーンな PeriodBatchCollectResult(すべて素の string)へ変換する(タスクB2b-1)。
+ */
+function toPeriodBatchCollectResult(
+  result: RangeCollectResult,
+): PeriodBatchCollectResult {
+  const perDayOutcome: PeriodBatchDayOutcomeView[] = result.perDayOutcome.map(
+    (o) => {
+      if (o.status === "hasRaces") {
+        return { date: String(o.date), status: "hasRaces", raceCount: o.raceCount };
+      }
+      if (o.status === "empty") {
+        return { date: String(o.date), status: "empty" };
+      }
+      return { date: String(o.date), status: "failure", error: o.error };
+    },
+  );
+  return {
+    totalRaces: result.totalRaces,
+    skippedAlreadyAnalyzed: result.skippedAlreadyAnalyzed,
+    // ブランド型(RaceId/KaisaiDate)からプレーンな string へ(タスクC1: レースごとのkaisaiDateを保持)。
+    targetRaces: result.targetRaces.map((t) => ({
+      raceId: String(t.raceId),
+      kaisaiDate: String(t.kaisaiDate),
+    })),
+    failureDays: result.failureDays.map(String),
+    perDayOutcome,
+    cancelled: result.cancelled,
+  };
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」(phase1)ハンドラの実処理(タスクB2b-1)。
+ * B2aの collectRaceIdsOverRange(純ロジック)を呼ぶだけで、LLM分析(runBatchAnalysis/analyzeOne)は
+ * 一切呼ばない(実行〈phase2〉は対象確定後に既存 runBatchAnalysis を再利用する。別ハンドラ)。
+ *
+ * 収集ループ全体を runExclusive 1回で包む(handleRunBulkImport と同じ粗い粒度)ことで、
+ * 収集中は DB を閉じさせない。bulk query(listAnalyzedRaceIdsByPromptVersion)はこの
+ * runExclusive コールバック内で1回だけ発行し、Set化してから収集ループへ束縛する。
+ *
+ * currentPromptVersion は設定(clipVariant)から resolveClipVariant で1回だけ解決してスナップショットし、
+ * 収集ループ全体(bulk query・dedup判定)で使い回す。実行中に設定のクリップ版が変わっても
+ * このphase1呼び出し内では変わらない(実行〈phase2〉は実行時点の版で走るため実害はないbest-effort最適化。
+ * boss合意の非ブロッキング留意事項)。
+ *
+ * 進捗(タスクC2): collectRaceIdsOverRange の onProgress(日ごとの completedDays/totalDays)を
+ * periodBatchCollectProgress チャネルで renderer へ一方向通知する(一括分析のbatchProgressとは
+ * 別チャネル。日単位の先取得と、レース単位の実行は意味が異なるため)。
+ */
+async function handleCollectPeriodBatch(
+  event: IpcMainInvokeEvent,
+  fromStr: string,
+  toStr: string,
+  target: RaceListTarget,
+): Promise<PeriodBatchCollectResult> {
+  return withErrorLogging(
+    IPC_CHANNELS.collectPeriodBatch,
+    { from: fromStr, to: toStr, target },
+    async () => {
+      const from = parseKaisaiDate(fromStr);
+      const to = parseKaisaiDate(toStr);
+      // 新しい収集の開始時に前回の中断要求を必ずクリアする(残留で即打ち切りにならないように)。
+      periodBatchCollectCancelRequested = false;
+      const result = await resourceManager.runExclusive((resources) => {
+        const settings = getSettingsStore().load();
+        const currentPromptVersion = resolveClipVariant(
+          settings.clipVariant,
+        ).promptVersion;
+        // bulk queryは1回だけ発行し、Set化してdedup判定を束縛する(4ケースの集合意味論を保存)。
+        const analyzedSet = new Set(
+          resources.listAnalyzedRaceIdsByPromptVersion(currentPromptVersion),
+        );
+        return collectRaceIdsOverRange(from, to, target, {
+          onProgress: (progress) => {
+            event.sender.send(IPC_CHANNELS.periodBatchCollectProgress, progress);
+          },
+          listDayRaces: (date, t) =>
+            t === "central" ? resources.listRaces(date) : resources.listNarRaces(date),
+          analyzedPromptVersionsOf: (raceId) =>
+            analyzedSet.has(raceId) ? [currentPromptVersion] : [],
+          currentPromptVersion,
+          shouldCancel: () => periodBatchCollectCancelRequested,
+        });
+      });
+      return toPeriodBatchCollectResult(result);
+    },
+  );
+}
+
+/** 期間バッチ先取得(phase1)の中断要求ハンドラ。次の日境界で停止させるためフラグを立てる。 */
+function handleCancelCollectPeriodBatch(): void {
+  periodBatchCollectCancelRequested = true;
+}
+
+/**
+ * renderer から渡された targetRaces(unknown)を、プレーンな PeriodBatchTargetRace[] へ
+ * 防御的に正規化する(要修正2)。IPC引数は信頼できない外部入力のため:
+ * - 配列でなければ空配列を返す。
+ * - 要素が非オブジェクト・null(typeof null は"object"のため明示的に除外)なら、その要素を
+ *   安全側で読み飛ばす(raceId/kaisaiDate に触れず素通しで例外を投げない)。
+ * - 有効な要素は raceId/kaisaiDate を String() 化する(既存 handleRunBatchAnalysis の
+ *   `(Array.isArray(raceIds)?raceIds:[]).map(String)` と同じ「信頼しない」流儀)。
+ */
+function normalizePeriodBatchTargetRaces(value: unknown): PeriodBatchTargetRace[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: PeriodBatchTargetRace[] = [];
+  for (const v of value) {
+    if (typeof v !== "object" || v === null) {
+      continue;
+    }
+    const t = v as { raceId?: unknown; kaisaiDate?: unknown };
+    result.push({ raceId: String(t.raceId), kaisaiDate: String(t.kaisaiDate) });
+  }
+  return result;
+}
+
+/**
+ * 期間バッチ「実行」(phase2。タスクC1)ハンドラの実処理。
+ *
+ * phase1(collectPeriodBatch)が確定した targetRaces(raceId+そのレースの開催日)を受け取り、
+ * レースごとに自分の kaisaiDate で runAnalysis を呼び分ける。単日一括分析の
+ * handleRunBatchAnalysis(全レース共通の単一 date)をそのまま使うと、日跨ぎの期間バッチでは
+ * 一部レースの開催日を取り違える(過去日較正が壊れる致命的バグ)ため、専用ハンドラとして分離する。
+ *
+ * オーケストレーション本体(runBatchAnalysis)・進捗チャネル(batchProgress)・
+ * 中断フラグ(batchCancelRequested)は単日一括分析とそのまま共有する(両者は同時に走らない前提。
+ * bulkImportCancelRequested のような別フラグを新設するほどの独立性は不要という boss合意)。
+ *
+ * 開催日の束縛は raceId をキーにした Map ではなく「位置(呼び出し順)」で行う(要修正1)。
+ * raceId をキーにすると、targetRaces に同一 raceId が複数回出現した場合に後勝ちで
+ * 上書きされ、先に出現したレースが誤った開催日で分析されてしまう(較正データの正しさを
+ * 「raceIdの一意性」という暗黙の前提に委ねてしまう)。runBatchAnalysis の analyzeOne は
+ * raceIds を渡した順に、境界(中断判定)ごとに最大1回ずつ・欠番無く呼ばれる
+ * (中断時は残り全部をまとめてスキップするだけで、途中の呼び出しを飛ばすことは無い)ため、
+ * 呼ばれた回数をそのまま targetRaces の添字として使えば、raceId の重複があっても
+ * 各出現が自分の開催日を正しく引ける。万一 targetRaces と呼び出し順がずれた場合は
+ * (raceIds 生成ロジックが変わる等の将来の実装ミスを検知するため)raceId 不一致を
+ * 明示的なエラーとして投げ、黙って誤った開催日を使わない。
+ */
+async function handleRunPeriodBatchAnalysis(
+  event: IpcMainInvokeEvent,
+  targetRaces: readonly PeriodBatchTargetRace[],
+): Promise<BatchRaceOutcome[]> {
+  return withErrorLogging(
+    IPC_CHANNELS.runPeriodBatchAnalysis,
+    undefined,
+    async () => {
+      const raceIds = targetRaces.map((t) => t.raceId);
+      // 新しいバッチの開始時に前回の中断要求を必ずクリアする(単日一括分析と共有するフラグ)。
+      batchCancelRequested = false;
+      let callIndex = 0;
+      return resourceManager.runExclusive(({ deps }) =>
+        runBatchAnalysis(raceIds, {
+          // 位置(呼び出し順)でその出現の開催日に束縛する(日跨ぎ・raceId重複の取り違え防止の核心)。
+          analyzeOne: (raceIdStr, onStage) => {
+            const target = targetRaces[callIndex];
+            callIndex += 1;
+            if (target === undefined || target.raceId !== raceIdStr) {
+              throw new Error(
+                `期間バッチ実行: targetRacesとの対応がずれています(index=${
+                  callIndex - 1
+                }, raceId=${raceIdStr})`,
+              );
+            }
+            const kaisaiDate = parseKaisaiDateOrNull(target.kaisaiDate);
+            return runAnalysis(parseRaceId(raceIdStr), kaisaiDate, deps, onStage);
+          },
+          shouldCancel: () => batchCancelRequested,
+          onProgress: (progress: BatchProgress) => {
+            event.sender.send(IPC_CHANNELS.batchProgress, progress);
+          },
+          onError: (raceId, error) => {
+            logError(PERIOD_BATCH_ANALYSIS_RACE_OPERATION, error, { raceId });
+          },
+        }),
+      );
+    },
+  );
 }
 
 /**
@@ -627,4 +884,71 @@ async function handleExportLogs(
     writeFileSync(result.filePath, content, "utf8");
     return { status: "saved", filePath: result.filePath };
   });
+}
+
+/**
+ * 「分析データのエクスポート」ハンドラの実処理(第一版・GitHub Issue#10)。
+ * 保存先はJSON側だけ dialog.showSaveDialog でユーザーに選ばせ(既定ファイル名はレースID+当日日付付き)、
+ * CSVは同じ場所へ拡張子違い(deriveCsvPathFromJsonPath)で自動的に書き出す
+ * (「JSON と CSV を両方出す。実装者判断でシンプルに」の承認済み方針。ダイアログを2回出さない)。
+ * キャンセル時(canceled または filePath 未指定)は何もせず "canceled" を返す(log-exportと同契約)。
+ *
+ * 対象は指定レースの「保存済みの最新分析」(getResources().getAnalysisExportInput が
+ * pickLatestAnalysisで決定的に選ぶ。同一レースに複数分析があれば最新〈id最大〉)。
+ * 対象の分析が1件も無ければ例外を投げる(withErrorLoggingがログに残したうえで呼び出し元へ伝播する。
+ * renderer側はボタンを分析済みレースにのみ出す前提のため、通常到達しない防御的経路)。
+ */
+async function handleExportAnalysis(
+  event: IpcMainInvokeEvent,
+  raceIdStr: string,
+): Promise<AnalysisExportOutcome> {
+  return withErrorLogging(
+    IPC_CHANNELS.exportAnalysis,
+    { raceId: raceIdStr },
+    async () => {
+      const raceId = parseRaceId(raceIdStr);
+      const source = getResources().getAnalysisExportInput(raceId);
+      if (source === null) {
+        throw new Error(
+          `このレースの保存済み分析が見つかりません(raceId: ${raceIdStr})`,
+        );
+      }
+      const doc = buildAnalysisExportDocument({
+        ...source,
+        toolName: APP_NAME,
+        toolVersion: buildAppInfo(app.getVersion()).appVersion,
+        exportedAt: new Date().toISOString(),
+      });
+
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const dialogOptions = {
+        defaultPath: buildDefaultAnalysisExportFileName(raceIdStr, new Date()),
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      };
+      const result =
+        window !== null
+          ? await dialog.showSaveDialog(window, dialogOptions)
+          : await dialog.showSaveDialog(dialogOptions);
+      if (result.canceled || result.filePath === undefined || result.filePath === "") {
+        return { status: "canceled" };
+      }
+
+      const jsonPath = result.filePath;
+      const csvPath = deriveCsvPathFromJsonPath(jsonPath);
+      // 防御ガード(code-reviewer指摘対応・多層防御): 正規化した上でcsvPathがjsonPathと
+      // 一致する場合は一切書き込まずエラーで打ち切る。analysis-export.tsの
+      // deriveCsvPathFromJsonPathは構造的にこの衝突を起こさない設計だが、万一の再発
+      // (将来のリファクタ等)でJSONがCSV書き込みにより無確認で上書き消失する事故を防ぐ。
+      if (path.resolve(csvPath) === path.resolve(jsonPath)) {
+        return {
+          status: "error",
+          message:
+            "CSV保存先がJSON保存先と同じパスになるため書き込みを中止しました(データ消失防止)。別のファイル名で保存し直してください。",
+        };
+      }
+      writeFileSync(jsonPath, serializeAnalysisExportJson(doc), "utf8");
+      writeFileSync(csvPath, serializeAnalysisExportCsv(doc), "utf8");
+      return { status: "saved", jsonPath, csvPath };
+    },
+  );
 }

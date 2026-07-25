@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import type { KeibaApi } from "../shared/api.js";
-import type { BatchProgress, BulkImportProgress } from "../shared/analysis-types.js";
+import type {
+  BatchProgress,
+  BulkImportProgress,
+  PeriodBatchCollectProgress,
+} from "../shared/analysis-types.js";
 import { IPC_CHANNELS } from "../shared/channels.js";
 
 /**
@@ -14,8 +18,8 @@ import { IPC_CHANNELS } from "../shared/channels.js";
  */
 const api: KeibaApi = {
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.getAppInfo),
-  listRaces: (date, venueKind) =>
-    ipcRenderer.invoke(IPC_CHANNELS.listRaces, date, venueKind),
+  listRaces: (date, venueKind, jpnOnly) =>
+    ipcRenderer.invoke(IPC_CHANNELS.listRaces, date, venueKind, jpnOnly),
   importResult: (raceId) =>
     ipcRenderer.invoke(IPC_CHANNELS.importResult, raceId),
   getVerifyReport: (venueKind) =>
@@ -35,6 +39,24 @@ const api: KeibaApi = {
     ipcRenderer.invoke(IPC_CHANNELS.runBatchAnalysis, raceIds, date),
   cancelBatchAnalysis: () =>
     ipcRenderer.invoke(IPC_CHANNELS.cancelBatchAnalysis),
+  runPeriodBatchAnalysis: (targetRaces) =>
+    ipcRenderer.invoke(IPC_CHANNELS.runPeriodBatchAnalysis, targetRaces),
+  collectPeriodBatch: (from, to, target) =>
+    ipcRenderer.invoke(IPC_CHANNELS.collectPeriodBatch, from, to, target),
+  cancelCollectPeriodBatch: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.cancelCollectPeriodBatch),
+  onPeriodBatchCollectProgress: (listener) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      progress: PeriodBatchCollectProgress,
+    ): void => {
+      listener(progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.periodBatchCollectProgress, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.periodBatchCollectProgress, handler);
+    };
+  },
   onBatchProgress: (listener) => {
     const handler = (_event: IpcRendererEvent, progress: BatchProgress): void => {
       listener(progress);
@@ -48,6 +70,8 @@ const api: KeibaApi = {
     ipcRenderer.invoke(IPC_CHANNELS.logRendererError, payload),
   openLogFolder: () => ipcRenderer.invoke(IPC_CHANNELS.openLogFolder),
   exportLogs: () => ipcRenderer.invoke(IPC_CHANNELS.exportLogs),
+  exportAnalysis: (raceId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.exportAnalysis, raceId),
   runBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.runBulkImport),
   cancelBulkImport: () => ipcRenderer.invoke(IPC_CHANNELS.cancelBulkImport),
   onBulkImportProgress: (listener) => {

@@ -15,10 +15,18 @@ import { describe, expect, it } from "vitest";
 import {
   buildPrompt,
   buildPromptPreview,
+  CLIP_VARIANTS,
+  clipAbsoluteLabel,
+  clipPercentLabel,
   computeReferenceEv,
   PROMPT_VERSION,
   type BuildPromptInput,
 } from "../../src/analyzer/build-prompt.js";
+import type { SameDayTrendSummary } from "../../src/analyzer/same-day-trend.js";
+import type { BodyWeightTrendSummary } from "../../src/analyzer/body-weight-trend.js";
+import type { MarketGapSummary } from "../../src/analyzer/market-gap.js";
+import type { JockeyChangeSummary } from "../../src/analyzer/jockey-change.js";
+import type { MarginTrendSummary } from "../../src/analyzer/margin-trend.js";
 
 function baseInput(): BuildPromptInput {
   return {
@@ -340,8 +348,186 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("地方/コース形態の有利脚質補正(タスクB)追加版として 2026-07-19.3 が付与されていること", () => {
-    expect(PROMPT_VERSION).toBe("2026-07-19.3");
+  it("過去走の着差傾向反映(タスク#9)追加版として 2026-07-23.5 が付与されていること", () => {
+    expect(PROMPT_VERSION).toBe("2026-07-23.5");
+  });
+});
+
+describe("buildPrompt(芝の傷み目安、タスク#26-P3b)", () => {
+  const turfWearHint = {
+    開催日次: 8,
+    開催回次: 2,
+    柵: "A",
+    note: "中央2回8日目(柵A)。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。",
+  };
+
+  it("race.turfWearHintが指定されているとき、【レース情報】末尾に「芝コースの開催進行」行を1行追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint },
+    });
+    expect(p).toContain(`芝コースの開催進行: ${turfWearHint.note}`);
+  });
+
+  it("追加した行が【レース情報】ブロック内、馬場状態の直後に来ること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint },
+    });
+    const trackConditionIndex = p.indexOf("馬場状態: 良");
+    const turfWearIndex = p.indexOf("芝コースの開催進行:");
+    const nextSectionIndex = p.indexOf("【展開想定】");
+    expect(trackConditionIndex).toBeGreaterThanOrEqual(0);
+    expect(turfWearIndex).toBeGreaterThan(trackConditionIndex);
+    expect(nextSectionIndex).toBeGreaterThan(turfWearIndex);
+  });
+
+  it("race.turfWearHintがundefined(未指定)のとき、「芝コースの開催進行」行を含まないこと(既存文面バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).not.toContain("芝コースの開催進行");
+  });
+
+  it("race.turfWearHintがnull(呼び出し側がnullを渡した)のとき、「芝コースの開催進行」行を含まないこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint: null },
+    });
+    expect(p).not.toContain("芝コースの開催進行");
+  });
+
+  it("回帰: turfWearHint未指定なら既存プロンプト(UNCHANGED_BASE_PROMPT相当)の【レース情報】ブロックが不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】",
+    );
+  });
+});
+
+describe("buildPrompt(当日の同一場・同一面傾向、タスク#27-C)", () => {
+  /** テスト用の SameDayTrendSummary を組み立てるヘルパー(既定は脚質のみ・確定3R)。 */
+  function sameDayTrend(overrides: Partial<SameDayTrendSummary> = {}): SameDayTrendSummary {
+    return {
+      脚質傾向: "前残り優勢",
+      内外傾向: null,
+      上がり傾向: null,
+      サンプル数: { レース数: 3, 複勝圏内馬数: 9 },
+      ...overrides,
+    };
+  }
+
+  it("脚質傾向のみ(内外・上がりが共にnull)のとき、脚質だけの1行を追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, courseType: "芝", sameDayTrend: sameDayTrend() },
+    });
+    expect(p).toContain("当日の同場・同面傾向(芝、確定3R): 脚質=前残り優勢");
+  });
+
+  it("内外傾向がある場合、「/ 内外=」を末尾に追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        courseType: "芝",
+        sameDayTrend: sameDayTrend({ 内外傾向: "内有利" }),
+      },
+    });
+    expect(p).toContain("当日の同場・同面傾向(芝、確定3R): 脚質=前残り優勢 / 内外=内有利");
+  });
+
+  it("上がり傾向がある場合、「/ 上がり=」を末尾に追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        courseType: "ダ",
+        sameDayTrend: sameDayTrend({ 上がり傾向: "差し・上がり優勢の示唆" }),
+      },
+    });
+    expect(p).toContain(
+      "当日の同場・同面傾向(ダ、確定3R): 脚質=前残り優勢 / 上がり=差し・上がり優勢の示唆",
+    );
+  });
+
+  it("内外・上がり両方あるとき、両方を「/」区切りで追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        courseType: "芝",
+        sameDayTrend: sameDayTrend({ 内外傾向: "外有利", 上がり傾向: "顕著な傾向なし" }),
+      },
+    });
+    expect(p).toContain(
+      "当日の同場・同面傾向(芝、確定3R): 脚質=前残り優勢 / 内外=外有利 / 上がり=顕著な傾向なし",
+    );
+  });
+
+  it("内外・上がりが共にnullのときはそれぞれ省略し、脚質のみの行になること(該当項目のみスキップ)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        sameDayTrend: sameDayTrend({ 内外傾向: null, 上がり傾向: null }),
+      },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("当日の同場・同面傾向"));
+    expect(line).toBe(
+      `当日の同場・同面傾向(${baseInput().race.courseType}、確定3R): 脚質=前残り優勢`,
+    );
+  });
+
+  it("脚質傾向がデータ不足のとき、ブロックを一切出さないこと(サンプル不足時非描画)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        sameDayTrend: sameDayTrend({
+          脚質傾向: "データ不足",
+          サンプル数: { レース数: 1, 複勝圏内馬数: 2 },
+        }),
+      },
+    });
+    expect(p).not.toContain("当日の同場・同面傾向");
+  });
+
+  it("追加した行が【レース情報】ブロック内、末尾(turfWearHintの後)に来ること", () => {
+    const turfWearHint = {
+      開催日次: 8,
+      開催回次: 2,
+      柵: "A",
+      note: "中央2回8日目(柵A)。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。",
+    };
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, turfWearHint, sameDayTrend: sameDayTrend() },
+    });
+    const turfWearIndex = p.indexOf("芝コースの開催進行:");
+    const sameDayTrendIndex = p.indexOf("当日の同場・同面傾向");
+    const nextSectionIndex = p.indexOf("【展開想定】");
+    expect(turfWearIndex).toBeGreaterThanOrEqual(0);
+    expect(sameDayTrendIndex).toBeGreaterThan(turfWearIndex);
+    expect(nextSectionIndex).toBeGreaterThan(sameDayTrendIndex);
+  });
+
+  it("race.sameDayTrendが未指定のとき、行を含まないこと(既存文面バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).not.toContain("当日の同場・同面傾向");
+  });
+
+  it("race.sameDayTrendがnull(呼び出し側がnullを渡した)のとき、行を含まないこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, sameDayTrend: null },
+    });
+    expect(p).not.toContain("当日の同場・同面傾向");
+  });
+
+  it("回帰: sameDayTrend未指定なら既存プロンプト(【レース情報】ブロック)が不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】",
+    );
   });
 });
 
@@ -508,6 +694,421 @@ describe("buildPrompt(条件替わり・妙味材料)", () => {
   });
 });
 
+describe("buildPrompt(馬体重トレンド、タスク#6・未使用パラメータ活用①)", () => {
+  /** テスト用の BodyWeightTrendSummary を組み立てるヘルパー(既定は増加傾向・当日あり)。 */
+  function bodyWeightTrend(
+    overrides: Partial<BodyWeightTrendSummary> = {},
+  ): BodyWeightTrendSummary {
+    return {
+      過去実測: [456, 452, 448],
+      傾向: "増加傾向",
+      当日: { 体重: 458, 前走比: 2 },
+      note: "448→452→456kg(増加傾向)、当日458kg・前走比+2kg",
+      ...overrides,
+    };
+  }
+
+  it("h.bodyWeightTrendが指定されているとき、その馬の行に「馬体重推移=」+noteを含むこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: bodyWeightTrend() },
+        input.horses[1]!,
+      ],
+    });
+    expect(p).toContain(
+      "馬体重推移=448→452→456kg(増加傾向)、当日458kg・前走比+2kg",
+    );
+  });
+
+  it("「馬体重推移=」が「過去ペース傾向」の隣(直後、レース間隔の前)に来ること", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: bodyWeightTrend() },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).toContain(
+      "過去ペース傾向=データ不足, 馬体重推移=448→452→456kg(増加傾向)、当日458kg・前走比+2kg, レース間隔=中2週",
+    );
+  });
+
+  it("h.bodyWeightTrendが未指定(undefined)の馬の行には「馬体重推移=」を含まないこと(既存行バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("馬体重推移");
+  });
+
+  it("h.bodyWeightTrendがnull(呼び出し側がnullを渡した)の馬の行にも「馬体重推移=」を含まないこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: null },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("馬体重推移");
+  });
+
+  it("1頭だけbodyWeightTrend指定・もう1頭は未指定のとき、それぞれ独立に反映されること(馬ごとの非破壊optional)", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, bodyWeightTrend: bodyWeightTrend({ 傾向: "減少傾向" }) },
+        input.horses[1]!,
+      ],
+    });
+    const line1 = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    const line2 = p.split("\n").find((l) => l.startsWith("馬番2 "))!;
+    expect(line1).toContain("馬体重推移=");
+    expect(line2).not.toContain("馬体重推移");
+  });
+
+  it("回帰: bodyWeightTrend未指定なら既存プロンプト(【出走馬】各行)が不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "馬番1 アルファ: 3着内率=0.42, 脚質=逃げ(安定度:不明), 過去ペース傾向=データ不足, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし",
+    );
+  });
+
+  it("buildPromptPreview()は「馬体重推移」を含まないこと(PREVIEW_SAMPLE_HORSESに新フィールドを設定しないため不変)", () => {
+    expect(buildPromptPreview()).not.toContain("馬体重推移");
+  });
+});
+
+describe("buildPrompt(人気・着順の乖離、タスク#7・未使用パラメータ活用②)", () => {
+  /** テスト用の MarketGapSummary を組み立てるヘルパー(既定は2走・上回りが多い傾向)。 */
+  function marketGap(overrides: Partial<MarketGapSummary> = {}): MarketGapSummary {
+    return {
+      過去走: [
+        { 人気: 5, 着順: 3, 頭数: 11, 判定: "人気を上回る着順" },
+        { 人気: 8, 着順: 2, 頭数: 11, 判定: "人気を上回る着順" },
+      ],
+      傾向: "人気を上回る着順が多い",
+      note: "近2走で人気を上回る着順2回・下回る着順0回・相応0回(人気を上回る着順が多い)",
+      ...overrides,
+    };
+  }
+
+  it("h.marketGapが指定されているとき、その馬の行に「人気着順乖離=」+noteを含むこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marketGap: marketGap() },
+        input.horses[1]!,
+      ],
+    });
+    expect(p).toContain(
+      "人気着順乖離=近2走で人気を上回る着順2回・下回る着順0回・相応0回(人気を上回る着順が多い)",
+    );
+  });
+
+  it("「人気着順乖離=」が「条件替わり=」の直後(行末)に来ること", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marketGap: marketGap() },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).toContain(
+      "条件替わり=なし, 人気着順乖離=近2走で人気を上回る着順2回・下回る着順0回・相応0回(人気を上回る着順が多い)",
+    );
+    // 行末である(乖離セグメントの後に別の項目が続かない)ことも確認する。
+    expect(line.endsWith("(人気を上回る着順が多い)")).toBe(true);
+  });
+
+  it("h.marketGapが未指定(undefined)の馬の行には「人気着順乖離」を含まないこと(既存行バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("人気着順乖離");
+  });
+
+  it("h.marketGapがnull(呼び出し側がnullを渡した)の馬の行にも「人気着順乖離」を含まないこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marketGap: null },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("人気着順乖離");
+  });
+
+  it("1頭だけmarketGap指定・もう1頭は未指定のとき、それぞれ独立に反映されること(馬ごとの非破壊optional)", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marketGap: marketGap() },
+        input.horses[1]!,
+      ],
+    });
+    const line1 = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    const line2 = p.split("\n").find((l) => l.startsWith("馬番2 "))!;
+    expect(line1).toContain("人気着順乖離=");
+    expect(line2).not.toContain("人気着順乖離");
+  });
+
+  it("回帰: marketGap未指定なら既存プロンプト(【出走馬】各行)が不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "馬番1 アルファ: 3着内率=0.42, 脚質=逃げ(安定度:不明), 過去ペース傾向=データ不足, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし",
+    );
+  });
+
+  it("buildPromptPreview()は「人気着順乖離」を含まないこと(PREVIEW_SAMPLE_HORSESに新フィールドを設定しないため不変)", () => {
+    expect(buildPromptPreview()).not.toContain("人気着順乖離");
+  });
+});
+
+describe("buildPrompt(乗り替わり、タスク#8・未使用パラメータ活用③)", () => {
+  /** テスト用の JockeyChangeSummary を組み立てるヘルパー(既定は継続)。 */
+  function jockeyChange(overrides: Partial<JockeyChangeSummary> = {}): JockeyChangeSummary {
+    return {
+      区分: "継続",
+      今走騎手名: "武豊",
+      前走騎手名: "武豊",
+      判定根拠: "id",
+      note: "騎手=武豊(前走から継続)",
+      ...overrides,
+    };
+  }
+
+  it("(10-a) h.jockeyChangeが指定されているとき、その馬の行に note の内容を含むこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, jockeyChange: jockeyChange() },
+        input.horses[1]!,
+      ],
+    });
+    expect(p).toContain("騎手=武豊(前走から継続)");
+  });
+
+  it("(11) 「人気着順乖離」の直後(行末)に乗り替わりが描画されること", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        {
+          ...input.horses[0]!,
+          marketGap: {
+            過去走: [{ 人気: 5, 着順: 3, 頭数: 11, 判定: "人気を上回る着順" }],
+            傾向: null,
+            note: "直近1走: 11頭中5番人気で3着(人気を上回る着順)",
+          },
+          jockeyChange: jockeyChange({
+            区分: "乗り替わり",
+            今走騎手名: "武豊",
+            前走騎手名: "川田将雅",
+            判定根拠: "id",
+            note: "騎手=武豊(前走川田将雅から乗り替わり)",
+          }),
+        },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).toContain(
+      "人気着順乖離=直近1走: 11頭中5番人気で3着(人気を上回る着順), 騎手=武豊(前走川田将雅から乗り替わり)",
+    );
+    // 行末である(乗り替わりセグメントの後に別の項目が続かない)ことも確認する。
+    expect(line.endsWith("(前走川田将雅から乗り替わり)")).toBe(true);
+  });
+
+  it("(11-b) marketGap未指定・jockeyChangeのみ指定のとき、「条件替わり」の直後に描画されること", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, jockeyChange: jockeyChange() },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).toContain("条件替わり=なし, 騎手=武豊(前走から継続)");
+    expect(line.endsWith("(前走から継続)")).toBe(true);
+  });
+
+  it("(10-b) h.jockeyChangeが未指定(undefined)の馬の行には「騎手=」を含まないこと(既存行バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("騎手=");
+  });
+
+  it("h.jockeyChangeがnull(呼び出し側がnullを渡した)の馬の行にも「騎手=」を含まないこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, jockeyChange: null },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("騎手=");
+  });
+
+  it("1頭だけjockeyChange指定・もう1頭は未指定のとき、それぞれ独立に反映されること(馬ごとの非破壊optional)", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, jockeyChange: jockeyChange() },
+        input.horses[1]!,
+      ],
+    });
+    const line1 = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    const line2 = p.split("\n").find((l) => l.startsWith("馬番2 "))!;
+    expect(line1).toContain("騎手=");
+    expect(line2).not.toContain("騎手=");
+  });
+
+  it("回帰: jockeyChange未指定なら既存プロンプト(【出走馬】各行)が不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "馬番1 アルファ: 3着内率=0.42, 脚質=逃げ(安定度:不明), 過去ペース傾向=データ不足, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし",
+    );
+  });
+
+  it("buildPromptPreview()は「騎手=」を含まないこと(PREVIEW_SAMPLE_HORSESに新フィールドを設定しないため不変)", () => {
+    expect(buildPromptPreview()).not.toContain("騎手=");
+  });
+});
+
+describe("buildPrompt(過去走の着差傾向、タスク#9・未使用パラメータ活用④)", () => {
+  /** テスト用の MarginTrendSummary を組み立てるヘルパー(既定は僅差の敗戦1件のみ)。 */
+  function marginTrend(overrides: Partial<MarginTrendSummary> = {}): MarginTrendSummary {
+    return {
+      過去走: [{ 結果: "敗け", 着差: 0.3, 区分: "僅差" }],
+      傾向: null,
+      note: "直近1走: 前の馬と0.3差の敗戦(僅差)",
+      ...overrides,
+    };
+  }
+
+  it("h.marginTrendが指定されているとき、その馬の行に「着差傾向=」+noteを含むこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marginTrend: marginTrend() },
+        input.horses[1]!,
+      ],
+    });
+    expect(p).toContain("着差傾向=直近1走: 前の馬と0.3差の敗戦(僅差)");
+  });
+
+  it("「乗り替わり(騎手=)」の直後(行末)に着差傾向が描画されること", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        {
+          ...input.horses[0]!,
+          jockeyChange: {
+            区分: "継続",
+            今走騎手名: "武豊",
+            前走騎手名: "武豊",
+            判定根拠: "id",
+            note: "騎手=武豊(前走から継続)",
+          },
+          marginTrend: marginTrend({
+            過去走: [
+              { 結果: "敗け", 着差: 0.2, 区分: "僅差" },
+              { 結果: "敗け", 着差: 0.1, 区分: "僅差" },
+            ],
+            傾向: "僅差の敗戦が多い",
+            note: "近2走で僅差の敗け2回(僅差の敗戦が多い)",
+          }),
+        },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).toContain(
+      "騎手=武豊(前走から継続), 着差傾向=近2走で僅差の敗け2回(僅差の敗戦が多い)",
+    );
+    // 行末である(着差傾向セグメントの後に別の項目が続かない)ことも確認する。
+    expect(line.endsWith("(僅差の敗戦が多い)")).toBe(true);
+  });
+
+  it("jockeyChange未指定・marginTrendのみ指定のとき、「条件替わり」の直後に描画されること", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marginTrend: marginTrend() },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).toContain(
+      "条件替わり=なし, 着差傾向=直近1走: 前の馬と0.3差の敗戦(僅差)",
+    );
+    expect(line.endsWith("(僅差)")).toBe(true);
+  });
+
+  it("h.marginTrendが未指定(undefined)の馬の行には「着差傾向」を含まないこと(既存行バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("着差傾向");
+  });
+
+  it("h.marginTrendがnull(呼び出し側がnullを渡した)の馬の行にも「着差傾向」を含まないこと", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marginTrend: null },
+        input.horses[1]!,
+      ],
+    });
+    const line = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    expect(line).not.toContain("着差傾向");
+  });
+
+  it("1頭だけmarginTrend指定・もう1頭は未指定のとき、それぞれ独立に反映されること(馬ごとの非破壊optional)", () => {
+    const input = baseInput();
+    const p = buildPrompt({
+      ...input,
+      horses: [
+        { ...input.horses[0]!, marginTrend: marginTrend() },
+        input.horses[1]!,
+      ],
+    });
+    const line1 = p.split("\n").find((l) => l.startsWith("馬番1 "))!;
+    const line2 = p.split("\n").find((l) => l.startsWith("馬番2 "))!;
+    expect(line1).toContain("着差傾向=");
+    expect(line2).not.toContain("着差傾向=");
+  });
+
+  it("回帰: marginTrend未指定なら既存プロンプト(【出走馬】各行)が不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "馬番1 アルファ: 3着内率=0.42, 脚質=逃げ(安定度:不明), 過去ペース傾向=データ不足, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし",
+    );
+  });
+
+  it("buildPromptPreview()は「着差傾向」を含まないこと(PREVIEW_SAMPLE_HORSESに新フィールドを設定しないため不変)", () => {
+    expect(buildPromptPreview()).not.toContain("着差傾向");
+  });
+});
+
 describe("buildPrompt(追加指示の注入口・Task#28 プロンプト改善C)", () => {
   // Task#27時点(コミット09fa1f0)の buildPrompt(baseInput()) の出力をそのまま固定した回帰用リテラル。
   // additionalInstruction が空/未指定のときにこの文字列と完全一致することを保証し、
@@ -594,6 +1195,72 @@ describe("buildPrompt(追加指示の注入口・Task#28 プロンプト改善C)
 });
 
 /**
+ * clipVariant(タスクD-2: ±10%↔±15%クリップ幅のA/B・新版並走)のテスト。
+ * 対照(clipVariant未指定 or "default")のバイト完全不変・新版(wide15)の文面反映・
+ * 単一ソース(CLIP_VARIANTS)からの機械導出・anti-anchoring等の非破壊を検証する。
+ */
+describe("clipVariant(タスクD-2: クリップ幅の版切替)", () => {
+  it("未指定は対照(±10%・絶対値0.10)のままで、明示的に'default'を渡した場合とバイト完全一致すること", () => {
+    const withoutVariant = buildPrompt(baseInput());
+    const withDefaultVariant = buildPrompt({ ...baseInput(), clipVariant: "default" });
+    expect(withoutVariant).toBe(withDefaultVariant);
+    expect(withoutVariant).toContain("±10%(絶対値0.10)以内に留めてください");
+  });
+
+  it("不正な版ID・未知の値は対照(±10%)へフォールバックすること(受け入れ条件: 不正値/未設定フォールバック)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      clipVariant: "bogus" as unknown as BuildPromptInput["clipVariant"],
+    });
+    expect(p).toBe(buildPrompt(baseInput()));
+  });
+
+  it("新版(wide15)は【指示】セクションの許容幅が「±15%(絶対値0.15)」になること", () => {
+    const p = buildPrompt({ ...baseInput(), clipVariant: "wide15" });
+    expect(p).toContain("±15%(絶対値0.15)以内に留めてください");
+    expect(p).not.toContain("±10%(絶対値0.10)");
+  });
+
+  it("新版(wide15)は追加指示ブロックの「3着内率±X%の制約」表記も±15%へ連動すること(D-6: 取りこぼし防止)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      clipVariant: "wide15",
+      additionalInstruction: "テスト指示",
+    });
+    expect(p).toContain("3着内率±15%の制約");
+    expect(p).not.toContain("3着内率±10%の制約");
+  });
+
+  it("文面の許容幅数値はCLIP_VARIANTSレジストリのmaxAdjustから機械導出されること(単一ソース保証・D-3)", () => {
+    const variant = CLIP_VARIANTS.wide15;
+    expect(variant.maxAdjust).toBe(0.15);
+    const p = buildPrompt({ ...baseInput(), clipVariant: variant.id });
+    // この期待文字列自体を variant.maxAdjust(=parseAnalyzerResponseへ渡るmaxAdjustと同一値。
+    // clip-variants.test.ts / pipeline-deps.test.ts の配線疎通テストと合わせて一致を保証する)から
+    // 動的に組み立てることで、ハードコードした数値同士の偶然の一致ではないことを示す。
+    expect(p).toContain(
+      `±${clipPercentLabel(variant.maxAdjust)}(絶対値${clipAbsoluteLabel(variant.maxAdjust)})`,
+    );
+  });
+
+  it("新版と対照の文面差分はクリップ幅の数値のみに局所化されること(anti-anchoring・出力スキーマ等は非破壊)", () => {
+    const defaultPrompt = buildPrompt(baseInput());
+    const wide15Prompt = buildPrompt({ ...baseInput(), clipVariant: "wide15" });
+    const normalizedWide15 = wide15Prompt
+      .replaceAll("±15%(絶対値0.15)", "±10%(絶対値0.10)")
+      .replaceAll("3着内率±15%の制約", "3着内率±10%の制約");
+    expect(normalizedWide15).toBe(defaultPrompt);
+  });
+
+  it("新版でもアンカリング禁止の指示文言が変わらず残ること", () => {
+    const p = buildPrompt({ ...baseInput(), clipVariant: "wide15" });
+    expect(p).toContain(
+      "3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。",
+    );
+  });
+});
+
+/**
  * buildPromptPreview(設定画面のプロンプトプレビュー用。実レース不要の決定論的サンプル)のテスト。
  * 設定画面で「実際にLLMへ送る文面」を確認できるようにする機能の一部(ユーザーフィードバック対応)。
  * 【レース情報】【出走馬】はサンプル(動的)だが、【指示】【予想印】制約・±10%・アンカリング禁止・
@@ -635,6 +1302,10 @@ describe("buildPromptPreview(設定画面向けプロンプトプレビュー)",
     expect(buildPromptPreview()).toBe(buildPromptPreview());
   });
 
+  it("固定サンプルはsameDayTrendを持たないため「当日の同場・同面傾向」行を含まないこと(タスク#27-C: 不変)", () => {
+    expect(buildPromptPreview()).not.toContain("当日の同場・同面傾向");
+  });
+
   it.each([
     { label: "追加指示なし(未指定)", additionalInstruction: undefined },
     { label: "追加指示なし(空文字)", additionalInstruction: "" },
@@ -648,6 +1319,15 @@ describe("buildPromptPreview(設定画面向けプロンプトプレビュー)",
     const p = buildPromptPreview("人気薄の複勝率は慎重に見積もること");
     expect(p).toContain("【追加指示");
     expect(p).toContain("人気薄の複勝率は慎重に見積もること");
+  });
+
+  it("clipVariant未指定は既定(±10%)のままであること(タスクD-2: 設定画面のプレビューにも版反映)", () => {
+    expect(buildPromptPreview(undefined)).toContain("±10%(絶対値0.10)以内に留めてください");
+  });
+
+  it("clipVariant='wide15' を渡すとプレビューにも±15%(絶対値0.15)が反映されること(タスクD-2)", () => {
+    const p = buildPromptPreview(undefined, "wide15");
+    expect(p).toContain("±15%(絶対値0.15)以内に留めてください");
   });
 
   /** プレビュー本文からセクション見出し(行頭「【」)のラベル部分(括弧内の説明文を除く)だけを抜き出す。 */

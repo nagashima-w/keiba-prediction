@@ -24,12 +24,15 @@ export {
   type TextFetcher,
 } from "./scraper/cache.js";
 export {
+  centralVenueInfoFromRaceId,
   InvalidIdError,
   kaisaiDateFromNarRaceId,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  siblingRaceIdsSameDay,
   venueKindOfRaceId,
+  type CentralVenueInfo,
   type HorseId,
   type KaisaiDate,
   type RaceId,
@@ -49,6 +52,12 @@ export {
   shutubaUrl,
 } from "./scraper/urls.js";
 export { parseRaceList } from "./scraper/parse-race-list.js";
+export { filterJpnOnlyEntries, isJpnGrade } from "./scraper/jpn-grade.js";
+export { enumerateDates } from "./scraper/enumerate-dates.js";
+export {
+  validatePeriodInput,
+  type PeriodInputValidationResult,
+} from "./scraper/validate-period-input.js";
 export { parseShutuba, ShutubaParseError } from "./scraper/parse-shutuba.js";
 export {
   HorseProfileParseError,
@@ -233,6 +242,8 @@ export {
   type AnalysisHorseRecord,
   type AnalysisRecord,
   type AnalysisStoreOptions,
+  type RaceResultDetail,
+  type RaceResultDetailHorse,
   type RaceResultEntry,
   type StoredAnalysis,
   type StoredAnalysisHorse,
@@ -289,12 +300,67 @@ export {
   type ConditionChangeTagKind,
 } from "./analyzer/condition-change.js";
 export {
+  collectSameDayTrend,
+  summarizeSameDayTrend,
+  type ClosingTrend,
+  type InOutTrend,
+  type PaceLeaningTrend,
+  type SameDayTrendRace,
+  type SameDayTrendRaceDetailHorseLike,
+  type SameDayTrendRaceDetailLike,
+  type SameDayTrendRaceHorse,
+  type SameDayTrendSampleSize,
+  type SameDayTrendSummary,
+} from "./analyzer/same-day-trend.js";
+export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
+export {
+  summarizeBodyWeightTrend,
+  type BodyWeightTrendLabel,
+  type BodyWeightTrendSummary,
+  type BodyWeightTrendToday,
+  type SummarizeBodyWeightTrendOptions,
+} from "./analyzer/body-weight-trend.js";
+export {
+  summarizeMarketGap,
+  type MarketGapJudgement,
+  type MarketGapPastRun,
+  type MarketGapRun,
+  type MarketGapSummary,
+  type MarketGapTrendLabel,
+  type SummarizeMarketGapOptions,
+} from "./analyzer/market-gap.js";
+export {
+  summarizeJockeyChange,
+  type JockeyChangeBasis,
+  type JockeyChangeCategory,
+  type JockeyChangePrevRunInput,
+  type JockeyChangeSummary,
+  type JockeyChangeTodayInput,
+} from "./analyzer/jockey-change.js";
+export {
+  summarizeMarginTrend,
+  type MarginTrendLabel,
+  type MarginTrendLevel,
+  type MarginTrendPastRun,
+  type MarginTrendResult,
+  type MarginTrendRun,
+  type MarginTrendSummary,
+  type SummarizeMarginTrendOptions,
+} from "./analyzer/margin-trend.js";
+export {
   buildPrompt,
   buildPromptPreview,
+  CLIP_VARIANTS,
+  clipAbsoluteLabel,
+  clipPercentLabel,
   computeReferenceEv,
+  DEFAULT_CLIP_VARIANT_ID,
   PROMPT_VERSION,
+  resolveClipVariant,
   type BuildPromptInput,
   type BuildPromptRaceInfo,
+  type ClipVariant,
+  type ClipVariantId,
   type PromptHorse,
   type PromptOikiri,
 } from "./analyzer/build-prompt.js";

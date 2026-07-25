@@ -6,11 +6,14 @@
 name: Windows ビルドと Releases 公開
 
 on:
-  # 開発ブランチへの push で自動ビルド。
+  # 開発ブランチへの push で自動ビルド(→ dev-latest プレリリースを差し替え)。
   push:
     branches:
       - claude/keiba-ev-tool-dev-cvagiu
       - claude/handover-next-session-x5ki6o
+    # v* タグ(例 v1.0.0)の push で正式リリースをビルド・公開する。
+    tags:
+      - "v*"
   # 手動実行も可能にする。
   workflow_dispatch:
 
@@ -19,8 +22,10 @@ permissions:
   contents: write
 
 # 同一ワークフローの多重実行を抑止し、走行中の古いビルドはキャンセルする。
+# ref 単位でグループ化し、タグ(正式リリース)ビルドとブランチ(dev-latest)ビルドが
+# 互いをキャンセルしないようにする。
 concurrency:
-  group: build-windows
+  group: build-windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -58,11 +63,12 @@ jobs:
       - name: electron-builder で exe を生成
         run: pnpm --filter @keiba/app exec electron-builder --win --config electron-builder.yml --publish never
 
-      # 生成した exe を dev-latest プレリリースとして公開する。
+      # ブランチ push / 手動実行時: 生成した exe を dev-latest プレリリースとして公開する。
       # 既存の dev-latest を delete→create せず、action-gh-release の in-place 更新で差し替える
       # (delete 方式だと公開失敗時に dev-latest が消えたまま残る非アトミック性があるため)。
       # 同名アセット(keiba-ev-tool-<version>-portable.exe)は上書き設定で置き換える。
-      - name: Releases に公開(dev-latest を in-place 更新)
+      - name: Releases に公開(dev-latest を in-place 更新 / ブランチ push 時)
+        if: startsWith(github.ref, 'refs/heads/')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dev-latest
@@ -71,6 +77,21 @@ jobs:
           # artifactName はバージョン固定(keiba-ev-tool-<version>-portable.exe)のため、
           # action-gh-release が同名の既存アセットを上書きし、in-place で最新 exe に差し替わる。
           body: |
-            claude/keiba-ev-tool-dev-cvagiu ブランチの最新コミットから自動ビルドした開発版です。
-            UI 実装中の動作確認用に、常に最新の exe をここから入手できます(個人利用専用)。
+            開発ブランチの最新コミットから自動ビルドした開発版です。
+            最新の実装を試せますが予告なく内容が変わります(個人利用専用)。
+            安定して使う場合は最新の正式版(v*)を入手してください。
+          files: packages/app/release/*.exe
+
+      # v* タグ push 時: そのタグの正式リリース(プレリリースではない)を作成する。
+      # tag_name を指定しなければ、トリガーとなったタグ(github.ref)がそのまま使われる。
+      - name: Releases に公開(正式リリース / v* タグ push 時)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            競馬期待値分析ツール ${{ github.ref_name }}(Windows・portable・個人利用専用)。
+            keiba-ev-tool-<version>-portable.exe をダウンロードしてダブルクリックで起動します。
           files: packages/app/release/*.exe

@@ -16,6 +16,32 @@ export const IPC_CHANNELS = {
   cancelBatchAnalysis: "analysis:cancel-batch",
   /** 一括分析の全体進捗イベント(main→renderer への一方向通知)。 */
   batchProgress: "analysis:batch-progress",
+  /**
+   * 期間バッチ「先取得+件数算出」(phase1。タスクB2b-1)。指定期間・取得対象からレースIDを
+   * 収集し件数を返すのみで、LLM分析(runBatchAnalysis/analyzeOne)は一切呼ばない。
+   * 実行対象が確定した後の分析実行(phase2)は既存 runBatchAnalysis(runBatchAnalysisチャネル)を
+   * そのまま再利用する(新規の実行チャネルは設けない)。
+   */
+  collectPeriodBatch: "analysis:period-batch-collect",
+  /**
+   * 実行中の期間バッチ先取得(phase1)に中断を要求する(次の日境界で停止)。
+   * 一括分析の中断(cancelBatchAnalysis)とは別の独立フラグ・別チャネル(bulkImportCancelRequestedに倣う)。
+   */
+  cancelCollectPeriodBatch: "analysis:period-batch-collect-cancel",
+  /**
+   * 期間バッチ「先取得」(phase1)の全体進捗イベント(main→renderer への一方向通知。タスクC2)。
+   * 一括分析の全体進捗(batchProgress)とは別チャネル(先取得は日単位、実行はレース単位で
+   * 意味が異なるため)。ペイロードは {completedDays, totalDays} のみの単純な件数
+   * (bulkImportProgressと同じ「レース内段階の無い単純な件数」の流儀)。
+   */
+  periodBatchCollectProgress: "analysis:period-batch-collect-progress",
+  /**
+   * 期間バッチ「実行」(phase2。タスクC1)。phase1(collectPeriodBatch)が確定した
+   * targetRaces(raceId+その開催日の組)を受け取り、レースごとに自分の開催日で分析する。
+   * オーケストレーション本体・進捗(batchProgress)・中断(cancelBatchAnalysis)は
+   * 単日一括分析(runBatchAnalysis)とそのまま共有する(新規チャネルは実行の起点のみ)。
+   */
+  runPeriodBatchAnalysis: "analysis:run-period-batch",
   /** レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。 */
   importResult: "result:import",
   /** 検証レポート(累積回収率・キャリブレーション表)を取得する。 */
@@ -60,6 +86,12 @@ export const IPC_CHANNELS = {
   openLogFolder: "log:open-folder",
   /** 現行ログ+ローテーション済みログを1ファイルに集約して保存する(Task#36 受け入れ条件2)。 */
   exportLogs: "log:export",
+  /**
+   * 分析データのエクスポート(第一版、GitHub Issue#10)。指定レースの「保存済みの最新分析」
+   * (同一レースに複数分析があれば最新〈id最大〉)を、schemaVersion=1のJSON+馬別CSVの2ファイルへ
+   * 書き出す。保存先はJSON側をダイアログで選ばせ、CSVは同じ場所へ拡張子違いで自動保存する。
+   */
+  exportAnalysis: "analysis:export",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

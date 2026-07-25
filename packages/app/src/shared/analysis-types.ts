@@ -23,6 +23,19 @@ export type RaceVenueKind = "central" | "nar";
 export type VerifyVenueFilter = "all" | RaceVenueKind;
 
 /**
+ * レース一覧の取得対象(UI表示用の3択。タスクB1で導入、タスクB2b-1でrendererからshared移設)。
+ * main(期間バッチのlistDayRaces呼び分け)・renderer(3択UI)双方が参照するためshared層に置く。
+ * 写像関数(raceListTargetToSelection/selectionToRaceListTarget)は shared/race-list-target.ts。
+ */
+export type RaceListTarget = "central" | "nar-all" | "nar-jpn";
+
+/** venueKind と jpnOnly の組(内部状態。タスクB1)。 */
+export interface RaceListSelection {
+  readonly venueKind: RaceVenueKind;
+  readonly jpnOnly: boolean;
+}
+
+/**
  * 予想印(core PredictionMark のプレーン写し。IPC越しの共有用)。
  * ◎本命/〇対抗/▲単穴/△連下/☆穴(勝ち目)/注 穴(3着)。印なし・LLM未使用時は null。
  */
@@ -438,6 +451,22 @@ export type LogExportOutcome =
   | { readonly status: "canceled" };
 
 /**
+ * 分析データのエクスポート(第一版、GitHub Issue#10。main→renderer に invoke の戻り値として返す)。
+ * - "saved": 保存先ダイアログでJSONの保存先を選び、schemaVersion=1のJSON+馬別CSVの2ファイルを
+ *   書き出した(CSVパスはJSON保存先から拡張子を置き換えて自動決定。log-exportとの契約差分は
+ *   filePathが2本〈jsonPath/csvPath〉になる点のみ)。
+ * - "canceled": 保存先ダイアログをキャンセルした(何も書き込んでいない)。
+ * - "error": 保存先パスの検証に失敗し、書き込みを行わなかった(code-reviewer指摘対応。
+ *   例: 導出したCSV保存先〈csvPath〉がJSON保存先〈jsonPath〉と一致してしまう異常なケースの
+ *   多層防御。通常はanalysis-export.tsのderiveCsvPathFromJsonPathが構造的にこの衝突を
+ *   起こさない設計のため到達しない想定だが、万一の再発防止として例外の代わりにこの状態を返す)。
+ */
+export type AnalysisExportOutcome =
+  | { readonly status: "saved"; readonly jsonPath: string; readonly csvPath: string }
+  | { readonly status: "canceled" }
+  | { readonly status: "error"; readonly message: string };
+
+/**
  * 検証画面: レース単体の予実ブレークダウンの1頭分(表示用。core RaceBreakdownHorse の
  * プレーン写し)。Task#34。
  */
@@ -511,6 +540,61 @@ export interface RaceLedgerView {
   readonly recoveryRate: number | null;
   /** このレースで賭けた点数。結果未取込なら0。 */
   readonly betCount: number;
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」フェーズ(phase1)の日ごとのアウトカム(表示用。タスクB2b-1)。
+ * core RangeCollectResult.perDayOutcome(main/range-collect.ts)のプレーン写し(IPC越しの共有用)。
+ */
+export type PeriodBatchDayOutcomeView =
+  | { readonly date: string; readonly status: "hasRaces"; readonly raceCount: number }
+  | { readonly date: string; readonly status: "empty" }
+  | { readonly date: string; readonly status: "failure"; readonly error: string };
+
+/**
+ * 期間バッチ「先取得」(phase1)の全体進捗(main→renderer に webContents.send で通知。タスクC2)。
+ * main/range-collect.ts の onProgress コールバックのペイロードと同じ形(日単位の単純な件数。
+ * レース内段階が無い点は BulkImportProgress と同じ流儀)。
+ */
+export interface PeriodBatchCollectProgress {
+  /** 収集を完了した日数(0起点ではなく、処理し終えた日数。1件目完了時点で1)。 */
+  readonly completedDays: number;
+  /** 期間内の総日数。 */
+  readonly totalDays: number;
+}
+
+/**
+ * 期間バッチの実行対象1レース(表示用・IPC共有用。タスクC1)。
+ * 中央のraceIdは暦日を持たないため、収集時にそのレースが見つかった開催日(kaisaiDate)を
+ * レースごとに運ぶ(main/range-collect.ts の RangeCollectTargetRace のプレーン写し)。
+ * phase2(期間バッチ実行ハンドラ)はこの kaisaiDate でレースごとに runAnalysis を呼び分け、
+ * 日跨ぎのレースで開催日を取り違えない(単一共有dateを渡すバグを構造的に防ぐ)。
+ */
+export interface PeriodBatchTargetRace {
+  /** レースID(12桁)。 */
+  readonly raceId: string;
+  /** このレースが見つかった開催日(YYYYMMDD)。 */
+  readonly kaisaiDate: string;
+}
+
+/**
+ * 期間バッチ「先取得+件数算出」フェーズ(phase1)の結果(タスクB2b-1、targetRacesはタスクC1で導入)。
+ * 実際の分析実行(phase2)は行わず、対象レース(raceId+kaisaiDate)と件数の算出までを表す
+ * (main/range-collect.ts の RangeCollectResult のプレーン写し。IPC越しの共有用)。
+ */
+export interface PeriodBatchCollectResult {
+  /** 収集成功レース総数(dedup前)。failureになった日のレースは含まれない。 */
+  readonly totalRaces: number;
+  /** dedupにより除外(現行版で分析済み)された件数。 */
+  readonly skippedAlreadyAnalyzed: number;
+  /** 実行対象のレース(dedup後、収集順。raceIdごとに自分のkaisaiDateを持つ。タスクC1)。 */
+  readonly targetRaces: readonly PeriodBatchTargetRace[];
+  /** lister が失敗(throw)した日の一覧。 */
+  readonly failureDays: readonly string[];
+  /** 日ごとのアウトカム(処理した日のみ)。 */
+  readonly perDayOutcome: readonly PeriodBatchDayOutcomeView[];
+  /** 先取得の中断要求により途中で打ち切られたか。 */
+  readonly cancelled: boolean;
 }
 
 /** レース一覧の1レース(renderer 表示用)。 */

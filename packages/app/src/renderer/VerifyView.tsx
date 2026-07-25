@@ -1,4 +1,8 @@
-import type { VerifyVenueFilter } from "../shared/analysis-types.js";
+import type {
+  CalibrationBiasBinView,
+  CalibrationBinView,
+  VerifyVenueFilter,
+} from "../shared/analysis-types.js";
 import type { VerifyState } from "./verify-reducer.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
@@ -10,6 +14,7 @@ import {
 import {
   distinctVenueNames,
   filterRaceLedger,
+  isRaceLedgerFilterActive,
   type RaceLedgerFilter,
 } from "./race-ledger-filter.js";
 import {
@@ -32,6 +37,7 @@ import {
   overconfidenceLabel,
   payoutSourceLabel,
   placedLabel,
+  promptVersionCalibrationHeading,
   promptVersionLabel,
   raceBreakdownHeading,
   raceLedgerFilterSummary,
@@ -46,6 +52,11 @@ export interface VerifyViewProps {
   readonly state: VerifyState;
   /** レース結果を取り込む操作。 */
   readonly onImport: (raceId: string) => void;
+  /**
+   * 分析データをエクスポートする操作(第一版・GitHub Issue#10)。対象は指定レースの
+   * 「保存済みの最新分析」(main側で決定的に選ぶ。同一レースに複数分析があれば最新〈id最大〉)。
+   */
+  readonly onExportAnalysis: (raceId: string) => void;
   /** 履歴・レポートを再取得する操作。 */
   readonly onRefresh: () => void;
   /**
@@ -85,6 +96,74 @@ const tdStyle: React.CSSProperties = {
 };
 
 /**
+ * キャリブレーション表(推定確率帯ごとの予測件数・実複勝率・過信バイアス・帯グラフ)の6列。
+ * 全体レポート(下記「キャリブレーション」セクション)とプロンプト版別比較の各版(D-1)の
+ * 両方で同じ体裁の表を出すため、JSXをここに共通化する(表示設計はユーザー承認済み: 版別も
+ * 全体表と完全同体裁の6列)。過信バイアスは calibration と同じ帯順(index整合)で
+ * calibrationBias を参照する(全体表の既存挙動と同じ)。
+ */
+function CalibrationTable(props: {
+  readonly calibration: readonly CalibrationBinView[];
+  readonly calibrationBias: readonly CalibrationBiasBinView[];
+}): React.JSX.Element {
+  return (
+    <table style={{ borderCollapse: "collapse", width: "100%" }}>
+      <thead>
+        <tr>
+          <th style={thStyle}>推定確率帯</th>
+          <th style={thStyle}>予測件数</th>
+          <th style={thStyle}>複勝件数</th>
+          <th style={thStyle}>実複勝率</th>
+          <th style={thStyle}>予測−実績</th>
+          <th style={{ ...thStyle, width: "30%" }}>帯グラフ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {props.calibration.map((bin, index) => {
+          const bias = props.calibrationBias[index] ?? null;
+          return (
+            <tr key={bin.lowerBound}>
+              <td style={tdStyle}>{formatBinRange(bin)}</td>
+              <td style={tdStyle}>{bin.predictedCount}</td>
+              <td style={tdStyle}>{bin.placedCount}</td>
+              <td style={tdStyle}>{formatRate(bin.actualPlaceRate)}</td>
+              <td style={tdStyle}>
+                {formatAdjustment(bias?.overconfidenceGap ?? null)}
+                {bias !== null && bias.overconfidenceGap !== null && (
+                  <span style={{ color: "#666" }}>
+                    {" "}
+                    ({overconfidenceLabel(bias.overconfidenceGap)})
+                  </span>
+                )}
+              </td>
+              <td style={tdStyle}>
+                <div
+                  style={{
+                    background: "#eee",
+                    borderRadius: 3,
+                    height: "0.8rem",
+                    width: "100%",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "#4c8bf5",
+                      borderRadius: 3,
+                      height: "100%",
+                      width: `${calibrationBarWidthPercent(bin.actualPlaceRate)}%`,
+                    }}
+                  />
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+/**
  * 検証画面(仕様「5. ui」検証画面 / 注意事項のキャリブレーション表)。
  *
  * - レース一覧(検証画面UI統合): レースID単位(latest統合)の折りたたみリスト。旧「分析履歴」
@@ -109,6 +188,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
   const report = state.report;
   // レース一覧の検索/絞り込み(表示専用)。state.raceLedger自体・reportは一切変えない。
   const filteredRaceLedger = filterRaceLedger(state.raceLedger, state.raceLedgerFilter);
+  // デフォルト(絞り込み未入力)では一覧を表示しない(Task#25)。入力があるときだけ絞り込み結果を出す。
+  const isFiltering = isRaceLedgerFilterActive(state.raceLedgerFilter);
+  const displayedRaceLedger = isFiltering ? filteredRaceLedger : [];
   const venueNameOptions = distinctVenueNames(state.raceLedger);
 
   return (
@@ -311,6 +393,61 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         </table>
       )}
 
+      {/*
+       * 版別キャリブレーション(D-1)。クリップ幅A/B実験等の効果を版別較正で比較できるようにする
+       * 土台。上の版別比較テーブル(回収率行)はそのまま残し、版ごとに折りたたみ(details/summary。
+       * レース一覧と同流儀)で展開するとその版のキャリブレーション表(全体表と完全同体裁の6列。
+       * CalibrationTable を共通利用)が出る形(表示設計はユーザー承認済み)。見出しには
+       * promptVersionCalibrationHeading で版番号+追加指示の要約を併記し、どの条件の較正かを
+       * 展開前から分かるようにする。サンプル過少の注意喚起等の新規ロジックはここでは追加しない
+       * (既存の集計件数・予測件数の表示に委ねる)。venueKindの版別適用はスコープ外(全体のみ)。
+       */}
+      {state.reportsByPromptVersion.length > 0 && (
+        <>
+          <h4
+            style={{
+              fontSize: "0.88rem",
+              margin: "0.6rem 0 0.25rem",
+              color: "#555",
+            }}
+          >
+            版別キャリブレーション(クリックで展開)
+          </h4>
+          {state.reportsByPromptVersion.map(
+            ({ promptVersion, report: r, additionalInstructions }) => (
+              <details
+                key={promptVersion ?? "版不明"}
+                style={{
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                  margin: "0 0 0.4rem",
+                  padding: "0.3rem 0.6rem",
+                }}
+              >
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                  {promptVersionCalibrationHeading(
+                    promptVersion,
+                    additionalInstructions,
+                  )}
+                </summary>
+                {r.calibration.length === 0 ? (
+                  <p style={{ color: "#666", margin: "0.4rem 0 0" }}>
+                    データがありません。
+                  </p>
+                ) : (
+                  <div style={{ marginTop: "0.4rem" }}>
+                    <CalibrationTable
+                      calibration={r.calibration}
+                      calibrationBias={r.trend.calibrationBias}
+                    />
+                  </div>
+                )}
+              </details>
+            ),
+          )}
+        </>
+      )}
+
       {/* 補正方向×結果(AIが確率を上げた馬/下げた馬/据え置いた馬が実際に来たか)。Task#26。 */}
       <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
         補正方向×結果
@@ -347,59 +484,10 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       {report === null || report.calibration.length === 0 ? (
         <p style={{ color: "#666" }}>データがありません。</p>
       ) : (
-        <table style={{ borderCollapse: "collapse", width: "100%" }}>
-          <thead>
-            <tr>
-              <th style={thStyle}>推定確率帯</th>
-              <th style={thStyle}>予測件数</th>
-              <th style={thStyle}>複勝件数</th>
-              <th style={thStyle}>実複勝率</th>
-              <th style={thStyle}>予測−実績</th>
-              <th style={{ ...thStyle, width: "30%" }}>帯グラフ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.calibration.map((bin, index) => {
-              const bias = report.trend.calibrationBias[index] ?? null;
-              return (
-                <tr key={bin.lowerBound}>
-                  <td style={tdStyle}>{formatBinRange(bin)}</td>
-                  <td style={tdStyle}>{bin.predictedCount}</td>
-                  <td style={tdStyle}>{bin.placedCount}</td>
-                  <td style={tdStyle}>{formatRate(bin.actualPlaceRate)}</td>
-                  <td style={tdStyle}>
-                    {formatAdjustment(bias?.overconfidenceGap ?? null)}
-                    {bias !== null && bias.overconfidenceGap !== null && (
-                      <span style={{ color: "#666" }}>
-                        {" "}
-                        ({overconfidenceLabel(bias.overconfidenceGap)})
-                      </span>
-                    )}
-                  </td>
-                  <td style={tdStyle}>
-                    <div
-                      style={{
-                        background: "#eee",
-                        borderRadius: 3,
-                        height: "0.8rem",
-                        width: "100%",
-                      }}
-                    >
-                      <div
-                        style={{
-                          background: "#4c8bf5",
-                          borderRadius: 3,
-                          height: "100%",
-                          width: `${calibrationBarWidthPercent(bin.actualPlaceRate)}%`,
-                        }}
-                      />
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <CalibrationTable
+          calibration={report.calibration}
+          calibrationBias={report.trend.calibrationBias}
+        />
       )}
 
       {/* 印別的中率(印付けが機能しているか)。Task#26。 */}
@@ -621,7 +709,7 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       </div>
       {state.raceLedger.length > 0 && (
         <p style={{ color: "#666", margin: "0 0 0.5rem" }}>
-          {raceLedgerFilterSummary(state.raceLedger.length, filteredRaceLedger.length)}
+          {raceLedgerFilterSummary(state.raceLedger.length, displayedRaceLedger.length)}
         </p>
       )}
 
@@ -637,12 +725,14 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
         <p style={{ color: "#666" }}>
           {state.loadingRaceLedger ? "読み込み中…" : "分析済みのレースがありません。"}
         </p>
+      ) : !isFiltering ? (
+        <p style={{ color: "#666" }}>検索条件を入力するとレースが表示されます。</p>
       ) : filteredRaceLedger.length === 0 ? (
         <p style={{ color: "#666" }}>
           絞り込み条件に一致するレースがありません。条件を変えるか「絞り込みをクリア」をお試しください。
         </p>
       ) : (
-        filteredRaceLedger.map((rb) => {
+        displayedRaceLedger.map((rb) => {
           const importing = state.importingRaceIds.includes(rb.raceId);
           return (
             <details
@@ -752,6 +842,16 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
                   {importing ? "取込中…" : importButtonLabel(rb)}
                 </button>
               )}
+              {/* 分析データのエクスポート(第一版・GitHub Issue#10)。結果取込の有無に関わらず、
+                  分析済みレースであれば常に出せる(このレース単位の統合リスト自体が分析済みレースのみを
+                  対象とするため、rb.analysisId は必ず存在する)。 */}
+              <button
+                type="button"
+                onClick={() => props.onExportAnalysis(rb.raceId)}
+                style={{ marginTop: "0.4rem", marginLeft: "0.4rem" }}
+              >
+                分析データをエクスポート
+              </button>
             </details>
           );
         })

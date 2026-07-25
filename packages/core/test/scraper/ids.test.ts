@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  centralVenueInfoFromRaceId,
   InvalidIdError,
   kaisaiDateFromNarRaceId,
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  siblingRaceIdsSameDay,
   venueKindOfRaceId,
 } from "../../src/scraper/ids.js";
 
@@ -140,6 +142,71 @@ describe("venueKindOfRaceId(レースIDから開催区分を判定)", () => {
   });
 });
 
+describe("siblingRaceIdsSameDay(同一場・同一開催日の兄弟レースID列挙、タスク#27-C)", () => {
+  it("中央: 先頭10桁を保ったまま01〜12を列挙し、自レース番号(11)を除外すること", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020811"));
+    expect(siblings).toEqual([
+      "202605020801",
+      "202605020802",
+      "202605020803",
+      "202605020804",
+      "202605020805",
+      "202605020806",
+      "202605020807",
+      "202605020808",
+      "202605020809",
+      "202605020810",
+      "202605020812",
+    ]);
+    expect(siblings).not.toContain("202605020811");
+  });
+
+  it("地方: 先頭10桁(場コード+月日)を保ったまま01〜12を列挙し、自レース番号(10)を除外すること", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202654071210"));
+    expect(siblings).toEqual([
+      "202654071201",
+      "202654071202",
+      "202654071203",
+      "202654071204",
+      "202654071205",
+      "202654071206",
+      "202654071207",
+      "202654071208",
+      "202654071209",
+      "202654071211",
+      "202654071212",
+    ]);
+    expect(siblings).not.toContain("202654071210");
+  });
+
+  it("自レース番号が01(先頭)のときも01を除外し、02〜12のみ返すこと(境界値)", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020801"));
+    expect(siblings).toHaveLength(11);
+    expect(siblings[0]).toBe("202605020802");
+    expect(siblings).not.toContain("202605020801");
+  });
+
+  it("自レース番号が12(末尾)のときも12を除外し、01〜11のみ返すこと(境界値)", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020812"));
+    expect(siblings).toHaveLength(11);
+    expect(siblings[siblings.length - 1]).toBe("202605020811");
+    expect(siblings).not.toContain("202605020812");
+  });
+
+  it("常にレース番号昇順(決定論的な順序)で返すこと", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202605020811"));
+    const raceNumbers = siblings.map((id) => Number(id.slice(10, 12)));
+    expect(raceNumbers).toEqual([...raceNumbers].sort((a, b) => a - b));
+  });
+
+  it("戻り値の各要素が parseRaceId を通過済みの妥当なレースIDであること", () => {
+    const siblings = siblingRaceIdsSameDay(parseRaceId("202654071210"));
+    for (const id of siblings) {
+      expect(() => parseRaceId(id)).not.toThrow();
+    }
+  });
+});
+
 describe("kaisaiDateFromNarRaceId(地方レースIDから開催日を導出)", () => {
   it("地方(場コード30〜64)のレースIDから開催日(YYYYMMDD)を導出すること", () => {
     // 場コード54 → 高知。7〜10桁目 0712 → 7月12日。
@@ -181,6 +248,61 @@ describe("kaisaiDateFromNarRaceId(地方レースIDから開催日を導出)", (
   it("閏年の2月29日は有効な開催日として導出すること", () => {
     // 2024年は閏年。場コード54(高知)の2月29日。
     expect(kaisaiDateFromNarRaceId("202454022901")).toBe("20240229");
+  });
+});
+
+describe("centralVenueInfoFromRaceId(中央レースIDから開催情報を導出)", () => {
+  it("中央レースIDから場コード・回次・日次を2桁ゼロ埋め文字列で導出すること", () => {
+    // 202605020811 → 場コード05・回次02・日次08(11R)。
+    expect(centralVenueInfoFromRaceId("202605020811")).toEqual({
+      trackCode: "05",
+      round: "02",
+      day: "08",
+    });
+  });
+
+  it("回次・日次が1桁相当の値でも2桁ゼロ埋め文字列のまま保持すること(P3のレースID再構築で桁を誤らないため)", () => {
+    // 202601010109 → 場コード01・回次01・日次01。
+    expect(centralVenueInfoFromRaceId("202601010109")).toEqual({
+      trackCode: "01",
+      round: "01",
+      day: "01",
+    });
+  });
+
+  describe("中央場コードの境界値(01・10)でも開催情報を導出できること", () => {
+    // [レースID, 期待する開催情報, 補足]
+    const cases: Array<
+      [string, { trackCode: string; round: string; day: string }, string]
+    > = [
+      ["202601020811", { trackCode: "01", round: "02", day: "08" }, "コード01(中央の下限)"],
+      ["202610020811", { trackCode: "10", round: "02", day: "08" }, "コード10(中央の上限)"],
+    ];
+    it.each(cases)("%s → %j(%s)", (raceId, expected) => {
+      expect(centralVenueInfoFromRaceId(raceId)).toEqual(expected);
+    });
+  });
+
+  it("地方(場コード30〜64)のレースIDはnullを返すこと(対象外)", () => {
+    expect(centralVenueInfoFromRaceId("202654071210")).toBeNull();
+  });
+
+  it("12桁の数字でない・場コード不正など parseRaceId が拒否する入力はnullを返すこと", () => {
+    expect(centralVenueInfoFromRaceId("2026050208111")).toBeNull(); // 13桁
+    expect(centralVenueInfoFromRaceId("20260502081")).toBeNull(); // 11桁
+    expect(centralVenueInfoFromRaceId("202611020811")).toBeNull(); // 場コード11(中央でも地方でもない)
+    expect(centralVenueInfoFromRaceId("202605020813")).toBeNull(); // レース番号13は不正
+  });
+
+  it("回次・日次が「00」等の異常桁でも、parseRaceIdが回次・日次の範囲を検証しないため例外にせずそのまま返すこと", () => {
+    // parseRaceId は場コード・レース番号のみ検証し、回次・日次(7〜10桁目)の範囲は検証しない
+    // (ids.ts のコメント参照)。本関数もその検証方針を踏襲し、独自の範囲チェックを追加しない
+    // (検証ロジックの二重管理を避けるため)。202601000811 → 回次00・日次08。
+    expect(centralVenueInfoFromRaceId("202601000811")).toEqual({
+      trackCode: "01",
+      round: "00",
+      day: "08",
+    });
   });
 });
 
@@ -262,5 +384,7 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.parseHorseId).toBe(parseHorseId);
     expect(mod.InvalidIdError).toBe(InvalidIdError);
     expect(mod.venueKindOfRaceId).toBe(venueKindOfRaceId);
+    expect(mod.centralVenueInfoFromRaceId).toBe(centralVenueInfoFromRaceId);
+    expect(mod.siblingRaceIdsSameDay).toBe(siblingRaceIdsSameDay);
   });
 });

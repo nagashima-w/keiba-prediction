@@ -17,6 +17,7 @@ import {
   type BaseScoreWeightValues,
   type BiasWeightKey,
   type BiasWeightValues,
+  type ClipVariantId,
   type MaskedSettings,
   type SettingsUpdate,
 } from "../shared/settings.js";
@@ -62,6 +63,8 @@ export interface SettingsFormState {
   readonly autoSendDiscord: boolean;
   /** プロンプト追加指示(Task#28)。 */
   readonly additionalInstruction: string;
+  /** クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B)。 */
+  readonly clipVariant: ClipVariantId;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -99,6 +102,7 @@ export type SettingsAction =
     }
   | { readonly type: "自動送信切替"; readonly value: boolean }
   | { readonly type: "追加指示入力"; readonly value: string }
+  | { readonly type: "クリップ幅版選択"; readonly value: ClipVariantId }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
   | { readonly type: "保存失敗"; readonly message: string }
@@ -156,6 +160,7 @@ export function createInitialSettingsState(): SettingsFormState {
     baseScoreWeights: emptyRecord(BASE_SCORE_WEIGHT_KEYS),
     autoSendDiscord: false,
     additionalInstruction: "",
+    clipVariant: "default",
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -186,6 +191,7 @@ function applyMasked(
     ),
     autoSendDiscord: settings.autoSendDiscord,
     additionalInstruction: settings.additionalInstruction,
+    clipVariant: settings.clipVariant,
   };
 }
 
@@ -233,6 +239,9 @@ export function settingsReducer(
 
     case "追加指示入力":
       return { ...state, additionalInstruction: action.value };
+
+    case "クリップ幅版選択":
+      return { ...state, clipVariant: action.value };
 
     case "保存開始":
       return { ...state, status: "saving", message: null };
@@ -306,6 +315,7 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     baseScoreWeights,
     autoSendDiscord: state.autoSendDiscord,
     additionalInstruction: state.additionalInstruction,
+    clipVariant: state.clipVariant,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }

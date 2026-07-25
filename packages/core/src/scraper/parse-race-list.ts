@@ -89,6 +89,10 @@ export function parseRaceList(html: string): RaceListEntry[] {
       // レース名(切り詰められている場合あり)。
       const name = $item.find(SEL.itemTitle).text().trim();
 
+      // グレードラベル(生テキストのまま)。存在しない/複数存在する場合は先頭のspanを採用し、
+      // 内テキストが空(中央の画像アイコン方式)なら undefined にする(空文字を拾わない)。
+      const grade = $item.find(SEL.grade).first().text().trim() || undefined;
+
       entries.push({
         raceId,
         name,
@@ -97,6 +101,7 @@ export function parseRaceList(html: string): RaceListEntry[] {
         entryCount,
         venue,
         raceNumber,
+        grade,
       });
     });
   });

@@ -37,9 +37,11 @@
  */
 
 import {
+  assessTurfWear,
   buildPriorInput,
   classifyRotationInterval,
   classifyTrackWetness,
+  collectSameDayTrend,
   computeConditionChangeTags,
   computeEstimatedRaceEv,
   computeFieldPriors,
@@ -48,21 +50,28 @@ import {
   daysBetweenDates,
   DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
-  PROMPT_VERSION,
+  resolveClipVariant,
+  summarizeBodyWeightTrend,
+  summarizeJockeyChange,
+  summarizeMarginTrend,
+  summarizeMarketGap,
   venueKindOfRaceId,
   type AnalysisRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
+  type ClipVariantId,
   type ConditionChangeRun,
   type EstimatedPlaceConfig,
   type EvConfig,
   type HorsePrior,
   type HorseRaceResult,
+  type JockeyChangePrevRunInput,
   type KaisaiDate,
   type PredictionMark,
   type PriorInput,
   type RaceData,
   type RaceId,
+  type RaceResultDetail,
   type ScorerConfig,
 } from "@keiba/core";
 
@@ -71,6 +80,7 @@ import type {
   AnalysisResult,
   AnalysisRow,
 } from "../shared/analysis-types.js";
+import { buildRaceSnapshot } from "./analysis-export.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
 
 /** runAnalysis に注入する依存。すべて関数注入でモック可能。 */
@@ -100,12 +110,37 @@ export interface AnalysisPipelineDeps {
   /** LLMスキップ理由(analyze=null のとき結果メタに載せる文言)。 */
   readonly llmSkipReason?: string;
   /**
+   * 使用するLLMモデル名(Issue#10 分析データのエクスポート。例: "claude-sonnet-4-6")。
+   * LLM使用時(deps.analyze!==null)のみ保存レコードの model 列に記録する。LLMスキップ時は
+   * この値が設定されていても保存レコードの model は null にする(偽値混入を避けるため。
+   * 呼び出し側〈pipeline-deps.ts〉は useLlm===true のときだけこの値を注入する想定)。
+   */
+  readonly modelName?: string;
+  /**
    * プロンプト追加指示(設定画面、Task#28 プロンプト改善C)。省略時・空文字・空白のみは
    * 何も注入しない(undefinedとしてBuildPromptInputへ渡す)。トリムした値を
    * BuildPromptInput.additionalInstruction に渡し、LLM使用時のみ分析レコードにも保存する
    * (LLMスキップ時はプロンプト自体を使っていないため null を保存する。promptVersionと同じ方針)。
    */
   readonly additionalInstruction?: string | null;
+  /**
+   * クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B・新版並走・2026-07-21 boss着手前ゲート合意)。
+   * 省略時・不正値は対照("default"、±10%)へフォールバックする(core resolveClipVariant に委譲)。
+   * この値を BuildPromptInput.clipVariant としてそのまま buildPrompt へ渡し(文面の許容幅表記に反映)、
+   * 保存する promptVersion もこの値から解決した ClipVariant.promptVersion を使う(単一ソース。D-3)。
+   * 呼び出し側(main/pipeline-deps.ts)は、parseAnalyzerResponse へ渡す
+   * AnalyzeRaceDeps.maxAdjust も同じ版から解決した値を deps.analyze の束縛時に渡す必要がある
+   * (文面とクリップ幅の食い違いを防ぐため、両者は同じ CLIP_VARIANTS エントリに由来させること)。
+   */
+  readonly clipVariant?: ClipVariantId;
+  /**
+   * 確定済みレース結果詳細の取得(タスク#27-C: 当日の同一場・同一面傾向をプロンプトに反映する配線)。
+   * 通常は AnalysisStore.getRaceResultDetail を束縛したもの(pipeline-deps.ts が
+   * store.getRaceResultDetail をそのまま渡す)。省略時は当日傾向を算出せず、既存のプロンプト文面・
+   * 既存テストを非破壊のまま保つ(機能オフ)。LLM分析をスキップする経路(deps.analyze===null)では、
+   * この依存が注入されていても当日傾向を算出しない(prior採用経路で無駄なDB読み出しを増やさないため)。
+   */
+  readonly getRaceResultDetail?: (raceId: RaceId) => RaceResultDetail | undefined;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
    * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(marksDroppedのみの
@@ -173,6 +208,23 @@ function restIntervalOf(
 }
 
 /**
+ * 戦績(新しい順)の先頭(前走=results[0])から、乗り替わり(騎手の継続/変更、タスク#8)判定用の
+ * 入力を作る。戦績が取得できなかった/空(results=null/undefined/[])の馬は前走なし相当として
+ * null を返す(summarizeJockeyChange側の「前走なし→null」仕様どおり)。前走(results[0])の
+ * jockeyId/jockeyNameが判定不能でも、さらに過去へ遡ることはしない(「前走」ラベルに忠実。
+ * summarizeJockeyChange側の設計に合わせる)。
+ */
+function jockeyChangePrevRunOf(
+  results: readonly HorseRaceResult[] | null | undefined,
+): JockeyChangePrevRunInput | null {
+  const last = (results ?? [])[0];
+  if (last === undefined) {
+    return null;
+  }
+  return { jockeyId: last.jockeyId, jockeyName: last.jockeyName };
+}
+
+/**
  * 戦績(新しい順)から条件替わり(妙味材料)判定用の ConditionChangeRun 配列を作る。
  * courseType/distance/venueKind をそのまま写すだけの薄いマッピング(条件替わりタグの実際の判定は
  * core computeConditionChangeTags が行う)。戦績が取得できなかった(results=null/undefined)馬は
@@ -207,6 +259,10 @@ export async function runAnalysis(
   };
   // プロンプト追加指示(Task#28): 空文字・空白のみ・未指定は「注入なし」として扱う。
   const trimmedInstruction = (deps.additionalInstruction ?? "").trim();
+  // クリップ幅版(タスクD-2): 未指定・不正値は対照(default)へフォールバックする。
+  // buildPrompt へ渡す clipVariant と、保存する promptVersion の両方をこの1回の解決結果から使う
+  // (単一ソース。deps.clipVariant の文字列が不正でも resolveClipVariant が対照へ安全に丸める)。
+  const clipVariant = resolveClipVariant(deps.clipVariant);
 
   // (1) スクレイピング。
   notify({
@@ -272,6 +328,10 @@ export async function runAnalysis(
   // fallback(確率補正そのものを prior に戻す)とは意味が異なるため別フィールドで伝播する。
   let marksDropped = false;
   let marksDroppedReason: string | null = null;
+  // LLMの生応答テキスト(Issue#10 分析データのエクスポート)。LLMスキップ時は保存しない
+  // (record組み立て時に llmUsed で判定して null にする。偽値混入を避けるため、この変数自体は
+  // LLM使用時のみ analyzeRace の結果で上書きする)。
+  let rawResponse: string | null = null;
   const adjustedByUmaban = new Map<number, AdjustedHorse>();
 
   if (deps.analyze === null) {
@@ -296,6 +356,12 @@ export async function runAnalysis(
       total: null,
       message: "LLMで複勝確率を補正しています…",
     });
+    // 当日の同一場・同一面傾向(タスク#27-C)。getRaceResultDetail が注入されているときだけ算出する
+    // (未注入・prior採用のLLMスキップ経路では算出しない=無駄なDB読み出しを増やさない)。
+    const sameDayTrend = deps.getRaceResultDetail
+      ? collectSameDayTrend(raceId, race.race.courseType, deps.getRaceResultDetail)
+      : null;
+
     const promptInput: BuildPromptInput = {
       race: {
         raceName: race.race.raceName,
@@ -306,6 +372,11 @@ export async function runAnalysis(
         trackCondition: race.race.trackCondition ?? null,
         // 条件替わり(妙味材料)の中央⇄地方替わり判定に使う(build-prompt.ts computeConditionChangeTags)。
         venueKind,
+        // 芝の傷み目安(タスク#26-P3): 中央芝のときだけ開催回・日次・柵の事実を1行渡す
+        // (turf-wear.ts の assessTurfWear。地方・ダート・障害は null になり行自体が出ない)。
+        turfWearHint: assessTurfWear(raceId, race.race.courseType, race.race.fence),
+        // 当日の同一場・同一面傾向(タスク#27-C。same-day-trend.ts の collectSameDayTrend)。
+        sameDayTrend,
       },
       horses: race.horses.map((horseData) => {
         const umaban = horseData.shutuba.umaban;
@@ -334,6 +405,48 @@ export async function runAnalysis(
           })),
           // 条件替わり(妙味材料)判定用の過去走条件(既存runsとは別配列。互いに影響しない)。
           runConditions: conditionChangeRunsOf(horseData.results),
+          // 馬体重トレンド(タスク#6): 過去走のbodyWeight(新しい順)と当日のshutuba.bodyWeightを
+          // summarizeBodyWeightTrend(core)へそのまま写す。diff(前走比の増減)は既にscorerが
+          // 使用済みのため、ここではweight(絶対値)の推移をプロンプト用に表出するだけで、
+          // scorer側の計算には一切影響しない。
+          bodyWeightTrend: summarizeBodyWeightTrend(
+            (horseData.results ?? []).map((r) => r.bodyWeight),
+            horseData.shutuba.bodyWeight,
+          ),
+          // 人気・着順の乖離(タスク#7): 過去走のninki/finishPosition/entryCount(新しい順)を
+          // summarizeMarketGap(core)へそのまま写す。ninki/entryCountは既にscraperがパース済みだが
+          // scorer側で未使用のパラメータであり、ここではLLMプロンプト用に表出するだけで、
+          // scorer側の計算(prior.ts・base-score.ts・bias-*.ts等)には一切影響しない。
+          // 当日オッズ(winOdds/popularity)への波及もない(②は過去走由来で別軸)。
+          marketGap: summarizeMarketGap(
+            (horseData.results ?? []).map((r) => ({
+              ninki: r.ninki,
+              finishPosition: r.finishPosition,
+              entryCount: r.entryCount,
+            })),
+          ),
+          // 乗り替わり(タスク#8): 今走騎手(shutuba.jockeyId/jockeyName)と前走(results[0])騎手を
+          // summarizeJockeyChange(core)へそのまま写す。jockeyId/jockeyNameは既にscraperが
+          // パース済みだがscorer側で未使用のパラメータであり、ここではLLMプロンプト用に
+          // 表出するだけで、scorer側の計算(prior.ts・base-score.ts・bias-*.ts等)には
+          // 一切影響しない(scorerは騎手継続性を判定材料として使っていない)。
+          jockeyChange: summarizeJockeyChange(
+            {
+              jockeyId: horseData.shutuba.jockeyId,
+              jockeyName: horseData.shutuba.jockeyName,
+            },
+            jockeyChangePrevRunOf(horseData.results),
+          ),
+          // 過去走の着差傾向(タスク#9): 過去走のfinishPosition/margin(新しい順)を
+          // summarizeMarginTrend(core)へそのまま写す。marginは既にscraperがパース済みだが
+          // scorer側で未使用のパラメータであり、ここではLLMプロンプト用に表出するだけで、
+          // scorer側の計算(prior.ts・base-score.ts・bias-*.ts等)には一切影響しない。
+          marginTrend: summarizeMarginTrend(
+            (horseData.results ?? []).map((r) => ({
+              finishPosition: r.finishPosition,
+              margin: r.margin,
+            })),
+          ),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),
           winOdds,
@@ -344,6 +457,8 @@ export async function runAnalysis(
       }),
       additionalInstruction:
         trimmedInstruction === "" ? undefined : trimmedInstruction,
+      // クリップ幅版(タスクD-2)。buildPrompt の【指示】【追加指示】ブロックの許容幅表記に反映される。
+      clipVariant: clipVariant.id,
     };
     const analysis = await deps.analyze(promptInput);
     llmUsed = true;
@@ -356,6 +471,9 @@ export async function runAnalysis(
     // 正規化してから AnalysisResult に伝播する(呼び出し元は必ず true/false を受け取れる)。
     marksDropped = analysis.marksDropped ?? false;
     marksDroppedReason = analysis.marksDroppedReason ?? null;
+    // LLMの生応答テキスト(Issue#10)。core AnalyzeRaceResult.rawResponse は既存呼び出し元との
+    // 互換のため optional(未設定時はtext未取得の失敗)なので、明示的にnullへ正規化する。
+    rawResponse = analysis.rawResponse ?? null;
     // フォールバック発生時のみ診断ログ用フックを呼ぶ(論点E)。生の診断詳細
     // (diagnosticMessage)はUI/DBへは渡さず、このフック経由でのみログ基盤へ渡す。
     if (fallback) {
@@ -414,10 +532,13 @@ export async function runAnalysis(
     raceId,
     analyzedAt,
     evEstimated,
-    // プロンプト版番号(Task#27): LLMを実際に使った(プロンプトを送った)分析のみ PROMPT_VERSION を
-    // 記録する。LLMスキップ(prior採用)はプロンプト自体を使っていないため null(版不明とは別の
-    // 「該当なし」だが、verifyの版別集計では版不明と同じ null グループにまとめて扱う)。
-    promptVersion: llmUsed ? PROMPT_VERSION : null,
+    // プロンプト版番号(Task#27。タスクD-2でクリップ幅版に対応): LLMを実際に使った(プロンプトを
+    // 送った)分析のみ、実際に使った clipVariant の promptVersion を記録する(対照なら従来どおり
+    // PROMPT_VERSION と同じ値。新版〈wide15〉ならその版専用の文字列になり、verifyの版別集計
+    // 〈computeVerifyReportByPromptVersion〉で対照と自動的に別グループとして比較できる)。
+    // LLMスキップ(prior採用)はプロンプト自体を使っていないため null(版不明とは別の「該当なし」だが、
+    // verifyの版別集計では版不明と同じ null グループにまとめて扱う)。
+    promptVersion: llmUsed ? clipVariant.promptVersion : null,
     // 追加指示(Task#28): プロンプトを実際に送った(LLMを使った)分析のみ記録する。
     // LLMスキップ(prior採用)はプロンプト自体を使っていないため null(promptVersionと同じ方針)。
     additionalInstruction:
@@ -426,6 +547,15 @@ export async function runAnalysis(
     // resolveAnalysisDate が当日日付で近似するが、その近似値は不確かなため保存しない
     // (analysisDate は季節分類等のスコアリングにのみ使い、DB保存は生の kaisaiDate 引数のみ参照する)。
     kaisaiDate,
+    // 使用したLLMモデル名(Issue#10)。LLMを実際に使った分析のみ記録する(promptVersionと同じ方針。
+    // LLMスキップ時は deps.modelName が設定されていても null にし、偽値を混入させない)。
+    model: llmUsed ? (deps.modelName ?? null) : null,
+    // LLMの生応答テキスト(Issue#10)。LLMスキップ時は null(rawResponse変数はLLM使用時のみ
+    // analyzeRaceの結果で上書きされる。上記(3)参照)。
+    rawResponse: llmUsed ? rawResponse : null,
+    // 取得したレース情報のスナップショット(Issue#10。エクスポート用、過去戦績は含めない)。
+    // LLM使用有無に関わらず保存する(取得済みレース情報のため)。
+    raceSnapshot: buildRaceSnapshot(race),
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;
       const prior = priorByUmaban.get(umaban)!;
@@ -440,6 +570,9 @@ export async function runAnalysis(
         isPositive: ev.isPositive,
         contributions: prior.contributions,
         mark: adjusted.mark,
+        // LLMが返した和文根拠(Issue#10)。LLMスキップ時は adjusted.reason が既に null
+        // (LLMスキップ経路の初期化ループ参照)のため、ここで追加のllmUsed分岐は不要。
+        reason: adjusted.reason,
       };
     }),
   };

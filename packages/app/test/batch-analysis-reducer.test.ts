@@ -10,12 +10,15 @@ import { describe, expect, it } from "vitest";
 import {
   batchAnalysisReducer,
   createInitialBatchState,
+  createInitialPeriodBatchState,
+  periodBatchReducer,
   type BatchAppState,
 } from "../src/renderer/batch-analysis-reducer.js";
 import type {
   AnalysisResult,
   BatchProgress,
   BatchRaceOutcome,
+  PeriodBatchCollectResult,
   RaceListItem,
 } from "../src/shared/analysis-types.js";
 
@@ -76,10 +79,15 @@ describe("createInitialBatchState(初期状態)", () => {
     const s = createInitialBatchState("20260712");
     expect(s.selection.venueKind).toBe("central");
   });
+
+  it("Jpnのみ絞り込み(jpnOnly)は既定でfalseになる(タスクB1)", () => {
+    const s = createInitialBatchState("20260712");
+    expect(s.selection.jpnOnly).toBe(false);
+  });
 });
 
-describe("開催区分変更(中央/地方の切替)", () => {
-  /** 選択済みレースがある状態(T1・T2選択済み、central)を作る。 */
+describe("開催区分変更(中央/地方(全て)/地方(Jpnのみ)の切替。タスクB1でjpnOnlyを追加)", () => {
+  /** 選択済みレースがある状態(T1・T2選択済み、central・jpnOnly=false)を作る。 */
   function withSelection(): BatchAppState {
     let s = withRaces();
     s = batchAnalysisReducer(s, { type: "レース選択トグル", raceId: "T1" });
@@ -94,8 +102,10 @@ describe("開催区分変更(中央/地方の切替)", () => {
     const s = batchAnalysisReducer(before, {
       type: "開催区分変更",
       venueKind: "nar",
+      jpnOnly: false,
     });
     expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.jpnOnly).toBe(false);
     expect(s.selection.selectedRaceIds).toEqual([]);
     expect(s.run.outcomes).toEqual([]);
   });
@@ -104,20 +114,26 @@ describe("開催区分変更(中央/地方の切替)", () => {
     let s = withSelection();
     s = batchAnalysisReducer(s, { type: "一括分析開始" });
     const before = s;
-    s = batchAnalysisReducer(s, { type: "開催区分変更", venueKind: "nar" });
+    s = batchAnalysisReducer(s, {
+      type: "開催区分変更",
+      venueKind: "nar",
+      jpnOnly: false,
+    });
     expect(s).toBe(before);
   });
 
-  it("同じ開催区分を指定した場合はno-op(状態を参照等価のまま返し、選択も維持される)", () => {
+  it("同じ開催区分・同じjpnOnlyを指定した場合はno-op(状態を参照等価のまま返し、選択も維持される)", () => {
     const before = withSelection();
     expect(before.selection.venueKind).toBe("central");
+    expect(before.selection.jpnOnly).toBe(false);
     expect(before.selection.selectedRaceIds).toEqual(["T1", "T2"]);
 
     const s = batchAnalysisReducer(before, {
       type: "開催区分変更",
       venueKind: "central",
+      jpnOnly: false,
     });
-    // 参照等価(no-op): 同一venueKind指定では新しいオブジェクトを作らない。
+    // 参照等価(no-op): 同一venueKind・同一jpnOnly指定では新しいオブジェクトを作らない。
     expect(s).toBe(before);
     expect(s.selection.venueKind).toBe("central");
     expect(s.selection.selectedRaceIds).toEqual(["T1", "T2"]);
@@ -130,9 +146,31 @@ describe("開催区分変更(中央/地方の切替)", () => {
     const s = batchAnalysisReducer(before, {
       type: "開催区分変更",
       venueKind: "nar",
+      jpnOnly: false,
     });
     expect(s).not.toBe(before);
     expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.selectedRaceIds).toEqual([]);
+  });
+
+  it("同じ開催区分(nar)でもjpnOnlyだけが変わる場合はno-opにならず、選択がクリアされる(地方全て→地方Jpnのみの切替)", () => {
+    let before = withRaces();
+    before = batchAnalysisReducer(before, {
+      type: "開催区分変更",
+      venueKind: "nar",
+      jpnOnly: false,
+    });
+    before = batchAnalysisReducer(before, { type: "レース選択トグル", raceId: "T1" });
+    expect(before.selection.selectedRaceIds).toEqual(["T1"]);
+
+    const s = batchAnalysisReducer(before, {
+      type: "開催区分変更",
+      venueKind: "nar",
+      jpnOnly: true,
+    });
+    expect(s).not.toBe(before);
+    expect(s.selection.venueKind).toBe("nar");
+    expect(s.selection.jpnOnly).toBe(true);
     expect(s.selection.selectedRaceIds).toEqual([]);
   });
 });
@@ -395,5 +433,295 @@ describe("不変性", () => {
     const snapshot = JSON.stringify(before);
     batchAnalysisReducer(before, { type: "レース選択トグル", raceId: "T1" });
     expect(JSON.stringify(before)).toBe(snapshot);
+  });
+});
+
+/** テスト用のphase1収集結果を組み立てる(targetRaces件数だけ指定できる)。 */
+function fakeCollectResult(
+  targetRaceCount: number,
+  overrides: Partial<PeriodBatchCollectResult> = {},
+): PeriodBatchCollectResult {
+  return {
+    totalRaces: targetRaceCount,
+    skippedAlreadyAnalyzed: 0,
+    targetRaces: Array.from({ length: targetRaceCount }, (_, i) => ({
+      raceId: `R${i}`,
+      kaisaiDate: "20260710",
+    })),
+    failureDays: [],
+    perDayOutcome: [],
+    cancelled: false,
+    ...overrides,
+  };
+}
+
+describe("periodBatchReducer(期間バッチの状態遷移。タスクB2b-1)", () => {
+  describe("createInitialPeriodBatchState(初期状態)", () => {
+    it("phaseはidle・収集結果は無し・実行状態は空であること", () => {
+      const s = createInitialPeriodBatchState();
+      expect(s.phase).toBe("idle");
+      expect(s.collectResult).toBeNull();
+      expect(s.collectError).toBeNull();
+      expect(s.needsReconfirmation).toBe(false);
+      expect(s.run.running).toBe(false);
+      expect(s.run.outcomes).toEqual([]);
+    });
+  });
+
+  describe("収集(phase1)の開始→成功/失敗", () => {
+    it("収集開始でphaseがcollectingになり、旧結果・旧エラーがクリアされること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集失敗",
+        message: "旧エラー",
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      expect(s.phase).toBe("collecting");
+      expect(s.collectResult).toBeNull();
+      expect(s.collectError).toBeNull();
+    });
+
+    it("収集成功でphaseがcollectedになり、収集結果(3値+failureDays+cancelled+targetRaces)を保持すること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      const result = fakeCollectResult(3, {
+        totalRaces: 5,
+        skippedAlreadyAnalyzed: 2,
+        failureDays: ["20260711"],
+        cancelled: true,
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ収集成功", result });
+
+      expect(s.phase).toBe("collected");
+      expect(s.collectResult).toEqual(result);
+      expect(s.collectResult?.totalRaces).toBe(5);
+      expect(s.collectResult?.skippedAlreadyAnalyzed).toBe(2);
+      expect(s.collectResult?.targetRaces).toHaveLength(3);
+      expect(s.collectResult?.failureDays).toEqual(["20260711"]);
+      expect(s.collectResult?.cancelled).toBe(true);
+    });
+
+    it("収集中でない状態(idle)での収集成功/失敗は無視されること(遅延イベントガード)", () => {
+      const s = createInitialPeriodBatchState();
+      const afterSuccess = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(1),
+      });
+      expect(afterSuccess).toBe(s);
+
+      const afterFailure = periodBatchReducer(s, {
+        type: "期間バッチ収集失敗",
+        message: "エラー",
+      });
+      expect(afterFailure).toBe(s);
+    });
+
+    it("収集失敗でphaseがidleへ戻り、エラーメッセージを保持すること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集失敗",
+        message: "取得に失敗しました",
+      });
+      expect(s.phase).toBe("idle");
+      expect(s.collectError).toBe("取得に失敗しました");
+      expect(s.collectResult).toBeNull();
+    });
+  });
+
+  describe("実行対象数>100で「要再確認」フラグが立つこと(境界値)", () => {
+    it("実行対象数=100はneedsReconfirmation=falseであること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(100),
+      });
+      expect(s.needsReconfirmation).toBe(false);
+    });
+
+    it("実行対象数=101はneedsReconfirmation=trueであること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(101),
+      });
+      expect(s.needsReconfirmation).toBe(true);
+    });
+  });
+
+  describe("実行確定ゲート(確定アクションを経るまでphase2〈進捗・完了〉を発火させない)", () => {
+    it("収集前(idle)に実行確定を投げても running へ遷移しないこと", () => {
+      const s = createInitialPeriodBatchState();
+      const after = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      expect(after).toBe(s);
+      expect(after.phase).not.toBe("running");
+    });
+
+    it("収集中(collecting)に実行確定を投げても running へ遷移しないこと", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      const after = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      expect(after).toBe(s);
+      expect(after.phase).toBe("collecting");
+    });
+
+    it("収集成功(collected)後に実行確定を投げるとrunningへ遷移すること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(3),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      expect(s.phase).toBe("running");
+      expect(s.run.running).toBe(true);
+    });
+
+    it("確定前(collected前)に進捗更新・完了を投げても無視されること(phase2が発火しないことの直接確認)", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(3),
+      });
+      // まだ「実行確定」を投げていない(collected止まり)。
+      const beforeConfirm = s;
+
+      const progress: BatchProgress = {
+        completedRaces: 0,
+        totalRaces: 3,
+        currentRaceId: "R0",
+        currentRaceName: null,
+        stage: { stage: "スクレイピング", current: null, total: null, message: "取得中" },
+      };
+      const afterProgress = periodBatchReducer(s, {
+        type: "期間バッチ実行進捗更新",
+        progress,
+      });
+      expect(afterProgress).toBe(beforeConfirm);
+
+      const afterComplete = periodBatchReducer(s, {
+        type: "期間バッチ実行完了",
+        outcomes: [],
+      });
+      expect(afterComplete).toBe(beforeConfirm);
+      expect(afterComplete.phase).toBe("collected");
+    });
+
+    it("確定後(running)は進捗更新・完了が反映されること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(2),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+
+      const progress: BatchProgress = {
+        completedRaces: 1,
+        totalRaces: 2,
+        currentRaceId: "R1",
+        currentRaceName: null,
+        stage: { stage: "LLM分析", current: null, total: null, message: "分析中" },
+      };
+      s = periodBatchReducer(s, { type: "期間バッチ実行進捗更新", progress });
+      expect(s.run.progress).toEqual(progress);
+
+      const outcomes: BatchRaceOutcome[] = [
+        { raceId: "R0", raceName: null, status: "success", result: fakeResult("R0"), error: null },
+        { raceId: "R1", raceName: null, status: "failure", result: null, error: "失敗" },
+      ];
+      s = periodBatchReducer(s, { type: "期間バッチ実行完了", outcomes });
+      expect(s.phase).toBe("done");
+      expect(s.run.running).toBe(false);
+      expect(s.run.progress).toBeNull();
+      expect(s.run.outcomes).toEqual(outcomes);
+    });
+
+    it("running中に再度実行確定を投げても二重発火しないこと(no-op)", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(1),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      const runningState = s;
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      expect(s).toBe(runningState);
+    });
+  });
+
+  describe("リセット(やり直す。タスクC2重大修正: 表示中のfrom/to/targetと確定実行対象の不一致を防ぐ導線)", () => {
+    it("収集済み(collected)状態でリセットするとidleへ戻り、collectResultがnullになること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(3),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s.phase).toBe("idle");
+      expect(s.collectResult).toBeNull();
+      expect(s.needsReconfirmation).toBe(false);
+    });
+
+    it("完了(done)状態でリセットするとidleへ戻ること", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(1),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      s = periodBatchReducer(s, { type: "期間バッチ実行完了", outcomes: [] });
+      expect(s.phase).toBe("done");
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s.phase).toBe("idle");
+      expect(s.collectResult).toBeNull();
+      expect(s.run.outcomes).toEqual([]);
+    });
+
+    it("収集中(collecting)のリセットは無視されること(中断してからでないとやり直せない)", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      const collectingState = s;
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s).toBe(collectingState);
+      expect(s.phase).toBe("collecting");
+    });
+
+    it("実行中(running)のリセットは無視されること(中断してからでないとやり直せない)", () => {
+      let s = createInitialPeriodBatchState();
+      s = periodBatchReducer(s, { type: "期間バッチ収集開始" });
+      s = periodBatchReducer(s, {
+        type: "期間バッチ収集成功",
+        result: fakeCollectResult(1),
+      });
+      s = periodBatchReducer(s, { type: "期間バッチ実行確定" });
+      const runningState = s;
+      s = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(s).toBe(runningState);
+      expect(s.phase).toBe("running");
+    });
+
+    it("idle状態でのリセットも安全に初期状態を返すこと", () => {
+      const s = createInitialPeriodBatchState();
+      const after = periodBatchReducer(s, { type: "期間バッチリセット" });
+      expect(after.phase).toBe("idle");
+      expect(after.collectResult).toBeNull();
+    });
+  });
+
+  describe("単日一括分析の状態遷移への回帰影響が無いこと", () => {
+    it("periodBatchReducerはBatchAppState(単日)を一切変更しない(別スライス)", () => {
+      const batchState = withRaces();
+      const before = JSON.stringify(batchState);
+      const periodState = createInitialPeriodBatchState();
+      periodBatchReducer(periodState, { type: "期間バッチ収集開始" });
+      expect(JSON.stringify(batchState)).toBe(before);
+    });
   });
 });

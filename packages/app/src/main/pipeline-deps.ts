@@ -20,16 +20,20 @@ import {
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
+  DEFAULT_ANALYZER_CONFIG,
   HttpClient,
   listNarRaces,
   listRaces,
   parseRaceResult,
+  resolveClipVariant,
   ScrapeCache,
   scrapeRace,
   type BuildPromptInput,
+  type ClipVariantId,
   type EvConfig,
   type FetchLike,
   type KaisaiDate,
+  type MessageSender,
   type RaceId,
   type RaceListEntry,
   type ScorerConfig,
@@ -44,8 +48,10 @@ import type {
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 import type { AnalysisPipelineDeps } from "./analysis-pipeline.js";
+import { pickLatestAnalysis, type AnalysisExportSource } from "./analysis-export.js";
 import { buildRaceLedgerView } from "./race-ledger-view.js";
 import { importRaceResult } from "./result-import.js";
+import { venueNameFromRaceId } from "./venue-codes.js";
 
 /** createPipelineDeps の設定。 */
 export interface PipelineWiringConfig {
@@ -65,6 +71,24 @@ export interface PipelineWiringConfig {
    * runAnalysis 側で「注入なし」として扱われる。
    */
   readonly additionalInstruction?: string;
+  /**
+   * クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B・新版並走・2026-07-21 boss着手前ゲート合意)。
+   * 省略時・不正値は対照("default"、±10%)へフォールバックする(resolveClipVariant)。
+   * この設定から解決した単一の ClipVariant を、(a) analyzeRace へ渡す deps.maxAdjust の束縛、
+   * (b) AnalysisPipelineDeps.clipVariant(analysis-pipeline.ts が promptInput.clipVariant・
+   * 保存する promptVersion の解決に使う)の両方に用いる(文面とクリップ幅の食い違いを構造的に防ぐ。D-3)。
+   */
+  readonly clipVariant?: ClipVariantId;
+  /**
+   * テスト専用: LLM実送信関数の差し替え(code-reviewer指摘対応・2026-07-21)。
+   * 省略時(本番既定)は AnthropicLlmClient の既定sender(実SDK呼び出し)を使う。
+   * 指定すると、createPipelineDeps が組み立てる deps.analyze の LLM呼び出しがこの関数を経由する
+   * ようになり、実ネットワーク・実API課金なしに「clipVariant→maxAdjust→parseAnalyzerResponseの
+   * クリップ反映」という配線の核心区間(D-2)を単体テストで実際に踏んで検証できる
+   * (AnthropicLlmClient コンストラクタの既存 deps.sender 注入口〈anthropic-client.ts〉をそのまま
+   * 通すだけで、AnthropicLlmClient 自体・本番の既定挙動には一切手を入れない)。
+   */
+  readonly llmSender?: MessageSender;
   /**
    * HTTP取得に使う fetch(注入)。
    *
@@ -111,6 +135,11 @@ export interface PipelineResources {
    */
   readonly listUnimportedRaceIds: () => readonly string[];
   /**
+   * 指定したプロンプト版で分析済みのレースIDをレースID昇順で列挙する(タスクB2b-1 期間バッチの
+   * dedup bulk query)。AnalysisStore.listAnalyzedRaceIdsByPromptVersion に委ねる。
+   */
+  readonly listAnalyzedRaceIdsByPromptVersion: (version: string) => readonly string[];
+  /**
    * 検証レポート(累積回収率・キャリブレーション表)を取得する。
    * @param venueKind 開催区分フィルタ(Task#32)。省略時は "all"(全体、従来どおり)。
    */
@@ -129,6 +158,16 @@ export interface PipelineResources {
    * (latest統合済み・結果取込の有無を問わない)を、開催日降順(null は最後)→レースID昇順で返す。
    */
   readonly getRaceLedger: () => readonly RaceLedgerView[];
+  /**
+   * 分析データのエクスポート(Issue#10)用の材料を組み立てる。指定レースの分析が1件も無ければ
+   * null。複数回分析済みなら最新(id最大)を対象にする(pickLatestAnalysis。決定的な選択)。
+   * 会場名(venueName)はレースIDの場コードから解決し、結果(results/resultDetail)は
+   * 取込済みならAnalysisStoreからそのまま渡す(未取込ならundefinedのまま)。
+   * ツール名・ツール版・エクスポート実行時刻(electron/main固有の情報)は含まないため、
+   * 呼び出し側(main/ipc.ts)がこれらを補って analysis-export.ts の
+   * buildAnalysisExportDocument へ渡す。
+   */
+  readonly getAnalysisExportInput: (raceId: RaceId) => AnalysisExportSource | null;
   /** DB接続などを閉じる。 */
   readonly close: () => void;
 }
@@ -162,10 +201,20 @@ export function createPipelineDeps(
   // ことを確認済みのため、現時点で注入は不要。将来システムプロキシ整合(社内プロキシ経由の LLM 呼び出し)が
   // 必要になった場合に SDK の fetch 差し替え注入を再検討する。
   const useLlm = shouldUseLlm(config.apiKey);
+  // クリップ幅版(タスクD-2)を1回だけ解決し、analyzeRace への束縛(maxAdjust)と
+  // deps.clipVariant(analysis-pipeline.ts が promptInput.clipVariant・promptVersion の解決に使う)の
+  // 両方に同じ変数を使う(単一ソース。文面とクリップ幅が別々の値を参照して食い違う余地を無くす)。
+  const clipVariant = resolveClipVariant(config.clipVariant);
   const analyze = useLlm
     ? (input: BuildPromptInput) =>
         analyzeRace(input, {
-          llm: new AnthropicLlmClient({ apiKey: config.apiKey }),
+          // config.llmSender はテスト専用の差し替え口(省略時 undefined なら
+          // AnthropicLlmClient の既定sender=実SDK呼び出しのまま。本番挙動は不変)。
+          llm: new AnthropicLlmClient(
+            { apiKey: config.apiKey },
+            config.llmSender ? { sender: config.llmSender } : {},
+          ),
+          maxAdjust: clipVariant.maxAdjust,
         })
     : null;
 
@@ -177,6 +226,15 @@ export function createPipelineDeps(
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
     additionalInstruction: config.additionalInstruction,
+    clipVariant: clipVariant.id,
+    // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定モデル名(anthropic-client.tsの
+    // DEFAULT_ANALYZER_CONFIG.model)を注入する。LLM未使用時はundefinedのまま
+    // (analysis-pipeline.ts側でllmUsed===falseのため、設定されていても保存レコードには使われない。
+    // 二重の安全策として、そもそも注入自体もLLM使用時に限定する)。
+    modelName: useLlm ? DEFAULT_ANALYZER_CONFIG.model : undefined,
+    // 当日の同一場・同一面傾向(タスク#27-C)。store.getRaceResultDetail をそのまま束縛するだけで、
+    // 新規スクレイピング・実リクエスト・DB書き込みは一切増えない(既存の取込済みデータの読み出しのみ)。
+    getRaceResultDetail: (raceId: RaceId) => store.getRaceResultDetail(raceId),
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",
@@ -199,9 +257,15 @@ export function createPipelineDeps(
         // 常にライブ取得(キャッシュ毒化回避)。パース失敗時は saveResult に到達しない。
         fetchText: (url, options) => fetcher.fetchText(url, options),
         parse: parseRaceResult,
-        saveResult: (rid, entries) => store.saveResult(rid, entries),
+        // courseType(面、タスク#27-A2)を素通しする。ここで引数を落とすと、
+        // importRaceResult が渡す result.courseType が本番経路で握り潰される
+        // (テストは緑でも実際にはrace_result_metaへ書かれない)ため、必ず転送する。
+        saveResult: (rid, entries, courseType) =>
+          store.saveResult(rid, entries, courseType),
       }),
     listUnimportedRaceIds: (): readonly string[] => store.listUnimportedRaceIds(),
+    listAnalyzedRaceIdsByPromptVersion: (version: string): readonly string[] =>
+      store.listAnalyzedRaceIdsByPromptVersion(version),
     getVerifyReport: (venueKind?: VerifyVenueFilter): VerifyReportView =>
       computeVerifyReport(store, undefined, venueKind),
     getVerifyReportByPromptVersion: (): readonly PromptVersionVerifyReportView[] =>
@@ -211,6 +275,18 @@ export function createPipelineDeps(
     }),
     getRaceLedger: (): readonly RaceLedgerView[] =>
       buildRaceLedgerView(computeRaceLedger(store)),
+    getAnalysisExportInput: (raceId: RaceId): AnalysisExportSource | null => {
+      const latest = pickLatestAnalysis(store.listAnalyses({ raceId }));
+      if (latest === null) {
+        return null;
+      }
+      return {
+        analysis: latest,
+        venueName: venueNameFromRaceId(raceId),
+        results: store.getResult(raceId),
+        resultDetail: store.getRaceResultDetail(raceId),
+      };
+    },
     close: () => db.close(),
   };
 }

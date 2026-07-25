@@ -69,6 +69,16 @@ export type BiasWeightKey = (typeof BIAS_WEIGHT_KEYS)[number];
 /** 基礎スコア重みキー。 */
 export type BaseScoreWeightKey = (typeof BASE_SCORE_WEIGHT_KEYS)[number];
 
+/**
+ * クリップ幅の版ID一覧(タスクD-2: ±10%↔±15%のA/B・新版並走、2026-07-21 boss着手前ゲート合意)。
+ * core の analyzer/clip-variants.ts の ClipVariantId と構造一致(shared を core非依存に保つため
+ * 再定義。core側 CLIP_VARIANTS のキー集合と一致させること。値の集合はこの配列が唯一の定義元)。
+ * "default"=対照(±10%・絶対値0.10)、"wide15"=新版(±15%・絶対値0.15)。
+ */
+export const CLIP_VARIANT_IDS = ["default", "wide15"] as const;
+/** クリップ幅の版ID。 */
+export type ClipVariantId = (typeof CLIP_VARIANT_IDS)[number];
+
 /** バイアス重みの日本語ラベル(フォーム表示用)。 */
 export const BIAS_WEIGHT_LABELS: Record<BiasWeightKey, string> = {
   trackCondition: "馬場状態適性(道悪)",
@@ -116,6 +126,12 @@ export interface AppSettings {
    * 損なうため避けるべき(設定画面に同旨の注意書きを表示する)。
    */
   readonly additionalInstruction: string;
+  /**
+   * クリップ幅の版ID(タスクD-2)。既定"default"(対照、±10%)。
+   * analyzer/build-prompt.ts の BuildPromptInput.clipVariant・parseAnalyzerResponse へ渡す
+   * maxAdjust の解決に使う(main/pipeline-deps.ts が resolveClipVariant で解決)。
+   */
+  readonly clipVariant: ClipVariantId;
 }
 
 /**
@@ -141,6 +157,8 @@ export interface MaskedSettings {
    * (往復編集フォームとして表示する必要があるため)。
    */
   readonly additionalInstruction: string;
+  /** クリップ幅の版ID(タスクD-2)。往復編集フォームとして表示するため平文のまま返す。 */
+  readonly clipVariant: ClipVariantId;
 }
 
 /**
@@ -163,6 +181,8 @@ export interface SettingsUpdate {
   readonly autoSendDiscord: boolean;
   /** プロンプト追加指示。空文字なら注入しない。 */
   readonly additionalInstruction: string;
+  /** クリップ幅の版ID(タスクD-2)。CLIP_VARIANT_IDS に無い値・欠損はmain側でdefaultへフォールバック。 */
+  readonly clipVariant: ClipVariantId;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */

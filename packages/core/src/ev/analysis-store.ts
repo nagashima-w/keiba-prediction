@@ -57,15 +57,36 @@
  * kaisai_date列には保存しない=不確かな値で上書きしない)。
  * 旧バージョンで作成済みのDBにはこの列が無いため、他の列と同じ流儀でALTER TABLEにより後付けし、
  * 既存行は NULL=日付不明として読む(後方互換)。
+ *
+ * 通過順(passing_json)・上がり3F(last3f)列、面テーブル(race_result_meta)(タスク#27-A2):
+ * #27-C(当日傾向のプロンプト反映)の土台として、結果取込の各馬に通過順・上がり3Fを、
+ * レース単位に面(course_type、芝/ダ/障)を永続化・復元できるようにする。
+ * - race_results に passing_json TEXT(通過順配列のJSON文字列)・last3f REAL を追加する。
+ *   他の列(mark・ev_estimated 等)と同じ流儀で ALTER TABLE により後付けし、既存行は
+ *   passing_json=NULL→復元時 passing=[]、last3f=NULLのまま読む(後方互換)。
+ * - 面はレース単位の情報(馬ごとに変わらない)であり、馬単位の race_results に持たせると
+ *   同一レース内の全行へ冗長に複製することになるため、正規化してレース単位の新テーブル
+ *   race_result_meta(race_id PRIMARY KEY, course_type TEXT)に分離する。面が取得できない
+ *   レース(courseType が null/未指定)は行そのものを作らない(読み出し側で
+ *   「行が無い=面不明」と「行はあるが course_type が未知値=面不明」を区別する必要が無いよう、
+ *   前者に統一する)。
+ * - saveResult は race_results・race_result_meta の2テーブルを単一の db.transaction 内で書く
+ *   (better-sqlite3 の transaction は例外で全ロールバックされるため、2テーブル書き込みの
+ *   原子性を担保できる)。
+ * - 復元専用の getRaceResultDetail(raceId) を新設する。既存の getResult(旧来の
+ *   umaban/finishPosition/placePayoutのみを返す verify 専用メソッド)は一切変更しない
+ *   (verify のクエリ性能・出力契約を保つため)。
  */
 
 import Database from "better-sqlite3";
 
 import type { PredictionMark } from "../analyzer/parse-response.js";
+import type { CourseType } from "../scraper/types.js";
 
 const ANALYSES_TABLE = "analyses";
 const ANALYSIS_HORSES_TABLE = "analysis_horses";
 const RACE_RESULTS_TABLE = "race_results";
+const RACE_RESULT_META_TABLE = "race_result_meta";
 
 /** 保存する分析の1頭分。 */
 export interface AnalysisHorseRecord {
@@ -85,6 +106,11 @@ export interface AnalysisHorseRecord {
   readonly contributions: unknown;
   /** 予想印(◎〇▲△☆注のいずれか。印なしは null)。Task#23。 */
   readonly mark: PredictionMark | null;
+  /**
+   * LLMが返した和文根拠(Issue#10 分析データのエクスポート)。LLM未使用(prior採用)の分析は
+   * null を渡す想定。省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly reason?: string | null;
 }
 
 /** 保存する分析(レース単位)。 */
@@ -119,6 +145,27 @@ export interface AnalysisRecord {
    * 省略時も null(日付不明。既存呼び出し元との後方互換のため任意項目とする)。
    */
   readonly kaisaiDate?: string | null;
+  /**
+   * 使用したLLMモデル名(Issue#10 分析データのエクスポート、例: "claude-sonnet-4-6")。
+   * LLMを使わず prior をそのまま採用した分析(LLMスキップ)は null を渡す想定(偽値を混入させない)。
+   * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly model?: string | null;
+  /**
+   * LLMの生応答テキスト(Issue#10)。LLMスキップ時は null を渡す想定。
+   * 秘密安全性: これはLLMが返したモデル出力テキストのみで、プロンプト本文・apiKey等は含まない
+   * (呼び出し側〈analysis-pipeline.ts〉が analyzeRace の結果からそのまま転送する)。
+   * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly rawResponse?: string | null;
+  /**
+   * 取得したレース情報のスナップショット(Issue#10。エクスポート用、過去戦績は含めない)。
+   * JSON化して保存する(contributions と同じ流儀)。LLM使用有無に関わらず、取得済みレース情報が
+   * あれば保存してよい。省略時・undefinedは null(スナップショット無し)として保存する。
+   * 型は analysis-store 側では意図的に unknown のまま扱う(スキーマは呼び出し側
+   * 〈main/analysis-export.ts の RaceSnapshot〉が定義・検証する)。
+   */
+  readonly raceSnapshot?: unknown;
 }
 
 /** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
@@ -132,6 +179,10 @@ export interface StoredAnalysisHorse {
   readonly contributions: unknown;
   /** 予想印(◎〇▲△☆注のいずれか。印なし・旧レコード(列追加前の保存)は null)。Task#23。 */
   readonly mark: PredictionMark | null;
+  /**
+   * LLMが返した和文根拠(Issue#10)。LLM未使用・旧レコード(列追加前の保存)は null。
+   */
+  readonly reason: string | null;
 }
 
 /** 復元した分析(レース単位)。 */
@@ -158,6 +209,19 @@ export interface StoredAnalysis {
    * null(日付不明)。
    */
   readonly kaisaiDate: string | null;
+  /**
+   * 使用したLLMモデル名(Issue#10)。LLMスキップ・旧レコード(列追加前の保存)は null。
+   */
+  readonly model: string | null;
+  /**
+   * LLMの生応答テキスト(Issue#10)。LLMスキップ・旧レコード(列追加前の保存)は null。
+   */
+  readonly rawResponse: string | null;
+  /**
+   * 取得したレース情報のスナップショット(Issue#10。JSONからパース済み)。未保存・
+   * 旧レコード(列追加前の保存)・破損JSONは null(防御的復元。getRaceResultDetailと同方針)。
+   */
+  readonly raceSnapshot: unknown;
 }
 
 /** レース結果の1頭分。 */
@@ -171,6 +235,40 @@ export interface RaceResultEntry {
    * 複勝圏外の馬・未取込(旧データ)は null。省略時も null 扱い(後方互換)。
    */
   readonly placePayout?: number | null;
+  /**
+   * 通過順位(例: [2,3,4,3]、タスク#27-A2)。取得できない場合は空配列。
+   * 省略時は空配列として保存する(placePayoutと同方針の非破壊optional追加)。
+   */
+  readonly passing?: number[];
+  /**
+   * 上がり3F(タスク#27-A2)。取得できない場合は null。省略時もnull扱い(後方互換)。
+   */
+  readonly last3f?: number | null;
+}
+
+/** 復元したレース結果詳細の1頭分(getRaceResultDetail、タスク#27-A2)。 */
+export interface RaceResultDetailHorse {
+  /** 馬番。 */
+  readonly umaban: number;
+  /** 実着順。非数値着順(中止・除外・着順不明)は null。 */
+  readonly finishPosition: number | null;
+  /** 通過順位。未保存・復元不能(JSON破損等)は空配列。 */
+  readonly passing: number[];
+  /** 上がり3F。未保存は null。 */
+  readonly last3f: number | null;
+}
+
+/**
+ * 復元したレース結果詳細(getRaceResultDetail、タスク#27-A2)。
+ * #27-C(当日傾向のプロンプト反映)が消費する最小フィールドに絞った契約型。
+ * horseName・wakuban 等、race_resultsに保存していない項目は含めない
+ * (未保存の値に偽の値を混入させないため)。
+ */
+export interface RaceResultDetail {
+  /** レース単位の面(芝/ダ/障)。未取得・未保存(race_result_metaに行が無い)は null。 */
+  readonly courseType: CourseType | null;
+  /** 各馬の着順・通過順・上がり3F(馬番昇順)。 */
+  readonly horses: readonly RaceResultDetailHorse[];
 }
 
 /** listAnalyses の絞り込み条件。 */
@@ -197,6 +295,7 @@ interface HorseRow {
   is_positive: number;
   contributions_json: string | null;
   mark: string | null;
+  reason: string | null;
 }
 
 /**
@@ -224,7 +323,10 @@ export class AnalysisStore {
         ev_estimated INTEGER,
         prompt_version TEXT,
         additional_instruction TEXT,
-        kaisai_date TEXT
+        kaisai_date TEXT,
+        model TEXT,
+        raw_response TEXT,
+        race_snapshot_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -238,6 +340,7 @@ export class AnalysisStore {
         is_positive INTEGER NOT NULL,
         contributions_json TEXT,
         mark TEXT,
+        reason TEXT,
         PRIMARY KEY (analysis_id, umaban),
         FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
       );
@@ -248,6 +351,10 @@ export class AnalysisStore {
         place_payout REAL,
         PRIMARY KEY (race_id, umaban)
       );
+      CREATE TABLE IF NOT EXISTS ${RACE_RESULT_META_TABLE} (
+        race_id TEXT PRIMARY KEY,
+        course_type TEXT
+      );
     `);
     this.migrateResultPayoutColumn();
     this.migrateMarkColumn();
@@ -255,6 +362,46 @@ export class AnalysisStore {
     this.migratePromptVersionColumn();
     this.migrateAdditionalInstructionColumn();
     this.migrateKaisaiDateColumn();
+    this.migrateResultDetailColumns();
+    this.migrateAnalysisExportColumns();
+    this.migrateHorseReasonColumn();
+  }
+
+  /**
+   * エクスポート用列(model・raw_response・race_snapshot_json)を後付けするマイグレーション
+   * (Issue#10 分析データのエクスポート)。
+   * 旧バージョンで作成済みの analyses にはこれらの列が無いため、存在しなければ追加する
+   * (既存行は全列NULL=LLM未使用・スナップショット未保存として読める=後方互換)。
+   */
+  private migrateAnalysisExportColumns(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "model")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN model TEXT`);
+    }
+    if (!columns.some((c) => c.name === "raw_response")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN raw_response TEXT`);
+    }
+    if (!columns.some((c) => c.name === "race_snapshot_json")) {
+      this.db.exec(
+        `ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN race_snapshot_json TEXT`,
+      );
+    }
+  }
+
+  /**
+   * LLM根拠(reason)列を後付けするマイグレーション(Issue#10)。
+   * 旧バージョンで作成済みの analysis_horses には reason 列が無いため、存在しなければ追加する
+   * (既存行は NULL=根拠なしとして読める=後方互換)。
+   */
+  private migrateHorseReasonColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "reason")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN reason TEXT`);
+    }
   }
 
   /**
@@ -347,19 +494,39 @@ export class AnalysisStore {
   }
 
   /**
+   * 通過順(passing_json)・上がり3F(last3f)列を後付けするマイグレーション(タスク#27-A2)。
+   * 旧バージョンで作成済みの race_results にはこれらの列が無いため、存在しなければ追加する
+   * (既存行は passing_json=NULL→復元時 passing=[]、last3f=NULLのまま読める=後方互換)。
+   */
+  private migrateResultDetailColumns(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "passing_json")) {
+      this.db.exec(
+        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN passing_json TEXT`,
+      );
+    }
+    if (!columns.some((c) => c.name === "last3f")) {
+      this.db.exec(`ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN last3f REAL`);
+    }
+  }
+
+  /**
    * 分析結果を保存し、採番された分析IDを返す。レース行と馬行をトランザクションで一括保存する。
    * @param record レース単位の分析結果
    */
   saveAnalysis(record: AnalysisRecord): number {
     const insertAnalysis = this.db.prepare(
       `INSERT INTO ${ANALYSES_TABLE}
-         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date,
+          model, raw_response, race_snapshot_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
-         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     const tx = this.db.transaction((rec: AnalysisRecord): number => {
@@ -370,6 +537,11 @@ export class AnalysisStore {
         rec.promptVersion ?? null,
         rec.additionalInstruction ?? null,
         rec.kaisaiDate ?? null,
+        rec.model ?? null,
+        rec.rawResponse ?? null,
+        rec.raceSnapshot === undefined || rec.raceSnapshot === null
+          ? null
+          : JSON.stringify(rec.raceSnapshot),
       );
       const analysisId = Number(info.lastInsertRowid);
       for (const h of rec.horses) {
@@ -385,6 +557,7 @@ export class AnalysisStore {
             ? null
             : JSON.stringify(h.contributions),
           h.mark,
+          h.reason ?? null,
         );
       }
       return analysisId;
@@ -394,25 +567,57 @@ export class AnalysisStore {
   }
 
   /**
-   * レース後の実着順(と複勝確定払戻)を保存する。(race_id, umaban) 主キーで再保存は上書きする。
-   * placePayout を省略した場合は null で保存する(実配当未取込=verifyは近似にフォールバック)。
+   * レース後の実着順(通過順・上がり3F・複勝確定払戻)と、レース単位の面(course_type)を保存する。
+   * (race_id, umaban) 主キーで再保存は上書きする。
+   * placePayout/passing/last3f を省略した場合はそれぞれ null/空配列/null で保存する
+   * (未取込項目=後続の復元・verifyは欠損値として扱う)。
+   *
+   * race_results(馬単位)・race_result_meta(レース単位の面)の2テーブルは単一の
+   * db.transaction 内で書く(better-sqlite3のtransactionは例外で全ロールバックされるため、
+   * 2テーブル書き込みの原子性を担保する)。courseType が null/未指定の場合は
+   * race_result_meta に行を作らない(面が取れないレースまで不確かな行を残さないため)。
    * @param raceId レースID
-   * @param results 馬番→着順・複勝払戻(非数値着順は finishPosition=null)
+   * @param results 馬番→着順・複勝払戻・通過順・上がり3F(非数値着順は finishPosition=null)
+   * @param courseType レース単位の面(芝/ダ/障)。取得できない・省略時は race_result_meta を書かない
    */
-  saveResult(raceId: string, results: readonly RaceResultEntry[]): void {
-    const upsert = this.db.prepare(
-      `INSERT INTO ${RACE_RESULTS_TABLE} (race_id, umaban, finish_position, place_payout)
-       VALUES (?, ?, ?, ?)
+  saveResult(
+    raceId: string,
+    results: readonly RaceResultEntry[],
+    courseType?: CourseType | null,
+  ): void {
+    const upsertResult = this.db.prepare(
+      `INSERT INTO ${RACE_RESULTS_TABLE}
+         (race_id, umaban, finish_position, place_payout, passing_json, last3f)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(race_id, umaban) DO UPDATE SET
          finish_position = excluded.finish_position,
-         place_payout = excluded.place_payout`,
+         place_payout = excluded.place_payout,
+         passing_json = excluded.passing_json,
+         last3f = excluded.last3f`,
     );
-    const tx = this.db.transaction((rows: readonly RaceResultEntry[]) => {
-      for (const r of rows) {
-        upsert.run(raceId, r.umaban, r.finishPosition, r.placePayout ?? null);
-      }
-    });
-    tx(results);
+    const upsertMeta = this.db.prepare(
+      `INSERT INTO ${RACE_RESULT_META_TABLE} (race_id, course_type)
+       VALUES (?, ?)
+       ON CONFLICT(race_id) DO UPDATE SET course_type = excluded.course_type`,
+    );
+    const tx = this.db.transaction(
+      (rows: readonly RaceResultEntry[], meta: CourseType | null | undefined) => {
+        for (const r of rows) {
+          upsertResult.run(
+            raceId,
+            r.umaban,
+            r.finishPosition,
+            r.placePayout ?? null,
+            JSON.stringify(r.passing ?? []),
+            r.last3f ?? null,
+          );
+        }
+        if (meta !== undefined && meta !== null) {
+          upsertMeta.run(raceId, meta);
+        }
+      },
+    );
+    tx(results, courseType);
   }
 
   /**
@@ -441,6 +646,48 @@ export class AnalysisStore {
   }
 
   /**
+   * レース結果の詳細(通過順・上がり3F・面)を取得する(タスク#27-A2)。
+   * race_results(馬単位)・race_result_meta(レース単位の面)の2テーブルから復元する。
+   * 1件も保存されていなければ undefined を返す(getResultと同じ流儀)。
+   *
+   * 防御的復元: passing_json が NULL・不正なJSON(配列でない/要素が数値でない)の場合は
+   * passing=[] にフォールバックする(silentにthrowしない。旧データ・想定外の書き込みへの耐性)。
+   * course_type が未知の文字列(想定外の値の混入)の場合も courseType=null にフォールバックする。
+   * race_result_meta に行が無い(面が取れなかったレース)場合も同様に courseType=null。
+   * @param raceId レースID
+   */
+  getRaceResultDetail(raceId: string): RaceResultDetail | undefined {
+    const rows = this.db
+      .prepare(
+        `SELECT umaban, finish_position AS finishPosition, passing_json AS passingJson, last3f
+           FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`,
+      )
+      .all(raceId) as Array<{
+      umaban: number;
+      finishPosition: number | null;
+      passingJson: string | null;
+      last3f: number | null;
+    }>;
+    if (rows.length === 0) {
+      return undefined;
+    }
+    const metaRow = this.db
+      .prepare(
+        `SELECT course_type AS courseType FROM ${RACE_RESULT_META_TABLE} WHERE race_id = ?`,
+      )
+      .get(raceId) as { courseType: string | null } | undefined;
+    return {
+      courseType: toStoredCourseType(metaRow?.courseType ?? null),
+      horses: rows.map((r) => ({
+        umaban: r.umaban,
+        finishPosition: r.finishPosition,
+        passing: toStoredPassing(r.passingJson),
+        last3f: r.last3f,
+      })),
+    };
+  }
+
+  /**
    * 保存済み分析を取得する。filter.raceId を与えるとそのレースのみに絞り込む。
    * 分析はID昇順(保存順)、馬は馬番昇順で返す。
    * @param filter 絞り込み条件(省略時は全件)
@@ -452,7 +699,8 @@ export class AnalysisStore {
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
                       prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
-                      kaisai_date AS kaisaiDate
+                      kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
+                      race_snapshot_json AS raceSnapshotJson
                  FROM ${ANALYSES_TABLE} ORDER BY id`,
             )
             .all()
@@ -460,7 +708,8 @@ export class AnalysisStore {
             .prepare(
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
                       prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
-                      kaisai_date AS kaisaiDate
+                      kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
+                      race_snapshot_json AS raceSnapshotJson
                  FROM ${ANALYSES_TABLE} WHERE race_id = ? ORDER BY id`,
             )
             .all(filter.raceId)
@@ -472,10 +721,13 @@ export class AnalysisStore {
       promptVersion: string | null;
       additionalInstruction: string | null;
       kaisaiDate: string | null;
+      model: string | null;
+      rawResponse: string | null;
+      raceSnapshotJson: string | null;
     }>;
 
     const horseStmt = this.db.prepare(
-      `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark
+      `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason
          FROM ${ANALYSIS_HORSES_TABLE} WHERE analysis_id = ? ORDER BY umaban`,
     );
 
@@ -494,6 +746,13 @@ export class AnalysisStore {
         additionalInstruction: a.additionalInstruction,
         // NULL(旧レコード・列追加前の保存・選択済み開催日が渡らなかった分析)は日付不明としてnullのまま復元する。
         kaisaiDate: a.kaisaiDate,
+        // NULL(旧レコード・列追加前の保存・LLM未使用)はモデル不明としてnullのまま復元する(Issue#10)。
+        model: a.model,
+        // NULL(旧レコード・列追加前の保存・LLM未使用)は応答なしとしてnullのまま復元する(Issue#10)。
+        rawResponse: a.rawResponse,
+        // NULL・破損JSON(旧レコード・未保存)はスナップショットなしとしてnullで復元する(Issue#10。
+        // 防御的復元。getRaceResultDetailと同方針)。
+        raceSnapshot: toStoredRaceSnapshot(a.raceSnapshotJson),
       };
     });
   }
@@ -520,6 +779,28 @@ export class AnalysisStore {
            ORDER BY race_id`,
       )
       .all() as Array<{ raceId: string }>;
+    return rows.map((r) => r.raceId);
+  }
+
+  /**
+   * 指定したプロンプト版(prompt_version)で分析済みのレースIDをレースID昇順で列挙する
+   * (タスクB2b-1 期間バッチのdedup bulk query)。
+   *
+   * `listUnimportedRaceIds` と同じ流儀で DISTINCT により、同一レースを同じ版で複数回
+   * 分析していても1回だけ返す。`prompt_version = ?` の等価比較は SQLite の NULL 比較の
+   * 性質上 NULL 行(版不明・LLM未使用)にはマッチしないため、版不明のレースは列挙されない
+   * (呼び出し側〈期間バッチのdedup〉は「別版のみ/null」を実行対象に含める前提のため、
+   * この非マッチは意図した挙動)。
+   */
+  listAnalyzedRaceIdsByPromptVersion(version: string): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT race_id AS raceId
+           FROM ${ANALYSES_TABLE}
+           WHERE prompt_version = ?
+           ORDER BY race_id`,
+      )
+      .all(version) as Array<{ raceId: string }>;
     return rows.map((r) => r.raceId);
   }
 
@@ -584,6 +865,41 @@ export class AnalysisStore {
   }
 }
 
+/**
+ * race_results.passing_json(JSON文字列)を数値配列へ復元する(タスク#27-A2)。
+ * NULL・JSON parseの失敗・配列でない・要素が数値でない(想定外の書き込み混入)は、
+ * silentにthrowせず空配列にフォールバックする(getRaceResultDetailの防御的復元方針)。
+ */
+function toStoredPassing(raw: string | null): number[] {
+  if (raw === null) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.every((n) => typeof n === "number")
+      ? (parsed as number[])
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * race_result_meta.course_type(TEXT)をドメイン型へ復元する(タスク#27-A2)。
+ * NULL(面行が無い=面不明)・未知の文字列(想定外の書き込み混入)は null にフォールバックする
+ * (getRaceResultDetailの防御的復元方針。parse-race-resultのtoCourseTypeOrNullと同流儀)。
+ */
+function toStoredCourseType(raw: string | null): CourseType | null {
+  switch (raw) {
+    case "芝":
+    case "ダ":
+    case "障":
+      return raw;
+    default:
+      return null;
+  }
+}
+
 /** DB行から復元済み馬レコードへ変換する(is_positive の 0/1、JSON の復元を含む)。 */
 function toStoredHorse(row: HorseRow): StoredAnalysisHorse {
   return {
@@ -598,5 +914,23 @@ function toStoredHorse(row: HorseRow): StoredAnalysisHorse {
     // DBには自前で書き込んだ値(またはNULL)のみが入るため、素通しでキャストする
     // (未知の文字列が紛れ込む経路は無い。念のため未知値でも「印なし扱い」にはせず型どおり通す)。
     mark: row.mark as PredictionMark | null,
+    reason: row.reason,
   };
+}
+
+/**
+ * analyses.race_snapshot_json(JSON文字列)をレース情報スナップショットへ復元する(Issue#10)。
+ * NULL(未保存・旧レコード)・JSON parseの失敗は、silentにthrowせず null にフォールバックする
+ * (getRaceResultDetail/toStoredPassingと同じ防御的復元方針)。スキーマの妥当性検証は行わない
+ * (呼び出し側〈main/analysis-export.ts〉が必要に応じて構造を検証する)。
+ */
+function toStoredRaceSnapshot(raw: string | null): unknown {
+  if (raw === null) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }

@@ -125,6 +125,16 @@ export interface AnalyzeRaceResult {
    * 失敗時は必ず値が入り、成功時・印救済時(fallback:false)は省略(undefined)。
    */
   readonly diagnosticMessage?: string | null;
+  /**
+   * LLMの生応答テキスト(Issue#10 分析データのエクスポート)。
+   * 成功時(fallback:false。印救済〈marksDropped:true〉を含む)は、実際に採用した試行の
+   * 応答テキストをそのまま載せる。text自体を取得できなかった失敗時(パース失敗・LLM呼び出し例外・
+   * 切り詰め検出によりprior採用へフォールバックした場合)は null にする(欠損は明示nullで表す。
+   * 秘密安全性: これはLLMが返したモデル出力テキストのみで、プロンプト本文・apiKey等は含まない)。
+   * optional なのは既存の AnalyzeRaceResult リテラルを使うテストを無改変で通すため
+   * (analyzeRace 自身は必ずこのフィールドを明示的に設定して返す)。
+   */
+  readonly rawResponse?: string | null;
 }
 
 /**
@@ -165,10 +175,22 @@ export async function analyzeRace(
   // 初回 + リトライ1回(同一プロンプト)。
   const maxAttempts = 2;
   let lastError: unknown = null;
+  // 印関連違反(AnalyzerMarkViolationError)発生時点で取得できていた応答テキスト(Issue#10)。
+  // LLM呼び出しとパースを別tryに分け、パース例外(印違反含む)のcatch節でも呼び出し済みの
+  // テキストを参照できるようにする(tryブロック内のconstはcatch節から見えないため)。
+  let lastMarkViolationText: string | null = null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let text: string;
     try {
-      const text = await deps.llm.complete(prompt);
+      text = await deps.llm.complete(prompt);
+    } catch (e) {
+      // LLM呼び出し自体の例外(認証エラー・レート制限・ネットワーク断等)。テキスト自体を
+      // 取得できていないため、rawResponse は次の試行に持ち越さず null のままにする。
+      lastError = e;
+      continue;
+    }
+    try {
       const parsed = parseAnalyzerResponse(text, priors, {
         maxAdjust: deps.maxAdjust,
       });
@@ -179,16 +201,21 @@ export async function analyzeRace(
         fallbackReason: null,
         marksDropped: false,
         marksDroppedReason: null,
+        rawResponse: text,
       };
     } catch (e) {
-      // パース失敗・LLM例外いずれも同様に扱い、残り試行があればリトライ。
+      // パース失敗(印関連違反を含む)。残り試行があればリトライ。
       lastError = e;
+      if (e instanceof AnalyzerMarkViolationError) {
+        lastMarkViolationText = text;
+      }
     }
   }
 
   // 全試行失敗。最終試行(2回目)の失敗が印関連違反(AnalyzerMarkViolationError)なら、
   // 確率補正(adjustedProb/clipped/reason)は捨てずに全馬 mark=null で採用する(A: フォールバック分離)。
   // fallback:false の不変条件(fallbackReason は null)を保つため、理由は marksDroppedReason に入れる。
+  // この経路は実質「成功(確率補正は有効)」に近いため、rawResponse も最終試行の応答テキストを載せる。
   if (lastError instanceof AnalyzerMarkViolationError) {
     return {
       horses: lastError.horses,
@@ -197,6 +224,7 @@ export async function analyzeRace(
       fallbackReason: null,
       marksDropped: true,
       marksDroppedReason: `印関連の制約違反のため2回目応答でも印を採用できず、確率補正のみ採用して印は全馬nullにしました: ${lastError.message}`,
+      rawResponse: lastMarkViolationText,
     };
   }
 
@@ -215,6 +243,8 @@ export async function analyzeRace(
       truncated: true,
       stopReason: lastError.stopReason,
       diagnosticMessage: FALLBACK_REASON_TRUNCATED,
+      // 切り詰め検出はLLM呼び出し自体の例外(text未取得)のため rawResponse は null(Issue#10)。
+      rawResponse: null,
     };
   }
 
@@ -239,6 +269,10 @@ export async function analyzeRace(
     truncated: false,
     stopReason: null,
     diagnosticMessage,
+    // 印と無関係な失敗(パース失敗・LLM呼び出し例外)はprior採用のフォールバックのため、
+    // テキストを取得できていても(パース失敗の場合)UI/DB向けrawResponseには載せない
+    // (欠損は明示null。Issue#10「text未取得の失敗時はnull」と同じ扱いに統一する)。
+    rawResponse: null,
   };
 }
 

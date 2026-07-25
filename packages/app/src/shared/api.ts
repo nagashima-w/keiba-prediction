@@ -1,5 +1,6 @@
 import type { AppInfo } from "../main/app-info.js";
 import type {
+  AnalysisExportOutcome,
   BatchProgress,
   BatchRaceOutcome,
   BulkImportProgress,
@@ -7,9 +8,13 @@ import type {
   DeleteUnknownPromptVersionAnalysesResult,
   ImportResultOutcome,
   LogExportOutcome,
+  PeriodBatchCollectProgress,
+  PeriodBatchCollectResult,
+  PeriodBatchTargetRace,
   PromptVersionVerifyReportView,
   RaceLedgerView,
   RaceListItem,
+  RaceListTarget,
   RaceVenueKind,
   VerifyReportView,
   VerifyVenueFilter,
@@ -30,8 +35,14 @@ export interface KeibaApi {
    * @param date 開催日(YYYYMMDD形式)
    * @param venueKind 開催区分(中央/地方)。省略時は "central"(中央)。
    *   "nar"(地方)を指定すると main 側で listNarRaces を呼び分ける。
+   * @param jpnOnly 交流重賞(Jpn1/2/3)のみに絞り込むか(タスクB1)。省略時は false(後方互換)。
+   *   venueKind="nar" のときのみ有効(main 側で判定)。venueKind="central" のときは無視される。
    */
-  listRaces(date: string, venueKind?: RaceVenueKind): Promise<RaceListItem[]>;
+  listRaces(
+    date: string,
+    venueKind?: RaceVenueKind,
+    jpnOnly?: boolean,
+  ): Promise<RaceListItem[]>;
 
   /**
    * 複数レースを一括分析する(直列実行)。全体進捗は onBatchProgress で購読する。
@@ -56,6 +67,47 @@ export interface KeibaApi {
    * @returns 購読を解除する関数
    */
   onBatchProgress(listener: (progress: BatchProgress) => void): () => void;
+
+  /**
+   * 期間バッチ「実行」(phase2。タスクC1)。phase1(collectPeriodBatch)が確定した
+   * targetRaces(raceId+その開催日の組)を渡すと、main側でレースごとに自分の開催日で分析する
+   * (単一の date を全レースへ使い回すと日跨ぎで開催日を取り違えるため、単日一括分析用の
+   * runBatchAnalysis とはシグネチャを分ける)。全体進捗・中断は既存の onBatchProgress /
+   * cancelBatchAnalysis をそのまま再利用する(同時に両方は走らない前提)。
+   * @param targetRaces 実行対象(phase1の PeriodBatchCollectResult.targetRaces をそのまま渡す)
+   */
+  runPeriodBatchAnalysis(
+    targetRaces: readonly PeriodBatchTargetRace[],
+  ): Promise<BatchRaceOutcome[]>;
+
+  /**
+   * 期間バッチ「先取得+件数算出」(phase1。タスクB2b-1/C2)。指定期間・取得対象からレースIDを
+   * 収集し件数を返すのみで、LLM分析(runPeriodBatchAnalysis/runBatchAnalysis)は一切呼ばない。
+   * 全体進捗は onPeriodBatchCollectProgress で購読する。
+   * @param from 開始日(YYYYMMDD)
+   * @param to 終了日(YYYYMMDD)
+   * @param target 取得対象(中央/地方(全て)/地方(Jpnのみ))
+   */
+  collectPeriodBatch(
+    from: string,
+    to: string,
+    target: RaceListTarget,
+  ): Promise<PeriodBatchCollectResult>;
+
+  /**
+   * 実行中の期間バッチ先取得(phase1)に中断を要求する。次の日境界で停止する
+   * (一括分析の中断=cancelBatchAnalysisとは独立。実行していないときは無視される)。
+   */
+  cancelCollectPeriodBatch(): Promise<void>;
+
+  /**
+   * 期間バッチ先取得(phase1)の全体進捗イベントを購読する。
+   * @param listener 全体進捗(完了日数・総日数)を受け取るコールバック
+   * @returns 購読を解除する関数
+   */
+  onPeriodBatchCollectProgress(
+    listener: (progress: PeriodBatchCollectProgress) => void,
+  ): () => void;
 
   /**
    * レース結果を取り込む(result.html取得→パース→実着順+複勝確定払戻を保存)。
@@ -165,4 +217,14 @@ export interface KeibaApi {
    * 何も書き込まない。
    */
   exportLogs(): Promise<LogExportOutcome>;
+
+  /**
+   * 分析データのエクスポート(第一版、GitHub Issue#10)。指定レースの「保存済みの最新分析」
+   * (同一レースに複数分析があれば最新〈id最大〉が対象。main側で決定的に選ぶ)を、
+   * schemaVersion=1のJSON+馬別CSVの2ファイルへ書き出す。保存先はmain側のダイアログで
+   * JSON側を選ばせ、CSVは同じ場所へ拡張子違いで自動保存する。キャンセル時は "canceled" を返し、
+   * 何も書き込まない。対象レースの分析が1件も無い場合は例外(reject)になる。
+   * @param raceId 対象レースID(12桁)
+   */
+  exportAnalysis(raceId: string): Promise<AnalysisExportOutcome>;
 }

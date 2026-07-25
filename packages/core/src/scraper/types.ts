@@ -32,6 +32,14 @@ export interface RaceListEntry {
   readonly venue?: string;
   /** レース番号(1〜12)。 */
   readonly raceNumber: number;
+  /**
+   * グレードラベル(生テキストのまま)。交流重賞(例: Jpn1)・地方重賞(例: 重賞)・OP等。
+   * 実測(2026-06-24 浦和さきたま杯): アラビア数字の "Jpn1"(ローマ数字ではない)。
+   * 中央は画像アイコン方式で内テキストが常に空のため、常に undefined になる
+   * (中央の数値クラス→gradeマッピングは今回スコープ外)。
+   * grade span が存在しない/内テキストが空の行は undefined(空文字では拾わない)。
+   */
+  readonly grade?: string;
 }
 
 /** 馬体重とその増減(前走比)。未発表の場合は null で表す。 */
@@ -90,6 +98,15 @@ export interface ShutubaRaceInfo {
   readonly weather?: string;
   /** 馬場状態。取得できない場合は未定義。 */
   readonly trackCondition?: string;
+  /**
+   * 芝コースの柵(内外の移動位置)を表す単一の大文字(例: "A"〜"D")。
+   * 三状態を持つ非破壊optionalフィールド(タスク#26-P1: 芝の傷み目安の土台):
+   * - このキー自体が無い(undefined): 芝以外(ダート・障害)。柵の概念が無いため省略する
+   *   (既存の startTime/weather/trackCondition と同じ spread-omit 流儀)。
+   * - null: 芝だが柵letterを判別できなかった(例: 直線コースで内外・回り方向のみの表記)。
+   * - 単一の大文字文字列: 判別できた柵(例: "A")。
+   */
+  readonly fence?: string | null;
 }
 
 /** 出馬表のパース結果(レース情報+出走馬)。 */
@@ -240,6 +257,22 @@ export interface RaceResultHorse {
   readonly finishPosition: FinishPosition | null;
   /** 馬名。 */
   readonly horseName: string;
+  /**
+   * 枠番。枠・馬番はどちらも td.Num だが class の Waku{n} で判別する(umaban との取り違え防止)。
+   * セルのテキストが空・非数値の場合は null(構造自体が想定外の場合は umaban 同様に例外)。
+   */
+  readonly wakuban: number | null;
+  /**
+   * 通過順位(例: 2-2-4-2 → [2,2,4,2])。
+   * 見出し(コーナー通過順)列が無い構造(地方の一部レース等)・セル値が空/非数値の場合は空配列。
+   */
+  readonly passing: number[];
+  /**
+   * 後3F(上がり3F)。上位馬の行は class にハイライト(BgBlue02/BgYellow/BgOrange 等)が付くが、
+   * 列インデックスをヘッダテキストから解決して値を取るためクラスに依存せず数値化できる。
+   * 見出し列が解決できない・セル値が空/非数値の場合は null。
+   */
+  readonly last3f: number | null;
 }
 
 /**
@@ -267,6 +300,13 @@ export interface RaceResult {
   readonly placePayouts: RacePayoutEntry[];
   /** 単勝の確定払戻(払戻テーブル欠損時は空配列)。 */
   readonly winPayouts: RacePayoutEntry[];
+  /**
+   * コース種別(芝/ダ/障、タスク#27-A2)。
+   * `.RaceData01` のテキストから解決する。parseRaceResult は常にこのフィールドを populate するが、
+   * ヘッダ欠損・非マッチ時は解決不能として null にする(非throwフォールバック)。
+   * optional にしているのは既存の RaceResult リテラル(テスト等)を非破壊にするため。
+   */
+  readonly courseType?: CourseType | null;
 }
 
 /** 単勝オッズ(1頭分)。未確定・非数値は null。 */

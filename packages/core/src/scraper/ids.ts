@@ -145,6 +145,39 @@ export function venueKindOfRaceId(raceId: RaceId): RaceIdVenueKind {
 }
 
 /**
+ * 同一場・同一開催日の兄弟レースID(自身のレース番号を除く01〜12)を列挙する
+ * (タスク#27-C: 当日の同一場・同一面傾向の集計対象探索に使う)。
+ *
+ * レースIDの先頭10桁(中央: 場コード+回次+日次、地方: 場コード+月+日)が同一なら
+ * 同一場・同一開催日であることを利用し、11〜12桁目(レース番号)だけを01〜12へ
+ * 振り替えて候補を作る。実在しないレース番号(例: 8レース制の開催の09〜12)の候補も
+ * 構文的には妥当なレースIDになるため含めて返す(実在性の検証はしない。呼び出し側が
+ * 結果取得〈lookup〉で「該当データなし」として自然にスキップする前提)。
+ *
+ * @param raceId 検証済みのレースID(基準となる自レース)
+ * @returns 兄弟レースID(レース番号昇順、自番号は含まない)
+ */
+export function siblingRaceIdsSameDay(raceId: RaceId): RaceId[] {
+  const head = raceId.slice(0, 10);
+  const ownRaceNumber = raceId.slice(10, 12);
+  const siblings: RaceId[] = [];
+  for (let n = 1; n <= 12; n++) {
+    const raceNumber = String(n).padStart(2, "0");
+    if (raceNumber === ownRaceNumber) {
+      continue;
+    }
+    const candidate = head + raceNumber;
+    try {
+      siblings.push(parseRaceId(candidate));
+    } catch {
+      // raceId(検証済み)の先頭10桁から作った候補は理論上必ず妥当な12桁レースIDになるが、
+      // 防御的に(想定外の入力に備えて)無効な候補はスキップする。
+    }
+  }
+  return siblings;
+}
+
+/**
  * 地方(NAR)のレースIDから開催日(YYYYMMDD)を導出する。
  *
  * 地方(場コード30〜64)は7〜10桁目に開催日(月日)が直接埋め込まれているため、YYYY(1〜4桁目)+
@@ -171,6 +204,61 @@ export function kaisaiDateFromNarRaceId(raceId: string): KaisaiDate | null {
     const candidate =
       parsed.slice(0, 4) + parsed.slice(6, 8) + parsed.slice(8, 10);
     return parseKaisaiDate(candidate);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 中央レースIDから導出した開催情報(場コード・回次・日次)。
+ *
+ * 回次・日次は後段(タスク#26-P3: レースID再構築で日次を振る処理)で使うため、
+ * 数値化せず2桁ゼロ埋め文字列のまま保持する(ゼロ埋め規約)。数値化すると
+ * 例えば "08" → 8 のように先頭ゼロが失われ、再構築時に文字列連結で桁を誤る
+ * (例: `8` を2桁化し忘れて11桁のレースIDを組み立ててしまう)事故につながるため。
+ */
+export interface CentralVenueInfo {
+  /** 場コード(2桁ゼロ埋め文字列。例: "05")。 */
+  readonly trackCode: string;
+  /** 回次(2桁ゼロ埋め文字列。例: "02")。 */
+  readonly round: string;
+  /** 日次(2桁ゼロ埋め文字列。例: "08")。 */
+  readonly day: string;
+}
+
+/**
+ * 中央のレースIDから開催情報(場コード・回次・日次)を導出する。
+ *
+ * 中央(場コード01〜10)は7〜10桁目に回次・日次が直接埋め込まれているため、そのまま
+ * 2桁ゼロ埋め文字列として取り出せる。地方(場コード30〜64)は7〜10桁目が開催日(月日)で
+ * あり回次・日次ではないため対象外とし、null を返す(kaisaiDateFromNarRaceId と対称の設計。
+ * 地方の開催日導出は kaisaiDateFromNarRaceId を使うこと)。
+ *
+ * parseRaceId とは異なり、不正な入力(12桁でない・場コードが中央の範囲外・レース番号が
+ * 範囲外等)でも例外を投げず null を返す(kaisaiDateFromNarRaceId と同じ「復元できなければ
+ * null」という使い方のための設計)。
+ *
+ * 回次・日次(7〜10桁目)自体の範囲は parseRaceId が検証しない(コメント参照:
+ * 中央の7〜10桁目は回次・日次であり日付ではないため実在日検証の対象外)。本関数も
+ * その方針を踏襲し、独自の範囲チェックを追加しない(検証ロジックの二重管理を避けるため)。
+ * そのため "00" 等の異常桁であっても、parseRaceId を通れば例外にせずそのまま返す。
+ *
+ * @param raceId レースID(12桁数字の文字列。未検証でよい)
+ * @returns 導出できた開催情報。地方・復元不可・不正な場合は null
+ */
+export function centralVenueInfoFromRaceId(
+  raceId: string,
+): CentralVenueInfo | null {
+  try {
+    const parsed = parseRaceId(raceId);
+    if (venueKindOfRaceId(parsed) !== "central") {
+      return null;
+    }
+    return {
+      trackCode: parsed.slice(4, 6),
+      round: parsed.slice(6, 8),
+      day: parsed.slice(8, 10),
+    };
   } catch {
     return null;
   }

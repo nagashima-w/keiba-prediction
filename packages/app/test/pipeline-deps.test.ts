@@ -1,5 +1,17 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
-import { parseKaisaiDate, parseRaceId, type FetchLike, type FetchResponse } from "@keiba/core";
+import {
+  AnalysisStore,
+  CLIP_VARIANTS,
+  DEFAULT_ANALYZER_CONFIG,
+  parseKaisaiDate,
+  parseRaceId,
+  resolveClipVariant,
+  type AnthropicMessageResponse,
+  type BuildPromptInput,
+  type FetchLike,
+  type FetchResponse,
+  type MessageSender,
+} from "@keiba/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -26,6 +38,10 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     for (const r of resources.splice(0)) {
       r.close();
     }
+    // vi.spyOn(AnalysisStore.prototype, ...) 等のスパイをテストごとに必ず復元する
+    // (code-reviewer指摘対応: テスト本体末尾の mockRestore() はアサーション失敗時に
+    // 到達せず、スパイが後続テストへ漏れ残る恐れがあったため afterEach に一本化する)。
+    vi.restoreAllMocks();
   });
 
   it("APIキー未設定なら analyze=null・スキップ理由付きで組み立てる", () => {
@@ -36,6 +52,99 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(typeof r.deps.saveAnalysis).toBe("function");
     expect(typeof r.deps.scrape).toBe("function");
     expect(typeof r.listRaces).toBe("function");
+  });
+
+  it("clipVariant未指定なら deps.clipVariant は対照('default')になること(タスクD-2: 配線疎通)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(r.deps.clipVariant).toBe("default");
+    // 実際に parseAnalyzerResponse へ渡る maxAdjust(analyzeRace の deps.maxAdjust)は、
+    // この deps.clipVariant を resolveClipVariant で解決した値と単一ソースで一致する
+    // (pipeline-deps.ts が config.clipVariant を1回だけ解決し、analyzeRace束縛とこのフィールドの
+    // 両方に同じ変数を使っているため。build-prompt.test.ts・clip-variants.test.ts の
+    // 「文面==クリップ幅」一致テストと合わせて全体の単一ソース性を保証する)。
+    expect(resolveClipVariant(r.deps.clipVariant).maxAdjust).toBe(CLIP_VARIANTS.default.maxAdjust);
+  });
+
+  it("clipVariant='wide15' を渡すと deps.clipVariant='wide15'(maxAdjust=0.15)が届くこと(タスクD-2: 配線疎通)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:", clipVariant: "wide15" });
+    resources.push(r);
+    expect(r.deps.clipVariant).toBe("wide15");
+    expect(resolveClipVariant(r.deps.clipVariant).maxAdjust).toBe(0.15);
+  });
+
+  it("clipVariantに不正な値を渡しても対照('default')へフォールバックすること(タスクD-2: 不正値フォールバック)", () => {
+    const r = createPipelineDeps({
+      dbPath: ":memory:",
+      clipVariant: "bogus" as unknown as Parameters<typeof createPipelineDeps>[0]["clipVariant"],
+    });
+    resources.push(r);
+    expect(r.deps.clipVariant).toBe("default");
+  });
+
+  describe("clipVariant→maxAdjustの配線が実際にparseAnalyzerResponseへ届くこと(タスクD-2: code-reviewer指摘対応の回帰テスト)", () => {
+    /**
+     * 常に prior+0.20 相当の place_prob(0.60。prior=0.40固定)を返す固定LLM応答。
+     * config.llmSender(テスト専用の差し替え口。AnthropicLlmClient の既存 deps.sender 注入口を
+     * pipeline-deps.ts が通すだけ)経由で、実ネットワーク・実API課金なしに deps.analyze を
+     * 実際に呼び出して検証できる。◎〇▲△の頭数制約(parseAnalyzerResponseの予想印検証)を
+     * 満たす埋め合わせ馬(馬番2〜4)も含める。
+     */
+    const fixedSender: MessageSender = async (): Promise<AnthropicMessageResponse> => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            horses: [
+              { number: 1, place_prob: 0.6, reason: "テスト応答", mark: "◎" },
+              { number: 2, place_prob: 0.3, reason: "x", mark: "〇" },
+              { number: 3, place_prob: 0.3, reason: "x", mark: "▲" },
+              { number: 4, place_prob: 0.3, reason: "x", mark: "△" },
+            ],
+          }),
+        },
+      ],
+    });
+
+    /** 馬番1(prior=0.40)が対象。2〜4は印の頭数制約を満たすための埋め合わせ。 */
+    function samplePromptInput(): BuildPromptInput {
+      return {
+        race: { courseType: "芝", distance: 1600 },
+        horses: [
+          { umaban: 1, horseName: "対象馬", prior: 0.4, runs: [] },
+          { umaban: 2, horseName: "馬2", prior: 0.3, runs: [] },
+          { umaban: 3, horseName: "馬3", prior: 0.3, runs: [] },
+          { umaban: 4, horseName: "馬4", prior: 0.3, runs: [] },
+        ],
+      };
+    }
+
+    it("clipVariant='wide15': prior+0.20の応答が実際にprior+0.15(0.55)へクリップされること", async () => {
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        clipVariant: "wide15",
+        llmSender: fixedSender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      const h1 = result.horses.find((h) => h.umaban === 1)!;
+      expect(h1.clipped).toBe(true);
+      expect(h1.adjustedProb).toBeCloseTo(0.4 + CLIP_VARIANTS.wide15.maxAdjust, 9); // 0.55
+    });
+
+    it("clipVariant既定(default): 同じprior+0.20の応答がprior+0.10(0.50)へクリップされること(wide15との差分確認)", async () => {
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: fixedSender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      const h1 = result.horses.find((h) => h.umaban === 1)!;
+      expect(h1.clipped).toBe(true);
+      expect(h1.adjustedProb).toBeCloseTo(0.4 + CLIP_VARIANTS.default.maxAdjust, 9); // 0.50
+    });
   });
 
   it("onFallback 未指定なら deps.onFallback は undefined であること(論点E)", () => {
@@ -57,6 +166,117 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(onFallback).toHaveBeenCalledWith("テスト診断メッセージ", {
       raceId: "202605020811",
       stopReason: "max_tokens",
+    });
+  });
+
+  describe("importResult の saveResult DI 配線(タスク#27-A2: 配線落ち検出)", () => {
+    /**
+     * 型だけでは検出できない配線落ち(DIラムダが引数を静かに落としても型検査は通る)を防ぐための
+     * 結合寄りテスト。AnalysisStore.prototype.saveResult をスパイに差し替え、
+     * createPipelineDeps が組み立てる importResult(内部で result-import.ts の
+     * importRaceResult → deps.saveResult → store.saveResult と繋がる)を実際に実行し、
+     * パース結果の courseType(面)がスパイの第3引数まで実際に届くことを確認する。
+     * DIラムダが `(rid, entries) => store.saveResult(rid, entries)` のように引数を落としても
+     * TypeScript 上は合法(コールバック型は少ない引数の実装を許容する)なため、この検出には
+     * 実行時アサーションが必須(型検査だけでは再発を防げない)。
+     */
+    it("合成HTML(芝1200m見出し+最小結果行)を取り込むと、courseType='芝'がstore.saveResultの第3引数まで届くこと", async () => {
+      const saveResultSpy = vi.spyOn(AnalysisStore.prototype, "saveResult");
+
+      // 実サイトアクセスなしの合成HTML。.RaceData01(芝1200m)+ #All_Result_Table の最小行。
+      const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type"
+              ? "text/html; charset=utf-8"
+              : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> =>
+          new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      const outcome = await r.importResult(parseRaceId("202602010607"));
+
+      expect(outcome.status).toBe("imported");
+      expect(saveResultSpy).toHaveBeenCalledTimes(1);
+      const [, , courseType] = saveResultSpy.mock.calls[0]!;
+      expect(courseType).toBe("芝");
+      // スパイの復元は afterEach の vi.restoreAllMocks() に一本化する
+      // (このアサーションが失敗しても復元が漏れないようにするため)。
+    });
+  });
+
+  describe("deps.getRaceResultDetail の配線(タスク#27-C: 当日傾向をプロンプトに反映する配線)", () => {
+    // importResult の saveResult DI 配線テストと同じ合成HTML(芝1200m見出し+最小結果行。実サイト非アクセス)。
+    const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+
+    it("importResultで取り込んだレースの結果詳細(面・着順)をgetRaceResultDetailが返すこと", async () => {
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> => new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      await r.importResult(parseRaceId("202602010607"));
+
+      expect(typeof r.deps.getRaceResultDetail).toBe("function");
+      const detail = r.deps.getRaceResultDetail!(parseRaceId("202602010607"));
+      expect(detail).toBeDefined();
+      expect(detail!.courseType).toBe("芝");
+      expect(detail!.horses).toHaveLength(1);
+      expect(detail!.horses[0]).toMatchObject({ umaban: 1, finishPosition: 1 });
+    });
+
+    it("未取込のレースIDにはundefinedを返すこと", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      expect(r.deps.getRaceResultDetail!(parseRaceId("202605020811"))).toBeUndefined();
     });
   });
 
@@ -158,6 +378,121 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.getVerifyReport("nar").includedAnalysisCount).toBe(0);
   });
 
+  describe("getAnalysisExportInput(分析データのエクスポート用の材料組み立て。Issue#10)", () => {
+    it("対象レースの分析が無ければnullを返すこと", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      expect(r.getAnalysisExportInput(parseRaceId("202605020811"))).toBeNull();
+    });
+
+    it("分析済みレースは会場名・スナップショット付きのStoredAnalysisを返すこと(結果未取込ならresults/resultDetailはundefined)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      r.deps.saveAnalysis({
+        raceId: "202605020811", // 場コード05 → 東京。
+        analyzedAt: "2026-07-08T10:00:00.000Z",
+        model: "claude-sonnet-4-6",
+        rawResponse: "raw",
+        raceSnapshot: { race: { raceName: "テスト" }, horses: [] },
+        horses: [
+          {
+            umaban: 1,
+            prior: 0.5,
+            adjustedProb: 0.5,
+            placeOddsMin: 2.0,
+            ev: 1.0,
+            isPositive: true,
+            contributions: null,
+            mark: null,
+            reason: "根拠",
+          },
+        ],
+      });
+      const input = r.getAnalysisExportInput(parseRaceId("202605020811"))!;
+      expect(input.venueName).toBe("東京");
+      expect(input.analysis.model).toBe("claude-sonnet-4-6");
+      expect(input.analysis.rawResponse).toBe("raw");
+      expect(input.analysis.horses[0]!.reason).toBe("根拠");
+      expect(input.results).toBeUndefined();
+      expect(input.resultDetail).toBeUndefined();
+    });
+
+    it("同一レースを複数回分析していたら最新(id最大)の分析を対象にすること(決定的な選択)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      r.deps.saveAnalysis({
+        raceId: "202605020811",
+        analyzedAt: "2026-07-08T09:00:00.000Z",
+        horses: [],
+      });
+      r.deps.saveAnalysis({
+        raceId: "202605020811",
+        analyzedAt: "2026-07-08T15:00:00.000Z",
+        model: "後発分析",
+        horses: [],
+      });
+      const input = r.getAnalysisExportInput(parseRaceId("202605020811"))!;
+      expect(input.analysis.model).toBe("後発分析");
+    });
+
+    it("結果取込済みならresults/resultDetailが渡ること(importResult経由で実際にrace_resultsへ保存したレース)", async () => {
+      // importResultのsaveResult DI配線テストと同じ合成HTML(芝1200m見出し+最小結果行。実サイト非アクセス)。
+      const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> => new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      r.deps.saveAnalysis({
+        raceId: "202602010607",
+        analyzedAt: "2026-07-08T10:00:00.000Z",
+        horses: [
+          {
+            umaban: 1,
+            prior: 0.5,
+            adjustedProb: 0.5,
+            placeOddsMin: 2.0,
+            ev: 1.0,
+            isPositive: true,
+            contributions: null,
+            mark: null,
+          },
+        ],
+      });
+      await r.importResult(parseRaceId("202602010607"));
+
+      const input = r.getAnalysisExportInput(parseRaceId("202602010607"))!;
+      expect(input.results).toBeDefined();
+      expect(input.results![0]!.finishPosition).toBe(1);
+      expect(input.resultDetail).toBeDefined();
+      expect(input.resultDetail!.courseType).toBe("芝");
+    });
+  });
+
   it("listUnimportedRaceIds が組み立てられ、未分析なら空配列を返すこと(Task#31)", () => {
     const r = createPipelineDeps({ dbPath: ":memory:" });
     resources.push(r);
@@ -176,10 +511,49 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(r.listUnimportedRaceIds()).toEqual(["202605020811"]);
   });
 
+  it("listAnalyzedRaceIdsByPromptVersion が組み立てられ、該当なしなら空配列を返すこと(タスクB2b-1)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    expect(typeof r.listAnalyzedRaceIdsByPromptVersion).toBe("function");
+    expect(r.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+  });
+
+  it("listAnalyzedRaceIdsByPromptVersion が指定版で分析済みのレースIDを返すこと(タスクB2b-1)", () => {
+    const r = createPipelineDeps({ dbPath: ":memory:" });
+    resources.push(r);
+    r.deps.saveAnalysis({
+      raceId: "202605020811",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+      promptVersion: "v1",
+    });
+    r.deps.saveAnalysis({
+      raceId: "202605020812",
+      analyzedAt: "2026-07-08T10:00:00.000Z",
+      horses: [],
+      promptVersion: "v2",
+    });
+    expect(r.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual(["202605020811"]);
+  });
+
   it("APIキーがあれば analyze は関数として組み立てられる", () => {
     const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
     resources.push(r);
     expect(typeof r.deps.analyze).toBe("function");
+  });
+
+  describe("deps.modelName の配線(Issue#10 分析データのエクスポート)", () => {
+    it("APIキーがあれば deps.modelName が既定モデル名(DEFAULT_ANALYZER_CONFIG.model)になること", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:", apiKey: "sk-ant-xxx" });
+      resources.push(r);
+      expect(r.deps.modelName).toBe(DEFAULT_ANALYZER_CONFIG.model);
+    });
+
+    it("APIキー未設定なら deps.modelName は undefined のまま(LLM未使用)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      expect(r.deps.modelName).toBeUndefined();
+    });
   });
 
   it("scorerConfig / evConfig を渡すと deps にそのまま反映される(設定の適用)", () => {

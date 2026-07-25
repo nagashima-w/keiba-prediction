@@ -5,6 +5,7 @@ import {
   distinctVenueNames,
   EMPTY_RACE_LEDGER_FILTER,
   filterRaceLedger,
+  isRaceLedgerFilterActive,
   type RaceLedgerFilter,
 } from "../src/renderer/race-ledger-filter.js";
 
@@ -240,5 +241,75 @@ describe("distinctVenueNames(レース一覧に登場する会場名の重複な
 
   it("空配列を渡せば空配列を返すこと", () => {
     expect(distinctVenueNames([])).toEqual([]);
+  });
+});
+
+describe("isRaceLedgerFilterActive(検証画面: レース一覧の絞り込み条件が何か入力されているか)", () => {
+  it("EMPTY_RACE_LEDGER_FILTER(全軸既定)はfalse(未入力)を返すこと", () => {
+    expect(isRaceLedgerFilterActive(EMPTY_RACE_LEDGER_FILTER)).toBe(false);
+  });
+
+  it("dateFromのみ指定していればtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, dateFrom: "20260701" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
+  });
+
+  it("dateToのみ指定していればtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, dateTo: "20260710" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
+  });
+
+  it("dateFrom・dateTo両方指定していればtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = {
+      ...EMPTY_RACE_LEDGER_FILTER,
+      dateFrom: "20260701",
+      dateTo: "20260710",
+    };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
+  });
+
+  it("venueKind=centralはtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, venueKind: "central" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
+  });
+
+  it("venueKind=narはtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, venueKind: "nar" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
+  });
+
+  it("venueKind=all(既定)はfalseを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, venueKind: "all" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(false);
+  });
+
+  it("venueNameを指定していればtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, venueName: "東京" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
+  });
+
+  it("venueName=null(既定)はfalseを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, venueName: null };
+    expect(isRaceLedgerFilterActive(filter)).toBe(false);
+  });
+
+  it("keywordに文字列を指定していればtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, keyword: "阪神" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
+  });
+
+  it("keyword=空文字列(既定)はfalseを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, keyword: "" };
+    expect(isRaceLedgerFilterActive(filter)).toBe(false);
+  });
+
+  it("keywordが空白のみ(トリムすると空文字列)はfalseを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, keyword: "   " };
+    expect(isRaceLedgerFilterActive(filter)).toBe(false);
+  });
+
+  it("keywordが前後空白を含む非空文字列(トリムすると非空)はtrueを返すこと", () => {
+    const filter: RaceLedgerFilter = { ...EMPTY_RACE_LEDGER_FILTER, keyword: "  x " };
+    expect(isRaceLedgerFilterActive(filter)).toBe(true);
   });
 });

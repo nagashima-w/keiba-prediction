@@ -34,6 +34,11 @@ import {
 export interface BatchAnalysisViewProps {
   /** 選択中のレース数(実行ボタンの有効判定に使う)。 */
   readonly selectedCount: number;
+  /**
+   * 期間バッチが収集中/実行中などの理由で、実行ボタンを外部から無効化するか(タスクC2、
+   * deriveBatchAvailability由来)。省略時は false(従来どおり)。
+   */
+  readonly disabledByOtherBatch?: boolean;
   /** 一括分析の実行中か。 */
   readonly running: boolean;
   /** 中断要求済み(境界での停止待ち)か。 */
@@ -56,6 +61,11 @@ export interface BatchAnalysisViewProps {
   readonly discordSend: DiscordSendState;
   /** 「Discordに送信」操作(サマリ1通)。 */
   readonly onSendDiscord: () => void;
+  /**
+   * 分析データをエクスポートする操作(第一版・GitHub Issue#10)。対象は指定レースの
+   * 「保存済みの最新分析」(main側で決定的に選ぶ。この画面から実行した分析がまさにその最新分析になる)。
+   */
+  readonly onExportAnalysis: (raceId: string) => void;
 }
 
 const thStyle: React.CSSProperties = {
@@ -91,7 +101,11 @@ function batchProgressText(progress: BatchProgress): string {
 }
 
 /** 1レース分の結果テーブル(成功時の詳細)。 */
-function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
+function ResultTable(props: {
+  result: AnalysisResult;
+  /** 分析データをエクスポートする操作(第一版・GitHub Issue#10)。 */
+  onExportAnalysis: (raceId: string) => void;
+}): React.JSX.Element {
   const { result } = props;
   return (
     <div>
@@ -108,6 +122,13 @@ function ResultTable(props: { result: AnalysisResult }): React.JSX.Element {
             ※開催日は当日日付での近似({result.date})
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => props.onExportAnalysis(result.raceId)}
+          style={{ marginLeft: "0.5rem" }}
+        >
+          分析データをエクスポート
+        </button>
       </p>
       {oddsStatusNote(result.oddsStatus) !== null && (
         <p style={{ margin: "0.25rem 0", color: "#a60", fontSize: "0.85rem" }}>
@@ -225,7 +246,11 @@ export function BatchAnalysisView(
         <button
           type="button"
           onClick={props.onRun}
-          disabled={props.selectedCount === 0 || props.running}
+          disabled={
+            props.selectedCount === 0 ||
+            props.running ||
+            (props.disabledByOtherBatch ?? false)
+          }
         >
           {props.running
             ? "分析中…"
@@ -573,7 +598,10 @@ export function BatchAnalysisView(
                   {expanded && (
                     <div style={{ padding: "0.5rem 0.6rem" }}>
                       {entry.status === "success" && entry.result !== null && (
-                        <ResultTable result={entry.result} />
+                        <ResultTable
+                          result={entry.result}
+                          onExportAnalysis={props.onExportAnalysis}
+                        />
                       )}
                       {entry.status === "failure" && (
                         <p style={{ color: "#c00", margin: 0 }}>

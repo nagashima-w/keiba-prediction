@@ -30,6 +30,16 @@ export const RACE_LIST_SELECTORS = {
   raceData: ".RaceData",
   /** 会場見出し内の回次・日次の注記(<small>2回</small> など)。会場名抽出時に除去する。 */
   titleAnnotation: "small",
+  /**
+   * グレードラベル(テキスト方式)。
+   * 実測(2026-06-24 浦和さきたま杯 Jpn1・2026-07-12 盛岡やまびこ賞 重賞・2026-07-13 瑞鳳賞 OP)で、
+   * NARは `Icon_Grade_None_Text Icon_GradeType Icon_GradeType{N} Icon_GradePos01` の内テキストに
+   * "Jpn1"/"重賞"/"OP" 等がそのまま入ることを確認済み(class番号も併記されるがテキストを優先採用)。
+   * 中央は同じ枠が `Icon_GradeType` のみ(Icon_Grade_None_Text クラス無し)で内テキストが常に空の
+   * 画像アイコン方式のため、このセレクタではマッチせず自然に undefined になる。
+   * 詳細: docs/nar-scraping-plan.md。
+   */
+  grade: ".Icon_Grade_None_Text",
 } as const;
 
 /** 出馬表(shutuba.html)のセレクタ。 */
@@ -108,6 +118,12 @@ export const HORSE_RESULTS_SELECTORS = {
  * id=All_Result_Table にスコープする(resultTable 配下でのみ resultRow を探す)。
  */
 export const RACE_RESULT_SELECTORS = {
+  /**
+   * 発走時刻・距離・コース・天候・馬場を含む行(タスク#27-A2: 面〈course_type〉解決に使う)。
+   * SHUTUBA_SELECTORS.raceData01 と値は重複するが、セレクタ群はページ単位で自己完結させる
+   * 既存規約(RACE_LIST_SELECTORS/SHUTUBA_SELECTORS等の作法)に合わせ、ここにも独立して持つ。
+   */
+  raceData01: ".RaceData01",
   /** 全着順テーブル(結果本体)。他テーブルの行と区別するため id で限定する。 */
   resultTable: "#All_Result_Table",
   /**
@@ -126,6 +142,17 @@ export const RACE_RESULT_SELECTORS = {
   numCell: "td.Num",
   /** 馬名リンク(title属性が馬名)。 */
   horseNameLink: "td.Horse_Info span.Horse_Name a",
+  /**
+   * ヘッダ行(thead 配下)。後3F・コーナー通過順の列インデックス解決に使う。
+   * これらの列は複数セルが同じ class(class="Time" 等)を共有し class だけでは区別できないため、
+   * ヘッダテキストから列位置を解決し、データ行側は同じ位置の td を位置ベースで読む
+   * (parse-horse-results がヘッダ列数を基準に検証する流儀に準拠)。
+   */
+  headerRow: "thead tr.Header",
+  /** ヘッダ列セル。 */
+  headerCell: "th",
+  /** データセル(位置ベースで後3F・コーナー通過順を取り出すために使う。resultRow 配下)。 */
+  dataCell: "td",
   /** 払戻テーブル(単勝・複勝・馬連…を含む。ページ内に複数ある)。 */
   payoutTable: "table.Payout_Detail_Table",
   /** 単勝の払戻行。 */
@@ -136,6 +163,18 @@ export const RACE_RESULT_SELECTORS = {
   payoutResult: "td.Result",
   /** 払戻行の払戻金額セル(内部で <br> 区切り。複数点あり)。 */
   payoutAmount: "td.Payout",
+} as const;
+
+/**
+ * レース結果(result.html)のヘッダテキストラベル。
+ * 後3F・コーナー通過順の列インデックスをこのテキストから解決する
+ * (地方(NAR)ではコーナー通過順の列自体が存在しない場合がある)。
+ */
+export const RACE_RESULT_HEADER_LABELS = {
+  /** 後3F列のヘッダテキスト。 */
+  last3f: "後3F",
+  /** コーナー通過順列のヘッダテキスト。 */
+  passing: "コーナー通過順",
 } as const;
 
 /**
@@ -208,6 +247,31 @@ export const PATTERNS = {
   weather: /天候\s*[:：]\s*([^\s<>/]+)/,
   /** 馬場状態を取り出す(例: 馬場:良 → 良)。 */
   trackCondition: /馬場\s*[:：]\s*([^\s<>/]+)/,
+  /**
+   * 芝コース区分(柵)の括弧内容を取り出す(タスク#26-P1)。
+   * 「芝XXXXm」の直後の `(...)` 内のみをキャプチャする(RaceData01全体から `[A-Z]` を
+   * 拾うと他要素の英字を誤って柵と誤認する恐れがあるため、必ず芝の距離表記に直接後続する
+   * 括弧に限定する)。実測(fixtures/shutuba_202602010601.html 等): `芝1200m (右&nbsp;A)`。
+   * \s は ECMAScript の仕様上 U+00A0(&nbsp;)を含むため、実体参照の区切りもそのまま吸収できる。
+   * ダート(`ダXXXXm (右)`)・障害はこのパターンにそもそもマッチしないため、
+   * 呼び出し側で courseType==="芝" のときのみ適用するガードと二重で安全性を確保する。
+   */
+  turfFenceParen: /芝\s*\d+\s*m\s*\(([^)]*)\)/,
+  /**
+   * 芝コース区分(柵)の括弧内容から柵letter(A〜Z単体)を取り出す(タスク#26-P1)。
+   * 括弧内容は `右`/`左`/`直`(回り方向)・`内`/`外`(内外)・柵letterの組み合わせで、
+   * 区切りは実体 `&nbsp;`(U+00A0。\s に含まれる)。内・外・回り方向はいずれも漢字のため
+   * `[A-Z]` に一致せず、柵letterの判別にのみ「柵letterでない」ことの消去法として働く
+   * (これらの語自体を型やフィールドとして持つ必要はない)。
+   *
+   * 採用方針(境界ケースの挙動を明記):
+   * - `(右 外)` のように柵letterが無ければ不一致 → 呼び出し側で null(判別不能)。
+   * - `(右 外 A)` のような複合表記でも、単独の大文字1文字トークンがあれば
+   *   前後の語(外/内)に関わらずそれを柵letterとして安全に抽出する(部分マッチではなく
+   *   単語境界〈空白 or 文字列端〉で区切られた1文字のみを対象にするため、"A"を含む
+   *   別の単語を誤って拾うことはない)。
+   */
+  fenceLetterToken: /(?:^|\s)([A-Z])(?:\s|$)/,
   /** href から trainer_id を取り出す(プロフィール表: /trainer/01126/ 形式)。 */
   trainerIdFromProfileHref: /\/trainer\/(\d+)/,
   /** 括弧内の値を取り出す(例: 木村哲也 (美浦) → 美浦)。半角・全角括弧に対応。 */
@@ -232,4 +296,11 @@ export const PATTERNS = {
   narWinOdds: /^[0-9]+(\.[0-9]+)?$/,
   /** NARオッズの複勝セル(下限 - 上限。例: 6.8 - 8.5)。 */
   narPlaceOddsRange: /^([0-9]+(?:\.[0-9]+)?)\s*-\s*([0-9]+(?:\.[0-9]+)?)$/,
+  /**
+   * 交流重賞(Jpn1/2/3)のグレード表記。半角数字("Jpn1"等)またはローマ数字
+   * ("JpnⅠ"等)のみを受理し、全角数字("Jpn１")は受理しない(実測で確認済みの
+   * "Jpn1" 表記を主対象としつつ、将来のローマ数字表記にも備える)。
+   * 前後の空白は呼び出し側で trim してから照合する想定。
+   */
+  jpnGrade: /^Jpn(?:[123]|[ⅠⅡⅢ])$/,
 } as const;

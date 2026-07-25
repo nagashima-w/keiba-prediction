@@ -119,4 +119,149 @@ describe("parseRaceList(地方(NAR)フィクスチャの互換性)", () => {
     expect(e).toBeDefined();
     expect(Number(e!.raceId.slice(4, 6))).toBe(54);
   });
+
+  it("2026-07-13の唯一のOP表記(帯広ばんえい)はばんえい除外により1件もgrade=\"OP\"として現れないこと", () => {
+    // nar_race_list_sub_20260713.html には Icon_Grade_None_Text(OP)が1件のみ存在するが、
+    // その直前のレースリンクは race_id=202665071311(場コード65=帯広ばんえい)であり、
+    // ばんえい除外ロジック(parseRaceId が場コード65を拒否)により entries には含まれない。
+    // grade抽出の追加によってこのばんえい除外が壊れていないことを明示的に固定する。
+    expect(entries0713.some((e) => e.grade === "OP")).toBe(false);
+    expect(entries0713.find((e) => e.raceId === "202665071311")).toBeUndefined();
+  });
+});
+
+describe("parseRaceList(グレードラベルの抽出)", () => {
+  it("実物のJpn1表記(さきたま杯・浦和、2026-06-24)をアラビア数字の\"Jpn1\"としてexact抽出すること", () => {
+    // 実測: Icon_Grade_None_Text の内テキストはアラビア数字「Jpn1」(ローマ数字ではない)。
+    const html = loadFixture("nar_race_list_sub_20260624.html");
+    const entries = parseRaceList(html);
+    const e = entries.find((x) => x.raceId === "202642062411");
+    expect(e).toBeDefined();
+    expect(e!.grade).toBe("Jpn1");
+  });
+
+  it("実物の地方重賞表記(20260712、非ばんえい2件)を\"重賞\"として抽出すること", () => {
+    const html = loadFixture("nar_race_list_sub_20260712.html");
+    const entries = parseRaceList(html);
+    const yamabiko = entries.find((x) => x.raceId === "202635071211"); // 盛岡・やまびこ賞
+    const kanazawa = entries.find((x) => x.raceId === "202646071210"); // 金沢
+    expect(yamabiko).toBeDefined();
+    expect(yamabiko!.grade).toBe("重賞");
+    expect(kanazawa).toBeDefined();
+    expect(kanazawa!.grade).toBe("重賞");
+  });
+
+  it("OP表記(実物マークアップを忠実に再現した合成HTML)を\"OP\"として抽出すること", () => {
+    // 実物(nar_race_list_sub_20260713.html)で観測した唯一のOP表記は帯広ばんえいのレースで
+    // entriesから除外されてしまうため実データでは検証できない(上のdescribeブロックで別途固定)。
+    // ここでは実測した class 表記
+    //   class="Icon_Grade_None_Text Icon_GradeType Icon_GradeType5 Icon_GradePos01"
+    // をそのまま用い、簡略化せず忠実に再現した合成HTMLで抽出を検証する。
+    const html = `
+<dl class="RaceList_DataList">
+<dt class="RaceList_DataHeader" >
+<p class="RaceList_DataTitle ">
+<small>1回</small>
+盛岡
+<small>1日目</small>
+</p>
+</dt>
+<dd class="RaceList_Data ">
+<ul style="position: relative">
+<li class="RaceList_DataItem ">
+<a href="../race/shutuba.html?race_id=202635071311&rf=race_list" class="">
+<div class="Race_Num">
+<span>
+<span class="MyRace_List_Item" id="myrace_202635071311" style="display: none;"></span>
+11R
+</span>
+</div>
+<div class="RaceList_ItemContent">
+<div class="RaceList_ItemTitle">
+<span class="ItemTitle">瑞鳳賞(OP)</span>
+<span class="Icon_Grade_None_Text Icon_GradeType Icon_GradeType5 Icon_GradePos01">OP</span>
+</div>
+<div class="RaceData">
+<span>20:00</span>
+<span class="Dart">ダ1600m</span>
+10頭
+</div>
+</div>
+</a>
+</li>
+</ul>
+</dd>
+</dl>`;
+    const entries = parseRaceList(html);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.grade).toBe("OP");
+  });
+
+  it("中央(20260628)のグレードアイコンは内テキストが空のため、grade=undefinedのままであること(空文字を拾わない)", () => {
+    // 中央は Icon_Grade_None_Text クラスを持たず、画像アイコン方式(内テキスト空)の
+    // Icon_GradeType のみが付く。空文字を grade="" として拾わず undefined にする契約を固定する。
+    const html = loadFixture("race_list_sub_20260628.html");
+    const entries = parseRaceList(html);
+    const e = entries.find((x) => x.raceId === "202603020209"); // 松島特別(Icon_GradeType17)
+    expect(e).toBeDefined();
+    expect(e!.grade).toBeUndefined();
+  });
+
+  it("グレード表記の無いNARレースはgrade=undefinedであること", () => {
+    const html = loadFixture("nar_race_list_sub_20260712.html");
+    const entries = parseRaceList(html);
+    const e = entries.find((x) => x.raceId === "202635071201"); // ファーストステップ(無印)
+    expect(e).toBeDefined();
+    expect(e!.grade).toBeUndefined();
+  });
+
+  it("境界値: グレード span が存在しない行ではgrade=undefinedであること", () => {
+    const html = `
+<dl class="RaceList_DataList">
+<dd class="RaceList_Data ">
+<ul>
+<li class="RaceList_DataItem ">
+<a href="../race/shutuba.html?race_id=202601010101&rf=race_list" class="">
+<div class="Race_Num"><span>1R</span></div>
+<div class="RaceList_ItemContent">
+<div class="RaceList_ItemTitle">
+<span class="ItemTitle">3歳未勝利</span>
+</div>
+<div class="RaceData"><span>10:00</span><span class="Dart">ダ1200m</span>10頭</div>
+</div>
+</a>
+</li>
+</ul>
+</dd>
+</dl>`;
+    const entries = parseRaceList(html);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.grade).toBeUndefined();
+  });
+
+  it("境界値: グレード span が複数存在する行では先頭のspanを採用すること", () => {
+    const html = `
+<dl class="RaceList_DataList">
+<dd class="RaceList_Data ">
+<ul>
+<li class="RaceList_DataItem ">
+<a href="../race/shutuba.html?race_id=202601010101&rf=race_list" class="">
+<div class="Race_Num"><span>1R</span></div>
+<div class="RaceList_ItemContent">
+<div class="RaceList_ItemTitle">
+<span class="ItemTitle">架空重賞</span>
+<span class="Icon_Grade_None_Text Icon_GradeType Icon_GradeType19 Icon_GradePos01">Jpn1</span>
+<span class="Icon_Grade_None_Text Icon_GradeType Icon_GradeType4 Icon_GradePos01">重賞</span>
+</div>
+<div class="RaceData"><span>10:00</span><span class="Dart">ダ1200m</span>10頭</div>
+</div>
+</a>
+</li>
+</ul>
+</dd>
+</dl>`;
+    const entries = parseRaceList(html);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.grade).toBe("Jpn1");
+  });
 });

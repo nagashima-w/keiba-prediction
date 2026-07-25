@@ -608,6 +608,212 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("エクスポート用列(model/rawResponse/raceSnapshot/reason)の保存・復元(Issue#10)", () => {
+    it("model・rawResponse・raceSnapshot・各馬reasonを指定して保存すると、そのまま復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "LLM使用レース",
+          model: "claude-sonnet-4-6",
+          rawResponse: '{"horses":[]}',
+          raceSnapshot: { race: { raceName: "テストS" } },
+          horses: [
+            {
+              umaban: 1,
+              prior: 0.3,
+              adjustedProb: 0.35,
+              placeOddsMin: 2.5,
+              ev: 0.9,
+              isPositive: false,
+              contributions: null,
+              mark: "◎",
+              reason: "調教良化",
+            },
+            {
+              umaban: 2,
+              prior: 0.5,
+              adjustedProb: 0.5,
+              placeOddsMin: 2.2,
+              ev: 1.1,
+              isPositive: true,
+              contributions: null,
+              mark: null,
+              reason: null,
+            },
+          ],
+        }),
+      );
+      const a = store.listAnalyses({ raceId: "LLM使用レース" })[0]!;
+      expect(a.model).toBe("claude-sonnet-4-6");
+      expect(a.rawResponse).toBe('{"horses":[]}');
+      expect(a.raceSnapshot).toEqual({ race: { raceName: "テストS" } });
+      expect(a.horses.find((h) => h.umaban === 1)!.reason).toBe("調教良化");
+      expect(a.horses.find((h) => h.umaban === 2)!.reason).toBeNull();
+      store.close();
+    });
+
+    it("model・rawResponse・raceSnapshotを省略して保存するとnullとして保存・復元されること(LLMスキップ想定・後方互換の既定値)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "LLMスキップレース" }));
+      const a = store.listAnalyses({ raceId: "LLMスキップレース" })[0]!;
+      expect(a.model).toBeNull();
+      expect(a.rawResponse).toBeNull();
+      expect(a.raceSnapshot).toBeNull();
+      expect(a.horses.every((h) => h.reason === null)).toBe(true);
+      store.close();
+    });
+
+    it("model・rawResponseにnullを明示してもLLMスキップ想定としてnullで保存・復元されること(raceSnapshotのみ保存する運用を許容)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "スナップショットのみレース",
+          model: null,
+          rawResponse: null,
+          raceSnapshot: { race: { raceName: "スナップショットのみ" } },
+          horses: [
+            {
+              umaban: 1,
+              prior: 0.3,
+              adjustedProb: 0.3,
+              placeOddsMin: 2.5,
+              ev: 0.9,
+              isPositive: false,
+              contributions: null,
+              mark: null,
+              reason: null,
+            },
+          ],
+        }),
+      );
+      const a = store.listAnalyses({ raceId: "スナップショットのみレース" })[0]!;
+      expect(a.model).toBeNull();
+      expect(a.rawResponse).toBeNull();
+      expect(a.raceSnapshot).toEqual({ race: { raceName: "スナップショットのみ" } });
+      store.close();
+    });
+  });
+
+  describe("model/raw_response/race_snapshot_json・reason列の後方互換マイグレーション(Issue#10)", () => {
+    it("これらの列が無い旧スキーマのDBを開いても、既存分析はmodel/rawResponse/raceSnapshot=null・reason=nullで読め、新規保存は新列付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // Issue#10より前のバージョン相当のスキーマ(analysesにmodel/raw_response/race_snapshot_json列、
+      // analysis_horsesにreason列が無い)を直接作る。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL,
+          ev_estimated INTEGER,
+          prompt_version TEXT,
+          additional_instruction TEXT,
+          kaisai_date TEXT
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      // 旧バージョンで保存済みの既存データ(新列自体が存在しない状態での保存を模す)。
+      const info = db
+        .prepare(
+          `INSERT INTO analyses (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run("旧レース2", "2026-01-01T00:00:00.000Z", 0, null, null, null);
+      const oldAnalysisId = Number(info.lastInsertRowid);
+      db.prepare(
+        `INSERT INTO analysis_horses
+           (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(oldAnalysisId, 1, 0.4, 0.4, 2.0, 0.8, 0, null, null);
+
+      // 新バージョンの AnalysisStore で開く(新列が無ければ ALTER TABLE で追加されるはず)。
+      const store = new AnalysisStore({ database: db });
+
+      // 旧分析は新列を後付けしても既存行はmodel/rawResponse/raceSnapshot=null・reason=nullとして読める。
+      const old = store.listAnalyses({ raceId: "旧レース2" })[0]!;
+      expect(old.model).toBeNull();
+      expect(old.rawResponse).toBeNull();
+      expect(old.raceSnapshot).toBeNull();
+      expect(old.horses[0]!.reason).toBeNull();
+
+      // 新規保存(新列付き)も問題なく動作する(後方互換を確認)。
+      const newId = store.saveAnalysis(
+        makeRecord({
+          raceId: "新レース2",
+          model: "claude-sonnet-4-6",
+          rawResponse: "raw",
+          raceSnapshot: { race: { raceName: "新レース" } },
+          horses: [
+            {
+              umaban: 1,
+              prior: 0.4,
+              adjustedProb: 0.4,
+              placeOddsMin: 2.0,
+              ev: 0.8,
+              isPositive: false,
+              contributions: null,
+              mark: null,
+              reason: "理由",
+            },
+          ],
+        }),
+      );
+      const saved = store.listAnalyses({ raceId: "新レース2" })[0]!;
+      expect(saved.id).toBe(newId);
+      expect(saved.model).toBe("claude-sonnet-4-6");
+      expect(saved.rawResponse).toBe("raw");
+      expect(saved.raceSnapshot).toEqual({ race: { raceName: "新レース" } });
+      expect(saved.horses[0]!.reason).toBe("理由");
+
+      store.close();
+    });
+
+    it("同一DBで2回目のAnalysisStore構築(再オープン相当)でもALTER TABLEが再実行されず、既存データを保持すること(冪等性)", () => {
+      const db = new Database(":memory:");
+      const store1 = new AnalysisStore({ database: db });
+      store1.saveAnalysis(
+        makeRecord({
+          raceId: "冪等性レース2",
+          model: "claude-sonnet-4-6",
+          rawResponse: "raw",
+          raceSnapshot: { race: { raceName: "冪等性" } },
+          horses: [
+            {
+              umaban: 1,
+              prior: 0.4,
+              adjustedProb: 0.4,
+              placeOddsMin: 2.0,
+              ev: 0.8,
+              isPositive: false,
+              contributions: null,
+              mark: null,
+              reason: "理由",
+            },
+          ],
+        }),
+      );
+      expect(() => new AnalysisStore({ database: db })).not.toThrow();
+      const store2 = new AnalysisStore({ database: db });
+      const a = store2.listAnalyses({ raceId: "冪等性レース2" })[0]!;
+      expect(a.model).toBe("claude-sonnet-4-6");
+      expect(a.rawResponse).toBe("raw");
+      expect(a.raceSnapshot).toEqual({ race: { raceName: "冪等性" } });
+      expect(a.horses[0]!.reason).toBe("理由");
+      db.close();
+    });
+  });
+
   describe("listUnimportedRaceIds(分析済みで結果未取込のレース列挙。Task#31)", () => {
     it("分析済みだが race_results に行が1件も無いレースを列挙すること", () => {
       const store = new AnalysisStore();
@@ -673,6 +879,63 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.saveAnalysis(makeRecord({ raceId: "C取込済み" }));
       store.saveResult("C取込済み", [{ umaban: 1, finishPosition: 1 }]);
       expect(store.listUnimportedRaceIds()).toEqual(["A未取込", "B未取込"]);
+      store.close();
+    });
+  });
+
+  describe("listAnalyzedRaceIdsByPromptVersion(指定版で分析済みのレース列挙。タスクB2b-1)", () => {
+    it("指定した版と一致する分析があるレースIDをDISTINCTで列挙すること(同一レースの複数分析でも1件)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "複数回分析レース",
+          promptVersion: "v1",
+          analyzedAt: "2026-07-08T09:00:00.000Z",
+        }),
+      );
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "複数回分析レース",
+          promptVersion: "v1",
+          analyzedAt: "2026-07-08T15:00:00.000Z",
+        }),
+      );
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([
+        "複数回分析レース",
+      ]);
+      store.close();
+    });
+
+    it("別版のみで分析済みのレースは列挙されないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "別版レース", promptVersion: "v2" }));
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+      store.close();
+    });
+
+    it("prompt_versionがnull(LLM未使用・旧データ)の分析は列挙されないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "版不明レース", promptVersion: null }));
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+      store.close();
+    });
+
+    it("該当する分析が1件も無ければ空配列を返すこと", () => {
+      const store = new AnalysisStore();
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([]);
+      store.close();
+    });
+
+    it("指定版のレースIDのみをレースID昇順で列挙すること(別版・null混在)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "B対象", promptVersion: "v1" }));
+      store.saveAnalysis(makeRecord({ raceId: "A対象", promptVersion: "v1" }));
+      store.saveAnalysis(makeRecord({ raceId: "C別版", promptVersion: "v2" }));
+      store.saveAnalysis(makeRecord({ raceId: "D版不明", promptVersion: null }));
+      expect(store.listAnalyzedRaceIdsByPromptVersion("v1")).toEqual([
+        "A対象",
+        "B対象",
+      ]);
       store.close();
     });
   });
@@ -764,6 +1027,299 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       const store = new AnalysisStore();
       store.saveAnalysis(makeRecord({ raceId: "版不明レース" }));
       expect(() => store.deleteAnalysesWithUnknownPromptVersion()).not.toThrow();
+      store.close();
+    });
+  });
+
+  describe("結果詳細列(passing_json/last3f)の後方互換マイグレーション(タスク#27-A2)", () => {
+    it("passing_json/last3f列が無い旧スキーマのDBを開いても、既存結果行はpassing=[]・last3f=nullで読め、新規保存は詳細付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // タスク#27-A2より前のバージョン相当のスキーマ(race_resultsにpassing_json/last3f列が無い)を直接作る。
+      db.exec(`
+        CREATE TABLE race_results (
+          race_id TEXT NOT NULL,
+          umaban INTEGER NOT NULL,
+          finish_position INTEGER,
+          place_payout REAL,
+          PRIMARY KEY (race_id, umaban)
+        );
+      `);
+      // 旧バージョンで保存済みの既存データ(passing_json/last3f列自体が存在しない状態での保存を模す)。
+      db.prepare(
+        `INSERT INTO race_results (race_id, umaban, finish_position, place_payout) VALUES (?, ?, ?, ?)`,
+      ).run("旧結果レース", 1, 1, 210);
+
+      // 新バージョンの AnalysisStore で開く(passing_json/last3f列が無ければ ALTER TABLE で追加されるはず)。
+      const store = new AnalysisStore({ database: db });
+
+      // 旧結果行はpassing_json/last3f列を後付けしても既存行はpassing=[]・last3f=nullとして読める。
+      const oldDetail = store.getRaceResultDetail("旧結果レース")!;
+      const oldHorse = oldDetail.horses.find((h) => h.umaban === 1)!;
+      expect(oldHorse.passing).toEqual([]);
+      expect(oldHorse.last3f).toBeNull();
+
+      // 新規保存(通過順・後3F付き)も問題なく動作する(後方互換を確認)。
+      store.saveResult("新結果レース", [
+        { umaban: 1, finishPosition: 1, passing: [2, 3, 4, 3], last3f: 35.2 },
+      ]);
+      const newDetail = store.getRaceResultDetail("新結果レース")!;
+      const newHorse = newDetail.horses.find((h) => h.umaban === 1)!;
+      expect(newHorse.passing).toEqual([2, 3, 4, 3]);
+      expect(newHorse.last3f).toBe(35.2);
+
+      store.close();
+    });
+
+    it("同一DBで2回目のAnalysisStore構築(再オープン相当)でもALTER TABLEが再実行されず、既存データを保持すること(冪等性)", () => {
+      const db = new Database(":memory:");
+      const store1 = new AnalysisStore({ database: db });
+      store1.saveResult("R1", [
+        { umaban: 1, finishPosition: 1, passing: [1, 1], last3f: 34.0 },
+      ]);
+      // 同じDBで再度AnalysisStoreを構築(再オープン相当)してもエラーにならない。
+      expect(() => new AnalysisStore({ database: db })).not.toThrow();
+      const store2 = new AnalysisStore({ database: db });
+      const detail = store2.getRaceResultDetail("R1")!;
+      expect(detail.horses[0]!.passing).toEqual([1, 1]);
+      expect(detail.horses[0]!.last3f).toBe(34.0);
+      db.close();
+    });
+  });
+
+  describe("race_result_metaテーブルの新設(タスク#27-A2)", () => {
+    it("race_result_metaテーブルが存在しない旧DBでAnalysisStoreを開くとテーブルが作成され、面付き保存ができること", () => {
+      const db = new Database(":memory:");
+      // 旧バージョン相当: race_result_meta自体が無い(race_resultsのみの最小スキーマ)。
+      db.exec(`
+        CREATE TABLE race_results (
+          race_id TEXT NOT NULL,
+          umaban INTEGER NOT NULL,
+          finish_position INTEGER,
+          PRIMARY KEY (race_id, umaban)
+        );
+      `);
+      const store = new AnalysisStore({ database: db });
+      // 面付きで保存でき、race_result_metaへ書き込めること(テーブルが無ければエラーになるはず)。
+      expect(() =>
+        store.saveResult("面テストレース", [{ umaban: 1, finishPosition: 1 }], "芝"),
+      ).not.toThrow();
+      expect(store.getRaceResultDetail("面テストレース")!.courseType).toBe("芝");
+      store.close();
+    });
+
+    it("同一DBで2回目のAnalysisStore構築(再オープン相当)でもCREATE TABLE IF NOT EXISTSがno-opで既存courseTypeを保持すること", () => {
+      const db = new Database(":memory:");
+      const store1 = new AnalysisStore({ database: db });
+      store1.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], "ダ");
+      const store2 = new AnalysisStore({ database: db });
+      expect(store2.getRaceResultDetail("R1")!.courseType).toBe("ダ");
+      db.close();
+    });
+  });
+
+  describe("getRaceResultDetail(passing/last3f/course_typeの2テーブルround-trip。タスク#27-A2)", () => {
+    it("passing=[]・last3f=null・courseType未指定(面行なし)を保存すると、その通りに復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [
+        { umaban: 1, finishPosition: 1, passing: [], last3f: null },
+      ]);
+      const detail = store.getRaceResultDetail("R1")!;
+      expect(detail.courseType).toBeNull();
+      const h = detail.horses.find((x) => x.umaban === 1)!;
+      expect(h.passing).toEqual([]);
+      expect(h.last3f).toBeNull();
+      store.close();
+    });
+
+    it("passing=[2,3,4,3]・last3f=35.2・courseType='芝'を保存すると、その通りに復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveResult(
+        "R1",
+        [{ umaban: 4, finishPosition: 1, passing: [2, 3, 4, 3], last3f: 35.2 }],
+        "芝",
+      );
+      const detail = store.getRaceResultDetail("R1")!;
+      expect(detail.courseType).toBe("芝");
+      const h = detail.horses.find((x) => x.umaban === 4)!;
+      expect(h.passing).toEqual([2, 3, 4, 3]);
+      expect(h.last3f).toBe(35.2);
+      store.close();
+    });
+
+    it.each([["芝"], ["ダ"], ["障"]] as const)(
+      "courseType='%s'を保存すると、その値のまま復元できること",
+      (courseType) => {
+        const store = new AnalysisStore();
+        store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], courseType);
+        expect(store.getRaceResultDetail("R1")!.courseType).toBe(courseType);
+        store.close();
+      },
+    );
+
+    it("1件も保存されていないレースは undefined を返すこと", () => {
+      const store = new AnalysisStore();
+      expect(store.getRaceResultDetail("未保存")).toBeUndefined();
+      store.close();
+    });
+
+    it("finishPositionがnull(中止・除外)の馬でもumaban/finishPosition/passing/last3fが復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [
+        { umaban: 5, finishPosition: null, passing: [3], last3f: 36.5 },
+      ]);
+      const h = store.getRaceResultDetail("R1")!.horses.find((x) => x.umaban === 5)!;
+      expect(h.finishPosition).toBeNull();
+      expect(h.passing).toEqual([3]);
+      expect(h.last3f).toBe(36.5);
+      store.close();
+    });
+
+    // code-reviewer指摘対応: 保存順(逆順)に依存せず、常に馬番昇順で返す契約を専用テストで固定する。
+    it("複数馬を馬番の逆順(9→4→2)で保存しても、馬番昇順(2→4→9)で返ること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [
+        { umaban: 9, finishPosition: 3 },
+        { umaban: 4, finishPosition: 1 },
+        { umaban: 2, finishPosition: 2 },
+      ]);
+      const detail = store.getRaceResultDetail("R1")!;
+      expect(detail.horses.map((h) => h.umaban)).toEqual([2, 4, 9]);
+      store.close();
+    });
+  });
+
+  describe("saveResultの原子性(race_results/race_result_metaを単一トランザクションで書くこと。タスク#27-A2)", () => {
+    it("courseType指定時、race_resultsとrace_result_metaの両方が書かれること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], "芝");
+      const resultRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_results WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const metaRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_result_meta WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      expect(resultRow.c).toBe(1);
+      expect(metaRow.c).toBe(1);
+      store.close();
+    });
+
+    it("courseType未指定(省略)でも、race_results側は必ず書かれ、race_result_metaには行を作らないこと", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const resultRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_results WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const metaRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_result_meta WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      expect(resultRow.c).toBe(1);
+      expect(metaRow.c).toBe(0);
+      store.close();
+    });
+
+    it("courseTypeにnullを明示しても、race_result_metaへ行を作らずcourseType=nullとして復元されること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null);
+      const metaRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_result_meta WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      expect(metaRow.c).toBe(0);
+      expect(store.getRaceResultDetail("R1")!.courseType).toBeNull();
+      store.close();
+    });
+  });
+
+  describe("防御的復元(passing_json破損・course_type未知値。タスク#27-A2)", () => {
+    it("passing_jsonがNULLの行は passing=[] として復元されること(旧データ・列追加直後の想定)", () => {
+      const store = new AnalysisStore();
+      store.rawDatabase
+        .prepare(
+          `INSERT INTO race_results (race_id, umaban, finish_position, place_payout, passing_json, last3f)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run("破損レース", 1, 1, null, null, null);
+      const h = store
+        .getRaceResultDetail("破損レース")!
+        .horses.find((x) => x.umaban === 1)!;
+      expect(h.passing).toEqual([]);
+      store.close();
+    });
+
+    it("passing_jsonが不正なJSON文字列の行は passing=[] として復元されること(throwしない)", () => {
+      const store = new AnalysisStore();
+      store.rawDatabase
+        .prepare(
+          `INSERT INTO race_results (race_id, umaban, finish_position, place_payout, passing_json, last3f)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run("不正JSONレース", 1, 1, null, "{不正", null);
+      const h = store
+        .getRaceResultDetail("不正JSONレース")!
+        .horses.find((x) => x.umaban === 1)!;
+      expect(h.passing).toEqual([]);
+      store.close();
+    });
+
+    // code-reviewer指摘対応: toStoredPassingが Array.isArray ガードと .every ガードの
+    // それぞれを別々に通る境界値(非配列JSON / 配列内に非数値混入)を回帰テストとして固定する。
+    // 将来どちらかのガードが弱化・削除されても、この2ケースで検知できるようにする。
+    it.each([
+      ["非配列JSON(オブジェクト)", '{"a":1}'],
+      ["非配列JSON(文字列)", '"2-3-4"'],
+      ["配列内に非数値混入", '[1,"a",3]'],
+    ])(
+      "passing_jsonが%s(%s)の場合は passing=[] として復元されること(throwしない)",
+      (_label, rawJson) => {
+        const store = new AnalysisStore();
+        store.rawDatabase
+          .prepare(
+            `INSERT INTO race_results (race_id, umaban, finish_position, place_payout, passing_json, last3f)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run("防御的復元境界値レース", 1, 1, null, rawJson, null);
+        const h = store
+          .getRaceResultDetail("防御的復元境界値レース")!
+          .horses.find((x) => x.umaban === 1)!;
+        expect(h.passing).toEqual([]);
+        store.close();
+      },
+    );
+
+    it("course_typeが未知の文字列の行は courseType=null として復元されること(throwしない)", () => {
+      const store = new AnalysisStore();
+      store.rawDatabase
+        .prepare(
+          `INSERT INTO race_results (race_id, umaban, finish_position) VALUES (?, ?, ?)`,
+        )
+        .run("未知面レース", 1, 1);
+      store.rawDatabase
+        .prepare(`INSERT INTO race_result_meta (race_id, course_type) VALUES (?, ?)`)
+        .run("未知面レース", "未知値");
+      expect(store.getRaceResultDetail("未知面レース")!.courseType).toBeNull();
+      store.close();
+    });
+  });
+
+  describe("非破壊回帰: getResultは従来どおりの出力を維持すること(タスク#27-A2)", () => {
+    it("passing/last3f/courseTypeを保存した後もgetResultはumaban/finishPosition/placePayoutのみを返すこと", () => {
+      const store = new AnalysisStore();
+      store.saveResult(
+        "R1",
+        [
+          {
+            umaban: 1,
+            finishPosition: 1,
+            placePayout: 210,
+            passing: [2, 3],
+            last3f: 35.0,
+          },
+        ],
+        "芝",
+      );
+      const results = store.getResult("R1")!;
+      expect(results).toEqual([
+        { umaban: 1, finishPosition: 1, placePayout: 210 },
+      ]);
       store.close();
     });
   });

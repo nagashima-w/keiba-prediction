@@ -264,6 +264,18 @@ export function additionalInstructionsFullText(
     .join(" / ");
 }
 
+/**
+ * プロンプト版別キャリブレーション表(D-1)の折りたたみ見出し。
+ * 版番号(promptVersionLabel)にその版で使われた追加指示の要約(additionalInstructionsSummary)を
+ * 併記し、「どの条件の較正か」を展開前から一目で分かるようにする。
+ */
+export function promptVersionCalibrationHeading(
+  promptVersion: string | null,
+  additionalInstructions: readonly (string | null)[],
+): string {
+  return `${promptVersionLabel(promptVersion)} (追加指示: ${additionalInstructionsSummary(additionalInstructions)})`;
+}
+
 /** YYYYMMDD形式かどうか(8桁数字)。 */
 function isYyyymmdd(value: string): boolean {
   return /^[0-9]{8}$/.test(value);
@@ -355,8 +367,11 @@ export function payoutSourceLabel(
 
 /**
  * レース一覧の絞り込み結果件数表示(検索/絞り込み機能)。
- * 絞り込みなし(全件表示)・該当0件のいずれも同じ「全N件中M件表示」の形式にし、
- * 該当0件時の穏やかな案内文はUI側(VerifyView)で別途出す(この関数は件数表示のみを担う)。
+ * shownCountには表示中の件数(Task#25以降は絞り込み未入力時も含めてVerifyViewが実際に描画する
+ * 件数=displayedRaceLedger.lengthを渡す)を受け取り、「全N件中M件表示」の形式で返す。
+ * 絞り込み未入力(=一覧を表示しない)なら「全N件中0件表示」、該当0件の絞り込み結果も
+ * 同様に「全N件中0件表示」になる(両者の穏やかな案内文の出し分けはUI側(VerifyView)が担う。
+ * この関数は件数表示のみを担う)。
  */
 export function raceLedgerFilterSummary(
   totalCount: number,

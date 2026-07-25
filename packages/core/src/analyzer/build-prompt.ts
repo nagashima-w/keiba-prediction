@@ -33,8 +33,95 @@
  * (favoredStyles/disfavoredStyles)自体の対応表も、地方(nar)向けに leg-style.ts の
  * buildRaceDevelopment(venueKind/trackCondition引数追加)側で切り替わるようにした
  * (中央/venueKind未指定は従来表のまま変更なし)。既存4行の文言・出力スキーマ・予想印の指示は不変。
+ *
+ * タスクD-2(クリップ幅の版切替・±10%↔±15%のA/B・2026-07-21 boss着手前ゲート合意):
+ * この PROMPT_VERSION 定数自体は対照(clipVariant="default")用の値であり、D-2自身のスコープでは
+ * 変更しない(...clip010 へ改名しない、の意)。新設した clip-variants.ts の
+ * CLIP_VARIANTS.default.promptVersion と同一の値をここに置いている(このファイル側が定義元、
+ * clip-variants.ts はここから参照しない循環を避けるため独立に同じ文字列を持つ。ズレはテストで固定する)。
+ * 新版(wide15)は CLIP_VARIANTS.wide15.promptVersion(対照の値+"-clip"+幅を3桁で表した値。
+ * 例: 幅0.15→"clip015")を使う。buildPrompt は input.clipVariant(省略時は対照)に応じて
+ * 【指示】【追加指示】ブロックの許容幅表記(±10%(絶対値0.10) 等)だけを CLIP_VARIANTS から
+ * 機械導出し、他の文言・出力スキーマは不変。
+ *
+ * #26-P3: 中央芝で芝コースの開催進行(開催回・日次・柵の事実)を1行追加。方向は断定せず材料として
+ * 提示。他文面・出力スキーマ不変。この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随した(ユーザー確定事項A: 対照更新時、
+ * 新版は必ず追随する運用に確定。D-2時点の「追随するかはその時点の合意による」という運用は
+ * この固定ルールに置き換えた。詳細は clip-variants.ts 冒頭コメント参照)。
+ *
+ * #27-C(当日傾向をプロンプトに反映する配線。2026-07-23 boss着手前ゲート合意): 【レース情報】末尾
+ * (turfWearHintの後)に、当日・同一場・同一面の確定済み結果から集計した傾向(same-day-trend.ts の
+ * summarizeSameDayTrend)を1行追加できるようにした。呼び出し側(analysis-pipeline.ts)が
+ * collectSameDayTrend で算出した SameDayTrendSummary を race.sameDayTrend として渡したときだけ描画し、
+ * 脚質傾向が「データ不足」ならブロックごと非表示、内外傾向・上がり傾向は値がある指標だけ列挙する
+ * (turfWearHintと同じ非破壊optionalの spread-omit 流儀。未指定なら既存文面バイト不変)。
+ * 他文面・出力スキーマは不変。この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #6(馬体重トレンドをプロンプトに反映。未使用パラメータ活用①。2026-07-23 boss着手前ゲート合意):
+ * 各馬行の「過去ペース傾向」の直後に「馬体重推移=」を1項目追加できるようにした。呼び出し側
+ * (analysis-pipeline.ts)が body-weight-trend.ts の summarizeBodyWeightTrend で算出した
+ * BodyWeightTrendSummary を PromptHorse.bodyWeightTrend として渡したときだけ、その馬の行に
+ * この項目を描画する(turfWearHint/sameDayTrendと同じ非破壊optionalの spread-omit 流儀。
+ * 未指定〈undefined/null〉の馬はこの項目自体を出さず、既存行バイト不変)。bodyWeight.diff
+ * (前走比の増減)は既にscorerが使用済みのため、この配線はweight(絶対値)の推移をLLM向けに
+ * 表出するプロンプト専用の追加であり、scorer側の計算(base-score.ts等)には一切影響しない。
+ * 他文面・出力スキーマは不変。この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #7(過去走の人気・オッズ乖離をプロンプトに反映。未使用パラメータ活用②。
+ * 2026-07-23 boss着手前ゲート合意): 各馬行の「条件替わり(#19)」の直後に「人気着順乖離=」を
+ * 1項目追加できるようにした。呼び出し側(analysis-pipeline.ts)が market-gap.ts の
+ * summarizeMarketGap で算出した MarketGapSummary を PromptHorse.marketGap として渡したときだけ、
+ * その馬の行にこの項目を描画する(bodyWeightTrend/turfWearHintと同じ非破壊optionalの spread-omit
+ * 流儀。未指定〈undefined/null〉の馬はこの項目自体を出さず、既存行バイト不変)。
+ * ninki/finishPosition/entryCountは既にscraperがパース済みだがscorer側で未使用のパラメータであり、この配線は
+ * それらを LLM 向けに表出するプロンプト専用の追加であって、scorer/prior.ts・base-score.ts・
+ * bias-*.ts の計算には一切影響しない(当日オッズ〈winOdds/popularity〉にも波及しない。
+ * ②は過去走由来の材料で当日オッズとは別軸)。他文面・出力スキーマは不変。
+ * この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #8(乗り替わり〈騎手の継続/変更〉をプロンプトに反映。未使用パラメータ活用③。
+ * 2026-07-23 boss着手前ゲート合意): 各馬行の「人気着順乖離(#7)」の直後に、今走騎手と前走
+ * (results[0])騎手の継続/乗り替わりを1項目追加できるようにした。呼び出し側
+ * (analysis-pipeline.ts)が jockey-change.ts の summarizeJockeyChange で算出した
+ * JockeyChangeSummary を PromptHorse.jockeyChange として渡したときだけ、その馬の行に
+ * note の内容(例:「騎手=武豊(前走から継続)」)をそのまま追記する(marketGap/bodyWeightTrend/
+ * turfWearHintと同じ非破壊optionalの spread-omit 流儀。未指定〈undefined/null〉の馬はこの項目
+ * 自体を出さず、既存行バイト不変)。jockeyId/jockeyNameは既にscraperがパース済みだが
+ * scorer側は騎手継続性を判定材料として使っていない未使用のパラメータであり、この配線は
+ * それらをLLM向けに表出するプロンプト専用の追加であって、scorer/prior.ts・base-score.ts・
+ * bias-*.ts の計算には一切影響しない。他文面・出力スキーマは不変。
+ * この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * #9(過去走の着差をプロンプトに反映。未使用パラメータ活用④。
+ * 2026-07-23 boss着手前ゲート合意・ユーザー確定): 各馬行の「乗り替わり(#8)」の直後に
+ * 「着差傾向=」を1項目追加できるようにした。呼び出し側(analysis-pipeline.ts)が
+ * margin-trend.ts の summarizeMarginTrend で算出した MarginTrendSummary を
+ * PromptHorse.marginTrend として渡したときだけ、その馬の行にこの項目を描画する
+ * (jockeyChange/marketGap/bodyWeightTrend/turfWearHintと同じ非破壊optionalの spread-omit
+ * 流儀。未指定〈undefined/null〉の馬はこの項目自体を出さず、既存行バイト不変)。marginは
+ * 既にscraperがパース済みだがscorer側で未使用のパラメータであり、この配線はそれをLLM向けに
+ * 表出するプロンプト専用の追加であって、scorer/prior.ts・base-score.ts・bias-*.ts の計算には
+ * 一切影響しない。勝敗は着差の符号ではなく finishPosition で分類する(margin==0の勝ち/敗け
+ * 両方が実在するため。詳細は margin-trend.ts 冒頭コメント参照)。他文面・出力スキーマは不変。
+ * この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-19.3";
+export const PROMPT_VERSION = "2026-07-23.5";
+
+export {
+  CLIP_VARIANTS,
+  clipAbsoluteLabel,
+  clipPercentLabel,
+  DEFAULT_CLIP_VARIANT_ID,
+  resolveClipVariant,
+  type ClipVariant,
+  type ClipVariantId,
+} from "./clip-variants.js";
 
 /**
  * プロンプト構築 — 1レース分の情報を LLM 用の1つのテキストにまとめる純関数。
@@ -57,6 +144,18 @@ export const PROMPT_VERSION = "2026-07-19.3";
 import type { CourseType } from "../scraper/types.js";
 import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
+import type { SameDayTrendSummary } from "./same-day-trend.js";
+import type { TurfWearHint } from "./turf-wear.js";
+import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
+import type { MarketGapSummary } from "./market-gap.js";
+import type { JockeyChangeSummary } from "./jockey-change.js";
+import type { MarginTrendSummary } from "./margin-trend.js";
+import {
+  clipAbsoluteLabel,
+  clipPercentLabel,
+  resolveClipVariant,
+  type ClipVariantId,
+} from "./clip-variants.js";
 import {
   computeConditionChangeTags,
   type ConditionChangeRun,
@@ -102,6 +201,46 @@ export interface PromptHorse {
    * 条件替わりタグは全て「なし」になる(例外にはならない)。
    */
   readonly runConditions?: readonly ConditionChangeRun[];
+  /**
+   * 馬体重トレンド(タスク#6・未使用パラメータ活用①。body-weight-trend.ts の
+   * summarizeBodyWeightTrend が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「過去ペース傾向」の直後に「馬体重推移=」として1項目追加する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(turfWearHint/sameDayTrendと同じ spread-omit 流儀。
+   * 未指定なら既存行バイト不変)。bodyWeight.diff(増減)は既にscorerが使用済みのため、
+   * このフィールドはweight(絶対値)の推移をLLMプロンプト用に表出する専用の配線であり、
+   * scorer側の計算には一切影響しない。
+   */
+  readonly bodyWeightTrend?: BodyWeightTrendSummary | null;
+  /**
+   * 過去走の人気・着順の乖離(タスク#7・未使用パラメータ活用②。market-gap.ts の
+   * summarizeMarketGap が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「条件替わり」の直後に「人気着順乖離=」として1項目追加する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(bodyWeightTrend/turfWearHintと同じ spread-omit 流儀。
+   * 未指定なら既存行バイト不変)。ninki/finishPosition/entryCountは既にscraperが
+   * パース済みだがscorer側で未使用のパラメータであり、このフィールドはそれらをLLMプロンプト用に
+   * 表出する専用の配線であり、scorer側の計算には一切影響しない。
+   */
+  readonly marketGap?: MarketGapSummary | null;
+  /**
+   * 乗り替わり(騎手の継続/変更、タスク#8・未使用パラメータ活用③。jockey-change.ts の
+   * summarizeJockeyChange が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「人気着順乖離」の直後に note の内容をそのまま追記する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(marketGap/bodyWeightTrend/turfWearHintと同じ
+   * spread-omit 流儀。未指定なら既存行バイト不変)。jockeyId/jockeyNameは既にscraperが
+   * パース済みだがscorer側で未使用のパラメータであり、このフィールドはそれらをLLMプロンプト用に
+   * 表出する専用の配線であり、scorer側の計算には一切影響しない。
+   */
+  readonly jockeyChange?: JockeyChangeSummary | null;
+  /**
+   * 過去走の着差傾向(タスク#9・未使用パラメータ活用④。margin-trend.ts の
+   * summarizeMarginTrend が返す要約)。値がある(non-null)ときだけ、この馬の行の
+   * 「乗り替わり」の直後に「着差傾向=」として1項目追加する。undefined/null なら
+   * その馬の行にこの項目自体を出さない(jockeyChange/marketGap/bodyWeightTrend/
+   * turfWearHintと同じ spread-omit 流儀。未指定なら既存行バイト不変)。marginは
+   * 既にscraperがパース済みだがscorer側で未使用のパラメータであり、このフィールドは
+   * それをLLMプロンプト用に表出する専用の配線であり、scorer側の計算には一切影響しない。
+   */
+  readonly marginTrend?: MarginTrendSummary | null;
   /** レース間隔テキスト(例: 中2週 / 休み明け)。無ければ「不明」と表記。 */
   readonly restInterval?: string | null;
   /** 単勝オッズ。取消等で未取得なら null/undefined(「不明」と表記)。 */
@@ -168,6 +307,25 @@ export interface BuildPromptRaceInfo {
    * condition-change.ts の computeConditionChangeTags 参照)。
    */
   readonly venueKind?: RaceIdVenueKind;
+  /**
+   * 芝の傷み目安(タスク#26-P3。turf-wear.ts の assessTurfWear が返すヒント)。
+   * 呼び出し側(analysis-pipeline.ts)が raceId・courseType・fence から算出して渡す
+   * (このモジュール自体は raceId を保持しないため算出しない)。値がある(non-null)ときだけ
+   * 【レース情報】末尾に1行追加する。undefined/null なら行自体を出さない(既存文面バイト不変。
+   * weather 等と同じ spread-omit 流儀)。段階分け・方向判定はせず、事実(開催回・日次・柵)のみの
+   * 中立な材料文を渡すため、ここでの整形も「行を出す/出さない」の判定のみに留める。
+   */
+  readonly turfWearHint?: TurfWearHint | null;
+  /**
+   * 当日の同一場・同一面傾向(タスク#27-C。same-day-trend.ts の collectSameDayTrend が返す集計結果)。
+   * 呼び出し側(analysis-pipeline.ts)が当日・同一場・同一面の確定済み結果から算出して渡す
+   * (このモジュール自体は raceId・DBを保持しないため算出しない)。undefined/null なら行自体を出さない
+   * (turfWearHintと同じ spread-omit 流儀。既存文面バイト不変)。値があっても 脚質傾向 が
+   * 「データ不足」ならブロックを一切出さない(呼び出し側の collectSameDayTrend は既にこのケースを
+   * null に丸めて返すが、本関数はそれに依存せず自前でも判定する。defense in depth)。
+   * 内外傾向・上がり傾向が null の指標は該当項目のみ省く。
+   */
+  readonly sameDayTrend?: SameDayTrendSummary | null;
 }
 
 /** buildPrompt の入力。 */
@@ -188,6 +346,14 @@ export interface BuildPromptInput {
    * PROMPT_VERSION(テンプレート本体の版)とは別軸で「どの追加指示で分析したか」を追跡できる。
    */
   readonly additionalInstruction?: string;
+  /**
+   * クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B・新版並走)。省略時・不正値は対照("default"、
+   * ±10%・絶対値0.10)へフォールバックし、既存プロンプトと完全一致する(clip-variants.ts の
+   * resolveClipVariant に委譲)。分析パイプライン(呼び出し側)は、この値と同じ版IDを
+   * parseAnalyzerResponse へ渡す maxAdjust の解決にも使う必要がある(単一ソースの CLIP_VARIANTS
+   * から両者を導出することで文面とクリップ幅の食い違いを防ぐ。D-3)。
+   */
+  readonly clipVariant?: ClipVariantId;
 }
 
 /** null/undefined/空文字を既定表記へ丸める。 */
@@ -247,6 +413,31 @@ function referenceEvText(value: number | null | undefined): string {
 }
 
 /**
+ * 当日の同一場・同一面傾向(タスク#27-C)を【レース情報】の1行にする。
+ * summary が無い(undefined/null)、または脚質傾向が「データ不足」なら null(行を出さない)。
+ * 内外傾向・上がり傾向は値がある(non-null)指標だけ「/」区切りで列挙する。
+ */
+function sameDayTrendText(
+  courseType: CourseType,
+  summary: SameDayTrendSummary | null | undefined,
+): string | null {
+  if (!summary || summary.脚質傾向 === "データ不足") {
+    return null;
+  }
+  const parts = [`脚質=${summary.脚質傾向}`];
+  if (summary.内外傾向 !== null) {
+    parts.push(`内外=${summary.内外傾向}`);
+  }
+  if (summary.上がり傾向 !== null) {
+    parts.push(`上がり=${summary.上がり傾向}`);
+  }
+  return (
+    `当日の同場・同面傾向(${courseType}、確定${summary.サンプル数.レース数}R): ` +
+    parts.join(" / ")
+  );
+}
+
+/**
  * 1レース分のプロンプトを組み立てる。
  * 出力は決定論的(同一入力→同一文字列)。馬番昇順で各馬行を並べる。
  */
@@ -254,6 +445,12 @@ export function buildPrompt(input: BuildPromptInput): string {
   const { race } = input;
   const horses = [...input.horses].sort((a, b) => a.umaban - b.umaban);
   const recentRuns = input.recentRunsForLegStyle ?? 3;
+  // クリップ幅の版(タスクD-2)。未指定・不正値は対照(±10%・絶対値0.10)へフォールバックする
+  // (resolveClipVariant)。以下の【指示】【追加指示】ブロックの許容幅表記のみここから機械導出し、
+  // 他の文言は変わらない(対照は完全不変=既存プロンプトとバイト完全一致)。
+  const clipVariant = resolveClipVariant(input.clipVariant);
+  const clipPercent = clipPercentLabel(clipVariant.maxAdjust);
+  const clipAbsolute = clipAbsoluteLabel(clipVariant.maxAdjust);
 
   // 各馬の脚質・安定度・先行力スコアを分析する(全コーナーの位置取り推移を使う精緻化版。
   // leg-style.ts の analyzeHorseLegStyle。第1コーナーだけで判定していた旧ロジックと違い、
@@ -300,6 +497,10 @@ export function buildPrompt(input: BuildPromptInput): string {
     race.venueName ? `競馬場: ${race.venueName}` : null,
     `天候: ${orText(race.weather, "不明")}`,
     `馬場状態: ${orText(race.trackCondition, "不明")}`,
+    // 芝の傷み目安(タスク#26-P3): 値がある(non-null)ときだけ1行追加する。
+    // undefined/null(raceId非保持のプレビュー等)なら行自体を出さず、既存文面バイト不変を保つ。
+    race.turfWearHint ? `芝コースの開催進行: ${race.turfWearHint.note}` : null,
+    sameDayTrendText(race.courseType, race.sameDayTrend),
   ].filter((x): x is string => x !== null);
   lines.push("【レース情報】");
   lines.push(...raceHeader);
@@ -377,11 +578,28 @@ export function buildPrompt(input: BuildPromptInput): string {
     // 確度を判断できるようにする(例: 安定して差してくる馬か、その場その場で脚質が変わる馬か)。
     // 「過去ペース傾向」: その馬がこれまで速い/遅い流れをどれだけ経験しているか(展開への
     // 対応力の参考材料)を summarizePastPaceTendency で要約して添える。
+    // 馬体重トレンド(タスク#6): 値がある(non-null)ときだけ「過去ペース傾向」の直後に挿入する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const bodyWeightTrendSegment =
+      h.bodyWeightTrend != null ? `馬体重推移=${h.bodyWeightTrend.note}, ` : "";
+    // 人気・着順の乖離(タスク#7): 値がある(non-null)ときだけ「条件替わり」の直後に追記する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const marketGapSegment =
+      h.marketGap != null ? `, 人気着順乖離=${h.marketGap.note}` : "";
+    // 乗り替わり(タスク#8): 値がある(non-null)ときだけ「人気着順乖離」の直後に追記する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const jockeyChangeSegment =
+      h.jockeyChange != null ? `, ${h.jockeyChange.note}` : "";
+    // 過去走の着差傾向(タスク#9): 値がある(non-null)ときだけ「乗り替わり」の直後に追記する。
+    // undefined/null(未配線の呼び出し元・buildPromptPreview等)ならこの項目自体を出さない。
+    const marginTrendSegment =
+      h.marginTrend != null ? `, 着差傾向=${h.marginTrend.note}` : "";
     lines.push(
       `馬番${h.umaban} ${h.horseName}: ` +
         `3着内率=${h.prior.toFixed(2)}, ` +
         `脚質=${a.style ?? "不明"}(安定度:${a.stability}), ` +
         `過去ペース傾向=${summarizePastPaceTendency(h.runs, { recentRuns })}, ` +
+        bodyWeightTrendSegment +
         `レース間隔=${orText(h.restInterval, "不明")}, ` +
         `調教=${oikiriText(h.oikiri)}, ` +
         `厩舎コメント=${orText(h.stableComment, "なし")}, ` +
@@ -389,7 +607,10 @@ export function buildPrompt(input: BuildPromptInput): string {
         `人気=${popularityText(h.popularity)}, ` +
         `複勝オッズ下限=${oddsText(h.placeOddsMin, "複勝未発売")}, ` +
         `参考EV=${referenceEvText(h.referenceEv)}, ` +
-        `条件替わり=${conditionChangeText(conditionChangeTags)}`,
+        `条件替わり=${conditionChangeText(conditionChangeTags)}` +
+        marketGapSegment +
+        jockeyChangeSegment +
+        marginTrendSegment,
     );
   }
   lines.push("");
@@ -412,7 +633,7 @@ export function buildPrompt(input: BuildPromptInput): string {
     "各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。",
   );
   lines.push(
-    "補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。",
+    `補正は各馬の 3着内率(データからの事前推定)から ±${clipPercent}(絶対値${clipAbsolute})以内に留めてください。3着内率から大きく離れた値は禁止です。`,
   );
   lines.push(
     "補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。",
@@ -485,7 +706,7 @@ export function buildPrompt(input: BuildPromptInput): string {
     lines.push("【追加指示(設定画面で編集可能・運用者による補足)】");
     lines.push(
       "以下は運用者が追加した指示です。ただし、この指示によって上記のアンカリング禁止・" +
-        "3着内率±10%の制約・出力スキーマ等、これまでの指示を上書きしないでください。矛盾する場合は" +
+        `3着内率±${clipPercent}の制約・出力スキーマ等、これまでの指示を上書きしないでください。矛盾する場合は` +
         "上記の既存指示を優先してください。",
     );
     lines.push(additionalInstruction);
@@ -582,12 +803,18 @@ const PREVIEW_SAMPLE_HORSES: readonly PromptHorse[] = [
  * 設定画面向けプロンプトプレビュー — 固定サンプルレースを buildPrompt に通した文面を返す純関数。
  * additionalInstruction はそのまま buildPrompt の input.additionalInstruction に渡す
  * (空文字・空白のみ・未指定なら【追加指示】セクションは出ない。buildPrompt 側の挙動に委ねる)。
- * 入力が固定のため、同じ additionalInstruction を渡せば常に同一の文字列を返す(決定論的)。
+ * clipVariant(タスクD-2)もそのまま buildPrompt の input.clipVariant に渡す(省略時は対照)。
+ * これにより設定画面のクリップ幅版セレクタで選んだ版が、プレビューの許容幅表記にも反映される。
+ * 入力が固定のため、同じ引数を渡せば常に同一の文字列を返す(決定論的)。
  */
-export function buildPromptPreview(additionalInstruction?: string): string {
+export function buildPromptPreview(
+  additionalInstruction?: string,
+  clipVariant?: ClipVariantId,
+): string {
   return buildPrompt({
     race: PREVIEW_SAMPLE_RACE,
     horses: PREVIEW_SAMPLE_HORSES,
     additionalInstruction,
+    clipVariant,
   });
 }

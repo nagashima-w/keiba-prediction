@@ -76,6 +76,7 @@ async function saveValidWebhookUrl(): Promise<void> {
     baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
     autoSendDiscord: false,
     additionalInstruction: "",
+    clipVariant: "default",
   };
   await handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 }

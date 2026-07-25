@@ -26,9 +26,11 @@ import type { EvConfig } from "@keiba/core";
 import {
   BASE_SCORE_WEIGHT_KEYS,
   BIAS_WEIGHT_KEYS,
+  CLIP_VARIANT_IDS,
   type AppSettings,
   type BaseScoreWeightValues,
   type BiasWeightValues,
+  type ClipVariantId,
   type MaskedSettings,
   type SettingsUpdate,
 } from "../shared/settings.js";
@@ -45,6 +47,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   baseScoreWeights: { ...DEFAULT_SCORER_CONFIG.baseScore.weights },
   autoSendDiscord: false,
   additionalInstruction: "",
+  // クリップ幅版(タスクD-2)。既定は対照(±10%)。
+  clipVariant: "default",
 };
 
 /** raw が number かつ有限かつ述語を満たせば採用、さもなくば fallback。 */
@@ -56,6 +60,18 @@ function coerceNumber(
   return typeof raw === "number" && Number.isFinite(raw) && predicate(raw)
     ? raw
     : fallback;
+}
+
+/**
+ * クリップ幅版ID(タスクD-2)を検証する。CLIP_VARIANT_IDS に含まれる文字列のみ採用し、
+ * 未知の文字列・型違い・欠損はデフォルト(対照="default")へフォールバックする
+ * (受け入れ条件「不正値/未設定フォールバック」)。
+ */
+function coerceClipVariant(raw: unknown): ClipVariantId {
+  return typeof raw === "string" &&
+    (CLIP_VARIANT_IDS as readonly string[]).includes(raw)
+    ? (raw as ClipVariantId)
+    : DEFAULT_APP_SETTINGS.clipVariant;
 }
 
 /** raw(unknown)を安全にプロパティ参照するためのレコード化。 */
@@ -124,6 +140,8 @@ export function coerceSettings(raw: unknown): AppSettings {
       typeof rec.additionalInstruction === "string"
         ? rec.additionalInstruction
         : DEFAULT_APP_SETTINGS.additionalInstruction,
+    // クリップ幅版(タスクD-2)。CLIP_VARIANT_IDS に無い値・欠損はdefaultへフォールバック。
+    clipVariant: coerceClipVariant(rec.clipVariant),
   };
 }
 
@@ -181,6 +199,8 @@ export function maskSettings(
     autoSendDiscord: settings.autoSendDiscord,
     // プロンプト追加指示はDiscord URLと同様、平文のまま返す(編集フォーム表示のため)。
     additionalInstruction: settings.additionalInstruction,
+    // クリップ幅版(タスクD-2)も往復編集フォームとして表示するため平文のまま返す。
+    clipVariant: settings.clipVariant,
   };
 }
 
@@ -202,6 +222,7 @@ export function applyUpdate(
     baseScoreWeights: update.baseScoreWeights,
     autoSendDiscord: update.autoSendDiscord,
     additionalInstruction: update.additionalInstruction,
+    clipVariant: update.clipVariant,
   });
 }
 

@@ -234,6 +234,62 @@ describe("analyzeRace(1レース分の分析)", () => {
   });
 });
 
+describe("analyzeRace(rawResponseの伝播。Issue#10 分析データのエクスポート)", () => {
+  it("初回成功時、LLMの生応答テキストがrawResponseにそのまま載ること", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm(okBody) });
+    expect(r.fallback).toBe(false);
+    expect(r.rawResponse).toBe(okBody);
+  });
+
+  it("リトライで成功した場合、成功した回(2回目)の応答テキストがrawResponseに載ること", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm("壊れています", okBody) });
+    expect(r.fallback).toBe(false);
+    expect(r.rawResponse).toBe(okBody);
+  });
+
+  it("印関連違反によるA救済(marksDropped:true)でも、最終試行の応答テキストがrawResponseに載ること", async () => {
+    const badMarkBody = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.15, reason: "y", mark: "◎" },
+        ...fillerMarkHorses(),
+      ],
+    });
+    const r = await analyzeRace(input(), { llm: fixedLlm(badMarkBody, badMarkBody) });
+    expect(r.marksDropped).toBe(true);
+    expect(r.rawResponse).toBe(badMarkBody);
+  });
+
+  it("パース2回失敗(prior採用のフォールバック)ではrawResponseがnullになること(text未取得の失敗時はnull)", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm("こわれ1", "こわれ2") });
+    expect(r.fallback).toBe(true);
+    expect(r.rawResponse).toBeNull();
+  });
+
+  it("LLM呼び出し例外2回(prior採用のフォールバック)ではrawResponseがnullになること", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new Error("常に失敗");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.rawResponse).toBeNull();
+  });
+
+  it("切り詰め(truncated)によるフォールバックではrawResponseがnullになること", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new AnalyzerTruncationError("応答がmax_tokensで切り詰められました", "max_tokens");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.truncated).toBe(true);
+    expect(r.rawResponse).toBeNull();
+  });
+});
+
 describe("analyzeRace(応答の切り詰め検出・小倉記念18頭切り詰め事故の再発防止)", () => {
   it("切り詰め(AnalyzerTruncationError)2回: fallback:true・固定分類文言・truncated:true・stopReason='max_tokens' で prior を採用すること", async () => {
     const llm: LlmClient = {

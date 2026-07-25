@@ -2,7 +2,8 @@ import { useCallback, useEffect, useReducer } from "react";
 
 import {
   buildPromptPreview,
-  PROMPT_VERSION,
+  CLIP_VARIANTS,
+  resolveClipVariant,
 } from "@keiba/core/analyzer/build-prompt";
 
 import { CopyErrorButton } from "./CopyErrorButton.js";
@@ -11,11 +12,13 @@ import {
   BASE_SCORE_WEIGHT_LABELS,
   BIAS_WEIGHT_KEYS,
   BIAS_WEIGHT_LABELS,
+  CLIP_VARIANT_IDS,
   isValidThreshold,
   isValidWebhookUrl,
   isValidWeight,
   type BaseScoreWeightKey,
   type BiasWeightKey,
+  type ClipVariantId,
 } from "../shared/settings.js";
 import {
   buildUpdate,
@@ -28,6 +31,12 @@ import {
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+/** クリップ幅版セレクタの表示ラベル(タスクD-2)。 */
+const CLIP_VARIANT_LABELS: Record<ClipVariantId, string> = {
+  default: `対照(±${Math.round(CLIP_VARIANTS.default.maxAdjust * 100)}%、既定)`,
+  wide15: `新版(±${Math.round(CLIP_VARIANTS.wide15.maxAdjust * 100)}%)`,
+};
 
 const labelStyle: React.CSSProperties = {
   display: "block",
@@ -287,6 +296,40 @@ export function SettingsView(): React.JSX.Element {
       </div>
 
       {/*
+       * クリップ幅版セレクタ(タスクD-2: ±10%↔±15%のA/B・新版並走・2026-07-21 boss着手前ゲート合意)。
+       * 中央キャリブレーションで確認された上位帯(30-50%)の自信不足(過小評価)への対策として、
+       * LLM補正の許容幅(prior±X%)を対照(±10%)/新版(±15%)から選べるようにする。
+       * 同一レースは常にどちらか1版のみで分析される(二重課金なし。案X)。効果は検証画面の
+       * 「プロンプト版別」比較(promptVersionが版ごとに異なる値で保存されるため自動的に別グループ化)で確認する。
+       */}
+      <div style={fieldStyle}>
+        <label style={labelStyle} htmlFor="clip-variant">
+          LLM補正の許容幅(クリップ幅の版。A/B比較用)
+        </label>
+        <select
+          id="clip-variant"
+          style={inputStyle}
+          value={state.clipVariant}
+          onChange={(e) =>
+            dispatch({
+              type: "クリップ幅版選択",
+              value: e.target.value as ClipVariantId,
+            })
+          }
+        >
+          {CLIP_VARIANT_IDS.map((id) => (
+            <option key={id} value={id}>
+              {CLIP_VARIANT_LABELS[id]}
+            </option>
+          ))}
+        </select>
+        <p style={noteStyle}>
+          次回の分析から反映されます。どちらの版で分析したかは検証画面のプロンプト版別比較で区別されます
+          (同一レースは選択中の1版のみで分析され、両版を同時には分析しません)。
+        </p>
+      </div>
+
+      {/*
        * LLMへ送るプロンプトのプレビュー(ユーザーフィードバック対応)。
        * 上の追加指示入力欄(state.additionalInstruction)をそのまま core の buildPromptPreview に
        * 渡すことで、編集内容が即座にプレビューへ反映される(保存前でも確認できる)。
@@ -328,10 +371,12 @@ export function SettingsView(): React.JSX.Element {
           次回の分析から反映)】はこのプレビューには入力中の内容が即座に反映されますが、実際の分析に
           使われるのは保存済みの内容です。【指示】も基本的にこのまま送られますが、天候・馬場が悪化条件
           (雨・稍重以下等)のレースでは「馬場悪化シナリオ」の指示が1文追加されます(このサンプルは
-          晴・良のため表示されていません)。(プロンプト版: {PROMPT_VERSION})
+          晴・良のため表示されていません)。上のクリップ幅版セレクタ(保存後、次回の分析から反映)は
+          このプレビューには選択中の内容が即座に反映されますが、実際の分析に使われるのは保存済みの
+          内容です。(プロンプト版: {resolveClipVariant(state.clipVariant).promptVersion})
         </p>
         <pre style={promptPreviewStyle}>
-          {buildPromptPreview(state.additionalInstruction)}
+          {buildPromptPreview(state.additionalInstruction, state.clipVariant)}
         </pre>
       </details>
 

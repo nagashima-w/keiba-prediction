@@ -25,6 +25,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { CLIP_VARIANTS } from "../../src/analyzer/clip-variants.js";
 import {
   AnalyzerMarkViolationError,
   AnalyzerResponseParseError,
@@ -217,6 +218,74 @@ describe("parseAnalyzerResponse(バリデーション・クリップ)", () => {
     expect(() => parseAnalyzerResponse("no json here", priors)).toThrow(
       AnalyzerResponseParseError,
     );
+  });
+});
+
+/**
+ * クリップ幅版D-2(±0.15)の境界値テスト。
+ * maxAdjust は CLIP_VARIANTS.wide15.maxAdjust をそのまま options に渡す(ハードコードした0.15を
+ * 二重に持たず、build-prompt.ts の文面生成・pipeline-deps.ts の配線と単一ソースを共有する)。
+ */
+describe("parseAnalyzerResponse(クリップ幅版D-2: ±0.15)", () => {
+  const maxAdjust = CLIP_VARIANTS.wide15.maxAdjust;
+
+  it("CLIP_VARIANTS.wide15.maxAdjust が0.15であること(前提の固定)", () => {
+    expect(maxAdjust).toBe(0.15);
+  });
+
+  // prior=0.40 に対する境界: +0.15ちょうど(0.55)は非クリップ、+0.16(0.56)はクリップ。
+  const clipCases: ReadonlyArray<{
+    label: string;
+    value: number;
+    expected: number;
+    clipped: boolean;
+  }> = [
+    { label: "+0.15ちょうど(0.55)は非クリップ", value: 0.55, expected: 0.55, clipped: false },
+    { label: "0.60(+0.20)は0.55へクリップ", value: 0.6, expected: 0.55, clipped: true },
+    { label: "0.56(+0.16)は0.55へクリップ", value: 0.56, expected: 0.55, clipped: true },
+  ];
+  it.each(clipCases)("馬番1(prior=0.40): $label", ({ value, expected, clipped }) => {
+    const text = bodyWithFillers([{ number: 1, place_prob: value, reason: "x" }]);
+    const r = parseAnalyzerResponse(text, priors, { maxAdjust });
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    expect(h1.adjustedProb).toBeCloseTo(expected, 9);
+    expect(h1.clipped).toBe(clipped);
+  });
+
+  it("prior=0.90 の上限は 1.0 にクランプされること(1.05にはならない)", () => {
+    const highPriors: PriorRef[] = [
+      { umaban: 1, prior: 0.9 },
+      { umaban: 3, prior: 0.3 },
+      { umaban: 4, prior: 0.3 },
+      { umaban: 5, prior: 0.3 },
+      { umaban: 6, prior: 0.3 },
+    ];
+    const text = body([
+      { number: 1, place_prob: 1.05, reason: "x" },
+      ...fillerMarkHorses(),
+    ]);
+    const r = parseAnalyzerResponse(text, highPriors, { maxAdjust });
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    expect(h1.adjustedProb).toBeCloseTo(1.0, 9);
+    expect(h1.clipped).toBe(true);
+  });
+
+  it("prior=0.10 の下限は 0.0 にクランプされること", () => {
+    const lowPriors: PriorRef[] = [
+      { umaban: 1, prior: 0.1 },
+      { umaban: 3, prior: 0.3 },
+      { umaban: 4, prior: 0.3 },
+      { umaban: 5, prior: 0.3 },
+      { umaban: 6, prior: 0.3 },
+    ];
+    const text = body([
+      { number: 1, place_prob: -0.5, reason: "x" },
+      ...fillerMarkHorses(),
+    ]);
+    const r = parseAnalyzerResponse(text, lowPriors, { maxAdjust });
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    expect(h1.adjustedProb).toBeCloseTo(0.0, 9);
+    expect(h1.clipped).toBe(true);
   });
 });
 
