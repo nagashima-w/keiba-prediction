@@ -11,6 +11,7 @@ on:
     branches:
       - claude/keiba-ev-tool-dev-cvagiu
       - claude/handover-next-session-x5ki6o
+      - claude/keiba-prediction-handover-ojr8t1
     # v* タグ(例 v1.0.0)の push で正式リリースをビルド・公開する。
     tags:
       - "v*"
