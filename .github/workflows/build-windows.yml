@@ -83,6 +83,69 @@ jobs:
             安定して使う場合は最新の正式版(v*)を入手してください。
           files: packages/app/release/*.exe
 
+      # dev-latest に残った孤児 exe アセットを掃除する(ブランチ push 時のみ)。
+      # 背景: artifactName がバージョン依存(keiba-ev-tool-<version>-portable.exe)のため、
+      # softprops/action-gh-release の in-place 上書きは「同名」のアセットしか差し替えない。
+      # version を上げると旧バージョン名のアセットが dev-latest に残置され続けてしまう。
+      # このステップは直前の公開ステップの後に置くことで、最新 exe が必ず先にアップロード
+      # 済みの状態を保ったまま(atomicity を壊さず)、現行ファイル名以外の .exe だけを削除する。
+      # 現行ファイル名は version の再パースではなく、ビルド成果物 packages/app/release/*.exe の
+      # basename から直接導出する(名前解決の曖昧さを排除するため)。
+      # 前提: portable ターゲットのみ設定のため exe は常に1個生成される。将来 target を追加して
+      # exe が複数生成される設定に変えた場合は、件数ガード(下記 exe_count チェック)で検知して
+      # 掃除をスキップする(basename の suffix 誤解釈による静かな誤動作を避けるため)。
+      # 既知の制約: concurrency グループは github.ref 単位のため、複数開発ブランチが同時 push
+      # されると本ステップが並行実行されうる。その場合、一覧取得→削除の間に他 run が直後に
+      # アップロードした exe を孤児と誤判定して削除する競合ウィンドウが理論上ある(本ステップの
+      # スコープ外の構造的リスクとして許容する)。
+      - name: dev-latest の孤児 exe アセットを掃除(現行ファイル名以外を削除)
+        if: startsWith(github.ref, 'refs/heads/')
+        shell: bash
+        # このステップは前段で exe 本体のアップロードが完了した後の後片付けであり、
+        # 失敗してもビルド・公開自体は成功させたい(受け入れ条件: run が conclusion=success)。
+        # ただし全面 `|| true` で無言に握りつぶすのではなく、個別の失敗は
+        # ::warning:: で必ずログに残し、次回実行時に再試行される形にする。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # exe が想定通り1個だけ生成されているかを機械的に検査する。
+          # basename はマッチが複数でもエラーにならず第2引数を suffix 解釈して静かに誤動作するため、
+          # コメントだけの前提依存にせず、件数を明示的にガードする。
+          exe_count=$(ls packages/app/release/*.exe 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$exe_count" != "1" ]; then
+            echo "::warning::release ディレクトリの .exe が1個ではありません(${exe_count}個)。孤児掃除をスキップします(target 追加等で前提が変わった可能性)"
+            exit 0
+          fi
+
+          export CURRENT_EXE=$(basename packages/app/release/*.exe)
+          echo "現行ファイル: $CURRENT_EXE"
+
+          # gh 内蔵 jq は --arg 未対応のため、env.CURRENT_EXE 経由でシェル変数を jq に渡す。
+          # 取得コマンド自体の失敗(ネットワーク瞬断・レート制限等)を「孤児なし」と取り違えないよう、
+          # 失敗時は ORPHANS を明示的に空にした上で ::warning:: を出す(取得失敗と本当に孤児が
+          # 0件であるケースを区別する)。
+          if ! ORPHANS=$(gh release view dev-latest --json assets \
+            --jq '.assets[].name | select(endswith(".exe") and . != env.CURRENT_EXE)'); then
+            echo "::warning::dev-latest のアセット一覧取得に失敗しました。孤児掃除をスキップします(次回のビルドで再試行されます)"
+            ORPHANS=""
+            SKIP_CLEANUP=1
+          fi
+
+          if [ -n "${SKIP_CLEANUP:-}" ]; then
+            : # 一覧取得失敗時は上で警告済みのため何もしない
+          elif [ -z "$ORPHANS" ]; then
+            echo "孤児 exe アセットなし"
+          else
+            while IFS= read -r asset; do
+              [ -z "$asset" ] && continue
+              echo "削除対象: $asset"
+              if ! gh release delete-asset dev-latest "$asset" --yes; then
+                echo "::warning::孤児アセット削除に失敗しました: $asset(次回のビルドで再試行されます)"
+              fi
+            done <<< "$ORPHANS"
+          fi
+
       # v* タグ push 時: そのタグの正式リリース(プレリリースではない)を作成する。
       # tag_name を指定しなければ、トリガーとなったタグ(github.ref)がそのまま使われる。
       - name: Releases に公開(正式リリース / v* タグ push 時)
