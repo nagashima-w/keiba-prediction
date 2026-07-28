@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import { validatePeriodInput } from "@keiba/core";
+import { validatePeriodInput } from "@keiba/core/scraper/validate-period-input";
 
 import type {
   BatchRaceOutcome,
