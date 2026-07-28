@@ -63,6 +63,8 @@ import {
   type ConditionChangeRun,
   type EstimatedPlaceConfig,
   type EvConfig,
+  type GradeWinnerConditions,
+  type GradeWinnerTrendSummary,
   type HorsePrior,
   type HorseRaceResult,
   type JockeyChangePrevRunInput,
@@ -141,6 +143,46 @@ export interface AnalysisPipelineDeps {
    * この依存が注入されていても当日傾向を算出しない(prior採用経路で無駄なDB読み出しを増やさないため)。
    */
   readonly getRaceResultDetail?: (raceId: RaceId) => RaceResultDetail | undefined;
+  /**
+   * 同レース(重賞)の過去10年結果傾向の取得+集計(タスク機能B。通常は core
+   * collectGradeWinnerTrend を CachedFetcher で束縛したもの。pipeline-deps.ts が束縛する)。
+   * 省略時は算出せず、既存のプロンプト文面・既存テストを非破壊のまま保つ(機能オフ)。
+   * 中央・地方(NAR)いずれのレースでも呼び出す(2026-07-28実測訂正: 地方専用ホストで同一APIが
+   * 取得できるため、venueKindによる事前フィルタは行わない。ホスト選択は束縛側の実装に委ねる)。
+   *
+   * 呼び出しゲート(要修正2・2026-07-28 boss裁定): 出馬表のレース名見出しに重賞グレードバッジ
+   * (parse-shutuba.ts の hasGradeBadge)が無いと判定できた場合のみ、この依存が注入されていても
+   * 呼び出さない(非重賞への無駄なPOSTを避ける。期間バッチで無視できない件数になるため)。
+   * hasGradeBadge が undefined(判定不能・旧フィクスチャ等)のときは fail-open で必ず呼ぶ
+   * (取りこぼしゼロを優先。詳細は types.ts ShutubaRaceInfo.hasGradeBadge のコメント参照)。
+   * LLM分析をスキップする経路(deps.analyze===null)では、この依存が注入されていても呼び出さない
+   * (無駄なリクエストを増やさない、sameDayTrend等と同じ方針)。
+   *
+   * 呼び出しは1回のネットワークI/Oを伴う「補助材料」であり、失敗(ネットワークエラー・
+   * 応答構造の異常等)してもLLM本体の分析結果には一切影響させず、null にフォールバックして
+   * 分析全体を完了させる(呼び出し側のrunAnalysisが try/catch でこれを保証する)。ただし
+   * 例外送出時は onGradeWinnerTrendError で警告として残す(要修正10。詳細は同フィールド参照)。
+   */
+  readonly getGradeWinnerTrend?: (
+    raceId: RaceId,
+    conditions: GradeWinnerConditions,
+  ) => Promise<GradeWinnerTrendSummary | null>;
+  /**
+   * getGradeWinnerTrend が例外を投げたときに呼ばれる診断ログ用フック(要修正10・2026-07-28
+   * boss裁定)。事前にグレードバッジ判定で呼び出しをゲートしているため、それでも呼び出しが
+   * 例外を投げるのは「重賞と判定したのに取得・パースが失敗した」という本物の異常
+   * (ネットワーク障害・netkeiba側のAPI仕様変更等)のみを意味する。
+   *
+   * 対して、非重賞判定(status:NG)・条件一致3回未満のような正常系の null 返却は例外を
+   * 投げないため、このフックは呼ばれない(無音のまま=既存どおり)。「非重賞NG(正常・無音)」と
+   * 「構造破壊・API仕様変更(異常・警告ログ)」を区別し、後者だけを無音で握りつぶさないための
+   * フックであり、onFallback(LLM関連の診断ログ)と役割・呼び出し条件が異なるため独立して持つ。
+   * 省略時は診断ログを残さない(黙って null にフォールバックするのみ。挙動は従来どおり)。
+   */
+  readonly onGradeWinnerTrendError?: (info: {
+    readonly raceId: RaceId;
+    readonly message: string;
+  }) => void;
   /**
    * fallback:true(LLMがフェイルセーフでpriorに復帰)発生時に呼ばれる任意の診断ログ用フック
    * (論点E: #35ログ基盤との連携・2026-07-19合意)。fallback:false(marksDroppedのみの
@@ -362,6 +404,36 @@ export async function runAnalysis(
       ? collectSameDayTrend(raceId, race.race.courseType, deps.getRaceResultDetail)
       : null;
 
+    // 同レース(重賞)の過去10年結果傾向(タスク機能B)。getGradeWinnerTrend が注入され、かつ
+    // 出馬表に重賞グレードバッジが無いと判定できなかったとき(hasGradeBadge!==false。true/未定義
+    // ならfail-open)だけ算出する(要修正2: 非重賞への無駄なPOSTを事前に避ける。期間バッチでは
+    // 無視できない件数〈約1,800本/181日〉になるため)。中央・地方(NAR)いずれも対応する
+    // (2026-07-28実測訂正: 当初「地方にはこのデータが存在しない」としていたが、地方専用ホスト
+    // 〈nar.netkeiba.com〉に同一パラメータでPOSTすれば取得できると判明したため、venueKindによる
+    // 事前フィルタは行わない。ホストの選択は deps.getGradeWinnerTrend の束縛側
+    // 〈pipeline-deps.ts〉が urls.ts の gradeWinnerApiUrl等でrace_idから自動選択する)。
+    // 条件フィルタに渡すtrackCodeはraceId由来(要修正8。venueName〈表示専用〉はAPIのjyoと
+    // 表記が一致しない場合があるため使わない)。
+    // ネットワーク越しの補助材料のため、失敗してもLLM本体の分析は継続させる(nullへフォールバック)。
+    // ただし例外送出時のみ onGradeWinnerTrendError で警告として残す(要修正10。正常系の
+    // null返却〈非重賞NG・条件一致3回未満〉は例外を投げないため、このcatchには到達しない)。
+    let gradeWinnerTrend: GradeWinnerTrendSummary | null = null;
+    if (deps.getGradeWinnerTrend && race.race.hasGradeBadge !== false) {
+      try {
+        gradeWinnerTrend = await deps.getGradeWinnerTrend(raceId, {
+          trackCode: raceId.slice(4, 6),
+          track: race.race.courseType,
+          kyori: race.race.distance,
+        });
+      } catch (error) {
+        gradeWinnerTrend = null;
+        deps.onGradeWinnerTrendError?.({
+          raceId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     const promptInput: BuildPromptInput = {
       race: {
         raceName: race.race.raceName,
@@ -377,6 +449,9 @@ export async function runAnalysis(
         turfWearHint: assessTurfWear(raceId, race.race.courseType, race.race.fence),
         // 当日の同一場・同一面傾向(タスク#27-C。same-day-trend.ts の collectSameDayTrend)。
         sameDayTrend,
+        // 同レース(重賞)の過去10年結果傾向(タスク機能B。grade-winner-trend.ts の
+        // collectGradeWinnerTrend)。
+        gradeWinnerTrend,
       },
       horses: race.horses.map((horseData) => {
         const umaban = horseData.shutuba.umaban;

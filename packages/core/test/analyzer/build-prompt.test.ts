@@ -27,6 +27,7 @@ import type { BodyWeightTrendSummary } from "../../src/analyzer/body-weight-tren
 import type { MarketGapSummary } from "../../src/analyzer/market-gap.js";
 import type { JockeyChangeSummary } from "../../src/analyzer/jockey-change.js";
 import type { MarginTrendSummary } from "../../src/analyzer/margin-trend.js";
+import type { GradeWinnerTrendSummary } from "../../src/analyzer/grade-winner-trend.js";
 
 function baseInput(): BuildPromptInput {
   return {
@@ -348,8 +349,8 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("過去走の着差傾向反映(タスク#9)追加版として 2026-07-23.5 が付与されていること", () => {
-    expect(PROMPT_VERSION).toBe("2026-07-23.5");
+  it("同レース過去10年結果傾向反映(タスク機能B)追加版として 2026-07-28.1 が付与されていること", () => {
+    expect(PROMPT_VERSION).toBe("2026-07-28.1");
   });
 });
 
@@ -524,6 +525,185 @@ describe("buildPrompt(当日の同一場・同一面傾向、タスク#27-C)", (
   });
 
   it("回帰: sameDayTrend未指定なら既存プロンプト(【レース情報】ブロック)が不変であること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】",
+    );
+  });
+});
+
+describe("buildPrompt(同レース過去10年結果傾向、タスク機能B)", () => {
+  /** テスト用の GradeWinnerTrendSummary を組み立てるヘルパー(既定はすべての材料が揃った状態)。 */
+  function gradeWinnerTrend(
+    overrides: Partial<GradeWinnerTrendSummary> = {},
+  ): GradeWinnerTrendSummary {
+    return {
+      対象回数: 10,
+      条件一致回数: 8,
+      条件除外回数: 2,
+      頭数レンジ: { min: 12, max: 16 },
+      馬場内訳: [
+        { 値: "良", 回数: 6 },
+        { 値: "稍重", 回数: 2 },
+      ],
+      柵内訳: [{ 値: "A", 回数: 8 }],
+      複勝圏内馬数: 24,
+      人気レンジ: { min: 1, max: 9 },
+      二桁人気回数: 0,
+      複勝配当レンジ: { min: 200, max: 430 },
+      複勝配当中央値: 280,
+      平均通過順相対: 0.45,
+      通過順相対サンプル数: 24,
+      平均上がり: 34.9,
+      上がりサンプル数: 24,
+      平均馬番相対: 0.52,
+      馬番相対サンプル数: 24,
+      ...overrides,
+    };
+  }
+
+  it("材料が揃っているとき、基礎・人気と複勝配当・記述統計の最大3行を追加すること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, gradeWinnerTrend: gradeWinnerTrend() },
+    });
+    // 1行目: 対象回数・条件一致/除外・頭数レンジ・馬場内訳・柵。
+    expect(p).toContain("対象10回中 条件一致8回・除外2回");
+    expect(p).toContain("頭数12〜16頭");
+    expect(p).toContain("良6");
+    expect(p).toContain("稍重2");
+    expect(p).toContain("A8");
+    // 2行目: 人気分布・二桁人気の回数・複勝配当のレンジ/中央値。
+    expect(p).toContain("複勝圏内(24頭)");
+    expect(p).toContain("1〜9番人気");
+    expect(p).toContain("二桁人気0回");
+    expect(p).toContain("200〜430円");
+    expect(p).toContain("中央値280円");
+    // 3行目: 記述統計(ラベルなし・サンプル数併記)。
+    expect(p).toContain("記述統計");
+    expect(p).toContain("ラベルなし");
+    expect(p).toContain("n=24");
+    expect(p).toContain("0.45");
+    expect(p).toContain("34.9");
+    expect(p).toContain("0.52");
+  });
+
+  it("記述統計の行に内有利/外有利等のラベル語を一切含まないこと(same-day-trendとは性質が異なる)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, gradeWinnerTrend: gradeWinnerTrend() },
+    });
+    const line = p.split("\n").find((l) => l.includes("記述統計"));
+    expect(line).toBeDefined();
+    expect(line).not.toContain("内有利");
+    expect(line).not.toContain("外有利");
+    expect(line).not.toContain("優勢");
+  });
+
+  it("頭数レンジ・馬場内訳・柵内訳が無い(null/空配列)場合は該当部分のみ省略すること(1行目は残す)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        gradeWinnerTrend: gradeWinnerTrend({
+          頭数レンジ: null,
+          馬場内訳: [],
+          柵内訳: [],
+        }),
+      },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("同レース過去傾向"));
+    expect(line).toBe("同レース過去傾向(対象10回中 条件一致8回・除外2回)");
+  });
+
+  it("要修正6回帰: 柵内訳のみ空配列(地方の実データ想定。coursekubun_cdが全10回空文字)のとき、柵の項目だけを省略し、頭数レンジ・馬場内訳は表示すること(「柵=」だけが出る空表示を作らない)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        gradeWinnerTrend: gradeWinnerTrend({ 柵内訳: [] }),
+      },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("同レース過去傾向"));
+    expect(line).toBeDefined();
+    expect(line).toContain("頭数12〜16頭");
+    expect(line).toContain("良6");
+    // 「柵」という文字自体を含まないこと(空の柵表示や「柵」だけの断片を作らない)。
+    expect(line).not.toContain("柵");
+  });
+
+  it("人気レンジ・複勝配当レンジが共にnullのとき、2行目(人気と複勝配当)を出さないこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        gradeWinnerTrend: gradeWinnerTrend({
+          人気レンジ: null,
+          複勝配当レンジ: null,
+          複勝配当中央値: null,
+        }),
+      },
+    });
+    expect(p.split("\n").some((l) => l.startsWith("複勝圏内(") && l.includes("の傾向"))).toBe(
+      false,
+    );
+  });
+
+  it("平均通過順相対・平均上がり・平均馬番相対が共にnullのとき、3行目(記述統計)を出さないこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        gradeWinnerTrend: gradeWinnerTrend({
+          平均通過順相対: null,
+          通過順相対サンプル数: 0,
+          平均上がり: null,
+          上がりサンプル数: 0,
+          平均馬番相対: null,
+          馬番相対サンプル数: 0,
+        }),
+      },
+    });
+    expect(p).not.toContain("記述統計");
+  });
+
+  it("追加した行が【レース情報】ブロック内、末尾(sameDayTrendの後)に来ること", () => {
+    const sameDayTrendSummary: SameDayTrendSummary = {
+      脚質傾向: "前残り優勢",
+      内外傾向: null,
+      上がり傾向: null,
+      サンプル数: { レース数: 3, 複勝圏内馬数: 9 },
+    };
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        sameDayTrend: sameDayTrendSummary,
+        gradeWinnerTrend: gradeWinnerTrend(),
+      },
+    });
+    const sameDayTrendIndex = p.indexOf("当日の同場・同面傾向");
+    const gradeWinnerIndex = p.indexOf("同レース過去傾向");
+    const nextSectionIndex = p.indexOf("【展開想定】");
+    expect(sameDayTrendIndex).toBeGreaterThanOrEqual(0);
+    expect(gradeWinnerIndex).toBeGreaterThan(sameDayTrendIndex);
+    expect(nextSectionIndex).toBeGreaterThan(gradeWinnerIndex);
+  });
+
+  it("race.gradeWinnerTrendが未指定のとき、行を一切含まないこと(既存文面バイト不変)", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).not.toContain("同レース過去傾向");
+  });
+
+  it("race.gradeWinnerTrendがnull(呼び出し側がnullを渡した)のとき、行を一切含まないこと", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, gradeWinnerTrend: null },
+    });
+    expect(p).not.toContain("同レース過去傾向");
+  });
+
+  it("回帰: gradeWinnerTrend未指定なら既存プロンプト(【レース情報】ブロック)が不変であること", () => {
     const p = buildPrompt(baseInput());
     expect(p).toContain(
       "【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】",

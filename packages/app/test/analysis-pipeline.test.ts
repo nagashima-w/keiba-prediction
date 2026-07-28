@@ -14,10 +14,13 @@ import {
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type CourseType,
+  type GradeWinnerConditions,
+  type GradeWinnerTrendSummary,
   type HorseRaceResult,
   type OddsSnapshot,
   type RaceData,
   type RaceHorseData,
+  type RaceId,
   type RaceResultDetail,
   type ShutubaHorse,
 } from "@keiba/core";
@@ -120,9 +123,14 @@ function fakeRaceData(
   raceId: string,
   resultsByUmaban: Record<number, HorseRaceResult[]> = {},
   oddsStatus: "result" | "middle" | "yoso" = "result",
-  // レース自体のcourseType/fenceを上書きできる(芝の傷み目安#26-P3の配線テスト用)。
-  // 省略時は従来どおり courseType="芝"・fenceキー無し(undefined)のまま=既存回帰は無変更。
-  raceOverrides: { courseType?: CourseType; fence?: string | null } = {},
+  // レース自体のcourseType/fence/hasGradeBadgeを上書きできる(芝の傷み目安#26-P3・
+  // 重賞グレードバッジ〈タスク機能B 要修正2〉の配線テスト用)。
+  // 省略時は従来どおり courseType="芝"・fence/hasGradeBadgeキー無し(undefined)のまま=既存回帰は無変更。
+  raceOverrides: {
+    courseType?: CourseType;
+    fence?: string | null;
+    hasGradeBadge?: boolean;
+  } = {},
 ): RaceData {
   const horses: RaceHorseData[] = [1, 2, 3].map((n) => ({
     shutuba: fakeHorse(n),
@@ -159,8 +167,12 @@ function fakeRaceData(
       distance: 1600,
       weather: "晴",
       trackCondition: "良",
-      // fenceは"fence"キーが指定されたときだけ持たせる(既存テストはキー自体を持たない=undefined相当を維持)。
+      // fence/hasGradeBadgeはキーが指定されたときだけ持たせる(既存テストはキー自体を
+      // 持たない=undefined相当を維持)。
       ...("fence" in raceOverrides ? { fence: raceOverrides.fence } : {}),
+      ...("hasGradeBadge" in raceOverrides
+        ? { hasGradeBadge: raceOverrides.hasGradeBadge }
+        : {}),
     },
     horses,
     odds,
@@ -1692,6 +1704,292 @@ describe("runAnalysis(分析パイプライン)", () => {
 
       expect(result.llmUsed).toBe(false);
       expect(getRaceResultDetail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("同レース(重賞)の過去10年結果傾向(タスク機能B)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    /** テスト用の GradeWinnerTrendSummary(材料がすべて揃った最小の例)。 */
+    function fakeGradeWinnerTrend(): GradeWinnerTrendSummary {
+      return {
+        対象回数: 10,
+        条件一致回数: 8,
+        条件除外回数: 2,
+        頭数レンジ: { min: 12, max: 16 },
+        馬場内訳: [{ 値: "良", 回数: 8 }],
+        柵内訳: [{ 値: "A", 回数: 8 }],
+        複勝圏内馬数: 24,
+        人気レンジ: { min: 1, max: 9 },
+        二桁人気回数: 0,
+        複勝配当レンジ: { min: 200, max: 430 },
+        複勝配当中央値: 280,
+        平均通過順相対: 0.45,
+        通過順相対サンプル数: 24,
+        平均上がり: 34.9,
+        上がりサンプル数: 24,
+        平均馬番相対: 0.52,
+        馬番相対サンプル数: 24,
+      };
+    }
+
+    it("中央のレースをLLMで分析するとき、getGradeWinnerTrendに現レースの条件(trackCode/track/kyori)とraceIdを渡し、戻り値をプロンプトへ反映すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(
+        async (
+          _raceId: RaceId,
+          _conditions: GradeWinnerConditions,
+        ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      expect(calledRaceId).toBe(RACE_ID);
+      // RACE_ID(場コード05)→東京、fakeRaceDataの既定はcourseType="芝"・distance=1600。
+      expect(calledConditions).toEqual({ trackCode: "05", track: "芝", kyori: 1600 });
+
+      expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).toContain("同レース過去傾向");
+    });
+
+    it("getGradeWinnerTrend未注入(deps側で省略)のとき、gradeWinnerTrendはnull/未指定でプロンプトに行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        // getGradeWinnerTrend は意図的に省略(機能オフ)。
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("同レース過去傾向");
+    });
+
+    it("地方(NAR)のレースでも、中央と同様にgetGradeWinnerTrendを呼び、結果をプロンプトへ反映すること(2026-07-28実測訂正: 地方専用ホストで同一APIが取得できるため、venueKindによる事前フィルタは行わない)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(
+        async (
+          _raceId: RaceId,
+          _conditions: GradeWinnerConditions,
+        ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(NAR_RACE_ID)),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+      await runAnalysis(
+        parseRaceId(NAR_RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      expect(calledRaceId).toBe(NAR_RACE_ID);
+      // NAR_RACE_ID(場コード54)→高知、fakeRaceDataの既定はcourseType="芝"・distance=1600。
+      expect(calledConditions).toEqual({ trackCode: "54", track: "芝", kyori: 1600 });
+      expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
+    });
+
+    it("LLMスキップ経路(analyze=null)ではgetGradeWinnerTrendを呼ばない(従来のsameDayTrend等と同様、無駄なリクエストを増やさない)", async () => {
+      const getGradeWinnerTrend = vi.fn(
+        async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(), // analyze: null(既定)
+        getGradeWinnerTrend,
+      };
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.llmUsed).toBe(false);
+      expect(getGradeWinnerTrend).not.toHaveBeenCalled();
+    });
+
+    it("getGradeWinnerTrendが例外を投げても分析全体は失敗させず、gradeWinnerTrendはnullのまま完了すること(補助材料のためコア分析を落とさない)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(async (): Promise<GradeWinnerTrendSummary | null> => {
+        throw new Error("ネットワークエラー(想定外)");
+      });
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.llmUsed).toBe(true);
+      expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+    });
+
+    it("getGradeWinnerTrendがnullを返す(非重賞・条件一致3回未満)とき、gradeWinnerTrendはnullでプロンプトに行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(
+        async (): Promise<GradeWinnerTrendSummary | null> => null,
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("同レース過去傾向");
+    });
+
+    describe("重賞グレードバッジによる呼び出しゲート(要修正2・2026-07-28 boss裁定)", () => {
+      it("出馬表に重賞グレードバッジが無い(hasGradeBadge=false)とき、getGradeWinnerTrendを一切呼ばないこと(非重賞への無駄なPOST防止)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "result", { hasGradeBadge: false })),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+        };
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(getGradeWinnerTrend).not.toHaveBeenCalled();
+        expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+      });
+
+      it("出馬表に重賞グレードバッジがある(hasGradeBadge=true)とき、getGradeWinnerTrendを呼ぶこと", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "result", { hasGradeBadge: true })),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+        };
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      });
+
+      it("hasGradeBadgeが未指定(判定不能・旧フィクスチャ相当)のとき、fail-openでgetGradeWinnerTrendを呼ぶこと(取りこぼしゼロを優先)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          // fakeRaceDataの既定はhasGradeBadgeキー自体を持たない(undefined相当)。
+          scrape: vi.fn(async () => fakeRaceData(RACE_ID)),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+        };
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe("onGradeWinnerTrendError(要修正10・2026-07-28 boss裁定: 構造破壊/API仕様変更のみを警告として残す)", () => {
+      it("getGradeWinnerTrendが例外を投げたとき、onGradeWinnerTrendErrorがraceIdとメッセージ付きで呼ばれること(無音で握りつぶさない)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const onGradeWinnerTrendError = vi.fn();
+        const getGradeWinnerTrend = vi.fn(async (): Promise<GradeWinnerTrendSummary | null> => {
+          throw new Error("ネットワークエラー(想定外)");
+        });
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+          onGradeWinnerTrendError,
+        };
+
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(onGradeWinnerTrendError).toHaveBeenCalledTimes(1);
+        expect(onGradeWinnerTrendError).toHaveBeenCalledWith({
+          raceId: RACE_ID,
+          message: "ネットワークエラー(想定外)",
+        });
+      });
+
+      it("getGradeWinnerTrendが例外を投げずnullを返す(非重賞NG・条件一致3回未満)とき、onGradeWinnerTrendErrorは呼ばれないこと(正常系は無音のまま)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const onGradeWinnerTrendError = vi.fn();
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => null,
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+          onGradeWinnerTrendError,
+        };
+
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(onGradeWinnerTrendError).not.toHaveBeenCalled();
+      });
+
+      it("onGradeWinnerTrendError未指定でも例外時にクラッシュしないこと(省略時は診断ログを残さないだけ)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(async (): Promise<GradeWinnerTrendSummary | null> => {
+          throw new Error("ネットワークエラー(想定外)");
+        });
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+          // onGradeWinnerTrendErrorは意図的に省略。
+        };
+
+        await expect(
+          runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+        ).resolves.toBeDefined();
+      });
     });
   });
 

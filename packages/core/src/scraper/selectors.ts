@@ -46,6 +46,17 @@ export const RACE_LIST_SELECTORS = {
 export const SHUTUBA_SELECTORS = {
   /** レース名(ページ上部)。 */
   raceName: "h1.RaceName",
+  /**
+   * 重賞グレードバッジ(タスク機能B 要修正2: 非重賞への無駄なAPI呼び出しを避ける事前判定)。
+   * RaceName配下にIcon_GradeTypeクラスを持つ要素があるかどうかで判定する(有無のみ。
+   * グレード番号〈Icon_GradeType{N}〉は中央・地方で体系が異なるため一切解釈しない)。
+   * 中央は<h1 class="RaceName">…<span class="Icon_GradeType Icon_GradeType3">、
+   * 地方(NAR)は<div class="RaceName">…<span class="Icon_Grade_None_Text Icon_GradeType
+   * Icon_GradeType19 …">Jpn1</span>とタグ名(h1/div)が異なるため、raceNameセレクタ
+   * (h1限定)を使い回さず、タグ名を問わないクラスセレクタ(.RaceName)で自己完結させる
+   * (実測: 2026-07-28 boss着手前ゲート裁定)。
+   */
+  gradeBadge: ".RaceName .Icon_GradeType",
   /** 発走時刻・距離・コース・天候・馬場を含む行。 */
   raceData01: ".RaceData01",
   /** 会場・条件・頭数などを含む行。 */

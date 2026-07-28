@@ -21,7 +21,14 @@ export interface FetchResponse {
 export type FetchLike = (
   url: string,
   init?: {
+    /**
+     * HTTPメソッド(タスク機能B: 同レース過去10年結果APIのPOST対応)。省略時は
+     * fetch実装の既定(通常GET)。既存呼び出し(GET専用)は指定しないため非破壊。
+     */
+    method?: string;
     headers?: Record<string, string>;
+    /** リクエストボディ(POST時のみ使用)。省略時は本文なし。 */
+    body?: string;
     signal?: AbortSignal;
   },
 ) => Promise<FetchResponse>;
@@ -75,8 +82,24 @@ export interface HttpClientOptions {
   onWarn?: (message: string) => void;
 }
 
+/**
+ * fetchText / fetchBuffer に渡すリクエスト条件(タスク機能B: POST対応)。
+ * 省略時は既存どおりGET相当(method/body/headers付与なし)になり、既存呼び出しは非破壊。
+ */
+export interface FetchRequestInit {
+  /** HTTPメソッド。省略時はfetch実装の既定(通常GET)。 */
+  method?: string;
+  /**
+   * 追加ヘッダ(User-Agentへ上書き合成される)。同レース過去10年結果APIのような
+   * Content-Type / X-Requested-With / Referer / Origin の指定に使う。
+   */
+  headers?: Record<string, string>;
+  /** リクエストボディ(POST時のみ使用)。 */
+  body?: string;
+}
+
 /** fetchText の呼び出しオプション。 */
-export interface FetchTextOptions {
+export interface FetchTextOptions extends FetchRequestInit {
   /** デコードに使うエンコーディングを明示指定する(Content-Typeより優先)。 */
   encoding?: SupportedEncoding;
 }
@@ -183,7 +206,12 @@ export class HttpClient {
    * URLを取得し、指定または応答のcharsetでデコードした文字列を返す。
    */
   async fetchText(url: string, options: FetchTextOptions = {}): Promise<string> {
-    const { body, contentType } = await this.fetchBuffer(url);
+    const { method, headers, body: requestBody } = options;
+    const { body, contentType } = await this.fetchBuffer(url, {
+      method,
+      headers,
+      body: requestBody,
+    });
     let encoding = options.encoding;
     if (!encoding) {
       const { raw, supported } = charsetFromContentType(contentType);
@@ -208,6 +236,7 @@ export class HttpClient {
    */
   async fetchBuffer(
     url: string,
+    requestInit: FetchRequestInit = {},
   ): Promise<{ body: Buffer; contentType: string | null; status: number }> {
     let lastError: unknown;
     // 初回 + maxRetries 回まで試行する。
@@ -217,7 +246,7 @@ export class HttpClient {
 
       let response: FetchResponse;
       try {
-        response = await this.fetchWithTimeout(url);
+        response = await this.fetchWithTimeout(url, requestInit);
       } catch (error) {
         // タイムアウトは既に HttpError 化されているためそのまま、
         // それ以外のネットワークエラーは一時的エラーとして包む。いずれもリトライ対象。
@@ -276,7 +305,10 @@ export class HttpClient {
    * タイムアウト時は AbortController を abort して実リクエストの解放を促しつつ、
    * 一時的エラーとして扱える HttpError を投げる。
    */
-  private async fetchWithTimeout(url: string): Promise<FetchResponse> {
+  private async fetchWithTimeout(
+    url: string,
+    requestInit: FetchRequestInit = {},
+  ): Promise<FetchResponse> {
     const controller = new AbortController();
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -291,8 +323,12 @@ export class HttpClient {
       }, this.timeoutMs);
     });
 
+    // 既定ヘッダ(User-Agent)に追加ヘッダ(Content-Type等)を合成する。追加ヘッダが
+    // 未指定(GET等の既存呼び出し)なら従来どおり User-Agent のみになり非破壊。
     const fetchPromise = this.fetchFn(url, {
-      headers: { "User-Agent": this.userAgent },
+      ...(requestInit.method !== undefined ? { method: requestInit.method } : {}),
+      headers: { "User-Agent": this.userAgent, ...(requestInit.headers ?? {}) },
+      ...(requestInit.body !== undefined ? { body: requestInit.body } : {}),
       signal: controller.signal,
     });
     // タイムアウトが先に解決した場合でも fetch 側の reject を握りつぶし、

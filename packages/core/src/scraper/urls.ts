@@ -149,6 +149,34 @@ export function raceResultUrl(raceId: RaceId): string {
 }
 
 /**
+ * 過去10年結果・優勝馬API(AplGradeWinner、タスク機能B)の固定URL。
+ * race_idはURLではなくPOSTボディに含めるが、ホスト(中央/地方)はrace_idの場コードで選択する。
+ *
+ * 2026-07-28 実測訂正: 当初「地方(NAR)にはこのAPI相当が存在しない」と判断していたが、これは
+ * 中央ホスト(race.netkeiba.com)に地方race_idを投げていたための誤りだった。正しくは地方専用の
+ * nar.netkeiba.comに同一パラメータでPOSTすればよく、パラメータ・レスポンス形式(zlib+base64)は
+ * 中央と完全に同一(2026-07-28 boss着手前ゲート合意の訂正を反映)。
+ */
+export function gradeWinnerApiUrl(raceId: RaceId): string {
+  return `${raceBaseFor(raceId)}/race_api/`;
+}
+
+/**
+ * 過去10年結果・優勝馬APIのReferer。
+ * 中央はpast10.html、地方はpast5.htmlとページ名が異なる点に注意(いずれも実際には過去10年分を返す。
+ * ページ名の「5」は地方側の表示件数を指すものではなく、単にURLパスが異なるだけ)。
+ */
+export function gradeWinnerRefererUrl(raceId: RaceId): string {
+  const page = venueKindOfRaceId(raceId) === "nar" ? "past5.html" : "past10.html";
+  return `${raceBaseFor(raceId)}/race/${page}?race_id=${raceId}`;
+}
+
+/** 過去10年結果・優勝馬APIのOrigin(ホストのみ。中央/地方でgradeWinnerApiUrlと同じホストを返す)。 */
+export function gradeWinnerOriginUrl(raceId: RaceId): string {
+  return raceBaseFor(raceId);
+}
+
+/**
  * 単勝・複勝オッズページのURL(地方のみ)。
  *
  * 中央と異なりJSON APIが存在しない(実測404)ため、静的HTML(odds/index.html?type=b1)を

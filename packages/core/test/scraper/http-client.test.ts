@@ -450,4 +450,96 @@ describe("HttpClient", () => {
       expect(mod.HttpError).toBe(HttpError);
     });
   });
+
+  describe("POST対応(タスク機能B: 同レース過去10年結果APIのため)", () => {
+    it("method/body/追加ヘッダを指定すると、fetch関数へそのまま渡されること", async () => {
+      const fetch = vi.fn<FetchLike>(async () => makeResponse(200, "ok"));
+      const client = new HttpClient({ fetch, minIntervalMs: 0 });
+
+      await client.fetchText("https://race.netkeiba.test/race_api/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: "input=UTF-8&output=json&race_id=202503020211",
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const init = fetch.mock.calls[0]![1] as {
+        method?: string;
+        headers: Record<string, string>;
+        body?: string;
+      };
+      expect(init.method).toBe("POST");
+      expect(init.body).toBe("input=UTF-8&output=json&race_id=202503020211");
+      expect(init.headers["Content-Type"]).toBe(
+        "application/x-www-form-urlencoded; charset=UTF-8",
+      );
+      expect(init.headers["X-Requested-With"]).toBe("XMLHttpRequest");
+    });
+
+    it("追加ヘッダを指定してもUser-Agentは既定どおり付与されること(非破壊)", async () => {
+      const fetch = vi.fn<FetchLike>(async () => makeResponse(200, "ok"));
+      const client = new HttpClient({ fetch, minIntervalMs: 0 });
+
+      await client.fetchText("https://race.netkeiba.test/race_api/", {
+        method: "POST",
+        headers: { Origin: "https://race.netkeiba.com" },
+        body: "a=1",
+      });
+
+      const init = fetch.mock.calls[0]![1] as { headers: Record<string, string> };
+      expect(init.headers["User-Agent"]).toBe(DEFAULT_USER_AGENT);
+      expect(init.headers["Origin"]).toBe("https://race.netkeiba.com");
+    });
+
+    it("method/body/headers未指定時は既存のGET挙動と完全に同じ(methodやbodyがinitに含まれない)こと(非破壊)", async () => {
+      const fetch = vi.fn<FetchLike>(async () => makeResponse(200, "ok"));
+      const client = new HttpClient({ fetch, minIntervalMs: 0 });
+
+      await client.fetchText("https://example.test/get-as-before");
+
+      const init = fetch.mock.calls[0]![1] as {
+        method?: string;
+        body?: string;
+        headers: Record<string, string>;
+        signal?: AbortSignal;
+      };
+      expect(init.method).toBeUndefined();
+      expect(init.body).toBeUndefined();
+      expect(init.headers).toEqual({ "User-Agent": DEFAULT_USER_AGENT });
+    });
+
+    it("POSTでも既定エンコーディング(utf-8)でレスポンス本文をデコードできること", async () => {
+      const fetch = vi.fn<FetchLike>(async () =>
+        makeResponse(200, '{"status":"OK"}', "application/json"),
+      );
+      const client = new HttpClient({ fetch, minIntervalMs: 0 });
+
+      await expect(
+        client.fetchText("https://race.netkeiba.test/race_api/", {
+          method: "POST",
+          body: "a=1",
+        }),
+      ).resolves.toBe('{"status":"OK"}');
+    });
+
+    it("POSTでも5xxはリトライされ、失敗時はHttpErrorになること(既存の堅牢性を維持)", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(0);
+      const fetch = vi.fn<FetchLike>(async () => makeResponse(503, "busy"));
+      const client = new HttpClient({ fetch, minIntervalMs: 0, maxRetries: 1 });
+
+      const p = client.fetchText("https://race.netkeiba.test/race_api/", {
+        method: "POST",
+        body: "a=1",
+      });
+      const assertion = expect(p).rejects.toMatchObject({ status: 503 });
+      await vi.advanceTimersByTimeAsync(10000);
+      await assertion;
+
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+  });
 });

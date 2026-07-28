@@ -107,6 +107,16 @@ export interface ShutubaRaceInfo {
    * - 単一の大文字文字列: 判別できた柵(例: "A")。
    */
   readonly fence?: string | null;
+  /**
+   * 重賞グレードバッジの有無(タスク機能B 要修正2。selectors.ts SHUTUBA_SELECTORS.gradeBadge
+   * で判定)。RaceName配下にIcon_GradeType要素があれば true、無ければ false。
+   * グレード番号(G1〜G3・Jpn1〜3等)の解釈は一切行わない=有無のみの判定であり、OP等の
+   * バッジ付きレースでも true になり得る(その場合は同レース過去10年結果APIが
+   * status:NGを返すだけで、呼び出し自体は無害。判定不能な場合まで false にはせず、
+   * 呼び出し側〈analysis-pipeline.ts〉はこのフィールドが無い〈undefined〉場合も
+   * true と同様に「呼ぶ」側へフォールセーフする=fail-open。取りこぼしゼロを優先する)。
+   */
+  readonly hasGradeBadge?: boolean;
 }
 
 /** 出馬表のパース結果(レース情報+出走馬)。 */

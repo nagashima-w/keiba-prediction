@@ -81,6 +81,9 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
   const weather = PATTERNS.weather.exec(data01)?.[1];
   const trackCondition = PATTERNS.trackCondition.exec(data01)?.[1];
   const fence = parseFence(courseType, data01);
+  // 重賞グレードバッジの有無(タスク機能B 要修正2)。RaceName配下のIcon_GradeType要素の
+  // 有無のみで判定し、番号(グレード)は解釈しない(中央h1/地方divのタグ違いはセレクタ側で吸収)。
+  const hasGradeBadge = $(SEL.gradeBadge).length > 0;
 
   return {
     raceName,
@@ -90,6 +93,7 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
     ...(weather !== undefined ? { weather } : {}),
     ...(trackCondition !== undefined ? { trackCondition } : {}),
     ...(fence !== undefined ? { fence } : {}),
+    hasGradeBadge,
   };
 }
 

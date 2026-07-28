@@ -41,6 +41,9 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
 - **レート制限とキャッシュ**: リクエストは最低 1.5 秒間隔・User-Agent 明示(`http-client.ts`)。取得結果は
   SQLite にキャッシュ(`cache.ts`)し同一レースの再取得を避ける。TTL はデータの揮発性で使い分け
   (出馬表・戦績・調教は長 TTL、オッズは短 TTL)。発走直前は `bypassOddsCache` でオッズのみキャッシュを迂回。
+  `HttpClient`/`CachedFetcher` は GET 専用ではなく POST(method/body/追加ヘッダ)にも対応し、
+  URL が固定でリクエスト識別子が POST ボディに入る API 向けに `cacheKey`(省略時は URL)を明示指定できる
+  (同レース過去10年結果 API 向け。詳細は次項)。
 - **期間一括取得**: 日付範囲を `enumerateDates` で列挙し、`validatePeriodInput` で入力検証したうえで
   複数日・複数レースをまとめて取得する(`packages/app` 側の一括分析と連動)。
 - **エラー方針**: 必須データ(出馬表・オッズ)の失敗は throw。optional データ(調教)の失敗はその項目を
@@ -82,12 +85,23 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   対応)/ 芝の傷み目安(`turf-wear.ts`)/ 当日傾向(同一場・同一面の当日結果集計、`same-day-trend.ts`)/
   馬体重推移(`body-weight-trend.ts`)/ 過去走の人気・着順乖離(`market-gap.ts`)/ 乗り替わり(騎手継続・変更、
   `jockey-change.ts`)/ 過去走の着差(`margin-trend.ts`)/ 条件替わり(サーフェス・距離延長短縮・中央⇄地方、
-  `condition-change.ts`)/ 調教(oikiri)。
-- **プロンプト版の記録**: `PROMPT_VERSION`(現行 `"2026-07-23.5"`)を分析ごとに保存し、版別に検証比較する。
+  `condition-change.ts`)/ 調教(oikiri)/ 同レース(重賞)の過去10年結果傾向(`grade-winner-trend.ts`。下記)。
+- **同レース(重賞)の過去10年結果傾向**(`grade-winner-trend.ts`・`fetch-grade-winner.ts`・
+  `parse-grade-winner.ts`): 分析対象が重賞のとき、同一レースの過去10年結果(netkeiba内部API
+  `AplGradeWinner`。中央・地方〈NAR〉いずれもホスト自動選択で取得)を集計し、【レース情報】末尾に
+  最大3行(①対象回数・条件一致/除外・頭数レンジ・馬場内訳・柵内訳、②複勝圏内馬の人気レンジ・
+  二桁人気回数・複勝配当レンジ/中央値、③複勝圏内馬の平均通過順相対・平均上がり・平均馬番相対。
+  いずれもサンプル数併記でラベル〈内有利/外有利等〉は付けない)を追加する。条件フィルタは
+  場コード(raceId由来)+コース種別+距離の完全一致のみ、一致3回未満はブロック非表示。
+  **呼び出しの事前判定**: 出馬表のレース名見出しに重賞グレードバッジ(`Icon_GradeType`)がある
+  ときだけ呼び出す(`parseShutuba` の `hasGradeBadge`。判定不能〈旧データ等〉なら fail-open で
+  呼ぶ)。これにより非重賞レースへの無駄なリクエストを避ける(重賞判定はバッジの有無のみで、
+  グレード番号は解釈しない)。地方(NAR)にも対応(`nar.netkeiba.com` の同一API)。
+- **プロンプト版の記録**: `PROMPT_VERSION`(現行 `"2026-07-28.1"`)を分析ごとに保存し、版別に検証比較する。
   設定画面の追加指示(`additionalInstruction`)も版とは別軸で記録する。
 - **クリップ幅の A/B(`clip-variants.ts`、単一の真実源 `CLIP_VARIANTS`)**: prior からの補正上限を
   版として切替。`default`=±10%(絶対値0.10、対照)、`wide15`=±15%(絶対値0.15)。版文字列に幅を内包
-  (例 `2026-07-23.5-clip015`)し、プロンプト文面・クリップ幅・版文字列をレジストリから機械導出して
+  (例 `2026-07-28.1-clip015`)し、プロンプト文面・クリップ幅・版文字列をレジストリから機械導出して
   食い違いを防ぐ。実際のクリップは `parseAnalyzerResponse` の `maxAdjust` で行う。
 - **予想印**: ◎〇▲△☆注(`PREDICTION_MARKS`)。◎はちょうど1頭必須、本線印は飛ばさない優先順位制約。
 - **フェイルセーフ**(`analyze-race.ts` / `parse-response.ts`): JSON 破損・切り詰め(`AnalyzerTruncationError`、

@@ -160,6 +160,16 @@ export interface CachedFetchTextOptions extends FetchTextOptions {
    * 発走直前のオッズ再取得など、常に最新が必要な場面で使う。
    */
   bypassCache?: boolean;
+  /**
+   * キャッシュキーを明示指定する(タスク機能B。省略時は url をキーとして使う従来どおりの挙動)。
+   *
+   * ⚠️ 重要: race.netkeiba.com/race_api/ のような「URLが固定でrace_id等がPOSTボディに入る」API
+   * では、URLだけをキーにすると全レースで同一キーになり、最初に取得したレースのデータが
+   * 以降すべてのレースに誤って返る事故になる(boss着手前ゲート指摘)。POSTボディに識別子が
+   * 入るエンドポイントを呼ぶ側は、必ずこのオプションで一意なキー(例:
+   * `race_api#AplGradeWinner#{race_id}`)を指定すること。
+   */
+  cacheKey?: string;
 }
 
 /**
@@ -179,24 +189,25 @@ export class CachedFetcher {
 
   /**
    * URLをキャッシュ経由で取得する。
-   * @param url 取得対象URL(キャッシュキーにもなる)
-   * @param options 鮮度・バイパス指定、およびフェッチャへ渡すオプション(encoding等)
+   * @param url 取得対象URL(キャッシュキーにもなる。cacheKey指定時はそちらを優先する)
+   * @param options 鮮度・バイパス指定、キャッシュキー指定、およびフェッチャへ渡すオプション(encoding等)
    */
   async fetchText(
     url: string,
     options: CachedFetchTextOptions = {},
   ): Promise<string> {
-    const { maxAgeMs, bypassCache, ...fetchOptions } = options;
+    const { maxAgeMs, bypassCache, cacheKey, ...fetchOptions } = options;
+    const key = cacheKey ?? url;
 
     if (!bypassCache) {
-      const hit = this.cache.get(url, { maxAgeMs });
+      const hit = this.cache.get(key, { maxAgeMs });
       if (hit) {
         return hit.value;
       }
     }
 
     const text = await this.fetcher.fetchText(url, fetchOptions);
-    this.cache.set(url, text);
+    this.cache.set(key, text);
     return text;
   }
 }

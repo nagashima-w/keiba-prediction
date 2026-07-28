@@ -17,6 +17,7 @@ import {
   analyzeRace,
   AnthropicLlmClient,
   CachedFetcher,
+  collectGradeWinnerTrend,
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
@@ -32,6 +33,7 @@ import {
   type ClipVariantId,
   type EvConfig,
   type FetchLike,
+  type GradeWinnerConditions,
   type KaisaiDate,
   type MessageSender,
   type RaceId,
@@ -235,6 +237,21 @@ export function createPipelineDeps(
     // 当日の同一場・同一面傾向(タスク#27-C)。store.getRaceResultDetail をそのまま束縛するだけで、
     // 新規スクレイピング・実リクエスト・DB書き込みは一切増えない(既存の取込済みデータの読み出しのみ)。
     getRaceResultDetail: (raceId: RaceId) => store.getRaceResultDetail(raceId),
+    // 同レース(重賞)の過去10年結果傾向(タスク機能B)。fetcher(既存のCachedFetcher。中央・地方
+    // いずれもホスト自動選択で取得できる)で束縛した collectGradeWinnerTrend をそのまま渡す。
+    getGradeWinnerTrend: (raceId: RaceId, conditions: GradeWinnerConditions) =>
+      collectGradeWinnerTrend(raceId, conditions, { fetcher }),
+    // 要修正10: getGradeWinnerTrendが例外を投げた(構造破壊・API仕様変更等の本物の異常)ときの
+    // 診断ログを、HttpClientの警告と同じ既存チャンネル(config.onWarn→ipc.tsのlogWarn)へ流す。
+    // 非重賞NG(status:NG)・条件一致3回未満のような正常系のnull返却は例外を投げないため、
+    // このフック自体が呼ばれない(既存どおり無音)。config.onWarn未指定ならundefinedのまま
+    // (診断ログを残さないだけで、runAnalysis側の null フォールバック自体は変わらない)。
+    onGradeWinnerTrendError: config.onWarn
+      ? (info) =>
+          config.onWarn!(
+            `同レース過去10年結果傾向(AplGradeWinner)の取得に失敗しました(race_id: ${info.raceId}): ${info.message}`,
+          )
+      : undefined,
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",

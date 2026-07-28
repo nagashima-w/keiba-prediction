@@ -110,8 +110,23 @@
  * 両方が実在するため。詳細は margin-trend.ts 冒頭コメント参照)。他文面・出力スキーマは不変。
  * この対照(default)のPROMPT_VERSION更新に伴い、
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-07-28.1"(タスク機能B: 同レース〈重賞〉の過去10年結果傾向。2026-07-28 boss着手前ゲート
+ * 合意): 分析対象が重賞のとき、【レース情報】末尾(sameDayTrendの直後)に、同一レースの過去10年
+ * 結果(grade-winner-trend.ts の summarizeGradeWinnerTrend)から集計した傾向を最大3行追加できる
+ * ようにした。呼び出し側(analysis-pipeline.ts)が race.gradeWinnerTrend として渡したときだけ
+ * 描画し、条件一致(jyo+track+kyori)が3回未満(=summaryがnull)なら1行も出さない
+ * (turfWearHint/sameDayTrendと同じ非破壊optionalの spread-omit 流儀。未指定なら既存文面バイト
+ * 不変)。3行の内訳は (1)基礎: 対象回数・条件一致/除外・頭数レンジ・馬場内訳・柵内訳、
+ * (2)人気と複勝配当: 複勝圏内馬の人気レンジ・二桁人気の回数・複勝配当のレンジ/中央値、
+ * (3)記述統計: 複勝圏内馬の平均通過順相対・平均上がり・平均馬番相対(いずれもサンプル数併記・
+ * ラベルなし。4着以下の対照群が無いため「内有利/外有利」等のバイアス判定語は一切使わない。
+ * same-day-trend.tsの内外傾向とは性質が異なる)。各行は材料(頭数レンジ・馬場内訳・柵内訳/
+ * 人気レンジ・複勝配当レンジ/各記述統計)が1つも無ければその行自体を省略する。他文面・
+ * 出力スキーマは不変。この対照(default)のPROMPT_VERSION更新に伴い、
+ * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-23.5";
+export const PROMPT_VERSION = "2026-07-28.1";
 
 export {
   CLIP_VARIANTS,
@@ -144,6 +159,7 @@ export {
 import type { CourseType } from "../scraper/types.js";
 import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
+import type { GradeWinnerTrendSummary } from "./grade-winner-trend.js";
 import type { SameDayTrendSummary } from "./same-day-trend.js";
 import type { TurfWearHint } from "./turf-wear.js";
 import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
@@ -326,6 +342,18 @@ export interface BuildPromptRaceInfo {
    * 内外傾向・上がり傾向が null の指標は該当項目のみ省く。
    */
   readonly sameDayTrend?: SameDayTrendSummary | null;
+  /**
+   * 同レース(重賞)の過去10年結果傾向(タスク機能B。grade-winner-trend.ts の
+   * summarizeGradeWinnerTrend が返す集計結果)。呼び出し側(analysis-pipeline.ts)が
+   * 分析対象レース自身の条件(jyo/track/kyori)で過去回を絞り込んで算出し渡す
+   * (このモジュール自体はraceId・ネットワークを保持しないため算出しない)。undefined/null なら
+   * 行を一切出さない(sameDayTrend/turfWearHintと同じ spread-omit 流儀。既存文面バイト不変)。
+   * 条件一致(jyo+track+kyori)が3回未満なら summarizeGradeWinnerTrend 自体が null を返すため、
+   * 呼び出し側がその null をそのまま渡せば自然にブロックが非表示になる(defense in depth。
+   * 本関数もその前提に依存せず、以下の gradeWinnerTrendLines は summary が非nullのときだけ
+   * 行を組み立てる)。
+   */
+  readonly gradeWinnerTrend?: GradeWinnerTrendSummary | null;
 }
 
 /** buildPrompt の入力。 */
@@ -438,6 +466,82 @@ function sameDayTrendText(
 }
 
 /**
+ * 値ごとの出現回数配列(GradeWinnerValueCount[])を「値回数・値回数」形式のテキストにする
+ * (例: [{値:"良",回数:6},{値:"稍重",回数:2}] → "良6・稍重2")。空配列は null。
+ */
+function valueCountsText(
+  counts: readonly { readonly 値: string; readonly 回数: number }[],
+): string | null {
+  if (counts.length === 0) {
+    return null;
+  }
+  return counts.map((c) => `${c.値}${c.回数}`).join("・");
+}
+
+/**
+ * 同レース(重賞)の過去10年結果傾向(タスク機能B)を【レース情報】末尾の最大3行にする。
+ * summary が無い(undefined/null)なら空配列(行を出さない)。
+ *
+ * 各行は材料が1つも無ければ丸ごと省略する(1行目の対象回数・条件一致/除外は
+ * summary が非nullである時点で必ず値を持つため常に出す)。3行目(記述統計)は
+ * 4着以下の対照群が無いため「内有利/外有利」等のラベルは一切使わず、
+ * サンプル数併記のみの中立な参考値として提示する(same-day-trend.tsの内外傾向とは性質が異なる)。
+ */
+function gradeWinnerTrendLines(
+  summary: GradeWinnerTrendSummary | null | undefined,
+): string[] {
+  if (!summary) {
+    return [];
+  }
+
+  const lines: string[] = [];
+
+  // 1行目: 基礎(対象回数・条件一致/除外・頭数レンジ・馬場内訳・柵内訳)。
+  const basicParts = [
+    summary.頭数レンジ
+      ? `頭数${summary.頭数レンジ.min}〜${summary.頭数レンジ.max}頭`
+      : null,
+    valueCountsText(summary.馬場内訳) ? `馬場${valueCountsText(summary.馬場内訳)}` : null,
+    valueCountsText(summary.柵内訳) ? `柵${valueCountsText(summary.柵内訳)}` : null,
+  ].filter((x): x is string => x !== null);
+  lines.push(
+    `同レース過去傾向(対象${summary.対象回数}回中 条件一致${summary.条件一致回数}回・除外${summary.条件除外回数}回)` +
+      (basicParts.length > 0 ? `: ${basicParts.join("、")}` : ""),
+  );
+
+  // 2行目: 人気と複勝配当(複勝圏内馬の人気レンジ・二桁人気の回数・複勝配当のレンジ/中央値)。
+  const marketParts = [
+    summary.人気レンジ
+      ? `人気${summary.人気レンジ.min}〜${summary.人気レンジ.max}番人気(二桁人気${summary.二桁人気回数}回)`
+      : null,
+    summary.複勝配当レンジ && summary.複勝配当中央値 !== null
+      ? `複勝配当${summary.複勝配当レンジ.min}〜${summary.複勝配当レンジ.max}円(中央値${summary.複勝配当中央値}円)`
+      : null,
+  ].filter((x): x is string => x !== null);
+  if (marketParts.length > 0) {
+    lines.push(`複勝圏内(${summary.複勝圏内馬数}頭)の傾向: ${marketParts.join("、")}`);
+  }
+
+  // 3行目: 記述統計(通過順相対・上がり・馬番相対。いずれもサンプル数併記・ラベルなし)。
+  const statParts = [
+    summary.平均通過順相対 !== null
+      ? `通過順相対平均${summary.平均通過順相対.toFixed(2)}(n=${summary.通過順相対サンプル数})`
+      : null,
+    summary.平均上がり !== null
+      ? `上がり平均${summary.平均上がり.toFixed(1)}秒(n=${summary.上がりサンプル数})`
+      : null,
+    summary.平均馬番相対 !== null
+      ? `馬番相対平均${summary.平均馬番相対.toFixed(2)}(n=${summary.馬番相対サンプル数})`
+      : null,
+  ].filter((x): x is string => x !== null);
+  if (statParts.length > 0) {
+    lines.push(`複勝圏内の記述統計(ラベルなし・参考値): ${statParts.join("、")}`);
+  }
+
+  return lines;
+}
+
+/**
  * 1レース分のプロンプトを組み立てる。
  * 出力は決定論的(同一入力→同一文字列)。馬番昇順で各馬行を並べる。
  */
@@ -501,6 +605,7 @@ export function buildPrompt(input: BuildPromptInput): string {
     // undefined/null(raceId非保持のプレビュー等)なら行自体を出さず、既存文面バイト不変を保つ。
     race.turfWearHint ? `芝コースの開催進行: ${race.turfWearHint.note}` : null,
     sameDayTrendText(race.courseType, race.sameDayTrend),
+    ...gradeWinnerTrendLines(race.gradeWinnerTrend),
   ].filter((x): x is string => x !== null);
   lines.push("【レース情報】");
   lines.push(...raceHeader);

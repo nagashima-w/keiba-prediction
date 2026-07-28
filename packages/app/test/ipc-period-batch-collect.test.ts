@@ -302,7 +302,7 @@ describe("期間バッチ「先取得+件数算出」ハンドラ(phase1。タ�
     await handler(fakeEvent, "20260710", "20260710", "central");
 
     expect(listAnalyzedRaceIdsByPromptVersionMock).toHaveBeenCalledWith(
-      "2026-07-23.5-clip015",
+      "2026-07-28.1-clip015",
     );
   });
 

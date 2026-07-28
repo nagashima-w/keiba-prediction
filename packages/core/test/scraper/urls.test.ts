@@ -6,6 +6,9 @@ import {
 } from "../../src/scraper/ids.js";
 import {
   commentUrl,
+  gradeWinnerApiUrl,
+  gradeWinnerOriginUrl,
+  gradeWinnerRefererUrl,
   horseResultsApiUrl,
   horseUrl,
   narOddsPageUrl,
@@ -141,6 +144,24 @@ describe("oikiriUrl/commentUrl/oddsApiUrl(地方では存在しないページ)"
   });
 });
 
+describe("gradeWinnerApiUrl/gradeWinnerRefererUrl/gradeWinnerOriginUrl(過去10年結果API。タスク機能B: 中央/地方でホストを出し分け)", () => {
+  it("中央race_idではrace.netkeiba.comのURL・Referer(past10.html)・Originを返すこと", () => {
+    expect(gradeWinnerApiUrl(raceId)).toBe("https://race.netkeiba.com/race_api/");
+    expect(gradeWinnerRefererUrl(raceId)).toBe(
+      "https://race.netkeiba.com/race/past10.html?race_id=202605020811",
+    );
+    expect(gradeWinnerOriginUrl(raceId)).toBe("https://race.netkeiba.com");
+  });
+
+  it("地方race_idではnar.netkeiba.comのURL・Referer(past5.html。ページ名が中央〈past10.html〉と異なる)・Originを返すこと", () => {
+    expect(gradeWinnerApiUrl(narRaceId)).toBe("https://nar.netkeiba.com/race_api/");
+    expect(gradeWinnerRefererUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/race/past5.html?race_id=202654071210",
+    );
+    expect(gradeWinnerOriginUrl(narRaceId)).toBe("https://nar.netkeiba.com");
+  });
+});
+
 describe("公開API(index.tsからの再エクスポート)", () => {
   it("URL構築関数がindexから再エクスポートされていること", async () => {
     const mod = await import("../../src/index.js");
@@ -155,6 +176,9 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.narRaceListSubUrl).toBe(narRaceListSubUrl);
     expect(mod.narOddsPageUrl).toBe(narOddsPageUrl);
     expect(mod.NarUnsupportedError).toBe(NarUnsupportedError);
+    expect(mod.gradeWinnerApiUrl).toBe(gradeWinnerApiUrl);
+    expect(mod.gradeWinnerRefererUrl).toBe(gradeWinnerRefererUrl);
+    expect(mod.gradeWinnerOriginUrl).toBe(gradeWinnerOriginUrl);
   });
 
   it("不採用となったnewspaperUrlは公開されないこと", async () => {
