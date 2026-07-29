@@ -11,6 +11,8 @@
     ".": "./src/index.ts",
     "./scorer/config": "./src/scorer/config.ts",
     "./ev/race-opportunity": "./src/ev/race-opportunity.ts",
+    "./ev/place-joint-model": "./src/ev/place-joint-model.ts",
+    "./ev/bet-allocation": "./src/ev/bet-allocation.ts",
     "./analyzer/build-prompt": "./src/analyzer/build-prompt.ts",
     "./scraper/validate-period-input": "./src/scraper/validate-period-input.ts"
   },
