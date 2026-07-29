@@ -273,8 +273,13 @@ export function allocateBets(
   const rawDistribution = model.buildDistribution(jointHorses, placeCount);
 
   // 診断値: 全出走馬のplaceProb合計・目標との乖離(符号付き)。
+  // placeProbSumTargetはplaceCountをそのまま使うが、NaNはplace-joint-model.tsのk導出と
+  // 同じ理由(Math.max等のクランプがNaNをすり抜ける)で0として扱う。NaNのままだと
+  // placeProbSumDeviationにもNaNが伝播し、判定していないことを判定結果として報告しない
+  // という原則に反する(resolveBetUnit等のような既定値フォールバックは採らない。placeCountに
+  // 普遍的な既定値はないため、負値・Infinityはそのまま診断値に反映する)。
   const placeProbSum = sortedHorses.reduce((acc, h) => acc + h.placeProb, 0);
-  const placeProbSumTarget = placeCount;
+  const placeProbSumTarget = Number.isNaN(placeCount) ? 0 : placeCount;
   const placeProbSumDeviation = placeProbSum - placeProbSumTarget;
 
   // 診断値: Step2の畳み込み前(全頭)の同時分布から求めた各馬の周辺確率と入力placeProbの

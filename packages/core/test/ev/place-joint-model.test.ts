@@ -112,6 +112,28 @@ describe("CONDITIONAL_BERNOULLI_MODEL(条件付きベルヌーイ同時分布)",
       const distribution = CONDITIONAL_BERNOULLI_MODEL.buildDistribution([], 3);
       expect(distribution).toEqual([{ placed: [], probability: 1 }]);
     });
+
+    it("placeCount === NaN のとき空集合が確率1になること(負値クランプと同じ挙動に揃える)", () => {
+      // Math.max(0, NaN) は NaN のまま素通りしてしまい(負値クランプが効かない)、
+      // kCombinationsの基底条件が恒久的に成立せずcombos=[]になる回帰バグの再発防止テスト。
+      // NaNを0(複勝人数なし)として扱うことで、負値(0にクランプ)と一貫した結果になる。
+      const distribution = CONDITIONAL_BERNOULLI_MODEL.buildDistribution(
+        horses([0.3, 0.5, 0.2]),
+        Number.NaN,
+      );
+      expect(distribution).toEqual([{ placed: [], probability: 1 }]);
+    });
+
+    it("placeCount === -Infinity のとき空集合が確率1になること(既存のMath.maxクランプのまま。回帰防止)", () => {
+      // -InfinityはNaNと異なりMath.max(0, -Infinity)が既に正しく0を返すため、修正の有無に
+      // 関わらず既存の挙動が維持されることを固定する(NaN修正が誤って-Infinityの経路まで
+      // 変えていないことの確認)。
+      const distribution = CONDITIONAL_BERNOULLI_MODEL.buildDistribution(
+        horses([0.3, 0.5, 0.2]),
+        Number.NEGATIVE_INFINITY,
+      );
+      expect(distribution).toEqual([{ placed: [], probability: 1 }]);
+    });
   });
 
   describe("確率合計が乖離する入力でも条件付け後の分布合計は必ず1(LLM補正後の未保証な合計を吸収)", () => {

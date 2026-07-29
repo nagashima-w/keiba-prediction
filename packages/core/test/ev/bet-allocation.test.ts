@@ -357,6 +357,35 @@ describe("allocateBets(馬券配分の最適化)", () => {
         6,
       );
     });
+
+    it("placeCount=NaNでもNaNが一切露出しないこと(要修正・新規の回帰テスト)", () => {
+      // place-joint-model.tsのk導出でNaNがMath.maxのクランプをすり抜け、combos=[]による
+      // 経路逸脱でdiagnostics.placeProbSumTarget/placeProbSumDeviationにもNaNが漏れていた
+      // 回帰バグの再発防止。資金安全性(予算超過)には影響しないが、判定していないことを
+      // 判定結果として報告してはならない欠陥クラス。
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const result = allocateBets(horses, Number.NaN, {
+        budget: 10000,
+        kellyFraction: 1,
+        betUnit: 100,
+        greedySteps: 1000,
+      });
+      expect(Number.isNaN(result.totalStake)).toBe(false);
+      expect(Number.isNaN(result.diagnostics.placeProbSumTarget)).toBe(false);
+      expect(Number.isNaN(result.diagnostics.placeProbSumDeviation)).toBe(false);
+      expect(Number.isNaN(result.diagnostics.marginalDeviationMax)).toBe(false);
+      for (const a of result.allocations) {
+        expect(Number.isNaN(a.stake)).toBe(false);
+        expect(Number.isNaN(a.kellyFraction)).toBe(false);
+        expect(Number.isNaN(a.scaledFraction)).toBe(false);
+      }
+      // 負値(既存のMath.maxクランプ)と同じ一貫した結果(k=0扱い)として④に分類される。
+      // 新しい見送り理由は増やさない(スコープを膨らませない)。
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe(
+        "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
+      );
+    });
   });
 
   describe("受け入れ条件9: 候補外の馬も欠落させないこと", () => {

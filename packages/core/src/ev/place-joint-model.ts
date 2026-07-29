@@ -99,7 +99,14 @@ function buildConditionalBernoulliDistribution(
   placeCount: number,
 ): readonly PlaceOutcome[] {
   const n = horses.length;
-  const k = Math.max(0, Math.floor(placeCount));
+  // NaN は Math.max(0, NaN) が NaN のまま素通りしてしまう(負値クランプが効かない)ため、
+  // 個別にガードして0(複勝人数なし)へ倒す。負値は既存どおり Math.max(0, ...) でクランプされ、
+  // +Infinity/-Infinityは既存の比較(k>=n・Math.max)で意図通り動く(+Infinityは「頭数以上」
+  // 経路、-InfinityはMath.maxで0にクランプ)ため変更しない。resolveBetUnit等のような既定値への
+  // フォールバックは採らない(placeCountはレースの頭数区分から決まる値で、普遍的な既定値がなく、
+  // 3などへ勝手に倒すとかえって誤った結果を正当化するため)。負値と同じ「0にクランプ」に揃える
+  // ことで、複勝人数なし=空集合が確率1という既存の不変条件（合計1）に一貫して落ちる。
+  const k = Number.isNaN(placeCount) ? 0 : Math.max(0, Math.floor(placeCount));
 
   // 頭数0 または 複勝人数0: 空集合が確率1の唯一の結果(合計1の不変条件を維持)。
   if (n === 0 || k === 0) {
