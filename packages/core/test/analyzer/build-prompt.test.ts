@@ -349,8 +349,8 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("同レース過去10年結果傾向反映(タスク機能B)追加版として 2026-07-28.1 が付与されていること", () => {
-    expect(PROMPT_VERSION).toBe("2026-07-28.1");
+  it("複勝圏内の標本数誤読解消(機能Bの小改善)追加版として 2026-07-28.2 が付与されていること", () => {
+    expect(PROMPT_VERSION).toBe("2026-07-28.2");
   });
 });
 
@@ -549,9 +549,11 @@ describe("buildPrompt(同レース過去10年結果傾向、タスク機能B)", 
       柵内訳: [{ 値: "A", 回数: 8 }],
       複勝圏内馬数: 24,
       人気レンジ: { min: 1, max: 9 },
-      二桁人気回数: 0,
+      人気サンプル数: 24,
+      二桁人気頭数: 0,
       複勝配当レンジ: { min: 200, max: 430 },
       複勝配当中央値: 280,
+      複勝配当サンプル数: 24,
       平均通過順相対: 0.45,
       通過順相対サンプル数: 24,
       平均上がり: 34.9,
@@ -573,10 +575,10 @@ describe("buildPrompt(同レース過去10年結果傾向、タスク機能B)", 
     expect(p).toContain("良6");
     expect(p).toContain("稍重2");
     expect(p).toContain("A8");
-    // 2行目: 人気分布・二桁人気の回数・複勝配当のレンジ/中央値。
-    expect(p).toContain("複勝圏内(24頭)");
+    // 2行目: 「延べ」頭数の見出し・人気分布(n=併記)・二桁人気の頭数・複勝配当のレンジ/中央値(n=併記)。
+    expect(p).toContain("複勝圏内(延べ24頭)");
     expect(p).toContain("1〜9番人気");
-    expect(p).toContain("二桁人気0回");
+    expect(p).toContain("うち二桁人気0頭");
     expect(p).toContain("200〜430円");
     expect(p).toContain("中央値280円");
     // 3行目: 記述統計(ラベルなし・サンプル数併記)。
@@ -586,6 +588,35 @@ describe("buildPrompt(同レース過去10年結果傾向、タスク機能B)", 
     expect(p).toContain("0.45");
     expect(p).toContain("34.9");
     expect(p).toContain("0.52");
+  });
+
+  it("2行目(人気と複勝配当)が仕様どおりのフォーマットに完全一致すること(誤読解消の本体。受け入れ条件1)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: { ...baseInput().race, gradeWinnerTrend: gradeWinnerTrend() },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("複勝圏内("));
+    expect(line).toBe(
+      "複勝圏内(延べ24頭)の傾向: 人気1〜9番人気(n=24、うち二桁人気0頭)、複勝配当200〜430円(中央値280円、n=24)",
+    );
+  });
+
+  it("複勝圏内馬数・人気サンプル数・複勝配当サンプル数が互いに異なる入力で、行にそれぞれ別々の数が出ること(受け入れ条件2: 誤読解消の本体)", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        gradeWinnerTrend: gradeWinnerTrend({
+          複勝圏内馬数: 24,
+          人気サンプル数: 22,
+          複勝配当サンプル数: 20,
+        }),
+      },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("複勝圏内("));
+    expect(line).toBe(
+      "複勝圏内(延べ24頭)の傾向: 人気1〜9番人気(n=22、うち二桁人気0頭)、複勝配当200〜430円(中央値280円、n=20)",
+    );
   });
 
   it("記述統計の行に内有利/外有利等のラベル語を一切含まないこと(same-day-trendとは性質が異なる)", () => {
@@ -632,21 +663,60 @@ describe("buildPrompt(同レース過去10年結果傾向、タスク機能B)", 
     expect(line).not.toContain("柵");
   });
 
-  it("人気レンジ・複勝配当レンジが共にnullのとき、2行目(人気と複勝配当)を出さないこと", () => {
+  it("人気レンジ・複勝配当レンジが共にnullのとき、2行目(人気と複勝配当)を出さないこと(既存635行を維持)", () => {
     const p = buildPrompt({
       ...baseInput(),
       race: {
         ...baseInput().race,
         gradeWinnerTrend: gradeWinnerTrend({
           人気レンジ: null,
+          人気サンプル数: 0,
           複勝配当レンジ: null,
           複勝配当中央値: null,
+          複勝配当サンプル数: 0,
         }),
       },
     });
     expect(p.split("\n").some((l) => l.startsWith("複勝圏内(") && l.includes("の傾向"))).toBe(
       false,
     );
+  });
+
+  it("人気のみ欠ける場合、人気の部分とその n= も一緒に省略され、複勝配当の部分だけが出ること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        gradeWinnerTrend: gradeWinnerTrend({
+          人気レンジ: null,
+          人気サンプル数: 0,
+        }),
+      },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("複勝圏内("));
+    expect(line).toBe(
+      "複勝圏内(延べ24頭)の傾向: 複勝配当200〜430円(中央値280円、n=24)",
+    );
+    expect(line).not.toContain("人気");
+  });
+
+  it("複勝配当のみ欠ける場合、複勝配当の部分とその n= も一緒に省略され、人気の部分だけが出ること", () => {
+    const p = buildPrompt({
+      ...baseInput(),
+      race: {
+        ...baseInput().race,
+        gradeWinnerTrend: gradeWinnerTrend({
+          複勝配当レンジ: null,
+          複勝配当中央値: null,
+          複勝配当サンプル数: 0,
+        }),
+      },
+    });
+    const line = p.split("\n").find((l) => l.startsWith("複勝圏内("));
+    expect(line).toBe(
+      "複勝圏内(延べ24頭)の傾向: 人気1〜9番人気(n=24、うち二桁人気0頭)",
+    );
+    expect(line).not.toContain("複勝配当");
   });
 
   it("平均通過順相対・平均上がり・平均馬番相対が共にnullのとき、3行目(記述統計)を出さないこと", () => {

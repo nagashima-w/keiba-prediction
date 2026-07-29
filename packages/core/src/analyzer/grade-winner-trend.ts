@@ -37,6 +37,15 @@
  * 頭数・馬場・柵・人気・複勝配当・記述統計のみで、レース名は出さない)。将来レース名を
  * 表示に使う場合は、出馬表側(build-prompt.ts の race.raceName。ユーザーが見ている画面と
  * 一致する)を正とし、API側の名称とは混在させないこと。
+ *
+ * 標本数の食い違いについて(2026-07-28 小改善・プロンプト誤読解消): 複勝圏内馬数(延べ頭数)は
+ * 人気サンプル数・複勝配当サンプル数と必ずしも一致しない。食い違いが実在する条件:
+ * (a) 7頭以下等でfuku_pay3が欠損する回、(b) 複勝非発売でfuku_pay1〜3が全欠の回、
+ * (c) 3着同着で複勝圏内は4頭だがpaybackは3枠のみの回、(d) payback自体がnullの回、
+ * (e) fuku_payが0または非有限値の回、(f) 複勝圏内馬のninkiがnull/0の回(人気側にも同様の
+ * 食い違いが起きる)。このため人気レンジ・複勝配当レンジそれぞれに専用のサンプル数
+ * (人気サンプル数・複勝配当サンプル数)を持たせ、複勝圏内馬数のNとは別物であることを
+ * 型で明示する(集計ロジック自体は変更せず、既に数えている件数を露出するだけ)。
  */
 
 import { classifyRunLegStyleFull } from "./leg-style.js";
@@ -109,12 +118,27 @@ export interface GradeWinnerTrendSummary {
   readonly 複勝圏内馬数: number;
   /** 複勝圏内馬の単勝人気レンジ。算出不能なら null。 */
   readonly 人気レンジ: GradeWinnerRange | null;
-  /** 複勝圏内馬のうち単勝人気が二桁(10番人気以上)だった回数。 */
-  readonly 二桁人気回数: number;
+  /**
+   * 人気レンジの算出に使えたサンプル数(プロンプト誤読解消。2026-07-28小改善)。
+   * 複勝圏内馬数(延べ頭数)と食い違うことがある(複勝圏内馬のninkiがnull/0の場合等)ため、
+   * 「複勝圏内(延べN頭)」のNとは別に、人気側自身のサンプル数を持たせて誤読を防ぐ。
+   * レンジが null のときは常に 0。
+   */
+  readonly 人気サンプル数: number;
+  /** 複勝圏内馬のうち単勝人気が二桁(10番人気以上)だった延べ頭数。 */
+  readonly 二桁人気頭数: number;
   /** 複勝配当(fuku_pay1〜3)のレンジ。算出不能なら null。 */
   readonly 複勝配当レンジ: GradeWinnerRange | null;
   /** 複勝配当(fuku_pay1〜3)の中央値。算出不能なら null。 */
   readonly 複勝配当中央値: number | null;
+  /**
+   * 複勝配当レンジ・中央値の算出に使えたサンプル数(プロンプト誤読解消。2026-07-28小改善)。
+   * 複勝圏内馬数(延べ頭数)と食い違うことがある。食い違いが起きる実在条件:
+   * (a) 7頭以下等で fuku_pay3 が欠損する回、(b) 複勝非発売で fuku_pay1〜3 が全欠の回、
+   * (c) 3着同着で複勝圏内は4頭だが payback は3枠のみの回、(d) payback 自体が null の回、
+   * (e) fuku_pay が0または非有限値の回。レンジが null のときは常に 0。
+   */
+  readonly 複勝配当サンプル数: number;
   /**
    * 複勝圏内馬の平均通過順相対(コーナー通過順の平均÷頭数。leg-style.ts の
    * classifyRunLegStyleFull による算出を再利用)。ラベル化はしない(参考値)。算出不能なら null。
@@ -292,9 +316,11 @@ export function summarizeGradeWinnerTrend(
     柵内訳: countByValue(fenceValues),
     複勝圏内馬数: placedCount,
     人気レンジ: rangeOf(ninkiValues),
-    二桁人気回数: ninkiValues.filter((n) => n >= DOUBLE_DIGIT_NINKI_MIN).length,
+    人気サンプル数: ninkiValues.length,
+    二桁人気頭数: ninkiValues.filter((n) => n >= DOUBLE_DIGIT_NINKI_MIN).length,
     複勝配当レンジ: rangeOf(paybackValues),
     複勝配当中央値: medianOf(paybackValues),
+    複勝配当サンプル数: paybackValues.length,
     平均通過順相対: average(positionRatios),
     通過順相対サンプル数: positionRatios.length,
     平均上がり: average(last3fs),

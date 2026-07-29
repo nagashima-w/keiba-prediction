@@ -215,7 +215,7 @@ describe("summarizeGradeWinnerTrend(複勝圏内馬の判定: 確定着順を正
 });
 
 describe("summarizeGradeWinnerTrend(人気傾向・複勝配当傾向)", () => {
-  it("複勝圏内馬のninkiから人気レンジと二桁人気回数を集計すること", () => {
+  it("複勝圏内馬のninkiから人気レンジと二桁人気頭数を集計すること", () => {
     const entries = [
       entry({
         result: [horse({ kakutei: 1, ninki: 4 }), horse({ kakutei: 2, ninki: 12 })],
@@ -225,10 +225,43 @@ describe("summarizeGradeWinnerTrend(人気傾向・複勝配当傾向)", () => {
     ];
     const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
     expect(summary.人気レンジ).toEqual({ min: 1, max: 12 });
-    expect(summary.二桁人気回数).toBe(1);
+    expect(summary.二桁人気頭数).toBe(1);
   });
 
-  it("payback.fuku_pay1〜3から複勝配当のレンジ・中央値を集計すること", () => {
+  // 二桁人気頭数の境界(テーブル駆動): ninki=9は非該当、ninki=10は該当。
+  it.each([
+    { ninki: 9, expected: 0, label: "9番人気は二桁人気に含めないこと" },
+    { ninki: 10, expected: 1, label: "10番人気は二桁人気に含めること" },
+  ])("二桁人気の境界: $label", ({ ninki, expected }) => {
+    const entries = [
+      entry({ result: [horse({ kakutei: 1, ninki })] }),
+      entry(),
+      entry(),
+    ];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    expect(summary.二桁人気頭数).toBe(expected);
+  });
+
+  it("複勝圏内馬のninkiがnull/0の場合、人気サンプル数が複勝圏内馬数より少なくなること(標本数の食い違い・条件f)", () => {
+    const entries = [
+      entry({
+        result: [
+          horse({ kakutei: 1, ninki: 3 }),
+          horse({ kakutei: 2, ninki: null }),
+          horse({ kakutei: 3, ninki: 0 }),
+        ],
+      }),
+      entry(),
+      entry(),
+    ];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    // 複勝圏内馬数は3頭(ninkiの有無に関わらず全員数える)だが、人気サンプル数はninki有効な1頭のみ。
+    expect(summary.複勝圏内馬数).toBe(3);
+    expect(summary.人気サンプル数).toBe(1);
+    expect(summary.人気サンプル数).toBeLessThan(summary.複勝圏内馬数);
+  });
+
+  it("payback.fuku_pay1〜3から複勝配当のレンジ・中央値・サンプル数を集計すること", () => {
     const entries = [
       entry({ payback: { fukuPay1: 280, fukuNinki1: 6, fukuPay2: 200, fukuNinki2: 1, fukuPay3: 430, fukuNinki3: 9 } }),
       entry({ payback: { fukuPay1: 150, fukuNinki1: 1, fukuPay2: 160, fukuNinki2: 2, fukuPay3: 170, fukuNinki3: 3 } }),
@@ -238,9 +271,10 @@ describe("summarizeGradeWinnerTrend(人気傾向・複勝配当傾向)", () => {
     // 値一覧: 280,200,430,150,160,170,900 (nullは除外)
     expect(summary.複勝配当レンジ).toEqual({ min: 150, max: 900 });
     expect(summary.複勝配当中央値).toBe(200);
+    expect(summary.複勝配当サンプル数).toBe(7);
   });
 
-  it("paybackが丸ごとnullのレースが混ざっていてもクラッシュせず、他レースの値だけで集計すること", () => {
+  it("paybackが丸ごとnullのレースが混ざっていてもクラッシュせず、他レースの値だけで集計すること(複勝配当サンプル数も他回の件数のみ)", () => {
     const entries = [
       entry({ payback: null }),
       entry({ payback: { fukuPay1: 300, fukuNinki1: 1, fukuPay2: 300, fukuNinki2: 2, fukuPay3: 300, fukuNinki3: 3 } }),
@@ -249,6 +283,115 @@ describe("summarizeGradeWinnerTrend(人気傾向・複勝配当傾向)", () => {
     const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
     expect(summary.複勝配当レンジ).toEqual({ min: 300, max: 300 });
     expect(summary.複勝配当中央値).toBe(300);
+    expect(summary.複勝配当サンプル数).toBe(3);
+  });
+
+  it("境界: fuku_pay3のみ欠損する回は、複勝圏内馬数は3のまま・複勝配当サンプル数は2になること(条件a)", () => {
+    const entries = [
+      entry({
+        result: [horse({ kakutei: 1 })],
+        payback: {
+          fukuPay1: 280,
+          fukuNinki1: 1,
+          fukuPay2: 200,
+          fukuNinki2: 2,
+          fukuPay3: null,
+          fukuNinki3: null,
+        },
+      }),
+      entry({ result: [horse({ kakutei: 1 })], payback: null }),
+      entry({ result: [horse({ kakutei: 1 })], payback: null }),
+    ];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    expect(summary.複勝圏内馬数).toBe(3);
+    expect(summary.複勝配当サンプル数).toBe(2);
+  });
+
+  it("異常系: fuku_pay1〜3が全欠のとき、複勝配当サンプル数=0かつ複勝配当レンジ=nullになるが、複勝圏内馬数は影響を受けないこと(条件b)", () => {
+    const entries = [
+      entry({
+        result: [horse({ kakutei: 1 })],
+        payback: {
+          fukuPay1: null,
+          fukuNinki1: null,
+          fukuPay2: null,
+          fukuNinki2: null,
+          fukuPay3: null,
+          fukuNinki3: null,
+        },
+      }),
+      entry({ result: [horse({ kakutei: 1 })] }),
+      entry({ result: [horse({ kakutei: 1 })] }),
+    ];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    expect(summary.複勝圏内馬数).toBe(3);
+    expect(summary.複勝配当サンプル数).toBe(0);
+    expect(summary.複勝配当レンジ).toBeNull();
+  });
+
+  it("境界: 3着同着で複勝圏内が4頭になる回でも、複勝配当はpayback3枠分(サンプル数3)のみであること(条件c)", () => {
+    const entries = [
+      entry({
+        result: [
+          horse({ kakutei: 1 }),
+          horse({ kakutei: 2 }),
+          horse({ kakutei: 3, dochakuCd: "1", dochakuTosu: 2 }),
+          horse({ kakutei: 3, dochakuCd: "1", dochakuTosu: 2 }),
+        ],
+        payback: {
+          fukuPay1: 150,
+          fukuNinki1: 1,
+          fukuPay2: 200,
+          fukuNinki2: 2,
+          fukuPay3: 300,
+          fukuNinki3: 3,
+        },
+      }),
+      entry(),
+      entry(),
+    ];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    expect(summary.複勝圏内馬数).toBe(4);
+    expect(summary.複勝配当サンプル数).toBe(3);
+  });
+
+  it("fuku_payが0または非有限のときはサンプル数にも数えられないこと(条件e)", () => {
+    const entries = [
+      entry({
+        payback: {
+          fukuPay1: 0,
+          fukuNinki1: 1,
+          fukuPay2: Number.NaN,
+          fukuNinki2: 2,
+          fukuPay3: 250,
+          fukuNinki3: 3,
+        },
+      }),
+      entry(),
+      entry(),
+    ];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    // 有効なのはfukuPay3(250)のみ。
+    expect(summary.複勝配当サンプル数).toBe(1);
+    expect(summary.複勝配当レンジ).toEqual({ min: 250, max: 250 });
+  });
+
+  it("不変条件: 人気レンジがnullのときは人気サンプル数が常に0であること", () => {
+    const entries = [
+      entry({ result: [horse({ kakutei: 1, ninki: null })] }),
+      entry(),
+      entry(),
+    ];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    expect(summary.人気レンジ).toBeNull();
+    expect(summary.人気サンプル数).toBe(0);
+  });
+
+  it("不変条件: 複勝配当レンジがnullのときは複勝配当サンプル数が常に0であること", () => {
+    const entries = [entry({ payback: null }), entry({ payback: null }), entry({ payback: null })];
+    const summary = summarizeGradeWinnerTrend(entries, CONDITIONS)!;
+    expect(summary.複勝配当レンジ).toBeNull();
+    expect(summary.複勝配当サンプル数).toBe(0);
   });
 });
 
