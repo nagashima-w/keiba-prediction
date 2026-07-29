@@ -230,8 +230,17 @@ export function allocateBets(
   config: BetAllocationConfig = DEFAULT_BET_ALLOCATION_CONFIG,
   model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL,
 ): BetAllocationResult {
-  const betUnit = config.betUnit;
   const budgetInput = config.budget;
+
+  // betUnit/greedySteps の防御。kellyFractionと同じ内部一貫性で、非有限・非正・非整数は
+  // 既定値へフォールバックする。betUnitが0/NaNだと budget/betUnit が Infinity/NaN になり、
+  // effectiveBudget・totalStakeがNaNのまま isSkip=false/skipReason=null で返る
+  // (kellyFractionの重大バグと同一の「サイレント破損」欠陥クラス)。greedySteps<=0/NaNは
+  // 貪欲ループが0回実行され、連続最適比率が(実際は判定していないのに)全て0のまま返り、
+  // 「妙味が小さい」という誤ったskipReasonになりうる(要修正3と同じ「判定していないことを
+  // 判定結果として報告してはならない」欠陥クラス)。
+  const betUnit = resolveBetUnit(config.betUnit);
+  const greedySteps = resolveGreedySteps(config.greedySteps);
 
   // λ(ケリー係数)の防御。budgetと同じ内部一貫性で、非有限(NaN/Infinity)・[0,1]範囲外は
   // 既定値(0.5)へフォールバックする(resolveClipVariant等、本リポジトリの防御的フォールバックの
@@ -239,6 +248,9 @@ export function allocateBets(
   // (受け入れ条件1違反)。NaN/Infinityを無防御に許すと stake に NaN が混入し、しかも
   // isSkip/skipReasonがそれを検知できずサイレントに破損した結果を返してしまう。
   // 採用した値は BetAllocationResult.kellyFraction に反映し、実際に使われたλを追跡可能にする。
+  // (betUnit/greedySteps は BetAllocationResult に対応する出力フィールドが元々ないため、
+  // これらは公開型を変更せず内部解決のみに留める。呼び出し側からは effectiveBudget/totalStakeが
+  // 常に有限になることで防御が効いていることを確認できる。)
   const kellyFraction = resolveKellyFraction(config.kellyFraction);
 
   // 出力を馬番昇順にする(入力を書き換えないよう新しい配列を作る)。
@@ -277,7 +289,7 @@ export function allocateBets(
   const continuousFractions = optimizeContinuousFractions(
     candidateHorses,
     foldedOutcomes,
-    config.greedySteps,
+    greedySteps,
   );
 
   // Step5: λ縮小 → betUnit単位への切り捨て。剰余は再配分しない(設計判断2)。
@@ -391,6 +403,32 @@ function resolveKellyFraction(kellyFraction: number): number {
     return DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction;
   }
   return kellyFraction;
+}
+
+/**
+ * betUnit(賭け金の最小単位)を防御する。非有限・0以下・非整数は既定値(100)へフォールバック
+ * する(kellyFractionと同じ流儀)。betUnitが0/NaNのまま Step0(budget/betUnit)に渡ると
+ * effectiveBudgetがInfinity/NaNになり、以降totalStakeまでNaNが伝播してisSkip=false・
+ * skipReason=nullのままサイレントに破損した結果を返してしまう(重大バグの再発防止)。
+ */
+function resolveBetUnit(betUnit: number): number {
+  if (!Number.isFinite(betUnit) || betUnit <= 0 || !Number.isInteger(betUnit)) {
+    return DEFAULT_BET_ALLOCATION_CONFIG.betUnit;
+  }
+  return betUnit;
+}
+
+/**
+ * greedySteps(貪欲逐次配分の分割数)を防御する。非有限・0以下・非整数は既定値(1000)へ
+ * フォールバックする。greedySteps<=0/NaNだとStep4の貪欲ループが1回も実行されず、連続最適比率が
+ * (実際には判定していないのに)全て0のまま返り、Step6が「妙味が小さく…」という誤ったskipReasonを
+ * 報告してしまう(要修正3と同じ「判定していないことを判定結果として報告してはならない」欠陥)。
+ */
+function resolveGreedySteps(greedySteps: number): number {
+  if (!Number.isFinite(greedySteps) || greedySteps <= 0 || !Number.isInteger(greedySteps)) {
+    return DEFAULT_BET_ALLOCATION_CONFIG.greedySteps;
+  }
+  return greedySteps;
 }
 
 /**

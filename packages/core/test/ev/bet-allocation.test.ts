@@ -53,7 +53,7 @@ describe("allocateBets(馬券配分の最適化)", () => {
       }
     });
 
-    it("totalStake <= kellyFraction * effectiveBudget <= effectiveBudget が無条件に成立すること(λ>1・NaN・負値を含む)", () => {
+    it("totalStake <= kellyFraction * effectiveBudget <= effectiveBudget が無条件に成立すること(λ>1・NaN・負値・betUnit異常値を含む)", () => {
       const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
       const configs: BetAllocationConfig[] = [
         { budget: 10000, kellyFraction: 1, betUnit: 100, greedySteps: 1000 },
@@ -66,13 +66,21 @@ describe("allocateBets(馬券配分の最適化)", () => {
         { budget: 10000, kellyFraction: Number.NaN, betUnit: 100, greedySteps: 1000 },
         { budget: 10000, kellyFraction: Number.POSITIVE_INFINITY, betUnit: 100, greedySteps: 1000 },
         { budget: 10000, kellyFraction: -0.5, betUnit: 100, greedySteps: 1000 },
+        // betUnitの異常値(0/NaN/Infinity/負値)。無防御だと budget/betUnit が
+        // Infinity/NaN になり effectiveBudget・totalStake に NaN が伝播する回帰テスト。
+        { budget: 10000, kellyFraction: 0.5, betUnit: 0, greedySteps: 1000 },
+        { budget: 10000, kellyFraction: 0.5, betUnit: Number.NaN, greedySteps: 1000 },
+        { budget: 10000, kellyFraction: 0.5, betUnit: Number.POSITIVE_INFINITY, greedySteps: 1000 },
+        { budget: 10000, kellyFraction: 0.5, betUnit: -100, greedySteps: 1000 },
       ];
       for (const config of configs) {
         const result = allocateBets(horses, 3, config);
+        // effectiveBudget/totalStakeは常に有限(betUnit異常値でNaN/Infinityが伝播しないこと)。
+        expect(Number.isFinite(result.effectiveBudget)).toBe(true);
+        expect(Number.isFinite(result.totalStake)).toBe(true);
         // 採用された(サニタイズ後の)λは常に[0,1]に収まる。
         expect(result.kellyFraction).toBeGreaterThanOrEqual(0);
         expect(result.kellyFraction).toBeLessThanOrEqual(1);
-        expect(Number.isFinite(result.totalStake)).toBe(true);
         expect(result.totalStake).toBeLessThanOrEqual(
           result.kellyFraction * result.effectiveBudget + 1e-9,
         );
@@ -551,6 +559,65 @@ describe("allocateBets(馬券配分の最適化)", () => {
       expect(resultNegative.totalStake).toBe(resultDefault.totalStake);
       expect(resultNegative.isSkip).toBe(resultDefault.isSkip);
       expect(resultNegative.skipReason).toBe(resultDefault.skipReason);
+    });
+  });
+
+  describe("betUnit/greedySteps の防御(重大バグ・水平展開の回帰テスト)", () => {
+    const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+    const validConfig: BetAllocationConfig = {
+      budget: 10000,
+      kellyFraction: 1,
+      betUnit: 100,
+      greedySteps: 1000,
+    };
+
+    describe("betUnitの異常値", () => {
+      const cases: Array<{ name: string; betUnit: number }> = [
+        { name: "betUnit=0", betUnit: 0 },
+        { name: "betUnit=NaN", betUnit: Number.NaN },
+        { name: "betUnit=Infinity", betUnit: Number.POSITIVE_INFINITY },
+        { name: "betUnit=-100(負値)", betUnit: -100 },
+        { name: "betUnit=33.5(非整数)", betUnit: 33.5 },
+      ];
+      for (const c of cases) {
+        it(`${c.name}でもeffectiveBudget/totalStakeが有限であり、既定betUnit(100)相当の結果と一致すること`, () => {
+          const result = allocateBets(horses, 3, { ...validConfig, betUnit: c.betUnit });
+          const expected = allocateBets(horses, 3, validConfig);
+          expect(Number.isFinite(result.effectiveBudget)).toBe(true);
+          expect(Number.isFinite(result.totalStake)).toBe(true);
+          for (const a of result.allocations) {
+            expect(Number.isFinite(a.stake)).toBe(true);
+          }
+          // 既定betUnit(100)へフォールバックされ、既定値を明示指定した結果と完全一致する
+          // (フォールバックが実際に効いていることの確認)。
+          expect(result.effectiveBudget).toBe(expected.effectiveBudget);
+          expect(result.totalStake).toBe(expected.totalStake);
+          expect(result.isSkip).toBe(expected.isSkip);
+          expect(result.skipReason).toBe(expected.skipReason);
+        });
+      }
+    });
+
+    describe("greedyStepsの異常値", () => {
+      const cases: Array<{ name: string; greedySteps: number }> = [
+        { name: "greedySteps=0", greedySteps: 0 },
+        { name: "greedySteps=NaN", greedySteps: Number.NaN },
+        { name: "greedySteps=-5(負値)", greedySteps: -5 },
+        { name: "greedySteps=Infinity", greedySteps: Number.POSITIVE_INFINITY },
+      ];
+      for (const c of cases) {
+        it(`${c.name}でも既定greedySteps(1000)相当の結果になり、誤った見送り理由にならないこと`, () => {
+          const result = allocateBets(horses, 3, { ...validConfig, greedySteps: c.greedySteps });
+          const expected = allocateBets(horses, 3, validConfig);
+          expect(Number.isFinite(result.totalStake)).toBe(true);
+          // greedySteps<=0/NaNだと貪欲ループが0回実行され連続最適比率が全て0のまま返り、
+          // 「妙味が小さい」という誤ったskipReasonになりうる(要修正3と同じ欠陥クラス)。
+          // フォールバック後は既定値(1000)を明示指定した結果と完全一致する。
+          expect(result.totalStake).toBe(expected.totalStake);
+          expect(result.isSkip).toBe(expected.isSkip);
+          expect(result.skipReason).toBe(expected.skipReason);
+        });
+      }
     });
   });
 
