@@ -310,8 +310,18 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     });
   });
 
-  describe("受け入れ条件7: 比例縮小 vs 貪欲打ち切り(制約付き最適)の差の上界", () => {
-    it("目的関数値の差が小さい上界に収まること(2頭・少数単位・cap非拘束)", () => {
+  describe("貪欲法とC-1由来の格子探索比較(経験的一致。理論保証ではない。2026-07-30 boss指摘で名称・アサーションを是正)", () => {
+    it("このフィクスチャでは貪欲法が全探索の最適格子点と一致すること(実測。理論保証ではない)", () => {
+      // このテストは「受け入れ条件7」ではない(旧来この describe 名を名乗っていたが中身は
+      // C-1由来の「貪欲 vs 全探索」の突き合わせであり、AC7〈比例縮小の代償の定量化〉とは
+      // 別の性質を検証している。5周のレビューで describe 名だけを見て本体を読まなかったために
+      // 見逃されていた〈2026-07-30 boss指摘〉。AC7本体は次のdescribeで別途実装する。
+      //
+      // 貪欲法に大域最適の理論保証は無い(bet-allocation.tsのoptimizeContinuousFractions
+      // JSDoc参照: 目的関数は非分離なlogの内側で変数が結合しており、分離可能凹目的やM♮凹関数の
+      // ケースのような保証が及ばない)。このテストは「試した範囲(2頭・粗い格子)では一致した」
+      // という経験則を実測で固定するものであり、Phase 2でモデルを差し替えた際に失敗しうる
+      // (失敗したらこのテストを消すか閾値を見直す。契約として固定しているわけではない)。
       const candidates = [candidate(1, 0.4, 3), candidate(2, 0.35, 3.2)];
       const model = CONDITIONAL_BERNOULLI_MODEL;
       const placeCount = 1;
@@ -357,7 +367,118 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       const greedyX2 = result.allocations.find((a) => a.umaban === 2)!.continuousFraction;
       const greedyF = objective(greedyX1, greedyX2);
       expect(greedyF).not.toBeNull();
-      expect(bestF - greedyF!).toBeLessThan(0.01);
+      // 実測差は1e-16〜1e-17(2026-07-30 boss実測)。片側(bestF-greedyF<0.01)だと、格子の
+      // 取り違えで貪欲が全探索を「上回る」符号逆転の不整合を見逃す。両側で固定する(3-b)。
+      expect(Math.abs(bestF - greedyF!)).toBeLessThan(1e-9);
+    });
+  });
+
+  describe("受け入れ条件7: 比例縮小の代償(制約付き最適=貪欲打ち切りとの差の定量化)", () => {
+    it("capApplied===trueのとき、比例縮小は制約付き最適(cap内で貪欲打ち切り)よりF値が実測差だけ劣ること", () => {
+      // 着手前ゲートでboss が「キャップは比例縮小で実装する。貪欲打ち切りは採らない」と決めた
+      // 設計判断の代償を定量化する(2026-07-30 boss指摘: この定量化が5周のレビューを通過する間
+      // 一度も実装されていなかった)。
+      //
+      // 比較対象:
+      //   (A) 実装(allocateBets): 無制約の連続最適比率x*を求めてから s=cap/kellyTargetStake で
+      //       比例縮小する(全候補を同じ比率で縮小)。
+      //   (B) 参照実装(テスト内): 同じ貪欲法だが、Σx(バンクロール比率換算)がcapFraction=
+      //       effectivePerRaceCap/resolvedBankroll を超えないよう打ち切りながら進める
+      //       (=「キャップ内で最も目的関数を改善する候補に優先的に配る」制約付き貪欲)。
+      // (B)は各ステップでその時点の目的関数改善が最大の候補を選ぶため、(A)の一律比例縮小とは
+      // 異なる配分比率になり得る。両者のF値の差が「比例縮小を採用した設計判断の代償」。
+      const candidates = [candidate(1, 0.4, 3), candidate(2, 0.35, 3.2)];
+      const model = CONDITIONAL_BERNOULLI_MODEL;
+      const placeCount = 1;
+      const bankroll = 10000;
+      const perRaceCap = 3000; // kellyTargetStake(≈10000。λ=1でΣx*≈1に近いため)の3割程度に絞る
+      const steps = 200;
+      const delta = 1 / steps;
+
+      const result = allocateBets(
+        candidates,
+        placeCount,
+        config({ bankroll, perRaceCap, kellyFraction: 1, betUnit: 1, greedySteps: steps }),
+        model,
+      );
+
+      // 前提(無条件expect): キャップが実際に拘束していること。拘束していなければ
+      // 比例縮小のs=1となり、以降の比較はAC7が測ろうとしている代償を何も検証しない。
+      expect(result.capApplied).toBe(true);
+
+      const jointHorses = candidates.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
+      const distribution = model.buildDistribution(jointHorses, placeCount);
+      const odds = [candidates[0]!.placeOddsMin!, candidates[1]!.placeOddsMin!];
+
+      function objective(x1: number, x2: number): number | null {
+        let total = 0;
+        for (const outcome of distribution) {
+          const has1 = outcome.placed.includes(1);
+          const has2 = outcome.placed.includes(2);
+          const wealth = 1 - x1 - x2 + (has1 ? x1 * odds[0]! : 0) + (has2 ? x2 * odds[1]! : 0);
+          if (wealth <= 0) {
+            return null;
+          }
+          total += outcome.probability * Math.log(wealth);
+        }
+        return total;
+      }
+
+      // (A) 実装が実際に出力したstakeを、バンクロール比率(fraction)へ変換する
+      // (sを自前で再計算せず、実際のallocateBets出力をそのまま使う。betUnit=1のため
+      // 丸めによる離散化損失が実質無く、fraction換算しても比例縮小の実態を正しく反映する)。
+      const propX1 = result.allocations.find((a) => a.umaban === 1)!.stake / result.resolvedBankroll;
+      const propX2 = result.allocations.find((a) => a.umaban === 2)!.stake / result.resolvedBankroll;
+      const propF = objective(propX1, propX2);
+      expect(propF).not.toBeNull();
+
+      // (B) 参照実装: capFraction(=perRaceCap/bankroll)を超えないよう打ち切る制約付き貪欲。
+      // optimizeContinuousFractions本体と同じ「各ステップで目的関数改善が最大の候補にdelta分
+      // 加える」ロジックだが、ΣxがcapFractionを超える手前で停止する点だけが異なる
+      // (制約なしのoptimizeContinuousFractionsをそのまま呼ぶことはできないため、テスト内に
+      // 参照実装を持つ。boss許可済み: 「テスト内実装で可」)。
+      const capFraction = perRaceCap / bankroll;
+      const greedyX = [0, 0];
+      let sumX = 0;
+      let currentF = objective(0, 0)!;
+      for (let step = 0; step < steps; step++) {
+        const trialSumX = sumX + delta;
+        if (trialSumX > capFraction + 1e-12) {
+          break; // これ以上はキャップを超えるため打ち切る。
+        }
+        let bestIdx = -1;
+        let bestIncrement = 0;
+        for (let i = 0; i < 2; i++) {
+          const trialX = greedyX.slice();
+          trialX[i] = trialX[i]! + delta;
+          const f = objective(trialX[0]!, trialX[1]!);
+          if (f === null) {
+            continue;
+          }
+          const increment = f - currentF;
+          if (increment > bestIncrement) {
+            bestIncrement = increment;
+            bestIdx = i;
+          }
+        }
+        if (bestIdx === -1) {
+          break;
+        }
+        greedyX[bestIdx] = greedyX[bestIdx]! + delta;
+        sumX = trialSumX;
+        currentF = objective(greedyX[0]!, greedyX[1]!)!;
+      }
+      const constrainedGreedyF = objective(greedyX[0]!, greedyX[1]!);
+      expect(constrainedGreedyF).not.toBeNull();
+
+      // 実測(2026-07-30・steps=200・この構成): 制約付き貪欲F − 比例縮小F ≈ 0.000916。
+      // 比例縮小は制約付き最適に対して正の代償(F値の劣化)を払っており、その代償はゼロではない
+      // (=キャップ拘束時、比例縮小は理論上の制約付き最適から実際に離れる)。
+      const cost = constrainedGreedyF! - propF!;
+      expect(cost).toBeGreaterThan(0);
+      // 上界は実測値(≈0.000916)から意味のある距離に設定する(約5倍の余裕。旧AC7の閾値0.01は
+      // 実測1e-16から6.0e+13倍も離れており無意味だった。同じ轍を踏まない)。
+      expect(cost).toBeLessThan(0.005);
     });
   });
 
