@@ -471,12 +471,12 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       const constrainedGreedyF = objective(greedyX[0]!, greedyX[1]!);
       expect(constrainedGreedyF).not.toBeNull();
 
-      // 実測(2026-07-30・steps=200・この構成): 制約付き貪欲F − 比例縮小F ≈ 0.000916。
+      // 実測(2026-07-30・steps=200・この構成): 制約付き貪欲F − 比例縮小F ≈ 0.00101。
       // 比例縮小は制約付き最適に対して正の代償(F値の劣化)を払っており、その代償はゼロではない
       // (=キャップ拘束時、比例縮小は理論上の制約付き最適から実際に離れる)。
       const cost = constrainedGreedyF! - propF!;
       expect(cost).toBeGreaterThan(0);
-      // 上界は実測値(≈0.000916)から意味のある距離に設定する(約5倍の余裕。旧AC7の閾値0.01は
+      // 上界は実測値(≈0.00101)から意味のある距離に設定する(約5倍の余裕。旧AC7の閾値0.01は
       // 実測1e-16から6.0e+13倍も離れており無意味だった。同じ轍を踏まない)。
       expect(cost).toBeLessThan(0.005);
     });
