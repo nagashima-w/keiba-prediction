@@ -21,9 +21,15 @@ scripts        … CLI・アイコン生成・フィクスチャ取得などの�
 fixtures       … テスト用の保存済み HTML/JSON(テストは実サイトへアクセスしない)
 ```
 
-- **renderer は core を直接 import しない**。`better-sqlite3` 等のネイティブ依存を renderer へ持ち込まない
-  ため、core を扱う処理は main プロセスに集約し、renderer は IPC 経由で core の値を受け取る(当初仕様
-  「UI はコアを直接 import」からの意図的な差異。README「仕様との差異」参照)。
+- **renderer は core のバレル(`@keiba/core`)を import しない**。バレル経由だと `better-sqlite3`・
+  `node:zlib` 等のネイティブ/Node 専用依存が renderer のブラウザ向けバンドルに巻き込まれ、Vite ビルドが
+  落ちる(実際に `node:zlib` の混入で CI が失敗した実績がある)。取得・DB・LLM 呼び出しなどネイティブ依存
+  を伴う処理は main プロセスに集約し、renderer は IPC 経由で結果を受け取る(当初仕様「UI はコアを直接
+  import」からの意図的な差異。README「仕様との差異」参照)。
+- ただし**純粋な計算ロジックに限り、renderer から core の `exports` サブパスを直接 import してよい**
+  (例: `@keiba/core/ev/race-opportunity`、`@keiba/core/ev/bet-allocation`、
+  `@keiba/core/scraper/validate-period-input`)。サブパス公開により Node 専用モジュールを引き込まない
+  ことがビルドで保証される。**新しく renderer から core を使うときは必ずサブパスを追加すること。**
 - 主要モジュール(core、`packages/core/src/index.ts` が公開 API): `scraper/`(取得)、`scorer/`(数値
   スコアリング)、`analyzer/`(LLM 分析と材料生成)、`ev/`(期待値・検証・分析履歴ストア)、`notify/`(Discord)。
 
@@ -130,7 +136,51 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **版別**: `computeVerifyReportByPromptVersion` が `PROMPT_VERSION` でグループ化し版別に集計・比較。
   推定 EV(evEstimated)は集計から除外して区別。既定は latest モード(レースごと最新分析のみ)。
 
-## 5. エクスポート(app: analysis-export)
+## 5. 馬券配分の提案(ev/place-joint-model・ev/bet-allocation)
+
+複勝の期待値プラス馬に対し、**1レースあたりいくらをどう配分するか**を提案する(機能C)。
+純ロジックは core、設定と表示は renderer にあり、**IPC は追加していない**(renderer が
+`@keiba/core/ev/bet-allocation` をサブパスで直接呼ぶ)。
+
+- **同時分布モデル**(`place-joint-model.ts`): 「どの馬の組合せが複勝圏内に入るか」の同時分布を、
+  条件付きベルヌーイ分布 `P(S)=Πwᵢ/ΣΠwᵢ`(`wᵢ=pᵢ/(1−pᵢ)`)で近似する。周辺確率の合計は
+  「ちょうど k 頭が複勝圏内」という条件付けにより **k(複勝の対象人数)へ正規化される**。
+  `PlaceJointModel` インタフェースを差し替え点として用意しており、Phase 2 で厳密なモデル
+  (Plackett-Luce 等)に置き換えられる。`approximate` フラグで近似かどうかを結果に表示する。
+- **配分の決め方**(`bet-allocation.ts`): 候補選定(EV プラス馬のみ)→ 同時分布 → 貪欲逐次配分で
+  期待対数資産の増分が最大の馬へ少しずつ割り当て、**λ縮小前の連続最適比率 `x*ᵢ`(スケール不変)**を得る
+  → フラクショナル・ケリー縮小 → 1レース上限で比例縮小 → 購入単位への切り捨て、の順で金額を決める。
+- **設定は3項目**: **馬券用の総資金**(`bankroll`・既定0=未設定)、**1レースの上限**(`perRaceCap`・
+  既定0=未設定)、**ケリー係数 λ**(`kellyFraction`・既定0.5・上級設定)。配分総額は
+  `min(λ · Σx*ᵢ · 総資金, 1レースの上限)`。**総資金は手動更新の固定値**で、収支に応じた自動更新はしない。
+  - 総資金と1レース上限を分けているのは、**ケリー基準の資金は本来「総資金」**であり、1レースの予算を
+    そのまま渡すと配分が予算の数%にしかならないため。上限は「これ以上は賭けない」という歯止めとして働く。
+  - 上限に届くかは妙味の大きさに依存する(必要な総資金の倍率 `1/(λ·Σx*)` は20〜285倍程度まで変動する)。
+    このため UI には固定倍率を書かず、**そのレースのケリー適正額と上限を併記してどちらが効いたかを示す**。
+- **入力の防御**: `bankroll` / `perRaceCap` の非有限・0以下は**計算に入る前に0へクランプ**する
+  (`resolveBankroll` / `resolveEffectivePerRaceCap`)。λ は非有限・`[0,1]` 範囲外を既定0.5へ、
+  購入単位・貪欲分割数は非有限・非正・非整数を既定へフォールバックする。**防御はクランプ1箇所に集約**し、
+  下流の判定に二重のガードを置かない(片方が退行してもテストで検出できなくなるため)。
+- **最低額の扱い**: 丸めで配分総額が0円になる場合、`x*ᵢ` が最大の1頭(同値は馬番昇順)にのみ購入単位を
+  1つ配分する。均等配分はしない(購入単位が最小粒度なので過大ベットが頭数倍に膨らむため)。
+  この配分が**ケリー適正額を上回った場合のみ**警告文言(`advisory`)を返す。λ=0 は「賭けない」の
+  明示指定として救済しない。
+- **見送り理由は6分類**(優先順位順): 総資金未設定 → 1レース上限未設定 → 実効上限が購入単位未満 →
+  λ=0 → EV プラスの馬が0頭 → 妙味が小さく賭ける価値がない。設定起因を妙味判定より先に置く。
+  文言の定義元は core にあり、UI は複製を持たない。
+- **提案しないレース**: 8頭未満(複勝が2着まで、または非発売で3着内率推定と整合しない)、
+  オッズ未発売(`oddsStatus="yoso"` の推定 EV は誤差±20〜30%で賭け金に直接効く)。
+  出走頭数が判定できない場合は「発売されない」ではなく専用の理由を返す。
+- **表示**(`renderer/bet-allocation-view.ts` + `BatchAnalysisView`): 配分表(馬番・馬名・補正後確率・
+  複勝下限・EV・配分額)と、ケリー適正額・1レース上限のどちらが効いたかを示す合計行。注記として
+  (1)賭け額の考え方、(2)**レース横断のオーバーベット警告**(配分はレースごとに独立計算のため、複数
+  レースを同時購入すると合計はケリー最適を超える)、(3)EV 閾値の脚注を常時表示する。複勝圏内確率の
+  合計が目標から大きく外れているときは信頼性低下の警告を出す(非有限値は表示しない)。
+- **未実装(将来課題)**: 1日/開催単位の総上限、券種拡張(ワイド・三連複。同時分布モデルは的中確率を
+  そのまま計算できるが、オッズ取得が未実装。三連単は着順情報が必要で Phase 2 待ち。
+  詳細は `docs/handover-next-session.md`)、検証画面での「一律100円 vs 配分」の回収率比較。
+
+## 6. エクスポート(app: analysis-export)
 
 - **JSON(schemaVersion=1)+ CSV**(`packages/app/src/main/analysis-export.ts`)。
 - meta に版メタ: `promptVersion` / `additionalInstruction` / `model` / `evEstimated` / `kaisaiDate` /
@@ -140,20 +190,23 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **秘密安全性**: 入力に apiKey・Webhook URL・プロンプト本文を受け取る経路が無く、出力へ混入しない構造。
   CSV は RFC4180 準拠(BOM なし)。
 
-## 6. Discord 通知(notify/discord)
+## 7. Discord 通知(notify/discord)
 
 - レース名・日付・会場と **EV プラスの馬**(予想印・馬番・馬名・AI 補正後確率・複勝下限・EV、推定 EV は
   接尾表示)を embed で送信。EV プラスが無ければ「該当なし」。
 - 設定画面の Webhook URL に送信、手動「Discordに送信」ボタン + 自動送信 ON/OFF。レート制限(429)は
   Retry-After を尊重して 1 回だけ待機リトライ。送信失敗は分析結果表示に影響しない。
 
-## 7. 配布(GitHub Actions / electron-builder)
+## 8. 配布(GitHub Actions / electron-builder)
 
 ワークフロー: `.github/workflows/build-windows.yml`(`windows-latest` でビルド、ビルド前にテスト全通過を関門)。
 
 - **Windows portable exe**(`keiba-ev-tool-<version>-portable.exe`、インストール不要)。
-- **開発版**: 開発ブランチ(`claude/keiba-ev-tool-dev-cvagiu`・`claude/handover-next-session-x5ki6o`)への
-  push ごとに固定タグ **`dev-latest`** のプレリリースを in-place 更新(ローリング公開)。
+- **開発版**: 開発ブランチ(`claude/keiba-ev-tool-dev-cvagiu`・`claude/handover-next-session-x5ki6o`・
+  `claude/keiba-prediction-handover-ojr8t1`)への push ごとに固定タグ **`dev-latest`** のプレリリースを
+  in-place 更新(ローリング公開)。**exe 名がバージョン依存のため、version を上げると旧名のアセットが
+  残置される**。これを防ぐため、公開ステップの直後に現行ファイル名以外の `.exe` を削除する掃除ステップを
+  置いている(最新 exe が先にアップロード済みの状態を保つ順序)。
 - **正式版**: `v*` タグ(例 `v1.0.0`)push でそのタグの通常リリースを公開。
 - アイコンは `scripts/gen-icon.mjs`(`pnpm gen:icon`)で生成。パッケージング構成は
   `packages/app/electron-builder.yml`。
