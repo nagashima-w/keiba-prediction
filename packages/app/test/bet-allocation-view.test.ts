@@ -330,6 +330,39 @@ describe("buildAllocationNotices(注記の表示順: advisory→確率合計警�
       expect(notices[1]).not.toBe(view.result.advisory);
     }
   });
+
+  it("advisory・確率合計警告・notDiversifiedの3件が同時成立するとき、表示順どおり(advisory→確率合計警告→notDiversified)に並ぶこと(code-reviewer再指摘: oddsMinを4→5に上げるだけで安定した3件同時ケースが得られる。CLAUDE.md鉄則6・7: 断念する前に固定していた別の変数〈オッズ下限〉を動かす)", () => {
+      // 候補馬のoddsMinを5(4ではなく)に上げ、確率合計を目標3から明確に離す(filler1頭を0.8、
+      // 残り4頭を0.42にすることで乖離が0.38前後になり、確率合計警告の閾値0.3を安全マージン
+      // 込みで超える)。oddsMin∈{5,5.2,4.8}×filler∈{0.78,0.8,0.82,0.85}の12通りすべてで
+      // notices.length===3になることをcode-reviewerが確認済み(tsx実測)。
+      const rows: AnalysisRow[] = [
+        candidateRow(1, 0.3, 5),
+        candidateRow(2, 0.3, 5),
+        candidateRow(3, 0.3, 5),
+        row({ umaban: 4, adjustedProb: 0.8 }),
+        row({ umaban: 5, adjustedProb: 0.42 }),
+        row({ umaban: 6, adjustedProb: 0.42 }),
+        row({ umaban: 7, adjustedProb: 0.42 }),
+        row({ umaban: 8, adjustedProb: 0.42 }),
+      ];
+      const r = race({ rows });
+      const view = buildRaceAllocation(r, { bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 });
+      expect(view.kind).toBe("computed");
+      if (view.kind === "computed") {
+        // 前提(無条件expect): 3条件すべてが実際に同時成立していること。
+        expect(view.result.advisory).not.toBeNull();
+        expect(view.result.notDiversified).toBe(true);
+        const warning = probabilitySumWarning(view.result.diagnostics);
+        expect(warning).not.toBeNull();
+        const notices = buildAllocationNotices(view.result);
+        expect(notices).toHaveLength(3);
+        expect(notices[0]).toBe(view.result.advisory);
+        expect(notices[1]).toBe(warning);
+        expect(notices[2]).not.toBe(view.result.advisory);
+        expect(notices[2]).not.toBe(warning);
+      }
+    });
 });
 
 describe("固定注記3点(必ず表示。文言は数値込みで生成)", () => {
