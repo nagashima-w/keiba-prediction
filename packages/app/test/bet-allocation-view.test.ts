@@ -363,6 +363,39 @@ describe("buildAllocationNotices(注記の表示順: advisory→確率合計警�
         expect(notices[2]).not.toBe(warning);
       }
     });
+
+  it("notDiversifiedの注記は、capApplied===false かつ minimumStakeApplied===false(1レース上限が一切効いていない純粋な丸めの経路)でも真であること(boss実測による指摘: 欠陥クラスの5回目。旧文言『1レース上限の制約により』はこの経路では偽だった)", () => {
+    // perRaceCap=100,000,000(実効上限が拘束点から8桁離れている)・候補3頭が非対称オッズ
+    // (3頭とも正のcontinuousFractionを持つが、bankroll=1200では最も妙味の大きい1頭にしか
+    // betUnit以上の額が floor で残らない「純粋な丸め」経路。tsx実測でcapApplied:false・
+    // minimumStakeApplied:false・notDiversified:trueを確認済み、boss指摘の「経路B」に相当)。
+    const rows: AnalysisRow[] = [
+      candidateRow(1, 0.7, 3),
+      candidateRow(2, 0.4, 3),
+      candidateRow(3, 0.35, 3),
+      row({ umaban: 4, adjustedProb: 0.31 }),
+      row({ umaban: 5, adjustedProb: 0.31 }),
+      row({ umaban: 6, adjustedProb: 0.31 }),
+      row({ umaban: 7, adjustedProb: 0.31 }),
+      row({ umaban: 8, adjustedProb: 0.31 }),
+    ];
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, { bankroll: 1200, perRaceCap: 100000000, kellyFraction: 0.5 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      // 前提(無条件expect): 1レース上限も最低額ロジックも一切効いていないこと
+      // (=「1レース上限の制約により」という原因断定が偽であることの直接証拠)。
+      expect(view.result.capApplied).toBe(false);
+      expect(view.result.minimumStakeApplied).toBe(false);
+      expect(view.result.notDiversified).toBe(true);
+      const notices = buildAllocationNotices(view.result);
+      const notDiversifiedNotice = notices.find((n) => n.includes("分散"));
+      expect(notDiversifiedNotice).toBeDefined();
+      // 中立表現になっていること: 「上限」「制約」等、この経路では偽になる原因を名指ししない。
+      expect(notDiversifiedNotice).not.toContain("上限");
+      expect(notDiversifiedNotice).not.toContain("制約");
+    }
+  });
 });
 
 describe("固定注記3点(必ず表示。文言は数値込みで生成)", () => {

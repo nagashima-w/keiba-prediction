@@ -525,6 +525,14 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       expect(result.skipReason).toBe("1レースの上限が100円未満のため配分できません");
     });
 
+    it("優先順位: bankroll未設定かつ候補0頭 → ①(未設定)が優先されること(⑤候補0頭ではない。C-1由来の回帰テスト)", () => {
+      // C-1旧テスト「優先順位: budget=0かつEVプラス0頭 → ①(未設定)が返る」の読み替え。
+      // 未設定は「妙味なし」ではなく「まだ判定していない」状態であり、候補の有無より優先する。
+      const horses = [nonCandidate(1, 0.3, 2)];
+      const result = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 10000 }));
+      expect(result.skipReason).toBe("総資金が未設定のため配分を提案していません");
+    });
+
     it("④ kellyTargetStake===0かつλ=0は「ケリー係数が0」になること(候補ありでも)", () => {
       const horses = [candidate(1, 0.6, 3)];
       const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0 }));
@@ -704,6 +712,13 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       expect(horses).toEqual(original);
     });
 
+    it("結果のBetAllocation.placeProbが入力と一致すること(C-1由来の回帰テスト。入力配列が不変であることとは別の主張)", () => {
+      const horses = [candidate(1, 0.55, 2.5), candidate(2, 0.35, 3)];
+      const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.allocations.find((a) => a.umaban === 1)!.placeProb).toBe(0.55);
+      expect(result.allocations.find((a) => a.umaban === 2)!.placeProb).toBe(0.35);
+    });
+
     it("placeCountを引数で受け、3をハードコードしないこと(placeCount=2と3で異なる結果)", () => {
       const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5), candidate(3, 0.5, 2.5)];
       const resultK2 = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
@@ -728,6 +743,12 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       const resultNoOdds = allocateBets(horsesNoOdds, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
       const excludedNoOdds = resultNoOdds.allocations.find((a) => a.umaban === 2)!;
       expect(excludedNoOdds.excludedReason).toBe("複勝オッズ下限が未確定のため対象外");
+    });
+
+    it("候補馬のexcludedReasonはnullであること(C-1由来の回帰テスト)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.allocations[0]!.excludedReason).toBeNull();
     });
 
     it("全出走馬が馬番昇順で結果に含まれること", () => {
@@ -797,7 +818,11 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       });
     });
 
-    it("剰余の再配分を行わないこと(cap非拘束時、合計は各馬stakeの合計と一致)", () => {
+    it("剰余の再配分を行わないこと(cap非拘束時、切り捨て前との差がbetUnit未満に収まること。C-1由来の回帰テスト)", () => {
+      // 旧テストは「継続配分×実効予算との差がbetUnit未満」を検証していたが、C-2の契約変更
+      // (effectiveBudget→resolvedBankroll)の際にtotalStake===sum(stakes)という自明な
+      // 恒等式だけが残り、剰余を繰り上げ補填していないことの実質的な検証が失われていた
+      // (boss指摘: 名前ではなく「何を保証していたか」で対応表を作った結果判明した空振り)。
       const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
       const result = allocateBets(
         horses,
@@ -806,6 +831,13 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       );
       const expectedStakeSum = result.allocations.reduce((acc, a) => acc + a.stake, 0);
       expect(result.totalStake).toBe(expectedStakeSum);
+      // 各馬の切り捨て前(継続配分 = continuousFraction×λ×resolvedBankroll。cap非拘束のためs=1)
+      // との差はbetUnit未満のはず(切り上げ補填していない証拠)。
+      for (const a of result.allocations) {
+        const continuous = a.continuousFraction * result.kellyFraction * result.resolvedBankroll;
+        expect(continuous - a.stake).toBeLessThan(DEFAULT_BET_ALLOCATION_CONFIG.betUnit);
+        expect(continuous - a.stake).toBeGreaterThanOrEqual(-1e-6);
+      }
     });
 
     it("1頭のみのときのケリー解析解との一致(λ=1・丸め前・cap非拘束)", () => {
@@ -860,6 +892,27 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       expect(result.isSkip).toBe(true);
       expect(result.diagnostics.placeProbSum).toBeCloseTo(0.3, 10);
       expect(result.diagnostics.candidateCount).toBe(0);
+    });
+
+    it("diagnosticsの各フィールドが算出されること(非見送り・C-1由来の回帰テスト)", () => {
+      const horses = [candidate(1, 0.6, 3), candidate(2, 0.3, 4), nonCandidate(3, 0.1)];
+      const result = allocateBets(horses, 3, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.diagnostics.placeProbSum).toBeCloseTo(1.0, 10);
+      expect(result.diagnostics.placeProbSumTarget).toBe(3);
+      expect(result.diagnostics.placeProbSumDeviation).toBeCloseTo(1.0 - 3, 10);
+      expect(result.diagnostics.marginalDeviationMax).toBeGreaterThanOrEqual(0);
+      expect(result.diagnostics.candidateCount).toBe(2);
+      expect(result.diagnostics.excludedCount).toBe(1);
+    });
+
+    it("placeProbSumDeviationは符号付き(合計が目標を上回るとき正)であること(C-1由来の回帰テスト。boss指摘: 符号規約テストが契約変更で削除され等価物が無かった)", () => {
+      // marginalDeviationMax(絶対値)と対比してplaceProbSumDeviationをわざわざ符号付きに
+      // した設計判断(JSDoc「8. 診断値の符号規約」)への回帰テスト。符号を反転させる退行を
+      // 検出する(Math.absを使う実害〈probabilitySumWarning〉には現れないため見落とされやすい)。
+      const horses = [candidate(1, 0.9, 3), candidate(2, 0.9, 2.5), candidate(3, 0.9, 2.2)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      // 合計2.7、目標(placeCount)1 → 正の乖離。
+      expect(result.diagnostics.placeProbSumDeviation).toBeGreaterThan(0);
     });
 
     it("見送り(bankroll不足)のときもcontinuousFractionが算出されること(Step4は早期リターンで省略しない)", () => {
