@@ -241,15 +241,45 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
   });
 
   describe("受け入れ条件6: キャップ拘束時は比例縮小(各馬のstake比がx*比と一致)", () => {
-    it("2頭配分でcapを絞ると、両馬のstakeが概ね同じ比率で縮小されること", () => {
-      const horses = [candidate(4, 0.3, 4), candidate(7, 0.15, 8)];
-      const wide = allocateBets(horses, 3, config({ bankroll: 1000000, perRaceCap: 1000000, kellyFraction: 1 }));
-      const narrow = allocateBets(horses, 3, config({ bankroll: 1000000, perRaceCap: 300, kellyFraction: 1 }));
+    it("複数頭(3頭・placeCount2)でcapを絞ると、2頭以上の正のcontinuousFraction比を保ったまま比例縮小されること", () => {
+      // 2頭構成(candidate(4,0.3,4)/candidate(7,0.15,8)・placeCount3)は退化解に陥り、
+      // horse4のcontinuousFractionが常に0(全額horse7に集中)になってしまい、複数馬間の
+      // 比率保持を検証できていなかった(code-reviewer指摘)。placeCount=2・3頭構成に差し替え、
+      // 2頭以上が正のcontinuousFractionを持つことを無条件expectで先に固定してから比率を比較する。
+      // perRaceCap=800はtsx実測で校正した値(2頭ともbetUnit切り捨て後も正のstakeを維持する)。
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.5, 2.2), candidate(3, 0.1, 5)];
+      const wide = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 1000000, perRaceCap: 10000000, kellyFraction: 1 }),
+      );
+      const narrow = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 1000000, perRaceCap: 800, kellyFraction: 1 }),
+      );
+
+      // 前提(無条件expect): 2頭以上が正のcontinuousFractionを持つこと。
+      // これが成立しないと、以降の「比率保持」の検証自体が意味をなさない。
+      const positiveFractionCount = wide.allocations.filter(
+        (a) => a.continuousFraction > 0,
+      ).length;
+      expect(positiveFractionCount).toBeGreaterThanOrEqual(2);
+      // wide/narrowでcontinuousFraction自体は不変(スケール不変性。capはstake算出後にのみ効く)。
+      for (let i = 0; i < wide.allocations.length; i++) {
+        expect(narrow.allocations[i]!.continuousFraction).toBe(
+          wide.allocations[i]!.continuousFraction,
+        );
+      }
+
+      // 前提(無条件expect): このケースでは最低額ロジックが介入していないこと
+      // (介入すると1頭に絞られ、比率保持の検証がそもそも成立しなくなるため)。
+      expect(narrow.minimumStakeApplied).toBe(false);
       expect(narrow.capApplied).toBe(true);
-      expect(narrow.totalStake).toBeLessThanOrEqual(300);
-      // 両ケースで2頭とも正のcontinuousFractionを持つこと(比較の前提)。
+      expect(narrow.totalStake).toBeLessThanOrEqual(800);
       const wideStakeSum = wide.allocations.reduce((acc, a) => acc + a.stake, 0);
-      expect(wideStakeSum).toBeGreaterThan(300);
+      expect(wideStakeSum).toBeGreaterThan(800);
+
       // narrowの各馬stakeは、比例縮小された連続配分(s·λ·x*_i·bankroll)をbetUnit未満で
       // 切り捨てた値に一致する(全探索ではなく計算式そのものを直接検証する)。
       const kellyTargetStake = narrow.kellyTargetStake;
@@ -259,11 +289,24 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
           Math.floor((s * a.scaledFraction * narrow.resolvedBankroll) / DEFAULT_BET_ALLOCATION_CONFIG.betUnit) *
           DEFAULT_BET_ALLOCATION_CONFIG.betUnit;
         const expectedFloored = expected < DEFAULT_BET_ALLOCATION_CONFIG.betUnit ? 0 : expected;
-        // 最低額ロジックが介入していなければ一致するはず(このケースはtotalStake>0なので最低額は不介入)。
-        if (!narrow.minimumStakeApplied) {
-          expect(a.stake).toBe(expectedFloored);
-        }
+        expect(a.stake).toBe(expectedFloored);
       }
+
+      // 前提(無条件expect): 正のcontinuousFractionを持つ2頭が、丸め後もどちらも正のstakeを
+      // 維持していること(退化解〈1頭だけに全額集中〉ではないことの直接証拠)。
+      const positiveNarrow = narrow.allocations.filter((a) => a.continuousFraction > 0);
+      expect(positiveNarrow).toHaveLength(2);
+      const withStake = positiveNarrow.filter((a) => a.stake > 0);
+      expect(withStake).toHaveLength(2);
+
+      // 比率保持の直接検証: stake比がcontinuousFraction比とbetUnitの丸め誤差程度(相対15%以内)で
+      // 一致すること。betUnit=100という粗い粒度での丸めが両馬の絶対値(500円・200円)に対して
+      // 一定の相対誤差を生むため、絶対精度(toBeCloseTo)ではなく相対誤差で比較する。
+      const [first, second] = withStake;
+      const actualRatio = first!.stake / second!.stake;
+      const expectedRatio = first!.continuousFraction / second!.continuousFraction;
+      const relativeError = Math.abs(actualRatio - expectedRatio) / expectedRatio;
+      expect(relativeError).toBeLessThan(0.15);
     });
   });
 
@@ -454,6 +497,20 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         expect(result.effectivePerRaceCap).toBeLessThan(100);
         expect(result.skipReason).toBe("1レースの上限が100円未満のため配分できません");
       }
+    });
+
+    it("③の文言はbetUnitに追随してテンプレート化されていること(code-reviewer指摘: buildAdvisoryと同じ流儀でbetUnitを埋め込む)", () => {
+      // betUnit=500のときは「1レースの上限が500円未満」になる(100のハードコードでないこと)。
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, {
+        bankroll: 10000,
+        perRaceCap: 200,
+        kellyFraction: 0.5,
+        betUnit: 500,
+        greedySteps: 1000,
+      });
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe("1レースの上限が500円未満のため配分できません");
     });
 
     it("優先順位: bankroll未設定かつperRaceCap未設定 → ①(bankroll)が優先されること", () => {
@@ -765,11 +822,36 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       expect(actual).toBeCloseTo(analytic, 2);
     });
 
-    it("modelId/modelApproximateが結果に載ること", () => {
+    it("modelId/modelApproximateが結果に載ること(既定モデル)", () => {
       const horses = [candidate(1, 0.6, 3)];
       const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
       expect(result.modelId).toBe(CONDITIONAL_BERNOULLI_MODEL.id);
       expect(result.modelApproximate).toBe(true);
+    });
+
+    it("差し替えたモデルのid/approximateが反映されること(C-1由来の回帰テスト。model引数を無視して既定値をハードコードで返す退行の検出)", () => {
+      // 既定(CONDITIONAL_BERNOULLI_MODEL: id="conditional-bernoulli"・approximate=true)とは
+      // 異なるid・approximateを持つスタブモデルを注入し、結果にそのまま反映されることを確認する。
+      const horses = [candidate(1, 0.6, 3)];
+      const swappedModel: PlaceJointModel = {
+        id: "exact-future-model",
+        approximate: false,
+        buildDistribution: () => [
+          { placed: [], probability: 0.4 },
+          { placed: [1], probability: 0.6 },
+        ],
+      };
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 10000, perRaceCap: 10000 }),
+        swappedModel,
+      );
+      expect(result.modelId).toBe("exact-future-model");
+      expect(result.modelApproximate).toBe(false);
+      // 既定モデルの値と異なることも積極的に確認する(既定へのハードコード退行の直接検出)。
+      expect(result.modelId).not.toBe(CONDITIONAL_BERNOULLI_MODEL.id);
+      expect(result.modelApproximate).not.toBe(CONDITIONAL_BERNOULLI_MODEL.approximate);
     });
 
     it("診断値(placeProbSum等)が見送り時も含め算出されること", () => {
@@ -785,6 +867,55 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       const result = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 10000 }));
       expect(result.isSkip).toBe(true);
       expect(result.allocations[0]!.continuousFraction).toBeGreaterThan(0);
+    });
+
+    it("N=0(出走馬なし)でもクラッシュせず、候補0頭の見送りになること(C-1由来の回帰テスト)", () => {
+      const result = allocateBets([], 3, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.allocations).toEqual([]);
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe("EVプラスの馬がいないため見送りです");
+      expect(result.diagnostics.candidateCount).toBe(0);
+      expect(result.diagnostics.placeProbSum).toBe(0);
+    });
+
+    it("N=4(複勝人数3に対して頭数が少ない境界)でもクラッシュせず正しく配分されること(C-1由来の回帰テスト)", () => {
+      const horses = [
+        candidate(1, 0.5, 2.5),
+        candidate(2, 0.4, 2.5),
+        candidate(3, 0.3, 2.2),
+        candidate(4, 0.2, 2.2),
+      ];
+      const result = allocateBets(horses, 3, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.allocations).toHaveLength(4);
+      expect(result.allocations.map((a) => a.umaban)).toEqual([1, 2, 3, 4]);
+      for (const a of result.allocations) {
+        expect(a.stake % DEFAULT_BET_ALLOCATION_CONFIG.betUnit).toBe(0);
+      }
+    });
+
+    it("placeCount=NaNでもNaNが一切露出しないこと(C-1で実際に発生したバグの回帰テスト。Math.max(0,NaN)がNaNを素通りしてcombos=[]になり見送り理由が誤分類されていた)", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const result = allocateBets(horses, Number.NaN, {
+        bankroll: 10000,
+        perRaceCap: 10000,
+        kellyFraction: 1,
+        betUnit: 100,
+        greedySteps: 1000,
+      });
+      expect(Number.isNaN(result.totalStake)).toBe(false);
+      expect(Number.isNaN(result.diagnostics.placeProbSumTarget)).toBe(false);
+      expect(Number.isNaN(result.diagnostics.placeProbSumDeviation)).toBe(false);
+      expect(Number.isNaN(result.diagnostics.marginalDeviationMax)).toBe(false);
+      for (const a of result.allocations) {
+        expect(Number.isNaN(a.stake)).toBe(false);
+        expect(Number.isNaN(a.continuousFraction)).toBe(false);
+        expect(Number.isNaN(a.scaledFraction)).toBe(false);
+      }
+      // 負値(既存のMath.maxクランプ)と同じ一貫した結果(k=0扱い)として⑥に分類される。
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe(
+        "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
+      );
     });
   });
 

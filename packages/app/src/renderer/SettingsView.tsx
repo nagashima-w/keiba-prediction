@@ -329,10 +329,13 @@ export function SettingsView(): React.JSX.Element {
           }
         />
         {/*
-         * 実効上限(100円単位切り捨て後)を入力欄直下に常時表示する(仕様「1レース上限は入力欄
+         * 実効上限(betUnit単位切り捨て後)を入力欄直下に常時表示する(仕様「1レース上限は入力欄
          * 直下に実効上限を常時表示」)。core resolveEffectivePerRaceCap をそのまま呼び、UI側で
          * 床関数をコピー実装しない(boss着手前ゲート2026-07-30: 「実効上限10,000円」と表示しつつ
-         * core側は別の値で計算する事態=嘘をつくUIを防ぐ)。betUnitはUI未公開の既定値を使う。
+         * core側は別の値で計算する事態=嘘をつくUIを防ぐ)。betUnitはUI未公開の既定値を使うが、
+         * 文言側も「100円」を直接書かずDEFAULT_BET_ALLOCATION_CONFIG.betUnitから埋め込む
+         * (code-reviewer指摘: core側REASON_CAP_TOO_SMALLの100円ハードコードと同じ欠陥クラス。
+         * betUnitが将来変わっても文言の追随漏れが起きないようにする)。
          */}
         <p style={noteStyle}>
           実効上限:{" "}
@@ -342,7 +345,7 @@ export function SettingsView(): React.JSX.Element {
               DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
             ),
           )}
-          (100円単位切り捨て後)
+          ({DEFAULT_BET_ALLOCATION_CONFIG.betUnit}円単位切り捨て後)
         </p>
         {!isValidPerRaceCap(state.perRaceCap) && (
           <p style={{ ...noteStyle, color: "#c00" }}>

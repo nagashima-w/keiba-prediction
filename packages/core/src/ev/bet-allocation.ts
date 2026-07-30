@@ -327,7 +327,6 @@ export interface BetAllocationResult {
 /** 見送り理由(優先順位順)。理由の選定ロジックはコメント「7. 見送り理由...」を参照。 */
 const REASON_BANKROLL_UNSET = "総資金が未設定のため配分を提案していません";
 const REASON_CAP_UNSET = "1レースの上限が未設定のため配分を提案していません";
-const REASON_CAP_TOO_SMALL = "1レースの上限が100円未満のため配分できません";
 const REASON_KELLY_ZERO = "ケリー係数が0のため配分しません";
 const REASON_NO_CANDIDATES = "EVプラスの馬がいないため見送りです";
 const REASON_NO_EDGE = "妙味が小さく、賭ける価値のある配分が見つかりませんでした";
@@ -661,6 +660,17 @@ function buildAdvisory(
 }
 
 /**
+ * 見送り理由③(1レース上限がbetUnit未満)の文言をbetUnitでテンプレート化する
+ * (code-reviewer指摘対応: buildAdvisoryは同じbetUnit引数を文言へ埋め込んでいるのに、
+ * 旧実装は本文言だけ"100円"をハードコードしており一貫性を欠いていた。現状UIは常に
+ * betUnit既定100で呼ぶため実害はないが、公開関数resolveEffectivePerRaceCapを含め
+ * betUnitを外部から変えられる契約である以上、文言もbetUnitに追随させる)。
+ */
+function buildCapTooSmallReason(betUnit: number): string {
+  return `1レースの上限が${betUnit}円未満のため配分できません`;
+}
+
+/**
  * Step2の畳み込み前(全頭)の同時分布から、各馬がいずれかの複勝圏内の組に含まれる確率
  * (周辺確率)を求め、入力placeProbとの乖離の絶対値の最大を返す。
  * 条件付けにより周辺確率の合計は保存されるため、乖離には正負両方が必ず現れる
@@ -826,7 +836,7 @@ function determineSkipReason(
   }
   // ③1レース上限はあるがbetUnit未満(実効上限が1単位に満たない)。
   if (effectivePerRaceCap < betUnit) {
-    return REASON_CAP_TOO_SMALL;
+    return buildCapTooSmallReason(betUnit);
   }
   // ④ケリー係数が0(ユーザーの明示的な「賭けない」指定。候補の有無より優先する)。
   if (kellyTargetStake === 0 && kellyFraction === 0) {

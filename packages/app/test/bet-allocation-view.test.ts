@@ -300,6 +300,36 @@ describe("buildAllocationNotices(注記の表示順: advisory→確率合計警�
       expect(notices).toEqual([]);
     }
   });
+
+  it("advisory!==null かつ notDiversified===true が同時成立するとき、2件とも表示されadvisoryが先頭に来ること(code-reviewer指摘: 従来は常に0/1件しか検証できていなかった)", () => {
+    // 3頭が対称候補(EV=1.2)・残り5頭は非候補(確率合計が目標3に近くなるよう0.42に調整し、
+    // 確率合計警告が余計に混入しないようにする)。低いbankrollで最低額ロジックが介入すると、
+    // 3頭とも正のcontinuousFractionを持ちながら1頭のみに配分される(minimumStakeApplied=true
+    // かつ betCount=1・positiveContinuousCount=3)ため、advisory(適正額超過)と
+    // notDiversified(分散できたのに1点)が同時に成立する(tsx実測で校正済み)。
+    const rows: AnalysisRow[] = [
+      candidateRow(1, 0.3, 4),
+      candidateRow(2, 0.3, 4),
+      candidateRow(3, 0.3, 4),
+      row({ umaban: 4, adjustedProb: 0.42 }),
+      row({ umaban: 5, adjustedProb: 0.42 }),
+      row({ umaban: 6, adjustedProb: 0.42 }),
+      row({ umaban: 7, adjustedProb: 0.42 }),
+      row({ umaban: 8, adjustedProb: 0.42 }),
+    ];
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, { bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      // 前提(無条件expect): このケースで実際に両条件が同時成立していること。
+      expect(view.result.advisory).not.toBeNull();
+      expect(view.result.notDiversified).toBe(true);
+      const notices = buildAllocationNotices(view.result);
+      expect(notices).toHaveLength(2);
+      expect(notices[0]).toBe(view.result.advisory);
+      expect(notices[1]).not.toBe(view.result.advisory);
+    }
+  });
 });
 
 describe("固定注記3点(必ず表示。文言は数値込みで生成)", () => {
