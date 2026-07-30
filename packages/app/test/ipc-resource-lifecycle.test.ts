@@ -58,6 +58,9 @@ const validUpdate: SettingsUpdate = {
   autoSendDiscord: false,
   additionalInstruction: "",
   clipVariant: "default",
+  bankroll: 10000,
+  perRaceCap: 5000,
+  kellyFraction: 0.5,
 };
 
 /** 登録済みハンドラを取得する。 */

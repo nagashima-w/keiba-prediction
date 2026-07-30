@@ -10,6 +10,9 @@
 import {
   BASE_SCORE_WEIGHT_KEYS,
   BIAS_WEIGHT_KEYS,
+  isValidBankroll,
+  isValidKellyFraction,
+  isValidPerRaceCap,
   isValidThreshold,
   isValidWebhookUrl,
   isValidWeight,
@@ -65,6 +68,12 @@ export interface SettingsFormState {
   readonly additionalInstruction: string;
   /** クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B)。 */
   readonly clipVariant: ClipVariantId;
+  /** 馬券用の総資金(文字列。機能C-2)。 */
+  readonly bankroll: string;
+  /** 1レースの上限(文字列。機能C-2)。 */
+  readonly perRaceCap: string;
+  /** 馬券配分のケリー係数λ(文字列。機能C-2)。 */
+  readonly kellyFraction: string;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -108,6 +117,9 @@ export type SettingsAction =
   | { readonly type: "自動送信切替"; readonly value: boolean }
   | { readonly type: "追加指示入力"; readonly value: string }
   | { readonly type: "クリップ幅版選択"; readonly value: ClipVariantId }
+  | { readonly type: "総資金入力"; readonly value: string }
+  | { readonly type: "1レース上限入力"; readonly value: string }
+  | { readonly type: "ケリー係数入力"; readonly value: string }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
   | { readonly type: "保存失敗"; readonly message: string }
@@ -168,6 +180,12 @@ export interface SettingsSnapshot {
   readonly autoSendDiscord: boolean;
   readonly additionalInstruction: string;
   readonly clipVariant: ClipVariantId;
+  /** 馬券用の総資金(文字列。機能C-2)。 */
+  readonly bankroll: string;
+  /** 1レースの上限(文字列。機能C-2)。 */
+  readonly perRaceCap: string;
+  /** 馬券配分のケリー係数λ(文字列。機能C-2)。 */
+  readonly kellyFraction: string;
 }
 
 /** 空文字ベースの初期スナップショットを作る。 */
@@ -180,6 +198,9 @@ function emptySnapshot(): SettingsSnapshot {
     autoSendDiscord: false,
     additionalInstruction: "",
     clipVariant: "default",
+    bankroll: "",
+    perRaceCap: "",
+    kellyFraction: "",
   };
 }
 
@@ -197,6 +218,9 @@ export function createInitialSettingsState(): SettingsFormState {
     autoSendDiscord: false,
     additionalInstruction: "",
     clipVariant: "default",
+    bankroll: "",
+    perRaceCap: "",
+    kellyFraction: "",
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -230,6 +254,9 @@ function applyMasked(
   const autoSendDiscord = settings.autoSendDiscord;
   const additionalInstruction = settings.additionalInstruction;
   const clipVariant = settings.clipVariant;
+  const bankroll = String(settings.bankroll);
+  const perRaceCap = String(settings.perRaceCap);
+  const kellyFraction = String(settings.kellyFraction);
   return {
     ...state,
     loaded: true,
@@ -244,6 +271,9 @@ function applyMasked(
     autoSendDiscord,
     additionalInstruction,
     clipVariant,
+    bankroll,
+    perRaceCap,
+    kellyFraction,
     savedSnapshot: {
       discordWebhookUrl,
       evThreshold,
@@ -252,6 +282,9 @@ function applyMasked(
       autoSendDiscord,
       additionalInstruction,
       clipVariant,
+      bankroll,
+      perRaceCap,
+      kellyFraction,
     },
   };
 }
@@ -303,6 +336,15 @@ export function settingsReducer(
 
     case "クリップ幅版選択":
       return { ...state, clipVariant: action.value };
+
+    case "総資金入力":
+      return { ...state, bankroll: action.value };
+
+    case "1レース上限入力":
+      return { ...state, perRaceCap: action.value };
+
+    case "ケリー係数入力":
+      return { ...state, kellyFraction: action.value };
 
     case "保存開始":
       return { ...state, status: "saving", message: null };
@@ -377,6 +419,9 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     autoSendDiscord: state.autoSendDiscord,
     additionalInstruction: state.additionalInstruction,
     clipVariant: state.clipVariant,
+    bankroll: Number(state.bankroll),
+    perRaceCap: Number(state.perRaceCap),
+    kellyFraction: Number(state.kellyFraction),
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
@@ -410,6 +455,15 @@ export function isDirty(state: SettingsFormState): boolean {
   if (state.clipVariant !== snap.clipVariant) {
     return true;
   }
+  if (state.bankroll !== snap.bankroll) {
+    return true;
+  }
+  if (state.perRaceCap !== snap.perRaceCap) {
+    return true;
+  }
+  if (state.kellyFraction !== snap.kellyFraction) {
+    return true;
+  }
   for (const key of BIAS_WEIGHT_KEYS) {
     if (state.biasWeights[key] !== snap.biasWeights[key]) {
       return true;
@@ -429,6 +483,15 @@ export function isFormValid(state: SettingsFormState): boolean {
     return false;
   }
   if (!isValidWebhookUrl(state.discordWebhookUrl)) {
+    return false;
+  }
+  if (!isValidBankroll(state.bankroll)) {
+    return false;
+  }
+  if (!isValidPerRaceCap(state.perRaceCap)) {
+    return false;
+  }
+  if (!isValidKellyFraction(state.kellyFraction)) {
     return false;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

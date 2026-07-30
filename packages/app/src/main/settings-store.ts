@@ -35,6 +35,11 @@ import {
   type SettingsUpdate,
 } from "../shared/settings.js";
 
+/** 馬券配分(機能C-2)の総資金の上限(円)。shared/settings.ts の isValidBankroll と一致させる。 */
+const BANKROLL_MAX = 100_000_000;
+/** 馬券配分(機能C-2)の1レース上限の上限(円)。shared/settings.ts の isValidPerRaceCap と一致させる。 */
+const PER_RACE_CAP_MAX = 10_000_000;
+
 /**
  * 既定設定。EV閾値は仕様の既定1.0、重みは core の DEFAULT_SCORER_CONFIG を出典とする。
  * (EvConfig の既定閾値もコアでは1.0。バレル import を避けるため数値を直接置く。)
@@ -49,6 +54,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   additionalInstruction: "",
   // クリップ幅版(タスクD-2)。既定は対照(±10%)。
   clipVariant: "default",
+  // 馬券配分3項目(機能C-2)。bankroll/perRaceCapは既定0(未設定=配分提案を出さないopt-in)、
+  // kellyFractionは既定0.5(core DEFAULT_BET_ALLOCATION_CONFIGと同じ既定値)。
+  bankroll: 0,
+  perRaceCap: 0,
+  kellyFraction: 0.5,
 };
 
 /** raw が number かつ有限かつ述語を満たせば採用、さもなくば fallback。 */
@@ -60,6 +70,49 @@ function coerceNumber(
   return typeof raw === "number" && Number.isFinite(raw) && predicate(raw)
     ? raw
     : fallback;
+}
+
+/**
+ * 総資金(機能C-2)を検証する。0〜BANKROLL_MAXの整数のみ採用し、それ以外(欠損・非数値・負・
+ * 非有限・非整数・上限超過)は既定(0=未設定)へフォールバックする。UI(shared/settings.ts の
+ * isValidBankroll)が弾く範囲と同じだが、main側は多層防御として独立に検証する(settings.json
+ * 手編集・IPC経由の不正入力に対する最後の砦)。
+ */
+function coerceBankroll(raw: unknown): number {
+  return coerceNumber(
+    raw,
+    DEFAULT_APP_SETTINGS.bankroll,
+    (n) => Number.isInteger(n) && n >= 0 && n <= BANKROLL_MAX,
+  );
+}
+
+/** 1レースの上限(機能C-2)を検証する。0〜PER_RACE_CAP_MAXの整数のみ採用(coerceBankrollと同じ流儀)。 */
+function coercePerRaceCap(raw: unknown): number {
+  return coerceNumber(
+    raw,
+    DEFAULT_APP_SETTINGS.perRaceCap,
+    (n) => Number.isInteger(n) && n >= 0 && n <= PER_RACE_CAP_MAX,
+  );
+}
+
+/**
+ * ケリー係数λ(機能C-2)を検証する。0〜1(core resolveKellyFractionと同じ範囲)のみ採用し、
+ * それ以外(負値・非有限・1超過)は既定(0.5)へフォールバックする。
+ *
+ * 重要: UI(shared/settings.ts の isValidKellyFraction)は下限0.05でλ=0の入力を弾くが、
+ * main側のこの関数は0を弾かない(0〜1をそのまま許容する)。理由: settings.jsonを手編集して
+ * kellyFraction:0を書き込んだ場合、core側の見送り理由④(ケリー係数0で配分しない)へ実際に
+ * 到達できる契約になっている(仕様「④はUI経由では到達しないが、settings.json手編集・core直接
+ * 利用では到達する」)。ここで0を0.5へ矯正してしまうと、settings.json経由でも④へ到達できなくなり
+ * この契約が壊れる。UIの妥当性判定(フォーム入力の下限)とmain側の永続化層の検証範囲を
+ * 意図的に分離している(boss着手前ゲート2026-07-30)。
+ */
+function coerceKellyFraction(raw: unknown): number {
+  return coerceNumber(
+    raw,
+    DEFAULT_APP_SETTINGS.kellyFraction,
+    (n) => n >= 0 && n <= 1,
+  );
 }
 
 /**
@@ -142,6 +195,10 @@ export function coerceSettings(raw: unknown): AppSettings {
         : DEFAULT_APP_SETTINGS.additionalInstruction,
     // クリップ幅版(タスクD-2)。CLIP_VARIANT_IDS に無い値・欠損はdefaultへフォールバック。
     clipVariant: coerceClipVariant(rec.clipVariant),
+    // 馬券配分3項目(機能C-2)。欠損・非数値・範囲外は既定へフォールバックする(多層防御)。
+    bankroll: coerceBankroll(rec.bankroll),
+    perRaceCap: coercePerRaceCap(rec.perRaceCap),
+    kellyFraction: coerceKellyFraction(rec.kellyFraction),
   };
 }
 
@@ -201,6 +258,10 @@ export function maskSettings(
     additionalInstruction: settings.additionalInstruction,
     // クリップ幅版(タスクD-2)も往復編集フォームとして表示するため平文のまま返す。
     clipVariant: settings.clipVariant,
+    // 馬券配分3項目(機能C-2)も往復編集フォームとして表示するため平文のまま返す。
+    bankroll: settings.bankroll,
+    perRaceCap: settings.perRaceCap,
+    kellyFraction: settings.kellyFraction,
   };
 }
 
@@ -223,6 +284,9 @@ export function applyUpdate(
     autoSendDiscord: update.autoSendDiscord,
     additionalInstruction: update.additionalInstruction,
     clipVariant: update.clipVariant,
+    bankroll: update.bankroll,
+    perRaceCap: update.perRaceCap,
+    kellyFraction: update.kellyFraction,
   });
 }
 

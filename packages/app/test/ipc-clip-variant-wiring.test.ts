@@ -95,6 +95,9 @@ describe("ipc: 設定のクリップ幅版(clipVariant)をcreatePipelineDepsへ�
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "wide15",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
     };
     await saveHandler(fakeEvent, update);
 

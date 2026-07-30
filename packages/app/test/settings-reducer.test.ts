@@ -42,6 +42,9 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
     autoSendDiscord: false,
     additionalInstruction: "",
     clipVariant: "default",
+    bankroll: 0,
+    perRaceCap: 0,
+    kellyFraction: 0.5,
     ...overrides,
   };
 }
@@ -86,6 +89,15 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.clipVariant).toBe("wide15");
   });
 
+  it("読込成功で馬券配分3項目(bankroll/perRaceCap/kellyFraction)を文字列として反映すること(機能C-2)", () => {
+    const s = loadedState(
+      fakeMasked({ bankroll: 300000, perRaceCap: 20000, kellyFraction: 0.3 }),
+    );
+    expect(s.bankroll).toBe("300000");
+    expect(s.perRaceCap).toBe("20000");
+    expect(s.kellyFraction).toBe("0.3");
+  });
+
   it("各フィールドの入力アクションで値を更新する", () => {
     let s = loadedState();
     s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
@@ -107,6 +119,9 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
       value: "人気薄の複勝率は慎重に見積もること",
     });
     s = settingsReducer(s, { type: "クリップ幅版選択", value: "wide15" });
+    s = settingsReducer(s, { type: "総資金入力", value: "500000" });
+    s = settingsReducer(s, { type: "1レース上限入力", value: "30000" });
+    s = settingsReducer(s, { type: "ケリー係数入力", value: "0.4" });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -116,6 +131,9 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.autoSendDiscord).toBe(true);
     expect(s.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
     expect(s.clipVariant).toBe("wide15");
+    expect(s.bankroll).toBe("500000");
+    expect(s.perRaceCap).toBe("30000");
+    expect(s.kellyFraction).toBe("0.4");
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -250,6 +268,24 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     const update = buildUpdate(loadedState());
     expect(update.clipVariant).toBe("default");
   });
+
+  it("馬券配分3項目(bankroll/perRaceCap/kellyFraction)を数値化して含めること(機能C-2)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "総資金入力", value: "500000" });
+    s = settingsReducer(s, { type: "1レース上限入力", value: "30000" });
+    s = settingsReducer(s, { type: "ケリー係数入力", value: "0.4" });
+    const update = buildUpdate(s);
+    expect(update.bankroll).toBe(500000);
+    expect(update.perRaceCap).toBe(30000);
+    expect(update.kellyFraction).toBe(0.4);
+  });
+
+  it("馬券配分3項目未編集(既定値0/0/0.5)はそのまま含めること(機能C-2)", () => {
+    const update = buildUpdate(loadedState());
+    expect(update.bankroll).toBe(0);
+    expect(update.perRaceCap).toBe(0);
+    expect(update.kellyFraction).toBe(0.5);
+  });
 });
 
 describe("isDirty(未保存インジケータ、Issue #11)", () => {
@@ -277,6 +313,9 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
       name: "クリップ幅版選択",
       action: { type: "クリップ幅版選択", value: "wide15" },
     },
+    { name: "総資金入力", action: { type: "総資金入力", value: "500000" } },
+    { name: "1レース上限入力", action: { type: "1レース上限入力", value: "30000" } },
+    { name: "ケリー係数入力", action: { type: "ケリー係数入力", value: "0.4" } },
     ...BIAS_WEIGHT_KEYS.map((key) => ({
       name: `バイアス重み入力(${key})`,
       action: {
@@ -391,5 +430,49 @@ describe("isFormValid(フォーム全体の妥当性)", () => {
       value: "",
     });
     expect(isFormValid(empty)).toBe(true);
+  });
+
+  describe("馬券配分3項目(機能C-2)", () => {
+    it("総資金が負・非整数・上限超過・空・非数値なら不正", () => {
+      for (const value of ["-1", "1.5", "100000001", "", "abc"]) {
+        const s = settingsReducer(loadedState(), { type: "総資金入力", value });
+        expect(isFormValid(s)).toBe(false);
+      }
+    });
+
+    it("総資金が0(未設定)・妥当な整数・上限ちょうどなら妥当", () => {
+      for (const value of ["0", "500000", "100000000"]) {
+        const s = settingsReducer(loadedState(), { type: "総資金入力", value });
+        expect(isFormValid(s)).toBe(true);
+      }
+    });
+
+    it("1レース上限が負・非整数・上限超過・空・非数値なら不正", () => {
+      for (const value of ["-1", "99.9", "10000001", "", "x"]) {
+        const s = settingsReducer(loadedState(), { type: "1レース上限入力", value });
+        expect(isFormValid(s)).toBe(false);
+      }
+    });
+
+    it("1レース上限が0(未設定)・妥当な整数・上限ちょうどなら妥当", () => {
+      for (const value of ["0", "30000", "10000000"]) {
+        const s = settingsReducer(loadedState(), { type: "1レース上限入力", value });
+        expect(isFormValid(s)).toBe(true);
+      }
+    });
+
+    it("ケリー係数が0(UI下限未満)・上限超過・負・空・非数値なら不正", () => {
+      for (const value of ["0", "1.0000001", "-0.1", "", "abc"]) {
+        const s = settingsReducer(loadedState(), { type: "ケリー係数入力", value });
+        expect(isFormValid(s)).toBe(false);
+      }
+    });
+
+    it("ケリー係数が下限(0.05)・0.5・上限(1)なら妥当", () => {
+      for (const value of ["0.05", "0.5", "1"]) {
+        const s = settingsReducer(loadedState(), { type: "ケリー係数入力", value });
+        expect(isFormValid(s)).toBe(true);
+      }
+    });
   });
 });

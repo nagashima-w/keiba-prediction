@@ -99,6 +99,16 @@ export function App(): React.JSX.Element {
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
 
+  // 馬券配分(機能C-2)の設定スナップショット(BatchAnalysisViewへ渡す)。evThresholdは
+  // 固定注記3「配分の対象はEV閾値(現在X.XX)を上回った馬のみです」の表示に使う。
+  // bankroll/perRaceCapの既定0は「未設定」を表し、配分ブロックを一切出さない(仕様)。
+  const [betAllocationSettings, setBetAllocationSettings] = useState({
+    bankroll: 0,
+    perRaceCap: 0,
+    kellyFraction: 0.5,
+    evThreshold: 1.0,
+  });
+
   // 実行中バッチの世代ID。一括分析開始時に固定し、完了で null に戻す。
   // 進捗イベントにはこの「開始時に固定した runId」を添えるため、完了後に遅れて届いた
   // 旧バッチの進捗は reducer の runId ガードで確実に弾かれる(恒真ガードにならない)。
@@ -149,16 +159,23 @@ export function App(): React.JSX.Element {
     return unsubscribe;
   }, []);
 
-  // Discord通知設定(Webhook URL 設定有無・自動送信ON/OFF)を読み込む。
+  // Discord通知設定(Webhook URL 設定有無・自動送信ON/OFF)と馬券配分3項目(機能C-2)を
+  // 同じIPC呼び出しから読み込む(IPC追加はゼロ。getSettingsの戻り値を両方に流用する)。
   const loadNotifySettings = useCallback(() => {
     window.keibaApi
       .getSettings()
-      .then((s) =>
+      .then((s) => {
         setNotify({
           webhookConfigured: s.discordWebhookUrl.trim() !== "",
           autoSend: s.autoSendDiscord,
-        }),
-      )
+        });
+        setBetAllocationSettings({
+          bankroll: s.bankroll,
+          perRaceCap: s.perRaceCap,
+          kellyFraction: s.kellyFraction,
+          evThreshold: s.evThreshold,
+        });
+      })
       .catch(() => {
         setNotify({ webhookConfigured: false, autoSend: false });
       });
@@ -641,6 +658,7 @@ export function App(): React.JSX.Element {
             discordSend={state.run.discordSend}
             onSendDiscord={() => handleSendDiscord(completedOutcomes)}
             onExportAnalysis={handleExportAnalysis}
+            betAllocationSettings={betAllocationSettings}
           />
 
           <PeriodBatchView

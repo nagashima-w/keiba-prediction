@@ -3,6 +3,20 @@ import type {
   BatchRaceEntry,
   DiscordSendState,
 } from "./batch-analysis-reducer.js";
+import {
+  BET_ALLOCATION_UNSET_NOTE,
+  buildAllocationNotices,
+  buildRaceAllocation,
+  CROSS_RACE_OVERBET_NOTE,
+  evThresholdFootnote,
+  formatAllocationSummary,
+  formatBetLabel,
+  isBetAllocationUnset,
+  KELLY_CAP_EXPLANATION_NOTE,
+  placeBetUnavailableMessage,
+  type BetAllocationSettings,
+  type RaceAllocationView,
+} from "./bet-allocation-view.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   collectPerRaceHighlights,
@@ -29,6 +43,7 @@ import {
   oddsStatusNote,
   raceHeading,
 } from "./format.js";
+import { formatYen } from "./verify-format.js";
 
 /** 一括分析画面のプロパティ。状態と操作は親(App)から受け取る。 */
 export interface BatchAnalysisViewProps {
@@ -66,6 +81,12 @@ export interface BatchAnalysisViewProps {
    * 「保存済みの最新分析」(main側で決定的に選ぶ。この画面から実行した分析がまさにその最新分析になる)。
    */
   readonly onExportAnalysis: (raceId: string) => void;
+  /**
+   * 馬券配分(機能C-2)の設定3項目+EV閾値(App.tsxがgetSettingsから流用して渡す。IPC追加なし)。
+   * bankroll/perRaceCapが未設定(0以下)のときは配分ブロックを一切出さず、画面全体で
+   * BET_ALLOCATION_UNSET_NOTEを1点だけ表示する(仕様「未設定時は…注記は画面全体で1点だけ」)。
+   */
+  readonly betAllocationSettings: BetAllocationSettings & { readonly evThreshold: number };
 }
 
 const thStyle: React.CSSProperties = {
@@ -218,6 +239,91 @@ function statusBadge(entry: BatchRaceEntry): React.JSX.Element {
 }
 
 /**
+ * 馬券配分ブロック(機能C-2)を1レース分描画する。buildRaceAllocationのkindごとに
+ * 表示を出し分ける。kind="unset"は個別レースでは何も出さない(呼び出し元がisBetAllocationUnset
+ * を先にチェックし、画面全体で1点だけ注記を出す設計のため。ここに来ること自体が想定外だが、
+ * 呼び出し順序に依存しない防御として null を返す)。
+ */
+function renderBetAllocationBlock(
+  view: RaceAllocationView,
+  evThreshold: number,
+): React.JSX.Element | null {
+  if (view.kind === "unset") {
+    return null;
+  }
+  if (view.kind === "yoso") {
+    return (
+      <p style={{ marginTop: "0.5rem", color: "#a60", fontSize: "0.85rem" }}>
+        複勝が未発売のため、オッズ確定後に再分析してください。
+      </p>
+    );
+  }
+  if (view.kind === "unavailable") {
+    return (
+      <p style={{ marginTop: "0.5rem", color: "#666", fontSize: "0.85rem" }}>
+        {placeBetUnavailableMessage(view.reason)}
+      </p>
+    );
+  }
+  // kind === "computed"
+  const { result } = view;
+  if (result.isSkip) {
+    return (
+      <p style={{ marginTop: "0.5rem", color: "#666", fontSize: "0.85rem" }}>
+        配分見送り: {result.skipReason}
+      </p>
+    );
+  }
+  const notices = buildAllocationNotices(result);
+  return (
+    <div
+      style={{
+        marginTop: "0.5rem",
+        padding: "0.5rem 0.6rem",
+        background: "#f7f7f7",
+        borderRadius: 4,
+      }}
+    >
+      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+        <thead>
+          <tr>
+            <th style={thStyle}>買い目</th>
+            <th style={thStyle}>配分額</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.allocations
+            .filter((a) => a.stake > 0)
+            .map((a) => (
+              <tr key={a.umaban}>
+                <td style={tdStyle}>{formatBetLabel(a.umaban)}</td>
+                <td style={tdStyle}>{formatYen(a.stake)}</td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+      <p style={{ margin: "0.4rem 0 0", fontWeight: 700, fontSize: "0.85rem" }}>
+        {formatAllocationSummary(result)}
+      </p>
+      {notices.map((notice) => (
+        <p key={notice} style={{ margin: "0.3rem 0 0", color: "#a60", fontSize: "0.8rem" }}>
+          {notice}
+        </p>
+      ))}
+      <p style={{ margin: "0.4rem 0 0", color: "#666", fontSize: "0.75rem" }}>
+        {KELLY_CAP_EXPLANATION_NOTE}
+      </p>
+      <p style={{ margin: "0.2rem 0 0", color: "#666", fontSize: "0.75rem" }}>
+        {CROSS_RACE_OVERBET_NOTE}
+      </p>
+      <p style={{ margin: "0.2rem 0 0", color: "#666", fontSize: "0.75rem" }}>
+        {evThresholdFootnote(evThreshold)}
+      </p>
+    </div>
+  );
+}
+
+/**
  * 一括分析画面。選択したレースを直列に分析し、最上部に妙味レースランキング、
  * その下にレース別ハイライト(印あり・EVプラス馬をレースごとにブロック化。Task#29)、
  * さらにその下にレースごとの詳細(折りたたみ)を表示する。Discord送信はサマリ1通にまとめる。
@@ -234,6 +340,16 @@ export function BatchAnalysisView(
   const opportunityByRaceId = new Map(
     ranking.map((r) => [r.raceId, r.opportunity]),
   );
+  // 馬券配分(機能C-2)には出走全頭(候補外も含む)が必要なため、highlightの絞り込み済み
+  // horsesではなく、outcomesから直接raceId→AnalysisResult(全rows)の対応を作る
+  // (collectPerRaceHighlightsのRaceHighlight型は変更しない。既存出力の非破壊性のため)。
+  const analysisResultByRaceId = new Map<string, AnalysisResult>();
+  for (const o of outcomes) {
+    if (o.status === "success" && o.result !== null) {
+      analysisResultByRaceId.set(o.result.raceId, o.result);
+    }
+  }
+  const betAllocationUnset = isBetAllocationUnset(props.betAllocationSettings);
   const expandedSet = new Set(props.expandedRaceIds);
   // 実行前スナップショット(全pending)だけの状態では結果表示はまだ出さない。
   const hasCompleted = outcomes.some((o) => o.status !== "pending");
@@ -372,6 +488,15 @@ export function BatchAnalysisView(
             <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.35rem" }}>
               レース別ハイライト(印あり・EVプラス)
             </h3>
+            {/*
+              馬券配分(機能C-2): 総資金または1レース上限が未設定のとき、レースごとの配分ブロックは
+              一切出さず、画面全体でこの注記を1点だけ表示する(レース数に比例して増やさない)。
+            */}
+            {betAllocationUnset && (
+              <p style={{ color: "#a60", fontSize: "0.85rem", margin: "0 0 0.5rem" }}>
+                {BET_ALLOCATION_UNSET_NOTE}
+              </p>
+            )}
             {highlights.length === 0 ? (
               <p style={{ color: "#666" }}>該当なし</p>
             ) : (
@@ -487,6 +612,22 @@ export function BatchAnalysisView(
                       ))}
                     </tbody>
                   </table>
+                  {/*
+                    馬券配分(機能C-2)。未設定時はここに来ない(上のbetAllocationUnsetチェックで
+                    画面全体の注記に一本化しているため、このブロックは常に判定対象)。
+                  */}
+                  {!betAllocationUnset &&
+                    (() => {
+                      const fullResult = analysisResultByRaceId.get(highlight.raceId);
+                      if (fullResult === undefined) {
+                        return null;
+                      }
+                      const view = buildRaceAllocation(fullResult, props.betAllocationSettings);
+                      return renderBetAllocationBlock(
+                        view,
+                        props.betAllocationSettings.evThreshold,
+                      );
+                    })()}
                 </details>
               ))
             )}

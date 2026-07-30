@@ -5,14 +5,22 @@ import {
   CLIP_VARIANTS,
   resolveClipVariant,
 } from "@keiba/core/analyzer/build-prompt";
+import {
+  DEFAULT_BET_ALLOCATION_CONFIG,
+  resolveEffectivePerRaceCap,
+} from "@keiba/core/ev/bet-allocation";
 
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   BASE_SCORE_WEIGHT_KEYS,
   BASE_SCORE_WEIGHT_LABELS,
+  BET_ALLOCATION_LABELS,
   BIAS_WEIGHT_KEYS,
   BIAS_WEIGHT_LABELS,
   CLIP_VARIANT_IDS,
+  isValidBankroll,
+  isValidKellyFraction,
+  isValidPerRaceCap,
   isValidThreshold,
   isValidWebhookUrl,
   isValidWeight,
@@ -20,6 +28,7 @@ import {
   type BiasWeightKey,
   type ClipVariantId,
 } from "../shared/settings.js";
+import { formatYen } from "./verify-format.js";
 import {
   buildUpdate,
   createInitialSettingsState,
@@ -274,6 +283,104 @@ export function SettingsView(): React.JSX.Element {
           分析結果を自動でDiscordに送信する(Phase 5 で使用)
         </label>
       </div>
+
+      {/*
+       * 馬券配分(機能C-2)。総資金・1レース上限は既定0(未設定=配分提案を出さない・opt-in)。
+       * ケリー係数は上級設定として折りたたみで区別する(仕様「UI ラベル」要件)。
+       */}
+      <h3 style={{ fontSize: "0.9rem", margin: "0.75rem 0 0.4rem" }}>馬券配分</h3>
+
+      <div style={fieldStyle}>
+        <label style={labelStyle} htmlFor="bankroll">
+          {BET_ALLOCATION_LABELS.bankroll}
+        </label>
+        <input
+          id="bankroll"
+          type="number"
+          step="1"
+          min="0"
+          style={isValidBankroll(state.bankroll) ? inputStyle : invalidStyle}
+          value={state.bankroll}
+          onChange={(e) =>
+            dispatch({ type: "総資金入力", value: e.target.value })
+          }
+        />
+        <p style={noteStyle}>{BET_ALLOCATION_LABELS.bankrollHelp}</p>
+        {!isValidBankroll(state.bankroll) && (
+          <p style={{ ...noteStyle, color: "#c00" }}>
+            0以上100,000,000以下の整数を入力してください(0は未設定を表し、配分提案を出しません)。
+          </p>
+        )}
+      </div>
+
+      <div style={fieldStyle}>
+        <label style={labelStyle} htmlFor="per-race-cap">
+          {BET_ALLOCATION_LABELS.perRaceCap}
+        </label>
+        <input
+          id="per-race-cap"
+          type="number"
+          step="1"
+          min="0"
+          style={isValidPerRaceCap(state.perRaceCap) ? inputStyle : invalidStyle}
+          value={state.perRaceCap}
+          onChange={(e) =>
+            dispatch({ type: "1レース上限入力", value: e.target.value })
+          }
+        />
+        {/*
+         * 実効上限(100円単位切り捨て後)を入力欄直下に常時表示する(仕様「1レース上限は入力欄
+         * 直下に実効上限を常時表示」)。core resolveEffectivePerRaceCap をそのまま呼び、UI側で
+         * 床関数をコピー実装しない(boss着手前ゲート2026-07-30: 「実効上限10,000円」と表示しつつ
+         * core側は別の値で計算する事態=嘘をつくUIを防ぐ)。betUnitはUI未公開の既定値を使う。
+         */}
+        <p style={noteStyle}>
+          実効上限:{" "}
+          {formatYen(
+            resolveEffectivePerRaceCap(
+              Number(state.perRaceCap) || 0,
+              DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
+            ),
+          )}
+          (100円単位切り捨て後)
+        </p>
+        {!isValidPerRaceCap(state.perRaceCap) && (
+          <p style={{ ...noteStyle, color: "#c00" }}>
+            0以上10,000,000以下の整数を入力してください(0は未設定を表し、配分提案を出しません)。
+          </p>
+        )}
+      </div>
+
+      <details style={{ margin: "0.5rem 0 1rem", maxWidth: 480 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+          上級設定: {BET_ALLOCATION_LABELS.kellyFraction}
+        </summary>
+        <div style={{ ...fieldStyle, marginTop: "0.5rem" }}>
+          <label style={labelStyle} htmlFor="kelly-fraction">
+            {BET_ALLOCATION_LABELS.kellyFraction}
+          </label>
+          <input
+            id="kelly-fraction"
+            type="number"
+            step="0.05"
+            min="0.05"
+            max="1"
+            style={isValidKellyFraction(state.kellyFraction) ? inputStyle : invalidStyle}
+            value={state.kellyFraction}
+            onChange={(e) =>
+              dispatch({ type: "ケリー係数入力", value: e.target.value })
+            }
+          />
+          <p style={noteStyle}>
+            0.05〜1(既定0.5)。小さいほど1回あたりの配分額が控えめになり、資産変動が穏やかになります。
+          </p>
+          {!isValidKellyFraction(state.kellyFraction) && (
+            <p style={{ ...noteStyle, color: "#c00" }}>
+              0.05以上1以下の数値を入力してください。
+            </p>
+          )}
+        </div>
+      </details>
 
       {/* プロンプト追加指示(Task#28 プロンプト改善C)。 */}
       <div style={fieldStyle}>

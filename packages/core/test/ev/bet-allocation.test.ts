@@ -3,6 +3,7 @@ import {
   allocateBets,
   CONDITIONAL_BERNOULLI_MODEL,
   DEFAULT_BET_ALLOCATION_CONFIG,
+  resolveEffectivePerRaceCap,
   type AllocationHorse,
   type BetAllocationConfig,
   type PlaceJointModel,
@@ -34,752 +35,240 @@ function stubModel(distribution: readonly PlaceOutcome[]): PlaceJointModel {
   };
 }
 
-describe("allocateBets(馬券配分の最適化)", () => {
-  describe("Step0: 実効予算とbetUnit丸め", () => {
-    it("effectiveBudgetはbudgetをbetUnitの倍数に切り捨てた値になること", () => {
+/** 素の設定を組み立てる補助関数(DEFAULT_BET_ALLOCATION_CONFIGへの一部上書き)。 */
+function config(overrides: Partial<BetAllocationConfig>): BetAllocationConfig {
+  return { ...DEFAULT_BET_ALLOCATION_CONFIG, ...overrides };
+}
+
+describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
+  describe("Step0: resolvedBankroll/effectivePerRaceCapの解決", () => {
+    it("effectivePerRaceCapはperRaceCapをbetUnitの倍数に切り捨てた値になること", () => {
       const horses = [candidate(1, 0.5, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 2550 });
-      expect(result.effectiveBudget).toBe(2500);
-      expect(result.budgetInput).toBe(2550);
-    });
-  });
-
-  describe("受け入れ条件1: 配分額はbetUnitの倍数、総額は上限内", () => {
-    it("配分額はすべてbetUnitの倍数であること", () => {
-      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), nonCandidate(3, 0.1)];
-      const result = allocateBets(horses, 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      for (const a of result.allocations) {
-        expect(a.stake % DEFAULT_BET_ALLOCATION_CONFIG.betUnit).toBe(0);
-      }
-    });
-
-    it("totalStake <= kellyFraction * effectiveBudget <= effectiveBudget が無条件に成立すること(λ>1・NaN・負値・betUnit異常値を含む)", () => {
-      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
-      const configs: BetAllocationConfig[] = [
-        { budget: 10000, kellyFraction: 1, betUnit: 100, greedySteps: 1000 },
-        { budget: 10000, kellyFraction: 0.5, betUnit: 100, greedySteps: 1000 },
-        { budget: 12345, kellyFraction: 0.3, betUnit: 100, greedySteps: 1000 },
-        // λ>1(範囲外)・NaN・負値。resolveKellyFractionで既定値へフォールバックされた後の
-        // result.kellyFraction(実際に使われた値)で不等式を検証する(config.kellyFractionの
-        // 生値ではない。これらが無防御だと予算超過・NaN混入が起きることの回帰テスト)。
-        { budget: 10000, kellyFraction: 1.5, betUnit: 100, greedySteps: 1000 },
-        { budget: 10000, kellyFraction: Number.NaN, betUnit: 100, greedySteps: 1000 },
-        { budget: 10000, kellyFraction: Number.POSITIVE_INFINITY, betUnit: 100, greedySteps: 1000 },
-        { budget: 10000, kellyFraction: -0.5, betUnit: 100, greedySteps: 1000 },
-        // betUnitの異常値(0/NaN/Infinity/負値)。無防御だと budget/betUnit が
-        // Infinity/NaN になり effectiveBudget・totalStake に NaN が伝播する回帰テスト。
-        { budget: 10000, kellyFraction: 0.5, betUnit: 0, greedySteps: 1000 },
-        { budget: 10000, kellyFraction: 0.5, betUnit: Number.NaN, greedySteps: 1000 },
-        { budget: 10000, kellyFraction: 0.5, betUnit: Number.POSITIVE_INFINITY, greedySteps: 1000 },
-        { budget: 10000, kellyFraction: 0.5, betUnit: -100, greedySteps: 1000 },
-      ];
-      for (const config of configs) {
-        const result = allocateBets(horses, 3, config);
-        // effectiveBudget/totalStakeは常に有限(betUnit異常値でNaN/Infinityが伝播しないこと)。
-        expect(Number.isFinite(result.effectiveBudget)).toBe(true);
-        expect(Number.isFinite(result.totalStake)).toBe(true);
-        // 採用された(サニタイズ後の)λは常に[0,1]に収まる。
-        expect(result.kellyFraction).toBeGreaterThanOrEqual(0);
-        expect(result.kellyFraction).toBeLessThanOrEqual(1);
-        expect(result.totalStake).toBeLessThanOrEqual(
-          result.kellyFraction * result.effectiveBudget + 1e-9,
-        );
-        expect(result.kellyFraction * result.effectiveBudget).toBeLessThanOrEqual(
-          result.effectiveBudget + 1e-9,
-        );
-      }
-    });
-  });
-
-  describe("受け入れ条件2: EVプラス0頭・エッジ不足での見送り", () => {
-    it("EVプラス0頭ならisSkip=trueで見送り理由が付くこと", () => {
-      const horses = [nonCandidate(1, 0.3, 2), nonCandidate(2, 0.2, 3)];
-      const result = allocateBets(horses, 2, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe("EVプラスの馬がいないため見送りです");
-      expect(result.totalStake).toBe(0);
-    });
-  });
-
-  describe("受け入れ条件3・見送りの5分類とその優先順位", () => {
-    it("① budget===0(未設定)は「未設定」の理由になること(候補がいても)", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 0 });
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe("予算が未設定のため配分を提案していません");
-    });
-
-    it("budgetが負値のときも①(未設定扱い)に落ちること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: -100 });
-      expect(result.skipReason).toBe("予算が未設定のため配分を提案していません");
-    });
-
-    it("budgetがNaNのときも①(未設定扱い)に落ちること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, {
-        ...DEFAULT_BET_ALLOCATION_CONFIG,
-        budget: Number.NaN,
-      });
-      expect(result.skipReason).toBe("予算が未設定のため配分を提案していません");
-    });
-
-    it("budgetがInfinityのときも①(未設定扱い)に落ちること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, {
-        ...DEFAULT_BET_ALLOCATION_CONFIG,
-        budget: Number.POSITIVE_INFINITY,
-      });
-      expect(result.skipReason).toBe("予算が未設定のため配分を提案していません");
-    });
-
-    it("② 0<budget<betUnit(100円未満)は「100円未満」の理由になること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 50 });
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe("予算が100円未満のため配分できません");
-    });
-
-    it("effectiveBudget<100が常に見送りになること(受け入れ条件3)", () => {
-      for (const budget of [1, 50, 99]) {
-        const horses = [candidate(1, 0.6, 3)];
-        const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget });
-        expect(result.isSkip).toBe(true);
-        expect(result.effectiveBudget).toBeLessThan(100);
-      }
-    });
-
-    it("優先順位: budget=50かつEVプラス0頭 → ②(予算不足)が返る(③候補0頭ではない)", () => {
-      const horses = [nonCandidate(1, 0.3, 2)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 50 });
-      expect(result.skipReason).toBe("予算が100円未満のため配分できません");
-    });
-
-    it("優先順位: budget=0かつEVプラス0頭 → ①(未設定)が返る", () => {
-      const horses = [nonCandidate(1, 0.3, 2)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 0 });
-      expect(result.skipReason).toBe("予算が未設定のため配分を提案していません");
-    });
-
-    it("③ 候補0頭(予算は十分)は「EVプラスの馬がいない」の理由になること", () => {
-      const horses = [nonCandidate(1, 0.3, 2)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.skipReason).toBe("EVプラスの馬がいないため見送りです");
-    });
-
-    it("④ 連続最適解が全て0(妙味が極小)は専用理由になること", () => {
-      // EVがほぼ1(閾値ちょうど超え程度)の候補で、連続最適比率が実質0になるケースを
-      // スタブモデルで作る(オッズがほぼ1に近い低倍率で複勝人数条件が的中確率をほぼ確定させる)。
-      const horses: AllocationHorse[] = [
-        { umaban: 1, placeProb: 0.5, placeOddsMin: 1.0000001, ev: 1.00000005, isPositive: true },
-      ];
-      const model = stubModel([
-        { placed: [], probability: 0.5 },
-        { placed: [1], probability: 0.5 },
-      ]);
       const result = allocateBets(
         horses,
         1,
-        { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 },
-        model,
+        config({ bankroll: 100000, perRaceCap: 2550 }),
       );
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe(
-        "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
-      );
+      expect(result.effectivePerRaceCap).toBe(2500);
+      expect(result.perRaceCapInput).toBe(2550);
     });
 
-    it("⑤ 連続最適解は正だが100円単位への丸めで全て0になる場合は専用理由になること", () => {
-      // 予算100円・betUnit100で、連続最適比率(x*≈0.5・実測)が小さいλで縮小されると
-      // 100円未満に丸められて全体が0になるケース(候補馬2頭・対称でEVプラス)。
-      const horses = [candidate(1, 0.5, 2.2), candidate(2, 0.5, 2.2)];
-      const result = allocateBets(horses, 1, {
-        budget: 100,
-        kellyFraction: 0.05,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe(
-        "妙味に対して予算が小さく、100円単位で配分できませんでした",
+    it("resolvedBankrollは正の有限bankrollをそのまま(切り捨てない)採用すること", () => {
+      const horses = [candidate(1, 0.5, 3)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 12345, perRaceCap: 100000 }),
       );
-      // 連続最適解自体は正であること(④ではなく⑤に分類される根拠)。
-      expect(result.allocations.some((a) => a.kellyFraction > 0)).toBe(true);
+      expect(result.resolvedBankroll).toBe(12345);
+      expect(result.bankrollInput).toBe(12345);
     });
   });
 
-  describe("受け入れ条件4: 予算100円は1点配分または見送り", () => {
-    it("予算100円なら1点のみ配分されるか見送りのいずれかであること", () => {
-      const horses = [candidate(1, 0.6, 3), candidate(2, 0.5, 2.5)];
-      const result = allocateBets(horses, 2, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 100 });
-      expect(result.betCount).toBeLessThanOrEqual(1);
-      expect(result.totalStake).toBeLessThanOrEqual(100);
+  describe("resolveEffectivePerRaceCap(公開関数・SettingsViewのライブプレビューと共有)", () => {
+    it("正の値はbetUnitの倍数に切り捨てる", () => {
+      expect(resolveEffectivePerRaceCap(2550, 100)).toBe(2500);
+      expect(resolveEffectivePerRaceCap(150.7, 100)).toBe(100);
+      expect(resolveEffectivePerRaceCap(100, 100)).toBe(100);
     });
 
-    it("budget=100はeffectiveBudget=100(betUnit以上)であり②(予算不足)ではなく⑤(丸めでゼロ)になること", () => {
-      // boss訂正②の境界確認: budget===betUnit(100)は「0<effectiveBudget<betUnit」に該当しない。
-      // 候補が1頭のみで妙味が小さい設定のため見送りにはなり(isSkipを無条件にassertする)、
-      // その理由は②ではなく⑤(丸めで全て0)であることを積極的に確認する(否定形assertは弱いため
-      // 使わない。isSkip===falseに将来変わってもテストが素通りしないよう、isSkipも必ず検証する)。
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, {
-        budget: 100,
-        kellyFraction: 0.5,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(result.effectiveBudget).toBe(100);
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe(
-        "妙味に対して予算が小さく、100円単位で配分できませんでした",
+    it("負値・0・非有限は0(floor(-50/100)*100=-100のような負のcapを作らない)", () => {
+      expect(resolveEffectivePerRaceCap(-50, 100)).toBe(0);
+      expect(resolveEffectivePerRaceCap(0, 100)).toBe(0);
+      expect(resolveEffectivePerRaceCap(Number.NaN, 100)).toBe(0);
+      expect(resolveEffectivePerRaceCap(Number.NEGATIVE_INFINITY, 100)).toBe(0);
+      expect(resolveEffectivePerRaceCap(Number.POSITIVE_INFINITY, 100)).toBe(0);
+    });
+
+    it("betUnitが異常値でも既定100へ内部フォールバックし、Infinity/NaNを生まないこと", () => {
+      expect(resolveEffectivePerRaceCap(2550, 0)).toBe(2500);
+      expect(resolveEffectivePerRaceCap(2550, Number.NaN)).toBe(2500);
+      expect(resolveEffectivePerRaceCap(2550, -100)).toBe(2500);
+    });
+
+    it("allocateBets内部もこの関数と同じ結果になること(コピー実装が無いことの間接確認)", () => {
+      const horses = [candidate(1, 0.5, 3)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 100000, perRaceCap: 2599 }),
       );
-    });
-
-    it("budget=101/150はいずれもeffectiveBudget=100に切り捨てられ、②ではなく⑤になること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      for (const budget of [101, 150]) {
-        const result = allocateBets(horses, 1, {
-          budget,
-          kellyFraction: 0.5,
-          betUnit: 100,
-          greedySteps: 1000,
-        });
-        expect(result.effectiveBudget).toBe(100);
-        expect(result.isSkip).toBe(true);
-        expect(result.skipReason).toBe(
-          "妙味に対して予算が小さく、100円単位で配分できませんでした",
-        );
-      }
+      expect(result.effectivePerRaceCap).toBe(resolveEffectivePerRaceCap(2599, 100));
     });
   });
 
-  describe("頭数の境界(統合レベル。クラッシュしないこと)", () => {
-    it("N=0(出走馬なし)でもクラッシュせず、候補0頭の見送りになること", () => {
-      const result = allocateBets([], 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.allocations).toEqual([]);
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe("EVプラスの馬がいないため見送りです");
-      expect(result.diagnostics.candidateCount).toBe(0);
-      expect(result.diagnostics.placeProbSum).toBe(0);
-    });
-
-    it("N=4(複勝人数3に対して頭数が少ない境界)でもクラッシュせず正しく配分されること", () => {
-      const horses = [
-        candidate(1, 0.5, 2.5),
-        candidate(2, 0.4, 2.5),
-        candidate(3, 0.3, 2.2),
-        candidate(4, 0.2, 2.2),
-      ];
-      const result = allocateBets(horses, 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.allocations).toHaveLength(4);
-      expect(result.allocations.map((a) => a.umaban)).toEqual([1, 2, 3, 4]);
+  describe("受け入れ条件1(無条件): totalStake <= effectivePerRaceCap", () => {
+    it("配分額はすべてbetUnitの倍数であること", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), nonCandidate(3, 0.1)];
+      const result = allocateBets(horses, 3, config({ bankroll: 1000000, perRaceCap: 10000 }));
       for (const a of result.allocations) {
         expect(a.stake % DEFAULT_BET_ALLOCATION_CONFIG.betUnit).toBe(0);
       }
     });
+
+    it("totalStake <= effectivePerRaceCap が無条件に成立すること(λ>1・NaN・負値・betUnit異常値・cap極小を含む)", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const configs: BetAllocationConfig[] = [
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: 1, betUnit: 100, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: 0.5, betUnit: 100, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 12345, kellyFraction: 0.3, betUnit: 100, greedySteps: 1000 },
+        // λ>1(範囲外)・NaN・負値。resolveKellyFractionで既定値へフォールバックされた後の
+        // result.kellyFraction(実際に使われた値)を使う点はC-1と同じ流儀。
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: 1.5, betUnit: 100, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: Number.NaN, betUnit: 100, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: Number.POSITIVE_INFINITY, betUnit: 100, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: -0.5, betUnit: 100, greedySteps: 1000 },
+        // betUnitの異常値。
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: 0.5, betUnit: 0, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: 0.5, betUnit: Number.NaN, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: 0.5, betUnit: Number.POSITIVE_INFINITY, greedySteps: 1000 },
+        { bankroll: 1000000, perRaceCap: 10000, kellyFraction: 0.5, betUnit: -100, greedySteps: 1000 },
+        // capが極小(キャップが強く効く境界)。
+        { bankroll: 1000000, perRaceCap: 100, kellyFraction: 1, betUnit: 100, greedySteps: 1000 },
+      ];
+      for (const c of configs) {
+        const result = allocateBets(horses, 3, c);
+        expect(Number.isFinite(result.effectivePerRaceCap)).toBe(true);
+        expect(Number.isFinite(result.totalStake)).toBe(true);
+        expect(result.kellyFraction).toBeGreaterThanOrEqual(0);
+        expect(result.kellyFraction).toBeLessThanOrEqual(1);
+        // 無条件不変条件: totalStakeは常にeffectivePerRaceCap以下(cap非拘束・拘束いずれでも)。
+        expect(result.totalStake).toBeLessThanOrEqual(result.effectivePerRaceCap);
+      }
+    });
   });
 
-  describe("受け入れ条件5: 予算スケール不変性(継続的最適比率は予算に依存しない・厳密一致)", () => {
-    it("予算を1,000/10,000/100,000と変えてもkellyFraction(連続最適比率)は完全一致すること", () => {
+  describe("受け入れ条件2(条件付き): exceedsKellyTarget===falseのときのみ totalStake <= kellyTargetStake", () => {
+    it("cap非拘束・最低額非適用の通常配分では exceedsKellyTarget===false かつ totalStake <= kellyTargetStake", () => {
       const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
-      const budgets = [1000, 10000, 100000];
-      const results = budgets.map((budget) =>
-        allocateBets(horses, 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget }),
+      const result = allocateBets(horses, 3, config({ bankroll: 1000000, perRaceCap: 1000000, kellyFraction: 0.5 }));
+      expect(result.exceedsKellyTarget).toBe(false);
+      expect(result.totalStake).toBeLessThanOrEqual(result.kellyTargetStake + 1e-9);
+    });
+
+    it("最低額適用でexceedsKellyTarget===trueになったケースは、この条件付き不変条件の対象外である(受け入れ条件2はexceedsKellyTarget===falseの場合のみを主張する)", () => {
+      // 単一候補・kellyTargetStakeが100円未満になる設定(後続の最低額4ケース(a)と同型)。
+      const horses = [candidate(1, 0.5, 2.2)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 }),
       );
-      for (let i = 1; i < results.length; i++) {
-        for (let j = 0; j < results[0]!.allocations.length; j++) {
-          expect(results[i]!.allocations[j]!.kellyFraction).toBe(
-            results[0]!.allocations[j]!.kellyFraction,
-          );
+      // 前提: このケースでは実際にexceedsKellyTarget===trueになる(でなければ本テストの意義がない)。
+      expect(result.exceedsKellyTarget).toBe(true);
+      // 条件付き不変条件はexceedsKellyTarget===falseのときのみ主張するものであり、
+      // trueのケースでtotalStake<=kellyTargetStakeを要求しない(むしろ超過するのが正しい)。
+      expect(result.totalStake).toBeGreaterThan(result.kellyTargetStake);
+    });
+  });
+
+  describe("受け入れ条件3(構造的): exceedsKellyTarget===true ⟹ minimumStakeApplied===true(逆は成り立たない)", () => {
+    it("exceedsKellyTarget===trueのケースは必ずminimumStakeApplied===trueであること", () => {
+      const horses = [candidate(1, 0.5, 2.2)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 }),
+      );
+      expect(result.exceedsKellyTarget).toBe(true);
+      expect(result.minimumStakeApplied).toBe(true);
+    });
+
+    it("逆は成り立たない: minimumStakeApplied===trueだがexceedsKellyTarget===falseのケースが存在すること", () => {
+      // ケース(b)相当: 2頭対称でkellyTargetStakeが150(100円未満に丸められるが150>100)。
+      const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5)];
+      // bankroll/kellyFractionを調整してkellyTargetStake≈150程度になるよう作る(実測で微調整)。
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 300, perRaceCap: 100000, kellyFraction: 0.5 }),
+      );
+      expect(result.minimumStakeApplied).toBe(true);
+      expect(result.exceedsKellyTarget).toBe(false);
+    });
+  });
+
+  describe("受け入れ条件4: λΣx*bankroll=0のゼロ除算ガード(NaN/Infinityが一切生じないこと)", () => {
+    it("bankroll=0(kellyTargetStake=0)でNaN/Infinityが生じず、①へ分類されること", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 10000 }));
+      expect(Number.isFinite(result.kellyTargetStake)).toBe(true);
+      expect(Number.isNaN(result.totalStake)).toBe(false);
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe("総資金が未設定のため配分を提案していません");
+      expect(result.exceedsKellyTarget).toBe(false);
+      expect(result.advisory).toBeNull();
+    });
+
+    it("候補0頭(Σx*=0)でkellyTargetStake=0となりNaN/Infinityが生じないこと", () => {
+      const horses = [nonCandidate(1, 0.3, 2)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.kellyTargetStake).toBe(0);
+      expect(Number.isFinite(result.plannedStake)).toBe(true);
+      expect(result.capApplied).toBe(false);
+      expect(Number.isNaN(result.totalStake)).toBe(false);
+    });
+
+    it("kellyFraction=0(λ=0)でkellyTargetStake=0となりNaN/Infinityが生じないこと", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0 }));
+      expect(result.kellyTargetStake).toBe(0);
+      expect(result.totalStake).toBe(0);
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe("ケリー係数が0のため配分しません");
+    });
+  });
+
+  describe("受け入れ条件5: キャップ非拘束時はC-1と同一配分(perRaceCapを十分大きくした回帰)", () => {
+    it("perRaceCapを極端に大きくすると、cap無しのC-1と同じ配分ロジック(丸めのみ)になること", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const result = allocateBets(
+        horses,
+        3,
+        config({ bankroll: 10000, perRaceCap: 100000000, kellyFraction: 1 }),
+      );
+      // capが十分大きいためcapApplied===false(非拘束)。
+      expect(result.capApplied).toBe(false);
+      // 非拘束時は各馬の stake が「λ×x*_i×resolvedBankroll をbetUnitで切り捨て」に一致する
+      // (C-1の rawStake = floor(scaledFraction * effectiveBudget / betUnit) * betUnit と同型)。
+      for (const a of result.allocations.filter((x) => x.excludedReason === null)) {
+        const expected =
+          Math.floor((a.scaledFraction * result.resolvedBankroll) / DEFAULT_BET_ALLOCATION_CONFIG.betUnit) *
+          DEFAULT_BET_ALLOCATION_CONFIG.betUnit;
+        expect(a.stake).toBe(expected < DEFAULT_BET_ALLOCATION_CONFIG.betUnit ? 0 : expected);
+      }
+    });
+  });
+
+  describe("受け入れ条件6: キャップ拘束時は比例縮小(各馬のstake比がx*比と一致)", () => {
+    it("2頭配分でcapを絞ると、両馬のstakeが概ね同じ比率で縮小されること", () => {
+      const horses = [candidate(4, 0.3, 4), candidate(7, 0.15, 8)];
+      const wide = allocateBets(horses, 3, config({ bankroll: 1000000, perRaceCap: 1000000, kellyFraction: 1 }));
+      const narrow = allocateBets(horses, 3, config({ bankroll: 1000000, perRaceCap: 300, kellyFraction: 1 }));
+      expect(narrow.capApplied).toBe(true);
+      expect(narrow.totalStake).toBeLessThanOrEqual(300);
+      // 両ケースで2頭とも正のcontinuousFractionを持つこと(比較の前提)。
+      const wideStakeSum = wide.allocations.reduce((acc, a) => acc + a.stake, 0);
+      expect(wideStakeSum).toBeGreaterThan(300);
+      // narrowの各馬stakeは、比例縮小された連続配分(s·λ·x*_i·bankroll)をbetUnit未満で
+      // 切り捨てた値に一致する(全探索ではなく計算式そのものを直接検証する)。
+      const kellyTargetStake = narrow.kellyTargetStake;
+      const s = kellyTargetStake > 0 ? Math.min(1, narrow.effectivePerRaceCap / kellyTargetStake) : 0;
+      for (const a of narrow.allocations.filter((x) => x.excludedReason === null)) {
+        const expected =
+          Math.floor((s * a.scaledFraction * narrow.resolvedBankroll) / DEFAULT_BET_ALLOCATION_CONFIG.betUnit) *
+          DEFAULT_BET_ALLOCATION_CONFIG.betUnit;
+        const expectedFloored = expected < DEFAULT_BET_ALLOCATION_CONFIG.betUnit ? 0 : expected;
+        // 最低額ロジックが介入していなければ一致するはず(このケースはtotalStake>0なので最低額は不介入)。
+        if (!narrow.minimumStakeApplied) {
+          expect(a.stake).toBe(expectedFloored);
         }
       }
     });
   });
 
-  describe("受け入れ条件6: bet-allocationは独立性を一切仮定しない(構造的検証)", () => {
-    it("スタブモデルで強い相関(片方が当たれば必ずもう片方も当たる)を与えると、独立仮定の結果とは異なる最適化になること", () => {
-      const horses = [candidate(1, 0.4, 3), candidate(2, 0.4, 3)];
-      // 完全相関: 両方当たるか、両方外れるかのいずれか(独立なら有り得ない同時分布)。
-      const perfectlyCorrelated = stubModel([
-        { placed: [], probability: 0.6 },
-        { placed: [1, 2], probability: 0.4 },
-      ]);
-      // 完全排反: 片方が当たれば必ずもう片方は外れる。
-      const mutuallyExclusive = stubModel([
-        { placed: [], probability: 0.2 },
-        { placed: [1], probability: 0.4 },
-        { placed: [2], probability: 0.4 },
-      ]);
-      const correlatedResult = allocateBets(
-        horses,
-        2,
-        { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 },
-        perfectlyCorrelated,
-      );
-      const exclusiveResult = allocateBets(
-        horses,
-        2,
-        { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 },
-        mutuallyExclusive,
-      );
-      // 同一の周辺確率(0.4)・同一オッズでも、同時分布が異なれば連続最適比率も異なるはず
-      // (独立性を仮定していれば、同時分布モデルを無視して同じ結果になってしまう)。
-      expect(correlatedResult.allocations[0]!.kellyFraction).not.toBeCloseTo(
-        exclusiveResult.allocations[0]!.kellyFraction,
-        6,
-      );
-    });
-  });
-
-  describe("受け入れ条件7: 入力のplaceProbを書き換えないこと", () => {
-    it("AllocationHorseのplaceProbが変更されず、結果にそのまま反映されること", () => {
-      const horses = [candidate(1, 0.55, 2.5), candidate(2, 0.35, 3)];
-      const original = horses.map((h) => ({ ...h }));
-      allocateBets(horses, 2, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(horses).toEqual(original);
-    });
-
-    it("結果のHorseAllocation.placeProbが入力と一致すること", () => {
-      const horses = [candidate(1, 0.55, 2.5), candidate(2, 0.35, 3)];
-      const result = allocateBets(horses, 2, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.allocations.find((a) => a.umaban === 1)!.placeProb).toBe(0.55);
-      expect(result.allocations.find((a) => a.umaban === 2)!.placeProb).toBe(0.35);
-    });
-  });
-
-  describe("受け入れ条件8: placeCountを引数で受け、3をハードコードしないこと", () => {
-    it("placeCountを2にすると、複勝人数3のときと異なる同時分布(=異なる最適配分)になること", () => {
-      const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5), candidate(3, 0.5, 2.5)];
-      const resultK2 = allocateBets(horses, 2, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      const resultK3 = allocateBets(horses, 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(resultK2.allocations[0]!.kellyFraction).not.toBeCloseTo(
-        resultK3.allocations[0]!.kellyFraction,
-        6,
-      );
-    });
-
-    it("placeCount=NaNでもNaNが一切露出しないこと(要修正・新規の回帰テスト)", () => {
-      // place-joint-model.tsのk導出でNaNがMath.maxのクランプをすり抜け、combos=[]による
-      // 経路逸脱でdiagnostics.placeProbSumTarget/placeProbSumDeviationにもNaNが漏れていた
-      // 回帰バグの再発防止。資金安全性(予算超過)には影響しないが、判定していないことを
-      // 判定結果として報告してはならない欠陥クラス。
-      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
-      const result = allocateBets(horses, Number.NaN, {
-        budget: 10000,
-        kellyFraction: 1,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(Number.isNaN(result.totalStake)).toBe(false);
-      expect(Number.isNaN(result.diagnostics.placeProbSumTarget)).toBe(false);
-      expect(Number.isNaN(result.diagnostics.placeProbSumDeviation)).toBe(false);
-      expect(Number.isNaN(result.diagnostics.marginalDeviationMax)).toBe(false);
-      for (const a of result.allocations) {
-        expect(Number.isNaN(a.stake)).toBe(false);
-        expect(Number.isNaN(a.kellyFraction)).toBe(false);
-        expect(Number.isNaN(a.scaledFraction)).toBe(false);
-      }
-      // 負値(既存のMath.maxクランプ)と同じ一貫した結果(k=0扱い)として④に分類される。
-      // 新しい見送り理由は増やさない(スコープを膨らませない)。
-      expect(result.isSkip).toBe(true);
-      expect(result.skipReason).toBe(
-        "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
-      );
-    });
-  });
-
-  describe("受け入れ条件9: 候補外の馬も欠落させないこと", () => {
-    it("isPositive=false(オッズはあるがEVマイナス)の馬は「EVがプラスではない」の理由になること", () => {
-      const horses = [candidate(1, 0.6, 3), nonCandidate(2, 0.1, 2)];
-      const result = allocateBets(horses, 2, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      const excluded = result.allocations.find((a) => a.umaban === 2)!;
-      expect(excluded.stake).toBe(0);
-      // オッズはある(2)がEVマイナス(0.1×2=0.2)。「未判定(オッズ未確定)」ではなく
-      // 「判定した結果マイナス」であることを文言で厳密に確認する(重大バグの再発防止)。
-      expect(excluded.excludedReason).toBe("EVがプラスではないため対象外");
-    });
-
-    it("placeOddsMin=null(オッズ未確定)の馬は「オッズ未確定」の理由になること(EVマイナスと誤表示しない)", () => {
-      const horses: AllocationHorse[] = [
-        candidate(1, 0.6, 3),
-        { umaban: 2, placeProb: 0.5, placeOddsMin: null, ev: null, isPositive: false },
-      ];
-      const result = allocateBets(horses, 2, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      const excluded = result.allocations.find((a) => a.umaban === 2)!;
-      expect(excluded.stake).toBe(0);
-      // placeOddsMin===null の馬は isPositive===false にもなるが、これは「判定未了(オッズが
-      // まだ確定していない)」であり「EVがプラスではない(判定した結果マイナス)」ではない。
-      // 優先判定を誤ると「EVがプラスではないため対象外」に誤ラベルされる(重大バグの再発防止)。
-      expect(excluded.excludedReason).toBe("複勝オッズ下限が未確定のため対象外");
-    });
-
-    it("候補馬のexcludedReasonはnullであること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.allocations[0]!.excludedReason).toBeNull();
-    });
-
-    it("全出走馬が馬番昇順で結果に含まれること", () => {
-      const horses = [candidate(3, 0.6, 3), nonCandidate(1, 0.1), candidate(2, 0.5, 2.5)];
-      const result = allocateBets(horses, 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.allocations.map((a) => a.umaban)).toEqual([1, 2, 3]);
-    });
-  });
-
-  describe("受け入れ条件10: modelId/modelApproximateが結果に載ること", () => {
-    it("既定モデル(条件付きベルヌーイ)のid/approximateが反映されること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.modelId).toBe(CONDITIONAL_BERNOULLI_MODEL.id);
-      expect(result.modelApproximate).toBe(true);
-    });
-
-    it("差し替えたモデルのid/approximateが反映されること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const model: PlaceJointModel = {
-        id: "exact-future-model",
-        approximate: false,
-        buildDistribution: () => [
-          { placed: [], probability: 0.4 },
-          { placed: [1], probability: 0.6 },
-        ],
-      };
-      const result = allocateBets(
-        horses,
-        1,
-        { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 },
-        model,
-      );
-      expect(result.modelId).toBe("exact-future-model");
-      expect(result.modelApproximate).toBe(false);
-    });
-  });
-
-  describe("受け入れ条件11: 診断値3種(実質5フィールド)が結果に載ること", () => {
-    it("diagnosticsの各フィールドが算出されること", () => {
-      const horses = [candidate(1, 0.6, 3), candidate(2, 0.3, 4), nonCandidate(3, 0.1)];
-      const result = allocateBets(horses, 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.diagnostics.placeProbSum).toBeCloseTo(1.0, 10);
-      expect(result.diagnostics.placeProbSumTarget).toBe(3);
-      expect(result.diagnostics.placeProbSumDeviation).toBeCloseTo(1.0 - 3, 10);
-      expect(result.diagnostics.marginalDeviationMax).toBeGreaterThanOrEqual(0);
-      expect(result.diagnostics.candidateCount).toBe(2);
-      expect(result.diagnostics.excludedCount).toBe(1);
-    });
-
-    it("placeProbSumDeviationは符号付き(合計が目標を上回るとき正)であること", () => {
-      const horses = [candidate(1, 0.9, 3), candidate(2, 0.9, 2.5), candidate(3, 0.9, 2.2)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      // 合計2.7、目標(placeCount)1 → 正の乖離。
-      expect(result.diagnostics.placeProbSumDeviation).toBeGreaterThan(0);
-    });
-
-    it("見送り(isSkip)のときも診断値が算出されること(Step0/1の早期リターンでも省略しない)", () => {
-      const horses = [nonCandidate(1, 0.3, 2)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 0 });
-      expect(result.isSkip).toBe(true);
-      expect(result.diagnostics.placeProbSum).toBeCloseTo(0.3, 10);
-      expect(result.diagnostics.candidateCount).toBe(0);
-      expect(result.diagnostics.excludedCount).toBe(1);
-    });
-
-    it("見送り(budget不足)のときもkellyFraction(連続最適比率)が算出されること(Step4は早期リターンで省略しない)", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 50 });
-      expect(result.isSkip).toBe(true);
-      expect(result.allocations[0]!.kellyFraction).toBeGreaterThan(0);
-    });
-  });
-
-  describe("受け入れ条件12: exportsの2サブパス(package.json)", () => {
-    it("bet-allocation.tsからplace-joint-model.tsの主要な型・既定モデルがre-exportされていること", () => {
-      expect(CONDITIONAL_BERNOULLI_MODEL).toBeDefined();
-      expect(CONDITIONAL_BERNOULLI_MODEL.id).toBe("conditional-bernoulli");
-    });
-  });
-
-  describe("λ(ケリー係数)の効果", () => {
-    it("λ=1とλ=0.5でstakeが概ね半分になること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const resultFull = allocateBets(horses, 1, {
-        budget: 100000,
-        kellyFraction: 1,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      const resultHalf = allocateBets(horses, 1, {
-        budget: 100000,
-        kellyFraction: 0.5,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      const ratio = resultHalf.totalStake / resultFull.totalStake;
-      expect(ratio).toBeGreaterThan(0.4);
-      expect(ratio).toBeLessThan(0.6);
-    });
-
-    it("λ=0で全額0円になること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, {
-        budget: 100000,
-        kellyFraction: 0,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(result.totalStake).toBe(0);
-      expect(result.isSkip).toBe(true);
-    });
-  });
-
-  describe("λ(ケリー係数)の防御(重大バグの回帰テスト: budgetと同じ内部一貫性で防御する)", () => {
-    const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
-
-    it("λ=1.5(範囲外)は既定値0.5へフォールボックされ、予算超過が起きないこと", () => {
-      const result = allocateBets(horses, 3, {
-        budget: 10000,
-        kellyFraction: 1.5,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(result.kellyFraction).toBe(DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction);
-      expect(result.totalStake).toBeLessThanOrEqual(result.effectiveBudget);
-    });
-
-    it("λ=NaNは既定値0.5へフォールバックされ、stakeにNaNが混入しないこと", () => {
-      const result = allocateBets(horses, 3, {
-        budget: 10000,
-        kellyFraction: Number.NaN,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(result.kellyFraction).toBe(DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction);
-      expect(Number.isNaN(result.totalStake)).toBe(false);
-      for (const a of result.allocations) {
-        expect(Number.isNaN(a.stake)).toBe(false);
-      }
-    });
-
-    it("λ=Infinityは既定値0.5へフォールバックされること", () => {
-      const result = allocateBets(horses, 3, {
-        budget: 10000,
-        kellyFraction: Number.POSITIVE_INFINITY,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(result.kellyFraction).toBe(DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction);
-      expect(Number.isFinite(result.totalStake)).toBe(true);
-    });
-
-    it("λ=-0.5(負値)は既定値0.5へフォールバックされ、誤った見送り理由にならないこと", () => {
-      const resultNegative = allocateBets(horses, 3, {
-        budget: 10000,
-        kellyFraction: -0.5,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      const resultDefault = allocateBets(horses, 3, {
-        budget: 10000,
-        kellyFraction: DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      expect(resultNegative.kellyFraction).toBe(DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction);
-      // 既定値λで計算した結果と完全に一致する(フォールバックが実際に効いていることの確認)。
-      expect(resultNegative.totalStake).toBe(resultDefault.totalStake);
-      expect(resultNegative.isSkip).toBe(resultDefault.isSkip);
-      expect(resultNegative.skipReason).toBe(resultDefault.skipReason);
-    });
-  });
-
-  describe("betUnit/greedySteps の防御(重大バグ・水平展開の回帰テスト)", () => {
-    const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
-    const validConfig: BetAllocationConfig = {
-      budget: 10000,
-      kellyFraction: 1,
-      betUnit: 100,
-      greedySteps: 1000,
-    };
-
-    describe("betUnitの異常値", () => {
-      const cases: Array<{ name: string; betUnit: number }> = [
-        { name: "betUnit=0", betUnit: 0 },
-        { name: "betUnit=NaN", betUnit: Number.NaN },
-        { name: "betUnit=Infinity", betUnit: Number.POSITIVE_INFINITY },
-        { name: "betUnit=-100(負値)", betUnit: -100 },
-        { name: "betUnit=33.5(非整数)", betUnit: 33.5 },
-      ];
-      for (const c of cases) {
-        it(`${c.name}でもeffectiveBudget/totalStakeが有限であり、既定betUnit(100)相当の結果と一致すること`, () => {
-          const result = allocateBets(horses, 3, { ...validConfig, betUnit: c.betUnit });
-          const expected = allocateBets(horses, 3, validConfig);
-          expect(Number.isFinite(result.effectiveBudget)).toBe(true);
-          expect(Number.isFinite(result.totalStake)).toBe(true);
-          for (const a of result.allocations) {
-            expect(Number.isFinite(a.stake)).toBe(true);
-          }
-          // 既定betUnit(100)へフォールバックされ、既定値を明示指定した結果と完全一致する
-          // (フォールバックが実際に効いていることの確認)。
-          expect(result.effectiveBudget).toBe(expected.effectiveBudget);
-          expect(result.totalStake).toBe(expected.totalStake);
-          expect(result.isSkip).toBe(expected.isSkip);
-          expect(result.skipReason).toBe(expected.skipReason);
-        });
-      }
-    });
-
-    describe("greedyStepsの異常値", () => {
-      const cases: Array<{ name: string; greedySteps: number }> = [
-        { name: "greedySteps=0", greedySteps: 0 },
-        { name: "greedySteps=NaN", greedySteps: Number.NaN },
-        { name: "greedySteps=-5(負値)", greedySteps: -5 },
-        { name: "greedySteps=Infinity", greedySteps: Number.POSITIVE_INFINITY },
-      ];
-      for (const c of cases) {
-        it(`${c.name}でも既定greedySteps(1000)相当の結果になり、誤った見送り理由にならないこと`, () => {
-          const result = allocateBets(horses, 3, { ...validConfig, greedySteps: c.greedySteps });
-          const expected = allocateBets(horses, 3, validConfig);
-          expect(Number.isFinite(result.totalStake)).toBe(true);
-          // greedySteps<=0/NaNだと貪欲ループが0回実行され連続最適比率が全て0のまま返り、
-          // 「妙味が小さい」という誤ったskipReasonになりうる(要修正3と同じ欠陥クラス)。
-          // フォールバック後は既定値(1000)を明示指定した結果と完全一致する。
-          expect(result.totalStake).toBe(expected.totalStake);
-          expect(result.isSkip).toBe(expected.isSkip);
-          expect(result.skipReason).toBe(expected.skipReason);
-        });
-      }
-    });
-  });
-
-  describe("droppedBelowMinimum", () => {
-    it("連続最適比率は正だが丸めで0になった馬はdroppedBelowMinimum=trueになること", () => {
-      const horses = [candidate(1, 0.5, 2.2), candidate(2, 0.5, 2.2)];
-      const result = allocateBets(horses, 1, {
-        budget: 100,
-        kellyFraction: 0.05,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      // 前提(連続最適比率が正であること)を無条件に確認してから検証する(観察4対応)。
-      const positiveCandidates = result.allocations.filter((a) => a.kellyFraction > 0);
-      expect(positiveCandidates.length).toBeGreaterThanOrEqual(1);
-      for (const a of positiveCandidates) {
-        expect(a.droppedBelowMinimum).toBe(true);
-        expect(a.stake).toBe(0);
-      }
-    });
-
-    it("配分された馬はdroppedBelowMinimum=falseであること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      const a = result.allocations[0]!;
-      // 前提(実際に配分されたこと)を無条件に確認してから検証する(観察4対応)。
-      expect(a.stake).toBeGreaterThan(0);
-      expect(a.droppedBelowMinimum).toBe(false);
-    });
-
-    it("budget=0(予算未設定)では丸め判定に到達しておらず、droppedBelowMinimumが常にfalseであること(要修正3)", () => {
-      // 予算未設定はskipReason①「予算が未設定」が正しく説明する状態であり、馬単位の
-      // droppedBelowMinimumが「丸めで落とされた」と矛盾した説明をしてはならない。
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 0 });
-      expect(result.skipReason).toBe("予算が未設定のため配分を提案していません");
-      for (const a of result.allocations) {
-        expect(a.droppedBelowMinimum).toBe(false);
-      }
-    });
-
-    it("budget<betUnit(予算不足)でも丸め判定に到達しておらず、droppedBelowMinimumが常にfalseであること(要修正3)", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 50 });
-      expect(result.skipReason).toBe("予算が100円未満のため配分できません");
-      for (const a of result.allocations) {
-        expect(a.droppedBelowMinimum).toBe(false);
-      }
-    });
-  });
-
-  describe("notDiversified(訂正①: betCount===1のときのみtrueになりうる)", () => {
-    it("1点配分かつ他に正の連続最適比率を持つ候補が2頭以上ならtrueになること", () => {
-      const horses = [candidate(1, 0.7, 3), candidate(2, 0.4, 3), candidate(3, 0.35, 3)];
-      // 予算を絞り、最も妙味の大きい1頭にしか100円単位の配分が届かない状況を作る
-      // (実測: betCount===1になることを確認済み)。
-      const result = allocateBets(horses, 3, { budget: 300, kellyFraction: 0.5, betUnit: 100, greedySteps: 1000 });
-      expect(result.betCount).toBe(1);
-      const positiveCount = result.allocations.filter((a) => a.kellyFraction > 0).length;
-      expect(positiveCount).toBeGreaterThanOrEqual(2);
-      expect(result.notDiversified).toBe(true);
-    });
-
-    it("2点以上配分されるときはnotDiversified=falseであること", () => {
-      // 非退化(placeCount < 頭数)かつ非対称オッズの入力を使う。頭数=複勝人数(k>=n)だと
-      // 「全頭が必ず複勝圏内」という無リスクな退化に陥り、全outcomeで増分が完全同値になって
-      // 貪欲が厳密不等号(increment > bestIncrement)により先頭候補だけに1000ステップ全てを
-      // 集中させてしまう(betCount=1に縮退する。重大2の回帰テスト)。
-      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.5, 2.2), candidate(3, 0.1, 5)];
-      const result = allocateBets(horses, 2, {
-        budget: 100000,
-        kellyFraction: 1,
-        betUnit: 100,
-        greedySteps: 1000,
-      });
-      // 前提(実際に2点以上配分されること)を無条件に確認してから検証する。
-      expect(result.betCount).toBeGreaterThanOrEqual(2);
-      expect(result.notDiversified).toBe(false);
-    });
-
-    it("見送り(betCount=0)のときはnotDiversified=falseであること(訂正①)", () => {
-      const horses = [nonCandidate(1, 0.3, 2)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 0 });
-      expect(result.betCount).toBe(0);
-      expect(result.notDiversified).toBe(false);
-    });
-
-    it("1点配分だが他に正の候補がいない(分散しようがない)場合はfalseであること", () => {
-      const horses = [candidate(1, 0.6, 3)];
-      const result = allocateBets(horses, 1, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000 });
-      expect(result.betCount).toBe(1);
-      expect(result.notDiversified).toBe(false);
-    });
-  });
-
-  describe("剰余の再配分を行わないこと", () => {
-    it("betUnit単位で切り捨てた剰余が他の候補に補填されないこと(合計が必ず切り捨て後の値以下)", () => {
-      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
-      const result = allocateBets(horses, 3, { ...DEFAULT_BET_ALLOCATION_CONFIG, budget: 10000, kellyFraction: 1 });
-      const expectedStakeSum = result.allocations.reduce((acc, a) => acc + a.stake, 0);
-      expect(result.totalStake).toBe(expectedStakeSum);
-      // 各馬の切り捨て前(連続配分×実効予算)との差はbetUnit未満のはず(切り上げ補填していない証拠)。
-      for (const a of result.allocations) {
-        const continuous = a.kellyFraction * result.kellyFraction * result.effectiveBudget;
-        expect(continuous - a.stake).toBeLessThan(DEFAULT_BET_ALLOCATION_CONFIG.betUnit);
-        expect(continuous - a.stake).toBeGreaterThanOrEqual(-1e-6);
-      }
-    });
-  });
-
-  describe("1頭のみのときのケリー解析解との一致(λ=1・丸め前)", () => {
-    it("2頭中1頭のみ候補・対称な同時分布のとき、連続最適比率が(EV-1)/(o-1)に一致すること", () => {
-      // umaban1が候補(placeProb0.5・oddsMin3・EV1.5)、umaban2は非候補で確率0.5(対称)。
-      // 2頭・placeCount1の条件付きベルヌーイでは対称性によりP(候補が複勝)=0.5となり、
-      // 二値ケリー(勝ち確率0.5・倍率3)の解析解と厳密一致する。
-      const horses: AllocationHorse[] = [
-        candidate(1, 0.5, 3),
-        nonCandidate(2, 0.5, null),
-      ];
-      const result = allocateBets(horses, 1, {
-        budget: 10000,
-        kellyFraction: 1,
-        betUnit: 100,
-        greedySteps: 10000,
-      });
-      const analytic = (1.5 - 1) / (3 - 1); // (EV-1)/(o-1) = 0.25
-      const actual = result.allocations.find((a) => a.umaban === 1)!.kellyFraction;
-      expect(actual).toBeCloseTo(analytic, 2);
-    });
-  });
-
-  describe("貪欲配分と全探索の突き合わせ(2頭・少数単位)", () => {
-    it("目的関数値の差が小さい上界に収まること", () => {
+  describe("受け入れ条件7: 比例縮小 vs 貪欲打ち切り(制約付き最適)の差の上界", () => {
+    it("目的関数値の差が小さい上界に収まること(2頭・少数単位・cap非拘束)", () => {
       const candidates = [candidate(1, 0.4, 3), candidate(2, 0.35, 3.2)];
       const model = CONDITIONAL_BERNOULLI_MODEL;
       const placeCount = 1;
@@ -789,11 +278,10 @@ describe("allocateBets(馬券配分の最適化)", () => {
       const result = allocateBets(
         candidates,
         placeCount,
-        { budget: 10000, kellyFraction: 1, betUnit: 1, greedySteps: steps },
+        config({ bankroll: 10000, perRaceCap: 1000000000, kellyFraction: 1, betUnit: 1, greedySteps: steps }),
         model,
       );
 
-      // テスト側で同じ粒度の目的関数を再現し、全探索で最良値を求める。
       const jointHorses = candidates.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
       const distribution = model.buildDistribution(jointHorses, placeCount);
       const odds = [candidates[0]!.placeOddsMin!, candidates[1]!.placeOddsMin!];
@@ -822,12 +310,619 @@ describe("allocateBets(馬券配分の最適化)", () => {
         }
       }
 
-      const greedyX1 = result.allocations.find((a) => a.umaban === 1)!.kellyFraction;
-      const greedyX2 = result.allocations.find((a) => a.umaban === 2)!.kellyFraction;
+      const greedyX1 = result.allocations.find((a) => a.umaban === 1)!.continuousFraction;
+      const greedyX2 = result.allocations.find((a) => a.umaban === 2)!.continuousFraction;
       const greedyF = objective(greedyX1, greedyX2);
       expect(greedyF).not.toBeNull();
-      // 貪欲配分は大域最適の保証がないため、目的関数値の差を上界(粒度に起因する誤差程度)で固定する。
       expect(bestF - greedyF!).toBeLessThan(0.01);
+    });
+  });
+
+  describe("受け入れ条件8・最低額ロジック(4ケース必須)", () => {
+    it("(a) 単一候補でkellyTargetStakeが100円未満 → totalStake=100・exceedsKellyTarget=true・advisory≠null", () => {
+      const horses = [candidate(1, 0.5, 2.2)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 }),
+      );
+      expect(result.kellyTargetStake).toBeGreaterThan(0);
+      expect(result.kellyTargetStake).toBeLessThan(100);
+      expect(result.minimumStakeApplied).toBe(true);
+      expect(result.totalStake).toBe(100);
+      expect(result.exceedsKellyTarget).toBe(true);
+      expect(result.advisory).not.toBeNull();
+    });
+
+    it("(b) 2頭対称(75/75相当)でkellyTargetStake=150程度 → totalStake=100・exceedsKellyTarget=false・advisory=null", () => {
+      const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 300, perRaceCap: 100000, kellyFraction: 0.5 }),
+      );
+      // 前提: 両馬とも丸めで0円になり、最低額ロジックが介入していること。
+      expect(result.minimumStakeApplied).toBe(true);
+      expect(result.totalStake).toBe(100);
+      // kellyTargetStakeが100を上回っていること(このテストの意義の前提)。
+      expect(result.kellyTargetStake).toBeGreaterThan(100);
+      expect(result.exceedsKellyTarget).toBe(false);
+      expect(result.advisory).toBeNull();
+    });
+
+    it("(c) cap=100・kellyTargetStakeが大きく縮小で全馬0円 → totalStake=100=cap・exceedsKellyTarget=false", () => {
+      const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 1000000, perRaceCap: 100, kellyFraction: 1 }),
+      );
+      // 前提: kellyTargetStakeがperRaceCapを大きく上回っていること(強いキャップ)。
+      expect(result.kellyTargetStake).toBeGreaterThan(1000);
+      expect(result.capApplied).toBe(true);
+      expect(result.minimumStakeApplied).toBe(true);
+      expect(result.totalStake).toBe(100);
+      expect(result.effectivePerRaceCap).toBe(100);
+      expect(result.exceedsKellyTarget).toBe(false);
+    });
+
+    it("(d) λ=0のときは最低額を適用せず分類④(ケリー係数0)で見送りになること", () => {
+      const horses = [candidate(1, 0.5, 2.2)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 100, perRaceCap: 100000, kellyFraction: 0 }),
+      );
+      expect(result.minimumStakeApplied).toBe(false);
+      expect(result.totalStake).toBe(0);
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe("ケリー係数が0のため配分しません");
+    });
+
+    it("最低額は continuousFraction 最大の1頭のみに付与され、同値は馬番昇順で決まること(均等配分しない)", () => {
+      // 完全対称(同一p・同一odds)の3頭。continuousFractionが全頭同値になるスタブモデルを使う。
+      // oddsMin=3だとev=0.9(EVマイナス)で候補外になってしまうため4を使う(ev=1.2)。
+      const horses = [candidate(3, 0.3, 4), candidate(1, 0.3, 4), candidate(2, 0.3, 4)];
+      const model = stubModel([
+        { placed: [], probability: 0.1 },
+        { placed: [1], probability: 0.3 },
+        { placed: [2], probability: 0.3 },
+        { placed: [3], probability: 0.3 },
+      ]);
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 }),
+        model,
+      );
+      expect(result.minimumStakeApplied).toBe(true);
+      expect(result.totalStake).toBe(100);
+      const withStake = result.allocations.filter((a) => a.stake > 0);
+      expect(withStake).toHaveLength(1);
+      // 同値タイブレークは馬番昇順(1番)。
+      expect(withStake[0]!.umaban).toBe(1);
+    });
+  });
+
+  describe("キャップでbetCountが2頭→1頭に減り、notDiversifiedが立つこと", () => {
+    it("非拘束では2頭配分だが、capを絞ると1頭に減りnotDiversified=trueになること", () => {
+      const horses = [candidate(1, 0.6, 3), candidate(2, 0.4, 3), candidate(3, 0.35, 3)];
+      const wide = allocateBets(
+        horses,
+        3,
+        config({ bankroll: 100000, perRaceCap: 100000, kellyFraction: 0.5 }),
+      );
+      expect(wide.betCount).toBeGreaterThanOrEqual(2);
+
+      const narrow = allocateBets(
+        horses,
+        3,
+        config({ bankroll: 100000, perRaceCap: 100, kellyFraction: 0.5 }),
+      );
+      // 前提: 最低額ロジックにより1頭のみ配分されること。
+      expect(narrow.betCount).toBe(1);
+      const positiveCount = narrow.allocations.filter((a) => a.continuousFraction > 0).length;
+      expect(positiveCount).toBeGreaterThanOrEqual(2);
+      expect(narrow.notDiversified).toBe(true);
+    });
+  });
+
+  describe("受け入れ条件9・見送り6分類(優先順位順・テーブル駆動)", () => {
+    it("① bankroll<=0/非有限(未設定)は「総資金が未設定」になること(候補・cap有効でも)", () => {
+      for (const bankroll of [0, -100, Number.NaN, Number.POSITIVE_INFINITY]) {
+        const horses = [candidate(1, 0.6, 3)];
+        const result = allocateBets(horses, 1, config({ bankroll, perRaceCap: 10000 }));
+        expect(result.isSkip).toBe(true);
+        expect(result.skipReason).toBe("総資金が未設定のため配分を提案していません");
+      }
+    });
+
+    it("② perRaceCap<=0/非有限(未設定)は「1レースの上限が未設定」になること(bankroll有効でも)", () => {
+      for (const perRaceCap of [0, -100, Number.NaN, Number.POSITIVE_INFINITY]) {
+        const horses = [candidate(1, 0.6, 3)];
+        const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap }));
+        expect(result.isSkip).toBe(true);
+        expect(result.skipReason).toBe("1レースの上限が未設定のため配分を提案していません");
+      }
+    });
+
+    it("③ 0<perRaceCap<betUnit(実効上限が100円未満)は「1レースの上限が100円未満」になること", () => {
+      for (const perRaceCap of [1, 50, 99]) {
+        const horses = [candidate(1, 0.6, 3)];
+        const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap }));
+        expect(result.isSkip).toBe(true);
+        expect(result.effectivePerRaceCap).toBeLessThan(100);
+        expect(result.skipReason).toBe("1レースの上限が100円未満のため配分できません");
+      }
+    });
+
+    it("優先順位: bankroll未設定かつperRaceCap未設定 → ①(bankroll)が優先されること", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 0 }));
+      expect(result.skipReason).toBe("総資金が未設定のため配分を提案していません");
+    });
+
+    it("優先順位: bankroll有効・perRaceCap=50(100円未満)かつ候補0頭 → ③(上限不足)が優先されること(⑤候補0頭ではない)", () => {
+      const horses = [nonCandidate(1, 0.3, 2)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 50 }));
+      expect(result.skipReason).toBe("1レースの上限が100円未満のため配分できません");
+    });
+
+    it("④ kellyTargetStake===0かつλ=0は「ケリー係数が0」になること(候補ありでも)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0 }));
+      expect(result.skipReason).toBe("ケリー係数が0のため配分しません");
+    });
+
+    it("⑤ 候補0頭(bankroll/perRaceCapとも有効)は「EVプラスの馬がいない」になること", () => {
+      const horses = [nonCandidate(1, 0.3, 2)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.skipReason).toBe("EVプラスの馬がいないため見送りです");
+    });
+
+    it("優先順位: λ=0かつ候補0頭 → ④(ケリー係数0)が優先されること(⑤候補0頭ではない)", () => {
+      const horses = [nonCandidate(1, 0.3, 2)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0 }));
+      expect(result.skipReason).toBe("ケリー係数が0のため配分しません");
+    });
+
+    it("⑥ 連続最適解が全て0(妙味が極小)は「妙味が小さく」になること", () => {
+      const horses: AllocationHorse[] = [
+        { umaban: 1, placeProb: 0.5, placeOddsMin: 1.0000001, ev: 1.00000005, isPositive: true },
+      ];
+      const model = stubModel([
+        { placed: [], probability: 0.5 },
+        { placed: [1], probability: 0.5 },
+      ]);
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 10000, perRaceCap: 10000 }),
+        model,
+      );
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReason).toBe("妙味が小さく、賭ける価値のある配分が見つかりませんでした");
+    });
+
+    it("見送り時もkellyTargetStake/plannedStake/capAppliedが有限であること(①〜④)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const cases: BetAllocationConfig[] = [
+        config({ bankroll: 0, perRaceCap: 10000 }), // ①
+        config({ bankroll: 10000, perRaceCap: 0 }), // ②
+        config({ bankroll: 10000, perRaceCap: 50 }), // ③
+        config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0 }), // ④
+      ];
+      for (const c of cases) {
+        const result = allocateBets(horses, 1, c);
+        expect(result.isSkip).toBe(true);
+        expect(Number.isFinite(result.kellyTargetStake)).toBe(true);
+        expect(Number.isFinite(result.plannedStake)).toBe(true);
+        expect(typeof result.capApplied).toBe("boolean");
+      }
+    });
+  });
+
+  describe("受け入れ条件10: 旧「丸めでゼロ」が到達不能であることの証明", () => {
+    it("C-1で「⑤丸めでゼロ」だった入力が、改訂後はtotalStake===betUnit・minimumStakeApplied===trueになること", () => {
+      // C-1旧テスト「⑤ 連続最適解は正だが100円単位への丸めで全て0になる場合」の入力をそのまま
+      // bankroll/perRaceCapへ読み替える(budget:100 → bankroll:100, perRaceCap:100)。
+      const horses = [candidate(1, 0.5, 2.2), candidate(2, 0.5, 2.2)];
+      const result = allocateBets(horses, 1, {
+        bankroll: 100,
+        perRaceCap: 100,
+        kellyFraction: 0.05,
+        betUnit: 100,
+        greedySteps: 1000,
+      });
+      // 連続最適解自体は正であること(旧④「連続最適解ゼロ」とは異なるケースである根拠)。
+      expect(result.allocations.some((a) => a.continuousFraction > 0)).toBe(true);
+      // 到達不能の証明: 到達していた旧「⑤丸めでゼロ」の代わりに最低額が適用され、見送りにならない。
+      expect(result.minimumStakeApplied).toBe(true);
+      expect(result.totalStake).toBe(DEFAULT_BET_ALLOCATION_CONFIG.betUnit);
+      expect(result.isSkip).toBe(false);
+      expect(result.skipReason).toBeNull();
+    });
+  });
+
+  describe("受け入れ条件11: advisoryはcoreが数値込みで生成し、exceedsKellyTarget===falseならnull", () => {
+    it("exceedsKellyTarget===trueのとき、advisoryにケリー適正額の数値が含まれること", () => {
+      const horses = [candidate(1, 0.5, 2.2)];
+      const result = allocateBets(
+        horses,
+        1,
+        config({ bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 }),
+      );
+      expect(result.exceedsKellyTarget).toBe(true);
+      expect(result.advisory).not.toBeNull();
+      const rounded = Math.round(result.kellyTargetStake);
+      expect(result.advisory).toContain(String(rounded));
+      expect(result.advisory).toContain("100円");
+    });
+
+    it("exceedsKellyTarget===falseのとき、advisory===nullであること(通常配分・最低額非適用いずれも)", () => {
+      const normal = allocateBets(
+        [candidate(1, 0.6, 3)],
+        1,
+        config({ bankroll: 1000000, perRaceCap: 1000000 }),
+      );
+      expect(normal.exceedsKellyTarget).toBe(false);
+      expect(normal.advisory).toBeNull();
+
+      // ケース(b)相当(最低額適用だがexceedsKellyTarget===false)。
+      const minimumButNotExceeding = allocateBets(
+        [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5)],
+        1,
+        config({ bankroll: 300, perRaceCap: 100000, kellyFraction: 0.5 }),
+      );
+      expect(minimumButNotExceeding.exceedsKellyTarget).toBe(false);
+      expect(minimumButNotExceeding.advisory).toBeNull();
+    });
+  });
+
+  describe("受け入れ条件12: BetAllocation/continuousFractionへの改称完了", () => {
+    it("allocations[].continuousFraction が公開され、旧名kellyFractionのフィールドが存在しないこと", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      const a = result.allocations[0]!;
+      expect(typeof a.continuousFraction).toBe("number");
+      expect((a as unknown as Record<string, unknown>).kellyFraction).toBeUndefined();
+    });
+
+    it("BetAllocationResult.kellyFraction(λ)は従来どおり存在すること(名前衝突の相手が消えたので問題ない)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0.3 }));
+      expect(result.kellyFraction).toBe(0.3);
+    });
+  });
+
+  describe("受け入れ条件13: C-1の不変条件の継承(契約変更で削る・緩めない)", () => {
+    it("受け入れ条件5相当: 予算スケール不変性(bankrollを変えてもcontinuousFractionは完全一致すること)", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const bankrolls = [1000, 10000, 100000];
+      const results = bankrolls.map((bankroll) =>
+        allocateBets(horses, 3, config({ bankroll, perRaceCap: 100000000 })),
+      );
+      for (let i = 1; i < results.length; i++) {
+        for (let j = 0; j < results[0]!.allocations.length; j++) {
+          expect(results[i]!.allocations[j]!.continuousFraction).toBe(
+            results[0]!.allocations[j]!.continuousFraction,
+          );
+        }
+      }
+    });
+
+    it("受け入れ条件6相当: 独立性を一切仮定しない(スタブモデルで完全相関/完全排反の結果が異なること)", () => {
+      const horses = [candidate(1, 0.4, 3), candidate(2, 0.4, 3)];
+      const perfectlyCorrelated = stubModel([
+        { placed: [], probability: 0.6 },
+        { placed: [1, 2], probability: 0.4 },
+      ]);
+      const mutuallyExclusive = stubModel([
+        { placed: [], probability: 0.2 },
+        { placed: [1], probability: 0.4 },
+        { placed: [2], probability: 0.4 },
+      ]);
+      const correlatedResult = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 10000, perRaceCap: 10000 }),
+        perfectlyCorrelated,
+      );
+      const exclusiveResult = allocateBets(
+        horses,
+        2,
+        config({ bankroll: 10000, perRaceCap: 10000 }),
+        mutuallyExclusive,
+      );
+      expect(correlatedResult.allocations[0]!.continuousFraction).not.toBeCloseTo(
+        exclusiveResult.allocations[0]!.continuousFraction,
+        6,
+      );
+    });
+
+    it("入力のplaceProbを書き換えないこと", () => {
+      const horses = [candidate(1, 0.55, 2.5), candidate(2, 0.35, 3)];
+      const original = horses.map((h) => ({ ...h }));
+      allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(horses).toEqual(original);
+    });
+
+    it("placeCountを引数で受け、3をハードコードしないこと(placeCount=2と3で異なる結果)", () => {
+      const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5), candidate(3, 0.5, 2.5)];
+      const resultK2 = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+      const resultK3 = allocateBets(horses, 3, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(resultK2.allocations[0]!.continuousFraction).not.toBeCloseTo(
+        resultK3.allocations[0]!.continuousFraction,
+        6,
+      );
+    });
+
+    it("候補外の馬も0円で欠落させないこと(EVマイナス/オッズ未確定を正しく区別)", () => {
+      const horses = [candidate(1, 0.6, 3), nonCandidate(2, 0.1, 2)];
+      const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+      const excluded = result.allocations.find((a) => a.umaban === 2)!;
+      expect(excluded.stake).toBe(0);
+      expect(excluded.excludedReason).toBe("EVがプラスではないため対象外");
+
+      const horsesNoOdds: AllocationHorse[] = [
+        candidate(1, 0.6, 3),
+        { umaban: 2, placeProb: 0.5, placeOddsMin: null, ev: null, isPositive: false },
+      ];
+      const resultNoOdds = allocateBets(horsesNoOdds, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+      const excludedNoOdds = resultNoOdds.allocations.find((a) => a.umaban === 2)!;
+      expect(excludedNoOdds.excludedReason).toBe("複勝オッズ下限が未確定のため対象外");
+    });
+
+    it("全出走馬が馬番昇順で結果に含まれること", () => {
+      const horses = [candidate(3, 0.6, 3), nonCandidate(1, 0.1), candidate(2, 0.5, 2.5)];
+      const result = allocateBets(horses, 3, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.allocations.map((a) => a.umaban)).toEqual([1, 2, 3]);
+    });
+
+    describe("droppedBelowMinimum(意味の一貫性を維持)", () => {
+      it("最低額を受け取った1頭はfalse、他の正比率馬はtrueのままであること", () => {
+        const horses = [candidate(1, 0.5, 2.5), candidate(2, 0.5, 2.5)];
+        const result = allocateBets(
+          horses,
+          1,
+          config({ bankroll: 300, perRaceCap: 100000, kellyFraction: 0.5 }),
+        );
+        expect(result.minimumStakeApplied).toBe(true);
+        const withStake = result.allocations.filter((a) => a.stake > 0);
+        expect(withStake).toHaveLength(1);
+        expect(withStake[0]!.droppedBelowMinimum).toBe(false);
+        const withoutStake = result.allocations.filter(
+          (a) => a.continuousFraction > 0 && a.stake === 0,
+        );
+        expect(withoutStake.length).toBeGreaterThanOrEqual(1);
+        for (const a of withoutStake) {
+          expect(a.droppedBelowMinimum).toBe(true);
+        }
+      });
+
+      it("bankroll未設定・perRaceCap不足では丸め判定に到達しておらずdroppedBelowMinimumが常にfalseであること", () => {
+        const horses = [candidate(1, 0.6, 3)];
+        const unsetBankroll = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 10000 }));
+        for (const a of unsetBankroll.allocations) {
+          expect(a.droppedBelowMinimum).toBe(false);
+        }
+        const smallCap = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 50 }));
+        for (const a of smallCap.allocations) {
+          expect(a.droppedBelowMinimum).toBe(false);
+        }
+      });
+    });
+
+    describe("notDiversified(betCount===1のときのみtrueになりうる)", () => {
+      it("見送り(betCount=0)のときはnotDiversified=falseであること", () => {
+        const horses = [nonCandidate(1, 0.3, 2)];
+        const result = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 10000 }));
+        expect(result.betCount).toBe(0);
+        expect(result.notDiversified).toBe(false);
+      });
+
+      it("1点配分だが他に正の候補がいない場合はfalseであること", () => {
+        const horses = [candidate(1, 0.6, 3)];
+        const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+        expect(result.betCount).toBe(1);
+        expect(result.notDiversified).toBe(false);
+      });
+
+      it("2点以上配分されるときはnotDiversified=falseであること", () => {
+        const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.5, 2.2), candidate(3, 0.1, 5)];
+        const result = allocateBets(
+          horses,
+          2,
+          config({ bankroll: 100000, perRaceCap: 100000, kellyFraction: 1 }),
+        );
+        expect(result.betCount).toBeGreaterThanOrEqual(2);
+        expect(result.notDiversified).toBe(false);
+      });
+    });
+
+    it("剰余の再配分を行わないこと(cap非拘束時、合計は各馬stakeの合計と一致)", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const result = allocateBets(
+        horses,
+        3,
+        config({ bankroll: 10000, perRaceCap: 100000000, kellyFraction: 1 }),
+      );
+      const expectedStakeSum = result.allocations.reduce((acc, a) => acc + a.stake, 0);
+      expect(result.totalStake).toBe(expectedStakeSum);
+    });
+
+    it("1頭のみのときのケリー解析解との一致(λ=1・丸め前・cap非拘束)", () => {
+      const horses: AllocationHorse[] = [candidate(1, 0.5, 3), nonCandidate(2, 0.5, null)];
+      const result = allocateBets(horses, 1, {
+        bankroll: 10000,
+        perRaceCap: 100000000,
+        kellyFraction: 1,
+        betUnit: 100,
+        greedySteps: 10000,
+      });
+      const analytic = (1.5 - 1) / (3 - 1); // (EV-1)/(o-1) = 0.25
+      const actual = result.allocations.find((a) => a.umaban === 1)!.continuousFraction;
+      expect(actual).toBeCloseTo(analytic, 2);
+    });
+
+    it("modelId/modelApproximateが結果に載ること", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.modelId).toBe(CONDITIONAL_BERNOULLI_MODEL.id);
+      expect(result.modelApproximate).toBe(true);
+    });
+
+    it("診断値(placeProbSum等)が見送り時も含め算出されること", () => {
+      const horses = [nonCandidate(1, 0.3, 2)];
+      const result = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 10000 }));
+      expect(result.isSkip).toBe(true);
+      expect(result.diagnostics.placeProbSum).toBeCloseTo(0.3, 10);
+      expect(result.diagnostics.candidateCount).toBe(0);
+    });
+
+    it("見送り(bankroll不足)のときもcontinuousFractionが算出されること(Step4は早期リターンで省略しない)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 0, perRaceCap: 10000 }));
+      expect(result.isSkip).toBe(true);
+      expect(result.allocations[0]!.continuousFraction).toBeGreaterThan(0);
+    });
+  });
+
+  describe("λ(ケリー係数)の効果・防御(既存回帰の踏襲)", () => {
+    it("λ=1とλ=0.5でstakeが概ね半分になること(cap非拘束)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const resultFull = allocateBets(horses, 1, {
+        bankroll: 1000000,
+        perRaceCap: 1000000,
+        kellyFraction: 1,
+        betUnit: 100,
+        greedySteps: 1000,
+      });
+      const resultHalf = allocateBets(horses, 1, {
+        bankroll: 1000000,
+        perRaceCap: 1000000,
+        kellyFraction: 0.5,
+        betUnit: 100,
+        greedySteps: 1000,
+      });
+      const ratio = resultHalf.totalStake / resultFull.totalStake;
+      expect(ratio).toBeGreaterThan(0.4);
+      expect(ratio).toBeLessThan(0.6);
+    });
+
+    it("λ=1.5(範囲外)は既定値0.5へフォールバックされ、無条件不変条件(totalStake<=effectivePerRaceCap)を破らないこと", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const result = allocateBets(horses, 3, {
+        bankroll: 10000,
+        perRaceCap: 10000,
+        kellyFraction: 1.5,
+        betUnit: 100,
+        greedySteps: 1000,
+      });
+      expect(result.kellyFraction).toBe(DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction);
+      expect(result.totalStake).toBeLessThanOrEqual(result.effectivePerRaceCap);
+    });
+
+    it("λ=NaN/Infinity/負値は既定値0.5へフォールバックされ、既定値を明示指定した結果と完全一致すること", () => {
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+      const base = { bankroll: 10000, perRaceCap: 10000, betUnit: 100, greedySteps: 1000 };
+      const expected = allocateBets(horses, 3, { ...base, kellyFraction: 0.5 });
+      for (const kellyFraction of [Number.NaN, Number.POSITIVE_INFINITY, -0.5]) {
+        const result = allocateBets(horses, 3, { ...base, kellyFraction });
+        expect(result.kellyFraction).toBe(0.5);
+        expect(result.totalStake).toBe(expected.totalStake);
+        expect(result.isSkip).toBe(expected.isSkip);
+        expect(result.skipReason).toBe(expected.skipReason);
+      }
+    });
+  });
+
+  describe("betUnit/greedySteps の防御(重大バグ・水平展開の回帰テスト)", () => {
+    const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+    const validConfig: BetAllocationConfig = {
+      bankroll: 10000,
+      perRaceCap: 10000,
+      kellyFraction: 1,
+      betUnit: 100,
+      greedySteps: 1000,
+    };
+
+    describe("betUnitの異常値", () => {
+      const cases: Array<{ name: string; betUnit: number }> = [
+        { name: "betUnit=0", betUnit: 0 },
+        { name: "betUnit=NaN", betUnit: Number.NaN },
+        { name: "betUnit=Infinity", betUnit: Number.POSITIVE_INFINITY },
+        { name: "betUnit=-100(負値)", betUnit: -100 },
+        { name: "betUnit=33.5(非整数)", betUnit: 33.5 },
+      ];
+      for (const c of cases) {
+        it(`${c.name}でも既定betUnit(100)相当の結果と一致すること`, () => {
+          const result = allocateBets(horses, 3, { ...validConfig, betUnit: c.betUnit });
+          const expected = allocateBets(horses, 3, validConfig);
+          expect(Number.isFinite(result.effectivePerRaceCap)).toBe(true);
+          expect(Number.isFinite(result.totalStake)).toBe(true);
+          for (const a of result.allocations) {
+            expect(Number.isFinite(a.stake)).toBe(true);
+          }
+          expect(result.effectivePerRaceCap).toBe(expected.effectivePerRaceCap);
+          expect(result.totalStake).toBe(expected.totalStake);
+          expect(result.isSkip).toBe(expected.isSkip);
+          expect(result.skipReason).toBe(expected.skipReason);
+        });
+      }
+    });
+
+    describe("greedyStepsの異常値", () => {
+      const cases: Array<{ name: string; greedySteps: number }> = [
+        { name: "greedySteps=0", greedySteps: 0 },
+        { name: "greedySteps=NaN", greedySteps: Number.NaN },
+        { name: "greedySteps=-5(負値)", greedySteps: -5 },
+        { name: "greedySteps=Infinity", greedySteps: Number.POSITIVE_INFINITY },
+      ];
+      for (const c of cases) {
+        it(`${c.name}でも既定greedySteps(1000)相当の結果になること`, () => {
+          const result = allocateBets(horses, 3, { ...validConfig, greedySteps: c.greedySteps });
+          const expected = allocateBets(horses, 3, validConfig);
+          expect(Number.isFinite(result.totalStake)).toBe(true);
+          expect(result.totalStake).toBe(expected.totalStake);
+          expect(result.isSkip).toBe(expected.isSkip);
+          expect(result.skipReason).toBe(expected.skipReason);
+        });
+      }
+    });
+  });
+
+  describe("受け入れ条件33: bankroll/perRaceCapが負値・NaN・±Infinityでも全出力が有限かつ非負であること", () => {
+    const badValues = [-10000, Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY];
+
+    it("bankrollが異常値のとき、resolvedBankroll/kellyTargetStake/effectivePerRaceCap/plannedStakeが有限・非負で、①へ分類されること", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      for (const bankroll of badValues) {
+        const result = allocateBets(horses, 1, config({ bankroll, perRaceCap: 10000 }));
+        expect(Number.isFinite(result.resolvedBankroll)).toBe(true);
+        expect(result.resolvedBankroll).toBeGreaterThanOrEqual(0);
+        expect(Number.isFinite(result.kellyTargetStake)).toBe(true);
+        expect(result.kellyTargetStake).toBeGreaterThanOrEqual(0);
+        expect(Number.isFinite(result.effectivePerRaceCap)).toBe(true);
+        expect(result.effectivePerRaceCap).toBeGreaterThanOrEqual(0);
+        expect(Number.isFinite(result.plannedStake)).toBe(true);
+        expect(result.plannedStake).toBeGreaterThanOrEqual(0);
+        expect(result.exceedsKellyTarget).toBe(false);
+        expect(result.advisory).toBeNull();
+        expect(result.skipReason).toBe("総資金が未設定のため配分を提案していません");
+      }
+    });
+
+    it("perRaceCapが異常値のとき、effectivePerRaceCapが有限・非負(負のcapにならない)で、②へ分類されること", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      for (const perRaceCap of badValues) {
+        const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap }));
+        expect(Number.isFinite(result.effectivePerRaceCap)).toBe(true);
+        expect(result.effectivePerRaceCap).toBeGreaterThanOrEqual(0);
+        expect(result.exceedsKellyTarget).toBe(false);
+        expect(result.advisory).toBeNull();
+        expect(result.skipReason).toBe("1レースの上限が未設定のため配分を提案していません");
+      }
     });
   });
 });

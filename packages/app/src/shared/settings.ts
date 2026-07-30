@@ -79,6 +79,21 @@ export const CLIP_VARIANT_IDS = ["default", "wide15"] as const;
 /** クリップ幅の版ID。 */
 export type ClipVariantId = (typeof CLIP_VARIANT_IDS)[number];
 
+/**
+ * 馬券配分(機能C-2)のラベル文字列(1箇所に集約。SettingsView.tsxが参照する)。
+ * 後から文言を差し替えられるよう定数化する(boss着手前ゲート2026-07-30合意)。
+ */
+export const BET_ALLOCATION_LABELS = {
+  /** 総資金入力欄のラベル。 */
+  bankroll: "馬券用の総資金",
+  /** 総資金入力欄の補助文(1レースの予算ではないことを明示する)。 */
+  bankrollHelp: "馬券に充てている資金の総額です(1レースで使う金額ではありません)",
+  /** 1レース上限入力欄のラベル。 */
+  perRaceCap: "1レースの上限",
+  /** ケリー係数入力欄のラベル(上級設定として区別する)。 */
+  kellyFraction: "ケリー係数(上級)",
+} as const;
+
 /** バイアス重みの日本語ラベル(フォーム表示用)。 */
 export const BIAS_WEIGHT_LABELS: Record<BiasWeightKey, string> = {
   trackCondition: "馬場状態適性(道悪)",
@@ -132,6 +147,22 @@ export interface AppSettings {
    * maxAdjust の解決に使う(main/pipeline-deps.ts が resolveClipVariant で解決)。
    */
   readonly clipVariant: ClipVariantId;
+  /**
+   * 馬券用の総資金(円。機能C-2)。既定0(未設定=配分提案を出さない・opt-in)。
+   * core BetAllocationConfig.bankroll にそのまま渡る(ケリー基準の元本。1レースの予算ではない)。
+   */
+  readonly bankroll: number;
+  /**
+   * 1レースの上限(円。機能C-2)。既定0(未設定=配分提案を出さない・opt-in)。
+   * core BetAllocationConfig.perRaceCap にそのまま渡る(「これ以上は賭けない」歯止め)。
+   */
+  readonly perRaceCap: number;
+  /**
+   * 馬券配分のケリー係数λ(0.05〜1。機能C-2の上級設定)。既定0.5。
+   * core BetAllocationConfig.kellyFraction にそのまま渡る。UI下限を0.05にし、λ=0
+   * (見送り理由④)はUIから到達不能にする(settings.json手編集・core直接利用でのみ到達する)。
+   */
+  readonly kellyFraction: number;
 }
 
 /**
@@ -159,6 +190,12 @@ export interface MaskedSettings {
   readonly additionalInstruction: string;
   /** クリップ幅の版ID(タスクD-2)。往復編集フォームとして表示するため平文のまま返す。 */
   readonly clipVariant: ClipVariantId;
+  /** 馬券用の総資金(円。機能C-2)。往復編集フォームとして表示するため平文のまま返す。 */
+  readonly bankroll: number;
+  /** 1レースの上限(円。機能C-2)。往復編集フォームとして表示するため平文のまま返す。 */
+  readonly perRaceCap: number;
+  /** 馬券配分のケリー係数λ(機能C-2)。往復編集フォームとして表示するため平文のまま返す。 */
+  readonly kellyFraction: number;
 }
 
 /**
@@ -183,6 +220,12 @@ export interface SettingsUpdate {
   readonly additionalInstruction: string;
   /** クリップ幅の版ID(タスクD-2)。CLIP_VARIANT_IDS に無い値・欠損はmain側でdefaultへフォールバック。 */
   readonly clipVariant: ClipVariantId;
+  /** 馬券用の総資金(円。機能C-2)。範囲外・非数値はmain側で既定(0)へフォールバック。 */
+  readonly bankroll: number;
+  /** 1レースの上限(円。機能C-2)。範囲外・非数値はmain側で既定(0)へフォールバック。 */
+  readonly perRaceCap: number;
+  /** 馬券配分のケリー係数λ(機能C-2)。範囲外・非数値はmain側で既定(0.5)へフォールバック。 */
+  readonly kellyFraction: number;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */
@@ -204,6 +247,34 @@ export function isValidThreshold(input: string): boolean {
 export function isValidWeight(input: string): boolean {
   const n = parseNumberInput(input);
   return n !== null && n >= 0;
+}
+
+/**
+ * 総資金の入力が妥当か(0〜100,000,000の整数。機能C-2)。
+ * 0は「未設定」を表す既定値であり妥当な入力として許容する(仕様: opt-in)。
+ */
+export function isValidBankroll(input: string): boolean {
+  const n = parseNumberInput(input);
+  return n !== null && Number.isInteger(n) && n >= 0 && n <= 100_000_000;
+}
+
+/**
+ * 1レースの上限の入力が妥当か(0〜10,000,000の整数。機能C-2)。
+ * 0は「未設定」を表す既定値であり妥当な入力として許容する(仕様: opt-in)。
+ */
+export function isValidPerRaceCap(input: string): boolean {
+  const n = parseNumberInput(input);
+  return n !== null && Number.isInteger(n) && n >= 0 && n <= 10_000_000;
+}
+
+/**
+ * ケリー係数の入力が妥当か(0.05〜1。機能C-2)。
+ * 下限を0.05にすることで、UI経由ではλ=0(core見送り理由④)に到達できないようにする
+ * (④はsettings.json手編集・core直接利用でのみ到達する契約上の分類。boss着手前ゲート2026-07-30)。
+ */
+export function isValidKellyFraction(input: string): boolean {
+  const n = parseNumberInput(input);
+  return n !== null && n >= 0.05 && n <= 1;
 }
 
 /** Webhook URL の入力が妥当か(空は許容。非空なら http/https のURL形式)。 */
