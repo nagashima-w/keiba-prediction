@@ -818,21 +818,40 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       });
     });
 
-    it("剰余の再配分を行わないこと(cap非拘束時、切り捨て前との差がbetUnit未満に収まること。C-1由来の回帰テスト)", () => {
-      // 旧テストは「継続配分×実効予算との差がbetUnit未満」を検証していたが、C-2の契約変更
-      // (effectiveBudget→resolvedBankroll)の際にtotalStake===sum(stakes)という自明な
-      // 恒等式だけが残り、剰余を繰り上げ補填していないことの実質的な検証が失われていた
-      // (boss指摘: 名前ではなく「何を保証していたか」で対応表を作った結果判明した空振り)。
-      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.3, 4), candidate(3, 0.5, 3)];
+    it("剰余の再配分を行わないこと(切り捨て前との差がbetUnit未満に収まり、実際に丸めが発生していること。C-1由来の回帰テスト)", () => {
+      // 【2周目の空振り修正】前回の修正(候補3頭・placeCount3・kellyFraction1)はΣx*が
+      // ちょうど1.0に張り付く退化解になり、continuousFraction×λ×resolvedBankrollが
+      // betUnitの倍数(floorが恒等写像)になって、差が全馬0になっていた(boss実測: 7.27e-12は
+      // 「丸めが起きた証拠」ではなく「一度も起きていない証拠」だった)。placeCount=2の非退化
+      // フィクスチャ(頭数>複勝人数)に差し替え、2頭が正のcontinuousFractionを持ち、かつ
+      // 丸めが実際に発生する(差が0でない)ことを無条件expectで先に固定してから検証する。
+      const horses = [candidate(1, 0.6, 2.5), candidate(2, 0.5, 2.2), candidate(3, 0.1, 5)];
       const result = allocateBets(
         horses,
-        3,
+        2,
         config({ bankroll: 10000, perRaceCap: 100000000, kellyFraction: 1 }),
       );
+
+      // 前提1(無条件expect): 剰余が複数馬にまたがる状況であること(2頭以上に配分)。
+      expect(result.betCount).toBeGreaterThanOrEqual(2);
+
+      const withPositiveContinuous = result.allocations.filter((a) => a.continuousFraction > 0);
+      const diffs = withPositiveContinuous.map((a) => ({
+        umaban: a.umaban,
+        diff:
+          a.continuousFraction * result.kellyFraction * result.resolvedBankroll - a.stake,
+      }));
+
+      // 前提2(無条件expect): 少なくとも1頭でcontinuous−stake>0であること
+      // (=betUnit単位への丸めが実際に発生していること。差が全馬0なら床関数が恒等写像に
+      // なっているだけで、以降のアサーションは何も検証していない空振りになる)。
+      expect(diffs.some((d) => d.diff > 1e-9)).toBe(true);
+
       const expectedStakeSum = result.allocations.reduce((acc, a) => acc + a.stake, 0);
       expect(result.totalStake).toBe(expectedStakeSum);
       // 各馬の切り捨て前(継続配分 = continuousFraction×λ×resolvedBankroll。cap非拘束のためs=1)
-      // との差はbetUnit未満のはず(切り上げ補填していない証拠)。
+      // との差はbetUnit未満のはず(切り上げ補填していない証拠。前提2により、この不等式は
+      // 実際に丸めが発生した馬に対して意味のある検証になっている)。
       for (const a of result.allocations) {
         const continuous = a.continuousFraction * result.kellyFraction * result.resolvedBankroll;
         expect(continuous - a.stake).toBeLessThan(DEFAULT_BET_ALLOCATION_CONFIG.betUnit);
