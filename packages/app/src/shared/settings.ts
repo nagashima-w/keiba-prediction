@@ -122,7 +122,7 @@ export const BASE_SCORE_WEIGHT_LABELS: Record<BaseScoreWeightKey, string> = {
 export interface AppSettings {
   /** Anthropic APIキー(平文)。空文字は未設定。 */
   readonly apiKey: string;
-  /** Discord Webhook URL(Phase 5 で使用。現状は保存のみ)。 */
+  /** Discord Webhook URL(手動送信ボタン・自動送信の両方で実際に使用する)。 */
   readonly discordWebhookUrl: string;
   /** EVプラス判定の閾値(> 0)。 */
   readonly evThreshold: number;
@@ -130,7 +130,11 @@ export interface AppSettings {
   readonly biasWeights: BiasWeightValues;
   /** 基礎スコア重み6項目。 */
   readonly baseScoreWeights: BaseScoreWeightValues;
-  /** 分析結果の自動Discord送信ON/OFF(Phase 5 で使用。現状は保存のみ)。 */
+  /**
+   * 分析結果の自動Discord送信ON/OFF。
+   * ONかつWebhook URL設定済みなら、一括分析完了時に横断EVプラスが1頭以上あれば自動で1通送信する
+   * (App.tsx の一括分析完了ハンドラを参照)。
+   */
   readonly autoSendDiscord: boolean;
   /**
    * プロンプト追加指示(Task#28 プロンプト改善C)。設定画面の自由記述欄。

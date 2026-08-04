@@ -170,8 +170,9 @@ export function coerceSettings(raw: unknown): AppSettings {
   const rec = asRecord(raw);
   return {
     apiKey: typeof rec.apiKey === "string" ? rec.apiKey : DEFAULT_APP_SETTINGS.apiKey,
-    // 記録: discordWebhookUrl は現状「文字列であること」のみを検証する。URL形式の main 側検証は
-    // 実際に送信する Phase 5(Discord Webhook 通知)で、送信可否判定と合わせて実装する。
+    // 記録: coerceSettings では discordWebhookUrl を「文字列であること」のみ検証する(不正値でも
+    // 起動を壊さないための緩い検証)。厳密な URL 形式検証(https://discord.com/api/webhooks/ で
+    // 始まるか)は送信直前に ipc.ts の isDiscordWebhookUrl で行う(実装済み・稼働中)。
     // フォーム段階の URL 形式チェックは renderer(shared/settings の isValidWebhookUrl)で行っている。
     discordWebhookUrl:
       typeof rec.discordWebhookUrl === "string"

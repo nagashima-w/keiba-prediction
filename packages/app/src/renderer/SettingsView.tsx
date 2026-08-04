@@ -226,7 +226,7 @@ export function SettingsView(): React.JSX.Element {
       {/* Discord Webhook URL。 */}
       <div style={fieldStyle}>
         <label style={labelStyle} htmlFor="webhook">
-          Discord Webhook URL(Phase 5 で使用)
+          Discord Webhook URL
         </label>
         <input
           id="webhook"
@@ -280,7 +280,7 @@ export function SettingsView(): React.JSX.Element {
               dispatch({ type: "自動送信切替", value: e.target.checked })
             }
           />{" "}
-          分析結果を自動でDiscordに送信する(Phase 5 で使用)
+          分析結果を自動でDiscordに送信する
         </label>
       </div>
 
