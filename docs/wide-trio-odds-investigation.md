@@ -35,9 +35,9 @@
 | 21 | 地方7頭3連複 | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202630062407` |
 | 22 | CLI(`--race-odds-types`)動作確認: 中央ワイド | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=5&action=init` |
 | 23 | CLI動作確認: 中央3連複 | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=7&action=init` |
-| 24 | 未発売状態(state③)の探索(結果は失敗。§7参照) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202642071301` |
+| 24 | 未発売状態(state③)の探索(結果は失敗。§6参照) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202642071301` |
 
-すべて HTTP 200(4xxは一度も発生しなかった。§7参照)。#22・#23 は #4・#5 と同一URLの再取得(CLI経路の
+すべて HTTP 200(4xxは一度も発生しなかった。§6参照)。#22・#23 は #4・#5 と同一URLの再取得(CLI経路の
 実動作確認のため。予算制約上、他のレースはCLI再取得せず探索フェーズの実データをそのまま正式名称で
 フィクスチャとしてコミットしている。詳細は §8)。
 
@@ -168,7 +168,7 @@
 
 | ファイル名 | レース | 頭数 | 状態 | 頭数の情報源 |
 |---|---|---|---|---|
-| `odds_wide_202603020211.json` | 中央・福島11R ラジオNIKKEI賞 | 16 | ①発売されていた(確定) | `shutuba_202603020211.html`のHorseList行数(既存フィクスチャ) |
+| `odds_wide_202603020211.json` | 中央・福島11R ラジオNIKKEI賞 | 16 | ①発売されていた(確定) | `parseShutuba(readFileSync("fixtures/shutuba_202603020211.html","utf-8")).horses.length`(既存フィクスチャ、本番パーサで再現可能。単純な`class="HorseList"`カウントは読み込み用ダミー行2件を含むため18になり誤る点に注意) |
 | `odds_trio_202603020211.json` | 同上 | 16 | ①同上 | 同上 |
 | `nar_odds_b5_202654071210.html` | 地方・高知10R ファイナルレース | 12 | ①発売されていた(確定) | `nar_race_list_sub_20260712.html`のentryCount(既存フィクスチャ) |
 | `nar_odds_b7_202654071210.html` | 同上 | 12 | ①同上(軸馬1固定) | 同上 |

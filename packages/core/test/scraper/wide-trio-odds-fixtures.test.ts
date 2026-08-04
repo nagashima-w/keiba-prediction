@@ -106,7 +106,11 @@ function narTripleCombos(html: string, type: string): Set<string> {
 }
 
 describe("中央 JSON API(wideOddsApiUrl/trioOddsApiUrl)の実データ構造(機能D-1実測 2026-08-04)", () => {
-  describe("16頭・確定オッズ(race_id=202603020211。頭数はfixtures/shutuba_202603020211.htmlのHorseList行数〈16件〉から独立に確認済み)", () => {
+  // 頭数(n=16)の根拠: fixtures/shutuba_202603020211.html を本番の parseShutuba に通すと
+  // horses.length===16(実行して確認済み。単純な class="HorseList" の出現数カウントは
+  // 読み込み用ダミー行2件を含むため18になり誤る。parseShutubaはtd.HorseInfoを持たない
+  // 行を実データ行から除外している)。
+  describe("16頭・確定オッズ(race_id=202603020211。頭数はparseShutuba(fixtures/shutuba_202603020211.html).horses.lengthから独立に確認済み)", () => {
     const n = 16;
 
     it("ワイド: 応答が空でなく、組合せ集合がC(16,2)=120通りと完全一致すること", () => {
