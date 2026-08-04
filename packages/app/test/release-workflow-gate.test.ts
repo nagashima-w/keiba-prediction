@@ -14,8 +14,11 @@
  * 2. 公開可否ゲート(env: PUBLISH_DEV_LATEST)が head_commit.message と「レビュー継続中」を参照している
  * 3. v* タグの正式リリースステップの条件に「レビュー継続中」が現れない
  *    (タグでの正式公開は、レビュー継続中の判定と無関係であるべき)
- * 4. スキップ通知(::notice::)ステップの条件がブランチ push / ブランチへの手動実行に限定されている
- *    (限定しないと v* タグ push でも「レビュー継続中のためスキップした」という誤った通知が出る)
+ * 4. スキップ通知(::notice::)ステップの条件が、ブランチ push / ブランチへの手動実行に限定され、
+ *    かつ公開ゲート(PUBLISH_DEV_LATEST)の否定(!=)である
+ *    (ブランチ限定でなければ v* タグ push でも誤通知が出る。否定でなければ「!=」→「==」の
+ *    1文字反転で「公開成功時に毎回通知・レビュー継続中では無言」という真逆の挙動になり、
+ *    「判定していない事象を判定結果として報告する」欠陥に直結する)
  * 5. スキップ通知ステップの文言が、掃除もスキップしたことと回復手段(workflow_dispatch)に触れている
  * 6. スキップ通知ステップに always() が付いていない
  *    (付けると前段の失敗を「レビュー継続中スキップ」と誤って名乗ってしまう)
@@ -109,13 +112,20 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     expect(tagStep).not.toContain("レビュー継続中");
   });
 
-  it("スキップ通知ステップの条件がブランチ push/手動実行限定である(タグ push で誤通知しない)", () => {
+  it("スキップ通知ステップの条件はブランチ限定かつ公開ゲートの否定(!=)である(タグ push で誤通知せず、== への反転も検出する)", () => {
     const noticeIf = extractIfLine(extractStep(yml, STEP_NAMES.skipNotice));
 
-    expect(noticeIf).toContain("PUBLISH_DEV_LATEST");
     // ブランチ限定にしていなければ、v* タグ push でも PUBLISH_DEV_LATEST が false になり
     // 「レビュー継続中のためスキップした」という事実と異なる通知が出てしまう。
     expect(noticeIf).toContain("refs/heads/");
+
+    // 極性固定: 公開ゲートの「否定」(!=)であることを、演算子込みの文字列で固定する。
+    // 「PUBLISH_DEV_LATEST を含む」「refs/heads/ を含む」という含有チェックのみでは、
+    // != を == に1文字反転しても両方とも真のままで見逃す(実際に反転した変異体で全6件が
+    // 緑のまま通過することを確認済み)。反転後の挙動は「公開に成功する度に毎回notice、
+    // レビュー継続中コミットでは逆に無言」という正反対のもので、これを演算子ごと固定して検出する。
+    expect(noticeIf).toContain("PUBLISH_DEV_LATEST != 'true'");
+    expect(noticeIf).not.toContain("PUBLISH_DEV_LATEST == 'true'");
   });
 
   it("スキップ通知ステップの文言が、掃除もスキップしたことと回復手段(workflow_dispatch)に触れている", () => {
