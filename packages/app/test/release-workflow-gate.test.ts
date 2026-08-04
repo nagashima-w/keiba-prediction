@@ -67,7 +67,12 @@ function extractIfLine(stepBlock: string): string {
 }
 
 describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件)", () => {
-  const yml = readFileSync(WORKFLOW_PATH, "utf8");
+  // 改行コードを LF に正規化してから読む。Windows ランナー上の checkout(actions/checkout)は
+  // リポジトリの .gitattributes 設定次第で CRLF になりうる。本テストの全パターンは `\n` を
+  // 前提にしている。読み込み直後の1箇所で正規化することで、6件すべてのパターンに
+  // 個別対応する必要をなくす(パターン側を `\r?\n` にする案は、1つでも直し漏れると
+  // 同じ事故が再発するため採らない)。
+  const yml = readFileSync(WORKFLOW_PATH, "utf8").replace(/\r\n/g, "\n");
 
   it("公開ステップと孤児掃除ステップの if: 条件が完全に一致する(ずれると exe 全滅)", () => {
     const publishIf = extractIfLine(extractStep(yml, STEP_NAMES.publish));
