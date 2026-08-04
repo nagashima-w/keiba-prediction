@@ -248,3 +248,28 @@
 先に確認しないと、成立しているように見えて実は何も検証していない状態を見逃す(詳細は
 `.claude/agents/code-reviewer.md` の教訓・`docs/lessons-learned.md` 参照)。
 
+
+## 7. 将来構想: 実行環境の移行(Cloudflare + スマホからのキック)
+
+ユーザーが2026-08-04に述べた構想。**現時点では着手せず、判断の前提としてのみ記録する。**
+
+> Discord通知はWindowsのexeで動いてる限り対応しなくていいかな。
+> 最終的にはCloudflareで動かしてスマホから分析をキックするとかそういうのはやりたいので、
+> そうなったときには通知ほしいけど。
+
+### 現時点の判断への影響
+- **Phase 6(discord.js bot)は現行の配布形態(Windows portable exe)では不要**。永久に不要なのではなく、
+  配布形態が変わったら再検討する性質のもの。「未実装(やり残し)」と「対象外(現行形態では不要)」を
+  取り違えた表記をしないこと。
+- **Discord の Webhook 送信(`notify/discord`)は実装済みで稼働中**。上記は bot の話であり、
+  Webhook 送信を削る話ではない。
+
+### 移行するとしたら影響が大きい箇所(調査時の出発点)
+- **better-sqlite3**: ネイティブ依存。Cloudflare Workers では動かない(D1 等への置換が要る)。
+  キャッシュ(`scraper/cache.ts`)と分析履歴ストア(`ev/analysis-store.ts`)が依存している。
+- **Electron main / IPC**: `packages/app/src/main` と `preload` は Electron 前提。core は UI 非依存なので
+  移植の主対象は app 側。
+- **設定の保存先**: `settings.json`(`main/settings-store.ts`)。API キー・Webhook URL を含むため、
+  移行時は秘密の扱いを設計し直す必要がある。
+- **レート制限**: `http-client.ts` の1.5秒間隔はプロセス内の状態。分散実行すると保証が崩れる。
+- **通知**: スマホからキックする形になると、完了通知の経路(Discord Webhook / プッシュ等)が改めて必要。
