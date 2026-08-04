@@ -27,6 +27,23 @@
  * 5. スキップ通知ステップの文言が、掃除もスキップしたことと回復手段(workflow_dispatch)に触れている
  * 6. スキップ通知ステップに always() が付いていない
  *    (付けると前段の失敗を「レビュー継続中スキップ」と誤って名乗ってしまう)
+ * 7. 公開ステップが孤児掃除ステップより前に出現する(構造的な順序の不変条件)
+ *    (掃除ステップのコメントが明記する atomicity の前提そのもの。入れ替わると、掃除が
+ *    新 exe のアップロード前に走り、その時点で dev-latest に残る旧バージョンの exe を
+ *    孤児と誤判定して削除する。直後に公開が失敗・中断すると dev-latest の資産がゼロになる)
+ * 8. 公開可否ゲート(env: PUBLISH_DEV_LATEST)のキーがファイル中に厳密に1回だけ定義されている
+ *    (ジョブ env と同名キーをステップ env で再定義する「シャドーイング」が起きていないことの
+ *    構造的な保証。字句の完全一致(不変条件2)だけでは、ジョブ env 側の定義行自体は無傷のまま
+ *    別の場所に同名キーが追加される変異を検出できない)
+ * 9. 全ステップの名前と出現順序が期待する配列と完全一致する
+ *    (不変条件7の publish/cleanup ペア限定の順序比較では、「if: を持たず常に実行される
+ *    無関係なステップを2ステップの間に挿入する」ような、既存ステップの条件式を1文字も
+ *    変えない構造変異を検出できないことが実際に確認された。全ステップの並びを配列として
+ *    まるごと比較することで、挿入・削除・並べ替えを種類を問わず一括で検出する)
+ * 10. 公開ステップに continue-on-error が付いていない
+ *    (付くと公開(action-gh-release)の失敗をジョブが握りつぶし、同じゲートで守られている
+ *    掃除ステップが「新 exe が未アップロードのまま」実行されうる。不変条件7が警告する
+ *    非アトミック性と同根の実害で、条件式を1文字も変えずに起こせることが実際に確認された)
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -80,15 +97,68 @@ function extractIfLine(stepBlock: string): string {
  * コメント行(先頭が `#`)にはマッチしない。これにより、コメント中の記述が実コードの
  * 演算子検証を偽装して素通りさせる事故(コメントと実コードが乖離しても toContain が
  * 満たされてしまう)を避ける。
+ *
+ * さらに、キーがファイル中に厳密に1回だけ出現することを要求する(グローバル検索して件数を
+ * 数える)。ジョブ env で定義したキーと同名のキーをステップ env で再定義する
+ * (シャドーイング)と、`.match()` の非グローバル検索では最初の一致(ジョブ env 側)しか
+ * 見えず、後続の再定義に気づけない。GitHub Actions 上でシャドーイングが `if:` の評価に
+ * 実際に効くかは別途実物検証が要るが、テストの前提として「唯一の定義を検証している」ことは
+ * 安価に保証できるため、複数出現そのものを異常として検出する。
  */
 function extractEnvValue(yml: string, key: string): string {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = yml.match(new RegExp(`^\\s*${escaped}:\\s*(.+)$`, "m"));
-  const captured = match?.[1];
-  if (captured === undefined) {
+  const lineRegex = new RegExp(`^\\s*${escaped}:\\s*(.+)$`, "gm");
+  const matches = [...yml.matchAll(lineRegex)];
+
+  if (matches.length === 0) {
     throw new Error(`env 定義行が見つかりません: ${key}`);
   }
+  if (matches.length > 1) {
+    throw new Error(
+      `env 定義行が複数出現しています(${matches.length}箇所、シャドーイングの疑い): ${key}`,
+    );
+  }
+
+  const captured = matches[0]?.[1];
+  if (captured === undefined) {
+    throw new Error(`env 定義行の値が取得できません: ${key}`);
+  }
   return captured.trim();
+}
+
+/**
+ * yml 本文中でのステップ開始位置(該当 `- name: <name>` 行の先頭インデックス)を返す。
+ * ステップの出現順序(index の大小比較)を検証するために使う。extractStep と同じ
+ * 「名前で一意に引き当てる」設計を踏襲し、見つからない場合は同じ流儀で例外を投げる
+ * (見つからないときに順序比較そのものが無意味な値(-1 同士の比較等)にすり替わらないように
+ * するため)。
+ */
+function stepStartIndex(yml: string, stepName: string): number {
+  const marker = `      - name: ${stepName}`;
+  const idx = yml.indexOf(marker);
+  if (idx === -1) {
+    throw new Error(`ステップが見つかりません: ${stepName}`);
+  }
+  return idx;
+}
+
+/**
+ * yml 本文に出現する全ステップの名前を出現順に列挙する。
+ * `publishIndex < cleanupIndex` のようなペア単位の順序比較では、既知の2ステップ間の
+ * 前後関係しか見えず、「無関係な新規ステップを2ステップの間に挿入する」
+ * (if: を持たず常に実行される・条件式を1文字も変えない)ような構造変異を検出できない。
+ * 全ステップの並びを列挙して期待する配列とまるごと比較することで、挿入・削除・並べ替えを
+ * 種類を問わず一括で検出する。
+ */
+function extractAllStepNames(yml: string): string[] {
+  const matches = [...yml.matchAll(/^ {6}- name: (.+)$/gm)];
+  return matches.map((m) => {
+    const captured = m[1];
+    if (captured === undefined) {
+      throw new Error("ステップ名の抽出に失敗しました(正規表現の不整合)");
+    }
+    return captured.trim();
+  });
 }
 
 describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件)", () => {
@@ -173,5 +243,63 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
   it("スキップ通知ステップに always() が付いていない(前段失敗を誤ってスキップ扱いしないため)", () => {
     const noticeStep = extractStep(yml, STEP_NAMES.skipNotice);
     expect(noticeStep).not.toContain("always()");
+  });
+
+  it("公開ステップが孤児掃除ステップより前に出現する(atomicity: 掃除は新exeのアップロード後でなければならない)", () => {
+    const publishIndex = stepStartIndex(yml, STEP_NAMES.publish);
+    const cleanupIndex = stepStartIndex(yml, STEP_NAMES.cleanup);
+
+    // 順序そのものが安全性の前提。掃除ステップのコメントが明記する通り、掃除ステップは
+    // 「直前の公開ステップの後に置く」ことで、最新 exe が必ず先にアップロード済みの状態を
+    // 保ったまま(atomicity を壊さず)現行ファイル名以外の .exe だけを削除している。
+    // 入れ替わると、掃除が新 exe のアップロード前に走り、その時点で dev-latest に残る
+    // 旧バージョンの exe を孤児と誤判定して削除する。直後に公開が成功すれば最終的な資産は
+    // 揃うが、掃除と公開の間で公開が失敗・中断すると dev-latest の資産がゼロになる
+    // (コメントが警告している非アトミック性そのもの)。両ステップの `if:` や文言を
+    // 一切変更せず出現順序だけを入れ替える変異は、これまでの字句レベルの不変条件
+    // (1〜6・8)では検出できないため、構造(出現位置)を直接比較する。
+    expect(publishIndex).toBeLessThan(cleanupIndex);
+  });
+
+  it("公開可否ゲート(PUBLISH_DEV_LATEST)のキーがファイル中に厳密に1回だけ定義されている(シャドーイングの検出)", () => {
+    // extractEnvValue はキーが複数出現すると例外を投げる設計にしている(ジョブ env と
+    // 同名キーをステップ env で再定義する「シャドーイング」を検出するため)。ここでは
+    // 「例外を投げずに呼び出せること」自体を、唯一性が保たれていることの直接証拠として
+    // 確認する(不変条件2の値の完全一致だけでは、ジョブ env 側の定義行自体は無傷のまま
+    // 別の場所に同名キーが追加される変異を検出できない)。
+    expect(() => extractEnvValue(yml, "PUBLISH_DEV_LATEST")).not.toThrow();
+  });
+
+  it("全ステップの名前と出現順序が期待する配列と完全一致する(挿入・削除・並べ替えを一括で検出する)", () => {
+    // 前提固定: このジョブが11ステップから成ることをまず固定する(配列比較が
+    // 空配列同士の一致のような自明なもので満たされないようにするため)。
+    const actualNames = extractAllStepNames(yml);
+    expect(actualNames.length).toBeGreaterThan(0);
+
+    expect(actualNames).toEqual([
+      "リポジトリを取得",
+      "pnpm をセットアップ",
+      "Node.js をセットアップ",
+      "依存をインストール",
+      "テストを実行",
+      "app をビルド",
+      "electron-builder で exe を生成",
+      STEP_NAMES.publish,
+      STEP_NAMES.cleanup,
+      STEP_NAMES.skipNotice,
+      STEP_NAMES.tagRelease,
+    ]);
+  });
+
+  it("公開ステップに continue-on-error が付いていない(atomicity: 公開失敗を握りつぶすと、新exe未アップロードのまま掃除だけ実行されうる)", () => {
+    const publishStep = extractStep(yml, STEP_NAMES.publish);
+
+    // continue-on-error: true が付くと、公開(action-gh-release)が失敗してもジョブは
+    // 成功継続する。同じ PUBLISH_DEV_LATEST == 'true' で守られている掃除ステップは
+    // 「前段(公開)成功」を前提に実行されるため、公開失敗を握りつぶすと「新 exe が
+    // アップロードされていないのに掃除だけ走る」という、不変条件7が警告する非アトミック性
+    // (dev-latest の資産がゼロになる)と同じ実害を招く。条件式・出現順序を1文字も変えずに
+    // 起こせる変異のため、別途この属性の不在を検証する。
+    expect(publishStep).not.toContain("continue-on-error");
   });
 });
