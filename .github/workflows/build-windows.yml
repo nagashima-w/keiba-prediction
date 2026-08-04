@@ -33,6 +33,35 @@ jobs:
   build:
     # Windows ネイティブの exe を作るため windows-latest 上でビルドする。
     runs-on: windows-latest
+    env:
+      # PUBLISH_DEV_LATEST: dev-latest への公開可否をここで一元判定する。
+      # 公開ステップ・孤児掃除ステップ・スキップ通知ステップは必ずこの値だけを参照し、
+      # 条件式を2箇所以上に複製してはならない(複製した2つがずれると「公開せずに掃除だけ実行」に
+      # なり、dev-latest の exe が全滅する。掃除ステップは現行ビルド成果物以外の .exe を
+      # 無条件に削除するため)。
+      #
+      # - startsWith(github.ref, 'refs/heads/'): ブランチ push / ブランチへの手動実行
+      #   (workflow_dispatch)のみを対象にする。v* タグ push・タグ ref への手動実行では常に false
+      #   になる(正式リリースは下部の別ステップ・別条件が担当し、本フラグの影響を受けない)。
+      # - github.event_name == 'push' && contains(head_commit.message, 'レビュー継続中') が真の間
+      #   だけ公開を止める。event_name == 'push' を明示するのは、workflow_dispatch では
+      #   head_commit が null になるため、暗黙の型強制(null への contains 呼び出し)に手動実行時の
+      #   挙動を委ねず、「手動実行では常に公開する」意図を式として明示するため。
+      #
+      # 照合文字列は括弧なしの「レビュー継続中」。CLAUDE.md 上の運用表記は「(レビュー継続中)」だが、
+      # 括弧なしの部分一致は括弧ありの表記も内包する広い側の判定であり、fail-safe(過剰スキップ)側に
+      # 意図的に倒している: 過小スキップ(未承認コードが公開される)は無言で誰も気付かないのに対し、
+      # 過剰スキップは下のスキップ通知ステップの ::notice:: と exe 未更新ですぐ判り、
+      # workflow_dispatch でいつでも回復できるためコストが低い。副作用として、この規約自体に
+      # 言及する将来のコミット(コミットメッセージに「レビュー継続中」を含むもの)も意図せず
+      # スキップ対象になり得るが、上記の理由により許容する。
+      #
+      # 残存ギャップ: 1回の push に複数コミットが含まれる場合の判定は head_commit(push後のref先端の
+      # コミット = 実際にビルドされるツリーそのもの)のみで行う。先端コミットのメッセージに印が
+      # 無ければ、同じ push 内の祖先コミットが未承認でも公開される。CLAUDE.md (b) が「レビュー継続中の
+      # 中間コミットには必ず印を付ける」運用を要求していることと、先端が無印=承認済みという運用前提の
+      # 上での許容(下の孤児掃除ステップが自身の並行実行競合ウィンドウを明記しているのと同じ作法)。
+      PUBLISH_DEV_LATEST: ${{ startsWith(github.ref, 'refs/heads/') && !(github.event_name == 'push' && contains(github.event.head_commit.message, 'レビュー継続中')) }}
     steps:
       - name: リポジトリを取得
         uses: actions/checkout@v4
@@ -69,7 +98,8 @@ jobs:
       # (delete 方式だと公開失敗時に dev-latest が消えたまま残る非アトミック性があるため)。
       # 同名アセット(keiba-ev-tool-<version>-portable.exe)は上書き設定で置き換える。
       - name: Releases に公開(dev-latest を in-place 更新 / ブランチ push 時)
-        if: startsWith(github.ref, 'refs/heads/')
+        # 公開可否はジョブ env の PUBLISH_DEV_LATEST に一元化(孤児掃除ステップと必ず同じ値を参照する)。
+        if: env.PUBLISH_DEV_LATEST == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dev-latest
@@ -99,7 +129,9 @@ jobs:
       # アップロードした exe を孤児と誤判定して削除する競合ウィンドウが理論上ある(本ステップの
       # スコープ外の構造的リスクとして許容する)。
       - name: dev-latest の孤児 exe アセットを掃除(現行ファイル名以外を削除)
-        if: startsWith(github.ref, 'refs/heads/')
+        # 公開ステップと必ず同じ値(ジョブ env の PUBLISH_DEV_LATEST)を参照する。ここだけ条件式を
+        # 書き換えてずらすと、公開されないまま掃除だけ走り dev-latest の exe が全滅する。
+        if: env.PUBLISH_DEV_LATEST == 'true'
         shell: bash
         # このステップは前段で exe 本体のアップロードが完了した後の後片付けであり、
         # 失敗してもビルド・公開自体は成功させたい(受け入れ条件: run が conclusion=success)。
@@ -145,6 +177,20 @@ jobs:
               fi
             done <<< "$ORPHANS"
           fi
+
+      # ゲート条件でスキップした場合に理由をログへ残す(無言スキップは不可)。
+      # 条件をブランチ push / ブランチへの手動実行に限定するのは、v* タグ push や
+      # タグ ref への手動実行では PUBLISH_DEV_LATEST が(レビュー継続中とは無関係の理由で)常に
+      # false になり、そのまま逆条件にすると「レビュー継続中のためスキップした」という事実と異なる
+      # notice を出してしまうため(dev-latest 公開はそもそもブランチ push 専用の仕組みであり、
+      # タグ push には無関係)。
+      # always() は付けない: 前段(テスト・ビルド・パッケージング等)が失敗した場合、暗黙の
+      # success() によりこのステップもスキップされる。always() を付けると、ビルド失敗を
+      # 「レビュー継続中スキップ」と誤って名乗ってしまう事故になる。
+      - name: dev-latest 公開スキップをログに記録(レビュー継続中コミット時)
+        if: startsWith(github.ref, 'refs/heads/') && env.PUBLISH_DEV_LATEST != 'true'
+        run: |
+          echo "::notice::コミットメッセージに『レビュー継続中』が含まれるため、dev-latest への公開と孤児 exe 掃除をスキップしました(必要なら workflow_dispatch で公開できます)"
 
       # v* タグ push 時: そのタグの正式リリース(プレリリースではない)を作成する。
       # tag_name を指定しなければ、トリガーとなったタグ(github.ref)がそのまま使われる。
