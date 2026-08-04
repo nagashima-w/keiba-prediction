@@ -49,11 +49,15 @@ export {
   narOddsPageUrl,
   narRaceListSubUrl,
   NarUnsupportedError,
+  narTrioOddsPageUrl,
+  narWideOddsPageUrl,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
   raceResultUrl,
   shutubaUrl,
+  trioOddsApiUrl,
+  wideOddsApiUrl,
 } from "./scraper/urls.js";
 export { parseRaceList } from "./scraper/parse-race-list.js";
 export {

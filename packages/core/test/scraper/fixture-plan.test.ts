@@ -37,6 +37,8 @@ describe("parseFetchArgs(取得スクリプトの引数パース)", () => {
     expect(args.date).toBe("20260628");
     expect(args.races).toEqual(["202605020811", "202601020811"]);
     expect(args.horses).toEqual(["2019105219"]);
+    // 新フラグ未指定時は空配列(既存--raceの挙動に影響しないことの確認)。
+    expect(args.oddsTypeRaces).toEqual([]);
   });
 
   it("引数なしのときは開催日なし・空配列を返すこと", () => {
@@ -44,6 +46,29 @@ describe("parseFetchArgs(取得スクリプトの引数パース)", () => {
     expect(args.date).toBeUndefined();
     expect(args.races).toEqual([]);
     expect(args.horses).toEqual([]);
+    expect(args.oddsTypeRaces).toEqual([]);
+  });
+
+  it("--race-odds-types(複数指定可)からワイド・3連複フィクスチャ対象のレースIDを検証済みで取り出せること(機能D-1、既存--raceとは独立)", () => {
+    const args = parseFetchArgs([
+      "--race-odds-types",
+      "202605020811",
+      "--race-odds-types",
+      "202654071210",
+    ]);
+    expect(args.oddsTypeRaces).toEqual(["202605020811", "202654071210"]);
+    // 既存--raceのリストには混入しないこと。
+    expect(args.races).toEqual([]);
+  });
+
+  it("--race-odds-typesに値を伴わない場合はエラーになること", () => {
+    expect(() => parseFetchArgs(["--race-odds-types"])).toThrow(/値/);
+  });
+
+  it("--race-odds-typesに不正なレースIDを渡すとInvalidIdErrorとして伝播すること", () => {
+    expect(() =>
+      parseFetchArgs(["--race-odds-types", "202611020811"]),
+    ).toThrow(InvalidIdError);
   });
 
   it("不正なレースIDはInvalidIdErrorとして伝播すること", () => {
@@ -180,6 +205,85 @@ describe("planFixtureTargets(取得対象とファイル名・URLの対応)", ()
     expect(targets).toHaveLength(2);
     const urls = targets.map((t) => t.url);
     expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  describe("--race-odds-types(ワイド・3連複フィクスチャの計画。機能D-1、既存--raceとは独立したオプトイン)", () => {
+    it("中央race_idを渡すとワイド・3連複JSON APIの2対象を生成すること", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [],
+        horses: [],
+        oddsTypeRaces: [race("202605020811")],
+      });
+      expect(targets).toHaveLength(2);
+      expect(find(targets, "odds_wide_202605020811.json").url).toBe(
+        "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=5&action=init",
+      );
+      expect(find(targets, "odds_trio_202605020811.json").url).toBe(
+        "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=7&action=init",
+      );
+    });
+
+    it("地方race_idを渡すとワイド・3連複オッズページの2対象を生成すること", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [],
+        horses: [],
+        oddsTypeRaces: [race("202654071210")],
+      });
+      expect(targets).toHaveLength(2);
+      expect(find(targets, "nar_odds_b5_202654071210.html").url).toBe(
+        "https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202654071210",
+      );
+      expect(find(targets, "nar_odds_b7_202654071210.html").url).toBe(
+        "https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202654071210",
+      );
+    });
+
+    it("同一レースIDが重複指定されても同一URLは1回だけ計画すること", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [],
+        horses: [],
+        oddsTypeRaces: [race("202605020811"), race("202605020811")],
+      });
+      expect(targets).toHaveLength(2);
+      const urls = targets.map((t) => t.url);
+      expect(new Set(urls).size).toBe(urls.length);
+    });
+
+    it("--race-odds-types未指定(省略)のときはワイド・3連複対象を生成しないこと(既存--race挙動への回帰防止)", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [race("202605020811")],
+        horses: [],
+      });
+      // 既存の出馬表・追い切り・コメント・オッズの4対象のみ(新規4ファイル名は含まれない)。
+      expect(targets).toHaveLength(4);
+      expect(
+        targets.find((t) => t.filename === "odds_wide_202605020811.json"),
+      ).toBeUndefined();
+      expect(
+        targets.find((t) => t.filename === "odds_trio_202605020811.json"),
+      ).toBeUndefined();
+    });
+
+    it("--raceと--race-odds-typesを同一レースIDで併用すると、両方の対象が生成されること", () => {
+      const targets = planFixtureTargets({
+        date: undefined,
+        races: [race("202605020811")],
+        horses: [],
+        oddsTypeRaces: [race("202605020811")],
+      });
+      // 既存4対象 + ワイド・3連複2対象 = 6対象。
+      expect(targets).toHaveLength(6);
+      expect(
+        find(targets, "odds_wide_202605020811.json").url,
+      ).toContain("type=5");
+      expect(
+        find(targets, "odds_trio_202605020811.json").url,
+      ).toContain("type=7");
+    });
   });
 
   describe("地方(NAR)race_idの計画(oikiri/commentは存在しないため除外)", () => {

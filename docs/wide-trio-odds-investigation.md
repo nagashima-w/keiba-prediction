@@ -1,0 +1,251 @@
+# ワイド・3連複オッズの実測調査記録(機能D-1、Issue #13)
+
+実測日: 2026-08-04。実行者: tdd-implementer(boss着手前ゲート合意済み・条件付きGo→4件回答によりGo維持)。
+
+対象は「ワイド・3連複のオッズをどう取得するか」の実測調査と、`urls.ts` / `fixture-plan.ts` の
+拡張、フィクスチャ整備。パーサ本体(`OddsSnapshot`型拡張・`parse-wide-odds.ts`等)は
+**次の Issue #14 のスコープ**であり、本ドキュメントは実測結果の記録に徹する。
+
+## 1. 実リクエスト一覧(合計24件。上限24件以内)
+
+すべて `HttpClient`(既定: 最低1.5秒間隔・UA明示)経由。`curl`直叩き・並列取得はしていない。
+
+| # | 目的 | URL |
+|---|---|---|
+| 1 | 中央タブ構造の観測 | `https://race.netkeiba.com/odds/index.html?type=b1&race_id=202603020211` |
+| 2 | 中央ワイドタブのAJAXフラグメント | `https://race.netkeiba.com/odds/odds_get_form.html?type=b5&race_id=202603020211&rf=shutuba_submenu` |
+| 3 | 中央3連複タブのAJAXフラグメント | `https://race.netkeiba.com/odds/odds_get_form.html?type=b7&race_id=202603020211&rf=shutuba_submenu` |
+| 4 | 中央ワイドJSON API(type確認) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=5&action=init` |
+| 5 | 中央3連複JSON API(type確認) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=7&action=init` |
+| 6 | 地方ワイドページ | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202654071210` |
+| 7 | 地方3連複ページ | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202654071210` |
+| 8 | 地方3連複jiku切替の誤仮説検証(index.html直叩き、失敗) | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202654071210&jiku=2` |
+| 9 | 地方3連複jiku切替の正しい経路(AJAXフラグメント) | `https://nar.netkeiba.com/odds/odds_get_form.html?type=b7&race_id=202654071210&jiku=2` |
+| 10 | 中央6頭result.html(一次証拠) | `https://race.netkeiba.com/race/result.html?race_id=202602010605` |
+| 11 | 中央6頭ワイド | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202602010605&type=5&action=init` |
+| 12 | 中央6頭3連複 | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202602010605&type=7&action=init` |
+| 13 | 地方6頭result.html(一次証拠) | `https://nar.netkeiba.com/race/result.html?race_id=202646071203` |
+| 14 | 地方6頭ワイド | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202646071203` |
+| 15 | 地方6頭3連複 | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202646071203` |
+| 16 | 中央5頭result.html(一次証拠) | `https://race.netkeiba.com/race/result.html?race_id=202603020203` |
+| 17 | 中央5頭ワイド | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020203&type=5&action=init` |
+| 18 | 中央5頭3連複 | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020203&type=7&action=init` |
+| 19 | 地方7頭result.html(一次証拠) | `https://nar.netkeiba.com/race/result.html?race_id=202630062407` |
+| 20 | 地方7頭ワイド | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202630062407` |
+| 21 | 地方7頭3連複 | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202630062407` |
+| 22 | CLI(`--race-odds-types`)動作確認: 中央ワイド | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=5&action=init` |
+| 23 | CLI動作確認: 中央3連複 | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=7&action=init` |
+| 24 | 未発売状態(state③)の探索(結果は失敗。§7参照) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202642071301` |
+
+すべて HTTP 200(4xxは一度も発生しなかった。§7参照)。#22・#23 は #4・#5 と同一URLの再取得(CLI経路の
+実動作確認のため。予算制約上、他のレースはCLI再取得せず探索フェーズの実データをそのまま正式名称で
+フィクスチャとしてコミットしている。詳細は §8)。
+
+候補レース選定はすべて既存の `race_list_sub` フィクスチャに対する `parseRaceList`(既存パーサ)の
+`entryCount` から行った。正規表現の近接ペアリングはしていない(boss指摘のバグの再発防止)。
+
+## 2. 中央: 取得経路の確定
+
+### 2.1 タブ→typeコード対応(中央から独立観測。地方の値を仮定していない)
+
+`race.netkeiba.com/odds/index.html?type=b1&race_id=202603020211` のHTML内、タブナビゲーション
+(`<li id="odds_navi_bN">`)から実測(#1):
+
+| タブ内部コード | 表記 |
+|---|---|
+| b0 | 上位人気一覧 |
+| b1 | 単勝・複勝 |
+| b3 | 枠連 |
+| b4 | 馬連 |
+| **b5** | **ワイド** |
+| b6 | 馬単 |
+| **b7** | **3連複** |
+| b8 | 3連単 |
+
+**中央と地方(boss実測)のtype対応は完全一致していた**(b2欠番も含め同一)。ただしこれは「タブの
+内部コード」の一致であり、後述のとおり実際の**データ取得経路(API/軸馬別取得の有無)は中央/地方で
+大きく異なる**。
+
+### 2.2 数値type(JSON API)への対応(中央のみ)
+
+各タブのAJAXフラグメント(`odds_get_form.html?type=bN&race_id=...`)内の埋め込みJS
+(`$.oddsUpdate({...})`)から、数値type値を独立観測(#2, #3):
+
+- ワイドフラグメント(`type=b5`)の埋め込みJS: `oddsType:'5'`
+- 3連複フラグメント(`type=b7`)の埋め込みJS: `oddsType:'7'`
+
+既存の単勝・複勝JSON API(`oddsApiUrl`、`type=1`)と**同一エンドポイント**
+(`race.netkeiba.com/api/api_get_jra_odds.html`)の `type` クエリを変えるだけで取得できることを
+実測で確認(#4, #5)。レスポンス例(#4, 16頭):
+
+```
+{"status":"result","data":{"official_datetime":"2026-06-28 15:52:30",
+"odds":{"5":{"0102":["18.3","19.1","25"],"0103":["17.5","18.3","22"], ...}}},
+"update_count":"0","reason":""}
+```
+
+3連複(#5、16頭)の応答冒頭:
+
+```
+{"status":"result","data":{"official_datetime":"2026-06-28 15:52:30",
+"odds":{"7":{"010203":["260.2","0.0","103"],"010204":["942.3","0.0","298"], ...}}},
+"update_count":"0","reason":""}
+```
+
+### 2.3 中央の結論
+
+- **経路**: JSON API `GET https://race.netkeiba.com/api/api_get_jra_odds.html?race_id={race_id}&type={5|7}&action=init`(既存`oddsApiUrl`と同一メカニズム)
+- **1レース分の全組合せに必要なリクエスト数**: **1**(ワイド・3連複とも)。16頭のレースでC(16,2)=120件・C(16,3)=560件が1レスポンスに全件含まれることを確認済み(`packages/core/test/scraper/wide-trio-odds-fixtures.test.ts`で組合せ集合の完全一致を検証)
+- **ワイドは幅(下限-上限)**。`data.odds["5"][キー] = [下限, 上限, 人気]`(既存の複勝type=2と同じ並び)。全120件で下限<=上限が成立し、かつ差が0でない組が存在(退化していない)ことをテストで確認
+- **3連複は単一値**。`data.odds["7"][キー] = [オッズ, "0.0"(ダミー), 人気]`(既存の単勝type=1と同じ形)
+- キー形式: ワイドは4桁(馬番2桁×2、昇順連結。例`"0102"`)、3連複は6桁(馬番2桁×3、昇順連結)
+
+## 3. 地方: 取得経路の確定
+
+### 3.1 ワイド(type=b5)
+
+`GET https://nar.netkeiba.com/odds/index.html?type=b5&race_id={race_id}` の**静的HTML**
+(#6、12頭)。軸馬(1〜11)ごとの `<table class="Odds_Table">` が**すべて同一ページに含まれる**
+(`<div class="Axis_Horse_Container">` のような軸馬選択UIは存在しない)。
+
+各組の値は `<td class="Odds" id="chk_..._b5_c0_{a}_{b}">41.9 - 42.8` のようにテキストで
+「下限 - 上限」の順に埋め込まれている。
+
+- **1レース分の全組合せに必要なリクエスト数**: **1**。12頭のレースでC(12,2)=66件と完全一致
+- **幅形式**であることをテキストの `"数値 - 数値"` パターンで確認、全件で下限<=上限、非退化
+
+### 3.2 3連複(type=b7)。中央と挙動が異なる重要な発見
+
+`GET https://nar.netkeiba.com/odds/index.html?type=b7&race_id={race_id}` の静的HTMLには
+`<select id="list_select_horse">`(軸馬選択プルダウン)と `<div class="Axis_Horse">` が存在し、
+ページ読み込み時点で**軸馬1固定**の組合せしか表示されない(#7、12頭でC(11,2)=55件のみ。
+全体C(12,3)=220件の一部)。
+
+軸馬切替はJS関数 `view_3odds_normal()` が発火し、AJAX GET
+`../odds/odds_get_form.html?type=b7&race_id=...&jiku={軸馬番}` を叩く実装だった。
+
+**変数を1つだけ変える検証**: まず `index.html?...&jiku=2` を素朴に叩いたところ(#8)、軸馬2の
+データではなく**軸馬1のデータがそのまま返った**(index.htmlは`jiku`クエリを無視し常に軸馬1固定。
+コメントアウトされた旧実装 `location.href = "?...&jiku=" + umaban` の名残と考えられる)。
+正しいエンドポイント(`odds_get_form.html?...&jiku=2`)を叩き直したところ(#9)、軸馬2の
+組合せ(全件馬02を含む、馬01を含む組も許容=C(10,2)超のC(11,2)=55件、軸馬1の集合との重複10件)
+が確認でき、**軸馬別取得**であることを確定した。
+
+- **1レース分の全組合せに必要なリクエスト数**: **軸馬別取得のため n-2 回**(n=頭数)。
+  例: 12頭なら軸1〜10の**10リクエスト**、16頭なら**14リクエスト**必要
+  (「18回叩くのは禁止」の指示のとおり、全軸を実際に叩いて確かめてはいない。軸1→軸2への
+  差分確認1件のみで確定した)
+- **単一値形式**。td内テキストに幅を表す `"-"` 区切りが無く、単独の数値のみ(構造的にもワイドの
+  `<span id="oddsmin-5-...">` 相当の要素が3連複側には存在しない)
+
+### 3.3 地方の結論
+
+| 券種 | 経路 | 1レース全組合せの必要リクエスト数 | 形式 |
+|---|---|---|---|
+| ワイド | 静的HTML(`type=b5`、軸馬クエリ不要) | 1 | 幅(下限-上限) |
+| 3連複 | 静的HTML(`type=b7`、`jiku`で軸馬指定) | **n-2**(軸馬別取得) | 単一値 |
+
+## 4. 実測で埋めた5論点(boss指定)
+
+1. **1レース全組合せの必要リクエスト数**: 中央はワイド・3連複とも**1**。地方はワイドが**1**、
+   3連複が**n-2**(軸馬別取得)。**中央/地方で3連複の取得方式が根本的に異なる**ことが今回の
+   最大の発見。#14の設計判断に直結する(地方の3連複を全通り取得する場合、頭数が多いレースほど
+   リクエスト数が線形に増える)
+2. **ワイドは幅・3連複は単一値**。中央・地方とも共通(§2.3, §3.3)
+3. **組合せ件数はC(n,2)/C(n,3)と一致するか**: 中央(ワイド・3連複とも)・地方ワイドは**完全一致**
+   (取消馬が今回の実測範囲に含まれなかったため「欠落時にどうなるか」は今回未検証。#14で取消馬
+   ありのレースを対象にする場合は追加確認が必要)。地方3連複は前述のとおり軸馬別のため単純な
+   件数比較ではなく「軸馬1固定の部分集合との完全一致」で検証(テストコード参照)
+4. **中央のAPI/ページ判断**: 静的ページ(`odds/index.html?type=b1`)自体は現在の実オッズを
+   表示するJSプレースホルダ(`---.-`)であり、確定オッズはページ単体では取得できない。1リクエストで
+   全点取れるJSON API(`api_get_jra_odds.html`)が既存 `oddsApiUrl` と同一メカニズムであるため、
+   これを正式ルートとした(判断基準(i)(ii)がどちらもAPI側を支持し、両論併記の必要はなかった)
+5. **地方のtypeコードは中央と同じか**: **同じだった**(b0/b1/b3/b4/b5/b6/b7/b8のタブ内部コードが
+   完全一致)。ただし取得方式(軸馬別取得の有無)は異なるため、「typeコードが同じ=挙動が同じ」では
+   ないことに注意
+
+## 5. フィクスチャ対応表
+
+| ファイル名 | レース | 頭数 | 状態 | 頭数の情報源 |
+|---|---|---|---|---|
+| `odds_wide_202603020211.json` | 中央・福島11R ラジオNIKKEI賞 | 16 | ①発売されていた(確定) | `shutuba_202603020211.html`のHorseList行数(既存フィクスチャ) |
+| `odds_trio_202603020211.json` | 同上 | 16 | ①同上 | 同上 |
+| `nar_odds_b5_202654071210.html` | 地方・高知10R ファイナルレース | 12 | ①発売されていた(確定) | `nar_race_list_sub_20260712.html`のentryCount(既存フィクスチャ) |
+| `nar_odds_b7_202654071210.html` | 同上 | 12 | ①同上(軸馬1固定) | 同上 |
+| `odds_wide_202602010605.json` | 中央・函館5R 2歳新馬 | 6 | ①発売されていた(確定) | `race_list_sub_20260628.html`のentryCount |
+| `odds_trio_202602010605.json` | 同上 | 6 | ①同上 | 同上 |
+| `result_202602010605.html` | 同上 | 6 | 払戻確定(一次証拠) | 同上 |
+| `odds_wide_202603020203.json` | 中央・福島3R 2歳未勝利 | 5 | ①発売されていた(確定) | `race_list_sub_20260628.html`のentryCount |
+| `odds_trio_202603020203.json` | 同上 | 5 | ①同上 | 同上 |
+| `result_202603020203.html` | 同上 | 5 | 払戻確定(一次証拠) | 同上 |
+| `nar_odds_b5_202646071203.html` | 地方・金沢3R 2歳新馬 | 6 | ①発売されていた(確定) | `nar_race_list_sub_20260712.html`のentryCount |
+| `nar_odds_b7_202646071203.html` | 同上 | 6 | ①同上(軸馬1固定) | 同上 |
+| `nar_result_202646071203.html` | 同上 | 6 | 払戻確定(一次証拠) | 同上 |
+| `nar_odds_b5_202630062407.html` | 地方・門別7R アルキバ特別 | 7 | ①発売されていた(確定) | `nar_race_list_sub_20260624.html`のentryCount |
+| `nar_odds_b7_202630062407.html` | 同上 | 7 | ①同上(軸馬1固定) | 同上 |
+| `nar_result_202630062407.html` | 同上 | 7 | 払戻確定(一次証拠) | 同上 |
+
+すべて `pnpm tsx scripts/fetch-fixtures.ts --race-odds-types {race_id}`(中央/地方は
+race_idから自動判定)で再取得できる経路(実際に202603020211でCLI実行し確認済み。§8)。
+`result_*.html` / `nar_result_*.html` は既存の `raceResultUrl` を使うが、`fixture-plan.ts` には
+元々result.html用のCLIターゲットが無い(既存の `result_202602010607.html` も同様にCLI経路外で
+取得された前例に倣った)。これは本Issueのスコープ外(urls.tsの`raceResultUrl`自体は既存)。
+
+## 6. 発売条件の4状態
+
+| 状態 | 今回の実測結果 |
+|---|---|
+| ①発売されていた | 中央5・6・16頭、地方6・7・12頭の**全レース**でワイド・3連複とも確認(result.htmlの`tr.Wide`/`tr.Fuku3`一次証拠+オッズ側の組合せ完全一致という二次証拠の両方で裏付け) |
+| ②発売なし | **今回の実測範囲(5〜16頭)では1件も観測できなかった**。中央2026-06-28・地方2026-07-12/06-24/07-13の計4つの`race_list_sub`(約150レース)を0追加リクエストで探索したが、4頭以下のレースが1件も見つからなかった(観測範囲の実情)。よって「4頭以下でワイド・3連複が発売されないこと」は**未確認**として記録する(推測で断定しない) |
+| ③未発売(発走前) | **今回は取得できなかった**。2026-08-04(火)は中央非開催。地方の既存「発売前」フィクスチャ(`nar_odds_b1_presale_202642071301.html`、race_id=202642071301)を流用してワイドを再取得したところ(#24)、このレースは2026年7月13日開催で**既に終了しており、確定オッズ(下限-上限を含む実数値)が返った**(状態①)。「presale」という古いフィクスチャ名は取得**時点**の状態であり、同じrace_idを後日再取得しても③が再現するとは限らないという教訓が得られた。#14着手前に中央の開催日を確認した上で改めて取得する必要がある |
+| ④取得失敗 | **今回は1件も発生しなかった**(全24リクエストがHTTP 200)。`scripts/fetch-fixtures.ts`は4xxで`HttpError`を投げてループが止まる実装のままであり(本Issueのスコープ外、CLAUDE.md参照)、探索フェーズでは`try/catch`でステータスを記録する専用スクリプト(非コミット、scratchpad配下)を使った |
+
+**②③④の実例を持てなかったことは本調査の限界として明記する。** #14の着手前に、(a)中央の
+開催日に発走前オッズを再取得する、(b)4頭以下のレースを別日程の一覧から探す、のいずれかが
+必要になる可能性がある。
+
+## 7. resolvePlaceBetTarget(複勝7頭以下対象外)の再検討材料
+
+`packages/app/src/renderer/bet-allocation-view.ts` の `resolvePlaceBetTarget` は変更していない
+(AC9)。実測結果を再検討材料として記録する:
+
+- **ワイド・3連複は5頭・6頭・7頭のレースでも発売されていた**(§6)。複勝が「2着まで」に
+  変わる7頭以下の帯でも、ワイド・3連複自体は(複勝と独立に)発売されている
+- **枠連(0追加リクエストでの副産物的観測)**: 中央5・6頭、地方6・7頭のいずれの`result.html`にも
+  `tr.Wakuren`(枠連の払戻行)が存在しなかった。一方、既存フィクスチャ`result_202602010607.html`
+  (中央・10頭)には`tr.Wakuren`が存在する。5〜7頭では枠連が発売されず、10頭では発売される
+  ことが示唆されるが、8・9頭の境界は未検証(#26のスコープ外につき追加リクエストはしていない)
+
+## 8. 予算とCLI経路の整合(AC5)
+
+探索フェーズ(URL構築・データ形式の特定)は非コミットのアドホックスクリプト
+(`HttpClient`直呼び出し)で行った。経路確定後、本番コード(`urls.ts`/`fixture-plan.ts`/
+`scripts/fetch-fixtures.ts`の新フラグ`--race-odds-types`)をTDDで実装し、**実際にCLIを実行して
+動作確認した**(race_id=202603020211、中央ワイド・3連複の2ファイルをCLI経由で取得・保存。
+§1の#22, #23)。
+
+予算(24件)の制約上、他の10レース分(地方2件×5レース+中央2件×1レース=既に探索フェーズで
+取得済みの12ファイル)はCLIで二重取得していない。**探索フェーズで`HttpClient`経由で取得した
+実データをそのまま正式なファイル名でコミットしている**(URLは`urls.ts`の関数が生成するものと
+同一であり、内容の改変は一切していない)。これらのファイルが実際にCLI経路で再取得可能である
+ことは、同一URL構築ロジックを使う202603020211の動作確認と、`fixture-plan.test.ts`のURL完全一致
+テストで裏付けている。
+
+## 9. キャッシュキー(AC10)
+
+いずれの新規URLも `race_id` と `type`(・地方3連複は`jiku`)がすべてURLクエリに含まれ、
+POSTボディに識別子が入る設計ではない(`race_api/`のような事故パターンに該当しない)。
+`action=init`はセッション依存ではなく、Cookie無しの直接GETで確定オッズが取得できることを
+実測で確認済み。**`cacheKey`の明示指定は不要**(既存`oddsApiUrl`と同じURLキー方式で足りる)。
+
+申し送り(#14向け): オッズは揮発性のため、既存の複勝オッズと同様`bypassOddsCache`相当の
+迂回が必要になる(`scrape-race.ts`の既存パターンを踏襲する想定)。
+
+## 10. #14への申し送り事項まとめ
+
+1. **地方の3連複は軸馬別取得**。全通り取得する場合は頭数-2回のリクエストが必要。方式(全通り取得
+   するか上位候補馬に絞るか)は#14の着手前ゲートで判断する(本Issueでは判断しない)
+2. **状態③(未発売)・④(取得失敗)の実フィクスチャが無い**。#14着手前に中央の開催日を確認して
+   追加取得するか、地方の直近レースで再探索する必要がある
+3. **取消馬がいるレースでの組合せ欠落パターンが未検証**(今回の実測レースはいずれも取消馬なし)
+4. **`resolvePlaceBetTarget`の変更判断は#14に持ち越し**(§7の再検討材料を参照)

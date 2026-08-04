@@ -21,10 +21,14 @@ import {
   horseResultsApiUrl,
   horseUrl,
   narOddsPageUrl,
+  narTrioOddsPageUrl,
+  narWideOddsPageUrl,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
   shutubaUrl,
+  trioOddsApiUrl,
+  wideOddsApiUrl,
 } from "./urls.js";
 
 /** パース済みのフィクスチャ取得引数。 */
@@ -35,6 +39,13 @@ export interface FetchFixturesArgs {
   readonly races: RaceId[];
   /** 取得対象の馬ID一覧。 */
   readonly horses: HorseId[];
+  /**
+   * ワイド・3連複フィクスチャ(機能D-1)の取得対象レースID一覧。
+   * 既存の `races`(出馬表・追い切り・コメント・単複オッズ)とは独立したオプトインの
+   * 取得対象で、`--race` の既存挙動(planFixtureTargetsが生成する対象の集合)を
+   * 変えないために分離している。省略時(undefined)は空配列と同じに扱う。
+   */
+  readonly oddsTypeRaces?: RaceId[];
 }
 
 /** 1つのフィクスチャ取得対象(取得先URLと保存ファイル名の対応)。 */
@@ -57,6 +68,8 @@ export interface FixtureTarget {
  * - `--date YYYYMMDD` : レース一覧取得用の開催日(1回のみ)
  * - `--race <race_id>` : 取得対象レース(複数指定可)
  * - `--horse <horse_id>`: 取得対象馬(複数指定可)
+ * - `--race-odds-types <race_id>`: ワイド・3連複フィクスチャ(機能D-1)の取得対象レース
+ *   (複数指定可)。既存 `--race` とは独立したオプトインで、`--race` の挙動には影響しない。
  *
  * 各値は ids.ts の検証を通す。不正値は InvalidIdError として伝播する。
  *
@@ -67,6 +80,7 @@ export function parseFetchArgs(argv: string[]): FetchFixturesArgs {
   let date: KaisaiDate | undefined;
   const races: RaceId[] = [];
   const horses: HorseId[] = [];
+  const oddsTypeRaces: RaceId[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i]!;
@@ -100,12 +114,20 @@ export function parseFetchArgs(argv: string[]): FetchFixturesArgs {
         i += 1;
         break;
       }
+      case "--race-odds-types": {
+        if (value === undefined) {
+          throw new Error("--race-odds-types にはレースIDの値が必要です");
+        }
+        oddsTypeRaces.push(parseRaceId(value));
+        i += 1;
+        break;
+      }
       default:
         throw new Error(`未知の引数です: ${flag}`);
     }
   }
 
-  return { date, races, horses };
+  return { date, races, horses, oddsTypeRaces };
 }
 
 /**
@@ -174,6 +196,34 @@ export function planFixtureTargets(args: FetchFixturesArgs): FixtureTarget[] {
     add({
       url: oddsApiUrl(raceId),
       filename: `odds_${raceId}.json`,
+    });
+  }
+
+  // ワイド・3連複フィクスチャ(機能D-1)。既存の args.races とは独立したオプトイン対象で、
+  // 未指定(undefined)時は何も計画しない(既存--raceの挙動に影響しない)。
+  for (const raceId of args.oddsTypeRaces ?? []) {
+    if (venueKindOfRaceId(raceId) === "nar") {
+      // 地方: 静的HTMLページ(narWideOddsPageUrl/narTrioOddsPageUrl)。
+      // 3連複は軸馬1固定の一部組合せのみを返す(詳細: urls.tsのJSDoc)。
+      add({
+        url: narWideOddsPageUrl(raceId),
+        filename: `nar_odds_b5_${raceId}.html`,
+      });
+      add({
+        url: narTrioOddsPageUrl(raceId),
+        filename: `nar_odds_b7_${raceId}.html`,
+      });
+      continue;
+    }
+
+    // 中央: JSON API(wideOddsApiUrl/trioOddsApiUrl)。1リクエストで全組合せが返る。
+    add({
+      url: wideOddsApiUrl(raceId),
+      filename: `odds_wide_${raceId}.json`,
+    });
+    add({
+      url: trioOddsApiUrl(raceId),
+      filename: `odds_trio_${raceId}.json`,
     });
   }
 

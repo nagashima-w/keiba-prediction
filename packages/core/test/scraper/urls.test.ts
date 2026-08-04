@@ -14,11 +14,15 @@ import {
   narOddsPageUrl,
   NarUnsupportedError,
   narRaceListSubUrl,
+  narTrioOddsPageUrl,
+  narWideOddsPageUrl,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
   raceResultUrl,
   shutubaUrl,
+  trioOddsApiUrl,
+  wideOddsApiUrl,
 } from "../../src/scraper/urls.js";
 
 const raceId = parseRaceId("202605020811");
@@ -144,6 +148,59 @@ describe("oikiriUrl/commentUrl/oddsApiUrl(地方では存在しないページ)"
   });
 });
 
+describe("wideOddsApiUrl/trioOddsApiUrl(中央 ワイド・三連複オッズJSON API。機能D-1 実測2026-08-04)", () => {
+  // 実測(2026-08-04, race_id=202603020211): 中央のオッズページ(odds/index.html?type=b1)の
+  // タブから `getDataOdds('b5','c0')`(ワイド)・`getDataOdds('b7','c0')`(3連複)を発見し、
+  // 各タブのAJAXフラグメント(odds_get_form.html)内のJSで `oddsType:'5'`(ワイド)・
+  // `oddsType:'7'`(3連複、フラグメントのdo_update_odds呼び出しから確認)であることを
+  // 独立に観測した。既存のoddsApiUrl(type=1)と同一のAPI(api_get_jra_odds.html)を
+  // 数値typeのみ変えて叩けば、1レース分の全組合せが1リクエストで取得できることを
+  // 実データ(race_id=202603020211・16頭)で確認済み(C(16,2)=120件・C(16,3)=560件と
+  // 完全一致。docs/wide-trio-odds-investigation.md 参照)。
+
+  it("wideOddsApiUrlは中央race_idでワイドオッズJSON APIのURL(type=5)を返すこと", () => {
+    expect(wideOddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=5&action=init",
+    );
+  });
+
+  it("trioOddsApiUrlは中央race_idで3連複オッズJSON APIのURL(type=7)を返すこと", () => {
+    expect(trioOddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=7&action=init",
+    );
+  });
+
+  it("wideOddsApiUrlに地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => wideOddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+
+  it("trioOddsApiUrlに地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => trioOddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+});
+
+describe("narWideOddsPageUrl/narTrioOddsPageUrl(地方 ワイド・三連複オッズページ。機能D-1 実測2026-08-04)", () => {
+  // 実測(2026-08-04, race_id=202654071210・12頭): type=b5(ワイド)は静的HTMLに全軸の
+  // テーブルが1ページに含まれ、C(12,2)=66件と完全一致(軸馬別の制限なし)。
+  // type=b7(3連複)は「軸馬選択」UI(#list_select_horse)を持ち、クエリ未指定時は
+  // 軸馬1固定のC(11,2)=55件のみを返す(軸馬別取得。全組合せC(12,3)=220件を得るには
+  // 軸1〜10の最大10リクエストが必要。&jiku=Nで軸を指定可能なことをAJAXフラグメント
+  // (odds_get_form.html)で確認したが、本関数(index.htmlの直接URL)は軸1固定の
+  // デフォルト応答を返す形に留める。全軸を機械的に走査する挙動は機能Dへの備えとして
+  // #14着手前ゲートで判断する。詳細: docs/wide-trio-odds-investigation.md)。
+  it("narWideOddsPageUrlはtype=b5固定のクエリ付き地方ワイドオッズページURLを返すこと", () => {
+    expect(narWideOddsPageUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202654071210",
+    );
+  });
+
+  it("narTrioOddsPageUrlはtype=b7固定のクエリ付き地方3連複オッズページURLを返すこと", () => {
+    expect(narTrioOddsPageUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202654071210",
+    );
+  });
+});
+
 describe("gradeWinnerApiUrl/gradeWinnerRefererUrl/gradeWinnerOriginUrl(過去10年結果API。タスク機能B: 中央/地方でホストを出し分け)", () => {
   it("中央race_idではrace.netkeiba.comのURL・Referer(past10.html)・Originを返すこと", () => {
     expect(gradeWinnerApiUrl(raceId)).toBe("https://race.netkeiba.com/race_api/");
@@ -179,6 +236,10 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.gradeWinnerApiUrl).toBe(gradeWinnerApiUrl);
     expect(mod.gradeWinnerRefererUrl).toBe(gradeWinnerRefererUrl);
     expect(mod.gradeWinnerOriginUrl).toBe(gradeWinnerOriginUrl);
+    expect(mod.wideOddsApiUrl).toBe(wideOddsApiUrl);
+    expect(mod.trioOddsApiUrl).toBe(trioOddsApiUrl);
+    expect(mod.narWideOddsPageUrl).toBe(narWideOddsPageUrl);
+    expect(mod.narTrioOddsPageUrl).toBe(narTrioOddsPageUrl);
   });
 
   it("不採用となったnewspaperUrlは公開されないこと", async () => {

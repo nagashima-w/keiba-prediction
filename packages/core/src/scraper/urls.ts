@@ -185,3 +185,70 @@ export function gradeWinnerOriginUrl(raceId: RaceId): string {
 export function narOddsPageUrl(raceId: RaceId): string {
   return `${NAR_BASE}/odds/index.html?type=b1&race_id=${raceId}`;
 }
+
+/**
+ * ワイドオッズを返す内部API(JSON、中央のみ、機能D-1)。
+ *
+ * `data.odds["5"]` に馬番ペア(4桁。例 "0102")をキーとした [下限,上限,人気] が入る。
+ * 実測(2026-08-04, race_id=202603020211・16頭)で1リクエストにC(16,2)=120件全組合せが
+ * 返ることを確認済み(組合せ集合が期待値と完全一致)。既存の単勝・複勝API(oddsApiUrl)と
+ * 同一エンドポイント(api_get_jra_odds.html)の type クエリのみが異なる
+ * (type=1: 単勝複勝, type=5: ワイド)。type値は中央のオッズページのタブJS
+ * (odds_get_form.html?type=b5 のフラグメント内 `oddsType:'5'`)から独立に観測した。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(oddsApiUrlと同じ理由。docs/nar-scraping-plan.md)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narWideOddsPageUrl を使うこと)。
+ */
+export function wideOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "ワイドオッズJSON API(api_get_jra_odds、type=5)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=5&action=init`;
+}
+
+/**
+ * 3連複オッズを返す内部API(JSON、中央のみ、機能D-1)。
+ *
+ * `data.odds["7"]` に馬番トリオ(6桁。例 "010203")をキーとした配列が入るが、
+ * 単勝と同様に2要素目は常に"0.0"のダミーで、3連複は下限・上限を持たない単一値
+ * (1要素目がオッズ、3要素目が人気)。実測(2026-08-04, race_id=202603020211・16頭)で
+ * 1リクエストにC(16,3)=560件全組合せが返ることを確認済み(組合せ集合が期待値と完全一致)。
+ * type値の観測方法は wideOddsApiUrl と同じ(odds_get_form.html?type=b7 フラグメント内
+ * `oddsType:'7'`)。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(oddsApiUrlと同じ理由)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narTrioOddsPageUrl を使うこと)。
+ */
+export function trioOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "3連複オッズJSON API(api_get_jra_odds、type=7)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=7&action=init`;
+}
+
+/**
+ * ワイドオッズページのURL(地方のみ、機能D-1)。
+ *
+ * 中央と異なりJSON APIが存在しないため、静的HTML(odds/index.html?type=b5)をパースする
+ * 方式を取る(narOddsPageUrlと同じ理由)。実測(2026-08-04, race_id=202654071210・12頭)で、
+ * 1ページに全軸のテーブルが含まれ、C(12,2)=66件全組合せが1リクエストで取得できることを
+ * 確認済み(軸馬別の制限を受けない。3連複〈narTrioOddsPageUrl〉とは挙動が異なる点に注意)。
+ */
+export function narWideOddsPageUrl(raceId: RaceId): string {
+  return `${NAR_BASE}/odds/index.html?type=b5&race_id=${raceId}`;
+}
+
+/**
+ * 3連複オッズページのURL(地方のみ、機能D-1)。
+ *
+ * 静的HTML(odds/index.html?type=b7)をパースする方式を取る(narOddsPageUrlと同じ理由)。
+ *
+ * 実測(2026-08-04, race_id=202654071210・12頭)での重要な制約: このURL(軸馬クエリ
+ * `jiku` 未指定)は「軸馬1固定」のC(11,2)=55件(=全組合せC(12,3)=220件の一部)しか
+ * 返さない(地方の3連複は軸馬別取得。中央〈trioOddsApiUrl〉が1リクエストで全組合せを
+ * 返すのとは異なる)。ページ内のJS(`view_3odds_normal`)は
+ * `../odds/odds_get_form.html?type=b7&race_id=...&jiku=<軸馬番>` のAJAX GETで軸を
+ * 切り替えており、全組合せを得るには軸1〜(頭数-2)を順に叩く必要があることを実測で
+ * 確認したが(differential確認: jiku=2はC(10,2)=45件相当と重複を含むC(11,2)=55件を返す)、
+ * 全軸を機械的に走査する挙動を本関数には持たせていない(機能Dへの備え。#14着手前ゲートで
+ * 方針を判断する。詳細: docs/wide-trio-odds-investigation.md)。
+ */
+export function narTrioOddsPageUrl(raceId: RaceId): string {
+  return `${NAR_BASE}/odds/index.html?type=b7&race_id=${raceId}`;
+}

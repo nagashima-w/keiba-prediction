@@ -18,17 +18,19 @@
  *   そのままUTF-8で書き出すことで、テスト入力と本番入力の形を一貫させる。
  *   EUC-JPページ(db.netkeiba.com)も取得時にデコード済みのため、保存物はUTF-8になる。
  *
- * 実行方法(ネットワーク解除後、オーケストレーターが1回のみ実行する):
+ * 実行方法:
  *   pnpm tsx scripts/fetch-fixtures.ts \
  *     --date 20260628 \
  *     --race 202605020811 --race 202601020811 \
- *     --horse 2019105219
+ *     --horse 2019105219 \
+ *     --race-odds-types 202605020811
  *
  * - --date  YYYYMMDD  : レース一覧サブHTMLを取得(1回のみ)
- * - --race  <race_id> : 競馬新聞・追い切り・厩舎コメントを取得(複数指定可)
+ * - --race  <race_id> : 出馬表・追い切り・厩舎コメント・単勝複勝オッズを取得(複数指定可)
  * - --horse <horse_id>: 馬個別ページを取得(複数指定可, EUC-JP)
- *
- * 注意: 現環境はnetkeibaに到達できないため、このスクリプトはここでは実行しない。
+ * - --race-odds-types <race_id>: ワイド・3連複オッズ(機能D-1)を取得(複数指定可)。
+ *   --race とは独立したオプトインで、--race の挙動には影響しない。地方race_idでは
+ *   3連複が軸馬1固定の一部組合せのみ返る点に注意(詳細: docs/wide-trio-odds-investigation.md)。
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -53,7 +55,7 @@ async function main(): Promise<void> {
 
   if (targets.length === 0) {
     console.error(
-      "取得対象がありません。--date / --race / --horse のいずれかを指定してください。",
+      "取得対象がありません。--date / --race / --horse / --race-odds-types のいずれかを指定してください。",
     );
     process.exitCode = 1;
     return;
