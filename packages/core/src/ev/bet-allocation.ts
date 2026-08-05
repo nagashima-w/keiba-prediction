@@ -154,14 +154,38 @@ import {
   type PlaceJointModel,
   type PlaceOutcome,
 } from "./place-joint-model.js";
+import {
+  applyMinimumStake,
+  buildOutcomeIndexSets,
+  computeKellyTarget,
+  DEFAULT_BET_UNIT,
+  DEFAULT_GREEDY_STEPS,
+  DEFAULT_KELLY_FRACTION,
+  determineSkipReasonCode,
+  foldToCandidateSubsets,
+  resolveBankroll,
+  resolveBetUnit,
+  resolveEffectivePerRaceCap,
+  resolveGreedySteps,
+  resolveKellyFraction,
+  roundStakes,
+  runGreedyAllocation,
+  type SkipReasonCode,
+} from "./allocation-primitives.js";
 
 // Phase 2 で同時分布モデルを差し替える際、C-2/C-3 が1本のサブパスで完結できるように
 // place-joint-model.ts の主要な型・既定モデルを re-export する。
 export type { JointModelHorse, PlaceJointModel, PlaceOutcome };
 export { CONDITIONAL_BERNOULLI_MODEL };
 
-/** 数値誤差を許容する微小値(浮動小数比較のガードに使う)。 */
-const NUMERIC_EPS = 1e-9;
+// 機能D-2a(Issue #14): 防御関数群・畳み込み・貪欲最適化・betUnit丸め・最低額ロジック・
+// 見送り理由判定ロジックは allocation-primitives.ts へ抽出し、組合せ券種(combo-bet-allocation.ts)
+// と実装を共有する(boss着手前ゲート2026-08-05決定)。本ファイルの公開契約
+// (allocateBetsのシグネチャ・AllocationHorse/BetAllocation/BetAllocationResult/
+// BetAllocationConfigの各フィールド名・型・resolveEffectivePerRaceCapの公開場所)は
+// 抽出の前後で一切変えていない。resolveEffectivePerRaceCapは元の公開場所を保つため、
+// ここで再exportする(SettingsView.tsxの既存importを壊さない)。
+export { resolveEffectivePerRaceCap };
 
 /** 配分最適化に渡す1頭分の情報(構造的最小型。AnalysisRow等shared型には依存しない)。 */
 export interface AllocationHorse {
@@ -198,9 +222,11 @@ export interface BetAllocationConfig {
 export const DEFAULT_BET_ALLOCATION_CONFIG: BetAllocationConfig = {
   bankroll: 0,
   perRaceCap: 0,
-  kellyFraction: 0.5,
-  betUnit: 100,
-  greedySteps: 1000,
+  // 数値の既定値は allocation-primitives.ts の DEFAULT_KELLY_FRACTION/DEFAULT_BET_UNIT/
+  // DEFAULT_GREEDY_STEPS を参照する(二重定義しない。決定17と同じ「単一定義」の原則)。
+  kellyFraction: DEFAULT_KELLY_FRACTION,
+  betUnit: DEFAULT_BET_UNIT,
+  greedySteps: DEFAULT_GREEDY_STEPS,
 };
 
 /**
@@ -395,75 +421,54 @@ export function allocateBets(
   // 乖離の絶対値の最大(marginalDeviationMaxは符号を持たない。JSDoc「8.」参照)。
   const marginalDeviationMax = computeMarginalDeviationMax(sortedHorses, rawDistribution);
 
-  // Step3: 候補馬の部分集合Tへ畳み込む。
+  // Step3: 候補馬の部分集合Tへ畳み込む(allocation-primitives.ts へ抽出。組合せ券種と共有)。
   const foldedOutcomes = foldToCandidateSubsets(rawDistribution, candidateUmabanSet);
 
   // Step4: 貪欲逐次配分で連続最適比率(ケリー基準)を求める。総資金・上限に関わらず常に計算する
   // (設計判断6)。effectivePerRaceCap/resolvedBankrollに一切依存しないためスケール不変。
-  const continuousFractions = optimizeContinuousFractions(
-    candidateHorses,
-    foldedOutcomes,
+  // 「的中」の定義(isHit)は複勝固有: 候補馬のumabanがoutcome.placedに含まれるか。
+  const outcomeIndexSets = buildOutcomeIndexSets(candidateHorses, foldedOutcomes, (h, outcome) =>
+    outcome.placed.includes(h.umaban),
+  );
+  const odds = candidateHorses.map((h) => h.placeOddsMin!);
+  const continuousFractions = runGreedyAllocation(
+    candidateHorses.length,
+    odds,
+    outcomeIndexSets,
     greedySteps,
   );
   const sumContinuousFractions = continuousFractions.reduce((acc, x) => acc + x, 0);
 
-  // ケリー適正額(キャップ前・丸め前)。resolvedBankroll>=0有限・Σx*>=0・λ∈[0,1]がいずれも
-  // 個別に保証されているため、kellyTargetStakeは常に0以上の有限値になる(NaN/Infinityが
-  // 生じない。JSDoc「5.」のゼロ除算ガードの前提)。
-  const kellyTargetStake = kellyFraction * sumContinuousFractions * resolvedBankroll;
-  const plannedStake = Math.min(kellyTargetStake, effectivePerRaceCap);
-  const capApplied = kellyTargetStake > effectivePerRaceCap;
+  // ケリー適正額・キャップ判定・比例縮小係数s(allocation-primitives.ts へ抽出)。
+  const { kellyTargetStake, plannedStake, capApplied, s } = computeKellyTarget(
+    kellyFraction,
+    sumContinuousFractions,
+    resolvedBankroll,
+    effectivePerRaceCap,
+  );
 
-  // Step5: キャップ比例縮小係数 s。kellyTargetStake=0のときのゼロ除算ガードが必須
-  // (C-1で2回繰り返した「サイレント破損」欠陥クラスの3回目を防ぐ)。
-  const s = kellyTargetStake > 0 ? Math.min(1, effectivePerRaceCap / kellyTargetStake) : 0;
-
-  // 各候補馬のstakeを算出する(cap比例縮小込み・betUnit未満切り捨て)。剰余は再配分しない
+  // Step5: 各候補馬のstakeを算出する(cap比例縮小込み・betUnit未満切り捨て)。剰余は再配分しない
   // (設計判断2)。この時点ではまだ最低額ロジックを適用しない(全馬0円かどうかをまず確定させる)。
-  const rawStakes: number[] = [];
-  let totalStake = 0;
-  for (let i = 0; i < candidateHorses.length; i++) {
-    const continuousFraction = continuousFractions[i]!;
-    const scaledFraction = kellyFraction * continuousFraction;
-    const raw = Math.floor((s * scaledFraction * resolvedBankroll) / betUnit) * betUnit;
-    const stake = raw < betUnit ? 0 : raw;
-    rawStakes.push(stake);
-    totalStake += stake;
-  }
+  const rounded = roundStakes(continuousFractions, kellyFraction, s, resolvedBankroll, betUnit);
+  let rawStakes: number[] = rounded.rawStakes;
+  let totalStake = rounded.totalStake;
 
   // Step5.5: 最低額ロジック(設計判断3)。全馬0円で、かつ妙味・総資金・上限のいずれも
   // 「未判定」の状態でない場合に限り、continuousFraction最大の1頭にbetUnit1単位を与える。
-  let minimumStakeApplied = false;
-  if (
-    totalStake === 0 &&
-    candidateHorses.length > 0 &&
-    resolvedBankroll > 0 &&
-    effectivePerRaceCap >= betUnit &&
-    kellyTargetStake > 0
-  ) {
-    let bestIdx = -1;
-    let bestFraction = 0;
-    for (let i = 0; i < candidateHorses.length; i++) {
-      const fraction = continuousFractions[i]!;
-      if (fraction <= 0) {
-        continue;
-      }
-      // 同値は馬番昇順(既存慣行 race-opportunity.ts の rawScore タイブレークに揃える)。
-      if (
-        bestIdx === -1 ||
-        fraction > bestFraction ||
-        (fraction === bestFraction && candidateHorses[i]!.umaban < candidateHorses[bestIdx]!.umaban)
-      ) {
-        bestIdx = i;
-        bestFraction = fraction;
-      }
-    }
-    if (bestIdx !== -1) {
-      rawStakes[bestIdx] = betUnit;
-      totalStake = betUnit;
-      minimumStakeApplied = true;
-    }
-  }
+  // タイブレークは馬番昇順(candidateHorsesが既に馬番昇順のため、先頭優先=馬番昇順と同じ)。
+  const minimumStakeResult = applyMinimumStake(
+    rawStakes,
+    continuousFractions,
+    totalStake,
+    candidateHorses.length,
+    resolvedBankroll,
+    effectivePerRaceCap,
+    betUnit,
+    kellyTargetStake,
+  );
+  rawStakes = minimumStakeResult.rawStakes;
+  totalStake = minimumStakeResult.totalStake;
+  const minimumStakeApplied = minimumStakeResult.minimumStakeApplied;
 
   // 丸め判定(cap比例縮小・最低額ロジックを含む)に到達したかどうか。到達していなければ
   // droppedBelowMinimumは常にfalse(「丸めで落とされた」という誤った説明を防ぐ。C-1由来の防御)。
@@ -518,16 +523,21 @@ export function allocateBets(
   const exceedsKellyTarget = totalStake > kellyTargetStake;
   const advisory = buildAdvisory(exceedsKellyTarget, kellyTargetStake, betUnit);
 
-  // Step6: 見送り理由(6分類・優先順位順)。isSkipのときのみ算出する。
+  // Step6: 見送り理由(6分類・優先順位順)。判定ロジックはallocation-primitives.tsのコードを
+  // 共有し、文言化(コード→日本語)だけを本ファイルの責務として残す(決定3: 文言定数は
+  // 組合せ券種と分離する)。isSkipのときのみ算出する。
   const skipReason = isSkip
-    ? determineSkipReason(
-        bankrollInput,
-        perRaceCapInput,
-        effectivePerRaceCap,
+    ? skipReasonText(
+        determineSkipReasonCode(
+          bankrollInput,
+          perRaceCapInput,
+          effectivePerRaceCap,
+          betUnit,
+          kellyTargetStake,
+          kellyFraction,
+          candidateHorses.length,
+        ),
         betUnit,
-        kellyTargetStake,
-        kellyFraction,
-        candidateHorses.length,
       )
     : null;
 
@@ -565,79 +575,6 @@ export function allocateBets(
       excludedCount: sortedHorses.length - candidateHorses.length,
     },
   };
-}
-
-/**
- * 総資金を解決する(クランプのみ・床関数はかけない)。非有限(NaN/Infinity)・0以下は0を返す
- * (見送り理由①「総資金未設定」へ自然につながる)。effectivePerRaceCapと異なりbetUnitの倍数への
- * 丸めは行わない(1レース単位の話ではなく総資金そのものであるため。boss着手前ゲート2026-07-30)。
- */
-function resolveBankroll(bankroll: number): number {
-  if (!Number.isFinite(bankroll) || bankroll <= 0) {
-    return 0;
-  }
-  return bankroll;
-}
-
-/**
- * 1レース上限を実効値へ解決する(公開関数)。非有限(NaN/Infinity)・0以下は0を、そうでなければ
- * betUnitの倍数に切り捨てた値を返す。
- *
- * public exportする理由: SettingsViewの「実効上限」ライブプレビュー(入力欄直下に常時表示)が
- * この関数と全く同じロジックを使う必要がある。UI側にfloor演算をコピーすると、UIが「実効上限
- * 10,000円」と表示しながらcore側は別の値で計算する事態(嘘をつくUI)になりかねない
- * (boss着手前ゲート2026-07-30)。allocateBets内部もこの関数を呼び、コピー実装を作らない。
- *
- * betUnitはこの関数の外で既に resolveBetUnit 済みの値が渡される想定だが、公開APIとして
- * 任意の呼び出し元(将来のUIコード等)から異常なbetUnitを渡された場合の防御として、
- * 内部でも resolveBetUnit を通す(冪等なので二重に通しても結果は変わらない)。
- */
-export function resolveEffectivePerRaceCap(perRaceCap: number, betUnit: number): number {
-  const resolvedBetUnit = resolveBetUnit(betUnit);
-  if (!Number.isFinite(perRaceCap) || perRaceCap <= 0) {
-    return 0;
-  }
-  return Math.floor(perRaceCap / resolvedBetUnit) * resolvedBetUnit;
-}
-
-/**
- * λ(ケリー係数)を防御する。非有限(NaN/Infinity)・[0,1]範囲外は既定値(0.5)へフォールバック
- * する(resolveClipVariant等、本リポジトリの防御的フォールバックの流儀に合わせる。bankrollのように
- * 「範囲外を0に落とす」クランプではなく既定値へ戻すのは、λ=0への一律クランプだと「負値だから
- * 何も賭けない」という誤った理由(丸め起因のようなskipReason)を誘発しうるため。既定値
- * フォールバックであれば、以降の計算は「正常なλで判定した結果」として一貫する)。
- */
-function resolveKellyFraction(kellyFraction: number): number {
-  if (!Number.isFinite(kellyFraction) || kellyFraction < 0 || kellyFraction > 1) {
-    return DEFAULT_BET_ALLOCATION_CONFIG.kellyFraction;
-  }
-  return kellyFraction;
-}
-
-/**
- * betUnit(賭け金の最小単位)を防御する。非有限・0以下・非整数は既定値(100)へフォールバック
- * する(kellyFractionと同じ流儀)。betUnitが0/NaNのまま割り算に渡ると計算結果がInfinity/NaNに
- * なり、以降totalStakeまでNaNが伝播してisSkip=false・skipReason=nullのままサイレントに
- * 破損した結果を返してしまう(重大バグの再発防止)。
- */
-function resolveBetUnit(betUnit: number): number {
-  if (!Number.isFinite(betUnit) || betUnit <= 0 || !Number.isInteger(betUnit)) {
-    return DEFAULT_BET_ALLOCATION_CONFIG.betUnit;
-  }
-  return betUnit;
-}
-
-/**
- * greedySteps(貪欲逐次配分の分割数)を防御する。非有限・0以下・非整数は既定値(1000)へ
- * フォールバックする。greedySteps<=0/NaNだとStep4の貪欲ループが1回も実行されず、連続最適比率が
- * (実際には判定していないのに)全て0のまま返り、Step6が「妙味が小さく…」という誤ったskipReasonを
- * 報告してしまう(「判定していないことを判定結果として報告してはならない」欠陥)。
- */
-function resolveGreedySteps(greedySteps: number): number {
-  if (!Number.isFinite(greedySteps) || greedySteps <= 0 || !Number.isInteger(greedySteps)) {
-    return DEFAULT_BET_ALLOCATION_CONFIG.greedySteps;
-  }
-  return greedySteps;
 }
 
 /**
@@ -698,166 +635,25 @@ function computeMarginalDeviationMax(
 }
 
 /**
- * Step3: 同時分布を「複勝圏に入った候補馬の部分集合T」ごとに畳み込む。候補馬でない馬は
- * Tから除外される(候補馬に限定した部分集合に確率を合算する)。
+ * Step6: 見送り理由コード(allocation-primitives.ts の determineSkipReasonCode。判定ロジックは
+ * 組合せ券種と共有)を、複勝固有の日本語文言へ変換する。優先順位・判定条件そのものは
+ * allocation-primitives.ts 側に一元化されているため、本関数は文言のマッピングのみを行う
+ * (決定3: 見送り理由・advisoryの文言定数は券種ごとに分離する。既存の①〜⑥の文言・優先順位は
+ * 完全に維持している)。
  */
-function foldToCandidateSubsets(
-  rawDistribution: readonly PlaceOutcome[],
-  candidateUmabanSet: ReadonlySet<number>,
-): readonly PlaceOutcome[] {
-  const folded = new Map<string, { placed: number[]; probability: number }>();
-  for (const outcome of rawDistribution) {
-    const t = outcome.placed.filter((u) => candidateUmabanSet.has(u)).sort((a, b) => a - b);
-    const key = t.join(",");
-    const existing = folded.get(key);
-    if (existing) {
-      existing.probability += outcome.probability;
-    } else {
-      folded.set(key, { placed: t, probability: outcome.probability });
-    }
+function skipReasonText(code: SkipReasonCode, betUnit: number): string {
+  switch (code) {
+    case "bankroll-unset":
+      return REASON_BANKROLL_UNSET;
+    case "cap-unset":
+      return REASON_CAP_UNSET;
+    case "cap-too-small":
+      return buildCapTooSmallReason(betUnit);
+    case "kelly-zero":
+      return REASON_KELLY_ZERO;
+    case "no-candidates":
+      return REASON_NO_CANDIDATES;
+    case "no-edge":
+      return REASON_NO_EDGE;
   }
-  return [...folded.values()];
-}
-
-/**
- * Step4: 貪欲逐次配分で連続最適比率(ケリー基準のバンクロール比率 x*_i、0〜1)を求める。
- * 目的関数 F(x) = Σ_T P(T)·log(1 − Σx_i + Σ_{i∈T}x_i·o_i)。
- * 総資金・1レース上限には一切依存しない(スケール不変)。
- *
- * 貪欲法に大域最適の理論保証は無い(2026-07-30 boss指摘。旧記述「差の上界をテストで固定して
- * 明示する」は実態と食い違っていた: テストの実測差は1e-16〜1e-17で、想定していた閾値0.01から
- * 14桁も離れており、実質的には「一度も乖離が観測されていない」だけだった)。
- *
- * 理論保証が無い理由: 目的関数Fは凹だが、大域最適を保証できるのは分離可能な凹目的
- * (Σf_i(x_i)を予算制約下で最大化する限界配分法)や、より一般にはM♮凹関数(離散凸解析)の
- * 場合に限られる。本関数のFはlogの内側で変数x_iが結合しており分離可能ではなく、格子上に
- * 制限した一般の凹関数がM♮凹とは限らない。本実装の貪欲は単調増加のみで後退しないため、
- * 「1変数を増やす単独ステップでは改善しないが、片方を減らしてもう片方を増やせば改善する」
- * 場合に停止しうる(非分離目的での貪欲法の古典的な失敗形)。
- *
- * 試した範囲(2頭・粗い格子)では全探索の最適格子点と経験的に一致した(テスト参照。ただし
- * これは定理ではなく経験則であり、Phase 2で同時分布モデル〈Plackett-Luce等〉に差し替えた際に
- * 目的関数の結合の仕方が変わり、一致しなくなる可能性がある)。
- *
- * 計算量: 1ステップあたり候補数×畳み込み後outcome数の評価が必要(greedySteps回繰り返す)。
- * 実測では出走頭数18・全頭候補(最悪ケースに近い。畳み込み後outcome数はC(18,3)=816)・
- * greedySteps=1000で約13ms(開発機実測)。実運用の候補数(通常は数頭程度)ではさらに軽量。
- */
-function optimizeContinuousFractions(
-  candidates: readonly AllocationHorse[],
-  foldedOutcomes: readonly PlaceOutcome[],
-  greedySteps: number,
-): number[] {
-  const n = candidates.length;
-  if (n === 0) {
-    return [];
-  }
-
-  const odds = candidates.map((c) => c.placeOddsMin!);
-  // 各畳み込み済み outcome を候補配列内インデックスの集合として持っておく(高速化)。
-  const outcomeIndexSets = foldedOutcomes.map((outcome) => {
-    const indices: number[] = [];
-    for (let i = 0; i < n; i++) {
-      if (outcome.placed.includes(candidates[i]!.umaban)) {
-        indices.push(i);
-      }
-    }
-    return { indices, probability: outcome.probability };
-  });
-
-  const x = new Array<number>(n).fill(0);
-  const delta = 1 / greedySteps;
-  let sumX = 0;
-
-  const computeF = (trialSumX: number, trialX: readonly number[]): number | null => {
-    let total = 0;
-    for (const outcome of outcomeIndexSets) {
-      let payout = 0;
-      for (const idx of outcome.indices) {
-        payout += trialX[idx]! * odds[idx]!;
-      }
-      const wealth = 1 - trialSumX + payout;
-      if (wealth <= NUMERIC_EPS) {
-        // 資産が0以下になる割当は候補から除外する(logの定義域外)。
-        return null;
-      }
-      total += outcome.probability * Math.log(wealth);
-    }
-    return total;
-  };
-
-  let currentF = computeF(sumX, x)!; // 全て0の初期状態は必ず有効(wealth=1 for 全outcome)。
-
-  for (let step = 0; step < greedySteps; step++) {
-    let bestIdx = -1;
-    let bestIncrement = 0; // 増分の最大値が0以下になったら停止するため、初期値は0(厳密に上回る候補のみ採用)。
-    const trialSumX = sumX + delta;
-    for (let i = 0; i < n; i++) {
-      const trialX = x.slice();
-      trialX[i] = trialX[i]! + delta;
-      const trialF = computeF(trialSumX, trialX);
-      if (trialF === null) {
-        continue;
-      }
-      const increment = trialF - currentF;
-      if (increment > bestIncrement) {
-        bestIncrement = increment;
-        bestIdx = i;
-      }
-    }
-    if (bestIdx === -1) {
-      break; // 増分の最大値が0以下 → 停止(残りは配分しない=「使い切らない」の実現)。
-    }
-    x[bestIdx] = x[bestIdx]! + delta;
-    sumX = trialSumX;
-    currentF = computeF(sumX, x)!;
-  }
-
-  return x;
-}
-
-/**
- * Step6: 見送り理由を6分類・優先順位順に決定する(設計判断7参照)。
- * isSkip(totalStake===0)のときにのみ呼び出される。
- *
- * ⑥(連続最適比率が全て0)には明示的な条件チェックを置かず、①〜⑤をすべて通過した場合の
- * 最終フォールバックとして返す。理由: isSkip(totalStake===0)かつ①(resolvedBankroll>0)・
- * ②③(effectivePerRaceCap>=betUnit)・④(kellyTargetStake>0またはλ≠0)・⑤(candidateCount>0)を
- * すべて通過した時点で、最低額ロジック(Step5.5)が発動しなかった理由は
- * kellyTargetStake===0(=Σx*===0、全continuousFractionが0)しかありえない
- * (resolvedBankroll・effectivePerRaceCapは正、λ≠0なのでkellyTargetStake=λ·Σx*·resolvedBankroll
- * が0になるのはΣx*=0の場合のみ)。この帰結は構造的に保証されるため、追加の条件チェックは
- * 二重防御になり不要(exceedsKellyTargetの設計判断4と同じ思想)。
- */
-function determineSkipReason(
-  bankrollInput: number,
-  perRaceCapInput: number,
-  effectivePerRaceCap: number,
-  betUnit: number,
-  kellyTargetStake: number,
-  kellyFraction: number,
-  candidateCount: number,
-): string {
-  // ①総資金が未設定・負値・非有限(NaN/Infinity)。opt-inの既定状態であり「妙味なし」ではない。
-  if (!Number.isFinite(bankrollInput) || bankrollInput <= 0) {
-    return REASON_BANKROLL_UNSET;
-  }
-  // ②1レース上限が未設定・負値・非有限。
-  if (!Number.isFinite(perRaceCapInput) || perRaceCapInput <= 0) {
-    return REASON_CAP_UNSET;
-  }
-  // ③1レース上限はあるがbetUnit未満(実効上限が1単位に満たない)。
-  if (effectivePerRaceCap < betUnit) {
-    return buildCapTooSmallReason(betUnit);
-  }
-  // ④ケリー係数が0(ユーザーの明示的な「賭けない」指定。候補の有無より優先する)。
-  if (kellyTargetStake === 0 && kellyFraction === 0) {
-    return REASON_KELLY_ZERO;
-  }
-  // ⑤候補(EVプラスかつオッズあり)が1頭もいない。
-  if (candidateCount === 0) {
-    return REASON_NO_CANDIDATES;
-  }
-  // ⑥連続最適比率が全て0(妙味が極小で、賭ける価値がないとケリー基準が判断した)。
-  return REASON_NO_EDGE;
 }
