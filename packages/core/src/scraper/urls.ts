@@ -244,10 +244,15 @@ export function narWideOddsPageUrl(raceId: RaceId): string {
  * 返さない(地方の3連複は軸馬別取得。中央〈trioOddsApiUrl〉が1リクエストで全組合せを
  * 返すのとは異なる)。ページ内のJS(`view_3odds_normal`)は
  * `../odds/odds_get_form.html?type=b7&race_id=...&jiku=<軸馬番>` のAJAX GETで軸を
- * 切り替えており、全組合せを得るには軸1〜(頭数-2)を順に叩く必要があることを実測で
- * 確認したが(differential確認: jiku=2はC(10,2)=45件相当と重複を含むC(11,2)=55件を返す)、
- * 全軸を機械的に走査する挙動を本関数には持たせていない(機能Dへの備え。#14着手前ゲートで
- * 方針を判断する。詳細: docs/wide-trio-odds-investigation.md)。
+ * 切り替えている。軸2(`jiku=2`)の応答を実測したところ「馬02を含む全トリオ」C(11,2)=55件と
+ * 完全一致し(`nar_odds_b7_jiku2_202654071210.html`)、「馬02を最小とするトリオのみ」
+ * C(10,2)=45件という対抗仮説は棄却された(=`jiku=k`はkを含む全トリオを返す。詳細:
+ * docs/wide-trio-odds-investigation.md §3.2)。この性質から、軸1〜(頭数-2)を叩けば
+ * 全組合せC(n,3)を漏れなく網羅できる(**導出値**。3頭の組合せの最小馬番は必ず頭数-2以下に
+ * なるため)。ただし実物の軸馬選択プルダウン(`#list_select_horse`)自体は**軸1〜頭数の
+ * 全頭(観測値)**を選択肢として提示しており、`頭数-2`はサイトが提示する値ではない
+ * (両者を混同しないこと)。全軸を機械的に走査する挙動を本関数には持たせていない
+ * (機能Dへの備え。#14着手前ゲートで方針を判断する。詳細: docs/wide-trio-odds-investigation.md)。
  */
 export function narTrioOddsPageUrl(raceId: RaceId): string {
   return `${NAR_BASE}/odds/index.html?type=b7&race_id=${raceId}`;

@@ -422,3 +422,44 @@ describe("result.html払戻テーブルとの突合(一次証拠。機能D-1実�
     expect(fuku3.yen.every((y) => /\d/.test(y))).toBe(true);
   });
 });
+
+describe("複勝払戻の点数(resolvePlaceBetTargetの\"two-place-only\"閾値の実測根拠。§7・boss要修正3対応)", () => {
+  /**
+   * tr.Fukusho td.Ninki 内の「N人気」出現回数を複勝払戻の点数として数える。
+   * 中央(td.Ninki内に値ごとの<span>が分かれる)・地方(1つの<span>内に<br/>区切りで
+   * 連結される)でマークアップが異なるため、cheerioのtext()で連結したテキストに対し
+   * 正規表現でパターン出現数を数える方式に統一する(どちらのマークアップでも同じ結果になる)。
+   */
+  function fukushoPayoutCount(html: string): number {
+    const $ = cheerio.load(html);
+    const text = $("tr.Fukusho td.Ninki").text();
+    const matches = text.match(/\d+人気/g) ?? [];
+    return matches.length;
+  }
+
+  it("中央5頭(202603020203)・中央6頭(202602010605)・地方6頭(202646071203)・地方7頭(202630062407): 複勝払戻が2点であること(\"two-place-only\"の直接証拠)", () => {
+    const twoPointFixtures = [
+      "result_202603020203.html",
+      "result_202602010605.html",
+      "nar_result_202646071203.html",
+      "nar_result_202630062407.html",
+    ];
+    // 前提を無条件expectで先に固定(空振り防止): 4件とも td.Ninki 自体は空でない。
+    for (const filename of twoPointFixtures) {
+      const html = loadFixture(filename);
+      const $ = cheerio.load(html);
+      expect($("tr.Fukusho td.Ninki").text().trim().length).toBeGreaterThan(0);
+    }
+    for (const filename of twoPointFixtures) {
+      const html = loadFixture(filename);
+      expect(fukushoPayoutCount(html)).toBe(2);
+    }
+  });
+
+  it("中央10頭(202602010607、既存フィクスチャ): 複勝払戻が3点であること(8頭以上側の対照。5〜7頭〈2点〉との差分を固定)", () => {
+    const html = loadFixture("result_202602010607.html");
+    const $ = cheerio.load(html);
+    expect($("tr.Fukusho td.Ninki").text().trim().length).toBeGreaterThan(0);
+    expect(fukushoPayoutCount(html)).toBe(3);
+  });
+});
