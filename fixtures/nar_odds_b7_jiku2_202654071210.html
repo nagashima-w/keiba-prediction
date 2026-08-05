@@ -1,0 +1,696 @@
+
+<!-- block=odds_normal (cp) -->
+<a id="housiki_select" name="housiki_select"></a>
+<div class="RaceOddsArea">
+<div class="RaceOddsMenu">
+<ul>
+<li class="MenuText">方式選択</li>
+<li><div><a href="javascript:void(0)" class="Active">オッズ一覧</a></div></li>
+<li class="Formation"><div><a href="javascript:void(0)" class="" id="btn_c1" onclick="SwitchingDisplay('b7','c1');return false;">通常／フォーメーション</a></div></li>
+<li><div><a href="javascript:void(0)" class="" id="btn_c3" onclick="SwitchingDisplay('b7','c3');return false;">ながし</a></div></li>
+<li><div><a href="javascript:void(0)" class="" id="btn_c2" onclick="SwitchingDisplay('b7','c2');return false;">ボックス</a></div></li>
+<li><div><a href="javascript:void(0)" class="" id="btn_c99" onclick="SwitchingDisplay('b7','c99');return false;">人気順</a></div></li>
+</ul>
+</div><!-- /.RaceInfo_Odds_Menu02 -->
+</div>
+<div class="W1100">
+<div class="GraphOdds  clearfix">
+<div class="Axis_Horse_Container">
+<div class="Axis_Horse_selectbox">
+<select name="Horse" id="list_select_horse" onchange="view_3odds_normal()">
+<option value="2" selected="selected">
+<span class="Num">2</span> ダイチヴィヴァン
+</option>
+<option value="1"><span class="Num">1</span> ジャスタースパーク</option><option value="2"><span class="Num">2</span> ダイチヴィヴァン</option><option value="3"><span class="Num">3</span> ニヨドスマイル</option><option value="4"><span class="Num">4</span> クヴェレ</option><option value="5"><span class="Num">5</span> ラインメッセージ</option><option value="6"><span class="Num">6</span> ディープカインズ</option><option value="7"><span class="Num">7</span> ルージュアマリア</option><option value="8"><span class="Num">8</span> ヤプシ</option><option value="9"><span class="Num">9</span> サノノゴールド</option><option value="10"><span class="Num">10</span> アンミノレモン</option><option value="11"><span class="Num">11</span> ヴィナクローナ</option><option value="12"><span class="Num">12</span> ディオスバリエンテ</option>
+</select>
+</div><!-- /.Axis_Horse_selectbox -->
+</div><!-- /.Axis_Horse_Container -->
+<script>
+$(function() {
+Axis_Horse_selectbox = function(select, obj){
+var set_selectbox = function(){
+var value = jQuery(this).find('option:selected').html();
+jQuery(select).find(obj).find('span').html(value);
+}
+jQuery(select).find('select').each(set_selectbox).on('change', set_selectbox);
+}
+jQuery(function(){
+Axis_Horse_selectbox('.Axis_Horse_selectbox', '.Inner');
+});
+});
+</script>
+<div class="Axis_Horse">
+<div class="Inner">
+<span class="Num">2</span>
+ダイチヴィヴァン
+</div>
+</div>
+<table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku1">1</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku3">3</td> -->
+<td class="Waku_Normal" >3</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_3" cart-item="a1-54-10_b7_c0_1_2_3" onClick="">209.3
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_3" id="chk_2a1-54-10_b7_c0_1_2_3" name="" value="a1-54-10_b7_c0_1_2_3" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_3" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku4">4</td> -->
+<td class="Waku_Normal" >4</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_4" cart-item="a1-54-10_b7_c0_1_2_4" onClick="">441.8
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_4" id="chk_2a1-54-10_b7_c0_1_2_4" name="" value="a1-54-10_b7_c0_1_2_4" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_4" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku5">5</td> -->
+<td class="Waku_Normal" >5</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_5" cart-item="a1-54-10_b7_c0_1_2_5" onClick="">541.0
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_5" id="chk_2a1-54-10_b7_c0_1_2_5" name="" value="a1-54-10_b7_c0_1_2_5" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_5" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku5">6</td> -->
+<td class="Waku_Normal" >6</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_6" cart-item="a1-54-10_b7_c0_1_2_6" onClick="">370.9
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_6" id="chk_2a1-54-10_b7_c0_1_2_6" name="" value="a1-54-10_b7_c0_1_2_6" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_6" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">7</td> -->
+<td class="Waku_Normal" >7</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_7" cart-item="a1-54-10_b7_c0_1_2_7" onClick="">347.1
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_7" id="chk_2a1-54-10_b7_c0_1_2_7" name="" value="a1-54-10_b7_c0_1_2_7" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_7" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">8</td> -->
+<td class="Waku_Normal" >8</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_8" cart-item="a1-54-10_b7_c0_1_2_8" onClick="">725.4
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_8" id="chk_2a1-54-10_b7_c0_1_2_8" name="" value="a1-54-10_b7_c0_1_2_8" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_8" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">9</td> -->
+<td class="Waku_Normal" >9</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_9" cart-item="a1-54-10_b7_c0_1_2_9" onClick="">420.9
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_9" id="chk_2a1-54-10_b7_c0_1_2_9" name="" value="a1-54-10_b7_c0_1_2_9" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_9" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_10" cart-item="a1-54-10_b7_c0_1_2_10" onClick="">906.3
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_10" id="chk_2a1-54-10_b7_c0_1_2_10" name="" value="a1-54-10_b7_c0_1_2_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_11" cart-item="a1-54-10_b7_c0_1_2_11" onClick="">688.1
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_11" id="chk_2a1-54-10_b7_c0_1_2_11" name="" value="a1-54-10_b7_c0_1_2_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_1_2_12" cart-item="a1-54-10_b7_c0_1_2_12" onClick="">623.7
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_1_2_12" id="chk_2a1-54-10_b7_c0_1_2_12" name="" value="a1-54-10_b7_c0_1_2_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_1_2_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku3">3</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku4">4</td> -->
+<td class="Waku_Normal" >4</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_4" cart-item="a1-54-10_b7_c0_2_3_4" onClick="">91.5
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_4" id="chk_2a1-54-10_b7_c0_2_3_4" name="" value="a1-54-10_b7_c0_2_3_4" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_4" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku5">5</td> -->
+<td class="Waku_Normal" >5</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_5" cart-item="a1-54-10_b7_c0_2_3_5" onClick="">136.6
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_5" id="chk_2a1-54-10_b7_c0_2_3_5" name="" value="a1-54-10_b7_c0_2_3_5" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_5" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku5">6</td> -->
+<td class="Waku_Normal" >6</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_6" cart-item="a1-54-10_b7_c0_2_3_6" onClick="">73.6
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_6" id="chk_2a1-54-10_b7_c0_2_3_6" name="" value="a1-54-10_b7_c0_2_3_6" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_6" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">7</td> -->
+<td class="Waku_Normal" >7</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_7" cart-item="a1-54-10_b7_c0_2_3_7" onClick="">67.9
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_7" id="chk_2a1-54-10_b7_c0_2_3_7" name="" value="a1-54-10_b7_c0_2_3_7" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_7" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">8</td> -->
+<td class="Waku_Normal" >8</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_8" cart-item="a1-54-10_b7_c0_2_3_8" onClick="">182.5
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_8" id="chk_2a1-54-10_b7_c0_2_3_8" name="" value="a1-54-10_b7_c0_2_3_8" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_8" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">9</td> -->
+<td class="Waku_Normal" >9</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_9" cart-item="a1-54-10_b7_c0_2_3_9" onClick="">81.0
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_9" id="chk_2a1-54-10_b7_c0_2_3_9" name="" value="a1-54-10_b7_c0_2_3_9" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_9" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_10" cart-item="a1-54-10_b7_c0_2_3_10" onClick="">212.3
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_10" id="chk_2a1-54-10_b7_c0_2_3_10" name="" value="a1-54-10_b7_c0_2_3_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_11" cart-item="a1-54-10_b7_c0_2_3_11" onClick="">136.9
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_11" id="chk_2a1-54-10_b7_c0_2_3_11" name="" value="a1-54-10_b7_c0_2_3_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_3_12" cart-item="a1-54-10_b7_c0_2_3_12" onClick="">112.0
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_3_12" id="chk_2a1-54-10_b7_c0_2_3_12" name="" value="a1-54-10_b7_c0_2_3_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_3_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku4">4</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku5">5</td> -->
+<td class="Waku_Normal" >5</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_5" cart-item="a1-54-10_b7_c0_2_4_5" onClick="">245.2
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_5" id="chk_2a1-54-10_b7_c0_2_4_5" name="" value="a1-54-10_b7_c0_2_4_5" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_5" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku5">6</td> -->
+<td class="Waku_Normal" >6</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_6" cart-item="a1-54-10_b7_c0_2_4_6" onClick="">127.0
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_6" id="chk_2a1-54-10_b7_c0_2_4_6" name="" value="a1-54-10_b7_c0_2_4_6" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_6" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">7</td> -->
+<td class="Waku_Normal" >7</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_7" cart-item="a1-54-10_b7_c0_2_4_7" onClick="">140.3
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_7" id="chk_2a1-54-10_b7_c0_2_4_7" name="" value="a1-54-10_b7_c0_2_4_7" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_7" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">8</td> -->
+<td class="Waku_Normal" >8</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_8" cart-item="a1-54-10_b7_c0_2_4_8" onClick="">363.1
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_8" id="chk_2a1-54-10_b7_c0_2_4_8" name="" value="a1-54-10_b7_c0_2_4_8" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_8" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">9</td> -->
+<td class="Waku_Normal" >9</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_9" cart-item="a1-54-10_b7_c0_2_4_9" onClick="">146.2
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_9" id="chk_2a1-54-10_b7_c0_2_4_9" name="" value="a1-54-10_b7_c0_2_4_9" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_9" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_10" cart-item="a1-54-10_b7_c0_2_4_10" onClick="">294.7
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_10" id="chk_2a1-54-10_b7_c0_2_4_10" name="" value="a1-54-10_b7_c0_2_4_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_11" cart-item="a1-54-10_b7_c0_2_4_11" onClick="">210.6
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_11" id="chk_2a1-54-10_b7_c0_2_4_11" name="" value="a1-54-10_b7_c0_2_4_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_4_12" cart-item="a1-54-10_b7_c0_2_4_12" onClick="">250.5
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_4_12" id="chk_2a1-54-10_b7_c0_2_4_12" name="" value="a1-54-10_b7_c0_2_4_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_4_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku5">5</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku5">6</td> -->
+<td class="Waku_Normal" >6</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_5_6" cart-item="a1-54-10_b7_c0_2_5_6" onClick="">249.9
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_5_6" id="chk_2a1-54-10_b7_c0_2_5_6" name="" value="a1-54-10_b7_c0_2_5_6" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_5_6" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">7</td> -->
+<td class="Waku_Normal" >7</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_5_7" cart-item="a1-54-10_b7_c0_2_5_7" onClick="">196.8
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_5_7" id="chk_2a1-54-10_b7_c0_2_5_7" name="" value="a1-54-10_b7_c0_2_5_7" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_5_7" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">8</td> -->
+<td class="Waku_Normal" >8</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_5_8" cart-item="a1-54-10_b7_c0_2_5_8" onClick="">553.2
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_5_8" id="chk_2a1-54-10_b7_c0_2_5_8" name="" value="a1-54-10_b7_c0_2_5_8" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_5_8" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">9</td> -->
+<td class="Waku_Normal" >9</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_5_9" cart-item="a1-54-10_b7_c0_2_5_9" onClick="">228.7
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_5_9" id="chk_2a1-54-10_b7_c0_2_5_9" name="" value="a1-54-10_b7_c0_2_5_9" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_5_9" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_5_10" cart-item="a1-54-10_b7_c0_2_5_10" onClick="">562.5
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_5_10" id="chk_2a1-54-10_b7_c0_2_5_10" name="" value="a1-54-10_b7_c0_2_5_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_5_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_5_11" cart-item="a1-54-10_b7_c0_2_5_11" onClick="">378.6
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_5_11" id="chk_2a1-54-10_b7_c0_2_5_11" name="" value="a1-54-10_b7_c0_2_5_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_5_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_5_12" cart-item="a1-54-10_b7_c0_2_5_12" onClick="">368.0
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_5_12" id="chk_2a1-54-10_b7_c0_2_5_12" name="" value="a1-54-10_b7_c0_2_5_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_5_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku5">6</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">7</td> -->
+<td class="Waku_Normal" >7</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_6_7" cart-item="a1-54-10_b7_c0_2_6_7" onClick="">95.4
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_6_7" id="chk_2a1-54-10_b7_c0_2_6_7" name="" value="a1-54-10_b7_c0_2_6_7" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_6_7" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">8</td> -->
+<td class="Waku_Normal" >8</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_6_8" cart-item="a1-54-10_b7_c0_2_6_8" onClick="">352.2
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_6_8" id="chk_2a1-54-10_b7_c0_2_6_8" name="" value="a1-54-10_b7_c0_2_6_8" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_6_8" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">9</td> -->
+<td class="Waku_Normal" >9</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_6_9" cart-item="a1-54-10_b7_c0_2_6_9" onClick="">125.7
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_6_9" id="chk_2a1-54-10_b7_c0_2_6_9" name="" value="a1-54-10_b7_c0_2_6_9" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_6_9" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_6_10" cart-item="a1-54-10_b7_c0_2_6_10" onClick="">255.6
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_6_10" id="chk_2a1-54-10_b7_c0_2_6_10" name="" value="a1-54-10_b7_c0_2_6_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_6_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_6_11" cart-item="a1-54-10_b7_c0_2_6_11" onClick="">155.2
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_6_11" id="chk_2a1-54-10_b7_c0_2_6_11" name="" value="a1-54-10_b7_c0_2_6_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_6_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_6_12" cart-item="a1-54-10_b7_c0_2_6_12" onClick="">158.7
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_6_12" id="chk_2a1-54-10_b7_c0_2_6_12" name="" value="a1-54-10_b7_c0_2_6_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_6_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku6">7</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku6">8</td> -->
+<td class="Waku_Normal" >8</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_7_8" cart-item="a1-54-10_b7_c0_2_7_8" onClick="">266.2
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_7_8" id="chk_2a1-54-10_b7_c0_2_7_8" name="" value="a1-54-10_b7_c0_2_7_8" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_7_8" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">9</td> -->
+<td class="Waku_Normal" >9</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_7_9" cart-item="a1-54-10_b7_c0_2_7_9" onClick="">117.9
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_7_9" id="chk_2a1-54-10_b7_c0_2_7_9" name="" value="a1-54-10_b7_c0_2_7_9" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_7_9" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_7_10" cart-item="a1-54-10_b7_c0_2_7_10" onClick="">252.8
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_7_10" id="chk_2a1-54-10_b7_c0_2_7_10" name="" value="a1-54-10_b7_c0_2_7_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_7_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_7_11" cart-item="a1-54-10_b7_c0_2_7_11" onClick="">152.6
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_7_11" id="chk_2a1-54-10_b7_c0_2_7_11" name="" value="a1-54-10_b7_c0_2_7_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_7_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_7_12" cart-item="a1-54-10_b7_c0_2_7_12" onClick="">145.0
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_7_12" id="chk_2a1-54-10_b7_c0_2_7_12" name="" value="a1-54-10_b7_c0_2_7_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_7_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku6">8</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">9</td> -->
+<td class="Waku_Normal" >9</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_8_9" cart-item="a1-54-10_b7_c0_2_8_9" onClick="">333.0
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_8_9" id="chk_2a1-54-10_b7_c0_2_8_9" name="" value="a1-54-10_b7_c0_2_8_9" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_8_9" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_8_10" cart-item="a1-54-10_b7_c0_2_8_10" onClick="">670.3
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_8_10" id="chk_2a1-54-10_b7_c0_2_8_10" name="" value="a1-54-10_b7_c0_2_8_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_8_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_8_11" cart-item="a1-54-10_b7_c0_2_8_11" onClick="">490.7
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_8_11" id="chk_2a1-54-10_b7_c0_2_8_11" name="" value="a1-54-10_b7_c0_2_8_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_8_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_8_12" cart-item="a1-54-10_b7_c0_2_8_12" onClick="">353.4
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_8_12" id="chk_2a1-54-10_b7_c0_2_8_12" name="" value="a1-54-10_b7_c0_2_8_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_8_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku7">9</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku7">10</td> -->
+<td class="Waku_Normal" >10</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_9_10" cart-item="a1-54-10_b7_c0_2_9_10" onClick="">280.5
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_9_10" id="chk_2a1-54-10_b7_c0_2_9_10" name="" value="a1-54-10_b7_c0_2_9_10" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_9_10" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_9_11" cart-item="a1-54-10_b7_c0_2_9_11" onClick="">173.2
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_9_11" id="chk_2a1-54-10_b7_c0_2_9_11" name="" value="a1-54-10_b7_c0_2_9_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_9_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_9_12" cart-item="a1-54-10_b7_c0_2_9_12" onClick="">196.8
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_9_12" id="chk_2a1-54-10_b7_c0_2_9_12" name="" value="a1-54-10_b7_c0_2_9_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_9_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku7">10</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">11</td> -->
+<td class="Waku_Normal" >11</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_10_11" cart-item="a1-54-10_b7_c0_2_10_11" onClick="">317.1
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_10_11" id="chk_2a1-54-10_b7_c0_2_10_11" name="" value="a1-54-10_b7_c0_2_10_11" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_10_11" class="Check01Btn_Off"></label>
+</td>
+</tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_10_12" cart-item="a1-54-10_b7_c0_2_10_12" onClick="">399.6
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_10_12" id="chk_2a1-54-10_b7_c0_2_10_12" name="" value="a1-54-10_b7_c0_2_10_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_10_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table><table class="Odds_Table">
+<tr class="col_label"><th colspan="3" class="Waku8">11</th></tr>
+<tr class="Graph_Odds">
+<!-- <td class="Waku8">12</td> -->
+<td class="Waku_Normal" >12</td>
+<td class="Odds" id="chk_2a1-54-10_b7_c0_2_11_12" cart-item="a1-54-10_b7_c0_2_11_12" onClick="">248.3
+<input type="checkbox" style="display: none;" class="HorseCheck_Select" cart-item="a1-54-10_b7_c0_2_11_12" id="chk_2a1-54-10_b7_c0_2_11_12" name="" value="a1-54-10_b7_c0_2_11_12" />
+<label  style="display: none;" for="chk_2a1-54-10_b7_c0_2_11_12" class="Check01Btn_Off"></label>
+</td>
+</tr>
+
+</table>
+</div>
+<p class="RaceInfo_Notice mt18">
+※結果・成績・オッズなどのデータは、必ず主催者発表のものと照合しご確認ください。
+</p>
+</div>
+<div class="InputFixedArea_Wrap">
+<div class="InputFixedArea01 Odds Sticky" style="display: block;" id ="bet_window">
+<dl class="TotalBetDL" class="disp_none">
+<dd id = "caution_50bet" style="display: none;">
+<font color="#f20">件数オーバー(1度の投票は50件まで)</font>
+</dd>
+<dt id="total_bet">選択済み：<span id="odds_select"></span>件</dt>
+</dl>
+<div class="InputBtnBox">
+<!-- <a href="?pid=bet&race_id=202654071210"> -->
+<a href="../ipat/dispatch.html?race_id=202654071210" class="SubmitBtn" id="action_bet" target="_blank">金額入力へすすむ</a>
+<button class="AddBtn" type="button" onClick="location.href='?race_id=202654071210'"><span class="Icon_addBtn"></span>買い目追加</button>
+</div><!-- /.InputBtnBox -->
+</div><!-- /.InputFixedArea01 -->
+</div>
+<script language="JavaScript" type="text/JavaScript">
+$(function() {
+$("#bet_window").show();
+$(document).off("click", ".Graph_Odds td.Odds").on("click", ".Graph_Odds td.Odds", function () {
+var $td = $(this);
+var $checkbox = $td.find("input[type=checkbox]");
+var _group = 'bet_202654071210';
+var _item_id = $(this).attr("cart-item");
+var _item_value = 1;
+var _client_data = '';
+if (typeof _item_id != "undefined" && _item_id != "") {
+if ($checkbox.prop("checked")) {
+$checkbox.prop("checked", false);
+update_cart_checkbox('bet_202654071210', $checkbox.val(), 1, '', false); view_check_count_normal();
+$td.parent().removeClass("Selected");
+} else {
+$checkbox.prop("checked", true);
+update_cart_checkbox('bet_202654071210', $checkbox.val(), 1, '', true); view_check_count_normal();
+$td.parent().addClass("Selected");
+}
+}
+});
+var param = location.search.split('&');
+if (param[1] == "type=b5") {
+$('.RaceOdds_HorseList').addClass('Wide_Normal');
+}
+});
+</script>
+<script language="JavaScript" type="text/JavaScript">
+//===========================================================
+// 選択方式の表示切り替え処理
+//===========================================================
+function SwitchingDisplay(type,housiki)
+{
+$("#odds_view_result").html('');
+var url = "../odds/odds_get_form.html?type=" + type + "&race_id=202654071210&housiki=" + housiki;
+$.ajax({
+type: "GET",
+url: url,
+data: null,
+cache: false,
+success: function(data)
+{
+window.history.pushState(null,null, url.replace('odds_get_form','index'));
+$("#odds_view_form").html(data);
+}
+});
+// location.href = "?type=" + type + "&race_id=202654071210&housiki=" + housiki + "#odds_menu";
+}
+//===========================================================
+// Docment Readyになったときに処理するもの
+//===========================================================
+$(document).ready(function ()
+{
+$(".umai_goods_list_v2").hide();
+//オッズ表示時の買い目チェック
+cart_get_itemlist( 'bet_202654071210', init_select_kaime_normal );
+});
+//===========================================================
+// オッズ検索結果にて、
+// すでにチェック済みの買い目にチェックを入れる
+// in: _cart       = cart_get_itemlist()の戻り(item_id)
+//     _aryID['0'] = チェック対象のchkboxのidタグ検索キー
+//===========================================================
+function init_select_kaime_normal( _cart )
+{
+console.log('init_select_kaime_normal');
+$("[id^='chk_']").each(function()
+{
+var chkbox 	= $(this);
+var count 	= chkbox.val();
+chkbox.prop("checked", false);	// 該当chkboxを初期化
+var select_name = chkbox.attr('cart-item');
+if (typeof select_name != "undefined" && select_name != "") {
+for(var item_id in _cart)
+{
+if (item_id == count)
+{// すでにチェック済みの買い目と一致したとき
+chkbox.prop("checked", true);	// 該当chkboxをチェック
+$(this).parent().parent().addClass('Selected');
+}
+}
+} else {
+$(this).addClass('Cancel');
+}
+});
+view_check_count_normal();		// チェック数をカウント(初期表示)
+}
+//------------------------------------------------------------
+// 買い目点数のカウント・表示
+//------------------------------------------------------------
+function view_check_count_normal()
+{
+var cnt = 0;
+$("[id^='chk_']").each(function()
+{
+var chkbox = $(this);
+if ( chkbox.prop("checked") == true )
+{
+cnt++;
+}
+});
+console.log('view_check_count _cnt='+cnt);
+$('#odds_select').text( cnt );
+var limit = '50';
+var cookie = document.cookie.split(';');
+for(var i = 0; i < cookie.length; i++){
+var item = cookie[i].split('=');
+//投票モード確認
+if(item[0].trim() === 'bet_mode' && item[1].trim() === 'spat4'){
+limit = '120';
+}
+}
+var err_text = '件数オーバー(1度の投票は'+limit+'件まで)';
+//51件以上の買い目が選択されている場合はアラートメッセージ
+if(cnt>limit)
+{
+$('#caution_50bet').css("display", "block");
+$('#caution_50bet > font').text(err_text);
+}
+else
+{
+$('#caution_50bet').css("display", "none");
+}
+$('#bet_window').css("display", "block");
+}
+//------------------------------------------------------------
+//
+//------------------------------------------------------------
+function update_cart_checkbox( _group, _item_id, _item_value, _client_data, _checked )
+{
+if(true == _checked){
+cart_add_item( _group, _item_id, _item_value, '', _client_data );
+view_check_count_normal();
+}else{
+cart_remove_item( _group, _item_id );
+view_check_count_normal();
+}
+}
+function view_3odds_normal()
+{
+// umaban = $('#list_select_horse').attr('value');
+// location.href = "?type=b7&race_id=202654071210&jiku=" + umaban + "#odds_menu";
+umaban = $('#list_select_horse').val();
+$("#odds_view_result").html('');
+var url = "../odds/odds_get_form.html?type=b7&race_id=202654071210&jiku=" + umaban;
+$.ajax({
+type: "GET",
+url: url,
+data: null,
+cache: false,
+success: function(data)
+{
+$("#odds_view_form").html(data); // show response from the php script.
+}
+});
+}
+</script>
