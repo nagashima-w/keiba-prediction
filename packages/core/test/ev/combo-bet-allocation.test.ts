@@ -575,6 +575,60 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
+  describe("converged(収束と打ち切りの区別。boss指摘2026-08-05)", () => {
+    it("市場regime(現実的なオッズ分布)ではconverged=trueにしかならないことの前提確認", () => {
+      // 「502件規模の現実的な候補では常にconverged=trueになる」というboss訂正の事実を
+      // 本テストスイート内でも再現しておく(下のテストが本当に打ち切りを再現しているかを
+      // 対比で示すため)。妙味が小さめの候補を多数並べても、貪欲法はgreedySteps=1000より
+      // 十分手前で自然停止する(実測: scripts/bench-allocation.tsの市場regimeは
+      // 使用ステップ数15〜973/1000で必ず1000未満)。
+      const horses = evenHorses(18, 3);
+      const candidates = makeAscendingUniqueCandidates(80);
+      const result = allocateGeneralBets(horses, 3, candidates, {
+        ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        bankroll: 1000000,
+        perRaceCap: 100000,
+      });
+      expect(result.diagnostics.converged).toBe(true);
+    });
+
+    it("打ち切り(converged=false)を再現できること(市場regimeでは再現できないため、確実に打ち切る構造で検証する)", () => {
+      // 「複数の買い目が排反かつ全体を尽くす(確率の合計が1)・オッズが極めて高い」という
+      // 構造にすると、貪欲法にとって実質リスクフリーな配分になり、貪欲分割数(greedySteps)を
+      // 使い切るまで改善が続く(allocation-primitives.test.tsの
+      // 「greedySteps不足時はconverged=falseになること」と同じ構造を、combo経路
+      // 〈GeneralBetAllocationDiagnostics.converged〉で確認する)。
+      const horses = evenHorses(3, 3);
+      const model = stubModel([
+        { placed: [1], probability: 1 / 3 },
+        { placed: [2], probability: 1 / 3 },
+        { placed: [3], probability: 1 / 3 },
+      ]);
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1], odds: 10, ev: 3.33, isPositive: true },
+        { umabans: [2], odds: 10, ev: 3.33, isPositive: true },
+        { umabans: [3], odds: 10, ev: 3.33, isPositive: true },
+      ];
+      // greedySteps=5のように小さい値で強制的に打ち切らせる(前提: この構造は
+      // greedySteps=1000でも打ち切られる。低レイヤ〈allocation-primitives.test.ts〉で
+      // 確認済みの構造をそのまま再利用しているため、ここでは空振りではないことを
+      // 小さいgreedyStepsでも同じ結論になることで補強する)。
+      const result = allocateGeneralBets(
+        horses,
+        3,
+        candidates,
+        { ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, bankroll: 1000000, perRaceCap: 1000000, greedySteps: 5 },
+        model,
+      );
+      expect(result.diagnostics.converged).toBe(false);
+      // 前提(無条件expect): 打ち切られた結果、Σx*が1.0に到達している(貪欲分割数を
+      // 使い切ってなお改善余地が残っていたことの直接証拠。仮に自然収束していたら
+      // Σx*<1.0で止まっているはず)。
+      const sumX = result.allocations.reduce((acc, a) => acc + a.continuousFraction, 0);
+      expect(sumX).toBeCloseTo(1, 10);
+    });
+  });
+
   describe("数値の極端値(高オッズ×低確率)", () => {
     it("odds=3000・hitProb=1/2000でもwealth<=EPSガードが効き、NaN/Infinityが混入しないこと", () => {
       const horses = evenHorses(5, 3);
