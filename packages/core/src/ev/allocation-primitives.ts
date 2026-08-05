@@ -329,6 +329,15 @@ export interface MinimumStakeResult {
  * タイブレークの契約: 同値の場合は**インデックスが小さい方**(=先に出現した方)を採用する。
  * 呼び出し側は、候補配列をタイブレークで優先したい順序(複勝: 馬番昇順、組合せ券種: 馬番配列の
  * 辞書順)へあらかじめ並べてから渡すこと(本関数自身は候補の識別子を一切参照しない。券種非依存)。
+ *
+ * **留意事項(code-reviewer指摘・機能D-2a): この契約は本JSDocによる取り決めのみで、実行時の
+ * 強制(ソート済みであることの検証)は行っていない。** 抽出前(旧 bet-allocation.ts 内で
+ * `candidateHorses[i].umaban < candidateHorses[bestIdx].umaban` を明示的に比較していた実装)から
+ * 抽出後の本実装への置き換えは、呼び出し側(bet-allocation.ts・combo-bet-allocation.ts)が
+ * いずれも馬番昇順/馬番配列辞書順にソート済みの配列を渡す不変条件のもとで、
+ * 出力が完全に一致することを確認済み(ソート済み入力では常に一致・非ソート入力でのみ
+ * 結果が食い違うことを比較スクリプトで実測)。将来ソートされていない配列を渡す呼び出しが
+ * 追加された場合はこの契約が黙って破られる点に注意。
  */
 export function applyMinimumStake(
   rawStakes: readonly number[],

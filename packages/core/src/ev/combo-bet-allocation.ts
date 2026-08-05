@@ -83,7 +83,24 @@ export { CONDITIONAL_BERNOULLI_MODEL, DEFAULT_EV_CONFIG };
 export interface AllocationCandidate {
   /** 買い目を構成する馬番の組(昇順・重複なし)。 */
   readonly umabans: readonly number[];
-  /** 採用したオッズ(単一値。ワイドなら下限、三連複ならそのまま)。 */
+  /**
+   * 採用したオッズ(単一値)。
+   *
+   * **ワイドは下限を使う(保守的見積り)**。既存 `expected-value.ts` の
+   * `computeRaceEv`(複勝EV = placeProb × placeOddsMin)が複勝オッズの下限を採用している流儀を
+   * 踏襲する。ワイドは最終配当が下限〜上限のレンジで確定する券種であり(仕様「4. ev — 期待値計算」
+   * のコメント参照)、下限を使うとEVを過小評価する方向に倒れるため、EVプラス判定・配分計算が
+   * 楽観的にならない(妙味を過大評価しない)。三連複はオッズが単一値で確定しているため、
+   * そのまま採用する(下限/上限の選択問題自体が存在しない。
+   * `docs/wide-trio-odds-investigation.md` §2.3「ワイドは幅(下限-上限)、3連複は単一値」参照)。
+   *
+   * **本モジュールはスカラー(既に1つに決まったオッズ値)を受け取る契約であり、
+   * レンジ(下限-上限)から下限を選び出す変換ロジック自体は本モジュールに存在しない。**
+   * その変換は呼び出し側(D-2b、Issue #27でのオッズ取得・配線実装)の責務である。
+   * 誤解を避けるための明記: `buildComboCandidates` の `oddsByKey: ReadonlyMap<string, number | null>`
+   * も同様にスカラー値を受け取るのみで、ワイドのレンジ表現(例: `[下限, 上限, 人気]`)から
+   * 下限を取り出す処理は呼び出し側が済ませてから渡す必要がある。
+   */
   readonly odds: number;
   /** 期待値(的中確率×odds)。 */
   readonly ev: number;
@@ -565,7 +582,9 @@ function computeComboHitProb(combo: readonly number[], rawDistribution: readonly
  * @param topFinishCount 上位何着までを的中判定に使うか(ワイド・三連複は常に3。JSDoc冒頭参照)
  * @param comboSize 買い目を構成する頭数(ワイド=2、三連複=3)
  * @param oddsByKey buildComboOddsKeyで生成したキーへのオッズMap(値がnullなら欠損、
- *   キーが無ければ未取得)
+ *   キーが無ければ未取得)。**値はスカラー(既に1つに決まったオッズ)であること。**
+ *   ワイドのレンジ表現(下限-上限)から下限を選び出す変換は本関数の責務ではなく、
+ *   呼び出し側(D-2b・Issue #27)が済ませてから渡すこと(AllocationCandidate.oddsのJSDoc参照)。
  * @param evConfig EV判定の設定(省略時は既存expected-value.tsの既定閾値1.0・厳密不等号を再利用。
  *   閾値を二重定義しない)
  * @param model 同時分布モデル(省略時は条件付きベルヌーイ)

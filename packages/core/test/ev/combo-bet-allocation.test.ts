@@ -362,6 +362,12 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       ];
       expect(() => allocateGeneralBets(horses, 3, dup)).toThrow();
     });
+
+    it("馬番の組が空(umabans: [])の候補を渡すと例外を投げること(code-reviewer提案2)", () => {
+      const horses = evenHorses(4, 3);
+      const empty: AllocationCandidate[] = [{ umabans: [], odds: 3, ev: 2, isPositive: true }];
+      expect(() => allocateGeneralBets(horses, 3, empty)).toThrow();
+    });
   });
 
   describe("既存の防御が組合せでも生きること(betUnit/λ/greedySteps/bankroll/perRaceCapの異常値)", () => {
@@ -435,6 +441,41 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(result.totalStake).toBe(expected.totalStake);
     });
 
+    it("candidateCap=NaN/Infinity/負値/0/非整数でも既定candidateCap(50)相当の結果になること", () => {
+      // 他5フィールド(betUnit/kellyFraction/bankroll/perRaceCap/greedySteps)と同じ流儀
+      // (code-reviewer指摘【要修正2】)。候補cap自体が観測できるよう、60件の一意なワイド候補
+      // (既定cap=50を上回る)で truncatedByCapCount/candidateCount の一致を直接検証する。
+      const horses18 = evenHorses(18, 3);
+      const candidates60 = makeAscendingUniqueCandidates(60);
+      const base: GeneralBetAllocationConfig = {
+        bankroll: 100000,
+        perRaceCap: 100000,
+        kellyFraction: 1,
+        betUnit: 100,
+        greedySteps: 1000,
+        candidateCap: DEFAULT_CANDIDATE_CAP,
+      };
+      const expected = allocateGeneralBets(horses18, 3, candidates60, base);
+      // 前提(無条件expect): 既定candidateCapが実際に切り捨てを発動していること
+      // (発動していなければ、この後の「フォールバック後も一致する」検証が空振りになる)。
+      expect(expected.diagnostics.truncatedByCapCount).toBeGreaterThan(0);
+      expect(expected.diagnostics.candidateCount).toBe(DEFAULT_CANDIDATE_CAP);
+
+      for (const candidateCap of [
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        -5,
+        0,
+        12.5,
+      ]) {
+        const result = allocateGeneralBets(horses18, 3, candidates60, { ...base, candidateCap });
+        expect(result.diagnostics.candidateCount).toBe(DEFAULT_CANDIDATE_CAP);
+        expect(result.diagnostics.truncatedByCapCount).toBe(expected.diagnostics.truncatedByCapCount);
+        expect(result.totalStake).toBe(expected.totalStake);
+      }
+    });
+
     it("skipReasonの6分類すべてが組合せ経路でも成立すること(文言は『買い目』表現)", () => {
       const r1 = allocateGeneralBets(horses, 3, candidates, {
         ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
@@ -449,6 +490,66 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         perRaceCap: 10000,
       });
       expect(r5.skipReason).toBe("EVプラスの買い目がないため見送りです");
+    });
+  });
+
+  describe("券種混在(受け入れ条件8): umabans長1/2/3を1回のallocateGeneralBetsに混ぜて渡せること", () => {
+    it("複勝1件・ワイド1件・3連複1件を混在させても、単一の最適化で全て扱われ辞書順で安定すること", () => {
+      // code-reviewer指摘【要修正3】: 「API形状が対応している」ことをコンパイル可能性だけで
+      // 済ませず、実際に umabans.length===1/2/3 を混在させた候補配列を1回呼び出しに渡し、
+      // 3件とも同じ貪欲最適化に載って結果を返すことを直接検証する。
+      const horses = evenHorses(6, 3);
+      // 3候補がそれぞれ独立した専用outcomeでのみヒットするよう分離する(候補同士を
+      // 同一outcomeに相乗りさせない。相乗りさせると完全相関の代替品になり、貪欲法が
+      // 一方だけを選んで他方を0円にする〈正しい〉挙動と、的中判定バグによる0円が
+      // 見分けられなくなるため)。{2,4,5}は「先頭馬番だけ一致」する誤判定(部分集合包含では
+      // なく先頭要素の単純一致)を検出するための撹乱outcomeである: [2,3]の先頭2、[4,5,6]の
+      // 先頭4がそれぞれ含まれるが、組の残りの馬番(3・6)は含まれない。的中判定が「全馬番の
+      // 部分集合包含」ならこのoutcomeは[2,3]にも[4,5,6]にもヒットしないが、「先頭要素だけの
+      // 一致」というバグがあると誤ってヒット扱いになり、hitProbが0.3ではなく0.4に膨らんで
+      // 検出できる。
+      const model = stubModel([
+        { placed: [1, 7, 8], probability: 0.3 }, // [1] 専用
+        { placed: [2, 3, 9], probability: 0.3 }, // [2,3] 専用
+        { placed: [4, 5, 6], probability: 0.3 }, // [4,5,6] 専用
+        { placed: [2, 4, 5], probability: 0.1 }, // 撹乱(先頭要素のみ一致・部分集合ではない)
+      ]);
+      // odds=5・正しいhitProb=0.3ならEV=1.5>1(正の妙味)で、貪欲最適化がstakeを配分するはず。
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1], odds: 5, ev: 1.5, isPositive: true }, // 複勝相当(1頭)
+        { umabans: [2, 3], odds: 5, ev: 1.5, isPositive: true }, // ワイド相当(2頭組)
+        { umabans: [4, 5, 6], odds: 5, ev: 1.5, isPositive: true }, // 3連複相当(3頭組)
+      ];
+
+      const result = allocateGeneralBets(
+        horses,
+        3,
+        candidates,
+        { ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, bankroll: 1000000, perRaceCap: 1000000 },
+        model,
+      );
+
+      // 前提(無条件expect): 3件とも切り捨てられず、1回の最適化に載っていること。
+      expect(result.diagnostics.candidateCount).toBe(3);
+      expect(result.diagnostics.truncatedByCapCount).toBe(0);
+
+      // 辞書順(umabans配列比較。長さではなく要素の値で決まる)で安定していること:
+      // [1] < [2,3] < [4,5,6](先頭要素 1 < 2 < 4 で決まる。長さ混在でも崩れない)。
+      expect(result.allocations.map((a) => a.umabans.join(","))).toEqual(["1", "2,3", "4,5,6"]);
+
+      // 各買い目のhitProbが「全馬番の部分集合包含」で正しく導出されていること(撹乱outcome
+      // {2,4,5}は[2,3]にも[4,5,6]にもヒットしないため、いずれも0.3のまま)。
+      // 長さ混在でも同じ判定関数が正しく効いていることの直接証拠。
+      for (const a of result.allocations) {
+        expect(a.hitProb).toBeCloseTo(0.3, 10);
+      }
+
+      // 3件とも同一の貪欲最適化に載り、いずれも正の配分を得ていること
+      // (型だけ受け入れて実際には別々に処理している、という誤魔化しではないことの直接証拠)。
+      expect(result.betCount).toBe(3);
+      for (const a of result.allocations) {
+        expect(a.stake).toBeGreaterThan(0);
+      }
     });
   });
 
