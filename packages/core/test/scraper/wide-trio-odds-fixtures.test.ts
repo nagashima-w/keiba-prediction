@@ -232,6 +232,59 @@ describe("地方 静的HTML(narWideOddsPageUrl/narTrioOddsPageUrl)の実デー�
       expect(actual.size).toBeLessThan(expectedTripleKeys(n).size);
     });
 
+    it("3連複(jiku=2): 組合せ集合が「馬02を含む全トリオ」C(11,2)=55通りと完全一致すること(仮説「kを最小とするトリオのみ」の棄却。boss差し戻し対応)", () => {
+      // 「jiku=k は k を含む全トリオを返す」(仮説X)か「k を最小とするトリオのみ返す」(仮説Y)かは
+      // 軸1のフィクスチャだけでは区別できない(軸1では両者が一致するため)。軸2のフィクスチャで
+      // 判別する: 仮説Xなら馬02を含む全トリオ(C(11,2)=55件、馬01を含む組も許容)、
+      // 仮説Yなら馬02を最小とするトリオのみ(C(10,2)=45件、馬01を含む組は無い)。
+      const html = loadFixture("nar_odds_b7_jiku2_202654071210.html");
+      expect(html.length).toBeGreaterThan(0);
+      const actual = narTripleCombos(html, "b7");
+      expect(actual.size).toBe(55);
+
+      const others = Array.from({ length: n }, (_, i) => i + 1).filter((h) => h !== 2);
+      const hypothesisXContainsHorse2 = new Set<string>();
+      for (let i = 0; i < others.length; i += 1) {
+        for (let j = i + 1; j < others.length; j += 1) {
+          const trio = [others[i]!, others[j]!, 2].sort((a, b) => a - b).map(pad2).join("");
+          hypothesisXContainsHorse2.add(trio);
+        }
+      }
+      expect(hypothesisXContainsHorse2.size).toBe(55);
+      expect(setsEqual(actual, hypothesisXContainsHorse2)).toBe(true);
+
+      // 仮説Y(kを最小とするトリオのみ)なら馬01を含む組は存在しないはずだが、実際には存在する。
+      const containsHorse01 = [...actual].some((k) => k.startsWith("01"));
+      expect(containsHorse01).toBe(true);
+    });
+
+    it("3連複: 軸1(202654071210)と軸2(jiku=2)の積集合がちょうど10件(馬01・馬02をともに含むトリオ)であること", () => {
+      const axis1 = narTripleCombos(loadFixture("nar_odds_b7_202654071210.html"), "b7");
+      const axis2 = narTripleCombos(loadFixture("nar_odds_b7_jiku2_202654071210.html"), "b7");
+      const overlap = [...axis1].filter((k) => axis2.has(k));
+      expect(overlap.length).toBe(10);
+      // 積集合の全件が馬01・馬02の両方を含むこと(空振り防止の正のassert)。
+      expect(overlap.every((k) => k.startsWith("01") && k.includes("02"))).toBe(true);
+    });
+
+    it("3連複の軸馬選択プルダウン(list_select_horse)が1〜n(全頭)を選択肢として提示すること(観測値。全組合せに必要な最小リクエスト数n-2とは異なる概念であることの区別)", () => {
+      // 先頭に「現在選択中(軸1)」を表示するための重複option(selected属性付き)が1件あり、
+      // 生のoption数は13(重複1+全選択肢12)になる。選択肢の「種類」を見るため値を重複除去する。
+      const html = loadFixture("nar_odds_b7_202654071210.html");
+      const $ = cheerio.load(html);
+      const rawOptionCount = $("#list_select_horse option").length;
+      expect(rawOptionCount).toBe(n + 1);
+      const options = [
+        ...new Set(
+          $("#list_select_horse option")
+            .map((_, el) => Number($(el).attr("value")))
+            .get(),
+        ),
+      ].sort((a, b) => a - b);
+      expect(options.length).toBe(n);
+      expect(options).toEqual(Array.from({ length: n }, (_, i) => i + 1));
+    });
+
     it("3連複: td.Odds内に幅を表す「-」区切りテキストが無く単一値であること(ワイドとの構造差の確認)", () => {
       const html = loadFixture("nar_odds_b7_202654071210.html");
       const $ = cheerio.load(html);
