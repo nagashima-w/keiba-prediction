@@ -431,7 +431,10 @@ export function allocateBets(
     outcome.placed.includes(h.umaban),
   );
   const odds = candidateHorses.map((h) => h.placeOddsMin!);
-  const continuousFractions = runGreedyAllocation(
+  // runGreedyAllocationは{fractions, converged}を返す(機能D-2a・boss指摘2026-08-05)。
+  // convergedは複勝経路では受け取って捨てる(BetAllocationResultに新規フィールドを
+  // 追加しない。公開契約を一切変えない方針は組合せ経路一般化の後も維持する)。
+  const { fractions: continuousFractions } = runGreedyAllocation(
     candidateHorses.length,
     odds,
     outcomeIndexSets,

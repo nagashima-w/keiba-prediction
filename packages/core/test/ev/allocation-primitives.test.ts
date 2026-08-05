@@ -160,9 +160,9 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
     });
   });
 
-  describe("runGreedyAllocation(貪欲逐次配分)", () => {
-    it("候補0件は空配列を返す", () => {
-      expect(runGreedyAllocation(0, [], [], 1000)).toEqual([]);
+  describe("runGreedyAllocation(貪欲逐次配分・機能D-2a高速化後)", () => {
+    it("候補0件は空配列・converged=trueを返す", () => {
+      expect(runGreedyAllocation(0, [], [], 1000)).toEqual({ fractions: [], converged: true });
     });
 
     it("単純な2択(オッズ差のみ)で妙味が大きい方に配分が偏ること(退化していないことの確認)", () => {
@@ -170,17 +170,101 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
         { indices: [0], probability: 0.5 },
         { indices: [1], probability: 0.5 },
       ];
-      const x = runGreedyAllocation(2, [5, 1.1], outcomeIndexSets, 1000);
-      expect(x[0]).toBeGreaterThan(0);
+      const { fractions, converged } = runGreedyAllocation(2, [5, 1.1], outcomeIndexSets, 1000);
+      expect(fractions[0]).toBeGreaterThan(0);
       // オッズ1.1側はEV=0.5*1.1=0.55<1で妙味が無く、配分されない(0のまま)ことを固定する。
-      expect(x[1]).toBe(0);
+      expect(fractions[1]).toBe(0);
+      // 増分が尽きて自然停止するはず(1000ステップを使い切らない)。
+      expect(converged).toBe(true);
     });
 
-    it("wealth<=EPSになる割当を候補から除外し、NaN/Infinityを生まないこと(極端値)", () => {
+    it("wealth<=EPSになる割当を候補から除外し、NaN/Infinityを生まないこと(極端値。EPSガードの安全性チェックが働く経路)", () => {
       const outcomeIndexSets: OutcomeIndexSet[] = [{ indices: [0], probability: 1 }];
       // 高オッズ×低確率(3000倍)でも、貪欲ループの結果が有限であること。
-      const x = runGreedyAllocation(1, [3000], outcomeIndexSets, 1000);
-      expect(Number.isFinite(x[0]!)).toBe(true);
+      const { fractions } = runGreedyAllocation(1, [3000], outcomeIndexSets, 1000);
+      expect(Number.isFinite(fractions[0]!)).toBe(true);
+    });
+
+    it("greedySteps不足時はconverged=falseになること(打ち切りを収束と誤読しないための固定)", () => {
+      // 3候補・十分な妙味(EV>1)があり、貪欲が常に増分>0を見出せる状況を作る。
+      // greedySteps=3のように極端に小さい値にすると、局所最適に到達する前に
+      // ステップ数を使い切って打ち切られるはず。
+      const outcomeIndexSets: OutcomeIndexSet[] = [
+        { indices: [0], probability: 1 / 3 },
+        { indices: [1], probability: 1 / 3 },
+        { indices: [2], probability: 1 / 3 },
+      ];
+      const { converged } = runGreedyAllocation(3, [10, 10, 10], outcomeIndexSets, 3);
+      expect(converged).toBe(false);
+    });
+
+    it("高速パス(候補が多く安全域)とフォールバック相当のブルートフォースが同じ結果になること(数学的同値性の直接検証)", () => {
+      // 候補20・outcome10のランダムだが決定的な構成で、通常は安全域(高速パス)を通るはず。
+      // 参照実装として、旧来のブルートフォース版をこのテスト内に再実装し、
+      // 本体(高速化後のrunGreedyAllocation)の出力と厳密一致(toBe)することを確認する。
+      const n = 20;
+      const outcomeIndexSets: OutcomeIndexSet[] = [];
+      let seed = 42;
+      const rand = () => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed / 0x7fffffff;
+      };
+      for (let j = 0; j < 10; j++) {
+        const indices: number[] = [];
+        for (let i = 0; i < n; i++) {
+          if (rand() < 0.15) indices.push(i);
+        }
+        outcomeIndexSets.push({ indices, probability: 1 / 10 });
+      }
+      const odds = Array.from({ length: n }, () => 2 + rand() * 4);
+
+      const bruteForce = (
+        nn: number,
+        oddsArr: readonly number[],
+        sets: readonly OutcomeIndexSet[],
+        steps: number,
+      ): number[] => {
+        const x = new Array<number>(nn).fill(0);
+        const delta = 1 / steps;
+        let sumX = 0;
+        const computeF = (trialSumX: number, trialX: readonly number[]): number | null => {
+          let total = 0;
+          for (const outcome of sets) {
+            let payout = 0;
+            for (const idx of outcome.indices) payout += trialX[idx]! * oddsArr[idx]!;
+            const wealth = 1 - trialSumX + payout;
+            if (wealth <= 1e-9) return null;
+            total += outcome.probability * Math.log(wealth);
+          }
+          return total;
+        };
+        let currentF = computeF(sumX, x)!;
+        for (let step = 0; step < steps; step++) {
+          let bestIdx = -1;
+          let bestIncrement = 0;
+          const trialSumX = sumX + delta;
+          for (let i = 0; i < nn; i++) {
+            const trialX = x.slice();
+            trialX[i] = trialX[i]! + delta;
+            const trialF = computeF(trialSumX, trialX);
+            if (trialF === null) continue;
+            const increment = trialF - currentF;
+            if (increment > bestIncrement) {
+              bestIncrement = increment;
+              bestIdx = i;
+            }
+          }
+          if (bestIdx === -1) break;
+          x[bestIdx] = x[bestIdx]! + delta;
+          sumX = trialSumX;
+          currentF = computeF(sumX, x)!;
+        }
+        return x;
+      };
+
+      const expected = bruteForce(n, odds, outcomeIndexSets, 500);
+      const { fractions: actual } = runGreedyAllocation(n, odds, outcomeIndexSets, 500);
+      expect(actual).toEqual(expected);
     });
   });
 

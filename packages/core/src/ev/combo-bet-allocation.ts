@@ -108,9 +108,27 @@ export interface AllocationCandidate {
   readonly isPositive: boolean;
 }
 
-/** 候補上限の既定値。18頭全頭(複勝候補数の最大)では発動せず、混在時の987候補級で効く値として
- *  実測(報告参照)に基づき暫定採用した(boss着手前ゲート決定5・本実装で確定)。 */
-export const DEFAULT_CANDIDATE_CAP = 50;
+/**
+ * 候補上限の既定値。
+ *
+ * **位置づけの変更(boss指摘・2026-08-05): 性能のための打ち切りとしては廃止し、
+ * 「暴走ガード」に位置づけを変えた。** 当初(本実装時点)はcandidateCapを「計算量を
+ * 抑えるための実用的な間引き」として既定50で運用していたが、`runGreedyAllocation`
+ * (allocation-primitives.ts)を「候補数×outcome数」から「outcome数+総接触数」へ
+ * 計算量最適化したことで、現実的な最大(18頭・複勝+ワイド+3連複混在=987候補)でも
+ * candidateCapを外して秒未満で完了することを確認した(`pnpm tsx scripts/bench-allocation.ts`
+ * で再現可能)。したがって候補cap=50を「性能を守るための間引き」として使い続けると、
+ * **ケリー配分の質そのものを歪める**(候補を減らすと分散投資による相関緩和が効かなくなり、
+ * 貪欲法が浅い局所解で止まる。boss実測: cap=50でΣx*=0.093、無制限でΣx*=0.854、
+ * betCountがcap=50で13件・無制限で113件という大きな差が出た)。
+ *
+ * 既定値は「18頭の現実的な最大987候補では発動しない」ことを条件に、明らかに異常な
+ * 候補数(データ生成バグ・呼び出し側の誤用等)からの暴走だけを止める安全弁として、
+ * 実際に想定される最大値に十分な余裕を持たせた2000とした(987の2倍強)。
+ * 候補上限を意図的に絞りたい場合は `GeneralBetAllocationConfig.candidateCap` を
+ * 明示的に指定すること(既定値はもはや「性能チューニングの推奨値」ではない)。
+ */
+export const DEFAULT_CANDIDATE_CAP = 2000;
 
 /** 券種一般の配分最適化設定。bet-allocation.tsのBetAllocationConfigに candidateCap を加えた形。 */
 export interface GeneralBetAllocationConfig {
@@ -119,7 +137,11 @@ export interface GeneralBetAllocationConfig {
   readonly kellyFraction: number;
   readonly betUnit: number;
   readonly greedySteps: number;
-  /** 最適化に渡す候補数の上限(EV降順・同値は馬番配列の辞書順でタイブレークして選抜)。 */
+  /**
+   * 最適化に渡す候補数の上限(EV降順・同値は馬番配列の辞書順でタイブレークして選抜)。
+   * **暴走ガードであり、性能チューニングのためのパラメータではない**(DEFAULT_CANDIDATE_CAPの
+   * JSDoc参照)。既定値(2000)は現実的な最大候補数を大きく上回るため通常は発動しない。
+   */
   readonly candidateCap: number;
 }
 
@@ -171,10 +193,23 @@ export interface GeneralBetAllocation {
 export interface GeneralBetAllocationDiagnostics {
   /** isPositiveな入力候補の数(candidateCap適用前)。 */
   readonly inputCandidateCount: number;
-  /** candidateCapにより最適化から切り捨てられた候補数。 */
+  /**
+   * candidateCap(暴走ガード。DEFAULT_CANDIDATE_CAPのJSDoc参照)により最適化から
+   * 切り捨てられた候補数。既定値では通常0(現実的な候補数を大きく上回るため)。
+   * 0でない場合は、候補数が想定を超える異常な状態(データ生成バグ等)を疑うべき。
+   */
   readonly truncatedByCapCount: number;
   /** 実際に最適化に載せた候補数(= min(inputCandidateCount, candidateCap))。 */
   readonly candidateCount: number;
+  /**
+   * 貪欲逐次配分が「収束」(増分の最大値が0以下になり自然停止)したか。
+   * false は greedySteps を使い切って打ち切られたことを意味し、「収束した」とは言えない
+   * (boss指摘2026-08-05: 無制限側でΣx*=1.000になっていたのは収束の証拠ではなく、
+   * greedyStepsを使い切って総資金の100%を配分する解を返しただけだった)。
+   * 複勝経路(bet-allocation.ts)はこの値を受け取って捨てる(公開型に追加しない)ため、
+   * 誤読を防ぐ役目は組合せ経路のこのフィールドが担う。
+   */
+  readonly converged: boolean;
 }
 
 /** 券種一般の配分最適化結果。 */
@@ -367,7 +402,16 @@ export function allocateGeneralBets(
   );
   const hitProbs = computeHitProbabilities(finalCandidates.length, outcomeIndexSets);
   const odds = finalCandidates.map((c) => c.odds);
-  const continuousFractions = runGreedyAllocation(finalCandidates.length, odds, outcomeIndexSets, greedySteps);
+  // runGreedyAllocationは{fractions, converged}を返す(機能D-2a・boss指摘2026-08-05)。
+  // convergedは組合せ経路では診断値に載せる(複勝経路は受け取って捨てるのと対照的。
+  // 「無制限側のΣx*=1.000はgreedyStepsを使い切っただけで収束ではない」という誤読を
+  // 防ぐため、判定結果を利用者に見える形で残す)。
+  const { fractions: continuousFractions, converged } = runGreedyAllocation(
+    finalCandidates.length,
+    odds,
+    outcomeIndexSets,
+    greedySteps,
+  );
   const sumContinuousFractions = continuousFractions.reduce((acc, x) => acc + x, 0);
 
   const { kellyTargetStake, plannedStake, capApplied, s } = computeKellyTarget(
@@ -460,6 +504,7 @@ export function allocateGeneralBets(
       inputCandidateCount: positiveCandidates.length,
       truncatedByCapCount,
       candidateCount: finalCandidates.length,
+      converged,
     },
   };
 }

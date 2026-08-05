@@ -278,12 +278,12 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
-  describe("候補上限(候補cap)の境界", () => {
-    it("既定上限は50であること(DEFAULT_CANDIDATE_CAP)", () => {
-      expect(DEFAULT_CANDIDATE_CAP).toBe(50);
+  describe("候補上限(候補cap)の境界。boss指摘2026-08-05により「暴走ガード」へ位置づけ変更", () => {
+    it("既定上限は2000であること(DEFAULT_CANDIDATE_CAP。性能のための間引きではなく暴走ガード)", () => {
+      expect(DEFAULT_CANDIDATE_CAP).toBe(2000);
     });
 
-    it("複勝相当(18件)の入力ではcapが発動しないこと(上限50>=18)", () => {
+    it("複勝相当(18件)の入力ではcapが発動しないこと(上限2000>=18)", () => {
       const horses = evenHorses(18, 3);
       const candidates: AllocationCandidate[] = Array.from({ length: 18 }, (_, i) => ({
         umabans: [i + 1],
@@ -300,22 +300,30 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(result.diagnostics.candidateCount).toBe(18);
     });
 
-    it("上限ちょうど(50件)では切り捨て0件、上限+1件(51件)では1件切り捨てられること", () => {
+    it("現実的な最大(18頭・C(18,2)=153件のワイド相当)でも既定candidateCapでは発動しないこと(廃止の直接確認)", () => {
+      // boss指摘: candidateCapは「性能のための打ち切り」としては廃止した。既定値(2000)は
+      // 現実的な最大候補数(複勝18+ワイド153+3連複816=987)を大きく上回るため、
+      // 実際にありうる最大規模の入力でも切り捨てが発動しないことを直接確認する。
       const horses = evenHorses(18, 3);
-
-      const at50 = allocateGeneralBets(horses, 3, makeAscendingUniqueCandidates(50), {
+      const candidates = makeAscendingUniqueCandidates(153); // C(18,2)の全件
+      const result = allocateGeneralBets(horses, 3, candidates, {
         ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
         bankroll: 100000,
         perRaceCap: 100000,
       });
+      expect(result.diagnostics.truncatedByCapCount).toBe(0);
+      expect(result.diagnostics.candidateCount).toBe(153);
+    });
+
+    it("上限ちょうど/上限+1の境界(選抜メカニズム自体の検証。既定値の大小に依存しないよう明示的なcandidateCapを指定)", () => {
+      const horses = evenHorses(18, 3);
+      const explicitCapConfig = { ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, bankroll: 100000, perRaceCap: 100000, candidateCap: 50 };
+
+      const at50 = allocateGeneralBets(horses, 3, makeAscendingUniqueCandidates(50), explicitCapConfig);
       expect(at50.diagnostics.truncatedByCapCount).toBe(0);
       expect(at50.diagnostics.candidateCount).toBe(50);
 
-      const at51 = allocateGeneralBets(horses, 3, makeAscendingUniqueCandidates(51), {
-        ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
-        bankroll: 100000,
-        perRaceCap: 100000,
-      });
+      const at51 = allocateGeneralBets(horses, 3, makeAscendingUniqueCandidates(51), explicitCapConfig);
       expect(at51.diagnostics.truncatedByCapCount).toBe(1);
       expect(at51.diagnostics.candidateCount).toBe(50);
     });
@@ -441,10 +449,19 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(result.totalStake).toBe(expected.totalStake);
     });
 
-    it("candidateCap=NaN/Infinity/負値/0/非整数でも既定candidateCap(50)相当の結果になること", () => {
+    it("candidateCap=NaN/Infinity/負値/0/非整数でも既定candidateCap相当の結果になること", () => {
       // 他5フィールド(betUnit/kellyFraction/bankroll/perRaceCap/greedySteps)と同じ流儀
-      // (code-reviewer指摘【要修正2】)。候補cap自体が観測できるよう、60件の一意なワイド候補
-      // (既定cap=50を上回る)で truncatedByCapCount/candidateCount の一致を直接検証する。
+      // (code-reviewer指摘【要修正2】)。
+      //
+      // 既定candidateCap(2000。暴走ガードへ位置づけ変更後)は現実的な候補数(最大987)を
+      // 大きく上回るため、60件程度の候補では自然には切り捨てが発生しない。そこで検証を
+      // 2段構えにする:
+      //   (a) 明示的な小さいcandidateCap(5)を指定すると実際に切り捨てが発動すること
+      //       (メカニズム自体が生きていることの直接証拠。無条件expectで先に固定)
+      //   (b) 異常値のcandidateCapが、明示的にDEFAULT_CANDIDATE_CAPを指定した場合と
+      //       完全に一致すること(例: NaNがresolveCandidateCapの防御なしに素通りすると
+      //       `Array.prototype.slice(0, NaN)` は空配列を返し candidateCount=0 になる。
+      //       これは(b)の比較で確実に検出できる)。
       const horses18 = evenHorses(18, 3);
       const candidates60 = makeAscendingUniqueCandidates(60);
       const base: GeneralBetAllocationConfig = {
@@ -453,14 +470,19 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         kellyFraction: 1,
         betUnit: 100,
         greedySteps: 1000,
-        candidateCap: DEFAULT_CANDIDATE_CAP,
+        candidateCap: 5,
       };
-      const expected = allocateGeneralBets(horses18, 3, candidates60, base);
-      // 前提(無条件expect): 既定candidateCapが実際に切り捨てを発動していること
-      // (発動していなければ、この後の「フォールバック後も一致する」検証が空振りになる)。
-      expect(expected.diagnostics.truncatedByCapCount).toBeGreaterThan(0);
-      expect(expected.diagnostics.candidateCount).toBe(DEFAULT_CANDIDATE_CAP);
 
+      // (a) 明示的な小さいcandidateCapで実際に切り捨てが発動すること。
+      const explicitSmallCap = allocateGeneralBets(horses18, 3, candidates60, base);
+      expect(explicitSmallCap.diagnostics.truncatedByCapCount).toBe(55);
+      expect(explicitSmallCap.diagnostics.candidateCount).toBe(5);
+
+      // (b) 異常値はDEFAULT_CANDIDATE_CAPを明示指定した場合と完全に一致すること。
+      const expected = allocateGeneralBets(horses18, 3, candidates60, {
+        ...base,
+        candidateCap: DEFAULT_CANDIDATE_CAP,
+      });
       for (const candidateCap of [
         Number.NaN,
         Number.POSITIVE_INFINITY,
@@ -470,7 +492,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         12.5,
       ]) {
         const result = allocateGeneralBets(horses18, 3, candidates60, { ...base, candidateCap });
-        expect(result.diagnostics.candidateCount).toBe(DEFAULT_CANDIDATE_CAP);
+        expect(result.diagnostics.candidateCount).toBe(expected.diagnostics.candidateCount);
         expect(result.diagnostics.truncatedByCapCount).toBe(expected.diagnostics.truncatedByCapCount);
         expect(result.totalStake).toBe(expected.totalStake);
       }

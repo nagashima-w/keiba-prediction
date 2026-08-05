@@ -165,6 +165,20 @@ export function buildOutcomeIndexSets<T>(
   });
 }
 
+/** runGreedyAllocation の結果。収束(局所最適に到達)したのか、貪欲分割数(greedySteps)を
+ *  使い切って打ち切られただけなのかを明示的に区別する(boss指摘・2026-08-05: 「無制限側の
+ *  Σx*=1.000は収束ではなくgreedyStepsを使い切ったという意味であり、品質の基準線にならない」)。 */
+export interface GreedyAllocationResult {
+  /** 各候補の連続最適比率 x*_i(0〜1。候補配列と同じ順序)。 */
+  readonly fractions: number[];
+  /**
+   * 増分の最大値が0以下になり、貪欲法が自然に停止した(局所最適に到達した)ら true。
+   * false は greedySteps を使い切って打ち切られたことを意味し、「収束した」とは言えない
+   * (まだ改善の余地があったのに予算が尽きただけの可能性がある)。
+   */
+  readonly converged: boolean;
+}
+
 /**
  * 貪欲逐次配分で連続最適比率(ケリー基準のバンクロール比率 x*_i、0〜1)を求める。
  * 目的関数 F(x) = Σ_T P(T)·log(1 − Σx_i + Σ_{i∈T}x_i·o_i)。
@@ -176,22 +190,92 @@ export function buildOutcomeIndexSets<T>(
  * 変数x_iが結合しており分離可能ではないため)。試した範囲では全探索の最適格子点と経験的に
  * 一致した(bet-allocation.test.ts参照)。
  *
- * 計算量: 1ステップあたり候補数×outcome数の評価が必要(greedySteps回繰り返す)。
+ * ## 計算量最適化(機能D-2a・boss指摘2026-08-05への対応)
+ *
+ * 旧実装は1ステップあたり「候補数×outcome数」の評価が必要で、現実的なオッズ分布
+ * (`scripts/bench-allocation.ts` で再現可能。正EV候補が数百件規模になりうる)では
+ * 無制限(candidateCapを外した場合)で数秒〜十数秒かかることが実測で判明した
+ * (`pnpm tsx scripts/bench-allocation.ts` の出力参照)。
+ *
+ * **数学的に同値な変形**で「outcome数+総接触数」(総接触数 = Σ_T |Tに含まれる候補数|。
+ * 各outcomeの的中候補数は高々 2^topFinishCount−1 という定数で頭打ちになるため、
+ * 候補数nにほぼ依存しない)へ計算量を落とした。候補iをδだけ増やす試行で、outcome Tの
+ * wealthは「T∌i: 一律に−δ」「T∋i: −δ+δ·o_i」の2パターンにしか分岐しない性質を使う。
+ *
+ * ### ビット一致を保つための設計(重要。1回目の実装で既存80件のうち1件が落ちた教訓)
+ *
+ * 最初の実装は「commonDelta(全候補共通の1項)+ correction_i(接触先だけの補正)」という
+ * 素朴な分解で、数式としては正しいが、**同一オッズを持つ複数候補が同一outcomeに属する
+ * 退化ケース**(`bet-allocation.test.ts`「キャップでbetCountが2頭→1頭に減り…」の前提部分。
+ * 3頭とも複勝オッズ3倍で単一outcomeに属す)で旧実装と異なる結果になった。原因は、旧実装が
+ * 「候補iの試行ごとにtrialX配列を作り直し、そのoutcomeのpayoutをtrialXから毎回フレッシュに
+ * 再計算する」ため、**候補ごとに異なる浮動小数の丸め誤差蓄積history(x[i]がこれまで何回
+ * δを加算されてきたか)が、たまたま同一オッズを持つ候補同士のタイブレークを偶発的に破る
+ * 副作用**を持っていたこと。素朴な分解(commonDelta+correction_i)はこの「iに固有の
+ * 丸め誤差history」を捨ててしまい、同一オッズの候補は常に完全に同値になってしまう
+ * (退化ケースで旧実装と乖離する)。
+ *
+ * 対策: 「接触先outcomeについては、旧実装と全く同じ trialX 構築・resum を行う」ことで
+ * このhistoryを保存する。具体的には、outcome Tごとに
+ *   - 現在のxでの payout P_T = Σ_{idx∈T} x[idx]·o[idx](旧実装がtrialX=xで呼ばれた場合と同じ式)
+ *   - commonWealth_T = 1 − trialSumX + P_T (旧実装の `1 - trialSumX + payout` と同じ項順)
+ * を1ステップに1回だけ計算する(未接触outcomeについてはこの値がそのまま「候補iの試行時の
+ * wealth」と旧実装含めビット一致する。証明: i∉TならtrialX[idx]=x[idx]がTの全idxで成立するため、
+ * 旧実装のpayout再計算はP_Tと完全に同じ式・同じ操作列になる)。
+ *
+ * 接触先outcome(候補iが実際に属すもの。的中候補数は高々2^k−1と少数)についてのみ、
+ * 旧実装と全く同じ「trialX[i]=x[i]+δとして該当outcomeのpayoutをresumし直す」処理を行い、
+ * その結果(freshWealth)を使う。候補iのtrialF相当値は
+ *   trialLogSum_i = commonLogSum − Σ_{T∋i} P(T)·log(commonWealth_T) + Σ_{T∋i} P(T)·log(freshWealth_T)
+ * (commonLogSum = Σ_T P(T)·log(commonWealth_T)、1ステップに1回だけ計算)。
+ * 接触先outcomeの実際の判定材料は必ずfreshWealth(旧実装とビット一致する値)であり、
+ * commonWealthは「未接触分の合計を1回で済ませるための会計上の中間値」としてのみ使う。
+ *
+ * この構成により、上記の退化ケースを含め既存 `bet-allocation.test.ts` の80件が無改変のまま
+ * ビット一致で全件パスすることを確認した(boss指摘の判定基準。事後に手元のトレーススクリプトで
+ * step単位の選択列が旧実装と完全一致することも確認済み)。
+ *
+ * **EPSガード(wealth≤EPSで除外)の扱い**: 上記の構成が使えるのは、(a) 一様シフト後の
+ * 全outcomeの最小commonWealth、(b) 各候補の接触先でのfreshWealthの最小値、の両方がEPSを
+ * 上回る場合に限る(どちらか一方でも0以下になるとlogの定義域外になる)。これを毎ステップ
+ * O(outcome数+総接触数)で判定し、安全なら高速パス、そうでなければ旧来のブルートフォース
+ * (O(候補数×outcome数))へフォールバックする(高オッズ×低確率などEPSに近づく極端な入力の
+ * 稀なステップでのみ発生。頻度が低いため全体の実測時間への影響は軽微)。
+ *
+ * **状態更新(x・sumX・currentF)は常に旧実装と同じ`computeF`によるフレッシュな再計算で行う**
+ * (高速パスの中間値は候補選択〈bestIdxの決定〉にのみ使う)。
+ *
+ * 実測(`pnpm tsx scripts/bench-allocation.ts`): 18頭・現実的なオッズ分布(正EV候補
+ * 数百件規模)で、旧実装は無制限(candidateCap無効化)時に数秒〜十数秒。新実装は
+ * 同条件で数百ms程度まで短縮された(具体的な数値は実行環境に依存するため、再現コマンドで
+ * 都度確認すること。固定の数値をここに書き込まない)。
  */
 export function runGreedyAllocation(
   n: number,
   odds: readonly number[],
   outcomeIndexSets: readonly OutcomeIndexSet[],
   greedySteps: number,
-): number[] {
+): GreedyAllocationResult {
   if (n === 0) {
-    return [];
+    return { fractions: [], converged: true };
+  }
+
+  const outcomeCount = outcomeIndexSets.length;
+
+  // 候補→接触先outcomeの逆引き(「総接触数」分だけ。ステップループの外で1回だけ構築する)。
+  const contactsByCandidate: number[][] = Array.from({ length: n }, () => [] as number[]);
+  for (let j = 0; j < outcomeCount; j++) {
+    for (const idx of outcomeIndexSets[j]!.indices) {
+      contactsByCandidate[idx]!.push(j);
+    }
   }
 
   const x = new Array<number>(n).fill(0);
   const delta = 1 / greedySteps;
   let sumX = 0;
 
+  // 旧来のブルートフォース計算。フォールバック専用として温存する(EPSガードがきわどい
+  // 稀なステップと、状態更新〈currentFの再計算〉の両方で使う。既存実装と完全に同じ式)。
   const computeF = (trialSumX: number, trialX: readonly number[]): number | null => {
     let total = 0;
     for (const outcome of outcomeIndexSets) {
@@ -209,34 +293,112 @@ export function runGreedyAllocation(
     return total;
   };
 
+  // 接触先outcome1件分のfreshWealthを、旧実装と全く同じ式・操作列で計算する
+  // (trialXの全体コピーは作らず、該当outcomeのindicesだけを見て候補iの項だけδを足す。
+  // 値としてはtrialX=x.slice();trialX[i]+=deltaしたときの該当outcomeのpayoutと完全に一致する)。
+  const computeFreshWealth = (
+    outcomeIdx: number,
+    candidateIdx: number,
+    trialSumX: number,
+  ): number => {
+    let payout = 0;
+    for (const idx of outcomeIndexSets[outcomeIdx]!.indices) {
+      const v = idx === candidateIdx ? x[idx]! + delta : x[idx]!;
+      payout += v * odds[idx]!;
+    }
+    return 1 - trialSumX + payout;
+  };
+
   let currentF = computeF(sumX, x)!; // 全て0の初期状態は必ず有効(wealth=1 for 全outcome)。
+  let converged = false;
 
   for (let step = 0; step < greedySteps; step++) {
+    const trialSumX = sumX + delta;
+
+    // commonWealth_T = 1 - trialSumX + P_T(現在のxでのpayout)。旧実装がi∉Tの候補を
+    // 試行したときに計算する値と完全に同じ式・同じ操作列(証明はJSDoc参照)。
+    const commonWealth = new Array<number>(outcomeCount);
+    for (let j = 0; j < outcomeCount; j++) {
+      let payout = 0;
+      for (const idx of outcomeIndexSets[j]!.indices) {
+        payout += x[idx]! * odds[idx]!;
+      }
+      commonWealth[j] = 1 - trialSumX + payout;
+    }
+
+    // 安全性チェック(O(outcome数+総接触数)): commonWealthの最小値と、各候補の接触先での
+    // freshWealthの最小値をどちらも求める。両方がEPSを上回っていれば高速パスが使える。
+    let worstCommon = Infinity;
+    for (let j = 0; j < outcomeCount; j++) {
+      if (commonWealth[j]! < worstCommon) {
+        worstCommon = commonWealth[j]!;
+      }
+    }
+    let worstFresh = Infinity;
+    for (let i = 0; i < n; i++) {
+      for (const j of contactsByCandidate[i]!) {
+        const fresh = computeFreshWealth(j, i, trialSumX);
+        if (fresh < worstFresh) {
+          worstFresh = fresh;
+        }
+      }
+    }
+    const safe = Math.min(worstCommon, worstFresh) > NUMERIC_EPS;
+
     let bestIdx = -1;
     let bestIncrement = 0; // 増分の最大値が0以下になったら停止するため、初期値は0(厳密に上回る候補のみ採用)。
-    const trialSumX = sumX + delta;
-    for (let i = 0; i < n; i++) {
-      const trialX = x.slice();
-      trialX[i] = trialX[i]! + delta;
-      const trialF = computeF(trialSumX, trialX);
-      if (trialF === null) {
-        continue;
+
+    if (safe) {
+      // 高速パス: O(outcome数+総接触数)。commonLogSum(全候補共通)を1回だけ計算し、
+      // 各候補は自分の接触先outcomeだけをfreshWealthで置き換える(JSDoc導出参照)。
+      let commonLogSum = 0;
+      for (let j = 0; j < outcomeCount; j++) {
+        commonLogSum += outcomeIndexSets[j]!.probability * Math.log(commonWealth[j]!);
       }
-      const increment = trialF - currentF;
-      if (increment > bestIncrement) {
-        bestIncrement = increment;
-        bestIdx = i;
+      for (let i = 0; i < n; i++) {
+        let trialLogSum = commonLogSum;
+        for (const j of contactsByCandidate[i]!) {
+          const prob = outcomeIndexSets[j]!.probability;
+          const fresh = computeFreshWealth(j, i, trialSumX);
+          trialLogSum = trialLogSum - prob * Math.log(commonWealth[j]!) + prob * Math.log(fresh);
+        }
+        const increment = trialLogSum - currentF;
+        if (increment > bestIncrement) {
+          bestIncrement = increment;
+          bestIdx = i;
+        }
+      }
+    } else {
+      // フォールバック: 旧来のブルートフォース(O(候補数×outcome数))。EPSガードがきわどい
+      // 稀なステップでのみ発生する。既存実装と完全に同じ式・同じ走査順のため、この分岐が
+      // 選ばれるステップの結果は旧実装とビット一致する。
+      for (let i = 0; i < n; i++) {
+        const trialX = x.slice();
+        trialX[i] = trialX[i]! + delta;
+        const trialF = computeF(trialSumX, trialX);
+        if (trialF === null) {
+          continue;
+        }
+        const increment = trialF - currentF;
+        if (increment > bestIncrement) {
+          bestIncrement = increment;
+          bestIdx = i;
+        }
       }
     }
+
     if (bestIdx === -1) {
-      break; // 増分の最大値が0以下 → 停止(残りは配分しない=「使い切らない」の実現)。
+      converged = true; // 増分の最大値が0以下 → 局所最適に到達して自然停止(「使い切らない」の実現)。
+      break;
     }
+    // 状態(x・sumX・currentF)の更新は常に旧実装と同じcomputeFによるフレッシュな再計算で行う
+    // (高速パスの中間値はbestIdxの選択にのみ使い、状態更新には使わない)。
     x[bestIdx] = x[bestIdx]! + delta;
     sumX = trialSumX;
     currentF = computeF(sumX, x)!;
   }
 
-  return x;
+  return { fractions: x, converged };
 }
 
 /** ケリー適正額・キャップ・比例縮小係数sの計算結果。 */
