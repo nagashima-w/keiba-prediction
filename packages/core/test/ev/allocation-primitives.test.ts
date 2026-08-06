@@ -178,13 +178,24 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
       expect(converged).toBe(true);
     });
 
-    it("wealth<=EPSになる割当を候補から除外し、NaN/Infinityを生まないこと(極端値。1ステップで収束するためフォールバック分岐は踏まない)", () => {
-      // 【タイトル訂正】(code-reviewer指摘・機能D-2a): 旧タイトル「EPSガードの安全性
-      // チェックが働く経路」は実態と一致していなかった。この構成(候補1件・odds=3000)は
-      // 1ステップ目でbestIdx=-1(即時収束)になり、safe判定・フォールバック分岐は
-      // 一度も評価されない(code-reviewerが計測により確認)。本テストは「NaN/Infinityが
-      // 混入しない」ことの確認に留まる。フォールバック分岐の実地検証は次のテスト
-      // 「フォールバック分岐(unsafe)を実際に踏むこと」を参照。
+    it("wealth<=EPSになる割当を候補から除外し、NaN/Infinityを生まないこと(極端値。safe判定は毎回trueでフォールバック分岐には入らない)", () => {
+      // 【タイトル訂正・2回目】(code-reviewer指摘・機能D-2a): 1回目の訂正
+      // 「1ステップ目で即時収束し、safe判定自体が評価されない」は誤りだった(自分で
+      // 実測して確認: greedySteps=1/2/1000のいずれでもconverged=falseで、収束は一度も
+      // 起きない。safeはループの各ステップで必ず評価される)。
+      //
+      // 実測(本ファイルの筆者が自分で実行して確認。以下は`pnpm --filter @keiba/core test`
+      // とは別に、このコメントを書く前に手元でrunGreedyAllocationへsafe/unsafeの発火回数を
+      // 数えるカウンタを一時的に仕込んで確認した値):
+      //   greedySteps=1000で実行すると、wealth=1-trialSumX+trialX[0]*3000は
+      //   trialX[0]について単調増加するため、1000ステップ全てでbestIdxが選ばれ続け
+      //   (converged=false。分割数を使い切って打ち切られる。「収束」ではない)、
+      //   safe判定は1000回中1000回ともtrue(unsafeは0回)だった。
+      // つまり「1ステップ目で収束する」も「safe判定が評価されない」も誤りで、正しくは
+      // 「収束しない(打ち切られる)が、safe判定は毎回trueでフォールバックには一度も
+      // 入らない」。本テストは「NaN/Infinityが混入しない」ことの確認に留まる。
+      // フォールバック分岐の実地検証は次のテスト
+      // 「フォールバック分岐(unsafe)を実際に踏み、高速パスとは異なる結果になり得ること」を参照。
       const outcomeIndexSets: OutcomeIndexSet[] = [{ indices: [0], probability: 1 }];
       // 高オッズ×低確率(3000倍)でも、貪欲ループの結果が有限であること。
       const { fractions } = runGreedyAllocation(1, [3000], outcomeIndexSets, 1000);
