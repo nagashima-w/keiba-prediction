@@ -24,7 +24,7 @@
  * `resolveEffectivePerRaceCap` を再exportし、既存の import 元(SettingsView.tsx等)を維持する。
  *
  * 挙動の等価性: 本ファイルへの抽出は「1ビットも挙動を変えないリファクタ」として行った。
- * 証拠は既存 `packages/core/test/ev/bet-allocation.test.ts` の73件が無改変のまま全件パスすること
+ * 証拠は既存 `packages/core/test/ev/bet-allocation.test.ts` の80件が無改変のまま全件パスすること
  * (extraction前後で同一の計算順序・同一の浮動小数演算列を保つよう、ループの反復順序等を
  * そのまま移植した)。
  */

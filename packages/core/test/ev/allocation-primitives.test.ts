@@ -26,7 +26,7 @@ import type { PlaceOutcome } from "../../src/ev/place-joint-model.js";
  * 抽出方針(boss決定・2026-08-05): 防御関数群・貪欲最適化・畳み込み・betUnit丸め・
  * キャップ比例縮小のゼロ除算ガード・最低額ロジックの数値部分・見送り理由の判定ロジック
  * (文言を除く)は複勝経路と組合せ経路で同一実装を共有する。挙動は bet-allocation.ts の
- * 元実装から1ビットも変えない(既存 packages/core/test/ev/bet-allocation.test.ts の73件が
+ * 元実装から1ビットも変えない(既存 packages/core/test/ev/bet-allocation.test.ts の80件が
  * 無改変のまま全件パスすることで検証する。本ファイルはそれとは別に、抽出した各プリミティブを
  * 直接ユニットテストする)。
  */

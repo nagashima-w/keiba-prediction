@@ -7,7 +7,7 @@
  *
  * 1. `bet-allocation.ts` の公開契約(allocateBetsのシグネチャ・AllocationHorse/BetAllocation/
  *    BetAllocationResult/BetAllocationConfigの各フィールド名・型・resolveEffectivePerRaceCapの
- *    公開場所)は一切変更しない。既存 `bet-allocation.test.ts` の73件は無改変のまま全件パスする
+ *    公開場所)は一切変更しない。既存 `bet-allocation.test.ts` の80件は無改変のまま全件パスする
  *    (`git diff` で確認済み。報告参照)。`packages/app/**` も一切変更しない。
  * 2. 防御関数群・貪欲最適化・畳み込み・betUnit丸め・キャップ比例縮小・最低額ロジック・
  *    見送り理由の判定ロジック(文言を除く)は `allocation-primitives.ts` を通じて
@@ -34,6 +34,36 @@
  *   `resolvePlaceBetTarget` の結果をそのまま `topFinishCount` に流用してはならない
  *   (誤用するとワイド・三連複の的中確率が構造的に0になる。症状はテストで固定している。
  *   `combo-bet-allocation.test.ts`「kとplaceCountの分離」参照)。
+ *
+ * ## 数値防御カバレッジ表(受け入れ条件20。boss指摘2026-08-06「表がソースに残っていない」への対応)
+ *
+ * `allocateGeneralBets`/`buildComboCandidates`(本ファイル)が受け取る**外部由来の数値**を
+ * 全数列挙する。会話・報告の中だけに存在する表はセッションが切れると失われる(#13の失敗形の
+ * 再発)ため、本体のJSDocに固定する。次に本ファイルへ数値を追加する人は、この表に1行追加する
+ * ことを忘れないこと。
+ *
+ * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
+ * |---|---|---|---|---|
+ * | `topFinishCount` | `allocateGeneralBets`/`buildComboCandidates`両方(共有gatekeeper`validateTopFinishCount`) | あり | throw(非有限または負値。0・小数は許容) | 呼び出し側が構築する引数そのもの(市場データではない)。`topFinishCount=Infinity`は`place-joint-model.ts`の`k>=n`分岐に落ちて「健全に見える」非スキップ配分を返す(誤りが表面化しない最重症パターン、実測確認済み)。0・小数を許容するのは`place-joint-model.ts`が既にfloor+0クランプで意図的に許容している設計(`k===0`→`[{placed:[],probability:1}]`という明示的な契約)と非対称を作らないため。テスト: `combo-bet-allocation.test.ts`「topFinishCountの数値検証」describe |
+ * | `comboSize` | `buildComboCandidates`(内部`kCombinationsOfUmabans`) | 部分的(構造的自己防御。追加防御はしない=対象外の判断) | 対象外(構造的自己防御) | ガード`k<=0\|\|k>items.length`は**NaN比較が常にfalseになるため、NaN・非整数(例:1.5)はこのガードを素通りする**(捕捉ではない)。ただし`backtrack`の停止条件`current.length===k`は`current.length`が常に整数であるためNaN/非整数と一致し得ず、深さ優先探索は**2^n通りの部分集合を最後まで歩いた末に**結果が空配列に収束する(早期returnではない)。実測(本ファイル筆者・n=18・k=NaN): 約4.6ms、k=1.5でも約2.4ms(負値・0・Infinityは`k<=0\|\|k>items.length`ガードで即座に捕捉され約0.001ms)。頭数は最大18で有界なので実用上は無害だが、将来`items`の上限を引き上げる変更をする者はこの2^n探索の存在を踏まえること |
+ * | `AllocationCandidate.umabans`(各要素) | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または0以下) | `NaN<=NaN`は常にfalseなので昇順チェックだけでは素通りする。`combo-bet-allocation.test.ts`「入力の正規化」describe(umaban=NaN/0/負値のit.each) |
+ * | `AllocationCandidate.odds` | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または0以下) | `combo-bet-allocation.test.ts`「候補の数値検証(odds/evの異常値)」describe |
+ * | `AllocationCandidate.ev` | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限) | 同上 |
+ * | `oddsByKey`の値(`ReadonlyMap<string, number\|null>`) | `resolveComboOdds`/`buildComboCandidates`(classifier) | あり | 分類(`malformed`→`unjudged.oddsMalformedCount`。throwしない) | 最大987組を1件ずつ分類するのが仕事であり、1組の異常値のために残りの健全な分類結果を失うのは誤り。`combo-bet-allocation.test.ts`「オッズ4区分」describe |
+ * | `evConfig.threshold` | `computeRaceEv`/`computeEstimatedRaceEv`(expected-value.ts)/`buildComboCandidates`(3箇所共有`resolveEvThreshold`) | あり | 既定値フォールバック(非有限→`DEFAULT_EV_CONFIG.threshold`=1.0) | 片側だけ守ると`ev>threshold`の比較が壊れた側だけ壊れる非対称が生まれるため3箇所で共有。`expected-value.test.ts`の`resolveEvThreshold`describe、`combo-bet-allocation.test.ts`「evConfig.thresholdの防御」describe |
+ * | `GeneralBetAllocationConfig.candidateCap` | `allocateGeneralBets`(`resolveCandidateCap`) | あり | 既定値フォールバック(非有限・0以下→2000。暴走ガードとして再定義。旧来の性能チューニング値ではない) | `combo-bet-allocation.test.ts`「候補上限(候補cap)の境界」describe |
+ * | `GeneralBetAllocationConfig.bankroll`/`perRaceCap`/`betUnit`/`greedySteps`/`kellyFraction` | `allocateGeneralBets`(`allocation-primitives.ts`の`resolveBankroll`等。複勝経路`bet-allocation.ts`と共有・D-2aでの変更なし) | あり(pre-existing) | 既定値フォールバック | `combo-bet-allocation.test.ts`「既存の防御が組合せでも生きること」describe |
+ * | `horses[].placeProb` | `allocateGeneralBets`/`buildComboCandidates`(`model.buildDistribution`。`place-joint-model.ts`、D-2a未変更) | あり(pre-existing) | 対象外(既存防御に委ねる) | `place-joint-model.ts`が`[EPS,1-EPS]`クランプ+分母非有限時の均等分布フォールバックで吸収する(同ファイルのJSDocに明記済みの設計)。実測(本ファイル筆者): `placeProb`にNaN/±Infinity/-5を注入しても`allocateGeneralBets`の`totalStake`は常に有限値(クラッシュなし)。`bet-allocation.ts`の`allocateBets`と全く同一の消費パターンであり、D-2aが新規に開いた経路ではない |
+ * | `horses[].umaban` | `allocateGeneralBets`(`model.buildDistribution`経由の同時分布)/`buildComboCandidates`(組合せ列挙の元データ) | あり(2つの異なる経路それぞれで) | 対象外(前者)+throw(後者、`allocateGeneralBets`への受け渡し時に`validateCandidates`が捕捉) | 実測(本ファイル筆者): (1)`allocateGeneralBets`が直接受け取る`horses[].umaban`が非有限でも、`foldToCandidateSubsets`が`candidateUmabanSet`(検証済み候補の馬番のみを含む集合)でフィルタするため、健全な候補のtotalStakeは不変(baseline一致を確認)。(2)一方、`buildComboCandidates`は`horses[].umaban`をそのまま組合せ列挙に使うため、非有限な馬番が`AllocationCandidate.umabans`に紛れ込んだ候補を生成しうる(実測: `isPositive:true`の候補として生成されるケースを確認)。この候補がそのまま`allocateGeneralBets`に渡されると`validateCandidates`が例外を投げて可視化する(実測で確認)。**buildComboCandidates自身はこの値を検証しない**(gatekeeperではなくclassifierであるため)ことに注意 |
+ *
+ * ## D-3(#15)・D-2b(#27)への申し送り(boss指摘2026-08-06)
+ *
+ * `allocateGeneralBets`/`buildComboCandidates`は契約違反(候補の構造・数値異常、topFinishCount異常)を
+ * throwで止める設計にした(複勝専用の`allocateBets`が同種の異常を無防備のまま許容しているのとは
+ * 対照的。`allocateBets`側にthrowを入れなかった理由は#31参照)。D-3でrenderer側からこれらを呼ぶ際、
+ * `BatchAnalysisView.tsx:625`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
+ * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。** 組合せ経路では「受け皿を
+ * D-3側で用意すること」が前提になっている。
  */
 
 import {
