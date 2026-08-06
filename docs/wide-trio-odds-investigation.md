@@ -289,3 +289,85 @@ POSTボディに識別子が入る設計ではない(`race_api/`のような事�
    追加取得するか、地方の直近レースで再探索する必要がある
 3. **取消馬がいるレースでの組合せ欠落パターンが未検証**(今回の実測レースはいずれも取消馬なし)
 4. **`resolvePlaceBetTarget`の変更判断は#14に持ち越し**(§7の再検討材料を参照)
+
+## 11. 状態③(未発売)の実測(機能D-2b-A・Issue #32、2026-08-06)
+
+#13時点では②③④の実例を持てなかった(§6)。本Issueで③(未発売)を実測し、`parse-combo-odds.ts`
+(中央)・`parse-nar-combo-odds.ts`(地方)の `unavailable` 分岐を実物で固定した。
+
+### 11.1 実リクエスト一覧(合計9件。上限9件ちょうど)
+
+すべて `HttpClient`(既定: 最低1.5秒間隔・UA明示)経由、実行日時 2026-08-06T18:27〜18:29 UTC
+(JST 8/7 3:27〜3:29頃)。翌々日(8/8開催)のレースを選定し、#13の教訓
+(「presaleという名前は取得**時点**の状態であり、同じrace_idを再取得しても再現しない」)を
+踏まえフィクスチャ名に取得日(20260806)を含めている。
+
+| # | 目的 | URL | 結果 |
+|---|---|---|---|
+| 1 | 地方race_list_sub(8/8開催の一覧) | `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(10件のレースを取得) |
+| 2 | 地方ワイド(佐賀・202655080803・12頭、探索用) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202655080803` | 200(unavailable) |
+| 3 | 地方3連複(同上、探索用) | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202655080803` | 200(unavailable) |
+| 4 | 中央race_list_sub(8/8開催の一覧) | `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(36件のレースを取得) |
+| 5 | 中央ワイド(18頭最大・202604020511、探索用) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=5&action=init` | 200(unavailable) |
+| 6 | 中央3連複(同上、探索用) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=7&action=init` | 200(unavailable) |
+| 7 | 地方ワイド再取得(フィクスチャ本文保存用) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202655080803` | 200 → `fixtures/nar_odds_b5_presale_202655080803_20260806.html` |
+| 8 | 地方3連複再取得(フィクスチャ本文保存用) | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202655080803` | 200 → `fixtures/nar_odds_b7_presale_202655080803_20260806.html` |
+| 9 | 中央ワイド再取得(正確なバイト列でフィクスチャ保存) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=5&action=init` | 200 → `fixtures/odds_wide_presale_202604020511_20260806.json` |
+
+#5・#6は探索段階で状態(`unavailable`)を確認済みだったため、#9では#5と同一URLを再取得して
+正確なバイト列(トリミングなし)をフィクスチャとして保存した。3連複(#6)は探索段階の応答が
+ワイド(#5)とバイト単位で同一内容("empty free odds schedule")だったため(封筒がtype非依存の
+内容であることを示す。既存 `odds_yoso_*.json` と同様、中央APIはtype横断で共通の封筒仕様)、
+再取得はせず同一バイト列を `fixtures/odds_trio_presale_202604020511_20260806.json` として
+コミットしている(内容が完全一致することは#5・#6両方の探索リクエストで独立に確認済み)。
+
+候補レース選定は既存の `parseRaceList`(本番パーサ)の `entryCount` で頭数最大のレースを機械的に
+選び(組合せ市場が観測しやすいため)、`venueKindOfRaceId` で中央/地方を判定した。**この選定
+スクリプトは帯広(場コード65)を明示的に除外していない**(`venueKindOfRaceId` はトラックコード
+`<=10`か否かのみを見る簡易判定で、帯広を特別扱いする`parseRaceId`の`InvalidIdError`を経由
+していないため。指示された「帯広は避ける」という既存の慣行をコードで保証できていなかった
+点は本調査の実装上の抜けとして記録する)。結果として実際に選ばれたのは佐賀(場コード55、
+race_id=202655080803)であり帯広ではなかったが、これは選定ロジックが保証したのではなく
+たまたま佐賀の方が頭数が多かったことによる。もし帯広の方が頭数最大だった場合は誤って選定
+されていた可能性があり、次回同種の探索を行う場合は `parseRaceId` を通す(帯広は例外で弾かれる)
+か、`raceId`の場コードを明示チェックするフィルタに直すこと。
+
+### 11.2 中央の観測結果(封筒異常の実物。改訂後AC7の裏付け)
+
+中央・8/8開催18頭最大レース(race_id=202604020511)のワイド・3連複とも、応答は次の80バイトで
+完全に一致した(トリミングなし):
+
+```json
+{"status":"NG","data":"","update_count":"0","reason":"empty free odds schedule"}
+```
+
+これは boss が着手前ゲートで示した仮説「未発売時の封筒が `{"status":"NG","data":"",...}` の
+ように `data` がオブジェクトですらない形で返る可能性がある」と**完全に一致する実物**であり、
+`data` が非オブジェクト(空文字列)であっても throw せず `unavailable` に分類する改訂後AC7の
+必要性を実物で裏付けた。`parseComboOdds` はこの応答を
+`{state:"unavailable", reason:{rawStatus:"NG", rawReason:"empty free odds schedule",
+missingKey:"data"}}` として分類する(`parse-combo-odds.test.ts`「状態③=未発売の実測」describe)。
+
+### 11.3 地方の観測結果(OR判定の実物確認)
+
+地方・佐賀(race_id=202655080803、頭数12、8/8開催)のb5(ワイド)・b7(3連複)とも、次のコンテナ
+構成だった:
+
+| ページ | `#odds_select` | `#odds_view_form` | `td.Odds` | 中身 |
+|---|---|---|---|---|
+| b5(ワイド、8/8開催、未発売) | **なし** | あり | 13 | 「予想オッズ（単勝）」プレビュー(単勝のみ、人気順) |
+| b7(3連複、8/8開催、未発売) | **なし** | あり | 13 | 同上 |
+
+**発見: b5・b7いずれの未発売ページも、券種固有のプレビューではなく、単勝の「予想オッズ」プレビュー
+(`block=odds_yoso`)に一律フォールバックする。** 実際に2ファイルを`diff`したところ、本文の差分は
+`meta`/`canonical`のURLと`<!-- block=... -->`のブロックキャッシュタグ(`cg`/`cp`)の5箇所のみで、
+オッズテーブル本体は完全に同一だった(既存 `nar_odds_b1_presale_202642071301.html` と同型の
+`block=odds_yoso`構造であることも確認済み)。
+
+この実物により、`selectors.ts` の `NAR_COMBO_ODDS_SELECTORS` JSDoc・受け入れ条件8で要求された
+「OR判定(`#odds_select` OR `#odds_view_form`)が b1 からの外挿ではなく実物のb5/b7でも正しく
+分岐すること」を確認した: `#odds_select` が無くても `#odds_view_form` があるため文書としては
+正当と判定され(throwしない)、かつ `td.Odds` 13件のいずれもワイド・3連複のセルid規約
+(`chk_..._b5|b7_c0_...`)を持たない(単勝プレビューのtd.Oddsにはこのid自体が付かない)ため
+組合せは0件となり、`unavailable` に分類される(`parse-nar-combo-odds.test.ts`
+「状態③=未発売の実測」describe)。

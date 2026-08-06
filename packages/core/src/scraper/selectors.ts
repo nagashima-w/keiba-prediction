@@ -209,6 +209,50 @@ export const NAR_ODDS_SELECTORS = {
   row: "tr",
 } as const;
 
+/**
+ * 地方(NAR)ワイド・3連複オッズページ(odds/index.html?type=b5|b7、
+ * および軸馬別AJAXフラグメント odds_get_form.html?type=b7&jiku=N)のセレクタ
+ * (機能D-2b-A・Issue #32)。
+ *
+ * `parse-nar-odds.ts`(単勝・複勝、`#odds_tan_block`/`#odds_fuku_block`ベースの行構造)とは
+ * 別の構造を持つ: 組合せオッズは軸馬ごとの `table.Odds_Table`(グリッド行列)に跨って
+ * `td.Odds` セルが並び、各セルの `id`(例: `chk_..._b5_c0_1_2`)に馬番の組が埋め込まれている。
+ * 1ページに複数の `table.Odds_Table` があるため、既存 `parse-nar-odds.ts` の行走査
+ * (`dataRows`)は流用せず、`id` パターンマッチでセルを直接走査する
+ * (`wide-trio-odds-fixtures.test.ts`〈機能D-1〉で実測済みの抽出方式を踏襲)。
+ *
+ * ## 「オッズ文書として正当か」の判定根拠(受け入れ条件8)
+ *
+ * boss実測(2026-08-06、実リクエスト0): 3種のページで次の組み合わせを確認した。
+ *
+ * | ページ | `#odds_select` | `#odds_view_form` | `td.Odds` |
+ * |---|---|---|---|
+ * | 発売後(`nar_odds_b5_202654071210.html`) | あり | あり | 66 |
+ * | AJAXフラグメント(`nar_odds_b7_jiku2_...`) | あり | **なし** | 55 |
+ * | 発売前(`nar_odds_b1_presale_202642071301.html`) | **なし** | あり | 11 |
+ *
+ * `#odds_select` は投票カートの選択済み件数を表示する `<span>`(「選択済み：<span
+ * id="odds_select"></span>件」)であり、通常ページ・AJAXフラグメントには含まれるが、
+ * 投票対象が無い発売前ページには含まれない。`#odds_view_form` はオッズ本文を包む
+ * 汎用ラッパーで、通常ページ・発売前ページには含まれるが、AJAXで差し替わる中身
+ * そのものであるフラグメント自身には(外枠が無いため)含まれない。したがって
+ * **`#odds_select` 単独をページである証拠にすると発売前ページで throw し、
+ * `#odds_view_form` 単独だと AJAXフラグメントで throw する**。両者の **OR**
+ * (いずれか一方でもあれば正当な文書とみなす)で3ケースすべてを正しく判定できる。
+ *
+ * 注意: 上記3ケースのうち発売前ページはb1(単勝・複勝)のものであり、b5/b7の発売前ページが
+ * 同じ骨格を持つ保証はない(実物1件による外挿)。状態③の実測(受け入れ条件9)で実物のb5/b7
+ * 発売前ページが取得できた場合、この判定根拠(OR判定)がそこでも成立するか確認すること。
+ */
+export const NAR_COMBO_ODDS_SELECTORS = {
+  /** 投票カートの選択済み件数(「オッズ文書として正当か」判定の一方の根拠)。 */
+  cartCount: "#odds_select",
+  /** オッズ本文を包む汎用ラッパー(同上、もう一方の根拠)。 */
+  viewFormWrapper: "#odds_view_form",
+  /** 組合せオッズセル(id属性に馬番の組が埋め込まれる)。 */
+  oddsCell: 'td.Odds[id^="chk_"]',
+} as const;
+
 /** 調教(oikiri.html)のセレクタ。 */
 export const OIKIRI_SELECTORS = {
   /** 調教テーブル。 */

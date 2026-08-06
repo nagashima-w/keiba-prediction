@@ -71,6 +71,7 @@ import {
   resolveEvThreshold,
   type EvConfig,
 } from "./expected-value.js";
+import { buildComboOddsKey } from "../scraper/combo-odds-key.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   type JointModelHorse,
@@ -609,13 +610,16 @@ export function allocateGeneralBets(
  * netkeibaの実キー形式(`docs/wide-trio-odds-investigation.md` §2.3。ワイド"0102"・
  * 3連複"010203")に一致させる: 馬番昇順ソート後、2桁ゼロ埋めで連結する。
  * 呼び出し側にキー文字列を組み立てさせない(キー形式の二重定義を防ぐ)。
+ *
+ * **実体は `../scraper/combo-odds-key.js` に移設した**(機能D-2b-A・Issue #32・
+ * boss着手前ゲート2026-08-06案(a))。ワイド・3連複の組合せオッズパーサ(`scraper/*`)からも
+ * 同じキー形式が必要になったため、`scraper → ev` という逆向きの層依存を避ける目的で
+ * `scraper` 配下の葉モジュールへ実装を1本化し、ここでは re-export するだけにする
+ * (`padStart(2,"0")` の連結ロジックを2箇所に複製しない)。既存の import 経路
+ * (`ev/combo-bet-allocation.js` から `buildComboOddsKey` を import する既存テスト等)を
+ * 壊さないよう、公開位置(このモジュールからexportされること)は維持する。
  */
-export function buildComboOddsKey(umabans: readonly number[]): string {
-  return [...umabans]
-    .sort((a, b) => a - b)
-    .map((u) => String(u).padStart(2, "0"))
-    .join("");
-}
+export { buildComboOddsKey };
 
 /**
  * combo オッズの解決結果(判別共用体)。取得済み/欠損(null)/未取得(キー不在)/
