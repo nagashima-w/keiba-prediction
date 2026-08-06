@@ -25,8 +25,8 @@ import {
  * 設計の骨子(報告参照):
  *   - allocateGeneralBets: 券種非依存の配分エンジン(複勝1頭も・ワイド2頭組も・3連複3頭組も
  *     同じ AllocationCandidate[] として受け取れる。受け入れ条件8「券種混在」の土台)。
- *   - buildComboCandidates: ワイド・3連複向けの候補ビルダー(列挙+オッズ3状態解決+EV算出)。
- *     EV/isPositiveはここで計算する(odds Mapのキー生成・3状態解決を1本化。決定2)。
+ *   - buildComboCandidates: ワイド・3連複向けの候補ビルダー(列挙+オッズ4状態解決+EV算出)。
+ *     EV/isPositiveはここで計算する(odds Mapのキー生成・4状態解決を1本化。決定2)。
  */
 
 /** テスト用の固定分布を返すスタブモデル。 */
@@ -64,7 +64,7 @@ function uniformOddsMap(n: number, comboSize: number, odds: number): Map<string,
 }
 
 describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", () => {
-  describe("buildComboOddsKey/resolveComboOdds(オッズキー正規化・3状態判別)", () => {
+  describe("buildComboOddsKey/resolveComboOdds(オッズキー正規化・4状態判別)", () => {
     it("キーは昇順2桁ゼロ埋め連結になること(netkeibaの実キー形式に一致)", () => {
       expect(buildComboOddsKey([1, 2])).toBe("0102");
       expect(buildComboOddsKey([2, 1])).toBe("0102"); // 入力順に依らない
@@ -81,6 +81,25 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(resolveComboOdds(map, [1, 2])).toEqual({ state: "present", odds: 3.5 });
       expect(resolveComboOdds(map, [1, 3])).toEqual({ state: "missing" });
       expect(resolveComboOdds(map, [2, 3])).toEqual({ state: "unfetched" });
+    });
+
+    it.each([
+      { name: "NaN", value: Number.NaN },
+      { name: "+Infinity", value: Number.POSITIVE_INFINITY },
+      { name: "-Infinity", value: Number.NEGATIVE_INFINITY },
+      { name: "0", value: 0 },
+      { name: "負値(-5)", value: -5 },
+    ])(
+      "取得済みだが数値として不正($name)はmalformedを返すこと(受け入れ条件18・boss指摘2026-08-06)",
+      ({ value }) => {
+        const map = new Map<string, number | null>([["0102", value]]);
+        expect(resolveComboOdds(map, [1, 2])).toEqual({ state: "malformed" });
+      },
+    );
+
+    it("odds=1(元返し)はmalformedにならないこと(0以下だけを不正とする境界の確認)", () => {
+      const map = new Map<string, number | null>([["0102", 1]]);
+      expect(resolveComboOdds(map, [1, 2])).toEqual({ state: "present", odds: 1 });
     });
   });
 
@@ -251,7 +270,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
-  describe("オッズ3区分(欠損/未取得/候補外)が別々の理由・件数として出ること", () => {
+  describe("オッズ4区分(欠損/未取得/不正/候補外)が別々の理由・件数として出ること", () => {
     it("present/missing/unfetchedがdiagnosticsで別カウントになること", () => {
       const horses = evenHorses(4, 3); // C(4,2)=6組
       const oddsMap = new Map<string, number | null>();
@@ -273,8 +292,101 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(result.diagnostics.enumeratedCount).toBe(6);
       expect(result.diagnostics.unjudged.oddsMissingCount).toBe(2);
       expect(result.diagnostics.unjudged.oddsUnfetchedCount).toBe(3);
+      expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(0);
       // 残り1組(present)はEVが計算され、judged(positive+notPositive)の合計が1になる。
       expect(result.diagnostics.judged.positiveCount + result.diagnostics.judged.notPositiveCount).toBe(1);
+    });
+
+    it("回帰テスト: 取得済みだが不正な数値(NaN)は、EVが計算できなくても judged(判定結果)へ" +
+      "絶対に混ざらず oddsMalformedCount(判定不能)へ計上されること(受け入れ条件16・18。" +
+      "boss指摘2026-08-06: 修正前はNaNがev=NaN→isPositive=(NaN>閾値)=falseという経路で" +
+      "judged.notPositiveCountに紛れ込んでいた)", () => {
+      const horses = evenHorses(4, 3); // C(4,2)=6組
+      const oddsMap = new Map<string, number | null>();
+      const allCombos = [
+        [1, 2],
+        [1, 3],
+        [1, 4],
+        [2, 3],
+        [2, 4],
+        [3, 4],
+      ];
+      oddsMap.set(buildComboOddsKey(allCombos[0]!), Number.NaN); // malformed
+      for (let i = 1; i < allCombos.length; i++) {
+        oddsMap.set(buildComboOddsKey(allCombos[i]!), 5); // 残り5組は健全(高オッズで正EV)
+      }
+
+      const result = buildComboCandidates(horses, 3, 2, oddsMap);
+      expect(result.diagnostics.enumeratedCount).toBe(6);
+      // 【回帰の本体】NaNの1組はjudgedのどちらにも入らず、oddsMalformedCountだけが1になること。
+      expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(1);
+      expect(result.diagnostics.judged.notPositiveCount).toBe(0);
+      // 残り5組は健全にEVプラス判定され、candidatesに載ること(NaNの1組に巻き添えにされない)。
+      expect(result.diagnostics.judged.positiveCount).toBe(5);
+      expect(result.candidates).toHaveLength(5);
+      expect(result.candidates.some((c) => c.umabans.join(",") === "1,2")).toBe(false);
+    });
+
+    it("Infinityのオッズはcandidatesに混入せずoddsMalformedCountへ計上されること(以前はallocateGeneralBets側のthrowに偶然救われていただけだった)", () => {
+      const horses = evenHorses(4, 3);
+      const oddsMap = new Map<string, number | null>();
+      oddsMap.set(buildComboOddsKey([1, 2]), Number.POSITIVE_INFINITY);
+      const result = buildComboCandidates(horses, 3, 2, oddsMap);
+      expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(1);
+      expect(result.candidates.some((c) => !Number.isFinite(c.odds) || !Number.isFinite(c.ev))).toBe(false);
+    });
+  });
+
+  describe("evConfig.thresholdの防御(受け入れ条件19。boss指摘2026-08-06)", () => {
+    // 混在オッズ(一部だけ正EV)を使う。全候補が同じ判定になるデータだと、
+    // threshold=-Infinity(ev>-Infinityは常にtrueになる)が「たまたま既定閾値と同じ結果」に
+    // なってしまい判別力を失う(実際に踏んだ落とし穴。カナリア検証時に発見)。
+    function buildMixedScenario(): { horses: JointModelHorse[]; oddsMap: Map<string, number | null> } {
+      const horses = evenHorses(4, 3);
+      const combos: number[][] = [];
+      for (let a = 1; a <= 4; a++) for (let b = a + 1; b <= 4; b++) combos.push([a, b]);
+      const oddsMap = new Map<string, number | null>();
+      combos.forEach((c, i) => {
+        // 半数は高オッズ(明らかに正EV)、半数は低オッズ(明らかに非正EV)。
+        oddsMap.set(buildComboOddsKey(c), i % 2 === 0 ? 5 : 0.5);
+      });
+      return { horses, oddsMap };
+    }
+
+    it.each([
+      { name: "threshold=NaN", threshold: Number.NaN },
+      { name: "threshold=+Infinity", threshold: Number.POSITIVE_INFINITY },
+      { name: "threshold=-Infinity", threshold: Number.NEGATIVE_INFINITY },
+    ])(
+      "$name は既定閾値(1.0)へフォールバックし、既定閾値を明示指定した場合と一致すること",
+      ({ threshold }) => {
+        const { horses, oddsMap } = buildMixedScenario();
+        const expected = buildComboCandidates(horses, 3, 2, oddsMap, { threshold: 1.0 });
+        // 前提(無条件expect): 既定閾値では正EV・非正EVの両方が生じる混在データであること
+        // (どちらか一方に偏っていると、異常なthresholdが「たまたま」既定と同じ結果になり
+        // このテストの判別力が失われる)。
+        expect(expected.diagnostics.judged.positiveCount).toBeGreaterThan(0);
+        expect(expected.diagnostics.judged.notPositiveCount).toBeGreaterThan(0);
+
+        const actual = buildComboCandidates(horses, 3, 2, oddsMap, { threshold });
+        expect(actual.diagnostics).toEqual(expected.diagnostics);
+        expect(actual.candidates).toEqual(expected.candidates);
+      },
+    );
+
+    it("回帰テスト: threshold=NaNだと明らかに正EVな候補も黙って全滅すること(この修正前の症状。現在はフォールバックで再現しない)", () => {
+      const horses = evenHorses(4, 3);
+      const oddsMap = uniformOddsMap(4, 2, 5); // odds=5(明らかに正EV)
+      // 前提(無条件expect): threshold=1.0(既定)ならpositiveCount>0であること。
+      const healthy = buildComboCandidates(horses, 3, 2, oddsMap, { threshold: 1.0 });
+      expect(healthy.diagnostics.judged.positiveCount).toBeGreaterThan(0);
+
+      // 修正後は防御によりNaNが1.0へフォールバックされるため、結果はhealthyと一致する
+      // (=「全滅」という誤った結果には決して化けない)。
+      const withNaNThreshold = buildComboCandidates(horses, 3, 2, oddsMap, { threshold: Number.NaN });
+      expect(withNaNThreshold.diagnostics.judged.positiveCount).toBe(
+        healthy.diagnostics.judged.positiveCount,
+      );
     });
   });
 
@@ -376,6 +488,22 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const empty: AllocationCandidate[] = [{ umabans: [], odds: 3, ev: 2, isPositive: true }];
       expect(() => allocateGeneralBets(horses, 3, empty)).toThrow();
     });
+
+    it.each([
+      { name: "umaban=NaN", umaban: Number.NaN },
+      { name: "umaban=0", umaban: 0 },
+      { name: "umaban=負値(-5)", umaban: -5 },
+    ])(
+      "$name を含む候補を渡すと例外を投げること(受け入れ条件20の走査で発見。" +
+        "NaN<=NaNは常にfalseなので、昇順チェックだけではNaNの馬番をすり抜けてしまう)",
+      ({ umaban }) => {
+        const horses = evenHorses(4, 3);
+        const bad: AllocationCandidate[] = [
+          { umabans: [umaban, umaban + 100], odds: 3, ev: 2, isPositive: true },
+        ];
+        expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
+      },
+    );
   });
 
   describe("候補の数値検証(odds/evの異常値。boss差し戻し2026-08-06)", () => {
@@ -387,7 +515,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     // 「サイレント破損」欠陥クラスの6回目。しかも今回は「判定できていないことを、
     // 判定した結果〈妙味が小さく…〉として報告する」という最も重い形)。
     // 構造検証と同じくthrowに揃える(除外して続行する設計は採らない。異常値を黙って
-    // 除外すると「判定不能」が「候補外」に混ざり、受け入れ条件16〈オッズ3状態分離〉の
+    // 除外すると「判定不能」が「候補外」に混ざり、受け入れ条件16〈オッズ状態分離〉の
     // 思想と矛盾するため)。
 
     it.each([

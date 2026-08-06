@@ -28,6 +28,25 @@ export const DEFAULT_EV_CONFIG: EvConfig = {
   threshold: 1.0,
 };
 
+/**
+ * EV閾値(threshold)を防御する。非有限(NaN/Infinity)は既定値(DEFAULT_EV_CONFIG.threshold=1.0)
+ * へフォールバックする(resolveKellyFraction/resolveBetUnit等と同じ流儀。
+ * bet-allocation系の防御的フォールバックの慣行に合わせる)。
+ *
+ * 受け入れ条件19(機能D-2a・boss指摘2026-08-06への対応): `isPositive = ev > threshold` の
+ * 右辺がNaNだと比較が常にfalseになり、どんなに良いオッズでも全候補が黙って「妙味なし」に
+ * 分類される(threshold=-Infinityの場合は逆に全候補が黙って「妙味あり」になる)。
+ * この関数を `computeRaceEv` / `computeEstimatedRaceEv` / `buildComboCandidates`
+ * (combo-bet-allocation.ts)の3箇所で共有し、片側だけ守って非対称を作らない
+ * (受け入れ条件17「閾値を二重定義しない」の当然の帰結)。
+ */
+export function resolveEvThreshold(threshold: number): number {
+  if (!Number.isFinite(threshold)) {
+    return DEFAULT_EV_CONFIG.threshold;
+  }
+  return threshold;
+}
+
 /** computeRaceEv の入力(1頭分の複勝確率)。 */
 export interface HorsePrior {
   /** 馬番。 */
@@ -106,7 +125,8 @@ export function computeRaceEv(
   odds: OddsSnapshot,
   config: EvConfig = DEFAULT_EV_CONFIG,
 ): HorseEv[] {
-  return priors.map((p) => evaluateHorse(p, odds, config.threshold));
+  const threshold = resolveEvThreshold(config.threshold);
+  return priors.map((p) => evaluateHorse(p, odds, threshold));
 }
 
 /** 1頭分のEVを評価する(オッズ欠損は対象外として理由付きで返す)。 */
@@ -181,7 +201,8 @@ export function computeEstimatedRaceEv(
   config: EvConfig = DEFAULT_EV_CONFIG,
   placeConfig: EstimatedPlaceConfig = DEFAULT_ESTIMATED_PLACE_CONFIG,
 ): EstimatedHorseEv[] {
-  return priors.map((p) => evaluateEstimatedHorse(p, odds, config.threshold, placeConfig));
+  const threshold = resolveEvThreshold(config.threshold);
+  return priors.map((p) => evaluateEstimatedHorse(p, odds, threshold, placeConfig));
 }
 
 /** 1頭分の推定EVを評価する(単勝オッズ欠損は対象外として理由付きで返す)。 */

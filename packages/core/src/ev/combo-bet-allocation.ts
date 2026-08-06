@@ -21,7 +21,7 @@
  *     対応する(受け入れ条件8)。ただし本タスクでは renderer 配線・UI・設定は行わない
  *     (API形状のみ用意する)。
  *   - 候補ビルダー `buildComboCandidates`: ワイド・三連複向けに、出走馬番からの組合せ列挙・
- *     オッズMapからの3状態解決(present/missing/unfetched)・EV算出(既存
+ *     オッズMapからの4状態解決(present/missing/unfetched/malformed)・EV算出(既存
  *     `expected-value.ts` の `EvConfig`/`DEFAULT_EV_CONFIG` を再利用し閾値を二重定義しない)を
  *     行い、`allocateGeneralBets` への入力(`AllocationCandidate[]`)を作る。
  *
@@ -38,6 +38,7 @@
 
 import {
   DEFAULT_EV_CONFIG,
+  resolveEvThreshold,
   type EvConfig,
 } from "./expected-value.js";
 import {
@@ -319,6 +320,17 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
     if (umabans.length === 0) {
       throw new Error("不正な買い目です: 馬番の組が空です");
     }
+    // 馬番自体の数値検証(受け入れ条件20の走査で発見。boss指摘2026-08-06の水平展開)。
+    // 「昇順・重複なし」の比較(umabans[i] <= umabans[i-1])はNaN同士の比較が常にfalseになるため、
+    // umaban=NaNは何個並んでいても素通りしてしまう(NaN<=NaNはfalse)。馬番自体が正の有限値で
+    // あることを別途検証する(odds/evと同じ基準)。
+    for (const u of umabans) {
+      if (!Number.isFinite(u) || u <= 0) {
+        throw new Error(
+          `不正な買い目です: 馬番は正の有限値である必要があります(umabans=${umabans.join(",")}, 不正な値=${u})`,
+        );
+      }
+    }
     for (let i = 1; i < umabans.length; i++) {
       if (umabans[i]! <= umabans[i - 1]!) {
         throw new Error(
@@ -341,7 +353,7 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
     // (実際は「判定できていない」状態であり、判定結果と区別できないまま握り潰される)。
     // 構造検証(umabans)と同じく throw に揃える(除外して続行する設計は採らない。
     // 異常値を黙って除外すると「判定不能」が「候補外」に混ざり、受け入れ条件16
-    // 〈オッズ3状態分離〉の思想と矛盾するため。呼び出し側が気づくべき異常である)。
+    // 〈オッズ状態分離〉の思想と矛盾するため。呼び出し側が気づくべき異常である)。
     if (!Number.isFinite(odds) || odds <= 0) {
       throw new Error(
         `不正な買い目です: oddsは正の有限値である必要があります(umabans=${umabans.join(",")}, odds=${odds})`,
@@ -551,16 +563,39 @@ export function buildComboOddsKey(umabans: readonly number[]): string {
 }
 
 /**
- * combo オッズの解決結果(判別共用体)。取得済み/欠損(null)/未取得(キー不在)の3状態を
- * 区別する(決定2)。`Map#get(...) ?? null` のような未取得と欠損の同一視を禁止する
+ * combo オッズの解決結果(判別共用体)。取得済み/欠損(null)/未取得(キー不在)/
+ * **不正な数値(malformed)** の4状態を区別する(決定2。boss指摘2026-08-06で4状態目を追加)。
+ * `Map#get(...) ?? null` のような未取得と欠損の同一視を禁止する
  * (本リポジトリが繰り返した「判定不能を判定結果と誤ラベルする」欠陥クラスの再発防止)。
+ *
+ * ## malformed(非有限・0以下)を追加した理由と、throwしない理由(受け入れ条件18)
+ *
+ * `buildComboCandidates` は**入口検証の二層原則**における「データの分類器」であり
+ * (対して `allocateGeneralBets`/`validateCandidates` は「公開APIの門番」)、外部データ由来の
+ * 異常値(取得したオッズがNaN・Infinity・0・負値等)は**分類して診断値の件数に残す**
+ * (throwしない)。理由: `buildComboCandidates` は最大987組を1件ずつ分類するのが仕事であり、
+ * 1組のオッズが壊れていただけでレース全体の分類を投げ捨てるのは誤りである(1件のNaNのために
+ * 残り986件の健全な分類結果まで失われてしまう)。
+ *
+ * 修正前は数値検証が無く、`resolveComboOdds` が非有限値でも無条件に`{state:"present"}`を
+ * 返していたため、NaNは`ev=NaN`→`isPositive=(NaN>閾値)=false`という経路で
+ * **judged.notPositiveCount(判定結果)に紛れ込み**、Infinityは`isPositive=true`のまま
+ * `candidates`配列に混入していた(たまたま下流の`allocateGeneralBets`側の`validateCandidates`
+ * throwで止まっていたに過ぎず、`buildComboCandidates`自身が意図して防いでいたわけではない)。
+ * いずれも「判定不能」を「判定結果」に混ぜる、受け入れ条件16が禁じた欠陥である。
  */
 export type ComboOddsResolution =
   | { readonly state: "present"; readonly odds: number }
   | { readonly state: "missing" }
-  | { readonly state: "unfetched" };
+  | { readonly state: "unfetched" }
+  | { readonly state: "malformed" };
 
-/** oddsByKeyから馬番の組のオッズを3状態判別共用体で解決する唯一の関数。 */
+/**
+ * oddsByKeyから馬番の組のオッズを4状態判別共用体で解決する唯一の関数。
+ * 数値としての妥当性(非有限・0以下)の判定もこの関数に集約する
+ * (`AllocationCandidate.odds`と同じ基準=正の有限値。`validateCandidates`のthrow基準と
+ * 値としては同じだが、ここでは分類〈malformed〉として扱いthrowはしない)。
+ */
 export function resolveComboOdds(
   oddsByKey: ReadonlyMap<string, number | null>,
   umabans: readonly number[],
@@ -574,6 +609,9 @@ export function resolveComboOdds(
   const value = oddsByKey.get(key)!;
   if (value === null) {
     return { state: "missing" };
+  }
+  if (!Number.isFinite(value) || value <= 0) {
+    return { state: "malformed" };
   }
   return { state: "present", odds: value };
 }
@@ -589,12 +627,17 @@ export interface ComboCandidateDiagnostics {
     /** EV非プラスで候補外にした数。 */
     readonly notPositiveCount: number;
   };
-  /** 判定不能(オッズが取得できずEVを計算できなかった買い目)。 */
+  /** 判定不能(オッズが取得できず、または数値として不正でEVを計算できなかった買い目)。 */
   readonly unjudged: {
     /** オッズ欠損(Mapの値がnull)で評価できなかった数。 */
     readonly oddsMissingCount: number;
     /** 未取得(Mapにキーが存在しない)のため評価していない数。 */
     readonly oddsUnfetchedCount: number;
+    /**
+     * オッズが取得済みだが数値として不正(非有限・0以下)で評価できなかった数
+     * (受け入れ条件18・boss指摘2026-08-06)。判定結果(judged)には絶対に混ざらない。
+     */
+    readonly oddsMalformedCount: number;
   };
 }
 
@@ -645,7 +688,7 @@ function computeComboHitProb(combo: readonly number[], rawDistribution: readonly
 }
 
 /**
- * ワイド・三連複向けの買い目候補を構築する(列挙+オッズ3状態解決+EV算出)。
+ * ワイド・三連複向けの買い目候補を構築する(列挙+オッズ4状態解決+EV算出)。
  *
  * @param horses 出走全頭(複勝圏内確率。同時分布構築に使う)
  * @param topFinishCount 上位何着までを的中判定に使うか(ワイド・三連複は常に3。JSDoc冒頭参照)
@@ -674,6 +717,12 @@ export function buildComboCandidates(
   let notPositiveCount = 0;
   let oddsMissingCount = 0;
   let oddsUnfetchedCount = 0;
+  let oddsMalformedCount = 0;
+  // 閾値の防御(受け入れ条件19)。computeRaceEv/computeEstimatedRaceEvと同じ関数を再利用し、
+  // 二重定義しない(受け入れ条件17)。非有限のまま`ev > threshold`に使うと、どんなに良い
+  // オッズでも比較が常にfalse(NaN/+Infinityの場合)またはtrue(-Infinityの場合)に
+  // 固定され、全候補が黙って誤分類される。
+  const threshold = resolveEvThreshold(evConfig.threshold);
 
   for (const combo of combos) {
     const resolution = resolveComboOdds(oddsByKey, combo);
@@ -685,9 +734,13 @@ export function buildComboCandidates(
       oddsMissingCount++;
       continue;
     }
+    if (resolution.state === "malformed") {
+      oddsMalformedCount++;
+      continue;
+    }
     const hitProb = computeComboHitProb(combo, rawDistribution);
     const ev = hitProb * resolution.odds;
-    const isPositive = ev > evConfig.threshold;
+    const isPositive = ev > threshold;
     if (!isPositive) {
       notPositiveCount++;
       continue;
@@ -700,7 +753,7 @@ export function buildComboCandidates(
     diagnostics: {
       enumeratedCount: combos.length,
       judged: { positiveCount: candidates.length, notPositiveCount },
-      unjudged: { oddsMissingCount, oddsUnfetchedCount },
+      unjudged: { oddsMissingCount, oddsUnfetchedCount, oddsMalformedCount },
     },
   };
 }
