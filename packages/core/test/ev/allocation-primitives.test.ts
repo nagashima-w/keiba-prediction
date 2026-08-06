@@ -178,11 +178,98 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
       expect(converged).toBe(true);
     });
 
-    it("wealth<=EPSになる割当を候補から除外し、NaN/Infinityを生まないこと(極端値。EPSガードの安全性チェックが働く経路)", () => {
+    it("wealth<=EPSになる割当を候補から除外し、NaN/Infinityを生まないこと(極端値。1ステップで収束するためフォールバック分岐は踏まない)", () => {
+      // 【タイトル訂正】(code-reviewer指摘・機能D-2a): 旧タイトル「EPSガードの安全性
+      // チェックが働く経路」は実態と一致していなかった。この構成(候補1件・odds=3000)は
+      // 1ステップ目でbestIdx=-1(即時収束)になり、safe判定・フォールバック分岐は
+      // 一度も評価されない(code-reviewerが計測により確認)。本テストは「NaN/Infinityが
+      // 混入しない」ことの確認に留まる。フォールバック分岐の実地検証は次のテスト
+      // 「フォールバック分岐(unsafe)を実際に踏むこと」を参照。
       const outcomeIndexSets: OutcomeIndexSet[] = [{ indices: [0], probability: 1 }];
       // 高オッズ×低確率(3000倍)でも、貪欲ループの結果が有限であること。
       const { fractions } = runGreedyAllocation(1, [3000], outcomeIndexSets, 1000);
       expect(Number.isFinite(fractions[0]!)).toBe(true);
+    });
+
+    it("フォールバック分岐(unsafe)を実際に踏み、高速パスとは異なる結果になり得ること(旧来ブルートフォース参照実装とtoEqualで一致を固定)", () => {
+      // code-reviewer指摘(機能D-2a再レビュー): runGreedyAllocationのsafe/unsafe
+      // 2分岐のうち、フォールバック(旧来ブルートフォース。computeFreshWealthの候補ごと
+      // 再構成ロジックを含む)を実際に踏んで検証するコミット済みテストが1件も無かった。
+      //
+      // 構成: 候補0・1は魅力的(odds=10)で無関係のoutcomeを持ち、sumXを押し上げていく。
+      // 候補2は自分専属のoutcome(確率0.0001と小さい)を持ち、oddsを極端に高く(10000)する。
+      // 候補2自身がまだ選ばれていない(x[2]=0)間、候補0・1の成長がoutcome2のwealth
+      // (=1-sumX。候補2に触れられていない限りpayoutが乗らない)を痩せさせ、EPS(1e-9)に
+      // 接近させる。ここが「commonWealth(未接触前提の共通項)」と「freshWealth(候補2自身が
+      // 選ばれた場合の再計算値)」が乖離しうる境目であり、高速パスをそのまま使うと
+      // (commonWealthのlogがNaN化し)候補2の増分まで巻き添えで壊れて誤って打ち切ってしまう。
+      // フォールバックはこの局面で候補2だけを正しく再評価し、貪欲を継続できる
+      // (下記の無条件expectで、フォールバック無しでは得られない`converged=false`かつ
+      // 候補2への配分>0という結果を先に固定する。カナリア検証も参照)。
+      const outcomeIndexSets: OutcomeIndexSet[] = [
+        { indices: [0], probability: 0.49995 },
+        { indices: [1], probability: 0.49995 },
+        { indices: [2], probability: 0.0001 },
+      ];
+      const odds = [10, 10, 10000];
+      const greedySteps = 1000;
+
+      // 旧来のブルートフォース参照実装(bet-allocation.ts抽出前の実装と同じ式・同じ走査順)。
+      const bruteForceReference = (): { fractions: number[]; converged: boolean } => {
+        const n = 3;
+        const x = new Array<number>(n).fill(0);
+        const delta = 1 / greedySteps;
+        let sumX = 0;
+        const computeF = (trialSumX: number, trialX: readonly number[]): number | null => {
+          let total = 0;
+          for (const outcome of outcomeIndexSets) {
+            let payout = 0;
+            for (const idx of outcome.indices) payout += trialX[idx]! * odds[idx]!;
+            const wealth = 1 - trialSumX + payout;
+            if (wealth <= 1e-9) return null;
+            total += outcome.probability * Math.log(wealth);
+          }
+          return total;
+        };
+        let currentF = computeF(sumX, x)!;
+        let converged = false;
+        for (let step = 0; step < greedySteps; step++) {
+          let bestIdx = -1;
+          let bestIncrement = 0;
+          const trialSumX = sumX + delta;
+          for (let i = 0; i < n; i++) {
+            const trialX = x.slice();
+            trialX[i] = trialX[i]! + delta;
+            const trialF = computeF(trialSumX, trialX);
+            if (trialF === null) continue;
+            const increment = trialF - currentF;
+            if (increment > bestIncrement) {
+              bestIncrement = increment;
+              bestIdx = i;
+            }
+          }
+          if (bestIdx === -1) {
+            converged = true;
+            break;
+          }
+          x[bestIdx] = x[bestIdx]! + delta;
+          sumX = trialSumX;
+          currentF = computeF(sumX, x)!;
+        }
+        return { fractions: x, converged };
+      };
+
+      const expected = bruteForceReference();
+      // 前提(無条件expect): 候補2が正の配分を得て、貪欲がgreedyStepsを使い切らずに
+      // 自然停止すること(=フォールバックが無ければ再現できない結果であることの直接証拠。
+      // 高速パスだけだと候補2の増分がNaN汚染され、より早い段階でconverged=trueに
+      // なってしまう〈本テスト作成時に実測済み〉)。
+      expect(expected.fractions[2]).toBeGreaterThan(0);
+      expect(expected.converged).toBe(false);
+
+      const actual = runGreedyAllocation(3, odds, outcomeIndexSets, greedySteps);
+      expect(actual.fractions).toEqual(expected.fractions);
+      expect(actual.converged).toBe(expected.converged);
     });
 
     it("greedySteps不足時はconverged=falseになること(打ち切りを収束と誤読しないための固定)", () => {
