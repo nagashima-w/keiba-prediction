@@ -310,6 +310,30 @@ function compareCandidatesForCap(a: AllocationCandidate, b: AllocationCandidate)
 }
 
 /**
+ * topFinishCount(上位何着まで)を検証する(gatekeeper。受け入れ条件20の走査・
+ * code-reviewer実測2026-08-06で発見)。`allocateGeneralBets`/`buildComboCandidates`の
+ * 両方が受け取る値であり、防御を本関数1箇所に集約して重複実装を避ける(受け入れ条件15、
+ * 「片側だけ守って非対称を作らない」原則)。
+ *
+ * 実測で確認したリスク: topFinishCount=Infinityを`allocateGeneralBets`に渡すと、
+ * place-joint-model.tsの「k>=n」分岐(全頭が同時に複勝圏内)に落ちて、isSkip=false・
+ * 一見健全な非スキップの配分を返してしまう(誤りが結果から一切気づけない=最も重い
+ * サイレント破損の形)。topFinishCountはoddsByKeyのような外部データ(スクレイピング結果)
+ * ではなく呼び出し側が構築する引数そのものなので、受け入れ条件18の「呼び出し側構築の
+ * 引数の契約違反→throw」に該当する(classifyしない)。
+ *
+ * 0・小数は許容する(place-joint-model.tsが既にfloor+0クランプで意図的に許容している
+ * 設計に合わせ、同ファイルの既存トレランス方針と非対称にしない)。
+ */
+function validateTopFinishCount(topFinishCount: number): void {
+  if (!Number.isFinite(topFinishCount) || topFinishCount < 0) {
+    throw new Error(
+      `不正なtopFinishCountです: 非負の有限値である必要があります(topFinishCount=${topFinishCount})`,
+    );
+  }
+}
+
+/**
  * 候補の正規化を検証する(受け入れ条件7)。馬番の組が「厳密な昇順」(=重複なし)でない候補、
  * または同じ組が複数回登場する場合は例外を投げる(黙って通さない)。
  */
@@ -401,6 +425,7 @@ export function allocateGeneralBets(
   config: GeneralBetAllocationConfig = DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL,
 ): GeneralBetAllocationResult {
+  validateTopFinishCount(topFinishCount);
   validateCandidates(candidates);
 
   const bankrollInput = config.bankroll;
@@ -709,6 +734,7 @@ export function buildComboCandidates(
   evConfig: EvConfig = DEFAULT_EV_CONFIG,
   model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL,
 ): ComboCandidateBuildResult {
+  validateTopFinishCount(topFinishCount);
   const umabans = [...horses].map((h) => h.umaban).sort((a, b) => a - b);
   const combos = kCombinationsOfUmabans(umabans, comboSize);
   const rawDistribution = model.buildDistribution(horses, topFinishCount);

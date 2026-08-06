@@ -161,6 +161,82 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
+  describe("topFinishCountの数値検証(受け入れ条件20の走査で発見。code-reviewer実測2026-08-06)", () => {
+    // 実測(本ラウンドで自分で確認): allocateGeneralBetsにtopFinishCount=Infinityを渡すと、
+    // place-joint-model.tsの「k>=n」分岐(全頭が同時に複勝圏内)に落ちて、isSkip=false・
+    // totalStake=49900という「健全に見える」非スキップの配分を返してしまう(正しい
+    // topFinishCount=3ではtotalStake=9000。どちらも一見「正常な結果」に見えるため、
+    // 呼び出し側のtopFinishCount取り違えバグが結果から一切気づけない=誤りが表面化しない)。
+    //
+    // topFinishCountはoddsByKeyのような外部データ(スクレイピング結果)ではなく、呼び出し側が
+    // 構築する引数そのものであるため、受け入れ条件18の「呼び出し側構築の引数の契約違反→throw」
+    // に該当する(oddsByKeyの値のようにclassifyはしない。分類対象は「取得した市場データ」であり、
+    // topFinishCountは市場データではない)。
+    //
+    // 0・小数(1.5)は許容し例外にしない: place-joint-model.tsが既にfloor+0クランプで意図的に
+    // 許容している設計(同ファイルのコメント「普遍的な既定値がなく…勝手に倒すとかえって誤った
+    // 結果を正当化する」参照)に合わせる。ここで1.5を拒否すると同ファイルの既存トレランス方針と
+    // 非対称になってしまう。
+    //
+    // allocateGeneralBets/buildComboCandidatesの両方が受け取る値であり、防御を1箇所(本ファイル
+    // 内の共有関数)に集約して重複実装しない(受け入れ条件15、boss「片側だけ守って非対称を
+    // 作らない」原則)。
+
+    it.each([
+      { name: "topFinishCount=NaN", topFinishCount: Number.NaN },
+      { name: "topFinishCount=+Infinity", topFinishCount: Number.POSITIVE_INFINITY },
+      { name: "topFinishCount=-Infinity", topFinishCount: Number.NEGATIVE_INFINITY },
+      { name: "topFinishCount=負値(-1)", topFinishCount: -1 },
+    ])("$name だと allocateGeneralBets が例外を投げること", ({ topFinishCount }) => {
+      const horses = evenHorses(5, 3);
+      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true }];
+      expect(() =>
+        allocateGeneralBets(horses, topFinishCount, cand, {
+          ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+          bankroll: 100000,
+          perRaceCap: 50000,
+        }),
+      ).toThrow();
+    });
+
+    it.each([
+      { name: "topFinishCount=NaN", topFinishCount: Number.NaN },
+      { name: "topFinishCount=+Infinity", topFinishCount: Number.POSITIVE_INFINITY },
+      { name: "topFinishCount=-Infinity", topFinishCount: Number.NEGATIVE_INFINITY },
+      { name: "topFinishCount=負値(-1)", topFinishCount: -1 },
+    ])(
+      "$name だと buildComboCandidates が例外を投げること(allocateGeneralBetsと非対称にしない)",
+      ({ topFinishCount }) => {
+        const horses = evenHorses(4, 3);
+        const oddsMap = uniformOddsMap(4, 2, 5);
+        expect(() => buildComboCandidates(horses, topFinishCount, 2, oddsMap)).toThrow();
+      },
+    );
+
+    it("topFinishCount=0・小数(1.5)は例外にならないこと(境界の確認。place-joint-model.tsの既存トレランスと非対称な過剰拒否を防ぐ)", () => {
+      const horses = evenHorses(5, 3);
+      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true }];
+      expect(() => allocateGeneralBets(horses, 0, cand)).not.toThrow();
+      expect(() => allocateGeneralBets(horses, 1.5, cand)).not.toThrow();
+
+      const oddsMap = uniformOddsMap(4, 2, 5);
+      expect(() => buildComboCandidates(evenHorses(4, 3), 0, 2, oddsMap)).not.toThrow();
+      expect(() => buildComboCandidates(evenHorses(4, 3), 1.5, 2, oddsMap)).not.toThrow();
+    });
+
+    it("回帰テスト: topFinishCount=Infinityが誤って健全に見える非スキップ配分を返していた症状(この修正前の実測: isSkip=false, totalStake=49900)が再現しないこと", () => {
+      const horses = evenHorses(5, 3);
+      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true }];
+      expect(() =>
+        allocateGeneralBets(horses, Number.POSITIVE_INFINITY, cand, {
+          ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+          bankroll: 100000,
+          perRaceCap: 50000,
+        }),
+      ).toThrow();
+    });
+  });
+
   describe("モデル非依存の恒等式4本(CONDITIONAL_BERNOULLI_MODEL、n=3,4,18)", () => {
     function sumWhere(dist: readonly PlaceOutcome[], pred: (placed: readonly number[]) => boolean): number {
       return dist.reduce((acc, o) => (pred(o.placed) ? acc + o.probability : acc), 0);
