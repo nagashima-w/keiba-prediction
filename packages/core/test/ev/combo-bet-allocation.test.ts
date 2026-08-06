@@ -378,6 +378,71 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
+  describe("候補の数値検証(odds/evの異常値。boss差し戻し2026-08-06)", () => {
+    // boss差し戻し理由: 候補の「構造」(昇順・重複・空)はvalidateCandidatesで検証してthrow
+    // していたが、候補の「数値」(odds/ev)は無防備だった。payout計算(trialX[idx]*odds[idx])に
+    // NaN/Infinityが1件でも混じると、貪欲ループのcurrentF・全候補の増分がNaN汚染され、
+    // `NaN > 0`は常にfalseのため`bestIdx=-1`(=収束)に化ける。無関係な1候補の異常値が、
+    // 他の健全な候補の配分まで巻き添えで消える(C-1で3回・C-2で2回繰り返した
+    // 「サイレント破損」欠陥クラスの6回目。しかも今回は「判定できていないことを、
+    // 判定した結果〈妙味が小さく…〉として報告する」という最も重い形)。
+    // 構造検証と同じくthrowに揃える(除外して続行する設計は採らない。異常値を黙って
+    // 除外すると「判定不能」が「候補外」に混ざり、受け入れ条件16〈オッズ3状態分離〉の
+    // 思想と矛盾するため)。
+
+    it.each([
+      { name: "odds=NaN", odds: Number.NaN },
+      { name: "odds=+Infinity", odds: Number.POSITIVE_INFINITY },
+      { name: "odds=-Infinity", odds: Number.NEGATIVE_INFINITY },
+      { name: "odds=0", odds: 0 },
+      { name: "odds=負値(-5)", odds: -5 },
+    ])("$name の候補を渡すと例外を投げること", ({ odds }) => {
+      const horses = evenHorses(4, 3);
+      const bad: AllocationCandidate[] = [{ umabans: [1, 2], odds, ev: 2, isPositive: true }];
+      expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
+    });
+
+    it.each([
+      { name: "ev=NaN", ev: Number.NaN },
+      { name: "ev=+Infinity", ev: Number.POSITIVE_INFINITY },
+      { name: "ev=-Infinity", ev: Number.NEGATIVE_INFINITY },
+    ])("$name の候補を渡すと例外を投げること", ({ ev }) => {
+      const horses = evenHorses(4, 3);
+      const bad: AllocationCandidate[] = [{ umabans: [1, 2], odds: 3, ev, isPositive: true }];
+      expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
+    });
+
+    it("回帰テスト: 健全な候補1件は正の配分を得るが、無関係なodds=NaNの候補を混ぜると【この修正前は】黙って見送りに化けていた(現在はthrowする)", () => {
+      // boss実測の再現(数値は本テスト用に別途用意したもので、boss報告の3,800円そのものの
+      // 引き写しではない。前提〈健全な1件が正の配分を得ること〉を無条件expectで固定する)。
+      const horses = evenHorses(4, 3);
+      const healthyOnly: AllocationCandidate[] = [
+        { umabans: [1, 2], odds: 5, ev: 2.5, isPositive: true },
+      ];
+      const config = { ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, bankroll: 100000, perRaceCap: 100000 };
+
+      // 前提(無条件expect): 健全な候補1件だけなら正の配分(見送りにならない)を得ること。
+      const healthyResult = allocateGeneralBets(horses, 3, healthyOnly, config);
+      expect(healthyResult.isSkip).toBe(false);
+      expect(healthyResult.totalStake).toBeGreaterThan(0);
+
+      // 【この修正が無ければ何が起きていたか(記録)】: 以下のodds=NaNを混ぜた呼び出しは、
+      // validateCandidatesの数値検証が無かった場合、NaNがpayout計算(trialX[idx]*odds[idx])
+      // に混入してcurrentF・全増分をNaN汚染し、`bestIdx=-1`に化けて即座に「収束」扱いとなる
+      // (greedyStepsを1回も進められない)。結果、healthyOnlyなら正の配分を得るはずの
+      // 上記候補まで巻き添えでtotalStake=0・isSkip=true・
+      // skipReason="妙味が小さく、賭ける価値のある配分が見つかりませんでした"という
+      // 【誤った判定結果】に化けていた(実際は判定できていないだけなのに)。
+      // 現在はvalidateCandidatesがodds=NaNの時点でthrowするため、この誤った見送りには
+      // 到達しない。
+      const withNaNCandidate: AllocationCandidate[] = [
+        ...healthyOnly,
+        { umabans: [3, 4], odds: Number.NaN, ev: 1.5, isPositive: true },
+      ];
+      expect(() => allocateGeneralBets(horses, 3, withNaNCandidate, config)).toThrow();
+    });
+  });
+
   describe("既存の防御が組合せでも生きること(betUnit/λ/greedySteps/bankroll/perRaceCapの異常値)", () => {
     const horses = evenHorses(5, 3);
     const candidates: AllocationCandidate[] = [

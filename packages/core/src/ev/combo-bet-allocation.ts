@@ -315,7 +315,7 @@ function compareCandidatesForCap(a: AllocationCandidate, b: AllocationCandidate)
 function validateCandidates(candidates: readonly AllocationCandidate[]): void {
   const seen = new Set<string>();
   for (const candidate of candidates) {
-    const { umabans } = candidate;
+    const { umabans, odds, ev } = candidate;
     if (umabans.length === 0) {
       throw new Error("不正な買い目です: 馬番の組が空です");
     }
@@ -331,6 +331,30 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
       throw new Error(`重複した買い目が含まれています(${key})`);
     }
     seen.add(key);
+
+    // 数値(odds/ev)の検証(boss差し戻し・2026-08-06)。
+    // 「サイレント破損」欠陥クラスの再発防止: payout計算(trialX[idx]*odds[idx])に
+    // NaN/Infinityが1件でも混じると、貪欲ループのcurrentF・全候補の増分がNaN汚染され、
+    // `NaN > 0` は常にfalseのため`bestIdx=-1`(=収束)に化ける。無関係な1候補の異常値が、
+    // 他の健全な候補の配分まで巻き添えで消し、「妙味が小さく、賭ける価値のある配分が
+    // 見つかりませんでした」という**判定結果**として誤って報告してしまう
+    // (実際は「判定できていない」状態であり、判定結果と区別できないまま握り潰される)。
+    // 構造検証(umabans)と同じく throw に揃える(除外して続行する設計は採らない。
+    // 異常値を黙って除外すると「判定不能」が「候補外」に混ざり、受け入れ条件16
+    // 〈オッズ3状態分離〉の思想と矛盾するため。呼び出し側が気づくべき異常である)。
+    if (!Number.isFinite(odds) || odds <= 0) {
+      throw new Error(
+        `不正な買い目です: oddsは正の有限値である必要があります(umabans=${umabans.join(",")}, odds=${odds})`,
+      );
+    }
+    // evの非有限チェック: compareCandidatesForCapの `b.ev - a.ev` がNaNを返すと
+    // Array#sortの比較関数契約(有限数を返す)に違反し、候補cap選抜の結果が
+    // 実装依存で非決定的になる副次的な問題も防ぐ。
+    if (!Number.isFinite(ev)) {
+      throw new Error(
+        `不正な買い目です: evは有限値である必要があります(umabans=${umabans.join(",")}, ev=${ev})`,
+      );
+    }
   }
 }
 
