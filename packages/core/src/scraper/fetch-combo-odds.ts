@@ -141,9 +141,15 @@ export interface ComboOddsFetchDiagnostics {
   readonly axisUmabans: readonly number[];
   /** 取得試行ごとの結末(中央・地方ワイドは1件、地方3連複は軸数件)。 */
   readonly attempts: readonly ComboOddsFetchAttempt[];
-  /** 軸間の数値衝突件数(oddsMinが数値同士で食い違った件数)。 */
+  /**
+   * 軸間の数値衝突件数(`ComboOddsCellConflict.kind==="numeric"`の件数)。
+   * `combo-odds-key.ts`の`ComboOddsCellConflictKind`JSDoc参照: この分類は`oddsMin`の
+   * 異同のみを見る(`oddsMax`/`ninki`だけが相違するケースも現状"numeric"に含まれるが、
+   * 地方3連複〈本フィールドの唯一の発生源〉は`oddsMax`/`ninki`が常に`null`固定のため
+   * 現時点では到達不能)。
+   */
   readonly numericConflictCount: number;
-  /** 軸間のnull採用衝突件数(片方がnullだった件数)。 */
+  /** 軸間のnull採用衝突件数(片方がnullだった件数)。分類の限定は上記`numericConflictCount`と同じ。 */
   readonly nullWinConflictCount: number;
   /** 衝突サンプル(上限{@link MAX_CONFLICT_SAMPLES}件で打ち切り。正確な件数は上記2フィールド)。 */
   readonly conflictSamples: readonly ComboOddsCellConflict[];

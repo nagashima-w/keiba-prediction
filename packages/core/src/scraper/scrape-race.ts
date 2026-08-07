@@ -135,8 +135,9 @@ export interface ScrapeRaceOptions {
    * **未指定(既定)時は本関数が発行するURL列・リクエスト数を一切変えない**
    * (`scrape-race.test.ts`の既存describeブロックが無改変で全緑であること自体がこの証拠)。
    * true指定時は追加で最大2リクエスト(中央ワイド1件+中央3連複1件、または地方ワイド1件)、
-   * 地方3連複はさらに最大16リクエスト(軸走査。`fetch-combo-odds.ts`参照。「約21秒/レース」は
-   * 14×1.5秒の**導出値**であり測定値ではない)が発行されうる。
+   * 地方3連複はさらに最大16リクエスト(軸走査。`fetch-combo-odds.ts`参照。所要は最大約24秒
+   * 〈16軸×1.5秒の**導出値**であり測定値ではない。16頭なら14軸≒21秒だが、それは上限ではなく
+   * 一例〉が発行されうる。
    */
   readonly includeComboOdds?: boolean;
 }
@@ -195,8 +196,17 @@ export interface RaceDataMeta {
    */
   readonly fetchedAt: string;
   /**
-   * オッズ取得直後の時刻(ISO8601)。オッズは発走直前まで変動するため、
+   * **単勝・複勝**オッズ取得直後の時刻(ISO8601)。オッズは発走直前まで変動するため、
    * EV計算では「いつのオッズか」を fetchedAt ではなくこの値で判断する。
+   *
+   * **この値は `odds.wideCombo`/`odds.trioCombo`(組合せオッズ)の鮮度を表さない**
+   * (機能D-2b-B・Issue #33第4段。boss メタレビュー指摘)。単勝・複勝は1リクエストで
+   * 確定するため単一時刻で鮮度を表せるが、組合せオッズ(特に地方3連複の軸走査)は
+   * `oddsFetchedAt` 確定より**後**に複数リクエストへ分散して取得される(地方3連複は
+   * 最大16リクエスト・所要は最大約24秒〈16軸×1.5秒の**導出値**〉)。単一の
+   * `oddsFetchedAt` では表しきれないため、組合せオッズ専用の取得時刻フィールドは
+   * 意図的に設けていない(#33 Issue本文に判断理由を記録)。組合せオッズの新鮮さは
+   * `meta.comboOdds`(診断値。`requestCount`等)から間接的に読み取ること。
    */
   readonly oddsFetchedAt: string;
   /** 非致命的な警告の一覧。 */
@@ -259,16 +269,36 @@ function comboOddsNeedsWarning(result: ComboOddsFetchResult): boolean {
   return false;
 }
 
-/** 組合せオッズの警告メッセージを組み立てる(診断値の要約を含める)。 */
+/**
+ * 組合せオッズの警告メッセージを組み立てる(診断値の要約を含める)。
+ *
+ * **人間が読む唯一のチャネルであることへの対応(boss メタレビュー指摘・要修正3)**:
+ * `packages/app/src/main/analysis-pipeline.ts:707` は `race.meta.warnings.map((w) =>
+ * w.message)` で `message` 文字列のみを取り出しており、`kind` も `meta.comboOdds` の
+ * 診断値(`attempts` の内訳)もユーザーには届かない。診断値では状態④(取得失敗)と
+ * 構造異常(`parseError`)を別枠に分類しているが(Q2裁定)、この文言が丸められると
+ * 運用者は「取得に失敗しました」しか読めず、netkeibaのHTML/JSON構造が変わった可能性
+ * (AC7bの「静かな劣化」)を疑う機会を失う。そのため常に軸/試行の内訳
+ * (未発売/発売なし・取得失敗・構造異常の件数)を文言に含め、構造異常が1件でもあれば
+ * 明示的に強調する。
+ */
 function comboOddsWarningMessage(betType: ComboBetType, result: ComboOddsFetchResult): string {
   const label = comboBetTypeLabel(betType);
-  const { requestCount, expectedComboCount, obtainedComboCount, missingComboCount } =
+  const { requestCount, expectedComboCount, obtainedComboCount, missingComboCount, attempts } =
     result.diagnostics;
+  const unavailableCount = attempts.filter((a) => a.state === "unavailable").length;
+  const fetchFailedCount = attempts.filter((a) => a.state === "fetchFailed").length;
+  const parseErrorCount = attempts.filter((a) => a.state === "parseError").length;
+  const breakdown = `未発売/発売なし=${unavailableCount} / 取得失敗=${fetchFailedCount} / 構造異常=${parseErrorCount}`;
+  const structureWarning =
+    parseErrorCount > 0
+      ? `構造異常${parseErrorCount}件(netkeibaのHTML/JSON構造が変わった可能性)。`
+      : "";
   if (result.state === "failed") {
     // 状態④(取得失敗)であることを明記し、②③(発売なし/未発売)との混同を防ぐ(AC7bの趣旨)。
-    return `${label}オッズの取得に失敗しました(全${requestCount}リクエストが失敗。発売なし/未発売〈状態②③〉とは異なる)`;
+    return `${label}オッズの取得に失敗しました(全${requestCount}リクエストが失敗。発売なし/未発売〈状態②③〉とは異なる。${structureWarning}内訳: ${breakdown})`;
   }
-  return `${label}オッズが部分的にしか取得できませんでした(期待${expectedComboCount}件中${obtainedComboCount}件取得、${missingComboCount}件欠落。requestCount=${requestCount})`;
+  return `${label}オッズが部分的にしか取得できませんでした(期待${expectedComboCount}件中${obtainedComboCount}件取得、${missingComboCount}件欠落。${structureWarning}内訳: ${breakdown}。requestCount=${requestCount})`;
 }
 
 /**
