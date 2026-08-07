@@ -295,31 +295,41 @@ POSTボディに識別子が入る設計ではない(`race_api/`のような事�
 #13時点では②③④の実例を持てなかった(§6)。本Issueで③(未発売)を実測し、`parse-combo-odds.ts`
 (中央)・`parse-nar-combo-odds.ts`(地方)の `unavailable` 分岐を実物で固定した。
 
-### 11.1 実リクエスト一覧(合計10件。当初の上限9件を1件超過。理由は末尾参照)
+### 11.1 実リクエスト一覧(合計11件。当初の上限9件を2件超過。理由は末尾参照)
 
-すべて `HttpClient`(既定: 最低1.5秒間隔・UA明示)経由、実行日時 2026-08-06T18:27〜2026-08-07T02:04 UTC
-(JST 8/7 3:27〜11:04頃)。翌々日(8/8開催)のレースを選定し、#13の教訓
+すべて `HttpClient`(既定: 最低1.5秒間隔・UA明示)経由、実行日時 2026-08-06T18:27〜2026-08-07T02:28 UTC
+(JST 8/7 3:27〜11:28頃)。翌々日(8/8開催)のレースを選定し、#13の教訓
 (「presaleという名前は取得**時点**の状態であり、同じrace_idを再取得しても再現しない」)を
 踏まえフィクスチャ名に取得日(20260806)を含めている。
 
 | # | 目的 | URL | 結果 |
 |---|---|---|---|
-| 1 | 地方race_list_sub(8/8開催の一覧) | `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(10件のレースを取得) |
+| 1 | 地方race_list_sub(8/8開催の一覧、探索用) | `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(10件のレースを取得) |
 | 2 | 地方ワイド(佐賀・202655080803・12頭、探索用) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202655080803` | 200(unavailable) |
 | 3 | 地方3連複(同上、探索用) | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202655080803` | 200(unavailable) |
-| 4 | 中央race_list_sub(8/8開催の一覧) | `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(36件のレースを取得) |
+| 4 | 中央race_list_sub(8/8開催の一覧、探索用) | `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(36件のレースを取得) |
 | 5 | 中央ワイド(18頭最大・202604020511、探索用) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=5&action=init` | 200(unavailable) |
 | 6 | 中央3連複(同上、探索用) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=7&action=init` | 200(unavailable) |
 | 7 | 地方ワイド再取得(フィクスチャ本文保存用) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202655080803` | 200 → `fixtures/nar_odds_b5_presale_202655080803_20260806.html` |
 | 8 | 地方3連複再取得(フィクスチャ本文保存用) | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202655080803` | 200 → `fixtures/nar_odds_b7_presale_202655080803_20260806.html` |
 | 9 | 中央ワイド再取得(正確なバイト列でフィクスチャ保存) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=5&action=init` | 200 → `fixtures/odds_wide_presale_202604020511_20260806.json` |
-| 10\* | 【code-reviewer要修正3対応・追加】中央race_list_subの再取得(発走予定時刻の記録漏れの補完) | `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(#4と同一URL。11R「17:50 」を確認) |
+| 10\* | 【code-reviewer要修正3対応・追加】中央race_list_subの再取得(発走予定時刻の記録漏れの補完) | `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(#4と同一URL。11R「17:50」を確認。**当初はscratchpadに残っていたのみでフィクスチャ未保存だったため、後日#11として改めて保存した(下記参照)**) |
+| 11\*\* | 【code-reviewer再指摘・全数走査で発見した欠落の補完】地方race_list_subの再取得(#1が repo にもscratchpadにも残っていなかったため) | `https://nar.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(#1と同一URL) → `fixtures/nar_race_list_sub_20260808.html` |
 
 \*#10は当初の予算9件とは別枠。code-reviewer要修正3(AC10「発走予定時刻」の記録漏れ)への
 対応として、CLAUDE.mdのnetkeiba一般承認(継続適用)の範囲内で1件のみ追加実施した
 (1.5秒間隔厳守)。#4の時点で `parseRaceList` が抽出しない発走時刻(`span.RaceList_Itemtime`。
 `RaceListEntry`型に無いフィールド)を見落としており、0追加コストで取得できたはずの証拠を
-取りこぼしていた(#13で boss が指摘したのと同型の失敗)。
+取りこぼしていた(#13で boss が指摘したのと同型の失敗)。**#10自体もこの時点ではフィクスチャに
+保存せず、コンソール出力とscratchpad(`central_race_list_20260808.html`)に残しただけだった
+(同型の欠陥の再発。§11.1末尾「再発防止」参照)。** code-reviewer再指摘を受け、scratchpadに
+残っていたその生バイト列をそのまま `fixtures/race_list_sub_20260808.html` として保存した
+(**追加の実リクエストなし**。同一内容であることは、保存したファイルに`race_id=202604020511`の
+`<span class="RaceList_Itemtime">17:50 </span>`が含まれることで裏付けられる)。
+
+\*\*#11は全数走査(下記)で新たに発見した欠落(#1も同様にフィクスチャ未保存かつscratchpadにも
+残っていなかった)を埋めるための追加実施(**この1件のみ実リクエストが必要だった**。1.5秒間隔は
+単発のため実質無関係)。
 
 #5・#6は探索段階で状態(`unavailable`)を確認済みだったため、#9では#5と同一URLを再取得して
 正確なバイト列(トリミングなし)をフィクスチャとして保存した。3連複(#6)は探索段階の応答が
@@ -327,6 +337,41 @@ POSTボディに識別子が入る設計ではない(`race_api/`のような事�
 内容であることを示す。既存 `odds_yoso_*.json` と同様、中央APIはtype横断で共通の封筒仕様)、
 再取得はせず同一バイト列を `fixtures/odds_trio_presale_202604020511_20260806.json` として
 コミットしている(内容が完全一致することは#5・#6両方の探索リクエストで独立に確認済み)。
+
+#### 全数走査: 11件それぞれが repo のどのファイルから再計算できるか(code-reviewer再指摘対応)
+
+| # | 再計算可能か | 根拠ファイル |
+|---|---|---|
+| 1 | **可**(#11で事後的に保存) | `fixtures/nar_race_list_sub_20260808.html`(`race_id=202655080803`・`3R`・`17:10`・`12頭`を含む) |
+| 2 | 可(#7と同一URL。#7で上書き取得・保存済み) | `fixtures/nar_odds_b5_presale_202655080803_20260806.html` |
+| 3 | 可(#8と同一URL) | `fixtures/nar_odds_b7_presale_202655080803_20260806.html` |
+| 4 | **可**(#10と同一URL。#10のバイト列を#11発覚時に事後保存) | `fixtures/race_list_sub_20260808.html` |
+| 5 | 可(#9と同一URL。#9で正確なバイト列を保存済み) | `fixtures/odds_wide_presale_202604020511_20260806.json` |
+| 6 | 部分的(独立採取のバイト列そのものはrepoに無い。#5とバイト単位で同一であることを探索段階の2回の観測で確認済みという**記録**〈本ドキュメント〉と、#5のバイト列を複製したファイルはrepoにある) | `fixtures/odds_trio_presale_202604020511_20260806.json`(#5と同一内容を意図的に複製したもの。#6自体の独立キャプチャではない点に注意) |
+| 7 | 可(直接保存) | `fixtures/nar_odds_b5_presale_202655080803_20260806.html` |
+| 8 | 可(直接保存) | `fixtures/nar_odds_b7_presale_202655080803_20260806.html` |
+| 9 | 可(直接保存) | `fixtures/odds_wide_presale_202604020511_20260806.json` |
+| 10 | 可(直接保存) | `fixtures/race_list_sub_20260808.html` |
+| 11 | 可(直接保存) | `fixtures/nar_race_list_sub_20260808.html` |
+
+**#6のみ「部分的」**: 独立に採取したバイト列そのものは保存されていない(2回の探索リクエストで
+コンソール上バイト単位で同一と確認したが、その時点でファイル保存していなかった)。ただし
+実害は小さいと判断する: (a) 同じ封筒フォーマットを使う中央APIの他の応答(`odds_yoso_*.json`)が
+type非依存の封筒仕様であることを裏付けており、(b) 3連複固有の内容(type別に異なる可能性のある
+情報)がそもそも存在しない応答("empty free odds schedule"という定型文言のみ)なので、
+仮に#6を独立再取得しても#5と異なる内容になる可能性は構造的に低い。とはいえ「探索段階の
+コンソール出力を根拠にする」こと自体が#13・今回の#10と同じ弱いパターンであるため、
+**次回この結論を利用する際は#6を独立再取得してバイト単位で確認することを推奨する**
+(本タスクでは追加の実リクエストは行わない。#33着手前ゲートで判断材料として提示する)。
+
+### 再発防止(code-reviewer再指摘への対応として明記)
+
+今回、#10(要修正3対応)を取得した際に**フィクスチャとして保存せず、ドキュメント本文に転記した
+数値だけを残す**という、まさに是正しようとしていた欠陥(#4の保存漏れ)と同型の失敗を繰り返した。
+さらに全数走査で#1にも同じ欠落が見つかった。原因は「実リクエストを発行した直後にその場で
+ファイル保存する」ことを手順化しておらず、コンソール出力を見て満足してしまったこと。
+今後この種の探索を行う際は、**`HttpClient.fetchText`の戻り値を得た直後に`writeFileSync`で
+保存してから解析する**(解析が先、保存が後、という順序を取らない)ことを徹底する。
 
 候補レース選定は既存の `parseRaceList`(本番パーサ)の `entryCount` で頭数最大のレースを機械的に
 選び(組合せ市場が観測しやすいため)、`venueKindOfRaceId` で中央/地方を判定した。**この選定
