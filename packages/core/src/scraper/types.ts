@@ -361,6 +361,29 @@ export interface OddsSnapshot {
   readonly win: Record<number, WinOdds>;
   /** 馬番 → 複勝オッズ。予想(yoso)では複勝未発売のため空オブジェクトになる。 */
   readonly place: Record<number, PlaceOdds>;
+  /**
+   * ワイドオッズ(馬番の組の正規化キー〈`buildComboOddsKey`形式。例"0102"〉→オッズ)。
+   * `scraper/combo-odds-key.ts`の`toComboOddsScalarMap`(下限採用ルールを1箇所に閉じた
+   * 変換関数)を経由した後の値であり、本フィールド自体は既に下限が確定したスカラー値を持つ
+   * (機能D-2b-B・Issue #33第4段)。
+   *
+   * **optionalである理由**: `OddsSnapshot`リテラルは`expected-value.test.ts`(7箇所)・
+   * `analysis-pipeline.test.ts`・`parse-odds.test.ts`等に散在しており、必須化は既存テストの
+   * 一括改変を強制する(「既存テストの非弱体化」原則に反する改変圧力を生む。#33本文で確定)。
+   * `scrapeRace`の`options.includeComboOdds`がtrueのときのみ設定される。
+   *
+   * **`Record`である理由(`ReadonlyMap`を載せない)**: `RaceData`は`buildRaceSnapshot`
+   * (`packages/app/src/main/analysis-export.ts:89`)がホワイトリストで詰め替えるため
+   * 現状は直列化事故が起きていないが、`Map`をドメイン型に載せると将来`JSON.stringify`/IPC
+   * 経由で静かに`{}`になる種を植える。`win`/`place`が`Record`である既存流儀に揃える。
+   */
+  readonly wideCombo?: Record<string, number | null>;
+  /**
+   * 3連複オッズ(馬番の組の正規化キー〈例"010203"〉→オッズ。単一値。`oddsMax`という
+   * 概念を持たない券種のため、`wideCombo`と同じ`toComboOddsScalarMap`変換後は`oddsMin`
+   * ではなく単一値そのものが入る)。optional・`Record`である理由は`wideCombo`と同じ。
+   */
+  readonly trioCombo?: Record<string, number | null>;
 }
 
 /**

@@ -106,6 +106,8 @@ export {
   listNarRaces,
   listRaces,
   scrapeRace,
+  type ComboOddsFetchOutcome,
+  type ComboOddsScrapeOutcome,
   type RaceData,
   type RaceDataMeta,
   type RaceFetcher,
