@@ -577,5 +577,37 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       // "unavailable"ケース(前テスト)とは異なり、"failed"を示す文言を含むこと。
       expect(comboWarnings.some((w) => w.message.includes("失敗"))).toBe(true);
     });
+
+    it('一部の軸がunavailable・一部がHTTP失敗の混在(取得0件)→ 警告あり、state="failed"であること(code-reviewer指摘2)', async () => {
+      // 出走12頭→軸は[1..10]。軸1〜5はunavailable(市場が首尾一貫して未発売/発売なしに
+      // 見える)、軸6〜10はHTTP失敗とする。取得できた組合せは0件だが、②③(市場が無い)と
+      // ④(取得できず分からない)の混同を防ぐのが本関数の核心(AC7b)であり、この混在は
+      // "unavailable"に丸めてはならず"failed"になる必要がある。
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        const jikuMatch = /[?&]jiku=(\d+)/.exec(url);
+        if (jikuMatch) {
+          const axis = Number(jikuMatch[1]);
+          if (axis <= 5) return NAR_UNAVAILABLE_HTML;
+          throw new Error(`軸${axis}のHTTP取得に失敗した(模擬)`);
+        }
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 混在の内訳そのものを先に固定する。
+      const trioAttempts = data.meta.comboOdds?.trio?.diagnostics.attempts ?? [];
+      expect(trioAttempts.filter((a) => a.state === "unavailable").length).toBe(5);
+      expect(trioAttempts.filter((a) => a.state === "fetchFailed").length).toBe(5);
+      expect(data.odds.trioCombo).toEqual({});
+
+      expect(data.meta.comboOdds?.trio?.state).toBe("failed"); // "unavailable"に丸めない
+      const comboWarnings = data.meta.warnings.filter((w) => w.kind === "組合せオッズ");
+      expect(comboWarnings.length).toBeGreaterThan(0);
+    });
   });
 });

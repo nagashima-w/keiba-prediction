@@ -199,6 +199,119 @@ describe("fetchComboOdds(地方3連複: 券種の結末3値。boss裁定Q2・AC-
       result.diagnostics.attempts.some((a) => a.axis === 3 && a.state === "fetchFailed"),
     ).toBe(true);
   });
+
+  it('一部unavailable・一部fetchFailed(取得0件)の混在→state="failed"であること("unavailable"に丸めない。code-reviewer指摘2)', async () => {
+    // n=5、軸=[1,2,3]。軸1・軸3はunavailable(市場が首尾一貫して未発売/発売なしに見える)、
+    // 軸2だけHTTP失敗。取得できた組合せは0件だが、②③(市場が無い)と④(取得できず分からない)を
+    // 混同してはならない核心の境界(AC7b)。attempts.every(...)をsome(...)に壊すと
+    // 「1件でもunavailableがあれば即unavailableと誤判定」してしまい、この境界を検知できない。
+    const { fetcher } = createFakeFetcher((url) => {
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 2)) return new Error("軸2はHTTP失敗する");
+      return NAR_UNAVAILABLE_HTML;
+    });
+    const result = await fetchComboOdds(NAR_RACE_ID, "trio", [1, 2, 3, 4, 5], fetcher);
+
+    expect(result.diagnostics.attempts.length).toBe(3); // 前提固定(n=5→軸3件)
+    // 前提固定(空振り防止): 混在の内訳そのものを先に固定する。
+    expect(
+      result.diagnostics.attempts.filter((a) => a.state === "unavailable").length,
+    ).toBe(2);
+    expect(
+      result.diagnostics.attempts.filter((a) => a.state === "fetchFailed").length,
+    ).toBe(1);
+    expect(result.odds.size).toBe(0);
+    expect(result.state).toBe("failed");
+  });
+
+  it('一部unavailable・一部parseError(取得0件)の混在→state="failed"であること("unavailable"に丸めない)', async () => {
+    // 軸2は構造異常(#odds_select・#odds_view_formのいずれも持たない)でparseErrorになる。
+    const malformedHtml = `<html><body>no markers here</body></html>`;
+    const { fetcher } = createFakeFetcher((url) => {
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 2)) return malformedHtml;
+      return NAR_UNAVAILABLE_HTML;
+    });
+    const result = await fetchComboOdds(NAR_RACE_ID, "trio", [1, 2, 3, 4, 5], fetcher);
+
+    expect(result.diagnostics.attempts.length).toBe(3); // 前提固定
+    expect(
+      result.diagnostics.attempts.filter((a) => a.state === "unavailable").length,
+    ).toBe(2);
+    expect(
+      result.diagnostics.attempts.filter((a) => a.state === "parseError").length,
+    ).toBe(1);
+    expect(result.odds.size).toBe(0);
+    expect(result.state).toBe("failed");
+  });
+});
+
+describe("fetchComboOdds(地方3連複: 軸間衝突の診断値配線。code-reviewer指摘1)", () => {
+  it("数値衝突1件のみ→numericConflictCount=1・nullWinConflictCount=0(両方を無条件に固定。入れ替えミューテーションの検知)", async () => {
+    // n=5、軸=[1,2,3]。軸1・軸2が同じ組{1,2,3}に異なる数値を返す(数値衝突)。
+    // 軸3は無関係な組を1件返す(衝突には関与しない)。
+    const axis1Html = narTrioHtml([[1, 2, 3, "5.0"]]);
+    const axis2Html = narTrioHtml([[1, 2, 3, "3.0"]]);
+    const axis3Html = narTrioHtml([[3, 4, 5, "8.0"]]);
+    const { fetcher } = createFakeFetcher((url) => {
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 1)) return axis1Html;
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 2)) return axis2Html;
+      return axis3Html;
+    });
+    const result = await fetchComboOdds(NAR_RACE_ID, "trio", [1, 2, 3, 4, 5], fetcher);
+
+    expect(result.diagnostics.numericConflictCount).toBe(1);
+    expect(result.diagnostics.nullWinConflictCount).toBe(0);
+    expect(result.diagnostics.conflictSamples.length).toBe(1);
+    expect(result.diagnostics.conflictSamples[0]!.kind).toBe("numeric");
+    // 保守側(小さい方)が採られていること(Q1裁定の一貫性確認)。
+    expect(result.odds.get(buildComboOddsKey([1, 2, 3]))).toEqual({
+      oddsMin: 3.0,
+      oddsMax: null,
+      ninki: null,
+    });
+  });
+
+  it("null採用衝突1件のみ→nullWinConflictCount=1・numericConflictCount=0(両方を無条件に固定。入れ替えミューテーションの検知)", async () => {
+    // 軸1が非数値("---.-"→oddsMin=null)、軸2が数値を返す組{1,2,3}(null採用衝突)。
+    const axis1Html = narTrioHtml([[1, 2, 3, "---.-"]]);
+    const axis2Html = narTrioHtml([[1, 2, 3, "3.0"]]);
+    const axis3Html = narTrioHtml([[3, 4, 5, "8.0"]]);
+    const { fetcher } = createFakeFetcher((url) => {
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 1)) return axis1Html;
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 2)) return axis2Html;
+      return axis3Html;
+    });
+    const result = await fetchComboOdds(NAR_RACE_ID, "trio", [1, 2, 3, 4, 5], fetcher);
+
+    expect(result.diagnostics.numericConflictCount).toBe(0);
+    expect(result.diagnostics.nullWinConflictCount).toBe(1);
+    expect(result.diagnostics.conflictSamples.length).toBe(1);
+    expect(result.diagnostics.conflictSamples[0]!.kind).toBe("nullWin");
+    expect(result.odds.get(buildComboOddsKey([1, 2, 3]))).toEqual({
+      oddsMin: null,
+      oddsMax: null,
+      ninki: null,
+    });
+  });
+
+  it("衝突11件→conflictSamples.length=10(打ち切り)だが、numericConflictCountは11のまま(打ち切りが件数に波及しないこと)", async () => {
+    // n=13、軸=[1..11]。軸1・軸2が{1,2,c}(c=3..13の11通り)に異なる数値を返し、
+    // 11件の数値衝突を作る。軸3..11はunavailable(衝突に無関係)。
+    const conflictAnchors = Array.from({ length: 11 }, (_, i) => i + 3); // 3..13
+    const axis1Html = narTrioHtml(conflictAnchors.map((c) => [1, 2, c, "5.0"] as const));
+    const axis2Html = narTrioHtml(conflictAnchors.map((c) => [1, 2, c, "3.0"] as const));
+    const { fetcher } = createFakeFetcher((url) => {
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 1)) return axis1Html;
+      if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 2)) return axis2Html;
+      return NAR_UNAVAILABLE_HTML;
+    });
+    const startingUmabans = Array.from({ length: 13 }, (_, i) => i + 1);
+    const result = await fetchComboOdds(NAR_RACE_ID, "trio", startingUmabans, fetcher);
+
+    expect(result.diagnostics.axisUmabans.length).toBe(11); // 前提固定(n=13→軸11件)
+    expect(result.diagnostics.numericConflictCount).toBe(11); // 打ち切りに関わらず正確な件数
+    expect(result.diagnostics.nullWinConflictCount).toBe(0);
+    expect(result.diagnostics.conflictSamples.length).toBe(10); // 表示用サンプルは上限で打ち切り
+  });
 });
 
 describe("fetchComboOdds(軸馬番の契約違反はfail fast。boss裁定Q3・AC-6。テスト観点14)", () => {
