@@ -205,7 +205,8 @@ export interface RaceDataMeta {
    * `oddsFetchedAt` 確定より**後**に複数リクエストへ分散して取得される(地方3連複は
    * 最大16リクエスト・所要は最大約24秒〈16軸×1.5秒の**導出値**〉)。単一の
    * `oddsFetchedAt` では表しきれないため、組合せオッズ専用の取得時刻フィールドは
-   * 意図的に設けていない(#33 Issue本文に判断理由を記録)。組合せオッズの新鮮さは
+   * 意図的に設けていない(#33のコメント「実装中に確定した判断の記録(クローズ前の申し送り)」
+   * に判断理由を記録)。組合せオッズの新鮮さは
    * `meta.comboOdds`(診断値。`requestCount`等)から間接的に読み取ること。
    */
   readonly oddsFetchedAt: string;
@@ -296,7 +297,12 @@ function comboOddsWarningMessage(betType: ComboBetType, result: ComboOddsFetchRe
       : "";
   if (result.state === "failed") {
     // 状態④(取得失敗)であることを明記し、②③(発売なし/未発売)との混同を防ぐ(AC7bの趣旨)。
-    return `${label}オッズの取得に失敗しました(全${requestCount}リクエストが失敗。発売なし/未発売〈状態②③〉とは異なる。${structureWarning}内訳: ${breakdown})`;
+    // 「全requestCount件が失敗」とは書かない: state==="failed"はobtainedComboCount===0かつ
+    // 全試行がunavailableではない、という条件でしかなく、HTTP自体は成功して構造的に正当な
+    // 「未発売」文書が返っている試行が大半を占めるケースが普通にある(例: 9軸unavailable+
+    // 1軸fetchFailedの混在)。この場合「全requestCount件が失敗」は事実に反する
+    // (boss メタレビュー・提案採用)。実際の内訳はbreakdownが正確に示す。
+    return `${label}オッズを1件も取得できませんでした(発売なし/未発売〈状態②③〉とは異なる。${structureWarning}内訳: ${breakdown}。requestCount=${requestCount})`;
   }
   return `${label}オッズが部分的にしか取得できませんでした(期待${expectedComboCount}件中${obtainedComboCount}件取得、${missingComboCount}件欠落。${structureWarning}内訳: ${breakdown}。requestCount=${requestCount})`;
 }
