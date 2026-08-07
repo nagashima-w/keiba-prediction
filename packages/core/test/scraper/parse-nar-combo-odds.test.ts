@@ -372,6 +372,48 @@ describe("parseNarComboOdds(状態③=未発売の実測。受け入れ条件9�
   });
 });
 
+describe("parseNarComboOdds(jiku=1フラグメント不変条件。実フィクスチャ。機能D-2b-B・Issue #33 第1段・AC6)", () => {
+  /**
+   * 実測記録: 2026-08-07T09:47 UTC、`scripts/fetch-nar-trio-axis-fixture.ts`経由で
+   * `https://nar.netkeiba.com/odds/odds_get_form.html?type=b7&race_id=202654071210&jiku=1`
+   * を取得(`fixtures/nar_odds_b7_jiku1_202654071210.html`)。
+   *
+   * 検証したい前提(#33の設計の唯一の未検証前提。鉄則6「安い反証を先に引く」): `jiku=1`の
+   * AJAXフラグメントが、通常ページ(`nar_odds_b7_202654071210.html`、軸1固定で表示される)と
+   * 同じ組合せ集合・同じ値を返すか。#32・#13で確認済みなのは`jiku=2`のみで、`jiku=1`
+   * (軸集合走査の起点)は本テストが初めての確認になる。
+   *
+   * 結果: キー集合55件が完全一致し、値の不一致も0件だった(独立検証: Pythonで正規表現抽出し
+   * 突合、本テストと同じ結論)。この前提が崩れていた場合はAC6の指示どおり着手を止めboss に
+   * 諮る想定だったが、今回は崩れなかったため第2段(URLビルダ+軸集合導出)に進める。
+   */
+  it("jiku=1フラグメントの組合せキー集合が通常ページ(軸1固定表示)と完全一致すること(55件)", () => {
+    const fragmentOdds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b7_jiku1_202654071210.html"), "trio"),
+    );
+    const indexPageOdds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b7_202654071210.html"), "trio"),
+    );
+    // 前提固定(空振り防止): 両方とも55件であること(片方が0件では集合比較が自明に成立してしまう)。
+    expect(fragmentOdds.size).toBe(55);
+    expect(indexPageOdds.size).toBe(55);
+    expect(new Set(fragmentOdds.keys())).toEqual(new Set(indexPageOdds.keys()));
+  });
+
+  it("jiku=1フラグメントと通常ページで、キーごとの値(oddsMin/oddsMax/ninki)も完全一致すること", () => {
+    const fragmentOdds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b7_jiku1_202654071210.html"), "trio"),
+    );
+    const indexPageOdds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b7_202654071210.html"), "trio"),
+    );
+    expect(fragmentOdds.size).toBeGreaterThan(0);
+    for (const [key, cell] of fragmentOdds) {
+      expect(indexPageOdds.get(key)).toEqual(cell);
+    }
+  });
+});
+
 describe("parseNarComboOdds(キー正規化の一致。受け入れ条件5)", () => {
   it("パーサ由来のキー全件がbuildComboOddsKey(umabans)の再計算結果と一致すること", () => {
     const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b5_202654071210.html"), "wide"));
