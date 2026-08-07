@@ -1,20 +1,34 @@
 /**
- * combo-odds-key(組合せオッズキー生成・Map化の葉モジュール)のテスト(機能D-2b-A・Issue #32)。
+ * combo-odds-key(組合せオッズキー生成・Map化の葉モジュール)のテスト(機能D-2b-A・Issue #32、
+ * 軸間マージは機能D-2b-B・Issue #33第3段AC-1)。
  *
  * 対象: `buildComboOddsKey`(#14からの移設。仕様は不変)・`validateComboUmabans`・
  * `buildComboOddsCellMap`(受け入れ条件18: 重複組の値一致/不一致)・
- * `toComboOddsScalarMap`(受け入れ条件19: ワイド下限採用ルールの一箇所集約)。
+ * `toComboOddsScalarMap`(受け入れ条件19: ワイド下限採用ルールの一箇所集約)・
+ * `mergeAxisComboOddsMaps`(#33 Q1裁定: 軸間の同一キー衝突は保守側〈oddsMin最小・nullは任意の数値より
+ * 保守的〉を採用してマージする。throwしない)。
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildComboOddsCellMap,
   buildComboOddsKey,
   ComboOddsKeyError,
+  mergeAxisComboOddsMaps,
   toComboOddsScalarMap,
   validateComboUmabans,
+  type AxisComboOddsMap,
   type ComboOddsCell,
   type ComboOddsEntry,
 } from "../../src/scraper/combo-odds-key.js";
+import { parseNarComboOdds } from "../../src/scraper/parse-nar-combo-odds.js";
+
+/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
+function loadFixture(name: string): string {
+  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
+  return readFileSync(fileURLToPath(url), "utf-8");
+}
 
 describe("buildComboOddsKey(#14からの移設。既存の挙動を変えない)", () => {
   it("馬番を昇順ソートしてゼロ埋め連結すること", () => {
@@ -143,5 +157,156 @@ describe("toComboOddsScalarMap(ワイド下限採用ルールの一箇所集約�
     ]);
     const scalarMap = toComboOddsScalarMap(cells);
     expect(scalarMap.get("0102")).toBeNull();
+  });
+});
+
+describe("mergeAxisComboOddsMaps(実フィクスチャ: jiku1/jiku2の重なりで衝突が0件であることの反証固定。#33第3段 boss裁定0)", () => {
+  /**
+   * boss が先に引いた反証(2026-08-07、追加リクエスト0): jiku1(cb881a8取得)とjiku2(57f6fcc取得、
+   * 約2.2日前)を突き合わせた結果、重なり(馬01・馬02をともに含むトリオ)10件のうち値が食い違った
+   * ものは0件だった。ただし対象レースは終了済みで確定オッズが凍結されているため、この一致は
+   * 「軸間で値は動かない」ことの証拠にはならない(衝突は合成データでしか再現できない。後続の
+   * describeで検証する)。本テストは「重なりが必ず存在し、マージ経路が実際に通ること」と
+   * 「その重なりで衝突0件」という観測事実を固定する。
+   */
+  it("jiku1・jiku2(いずれも12頭)をマージすると、55+55-10=100件になり、重なり10件が1件も落ちず、衝突が0件であること", () => {
+    const jiku1 = parseNarComboOdds(loadFixture("nar_odds_b7_jiku1_202654071210.html"), "trio");
+    const jiku2 = parseNarComboOdds(loadFixture("nar_odds_b7_jiku2_202654071210.html"), "trio");
+    expect(jiku1.state).toBe("available");
+    expect(jiku2.state).toBe("available");
+    if (jiku1.state !== "available" || jiku2.state !== "available") throw new Error("unreachable");
+    // 前提固定(空振り防止): 両軸とも55件、重なりは10件であること。
+    expect(jiku1.odds.size).toBe(55);
+    expect(jiku2.odds.size).toBe(55);
+    const overlapKeys = [...jiku1.odds.keys()].filter((k) => jiku2.odds.has(k));
+    expect(overlapKeys.length).toBe(10);
+
+    const maps: AxisComboOddsMap[] = [
+      { axis: 1, odds: jiku1.odds },
+      { axis: 2, odds: jiku2.odds },
+    ];
+    const { odds, conflicts } = mergeAxisComboOddsMaps(maps);
+
+    expect(odds.size).toBe(100);
+    expect(conflicts.length).toBe(0); // 反証: この実フィクスチャの重なりでは衝突が発生しない
+    for (const key of overlapKeys) {
+      expect(odds.has(key)).toBe(true); // 重なり10件が1件も落ちないこと
+    }
+  });
+});
+
+describe("mergeAxisComboOddsMaps(衝突の解決規則。合成データ。#33第3段 Q1裁定〈実フィクスチャでは衝突を再現できないため〉)", () => {
+  it("数値同士が食い違う場合は小さい方(保守側)のセルが丸ごと採られること", () => {
+    const key = buildComboOddsKey([1, 2, 3]);
+    const maps: AxisComboOddsMap[] = [
+      { axis: 1, odds: new Map([[key, { oddsMin: 5.0, oddsMax: null, ninki: null }]]) },
+      { axis: 2, odds: new Map([[key, { oddsMin: 3.0, oddsMax: null, ninki: null }]]) },
+    ];
+    const { odds, conflicts } = mergeAxisComboOddsMaps(maps);
+    expect(odds.get(key)).toEqual({ oddsMin: 3.0, oddsMax: null, ninki: null });
+    expect(conflicts.length).toBe(1);
+    expect(conflicts[0]!.kind).toBe("numeric");
+  });
+
+  it("片方がnull・片方が数値の場合はnull側のセルが採られること(nullは任意の数値より保守的)", () => {
+    const key = buildComboOddsKey([1, 2, 3]);
+    const maps: AxisComboOddsMap[] = [
+      { axis: 1, odds: new Map([[key, { oddsMin: null, oddsMax: null, ninki: null }]]) },
+      { axis: 2, odds: new Map([[key, { oddsMin: 3.0, oddsMax: null, ninki: null }]]) },
+    ];
+    const { odds, conflicts } = mergeAxisComboOddsMaps(maps);
+    expect(odds.get(key)).toEqual({ oddsMin: null, oddsMax: null, ninki: null });
+    expect(conflicts.length).toBe(1);
+    expect(conflicts[0]!.kind).toBe("nullWin");
+  });
+
+  it("軸の投入順序を入れ替えても結果が同一であること(順序非依存)", () => {
+    const key = buildComboOddsKey([1, 2, 3]);
+    const mapA: AxisComboOddsMap = {
+      axis: 1,
+      odds: new Map([[key, { oddsMin: 5.0, oddsMax: null, ninki: null }]]),
+    };
+    const mapB: AxisComboOddsMap = {
+      axis: 2,
+      odds: new Map([[key, { oddsMin: 3.0, oddsMax: null, ninki: null }]]),
+    };
+    const forward = mergeAxisComboOddsMaps([mapA, mapB]);
+    const backward = mergeAxisComboOddsMaps([mapB, mapA]);
+    expect(forward.odds).toEqual(backward.odds);
+    expect(forward.conflicts).toEqual(backward.conflicts);
+  });
+
+  it("勝った側のセルがoddsMax/ninkiを含めて丸ごと採られ、フィールドが混ざらないこと(どのスナップショットにも無かった合成セルを作らない)", () => {
+    const key = buildComboOddsKey([1, 2]); // ワイド想定(oddsMax/ninkiが意味を持つ形)
+    const maps: AxisComboOddsMap[] = [
+      { axis: 1, odds: new Map([[key, { oddsMin: 5.0, oddsMax: 8.0, ninki: 3 }]]) },
+      { axis: 2, odds: new Map([[key, { oddsMin: 3.0, oddsMax: 9.0, ninki: 1 }]]) },
+    ];
+    const { odds } = mergeAxisComboOddsMaps(maps);
+    // oddsMinが小さい軸2が勝つ。oddsMax/ninkiも軸2のものがそのまま採られる(軸1のoddsMax=8.0と
+    // 混ざって{oddsMin:3.0, oddsMax:8.0,...}のような合成セルにならないこと)。
+    expect(odds.get(key)).toEqual({ oddsMin: 3.0, oddsMax: 9.0, ninki: 1 });
+  });
+
+  it("完全同値(全フィールド一致)は衝突に計上しないこと(冪等)", () => {
+    const conflictKey = buildComboOddsKey([1, 2, 3]);
+    const equalKey = buildComboOddsKey([1, 2, 4]);
+    const maps: AxisComboOddsMap[] = [
+      {
+        axis: 1,
+        odds: new Map([
+          [conflictKey, { oddsMin: 5.0, oddsMax: null, ninki: null }],
+          [equalKey, { oddsMin: 7.0, oddsMax: null, ninki: null }],
+        ]),
+      },
+      {
+        axis: 2,
+        odds: new Map([
+          [conflictKey, { oddsMin: 3.0, oddsMax: null, ninki: null }],
+          [equalKey, { oddsMin: 7.0, oddsMax: null, ninki: null }], // conflictKeyとは異なりequalKeyは完全同値
+        ]),
+      },
+    ];
+    const { odds, conflicts } = mergeAxisComboOddsMaps(maps);
+    expect(odds.get(equalKey)).toEqual({ oddsMin: 7.0, oddsMax: null, ninki: null });
+    // 衝突として計上されるのはconflictKeyのみ(equalKeyは完全同値のため計上されない)。
+    expect(conflicts.length).toBe(1);
+    expect(conflicts[0]!.key).toBe(conflictKey);
+  });
+
+  it("衝突エントリは軸昇順で保持されること(入力順ではなく軸番号でソートされる)", () => {
+    const key = buildComboOddsKey([1, 2, 3]);
+    const maps: AxisComboOddsMap[] = [
+      { axis: 5, odds: new Map([[key, { oddsMin: 3.0, oddsMax: null, ninki: null }]]) },
+      { axis: 2, odds: new Map([[key, { oddsMin: 5.0, oddsMax: null, ninki: null }]]) },
+    ];
+    const { conflicts } = mergeAxisComboOddsMaps(maps);
+    expect(conflicts.length).toBe(1);
+    expect(conflicts[0]!.entries.map((e) => e.axis)).toEqual([2, 5]);
+  });
+
+  it("3軸以上にまたがる衝突でも保守側(最小値)が採られること", () => {
+    const key = buildComboOddsKey([1, 2, 3]);
+    const maps: AxisComboOddsMap[] = [
+      { axis: 1, odds: new Map([[key, { oddsMin: 5.0, oddsMax: null, ninki: null }]]) },
+      { axis: 2, odds: new Map([[key, { oddsMin: 3.0, oddsMax: null, ninki: null }]]) },
+      { axis: 3, odds: new Map([[key, { oddsMin: 4.0, oddsMax: null, ninki: null }]]) },
+    ];
+    const { odds, conflicts } = mergeAxisComboOddsMaps(maps);
+    expect(odds.get(key)).toEqual({ oddsMin: 3.0, oddsMax: null, ninki: null });
+    expect(conflicts.length).toBe(1);
+    expect(conflicts[0]!.entries.length).toBe(3);
+  });
+
+  it("軸をまたがない組(1つの軸にしか現れない組)は無条件にそのまま採用されること(衝突なし)", () => {
+    const keyOnlyAxis1 = buildComboOddsKey([1, 9, 10]);
+    const maps: AxisComboOddsMap[] = [
+      { axis: 1, odds: new Map([[keyOnlyAxis1, { oddsMin: 12.0, oddsMax: null, ninki: null }]]) },
+      { axis: 2, odds: new Map() },
+    ];
+    const { odds, conflicts } = mergeAxisComboOddsMaps(maps);
+    expect(odds.size).toBe(1);
+    expect(odds.get(keyOnlyAxis1)).toEqual({ oddsMin: 12.0, oddsMax: null, ninki: null });
+    expect(conflicts.length).toBe(0);
   });
 });

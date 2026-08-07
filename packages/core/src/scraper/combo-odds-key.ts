@@ -226,3 +226,146 @@ export function toComboOddsScalarMap(
   }
   return map;
 }
+
+/**
+ * 軸番号付きのオッズセルMap(地方3連複の軸馬別取得〈機能D-2b-B・Issue #33第3段〉が
+ * `narTrioOddsAxisUrl`ごとに得る1軸分の結果)。
+ */
+export interface AxisComboOddsMap {
+  /** 軸馬番(`narTrioOddsAxisUrl`のjikuに対応)。 */
+  readonly axis: number;
+  /** その軸から得たオッズセルMap(`parseNarComboOdds`の`available`結果)。 */
+  readonly odds: ReadonlyMap<string, ComboOddsCell>;
+}
+
+/** 軸間の同一キー衝突1件(衝突に関与した全軸のセルを軸昇順で保持する)。 */
+export interface ComboOddsCellConflictEntry {
+  readonly axis: number;
+  readonly cell: ComboOddsCell;
+}
+
+/**
+ * 軸間衝突の種別。
+ * - "numeric": 数値同士が食い違った(いずれの軸のoddsMinもnullではない)
+ * - "nullWin": 片方以上がnull(未確定/取消の可能性)で、null側が採用された
+ */
+export type ComboOddsCellConflictKind = "numeric" | "nullWin";
+
+/** 軸間の同一キー衝突。 */
+export interface ComboOddsCellConflict {
+  readonly key: string;
+  readonly kind: ComboOddsCellConflictKind;
+  /** 衝突に関与した全軸のセル(軸番号昇順)。 */
+  readonly entries: readonly ComboOddsCellConflictEntry[];
+}
+
+/** `mergeAxisComboOddsMaps` の戻り値。 */
+export interface MergeAxisComboOddsResult {
+  readonly odds: Map<string, ComboOddsCell>;
+  readonly conflicts: ComboOddsCellConflict[];
+}
+
+/**
+ * 保守側(oddsMinが小さい方。nullは任意の数値より保守的)のセルを丸ごと採用する2値比較。
+ * 同値(oddsMinが等しい)場合は`a`を返す(呼び出し元が軸番号昇順に整列した配列を畳み込むため、
+ * 結果は常に「軸番号が最も小さいエントリ」に決定的に収束する。入力`maps`配列自体の順序には
+ * 依存しない)。
+ */
+function pickConservativeEntry(
+  a: ComboOddsCellConflictEntry,
+  b: ComboOddsCellConflictEntry,
+): ComboOddsCellConflictEntry {
+  const am = a.cell.oddsMin;
+  const bm = b.cell.oddsMin;
+  if (am === bm) return a;
+  if (am === null) return a;
+  if (bm === null) return b;
+  return am <= bm ? a : b;
+}
+
+/**
+ * 複数の軸から得たオッズセルMapを、キー(組合せ)単位でマージする(機能D-2b-B・Issue #33
+ * 第3段・AC-1〜AC-3。boss裁定2026-08-07 Q1)。
+ *
+ * ## 衝突解決規則(Q1裁定。6項目)
+ *
+ * 1. 比較キーは `oddsMin`(`toComboOddsScalarMap` がEVに流す唯一の値)
+ * 2. `null` は任意の数値より保守的(`null` < 任意の数値)。片方が `null` ならnull側のセルを採る
+ * 3. 数値同士は**小さい方**のセルを採る
+ * 4. **フィールドを混ぜない**。勝った側のセルを `oddsMin`/`oddsMax`/`ninki` ごと丸ごと採用する
+ *    (どのスナップショットにも存在しなかった合成セルを作らない)
+ * 5. 完全同値(`cellsEqual`)は衝突として計上しない(冪等)
+ * 6. 衝突はthrowしない。呼び出し元(`fetch-combo-odds.ts`)が診断値に件数・サンプルを残す
+ *
+ * ## throwしない理由(#14 `resolveComboOdds` との対比)
+ *
+ * `buildComboOddsCellMap` の「同じ組に異なる値が複数回現れたらthrow」は**1つの文書は自己整合で
+ * あるべき**という不変条件であり、別々の時刻の別々のHTTP応答をまたぐ軸間マージはその不変条件の
+ * 外側にある。#14の`resolveComboOdds`が下した判断(「1組の異常値のために残りの健全な分類結果を
+ * 失うのは誤り」)と同型で、軸間衝突はさらに規模が悪い(1組の0.1の差でC(18,3)=816組すべてが
+ * 消える)。
+ *
+ * ## 「先勝ち/後勝ち」を採らない理由
+ *
+ * 呼び出し元の `RaceFetcher.fetchText` は `Promise<string>` しか返さず取得時刻もキャッシュ年齢も
+ * 返さない。加えてオッズのキャッシュTTL(既定60秒)の内側に軸走査全体(最大14軸×1.5秒≒21秒)が
+ * 収まるため、「ループ後半の軸の方が新しいスナップショットである」とは限らない。先勝ち/後勝ちは
+ * 走査順という実装詳細に結果を依存させてしまうため、順序非依存な最小値採用を選んだ。
+ *
+ * ## 軸間衝突は2026-08-07時点で実物では未観測(AC-9)
+ *
+ * `nar_odds_b7_jiku1_202654071210.html`(2026-08-07取得)と`nar_odds_b7_jiku2_202654071210.html`
+ * (2026-08-05取得、約2.2日前)を突き合わせたところ、重なり(軸1・軸2の両方に現れるトリオ)10件は
+ * 1件も値が食い違わなかった(`combo-odds-key.test.ts`「実フィクスチャ」describe参照)。**この
+ * 一致を「軸間で値は動かない」ことの証拠にしてはならない**: 対象レースは既に終了しており確定
+ * オッズが凍結されているため、そもそもこのフィクスチャでは衝突が原理的に再現できない(取得時刻が
+ * 2.2日離れているのに完全一致した理由そのものが「確定済みだから」)。したがって本関数の衝突解決
+ * ロジックのテストは合成データでのみ書ける(`combo-odds-key.test.ts`「衝突の解決規則」describe)。
+ * 観測していない現象(発売中レースでの軸間衝突の実例)を「観測した」と誤読しないこと。
+ *
+ * @param maps 軸ごとのオッズセルMap(`odds`は成功した軸のみを渡すこと。失敗軸は呼び出し元で除外する)
+ */
+export function mergeAxisComboOddsMaps(
+  maps: readonly AxisComboOddsMap[],
+): MergeAxisComboOddsResult {
+  const byKey = new Map<string, ComboOddsCellConflictEntry[]>();
+  for (const { axis, odds } of maps) {
+    for (const [key, cell] of odds) {
+      const list = byKey.get(key);
+      if (list) {
+        list.push({ axis, cell });
+      } else {
+        byKey.set(key, [{ axis, cell }]);
+      }
+    }
+  }
+
+  const merged = new Map<string, ComboOddsCell>();
+  const conflicts: ComboOddsCellConflict[] = [];
+
+  for (const [key, rawEntries] of byKey) {
+    // 軸番号昇順に整列してから畳み込む: 入力`maps`配列の並び順(呼び出し元がどの順でawaitしたか)
+    // に結果が依存しないようにするための正規化(順序非依存。#33第3段AC-3)。
+    const entries = [...rawEntries].sort((a, b) => a.axis - b.axis);
+    const first = entries[0]!;
+    const allEqual = entries.every((e) => cellsEqual(e.cell, first.cell));
+    if (allEqual) {
+      merged.set(key, first.cell);
+      continue;
+    }
+    let winner = first;
+    for (const entry of entries.slice(1)) {
+      winner = pickConservativeEntry(winner, entry);
+    }
+    merged.set(key, winner.cell);
+    const hasNull = entries.some((e) => e.cell.oddsMin === null);
+    const hasNumeric = entries.some((e) => e.cell.oddsMin !== null);
+    conflicts.push({
+      key,
+      kind: hasNull && hasNumeric ? "nullWin" : "numeric",
+      entries,
+    });
+  }
+
+  return { odds: merged, conflicts };
+}
