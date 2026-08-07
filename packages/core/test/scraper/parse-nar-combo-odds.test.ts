@@ -162,6 +162,25 @@ describe("parseNarComboOdds(構造の検証。throw側。合成データ。受�
     expect(() => parseNarComboOdds(synthHtmlWithId("2_2"), "wide")).toThrow(NarComboOddsParseError);
   });
 
+  it("セルidの数値グループ数が券種と不一致(3連複用の3グループidをワイドパーサに渡す)場合は投げること(カバレッジ表「組の要素数」の裏付け。code-reviewer指摘5)", () => {
+    // idの部分文字列"_b5_c0_"は含む(idSubstringフィルタは通過する)が、末尾が
+    // "1_2_3"の3グループになっており、ワイド(comboSize=2)の正規表現(2グループ固定)に
+    // 一致しない。前提固定(空振り防止): 実際にidSubstringを含んでいること。
+    const html = `<div id="odds_select"></div><table class="Odds_Table"><tr>
+      <td class="Odds" id="chk_a1_b5_c0_1_2_3">10.0 - 11.0</td>
+    </tr></table>`;
+    expect(html).toContain("_b5_c0_");
+    expect(() => parseNarComboOdds(html, "wide")).toThrow(NarComboOddsParseError);
+  });
+
+  it("逆方向: ワイド用の2グループidを3連複パーサに渡す場合も投げること(対称性の確認)", () => {
+    const html = `<div id="odds_select"></div><table class="Odds_Table"><tr>
+      <td class="Odds" id="chk_a1_b7_c0_1_2">10.0</td>
+    </tr></table>`;
+    expect(html).toContain("_b7_c0_");
+    expect(() => parseNarComboOdds(html, "trio")).toThrow(NarComboOddsParseError);
+  });
+
   it("同じ組が異なる値で複数回現れた場合(黙って後勝ちにしない)は投げること", () => {
     const html = `<div id="odds_select"></div>
       <table class="Odds_Table"><tr><td class="Odds" id="chk_a1_b5_c0_1_2">10.0 - 11.0</td></tr></table>
@@ -191,24 +210,68 @@ describe("parseNarComboOdds(オッズ文書として正当かの判定。受け�
 });
 
 describe("parseNarComboOdds(分類側。throwしない。受け入れ条件11・12)", () => {
-  it("組合せ0件(文書としては正当)の場合はunavailableになること", () => {
+  it("組合せ0件(文書としては正当)の場合はunavailableになり、reasonに生信号(コンテナ有無・セル総数)を持つこと", () => {
     const html = `<div id="odds_select"></div><div id="odds_view_form"><p>該当なし</p></div>`;
     const result = parseNarComboOdds(html, "wide");
     expect(result.state).toBe("unavailable");
+    if (result.state !== "unavailable") throw new Error("unreachable");
+    expect(result.reason).toEqual({
+      cartCountFound: true,
+      viewFormWrapperFound: true,
+      oddsCellCount: 0,
+    });
   });
 
-  it("型の取り違え検出: 単複ページ(nar_odds_b1_202654071210.html、td.Oddsが24件だがid属性を持たない)をワイドパーサに渡すと0件=unavailableになること", () => {
+  it("型の取り違え検出: 単複ページ(nar_odds_b1_202654071210.html、td.Oddsが24件だがワイド・3連複のセルid規約を持たない)をワイドパーサに渡すと0件=unavailableになること", () => {
     const html = loadFixture("nar_odds_b1_202654071210.html");
     // 前提固定(空振り防止): このフィクスチャがオッズ文書としては正当(#odds_select/#odds_view_form)であり、
     // かつtd.Odds自体は24件存在すること(型を取り違えなければ0件にはならないはずの母集団があること)。
+    // 件数は「<td class="Odds"」という開始タグ完全一致で数える(見出し行のth要素を誤って
+    // 混入させないため。boss要修正2の再発防止)。
     expect(html).toMatch(/id="odds_select"/);
-    expect((html.match(/class="Odds"/g) ?? []).length).toBeGreaterThan(0);
+    expect((html.match(/<td class="Odds"/g) ?? []).length).toBe(24);
     const result = parseNarComboOdds(html, "wide");
     expect(result.state).toBe("unavailable");
+    if (result.state !== "unavailable") throw new Error("unreachable");
+    expect(result.reason).toEqual({
+      cartCountFound: true,
+      viewFormWrapperFound: true,
+      oddsCellCount: 24,
+    });
+  });
+
+  it("状態③(本当の未発売)と型の取り違えは、どちらもunavailableだがreasonの値で区別できること(boss裁定2026-08-07。区別不能な状態を固定しないための対照テスト)", () => {
+    // 前提固定(空振り防止): 2件とも実際にunavailableであること(区別以前にまず両者とも
+    // unavailableに分類されることを先に固定する)。新規フィクスチャ・追加リクエストは使わない
+    // (既にテストファイル内で使用中の2フィクスチャを再利用する。boss指定)。
+    const presale = parseNarComboOdds(
+      loadFixture("nar_odds_b5_presale_202655080803_20260806.html"),
+      "wide",
+    );
+    const typeConfusion = parseNarComboOdds(loadFixture("nar_odds_b1_202654071210.html"), "wide");
+    expect(presale.state).toBe("unavailable");
+    expect(typeConfusion.state).toBe("unavailable");
+    if (presale.state !== "unavailable" || typeConfusion.state !== "unavailable") {
+      throw new Error("unreachable");
+    }
+
+    // 本題: reasonが互いに異なること(区別可能であることの固定)。
+    expect(presale.reason).not.toEqual(typeConfusion.reason);
+    // 実測値そのものも固定する(導出値ではなく観測値。再現: grep -c '<td class="Odds"' <file>)。
+    expect(presale.reason).toEqual({
+      cartCountFound: false,
+      viewFormWrapperFound: true,
+      oddsCellCount: 12,
+    });
+    expect(typeConfusion.reason).toEqual({
+      cartCountFound: true,
+      viewFormWrapperFound: true,
+      oddsCellCount: 24,
+    });
   });
 });
 
-describe("parseNarComboOdds(件数の完全性。実フィクスチャ。受け入れ条件15)", () => {
+describe("parseNarComboOdds(件数の完全性。実フィクスチャ。TDDリスト項目15)", () => {
   it("12頭(202654071210): ワイドC(12,2)=66件と完全一致すること", () => {
     const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b5_202654071210.html"), "wide"));
     expect(odds.size).toBe(66);
@@ -264,23 +327,32 @@ describe("parseNarComboOdds(状態③=未発売の実測。受け入れ条件9�
    *
    * 判定根拠: `#odds_select`(投票カート件数)が**無く**、`#odds_view_form`(本文ラッパー)は
    * **ある**(b1発売前フィクスチャと同じ組み合わせ)。中身は「予想オッズ（単勝）」プレビュー
-   * テーブル(td.Oddsは13件あるが、いずれもワイド・3連複のセルid規約〈chk_..._b5|b7_c0_...〉を
-   * 持たない=このドキュメント種別に人気付き単勝プレビュー以外の内容が無い)。b5・b7とも
-   * type別の差はmeta/canonical URLとブロックキャッシュタグ(cg/cp)のみで、テーブル本体は
-   * 完全に同一だった(diffで確認: 本文差分は5箇所のURL/コメントのみ)。
+   * テーブル(td.Oddsは**12件**〈`<td class="Odds"`の開始タグ完全一致で計測。見出し行の
+   * `<th class="Odds">`を誤って混入させる緩い一致は使わない。boss要修正2の再発防止〉あるが、
+   * いずれもワイド・3連複のセルid規約〈chk_..._b5|b7_c0_...〉を持たない=このドキュメント
+   * 種別に人気付き単勝プレビュー以外の内容が無い)。b5・b7とも type別の差は
+   * meta/canonical URLとブロックキャッシュタグ(cg/cp)のみで、テーブル本体は完全に同一
+   * だった(diffで確認: 本文差分は5箇所のURL/コメントのみ)。
    *
    * この実物により、AC8で要求された「OR判定(#odds_select OR #odds_view_form)が
    * b1からの外挿ではなく実物のb5/b7でも正しく分岐すること」を確認した
    * (throwせず`unavailable`に分類できている)。
    */
-  it("地方・佐賀(202655080803、8/8開催・2026-08-06取得): b5(ワイド)は#odds_selectが無く#odds_view_formがある構造でもthrowせずunavailableになること", () => {
+  it("地方・佐賀(202655080803、8/8開催・2026-08-06取得): b5(ワイド)は#odds_selectが無く#odds_view_formがある構造でもthrowせずunavailableになり、reasonが実測どおりであること", () => {
     const html = loadFixture("nar_odds_b5_presale_202655080803_20260806.html");
     // 前提固定(空振り防止): 判定根拠となるコンテナの組み合わせが実際にそうなっていること。
     expect(html).not.toContain('id="odds_select"');
     expect(html).toContain('id="odds_view_form"');
     expect(html).toContain("予想オッズ（単勝）");
+    expect((html.match(/<td class="Odds"/g) ?? []).length).toBe(12);
     const result = parseNarComboOdds(html, "wide");
     expect(result.state).toBe("unavailable");
+    if (result.state !== "unavailable") throw new Error("unreachable");
+    expect(result.reason).toEqual({
+      cartCountFound: false,
+      viewFormWrapperFound: true,
+      oddsCellCount: 12,
+    });
   });
 
   it("地方・佐賀(202655080803、8/8開催・2026-08-06取得): b7(3連複)も同じ構造でthrowせずunavailableになること(type=b5/b7で本文が同一の予想オッズ〈単勝〉プレビューに落ちることの確認)", () => {
@@ -288,8 +360,15 @@ describe("parseNarComboOdds(状態③=未発売の実測。受け入れ条件9�
     expect(html).not.toContain('id="odds_select"');
     expect(html).toContain('id="odds_view_form"');
     expect(html).toContain("予想オッズ（単勝）");
+    expect((html.match(/<td class="Odds"/g) ?? []).length).toBe(12);
     const result = parseNarComboOdds(html, "trio");
     expect(result.state).toBe("unavailable");
+    if (result.state !== "unavailable") throw new Error("unreachable");
+    expect(result.reason).toEqual({
+      cartCountFound: false,
+      viewFormWrapperFound: true,
+      oddsCellCount: 12,
+    });
   });
 });
 

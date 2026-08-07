@@ -81,12 +81,42 @@ export class ComboOddsKeyError extends Error {
 }
 
 /**
+ * 各馬番の値そのものを検証する(1〜18の整数範囲であること。**順序・重複・要素数は
+ * 問わない**)。`validateComboUmabans`(公開API。長さ・昇順検証込み)と
+ * `buildComboOddsCellMap`(自己防御。要素数・順序を知らない/問わない汎用Map化関数)の
+ * 両方から共有される内部ヘルパー(受け入れ条件18・code-reviewer指摘4対応)。
+ *
+ * `Number.isInteger`でNaN/Infinity/小数を弾く(`u < 1 || u > MAX_UMABAN`だけだと
+ * NaNとの比較は常にfalseになり素通りするため、整数性チェックを先に置く必要がある)。
+ * `buildComboOddsKey([NaN,5])`が`"NaN05"`、`buildComboOddsKey([Infinity,5])`が
+ * `"05Infinity"`、`buildComboOddsKey([1.5,2])`が`"1.502"`という**キー文字列そのものが
+ * 破損する**実測(code-reviewer指摘4)を踏まえ、この破損パターンをここで止める。
+ *
+ * 昇順・重複の検証はここに含めない: `buildComboOddsCellMap`は`buildComboOddsKey`
+ * (入力を自動でソートする)を介してキー化するため、入力順序が[1,2]でも[2,1]でも
+ * 同じ組として正しく扱える(この性質自体がMap化関数の望ましい振る舞いであり、
+ * `combo-odds-key.test.ts`「同じ組が複数回現れても値が完全一致すれば1件として
+ * 受理すること」で固定済み)。昇順違反(例: 生キー"0201"のようなソース側の並びの
+ * 想定外)を検出したい場面は`validateComboUmabans`を使うこと(生データの構造検証は
+ * パーサ層〈`parse-combo-odds.ts`/`parse-nar-combo-odds.ts`〉の責務)。
+ */
+function validateComboUmabanRange(umabans: readonly number[]): void {
+  for (const u of umabans) {
+    if (!Number.isInteger(u) || u < 1 || u > MAX_UMABAN) {
+      throw new ComboOddsKeyError(
+        `馬番は1〜${MAX_UMABAN}の範囲である必要があります(umabans=${umabans.join(",")}, 不正な値=${u})`,
+      );
+    }
+  }
+}
+
+/**
  * 馬番の組を検証する(構造の最低条件。throw側)。
  * - 要素数が comboSize と一致すること
- * - 各馬番が1〜18の範囲であること
+ * - 各馬番が1〜18の範囲であること(`validateComboUmabanRange`)
  * - 厳密な昇順(重複なし)であること。`buildComboOddsKey` 自体は入力をソートして受理して
  *   しまうため、ソース側の並びが想定外(例: "0201"のような昇順違反)であることを検出するには
- *   この関数を別途呼ぶ必要がある。
+ *   この関数を別途呼ぶ必要がある
  */
 export function validateComboUmabans(
   umabans: readonly number[],
@@ -97,13 +127,7 @@ export function validateComboUmabans(
       `組の要素数が券種と一致しません(期待: ${comboSize}, 実際: ${umabans.length}, umabans=${umabans.join(",")})`,
     );
   }
-  for (const u of umabans) {
-    if (!Number.isInteger(u) || u < 1 || u > MAX_UMABAN) {
-      throw new ComboOddsKeyError(
-        `馬番は1〜${MAX_UMABAN}の範囲である必要があります(umabans=${umabans.join(",")}, 不正な値=${u})`,
-      );
-    }
-  }
+  validateComboUmabanRange(umabans);
   for (let i = 1; i < umabans.length; i++) {
     if (umabans[i]! <= umabans[i - 1]!) {
       throw new ComboOddsKeyError(
@@ -119,7 +143,28 @@ function cellsEqual(a: ComboOddsCell, b: ComboOddsCell): boolean {
 }
 
 /**
- * 検証済みエントリ列を正規化キーでMap化する唯一の関数(受け入れ条件18)。
+ * エントリ列を正規化キーでMap化する唯一の関数(受け入れ条件18)。**公開APIであり、
+ * 呼び出し元が事前に検証済みであることを前提にしない**(code-reviewer指摘4対応)。
+ * `ev/combo-bet-allocation.ts`の`validateCandidates`にも同種の教訓が残っている
+ * (`AllocationCandidate.umabans`のJSDoc「`NaN<=NaN`は常にfalseなので昇順チェックだけでは
+ * 素通りする」)。今回は「呼び出し元は既に検証済みだから関数自身は無防備でよい」という
+ * 前提に依存せず、関数自身が防御する設計にした。
+ *
+ * 実測(本ファイル筆者、2026-08-07。C(18,3)=816組・500回試行の比較ベンチマーク):
+ * 検証あり(現行実装)の中央値0.394ms・平均0.563ms・p95 0.686msに対し、検証なし
+ * (修正前相当のローカル複製)は中央値0.388ms・平均0.557ms・p95 0.732ms。
+ * 差は約1〜2%(0.005〜0.01ms)で測定ノイズの範囲に収まり、有意な性能劣化は無い
+ * (呼び出し元が既に検証済みの既存2経路〈`parse-combo-odds.ts`・`parse-nar-combo-odds.ts`〉
+ * での二重検証コストも同様に無視できる)。したがって「性能のため防御を省く」判断は
+ * 不要と結論し、関数自身が常に防御する設計を採用した。
+ *
+ * 各エントリの `umabans` を `validateComboUmabanRange`(1〜18の整数範囲。NaN/Infinity/
+ * 小数を弾く)で検証する(throw)。**要素数(comboSize)・昇順は検証しない**(この関数は
+ * 券種非依存の汎用Map化関数であり期待する組の要素数を知らないこと、および
+ * `buildComboOddsKey`自体が入力順序を自動で正規化する設計〈同じ組を順序違いでも1件に
+ * 集約できる、というこの関数自身の望ましい性質〉と両立させるため)。要素数・昇順まで
+ * 含めた構造検証が必要な場面(生データの構造検証)は呼び出し元が `validateComboUmabans`
+ * を使うこと。
  *
  * 同じ組(正規化キーが同じ)が複数回登場した場合:
  * - 値(oddsMin/oddsMax/ninki)が完全一致するなら1件として受理する(冪等)
@@ -130,6 +175,7 @@ export function buildComboOddsCellMap(
 ): Map<string, ComboOddsCell> {
   const map = new Map<string, ComboOddsCell>();
   for (const { umabans, cell } of entries) {
+    validateComboUmabanRange(umabans);
     const key = buildComboOddsKey(umabans);
     const existing = map.get(key);
     if (existing !== undefined) {

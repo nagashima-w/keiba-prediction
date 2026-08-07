@@ -82,6 +82,49 @@ describe("buildComboOddsCellMap(重複組の扱い。受け入れ条件18)", () 
   });
 });
 
+describe("buildComboOddsCellMapの自己防御(構造検証と数値検証の非対称の再発防止。code-reviewer指摘4)", () => {
+  const cellA: ComboOddsCell = { oddsMin: 5.0, oddsMax: null, ninki: null };
+
+  it("呼び出し元が事前検証していなくても、NaNを含む馬番の組は投げること(修正前は buildComboOddsKey([NaN,5]) が \"NaN05\" として黙って混入していた。カナリア)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [Number.NaN, 5], cell: cellA },
+      { umabans: [1, 2], cell: cellA },
+    ];
+    expect(() => buildComboOddsCellMap(entries)).toThrow(ComboOddsKeyError);
+  });
+
+  it("Infinityを含む馬番の組は投げること(カナリア)", () => {
+    const entries: ComboOddsEntry[] = [{ umabans: [Number.POSITIVE_INFINITY, 5], cell: cellA }];
+    expect(() => buildComboOddsCellMap(entries)).toThrow(ComboOddsKeyError);
+  });
+
+  it("小数(非整数)の馬番を含む組は投げること(カナリア)", () => {
+    const entries: ComboOddsEntry[] = [{ umabans: [1.5, 2], cell: cellA }];
+    expect(() => buildComboOddsCellMap(entries)).toThrow(ComboOddsKeyError);
+  });
+
+  it("範囲外(0・19)の馬番を含む組は投げること(カナリア)", () => {
+    expect(() => buildComboOddsCellMap([{ umabans: [0, 5], cell: cellA }])).toThrow(ComboOddsKeyError);
+    expect(() => buildComboOddsCellMap([{ umabans: [5, 19], cell: cellA }])).toThrow(ComboOddsKeyError);
+  });
+
+  it("昇順・重複はbuildComboOddsCellMap自身では検証しないこと(順序違いの組を1件に集約する既存の望ましい性質と両立させるため、要素数・昇順を含めた構造検証は呼び出し元がvalidateComboUmabansで行う設計。空振り防止の対照)", () => {
+    // このテストの前提: [2,1]はbuildComboOddsKeyにより正しく"0102"へ正規化される
+    // (buildComboOddsKeyの単体テストで別途固定済み)。ここではbuildComboOddsCellMapが
+    // 順序違反を理由に例外を投げないことだけを確認する。
+    expect(() => buildComboOddsCellMap([{ umabans: [2, 1], cell: cellA }])).not.toThrow();
+  });
+
+  it("正常な組は従来どおり例外を投げず、健全な候補が異常値に巻き添えで失われないこと(空振り防止の対照)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [1, 2], cell: cellA },
+      { umabans: [3, 4], cell: cellA },
+    ];
+    const map = buildComboOddsCellMap(entries);
+    expect(map.size).toBe(2);
+  });
+});
+
 describe("toComboOddsScalarMap(ワイド下限採用ルールの一箇所集約。受け入れ条件19)", () => {
   it("各セルのoddsMinをスカラー値として取り出すこと(ワイド=下限、3連複=単一値そのもの)", () => {
     const cells = new Map<string, ComboOddsCell>([

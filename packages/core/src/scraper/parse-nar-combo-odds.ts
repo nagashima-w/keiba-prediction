@@ -41,7 +41,9 @@
  * | オッズ文字列(上限。"下限 - 上限"レンジのハイフン以降。ワイドのみ) | `parseNarComboOdds`(レンジ分割+`toOddsNumber`) | あり | null化(レンジとして分割できない場合は下限・上限とも null) | 同上 |
  * | 人気(このドキュメント種別に列自体が存在しない) | `parseNarComboOdds` | あり | 対象外(常にnull固定。実測でこの表示種別に人気列が無いことを確認済みのため防御ではなく仕様) | `parse-nar-combo-odds.test.ts`「値の解釈」describe |
  * | 馬番(td.Oddsのid属性由来) | `decodeCellId`(`validateComboUmabans`経由) | あり | throw(1〜18範囲外・昇順違反〈重複含む〉を検出) | `parse-nar-combo-odds.test.ts`「構造の検証」describe |
+ * | 組の要素数(セルidの数値グループ数が券種〈comboSize〉と不一致。code-reviewer指摘5・#14の教訓「表を作る過程で穴が見つかる」を踏まえた全数走査で発見) | `decodeCellId`(comboSizeで2/3グループ固定の正規表現を選択) | あり | throw(anchoredな正規表現が一致しない。例: `_b5_c0_1_2_3`〈3グループ〉をwideパーサ〈2グループ想定〉に渡すと不一致) | `parse-nar-combo-odds.test.ts`「構造の検証」describe「セルidの数値グループ数が券種と不一致」it |
  * | td.Oddsの直接テキスト(隠しinput/labelの文字混入防止) | `directText` | あり | 除外(cheerioのcontents()でテキストノードのみを対象にし、子要素〈input/label〉のテキストを合成しない) | `parse-nar-combo-odds.test.ts`「隠しinput/labelの文字が混入しないこと」describe(合成データ。防御的不変条件) |
+ * | ドキュメント正当性判定(`#odds_select`・`#odds_view_form`の有無) | `documentSignals` | あり | throw(いずれも見つからない場合のみ) | `parse-nar-combo-odds.test.ts`「構造の検証」「オッズ文書として正当かの判定」describe |
  */
 
 import * as cheerio from "cheerio";
@@ -73,15 +75,64 @@ export class NarComboOddsParseError extends Error {
 const ID_MARKER: Record<ComboBetType, string> = { wide: "b5", trio: "b7" };
 
 /**
- * 地方ワイド・3連複オッズのパース結果(判別共用体)。
- * 中央(`parse-combo-odds.ts`の`ComboOddsParseResult`)と異なりunavailableに理由を持たない。
- * 理由: HTML側の封筒異常(オッズ文書と判定できない構造)はthrow側で捕捉されるため、
- * unavailableに落ちる経路は主に「文書としては正当だが組合せが0件」の1パターンに限られ、
- * 中央JSON(status/data/oddsキーの多段欠落パターン)ほど理由を区別する必要性が薄いため。
+ * `unavailable`の理由(生信号のみ。boss裁定2026-08-07)。
+ *
+ * **旧設計からの訂正**: 当初「文書としては正当だが組合せが0件」の1パターンに限られるため
+ * 理由を区別する必要性が薄いと判断していたが、これは事実誤認だった(boss裁定)。
+ * `state==="unavailable"`に落ちる経路は実際には複数あり、次の2つを実物で比較すると
+ * `cartCountFound`の値で区別できることを確認している(`parse-nar-combo-odds.test.ts`
+ * 「状態③=未発売の実測」「分類側」describe参照。実測値であり、以下は導出でも一般則でもない):
+ * - 本当の未発売(`nar_odds_b5_presale_202655080803_20260806.html`): `cartCountFound=false`・
+ *   `oddsCellCount=12`(単勝の「予想オッズ」プレビューにtd.Oddsが12件表示されるが、
+ *   いずれもid属性を持たずワイド・3連複のセルid規約に一致しないため0件と判定される)
+ * - 型の取り違え(`nar_odds_b1_202654071210.html`をwideパーサに通す): `cartCountFound=true`・
+ *   `oddsCellCount=24`(単複ページのtd.Odds24件も同様にid属性を持たず0件と判定される)
+ *
+ * **注意(実測で判明した、当初の想定との差分)**: `oddsCellCount`は「型の取り違え」でのみ
+ * 正の値になり「本当の未発売」では0になる、という単純な二値の目印にはならない
+ * (`oddsCellCount>0`はこの2ケースの**両方**で成立する。単勝プレビューへのフォールバック
+ * 自体がtd.Oddsを持つドキュメントであるため)。#33でこの値を解釈する際は、
+ * `oddsCellCount>0`だけで「型の取り違え」と断定せず、複数の実測ケースと突き合わせる
+ * 目的の診断値として使うこと(生信号のみ返し、解釈は呼び出し側に委ねる、という本節の
+ * 設計方針どおり)。
+ *
+ * AC7b(#33で`ScrapeWarning`に載せる申し送りの根拠)の趣旨は「封筒の形」ではなく
+ * 「提供元(netkeiba)の仕様変更を『全レース発売なし』と誤読しないこと」であり、地方の
+ * セルid規約(`_b5_c0_`等)は中央のJSONキー(`odds["5"]`)とまったく同じ役割の外部契約
+ * である。`parseNarComboOdds`は`unavailable`を返す時点で区別に必要な情報(コンテナ2種の
+ * 有無・td.Oddsの生の総数)を既に手元に持っており、保持コストはほぼゼロなので、捨てずに
+ * 返す。
+ *
+ * **列挙型で原因を名付けない**: 「型の取り違え」と「id規約変更」と「本当の未発売」は
+ * 生信号だけでは完全には区別できず(上記の注意参照)、名前を付けると観測していない分類を
+ * 発明することになる(#13・#27が繰り返し踏んだ罠)。生信号のみを返し、解釈は呼び出し側
+ * (#33)に委ねる。
+ *
+ * ## #33への申し送り
+ * `state==="unavailable"` かつ `reason.oddsCellCount > 0` は「オッズ文書でセルも在るのに
+ * 券種idが1件も一致しない」状態であり、#33で`ScrapeWarning`を上げる候補にすること。
+ * ただし上記の注意のとおり、この条件は実測済みの「本当の未発売」ケースでも成立するため、
+ * 単純な「型の取り違え検出フラグ」としては使えない(誤検知を許容する早期警戒シグナルとして
+ * 位置づけること。取りこぼしよりも過検知の方が安全という判断はAC7bの趣旨〈全レース
+ * unavailableへの静かな劣化を見逃さない〉に沿う)。
  */
+export interface NarComboOddsUnavailableReason {
+  /** `#odds_select`(投票カート件数)が見つかったか。 */
+  readonly cartCountFound: boolean;
+  /** `#odds_view_form`(本文ラッパー)が見つかったか。 */
+  readonly viewFormWrapperFound: boolean;
+  /**
+   * `td.Odds`の生の総数(id属性の有無を問わない。`selectors.ts`の`oddsCellAny`で計測)。
+   * パースに実際使う`oddsCell`(id属性で券種を識別するセレクタ)とは異なる、より広い集合を
+   * 数えている点に注意(`oddsCellAny`のJSDoc参照)。
+   */
+  readonly oddsCellCount: number;
+}
+
+/** 地方ワイド・3連複オッズのパース結果(判別共用体)。 */
 export type NarComboOddsParseResult =
   | { readonly state: "available"; readonly odds: ReadonlyMap<string, ComboOddsCell> }
-  | { readonly state: "unavailable" };
+  | { readonly state: "unavailable"; readonly reason: NarComboOddsUnavailableReason };
 
 const PLAIN_NUMBER = /^[0-9]+(\.[0-9]+)?$/;
 /** 桁区切りカンマ付き数値(例: "1,172.4")。3桁ごとの区切りのみ許容し、不正な区切りは拒否する。 */
@@ -132,8 +183,13 @@ function decodeCellId(id: string, betType: ComboBetType): number[] {
       : new RegExp(`_${marker}_c0_(\\d+)_(\\d+)_(\\d+)$`);
   const m = pattern.exec(id);
   if (!m) {
-    // idパターン自体が一致しない(型の取り違え・想定外の構造)場合は、この要素を
-    // 「該当セルではない」として呼び出し側でスキップする(呼び出し側でnullを返す)。
+    // 呼び出し元(parseNarComboOdds)は「idにidSubstring(例: "_b5_c0_")を含む」ことを
+    // 既に確認した上でこの関数を呼ぶため、ここに来た時点でその部分文字列は含むのに
+    // 末尾の数値パターンにだけ一致しない=構造的に想定外(想定外の付加文字列等)。
+    // 「該当セルではない」as スキップではなく、throwする(この関数はスキップしない。
+    // 呼び出し元のidSubstringフィルタが「該当しうるセルかどうか」の絞り込みを担い、
+    // この関数はその絞り込みを通過したセルの構造検証を担う。捕捉されないためこの
+    // throwはparseNarComboOdds全体を停止させる=AC8「構造は throw」に合致する)。
     throw new NarComboOddsParseError(`セルidから馬番を抽出できませんでした(id="${id}")`);
   }
   const umabans = m.slice(1).map((s) => Number(s));
@@ -148,12 +204,24 @@ function decodeCellId(id: string, betType: ComboBetType): number[] {
   return umabans;
 }
 
+/** ドキュメント正当性判定の生信号(2つのコンテナそれぞれの有無)。 */
+interface DocumentSignals {
+  readonly cartCountFound: boolean;
+  readonly viewFormWrapperFound: boolean;
+}
+
 /**
- * 「オッズ文書として正当か」を判定する(#odds_select OR #odds_view_form。
- * モジュール冒頭JSDoc・selectors.tsのNAR_COMBO_ODDS_SELECTORS参照)。
+ * 「オッズ文書として正当か」の判定に使う2つの生信号を個別に取得する
+ * (#odds_select・#odds_view_form。モジュール冒頭JSDoc・selectors.tsの
+ * NAR_COMBO_ODDS_SELECTORS参照)。正当性そのものは呼び出し側で両者のORを取る
+ * (`unavailable`時にこの2値をそのまま`reason`として返せるよう、OR判定の結果だけでなく
+ * 個別の値を保持する。boss裁定2026-08-07)。
  */
-function isRecognizedOddsDocument($: CheerioAPI): boolean {
-  return $(SEL.cartCount).length > 0 || $(SEL.viewFormWrapper).length > 0;
+function documentSignals($: CheerioAPI): DocumentSignals {
+  return {
+    cartCountFound: $(SEL.cartCount).length > 0,
+    viewFormWrapperFound: $(SEL.viewFormWrapper).length > 0,
+  };
 }
 
 /**
@@ -170,7 +238,8 @@ function isRecognizedOddsDocument($: CheerioAPI): boolean {
 export function parseNarComboOdds(html: string, betType: ComboBetType): NarComboOddsParseResult {
   const $ = cheerio.load(html);
 
-  if (!isRecognizedOddsDocument($)) {
+  const signals = documentSignals($);
+  if (!signals.cartCountFound && !signals.viewFormWrapperFound) {
     throw new NarComboOddsParseError(
       "オッズ文書として認識できませんでした(#odds_select・#odds_view_formのいずれも見つかりません)",
     );
@@ -179,8 +248,16 @@ export function parseNarComboOdds(html: string, betType: ComboBetType): NarCombo
   const marker = ID_MARKER[betType];
   const idSubstring = `_${marker}_c0_`;
   const entries: ComboOddsEntry[] = [];
+  const allOddsCells = $(SEL.oddsCell);
+  // td.Oddsの生の総数(id属性の有無を問わない。unavailable時のreasonに残す。boss裁定
+  // 2026-08-07)。allOddsCells(SEL.oddsCell='td.Odds[id^="chk_"]')は既にid属性で絞られて
+  // いるため、これをそのまま「フィルタ前の総数」として使うと発売前ページの予想オッズ
+  // プレビュー(td.Oddsはあるがid属性を持たない)で常に0になり、型の取り違え(こちらも
+  // id属性を持たないb1発売後ページ)と区別できなくなる。selectors.tsのoddsCellAny
+  // ('td.Odds'、id属性を問わない)で真に生の総数を数える。
+  const oddsCellCount = $(SEL.oddsCellAny).length;
 
-  $(SEL.oddsCell).each((_, el) => {
+  allOddsCells.each((_, el) => {
     const id = $(el).attr("id") ?? "";
     if (!id.includes(idSubstring)) {
       // 型の取り違え防止: 別券種(または単複ページ)のセルidはこの部分文字列を含まない。
@@ -198,7 +275,14 @@ export function parseNarComboOdds(html: string, betType: ComboBetType): NarCombo
   });
 
   if (entries.length === 0) {
-    return { state: "unavailable" };
+    return {
+      state: "unavailable",
+      reason: {
+        cartCountFound: signals.cartCountFound,
+        viewFormWrapperFound: signals.viewFormWrapperFound,
+        oddsCellCount,
+      },
+    };
   }
 
   let cellMap: Map<string, ComboOddsCell>;

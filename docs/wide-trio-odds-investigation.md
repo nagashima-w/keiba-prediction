@@ -295,10 +295,10 @@ POSTボディに識別子が入る設計ではない(`race_api/`のような事�
 #13時点では②③④の実例を持てなかった(§6)。本Issueで③(未発売)を実測し、`parse-combo-odds.ts`
 (中央)・`parse-nar-combo-odds.ts`(地方)の `unavailable` 分岐を実物で固定した。
 
-### 11.1 実リクエスト一覧(合計9件。上限9件ちょうど)
+### 11.1 実リクエスト一覧(合計10件。当初の上限9件を1件超過。理由は末尾参照)
 
-すべて `HttpClient`(既定: 最低1.5秒間隔・UA明示)経由、実行日時 2026-08-06T18:27〜18:29 UTC
-(JST 8/7 3:27〜3:29頃)。翌々日(8/8開催)のレースを選定し、#13の教訓
+すべて `HttpClient`(既定: 最低1.5秒間隔・UA明示)経由、実行日時 2026-08-06T18:27〜2026-08-07T02:04 UTC
+(JST 8/7 3:27〜11:04頃)。翌々日(8/8開催)のレースを選定し、#13の教訓
 (「presaleという名前は取得**時点**の状態であり、同じrace_idを再取得しても再現しない」)を
 踏まえフィクスチャ名に取得日(20260806)を含めている。
 
@@ -313,6 +313,13 @@ POSTボディに識別子が入る設計ではない(`race_api/`のような事�
 | 7 | 地方ワイド再取得(フィクスチャ本文保存用) | `https://nar.netkeiba.com/odds/index.html?type=b5&race_id=202655080803` | 200 → `fixtures/nar_odds_b5_presale_202655080803_20260806.html` |
 | 8 | 地方3連複再取得(フィクスチャ本文保存用) | `https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202655080803` | 200 → `fixtures/nar_odds_b7_presale_202655080803_20260806.html` |
 | 9 | 中央ワイド再取得(正確なバイト列でフィクスチャ保存) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=5&action=init` | 200 → `fixtures/odds_wide_presale_202604020511_20260806.json` |
+| 10\* | 【code-reviewer要修正3対応・追加】中央race_list_subの再取得(発走予定時刻の記録漏れの補完) | `https://race.netkeiba.com/top/race_list_sub.html?kaisai_date=20260808` | 200(#4と同一URL。11R「17:50 」を確認) |
+
+\*#10は当初の予算9件とは別枠。code-reviewer要修正3(AC10「発走予定時刻」の記録漏れ)への
+対応として、CLAUDE.mdのnetkeiba一般承認(継続適用)の範囲内で1件のみ追加実施した
+(1.5秒間隔厳守)。#4の時点で `parseRaceList` が抽出しない発走時刻(`span.RaceList_Itemtime`。
+`RaceListEntry`型に無いフィールド)を見落としており、0追加コストで取得できたはずの証拠を
+取りこぼしていた(#13で boss が指摘したのと同型の失敗)。
 
 #5・#6は探索段階で状態(`unavailable`)を確認済みだったため、#9では#5と同一URLを再取得して
 正確なバイト列(トリミングなし)をフィクスチャとして保存した。3連複(#6)は探索段階の応答が
@@ -334,8 +341,11 @@ race_id=202655080803)であり帯広ではなかったが、これは選定ロ�
 
 ### 11.2 中央の観測結果(封筒異常の実物。改訂後AC7の裏付け)
 
-中央・8/8開催18頭最大レース(race_id=202604020511)のワイド・3連複とも、応答は次の80バイトで
-完全に一致した(トリミングなし):
+中央・8/8開催18頭最大レース(race_id=202604020511、**11R「3歳以上1勝クラス」・芝1000m・
+17:50発走予定**〈#10で`race_list_sub`の生HTMLから`<span class="RaceList_Itemtime">17:50
+</span>`を確認。`parseRaceList`〈本番パーサ〉の`RaceListEntry`型は発走時刻を持たないため、
+生HTMLを直接参照した〉)のワイド・3連複とも、応答は次の80バイトで完全に一致した
+(トリミングなし):
 
 ```json
 {"status":"NG","data":"","update_count":"0","reason":"empty free odds schedule"}
@@ -350,13 +360,23 @@ missingKey:"data"}}` として分類する(`parse-combo-odds.test.ts`「状態�
 
 ### 11.3 地方の観測結果(OR判定の実物確認)
 
-地方・佐賀(race_id=202655080803、頭数12、8/8開催)のb5(ワイド)・b7(3連複)とも、次のコンテナ
-構成だった:
+地方・佐賀(race_id=202655080803、3R「C2ー26組」、ダ1300m、**17:10発走予定**、頭数12、8/8開催)の
+b5(ワイド)・b7(3連複)とも、次のコンテナ構成だった:
 
 | ページ | `#odds_select` | `#odds_view_form` | `td.Odds` | 中身 |
 |---|---|---|---|---|
-| b5(ワイド、8/8開催、未発売) | **なし** | あり | 13 | 「予想オッズ（単勝）」プレビュー(単勝のみ、人気順) |
-| b7(3連複、8/8開催、未発売) | **なし** | あり | 13 | 同上 |
+| b5(ワイド、8/8開催17:10発走予定、未発売) | **なし** | あり | 12 | 「予想オッズ（単勝）」プレビュー(単勝のみ、人気順) |
+| b7(3連複、8/8開催17:10発走予定、未発売) | **なし** | あり | 12 | 同上 |
+
+`td.Odds` の数え方(boss要修正2対応。#13「HorseList行数16件」誤カウントの再発防止として明記する):
+**`grep -c '<td class="Odds"'`**(開始タグの完全一致。`class="Odds"`という文字列一致ではなく、
+`<td class="Odds"` という開始タグ全体で数える)で12件。当初「13件」と記録していたのは
+`<th class="Odds">予想<br>オッズ</th>`(見出し行の`th`要素。`grep -c 'class="Odds"'`のような
+緩い一致だと見出し行のthを1件誤って混入する)を数えてしまっていたための誤り。実際に本番実装
+(`selectors.ts`の`NAR_COMBO_ODDS_SELECTORS.oddsCell = 'td.Odds[id^="chk_"]'`)がtd要素のみを
+対象にしていることと整合させ、再検証(`grep -c '<td class="Odds"' fixtures/nar_odds_b5_presale_202655080803_20260806.html`
+→12、`fixtures/nar_odds_b7_presale_202655080803_20260806.html`→12、いずれも`<th class="Odds"`は1件)
+した。
 
 **発見: b5・b7いずれの未発売ページも、券種固有のプレビューではなく、単勝の「予想オッズ」プレビュー
 (`block=odds_yoso`)に一律フォールバックする。** 実際に2ファイルを`diff`したところ、本文の差分は
@@ -367,7 +387,18 @@ missingKey:"data"}}` として分類する(`parse-combo-odds.test.ts`「状態�
 この実物により、`selectors.ts` の `NAR_COMBO_ODDS_SELECTORS` JSDoc・受け入れ条件8で要求された
 「OR判定(`#odds_select` OR `#odds_view_form`)が b1 からの外挿ではなく実物のb5/b7でも正しく
 分岐すること」を確認した: `#odds_select` が無くても `#odds_view_form` があるため文書としては
-正当と判定され(throwしない)、かつ `td.Odds` 13件のいずれもワイド・3連複のセルid規約
+正当と判定され(throwしない)、かつ `td.Odds` 12件のいずれもワイド・3連複のセルid規約
 (`chk_..._b5|b7_c0_...`)を持たない(単勝プレビューのtd.Oddsにはこのid自体が付かない)ため
 組合せは0件となり、`unavailable` に分類される(`parse-nar-combo-odds.test.ts`
-「状態③=未発売の実測」describe)。
+「状態③=未発売の実測」describe)。返り値は
+`{state:"unavailable", reason:{cartCountFound:false, viewFormWrapperFound:true,
+oddsCellCount:12}}`(boss裁定2026-08-07により地方側もreasonを保持するよう改訂。
+詳細は`parse-nar-combo-odds.ts`の`NarComboOddsUnavailableReason`JSDoc参照)。
+
+**追加の発見(要修正1の裁定過程で判明)**: 型の取り違え(発売済みの単複ページ`nar_odds_b1_202654071210.html`
+をワイドパーサに通す)も同じ`{state:"unavailable"}`になるが、`reason`は
+`{cartCountFound:true, viewFormWrapperFound:true, oddsCellCount:24}`と異なる値になり、
+本当の未発売(`cartCountFound:false`・`oddsCellCount:12`)と区別できる。ただし
+`oddsCellCount`はどちらのケースも0より大きい(単勝プレビューへのフォールバック自体が
+`td.Odds`を持つドキュメントであるため)ため、`oddsCellCount>0`だけで型の取り違えと断定は
+できない(誤検知を許容する早期警戒シグナルとして#33で扱うこと)。

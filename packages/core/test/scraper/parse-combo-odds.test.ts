@@ -236,7 +236,7 @@ describe("parseComboOdds(状態③=未発売の実測。受け入れ条件9。�
   });
 });
 
-describe("parseComboOdds(件数の完全性。受け入れ条件14)", () => {
+describe("parseComboOdds(件数の完全性。TDDリスト項目14)", () => {
   it("16頭(202603020211): ワイドC(16,2)=120・3連複C(16,3)=560と完全一致すること", () => {
     const wide = expectAvailable(parseComboOdds(loadFixture("odds_wide_202603020211.json"), "wide"));
     const trio = expectAvailable(parseComboOdds(loadFixture("odds_trio_202603020211.json"), "trio"));

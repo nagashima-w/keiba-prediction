@@ -29,7 +29,7 @@
  * |---|---|---|---|---|
  * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | `parseComboOdds`(`toOddsNumber`) | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe |
  * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | `parseComboOdds`(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
- * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(`toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**既存`parse-odds.ts`のtoNinkiは実装上"0"をNumber(0)のまま返す(同名JSDocの「"0"欠損表現はnull」という記述と実装が食い違うpre-existingな不一致。既存テストは`ninki:0`を期待しており実装が正=既存の契約)が、本モジュールはブリーフの明示指示(TDDリスト項目5)に従い意図的に"0"をnullとして扱う独自契約とする** |
+ * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(`toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**本モジュールの"0"→nullが正であり、既存`parse-odds.ts`のtoNinki(実装上"0"をNumber(0)のまま返す。同名JSDocの「"0"欠損表現はnull」という記述と実装が食い違っている)は既知の欠陥であり是正待ち(Issue #34)。人気は1始まりの値域であり0は値域外、かつ`analysis-pipeline.ts:463`の`race.odds.win[umaban]?.ninki ?? null`は`??`がnullishのみ捕捉するため`0 ?? null`は`0`を返し値域外の値が下流の欠損表現に落ちない経路が構造として存在する(コミット済み全フィクスチャに人気"0"の実データは無く、実データでの発生は未観測。既存テストの"0"は合成データ)。既存側の是正〈テスト期待値の変更を伴う〉はIssue #34側の作業とし、本モジュールでは追認しない** |
  * | 馬番(オッズキー由来。例"0102") | `decodeRawKey`(`validateComboUmabans`経由) | あり | throw(2桁ずつ分解し1〜18範囲外・キー長不一致・昇順違反〈"0201"等〉を検出) | `parse-combo-odds.test.ts`「構造の検証」describe |
  * | 組の要素数(キー長 / 券種との不一致) | `decodeRawKey` | あり | throw(`COMBO_SIZE`との不一致) | 同上 |
  * | JSON封筒(`status`/`data`/`data.odds`/`data.odds[type]`の型・欠落) | `parseComboOdds` | あり | 分類(`unavailable`。throwしない。`JSON.parse`失敗のみthrow) | `parse-combo-odds.test.ts`「未発売・封筒異常」describe |
