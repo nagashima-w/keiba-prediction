@@ -221,7 +221,13 @@ export function createPipelineDeps(
     : null;
 
   const deps: AnalysisPipelineDeps = {
-    scrape: (raceId: RaceId) => scrapeRace(raceId, { fetcher }),
+    // 組合せオッズ(ワイド・3連複、機能D-2c第1段・Issue #28): 第3引数(ScrapeRaceOptions)を
+    // 明示的に渡す「口」だけをここで作る。値は既定false固定(未取得のまま)であり、
+    // 既存の挙動(第3引数を渡さない呼び出し)と発行URL列・リクエスト数は完全に一致する
+    // (includeComboOdds未指定時の既定値もfalseのため。scrape-race.test.tsの回帰テスト参照)。
+    // 設定画面からの切り替え(config.includeComboOdds等の追加)は第3段のスコープ。
+    scrape: (raceId: RaceId) =>
+      scrapeRace(raceId, { fetcher }, { includeComboOdds: false }),
     analyze,
     saveAnalysis: (record) => store.saveAnalysis(record),
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。

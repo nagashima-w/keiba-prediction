@@ -394,6 +394,24 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
     ).toBe(false);
   });
 
+  it("includeComboOdds:falseを明示しても、省略時と完全に同じURL列になること(機能D-2c第1段・Issue #28: pipeline-deps.tsが第3引数を明示的に渡す配線に変わったことへの回帰ピン)", async () => {
+    const omittedFetcher = new RecordingFetcher(defaultHandler);
+    await scrapeRace(RACE_ID, { fetcher: omittedFetcher, now: FIXED_NOW });
+
+    const explicitFalseFetcher = new RecordingFetcher(defaultHandler);
+    await scrapeRace(
+      RACE_ID,
+      { fetcher: explicitFalseFetcher, now: FIXED_NOW },
+      { includeComboOdds: false },
+    );
+
+    // 両者のURL列(発行順・件数とも)が1件も違わないこと。
+    expect(explicitFalseFetcher.calls.map((c) => c.url)).toEqual(
+      omittedFetcher.calls.map((c) => c.url),
+    );
+    expect(explicitFalseFetcher.calls.length).toBeGreaterThan(0); // 空配列同士の一致という空振りを防ぐ。
+  });
+
   describe("中央(includeComboOdds:true)", () => {
     /** 中央3連複・ワイドの実フィクスチャを追加で解決する既定ハンドラ(既存defaultHandlerを包む)。 */
     function comboAwareCentralHandler(url: string): string {

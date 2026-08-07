@@ -706,5 +706,15 @@ export async function runAnalysis(
     rows,
     warnings: race.meta.warnings.map((w) => w.message),
     analyzedAt,
+    // 組合せオッズ(ワイド・3連複、機能D-2c第1段・Issue #28): race.odds.wideCombo/trioCombo・
+    // race.meta.comboOdds はいずれも scrapeRace の options.includeComboOdds が true のときだけ
+    // 設定される optional フィールド(#33)。ここでは「写し取るだけ」で新たな解釈・変換は行わない。
+    // 条件付きspreadで、未設定(undefined)のときはキー自体を持たせない
+    // (`wideCombo: undefined` という明示的な代入はしない。`"wideCombo" in result` が
+    // false のままであることを型・値の両方で守るため。scrape-race.ts の
+    // `...(wideCombo !== undefined ? { wideCombo } : {})` と同じ流儀)。
+    ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
+    ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
+    ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }

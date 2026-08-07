@@ -2697,4 +2697,188 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(call[0].race.venueKind).toBe("central");
     }
   });
+
+  describe("組合せオッズ(ワイド・3連複)のAnalysisResultへの伝播(機能D-2c第1段・Issue #28)", () => {
+    /**
+     * テスト用のワイド・3連複診断値(core RaceDataMeta.comboOdds 相当)。
+     * 「欠落なく届くこと」を検証するため、attempts/conflictSamplesまで含む実構造に近い値を使う
+     * (state違い〈available/failed〉・試行結末4種〈available/unavailable/fetchFailed/parseError〉・
+     * 衝突サンプルを1つの固定値に混在させ、単一のtoEqualで一括固定する)。
+     */
+    function fakeComboOddsScrapeOutcome() {
+      return {
+        wide: {
+          state: "available",
+          diagnostics: {
+            betType: "wide",
+            requestCount: 1,
+            expectedComboCount: 120,
+            obtainedComboCount: 118,
+            missingComboCount: 2,
+            axisUmabans: [],
+            attempts: [{ axis: null, state: "available", comboCount: 118 }],
+            numericConflictCount: 0,
+            nullWinConflictCount: 0,
+            conflictSamples: [],
+          },
+        },
+        trio: {
+          state: "failed",
+          diagnostics: {
+            betType: "trio",
+            requestCount: 3,
+            expectedComboCount: 560,
+            obtainedComboCount: 0,
+            missingComboCount: 560,
+            axisUmabans: [1, 2, 3],
+            attempts: [
+              {
+                axis: 1,
+                state: "unavailable",
+                reason: { rawStatus: "NG", rawReason: null, missingKey: "odds" },
+              },
+              { axis: 2, state: "fetchFailed", message: "HTTP 500" },
+              { axis: 3, state: "parseError", message: "構造異常" },
+            ],
+            numericConflictCount: 1,
+            nullWinConflictCount: 1,
+            conflictSamples: [
+              {
+                key: "010203",
+                kind: "numeric",
+                entries: [
+                  { axis: 1, cell: { oddsMin: 2.1, oddsMax: null, ninki: null } },
+                  { axis: 2, cell: { oddsMin: 2.5, oddsMax: null, ninki: null } },
+                ],
+              },
+            ],
+          },
+        },
+      } as const;
+    }
+
+    it("race.odds.wideCombo/trioCombo・race.meta.comboOddsが未設定(未取得)なら、結果のwideCombo/trioCombo/comboOddsもキー自体が無いままであること({}に化けないこと)", async () => {
+      // fakeRaceData(RACE_ID) は wideCombo/trioCombo/meta.comboOdds を持たない
+      // (scrapeRaceのincludeComboOdds未指定=既定の未取得状態を模す)。
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        baseDeps(),
+        onProgress,
+      );
+
+      expect(result.wideCombo).toBeUndefined();
+      expect(result.trioCombo).toBeUndefined();
+      expect(result.comboOdds).toBeUndefined();
+      // 「undefinedという値の代入」と「キー自体が無いこと」は違う(JSON.stringifyでは
+      // 両者が区別できない)。hasOwnPropertyで直接キーの有無を見る。
+      expect(Object.prototype.hasOwnProperty.call(result, "wideCombo")).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(result, "trioCombo")).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(result, "comboOdds")).toBe(false);
+    });
+
+    it("race.odds.wideCombo/trioComboが設定されていれば結果にそのまま伝播し、JSON往復(IPC相当)でも中身が消えないこと", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          wideCombo: { "0102": 1.5, "0103": null },
+          trioCombo: { "010203": 2.3 },
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({ "0102": 1.5, "0103": null });
+      expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      // Mapではない(plainオブジェクト)ことを直接確認する(#33と同じ回帰観点)。
+      expect(result.wideCombo instanceof Map).toBe(false);
+      expect(result.trioCombo instanceof Map).toBe(false);
+
+      // JSON.stringify→JSON.parseを通しても中身が消えないこと(IPC相当。Mapを載せていたら
+      // JSON.stringify(new Map(...))は"{}"になりroundTrip後は0件になる回帰を検知する)。
+      const roundTripped = JSON.parse(JSON.stringify(result)) as {
+        wideCombo: Record<string, number | null>;
+        trioCombo: Record<string, number | null>;
+      };
+      expect(roundTripped.wideCombo).toEqual({ "0102": 1.5, "0103": null });
+      expect(roundTripped.trioCombo).toEqual({ "010203": 2.3 });
+    });
+
+    it("race.odds.wideCombo/trioComboが発売なし(空オブジェクト)なら、結果も空オブジェクトのまま(undefinedへ化けない)であること(未取得との2状態を区別)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: { ...base.odds, wideCombo: {}, trioCombo: {} },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({});
+      expect(result.trioCombo).toEqual({});
+      // 未取得(前テスト。キー自体が無い)とは異なり、こちらはキーが存在すること。
+      expect(Object.prototype.hasOwnProperty.call(result, "wideCombo")).toBe(true);
+      expect(Object.prototype.hasOwnProperty.call(result, "trioCombo")).toBe(true);
+    });
+
+    it("race.meta.comboOddsが設定されていれば診断値(requestCount等)が欠落なく結果に伝播すること(JSON往復含む)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const comboOdds = fakeComboOddsScrapeOutcome();
+      const race: RaceData = { ...base, meta: { ...base.meta, comboOdds } };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      // 深い構造をまるごと(deep equal)固定する。
+      expect(result.comboOdds).toEqual(comboOdds);
+      // 「等しい」の一言に寄りかからず、深い階層のフィールドも個別に固定する
+      // (欠落があればここで真っ先に落ちる)。
+      expect(result.comboOdds?.wide?.state).toBe("available");
+      expect(result.comboOdds?.wide?.diagnostics.requestCount).toBe(1);
+      expect(result.comboOdds?.wide?.diagnostics.obtainedComboCount).toBe(118);
+      expect(result.comboOdds?.trio?.state).toBe("failed");
+      expect(result.comboOdds?.trio?.diagnostics.requestCount).toBe(3);
+      expect(result.comboOdds?.trio?.diagnostics.attempts).toHaveLength(3);
+      expect(result.comboOdds?.trio?.diagnostics.attempts[1]).toEqual({
+        axis: 2,
+        state: "fetchFailed",
+        message: "HTTP 500",
+      });
+      expect(result.comboOdds?.trio?.diagnostics.conflictSamples).toHaveLength(1);
+      expect(result.comboOdds?.trio?.diagnostics.conflictSamples[0]?.entries).toHaveLength(2);
+
+      // JSON.stringify→JSON.parseを通しても中身が消えないこと(IPC相当)。
+      const roundTripped = JSON.parse(JSON.stringify(result)) as {
+        comboOdds: typeof comboOdds;
+      };
+      expect(roundTripped.comboOdds).toEqual(comboOdds);
+    });
+  });
 });

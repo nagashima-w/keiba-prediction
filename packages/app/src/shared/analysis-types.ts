@@ -66,6 +66,131 @@ export interface ConditionChangeTagView {
   readonly label: string;
 }
 
+/**
+ * 組合せオッズ取得試行がunavailableだった理由(中央。core `ComboOddsUnavailableReason` の
+ * プレーン写し。機能D-2c第1段・Issue #28)。
+ */
+export interface ComboOddsUnavailableReasonView {
+  /** 応答の `status` 値(文字列として読めなかった場合は null)。 */
+  readonly rawStatus: string | null;
+  /** 応答ルートの `reason` フィールド(存在しない・文字列でない場合は null)。 */
+  readonly rawReason: string | null;
+  /** 構造のどの段が欠落/不正だったか。組合せが0件だった場合は null。 */
+  readonly missingKey: string | null;
+}
+
+/**
+ * 組合せオッズ取得試行がunavailableだった理由(地方。core `NarComboOddsUnavailableReason` の
+ * プレーン写し。機能D-2c第1段・Issue #28)。
+ */
+export interface NarComboOddsUnavailableReasonView {
+  /** `#odds_select`(投票カート件数)が見つかったか。 */
+  readonly cartCountFound: boolean;
+  /** `#odds_view_form`(本文ラッパー)が見つかったか。 */
+  readonly viewFormWrapperFound: boolean;
+  /** `td.Odds`の生の総数。 */
+  readonly oddsCellCount: number;
+}
+
+/**
+ * 組合せオッズ取得の1試行分の結末(core `ComboOddsFetchAttempt` のプレーン写し。
+ * 機能D-2c第1段・Issue #28)。中央・地方ワイドは1件、地方3連複は軸数件。
+ */
+export type ComboOddsFetchAttemptView =
+  | { readonly axis: number | null; readonly state: "available"; readonly comboCount: number }
+  | {
+      readonly axis: number | null;
+      readonly state: "unavailable";
+      readonly reason: ComboOddsUnavailableReasonView | NarComboOddsUnavailableReasonView;
+    }
+  | { readonly axis: number | null; readonly state: "fetchFailed"; readonly message: string }
+  | { readonly axis: number | null; readonly state: "parseError"; readonly message: string };
+
+/** 組合せオッズ1件分のセル(core `ComboOddsCell` のプレーン写し。機能D-2c第1段・Issue #28)。 */
+export interface ComboOddsCellView {
+  /** ワイド: オッズ下限。3連複: オッズ(単一値)。未確定・非数値は null。 */
+  readonly oddsMin: number | null;
+  /** ワイド: オッズ上限。3連複: 常に null。 */
+  readonly oddsMax: number | null;
+  /** 人気。取得できない場合は null。 */
+  readonly ninki: number | null;
+}
+
+/**
+ * 軸間の同一キー衝突1件分のエントリ(core `ComboOddsCellConflictEntry` のプレーン写し。
+ * 機能D-2c第1段・Issue #28)。
+ */
+export interface ComboOddsCellConflictEntryView {
+  /** 軸馬番。 */
+  readonly axis: number;
+  /** その軸で採用されなかった側のセル。 */
+  readonly cell: ComboOddsCellView;
+}
+
+/**
+ * 軸間の同一キー衝突(core `ComboOddsCellConflict` のプレーン写し。機能D-2c第1段・Issue #28)。
+ * 地方3連複の軸走査でのみ発生しうる(中央・地方ワイドは軸走査が無いため常に空配列)。
+ */
+export interface ComboOddsCellConflictView {
+  /** 衝突したキー(例 "010203")。 */
+  readonly key: string;
+  /**
+   * 衝突種別。"numeric" は数値同士の食い違い、"nullWin" は片方以上がnullで
+   * null側が採用された衝突(core `ComboOddsCellConflictKind` のプレーン写し)。
+   */
+  readonly kind: "numeric" | "nullWin";
+  /** 衝突に関与した全軸のセル(軸番号昇順)。 */
+  readonly entries: readonly ComboOddsCellConflictEntryView[];
+}
+
+/**
+ * 組合せオッズ取得の診断値(core `ComboOddsFetchDiagnostics` のプレーン写し。
+ * 機能D-2c第1段・Issue #28)。
+ */
+export interface ComboOddsFetchDiagnosticsView {
+  /** 券種("wide" | "trio")。 */
+  readonly betType: "wide" | "trio";
+  /** 発行したHTTPリクエスト数。 */
+  readonly requestCount: number;
+  /** 出走馬番から導出した期待組合せ数。 */
+  readonly expectedComboCount: number;
+  /** マージ後に実際に得られた組合せ数。 */
+  readonly obtainedComboCount: number;
+  /** expectedComboCount - obtainedComboCount(0未満にはならない)。 */
+  readonly missingComboCount: number;
+  /** 地方3連複の軸馬番配列(昇順)。中央・地方ワイドは空配列。 */
+  readonly axisUmabans: readonly number[];
+  /** 取得試行ごとの結末。 */
+  readonly attempts: readonly ComboOddsFetchAttemptView[];
+  /** 軸間の数値衝突件数。 */
+  readonly numericConflictCount: number;
+  /** 軸間のnull採用衝突件数。 */
+  readonly nullWinConflictCount: number;
+  /** 衝突サンプル(上限件数で打ち切り。正確な件数は上記2フィールド)。 */
+  readonly conflictSamples: readonly ComboOddsCellConflictView[];
+}
+
+/**
+ * 組合せオッズ1券種分の取得結果(core `ComboOddsFetchOutcome` のプレーン写し。
+ * 機能D-2c第1段・Issue #28)。
+ */
+export interface ComboOddsFetchOutcomeView {
+  /** 券種の最終状態("available" | "unavailable" | "failed")。 */
+  readonly state: "available" | "unavailable" | "failed";
+  /** 診断値(リクエスト数・期待/実取得組合せ数・軸ごとの結末・衝突件数等)。 */
+  readonly diagnostics: ComboOddsFetchDiagnosticsView;
+}
+
+/**
+ * 組合せオッズ(ワイド・3連複)取得結果のペア(core `ComboOddsScrapeOutcome` のプレーン写し。
+ * 機能D-2c第1段・Issue #28)。core `RaceDataMeta.comboOdds` と同じく、
+ * `options.includeComboOdds`がtrueのときのみ設定される。
+ */
+export interface ComboOddsScrapeOutcomeView {
+  readonly wide?: ComboOddsFetchOutcomeView;
+  readonly trio?: ComboOddsFetchOutcomeView;
+}
+
 /** 進捗イベント(main→renderer に webContents.send で通知)。 */
 export interface AnalysisProgress {
   /** 現在の段階。 */
@@ -180,6 +305,33 @@ export interface AnalysisResult {
   readonly warnings: readonly string[];
   /** 分析日時(ISO8601)。 */
   readonly analyzedAt: string;
+  /**
+   * ワイドオッズ(馬番の組の正規化キー〈例"0102"〉→オッズ下限。core
+   * `OddsSnapshot.wideCombo` のプレーン写し。機能D-2c第1段・Issue #28)。
+   *
+   * **3状態(#33で確立した思想をそのまま引き継ぐ)**:
+   * - このキー自体が無い(undefined): 組合せオッズを**未取得**(`scrapeRace`の
+   *   `includeComboOdds`が未指定・false。現状は常にこの状態=第1段では既定値を渡さない)。
+   * - 空オブジェクト(`{}`): 取得を試みたが**発売なし**(市場が首尾一貫して未発売)。
+   * - 値を持つオブジェクト: 取得できた組合せの下限オッズ(組ごとに `null` は個別の欠損)。
+   *
+   * **`Record`である理由(`ReadonlyMap`を載せない)**: `AnalysisResult`はIPC(`webContents.send`/
+   * `ipcMain.handle`の戻り値)を経由する。`Map`をここに載せると`JSON.stringify`/IPC経由で
+   * 静かに`{}`になる種を植える(#33 `OddsSnapshot.wideCombo`と同じ理由)。
+   */
+  readonly wideCombo?: Record<string, number | null>;
+  /**
+   * 3連複オッズ(馬番の組の正規化キー〈例"010203"〉→オッズ。単一値。core
+   * `OddsSnapshot.trioCombo` のプレーン写し)。3状態・`Record`である理由は `wideCombo` と同じ。
+   */
+  readonly trioCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズ(ワイド・3連複)の取得結果(core `RaceDataMeta.comboOdds` のプレーン写し。
+   * 機能D-2c第1段・Issue #28)。`wideCombo`/`trioCombo`と同じく、組合せオッズを取得した
+   * ときだけ設定される(現状は第1段では常にundefined。取得自体は`includeComboOdds`が
+   * trueのときのみ発生し、第1段はこれを既定falseで固定配線している)。
+   */
+  readonly comboOdds?: ComboOddsScrapeOutcomeView;
 }
 
 /**
