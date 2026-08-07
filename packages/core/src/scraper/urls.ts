@@ -251,9 +251,41 @@ export function narWideOddsPageUrl(raceId: RaceId): string {
  * 全組合せC(n,3)を漏れなく網羅できる(**導出値**。3頭の組合せの最小馬番は必ず頭数-2以下に
  * なるため)。ただし実物の軸馬選択プルダウン(`#list_select_horse`)自体は**軸1〜頭数の
  * 全頭(観測値)**を選択肢として提示しており、`頭数-2`はサイトが提示する値ではない
- * (両者を混同しないこと)。全軸を機械的に走査する挙動を本関数には持たせていない
- * (機能Dへの備え。#14着手前ゲートで方針を判断する。詳細: docs/wide-trio-odds-investigation.md)。
+ * (両者を混同しないこと)。
+ *
+ * **本関数はクエリ未指定=軸1固定の応答しか返さない。** 軸馬を機械的に走査する経路は
+ * `narTrioOddsAxisUrl`(軸馬別AJAXフラグメントのURLを組み立てる)と、その軸集合を
+ * 導出する `deriveNarTrioAxisUmabans`(`nar-trio-axis.ts`)が担う(機能D-2b-B・Issue #33)。
+ * **軸集合は「出走馬番のうち値が頭数-2以下のもの」ではなく「出走馬番を昇順に並べた
+ * 先頭 頭数-2 頭」である**点に注意(取消等で馬番が飛ぶ場合、前者は破綻する。
+ * Issue #33本文の⚠️参照)。
  */
 export function narTrioOddsPageUrl(raceId: RaceId): string {
   return `${NAR_BASE}/odds/index.html?type=b7&race_id=${raceId}`;
+}
+
+/** 馬番(軸馬番jiku含む)の上限。scraper配下の各モジュールがローカルに持つ MAX_UMABAN=18 と同じ基準(既存の重複定義の流儀に倣う。combo-odds-key.ts 等参照)。 */
+const MAX_UMABAN = 18;
+
+/**
+ * 地方(NAR)3連複オッズの軸馬別AJAXフラグメントのURL(機能D-2b-B・Issue #33)。
+ *
+ * `narTrioOddsPageUrl` のJSDoc参照: `type=b7&race_id=...`(クエリ未指定)は軸1固定の
+ * C(n-1,2)件しか返さないため、全組合せC(n,3)を得るには軸馬(`jiku`)を切り替えながら
+ * 本URLを複数回叩く必要がある。ページ内JS(`view_3odds_normal`)が実際に呼ぶAJAX GETと
+ * 同一の形(実測: `scripts/fetch-nar-trio-axis-fixture.ts` で `jiku=1` を取得しフィクスチャ化
+ * 済み。`docs/wide-trio-odds-investigation.md` §3.2)。
+ *
+ * `jiku` は馬番(1〜{@link MAX_UMABAN}の整数)。呼び出し側が構築する引数であり市場データでは
+ * ないため、契約違反(非有限・小数・0・負値・上限超過)は throw する(`ev/combo-bet-allocation.ts`
+ * の `validateTopFinishCount`/`validateCandidates` と同じ「入口検証の二層原則」における
+ * 門番側の扱い)。
+ */
+export function narTrioOddsAxisUrl(raceId: RaceId, jiku: number): string {
+  if (!Number.isInteger(jiku) || jiku < 1 || jiku > MAX_UMABAN) {
+    throw new Error(
+      `軸馬番(jiku)は1〜${MAX_UMABAN}の整数である必要があります(jiku=${jiku})`,
+    );
+  }
+  return `${NAR_BASE}/odds/odds_get_form.html?type=b7&race_id=${raceId}&jiku=${jiku}`;
 }

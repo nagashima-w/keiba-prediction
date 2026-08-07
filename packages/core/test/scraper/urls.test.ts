@@ -14,6 +14,7 @@ import {
   narOddsPageUrl,
   NarUnsupportedError,
   narRaceListSubUrl,
+  narTrioOddsAxisUrl,
   narTrioOddsPageUrl,
   narWideOddsPageUrl,
   oddsApiUrl,
@@ -201,6 +202,30 @@ describe("narWideOddsPageUrl/narTrioOddsPageUrl(地方 ワイド・三連複オ�
   });
 });
 
+describe("narTrioOddsAxisUrl(地方3連複の軸馬別AJAXフラグメントURL。機能D-2b-B・Issue #33)", () => {
+  it("type=b7固定・raceId/jikuクエリ付きのURLを返すこと", () => {
+    expect(narTrioOddsAxisUrl(narRaceId, 1)).toBe(
+      "https://nar.netkeiba.com/odds/odds_get_form.html?type=b7&race_id=202654071210&jiku=1",
+    );
+    // 上限(18)も正常系として通ること
+    expect(narTrioOddsAxisUrl(narRaceId, 18)).toBe(
+      "https://nar.netkeiba.com/odds/odds_get_form.html?type=b7&race_id=202654071210&jiku=18",
+    );
+  });
+
+  it.each([
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+    ["-Infinity", -Infinity],
+    ["小数(1.5)", 1.5],
+    ["0", 0],
+    ["負値(-1)", -1],
+    ["上限超過(19)", 19],
+  ])("jikuが契約違反(%s)の場合は投げること", (_label, jiku) => {
+    expect(() => narTrioOddsAxisUrl(narRaceId, jiku)).toThrow();
+  });
+});
+
 describe("gradeWinnerApiUrl/gradeWinnerRefererUrl/gradeWinnerOriginUrl(過去10年結果API。タスク機能B: 中央/地方でホストを出し分け)", () => {
   it("中央race_idではrace.netkeiba.comのURL・Referer(past10.html)・Originを返すこと", () => {
     expect(gradeWinnerApiUrl(raceId)).toBe("https://race.netkeiba.com/race_api/");
@@ -240,6 +265,7 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.trioOddsApiUrl).toBe(trioOddsApiUrl);
     expect(mod.narWideOddsPageUrl).toBe(narWideOddsPageUrl);
     expect(mod.narTrioOddsPageUrl).toBe(narTrioOddsPageUrl);
+    expect(mod.narTrioOddsAxisUrl).toBe(narTrioOddsAxisUrl);
   });
 
   it("不採用となったnewspaperUrlは公開されないこと", async () => {

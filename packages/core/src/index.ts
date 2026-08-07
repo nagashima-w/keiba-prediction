@@ -48,6 +48,7 @@ export {
   horseUrl,
   narOddsPageUrl,
   narRaceListSubUrl,
+  narTrioOddsAxisUrl,
   narTrioOddsPageUrl,
   NarUnsupportedError,
   narWideOddsPageUrl,
