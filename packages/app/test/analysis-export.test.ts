@@ -257,6 +257,45 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
   });
 
   describe("組合せオッズ(ワイド・三連複。機能D-2c第3段・Issue #28: 一次データを記録のみ残す)", () => {
+    /**
+     * hasOwnPropertyの簡潔な別名(code-reviewer指摘対応: analysis-pipeline.test.tsの
+     * 8状態〈wideCombo有無×trioCombo有無×comboOdds有無〉パターンをこのファイルにも横展開する。
+     * 「undefinedという値の代入」と「キー自体が無いこと」はJSON.stringifyでは区別できないため、
+     * hasOwnPropertyで直接キーの有無を見る)。
+     */
+    const hasOwn = (obj: object, key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(obj, key);
+
+    /** ワイド・三連複を含むraceDataを組み立てる(odds/metaの3フィールドを個別に上書きできる)。 */
+    function makeComboRaceData(overrides: {
+      wideCombo?: Record<string, number | null>;
+      trioCombo?: Record<string, number | null>;
+      comboOdds?: {
+        wide?: ReturnType<typeof makeComboOddsFetchOutcome>;
+        trio?: ReturnType<typeof makeComboOddsFetchOutcome>;
+      };
+    }): RaceData {
+      return makeRaceData({
+        odds: {
+          officialDatetime: "2026-07-24 09:00:00",
+          oddsStatus: "result",
+          win: { 1: { odds: 2.5, ninki: 1 }, 2: { odds: 8.0, ninki: 4 } },
+          place: {
+            1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 },
+            2: { oddsMin: 2.0, oddsMax: 2.5, ninki: 4 },
+          },
+          ...(overrides.wideCombo !== undefined ? { wideCombo: overrides.wideCombo } : {}),
+          ...(overrides.trioCombo !== undefined ? { trioCombo: overrides.trioCombo } : {}),
+        },
+        meta: {
+          fetchedAt: "2026-07-24T09:00:00.000Z",
+          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
+          warnings: [],
+          ...(overrides.comboOdds !== undefined ? { comboOdds: overrides.comboOdds } : {}),
+        },
+      });
+    }
+
     it("OFF(includeComboOdds未使用): race.odds.wideCombo/trioCombo・race.meta.comboOddsが" +
       "undefinedのままなら、スナップショットにキー自体が生えないこと(受け入れ条件7)", () => {
       // makeRaceData()の既定odds/metaにはwideCombo/trioCombo/comboOddsを含めていない
@@ -267,13 +306,186 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       expect(race.meta.comboOdds).toBeUndefined();
 
       const snapshot = buildRaceSnapshot(race);
-      expect("wideCombo" in snapshot).toBe(false);
-      expect("trioCombo" in snapshot).toBe(false);
-      expect("comboOdds" in snapshot).toBe(false);
+      expect(hasOwn(snapshot, "wideCombo")).toBe(false);
+      expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(hasOwn(snapshot, "comboOdds")).toBe(false);
     });
 
-    it("ON・取得成功: race.odds.wideCombo/trioCombo・race.meta.comboOddsの値が欠落なく写ること(受け入れ条件7)", () => {
-      const race = makeRaceData({
+    it("ON・取得成功: race.odds.wideCombo/trioCombo・race.meta.comboOddsの値が欠落なく写ること(受け入れ条件7・3キーすべて有)", () => {
+      const race = makeComboRaceData({
+        wideCombo: { "1-2": 3.4 },
+        trioCombo: { "1-2-3": 12.5 },
+        comboOdds: {
+          wide: makeComboOddsFetchOutcome("available"),
+          trio: makeComboOddsFetchOutcome("available"),
+        },
+      });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.wideCombo).toEqual({ "1-2": 3.4 });
+      expect(hasOwn(snapshot, "wideCombo")).toBe(true);
+      expect(snapshot.trioCombo).toEqual({ "1-2-3": 12.5 });
+      expect(hasOwn(snapshot, "trioCombo")).toBe(true);
+      expect(snapshot.comboOdds).toEqual({
+        wide: makeComboOddsFetchOutcome("available"),
+        trio: makeComboOddsFetchOutcome("available"),
+      });
+      expect(hasOwn(snapshot, "comboOdds")).toBe(true);
+    });
+
+    /**
+     * 非対称ケース(code-reviewer指摘: 「trioComboの条件式がwideCombo側の条件を見る」変異
+     * 〈`...(race.odds.wideCombo !== undefined ? { trioCombo: ... } : {})`〉が、
+     * 「両方値あり」「両方未設定」という対称な入力だけでは検知できないことが実際に確認された
+     * 〈レビュアーが注入し32件全緑で通過〉。analysis-pipeline.test.tsの8状態パターンを
+     * このファイルにも横展開し、片方だけ設定・もう片方は未取得(キー自体無し)を両方向で固定する。
+     */
+    it("wideComboのみ設定・trioComboは未設定(キー自体無し)のとき、両者が互いに影響し合わず独立して伝播すること(非対称ケース)", () => {
+      const race = makeComboRaceData({ wideCombo: { "1-2": 3.4 } });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.wideCombo).toEqual({ "1-2": 3.4 });
+      expect(hasOwn(snapshot, "wideCombo")).toBe(true);
+      expect(snapshot.trioCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(snapshot.comboOdds).toBeUndefined();
+      expect(hasOwn(snapshot, "comboOdds")).toBe(false);
+    });
+
+    it("trioComboのみ設定・wideComboは未設定(キー自体無し)のとき、両者が互いに影響し合わず独立して伝播すること(非対称ケース・逆方向)", () => {
+      const race = makeComboRaceData({ trioCombo: { "1-2-3": 12.5 } });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.trioCombo).toEqual({ "1-2-3": 12.5 });
+      expect(hasOwn(snapshot, "trioCombo")).toBe(true);
+      expect(snapshot.wideCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "wideCombo")).toBe(false);
+      expect(snapshot.comboOdds).toBeUndefined();
+      expect(hasOwn(snapshot, "comboOdds")).toBe(false);
+    });
+
+    it("wideComboとcomboOddsのみ設定・trioComboは未設定(キー自体無し)のとき、3キーとも独立して伝播すること(混在ケース)", () => {
+      const comboOdds = { wide: makeComboOddsFetchOutcome("available") };
+      const race = makeComboRaceData({ wideCombo: { "1-2": 3.4 }, comboOdds });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.wideCombo).toEqual({ "1-2": 3.4 });
+      expect(hasOwn(snapshot, "wideCombo")).toBe(true);
+      expect(snapshot.comboOdds).toEqual(comboOdds);
+      expect(hasOwn(snapshot, "comboOdds")).toBe(true);
+      expect(snapshot.trioCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+    });
+
+    it("trioComboとcomboOddsのみ設定・wideComboは未設定(キー自体無し)のとき、3キーとも独立して伝播すること(混在ケース・逆方向)", () => {
+      const comboOdds = { trio: makeComboOddsFetchOutcome("available") };
+      const race = makeComboRaceData({ trioCombo: { "1-2-3": 12.5 }, comboOdds });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.trioCombo).toEqual({ "1-2-3": 12.5 });
+      expect(hasOwn(snapshot, "trioCombo")).toBe(true);
+      expect(snapshot.comboOdds).toEqual(comboOdds);
+      expect(hasOwn(snapshot, "comboOdds")).toBe(true);
+      expect(snapshot.wideCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "wideCombo")).toBe(false);
+    });
+
+    describe("3状態(未取得〈undefined〉/空({})/値あり)の区別、およびcomboOdds.<betType>.stateが唯一の判別子であること(受け入れ条件7)", () => {
+      it("wideCombo: {}(発売なし/未発売)と{}(取得失敗)をcomboOdds.wide.stateで区別できること", () => {
+        const unavailableSnapshot = buildRaceSnapshot(
+          makeComboRaceData({
+            wideCombo: {},
+            comboOdds: { wide: makeComboOddsFetchOutcome("unavailable") },
+          }),
+        );
+        expect(unavailableSnapshot.wideCombo).toEqual({});
+        expect(unavailableSnapshot.comboOdds?.wide?.state).toBe("unavailable");
+
+        const failedSnapshot = buildRaceSnapshot(
+          makeComboRaceData({
+            wideCombo: {},
+            comboOdds: { wide: makeComboOddsFetchOutcome("failed") },
+          }),
+        );
+        expect(failedSnapshot.wideCombo).toEqual({});
+        expect(failedSnapshot.comboOdds?.wide?.state).toBe("failed");
+
+        // wideCombo単体(いずれも{})では区別できず、comboOdds.wide.stateが区別する唯一の手段であること。
+        expect(unavailableSnapshot.wideCombo).toEqual(failedSnapshot.wideCombo);
+        expect(unavailableSnapshot.comboOdds?.wide?.state).not.toBe(
+          failedSnapshot.comboOdds?.wide?.state,
+        );
+      });
+
+      it("trioCombo: {}(発売なし/未発売)と{}(取得失敗)をcomboOdds.trio.stateで区別できること(wide側と同じ観点を三連複にも横展開)", () => {
+        const unavailableSnapshot = buildRaceSnapshot(
+          makeComboRaceData({
+            trioCombo: {},
+            comboOdds: { trio: makeComboOddsFetchOutcome("unavailable") },
+          }),
+        );
+        expect(unavailableSnapshot.trioCombo).toEqual({});
+        expect(unavailableSnapshot.comboOdds?.trio?.state).toBe("unavailable");
+
+        const failedSnapshot = buildRaceSnapshot(
+          makeComboRaceData({
+            trioCombo: {},
+            comboOdds: { trio: makeComboOddsFetchOutcome("failed") },
+          }),
+        );
+        expect(failedSnapshot.trioCombo).toEqual({});
+        expect(failedSnapshot.comboOdds?.trio?.state).toBe("failed");
+
+        expect(unavailableSnapshot.trioCombo).toEqual(failedSnapshot.trioCombo);
+        expect(unavailableSnapshot.comboOdds?.trio?.state).not.toBe(
+          failedSnapshot.comboOdds?.trio?.state,
+        );
+      });
+
+      it("未取得(キー自体無し)と空({})は別状態であること(wideCombo/trioComboそれぞれ)", () => {
+        const unfetched = buildRaceSnapshot(makeRaceData());
+        expect(hasOwn(unfetched, "wideCombo")).toBe(false);
+        expect(hasOwn(unfetched, "trioCombo")).toBe(false);
+
+        const empty = buildRaceSnapshot(
+          makeComboRaceData({ wideCombo: {}, trioCombo: {} }),
+        );
+        expect(hasOwn(empty, "wideCombo")).toBe(true);
+        expect(empty.wideCombo).toEqual({});
+        expect(hasOwn(empty, "trioCombo")).toBe(true);
+        expect(empty.trioCombo).toEqual({});
+      });
+    });
+
+    describe("入力×出力の対応表 + 定数置換(.claude/agents/code-reviewer.mdの新条項)", () => {
+      // buildRaceSnapshotはrace.odds/race.metaから「写す」関数であるため、出力を実装内の
+      // 何らかの固定値に置き換えても検知できることを、非デフォルト値のフィクスチャで確認する。
+      it("wideCombo/trioCombo/comboOddsの値は、実装内に無い非デフォルト値でも欠落なく写ること(定数置換の余地が無いことの確認)", () => {
+        const race = makeComboRaceData({
+          wideCombo: { "3-4": 99.9 }, // 他のどのテストとも異なる値。
+          trioCombo: { "3-4-5": 88.8 },
+          comboOdds: {
+            wide: makeComboOddsFetchOutcome("failed"),
+            trio: makeComboOddsFetchOutcome("unavailable"),
+          },
+        });
+        const snapshot = buildRaceSnapshot(race);
+        expect(snapshot.wideCombo).toEqual({ "3-4": 99.9 });
+        expect(snapshot.trioCombo).toEqual({ "3-4-5": 88.8 });
+        expect(snapshot.comboOdds?.wide?.state).toBe("failed");
+        expect(snapshot.comboOdds?.trio?.state).toBe("unavailable");
+      });
+    });
+  });
+
+  describe("horsesブロックの行ごとの写像(受け入れ条件7周辺。第2段boss差し戻し論点の横展開)", () => {
+    /**
+     * 2頭の値をすべて異ならせたraceDataを組み立てる(第2段「行ごとの写像を、値の種類がある
+     * 入力で固定する」の教訓: 全ての行が同じ値だと、行を取り違える変異〈umabanをハードコードする等〉
+     * を検知できない)。
+     */
+    function makeTwoDistinctHorsesRaceData(): RaceData {
+      return makeRaceData({
         odds: {
           officialDatetime: "2026-07-24 09:00:00",
           oddsStatus: "result",
@@ -282,73 +494,56 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
             1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 },
             2: { oddsMin: 2.0, oddsMax: 2.5, ninki: 4 },
           },
-          wideCombo: { "1-2": 3.4 },
-          trioCombo: { "1-2-3": 12.5 },
-        },
-        meta: {
-          fetchedAt: "2026-07-24T09:00:00.000Z",
-          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
-          warnings: [],
-          comboOdds: {
-            wide: makeComboOddsFetchOutcome("available"),
-            trio: makeComboOddsFetchOutcome("available"),
-          },
         },
       });
+    }
 
-      const snapshot = buildRaceSnapshot(race);
-      expect(snapshot.wideCombo).toEqual({ "1-2": 3.4 });
-      expect(snapshot.trioCombo).toEqual({ "1-2-3": 12.5 });
-      expect(snapshot.comboOdds).toEqual({
-        wide: makeComboOddsFetchOutcome("available"),
-        trio: makeComboOddsFetchOutcome("available"),
+    it("2頭それぞれの出馬表項目・単複オッズ・調教が、umabanに対応する値のまま独立して写ること(行の取り違え検知)", () => {
+      const snapshot = buildRaceSnapshot(makeTwoDistinctHorsesRaceData());
+      const h1 = snapshot.horses.find((h) => h.umaban === 1)!;
+      const h2 = snapshot.horses.find((h) => h.umaban === 2)!;
+
+      // 前提固定: 2頭の値がすべて異なること(空振り防止。同じ値なら取り違えても気付けない)。
+      expect(h1).not.toEqual(h2);
+      expect(h1.winOdds).not.toBe(h2.winOdds);
+      expect(h1.popularity).not.toBe(h2.popularity);
+      expect(h1.placeOddsMin).not.toBe(h2.placeOddsMin);
+      expect(h1.name).not.toBe(h2.name);
+      expect(h1.oikiriCritic).not.toBe(h2.oikiriCritic);
+
+      // h1・h2それぞれの値を個別に固定する(片方だけでは行の取り違えを検知できない)。
+      expect(h1).toEqual({
+        umaban: 1,
+        wakuban: 1,
+        name: "アルファ",
+        sex: "牡",
+        age: 4,
+        kinryo: 57,
+        jockeyName: "テスト騎手",
+        trainerName: "テスト調教師",
+        bodyWeight: 480,
+        winOdds: 2.5,
+        popularity: 1,
+        placeOddsMin: 1.2,
+        oikiriCritic: "動き良好",
+        oikiriRank: "A",
       });
-    });
-
-    it("ON・空({})の原因(発売なし/未発売 と 取得失敗)をcomboOdds.<betType>.stateで区別できること(受け入れ条件7)", () => {
-      const unavailableRace = makeRaceData({
-        odds: {
-          officialDatetime: "2026-07-24 09:00:00",
-          oddsStatus: "result",
-          win: {},
-          place: {},
-          wideCombo: {},
-        },
-        meta: {
-          fetchedAt: "2026-07-24T09:00:00.000Z",
-          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
-          warnings: [],
-          comboOdds: { wide: makeComboOddsFetchOutcome("unavailable") },
-        },
+      expect(h2).toEqual({
+        umaban: 2,
+        wakuban: 2,
+        name: "ブラボー",
+        sex: "牝",
+        age: 3,
+        kinryo: 54,
+        jockeyName: "テスト騎手2",
+        trainerName: "テスト調教師2",
+        bodyWeight: null,
+        winOdds: 8.0,
+        popularity: 4,
+        placeOddsMin: 2.0,
+        oikiriCritic: null,
+        oikiriRank: null,
       });
-      const unavailableSnapshot = buildRaceSnapshot(unavailableRace);
-      expect(unavailableSnapshot.wideCombo).toEqual({});
-      expect(unavailableSnapshot.comboOdds?.wide?.state).toBe("unavailable");
-
-      const failedRace = makeRaceData({
-        odds: {
-          officialDatetime: "2026-07-24 09:00:00",
-          oddsStatus: "result",
-          win: {},
-          place: {},
-          wideCombo: {},
-        },
-        meta: {
-          fetchedAt: "2026-07-24T09:00:00.000Z",
-          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
-          warnings: [],
-          comboOdds: { wide: makeComboOddsFetchOutcome("failed") },
-        },
-      });
-      const failedSnapshot = buildRaceSnapshot(failedRace);
-      expect(failedSnapshot.wideCombo).toEqual({});
-      expect(failedSnapshot.comboOdds?.wide?.state).toBe("failed");
-
-      // wideCombo単体(いずれも{})では区別できず、comboOdds.wide.stateが区別する唯一の手段であること。
-      expect(unavailableSnapshot.wideCombo).toEqual(failedSnapshot.wideCombo);
-      expect(unavailableSnapshot.comboOdds?.wide?.state).not.toBe(
-        failedSnapshot.comboOdds?.wide?.state,
-      );
     });
   });
 });
