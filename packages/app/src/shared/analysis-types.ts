@@ -314,11 +314,28 @@ export interface AnalysisResult {
    * ワイドオッズ(馬番の組の正規化キー〈例"0102"〉→オッズ下限。core
    * `OddsSnapshot.wideCombo` のプレーン写し。機能D-2c第1段・Issue #28)。
    *
-   * **3状態(#33で確立した思想をそのまま引き継ぐ)**:
-   * - このキー自体が無い(undefined): 組合せオッズを**未取得**(`scrapeRace`の
-   *   `includeComboOdds`が未指定・false。現状は常にこの状態=第1段では既定値を渡さない)。
-   * - 空オブジェクト(`{}`): 取得を試みたが**発売なし**(市場が首尾一貫して未発売)。
-   * - 値を持つオブジェクト: 取得できた組合せの下限オッズ(組ごとに `null` は個別の欠損)。
+   * **状態(キー有無・空/値の別)と原因は1対1に対応しない(boss差し戻し2026-08-11で訂正。
+   * 修正前の記述は「判定不能」を「判定結果」に誤ラベルする、本リポジトリで繰り返している
+   * 欠陥クラスそのものだった)**:
+   * - このキー自体が無い(undefined): 「取得結果を持たない」ことは確かだが、原因は1つに
+   *   絞れない。(a) `scrapeRace`の`includeComboOdds`が未指定・false(そもそも取得を
+   *   試みていない。第1段は常にこの状態)、または (b) `includeComboOdds:true`でも
+   *   ワイドの取得処理(`fetchComboBetTypeOdds`)が想定外の例外を投げ`scrape-race.ts`側で
+   *   catchされた場合、のいずれもこの状態になる。**後者では`comboOdds`(下記)自体は
+   *   〈3連複側の結果を伴って〉設定されうる。`wideCombo`のundefinedと`comboOdds`の
+   *   undefinedは独立した別々の事象**であり、どちらか一方から他方を推測してはならない。
+   * - 空オブジェクト(`{}`): 「1件も取得できなかった」ことは確かだが、これも原因は
+   *   1つに絞れない。(a) `state==="unavailable"`(市場が首尾一貫して未発売/発売なし。
+   *   状態②③)、(b) `state==="failed"`(全軸・全試行がHTTP失敗や構造異常で取得できず、
+   *   ②③〈発売なし〉とは断定できない。状態④)、のいずれでも`{}`になり、値だけでは
+   *   区別できない。
+   * - 値を持つオブジェクト: `state==="available"`(1件以上取得できた。部分被覆を含む)。
+   *
+   * **原因を正しく判別する唯一の手段は `comboOdds.wide.state`**
+   * (`"available" | "unavailable" | "failed"`。値・キー有無だけを見て「発売なし」等と
+   * 断定しないこと)。core `comboOddsWarningMessage`(`scrape-race.ts`)が
+   * 「発売なし/未発売〈状態②③〉とは異なる」とわざわざ明記して混同を防いでいるのと同じ
+   * 区別であり、この`wideCombo`単体の値からは再現できない。
    *
    * **`Record`である理由(`ReadonlyMap`を載せない)**: `AnalysisResult`はIPC(`webContents.send`/
    * `ipcMain.handle`の戻り値)を経由する。`Map`をここに載せると`JSON.stringify`/IPC経由で
@@ -327,14 +344,22 @@ export interface AnalysisResult {
   readonly wideCombo?: Record<string, number | null>;
   /**
    * 3連複オッズ(馬番の組の正規化キー〈例"010203"〉→オッズ。単一値。core
-   * `OddsSnapshot.trioCombo` のプレーン写し)。3状態・`Record`である理由は `wideCombo` と同じ。
+   * `OddsSnapshot.trioCombo` のプレーン写し)。状態と原因が1対1に対応しないこと・
+   * `Record`である理由は `wideCombo` と同じ(原因の判別は`comboOdds.trio.state`を見ること)。
    */
   readonly trioCombo?: Record<string, number | null>;
   /**
    * 組合せオッズ(ワイド・3連複)の取得結果(core `RaceDataMeta.comboOdds` のプレーン写し。
-   * 機能D-2c第1段・Issue #28)。`wideCombo`/`trioCombo`と同じく、組合せオッズを取得した
-   * ときだけ設定される(現状は第1段では常にundefined。取得自体は`includeComboOdds`が
-   * trueのときのみ発生し、第1段はこれを既定falseで固定配線している)。
+   * 機能D-2c第1段・Issue #28)。このフィールド自身の有無は`wideCombo`/`trioCombo`とは異なり
+   * `includeComboOdds`の指定と1対1で対応する(`scrapeRace`は`includeComboOdds:true`のとき、
+   * ワイド・3連複いずれかの取得処理が例外で失敗しても`comboOdds`自体〈`wide`/`trio`が
+   * それぞれoptionalなオブジェクト〉は必ず設定する。現状は第1段では常にundefined。
+   * 取得自体は`includeComboOdds`がtrueのときのみ発生し、第1段はこれを既定falseで
+   * 固定配線している)。
+   *
+   * `wide`/`trio`それぞれの`state`(`"available" | "unavailable" | "failed"`)が、
+   * `wideCombo`/`trioCombo`が空(`{}`)になった原因(発売なし/未発売なのか、取得失敗
+   * なのか)を判別する唯一の手段である(`wideCombo`のJSDoc参照)。
    */
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
 }
