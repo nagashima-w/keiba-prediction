@@ -123,7 +123,12 @@ export interface ComboOddsCellView {
 export interface ComboOddsCellConflictEntryView {
   /** 軸馬番。 */
   readonly axis: number;
-  /** その軸で採用されなかった側のセル。 */
+  /**
+   * その軸のセル(衝突に関与した全軸のセルを軸昇順で保持する。マージ後に採用されたセルを
+   * 含む。必ずしも非採用側とは限らない。core `ComboOddsCellConflictEntry` のJSDoc・
+   * `mergeAxisComboOddsMaps`〈combo-odds-key.ts〉参照。code-reviewer指摘・要修正2対応:
+   * 「採用されなかった側のセル」という誤った限定を取り除いた)。
+   */
   readonly cell: ComboOddsCellView;
 }
 

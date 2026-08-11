@@ -2840,6 +2840,70 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(Object.prototype.hasOwnProperty.call(result, "trioCombo")).toBe(true);
     });
 
+    /**
+     * 非対称ケース(code-reviewer指摘・要修正1): wideCombo/trioComboは条件付きspreadで
+     * それぞれ独立に判定しているため、両者が常に同時に有/無で動く入力だけでは
+     * 「wideComboの条件式とtrioComboの条件式を取り違える」変異を検知できない
+     * (実際にレビュアーが注入して確認: 982件全緑で検知されず)。
+     * 「片方だけ設定・もう片方は未取得(キー自体無し)」を両方向で固定することで、
+     * 2つの条件式が互いに独立して正しく動いていることを保証する。
+     */
+    it("wideComboのみ設定・trioComboは未設定(キー自体無し)のとき、両者が互いに影響し合わず独立して伝播すること(非対称ケース)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          wideCombo: { "0102": 1.5 },
+          // trioComboはキー自体を持たせない(=未取得のまま。base.oddsも元々持たない)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({ "0102": 1.5 });
+      expect(Object.prototype.hasOwnProperty.call(result, "wideCombo")).toBe(true);
+      expect(result.trioCombo).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(result, "trioCombo")).toBe(false);
+    });
+
+    it("trioComboのみ設定・wideComboは未設定(キー自体無し)のとき、両者が互いに影響し合わず独立して伝播すること(非対称ケース・逆方向)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          trioCombo: { "010203": 2.3 },
+          // wideComboはキー自体を持たせない(=未取得のまま。base.oddsも元々持たない)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      expect(Object.prototype.hasOwnProperty.call(result, "trioCombo")).toBe(true);
+      expect(result.wideCombo).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(result, "wideCombo")).toBe(false);
+    });
+
     it("race.meta.comboOddsが設定されていれば診断値(requestCount等)が欠落なく結果に伝播すること(JSON往復含む)", async () => {
       const base = fakeRaceData(RACE_ID);
       const comboOdds = fakeComboOddsScrapeOutcome();
@@ -2879,6 +2943,35 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
         comboOdds: typeof comboOdds;
       };
       expect(roundTripped.comboOdds).toEqual(comboOdds);
+    });
+
+    it("wideCombo・trioCombo・comboOddsが同時に設定されていれば、3つとも取りこぼしなく同時に伝播すること(code-reviewer指摘・提案2採用)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const comboOdds = fakeComboOddsScrapeOutcome();
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          wideCombo: { "0102": 1.5 },
+          trioCombo: { "010203": 2.3 },
+        },
+        meta: { ...base.meta, comboOdds },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({ "0102": 1.5 });
+      expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      expect(result.comboOdds).toEqual(comboOdds);
     });
   });
 });
