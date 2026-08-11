@@ -21,19 +21,28 @@ import {
 // テストヘルパー(定義したヘルパーはすべて自己テストする。「テストを書くときの注意」参照)
 // ============================================================================
 
-/** テスト用のAnalysisRowを組み立てる補助関数(bet-allocation-view.test.tsの流儀を踏襲)。 */
+/**
+ * テスト用のAnalysisRowを組み立てる補助関数(bet-allocation-view.test.tsの流儀を踏襲)。
+ *
+ * boss メタレビュー指摘(入力フィールド→出力フィールドの写像の取り違え検知)対応:
+ * `wakuban`/`prior`/`careerRunCount` を既定値のまま固定していると、これらが誤って
+ * 読まれても(型は一致するため)テストで検知できない。個別にoverride可能にし、
+ * 各フィールドの既定値を互いに異なる値にしておく(umaban≠wakuban、prior≠adjustedProb、
+ * careerRunCount≠placeOddsMin≠ev)ことで、取り違えテストが「値が違う」ことを頼りに
+ * 検知できるようにする。
+ */
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
   return {
     umaban: overrides.umaban,
-    wakuban: 1,
+    wakuban: overrides.wakuban ?? 90, // umaban(1〜18想定)と衝突しない値を既定にする。
     horseName: `${overrides.umaban}番`,
-    prior: 0.3,
+    prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,
     placeOddsMin: overrides.placeOddsMin === undefined ? 3 : overrides.placeOddsMin,
     ev: overrides.ev === undefined ? 1.5 : overrides.ev,
     isPositive: overrides.isPositive ?? true,
     reason: null,
-    careerRunCount: 5,
+    careerRunCount: overrides.careerRunCount === undefined ? 999 : overrides.careerRunCount,
     mark: null,
     evEstimated: overrides.evEstimated ?? false,
     conditionChangeTags: [],
@@ -122,6 +131,25 @@ describe("テストヘルパー自己テスト", () => {
     expect(row({ umaban: 1, placeOddsMin: null }).placeOddsMin).toBeNull();
     expect(row({ umaban: 1, ev: null }).ev).toBeNull();
     expect(row({ umaban: 1, isPositive: false }).isPositive).toBe(false);
+  });
+
+  it("row(): 既定値はumaban/wakuban/prior/adjustedProb/placeOddsMin/ev/careerRunCountが互いに異なること(取り違え検知の前提)", () => {
+    const r = row({ umaban: 1 });
+    // 前提固定: 同じ型(number同士・number|null同士)の隣接フィールドがすべて異なる既定値を
+    // 持つこと。値が一致していると、実装が誤って隣のフィールドを読んでも値が変わらず
+    // 検知できない(boss メタレビュー指摘の核心)。
+    const numericGroupA = [r.umaban, r.wakuban, r.prior, r.adjustedProb];
+    expect(new Set(numericGroupA).size).toBe(numericGroupA.length);
+    const numericGroupB = [r.placeOddsMin, r.ev, r.careerRunCount];
+    expect(new Set(numericGroupB).size).toBe(numericGroupB.length);
+  });
+
+  it("row(): wakuban/prior/careerRunCountもoverridesで個別に上書きできること", () => {
+    expect(row({ umaban: 1, wakuban: 7 }).wakuban).toBe(7);
+    expect(row({ umaban: 1, prior: 0.77 }).prior).toBe(0.77);
+    expect(row({ umaban: 1, careerRunCount: 42 }).careerRunCount).toBe(42);
+    // 明示的なnullも既定値へフォールバックしないこと。
+    expect(row({ umaban: 1, careerRunCount: null }).careerRunCount).toBeNull();
   });
 
   it("raceInput(): 既定はoddsStatus='result'であり、overridesで上書きできること", () => {
@@ -409,6 +437,141 @@ describe("wide/trioの非対称入力(取り違え検知。code-reviewer指摘)"
     expect(result.diagnostics.trio.fieldPresence).toBe("present");
     expect(result.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(0);
     expect(result.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// 入力フィールド→出力フィールドの写像(取り違え検知。bossメタレビュー指摘)
+//
+// wide/trioという「出力どうしの対」の水平展開(前段)だけでは、「入力フィールド→出力
+// フィールドの写像」の取り違えは検知できなかった(adjustedProb→prior、placeOddsMin↔ev)。
+// 同じ型(number同士・number|null同士・boolean同士)の隣接フィールドは型検査を通過するため、
+// テストでしか固定できない(boss指摘)。mixed-candidates.tsが実際にAnalysisRowから読む
+// フィールドと、取り違えても型検査を通過する「同じ型の他フィールド」を対応表にして洗い出す。
+//
+// | 読む位置(mixed-candidates.ts) | 読んでいるフィールド | 同じ型で取り違えうる他フィールド | 検知テスト |
+// |---|---|---|---|
+// | horses[].umaban | umaban (number) | wakuban (number) | 「umaban→umabansへの写像」 |
+// | horses[].placeProb | adjustedProb (number) | prior/umaban/wakuban (number) | 「combo EVはadjustedProbに感応・priorに絶縁」 |
+// | place候補 umabans[0] | umaban (number) | wakuban (number) | 「umaban→umabansへの写像」 |
+// | place候補 odds | placeOddsMin (number\|null) | ev/careerRunCount (number\|null) | 「place候補のodds/evの写像」 |
+// | place候補 ev | ev (number\|null) | placeOddsMin/careerRunCount (number\|null) | 「place候補のodds/evの写像」 |
+// | place候補化条件 | isPositive (boolean) | evEstimated (boolean) | 「isPositiveのみに従うこと」 |
+//
+// (umaban↔wakuban・isPositive↔evEstimatedはboss指摘の2件そのものではないが、同じ理由で
+// 型検査を素通りしうる隣接フィールドとして本段で洗い出し、追加で潰した)
+// ============================================================================
+
+/** candidatesからumabansが完全一致する候補を1件取り出す(見つからなければ例外)。 */
+function findCandidateByUmabans(
+  candidates: readonly AllocationCandidate[],
+  umabans: readonly number[],
+): AllocationCandidate {
+  const found = candidates.find(
+    (c) => c.umabans.length === umabans.length && c.umabans.every((u, i) => u === umabans[i]),
+  );
+  if (!found) {
+    throw new Error(`候補が見つかりません(umabans=${umabans.join(",")})`);
+  }
+  return found;
+}
+
+describe("入力フィールド→出力フィールドの写像(取り違え検知)", () => {
+  it("findCandidateByUmabans(): 完全一致する候補を返し、無ければ例外を投げること(自己テスト)", () => {
+    const candidates: AllocationCandidate[] = [
+      { umabans: [1, 2], odds: 3, ev: 2, isPositive: true },
+      { umabans: [1, 3], odds: 5, ev: 4, isPositive: true },
+    ];
+    expect(findCandidateByUmabans(candidates, [1, 3]).odds).toBe(5);
+    expect(() => findCandidateByUmabans(candidates, [2, 3])).toThrow();
+  });
+
+  // umaban1の確率だけを可変にし、他3頭(umaban2〜4)は固定の非対称な確率を持たせる。
+  // 全頭を一様確率にすると「条件付きベルヌーイモデルの対称性」により、共通の確率値を
+  // 変えてもペアの的中確率が変化しない退化ケースになる(実測: 4頭一様0.9と一様0.1で
+  // ペア[1,2]のhitProbが厳密に一致した。対称な入力では差が出ないことを先に確認したうえで
+  // 非対称な確率設定に直した)。
+  const FIXED_OTHER_PROBS = [0.6, 0.5, 0.4]; // umaban2・3・4に固定で割り当てる非対称な確率。
+
+  /** umaban1の確率だけをvaryingProbで差し替え、他3頭は固定確率を持つ4頭のワイド候補結果を作る。 */
+  function buildWideWithVaryingUmaban1(varyingAdjustedProb: number, varyingPrior: number) {
+    const umabans = [1, 2, 3, 4];
+    const rows = umabans.map((umaban, i) =>
+      row({
+        umaban,
+        adjustedProb: i === 0 ? varyingAdjustedProb : FIXED_OTHER_PROBS[i - 1]!,
+        prior: i === 0 ? varyingPrior : FIXED_OTHER_PROBS[i - 1]!,
+        isPositive: false,
+        ev: null,
+        placeOddsMin: null,
+      }),
+    );
+    return buildMixedCandidates(raceInput({ rows, wideCombo: fullOddsRecord(umabans, 2, 100000) }));
+  }
+
+  it("【boss要修正1】ワイド・3連複のevはadjustedProbを変えると変化すること(prior固定・他頭の確率は非対称に固定)", () => {
+    const high = buildWideWithVaryingUmaban1(0.95, 0.1);
+    const low = buildWideWithVaryingUmaban1(0.05, 0.1); // priorは固定、adjustedProbだけを変える。
+    const evHigh = findCandidateByUmabans(high.candidates, [1, 2]).ev;
+    const evLow = findCandidateByUmabans(low.candidates, [1, 2]).ev;
+    // 前提固定: 両者とも候補化されていること(比較対象が両方とも存在する)。
+    expect(Number.isFinite(evHigh)).toBe(true);
+    expect(Number.isFinite(evLow)).toBe(true);
+    expect(evHigh).not.toBe(evLow);
+    expect(evHigh).toBeGreaterThan(evLow); // umaban1の複勝圏内確率が高いほどhitProbも高くなるはず。
+  });
+
+  it("【boss要修正1】ワイド・3連複のevはpriorを変えても変化しないこと(adjustedProb固定・他頭の確率は非対称に固定)", () => {
+    const priorLow = buildWideWithVaryingUmaban1(0.5, 0.1);
+    const priorHigh = buildWideWithVaryingUmaban1(0.5, 0.9); // adjustedProbは固定、priorだけを変える。
+    const evA = findCandidateByUmabans(priorLow.candidates, [1, 2]).ev;
+    const evB = findCandidateByUmabans(priorHigh.candidates, [1, 2]).ev;
+    expect(evA).toBe(evB); // priorは同時分布に一切影響しないため厳密に一致する。
+  });
+
+  it("【boss要修正2】place候補のoddsはplaceOddsMin由来・evはev由来であること(careerRunCountという同型の第3フィールドにも惑わされない)", () => {
+    const rows = [
+      ...allCandidateRows(7),
+      row({ umaban: 8, placeOddsMin: 3, ev: 1.5, careerRunCount: 999, isPositive: true }),
+    ];
+    const result = buildMixedCandidates(raceInput({ rows }));
+    const candidate = result.candidates.find((c) => c.umabans.length === 1 && c.umabans[0] === 8)!;
+    // 前提固定: placeOddsMin(3)/ev(1.5)/careerRunCount(999)が互いに異なる値であること
+    // (値が一致していると取り違えを検知できない)。
+    expect(new Set([3, 1.5, 999]).size).toBe(3);
+    expect(candidate.odds).toBe(3);
+    expect(candidate.ev).toBe(1.5);
+  });
+
+  it("umaban→umabansの写像はwakuban(同じnumber型の隣接フィールド)を読まないこと", () => {
+    // umaban=[11,12,13]・wakuban=[91,92,93]と、値域が重ならない形で明確に区別する。
+    const rows = [11, 12, 13].map((umaban, i) => row({ umaban, wakuban: 91 + i, isPositive: false, ev: null, placeOddsMin: null }));
+    const umabans = [11, 12, 13];
+    const wakubans = [91, 92, 93];
+    const result = buildMixedCandidates(
+      raceInput({ rows, wideCombo: fullOddsRecord(umabans, 2, 100000), trioCombo: fullOddsRecord(umabans, 3, 100000) }),
+    );
+    // 前提固定: 候補が実際に生成されていること(空振り防止)。
+    expect(result.candidates.length).toBeGreaterThan(0);
+    for (const c of result.candidates) {
+      for (const u of c.umabans) {
+        expect(umabans).toContain(u);
+        expect(wakubans).not.toContain(u);
+      }
+    }
+  });
+
+  it("place候補化の判定はisPositiveに従い、evEstimated(同じboolean型の隣接フィールド)には従わないこと", () => {
+    // isPositive=true・evEstimated=falseの馬(8番)と、isPositive=false・evEstimated=trueの馬(1〜7番)。
+    // evEstimatedを読んでいれば1〜7番が候補化され8番が除外される(逆転)はずだが、
+    // isPositiveに従うなら8番だけが候補化される。
+    const rows = [
+      ...allCandidateRows(7).map((r) => row({ umaban: r.umaban, isPositive: false, evEstimated: true })),
+      row({ umaban: 8, isPositive: true, evEstimated: false }),
+    ];
+    const result = buildMixedCandidates(raceInput({ rows }));
+    const placeUmabans = result.candidates.filter((c) => c.umabans.length === 1).map((c) => c.umabans[0]);
+    expect(placeUmabans).toEqual([8]);
   });
 });
 
