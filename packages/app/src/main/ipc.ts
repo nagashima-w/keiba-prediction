@@ -225,6 +225,10 @@ const resourceManager = new ResourceManager<PipelineResources>({
       // クリップ幅版(タスクD-2)。設定画面のセレクタで選んだ版をそのまま渡す
       // (未設定・不正値は pipeline-deps.ts 側の resolveClipVariant が対照へフォールバックする)。
       clipVariant: settings.clipVariant,
+      // 組合せオッズ取得(機能D-2c第3段・Issue #28)。設定画面のチェックボックスをそのまま渡す
+      // (未設定は pipeline-deps.ts 側の `??` が既定false〈組合せオッズを取得しない〉へ
+      // フォールバックする)。
+      includeComboOdds: settings.includeComboOdds,
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,
       // HttpClient(core)のサポート外charset警告をログ基盤へ接続する(要修正4)。

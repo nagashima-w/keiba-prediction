@@ -119,6 +119,12 @@ export interface PipelineWiringConfig {
     message: string,
     context: { readonly raceId: string; readonly stopReason: string | null },
   ) => void;
+  /**
+   * ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。省略時・未指定は
+   * `deps.scrape` が `??` で既定false(組合せオッズを取得しない)へフォールバックする
+   * (第1段までの既定挙動と発行URL列・リクエスト数が完全に一致する)。
+   */
+  readonly includeComboOdds?: boolean;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -221,13 +227,15 @@ export function createPipelineDeps(
     : null;
 
   const deps: AnalysisPipelineDeps = {
-    // 組合せオッズ(ワイド・3連複、機能D-2c第1段・Issue #28): 第3引数(ScrapeRaceOptions)を
-    // 明示的に渡す「口」だけをここで作る。値は既定false固定(未取得のまま)であり、
-    // 既存の挙動(第3引数を渡さない呼び出し)と発行URL列・リクエスト数は完全に一致する
-    // (includeComboOdds未指定時の既定値もfalseのため。scrape-race.test.tsの回帰テスト参照)。
-    // 設定画面からの切り替え(config.includeComboOdds等の追加)は第3段のスコープ。
+    // 組合せオッズ(ワイド・3連複、機能D-2c第3段・Issue #28): 設定画面のチェックボックス
+    // (config.includeComboOdds)をそのまま第3引数(ScrapeRaceOptions)へ渡す。`??`で既定falseへ
+    // フォールバックするため、未指定時は第1段までと発行URL列・リクエスト数が完全に一致する
+    // (`??`を落とすとconfig.includeComboOddsがundefinedのまま素通りし、既定OFFの契約が壊れる)。
+    // bypassOddsCache(第3引数の他フィールド)・now/ttl(第2引数)は渡さない(対応表D1・D3。
+    // 組合せオッズはcore側〈scrape-race.ts:446〉が単勝・複勝と同じoddsFetchOptionsを流用するため、
+    // ここを触ると単勝・複勝のキャッシュ挙動まで変わる)。
     scrape: (raceId: RaceId) =>
-      scrapeRace(raceId, { fetcher }, { includeComboOdds: false }),
+      scrapeRace(raceId, { fetcher }, { includeComboOdds: config.includeComboOdds ?? false }),
     analyze,
     saveAnalysis: (record) => store.saveAnalysis(record),
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。

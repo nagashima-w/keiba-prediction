@@ -61,6 +61,7 @@ const validUpdate: SettingsUpdate = {
   bankroll: 10000,
   perRaceCap: 5000,
   kellyFraction: 0.5,
+  includeComboOdds: false,
 };
 
 /** 登録済みハンドラを取得する。 */

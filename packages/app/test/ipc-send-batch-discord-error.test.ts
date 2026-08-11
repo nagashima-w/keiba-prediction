@@ -80,6 +80,7 @@ async function saveValidWebhookUrl(): Promise<void> {
     bankroll: 10000,
     perRaceCap: 5000,
     kellyFraction: 0.5,
+    includeComboOdds: false,
   };
   await handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 }

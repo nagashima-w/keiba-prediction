@@ -94,6 +94,30 @@ export const BET_ALLOCATION_LABELS = {
   kellyFraction: "ケリー係数(上級)",
 } as const;
 
+/**
+ * 組合せオッズ取得設定(機能D-2c第3段・Issue #28)の文言(1箇所に集約。SettingsView.tsxが
+ * 参照する。JSXに文言を直書きしない)。boss着手前ゲート裁定: 「記録のみで配分提案には
+ * 使わない」ことを補助文に明示すること自体が必須要件(第3段時点ではこの記述が事実であることを
+ * AC1のgrep結果〈配分計算に関わる差分0行・buildMixedCandidates呼び出し元0件〉が裏付ける)。
+ * 数値(最大16リクエスト・約24秒・+約5分)は`docs/wide-trio-odds-investigation.md`§5の
+ * n-2と1.5秒レート制限からの**導出値**であり、測定値の口調にしない。
+ */
+export const INCLUDE_COMBO_ODDS_LABELS = {
+  /** 設定画面のチェックボックスのラベル。 */
+  checkbox: "ワイド・三連複のオッズも取得する(上級)",
+  /** チェックボックス直下の補助文。 */
+  help:
+    "取得に時間がかかります(地方競馬の三連複は1レースあたり最大16リクエスト・約24秒。12レース一括で+約5分)。現時点では取得したオッズを配分提案には使いません(記録のみ)。",
+} as const;
+
+/**
+ * 一括分析画面に、設定(includeComboOdds)がONのときだけ表示する固定注記1行(機能D-2c第3段)。
+ * BET_ALLOCATION_UNSET_NOTE(bet-allocation-view.ts)と同じ「画面全体で1点だけの固定注記」の
+ * 前例に倣う。対象レース数・所要時間の動的な見積りは含めない(#15/第4段のスコープ)。
+ */
+export const INCLUDE_COMBO_ODDS_BATCH_NOTE =
+  "設定でワイド・三連複のオッズ取得をONにしています。取得したオッズは記録のみで、配分提案にはまだ使用していません。";
+
 /** バイアス重みの日本語ラベル(フォーム表示用)。 */
 export const BIAS_WEIGHT_LABELS: Record<BiasWeightKey, string> = {
   trackCondition: "馬場状態適性(道悪)",
@@ -167,6 +191,15 @@ export interface AppSettings {
    * (見送り理由④)はUIから到達不能にする(settings.json手編集・core直接利用でのみ到達する)。
    */
   readonly kellyFraction: number;
+  /**
+   * ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。既定false(オプトイン)。
+   * core `ScrapeRaceOptions.includeComboOdds` と同名にして追跡を1語で通す(main/pipeline-deps.ts が
+   * `createPipelineDeps` の config 経由で scrapeRace の第3引数へそのまま渡す)。
+   * **第3段時点では取得したオッズを配分提案には一切使わない(記録のみ)**。券種横断の配分ロジックへの
+   * 反映は別タスクのスコープ(反証B: Σx*はallocateGeneralBetsを実行して初めて得られる値のため、
+   * この段では指標を一切算出しない)。
+   */
+  readonly includeComboOdds: boolean;
 }
 
 /**
@@ -200,6 +233,8 @@ export interface MaskedSettings {
   readonly perRaceCap: number;
   /** 馬券配分のケリー係数λ(機能C-2)。往復編集フォームとして表示するため平文のまま返す。 */
   readonly kellyFraction: number;
+  /** ワイド・三連複のオッズも取得するか(機能D-2c第3段)。往復編集フォームとして表示するためそのまま返す。 */
+  readonly includeComboOdds: boolean;
 }
 
 /**
@@ -230,6 +265,12 @@ export interface SettingsUpdate {
   readonly perRaceCap: number;
   /** 馬券配分のケリー係数λ(機能C-2)。範囲外・非数値はmain側で既定(0.5)へフォールバック。 */
   readonly kellyFraction: number;
+  /**
+   * ワイド・三連複のオッズも取得するか(機能D-2c第3段)。boolean以外(main側coerceSettings)は
+   * 既定(false)へフォールバック(チェックボックス由来でUI側からは不正値が作れないため、
+   * `isValid*`バリデータは設けない。`autoSendDiscord`と同じ流儀)。
+   */
+  readonly includeComboOdds: boolean;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */

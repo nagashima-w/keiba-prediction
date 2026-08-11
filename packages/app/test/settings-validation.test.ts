@@ -6,6 +6,8 @@ import {
   BET_ALLOCATION_LABELS,
   BIAS_WEIGHT_KEYS,
   BIAS_WEIGHT_LABELS,
+  INCLUDE_COMBO_ODDS_BATCH_NOTE,
+  INCLUDE_COMBO_ODDS_LABELS,
   isValidBankroll,
   isValidKellyFraction,
   isValidPerRaceCap,
@@ -138,6 +140,25 @@ describe("設定フォームの入力検証(純関数)", () => {
       for (const key of BASE_SCORE_WEIGHT_KEYS) {
         expect(BASE_SCORE_WEIGHT_LABELS[key]).toBeTruthy();
       }
+    });
+  });
+
+  describe("INCLUDE_COMBO_ODDS_LABELS(組合せオッズ取得設定の文言。機能D-2c第3段・Issue #28)", () => {
+    it("チェックボックスのラベルが空でない", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toBeTruthy();
+    });
+
+    it("補助文が『記録のみで配分提案には使わない』ことを明示している(boss裁定の必須文言、受け入れ条件9)", () => {
+      // 「ONにしたのに配分が変わらない」という未実装を不具合と誤認させないための必須記述。
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("配分提案には使いません");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("記録のみ");
+    });
+  });
+
+  describe("INCLUDE_COMBO_ODDS_BATCH_NOTE(一括分析画面の固定注記。機能D-2c第3段・Issue #28)", () => {
+    it("空でなく、数値(所要時間等の動的見積り)を含まないこと(#15/第4段のスコープとの境界)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toBeTruthy();
+      expect(/[0-9]/.test(INCLUDE_COMBO_ODDS_BATCH_NOTE)).toBe(false);
     });
   });
 });

@@ -59,6 +59,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   bankroll: 0,
   perRaceCap: 0,
   kellyFraction: 0.5,
+  // 組合せオッズ取得(機能D-2c第3段・Issue #28)。既定OFF(オプトイン。U-A既定OFFの定義元)。
+  includeComboOdds: false,
 };
 
 /** raw が number かつ有限かつ述語を満たせば採用、さもなくば fallback。 */
@@ -200,6 +202,12 @@ export function coerceSettings(raw: unknown): AppSettings {
     bankroll: coerceBankroll(rec.bankroll),
     perRaceCap: coercePerRaceCap(rec.perRaceCap),
     kellyFraction: coerceKellyFraction(rec.kellyFraction),
+    // 組合せオッズ取得(機能D-2c第3段)。チェックボックス由来でUI側からは不正値が作れないため、
+    // autoSendDiscordと同じ流儀(boolean以外は既定falseへフォールバック。isValid*は設けない)。
+    includeComboOdds:
+      typeof rec.includeComboOdds === "boolean"
+        ? rec.includeComboOdds
+        : DEFAULT_APP_SETTINGS.includeComboOdds,
   };
 }
 
@@ -263,6 +271,8 @@ export function maskSettings(
     bankroll: settings.bankroll,
     perRaceCap: settings.perRaceCap,
     kellyFraction: settings.kellyFraction,
+    // 組合せオッズ取得(機能D-2c第3段)も往復編集フォームとして表示するため平文のまま返す。
+    includeComboOdds: settings.includeComboOdds,
   };
 }
 
@@ -288,6 +298,7 @@ export function applyUpdate(
     bankroll: update.bankroll,
     perRaceCap: update.perRaceCap,
     kellyFraction: update.kellyFraction,
+    includeComboOdds: update.includeComboOdds,
   });
 }
 

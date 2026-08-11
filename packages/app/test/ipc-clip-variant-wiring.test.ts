@@ -98,6 +98,7 @@ describe("ipc: 設定のクリップ幅版(clipVariant)をcreatePipelineDepsへ�
       bankroll: 10000,
       perRaceCap: 5000,
       kellyFraction: 0.5,
+      includeComboOdds: false,
     };
     await saveHandler(fakeEvent, update);
 

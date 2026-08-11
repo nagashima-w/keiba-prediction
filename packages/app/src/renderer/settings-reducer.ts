@@ -74,6 +74,8 @@ export interface SettingsFormState {
   readonly perRaceCap: string;
   /** 馬券配分のケリー係数λ(文字列。機能C-2)。 */
   readonly kellyFraction: string;
+  /** ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。既定false。 */
+  readonly includeComboOdds: boolean;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -120,6 +122,7 @@ export type SettingsAction =
   | { readonly type: "総資金入力"; readonly value: string }
   | { readonly type: "1レース上限入力"; readonly value: string }
   | { readonly type: "ケリー係数入力"; readonly value: string }
+  | { readonly type: "組合せオッズ取得切替"; readonly value: boolean }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
   | { readonly type: "保存失敗"; readonly message: string }
@@ -186,6 +189,8 @@ export interface SettingsSnapshot {
   readonly perRaceCap: string;
   /** 馬券配分のケリー係数λ(文字列。機能C-2)。 */
   readonly kellyFraction: string;
+  /** ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。 */
+  readonly includeComboOdds: boolean;
 }
 
 /** 空文字ベースの初期スナップショットを作る。 */
@@ -201,6 +206,7 @@ function emptySnapshot(): SettingsSnapshot {
     bankroll: "",
     perRaceCap: "",
     kellyFraction: "",
+    includeComboOdds: false,
   };
 }
 
@@ -221,6 +227,7 @@ export function createInitialSettingsState(): SettingsFormState {
     bankroll: "",
     perRaceCap: "",
     kellyFraction: "",
+    includeComboOdds: false,
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -257,6 +264,7 @@ function applyMasked(
   const bankroll = String(settings.bankroll);
   const perRaceCap = String(settings.perRaceCap);
   const kellyFraction = String(settings.kellyFraction);
+  const includeComboOdds = settings.includeComboOdds;
   return {
     ...state,
     loaded: true,
@@ -274,6 +282,7 @@ function applyMasked(
     bankroll,
     perRaceCap,
     kellyFraction,
+    includeComboOdds,
     savedSnapshot: {
       discordWebhookUrl,
       evThreshold,
@@ -285,6 +294,7 @@ function applyMasked(
       bankroll,
       perRaceCap,
       kellyFraction,
+      includeComboOdds,
     },
   };
 }
@@ -345,6 +355,9 @@ export function settingsReducer(
 
     case "ケリー係数入力":
       return { ...state, kellyFraction: action.value };
+
+    case "組合せオッズ取得切替":
+      return { ...state, includeComboOdds: action.value };
 
     case "保存開始":
       return { ...state, status: "saving", message: null };
@@ -422,6 +435,7 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     bankroll: Number(state.bankroll),
     perRaceCap: Number(state.perRaceCap),
     kellyFraction: Number(state.kellyFraction),
+    includeComboOdds: state.includeComboOdds,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
@@ -462,6 +476,9 @@ export function isDirty(state: SettingsFormState): boolean {
     return true;
   }
   if (state.kellyFraction !== snap.kellyFraction) {
+    return true;
+  }
+  if (state.includeComboOdds !== snap.includeComboOdds) {
     return true;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

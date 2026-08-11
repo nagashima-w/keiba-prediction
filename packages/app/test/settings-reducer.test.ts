@@ -45,6 +45,7 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
     bankroll: 0,
     perRaceCap: 0,
     kellyFraction: 0.5,
+    includeComboOdds: false,
     ...overrides,
   };
 }
@@ -98,6 +99,19 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.kellyFraction).toBe("0.3");
   });
 
+  it("読込成功でincludeComboOdds(機能D-2c第3段)を反映すること(OFF/ON両方向)", () => {
+    expect(loadedState(fakeMasked({ includeComboOdds: false })).includeComboOdds).toBe(false);
+    expect(loadedState(fakeMasked({ includeComboOdds: true })).includeComboOdds).toBe(true);
+  });
+
+  it("includeComboOddsとautoSendDiscordが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    const s = loadedState(
+      fakeMasked({ autoSendDiscord: true, includeComboOdds: false }),
+    );
+    expect(s.autoSendDiscord).toBe(true);
+    expect(s.includeComboOdds).toBe(false);
+  });
+
   it("各フィールドの入力アクションで値を更新する", () => {
     let s = loadedState();
     s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
@@ -122,6 +136,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     s = settingsReducer(s, { type: "総資金入力", value: "500000" });
     s = settingsReducer(s, { type: "1レース上限入力", value: "30000" });
     s = settingsReducer(s, { type: "ケリー係数入力", value: "0.4" });
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: true });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -134,6 +149,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.bankroll).toBe("500000");
     expect(s.perRaceCap).toBe("30000");
     expect(s.kellyFraction).toBe("0.4");
+    expect(s.includeComboOdds).toBe(true);
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -286,6 +302,28 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(update.perRaceCap).toBe(0);
     expect(update.kellyFraction).toBe(0.5);
   });
+
+  it("includeComboOdds(機能D-2c第3段)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: true });
+    expect(buildUpdate(s).includeComboOdds).toBe(true);
+
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: false });
+    expect(buildUpdate(s).includeComboOdds).toBe(false);
+  });
+
+  it("includeComboOdds未編集(既定false)はそのまま含めること", () => {
+    expect(buildUpdate(loadedState()).includeComboOdds).toBe(false);
+  });
+
+  it("includeComboOddsとautoSendDiscordが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "自動送信切替", value: true });
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: false });
+    const update = buildUpdate(s);
+    expect(update.autoSendDiscord).toBe(true);
+    expect(update.includeComboOdds).toBe(false);
+  });
 });
 
 describe("isDirty(未保存インジケータ、Issue #11)", () => {
@@ -316,6 +354,10 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     { name: "総資金入力", action: { type: "総資金入力", value: "500000" } },
     { name: "1レース上限入力", action: { type: "1レース上限入力", value: "30000" } },
     { name: "ケリー係数入力", action: { type: "ケリー係数入力", value: "0.4" } },
+    {
+      name: "組合せオッズ取得切替",
+      action: { type: "組合せオッズ取得切替", value: true },
+    },
     ...BIAS_WEIGHT_KEYS.map((key) => ({
       name: `バイアス重み入力(${key})`,
       action: {

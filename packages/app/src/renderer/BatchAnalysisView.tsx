@@ -17,6 +17,7 @@ import {
   type BetAllocationSettings,
   type RaceAllocationView,
 } from "./bet-allocation-view.js";
+import { INCLUDE_COMBO_ODDS_BATCH_NOTE } from "../shared/settings.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   collectPerRaceHighlights,
@@ -87,6 +88,13 @@ export interface BatchAnalysisViewProps {
    * BET_ALLOCATION_UNSET_NOTEを1点だけ表示する(仕様「未設定時は…注記は画面全体で1点だけ」)。
    */
   readonly betAllocationSettings: BetAllocationSettings & { readonly evThreshold: number };
+  /**
+   * 組合せオッズ取得設定(機能D-2c第3段・Issue #28)がONか。ONのときだけ画面全体で
+   * INCLUDE_COMBO_ODDS_BATCH_NOTEを1点表示する(BET_ALLOCATION_UNSET_NOTEと同じ
+   * 「画面全体で1点だけの固定注記」の前例に倣う)。配分計算には一切関わらない
+   * (bet-allocation-view.tsは変更していない。App.tsxがgetSettingsの戻り値から渡す)。
+   */
+  readonly includeComboOdds: boolean;
 }
 
 const thStyle: React.CSSProperties = {
@@ -357,6 +365,16 @@ export function BatchAnalysisView(
   return (
     <section style={{ marginTop: "1.5rem" }}>
       <h2 style={{ fontSize: "1.05rem" }}>一括分析</h2>
+
+      {/*
+        組合せオッズ取得設定(機能D-2c第3段・Issue #28): 設定がONのときだけ表示する固定注記1行
+        (数値を含まない。対象レース数・所要時間の動的な見積りは#15/第4段のスコープ)。
+      */}
+      {props.includeComboOdds && (
+        <p style={{ color: "#a60", fontSize: "0.85rem", margin: "0 0 0.5rem" }}>
+          {INCLUDE_COMBO_ODDS_BATCH_NOTE}
+        </p>
+      )}
 
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
         <button

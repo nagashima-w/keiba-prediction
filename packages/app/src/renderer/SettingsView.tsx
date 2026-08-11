@@ -18,6 +18,7 @@ import {
   BIAS_WEIGHT_KEYS,
   BIAS_WEIGHT_LABELS,
   CLIP_VARIANT_IDS,
+  INCLUDE_COMBO_ODDS_LABELS,
   isValidBankroll,
   isValidKellyFraction,
   isValidPerRaceCap,
@@ -282,6 +283,26 @@ export function SettingsView(): React.JSX.Element {
           />{" "}
           分析結果を自動でDiscordに送信する
         </label>
+      </div>
+
+      {/*
+       * 組合せオッズ取得(機能D-2c第3段・Issue #28)。既定OFF(opt-in)。第3段時点では取得した
+       * オッズを配分提案には一切使わない(記録のみ)ため、その旨を補助文で必ず明示する
+       * (INCLUDE_COMBO_ODDS_LABELS.help。ONにしたのに配分が変わらないという未実装を
+       * 不具合と誤認させないための必須記述。boss着手前ゲート裁定)。
+       */}
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeComboOdds}
+            onChange={(e) =>
+              dispatch({ type: "組合せオッズ取得切替", value: e.target.checked })
+            }
+          />{" "}
+          {INCLUDE_COMBO_ODDS_LABELS.checkbox}
+        </label>
+        <p style={noteStyle}>{INCLUDE_COMBO_ODDS_LABELS.help}</p>
       </div>
 
       {/*

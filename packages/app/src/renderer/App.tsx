@@ -109,6 +109,10 @@ export function App(): React.JSX.Element {
     evThreshold: 1.0,
   });
 
+  // 組合せオッズ取得設定(機能D-2c第3段・Issue #28)。IPC追加はゼロ(getSettingsの戻り値を流用する。
+  // betAllocationSettingsと同じ流儀)。一括分析画面の固定注記表示にのみ使い、配分計算には渡さない。
+  const [includeComboOddsSetting, setIncludeComboOddsSetting] = useState(false);
+
   // 実行中バッチの世代ID。一括分析開始時に固定し、完了で null に戻す。
   // 進捗イベントにはこの「開始時に固定した runId」を添えるため、完了後に遅れて届いた
   // 旧バッチの進捗は reducer の runId ガードで確実に弾かれる(恒真ガードにならない)。
@@ -175,6 +179,7 @@ export function App(): React.JSX.Element {
           kellyFraction: s.kellyFraction,
           evThreshold: s.evThreshold,
         });
+        setIncludeComboOddsSetting(s.includeComboOdds);
       })
       .catch(() => {
         setNotify({ webhookConfigured: false, autoSend: false });
@@ -659,6 +664,7 @@ export function App(): React.JSX.Element {
             onSendDiscord={() => handleSendDiscord(completedOutcomes)}
             onExportAnalysis={handleExportAnalysis}
             betAllocationSettings={betAllocationSettings}
+            includeComboOdds={includeComboOddsSetting}
           />
 
           <PeriodBatchView

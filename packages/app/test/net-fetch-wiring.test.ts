@@ -115,6 +115,7 @@ describe("ipc: net.fetch アダプタの注入", () => {
       bankroll: 10000,
       perRaceCap: 5000,
       kellyFraction: 0.5,
+      includeComboOdds: false,
     };
     handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 

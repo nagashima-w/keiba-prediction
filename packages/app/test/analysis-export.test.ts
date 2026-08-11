@@ -7,7 +7,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { RaceData, RaceResultDetail, RaceResultEntry, StoredAnalysis } from "@keiba/core";
+import type {
+  ComboOddsFetchOutcome,
+  RaceData,
+  RaceResultDetail,
+  RaceResultEntry,
+  StoredAnalysis,
+} from "@keiba/core";
 
 import {
   buildAnalysisExportDocument,
@@ -93,6 +99,48 @@ function makeRaceData(overrides: Partial<RaceData> = {}): RaceData {
     ...overrides,
   } as RaceData;
 }
+
+/**
+ * テスト用の最小 ComboOddsFetchOutcome(機能D-2c第3段・Issue #28)を組み立てる。
+ * state="available"なら1件取得できた体、それ以外(unavailable/failed)は0件取得の体にする
+ * (発売なし/未発売と取得失敗はどちらもwideCombo/trioComboが{}になるが、この`state`だけが
+ * 両者を区別する唯一の手段であるため〈shared/analysis-types.tsのJSDoc参照〉)。
+ */
+function makeComboOddsFetchOutcome(
+  state: ComboOddsFetchOutcome["state"],
+): ComboOddsFetchOutcome {
+  return {
+    state,
+    diagnostics: {
+      betType: "wide",
+      requestCount: 1,
+      expectedComboCount: 1,
+      obtainedComboCount: state === "available" ? 1 : 0,
+      missingComboCount: state === "available" ? 0 : 1,
+      axisUmabans: [],
+      attempts: [],
+      numericConflictCount: 0,
+      nullWinConflictCount: 0,
+      conflictSamples: [],
+    },
+  };
+}
+
+describe("makeComboOddsFetchOutcome(テストヘルパーの自己検証)", () => {
+  it("stateをそのまま反映し、available以外はobtainedComboCount=0にすること", () => {
+    const available = makeComboOddsFetchOutcome("available");
+    expect(available.state).toBe("available");
+    expect(available.diagnostics.obtainedComboCount).toBe(1);
+
+    const unavailable = makeComboOddsFetchOutcome("unavailable");
+    expect(unavailable.state).toBe("unavailable");
+    expect(unavailable.diagnostics.obtainedComboCount).toBe(0);
+
+    const failed = makeComboOddsFetchOutcome("failed");
+    expect(failed.state).toBe("failed");
+    expect(failed.diagnostics.obtainedComboCount).toBe(0);
+  });
+});
 
 /** テスト用の最小 StoredAnalysis を組み立てる。 */
 function makeStoredAnalysis(overrides: Partial<StoredAnalysis> = {}): StoredAnalysis {
@@ -206,6 +254,102 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
     for (const h of snapshot.horses) {
       expect((h as unknown as Record<string, unknown>).results).toBeUndefined();
     }
+  });
+
+  describe("組合せオッズ(ワイド・三連複。機能D-2c第3段・Issue #28: 一次データを記録のみ残す)", () => {
+    it("OFF(includeComboOdds未使用): race.odds.wideCombo/trioCombo・race.meta.comboOddsが" +
+      "undefinedのままなら、スナップショットにキー自体が生えないこと(受け入れ条件7)", () => {
+      // makeRaceData()の既定odds/metaにはwideCombo/trioCombo/comboOddsを含めていない
+      // (scrapeRaceのincludeComboOdds:false相当)。まず前提を無条件expectで固定する。
+      const race = makeRaceData();
+      expect(race.odds.wideCombo).toBeUndefined();
+      expect(race.odds.trioCombo).toBeUndefined();
+      expect(race.meta.comboOdds).toBeUndefined();
+
+      const snapshot = buildRaceSnapshot(race);
+      expect("wideCombo" in snapshot).toBe(false);
+      expect("trioCombo" in snapshot).toBe(false);
+      expect("comboOdds" in snapshot).toBe(false);
+    });
+
+    it("ON・取得成功: race.odds.wideCombo/trioCombo・race.meta.comboOddsの値が欠落なく写ること(受け入れ条件7)", () => {
+      const race = makeRaceData({
+        odds: {
+          officialDatetime: "2026-07-24 09:00:00",
+          oddsStatus: "result",
+          win: { 1: { odds: 2.5, ninki: 1 }, 2: { odds: 8.0, ninki: 4 } },
+          place: {
+            1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 },
+            2: { oddsMin: 2.0, oddsMax: 2.5, ninki: 4 },
+          },
+          wideCombo: { "1-2": 3.4 },
+          trioCombo: { "1-2-3": 12.5 },
+        },
+        meta: {
+          fetchedAt: "2026-07-24T09:00:00.000Z",
+          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
+          warnings: [],
+          comboOdds: {
+            wide: makeComboOddsFetchOutcome("available"),
+            trio: makeComboOddsFetchOutcome("available"),
+          },
+        },
+      });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.wideCombo).toEqual({ "1-2": 3.4 });
+      expect(snapshot.trioCombo).toEqual({ "1-2-3": 12.5 });
+      expect(snapshot.comboOdds).toEqual({
+        wide: makeComboOddsFetchOutcome("available"),
+        trio: makeComboOddsFetchOutcome("available"),
+      });
+    });
+
+    it("ON・空({})の原因(発売なし/未発売 と 取得失敗)をcomboOdds.<betType>.stateで区別できること(受け入れ条件7)", () => {
+      const unavailableRace = makeRaceData({
+        odds: {
+          officialDatetime: "2026-07-24 09:00:00",
+          oddsStatus: "result",
+          win: {},
+          place: {},
+          wideCombo: {},
+        },
+        meta: {
+          fetchedAt: "2026-07-24T09:00:00.000Z",
+          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
+          warnings: [],
+          comboOdds: { wide: makeComboOddsFetchOutcome("unavailable") },
+        },
+      });
+      const unavailableSnapshot = buildRaceSnapshot(unavailableRace);
+      expect(unavailableSnapshot.wideCombo).toEqual({});
+      expect(unavailableSnapshot.comboOdds?.wide?.state).toBe("unavailable");
+
+      const failedRace = makeRaceData({
+        odds: {
+          officialDatetime: "2026-07-24 09:00:00",
+          oddsStatus: "result",
+          win: {},
+          place: {},
+          wideCombo: {},
+        },
+        meta: {
+          fetchedAt: "2026-07-24T09:00:00.000Z",
+          oddsFetchedAt: "2026-07-24T09:00:00.000Z",
+          warnings: [],
+          comboOdds: { wide: makeComboOddsFetchOutcome("failed") },
+        },
+      });
+      const failedSnapshot = buildRaceSnapshot(failedRace);
+      expect(failedSnapshot.wideCombo).toEqual({});
+      expect(failedSnapshot.comboOdds?.wide?.state).toBe("failed");
+
+      // wideCombo単体(いずれも{})では区別できず、comboOdds.wide.stateが区別する唯一の手段であること。
+      expect(unavailableSnapshot.wideCombo).toEqual(failedSnapshot.wideCombo);
+      expect(unavailableSnapshot.comboOdds?.wide?.state).not.toBe(
+        failedSnapshot.comboOdds?.wide?.state,
+      );
+    });
   });
 });
 
@@ -383,6 +527,55 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
     );
     expect(doc.race.raceName).toBeNull();
     expect(doc.horses[0]!.name).toBeNull();
+  });
+
+  describe("組合せオッズ(機能D-2c第3段・Issue #28)を持たない旧レコード・持つ新レコードの復元(受け入れ条件8)", () => {
+    it("wideCombo/trioCombo/comboOddsキー自体が無い旧形式のraceSnapshotでも例外を投げず、他の項目は復元できること", () => {
+      // 機能D-2c第3段より前に保存された典型的なraceSnapshot(新フィールドのキー自体が無い)。
+      const legacyRaw = {
+        race: { raceName: "旧レコードのレース", courseType: "芝", distance: 1600 },
+        horses: [{ umaban: 1, name: "旧レコードの馬" }],
+      };
+      const doc = buildAnalysisExportDocument(
+        makeInput({
+          analysis: makeStoredAnalysis({ raceSnapshot: legacyRaw }),
+        }),
+      );
+      expect(doc.race.raceName).toBe("旧レコードのレース");
+      expect(doc.horses[0]!.name).toBe("旧レコードの馬");
+    });
+
+    it("wideCombo/trioCombo/comboOddsを持つ新形式のraceSnapshotを渡しても例外を投げず、エクスポートJSONへは新フィールドが漏れないこと(G2: 第3段では露出しない)", () => {
+      const newFormatRaceSnapshot = buildRaceSnapshot(
+        makeRaceData({
+          odds: {
+            officialDatetime: "2026-07-24 09:00:00",
+            oddsStatus: "result",
+            win: { 1: { odds: 2.5, ninki: 1 } },
+            place: { 1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 } },
+            wideCombo: { "1-2": 3.4 },
+          },
+          meta: {
+            fetchedAt: "2026-07-24T09:00:00.000Z",
+            oddsFetchedAt: "2026-07-24T09:00:00.000Z",
+            warnings: [],
+            comboOdds: { wide: makeComboOddsFetchOutcome("available") },
+          },
+        }),
+      );
+      // 前提固定: このraceSnapshotには実際に新フィールドが載っていること。
+      expect(newFormatRaceSnapshot.wideCombo).toEqual({ "1-2": 3.4 });
+
+      const doc = buildAnalysisExportDocument(
+        makeInput({
+          analysis: makeStoredAnalysis({ raceSnapshot: newFormatRaceSnapshot }),
+        }),
+      );
+      expect(doc.race.raceName).toBe("テストステークス");
+      expect("wideCombo" in doc.race).toBe(false);
+      expect("trioCombo" in doc.race).toBe(false);
+      expect("comboOdds" in doc.race).toBe(false);
+    });
   });
 
   it("結果未取込(results/resultDetailともにundefined)ならresultsは空配列になること", () => {
