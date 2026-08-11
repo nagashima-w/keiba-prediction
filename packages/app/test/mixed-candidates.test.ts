@@ -133,15 +133,16 @@ describe("テストヘルパー自己テスト", () => {
     expect(row({ umaban: 1, isPositive: false }).isPositive).toBe(false);
   });
 
-  it("row(): 既定値はumaban/wakuban/prior/adjustedProb/placeOddsMin/ev/careerRunCountが互いに異なること(取り違え検知の前提)", () => {
+  it("row(): 既定値はumaban/wakuban/prior/adjustedProb/placeOddsMin/ev/careerRunCountが型グループを跨いでも互いに異なること(取り違え検知の前提)", () => {
     const r = row({ umaban: 1 });
-    // 前提固定: 同じ型(number同士・number|null同士)の隣接フィールドがすべて異なる既定値を
-    // 持つこと。値が一致していると、実装が誤って隣のフィールドを読んでも値が変わらず
-    // 検知できない(boss メタレビュー指摘の核心)。
-    const numericGroupA = [r.umaban, r.wakuban, r.prior, r.adjustedProb];
-    expect(new Set(numericGroupA).size).toBe(numericGroupA.length);
-    const numericGroupB = [r.placeOddsMin, r.ev, r.careerRunCount];
-    expect(new Set(numericGroupB).size).toBe(numericGroupB.length);
+    // 前提固定: 数値系フィールド7個すべてが互いに異なる既定値を持つこと。
+    // boss指摘: `number`型同士・`number|null`型同士だけでなく、`AllocationCandidate.odds`は
+    // `number`型なので `odds: row.adjustedProb` のような**型グループを跨ぐ**取り違えも
+    // 型検査を通過する。グループ単位の相異(numberグループ内だけ・number|nullグループ内だけ)
+    // では「たまたま2グループ間でも値がかぶっていない」ことまでは保証しないため、7個まとめて
+    // 1つのSetで相異を固定する(将来いずれかの既定値を変更しても、この1行が検知する)。
+    const allNumeric = [r.umaban, r.wakuban, r.prior, r.adjustedProb, r.placeOddsMin, r.ev, r.careerRunCount];
+    expect(new Set(allNumeric).size).toBe(7);
   });
 
   it("row(): wakuban/prior/careerRunCountもoverridesで個別に上書きできること", () => {
@@ -526,21 +527,56 @@ describe("入力フィールド→出力フィールドの写像(取り違え検
     const priorHigh = buildWideWithVaryingUmaban1(0.5, 0.9); // adjustedProbは固定、priorだけを変える。
     const evA = findCandidateByUmabans(priorLow.candidates, [1, 2]).ev;
     const evB = findCandidateByUmabans(priorHigh.candidates, [1, 2]).ev;
+    // 前提固定: 有限値であること(NaN同士はObject.isによるtoBe比較を素通りするため、
+    // 兄弟テスト〈adjustedProb感応性テスト〉と同様に有限性を先に固定する。boss非ブロッキング指摘2)。
+    expect(Number.isFinite(evA)).toBe(true);
+    expect(Number.isFinite(evB)).toBe(true);
     expect(evA).toBe(evB); // priorは同時分布に一切影響しないため厳密に一致する。
   });
 
-  it("【boss要修正2】place候補のoddsはplaceOddsMin由来・evはev由来であること(careerRunCountという同型の第3フィールドにも惑わされない)", () => {
-    const rows = [
-      ...allCandidateRows(7),
-      row({ umaban: 8, placeOddsMin: 3, ev: 1.5, careerRunCount: 999, isPositive: true }),
-    ];
+  /**
+   * 【boss要修正】: 「place候補のodds/evはplaceOddsMin/ev由来」の写像テストが、実際には
+   * 「odds/evが互いに異なるplace候補が2件以上存在する入力」を1つも使っていなかった
+   * (boss実測: フィクスチャ全体でplaceOddsMinを明示している箇所は1件だけで、しかも
+   * row()の既定値〈3〉と同じだった)。そのため次の3変異がいずれも56件全緑のまま検知できなかった:
+   *   - D8: 全候補のodds/evを「race.rows[0]」(最初の行)の値に固定する
+   *     (ループ変数・クロージャの取り違え相当。`.map()`へのリファクタ時に起こりやすい実務上の事故)
+   *   - ev: row.ev を ev: 1.5(フィクスチャ既定値そのものの定数)に置換
+   *   - odds: row.placeOddsMin を odds: 3(同上)に置換
+   * 8頭ぶんのodds/evをすべて互いに異なる値にし、各候補を個別にassertすることで、
+   * 上記3種いずれの変異も「その馬番の候補だけ値が食い違う」形で検知できるようにする
+   * (定数置換・先頭行固定のどちらであっても、8頭中7頭は値が変わってしまうため必ず落ちる)。
+   */
+  it("【boss要修正2】place候補のoddsはplaceOddsMin由来・evはev由来であること(8頭ぶん互いに異なる値で個別にassert)", () => {
+    // umaban→[placeOddsMin, ev]。全8組が互いに異なる値になるよう設計する。
+    const oddsEvByUmaban: ReadonlyMap<number, readonly [number, number]> = new Map([
+      [1, [2.1, 1.05]],
+      [2, [3.4, 2.1]],
+      [3, [5.0, 3.3]],
+      [4, [1.8, 1.2]],
+      [5, [9.9, 5.5]],
+      [6, [4.4, 2.9]],
+      [7, [6.6, 3.9]],
+      [8, [7.7, 2.2]],
+    ]);
+    // 前提固定: oddsが8件とも互いに異なり、evも8件とも互いに異なること(「odds/evが互いに
+    // 異なるplace候補が2件以上」というboss要求の最低条件を満たしたうえで、より強く8件全異にする)。
+    const allOdds = [...oddsEvByUmaban.values()].map(([o]) => o);
+    const allEv = [...oddsEvByUmaban.values()].map(([, e]) => e);
+    expect(new Set(allOdds).size).toBe(8);
+    expect(new Set(allEv).size).toBe(8);
+
+    const rows = [...oddsEvByUmaban.entries()].map(([umaban, [placeOddsMin, ev]]) =>
+      row({ umaban, placeOddsMin, ev, careerRunCount: 900 + umaban, isPositive: true }),
+    );
     const result = buildMixedCandidates(raceInput({ rows }));
-    const candidate = result.candidates.find((c) => c.umabans.length === 1 && c.umabans[0] === 8)!;
-    // 前提固定: placeOddsMin(3)/ev(1.5)/careerRunCount(999)が互いに異なる値であること
-    // (値が一致していると取り違えを検知できない)。
-    expect(new Set([3, 1.5, 999]).size).toBe(3);
-    expect(candidate.odds).toBe(3);
-    expect(candidate.ev).toBe(1.5);
+
+    for (const [umaban, [placeOddsMin, ev]] of oddsEvByUmaban) {
+      const candidate = result.candidates.find((c) => c.umabans.length === 1 && c.umabans[0] === umaban);
+      expect(candidate).toBeDefined();
+      expect(candidate!.odds).toBe(placeOddsMin);
+      expect(candidate!.ev).toBe(ev);
+    }
   });
 
   it("umaban→umabansの写像はwakuban(同じnumber型の隣接フィールド)を読まないこと", () => {
