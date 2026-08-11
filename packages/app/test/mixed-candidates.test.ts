@@ -318,6 +318,101 @@ describe("オッズ状態4×2(wide/trioそれぞれ4状態。(b)と(c)を診断�
 });
 
 // ============================================================================
+// wide/trioの非対称入力(交差配線バグの検知。code-reviewer指摘・要修正1対応)
+//
+// 「オッズ状態4×2」describeの3ケースはいずれも wide と trio に**同じ** state を与えていたため、
+// `comboOddsState` の実装が `betType` を無視して常に `race.comboOdds?.["wide"]?.state` を
+// 読んでいても(=trio側にwideの値を誤って流用しても)44件全緑のまま検知できなかった
+// (code-reviewer実測。`fetchComboBetTypeOdds` はワイド・3連複を独立した2回の呼び出しで取得し、
+// それぞれ独立に例外をcatchするため、`comboOdds.wide.state !== comboOdds.trio.state` は
+// `includeComboOdds` が有効化される次段で実際に発生しうる。production-reachable)。
+// wide/trioのペアを持つ出力(fieldPresence・comboOddsState)について、意図的に非対称な状態を
+// 与えたときに互いを取り違えないことを個別に固定する。
+// ============================================================================
+
+describe("wide/trioの非対称入力(取り違え検知。code-reviewer指摘)", () => {
+  it("comboOddsStateが非対称(wide=available/trio=failed)のとき、互いを取り違えず個別に反映されること", () => {
+    const rows = allCandidateRows(3).map((r) =>
+      row({ umaban: r.umaban, isPositive: false, ev: null, placeOddsMin: null }),
+    );
+    const umabans = umabansOf(3);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        wideCombo: fullOddsRecord(umabans, 2, 2),
+        trioCombo: fullOddsRecord(umabans, 3, 2),
+        comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "failed") },
+      }),
+    );
+    if (result.diagnostics.wide.kind !== "built" || result.diagnostics.trio.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    // 前提固定: wideとtrioで異なるstate値を与えていること(対称値だと検知できない=本describeの主眼)。
+    expect(result.diagnostics.wide.comboOddsState).not.toBe(result.diagnostics.trio.comboOddsState);
+    expect(result.diagnostics.wide.comboOddsState).toBe("available");
+    expect(result.diagnostics.trio.comboOddsState).toBe("failed");
+  });
+
+  it("comboOddsStateが逆向きに非対称(wide=unavailable/trio=available)でも、それぞれ正しく反映されること(片方向だけの固定を避ける)", () => {
+    const rows = allCandidateRows(3).map((r) =>
+      row({ umaban: r.umaban, isPositive: false, ev: null, placeOddsMin: null }),
+    );
+    const umabans = umabansOf(3);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        wideCombo: fullOddsRecord(umabans, 2, 2),
+        trioCombo: fullOddsRecord(umabans, 3, 2),
+        comboOdds: { wide: comboOddsOutcome("wide", "unavailable"), trio: comboOddsOutcome("trio", "available") },
+      }),
+    );
+    if (result.diagnostics.wide.kind !== "built" || result.diagnostics.trio.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.wide.comboOddsState).toBe("unavailable");
+    expect(result.diagnostics.trio.comboOddsState).toBe("available");
+  });
+
+  it("fieldPresenceが非対称(wideCombo=値あり/trioComboキー不在)のとき、互いを取り違えず個別に反映されること", () => {
+    const rows = allCandidateRows(3).map((r) =>
+      row({ umaban: r.umaban, isPositive: false, ev: null, placeOddsMin: null }),
+    );
+    const umabans = umabansOf(3);
+    // trioComboは意図的に省略(キー不在=absent)。comboOddsも省略し、comboOddsStateは
+    // 両者とも"unknown"になる(本ケースの主眼はfieldPresenceの取り違え検知のため、
+    // comboOddsStateは意図的に対称〈unknown/unknown〉のままにする)。
+    const result = buildMixedCandidates(raceInput({ rows, wideCombo: fullOddsRecord(umabans, 2, 2) }));
+    if (result.diagnostics.wide.kind !== "built" || result.diagnostics.trio.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    // 前提固定: wideとtrioで異なるfieldPresence値を与えていること。
+    expect(result.diagnostics.wide.fieldPresence).not.toBe(result.diagnostics.trio.fieldPresence);
+    expect(result.diagnostics.wide.fieldPresence).toBe("present");
+    expect(result.diagnostics.trio.fieldPresence).toBe("absent");
+    // fieldPresence="present"側(wide)は実際に候補が載り、"absent"側(trio)は0件であること
+    // (取り違えていれば、trioの候補にwideのオッズが誤って使われ0件にならない、または
+    // wideの候補がtrioComboの不在に引きずられて0件になる、のいずれかで検知できる)。
+    expect(result.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(3);
+    expect(result.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(0);
+  });
+
+  it("fieldPresenceが逆向きに非対称(wideComboキー不在/trioCombo=値あり)でも、それぞれ正しく反映されること", () => {
+    const rows = allCandidateRows(3).map((r) =>
+      row({ umaban: r.umaban, isPositive: false, ev: null, placeOddsMin: null }),
+    );
+    const umabans = umabansOf(3);
+    const result = buildMixedCandidates(raceInput({ rows, trioCombo: fullOddsRecord(umabans, 3, 2) }));
+    if (result.diagnostics.wide.kind !== "built" || result.diagnostics.trio.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.wide.fieldPresence).toBe("absent");
+    expect(result.diagnostics.trio.fieldPresence).toBe("present");
+    expect(result.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(0);
+    expect(result.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(1);
+  });
+});
+
+// ============================================================================
 // 複勝の除外境界(各単独条件で、その馬だけが除外され他馬に波及しないこと)
 // ============================================================================
 
