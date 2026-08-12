@@ -9,15 +9,23 @@
  * numericConflictCount/nullWinConflictCount/conflictSamples(修正2で追加した転記)が
  * 正しく転記されることを固定する。
  *
- * scripts/ は @keiba/app のワークスペースパッケージではないため、パッケージ内の test/ から
- * 相対パスで直接importする(main()はモジュールのエントリポイントガードにより、importだけでは
- * 発火しない。実行時にネットワークへ出ないことは、このテストがオフラインで通ることで裏付ける)。
+ * 配置(Issue #38): 元々は `packages/app/test/` に置き `../../../scripts/...` で相対 import
+ * していたが、これにより `packages/core/src/**` の src ツリー全体が `packages/app` の
+ * TypeScript プログラムに rootDir 外として引き込まれ、`pnpm -r typecheck` が TS6059 を
+ * 60件出す事故になった(`packages/app/tsconfig.json` の `rootDir` は `@keiba/core` の
+ * `exports` 方針を tsc 側で不可迂回にしている境界であり、緩めない)。
+ * `scripts/` は元々 `tsconfig.scripts.json`(rootDir=リポジトリルート)というパッケージ横断の
+ * 相対 import が設計上許容されたプログラムを持つため、本テストもそちらに属する
+ * `scripts/test/` へ移設した。実行はルートの vitest(`vitest.config.ts`。`test.include` を
+ * `scripts/` 配下に限定)が `pnpm test`(ルート)経由で行う。
+ * main()はモジュールのエントリポイントガードにより、importだけでは発火しない
+ * (実行時にネットワークへ出ないことは、このテストがオフラインで通ることで裏付ける)。
  */
 
 import { describe, expect, it } from "vitest";
-import { parseRaceId, type ComboOddsFetchOutcome, type RaceData } from "@keiba/core";
+import { parseRaceId, type ComboOddsFetchOutcome, type RaceData } from "../../packages/core/src/index.js";
 
-import { buildRaceRecord } from "../../../scripts/investigate-combo-odds-real-fetch.js";
+import { buildRaceRecord } from "../investigate-combo-odds-real-fetch.js";
 
 /** テスト用の最小 RaceData を組み立てる(analysis-export.test.ts の makeRaceData と同型)。 */
 function makeRaceData(overrides: Partial<RaceData> = {}): RaceData {

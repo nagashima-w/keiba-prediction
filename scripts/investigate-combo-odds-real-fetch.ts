@@ -172,9 +172,9 @@ function summarizeDiagnostics(outcome: ComboOddsFetchOutcome | undefined): unkno
  * IO・ネットワークを一切行わない(ライブ取得経路・保存済みファイルからの再生成経路の両方から
  * 呼べるようにするため)。
  *
- * `export`しているのはテスト(`investigate-combo-odds-real-fetch.test.ts`)から直接呼ぶため
- * (code-reviewer指摘・修正3)。合成フィクスチャで「保存済みJSONから決定論的に再生成できる」
- * という`ba32b43`の主張を回帰テストとして固定する。
+ * `export`しているのはテスト(`scripts/test/investigate-combo-odds-real-fetch.test.ts`)から
+ * 直接呼ぶため(code-reviewer指摘・修正3)。合成フィクスチャで「保存済みJSONから決定論的に
+ * 再生成できる」という`ba32b43`の主張を回帰テストとして固定する。
  */
 export function buildRaceRecord(
   target: TargetRace,
@@ -339,9 +339,9 @@ async function main(): Promise<void> {
 
 /**
  * このモジュールが直接実行された(`pnpm tsx scripts/investigate-combo-odds-real-fetch.ts`)場合の
- * みtrue。テスト(`investigate-combo-odds-real-fetch.test.ts`)が`buildRaceRecord`を使うために
- * このモジュールをimportしたときにmain()(ネットワークアクセスを含みうる)が誤発火しないよう、
- * 実行エントリポイントかどうかをここで判定する(Node標準のentry-pointガードパターン)。
+ * みtrue。テスト(`scripts/test/investigate-combo-odds-real-fetch.test.ts`)が`buildRaceRecord`を
+ * 使うためにこのモジュールをimportしたときにmain()(ネットワークアクセスを含みうる)が誤発火
+ * しないよう、実行エントリポイントかどうかをここで判定する(Node標準のentry-pointガードパターン)。
  */
 const isMainModule =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;

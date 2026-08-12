@@ -79,9 +79,17 @@ jobs:
       - name: 依存をインストール
         run: pnpm install --frozen-lockfile
 
-      # 全パッケージ(core + app)のテストが通ることをビルド前の関門にする。
+      # 型検査をテスト・ビルドより前段の関門にする(fail fast。Issue #38)。
+      # ルートの `pnpm typecheck`(= `pnpm -r typecheck && tsc -p tsconfig.scripts.json`)を呼ぶ。
+      # `pnpm -r typecheck` だけでは scripts/ の型検査(tsconfig.scripts.json)が走らない。
+      - name: 型検査を実行
+        run: pnpm typecheck
+
+      # 全パッケージ(core + app)+ ルート(scripts/)のテストが通ることをビルド前の関門にする。
+      # ルートの `pnpm test`(= `pnpm -r test && vitest run`)で scripts/ のテストも対象に含める
+      # (`pnpm -r test` のままだと scripts/ のテストは CI で実行されない)。
       - name: テストを実行
-        run: pnpm -r test
+        run: pnpm test
 
       # renderer(Vite)+ main/preload(esbuild)をビルドする。
       - name: app をビルド

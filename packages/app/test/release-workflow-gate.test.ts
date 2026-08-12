@@ -44,6 +44,10 @@
  *    (付くと公開(action-gh-release)の失敗をジョブが握りつぶし、同じゲートで守られている
  *    掃除ステップが「新 exe が未アップロードのまま」実行されうる。不変条件7が警告する
  *    非アトミック性と同根の実害で、条件式を1文字も変えずに起こせることが実際に確認された)
+ * 11. 型検査ステップ(Issue #38)が存在し、ルートの `pnpm typecheck`
+ *    (= `pnpm -r typecheck && tsc -p tsconfig.scripts.json`。core・app・scripts の3プログラムを
+ *    覆う)を実行し、「app をビルド」ステップより前にある(fail fast: 型検査が壊れた状態で
+ *    ビルド・パッケージングへ進まない)
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -58,6 +62,8 @@ const WORKFLOW_PATH = path.join(
 );
 
 const STEP_NAMES = {
+  typecheck: "型検査を実行",
+  build: "app をビルド",
   publish: "Releases に公開(dev-latest を in-place 更新 / ブランチ push 時)",
   cleanup: "dev-latest の孤児 exe アセットを掃除(現行ファイル名以外を削除)",
   skipNotice: "dev-latest 公開スキップをログに記録(レビュー継続中コミット時)",
@@ -79,6 +85,23 @@ function extractStep(yml: string, stepName: string): string {
     throw new Error(`ステップが見つかりません: ${stepName}`);
   }
   return found;
+}
+
+/**
+ * ステップブロックから `run:` の内容を抽出する。単一行(`run: <cmd>`)・複数行
+ * (`run: |` ブロックスカラー)の両方に対応する(複数行は次のトップレベルキー
+ * (ステップと同じインデント、または step 内の別キー)が現れるまでを本文とみなす)。
+ */
+function extractRunBlock(stepBlock: string): string {
+  const singleLine = stepBlock.match(/^\s*run:\s+(?!\|)(.+)$/m);
+  if (singleLine?.[1] !== undefined) {
+    return singleLine[1].trim();
+  }
+  const blockMatch = stepBlock.match(/^(\s*)run:\s*\|\s*\n([\s\S]*?)(?=\n\1\S|\n {0,7}\S|$)/m);
+  if (blockMatch?.[2] !== undefined) {
+    return blockMatch[2];
+  }
+  throw new Error(`run: が見つかりません:\n${stepBlock}`);
 }
 
 /** ステップブロックから if: 行(1行)を抽出する。 */
@@ -290,8 +313,9 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
       "pnpm をセットアップ",
       "Node.js をセットアップ",
       "依存をインストール",
+      STEP_NAMES.typecheck,
       "テストを実行",
-      "app をビルド",
+      STEP_NAMES.build,
       "electron-builder で exe を生成",
       STEP_NAMES.publish,
       STEP_NAMES.cleanup,
@@ -310,5 +334,19 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     // (dev-latest の資産がゼロになる)と同じ実害を招く。条件式・出現順序を1文字も変えずに
     // 起こせる変異のため、別途この属性の不在を検証する。
     expect(publishStep).not.toContain("continue-on-error");
+  });
+
+  it("型検査ステップが存在し、ルートの pnpm typecheck を実行し、app をビルドするステップより前にある(Issue #38)", () => {
+    const typecheckStep = extractStep(yml, STEP_NAMES.typecheck);
+    const runLine = extractRunBlock(typecheckStep);
+
+    // pnpm -r typecheck だけでは scripts/ の型検査(tsconfig.scripts.json)が走らない
+    // (Issue #38 の事故の直接原因)。ルートの `pnpm typecheck`
+    // (= `pnpm -r typecheck && tsc -p tsconfig.scripts.json`)を呼ぶことを固定する。
+    expect(runLine).toBe("pnpm typecheck");
+
+    const typecheckIndex = stepStartIndex(yml, STEP_NAMES.typecheck);
+    const buildIndex = stepStartIndex(yml, STEP_NAMES.build);
+    expect(typecheckIndex).toBeLessThan(buildIndex);
   });
 });
