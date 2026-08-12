@@ -27,13 +27,21 @@ model: sonnet
 
 ## 検証(完了報告の前に必ず自分で実行する)
 以下の3点を**自分で実行し、実出力を報告に含める**こと。他人の報告や「通るはず」で代替しない。
-1. `pnpm -r test`
-2. `pnpm -r typecheck`
+1. `pnpm test`
+2. `pnpm typecheck`
 3. `pnpm --filter @keiba/app build`
 
 **3 は必須**。vitest は Node 環境で走るため、renderer(ブラウザ向け Vite バンドル)の破綻は
 **テストでも typecheck でも検出できない**(過去に `node:zlib` の混入で CI が落ちた)。
 renderer から core を使うときは**バレル(`@keiba/core`)ではなく `exports` のサブパス**を import すること。
+
+**1・2 はいずれもリポジトリルートの `-r` 無しコマンド。** ルート直下 `scripts/` 配下のテスト・
+型検査は `pnpm -r test`/`pnpm -r typecheck`(パッケージ横断だが `-r` は workspace 全体を意味し、
+`scripts/` はどの workspace package にも属さないため対象外になる)では実行されない。
+`pnpm test` = `pnpm -r test && vitest run`(ルートの `vitest.config.ts` が `scripts/test/` を対象にする)、
+`pnpm typecheck` = `pnpm -r typecheck && tsc -p tsconfig.scripts.json` で、いずれも `-r` 付きの
+下位互換ではないため、`-r` 付きコマンドで代替しないこと(Issue #38: `-r` 付きコマンドだけで
+検証していたために `scripts/` の型検査回帰〈TS6059〉が見逃された事故があった)。
 
 ## テストを書くときの注意(過去に繰り返した失敗)
 - **空振り(vacuous pass)を作らない**。条件分岐の中にアサーションを置かず、**前提を無条件 `expect` で

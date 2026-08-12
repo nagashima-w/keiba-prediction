@@ -9,24 +9,35 @@
  * 唯一の効果であり、`@keiba/core` の `exports`(renderer が native 依存を巻き込まないよう
  * 狭いサブパスのみ公開する方針)を tsc 側で不可迂回にしている実効的な境界のため)。
  *
- * `packages/app/src/**` と `packages/app/test/**` の全 `.ts`/`.tsx` について、相対 import
- * 指定子(`import`/`export`の`from "..."`・動的`import("...")`・副作用のみの`import "..."`)を
- * ファイル自身のディレクトリ基準で解決し、`packages/app` の外を指すものが0件であることを
- * 構造的に固定する。`readFileSync`等の単なるパス文字列は対象外(import指定子のみを見る)。
+ * 走査対象は `packages/app/src`・`packages/app/test` の**ハードコードではなく**、
+ * `packages/app/tsconfig.json` の `include` 配列そのものから導出する(TypeScript コンパイラ
+ * (`typescript`パッケージ)の `parseConfigFileTextToJson` で実際に tsconfig.json をパースする。
+ * 独自の JSONC パーサを持たない)。`include` が将来増減しても、tsc が rootDir 判定に使う入力と
+ * このガードの走査対象が乖離しない構造にするため(以前のバージョンは `src`/`test` の2エントリを
+ * 決め打ちしており、`vite.config.ts`/`vitest.config.ts`(`include` の残り3エントリ)を素通し
+ * していた。code-reviewer 指摘)。
+ *
+ * `include` の各エントリについて、全 `.ts`/`.tsx` の相対 import 指定子(`import`/`export`の
+ * `from "..."`・動的`import("...")`・副作用のみの`import "..."`)をファイル自身のディレクトリ
+ * 基準で解決し、`packages/app` の外を指すものが0件であることを構造的に固定する。
+ * `readFileSync`等の単なるパス文字列は対象外(import指定子のみを見る)。
+ * triple-slash reference directive(`/// <reference path="..." />`)は対象外
+ * (現時点でリポジトリ内に使用例が0件のため実害は無いが、将来 `.d.ts` を追加する際の
+ * 抜け穴になりうる。実装は変更しない)。
  *
  * スコープ外: `packages/core` への同種ガードは今回入れない(boss裁定・Issue #38)。
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.join(currentDir, "..");
-const srcDir = path.join(appRoot, "src");
-const testDir = path.join(appRoot, "test");
+const tsconfigPath = path.join(appRoot, "tsconfig.json");
 
 /** ディレクトリ配下の対象拡張子ファイルを再帰的に読み込み、絶対パス→内容のMapを返す。 */
 function readSourceFiles(dir: string, extensions: readonly string[]): Map<string, string> {
@@ -36,6 +47,50 @@ function readSourceFiles(dir: string, extensions: readonly string[]): Map<string
     if (!extensions.some((ext) => rel.endsWith(ext))) continue;
     const full = path.join(dir, rel);
     out.set(full, readFileSync(full, "utf8"));
+  }
+  return out;
+}
+
+/**
+ * `packages/app/tsconfig.json` の `include` 配列を、TypeScript コンパイラ自身のパーサで
+ * 読み取る(tsconfig.json は `//` コメントを含む JSONC のため、素の `JSON.parse` では読めない。
+ * 独自のJSONCパーサを実装せず、tsc が実際に使うのと同じパーサを使うことで、パース結果の
+ * 乖離そのものをあり得なくする)。
+ */
+function loadTsconfigIncludeEntries(configPath: string): string[] {
+  const text = readFileSync(configPath, "utf8");
+  const parsed = ts.parseConfigFileTextToJson(configPath, text);
+  if (parsed.error !== undefined) {
+    throw new Error(`tsconfig.json のパースに失敗しました: ${configPath}`);
+  }
+  const include: unknown = parsed.config?.include;
+  if (!Array.isArray(include) || !include.every((e) => typeof e === "string")) {
+    throw new Error(`tsconfig.json に include 配列がありません: ${configPath}`);
+  }
+  return include as string[];
+}
+
+/**
+ * tsconfig.json の `include` エントリ(ディレクトリ・単一ファイルが混在する)から、
+ * 対象拡張子のソースファイルをすべて読み込む。ディレクトリは再帰的に走査し、
+ * 単一ファイルはそのエントリ自体を対象拡張子かどうかで判定する。
+ */
+function collectScopedSourceFiles(
+  rootDir: string,
+  includeEntries: readonly string[],
+  extensions: readonly string[],
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const entry of includeEntries) {
+    const full = path.join(rootDir, entry);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      for (const [file, content] of readSourceFiles(full, extensions)) {
+        out.set(file, content);
+      }
+    } else if (stat.isFile() && extensions.some((ext) => full.endsWith(ext))) {
+      out.set(full, readFileSync(full, "utf8"));
+    }
   }
   return out;
 }
@@ -157,12 +212,38 @@ describe("extractRelativeImportSpecifiers(テストヘルパーの自己検証)"
   });
 });
 
+describe("走査対象がtsconfig.jsonのincludeから正しく導出されること(code-reviewer指摘: src/testの決め打ちを解消)", () => {
+  it("packages/app/tsconfig.jsonのincludeが現在の5エントリと一致すること(前提固定・空振り防止)", () => {
+    // このassert自体はincludeが変わったら追随して直す必要があるが、走査ロジック
+    // (collectScopedSourceFiles)側は決め打ちではなくincludeを直接読むため、
+    // このテストを更新し忘れても本体の再発防止機能(下のdescribe)は追随し続ける。
+    const includeEntries = loadTsconfigIncludeEntries(tsconfigPath);
+    expect(includeEntries).toEqual(["src", "test", "scripts", "vite.config.ts", "vitest.config.ts"]);
+  });
+
+  it("include配列の全エントリ(ディレクトリ+設定ファイル単体)が走査対象ファイル集合に反映されること", () => {
+    const includeEntries = loadTsconfigIncludeEntries(tsconfigPath);
+    const files = collectScopedSourceFiles(appRoot, includeEntries, [".ts", ".tsx"]);
+
+    // 決め打ちのsrc/testだけを見ていた旧実装だと、以下の2つの単一ファイルエントリは
+    // 走査対象に入らない(code-reviewerが実証したギャップそのもの)。ここで直接
+    // 存在を固定することで、将来再びsrc/testの決め打ちに戻す変更をRedにする。
+    expect(files.has(path.join(appRoot, "vite.config.ts"))).toBe(true);
+    expect(files.has(path.join(appRoot, "vitest.config.ts"))).toBe(true);
+    // src/testも引き続き含まれること(範囲を広げただけで、既存の走査が失われていないこと)。
+    expect(
+      [...files.keys()].some((f) => f.startsWith(path.join(appRoot, "src") + path.sep)),
+    ).toBe(true);
+    expect(
+      [...files.keys()].some((f) => f.startsWith(path.join(appRoot, "test") + path.sep)),
+    ).toBe(true);
+  });
+});
+
 describe("packages/appの相対importがpackages/appの外を指していないこと(Issue #38再発防止)", () => {
-  it("src/配下・test/配下(.ts/.tsx)の相対importをすべて解決しても、packages/appの外を指すものが0件であること", () => {
-    const files = new Map([
-      ...readSourceFiles(srcDir, [".ts", ".tsx"]),
-      ...readSourceFiles(testDir, [".ts", ".tsx"]),
-    ]);
+  it("tsconfig.jsonのinclude全エントリ(.ts/.tsx)の相対importをすべて解決しても、packages/appの外を指すものが0件であること", () => {
+    const includeEntries = loadTsconfigIncludeEntries(tsconfigPath);
+    const files = collectScopedSourceFiles(appRoot, includeEntries, [".ts", ".tsx"]);
     // 前提固定: 走査対象が実在すること(空振り防止。0件のMapに対して0件の違反を主張しても無意味)。
     expect(files.size).toBeGreaterThan(0);
 

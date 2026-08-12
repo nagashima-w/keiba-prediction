@@ -4,6 +4,10 @@
     "allow": [
       "mcp__Claude_Code_Remote__send_later",
 
+      "Bash(pnpm test)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm typecheck *)",
       "Bash(pnpm -r test)",
       "Bash(pnpm -r test *)",
       "Bash(pnpm -r typecheck)",
