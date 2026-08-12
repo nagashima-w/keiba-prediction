@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-08-12T08:36:40.937Z",
-  "note": "指標(Σx*等)は未算出。一次データ(実オッズ・診断値)のみ。timingMs.offColdMs/onWarmReuseMsは実測値。OFF(コールドキャッシュ)は出馬表・戦績・調教・単勝複勝オッズ等の基礎データのみを取得した所要時間で、組合せオッズは0件。ON(OFFのキャッシュを再利用)は基礎データがすべてキャッシュ命中(実リクエスト無し)になるため、実測値はほぼ組合せオッズ取得のみの所要時間を表す。したがってOFFとONは測定対象がほぼ重ならず、両者の差分(ON−OFF)には『組合せオッズの追加コスト』という意味が無い(このため差分フィールドは持たない)。組合せオッズの取得コスト(derivedComboOddsFetchCostMs。導出値・解釈)は、ON実測値(timingMs.onWarmReuseMs)にほぼ等しいとみなせる。所要時間の見積り(最大16リクエスト・約24秒等)はここでは使っていない(導出値であり実測値ではない)。",
+  "generatedAt": "2026-08-12T10:33:36.166Z",
+  "note": "指標(Σx*等)は未算出。一次データ(実オッズ・診断値)のみ。timingMs.offColdMs/onWarmReuseMsは実測値。OFF(コールドキャッシュ)は出馬表・戦績・調教・単勝複勝オッズ等の基礎データのみを取得した所要時間で、組合せオッズは0件。ON(OFFのキャッシュを再利用)は基礎データがすべてキャッシュ命中(実リクエスト無し)になるため、実測値はほぼ組合せオッズ取得のみの所要時間を表す。したがってOFFとONは測定対象がほぼ重ならず、両者の差分(ON−OFF)には『組合せオッズの追加コスト』という意味が無い(このため差分フィールドは持たない)。組合せオッズの取得コスト(derivedComboOddsFetchCostMs。導出値・解釈)は、ON実測値(timingMs.onWarmReuseMs)にほぼ等しいとみなせる。所要時間の見積り(最大16リクエスト・約24秒等)はここでは使っていない(導出値であり実測値ではない)。【ワイドの集計上の注意・未判定】wideComboOdds/comboOdds.wideのoddsMinは『下限』であり単一値ではない(combo-odds-key.tsのComboOddsCell JSDoc参照)。ワイドはオッズが下限〜上限のレンジを持つ券種だが、toComboOddsScalarMap(#32)はoddsMinのみを残しoddsMaxを捨てる。このためここに残る値は実際の払戻より小さい側に偏っている可能性があるが、上限値そのものはこの一次データに残っておらず、偏りの大きさはここでは判定していない。また、単一勝者の還元率恒等式Σ(1/odds)=1/払戻率は三連複には成立する(1レース1組的中)が、ワイドには成立しない(1レース3組が同時的中するため)。実際、central wideComboOddsにΣ(1/oddsMin)を機械的に当てはめるとΣ(1/oddsMin)≈3.958となり、これを1/払戻率とみなすと『還元率25.27%』というtrio(実測控除率25.02%)と紛らわしい値が出るが、この値はワイドの払戻率の推定値ではない(前提の恒等式が成立しないため)。ワイドの払戻率はこの一次データからは算出していない(未判定)。",
   "results": [
     {
       "label": "central",
@@ -35,7 +35,10 @@
               "state": "available",
               "comboCount": 120
             }
-          ]
+          ],
+          "numericConflictCount": 0,
+          "nullWinConflictCount": 0,
+          "conflictSamples": []
         },
         "trio": {
           "state": "available",
@@ -56,7 +59,10 @@
               "state": "available",
               "comboCount": 560
             }
-          ]
+          ],
+          "numericConflictCount": 0,
+          "nullWinConflictCount": 0,
+          "conflictSamples": []
         }
       },
       "wideComboOdds": {
@@ -777,7 +783,10 @@
               "state": "available",
               "comboCount": 66
             }
-          ]
+          ],
+          "numericConflictCount": 0,
+          "nullWinConflictCount": 0,
+          "conflictSamples": []
         },
         "trio": {
           "state": "available",
@@ -854,7 +863,10 @@
               "state": "available",
               "comboCount": 55
             }
-          ]
+          ],
+          "numericConflictCount": 0,
+          "nullWinConflictCount": 0,
+          "conflictSamples": []
         }
       },
       "wideComboOdds": {

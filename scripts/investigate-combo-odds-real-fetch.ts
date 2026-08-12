@@ -157,6 +157,13 @@ function summarizeDiagnostics(outcome: ComboOddsFetchOutcome | undefined): unkno
     axisUmabans: outcome.diagnostics.axisUmabans,
     attemptCounts,
     attempts,
+    // AC-10(fetch-combo-odds.ts)が「実測されていない」と申し送っていた、地方3連複の
+    // 軸間衝突(最小値採用による下押し)の実測値。0コストで得られているのに転記漏れしていた
+    // (code-reviewer指摘・修正2)。件数のみで判定はしない(0件=「この標本では衝突が
+    // 観測されなかった」という事実であり、「系統誤差が存在しない」ことの証明ではない)。
+    numericConflictCount: outcome.diagnostics.numericConflictCount,
+    nullWinConflictCount: outcome.diagnostics.nullWinConflictCount,
+    conflictSamples: outcome.diagnostics.conflictSamples,
   };
 }
 
@@ -165,8 +172,11 @@ function summarizeDiagnostics(outcome: ComboOddsFetchOutcome | undefined): unkno
  * IO・ネットワークを一切行わない(ライブ取得経路・保存済みファイルからの再生成経路の両方から
  * 呼べるようにするため)。
  *
+ * `export`しているのはテスト(`investigate-combo-odds-real-fetch.test.ts`)から直接呼ぶため
+ * (code-reviewer指摘・修正3)。合成フィクスチャで「保存済みJSONから決定論的に再生成できる」
+ * という`ba32b43`の主張を回帰テストとして固定する。
  */
-function buildRaceRecord(
+export function buildRaceRecord(
   target: TargetRace,
   offRace: RaceData,
   onRace: RaceData,
