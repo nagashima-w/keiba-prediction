@@ -197,6 +197,24 @@ function makeInput(overrides: Partial<BuildAnalysisExportInput> = {}): BuildAnal
 }
 
 describe("buildRaceSnapshot(取得したレース情報のスナップショット化)", () => {
+  /**
+   * code-reviewer指摘への水平展開: raceブロック(RaceSnapshotRace)にも文字列フィールド8個
+   * (raceName/courseType/weather/trackCondition/startTime/fence/oddsStatus/officialDatetime。
+   * distanceのみnumber|nullで型が異なるため対象外)の同型フィールドが並んでおり、
+   * horsesブロックと同じ「隣接ペア取り違え」の穴がありえる。「既定フィクスチャは互いに異なる
+   * 値になっている」と報告するだけでなく、new Set([...]).sizeで機械的に固定する
+   * (mixed-candidates.test.tsの`row()`自己テスト・horsesブロックの自己テストと同じ形)。
+   */
+  it("makeRaceData()の既定raceブロックは、文字列フィールド8個が互いに相異なること(取り違え検知の前提の自己検証)", () => {
+    const snapshot = buildRaceSnapshot(makeRaceData());
+    const r = snapshot.race;
+    const strings = [
+      r.raceName, r.courseType, r.weather, r.trackCondition,
+      r.startTime, r.fence, r.oddsStatus, r.officialDatetime,
+    ];
+    expect(new Set(strings).size).toBe(8);
+  });
+
   it("レース情報・各馬の出馬表項目・単複オッズ・調教をスナップショット化すること", () => {
     const snapshot = buildRaceSnapshot(makeRaceData());
     expect(snapshot.race).toEqual({
@@ -480,23 +498,118 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
 
   describe("horsesブロックの行ごとの写像(受け入れ条件7周辺。第2段boss差し戻し論点の横展開)", () => {
     /**
-     * 2頭の値をすべて異ならせたraceDataを組み立てる(第2段「行ごとの写像を、値の種類がある
-     * 入力で固定する」の教訓: 全ての行が同じ値だと、行を取り違える変異〈umabanをハードコードする等〉
-     * を検知できない)。
+     * 2頭分のRaceHorseDataを明示的に組み立てる(makeRaceData()の既定horsesは使わない)。
+     *
+     * code-reviewer指摘(2回目): 旧フィクスチャはmakeRaceData()の既定horsesを流用しており、
+     * 同一馬内で`umaban`と`wakuban`が同じ値(horse1:1と1/horse2:2と2)のままだった。
+     * そのため`wakuban: h.shutuba.umaban`という取り違え変異が検知できず、40件全緑のまま通過した
+     * (実際にレビュアーが注入して確認)。
+     *
+     * 修正: `umaban`自身を含む数値フィールド8個(umaban/wakuban/age/kinryo/bodyWeight/
+     * winOdds/popularity/placeOddsMin)・文字列フィールド6個(name/sex/jockeyName/
+     * trainerName/oikiriCritic/oikiriRank)を、馬ごとにすべて相異なる値にする
+     * (umaban自身も同じSetに含めることで、umaban↔他フィールドの取り違えも検知できるようにする)。
+     * 「異なるようにした」という報告だけでは不十分だったため、直後の自己テストで
+     * `new Set([...]).size`により実際に相異なることを機械的に固定する
+     * (第2段`mixed-candidates.test.ts`の`row()`自己テストと同じ形)。
      */
     function makeTwoDistinctHorsesRaceData(): RaceData {
       return makeRaceData({
+        horses: [
+          {
+            shutuba: {
+              wakuban: 4,
+              umaban: 1,
+              name: "アルファ",
+              horseId: "2020100001" as never,
+              sex: "牡",
+              age: 24,
+              kinryo: 57,
+              jockeyName: "ジョッキー甲",
+              jockeyId: "00001",
+              stableLocation: "美浦",
+              trainerName: "調教師甲",
+              trainerId: "00002",
+              bodyWeight: { weight: 480, diff: 2 },
+            },
+            results: [],
+            oikiri: {
+              umaban: 1,
+              horseId: "2020100001" as never,
+              horseName: "アルファ",
+              critic: "動き良好",
+              rank: "A",
+            },
+          },
+          {
+            shutuba: {
+              wakuban: 7,
+              umaban: 2,
+              name: "ブラボー",
+              horseId: "2020100002" as never,
+              sex: "牝",
+              age: 13,
+              kinryo: 54,
+              jockeyName: "ジョッキー乙",
+              jockeyId: "00003",
+              stableLocation: "栗東",
+              trainerName: "調教師乙",
+              trainerId: "00004",
+              bodyWeight: { weight: 420, diff: -4 },
+            },
+            results: [],
+            oikiri: {
+              umaban: 2,
+              horseId: "2020100002" as never,
+              horseName: "ブラボー",
+              critic: "平凡",
+              rank: "B",
+            },
+          },
+        ],
         odds: {
           officialDatetime: "2026-07-24 09:00:00",
           oddsStatus: "result",
-          win: { 1: { odds: 2.5, ninki: 1 }, 2: { odds: 8.0, ninki: 4 } },
+          win: { 1: { odds: 2.5, ninki: 9 }, 2: { odds: 8.0, ninki: 6 } },
           place: {
-            1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 },
-            2: { oddsMin: 2.0, oddsMax: 2.5, ninki: 4 },
+            1: { oddsMin: 1.6, oddsMax: 1.9, ninki: 9 },
+            2: { oddsMin: 3.3, oddsMax: 3.9, ninki: 6 },
           },
         },
       });
     }
+
+    describe("makeTwoDistinctHorsesRaceData(テストフィクスチャの自己検証: 「異なるようにした」を機械的に保証する)", () => {
+      it("horse1・horse2それぞれで、umabanを含む数値フィールド8個が互いに相異なること(取り違え検知の前提)", () => {
+        const snapshot = buildRaceSnapshot(makeTwoDistinctHorsesRaceData());
+        const h1 = snapshot.horses.find((h) => h.umaban === 1)!;
+        const h2 = snapshot.horses.find((h) => h.umaban === 2)!;
+
+        const h1Numeric = [
+          h1.umaban, h1.wakuban, h1.age, h1.kinryo,
+          h1.bodyWeight, h1.winOdds, h1.popularity, h1.placeOddsMin,
+        ];
+        expect(new Set(h1Numeric).size).toBe(8);
+
+        const h2Numeric = [
+          h2.umaban, h2.wakuban, h2.age, h2.kinryo,
+          h2.bodyWeight, h2.winOdds, h2.popularity, h2.placeOddsMin,
+        ];
+        expect(new Set(h2Numeric).size).toBe(8);
+      });
+
+      it("horse1・horse2それぞれで、文字列フィールド6個が互いに相異なること(取り違え検知の前提)", () => {
+        const snapshot = buildRaceSnapshot(makeTwoDistinctHorsesRaceData());
+        const h1 = snapshot.horses.find((h) => h.umaban === 1)!;
+        const h2 = snapshot.horses.find((h) => h.umaban === 2)!;
+
+        const h1Strings = [h1.name, h1.sex, h1.jockeyName, h1.trainerName, h1.oikiriCritic, h1.oikiriRank];
+        expect(new Set(h1Strings).size).toBe(6);
+
+        const h2Strings = [h2.name, h2.sex, h2.jockeyName, h2.trainerName, h2.oikiriCritic, h2.oikiriRank];
+        expect(new Set(h2Strings).size).toBe(6);
+      });
+    });
 
     it("2頭それぞれの出馬表項目・単複オッズ・調教が、umabanに対応する値のまま独立して写ること(行の取り違え検知)", () => {
       const snapshot = buildRaceSnapshot(makeTwoDistinctHorsesRaceData());
@@ -514,35 +627,35 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       // h1・h2それぞれの値を個別に固定する(片方だけでは行の取り違えを検知できない)。
       expect(h1).toEqual({
         umaban: 1,
-        wakuban: 1,
+        wakuban: 4,
         name: "アルファ",
         sex: "牡",
-        age: 4,
+        age: 24,
         kinryo: 57,
-        jockeyName: "テスト騎手",
-        trainerName: "テスト調教師",
+        jockeyName: "ジョッキー甲",
+        trainerName: "調教師甲",
         bodyWeight: 480,
         winOdds: 2.5,
-        popularity: 1,
-        placeOddsMin: 1.2,
+        popularity: 9,
+        placeOddsMin: 1.6,
         oikiriCritic: "動き良好",
         oikiriRank: "A",
       });
       expect(h2).toEqual({
         umaban: 2,
-        wakuban: 2,
+        wakuban: 7,
         name: "ブラボー",
         sex: "牝",
-        age: 3,
+        age: 13,
         kinryo: 54,
-        jockeyName: "テスト騎手2",
-        trainerName: "テスト調教師2",
-        bodyWeight: null,
+        jockeyName: "ジョッキー乙",
+        trainerName: "調教師乙",
+        bodyWeight: 420,
         winOdds: 8.0,
-        popularity: 4,
-        placeOddsMin: 2.0,
-        oikiriCritic: null,
-        oikiriRank: null,
+        popularity: 6,
+        placeOddsMin: 3.3,
+        oikiriCritic: "平凡",
+        oikiriRank: "B",
       });
     });
   });
