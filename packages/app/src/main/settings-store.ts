@@ -61,6 +61,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   kellyFraction: 0.5,
   // 組合せオッズ取得(機能D-2c第3段・Issue #28)。既定OFF(オプトイン。U-A既定OFFの定義元)。
   includeComboOdds: false,
+  // 券種横断の馬券配分対象(機能D-2c第4段・Issue #28)。既定ON(boss裁定D-1。U2「常に全券種」・
+  // B-3「三連複を外さない」に整合)。includeComboOdds自体が既定OFFのオプトインのため、
+  // これらが既定ONでも既存ユーザーの挙動は変わらない。
+  includeWideInAllocation: true,
+  includeTrioInAllocation: true,
 };
 
 /** raw が number かつ有限かつ述語を満たせば採用、さもなくば fallback。 */
@@ -208,6 +213,16 @@ export function coerceSettings(raw: unknown): AppSettings {
       typeof rec.includeComboOdds === "boolean"
         ? rec.includeComboOdds
         : DEFAULT_APP_SETTINGS.includeComboOdds,
+    // 券種横断の馬券配分対象(機能D-2c第4段)。既定trueへフォールバックする点がincludeComboOddsと
+    // 逆向きだが、流儀(boolean以外は既定値)は同じ(受け入れ条件7)。
+    includeWideInAllocation:
+      typeof rec.includeWideInAllocation === "boolean"
+        ? rec.includeWideInAllocation
+        : DEFAULT_APP_SETTINGS.includeWideInAllocation,
+    includeTrioInAllocation:
+      typeof rec.includeTrioInAllocation === "boolean"
+        ? rec.includeTrioInAllocation
+        : DEFAULT_APP_SETTINGS.includeTrioInAllocation,
   };
 }
 
@@ -273,6 +288,9 @@ export function maskSettings(
     kellyFraction: settings.kellyFraction,
     // 組合せオッズ取得(機能D-2c第3段)も往復編集フォームとして表示するため平文のまま返す。
     includeComboOdds: settings.includeComboOdds,
+    // 券種横断の馬券配分対象(機能D-2c第4段)も往復編集フォームとして表示するため平文のまま返す。
+    includeWideInAllocation: settings.includeWideInAllocation,
+    includeTrioInAllocation: settings.includeTrioInAllocation,
   };
 }
 
@@ -299,6 +317,8 @@ export function applyUpdate(
     perRaceCap: update.perRaceCap,
     kellyFraction: update.kellyFraction,
     includeComboOdds: update.includeComboOdds,
+    includeWideInAllocation: update.includeWideInAllocation,
+    includeTrioInAllocation: update.includeTrioInAllocation,
   });
 }
 

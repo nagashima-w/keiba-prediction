@@ -15,6 +15,7 @@ import {
   BASE_SCORE_WEIGHT_KEYS,
   BASE_SCORE_WEIGHT_LABELS,
   BET_ALLOCATION_LABELS,
+  ALLOCATION_BET_TYPE_LABELS,
   BIAS_WEIGHT_KEYS,
   BIAS_WEIGHT_LABELS,
   CLIP_VARIANT_IDS,
@@ -303,6 +304,38 @@ export function SettingsView(): React.JSX.Element {
           {INCLUDE_COMBO_ODDS_LABELS.checkbox}
         </label>
         <p style={noteStyle}>{INCLUDE_COMBO_ODDS_LABELS.help}</p>
+      </div>
+
+      {/*
+       * 券種横断の馬券配分対象(機能D-2c第4段・Issue #28)。既定ON(D-1)。複勝は常時対象のため
+       * チェックボックスを設けない(呼び出し側でbetTypesへ"place"を常に含める)。
+       */}
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeWideInAllocation}
+            onChange={(e) =>
+              dispatch({ type: "ワイド配分対象切替", value: e.target.checked })
+            }
+          />{" "}
+          {ALLOCATION_BET_TYPE_LABELS.wide.checkbox}
+        </label>
+        <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.wide.help}</p>
+      </div>
+
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeTrioInAllocation}
+            onChange={(e) =>
+              dispatch({ type: "三連複配分対象切替", value: e.target.checked })
+            }
+          />{" "}
+          {ALLOCATION_BET_TYPE_LABELS.trio.checkbox}
+        </label>
+        <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.trio.help}</p>
       </div>
 
       {/*

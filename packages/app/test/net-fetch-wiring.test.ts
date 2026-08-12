@@ -116,6 +116,8 @@ describe("ipc: net.fetch アダプタの注入", () => {
       perRaceCap: 5000,
       kellyFraction: 0.5,
       includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     };
     handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 

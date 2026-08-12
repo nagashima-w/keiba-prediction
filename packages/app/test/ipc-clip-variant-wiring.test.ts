@@ -99,6 +99,8 @@ describe("ipc: 設定のクリップ幅版(clipVariant)をcreatePipelineDepsへ�
       perRaceCap: 5000,
       kellyFraction: 0.5,
       includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     };
     await saveHandler(fakeEvent, update);
 

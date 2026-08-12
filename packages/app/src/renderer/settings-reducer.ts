@@ -76,6 +76,10 @@ export interface SettingsFormState {
   readonly kellyFraction: string;
   /** ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。既定false。 */
   readonly includeComboOdds: boolean;
+  /** ワイドを馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。既定true。 */
+  readonly includeWideInAllocation: boolean;
+  /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。既定true。 */
+  readonly includeTrioInAllocation: boolean;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -123,6 +127,8 @@ export type SettingsAction =
   | { readonly type: "1レース上限入力"; readonly value: string }
   | { readonly type: "ケリー係数入力"; readonly value: string }
   | { readonly type: "組合せオッズ取得切替"; readonly value: boolean }
+  | { readonly type: "ワイド配分対象切替"; readonly value: boolean }
+  | { readonly type: "三連複配分対象切替"; readonly value: boolean }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
   | { readonly type: "保存失敗"; readonly message: string }
@@ -191,6 +197,10 @@ export interface SettingsSnapshot {
   readonly kellyFraction: string;
   /** ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。 */
   readonly includeComboOdds: boolean;
+  /** ワイドを馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。 */
+  readonly includeWideInAllocation: boolean;
+  /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。 */
+  readonly includeTrioInAllocation: boolean;
 }
 
 /** 空文字ベースの初期スナップショットを作る。 */
@@ -207,6 +217,10 @@ function emptySnapshot(): SettingsSnapshot {
     perRaceCap: "",
     kellyFraction: "",
     includeComboOdds: false,
+    // 未読込状態の初期値。読込成功時にAppSettingsの実既定(true)へ上書きされる
+    // (createInitialSettingsStateも同様。ここはあくまで「まだ何も読み込んでいない」状態の表現)。
+    includeWideInAllocation: false,
+    includeTrioInAllocation: false,
   };
 }
 
@@ -228,6 +242,8 @@ export function createInitialSettingsState(): SettingsFormState {
     perRaceCap: "",
     kellyFraction: "",
     includeComboOdds: false,
+    includeWideInAllocation: false,
+    includeTrioInAllocation: false,
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -265,6 +281,8 @@ function applyMasked(
   const perRaceCap = String(settings.perRaceCap);
   const kellyFraction = String(settings.kellyFraction);
   const includeComboOdds = settings.includeComboOdds;
+  const includeWideInAllocation = settings.includeWideInAllocation;
+  const includeTrioInAllocation = settings.includeTrioInAllocation;
   return {
     ...state,
     loaded: true,
@@ -283,6 +301,8 @@ function applyMasked(
     perRaceCap,
     kellyFraction,
     includeComboOdds,
+    includeWideInAllocation,
+    includeTrioInAllocation,
     savedSnapshot: {
       discordWebhookUrl,
       evThreshold,
@@ -295,6 +315,8 @@ function applyMasked(
       perRaceCap,
       kellyFraction,
       includeComboOdds,
+      includeWideInAllocation,
+      includeTrioInAllocation,
     },
   };
 }
@@ -358,6 +380,12 @@ export function settingsReducer(
 
     case "組合せオッズ取得切替":
       return { ...state, includeComboOdds: action.value };
+
+    case "ワイド配分対象切替":
+      return { ...state, includeWideInAllocation: action.value };
+
+    case "三連複配分対象切替":
+      return { ...state, includeTrioInAllocation: action.value };
 
     case "保存開始":
       return { ...state, status: "saving", message: null };
@@ -436,6 +464,8 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     perRaceCap: Number(state.perRaceCap),
     kellyFraction: Number(state.kellyFraction),
     includeComboOdds: state.includeComboOdds,
+    includeWideInAllocation: state.includeWideInAllocation,
+    includeTrioInAllocation: state.includeTrioInAllocation,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
@@ -479,6 +509,12 @@ export function isDirty(state: SettingsFormState): boolean {
     return true;
   }
   if (state.includeComboOdds !== snap.includeComboOdds) {
+    return true;
+  }
+  if (state.includeWideInAllocation !== snap.includeWideInAllocation) {
+    return true;
+  }
+  if (state.includeTrioInAllocation !== snap.includeTrioInAllocation) {
     return true;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

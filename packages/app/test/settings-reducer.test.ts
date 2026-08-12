@@ -46,6 +46,8 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
     perRaceCap: 0,
     kellyFraction: 0.5,
     includeComboOdds: false,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
     ...overrides,
   };
 }
@@ -112,6 +114,35 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.includeComboOdds).toBe(false);
   });
 
+  it("読込成功でincludeWideInAllocation/includeTrioInAllocation(機能D-2c第4段)を反映すること(OFF/ON両方向)", () => {
+    expect(
+      loadedState(fakeMasked({ includeWideInAllocation: false })).includeWideInAllocation,
+    ).toBe(false);
+    expect(
+      loadedState(fakeMasked({ includeWideInAllocation: true })).includeWideInAllocation,
+    ).toBe(true);
+    expect(
+      loadedState(fakeMasked({ includeTrioInAllocation: false })).includeTrioInAllocation,
+    ).toBe(false);
+    expect(
+      loadedState(fakeMasked({ includeTrioInAllocation: true })).includeTrioInAllocation,
+    ).toBe(true);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocationが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    const s = loadedState(
+      fakeMasked({ includeWideInAllocation: false, includeTrioInAllocation: true }),
+    );
+    expect(s.includeWideInAllocation).toBe(false);
+    expect(s.includeTrioInAllocation).toBe(true);
+
+    const flipped = loadedState(
+      fakeMasked({ includeWideInAllocation: true, includeTrioInAllocation: false }),
+    );
+    expect(flipped.includeWideInAllocation).toBe(true);
+    expect(flipped.includeTrioInAllocation).toBe(false);
+  });
+
   it("各フィールドの入力アクションで値を更新する", () => {
     let s = loadedState();
     s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
@@ -137,6 +168,8 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     s = settingsReducer(s, { type: "1レース上限入力", value: "30000" });
     s = settingsReducer(s, { type: "ケリー係数入力", value: "0.4" });
     s = settingsReducer(s, { type: "組合せオッズ取得切替", value: true });
+    s = settingsReducer(s, { type: "ワイド配分対象切替", value: false });
+    s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -150,6 +183,8 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.perRaceCap).toBe("30000");
     expect(s.kellyFraction).toBe("0.4");
     expect(s.includeComboOdds).toBe(true);
+    expect(s.includeWideInAllocation).toBe(false);
+    expect(s.includeTrioInAllocation).toBe(false);
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -324,6 +359,27 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(update.autoSendDiscord).toBe(true);
     expect(update.includeComboOdds).toBe(false);
   });
+
+  it("includeWideInAllocation/includeTrioInAllocation(機能D-2c第4段)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "ワイド配分対象切替", value: false });
+    s = settingsReducer(s, { type: "三連複配分対象切替", value: true });
+    let update = buildUpdate(s);
+    expect(update.includeWideInAllocation).toBe(false);
+    expect(update.includeTrioInAllocation).toBe(true);
+
+    s = settingsReducer(s, { type: "ワイド配分対象切替", value: true });
+    s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
+    update = buildUpdate(s);
+    expect(update.includeWideInAllocation).toBe(true);
+    expect(update.includeTrioInAllocation).toBe(false);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocation未編集(読込値どおり)はそのまま含めること", () => {
+    const update = buildUpdate(loadedState(fakeMasked({ includeWideInAllocation: true, includeTrioInAllocation: true })));
+    expect(update.includeWideInAllocation).toBe(true);
+    expect(update.includeTrioInAllocation).toBe(true);
+  });
 });
 
 describe("isDirty(未保存インジケータ、Issue #11)", () => {
@@ -357,6 +413,14 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     {
       name: "組合せオッズ取得切替",
       action: { type: "組合せオッズ取得切替", value: true },
+    },
+    {
+      name: "ワイド配分対象切替",
+      action: { type: "ワイド配分対象切替", value: false },
+    },
+    {
+      name: "三連複配分対象切替",
+      action: { type: "三連複配分対象切替", value: false },
     },
     ...BIAS_WEIGHT_KEYS.map((key) => ({
       name: `バイアス重み入力(${key})`,

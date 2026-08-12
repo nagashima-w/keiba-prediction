@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALLOCATION_BET_TYPE_LABELS,
   BASE_SCORE_WEIGHT_KEYS,
   BASE_SCORE_WEIGHT_LABELS,
   BET_ALLOCATION_LABELS,
@@ -148,10 +149,18 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toBeTruthy();
     });
 
-    it("補助文が『記録のみで配分提案には使わない』ことを明示している(boss裁定の必須文言、受け入れ条件9)", () => {
-      // 「ONにしたのに配分が変わらない」という未実装を不具合と誤認させないための必須記述。
-      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("配分提案には使いません");
-      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("記録のみ");
+    // 【機能D-2c第4段・AC19で改訂】旧版(第3段)は「配分提案には一切使わない(記録のみ)」と
+    // 断定していたが、第4段で実際に使うようになったため、この断定はもはや事実ではない。
+    // 何を保証していたか(新旧対応表):
+    //   旧: 「ONにしても配分は絶対に変わらない」という断定文言を保証 → 事実と食い違うため削除
+    //   新: 「配分に使うかどうかは別設定(ワイド/三連複を配分に使う)に従う」という条件付きの
+    //       依存関係の明記を保証(AC24必須要件1と対になる。INCLUDE_COMBO_ODDS_LABELS.helpの
+    //       JSDocも参照)。「記録のみ」という断定は含まれないことも合わせて固定する
+    //       (古い断定文言が再混入する退行を検知するため)。
+    it("補助文が『配分に使うかどうかは別設定に従う』という依存関係を明示し、『記録のみ』という断定を含まないこと(AC19・AC24)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("配分に使う");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("記録のみ");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("配分提案には使いません");
     });
   });
 
@@ -160,5 +169,54 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toBeTruthy();
       expect(/[0-9]/.test(INCLUDE_COMBO_ODDS_BATCH_NOTE)).toBe(false);
     });
+
+    // 【機能D-2c第4段・AC19で改訂】新旧対応表はINCLUDE_COMBO_ODDS_LABELS.helpのテストに同じ。
+    it("『配分に使うかどうかは別設定に従う』という依存関係を明示し、『記録のみ』という断定を含まないこと(AC19)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("配分に使う");
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("記録のみ");
+    });
+  });
+
+  // 券種横断の馬券配分対象チェックボックス文言(機能D-2c第4段・Issue #28)。
+  // AC24必須要件3点をwide/trioそれぞれで個別に固定する(片方だけ直して他方が古い文言のまま
+  // 残る欠陥を防ぐため、必ず2券種とも同じアサーションを通す)。
+  describe("ALLOCATION_BET_TYPE_LABELS(券種横断の配分対象チェックボックス文言。機能D-2c第4段・Issue #28・AC24)", () => {
+    it.each(["wide", "trio"] as const)(
+      "%sのチェックボックスラベルが空でない",
+      (betType) => {
+        expect(ALLOCATION_BET_TYPE_LABELS[betType].checkbox).toBeTruthy();
+      },
+    );
+
+    it.each(["wide", "trio"] as const)(
+      "%sの補助文がincludeComboOdds(オッズ取得)への依存を明示する(AC24必須要件1)",
+      (betType) => {
+        // 「オッズ取得がOFFの間は効果がない」ことを書かないと、「ONにしたのに何も変わらない」を
+        // 未実装と誤認させる(第3段のINCLUDE_COMBO_ODDS_LABELS.helpと対になる必須記述)。
+        expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(
+          "ワイド・三連複のオッズも取得する",
+        );
+        expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("OFFの間は効果がありません");
+      },
+    );
+
+    it.each(["wide", "trio"] as const)(
+      "%sの補助文が既定ONであることを明示する(AC24必須要件3)",
+      (betType) => {
+        // includeComboOdds自体は既定OFF(オプトイン)だが、この2項目は逆に既定ON(D-1裁定)。
+        // 逆向きの既定値であることを書かないと誤解を招く。
+        expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("既定でON");
+      },
+    );
+
+    it.each(["wide", "trio"] as const)(
+      "%sの補助文が寄り先の券種を断定する表現を含まないこと(AC24必須要件2・AC12と同じ理由)",
+      (betType) => {
+        // 資金規模・1レース上限・greedySteps(#36)で寄り先が変わるため、断定した瞬間に
+        // 条件次第で嘘になる(boss裁定)。「集中」「寄る」「偏る」等の断定語を含まないこと。
+        const help = ALLOCATION_BET_TYPE_LABELS[betType].help;
+        expect(help).not.toMatch(/集中|寄る|偏る/);
+      },
+    );
   });
 });
