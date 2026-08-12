@@ -1,0 +1,5667 @@
+{
+  "raceId": "202603020211",
+  "race": {
+    "raceName": "ラジオNIKKEI賞",
+    "courseType": "芝",
+    "distance": 1800,
+    "startTime": "15:45",
+    "weather": "晴",
+    "trackCondition": "良",
+    "fence": "A",
+    "hasGradeBadge": true
+  },
+  "horses": [
+    {
+      "shutuba": {
+        "wakuban": 1,
+        "umaban": 1,
+        "name": "ルージュボヤージュ",
+        "horseId": "2023103386",
+        "sex": "牝",
+        "age": 3,
+        "kinryo": 52,
+        "jockeyName": "北村宏",
+        "jockeyId": "01043",
+        "stableLocation": "美浦",
+        "trainerName": "木村",
+        "trainerId": "01126",
+        "bodyWeight": {
+          "weight": 464,
+          "diff": -8
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 9,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 10
+          },
+          "jockeyName": "北村宏司",
+          "jockeyId": "01043",
+          "kinryo": 52,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.9",
+          "margin": 0.7,
+          "passing": [
+            2,
+            3,
+            4,
+            3
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 35,
+          "bodyWeight": {
+            "weight": 464,
+            "diff": -8
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/04/18",
+          "venue": {
+            "round": 3,
+            "name": "中山",
+            "day": 7,
+            "raw": "3中山7"
+          },
+          "weather": "晴",
+          "raceNumber": 6,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202606030706",
+          "raceIdRaw": "202606030706",
+          "venueKind": "中央",
+          "entryCount": 6,
+          "wakuban": 2,
+          "umaban": 2,
+          "odds": 2.4,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:49.4",
+          "margin": 0,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "38.3-33.1",
+          "last3f": 33.1,
+          "bodyWeight": {
+            "weight": 472,
+            "diff": -10
+          },
+          "winnerName": "(ターンザテーブルス)"
+        },
+        {
+          "date": "2026/02/22",
+          "venue": {
+            "round": 1,
+            "name": "東京",
+            "day": 8,
+            "raw": "1東京8"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202605010805",
+          "raceIdRaw": "202605010805",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 6,
+          "umaban": 8,
+          "odds": 5.9,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 5
+          },
+          "jockeyName": "キング",
+          "jockeyId": "05643",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.9",
+          "margin": 0.7,
+          "passing": [
+            3,
+            2
+          ],
+          "pace": "34.3-34.9",
+          "last3f": 35.3,
+          "bodyWeight": {
+            "weight": 482,
+            "diff": 14
+          },
+          "winnerName": "ゴーラッキー"
+        },
+        {
+          "date": "2025/07/13",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 6,
+            "raw": "2福島6"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202503020605",
+          "raceIdRaw": "202503020605",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 7,
+          "umaban": 12,
+          "odds": 2.3,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "荻野極",
+          "jockeyId": "01160",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:53.6",
+          "margin": -0.7,
+          "passing": [
+            2,
+            2,
+            2,
+            1
+          ],
+          "pace": "38.8-35.8",
+          "last3f": 35.7,
+          "bodyWeight": {
+            "weight": 468,
+            "diff": 0
+          },
+          "winnerName": "(ジャストビコーズ)"
+        }
+      ],
+      "oikiri": {
+        "umaban": 1,
+        "horseId": "2023103386",
+        "horseName": "ルージュボヤージュ",
+        "critic": "動き良化",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 1,
+        "umaban": 2,
+        "name": "クカイリモク",
+        "horseId": "2023105684",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 53,
+        "jockeyName": "ゴンサルベ",
+        "jockeyId": "05675",
+        "stableLocation": "美浦",
+        "trainerName": "堀",
+        "trainerId": "01070",
+        "bodyWeight": {
+          "weight": 496,
+          "diff": -4
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 1,
+          "umaban": 2,
+          "odds": 18.6,
+          "ninki": 10,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 9
+          },
+          "jockeyName": "ゴンサル",
+          "jockeyId": "05675",
+          "kinryo": 53,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.8",
+          "margin": 0.6,
+          "passing": [
+            8,
+            10,
+            12,
+            12
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.4,
+          "bodyWeight": {
+            "weight": 496,
+            "diff": -4
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/17",
+          "venue": {
+            "round": 2,
+            "name": "東京",
+            "day": 8,
+            "raw": "2東京8"
+          },
+          "weather": "晴",
+          "raceNumber": 4,
+          "raceName": "3歳未勝利",
+          "raceId": "202605020804",
+          "raceIdRaw": "202605020804",
+          "venueKind": "中央",
+          "entryCount": 17,
+          "wakuban": 8,
+          "umaban": 16,
+          "odds": 1.8,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "レーン",
+          "jockeyId": "05585",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:47.1",
+          "margin": -0.1,
+          "passing": [
+            4,
+            3,
+            4
+          ],
+          "pace": "36.0-34.3",
+          "last3f": 33.8,
+          "bodyWeight": {
+            "weight": 500,
+            "diff": -2
+          },
+          "winnerName": "(ニシノマルガリート)"
+        },
+        {
+          "date": "2026/04/26",
+          "venue": {
+            "round": 2,
+            "name": "東京",
+            "day": 2,
+            "raw": "2東京2"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳未勝利",
+          "raceId": "202605020205",
+          "raceIdRaw": "202605020205",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 7,
+          "umaban": 14,
+          "odds": 2.5,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "レーン",
+          "jockeyId": "05585",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.8",
+          "margin": 0.1,
+          "passing": [
+            12,
+            11,
+            10
+          ],
+          "pace": "35.9-34.7",
+          "last3f": 33.5,
+          "bodyWeight": {
+            "weight": 502,
+            "diff": 0
+          },
+          "winnerName": "ダイユウアレグロ"
+        }
+      ],
+      "oikiri": {
+        "umaban": 2,
+        "horseId": "2023105684",
+        "horseName": "クカイリモク",
+        "critic": "上積十分",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 2,
+        "umaban": 3,
+        "name": "ジーネキング",
+        "horseId": "2023104885",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 56,
+        "jockeyName": "菊沢",
+        "jockeyId": "01161",
+        "stableLocation": "美浦",
+        "trainerName": "斎藤誠",
+        "trainerId": "01086",
+        "bodyWeight": {
+          "weight": 494,
+          "diff": 4
+        }
+      },
+      "results": [
+        {
+          "date": "2026/08/08",
+          "venue": {
+            "round": 1,
+            "name": "札幌",
+            "day": 5,
+            "raw": "1札幌5"
+          },
+          "weather": "曇",
+          "raceNumber": 12,
+          "raceName": "摩周湖特別(2勝クラス)",
+          "raceId": "202601010512",
+          "raceIdRaw": "202601010512",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 7,
+          "umaban": 11,
+          "odds": 3.3,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "横山武史",
+          "jockeyId": "01170",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1500,
+          "trackCondition": "稍",
+          "time": "1:27.8",
+          "margin": 0,
+          "passing": [
+            9,
+            8,
+            8
+          ],
+          "pace": "28.8-35.4",
+          "last3f": 34.7,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 0
+          },
+          "winnerName": "ブラックジェダイト"
+        },
+        {
+          "date": "2026/07/25",
+          "venue": {
+            "round": 2,
+            "name": "新潟",
+            "day": 1,
+            "raw": "2新潟1"
+          },
+          "weather": "曇",
+          "raceNumber": 6,
+          "raceName": "豊栄特別(2勝クラス)",
+          "raceId": "202604020106",
+          "raceIdRaw": "202604020106",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 5,
+          "umaban": 9,
+          "odds": 4.6,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "斎藤新",
+          "jockeyId": "01178",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:31.8",
+          "margin": 0.2,
+          "passing": [
+            6,
+            7
+          ],
+          "pace": "34.5-33.5",
+          "last3f": 33.3,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 0
+          },
+          "winnerName": "ガリレア"
+        },
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 2,
+          "umaban": 3,
+          "odds": 11.1,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 7
+          },
+          "jockeyName": "菊沢一樹",
+          "jockeyId": "01161",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.8",
+          "margin": 0.6,
+          "passing": [
+            5,
+            6,
+            8,
+            7
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.7,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 4
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/10",
+          "venue": {
+            "round": 2,
+            "name": "東京",
+            "day": 6,
+            "raw": "2東京6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "NHKマイルC(GI)",
+          "raceId": "202605020611",
+          "raceIdRaw": "202605020611",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 3,
+          "umaban": 6,
+          "odds": 43.7,
+          "ninki": 13,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 13
+          },
+          "jockeyName": "斎藤新",
+          "jockeyId": "01178",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:32.4",
+          "margin": 0.9,
+          "passing": [
+            7,
+            7
+          ],
+          "pace": "33.7-34.6",
+          "last3f": 34.9,
+          "bodyWeight": {
+            "weight": 490,
+            "diff": -4
+          },
+          "winnerName": "ロデオドライブ"
+        },
+        {
+          "date": "2026/04/11",
+          "venue": {
+            "round": 3,
+            "name": "中山",
+            "day": 5,
+            "raw": "3中山5"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ニュージーランドT(GII)",
+          "raceId": "202606030511",
+          "raceIdRaw": "202606030511",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 3,
+          "umaban": 5,
+          "odds": 11.8,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "横山和生",
+          "jockeyId": "01140",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.6",
+          "margin": 0.3,
+          "passing": [
+            7,
+            6,
+            5
+          ],
+          "pace": "35.4-34.3",
+          "last3f": 34,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": -2
+          },
+          "winnerName": "レザベーション"
+        },
+        {
+          "date": "2026/03/15",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 6,
+            "raw": "2中山6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "フジTVスプリングS(GII)",
+          "raceId": "202606020611",
+          "raceIdRaw": "202606020611",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 4,
+          "umaban": 7,
+          "odds": 73.5,
+          "ninki": 12,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 12
+          },
+          "jockeyName": "横山和生",
+          "jockeyId": "01140",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.9",
+          "margin": 0.9,
+          "passing": [
+            2,
+            2,
+            3,
+            2
+          ],
+          "pace": "36.0-35.3",
+          "last3f": 35.9,
+          "bodyWeight": {
+            "weight": 496,
+            "diff": 4
+          },
+          "winnerName": "アウダーシア"
+        },
+        {
+          "date": "2026/01/18",
+          "venue": {
+            "round": 1,
+            "name": "中山",
+            "day": 7,
+            "raw": "1中山7"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "京成杯(GIII)",
+          "raceId": "202606010711",
+          "raceIdRaw": "202606010711",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 6,
+          "umaban": 10,
+          "odds": 27.3,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 10
+          },
+          "jockeyName": "斎藤新",
+          "jockeyId": "01178",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:59.9",
+          "margin": 0.6,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "35.6-34.7",
+          "last3f": 35.3,
+          "bodyWeight": {
+            "weight": 492,
+            "diff": 2
+          },
+          "winnerName": "グリーンエナジー"
+        },
+        {
+          "date": "2025/12/27",
+          "venue": {
+            "round": 5,
+            "name": "中山",
+            "day": 7,
+            "raw": "5中山7"
+          },
+          "weather": "曇",
+          "raceNumber": 11,
+          "raceName": "ホープフルS(GI)",
+          "raceId": "202506050711",
+          "raceIdRaw": "202506050711",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 7,
+          "umaban": 14,
+          "odds": 55,
+          "ninki": 11,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 12
+          },
+          "jockeyName": "斎藤新",
+          "jockeyId": "01178",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:02.1",
+          "margin": 1.1,
+          "passing": [
+            2,
+            2,
+            2,
+            2
+          ],
+          "pace": "35.5-35.2",
+          "last3f": 36.1,
+          "bodyWeight": {
+            "weight": 490,
+            "diff": 12
+          },
+          "winnerName": "ロブチェン"
+        },
+        {
+          "date": "2025/09/06",
+          "venue": {
+            "round": 2,
+            "name": "札幌",
+            "day": 5,
+            "raw": "2札幌5"
+          },
+          "weather": "曇",
+          "raceNumber": 11,
+          "raceName": "札幌2歳S(GIII)",
+          "raceId": "202501020511",
+          "raceIdRaw": "202501020511",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 31.1,
+          "ninki": 10,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "斎藤新",
+          "jockeyId": "01178",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:50.6",
+          "margin": 0,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "38.2-36.1",
+          "last3f": 36.1,
+          "bodyWeight": {
+            "weight": 478,
+            "diff": 4
+          },
+          "winnerName": "ショウナンガルフ"
+        },
+        {
+          "date": "2025/08/16",
+          "venue": {
+            "round": 2,
+            "name": "新潟",
+            "day": 7,
+            "raw": "2新潟7"
+          },
+          "weather": "晴",
+          "raceNumber": 1,
+          "raceName": "2歳未勝利",
+          "raceId": "202504020701",
+          "raceIdRaw": "202504020701",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 6,
+          "umaban": 8,
+          "odds": 1.5,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:48.2",
+          "margin": -0.2,
+          "passing": [
+            1,
+            1
+          ],
+          "pace": "36.4-34.4",
+          "last3f": 34.4,
+          "bodyWeight": {
+            "weight": 474,
+            "diff": -2
+          },
+          "winnerName": "(ユメシルベ)"
+        },
+        {
+          "date": "2025/07/27",
+          "venue": {
+            "round": 2,
+            "name": "新潟",
+            "day": 2,
+            "raw": "2新潟2"
+          },
+          "weather": "晴",
+          "raceNumber": 2,
+          "raceName": "2歳未勝利",
+          "raceId": "202504020202",
+          "raceIdRaw": "202504020202",
+          "venueKind": "中央",
+          "entryCount": 6,
+          "wakuban": 6,
+          "umaban": 6,
+          "odds": 4.4,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:47.8",
+          "margin": 0.4,
+          "passing": [
+            1,
+            1
+          ],
+          "pace": "36.3-33.0",
+          "last3f": 33.4,
+          "bodyWeight": {
+            "weight": 476,
+            "diff": -2
+          },
+          "winnerName": "ゾロアストロ"
+        },
+        {
+          "date": "2025/06/29",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202503020205",
+          "raceIdRaw": "202503020205",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 8,
+          "umaban": 13,
+          "odds": 5.4,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "大野拓弥",
+          "jockeyId": "01096",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:50.0",
+          "margin": 0.5,
+          "passing": [
+            3,
+            3,
+            3,
+            2
+          ],
+          "pace": "35.6-36.5",
+          "last3f": 36.7,
+          "bodyWeight": {
+            "weight": 478,
+            "diff": 0
+          },
+          "winnerName": "ロスパレドネス"
+        }
+      ],
+      "oikiri": {
+        "umaban": 3,
+        "horseId": "2023104885",
+        "horseName": "ジーネキング",
+        "critic": "気配上々",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 2,
+        "umaban": 4,
+        "name": "サイモンシャリオ",
+        "horseId": "2023101569",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 52,
+        "jockeyName": "田口",
+        "jockeyId": "01208",
+        "stableLocation": "栗東",
+        "trainerName": "梅田",
+        "trainerId": "01084",
+        "bodyWeight": {
+          "weight": 488,
+          "diff": -2
+        }
+      },
+      "results": [
+        {
+          "date": "2026/07/25",
+          "venue": {
+            "round": 2,
+            "name": "中京",
+            "day": 1,
+            "raw": "2中京1"
+          },
+          "weather": "晴",
+          "raceNumber": 8,
+          "raceName": "香嵐渓特別(1勝クラス)",
+          "raceId": "202607020108",
+          "raceIdRaw": "202607020108",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 7,
+          "umaban": 7,
+          "odds": 9.1,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 6
+          },
+          "jockeyName": "松若風馬",
+          "jockeyId": "01154",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:59.4",
+          "margin": 1.1,
+          "passing": [
+            3,
+            3,
+            3,
+            3
+          ],
+          "pace": "36.7-33.2",
+          "last3f": 33.9,
+          "bodyWeight": {
+            "weight": 482,
+            "diff": -6
+          },
+          "winnerName": "ロードフィレール"
+        },
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 2,
+          "umaban": 4,
+          "odds": 59.5,
+          "ninki": 14,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 6
+          },
+          "jockeyName": "田口貫太",
+          "jockeyId": "01208",
+          "kinryo": 52,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.7",
+          "margin": 0.5,
+          "passing": [
+            10,
+            8,
+            8,
+            7
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.6,
+          "bodyWeight": {
+            "weight": 488,
+            "diff": -2
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/16",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 7,
+            "raw": "3京都7"
+          },
+          "weather": "晴",
+          "raceNumber": 9,
+          "raceName": "あずさ賞(1勝クラス)",
+          "raceId": "202608030709",
+          "raceIdRaw": "202608030709",
+          "venueKind": "中央",
+          "entryCount": 10,
+          "wakuban": 3,
+          "umaban": 3,
+          "odds": 9.7,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 6
+          },
+          "jockeyName": "松若風馬",
+          "jockeyId": "01154",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:58.3",
+          "margin": 0.4,
+          "passing": [
+            8,
+            7,
+            8,
+            8
+          ],
+          "pace": "35.2-34.6",
+          "last3f": 34.5,
+          "bodyWeight": {
+            "weight": 490,
+            "diff": 8
+          },
+          "winnerName": "レッドラージャ"
+        },
+        {
+          "date": "2026/04/18",
+          "venue": {
+            "round": 1,
+            "name": "福島",
+            "day": 3,
+            "raw": "1福島3"
+          },
+          "weather": "晴",
+          "raceNumber": 9,
+          "raceName": "ひめさゆり賞(1勝クラス)",
+          "raceId": "202603010309",
+          "raceIdRaw": "202603010309",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 4.6,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "松若風馬",
+          "jockeyId": "01154",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:58.4",
+          "margin": 0.6,
+          "passing": [
+            5,
+            5,
+            6,
+            5
+          ],
+          "pace": "34.6-34.9",
+          "last3f": 34.8,
+          "bodyWeight": {
+            "weight": 482,
+            "diff": -4
+          },
+          "winnerName": "キンググローリー"
+        },
+        {
+          "date": "2026/03/29",
+          "venue": {
+            "round": 2,
+            "name": "阪神",
+            "day": 2,
+            "raw": "2阪神2"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳未勝利",
+          "raceId": "202609020205",
+          "raceIdRaw": "202609020205",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 3.1,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "松若風馬",
+          "jockeyId": "01154",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:00.4",
+          "margin": 0,
+          "passing": [
+            5,
+            5,
+            5,
+            3
+          ],
+          "pace": "36.5-35.3",
+          "last3f": 34.9,
+          "bodyWeight": {
+            "weight": 486,
+            "diff": -4
+          },
+          "winnerName": "(フレアオブセンス)"
+        },
+        {
+          "date": "2026/03/14",
+          "venue": {
+            "round": 1,
+            "name": "中京",
+            "day": 1,
+            "raw": "1中京1"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳未勝利",
+          "raceId": "202607010105",
+          "raceIdRaw": "202607010105",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 7,
+          "umaban": 14,
+          "odds": 9.1,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "松若風馬",
+          "jockeyId": "01154",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:00.9",
+          "margin": 0.5,
+          "passing": [
+            11,
+            11,
+            12,
+            13
+          ],
+          "pace": "35.7-35.0",
+          "last3f": 34.6,
+          "bodyWeight": {
+            "weight": 490,
+            "diff": -2
+          },
+          "winnerName": "ミッキージャンプ"
+        },
+        {
+          "date": "2026/01/05",
+          "venue": {
+            "round": 1,
+            "name": "京都",
+            "day": 2,
+            "raw": "1京都2"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳未勝利",
+          "raceId": "202608010205",
+          "raceIdRaw": "202608010205",
+          "venueKind": "中央",
+          "entryCount": 17,
+          "wakuban": 8,
+          "umaban": 16,
+          "odds": 12,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 8
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:03.0",
+          "margin": 0.7,
+          "passing": [
+            4,
+            4,
+            4,
+            3
+          ],
+          "pace": "35.7-36.0",
+          "last3f": 36.3,
+          "bodyWeight": {
+            "weight": 492,
+            "diff": 4
+          },
+          "winnerName": "タガノアルトゥーラ"
+        },
+        {
+          "date": "2025/12/20",
+          "venue": {
+            "round": 5,
+            "name": "中京",
+            "day": 5,
+            "raw": "5中京5"
+          },
+          "weather": "曇",
+          "raceNumber": 5,
+          "raceName": "2歳未勝利",
+          "raceId": "202507050505",
+          "raceIdRaw": "202507050505",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 5,
+          "umaban": 9,
+          "odds": 8.3,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "吉田隼人",
+          "jockeyId": "01095",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "稍",
+          "time": "2:02.6",
+          "margin": 0.1,
+          "passing": [
+            10,
+            11,
+            12,
+            10
+          ],
+          "pace": "35.8-36.7",
+          "last3f": 34.7,
+          "bodyWeight": {
+            "weight": 488,
+            "diff": -8
+          },
+          "winnerName": "ロードメルヴェイユ"
+        },
+        {
+          "date": "2025/12/06",
+          "venue": {
+            "round": 5,
+            "name": "阪神",
+            "day": 1,
+            "raw": "5阪神1"
+          },
+          "weather": "晴",
+          "raceNumber": 4,
+          "raceName": "2歳未勝利",
+          "raceId": "202509050104",
+          "raceIdRaw": "202509050104",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 8,
+          "umaban": 9,
+          "odds": 11.2,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:49.0",
+          "margin": 0.6,
+          "passing": [
+            9,
+            9
+          ],
+          "pace": "35.6-33.5",
+          "last3f": 33.2,
+          "bodyWeight": {
+            "weight": 496,
+            "diff": 0
+          },
+          "winnerName": "ブレットパス"
+        },
+        {
+          "date": "2025/11/16",
+          "venue": {
+            "round": 4,
+            "name": "京都",
+            "day": 4,
+            "raw": "4京都4"
+          },
+          "weather": "晴",
+          "raceNumber": 3,
+          "raceName": "2歳未勝利",
+          "raceId": "202508040403",
+          "raceIdRaw": "202508040403",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 6,
+          "umaban": 11,
+          "odds": 32.1,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.5",
+          "margin": 0.6,
+          "passing": [
+            12,
+            10
+          ],
+          "pace": "34.9-35.5",
+          "last3f": 35.1,
+          "bodyWeight": {
+            "weight": 496,
+            "diff": 2
+          },
+          "winnerName": "エイシンティザー"
+        },
+        {
+          "date": "2025/10/25",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 8,
+            "raw": "3京都8"
+          },
+          "weather": "曇",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202508030805",
+          "raceIdRaw": "202508030805",
+          "venueKind": "中央",
+          "entryCount": 14,
+          "wakuban": 6,
+          "umaban": 10,
+          "odds": 26.8,
+          "ninki": 8,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 6
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:36.0",
+          "margin": 1.2,
+          "passing": [
+            12,
+            11
+          ],
+          "pace": "35.7-34.8",
+          "last3f": 34.9,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 0
+          },
+          "winnerName": "アーリーハーベスト"
+        }
+      ],
+      "oikiri": {
+        "umaban": 4,
+        "horseId": "2023101569",
+        "horseName": "サイモンシャリオ",
+        "critic": "気配平凡",
+        "rank": "C"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 3,
+        "umaban": 5,
+        "name": "リッツパーティー",
+        "horseId": "2023104224",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 54,
+        "jockeyName": "横山武",
+        "jockeyId": "01170",
+        "stableLocation": "美浦",
+        "trainerName": "岩戸",
+        "trainerId": "01051",
+        "bodyWeight": {
+          "weight": 486,
+          "diff": 4
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 3,
+          "umaban": 5,
+          "odds": 5.6,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "横山武史",
+          "jockeyId": "01170",
+          "kinryo": 54,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.5",
+          "margin": 0.3,
+          "passing": [
+            2,
+            2,
+            2,
+            2
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.8,
+          "bodyWeight": {
+            "weight": 486,
+            "diff": 4
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/09",
+          "venue": {
+            "round": 2,
+            "name": "東京",
+            "day": 5,
+            "raw": "2東京5"
+          },
+          "weather": "晴",
+          "raceNumber": 6,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202605020506",
+          "raceIdRaw": "202605020506",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 8,
+          "umaban": 11,
+          "odds": 4.7,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "横山武史",
+          "jockeyId": "01170",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.4",
+          "margin": -0.1,
+          "passing": [
+            5,
+            3,
+            2
+          ],
+          "pace": "34.7-34.2",
+          "last3f": 34.1,
+          "bodyWeight": {
+            "weight": 482,
+            "diff": -4
+          },
+          "winnerName": "(ホールドザデイ)"
+        },
+        {
+          "date": "2026/02/21",
+          "venue": {
+            "round": 1,
+            "name": "東京",
+            "day": 7,
+            "raw": "1東京7"
+          },
+          "weather": "晴",
+          "raceNumber": 9,
+          "raceName": "フリージア賞(1勝クラス)",
+          "raceId": "202605010709",
+          "raceIdRaw": "202605010709",
+          "venueKind": "中央",
+          "entryCount": 7,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 4.1,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "柴田善臣",
+          "jockeyId": "00641",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:59.0",
+          "margin": 0.3,
+          "passing": [
+            3,
+            3,
+            3
+          ],
+          "pace": "35.8-34.2",
+          "last3f": 34,
+          "bodyWeight": {
+            "weight": 486,
+            "diff": -8
+          },
+          "winnerName": "ファムクラジューズ"
+        },
+        {
+          "date": "2026/01/31",
+          "venue": {
+            "round": 1,
+            "name": "東京",
+            "day": 1,
+            "raw": "1東京1"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳新馬",
+          "raceId": "202605010105",
+          "raceIdRaw": "202605010105",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 2,
+          "umaban": 3,
+          "odds": 20.5,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "柴田善臣",
+          "jockeyId": "00641",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:48.2",
+          "margin": -0.4,
+          "passing": [
+            2,
+            1,
+            1
+          ],
+          "pace": "36.9-33.6",
+          "last3f": 33.6,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 0
+          },
+          "winnerName": "(ウイルソン)"
+        }
+      ],
+      "oikiri": {
+        "umaban": 5,
+        "horseId": "2023104224",
+        "horseName": "リッツパーティー",
+        "critic": "気配抜群",
+        "rank": "A"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 3,
+        "umaban": 6,
+        "name": "コルテオソレイユ",
+        "horseId": "2023105084",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 54,
+        "jockeyName": "荻野極",
+        "jockeyId": "01160",
+        "stableLocation": "栗東",
+        "trainerName": "佐藤悠",
+        "trainerId": "01205",
+        "bodyWeight": {
+          "weight": 456,
+          "diff": 4
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 3,
+          "umaban": 6,
+          "odds": 7.8,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 8
+          },
+          "jockeyName": "荻野極",
+          "jockeyId": "01160",
+          "kinryo": 54,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.8",
+          "margin": 0.6,
+          "passing": [
+            5,
+            5,
+            4,
+            3
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.9,
+          "bodyWeight": {
+            "weight": 456,
+            "diff": 4
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/09",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 5,
+            "raw": "3京都5"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202608030505",
+          "raceIdRaw": "202608030505",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 7,
+          "umaban": 7,
+          "odds": 2.6,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "浜中俊",
+          "jockeyId": "01115",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.4",
+          "margin": 0,
+          "passing": [
+            3,
+            3
+          ],
+          "pace": "35.0-34.0",
+          "last3f": 33.7,
+          "bodyWeight": {
+            "weight": 452,
+            "diff": -6
+          },
+          "winnerName": "(ダークマルス)"
+        },
+        {
+          "date": "2026/03/22",
+          "venue": {
+            "round": 1,
+            "name": "中京",
+            "day": 4,
+            "raw": "1中京4"
+          },
+          "weather": "曇",
+          "raceNumber": 9,
+          "raceName": "フローラルウォーク賞(1勝クラス)",
+          "raceId": "202607010409",
+          "raceIdRaw": "202607010409",
+          "venueKind": "中央",
+          "entryCount": 10,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 3.8,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "浜中俊",
+          "jockeyId": "01115",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.9",
+          "margin": 0.2,
+          "passing": [
+            3,
+            4,
+            4
+          ],
+          "pace": "36.0-33.7",
+          "last3f": 33.5,
+          "bodyWeight": {
+            "weight": 458,
+            "diff": 0
+          },
+          "winnerName": "テーオーアルアイン"
+        },
+        {
+          "date": "2026/03/08",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 4,
+            "raw": "2中山4"
+          },
+          "weather": "晴",
+          "raceNumber": 7,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202606020407",
+          "raceIdRaw": "202606020407",
+          "venueKind": "中央",
+          "entryCount": 11,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 4.2,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 6
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.2",
+          "margin": 0.7,
+          "passing": [
+            6,
+            10,
+            11
+          ],
+          "pace": "34.6-34.9",
+          "last3f": 34.8,
+          "bodyWeight": {
+            "weight": 458,
+            "diff": 0
+          },
+          "winnerName": "ディールメーカー"
+        },
+        {
+          "date": "2025/12/21",
+          "venue": {
+            "round": 5,
+            "name": "阪神",
+            "day": 6,
+            "raw": "5阪神6"
+          },
+          "weather": "小雨",
+          "raceNumber": 11,
+          "raceName": "朝日フューチュリティ(GI)",
+          "raceId": "202509050611",
+          "raceIdRaw": "202509050611",
+          "venueKind": "中央",
+          "entryCount": 14,
+          "wakuban": 5,
+          "umaban": 7,
+          "odds": 22.2,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 11
+          },
+          "jockeyName": "川田将雅",
+          "jockeyId": "01088",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "重",
+          "time": "1:34.6",
+          "margin": 1.4,
+          "passing": [
+            4,
+            4
+          ],
+          "pace": "34.6-35.0",
+          "last3f": 36,
+          "bodyWeight": {
+            "weight": 458,
+            "diff": 2
+          },
+          "winnerName": "カヴァレリッツォ"
+        },
+        {
+          "date": "2025/11/30",
+          "venue": {
+            "round": 5,
+            "name": "東京",
+            "day": 8,
+            "raw": "5東京8"
+          },
+          "weather": "晴",
+          "raceNumber": 8,
+          "raceName": "ベゴニア賞(1勝クラス)",
+          "raceId": "202505050808",
+          "raceIdRaw": "202505050808",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 3,
+          "umaban": 3,
+          "odds": 14.9,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "マーカン",
+          "jockeyId": "05626",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.1",
+          "margin": 0,
+          "passing": [
+            7,
+            6
+          ],
+          "pace": "35.5-34.1",
+          "last3f": 33.5,
+          "bodyWeight": {
+            "weight": 456,
+            "diff": 12
+          },
+          "winnerName": "ドリームコア"
+        },
+        {
+          "date": "2025/09/21",
+          "venue": {
+            "round": 4,
+            "name": "阪神",
+            "day": 7,
+            "raw": "4阪神7"
+          },
+          "weather": "晴",
+          "raceNumber": 2,
+          "raceName": "2歳未勝利",
+          "raceId": "202509040702",
+          "raceIdRaw": "202509040702",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 5,
+          "umaban": 7,
+          "odds": 18.8,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "浜中俊",
+          "jockeyId": "01115",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.8",
+          "margin": -0.1,
+          "passing": [
+            5,
+            5
+          ],
+          "pace": "34.9-35.3",
+          "last3f": 34.9,
+          "bodyWeight": {
+            "weight": 444,
+            "diff": -6
+          },
+          "winnerName": "(アルヴァンドルード)"
+        },
+        {
+          "date": "2025/09/07",
+          "venue": {
+            "round": 2,
+            "name": "札幌",
+            "day": 6,
+            "raw": "2札幌6"
+          },
+          "weather": "曇",
+          "raceNumber": 1,
+          "raceName": "2歳未勝利",
+          "raceId": "202501020601",
+          "raceIdRaw": "202501020601",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 3,
+          "umaban": 3,
+          "odds": 3.5,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "浜中俊",
+          "jockeyId": "01115",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1500,
+          "trackCondition": "稍",
+          "time": "1:32.5",
+          "margin": 0.3,
+          "passing": [
+            6,
+            4,
+            6
+          ],
+          "pace": "30.9-36.2",
+          "last3f": 36.1,
+          "bodyWeight": {
+            "weight": 450,
+            "diff": 0
+          },
+          "winnerName": "グロリアスマーチ"
+        },
+        {
+          "date": "2025/07/20",
+          "venue": {
+            "round": 1,
+            "name": "函館",
+            "day": 12,
+            "raw": "1函館12"
+          },
+          "weather": "晴",
+          "raceNumber": 1,
+          "raceName": "2歳未勝利",
+          "raceId": "202502011201",
+          "raceIdRaw": "202502011201",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 2,
+          "umaban": 4,
+          "odds": 4.6,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "鮫島克駿",
+          "jockeyId": "01157",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1200,
+          "trackCondition": "良",
+          "time": "1:09.4",
+          "margin": 0.3,
+          "passing": [
+            4,
+            4
+          ],
+          "pace": "33.8-35.3",
+          "last3f": 35.2,
+          "bodyWeight": {
+            "weight": 450,
+            "diff": 8
+          },
+          "winnerName": "クワイエットアイ"
+        },
+        {
+          "date": "2025/07/05",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 3,
+            "raw": "2福島3"
+          },
+          "weather": "曇",
+          "raceNumber": 4,
+          "raceName": "2歳新馬",
+          "raceId": "202503020304",
+          "raceIdRaw": "202503020304",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 2,
+          "umaban": 2,
+          "odds": 1.7,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "菅原明良",
+          "jockeyId": "01179",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1200,
+          "trackCondition": "稍",
+          "time": "1:11.0",
+          "margin": 0.3,
+          "passing": [
+            5,
+            5
+          ],
+          "pace": "35.8-34.9",
+          "last3f": 34.5,
+          "bodyWeight": {
+            "weight": 442,
+            "diff": 0
+          },
+          "winnerName": "ヤマメライズ"
+        }
+      ],
+      "oikiri": {
+        "umaban": 6,
+        "horseId": "2023105084",
+        "horseName": "コルテオソレイユ",
+        "critic": "更に上昇",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 4,
+        "umaban": 7,
+        "name": "ショウナンガルフ",
+        "horseId": "2023105332",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 57,
+        "jockeyName": "丸山",
+        "jockeyId": "01127",
+        "stableLocation": "栗東",
+        "trainerName": "須貝",
+        "trainerId": "01105",
+        "bodyWeight": {
+          "weight": 484,
+          "diff": -2
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 4,
+          "umaban": 7,
+          "odds": 79.2,
+          "ninki": 15,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 12
+          },
+          "jockeyName": "丸山元気",
+          "jockeyId": "01127",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.0",
+          "margin": 0.8,
+          "passing": [
+            16,
+            16,
+            12,
+            12
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.5,
+          "bodyWeight": {
+            "weight": 484,
+            "diff": -2
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/31",
+          "venue": {
+            "round": 2,
+            "name": "東京",
+            "day": 12,
+            "raw": "2東京12"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "東京優駿(GI)",
+          "raceId": "202605021211",
+          "raceIdRaw": "202605021211",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 4,
+          "umaban": 8,
+          "odds": 281.8,
+          "ninki": 17,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 17
+          },
+          "jockeyName": "浜中俊",
+          "jockeyId": "01115",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2400,
+          "trackCondition": "良",
+          "time": "2:24.2",
+          "margin": 1.5,
+          "passing": [
+            15,
+            14,
+            17,
+            17
+          ],
+          "pace": "35.6-34.2",
+          "last3f": 34.1,
+          "bodyWeight": {
+            "weight": 486,
+            "diff": 6
+          },
+          "winnerName": "ロブチェン"
+        },
+        {
+          "date": "2026/02/10",
+          "venue": {
+            "round": 2,
+            "name": "京都",
+            "day": 4,
+            "raw": "2京都4"
+          },
+          "weather": "曇",
+          "raceNumber": 11,
+          "raceName": "きさらぎ賞(GIII)",
+          "raceId": "202608020411",
+          "raceIdRaw": "202608020411",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 8,
+          "umaban": 8,
+          "odds": 9,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 9
+          },
+          "jockeyName": "横山和生",
+          "jockeyId": "01140",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:49.0",
+          "margin": 1,
+          "passing": [
+            3,
+            4
+          ],
+          "pace": "36.6-33.7",
+          "last3f": 34.3,
+          "bodyWeight": {
+            "weight": 480,
+            "diff": -12
+          },
+          "winnerName": "ゾロアストロ"
+        },
+        {
+          "date": "2025/12/27",
+          "venue": {
+            "round": 5,
+            "name": "中山",
+            "day": 7,
+            "raw": "5中山7"
+          },
+          "weather": "曇",
+          "raceNumber": 11,
+          "raceName": "ホープフルS(GI)",
+          "raceId": "202506050711",
+          "raceIdRaw": "202506050711",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 7,
+          "umaban": 13,
+          "odds": 5.6,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 14
+          },
+          "jockeyName": "池添謙一",
+          "jockeyId": "01032",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:02.4",
+          "margin": 1.4,
+          "passing": [
+            12,
+            12,
+            10,
+            10
+          ],
+          "pace": "35.5-35.2",
+          "last3f": 35.6,
+          "bodyWeight": {
+            "weight": 492,
+            "diff": 20
+          },
+          "winnerName": "ロブチェン"
+        },
+        {
+          "date": "2025/09/06",
+          "venue": {
+            "round": 2,
+            "name": "札幌",
+            "day": 5,
+            "raw": "2札幌5"
+          },
+          "weather": "曇",
+          "raceNumber": 11,
+          "raceName": "札幌2歳S(GIII)",
+          "raceId": "202501020511",
+          "raceIdRaw": "202501020511",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 3.4,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "池添謙一",
+          "jockeyId": "01032",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:50.6",
+          "margin": 0,
+          "passing": [
+            9,
+            9,
+            11,
+            9
+          ],
+          "pace": "38.2-36.1",
+          "last3f": 35,
+          "bodyWeight": {
+            "weight": 472,
+            "diff": -2
+          },
+          "winnerName": "(ジーネキング)"
+        },
+        {
+          "date": "2025/07/06",
+          "venue": {
+            "round": 1,
+            "name": "函館",
+            "day": 8,
+            "raw": "1函館8"
+          },
+          "weather": "曇",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202502010805",
+          "raceIdRaw": "202502010805",
+          "venueKind": "中央",
+          "entryCount": 6,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 1.3,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "池添謙一",
+          "jockeyId": "01032",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "稍",
+          "time": "1:51.1",
+          "margin": -1.1,
+          "passing": [
+            2,
+            2,
+            2,
+            2
+          ],
+          "pace": "38.5-35.5",
+          "last3f": 35.4,
+          "bodyWeight": {
+            "weight": 474,
+            "diff": 0
+          },
+          "winnerName": "(ヴンダーバール)"
+        }
+      ],
+      "oikiri": {
+        "umaban": 7,
+        "horseId": "2023105332",
+        "horseName": "ショウナンガルフ",
+        "critic": "一歩前進",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 4,
+        "umaban": 8,
+        "name": "ディールメーカー",
+        "horseId": "2023103326",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 56,
+        "jockeyName": "高杉",
+        "jockeyId": "01213",
+        "stableLocation": "美浦",
+        "trainerName": "大和田",
+        "trainerId": "01124",
+        "bodyWeight": {
+          "weight": 494,
+          "diff": -4
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 4,
+          "umaban": 8,
+          "odds": 14,
+          "ninki": 8,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "高杉吏麒",
+          "jockeyId": "01213",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.4",
+          "margin": 0.2,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.7,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": -4
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/04/11",
+          "venue": {
+            "round": 3,
+            "name": "中山",
+            "day": 5,
+            "raw": "3中山5"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ニュージーランドT(GII)",
+          "raceId": "202606030511",
+          "raceIdRaw": "202606030511",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 8,
+          "umaban": 14,
+          "odds": 7.8,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.6",
+          "margin": 0.3,
+          "passing": [
+            3,
+            3,
+            3
+          ],
+          "pace": "35.4-34.3",
+          "last3f": 34.3,
+          "bodyWeight": {
+            "weight": 498,
+            "diff": 0
+          },
+          "winnerName": "レザベーション"
+        },
+        {
+          "date": "2026/03/08",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 4,
+            "raw": "2中山4"
+          },
+          "weather": "晴",
+          "raceNumber": 7,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202606020407",
+          "raceIdRaw": "202606020407",
+          "venueKind": "中央",
+          "entryCount": 11,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 2.8,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "坂井瑠星",
+          "jockeyId": "01163",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.5",
+          "margin": -0.3,
+          "passing": [
+            1,
+            2,
+            2
+          ],
+          "pace": "34.6-34.9",
+          "last3f": 34.8,
+          "bodyWeight": {
+            "weight": 498,
+            "diff": 4
+          },
+          "winnerName": "(サーディンラン)"
+        },
+        {
+          "date": "2026/01/10",
+          "venue": {
+            "round": 1,
+            "name": "中山",
+            "day": 3,
+            "raw": "1中山3"
+          },
+          "weather": "晴",
+          "raceNumber": 7,
+          "raceName": "3歳未勝利",
+          "raceId": "202606010307",
+          "raceIdRaw": "202606010307",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 3,
+          "umaban": 6,
+          "odds": 3.2,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.0",
+          "margin": -0.1,
+          "passing": [
+            2,
+            2,
+            2
+          ],
+          "pace": "35.4-34.7",
+          "last3f": 34.6,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 8
+          },
+          "winnerName": "(シャルムグリーン)"
+        },
+        {
+          "date": "2025/07/27",
+          "venue": {
+            "round": 2,
+            "name": "新潟",
+            "day": 2,
+            "raw": "2新潟2"
+          },
+          "weather": "晴",
+          "raceNumber": 3,
+          "raceName": "2歳新馬",
+          "raceId": "202504020203",
+          "raceIdRaw": "202504020203",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 8,
+          "umaban": 8,
+          "odds": 33.3,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "横山琉人",
+          "jockeyId": "01192",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:37.1",
+          "margin": 0,
+          "passing": [
+            5,
+            5
+          ],
+          "pace": "37.5-33.0",
+          "last3f": 32.8,
+          "bodyWeight": {
+            "weight": 486,
+            "diff": 0
+          },
+          "winnerName": "フィロステファニ"
+        }
+      ],
+      "oikiri": {
+        "umaban": 8,
+        "horseId": "2023103326",
+        "horseName": "ディールメーカー",
+        "critic": "動き上々",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 5,
+        "umaban": 9,
+        "name": "キンググローリー",
+        "horseId": "2023100021",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 54,
+        "jockeyName": "石川",
+        "jockeyId": "01150",
+        "stableLocation": "美浦",
+        "trainerName": "古賀慎",
+        "trainerId": "01079",
+        "bodyWeight": {
+          "weight": 464,
+          "diff": -2
+        }
+      },
+      "results": [
+        {
+          "date": "2026/07/11",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 5,
+            "raw": "2福島5"
+          },
+          "weather": "曇",
+          "raceNumber": 9,
+          "raceName": "信夫山特別(2勝クラス)",
+          "raceId": "202603020509",
+          "raceIdRaw": "202603020509",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 3,
+          "umaban": 5,
+          "odds": 4.3,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "三浦皇成",
+          "jockeyId": "01122",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 2600,
+          "trackCondition": "良",
+          "time": "2:37.4",
+          "margin": 0,
+          "passing": [
+            2,
+            2,
+            2,
+            2
+          ],
+          "pace": "36.5-35.9",
+          "last3f": 35.8,
+          "bodyWeight": {
+            "weight": 466,
+            "diff": 2
+          },
+          "winnerName": "サトノソティラス"
+        },
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 5,
+          "umaban": 9,
+          "odds": 18.6,
+          "ninki": 9,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 13
+          },
+          "jockeyName": "石川裕紀",
+          "jockeyId": "01150",
+          "kinryo": 54,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.1",
+          "margin": 0.9,
+          "passing": [
+            12,
+            12,
+            15,
+            15
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.4,
+          "bodyWeight": {
+            "weight": 464,
+            "diff": -2
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/09",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 5,
+            "raw": "3京都5"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "京都新聞杯(GII)",
+          "raceId": "202608030511",
+          "raceIdRaw": "202608030511",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 6,
+          "umaban": 12,
+          "odds": 29.8,
+          "ninki": 8,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 13
+          },
+          "jockeyName": "幸英明",
+          "jockeyId": "00732",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2200,
+          "trackCondition": "良",
+          "time": "2:11.1",
+          "margin": 1.2,
+          "passing": [
+            2,
+            2,
+            2,
+            2
+          ],
+          "pace": "35.3-35.8",
+          "last3f": 37,
+          "bodyWeight": {
+            "weight": 466,
+            "diff": 4
+          },
+          "winnerName": "コンジェスタス"
+        },
+        {
+          "date": "2026/04/18",
+          "venue": {
+            "round": 1,
+            "name": "福島",
+            "day": 3,
+            "raw": "1福島3"
+          },
+          "weather": "晴",
+          "raceNumber": 9,
+          "raceName": "ひめさゆり賞(1勝クラス)",
+          "raceId": "202603010309",
+          "raceIdRaw": "202603010309",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 11.2,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "舟山瑠泉",
+          "jockeyId": "01221",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:57.8",
+          "margin": -0.5,
+          "passing": [
+            2,
+            2,
+            2,
+            1
+          ],
+          "pace": "34.6-34.9",
+          "last3f": 34.8,
+          "bodyWeight": {
+            "weight": 462,
+            "diff": -10
+          },
+          "winnerName": "(マカナアネラ)"
+        },
+        {
+          "date": "2026/03/29",
+          "venue": {
+            "round": 3,
+            "name": "中山",
+            "day": 2,
+            "raw": "3中山2"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳未勝利",
+          "raceId": "202606030205",
+          "raceIdRaw": "202606030205",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 2,
+          "umaban": 2,
+          "odds": 7.5,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "丹内祐次",
+          "jockeyId": "01091",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2200,
+          "trackCondition": "良",
+          "time": "2:12.6",
+          "margin": -0.1,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "35.0-36.4",
+          "last3f": 36.4,
+          "bodyWeight": {
+            "weight": 472,
+            "diff": 2
+          },
+          "winnerName": "(ニシノヒノトリ)"
+        },
+        {
+          "date": "2026/03/07",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 3,
+            "raw": "2中山3"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳未勝利",
+          "raceId": "202606020305",
+          "raceIdRaw": "202606020305",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 3,
+          "umaban": 5,
+          "odds": 15.8,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "丹内祐次",
+          "jockeyId": "01091",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2200,
+          "trackCondition": "稍",
+          "time": "2:15.7",
+          "margin": 0.1,
+          "passing": [
+            2,
+            2,
+            2,
+            1
+          ],
+          "pace": "37.8-36.1",
+          "last3f": 36.2,
+          "bodyWeight": {
+            "weight": 470,
+            "diff": -4
+          },
+          "winnerName": "ウィロークリーク"
+        },
+        {
+          "date": "2026/01/24",
+          "venue": {
+            "round": 1,
+            "name": "中山",
+            "day": 8,
+            "raw": "1中山8"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "3歳未勝利",
+          "raceId": "202606010805",
+          "raceIdRaw": "202606010805",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 4,
+          "umaban": 7,
+          "odds": 17.4,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 9
+          },
+          "jockeyName": "菅原明良",
+          "jockeyId": "01179",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2200,
+          "trackCondition": "良",
+          "time": "2:13.2",
+          "margin": 1.2,
+          "passing": [
+            10,
+            11,
+            11,
+            10
+          ],
+          "pace": "35.1-35.9",
+          "last3f": 36.2,
+          "bodyWeight": {
+            "weight": 474,
+            "diff": 6
+          },
+          "winnerName": "ミッキーファルコン"
+        },
+        {
+          "date": "2026/01/05",
+          "venue": {
+            "round": 1,
+            "name": "中山",
+            "day": 2,
+            "raw": "1中山2"
+          },
+          "weather": "晴",
+          "raceNumber": 6,
+          "raceName": "3歳未勝利",
+          "raceId": "202606010206",
+          "raceIdRaw": "202606010206",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 1,
+          "umaban": 2,
+          "odds": 29.5,
+          "ninki": 8,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 5
+          },
+          "jockeyName": "菅原明良",
+          "jockeyId": "01179",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:01.6",
+          "margin": 0.5,
+          "passing": [
+            4,
+            3,
+            3,
+            4
+          ],
+          "pace": "35.5-36.1",
+          "last3f": 36.3,
+          "bodyWeight": {
+            "weight": 468,
+            "diff": 2
+          },
+          "winnerName": "イモータリス"
+        },
+        {
+          "date": "2025/10/12",
+          "venue": {
+            "round": 4,
+            "name": "東京",
+            "day": 4,
+            "raw": "4東京4"
+          },
+          "weather": "晴",
+          "raceNumber": 2,
+          "raceName": "2歳未勝利",
+          "raceId": "202505040402",
+          "raceIdRaw": "202505040402",
+          "venueKind": "中央",
+          "entryCount": 10,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 5.7,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "菅原明良",
+          "jockeyId": "01179",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.7",
+          "margin": 0.7,
+          "passing": [
+            4,
+            4
+          ],
+          "pace": "35.9-34.2",
+          "last3f": 34.7,
+          "bodyWeight": {
+            "weight": 466,
+            "diff": 0
+          },
+          "winnerName": "コズミックボックス"
+        },
+        {
+          "date": "2025/09/20",
+          "venue": {
+            "round": 4,
+            "name": "中山",
+            "day": 6,
+            "raw": "4中山6"
+          },
+          "weather": "曇",
+          "raceNumber": 2,
+          "raceName": "2歳未勝利",
+          "raceId": "202506040602",
+          "raceIdRaw": "202506040602",
+          "venueKind": "中央",
+          "entryCount": 14,
+          "wakuban": 7,
+          "umaban": 11,
+          "odds": 6.6,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "菅原明良",
+          "jockeyId": "01179",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:02.1",
+          "margin": 0.5,
+          "passing": [
+            7,
+            8,
+            7,
+            7
+          ],
+          "pace": "37.0-34.8",
+          "last3f": 34.7,
+          "bodyWeight": {
+            "weight": 466,
+            "diff": 10
+          },
+          "winnerName": "ポルフュロゲネトス"
+        },
+        {
+          "date": "2025/08/23",
+          "venue": {
+            "round": 3,
+            "name": "新潟",
+            "day": 1,
+            "raw": "3新潟1"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202504030105",
+          "raceIdRaw": "202504030105",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 6,
+          "umaban": 9,
+          "odds": 14.8,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "菅原明良",
+          "jockeyId": "01179",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:38.8",
+          "margin": 0.2,
+          "passing": [
+            10,
+            9
+          ],
+          "pace": "38.3-33.8",
+          "last3f": 33.3,
+          "bodyWeight": {
+            "weight": 456,
+            "diff": 0
+          },
+          "winnerName": "ローザレイア"
+        }
+      ],
+      "oikiri": {
+        "umaban": 9,
+        "horseId": "2023100021",
+        "horseName": "キンググローリー",
+        "critic": "気配上々",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 5,
+        "umaban": 10,
+        "name": "ガリレア",
+        "horseId": "2023100681",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 54,
+        "jockeyName": "石橋脩",
+        "jockeyId": "01077",
+        "stableLocation": "美浦",
+        "trainerName": "清水英",
+        "trainerId": "01080",
+        "bodyWeight": {
+          "weight": 450,
+          "diff": 0
+        }
+      },
+      "results": [
+        {
+          "date": "2026/07/25",
+          "venue": {
+            "round": 2,
+            "name": "新潟",
+            "day": 1,
+            "raw": "2新潟1"
+          },
+          "weather": "曇",
+          "raceNumber": 6,
+          "raceName": "豊栄特別(2勝クラス)",
+          "raceId": "202604020106",
+          "raceIdRaw": "202604020106",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 4,
+          "umaban": 7,
+          "odds": 10.4,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "杉原誠人",
+          "jockeyId": "01135",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:31.6",
+          "margin": -0.2,
+          "passing": [
+            6,
+            6
+          ],
+          "pace": "34.5-33.5",
+          "last3f": 33,
+          "bodyWeight": {
+            "weight": 444,
+            "diff": -6
+          },
+          "winnerName": "(ジーネキング)"
+        },
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 5,
+          "umaban": 10,
+          "odds": 151.8,
+          "ninki": 16,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 5
+          },
+          "jockeyName": "石橋脩",
+          "jockeyId": "01077",
+          "kinryo": 54,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.6",
+          "margin": 0.4,
+          "passing": [
+            8,
+            8,
+            4,
+            3
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.7,
+          "bodyWeight": {
+            "weight": 450,
+            "diff": 0
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/04/11",
+          "venue": {
+            "round": 3,
+            "name": "中山",
+            "day": 5,
+            "raw": "3中山5"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ニュージーランドT(GII)",
+          "raceId": "202606030511",
+          "raceIdRaw": "202606030511",
+          "venueKind": "中央",
+          "entryCount": 15,
+          "wakuban": 7,
+          "umaban": 13,
+          "odds": 161.6,
+          "ninki": 12,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 11
+          },
+          "jockeyName": "石橋脩",
+          "jockeyId": "01077",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.6",
+          "margin": 1.3,
+          "passing": [
+            5,
+            5,
+            5
+          ],
+          "pace": "35.4-34.3",
+          "last3f": 35.1,
+          "bodyWeight": {
+            "weight": 450,
+            "diff": 2
+          },
+          "winnerName": "レザベーション"
+        },
+        {
+          "date": "2026/03/15",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 6,
+            "raw": "2中山6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "フジTVスプリングS(GII)",
+          "raceId": "202606020611",
+          "raceIdRaw": "202606020611",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 3,
+          "umaban": 6,
+          "odds": 55.6,
+          "ninki": 10,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 10
+          },
+          "jockeyName": "石橋脩",
+          "jockeyId": "01077",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.7",
+          "margin": 0.7,
+          "passing": [
+            8,
+            8,
+            9,
+            10
+          ],
+          "pace": "36.0-35.3",
+          "last3f": 35.2,
+          "bodyWeight": {
+            "weight": 448,
+            "diff": 0
+          },
+          "winnerName": "アウダーシア"
+        },
+        {
+          "date": "2026/02/15",
+          "venue": {
+            "round": 1,
+            "name": "東京",
+            "day": 6,
+            "raw": "1東京6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "共同通信杯(GIII)",
+          "raceId": "202605010611",
+          "raceIdRaw": "202605010611",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 3,
+          "umaban": 3,
+          "odds": 96.6,
+          "ninki": 8,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 7
+          },
+          "jockeyName": "石橋脩",
+          "jockeyId": "01077",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.5",
+          "margin": 1,
+          "passing": [
+            2,
+            1,
+            1
+          ],
+          "pace": "35.2-34.3",
+          "last3f": 35.3,
+          "bodyWeight": {
+            "weight": 448,
+            "diff": 10
+          },
+          "winnerName": "リアライズシリウス"
+        },
+        {
+          "date": "2025/11/15",
+          "venue": {
+            "round": 4,
+            "name": "京都",
+            "day": 3,
+            "raw": "4京都3"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "デイリー杯2歳S(GII)",
+          "raceId": "202508040311",
+          "raceIdRaw": "202508040311",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 3,
+          "umaban": 3,
+          "odds": 19.1,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 7
+          },
+          "jockeyName": "杉原誠人",
+          "jockeyId": "01135",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.8",
+          "margin": 1.7,
+          "passing": [
+            2,
+            2
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 36.1,
+          "bodyWeight": {
+            "weight": 438,
+            "diff": -4
+          },
+          "winnerName": "アドマイヤクワッズ"
+        },
+        {
+          "date": "2025/10/11",
+          "venue": {
+            "round": 4,
+            "name": "東京",
+            "day": 3,
+            "raw": "4東京3"
+          },
+          "weather": "小雨",
+          "raceNumber": 11,
+          "raceName": "サウジアラビアRC(GIII)",
+          "raceId": "202505040311",
+          "raceIdRaw": "202505040311",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 53.4,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "杉原誠人",
+          "jockeyId": "01135",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.1",
+          "margin": 0.3,
+          "passing": [
+            3,
+            3
+          ],
+          "pace": "35.7-34.0",
+          "last3f": 34,
+          "bodyWeight": {
+            "weight": 442,
+            "diff": 2
+          },
+          "winnerName": "エコロアルバ"
+        },
+        {
+          "date": "2025/08/24",
+          "venue": {
+            "round": 3,
+            "name": "新潟",
+            "day": 2,
+            "raw": "3新潟2"
+          },
+          "weather": "晴",
+          "raceNumber": 1,
+          "raceName": "2歳未勝利",
+          "raceId": "202504030201",
+          "raceIdRaw": "202504030201",
+          "venueKind": "中央",
+          "entryCount": 7,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 13.4,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "杉原誠人",
+          "jockeyId": "01135",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:37.4",
+          "margin": 0,
+          "passing": [
+            1,
+            1
+          ],
+          "pace": "38.4-33.3",
+          "last3f": 33.3,
+          "bodyWeight": {
+            "weight": 440,
+            "diff": 6
+          },
+          "winnerName": "(ムーングレイル)"
+        },
+        {
+          "date": "2025/07/27",
+          "venue": {
+            "round": 2,
+            "name": "新潟",
+            "day": 2,
+            "raw": "2新潟2"
+          },
+          "weather": "晴",
+          "raceNumber": 3,
+          "raceName": "2歳新馬",
+          "raceId": "202504020203",
+          "raceIdRaw": "202504020203",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 83.3,
+          "ninki": 9,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 5
+          },
+          "jockeyName": "杉原誠人",
+          "jockeyId": "01135",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:37.5",
+          "margin": 0.4,
+          "passing": [
+            2,
+            2
+          ],
+          "pace": "37.5-33.0",
+          "last3f": 33.3,
+          "bodyWeight": {
+            "weight": 434,
+            "diff": 0
+          },
+          "winnerName": "フィロステファニ"
+        }
+      ],
+      "oikiri": {
+        "umaban": 10,
+        "horseId": "2023100681",
+        "horseName": "ガリレア",
+        "critic": "キビキビ",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 6,
+        "umaban": 11,
+        "name": "コロナドブリッジ",
+        "horseId": "2023107368",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 54,
+        "jockeyName": "三浦",
+        "jockeyId": "01122",
+        "stableLocation": "栗東",
+        "trainerName": "庄野",
+        "trainerId": "01087",
+        "bodyWeight": {
+          "weight": 524,
+          "diff": 6
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 6,
+          "umaban": 11,
+          "odds": 27.2,
+          "ninki": 12,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 15
+          },
+          "jockeyName": "三浦皇成",
+          "jockeyId": "01122",
+          "kinryo": 54,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.3",
+          "margin": 1.1,
+          "passing": [
+            2,
+            3,
+            2,
+            3
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 35.5,
+          "bodyWeight": {
+            "weight": 524,
+            "diff": 6
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/02",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 3,
+            "raw": "3京都3"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ユニコーンS(GIII)",
+          "raceId": "202608030311",
+          "raceIdRaw": "202608030311",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 9.7,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 7
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 57,
+          "courseType": "ダ",
+          "distance": 1900,
+          "trackCondition": "稍",
+          "time": "1:58.6",
+          "margin": 1.1,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "29.4-37.1",
+          "last3f": 38.2,
+          "bodyWeight": {
+            "weight": 518,
+            "diff": -6
+          },
+          "winnerName": "シルバーレシオ"
+        },
+        {
+          "date": "2026/03/21",
+          "venue": {
+            "round": 1,
+            "name": "阪神",
+            "day": 9,
+            "raw": "1阪神9"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "若葉S(L)",
+          "raceId": "202609010911",
+          "raceIdRaw": "202609010911",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 3,
+          "umaban": 3,
+          "odds": 8.5,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 8
+          },
+          "jockeyName": "丸山元気",
+          "jockeyId": "01127",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:59.6",
+          "margin": 1.1,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "35.7-34.5",
+          "last3f": 35.6,
+          "bodyWeight": {
+            "weight": 524,
+            "diff": 8
+          },
+          "winnerName": "マテンロウゲイル"
+        },
+        {
+          "date": "2025/12/13",
+          "venue": {
+            "round": 5,
+            "name": "阪神",
+            "day": 3,
+            "raw": "5阪神3"
+          },
+          "weather": "晴",
+          "raceNumber": 9,
+          "raceName": "エリカ賞(1勝クラス)",
+          "raceId": "202509050309",
+          "raceIdRaw": "202509050309",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 7,
+          "umaban": 7,
+          "odds": 7.5,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "Ｃ．デム",
+          "jockeyId": "05473",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:01.9",
+          "margin": -0.1,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "38.2-33.4",
+          "last3f": 33.4,
+          "bodyWeight": {
+            "weight": 516,
+            "diff": 6
+          },
+          "winnerName": "(ベレシート)"
+        },
+        {
+          "date": "2025/09/15",
+          "venue": {
+            "round": 4,
+            "name": "阪神",
+            "day": 5,
+            "raw": "4阪神5"
+          },
+          "weather": "晴",
+          "raceNumber": 3,
+          "raceName": "2歳未勝利",
+          "raceId": "202509040503",
+          "raceIdRaw": "202509040503",
+          "venueKind": "中央",
+          "entryCount": 5,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 2.9,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "西村淳也",
+          "jockeyId": "01171",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:03.6",
+          "margin": 0,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "38.5-33.8",
+          "last3f": 33.8,
+          "bodyWeight": {
+            "weight": 510,
+            "diff": -2
+          },
+          "winnerName": "(シーズザスローン)"
+        },
+        {
+          "date": "2025/07/19",
+          "venue": {
+            "round": 2,
+            "name": "小倉",
+            "day": 7,
+            "raw": "2小倉7"
+          },
+          "weather": "晴",
+          "raceNumber": 1,
+          "raceName": "2歳未勝利",
+          "raceId": "202510020701",
+          "raceIdRaw": "202510020701",
+          "venueKind": "中央",
+          "entryCount": 10,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 2.5,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "亀田温心",
+          "jockeyId": "01176",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "稍",
+          "time": "1:51.0",
+          "margin": 0.1,
+          "passing": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "pace": "36.8-36.8",
+          "last3f": 36.9,
+          "bodyWeight": {
+            "weight": 512,
+            "diff": 0
+          },
+          "winnerName": "ディーリライズ"
+        },
+        {
+          "date": "2025/07/06",
+          "venue": {
+            "round": 2,
+            "name": "小倉",
+            "day": 4,
+            "raw": "2小倉4"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202510020405",
+          "raceIdRaw": "202510020405",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 8.7,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "亀田温心",
+          "jockeyId": "01176",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:50.5",
+          "margin": 1,
+          "passing": [
+            2,
+            1,
+            1,
+            2
+          ],
+          "pace": "36.2-36.7",
+          "last3f": 37.7,
+          "bodyWeight": {
+            "weight": 512,
+            "diff": 0
+          },
+          "winnerName": "ロードラヴォール"
+        }
+      ],
+      "oikiri": {
+        "umaban": 11,
+        "horseId": "2023107368",
+        "horseName": "コロナドブリッジ",
+        "critic": "態勢整う",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 6,
+        "umaban": 12,
+        "name": "ローベルクランツ",
+        "horseId": "2023107199",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 57,
+        "jockeyName": "松山",
+        "jockeyId": "01126",
+        "stableLocation": "栗東",
+        "trainerName": "小林",
+        "trainerId": "01185",
+        "bodyWeight": {
+          "weight": 486,
+          "diff": 2
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 6,
+          "umaban": 12,
+          "odds": 6.3,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 11
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.0",
+          "margin": 0.8,
+          "passing": [
+            14,
+            14,
+            15,
+            15
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.3,
+          "bodyWeight": {
+            "weight": 486,
+            "diff": 2
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/10",
+          "venue": {
+            "round": 2,
+            "name": "東京",
+            "day": 6,
+            "raw": "2東京6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "NHKマイルC(GI)",
+          "raceId": "202605020611",
+          "raceIdRaw": "202605020611",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 4,
+          "umaban": 8,
+          "odds": 28.5,
+          "ninki": 10,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:31.9",
+          "margin": 0.4,
+          "passing": [
+            10,
+            10
+          ],
+          "pace": "33.7-34.6",
+          "last3f": 34.1,
+          "bodyWeight": {
+            "weight": 484,
+            "diff": 0
+          },
+          "winnerName": "ロデオドライブ"
+        },
+        {
+          "date": "2026/03/28",
+          "venue": {
+            "round": 2,
+            "name": "阪神",
+            "day": 1,
+            "raw": "2阪神1"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "毎日杯(GIII)",
+          "raceId": "202609020111",
+          "raceIdRaw": "202609020111",
+          "venueKind": "中央",
+          "entryCount": 7,
+          "wakuban": 3,
+          "umaban": 3,
+          "odds": 5,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.2",
+          "margin": 0.1,
+          "passing": [
+            2,
+            2
+          ],
+          "pace": "35.0-33.4",
+          "last3f": 33.4,
+          "bodyWeight": {
+            "weight": 484,
+            "diff": -10
+          },
+          "winnerName": "アルトラムス"
+        },
+        {
+          "date": "2026/02/10",
+          "venue": {
+            "round": 2,
+            "name": "京都",
+            "day": 4,
+            "raw": "2京都4"
+          },
+          "weather": "曇",
+          "raceNumber": 11,
+          "raceName": "きさらぎ賞(GIII)",
+          "raceId": "202608020411",
+          "raceIdRaw": "202608020411",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 8,
+          "umaban": 9,
+          "odds": 10.9,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 7
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:48.5",
+          "margin": 0.5,
+          "passing": [
+            8,
+            9
+          ],
+          "pace": "36.6-33.7",
+          "last3f": 33,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 10
+          },
+          "winnerName": "ゾロアストロ"
+        },
+        {
+          "date": "2025/11/24",
+          "venue": {
+            "round": 5,
+            "name": "東京",
+            "day": 6,
+            "raw": "5東京6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "東京スポーツ杯2歳S(GII)",
+          "raceId": "202505050611",
+          "raceIdRaw": "202505050611",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 9,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 8
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:47.0",
+          "margin": 1,
+          "passing": [
+            3,
+            4,
+            6
+          ],
+          "pace": "35.9-33.5",
+          "last3f": 33.8,
+          "bodyWeight": {
+            "weight": 484,
+            "diff": 20
+          },
+          "winnerName": "パントルナイーフ"
+        },
+        {
+          "date": "2025/08/17",
+          "venue": {
+            "round": 3,
+            "name": "中京",
+            "day": 8,
+            "raw": "3中京8"
+          },
+          "weather": "晴",
+          "raceNumber": 1,
+          "raceName": "2歳未勝利",
+          "raceId": "202507030801",
+          "raceIdRaw": "202507030801",
+          "venueKind": "中央",
+          "entryCount": 7,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 1.1,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:00.7",
+          "margin": -0.5,
+          "passing": [
+            7,
+            6,
+            4,
+            5
+          ],
+          "pace": "35.1-35.1",
+          "last3f": 33.9,
+          "bodyWeight": {
+            "weight": 464,
+            "diff": -4
+          },
+          "winnerName": "(メイショウナルカミ)"
+        },
+        {
+          "date": "2025/06/15",
+          "venue": {
+            "round": 3,
+            "name": "阪神",
+            "day": 4,
+            "raw": "3阪神4"
+          },
+          "weather": "曇",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202509030405",
+          "raceIdRaw": "202509030405",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 6.8,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "松山弘平",
+          "jockeyId": "01126",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "重",
+          "time": "1:49.4",
+          "margin": 0.1,
+          "passing": [
+            4,
+            5
+          ],
+          "pace": "36.9-34.0",
+          "last3f": 33.5,
+          "bodyWeight": {
+            "weight": 468,
+            "diff": 0
+          },
+          "winnerName": "サレジオ"
+        }
+      ],
+      "oikiri": {
+        "umaban": 12,
+        "horseId": "2023107199",
+        "horseName": "ローベルクランツ",
+        "critic": "好気配",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 7,
+        "umaban": 13,
+        "name": "サノノグレーター",
+        "horseId": "2023100724",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 56,
+        "jockeyName": "田辺",
+        "jockeyId": "01075",
+        "stableLocation": "美浦",
+        "trainerName": "尾形",
+        "trainerId": "01141",
+        "bodyWeight": {
+          "weight": 462,
+          "diff": 4
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 7,
+          "umaban": 13,
+          "odds": 5.4,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "田辺裕信",
+          "jockeyId": "01075",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.2",
+          "margin": -0.2,
+          "passing": [
+            10,
+            11,
+            11,
+            11
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34,
+          "bodyWeight": {
+            "weight": 462,
+            "diff": 4
+          },
+          "winnerName": "(ディールメーカー)"
+        },
+        {
+          "date": "2026/04/19",
+          "venue": {
+            "round": 3,
+            "name": "中山",
+            "day": 8,
+            "raw": "3中山8"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "皐月賞(GI)",
+          "raceId": "202606030811",
+          "raceIdRaw": "202606030811",
+          "venueKind": "中央",
+          "entryCount": 18,
+          "wakuban": 2,
+          "umaban": 3,
+          "odds": 77.3,
+          "ninki": 14,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 9
+          },
+          "jockeyName": "田辺裕信",
+          "jockeyId": "01075",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:57.3",
+          "margin": 0.8,
+          "passing": [
+            13,
+            13,
+            13,
+            10
+          ],
+          "pace": "35.1-34.2",
+          "last3f": 33.9,
+          "bodyWeight": {
+            "weight": 458,
+            "diff": 2
+          },
+          "winnerName": "ロブチェン"
+        },
+        {
+          "date": "2026/03/15",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 6,
+            "raw": "2中山6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "フジTVスプリングS(GII)",
+          "raceId": "202606020611",
+          "raceIdRaw": "202606020611",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 5,
+          "umaban": 10,
+          "odds": 11.2,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 5
+          },
+          "jockeyName": "田辺裕信",
+          "jockeyId": "01075",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.2",
+          "margin": 0.2,
+          "passing": [
+            15,
+            15,
+            13,
+            13
+          ],
+          "pace": "36.0-35.3",
+          "last3f": 34.2,
+          "bodyWeight": {
+            "weight": 456,
+            "diff": -12
+          },
+          "winnerName": "アウダーシア"
+        },
+        {
+          "date": "2026/02/15",
+          "venue": {
+            "round": 1,
+            "name": "東京",
+            "day": 6,
+            "raw": "1東京6"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "共同通信杯(GIII)",
+          "raceId": "202605010611",
+          "raceIdRaw": "202605010611",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 10.1,
+          "ninki": 6,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 6
+          },
+          "jockeyName": "横山武史",
+          "jockeyId": "01170",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.4",
+          "margin": 0.9,
+          "passing": [
+            6,
+            6,
+            6
+          ],
+          "pace": "35.2-34.3",
+          "last3f": 34,
+          "bodyWeight": {
+            "weight": 468,
+            "diff": 0
+          },
+          "winnerName": "リアライズシリウス"
+        },
+        {
+          "date": "2025/12/06",
+          "venue": {
+            "round": 5,
+            "name": "中山",
+            "day": 1,
+            "raw": "5中山1"
+          },
+          "weather": "曇",
+          "raceNumber": 9,
+          "raceName": "葉牡丹賞(1勝クラス)",
+          "raceId": "202506050109",
+          "raceIdRaw": "202506050109",
+          "venueKind": "中央",
+          "entryCount": 11,
+          "wakuban": 7,
+          "umaban": 9,
+          "odds": 6.9,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "横山武史",
+          "jockeyId": "01170",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "1:58.2",
+          "margin": -0.5,
+          "passing": [
+            7,
+            7,
+            6,
+            6
+          ],
+          "pace": "35.1-35.3",
+          "last3f": 34.5,
+          "bodyWeight": {
+            "weight": 468,
+            "diff": 4
+          },
+          "winnerName": "(ポルフュロゲネトス)"
+        },
+        {
+          "date": "2025/08/24",
+          "venue": {
+            "round": 3,
+            "name": "新潟",
+            "day": 2,
+            "raw": "3新潟2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "新潟2歳S(GIII)",
+          "raceId": "202504030211",
+          "raceIdRaw": "202504030211",
+          "venueKind": "中央",
+          "entryCount": 10,
+          "wakuban": 7,
+          "umaban": 7,
+          "odds": 4.3,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 6
+          },
+          "jockeyName": "横山琉人",
+          "jockeyId": "01192",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.7",
+          "margin": 1.3,
+          "passing": [
+            7,
+            9
+          ],
+          "pace": "35.7-33.7",
+          "last3f": 33.2,
+          "bodyWeight": {
+            "weight": 464,
+            "diff": -2
+          },
+          "winnerName": "リアライズシリウス"
+        },
+        {
+          "date": "2025/06/22",
+          "venue": {
+            "round": 3,
+            "name": "東京",
+            "day": 6,
+            "raw": "3東京6"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202505030605",
+          "raceIdRaw": "202505030605",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 4,
+          "umaban": 7,
+          "odds": 23.3,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "横山琉人",
+          "jockeyId": "01192",
+          "kinryo": 54,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.6",
+          "margin": -0.2,
+          "passing": [
+            12,
+            11
+          ],
+          "pace": "35.6-35.1",
+          "last3f": 33.9,
+          "bodyWeight": {
+            "weight": 466,
+            "diff": 0
+          },
+          "winnerName": "(マゲバスピード)"
+        },
+        {
+          "date": "2025/06/08",
+          "venue": {
+            "round": 3,
+            "name": "東京",
+            "day": 2,
+            "raw": "3東京2"
+          },
+          "weather": "曇",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202505030205",
+          "raceIdRaw": "202505030205",
+          "venueKind": "中央",
+          "entryCount": 10,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": null,
+          "ninki": null,
+          "finishPosition": {
+            "kind": "非数値",
+            "text": "取"
+          },
+          "jockeyName": "横山琉人",
+          "jockeyId": "01192",
+          "kinryo": 54,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": null,
+          "margin": null,
+          "passing": [],
+          "pace": "35.4-34.8",
+          "last3f": null,
+          "bodyWeight": null,
+          "winnerName": "ダノンヒストリー"
+        }
+      ],
+      "oikiri": {
+        "umaban": 13,
+        "horseId": "2023100724",
+        "horseName": "サノノグレーター",
+        "critic": "キビキビ",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 7,
+        "umaban": 14,
+        "name": "スカイスプレンダー",
+        "horseId": "2023103907",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 55,
+        "jockeyName": "戸崎圭",
+        "jockeyId": "05386",
+        "stableLocation": "栗東",
+        "trainerName": "池江",
+        "trainerId": "01071",
+        "bodyWeight": {
+          "weight": 490,
+          "diff": 18
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 7,
+          "umaban": 14,
+          "odds": 13.8,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 16
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:47.6",
+          "margin": 2.4,
+          "passing": [
+            5,
+            6,
+            4,
+            7
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 36.7,
+          "bodyWeight": {
+            "weight": 490,
+            "diff": 18
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/02/10",
+          "venue": {
+            "round": 1,
+            "name": "東京",
+            "day": 4,
+            "raw": "1東京4"
+          },
+          "weather": "曇",
+          "raceNumber": 9,
+          "raceName": "ゆりかもめ賞(1勝クラス)",
+          "raceId": "202605010409",
+          "raceIdRaw": "202605010409",
+          "venueKind": "中央",
+          "entryCount": 7,
+          "wakuban": 6,
+          "umaban": 6,
+          "odds": 3.4,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "戸崎圭太",
+          "jockeyId": "05386",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2400,
+          "trackCondition": "良",
+          "time": "2:28.1",
+          "margin": -0.3,
+          "passing": [
+            6,
+            6,
+            2,
+            2
+          ],
+          "pace": "38.0-33.9",
+          "last3f": 33.8,
+          "bodyWeight": {
+            "weight": 472,
+            "diff": -2
+          },
+          "winnerName": "(アローメタル)"
+        },
+        {
+          "date": "2026/01/04",
+          "venue": {
+            "round": 1,
+            "name": "京都",
+            "day": 1,
+            "raw": "1京都1"
+          },
+          "weather": "曇",
+          "raceNumber": 6,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202608010106",
+          "raceIdRaw": "202608010106",
+          "venueKind": "中央",
+          "entryCount": 7,
+          "wakuban": 1,
+          "umaban": 1,
+          "odds": 2.3,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "佐々木大",
+          "jockeyId": "01197",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:01.2",
+          "margin": 0.3,
+          "passing": [
+            6,
+            6,
+            6,
+            6
+          ],
+          "pace": "36.3-34.7",
+          "last3f": 34.1,
+          "bodyWeight": {
+            "weight": 474,
+            "diff": 0
+          },
+          "winnerName": "ジュウリョクピエロ"
+        },
+        {
+          "date": "2025/11/23",
+          "venue": {
+            "round": 4,
+            "name": "京都",
+            "day": 6,
+            "raw": "4京都6"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202508040605",
+          "raceIdRaw": "202508040605",
+          "venueKind": "中央",
+          "entryCount": 9,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 1.5,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "Ｃ．デム",
+          "jockeyId": "05473",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:47.8",
+          "margin": -0.5,
+          "passing": [
+            1,
+            2
+          ],
+          "pace": "36.1-34.1",
+          "last3f": 34.1,
+          "bodyWeight": {
+            "weight": 474,
+            "diff": 0
+          },
+          "winnerName": "(サトノアグード)"
+        }
+      ],
+      "oikiri": {
+        "umaban": 14,
+        "horseId": "2023103907",
+        "horseName": "スカイスプレンダー",
+        "critic": "態勢整う",
+        "rank": "B"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 8,
+        "umaban": 15,
+        "name": "バドリナート",
+        "horseId": "2023107278",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 57,
+        "jockeyName": "津村",
+        "jockeyId": "01092",
+        "stableLocation": "栗東",
+        "trainerName": "松永幹",
+        "trainerId": "01092",
+        "bodyWeight": {
+          "weight": 490,
+          "diff": -2
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 8,
+          "umaban": 15,
+          "odds": 29.1,
+          "ninki": 13,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 4
+          },
+          "jockeyName": "津村明秀",
+          "jockeyId": "01092",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:45.6",
+          "margin": 0.4,
+          "passing": [
+            12,
+            13,
+            12,
+            12
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 34.2,
+          "bodyWeight": {
+            "weight": 490,
+            "diff": -2
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/09",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 5,
+            "raw": "3京都5"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "京都新聞杯(GII)",
+          "raceId": "202608030511",
+          "raceIdRaw": "202608030511",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 4,
+          "umaban": 8,
+          "odds": 15.2,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 11
+          },
+          "jockeyName": "坂井瑠星",
+          "jockeyId": "01163",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 2200,
+          "trackCondition": "良",
+          "time": "2:10.9",
+          "margin": 1,
+          "passing": [
+            2,
+            3,
+            5,
+            3
+          ],
+          "pace": "35.3-35.8",
+          "last3f": 36.5,
+          "bodyWeight": {
+            "weight": 492,
+            "diff": 0
+          },
+          "winnerName": "コンジェスタス"
+        },
+        {
+          "date": "2025/12/27",
+          "venue": {
+            "round": 5,
+            "name": "中山",
+            "day": 7,
+            "raw": "5中山7"
+          },
+          "weather": "曇",
+          "raceNumber": 11,
+          "raceName": "ホープフルS(GI)",
+          "raceId": "202506050711",
+          "raceIdRaw": "202506050711",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 3,
+          "umaban": 6,
+          "odds": 6.4,
+          "ninki": 5,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 5
+          },
+          "jockeyName": "坂井瑠星",
+          "jockeyId": "01163",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:01.4",
+          "margin": 0.4,
+          "passing": [
+            3,
+            3,
+            4,
+            4
+          ],
+          "pace": "35.5-35.2",
+          "last3f": 35.2,
+          "bodyWeight": {
+            "weight": 492,
+            "diff": 4
+          },
+          "winnerName": "ロブチェン"
+        },
+        {
+          "date": "2025/10/26",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 9,
+            "raw": "3京都9"
+          },
+          "weather": "曇",
+          "raceNumber": 9,
+          "raceName": "萩S(L)",
+          "raceId": "202508030909",
+          "raceIdRaw": "202508030909",
+          "venueKind": "中央",
+          "entryCount": 8,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 4,
+          "ninki": 3,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "坂井瑠星",
+          "jockeyId": "01163",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "稍",
+          "time": "1:47.1",
+          "margin": -0.1,
+          "passing": [
+            3,
+            2
+          ],
+          "pace": "36.1-34.6",
+          "last3f": 34.3,
+          "bodyWeight": {
+            "weight": 488,
+            "diff": -2
+          },
+          "winnerName": "(キッコベッロ)"
+        },
+        {
+          "date": "2025/09/06",
+          "venue": {
+            "round": 4,
+            "name": "阪神",
+            "day": 1,
+            "raw": "4阪神1"
+          },
+          "weather": "晴",
+          "raceNumber": 2,
+          "raceName": "2歳未勝利",
+          "raceId": "202509040102",
+          "raceIdRaw": "202509040102",
+          "venueKind": "中央",
+          "entryCount": 5,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 1.4,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "坂井瑠星",
+          "jockeyId": "01163",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 2000,
+          "trackCondition": "良",
+          "time": "2:00.9",
+          "margin": -0.7,
+          "passing": [
+            2,
+            2,
+            2,
+            2
+          ],
+          "pace": "36.7-35.1",
+          "last3f": 35.1,
+          "bodyWeight": {
+            "weight": 490,
+            "diff": -4
+          },
+          "winnerName": "(メイショウナルカミ)"
+        },
+        {
+          "date": "2025/08/03",
+          "venue": {
+            "round": 2,
+            "name": "新潟",
+            "day": 4,
+            "raw": "2新潟4"
+          },
+          "weather": "晴",
+          "raceNumber": 4,
+          "raceName": "2歳新馬",
+          "raceId": "202504020404",
+          "raceIdRaw": "202504020404",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 4,
+          "umaban": 4,
+          "odds": 5.5,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "丸山元気",
+          "jockeyId": "01127",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.9",
+          "margin": 0,
+          "passing": [
+            5,
+            4
+          ],
+          "pace": "35.9-33.8",
+          "last3f": 33.4,
+          "bodyWeight": {
+            "weight": 494,
+            "diff": 0
+          },
+          "winnerName": "プロメサアルムンド"
+        }
+      ],
+      "oikiri": {
+        "umaban": 15,
+        "horseId": "2023107278",
+        "horseName": "バドリナート",
+        "critic": "やや良化",
+        "rank": "C"
+      }
+    },
+    {
+      "shutuba": {
+        "wakuban": 8,
+        "umaban": 16,
+        "name": "スペルーチェ",
+        "horseId": "2023107352",
+        "sex": "牡",
+        "age": 3,
+        "kinryo": 55,
+        "jockeyName": "Ｍデムーロ",
+        "jockeyId": "05212",
+        "stableLocation": "美浦",
+        "trainerName": "宮田",
+        "trainerId": "01175",
+        "bodyWeight": {
+          "weight": 448,
+          "diff": -2
+        }
+      },
+      "results": [
+        {
+          "date": "2026/06/28",
+          "venue": {
+            "round": 2,
+            "name": "福島",
+            "day": 2,
+            "raw": "2福島2"
+          },
+          "weather": "晴",
+          "raceNumber": 11,
+          "raceName": "ラジオNIKKEI賞(GIII)",
+          "raceId": "202603020211",
+          "raceIdRaw": "202603020211",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 8,
+          "umaban": 16,
+          "odds": 21.7,
+          "ninki": 11,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 14
+          },
+          "jockeyName": "Ｍ．デム",
+          "jockeyId": "05212",
+          "kinryo": 55,
+          "courseType": "芝",
+          "distance": 1800,
+          "trackCondition": "良",
+          "time": "1:46.3",
+          "margin": 1.1,
+          "passing": [
+            14,
+            14,
+            8,
+            7
+          ],
+          "pace": "34.5-34.5",
+          "last3f": 35.2,
+          "bodyWeight": {
+            "weight": 448,
+            "diff": -2
+          },
+          "winnerName": "サノノグレーター"
+        },
+        {
+          "date": "2026/05/10",
+          "venue": {
+            "round": 3,
+            "name": "京都",
+            "day": 6,
+            "raw": "3京都6"
+          },
+          "weather": "晴",
+          "raceNumber": 10,
+          "raceName": "橘S(L)",
+          "raceId": "202608030610",
+          "raceIdRaw": "202608030610",
+          "venueKind": "中央",
+          "entryCount": 11,
+          "wakuban": 5,
+          "umaban": 5,
+          "odds": 3.8,
+          "ninki": 2,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 3
+          },
+          "jockeyName": "Ｍ．デム",
+          "jockeyId": "05212",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1400,
+          "trackCondition": "良",
+          "time": "1:20.1",
+          "margin": 0.4,
+          "passing": [
+            10,
+            5
+          ],
+          "pace": "34.8-33.2",
+          "last3f": 33.3,
+          "bodyWeight": {
+            "weight": 450,
+            "diff": -6
+          },
+          "winnerName": "タガノアラリア"
+        },
+        {
+          "date": "2026/03/21",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 7,
+            "raw": "2中山7"
+          },
+          "weather": "晴",
+          "raceNumber": 6,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202606020706",
+          "raceIdRaw": "202606020706",
+          "venueKind": "中央",
+          "entryCount": 13,
+          "wakuban": 7,
+          "umaban": 10,
+          "odds": 1.7,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "ルメール",
+          "jockeyId": "05339",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:33.4",
+          "margin": -0.2,
+          "passing": [
+            5,
+            2,
+            2
+          ],
+          "pace": "35.4-34.9",
+          "last3f": 34.6,
+          "bodyWeight": {
+            "weight": 456,
+            "diff": 0
+          },
+          "winnerName": "(デイトナチャンプ)"
+        },
+        {
+          "date": "2026/03/01",
+          "venue": {
+            "round": 2,
+            "name": "中山",
+            "day": 2,
+            "raw": "2中山2"
+          },
+          "weather": "晴",
+          "raceNumber": 7,
+          "raceName": "3歳1勝クラス",
+          "raceId": "202606020207",
+          "raceIdRaw": "202606020207",
+          "venueKind": "中央",
+          "entryCount": 12,
+          "wakuban": 8,
+          "umaban": 12,
+          "odds": 2.2,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "ルメール",
+          "jockeyId": "05339",
+          "kinryo": 57,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:32.6",
+          "margin": 0.5,
+          "passing": [
+            10,
+            8,
+            7
+          ],
+          "pace": "34.6-33.9",
+          "last3f": 33.6,
+          "bodyWeight": {
+            "weight": 456,
+            "diff": 0
+          },
+          "winnerName": "ロデオドライブ"
+        },
+        {
+          "date": "2025/12/21",
+          "venue": {
+            "round": 5,
+            "name": "阪神",
+            "day": 6,
+            "raw": "5阪神6"
+          },
+          "weather": "小雨",
+          "raceNumber": 11,
+          "raceName": "朝日フューチュリティ(GI)",
+          "raceId": "202509050611",
+          "raceIdRaw": "202509050611",
+          "venueKind": "中央",
+          "entryCount": 14,
+          "wakuban": 6,
+          "umaban": 9,
+          "odds": 38.6,
+          "ninki": 7,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 14
+          },
+          "jockeyName": "三浦皇成",
+          "jockeyId": "01122",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "重",
+          "time": "1:34.9",
+          "margin": 1.7,
+          "passing": [
+            7,
+            8
+          ],
+          "pace": "34.6-35.0",
+          "last3f": 36.1,
+          "bodyWeight": {
+            "weight": 456,
+            "diff": -4
+          },
+          "winnerName": "カヴァレリッツォ"
+        },
+        {
+          "date": "2025/11/15",
+          "venue": {
+            "round": 5,
+            "name": "東京",
+            "day": 3,
+            "raw": "5東京3"
+          },
+          "weather": "晴",
+          "raceNumber": 2,
+          "raceName": "2歳未勝利",
+          "raceId": "202505050302",
+          "raceIdRaw": "202505050302",
+          "venueKind": "中央",
+          "entryCount": 17,
+          "wakuban": 3,
+          "umaban": 5,
+          "odds": 1.5,
+          "ninki": 1,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 1
+          },
+          "jockeyName": "三浦皇成",
+          "jockeyId": "01122",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.9",
+          "margin": -0.2,
+          "passing": [
+            8,
+            7
+          ],
+          "pace": "35.7-34.3",
+          "last3f": 33.7,
+          "bodyWeight": {
+            "weight": 460,
+            "diff": 2
+          },
+          "winnerName": "(サンデースマッシュ)"
+        },
+        {
+          "date": "2025/10/18",
+          "venue": {
+            "round": 4,
+            "name": "東京",
+            "day": 6,
+            "raw": "4東京6"
+          },
+          "weather": "晴",
+          "raceNumber": 5,
+          "raceName": "2歳新馬",
+          "raceId": "202505040605",
+          "raceIdRaw": "202505040605",
+          "venueKind": "中央",
+          "entryCount": 16,
+          "wakuban": 6,
+          "umaban": 12,
+          "odds": 7.1,
+          "ninki": 4,
+          "finishPosition": {
+            "kind": "順位",
+            "value": 2
+          },
+          "jockeyName": "三浦皇成",
+          "jockeyId": "01122",
+          "kinryo": 56,
+          "courseType": "芝",
+          "distance": 1600,
+          "trackCondition": "良",
+          "time": "1:34.2",
+          "margin": 0.1,
+          "passing": [
+            2,
+            2
+          ],
+          "pace": "35.9-34.0",
+          "last3f": 34,
+          "bodyWeight": {
+            "weight": 458,
+            "diff": 0
+          },
+          "winnerName": "アドマイヤクワッズ"
+        }
+      ],
+      "oikiri": {
+        "umaban": 16,
+        "horseId": "2023107352",
+        "horseName": "スペルーチェ",
+        "critic": "キビキビ",
+        "rank": "B"
+      }
+    }
+  ],
+  "odds": {
+    "officialDatetime": "2026-06-28 15:52:30",
+    "oddsStatus": "result",
+    "win": {
+      "1": {
+        "odds": 9,
+        "ninki": 5
+      },
+      "2": {
+        "odds": 18.6,
+        "ninki": 10
+      },
+      "3": {
+        "odds": 11.1,
+        "ninki": 6
+      },
+      "4": {
+        "odds": 59.5,
+        "ninki": 14
+      },
+      "5": {
+        "odds": 5.6,
+        "ninki": 2
+      },
+      "6": {
+        "odds": 7.8,
+        "ninki": 4
+      },
+      "7": {
+        "odds": 79.2,
+        "ninki": 15
+      },
+      "8": {
+        "odds": 14,
+        "ninki": 8
+      },
+      "9": {
+        "odds": 18.6,
+        "ninki": 9
+      },
+      "10": {
+        "odds": 151.8,
+        "ninki": 16
+      },
+      "11": {
+        "odds": 27.2,
+        "ninki": 12
+      },
+      "12": {
+        "odds": 6.3,
+        "ninki": 3
+      },
+      "13": {
+        "odds": 5.4,
+        "ninki": 1
+      },
+      "14": {
+        "odds": 13.8,
+        "ninki": 7
+      },
+      "15": {
+        "odds": 29.1,
+        "ninki": 13
+      },
+      "16": {
+        "odds": 21.7,
+        "ninki": 11
+      }
+    },
+    "place": {
+      "1": {
+        "oddsMin": 3.1,
+        "oddsMax": 4.1,
+        "ninki": 5
+      },
+      "2": {
+        "oddsMin": 4.2,
+        "oddsMax": 5.6,
+        "ninki": 8
+      },
+      "3": {
+        "oddsMin": 3.2,
+        "oddsMax": 4.1,
+        "ninki": 6
+      },
+      "4": {
+        "oddsMin": 9.5,
+        "oddsMax": 12.8,
+        "ninki": 14
+      },
+      "5": {
+        "oddsMin": 1.9,
+        "oddsMax": 2.3,
+        "ninki": 1
+      },
+      "6": {
+        "oddsMin": 2.5,
+        "oddsMax": 3.2,
+        "ninki": 4
+      },
+      "7": {
+        "oddsMin": 15.4,
+        "oddsMax": 20.7,
+        "ninki": 15
+      },
+      "8": {
+        "oddsMin": 3.6,
+        "oddsMax": 4.7,
+        "ninki": 7
+      },
+      "9": {
+        "oddsMin": 4.5,
+        "oddsMax": 5.9,
+        "ninki": 10
+      },
+      "10": {
+        "oddsMin": 21.2,
+        "oddsMax": 28.4,
+        "ninki": 16
+      },
+      "11": {
+        "oddsMin": 8.3,
+        "oddsMax": 11.1,
+        "ninki": 13
+      },
+      "12": {
+        "oddsMin": 2,
+        "oddsMax": 2.5,
+        "ninki": 3
+      },
+      "13": {
+        "oddsMin": 1.9,
+        "oddsMax": 2.3,
+        "ninki": 2
+      },
+      "14": {
+        "oddsMin": 4.4,
+        "oddsMax": 5.8,
+        "ninki": 9
+      },
+      "15": {
+        "oddsMin": 6.5,
+        "oddsMax": 8.6,
+        "ninki": 12
+      },
+      "16": {
+        "oddsMin": 5,
+        "oddsMax": 6.6,
+        "ninki": 11
+      }
+    }
+  },
+  "meta": {
+    "fetchedAt": "2026-08-12T07:38:01.103Z",
+    "oddsFetchedAt": "2026-08-12T07:38:28.711Z",
+    "warnings": []
+  }
+}
