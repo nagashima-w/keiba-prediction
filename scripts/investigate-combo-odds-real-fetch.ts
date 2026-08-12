@@ -65,7 +65,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   CachedFetcher,
@@ -164,6 +164,7 @@ function summarizeDiagnostics(outcome: ComboOddsFetchOutcome | undefined): unkno
  * 1レース分(OFF/ONのRaceDataと実測所要時間)から、まとめの1レコードを組み立てる**純関数**。
  * IO・ネットワークを一切行わない(ライブ取得経路・保存済みファイルからの再生成経路の両方から
  * 呼べるようにするため)。
+ *
  */
 function buildRaceRecord(
   target: TargetRace,
@@ -218,7 +219,18 @@ const SUMMARY_NOTE =
   "『組合せオッズの追加コスト』という意味が無い(このため差分フィールドは持たない)。" +
   "組合せオッズの取得コスト(derivedComboOddsFetchCostMs。導出値・解釈)は、" +
   "ON実測値(timingMs.onWarmReuseMs)にほぼ等しいとみなせる。" +
-  "所要時間の見積り(最大16リクエスト・約24秒等)はここでは使っていない(導出値であり実測値ではない)。";
+  "所要時間の見積り(最大16リクエスト・約24秒等)はここでは使っていない(導出値であり実測値ではない)。" +
+  "【ワイドの集計上の注意・未判定】wideComboOdds/comboOdds.wideのoddsMinは『下限』であり単一値" +
+  "ではない(combo-odds-key.tsのComboOddsCell JSDoc参照)。ワイドはオッズが下限〜上限のレンジを" +
+  "持つ券種だが、toComboOddsScalarMap(#32)はoddsMinのみを残しoddsMaxを捨てる。このためここに" +
+  "残る値は実際の払戻より小さい側に偏っている可能性があるが、上限値そのものはこの一次データに" +
+  "残っておらず、偏りの大きさはここでは判定していない。" +
+  "また、単一勝者の還元率恒等式Σ(1/odds)=1/払戻率は三連複には成立する(1レース1組的中)が、" +
+  "ワイドには成立しない(1レース3組が同時的中するため)。実際、central wideComboOddsに" +
+  "Σ(1/oddsMin)を機械的に当てはめるとΣ(1/oddsMin)≈3.958となり、これを1/払戻率とみなすと" +
+  "『還元率25.27%』というtrio(実測控除率25.02%)と紛らわしい値が出るが、この値はワイドの" +
+  "払戻率の推定値ではない(前提の恒等式が成立しないため)。ワイドの払戻率はこの一次データからは" +
+  "算出していない(未判定)。";
 
 /** summary.json を書き出す(共通処理)。 */
 function writeSummary(results: readonly Record<string, unknown>[]): void {
@@ -315,7 +327,18 @@ async function main(): Promise<void> {
   await runLiveFetch();
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+/**
+ * このモジュールが直接実行された(`pnpm tsx scripts/investigate-combo-odds-real-fetch.ts`)場合の
+ * みtrue。テスト(`investigate-combo-odds-real-fetch.test.ts`)が`buildRaceRecord`を使うために
+ * このモジュールをimportしたときにmain()(ネットワークアクセスを含みうる)が誤発火しないよう、
+ * 実行エントリポイントかどうかをここで判定する(Node標準のentry-pointガードパターン)。
+ */
+const isMainModule =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
