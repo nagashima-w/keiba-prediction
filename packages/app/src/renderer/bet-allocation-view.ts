@@ -157,12 +157,28 @@ export function buildRaceAllocation(
 
 /**
  * 買い目ラベルの純関数生成(受け入れ条件27)。umabanをJSXへ直接埋め込まず、
- * ラベル文字列をここで一元的に組み立てる。機能Dで "4-7"(ワイド) / "3-4-7"(3連複)等の
- * 複数馬の組ラベルに差し替える際、この関数の実装だけを変えれば済むようにする
- * (最も効果が大きい機能Dへの備え。boss着手前ゲート2026-07-30)。
+ * ラベル文字列をここで一元的に組み立てる。
+ *
+ * **機能D-2c第4段(Issue #28)でワイド・3連複の組ラベルに対応した(boss指示: 必ずこのファイル側で
+ * 拡張し、新ファイルに別実装を複製しないこと)。** 単一馬番(`number`。複勝・従来どおり)と
+ * 馬番の組(`readonly number[]`。ワイド・3連複)の両方を受け取れる。
+ * - 単一馬番、または要素数1の配列: `"4番"`(従来どおりの表記)
+ * - 要素数2の配列(ワイド): `"4-7"`
+ * - 要素数3の配列(3連複): `"3-4-7"`
+ *
+ * 配列の順序はそのまま連結する(本関数では再ソートしない)。`AllocationCandidate.umabans`/
+ * `GeneralBetAllocation.umabans`(`combo-bet-allocation.ts`)は「昇順・重複なし」が契約
+ * (`validateCandidates`が違反をthrowで弾く)であるため、この関数はその契約に委ねる
+ * (構造的自己防御ではなく呼び出し側の契約に委ねる、というAllocationCandidate側の設計と揃える)。
  */
-export function formatBetLabel(umaban: number): string {
-  return `${umaban}番`;
+export function formatBetLabel(umaban: number | readonly number[]): string {
+  if (typeof umaban === "number") {
+    return `${umaban}番`;
+  }
+  if (umaban.length === 1) {
+    return `${umaban[0]}番`;
+  }
+  return umaban.join("-");
 }
 
 /**
@@ -253,9 +269,18 @@ export const CROSS_RACE_OVERBET_NOTE =
 
 /**
  * 固定注記3: EV閾値の脚注(候補選定がisPositive依存であることの説明。数値込みのため関数化)。
+ *
+ * **機能D-2c第4段(Issue #28・AC9)で「馬」→「買い目」に改訂した。** 券種横断の配分(混在経路)
+ * では判定対象が単一馬(複勝)だけでなく組(ワイド・3連複)にも及ぶため、「馬のみ」という表記は
+ * 事実と食い違う。「買い目」は`combo-bet-allocation.ts`の既存文言(例:
+ * `REASON_NO_CANDIDATES`「EVプラスの買い目がないため見送りです」)と同じ語であり、単一馬・組の
+ * どちらも指す中立語として揃える。**文言だけでなく実際の判定基準も揃っていること**(D-4・
+ * `mixed-candidates.ts`の`evConfig`)を前提にした改訂であり、`evConfig`を渡し忘れると
+ * この文言と実際の判定が再び食い違う(この欠陥クラスの再発防止のため、呼び出し元
+ * 〈`mixed-allocation-view.ts`〉が同じ`evThreshold`由来の`evConfig`を渡すこと)。
  */
 export function evThresholdFootnote(evThreshold: number): string {
-  return `配分の対象はEV閾値(現在 ${evThreshold.toFixed(2)})を上回った馬のみです。`;
+  return `配分の対象はEV閾値(現在 ${evThreshold.toFixed(2)})を上回った買い目のみです。`;
 }
 
 /**

@@ -868,3 +868,78 @@ describe("topFinishCount(常に3。複勝可用性・頭数に関わらず定数
     expect(result.topFinishCount).toBe(3);
   });
 });
+
+// ============================================================================
+// EV閾値の統一(options.evConfig。機能D-2c第4段・Issue #28・D-4)
+//
+// n=3・k=3構成(頭数境界のdescribeと同じ)を使い、hitProb=1が手計算で厳密に確定する状態で
+// odds=1.1のワイド・3連複候補を用意する。ev = hitProb × odds = 1.1 は「閾値1.0では通り、
+// 閾値1.2では落ちる」境界値そのもの(boss指示)。evConfigを渡し忘れて既定(閾値1.0)のまま
+// 動いてしまう回帰を、閾値1.2のケースだけで検知できる設計にする。
+// ============================================================================
+
+describe("EV閾値の統一(options.evConfig。渡し忘れると既定1.0のまま動くため、閾値1.2のケースで検知する)", () => {
+  // 複勝を候補外にして(isPositive=false等)、この境界値テストがワイド・3連複だけに反応するようにする。
+  const rows = allCandidateRows(3).map((r) =>
+    row({ umaban: r.umaban, isPositive: false, ev: null, placeOddsMin: null }),
+  );
+  const umabans = umabansOf(3);
+  // odds=1.1・hitProb=1(n=k=3で確定)なので ev=1.1。閾値1.0では ev>1.0 でisPositive、
+  // 閾値1.2では ev>1.2 が成立せずnotPositiveになる「ちょうど境界」の候補。
+  const boundaryOddsRecord = { wideCombo: fullOddsRecord(umabans, 2, 1.1), trioCombo: fullOddsRecord(umabans, 3, 1.1) };
+
+  it("前提固定: ev=1.1は閾値1.0を上回り、閾値1.2を上回らないこと(境界値そのものの検算)", () => {
+    // これはbuildMixedCandidatesの結果ではなく、境界値設計そのものが正しいことを先に固定する
+    // (「差が0でないこと」を先に固定する、というテスト作成上の注意に対応)。
+    expect(1.1).toBeGreaterThan(1.0);
+    expect(1.1).toBeLessThanOrEqual(1.2);
+  });
+
+  it("evConfig省略時(既定閾値1.0)は境界値(ev=1.1)の候補が採用されること", () => {
+    const result = buildMixedCandidates(raceInput({ rows, ...boundaryOddsRecord }));
+    const wideCandidates = result.candidates.filter((c) => c.umabans.length === 2);
+    const trioCandidates = result.candidates.filter((c) => c.umabans.length === 3);
+    // 前提固定: 候補が実際に生成されていること(空振り防止)。
+    expect(wideCandidates.length).toBeGreaterThan(0);
+    expect(trioCandidates.length).toBeGreaterThan(0);
+    expect(wideCandidates).toHaveLength(3);
+    expect(trioCandidates).toHaveLength(1);
+  });
+
+  it("evConfig.threshold=1.0を明示指定しても境界値(ev=1.1)の候補が採用されること", () => {
+    const result = buildMixedCandidates(raceInput({ rows, ...boundaryOddsRecord }), {
+      evConfig: { threshold: 1.0 },
+    });
+    expect(result.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(3);
+    expect(result.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(1);
+  });
+
+  it("evConfig.threshold=1.2を指定すると境界値(ev=1.1)の候補が0件になること(evConfigが実際にbuildComboCandidatesへ渡っていることの証拠)", () => {
+    const result = buildMixedCandidates(raceInput({ rows, ...boundaryOddsRecord }), {
+      evConfig: { threshold: 1.2 },
+    });
+    expect(result.candidates.filter((c) => c.umabans.length >= 2)).toHaveLength(0);
+    if (result.diagnostics.wide.kind !== "built" || result.diagnostics.trio.kind !== "built") {
+      throw new Error("wide/trio診断値はkind='built'のはず");
+    }
+    // 判定結果(notPositiveCount)に落ちていること(判定不能=unjudgedに紛れ込んでいないこと)。
+    expect(result.diagnostics.wide.build.judged).toEqual({ positiveCount: 0, notPositiveCount: 3 });
+    expect(result.diagnostics.trio.build.judged).toEqual({ positiveCount: 0, notPositiveCount: 1 });
+  });
+
+  it("wide/trioで異なる閾値の影響を受けないこと(両方に同じevConfigが渡ること。取り違え検知)", () => {
+    // 閾値1.2で両方0件になることは前段で確認済み。ここでは片方だけ計算しても同じ結果になる
+    // (betTypesで絞ってもevConfigの適用先が変わらない)ことを確認し、evConfigがwide/trioの
+    // どちらか一方にしか渡っていない配線ミスを検知する。
+    const wideOnly = buildMixedCandidates(
+      raceInput({ rows, ...boundaryOddsRecord }),
+      { betTypes: ["wide"], evConfig: { threshold: 1.2 } },
+    );
+    const trioOnly = buildMixedCandidates(
+      raceInput({ rows, ...boundaryOddsRecord }),
+      { betTypes: ["trio"], evConfig: { threshold: 1.2 } },
+    );
+    expect(wideOnly.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(0);
+    expect(trioOnly.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(0);
+  });
+});

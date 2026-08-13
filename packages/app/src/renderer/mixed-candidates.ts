@@ -72,12 +72,24 @@
  * これは**第3段以降のための受け口**であり、本段(第2段)では妙味度による券種切り替えを
  * 実装しない(ユーザー決定Q2「常に全券種」)。既定値は全券種。型定義上、妙味度・
  * `RaceOpportunity` に類する値は本モジュールの入力に一切現れない(受け取れない)。
+ *
+ * ## EV閾値の統一(`options.evConfig`。機能D-2c第4段・Issue #28・D-4)
+ *
+ * 第4段のboss裁定B-2「閾値を揃える」により、`options.evConfig`(省略時は
+ * `DEFAULT_EV_CONFIG`=閾値1.0)を`buildComboCandidates`へそのまま渡す。複勝候補は
+ * `row.isPositive`(呼び出し元が`AppSettings.evThreshold`で既に判定済みの値)をそのまま使う
+ * ため、呼び出し元(`mixed-allocation-view.ts`)が**同じ`evThreshold`から組み立てた`evConfig`**を
+ * ここへ渡すことで、複勝・ワイド・3連複が同一の閾値・同一の厳密不等号(`ev > threshold`)で
+ * 判定される(`bet-allocation-view.ts`の`evThresholdFootnote`「配分の対象はEV閾値を上回った
+ * 買い目のみです」という注記と実際の判定基準を一致させる)。
  */
 
 import {
   buildComboCandidates,
+  DEFAULT_EV_CONFIG,
   type AllocationCandidate,
   type ComboCandidateDiagnostics,
+  type EvConfig,
   type JointModelHorse,
 } from "@keiba/core/ev/combo-bet-allocation";
 
@@ -108,6 +120,12 @@ export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
 export interface MixedCandidateBuildOptions {
   /** 対象券種(省略時は全券種 `ALL_MIXED_CANDIDATE_BET_TYPES`)。 */
   readonly betTypes?: readonly MixedCandidateBetType[];
+  /**
+   * ワイド・3連複のEV判定に使う閾値設定(省略時は `DEFAULT_EV_CONFIG` = 閾値1.0)。
+   * 複勝候補は`row.isPositive`をそのまま使う(呼び出し元が同じ閾値で既に判定済みの値)ため、
+   * 呼び出し元がここへ同じ閾値の`evConfig`を渡すことで全券種の判定基準を統一できる(D-4)。
+   */
+  readonly evConfig?: EvConfig;
 }
 
 /**
@@ -261,6 +279,7 @@ function buildComboCandidatesForBetType(
   requested: boolean,
   race: MixedCandidateBuildInput,
   horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
 ): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
   if (!requested) {
     return { candidates: [], diagnostics: { kind: "not-requested" } };
@@ -273,7 +292,14 @@ function buildComboCandidatesForBetType(
   const fieldPresence = resolveFieldPresence(record);
   const comboOddsState = race.comboOdds?.[betType]?.state ?? "unknown";
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
-  const result = buildComboCandidates(horses, COMBO_TOP_FINISH_COUNT, COMBO_SIZE[betType], oddsByKey);
+  // D-4: evConfigを渡し、複勝(row.isPositive)と同じ閾値・同じ厳密不等号で判定させる。
+  const result = buildComboCandidates(
+    horses,
+    COMBO_TOP_FINISH_COUNT,
+    COMBO_SIZE[betType],
+    oddsByKey,
+    evConfig,
+  );
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
@@ -291,13 +317,14 @@ export function buildMixedCandidates(
   options: MixedCandidateBuildOptions = {},
 ): MixedCandidateBuildResult {
   const betTypes = options.betTypes ?? ALL_MIXED_CANDIDATE_BET_TYPES;
+  const evConfig = options.evConfig ?? DEFAULT_EV_CONFIG;
   const horses: JointModelHorse[] = race.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
 
   const place = betTypes.includes("place")
     ? buildPlaceCandidates(race)
     : { candidates: [] as AllocationCandidate[], diagnostics: { kind: "not-requested" } as PlaceCandidateDiagnostics };
-  const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses);
-  const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses);
+  const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses, evConfig);
+  const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig);
 
   return {
     candidates: [...place.candidates, ...wide.candidates, ...trio.candidates],
