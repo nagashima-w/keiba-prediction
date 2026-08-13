@@ -14,7 +14,6 @@ import {
   formatBetLabel,
   isBetAllocationUnset,
   KELLY_CAP_EXPLANATION_NOTE,
-  NOT_DIVERSIFIED_NOTE,
   placeBetUnavailableMessage,
   type RaceAllocationView,
 } from "./bet-allocation-view.js";
@@ -24,6 +23,7 @@ import {
 } from "./mixed-allocation-cache.js";
 import {
   buildMixedAllocationDisplay,
+  buildMixedAllocationNotices,
   COMBO_EV_CALIBRATION_NOTE,
   formatUnjudgedNote,
   mixedBetTypeLabel,
@@ -395,16 +395,11 @@ function renderMixedAllocationBlock(
   // 表示順(advisory → 確率合計警告 → notDiversified)は既存の複勝専用経路
   // (buildAllocationNotices・bet-allocation-view.ts)と揃える(boss メタレビュー
   // 差し戻し2026-08-13対応: 混在経路で確率合計警告が欠落していたため追加した)。
-  const notices: string[] = [];
-  if (result.advisory !== null) {
-    notices.push(result.advisory);
-  }
-  if (display.probabilitySumWarning !== null) {
-    notices.push(display.probabilitySumWarning);
-  }
-  if (result.notDiversified) {
-    notices.push(NOT_DIVERSIFIED_NOTE);
-  }
+  // 組み立てロジック自体はmixed-allocation-view.tsのbuildMixedAllocationNotices
+  // (純関数)へ切り出し済み(再差し戻し対応: ソース走査ガードでは push の積み忘れを
+  // 検出できないと判明したため、値として直接テストできる形にした)。ここでは戻り値を
+  // 描画するだけにする。
+  const notices = buildMixedAllocationNotices(result, display);
   const unjudgedCount = totalUnjudgedCount(display.unjudged);
 
   return (

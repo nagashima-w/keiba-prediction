@@ -21,6 +21,7 @@ import {
 } from "../src/renderer/mixed-candidates.js";
 import {
   buildRaceAllocation,
+  NOT_DIVERSIFIED_NOTE,
   probabilitySumWarning,
   resolvePlaceBetTarget,
 } from "../src/renderer/bet-allocation-view.js";
@@ -28,6 +29,7 @@ import {
   aggregateUnjudgedCounts,
   buildMixedAllocationBreakdown,
   buildMixedAllocationDisplay,
+  buildMixedAllocationNotices,
   buildMixedRaceAllocation,
   comboBetTypeNote,
   COMBO_EV_CALIBRATION_NOTE,
@@ -39,6 +41,7 @@ import {
   resolvePlaceOnlyStake,
   sortMixedAllocationsForDisplay,
   totalUnjudgedCount,
+  type MixedAllocationDisplay,
   type MixedAllocationSettings,
 } from "../src/renderer/mixed-allocation-view.js";
 
@@ -1153,6 +1156,119 @@ describe("buildMixedAllocationDisplay — display.probabilitySumWarningがkind='
       throw new Error("kind='mixed'のはず");
     }
     expect(view.display.probabilitySumWarning).toBeNull();
+  });
+});
+
+// ============================================================================
+// buildMixedAllocationNotices — 注記の組み立て(advisory→確率合計警告→notDiversified)を
+// 値として直接テストする(boss メタレビュー再差し戻し2026-08-13対応)。
+//
+// 経緯: 当初はBatchAnalysisView.tsx内に直書きし、ソース走査(「push行を含む文字列がソースに
+// あるか」)で代替しようとしたが、push行だけを削除しても`if (display.probabilitySumWarning...)`
+// という行自体は残るため文字列一致テストをすり抜けた(オーケストレーターが実際に確認)。
+// 純関数として切り出し、戻り値(配列の中身・件数・順序)を直接検証することで、
+// 「pushを1行消したら配列の要素数・中身が変わる」ことを実データで固定する。
+// ============================================================================
+
+/** テスト用のMixedAllocationDisplayを組み立てる補助関数(probabilitySumWarning以外は空・0値の既定)。 */
+function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAllocationDisplay {
+  return {
+    breakdown: { place: { stake: 0, count: 0 }, wide: { stake: 0, count: 0 }, trio: { stake: 0, count: 0 } },
+    sortedAllocations: [],
+    unjudged: { oddsMissingCount: 0, oddsUnfetchedCount: 0, oddsMalformedCount: 0 },
+    wideNote: null,
+    trioNote: null,
+    placeUnavailableNote: null,
+    placeOnlyStake: null,
+    probabilitySumWarning: null,
+    ...overrides,
+  };
+}
+
+describe("テストヘルパー自己テスト: mixedDisplay()", () => {
+  it("既定値はprobabilitySumWarning等すべてnull/0であり、overridesで個別に上書きできること", () => {
+    const d = mixedDisplay();
+    expect(d.probabilitySumWarning).toBeNull();
+    expect(mixedDisplay({ probabilitySumWarning: "警告文" }).probabilitySumWarning).toBe("警告文");
+  });
+});
+
+describe("buildMixedAllocationNotices(注記の表示順: advisory→確率合計警告→notDiversified。boss指摘の再発防止)", () => {
+  it("【回帰の核心】3種すべてが該当するとき、3件とも含まれ、advisory→確率合計警告→notDiversifiedの順で並ぶこと", () => {
+    const result = generalResult([allocation({ umabans: [1], stake: 100 })], {
+      advisory: "適正額超過の警告文",
+      notDiversified: true,
+    });
+    const display = mixedDisplay({ probabilitySumWarning: "確率合計の警告文" });
+    const notices = buildMixedAllocationNotices(result, display);
+    // 件数・各要素の値の両方を厳密に固定する(pushが1行でも欠けると長さ・中身のどちらかで
+    // 必ず検知できる)。
+    expect(notices).toHaveLength(3);
+    expect(notices[0]).toBe("適正額超過の警告文");
+    expect(notices[1]).toBe("確率合計の警告文");
+    expect(notices[2]).toBe(NOT_DIVERSIFIED_NOTE);
+  });
+
+  it("確率合計警告だけがnullのとき、advisoryとnotDiversifiedの2件のみ含まれ、間が詰まること(該当箇所だけが抜けること)", () => {
+    const result = generalResult([allocation({ umabans: [1], stake: 100 })], {
+      advisory: "適正額超過の警告文",
+      notDiversified: true,
+    });
+    const display = mixedDisplay({ probabilitySumWarning: null });
+    const notices = buildMixedAllocationNotices(result, display);
+    expect(notices).toEqual(["適正額超過の警告文", NOT_DIVERSIFIED_NOTE]);
+  });
+
+  it("確率合計警告のみ該当するとき、1件だけ(確率合計警告)が含まれること", () => {
+    const result = generalResult([allocation({ umabans: [1], stake: 100 })], {
+      advisory: null,
+      notDiversified: false,
+    });
+    const display = mixedDisplay({ probabilitySumWarning: "確率合計の警告文" });
+    const notices = buildMixedAllocationNotices(result, display);
+    expect(notices).toEqual(["確率合計の警告文"]);
+  });
+
+  it("advisoryのみ該当するとき、1件だけ(advisory)が含まれること", () => {
+    const result = generalResult([allocation({ umabans: [1], stake: 100 })], {
+      advisory: "適正額超過の警告文",
+      notDiversified: false,
+    });
+    const display = mixedDisplay();
+    expect(buildMixedAllocationNotices(result, display)).toEqual(["適正額超過の警告文"]);
+  });
+
+  it("notDiversifiedのみ該当するとき、1件だけ(NOT_DIVERSIFIED_NOTE)が含まれること", () => {
+    const result = generalResult([allocation({ umabans: [1], stake: 100 })], {
+      advisory: null,
+      notDiversified: true,
+    });
+    const display = mixedDisplay();
+    expect(buildMixedAllocationNotices(result, display)).toEqual([NOT_DIVERSIFIED_NOTE]);
+  });
+
+  it("いずれも該当しないとき、空配列を返すこと", () => {
+    const result = generalResult([allocation({ umabans: [1], stake: 100 })], {
+      advisory: null,
+      notDiversified: false,
+    });
+    const display = mixedDisplay();
+    expect(buildMixedAllocationNotices(result, display)).toEqual([]);
+  });
+
+  it("buildMixedAllocationDisplayが返すMixedAllocationDisplayを実際にそのまま渡しても動作すること(統合確認)", () => {
+    // raceWithPositiveCombosはallCandidateRows(既定adjustedProb=0.5)を使うため、
+    // 8頭で合計4.0・乖離1.0(>0.3)となり、確率合計警告が必ず出る入力である。
+    const race = raceWithPositiveCombos(8);
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const notices = buildMixedAllocationNotices(view.result, view.display);
+    // 前提固定: この入力では確率合計警告が実際に出ること(空振り防止)。
+    expect(view.display.probabilitySumWarning).not.toBeNull();
+    expect(notices).toContain(view.display.probabilitySumWarning);
   });
 });
 

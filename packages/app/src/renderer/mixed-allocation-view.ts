@@ -535,6 +535,45 @@ export type MixedRaceAllocationDisplayView =
   | MixedRaceAllocationComputedWithDisplay;
 
 /**
+ * 混在配分の注記(advisory → 確率合計警告 → notDiversified)を表示順で並べる純関数
+ * (boss メタレビュー差し戻し2026-08-13対応・再差し戻し対応)。
+ *
+ * ## 経緯(ソース走査ガードの失敗)
+ *
+ * 当初、この3種の注記の組み立ては`BatchAnalysisView.tsx`内に直書きし、React描画テスト基盤が
+ * 無いことを理由に「`renderMixedAllocationBlock`のソースが3つの識別子を含むこと」を検証する
+ * ソース走査テストで代替しようとした。**しかしオーケストレーターが実際に`push`の1行だけを
+ * 削除するミューテーションを注入したところ、そのテストは通ってしまった**
+ * (`if (display.probabilitySumWarning !== null) {`という行自体は`push`を消しても残るため、
+ * `toContain("display.probabilitySumWarning")`という文字列一致では検知できなかった)。
+ * 「識別子がソースに書かれていること」と「値が実際に積まれること」は別の主張であり、
+ * 前者のテストは後者を保証しない。
+ *
+ * この教訓を踏まえ、組み立てロジック自体を**値として直接テストできる純関数**として
+ * `mixed-allocation-view.ts`側に切り出した(既存の複勝専用経路`buildAllocationNotices`
+ * 〈`bet-allocation-view.ts`〉と同じ構造。単一定義の原則の観点でも両経路が揃う)。
+ * `BatchAnalysisView.tsx`はこの関数の戻り値をそのまま描画するだけになり、
+ * 「pushを1行消したら結果配列の要素数が減る」ことを`mixed-allocation-view.test.ts`が
+ * 実データで直接固定できる(ソース走査に依存しない)。
+ */
+export function buildMixedAllocationNotices(
+  result: GeneralBetAllocationResult,
+  display: MixedAllocationDisplay,
+): readonly string[] {
+  const notices: string[] = [];
+  if (result.advisory !== null) {
+    notices.push(result.advisory);
+  }
+  if (display.probabilitySumWarning !== null) {
+    notices.push(display.probabilitySumWarning);
+  }
+  if (result.notDiversified) {
+    notices.push(NOT_DIVERSIFIED_NOTE);
+  }
+  return notices;
+}
+
+/**
  * 券種横断の馬券配分ビューを、表示に必要な追加データ(AC10〜AC16)まで含めて合成する。
  * `buildMixedRaceAllocation`(合成ロジック本体)自体は変更せず、`kind:"mixed"`のときだけ
  * 追加計算(内訳・並べ替え・判定不能集計・状態注記・複勝のみ比較額)を行う薄いラッパー。
