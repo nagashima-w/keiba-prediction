@@ -17,9 +17,22 @@
  *
  * ## 計測条件(必ず併記すること。boss指摘)
  * - 保存済みの実オッズフィクスチャ `docs/investigations/combo-odds-real-fetch/central-on.json`
- *   (中央16頭・race_id=202603020211・確定オッズ)を入力にする。**ネットワークには一切出ない**
+ *   (中央16頭・race_id=202603020211・確定オッズ・**実レース日 2026/06/28**)を入力にする。
+ *   **ネットワークには一切出ない**
+ * - `runAnalysis` には `kaisaiDate="20260628"`(実レース日)を明示して渡す。渡さないと
+ *   `resolveAnalysisDate` が実行日(`now()`)へフォールバックし、季節分類・休み明け走目の
+ *   基準日が壁時計時刻とともにドリフトする(#40「#35-1a」で判明した欠陥。
+ *   `docs/current-spec.md`・Issue #40 参照)
  * - `runAnalysis` を `deps.analyze: null`(LLM未使用)で実行し、scorer が出す **実 prior**
  *   (LLM補正なし=adjustedProb===prior)をそのまま使う
+ * - **戦績の先読みリークは遮断していない**: `deps.scrape` に渡すフィクスチャの
+ *   `horses[].results` は日付フィルタをかけていない生データであり、当該レース自身の着順が
+ *   prior の材料に混入したまま計測している(本番の `analysis-pipeline.ts` と同じ状態。
+ *   是正は #39)。したがって本スクリプトが出す prior・EV・配分の絶対値は、確率の質の指標として
+ *   額面通りに読んではならない(リーク遮断込みの計測は `ev/probability-quality.ts` +
+ *   `scripts/test/probability-quality-regression.test.ts` を参照すること。#40「#35-1a」)。
+ *   本スクリプトの目的は `greedySteps` 感度・所要時間の計測であり、prior の質そのものの
+ *   計測ではないため、ここでは意図的にリーク遮断を追加していない
  * - ケリー係数 λ=0.5、EV閾値1.0(既定)
  *
  * ## 使い方
@@ -36,7 +49,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { RaceData } from "../packages/core/src/index.js";
+import { parseKaisaiDate, type RaceData } from "../packages/core/src/index.js";
 import {
   runAnalysis,
   type AnalysisPipelineDeps,
@@ -79,7 +92,10 @@ async function loadAnalysisResult(): Promise<AnalysisResult> {
     analyze: null,
     saveAnalysis: () => 0,
   };
-  return runAnalysis(raceData.raceId, null, deps);
+  // kaisaiDateを明示する(実レース日2026/06/28。#40「#35-1a」)。渡さないとresolveAnalysisDateが
+  // 実行日(now())へフォールバックし、季節分類・休み明け走目の基準日が壁時計時刻とともに
+  // ドリフトする(計測条件のJSDoc参照)。
+  return runAnalysis(raceData.raceId, parseKaisaiDate("20260628"), deps);
 }
 
 /** AnalysisResultから、buildMixedCandidates/allocateGeneralBetsが要求する最小構造を取り出す。 */

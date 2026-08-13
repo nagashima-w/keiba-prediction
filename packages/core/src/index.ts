@@ -239,6 +239,12 @@ export {
   type TodayRaceConditions,
 } from "./scorer/prior.js";
 export {
+  filterRaceDataBefore,
+  type FilterRaceDataBeforeResult,
+  type SnapshotFilterDiagnostics,
+  type SnapshotFilterHorseDiagnostics,
+} from "./scorer/snapshot-filter.js";
+export {
   computeEstimatedRaceEv,
   computeRaceEv,
   DEFAULT_ESTIMATED_PLACE_CONFIG,
@@ -292,6 +298,26 @@ export {
   type VerifyTrendReport,
   type VerifyVenueFilter,
 } from "./ev/verify.js";
+export {
+  buildProbabilityQualityReport,
+  computeMarketImpliedPlaceProbabilities,
+  computeTrioAllPointEvOverPayoutRate,
+  computeVarianceRatioMetrics,
+  normalizedKlDivergenceFromUniform,
+  normalizedTrioJointKlDivergence,
+  spearmanRankCorrelation,
+  type MarketImpliedPlaceProbabilities,
+  type MeasurementConditions,
+  type NullableMetric,
+  type PlaceOddsInputHorse,
+  type PriorSource,
+  type ProbabilityQualityInputHorse,
+  type ProbabilityQualityReport,
+  type ProbabilityQualityReportInput,
+  type TrioAllPointEvOverPayoutRateResult,
+  type TrioAllPointMetricDiagnostics,
+  type VarianceRatioMetrics,
+} from "./ev/probability-quality.js";
 export {
   analyzeHorseLegStyle,
   buildRaceDevelopment,
