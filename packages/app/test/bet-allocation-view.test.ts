@@ -190,9 +190,35 @@ describe("buildRaceAllocation(レース単位の配分ビュー状態)", () => {
 });
 
 describe("formatBetLabel(買い目ラベルの純関数生成。umabanをJSXに直接埋め込まない)", () => {
-  it("馬番から「N番」形式のラベル文字列を作ること", () => {
+  it("馬番(単一number)から「N番」形式のラベル文字列を作ること(既存契約・非破壊)", () => {
     expect(formatBetLabel(4)).toBe("4番");
     expect(formatBetLabel(12)).toBe("12番");
+  });
+
+  // 機能D-2c第4段(Issue #28): ワイド・3連複の組ラベルへの拡張。単一馬(4)・2頭組(4-7)・
+  // 3頭組(3-4-7)の3形態を固定する(boss指示)。
+  describe("組ラベルへの拡張(機能D-2c第4段・Issue #28)", () => {
+    it("要素数1の配列は単一numberと同じ「N番」形式になること(複勝候補がumabans:[N]の形で来ても揃う)", () => {
+      expect(formatBetLabel([4])).toBe("4番");
+      expect(formatBetLabel([12])).toBe("12番");
+    });
+
+    it("要素数2の配列(ワイド)は「N-M」形式(区切り文字はハイフン、番は付けない)になること", () => {
+      expect(formatBetLabel([4, 7])).toBe("4-7");
+    });
+
+    it("要素数3の配列(3連複)は「N-M-L」形式になること", () => {
+      expect(formatBetLabel([3, 4, 7])).toBe("3-4-7");
+    });
+
+    it("配列の馬番順序をそのまま連結すること(再ソートしない。昇順入力での決定的な出力を固定)", () => {
+      // AllocationCandidate.umabans/GeneralBetAllocation.umabansは「昇順・重複なし」が契約
+      // (validateCandidatesがthrowで強制)のため、本関数は与えられた順序をそのまま連結する。
+      expect(formatBetLabel([1, 2, 3])).toBe("1-2-3");
+      expect(formatBetLabel([2, 5])).toBe("2-5");
+      // 同じ2要素でも中身が違えば出力も違うこと(定数返却になっていないことの空振り防止)。
+      expect(formatBetLabel([2, 5])).not.toBe(formatBetLabel([4, 7]));
+    });
   });
 });
 
@@ -410,6 +436,14 @@ describe("固定注記3点(必ず表示。文言は数値込みで生成)", () =
   it("evThresholdFootnoteはEV閾値の数値を小数第2位で埋め込むこと", () => {
     expect(evThresholdFootnote(1.05)).toContain("1.05");
     expect(evThresholdFootnote(1)).toContain("1.00");
+  });
+
+  // 機能D-2c第4段(Issue #28・AC9): 「馬」→「買い目」への改訂。混在経路では判定対象が
+  // 単一馬(複勝)だけでなくワイド・3連複の組にも及ぶため、「馬のみ」という表記のままだと
+  // 実際の判定対象(D-4により全券種同一閾値)と食い違う。
+  it("evThresholdFootnoteは判定対象を「買い目」と表記し、「馬のみ」という表記を含まないこと(AC9)", () => {
+    expect(evThresholdFootnote(1.0)).toContain("買い目のみ");
+    expect(evThresholdFootnote(1.0)).not.toContain("馬のみ");
   });
 });
 
