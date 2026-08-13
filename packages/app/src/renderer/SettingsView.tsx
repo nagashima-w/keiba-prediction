@@ -287,10 +287,10 @@ export function SettingsView(): React.JSX.Element {
       </div>
 
       {/*
-       * 組合せオッズ取得(機能D-2c第3段・Issue #28)。既定OFF(opt-in)。第3段時点では取得した
-       * オッズを配分提案には一切使わない(記録のみ)ため、その旨を補助文で必ず明示する
-       * (INCLUDE_COMBO_ODDS_LABELS.help。ONにしたのに配分が変わらないという未実装を
-       * 不具合と誤認させないための必須記述。boss着手前ゲート裁定)。
+       * 組合せオッズ取得(機能D-2c・Issue #28)。既定OFF(opt-in)。取得したオッズを馬券配分に
+       * 実際に使うかどうかは、下のALLOCATION_BET_TYPE_LABELS(ワイド/三連複を配分に使う)の
+       * 設定に従う(第4段でこの依存関係を補助文に明示した。INCLUDE_COMBO_ODDS_LABELS.help
+       * 参照。「記録のみ」だった第3段時点の説明はAC19で更新済み)。
        */}
       <div style={fieldStyle}>
         <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>

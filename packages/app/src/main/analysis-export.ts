@@ -81,10 +81,15 @@ export interface RaceSnapshot {
   readonly race: RaceSnapshotRace;
   readonly horses: readonly RaceSnapshotHorse[];
   /**
-   * ワイドオッズ(機能D-2c第3段・Issue #28)。`scrapeRace`の`options.includeComboOdds`が
+   * ワイドオッズ(機能D-2c・Issue #28)。`scrapeRace`の`options.includeComboOdds`が
    * trueのときのみ設定される(既定undefined。core `OddsSnapshot.wideCombo`のプレーン写し)。
-   * 第3段時点では一次データを記録するのみで、配分提案には使わない(反証B: Σx*は
-   * allocateGeneralBetsを実行して初めて得られる値のため、この段では指標を一切算出しない)。
+   *
+   * **この値自体は「JSON永続化用のスナップショット」であり、馬券配分の計算には使われない**
+   * (この記述は今も正しい)。第4段(Issue #28)で券種横断の配分が実際に使うのは、
+   * このスナップショットではなく**別の生きた経路**(`AnalysisResult.wideCombo` →
+   * `renderer/mixed-allocation-view.ts`。DB保存を経ずに分析結果からその場で計算する)である。
+   * 混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・DB保存専用の写しに
+   * すぎず、配分計算の入力としては一切参照されない。
    */
   readonly wideCombo?: Record<string, number | null>;
   /** 三連複オッズ(機能D-2c第3段)。`wideCombo`と同じ条件・同じ理由でoptional。 */

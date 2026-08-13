@@ -53,10 +53,27 @@
  * `allocateGeneralBets` の貪欲逐次配分は `config.greedySteps`(既定値は
  * `DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps`。`allocation-primitives.ts`の
  * `DEFAULT_GREEDY_STEPS`)刻みで最適化する。**この刻み幅が券種構成比(複勝/ワイド/三連複への
- * 金額配分の割合)を左右することが実測で確認されている**(例: `greedySteps=400`では三連複が
- * 資金500万でも0円、既定1000なら資金100万で三連複に入る)。本タスク(第4段)では
- * `greedySteps`の値・アルゴリズムを一切変更しない(値変更・チューニングはIssue #36のスコープ)。
- * 本モジュールは常に`DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps`をそのまま使う。
+ * 金額配分の割合)を左右することが実測で確認されている。**
+ *
+ * **再現可能な計測: `pnpm tsx scripts/bench-mixed-allocation.ts`**(ネットワークに出ない。
+ * `docs/investigations/combo-odds-real-fetch/central-on.json` の保存済み実オッズを入力にする)。
+ * 数値をこのJSDocへ直接書いていたところ、code-reviewer指摘(2026-08-13)により**再現しない
+ * 具体例(「資金500万でも0円」)がそのまま書かれていたことが判明した**(オーケストレーターが
+ * 別条件〈α平坦化した合成確率〉での計測を無条件の事実として伝えたことが原因。実データでは
+ * 再現しない。この欠陥クラス「検証手段のない数値をコードに書く」の再発防止として、以後は
+ * 数値そのものではなくスクリプトを参照する)。
+ *
+ * 計測条件(中央16頭・実オッズ・`runAnalysis` を `analyze:null` で実行した実prior・λ=0.5)での
+ * 実行結果の要旨(2026-08-13時点。スクリプトを実行して自分の手元で確認すること):
+ * - 総額はgreedySteps(既定1000/400)でほとんど変わらない
+ * - **点数**(betCount)と**券種別の構成比**は大きく変わる(点数は概ね1/3程度に、三連複の
+ *   取り分は概ね1/3程度に減る。既定1000に対し400を試した場合)
+ * - 具体的な数値・割合はスクリプトの出力(実行環境・実データ更新により変動しうる)を参照し、
+ *   この場に固定の数字を書かない
+ *
+ * 本タスク(第4段)では `greedySteps` の値・アルゴリズムを一切変更しない(値変更・チューニングは
+ * Issue #36のスコープ)。本モジュールは常に `DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps`
+ * をそのまま使う。
  */
 
 import {
