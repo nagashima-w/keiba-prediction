@@ -28,12 +28,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import {
-  filterRaceDataBefore,
-  parseKaisaiDate,
-  parseRaceId,
-  type RaceData,
-} from "../../packages/core/src/index.js";
+import { parseKaisaiDate, type RaceData } from "../../packages/core/src/index.js";
+import { filterRaceDataBefore } from "../../packages/core/src/scorer/snapshot-filter.js";
 import {
   buildProbabilityQualityReport,
   type ProbabilityQualityReport,
