@@ -8,6 +8,7 @@ import {
   CROSS_RACE_OVERBET_NOTE,
   evThresholdFootnote,
   formatAllocationSummary,
+  NOT_DIVERSIFIED_NOTE,
   formatBetLabel,
   isBetAllocationUnset,
   KELLY_CAP_EXPLANATION_NOTE,
@@ -246,6 +247,33 @@ describe("formatAllocationSummary(合計行。capAppliedで文言切替)", () =>
       expect(summary).toContain("打ち止め");
       expect(summary).toContain("ケリー適正額");
     }
+  });
+
+  // 機能D-2c第4段(Issue #28): GeneralBetAllocationResult(券種混在。diagnosticsの形が非互換)
+  // からでも、この5フィールドだけを持つ構造的な入力なら呼べること(AllocationSummaryInputの
+  // 単一定義の原則。同じ文言ロジックを2箇所に複製しない前提の型的な保証)。
+  it("BetAllocationResult以外でも、5フィールド(totalStake等)だけを持つ構造的な入力から呼べること", () => {
+    const generalLike = {
+      totalStake: 12900,
+      kellyTargetStake: 25000,
+      effectivePerRaceCap: 20000,
+      capApplied: false,
+      resolvedBankroll: 300000,
+      // GeneralBetAllocationResultにしか無い、BetAllocationResultとは非互換なdiagnostics形状
+      // (diagnostics.placeProbSum等を持たない)。formatAllocationSummaryはdiagnosticsを
+      // 一切読まないため、この型のまま呼べることを確認する。
+      diagnostics: { inputCandidateCount: 10, truncatedByCapCount: 0, candidateCount: 10, converged: true },
+    };
+    const summary = formatAllocationSummary(generalLike);
+    expect(summary).toContain("12,900円");
+    expect(summary).toContain("上限に未達");
+  });
+});
+
+describe("NOT_DIVERSIFIED_NOTE(機能D-2c第4段でexport。mixed-allocation-view.tsが再利用する)", () => {
+  it("空でなく、原因を名指ししない中立表現であること(「1レース上限」を名指ししない)", () => {
+    expect(NOT_DIVERSIFIED_NOTE.length).toBeGreaterThan(0);
+    expect(NOT_DIVERSIFIED_NOTE).not.toContain("1レース上限の制約により");
   });
 });
 

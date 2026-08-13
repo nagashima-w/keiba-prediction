@@ -18,6 +18,7 @@ import { deriveBatchAvailability } from "./batch-availability.js";
 import { canCollectPeriodBatch } from "./period-batch-gate.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
+import type { MixedAllocationSettings } from "./mixed-allocation-view.js";
 import { PeriodBatchView } from "./PeriodBatchView.js";
 import type { RaceLedgerFilter } from "./race-ledger-filter.js";
 import {
@@ -100,18 +101,21 @@ export function App(): React.JSX.Element {
   notifyRef.current = notify;
 
   // 馬券配分(機能C-2)の設定スナップショット(BatchAnalysisViewへ渡す)。evThresholdは
-  // 固定注記3「配分の対象はEV閾値(現在X.XX)を上回った馬のみです」の表示に使う。
+  // 固定注記3「配分の対象はEV閾値(現在X.XX)を上回った買い目のみです」の表示に使う。
   // bankroll/perRaceCapの既定0は「未設定」を表し、配分ブロックを一切出さない(仕様)。
-  const [betAllocationSettings, setBetAllocationSettings] = useState({
+  //
+  // 機能D-2c第4段(Issue #28)でincludeComboOdds/includeWideInAllocation/includeTrioInAllocation
+  // の3項目を統合した(旧includeComboOddsSettingを分離した別stateとして持たず、
+  // buildMixedAllocationDisplayへそのまま渡せる1つのMixedAllocationSettings形にする)。
+  const [betAllocationSettings, setBetAllocationSettings] = useState<MixedAllocationSettings>({
     bankroll: 0,
     perRaceCap: 0,
     kellyFraction: 0.5,
     evThreshold: 1.0,
+    includeComboOdds: false,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
   });
-
-  // 組合せオッズ取得設定(機能D-2c第3段・Issue #28)。IPC追加はゼロ(getSettingsの戻り値を流用する。
-  // betAllocationSettingsと同じ流儀)。一括分析画面の固定注記表示にのみ使い、配分計算には渡さない。
-  const [includeComboOddsSetting, setIncludeComboOddsSetting] = useState(false);
 
   // 実行中バッチの世代ID。一括分析開始時に固定し、完了で null に戻す。
   // 進捗イベントにはこの「開始時に固定した runId」を添えるため、完了後に遅れて届いた
@@ -178,8 +182,10 @@ export function App(): React.JSX.Element {
           perRaceCap: s.perRaceCap,
           kellyFraction: s.kellyFraction,
           evThreshold: s.evThreshold,
+          includeComboOdds: s.includeComboOdds,
+          includeWideInAllocation: s.includeWideInAllocation,
+          includeTrioInAllocation: s.includeTrioInAllocation,
         });
-        setIncludeComboOddsSetting(s.includeComboOdds);
       })
       .catch(() => {
         setNotify({ webhookConfigured: false, autoSend: false });
@@ -664,7 +670,6 @@ export function App(): React.JSX.Element {
             onSendDiscord={() => handleSendDiscord(completedOutcomes)}
             onExportAnalysis={handleExportAnalysis}
             betAllocationSettings={betAllocationSettings}
-            includeComboOdds={includeComboOddsSetting}
           />
 
           <PeriodBatchView

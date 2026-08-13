@@ -1,16 +1,39 @@
 import { describe, expect, it } from "vitest";
 
-import { buildComboOddsKey, type AllocationCandidate } from "@keiba/core/ev/combo-bet-allocation";
+import {
+  buildComboOddsKey,
+  type AllocationCandidate,
+  type GeneralBetAllocation,
+  type GeneralBetAllocationResult,
+} from "@keiba/core/ev/combo-bet-allocation";
 
 import type {
   AnalysisRow,
   ComboOddsFetchDiagnosticsView,
   ComboOddsFetchOutcomeView,
 } from "../src/shared/analysis-types.js";
-import { buildMixedCandidates, type MixedCandidateBuildInput } from "../src/renderer/mixed-candidates.js";
+import {
+  buildMixedCandidates,
+  type ComboCandidateDiagnosticsView,
+  type MixedCandidateBuildInput,
+  type MixedCandidateDiagnostics,
+  type PlaceCandidateDiagnostics,
+} from "../src/renderer/mixed-candidates.js";
 import { buildRaceAllocation, resolvePlaceBetTarget } from "../src/renderer/bet-allocation-view.js";
 import {
+  aggregateUnjudgedCounts,
+  buildMixedAllocationBreakdown,
+  buildMixedAllocationDisplay,
   buildMixedRaceAllocation,
+  comboBetTypeNote,
+  COMBO_EV_CALIBRATION_NOTE,
+  formatUnjudgedNote,
+  MIXED_ALLOCATION_INVALID_MESSAGE,
+  mixedBetTypeLabel,
+  placeUnavailableNoteForMixed,
+  resolvePlaceOnlyStake,
+  sortMixedAllocationsForDisplay,
+  totalUnjudgedCount,
   type MixedAllocationSettings,
 } from "../src/renderer/mixed-allocation-view.js";
 
@@ -525,5 +548,545 @@ describe("AC17: 異常な数値(placeOddsMin<=0/ev=NaN/umaban非有限)を含ん
     const healthyView = buildMixedRaceAllocation(healthyRace, settings());
     expect(brokenView.kind).toBe("invalid");
     expect(healthyView.kind).toBe("mixed");
+  });
+});
+
+// ============================================================================
+// 表示データ導出(AC10〜AC16)のテストヘルパー
+// ============================================================================
+
+/** テスト用のGeneralBetAllocationを組み立てる補助関数。 */
+function allocation(overrides: Partial<GeneralBetAllocation> & { umabans: readonly number[] }): GeneralBetAllocation {
+  return {
+    umabans: overrides.umabans,
+    stake: overrides.stake ?? 0,
+    continuousFraction: overrides.continuousFraction ?? 0.01,
+    scaledFraction: overrides.scaledFraction ?? 0.005,
+    hitProb: overrides.hitProb ?? 0.2,
+    odds: overrides.odds ?? 3,
+    ev: overrides.ev ?? 1.2,
+    droppedBelowMinimum: overrides.droppedBelowMinimum ?? false,
+  };
+}
+
+/** テスト用のGeneralBetAllocationResultを組み立てる補助関数(allocationsのstake合計をtotalStakeへ自動反映)。 */
+function generalResult(
+  allocations: readonly GeneralBetAllocation[],
+  overrides: Partial<GeneralBetAllocationResult> = {},
+): GeneralBetAllocationResult {
+  const totalStake = overrides.totalStake ?? allocations.reduce((sum, a) => sum + a.stake, 0);
+  return {
+    allocations,
+    totalStake,
+    bankrollInput: 300000,
+    perRaceCapInput: 20000,
+    resolvedBankroll: 300000,
+    effectivePerRaceCap: 20000,
+    kellyTargetStake: totalStake,
+    plannedStake: totalStake,
+    capApplied: false,
+    minimumStakeApplied: false,
+    exceedsKellyTarget: false,
+    advisory: null,
+    kellyFraction: 0.5,
+    betCount: allocations.filter((a) => a.stake > 0).length,
+    isSkip: totalStake === 0,
+    skipReason: totalStake === 0 ? "妙味が小さく、賭ける価値のある配分が見つかりませんでした" : null,
+    notDiversified: false,
+    modelId: "conditional-bernoulli",
+    modelApproximate: false,
+    diagnostics: { inputCandidateCount: allocations.length, truncatedByCapCount: 0, candidateCount: allocations.length, converged: true },
+    ...overrides,
+  };
+}
+
+/** テスト用のComboCandidateDiagnosticsView(kind="built")を組み立てる補助関数。 */
+function builtComboDiag(overrides: {
+  fieldPresence?: "absent" | "empty" | "present";
+  comboOddsState?: ComboOddsFetchOutcomeView["state"] | "unknown";
+  positiveCount?: number;
+  notPositiveCount?: number;
+  oddsMissingCount?: number;
+  oddsUnfetchedCount?: number;
+  oddsMalformedCount?: number;
+} = {}): ComboCandidateDiagnosticsView {
+  return {
+    kind: "built",
+    fieldPresence: overrides.fieldPresence ?? "present",
+    comboOddsState: overrides.comboOddsState ?? "available",
+    build: {
+      enumeratedCount: 10,
+      judged: {
+        positiveCount: overrides.positiveCount ?? 1,
+        notPositiveCount: overrides.notPositiveCount ?? 0,
+      },
+      unjudged: {
+        oddsMissingCount: overrides.oddsMissingCount ?? 0,
+        oddsUnfetchedCount: overrides.oddsUnfetchedCount ?? 0,
+        oddsMalformedCount: overrides.oddsMalformedCount ?? 0,
+      },
+    },
+  };
+}
+
+/** テスト用のMixedCandidateDiagnosticsを組み立てる補助関数。 */
+function mixedDiagnostics(overrides: {
+  place?: PlaceCandidateDiagnostics;
+  wide?: ComboCandidateDiagnosticsView;
+  trio?: ComboCandidateDiagnosticsView;
+} = {}): MixedCandidateDiagnostics {
+  return {
+    place: overrides.place ?? {
+      kind: "judged",
+      judged: { positiveCount: 1, notPositiveCount: 0 },
+      unjudged: { oddsMissingCount: 0 },
+    },
+    wide: overrides.wide ?? builtComboDiag(),
+    trio: overrides.trio ?? builtComboDiag(),
+  };
+}
+
+describe("表示データ導出のテストヘルパー自己テスト", () => {
+  it("allocation(): umabansのlength違いで異なる値を作れ、既定値はゼロでないstake以外を持つこと", () => {
+    expect(allocation({ umabans: [1] }).umabans).toEqual([1]);
+    expect(allocation({ umabans: [1, 2] }).stake).toBe(0);
+    expect(allocation({ umabans: [1, 2], stake: 500 }).stake).toBe(500);
+  });
+
+  it("generalResult(): totalStakeを省略するとallocationsのstake合計になること", () => {
+    const r = generalResult([allocation({ umabans: [1], stake: 100 }), allocation({ umabans: [2, 3], stake: 200 })]);
+    expect(r.totalStake).toBe(300);
+  });
+
+  it("generalResult(): totalStakeを明示すれば上書きできること(不整合な状態も意図的に作れる)", () => {
+    const r = generalResult([allocation({ umabans: [1], stake: 100 })], { totalStake: 999 });
+    expect(r.totalStake).toBe(999);
+  });
+
+  it("builtComboDiag(): overridesが個別に反映されること", () => {
+    const d = builtComboDiag({ comboOddsState: "failed", positiveCount: 0 });
+    expect(d.kind).toBe("built");
+    if (d.kind === "built") {
+      expect(d.comboOddsState).toBe("failed");
+      expect(d.build.judged.positiveCount).toBe(0);
+    }
+  });
+});
+
+// ============================================================================
+// AC10: 券種別内訳の合計がtotalStakeと一致すること
+// ============================================================================
+
+describe("AC10: buildMixedAllocationBreakdown — 券種別内訳(金額・点数)の合計がtotalStakeと一致すること", () => {
+  it("複勝・ワイド・3連複それぞれ異なる金額・点数を持つ場合に正しく集計されること(非対称データ)", () => {
+    const allocations = [
+      allocation({ umabans: [1], stake: 300 }),
+      allocation({ umabans: [2], stake: 0 }), // stake=0はcountに数えない
+      allocation({ umabans: [3, 4], stake: 500 }),
+      allocation({ umabans: [5, 6], stake: 700 }),
+      allocation({ umabans: [7, 8, 9], stake: 1100 }),
+    ];
+    const result = generalResult(allocations);
+    const breakdown = buildMixedAllocationBreakdown(result);
+    expect(breakdown.place).toEqual({ stake: 300, count: 1 });
+    expect(breakdown.wide).toEqual({ stake: 1200, count: 2 });
+    expect(breakdown.trio).toEqual({ stake: 1100, count: 1 });
+    // 前提固定: 3群の合計がtotalStakeと一致すること(AC10の核心)。
+    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
+    expect(sum).toBe(result.totalStake);
+  });
+
+  it("空の配分(allocations=[])でも合計0でtotalStakeと一致すること", () => {
+    const result = generalResult([]);
+    const breakdown = buildMixedAllocationBreakdown(result);
+    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
+    expect(sum).toBe(0);
+    expect(sum).toBe(result.totalStake);
+  });
+
+  it("実データ(buildMixedRaceAllocationの本物の結果)でも内訳の合計がtotalStakeと一致すること(統合確認)", () => {
+    const n = 8;
+    const umabans = umabansOf(n);
+    const race = raceInput({
+      rows: allCandidateRows(n),
+      wideCombo: fullOddsRecord(umabans, 2, 30000),
+      trioCombo: fullOddsRecord(umabans, 3, 90000),
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    });
+    const view = buildMixedRaceAllocation(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const breakdown = buildMixedAllocationBreakdown(view.result);
+    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
+    // 前提固定: 実際に金額が動いていること(空振り防止)。
+    expect(view.result.totalStake).toBeGreaterThan(0);
+    expect(sum).toBe(view.result.totalStake);
+  });
+});
+
+// ============================================================================
+// AC13: 個々の買い目を全件・stake降順(同額は馬番配列の辞書順)で列挙。券種ラベル。
+// ============================================================================
+
+describe("AC13: sortMixedAllocationsForDisplay — 全件・stake降順(同額は馬番配列の辞書順)で列挙すること", () => {
+  it("stake降順で並ぶこと(打ち切りなし=全件)", () => {
+    const allocations = [
+      allocation({ umabans: [1], stake: 100 }),
+      allocation({ umabans: [2, 3], stake: 500 }),
+      allocation({ umabans: [4, 5, 6], stake: 300 }),
+      allocation({ umabans: [7], stake: 0 }), // stake=0は除外される
+    ];
+    const sorted = sortMixedAllocationsForDisplay(generalResult(allocations));
+    expect(sorted.map((a) => a.umabans)).toEqual([[2, 3], [4, 5, 6], [1]]);
+    // 前提固定: stake=0の候補が除外されていること(「全件」はstake>0の全件を意味する)。
+    expect(sorted).toHaveLength(3);
+  });
+
+  it("同額のときは馬番配列の辞書順(要素ごとの昇順)でタイブレークすること", () => {
+    const allocations = [
+      allocation({ umabans: [5, 9], stake: 200 }),
+      allocation({ umabans: [1, 2], stake: 200 }),
+      allocation({ umabans: [1, 9], stake: 200 }),
+    ];
+    const sorted = sortMixedAllocationsForDisplay(generalResult(allocations));
+    expect(sorted.map((a) => a.umabans)).toEqual([[1, 2], [1, 9], [5, 9]]);
+  });
+
+  it("同額かつ長さが異なる場合は短い方を先にすること(辞書順の定義どおり)", () => {
+    const allocations = [
+      allocation({ umabans: [1, 2, 3], stake: 200 }),
+      allocation({ umabans: [1, 2], stake: 200 }),
+    ];
+    const sorted = sortMixedAllocationsForDisplay(generalResult(allocations));
+    expect(sorted.map((a) => a.umabans)).toEqual([[1, 2], [1, 2, 3]]);
+  });
+
+  it("実データでも、返された配列に含まれる要素数がstake>0の件数と一致すること(全件性の確認)", () => {
+    const n = 8;
+    const umabans = umabansOf(n);
+    const race = raceInput({
+      rows: allCandidateRows(n),
+      wideCombo: fullOddsRecord(umabans, 2, 30000),
+      trioCombo: fullOddsRecord(umabans, 3, 90000),
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    });
+    const view = buildMixedRaceAllocation(race, settings());
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const sorted = sortMixedAllocationsForDisplay(view.result);
+    const expectedCount = view.result.allocations.filter((a) => a.stake > 0).length;
+    expect(sorted).toHaveLength(expectedCount);
+    // 前提固定: 空振り防止(実際に複数件あること)。
+    expect(expectedCount).toBeGreaterThan(1);
+  });
+});
+
+describe("mixedBetTypeLabel — umabans.lengthから券種ラベルを返すこと", () => {
+  it.each([
+    [1, "複勝"],
+    [2, "ワイド"],
+    [3, "三連複"],
+  ] as const)("length=%i は %s", (length, expected) => {
+    expect(mixedBetTypeLabel(length)).toBe(expected);
+  });
+});
+
+// ============================================================================
+// AC15: 判定不能(unjudged)件数の合算。0件なら表示側は出さない(合計0の判定はtotalUnjudgedCountに委ねる)
+// ============================================================================
+
+describe("AC15: aggregateUnjudgedCounts/totalUnjudgedCount — 券種横断の判定不能件数を合算すること", () => {
+  it("複勝・ワイド・3連複それぞれ異なる件数を持つ場合に正しく合算されること(非対称データ)", () => {
+    const diagnostics = mixedDiagnostics({
+      place: { kind: "judged", judged: { positiveCount: 1, notPositiveCount: 0 }, unjudged: { oddsMissingCount: 2 } },
+      wide: builtComboDiag({ oddsMissingCount: 3, oddsUnfetchedCount: 5, oddsMalformedCount: 1 }),
+      trio: builtComboDiag({ oddsMissingCount: 1, oddsUnfetchedCount: 0, oddsMalformedCount: 2 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    expect(counts).toEqual({ oddsMissingCount: 6, oddsUnfetchedCount: 5, oddsMalformedCount: 3 });
+    expect(totalUnjudgedCount(counts)).toBe(14);
+  });
+
+  it("すべて0件ならtotalUnjudgedCountも0であること(表示を出さない判定に使う)", () => {
+    const diagnostics = mixedDiagnostics();
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    expect(totalUnjudgedCount(counts)).toBe(0);
+  });
+
+  it("not-requested(対象外にした券種)は判定不能に加算しないこと(対象外と判定不能を混同しない)", () => {
+    const diagnostics = mixedDiagnostics({
+      wide: { kind: "not-requested" },
+      trio: builtComboDiag({ oddsMissingCount: 5 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    // wideがnot-requestedでも、trioの5件だけが計上されること(0を足しているだけで無視されていないことの確認)。
+    expect(counts.oddsMissingCount).toBe(5);
+  });
+
+  it("部分被覆(comboOddsState='available'かつunjudgedが1件以上)でも件数が計上されること(地方三連複の軸別取得で発生。AC15の核心)", () => {
+    // state='available'(発売あり・取得成功)でも、oddsUnfetchedCount>0(一部の組だけ取得できなかった)
+    // というケースを表現する。stateだけを見て「全部揃っている」と誤判定しないことを固定する。
+    const diagnostics = mixedDiagnostics({
+      trio: builtComboDiag({ comboOddsState: "available", positiveCount: 50, oddsUnfetchedCount: 12 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    expect(counts.oddsUnfetchedCount).toBe(12);
+    expect(totalUnjudgedCount(counts)).toBeGreaterThan(0);
+  });
+});
+
+describe("formatUnjudgedNote — 判定不能件数の注記文言(0件の区分は文言に含めない)", () => {
+  it("3区分すべて非0なら3つとも文言に含まれること", () => {
+    const note = formatUnjudgedNote({ oddsMissingCount: 2, oddsUnfetchedCount: 5, oddsMalformedCount: 1 });
+    expect(note).toContain("オッズ欠損2件");
+    expect(note).toContain("未取得5件");
+    expect(note).toContain("不正値1件");
+  });
+
+  it("0件の区分は文言に含めないこと(ノイズを出さない)", () => {
+    const note = formatUnjudgedNote({ oddsMissingCount: 3, oddsUnfetchedCount: 0, oddsMalformedCount: 0 });
+    expect(note).toContain("オッズ欠損3件");
+    expect(note).not.toContain("未取得0件");
+    expect(note).not.toContain("不正値0件");
+  });
+});
+
+// ============================================================================
+// AC16: {}(fieldPresence="empty")を「発売なし」と断定しない。comboOddsStateで原因を判別する
+// ============================================================================
+
+describe("AC16: comboBetTypeNote — {}を『発売なし』と断定せず、comboOddsStateで原因を判別すること", () => {
+  it("comboOddsState='available'かつ候補ありのときは注記なし(null)", () => {
+    expect(comboBetTypeNote(builtComboDiag({ comboOddsState: "available", positiveCount: 3 }))).toBeNull();
+  });
+
+  it("comboOddsState='available'かつ候補なし(0件)のときは『発売なし』と断定せず、EVプラスが無かった旨を表示すること", () => {
+    const note = comboBetTypeNote(builtComboDiag({ comboOddsState: "available", positiveCount: 0 }));
+    expect(note).not.toBeNull();
+    expect(note).not.toContain("発売");
+  });
+
+  it("comboOddsState='unavailable'のときは発売なしと表示してよい(取得結果から確定できる唯一のケース)", () => {
+    const note = comboBetTypeNote(builtComboDiag({ comboOddsState: "unavailable", positiveCount: 0 }));
+    expect(note).toContain("発売");
+  });
+
+  it("comboOddsState='failed'のときは『発売なしとは限らない』ことを明示し、断定しないこと(AC16の核心)", () => {
+    const note = comboBetTypeNote(builtComboDiag({ comboOddsState: "failed", positiveCount: 0 }));
+    expect(note).not.toBeNull();
+    expect(note).toContain("失敗");
+    // 「発売なし」と断定する表現(「発売されていません」「発売なし」)を含まないこと。
+    expect(note).not.toMatch(/発売されていません|発売なし/);
+  });
+
+  it("comboOddsState='unknown'(fieldPresence='absent'。未取得)のときは取得していない旨を表示し、断定しないこと", () => {
+    const note = comboBetTypeNote(builtComboDiag({ fieldPresence: "absent", comboOddsState: "unknown", positiveCount: 0 }));
+    expect(note).not.toBeNull();
+    expect(note?.includes("未取得") || note?.includes("取得していません")).toBe(true);
+    expect(note).not.toMatch(/発売されていません|発売なし/);
+  });
+
+  it("kind='not-requested'(ユーザーが対象外にした)は注記なし(null)", () => {
+    expect(comboBetTypeNote({ kind: "not-requested" })).toBeNull();
+  });
+
+  // fieldPresence(値の中身)とcomboOddsState(原因)が食い違う組合せ(={}なのにstateがavailable、
+  // 逆に値ありなのにstateがunavailable等)でも、comboOddsStateだけを根拠に判定すること
+  // (fieldPresenceを読んで「発売なし」と誤判定していないかの検知)。
+  it.each([
+    { fieldPresence: "empty" as const, comboOddsState: "unavailable" as const, expectSubstr: "発売" },
+    { fieldPresence: "present" as const, comboOddsState: "unavailable" as const, expectSubstr: "発売" },
+    { fieldPresence: "empty" as const, comboOddsState: "failed" as const, expectSubstr: "失敗" },
+    { fieldPresence: "present" as const, comboOddsState: "failed" as const, expectSubstr: "失敗" },
+  ])(
+    "fieldPresence=$fieldPresence・comboOddsState=$comboOddsStateの組合せでも、comboOddsStateに従った注記になること",
+    ({ fieldPresence, comboOddsState, expectSubstr }) => {
+      const note = comboBetTypeNote(builtComboDiag({ fieldPresence, comboOddsState, positiveCount: 0 }));
+      expect(note).toContain(expectSubstr);
+    },
+  );
+});
+
+// ============================================================================
+// AC3改訂: 頭数不可の一言注記(既存placeBetUnavailableMessageをそのまま使う)
+// ============================================================================
+
+describe("placeUnavailableNoteForMixed — 頭数不可のとき既存placeBetUnavailableMessageをそのまま使うこと", () => {
+  it("kind='unavailable'のときplaceBetUnavailableMessage(reason)と同じ文言を返すこと(新しい文言を作らない)", () => {
+    const diag: PlaceCandidateDiagnostics = { kind: "unavailable", reason: "two-place-only" };
+    expect(placeUnavailableNoteForMixed(diag)).toContain("複勝が2着まで");
+  });
+
+  it("kind='judged'(複勝が対象)のときはnullであること", () => {
+    const diag: PlaceCandidateDiagnostics = {
+      kind: "judged",
+      judged: { positiveCount: 1, notPositiveCount: 0 },
+      unjudged: { oddsMissingCount: 0 },
+    };
+    expect(placeUnavailableNoteForMixed(diag)).toBeNull();
+  });
+
+  it("reason='yoso'のときは型安全のためnullを返すこと(ゲート順序上このkindがmixed表示に現れることはない)", () => {
+    const diag: PlaceCandidateDiagnostics = { kind: "unavailable", reason: "yoso" };
+    expect(placeUnavailableNoteForMixed(diag)).toBeNull();
+  });
+});
+
+// ============================================================================
+// AC14: #35較正注記
+// ============================================================================
+
+describe("AC14: COMBO_EV_CALIBRATION_NOTE — 組合せ券種のEV過大評価・較正未実施を明記すること", () => {
+  it("『過大評価』『較正』の両方の趣旨を含むこと", () => {
+    expect(COMBO_EV_CALIBRATION_NOTE).toContain("過大評価");
+    expect(COMBO_EV_CALIBRATION_NOTE).toMatch(/較正/);
+  });
+});
+
+// ============================================================================
+// AC12: 説明文に寄り先の券種を断定する表現が含まれないこと(文言テストで固定)
+// ============================================================================
+
+describe("AC12: 寄り先の券種を断定する表現が含まれないこと(文言テストで固定)", () => {
+  const forbiddenPatterns = /集中|寄る|偏る|多くなり(ます|がち)|優先(的)?に(配分|購入)/;
+
+  it("COMBO_EV_CALIBRATION_NOTEに寄り先を断定する表現が含まれないこと", () => {
+    expect(COMBO_EV_CALIBRATION_NOTE).not.toMatch(forbiddenPatterns);
+  });
+
+  it("comboBetTypeNoteの全パターンに寄り先を断定する表現が含まれないこと", () => {
+    const states: readonly ComboOddsFetchOutcomeView["state"][] = ["available", "unavailable", "failed"];
+    for (const state of states) {
+      for (const positiveCount of [0, 1]) {
+        const note = comboBetTypeNote(builtComboDiag({ comboOddsState: state, positiveCount }));
+        if (note !== null) {
+          expect(note).not.toMatch(forbiddenPatterns);
+        }
+      }
+    }
+    const unknownNote = comboBetTypeNote(builtComboDiag({ fieldPresence: "absent", comboOddsState: "unknown", positiveCount: 0 }));
+    expect(unknownNote).not.toMatch(forbiddenPatterns);
+  });
+
+  it("MIXED_ALLOCATION_INVALID_MESSAGEに寄り先を断定する表現が含まれないこと", () => {
+    expect(MIXED_ALLOCATION_INVALID_MESSAGE).not.toMatch(forbiddenPatterns);
+  });
+});
+
+// ============================================================================
+// AC17続き: kind='invalid'はユーザー向け文言(MIXED_ALLOCATION_INVALID_MESSAGE)を使うこと
+// (core由来の生の例外メッセージをそのまま画面に出さない)
+// ============================================================================
+
+describe("MIXED_ALLOCATION_INVALID_MESSAGE — ユーザー向け文言であり、core由来の生メッセージを含まないこと", () => {
+  it("『不正な買い目です』等のcore側の生の例外文言を含まないこと(開発者向けメッセージの露出防止)", () => {
+    expect(MIXED_ALLOCATION_INVALID_MESSAGE).not.toContain("不正な買い目です");
+    expect(MIXED_ALLOCATION_INVALID_MESSAGE).not.toContain("validateCandidates");
+  });
+
+  it("空でないこと", () => {
+    expect(MIXED_ALLOCATION_INVALID_MESSAGE.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// AC11: 「複勝のみの場合の提案額」の併記(混在時の複勝配分額とは別々の値)
+// 一致するケースと大きく食い違うケースの両方を持つ(boss指示)。
+// ============================================================================
+
+/** 複勝のみ1頭が候補になる8頭立ての行配列を作る(bet-allocation-view.test.tsの流儀を踏襲)。 */
+function candidateRow(umaban: number, adjustedProb: number, placeOddsMin: number): AnalysisRow {
+  const ev = adjustedProb * placeOddsMin;
+  return row({ umaban, adjustedProb, placeOddsMin, ev, isPositive: ev > 1 });
+}
+function eightRunnersOnePlaceCandidate(): AnalysisRow[] {
+  return [
+    candidateRow(1, 0.5, 2.5),
+    ...[2, 3, 4, 5, 6, 7, 8].map((u) =>
+      row({ umaban: u, adjustedProb: 0.36, isPositive: false, ev: null, placeOddsMin: null }),
+    ),
+  ];
+}
+
+describe("AC11: resolvePlaceOnlyStake / buildMixedAllocationDisplay — 複勝のみの提案額を別々の値として併記すること", () => {
+  it("【食い違うケース】強い組合せオッズがあると、混在時の複勝配分額と複勝のみの提案額が大きく異なること(実測の傾向を再現)", () => {
+    const umabans = umabansOf(8);
+    const race = raceInput({
+      rows: eightRunnersOnePlaceCandidate(),
+      wideCombo: fullOddsRecord(umabans, 2, 3000),
+      trioCombo: fullOddsRecord(umabans, 3, 15000),
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    });
+    const s = settings({ bankroll: 300000, perRaceCap: 20000 });
+    const view = buildMixedAllocationDisplay(race, s);
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定: 複勝のみなら提案額が出ること(比較対象が両方とも意味のある値であることの確認)。
+    expect(view.display.placeOnlyStake).not.toBeNull();
+    expect(view.display.placeOnlyStake).toBeGreaterThan(0);
+    // 核心: 混在時の複勝配分額(breakdown.place.stake)と複勝のみの提案額が別々の値であり、
+    // 大きく食い違うこと(実測例: 複勝のみ19,900円→混在では100円、という傾向の再現)。
+    expect(view.display.breakdown.place.stake).not.toBe(view.display.placeOnlyStake);
+    expect(view.display.placeOnlyStake! - view.display.breakdown.place.stake).toBeGreaterThan(10000);
+    // このケースでの具体的な値も固定する(回帰検知)。
+    expect(view.display.placeOnlyStake).toBe(20000);
+    expect(view.display.breakdown.place.stake).toBe(0);
+  });
+
+  it("【一致するケース】資金が小さく組合せ候補に1単位も配分されないと、混在時の複勝配分額と複勝のみの提案額が一致すること", () => {
+    const umabans = umabansOf(8);
+    const race = raceInput({
+      rows: eightRunnersOnePlaceCandidate(),
+      wideCombo: fullOddsRecord(umabans, 2, 8), // EVプラスの候補として存在する(D-2条件③には該当しない)。
+      trioCombo: fullOddsRecord(umabans, 3, 1), // 3連複はEVプラスにならない(閾値未満)。
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    });
+    const s = settings({ bankroll: 5000, perRaceCap: 1000 });
+    const view = buildMixedAllocationDisplay(race, s);
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定: 実際にワイド候補が存在し(D-2条件③に該当せず混在経路に入っていること)、
+    // かつ資金が小さくワイドには1円も配分されなかったこと(この一致は偶然ではなく、
+    // 「候補はあるが小さすぎて選ばれなかった」という具体的な機構によるものであることの確認)。
+    expect(view.diagnostics.wide.kind === "built" && view.diagnostics.wide.build.judged.positiveCount).toBeGreaterThan(0);
+    expect(view.display.breakdown.wide.stake).toBe(0);
+    // 核心: 混在時の複勝配分額と複勝のみの提案額が一致すること。
+    expect(view.display.placeOnlyStake).not.toBeNull();
+    expect(view.display.breakdown.place.stake).toBe(view.display.placeOnlyStake);
+    // このケースでの具体的な値も固定する(回帰検知。「たまたま両方0円」という空虚な一致ではないこと)。
+    expect(view.display.placeOnlyStake).toBe(400);
+    expect(view.display.breakdown.place.stake).toBe(400);
+  });
+
+  it("resolvePlaceOnlyStakeは頭数不可(複勝が対象外)のときnullを返すこと(0円と算出不能を区別する)", () => {
+    const race = raceInput({ rows: allCandidateRows(6) }); // 5〜7頭=複勝対象外
+    const s = settings();
+    expect(resolvePlaceOnlyStake(race, s)).toBeNull();
+  });
+});
+
+// ============================================================================
+// buildMixedAllocationDisplay: kind!=="mixed"のときはbuildMixedRaceAllocationの結果を
+// そのまま通す(displayフィールドの追加が非破壊性〈AC2〉を壊さないことの確認)
+// ============================================================================
+
+describe("buildMixedAllocationDisplay — kind!=='mixed'のときは合成ロジック本体の結果をそのまま通すこと", () => {
+  it("unset/computed(フォールバック)のとき、buildMixedRaceAllocationの結果と完全一致すること(displayフィールドが混ざらない)", () => {
+    const race = raceInput({ rows: allCandidateRows(8) });
+    const unsetSettings = settings({ bankroll: 0 });
+    expect(buildMixedAllocationDisplay(race, unsetSettings)).toEqual(buildMixedRaceAllocation(race, unsetSettings));
+
+    const fallbackSettings = settings({ includeComboOdds: false });
+    const fallbackView = buildMixedAllocationDisplay(race, fallbackSettings);
+    expect(fallbackView).toEqual(buildMixedRaceAllocation(race, fallbackSettings));
+    // 前提固定: "display"フィールドが存在しないこと(型と実体の両方で非mixed状態であることの確認)。
+    expect(fallbackView).not.toHaveProperty("display");
   });
 });

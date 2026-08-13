@@ -182,10 +182,26 @@ export function formatBetLabel(umaban: number | readonly number[]): string {
 }
 
 /**
+ * `formatAllocationSummary`が実際に読む5フィールドだけを取り出した構造的な入力型
+ * (機能D-2c第4段・Issue #28)。`BetAllocationResult`(複勝専用)と
+ * `GeneralBetAllocationResult`(`combo-bet-allocation.ts`。券種混在)は`diagnostics`の形が
+ * 非互換(`placeProbSum`等の有無が異なる)だが、この関数が実際に使うのは総額・ケリー適正額・
+ * 1レース上限・上限到達フラグ・解決済み総資金の5つだけなので、それらだけを要求する構造的な
+ * 型にして両方の結果型から呼べるようにする(単一定義の原則。合計行の文言を2箇所に複製しない)。
+ */
+export interface AllocationSummaryInput {
+  readonly totalStake: number;
+  readonly kellyTargetStake: number;
+  readonly effectivePerRaceCap: number;
+  readonly capApplied: boolean;
+  readonly resolvedBankroll: number;
+}
+
+/**
  * 合計行の文言。capApplied(1レース上限で頭打ちになったか)で表現を切り替える
  * (仕様「UI 表示要件」の2例文に準拠)。
  */
-export function formatAllocationSummary(result: BetAllocationResult): string {
+export function formatAllocationSummary(result: AllocationSummaryInput): string {
   const total = formatYen(result.totalStake);
   const kellyTarget = formatYen(Math.round(result.kellyTargetStake));
   const cap = formatYen(result.effectivePerRaceCap);
@@ -233,8 +249,13 @@ export function probabilitySumWarning(diagnostics: BetAllocationDiagnostics): st
  * 注記」と意図的に原因中立で定義している設計に、renderer側の文言も揃える
  * (capApplied/minimumStakeAppliedによる原因分岐は行わない。原因を問わず常に真であることを
  * 優先する)。
+ *
+ * **機能D-2c第4段(Issue #28)でexportした**: `GeneralBetAllocationResult`(券種混在。
+ * `combo-bet-allocation.ts`)も同じ意味の`notDiversified`フィールドを持つため、
+ * `mixed-allocation-view.ts`/`BatchAnalysisView.tsx`がこの文言をそのまま再利用できるように
+ * する(単一定義の原則。同じ注記文言を2箇所に複製しない)。
  */
-const NOT_DIVERSIFIED_NOTE =
+export const NOT_DIVERSIFIED_NOTE =
   "妙味のある候補が複数いますが、1点のみの配分になっています(分散されていません)。";
 
 /**

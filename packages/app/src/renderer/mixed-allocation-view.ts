@@ -63,6 +63,7 @@ import {
   allocateGeneralBets,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   type EvConfig,
+  type GeneralBetAllocation,
   type GeneralBetAllocationConfig,
   type GeneralBetAllocationResult,
   type JointModelHorse,
@@ -70,12 +71,15 @@ import {
 
 import {
   buildMixedCandidates,
+  type ComboCandidateDiagnosticsView,
   type MixedCandidateBuildInput,
   type MixedCandidateDiagnostics,
+  type PlaceCandidateDiagnostics,
 } from "./mixed-candidates.js";
 import {
   buildRaceAllocation,
   isBetAllocationUnset,
+  placeBetUnavailableMessage,
   type BetAllocationSettings,
   type RaceAllocationView,
 } from "./bet-allocation-view.js";
@@ -224,4 +228,261 @@ export function buildMixedRaceAllocation(
     // このレースだけを判別可能な状態にする(画面全体・他レースには波及させない)。
     return { kind: "invalid", message: e instanceof Error ? e.message : String(e) };
   }
+}
+
+// ============================================================================
+// 表示データの導出(機能D-2c第4段後半・AC10〜AC16)
+//
+// buildMixedRaceAllocation(合成ロジック本体)は変更せず、kind="mixed"のときだけ
+// 追加の表示データ(display)を持たせる薄いラッパー(buildMixedAllocationDisplay)を
+// 別関数として用意する。unset/yoso/unavailable/computed/invalidの5状態は
+// buildMixedRaceAllocationの結果をそのまま通す(表示ロジックの追加が合成ロジックの
+// 非破壊性〈AC2〉に影響しないようにする)。
+// ============================================================================
+
+/** 券種別の内訳(金額・点数)。AC10: 3つの合計は必ずtotalStakeと一致する(同じ配列から集計するため)。 */
+export interface MixedAllocationBreakdown {
+  readonly place: { readonly stake: number; readonly count: number };
+  readonly wide: { readonly stake: number; readonly count: number };
+  readonly trio: { readonly stake: number; readonly count: number };
+}
+
+/**
+ * `result.allocations` を `umabans.length`(1=複勝/2=ワイド/3=三連複)で3群に分け、
+ * 金額合計・点数(`stake>0`の件数)を求める(AC10・AC13の点数)。
+ */
+export function buildMixedAllocationBreakdown(
+  result: GeneralBetAllocationResult,
+): MixedAllocationBreakdown {
+  const groupOf = (n: number): { stake: number; count: number } => {
+    const inGroup = result.allocations.filter((a) => a.umabans.length === n);
+    return {
+      stake: inGroup.reduce((sum, a) => sum + a.stake, 0),
+      count: inGroup.filter((a) => a.stake > 0).length,
+    };
+  };
+  return { place: groupOf(1), wide: groupOf(2), trio: groupOf(3) };
+}
+
+/**
+ * 馬番配列を辞書順(要素ごとの昇順、長さが異なれば短い方を先)で比較する
+ * (`combo-bet-allocation.ts`の`compareUmabansLex`と同じロジックだが、exportされていない
+ * private関数のため、券種非依存モジュール間の依存を増やさない目的で独立して持つ
+ * 〈`mixed-candidates.ts`の`kCombinationsOfUmabans`と同じ前例〉)。
+ */
+function compareUmabansLex(a: readonly number[], b: readonly number[]): number {
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    if (a[i]! !== b[i]!) {
+      return a[i]! - b[i]!;
+    }
+  }
+  return a.length - b.length;
+}
+
+/**
+ * `stake>0`の買い目を**全件**、`stake`降順(同額は馬番配列の辞書順)で並べる(AC13)。
+ * 表示件数の打ち切り(top-N・折りたたみ)は行わない(#15のスコープ。boss指示)。
+ */
+export function sortMixedAllocationsForDisplay(
+  result: GeneralBetAllocationResult,
+): readonly GeneralBetAllocation[] {
+  return result.allocations
+    .filter((a) => a.stake > 0)
+    .slice()
+    .sort((a, b) => {
+      if (a.stake !== b.stake) {
+        return b.stake - a.stake;
+      }
+      return compareUmabansLex(a.umabans, b.umabans);
+    });
+}
+
+/** `umabans.length`から券種の日本語ラベルを返す(表示用。1=複勝/2=ワイド/3=三連複)。 */
+export function mixedBetTypeLabel(umabansLength: number): "複勝" | "ワイド" | "三連複" {
+  if (umabansLength === 1) {
+    return "複勝";
+  }
+  if (umabansLength === 2) {
+    return "ワイド";
+  }
+  return "三連複";
+}
+
+/** 券種横断で判定不能(unjudged)だった件数(AC15)。 */
+export interface MixedUnjudgedCounts {
+  readonly oddsMissingCount: number;
+  readonly oddsUnfetchedCount: number;
+  readonly oddsMalformedCount: number;
+}
+
+/**
+ * 券種横断(複勝・ワイド・3連複)で判定不能だった件数を合算する(AC15)。
+ * `kind!=="built"`(`not-requested`。ユーザーが対象外にした券種)は判定不能ではなく
+ * 「対象外」なので0として扱う(判定不能〈unjudged〉と対象外〈not-requested〉を混同しない)。
+ * 複勝は`unjudged.oddsMissingCount`のみ持つ(`oddsUnfetchedCount`/`oddsMalformedCount`は
+ * ワイド・3連複固有の概念のため複勝には存在しない)。
+ */
+export function aggregateUnjudgedCounts(diagnostics: MixedCandidateDiagnostics): MixedUnjudgedCounts {
+  const placeMissing =
+    diagnostics.place.kind === "judged" ? diagnostics.place.unjudged.oddsMissingCount : 0;
+  const wideUnjudged = diagnostics.wide.kind === "built" ? diagnostics.wide.build.unjudged : null;
+  const trioUnjudged = diagnostics.trio.kind === "built" ? diagnostics.trio.build.unjudged : null;
+  return {
+    oddsMissingCount:
+      placeMissing + (wideUnjudged?.oddsMissingCount ?? 0) + (trioUnjudged?.oddsMissingCount ?? 0),
+    oddsUnfetchedCount: (wideUnjudged?.oddsUnfetchedCount ?? 0) + (trioUnjudged?.oddsUnfetchedCount ?? 0),
+    oddsMalformedCount: (wideUnjudged?.oddsMalformedCount ?? 0) + (trioUnjudged?.oddsMalformedCount ?? 0),
+  };
+}
+
+/** `MixedUnjudgedCounts`の合計件数(0なら表示側は注記を出さない。AC15)。 */
+export function totalUnjudgedCount(counts: MixedUnjudgedCounts): number {
+  return counts.oddsMissingCount + counts.oddsUnfetchedCount + counts.oddsMalformedCount;
+}
+
+/**
+ * 判定不能件数の注記文言(AC15)。0件の区分は文言から省く(「オッズ欠損0件」のような
+ * ノイズを出さない)。呼び出し側は`totalUnjudgedCount(counts) > 0`のときだけこの文言を表示する
+ * (0件なら注記自体を出さない、というAC15の要件は表示側〈本関数の外〉の責務とする)。
+ */
+export function formatUnjudgedNote(counts: MixedUnjudgedCounts): string {
+  const parts: string[] = [];
+  if (counts.oddsMissingCount > 0) {
+    parts.push(`オッズ欠損${counts.oddsMissingCount}件`);
+  }
+  if (counts.oddsUnfetchedCount > 0) {
+    parts.push(`未取得${counts.oddsUnfetchedCount}件`);
+  }
+  if (counts.oddsMalformedCount > 0) {
+    parts.push(`不正値${counts.oddsMalformedCount}件`);
+  }
+  return `判定できなかった買い目があります(${parts.join("・")})。`;
+}
+
+/**
+ * ワイド・3連複それぞれの状態を、断定を避けつつ正確に説明する一言注記(AC16)。
+ * `{}`(`fieldPresence:"empty"`)を単独で「発売なし」と断定せず、`comboOddsState`
+ * (取得結果の最終状態)で原因を判別する(`mixed-candidates.ts`のJSDoc「原因を正しく判別する
+ * 唯一の手段は`comboOddsState`」を踏襲する)。
+ */
+export function comboBetTypeNote(diag: ComboCandidateDiagnosticsView): string | null {
+  if (diag.kind !== "built") {
+    // "not-requested"(ユーザーが対象外にした)・"yoso"(このkindがmixed表示に現れることは
+    // ゲート順序上ない。念のため)はいずれも注記不要。
+    return null;
+  }
+  switch (diag.comboOddsState) {
+    case "available":
+      return diag.build.judged.positiveCount > 0
+        ? null
+        : "オッズは取得できましたが、EVプラスの買い目がありませんでした。";
+    case "unavailable":
+      return "このレースでは発売されていません(取得結果より判定)。";
+    case "failed":
+      return "オッズの取得に失敗しました(発売されていないとは限りません)。";
+    case "unknown":
+      return "オッズを取得していません(設定変更後に再分析すると反映されます)。";
+  }
+}
+
+/**
+ * 頭数不可(4以下・5〜7)で複勝が対象外のときの一言注記(AC3改訂)。既存の
+ * `placeBetUnavailableMessage`をそのまま使い、新しい文言を作らない。
+ * `reason:"yoso"`はゲート順序上、混在経路(`kind:"mixed"`)には到達しない値だが、型上は
+ * `PlaceCandidateUnavailableReason`に含まれるため、安全のため明示的にnullへ倒す。
+ */
+export function placeUnavailableNoteForMixed(place: PlaceCandidateDiagnostics): string | null {
+  if (place.kind !== "unavailable") {
+    return null;
+  }
+  if (place.reason === "yoso") {
+    return null;
+  }
+  return placeBetUnavailableMessage(place.reason);
+}
+
+/**
+ * D-2と同じ`buildRaceAllocation`を使い、「複勝のみで計算した場合の提案額」を求める(AC11)。
+ * 混在時の複勝配分額(`breakdown.place.stake`)とは**別々の値**であり、比較対象がずれないよう
+ * 同じ`race`/`settings`(の`BetAllocationSettings`部分)を渡す(D-2の単一定義の原則と同じ)。
+ * `kind:"computed"`以外(このレースが既にunset/yoso/headcount不可を通過済みのため理論上
+ * `unavailable`のみ発生しうる。5〜7頭・4頭以下で複勝自体が対象外の場合)は`null`
+ * (「複勝のみなら提案不能」を意味する。0円〈見送り〉とは異なる状態として区別する)。
+ */
+export function resolvePlaceOnlyStake(
+  race: MixedCandidateBuildInput,
+  settings: MixedAllocationSettings,
+): number | null {
+  const view = buildRaceAllocation(race, settings);
+  return view.kind === "computed" ? view.result.totalStake : null;
+}
+
+/** #35の較正注記(AC14)。組合せ券種のEVが過大評価であること・較正未実施であることを明記する。 */
+export const COMBO_EV_CALIBRATION_NOTE =
+  "ワイド・三連複など組合せ券種のEVは、推定確率の誤差が組み合わせ人数ぶん増幅されるため過大評価になりやすいことが実測でわかっています(較正は未実施・Issue #35)。表示額を鵜呑みにせず、資金管理は慎重に行ってください。";
+
+/**
+ * `kind:"invalid"`のユーザー向け表示文言(AC17)。`MixedRaceAllocationInvalid.message`は
+ * core由来の生の例外メッセージ(開発者向け)であり、そのまま画面に出さない。
+ */
+export const MIXED_ALLOCATION_INVALID_MESSAGE =
+  "このレースのデータに数値の異常(オッズや馬番の不正な値)が含まれているため、券種横断の配分を計算できませんでした。";
+
+/** `kind:"mixed"`のときだけ追加で持つ表示データ(AC10〜AC16の導出結果一式)。 */
+export interface MixedAllocationDisplay {
+  /** 券種別内訳(AC10・AC13の点数)。 */
+  readonly breakdown: MixedAllocationBreakdown;
+  /** stake>0の買い目全件(AC13。stake降順・同額は馬番配列の辞書順)。 */
+  readonly sortedAllocations: readonly GeneralBetAllocation[];
+  /** 券種横断の判定不能件数(AC15)。 */
+  readonly unjudged: MixedUnjudgedCounts;
+  /** ワイドの状態注記(AC16。無ければnull)。 */
+  readonly wideNote: string | null;
+  /** 3連複の状態注記(AC16。無ければnull)。 */
+  readonly trioNote: string | null;
+  /** 頭数不可で複勝が対象外のときの注記(AC3改訂。無ければnull)。 */
+  readonly placeUnavailableNote: string | null;
+  /** 複勝のみで計算した場合の提案額(AC11。算出不能ならnull)。 */
+  readonly placeOnlyStake: number | null;
+}
+
+/** `kind:"mixed"`のとき`display`フィールドを追加で持つビュー。 */
+export type MixedRaceAllocationComputedWithDisplay = MixedRaceAllocationComputed & {
+  readonly display: MixedAllocationDisplay;
+};
+
+/**
+ * 表示データまで導出したビューの判別共用体。`kind:"mixed"`のときだけ`display`
+ * フィールドが追加される。それ以外の4状態(`unset`/`yoso`/`unavailable`/`computed`)と
+ * `invalid`は`buildMixedRaceAllocation`の結果をそのまま通す。
+ */
+export type MixedRaceAllocationDisplayView =
+  | RaceAllocationView
+  | MixedRaceAllocationInvalid
+  | MixedRaceAllocationComputedWithDisplay;
+
+/**
+ * 券種横断の馬券配分ビューを、表示に必要な追加データ(AC10〜AC16)まで含めて合成する。
+ * `buildMixedRaceAllocation`(合成ロジック本体)自体は変更せず、`kind:"mixed"`のときだけ
+ * 追加計算(内訳・並べ替え・判定不能集計・状態注記・複勝のみ比較額)を行う薄いラッパー。
+ */
+export function buildMixedAllocationDisplay(
+  race: MixedCandidateBuildInput,
+  settings: MixedAllocationSettings,
+): MixedRaceAllocationDisplayView {
+  const view = buildMixedRaceAllocation(race, settings);
+  if (view.kind !== "mixed") {
+    return view;
+  }
+  const display: MixedAllocationDisplay = {
+    breakdown: buildMixedAllocationBreakdown(view.result),
+    sortedAllocations: sortMixedAllocationsForDisplay(view.result),
+    unjudged: aggregateUnjudgedCounts(view.diagnostics),
+    wideNote: comboBetTypeNote(view.diagnostics.wide),
+    trioNote: comboBetTypeNote(view.diagnostics.trio),
+    placeUnavailableNote: placeUnavailableNoteForMixed(view.diagnostics.place),
+    placeOnlyStake: resolvePlaceOnlyStake(race, settings),
+  };
+  return { ...view, display };
 }
