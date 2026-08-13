@@ -313,6 +313,18 @@ describe("probabilitySumWarning(確率合計警告。閾値超過かつ有限の
     expect(probabilitySumWarning(diagnosticsWith(Number.POSITIVE_INFINITY))).toBeNull();
     expect(probabilitySumWarning(diagnosticsWith(Number.NEGATIVE_INFINITY))).toBeNull();
   });
+
+  // boss メタレビュー差し戻し2026-08-13対応: GeneralBetAllocationDiagnostics(券種混在。
+  // marginalDeviationMax/candidateCount等を持たない)からでも、この3フィールドだけを持つ
+  // 構造的な入力なら呼べること(ProbabilitySumWarningInputの単一定義の原則。
+  // formatAllocationSummary/AllocationSummaryInputと同じ理由の型的な保証)。
+  it("BetAllocationDiagnostics以外でも、3フィールド(placeProbSum等)だけを持つ構造的な入力から呼べること", () => {
+    const minimal = { placeProbSum: 4.0, placeProbSumTarget: 3, placeProbSumDeviation: 1.0 };
+    const warning = probabilitySumWarning(minimal);
+    expect(warning).not.toBeNull();
+    expect(warning).toContain("3.00");
+    expect(warning).toContain("4.00");
+  });
 });
 
 describe("buildAllocationNotices(注記の表示順: advisory→確率合計警告→notDiversified)", () => {

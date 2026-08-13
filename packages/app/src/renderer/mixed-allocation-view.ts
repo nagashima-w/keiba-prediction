@@ -5,8 +5,21 @@
  * 第1〜3段(組合せオッズを renderer まで運ぶ器・候補ビルダー `mixed-candidates.ts`・
  * 取得の有効化)を土台に、実際にユーザーへ提示する配分提案を合成する。**画面
  * (`BatchAnalysisView.tsx`)は本モジュールを呼び出すだけで、`bet-allocation-view.ts`・
- * `mixed-candidates.ts` は一切変更しない**(`formatBetLabel`/`evThresholdFootnote`の文言修正を
- * 除く。D-4対応として第4段前半で既に完了済み)。
+ * `mixed-candidates.ts`の既存の関数・型の**契約(シグネチャ・意味論)**は破壊的に変更しない**
+ * (boss メタレビュー差し戻し2026-08-13対応: 「一切変更しない」という記述が実態と食い違って
+ * いた。実際には両ファイルとも第4段で追記・拡張されている)。実際の変更点:
+ * - `mixed-candidates.ts`: `MixedCandidateBuildOptions.evConfig`(D-4)を新設し、
+ *   `buildComboCandidatesForBetType`/`buildComboCandidates`へ引数として追加した(既存の
+ *   判定順序・診断値の型は変更していない。第2段で確定した契約の範囲内の**加法的**拡張)
+ * - `bet-allocation-view.ts`: `formatBetLabel`のシグネチャを`number`→
+ *   `number | readonly number[]`へ拡張(既存呼び出しはそのまま動く)、`formatAllocationSummary`/
+ *   `probabilitySumWarning`の引数型をそれぞれ構造的な`AllocationSummaryInput`/
+ *   `ProbabilitySumWarningInput`へ広げ(ロジック不変。単一定義の原則で本モジュールから
+ *   再利用するため)、`NOT_DIVERSIFIED_NOTE`をexportした。いずれも既存の呼び出し元・
+ *   既存テストを壊さない後方互換な拡張であり、**単に「変更していない」わけではない**
+ *
+ * `BatchAnalysisView.tsx`・`mixed-candidates.ts`の判定順序・診断値の型は第2段で確定済みの
+ * 契約として維持する(変更したくなったら着手前に相談、という原則は保持している)。
  *
  * ## ゲート順序(boss改訂・AC3)
  *
@@ -65,7 +78,11 @@
  *
  * 計測条件(中央16頭・実オッズ・`runAnalysis` を `analyze:null` で実行した実prior・λ=0.5)での
  * 実行結果の要旨(2026-08-13時点。スクリプトを実行して自分の手元で確認すること):
- * - 総額はgreedySteps(既定1000/400)でほとんど変わらない
+ * - **総額への影響は条件によって幅がある**(小さい場合〈概ね1%未満〉と1割を超える場合の
+ *   両方が実測で出た。「ほとんど変わらない」と断定した旧版の記述は誤りだった。boss指摘
+ *   2026-08-13: 3シナリオ中1つで+13.7%〈84,800円→96,400円〉となり、単純な断定では
+ *   なかったことが判明した)。ただし**点数・券種別の構成比の変化に比べれば総額側の変化は
+ *   小さい**
  * - **点数**(betCount)と**券種別の構成比**は大きく変わる(点数は概ね1/3程度に、三連複の
  *   取り分は概ね1/3程度に減る。既定1000に対し400を試した場合)
  * - 具体的な数値・割合はスクリプトの出力(実行環境・実データ更新により変動しうる)を参照し、
@@ -96,7 +113,9 @@ import {
 import {
   buildRaceAllocation,
   isBetAllocationUnset,
+  NOT_DIVERSIFIED_NOTE,
   placeBetUnavailableMessage,
+  probabilitySumWarning,
   type BetAllocationSettings,
   type RaceAllocationView,
 } from "./bet-allocation-view.js";
@@ -446,6 +465,37 @@ export const COMBO_EV_CALIBRATION_NOTE =
 export const MIXED_ALLOCATION_INVALID_MESSAGE =
   "このレースのデータに数値の異常(オッズや馬番の不正な値)が含まれているため、券種横断の配分を計算できませんでした。";
 
+/**
+ * 複勝圏内確率の合計が目標(`topFinishCount`)から外れている旨の警告(boss メタレビュー
+ * 差し戻し2026-08-13対応)。
+ *
+ * **既存の複勝専用経路(`buildRaceAllocation`)は`buildAllocationNotices`経由で
+ * `probabilitySumWarning`をnoticesに積んでいたが、混在経路はこの警告を一切出していなかった**
+ * (`GeneralBetAllocationDiagnostics`に`placeProbSum`等のフィールドが無いため。boss着手前
+ * ゲート裁定Q4で名指しされていた既知の非互換〈D-3への申し送り〉が、実際に本段で対応漏れに
+ * なっていた)。この警告は「モデルの複勝圏内確率が壊れている」ことを可視化する**唯一の手段**
+ * であり(#35が実測で示した較正ずれの条件そのもの)、組合せ券種はその誤差を増幅するため、
+ * 警告が最も必要な経路で警告だけが消えるのは看過できない欠陥だった。
+ *
+ * `GeneralBetAllocationDiagnostics`にこのフィールドが無くても、元データ
+ * (`race.rows[].adjustedProb`の合計)と目標値(`topFinishCount`。混在経路では常に3)は
+ * 呼び出し元がすでに持っているため、ここで組み立てて`probabilitySumWarning`
+ * (`bet-allocation-view.ts`。`ProbabilitySumWarningInput`に narrow 済み)へ渡す
+ * (同じ閾値・同じ文言・同じ非有限時の非表示を再利用し、警告ロジックを複製しない)。
+ *
+ * `placeProbSum`は**全出走馬**(候補に限らない)のadjustedProb単純合計とする定義
+ * (`BetAllocationDiagnostics.placeProbSum`のJSDoc参照)を踏襲する。
+ */
+export function resolveMixedProbabilitySumWarning(
+  race: MixedCandidateBuildInput,
+  topFinishCount: number,
+): string | null {
+  const placeProbSum = race.rows.reduce((sum, r) => sum + r.adjustedProb, 0);
+  const placeProbSumTarget = topFinishCount;
+  const placeProbSumDeviation = placeProbSum - placeProbSumTarget;
+  return probabilitySumWarning({ placeProbSum, placeProbSumTarget, placeProbSumDeviation });
+}
+
 /** `kind:"mixed"`のときだけ追加で持つ表示データ(AC10〜AC16の導出結果一式)。 */
 export interface MixedAllocationDisplay {
   /** 券種別内訳(AC10・AC13の点数)。 */
@@ -462,6 +512,11 @@ export interface MixedAllocationDisplay {
   readonly placeUnavailableNote: string | null;
   /** 複勝のみで計算した場合の提案額(AC11。算出不能ならnull)。 */
   readonly placeOnlyStake: number | null;
+  /**
+   * 複勝圏内確率の合計が目標から外れている旨の警告(既存経路と同じ閾値・文言。無ければnull。
+   * boss メタレビュー差し戻し2026-08-13対応)。
+   */
+  readonly probabilitySumWarning: string | null;
 }
 
 /** `kind:"mixed"`のとき`display`フィールドを追加で持つビュー。 */
@@ -500,6 +555,7 @@ export function buildMixedAllocationDisplay(
     trioNote: comboBetTypeNote(view.diagnostics.trio),
     placeUnavailableNote: placeUnavailableNoteForMixed(view.diagnostics.place),
     placeOnlyStake: resolvePlaceOnlyStake(race, settings),
+    probabilitySumWarning: resolveMixedProbabilitySumWarning(race, view.topFinishCount),
   };
   return { ...view, display };
 }

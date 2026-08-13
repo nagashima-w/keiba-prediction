@@ -19,7 +19,11 @@ import {
   type MixedCandidateDiagnostics,
   type PlaceCandidateDiagnostics,
 } from "../src/renderer/mixed-candidates.js";
-import { buildRaceAllocation, resolvePlaceBetTarget } from "../src/renderer/bet-allocation-view.js";
+import {
+  buildRaceAllocation,
+  probabilitySumWarning,
+  resolvePlaceBetTarget,
+} from "../src/renderer/bet-allocation-view.js";
 import {
   aggregateUnjudgedCounts,
   buildMixedAllocationBreakdown,
@@ -31,6 +35,7 @@ import {
   MIXED_ALLOCATION_INVALID_MESSAGE,
   mixedBetTypeLabel,
   placeUnavailableNoteForMixed,
+  resolveMixedProbabilitySumWarning,
   resolvePlaceOnlyStake,
   sortMixedAllocationsForDisplay,
   totalUnjudgedCount,
@@ -1069,6 +1074,85 @@ describe("AC11: resolvePlaceOnlyStake / buildMixedAllocationDisplay — 複勝�
     const race = raceInput({ rows: allCandidateRows(6) }); // 5〜7頭=複勝対象外
     const s = settings();
     expect(resolvePlaceOnlyStake(race, s)).toBeNull();
+  });
+});
+
+// ============================================================================
+// boss メタレビュー差し戻し2026-08-13対応: 確率合計警告(probabilitySumWarning相当)が
+// 混在経路で欠落していた欠陥の是正。既存の複勝専用経路(buildAllocationNotices)が出す
+// 警告と同じ閾値・同じ文言を混在経路でも出すことを固定する。
+// ============================================================================
+
+describe("resolveMixedProbabilitySumWarning — 既存probabilitySumWarningと同じ閾値・同じ文言を再利用すること", () => {
+  it("全出走馬(候補に限らない)のadjustedProb単純合計をplaceProbSumとして使うこと(isPositive=falseの馬も含む)", () => {
+    // 前提固定: 8頭のうち1頭だけisPositive=trueでも、8頭全員のadjustedProbが合算されること。
+    const rows = [
+      row({ umaban: 1, adjustedProb: 0.5, isPositive: true }),
+      ...[2, 3, 4, 5, 6, 7, 8].map((u) =>
+        row({ umaban: u, adjustedProb: 0.5, isPositive: false, ev: null, placeOddsMin: null }),
+      ),
+    ];
+    // 8頭×0.5=4.0、目標3に対し乖離1.0(>0.3)なので警告が出るはず。
+    const warning = resolveMixedProbabilitySumWarning(raceInput({ rows }), 3);
+    expect(warning).not.toBeNull();
+    expect(warning).toContain("4.00");
+  });
+
+  it("乖離が閾値(0.3)以内なら警告しないこと(既存probabilitySumWarningと同じ閾値)", () => {
+    // 8頭×0.375=3.0ちょうど(乖離0)。
+    const rows = umabansOf(8).map((u) => row({ umaban: u, adjustedProb: 0.375 }));
+    const warning = resolveMixedProbabilitySumWarning(raceInput({ rows }), 3);
+    expect(warning).toBeNull();
+  });
+
+  it("既存probabilitySumWarningを同じ入力(placeProbSum/target/deviation)で直接呼んだ結果と文字列として完全一致すること(ロジックの複製が無いことの証拠)", () => {
+    const rows = umabansOf(8).map((u) => row({ umaban: u, adjustedProb: 0.6 })); // 合計4.8、乖離1.8。
+    const mixedWarning = resolveMixedProbabilitySumWarning(raceInput({ rows }), 3);
+    const placeProbSum = rows.reduce((s, r) => s + r.adjustedProb, 0);
+    const directWarning = probabilitySumWarning({
+      placeProbSum,
+      placeProbSumTarget: 3,
+      placeProbSumDeviation: placeProbSum - 3,
+    });
+    // 前提固定: 両方とも実際に警告が出るケースであること(空振り防止)。
+    expect(directWarning).not.toBeNull();
+    expect(mixedWarning).toBe(directWarning);
+  });
+
+  it("topFinishCountが目標値(placeProbSumTarget)としてそのまま使われること", () => {
+    // topFinishCountを敢えて5にして、目標値が3固定ではなく引数どおりであることを確認する
+    // (本来は常に3だが、この関数自体は引数を信頼して使うことを確認する単体テスト)。
+    const rows = umabansOf(8).map((u) => row({ umaban: u, adjustedProb: 0.625 })); // 合計5.0。
+    const warning = resolveMixedProbabilitySumWarning(raceInput({ rows }), 5);
+    // 目標5・実測5.0なら乖離0で警告なし。
+    expect(warning).toBeNull();
+  });
+});
+
+describe("buildMixedAllocationDisplay — display.probabilitySumWarningがkind='mixed'のときに実際に現れること(欠落していた欠陥の回帰テスト)", () => {
+  it("乖離が大きい実データでは、display.probabilitySumWarningが非nullになること", () => {
+    // raceWithPositiveCombosはallCandidateRows(既定adjustedProb=0.5)を使うため、
+    // 8頭で合計4.0・乖離1.0(>0.3)となり、必ず警告が出る入力である。
+    const race = raceWithPositiveCombos(8);
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.display.probabilitySumWarning).not.toBeNull();
+    expect(view.display.probabilitySumWarning).toContain("4.00");
+  });
+
+  it("乖離が閾値以内なら、display.probabilitySumWarningがnullになること", () => {
+    const umabans = umabansOf(8);
+    const rows = umabans.map((u) => row({ umaban: u, adjustedProb: 0.375 })); // 合計3.0ちょうど。
+    const race = raceWithPositiveCombos(8, { rows });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.display.probabilitySumWarning).toBeNull();
   });
 });
 

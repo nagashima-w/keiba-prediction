@@ -392,9 +392,15 @@ function renderMixedAllocationBlock(
       </p>
     );
   }
+  // 表示順(advisory → 確率合計警告 → notDiversified)は既存の複勝専用経路
+  // (buildAllocationNotices・bet-allocation-view.ts)と揃える(boss メタレビュー
+  // 差し戻し2026-08-13対応: 混在経路で確率合計警告が欠落していたため追加した)。
   const notices: string[] = [];
   if (result.advisory !== null) {
     notices.push(result.advisory);
+  }
+  if (display.probabilitySumWarning !== null) {
+    notices.push(display.probabilitySumWarning);
   }
   if (result.notDiversified) {
     notices.push(NOT_DIVERSIFIED_NOTE);
@@ -433,11 +439,16 @@ function renderMixedAllocationBlock(
         </tbody>
       </table>
 
-      {/* AC11: 複勝のみの場合の提案額を、混在時の複勝配分額とは別々の値として併記する。 */}
+      {/*
+        AC11: 複勝のみの場合の提案額を、混在時の複勝配分額とは別々の値として併記する。
+        boss メタレビュー差し戻し2026-08-13対応: 「この券種横断の配分」という表現が総額
+        (上の内訳テーブルの合計)を指すように読め、複勝ぶんの金額(display.breakdown.place.stake)
+        と取り違えられていたため、「この配分での複勝ぶん」に直した(値そのものは変更なし)。
+      */}
       <p style={{ margin: "0.35rem 0 0", color: "#666", fontSize: "0.8rem" }}>
         参考: 複勝のみで計算した場合の提案額は
         {display.placeOnlyStake !== null ? formatYen(display.placeOnlyStake) : "算出できません"}
-        でした(この券種横断の配分〈{formatYen(display.breakdown.place.stake)}〉とは別の計算です)。
+        でした(この配分での複勝ぶん〈{formatYen(display.breakdown.place.stake)}〉とは別の計算です)。
       </p>
 
       {/* AC13: 個々の買い目を全件・stake降順(同額は馬番配列の辞書順)で列挙。打ち切りはしない。 */}

@@ -17,7 +17,6 @@ import {
   allocateBets,
   DEFAULT_BET_ALLOCATION_CONFIG,
   type AllocationHorse,
-  type BetAllocationDiagnostics,
   type BetAllocationResult,
 } from "@keiba/core/ev/bet-allocation";
 
@@ -217,11 +216,28 @@ export function formatAllocationSummary(result: AllocationSummaryInput): string 
 const PLACE_PROB_SUM_DEVIATION_THRESHOLD = 0.3;
 
 /**
+ * `probabilitySumWarning`が実際に読む3フィールドだけを取り出した構造的な入力型
+ * (機能D-2c第4段・Issue #28。boss メタレビュー差し戻し2026-08-13対応)。
+ * `formatAllocationSummary`/`AllocationSummaryInput`と同じ理由(単一定義の原則)で、
+ * `BetAllocationDiagnostics`(複勝専用。`marginalDeviationMax`/`candidateCount`も持つ)から
+ * この3つだけを要求する構造的な型に切り出し、`GeneralBetAllocationDiagnostics`
+ * (`combo-bet-allocation.ts`。この3フィールドを持たない)からは**呼び出し元
+ * 〈`mixed-allocation-view.ts`〉が`race.rows[].adjustedProb`の合計と`topFinishCount`から
+ * 同じ形の値を組み立てて渡す**ことで、同じ警告ロジック・同じ閾値・同じ文言を再利用できる
+ * ようにする(警告そのものを2箇所に複製しない)。
+ */
+export interface ProbabilitySumWarningInput {
+  readonly placeProbSum: number;
+  readonly placeProbSumTarget: number;
+  readonly placeProbSumDeviation: number;
+}
+
+/**
  * 複勝圏内確率の合計が目標(placeCount)から外れている旨の警告。
  * |placeProbSumDeviation| > 閾値 かつ 有限のときのみ文言を返す。非有限値は画面に出さない
  * (受け入れ条件24)。
  */
-export function probabilitySumWarning(diagnostics: BetAllocationDiagnostics): string | null {
+export function probabilitySumWarning(diagnostics: ProbabilitySumWarningInput): string | null {
   const { placeProbSum, placeProbSumTarget, placeProbSumDeviation } = diagnostics;
   if (!Number.isFinite(placeProbSumDeviation)) {
     return null;
