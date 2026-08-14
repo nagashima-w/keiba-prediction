@@ -26,6 +26,23 @@ import type { SnapshotFilterDiagnostics } from "../../src/scorer/snapshot-filter
  * runAnalysisを駆動するリーク遮断の前後比較は scripts/test 側の担当)。
  */
 
+/**
+ * `findInvalidProbabilityReason`(明示的なNaN/Infinity/負値検証)が返す理由文字列に
+ * 必ず含まれる固定の目印。NaN・Infinity・負値の注入テストで「狙った明示的な検証ガードで
+ * 落ちたか」を精密に確認するために使う。
+ *
+ * **なぜ必要か(code-reviewer指摘・boss確認)**: `computeMaxMinRatio` は明示検証の他に
+ * `min > 0` という既存の偶発的なガードも持つ。NaN・負値はいずれも `Math.min(...)` を
+ * NaN または非正の値にするため、明示検証を無効化するミューテーションを入れても
+ * `min > 0` ガードにすり替わって `value: null` のまま通ってしまう(reasonの中身を見ない限り
+ * 区別できない)。一方 Infinity は min 側を汚さない(max 側だけを汚す)ため、
+ * `min > 0` ガードでは捕まらず明示検証だけが頼りになる。この非対称があるため、
+ * 「NaN・Infinity・負値のいずれを注入しても reason はこの目印を含む」ことまで固定しないと、
+ * 狙ったガードの検証になっていない(#40で繰り返し指摘された「テストが何かを守っていると
+ * 言えるか」の教訓)。
+ */
+const INVALID_PROBABILITY_MARKER = "値が不正(NaN・Infinity・負値";
+
 // ---------------------------------------------------------------------------
 // spearmanRankCorrelation
 // ---------------------------------------------------------------------------
@@ -75,25 +92,28 @@ describe("spearmanRankCorrelation", () => {
     // NaNを1つ混入: 修正前は value=-0.6 (符号反転) が reason:null で返っていた(実測済みバグ)。
     const withNaN = spearmanRankCorrelation([0.3, NaN, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
     expect(withNaN.value).toBeNull();
-    expect(withNaN.reason).not.toBeNull();
-    expect(withNaN.reason).toContain("NaN");
+    // 明示的な検証(findInvalidProbabilityReason)で弾かれたことを目印で確認する
+    // (他のnullガード〈長さ不一致・タイ〉と混同していないことの担保)。
+    expect(withNaN.reason).toContain(INVALID_PROBABILITY_MARKER);
+    expect(withNaN.reason).toContain("系列a");
   });
 
   it("Infinityが混入した場合もnull+理由になる", () => {
     const result = spearmanRankCorrelation([0.3, Infinity, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
     expect(result.value).toBeNull();
-    expect(result.reason).toContain("Infinity");
+    expect(result.reason).toContain(INVALID_PROBABILITY_MARKER);
   });
 
   it("負値が混入した場合もnull+理由になる", () => {
     const result = spearmanRankCorrelation([0.3, -0.1, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
     expect(result.value).toBeNull();
-    expect(result.reason).not.toBeNull();
+    expect(result.reason).toContain(INVALID_PROBABILITY_MARKER);
   });
 
   it("市場側(第2引数)のNaN混入も検出する(片側だけの防御にしない)", () => {
     const result = spearmanRankCorrelation([0.3, 0.26, 0.2, 0.25], [0.28, NaN, 0.19, 0.22]);
     expect(result.value).toBeNull();
+    expect(result.reason).toContain(INVALID_PROBABILITY_MARKER);
     expect(result.reason).toContain("系列b");
   });
 
@@ -125,45 +145,60 @@ describe("computeVarianceRatioMetrics", () => {
     expect(result.maxMinRatioMarket.value).toBeCloseTo(5, 10);
   });
 
-  it("最小値が0以下のときmax/min比はゼロ除算でnull", () => {
+  it("最小値が0以下のときmax/min比はゼロ除算でnull(明示検証ではなくmin>0ガードで止まったことを区別する)", () => {
+    // 0は有限かつ非負なのでfindInvalidProbabilityReasonは通過する。ここでnullになるのは
+    // min>0ガードだけであり、明示検証のガードとは別物であることを理由文字列で区別する。
     const result = computeVarianceRatioMetrics([0, 0.5], [0.1, 0.2]);
     expect(result.maxMinRatioModel.value).toBeNull();
+    expect(result.maxMinRatioModel.reason).toContain("最小値が0以下");
+    expect(result.maxMinRatioModel.reason).not.toContain(INVALID_PROBABILITY_MARKER);
   });
 
   // --- NaN/Infinity/負値の防御(code-reviewer指摘・boss実測で再現) ---------------------
+  //
+  // computeMaxMinRatioは明示検証(findInvalidProbabilityReason)の他に「min>0」という
+  // 既存の偶発的なガードも持つ。NaN・負値はMath.min(...)をNaNまたは非正の値にするため、
+  // 明示検証を無効化しても「min>0」ガードにすり替わってvalue:nullのまま通ってしまう
+  // (reasonの中身を見ないと区別できない)。Infinityはmin側を汚さないため「min>0」では
+  // 捕まらず明示検証だけが頼りになる。この非対称があるため、NaN・Infinity・負値の
+  // いずれについても reason が INVALID_PROBABILITY_MARKER を含むことまで固定する
+  // (code-reviewer指摘: yoso分岐のテストがこの区別をしておらず検出力を持たなかった)。
 
-  it("modelにNaNが混入すると、sdMarket===0判定をすり抜けた「もっともらしい値」を返さずnull+理由になる", () => {
+  it("modelにNaNが混入すると、sdMarket===0判定をすり抜けた「もっともらしい値」を返さずnull+明示検証由来の理由になる", () => {
     // 修正前はNaN/0.05(有限)→NaNとなり、JSON.stringifyでNaNがnullに化けるため
     // 「value:null, reason:null」というreason無しの結果として観測された(boss実測)。
     const result = computeVarianceRatioMetrics([0.3, NaN, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
     expect(result.sdRatio.value).toBeNull();
-    expect(result.sdRatio.reason).not.toBeNull();
+    expect(result.sdRatio.reason).toContain(INVALID_PROBABILITY_MARKER);
     expect(result.maxMinRatioModel.value).toBeNull();
-    expect(result.maxMinRatioModel.reason).not.toBeNull();
+    expect(result.maxMinRatioModel.reason).toContain(INVALID_PROBABILITY_MARKER);
     // 市場側は無傷なので、市場側だけで完結するmaxMinRatioMarketは正常に計算できる。
     expect(result.maxMinRatioMarket.value).not.toBeNull();
     expect(result.maxMinRatioMarket.reason).toBeNull();
   });
 
-  it("modelにInfinityが混入した場合もnull+理由になる(maxMinRatioのmax側の防御。min側だけでなくmax側も検証する)", () => {
+  it("modelにInfinityが混入した場合もnull+明示検証由来の理由になる(min>0ガードでは捕まらないため明示検証が唯一の頼り)", () => {
     const result = computeVarianceRatioMetrics([0.3, Infinity, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
     expect(result.sdRatio.value).toBeNull();
-    expect(result.sdRatio.reason).not.toBeNull();
+    expect(result.sdRatio.reason).toContain(INVALID_PROBABILITY_MARKER);
     expect(result.maxMinRatioModel.value).toBeNull();
-    expect(result.maxMinRatioModel.reason).not.toBeNull();
+    expect(result.maxMinRatioModel.reason).toContain(INVALID_PROBABILITY_MARKER);
   });
 
-  it("modelに負値が混入した場合もnull+理由になる", () => {
+  it("modelに負値が混入した場合もnull+明示検証由来の理由になる", () => {
     const result = computeVarianceRatioMetrics([0.3, -0.1, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
     expect(result.sdRatio.value).toBeNull();
-    expect(result.sdRatio.reason).not.toBeNull();
+    expect(result.sdRatio.reason).toContain(INVALID_PROBABILITY_MARKER);
+    expect(result.maxMinRatioModel.value).toBeNull();
+    expect(result.maxMinRatioModel.reason).toContain(INVALID_PROBABILITY_MARKER);
   });
 
-  it("市場側にNaNが混入した場合もnull+理由になる(片側だけの防御にしない)", () => {
+  it("市場側にNaNが混入した場合もnull+明示検証由来の理由になる(片側だけの防御にしない)", () => {
     const result = computeVarianceRatioMetrics([0.3, 0.26, 0.2, 0.25], [0.28, NaN, 0.19, 0.22]);
     expect(result.sdRatio.value).toBeNull();
-    expect(result.sdRatio.reason).not.toBeNull();
+    expect(result.sdRatio.reason).toContain(INVALID_PROBABILITY_MARKER);
     expect(result.maxMinRatioMarket.value).toBeNull();
+    expect(result.maxMinRatioMarket.reason).toContain(INVALID_PROBABILITY_MARKER);
     // モデル側は無傷なのでmaxMinRatioModelは正常に計算できる(粒度: 片側の異常がもう片側を巻き込まない)。
     expect(result.maxMinRatioModel.value).not.toBeNull();
   });
@@ -219,18 +254,21 @@ describe("normalizedKlDivergenceFromUniform", () => {
     expect(result.value).toBeCloseTo(0.5, 10);
   });
 
-  it("NaN・Infinity・負値が混入した場合はnull+理由になる(もっともらしい値を返さない)", () => {
+  it("NaN・Infinity・負値が混入した場合はnull+明示検証由来の理由になる(もっともらしい値を返さない)", () => {
+    // この関数は明示検証を通過した後は無条件にmetricOkを返す(検証後にvalueをnull化する
+    // 別ガードが存在しない)ため、value===nullの一致だけでも実は明示検証の効果を検出できるが、
+    // 「どのガードで止まったか」を他関数と揃えて明示しておく(code-reviewer指摘3の横断点検)。
     const withNaN = normalizedKlDivergenceFromUniform([0.5, NaN, 0.25, 0.25]);
     expect(withNaN.value).toBeNull();
-    expect(withNaN.reason).not.toBeNull();
+    expect(withNaN.reason).toContain(INVALID_PROBABILITY_MARKER);
 
     const withInf = normalizedKlDivergenceFromUniform([0.5, Infinity, 0.25, 0.25]);
     expect(withInf.value).toBeNull();
-    expect(withInf.reason).not.toBeNull();
+    expect(withInf.reason).toContain(INVALID_PROBABILITY_MARKER);
 
     const withNegative = normalizedKlDivergenceFromUniform([0.5, -0.1, 0.25, 0.25]);
     expect(withNegative.value).toBeNull();
-    expect(withNegative.reason).not.toBeNull();
+    expect(withNegative.reason).toContain(INVALID_PROBABILITY_MARKER);
   });
 });
 
@@ -275,7 +313,10 @@ describe("normalizedTrioJointKlDivergence", () => {
     expect(nar.value).toBeCloseTo(0, 6);
   });
 
-  it("placeProbにNaNが混入すると、CONDITIONAL_BERNOULLI_MODELの一様分布フォールバックにより「KL=0(正常な均等分布)」という尤もらしい値へ化けさせず、事前にnull+理由で弾く", () => {
+  it("placeProbにNaNが混入すると、CONDITIONAL_BERNOULLI_MODELの一様分布フォールバックにより「KL=0(正常な均等分布)」という尤もらしい値へ化けさせず、事前にnull+明示検証由来の理由で弾く", () => {
+    // 検証: 明示検証を無効化した場合、buildDistributionのNaNフォールバック(均等分布)により
+    // value=0(reason:null)という「尤もらしい」実数が漏れる(toBeNull()が正しく落ちるため
+    // value側だけでも検出できるが、狙ったガードを明示するためreasonの中身も固定する)。
     const horses: JointModelHorse[] = [
       { umaban: 1, placeProb: NaN },
       { umaban: 2, placeProb: 0.75 },
@@ -284,11 +325,13 @@ describe("normalizedTrioJointKlDivergence", () => {
     ];
     const result = normalizedTrioJointKlDivergence(horses);
     expect(result.value).toBeNull();
-    expect(result.reason).not.toBeNull();
-    expect(result.reason).toContain("NaN");
+    expect(result.reason).toContain(INVALID_PROBABILITY_MARKER);
   });
 
-  it("placeProbにInfinity・負値が混入した場合もnull+理由になる", () => {
+  it("placeProbにInfinity・負値が混入した場合もnull+明示検証由来の理由になる", () => {
+    // 検証: 明示検証を無効化した場合、place-joint-model.tsのclamp(EPS,1-EPS)により
+    // Infinity/負値は正常な有限値に丸められてしまい、KLは尤もらしい実数になる
+    // (value側でも検出できるが、reasonで狙ったガードを明示する)。
     const withInf = normalizedTrioJointKlDivergence([
       { umaban: 1, placeProb: Infinity },
       { umaban: 2, placeProb: 0.75 },
@@ -296,7 +339,7 @@ describe("normalizedTrioJointKlDivergence", () => {
       { umaban: 4, placeProb: 0.75 },
     ]);
     expect(withInf.value).toBeNull();
-    expect(withInf.reason).not.toBeNull();
+    expect(withInf.reason).toContain(INVALID_PROBABILITY_MARKER);
 
     const withNegative = normalizedTrioJointKlDivergence([
       { umaban: 1, placeProb: -0.1 },
@@ -305,7 +348,7 @@ describe("normalizedTrioJointKlDivergence", () => {
       { umaban: 4, placeProb: 0.75 },
     ]);
     expect(withNegative.value).toBeNull();
-    expect(withNegative.reason).not.toBeNull();
+    expect(withNegative.reason).toContain(INVALID_PROBABILITY_MARKER);
   });
 });
 
@@ -438,7 +481,10 @@ describe("computeTrioAllPointEvOverPayoutRate", () => {
     expect(result.diagnostics.unfetchedCount).toBe(4);
   });
 
-  it("placeProbにNaN・Infinity・負値が混入した場合はnull+理由になる(オッズが正常でも計算しない)", () => {
+  it("placeProbにNaN・Infinity・負値が混入した場合はnull+明示検証由来の理由になる(オッズが正常でも計算しない)", () => {
+    // 検証: 明示検証を無効化した場合、buildDistributionのフォールバック/clampにより
+    // 尤もらしい実数のratioが漏れる(オッズは全組present)。value側でも検出できるが、
+    // reasonで狙ったガードを明示する。
     const odds = new Map<string, number | null>([
       ["010203", 4],
       ["010204", 4],
@@ -456,7 +502,7 @@ describe("computeTrioAllPointEvOverPayoutRate", () => {
       expect(result.ratio).toBeNull();
       expect(result.averageEv).toBeNull();
       expect(result.estimatedPayoutRate).toBeNull();
-      expect(result.reason).not.toBeNull();
+      expect(result.reason).toContain(INVALID_PROBABILITY_MARKER);
     }
   });
 });
@@ -611,7 +657,7 @@ describe("buildProbabilityQualityReport", () => {
   // 実際に過去に起きていたため、oddsStatus=yosoの場合も明示的に確認する。
 
   describe("NaN・Infinity・負値混入時の防御(集約関数経由)", () => {
-    it("modelProbにNaNが混入すると、市場データが正常でも該当するモデル系指標すべてがnull+理由になる", () => {
+    it("modelProbにNaNが混入すると、市場データが正常でも該当するモデル系指標すべてがnull+明示検証由来の理由になる", () => {
       const report = buildProbabilityQualityReport(
         baseInput({
           horses: [
@@ -623,37 +669,49 @@ describe("buildProbabilityQualityReport", () => {
         }),
       );
       expect(report.spearmanRho.value).toBeNull();
-      expect(report.spearmanRho.reason).not.toBeNull();
+      expect(report.spearmanRho.reason).toContain(INVALID_PROBABILITY_MARKER);
       expect(report.sdRatio.value).toBeNull();
-      expect(report.sdRatio.reason).not.toBeNull();
+      expect(report.sdRatio.reason).toContain(INVALID_PROBABILITY_MARKER);
       expect(report.maxMinRatioModel.value).toBeNull();
-      expect(report.maxMinRatioModel.reason).not.toBeNull();
+      expect(report.maxMinRatioModel.reason).toContain(INVALID_PROBABILITY_MARKER);
       expect(report.normalizedJointKlModel.value).toBeNull();
-      expect(report.normalizedJointKlModel.reason).not.toBeNull();
+      expect(report.normalizedJointKlModel.reason).toContain(INVALID_PROBABILITY_MARKER);
       expect(report.trioAllPointEvOverPayoutRate.ratio).toBeNull();
-      expect(report.trioAllPointEvOverPayoutRate.reason).not.toBeNull();
+      expect(report.trioAllPointEvOverPayoutRate.reason).toContain(INVALID_PROBABILITY_MARKER);
 
       // 市場側(placeOddsMinは全馬正常)は影響を受けない。
       expect(report.maxMinRatioMarket.value).not.toBeNull();
       expect(report.normalizedJointKlMarket.value).not.toBeNull();
     });
 
-    it("oddsStatus=yoso分岐(maxMinRatioを直接呼ぶ別経路)でもmodelProbのNaNが漏れない", () => {
-      // yoso分岐はcomputeVarianceRatioMetricsを経由せずmaxMinRatio(modelProbs)を直接呼ぶため、
-      // この経路だけ検証漏れが起きうる(過去に実際に発生した欠陥の形)。
-      const report = buildProbabilityQualityReport(
-        baseInput({
-          oddsStatus: "yoso",
-          horses: [
-            { umaban: 1, modelProb: NaN, placeOddsMin: null },
-            { umaban: 2, modelProb: 0.5, placeOddsMin: null },
-            { umaban: 3, modelProb: 0.4, placeOddsMin: null },
-            { umaban: 4, modelProb: 0.2, placeOddsMin: null },
-          ],
-        }),
-      );
-      expect(report.maxMinRatioModel.value).toBeNull();
-      expect(report.maxMinRatioModel.reason).not.toBeNull();
+    it("oddsStatus=yoso分岐(maxMinRatioを直接呼ぶ別経路)でNaN・Infinity・負値のいずれもが漏れない(code-reviewer指摘への是正)", () => {
+      // yoso分岐はcomputeVarianceRatioMetricsを経由せずcomputeMaxMinRatio(modelProbs)を
+      // 直接呼ぶため、この経路だけ検証漏れが起きうる(過去に実際に発生した欠陥の形)。
+      //
+      // 【code-reviewer指摘への是正】NaNだけを注入するテストは、computeMaxMinRatio内部の
+      // 「min>0」という別ガード(NaNはMath.min(...)をNaNにし、!(NaN>0)がtrueになるため
+      // 偶発的にnullを返す)と結果が見分けられず、明示検証(findInvalidProbabilityReason)を
+      // 無効化しても本テストは通ってしまっていた(実測: code-reviewerが再現)。
+      // そこで(1)Infinity(min側を汚さずmax側だけを汚すため、min>0ガードでは捕まらず
+      // 明示検証だけが頼りになる)を追加し、(2)すべてのケースでreasonが
+      // INVALID_PROBABILITY_MARKERを含むことまで固定して、狙ったガードで止まったことを
+      // 明示検証の理由文字列で確認する(min>0ガードの理由文字列「最小値が0以下…」とは
+      // 別物であることが、この文字列一致で担保される)。
+      for (const bad of [NaN, Infinity, -0.1]) {
+        const report = buildProbabilityQualityReport(
+          baseInput({
+            oddsStatus: "yoso",
+            horses: [
+              { umaban: 1, modelProb: bad, placeOddsMin: null },
+              { umaban: 2, modelProb: 0.5, placeOddsMin: null },
+              { umaban: 3, modelProb: 0.4, placeOddsMin: null },
+              { umaban: 4, modelProb: 0.2, placeOddsMin: null },
+            ],
+          }),
+        );
+        expect(report.maxMinRatioModel.value).toBeNull();
+        expect(report.maxMinRatioModel.reason).toContain(INVALID_PROBABILITY_MARKER);
+      }
     });
 
     it("value:null のとき reason は必ず非nullである(不変条件。レポート全体を横断確認)", () => {
