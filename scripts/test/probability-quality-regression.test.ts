@@ -232,4 +232,43 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
         `filtered(removed=${diagnostics.removedCount}): spearmanRho=${filteredReport.spearmanRho.value} klModel=${filteredReport.normalizedJointKlModel.value}`,
     );
   });
+
+  it("戦績0走の馬がいてもrunAnalysisが完走しΣpriorが目標付近に収まる(boss指摘・受け入れ条件の後件を実測で固定)", async () => {
+    // 「全走が除外され戦績0走になる馬がいても例外を投げずpriorが計算できること」という
+    // 受け入れ条件は、filterRaceDataBefore単体(前件)のテストだけでは検証されない。
+    // 後件(下流のrunAnalysis/buildPriorInput/computeFieldPriorsが実際に完走すること)を
+    // ここで固定する。0走になる馬の代表例は新馬・デビュー戦の馬で、#41(サンプル拡大)では
+    // 日常的に現れる(boss指摘)。
+    //
+    // 極端に古い基準日("1900/01/01")でfilterRaceDataBeforeを適用し、出走16頭全頭の戦績を
+    // 0走にする(実データはすべて2020年代のため、この基準日なら全走が除外される)。
+    const fixtureCase = FIXTURES[0]!;
+    const rawRaceData = loadFixtureRaceData(fixtureCase.fixtureFileName);
+    const { raceData: emptiedRaceData, diagnostics } = filterRaceDataBefore(rawRaceData, "1900/01/01");
+
+    // 前提固定: 全頭が実際に0走になっていること(空振り防止。数馬だけ0走では検証にならない)。
+    expect(emptiedRaceData.horses.length).toBeGreaterThan(0);
+    expect(emptiedRaceData.horses.every((h) => (h.results?.length ?? -1) === 0)).toBe(true);
+    expect(diagnostics.perHorse.every((h) => h.originalCount > 0)).toBe(true); // 除去前は戦績があった
+
+    // 例外を投げずrunAnalysisが完走すること。
+    const result = await runWithFixture(emptiedRaceData, fixtureCase.kaisaiDate);
+    expect(result.rows.length).toBe(emptiedRaceData.horses.length);
+
+    // 全馬careerRunCount=0(新馬相当)であること。
+    expect(result.rows.every((row) => row.careerRunCount === 0)).toBe(true);
+
+    // Σpriorが目標(min(3,頭数)=3)付近に収まること(prior.tsの正規化仕様)。
+    const priorSum = result.rows.reduce((s, row) => s + row.prior, 0);
+    expect(priorSum).toBeCloseTo(3, 1);
+
+    // 回帰: 自分で実行して得た値を固定する(受け入れ条件8)。
+    expect(priorSum).toBeCloseTo(3.0000000000000004, 9);
+    expect(result.rows.every((row) => row.prior > 0 && row.prior < 1)).toBe(true);
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[戦績0走]  Σprior=${priorSum} prior範囲=[${Math.min(...result.rows.map((r) => r.prior))}, ${Math.max(...result.rows.map((r) => r.prior))}]`,
+    );
+  });
 });
