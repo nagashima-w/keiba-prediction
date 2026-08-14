@@ -184,10 +184,27 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     expect(diagnostics.removedCount).toBeGreaterThan(0);
     expect(diagnostics.perHorse.every((h) => h.removedByCutoffCount > 0)).toBe(true);
     // 回帰(自分で実行して得た値。#40 Issue本文の実測「除去対象は21走」と一致): 出走16頭全頭が
-    // 該当し、除去21走のうち16走が「当該レース自身(基準日と同日)」。
+    // 該当し、除去21走のうち16走が「当該レース自身(基準日と同日)」、残り5走は基準日より
+    // 後の日付(データ収集タイミングの都合で混入した未来日の走)。両方を実際に数えて固定する
+    // (コメントに書くだけで assert しない、という状態を作らない)。
     expect(diagnostics.removedCount).toBe(21);
     expect(diagnostics.removedByCutoffCount).toBe(21);
     expect(diagnostics.removedByInvalidDateCount).toBe(0);
+    // 注意: ここでの日付比較は本フィクスチャ固有のクロスチェック用であり、production側
+    // (snapshot-filter.ts)は文字列比較を使わずdaysBetweenDatesで比較する(受け入れ条件10)。
+    // central-on.jsonの日付はすべてゼロ埋め("YYYY/MM/DD")であることを確認済みのため、
+    // このテストに限り文字列比較で安全に集計できる。
+    const sameDayCount = rawRaceData.horses.reduce(
+      (s, h) => s + (h.results ?? []).filter((r) => r.date === cutoffDate).length,
+      0,
+    );
+    const afterCutoffCount = rawRaceData.horses.reduce(
+      (s, h) => s + (h.results ?? []).filter((r) => r.date !== null && r.date > cutoffDate).length,
+      0,
+    );
+    expect(sameDayCount).toBe(16);
+    expect(afterCutoffCount).toBe(5);
+    expect(sameDayCount + afterCutoffCount).toBe(diagnostics.removedByCutoffCount);
 
     // 同一kaisaiDateで2回実行し、変数をリーク遮断の有無1つだけに保つ。
     const rawResult = await runWithFixture(rawRaceData, fixtureCase.kaisaiDate);
@@ -263,8 +280,11 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     expect(priorSum).toBeCloseTo(3, 1);
 
     // 回帰: 自分で実行して得た値を固定する(受け入れ条件8)。
-    expect(priorSum).toBeCloseTo(3.0000000000000004, 9);
+    expect(priorSum).toBeCloseTo(3.000000000000001, 9);
     expect(result.rows.every((row) => row.prior > 0 && row.prior < 1)).toBe(true);
+    // 参考: boss実測(中継経由・#40会話)の範囲[0.1608, 0.2142]と一致する。
+    expect(Math.min(...result.rows.map((r) => r.prior))).toBeCloseTo(0.16079376854599414, 9);
+    expect(Math.max(...result.rows.map((r) => r.prior))).toBeCloseTo(0.214206231454006, 9);
 
     // eslint-disable-next-line no-console
     console.log(

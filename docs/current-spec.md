@@ -201,12 +201,13 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   混在経路でも同じ閾値・同じ文言で出す**(複勝専用経路と同じ`probabilitySumWarning`を、
   混在経路が持つ`race.rows[].adjustedProb`合計から同じ形の入力を組み立てて再利用する。既存経路に
   あった注記が新経路で欠落しないことを個別に確認済み)。**組合せ券種のEVは推定誤差が組み合わせ人数ぶん増幅されて過大評価になりやすく、
-  較正は未実施**(Issue #35。画面にも注記を表示する)。異常な数値(オッズ・馬番)を含むレースは
-  例外を投げずに判別可能な状態で表示する。
-- **未実装(将来課題)**: 1日/開催単位の総上限、確率の較正(Issue #35。複勝単独でも市場に対し系統的な
-  過大評価がある実測がある)、三連単(着順情報が必要で Phase 2 待ち)、検証画面での「一律100円 vs 配分」
-  の回収率比較。券種構成比を大きく左右する貪欲配分の刻み幅(`greedySteps`)の挙動確認・調整は別Issue
-  (#36)。詳細は `docs/handover-next-session.md`。
+  較正は未実施**(Issue #35。計測基盤は#40で整備済み、較正方式の要否検討は#42。画面にも注記を
+  表示する)。異常な数値(オッズ・馬番)を含むレースは例外を投げずに判別可能な状態で表示する。
+- **未実装(将来課題)**: 1日/開催単位の総上限、確率の較正(Issue #35→#39/#40/#41/#42に分割。
+  #40で計測基盤を整備済み〈9節参照〉、較正方式そのものの要否検討は#42。複勝単独でも市場に対し
+  系統的な過大評価がある実測がある)、三連単(着順情報が必要で Phase 2 待ち)、検証画面での
+  「一律100円 vs 配分」の回収率比較。券種構成比を大きく左右する貪欲配分の刻み幅(`greedySteps`)の
+  挙動確認・調整は別Issue(#36)。詳細は `docs/handover-next-session.md`。
 
 ## 6. エクスポート(app: analysis-export)
 
@@ -241,6 +242,54 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   (`CLAUDE.md`「レビュー継続中の中間コミット」節 (f))。スキップ時は run のログに `::notice::` を残す。
 - アイコンは `scripts/gen-icon.mjs`(`pnpm gen:icon`)で生成。パッケージング構成は
   `packages/app/electron-builder.yml`。
+
+## 9. 確率の質の計測基盤(scorer/snapshot-filter・ev/probability-quality。#40「#35-1a」)
+
+#35(確率の質の疑い。「組合せ券種のEVがオッズの順序をなぞるだけではないか」)を判断するための
+**計測専用**の基盤。**測るだけ**で、prior・同時分布モデル・EV計算(`prior.ts`・
+`place-joint-model.ts`・`combo-bet-allocation.ts`・`expected-value.ts`)の挙動は一切変更しない。
+
+- **Issue #35 の分割**: #40(本節。計測基盤の健全化と指標の実装)/ #39(本番側
+  `analysis-pipeline.ts` の先読みリーク是正)/ #41(30レース規模のサンプル拡大・LLM実行)/
+  #42(較正 calibration 方式の要否検討)。#20(同時分布モデルの厳密化)は #41/#42 の技術的前提。
+- **着手前ゲートで判明した2つの計測条件欠陥**(#40がまず健全化した理由):
+  1. **実行日ドリフト**: `runAnalysis` に `kaisaiDate` を渡さないと `resolveAnalysisDate` が
+     実行日(`now()`)へフォールバックし、季節分類・休み明け走目の基準日が壁時計時刻とともに
+     動く(`dateApproximate=true`)。計測・回帰テストでは必ず実レース日の `kaisaiDate` を明示する
+     こと。`scripts/bench-mixed-allocation.ts` もこの理由で `kaisaiDate` を明示するよう是正済み
+     (#40。それ以前は明示していなかった)。
+  2. **先読みリーク**: `analysis-pipeline.ts:344` 付近が戦績を日付でフィルタせず `buildPriorInput`
+     に渡すため、当該レース自身の着順が prior の材料に混入しうる(実測: 中央16頭フィクスチャで
+     出走16頭全頭・21走が該当。うち16走が当該レース自身、5走は基準日より後の日付)。
+     **本番側(`analysis-pipeline.ts`)の是正は #39 の担当**(#40はそこに一切手を入れない)。
+     計測用には `filterRaceDataBefore`(後述)で遮断してから測る。
+- **`scorer/snapshot-filter.ts`**: `filterRaceDataBefore(raceData, cutoffDate)` — 各馬の
+  `results` を `date < cutoffDate` で絞る純関数(`cutoffDate`/`HorseRaceResult.date` はいずれも
+  `YYYY/MM/DD`。非ゼロ埋め表記も含め `daysBetweenDates` で比較し、辞書順比較はしない)。
+  基準日と同日(=当該レース自身の可能性)は除外。日付欠損・不正形式は安全側(除外)に倒す。
+  除去件数を診断値(`SnapshotFilterDiagnostics`)として返す。全走が除外され戦績0走になる馬が
+  いても例外を投げない(新馬・デビュー戦の馬は #41 のサンプル拡大で日常的に現れる形であり、
+  `scripts/test/probability-quality-regression.test.ts` で `runAnalysis` が完走し
+  `Σprior` が目標付近に収まることを実測固定している)。
+- **`ev/probability-quality.ts`**(公開)+ **`ev/probability-quality-metrics.ts`**(内部。
+  `package.json` の `exports` に載せない): 確率の質を測る4指標。唯一の公開エントリポイント
+  `buildProbabilityQualityReport` が計測条件(`priorSource`・`oddsStatus`・リーク遮断の有無・
+  使用オッズの種別)を必ず結果に同梱する(条件抜きの数値を返さない設計。低レベル指標関数は
+  パッケージ境界の外からは意図的に到達不能)。
+  1. **全点等額購入時の平均EV÷払戻率**(三連複専用。ワイドには適用不可。1レース3組同時的中の
+     ため `Σ(1/odds)=1/払戻率` の恒等式が成立しない)。
+  2. **Spearman順位相関**(prior vs 市場含意複勝確率〈`1/placeOddsMin` をΣ=3正規化〉。
+     平均順位法でタイ補正)。
+  3. **分散比**(sd比・max/min比)。
+  4. **三連複同時分布の正規化KL**(`KL(model‖uniform)/log(組数)`。モデル側・市場側を同一関数で
+     算出して並記し、頭数が異なるレース間でも比較可能にする)。
+  - NaN・Infinity・負値は演算前に明示検証して弾く(`reason` 付きの `null` を返し、
+    もっともらしい誤った数値を返さない)。`placeOddsMin` は下限であり単一の真値ではない
+    (複勝は下限〜上限の幅を持つ券種)ことを `conditions.placeOddsKind` で明示する。
+- **回帰テスト**: `packages/core/test/` に低レベル指標の単体テスト(合成データ・境界値、
+  `packages/app` に非依存)。`scripts/test/probability-quality-regression.test.ts` に
+  実フィクスチャ(中央16頭・地方12頭)を `runAnalysis` で駆動する回帰テストと、リーク遮断の
+  前後比較(#40で実測: 中央16頭で ρ 0.2104→-0.0059、正規化KL 0.0156→0.0236)。
 
 ## 主な当初仕様との差異(記録)
 

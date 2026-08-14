@@ -22,7 +22,7 @@
  * - `runAnalysis` には `kaisaiDate="20260628"`(実レース日)を明示して渡す。渡さないと
  *   `resolveAnalysisDate` が実行日(`now()`)へフォールバックし、季節分類・休み明け走目の
  *   基準日が壁時計時刻とともにドリフトする(#40「#35-1a」で判明した欠陥。
- *   `docs/current-spec.md`・Issue #40 参照)
+ *   `docs/current-spec.md`「9. 確率の質の計測基盤」・Issue #40 参照)
  * - `runAnalysis` を `deps.analyze: null`(LLM未使用)で実行し、scorer が出す **実 prior**
  *   (LLM補正なし=adjustedProb===prior)をそのまま使う
  * - **戦績の先読みリークは遮断していない**: `deps.scrape` に渡すフィクスチャの
