@@ -4,14 +4,19 @@ import { describe, expect, it } from "vitest";
 import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
 import {
   buildProbabilityQualityReport,
+  type ProbabilityQualityReportInput,
+} from "../../src/ev/probability-quality.js";
+// 低レベル関数は公開エントリポイント(probability-quality.ts)からは意図的に到達不能にした
+// (受け入れ条件5'。code-reviewer指摘)。core自身のテストはパッケージ境界の内側なので、
+// 内部ファイルへの直接パスでimportする。
+import {
   computeMarketImpliedPlaceProbabilities,
   computeTrioAllPointEvOverPayoutRate,
   computeVarianceRatioMetrics,
   normalizedKlDivergenceFromUniform,
   normalizedTrioJointKlDivergence,
   spearmanRankCorrelation,
-  type ProbabilityQualityReportInput,
-} from "../../src/ev/probability-quality.js";
+} from "../../src/ev/probability-quality-metrics.js";
 import type { SnapshotFilterDiagnostics } from "../../src/scorer/snapshot-filter.js";
 
 /**
@@ -58,6 +63,45 @@ describe("spearmanRankCorrelation", () => {
     const result = spearmanRankCorrelation([1, 2], [1, 2, 3]);
     expect(result.value).toBeNull();
   });
+
+  // --- NaN/Infinity/負値の防御(code-reviewer指摘・boss実測で再現) ---------------------
+
+  it("NaNが1つ混入しても符号反転した「もっともらしい値」を返さずnull+理由になる", () => {
+    // 正常系(boss実測の再現条件): [0.3,0.26,0.2,0.25] vs [0.28,0.31,0.19,0.22] → ρ=0.8。
+    const normal = spearmanRankCorrelation([0.3, 0.26, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(normal.value).toBeCloseTo(0.8, 10);
+    expect(normal.reason).toBeNull();
+
+    // NaNを1つ混入: 修正前は value=-0.6 (符号反転) が reason:null で返っていた(実測済みバグ)。
+    const withNaN = spearmanRankCorrelation([0.3, NaN, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(withNaN.value).toBeNull();
+    expect(withNaN.reason).not.toBeNull();
+    expect(withNaN.reason).toContain("NaN");
+  });
+
+  it("Infinityが混入した場合もnull+理由になる", () => {
+    const result = spearmanRankCorrelation([0.3, Infinity, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(result.value).toBeNull();
+    expect(result.reason).toContain("Infinity");
+  });
+
+  it("負値が混入した場合もnull+理由になる", () => {
+    const result = spearmanRankCorrelation([0.3, -0.1, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(result.value).toBeNull();
+    expect(result.reason).not.toBeNull();
+  });
+
+  it("市場側(第2引数)のNaN混入も検出する(片側だけの防御にしない)", () => {
+    const result = spearmanRankCorrelation([0.3, 0.26, 0.2, 0.25], [0.28, NaN, 0.19, 0.22]);
+    expect(result.value).toBeNull();
+    expect(result.reason).toContain("系列b");
+  });
+
+  it("0は不正値ではない(有限かつ非負のため素通りする)", () => {
+    const result = spearmanRankCorrelation([0, 0.26, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(result.value).not.toBeNull();
+    expect(result.reason).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -84,6 +128,67 @@ describe("computeVarianceRatioMetrics", () => {
   it("最小値が0以下のときmax/min比はゼロ除算でnull", () => {
     const result = computeVarianceRatioMetrics([0, 0.5], [0.1, 0.2]);
     expect(result.maxMinRatioModel.value).toBeNull();
+  });
+
+  // --- NaN/Infinity/負値の防御(code-reviewer指摘・boss実測で再現) ---------------------
+
+  it("modelにNaNが混入すると、sdMarket===0判定をすり抜けた「もっともらしい値」を返さずnull+理由になる", () => {
+    // 修正前はNaN/0.05(有限)→NaNとなり、JSON.stringifyでNaNがnullに化けるため
+    // 「value:null, reason:null」というreason無しの結果として観測された(boss実測)。
+    const result = computeVarianceRatioMetrics([0.3, NaN, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(result.sdRatio.value).toBeNull();
+    expect(result.sdRatio.reason).not.toBeNull();
+    expect(result.maxMinRatioModel.value).toBeNull();
+    expect(result.maxMinRatioModel.reason).not.toBeNull();
+    // 市場側は無傷なので、市場側だけで完結するmaxMinRatioMarketは正常に計算できる。
+    expect(result.maxMinRatioMarket.value).not.toBeNull();
+    expect(result.maxMinRatioMarket.reason).toBeNull();
+  });
+
+  it("modelにInfinityが混入した場合もnull+理由になる(maxMinRatioのmax側の防御。min側だけでなくmax側も検証する)", () => {
+    const result = computeVarianceRatioMetrics([0.3, Infinity, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(result.sdRatio.value).toBeNull();
+    expect(result.sdRatio.reason).not.toBeNull();
+    expect(result.maxMinRatioModel.value).toBeNull();
+    expect(result.maxMinRatioModel.reason).not.toBeNull();
+  });
+
+  it("modelに負値が混入した場合もnull+理由になる", () => {
+    const result = computeVarianceRatioMetrics([0.3, -0.1, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]);
+    expect(result.sdRatio.value).toBeNull();
+    expect(result.sdRatio.reason).not.toBeNull();
+  });
+
+  it("市場側にNaNが混入した場合もnull+理由になる(片側だけの防御にしない)", () => {
+    const result = computeVarianceRatioMetrics([0.3, 0.26, 0.2, 0.25], [0.28, NaN, 0.19, 0.22]);
+    expect(result.sdRatio.value).toBeNull();
+    expect(result.sdRatio.reason).not.toBeNull();
+    expect(result.maxMinRatioMarket.value).toBeNull();
+    // モデル側は無傷なのでmaxMinRatioModelは正常に計算できる(粒度: 片側の異常がもう片側を巻き込まない)。
+    expect(result.maxMinRatioModel.value).not.toBeNull();
+  });
+
+  it("value:null のとき reason は必ず非nullである(不変条件。全パターンを横断確認)", () => {
+    const cases: readonly [readonly number[], readonly number[]][] = [
+      [[0.3, NaN, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]],
+      [[0.3, Infinity, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]],
+      [[0.3, -Infinity, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]],
+      [[0.3, -0.1, 0.2, 0.25], [0.28, 0.31, 0.19, 0.22]],
+      [[5, 5, 5], [0.1, 0.2, 0.3]], // sdMarket正常だがsdModel=0(分散比自体は算出できるケース、対照)
+      [[0.1, 0.2, 0.3], [5, 5, 5]], // sdMarket=0
+    ];
+    for (const [model, market] of cases) {
+      const result = computeVarianceRatioMetrics(model, market);
+      for (const m of [result.sdRatio, result.maxMinRatioModel, result.maxMinRatioMarket]) {
+        if (m.value === null) {
+          expect(m.reason).not.toBeNull();
+          expect(typeof m.reason).toBe("string");
+        } else {
+          expect(Number.isFinite(m.value)).toBe(true);
+          expect(m.reason).toBeNull();
+        }
+      }
+    }
   });
 });
 
@@ -112,6 +217,20 @@ describe("normalizedKlDivergenceFromUniform", () => {
     const result = normalizedKlDivergenceFromUniform([0.5, 0.5, 0, 0]);
     expect(Number.isNaN(result.value)).toBe(false);
     expect(result.value).toBeCloseTo(0.5, 10);
+  });
+
+  it("NaN・Infinity・負値が混入した場合はnull+理由になる(もっともらしい値を返さない)", () => {
+    const withNaN = normalizedKlDivergenceFromUniform([0.5, NaN, 0.25, 0.25]);
+    expect(withNaN.value).toBeNull();
+    expect(withNaN.reason).not.toBeNull();
+
+    const withInf = normalizedKlDivergenceFromUniform([0.5, Infinity, 0.25, 0.25]);
+    expect(withInf.value).toBeNull();
+    expect(withInf.reason).not.toBeNull();
+
+    const withNegative = normalizedKlDivergenceFromUniform([0.5, -0.1, 0.25, 0.25]);
+    expect(withNegative.value).toBeNull();
+    expect(withNegative.reason).not.toBeNull();
   });
 });
 
@@ -154,6 +273,39 @@ describe("normalizedTrioJointKlDivergence", () => {
     const nar = normalizedTrioJointKlDivergence(evenHorses(12, 3 / 12));
     expect(central.value).toBeCloseTo(0, 6);
     expect(nar.value).toBeCloseTo(0, 6);
+  });
+
+  it("placeProbにNaNが混入すると、CONDITIONAL_BERNOULLI_MODELの一様分布フォールバックにより「KL=0(正常な均等分布)」という尤もらしい値へ化けさせず、事前にnull+理由で弾く", () => {
+    const horses: JointModelHorse[] = [
+      { umaban: 1, placeProb: NaN },
+      { umaban: 2, placeProb: 0.75 },
+      { umaban: 3, placeProb: 0.75 },
+      { umaban: 4, placeProb: 0.75 },
+    ];
+    const result = normalizedTrioJointKlDivergence(horses);
+    expect(result.value).toBeNull();
+    expect(result.reason).not.toBeNull();
+    expect(result.reason).toContain("NaN");
+  });
+
+  it("placeProbにInfinity・負値が混入した場合もnull+理由になる", () => {
+    const withInf = normalizedTrioJointKlDivergence([
+      { umaban: 1, placeProb: Infinity },
+      { umaban: 2, placeProb: 0.75 },
+      { umaban: 3, placeProb: 0.75 },
+      { umaban: 4, placeProb: 0.75 },
+    ]);
+    expect(withInf.value).toBeNull();
+    expect(withInf.reason).not.toBeNull();
+
+    const withNegative = normalizedTrioJointKlDivergence([
+      { umaban: 1, placeProb: -0.1 },
+      { umaban: 2, placeProb: 0.75 },
+      { umaban: 3, placeProb: 0.75 },
+      { umaban: 4, placeProb: 0.75 },
+    ]);
+    expect(withNegative.value).toBeNull();
+    expect(withNegative.reason).not.toBeNull();
   });
 });
 
@@ -284,6 +436,28 @@ describe("computeTrioAllPointEvOverPayoutRate", () => {
     expect(result.ratio).toBeNull();
     expect(result.diagnostics.presentCount).toBe(0);
     expect(result.diagnostics.unfetchedCount).toBe(4);
+  });
+
+  it("placeProbにNaN・Infinity・負値が混入した場合はnull+理由になる(オッズが正常でも計算しない)", () => {
+    const odds = new Map<string, number | null>([
+      ["010203", 4],
+      ["010204", 4],
+      ["010304", 4],
+      ["020304", 4],
+    ]);
+    for (const bad of [NaN, Infinity, -0.1]) {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: bad },
+        { umaban: 2, placeProb: 0.75 },
+        { umaban: 3, placeProb: 0.75 },
+        { umaban: 4, placeProb: 0.75 },
+      ];
+      const result = computeTrioAllPointEvOverPayoutRate(horses, odds);
+      expect(result.ratio).toBeNull();
+      expect(result.averageEv).toBeNull();
+      expect(result.estimatedPayoutRate).toBeNull();
+      expect(result.reason).not.toBeNull();
+    }
   });
 });
 
@@ -428,5 +602,101 @@ describe("buildProbabilityQualityReport", () => {
     expect(report.conditions.leakFilterApplied).toBe(true);
     expect(report.conditions.cutoffDate).toBe("2026/06/28");
     expect(report.conditions.removedResultCount).toBe(16);
+  });
+
+  // --- NaN/Infinity/負値の防御を集約関数経由でも確認する(code-reviewer指摘3) -------------
+  // 「低レベル関数だけ直しても、集約側で別経路があれば意味がない」への対応。
+  // buildProbabilityQualityReportはmaxMinRatioModelを yoso 分岐で maxMinRatio へ**直接**
+  // 渡す経路を持ち(computeVarianceRatioMetricsを経由しない)、この経路の防御漏れが
+  // 実際に過去に起きていたため、oddsStatus=yosoの場合も明示的に確認する。
+
+  describe("NaN・Infinity・負値混入時の防御(集約関数経由)", () => {
+    it("modelProbにNaNが混入すると、市場データが正常でも該当するモデル系指標すべてがnull+理由になる", () => {
+      const report = buildProbabilityQualityReport(
+        baseInput({
+          horses: [
+            { umaban: 1, modelProb: NaN, placeOddsMin: 1.5 },
+            { umaban: 2, modelProb: 0.5, placeOddsMin: 2.0 },
+            { umaban: 3, modelProb: 0.4, placeOddsMin: 3.0 },
+            { umaban: 4, modelProb: 0.2, placeOddsMin: 8.0 },
+          ],
+        }),
+      );
+      expect(report.spearmanRho.value).toBeNull();
+      expect(report.spearmanRho.reason).not.toBeNull();
+      expect(report.sdRatio.value).toBeNull();
+      expect(report.sdRatio.reason).not.toBeNull();
+      expect(report.maxMinRatioModel.value).toBeNull();
+      expect(report.maxMinRatioModel.reason).not.toBeNull();
+      expect(report.normalizedJointKlModel.value).toBeNull();
+      expect(report.normalizedJointKlModel.reason).not.toBeNull();
+      expect(report.trioAllPointEvOverPayoutRate.ratio).toBeNull();
+      expect(report.trioAllPointEvOverPayoutRate.reason).not.toBeNull();
+
+      // 市場側(placeOddsMinは全馬正常)は影響を受けない。
+      expect(report.maxMinRatioMarket.value).not.toBeNull();
+      expect(report.normalizedJointKlMarket.value).not.toBeNull();
+    });
+
+    it("oddsStatus=yoso分岐(maxMinRatioを直接呼ぶ別経路)でもmodelProbのNaNが漏れない", () => {
+      // yoso分岐はcomputeVarianceRatioMetricsを経由せずmaxMinRatio(modelProbs)を直接呼ぶため、
+      // この経路だけ検証漏れが起きうる(過去に実際に発生した欠陥の形)。
+      const report = buildProbabilityQualityReport(
+        baseInput({
+          oddsStatus: "yoso",
+          horses: [
+            { umaban: 1, modelProb: NaN, placeOddsMin: null },
+            { umaban: 2, modelProb: 0.5, placeOddsMin: null },
+            { umaban: 3, modelProb: 0.4, placeOddsMin: null },
+            { umaban: 4, modelProb: 0.2, placeOddsMin: null },
+          ],
+        }),
+      );
+      expect(report.maxMinRatioModel.value).toBeNull();
+      expect(report.maxMinRatioModel.reason).not.toBeNull();
+    });
+
+    it("value:null のとき reason は必ず非nullである(不変条件。レポート全体を横断確認)", () => {
+      const reportNormal = buildProbabilityQualityReport(baseInput());
+      const reportWithNaN = buildProbabilityQualityReport(
+        baseInput({
+          horses: [
+            { umaban: 1, modelProb: NaN, placeOddsMin: 1.5 },
+            { umaban: 2, modelProb: 0.5, placeOddsMin: 2.0 },
+            { umaban: 3, modelProb: 0.4, placeOddsMin: 3.0 },
+            { umaban: 4, modelProb: 0.2, placeOddsMin: 8.0 },
+          ],
+        }),
+      );
+      for (const report of [reportNormal, reportWithNaN]) {
+        const metrics = [
+          report.spearmanRho,
+          report.sdRatio,
+          report.maxMinRatioModel,
+          report.maxMinRatioMarket,
+          report.normalizedJointKlModel,
+          report.normalizedJointKlMarket,
+        ];
+        for (const m of metrics) {
+          if (m.value === null) {
+            expect(m.reason).not.toBeNull();
+            expect(typeof m.reason).toBe("string");
+          } else {
+            expect(Number.isFinite(m.value)).toBe(true);
+            expect(m.reason).toBeNull();
+          }
+        }
+        const trio = report.trioAllPointEvOverPayoutRate;
+        if (trio.ratio === null) {
+          expect(trio.reason).not.toBeNull();
+          expect(trio.averageEv).toBeNull();
+          expect(trio.estimatedPayoutRate).toBeNull();
+        } else {
+          expect(trio.reason).toBeNull();
+          expect(Number.isFinite(trio.averageEv)).toBe(true);
+          expect(Number.isFinite(trio.estimatedPayoutRate)).toBe(true);
+        }
+      }
+    });
   });
 });
