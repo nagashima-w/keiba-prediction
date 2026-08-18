@@ -1,12 +1,18 @@
 /**
  * CI ワークフロー(.github/workflows/build-windows.yml)の
- * 「レビュー継続中コミットでは dev-latest への公開をスキップする」ゲートに関する
- * 静的な不変条件テスト。
+ * 「dev-latest への公開には承認印([PUBLISH-APPROVED])付きの push が必要」ゲートに関する
+ * 静的な不変条件テスト(Issue #43)。
  *
  * 注意: 本テストは yml のテキストを正規表現で検査するものであり、
  * GitHub Actions の式(if:/env: の ${{ }} 式)そのものを実際に評価・実行するものではない。
- * ゲートが CI 上で意図通り動くかどうかは実物検証(オーケストレーターが CI の run で確認する)に委ねる。
- * 本テストが保証するのは「壊れると実害が出る」静的な不変条件のみ。
+ * ゲートが CI 上で意図通り動くかどうかは実物検証(オーケストレーターが CI の run で確認する。AC7)に
+ * 委ねる。本テストが保証するのは「壊れると実害が出る」静的な不変条件のみ。
+ *
+ * 背景(Issue #43): 旧仕様(「レビュー継続中」を含まなければ公開する = 既定で公開する)は、
+ * 印の無い自動コミットが1つ割り込むだけで未レビューのコードが公開される事故を招いた
+ * (コミット `10a4c54` が「レビュー継続中」を含まないまま単独 push され、その時点でブランチには
+ * boss 承認前の実装が4コミット載っていた)。本タスクは既定値を安全側(既定で非公開)へ反転し、
+ * 「承認印([PUBLISH-APPROVED])付きの push」または「workflow_dispatch」のときだけ公開する。
  *
  * 検証する不変条件:
  * 1. 公開ステップと孤児掃除ステップの if: が、公開を許可する極性(== 'true')で完全一致する
@@ -14,19 +20,23 @@
  *    「一致」だけの検査だと、両方が同時に != 'true' へ反転しても素通りしてしまうため
  *    「一致」と「期待する極性そのもの」の両方を固定する)
  * 2. 公開可否ゲート(env: PUBLISH_DEV_LATEST)の定義行が期待する式と完全一致する
- *    (head_commit.message・「レビュー継続中」参照に加え、外側の否定 !(...)・event_name の
- *    == 判定・refs/heads/ 限定・&&/|| の結合順のすべてを1つの完全一致で固定する。部分一致
- *    (toContain)の組み合わせだと、`!` の除去・演算子の反転・&&/||の入れ替えなどを個別に
- *    見逃す穴が残ることが実際に確認されたため、字句そのものをピン留めする)
- * 3. v* タグの正式リリースステップの条件に「レビュー継続中」が現れない
- *    (タグでの正式公開は、レビュー継続中の判定と無関係であるべき)
- * 4. スキップ通知(::notice::)ステップの条件が期待する式と完全一致する
+ *    (承認印リテラル・「レビュー継続中」参照・event_name 判定(push/workflow_dispatch)・
+ *    refs/heads/ 限定・&&/|| の結合順・括弧構造のすべてを1つの完全一致で固定する。部分一致
+ *    (toContain)の組み合わせだと、演算子の反転・&&/||の入れ替えなどを個別に見逃す穴が残ることが
+ *    実際に確認されたため、字句そのものをピン留めする)
+ * 2b. ゲート式が、承認印なしで公開されてしまう旧仕様(「レビュー継続中」の否定だけで公開を許可する
+ *    骨格)の字句を含まない(不変条件2と目的は重複するが、極性の反転は本タスクが修正する事故の
+ *    核心そのものであるため、字句レベルでも独立して固定する価値がある)
+ * 3. v* タグの正式リリースステップの条件に「レビュー継続中」・承認印リテラルのいずれも現れない
+ *    (タグでの正式公開は、この静的ゲートの判定と無関係であるべき)
+ * 4. スキップ通知ステップの if: 条件が期待する式と完全一致する
  *    (ブランチ限定・公開ゲートの否定・&&の結合をすべて1つの完全一致で固定する。
  *    部分一致の組み合わせでは `&&` → `||` への反転(常に通知が出るようになる事故)を
  *    見逃すことが実際に確認されたため、字句そのものをピン留めする)
- * 5. スキップ通知ステップの文言が、掃除もスキップしたことと回復手段(workflow_dispatch)に触れている
+ * 5. スキップ通知ステップの文言が、承認印リテラル・掃除もスキップしたこと・回復手段
+ *    (承認印付きコミットの push / workflow_dispatch)に触れている
  * 6. スキップ通知ステップに always() が付いていない
- *    (付けると前段の失敗を「レビュー継続中スキップ」と誤って名乗ってしまう)
+ *    (付けると前段の失敗を「公開スキップ」と誤って名乗ってしまう)
  * 7. 公開ステップが孤児掃除ステップより前に出現する(構造的な順序の不変条件)
  *    (掃除ステップのコメントが明記する atomicity の前提そのもの。入れ替わると、掃除が
  *    新 exe のアップロード前に走り、その時点で dev-latest に残る旧バージョンの exe を
@@ -48,6 +58,11 @@
  *    (= `pnpm -r typecheck && tsc -p tsconfig.scripts.json`。core・app・scripts の3プログラムを
  *    覆う)を実行し、「app をビルド」ステップより前にある(fail fast: 型検査が壊れた状態で
  *    ビルド・パッケージングへ進まない)
+ * 12. 承認印リテラル([PUBLISH-APPROVED])が CLAUDE.md・docs/current-spec.md・
+ *    docs/development-workflow.md にワークフローと同一の文字列で現れる(Issue #43 の事故は
+ *    「規約に書いた運用と CI の実装がずれても誰も気付かない」構造が土台にあるため、規約と CI の
+ *    乖離を機械的に検出できるようにする。語句の言い換えでは検出できないが、トークンの存在のみを
+ *    見る緩い検査でも「規約からリテラルが丸ごと消える/書き換わる」ような乖離は検出できる)
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -56,17 +71,27 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.join(currentDir, "../../..");
 const WORKFLOW_PATH = path.join(
-  currentDir,
-  "../../../.github/workflows/build-windows.yml",
+  REPO_ROOT,
+  ".github/workflows/build-windows.yml",
 );
+const CLAUDE_MD_PATH = path.join(REPO_ROOT, "CLAUDE.md");
+const CURRENT_SPEC_PATH = path.join(REPO_ROOT, "docs/current-spec.md");
+const DEVELOPMENT_WORKFLOW_PATH = path.join(
+  REPO_ROOT,
+  "docs/development-workflow.md",
+);
+
+/** dev-latest 公開の承認印リテラル。CI・CLAUDE.md・docs の全箇所で同一文字列である必要がある。 */
+const APPROVAL_MARK = "[PUBLISH-APPROVED]";
 
 const STEP_NAMES = {
   typecheck: "型検査を実行",
   build: "app をビルド",
   publish: "Releases に公開(dev-latest を in-place 更新 / ブランチ push 時)",
   cleanup: "dev-latest の孤児 exe アセットを掃除(現行ファイル名以外を削除)",
-  skipNotice: "dev-latest 公開スキップをログに記録(レビュー継続中コミット時)",
+  skipNotice: "dev-latest 公開スキップをログに記録(承認印なしコミット時)",
   tagRelease: "Releases に公開(正式リリース / v* タグ push 時)",
 } as const;
 
@@ -198,40 +223,54 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
 
     // 期待値そのものを固定する。「publishIf === cleanupIf」という一致だけの検査だと、
     // 両方が同時に == → != に反転しても(等価性は保たれたまま)素通りしてしまう
-    // (実際に変異させて素通りすることを確認済み。この場合レビュー継続中コミットでのみ
-    // 公開・掃除が走るという完全な意味の逆転になる)。期待する極性そのものを固定することで、
+    // (実際に変異させて素通りすることを確認済み。この場合承認印付きコミットでのみ
+    // 公開・掃除が走らないという完全な意味の逆転になる)。期待する極性そのものを固定することで、
     // 「片方だけのズレ」と「両方同時のズレ」の両方を検出する。
     const expected = "env.PUBLISH_DEV_LATEST == 'true'";
     expect(publishIf).toBe(expected);
     expect(cleanupIf).toBe(expected);
   });
 
-  it("公開可否ゲート(PUBLISH_DEV_LATEST)の定義行が期待する式と完全一致する", () => {
+  it("公開可否ゲート(PUBLISH_DEV_LATEST)の定義行が期待する式と完全一致する(Issue #43: 既定で非公開に反転)", () => {
     // 検査対象は env ブロック全体(コメント込み)ではなく、PUBLISH_DEV_LATEST: の定義行そのもの
-    // (実コード1行)に絞る。env ブロック全体を対象にすると、コメント文中に同じ語句
-    // (例: 説明コメント中の「github.event_name == 'push'」)が含まれているだけで
-    // toContain が満たされてしまい、実コードの演算子が反転していても検出できない
+    // (実コード1行)に絞る。env ブロック全体を対象にすると、コメント文中に同じ語句が含まれている
+    // だけで toContain が満たされてしまい、実コードの演算子が反転していても検出できない
     // (過去のレビューで実際に検出漏れとして指摘された)。
     const gateValue = extractEnvValue(yml, "PUBLISH_DEV_LATEST");
 
     // 部分一致(toContain)の組み合わせでは、以下のような変異が個別に見逃されることが
     // 実際に確認された:
-    //   - 外側の否定 `!(...)` の `!` を除去(印ありコミットだけ公開され、印なし=承認済みの
-    //     コミットが黙って公開されなくなる完全な意味の逆転。このタスクが防ごうとしている
-    //     実害そのもの)
-    //   - `github.event_name == 'push'` → `!= 'push'`
+    //   - 承認印の contains(...) を除去(印なしで公開される = Issue #43 の事故の再現)
+    //   - `github.event_name == 'workflow_dispatch'` を欠落させる(手動実行での復旧レバーが失われる)
     //   - `startsWith(github.ref, 'refs/heads/')` → `'refs/tags/'`
     //   - 外側 `&&` → `||`(ブランチ以外でも常に公開扱いになりうる)
-    //   - 内側 `&&` → `||`(印の有無に関わらず全 push でスキップになりうる)
-    //   - `contains(...)` → `startsWith(...)`(印の位置次第で検出漏れになる)
+    //   - 内側 `&&` → `||`(承認印の有無に関わらず全 push で公開されうる)
+    //   - `!contains(...レビュー継続中...)` の `!` を除去(承認印があっても
+    //     「レビュー継続中」を含めば公開が止まらなくなる)
     // 個別の toContain/not.toContain を積み上げるのではなく、期待する式そのものを
     // 完全一致で固定することで、上記すべてと将来の未知の字句変異を一括で検出する。
     expect(gateValue).toBe(
-      "${{ startsWith(github.ref, 'refs/heads/') && !(github.event_name == 'push' && contains(github.event.head_commit.message, 'レビュー継続中')) }}",
+      "${{ startsWith(github.ref, 'refs/heads/') && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[PUBLISH-APPROVED]') && !contains(github.event.head_commit.message, 'レビュー継続中'))) }}",
     );
   });
 
-  it("v* タグの正式リリースステップの条件に「レビュー継続中」が現れない", () => {
+  it("公開可否ゲートの式が、承認印なしで公開されてしまう旧仕様の骨格を含まない(極性は本タスクの核心のため独立して固定する)", () => {
+    const gateValue = extractEnvValue(yml, "PUBLISH_DEV_LATEST");
+
+    // 完全一致テスト(上記)と目的は重複するが、Issue #43 が修正する事故は「印なしコミットで
+    // 公開される」極性の反転そのものであるため、字句レベルでも独立して固定する価値がある。
+    // 旧仕様は「レビュー継続中」の否定だけで公開を許可しており(骨格:
+    // `startsWith(...) && !(github.event_name == 'push' && contains(...レビュー継続中...))`)、
+    // 承認印(contains(..., '[PUBLISH-APPROVED]'))を要求しなかった。
+    expect(gateValue).toContain(
+      "contains(github.event.head_commit.message, '[PUBLISH-APPROVED]')",
+    );
+    expect(gateValue).not.toMatch(
+      /^\$\{\{ startsWith\(github\.ref, 'refs\/heads\/'\) && !\(github\.event_name/,
+    );
+  });
+
+  it("v* タグの正式リリースステップの条件に「レビュー継続中」・承認印リテラルのいずれも現れない", () => {
     const tagStep = extractStep(yml, STEP_NAMES.tagRelease);
     const tagIf = extractIfLine(tagStep);
 
@@ -240,6 +279,7 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     expect(tagIf).toContain("refs/tags/v");
 
     expect(tagStep).not.toContain("レビュー継続中");
+    expect(tagStep).not.toContain(APPROVAL_MARK);
   });
 
   it("スキップ通知ステップの if: 条件が期待する式と完全一致する(タグ push で誤通知せず、== への反転や &&/|| の入れ替えも検出する)", () => {
@@ -250,15 +290,18 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     // しまう。「refs/heads/ を含む」「!= 'true' を含む」は両方とも真のままなので検出できない
     // ことを実際に確認した)を見逃す。期待する式そのものを完全一致で固定することで、
     // ブランチ限定・公開ゲートの否定・&& の結合をまとめて検出する。
+    //
+    // この if: 自体は Issue #43 での極性反転(env 側)の影響を受けない(PUBLISH_DEV_LATEST の
+    // 意味が変わっても「!= 'true' ならスキップを通知する」という関係は変わらないため)。
     expect(noticeIf).toBe(
       "startsWith(github.ref, 'refs/heads/') && env.PUBLISH_DEV_LATEST != 'true'",
     );
   });
 
-  it("スキップ通知ステップの文言が、掃除もスキップしたことと回復手段(workflow_dispatch)に触れている", () => {
+  it("スキップ通知ステップの文言が、承認印・掃除もスキップしたことと回復手段(承認印付きコミット / workflow_dispatch)に触れている", () => {
     const noticeStep = extractStep(yml, STEP_NAMES.skipNotice);
 
-    expect(noticeStep).toContain("レビュー継続中");
+    expect(noticeStep).toContain(APPROVAL_MARK);
     expect(noticeStep).toContain("掃除");
     expect(noticeStep).toContain("workflow_dispatch");
   });
@@ -303,7 +346,7 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     // 精密な部分検査に置き換えようとすると、本ファイルが辿った「部分一致の積み上げでは
     // 意味の逆転を検出できない」という失敗に逆戻りする。
     //
-    // 前提固定: このジョブが11ステップから成ることをまず固定する(配列比較が
+    // 前提固定: このジョブが12ステップから成ることをまず固定する(配列比較が
     // 空配列同士の一致のような自明なもので満たされないようにするため)。
     const actualNames = extractAllStepNames(yml);
     expect(actualNames.length).toBeGreaterThan(0);
@@ -348,5 +391,25 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     const typecheckIndex = stepStartIndex(yml, STEP_NAMES.typecheck);
     const buildIndex = stepStartIndex(yml, STEP_NAMES.build);
     expect(typecheckIndex).toBeLessThan(buildIndex);
+  });
+
+  it("承認印リテラル([PUBLISH-APPROVED])が CLAUDE.md・docs/current-spec.md・docs/development-workflow.md にワークフローと同一の文字列で現れる(規約とCIの乖離検出。Issue #43)", () => {
+    // Issue #43 の事故は「規約に書いた運用と CI の実装がずれても誰も気付かない」構造が
+    // 土台にある。承認印リテラルが規約側とワークフロー側で同一文字列になっていることを
+    // 機械的に固定することで、将来どちらか一方だけが書き換わる乖離を検出できるようにする。
+    // 語句の言い換え(例: 説明文だけが変わる)までは検出できないが、「規約からリテラルが
+    // 丸ごと消える/別の文字列に変わる」ような乖離は検出できる。
+    expect(yml).toContain(APPROVAL_MARK);
+
+    const claudeMd = readFileSync(CLAUDE_MD_PATH, "utf8");
+    const currentSpec = readFileSync(CURRENT_SPEC_PATH, "utf8");
+    const developmentWorkflow = readFileSync(
+      DEVELOPMENT_WORKFLOW_PATH,
+      "utf8",
+    );
+
+    expect(claudeMd).toContain(APPROVAL_MARK);
+    expect(currentSpec).toContain(APPROVAL_MARK);
+    expect(developmentWorkflow).toContain(APPROVAL_MARK);
   });
 });
