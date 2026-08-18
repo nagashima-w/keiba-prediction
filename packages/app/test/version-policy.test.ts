@@ -47,11 +47,15 @@ const VERSIONING_DOC_PATH = path.join(REPO_ROOT, "docs/versioning.md");
  * 文書テキストに正規表現を当てるすべての箇所は、この関数を通した正規化済みテキストに対して
  * 行う(release-workflow-gate.test.ts と同じ理由・同じ手当て)。
  *
- * 注記(#45 メタレビュー): 現時点では、本ファイルが当てる正規表現・toContain はいずれも版数表記の
- * 近傍に改行を挟まない短い一致であるため、この正規化を外しても全件緑のままである(=現時点では
- * load-bearing ではない)。それでも適用するのは、将来パターンが行をまたいだとき
- * (例: 複数行にわたる箇条書きを近接パターンで検査する)に CRLF だけで CI が
- * ローカルと異なる結果になる事故を予防するため。
+ * 注記(#44-D-1 のメタレビュー差し戻し 要修正A): 実測すると、本ファイルが当てる正規表現・toContain の
+ * うち複数(例: /自動判定[\s\S]{0,200}(採らない|採用しない)/ は一致長76文字中に改行3個、
+ * /対象外[\s\S]{0,200}(private|npm)/ は一致長177文字中に改行4個)が改行をまたいでいる。
+ * それでもこの正規化を外して全件緑のままなのは、しきい値(200/80/60文字)に対して
+ * CRLF による `\r` の増分(改行の出現数と同数)が十分小さく、一致の成否を左右しないため。
+ * ただし D-2(#45)申し送りパターン(/D-2[\s\S]{0,60}workflow_dispatch[\s\S]{0,60}除外/)は
+ * 一致長53文字に対ししきい値60文字と余裕が薄く(CRLF込みで54文字)、語間を7文字ほど広げる
+ * 書き換えが入ると LF では緑・CRLF では赤になりうる。今この関数を外しても全件緑という結論は
+ * 変わらないが、将来パターンが伸びたときの予防として本正規化を維持する。
  */
 function readNormalized(filePath: string): string {
   return readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
@@ -281,7 +285,7 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
     expect(doc).toMatch(/(coerceSettings|ALTER TABLE)/);
   });
 
-  it("workflow_dispatch による同一コミットの再送は「公開」に含めず、版数を上げない旨が明記されている(#45差し戻し要修正1)", () => {
+  it("workflow_dispatch による同一コミットの再送は「公開」に含めず、版数を上げない旨が明記されている(#44-D-1 のメタレビュー差し戻し 要修正1)", () => {
     // 差し戻し前は「頻度」条項が [PUBLISH-APPROVED] push と workflow_dispatch の両方を
     // 「公開」として扱っており、後者は同一コミットの再実行であるため版数を上げる余地が
     // そもそも無い(物理的に満たせない条項だった)。ここでは修正後の条項の中心語を
@@ -303,7 +307,7 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
     expect(doc).toMatch(/D-2[\s\S]{0,60}workflow_dispatch[\s\S]{0,60}除外/);
   });
 
-  it("版数を上げるときの同時更新チェックリストが、不変条件テストが実際にピン留めしている全箇所を列挙している(#45差し戻し要修正2)", () => {
+  it("版数を上げるときの同時更新チェックリストが、不変条件テストが実際にピン留めしている全箇所を列挙している(#44-D-1 のメタレビュー差し戻し 要修正2)", () => {
     // 「操作者が読むのは docs/versioning.md と CLAUDE.md であり、本テストファイルのコメントは
     // 読まれない」という指摘(要修正2)への対応。EXPECTED_APP_VERSION というテスト内部の
     // 定数名まで含めて列挙することで、「pnpm test が落ちたら何を更新し忘れたか」を
@@ -311,8 +315,13 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
     const doc = readNormalized(VERSIONING_DOC_PATH);
 
     expect(doc).toContain("同時更新チェックリスト");
+    // 6項目のうち、複数箇所を1つの toContain で束ねると「片方が消えても緑」という穴が残る
+    // (メタレビュー提案)。root/app の package.json、docs/current-spec.md の2箇所
+    // (冒頭・バージョン一覧行)、keiba-ev-tool-spec.md、EXPECTED_APP_VERSION を個別に固定する。
+    expect(doc).toContain("root `package.json`");
     expect(doc).toContain("packages/app/package.json");
-    expect(doc).toContain("docs/current-spec.md");
+    expect(doc).toContain("実際に実装されている現状(vX.Y.Z)");
+    expect(doc).toContain("バージョン: ルート/アプリ");
     expect(doc).toContain("keiba-ev-tool-spec.md");
     expect(doc).toContain("EXPECTED_APP_VERSION");
     // 「テストの失敗ではなく更新漏れの検出である」という読み方そのものを明示していること。
