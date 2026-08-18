@@ -114,6 +114,11 @@
 それ以外の Issue(回収率比較・リリースタグ等)は後回しにする。全体像と技術的な依存関係は **#22** に集約。
 例外として #20(同時分布モデルの厳密化)は馬単・三連単の技術的前提なのでシリーズの一部として扱う。
 
+**次に着手する Issue の具体的な順番は [`docs/issue-order.md`](./docs/issue-order.md) を見る。**
+依存関係・前提・「着手しないと決めた理由」もそこに集約する。会話の文脈が失われても、
+このファイルと GitHub Issue を見れば次に何をやるかが分かる状態を保つこと。
+**Issue を完了・追加したら同ファイルも更新する**(open な Issue と食い違ったら GitHub が正)。
+
 ## ワークフロー(オーケストレーション)
 メインセッションは進行管理に徹し、実装とレビューはサブエージェントに委譲する。1タスクの間は3体のセッションを保持し、`SendMessage` で往復する(タスク完了で破棄):
 
@@ -198,4 +203,5 @@
 - [`docs/prompt-improvement-plan.md`](./docs/prompt-improvement-plan.md) — 検証結果(回収率)に基づく LLM プロンプト改善の仕組みの検討メモ(過学習リスク・記録/可視化を先行する方針)。
 - [`docs/handover-next-session.md`](./docs/handover-next-session.md) — 過去セッションから次セッションへの引き継ぎ(実装済みタスクの仕様記録・技術メモ)。
 - [`docs/versioning.md`](./docs/versioning.md) — 版数運用規約(major/minor/patch の基準、公開1回につき必ず1回上げる運用、`packages/core` 対象外の理由)。
+- [`docs/issue-order.md`](./docs/issue-order.md) — **Issue の着手順**。次に何をやるか、依存関係・前提、着手しないと決めた理由を集約。
 - 補足: [`README.md`](./README.md) は利用者向けの概要・ダウンロード・Discord 設定・開発コマンド、[`GETTING_STARTED.md`](./GETTING_STARTED.md) はクラウド版の開始手順。
