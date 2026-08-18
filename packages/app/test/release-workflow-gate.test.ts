@@ -63,6 +63,13 @@
  *    「規約に書いた運用と CI の実装がずれても誰も気付かない」構造が土台にあるため、規約と CI の
  *    乖離を機械的に検出できるようにする。語句の言い換えでは検出できないが、トークンの存在のみを
  *    見る緩い検査でも「規約からリテラルが丸ごと消える/書き換わる」ような乖離は検出できる)
+ * 13. 旧セマンティクス(「push ごとに dev-latest が更新される」)の文言が README.md・
+ *    docs/current-spec.md に再混入していない(Issue #43 の作業中、この文言が2つのドキュメントに
+ *    独立して2回残存する事故が実際に起きたため追加。対象は利用者/現状仕様の記述であり、
+ *    開発者向けの CLAUDE.md・docs/development-workflow.md は対象外とする——両ファイルは
+ *    「どう運用するか」の手続きを書く文脈であり、「今 dev-latest がどう更新されるか」を
+ *    利用者/現状仕様として断定する文とは性質が違うため、この不変条件のスコープに含めない。
+ *    検出できる範囲・できない範囲は STALE_PUSH_EVERY_PATTERN のコメントを参照)
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -82,9 +89,41 @@ const DEVELOPMENT_WORKFLOW_PATH = path.join(
   REPO_ROOT,
   "docs/development-workflow.md",
 );
+const README_PATH = path.join(REPO_ROOT, "README.md");
 
 /** dev-latest 公開の承認印リテラル。CI・CLAUDE.md・docs の全箇所で同一文字列である必要がある。 */
 const APPROVAL_MARK = "[PUBLISH-APPROVED]";
+
+/**
+ * 旧セマンティクス(「push すれば常に dev-latest が更新される」)の再混入を検出するための
+ * 近接パターン。Issue #43 の作業中に、この文言が `docs/current-spec.md`・`README.md` の
+ * 2箇所に独立して残存する事故が実際に2回起きたため、機械検査に落とす。
+ *
+ * 「push ごとに」という字句単体を全文検索すると、正当な文脈(例えば別の自動化を指して
+ * 「push ごとに CI が走る」のような無関係な記述)まで誤検出し、次にこのテストに当たった人が
+ * テストを緩める方向へ動きかねない。そこで今回実際に問題になった形——「push ごとに」と
+ * 「dev-latest」が同じ文の中で近接して現れる——に絞る。しきい値 100 文字は、実際に事故が
+ * 起きた2つの文例(例:「push ごとに固定タグ **`dev-latest`** のプレリリースを」)の間隔
+ * (20〜30文字程度)に安全マージンを加えた値であり、章をまたぐような遠い偶然の共起までは
+ * 拾わない。
+ *
+ * 【このテストが守るもの】「push ごとに」と「dev-latest」が同一文脈(100文字以内)で
+ * 共起する、今回実際に発生した形そのものの再混入。
+ * 【このテストが守らないもの】同じ意味の言い換え(例:「毎回公開されます」「push するたびに
+ * 差し替わります」等)。パターンを広げて言い換えまで拾おうとすると、正当な文脈での誤検出が
+ * 増え、テストが形骸化(緩和・削除)される方向に働くため、あえて対応しない。次にこの領域を
+ * 触る人が「このテストがあるから言い換えも安全」と誤解しないよう、ここに明記する。
+ */
+const STALE_PUSH_EVERY_PATTERN = /push\s*ごとに[\s\S]{0,100}dev-latest/;
+
+/**
+ * yml 以外の任意テキストから、旧セマンティクスの再混入を検出する。
+ * yml 側は既にワークフロー自体の書き換え(このタスク)で正しい記述に揃っているため対象外とし、
+ * 「規約・ドキュメントに旧文言が戻っていないか」を確認する用途に絞る。
+ */
+function hasStalePushEverySemantics(text: string): boolean {
+  return STALE_PUSH_EVERY_PATTERN.test(text);
+}
 
 const STEP_NAMES = {
   typecheck: "型検査を実行",
@@ -411,5 +450,20 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     expect(claudeMd).toContain(APPROVAL_MARK);
     expect(currentSpec).toContain(APPROVAL_MARK);
     expect(developmentWorkflow).toContain(APPROVAL_MARK);
+  });
+
+  it("旧セマンティクス(「push ごとに dev-latest が更新される」)の文言が README.md・docs/current-spec.md に再混入していない(Issue #43)", () => {
+    // Issue #43 の作業中、「push すれば常に dev-latest が更新される」という旧セマンティクスの
+    // 文言が docs/current-spec.md・README.md の2箇所に独立して残存する事故が実際に2回起きた
+    // (dev-latest 公開ゲートを追加した diff の中で、隣接する既存文言の更新が漏れた)。
+    // 人の目視レビューで2回見落としたものは3回目も見落とされうるため、機械検査に落とす。
+    //
+    // 前提固定: 現時点でこの2ファイルに旧文言が存在しないこと(このテストが「常に真」の
+    // 空振りになっていないこと)をまず確認する。
+    const readme = readFileSync(README_PATH, "utf8");
+    const currentSpecForStaleCheck = readFileSync(CURRENT_SPEC_PATH, "utf8");
+
+    expect(hasStalePushEverySemantics(readme)).toBe(false);
+    expect(hasStalePushEverySemantics(currentSpecForStaleCheck)).toBe(false);
   });
 });
