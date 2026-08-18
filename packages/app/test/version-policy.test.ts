@@ -52,10 +52,13 @@ const VERSIONING_DOC_PATH = path.join(REPO_ROOT, "docs/versioning.md");
  * /対象外[\s\S]{0,200}(private|npm)/ は一致長177文字中に改行4個)が改行をまたいでいる。
  * それでもこの正規化を外して全件緑のままなのは、しきい値(200/80/60文字)に対して
  * CRLF による `\r` の増分(改行の出現数と同数)が十分小さく、一致の成否を左右しないため。
- * ただし D-2(#45)申し送りパターン(/D-2[\s\S]{0,60}workflow_dispatch[\s\S]{0,60}除外/)は
- * 一致長53文字に対ししきい値60文字と余裕が薄く(CRLF込みで54文字)、語間を7文字ほど広げる
- * 書き換えが入ると LF では緑・CRLF では赤になりうる。今この関数を外しても全件緑という結論は
- * 変わらないが、将来パターンが伸びたときの予防として本正規化を維持する。
+ * D-2(#45)申し送りパターン(/D-2[\s\S]{0,60}workflow_dispatch[\s\S]{0,60}除外/)は
+ * `{0,60}` の隙間が独立に2箇所ある(合算の単一予算ではない)。実測: gap1(D-2〜workflow_dispatch)は
+ * 18文字(改行1個を含む)でしきい値60への余裕42文字、gap2(workflow_dispatch〜除外)は13文字
+ * (改行なし)で余裕47文字。余裕が薄いのは改行を含む gap1 のほうで、実際に gap1 だけを42文字
+ * 広げる注入実験(このコメントを書いた本人が実行)では LF=緑・CRLF=赤に転じ、43文字広げると
+ * 両方赤になる(41文字までは両方緑)。今この関数を外しても全件緑という結論は変わらないが、
+ * 将来パターンが伸びたときの予防として本正規化を維持する。
  */
 function readNormalized(filePath: string): string {
   return readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
@@ -318,8 +321,12 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
     // 6項目のうち、複数箇所を1つの toContain で束ねると「片方が消えても緑」という穴が残る
     // (メタレビュー提案)。root/app の package.json、docs/current-spec.md の2箇所
     // (冒頭・バージョン一覧行)、keiba-ev-tool-spec.md、EXPECTED_APP_VERSION を個別に固定する。
+    // 各固定文字列は文書内で一意である(出現回数=1)ことを実測して選定した
+    // (「packages/app/package.json」単体は背景・チェックリスト・core対象外理由の3箇所に
+    // 出現し項目を丸ごと削除しても緑のままになる穴があったため、チェックリストの当該行
+    // 「`packages/app/package.json` の `version`」でのみ一意に一致する部分文字列に直した)。
     expect(doc).toContain("root `package.json`");
-    expect(doc).toContain("packages/app/package.json");
+    expect(doc).toContain("`packages/app/package.json` の `version`");
     expect(doc).toContain("実際に実装されている現状(vX.Y.Z)");
     expect(doc).toContain("バージョン: ルート/アプリ");
     expect(doc).toContain("keiba-ev-tool-spec.md");
