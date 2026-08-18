@@ -46,6 +46,12 @@ const VERSIONING_DOC_PATH = path.join(REPO_ROOT, "docs/versioning.md");
  * CI(windows-latest)の checkout は .gitattributes 次第で CRLF になりうる。本ファイルで
  * 文書テキストに正規表現を当てるすべての箇所は、この関数を通した正規化済みテキストに対して
  * 行う(release-workflow-gate.test.ts と同じ理由・同じ手当て)。
+ *
+ * 注記(#45 メタレビュー): 現時点では、本ファイルが当てる正規表現・toContain はいずれも版数表記の
+ * 近傍に改行を挟まない短い一致であるため、この正規化を外しても全件緑のままである(=現時点では
+ * load-bearing ではない)。それでも適用するのは、将来パターンが行をまたいだとき
+ * (例: 複数行にわたる箇条書きを近接パターンで検査する)に CRLF だけで CI が
+ * ローカルと異なる結果になる事故を予防するため。
  */
 function readNormalized(filePath: string): string {
   return readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
@@ -273,6 +279,44 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
 
     expect(doc).toContain("1.2.0");
     expect(doc).toMatch(/(coerceSettings|ALTER TABLE)/);
+  });
+
+  it("workflow_dispatch による同一コミットの再送は「公開」に含めず、版数を上げない旨が明記されている(#45差し戻し要修正1)", () => {
+    // 差し戻し前は「頻度」条項が [PUBLISH-APPROVED] push と workflow_dispatch の両方を
+    // 「公開」として扱っており、後者は同一コミットの再実行であるため版数を上げる余地が
+    // そもそも無い(物理的に満たせない条項だった)。ここでは修正後の条項の中心語を
+    // toContain の積み上げで固定する(言い換えへの脆さより、一度差し戻された条項という
+    // 経緯を踏まえた検出力を優先する)。
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+
+    expect(doc).toContain("workflow_dispatch");
+    expect(doc).toContain("「公開」に含めない");
+    expect(doc).toMatch(/版数は上げない/);
+  });
+
+  it("D-2(#45)の機械検査でも workflow_dispatch を版数据え置き検査から除外する予定である旨が記されている(次タスクへの申し送り)", () => {
+    // D-1(本書)と D-2(#45 の機械検査)の間で「workflow_dispatch をどう扱うか」の認識が
+    // ずれると、D-2 の実装者が本書を仕様として読んだときに手戻りが起きる(差し戻し要修正1の
+    // 指摘そのもの)。D-2 への申し送りが本書に残っていることを固定する。
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+
+    expect(doc).toMatch(/D-2[\s\S]{0,60}workflow_dispatch[\s\S]{0,60}除外/);
+  });
+
+  it("版数を上げるときの同時更新チェックリストが、不変条件テストが実際にピン留めしている全箇所を列挙している(#45差し戻し要修正2)", () => {
+    // 「操作者が読むのは docs/versioning.md と CLAUDE.md であり、本テストファイルのコメントは
+    // 読まれない」という指摘(要修正2)への対応。EXPECTED_APP_VERSION というテスト内部の
+    // 定数名まで含めて列挙することで、「pnpm test が落ちたら何を更新し忘れたか」を
+    // 操作者向け文書だけから辿れることを固定する。
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+
+    expect(doc).toContain("同時更新チェックリスト");
+    expect(doc).toContain("packages/app/package.json");
+    expect(doc).toContain("docs/current-spec.md");
+    expect(doc).toContain("keiba-ev-tool-spec.md");
+    expect(doc).toContain("EXPECTED_APP_VERSION");
+    // 「テストの失敗ではなく更新漏れの検出である」という読み方そのものを明示していること。
+    expect(doc).toMatch(/更新漏れ.{0,20}(検出|正しく)/);
   });
 });
 
