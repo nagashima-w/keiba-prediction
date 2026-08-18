@@ -232,10 +232,11 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 
 - **Windows portable exe**(`keiba-ev-tool-<version>-portable.exe`、インストール不要)。
 - **開発版**: 開発ブランチ(`claude/keiba-ev-tool-dev-cvagiu`・`claude/handover-next-session-x5ki6o`・
-  `claude/keiba-prediction-handover-ojr8t1`)への push ごとに固定タグ **`dev-latest`** のプレリリースを
-  in-place 更新(ローリング公開)。**exe 名がバージョン依存のため、version を上げると旧名のアセットが
-  残置される**。これを防ぐため、公開ステップの直後に現行ファイル名以外の `.exe` を削除する掃除ステップを
-  置いている(最新 exe が先にアップロード済みの状態を保つ順序)。
+  `claude/keiba-prediction-handover-ojr8t1`)への push のうち、下記の dev-latest 公開ゲート(Issue #43)
+  を満たすものだけが固定タグ **`dev-latest`** のプレリリースを in-place 更新する(ローリング公開。
+  **push すれば常に更新されるわけではない**)。**exe 名がバージョン依存のため、version を上げると
+  旧名のアセットが残置される**。これを防ぐため、公開ステップの直後に現行ファイル名以外の `.exe` を
+  削除する掃除ステップを置いている(最新 exe が先にアップロード済みの状態を保つ順序)。
 - **正式版**: `v*` タグ(例 `v1.0.0`)push でそのタグの通常リリースを公開。
 - **dev-latest 公開ゲート(Issue #43。既定で非公開)**: `dev-latest` への公開は、
   (i) ブランチ ref への push でコミットメッセージ(件名末尾)に承認印 `[PUBLISH-APPROVED]` を含み、
