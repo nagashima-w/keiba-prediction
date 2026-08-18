@@ -35,6 +35,7 @@
  */
 
 import type {
+  ComboOddsScrapeOutcome,
   RaceData,
   RaceResultDetail,
   RaceResultEntry,
@@ -79,6 +80,26 @@ export interface RaceSnapshotHorse {
 export interface RaceSnapshot {
   readonly race: RaceSnapshotRace;
   readonly horses: readonly RaceSnapshotHorse[];
+  /**
+   * ワイドオッズ(機能D-2c・Issue #28)。`scrapeRace`の`options.includeComboOdds`が
+   * trueのときのみ設定される(既定undefined。core `OddsSnapshot.wideCombo`のプレーン写し)。
+   *
+   * **この値自体は「JSON永続化用のスナップショット」であり、馬券配分の計算には使われない**
+   * (この記述は今も正しい)。第4段(Issue #28)で券種横断の配分が実際に使うのは、
+   * このスナップショットではなく**別の生きた経路**(`AnalysisResult.wideCombo` →
+   * `renderer/mixed-allocation-view.ts`。DB保存を経ずに分析結果からその場で計算する)である。
+   * 混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・DB保存専用の写しに
+   * すぎず、配分計算の入力としては一切参照されない。
+   */
+  readonly wideCombo?: Record<string, number | null>;
+  /** 三連複オッズ(機能D-2c第3段)。`wideCombo`と同じ条件・同じ理由でoptional。 */
+  readonly trioCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズの取得診断値(機能D-2c第3段)。`wideCombo`/`trioCombo`が空({})になった原因
+   * (発売なし/未発売なのか、取得失敗なのか)を判別する唯一の手段(`comboOdds.<betType>.state`)。
+   * core `RaceDataMeta.comboOdds`のプレーン写し。
+   */
+  readonly comboOdds?: ComboOddsScrapeOutcome;
 }
 
 /**
@@ -118,6 +139,14 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         oikiriRank: h.oikiri?.rank ?? null,
       };
     }),
+    // 組合せオッズ(ワイド・三連複、機能D-2c第3段・Issue #28): race.odds.wideCombo/trioCombo・
+    // race.meta.comboOdds はいずれも scrapeRace の options.includeComboOdds が true のときだけ
+    // 設定される optional フィールド。ここでは「写すだけ」で新たな解釈・変換は行わない
+    // (analysis-pipeline.ts の AnalysisResult 組み立て〈同じ写し方〉と同じ流儀。条件付きspreadで、
+    // 未設定〈undefined〉のときはキー自体を持たせない)。
+    ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
+    ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
+    ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }
 

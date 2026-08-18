@@ -10,6 +10,9 @@
 import {
   BASE_SCORE_WEIGHT_KEYS,
   BIAS_WEIGHT_KEYS,
+  isValidBankroll,
+  isValidKellyFraction,
+  isValidPerRaceCap,
   isValidThreshold,
   isValidWebhookUrl,
   isValidWeight,
@@ -65,6 +68,18 @@ export interface SettingsFormState {
   readonly additionalInstruction: string;
   /** クリップ幅の版ID(タスクD-2: ±10%↔±15%のA/B)。 */
   readonly clipVariant: ClipVariantId;
+  /** 馬券用の総資金(文字列。機能C-2)。 */
+  readonly bankroll: string;
+  /** 1レースの上限(文字列。機能C-2)。 */
+  readonly perRaceCap: string;
+  /** 馬券配分のケリー係数λ(文字列。機能C-2)。 */
+  readonly kellyFraction: string;
+  /** ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。既定false。 */
+  readonly includeComboOdds: boolean;
+  /** ワイドを馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。既定true。 */
+  readonly includeWideInAllocation: boolean;
+  /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。既定true。 */
+  readonly includeTrioInAllocation: boolean;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -80,6 +95,11 @@ export interface SettingsFormState {
    * status="saved" のときは保存先パス、status="error" のときは失敗メッセージを保持する。
    */
   readonly logExportMessage: string | null;
+  /**
+   * 未保存(dirty)判定の基準となるスナップショット(Issue #11)。
+   * 読込成功・保存成功のたびに applyMasked 内で更新され、フォームの現在値との差分が isDirty の判定に使われる。
+   */
+  readonly savedSnapshot: SettingsSnapshot;
 }
 
 /** reducer が処理するアクション。 */
@@ -103,6 +123,12 @@ export type SettingsAction =
   | { readonly type: "自動送信切替"; readonly value: boolean }
   | { readonly type: "追加指示入力"; readonly value: string }
   | { readonly type: "クリップ幅版選択"; readonly value: ClipVariantId }
+  | { readonly type: "総資金入力"; readonly value: string }
+  | { readonly type: "1レース上限入力"; readonly value: string }
+  | { readonly type: "ケリー係数入力"; readonly value: string }
+  | { readonly type: "組合せオッズ取得切替"; readonly value: boolean }
+  | { readonly type: "ワイド配分対象切替"; readonly value: boolean }
+  | { readonly type: "三連複配分対象切替"; readonly value: boolean }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
   | { readonly type: "保存失敗"; readonly message: string }
@@ -147,6 +173,57 @@ function stringRecordToNumbers<K extends string>(
   return out;
 }
 
+/**
+ * 未保存(dirty)判定の基準となるスナップショット(Issue #11)。
+ * applyMasked がフォームへ反映するのと同じ正規化済み文字列表現(String()/numberRecordToStrings済み)を
+ * 保持する。MaskedSettings の数値をそのまま比較すると "1" vs "1.0" のような表記揺れで誤 dirty になるため、
+ * 必ず applyMasked の生成結果と同じ経路を通した値をここに置く。
+ * APIキーはスナップショットを持たない(apiKeyInput !== "" 自体を dirty 条件にするため、shared/settings.ts の
+ * SettingsUpdate/isFormValid には一切影響しない)。
+ */
+export interface SettingsSnapshot {
+  readonly discordWebhookUrl: string;
+  readonly evThreshold: string;
+  readonly biasWeights: Record<BiasWeightKey, string>;
+  readonly baseScoreWeights: Record<BaseScoreWeightKey, string>;
+  readonly autoSendDiscord: boolean;
+  readonly additionalInstruction: string;
+  readonly clipVariant: ClipVariantId;
+  /** 馬券用の総資金(文字列。機能C-2)。 */
+  readonly bankroll: string;
+  /** 1レースの上限(文字列。機能C-2)。 */
+  readonly perRaceCap: string;
+  /** 馬券配分のケリー係数λ(文字列。機能C-2)。 */
+  readonly kellyFraction: string;
+  /** ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。 */
+  readonly includeComboOdds: boolean;
+  /** ワイドを馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。 */
+  readonly includeWideInAllocation: boolean;
+  /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。 */
+  readonly includeTrioInAllocation: boolean;
+}
+
+/** 空文字ベースの初期スナップショットを作る。 */
+function emptySnapshot(): SettingsSnapshot {
+  return {
+    discordWebhookUrl: "",
+    evThreshold: "",
+    biasWeights: emptyRecord(BIAS_WEIGHT_KEYS),
+    baseScoreWeights: emptyRecord(BASE_SCORE_WEIGHT_KEYS),
+    autoSendDiscord: false,
+    additionalInstruction: "",
+    clipVariant: "default",
+    bankroll: "",
+    perRaceCap: "",
+    kellyFraction: "",
+    includeComboOdds: false,
+    // 未読込状態の初期値。読込成功時にAppSettingsの実既定(true)へ上書きされる
+    // (createInitialSettingsStateも同様。ここはあくまで「まだ何も読み込んでいない」状態の表現)。
+    includeWideInAllocation: false,
+    includeTrioInAllocation: false,
+  };
+}
+
 /** 初期状態(未読込・空)。 */
 export function createInitialSettingsState(): SettingsFormState {
   return {
@@ -161,20 +238,51 @@ export function createInitialSettingsState(): SettingsFormState {
     autoSendDiscord: false,
     additionalInstruction: "",
     clipVariant: "default",
+    bankroll: "",
+    perRaceCap: "",
+    kellyFraction: "",
+    includeComboOdds: false,
+    includeWideInAllocation: false,
+    includeTrioInAllocation: false,
     status: "idle",
     message: null,
     logFolderStatus: "idle",
     logFolderMessage: null,
     logExportStatus: "idle",
     logExportMessage: null,
+    savedSnapshot: emptySnapshot(),
   };
 }
 
-/** マスク済み設定をフォーム状態へ反映する(読込成功・保存成功で共通利用)。 */
+/**
+ * マスク済み設定をフォーム状態へ反映する(読込成功・保存成功で共通利用)。
+ * 反映と同時に savedSnapshot(dirty判定の基準)も同じ正規化済み文字列で更新する(Issue #11)。
+ * こうすることで読込直後・保存直後は必ず isDirty=false になり、
+ * スナップショット更新箇所がこの1関数に集約される。
+ */
 function applyMasked(
   state: SettingsFormState,
   settings: MaskedSettings,
 ): SettingsFormState {
+  const discordWebhookUrl = settings.discordWebhookUrl;
+  const evThreshold = String(settings.evThreshold);
+  const biasWeights = numberRecordToStrings(
+    BIAS_WEIGHT_KEYS,
+    settings.biasWeights,
+  );
+  const baseScoreWeights = numberRecordToStrings(
+    BASE_SCORE_WEIGHT_KEYS,
+    settings.baseScoreWeights,
+  );
+  const autoSendDiscord = settings.autoSendDiscord;
+  const additionalInstruction = settings.additionalInstruction;
+  const clipVariant = settings.clipVariant;
+  const bankroll = String(settings.bankroll);
+  const perRaceCap = String(settings.perRaceCap);
+  const kellyFraction = String(settings.kellyFraction);
+  const includeComboOdds = settings.includeComboOdds;
+  const includeWideInAllocation = settings.includeWideInAllocation;
+  const includeTrioInAllocation = settings.includeTrioInAllocation;
   return {
     ...state,
     loaded: true,
@@ -182,16 +290,34 @@ function applyMasked(
     apiKeyInput: "",
     apiKeyMasked: settings.apiKeyMasked,
     apiKeyFromEnv: settings.apiKeyFromEnv,
-    discordWebhookUrl: settings.discordWebhookUrl,
-    evThreshold: String(settings.evThreshold),
-    biasWeights: numberRecordToStrings(BIAS_WEIGHT_KEYS, settings.biasWeights),
-    baseScoreWeights: numberRecordToStrings(
-      BASE_SCORE_WEIGHT_KEYS,
-      settings.baseScoreWeights,
-    ),
-    autoSendDiscord: settings.autoSendDiscord,
-    additionalInstruction: settings.additionalInstruction,
-    clipVariant: settings.clipVariant,
+    discordWebhookUrl,
+    evThreshold,
+    biasWeights,
+    baseScoreWeights,
+    autoSendDiscord,
+    additionalInstruction,
+    clipVariant,
+    bankroll,
+    perRaceCap,
+    kellyFraction,
+    includeComboOdds,
+    includeWideInAllocation,
+    includeTrioInAllocation,
+    savedSnapshot: {
+      discordWebhookUrl,
+      evThreshold,
+      biasWeights,
+      baseScoreWeights,
+      autoSendDiscord,
+      additionalInstruction,
+      clipVariant,
+      bankroll,
+      perRaceCap,
+      kellyFraction,
+      includeComboOdds,
+      includeWideInAllocation,
+      includeTrioInAllocation,
+    },
   };
 }
 
@@ -242,6 +368,24 @@ export function settingsReducer(
 
     case "クリップ幅版選択":
       return { ...state, clipVariant: action.value };
+
+    case "総資金入力":
+      return { ...state, bankroll: action.value };
+
+    case "1レース上限入力":
+      return { ...state, perRaceCap: action.value };
+
+    case "ケリー係数入力":
+      return { ...state, kellyFraction: action.value };
+
+    case "組合せオッズ取得切替":
+      return { ...state, includeComboOdds: action.value };
+
+    case "ワイド配分対象切替":
+      return { ...state, includeWideInAllocation: action.value };
+
+    case "三連複配分対象切替":
+      return { ...state, includeTrioInAllocation: action.value };
 
     case "保存開始":
       return { ...state, status: "saving", message: null };
@@ -316,10 +460,74 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     autoSendDiscord: state.autoSendDiscord,
     additionalInstruction: state.additionalInstruction,
     clipVariant: state.clipVariant,
+    bankroll: Number(state.bankroll),
+    perRaceCap: Number(state.perRaceCap),
+    kellyFraction: Number(state.kellyFraction),
+    includeComboOdds: state.includeComboOdds,
+    includeWideInAllocation: state.includeWideInAllocation,
+    includeTrioInAllocation: state.includeTrioInAllocation,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
     : update;
+}
+
+/**
+ * フォームに未保存の変更があるか(Issue #11「未保存(dirty)インジケータ」)。
+ * savedSnapshot(最後に読込/保存した値)と現在のフォーム値を項目ごとに比較する。
+ * APIキーはマスク値と比較せず、apiKeyInput が空文字でないこと自体を独立した dirty 条件とする
+ * (apiKeyFromEnv=true のときは入力欄が disabled で apiKeyInput は常に空のため、dirty化しない)。
+ * isFormValid とは独立(不正な入力でも dirty は成立しうる)。canSave の判定には使わない。
+ */
+export function isDirty(state: SettingsFormState): boolean {
+  if (state.apiKeyInput !== "") {
+    return true;
+  }
+  const snap = state.savedSnapshot;
+  if (state.discordWebhookUrl !== snap.discordWebhookUrl) {
+    return true;
+  }
+  if (state.evThreshold !== snap.evThreshold) {
+    return true;
+  }
+  if (state.autoSendDiscord !== snap.autoSendDiscord) {
+    return true;
+  }
+  if (state.additionalInstruction !== snap.additionalInstruction) {
+    return true;
+  }
+  if (state.clipVariant !== snap.clipVariant) {
+    return true;
+  }
+  if (state.bankroll !== snap.bankroll) {
+    return true;
+  }
+  if (state.perRaceCap !== snap.perRaceCap) {
+    return true;
+  }
+  if (state.kellyFraction !== snap.kellyFraction) {
+    return true;
+  }
+  if (state.includeComboOdds !== snap.includeComboOdds) {
+    return true;
+  }
+  if (state.includeWideInAllocation !== snap.includeWideInAllocation) {
+    return true;
+  }
+  if (state.includeTrioInAllocation !== snap.includeTrioInAllocation) {
+    return true;
+  }
+  for (const key of BIAS_WEIGHT_KEYS) {
+    if (state.biasWeights[key] !== snap.biasWeights[key]) {
+      return true;
+    }
+  }
+  for (const key of BASE_SCORE_WEIGHT_KEYS) {
+    if (state.baseScoreWeights[key] !== snap.baseScoreWeights[key]) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** フォーム全体が妥当か(EV閾値・全重み・Webhook URL)。 */
@@ -328,6 +536,15 @@ export function isFormValid(state: SettingsFormState): boolean {
     return false;
   }
   if (!isValidWebhookUrl(state.discordWebhookUrl)) {
+    return false;
+  }
+  if (!isValidBankroll(state.bankroll)) {
+    return false;
+  }
+  if (!isValidPerRaceCap(state.perRaceCap)) {
+    return false;
+  }
+  if (!isValidKellyFraction(state.kellyFraction)) {
     return false;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

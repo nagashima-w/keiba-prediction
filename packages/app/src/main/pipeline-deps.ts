@@ -17,6 +17,7 @@ import {
   analyzeRace,
   AnthropicLlmClient,
   CachedFetcher,
+  collectGradeWinnerTrend,
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
@@ -32,6 +33,7 @@ import {
   type ClipVariantId,
   type EvConfig,
   type FetchLike,
+  type GradeWinnerConditions,
   type KaisaiDate,
   type MessageSender,
   type RaceId,
@@ -117,6 +119,12 @@ export interface PipelineWiringConfig {
     message: string,
     context: { readonly raceId: string; readonly stopReason: string | null },
   ) => void;
+  /**
+   * ワイド・三連複のオッズも取得するか(機能D-2c第3段・Issue #28)。省略時・未指定は
+   * `deps.scrape` が `??` で既定false(組合せオッズを取得しない)へフォールバックする
+   * (第1段までの既定挙動と発行URL列・リクエスト数が完全に一致する)。
+   */
+  readonly includeComboOdds?: boolean;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -219,7 +227,15 @@ export function createPipelineDeps(
     : null;
 
   const deps: AnalysisPipelineDeps = {
-    scrape: (raceId: RaceId) => scrapeRace(raceId, { fetcher }),
+    // 組合せオッズ(ワイド・3連複、機能D-2c第3段・Issue #28): 設定画面のチェックボックス
+    // (config.includeComboOdds)をそのまま第3引数(ScrapeRaceOptions)へ渡す。`??`で既定falseへ
+    // フォールバックするため、未指定時は第1段までと発行URL列・リクエスト数が完全に一致する
+    // (`??`を落とすとconfig.includeComboOddsがundefinedのまま素通りし、既定OFFの契約が壊れる)。
+    // bypassOddsCache(第3引数の他フィールド)・now/ttl(第2引数)は渡さない(対応表D1・D3。
+    // 組合せオッズはcore側〈scrape-race.ts:446〉が単勝・複勝と同じoddsFetchOptionsを流用するため、
+    // ここを触ると単勝・複勝のキャッシュ挙動まで変わる)。
+    scrape: (raceId: RaceId) =>
+      scrapeRace(raceId, { fetcher }, { includeComboOdds: config.includeComboOdds ?? false }),
     analyze,
     saveAnalysis: (record) => store.saveAnalysis(record),
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
@@ -235,6 +251,21 @@ export function createPipelineDeps(
     // 当日の同一場・同一面傾向(タスク#27-C)。store.getRaceResultDetail をそのまま束縛するだけで、
     // 新規スクレイピング・実リクエスト・DB書き込みは一切増えない(既存の取込済みデータの読み出しのみ)。
     getRaceResultDetail: (raceId: RaceId) => store.getRaceResultDetail(raceId),
+    // 同レース(重賞)の過去10年結果傾向(タスク機能B)。fetcher(既存のCachedFetcher。中央・地方
+    // いずれもホスト自動選択で取得できる)で束縛した collectGradeWinnerTrend をそのまま渡す。
+    getGradeWinnerTrend: (raceId: RaceId, conditions: GradeWinnerConditions) =>
+      collectGradeWinnerTrend(raceId, conditions, { fetcher }),
+    // 要修正10: getGradeWinnerTrendが例外を投げた(構造破壊・API仕様変更等の本物の異常)ときの
+    // 診断ログを、HttpClientの警告と同じ既存チャンネル(config.onWarn→ipc.tsのlogWarn)へ流す。
+    // 非重賞NG(status:NG)・条件一致3回未満のような正常系のnull返却は例外を投げないため、
+    // このフック自体が呼ばれない(既存どおり無音)。config.onWarn未指定ならundefinedのまま
+    // (診断ログを残さないだけで、runAnalysis側の null フォールバック自体は変わらない)。
+    onGradeWinnerTrendError: config.onWarn
+      ? (info) =>
+          config.onWarn!(
+            `同レース過去10年結果傾向(AplGradeWinner)の取得に失敗しました(race_id: ${info.raceId}): ${info.message}`,
+          )
+      : undefined,
     llmSkipReason: useLlm
       ? undefined
       : "APIキー(ANTHROPIC_API_KEY)が未設定のため",

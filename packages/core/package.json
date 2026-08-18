@@ -1,6 +1,6 @@
 {
   "name": "@keiba/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -11,7 +11,13 @@
     ".": "./src/index.ts",
     "./scorer/config": "./src/scorer/config.ts",
     "./ev/race-opportunity": "./src/ev/race-opportunity.ts",
-    "./analyzer/build-prompt": "./src/analyzer/build-prompt.ts"
+    "./ev/place-joint-model": "./src/ev/place-joint-model.ts",
+    "./ev/bet-allocation": "./src/ev/bet-allocation.ts",
+    "./ev/combo-bet-allocation": "./src/ev/combo-bet-allocation.ts",
+    "./ev/probability-quality": "./src/ev/probability-quality.ts",
+    "./scorer/snapshot-filter": "./src/scorer/snapshot-filter.ts",
+    "./analyzer/build-prompt": "./src/analyzer/build-prompt.ts",
+    "./scraper/validate-period-input": "./src/scraper/validate-period-input.ts"
   },
   "scripts": {
     "test": "vitest run",

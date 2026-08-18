@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { MaskedSettings } from "../src/shared/settings.js";
+import {
+  BASE_SCORE_WEIGHT_KEYS,
+  BIAS_WEIGHT_KEYS,
+  type MaskedSettings,
+} from "../src/shared/settings.js";
 import {
   buildUpdate,
   createInitialSettingsState,
+  isDirty,
   isFormValid,
   settingsReducer,
+  type SettingsAction,
   type SettingsFormState,
 } from "../src/renderer/settings-reducer.js";
 
@@ -36,6 +42,12 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
     autoSendDiscord: false,
     additionalInstruction: "",
     clipVariant: "default",
+    bankroll: 0,
+    perRaceCap: 0,
+    kellyFraction: 0.5,
+    includeComboOdds: false,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
     ...overrides,
   };
 }
@@ -80,6 +92,57 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.clipVariant).toBe("wide15");
   });
 
+  it("読込成功で馬券配分3項目(bankroll/perRaceCap/kellyFraction)を文字列として反映すること(機能C-2)", () => {
+    const s = loadedState(
+      fakeMasked({ bankroll: 300000, perRaceCap: 20000, kellyFraction: 0.3 }),
+    );
+    expect(s.bankroll).toBe("300000");
+    expect(s.perRaceCap).toBe("20000");
+    expect(s.kellyFraction).toBe("0.3");
+  });
+
+  it("読込成功でincludeComboOdds(機能D-2c第3段)を反映すること(OFF/ON両方向)", () => {
+    expect(loadedState(fakeMasked({ includeComboOdds: false })).includeComboOdds).toBe(false);
+    expect(loadedState(fakeMasked({ includeComboOdds: true })).includeComboOdds).toBe(true);
+  });
+
+  it("includeComboOddsとautoSendDiscordが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    const s = loadedState(
+      fakeMasked({ autoSendDiscord: true, includeComboOdds: false }),
+    );
+    expect(s.autoSendDiscord).toBe(true);
+    expect(s.includeComboOdds).toBe(false);
+  });
+
+  it("読込成功でincludeWideInAllocation/includeTrioInAllocation(機能D-2c第4段)を反映すること(OFF/ON両方向)", () => {
+    expect(
+      loadedState(fakeMasked({ includeWideInAllocation: false })).includeWideInAllocation,
+    ).toBe(false);
+    expect(
+      loadedState(fakeMasked({ includeWideInAllocation: true })).includeWideInAllocation,
+    ).toBe(true);
+    expect(
+      loadedState(fakeMasked({ includeTrioInAllocation: false })).includeTrioInAllocation,
+    ).toBe(false);
+    expect(
+      loadedState(fakeMasked({ includeTrioInAllocation: true })).includeTrioInAllocation,
+    ).toBe(true);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocationが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    const s = loadedState(
+      fakeMasked({ includeWideInAllocation: false, includeTrioInAllocation: true }),
+    );
+    expect(s.includeWideInAllocation).toBe(false);
+    expect(s.includeTrioInAllocation).toBe(true);
+
+    const flipped = loadedState(
+      fakeMasked({ includeWideInAllocation: true, includeTrioInAllocation: false }),
+    );
+    expect(flipped.includeWideInAllocation).toBe(true);
+    expect(flipped.includeTrioInAllocation).toBe(false);
+  });
+
   it("各フィールドの入力アクションで値を更新する", () => {
     let s = loadedState();
     s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
@@ -101,6 +164,12 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
       value: "人気薄の複勝率は慎重に見積もること",
     });
     s = settingsReducer(s, { type: "クリップ幅版選択", value: "wide15" });
+    s = settingsReducer(s, { type: "総資金入力", value: "500000" });
+    s = settingsReducer(s, { type: "1レース上限入力", value: "30000" });
+    s = settingsReducer(s, { type: "ケリー係数入力", value: "0.4" });
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: true });
+    s = settingsReducer(s, { type: "ワイド配分対象切替", value: false });
+    s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -110,6 +179,12 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.autoSendDiscord).toBe(true);
     expect(s.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
     expect(s.clipVariant).toBe("wide15");
+    expect(s.bankroll).toBe("500000");
+    expect(s.perRaceCap).toBe("30000");
+    expect(s.kellyFraction).toBe("0.4");
+    expect(s.includeComboOdds).toBe(true);
+    expect(s.includeWideInAllocation).toBe(false);
+    expect(s.includeTrioInAllocation).toBe(false);
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -244,6 +319,187 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     const update = buildUpdate(loadedState());
     expect(update.clipVariant).toBe("default");
   });
+
+  it("馬券配分3項目(bankroll/perRaceCap/kellyFraction)を数値化して含めること(機能C-2)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "総資金入力", value: "500000" });
+    s = settingsReducer(s, { type: "1レース上限入力", value: "30000" });
+    s = settingsReducer(s, { type: "ケリー係数入力", value: "0.4" });
+    const update = buildUpdate(s);
+    expect(update.bankroll).toBe(500000);
+    expect(update.perRaceCap).toBe(30000);
+    expect(update.kellyFraction).toBe(0.4);
+  });
+
+  it("馬券配分3項目未編集(既定値0/0/0.5)はそのまま含めること(機能C-2)", () => {
+    const update = buildUpdate(loadedState());
+    expect(update.bankroll).toBe(0);
+    expect(update.perRaceCap).toBe(0);
+    expect(update.kellyFraction).toBe(0.5);
+  });
+
+  it("includeComboOdds(機能D-2c第3段)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: true });
+    expect(buildUpdate(s).includeComboOdds).toBe(true);
+
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: false });
+    expect(buildUpdate(s).includeComboOdds).toBe(false);
+  });
+
+  it("includeComboOdds未編集(既定false)はそのまま含めること", () => {
+    expect(buildUpdate(loadedState()).includeComboOdds).toBe(false);
+  });
+
+  it("includeComboOddsとautoSendDiscordが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "自動送信切替", value: true });
+    s = settingsReducer(s, { type: "組合せオッズ取得切替", value: false });
+    const update = buildUpdate(s);
+    expect(update.autoSendDiscord).toBe(true);
+    expect(update.includeComboOdds).toBe(false);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocation(機能D-2c第4段)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "ワイド配分対象切替", value: false });
+    s = settingsReducer(s, { type: "三連複配分対象切替", value: true });
+    let update = buildUpdate(s);
+    expect(update.includeWideInAllocation).toBe(false);
+    expect(update.includeTrioInAllocation).toBe(true);
+
+    s = settingsReducer(s, { type: "ワイド配分対象切替", value: true });
+    s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
+    update = buildUpdate(s);
+    expect(update.includeWideInAllocation).toBe(true);
+    expect(update.includeTrioInAllocation).toBe(false);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocation未編集(読込値どおり)はそのまま含めること", () => {
+    const update = buildUpdate(loadedState(fakeMasked({ includeWideInAllocation: true, includeTrioInAllocation: true })));
+    expect(update.includeWideInAllocation).toBe(true);
+    expect(update.includeTrioInAllocation).toBe(true);
+  });
+});
+
+describe("isDirty(未保存インジケータ、Issue #11)", () => {
+  it("未読込の初期状態は非dirty", () => {
+    expect(isDirty(createInitialSettingsState())).toBe(false);
+  });
+
+  it("読込成功直後は非dirty(数値の表記揺れ'1'と'1.0'で誤dirtyにならない)", () => {
+    const s = loadedState(fakeMasked({ evThreshold: 1.0 }));
+    expect(isDirty(s)).toBe(false);
+  });
+
+  const singleFieldCases: { name: string; action: SettingsAction }[] = [
+    {
+      name: "Webhook入力",
+      action: { type: "Webhook入力", value: "https://x.example/y" },
+    },
+    { name: "EV閾値入力", action: { type: "EV閾値入力", value: "1.3" } },
+    { name: "自動送信切替", action: { type: "自動送信切替", value: true } },
+    {
+      name: "追加指示入力",
+      action: { type: "追加指示入力", value: "テスト指示" },
+    },
+    {
+      name: "クリップ幅版選択",
+      action: { type: "クリップ幅版選択", value: "wide15" },
+    },
+    { name: "総資金入力", action: { type: "総資金入力", value: "500000" } },
+    { name: "1レース上限入力", action: { type: "1レース上限入力", value: "30000" } },
+    { name: "ケリー係数入力", action: { type: "ケリー係数入力", value: "0.4" } },
+    {
+      name: "組合せオッズ取得切替",
+      action: { type: "組合せオッズ取得切替", value: true },
+    },
+    {
+      name: "ワイド配分対象切替",
+      action: { type: "ワイド配分対象切替", value: false },
+    },
+    {
+      name: "三連複配分対象切替",
+      action: { type: "三連複配分対象切替", value: false },
+    },
+    ...BIAS_WEIGHT_KEYS.map((key) => ({
+      name: `バイアス重み入力(${key})`,
+      action: {
+        type: "バイアス重み入力",
+        key,
+        value: "0.4",
+      } as SettingsAction,
+    })),
+    ...BASE_SCORE_WEIGHT_KEYS.map((key) => ({
+      name: `基礎重み入力(${key})`,
+      action: {
+        type: "基礎重み入力",
+        key,
+        value: "0.4",
+      } as SettingsAction,
+    })),
+  ];
+
+  it.each(singleFieldCases)("$name 単独でdirtyになる", ({ action }) => {
+    const s = settingsReducer(loadedState(), action);
+    expect(isDirty(s)).toBe(true);
+  });
+
+  it("APIキー入力が非空でdirty、空に戻すと非dirtyに戻る(他フィールド不変の場合)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "APIキー入力", value: "" });
+    expect(isDirty(s)).toBe(false);
+  });
+
+  it("apiKeyFromEnv=trueのときは入力欄が空のままなのでdirty化しない", () => {
+    const s = loadedState(fakeMasked({ apiKeyFromEnv: true }));
+    expect(isDirty(s)).toBe(false);
+  });
+
+  it("保存成功でdirtyが解消し、以後の再編集で再度dirtyになる", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "EV閾値入力", value: "1.5" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "保存開始" });
+    s = settingsReducer(s, {
+      type: "保存成功",
+      settings: fakeMasked({ evThreshold: 1.5 }),
+    });
+    expect(isDirty(s)).toBe(false);
+    s = settingsReducer(s, {
+      type: "Webhook入力",
+      value: "https://y.example/z",
+    });
+    expect(isDirty(s)).toBe(true);
+  });
+
+  it("保存失敗ではスナップショットが更新されないためdirtyを維持する", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "EV閾値入力", value: "1.5" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "保存開始" });
+    s = settingsReducer(s, { type: "保存失敗", message: "書き込み失敗" });
+    expect(isDirty(s)).toBe(true);
+  });
+
+  it("デフォルトに戻す(保存成功経由)でdirtyが解消する", () => {
+    // handleReset は「保存開始」→(resetSettings成功時)「保存成功」を dispatch する(SettingsView.tsx参照)。
+    let s = loadedState();
+    s = settingsReducer(s, { type: "EV閾値入力", value: "1.5" });
+    expect(isDirty(s)).toBe(true);
+    s = settingsReducer(s, { type: "保存開始" });
+    s = settingsReducer(s, { type: "保存成功", settings: fakeMasked() });
+    expect(isDirty(s)).toBe(false);
+  });
+
+  it("isDirtyはstateを破壊しない(不変性)", () => {
+    const s = loadedState();
+    const before = JSON.stringify(s);
+    isDirty(s);
+    expect(JSON.stringify(s)).toBe(before);
+  });
 });
 
 describe("isFormValid(フォーム全体の妥当性)", () => {
@@ -280,5 +536,49 @@ describe("isFormValid(フォーム全体の妥当性)", () => {
       value: "",
     });
     expect(isFormValid(empty)).toBe(true);
+  });
+
+  describe("馬券配分3項目(機能C-2)", () => {
+    it("総資金が負・非整数・上限超過・空・非数値なら不正", () => {
+      for (const value of ["-1", "1.5", "100000001", "", "abc"]) {
+        const s = settingsReducer(loadedState(), { type: "総資金入力", value });
+        expect(isFormValid(s)).toBe(false);
+      }
+    });
+
+    it("総資金が0(未設定)・妥当な整数・上限ちょうどなら妥当", () => {
+      for (const value of ["0", "500000", "100000000"]) {
+        const s = settingsReducer(loadedState(), { type: "総資金入力", value });
+        expect(isFormValid(s)).toBe(true);
+      }
+    });
+
+    it("1レース上限が負・非整数・上限超過・空・非数値なら不正", () => {
+      for (const value of ["-1", "99.9", "10000001", "", "x"]) {
+        const s = settingsReducer(loadedState(), { type: "1レース上限入力", value });
+        expect(isFormValid(s)).toBe(false);
+      }
+    });
+
+    it("1レース上限が0(未設定)・妥当な整数・上限ちょうどなら妥当", () => {
+      for (const value of ["0", "30000", "10000000"]) {
+        const s = settingsReducer(loadedState(), { type: "1レース上限入力", value });
+        expect(isFormValid(s)).toBe(true);
+      }
+    });
+
+    it("ケリー係数が0(UI下限未満)・上限超過・負・空・非数値なら不正", () => {
+      for (const value of ["0", "1.0000001", "-0.1", "", "abc"]) {
+        const s = settingsReducer(loadedState(), { type: "ケリー係数入力", value });
+        expect(isFormValid(s)).toBe(false);
+      }
+    });
+
+    it("ケリー係数が下限(0.05)・0.5・上限(1)なら妥当", () => {
+      for (const value of ["0.05", "0.5", "1"]) {
+        const s = settingsReducer(loadedState(), { type: "ケリー係数入力", value });
+        expect(isFormValid(s)).toBe(true);
+      }
+    });
   });
 });

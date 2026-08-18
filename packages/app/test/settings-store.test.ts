@@ -32,6 +32,19 @@ describe("DEFAULT_APP_SETTINGS(既定設定)", () => {
     expect(DEFAULT_APP_SETTINGS.additionalInstruction).toBe("");
     // クリップ幅版(タスクD-2)は既定で対照("default"、±10%)。
     expect(DEFAULT_APP_SETTINGS.clipVariant).toBe("default");
+    // 組合せオッズ取得(機能D-2c第3段)は既定OFF(受け入れ条件2: U-A既定OFFの定義元)。
+    expect(DEFAULT_APP_SETTINGS.includeComboOdds).toBe(false);
+  });
+
+  it("券種横断の馬券配分対象(機能D-2c第4段・Issue #28)はワイド・三連複とも既定ON(D-1・boss裁定)", () => {
+    expect(DEFAULT_APP_SETTINGS.includeWideInAllocation).toBe(true);
+    expect(DEFAULT_APP_SETTINGS.includeTrioInAllocation).toBe(true);
+  });
+
+  it("馬券配分3項目(機能C-2)は既定でbankroll=0・perRaceCap=0(未設定)・kellyFraction=0.5", () => {
+    expect(DEFAULT_APP_SETTINGS.bankroll).toBe(0);
+    expect(DEFAULT_APP_SETTINGS.perRaceCap).toBe(0);
+    expect(DEFAULT_APP_SETTINGS.kellyFraction).toBe(0.5);
   });
 });
 
@@ -112,6 +125,157 @@ describe("coerceSettings(バリデーション+デフォルトマージ)", () =>
     expect(coerceSettings({ clipVariant: null }).clipVariant).toBe("default");
     expect(coerceSettings({}).clipVariant).toBe("default");
   });
+
+  describe("includeComboOdds(組合せオッズ取得。機能D-2c第3段・Issue #28): boolean以外は既定(false)へフォールバック", () => {
+    it.each([
+      { name: "欠損はfalse", raw: undefined, expected: false },
+      { name: "文字列'true'はfalse", raw: "true", expected: false },
+      { name: "数値1はfalse", raw: 1, expected: false },
+      { name: "nullはfalse", raw: null, expected: false },
+      { name: "true(boolean)はtrueのまま採用", raw: true, expected: true },
+      { name: "false(boolean)はfalseのまま採用", raw: false, expected: false },
+    ])("$name", ({ raw, expected }) => {
+      const input = raw === undefined ? {} : { includeComboOdds: raw };
+      expect(coerceSettings(input).includeComboOdds).toBe(expected);
+    });
+
+    // 入れ替え変異の検知: autoSendDiscord(隣接するboolean項目)と非対称な値を与え、
+    // includeComboOddsがautoSendDiscordの値と取り違えられていないことを固定する。
+    it("autoSendDiscordと異なる値を与えても、それぞれ独立に反映されること(隣接boolean項目の取り違え検知)", () => {
+      const a = coerceSettings({ autoSendDiscord: true, includeComboOdds: false });
+      expect(a.autoSendDiscord).toBe(true);
+      expect(a.includeComboOdds).toBe(false);
+
+      const b = coerceSettings({ autoSendDiscord: false, includeComboOdds: true });
+      expect(b.autoSendDiscord).toBe(false);
+      expect(b.includeComboOdds).toBe(true);
+    });
+  });
+
+  describe("includeWideInAllocation/includeTrioInAllocation(券種横断の配分対象。機能D-2c第4段・Issue #28): boolean以外は既定(true)へフォールバック", () => {
+    it.each([
+      { name: "欠損はtrue", raw: undefined, expected: true },
+      { name: "文字列'false'はtrue", raw: "false", expected: true },
+      { name: "数値0はtrue", raw: 0, expected: true },
+      { name: "nullはtrue", raw: null, expected: true },
+      { name: "true(boolean)はtrueのまま採用", raw: true, expected: true },
+      { name: "false(boolean)はfalseのまま採用", raw: false, expected: false },
+    ])("includeWideInAllocation: $name", ({ raw, expected }) => {
+      const input = raw === undefined ? {} : { includeWideInAllocation: raw };
+      expect(coerceSettings(input).includeWideInAllocation).toBe(expected);
+    });
+
+    it.each([
+      { name: "欠損はtrue", raw: undefined, expected: true },
+      { name: "文字列'false'はtrue", raw: "false", expected: true },
+      { name: "数値0はtrue", raw: 0, expected: true },
+      { name: "nullはtrue", raw: null, expected: true },
+      { name: "true(boolean)はtrueのまま採用", raw: true, expected: true },
+      { name: "false(boolean)はfalseのまま採用", raw: false, expected: false },
+    ])("includeTrioInAllocation: $name", ({ raw, expected }) => {
+      const input = raw === undefined ? {} : { includeTrioInAllocation: raw };
+      expect(coerceSettings(input).includeTrioInAllocation).toBe(expected);
+    });
+
+    // 非対称な入力(取り違え検知): includeWideInAllocation/includeTrioInAllocation同士、
+    // およびincludeComboOddsとで異なる値を与え、互いに取り違えず独立に反映されることを固定する。
+    it("includeWideInAllocation/includeTrioInAllocation/includeComboOddsが互いに異なる値でも取り違えないこと", () => {
+      const a = coerceSettings({
+        includeComboOdds: true,
+        includeWideInAllocation: false,
+        includeTrioInAllocation: true,
+      });
+      expect(a.includeComboOdds).toBe(true);
+      expect(a.includeWideInAllocation).toBe(false);
+      expect(a.includeTrioInAllocation).toBe(true);
+
+      const b = coerceSettings({
+        includeComboOdds: false,
+        includeWideInAllocation: true,
+        includeTrioInAllocation: false,
+      });
+      expect(b.includeComboOdds).toBe(false);
+      expect(b.includeWideInAllocation).toBe(true);
+      expect(b.includeTrioInAllocation).toBe(false);
+    });
+  });
+
+  describe("馬券配分3項目(機能C-2): 欠損/非数値/負/非有限/非整数/範囲外は既定へフォールバック", () => {
+    it.each([
+      { name: "妥当な整数はそのまま採用", raw: 50000, expected: 50000 },
+      { name: "欠損はデフォルト", raw: undefined, expected: 0 },
+      { name: "文字列はデフォルト", raw: "50000", expected: 0 },
+      { name: "負値はデフォルト", raw: -1, expected: 0 },
+      { name: "非有限(NaN)はデフォルト", raw: Number.NaN, expected: 0 },
+      { name: "非有限(Infinity)はデフォルト", raw: Number.POSITIVE_INFINITY, expected: 0 },
+      { name: "非整数はデフォルト", raw: 100.5, expected: 0 },
+      { name: "上限超過(100,000,001)はデフォルト", raw: 100_000_001, expected: 0 },
+      { name: "上限ちょうど(100,000,000)は採用", raw: 100_000_000, expected: 100_000_000 },
+      { name: "0(未設定)は採用", raw: 0, expected: 0 },
+    ])("bankroll: $name", ({ raw, expected }) => {
+      const input = raw === undefined ? {} : { bankroll: raw };
+      expect(coerceSettings(input).bankroll).toBe(expected);
+    });
+
+    it.each([
+      { name: "妥当な整数はそのまま採用", raw: 5000, expected: 5000 },
+      { name: "欠損はデフォルト", raw: undefined, expected: 0 },
+      { name: "文字列はデフォルト", raw: "5000", expected: 0 },
+      { name: "負値はデフォルト", raw: -1, expected: 0 },
+      { name: "非有限(NaN)はデフォルト", raw: Number.NaN, expected: 0 },
+      { name: "非有限(-Infinity)はデフォルト", raw: Number.NEGATIVE_INFINITY, expected: 0 },
+      { name: "非整数はデフォルト", raw: 99.9, expected: 0 },
+      { name: "上限超過(10,000,001)はデフォルト", raw: 10_000_001, expected: 0 },
+      { name: "上限ちょうど(10,000,000)は採用", raw: 10_000_000, expected: 10_000_000 },
+      { name: "0(未設定)は採用", raw: 0, expected: 0 },
+    ])("perRaceCap: $name", ({ raw, expected }) => {
+      const input = raw === undefined ? {} : { perRaceCap: raw };
+      expect(coerceSettings(input).perRaceCap).toBe(expected);
+    });
+
+    it.each([
+      { name: "妥当な値はそのまま採用", raw: 0.3, expected: 0.3 },
+      { name: "欠損はデフォルト(0.5)", raw: undefined, expected: 0.5 },
+      { name: "文字列はデフォルト", raw: "0.3", expected: 0.5 },
+      { name: "負値はデフォルト", raw: -0.1, expected: 0.5 },
+      { name: "非有限(NaN)はデフォルト", raw: Number.NaN, expected: 0.5 },
+      { name: "上限超過(1.0000001)はデフォルト", raw: 1.0000001, expected: 0.5 },
+      { name: "下限ちょうど(0.05)は採用", raw: 0.05, expected: 0.05 },
+      { name: "上限ちょうど(1)は採用", raw: 1, expected: 1 },
+    ])("kellyFraction: $name", ({ raw, expected }) => {
+      const input = raw === undefined ? {} : { kellyFraction: raw };
+      expect(coerceSettings(input).kellyFraction).toBe(expected);
+    });
+
+    it("0はUIの下限(0.05)未満だが、settings.json手編集経由ではmain側は矯正せずそのまま0を採用すること(core見送り理由④への到達契約。boss着手前ゲート2026-07-30)", () => {
+      // UI(shared/settings.ts の isValidKellyFraction)は0を弾くが、main側のcoerceKellyFractionは
+      // core resolveKellyFractionと同じ[0,1]範囲を許容し、0をそのままcoreへ届ける契約になっている。
+      expect(coerceSettings({ kellyFraction: 0 }).kellyFraction).toBe(0);
+    });
+  });
+
+  it("馬券配分3項目が無い既存settings.json(後方互換)を読んでも他項目が壊れず既定が入ること", () => {
+    // 機能C-2導入前のsettings.json相当(3項目を含まない)。
+    const legacy = {
+      apiKey: "sk-ant-legacy",
+      discordWebhookUrl: "https://discord.com/api/webhooks/1/a",
+      evThreshold: 1.2,
+      biasWeights: DEFAULT_SCORER_CONFIG.weights,
+      baseScoreWeights: DEFAULT_SCORER_CONFIG.baseScore.weights,
+      autoSendDiscord: true,
+      additionalInstruction: "",
+      clipVariant: "default",
+    };
+    const coerced = coerceSettings(legacy);
+    // 3項目は新規既定値へフォールバックする。
+    expect(coerced.bankroll).toBe(0);
+    expect(coerced.perRaceCap).toBe(0);
+    expect(coerced.kellyFraction).toBe(0.5);
+    // 既存項目は壊れず維持される。
+    expect(coerced.apiKey).toBe("sk-ant-legacy");
+    expect(coerced.evThreshold).toBe(1.2);
+    expect(coerced.autoSendDiscord).toBe(true);
+  });
 });
 
 describe("maskApiKey(APIキーのマスク)", () => {
@@ -153,6 +317,76 @@ describe("maskSettings(レンダラー向けマスク+環境変数優先)", () =
   it("クリップ幅版(clipVariant)をそのまま返す(タスクD-2)", () => {
     const masked = maskSettings({ ...base, clipVariant: "wide15" }, undefined);
     expect(masked.clipVariant).toBe("wide15");
+  });
+
+  it("馬券配分3項目(bankroll/perRaceCap/kellyFraction)をそのまま返す(機能C-2・往復編集フォーム表示のため平文)", () => {
+    const masked = maskSettings(
+      { ...base, bankroll: 300000, perRaceCap: 20000, kellyFraction: 0.3 },
+      undefined,
+    );
+    expect(masked.bankroll).toBe(300000);
+    expect(masked.perRaceCap).toBe(20000);
+    expect(masked.kellyFraction).toBe(0.3);
+  });
+
+  it("includeComboOdds(機能D-2c第3段)をそのまま返す(往復編集フォーム表示のため平文。OFF/ON両方向)", () => {
+    expect(maskSettings({ ...base, includeComboOdds: false }, undefined).includeComboOdds).toBe(
+      false,
+    );
+    expect(maskSettings({ ...base, includeComboOdds: true }, undefined).includeComboOdds).toBe(
+      true,
+    );
+  });
+
+  it("includeComboOddsとautoSendDiscordが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    const masked = maskSettings(
+      { ...base, autoSendDiscord: true, includeComboOdds: false },
+      undefined,
+    );
+    expect(masked.autoSendDiscord).toBe(true);
+    expect(masked.includeComboOdds).toBe(false);
+
+    const flipped = maskSettings(
+      { ...base, autoSendDiscord: false, includeComboOdds: true },
+      undefined,
+    );
+    expect(flipped.autoSendDiscord).toBe(false);
+    expect(flipped.includeComboOdds).toBe(true);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocation(機能D-2c第4段)をそのまま返す(往復編集フォーム表示のため平文。OFF/ON両方向)", () => {
+    expect(
+      maskSettings({ ...base, includeWideInAllocation: false }, undefined)
+        .includeWideInAllocation,
+    ).toBe(false);
+    expect(
+      maskSettings({ ...base, includeWideInAllocation: true }, undefined)
+        .includeWideInAllocation,
+    ).toBe(true);
+    expect(
+      maskSettings({ ...base, includeTrioInAllocation: false }, undefined)
+        .includeTrioInAllocation,
+    ).toBe(false);
+    expect(
+      maskSettings({ ...base, includeTrioInAllocation: true }, undefined)
+        .includeTrioInAllocation,
+    ).toBe(true);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocationが互いに異なる値でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    const masked = maskSettings(
+      { ...base, includeWideInAllocation: true, includeTrioInAllocation: false },
+      undefined,
+    );
+    expect(masked.includeWideInAllocation).toBe(true);
+    expect(masked.includeTrioInAllocation).toBe(false);
+
+    const flipped = maskSettings(
+      { ...base, includeWideInAllocation: false, includeTrioInAllocation: true },
+      undefined,
+    );
+    expect(flipped.includeWideInAllocation).toBe(false);
+    expect(flipped.includeTrioInAllocation).toBe(true);
   });
 
   it("環境変数が設定済みなら環境変数を優先し fromEnv=true・環境キーをマスク", () => {
@@ -199,6 +433,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: true,
       additionalInstruction: "",
       clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(next.apiKey).toBe("keep-me");
     expect(next.discordWebhookUrl).toBe("https://new.example.com/x");
@@ -216,6 +456,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(replaced.apiKey).toBe("new-key");
 
@@ -228,6 +474,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(cleared.apiKey).toBe("");
   });
@@ -243,6 +495,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(withNull.apiKey).toBe("keep-me");
 
@@ -255,6 +513,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(withNumber.apiKey).toBe("keep-me");
   });
@@ -268,6 +532,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(next.evThreshold).toBe(1.0);
     expect(next.biasWeights.venue).toBe(DEFAULT_SCORER_CONFIG.weights.venue);
@@ -282,6 +552,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "人気薄の複勝率は慎重に見積もること",
       clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(next.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
   });
@@ -295,6 +571,12 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "wide15",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(next.clipVariant).toBe("wide15");
   });
@@ -308,8 +590,172 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       autoSendDiscord: false,
       additionalInstruction: "",
       clipVariant: "bogus" as unknown as AppSettings["clipVariant"],
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
     });
     expect(next.clipVariant).toBe("default");
+  });
+
+  it("馬券配分3項目(bankroll/perRaceCap/kellyFraction)を渡すとそのまま反映される(機能C-2)", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 500000,
+      perRaceCap: 30000,
+      kellyFraction: 0.4,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+    });
+    expect(next.bankroll).toBe(500000);
+    expect(next.perRaceCap).toBe(30000);
+    expect(next.kellyFraction).toBe(0.4);
+  });
+
+  it("馬券配分3項目に不正な値を渡すとcoerceで既定へフォールバックされる(機能C-2)", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: -1,
+      perRaceCap: Number.NaN,
+      // kellyFraction=0はmain側では有効値として通る(coerceKellyFractionのテスト参照)ため、
+      // ここでは範囲外(負値)を使ってフォールバックを確認する。
+      kellyFraction: -0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+    });
+    expect(next.bankroll).toBe(0);
+    expect(next.perRaceCap).toBe(0);
+    expect(next.kellyFraction).toBe(0.5);
+  });
+
+  it("includeComboOdds(機能D-2c第3段)を渡すとそのまま反映される(OFF/ON両方向)", () => {
+    const onNext = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: true,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+    });
+    expect(onNext.includeComboOdds).toBe(true);
+
+    const offNext = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+    });
+    expect(offNext.includeComboOdds).toBe(false);
+  });
+
+  it("includeComboOddsとautoSendDiscordが非対称でも取り違えないこと(隣接boolean項目の入れ替え変異検知)", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: true,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+    });
+    expect(next.autoSendDiscord).toBe(true);
+    expect(next.includeComboOdds).toBe(false);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocation(機能D-2c第4段)を渡すとそのまま反映される(OFF/ON両方向・受け入れ条件6)", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: false,
+      includeTrioInAllocation: true,
+    });
+    expect(next.includeWideInAllocation).toBe(false);
+    expect(next.includeTrioInAllocation).toBe(true);
+
+    const flipped = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: false,
+    });
+    expect(flipped.includeWideInAllocation).toBe(true);
+    expect(flipped.includeTrioInAllocation).toBe(false);
+  });
+
+  it("includeWideInAllocation/includeTrioInAllocationに不正な値(型違い)を渡すとcoerceで既定(true)へフォールバックされる", () => {
+    const next = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: "false" as unknown as boolean,
+      includeTrioInAllocation: 0 as unknown as boolean,
+    });
+    expect(next.includeWideInAllocation).toBe(true);
+    expect(next.includeTrioInAllocation).toBe(true);
   });
 });
 
@@ -330,6 +776,22 @@ describe("buildScorerConfig(設定→ScorerConfigのディープマージ)", () 
       DEFAULT_SCORER_CONFIG.baseScore.neutralPlaceRate,
     );
   });
+
+  it("馬券配分3項目(bankroll/perRaceCap/kellyFraction)を変えてもScorerConfigは一切変化しないこと(受け入れ条件28: 既存出力の非破壊性)", () => {
+    // buildScorerConfigはスコアリング(ひいては妙味ランキング・レース別ハイライト・
+    // Discordサマリ・エクスポート・DB保存内容すべての土台)を組み立てる関数であり、
+    // ここが3項目に無反応であることを確認すれば下流の既存出力が影響を受けないことの
+    // 土台が担保される(妙味ランキング等の各出力はこのScorerConfig/EvConfigを経由するため)。
+    const base = buildScorerConfig(DEFAULT_APP_SETTINGS);
+    const variants: AppSettings[] = [
+      { ...DEFAULT_APP_SETTINGS, bankroll: 500000, perRaceCap: 20000, kellyFraction: 0.3 },
+      { ...DEFAULT_APP_SETTINGS, bankroll: 0, perRaceCap: 0, kellyFraction: 1 },
+      { ...DEFAULT_APP_SETTINGS, bankroll: 100_000_000, perRaceCap: 10_000_000, kellyFraction: 0.05 },
+    ];
+    for (const settings of variants) {
+      expect(buildScorerConfig(settings)).toEqual(base);
+    }
+  });
 });
 
 describe("buildEvConfig(設定→EvConfig)", () => {
@@ -337,6 +799,17 @@ describe("buildEvConfig(設定→EvConfig)", () => {
     expect(buildEvConfig({ ...DEFAULT_APP_SETTINGS, evThreshold: 1.4 })).toEqual({
       threshold: 1.4,
     });
+  });
+
+  it("馬券配分3項目(bankroll/perRaceCap/kellyFraction)を変えてもEvConfigは一切変化しないこと(受け入れ条件28: 既存出力の非破壊性)", () => {
+    const base = buildEvConfig(DEFAULT_APP_SETTINGS);
+    const variants: AppSettings[] = [
+      { ...DEFAULT_APP_SETTINGS, bankroll: 500000, perRaceCap: 20000, kellyFraction: 0.3 },
+      { ...DEFAULT_APP_SETTINGS, bankroll: 0, perRaceCap: 0, kellyFraction: 1 },
+    ];
+    for (const settings of variants) {
+      expect(buildEvConfig(settings)).toEqual(base);
+    }
   });
 });
 

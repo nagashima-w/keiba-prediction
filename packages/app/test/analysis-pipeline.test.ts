@@ -14,10 +14,13 @@ import {
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type CourseType,
+  type GradeWinnerConditions,
+  type GradeWinnerTrendSummary,
   type HorseRaceResult,
   type OddsSnapshot,
   type RaceData,
   type RaceHorseData,
+  type RaceId,
   type RaceResultDetail,
   type ShutubaHorse,
 } from "@keiba/core";
@@ -120,9 +123,14 @@ function fakeRaceData(
   raceId: string,
   resultsByUmaban: Record<number, HorseRaceResult[]> = {},
   oddsStatus: "result" | "middle" | "yoso" = "result",
-  // レース自体のcourseType/fenceを上書きできる(芝の傷み目安#26-P3の配線テスト用)。
-  // 省略時は従来どおり courseType="芝"・fenceキー無し(undefined)のまま=既存回帰は無変更。
-  raceOverrides: { courseType?: CourseType; fence?: string | null } = {},
+  // レース自体のcourseType/fence/hasGradeBadgeを上書きできる(芝の傷み目安#26-P3・
+  // 重賞グレードバッジ〈タスク機能B 要修正2〉の配線テスト用)。
+  // 省略時は従来どおり courseType="芝"・fence/hasGradeBadgeキー無し(undefined)のまま=既存回帰は無変更。
+  raceOverrides: {
+    courseType?: CourseType;
+    fence?: string | null;
+    hasGradeBadge?: boolean;
+  } = {},
 ): RaceData {
   const horses: RaceHorseData[] = [1, 2, 3].map((n) => ({
     shutuba: fakeHorse(n),
@@ -159,8 +167,12 @@ function fakeRaceData(
       distance: 1600,
       weather: "晴",
       trackCondition: "良",
-      // fenceは"fence"キーが指定されたときだけ持たせる(既存テストはキー自体を持たない=undefined相当を維持)。
+      // fence/hasGradeBadgeはキーが指定されたときだけ持たせる(既存テストはキー自体を
+      // 持たない=undefined相当を維持)。
       ...("fence" in raceOverrides ? { fence: raceOverrides.fence } : {}),
+      ...("hasGradeBadge" in raceOverrides
+        ? { hasGradeBadge: raceOverrides.hasGradeBadge }
+        : {}),
     },
     horses,
     odds,
@@ -1695,6 +1707,294 @@ describe("runAnalysis(分析パイプライン)", () => {
     });
   });
 
+  describe("同レース(重賞)の過去10年結果傾向(タスク機能B)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    /** テスト用の GradeWinnerTrendSummary(材料がすべて揃った最小の例)。 */
+    function fakeGradeWinnerTrend(): GradeWinnerTrendSummary {
+      return {
+        対象回数: 10,
+        条件一致回数: 8,
+        条件除外回数: 2,
+        頭数レンジ: { min: 12, max: 16 },
+        馬場内訳: [{ 値: "良", 回数: 8 }],
+        柵内訳: [{ 値: "A", 回数: 8 }],
+        複勝圏内馬数: 24,
+        人気レンジ: { min: 1, max: 9 },
+        人気サンプル数: 24,
+        二桁人気頭数: 0,
+        複勝配当レンジ: { min: 200, max: 430 },
+        複勝配当中央値: 280,
+        複勝配当サンプル数: 24,
+        平均通過順相対: 0.45,
+        通過順相対サンプル数: 24,
+        平均上がり: 34.9,
+        上がりサンプル数: 24,
+        平均馬番相対: 0.52,
+        馬番相対サンプル数: 24,
+      };
+    }
+
+    it("中央のレースをLLMで分析するとき、getGradeWinnerTrendに現レースの条件(trackCode/track/kyori)とraceIdを渡し、戻り値をプロンプトへ反映すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(
+        async (
+          _raceId: RaceId,
+          _conditions: GradeWinnerConditions,
+        ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      expect(calledRaceId).toBe(RACE_ID);
+      // RACE_ID(場コード05)→東京、fakeRaceDataの既定はcourseType="芝"・distance=1600。
+      expect(calledConditions).toEqual({ trackCode: "05", track: "芝", kyori: 1600 });
+
+      expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).toContain("同レース過去傾向");
+    });
+
+    it("getGradeWinnerTrend未注入(deps側で省略)のとき、gradeWinnerTrendはnull/未指定でプロンプトに行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        // getGradeWinnerTrend は意図的に省略(機能オフ)。
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("同レース過去傾向");
+    });
+
+    it("地方(NAR)のレースでも、中央と同様にgetGradeWinnerTrendを呼び、結果をプロンプトへ反映すること(2026-07-28実測訂正: 地方専用ホストで同一APIが取得できるため、venueKindによる事前フィルタは行わない)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(
+        async (
+          _raceId: RaceId,
+          _conditions: GradeWinnerConditions,
+        ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(NAR_RACE_ID)),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+      await runAnalysis(
+        parseRaceId(NAR_RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      expect(calledRaceId).toBe(NAR_RACE_ID);
+      // NAR_RACE_ID(場コード54)→高知、fakeRaceDataの既定はcourseType="芝"・distance=1600。
+      expect(calledConditions).toEqual({ trackCode: "54", track: "芝", kyori: 1600 });
+      expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
+    });
+
+    it("LLMスキップ経路(analyze=null)ではgetGradeWinnerTrendを呼ばない(従来のsameDayTrend等と同様、無駄なリクエストを増やさない)", async () => {
+      const getGradeWinnerTrend = vi.fn(
+        async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(), // analyze: null(既定)
+        getGradeWinnerTrend,
+      };
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.llmUsed).toBe(false);
+      expect(getGradeWinnerTrend).not.toHaveBeenCalled();
+    });
+
+    it("getGradeWinnerTrendが例外を投げても分析全体は失敗させず、gradeWinnerTrendはnullのまま完了すること(補助材料のためコア分析を落とさない)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(async (): Promise<GradeWinnerTrendSummary | null> => {
+        throw new Error("ネットワークエラー(想定外)");
+      });
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.llmUsed).toBe(true);
+      expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+    });
+
+    it("getGradeWinnerTrendがnullを返す(非重賞・条件一致3回未満)とき、gradeWinnerTrendはnullでプロンプトに行が出ないこと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const getGradeWinnerTrend = vi.fn(
+        async (): Promise<GradeWinnerTrendSummary | null> => null,
+      );
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        analyze: analyzeCapturing(captured),
+        getGradeWinnerTrend,
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+      const promptText = buildPrompt(captured.value!);
+      expect(promptText).not.toContain("同レース過去傾向");
+    });
+
+    describe("重賞グレードバッジによる呼び出しゲート(要修正2・2026-07-28 boss裁定)", () => {
+      it("出馬表に重賞グレードバッジが無い(hasGradeBadge=false)とき、getGradeWinnerTrendを一切呼ばないこと(非重賞への無駄なPOST防止)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "result", { hasGradeBadge: false })),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+        };
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(getGradeWinnerTrend).not.toHaveBeenCalled();
+        expect(captured.value!.race.gradeWinnerTrend ?? null).toBeNull();
+      });
+
+      it("出馬表に重賞グレードバッジがある(hasGradeBadge=true)とき、getGradeWinnerTrendを呼ぶこと", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "result", { hasGradeBadge: true })),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+        };
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      });
+
+      it("hasGradeBadgeが未指定(判定不能・旧フィクスチャ相当)のとき、fail-openでgetGradeWinnerTrendを呼ぶこと(取りこぼしゼロを優先)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          // fakeRaceDataの既定はhasGradeBadgeキー自体を持たない(undefined相当)。
+          scrape: vi.fn(async () => fakeRaceData(RACE_ID)),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+        };
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe("onGradeWinnerTrendError(要修正10・2026-07-28 boss裁定: 構造破壊/API仕様変更のみを警告として残す)", () => {
+      it("getGradeWinnerTrendが例外を投げたとき、onGradeWinnerTrendErrorがraceIdとメッセージ付きで呼ばれること(無音で握りつぶさない)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const onGradeWinnerTrendError = vi.fn();
+        const getGradeWinnerTrend = vi.fn(async (): Promise<GradeWinnerTrendSummary | null> => {
+          throw new Error("ネットワークエラー(想定外)");
+        });
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+          onGradeWinnerTrendError,
+        };
+
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(onGradeWinnerTrendError).toHaveBeenCalledTimes(1);
+        expect(onGradeWinnerTrendError).toHaveBeenCalledWith({
+          raceId: RACE_ID,
+          message: "ネットワークエラー(想定外)",
+        });
+      });
+
+      it("getGradeWinnerTrendが例外を投げずnullを返す(非重賞NG・条件一致3回未満)とき、onGradeWinnerTrendErrorは呼ばれないこと(正常系は無音のまま)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const onGradeWinnerTrendError = vi.fn();
+        const getGradeWinnerTrend = vi.fn(
+          async (): Promise<GradeWinnerTrendSummary | null> => null,
+        );
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+          onGradeWinnerTrendError,
+        };
+
+        await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+        expect(onGradeWinnerTrendError).not.toHaveBeenCalled();
+      });
+
+      it("onGradeWinnerTrendError未指定でも例外時にクラッシュしないこと(省略時は診断ログを残さないだけ)", async () => {
+        const captured: { value: BuildPromptInput | null } = { value: null };
+        const getGradeWinnerTrend = vi.fn(async (): Promise<GradeWinnerTrendSummary | null> => {
+          throw new Error("ネットワークエラー(想定外)");
+        });
+        const deps: AnalysisPipelineDeps = {
+          ...baseDeps(),
+          analyze: analyzeCapturing(captured),
+          getGradeWinnerTrend,
+          // onGradeWinnerTrendErrorは意図的に省略。
+        };
+
+        await expect(
+          runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+        ).resolves.toBeDefined();
+      });
+    });
+  });
+
   describe("追加指示(additionalInstruction)の配線(Task#28 プロンプト改善C)", () => {
     function analyzeCapturing(
       captured: { value: BuildPromptInput | null },
@@ -2396,5 +2696,385 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
     for (const call of calls) {
       expect(call[0].race.venueKind).toBe("central");
     }
+  });
+
+  describe("組合せオッズ(ワイド・3連複)のAnalysisResultへの伝播(機能D-2c第1段・Issue #28)", () => {
+    /**
+     * テスト用のワイド・3連複診断値(core RaceDataMeta.comboOdds 相当)。
+     * 「欠落なく届くこと」を検証するため、attempts/conflictSamplesまで含む実構造に近い値を使う
+     * (state違い〈available/failed〉・試行結末4種〈available/unavailable/fetchFailed/parseError〉・
+     * 衝突サンプルを1つの固定値に混在させ、単一のtoEqualで一括固定する)。
+     */
+    function fakeComboOddsScrapeOutcome() {
+      return {
+        wide: {
+          state: "available",
+          diagnostics: {
+            betType: "wide",
+            requestCount: 1,
+            expectedComboCount: 120,
+            obtainedComboCount: 118,
+            missingComboCount: 2,
+            axisUmabans: [],
+            attempts: [{ axis: null, state: "available", comboCount: 118 }],
+            numericConflictCount: 0,
+            nullWinConflictCount: 0,
+            conflictSamples: [],
+          },
+        },
+        trio: {
+          state: "failed",
+          diagnostics: {
+            betType: "trio",
+            requestCount: 3,
+            expectedComboCount: 560,
+            obtainedComboCount: 0,
+            missingComboCount: 560,
+            axisUmabans: [1, 2, 3],
+            attempts: [
+              {
+                axis: 1,
+                state: "unavailable",
+                reason: { rawStatus: "NG", rawReason: null, missingKey: "odds" },
+              },
+              { axis: 2, state: "fetchFailed", message: "HTTP 500" },
+              { axis: 3, state: "parseError", message: "構造異常" },
+            ],
+            numericConflictCount: 1,
+            nullWinConflictCount: 1,
+            conflictSamples: [
+              {
+                key: "010203",
+                kind: "numeric",
+                entries: [
+                  { axis: 1, cell: { oddsMin: 2.1, oddsMax: null, ninki: null } },
+                  { axis: 2, cell: { oddsMin: 2.5, oddsMax: null, ninki: null } },
+                ],
+              },
+            ],
+          },
+        },
+      } as const;
+    }
+
+    /**
+     * hasOwnPropertyの簡潔な別名(boss指摘・要修正1対応: 8状態〈wideCombo有無×trioCombo有無×
+     * comboOdds有無〉すべてで3キーの有無を毎回書き下すため、繰り返しを減らす)。
+     */
+    const hasOwn = (obj: object, key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(obj, key);
+
+    it("race.odds.wideCombo/trioCombo・race.meta.comboOddsが未設定(未取得)なら、結果のwideCombo/trioCombo/comboOddsもキー自体が無いままであること({}に化けないこと)", async () => {
+      // fakeRaceData(RACE_ID) は wideCombo/trioCombo/meta.comboOdds を持たない
+      // (scrapeRaceのincludeComboOdds未指定=既定の未取得状態を模す)。
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        baseDeps(),
+        onProgress,
+      );
+
+      expect(result.wideCombo).toBeUndefined();
+      expect(result.trioCombo).toBeUndefined();
+      expect(result.comboOdds).toBeUndefined();
+      // 「undefinedという値の代入」と「キー自体が無いこと」は違う(JSON.stringifyでは
+      // 両者が区別できない)。hasOwnPropertyで直接キーの有無を見る。
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    it("race.odds.wideCombo/trioComboが設定されていれば結果にそのまま伝播し、JSON往復(IPC相当)でも中身が消えないこと", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          wideCombo: { "0102": 1.5, "0103": null },
+          trioCombo: { "010203": 2.3 },
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({ "0102": 1.5, "0103": null });
+      expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      // Mapではない(plainオブジェクト)ことを直接確認する(#33と同じ回帰観点)。
+      expect(result.wideCombo instanceof Map).toBe(false);
+      expect(result.trioCombo instanceof Map).toBe(false);
+      // boss指摘・要修正1: このケース(wideCombo/trioComboが有・comboOddsが無)で
+      // comboOddsのキー自体が無いことも固定する。comboOddsの条件式が
+      // `race.meta.comboOdds !== undefined || race.odds.wideCombo !== undefined` のように
+      // wideCombo側へ広がる変異(fail-open)は、wideComboが有るこのテストでこそ露呈する
+      // (fail-open変異は「選言が真になる状態でキー不在を主張する」テストでしか検知できない)。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+
+      // JSON.stringify→JSON.parseを通しても中身が消えないこと(IPC相当。Mapを載せていたら
+      // JSON.stringify(new Map(...))は"{}"になりroundTrip後は0件になる回帰を検知する)。
+      const roundTripped = JSON.parse(JSON.stringify(result)) as {
+        wideCombo: Record<string, number | null>;
+        trioCombo: Record<string, number | null>;
+      };
+      expect(roundTripped.wideCombo).toEqual({ "0102": 1.5, "0103": null });
+      expect(roundTripped.trioCombo).toEqual({ "010203": 2.3 });
+    });
+
+    it("race.odds.wideCombo/trioComboが空オブジェクト(1件も取得できなかった。発売なし/取得失敗いずれの原因でも起こりうる)なら、結果も空オブジェクトのまま(undefinedへ化けない)であること(未取得との2状態を区別)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: { ...base.odds, wideCombo: {}, trioCombo: {} },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({});
+      expect(result.trioCombo).toEqual({});
+      // 未取得(前テスト。キー自体が無い)とは異なり、こちらはキーが存在すること。
+      expect(hasOwn(result, "wideCombo")).toBe(true);
+      expect(hasOwn(result, "trioCombo")).toBe(true);
+      // boss指摘・要修正1: このケース(wideCombo/trioComboが有〈空〉・comboOddsが無)でも
+      // comboOddsのキー自体が無いことを固定する(fail-open変異の検知)。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    /**
+     * 非対称ケース(code-reviewer指摘・要修正1): wideCombo/trioComboは条件付きspreadで
+     * それぞれ独立に判定しているため、両者が常に同時に有/無で動く入力だけでは
+     * 「wideComboの条件式とtrioComboの条件式を取り違える」変異を検知できない
+     * (実際にレビュアーが注入して確認: 982件全緑で検知されず)。
+     * 「片方だけ設定・もう片方は未取得(キー自体無し)」を両方向で固定することで、
+     * 2つの条件式が互いに独立して正しく動いていることを保証する。
+     */
+    it("wideComboのみ設定・trioComboは未設定(キー自体無し)のとき、両者が互いに影響し合わず独立して伝播すること(非対称ケース)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          wideCombo: { "0102": 1.5 },
+          // trioComboはキー自体を持たせない(=未取得のまま。base.oddsも元々持たない)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({ "0102": 1.5 });
+      expect(hasOwn(result, "wideCombo")).toBe(true);
+      expect(result.trioCombo).toBeUndefined();
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+      // boss指摘・要修正1: このケース(wideComboのみ有・comboOddsは無)でも
+      // comboOddsのキー自体が無いことを固定する。comboOddsの条件式が`... || wideCombo!==undefined`
+      // へ広がる変異(fail-open)は、このテストが最初に検知する(wideComboが有る唯一のケースの1つ)。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    it("trioComboのみ設定・wideComboは未設定(キー自体無し)のとき、両者が互いに影響し合わず独立して伝播すること(非対称ケース・逆方向)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          trioCombo: { "010203": 2.3 },
+          // wideComboはキー自体を持たせない(=未取得のまま。base.oddsも元々持たない)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      expect(hasOwn(result, "trioCombo")).toBe(true);
+      expect(result.wideCombo).toBeUndefined();
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+      // boss指摘・要修正1: このケース(trioComboのみ有・comboOddsは無)でも
+      // comboOddsのキー自体が無いことを固定する(fail-open変異の検知。trioCombo経由の広がりも含む)。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    it("race.meta.comboOddsが設定されていれば診断値(requestCount等)が欠落なく結果に伝播すること(JSON往復含む)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const comboOdds = fakeComboOddsScrapeOutcome();
+      const race: RaceData = { ...base, meta: { ...base.meta, comboOdds } };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      // 深い構造をまるごと(deep equal)固定する。
+      expect(result.comboOdds).toEqual(comboOdds);
+      // 「等しい」の一言に寄りかからず、深い階層のフィールドも個別に固定する
+      // (欠落があればここで真っ先に落ちる)。
+      expect(result.comboOdds?.wide?.state).toBe("available");
+      expect(result.comboOdds?.wide?.diagnostics.requestCount).toBe(1);
+      expect(result.comboOdds?.wide?.diagnostics.obtainedComboCount).toBe(118);
+      expect(result.comboOdds?.trio?.state).toBe("failed");
+      expect(result.comboOdds?.trio?.diagnostics.requestCount).toBe(3);
+      expect(result.comboOdds?.trio?.diagnostics.attempts).toHaveLength(3);
+      expect(result.comboOdds?.trio?.diagnostics.attempts[1]).toEqual({
+        axis: 2,
+        state: "fetchFailed",
+        message: "HTTP 500",
+      });
+      expect(result.comboOdds?.trio?.diagnostics.conflictSamples).toHaveLength(1);
+      expect(result.comboOdds?.trio?.diagnostics.conflictSamples[0]?.entries).toHaveLength(2);
+      // boss指摘・要修正1: このケース(comboOddsのみ有・wideCombo/trioComboは無)でも
+      // wideCombo/trioComboのキー自体が無いことを固定する。wideCombo(またはtrioCombo)の条件式が
+      // `... || race.meta.comboOdds !== undefined` へ広がる変異(fail-open)は、
+      // comboOddsが有ってwideCombo/trioComboが無いこのテストでこそ露呈する。
+      expect(result.wideCombo).toBeUndefined();
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+      expect(result.trioCombo).toBeUndefined();
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+
+      // JSON.stringify→JSON.parseを通しても中身が消えないこと(IPC相当)。
+      const roundTripped = JSON.parse(JSON.stringify(result)) as {
+        comboOdds: typeof comboOdds;
+      };
+      expect(roundTripped.comboOdds).toEqual(comboOdds);
+    });
+
+    /**
+     * boss指摘・要修正1: 「片方のcombo系フィールド + comboOdds診断値」という、これまで
+     * テストしていなかった混在ケース(8状態のうち残り2つ)を固定する。
+     * これらはproduction-reachableでもある: `scrape-race.ts`の`fetchComboBetTypeOdds`は
+     * 券種ごとに独立して例外をcatchするため、ワイドは取得できてもtrioComboで想定外の例外が
+     * 起きれば「wideComboは有る・trioComboは無い・comboOddsは有る(両券種の診断値を含む)」
+     * という状態が実際に発生しうる。
+     */
+    it("wideComboとcomboOddsのみ設定・trioComboは未設定(キー自体無し)のとき、3キーとも独立して伝播すること(混在ケース)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const comboOdds = fakeComboOddsScrapeOutcome();
+      const race: RaceData = {
+        ...base,
+        odds: { ...base.odds, wideCombo: { "0102": 1.5 } },
+        meta: { ...base.meta, comboOdds },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.wideCombo).toEqual({ "0102": 1.5 });
+      expect(hasOwn(result, "wideCombo")).toBe(true);
+      expect(result.comboOdds).toEqual(comboOdds);
+      expect(hasOwn(result, "comboOdds")).toBe(true);
+      expect(result.trioCombo).toBeUndefined();
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+    });
+
+    it("trioComboとcomboOddsのみ設定・wideComboは未設定(キー自体無し)のとき、3キーとも独立して伝播すること(混在ケース・逆方向)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const comboOdds = fakeComboOddsScrapeOutcome();
+      const race: RaceData = {
+        ...base,
+        odds: { ...base.odds, trioCombo: { "010203": 2.3 } },
+        meta: { ...base.meta, comboOdds },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      expect(hasOwn(result, "trioCombo")).toBe(true);
+      expect(result.comboOdds).toEqual(comboOdds);
+      expect(hasOwn(result, "comboOdds")).toBe(true);
+      expect(result.wideCombo).toBeUndefined();
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+    });
+
+    it("wideCombo・trioCombo・comboOddsが同時に設定されていれば、3つとも取りこぼしなく同時に伝播すること(code-reviewer指摘・提案2採用)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const comboOdds = fakeComboOddsScrapeOutcome();
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          wideCombo: { "0102": 1.5 },
+          trioCombo: { "010203": 2.3 },
+        },
+        meta: { ...base.meta, comboOdds },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      // 8状態の最後(3キーすべて有)。hasOwnPropertyも含めて全キーの存在を固定する。
+      expect(result.wideCombo).toEqual({ "0102": 1.5 });
+      expect(hasOwn(result, "wideCombo")).toBe(true);
+      expect(result.trioCombo).toEqual({ "010203": 2.3 });
+      expect(hasOwn(result, "trioCombo")).toBe(true);
+      expect(result.comboOdds).toEqual(comboOdds);
+      expect(hasOwn(result, "comboOdds")).toBe(true);
+    });
   });
 });

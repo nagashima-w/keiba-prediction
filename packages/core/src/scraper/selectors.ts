@@ -46,6 +46,17 @@ export const RACE_LIST_SELECTORS = {
 export const SHUTUBA_SELECTORS = {
   /** レース名(ページ上部)。 */
   raceName: "h1.RaceName",
+  /**
+   * 重賞グレードバッジ(タスク機能B 要修正2: 非重賞への無駄なAPI呼び出しを避ける事前判定)。
+   * RaceName配下にIcon_GradeTypeクラスを持つ要素があるかどうかで判定する(有無のみ。
+   * グレード番号〈Icon_GradeType{N}〉は中央・地方で体系が異なるため一切解釈しない)。
+   * 中央は<h1 class="RaceName">…<span class="Icon_GradeType Icon_GradeType3">、
+   * 地方(NAR)は<div class="RaceName">…<span class="Icon_Grade_None_Text Icon_GradeType
+   * Icon_GradeType19 …">Jpn1</span>とタグ名(h1/div)が異なるため、raceNameセレクタ
+   * (h1限定)を使い回さず、タグ名を問わないクラスセレクタ(.RaceName)で自己完結させる
+   * (実測: 2026-07-28 boss着手前ゲート裁定)。
+   */
+  gradeBadge: ".RaceName .Icon_GradeType",
   /** 発走時刻・距離・コース・天候・馬場を含む行。 */
   raceData01: ".RaceData01",
   /** 会場・条件・頭数などを含む行。 */
@@ -196,6 +207,68 @@ export const NAR_ODDS_SELECTORS = {
   yosoTable: "table.RaceOdds_HorseList_Table.Ninki",
   /** データ行(ヘッダ行はthのみでtdを持たないため、tdを持つ行をデータ行とみなす)。 */
   row: "tr",
+} as const;
+
+/**
+ * 地方(NAR)ワイド・3連複オッズページ(odds/index.html?type=b5|b7、
+ * および軸馬別AJAXフラグメント odds_get_form.html?type=b7&jiku=N)のセレクタ
+ * (機能D-2b-A・Issue #32)。
+ *
+ * `parse-nar-odds.ts`(単勝・複勝、`#odds_tan_block`/`#odds_fuku_block`ベースの行構造)とは
+ * 別の構造を持つ: 組合せオッズは軸馬ごとの `table.Odds_Table`(グリッド行列)に跨って
+ * `td.Odds` セルが並び、各セルの `id`(例: `chk_..._b5_c0_1_2`)に馬番の組が埋め込まれている。
+ * 1ページに複数の `table.Odds_Table` があるため、既存 `parse-nar-odds.ts` の行走査
+ * (`dataRows`)は流用せず、`id` パターンマッチでセルを直接走査する
+ * (`wide-trio-odds-fixtures.test.ts`〈機能D-1〉で実測済みの抽出方式を踏襲)。
+ *
+ * ## 「オッズ文書として正当か」の判定根拠(受け入れ条件8)
+ *
+ * boss実測(2026-08-06、実リクエスト0): 3種のページで次の組み合わせを確認した。
+ *
+ * | ページ | `#odds_select` | `#odds_view_form` | `td.Odds` |
+ * |---|---|---|---|
+ * | 発売後(`nar_odds_b5_202654071210.html`) | あり | あり | 66 |
+ * | AJAXフラグメント(`nar_odds_b7_jiku2_...`) | あり | **なし** | 55 |
+ * | 発売前(`nar_odds_b1_presale_202642071301.html`) | **なし** | あり | 11 |
+ *
+ * `#odds_select` は投票カートの選択済み件数を表示する `<span>`(「選択済み：<span
+ * id="odds_select"></span>件」)であり、通常ページ・AJAXフラグメントには含まれるが、
+ * 投票対象が無い発売前ページには含まれない。`#odds_view_form` はオッズ本文を包む
+ * 汎用ラッパーで、通常ページ・発売前ページには含まれるが、AJAXで差し替わる中身
+ * そのものであるフラグメント自身には(外枠が無いため)含まれない。したがって
+ * **`#odds_select` 単独をページである証拠にすると発売前ページで throw し、
+ * `#odds_view_form` 単独だと AJAXフラグメントで throw する**。両者の **OR**
+ * (いずれか一方でもあれば正当な文書とみなす)で3ケースすべてを正しく判定できる。
+ *
+ * 上記3ケースのうち発売前ページはb1(単勝・複勝)のものだったが、状態③(受け入れ条件9)で
+ * b5/b7の実物発売前ページ(`nar_odds_b5_presale_202655080803_20260806.html`ほか)を取得し、
+ * 同じOR判定が正しく分岐すること(`#odds_select`なし・`#odds_view_form`あり・throwせず
+ * unavailable)を確認済み(`docs/wide-trio-odds-investigation.md` §11.3)。
+ *
+ * 発見: b5/b7の発売前ページは、券種固有のプレビューではなく単勝の「予想オッズ」プレビュー
+ * (`td.Odds`は12件だが、いずれも`id`属性を持たない=`chk_`接頭辞のid規約がb1の発売前ページと
+ * 同様に付かない)に一律フォールバックする。このため`oddsCell`(id属性で組合せを識別する
+ * セレクタ)は発売前ページでは0件になり、unavailable判定の`reason`(下記
+ * `NarComboOddsUnavailableReason`)には`td.Odds`の**生の総数**(id属性の有無を問わない)を
+ * 別途 `oddsCellAny` で数えて持たせる(boss裁定2026-08-07。型の取り違え〈b1発売後ページを
+ * wideパーサに通す〉との区別に使う: 型の取り違えはtd.Odds自体は24件〈idなし〉存在するが、
+ * 本当の未発売は12件〈同じくidなし〉と、いずれも`oddsCell`は0件で見分けが付かないため、
+ * `oddsCellAny`のような生の全体件数を別途持たせないと2つの経路が区別不能になる)。
+ */
+export const NAR_COMBO_ODDS_SELECTORS = {
+  /** 投票カートの選択済み件数(「オッズ文書として正当か」判定の一方の根拠)。 */
+  cartCount: "#odds_select",
+  /** オッズ本文を包む汎用ラッパー(同上、もう一方の根拠)。 */
+  viewFormWrapper: "#odds_view_form",
+  /** 組合せオッズセル(id属性に馬番の組が埋め込まれる)。実際にパースに使うセルの走査対象。 */
+  oddsCell: 'td.Odds[id^="chk_"]',
+  /**
+   * `td.Odds`の生の総数を数えるためのセレクタ(id属性の有無を問わない)。
+   * `oddsCell`とは異なる集合になり得る(発売前ページの予想オッズプレビューは`td.Odds`は
+   * 存在するが`id`属性を持たないため、`oddsCell`では0件になる)。`unavailable`のreasonに
+   * 診断値として残す用途専用で、パース本体の値抽出には使わない。
+   */
+  oddsCellAny: "td.Odds",
 } as const;
 
 /** 調教(oikiri.html)のセレクタ。 */

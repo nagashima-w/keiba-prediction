@@ -7,6 +7,7 @@ export {
   HttpClient,
   HttpError,
   type FetchLike,
+  type FetchRequestInit,
   type FetchResponse,
   type FetchTextOptions,
   type HttpClientOptions,
@@ -40,18 +41,39 @@ export {
 } from "./scraper/ids.js";
 export {
   commentUrl,
+  gradeWinnerApiUrl,
+  gradeWinnerOriginUrl,
+  gradeWinnerRefererUrl,
   horseResultsApiUrl,
   horseUrl,
   narOddsPageUrl,
   narRaceListSubUrl,
+  narTrioOddsAxisUrl,
+  narTrioOddsPageUrl,
   NarUnsupportedError,
+  narWideOddsPageUrl,
   oddsApiUrl,
   oikiriUrl,
   raceListSubUrl,
   raceResultUrl,
   shutubaUrl,
+  trioOddsApiUrl,
+  wideOddsApiUrl,
 } from "./scraper/urls.js";
 export { parseRaceList } from "./scraper/parse-race-list.js";
+export {
+  GradeWinnerParseError,
+  parseGradeWinnerResponse,
+  type GradeWinnerEntry,
+  type GradeWinnerPayback,
+  type GradeWinnerResultHorse,
+} from "./scraper/parse-grade-winner.js";
+export {
+  fetchGradeWinnerEntries,
+  gradeWinnerCacheKey,
+  type FetchGradeWinnerDeps,
+  type GradeWinnerFetcher,
+} from "./scraper/fetch-grade-winner.js";
 export { filterJpnOnlyEntries, isJpnGrade } from "./scraper/jpn-grade.js";
 export { enumerateDates } from "./scraper/enumerate-dates.js";
 export {
@@ -84,6 +106,8 @@ export {
   listNarRaces,
   listRaces,
   scrapeRace,
+  type ComboOddsFetchOutcome,
+  type ComboOddsScrapeOutcome,
   type RaceData,
   type RaceDataMeta,
   type RaceFetcher,
@@ -313,6 +337,14 @@ export {
   type SameDayTrendSummary,
 } from "./analyzer/same-day-trend.js";
 export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
+export {
+  collectGradeWinnerTrend,
+  summarizeGradeWinnerTrend,
+  type GradeWinnerConditions,
+  type GradeWinnerRange,
+  type GradeWinnerTrendSummary,
+  type GradeWinnerValueCount,
+} from "./analyzer/grade-winner-trend.js";
 export {
   summarizeBodyWeightTrend,
   type BodyWeightTrendLabel,

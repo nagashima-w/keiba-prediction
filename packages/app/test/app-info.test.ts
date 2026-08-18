@@ -10,9 +10,9 @@ describe("buildAppInfo(アプリ情報の組み立て)", () => {
     expect(APP_NAME).toBe("競馬期待値分析ツール");
   });
 
-  it("開発フェーズ表示を含む", () => {
+  it("開発フェーズ表示は Phase 6 が「未着手」ではなく「現行配布形態では対象外」という位置づけであることを表す", () => {
     const info = buildAppInfo("0.1.0");
-    expect(info.phase).toBe("Phase 4 開発中");
+    expect(info.phase).toBe("Phase 6(discord.js bot)のみ対象外(現行のexe配布はWebhook通知で完結)");
   });
 
   it("渡されたバージョン文字列をそのまま返す", () => {

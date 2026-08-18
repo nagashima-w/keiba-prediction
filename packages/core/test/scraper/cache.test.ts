@@ -261,6 +261,79 @@ describe("CachedFetcher(キャッシュ付きフェッチ)", () => {
     expect(calls[0]!.options).toEqual({ encoding: "euc-jp" });
     cache.close();
   });
+
+  describe("cacheKey(タスク機能B: URLがPOSTボディのrace_idで実質同一になるAPI向け)", () => {
+    it("cacheKey省略時は従来どおりURLをキーとして使うこと(非破壊)", async () => {
+      const cache = new ScrapeCache({ now: makeClock().now });
+      const { fetcher, calls } = makeFetcherStub();
+      const cf = new CachedFetcher({ fetcher, cache });
+
+      await cf.fetchText("https://example.test/same-url");
+
+      expect(cache.get("https://example.test/same-url")?.value).toBe("body#1");
+      expect(calls).toHaveLength(1);
+      cache.close();
+    });
+
+    it("同一URLでもcacheKeyが異なれば別エントリとしてキャッシュされ、2回目に1回目の内容が返らないこと(最重要回帰)", async () => {
+      const cache = new ScrapeCache({ now: makeClock().now });
+      const { fetcher, calls } = makeFetcherStub((_url, n) => `race-body#${n}`);
+      const cf = new CachedFetcher({ fetcher, cache });
+
+      // 同一URL(race_api/)だがPOSTボディのrace_idが異なるため、cacheKeyを分ける想定。
+      const first = await cf.fetchText("https://race.netkeiba.test/race_api/", {
+        cacheKey: "race_api#AplGradeWinner#202503020211",
+        body: "race_id=202503020211",
+      });
+      const second = await cf.fetchText("https://race.netkeiba.test/race_api/", {
+        cacheKey: "race_api#AplGradeWinner#202403020211",
+        body: "race_id=202403020211",
+      });
+
+      expect(first).toBe("race-body#1");
+      // 2回目が1回目のキャッシュ内容(race-body#1)を誤って返さないこと。
+      expect(second).toBe("race-body#2");
+      expect(calls).toHaveLength(2);
+      cache.close();
+    });
+
+    it("cacheKey指定時、同一cacheKeyへの2回目取得はfetchTextを発行せずキャッシュ値を返すこと", async () => {
+      const cache = new ScrapeCache({ now: makeClock().now });
+      const { fetcher, calls } = makeFetcherStub();
+      const cf = new CachedFetcher({ fetcher, cache });
+
+      const first = await cf.fetchText("https://race.netkeiba.test/race_api/", {
+        cacheKey: "race_api#AplGradeWinner#202503020211",
+        body: "race_id=202503020211",
+      });
+      const second = await cf.fetchText("https://race.netkeiba.test/race_api/", {
+        cacheKey: "race_api#AplGradeWinner#202503020211",
+        body: "race_id=202503020211",
+      });
+
+      expect(first).toBe("body#1");
+      expect(second).toBe("body#1");
+      expect(calls).toHaveLength(1);
+      cache.close();
+    });
+
+    it("cacheKeyはfetcherへは渡らないこと(内部専用オプション)", async () => {
+      const cache = new ScrapeCache({ now: makeClock().now });
+      const { fetcher, calls } = makeFetcherStub();
+      const cf = new CachedFetcher({ fetcher, cache });
+
+      await cf.fetchText("https://race.netkeiba.test/race_api/", {
+        cacheKey: "race_api#AplGradeWinner#202503020211",
+        method: "POST",
+        body: "race_id=202503020211",
+      });
+
+      expect(calls[0]!.options).toEqual({
+        method: "POST",
+        body: "race_id=202503020211",
+      });
+    });
+  });
 });
 
 describe("公開API(index.tsからの再エクスポート)", () => {

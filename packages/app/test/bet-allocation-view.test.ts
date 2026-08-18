@@ -1,0 +1,495 @@
+import { describe, expect, it } from "vitest";
+
+import type { AnalysisResult, AnalysisRow } from "../src/shared/analysis-types.js";
+import {
+  BET_ALLOCATION_UNSET_NOTE,
+  buildAllocationNotices,
+  buildRaceAllocation,
+  CROSS_RACE_OVERBET_NOTE,
+  evThresholdFootnote,
+  formatAllocationSummary,
+  NOT_DIVERSIFIED_NOTE,
+  formatBetLabel,
+  isBetAllocationUnset,
+  KELLY_CAP_EXPLANATION_NOTE,
+  placeBetUnavailableMessage,
+  probabilitySumWarning,
+  resolvePlaceBetTarget,
+  type BetAllocationSettings,
+} from "../src/renderer/bet-allocation-view.js";
+
+/** テスト用のAnalysisRowを組み立てる補助関数。 */
+function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
+  return {
+    umaban: overrides.umaban,
+    wakuban: 1,
+    horseName: `${overrides.umaban}番`,
+    prior: 0.3,
+    adjustedProb: overrides.adjustedProb ?? 0.3,
+    placeOddsMin: overrides.placeOddsMin ?? 3,
+    ev: overrides.ev ?? 0.9,
+    isPositive: overrides.isPositive ?? false,
+    reason: null,
+    careerRunCount: 5,
+    mark: null,
+    evEstimated: overrides.evEstimated ?? false,
+    conditionChangeTags: [],
+  };
+}
+
+/** テスト用のAnalysisResultを組み立てる補助関数。 */
+function race(overrides: Partial<AnalysisResult> & { rows: readonly AnalysisRow[] }): AnalysisResult {
+  return {
+    raceId: "202601010101",
+    venueName: "東京",
+    raceName: "テストレース",
+    courseType: "芝",
+    distance: 2000,
+    date: "2026/07/30",
+    dateApproximate: false,
+    llmUsed: false,
+    llmSkippedReason: null,
+    fallback: false,
+    fallbackReason: null,
+    oddsStatus: "result",
+    warnings: [],
+    analyzedAt: "2026-07-30T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** 候補馬(EVプラス)の行を作る補助関数。 */
+function candidateRow(umaban: number, adjustedProb: number, placeOddsMin: number): AnalysisRow {
+  const ev = adjustedProb * placeOddsMin;
+  return row({ umaban, adjustedProb, placeOddsMin, ev, isPositive: ev > 1 });
+}
+
+/** 8頭立て(配分対象)の出走表を作る補助関数(1頭だけ候補、残りは非候補)。 */
+function eightRunnersOneCandidate(): AnalysisRow[] {
+  // 複勝圏内確率の合計が目標(placeCount=3)に近くなるよう、非候補7頭のadjustedProbを
+  // 0.36に揃える(0.5+0.36*7=3.02、乖離0.02で確率合計警告の閾値0.3を超えない)。
+  // 意図せず確率合計警告が発火するテストの汚染を避けるための調整(候補判定は
+  // ev/isPositiveのデフォルト値に委ねているため、adjustedProbだけを変えても候補外のまま)。
+  return [
+    candidateRow(1, 0.5, 2.5),
+    row({ umaban: 2, adjustedProb: 0.36 }),
+    row({ umaban: 3, adjustedProb: 0.36 }),
+    row({ umaban: 4, adjustedProb: 0.36 }),
+    row({ umaban: 5, adjustedProb: 0.36 }),
+    row({ umaban: 6, adjustedProb: 0.36 }),
+    row({ umaban: 7, adjustedProb: 0.36 }),
+    row({ umaban: 8, adjustedProb: 0.36 }),
+  ];
+}
+
+const SETTINGS_OK: BetAllocationSettings = { bankroll: 100000, perRaceCap: 10000, kellyFraction: 0.5 };
+
+describe("resolvePlaceBetTarget(頭数→複勝対象人数の判定。boss着手前ゲート2026-07-30で確定)", () => {
+  it.each([
+    { runnerCount: 0, expected: { available: false, reason: "unknown" } },
+    { runnerCount: -1, expected: { available: false, reason: "unknown" } },
+    { runnerCount: 7.5, expected: { available: false, reason: "unknown" } },
+    { runnerCount: Number.NaN, expected: { available: false, reason: "unknown" } },
+    { runnerCount: 1, expected: { available: false, reason: "not-sold" } },
+    { runnerCount: 4, expected: { available: false, reason: "not-sold" } },
+    { runnerCount: 5, expected: { available: false, reason: "two-place-only" } },
+    { runnerCount: 7, expected: { available: false, reason: "two-place-only" } },
+    { runnerCount: 8, expected: { available: true, placeCount: 3 } },
+    { runnerCount: 18, expected: { available: true, placeCount: 3 } },
+  ])("runnerCount=$runnerCount", ({ runnerCount, expected }) => {
+    expect(resolvePlaceBetTarget(runnerCount)).toEqual(expected);
+  });
+
+  it("placeCountの型はnumber(リテラル3に固定しない。機能Dで券種ごとの発売条件を見直す余地を残す)", () => {
+    const target = resolvePlaceBetTarget(8);
+    if (target.available) {
+      const placeCount: number = target.placeCount;
+      expect(placeCount).toBe(3);
+    } else {
+      throw new Error("8頭はavailable:trueになるはず");
+    }
+  });
+});
+
+describe("placeBetUnavailableMessage(reasonコード→文言のマップ。renderer側1箇所に集約)", () => {
+  it("two-place-onlyは複勝が2着までとなる旨のメッセージであること", () => {
+    expect(placeBetUnavailableMessage("two-place-only")).toContain("2着まで");
+  });
+
+  it("not-soldは複勝が発売されない旨のメッセージであること", () => {
+    expect(placeBetUnavailableMessage("not-sold")).toContain("発売されない");
+  });
+
+  it("unknownは取得失敗を判定結果として報告しない専用メッセージであること(「発売されない」に丸めない)", () => {
+    const message = placeBetUnavailableMessage("unknown");
+    expect(message).not.toContain("発売されない");
+    expect(message).toContain("判定できない");
+  });
+});
+
+describe("isBetAllocationUnset(総資金または1レース上限が未設定か)", () => {
+  it("bankroll<=0またはperRaceCap<=0ならtrue", () => {
+    expect(isBetAllocationUnset({ bankroll: 0, perRaceCap: 10000, kellyFraction: 0.5 })).toBe(true);
+    expect(isBetAllocationUnset({ bankroll: 100000, perRaceCap: 0, kellyFraction: 0.5 })).toBe(true);
+    expect(isBetAllocationUnset({ bankroll: -1, perRaceCap: 10000, kellyFraction: 0.5 })).toBe(true);
+  });
+
+  it("両方とも正ならfalse", () => {
+    expect(isBetAllocationUnset(SETTINGS_OK)).toBe(false);
+  });
+});
+
+describe("buildRaceAllocation(レース単位の配分ビュー状態)", () => {
+  it("未設定(bankroll<=0またはperRaceCap<=0)ならkind='unset'を返すこと(oddsStatus・頭数に関わらず優先)", () => {
+    const r = race({ rows: eightRunnersOneCandidate(), oddsStatus: "yoso" });
+    const view = buildRaceAllocation(r, { bankroll: 0, perRaceCap: 10000, kellyFraction: 0.5 });
+    expect(view.kind).toBe("unset");
+  });
+
+  it("oddsStatus='yoso'ならkind='yoso'を返すこと(設定は有効)", () => {
+    const r = race({ rows: eightRunnersOneCandidate(), oddsStatus: "yoso" });
+    const view = buildRaceAllocation(r, SETTINGS_OK);
+    expect(view.kind).toBe("yoso");
+  });
+
+  it("7頭以下ならkind='unavailable'(reason='two-place-only')を返すこと", () => {
+    const rows = eightRunnersOneCandidate().slice(0, 7);
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, SETTINGS_OK);
+    expect(view).toEqual({ kind: "unavailable", reason: "two-place-only" });
+  });
+
+  it("4頭以下ならkind='unavailable'(reason='not-sold')を返すこと", () => {
+    const rows = eightRunnersOneCandidate().slice(0, 4);
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, SETTINGS_OK);
+    expect(view).toEqual({ kind: "unavailable", reason: "not-sold" });
+  });
+
+  it("8頭以上・oddsStatus有効・設定有効ならkind='computed'でBetAllocationResultを返すこと", () => {
+    const r = race({ rows: eightRunnersOneCandidate() });
+    const view = buildRaceAllocation(r, SETTINGS_OK);
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      expect(view.result.allocations).toHaveLength(8);
+      // AnalysisRow.adjustedProb が AllocationHorse.placeProb にマッピングされていること。
+      const candidate = view.result.allocations.find((a) => a.umaban === 1)!;
+      expect(candidate.placeProb).toBe(0.5);
+    }
+  });
+
+  it("UIで妥当と判定した設定値がcoreで書き換えられないこと(result.kellyFraction===入力値)", () => {
+    const r = race({ rows: eightRunnersOneCandidate() });
+    const view = buildRaceAllocation(r, { bankroll: 50000, perRaceCap: 5000, kellyFraction: 0.3 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      expect(view.result.kellyFraction).toBe(0.3);
+      expect(view.result.bankrollInput).toBe(50000);
+      expect(view.result.perRaceCapInput).toBe(5000);
+    }
+  });
+});
+
+describe("formatBetLabel(買い目ラベルの純関数生成。umabanをJSXに直接埋め込まない)", () => {
+  it("馬番(単一number)から「N番」形式のラベル文字列を作ること(既存契約・非破壊)", () => {
+    expect(formatBetLabel(4)).toBe("4番");
+    expect(formatBetLabel(12)).toBe("12番");
+  });
+
+  // 機能D-2c第4段(Issue #28): ワイド・3連複の組ラベルへの拡張。単一馬(4)・2頭組(4-7)・
+  // 3頭組(3-4-7)の3形態を固定する(boss指示)。
+  describe("組ラベルへの拡張(機能D-2c第4段・Issue #28)", () => {
+    it("要素数1の配列は単一numberと同じ「N番」形式になること(複勝候補がumabans:[N]の形で来ても揃う)", () => {
+      expect(formatBetLabel([4])).toBe("4番");
+      expect(formatBetLabel([12])).toBe("12番");
+    });
+
+    it("要素数2の配列(ワイド)は「N-M」形式(区切り文字はハイフン、番は付けない)になること", () => {
+      expect(formatBetLabel([4, 7])).toBe("4-7");
+    });
+
+    it("要素数3の配列(3連複)は「N-M-L」形式になること", () => {
+      expect(formatBetLabel([3, 4, 7])).toBe("3-4-7");
+    });
+
+    it("配列の馬番順序をそのまま連結すること(再ソートしない。昇順入力での決定的な出力を固定)", () => {
+      // AllocationCandidate.umabans/GeneralBetAllocation.umabansは「昇順・重複なし」が契約
+      // (validateCandidatesがthrowで強制)のため、本関数は与えられた順序をそのまま連結する。
+      expect(formatBetLabel([1, 2, 3])).toBe("1-2-3");
+      expect(formatBetLabel([2, 5])).toBe("2-5");
+      // 同じ2要素でも中身が違えば出力も違うこと(定数返却になっていないことの空振り防止)。
+      expect(formatBetLabel([2, 5])).not.toBe(formatBetLabel([4, 7]));
+    });
+  });
+});
+
+describe("formatAllocationSummary(合計行。capAppliedで文言切替)", () => {
+  it("非拘束時はケリー適正額と1レース上限を併記し「上限に未達」を含むこと", () => {
+    const r = race({ rows: eightRunnersOneCandidate() });
+    const view = buildRaceAllocation(r, { bankroll: 1000000, perRaceCap: 1000000, kellyFraction: 1 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      expect(view.result.capApplied).toBe(false);
+      const summary = formatAllocationSummary(view.result);
+      expect(summary).toContain("上限に未達");
+      expect(summary).toContain("ケリー適正額");
+      expect(summary).toContain("1レース上限");
+    }
+  });
+
+  it("拘束時は「打ち止め」を含み、上限額とケリー適正額を併記すること", () => {
+    const r = race({ rows: eightRunnersOneCandidate() });
+    const view = buildRaceAllocation(r, { bankroll: 1000000, perRaceCap: 100, kellyFraction: 1 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      expect(view.result.capApplied).toBe(true);
+      const summary = formatAllocationSummary(view.result);
+      expect(summary).toContain("打ち止め");
+      expect(summary).toContain("ケリー適正額");
+    }
+  });
+
+  // 機能D-2c第4段(Issue #28): GeneralBetAllocationResult(券種混在。diagnosticsの形が非互換)
+  // からでも、この5フィールドだけを持つ構造的な入力なら呼べること(AllocationSummaryInputの
+  // 単一定義の原則。同じ文言ロジックを2箇所に複製しない前提の型的な保証)。
+  it("BetAllocationResult以外でも、5フィールド(totalStake等)だけを持つ構造的な入力から呼べること", () => {
+    const generalLike = {
+      totalStake: 12900,
+      kellyTargetStake: 25000,
+      effectivePerRaceCap: 20000,
+      capApplied: false,
+      resolvedBankroll: 300000,
+      // GeneralBetAllocationResultにしか無い、BetAllocationResultとは非互換なdiagnostics形状
+      // (diagnostics.placeProbSum等を持たない)。formatAllocationSummaryはdiagnosticsを
+      // 一切読まないため、この型のまま呼べることを確認する。
+      diagnostics: { inputCandidateCount: 10, truncatedByCapCount: 0, candidateCount: 10, converged: true },
+    };
+    const summary = formatAllocationSummary(generalLike);
+    expect(summary).toContain("12,900円");
+    expect(summary).toContain("上限に未達");
+  });
+});
+
+describe("NOT_DIVERSIFIED_NOTE(機能D-2c第4段でexport。mixed-allocation-view.tsが再利用する)", () => {
+  it("空でなく、原因を名指ししない中立表現であること(「1レース上限」を名指ししない)", () => {
+    expect(NOT_DIVERSIFIED_NOTE.length).toBeGreaterThan(0);
+    expect(NOT_DIVERSIFIED_NOTE).not.toContain("1レース上限の制約により");
+  });
+});
+
+describe("probabilitySumWarning(確率合計警告。閾値超過かつ有限のときのみ)", () => {
+  function diagnosticsWith(deviation: number, target = 3) {
+    return {
+      placeProbSum: target + deviation,
+      placeProbSumTarget: target,
+      placeProbSumDeviation: deviation,
+      marginalDeviationMax: 0,
+      candidateCount: 1,
+      excludedCount: 0,
+    };
+  }
+
+  it("閾値(0.3)の直下では警告しないこと", () => {
+    expect(probabilitySumWarning(diagnosticsWith(0.29))).toBeNull();
+  });
+
+  it("閾値ちょうどでは警告しないこと(境界は含まない)", () => {
+    expect(probabilitySumWarning(diagnosticsWith(0.3))).toBeNull();
+  });
+
+  it("閾値の直上(正負とも)では警告すること", () => {
+    expect(probabilitySumWarning(diagnosticsWith(0.31))).not.toBeNull();
+    expect(probabilitySumWarning(diagnosticsWith(-0.31))).not.toBeNull();
+  });
+
+  it("警告文言に目標値・実測値が含まれること", () => {
+    const warning = probabilitySumWarning(diagnosticsWith(0.5, 3));
+    expect(warning).toContain("3.00");
+    expect(warning).toContain("3.50");
+  });
+
+  it("非有限値(NaN/Infinity)は画面に出さない(null)こと", () => {
+    expect(probabilitySumWarning(diagnosticsWith(Number.NaN))).toBeNull();
+    expect(probabilitySumWarning(diagnosticsWith(Number.POSITIVE_INFINITY))).toBeNull();
+    expect(probabilitySumWarning(diagnosticsWith(Number.NEGATIVE_INFINITY))).toBeNull();
+  });
+
+  // boss メタレビュー差し戻し2026-08-13対応: GeneralBetAllocationDiagnostics(券種混在。
+  // marginalDeviationMax/candidateCount等を持たない)からでも、この3フィールドだけを持つ
+  // 構造的な入力なら呼べること(ProbabilitySumWarningInputの単一定義の原則。
+  // formatAllocationSummary/AllocationSummaryInputと同じ理由の型的な保証)。
+  it("BetAllocationDiagnostics以外でも、3フィールド(placeProbSum等)だけを持つ構造的な入力から呼べること", () => {
+    const minimal = { placeProbSum: 4.0, placeProbSumTarget: 3, placeProbSumDeviation: 1.0 };
+    const warning = probabilitySumWarning(minimal);
+    expect(warning).not.toBeNull();
+    expect(warning).toContain("3.00");
+    expect(warning).toContain("4.00");
+  });
+});
+
+describe("buildAllocationNotices(注記の表示順: advisory→確率合計警告→notDiversified)", () => {
+  it("advisory有り・確率合計警告なし・notDiversifiedなしなら1件でadvisoryのみ", () => {
+    // 単一候補・最低額が適用されadvisoryが出るケース(コアのbet-allocation.test.tsケース(a)相当)。
+    const rows = eightRunnersOneCandidate();
+    rows[0] = candidateRow(1, 0.5, 2.2);
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, { bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      expect(view.result.advisory).not.toBeNull();
+      const notices = buildAllocationNotices(view.result);
+      expect(notices[0]).toBe(view.result.advisory);
+    }
+  });
+
+  it("advisoryがnullならnotDiversifiedより前に来ない(先頭がadvisoryでない)", () => {
+    const rows = eightRunnersOneCandidate();
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, { bankroll: 1000000, perRaceCap: 1000000, kellyFraction: 1 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      expect(view.result.advisory).toBeNull();
+      const notices = buildAllocationNotices(view.result);
+      expect(notices).not.toContain(view.result.advisory);
+    }
+  });
+
+  it("いずれの条件も満たさないときは空配列を返すこと", () => {
+    const rows = eightRunnersOneCandidate();
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, { bankroll: 1000000, perRaceCap: 1000000, kellyFraction: 1 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      expect(view.result.advisory).toBeNull();
+      expect(view.result.notDiversified).toBe(false);
+      const notices = buildAllocationNotices(view.result);
+      expect(notices).toEqual([]);
+    }
+  });
+
+  it("advisory!==null かつ notDiversified===true が同時成立するとき、2件とも表示されadvisoryが先頭に来ること(code-reviewer指摘: 従来は常に0/1件しか検証できていなかった)", () => {
+    // 3頭が対称候補(EV=1.2)・残り5頭は非候補(確率合計が目標3に近くなるよう0.42に調整し、
+    // 確率合計警告が余計に混入しないようにする)。低いbankrollで最低額ロジックが介入すると、
+    // 3頭とも正のcontinuousFractionを持ちながら1頭のみに配分される(minimumStakeApplied=true
+    // かつ betCount=1・positiveContinuousCount=3)ため、advisory(適正額超過)と
+    // notDiversified(分散できたのに1点)が同時に成立する(tsx実測で校正済み)。
+    const rows: AnalysisRow[] = [
+      candidateRow(1, 0.3, 4),
+      candidateRow(2, 0.3, 4),
+      candidateRow(3, 0.3, 4),
+      row({ umaban: 4, adjustedProb: 0.42 }),
+      row({ umaban: 5, adjustedProb: 0.42 }),
+      row({ umaban: 6, adjustedProb: 0.42 }),
+      row({ umaban: 7, adjustedProb: 0.42 }),
+      row({ umaban: 8, adjustedProb: 0.42 }),
+    ];
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, { bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      // 前提(無条件expect): このケースで実際に両条件が同時成立していること。
+      expect(view.result.advisory).not.toBeNull();
+      expect(view.result.notDiversified).toBe(true);
+      const notices = buildAllocationNotices(view.result);
+      expect(notices).toHaveLength(2);
+      expect(notices[0]).toBe(view.result.advisory);
+      expect(notices[1]).not.toBe(view.result.advisory);
+    }
+  });
+
+  it("advisory・確率合計警告・notDiversifiedの3件が同時成立するとき、表示順どおり(advisory→確率合計警告→notDiversified)に並ぶこと(code-reviewer再指摘: oddsMinを4→5に上げるだけで安定した3件同時ケースが得られる。CLAUDE.md鉄則6・7: 断念する前に固定していた別の変数〈オッズ下限〉を動かす)", () => {
+      // 候補馬のoddsMinを5(4ではなく)に上げ、確率合計を目標3から明確に離す(filler1頭を0.8、
+      // 残り4頭を0.42にすることで乖離が0.38前後になり、確率合計警告の閾値0.3を安全マージン
+      // 込みで超える)。oddsMin∈{5,5.2,4.8}×filler∈{0.78,0.8,0.82,0.85}の12通りすべてで
+      // notices.length===3になることをcode-reviewerが確認済み(tsx実測)。
+      const rows: AnalysisRow[] = [
+        candidateRow(1, 0.3, 5),
+        candidateRow(2, 0.3, 5),
+        candidateRow(3, 0.3, 5),
+        row({ umaban: 4, adjustedProb: 0.8 }),
+        row({ umaban: 5, adjustedProb: 0.42 }),
+        row({ umaban: 6, adjustedProb: 0.42 }),
+        row({ umaban: 7, adjustedProb: 0.42 }),
+        row({ umaban: 8, adjustedProb: 0.42 }),
+      ];
+      const r = race({ rows });
+      const view = buildRaceAllocation(r, { bankroll: 100, perRaceCap: 100000, kellyFraction: 0.5 });
+      expect(view.kind).toBe("computed");
+      if (view.kind === "computed") {
+        // 前提(無条件expect): 3条件すべてが実際に同時成立していること。
+        expect(view.result.advisory).not.toBeNull();
+        expect(view.result.notDiversified).toBe(true);
+        const warning = probabilitySumWarning(view.result.diagnostics);
+        expect(warning).not.toBeNull();
+        const notices = buildAllocationNotices(view.result);
+        expect(notices).toHaveLength(3);
+        expect(notices[0]).toBe(view.result.advisory);
+        expect(notices[1]).toBe(warning);
+        expect(notices[2]).not.toBe(view.result.advisory);
+        expect(notices[2]).not.toBe(warning);
+      }
+    });
+
+  it("notDiversifiedの注記は、capApplied===false かつ minimumStakeApplied===false(1レース上限が一切効いていない純粋な丸めの経路)でも真であること(boss実測による指摘: 欠陥クラスの5回目。旧文言『1レース上限の制約により』はこの経路では偽だった)", () => {
+    // perRaceCap=100,000,000(実効上限が拘束点から8桁離れている)・候補3頭が非対称オッズ
+    // (3頭とも正のcontinuousFractionを持つが、bankroll=1200では最も妙味の大きい1頭にしか
+    // betUnit以上の額が floor で残らない「純粋な丸め」経路。tsx実測でcapApplied:false・
+    // minimumStakeApplied:false・notDiversified:trueを確認済み、boss指摘の「経路B」に相当)。
+    const rows: AnalysisRow[] = [
+      candidateRow(1, 0.7, 3),
+      candidateRow(2, 0.4, 3),
+      candidateRow(3, 0.35, 3),
+      row({ umaban: 4, adjustedProb: 0.31 }),
+      row({ umaban: 5, adjustedProb: 0.31 }),
+      row({ umaban: 6, adjustedProb: 0.31 }),
+      row({ umaban: 7, adjustedProb: 0.31 }),
+      row({ umaban: 8, adjustedProb: 0.31 }),
+    ];
+    const r = race({ rows });
+    const view = buildRaceAllocation(r, { bankroll: 1200, perRaceCap: 100000000, kellyFraction: 0.5 });
+    expect(view.kind).toBe("computed");
+    if (view.kind === "computed") {
+      // 前提(無条件expect): 1レース上限も最低額ロジックも一切効いていないこと
+      // (=「1レース上限の制約により」という原因断定が偽であることの直接証拠)。
+      expect(view.result.capApplied).toBe(false);
+      expect(view.result.minimumStakeApplied).toBe(false);
+      expect(view.result.notDiversified).toBe(true);
+      const notices = buildAllocationNotices(view.result);
+      const notDiversifiedNotice = notices.find((n) => n.includes("分散"));
+      expect(notDiversifiedNotice).toBeDefined();
+      // 中立表現になっていること: 「上限」「制約」等、この経路では偽になる原因を名指ししない。
+      expect(notDiversifiedNotice).not.toContain("上限");
+      expect(notDiversifiedNotice).not.toContain("制約");
+    }
+  });
+});
+
+describe("固定注記3点(必ず表示。文言は数値込みで生成)", () => {
+  it("KELLY_CAP_EXPLANATION_NOTEはケリー基準の説明を含むこと", () => {
+    expect(KELLY_CAP_EXPLANATION_NOTE).toContain("ケリー基準");
+  });
+
+  it("CROSS_RACE_OVERBET_NOTEはレース横断オーバーベットの警告を含むこと", () => {
+    expect(CROSS_RACE_OVERBET_NOTE).toContain("レースごとに独立");
+  });
+
+  it("evThresholdFootnoteはEV閾値の数値を小数第2位で埋め込むこと", () => {
+    expect(evThresholdFootnote(1.05)).toContain("1.05");
+    expect(evThresholdFootnote(1)).toContain("1.00");
+  });
+
+  // 機能D-2c第4段(Issue #28・AC9): 「馬」→「買い目」への改訂。混在経路では判定対象が
+  // 単一馬(複勝)だけでなくワイド・3連複の組にも及ぶため、「馬のみ」という表記のままだと
+  // 実際の判定対象(D-4により全券種同一閾値)と食い違う。
+  it("evThresholdFootnoteは判定対象を「買い目」と表記し、「馬のみ」という表記を含まないこと(AC9)", () => {
+    expect(evThresholdFootnote(1.0)).toContain("買い目のみ");
+    expect(evThresholdFootnote(1.0)).not.toContain("馬のみ");
+  });
+});
+
+describe("BET_ALLOCATION_UNSET_NOTE(未設定時・画面全体で1点だけの注記)", () => {
+  it("総資金・1レース上限の設定を促す文言であること", () => {
+    expect(BET_ALLOCATION_UNSET_NOTE).toContain("総資金");
+    expect(BET_ALLOCATION_UNSET_NOTE).toContain("1レースの上限");
+  });
+});

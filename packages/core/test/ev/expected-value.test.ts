@@ -5,6 +5,7 @@ import {
   DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
   estimatePlaceOddsMinFromWin,
+  resolveEvThreshold,
   type EvConfig,
   type HorsePrior,
 } from "../../src/ev/expected-value.js";
@@ -125,6 +126,47 @@ describe("computeRaceEv(複勝期待値計算)", () => {
       const [result] = computeRaceEv(priors, odds);
       expect(result!.isPositive).toBe(true);
     });
+
+    it.each([
+      { name: "threshold=NaN", threshold: Number.NaN },
+      { name: "threshold=+Infinity", threshold: Number.POSITIVE_INFINITY },
+      { name: "threshold=-Infinity", threshold: Number.NEGATIVE_INFINITY },
+    ])(
+      "$name は既定閾値(1.0)へフォールバックすること(受け入れ条件19。boss指摘2026-08-06: " +
+        "非有限のまま比較に使うと全馬が黙って妙味なし〈NaN/+Infinity〉または " +
+        "妙味あり〈-Infinity〉に化ける)",
+      ({ threshold }) => {
+        // 2頭混在(1頭は明らかに正EV、もう1頭は明らかに非正EV)を使う。全馬が同じ判定になる
+        // データだと、threshold=-Infinity(ev>-Infinityは常にtrue)が「たまたま既定閾値と
+        // 同じ結果」になり判別力を失う(実際に踏んだ落とし穴。カナリア検証時に発見)。
+        const priors: HorsePrior[] = [
+          { umaban: 1, placeProb: 0.5 }, // EV=1.25(閾値1.0なら正EV)
+          { umaban: 2, placeProb: 0.1 }, // EV=0.25(閾値1.0なら非正EV)
+        ];
+        const odds = oddsSnapshot({ 1: place(2.5), 2: place(2.5) });
+        const expected = computeRaceEv(priors, odds, { threshold: 1.0 });
+        // 前提(無条件expect): 既定閾値では正EV・非正EVの両方が生じる混在データであること。
+        expect(expected.some((r) => r.isPositive)).toBe(true);
+        expect(expected.some((r) => !r.isPositive)).toBe(true);
+
+        const actual = computeRaceEv(priors, odds, { threshold });
+        expect(actual).toEqual(expected);
+      },
+    );
+  });
+});
+
+describe("resolveEvThreshold(EV閾値の防御。受け入れ条件19)", () => {
+  it("有限値はそのまま返す", () => {
+    expect(resolveEvThreshold(1.3)).toBe(1.3);
+    expect(resolveEvThreshold(0)).toBe(0);
+    expect(resolveEvThreshold(-1)).toBe(-1); // 閾値自体の意味論的な妥当性は呼び出し側の責務。ここでは有限性のみを見る。
+  });
+
+  it("非有限(NaN/±Infinity)は既定値(1.0)へフォールバックする", () => {
+    expect(resolveEvThreshold(Number.NaN)).toBe(DEFAULT_EV_CONFIG.threshold);
+    expect(resolveEvThreshold(Number.POSITIVE_INFINITY)).toBe(DEFAULT_EV_CONFIG.threshold);
+    expect(resolveEvThreshold(Number.NEGATIVE_INFINITY)).toBe(DEFAULT_EV_CONFIG.threshold);
   });
 });
 
@@ -251,6 +293,35 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
     expect(result!.ev).toBeCloseTo(1.4, 10);
     expect(result!.isPositive).toBe(false);
   });
+
+  it.each([
+    { name: "threshold=NaN", threshold: Number.NaN },
+    { name: "threshold=+Infinity", threshold: Number.POSITIVE_INFINITY },
+    { name: "threshold=-Infinity", threshold: Number.NEGATIVE_INFINITY },
+  ])(
+    "$name は既定閾値(1.0)へフォールバックすること(受け入れ条件19。confirmedEV経路と非対称にならないこと)",
+    ({ threshold }) => {
+      // 2頭混在(1頭は明らかに正EV、もう1頭は明らかに非正EV)。理由はcomputeRaceEv側の
+      // 同種テストのコメント参照(-Infinityの判別力を保つため)。
+      const priors: HorsePrior[] = [
+        { umaban: 1, placeProb: 0.5 }, // 推定複勝下限2.8→EV=1.4(閾値1.0なら正EV)
+        { umaban: 2, placeProb: 0.1 }, // 同条件でEV=0.28(閾値1.0なら非正EV)
+      ];
+      const odds: OddsSnapshot = {
+        officialDatetime: null,
+        oddsStatus: "yoso",
+        win: { 1: { odds: 10, ninki: 1 }, 2: { odds: 10, ninki: 2 } },
+        place: {},
+      };
+      const expected = computeEstimatedRaceEv(priors, odds, { threshold: 1.0 });
+      // 前提(無条件expect): 既定閾値では正EV・非正EVの両方が生じる混在データであること。
+      expect(expected.some((r) => r.isPositive)).toBe(true);
+      expect(expected.some((r) => !r.isPositive)).toBe(true);
+
+      const actual = computeEstimatedRaceEv(priors, odds, { threshold });
+      expect(actual).toEqual(expected);
+    },
+  );
 
   it("estimatedPlaceConfig(coef)を差し替えられること", () => {
     const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.5 }];

@@ -35,6 +35,11 @@ import {
   type SettingsUpdate,
 } from "../shared/settings.js";
 
+/** 馬券配分(機能C-2)の総資金の上限(円)。shared/settings.ts の isValidBankroll と一致させる。 */
+const BANKROLL_MAX = 100_000_000;
+/** 馬券配分(機能C-2)の1レース上限の上限(円)。shared/settings.ts の isValidPerRaceCap と一致させる。 */
+const PER_RACE_CAP_MAX = 10_000_000;
+
 /**
  * 既定設定。EV閾値は仕様の既定1.0、重みは core の DEFAULT_SCORER_CONFIG を出典とする。
  * (EvConfig の既定閾値もコアでは1.0。バレル import を避けるため数値を直接置く。)
@@ -49,6 +54,18 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   additionalInstruction: "",
   // クリップ幅版(タスクD-2)。既定は対照(±10%)。
   clipVariant: "default",
+  // 馬券配分3項目(機能C-2)。bankroll/perRaceCapは既定0(未設定=配分提案を出さないopt-in)、
+  // kellyFractionは既定0.5(core DEFAULT_BET_ALLOCATION_CONFIGと同じ既定値)。
+  bankroll: 0,
+  perRaceCap: 0,
+  kellyFraction: 0.5,
+  // 組合せオッズ取得(機能D-2c第3段・Issue #28)。既定OFF(オプトイン。U-A既定OFFの定義元)。
+  includeComboOdds: false,
+  // 券種横断の馬券配分対象(機能D-2c第4段・Issue #28)。既定ON(boss裁定D-1。U2「常に全券種」・
+  // B-3「三連複を外さない」に整合)。includeComboOdds自体が既定OFFのオプトインのため、
+  // これらが既定ONでも既存ユーザーの挙動は変わらない。
+  includeWideInAllocation: true,
+  includeTrioInAllocation: true,
 };
 
 /** raw が number かつ有限かつ述語を満たせば採用、さもなくば fallback。 */
@@ -60,6 +77,49 @@ function coerceNumber(
   return typeof raw === "number" && Number.isFinite(raw) && predicate(raw)
     ? raw
     : fallback;
+}
+
+/**
+ * 総資金(機能C-2)を検証する。0〜BANKROLL_MAXの整数のみ採用し、それ以外(欠損・非数値・負・
+ * 非有限・非整数・上限超過)は既定(0=未設定)へフォールバックする。UI(shared/settings.ts の
+ * isValidBankroll)が弾く範囲と同じだが、main側は多層防御として独立に検証する(settings.json
+ * 手編集・IPC経由の不正入力に対する最後の砦)。
+ */
+function coerceBankroll(raw: unknown): number {
+  return coerceNumber(
+    raw,
+    DEFAULT_APP_SETTINGS.bankroll,
+    (n) => Number.isInteger(n) && n >= 0 && n <= BANKROLL_MAX,
+  );
+}
+
+/** 1レースの上限(機能C-2)を検証する。0〜PER_RACE_CAP_MAXの整数のみ採用(coerceBankrollと同じ流儀)。 */
+function coercePerRaceCap(raw: unknown): number {
+  return coerceNumber(
+    raw,
+    DEFAULT_APP_SETTINGS.perRaceCap,
+    (n) => Number.isInteger(n) && n >= 0 && n <= PER_RACE_CAP_MAX,
+  );
+}
+
+/**
+ * ケリー係数λ(機能C-2)を検証する。0〜1(core resolveKellyFractionと同じ範囲)のみ採用し、
+ * それ以外(負値・非有限・1超過)は既定(0.5)へフォールバックする。
+ *
+ * 重要: UI(shared/settings.ts の isValidKellyFraction)は下限0.05でλ=0の入力を弾くが、
+ * main側のこの関数は0を弾かない(0〜1をそのまま許容する)。理由: settings.jsonを手編集して
+ * kellyFraction:0を書き込んだ場合、core側の見送り理由④(ケリー係数0で配分しない)へ実際に
+ * 到達できる契約になっている(仕様「④はUI経由では到達しないが、settings.json手編集・core直接
+ * 利用では到達する」)。ここで0を0.5へ矯正してしまうと、settings.json経由でも④へ到達できなくなり
+ * この契約が壊れる。UIの妥当性判定(フォーム入力の下限)とmain側の永続化層の検証範囲を
+ * 意図的に分離している(boss着手前ゲート2026-07-30)。
+ */
+function coerceKellyFraction(raw: unknown): number {
+  return coerceNumber(
+    raw,
+    DEFAULT_APP_SETTINGS.kellyFraction,
+    (n) => n >= 0 && n <= 1,
+  );
 }
 
 /**
@@ -117,8 +177,9 @@ export function coerceSettings(raw: unknown): AppSettings {
   const rec = asRecord(raw);
   return {
     apiKey: typeof rec.apiKey === "string" ? rec.apiKey : DEFAULT_APP_SETTINGS.apiKey,
-    // 記録: discordWebhookUrl は現状「文字列であること」のみを検証する。URL形式の main 側検証は
-    // 実際に送信する Phase 5(Discord Webhook 通知)で、送信可否判定と合わせて実装する。
+    // 記録: coerceSettings では discordWebhookUrl を「文字列であること」のみ検証する(不正値でも
+    // 起動を壊さないための緩い検証)。厳密な URL 形式検証(https://discord.com/api/webhooks/ で
+    // 始まるか)は送信直前に ipc.ts の isDiscordWebhookUrl で行う(実装済み・稼働中)。
     // フォーム段階の URL 形式チェックは renderer(shared/settings の isValidWebhookUrl)で行っている。
     discordWebhookUrl:
       typeof rec.discordWebhookUrl === "string"
@@ -142,6 +203,26 @@ export function coerceSettings(raw: unknown): AppSettings {
         : DEFAULT_APP_SETTINGS.additionalInstruction,
     // クリップ幅版(タスクD-2)。CLIP_VARIANT_IDS に無い値・欠損はdefaultへフォールバック。
     clipVariant: coerceClipVariant(rec.clipVariant),
+    // 馬券配分3項目(機能C-2)。欠損・非数値・範囲外は既定へフォールバックする(多層防御)。
+    bankroll: coerceBankroll(rec.bankroll),
+    perRaceCap: coercePerRaceCap(rec.perRaceCap),
+    kellyFraction: coerceKellyFraction(rec.kellyFraction),
+    // 組合せオッズ取得(機能D-2c第3段)。チェックボックス由来でUI側からは不正値が作れないため、
+    // autoSendDiscordと同じ流儀(boolean以外は既定falseへフォールバック。isValid*は設けない)。
+    includeComboOdds:
+      typeof rec.includeComboOdds === "boolean"
+        ? rec.includeComboOdds
+        : DEFAULT_APP_SETTINGS.includeComboOdds,
+    // 券種横断の馬券配分対象(機能D-2c第4段)。既定trueへフォールバックする点がincludeComboOddsと
+    // 逆向きだが、流儀(boolean以外は既定値)は同じ(受け入れ条件7)。
+    includeWideInAllocation:
+      typeof rec.includeWideInAllocation === "boolean"
+        ? rec.includeWideInAllocation
+        : DEFAULT_APP_SETTINGS.includeWideInAllocation,
+    includeTrioInAllocation:
+      typeof rec.includeTrioInAllocation === "boolean"
+        ? rec.includeTrioInAllocation
+        : DEFAULT_APP_SETTINGS.includeTrioInAllocation,
   };
 }
 
@@ -201,6 +282,15 @@ export function maskSettings(
     additionalInstruction: settings.additionalInstruction,
     // クリップ幅版(タスクD-2)も往復編集フォームとして表示するため平文のまま返す。
     clipVariant: settings.clipVariant,
+    // 馬券配分3項目(機能C-2)も往復編集フォームとして表示するため平文のまま返す。
+    bankroll: settings.bankroll,
+    perRaceCap: settings.perRaceCap,
+    kellyFraction: settings.kellyFraction,
+    // 組合せオッズ取得(機能D-2c第3段)も往復編集フォームとして表示するため平文のまま返す。
+    includeComboOdds: settings.includeComboOdds,
+    // 券種横断の馬券配分対象(機能D-2c第4段)も往復編集フォームとして表示するため平文のまま返す。
+    includeWideInAllocation: settings.includeWideInAllocation,
+    includeTrioInAllocation: settings.includeTrioInAllocation,
   };
 }
 
@@ -223,6 +313,12 @@ export function applyUpdate(
     autoSendDiscord: update.autoSendDiscord,
     additionalInstruction: update.additionalInstruction,
     clipVariant: update.clipVariant,
+    bankroll: update.bankroll,
+    perRaceCap: update.perRaceCap,
+    kellyFraction: update.kellyFraction,
+    includeComboOdds: update.includeComboOdds,
+    includeWideInAllocation: update.includeWideInAllocation,
+    includeTrioInAllocation: update.includeTrioInAllocation,
   });
 }
 

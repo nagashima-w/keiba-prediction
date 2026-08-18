@@ -7,7 +7,7 @@
  * App側はこれを収集ボタンのdisabled条件・ハンドラの早期returnの両方に使う。
  */
 
-import { validatePeriodInput } from "@keiba/core";
+import { validatePeriodInput } from "@keiba/core/scraper/validate-period-input";
 
 /**
  * from/to入力が期間バッチの収集(collectPeriodBatch)を呼び出せる状態か判定する。

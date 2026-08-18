@@ -1,9 +1,9 @@
 {
   "name": "@keiba/app",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "競馬期待値分析ツールの Electron デスクトップアプリ(Phase 4)",
+  "description": "競馬期待値分析ツールの Electron デスクトップアプリ",
   "main": "dist/main/main.cjs",
   "scripts": {
     "dev": "vite",

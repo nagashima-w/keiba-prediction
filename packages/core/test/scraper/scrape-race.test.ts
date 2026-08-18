@@ -14,6 +14,9 @@ import {
   scrapeRace,
   type RaceFetcher,
 } from "../../src/scraper/scrape-race.js";
+import { buildComboCandidates } from "../../src/ev/combo-bet-allocation.js";
+import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
+import { narTrioOddsAxisUrl } from "../../src/scraper/urls.js";
 
 /** フィクスチャを読み込む(実ネットワークは使わない)。 */
 function loadFixture(name: string): string {
@@ -362,5 +365,467 @@ describe("listNarRaces(地方の開催日→レース一覧)", () => {
     expect(fetcher.callFor("race_list_sub").url).toContain(
       "nar.netkeiba.com",
     );
+  });
+});
+
+/**
+ * 組合せオッズ(ワイド・3連複)のオプトイン配線(機能D-2b-B・Issue #33第4段)のテスト。
+ *
+ * `defaultHandler`/`narHandler`は未知のURLでthrowするため、既存のdescribeブロックを
+ * 1行も変更せずに全緑のままであること自体が「既定呼び出しでURL列が現行と1件も変わらない」
+ * (AC4)ことの間接証拠になる。本ブロックはそれに加えて明示的な回帰ピンを立てる。
+ */
+describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B・Issue #33第4段)", () => {
+  it("デフォルト(includeComboOdds未指定)ではwideCombo/trioComboを含まず、comboOddsも設定されないこと", async () => {
+    const fetcher = new RecordingFetcher(defaultHandler);
+    const data = await scrapeRace(RACE_ID, { fetcher, now: FIXED_NOW });
+
+    expect(data.odds.wideCombo).toBeUndefined();
+    expect(data.odds.trioCombo).toBeUndefined();
+    expect(data.meta.comboOdds).toBeUndefined();
+    // 組合せオッズ関連のURL(type=5/type=7/odds_get_form.html)への発行が1件も無いこと。
+    expect(
+      fetcher.calls.some(
+        (c) =>
+          c.url.includes("type=5") ||
+          c.url.includes("type=7") ||
+          c.url.includes("odds_get_form.html"),
+      ),
+    ).toBe(false);
+  });
+
+  it("includeComboOdds:falseを明示しても、省略時と完全に同じURL列になること(機能D-2c第1段・Issue #28: pipeline-deps.tsが第3引数を明示的に渡す配線に変わったことへの回帰ピン)", async () => {
+    const omittedFetcher = new RecordingFetcher(defaultHandler);
+    await scrapeRace(RACE_ID, { fetcher: omittedFetcher, now: FIXED_NOW });
+
+    const explicitFalseFetcher = new RecordingFetcher(defaultHandler);
+    await scrapeRace(
+      RACE_ID,
+      { fetcher: explicitFalseFetcher, now: FIXED_NOW },
+      { includeComboOdds: false },
+    );
+
+    // 両者のURL列(発行順・件数とも)が1件も違わないこと。
+    expect(explicitFalseFetcher.calls.map((c) => c.url)).toEqual(
+      omittedFetcher.calls.map((c) => c.url),
+    );
+    expect(explicitFalseFetcher.calls.length).toBeGreaterThan(0); // 空配列同士の一致という空振りを防ぐ。
+  });
+
+  describe("中央(includeComboOdds:true)", () => {
+    /** 中央3連複・ワイドの実フィクスチャを追加で解決する既定ハンドラ(既存defaultHandlerを包む)。 */
+    function comboAwareCentralHandler(url: string): string {
+      if (url.includes("type=5")) return loadFixture("odds_wide_202603020211.json");
+      if (url.includes("type=7")) return loadFixture("odds_trio_202603020211.json");
+      return defaultHandler(url);
+    }
+
+    it("wideCombo/trioComboがRecordとして載り、JSON.stringifyを通しても値が消えないこと(Map化していないことの回帰テスト)", async () => {
+      const fetcher = new RecordingFetcher(comboAwareCentralHandler);
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      expect(data.odds.wideCombo).toBeDefined();
+      expect(data.odds.trioCombo).toBeDefined();
+      // Mapではない(plainオブジェクト)ことを直接確認する。
+      expect(data.odds.wideCombo instanceof Map).toBe(false);
+      expect(data.odds.trioCombo instanceof Map).toBe(false);
+      expect(Object.keys(data.odds.wideCombo!)).toHaveLength(120); // C(16,2)、実測(urls.ts JSDoc)
+      expect(Object.keys(data.odds.trioCombo!)).toHaveLength(560); // C(16,3)、実測
+
+      // JSON.stringify→JSON.parseを通しても中身が消えないこと。Mapを載せていたら
+      // JSON.stringify(new Map(...))は"{}"になり、roundTrip後は0件になる(この回帰を検知する)。
+      const roundTripped = JSON.parse(JSON.stringify(data.odds)) as {
+        wideCombo: Record<string, number | null>;
+        trioCombo: Record<string, number | null>;
+      };
+      expect(Object.keys(roundTripped.wideCombo)).toHaveLength(120);
+      expect(Object.keys(roundTripped.trioCombo)).toHaveLength(560);
+
+      // 診断値が取り出せること(第3段ComboOddsFetchDiagnosticsの受け渡し)。
+      expect(data.meta.comboOdds?.wide?.state).toBe("available");
+      expect(data.meta.comboOdds?.trio?.state).toBe("available");
+      expect(data.meta.comboOdds?.wide?.diagnostics.requestCount).toBe(1);
+      expect(data.meta.comboOdds?.trio?.diagnostics.requestCount).toBe(1);
+      expect(data.meta.comboOdds?.wide?.diagnostics.obtainedComboCount).toBe(120);
+      expect(data.meta.comboOdds?.trio?.diagnostics.obtainedComboCount).toBe(560);
+
+      // 全件取得できているため、組合せオッズに関する警告は出ないこと。
+      expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ")).toEqual([]);
+    });
+
+    it("未発売(unavailable)では警告0件・stateが\"unavailable\"であること", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=5")) {
+          return loadFixture("odds_wide_presale_202604020511_20260806.json");
+        }
+        if (url.includes("type=7")) {
+          return loadFixture("odds_trio_presale_202604020511_20260806.json");
+        }
+        return defaultHandler(url);
+      });
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      expect(data.meta.comboOdds?.wide?.state).toBe("unavailable");
+      expect(data.meta.comboOdds?.trio?.state).toBe("unavailable");
+      expect(data.odds.wideCombo).toEqual({});
+      expect(data.odds.trioCombo).toEqual({});
+      expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ")).toEqual([]);
+    });
+
+    it("trioComboをtoComboOddsScalarMap相当の橋渡しでbuildComboCandidates(#14)にそのまま渡せること(end-to-end)", async () => {
+      const fetcher = new RecordingFetcher(comboAwareCentralHandler);
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      const oddsByKey = new Map(Object.entries(data.odds.trioCombo!));
+      const horses: JointModelHorse[] = data.horses.map((h) => ({
+        umaban: h.shutuba.umaban,
+        placeProb: 0.3, // 橋渡しの型・値検証が目的でありEV値そのものの妥当性は検証しない
+      }));
+      const result = buildComboCandidates(horses, 3, 3, oddsByKey);
+
+      expect(result.diagnostics.enumeratedCount).toBe(560); // C(16,3)
+      // スカラー変換された値は常に正の有限値かnullのいずれかであり、malformed(不正値)にならないこと。
+      expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(0);
+      const total =
+        result.diagnostics.judged.positiveCount +
+        result.diagnostics.judged.notPositiveCount +
+        result.diagnostics.unjudged.oddsMissingCount +
+        result.diagnostics.unjudged.oddsUnfetchedCount +
+        result.diagnostics.unjudged.oddsMalformedCount;
+      expect(total).toBe(560);
+    });
+  });
+
+  describe("地方(NAR)3連複の軸走査(includeComboOdds:true)", () => {
+    /** 最小限の合成NAR3連複オッズHTML(fetch-combo-odds.test.tsと同じ流儀)。 */
+    function narTrioHtml(
+      entries: ReadonlyArray<readonly [number, number, number, string]>,
+    ): string {
+      const cells = entries
+        .map(
+          ([a, b, c, value]) =>
+            `<tr><td class="Odds" id="chk_x_b7_c0_${a}_${b}_${c}">${value}</td></tr>`,
+        )
+        .join("");
+      return `<div id="odds_view_form"><table class="Odds_Table">${cells}</table></div>`;
+    }
+
+    /** 発売前などで組合せセルが1件も無い(構造は正当な)合成NARオッズHTML。 */
+    const NAR_UNAVAILABLE_HTML = `<div id="odds_view_form"></div>`;
+
+    it("全軸unavailable(首尾一貫して未発売/発売なし)→ 警告0件であること", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return NAR_UNAVAILABLE_HTML;
+        if (url.includes("odds_get_form.html")) return NAR_UNAVAILABLE_HTML;
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      expect(data.meta.comboOdds?.wide?.state).toBe("unavailable");
+      expect(data.meta.comboOdds?.trio?.state).toBe("unavailable");
+      expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ")).toEqual([]);
+    });
+
+    it("一部の軸だけHTTP失敗(部分被覆)→ 警告あり。失敗軸にしか属さない組がtrioComboに存在しないこと(第3段AC-5bのend-to-end確認)", async () => {
+      // 出走12頭→軸は[1..10]。軸9だけHTTP失敗させる。他の軸kは{k,11,12}という
+      // 軸kにしか属さない組を1件だけ返す(11・12は軸集合に含まれない上位2頭)。
+      // {9,11,12}は軸9にしか属さないため、軸9の失敗でこの1件だけが丸ごと欠落するはず。
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        const jikuMatch = /[?&]jiku=(\d+)/.exec(url);
+        if (jikuMatch) {
+          const axis = Number(jikuMatch[1]);
+          if (axis === 9) throw new Error("軸9のHTTP取得に失敗した(模擬)");
+          return narTrioHtml([[axis, 11, 12, "10.0"]]);
+        }
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      expect(data.meta.comboOdds?.trio?.state).toBe("available"); // 部分被覆でもavailable
+      expect(data.meta.comboOdds?.trio?.diagnostics.axisUmabans).toEqual([
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+      ]); // 前提固定(12頭→軸10件)
+      // 軸1..8,10の9軸が成功し、それぞれ1件ずつ({k,11,12})を返すため9件になる。
+      expect(Object.keys(data.odds.trioCombo!)).toHaveLength(9);
+      const key9_11_12 = [9, 11, 12].map((n) => String(n).padStart(2, "0")).join("");
+      expect(Object.prototype.hasOwnProperty.call(data.odds.trioCombo!, key9_11_12)).toBe(
+        false,
+      ); // AC-5b: 値nullで存在するのではなくキーごと不在
+      const trioWarning = data.meta.warnings.find(
+        (w) => w.kind === "組合せオッズ" && w.message.includes("3連複"),
+      );
+      expect(trioWarning).toBeDefined();
+      // 偽陽性方向の固定(boss再メタレビュー指摘・MU6対策): 構造異常0件のときは
+      // 内訳に「構造異常=0」が正しく現れつつ、強調文言「構造が変わった可能性」は
+      // 一切出てはならない(`parseErrorCount > 0` を `>= 0` に壊すと常時強調が出るように
+      // なり、Q2裁定が回避したアラート疲れを再現してしまう)。
+      expect(trioWarning!.message.includes("構造異常=0")).toBe(true);
+      expect(trioWarning!.message.includes("構造が変わった可能性")).toBe(false);
+    });
+
+    it("全軸HTTP失敗 → 警告あり、state=\"failed\"であること(\"unavailable\"と区別できる)", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        if (url.includes("odds_get_form.html")) throw new Error("軸取得に全滅した(模擬)");
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      expect(data.meta.comboOdds?.trio?.state).toBe("failed");
+      expect(data.odds.trioCombo).toEqual({});
+      const comboWarnings = data.meta.warnings.filter((w) => w.kind === "組合せオッズ");
+      expect(comboWarnings.length).toBeGreaterThan(0);
+      // "unavailable"ケース(前テスト)とは異なり、"failed"を示す文言を含むこと。
+      expect(comboWarnings.some((w) => w.message.includes("失敗"))).toBe(true);
+    });
+
+    it('一部の軸がunavailable・一部がHTTP失敗の混在(取得0件)→ 警告あり、state="failed"であること(code-reviewer指摘2)', async () => {
+      // 出走12頭→軸は[1..10]。軸1〜5はunavailable(市場が首尾一貫して未発売/発売なしに
+      // 見える)、軸6〜10はHTTP失敗とする。取得できた組合せは0件だが、②③(市場が無い)と
+      // ④(取得できず分からない)の混同を防ぐのが本関数の核心(AC7b)であり、この混在は
+      // "unavailable"に丸めてはならず"failed"になる必要がある。
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        const jikuMatch = /[?&]jiku=(\d+)/.exec(url);
+        if (jikuMatch) {
+          const axis = Number(jikuMatch[1]);
+          if (axis <= 5) return NAR_UNAVAILABLE_HTML;
+          throw new Error(`軸${axis}のHTTP取得に失敗した(模擬)`);
+        }
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 混在の内訳そのものを先に固定する。
+      const trioAttempts = data.meta.comboOdds?.trio?.diagnostics.attempts ?? [];
+      expect(trioAttempts.filter((a) => a.state === "unavailable").length).toBe(5);
+      expect(trioAttempts.filter((a) => a.state === "fetchFailed").length).toBe(5);
+      expect(data.odds.trioCombo).toEqual({});
+
+      expect(data.meta.comboOdds?.trio?.state).toBe("failed"); // "unavailable"に丸めない
+      const comboWarnings = data.meta.warnings.filter((w) => w.kind === "組合せオッズ");
+      expect(comboWarnings.length).toBeGreaterThan(0);
+    });
+
+    it("構造異常(parseError)が1件でもあれば、警告メッセージに構造異常件数が明示されること(boss指摘・要修正3。message文字列だけがユーザーに届く唯一のチャネルであるため)", async () => {
+      // 出走12頭→軸は[1..10]。軸1は構造異常(#odds_select・#odds_view_formのいずれも
+      // 持たない)でparseErrorになる。軸2〜10はunavailable。
+      const malformedHtml = `<html><body>no markers here</body></html>`;
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        const jikuMatch = /[?&]jiku=(\d+)/.exec(url);
+        if (jikuMatch) {
+          const axis = Number(jikuMatch[1]);
+          if (axis === 1) return malformedHtml;
+          return NAR_UNAVAILABLE_HTML;
+        }
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 内訳そのものを先に固定する。
+      const trioAttempts = data.meta.comboOdds?.trio?.diagnostics.attempts ?? [];
+      expect(trioAttempts.filter((a) => a.state === "parseError").length).toBe(1);
+      expect(trioAttempts.filter((a) => a.state === "unavailable").length).toBe(9);
+      expect(data.meta.comboOdds?.trio?.state).toBe("failed"); // ②③に丸めない(AC7b)
+
+      const trioWarning = data.meta.warnings.find(
+        (w) => w.kind === "組合せオッズ" && w.message.includes("3連複"),
+      );
+      expect(trioWarning).toBeDefined();
+      // 「取得に失敗しました」という④一般の文言だけに丸めず、構造異常であることが
+      // メッセージ文字列自体から読み取れること(kindも診断値も落とすUI側の唯一のチャネル)。
+      expect(trioWarning!.message.includes("構造異常")).toBe(true);
+      expect(trioWarning!.message.includes("構造異常1件")).toBe(true);
+      // 内訳(breakdown)そのものも固定する(boss再メタレビュー指摘: 強調だけでなく
+      // 内訳自体が削除されても検知できなかったセル。MU4対策)。
+      expect(
+        trioWarning!.message.includes("内訳: 未発売/発売なし=9 / 取得失敗=0 / 構造異常=1"),
+      ).toBe(true);
+    });
+
+    it("部分被覆かつ構造異常あり→ 強調文言と内訳の両方が警告メッセージに現れること(boss再メタレビュー指摘・実測シナリオ。MU1/MU2対策: 部分被覆分岐の強調/内訳が削除されても未検知だったセル)", async () => {
+      // 出走12頭→軸は[1..10]。軸1のみavailable(2件)、軸2〜8(7軸)はunavailable、
+      // 軸9はHTTP失敗、軸10は構造異常(parseError)。boss実測: 「期待220件中2件取得、
+      // 218件欠落。構造異常1件(...)。内訳: 未発売/発売なし=7 / 取得失敗=1 / 構造異常=1」。
+      const malformedHtml = `<html><body>no markers here</body></html>`;
+      const axis1Html = narTrioHtml([
+        [1, 11, 12, "10.0"],
+        [1, 2, 11, "20.0"],
+      ]);
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        const jikuMatch = /[?&]jiku=(\d+)/.exec(url);
+        if (jikuMatch) {
+          const axis = Number(jikuMatch[1]);
+          if (axis === 1) return axis1Html;
+          if (axis === 9) throw new Error("軸9のHTTP取得に失敗した(模擬)");
+          if (axis === 10) return malformedHtml;
+          return NAR_UNAVAILABLE_HTML; // 軸2〜8
+        }
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 内訳そのものを先に固定する(boss実測シナリオと同じ内訳)。
+      const trioAttempts = data.meta.comboOdds?.trio?.diagnostics.attempts ?? [];
+      expect(trioAttempts.filter((a) => a.state === "available").length).toBe(1);
+      expect(trioAttempts.filter((a) => a.state === "unavailable").length).toBe(7);
+      expect(trioAttempts.filter((a) => a.state === "fetchFailed").length).toBe(1);
+      expect(trioAttempts.filter((a) => a.state === "parseError").length).toBe(1);
+      expect(data.meta.comboOdds?.trio?.state).toBe("available"); // 部分被覆でもavailable
+      expect(data.meta.comboOdds?.trio?.diagnostics.expectedComboCount).toBe(220); // C(12,3)
+      expect(data.meta.comboOdds?.trio?.diagnostics.obtainedComboCount).toBe(2);
+      expect(data.meta.comboOdds?.trio?.diagnostics.missingComboCount).toBe(218);
+
+      const trioWarning = data.meta.warnings.find(
+        (w) => w.kind === "組合せオッズ" && w.message.includes("3連複"),
+      );
+      expect(trioWarning).toBeDefined();
+      // 強調(構造異常であることの明示)と内訳の両方が、部分被覆分岐でも現れること。
+      expect(
+        trioWarning!.message.includes("構造異常1件(netkeibaのHTML/JSON構造が変わった可能性)"),
+      ).toBe(true);
+      expect(
+        trioWarning!.message.includes("内訳: 未発売/発売なし=7 / 取得失敗=1 / 構造異常=1"),
+      ).toBe(true);
+    });
+
+    it('ほぼ全軸unavailable(9軸)+1軸だけHTTP失敗→ 偽の「全Nリクエストが失敗」が出ないこと(state="failed"は保たれる。boss指摘・提案採用)', async () => {
+      // 出走12頭→軸は[1..10]。軸1〜9はunavailable(市場は首尾一貫して未発売/発売なしに
+      // 見える。HTTP・パースとも成功し正当な「未発売」文書が返っている)、軸10だけHTTP失敗。
+      // 実際に失敗したのは10リクエスト中1件だけなのに、旧文言「全10リクエストが失敗」は
+      // 事実に反する。「状態④であって②③ではない」という主張は保ちつつ、事実に反する
+      // 「全Nリクエストが失敗」という表現は出てはならない。
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        const jikuMatch = /[?&]jiku=(\d+)/.exec(url);
+        if (jikuMatch) {
+          const axis = Number(jikuMatch[1]);
+          if (axis === 10) throw new Error("軸10のHTTP取得に失敗した(模擬)");
+          return NAR_UNAVAILABLE_HTML; // 軸1〜9
+        }
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 内訳そのものを先に固定する。
+      const trioAttempts = data.meta.comboOdds?.trio?.diagnostics.attempts ?? [];
+      expect(trioAttempts.filter((a) => a.state === "unavailable").length).toBe(9);
+      expect(trioAttempts.filter((a) => a.state === "fetchFailed").length).toBe(1);
+      expect(data.meta.comboOdds?.trio?.state).toBe("failed"); // 状態④(②③に丸めない)
+
+      const trioWarning = data.meta.warnings.find(
+        (w) => w.kind === "組合せオッズ" && w.message.includes("3連複"),
+      );
+      expect(trioWarning).toBeDefined();
+      // 偽の「全Nリクエストが失敗」が出ないこと(実際に失敗したのは1件のみ)。
+      expect(trioWarning!.message.includes("リクエストが失敗")).toBe(false);
+      // それでも「状態④であって②③ではない」という主張は保たれていること。
+      expect(trioWarning!.message.includes("発売なし/未発売")).toBe(true);
+      expect(trioWarning!.message.includes("状態②③")).toBe(true);
+      // 内訳から実際の失敗件数(1件)が正しく読み取れること。
+      expect(trioWarning!.message.includes("取得失敗=1")).toBe(true);
+    });
+
+    it("値がnull(missing)の組はtrioComboにキーごと存在し、失敗軸由来の組(unfetched)はキーごと不在であること。JSON往復後も両方向とも保たれること(code-reviewer/boss指摘・要修正1)", async () => {
+      // n=5相当の縮小シナリオ(軸=[1,2,3])。{1,2,4}は軸1・軸2とも値が確定していない
+      // (NAR側の非数値表示"---.-"→oddsMin=null。missing)。軸3はHTTP失敗させ、
+      // 軸3にしか属さない{3,4,5}は取得自体していない(unfetched)。
+      //
+      // NAR_RACE_ID自体は12頭のレースだが、本テストは軸1・2・3のみを制御し、
+      // 残りの軸(4〜10)はunavailableを返す(全体のstate判定には影響しない。
+      // 軸1・2がavailableのため"available"になる)。
+      const axis1Html = narTrioHtml([
+        [1, 2, 3, "10.0"],
+        [1, 2, 4, "---.-"], // missing(値null)
+        [1, 3, 4, "13.0"],
+        [1, 3, 5, "14.0"],
+        [1, 4, 5, "15.0"],
+      ]);
+      const axis2Html = narTrioHtml([
+        [1, 2, 3, "10.0"],
+        [1, 2, 4, "---.-"], // 軸1と同じnull(衝突ではなく完全同値)
+        [2, 3, 4, "16.0"],
+        [2, 3, 5, "17.0"],
+        [2, 4, 5, "18.0"],
+      ]);
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b5")) return loadFixture("nar_odds_b5_202654071210.html");
+        if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 1)) return axis1Html;
+        if (url === narTrioOddsAxisUrl(NAR_RACE_ID, 2)) return axis2Html;
+        const jikuMatch = /[?&]jiku=(\d+)/.exec(url);
+        if (jikuMatch) {
+          const axis = Number(jikuMatch[1]);
+          if (axis === 3) throw new Error("軸3のHTTP取得に失敗した(模擬)");
+          return NAR_UNAVAILABLE_HTML; // 軸4〜10
+        }
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      const key124 = [1, 2, 4].map((n) => String(n).padStart(2, "0")).join("");
+      const key345 = [3, 4, 5].map((n) => String(n).padStart(2, "0")).join("");
+
+      // (1) missing: キーは存在し、値はnullであること。
+      expect(Object.prototype.hasOwnProperty.call(data.odds.trioCombo!, key124)).toBe(true);
+      expect(data.odds.trioCombo![key124]).toBeNull();
+      // (3) unfetched: 失敗軸(軸3)にしか属さない組はキーごと不在であること。
+      expect(Object.prototype.hasOwnProperty.call(data.odds.trioCombo!, key345)).toBe(false);
+
+      // (2) JSON.stringify→JSON.parse往復後も、両方向とも保たれていること
+      // (nullを黙って落とす退化〈#29永続化で最も出やすい「掃除」の形〉を検知する)。
+      const roundTripped = JSON.parse(JSON.stringify(data.odds)) as {
+        trioCombo: Record<string, number | null>;
+      };
+      expect(Object.prototype.hasOwnProperty.call(roundTripped.trioCombo, key124)).toBe(true);
+      expect(roundTripped.trioCombo[key124]).toBeNull();
+      expect(Object.prototype.hasOwnProperty.call(roundTripped.trioCombo, key345)).toBe(false);
+    });
   });
 });

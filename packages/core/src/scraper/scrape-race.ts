@@ -8,13 +8,24 @@
  * - 馬プロフィール(db.netkeiba.com/horse/{id}/)は取得しない。厩舎所在地は出馬表に含まれ、
  *   全戦績はAjax APIで取れるため、プロフィール取得はリクエスト数を増やすだけで得るものがない
  *   (設計判断: 1レースあたりのGET数を「出馬表1+戦績N+調教1+オッズ1」に抑える)。
- * - エラー方針: 必須データ(出馬表・オッズ)の失敗は throw。optional データ(調教)の失敗は
- *   結果を null にして警告を積む。戦績は馬単位で握り、1頭の失敗で全体を落とさない。
+ * - エラー方針: 必須データ(出馬表・オッズ)の失敗は throw。optional データ(調教・組合せオッズ)の
+ *   失敗は結果を null/未設定にして警告を積む。戦績は馬単位で握り、1頭の失敗で全体を落とさない。
  * - キャッシュTTL: 確定的なデータ(出馬表・戦績・調教)は長TTL、揮発性の高いオッズは短TTL。
  *   発走直前の再取得は bypassOddsCache でキャッシュを迂回する。
+ * - 組合せオッズ(ワイド・3連複)は`options.includeComboOdds`によるオプトイン(既定OFF。
+ *   機能D-2b-B・Issue #33第4段)。取得は`fetch-combo-odds.ts`(第3段)に委譲し、本ファイルは
+ *   「呼ぶかどうか」「警告をいつ出すか」「`OddsSnapshot`/`RaceDataMeta`にどう詰めるか」の
+ *   配線のみを担う(取得ロジック自体の再実装はしない)。
  */
 
 import type { CachedFetchTextOptions } from "./cache.js";
+import { toComboOddsScalarMap, type ComboBetType } from "./combo-odds-key.js";
+import {
+  fetchComboOdds,
+  type ComboOddsFetchDiagnostics,
+  type ComboOddsFetchResult,
+  type ComboOddsFetchState,
+} from "./fetch-combo-odds.js";
 import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
 import { venueKindOfRaceId } from "./ids.js";
 import { parseHorseResults } from "./parse-horse-results.js";
@@ -117,10 +128,22 @@ export interface ScrapeDeps {
 export interface ScrapeRaceOptions {
   /** true のときオッズをキャッシュを迂回して再取得する(発走直前用)。 */
   readonly bypassOddsCache?: boolean;
+  /**
+   * true のとき、組合せオッズ(ワイド・3連複)も取得して`OddsSnapshot`(`wideCombo`/
+   * `trioCombo`)に載せる。既定は`false`(オプトイン。機能D-2b-B・Issue #33第4段AC4)。
+   *
+   * **未指定(既定)時は本関数が発行するURL列・リクエスト数を一切変えない**
+   * (`scrape-race.test.ts`の既存describeブロックが無改変で全緑であること自体がこの証拠)。
+   * true指定時は追加で最大2リクエスト(中央ワイド1件+中央3連複1件、または地方ワイド1件)、
+   * 地方3連複はさらに最大16リクエスト(軸走査。`fetch-combo-odds.ts`参照。所要は最大約24秒
+   * 〈16軸×1.5秒の**導出値**であり測定値ではない。16頭なら14軸≒21秒だが、それは上限ではなく
+   * 一例〉が発行されうる。
+   */
+  readonly includeComboOdds?: boolean;
 }
 
 /** 取得中に発生した非致命的な問題の種別。 */
-export type ScrapeWarningKind = "戦績" | "調教";
+export type ScrapeWarningKind = "戦績" | "調教" | "組合せオッズ";
 
 /** 取得中に発生した非致命的な問題(結果には含めるが失敗はさせない)。 */
 export interface ScrapeWarning {
@@ -130,6 +153,28 @@ export interface ScrapeWarning {
   readonly message: string;
   /** 馬単位の警告(戦績)の場合の対象馬ID。 */
   readonly horseId?: HorseId;
+}
+
+/**
+ * 組合せオッズ(ワイド or 3連複)1件分の取得結果の要約(機能D-2b-B・Issue #33第4段)。
+ *
+ * 第3段`ComboOddsFetchResult`の`odds`(`ReadonlyMap<string, ComboOddsCell>`)は含めない。
+ * `RaceDataMeta`もIPC/`JSON.stringify`を経由しうる`RaceData`の一部であり、Mapを載せると
+ * `OddsSnapshot.wideCombo`/`trioCombo`と同じ「静かに`{}`になる」種を植えてしまうため
+ * (`types.ts`の`OddsSnapshot`JSDoc参照)。オッズの値そのものは`OddsSnapshot`側の
+ * `wideCombo`/`trioCombo`(`Record`)で保持し、ここには状態と診断値のみを残す。
+ */
+export interface ComboOddsFetchOutcome {
+  /** 券種の最終状態(第3段AC-4の3値)。 */
+  readonly state: ComboOddsFetchState;
+  /** 第3段の診断値(リクエスト数・期待/実取得組合せ数・軸ごとの結末・衝突件数等)。 */
+  readonly diagnostics: ComboOddsFetchDiagnostics;
+}
+
+/** 組合せオッズ(ワイド・3連複)取得結果のペア。`options.includeComboOdds`がtrueのときのみ設定される。 */
+export interface ComboOddsScrapeOutcome {
+  readonly wide?: ComboOddsFetchOutcome;
+  readonly trio?: ComboOddsFetchOutcome;
 }
 
 /** 1頭分の統合データ(出馬表情報+全戦績+調教評価)。 */
@@ -151,12 +196,29 @@ export interface RaceDataMeta {
    */
   readonly fetchedAt: string;
   /**
-   * オッズ取得直後の時刻(ISO8601)。オッズは発走直前まで変動するため、
+   * **単勝・複勝**オッズ取得直後の時刻(ISO8601)。オッズは発走直前まで変動するため、
    * EV計算では「いつのオッズか」を fetchedAt ではなくこの値で判断する。
+   *
+   * **この値は `odds.wideCombo`/`odds.trioCombo`(組合せオッズ)の鮮度を表さない**
+   * (機能D-2b-B・Issue #33第4段。boss メタレビュー指摘)。単勝・複勝は1リクエストで
+   * 確定するため単一時刻で鮮度を表せるが、組合せオッズ(特に地方3連複の軸走査)は
+   * `oddsFetchedAt` 確定より**後**に複数リクエストへ分散して取得される(地方3連複は
+   * 最大16リクエスト・所要は最大約24秒〈16軸×1.5秒の**導出値**〉)。単一の
+   * `oddsFetchedAt` では表しきれないため、組合せオッズ専用の取得時刻フィールドは
+   * 意図的に設けていない(#33のコメント「実装中に確定した判断の記録(クローズ前の申し送り)」
+   * に判断理由を記録)。組合せオッズの新鮮さは
+   * `meta.comboOdds`(診断値。`requestCount`等)から間接的に読み取ること。
    */
   readonly oddsFetchedAt: string;
   /** 非致命的な警告の一覧。 */
   readonly warnings: ScrapeWarning[];
+  /**
+   * 組合せオッズ(ワイド・3連複)の取得結果。`options.includeComboOdds`がtrueのときのみ
+   * 設定される(既定はundefined。機能D-2b-B・Issue #33第4段)。#15(UI)が進捗表示の要否を
+   * 判断する際、`diagnostics.requestCount`を使う想定(`onProgress`コールバック自体は
+   * #15のスコープであり本段では持たない)。
+   */
+  readonly comboOdds?: ComboOddsScrapeOutcome;
 }
 
 /** 1レース分の完全データ。 */
@@ -176,6 +238,108 @@ export interface RaceData {
 /** エラーオブジェクトから表示用メッセージを取り出す。 */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** 券種の日本語表示名(警告メッセージ用)。 */
+function comboBetTypeLabel(betType: ComboBetType): string {
+  return betType === "wide" ? "ワイド" : "3連複";
+}
+
+/**
+ * 組合せオッズ取得結果が`ScrapeWarning`を要するかを判定する(機能D-2b-B・Issue #33第3段
+ * `fetch-combo-odds.ts`のJSDoc「Q2裁定」からの申し送りをそのまま実装する。再発明しない)。
+ *
+ * | 軸の結末(第3段`diagnostics.attempts`) | 警告 |
+ * |---|---|
+ * | 全軸`unavailable`(首尾一貫して未発売/発売なし。状態②③。区別しない) | 出さない |
+ * | 一部だけ`available`、残りが`unavailable`/HTTP失敗(部分被覆) | 出す |
+ * | 全軸HTTP失敗(`state==="failed"`。状態④) | 出す(必須。②③と混同しない) |
+ * | 構造異常(`parseError`) | 出す |
+ *
+ * 上記4行は次の2条件に単純化できる: `state==="failed"`を1行目として無条件に警告対象にし、
+ * 残り3行は「`state==="available"`かつ`available`でない試行が1件以上ある」という単一の
+ * 条件に統合される(`available`でない試行=`unavailable`/`fetchFailed`/`parseError`のいずれか)。
+ * `state==="unavailable"`(全試行が`unavailable`)だけは警告を出さない、という原則がこの
+ * 単純化からそのまま導かれる。
+ */
+function comboOddsNeedsWarning(result: ComboOddsFetchResult): boolean {
+  if (result.state === "failed") return true;
+  if (result.state === "available") {
+    return result.diagnostics.attempts.some((a) => a.state !== "available");
+  }
+  return false;
+}
+
+/**
+ * 組合せオッズの警告メッセージを組み立てる(診断値の要約を含める)。
+ *
+ * **人間が読む唯一のチャネルであることへの対応(boss メタレビュー指摘・要修正3)**:
+ * `packages/app/src/main/analysis-pipeline.ts:707` は `race.meta.warnings.map((w) =>
+ * w.message)` で `message` 文字列のみを取り出しており、`kind` も `meta.comboOdds` の
+ * 診断値(`attempts` の内訳)もユーザーには届かない。診断値では状態④(取得失敗)と
+ * 構造異常(`parseError`)を別枠に分類しているが(Q2裁定)、この文言が丸められると
+ * 運用者は「取得に失敗しました」しか読めず、netkeibaのHTML/JSON構造が変わった可能性
+ * (AC7bの「静かな劣化」)を疑う機会を失う。そのため常に軸/試行の内訳
+ * (未発売/発売なし・取得失敗・構造異常の件数)を文言に含め、構造異常が1件でもあれば
+ * 明示的に強調する。
+ */
+function comboOddsWarningMessage(betType: ComboBetType, result: ComboOddsFetchResult): string {
+  const label = comboBetTypeLabel(betType);
+  const { requestCount, expectedComboCount, obtainedComboCount, missingComboCount, attempts } =
+    result.diagnostics;
+  const unavailableCount = attempts.filter((a) => a.state === "unavailable").length;
+  const fetchFailedCount = attempts.filter((a) => a.state === "fetchFailed").length;
+  const parseErrorCount = attempts.filter((a) => a.state === "parseError").length;
+  const breakdown = `未発売/発売なし=${unavailableCount} / 取得失敗=${fetchFailedCount} / 構造異常=${parseErrorCount}`;
+  const structureWarning =
+    parseErrorCount > 0
+      ? `構造異常${parseErrorCount}件(netkeibaのHTML/JSON構造が変わった可能性)。`
+      : "";
+  if (result.state === "failed") {
+    // 状態④(取得失敗)であることを明記し、②③(発売なし/未発売)との混同を防ぐ(AC7bの趣旨)。
+    // 「全requestCount件が失敗」とは書かない: state==="failed"はobtainedComboCount===0かつ
+    // 全試行がunavailableではない、という条件でしかなく、HTTP自体は成功して構造的に正当な
+    // 「未発売」文書が返っている試行が大半を占めるケースが普通にある(例: 9軸unavailable+
+    // 1軸fetchFailedの混在)。この場合「全requestCount件が失敗」は事実に反する
+    // (boss メタレビュー・提案採用)。実際の内訳はbreakdownが正確に示す。
+    return `${label}オッズを1件も取得できませんでした(発売なし/未発売〈状態②③〉とは異なる。${structureWarning}内訳: ${breakdown}。requestCount=${requestCount})`;
+  }
+  return `${label}オッズが部分的にしか取得できませんでした(期待${expectedComboCount}件中${obtainedComboCount}件取得、${missingComboCount}件欠落。${structureWarning}内訳: ${breakdown}。requestCount=${requestCount})`;
+}
+
+/**
+ * 組合せオッズ1券種分を取得し、`OddsSnapshot`用のRecordへの変換・警告判定まで行う。
+ *
+ * `fetchComboOdds`(第3段)は基本的にthrowしない設計(Q3裁定)だが、`narTrioOddsAxisUrl`の
+ * 契約違反(AC-6のfail fast。出走馬番の異常に由来する、こちら側のバグ)は例外的にthrowしうる。
+ * 組合せオッズは調教と同じ任意データ(オプトイン)であり、この例外でレース全体を落とすのは
+ * 過剰なため、他の任意データ(調教)と同じくcatchして警告に落とす
+ * (`odds.wideCombo`/`trioCombo`は当該券種について未設定のままになる)。
+ */
+async function fetchComboBetTypeOdds(
+  betType: ComboBetType,
+  raceId: RaceId,
+  startingUmabans: readonly number[],
+  fetcher: RaceFetcher,
+  fetchOptions: CachedFetchTextOptions,
+  warnings: ScrapeWarning[],
+): Promise<{ readonly record: Record<string, number | null>; readonly outcome: ComboOddsFetchOutcome } | undefined> {
+  try {
+    const result = await fetchComboOdds(raceId, betType, startingUmabans, fetcher, fetchOptions);
+    if (comboOddsNeedsWarning(result)) {
+      warnings.push({ kind: "組合せオッズ", message: comboOddsWarningMessage(betType, result) });
+    }
+    return {
+      record: Object.fromEntries(toComboOddsScalarMap(result.odds)),
+      outcome: { state: result.state, diagnostics: result.diagnostics },
+    };
+  } catch (error) {
+    warnings.push({
+      kind: "組合せオッズ",
+      message: `${comboBetTypeLabel(betType)}オッズの取得中に想定外の例外が発生しました: ${errorMessage(error)}`,
+    });
+    return undefined;
+  }
 }
 
 /**
@@ -252,7 +416,7 @@ export async function scrapeRace(
     maxAgeMs: ttl.oddsMs,
     bypassCache: options.bypassOddsCache ?? false,
   };
-  const odds = isNar
+  const baseOdds = isNar
     ? parseNarOdds(
         await deps.fetcher.fetchText(narOddsPageUrl(raceId), oddsFetchOptions),
       )
@@ -260,7 +424,53 @@ export async function scrapeRace(
         await deps.fetcher.fetchText(oddsApiUrl(raceId), oddsFetchOptions),
       );
   // オッズ取得直後の時刻。着手時刻(fetchedAt)とは別に記録する。
+  // 組合せオッズ(下記(5))はこの後に取得するが、既存の意味(「単勝・複勝オッズ取得直後」)を
+  // 変えないため、(5)より前のこの位置で確定させる(オプトインしない既定呼び出しでは
+  // (5)自体が実行されないため、この行の位置に関わらず既存の挙動と完全に一致する)。
   const oddsFetchedAt = now().toISOString();
+
+  // (5) 組合せオッズ(ワイド・3連複。オプトイン。既定OFF。機能D-2b-B・Issue #33第4段):
+  // options.includeComboOddsがtrueの場合のみ実行する。既定呼び出しでは本ステップは
+  // 一切実行されず、発行URL列・リクエスト数は現行と完全に一致する(AC4)。
+  //
+  // 防御カバレッジ表への追記(AC8。fetch-combo-odds.tsの表に対する追加出口):
+  // | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
+  // |---|---|---|---|---|
+  // | fetchComboOddsの結果(ComboOddsCellのMap) | Object.fromEntries(toComboOddsScalarMap(...)) | あり | 変換(MapをRecordに詰め替え。#32のtoComboOddsScalarMapで下限採用ルールを1箇所に閉じる。ここで規則を再実装しない) | `scrape-race.test.ts`「JSON.stringifyを通しても値が消えないこと」it(Map化していないことのJSON往復回帰テスト) |
+  // | narTrioOddsAxisUrlの契約違反throw(AC-6のfail fast経由) | fetchComboBetTypeOddsのcatch | あり | 分類(警告に落とす。他の任意データ〈調教〉と同じ扱い。レース全体は落とさない) | 本ファイル内コメント参照。専用の合成テストは今回未追加(発生させるにはshutuba由来の出走馬番自体が破損している必要があり、既存parse-shutubaの馬番検証〈1〜18範囲・throw〉が既に上流で防いでいるため実質到達不能経路。到達可能にする改変〈shutuba側の検証を弱める等〉があれば別途テストを追加すること) |
+  let wideCombo: Record<string, number | null> | undefined;
+  let trioCombo: Record<string, number | null> | undefined;
+  let comboOdds: ComboOddsScrapeOutcome | undefined;
+  if (options.includeComboOdds) {
+    const startingUmabans = shutuba.horses.map((h) => h.umaban);
+    // TTL/bypassCacheは単勝・複勝オッズと同じ揮発性のデータとして扱い、専用のカテゴリは
+    // 設けない(oddsFetchOptionsをそのまま流用する。デザイン判断)。
+    const wideOutcome = await fetchComboBetTypeOdds(
+      "wide",
+      raceId,
+      startingUmabans,
+      deps.fetcher,
+      oddsFetchOptions,
+      warnings,
+    );
+    const trioOutcome = await fetchComboBetTypeOdds(
+      "trio",
+      raceId,
+      startingUmabans,
+      deps.fetcher,
+      oddsFetchOptions,
+      warnings,
+    );
+    wideCombo = wideOutcome?.record;
+    trioCombo = trioOutcome?.record;
+    comboOdds = { wide: wideOutcome?.outcome, trio: trioOutcome?.outcome };
+  }
+
+  const odds: OddsSnapshot = {
+    ...baseOdds,
+    ...(wideCombo !== undefined ? { wideCombo } : {}),
+    ...(trioCombo !== undefined ? { trioCombo } : {}),
+  };
 
   const horses: RaceHorseData[] = shutuba.horses.map((shutubaHorse) => ({
     shutuba: shutubaHorse,
@@ -273,7 +483,7 @@ export async function scrapeRace(
     race: shutuba.race,
     horses,
     odds,
-    meta: { fetchedAt, oddsFetchedAt, warnings },
+    meta: { fetchedAt, oddsFetchedAt, warnings, comboOdds },
   };
 }
 

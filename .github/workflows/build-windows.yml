@@ -2,15 +2,19 @@
 #
 # 方針(ユーザー指示):
 #   UI 実装中は常に Releases から最新 exe をダウンロードできる状態を維持する。
-#   そのため固定タグ `dev-latest` のプレリリースを毎回作り直して差し替える(ローリングプレリリース)。
+#   そのため固定タグ `dev-latest` のプレリリースを、公開ゲート(下記 PUBLISH_DEV_LATEST。Issue #43)を
+#   満たす push のたびに in-place で差し替える(ローリングプレリリース。delete→create ではなく
+#   既存アセットの上書き更新。詳細は後段の公開ステップのコメントを参照)。
 name: Windows ビルドと Releases 公開
 
 on:
-  # 開発ブランチへの push で自動ビルド(→ dev-latest プレリリースを差し替え)。
+  # 開発ブランチへの push ではビルド・テストを毎回実行し、公開ゲート(下記 PUBLISH_DEV_LATEST)を
+  # 満たす push のときだけ dev-latest プレリリースを差し替える(ビルドの実行可否と公開可否は別)。
   push:
     branches:
       - claude/keiba-ev-tool-dev-cvagiu
       - claude/handover-next-session-x5ki6o
+      - claude/keiba-prediction-handover-ojr8t1
     # v* タグ(例 v1.0.0)の push で正式リリースをビルド・公開する。
     tags:
       - "v*"
@@ -32,6 +36,56 @@ jobs:
   build:
     # Windows ネイティブの exe を作るため windows-latest 上でビルドする。
     runs-on: windows-latest
+    env:
+      # PUBLISH_DEV_LATEST: dev-latest への公開可否をここで一元判定する。
+      # 公開ステップ・孤児掃除ステップ・スキップ通知ステップは必ずこの値だけを参照し、
+      # 条件式を2箇所以上に複製してはならない(複製した2つがずれると「公開せずに掃除だけ実行」に
+      # なり、dev-latest の exe が全滅する。掃除ステップは現行ビルド成果物以外の .exe を
+      # 無条件に削除するため)。
+      #
+      # Issue #43(既定値の反転): 旧仕様は「コミットメッセージに『レビュー継続中』が無ければ公開する」
+      # という「既定で公開」の設計だった。これは印の無い自動コミットが1つ割り込むだけで
+      # 未レビューのコードが公開される事故を招いた(コミット 10a4c54 が印なしで単独 push され、
+      # その時点でブランチには boss 承認前の実装が4コミット載っていた。実害は無かったが、
+      # 実装が packages/app/src に触れていれば未承認コードが配布されていた)。
+      # push という操作自体がこちらの手を離れて(自動コミット等から)起こりうる以上、防御は
+      # CI 側に置くしかなく、既定値は安全側(既定で非公開)でなければならない。そのため本タスクで
+      # 「承認印([PUBLISH-APPROVED])付きの push」を公開の必須条件に変更し、既定を反転した。
+      #
+      # 現行の判定(公開する3条件のいずれか):
+      # 1. ブランチ ref への workflow_dispatch(手動実行)。
+      #    付け忘れ・機械判定の誤りからの回復レバーとして無条件公開を維持する。明示的な人手操作
+      #    であり、事故原因である「無言の既定動作」とは性質が違う。
+      # 2. ブランチ ref への push で、先端コミットメッセージに承認印 `[PUBLISH-APPROVED]` を含み、
+      #    かつ「レビュー継続中」を含まない。
+      #    event_name == 'push' を明示するのは、workflow_dispatch では head_commit が null になる
+      #    ため、暗黙の型強制(null への contains 呼び出し)に手動実行時の挙動を委ねず、
+      #    「手動実行では条件1が別途無条件で担当する」意図を式として明示するため。
+      # (それ以外: v* タグ push・タグ ref への手動実行・head_commit が null のその他イベントは
+      #  常に false。startsWith(github.ref, 'refs/heads/') がブランチ ref 以外をすべて落とす)
+      #
+      # 承認印リテラルの運用: `[PUBLISH-APPROVED]` はコミットメッセージの**件名(1行目)の末尾**に
+      # 置く運用とする(CLAUDE.md「レビュー継続中の中間コミット」節)。ただし `contains()` は
+      # コミットメッセージ全文(件名+本文)を対象にするため、本文中に書いても実際には効いてしまう
+      # ——CI の判定基準(全文)と運用上の置き場所(件名末尾)がずれているという残存ギャップとして
+      # ここに明記する。
+      #
+      # 「レビュー継続中」の否定(AND)は保険として残す: 承認印リテラルが偶然の一致や引用
+      # (例: このコメント自体の引用、無関係な文脈での言及)で本文に混入した場合の二重の防波堤。
+      # ただし公開を許可する側の荷重を担うのは承認印(contains 側)であり、この否定は
+      # もはや主たる防御ではなく保険にすぎない。
+      #
+      # 残存リスク(大文字小文字): GitHub Actions の式の文字列比較(contains 含む)は
+      # 大文字小文字を区別しない。そのため `[publish-approved]` のような小文字表記も一致する。
+      # 広い側の一致が効くのは公開を許可する側であるため、意図しない大小文字違いの文字列でも
+      # 公開されうる残存リスクとして明記する。
+      #
+      # 残存ギャップ(複数コミットの push): 1回の push に複数コミットが含まれる場合の判定は
+      # head_commit(push後のref先端のコミット = 実際にビルドされるツリーそのもの)のみで行う。
+      # 先端コミットのメッセージに承認印が無ければ、同じ push 内の祖先コミットに承認印があっても
+      # 公開されない(fail-safe 側の挙動であり、Issue #43 が問題視した「印なしで公開される」方向の
+      # 事故ではない)。
+      PUBLISH_DEV_LATEST: ${{ startsWith(github.ref, 'refs/heads/') && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[PUBLISH-APPROVED]') && !contains(github.event.head_commit.message, 'レビュー継続中'))) }}
     steps:
       - name: リポジトリを取得
         uses: actions/checkout@v4
@@ -49,9 +103,17 @@ jobs:
       - name: 依存をインストール
         run: pnpm install --frozen-lockfile
 
-      # 全パッケージ(core + app)のテストが通ることをビルド前の関門にする。
+      # 型検査をテスト・ビルドより前段の関門にする(fail fast。Issue #38)。
+      # ルートの `pnpm typecheck`(= `pnpm -r typecheck && tsc -p tsconfig.scripts.json`)を呼ぶ。
+      # `pnpm -r typecheck` だけでは scripts/ の型検査(tsconfig.scripts.json)が走らない。
+      - name: 型検査を実行
+        run: pnpm typecheck
+
+      # 全パッケージ(core + app)+ ルート(scripts/)のテストが通ることをビルド前の関門にする。
+      # ルートの `pnpm test`(= `pnpm -r test && vitest run`)で scripts/ のテストも対象に含める
+      # (`pnpm -r test` のままだと scripts/ のテストは CI で実行されない)。
       - name: テストを実行
-        run: pnpm -r test
+        run: pnpm test
 
       # renderer(Vite)+ main/preload(esbuild)をビルドする。
       - name: app をビルド
@@ -68,7 +130,8 @@ jobs:
       # (delete 方式だと公開失敗時に dev-latest が消えたまま残る非アトミック性があるため)。
       # 同名アセット(keiba-ev-tool-<version>-portable.exe)は上書き設定で置き換える。
       - name: Releases に公開(dev-latest を in-place 更新 / ブランチ push 時)
-        if: startsWith(github.ref, 'refs/heads/')
+        # 公開可否はジョブ env の PUBLISH_DEV_LATEST に一元化(孤児掃除ステップと必ず同じ値を参照する)。
+        if: env.PUBLISH_DEV_LATEST == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dev-latest
@@ -81,6 +144,85 @@ jobs:
             最新の実装を試せますが予告なく内容が変わります(個人利用専用)。
             安定して使う場合は最新の正式版(v*)を入手してください。
           files: packages/app/release/*.exe
+
+      # dev-latest に残った孤児 exe アセットを掃除する(ブランチ push 時のみ)。
+      # 背景: artifactName がバージョン依存(keiba-ev-tool-<version>-portable.exe)のため、
+      # softprops/action-gh-release の in-place 上書きは「同名」のアセットしか差し替えない。
+      # version を上げると旧バージョン名のアセットが dev-latest に残置され続けてしまう。
+      # このステップは直前の公開ステップの後に置くことで、最新 exe が必ず先にアップロード
+      # 済みの状態を保ったまま(atomicity を壊さず)、現行ファイル名以外の .exe だけを削除する。
+      # 現行ファイル名は version の再パースではなく、ビルド成果物 packages/app/release/*.exe の
+      # basename から直接導出する(名前解決の曖昧さを排除するため)。
+      # 前提: portable ターゲットのみ設定のため exe は常に1個生成される。将来 target を追加して
+      # exe が複数生成される設定に変えた場合は、件数ガード(下記 exe_count チェック)で検知して
+      # 掃除をスキップする(basename の suffix 誤解釈による静かな誤動作を避けるため)。
+      # 既知の制約: concurrency グループは github.ref 単位のため、複数開発ブランチが同時 push
+      # されると本ステップが並行実行されうる。その場合、一覧取得→削除の間に他 run が直後に
+      # アップロードした exe を孤児と誤判定して削除する競合ウィンドウが理論上ある(本ステップの
+      # スコープ外の構造的リスクとして許容する)。
+      - name: dev-latest の孤児 exe アセットを掃除(現行ファイル名以外を削除)
+        # 公開ステップと必ず同じ値(ジョブ env の PUBLISH_DEV_LATEST)を参照する。ここだけ条件式を
+        # 書き換えてずらすと、公開されないまま掃除だけ走り dev-latest の exe が全滅する。
+        if: env.PUBLISH_DEV_LATEST == 'true'
+        shell: bash
+        # このステップは前段で exe 本体のアップロードが完了した後の後片付けであり、
+        # 失敗してもビルド・公開自体は成功させたい(受け入れ条件: run が conclusion=success)。
+        # ただし全面 `|| true` で無言に握りつぶすのではなく、個別の失敗は
+        # ::warning:: で必ずログに残し、次回実行時に再試行される形にする。
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # exe が想定通り1個だけ生成されているかを機械的に検査する。
+          # basename はマッチが複数でもエラーにならず第2引数を suffix 解釈して静かに誤動作するため、
+          # コメントだけの前提依存にせず、件数を明示的にガードする。
+          exe_count=$(ls packages/app/release/*.exe 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$exe_count" != "1" ]; then
+            echo "::warning::release ディレクトリの .exe が1個ではありません(${exe_count}個)。孤児掃除をスキップします(target 追加等で前提が変わった可能性)"
+            exit 0
+          fi
+
+          export CURRENT_EXE=$(basename packages/app/release/*.exe)
+          echo "現行ファイル: $CURRENT_EXE"
+
+          # gh 内蔵 jq は --arg 未対応のため、env.CURRENT_EXE 経由でシェル変数を jq に渡す。
+          # 取得コマンド自体の失敗(ネットワーク瞬断・レート制限等)を「孤児なし」と取り違えないよう、
+          # 失敗時は ORPHANS を明示的に空にした上で ::warning:: を出す(取得失敗と本当に孤児が
+          # 0件であるケースを区別する)。
+          if ! ORPHANS=$(gh release view dev-latest --json assets \
+            --jq '.assets[].name | select(endswith(".exe") and . != env.CURRENT_EXE)'); then
+            echo "::warning::dev-latest のアセット一覧取得に失敗しました。孤児掃除をスキップします(次回のビルドで再試行されます)"
+            ORPHANS=""
+            SKIP_CLEANUP=1
+          fi
+
+          if [ -n "${SKIP_CLEANUP:-}" ]; then
+            : # 一覧取得失敗時は上で警告済みのため何もしない
+          elif [ -z "$ORPHANS" ]; then
+            echo "孤児 exe アセットなし"
+          else
+            while IFS= read -r asset; do
+              [ -z "$asset" ] && continue
+              echo "削除対象: $asset"
+              if ! gh release delete-asset dev-latest "$asset" --yes; then
+                echo "::warning::孤児アセット削除に失敗しました: $asset(次回のビルドで再試行されます)"
+              fi
+            done <<< "$ORPHANS"
+          fi
+
+      # ゲート条件でスキップした場合に理由をログへ残す(無言スキップは不可)。
+      # 条件をブランチ push / ブランチへの手動実行に限定するのは、v* タグ push や
+      # タグ ref への手動実行では PUBLISH_DEV_LATEST が(承認印の有無とは無関係の理由で)常に
+      # false になり、そのまま逆条件にすると「承認印が無いためスキップした」という事実と異なる
+      # notice を出してしまうため(dev-latest 公開はそもそもブランチ push 専用の仕組みであり、
+      # タグ push には無関係)。
+      # always() は付けない: 前段(テスト・ビルド・パッケージング等)が失敗した場合、暗黙の
+      # success() によりこのステップもスキップされる。always() を付けると、ビルド失敗を
+      # 「承認印なしスキップ」と誤って名乗ってしまう事故になる。
+      - name: dev-latest 公開スキップをログに記録(承認印なしコミット時)
+        if: startsWith(github.ref, 'refs/heads/') && env.PUBLISH_DEV_LATEST != 'true'
+        run: |
+          echo "::notice::コミットメッセージに承認印『[PUBLISH-APPROVED]』が無い、または『レビュー継続中』が含まれるため、dev-latest への公開と孤児 exe 掃除をスキップしました(承認印付きコミットを push するか、workflow_dispatch で公開できます)"
 
       # v* タグ push 時: そのタグの正式リリース(プレリリースではない)を作成する。
       # tag_name を指定しなければ、トリガーとなったタグ(github.ref)がそのまま使われる。

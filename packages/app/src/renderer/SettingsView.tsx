@@ -5,14 +5,24 @@ import {
   CLIP_VARIANTS,
   resolveClipVariant,
 } from "@keiba/core/analyzer/build-prompt";
+import {
+  DEFAULT_BET_ALLOCATION_CONFIG,
+  resolveEffectivePerRaceCap,
+} from "@keiba/core/ev/bet-allocation";
 
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   BASE_SCORE_WEIGHT_KEYS,
   BASE_SCORE_WEIGHT_LABELS,
+  BET_ALLOCATION_LABELS,
+  ALLOCATION_BET_TYPE_LABELS,
   BIAS_WEIGHT_KEYS,
   BIAS_WEIGHT_LABELS,
   CLIP_VARIANT_IDS,
+  INCLUDE_COMBO_ODDS_LABELS,
+  isValidBankroll,
+  isValidKellyFraction,
+  isValidPerRaceCap,
   isValidThreshold,
   isValidWebhookUrl,
   isValidWeight,
@@ -20,9 +30,11 @@ import {
   type BiasWeightKey,
   type ClipVariantId,
 } from "../shared/settings.js";
+import { formatYen } from "./verify-format.js";
 import {
   buildUpdate,
   createInitialSettingsState,
+  isDirty,
   isFormValid,
   settingsReducer,
 } from "./settings-reducer.js";
@@ -174,6 +186,8 @@ export function SettingsView(): React.JSX.Element {
   }
 
   const canSave = isFormValid(state) && state.status !== "saving";
+  // 未保存(dirty)インジケータ(Issue #11)。読込/保存済みの値との差分を純関数isDirtyで判定する。
+  const dirty = isDirty(state);
 
   return (
     <section style={{ marginTop: "1rem" }}>
@@ -214,7 +228,7 @@ export function SettingsView(): React.JSX.Element {
       {/* Discord Webhook URL。 */}
       <div style={fieldStyle}>
         <label style={labelStyle} htmlFor="webhook">
-          Discord Webhook URL(Phase 5 で使用)
+          Discord Webhook URL
         </label>
         <input
           id="webhook"
@@ -268,9 +282,162 @@ export function SettingsView(): React.JSX.Element {
               dispatch({ type: "自動送信切替", value: e.target.checked })
             }
           />{" "}
-          分析結果を自動でDiscordに送信する(Phase 5 で使用)
+          分析結果を自動でDiscordに送信する
         </label>
       </div>
+
+      {/*
+       * 組合せオッズ取得(機能D-2c・Issue #28)。既定OFF(opt-in)。取得したオッズを馬券配分に
+       * 実際に使うかどうかは、下のALLOCATION_BET_TYPE_LABELS(ワイド/三連複を配分に使う)の
+       * 設定に従う(第4段でこの依存関係を補助文に明示した。INCLUDE_COMBO_ODDS_LABELS.help
+       * 参照。「記録のみ」だった第3段時点の説明はAC19で更新済み)。
+       */}
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeComboOdds}
+            onChange={(e) =>
+              dispatch({ type: "組合せオッズ取得切替", value: e.target.checked })
+            }
+          />{" "}
+          {INCLUDE_COMBO_ODDS_LABELS.checkbox}
+        </label>
+        <p style={noteStyle}>{INCLUDE_COMBO_ODDS_LABELS.help}</p>
+      </div>
+
+      {/*
+       * 券種横断の馬券配分対象(機能D-2c第4段・Issue #28)。既定ON(D-1)。複勝は常時対象のため
+       * チェックボックスを設けない(呼び出し側でbetTypesへ"place"を常に含める)。
+       */}
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeWideInAllocation}
+            onChange={(e) =>
+              dispatch({ type: "ワイド配分対象切替", value: e.target.checked })
+            }
+          />{" "}
+          {ALLOCATION_BET_TYPE_LABELS.wide.checkbox}
+        </label>
+        <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.wide.help}</p>
+      </div>
+
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeTrioInAllocation}
+            onChange={(e) =>
+              dispatch({ type: "三連複配分対象切替", value: e.target.checked })
+            }
+          />{" "}
+          {ALLOCATION_BET_TYPE_LABELS.trio.checkbox}
+        </label>
+        <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.trio.help}</p>
+      </div>
+
+      {/*
+       * 馬券配分(機能C-2)。総資金・1レース上限は既定0(未設定=配分提案を出さない・opt-in)。
+       * ケリー係数は上級設定として折りたたみで区別する(仕様「UI ラベル」要件)。
+       */}
+      <h3 style={{ fontSize: "0.9rem", margin: "0.75rem 0 0.4rem" }}>馬券配分</h3>
+
+      <div style={fieldStyle}>
+        <label style={labelStyle} htmlFor="bankroll">
+          {BET_ALLOCATION_LABELS.bankroll}
+        </label>
+        <input
+          id="bankroll"
+          type="number"
+          step="1"
+          min="0"
+          style={isValidBankroll(state.bankroll) ? inputStyle : invalidStyle}
+          value={state.bankroll}
+          onChange={(e) =>
+            dispatch({ type: "総資金入力", value: e.target.value })
+          }
+        />
+        <p style={noteStyle}>{BET_ALLOCATION_LABELS.bankrollHelp}</p>
+        {!isValidBankroll(state.bankroll) && (
+          <p style={{ ...noteStyle, color: "#c00" }}>
+            0以上100,000,000以下の整数を入力してください(0は未設定を表し、配分提案を出しません)。
+          </p>
+        )}
+      </div>
+
+      <div style={fieldStyle}>
+        <label style={labelStyle} htmlFor="per-race-cap">
+          {BET_ALLOCATION_LABELS.perRaceCap}
+        </label>
+        <input
+          id="per-race-cap"
+          type="number"
+          step="1"
+          min="0"
+          style={isValidPerRaceCap(state.perRaceCap) ? inputStyle : invalidStyle}
+          value={state.perRaceCap}
+          onChange={(e) =>
+            dispatch({ type: "1レース上限入力", value: e.target.value })
+          }
+        />
+        {/*
+         * 実効上限(betUnit単位切り捨て後)を入力欄直下に常時表示する(仕様「1レース上限は入力欄
+         * 直下に実効上限を常時表示」)。core resolveEffectivePerRaceCap をそのまま呼び、UI側で
+         * 床関数をコピー実装しない(boss着手前ゲート2026-07-30: 「実効上限10,000円」と表示しつつ
+         * core側は別の値で計算する事態=嘘をつくUIを防ぐ)。betUnitはUI未公開の既定値を使うが、
+         * 文言側も「100円」を直接書かずDEFAULT_BET_ALLOCATION_CONFIG.betUnitから埋め込む
+         * (code-reviewer指摘: core側REASON_CAP_TOO_SMALLの100円ハードコードと同じ欠陥クラス。
+         * betUnitが将来変わっても文言の追随漏れが起きないようにする)。
+         */}
+        <p style={noteStyle}>
+          実効上限:{" "}
+          {formatYen(
+            resolveEffectivePerRaceCap(
+              Number(state.perRaceCap) || 0,
+              DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
+            ),
+          )}
+          ({DEFAULT_BET_ALLOCATION_CONFIG.betUnit}円単位切り捨て後)
+        </p>
+        {!isValidPerRaceCap(state.perRaceCap) && (
+          <p style={{ ...noteStyle, color: "#c00" }}>
+            0以上10,000,000以下の整数を入力してください(0は未設定を表し、配分提案を出しません)。
+          </p>
+        )}
+      </div>
+
+      <details style={{ margin: "0.5rem 0 1rem", maxWidth: 480 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+          上級設定: {BET_ALLOCATION_LABELS.kellyFraction}
+        </summary>
+        <div style={{ ...fieldStyle, marginTop: "0.5rem" }}>
+          <label style={labelStyle} htmlFor="kelly-fraction">
+            {BET_ALLOCATION_LABELS.kellyFraction}
+          </label>
+          <input
+            id="kelly-fraction"
+            type="number"
+            step="0.05"
+            min="0.05"
+            max="1"
+            style={isValidKellyFraction(state.kellyFraction) ? inputStyle : invalidStyle}
+            value={state.kellyFraction}
+            onChange={(e) =>
+              dispatch({ type: "ケリー係数入力", value: e.target.value })
+            }
+          />
+          <p style={noteStyle}>
+            0.05〜1(既定0.5)。小さいほど1回あたりの配分額が控えめになり、資産変動が穏やかになります。
+          </p>
+          {!isValidKellyFraction(state.kellyFraction) && (
+            <p style={{ ...noteStyle, color: "#c00" }}>
+              0.05以上1以下の数値を入力してください。
+            </p>
+          )}
+        </div>
+      </details>
 
       {/* プロンプト追加指示(Task#28 プロンプト改善C)。 */}
       <div style={fieldStyle}>
@@ -463,7 +630,15 @@ export function SettingsView(): React.JSX.Element {
         ))}
       </details>
 
-      {/* 操作。 */}
+      {/*
+       * 操作(Issue #11: 保存ボタンのスコープ明示・未保存インジケータ)。
+       * 「保存」はこの画面に表示している設定項目をすべてまとめて保存する操作であることを近傍の注記で明示する。
+       * 未保存インジケータ(dirty)と「保存しました」緑表示は、保存直後に値を編集すると両方が同時に出て
+       * 矛盾しないよう、緑表示側を `status==="saved" && !dirty` の条件で出す(dirtyなら緑は隠す)。
+       */}
+      <p style={{ ...noteStyle, marginBottom: "0.4rem" }}>
+        「保存」はこの画面の設定項目をまとめて保存します。
+      </p>
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
         <button type="button" onClick={handleSave} disabled={!canSave}>
           {state.status === "saving" ? "保存中…" : "保存"}
@@ -475,7 +650,12 @@ export function SettingsView(): React.JSX.Element {
         >
           デフォルトに戻す
         </button>
-        {state.status === "saved" && (
+        {dirty && (
+          <span style={{ color: "#a60", fontSize: "0.85rem" }}>
+            未保存の変更があります
+          </span>
+        )}
+        {state.status === "saved" && !dirty && (
           <span style={{ color: "#0a7f2e", fontSize: "0.85rem" }}>
             保存しました(次回の分析から反映されます)。
           </span>

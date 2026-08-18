@@ -1,3 +1,4 @@
+import { deflateSync } from "node:zlib";
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
   AnalysisStore,
@@ -277,6 +278,132 @@ describe("createPipelineDeps(本番依存の配線)", () => {
       const r = createPipelineDeps({ dbPath: ":memory:" });
       resources.push(r);
       expect(r.deps.getRaceResultDetail!(parseRaceId("202605020811"))).toBeUndefined();
+    });
+  });
+
+  describe("deps.getGradeWinnerTrend の配線(タスク機能B: 同レース過去10年結果傾向をプロンプトに反映する配線)", () => {
+    /** APIと同じ base64(zlib deflate) 形式にエンコードする(テスト専用の疑似応答組み立て用)。 */
+    function encodePayload(value: unknown): string {
+      return deflateSync(Buffer.from(JSON.stringify(value), "utf-8")).toString("base64");
+    }
+
+    /** status:OKの疑似生レスポンス(過去回配列)をJSON文字列で組み立てる。 */
+    function makeOkRawResponse(entries: readonly unknown[]): string {
+      return JSON.stringify({
+        status: "OK",
+        reason: null,
+        data: {
+          "nkrace_gw::race_ids_testhash": encodePayload(entries),
+          "nkrace_gw::race_ids_testhash_last_dt": "2026-01-01",
+        },
+      });
+    }
+
+    /** 本文をtext(JSON文字列)から疑似FetchResponseを組み立てる。 */
+    function makeFetchResponse(body: string): FetchResponse {
+      return {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type" ? "application/json" : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> =>
+          new TextEncoder().encode(body).buffer,
+      };
+    }
+
+    it("deps.getGradeWinnerTrendが関数として組み立てられ、注入したfetch(Electron net.fetch相当の注入経路)経由でPOSTし、集計結果を返すこと", async () => {
+      const rawEntries = [
+        { race_id: "202503020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 14, result: [{ umaban: 1, kakutei: 1, ninki: 3 }], payback: null },
+        { race_id: "202403020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 12, result: [], payback: null },
+        { race_id: "202303020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 16, result: [], payback: null },
+      ];
+      const fetch = vi.fn<FetchLike>(async () =>
+        makeFetchResponse(makeOkRawResponse(rawEntries)),
+      );
+
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      expect(typeof r.deps.getGradeWinnerTrend).toBe("function");
+      const summary = await r.deps.getGradeWinnerTrend!(parseRaceId("202603020211"), {
+        trackCode: "03",
+        track: "芝",
+        kyori: 1800,
+      });
+
+      expect(summary).not.toBeNull();
+      expect(summary!.条件一致回数).toBe(3);
+      expect(summary!.複勝圏内馬数).toBe(1);
+
+      // 注入したfetchへ実際にPOST(method/body/headers)が渡っていること
+      // (Electron net.fetch注入経路でもPOSTが通ることの確認。net-fetch-adapter.tsの
+      // CoreFetchInitは既にmethod/body/headersを汎用的に扱えるため、この注入口〈FetchLike〉に
+      // 正しくmethod/bodyが渡っていれば本番のElectron net.fetchアダプタでも同様に機能する)。
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [calledUrl, calledInit] = fetch.mock.calls[0]!;
+      expect(calledUrl).toBe("https://race.netkeiba.com/race_api/");
+      expect(calledInit).toMatchObject({
+        method: "POST",
+        body: "input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=202603020211",
+      });
+    });
+
+    it("非重賞(status:NG相当)のときはnullを返すこと", async () => {
+      const fetch = vi.fn<FetchLike>(async () =>
+        makeFetchResponse(
+          JSON.stringify({ status: "NG", reason: "AplGradeWinner->get() Error" }),
+        ),
+      );
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      const summary = await r.deps.getGradeWinnerTrend!(parseRaceId("202602010607"), {
+        trackCode: "03",
+        track: "芝",
+        kyori: 1800,
+      });
+
+      expect(summary).toBeNull();
+    });
+
+    it("地方(NAR)のrace_idでは、nar.netkeiba.comへPOSTすること(2026-07-28実測訂正: 地方も同一APIで取得できる)", async () => {
+      const fetch = vi.fn<FetchLike>(async () => makeFetchResponse(makeOkRawResponse([])));
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      await r.deps.getGradeWinnerTrend!(parseRaceId("202644070111"), {
+        trackCode: "44",
+        track: "ダ",
+        kyori: 2000,
+      });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [calledUrl] = fetch.mock.calls[0]!;
+      expect(calledUrl).toBe("https://nar.netkeiba.com/race_api/");
+    });
+
+    it("config.onWarnを渡すと、deps.onGradeWinnerTrendErrorがraceId・messageを含む文言でonWarnへ届くこと(要修正10: 構造破壊/API仕様変更の警告配線)", () => {
+      const onWarn = vi.fn();
+      const r = createPipelineDeps({ dbPath: ":memory:", onWarn });
+      resources.push(r);
+
+      expect(typeof r.deps.onGradeWinnerTrendError).toBe("function");
+      r.deps.onGradeWinnerTrendError!({
+        raceId: parseRaceId("202603020211"),
+        message: "ネットワークエラー(想定外)",
+      });
+
+      expect(onWarn).toHaveBeenCalledTimes(1);
+      expect(onWarn.mock.calls[0]![0]).toContain("202603020211");
+      expect(onWarn.mock.calls[0]![0]).toContain("ネットワークエラー(想定外)");
+    });
+
+    it("config.onWarn未指定なら、deps.onGradeWinnerTrendErrorはundefinedのまま(省略時は診断ログを残さない)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      expect(r.deps.onGradeWinnerTrendError).toBeUndefined();
     });
   });
 

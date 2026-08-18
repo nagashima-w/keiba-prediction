@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import { validatePeriodInput } from "@keiba/core";
+import { validatePeriodInput } from "@keiba/core/scraper/validate-period-input";
 
 import type {
   BatchRaceOutcome,
@@ -18,6 +18,7 @@ import { deriveBatchAvailability } from "./batch-availability.js";
 import { canCollectPeriodBatch } from "./period-batch-gate.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
+import type { MixedAllocationSettings } from "./mixed-allocation-view.js";
 import { PeriodBatchView } from "./PeriodBatchView.js";
 import type { RaceLedgerFilter } from "./race-ledger-filter.js";
 import {
@@ -99,6 +100,23 @@ export function App(): React.JSX.Element {
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
 
+  // 馬券配分(機能C-2)の設定スナップショット(BatchAnalysisViewへ渡す)。evThresholdは
+  // 固定注記3「配分の対象はEV閾値(現在X.XX)を上回った買い目のみです」の表示に使う。
+  // bankroll/perRaceCapの既定0は「未設定」を表し、配分ブロックを一切出さない(仕様)。
+  //
+  // 機能D-2c第4段(Issue #28)でincludeComboOdds/includeWideInAllocation/includeTrioInAllocation
+  // の3項目を統合した(旧includeComboOddsSettingを分離した別stateとして持たず、
+  // buildMixedAllocationDisplayへそのまま渡せる1つのMixedAllocationSettings形にする)。
+  const [betAllocationSettings, setBetAllocationSettings] = useState<MixedAllocationSettings>({
+    bankroll: 0,
+    perRaceCap: 0,
+    kellyFraction: 0.5,
+    evThreshold: 1.0,
+    includeComboOdds: false,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+  });
+
   // 実行中バッチの世代ID。一括分析開始時に固定し、完了で null に戻す。
   // 進捗イベントにはこの「開始時に固定した runId」を添えるため、完了後に遅れて届いた
   // 旧バッチの進捗は reducer の runId ガードで確実に弾かれる(恒真ガードにならない)。
@@ -149,16 +167,26 @@ export function App(): React.JSX.Element {
     return unsubscribe;
   }, []);
 
-  // Discord通知設定(Webhook URL 設定有無・自動送信ON/OFF)を読み込む。
+  // Discord通知設定(Webhook URL 設定有無・自動送信ON/OFF)と馬券配分3項目(機能C-2)を
+  // 同じIPC呼び出しから読み込む(IPC追加はゼロ。getSettingsの戻り値を両方に流用する)。
   const loadNotifySettings = useCallback(() => {
     window.keibaApi
       .getSettings()
-      .then((s) =>
+      .then((s) => {
         setNotify({
           webhookConfigured: s.discordWebhookUrl.trim() !== "",
           autoSend: s.autoSendDiscord,
-        }),
-      )
+        });
+        setBetAllocationSettings({
+          bankroll: s.bankroll,
+          perRaceCap: s.perRaceCap,
+          kellyFraction: s.kellyFraction,
+          evThreshold: s.evThreshold,
+          includeComboOdds: s.includeComboOdds,
+          includeWideInAllocation: s.includeWideInAllocation,
+          includeTrioInAllocation: s.includeTrioInAllocation,
+        });
+      })
       .catch(() => {
         setNotify({ webhookConfigured: false, autoSend: false });
       });
@@ -641,6 +669,7 @@ export function App(): React.JSX.Element {
             discordSend={state.run.discordSend}
             onSendDiscord={() => handleSendDiscord(completedOutcomes)}
             onExportAnalysis={handleExportAnalysis}
+            betAllocationSettings={betAllocationSettings}
           />
 
           <PeriodBatchView

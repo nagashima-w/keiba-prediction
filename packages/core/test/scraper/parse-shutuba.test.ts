@@ -281,3 +281,27 @@ describe("parseShutuba(地方(NAR)フィクスチャの互換性)", () => {
     expect(h.stableLocation).toBe("浦和");
   });
 });
+
+describe("parseShutuba(重賞グレードバッジの有無。タスク機能B 要修正2: 非重賞への無駄なAPI呼び出しを避ける事前判定)", () => {
+  /**
+   * RaceName配下のIcon_GradeType要素の有無で判定する(グレード番号は解釈しない=有無のみ)。
+   * 中央は<h1 class="RaceName">、地方(NAR)は<div class="RaceName">とタグ名が異なるため、
+   * セレクタ(selectors.ts SHUTUBA_SELECTORS.gradeBadge)はタグ名を限定しないこと
+   * (boss実測: 中央Icon_GradeType3/13、地方Icon_GradeType19。番号のマッピングは作らない)。
+   */
+  const cases: Array<[name: string, fixture: string, expected: boolean]> = [
+    // 陽性(グレードバッジあり)。
+    ["中央G3(ラジオNIKKEI賞、h1.RaceName)", "shutuba_202603020211.html", true],
+    ["地方Jpn1(帝王賞、div.RaceName)", "nar_shutuba_grade_202644070111.html", true],
+    // 陰性(グレードバッジなし)。
+    ["中央2歳未勝利", "shutuba_202602010601.html", false],
+    ["中央3歳以上1勝クラス", "shutuba_202602010607.html", false],
+    ["地方一般(浦和・ランチタイムC3)", "nar_shutuba_202642071301.html", false],
+    ["地方一般(高知・ファイナルレースC1)", "nar_shutuba_202654071210.html", false],
+  ];
+
+  it.each(cases)("%s: hasGradeBadgeが%sであること", (_name, fixture, expected) => {
+    const result = parseShutuba(loadFixture(fixture));
+    expect(result.race.hasGradeBadge).toBe(expected);
+  });
+});

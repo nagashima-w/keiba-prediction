@@ -58,6 +58,12 @@ const validUpdate: SettingsUpdate = {
   autoSendDiscord: false,
   additionalInstruction: "",
   clipVariant: "default",
+  bankroll: 10000,
+  perRaceCap: 5000,
+  kellyFraction: 0.5,
+  includeComboOdds: false,
+  includeWideInAllocation: true,
+  includeTrioInAllocation: true,
 };
 
 /** 登録済みハンドラを取得する。 */
