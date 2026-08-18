@@ -64,12 +64,23 @@
  *    乖離を機械的に検出できるようにする。語句の言い換えでは検出できないが、トークンの存在のみを
  *    見る緩い検査でも「規約からリテラルが丸ごと消える/書き換わる」ような乖離は検出できる)
  * 13. 旧セマンティクス(「push ごとに dev-latest が更新される」)の文言が README.md・
- *    docs/current-spec.md に再混入していない(Issue #43 の作業中、この文言が2つのドキュメントに
- *    独立して2回残存する事故が実際に起きたため追加。対象は利用者/現状仕様の記述であり、
- *    開発者向けの CLAUDE.md・docs/development-workflow.md は対象外とする——両ファイルは
- *    「どう運用するか」の手続きを書く文脈であり、「今 dev-latest がどう更新されるか」を
- *    利用者/現状仕様として断定する文とは性質が違うため、この不変条件のスコープに含めない。
- *    検出できる範囲・できない範囲は STALE_PUSH_EVERY_PATTERN のコメントを参照)
+ *    docs/current-spec.md・docs/handover-next-session.md に再混入していない(Issue #43 の作業中、
+ *    この文言が2つのドキュメントに独立して2回残存する事故が実際に起きたため追加。対象は
+ *    利用者/現状仕様の記述(および同種の現在形の断定を含む引き継ぎメモ)であり、開発者向けの
+ *    CLAUDE.md・docs/development-workflow.md・yml は対象外とする——CLAUDE.md/development-workflow.md
+ *    は「どう運用するか」の手続きを書く文脈であり、「今 dev-latest がどう更新されるか」を
+ *    利用者/現状仕様として断定する文とは性質が違うため、この不変条件のスコープに含めない。yml を
+ *    対象外とする理由(時点依存ではない恒久的な理由)は hasStalePushEverySemantics のコメントを
+ *    参照。この不変条件には正の対照(過去に実際に問題だった本文を検出器が true と判定すること)を
+ *    別途用意し、検出器側の変異(パターンの無害化)で空振りになっていないことを保証する
+ *    (検出できる範囲・できない範囲は STALE_PUSH_EVERY_PATTERN のコメントを参照)
+ * 14. 承認印([PUBLISH-APPROVED])の付与指示が、CLAUDE.md 手順6・docs/development-workflow.md
+ *    手順7において**命令形**(「必ず」+「付与」の近接共起)のまま維持されている(Issue #43 の
+ *    メタレビューで「承認印への言及4箇所すべてが説明的で命令が無かった」という重大指摘が
+ *    あったため、退行防止の機械検査を追加。抽出範囲は開始/終了の目印で厳密に区切り、範囲が
+ *    後続セクションまで伸びていないことを無条件 expect で先に固定する——範囲が伸びると、
+ *    対象の手順から命令形が消えても下流の別リテラルと「必ず」で条件が満たされてしまい、
+ *    素通りする穴になるため)
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -90,6 +101,22 @@ const DEVELOPMENT_WORKFLOW_PATH = path.join(
   "docs/development-workflow.md",
 );
 const README_PATH = path.join(REPO_ROOT, "README.md");
+const HANDOVER_NEXT_SESSION_PATH = path.join(
+  REPO_ROOT,
+  "docs/handover-next-session.md",
+);
+
+/**
+ * テキストファイルを読み、改行コードを LF に正規化して返す。
+ * CI(windows-latest)の checkout は `.gitattributes` 次第で CRLF になりうる。本ファイルで
+ * 文書テキストに正規表現(近接パターン・行アンカー等)を当てるすべての箇所は、この関数を通した
+ * 正規化済みテキストに対して行う(1箇所だけ生読みにすると、そこだけ CRLF で挙動が変わり
+ * 「ローカルでは緑・CI(CRLF)でだけ落ちる/素通りする」という、このゲート導入タスク自体で
+ * 実際に起きた見落としが再発するため)。
+ */
+function readNormalized(filePath: string): string {
+  return readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
+}
 
 /** dev-latest 公開の承認印リテラル。CI・CLAUDE.md・docs の全箇所で同一文字列である必要がある。 */
 const APPROVAL_MARK = "[PUBLISH-APPROVED]";
@@ -118,9 +145,23 @@ const APPROVAL_MARK = "[PUBLISH-APPROVED]";
 const STALE_PUSH_EVERY_PATTERN = /push\s*ごとに[\s\S]{0,100}dev-latest/;
 
 /**
- * yml 以外の任意テキストから、旧セマンティクスの再混入を検出する。
- * yml 側は既にワークフロー自体の書き換え(このタスク)で正しい記述に揃っているため対象外とし、
- * 「規約・ドキュメントに旧文言が戻っていないか」を確認する用途に絞る。
+ * 利用者/現状仕様向けの散文(README.md・docs/current-spec.md・docs/handover-next-session.md 等)
+ * から、旧セマンティクスの再混入を検出する。
+ *
+ * yml(.github/workflows/build-windows.yml)は対象外とする。この除外の理由は「今回の書き換えで
+ * 直したから」という**時点依存のもの**ではなく、恒久的に成立する理由に基づく:
+ *   1. yml の実コード(公開可否ゲート)の主たる防御は不変条件2(PUBLISH_DEV_LATEST の定義行を
+ *      期待する式と完全一致でピン留めする検査)であり、演算子・条件式の変異はそちらが検出する。
+ *      本パターンが見ているのはコメント欄の散文であり、実コードの防御とは独立で価値が薄い。
+ *   2. yml のヘッダ・各ステップのコメントには、公開ゲートと矛盾しない**正当な現行の記述**
+ *      (「差し替える」「in-place 更新」「置き換える」等)が複数箇所に存在する。これらは
+ *      STALE_PUSH_EVERY_PATTERN(「push ごとに」+「dev-latest」の近接)そのものとは字面が
+ *      異なるため直接の誤検出は起きないが、yml の実際の旧文言(「毎回作り直して差し替える」)を
+ *      捕まえようとして「差し替え」系の語まで拾うパターンを新たに足すと、これらの正当な記述と
+ *      衝突して誤検出を招く。誤検出は「次にこのテストに当たった人がパターンを緩める」方向に働き、
+ *      本パターンの docstring 自身が警告する形骸化を新たに1件作ることになる。
+ * そのため yml のヘッダ散文は本関数の対象に含めず、機械検査は実コードのピン留め(不変条件2)に
+ * 一本化する。
  */
 function hasStalePushEverySemantics(text: string): boolean {
   return STALE_PUSH_EVERY_PATTERN.test(text);
@@ -249,13 +290,50 @@ function extractAllStepNames(yml: string): string[] {
   });
 }
 
+/**
+ * 文書のテキストから、開始目印(startMarker)〜終了目印(endMarker)の直前までの範囲を切り出す。
+ * extractStep と同じ流儀: どちらかの目印が見つからない場合は、範囲比較そのものが無意味な値
+ * (undefined や空文字が後続の検査に流れる)にすり替わらないよう、必ず例外を投げる。
+ */
+function extractStepBlock(
+  text: string,
+  startMarker: string,
+  endMarker: string,
+): string {
+  const startIdx = text.indexOf(startMarker);
+  if (startIdx === -1) {
+    throw new Error(`開始位置が見つかりません: ${startMarker}`);
+  }
+  const endIdx = text.indexOf(endMarker, startIdx + startMarker.length);
+  if (endIdx === -1) {
+    throw new Error(`終了位置が見つかりません: ${endMarker}`);
+  }
+  return text.slice(startIdx, endIdx);
+}
+
+/**
+ * 承認印([PUBLISH-APPROVED])の運用を明記する箇所に、「必ず」+「付与」という命令形が
+ * 近接して同居しているかを見る、緩い機械検査のパターン。
+ *
+ * 粒度の選定理由: 「を必ず付与する」のような文言を一言一句で固定すると、将来の言い換え
+ * (例:「例外なく付与する」「省略せず付与すること」)だけで無意味に壊れ、次にここへ来た人が
+ * パターンを緩める方向に動きかねない(STALE_PUSH_EVERY_PATTERN と同じ懸念)。逆に「付与」
+ * という語単体だけを見ると、「付与すると公開される」のような**説明的な文**にも一致してしまい、
+ * Issue #43 で実際に重大指摘だった「命令ではなく説明になっている」という退行を区別できない。
+ * そこで「必ず」という強制を表す語と「付与」という動作語の**近接共起(0〜10文字以内)**を
+ * 要求する: 「必ず」だけでは動作対象が特定できず無関係な強調表現にも一致し、「付与」だけでは
+ * 説明文にも一致するため、両方の近接共起を要求することで「これは命令である」という最小限の
+ * 判別力を持たせている。しきい値10文字は、実際の文言(「`[PUBLISH-APPROVED]` を必ず付与する」)
+ * での間隔(「必ず付与」で0文字)に対して十分な余裕を持たせつつ、無関係な「必ず」と「付与」が
+ * 遠く離れて偶然共起するような誤検出は避ける値として選んだ。
+ */
+const IMPERATIVE_ATTACH_PATTERN = /必ず[\s\S]{0,10}付与/;
+
 describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件)", () => {
-  // 改行コードを LF に正規化してから読む。Windows ランナー上の checkout(actions/checkout)は
-  // リポジトリの .gitattributes 設定次第で CRLF になりうる。本テストの全パターンは `\n` を
-  // 前提にしている。読み込み直後の1箇所で正規化することで、6件すべてのパターンに
-  // 個別対応する必要をなくす(パターン側を `\r?\n` にする案は、1つでも直し漏れると
-  // 同じ事故が再発するため採らない)。
-  const yml = readFileSync(WORKFLOW_PATH, "utf8").replace(/\r\n/g, "\n");
+  // 改行コードを LF に正規化してから読む(readNormalized)。Windows ランナー上の
+  // checkout(actions/checkout)はリポジトリの .gitattributes 設定次第で CRLF になりうる。
+  // 本テストの全パターンは `\n` を前提にしている。
+  const yml = readNormalized(WORKFLOW_PATH);
 
   it("公開ステップと孤児掃除ステップの if: 条件が、公開を許可する極性(== 'true')で完全一致する(ずれると exe 全滅)", () => {
     const publishIf = extractIfLine(extractStep(yml, STEP_NAMES.publish));
@@ -441,30 +519,94 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     // 丸ごと消える/別の文字列に変わる」ような乖離は検出できる。
     expect(yml).toContain(APPROVAL_MARK);
 
-    const claudeMd = readFileSync(CLAUDE_MD_PATH, "utf8");
-    const currentSpec = readFileSync(CURRENT_SPEC_PATH, "utf8");
-    const developmentWorkflow = readFileSync(
-      DEVELOPMENT_WORKFLOW_PATH,
-      "utf8",
-    );
+    const claudeMd = readNormalized(CLAUDE_MD_PATH);
+    const currentSpec = readNormalized(CURRENT_SPEC_PATH);
+    const developmentWorkflow = readNormalized(DEVELOPMENT_WORKFLOW_PATH);
 
     expect(claudeMd).toContain(APPROVAL_MARK);
     expect(currentSpec).toContain(APPROVAL_MARK);
     expect(developmentWorkflow).toContain(APPROVAL_MARK);
   });
 
-  it("旧セマンティクス(「push ごとに dev-latest が更新される」)の文言が README.md・docs/current-spec.md に再混入していない(Issue #43)", () => {
+  it("旧セマンティクス(「push ごとに dev-latest が更新される」)の文言が README.md・docs/current-spec.md・docs/handover-next-session.md に再混入していない(Issue #43)", () => {
     // Issue #43 の作業中、「push すれば常に dev-latest が更新される」という旧セマンティクスの
     // 文言が docs/current-spec.md・README.md の2箇所に独立して残存する事故が実際に2回起きた
     // (dev-latest 公開ゲートを追加した diff の中で、隣接する既存文言の更新が漏れた)。
     // 人の目視レビューで2回見落としたものは3回目も見落とされうるため、機械検査に落とす。
+    // docs/handover-next-session.md も、同種の「push すれば自動的に exe が更新される」という
+    // 現在形の断定を含みうる文書として対象に加える(要修正2で実際に見つかった)。
     //
-    // 前提固定: 現時点でこの2ファイルに旧文言が存在しないこと(このテストが「常に真」の
+    // 前提固定: 現時点でこの3ファイルに旧文言が存在しないこと(このテストが「常に真」の
     // 空振りになっていないこと)をまず確認する。
-    const readme = readFileSync(README_PATH, "utf8");
-    const currentSpecForStaleCheck = readFileSync(CURRENT_SPEC_PATH, "utf8");
+    const readme = readNormalized(README_PATH);
+    const currentSpecForStaleCheck = readNormalized(CURRENT_SPEC_PATH);
+    const handoverForStaleCheck = readNormalized(HANDOVER_NEXT_SESSION_PATH);
 
     expect(hasStalePushEverySemantics(readme)).toBe(false);
     expect(hasStalePushEverySemantics(currentSpecForStaleCheck)).toBe(false);
+    expect(hasStalePushEverySemantics(handoverForStaleCheck)).toBe(false);
+  });
+
+  it("検出器(hasStalePushEverySemantics)自身が、過去に実際に問題だった本文を true と判定する(正の対照。空振り防止)", () => {
+    // 上のテストは「今この3ファイルに旧文言が無いこと」(false)しか確認しておらず、
+    // STALE_PUSH_EVERY_PATTERN 自体を無害化する変異(対象文字列を1文字も変えず検出器だけを
+    // 壊す)で永久に緑になる空振りの穴があった(boss のメタレビューで指摘・実測済み)。
+    // ここでは、検出器が「本当に旧文言を捕まえられること」を、過去に実在した悪い本文
+    // (事故当時のコミット `67f5b65` の README.md / docs/current-spec.md に実在した該当文)を
+    // 正の対照として固定する。
+    //
+    // 【以下の2つの文字列はテストデータである】現在のリポジトリの記述ではなく、Issue #43 の
+    // 作業中に実際に混入していた旧セマンティクスの再現データとして、このテスト専用にリテラルで
+    // 埋め込む。将来この文字列を見た人が「リポジトリに旧文言が残っている」と誤読しないよう、
+    // ここに明記する。
+    //
+    // git show 67f5b65:<path> のような git 参照による取得ではなく、リテラル埋め込みを選ぶ理由:
+    // .github/workflows/build-windows.yml の checkout ステップ(actions/checkout@v4)は
+    // fetch-depth を指定しておらず既定値 1(浅いクローン)になる。浅いクローンでは過去コミット
+    // `67f5b65` を参照できないため、git 参照に頼るとローカルでは通っても CI 上でだけ失敗する
+    // (最悪、参照エラーを握りつぶすとテストが常に空振りする)不安定なテストになってしまう。
+    const staleReadmeSnippet =
+      "- **開発版**: 開発ブランチへの push ごとにプレリリース **`dev-latest`** を差し替え公開します。";
+    const staleCurrentSpecSnippet =
+      "`claude/keiba-prediction-handover-ojr8t1`)への push ごとに固定タグ **`dev-latest`** のプレリリースを";
+
+    expect(hasStalePushEverySemantics(staleReadmeSnippet)).toBe(true);
+    expect(hasStalePushEverySemantics(staleCurrentSpecSnippet)).toBe(true);
+  });
+
+  it("承認印の付与指示が CLAUDE.md 手順6・docs/development-workflow.md 手順7で命令形のまま維持されている(退行防止。Issue #43 メタレビューの提案対応)", () => {
+    // Issue #43 の当初レビューで「重大」指摘だったのは、承認印(APPROVAL_MARK)への言及
+    // 4箇所すべてが説明的で、「付けよ」という命令形が無かったこと。不変条件12はリテラルの
+    // 存在しか見ないため、この退行が将来再発しても緑のままになる非対称があった。
+    // ここでは、承認印の運用が明記される「コミットする」手順そのもの(CLAUDE.md 手順6・
+    // docs/development-workflow.md 手順7)に絞って、承認印と命令形が同居することを固定する。
+    const claudeMd = readNormalized(CLAUDE_MD_PATH);
+    const developmentWorkflow = readNormalized(DEVELOPMENT_WORKFLOW_PATH);
+
+    const claudeStep6 = extractStepBlock(
+      claudeMd,
+      "6. bossの承認が出たら",
+      "\n7. ",
+    );
+    // 前提固定: 抽出範囲が手順6だけに収まっており、手順7(次のリスト項目)まで伸びていないこと・
+    // 極端に長くなっていないことを無条件に確認する。範囲が伸びると、手順6の本文から命令形が
+    // 消えても下流の別のリテラル・別の「必ず」で条件が満たされてしまい、退行が素通りする穴になる
+    // (実測した現在の長さは292文字。400文字は文面の軽微な増減を許容しつつ、次のセクション
+    // 全体を飲み込むような大きな抽出崩れは確実に検出できる余裕を見た値)。
+    expect(claudeStep6).not.toContain("各Phase完了時に");
+    expect(claudeStep6.length).toBeLessThan(400);
+    expect(claudeStep6).toContain(APPROVAL_MARK);
+    expect(IMPERATIVE_ATTACH_PATTERN.test(claudeStep6)).toBe(true);
+
+    const workflowStep7 = extractStepBlock(
+      developmentWorkflow,
+      "7. **コミット**",
+      "\n\n>",
+    );
+    // 実測した現在の長さは241文字。350文字は同様の余裕を見た値。
+    expect(workflowStep7).not.toContain("実装完了 ≠");
+    expect(workflowStep7.length).toBeLessThan(350);
+    expect(workflowStep7).toContain(APPROVAL_MARK);
+    expect(IMPERATIVE_ATTACH_PATTERN.test(workflowStep7)).toBe(true);
   });
 });

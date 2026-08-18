@@ -2,11 +2,14 @@
 #
 # 方針(ユーザー指示):
 #   UI 実装中は常に Releases から最新 exe をダウンロードできる状態を維持する。
-#   そのため固定タグ `dev-latest` のプレリリースを毎回作り直して差し替える(ローリングプレリリース)。
+#   そのため固定タグ `dev-latest` のプレリリースを、公開ゲート(下記 PUBLISH_DEV_LATEST。Issue #43)を
+#   満たす push のたびに in-place で差し替える(ローリングプレリリース。delete→create ではなく
+#   既存アセットの上書き更新。詳細は後段の公開ステップのコメントを参照)。
 name: Windows ビルドと Releases 公開
 
 on:
-  # 開発ブランチへの push で自動ビルド(→ dev-latest プレリリースを差し替え)。
+  # 開発ブランチへの push ではビルド・テストを毎回実行し、公開ゲート(下記 PUBLISH_DEV_LATEST)を
+  # 満たす push のときだけ dev-latest プレリリースを差し替える(ビルドの実行可否と公開可否は別)。
   push:
     branches:
       - claude/keiba-ev-tool-dev-cvagiu
