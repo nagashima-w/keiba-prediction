@@ -197,4 +197,5 @@
 - [`docs/phase1-scraping-plan.md`](./docs/phase1-scraping-plan.md) — Phase 1 の中央競馬 HTML 構造調査・対象ページ URL・セレクタ・フィクスチャ取得計画。
 - [`docs/prompt-improvement-plan.md`](./docs/prompt-improvement-plan.md) — 検証結果(回収率)に基づく LLM プロンプト改善の仕組みの検討メモ(過学習リスク・記録/可視化を先行する方針)。
 - [`docs/handover-next-session.md`](./docs/handover-next-session.md) — 過去セッションから次セッションへの引き継ぎ(実装済みタスクの仕様記録・技術メモ)。
+- [`docs/versioning.md`](./docs/versioning.md) — 版数運用規約(major/minor/patch の基準、公開1回につき必ず1回上げる運用、`packages/core` 対象外の理由)。
 - 補足: [`README.md`](./README.md) は利用者向けの概要・ダウンロード・Discord 設定・開発コマンド、[`GETTING_STARTED.md`](./GETTING_STARTED.md) はクラウド版の開始手順。
