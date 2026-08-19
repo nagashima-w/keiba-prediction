@@ -259,7 +259,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `github.event_name == 'push'` を明示)、**`workflow_dispatch`(手動実行)では実行しない**
     (`docs/versioning.md` が同一コミットの再送を「公開」に含めないと定めているのに合わせた
     意図的な残存ギャップ。手動実行で新しい内容を配布した場合は版上げが機械で守られない)。
-    アセット一覧取得(GitHub REST API)の失敗(404・403/5xx・タイムアウト等)は
+    アセット一覧取得(GitHub REST API)の失敗(404・403/5xx・タイムアウト・設定不備等)は
     fail-open(公開を止めず警告のみ)。
   - **タグ検証**(`tag-version`。依存インストール直後・型検査より前): `v* タグ push` /
     タグ ref への `workflow_dispatch` で、タグ名と `packages/app/package.json` の
