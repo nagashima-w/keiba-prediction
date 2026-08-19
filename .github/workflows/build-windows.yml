@@ -104,6 +104,23 @@ jobs:
       - name: 依存をインストール
         run: pnpm install --frozen-lockfile
 
+      # Issue #45(D-2): #44-D-1(docs/versioning.md)の版数運用規約「正式版タグは
+      # v<package.json の version>」を機械検査する。v* タグ push・タグ ref への
+      # workflow_dispatch でのみ実行する(正式リリースステップと同一の if:)。
+      # build 成果物を必要とせず packages/app/package.json の version だけで判定できるため、
+      # 型検査・テスト・ビルドより前の早期失敗位置に置く。
+      # 判定核は scripts/release-gate.ts の純関数(judgeTagVersion)。インライン bash で
+      # 書くと、テストは yml のテキストへの正規表現しか書けず判定ロジック自体は1行も
+      # 実行されないまま「テストがある体」になる(#43 で実際に起きた形骸化の再来)ため、
+      # scripts/test/release-gate.test.ts で実ふるまいを検証できる形にしている。
+      # fail-closed: packages/app/package.json が読めない/不正な場合も block する
+      # (この入力はローカルで決定的に定まる値であり、version-bump-check〈下記〉のような
+      # リモート API の一過性障害が原理的に起こり得ないため。詳細は release-gate.ts 冒頭)。
+      - name: タグとバージョンの一致を検証
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: pnpm exec tsx scripts/release-gate.ts tag-version "${{ github.ref_name }}"
+
       # 型検査をテスト・ビルドより前段の関門にする(fail fast。Issue #38)。
       # ルートの `pnpm typecheck`(= `pnpm -r typecheck && tsc -p tsconfig.scripts.json`)を呼ぶ。
       # `pnpm -r typecheck` だけでは scripts/ の型検査(tsconfig.scripts.json)が走らない。
@@ -125,6 +142,37 @@ jobs:
       # electron-builder 自身の自動公開は無効化(--publish never)し、公開は後段の action-gh-release に一本化する。
       - name: electron-builder で exe を生成
         run: pnpm --filter @keiba/app exec electron-builder --win --config electron-builder.yml --publish never
+
+      # Issue #45(D-2): #44-D-1(docs/versioning.md)の版数運用規約「公開1回につき必ず1回
+      # 版数を上げる」を機械検査する。今回ビルドした exe と同名のアセットが dev-latest に
+      # 既に存在する(= 版数が据え置かれたまま公開されようとしている)場合に block する。
+      - name: 版数据え置きを検査(dev-latest 公開前)
+        if: env.PUBLISH_DEV_LATEST == 'true' && github.event_name == 'push'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: pnpm exec tsx scripts/release-gate.ts version-bump-check
+      # if: env.PUBLISH_DEV_LATEST == 'true' && github.event_name == 'push' は唯一解
+      # (boss 着手前ゲート(C)): env: マップ内から別の env は参照できないため、
+      # PUBLISH_DEV_LATEST の判定式をここへ複製することはできない(条件式を2箇所以上に
+      # 複製しない規律への抵触)。PUBLISH_DEV_LATEST(ブランチ ref かつ(手動実行 or
+      # 承認印付き push))に event_name == 'push' の絞り込みを掛け合わせるだけで、
+      # 「承認印付き push だけ」に一致し workflow_dispatch(同一コミット再送。
+      # docs/versioning.md が版数据え置き検査から除外すると予告している)を自然に除外する。
+      #
+      # continue-on-error は付けない(実装仕様2): block(exit 1)した場合、このステップに
+      # 続く公開・掃除ステップは GitHub Actions の「if: にステータス関数を含まない場合は
+      # 暗黙に success() が付く」という仕様により自動的にスキップされる。この仕様依存は
+      # GitHub Actions 側の挙動でありテストでは検証できない(AC9。静的な yml テキスト検査に
+      # 留まる本テストスイートの限界)。**block 経路(実際に据え置きで exit 1 になる CI run)
+      # は本タスクでは実物未検証**であり、担保は scripts/test/release-gate.test.ts の
+      # ふるまいテストとミューテーションテストに委ねている。
+      #
+      # fail-open: dev-latest のアセット一覧取得(GitHub REST API)に失敗しても公開自体は
+      # 止めない(allow + warning。404/403/5xx/ネットワーク例外は文言で区別してログに残す。
+      # 詳細は scripts/release-gate.ts 冒頭)。version-bump-check(この検査)の入力は
+      # リモート API 呼び出しを要し一過性障害があり得るため、tag-version(上記)とは非対称に
+      # fail-open を選んでいる。
 
       # ブランチ push / 手動実行時: 生成した exe を dev-latest プレリリースとして公開する。
       # 既存の dev-latest を delete→create せず、action-gh-release の in-place 更新で差し替える

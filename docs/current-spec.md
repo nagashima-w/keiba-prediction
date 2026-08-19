@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.2.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.2.1)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -11,7 +11,7 @@
 - **対応券種: 複勝のみ。** 単勝・ワイド・馬連・馬単・三連複・三連単・枠連・枠単はいずれも未対応
   (拡張のロードマップと技術的な依存関係は GitHub Issue #22)。単勝オッズは取得しているが賭け対象では
   なく、発売前レースで複勝下限を概算する用途にのみ使う(`estimatePlaceOddsMinFromWin`)
-- バージョン: ルート/アプリ `1.2.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.2.1`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -248,6 +248,25 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   すべて公開・孤児掃除の両ステップをスキップする(`CLAUDE.md`「レビュー継続中の中間コミット」節 (f))。
   未承認の自動コミットが1つ割り込むだけで未レビューのコードが公開される事故(Issue #43)を受けて、
   「印が無ければ公開しない」既定安全側に反転した。スキップ時は run のログに `::notice::` を残す。
+- **版数運用の機械検査(Issue #45。`scripts/release-gate.ts`)**: #44-D-1(`docs/versioning.md`)
+  の「公開1回につき必ず1回、版数を上げる」運用を機械で強制する2ステップ。判定核は純関数
+  + 依存注入として `scripts/release-gate.ts` に切り出し、`scripts/test/release-gate.test.ts`
+  で実ふるまいを検証する(yml へのインライン bash では判定ロジック自体がテストされない
+  形骸化を避けるため)。
+  - **版数据え置き検査**(`version-bump-check`。exe 生成の直後・dev-latest 公開の直前):
+    今回ビルドした exe と同名のアセットが dev-latest に既に存在する場合に block する。
+    dev-latest 公開ゲートを満たす push のときだけ実行し(`if:` に
+    `github.event_name == 'push'` を明示)、**`workflow_dispatch`(手動実行)では実行しない**
+    (`docs/versioning.md` が同一コミットの再送を「公開」に含めないと定めているのに合わせた
+    意図的な残存ギャップ。手動実行で新しい内容を配布した場合は版上げが機械で守られない)。
+    アセット一覧取得(GitHub REST API)の失敗(404・403/5xx・タイムアウト等)は
+    fail-open(公開を止めず警告のみ)。
+  - **タグ検証**(`tag-version`。依存インストール直後・型検査より前): `v* タグ push` /
+    タグ ref への `workflow_dispatch` で、タグ名と `packages/app/package.json` の
+    version が一致しない場合に block する。こちらは fail-closed(package.json が
+    読めない・不正な場合も block)。据え置き検査と非対称な理由は、タグ検証の入力が
+    ローカルで決定論的に定まる値であり、リモート API のような一過性障害が原理的に
+    起こり得ないため。
 - アイコンは `scripts/gen-icon.mjs`(`pnpm gen:icon`)で生成。パッケージング構成は
   `packages/app/electron-builder.yml`。
 
