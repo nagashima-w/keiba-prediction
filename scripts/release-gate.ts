@@ -404,6 +404,36 @@ export async function dispatch(argv: string[], deps: RealDeps): Promise<Dispatch
 // 実プロセスとして起動された場合のエントリポイント
 // ---------------------------------------------------------------------------
 
+/**
+ * main() の本体。dispatch() を try/catch で包み、想定外の例外を fail-closed
+ * (exit 1 + `::error::`)で受け止める(code-reviewer 一次レビュー 提案2)。
+ *
+ * **fail-open との違い(混同注意)**: version-bump-check の fail-open は、
+ * judgeVersionBump 内で `deps.fetchAssetNames()` の失敗(AssetFetchError や
+ * その他の例外)を個別に catch し、意図的に allow へ倒す設計であり、その適用範囲は
+ * 「dev-latest のアセット一覧取得の失敗」に**限定**されている(scripts/release-gate.ts
+ * 冒頭コメント参照)。一方この runMain の try/catch は、judgeVersionBump/judgeTagVersion
+ * の**どちらの防波堤にも捕まらずに dispatch から漏れ出た**、文字どおり想定していない例外
+ * (例: listExeFileNames が権限エラー等で同期的に throw する、実装変更でどこかが未捕捉の
+ * 例外を投げるようになる、等)のための最終防波堤であり、fail-open の対象範囲を広げるもの
+ * ではない。ここに来る例外は「判定できたが問題なかった」のではなく「判定そのものが
+ * 実行できなかった」ため、常に fail-closed(exit 1)で終える。
+ */
+export async function runMain(argv: string[], deps: RealDeps): Promise<DispatchOutcome> {
+  try {
+    return await dispatch(argv, deps);
+  } catch (error) {
+    return {
+      exitCode: 1,
+      logs: [
+        `::error::予期しない例外が発生しました(${
+          error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+        })。fail-closed としてジョブを失敗させます(version-bump-check のアセット一覧取得失敗に限定した fail-open とは別の経路です)`,
+      ],
+    };
+  }
+}
+
 async function main(): Promise<void> {
   const repository = process.env.GITHUB_REPOSITORY ?? "";
   const [owner = "", repo = ""] = repository.includes("/")
@@ -417,7 +447,7 @@ async function main(): Promise<void> {
     readAppVersion: readAppVersionReal,
   };
 
-  const outcome = await dispatch(process.argv.slice(2), realDeps);
+  const outcome = await runMain(process.argv.slice(2), realDeps);
   for (const line of outcome.logs) {
     console.log(line);
   }

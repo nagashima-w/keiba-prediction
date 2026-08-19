@@ -36,6 +36,7 @@ import {
   judgeVersionBump,
   resolveSingleExeName,
   resultToExitCode,
+  runMain,
 } from "../release-gate.js";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -534,6 +535,62 @@ describe("配線: dispatch(終了コードをふるまいで固定する。5セ�
   it("未知のサブコマンドは block(exit 1)", async () => {
     const outcome: DispatchOutcome = await dispatch(["nonsense"], makeDeps({}));
     expect(outcome.exitCode).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 配線: runMain(main() の fail-closed ラッパ。code-reviewer 提案2)
+// ---------------------------------------------------------------------------
+
+describe("配線: runMain(想定外の例外を fail-closed で受け止める。code-reviewer 提案2)", () => {
+  const CURRENT = "keiba-ev-tool-1.2.1-portable.exe";
+
+  it("dispatch が正常に完了する場合は dispatch と同じ結果を返す(素通りの確認)", async () => {
+    const outcome = await runMain(
+      ["version-bump-check"],
+      makeDeps({
+        listExeFileNames: () => [CURRENT],
+        fetchAssetNames: async () => [],
+      }),
+    );
+    expect(outcome.exitCode).toBe(0);
+  });
+
+  it("listExeFileNames が想定外の例外を投げても exit 1 になり ::error:: を含む(version-bump-check の fail-open〈アセット取得失敗限定〉とは別経路であることの確認)", async () => {
+    const outcome = await runMain(
+      ["version-bump-check"],
+      makeDeps({
+        listExeFileNames: () => {
+          throw new Error("release ディレクトリの読み取りに失敗しました(権限エラーを模擬)");
+        },
+      }),
+    );
+    expect(outcome.exitCode).toBe(1);
+    const logText = outcome.logs.join("\n");
+    expect(logText).toContain("::error::");
+    // fail-open(アセット一覧取得失敗)の文言と混同しないことを固定する
+    // (この経路はアセット取得の失敗ではなく、それより手前の想定外の例外である)。
+    expect(logText).not.toContain("アセット一覧取得に失敗しました");
+    expect(logText).toContain("予期しない例外");
+  });
+
+  it("readAppVersion が judgeTagVersion では捕捉されない想定外の例外(非 Error オブジェクトの throw)を投げても exit 1 になる", async () => {
+    // judgeTagVersion は readAppVersion の throw を try/catch しているが(fail-closed)、
+    // それとは別に「dispatch/judge のどこかで判定核が想定していない例外を投げる」という
+    // より広い想定外系統をここで確認する。deps.readAppVersion 自体は judgeTagVersion の
+    // try/catch に確実に捕まるため block になるが、runMain 経由でも同じ block(exit 1)が
+    // 得られること(runMain が dispatch の正常な block 経路を壊していないこと)を固定する。
+    const outcome = await runMain(
+      ["tag-version", "v1.2.1"],
+      makeDeps({
+        readAppVersion: () => {
+          // eslint-disable-next-line @typescript-eslint/no-throw-literal
+          throw "文字列 throw(非 Error オブジェクト)";
+        },
+      }),
+    );
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.logs.join("\n")).toContain("::error::");
   });
 });
 

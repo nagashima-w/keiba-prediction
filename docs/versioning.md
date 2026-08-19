@@ -60,10 +60,17 @@ exe のファイル名は `packages/app/electron-builder.yml` の
 4. `docs/current-spec.md` のバージョン一覧行(「バージョン: ルート/アプリ `X.Y.Z`」の箇所)
 5. `keiba-ev-tool-spec.md` の冒頭(「実装は vX.Y.Z に到達しており」の箇所)
 6. `packages/app/test/version-policy.test.ts` の `EXPECTED_APP_VERSION` 定数
+7. 本書に「次の正式版が X.Y.Z である根拠セクション」(`## 次の正式版が X.Y.Z である根拠`という
+   見出し)を追加する(区分〈major/minor/patch〉の判断根拠を残す)
 
 6 は上げた先の版数を実ファイルに直接ピン留めしている。これ自体は「是正が実際に行われたことの
 直接検証」であると同時に、次の上げ忘れに対する意図的な摩擦として機能する。摩擦として残すからには、
 その存在をこの操作者向け文書に明記する(このチェックリストがその対)。
+
+7 は `packages/app/test/version-policy.test.ts` の `hasVersionRationaleSection` によって、
+`EXPECTED_APP_VERSION` に対応する見出しの存在が機械的に検査される(code-reviewer 一次レビューの
+提案を一般化して採用。literal な版数を直接ピン留めする専用テストを版ごとに積み上げるのではなく、
+汎用の不変条件にすることで「根拠を書く」こと自体を機械的に強制する)。
 
 ## 表記ルール
 
