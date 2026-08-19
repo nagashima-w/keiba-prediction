@@ -19,7 +19,7 @@
  * skipIf 等の条件付き無効化は付けない。
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +34,7 @@ import {
   fetchDevLatestAssetNamesReal,
   judgeTagVersion,
   judgeVersionBump,
+  resolveApiConfig,
   resolveSingleExeName,
   resultToExitCode,
   runMain,
@@ -114,6 +115,67 @@ describe("純関数: resolveSingleExeName(exe 名の解決)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 純関数: resolveApiConfig(owner/repo/token の解決。boss メタレビュー 要修正1)
+// ---------------------------------------------------------------------------
+
+describe("純関数: resolveApiConfig(GitHub REST API 呼び出しに必要な設定の解決)", () => {
+  it("owner/repo/token がすべて揃っていれば ok:true で分解した値を返す", () => {
+    const resolution = resolveApiConfig({
+      GITHUB_REPOSITORY: "acme/keiba-ev-tool",
+      GITHUB_TOKEN: "ghp_xxx",
+    });
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) throw new Error("到達しないはず");
+    expect(resolution.owner).toBe("acme");
+    expect(resolution.repo).toBe("keiba-ev-tool");
+    expect(resolution.token).toBe("ghp_xxx");
+  });
+
+  it("GITHUB_TOKEN が無ければ GH_TOKEN にフォールバックする(孤児掃除ステップと同じ流儀)", () => {
+    const resolution = resolveApiConfig({
+      GITHUB_REPOSITORY: "acme/keiba-ev-tool",
+      GH_TOKEN: "gh_token_xxx",
+    });
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) throw new Error("到達しないはず");
+    expect(resolution.token).toBe("gh_token_xxx");
+  });
+
+  it("環境変数が全欠落していれば ok:false で GITHUB_REPOSITORY・GITHUB_TOKEN の両方を missing に含む(boss の実測ケースそのもの)", () => {
+    const resolution = resolveApiConfig({});
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) throw new Error("到達しないはず");
+    // 前提固定: 2件とも欠落として検出されること(片方で打ち切って一方だけ報告する
+    // 縮退実装を排除する)。
+    expect(resolution.missing.length).toBe(2);
+    expect(resolution.missing.some((m) => m.includes("GITHUB_REPOSITORY"))).toBe(true);
+    expect(resolution.missing.some((m) => m.includes("GITHUB_TOKEN"))).toBe(true);
+  });
+
+  it("GITHUB_REPOSITORY にスラッシュが無ければ owner/repo 形式ではないとして missing に含める", () => {
+    const resolution = resolveApiConfig({
+      GITHUB_REPOSITORY: "acme-keiba-ev-tool",
+      GITHUB_TOKEN: "ghp_xxx",
+    });
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) throw new Error("到達しないはず");
+    expect(resolution.missing.length).toBe(1);
+    expect(resolution.missing[0]).toContain("GITHUB_REPOSITORY");
+  });
+
+  it("token が空文字列なら未設定として扱う(存在するが空、という劣化パターン)", () => {
+    const resolution = resolveApiConfig({
+      GITHUB_REPOSITORY: "acme/keiba-ev-tool",
+      GITHUB_TOKEN: "",
+    });
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) throw new Error("到達しないはず");
+    expect(resolution.missing.length).toBe(1);
+    expect(resolution.missing[0]).toContain("GITHUB_TOKEN");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 純関数: judgeVersionBump(版数据え置き判定)
 // ---------------------------------------------------------------------------
 
@@ -171,7 +233,14 @@ describe("純関数: judgeVersionBump(版数据え置き判定)", () => {
   });
 
   describe("取得失敗の種別ごとの区別(boss 追加条件2)", () => {
-    it("404(dev-latest 未作成)は allow + 警告に『存在しません』を含む", async () => {
+    it("404(dev-latest 未作成)は allow + 警告に断定を弱めた文言(『存在しないか、参照権限がありません』)を含む(boss メタレビュー: 404を断定しない)", async () => {
+      // 契約変更の記録: 旧版は「存在しません」と断定していたが、config_error
+      // (owner/repo/token 未解決)も同じ 404 経由で観測されうることが判明したため、
+      // 404 単独では「本当に dev-latest が無いのか、権限が無いだけなのか」を
+      // 区別できない事実に合わせて文言を弱めた。旧テストが保証していた
+      // 「404 は allow」「HTTP 404 という数値を含む」は維持し、断定的すぎた
+      // 「存在しません」の直接一致だけを弱めた文言に差し替える(何も検出力を落としていない:
+      // config_error との文言差異は別テストで固定する)。
       const result = await judgeVersionBump({
         listExeFileNames: () => [CURRENT],
         fetchAssetNames: async () => {
@@ -180,7 +249,41 @@ describe("純関数: judgeVersionBump(版数据え置き判定)", () => {
       });
       expect(result.status).toBe("allow");
       expect(result.message).toContain("404");
-      expect(result.message).toContain("存在しません");
+      expect(result.message).toContain("存在しないか、参照権限がありません");
+    });
+
+    it("設定不備(config_error)は allow + 警告に 404 とは別の文言で欠落変数名を明示する(boss メタレビュー 要修正1)", async () => {
+      const notFound = await judgeVersionBump({
+        listExeFileNames: () => [CURRENT],
+        fetchAssetNames: async () => {
+          throw new AssetFetchError("not_found");
+        },
+      });
+      const configError = await judgeVersionBump({
+        listExeFileNames: () => [CURRENT],
+        fetchAssetNames: async () => {
+          throw new AssetFetchError("config_error", {
+            missing: ["GITHUB_REPOSITORY", "GITHUB_TOKEN(または GH_TOKEN)"],
+          });
+        },
+      });
+
+      // 前提固定: どちらも allow であること(以降の文言比較が block/allow の混在ではなく
+      // 同じ status 同士であることを保証する)。
+      expect(notFound.status).toBe("allow");
+      expect(configError.status).toBe("allow");
+
+      // 設定不備は「404」という数値にも「存在しない」という断定にも触れない
+      // (owner/repo/token 解決の時点で弾かれ、HTTP 通信すら発生していないため)。
+      expect(configError.message).not.toContain("404");
+      expect(configError.message).not.toContain("存在しない");
+      // 欠落した変数名を名指しする(次にログを見た人が原因を特定できるようにする)。
+      expect(configError.message).toContain("GITHUB_REPOSITORY");
+      expect(configError.message).toContain("GITHUB_TOKEN");
+      // 「初回公開とみなし」という事実と異なる説明を、設定不備の場合には出さない。
+      expect(configError.message).not.toContain("初回公開");
+      // not_found と config_error のメッセージが取り違えられないよう、必ず異なる文言にする。
+      expect(configError.message).not.toBe(notFound.message);
     });
 
     it("403(トークン権限退行)は allow + 警告にステータスコード403を含む", async () => {
@@ -628,5 +731,78 @@ describe("実プロセス起動(AC8): tag-version をネットワーク不要で
       { encoding: "utf8" },
     );
     expect(result.status).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 実プロセス起動: version-bump-check の設定不備検出(boss メタレビュー 要修正1)
+// ---------------------------------------------------------------------------
+
+describe("実プロセス起動: version-bump-check の設定不備検出(boss が実測した再現手順そのもの)", () => {
+  const RELEASE_DIR = path.join(REPO_ROOT, "packages/app/release");
+  const DUMMY_EXE_PATH = path.join(RELEASE_DIR, "release-gate-test-dummy.exe");
+
+  /**
+   * release ディレクトリに .exe がちょうど1個ある状態を用意する(無ければダミーを1個作る)。
+   * boss の実測(「ダミー exe を置き、環境変数を落として実行」)を自動テストとして再現する。
+   * 既に本物の exe が1個だけ存在する場合はそれをそのまま使い、何も作らない
+   * (electron-builder を実際に走らせた後の環境でも壊さないため)。
+   */
+  function ensureSingleExe(): { createdDir: boolean; createdFile: boolean } {
+    let createdDir = false;
+    if (!existsSync(RELEASE_DIR)) {
+      mkdirSync(RELEASE_DIR, { recursive: true });
+      createdDir = true;
+    }
+    const existing = readdirSync(RELEASE_DIR).filter((name) =>
+      name.toLowerCase().endsWith(".exe"),
+    );
+    let createdFile = false;
+    if (existing.length === 0) {
+      writeFileSync(DUMMY_EXE_PATH, "dummy");
+      createdFile = true;
+    }
+    return { createdDir, createdFile };
+  }
+
+  function cleanup(state: { createdDir: boolean; createdFile: boolean }): void {
+    if (state.createdFile) {
+      rmSync(DUMMY_EXE_PATH, { force: true });
+    }
+    if (state.createdDir) {
+      rmSync(RELEASE_DIR, { recursive: true, force: true });
+    }
+  }
+
+  it("GITHUB_REPOSITORY/GITHUB_TOKEN/GH_TOKEN が全欠落していると、404とは別の・変数名を明示した ::warning:: が出て終了コード0のまま(fail-openだが名指しする)", () => {
+    const state = ensureSingleExe();
+    try {
+      // boss の実測コマンド(env -u GITHUB_REPOSITORY -u GITHUB_TOKEN -u GH_TOKEN)と
+      // 同じ状況を、process.env から3変数を除いたコピーで再現する。
+      const env = { ...process.env };
+      delete env.GITHUB_REPOSITORY;
+      delete env.GITHUB_TOKEN;
+      delete env.GH_TOKEN;
+
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", SCRIPT_ABS_PATH, "version-bump-check"],
+        { encoding: "utf8", env },
+      );
+
+      expect(result.status).toBe(0);
+      const combined = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      expect(combined).toContain("::warning::");
+      // 修正前の実際の出力(boss 報告): 「HTTP 404: dev-latest が存在しません」
+      // 「初回公開とみなし」——設定不備であるにもかかわらず正常系の404と同じ文言だった。
+      // 修正後はこの文言に合流しないことを固定する。
+      expect(combined).not.toContain("404");
+      expect(combined).not.toContain("初回公開");
+      // 欠落した変数名を名指しすることを固定する。
+      expect(combined).toContain("GITHUB_REPOSITORY");
+      expect(combined).toContain("GITHUB_TOKEN");
+    } finally {
+      cleanup(state);
+    }
   });
 });

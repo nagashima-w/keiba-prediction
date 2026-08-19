@@ -684,10 +684,19 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     const tagVerifyRun = extractRunBlock(extractStep(yml, STEP_NAMES.tagVerify));
     const checkRun = extractRunBlock(extractStep(yml, STEP_NAMES.versionBumpCheck));
 
+    // boss メタレビュー(提案 → オーケストレーターが採用): github.ref_name を run: に
+    // 直接展開せず、env: 経由でシェル変数として渡す(タグ名はシェルメタ文字を含みうるため。
+    // 孤児掃除ステップの CURRENT_EXE と同じ「値を env 変数化してから $VAR で参照する」流儀)。
     expect(tagVerifyRun).toBe(
-      'pnpm exec tsx scripts/release-gate.ts tag-version "${{ github.ref_name }}"',
+      'pnpm exec tsx scripts/release-gate.ts tag-version "$TAG_NAME"',
     );
     expect(checkRun).toBe("pnpm exec tsx scripts/release-gate.ts version-bump-check");
+  });
+
+  it("タグ検証ステップの env: TAG_NAME が github.ref_name をそのまま渡している(シェル注入対策の配線)", () => {
+    // extractEnvValue はキーがファイル中に厳密に1回だけ定義されていることも検証する
+    // (PUBLISH_DEV_LATEST と同じ流儀)。TAG_NAME はこのステップの外では使わない前提。
+    expect(extractEnvValue(yml, "TAG_NAME")).toBe("${{ github.ref_name }}");
   });
 
   it("continue-on-error が yml 全体で厳密に1回(掃除ステップのみ)出現する", () => {

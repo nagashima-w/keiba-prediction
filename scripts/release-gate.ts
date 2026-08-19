@@ -112,29 +112,51 @@ export function resolveSingleExeName(fileNames: string[]): ExeResolution {
 // version-bump-check: dev-latest アセット一覧の取得(失敗種別を区別する)
 // ---------------------------------------------------------------------------
 
-export type AssetFetchErrorKind = "not_found" | "http_error" | "network_error";
+export type AssetFetchErrorKind =
+  | "not_found"
+  | "http_error"
+  | "network_error"
+  | "config_error";
 
 /**
  * dev-latest のアセット一覧取得に失敗したことを表す例外。種別を保持することで、
  * 404(dev-latest 未作成)・403/5xx(トークン権限退行やサーバ障害)・
- * ネットワーク例外(タイムアウト含む)を呼び出し側が文言で区別できるようにする。
+ * ネットワーク例外(タイムアウト含む)・設定不備(owner/repo/token が未解決)を
+ * 呼び出し側が文言で区別できるようにする。
  * 401/403/5xx を 404 と同じ扱いにすると「検査が毎回スキップされ続けているのに
  * 誰も気づかない」という #45 が防ごうとしている形骸化と同型の問題が起こるため、
  * fail-open にする(スキップして進める)こと自体は維持しつつ、種別は必ず警告文に残す。
+ *
+ * config_error(boss メタレビュー 要修正1への対応): owner/repo/token のいずれかが
+ * 未解決のまま fetch すると、GitHub は空の URL セグメントに対して 404 を返す
+ * (`/repos//releases/tags/dev-latest` 等)。これを not_found(dev-latest 未作成の正常系)と
+ * 区別せずに扱うと、「ステップ env から GITHUB_TOKEN が消えた」「変数名が変わった」
+ * 「トークンがリリース参照権限を失った」という**最も起こりやすい劣化**が、無害な 404 と
+ * 見分けがつかないまま「初回公開とみなしスキップします」という事実と異なる説明で
+ * 恒久的に握りつぶされる(この検査が二度と機能しなくなっても誰も気づけない)。
+ * そのため owner/repo/token の解決(resolveApiConfig)は fetch を呼ぶ**前**に行い、
+ * 欠落があれば HTTP 通信すら発生させずに config_error として区別する。
  */
 export class AssetFetchError extends Error {
   readonly kind: AssetFetchErrorKind;
   readonly status?: number;
+  readonly missing?: string[];
 
-  constructor(kind: AssetFetchErrorKind, options?: { status?: number; cause?: unknown }) {
+  constructor(
+    kind: AssetFetchErrorKind,
+    options?: { status?: number; cause?: unknown; missing?: string[] },
+  ) {
     super(
       `dev-latest アセット一覧の取得に失敗しました(種別=${kind}${
         options?.status !== undefined ? `, status=${options.status}` : ""
+      }${
+        options?.missing !== undefined ? `, missing=${options.missing.join(",")}` : ""
       })`,
     );
     this.name = "AssetFetchError";
     this.kind = kind;
     this.status = options?.status;
+    this.missing = options?.missing;
     if (options?.cause !== undefined) {
       this.cause = options.cause;
     }
@@ -212,11 +234,24 @@ export async function judgeVersionBump(deps: VersionBumpCheckDeps): Promise<Gate
     existingAssetNames = await deps.fetchAssetNames();
   } catch (error) {
     if (error instanceof AssetFetchError) {
+      if (error.kind === "config_error") {
+        // 設定不備(boss メタレビュー 要修正1): owner/repo/token のいずれかが未解決の
+        // まま fetch すると 404 に合流し、正常系(dev-latest 未作成)と区別できなくなる。
+        // ここは HTTP 通信すら発生していない(resolveApiConfig の時点で弾かれている)ため、
+        // 「404」や「存在しません」とは明確に異なる文言にし、欠落している変数名を
+        // 名指しする(何が壊れているかを次にこのログを見た人が特定できるようにする)。
+        return {
+          status: "allow",
+          message: `dev-latest のアセット一覧を取得できません(設定不備: ${
+            error.missing?.join("、") ?? "不明"
+          } が未設定または空です)。GitHub Actions のステップ env を確認してください。版数据え置き検査をスキップします`,
+        };
+      }
       if (error.kind === "not_found") {
         return {
           status: "allow",
           message:
-            "dev-latest のアセット一覧取得に失敗しました(HTTP 404: dev-latest が存在しません)。初回公開とみなし版数据え置き検査をスキップします",
+            "dev-latest のアセット一覧取得に失敗しました(HTTP 404: dev-latest が存在しないか、参照権限がありません)。初回公開の可能性があるため版数据え置き検査をスキップします",
         };
       }
       if (error.kind === "http_error") {
@@ -331,6 +366,61 @@ export function readAppVersionReal(): string {
 }
 
 // ---------------------------------------------------------------------------
+// GitHub REST API 呼び出しに必要な設定(owner/repo/token)の解決
+// ---------------------------------------------------------------------------
+
+/**
+ * 環境変数から owner/repo/token を解決した結果。
+ * ok: false のときは missing に欠落・不正だった変数名(の説明)を列挙する。
+ * fetch を一切呼ばずに判定できる純関数にすることで、「owner/repo/token が空でも
+ * そのまま fetch してしまい、GitHub が返す 404 と正常系(dev-latest 未作成)の
+ * 404 が区別できなくなる」という事故(boss メタレビュー 要修正1)を、HTTP 通信より
+ * 手前で構造的に防ぐ。
+ */
+export type ApiConfigResolution =
+  | { ok: true; owner: string; repo: string; token: string }
+  | { ok: false; missing: string[] };
+
+/**
+ * `NodeJS.ProcessEnv` から GitHub REST API 呼び出しに必要な owner/repo/token を解決する。
+ * 境界値: `GITHUB_REPOSITORY` が未設定・空文字列・`/` を含まない(owner/repo 形式でない)・
+ * どちらか片方が空("/repo" や "owner/")のいずれも欠落として扱う。token は
+ * `GITHUB_TOKEN` を優先し、無ければ `GH_TOKEN`(孤児掃除ステップと同じフォールバック)を見る。
+ * 欠落は複数同時に起こりうる(例: 全部消えている)ため、最初の1件で打ち切らず全件集める
+ * (ログを見た人が一度で全欠落項目を把握できるようにするため)。
+ */
+export function resolveApiConfig(env: NodeJS.ProcessEnv): ApiConfigResolution {
+  const missing: string[] = [];
+
+  let owner = "";
+  let repo = "";
+  const repository = env.GITHUB_REPOSITORY;
+  if (repository === undefined || repository.length === 0) {
+    missing.push("GITHUB_REPOSITORY");
+  } else {
+    const slashIndex = repository.indexOf("/");
+    const candidateOwner = slashIndex === -1 ? "" : repository.slice(0, slashIndex);
+    const candidateRepo = slashIndex === -1 ? "" : repository.slice(slashIndex + 1);
+    if (candidateOwner.length === 0 || candidateRepo.length === 0) {
+      missing.push(`GITHUB_REPOSITORY(owner/repo 形式ではありません: "${repository}")`);
+    } else {
+      owner = candidateOwner;
+      repo = candidateRepo;
+    }
+  }
+
+  const token = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? "";
+  if (token.length === 0) {
+    missing.push("GITHUB_TOKEN(または GH_TOKEN)");
+  }
+
+  if (missing.length > 0) {
+    return { ok: false, missing };
+  }
+  return { ok: true, owner, repo, token };
+}
+
+// ---------------------------------------------------------------------------
 // CLI ディスパッチ(薄い配線。判定核は上記の純関数が担う)
 // ---------------------------------------------------------------------------
 
@@ -435,15 +525,22 @@ export async function runMain(argv: string[], deps: RealDeps): Promise<DispatchO
 }
 
 async function main(): Promise<void> {
-  const repository = process.env.GITHUB_REPOSITORY ?? "";
-  const [owner = "", repo = ""] = repository.includes("/")
-    ? repository.split("/")
-    : ["", ""];
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? "";
+  // owner/repo/token の解決を fetch より手前で行う(boss メタレビュー 要修正1)。
+  // 欠落があっても HTTP は一切呼ばず、config_error として judgeVersionBump 側の
+  // 通常の AssetFetchError 分岐に合流させる(404 とは別の文言になる)。
+  const configResolution = resolveApiConfig(process.env);
+  const fetchAssetNames = configResolution.ok
+    ? () =>
+        fetchDevLatestAssetNamesReal({
+          owner: configResolution.owner,
+          repo: configResolution.repo,
+          token: configResolution.token,
+        })
+    : () => Promise.reject(new AssetFetchError("config_error", { missing: configResolution.missing }));
 
   const realDeps: RealDeps = {
     listExeFileNames: listReleaseExeFileNamesReal,
-    fetchAssetNames: () => fetchDevLatestAssetNamesReal({ owner, repo, token }),
+    fetchAssetNames,
     readAppVersion: readAppVersionReal,
   };
 
