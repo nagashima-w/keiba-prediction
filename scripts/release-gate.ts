@@ -240,6 +240,31 @@ export async function judgeVersionBump(deps: VersionBumpCheckDeps): Promise<Gate
         // ここは HTTP 通信すら発生していない(resolveApiConfig の時点で弾かれている)ため、
         // 「404」や「存在しません」とは明確に異なる文言にし、欠落している変数名を
         // 名指しする(何が壊れているかを次にこのログを見た人が特定できるようにする)。
+        //
+        // 【fail-open を維持する理由(code-reviewer 再レビューの提案を検討のうえ、
+        // オーケストレーターが判断)】config_error は resolveApiConfig により
+        // fetch 呼び出し前・ローカルで決定論的に判定される、という性質だけを見れば、
+        // judgeTagVersion(readAppVersion の失敗)を fail-closed にしている理由
+        // (「ローカルで決定論的に定まる値であり、リモート API のような一過性障害が
+        // 原理的に起こり得ない」)と同じであり、fail-closed 側に倒す方が一貫性がある、
+        // という指摘は論理的に正しい。それでもここでは fail-open を維持する:
+        // (a) Issue #45 自体が「検査の失敗を公開の失敗に転嫁しない」という設計方針を
+        //     明示しており、version-bump-check 全体(このステップそのもの)がその方針の
+        //     具体化として存在する。tag-version(正式リリースの入口)と version-bump-check
+        //     (dev-latest への日常的なローリング公開)とでは、ゲートが誤って公開を止めた
+        //     ときに止まるものの重み・頻度が異なる。
+        // (b) `GITHUB_TOKEN` は `${{ github.token }}` により CI 上ほぼ常に自動供給される
+        //     (人が明示的に設定する種類の値ではない)。したがって持続的な config_error は
+        //     主に yml 編集ミス(env: の書き換え忘れ・キー名の打ち間違い等)に起因する。
+        //     fail-closed にすると「yml の編集ミス1件が、無関係などの正当な push の公開も
+        //     すべて止め続ける」という、単一障害点としてのリスクを新たに負うことになる。
+        // (c) 本対応(要修正1)によって「設定不備である」ことと欠落変数名を必ず名指しする
+        //     warning が残るようになったため、#45 が最も懸念していた「検査が機能しなくなって
+        //     いることに誰も気づけない」というリスクは、fail-open を維持したまま大きく
+        //     軽減されている(旧バグは「404 と誤って断定する」ことが問題だったのであり、
+        //     「fail-open であること」自体が問題だったのではない)。
+        // tag-version と version-bump-check とで fail-closed/fail-open が非対称なのは
+        // 以上の理由による意図的な設計判断であり、実装漏れではない。
         return {
           status: "allow",
           message: `dev-latest のアセット一覧を取得できません(設定不備: ${

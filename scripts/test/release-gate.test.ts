@@ -163,6 +163,36 @@ describe("純関数: resolveApiConfig(GitHub REST API 呼び出しに必要な�
     expect(resolution.missing[0]).toContain("GITHUB_REPOSITORY");
   });
 
+  it("GITHUB_REPOSITORY が『owner/』(repo が空)なら owner/repo 形式ではないとして missing に含める(code-reviewer 再レビュー 要修正)", () => {
+    // 素朴な `repository.split("/")` 実装(修正前のコードと同型)は "owner/" を
+    // ["owner", ""] に分割してしまい、repo が空文字列のまま fetch に渡る。
+    // その結果 GitHub は /repos/owner//releases/tags/dev-latest に 404 を返し、
+    // boss が最初に報告した「config_error が 404 に合流する」事故がそのまま再現する
+    // (レビュアーが実機で確認済み)。indexOf + slice + 空文字チェックによる
+    // 厳密な検証がこのケースを弾くことをここで固定する。
+    const resolution = resolveApiConfig({
+      GITHUB_REPOSITORY: "owner/",
+      GITHUB_TOKEN: "ghp_xxx",
+    });
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) throw new Error("到達しないはず");
+    expect(resolution.missing.length).toBe(1);
+    expect(resolution.missing[0]).toContain("GITHUB_REPOSITORY");
+  });
+
+  it("GITHUB_REPOSITORY が『/repo』(owner が空)なら owner/repo 形式ではないとして missing に含める(code-reviewer 再レビュー 要修正)", () => {
+    // 上と対称のケース。owner が空文字列のまま fetch に渡ると
+    // /repos//repo/releases/tags/dev-latest になり、同じく 404 に合流する。
+    const resolution = resolveApiConfig({
+      GITHUB_REPOSITORY: "/repo",
+      GITHUB_TOKEN: "ghp_xxx",
+    });
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) throw new Error("到達しないはず");
+    expect(resolution.missing.length).toBe(1);
+    expect(resolution.missing[0]).toContain("GITHUB_REPOSITORY");
+  });
+
   it("token が空文字列なら未設定として扱う(存在するが空、という劣化パターン)", () => {
     const resolution = resolveApiConfig({
       GITHUB_REPOSITORY: "acme/keiba-ev-tool",
