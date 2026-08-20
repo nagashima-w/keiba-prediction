@@ -1361,6 +1361,22 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         const result = allocateBets(horses, 3, config({ bankroll: 10000, perRaceCap: 10000 }));
         expect(result.diagnostics.oddsMalformedCount).toBe(0);
       });
+
+      it("除外馬が全員不正値(未確定・EVマイナスがゼロ)のとき、oddsMalformedCountがexcludedCountの" +
+        "上端に張り付く(等号成立)こと(code-reviewer指摘・境界値)", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.2, placeOddsMin: Number.NaN, ev: 1.5, isPositive: true },
+          { umaban: 3, placeProb: 0.2, placeOddsMin: Number.POSITIVE_INFINITY, ev: 1.5, isPositive: true },
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        // 前提固定: 除外馬(umaban 2・3)がplaceOddsMin===null・EVマイナスのいずれでもなく、
+        // 「全員不正値」であることをまず確定させる(空振り防止)。
+        expect(result.diagnostics.excludedCount).toBe(2);
+        expect(result.diagnostics.oddsMalformedCount).toBe(2);
+        // 【本題】上端の等号: oddsMalformedCount === excludedCount。
+        expect(result.diagnostics.oddsMalformedCount).toBe(result.diagnostics.excludedCount);
+      });
     });
 
     describe("AC3(#31の本丸): 無関係な1頭の不正値が健全な馬の配分を巻き添えにしないこと", () => {

@@ -480,6 +480,11 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
       { name: "正の極小値(1e-9)", value: 1e-9, expected: true },
       { name: "Number.MAX_VALUE(有限の最大値)", value: Number.MAX_VALUE, expected: true },
       { name: "0(境界。>0を満たさない)", value: 0, expected: false },
+      // 負のゼロ(-0)。-0 > 0 は false なので現状の実装で正しく除外される想定の境界値
+      // (code-reviewer指摘)。-0 === 0 は true だが Object.is(-0, 0) は false であり、
+      // 実装が `value > 0` を使う限り区別なく false になるはず、という点を明示的に固定する。
+      // it.eachの表示名は上記$name(このオブジェクトのname)を使うため、"0"の行と紛れない。
+      { name: "負のゼロ(-0)", value: -0, expected: false },
       { name: "負値(-1)", value: -1, expected: false },
       { name: "NaN", value: Number.NaN, expected: false },
       { name: "+Infinity", value: Number.POSITIVE_INFINITY, expected: false },
