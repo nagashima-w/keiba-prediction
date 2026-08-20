@@ -67,9 +67,15 @@
  * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/app/src/renderer/
  * mixed-allocation-view.ts` が `allocateGeneralBets` の呼び出しをtry/catchで保護し、例外を
  * `MixedRaceAllocationInvalid`(`kind:"invalid"`)へ変換して他レースの計算・画面全体に波及させない
- * (受け皿の実体はtry/catchブロック本体。表示側のテストは`packages/app/test/
- * mixed-allocation-view.test.ts`のAC17〈5件〉が固定している)。D-3着手時に改めて受け皿を
- * 新設する必要はない。
+ * (受け皿の実体はtry/catchブロック本体。表示側のテストは `packages/app/test/
+ * mixed-allocation-view.test.ts` の **`AC17` を冠する describe 群**〈`grep -n "AC17"` で
+ * 辿れる〉が固定している)。D-3着手時に改めて受け皿を新設する必要はない。
+ *
+ * **件数(旧「〈5件〉」)を書かない。** 旧版はここに具体的な件数を書いていたが、実際に数え直すと
+ * 誤りだった(boss指摘2026-08-20)。件数は`describe`が増減するたびに腐る参照であり、腐った状態が
+ * 気づかれないまま残る(`docs/issue-order.md`の行番号参照が腐って偽になっていたのと同じ欠陥
+ * クラス)。名前(`AC17`)による参照なら、テストが分割されて複数箇所に散っても`grep`で正しく
+ * 拾えるため、以後この種の参照は件数・行番号ではなく名前で行うこと。
  */
 
 import {

@@ -214,9 +214,11 @@ export interface RaceDataMeta {
   readonly warnings: ScrapeWarning[];
   /**
    * 組合せオッズ(ワイド・3連複)の取得結果。`options.includeComboOdds`がtrueのときのみ
-   * 設定される(既定はundefined。機能D-2b-B・Issue #33第4段)。#15(UI)が進捗表示の要否を
-   * 判断する際、`diagnostics.requestCount`を使う想定(`onProgress`コールバック自体は
-   * #15のスコープであり本段では持たない)。
+   * 設定される(既定はundefined。機能D-2b-B・Issue #33第4段)。
+   *
+   * **進捗表示の要否は判断済み(Issue #15再スコープ・2026-08-20)**: レース内(1レースの
+   * 組合せオッズ取得中)の進捗表示は出さない。レース単位(一括分析での複数レース間)の
+   * 逐次表示は #49 へ分離した。`onProgress`コールバックは現状持たない。
    */
   readonly comboOdds?: ComboOddsScrapeOutcome;
 }

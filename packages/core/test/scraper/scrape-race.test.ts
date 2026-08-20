@@ -767,6 +767,11 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(trioWarning!.message.includes("状態②③")).toBe(true);
       // 内訳から実際の失敗件数(1件)が正しく読み取れること。
       expect(trioWarning!.message.includes("取得失敗=1")).toBe(true);
+      // 状態④(取得失敗)の文言に、別原因(構造異常=parseError)向けの「構造が変わった可能性」が
+      // 混入しないこと(偽陽性方向の固定。Issue #15。このシナリオはparseErrorCount=0のため、
+      // comboOddsWarningMessageのstructureWarningは元々空文字列になるはずで、既存挙動の
+      // 特性を固定するテストであり新しいRedを作るものではない)。
+      expect(trioWarning!.message.includes("構造が変わった可能性")).toBe(false);
     });
 
     it("値がnull(missing)の組はtrioComboにキーごと存在し、失敗軸由来の組(unfetched)はキーごと不在であること。JSON往復後も両方向とも保たれること(code-reviewer/boss指摘・要修正1)", async () => {

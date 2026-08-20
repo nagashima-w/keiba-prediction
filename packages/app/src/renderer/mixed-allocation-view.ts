@@ -119,6 +119,7 @@ import {
   type BetAllocationSettings,
   type RaceAllocationView,
 } from "./bet-allocation-view.js";
+import { formatYen } from "./verify-format.js";
 
 /**
  * 混在配分の合成に必要な設定(既存の複勝配分3項目 `BetAllocationSettings` に、
@@ -318,7 +319,10 @@ function compareUmabansLex(a: readonly number[], b: readonly number[]): number {
 
 /**
  * `stake>0`の買い目を**全件**、`stake`降順(同額は馬番配列の辞書順)で並べる(AC13)。
- * 表示件数の打ち切り(top-N・折りたたみ)は行わない(#15のスコープ。boss指示)。
+ * 本関数自体の契約(戻り値が全件であること)は変わらない。画面(`BatchAnalysisView.tsx`)は
+ * この結果をそのまま描画するのではなく、`splitAllocationsForDisplay`で上位N件+隠れ分に
+ * 分割してから`split.visible`のみを常時表示し、残りは折りたたみに入れる(Issue #15再スコープ。
+ * 直下の`splitAllocationsForDisplay`・`MIXED_ALLOCATION_VISIBLE_LIMIT`参照)。
  */
 export function sortMixedAllocationsForDisplay(
   result: GeneralBetAllocationResult,
@@ -332,6 +336,110 @@ export function sortMixedAllocationsForDisplay(
       }
       return compareUmabansLex(a.umabans, b.umabans);
     });
+}
+
+/**
+ * 混在配分の買い目一覧を画面に常時表示する上限件数(Issue #15再スコープ)。
+ *
+ * - **N=20はユーザー判断によるUXの目安であり、計測から導いた値ではない**(boss裁定)。
+ * - **この上限の適用範囲は混在経路(本モジュール)の買い目一覧のみ。** 複勝専用経路
+ *   (`BatchAnalysisView.tsx`の`renderBetAllocationBlock`)は`result.allocations.filter(
+ *   stake>0).map(...)`で全件を描画しており、そもそも上限という概念自体を適用していない
+ *   (以前のJSDocは「出走頭数18が構造的上限だから複勝専用経路の見た目は変わらない」と
+ *   書いていたが、これは誤り。頭数18を強制するコードは存在せず、複勝専用経路の描画は
+ *   常に無条件・全件であるため、頭数と無関係に不変。boss指摘2026-08-20により訂正)。
+ * - **性能上の意図はない。** 折りたたみ(`<details>`)は隠れた行も含めて React が描画し
+ *   DOM に載せる(表示のみを隠す)。目的は可読性(一覧が数百件になりうる)のみであり、
+ *   「描画が軽くなる」効果は主張しない。
+ */
+export const MIXED_ALLOCATION_VISIBLE_LIMIT = 20;
+
+/**
+ * `splitAllocationsForDisplay`の戻り値。`sortedAllocations`(全件・stake降順)を
+ * 上位`MIXED_ALLOCATION_VISIBLE_LIMIT`件(`visible`)と残り(`hidden`)に分割したもの。
+ * `visible`と`hidden`を連結すると元の`sorted`と順序・要素ともに完全一致する(AC5)。
+ */
+export interface MixedAllocationSplit {
+  /** 常時表示する上位件数(最大`MIXED_ALLOCATION_VISIBLE_LIMIT`件)。 */
+  readonly visible: readonly GeneralBetAllocation[];
+  /** 折りたたみに入る残り。 */
+  readonly hidden: readonly GeneralBetAllocation[];
+  /** `hidden`の件数(0なら折りたたみ自体を出さない。AC1)。 */
+  readonly hiddenCount: number;
+  /** `hidden`のstake合計(有限なstakeの下で成り立つ。NaN防御は本タスクのスコープ外)。 */
+  readonly hiddenStake: number;
+}
+
+/**
+ * `sortMixedAllocationsForDisplay`の結果(全件・stake降順)を上位N件+隠れ分に分割する。
+ *
+ * `sorted`は既にソート済みの配列をそのまま受け取り、独立にfilter/sortをやり直さない
+ * (AC5「visible++hiddenがsortedAllocationsと完全一致」を偶然ではなく構造で保証するため。
+ * boss裁定・条項4)。呼び出し元(`buildMixedAllocationDisplay`)は必ず
+ * `sortMixedAllocationsForDisplay`の戻り値をそのまま渡すこと。
+ *
+ * `limit`は既定`MIXED_ALLOCATION_VISIBLE_LIMIT`(=20)。非有限・0以下を渡すと既定値へ
+ * フォールバックする(`resolveCandidateCap`〈`combo-bet-allocation.ts`〉等、本リポジトリの
+ * 既存の防御と同じ流儀)。
+ *
+ * 不変式(有限なstakeの下で成り立つ。`stake`がNaNの場合はこの限りではない。
+ * `sortMixedAllocationsForDisplay`・`buildMixedAllocationBreakdown`が既に持つ同一の前提であり、
+ * 本関数が新設する穴ではない。NaN防御は本タスクのスコープ外・到達可能性も未調査):
+ * 1. `visible`のstake合計 + `hiddenStake` === 元の`GeneralBetAllocationResult.totalStake`
+ * 2. `totalStake` === `buildMixedAllocationBreakdown`の`place+wide+trio`のstake合計(既存契約AC10)
+ * 3. `visible.length + hiddenCount` === `place+wide+trio`のcount合計
+ */
+export function splitAllocationsForDisplay(
+  sorted: readonly GeneralBetAllocation[],
+  limit: number = MIXED_ALLOCATION_VISIBLE_LIMIT,
+): MixedAllocationSplit {
+  const resolvedLimit = Number.isFinite(limit) && limit > 0 ? limit : MIXED_ALLOCATION_VISIBLE_LIMIT;
+  const visible = sorted.slice(0, resolvedLimit);
+  const hidden = sorted.slice(resolvedLimit);
+  return {
+    visible,
+    hidden,
+    hiddenCount: hidden.length,
+    hiddenStake: hidden.reduce((sum, a) => sum + a.stake, 0),
+  };
+}
+
+/**
+ * 折りたたみの見出し文言(AC2強化・boss裁定)。件数だけでなく金額も含めることで、
+ * 読者が画面だけで「可視合計+隠れ合計=合計行」(不変式1)を検算できるようにする。
+ *
+ * **金額が「隠れている買い目の配分額合計」であることが文言だけで一意に読めるよう、
+ * 「非表示分の」という限定語を必ず含める**(裸の「(合計◯◯円)」は合計行〈総額〉と
+ * 読み違えられるため。boss指摘)。
+ */
+export function formatHiddenAllocationsSummary(split: MixedAllocationSplit): string {
+  return `ほかに${split.hiddenCount}件(非表示分の配分額合計${formatYen(split.hiddenStake)})を表示`;
+}
+
+/** `buildHiddenAllocationsBlocks`が返す1要素の中身(折りたたみの見出し文言+中の買い目)。 */
+export interface HiddenAllocationsBlock {
+  /** `<summary>`に表示する文言(`formatHiddenAllocationsSummary`と同一)。 */
+  readonly summaryText: string;
+  /** `<details>`内の表に描画する買い目(=`split.hidden`)。 */
+  readonly rows: readonly GeneralBetAllocation[];
+}
+
+/**
+ * 折りたたみブロックを**0または1要素の配列**として返す(AC1強化・boss裁定)。
+ *
+ * `buildMixedAllocationNotices`と同型の設計: `hiddenCount===0`のとき配列長が0であること
+ * 自体を値として直接テストできるようにし、呼び出し側(JSX)は`.map`で描画するだけにする。
+ * JSXに`hiddenCount > 0 && <details>...`という条件式を書くと、`>`を`>=`に変える変異が
+ * 入ってもどのテストも検知できない(`push`1行削除がすり抜けた事故と同じ欠陥クラス。
+ * boss指摘2026-08-20)。
+ */
+export function buildHiddenAllocationsBlocks(
+  split: MixedAllocationSplit,
+): readonly HiddenAllocationsBlock[] {
+  if (split.hiddenCount === 0) {
+    return [];
+  }
+  return [{ summaryText: formatHiddenAllocationsSummary(split), rows: split.hidden }];
 }
 
 /** `umabans.length`から券種の日本語ラベルを返す(表示用。1=複勝/2=ワイド/3=三連複)。 */
@@ -502,6 +610,13 @@ export interface MixedAllocationDisplay {
   readonly breakdown: MixedAllocationBreakdown;
   /** stake>0の買い目全件(AC13。stake降順・同額は馬番配列の辞書順)。 */
   readonly sortedAllocations: readonly GeneralBetAllocation[];
+  /**
+   * `sortedAllocations`を上位`MIXED_ALLOCATION_VISIBLE_LIMIT`件+隠れ分に分割したもの
+   * (Issue #15再スコープ)。`sortedAllocations`から導出される(`splitAllocationsForDisplay`
+   * 参照)。画面はこちらを描画に使い、`sortedAllocations`は`split`の導出元・全件性の契約を
+   * 保つために残す。
+   */
+  readonly split: MixedAllocationSplit;
   /** 券種横断の判定不能件数(AC15)。 */
   readonly unjudged: MixedUnjudgedCounts;
   /** ワイドの状態注記(AC16。無ければnull)。 */
@@ -586,9 +701,12 @@ export function buildMixedAllocationDisplay(
   if (view.kind !== "mixed") {
     return view;
   }
+  // splitはsortedAllocationsから導出する(独立にfilter/sortし直さない。AC5を構造で保証する)。
+  const sortedAllocations = sortMixedAllocationsForDisplay(view.result);
   const display: MixedAllocationDisplay = {
     breakdown: buildMixedAllocationBreakdown(view.result),
-    sortedAllocations: sortMixedAllocationsForDisplay(view.result),
+    sortedAllocations,
+    split: splitAllocationsForDisplay(sortedAllocations),
     unjudged: aggregateUnjudgedCounts(view.diagnostics),
     wideNote: comboBetTypeNote(view.diagnostics.wide),
     trioNote: comboBetTypeNote(view.diagnostics.trio),

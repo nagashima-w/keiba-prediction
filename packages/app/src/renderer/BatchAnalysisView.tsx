@@ -22,6 +22,7 @@ import {
   type MixedAllocationCache,
 } from "./mixed-allocation-cache.js";
 import {
+  buildHiddenAllocationsBlocks,
   buildMixedAllocationDisplay,
   buildMixedAllocationNotices,
   COMBO_EV_CALIBRATION_NOTE,
@@ -368,7 +369,8 @@ function breakdownRow(
  * - `invalid`: core由来の生の例外メッセージではなく、ユーザー向け文言
  *   (`MIXED_ALLOCATION_INVALID_MESSAGE`)を表示する(AC17)。
  * - `mixed`: 券種別内訳(AC10・AC13の点数)・複勝のみの提案額との併記(AC11)・個々の買い目
- *   全件(AC13)・判定不能件数(AC15)・券種別の状態注記(AC16)・#35較正注記(AC14)を表示する。
+ *   (AC13。上位`MIXED_ALLOCATION_VISIBLE_LIMIT`件+折りたたみ。Issue #15再スコープ)・
+ *   判定不能件数(AC15)・券種別の状態注記(AC16)・#35較正注記(AC14)を表示する。
  */
 function renderMixedAllocationBlock(
   view: MixedRaceAllocationDisplayView,
@@ -446,7 +448,12 @@ function renderMixedAllocationBlock(
         でした(この配分での複勝ぶん〈{formatYen(display.breakdown.place.stake)}〉とは別の計算です)。
       </p>
 
-      {/* AC13: 個々の買い目を全件・stake降順(同額は馬番配列の辞書順)で列挙。打ち切りはしない。 */}
+      {/*
+        AC13: 個々の買い目をstake降順(同額は馬番配列の辞書順)で列挙する。上位
+        MIXED_ALLOCATION_VISIBLE_LIMIT件を常時表示し、残りは直後の折りたたみに入れる
+        (Issue #15再スコープ)。「配分額の大きい順」以外の断定的なキャプション
+        (例: 「上位20件」)は、実際に20件未満のとき嘘になるため付けない。
+      */}
       <table style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.5rem" }}>
         <thead>
           <tr>
@@ -456,7 +463,7 @@ function renderMixedAllocationBlock(
           </tr>
         </thead>
         <tbody>
-          {display.sortedAllocations.map((a) => (
+          {display.split.visible.map((a) => (
             <tr key={a.umabans.join("-")}>
               <td style={tdStyle}>{mixedBetTypeLabel(a.umabans.length)}</td>
               <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
@@ -465,6 +472,39 @@ function renderMixedAllocationBlock(
           ))}
         </tbody>
       </table>
+
+      {/*
+        隠れている買い目の折りたたみ(Issue #15再スコープ)。hiddenCount===0のときは
+        buildHiddenAllocationsBlocksが空配列を返すため、この.mapは何も描画しない
+        (JSXに`hiddenCount > 0 &&`という条件式を書かない。AC1強化・boss指摘)。
+        ネイティブ<details>/<summary>を使い、Reactのstateを持たない(再レンダーを
+        起こさずメモ化の前提を崩さない。boss裁定)。
+      */}
+      {buildHiddenAllocationsBlocks(display.split).map((block) => (
+        <details key="hidden-allocations" style={{ marginTop: "0.5rem" }}>
+          <summary style={{ cursor: "pointer", color: "#666", fontSize: "0.8rem" }}>
+            {block.summaryText}
+          </summary>
+          <table style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.3rem" }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>券種</th>
+                <th style={thStyle}>買い目</th>
+                <th style={thStyle}>配分額</th>
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((a) => (
+                <tr key={a.umabans.join("-")}>
+                  <td style={tdStyle}>{mixedBetTypeLabel(a.umabans.length)}</td>
+                  <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
+                  <td style={tdStyle}>{formatYen(a.stake)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      ))}
 
       <p style={{ margin: "0.4rem 0 0", fontWeight: 700, fontSize: "0.85rem" }}>
         {formatAllocationSummary(result)}
@@ -559,7 +599,7 @@ export function BatchAnalysisView(
 
       {/*
         組合せオッズ取得設定(機能D-2c第3段・Issue #28): 設定がONのときだけ表示する固定注記1行
-        (数値を含まない。対象レース数・所要時間の動的な見積りは#15/第4段のスコープ)。
+        (数値を含まない。対象レース数・所要時間の動的な見積りは判断済み・出さない。Issue #15再スコープ)。
       */}
       {props.betAllocationSettings.includeComboOdds && (
         <p style={{ color: "#a60", fontSize: "0.85rem", margin: "0 0 0.5rem" }}>

@@ -118,7 +118,7 @@ export const INCLUDE_COMBO_ODDS_LABELS = {
 /**
  * 一括分析画面に、設定(includeComboOdds)がONのときだけ表示する固定注記1行(機能D-2c第3段)。
  * BET_ALLOCATION_UNSET_NOTE(bet-allocation-view.ts)と同じ「画面全体で1点だけの固定注記」の
- * 前例に倣う。対象レース数・所要時間の動的な見積りは含めない(#15/第4段のスコープ)。
+ * 前例に倣う。対象レース数・所要時間の動的な見積りは含めない(判断済み・出さない。Issue #15再スコープ)。
  *
  * **第4段でAC19により更新**: 「記録のみで配分提案にはまだ使用していません」は第3段時点の
  * 事実だったが、第4段以降は`includeWideInAllocation`/`includeTrioInAllocation`次第で実際に
