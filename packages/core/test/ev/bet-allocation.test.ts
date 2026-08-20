@@ -1259,4 +1259,164 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       }
     });
   });
+
+  describe("不正なオッズ値の候補外化(Issue #31)", () => {
+    // 背景: 候補選定が `h.isPositive && h.placeOddsMin !== null` のみで、値が「使える値か」を
+    // 検証していなかった。無関係な1頭に NaN/Infinity が混じると `runGreedyAllocation` の
+    // payout計算(`trialX[idx] * odds[idx]`)がNaN汚染され、健全な他の馬の配分まで巻き添えで
+    // 消えて「妙味が小さく…」という誤った見送り理由に化けていた(#31再現ログ)。
+    // 判定基準は allocation-primitives.ts の isUsableOdds(正の有限値)に委譲する
+    // (combo-bet-allocation.ts の validateCandidates/resolveComboOdds と同一基準を共有)。
+
+    describe("候補選定・excludedReasonのテーブル駆動検証", () => {
+      const excludedTable: Array<{ name: string; value: number }> = [
+        { name: "NaN", value: Number.NaN },
+        { name: "+Infinity", value: Number.POSITIVE_INFINITY },
+        { name: "-Infinity", value: Number.NEGATIVE_INFINITY },
+        { name: "0(境界。>0を満たさない)", value: 0 },
+        { name: "負値(-1)", value: -1 },
+      ];
+      it.each(excludedTable)(
+        "placeOddsMin=$name の馬はisPositive===trueであっても候補外になり、新設の「不正な値」理由が付くこと(AC2)",
+        ({ value }) => {
+          const horses: AllocationHorse[] = [
+            candidate(1, 0.6, 3),
+            // isPositive:true を明示的に与える(#31再現の核心: 実運用でこの組み合わせが起き得るかに
+            // 関わらず、候補フィルタが isPositive だけを見て通してしまわないことを検証する)。
+            { umaban: 2, placeProb: 0.35, placeOddsMin: value, ev: 1.5, isPositive: true },
+          ];
+          const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+          const excluded = result.allocations.find((a) => a.umaban === 2)!;
+          expect(excluded.stake).toBe(0);
+          expect(excluded.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+        },
+      );
+
+      const retainedTable: Array<{ name: string; value: number }> = [
+        { name: "正の極小値(1e-9)", value: 1e-9 },
+        { name: "Number.MAX_VALUE(有限の最大値)", value: Number.MAX_VALUE },
+      ];
+      it.each(retainedTable)(
+        "placeOddsMin=$name の馬は候補として残ること(過剰除外の否定側)",
+        ({ value }) => {
+          const horses: AllocationHorse[] = [
+            { umaban: 1, placeProb: 0.6, placeOddsMin: value, ev: 1.5, isPositive: true },
+          ];
+          const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+          expect(result.allocations[0]!.excludedReason).toBeNull();
+          expect(result.diagnostics.candidateCount).toBe(1);
+        },
+      );
+
+      it("placeOddsMin===null(未確定)は従来どおり既存文言のままであること(AC1・非破壊の明示的固定)", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.35, placeOddsMin: null, ev: null, isPositive: false },
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        const excluded = result.allocations.find((a) => a.umaban === 2)!;
+        expect(excluded.excludedReason).toBe("複勝オッズ下限が未確定のため対象外");
+      });
+
+      it("不正な値かつisPositive===falseの馬は「EVがプラスではない」に誤ラベルされず「不正な値」と報告されること" +
+        "(boss拘束力のある補足2: #31が直そうとした誤ラベルの再生産防止)", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.35, placeOddsMin: Number.NaN, ev: null, isPositive: false },
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        const excluded = result.allocations.find((a) => a.umaban === 2)!;
+        expect(excluded.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+        expect(excluded.excludedReason).not.toBe("EVがプラスではないため対象外");
+      });
+
+      it("通常値(2.2)の候補は引き続き候補になること(過剰除外の否定・回帰)", () => {
+        const horses = [candidate(1, 0.6, 2.2)];
+        const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+        expect(result.allocations[0]!.excludedReason).toBeNull();
+      });
+    });
+
+    describe("診断値(oddsMalformedCount)の整合(AC4)", () => {
+      it("不正値2頭を含むレースでoddsMalformedCount=2、かつcandidateCount+excludedCount=全出走頭数を崩さないこと", () => {
+        const horses: AllocationHorse[] = [
+          candidate(1, 0.6, 3),
+          { umaban: 2, placeProb: 0.15, placeOddsMin: Number.NaN, ev: 1.5, isPositive: true },
+          { umaban: 3, placeProb: 0.15, placeOddsMin: Number.POSITIVE_INFINITY, ev: 1.5, isPositive: true },
+          nonCandidate(4, 0.1, 2), // 通常のEVマイナス候補外(不正値ではない)との混在
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+        expect(result.diagnostics.candidateCount).toBe(1);
+        expect(result.diagnostics.excludedCount).toBe(3);
+        expect(result.diagnostics.candidateCount + result.diagnostics.excludedCount).toBe(horses.length);
+        expect(result.diagnostics.oddsMalformedCount).toBe(2);
+        // boss拘束力のある補足2: oddsMalformedCountはexcludedCountの内訳(部分集合)であって
+        // 別枠ではないことの不変条件。
+        expect(result.diagnostics.oddsMalformedCount).toBeGreaterThanOrEqual(0);
+        expect(result.diagnostics.oddsMalformedCount).toBeLessThanOrEqual(result.diagnostics.excludedCount);
+      });
+
+      it("正常系(全馬健全)ではoddsMalformedCountが0であること(ノイズを出さない側の固定)", () => {
+        const horses = [candidate(1, 0.6, 3), candidate(2, 0.3, 4), nonCandidate(3, 0.1)];
+        const result = allocateBets(horses, 3, config({ bankroll: 10000, perRaceCap: 10000 }));
+        expect(result.diagnostics.oddsMalformedCount).toBe(0);
+      });
+    });
+
+    describe("AC3(#31の本丸): 無関係な1頭の不正値が健全な馬の配分を巻き添えにしないこと", () => {
+      it("不正値の馬を、同じplaceProbを持つ候補外の馬(placeOddsMin=null・isPositive=false)に" +
+        "差し替えた対照レースと、totalStake・健全な馬のstake/continuousFractionが完全一致すること", () => {
+        const healthy = candidate(1, 0.6, 3);
+        const contaminated: AllocationHorse[] = [
+          healthy,
+          { umaban: 2, placeProb: 0.35, placeOddsMin: Number.NaN, ev: 1.5, isPositive: true },
+        ];
+        const control: AllocationHorse[] = [
+          healthy,
+          { umaban: 2, placeProb: 0.35, placeOddsMin: null, ev: null, isPositive: false },
+        ];
+        const cfg = config({ bankroll: 10000, perRaceCap: 10000 });
+        const contaminatedResult = allocateBets(contaminated, 2, cfg);
+        const controlResult = allocateBets(control, 2, cfg);
+
+        // 前提固定(空振り防止): 健全な馬は両レースでisSkip=false・stake>0であること。
+        expect(contaminatedResult.isSkip).toBe(false);
+        expect(controlResult.isSkip).toBe(false);
+        const contaminatedHealthy = contaminatedResult.allocations.find((a) => a.umaban === 1)!;
+        const controlHealthy = controlResult.allocations.find((a) => a.umaban === 1)!;
+        expect(contaminatedHealthy.stake).toBeGreaterThan(0);
+        expect(controlHealthy.stake).toBeGreaterThan(0);
+
+        // 一致すべきフィールド(boss拘束力のある補足3のスコープ)。結果オブジェクト全体の
+        // toEqualは使わない(差し替えた1頭のexcludedReason/placeOddsMin・
+        // diagnostics.oddsMalformedCountは意図的に差が出るため)。
+        expect(contaminatedResult.totalStake).toBe(controlResult.totalStake);
+        expect(contaminatedResult.skipReason).toBe(controlResult.skipReason);
+        expect(contaminatedResult.kellyTargetStake).toBe(controlResult.kellyTargetStake);
+        expect(contaminatedResult.capApplied).toBe(controlResult.capApplied);
+        expect(contaminatedResult.minimumStakeApplied).toBe(controlResult.minimumStakeApplied);
+        expect(contaminatedResult.betCount).toBe(controlResult.betCount);
+        expect(contaminatedResult.notDiversified).toBe(controlResult.notDiversified);
+        expect(contaminatedHealthy.stake).toBe(controlHealthy.stake);
+        expect(contaminatedHealthy.continuousFraction).toBe(controlHealthy.continuousFraction);
+        expect(contaminatedHealthy.scaledFraction).toBe(controlHealthy.scaledFraction);
+        expect(contaminatedResult.diagnostics.placeProbSum).toBe(controlResult.diagnostics.placeProbSum);
+        expect(contaminatedResult.diagnostics.marginalDeviationMax).toBe(
+          controlResult.diagnostics.marginalDeviationMax,
+        );
+        expect(contaminatedResult.diagnostics.candidateCount).toBe(controlResult.diagnostics.candidateCount);
+        expect(contaminatedResult.diagnostics.excludedCount).toBe(controlResult.diagnostics.excludedCount);
+
+        // 一致しなくてよい(むしろ差が出るのが正しい)側の明示的な固定(boss拘束力のある補足3)。
+        const contaminatedRow = contaminatedResult.allocations.find((a) => a.umaban === 2)!;
+        const controlRow = controlResult.allocations.find((a) => a.umaban === 2)!;
+        expect(contaminatedRow.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+        expect(controlRow.excludedReason).toBe("複勝オッズ下限が未確定のため対象外");
+        expect(Number.isNaN(contaminatedRow.placeOddsMin as number)).toBe(true);
+        expect(controlRow.placeOddsMin).toBeNull();
+        expect(contaminatedResult.diagnostics.oddsMalformedCount).toBe(1);
+        expect(controlResult.diagnostics.oddsMalformedCount).toBe(0);
+      });
+    });
+  });
 });

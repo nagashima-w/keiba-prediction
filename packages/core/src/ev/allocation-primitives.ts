@@ -546,6 +546,30 @@ export function applyMinimumStake(
 }
 
 /**
+ * オッズとして使える値か(正の有限値)を判定する(Issue #31)。
+ *
+ * 背景: `combo-bet-allocation.ts` の `validateCandidates`(門番・throw基準)と `resolveComboOdds`
+ * (分類器・`malformed`基準)が `!Number.isFinite(x) || x <= 0` を独立に2回実装していた
+ * (将来どちらか一方だけ基準を変えて他方が古いまま残る、本リポジトリが繰り返してきた事故形)。
+ * 複勝経路(`bet-allocation.ts`)の候補フィルタも同じ基準を必要としたため(Issue #31: 候補外の
+ * 1頭に `NaN`/`Infinity` が混じると `runGreedyAllocation` の増分がNaN汚染され、健全な他の馬の
+ * 配分まで巻き添えで消える)、本述語へ1本化し3箇所すべてがここへ委譲する。
+ *
+ * **null判定は含まない(呼び出し側の責務)**: 引数の型を `number` のみとし `number | null` を
+ * 受け取らないのは意図的。「未確定(null)」と「不正値(数値だが使えない)」は意味が異なり、
+ * この区別を呼び出し側が保持し続けることで、excludedReason等の文言分岐(判定不能の内訳)を
+ * 呼び出し側で作り分けられるようにする(本述語に混ぜるとその区別が失われる)。
+ *
+ * **適用範囲は「オッズ」に限る(馬番の検証には使わない)**: `validateCandidates` の馬番検証
+ * (`umabans`)も式としては同一の `!Number.isFinite(u) || u <= 0` だが、これは「馬番として
+ * 妥当か」という別概念であり、式が同じなのは偶然に過ぎない。ここへ本述語を流用すると、
+ * 将来オッズ側の基準だけを変えた際に馬番の検証まで意図せず道連れで変わってしまう。
+ */
+export function isUsableOdds(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+/**
  * 見送り理由のコード(文言を持たない判別共用体)。文言は呼び出し側(bet-allocation.ts /
  * combo-bet-allocation.ts)がそれぞれ独立して持つ(見送り理由・advisoryの文言定数は
  * 券種ごとに分離する。boss着手前ゲート2026-08-05決定)。

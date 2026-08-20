@@ -163,6 +163,7 @@ import {
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
   foldToCandidateSubsets,
+  isUsableOdds,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
@@ -286,10 +287,23 @@ export interface BetAllocationDiagnostics {
    * 乖離の大きさの最大値(絶対値)。各馬の乖離には方向(正負)が入り混じるため符号は持たない。
    */
   readonly marginalDeviationMax: number;
-  /** 候補馬(isPositive && placeOddsMin!==null)の頭数。 */
+  /**
+   * 候補馬(isPositive && placeOddsMin!==null && オッズが使える値〈正の有限値〉)の頭数
+   * (Issue #31: 従来はisPositiveとplaceOddsMin!==nullのみで判定しており、NaN/Infinity等の
+   * 不正な数値を持つ馬が候補に混入しうる欠陥があった。isUsableOdds〈allocation-primitives.ts〉
+   * による数値検証を追加した)。
+   */
   readonly candidateCount: number;
   /** 候補外の頭数。 */
   readonly excludedCount: number;
+  /**
+   * 候補外のうち、placeOddsMinが非null(値は入っている)だが数値として使えない
+   * (非有限または0以下)ために候補外にした頭数(Issue #31)。
+   * **excludedCountの内訳(部分集合)であり、別枠の頭数ではない**
+   * (0 <= oddsMalformedCount <= excludedCount が常に成立し、candidateCount + excludedCount
+   * が全出走頭数になる不変条件は変わらない。オッズ未確定〈placeOddsMin===null〉はここに含まない)。
+   */
+  readonly oddsMalformedCount: number;
 }
 
 /** 馬券配分の最適化結果。 */
@@ -360,6 +374,12 @@ const REASON_NO_EDGE = "妙味が小さく、賭ける価値のある配分が�
 /** 候補外の理由。 */
 const EXCLUDED_NOT_POSITIVE = "EVがプラスではないため対象外";
 const EXCLUDED_NO_ODDS = "複勝オッズ下限が未確定のため対象外";
+/**
+ * オッズが不正な値(非有限または0以下)のため対象外(Issue #31)。
+ * EXCLUDED_NO_ODDS(未確定=null)とは意図的に文言を分ける(「未確定」と「不正値」は別状態。
+ * 混在経路の既存表示語「不正値」〈formatUnjudgedNote〉とも語を揃える)。
+ */
+const EXCLUDED_ODDS_MALFORMED = "複勝オッズ下限が不正な値のため対象外";
 
 /**
  * 複勝の馬券配分を最適化する。
@@ -400,8 +420,13 @@ export function allocateBets(
   const effectivePerRaceCap = resolveEffectivePerRaceCap(perRaceCapInput, betUnit);
 
   // Step1: 候補選定。Step0/Step1の判定結果に関わらず常に行う(設計判断6)。
+  // Issue #31: isPositive && placeOddsMin!==null だけでは「値が使える値か(正の有限値)」を
+  // 検証しておらず、無関係な1頭のNaN/Infinityが payout計算(runGreedyAllocation)をNaN汚染し、
+  // 健全な他の馬の配分まで巻き添えで消していた。isUsableOdds(allocation-primitives.ts。
+  // combo-bet-allocation.tsのvalidateCandidates/resolveComboOddsと同一基準を共有)による
+  // 数値検証を追加する。
   const candidateHorses = sortedHorses.filter(
-    (h) => h.isPositive && h.placeOddsMin !== null,
+    (h) => h.isPositive && h.placeOddsMin !== null && isUsableOdds(h.placeOddsMin),
   );
   const candidateUmabanSet = new Set(candidateHorses.map((h) => h.umaban));
 
@@ -510,11 +535,22 @@ export function allocateBets(
       placeOddsMin: horse.placeOddsMin,
       ev: horse.ev,
       droppedBelowMinimum: false,
-      // placeOddsMin===null(オッズ未確定)を先に判定する。オッズ未確定の馬は ev===null・
-      // isPositive===false になる(evaluateHorse/excluded と同じ規約)ため、!isPositive を
-      // 先に見ると「まだ判定できていない(オッズ未確定)」馬まで「EVがプラスではない(判定した
-      // 結果マイナス)」と誤ラベルしてしまう。判定不能 > 判定結果マイナス の順に判定する。
-      excludedReason: horse.placeOddsMin === null ? EXCLUDED_NO_ODDS : EXCLUDED_NOT_POSITIVE,
+      // 判定不能 > 判定結果マイナス の順に判定する(Issue #31で3分岐に拡張)。
+      // 1. placeOddsMin===null(オッズ未確定)。オッズ未確定の馬は ev===null・isPositive===false
+      //    になる(evaluateHorse/excluded と同じ規約)ため、!isPositive を先に見ると「まだ判定
+      //    できていない(オッズ未確定)」馬まで「EVがプラスではない(判定した結果マイナス)」と
+      //    誤ラベルしてしまう。
+      // 2. placeOddsMin!==null だが数値として使えない(非有限・0以下)。値は入っているが
+      //    「使えない」状態であり、これも「判定不能」の一種として isPositive の値に関わらず
+      //    優先する(isPositive===falseの不正値を「EVがプラスではない」と誤ラベルしない。
+      //    #31が問題視した「判定不能を判定結果として報告する」欠陥の再生産防止)。
+      // 3. 上記いずれでもない(数値としては有効・isPositive===false) → 従来どおり判定結果マイナス。
+      excludedReason:
+        horse.placeOddsMin === null
+          ? EXCLUDED_NO_ODDS
+          : !isUsableOdds(horse.placeOddsMin)
+            ? EXCLUDED_ODDS_MALFORMED
+            : EXCLUDED_NOT_POSITIVE,
     });
   }
 
@@ -576,6 +612,12 @@ export function allocateBets(
       marginalDeviationMax,
       candidateCount: candidateHorses.length,
       excludedCount: sortedHorses.length - candidateHorses.length,
+      // oddsMalformedCount(Issue #31): excludedCountの内訳(部分集合)。placeOddsMinが
+      // 非nullだが数値として使えない(非有限・0以下)馬の頭数。候補選定(Step1)と同一の
+      // isUsableOdds基準で数え直す(二重の基準を作らない)。
+      oddsMalformedCount: sortedHorses.filter(
+        (h) => h.placeOddsMin !== null && !isUsableOdds(h.placeOddsMin),
+      ).length,
     },
   };
 }

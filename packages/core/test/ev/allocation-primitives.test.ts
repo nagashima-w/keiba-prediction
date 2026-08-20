@@ -8,6 +8,7 @@ import {
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
   foldToCandidateSubsets,
+  isUsableOdds,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
@@ -460,6 +461,32 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
 
     it("優先順位: λ=0かつ候補0頭 → kelly-zeroが優先されること(no-candidatesではない)", () => {
       expect(determineSkipReasonCode(10000, 10000, 10000, 100, 0, 0, 0)).toBe("kelly-zero");
+    });
+  });
+
+  describe("isUsableOdds(オッズとして使える値かの判定・Issue #31)", () => {
+    // 背景: combo-bet-allocation.ts の validateCandidates(:412-416)と resolveComboOdds(:672-674)が
+    // `!Number.isFinite(x) || x <= 0` を独立に2回実装していた(将来どちらかだけ直す事故の温床)。
+    // 本述語へ1本化し、複勝側(bet-allocation.ts)の候補フィルタを3つ目の委譲先として追加する
+    // (Issue #31)。「正の有限値」であることのみを判定し、null判定は呼び出し側の責務とする
+    // (「未確定」と「不正値」の区別を呼び出し側に残すため、引数の型はnumberのみでnullを許容しない)。
+    //
+    // 適用範囲の注意(boss拘束力のある補足1): 本述語は「オッズ」の3箇所にのみ適用する。
+    // validateCandidatesの馬番検証(umabans)は式がたまたま同一なだけで意味論が別(馬番の
+    // 妥当性であってオッズの妥当性ではない)であるため、本述語を流用してはならない
+    // (将来オッズ側の基準だけを変えた際に馬番の検証まで道連れで変わる事故を防ぐ)。
+    const table: Array<{ name: string; value: number; expected: boolean }> = [
+      { name: "通常値(2.2)", value: 2.2, expected: true },
+      { name: "正の極小値(1e-9)", value: 1e-9, expected: true },
+      { name: "Number.MAX_VALUE(有限の最大値)", value: Number.MAX_VALUE, expected: true },
+      { name: "0(境界。>0を満たさない)", value: 0, expected: false },
+      { name: "負値(-1)", value: -1, expected: false },
+      { name: "NaN", value: Number.NaN, expected: false },
+      { name: "+Infinity", value: Number.POSITIVE_INFINITY, expected: false },
+      { name: "-Infinity", value: Number.NEGATIVE_INFINITY, expected: false },
+    ];
+    it.each(table)("$name → $expected", ({ value, expected }) => {
+      expect(isUsableOdds(value)).toBe(expected);
     });
   });
 });

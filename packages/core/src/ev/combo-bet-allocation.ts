@@ -62,8 +62,14 @@
  * throwで止める設計にした(複勝専用の`allocateBets`が同種の異常を無防備のまま許容しているのとは
  * 対照的。`allocateBets`側にthrowを入れなかった理由は#31参照)。D-3でrenderer側からこれらを呼ぶ際、
  * `BatchAnalysisView.tsx:625`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
- * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。** 組合せ経路では「受け皿を
- * D-3側で用意すること」が前提になっている。
+ * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。**
+ *
+ * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/app/src/renderer/
+ * mixed-allocation-view.ts` が `allocateGeneralBets` の呼び出しをtry/catchで保護し、例外を
+ * `MixedRaceAllocationInvalid`(`kind:"invalid"`)へ変換して他レースの計算・画面全体に波及させない
+ * (受け皿の実体はtry/catchブロック本体。表示側のテストは`packages/app/test/
+ * mixed-allocation-view.test.ts`のAC17〈5件〉が固定している)。D-3着手時に改めて受け皿を
+ * 新設する必要はない。
  */
 
 import {
@@ -87,6 +93,7 @@ import {
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
   foldToCandidateSubsets,
+  isUsableOdds,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
@@ -409,7 +416,9 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
     // 構造検証(umabans)と同じく throw に揃える(除外して続行する設計は採らない。
     // 異常値を黙って除外すると「判定不能」が「候補外」に混ざり、受け入れ条件16
     // 〈オッズ状態分離〉の思想と矛盾するため。呼び出し側が気づくべき異常である)。
-    if (!Number.isFinite(odds) || odds <= 0) {
+    // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #31。
+    // resolveComboOdds・bet-allocation.tsの候補フィルタと同一基準を1箇所で共有する)。
+    if (!isUsableOdds(odds)) {
       throw new Error(
         `不正な買い目です: oddsは正の有限値である必要があります(umabans=${umabans.join(",")}, odds=${odds})`,
       );
@@ -669,7 +678,9 @@ export function resolveComboOdds(
   if (value === null) {
     return { state: "missing" };
   }
-  if (!Number.isFinite(value) || value <= 0) {
+  // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #31。
+  // validateCandidates・bet-allocation.tsの候補フィルタと同一基準を1箇所で共有する)。
+  if (!isUsableOdds(value)) {
     return { state: "malformed" };
   }
   return { state: "present", odds: value };
