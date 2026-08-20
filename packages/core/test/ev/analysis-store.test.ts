@@ -1355,7 +1355,10 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
   });
 
   describe("placeOddsMinの非有限値がDB往復でどうなるか(Issue #50・回帰テスト)", () => {
-    // 【このテストの目的(4点。boss指示により明記する)】
+    // 【このテストの目的(4点)】
+    // boss メタレビュー(要修正2)を契機に、オーケストレーターの判断で本テストを追加した
+    // (テスト追加そのものはboss指示ではない。boss が求めたのは要修正2の走査結果の記録まで)。
+    // 目的は次の4点。
     //
     // 1. 「DBを通るから非有限値は消える」という一般化は誤りであることの固定。
     //    本テスト作成の経緯: Issue #31(#50)の調査中、実装担当者が本番の AnalysisStore
@@ -1363,8 +1366,9 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     //    プローブを1回限りのスクリプトで実行し、「NaNだけがnullへ自己修復され、Infinityは
     //    そのまま生き残る」ことを実測した。この結果を code-reviewer が本番の AnalysisStore を
     //    使って再現しようとした際に一度は逆の結論(Infinityもnullになる)を得て差し戻しに
-    //    至ったが、boss が3度目の実測(in-memory・ファイルベース両方)で当初の実測が正しい
-    //    ことを確定させた。**「非有限値はNaN・Infinityをまとめて1つの性質として扱ってよい」
+    //    至ったが、オーケストレーターが3度目の実測(in-memory・ファイルベース両方、
+    //    生SQLのtypeof併用)を行い、当初の実測が正しいことを確定させた。
+    //    **「非有限値はNaN・Infinityをまとめて1つの性質として扱ってよい」
     //    という直感は、少なくとも better-sqlite3 経由のREAL列では成立しない。**
     //
     // 2. これは better-sqlite3 の挙動への依存であり、バージョン更新で変わりうる。
@@ -1408,7 +1412,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       { name: "通常値(3.5・対照)はそのまま素通しされる", value: 3.5, expected: 3.5 },
     ];
     it.each(table)("$name", ({ value, expected }) => {
-      // :memory: で十分(boss確認済み: ファイルベースでも同結果)。テストは一時ファイルを残さない。
+      // :memory: で十分(オーケストレーターがファイルベースでも同結果であることを実測済み)。テストは一時ファイルを残さない。
       const store = new AnalysisStore();
       store.saveAnalysis(
         makeRecord({
