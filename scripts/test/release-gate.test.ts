@@ -733,14 +733,17 @@ describe("配線: runMain(想定外の例外を fail-closed で受け止める�
 
 describe("実プロセス起動(AC8): tag-version をネットワーク不要で実行する", () => {
   // 本テストは実リポジトリの packages/app/package.json の version に依存する。
-  // 本タスクで 1.2.1 に上げること自体が前提のため、先に前提を無条件 expect で固定する
+  // 版数を上げること自体が公開の前提のため、先に前提を無条件 expect で固定する
   // (据え置きのまま実行され「たまたま一致」で緑になる空振りを避ける)。
+  // この literal は版を上げるたびに更新が要る。docs/versioning.md の同時更新
+  // チェックリストの8項目目がこのファイルを指している(EXPECTED_APP_VERSION と同じく、
+  // 上げ忘れに対する意図的な摩擦として literal のまま残している)。
   const appPkg = JSON.parse(readFileSync(APP_PACKAGE_JSON_PATH, "utf8")) as {
     version: string;
   };
 
-  it("前提: packages/app/package.json の version が 1.2.1 である", () => {
-    expect(appPkg.version).toBe("1.2.1");
+  it("前提: packages/app/package.json の version が 1.2.2 である", () => {
+    expect(appPkg.version).toBe("1.2.2");
   });
 
   it("バージョン不一致(v1.2.0)で終了コード1、出力に ::error:: を含む", () => {
@@ -754,10 +757,10 @@ describe("実プロセス起動(AC8): tag-version をネットワーク不要で
     expect(combined).toContain("::error::");
   });
 
-  it("バージョン一致(v1.2.1)で終了コード0", () => {
+  it("バージョン一致(v1.2.2)で終了コード0", () => {
     const result = spawnSync(
       process.execPath,
-      ["--import", "tsx", SCRIPT_ABS_PATH, "tag-version", "v1.2.1"],
+      ["--import", "tsx", SCRIPT_ABS_PATH, "tag-version", "v1.2.2"],
       { encoding: "utf8" },
     );
     expect(result.status).toBe(0);

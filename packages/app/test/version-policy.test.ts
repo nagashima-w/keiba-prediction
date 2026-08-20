@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.2.1";
+const EXPECTED_APP_VERSION = "1.2.2";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,12 +234,12 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.2.1(Issue #45: 機械検査導入に伴う公開1回分の是正先)である", () => {
-    // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0 だったが、その後 #45 の
-    // 機械検査(scripts/release-gate.ts)を dev-latest に公開する際、既に 1.2.0 の exe が
-    // 存在するため据え置き検査が block してしまう。#45 自身の変更(CI・scripts・テスト・
-    // 文書のみ、packages/app/src・packages/core/src 非変更)を patch として上げ、
-    // 1.2.1 に是正する。EXPECTED_APP_VERSION 据え置きのままにならないことを固定する。
+  it("root と app の version が 1.2.2(Issue #31: 到達経路の無い潜在的欠陥の是正)である", () => {
+    // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1。本回は #31。
+    // #31 は allocateBets の候補選定が「値として使えるか」を見ていなかった潜在的欠陥の
+    // 是正で、placeOddsMin に非有限値が入る到達経路は現状無いため実データの数値は動かない。
+    // 区分表の「分析結果の数値が変わる」に該当しないので patch。公開1回につき1回上げる
+    // 運用により、EXPECTED_APP_VERSION 据え置きのままにならないことを固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);
     expect(appPkg.version).toBe(EXPECTED_APP_VERSION);
   });
