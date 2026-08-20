@@ -1434,5 +1434,55 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         expect(controlResult.diagnostics.oddsMalformedCount).toBe(0);
       });
     });
+
+    describe("skipReasonの特性化(boss差し戻し・要修正1)", () => {
+      // 【この経路が偽の原因を報告する現状(本タスクでは是正しない)】
+      // isPositive===trueと判定された馬(ev = prob × odds なので、oddsがInfinityならev=Infinity
+      // > 閾値でisPositive=trueになりうる。#31本文が挙げている組み合わせ)が、不正なオッズのため
+      // 候補フィルタで全頭除外されると、candidateHorses.length===0になり、
+      // determineSkipReasonCode(allocation-primitives.ts)は「候補0頭」を無条件に
+      // no-candidates(文言「EVプラスの馬がいないため見送りです」)へ分類する。
+      // しかし実際には「EVプラスと判定した馬は存在した(isPositive===trueだった)」のであり、
+      // 見送りの真の原因は「そのオッズが判定不能(不正な値)だった」ことである。
+      // 同じ BetAllocationResult の中で、skipReason(「EVプラスの馬がいない」)と
+      // allocations[].excludedReason(「オッズ下限が不正な値のため対象外」)が矛盾した説明を
+      // 同時に返す状態は本テスト作成時点で解消されていない。
+      //
+      // 【今回是正しない理由(boss指示・記録用)】
+      // 1. #31の処方箋(boss着手前ゲートで合意したブリーフ)に専用skipReasonの新設は無い。
+      // 2. 文言の出し分けはUI側の受け皿設計(見送り理由をどう表示し直すか)と一緒に決めるべきで、
+      //    本タスク単独で先取りすると設計の手戻りを招く(後続タスクで扱う)。
+      // 3. 修正前(#31着手前)は同じ入力が「妙味が小さく…」(#31再現ログと同じ偽の理由)に
+      //    化けていたため、本タスクの変更は「偽の理由を出す」という状態を悪化させてはいない
+      //    (原因の文言は変わったが、依然として偽である点は変わらない)。
+      //
+      // 本テストは「現状の挙動を変えない」ことを保証する特性化テストであり、上記の矛盾が
+      // 解消されていないことを可視化する目的で残す(将来この経路を直す際の回帰検出にもなる)。
+      it("EVプラス判定の馬が全員不正オッズのとき、skipReasonは真の原因(判定不能)を名指しせず" +
+        "「EVプラスの馬がいない」という判定結果の文言になること(現状の固定・是正は別タスク)", () => {
+        const horses: AllocationHorse[] = [
+          // isPositive===trueだがplaceOddsMin=Infinityで不正(#31本文が挙げた組み合わせ)。
+          { umaban: 1, placeProb: 0.5, placeOddsMin: Number.POSITIVE_INFINITY, ev: Number.POSITIVE_INFINITY, isPositive: true },
+          nonCandidate(2, 0.3, 2), // 通常のEVマイナス(不正値ではない)
+        ];
+        const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+
+        // 前提固定: 候補が実際に0頭になり、見送りになること(空振り防止)。
+        expect(result.diagnostics.candidateCount).toBe(0);
+        expect(result.diagnostics.excludedCount).toBe(2);
+        expect(result.isSkip).toBe(true);
+
+        // 【本題】skipReasonは「EVプラスの馬がいない」という判定結果の文言になる
+        // (真の原因=判定不能ではない。矛盾の固定)。
+        expect(result.skipReason).toBe("EVプラスの馬がいないため見送りです");
+
+        // 真の原因を示す情報はdiagnostics.oddsMalformedCountとexcludedReasonにのみ残る
+        // (skipReasonからは読み取れないことの対比)。
+        expect(result.diagnostics.oddsMalformedCount).toBe(1);
+        expect(result.allocations.find((a) => a.umaban === 1)!.excludedReason).toBe(
+          "複勝オッズ下限が不正な値のため対象外",
+        );
+      });
+    });
   });
 });

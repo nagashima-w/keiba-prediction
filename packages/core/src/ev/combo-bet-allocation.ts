@@ -61,7 +61,7 @@
  * `allocateGeneralBets`/`buildComboCandidates`は契約違反(候補の構造・数値異常、topFinishCount異常)を
  * throwで止める設計にした(複勝専用の`allocateBets`が同種の異常を無防備のまま許容しているのとは
  * 対照的。`allocateBets`側にthrowを入れなかった理由は#31参照)。D-3でrenderer側からこれらを呼ぶ際、
- * `BatchAnalysisView.tsx:625`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
+ * `BatchAnalysisView.tsx`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
  * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。**
  *
  * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/app/src/renderer/

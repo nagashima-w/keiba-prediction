@@ -425,6 +425,18 @@ export function allocateBets(
   // 健全な他の馬の配分まで巻き添えで消していた。isUsableOdds(allocation-primitives.ts。
   // combo-bet-allocation.tsのvalidateCandidates/resolveComboOddsと同一基準を共有)による
   // 数値検証を追加する。
+  //
+  // なぜ AllocationHorse.ev には同じ防御を入れないか(#31本文は placeOddsMin と ev の
+  // 2フィールドを名指ししているが、本タスクでは placeOddsMin のみを対象にした・boss確認済み):
+  // `ev` が本ファイルに現れるのは (a) 型定義(AllocationHorse.ev/BetAllocation.ev)と
+  // (b) 出力オブジェクトへの素通し2箇所(`ev: horse.ev` × 2。候補ループ・候補外ループ)だけで、
+  // 最適化に使う `odds` 配列(直下の行。candidateHorses[i].placeOddsMin から構築)にも
+  // `runGreedyAllocation` の引数にも一切登場しない。したがって `ev=NaN`/`Infinity` は
+  // payout計算をNaN/Infinity汚染できず、#31が問題にした「無関係な1頭が他馬の配分を
+  // 巻き添えにする」欠陥を引き起こす経路にならない(確認方法: 本ファイル内で `horse.ev`/
+  // `h.ev`/`.ev` を grep し、上記(a)(b)以外の出現が無いことを確認した)。`ev` は結果を
+  // 読む利用者への参考情報としてそのまま素通しする(サニタイズしない。他の入力echoフィールド
+  // 〈placeProb等〉と同じ扱い)。
   const candidateHorses = sortedHorses.filter(
     (h) => h.isPositive && h.placeOddsMin !== null && isUsableOdds(h.placeOddsMin),
   );
