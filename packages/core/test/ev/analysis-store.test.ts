@@ -1353,4 +1353,90 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       db.close();
     });
   });
+
+  describe("placeOddsMinの非有限値がDB往復でどうなるか(Issue #50・回帰テスト)", () => {
+    // 【このテストの目的(4点。boss指示により明記する)】
+    //
+    // 1. 「DBを通るから非有限値は消える」という一般化は誤りであることの固定。
+    //    本テスト作成の経緯: Issue #31(#50)の調査中、実装担当者が本番の AnalysisStore
+    //    (better-sqlite3、in-memory)へ NaN/+Infinity/-Infinity を実際に保存・復元する
+    //    プローブを1回限りのスクリプトで実行し、「NaNだけがnullへ自己修復され、Infinityは
+    //    そのまま生き残る」ことを実測した。この結果を code-reviewer が本番の AnalysisStore を
+    //    使って再現しようとした際に一度は逆の結論(Infinityもnullになる)を得て差し戻しに
+    //    至ったが、boss が3度目の実測(in-memory・ファイルベース両方)で当初の実測が正しい
+    //    ことを確定させた。**「非有限値はNaN・Infinityをまとめて1つの性質として扱ってよい」
+    //    という直感は、少なくとも better-sqlite3 経由のREAL列では成立しない。**
+    //
+    // 2. これは better-sqlite3 の挙動への依存であり、バージョン更新で変わりうる。
+    //    本テストはその依存を明示的に固定する回帰テストであり、将来 better-sqlite3(または
+    //    SQLiteそのもの)のバージョンが上がって挙動が変わったら、このテストが落ちて気づける
+    //    ようにすることが目的(「気づけない」状態を作らないための固定)。
+    //
+    // 3. Issue #50 のリスク評価はこの事実に依存している: 将来 placeOddsMin に Infinity を
+    //    書き込む経路が生まれた場合、**DBは防波堤にならない**(NaNは自己修復されて無害化するが、
+    //    Infinityは往復してそのまま残り、verify.ts:640/669等の同型サイトに到達しうる)。
+    //
+    // 4. この挙動を「望ましい」と承認しているわけではない。これは better-sqlite3 の現状の
+    //    実装の記録であって、仕様としての追認ではない(本番コードは本タスクで一切変更していない)。
+    //
+    // 【確認手順の注意(code-reviewer自身が特定した誤りの根本原因)】
+    // この挙動を確認するとき `JSON.stringify` で表示してはならない。`JSON.stringify` は
+    // 仕様上 NaN・Infinity・-Infinity をすべて null に変換して出力する(JSONに非有限数の
+    // 表現が無いため)。このため「DBが3つとも null に自己修復した」ように見えてしまう
+    // (実際に本タスクのレビューで一度この誤認が起きた: code-reviewerが
+    // `console.log(JSON.stringify(loaded?.horses, null, 2))` で結果を表示したところ、
+    // SQLite側で本当にnullになるNaNと、実際にはInfinityのまま生きているが表示上nullに
+    // 潰されていた+Infinity/-Infinityの区別がつかなくなり、「Infinityもnullになる」という
+    // 誤った結論に至った)。確認するときは値そのものを typeof・Number.isFinite と
+    // あわせて直接出力すること(本テスト本体のアサーションも、当然ながら JSON.stringify を
+    // 経由せず toBe(Number.POSITIVE_INFINITY) 等で値を直接比較している)。
+    //
+    // 対照として通常値(3.5)が素通しされることも併記し、「異常値だけが変な挙動をする」ことを
+    // 明確にする(通常値まで巻き添えで壊れているわけではないことの確認)。
+    const table: Array<{ name: string; value: number; expected: number | null }> = [
+      { name: "NaN → null(自己修復される)", value: Number.NaN, expected: null },
+      {
+        name: "+Infinity → +Infinityのまま(自己修復されない)",
+        value: Number.POSITIVE_INFINITY,
+        expected: Number.POSITIVE_INFINITY,
+      },
+      {
+        name: "-Infinity → -Infinityのまま(自己修復されない)",
+        value: Number.NEGATIVE_INFINITY,
+        expected: Number.NEGATIVE_INFINITY,
+      },
+      { name: "通常値(3.5・対照)はそのまま素通しされる", value: 3.5, expected: 3.5 },
+    ];
+    it.each(table)("$name", ({ value, expected }) => {
+      // :memory: で十分(boss確認済み: ファイルベースでも同結果)。テストは一時ファイルを残さない。
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "非有限値往復テスト",
+          horses: [
+            {
+              umaban: 1,
+              prior: 0.5,
+              adjustedProb: 0.5,
+              placeOddsMin: value,
+              ev: 1.0,
+              isPositive: true,
+              contributions: null,
+              mark: null,
+            },
+          ],
+        }),
+      );
+      const restored = store.listAnalyses({ raceId: "非有限値往復テスト" })[0]!;
+      const restoredOdds = restored.horses[0]!.placeOddsMin;
+      if (expected === null) {
+        expect(restoredOdds).toBeNull();
+      } else {
+        // Object.is基準(toBe)で比較する。+Infinity/-Infinityの符号違いを
+        // 取り違えないようにするため(NaN行は上のnull分岐で扱う)。
+        expect(restoredOdds).toBe(expected);
+      }
+      store.close();
+    });
+  });
 });
