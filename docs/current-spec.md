@@ -10,7 +10,7 @@
 - 種別: 複勝の期待値プラス馬券を抽出するデスクトップアプリ(Electron + React)
 - **対応券種は用途によって異なる(3点。混同しないこと)**:
   - **配分提案**: 複勝+ワイド+三連複(ワイド・三連複はオプトイン設定`includeWideInAllocation`/
-    `includeTrioInAllocation`。既定ON。取得自体は`includeComboOdds`が別途必要。9節参照)
+    `includeTrioInAllocation`。既定ON。取得自体は`includeComboOdds`が別途必要。5節参照)
   - **記録・回収率検証**: 複勝のみ(`ev/verify.ts`・`ev/analysis-store.ts`は複勝の的中判定・
     払戻のみを扱う。組合せ券種の永続化・検証への反映は未着手 = Issue #29)
   - **単勝オッズ**: 賭け対象ではなく、発売前レースで複勝下限を概算する用途にのみ使う

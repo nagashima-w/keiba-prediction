@@ -915,21 +915,39 @@ describe("splitAllocationsForDisplay — 同額が境界をまたぐ場合の決
 });
 
 describe("不変式1〜3(可視+隠れ=合計。有限なstakeの下で成り立つ主張)", () => {
-  it("大量(100件・複勝/ワイド/三連複混在)のとき、不変式1〜3がすべて成り立つこと", () => {
+  it("大量(103件・stake>0が100件+stake=0が3件・複勝/ワイド/三連複混在)のとき、不変式1〜3がすべて成り立つこと", () => {
     const placeAllocs = Array.from({ length: 30 }, (_, i) => allocation({ umabans: [i + 1], stake: 100 + i }));
     const wideAllocs = Array.from({ length: 40 }, (_, i) => allocation({ umabans: [i + 1, i + 2], stake: 50 + i }));
     const trioAllocs = Array.from({ length: 30 }, (_, i) =>
       allocation({ umabans: [i + 1, i + 2, i + 3], stake: 30 + i }),
     );
-    const allocations = [...placeAllocs, ...wideAllocs, ...trioAllocs];
+    // boss指摘(採用2): stake===0の行を1件では終わらせず券種ごとに混ぜる。これが無いと、
+    // 「countがstake>0基準であること」という不変式3の主張が、buildMixedAllocationBreakdown
+    // 自身の既存契約(AC10)と同じ土俵で二重に確認しているだけになり、合成した主張として
+    // 自立しない(仮に本関数がstake>=0基準に取り違えても、stake===0の入力が無ければ
+    // どちらの基準でも同じ数になり検知できない)。
+    const zeroStakeAllocs = [
+      allocation({ umabans: [901], stake: 0 }),
+      allocation({ umabans: [902, 903], stake: 0 }),
+      allocation({ umabans: [904, 905, 906], stake: 0 }),
+    ];
+    const allocations = [...placeAllocs, ...wideAllocs, ...trioAllocs, ...zeroStakeAllocs];
     const result = generalResult(allocations);
     const sorted = sortMixedAllocationsForDisplay(result);
     const split = splitAllocationsForDisplay(sorted);
     const breakdown = buildMixedAllocationBreakdown(result);
+    // 不変式3の右辺(count)を、production関数(buildMixedAllocationBreakdown)に頼らず
+    // 生の入力配列から独立に数え直す(自立した主張にするため。boss指摘)。
+    const expectedPositiveCount = allocations.filter((a) => a.stake > 0).length;
 
-    // 前提固定(空振り防止): 実際に打ち切りが発生し、totalStakeが有限の正値であること。
+    // 前提固定(空振り防止): 実際に打ち切りが発生し、totalStakeが有限の正値であり、
+    // かつstake=0の行が実在すること(不変式3を自立させる前提そのもの)。
     expect(result.totalStake).toBeGreaterThan(0);
     expect(split.hiddenCount).toBeGreaterThan(0);
+    expect(allocations.filter((a) => a.stake === 0)).toHaveLength(3);
+    // 前提固定: stake=0の3件はstake>0の100件とは別枠であり、合計103件であること。
+    expect(allocations).toHaveLength(103);
+    expect(expectedPositiveCount).toBe(100);
 
     // 不変式1: visible.stake合計 + hidden.stake合計 === totalStake
     const visibleStake = split.visible.reduce((sum, a) => sum + a.stake, 0);
@@ -939,9 +957,11 @@ describe("不変式1〜3(可視+隠れ=合計。有限なstakeの下で成り立
     expect(breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake).toBe(result.totalStake);
 
     // 不変式3: visible.length + hiddenCount === breakdown.place.count+wide.count+trio.count
+    // （かつ、生入力から独立に数えたstake>0件数〈100〉とも一致すること。自立した主張の核心）。
     expect(split.visible.length + split.hiddenCount).toBe(
       breakdown.place.count + breakdown.wide.count + breakdown.trio.count,
     );
+    expect(split.visible.length + split.hiddenCount).toBe(expectedPositiveCount);
   });
 });
 
