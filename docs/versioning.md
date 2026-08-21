@@ -59,11 +59,15 @@ exe のファイル名は `packages/app/electron-builder.yml` の
 3. `docs/current-spec.md` の冒頭(「実際に実装されている現状(vX.Y.Z)」の箇所)
 4. `docs/current-spec.md` のバージョン一覧行(「バージョン: ルート/アプリ `X.Y.Z`」の箇所)
 5. `keiba-ev-tool-spec.md` の冒頭(「実装は vX.Y.Z に到達しており」の箇所)
-6. `packages/app/test/version-policy.test.ts` の `EXPECTED_APP_VERSION` 定数
+6. `packages/app/test/version-policy.test.ts` の `EXPECTED_APP_VERSION` 定数。**あわせて同ファイルの
+   テスト名に埋まっている版数 literal も直す**(定数だけを見て置換すると取り残す)
 7. 本書に「次の正式版が X.Y.Z である根拠セクション」(`## 次の正式版が X.Y.Z である根拠`という
    見出し)を追加する(区分〈major/minor/patch〉の判断根拠を残す)
-8. `scripts/test/release-gate.test.ts` の実プロセス起動テスト(AC8)が持つ版数 literal
-   (「前提: …の version が X.Y.Z である」と「バージョン一致(vX.Y.Z)で終了コード0」の2箇所)
+8. `scripts/test/release-gate.test.ts` の実プロセス起動テスト(AC8)が持つ版数 literal。
+   **対象は2つのテストだが、書き換える literal は4つある**(「前提: …の version が X.Y.Z である」の
+   テスト名と `expect(appPkg.version).toBe("X.Y.Z")`、「バージョン一致(vX.Y.Z)で終了コード0」の
+   テスト名と `"vX.Y.Z"` 引数)。**「2箇所」を「2つの文字列」と読んで機械置換すると取り残す**
+   (1.3.1 への版上げ時に boss の実測で判明。取り残しても `pnpm test` が落ちて検出される)
 
 6 と 8 は上げた先の版数を実ファイルに直接ピン留めしている。これ自体は「是正が実際に行われたことの
 直接検証」であると同時に、次の上げ忘れに対する意図的な摩擦として機能する。摩擦として残すからには、
@@ -166,6 +170,26 @@ Issue #15 は、混在配分の買い目一覧を**上位20件の常時表示+�
 **「分析結果の数値が変わる」には該当しない**: 配分計算(`packages/core/src/ev/**`)には1行も
 触れておらず、`totalStake`・券種別内訳・注記はいずれも分割の前後で同一である(不変式1〜3として
 テストで固定した)。変わったのは**画面に何行出すか**だけである。
+
+## 次の正式版が 1.3.1 である根拠(Issue #52 での変更)
+
+Issue #52 は、レース結果ページからワイド・三連複の**確定払戻を取り込んで永続化**する変更である
+(`packages/core/src/scraper/parse-race-result.ts` の `parseComboPayoutRow` と、
+`packages/core/src/ev/analysis-store.ts` の `race_combo_payouts` / `race_combo_payout_imports`)。
+
+**patch である根拠**: 区分表の minor は「**利用者から見てできることが増える**」または
+「**分析結果の数値が変わる**」だが、本変更は**どちらにも該当しない**。UI・IPC は一切触っておらず
+(過去分析の再表示は #55 がスコープ)、`ev/verify.ts` も無改変なので**回収率を含む分析結果の数値は
+1つも変わらない**。取得・永続化という内部能力は増えるが、**利用者からは観測できない**。
+よって区分表の patch(「それ以外(不具合修正・内部改善・CI/文書のみ)」)に該当する。
+
+**major でない根拠**: 新テーブルは `CREATE TABLE IF NOT EXISTS` の追加のみで、旧DBはそのまま開けて
+既存データも読める(旧DB互換をテストで固定済み)。「既存の保存データ・設定が使えなくなる変更」に
+当たらない。
+
+なお本 Issue は**保存はするが検証(`ev/verify.ts`)には一切反映しない**という中間状態で着地している。
+反映は #54 が担う。`docs/current-spec.md` の「記録・回収率検証: 複勝のみ」は本 Issue 完了時点でも
+**まだ正**であり、その微妙な状態を同文書に明記した。
 
 ## 公開後の確認(版数据え置き検査が実際に走ったことの確認)
 

@@ -742,8 +742,8 @@ describe("実プロセス起動(AC8): tag-version をネットワーク不要で
     version: string;
   };
 
-  it("前提: packages/app/package.json の version が 1.3.0 である", () => {
-    expect(appPkg.version).toBe("1.3.0");
+  it("前提: packages/app/package.json の version が 1.3.1 である", () => {
+    expect(appPkg.version).toBe("1.3.1");
   });
 
   it("バージョン不一致(v1.2.0)で終了コード1、出力に ::error:: を含む", () => {
@@ -757,10 +757,10 @@ describe("実プロセス起動(AC8): tag-version をネットワーク不要で
     expect(combined).toContain("::error::");
   });
 
-  it("バージョン一致(v1.3.0)で終了コード0", () => {
+  it("バージョン一致(v1.3.1)で終了コード0", () => {
     const result = spawnSync(
       process.execPath,
-      ["--import", "tsx", SCRIPT_ABS_PATH, "tag-version", "v1.3.0"],
+      ["--import", "tsx", SCRIPT_ABS_PATH, "tag-version", "v1.3.1"],
       { encoding: "utf8" },
     );
     expect(result.status).toBe(0);
