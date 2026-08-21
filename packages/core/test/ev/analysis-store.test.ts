@@ -1443,4 +1443,311 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
   });
+
+  describe("組合せ払戻テーブルの新設(race_combo_payouts / race_combo_payout_imports、Issue #52)", () => {
+    it("旧DB(combo系テーブルが存在しない)でAnalysisStoreを開くとテーブルが作成され、組合せ払戻付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // 旧バージョン相当: race_results のみの最小スキーマ(combo系テーブル自体が無い)。
+      db.exec(`
+        CREATE TABLE race_results (
+          race_id TEXT NOT NULL,
+          umaban INTEGER NOT NULL,
+          finish_position INTEGER,
+          PRIMARY KEY (race_id, umaban)
+        );
+      `);
+      const store = new AnalysisStore({ database: db });
+      expect(() =>
+        store.saveResult(
+          "組合せ払戻テストレース",
+          [{ umaban: 1, finishPosition: 1 }],
+          null,
+          {
+            wide: {
+              state: "parsed",
+              payouts: [{ umabans: [1, 2], payout: 120 }],
+            },
+          },
+        ),
+      ).not.toThrow();
+      expect(store.getComboPayouts("組合せ払戻テストレース", "wide")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0102", payout: 120 }],
+      });
+      store.close();
+    });
+
+    it("同一DBで2回目のAnalysisStore構築(再オープン相当)でもCREATE TABLE IF NOT EXISTSがno-opで既存データを保持すること", () => {
+      const db = new Database(":memory:");
+      const store1 = new AnalysisStore({ database: db });
+      store1.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 120 }] },
+      });
+      const store2 = new AnalysisStore({ database: db });
+      expect(store2.getComboPayouts("R1", "wide")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0102", payout: 120 }],
+      });
+      db.close();
+    });
+  });
+
+  describe("getComboPayouts(組合せ払戻の読み出し契約。Issue #52 AC9・boss裁定R-4〜R-6)", () => {
+    it("一度も取り込んでいないレースは not_imported を返すこと", () => {
+      const store = new AnalysisStore();
+      expect(store.getComboPayouts("未保存", "wide")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("旧DB(race_results に行があるがcombo系マーカーが無い)を開いた直後は not_imported を返すこと(R-4がAC9・AC12を同時に満たすことの直接証明)", () => {
+      const db = new Database(":memory:");
+      // 旧バージョン相当: race_results には既にこのレースの行がある(#52より前に取り込んだ想定)。
+      db.exec(`
+        CREATE TABLE race_results (
+          race_id TEXT NOT NULL,
+          umaban INTEGER NOT NULL,
+          finish_position INTEGER,
+          PRIMARY KEY (race_id, umaban)
+        );
+        INSERT INTO race_results (race_id, umaban, finish_position)
+        VALUES ('旧DBレース', 1, 1);
+      `);
+      const store = new AnalysisStore({ database: db });
+      // race_results には行があるが、combo系テーブルにはこのレースの行が無い。
+      // 「race_resultsの行の有無」を根拠に判定すると誤って imported/[] を返してしまう
+      // (=過去の全レースがワイド・3連複払戻0円という偽の確定値になる)ため、
+      // race_combo_payout_imports のマーカー行の有無で判定しなければならない。
+      expect(store.getComboPayouts("旧DBレース", "wide")).toEqual({
+        state: "not_imported",
+      });
+      expect(store.getComboPayouts("旧DBレース", "trio")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("state:'parsed'かつpayouts:[]で保存すると、imported かつ空配列を返すこと(未発売等・0件でもnot_importedへ退行しない)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [] },
+      });
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "imported",
+        payouts: [],
+      });
+      store.close();
+    });
+
+    it("1件以上の払戻を保存すると、そのまま復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        trio: {
+          state: "parsed",
+          payouts: [{ umabans: [1, 2, 5], payout: 240 }],
+        },
+      });
+      expect(store.getComboPayouts("R1", "trio")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "010205", payout: 240 }],
+      });
+      store.close();
+    });
+
+    it("state:'undetermined'を渡して保存しても、DBに一切触れず not_imported のままであること(R-5)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "undetermined",
+          reason: {
+            kind: "payoutTableAbsent",
+            message: "テスト用",
+            observedGroupCount: null,
+            observedPayoutCount: null,
+            rawHtml: null,
+          },
+        },
+      });
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("comboPayouts自体を省略した既存互換の呼び出しでは、DBに一切触れず not_imported のままであること(AC13: 既存呼び出しの非破壊)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "not_imported",
+      });
+      expect(store.getComboPayouts("R1", "trio")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("複数組を保存すると combo_key 昇順で決定的に返ること(getResultのORDER BY umabanと同じ流儀)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [
+            { umabans: [1, 4], payout: 150 },
+            { umabans: [1, 2], payout: 100 },
+            { umabans: [2, 4], payout: 200 },
+          ],
+        },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      expect(result.state).toBe("imported");
+      if (result.state === "imported") {
+        expect(result.payouts.map((p) => p.comboKey)).toEqual([
+          "0102",
+          "0104",
+          "0204",
+        ]);
+      }
+      store.close();
+    });
+
+    it("wideとtrioは互いに独立して保存・読み出しできること(片方だけ保存してももう片方はnot_importedのまま)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 100 }] },
+      });
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0102", payout: 100 }],
+      });
+      expect(store.getComboPayouts("R1", "trio")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+  });
+
+  describe("saveResultの組合せ払戻: 単一トランザクション・再取込の境界(Issue #52 AC7・AC8・boss裁定R-7〜R-9)", () => {
+    it("courseType同様、comboPayouts省略時はrace_combo_payouts/race_combo_payout_importsに一切触れないこと(既存呼び出しの非破壊)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const comboRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_combo_payouts WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const markerRow = store.rawDatabase
+        .prepare(
+          `SELECT COUNT(*) AS c FROM race_combo_payout_imports WHERE race_id = ?`,
+        )
+        .get("R1") as { c: number };
+      expect(comboRow.c).toBe(0);
+      expect(markerRow.c).toBe(0);
+      store.close();
+    });
+
+    it("再取込の境界1: 3組保存済みの状態で2組に減らして再取込すると、古い行が1つも残らないこと(AC8)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [
+            { umabans: [1, 2], payout: 100 },
+            { umabans: [1, 3], payout: 150 },
+            { umabans: [2, 3], payout: 200 },
+          ],
+        },
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [{ umabans: [1, 2], payout: 110 }],
+        },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      // 前提: 再取込後の件数をまず無条件に固定する(空振り防止。「1組も残らない」は
+      // 「2件消えて1件残る」ことを含意するため、件数そのものを固定する)。
+      expect(result.state).toBe("imported");
+      if (result.state === "imported") {
+        expect(result.payouts).toHaveLength(1);
+        expect(result.payouts).toEqual([{ comboKey: "0102", payout: 110 }]);
+      }
+      store.close();
+    });
+
+    it("再取込の境界2: 3組保存済みの状態でstate:'undetermined'で再取込すると、3組がそのまま保持されること(消えない。一過性の構造異常で正しい過去データを破壊しない)", () => {
+      const store = new AnalysisStore();
+      const threeEntries = [
+        { umabans: [1, 2], payout: 100 },
+        { umabans: [1, 3], payout: 150 },
+        { umabans: [2, 3], payout: 200 },
+      ];
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: threeEntries },
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "undetermined",
+          reason: {
+            kind: "groupCountMismatch",
+            message: "テスト用(一過性の構造異常を模す)",
+            observedGroupCount: 2,
+            observedPayoutCount: 1,
+            rawHtml: null,
+          },
+        },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      expect(result.state).toBe("imported");
+      if (result.state === "imported") {
+        expect(result.payouts).toHaveLength(3);
+        expect(result.payouts.map((p) => p.comboKey)).toEqual([
+          "0102",
+          "0103",
+          "0203",
+        ]);
+      }
+      store.close();
+    });
+
+    it("再取込の境界3: 3組保存済みの状態でstate:'parsed'かつpayouts:[]で再取込すると、0組になりimportedのまま(not_importedへ退行しない)であること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [
+            { umabans: [1, 2], payout: 100 },
+            { umabans: [1, 3], payout: 150 },
+            { umabans: [2, 3], payout: 200 },
+          ],
+        },
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [] },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      expect(result).toEqual({ state: "imported", payouts: [] });
+      store.close();
+    });
+
+    it("race_results・race_combo_payoutsを単一トランザクションで書くこと(AC7の直接固定)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 100 }] },
+      });
+      const resultRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_results WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const comboRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_combo_payouts WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const markerRow = store.rawDatabase
+        .prepare(
+          `SELECT COUNT(*) AS c FROM race_combo_payout_imports WHERE race_id = ? AND bet_type = 'wide'`,
+        )
+        .get("R1") as { c: number };
+      expect(resultRow.c).toBe(1);
+      expect(comboRow.c).toBe(1);
+      expect(markerRow.c).toBe(1);
+      store.close();
+    });
+  });
 });

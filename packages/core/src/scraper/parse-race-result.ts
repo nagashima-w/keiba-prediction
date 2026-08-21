@@ -40,6 +40,13 @@
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import {
+  buildComboOddsKey,
+  COMBO_SIZE,
+  ComboOddsKeyError,
+  validateComboUmabans,
+  type ComboBetType,
+} from "./combo-odds-key.js";
+import {
   PATTERNS,
   RACE_RESULT_HEADER_LABELS,
   RACE_RESULT_SELECTORS as SEL,
@@ -47,6 +54,9 @@ import {
 import type {
   CourseType,
   FinishPosition,
+  RaceComboPayoutAnomaly,
+  RaceComboPayoutEntry,
+  RaceComboPayoutResult,
   RacePayoutEntry,
   RaceResult,
 } from "./types.js";
@@ -282,6 +292,169 @@ function parsePayoutRow(
 }
 
 /**
+ * 組合せ払戻(ワイド・三連複)の診断値に載せる生HTMLの切り詰め上限(Issue #52 R-1)。
+ * 診断値はログ・IPCを経由しうるため、想定外に巨大なHTML断片が紛れ込んでも肥大化しない
+ * ように上限を明示する。
+ */
+const ANOMALY_RAW_HTML_MAX_LENGTH = 500;
+
+/** 生HTMLを ANOMALY_RAW_HTML_MAX_LENGTH で切り詰める。null はそのまま null。 */
+function truncateRawHtml(html: string | null): string | null {
+  if (html === null) {
+    return null;
+  }
+  return html.length > ANOMALY_RAW_HTML_MAX_LENGTH
+    ? `${html.slice(0, ANOMALY_RAW_HTML_MAX_LENGTH)}…(truncated)`
+    : html;
+}
+
+/** RaceComboPayoutResult の "undetermined" 値を組み立てる(生HTMLの切り詰めを一本化する)。 */
+function undeterminedComboPayout(
+  kind: RaceComboPayoutAnomaly["kind"],
+  message: string,
+  observedGroupCount: number | null,
+  observedPayoutCount: number | null,
+  rawHtml: string | null,
+): RaceComboPayoutResult {
+  return {
+    state: "undetermined",
+    reason: {
+      kind,
+      message,
+      observedGroupCount,
+      observedPayoutCount,
+      rawHtml: truncateRawHtml(rawHtml),
+    },
+  };
+}
+
+/**
+ * 組合せ払戻行(ワイド・三連複)を RaceComboPayoutResult に変換する(Issue #52)。
+ *
+ * 既存 parsePayoutRow(td.Result 内の全 span を平坦化)は流用しない: ワイド・三連複は
+ * 1行内に複数組(`<ul>`)を持ち、平坦化すると組の境界(どの馬番がどの組に属すか)を失う。
+ *
+ * 巻き添え防止(AC6・boss裁定R-12): この関数は例外を投げない。構造異常
+ * (組数と払戻件数の不一致・組の要素数不一致・不正な馬番・重複組)は分類して
+ * `state:"undetermined"` を返す(呼び出し側=`parseRaceResult`はこれをそのまま
+ * `RaceResult.widePayouts`/`trioPayouts` に積むだけで、着順・複勝・単勝の取込を
+ * 巻き添えにしない)。組数を固定値(ワイド=3・3連複=1)で検証しない(boss裁定R-3):
+ * 同着があると組数は増減しうる(3着同着でワイドが3組を超える等)。検証してよいのは
+ * 相対的な整合(組数=払戻件数、各組の要素数=COMBO_SIZE[betType]、馬番の妥当性)のみ。
+ *
+ * @param payoutTablePresent 払戻テーブル自体(.Payout_Detail_Table)が文書に1つ以上あるか。
+ *   無ければ行の有無を見るまでもなく payoutTableAbsent として扱う(boss裁定R-2: 着順は
+ *   確定しているが払戻がまだ公開されていない窓が実在するため、複勝・単勝と違って
+ *   「0件」という確定値にはしない)。
+ */
+function parseComboPayoutRow(
+  $: CheerioAPI,
+  rowSelector: string,
+  betType: ComboBetType,
+  label: string,
+  payoutTablePresent: boolean,
+): RaceComboPayoutResult {
+  if (!payoutTablePresent) {
+    return undeterminedComboPayout(
+      "payoutTableAbsent",
+      "払戻テーブル(.Payout_Detail_Table)が見つかりません(確定直後で払戻が未公開の可能性があります)",
+      null,
+      null,
+      null,
+    );
+  }
+
+  // 行セレクタは文書全体に対して直指定する(R-11): 払戻テーブルは1文書に複数
+  // (単勝・複勝・馬連を含む1つ目/ワイド・馬単・三連複・三連単を含む2つ目)存在しうるが、
+  // class="Wide"・class="Fuku3" はいずれも文書中に1回だけしか出現しないため、
+  // 「払戻テーブルを取ってからその中を探す」実装にせず行セレクタ直指定で安全に一意に取れる。
+  const $row = $(rowSelector).first();
+  if ($row.length === 0) {
+    // 払戻テーブル自体はあるがこの券種の行が無い = 発売なし等。判定結果としての空配列。
+    return { state: "parsed", payouts: [] };
+  }
+
+  const rawHtml = $.html($row);
+
+  // 組(<ul>)ごとに、非空の <li> テキスト(空 li はワイドの末尾に付く区切り用)を集める。
+  const groups = $row
+    .find(SEL.comboGroup)
+    .toArray()
+    .map((ul) =>
+      $(ul)
+        .find(SEL.comboSlot)
+        .toArray()
+        .map((li) => normalizeText($(li).text()))
+        .filter((t) => t !== ""),
+    );
+
+  // 払戻: td.Payout 内を <br> で分割し、各点を数値化(parsePayoutRow と同じ抽出方式)。
+  const payoutHtml = $row.find(SEL.payoutAmount).first().html() ?? "";
+  const payouts = payoutHtml
+    .split(/<br\s*\/?>/i)
+    .map((chunk) => toPayoutNumber(cheerio.load(chunk).text()))
+    .filter((n): n is number => n !== null);
+
+  if (groups.length !== payouts.length) {
+    return undeterminedComboPayout(
+      "groupCountMismatch",
+      `${label}の組数(${groups.length})と払戻件数(${payouts.length})が一致しません`,
+      groups.length,
+      payouts.length,
+      rawHtml,
+    );
+  }
+
+  const comboSize = COMBO_SIZE[betType];
+  const entries: RaceComboPayoutEntry[] = [];
+  const seenKeys = new Set<string>();
+  for (let i = 0; i < groups.length; i++) {
+    const slots = groups[i]!;
+    if (slots.length !== comboSize) {
+      return undeterminedComboPayout(
+        "comboSizeMismatch",
+        `${label}の組の要素数(${slots.length})が券種の構成頭数(${comboSize})と一致しません`,
+        groups.length,
+        payouts.length,
+        rawHtml,
+      );
+    }
+
+    const umabans = slots.map((t) => Number(t));
+    try {
+      validateComboUmabans(umabans, comboSize);
+    } catch (e) {
+      if (e instanceof ComboOddsKeyError) {
+        return undeterminedComboPayout(
+          "invalidUmaban",
+          `${label}の馬番が不正です(${e.message})`,
+          groups.length,
+          payouts.length,
+          rawHtml,
+        );
+      }
+      throw e;
+    }
+
+    const key = buildComboOddsKey(umabans);
+    if (seenKeys.has(key)) {
+      return undeterminedComboPayout(
+        "duplicateCombo",
+        `${label}に同じ組(${key})が複数回出現しました`,
+        groups.length,
+        payouts.length,
+        rawHtml,
+      );
+    }
+    seenKeys.add(key);
+
+    entries.push({ umabans: [...umabans].sort((a, b) => a - b), payout: payouts[i]! });
+  }
+
+  return { state: "parsed", payouts: entries };
+}
+
+/**
  * レース結果ページのHTMLをパースする。
  *
  * @param html result.html の静的HTML(UTF-8)
@@ -353,10 +526,29 @@ export function parseRaceResult(html: string): RaceResult {
     );
   }
 
+  // 払戻テーブル自体(.Payout_Detail_Table)の有無は1文書につき1回だけ判定し、
+  // ワイド・三連複の双方で共有する(R-2: 複勝・単勝と異なり「テーブルが無い」ことを
+  // 空配列にせず undetermined にするための判定材料)。
+  const payoutTablePresent = $(SEL.payoutTable).length > 0;
+
   return {
     horses,
     placePayouts: parsePayoutRow($, SEL.placeRow, "複勝"),
     winPayouts: parsePayoutRow($, SEL.winRow, "単勝"),
+    widePayouts: parseComboPayoutRow(
+      $,
+      SEL.wideRow,
+      "wide",
+      "ワイド",
+      payoutTablePresent,
+    ),
+    trioPayouts: parseComboPayoutRow(
+      $,
+      SEL.trioRow,
+      "trio",
+      "三連複",
+      payoutTablePresent,
+    ),
     courseType: parseCourseType($),
   };
 }

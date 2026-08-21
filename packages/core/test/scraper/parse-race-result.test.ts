@@ -158,6 +158,45 @@ function buildFullResultHtml(headerRow: string, rows: string[]): string {
   </body></html>`;
 }
 
+/**
+ * 組合せ払戻(ワイド・三連複、Issue #52)の払戻行を組み立てる。
+ * groups は組ごとの馬番テキスト配列(文字列のまま渡せるので、非数値・要素数不足など
+ * 異常系もそのまま表現できる)。payoutTexts は td.Payout の<br>区切りテキスト列
+ * (「円」を含めて呼び出し側が指定する)。
+ */
+function buildComboRow(
+  rowClass: "Wide" | "Fuku3",
+  label: string,
+  groups: readonly (readonly string[])[],
+  payoutTexts: readonly string[],
+): string {
+  const ulHtml = groups
+    .map((slots) => {
+      const lis = slots
+        .map((s) => (s === "" ? "<li></li>" : `<li><span>${s}</span></li>`))
+        .join("");
+      return `<ul>${lis}</ul>`;
+    })
+    .join("");
+  return `<tr class="${rowClass}"><th>${label}</th><td class="Result">${ulHtml}</td><td class="Payout"><span>${payoutTexts.join("<br />")}</span></td></tr>`;
+}
+
+/** 単勝の払戻行(組合せ払戻の巻き添え防止テストで、着順以外の他券種が無事なことを見るために使う)。 */
+function buildTanshoRow(umaban: number, payout: number): string {
+  return `<tr class="Tansho"><th>単勝</th><td class="Result"><div><span>${umaban}</span></div></td><td class="Payout"><span>${payout}円</span></td></tr>`;
+}
+
+/** 複勝の払戻行(単勝と同じ用途)。1頭〜複数頭に対応。 */
+function buildFukushoRow(umabans: readonly number[], payouts: readonly number[]): string {
+  const spans = umabans.map((u) => `<div><span>${u}</span></div>`).join("");
+  return `<tr class="Fukusho"><th>複勝</th><td class="Result">${spans}</td><td class="Payout"><span>${payouts.map((p) => `${p}円`).join("<br />")}</span></td></tr>`;
+}
+
+/** 払戻行の配列を1つの table.Payout_Detail_Table にまとめる。 */
+function buildPayoutTables(rows: readonly string[]): string {
+  return `<table class="Payout_Detail_Table"><tbody>${rows.join("")}</tbody></table>`;
+}
+
 describe("parseRaceResult(レース結果パーサー)", () => {
   describe("フィクスチャ(函館7R・10頭)の実データ検証", () => {
     let result: RaceResult;
@@ -583,5 +622,312 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.parseRaceResult).toBe(parseRaceResult);
     expect(mod.RaceResultParseError).toBe(RaceResultParseError);
     expect(mod.RaceResultNotConfirmedError).toBe(RaceResultNotConfirmedError);
+  });
+});
+
+describe("組合せ払戻(ワイド・三連複、Issue #52)", () => {
+  describe("実データ: 頭数(複勝の対象人数)とワイド・三連複の的中基準(常に上位3着)は別概念であること(AC2)", () => {
+    it.each([
+      [
+        "result_202603020203.html",
+        5,
+        [
+          { umabans: [1, 5], payout: 130 },
+          { umabans: [2, 5], payout: 130 },
+          { umabans: [1, 2], payout: 180 },
+        ],
+        [{ umabans: [1, 2, 5], payout: 240 }],
+      ],
+      [
+        "result_202602010605.html",
+        6,
+        [
+          { umabans: [1, 2], payout: 110 },
+          { umabans: [2, 3], payout: 140 },
+          { umabans: [1, 3], payout: 210 },
+        ],
+        [{ umabans: [1, 2, 3], payout: 270 }],
+      ],
+      [
+        "nar_result_202630062407.html",
+        7,
+        [
+          { umabans: [2, 4], payout: 190 },
+          { umabans: [1, 2], payout: 1990 },
+          { umabans: [1, 4], payout: 1550 },
+        ],
+        [{ umabans: [1, 2, 4], payout: 2210 }],
+      ],
+      [
+        "result_202602010607.html",
+        10,
+        [
+          { umabans: [2, 4], payout: 620 },
+          { umabans: [4, 9], payout: 6940 },
+          { umabans: [2, 9], payout: 4930 },
+        ],
+        [{ umabans: [2, 4, 9], payout: 32520 }],
+      ],
+    ] as const)(
+      "%s(%d頭)はワイド3組・3連複1組が的中すること(複勝の点数とは独立=別概念)",
+      (fixture, runnerCount, expectedWide, expectedTrio) => {
+        const result = parseRaceResult(loadFixture(fixture));
+        // 前提: 頭数が期待どおりであることをまず無条件に固定する(空振り防止)。
+        expect(result.horses).toHaveLength(runnerCount);
+        expect(result.widePayouts).toEqual({ state: "parsed", payouts: expectedWide });
+        expect(result.trioPayouts).toEqual({ state: "parsed", payouts: expectedTrio });
+      },
+    );
+
+    it("複勝の払戻点数は頭数に応じて2点/3点と変わるが、ワイド・3連複の組数はそれと無関係に一定であること(別概念であることの直接証明。#54への申し送りを兼ねる)", () => {
+      const five = parseRaceResult(loadFixture("result_202603020203.html"));
+      const six = parseRaceResult(loadFixture("result_202602010605.html"));
+      const seven = parseRaceResult(loadFixture("nar_result_202630062407.html"));
+      const ten = parseRaceResult(loadFixture("result_202602010607.html"));
+      // 複勝の点数は頭数で変わる(5/6/7頭は2点、10頭は3点)。
+      expect(five.placePayouts).toHaveLength(2);
+      expect(six.placePayouts).toHaveLength(2);
+      expect(seven.placePayouts).toHaveLength(2);
+      expect(ten.placePayouts).toHaveLength(3);
+      // 一方でワイド・3連複の組数は複勝の点数と無関係に、どの頭数でも3組・1組で一定。
+      for (const r of [five, six, seven, ten]) {
+        expect(r.widePayouts!.state).toBe("parsed");
+        expect(r.trioPayouts!.state).toBe("parsed");
+        if (r.widePayouts!.state === "parsed") {
+          expect(r.widePayouts!.payouts).toHaveLength(3);
+        }
+        if (r.trioPayouts!.state === "parsed") {
+          expect(r.trioPayouts!.payouts).toHaveLength(1);
+        }
+      }
+    });
+
+    it("NAR(地方)はtd.Resultのclass属性直前に空白が2つ入る実測構造(<td  class=\"Result\">)でも取れること(AC3)", () => {
+      const result = parseRaceResult(loadFixture("nar_result_202630062407.html"));
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [
+          { umabans: [2, 4], payout: 190 },
+          { umabans: [1, 2], payout: 1990 },
+          { umabans: [1, 4], payout: 1550 },
+        ],
+      });
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 4], payout: 2210 }],
+      });
+    });
+  });
+
+  describe("3着同着でワイドの的中組が増えるケース(以下は合成HTMLである。実測由来のデータではない)", () => {
+    it("1着1・2着2・3着(3・4が同着)という想定で、上位3着に4頭が入りワイドの的中組がC(4,2)=6組になること(組数を3固定で検証していないことの直接証明。AC4・boss裁定R-3)", () => {
+      // 合成データ: 実在のレースではなく、3着同着によりワイドの的中組が定数(3)を超える
+      // ケースを人工的に構築したものである。
+      const wideRow = buildComboRow(
+        "Wide",
+        "ワイド",
+        [
+          ["1", "2"],
+          ["1", "3"],
+          ["1", "4"],
+          ["2", "3"],
+          ["2", "4"],
+          ["3", "4"],
+        ],
+        ["120円", "150円", "150円", "300円", "300円", "400円"],
+      );
+      const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+      const html = buildResultHtml(
+        [buildResultRow({ umaban: "1" })],
+        buildPayoutTables([wideRow, trioRow]),
+      );
+      const result = parseRaceResult(html);
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [
+          { umabans: [1, 2], payout: 120 },
+          { umabans: [1, 3], payout: 150 },
+          { umabans: [1, 4], payout: 150 },
+          { umabans: [2, 3], payout: 300 },
+          { umabans: [2, 4], payout: 300 },
+          { umabans: [3, 4], payout: 400 },
+        ],
+      });
+      // 組数が3(通常時の定数)ではなく6であることを直接固定する。
+      if (result.widePayouts!.state === "parsed") {
+        expect(result.widePayouts!.payouts).toHaveLength(6);
+        expect(result.widePayouts!.payouts.length).not.toBe(3);
+      }
+    });
+  });
+
+  describe("払戻テーブル自体が1つも無い場合(AC5-b・boss裁定R-2)", () => {
+    it("ワイド・3連複はstate:'undetermined'(kind:'payoutTableAbsent')になり、複勝・単勝は従来どおり空配列のままであること(非対称は意図的)", () => {
+      const result = parseRaceResult(
+        buildResultHtml([buildResultRow({ umaban: "1" })]), // payoutTables省略=テーブル自体が無い
+      );
+      expect(result.placePayouts).toEqual([]);
+      expect(result.winPayouts).toEqual([]);
+      expect(result.widePayouts).toEqual({
+        state: "undetermined",
+        reason: expect.objectContaining({ kind: "payoutTableAbsent" }),
+      });
+      expect(result.trioPayouts).toEqual({
+        state: "undetermined",
+        reason: expect.objectContaining({ kind: "payoutTableAbsent" }),
+      });
+    });
+  });
+
+  describe("払戻テーブルはあるが当該券種の行が無い場合(AC5-a)", () => {
+    it("複勝・単勝の行はあるがワイド・3連複の行が無い場合、state:'parsed'かつpayouts:[]になること(発売なし等)", () => {
+      const payoutTables = buildPayoutTables([
+        buildTanshoRow(1, 150),
+        buildFukushoRow([1], [110]),
+      ]);
+      const result = parseRaceResult(
+        buildResultHtml([buildResultRow({ umaban: "1" })], payoutTables),
+      );
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.widePayouts).toEqual({ state: "parsed", payouts: [] });
+      expect(result.trioPayouts).toEqual({ state: "parsed", payouts: [] });
+    });
+  });
+
+  describe("未確定レース(発走前・確定前)はワイド・三連複の追加後も払戻パースに到達しないこと(AC5-c)", () => {
+    it("実データ(発走前NARレース・#All_Result_Table あり/tbody空/払戻テーブルなし)でワイド・三連複の追加後もRaceResultNotConfirmedErrorを投げること(非回帰)", () => {
+      expect(() =>
+        parseRaceResult(loadFixture("nar_result_presale_202642071612.html")),
+      ).toThrow(RaceResultNotConfirmedError);
+    });
+  });
+
+  describe("払戻テーブルが2つある文書でも取りこぼさないこと(R-11)", () => {
+    it("1つ目のテーブルに単勝・複勝、2つ目のテーブルにワイド・3連複がある実物同型の構造でも正しく取れること", () => {
+      const table1 = buildPayoutTables([
+        buildTanshoRow(1, 150),
+        buildFukushoRow([1, 2], [110, 120]),
+      ]);
+      const wideRow = buildComboRow("Wide", "ワイド", [["1", "2"]], ["100円"]);
+      const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+      const table2 = buildPayoutTables([wideRow, trioRow]);
+      const result = parseRaceResult(
+        buildResultHtml([buildResultRow({ umaban: "1" })], `${table1}${table2}`),
+      );
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2], payout: 100 }],
+      });
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+      });
+    });
+  });
+
+  describe("構造異常は分類して診断値に残し、着順・複勝・単勝の取込を巻き添えにしないこと(AC6・R-12)", () => {
+    /** 複勝・単勝は正常な行、ワイドだけ異常な行にした払戻テーブルを持つ結果HTMLを組み立てる。 */
+    function buildHtmlWithWideRow(wideRow: string): string {
+      const payoutTables = buildPayoutTables([
+        buildTanshoRow(1, 150),
+        buildFukushoRow([1], [110]),
+        wideRow,
+        buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]),
+      ]);
+      return buildResultHtml([buildResultRow({ umaban: "1", rank: "1" })], payoutTables);
+    }
+
+    it("組数(<ul>数)と払戻件数が食い違う場合、kind:'groupCountMismatch'になり、着順・複勝・単勝は通常どおり保存されること", () => {
+      const wideRow = buildComboRow(
+        "Wide",
+        "ワイド",
+        [
+          ["1", "2"],
+          ["1", "3"],
+        ], // 組は2つ
+        ["100円"], // だが払戻は1件
+      );
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      // 巻き添え無し: 着順・複勝・単勝・3連複は通常どおり保存される。
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+      });
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("groupCountMismatch");
+        expect(result.widePayouts!.reason.observedGroupCount).toBe(2);
+        expect(result.widePayouts!.reason.observedPayoutCount).toBe(1);
+      }
+    });
+
+    it("組の要素数が券種の構成頭数(COMBO_SIZE)と一致しない場合、kind:'comboSizeMismatch'になり、着順・複勝・単勝は通常どおり保存されること", () => {
+      const wideRow = buildComboRow("Wide", "ワイド", [["1"]], ["100円"]); // ワイドなのに1頭だけの組
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("comboSizeMismatch");
+      }
+    });
+
+    it("馬番が範囲外(19)の場合、kind:'invalidUmaban'になり、着順・複勝・単勝は通常どおり保存されること", () => {
+      const wideRow = buildComboRow("Wide", "ワイド", [["1", "19"]], ["100円"]);
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it("馬番が非数値(取消等)の場合も、kind:'invalidUmaban'になり巻き添えにしないこと", () => {
+      const wideRow = buildComboRow("Wide", "ワイド", [["1", "取消"]], ["100円"]);
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it("同一組(1-2)が2回出現する場合、kind:'duplicateCombo'になり、着順・複勝・単勝は通常どおり保存されること(永続化層のPRIMARY KEY違反によるトランザクション巻き添えを未然に防ぐ。R-12)", () => {
+      const wideRow = buildComboRow(
+        "Wide",
+        "ワイド",
+        [
+          ["1", "2"],
+          ["1", "2"],
+        ], // 同じ組が2回
+        ["100円", "100円"],
+      );
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("duplicateCombo");
+      }
+    });
+
+    it("診断値のrawHtmlは上限を超えると切り詰められること(ログ・IPCを経由しうるため)", () => {
+      const longText = "9".repeat(1000);
+      const wideRow = buildComboRow("Wide", "ワイド", [[longText]], ["100円"]);
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.rawHtml).not.toBeNull();
+        expect(result.widePayouts!.reason.rawHtml!.length).toBeLessThanOrEqual(520);
+        expect(result.widePayouts!.reason.rawHtml!.endsWith("…(truncated)")).toBe(true);
+      }
+    });
   });
 });

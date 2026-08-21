@@ -174,6 +174,23 @@ export const RACE_RESULT_SELECTORS = {
   payoutResult: "td.Result",
   /** 払戻行の払戻金額セル(内部で <br> 区切り。複数点あり)。 */
   payoutAmount: "td.Payout",
+  /**
+   * ワイドの払戻行(Issue #52)。行セレクタを直指定するため、文書内に払戻テーブルが
+   * 複数(単勝・複勝・馬連を含む1つ目/ワイド・馬単・三連複・三連単を含む2つ目)存在しても
+   * 取りこぼさない(実測: `fixtures/result_202602010605.html`・
+   * `fixtures/nar_result_202630062407.html` はいずれも `tr.Wide` が2つ目のテーブルに入るが、
+   * `class="Wide"` は文書中に1回だけしか出現しないため `.first()` を挟まずとも一意に取れる)。
+   */
+  wideRow: "tr.Wide",
+  /** 三連複の払戻行(Issue #52)。wideRow と同じ理由で行セレクタを直指定する。 */
+  trioRow: "tr.Fuku3",
+  /**
+   * ワイド・三連複の払戻行内で1組を表す `<ul>`(Issue #52)。組内の的中馬番は
+   * 各 `<li>` のテキスト(空の `<li></li>` は区切り用でワイドの末尾に付く)。
+   */
+  comboGroup: "ul",
+  /** 組内の的中馬番を表すセル(Issue #52。空要素は呼び出し側でフィルタする)。 */
+  comboSlot: "li",
 } as const;
 
 /**

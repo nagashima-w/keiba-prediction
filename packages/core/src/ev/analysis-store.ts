@@ -81,12 +81,22 @@
 import Database from "better-sqlite3";
 
 import type { PredictionMark } from "../analyzer/parse-response.js";
-import type { CourseType } from "../scraper/types.js";
+import { buildComboOddsKey, COMBO_SIZE, type ComboBetType } from "../scraper/combo-odds-key.js";
+import type { CourseType, RaceComboPayoutResult } from "../scraper/types.js";
 
 const ANALYSES_TABLE = "analyses";
 const ANALYSIS_HORSES_TABLE = "analysis_horses";
 const RACE_RESULTS_TABLE = "race_results";
 const RACE_RESULT_META_TABLE = "race_result_meta";
+const RACE_COMBO_PAYOUTS_TABLE = "race_combo_payouts";
+const RACE_COMBO_PAYOUT_IMPORTS_TABLE = "race_combo_payout_imports";
+
+/**
+ * 組合せ払戻(ワイド・3連複)で扱う券種一覧(Issue #52)。
+ * `COMBO_SIZE`(`combo-odds-key.ts`)のキーをそのまま使い、券種一覧を別の場所で
+ * 二重に列挙しない(単一ソース。AC10)。
+ */
+const COMBO_BET_TYPES = Object.keys(COMBO_SIZE) as ComboBetType[];
 
 /** 保存する分析の1頭分。 */
 export interface AnalysisHorseRecord {
@@ -246,6 +256,59 @@ export interface RaceResultEntry {
   readonly last3f?: number | null;
 }
 
+/**
+ * saveResult に渡す組合せ払戻(ワイド・3連複)の入力(Issue #52・boss裁定R-7)。
+ *
+ * 各券種の値は `parseRaceResult` が返す判別共用体(`RaceComboPayoutResult`)をそのまま渡す
+ * 設計にし、「構造異常なのに空配列として渡してしまう」ことを型として表現不能にする
+ * (呼び出し側〈result-import.ts〉に判断を持たせない。R-7の要点)。
+ *
+ * - `state:"undetermined"`: その券種の `race_combo_payouts`/`race_combo_payout_imports` に
+ *   一切触れない(既存値があれば保持する。R-5)。一過性の構造異常・払戻未公開の再取込で
+ *   正しい過去データを破壊しないための設計。
+ * - `state:"parsed"`: 既存行を DELETE してから保存し直す(`payouts:[]` なら明示的に空へ
+ *   クリアする。AC8)。
+ * - 券種キー省略・`comboPayouts` 自体の省略: 触れない(`courseType` と同じ非破壊 optional。
+ *   AC13。既存呼び出しは無改変で通る)。
+ */
+export interface RaceComboPayoutsSaveInput {
+  readonly wide?: RaceComboPayoutResult;
+  readonly trio?: RaceComboPayoutResult;
+}
+
+/** `race_combo_payouts` の1行(読み出し専用の軽量表現。Issue #52・boss裁定R-6)。 */
+export interface StoredComboPayout {
+  /**
+   * `buildComboOddsKey` で得られる正規化キー(例: ワイド"0102")。復号(umabans配列への
+   * 復元)は本Issueのスコープ外(不明点4。#54が表示で必要になった時点で追加する)。
+   * 呼び出し側は `buildComboOddsKey` で購入候補側を同じキーへ正規化して比較すればよい。
+   */
+  readonly comboKey: string;
+  /** 100円あたりの払戻額(円)。 */
+  readonly payout: number;
+}
+
+/**
+ * `getComboPayouts` の返り値(判別共用体。Issue #52 AC9・boss裁定R-4〜R-6)。
+ *
+ * 現実の事象と state の対応(#54 が読む契約。曖昧さを残さないためここに列挙する):
+ * - `"not_imported"`: 次のいずれか。(a) このレース・券種を一度も取り込んでいない。
+ *   (b) 本機能(Issue #52)より前に取り込んだ旧DB(`race_combo_payout_imports` にマーカー行が
+ *   無い。`race_results` には行があってもこの判定には使わない。R-4)。(c) 直近の取込で
+ *   この券種が構造異常・払戻未公開だった(`RaceComboPayoutResult` の `state:"undetermined"`。
+ *   `saveResult` はこの場合DBに一切触れないため、初回なら `not_imported` のまま、
+ *   再取込なら前回の正しい値が保持される)。
+ *   → #54はこの状態を**分母から除外する(判定不能)**。
+ * - `"imported"` かつ `payouts` が空配列: 払戻テーブルは取れたがこの券種の行が無かった
+ *   (未発売等)。
+ *   → #54はこの状態を**「払戻0円」ではなく「この券種は成立していない」ものとして扱う**
+ *   (具体的な集計方法自体は#54が決める)。
+ * - `"imported"` かつ `payouts.length >= 1`: 確定払戻。
+ */
+export type RaceComboPayoutsReadResult =
+  | { readonly state: "not_imported" }
+  | { readonly state: "imported"; readonly payouts: readonly StoredComboPayout[] };
+
 /** 復元したレース結果詳細の1頭分(getRaceResultDetail、タスク#27-A2)。 */
 export interface RaceResultDetailHorse {
   /** 馬番。 */
@@ -354,6 +417,26 @@ export class AnalysisStore {
       CREATE TABLE IF NOT EXISTS ${RACE_RESULT_META_TABLE} (
         race_id TEXT PRIMARY KEY,
         course_type TEXT
+      );
+      -- 組合せ払戻(ワイド・3連複)の値テーブルとマーカーテーブル(Issue #52・AC12)。
+      -- race_result_meta(タスク#27-A2)と同じ理由・同じ流儀で CREATE TABLE IF NOT EXISTS
+      -- を使う(ALTER TABLE ADD COLUMN ではない): これらは既存テーブルへの列追加ではなく
+      -- 新規テーブルの追加であり、旧DBを開いた際に無ければ作成されるだけで既存データには
+      -- 触れない(冪等・非破壊)。2テーブルに分けた理由(R-4): 値テーブル(下記)だけでは
+      -- 「未取込」と「取り込んだが該当券種の払戻が0件だった」を区別できない
+      -- (行の個数ではなく行の有無で判定する必要があるため。listUnimportedRaceIdsが
+      -- race_resultsの行の有無でNOT EXISTS判定する既存流儀と同じ)。
+      CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUTS_TABLE} (
+        race_id TEXT NOT NULL,
+        bet_type TEXT NOT NULL,
+        combo_key TEXT NOT NULL,
+        payout INTEGER NOT NULL,
+        PRIMARY KEY (race_id, bet_type, combo_key)
+      );
+      CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} (
+        race_id TEXT NOT NULL,
+        bet_type TEXT NOT NULL,
+        PRIMARY KEY (race_id, bet_type)
       );
     `);
     this.migrateResultPayoutColumn();
@@ -572,18 +655,28 @@ export class AnalysisStore {
    * placePayout/passing/last3f を省略した場合はそれぞれ null/空配列/null で保存する
    * (未取込項目=後続の復元・verifyは欠損値として扱う)。
    *
-   * race_results(馬単位)・race_result_meta(レース単位の面)の2テーブルは単一の
-   * db.transaction 内で書く(better-sqlite3のtransactionは例外で全ロールバックされるため、
-   * 2テーブル書き込みの原子性を担保する)。courseType が null/未指定の場合は
-   * race_result_meta に行を作らない(面が取れないレースまで不確かな行を残さないため)。
+   * race_results(馬単位)・race_result_meta(レース単位の面)・race_combo_payouts/
+   * race_combo_payout_imports(組合せ払戻、Issue #52)は単一の db.transaction 内で書く
+   * (better-sqlite3のtransactionは例外で全ロールバックされるため、複数テーブル書き込みの
+   * 原子性を担保する。AC7)。courseType が null/未指定の場合は race_result_meta に行を
+   * 作らない(面が取れないレースまで不確かな行を残さないため)。
+   *
+   * comboPayouts の各券種は、`state:"undetermined"`(構造異常・払戻未公開)なら
+   * その券種のテーブルに一切触れない(boss裁定R-5・R-7: 一過性の構造異常での再取込が
+   * 正しい過去データを破壊しないため)。`state:"parsed"` なら既存行を削除してから
+   * 保存し直す(delete-then-insert。AC8: 再取込で組数が減っても孤児行を残さない)。
+   * 券種キー省略・comboPayouts自体の省略は「触れない」と同義(courseTypeと同じ非破壊
+   * optional。AC13)。
    * @param raceId レースID
    * @param results 馬番→着順・複勝払戻・通過順・上がり3F(非数値着順は finishPosition=null)
    * @param courseType レース単位の面(芝/ダ/障)。取得できない・省略時は race_result_meta を書かない
+   * @param comboPayouts ワイド・3連複の確定払戻(Issue #52)。省略時は組合せ払戻テーブルに触れない
    */
   saveResult(
     raceId: string,
     results: readonly RaceResultEntry[],
     courseType?: CourseType | null,
+    comboPayouts?: RaceComboPayoutsSaveInput,
   ): void {
     const upsertResult = this.db.prepare(
       `INSERT INTO ${RACE_RESULTS_TABLE}
@@ -600,8 +693,24 @@ export class AnalysisStore {
        VALUES (?, ?)
        ON CONFLICT(race_id) DO UPDATE SET course_type = excluded.course_type`,
     );
+    const deleteCombo = this.db.prepare(
+      `DELETE FROM ${RACE_COMBO_PAYOUTS_TABLE} WHERE race_id = ? AND bet_type = ?`,
+    );
+    const insertCombo = this.db.prepare(
+      `INSERT INTO ${RACE_COMBO_PAYOUTS_TABLE} (race_id, bet_type, combo_key, payout)
+       VALUES (?, ?, ?, ?)`,
+    );
+    const markComboImported = this.db.prepare(
+      `INSERT INTO ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} (race_id, bet_type)
+       VALUES (?, ?)
+       ON CONFLICT(race_id, bet_type) DO NOTHING`,
+    );
     const tx = this.db.transaction(
-      (rows: readonly RaceResultEntry[], meta: CourseType | null | undefined) => {
+      (
+        rows: readonly RaceResultEntry[],
+        meta: CourseType | null | undefined,
+        combo: RaceComboPayoutsSaveInput | undefined,
+      ) => {
         for (const r of rows) {
           upsertResult.run(
             raceId,
@@ -615,9 +724,63 @@ export class AnalysisStore {
         if (meta !== undefined && meta !== null) {
           upsertMeta.run(raceId, meta);
         }
+        for (const betType of COMBO_BET_TYPES) {
+          const result = combo?.[betType];
+          if (result === undefined || result.state === "undetermined") {
+            // R-5・R-7: 判定不能(構造異常・払戻未公開)または未指定はDBに判定結果として
+            // 残さない。再取込で一過性の異常が起きても、既存の正しい値を保持する。
+            continue;
+          }
+          deleteCombo.run(raceId, betType);
+          for (const entry of result.payouts) {
+            insertCombo.run(
+              raceId,
+              betType,
+              buildComboOddsKey(entry.umabans),
+              entry.payout,
+            );
+          }
+          markComboImported.run(raceId, betType);
+        }
       },
     );
-    tx(results, courseType);
+    tx(results, courseType, comboPayouts);
+  }
+
+  /**
+   * ワイド・3連複の確定払戻を取得する(Issue #52。返り値契約は RaceComboPayoutsReadResult
+   * のJSDoc参照)。
+   *
+   * 「未取込」の判定は race_combo_payout_imports のマーカー行の有無で行う
+   * (race_results の行の有無を根拠にしてはならない。boss裁定R-4): 旧DB
+   * (本機能より前に取り込んだレース)は race_results に行があるがこのマーカーが無いため、
+   * 正しく not_imported と判定できる。marker が有る(=取込試行が成功した)場合のみ
+   * race_combo_payouts を読み、0件でも imported として返す(未発売等と not_imported を
+   * 混同しない)。
+   *
+   * 未知の bet_type 文字列が紛れ込んだ場合の防御(boss裁定R-6): この関数は呼び出し側が
+   * 渡す型付きの betType("wide"|"trio")で WHERE 句を等価比較するため、DBに万一未知の
+   * bet_type 値が混入していても、そのレース・その betType の一致行以外は自動的に除外される
+   * (toStoredCourseType のような追加の防御的フォールバック関数を別途持つ必要が無い)。
+   * @param raceId レースID
+   * @param betType 券種("wide"|"trio")
+   */
+  getComboPayouts(raceId: string, betType: ComboBetType): RaceComboPayoutsReadResult {
+    const marker = this.db
+      .prepare(
+        `SELECT 1 FROM ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} WHERE race_id = ? AND bet_type = ?`,
+      )
+      .get(raceId, betType);
+    if (marker === undefined) {
+      return { state: "not_imported" };
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT combo_key AS comboKey, payout FROM ${RACE_COMBO_PAYOUTS_TABLE}
+           WHERE race_id = ? AND bet_type = ? ORDER BY combo_key`,
+      )
+      .all(raceId, betType) as StoredComboPayout[];
+    return { state: "imported", payouts: rows };
   }
 
   /**
