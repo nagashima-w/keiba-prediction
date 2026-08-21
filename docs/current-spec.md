@@ -11,8 +11,13 @@
 - **対応券種は用途によって異なる(3点。混同しないこと)**:
   - **配分提案**: 複勝+ワイド+三連複(ワイド・三連複はオプトイン設定`includeWideInAllocation`/
     `includeTrioInAllocation`。既定ON。取得自体は`includeComboOdds`が別途必要。5節参照)
-  - **記録・回収率検証**: 複勝のみ(`ev/verify.ts`・`ev/analysis-store.ts`は複勝の的中判定・
-    払戻のみを扱う。組合せ券種の永続化・検証への反映は未着手 = Issue #29)
+  - **記録・回収率検証**: 複勝のみ(`ev/verify.ts`は複勝の的中判定・払戻のみを扱う。**回収率検証は
+    Issue #52 完了時点でもまだ複勝のみが正**)。`ev/analysis-store.ts`は Issue #52 で
+    ワイド・三連複の**確定払戻の取得・永続化**(`race_combo_payouts`/`race_combo_payout_imports`、
+    `parse-race-result.ts`)まで対応したが、**保存はするが検証(`ev/verify.ts`)への反映は未着手**
+    (読み手は Issue #54)。取得(オッズ・配分提案)と検証(回収率集計)は別軸であることに注意
+    (5節の配分提案は既にワイド・三連複対応済みだが、これは組合せ**オッズ**の話で本項の組合せ**払戻**
+    とは別物。組合せオッズの永続化自体も別Issue #53)
   - **単勝オッズ**: 賭け対象ではなく、発売前レースで複勝下限を概算する用途にのみ使う
     (`estimatePlaceOddsMinFromWin`)
   - 馬連・馬単・三連単・枠連・枠単は未対応(拡張のロードマップと技術的な依存関係は GitHub Issue #22)

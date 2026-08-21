@@ -288,11 +288,13 @@ export function createPipelineDeps(
         // 常にライブ取得(キャッシュ毒化回避)。パース失敗時は saveResult に到達しない。
         fetchText: (url, options) => fetcher.fetchText(url, options),
         parse: parseRaceResult,
-        // courseType(面、タスク#27-A2)を素通しする。ここで引数を落とすと、
-        // importRaceResult が渡す result.courseType が本番経路で握り潰される
-        // (テストは緑でも実際にはrace_result_metaへ書かれない)ため、必ず転送する。
-        saveResult: (rid, entries, courseType) =>
-          store.saveResult(rid, entries, courseType),
+        // courseType(面、タスク#27-A2)・comboPayouts(ワイド・3連複、Issue #52)を素通しする。
+        // ここで引数を落とすと、importRaceResult が渡す result.courseType /
+        // widePayouts・trioPayouts が本番経路で握り潰される(テストは緑でも実際には
+        // race_result_meta・race_combo_payoutsへ書かれない。#27-A2と同型の事故)ため、
+        // 必ず転送する(boss裁定R-8)。
+        saveResult: (rid, entries, courseType, comboPayouts) =>
+          store.saveResult(rid, entries, courseType, comboPayouts),
       }),
     listUnimportedRaceIds: (): readonly string[] => store.listUnimportedRaceIds(),
     listAnalyzedRaceIdsByPromptVersion: (version: string): readonly string[] =>

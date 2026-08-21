@@ -228,6 +228,78 @@ describe("createPipelineDeps(本番依存の配線)", () => {
       // スパイの復元は afterEach の vi.restoreAllMocks() に一本化する
       // (このアサーションが失敗しても復元が漏れないようにするため)。
     });
+
+    /**
+     * Issue #52・boss裁定R-8: courseTypeと同型の配線落ち検出(位置引数の転送はTypeScriptが
+     * 守らないため、DIラムダが第4引数〈comboPayouts〉を静かに落としても型検査は通る)。
+     * 上のcourseTypeテストと同じ合成HTMLに、ワイド・3連複の払戻テーブルを追加し、
+     * store.saveResultの第4引数までワイド・3連複が実際に届くことを実行時に確認する。
+     */
+    it("合成HTML(芝1200m見出し+最小結果行+ワイド・3連複の払戻テーブル)を取り込むと、widePayouts/trioPayoutsがstore.saveResultの第4引数まで届くこと(Issue #52・boss裁定R-8)", async () => {
+      const saveResultSpy = vi.spyOn(AnalysisStore.prototype, "saveResult");
+
+      const html = `<html><body>
+        <div class="RaceData01">15:35発走 /<span> 芝1200m</span> (右A) / 天候:晴 / 馬場:良</div>
+        <table id="All_Result_Table"><tbody>
+          <tr class="HorseList">
+            <td class="Result_Num"><div class="Rank">1</div></td>
+            <td class="Num Waku1"><div>1</div></td>
+            <td class="Num Txt_C"><div>1</div></td>
+            <td class="Horse_Info">
+              <span class="Horse_Name">
+                <a href="https://db.netkeiba.com/horse/2022101678" title="テスト馬">
+                  <span class="HorseNameSpan">テスト馬</span>
+                </a>
+              </span>
+            </td>
+          </tr>
+        </tbody></table>
+        <table class="Payout_Detail_Table"><tbody>
+          <tr class="Tansho"><th>単勝</th>
+            <td class="Result"><div><span>1</span></div></td>
+            <td class="Payout"><span>150円</span></td>
+          </tr>
+          <tr class="Fukusho"><th>複勝</th>
+            <td class="Result"><div><span>1</span></div></td>
+            <td class="Payout"><span>110円</span></td>
+          </tr>
+          <tr class="Wide"><th>ワイド</th>
+            <td class="Result"><ul><li><span>1</span></li><li><span>2</span></li><li></li></ul></td>
+            <td class="Payout"><span>100円</span></td>
+          </tr>
+          <tr class="Fuku3"><th>3連複</th>
+            <td class="Result"><ul><li><span>1</span></li><li><span>2</span></li><li><span>3</span></li></ul></td>
+            <td class="Payout"><span>500円</span></td>
+          </tr>
+        </tbody></table>
+      </body></html>`;
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type"
+              ? "text/html; charset=utf-8"
+              : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> =>
+          new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      const outcome = await r.importResult(parseRaceId("202602010607"));
+
+      expect(outcome.status).toBe("imported");
+      expect(saveResultSpy).toHaveBeenCalledTimes(1);
+      const [, , , comboPayouts] = saveResultSpy.mock.calls[0]!;
+      expect(comboPayouts).toEqual({
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 100 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 500 }] },
+      });
+    });
   });
 
   describe("deps.getRaceResultDetail の配線(タスク#27-C: 当日傾向をプロンプトに反映する配線)", () => {
