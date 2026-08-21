@@ -1749,5 +1749,38 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       expect(markerRow.c).toBe(1);
       store.close();
     });
+
+    /**
+     * 上のテスト(件数1/1/1)は「保存できたこと」の事後条件であり、非トランザクション実装
+     * (race_resultsを書いた後にrace_combo_payoutsの書き込みで例外が起きても、race_results側は
+     * 巻き戻らない実装)でも同じ値になる。これでは「単一トランザクションで書くこと」自体の
+     * 検出力が無い(boss メタレビュー・要修正2)。
+     *
+     * 検出力のある反例: 正規化後(buildComboOddsKey適用後)で同一になる組を2件渡すと、
+     * race_combo_payoutsのPRIMARY KEY(race_id, bet_type, combo_key)違反で例外が飛ぶ
+     * (このテスト自体はcode-reviewerの一次レビューR-12プローブがアドホックに確認した現象を
+     * 固定化したもの)。単一トランザクションで書かれているなら、この例外でrace_results側も
+     * 巻き戻り、getResultはundefinedを返すはずである。もし将来 db.transaction(...) が
+     * 素の関数呼び出しに置き換えられる退行が起きた場合、race_resultsの書き込みは既に
+     * コミット済みのまま残ってしまい、このアサーションが失敗して検知できる。
+     */
+    it("正規化後に重複するcombo_key(例: [1,2]と[2,1]はどちらも\"0102\")を渡すとPRIMARY KEY違反で例外を投げ、race_results側も巻き戻ってgetResultがundefinedになること(AC7の原子性を検出力を持たせて直接固定する)", () => {
+      const store = new AnalysisStore();
+      expect(() =>
+        store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+          wide: {
+            state: "parsed",
+            payouts: [
+              { umabans: [1, 2], payout: 100 },
+              { umabans: [2, 1], payout: 100 }, // 正規化後は同一キー"0102"
+            ],
+          },
+        }),
+      ).toThrow();
+      // 単一トランザクションでなければ、race_combo_payouts側の例外前に既にコミット済みの
+      // race_results行が残ってしまう。ここが緑のままだと原子性が壊れていても気づけない。
+      expect(store.getResult("R1")).toBeUndefined();
+      store.close();
+    });
   });
 });

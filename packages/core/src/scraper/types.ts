@@ -368,8 +368,15 @@ export type RaceComboPayoutResult =
 /**
  * レース結果ページ(result.html)のパース結果。
  *
- * 全着順テーブル(#All_Result_Table)から各馬の着順を、払戻テーブルから複勝・単勝の
- * 確定払戻を取り出す。未確定レース等で払戻テーブルが無い場合、payout類は空配列になる。
+ * 全着順テーブル(#All_Result_Table)から各馬の着順を、払戻テーブルから複勝・単勝・
+ * ワイド・三連複の確定払戻を取り出す。
+ *
+ * **払戻テーブルが無い場合の挙動は券種によって非対称(boss裁定R-2。要修正4で明記)**:
+ * 複勝・単勝(`placePayouts`/`winPayouts`)は空配列になる。一方、ワイド・三連複
+ * (`widePayouts`/`trioPayouts`)は空配列に**ならず** `state:"undetermined"`
+ * (`kind:"payoutTableAbsent"`)になる(着順は確定しているが払戻がまだ公開されていない窓が
+ * 実在するため、「払戻0円」という確定値と取り違えないようにする設計。詳細は
+ * `widePayouts` のJSDoc・`RaceComboPayoutResult`/`RaceComboPayoutAnomaly` のJSDoc参照)。
  */
 export interface RaceResult {
   /** 各馬の着順(全着順テーブルの並び順)。 */

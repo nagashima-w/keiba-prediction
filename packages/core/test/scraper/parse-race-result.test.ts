@@ -825,6 +825,28 @@ describe("組合せ払戻(ワイド・三連複、Issue #52)", () => {
     });
   });
 
+  describe("組の探索は td.Result にスコープすること(boss メタレビュー要修正3)", () => {
+    it("td.Ninki(人気表示)側に<ul>が紛れ込んでいても組として数えないこと(以下は合成HTMLであり実測由来ではない。将来netkeibaがtd.Ninkiを<ul>で描画するように変わっても、組数だけが静かに増えてgroupCountMismatchへ倒れ、全レース・全券種が恒久的にundetermined→not_importedへ落ちる欠陥を防ぐ)", () => {
+      const wideRow = `<tr class="Wide"><th>ワイド</th>
+        <td class="Result"><ul><li><span>1</span></li><li><span>2</span></li><li></li></ul></td>
+        <td class="Payout"><span>100円</span></td>
+        <td class="Ninki"><ul><li><span>2</span></li><li><span>3</span></li></ul></td>
+      </tr>`;
+      const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+      const html = buildResultHtml(
+        [buildResultRow({ umaban: "1" })],
+        buildPayoutTables([wideRow, trioRow]),
+      );
+      const result = parseRaceResult(html);
+      // td.Result内の1組(1,2)だけが数えられ、td.Ninki側の<ul>は無視されること
+      // (組数=1、払戻件数=1が一致し、groupCountMismatchへ倒れないこと)。
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2], payout: 100 }],
+      });
+    });
+  });
+
   describe("構造異常は分類して診断値に残し、着順・複勝・単勝の取込を巻き添えにしないこと(AC6・R-12)", () => {
     /** 複勝・単勝は正常な行、ワイドだけ異常な行にした払戻テーブルを持つ結果HTMLを組み立てる。 */
     function buildHtmlWithWideRow(wideRow: string): string {
@@ -916,6 +938,14 @@ describe("組合せ払戻(ワイド・三連複、Issue #52)", () => {
       if (result.widePayouts!.state === "undetermined") {
         expect(result.widePayouts!.reason.kind).toBe("duplicateCombo");
       }
+      // code-reviewer一次レビュー指摘(boss裁定: 対応不要・任意。要修正3で同ファイルを
+      // 触るついでに追加): 隣接するtrioPayoutsもワイドの異常に巻き添えにならず
+      // parsedのまま残ることを明示する(同型の券種間独立性はgroupCountMismatchの
+      // テストで既に固定済みだが、duplicateComboでも同様であることをここでも確認する)。
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+      });
     });
 
     it("診断値のrawHtmlは上限を超えると切り詰められること(ログ・IPCを経由しうるため)", () => {

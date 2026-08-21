@@ -3,7 +3,11 @@
  *
  * 取得対象:
  * - 全着順(#All_Result_Table): 各馬の着順・馬番・馬名。
- * - 確定払戻(払戻テーブル): 複勝と単勝の払戻(100円あたりの円)。
+ * - 確定払戻(払戻テーブル): 複勝・単勝・ワイド・三連複の払戻(100円あたりの円)。
+ *   ワイド・三連複(Issue #52)は複数馬番の「組」を的中単位とするため、複勝・単勝
+ *   (`RacePayoutEntry`)とは別の型(`RaceComboPayoutResult`)で返す。詳細は下記
+ *   「払戻テーブルは発走後に確定する」の段落、および `types.ts` の `RaceResult.widePayouts`
+ *   JSDoc参照。
  *
  * 設計上の注意:
  * - 文書全体には結果本体以外にも tr.HorseList を持つテーブルが複数存在する
@@ -28,9 +32,17 @@
  *   などで行ごとにセル構成が変わり得るため、ここでは throw せず対象フィールドのみフォールバック
  *   させる(行自体・umaban/finishPosition/wakuban は破棄しない)。
  * - 着順は「中止」「除外」等の非数値があり得るため、全戦績と同じ FinishPosition 流儀で返す。
- * - 払戻テーブルは発走後に確定するため、未確定レースでは欠ける。欠損時は payout類を空配列に
- *   して耐性を持たせる(未確定レースを渡しても着順部分は取れる)。ただし払戻が存在する場合に
- *   「的中馬番数」と「払戻件数」が食い違う構造異常は silent に隠さず失敗させる。
+ * - 払戻テーブルは発走後に確定するため、未確定レースでは欠ける。**この段落は複勝・単勝
+ *   (`placePayouts`/`winPayouts`)にのみ当てはまる**: 欠損時は payout類を空配列にして
+ *   耐性を持たせ(未確定レースを渡しても着順部分は取れる)、払戻が存在する場合に
+ *   「的中馬番数」と「払戻件数」が食い違う構造異常は silent に隠さず失敗(throw)させる。
+ *   **ワイド・三連複(`widePayouts`/`trioPayouts`、Issue #52)はいずれも逆**: 払戻テーブル
+ *   欠損時・組数と払戻件数が食い違う等の構造異常時のいずれも、空配列にはせず throw もしない
+ *   (`RaceComboPayoutResult` の `state:"undetermined"` に分類して診断値〈`kind`〉を残す)。
+ *   これは (a) 複勝・単勝と違い「払戻0円」という確定値を verify の分母に混入させたくないこと
+ *   (boss裁定R-2)、(b) ワイド・三連複行の構造異常で着順・複勝・単勝の取込全体を巻き添えに
+ *   したくないこと(boss裁定R-12)の2点による意図的な非対称。詳細は
+ *   `parseComboPayoutRow` のJSDoc・`RaceComboPayoutAnomaly` のJSDoc参照。
  * - #All_Result_Table 自体が存在する状態で結果行(tbody 配下の tr)が0件の場合は、発走前・
  *   確定前でまだ結果行が出ていない可能性があるため、構造異常(RaceResultParseError)とは
  *   区別して RaceResultNotConfirmedError を投げる。#All_Result_Table 自体が無い場合は
@@ -377,8 +389,15 @@ function parseComboPayoutRow(
   const rawHtml = $.html($row);
 
   // 組(<ul>)ごとに、非空の <li> テキスト(空 li はワイドの末尾に付く区切り用)を集める。
+  // td.Result にスコープする(boss メタレビュー要修正3): 兄弟関数 parsePayoutRow が
+  // `${SEL.payoutResult} span` と td.Result にスコープしているのに対し、ここが行全体
+  // (td.Ninki 等も含む)を対象にすると、将来 netkeiba が td.Ninki(人気表示)を <ul> で
+  // 描画するように変えた場合、組数だけが静かに増えて groupCountMismatch となり、
+  // 全レース・全券種が恒久的に undetermined → not_imported に落ちる
+  // (fail-safeではあるが「静かに1件も取れなくなる」欠陥クラス。ComboOddsUnavailableReason の
+  // JSDoc が警戒する「API変更をunavailableと誤読しない」と同じ土俵)。
   const groups = $row
-    .find(SEL.comboGroup)
+    .find(`${SEL.payoutResult} ${SEL.comboGroup}`)
     .toArray()
     .map((ul) =>
       $(ul)

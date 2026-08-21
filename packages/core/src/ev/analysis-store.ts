@@ -282,6 +282,15 @@ export interface StoredComboPayout {
    * `buildComboOddsKey` で得られる正規化キー(例: ワイド"0102")。復号(umabans配列への
    * 復元)は本Issueのスコープ外(不明点4。#54が表示で必要になった時点で追加する)。
    * 呼び出し側は `buildComboOddsKey` で購入候補側を同じキーへ正規化して比較すればよい。
+   *
+   * **AC10(流用禁止)**: `buildComboOddsKey` は馬番を**昇順に正規化してから**連結するため、
+   * 順不同の組(ワイド・3連複)でしか意味を持たない。**着順が意味を持つ券種(馬単・三連単)には
+   * このキー生成規則を流用してはならない**(例: 馬単「1着1・2着2」と「1着2・2着1」は別の
+   * 買い目だが、`buildComboOddsKey([1,2])` はどちらも同じ"0102"に潰してしまい区別できなくなる)。
+   * `race_combo_payouts.bet_type` 列は将来の券種追加を「行追加だけで足りる」形にしてあるが、
+   * それは**順不同の組(ワイド系)に限った話**であり、馬単・三連単を同じ `combo_key` 列に
+   * 追加する場合は、着順を保持できるキー生成規則へ分岐させる(または列/テーブル自体を
+   * 分離する)必要がある。
    */
   readonly comboKey: string;
   /** 100円あたりの払戻額(円)。 */
@@ -426,6 +435,13 @@ export class AnalysisStore {
       -- 「未取込」と「取り込んだが該当券種の払戻が0件だった」を区別できない
       -- (行の個数ではなく行の有無で判定する必要があるため。listUnimportedRaceIdsが
       -- race_resultsの行の有無でNOT EXISTS判定する既存流儀と同じ)。
+      --
+      -- combo_key は buildComboOddsKey による「馬番昇順正規化キー」であり、順不同の組
+      -- (ワイド・3連複)でしか意味を持たない(AC10)。着順を持つ券種(馬単・三連単)には
+      -- このキー生成規則を流用できない(1着1・2着2 と 1着2・2着1 が同じキーに潰れて
+      -- 区別できなくなるため)。bet_type列を増やすだけで足りるのはワイド系(順不同の組)に
+      -- 限られ、馬単・三連単を追加する際はキー生成規則を分岐させるか、combo_key列/
+      -- テーブル自体を分離する必要がある。詳細: StoredComboPayout.comboKey のJSDoc。
       CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUTS_TABLE} (
         race_id TEXT NOT NULL,
         bet_type TEXT NOT NULL,
@@ -667,6 +683,16 @@ export class AnalysisStore {
    * 保存し直す(delete-then-insert。AC8: 再取込で組数が減っても孤児行を残さない)。
    * 券種キー省略・comboPayouts自体の省略は「触れない」と同義(courseTypeと同じ非破壊
    * optional。AC13)。
+   *
+   * **呼び出し側への警告(提案・boss メタレビュー対応)**: `payouts` に正規化後(`buildComboOddsKey`
+   * 適用後)で同一になる組が2件以上含まれていると、`race_combo_payouts` の
+   * PRIMARY KEY(race_id, bet_type, combo_key)違反で例外が飛び、この呼び出し全体が
+   * ロールバックされる(=着順(`race_results`)まで巻き戻る。この関数自身は重複を検知して
+   * 除外したりしない)。`parseRaceResult` は `duplicateCombo` を検出して
+   * `state:"undetermined"` に倒すため通常この経路には来ないが、将来 `parseRaceResult` を
+   * 経由しない呼び出し元(#53〜#55等)が増えたときは、呼び出し側が事前に重複を検証するか、
+   * この関数側の防御を検討すること(`analysis-store.test.ts`「単一トランザクション」describe
+   * に、この事故が発生した際に着順まで巻き戻ることを直接固定したテストがある)。
    * @param raceId レースID
    * @param results 馬番→着順・複勝払戻・通過順・上がり3F(非数値着順は finishPosition=null)
    * @param courseType レース単位の面(芝/ダ/障)。取得できない・省略時は race_result_meta を書かない
