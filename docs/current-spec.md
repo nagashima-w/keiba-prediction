@@ -140,6 +140,27 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 
 - **結果取込**: レース結果を取り込み(`parse-race-result.ts`)。未確定レース(結果表はあるが着順行が
   0 件)は構造異常と区別して `RaceResultNotConfirmedError` で穏やかに扱う。未取込レースの一括取込に対応。
+- **組合せ払戻(ワイド・三連複)の取得・永続化(Issue #52)**: `parseRaceResult` は着順・複勝・単勝に
+  加えて `widePayouts`/`trioPayouts`(判別共用体 `RaceComboPayoutResult`)を返す。組(複数馬番)を
+  表現できない既存 `RacePayoutEntry` は流用せず、`{umabans, payout}` の新型で表す。
+  - **`state:"parsed"`**(組を取得できた。`payouts:[]`は「払戻テーブルはあるがこの券種の行が無かった
+    〈未発売等〉」の意味に限定)と、**`state:"undetermined"`**(構造異常・払戻未公開で判定不能。
+    理由は`kind`で分類: `payoutTableAbsent`/`groupCountMismatch`/`comboSizeMismatch`/
+    `invalidUmaban`/`duplicateCombo`)を明確に区別する(空配列を「判定結果」、undeterminedを
+    「判定不能」として扱う二層原則。`ev/combo-bet-allocation.ts`の`ComboOddsResolution`と同型)。
+    ワイド・三連複の的中組数はレースごとに一定ではない(3着同着でワイドが3組を超える等)ため、
+    組数を固定値で検証しない。ワイド・三連複行の構造異常は複勝・単勝・着順の取込を巻き添えにしない。
+  - 永続化は新テーブル `race_combo_payouts`(値。`race_id`/`bet_type`/`combo_key`/`payout`)と
+    `race_combo_payout_imports`(取込済みマーカー。`race_id`/`bet_type`)の2本。
+    `AnalysisStore.saveResult` の第4引数(`comboPayouts`)として`race_results`・
+    `race_result_meta`と単一トランザクションで書く。`state:"undetermined"`の券種はDBに一切触れない
+    (一過性の構造異常での再取込が正しい過去データを破壊しないため)。再取込で組数が減った場合は
+    delete-then-insertで古い行を残さない。
+  - 読み出しは`AnalysisStore.getComboPayouts(raceId, betType)`。「未取込」(一度も取り込んでいない・
+    Issue #52より前の旧DB・直近の取込が構造異常)と「取り込んだが該当券種の払戻が0件」を、
+    `race_combo_payout_imports`のマーカー行の有無(`race_results`の行の有無ではない)で区別する。
+  - **verify(`ev/verify.ts`)は本Issueでは一切変更していない**(読み手はIssue #54)。
+    取得・永続化はできるが回収率集計には未反映。
 - **回収率サマリ**(`VerifyBetSummary`): EV プラスで購入した点数・賭け金・払戻・回収率。払戻は実配当
   (placePayout)優先、無ければ複勝下限で近似(近似計上件数を区別)。既定 stake 100 円。
 - **キャリブレーション**: 推定確率帯(既定 10 分割)ごとの実複勝率(`CalibrationBin`)と、過信バイアス
