@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -205,6 +205,73 @@ export function closeResources(): void {
 }
 
 /**
+ * packaged実行時のbetter-sqlite3ネイティブバインディング(.node)の絶対パスを解決する(Issue #60-B)。
+ *
+ * 背景: bindings パッケージは呼び出し元のスタックトレースからモジュールルートを推測して .node を
+ * 探すが、packaged(asar化)実行ではこの推測が崩れて `Could not locate the bindings file` になりうる
+ * (実機バグ報告)。electron-builder の asarUnpack により、実体は常に
+ * `<resourcesPath>/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node`
+ * に展開される(electron-builder.yml)ため、この絶対パスを推測に頼らず明示的に組み立てる。
+ *
+ * 解決規則:
+ * - 非packaged(開発・vitest): undefined(従来どおり bindings パッケージに解決を任せる。挙動不変)
+ * - packaged かつ resourcesPath 未定義(実運用のpackaged実行では発生しないが、テスト環境等での防御):
+ *   undefined(壊れずに従来経路へフォールバック)
+ * - packaged かつ resourcesPath 定義済み: 上記の絶対パス(path.join で組み立てる。手書き結合はしない
+ *   ため、実行環境のパス区切り文字に関わらず正しく組み立つ)
+ *
+ * この関数は electron に依存しない(isPackaged/resourcesPath を呼び出し側から値で受け取るだけ)。
+ */
+export function resolveNativeBindingPath(input: {
+  readonly isPackaged: boolean;
+  readonly resourcesPath: string | undefined;
+}): string | undefined {
+  if (!input.isPackaged || input.resourcesPath === undefined) {
+    return undefined;
+  }
+  return path.join(
+    input.resourcesPath,
+    "app.asar.unpacked",
+    "node_modules",
+    "better-sqlite3",
+    "build",
+    "Release",
+    "better_sqlite3.node",
+  );
+}
+
+/**
+ * resolveNativeBindingPath の戻り値がファイルとして実在するか確認し、実在すればそのまま返す
+ * (Issue #60-B 受け入れ条件3)。
+ *
+ * 存在しなければ、原因特定に必要な4要素(期待した絶対パス・fs.existsSyncの結果・
+ * process.resourcesPath・app.isPackaged)をすべて含む日本語エラーを投げ、bindings パッケージの
+ * わかりにくいエラー(冒頭の実機バグ報告のような13経路の列挙)で落ちる前に検知できるようにする。
+ * 非packaged(resolveNativeBindingPathの戻り値がundefined)ならそのままundefinedを返す
+ * (検証不要。pipeline-deps.ts側がbindingsへ解決を委ねる)。
+ */
+export function resolveVerifiedNativeBindingPath(input: {
+  readonly isPackaged: boolean;
+  readonly resourcesPath: string | undefined;
+}): string | undefined {
+  const resolved = resolveNativeBindingPath(input);
+  if (resolved === undefined) {
+    return undefined;
+  }
+  const exists = existsSync(resolved);
+  if (!exists) {
+    throw new Error(
+      "better-sqlite3のネイティブバインディング(.node)が見つかりません。" +
+        `期待した絶対パス: ${resolved} / ` +
+        `fs.existsSync: ${exists} / ` +
+        `process.resourcesPath: ${input.resourcesPath} / ` +
+        `app.isPackaged: ${input.isPackaged}`,
+    );
+  }
+  return resolved;
+}
+
+/**
  * 分析の依存(SQLiteキャッシュ・分析ストア・LLM)を配線して使い回す。
  * DBのオープンはコストがあるため、最初に必要になった時点で遅延生成する
  * (registerIpcHandlers 時点では DB を開かない → app 情報のみのテストに副作用が無い)。
@@ -216,8 +283,16 @@ export function closeResources(): void {
 const resourceManager = new ResourceManager<PipelineResources>({
   create: () => {
     const settings = getSettingsStore().load();
+    // better-sqlite3のネイティブバインディング絶対パス(Issue #60-B)。packaged実行時のみ解決し、
+    // .nodeが見つからなければここで診断メッセージ付きの例外を投げる(createPipelineDeps/
+    // new Databaseへは到達しない)。非packagedはundefinedのまま(従来どおりbindingsに委ねる)。
+    const nativeBindingPath = resolveVerifiedNativeBindingPath({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+    });
     return createPipelineDeps({
       dbPath: path.join(app.getPath("userData"), "keiba.db"),
+      nativeBindingPath,
       apiKey: resolveEffectiveApiKey(settings, process.env.ANTHROPIC_API_KEY),
       scorerConfig: buildScorerConfig(settings),
       evConfig: buildEvConfig(settings),

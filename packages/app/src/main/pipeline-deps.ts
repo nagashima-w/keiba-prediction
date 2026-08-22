@@ -125,6 +125,20 @@ export interface PipelineWiringConfig {
    * (第1段までの既定挙動と発行URL列・リクエスト数が完全に一致する)。
    */
   readonly includeComboOdds?: boolean;
+  /**
+   * better-sqlite3 のネイティブバインディング(.node)の絶対パス(Issue #60-B)。
+   *
+   * 背景: bindings パッケージは呼び出し元のスタックトレースからモジュールルートを推測して
+   * .node を探すが、packaged(asar化)実行では推測が崩れて `Could not locate the bindings file`
+   * になりうる(実機バグ報告)。この推測を経路ごと外すため、packaged 時は呼び出し側(ipc.ts)が
+   * app.asar.unpacked 配下の絶対パスを解決・実在確認した上でここへ渡し、
+   * `new Database(dbPath, { nativeBinding })` として明示指定する。
+   * 省略時(非packaged・開発・vitest)は従来どおり `new Database(dbPath)` のみで、
+   * bindings パッケージの推測解決に委ねる(挙動を変えない)。
+   * このモジュールは electron に依存させないため、解決・実在確認そのものは行わない
+   * (呼び出し側から解決済みの値を受け取るだけ)。
+   */
+  readonly nativeBindingPath?: string;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -196,7 +210,13 @@ export function shouldUseLlm(apiKey: string | undefined): boolean {
 export function createPipelineDeps(
   config: PipelineWiringConfig,
 ): PipelineResources {
-  const db = new Database(config.dbPath);
+  // nativeBindingPath(Issue #60-B)を渡された場合のみ明示指定する。bindings パッケージの
+  // スタックトレース探索は packaged 実行での失敗要因になり得るため、その経路自体を通さない。
+  // 省略時(非packaged・開発・vitest)は従来どおり第2引数無しで開き、bindings に解決を委ねる。
+  const db =
+    config.nativeBindingPath !== undefined
+      ? new Database(config.dbPath, { nativeBinding: config.nativeBindingPath })
+      : new Database(config.dbPath);
   const cache = new ScrapeCache({ database: db });
   // fetch を注入すると undici 既定経路を通らず、Electron main では net.fetch(Chromium スタック)で取得する。
   const httpClient = new HttpClient({ fetch: config.fetch, onWarn: config.onWarn });

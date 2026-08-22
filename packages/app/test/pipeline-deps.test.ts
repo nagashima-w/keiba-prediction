@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import path from "node:path";
 import { deflateSync } from "node:zlib";
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
@@ -53,6 +55,47 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(typeof r.deps.saveAnalysis).toBe("function");
     expect(typeof r.deps.scrape).toBe("function");
     expect(typeof r.listRaces).toBe("function");
+  });
+
+  describe("nativeBindingPath(Issue #60-B: bindingsのスタックトレース探索を外す明示指定)", () => {
+    it("nativeBindingPath未指定なら従来どおりbindingsに解決を任せてDBが開けること(開発・vitestの既定経路)", () => {
+      const r = createPipelineDeps({ dbPath: ":memory:" });
+      resources.push(r);
+      // DBが実際に開けている(saveAnalysisが動く)ことを、bindings既定経路が壊れていない証拠とする。
+      expect(() =>
+        r.deps.saveAnalysis({
+          raceId: "202605020811",
+          analyzedAt: "2026-01-01T00:00:00.000Z",
+          horses: [],
+        }),
+      ).not.toThrow();
+    });
+
+    it("nativeBindingPathに実在するbetter_sqlite3.nodeの絶対パスを渡すと、その nativeBinding 経由でDBが開くこと(明示指定が実際に効いている証拠)", () => {
+      const req = createRequire(import.meta.url);
+      const realBindingPath = req.resolve(
+        "better-sqlite3/build/Release/better_sqlite3.node",
+      );
+
+      const r = createPipelineDeps({ dbPath: ":memory:", nativeBindingPath: realBindingPath });
+      resources.push(r);
+
+      r.deps.saveAnalysis({
+        raceId: "202605020811",
+        analyzedAt: "2026-01-01T00:00:00.000Z",
+        horses: [],
+      });
+      expect(r.getRaceLedger()).toHaveLength(1);
+    });
+
+    it("nativeBindingPathに実在しない絶対パスを渡すと、new Database生成時に例外が投げられること(nativeBindingが実際に第2引数まで渡っている証拠。渡さない経路が残っていればこの例外は起きないはず)", () => {
+      expect(() =>
+        createPipelineDeps({
+          dbPath: ":memory:",
+          nativeBindingPath: path.join("/definitely/not/a/real/dir", "better_sqlite3.node"),
+        }),
+      ).toThrow();
+    });
   });
 
   it("clipVariant未指定なら deps.clipVariant は対照('default')になること(タスクD-2: 配線疎通)", () => {
