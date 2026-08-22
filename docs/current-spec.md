@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.3.1)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.3.2)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -21,7 +21,7 @@
   - **単勝オッズ**: 賭け対象ではなく、発売前レースで複勝下限を概算する用途にのみ使う
     (`estimatePlaceOddsMinFromWin`)
   - 馬連・馬単・三連単・枠連・枠単は未対応(拡張のロードマップと技術的な依存関係は GitHub Issue #22)
-- バージョン: ルート/アプリ `1.3.1`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.3.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -304,6 +304,13 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     起こり得ないため。
 - アイコンは `scripts/gen-icon.mjs`(`pnpm gen:icon`)で生成。パッケージング構成は
   `packages/app/electron-builder.yml`。
+- **ネイティブバインディングの解決(Issue #61)**: 配布(packaged)時は better-sqlite3 の
+  `.node` を `<process.resourcesPath>/app.asar.unpacked/node_modules/better-sqlite3/build/Release/
+  better_sqlite3.node` の絶対パスで**明示指定**し(`ipc.ts` の `resolveNativeBindingPath` →
+  `pipeline-deps.ts` の `new Database` 第2引数)、`bindings` パッケージの**スタックトレースからの
+  推測解決を使わない**。見つからない場合は、期待した絶対パス・`fs.existsSync` の結果・
+  `process.resourcesPath`・`app.isPackaged` の4要素を含む診断メッセージ付きで**即時失敗**する。
+  非 packaged(開発・テスト)では従来どおり `bindings` に委ねる。
 
 ## 9. 確率の質の計測基盤(scorer/snapshot-filter・ev/probability-quality。#40「#35-1a」)
 
