@@ -98,9 +98,17 @@ describe("resolveNativeBindingPath(パス解決、Issue #60-B)", () => {
 });
 
 describe("resolveNativeBindingPathの絶対パス組み立てでpath.joinが実際に呼ばれていること(code-reviewer指摘対応: 手書き結合の禁止を直接固定)", () => {
-  it("path.joinへ期待する引数列で呼ばれ、その戻り値がそのまま関数の戻り値になること(手書き結合〈resourcesPath + \"/\" + ...〉に置き換わっていたら、この呼び出し自体が発生しなくなり赤くなる)", () => {
+  it("path.joinへ期待する引数列で呼ばれ、かつpath.joinの戻り値がそのまま関数の戻り値になること(code-reviewer再指摘対応)", () => {
+    // 注意(code-reviewer再指摘対応): 素通しスパイ(呼ばれたことだけを見る)では、
+    // 「path.joinを呼びつつ戻り値を捨てて手書き結合を別途returnする」変異を検出できなかった
+    // (この環境=POSIXではpath.joinの出力と手書き結合の出力がバイト単位で一致するため、
+    // `expect(result).toBe(lastResult!.value)`が偶然成立してしまう)。
+    // path.joinの戻り値そのものを実際の出力と区別可能な値(センチネル)にすり替え、
+    // 関数の戻り値がそのセンチネルと一致することを見ることで、
+    // 「呼ばれたか」ではなく「戻り値が実際に使われているか」を検証する。
     const resourcesPath = "C:\\Users\\tester\\AppData\\Local\\Temp\\keiba-ev-tool\\resources";
-    const joinSpy = vi.spyOn(path, "join");
+    const sentinel = "SENTINEL_PATH_JOIN_RETURN_VALUE";
+    const joinSpy = vi.spyOn(path, "join").mockReturnValueOnce(sentinel);
     try {
       const result = resolveNativeBindingPath({ isPackaged: true, resourcesPath });
 
@@ -113,9 +121,9 @@ describe("resolveNativeBindingPathの絶対パス組み立てでpath.joinが実�
         "Release",
         "better_sqlite3.node",
       );
-      const lastResult = joinSpy.mock.results[joinSpy.mock.results.length - 1];
-      expect(lastResult).toBeDefined();
-      expect(result).toBe(lastResult!.value);
+      // path.joinの戻り値(センチネル)がそのまま関数の戻り値になっていること
+      // (呼び出し文だけ残して戻り値を捨てる変異が入れば、resultはsentinelと一致しなくなり赤くなる)。
+      expect(result).toBe(sentinel);
     } finally {
       joinSpy.mockRestore();
     }
