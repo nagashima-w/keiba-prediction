@@ -82,11 +82,29 @@ describe("resolveNativeBindingPath(パス解決、Issue #60-B)", () => {
     ).toBeUndefined();
   });
 
-  it("resourcesPathがWindows風の区切り(\\)を含んでいても、path.joinで組み立てられセグメントが壊れないこと(手書き結合の禁止を固定)", () => {
+  it("resourcesPathがWindows風の区切り(\\)を含む文字列でも、その文字列がそのまま先頭に保たれること(セグメントの非破壊)", () => {
+    // 注意(code-reviewer指摘対応): このテストは実装の戻り値を「検証対象と同じ path.join 呼び出し」と
+    // 比較する同語反復だったため、実質的に固定できていたのは「resourcesPathの文字列が先頭に保たれる」
+    // ことだけだった(このテスト名・アサーションはその実態に合わせて縮小した)。「path.joinで組み立てられる
+    // こと(手書き結合の禁止)」自体の固定は、直後の describe「resolveNativeBindingPathの絶対パス組み立てで
+    // path.joinが実際に呼ばれていること」のspyテストが担う。
+    // また、この環境(Linux)ではPOSIX版path.joinが走るため、実機Windowsのセパレータ処理
+    // (`\`区切りでの組み立て)そのものはここでは検証できていない(実行環境依存の既知の限界)。
     const resourcesPath = "C:\\Users\\tester\\AppData\\Local\\Temp\\keiba-ev-tool\\resources";
     const result = resolveNativeBindingPath({ isPackaged: true, resourcesPath });
-    expect(result).toBe(
-      path.join(
+    expect(result).toBeDefined();
+    expect(result!.startsWith(resourcesPath)).toBe(true);
+  });
+});
+
+describe("resolveNativeBindingPathの絶対パス組み立てでpath.joinが実際に呼ばれていること(code-reviewer指摘対応: 手書き結合の禁止を直接固定)", () => {
+  it("path.joinへ期待する引数列で呼ばれ、その戻り値がそのまま関数の戻り値になること(手書き結合〈resourcesPath + \"/\" + ...〉に置き換わっていたら、この呼び出し自体が発生しなくなり赤くなる)", () => {
+    const resourcesPath = "C:\\Users\\tester\\AppData\\Local\\Temp\\keiba-ev-tool\\resources";
+    const joinSpy = vi.spyOn(path, "join");
+    try {
+      const result = resolveNativeBindingPath({ isPackaged: true, resourcesPath });
+
+      expect(joinSpy).toHaveBeenCalledWith(
         resourcesPath,
         "app.asar.unpacked",
         "node_modules",
@@ -94,10 +112,13 @@ describe("resolveNativeBindingPath(パス解決、Issue #60-B)", () => {
         "build",
         "Release",
         "better_sqlite3.node",
-      ),
-    );
-    // resourcesPath自体が文字列としてそのまま先頭に保たれていること(手書き結合による破壊が無いこと)。
-    expect(result!.startsWith(resourcesPath)).toBe(true);
+      );
+      const lastResult = joinSpy.mock.results[joinSpy.mock.results.length - 1];
+      expect(lastResult).toBeDefined();
+      expect(result).toBe(lastResult!.value);
+    } finally {
+      joinSpy.mockRestore();
+    }
   });
 });
 

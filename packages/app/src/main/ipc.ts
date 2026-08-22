@@ -221,6 +221,14 @@ export function closeResources(): void {
  *   ため、実行環境のパス区切り文字に関わらず正しく組み立つ)
  *
  * この関数は electron に依存しない(isPackaged/resourcesPath を呼び出し側から値で受け取るだけ)。
+ *
+ * 注(code-reviewer指摘・boss判断記録): `app.asar.unpacked/node_modules/better-sqlite3/build/Release/
+ * better_sqlite3.node` という相対パスはハードコードであり、将来 pnpm のネスト構造等でこの階層が
+ * 変わると即例外になる(bindings パッケージの多段探索なら発見できていたケースでも失敗しうる)。
+ * これは「新しい壊れ方」ではなく「既存の壊れ方(実機バグ報告の`Could not locate the bindings file`)を
+ * 診断メッセージ付きの即時失敗に変えただけ」であり、Issue #60-B の対応としては許容範囲と判断した
+ * (2026-08-22 boss メタレビュー)。レイアウト変化そのものへの構造的な備え(CIで`.node`の実配置を
+ * 機械検査し、変わったらCIが止まるようにする)は #62 のスコープとして別途対応する。
  */
 export function resolveNativeBindingPath(input: {
   readonly isPackaged: boolean;
