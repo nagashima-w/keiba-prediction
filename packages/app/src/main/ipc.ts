@@ -222,13 +222,16 @@ export function closeResources(): void {
  *
  * この関数は electron に依存しない(isPackaged/resourcesPath を呼び出し側から値で受け取るだけ)。
  *
- * 注(code-reviewer指摘・boss判断記録): `app.asar.unpacked/node_modules/better-sqlite3/build/Release/
+ * 注(帰属を正確に記録する): `app.asar.unpacked/node_modules/better-sqlite3/build/Release/
  * better_sqlite3.node` という相対パスはハードコードであり、将来 pnpm のネスト構造等でこの階層が
  * 変わると即例外になる(bindings パッケージの多段探索なら発見できていたケースでも失敗しうる)。
+ * この懸念は code-reviewer が一次レビューの【提案・対応任意】として指摘したもので、
  * これは「新しい壊れ方」ではなく「既存の壊れ方(実機バグ報告の`Could not locate the bindings file`)を
- * 診断メッセージ付きの即時失敗に変えただけ」であり、Issue #60-B の対応としては許容範囲と判断した
- * (2026-08-22 boss メタレビュー)。レイアウト変化そのものへの構造的な備え(CIで`.node`の実配置を
- * 機械検査し、変わったらCIが止まるようにする)は #62 のスコープとして別途対応する。
+ * 診断メッセージ付きの即時失敗に変えただけ」であるとして、対応を任意としJSDocへ記録する判断は
+ * オーケストレーター(プロジェクトマネジメント役)が行った。boss は2026-08-22のメタレビューで
+ * この内容(対応任意という判断・下記#62への参照)を検証のうえ支持している。
+ * レイアウト変化そのものへの構造的な備え(CIで`.node`の実配置を機械検査し、変わったらCIが止まる
+ * ようにする)は #62(オーケストレーターが起票)のスコープとして別途対応する。
  */
 export function resolveNativeBindingPath(input: {
   readonly isPackaged: boolean;
@@ -257,6 +260,14 @@ export function resolveNativeBindingPath(input: {
  * わかりにくいエラー(冒頭の実機バグ報告のような13経路の列挙)で落ちる前に検知できるようにする。
  * 非packaged(resolveNativeBindingPathの戻り値がundefined)ならそのままundefinedを返す
  * (検証不要。pipeline-deps.ts側がbindingsへ解決を委ねる)。
+ *
+ * 注(boss提案・対応見送りの記録): `better_sqlite3.node`という名のディレクトリが存在する病的ケースでは
+ * existsSyncがtrueを返し診断をすり抜ける(statSync(...).isFile()の方が「ファイルとして実在する」という
+ * 主張に忠実、というboss指摘)。ただし下の日本語エラーメッセージは受け入れ条件3で合意した文言どおり
+ * `fs.existsSync`の結果を名指しで報告しており、判定をstatSyncへ差し替えると、メッセージのラベルが
+ * 実際に実行した関数と一致しなくなる(受け入れ条件のメッセージ文言を変えるか、ラベルと実装を
+ * 一致させないかの二択になる)。実害はほぼ無い病的ケース(boss談)のためにその再合意コストを払う
+ * 積極的な理由が無いと判断し、今回は見送った(2026-08-22)。
  */
 export function resolveVerifiedNativeBindingPath(input: {
   readonly isPackaged: boolean;
