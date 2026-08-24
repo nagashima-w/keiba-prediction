@@ -364,6 +364,31 @@ describe("judgeSmokeOutcome(終了コード+センチネル出力の判定)", ()
     expect(result.message).toContain("DB検証失敗");
   });
 
+  it("exit 0 だがセンチネルにokキー自体が無い場合もblock(欠落。fail-openな`=== false`判定への弱化を検出する正の対照)", () => {
+    // code-reviewer一次レビュー指摘対応: judgeSmokeOutcomeのJSDocは
+    // 「okがtrueでない(falseまたは欠落)→block」と明記しているが、既存テストは
+    // {ok:true}と{ok:false}の2値しか送っておらず、`payload.ok !== true`を
+    // `payload.ok === false`へ弱める変異(欠落・非booleanを通してしまう)を検出できていなかった
+    // (レビュアーがsedで実注入し34件全緑のままであることを実証済み)。
+    const result = judgeSmokeOutcome(
+      outcome({
+        status: 0,
+        stdout: `${SMOKE_SENTINEL_PREFIX}${JSON.stringify({ resourcesPath: "x" })}\n`,
+      }),
+    );
+    expect(result.status).toBe("block");
+  });
+
+  it("exit 0 だがセンチネルのokが非boolean(文字列\"true\"等)のtruthy値の場合もblock(`=== false`判定への弱化を検出する正の対照)", () => {
+    const result = judgeSmokeOutcome(
+      outcome({
+        status: 0,
+        stdout: `${SMOKE_SENTINEL_PREFIX}${JSON.stringify({ ok: "true" })}\n`,
+      }),
+    );
+    expect(result.status).toBe("block");
+  });
+
   it("exit 0 だがセンチネル行のJSONが壊れている場合もblock(パース例外を投げない)", () => {
     const call = () =>
       judgeSmokeOutcome(outcome({ status: 0, stdout: `${SMOKE_SENTINEL_PREFIX}{不正json\n` }));
