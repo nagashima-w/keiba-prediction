@@ -1,0 +1,603 @@
+/**
+ * 配布 exe が「動くこと」を CI で検査するゲート(Issue #62)。
+ *
+ * ## 背景
+ * #60(better-sqlite3 が packaged 実行でロードできなかった実機事故)を #61 で是正したが、
+ * このリポジトリの検証は「exe が更新されたこと」しか見ておらず「exe が動くこと」を一度も
+ * 確認していなかった。vitest は Node 環境で走るため、Electron ランタイム・asar・
+ * ネイティブモジュールの破綻を原理的に検出できない。
+ *
+ * ## 設計の核心(boss の着手前ゲートで実測により確定。推測で変えないこと)
+ * 壊れていた v1.3.1 の実物 exe を検査すると、配置検査4項目(当初案)すべてが PASS した。
+ * 一方ヘッドレススモークは `NODE_MODULE_VERSION 127 ... requires 132` で実際に FAIL した
+ * (.node は存在しサイズもあるのに Electron からロードできない状態)。**ABI 不一致は配置検査
+ * では1件も検出できない。** そのため本モジュールは
+ *   (1) asar 配置検査(縮小版・A1/A2。スモークが subsume しない部分だけを残す)
+ *   (2) ヘッドレススモーク(本命)
+ * の2段構成にする。
+ *
+ * スモークは「本番と同じ呼び出し経路(スタック起点)」ではなく「本番と同じメカニズム」を追う。
+ * better-sqlite3/lib/database.js は nativeBinding を文字列で渡された瞬間 bindings を一切
+ * 呼ばず、.node の require を自身が絶対パスで行うため、呼び出し元のスタックは影響しない。
+ * したがって `packages/app/src/main/native-binding.ts` の `resolveVerifiedNativeBindingPath`
+ * を**そのまま呼ぶ**(検査スクリプトがパス規則を再実装すると、本番の規則が変わったときに
+ * 検査だけ通り続けてしまうため)。
+ *
+ * ## 射程外(#60型の症状を検出できない、とは書かない。#61以降それは事実として誤り)
+ * 1. 検査対象は win-unpacked であり、portable exe 自身の自己展開(%TEMP%への展開)は通らない
+ * 2. ELECTRON_RUN_AS_NODE=1 は Electron の Node 部分だけを起動する。Chromium 初期化・
+ *    app.whenReady・BrowserWindow・preload・renderer は動かないため、GUI起動時にしか
+ *    出ない破綻は検出しない
+ * 3. 本番の呼び出し元(main.cjs の ResourceManager 経由)そのものは実行しない。ただし
+ *    #61 以降 nativeBinding を明示指定するため bindings のスタック走査は使われず、.node の
+ *    実 require は database.js が絶対パスで行う。呼び出し元の違いは .node のロード可否に影響しない
+ * 4. DB操作は CREATE TABLE/INSERT/SELECT のみで、スキーマ移行経路は通らない
+ * 5. ビルドマシン上のx64成果物のみ。ユーザー実機の環境差(VC++ランタイム・AVの隔離・
+ *    %TEMP%の残骸)は対象外
+ *
+ * ## 終了コードの写像
+ * `GateResult`/`resultToExitCode` は `scripts/release-gate.ts`(Issue #45)の型・規約に倣う。
+ * ただし import はしない(自己完結にする。release-gate.ts は版数据え置き検査、本ファイルは
+ * exe の可動性検査で目的が異なる独立したゲートであり、将来どちらかの型が変わっても互いに
+ * 影響しないようにするため。「倣う」は模倣であって共有ではない、という判断)。
+ */
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { resolveVerifiedNativeBindingPath } from "../packages/app/src/main/native-binding.js";
+
+// ---------------------------------------------------------------------------
+// 共通の判定結果型(scripts/release-gate.ts の GateResult/resultToExitCode に倣う)
+// ---------------------------------------------------------------------------
+
+export type GateResult =
+  | { status: "block"; message: string }
+  | { status: "allow"; message?: string }
+  | { status: "skip"; message: string };
+
+export function resultToExitCode(result: GateResult): number {
+  return result.status === "block" ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// S1: asar ヘッダのバイト列パーサ(副作用ゼロの純関数)
+// ---------------------------------------------------------------------------
+
+/**
+ * asar ヘッダ木のノード(電子/asar のヘッダJSON構造)。
+ * ディレクトリ相当のノードは `files` を持ち、ファイル相当のノードは持たない。
+ * `unpacked: true` は asarUnpack で展開されたファイル(実体が asar 外にある)を示す。
+ */
+export interface AsarNode {
+  files?: Record<string, AsarNode>;
+  unpacked?: boolean;
+  size?: number;
+  offset?: string;
+}
+
+export type AsarHeaderParseResult =
+  | { ok: true; header: AsarNode }
+  | { ok: false; reason: string };
+
+/**
+ * asar ヘッダのバイト列パーサ。@electron/asar の実出力を実測して確定したフォーマットに従う
+ * (テスト冒頭コメント参照。推測ではなく実測に基づく)。
+ *
+ * - bytes[0,12) は外側/内側 pickle の制御フィールド(本パーサは読まない。offset 12 だけ見る)
+ * - bytes[12,16) = ヘッダJSONのバイト長(readUInt32LE(12))
+ * - bytes[16, 16+len) = ヘッダJSON本体(UTF-8)
+ *
+ * 例外は投げない(fail-closed): ファイルが小さすぎる・サイズフィールドがファイル長と
+ * 整合しない・JSONとしてパースできない・`files` を持たない、のいずれも `{ ok: false }` を返す。
+ * 呼び出し側(judgeAsarLayoutFromBytes)がこれを block に変換する。
+ */
+export function parseAsarHeader(buffer: Buffer): AsarHeaderParseResult {
+  const MIN_PREFIX_BYTES = 16;
+  if (buffer.length < MIN_PREFIX_BYTES) {
+    return {
+      ok: false,
+      reason: `ファイルが小さすぎます(${buffer.length}バイト、最低${MIN_PREFIX_BYTES}バイト必要)`,
+    };
+  }
+  const headerJsonSize = buffer.readUInt32LE(12);
+  const headerJsonEnd = MIN_PREFIX_BYTES + headerJsonSize;
+  if (headerJsonSize <= 0 || headerJsonEnd > buffer.length) {
+    return {
+      ok: false,
+      reason: `ヘッダJSONのサイズ(${headerJsonSize}バイト)がファイル長(${buffer.length}バイト)と整合しません`,
+    };
+  }
+  const headerJsonBytes = buffer.subarray(MIN_PREFIX_BYTES, headerJsonEnd);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(headerJsonBytes.toString("utf8"));
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `ヘッダJSONのパースに失敗しました(${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    typeof (parsed as AsarNode).files !== "object" ||
+    (parsed as AsarNode).files === null
+  ) {
+    return { ok: false, reason: "ヘッダJSONの構造が不正です(files が見つかりません)" };
+  }
+  return { ok: true, header: parsed as AsarNode };
+}
+
+// ---------------------------------------------------------------------------
+// S1: judgeAsarLayout(縮小版・A1/A2。副作用ゼロの純関数)
+// ---------------------------------------------------------------------------
+
+interface FlatAsarFile {
+  readonly path: string;
+  readonly unpacked: boolean;
+}
+
+/** asar ヘッダ木を "dist/main/main.cjs" 形式のフラットなファイル一覧へ展開する。 */
+function flattenAsarFiles(node: AsarNode, prefix: string): FlatAsarFile[] {
+  const filesField = node.files;
+  if (filesField === undefined) {
+    return [];
+  }
+  const results: FlatAsarFile[] = [];
+  for (const [name, child] of Object.entries(filesField)) {
+    const childPath = prefix === "" ? name : `${prefix}/${name}`;
+    if (child.files !== undefined) {
+      results.push(...flattenAsarFiles(child, childPath));
+    } else {
+      results.push({ path: childPath, unpacked: child.unpacked === true });
+    }
+  }
+  return results;
+}
+
+/** A2 で存在確認する必須ファイル(electron-builder.yml の files: dist/**\/* が前提)。 */
+const REQUIRED_ASAR_FILES = [
+  "dist/main/main.cjs",
+  "dist/preload/preload.cjs",
+  "dist/renderer/index.html",
+] as const;
+
+/**
+ * asar 配置検査(縮小版)。ブリーフで合意された2項目だけを見る:
+ * - A1: `unpacked !== true` な `.node` エントリが0件であること
+ *   (`.node` エントリ自体が1件も無い場合も block とする。推奨どおり fail-closed に倒す。
+ *   ビルド構成が変わってネイティブモジュールが同梱されなくなった、という重大な変化を
+ *   「何もチェック対象が無いので allow」にしてしまうと、この検査自体が無意味になるため)
+ * - A2: `dist/main/main.cjs` / `dist/preload/preload.cjs` / `dist/renderer/index.html` が
+ *   asar 内に存在すること
+ *
+ * 当初案にあった他3項目は削除済み(ブリーフ参照: (a) スモークが subsume する
+ * (b) build-electron.mjs と bundle.test.ts で既に3重 (c) unpacked:true のため
+ * 「ヘッダに存在」が「中身が asar にある」を意味しない)。
+ */
+export function judgeAsarLayout(header: AsarNode): GateResult {
+  const files = flattenAsarFiles(header, "");
+  const nodeEntries = files.filter((f) => f.path.toLowerCase().endsWith(".node"));
+
+  if (nodeEntries.length === 0) {
+    return {
+      status: "block",
+      message:
+        "app.asar のヘッダに .node エントリが1件もありません(A1)。ビルド構成が変わり、ネイティブモジュールが同梱されていない可能性があります",
+    };
+  }
+
+  const packedNodeEntries = nodeEntries.filter((f) => !f.unpacked);
+  if (packedNodeEntries.length > 0) {
+    return {
+      status: "block",
+      message: `以下の .node エントリが asarUnpack で展開されていません(A1、unpacked!==true): ${packedNodeEntries
+        .map((f) => f.path)
+        .join(", ")}`,
+    };
+  }
+
+  const missing = REQUIRED_ASAR_FILES.filter(
+    (required) => !files.some((f) => f.path === required),
+  );
+  if (missing.length > 0) {
+    return {
+      status: "block",
+      message: `app.asar に必須ファイルがありません(A2): ${missing.join(", ")}`,
+    };
+  }
+
+  return { status: "allow" };
+}
+
+/**
+ * parseAsarHeader の失敗を block に変換する合成関数(fail-closed)。
+ * parseAsarHeader / judgeAsarLayout のどちらも例外を投げないため、この関数自体も
+ * 副作用ゼロの純関数のまま例外を投げない。
+ */
+export function judgeAsarLayoutFromBytes(buffer: Buffer): GateResult {
+  const parsed = parseAsarHeader(buffer);
+  if (!parsed.ok) {
+    return {
+      status: "block",
+      message: `app.asar のヘッダを解析できません(${parsed.reason})。ビルド成果物が壊れている可能性があります`,
+    };
+  }
+  return judgeAsarLayout(parsed.header);
+}
+
+// ---------------------------------------------------------------------------
+// S3: win-unpacked の exe を一意に解決する(0個/複数個は block。release-gate.ts の
+// resolveSingleExeName に「倣う」が、あちらは skip でこちらは block にする意図的な非対称)
+// ---------------------------------------------------------------------------
+
+export type WinUnpackedExeResolution =
+  | { ok: true; exePath: string }
+  | { ok: false; result: GateResult };
+
+/**
+ * release-gate.ts の resolveSingleExeName は「exe 生成前後の両方で呼ばれうる」検査
+ * (バージョン据え置き検査は日常的な dev-latest 公開のたびに走る)のため 0個/複数個を
+ * skip(「判定できないだけで公開は止めない」)にしている。
+ * 一方こちらは electron-builder による exe 生成の直後にしか呼ばれない専用の検査であり、
+ * 0個/複数個は「ビルドが期待通りに終わっていない」ことそのものを意味するため block にする
+ * (ブリーフで明示的に指定された非対称)。
+ */
+export function resolveSingleWinUnpackedExe(
+  fileNames: string[],
+  winUnpackedDir: string,
+): WinUnpackedExeResolution {
+  const exeNames = fileNames.filter((name) => name.toLowerCase().endsWith(".exe"));
+  if (exeNames.length === 0) {
+    return {
+      ok: false,
+      result: {
+        status: "block",
+        message: `${winUnpackedDir} に .exe が見つかりません(0個)。win-unpacked の生成に失敗している可能性があります`,
+      },
+    };
+  }
+  if (exeNames.length > 1) {
+    return {
+      ok: false,
+      result: {
+        status: "block",
+        message: `${winUnpackedDir} の .exe が1個ではありません(${exeNames.length}個: ${exeNames.join(", ")})。想定外の構成のためスモークを中止します`,
+      },
+    };
+  }
+  const [name] = exeNames;
+  if (name === undefined) {
+    throw new Error("到達しないはずの分岐です(exeNames.length===1のはずが要素を取得できません)");
+  }
+  return { ok: true, exePath: path.join(winUnpackedDir, name) };
+}
+
+// ---------------------------------------------------------------------------
+// S3: judgeSmokeOutcome(終了コード + センチネル出力の解釈。副作用ゼロの純関数)
+// ---------------------------------------------------------------------------
+
+/**
+ * スモーク子プロセス(scripts/artifact-gate-smoke-child.cjs)の stdout に載せる
+ * センチネル行のプレフィックス。子スクリプト側と必ず一致させる。
+ */
+export const SMOKE_SENTINEL_PREFIX = "KEIBA_ARTIFACT_GATE_SMOKE_RESULT ";
+
+export interface SmokeSentinelPayload {
+  readonly ok: boolean;
+  readonly resourcesPath?: string;
+  readonly reason?: string;
+}
+
+/** spawnSync の生の戻り値を、judgeSmokeOutcome が必要とする最小形へ整えたもの。 */
+export interface SmokeProcessOutcome {
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly error?: Error;
+}
+
+/**
+ * ヘッドレススモークの終了コード・センチネル出力を判定する。
+ * - 子プロセスの起動自体が失敗(spawnのerror) → block
+ * - シグナルで終了(タイムアウトの典型) → block
+ * - exit code が 0 以外 → block
+ * - exit 0 だがセンチネル行が見つからない → block(「静かに何もせず0で返る」を通さない)
+ * - exit 0 でセンチネルはあるがJSONとしてパースできない → block
+ * - exit 0 でセンチネルの ok が true でない(false または欠落) → block
+ * - exit 0 でセンチネルが ok:true → allow
+ */
+export function judgeSmokeOutcome(outcome: SmokeProcessOutcome): GateResult {
+  if (outcome.error !== undefined) {
+    return {
+      status: "block",
+      message: `子プロセスの起動に失敗しました(${outcome.error.message})`,
+    };
+  }
+  if (outcome.signal !== null) {
+    return {
+      status: "block",
+      message: `子プロセスがシグナル(${outcome.signal})で終了しました(タイムアウトの可能性があります)`,
+    };
+  }
+  if (outcome.status !== 0) {
+    return {
+      status: "block",
+      message: `子プロセスが異常終了しました(exit code: ${outcome.status})。stderr: ${outcome.stderr.slice(0, 2000)}`,
+    };
+  }
+
+  const sentinelLine = outcome.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .reverse()
+    .find((line) => line.startsWith(SMOKE_SENTINEL_PREFIX));
+  if (sentinelLine === undefined) {
+    return {
+      status: "block",
+      message:
+        "子プロセスは正常終了(exit 0)しましたが、センチネル出力が見つかりません(スモークが実際に実行された保証がありません)",
+    };
+  }
+
+  let payload: SmokeSentinelPayload;
+  try {
+    payload = JSON.parse(sentinelLine.slice(SMOKE_SENTINEL_PREFIX.length)) as SmokeSentinelPayload;
+  } catch (error) {
+    return {
+      status: "block",
+      message: `センチネル出力のJSON解析に失敗しました(${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+
+  if (payload.ok !== true) {
+    return {
+      status: "block",
+      message: `子プロセスがスモーク失敗を報告しました(${payload.reason ?? "詳細不明"})`,
+    };
+  }
+
+  return { status: "allow" };
+}
+
+// ---------------------------------------------------------------------------
+// S3: runSmokeCheck(実I/Oを注入可能にした駆動本体)
+// ---------------------------------------------------------------------------
+
+export interface SmokeRealDeps {
+  readonly winUnpackedDir: string;
+  readonly listWinUnpackedFileNames: () => string[];
+  /**
+   * 本番の resolveVerifiedNativeBindingPath(packages/app/src/main/native-binding.ts)を
+   * そのまま渡す(既定は makeSmokeRealDeps が配線する)。検査スクリプトがパス規則を
+   * 再実装しないことが本タスクの核心のため、ここを別実装で差し替えるのはテスト用途のみに限る。
+   */
+  readonly resolveNativeBinding: (input: {
+    readonly isPackaged: boolean;
+    readonly resourcesPath: string | undefined;
+  }) => string | undefined;
+  readonly mkdtemp: () => string;
+  readonly rm: (dir: string) => void;
+  readonly spawnChild: (exePath: string, args: string[]) => SmokeProcessOutcome;
+}
+
+/**
+ * ヘッドレススモークの駆動本体。
+ * 1. win-unpacked の exe をちょうど1個解決する(0個/複数個はblock)
+ * 2. 本番と同一の resolveVerifiedNativeBindingPath を呼ぶ(packaged:true, resourcesPath指定)
+ *    → .node が無ければここで例外を投げるので、その診断メッセージをそのままblockへ転記する
+ *    (mkdtemp はまだ呼ばない。無駄な一時ディレクトリを作らないため)
+ * 3. mkdtemp で一時ディレクトリを用意し、子プロセスを ELECTRON_RUN_AS_NODE=1 で起動する
+ * 4. finally で必ず rm する(子が異常終了しても一時ディレクトリを残さない)
+ * 5. 終了コード・センチネル出力を judgeSmokeOutcome で判定する
+ */
+export function runSmokeCheck(deps: SmokeRealDeps): GateResult {
+  const exeResolution = resolveSingleWinUnpackedExe(
+    deps.listWinUnpackedFileNames(),
+    deps.winUnpackedDir,
+  );
+  if (!exeResolution.ok) {
+    return exeResolution.result;
+  }
+
+  const resourcesPath = path.join(deps.winUnpackedDir, "resources");
+
+  let nativeBindingPath: string | undefined;
+  try {
+    nativeBindingPath = deps.resolveNativeBinding({ isPackaged: true, resourcesPath });
+  } catch (error) {
+    return {
+      status: "block",
+      message: `ネイティブバインディングの解決に失敗しました(${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  if (nativeBindingPath === undefined) {
+    // isPackaged:true かつ resourcesPath 定義済みで呼んでいるため、native-binding.ts の
+    // 解決規則上ここは到達しないはず(到達したら native-binding.ts 側の規則が変わったことを疑う)。
+    return {
+      status: "block",
+      message:
+        "ネイティブバインディングのパスを解決できませんでした(isPackaged:true指定にもかかわらずundefinedが返りました。native-binding.tsの解決規則が変わった可能性があります)",
+    };
+  }
+
+  const tmpDir = deps.mkdtemp();
+  try {
+    const tmpDbPath = path.join(tmpDir, "smoke.db");
+    const outcome = deps.spawnChild(exeResolution.exePath, [
+      nativeBindingPath,
+      resourcesPath,
+      tmpDbPath,
+    ]);
+    return judgeSmokeOutcome(outcome);
+  } finally {
+    deps.rm(tmpDir);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 実I/O実装(CLI起動時の既定値)
+// ---------------------------------------------------------------------------
+
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.join(SCRIPT_DIR, "..");
+const RELEASE_DIR = path.join(REPO_ROOT, "packages/app/release");
+const WIN_UNPACKED_DIR = path.join(RELEASE_DIR, "win-unpacked");
+const APP_ASAR_PATH = path.join(WIN_UNPACKED_DIR, "resources", "app.asar");
+const SMOKE_CHILD_SCRIPT_PATH = path.join(SCRIPT_DIR, "artifact-gate-smoke-child.cjs");
+/** スモーク子プロセスのタイムアウト。CREATE/INSERT/SELECT程度なので60秒あれば十分。 */
+const SMOKE_TIMEOUT_MS = 60_000;
+
+export function readAsarFileReal(): Buffer {
+  return readFileSync(APP_ASAR_PATH);
+}
+
+export function judgeAsarLayoutCommand(deps: { readAsarFile: () => Buffer }): GateResult {
+  let buffer: Buffer;
+  try {
+    buffer = deps.readAsarFile();
+  } catch (error) {
+    return {
+      status: "block",
+      message: `app.asar を読み込めません(${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  return judgeAsarLayoutFromBytes(buffer);
+}
+
+function listWinUnpackedFileNamesReal(winUnpackedDir: string): string[] {
+  try {
+    return readdirSync(winUnpackedDir);
+  } catch {
+    // ディレクトリが無い場合も「0個」として扱う(resolveSingleWinUnpackedExe が block を返す)。
+    return [];
+  }
+}
+
+function mkdtempReal(): string {
+  return mkdtempSync(path.join(tmpdir(), "keiba-artifact-gate-smoke-"));
+}
+
+function rmReal(dir: string): void {
+  rmSync(dir, { recursive: true, force: true });
+}
+
+function spawnChildReal(exePath: string, args: string[]): SmokeProcessOutcome {
+  const result: SpawnSyncReturns<string> = spawnSync(exePath, [SMOKE_CHILD_SCRIPT_PATH, ...args], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    timeout: SMOKE_TIMEOUT_MS,
+    encoding: "utf8",
+  });
+  return {
+    status: result.status,
+    signal: result.signal,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    error: result.error,
+  };
+}
+
+/**
+ * SmokeRealDeps を組み立てる。既定(引数省略時)は CI 本番と同じ
+ * `packages/app/release/win-unpacked` を見る。winUnpackedDir を明示的に渡せるようにしているのは
+ * (1) テストで実DepsのresolveNativeBindingが本物であることを、任意の一時ディレクトリ相手に
+ * 検証するため (2) 手元での `--linux dir` 成果物に対する動作確認(本タスクの検証要件)を、
+ * 本番CLIの配線を書き換えずに行うため。
+ */
+export function makeSmokeRealDeps(winUnpackedDir: string = WIN_UNPACKED_DIR): SmokeRealDeps {
+  return {
+    winUnpackedDir,
+    listWinUnpackedFileNames: () => listWinUnpackedFileNamesReal(winUnpackedDir),
+    // 本番と同一の関数をそのまま渡す(検査スクリプト側でパス規則を再実装しないことが核心)。
+    resolveNativeBinding: resolveVerifiedNativeBindingPath,
+    mkdtemp: mkdtempReal,
+    rm: rmReal,
+    spawnChild: spawnChildReal,
+  };
+}
+
+export const SMOKE_REAL_DEPS: SmokeRealDeps = makeSmokeRealDeps();
+
+// ---------------------------------------------------------------------------
+// CLI ディスパッチ(薄い配線。判定核は上記の純関数が担う。release-gate.ts と同じ考え方)
+// ---------------------------------------------------------------------------
+
+export interface DispatchOutcome {
+  exitCode: number;
+  logs: string[];
+}
+
+function formatLogLine(result: GateResult, okLabel: string): string {
+  if (result.status === "block") {
+    return `::error::${result.message}`;
+  }
+  if (result.status === "skip") {
+    return `::warning::${result.message}`;
+  }
+  return result.message !== undefined ? `::warning::${result.message}` : okLabel;
+}
+
+export async function dispatch(argv: string[]): Promise<DispatchOutcome> {
+  const [subcommand] = argv;
+
+  if (subcommand === "asar-layout") {
+    const result = judgeAsarLayoutCommand({ readAsarFile: readAsarFileReal });
+    return {
+      exitCode: resultToExitCode(result),
+      logs: [formatLogLine(result, "asar 配置検査: 問題ありません(A1/A2 を満たしています)")],
+    };
+  }
+
+  if (subcommand === "smoke") {
+    const result = runSmokeCheck(SMOKE_REAL_DEPS);
+    return {
+      exitCode: resultToExitCode(result),
+      logs: [formatLogLine(result, "ヘッドレススモーク: 問題ありません(DB作成・読み書きに成功しました)")],
+    };
+  }
+
+  const result: GateResult = {
+    status: "block",
+    message: `未知のサブコマンドです: ${subcommand ?? "(未指定)"}(asar-layout | smoke のいずれかを指定してください)`,
+  };
+  return { exitCode: resultToExitCode(result), logs: [formatLogLine(result, "")] };
+}
+
+/**
+ * dispatch() を try/catch で包み、想定外の例外を fail-closed(exit 1 + ::error::)で受け止める
+ * (release-gate.ts の runMain と同じ考え方)。
+ */
+export async function runMain(argv: string[]): Promise<DispatchOutcome> {
+  try {
+    return await dispatch(argv);
+  } catch (error) {
+    return {
+      exitCode: 1,
+      logs: [
+        `::error::予期しない例外が発生しました(${
+          error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+        })。fail-closed としてジョブを失敗させます`,
+      ],
+    };
+  }
+}
+
+async function main(): Promise<void> {
+  const outcome = await runMain(process.argv.slice(2));
+  for (const line of outcome.logs) {
+    console.log(line);
+  }
+  process.exitCode = outcome.exitCode;
+}
+
+const isMainModule =
+  process.argv[1] !== undefined &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+
+if (isMainModule) {
+  void main();
+}

@@ -149,6 +149,40 @@ jobs:
       - name: electron-builder で exe を生成
         run: pnpm --filter @keiba/app exec electron-builder --win --config electron-builder.yml --publish never
 
+      # Issue #62: 配布 exe が「動くこと」を CI で検査するゲート(2ステップ、常時関門・if:なし)。
+      #
+      # 背景: #60(better-sqlite3 が packaged 実行でロードできなかった実機事故)を #61 で
+      # 是正したが、このリポジトリの検証は「exe が更新されたこと」しか見ておらず「exe が
+      # 動くこと」を一度も確認していなかった。vitest は Node 環境で走るため、Electron
+      # ランタイム・asar・ネイティブモジュールの破綻を原理的に検出できない。
+      #
+      # 2段構成にした理由(boss の着手前ゲートで実測により確定): 壊れていた v1.3.1 の実物 exe を
+      # 検査すると asar 配置検査4項目(当初案)すべてが PASS した一方、ヘッドレススモークは
+      # ABI 不一致(NODE_MODULE_VERSION 不一致)で実際に FAIL した。配置検査だけでは ABI
+      # 不一致を1件も検出できないため、下記2ステップ目(ヘッドレススモーク)が本命であり、
+      # 1ステップ目(asar配置検査)はスモークが検出できない構造面(A1/A2)だけを補完する縮小版。
+      #
+      # 判定核はすべて scripts/artifact-gate.ts の純関数(release-gate.ts と同じ考え方)。
+      # yml へインライン bash の判定ロジックを書かない(#43 の形骸化の再来を避ける)。
+      #
+      # 射程外(#60型の症状を検出できない、とは書かない。#61以降それは事実として誤り):
+      # 1. 検査対象は win-unpacked であり、portable exe 自身の自己展開(%TEMP%への展開)は通らない
+      # 2. ELECTRON_RUN_AS_NODE=1 は Electron の Node 部分だけを起動する。Chromium 初期化・
+      #    app.whenReady・BrowserWindow・preload・renderer は動かないため、GUI起動時にしか
+      #    出ない破綻は検出しない
+      # 3. 本番の呼び出し元(main.cjs の ResourceManager 経由)そのものは実行しない。ただし
+      #    #61 以降 nativeBinding を明示指定するため bindings のスタック走査は使われず、
+      #    .node の実 require は database.js が絶対パスで行う。呼び出し元の違いは .node の
+      #    ロード可否に影響しない
+      # 4. DB操作は CREATE TABLE/INSERT/SELECT のみで、スキーマ移行経路は通らない
+      # 5. ビルドマシン上のx64成果物のみ。ユーザー実機の環境差(VC++ランタイム・AVの隔離・
+      #    %TEMP%の残骸)は対象外
+      - name: 配布 exe の asar 配置を検査(A1/A2)
+        run: pnpm exec tsx scripts/artifact-gate.ts asar-layout
+
+      - name: 配布 exe のヘッドレススモークテスト
+        run: pnpm exec tsx scripts/artifact-gate.ts smoke
+
       # Issue #45(D-2): #44-D-1(docs/versioning.md)の版数運用規約「公開1回につき必ず1回
       # 版数を上げる」を機械検査する。今回ビルドした exe と同名のアセットが dev-latest に
       # 既に存在する(= 版数が据え置かれたまま公開されようとしている)場合に block する。

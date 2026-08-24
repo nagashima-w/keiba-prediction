@@ -177,6 +177,9 @@ const STEP_NAMES = {
   // Issue #45(D-2): 版数運用規約(#44-D-1)の機械検査。
   tagVerify: "タグとバージョンの一致を検証",
   versionBumpCheck: "版数据え置きを検査(dev-latest 公開前)",
+  // Issue #62: 配布 exe が「動くこと」を CI で検査するゲート(asar配置検査・ヘッドレススモーク)。
+  asarLayoutCheck: "配布 exe の asar 配置を検査(A1/A2)",
+  smokeCheck: "配布 exe のヘッドレススモークテスト",
 } as const;
 
 /**
@@ -487,11 +490,12 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     // 精密な部分検査に置き換えようとすると、本ファイルが辿った「部分一致の積み上げでは
     // 意味の逆転を検出できない」という失敗に逆戻りする。
     //
-    // 前提固定: このジョブが14ステップから成ることをまず固定する(配列比較が
+    // 前提固定: このジョブが16ステップから成ることをまず固定する(配列比較が
     // 空配列同士の一致のような自明なもので満たされないようにするため。Issue #45 で
-    // タグ検証・版数据え置き検査の2ステップが増え、12→14 になった)。
+    // タグ検証・版数据え置き検査の2ステップが増えて12→14になり、Issue #62 で
+    // asar配置検査・ヘッドレススモークの2ステップが増えて14→16になった)。
     const actualNames = extractAllStepNames(yml);
-    expect(actualNames.length).toBe(14);
+    expect(actualNames.length).toBe(16);
 
     expect(actualNames).toEqual([
       "リポジトリを取得",
@@ -503,6 +507,8 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
       "テストを実行",
       STEP_NAMES.build,
       "electron-builder で exe を生成",
+      STEP_NAMES.asarLayoutCheck,
+      STEP_NAMES.smokeCheck,
       STEP_NAMES.versionBumpCheck,
       STEP_NAMES.publish,
       STEP_NAMES.cleanup,
