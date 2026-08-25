@@ -306,11 +306,51 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   `packages/app/electron-builder.yml`。
 - **ネイティブバインディングの解決(Issue #61)**: 配布(packaged)時は better-sqlite3 の
   `.node` を `<process.resourcesPath>/app.asar.unpacked/node_modules/better-sqlite3/build/Release/
-  better_sqlite3.node` の絶対パスで**明示指定**し(`ipc.ts` の `resolveNativeBindingPath` →
-  `pipeline-deps.ts` の `new Database` 第2引数)、`bindings` パッケージの**スタックトレースからの
+  better_sqlite3.node` の絶対パスで**明示指定**し(`packages/app/src/main/native-binding.ts` の
+  `resolveVerifiedNativeBindingPath` → `pipeline-deps.ts` の `new Database` 第2引数。
+  Issue #62 でこの2関数は `ipc.ts` から electron 非依存の `native-binding.ts` へ抽出した。
+  挙動不変・`ipc.ts` は re-export のみ)、`bindings` パッケージの**スタックトレースからの
   推測解決を使わない**。見つからない場合は、期待した絶対パス・`fs.existsSync` の結果・
   `process.resourcesPath`・`app.isPackaged` の4要素を含む診断メッセージ付きで**即時失敗**する。
   非 packaged(開発・テスト)では従来どおり `bindings` に委ねる。
+- **配布 exe の可動性検査(Issue #62。`scripts/artifact-gate.ts`)**: #60(better-sqlite3 が
+  packaged 実行でロードできなかった実機事故)を #61 で是正したが、それまでの検証は
+  「exe が更新されたこと」しか見ておらず「exe が動くこと」を一度も確認していなかった
+  (vitest は Node 環境で走るため、Electron ランタイム・asar・ネイティブモジュールの破綻を
+  原理的に検出できない)。`electron-builder で exe を生成` の直後・`版数据え置きを検査` の
+  前に、判定核を純関数として切り出した2ステップの機械検査を常時関門(`if:` なし)として置く。
+  判定核・依存注入・yml 配線は #43/#45(上記)と同じ方針(yml へインライン bash の判定を書かず、
+  `scripts/test/artifact-gate.test.ts` で実ふるまいを検証する)。
+  - **asar 配置検査**(`asar-layout`。縮小版): A1(`unpacked !== true` な `.node` エントリが
+    asar 内に0件であること。`.node` エントリ自体が1件も無い場合も fail-closed で block)・
+    A2(`dist/main/main.cjs`・`dist/preload/preload.cjs`・`dist/renderer/index.html` が
+    asar 内に存在すること)の2項目のみ。app.asar の読み込み自体が失敗した場合(存在しない等)も
+    fail-closed で block する。asar ヘッダのバイト列パーサ(`parseAsarHeader`)は
+    `@electron/asar` の実出力を実測して確定した実フォーマットに従う(新規依存は追加していない。
+    pnpm 環境で `@electron/asar` を `require.resolve` できないため)。
+  - **ヘッドレススモーク**(`smoke`。本命): 壊れていた v1.3.1 の実物 exe を検査すると asar
+    配置検査4項目(当初案)すべてが PASS した一方、ABI 不一致(`NODE_MODULE_VERSION` 不一致)は
+    配置検査では1件も検出できないことが実測で判明したため、こちらが本命。
+    `win-unpacked/*.exe` を一意に解決し(0個/複数個は block)、本番と同一の
+    `resolveVerifiedNativeBindingPath` を呼んでネイティブバインディングの絶対パスを得たうえで、
+    `spawnSync(exe, [子スクリプト, nativeBindingPath, resourcesPath, tmpDbPath], { env:
+    { ELECTRON_RUN_AS_NODE: "1" }, timeout })` で子プロセス(`scripts/artifact-gate-smoke-child.cjs`。
+    plain CJS)を起動する。子プロセスは `process.resourcesPath` の一致確認 →
+    `require.resolve("better-sqlite3", { paths: [...] })` → `new Database(tmp, { nativeBinding })` →
+    CREATE TABLE/INSERT/SELECT(値一致検証)→ close() → センチネル付きJSON1行を stdout に出す。
+    判定(`judgeSmokeOutcome`)は exit code とセンチネルの両方を見る: exit 0 でもセンチネルが
+    無ければ block(静かに何もせず0で返ることを許さない)、exit≠0 でも stdout のセンチネルから
+    `reason` を取り出して message に含める(exit≠0 は何があっても block のまま。fail-closed は
+    弱めない。理由の可視化のみ)。一時ディレクトリは `finally` で必ず削除する。
+  - **射程外**(「#60型の症状を検出できない」とは書かない。#61以降それは事実として誤り):
+    (1) 検査対象は `win-unpacked` であり portable exe 自身の自己展開は通らない、
+    (2) `ELECTRON_RUN_AS_NODE=1` は Node 部分のみで GUI 起動時にしか出ない破綻は検出しない、
+    (3) 本番の呼び出し元(`main.cjs` の `ResourceManager` 経由)そのものは実行しないが、
+    `nativeBinding` を明示指定するため呼び出し元の違いは `.node` のロード可否に影響しない、
+    (4) DB操作は CREATE/INSERT/SELECT のみでスキーマ移行経路は通らない、
+    (5) ビルドマシン上の x64 成果物のみでユーザー実機の環境差は対象外、
+    (6) 実 exe 経路は Linux では原理的に実行できず(`.exe` 拡張子を要求する)、
+    Windows CI が唯一の検証場所である。
 
 ## 9. 確率の質の計測基盤(scorer/snapshot-filter・ev/probability-quality。#40「#35-1a」)
 

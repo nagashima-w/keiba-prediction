@@ -34,6 +34,10 @@
  * 4. DB操作は CREATE TABLE/INSERT/SELECT のみで、スキーマ移行経路は通らない
  * 5. ビルドマシン上のx64成果物のみ。ユーザー実機の環境差(VC++ランタイム・AVの隔離・
  *    %TEMP%の残骸)は対象外
+ * 6. スモークの実 exe 経路は Linux では原理的に実行できない(resolveSingleWinUnpackedExe が
+ *    `.exe` を要求するが、Linux 成果物の実行ファイルは `.exe` 拡張子を持たない)。ローカルで
+ *    通せるのは fake deps までで、実経路(実 exe を spawn して better-sqlite3 をロードする経路)
+ *    の検証は Windows CI が唯一の場所である
  *
  * ## 終了コードの写像
  * `GateResult`/`resultToExitCode` は `scripts/release-gate.ts`(Issue #45)の型・規約に倣う。
@@ -180,6 +184,12 @@ const REQUIRED_ASAR_FILES = [
  */
 export function judgeAsarLayout(header: AsarNode): GateResult {
   const files = flattenAsarFiles(header, "");
+  // boss メタレビュー 提案M1(判断記録): toLowerCase() を外す変異はテストを1件も検出できなかった
+  // (electron-builder が生成する asar 内のファイル名は npm パッケージ由来で常に小文字
+  // `.node` のため、大文字化ケースの実害は事実上無い)。対応は見送る。ただし
+  // fail-closed(大文字小文字を問わず.nodeを1件でも多く拾う側)の安全側であるため toLowerCase()
+  // 自体は維持する(実害が薄い変異への専用テスト追加を見送っただけで、既存の安全側の実装は
+  // 崩さない、という判断)。
   const nodeEntries = files.filter((f) => f.path.toLowerCase().endsWith(".node"));
 
   if (nodeEntries.length === 0) {
@@ -302,10 +312,50 @@ export interface SmokeProcessOutcome {
 }
 
 /**
+ * outcome.stdout からセンチネル行を探して JSON パースする(見つかったかどうか・パース結果を
+ * 区別して返す。副作用ゼロ)。
+ *
+ * boss メタレビュー 要修正1 への対応: 当初、この抽出処理は「exit 0」の分岐でしか行っていなかった。
+ * しかし子スクリプト(artifact-gate-smoke-child.cjs)は失敗時に必ずセンチネル(ok:false + reason)を
+ * stdout に書いてから exitCode=1 を立てる契約のため、**実子プロセスからの失敗は常に exit≠0 経路
+ * にしか入らない**。exit≠0 の分岐がセンチネルを見ずに stderr(常に空。子は stderr へは書かない)
+ * だけを載せていたため、実際に起きた失敗理由(例: ABI不一致の NODE_MODULE_VERSION 文言)が
+ * CI ログから完全に失われていた。この抽出関数を exit 0/≠0 の両方から共有することで、
+ * 「原因をログに残したうえで確実に block させる」という子スクリプトの契約を実際に満たす。
+ */
+function extractSentinelPayload(stdout: string): {
+  readonly found: boolean;
+  readonly payload?: SmokeSentinelPayload;
+  readonly parseErrorMessage?: string;
+} {
+  const sentinelLine = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .reverse()
+    .find((line) => line.startsWith(SMOKE_SENTINEL_PREFIX));
+  if (sentinelLine === undefined) {
+    return { found: false };
+  }
+  try {
+    const payload = JSON.parse(
+      sentinelLine.slice(SMOKE_SENTINEL_PREFIX.length),
+    ) as SmokeSentinelPayload;
+    return { found: true, payload };
+  } catch (error) {
+    return {
+      found: true,
+      parseErrorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * ヘッドレススモークの終了コード・センチネル出力を判定する。
  * - 子プロセスの起動自体が失敗(spawnのerror) → block
  * - シグナルで終了(タイムアウトの典型) → block
- * - exit code が 0 以外 → block
+ * - exit code が 0 以外 → block(**stdout のセンチネルを解析し、取れた reason を message に
+ *   含める。取れなければ stdout 末尾を載せる**。boss メタレビュー 要修正1: exit≠0 は何が
+ *   あっても block のまま=fail-closed は弱めない。理由の可視化だけを追加する)
  * - exit 0 だがセンチネル行が見つからない → block(「静かに何もせず0で返る」を通さない)
  * - exit 0 でセンチネルはあるがJSONとしてパースできない → block
  * - exit 0 でセンチネルの ok が true でない(false または欠落) → block
@@ -324,19 +374,29 @@ export function judgeSmokeOutcome(outcome: SmokeProcessOutcome): GateResult {
       message: `子プロセスがシグナル(${outcome.signal})で終了しました(タイムアウトの可能性があります)`,
     };
   }
+
+  const sentinel = extractSentinelPayload(outcome.stdout);
+
   if (outcome.status !== 0) {
+    // fail-closed は絶対に弱めない: このブロックは常に status:"block" を返す。
+    // 以下はメッセージへ理由を載せるための分岐であり、判定結果そのものには関与しない。
+    let reasonPart: string;
+    if (sentinel.payload?.reason !== undefined) {
+      reasonPart = `reason: ${sentinel.payload.reason}`;
+    } else if (sentinel.parseErrorMessage !== undefined) {
+      reasonPart = `センチネルのJSON解析にも失敗しました(${sentinel.parseErrorMessage})`;
+    } else if (sentinel.found) {
+      reasonPart = "センチネルにreasonがありません";
+    } else {
+      reasonPart = `stdout末尾: ${outcome.stdout.slice(-2000)}`;
+    }
     return {
       status: "block",
-      message: `子プロセスが異常終了しました(exit code: ${outcome.status})。stderr: ${outcome.stderr.slice(0, 2000)}`,
+      message: `子プロセスが異常終了しました(exit code: ${outcome.status})。${reasonPart}。stderr: ${outcome.stderr.slice(0, 2000)}`,
     };
   }
 
-  const sentinelLine = outcome.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .reverse()
-    .find((line) => line.startsWith(SMOKE_SENTINEL_PREFIX));
-  if (sentinelLine === undefined) {
+  if (!sentinel.found) {
     return {
       status: "block",
       message:
@@ -344,20 +404,17 @@ export function judgeSmokeOutcome(outcome: SmokeProcessOutcome): GateResult {
     };
   }
 
-  let payload: SmokeSentinelPayload;
-  try {
-    payload = JSON.parse(sentinelLine.slice(SMOKE_SENTINEL_PREFIX.length)) as SmokeSentinelPayload;
-  } catch (error) {
+  if (sentinel.parseErrorMessage !== undefined) {
     return {
       status: "block",
-      message: `センチネル出力のJSON解析に失敗しました(${error instanceof Error ? error.message : String(error)})`,
+      message: `センチネル出力のJSON解析に失敗しました(${sentinel.parseErrorMessage})`,
     };
   }
 
-  if (payload.ok !== true) {
+  if (sentinel.payload?.ok !== true) {
     return {
       status: "block",
-      message: `子プロセスがスモーク失敗を報告しました(${payload.reason ?? "詳細不明"})`,
+      message: `子プロセスがスモーク失敗を報告しました(${sentinel.payload?.reason ?? "詳細不明"})`,
     };
   }
 
@@ -445,12 +502,29 @@ export function runSmokeCheck(deps: SmokeRealDeps): GateResult {
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(SCRIPT_DIR, "..");
-const RELEASE_DIR = path.join(REPO_ROOT, "packages/app/release");
+/**
+ * release ディレクトリの実パス。既定は CI 本番と同じ `packages/app/release`。
+ *
+ * `ARTIFACT_GATE_RELEASE_DIR_OVERRIDE` が設定されていればそちらを使う(boss メタレビュー
+ * 【提案】: `実プロセス起動` テストが作業ツリーの実 `release/win-unpacked/resources/app.asar` を
+ * rename退避→書き換え→復元していたため、プロセスが強制終了されると壊れたファイルと
+ * `.artifact-gate-test-backup` が残置されるリスクがあった。この環境変数により、テストは
+ * 一時ディレクトリを指すよう CLI 実プロセスへ注入でき、実リポジトリのファイルには一切触れずに
+ * 済む。CI では未設定のため既定の実パスのまま動作は変わらない。
+ */
+const RELEASE_DIR =
+  process.env.ARTIFACT_GATE_RELEASE_DIR_OVERRIDE !== undefined
+    ? path.resolve(process.env.ARTIFACT_GATE_RELEASE_DIR_OVERRIDE)
+    : path.join(REPO_ROOT, "packages/app/release");
 const WIN_UNPACKED_DIR = path.join(RELEASE_DIR, "win-unpacked");
 const APP_ASAR_PATH = path.join(WIN_UNPACKED_DIR, "resources", "app.asar");
 const SMOKE_CHILD_SCRIPT_PATH = path.join(SCRIPT_DIR, "artifact-gate-smoke-child.cjs");
-/** スモーク子プロセスのタイムアウト。CREATE/INSERT/SELECT程度なので60秒あれば十分。 */
-const SMOKE_TIMEOUT_MS = 60_000;
+/**
+ * スモーク子プロセスのタイムアウト。CREATE/INSERT/SELECT程度なので60秒あれば十分。
+ * export するのは、テスト(M5対応)が「spawnSync へこの値が実際に渡っていること」を
+ * 検証するときに、テスト側で別途同じ数値をハードコードして二重管理にしないため。
+ */
+export const SMOKE_TIMEOUT_MS = 60_000;
 
 export function readAsarFileReal(): Buffer {
   return readFileSync(APP_ASAR_PATH);

@@ -20,11 +20,9 @@
  */
 import { spawnSync } from "node:child_process";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -32,13 +30,28 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// spawnSyncだけをspy可能なvi.fn()へ差し替える(node:child_processのESM名前空間は
+// Object.definePropertyの都合でvi.spyOnによる再定義を受け付けないため、vi.mock+
+// importOriginalで部分モック化する。既定はactual実装への素通しなので、他のテストが
+// 実際のサブプロセス起動を必要とする箇所(実プロセス起動テスト・M3の子プロセス直接起動)は
+// 挙動が変わらない。M5対応のテストでだけ一時的にmockReturnValueOnceで差し替える)。
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawnSync: vi.fn(actual.spawnSync),
+  };
+});
 
 import { resolveVerifiedNativeBindingPath } from "../../packages/app/src/main/native-binding.js";
 import {
   SMOKE_SENTINEL_PREFIX,
+  SMOKE_TIMEOUT_MS,
   dispatch,
   judgeAsarLayout,
+  judgeAsarLayoutCommand,
   judgeAsarLayoutFromBytes,
   judgeSmokeOutcome,
   makeSmokeRealDeps,
@@ -287,6 +300,37 @@ describe("judgeAsarLayoutFromBytes(parseAsarHeader失敗をfail-closedでblock�
   });
 });
 
+describe("judgeAsarLayoutCommand(app.asar読み込み自体の失敗をfail-closedでblockに変換する。boss メタレビュー 要修正2)", () => {
+  // 要修正2: このファイルに judgeAsarLayoutCommand の呼び出しが1件も無く、「app.asar を
+  // 読み込めません」分岐(= app.asar が存在しない場合)が一度も実行されていなかった
+  // (boss の fail-open 変異注入で36件全緑のまま素通りしたことで実証された)。
+  // 既存の「実プロセス起動」テストは壊れたファイルを置くため読み込みは成功し、この分岐を
+  // 通らない。ここでは deps.readAsarFile を直接注入する純粋な単体テストとして、この分岐を
+  // 確実に固定する(副作用なし。実ファイルには一切触れない)。
+
+  it("readAsarFileが例外を投げる(app.asarが存在しない等)場合、例外を投げずにblockを返す(fail-closed)", () => {
+    const call = () =>
+      judgeAsarLayoutCommand({
+        readAsarFile: () => {
+          throw new Error("ENOENT: no such file or directory, open 'app.asar'");
+        },
+      });
+
+    expect(call).not.toThrow();
+    const result = call();
+    expect(result.status).toBe("block");
+    if (result.status !== "block") throw new Error("到達しないはず");
+    expect(result.message).toContain("app.asar を読み込めません");
+    expect(result.message).toContain("ENOENT");
+  });
+
+  it("readAsarFileが成功すればjudgeAsarLayoutFromBytesへ委譲される(正常系。allowになること)", () => {
+    const buffer = buildMinimalAsarBuffer(baseHeader());
+    const result = judgeAsarLayoutCommand({ readAsarFile: () => buffer });
+    expect(result.status).toBe("allow");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // (3) resolveSingleWinUnpackedExe: win-unpacked の exe を一意に解決(0個/複数個はblock)
 // ---------------------------------------------------------------------------
@@ -401,6 +445,40 @@ describe("judgeSmokeOutcome(終了コード+センチネル出力の判定)", ()
       outcome({ status: 1, stdout: "", stderr: "何らかのエラー" }),
     );
     expect(result.status).toBe("block");
+  });
+
+  it("exit≠0でもstdoutのセンチネルからreasonを取り出してmessageに含める(boss メタレビュー 要修正1: ABI不一致等の診断がCIログから消えていた問題への対応)。fail-closed(block)は絶対に弱めない", () => {
+    // boss が実際に再現したABI不一致の実文言そのものを使い、この文言がmessageに載ることを固定する。
+    // 子スクリプトは失敗時に必ずexitCode=1を立てるため、実子プロセスからの失敗は常にこの分岐
+    // (status!==0)にしか入らない。この分岐がreasonを見ずにstderr(常に空)だけを載せていたのが
+    // 要修正1の実体だった。
+    const abiMismatchReason =
+      "DB操作(CREATE/INSERT/SELECT)に失敗しました: Error: .../better_sqlite3.node was compiled " +
+      "against a different Node.js version using NODE_MODULE_VERSION 127. This version of Node.js " +
+      "requires NODE_MODULE_VERSION 132.";
+    const result = judgeSmokeOutcome(
+      outcome({
+        status: 1,
+        stdout: `${SMOKE_SENTINEL_PREFIX}${JSON.stringify({ ok: false, reason: abiMismatchReason })}\n`,
+        stderr: "",
+      }),
+    );
+
+    // fail-closedを弱めていないことを先に固定する(このテストが「原因が見えるようになった」こと
+    // だけを見て、うっかりallowへ倒れる変異を見逃さないため)。
+    expect(result.status).toBe("block");
+    if (result.status !== "block") throw new Error("到達しないはず");
+    expect(result.message).toContain("NODE_MODULE_VERSION 127");
+    expect(result.message).toContain("NODE_MODULE_VERSION 132");
+  });
+
+  it("exit≠0でセンチネル自体が見つからない場合は、stdout末尾をmessageに含める(reasonが取れないときのフォールバック)", () => {
+    const result = judgeSmokeOutcome(
+      outcome({ status: 1, stdout: "センチネルより前に何か出力\n", stderr: "" }),
+    );
+    expect(result.status).toBe("block");
+    if (result.status !== "block") throw new Error("到達しないはず");
+    expect(result.message).toContain("センチネルより前に何か出力");
   });
 
   it("シグナルで終了(タイムアウトの典型)した場合はblock", () => {
@@ -575,8 +653,19 @@ describe("runSmokeCheck(スモーク駆動の配線・resolveVerifiedNativeBindi
       expect(calls.mkdtempCalls.length).toBe(1);
       expect(calls.spawnCalls.length).toBe(1);
       expect(calls.spawnCalls[0]!.exePath).toBe(path.join(winUnpackedDir, "app.exe"));
-      // nativeBindingPathが解決済みの絶対パスとして子プロセス引数に渡っていること。
-      expect(calls.spawnCalls[0]!.args).toContain(nativeFile);
+      // boss メタレビュー M3対応: nativeBindingPathが解決済みの絶対パスとして子プロセス引数に
+      // 渡っていることを、単なる包含(toContain)ではなく**完全一致・順序込み**で固定する
+      // (旧toContainでは引数順序を入れ替える変異〈nativeBindingPath/resourcesPath/tmpDbPathの
+      // 並びを崩す〉を検出できず、boss実測で36件全緑のまま素通りした)。
+      // 子スクリプト(artifact-gate-smoke-child.cjs)は argv[2]=nativeBindingPath,
+      // argv[3]=expectedResourcesPath, argv[4]=tmpDbPath の順で読む契約のため、
+      // このファイル側もその順序どおりに渡していることを直接固定する。
+      const resourcesPath = path.join(winUnpackedDir, "resources");
+      expect(calls.spawnCalls[0]!.args).toEqual([
+        nativeFile,
+        resourcesPath,
+        path.join(fakeTmpDir, "smoke.db"),
+      ]);
       expect(calls.rmCalls).toEqual([fakeTmpDir]);
     } finally {
       tearDown();
@@ -622,6 +711,96 @@ describe("runSmokeCheck(スモーク駆動の配線・resolveVerifiedNativeBindi
 });
 
 // ---------------------------------------------------------------------------
+// M3対応: 子プロセス(artifact-gate-smoke-child.cjs)のargv位置契約を、子スクリプト単独を
+// plain node で直接起動して固定する(runSmokeCheckの内部配線だけでなく、2ファイル間の
+// 実際の引数受け渡し契約そのものを検証する。boss実測: 引数順序を入れ替える変異が36件全緑で
+// 素通りしていた)。
+// ---------------------------------------------------------------------------
+
+describe("子プロセス(artifact-gate-smoke-child.cjs)のargv位置契約(M3対応)", () => {
+  const SMOKE_CHILD_SCRIPT_ABS_PATH = path.join(
+    REPO_ROOT,
+    "scripts/artifact-gate-smoke-child.cjs",
+  );
+
+  function runChild(args: [string, string, string]): { ok: boolean; reason?: string } {
+    // plain node(Electronではない)で直接起動する。process.resourcesPathは常にundefinedのため、
+    // argv[3](expectedResourcesPath)との不一致で必ずfail()し、その理由文にargv[3]の値が
+    // そのまま載る。これを使ってargv[3]の位置を直接特定する。
+    const result = spawnSync(process.execPath, [SMOKE_CHILD_SCRIPT_ABS_PATH, ...args], {
+      encoding: "utf8",
+    });
+    const sentinelLine = (result.stdout ?? "")
+      .split("\n")
+      .find((line) => line.startsWith(SMOKE_SENTINEL_PREFIX));
+    if (sentinelLine === undefined) {
+      throw new Error(`センチネル出力が無い: stdout=${result.stdout} stderr=${result.stderr}`);
+    }
+    return JSON.parse(sentinelLine.slice(SMOKE_SENTINEL_PREFIX.length)) as {
+      ok: boolean;
+      reason?: string;
+    };
+  }
+
+  it("argv[2]=nativeBindingPath, argv[3]=expectedResourcesPath, argv[4]=tmpDbPathの順で解釈する(1組目)", () => {
+    const sentinel = runChild(["NATIVE_BINDING_A", "RESOURCES_PATH_A", "TMP_DB_A"]);
+    expect(sentinel.ok).toBe(false);
+    if (sentinel.ok) throw new Error("到達しないはず");
+    // 前提固定: fail()の理由がprocess.resourcesPath不一致であること自体をまず無条件で固定する。
+    expect(sentinel.reason).toContain("process.resourcesPathが期待値と一致しません");
+    // argv[3]の値(RESOURCES_PATH_A)だけがexpected=として現れ、他の2値は現れないこと。
+    expect(sentinel.reason).toContain("RESOURCES_PATH_A");
+    expect(sentinel.reason).not.toContain("NATIVE_BINDING_A");
+    expect(sentinel.reason).not.toContain("TMP_DB_A");
+  });
+
+  it("argv[2]とargv[3]の値を入れ替えると、fail理由のexpected=も追随して入れ替わる(位置依存であることの直接固定。2組目)", () => {
+    // 1組目とは逆に、1番目の位置にRESOURCES_PATH寄りの値、2番目の位置にNATIVE_BINDING寄りの
+    // 値を置く。もしargv[2]を読んでいる(位置がずれている)変異が入っていれば、この期待は
+    // 1組目と矛盾する形で崩れる。
+    const sentinel = runChild(["RESOURCES_PATH_B", "NATIVE_BINDING_B", "TMP_DB_B"]);
+    expect(sentinel.ok).toBe(false);
+    if (sentinel.ok) throw new Error("到達しないはず");
+    expect(sentinel.reason).toContain("NATIVE_BINDING_B");
+    expect(sentinel.reason).not.toContain("RESOURCES_PATH_B");
+    expect(sentinel.reason).not.toContain("TMP_DB_B");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M5対応: spawnSync に timeout: SMOKE_TIMEOUT_MS が実際に渡っていることを固定する
+// (boss実測: timeoutオプションを削除する変異が36件全緑で素通りしていた。JSDocが
+// タイムアウトの目的〈ハングしたらジョブ上限まで回るのを防ぐ〉を明記しているのに未固定だった)。
+// ---------------------------------------------------------------------------
+
+describe("makeSmokeRealDeps().spawnChildがspawnSyncへtimeoutを実際に渡す(M5対応)", () => {
+  it("spawnSyncの第3引数(オプション)にtimeout: SMOKE_TIMEOUT_MSが含まれる", () => {
+    // node:child_process.spawnSync を(ファイル冒頭のvi.mockにより)vi.fn()化したものへ
+    // 一度だけ差し替え、実際のプロセスは起動しない(spawnChildRealのロジックだけを検証する)。
+    const mockedSpawnSync = vi.mocked(spawnSync);
+    const callsBefore = mockedSpawnSync.mock.calls.length;
+    mockedSpawnSync.mockReturnValueOnce({
+      pid: 0,
+      output: [],
+      stdout: "",
+      stderr: "",
+      status: 0,
+      signal: null,
+    } as unknown as ReturnType<typeof spawnSync>);
+
+    const deps = makeSmokeRealDeps("/dummy/win-unpacked");
+    deps.spawnChild("/dummy/win-unpacked/app.exe", ["a", "b", "c"]);
+
+    expect(mockedSpawnSync.mock.calls.length).toBe(callsBefore + 1);
+    const callArgs = mockedSpawnSync.mock.calls[callsBefore]!;
+    const options = callArgs[2] as { timeout?: number };
+    expect(options.timeout).toBe(SMOKE_TIMEOUT_MS);
+    // SMOKE_TIMEOUT_MS自体が0や未定義的な値に弱化されていないことも併せて固定する。
+    expect(SMOKE_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CLI配線: dispatch()のふるまい(release-gate.tsと同じ考え方。実際に返る終了コードで固定)
 // ---------------------------------------------------------------------------
 
@@ -644,55 +823,61 @@ describe("dispatch(CLI配線のふるまい)", () => {
 // (「報告してほしいもの」2: 壊したフィクスチャで各blockケースが実際にfailするログ)
 // ---------------------------------------------------------------------------
 
-describe("実プロセス起動: asar-layoutサブコマンドが壊れたapp.asarに対して実際にblockする", () => {
-  const RELEASE_DIR = path.join(REPO_ROOT, "packages/app/release");
-  const WIN_UNPACKED_DIR = path.join(RELEASE_DIR, "win-unpacked");
-  const RESOURCES_DIR = path.join(WIN_UNPACKED_DIR, "resources");
-  const APP_ASAR_PATH = path.join(RESOURCES_DIR, "app.asar");
+describe("実プロセス起動: asar-layoutサブコマンドが実際にblockする(一時ディレクトリに隔離。実リポジトリのファイルには一切触れない)", () => {
+  // boss メタレビュー【提案】対応: 旧版は作業ツリーの実
+  // packages/app/release/win-unpacked/resources/app.asar を rename退避→書き換え→復元していた。
+  // finallyで復元する設計だったが、プロセスが強制終了されると壊れたapp.asarと
+  // .artifact-gate-test-backup が残置されるリスクがあった。
+  // scripts/artifact-gate.ts の ARTIFACT_GATE_RELEASE_DIR_OVERRIDE 環境変数で、実プロセスの
+  // release ディレクトリ解決先を完全に隔離された一時ディレクトリへリダイレクトすることで、
+  // 実リポジトリのファイルに一切触れずに実プロセス経路(tsx起動→CLI→judgeAsarLayoutCommand→
+  // 実ファイル読み込み)を検証できるようにした。副作用ゼロなので finally での復元も不要になる
+  // (rmSyncで一時ディレクトリごと消すだけでよい)。
 
-  function ensureCorruptAsar(): { createdDirs: string[]; createdFile: boolean; backedUp: boolean } {
-    const createdDirs: string[] = [];
-    for (const dir of [RELEASE_DIR, WIN_UNPACKED_DIR, RESOURCES_DIR]) {
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-        createdDirs.push(dir);
-      }
-    }
-    const backedUp = existsSync(APP_ASAR_PATH);
-    if (backedUp) {
-      rmSync(`${APP_ASAR_PATH}.artifact-gate-test-backup`, { force: true });
-      // 既存の本物のapp.asarをテスト後に戻すためリネーム退避する。
-      renameSync(APP_ASAR_PATH, `${APP_ASAR_PATH}.artifact-gate-test-backup`);
-    }
-    // 明らかに壊れているバイト列(16バイト未満)を書く。
-    writeFileSync(APP_ASAR_PATH, Buffer.from([1, 2, 3]));
-    return { createdDirs, createdFile: true, backedUp };
-  }
-
-  function cleanup(state: { createdDirs: string[]; createdFile: boolean; backedUp: boolean }): void {
-    if (state.backedUp) {
-      renameSync(`${APP_ASAR_PATH}.artifact-gate-test-backup`, APP_ASAR_PATH);
-    } else if (state.createdFile) {
-      rmSync(APP_ASAR_PATH, { force: true });
-    }
-    for (const dir of [...state.createdDirs].reverse()) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  function runAsarLayoutSubcommand(releaseDir: string): { status: number | null; combined: string } {
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", SCRIPT_ABS_PATH, "asar-layout"],
+      {
+        encoding: "utf8",
+        cwd: REPO_ROOT,
+        env: { ...process.env, ARTIFACT_GATE_RELEASE_DIR_OVERRIDE: releaseDir },
+      },
+    );
+    return {
+      status: result.status,
+      combined: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+    };
   }
 
   it("app.asarが16バイト未満に壊れていると、asar-layoutサブコマンドは終了コード1・::error::付きで実際に失敗する", () => {
-    const state = ensureCorruptAsar();
+    const releaseDir = mkdtempSync(path.join(tmpdir(), "keiba-artifact-gate-e2e-corrupt-"));
     try {
-      const result = spawnSync(
-        process.execPath,
-        ["--import", "tsx", SCRIPT_ABS_PATH, "asar-layout"],
-        { encoding: "utf8", cwd: REPO_ROOT },
-      );
-      expect(result.status).toBe(1);
-      const combined = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      const resourcesDir = path.join(releaseDir, "win-unpacked", "resources");
+      mkdirSync(resourcesDir, { recursive: true });
+      // 明らかに壊れているバイト列(16バイト未満)を書く。
+      writeFileSync(path.join(resourcesDir, "app.asar"), Buffer.from([1, 2, 3]));
+
+      const { status, combined } = runAsarLayoutSubcommand(releaseDir);
+
+      expect(status).toBe(1);
       expect(combined).toContain("::error::");
     } finally {
-      cleanup(state);
+      rmSync(releaseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("app.asar自体が存在しない場合も、asar-layoutサブコマンドは終了コード1・::error::付きで実際に失敗する(boss メタレビュー 要修正2: judgeAsarLayoutCommandのfail-closed分岐〈app.asarを読み込めません〉が実プロセス経路でも通ることの固定。壊れたファイルを置く旧テストは読み込み自体は成功するため、この分岐を一度も通していなかった)", () => {
+    const releaseDir = mkdtempSync(path.join(tmpdir(), "keiba-artifact-gate-e2e-missing-"));
+    try {
+      // win-unpacked/resources ディレクトリすら作らない(app.asarが存在しない状態そのもの)。
+      const { status, combined } = runAsarLayoutSubcommand(releaseDir);
+
+      expect(status).toBe(1);
+      expect(combined).toContain("::error::");
+      expect(combined).toContain("app.asar を読み込めません");
+    } finally {
+      rmSync(releaseDir, { recursive: true, force: true });
     }
   });
 });

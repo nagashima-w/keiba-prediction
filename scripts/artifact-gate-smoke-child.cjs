@@ -33,6 +33,10 @@
  * 4. DB操作は CREATE TABLE/INSERT/SELECT のみで、スキーマ移行経路は通らない
  * 5. ビルドマシン上のx64成果物のみ。ユーザー実機の環境差(VC++ランタイム・AVの隔離・
  *    %TEMP%の残骸)は対象外
+ * 6. スモークの実 exe 経路は Linux では原理的に実行できない(resolveSingleWinUnpackedExe が
+ *    `.exe` を要求するが、Linux 成果物の実行ファイルは `.exe` 拡張子を持たない)。ローカルで
+ *    通せるのは fake deps までで、実経路(実 exe を spawn して better-sqlite3 をロードする経路)
+ *    の検証は Windows CI が唯一の場所である
  *
  * センチネル出力のプレフィックスは scripts/artifact-gate.ts の SMOKE_SENTINEL_PREFIX と
  * 必ず一致させること(judgeSmokeOutcome が同じ文字列でパースする)。
