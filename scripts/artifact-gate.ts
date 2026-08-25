@@ -8,13 +8,37 @@
  * ネイティブモジュールの破綻を原理的に検出できない。
  *
  * ## 設計の核心(boss の着手前ゲートで実測により確定。推測で変えないこと)
- * 壊れていた v1.3.1 の実物 exe を検査すると、配置検査4項目(当初案)すべてが PASS した。
- * 一方ヘッドレススモークは `NODE_MODULE_VERSION 127 ... requires 132` で実際に FAIL した
- * (.node は存在しサイズもあるのに Electron からロードできない状態)。**ABI 不一致は配置検査
+ *
+ * 【実測の訂正(#62 メタレビュー2巡目で発覚)】当初は「壊れていた v1.3.1 の実物 exe を検査すると
+ * 配置検査4項目(当初案)は PASS したが、ヘッドレススモークは
+ * `NODE_MODULE_VERSION 127 ... requires 132` で実際に FAIL した」と記述していたが、これは誤り
+ * だった。v1.3.1 実物の `.node` をバイナリレベルで実測すると `nm_version=132`
+ * (Electron 34 向けに正しくビルド済み)であり、**配置検査・スモークとも実際には allow を返す**
+ * (`.node` は 1,918,976 バイトで実在・asar ヘッダ上 `unpacked: true`・`dist` 3点も実在。
+ * 読み取り方法は下記参照)。127→132 のエラーは、Node 向け(NODE_MODULE_VERSION=127)の `.node`
+ * を Electron 向け配置へ注入した対照実験で再現したものであり、v1.3.1 の実物から出たものでは
+ * なかった。
+ *
+ * 【この対照実験で確認できたこと(2段構成の根拠。ここは変わらない)】配置検査は asar のヘッダ
+ * (ファイルの存在・展開状態)しか見ず `.node` の中身(ABI)を一切読まないため、原理的に ABI
+ * 不一致を検出できない。実際、Node 向け `.node` を注入すると配置検査4項目(当初案)はすべて
+ * PASS したが、ヘッドレススモークは `NODE_MODULE_VERSION 127 ... requires 132` で実際に FAIL
+ * した(.node は存在しサイズもあるのに Electron からロードできない状態)。**ABI 不一致は配置検査
  * では1件も検出できない。** そのため本モジュールは
  *   (1) asar 配置検査(縮小版・A1/A2。スモークが subsume しない部分だけを残す)
  *   (2) ヘッドレススモーク(本命)
  * の2段構成にする。
+ *
+ * 【nm_version の実測方法(次に読む人が同じ調査を繰り返さないための記録)】ネイティブアドオンは
+ * `node_module` 構造体を静的データとして埋め込む(レイアウト: `nm_version` int(+0)・
+ * `nm_flags` unsigned(+4)・`nm_dso_handle` void*(+8)・`nm_filename` char*(+16)・
+ * `nm_register_func`(+24)・`nm_context_register_func`(+32)・`nm_modname` char*(+40))。
+ * バイナリ中で `nm_modname`("better_sqlite3" 文字列)を指す絶対アドレスの QWORD を探し、
+ * そこから40バイト遡った位置の int32 が `nm_version`(`nm_flags==0` であることも整合性チェックに
+ * 使える)。この方法を、正解が既知の2検体(現行 Node 向け `.node` → 127。
+ * `process.versions.modules` と一致/ electron-rebuild 済み `.node` → 132。Electron 34 と一致)
+ * で裏取りしたうえで v1.3.1 実物 exe の `.node`(PE32+)に適用し、`nm_version=132`
+ * (`nm_flags=0`)を確認した。
  *
  * スモークは「本番と同じ呼び出し経路(スタック起点)」ではなく「本番と同じメカニズム」を追う。
  * better-sqlite3/lib/database.js は nativeBinding を文字列で渡された瞬間 bindings を一切

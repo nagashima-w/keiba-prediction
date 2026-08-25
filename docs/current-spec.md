@@ -328,9 +328,12 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     fail-closed で block する。asar ヘッダのバイト列パーサ(`parseAsarHeader`)は
     `@electron/asar` の実出力を実測して確定した実フォーマットに従う(新規依存は追加していない。
     pnpm 環境で `@electron/asar` を `require.resolve` できないため)。
-  - **ヘッドレススモーク**(`smoke`。本命): 壊れていた v1.3.1 の実物 exe を検査すると asar
-    配置検査4項目(当初案)すべてが PASS した一方、ABI 不一致(`NODE_MODULE_VERSION` 不一致)は
-    配置検査では1件も検出できないことが実測で判明したため、こちらが本命。
+  - **ヘッドレススモーク**(`smoke`。本命): 配置検査は asar のヘッダ(ファイルの存在・展開状態)
+    しか見ず `.node` の中身(ABI)を一切読まないため、ABI 不一致を原理的に検出できない
+    (Node 向け `.node` を注入した対照実験で確認済み。配置検査4項目〈当初案〉はすべて PASS した
+    一方、ヘッドレススモークは `NODE_MODULE_VERSION` 不一致で実際に FAIL した)ため、こちらが本命
+    (**v1.3.1 の実物 exe 自体は当初案・スモークともに allow を返す**。誤りだった旧記述の訂正と
+    実測方法は下記「この検査が実際に何を検出できるのか」を参照)。
     `win-unpacked/*.exe` を一意に解決し(0個/複数個は block)、本番と同一の
     `resolveVerifiedNativeBindingPath` を呼んでネイティブバインディングの絶対パスを得たうえで、
     `spawnSync(exe, [子スクリプト, nativeBindingPath, resourcesPath, tmpDbPath], { env:
@@ -355,9 +358,13 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     メカニズムで叩けることを見るだけで、本番コードがそのメカニズムを使っているかは見ない。
     この配線は `packages/app/test/ipc-native-binding.test.ts` が守る)。
   - **この検査が実際に何を検出できるのか**: 本検査は v1.3.1 の実物 exe(`.node` が
-    1,918,976 バイトで実在・asar ヘッダ上 `unpacked: true`・`dist` 3点も実在)に対し
+    1,918,976 バイトで実在・asar ヘッダ上 `unpacked: true`・`dist` 3点も実在・
+    `nm_version=132`〈Electron 34 向けに正しくビルド済み〉)に対し
     A1/A2・スモークとも実際に allow を返す(実測確認済み。#60当時の壊れ方はこの検査には
-    映らない)。#60 の真因は `bindings` パッケージの呼び出し元スタック走査であり、そのメカニズムは
+    映らない。`nm_version` はネイティブアドオンが埋め込む `node_module` 構造体〈`nm_modname`
+    〈+40〉から40バイト遡った位置が `nm_version`〈+0〉〉をバイナリから直接読み取って確認した。
+    詳細は `scripts/artifact-gate.ts` 冒頭「設計の核心」参照)。#60 の真因は `bindings`
+    パッケージの呼び出し元スタック走査であり、そのメカニズムは
     #61 で除去済みのため、本検査は成果物を*現行(#61後)のメカニズムで*叩くだけで、v1.3.1 当時の
     壊れ方(呼び出し元スタックに依存した解決失敗)そのものは原理的に再現しない。本検査が守るのは、
     #61 が新たに単一障害点にした「ハードコードされた絶対パスが実物の配置と一致すること」と、
