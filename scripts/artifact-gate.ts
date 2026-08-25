@@ -615,11 +615,37 @@ function formatLogLine(result: GateResult, okLabel: string): string {
   return result.message !== undefined ? `::warning::${result.message}` : okLabel;
 }
 
-export async function dispatch(argv: string[]): Promise<DispatchOutcome> {
+/**
+ * dispatch() が判定核を呼ぶための依存(code-reviewer 再々レビュー指摘対応)。
+ *
+ * 背景: dispatch() は元々 judgeAsarLayoutCommand/runSmokeCheck を実I/O(readAsarFileReal/
+ * SMOKE_REAL_DEPS)へ直接ハードワイヤしており、依存注入の余地が無かった。そのため
+ * 「dispatch内部から想定外の例外が投げられてもrunMainがfail-closedで受け止める」ことを、
+ * release-gate.test.tsのrunMainテスト(deps注入で意図的にthrowさせる)と同じ手法で
+ * 検証できなかった。dispatch()/runMain() のJSDocは「release-gate.tsのrunMainと同じ考え方」と
+ * 明記しているため、テスト容易性の面でも同じ考え方に揃える。
+ *
+ * 既定値(REAL_DISPATCH_DEPS)を持つ省略可能引数にすることで、main() からの呼び出し
+ * (`runMain(process.argv.slice(2))`)は無改変のまま、テストだけが任意の deps を注入できる。
+ */
+export interface DispatchDeps {
+  readonly runAsarLayoutCheck: () => GateResult;
+  readonly runSmoke: () => GateResult;
+}
+
+const REAL_DISPATCH_DEPS: DispatchDeps = {
+  runAsarLayoutCheck: () => judgeAsarLayoutCommand({ readAsarFile: readAsarFileReal }),
+  runSmoke: () => runSmokeCheck(SMOKE_REAL_DEPS),
+};
+
+export async function dispatch(
+  argv: string[],
+  deps: DispatchDeps = REAL_DISPATCH_DEPS,
+): Promise<DispatchOutcome> {
   const [subcommand] = argv;
 
   if (subcommand === "asar-layout") {
-    const result = judgeAsarLayoutCommand({ readAsarFile: readAsarFileReal });
+    const result = deps.runAsarLayoutCheck();
     return {
       exitCode: resultToExitCode(result),
       // code-reviewer再レビュー【提案・対応任意】への対応: ARTIFACT_GATE_RELEASE_DIR_OVERRIDE は
@@ -636,7 +662,7 @@ export async function dispatch(argv: string[]): Promise<DispatchOutcome> {
   }
 
   if (subcommand === "smoke") {
-    const result = runSmokeCheck(SMOKE_REAL_DEPS);
+    const result = deps.runSmoke();
     return {
       exitCode: resultToExitCode(result),
       logs: [
@@ -657,9 +683,12 @@ export async function dispatch(argv: string[]): Promise<DispatchOutcome> {
  * dispatch() を try/catch で包み、想定外の例外を fail-closed(exit 1 + ::error::)で受け止める
  * (release-gate.ts の runMain と同じ考え方)。
  */
-export async function runMain(argv: string[]): Promise<DispatchOutcome> {
+export async function runMain(
+  argv: string[],
+  deps: DispatchDeps = REAL_DISPATCH_DEPS,
+): Promise<DispatchOutcome> {
   try {
-    return await dispatch(argv);
+    return await dispatch(argv, deps);
   } catch (error) {
     return {
       exitCode: 1,

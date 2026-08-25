@@ -58,8 +58,10 @@ import {
   parseAsarHeader,
   resolveSingleWinUnpackedExe,
   resultToExitCode,
+  runMain,
   runSmokeCheck,
   type AsarNode,
+  type DispatchDeps,
   type GateResult,
   type SmokeProcessOutcome,
   type SmokeRealDeps,
@@ -815,6 +817,88 @@ describe("dispatch(CLI配線のふるまい)", () => {
     const allow: GateResult = { status: "allow" };
     expect(resultToExitCode(block)).toBe(1);
     expect(resultToExitCode(allow)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 配線: runMain(main() の fail-closed ラッパ。code-reviewer 再々レビュー指摘対応)
+//
+// scripts/release-gate.ts の runMain には同種のテストが3件既にあり(過去に code-reviewer が
+// 同じ観点で指摘して追加されたもの)、artifact-gate.ts の runMain の JSDoc は「release-gate.ts の
+// runMain と同じ考え方」と明記している。にもかかわらずテストは移植されておらず、
+// dispatch()の"smoke"分岐をfail-openへ弱める変異が45件全緑のまま素通りしていた
+// (SMOKE_REAL_DEPSをgrepすると0件、というのが発見の端緒)。
+// release-gate.test.ts の describe("配線: runMain(...)") と同等の粒度(素通り確認・
+// Errorオブジェクトのthrow・非Errorオブジェクトのthrow)で固定する。
+// ---------------------------------------------------------------------------
+
+describe("配線: runMain(想定外の例外を fail-closed で受け止める。code-reviewer 再々レビュー指摘対応)", () => {
+  it("dispatch が正常に完了する場合は dispatch と同じ結果を返す(素通りの確認)", async () => {
+    const deps: DispatchDeps = {
+      runAsarLayoutCheck: () => ({ status: "allow" }),
+      runSmoke: () => ({ status: "block", message: "スモーク失敗(テスト用)" }),
+    };
+
+    const dispatchOutcome = await dispatch(["asar-layout"], deps);
+    const runMainOutcome = await runMain(["asar-layout"], deps);
+
+    expect(runMainOutcome).toEqual(dispatchOutcome);
+    expect(runMainOutcome.exitCode).toBe(0);
+  });
+
+  it("runAsarLayoutCheck が想定外の例外(Errorオブジェクト)を投げても exit 1 になり ::error:: と「予期しない例外」を含む(dispatch()のasar-layout分岐から想定外にthrowするケース)", async () => {
+    const deps: DispatchDeps = {
+      runAsarLayoutCheck: () => {
+        throw new Error("想定外の実I/O例外(権限エラー等を模擬)");
+      },
+      runSmoke: () => {
+        throw new Error("このテストでは未使用のはず");
+      },
+    };
+
+    const outcome = await runMain(["asar-layout"], deps);
+
+    expect(outcome.exitCode).toBe(1);
+    const logText = outcome.logs.join("\n");
+    expect(logText).toContain("::error::");
+    expect(logText).toContain("予期しない例外");
+    expect(logText).toContain("想定外の実I/O例外");
+  });
+
+  it("runSmoke が想定外の例外(Errorオブジェクト)を投げても exit 1 になり ::error:: と「予期しない例外」を含む(dispatch()のsmoke分岐から想定外にthrowするケース。本件レビューの発端そのもの)", async () => {
+    const deps: DispatchDeps = {
+      runAsarLayoutCheck: () => {
+        throw new Error("このテストでは未使用のはず");
+      },
+      runSmoke: () => {
+        throw new Error("想定外の実I/O例外(mkdtemp失敗等を模擬)");
+      },
+    };
+
+    const outcome = await runMain(["smoke"], deps);
+
+    expect(outcome.exitCode).toBe(1);
+    const logText = outcome.logs.join("\n");
+    expect(logText).toContain("::error::");
+    expect(logText).toContain("予期しない例外");
+    expect(logText).toContain("想定外の実I/O例外");
+  });
+
+  it("非Errorオブジェクトのthrow(文字列throw)でも exit 1 になる(release-gate.test.ts の runMain テストと同等の粒度)", async () => {
+    const deps: DispatchDeps = {
+      runAsarLayoutCheck: () => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "文字列 throw(非 Error オブジェクト)";
+      },
+      runSmoke: () => {
+        throw new Error("このテストでは未使用のはず");
+      },
+    };
+
+    const outcome = await runMain(["asar-layout"], deps);
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.logs.join("\n")).toContain("::error::");
   });
 });
 
