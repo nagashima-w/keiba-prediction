@@ -622,7 +622,16 @@ export async function dispatch(argv: string[]): Promise<DispatchOutcome> {
     const result = judgeAsarLayoutCommand({ readAsarFile: readAsarFileReal });
     return {
       exitCode: resultToExitCode(result),
-      logs: [formatLogLine(result, "asar 配置検査: 問題ありません(A1/A2 を満たしています)")],
+      // code-reviewer再レビュー【提案・対応任意】への対応: ARTIFACT_GATE_RELEASE_DIR_OVERRIDE は
+      // CI では未設定を前提にしており(yml で設定していない)、誤設定・混入があっても
+      // 存在しないディレクトリを指すだけなら fail-closed で実害は無い。ただし「検査が実際に
+      // どのディレクトリを見たか」をCIログに残しておけば、意図しない設定漏れ・混入に
+      // 気づきやすくなる(#45の据え置き検査が「実際に比較したこと」をログ行で示しているのと
+      // 同じ発想)。判定結果とは無関係に常に出す。
+      logs: [
+        `release ディレクトリの解決先: ${RELEASE_DIR}`,
+        formatLogLine(result, "asar 配置検査: 問題ありません(A1/A2 を満たしています)"),
+      ],
     };
   }
 
@@ -630,7 +639,10 @@ export async function dispatch(argv: string[]): Promise<DispatchOutcome> {
     const result = runSmokeCheck(SMOKE_REAL_DEPS);
     return {
       exitCode: resultToExitCode(result),
-      logs: [formatLogLine(result, "ヘッドレススモーク: 問題ありません(DB作成・読み書きに成功しました)")],
+      logs: [
+        `release ディレクトリの解決先: ${RELEASE_DIR}`,
+        formatLogLine(result, "ヘッドレススモーク: 問題ありません(DB作成・読み書きに成功しました)"),
+      ],
     };
   }
 

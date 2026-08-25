@@ -862,6 +862,11 @@ describe("実プロセス起動: asar-layoutサブコマンドが実際にblock�
 
       expect(status).toBe(1);
       expect(combined).toContain("::error::");
+      // 【提案・対応任意】ARTIFACT_GATE_RELEASE_DIR_OVERRIDEの解決結果がログに残ること
+      // (誤設定・混入への気づきやすさのため)。ログ行の正確な形式を固定する(単なる
+      // releaseDir文字列の包含だと、この後の分岐のエラーメッセージ自体がたまたま
+      // パスを含む場合に空振りする恐れがあるため、ログ行のプレフィックスごと固定する)。
+      expect(combined).toContain(`release ディレクトリの解決先: ${releaseDir}`);
     } finally {
       rmSync(releaseDir, { recursive: true, force: true });
     }
@@ -876,6 +881,73 @@ describe("実プロセス起動: asar-layoutサブコマンドが実際にblock�
       expect(status).toBe(1);
       expect(combined).toContain("::error::");
       expect(combined).toContain("app.asar を読み込めません");
+      // 注意: readFileSyncのENOENTメッセージ自体にAPP_ASAR_PATH(releaseDir配下)が含まれるため、
+      // 単なるtoContain(releaseDir)は専用ログ行が無くても偶然成立してしまう(実際に確認済み:
+      // ログ行を削除する回帰実験でこのit()だけ緑のまま素通りした)。ログ行の正確な形式
+      // (プレフィックス込み)で固定し直す。
+      expect(combined).toContain(`release ディレクトリの解決先: ${releaseDir}`);
+    } finally {
+      rmSync(releaseDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 実プロセス起動: smokeサブコマンド(CIが実際に呼ぶ本命の検査)がdispatch経路そのもので
+// 実際にblockすること(code-reviewer再レビュー指摘対応)
+// ---------------------------------------------------------------------------
+
+describe('実プロセス起動: smokeサブコマンドが実際にblockする(dispatch(["smoke"]) → runSmokeCheck(SMOKE_REAL_DEPS)という、CIが実際に呼び出す配線そのものを固定する)', () => {
+  // code-reviewer再レビュー指摘対応: SMOKE_REAL_DEPSをテストファイルでgrepすると0件で、
+  // dispatch()の"smoke"分岐を丸ごと{status:"allow"}に固定する変異が
+  // pnpm test(core 2047 / app 1333 / scripts 108)全緑のまま素通りした。
+  // 一方dispatch()の"asar-layout"分岐を同じ手法で固定すると、上の「実プロセス起動」describeが
+  // 正しく2件検出した(対照実験で確認済み)。つまりasar-layoutは保護されていてsmokeだけが
+  // 無防備という非対称があった。runSmokeCheckやjudgeSmokeOutcomeの単体テストがどれだけ手厚くても、
+  // それらをCIが実際に呼び出す配線(dispatch(["smoke"]) → SMOKE_REAL_DEPS → resultToExitCode →
+  // formatLogLine)自体が無固定では、この1行が壊れてもCI上「ヘッドレススモークテスト」ステップは
+  // 常に成功したままになり、#60が再発する経路をそのまま見逃す。
+  //
+  // SMOKE_REAL_DEPSは本番実I/O(makeSmokeRealDeps() = 既定でCIと同じ実resolveVerifiedNativeBindingPath
+  // 等)に固定されているため差し替えできない。asar-layout側と同じくARTIFACT_GATE_RELEASE_DIR_OVERRIDEで
+  // release ディレクトリの解決先だけを隔離された一時ディレクトリへリダイレクトし、
+  // win-unpackedが存在しない(.exeが0個の)状態を作ることで、実プロセス経由でblockを固定する
+  // (実リポジトリのファイルには一切触れない。asar-layout側と同じ設計)。
+
+  function runSmokeSubcommand(releaseDir: string): { status: number | null; combined: string } {
+    const result = spawnSync(
+      process.execPath,
+      ["--import", "tsx", SCRIPT_ABS_PATH, "smoke"],
+      {
+        encoding: "utf8",
+        cwd: REPO_ROOT,
+        env: { ...process.env, ARTIFACT_GATE_RELEASE_DIR_OVERRIDE: releaseDir },
+      },
+    );
+    return {
+      status: result.status,
+      combined: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+    };
+  }
+
+  it("win-unpackedディレクトリが存在しない(.exeが0個の)状態では、smokeサブコマンドは終了コード1・::error::付きで実際に失敗し、asar-layoutとは異なるメッセージ(.exe が見つかりません)を返す", () => {
+    const releaseDir = mkdtempSync(path.join(tmpdir(), "keiba-artifact-gate-e2e-smoke-missing-"));
+    try {
+      // win-unpackedディレクトリすら作らない(.exeが0個の状態そのもの)。
+
+      const { status, combined } = runSmokeSubcommand(releaseDir);
+
+      expect(status).toBe(1);
+      expect(combined).toContain("::error::");
+      expect(combined).toContain(".exe が見つかりません");
+      // 【提案・対応任意】ARTIFACT_GATE_RELEASE_DIR_OVERRIDEの解決結果がログに残ること。
+      // 注意: 「.exe が見つかりません」メッセージ自体がwinUnpackedDir(releaseDir配下)を
+      // 含むため、単なるtoContain(releaseDir)は専用ログ行が無くても偶然成立してしまう
+      // (実際に確認済み)。ログ行の正確な形式で固定し直す。
+      expect(combined).toContain(`release ディレクトリの解決先: ${releaseDir}`);
+      // dispatch()のsubcommand分岐が実際に機能していること(smoke分岐がasar-layoutの処理へ
+      // 誤って合流していないこと)を、asar-layout側の固有メッセージが現れないことで固定する。
+      expect(combined).not.toContain("app.asar を読み込めません");
     } finally {
       rmSync(releaseDir, { recursive: true, force: true });
     }
