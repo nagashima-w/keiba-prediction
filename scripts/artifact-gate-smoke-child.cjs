@@ -37,6 +37,10 @@
  *    `.exe` を要求するが、Linux 成果物の実行ファイルは `.exe` 拡張子を持たない)。ローカルで
  *    通せるのは fake deps までで、実経路(実 exe を spawn して better-sqlite3 をロードする経路)
  *    の検証は Windows CI が唯一の場所である
+ * 7. 本番コードが実際に nativeBinding を渡し続けることは本検査の対象外である(検査は成果物を
+ *    正しいメカニズムで叩けることを見るだけで、本番コードがそのメカニズムを使っているかは
+ *    見ない)。この配線は packages/app/test/ipc-native-binding.test.ts が守っており、
+ *    役割分担として正しい
  *
  * センチネル出力のプレフィックスは scripts/artifact-gate.ts の SMOKE_SENTINEL_PREFIX と
  * 必ず一致させること(judgeSmokeOutcome が同じ文字列でパースする)。

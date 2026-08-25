@@ -807,8 +807,20 @@ describe("makeSmokeRealDeps().spawnChildがspawnSyncへtimeoutを実際に渡す
 // ---------------------------------------------------------------------------
 
 describe("dispatch(CLI配線のふるまい)", () => {
-  it("未知のサブコマンドはblock相当(終了コード1)", async () => {
-    const outcome2 = await dispatch(["unknown-subcommand"]);
+  it("未知のサブコマンドはblock相当(終了コード1)。deps.runAsarLayoutCheck/runSmokeのどちらにも到達しない分岐であることをdeps自体で示す(boss再メタレビュー 提案1対応: dispatchのdeps引数を必須化したことに伴う呼び出し側修正)", async () => {
+    // 「未知のサブコマンド」分岐は deps.runAsarLayoutCheck / deps.runSmoke のどちらも
+    // 呼ばないため、渡す値は何でもよい。それを読者に分かる形にするため、両方が
+    // 呼ばれたら明示的に失敗するダミーdepsを渡す(呼ばれていないことも併せて固定する)。
+    const unreachableDeps: DispatchDeps = {
+      runAsarLayoutCheck: () => {
+        throw new Error("未知のサブコマンド分岐では呼ばれないはず(runAsarLayoutCheck)");
+      },
+      runSmoke: () => {
+        throw new Error("未知のサブコマンド分岐では呼ばれないはず(runSmoke)");
+      },
+    };
+
+    const outcome2 = await dispatch(["unknown-subcommand"], unreachableDeps);
     expect(outcome2.exitCode).toBe(1);
   });
 
@@ -884,7 +896,12 @@ describe("配線: runMain(想定外の例外を fail-closed で受け止める�
     expect(logText).toContain("想定外の実I/O例外");
   });
 
-  it("非Errorオブジェクトのthrow(文字列throw)でも exit 1 になる(release-gate.test.ts の runMain テストと同等の粒度)", async () => {
+  it("非Errorオブジェクトのthrow(文字列throw)でも exit 1 になり、throwされた値の内容がログに残る(release-gate.test.ts の runMain テストと同等の粒度 + boss再メタレビュー 提案2対応)", async () => {
+    // boss実測(Mu7): catch節の `String(error)` を `"(詳細不明)"` のような固定文言へ
+    // 弱める変異は、exit code・::error::の有無だけを見るアサーションでは検出できなかった
+    // (49件全緑)。#62全体が「止める検査は理由も出す」という主題である以上、非Errorの
+    // throwだけ理由が固定されていないのは一貫しない。throwされた値の内容そのものが
+    // ログに含まれることを直接固定する。
     const deps: DispatchDeps = {
       runAsarLayoutCheck: () => {
         // eslint-disable-next-line @typescript-eslint/no-throw-literal
@@ -898,7 +915,9 @@ describe("配線: runMain(想定外の例外を fail-closed で受け止める�
     const outcome = await runMain(["asar-layout"], deps);
 
     expect(outcome.exitCode).toBe(1);
-    expect(outcome.logs.join("\n")).toContain("::error::");
+    const logText = outcome.logs.join("\n");
+    expect(logText).toContain("::error::");
+    expect(logText).toContain("文字列 throw(非 Error オブジェクト)");
   });
 });
 

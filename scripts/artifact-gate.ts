@@ -24,6 +24,16 @@
  * 検査だけ通り続けてしまうため)。
  *
  * ## 射程外(#60型の症状を検出できない、とは書かない。#61以降それは事実として誤り)
+ *
+ * 【この検査が実際に何を検出できるのか(boss 再メタレビュー 提案3対応)】
+ * 本検査は v1.3.1 の実物 exe(`.node` が 1,918,976 バイトで実在・asar ヘッダ上 `unpacked: true`・
+ * `dist` 3点も実在)に対し A1/A2・スモークとも実際に allow を返す(実測確認済み。#60当時の
+ * 壊れ方はこの検査には映らない)。#60 の真因は `bindings` パッケージの呼び出し元スタック走査
+ * であり、そのメカニズムは #61 で除去済みのため、本検査は成果物を*現行(#61後)のメカニズムで*
+ * 叩くだけで、v1.3.1 当時の壊れ方(呼び出し元スタックに依存した解決失敗)そのものは原理的に
+ * 再現しない。本検査が守るのは、#61 が新たに単一障害点にした「ハードコードされた絶対パスが
+ * 実物の配置と一致すること」と、ABI・asar・配置の破綻という(#60より)より広いクラスである。
+ *
  * 1. 検査対象は win-unpacked であり、portable exe 自身の自己展開(%TEMP%への展開)は通らない
  * 2. ELECTRON_RUN_AS_NODE=1 は Electron の Node 部分だけを起動する。Chromium 初期化・
  *    app.whenReady・BrowserWindow・preload・renderer は動かないため、GUI起動時にしか
@@ -38,6 +48,10 @@
  *    `.exe` を要求するが、Linux 成果物の実行ファイルは `.exe` 拡張子を持たない)。ローカルで
  *    通せるのは fake deps までで、実経路(実 exe を spawn して better-sqlite3 をロードする経路)
  *    の検証は Windows CI が唯一の場所である
+ * 7. 本番コードが実際に nativeBinding を渡し続けることは本検査の対象外である(検査は成果物を
+ *    正しいメカニズムで叩けることを見るだけで、本番コードがそのメカニズムを使っているかは
+ *    見ない)。この配線は packages/app/test/ipc-native-binding.test.ts が守っており、
+ *    役割分担として正しい
  *
  * ## 終了コードの写像
  * `GateResult`/`resultToExitCode` は `scripts/release-gate.ts`(Issue #45)の型・規約に倣う。
@@ -625,8 +639,13 @@ function formatLogLine(result: GateResult, okLabel: string): string {
  * 検証できなかった。dispatch()/runMain() のJSDocは「release-gate.tsのrunMainと同じ考え方」と
  * 明記しているため、テスト容易性の面でも同じ考え方に揃える。
  *
- * 既定値(REAL_DISPATCH_DEPS)を持つ省略可能引数にすることで、main() からの呼び出し
- * (`runMain(process.argv.slice(2))`)は無改変のまま、テストだけが任意の deps を注入できる。
+ * boss 再メタレビュー【提案1】対応: 当初 dispatch() 自身にも既定値
+ * (`deps: DispatchDeps = REAL_DISPATCH_DEPS`)を持たせていたが、本番経路は常に
+ * `main() → runMain(argv)`(ここでのみ既定値 REAL_DISPATCH_DEPS が使われる)→
+ * `dispatch(argv, deps)`(runMain から常に deps が明示的に渡される)であり、dispatch 側の
+ * 既定値は本番経路から一度も評価されない dead default だった(boss実測: dispatch側の既定値を
+ * allowスタブへ差し替える変異〈Mu6〉が49件全緑で無検出)。dispatch を deps 必須にすることで、
+ * 既定値の所在を runMain 1箇所に集約し、この無検出の枝を消す。
  */
 export interface DispatchDeps {
   readonly runAsarLayoutCheck: () => GateResult;
@@ -638,10 +657,7 @@ const REAL_DISPATCH_DEPS: DispatchDeps = {
   runSmoke: () => runSmokeCheck(SMOKE_REAL_DEPS),
 };
 
-export async function dispatch(
-  argv: string[],
-  deps: DispatchDeps = REAL_DISPATCH_DEPS,
-): Promise<DispatchOutcome> {
+export async function dispatch(argv: string[], deps: DispatchDeps): Promise<DispatchOutcome> {
   const [subcommand] = argv;
 
   if (subcommand === "asar-layout") {
