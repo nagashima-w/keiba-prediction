@@ -23,7 +23,7 @@
  *   発売されていた一次証拠)。→ **ワイド・3連複は頭数による門前払いを一切しない**
  *   (`buildComboCandidates` が `comboSize > 出走頭数` のとき組合せ列挙自体が0件になる、という
  *   構造的な結果に委ねる。頭数チェックを本ファイルには書かない)。
- * - **反証C**: 既存 `bet-allocation-view.ts` の `buildRaceAllocation` は `resolvePlaceBetTarget`
+ * - **反証C**: 既存 `race-allocation.ts` の `buildRaceAllocation` は `resolvePlaceBetTarget`
  *   の可用性判定を「レース全体の表示ゲート」として使っている。本モジュールでは同じ関数を
  *   「複勝候補を載せるか否かの判定」に**格下げ**して再利用する(`combo-bet-allocation.ts` の
  *   JSDocが警告する「`resolvePlaceBetTarget` の結果を `topFinishCount` に誤用してはならない」
@@ -32,7 +32,7 @@
  * ## yosoガードの複勝適用(boss裁定・ブリーフ差し替え。反証Cの誤り訂正)
  *
  * 当初のブリーフは複勝候補の条件を3つ(`placeOddsMin`/`ev`/`isPositive`)としていたが、これは
- * `bet-allocation-view.ts:134` の `buildRaceAllocation` が `resolvePlaceBetTarget` より**手前**で
+ * `race-allocation.ts` の `buildRaceAllocation` が `resolvePlaceBetTarget` より**手前**で
  * 判定している `oddsStatus==="yoso"` ガードを取りこぼしていた(反証Cで頭数判定だけを論じた際に
  * 一緒に落とした)。実コードで確認した事実:
  * - `analysis-pipeline.ts:587` は `oddsStatus==="yoso"` のとき `computeEstimatedRaceEv`
@@ -78,7 +78,7 @@
  * 第4段のboss裁定B-2「閾値を揃える」により、`options.evConfig`(省略時は
  * `DEFAULT_EV_CONFIG`=閾値1.0)を`buildComboCandidates`へそのまま渡す。複勝候補は
  * `row.isPositive`(呼び出し元が`AppSettings.evThreshold`で既に判定済みの値)をそのまま使う
- * ため、呼び出し元(`mixed-allocation-view.ts`)が**同じ`evThreshold`から組み立てた`evConfig`**を
+ * ため、呼び出し元(`mixed-race-allocation.ts` の `buildMixedRaceAllocation`)が**同じ`evThreshold`から組み立てた`evConfig`**を
  * ここへ渡すことで、複勝・ワイド・3連複が同一の閾値・同一の厳密不等号(`ev > threshold`)で
  * 判定される(`bet-allocation-view.ts`の`evThresholdFootnote`「配分の対象はEV閾値を上回った
  * 買い目のみです」という注記と実際の判定基準を一致させる)。
@@ -98,8 +98,8 @@ import type {
   ComboOddsFetchOutcomeView,
   ComboOddsScrapeOutcomeView,
   OddsStatus,
-} from "../shared/analysis-types.js";
-import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./bet-allocation-view.js";
+} from "./analysis-types.js";
+import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-allocation.js";
 
 /** 券種横断の買い目候補ビルダーが対象にできる券種。 */
 export type MixedCandidateBetType = "place" | "wide" | "trio";
@@ -130,7 +130,7 @@ export interface MixedCandidateBuildOptions {
 
 /**
  * `buildMixedCandidates` が受け取るレース情報の最小構造(`AnalysisResult` からそのまま渡せる。
- * `RaceAllocationInput`〈bet-allocation-view.ts〉と同じ流儀の構造的最小型)。
+ * `RaceAllocationInput`〈race-allocation.ts〉と同じ流儀の構造的最小型)。
  */
 export interface MixedCandidateBuildInput {
   readonly oddsStatus: OddsStatus;

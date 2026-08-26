@@ -219,7 +219,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   合計が目標から大きく外れているときは信頼性低下の警告を出す(非有限値は表示しない)。
 - **券種横断の配分(機能D-2c・Issue #28)**: 複勝・ワイド・三連複を**同じ1つの予算枠**の中で
   `allocateGeneralBets`(`@keiba/core/ev/combo-bet-allocation`)により同時最適化する
-  (`renderer/mixed-allocation-view.ts`)。ワイド・三連複のオッズ取得(`includeComboOdds`・
+  (`shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
+  `renderer/mixed-allocation-view.ts` から分離した。表示データの導出〈`buildMixedAllocationDisplay`〉は
+  引き続き `renderer/mixed-allocation-view.ts` にある)。ワイド・三連複のオッズ取得(`includeComboOdds`・
   既定OFF)と、取得したオッズを実際に配分へ使うか(`includeWideInAllocation`/
   `includeTrioInAllocation`・それぞれ既定ON)は別設定に分けている(取得と採用の分離)。
   次のいずれかに該当すると、複勝専用の従来経路(`buildRaceAllocation`)の結果を**そのまま**使う

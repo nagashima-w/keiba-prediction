@@ -4,19 +4,21 @@ import type { AnalysisResult, AnalysisRow } from "../src/shared/analysis-types.j
 import {
   BET_ALLOCATION_UNSET_NOTE,
   buildAllocationNotices,
-  buildRaceAllocation,
   CROSS_RACE_OVERBET_NOTE,
   evThresholdFootnote,
   formatAllocationSummary,
   NOT_DIVERSIFIED_NOTE,
   formatBetLabel,
-  isBetAllocationUnset,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
   probabilitySumWarning,
+} from "../src/renderer/bet-allocation-view.js";
+import {
+  buildRaceAllocation,
+  isBetAllocationUnset,
   resolvePlaceBetTarget,
   type BetAllocationSettings,
-} from "../src/renderer/bet-allocation-view.js";
+} from "../src/shared/race-allocation.js";
 
 /** テスト用のAnalysisRowを組み立てる補助関数。 */
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {

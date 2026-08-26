@@ -12,10 +12,8 @@ import {
   evThresholdFootnote,
   formatAllocationSummary,
   formatBetLabel,
-  isBetAllocationUnset,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
-  type RaceAllocationView,
 } from "./bet-allocation-view.js";
 import {
   createMixedAllocationCache,
@@ -30,9 +28,10 @@ import {
   mixedBetTypeLabel,
   MIXED_ALLOCATION_INVALID_MESSAGE,
   totalUnjudgedCount,
-  type MixedAllocationSettings,
   type MixedRaceAllocationDisplayView,
 } from "./mixed-allocation-view.js";
+import { isBetAllocationUnset, type RaceAllocationView } from "../shared/race-allocation.js";
+import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
 import { INCLUDE_COMBO_ODDS_BATCH_NOTE } from "../shared/settings.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
@@ -867,8 +866,9 @@ export function BatchAnalysisView(
                     このブロックは常に判定対象)。券種横断の配分(buildMixedAllocationDisplay)
                     へ切り替え済み(D-2のフォールバック規則により、対象外設定時は既存の
                     複勝専用経路と完全に同じ結果になる)。greedySteps(貪欲配分の刻み幅)が
-                    券種構成比を左右する事実・Issue #36の詳細は mixed-allocation-view.ts の
-                    JSDoc参照(本タスクではgreedySteps自体は変更しない)。
+                    券種構成比を左右する事実・Issue #36の詳細は shared/mixed-race-allocation.ts の
+                    JSDoc参照(Issue #57で計算本体と共にそちらへ移設した。本タスクではgreedySteps
+                    自体は変更しない)。
                     AC21: レース単位でメモ化する(details開閉等の再レンダーで再計算しない)。
                   */}
                   {!betAllocationUnset &&

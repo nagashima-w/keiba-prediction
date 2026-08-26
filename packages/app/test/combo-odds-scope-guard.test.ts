@@ -27,11 +27,25 @@ import { describe, expect, it } from "vitest";
  *
  * 文言の直書き禁止(対応表A2「JSXに文言を直書きしない」)もここで固定する:
  * SettingsView.tsx/BatchAnalysisView.tsxが定数を経由して文言を表示し、生文字列を二重管理していないこと。
+ *
+ * 【Issue #57でさらに改訂】配分計算の純関数を`renderer`から`shared`へ移設したことに伴い、
+ * 以下の2点を空振り防止アサートの付け替え・期待値の更新で継承する(アサーションの強度は
+ * 弱めていない。むしろ受け入れ条件9は1ファイル→2ファイルの検証に拡張した):
+ * - 受け入れ条件1: `buildMixedCandidates`の定義は`renderer/mixed-candidates.ts`から
+ *   `shared/mixed-candidates.ts`へ(ファイル名は変えず移動のみ)。唯一の承認された呼び出し元も
+ *   `renderer/mixed-allocation-view.ts`から`shared/mixed-race-allocation.ts`(移設後の
+ *   `buildMixedRaceAllocation`)へ変わった。
+ * - 受け入れ条件9: `buildRaceAllocation`(複勝専用の配分計算本体)は
+ *   `renderer/bet-allocation-view.ts`から`shared/race-allocation.ts`へ移設した。元の
+ *   「bet-allocation-view.tsが組合せオッズに無関与」という1ファイルの保証を、
+ *   分割後の2ファイル(`shared/race-allocation.ts`=計算・`renderer/bet-allocation-view.ts`=表示)
+ *   それぞれについて個別に検証する形に拡張し、保証の対象範囲を移設前と同じ(むしろ広く)保つ。
  */
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.join(currentDir, "../src");
 const rendererDir = path.join(srcDir, "renderer");
+const sharedDir = path.join(srcDir, "shared");
 
 /** ディレクトリ配下の対象拡張子ファイルを再帰的に読み込み、パス→内容のMapを返す。 */
 function readSourceFiles(dir: string, extensions: readonly string[]): Map<string, string> {
@@ -136,29 +150,35 @@ describe("listCallerFiles(テストヘルパーの自己検証)", () => {
   });
 });
 
-describe("受け入れ条件1(第4段で改訂): buildMixedCandidatesの呼び出し元がmixed-allocation-view.ts以外に無いこと(単一定義の原則)", () => {
-  it("app/src配下(.ts/.tsx)を走査しても、mixed-candidates.ts自身とmixed-allocation-view.ts以外に呼び出しが無いこと", () => {
+describe("受け入れ条件1(第4段で改訂、Issue #57でさらに改訂): buildMixedCandidatesの呼び出し元がshared/mixed-race-allocation.ts以外に無いこと(単一定義の原則)", () => {
+  it("app/src配下(.ts/.tsx)を走査しても、shared/mixed-candidates.ts自身とshared/mixed-race-allocation.ts以外に呼び出しが無いこと", () => {
     const files = readSourceFiles(srcDir, [".ts", ".tsx"]);
     // 前提固定: 両ファイルに定義・呼び出しが実在すること(空振り防止)。
-    expect(files.has(path.join(rendererDir, "mixed-candidates.ts"))).toBe(true);
-    expect(files.has(path.join(rendererDir, "mixed-allocation-view.ts"))).toBe(true);
+    expect(files.has(path.join(sharedDir, "mixed-candidates.ts"))).toBe(true);
+    expect(files.has(path.join(sharedDir, "mixed-race-allocation.ts"))).toBe(true);
     const callers = listCallerFiles(files, "buildMixedCandidates", [
-      path.join(rendererDir, "mixed-candidates.ts"),
+      path.join(sharedDir, "mixed-candidates.ts"),
     ]);
-    // 唯一の承認された呼び出し元(mixed-allocation-view.ts)以外は無いこと。
-    // BatchAnalysisView.tsx等が単一定義の原則(D-2)を破って直接呼んでいないことの検知。
-    expect(callers).toEqual([path.join(rendererDir, "mixed-allocation-view.ts")]);
+    // 唯一の承認された呼び出し元(shared/mixed-race-allocation.ts の buildMixedRaceAllocation)
+    // 以外は無いこと。BatchAnalysisView.tsx等が単一定義の原則(D-2)を破って直接呼んでいないことの検知。
+    expect(callers).toEqual([path.join(sharedDir, "mixed-race-allocation.ts")]);
   });
 });
 
-describe("受け入れ条件9(第4段で改訂): bet-allocation-view.tsが単一定義の原則により組合せオッズに一切関与しないこと", () => {
-  it("bet-allocation-view.ts(複勝専用の配分計算本体)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
-    const source = readFileSync(
-      path.join(rendererDir, "bet-allocation-view.ts"),
-      "utf8",
-    );
+describe("受け入れ条件9(第4段で改訂、Issue #57でさらに改訂): 複勝専用の配分計算・表示が単一定義の原則により組合せオッズに一切関与しないこと", () => {
+  it("shared/race-allocation.ts(複勝専用の配分計算本体。Issue #57でbet-allocation-view.tsから分離)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
+    const source = readFileSync(path.join(sharedDir, "race-allocation.ts"), "utf8");
     // 前提固定: このファイルには複勝配分の中核関数が実在すること(空振り防止)。
     expect(source).toContain("export function buildRaceAllocation");
+    expect(source).not.toContain("wideCombo");
+    expect(source).not.toContain("trioCombo");
+    expect(source).not.toContain("comboOdds");
+  });
+
+  it("renderer/bet-allocation-view.ts(複勝専用の表示関数群)がwideCombo/trioCombo/comboOddsを一切参照していないこと", () => {
+    const source = readFileSync(path.join(rendererDir, "bet-allocation-view.ts"), "utf8");
+    // 前提固定: このファイルには複勝配分の表示関数が実在すること(空振り防止)。
+    expect(source).toContain("export function placeBetUnavailableMessage");
     expect(source).not.toContain("wideCombo");
     expect(source).not.toContain("trioCombo");
     expect(source).not.toContain("comboOdds");

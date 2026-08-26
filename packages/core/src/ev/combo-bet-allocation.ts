@@ -64,10 +64,11 @@
  * `BatchAnalysisView.tsx`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
  * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。**
  *
- * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/app/src/renderer/
- * mixed-allocation-view.ts` が `allocateGeneralBets` の呼び出しをtry/catchで保護し、例外を
- * `MixedRaceAllocationInvalid`(`kind:"invalid"`)へ変換して他レースの計算・画面全体に波及させない
- * (受け皿の実体はtry/catchブロック本体。表示側のテストは `packages/app/test/
+ * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/app/src/shared/
+ * mixed-race-allocation.ts`(Issue #57で`packages/app/src/renderer/mixed-allocation-view.ts`から
+ * 分離した`buildMixedRaceAllocation`)が `allocateGeneralBets` の呼び出しをtry/catchで保護し、
+ * 例外を `MixedRaceAllocationInvalid`(`kind:"invalid"`)へ変換して他レースの計算・画面全体に
+ * 波及させない(受け皿の実体はtry/catchブロック本体。表示側のテストは `packages/app/test/
  * mixed-allocation-view.test.ts` の **`AC17` を冠する describe 群**〈`grep -n "AC17"` で
  * 辿れる〉が固定している)。D-3着手時に改めて受け皿を新設する必要はない。
  *

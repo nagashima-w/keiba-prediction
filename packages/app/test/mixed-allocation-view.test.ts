@@ -18,20 +18,15 @@ import {
   type MixedCandidateBuildInput,
   type MixedCandidateDiagnostics,
   type PlaceCandidateDiagnostics,
-} from "../src/renderer/mixed-candidates.js";
-import {
-  buildRaceAllocation,
-  NOT_DIVERSIFIED_NOTE,
-  probabilitySumWarning,
-  resolvePlaceBetTarget,
-} from "../src/renderer/bet-allocation-view.js";
+} from "../src/shared/mixed-candidates.js";
+import { NOT_DIVERSIFIED_NOTE, probabilitySumWarning } from "../src/renderer/bet-allocation-view.js";
+import { buildRaceAllocation, resolvePlaceBetTarget } from "../src/shared/race-allocation.js";
 import {
   aggregateUnjudgedCounts,
   buildHiddenAllocationsBlocks,
   buildMixedAllocationBreakdown,
   buildMixedAllocationDisplay,
   buildMixedAllocationNotices,
-  buildMixedRaceAllocation,
   comboBetTypeNote,
   COMBO_EV_CALIBRATION_NOTE,
   formatHiddenAllocationsSummary,
@@ -46,9 +41,9 @@ import {
   splitAllocationsForDisplay,
   totalUnjudgedCount,
   type MixedAllocationDisplay,
-  type MixedAllocationSettings,
   type MixedAllocationSplit,
 } from "../src/renderer/mixed-allocation-view.js";
+import { buildMixedRaceAllocation, type MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
 import { formatYen } from "../src/renderer/verify-format.js";
 
 // ============================================================================

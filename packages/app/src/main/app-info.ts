@@ -3,6 +3,13 @@
 // main バンドルの起動時にネイティブ解決を要求してしまうため。
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 
+// Issue #57: CoreSummary/AppInfoの宣言実体は shared/app-info-types.ts に移設した
+// (shared → main の逆依存を作らないため。相対import範囲ガード〈Issue #57〉参照)。
+// 後方互換のため、このファイルからも従来どおり import { AppInfo, CoreSummary } from
+// "./app-info.js" で参照できるよう type export で再輸出する。
+import type { AppInfo, CoreSummary } from "../shared/app-info-types.js";
+export type { AppInfo, CoreSummary };
+
 /** アプリの表示名称(固定)。 */
 export const APP_NAME = "競馬期待値分析ツール";
 
@@ -19,32 +26,6 @@ export const APP_NAME = "競馬期待値分析ツール";
  * Phase 6 を再検討し、この文字列を更新すること。
  */
 export const APP_PHASE = "Phase 6(discord.js bot)のみ対象外(現行のexe配布はWebhook通知で完結)";
-
-/**
- * core から取り込んだ設定の要約。
- * レンダラーが core を直接 import せず(better-sqlite3 等のネイティブ依存を避けるため)、
- * IPC 経由で core の値を受け取れることを確認するための最小データ。
- */
-export interface CoreSummary {
-  /** バイアス補正を適用する最小サンプル数。 */
-  readonly minSampleForBias: number;
-  /** prior の下限。 */
-  readonly priorMin: number;
-  /** prior の上限。 */
-  readonly priorMax: number;
-}
-
-/** レンダラーへ返すアプリ情報。 */
-export interface AppInfo {
-  /** アプリ名称。 */
-  readonly appName: string;
-  /** アプリのバージョン(package.json 由来)。 */
-  readonly appVersion: string;
-  /** 開発フェーズ表示。 */
-  readonly phase: string;
-  /** core 設定の要約(core 読み込み確認用)。 */
-  readonly core: CoreSummary;
-}
 
 /**
  * アプリ情報を組み立てる純関数。
