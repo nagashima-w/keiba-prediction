@@ -101,7 +101,7 @@ export const BET_ALLOCATION_LABELS = {
  * **第4段(Issue #28)で「記録のみ」の記述を更新した(AC19)**: 取得したオッズは、
  * `includeWideInAllocation`/`includeTrioInAllocation`(下記 `ALLOCATION_BET_TYPE_LABELS`)が
  * ONの券種について実際に配分提案へ使われる(`shared/mixed-candidates.ts`。Issue #57で
- * `renderer/mixed-allocation-view.ts` から分離した)。「使うかどうかは
+ * `renderer/mixed-candidates.ts` から移動した。ファイル名は不変)。「使うかどうかは
  * 別設定に従う」という条件付きの表現にすることで、状態(このcheckboxがONで、かつ配分対象
  * checkboxがOFFのとき等)によらず文言が事実と食い違わないようにする(この欠陥クラスは
  * 本リポジトリで6回目。`c63d7b2`のレビュー観点参照)。
@@ -238,8 +238,8 @@ export interface AppSettings {
    *
    * **第4段(Issue #28)で「記録のみ」の制約を解除した(AC19)**: 取得したオッズは、
    * `includeWideInAllocation`/`includeTrioInAllocation`(下記)がONの券種について
-   * `shared/mixed-candidates.ts`(Issue #57で`renderer/mixed-allocation-view.ts`から分離)の
-   * 馬券配分提案に実際に使われる。第3段時点の「配分提案には
+   * `shared/mixed-candidates.ts`(Issue #57で`renderer/mixed-candidates.ts`から移動。
+   * ファイル名は不変)の馬券配分提案に実際に使われる。第3段時点の「配分提案には
    * 一切使わない」という記述は事実ではなくなったため削除した。
    */
   readonly includeComboOdds: boolean;

@@ -4,8 +4,12 @@
  * boss着手前ゲート(第2段Go)で確定した設計。第1段(`AnalysisResult` に `wideCombo?`/`trioCombo?`/
  * `comboOdds?` を追加)を土台に、`@keiba/core/ev/combo-bet-allocation` の汎用配分エンジン
  * (`allocateGeneralBets`)にそのまま渡せる `AllocationCandidate[]` を組み立てる純関数
- * `buildMixedCandidates` を提供する。**画面(`BatchAnalysisView.tsx`)・既存の複勝専用ビュー
- * (`bet-allocation-view.ts`)は一切変更しない**(本ファイルからは import するだけ)。
+ * `buildMixedCandidates` を提供する。**着手当時(第2段)は画面(`BatchAnalysisView.tsx`)・
+ * 既存の複勝専用ビュー(`bet-allocation-view.ts`)を一切変更しなかった**(本ファイルからは
+ * import するだけだった)。**追記(Issue #57)**: 本ファイル自体は `renderer/mixed-candidates.ts`
+ * から `shared/mixed-candidates.ts` へ移動した(ファイル名は不変)。import 先も
+ * `resolvePlaceBetTarget`/`PlaceBetUnavailableReason` の移設に伴い `./race-allocation.js`
+ * (旧`./bet-allocation-view.js`)へ変わっている(下記import文参照)。
  *
  * ## 反証(boss着手前ゲートで実コードから確認済み。実装方針の前提)
  *
