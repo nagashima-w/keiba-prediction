@@ -5,10 +5,14 @@ import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 
 // Issue #57: CoreSummary/AppInfoの宣言実体は shared/app-info-types.ts に移設した
 // (shared → main の逆依存を作らないため。相対import範囲ガード〈Issue #57〉参照)。
-// 後方互換のため、このファイルからも従来どおり import { AppInfo, CoreSummary } from
-// "./app-info.js" で参照できるよう type export で再輸出する。
-import type { AppInfo, CoreSummary } from "../shared/app-info-types.js";
-export type { AppInfo, CoreSummary };
+// re-exportシムは置かない(code-reviewer指摘: 呼び出し元は shared/api.ts が
+// "./app-info-types.js" から直接importしており、main/ipc.ts等はAPP_NAME/buildAppInfoしか
+// importしていないため、このファイル経由でAppInfo/CoreSummaryを参照する箇所が実在しない。
+// 「後方互換のため」という理由は事実に基づいていなかった)。型が必要な箇所は
+// "../shared/app-info-types.js" から直接importすること。本ファイルはbuildAppInfoの
+// 戻り値型としてAppInfoのみを使うため、CoreSummaryは(型のみで完結し値の使用は無いが)
+// importしない。
+import type { AppInfo } from "../shared/app-info-types.js";
 
 /** アプリの表示名称(固定)。 */
 export const APP_NAME = "競馬期待値分析ツール";

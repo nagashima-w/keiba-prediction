@@ -1,6 +1,9 @@
 /**
- * mixed-allocation-view — 券種横断(複勝・ワイド・三連複)の馬券配分の合成ロジック
- * (機能D-2c第4段・Issue #28)。
+ * mixed-allocation-view — 券種横断(複勝・ワイド・三連複)の馬券配分の表示データ導出
+ * (機能D-2c第4段・Issue #28)。**合成ロジック本体は Issue #57 で `shared/mixed-race-allocation.ts`
+ * へ移設した(下記「追記(Issue #57)」参照)。本ファイルの自己識別は移設後の実態に合わせて
+ * 書き換えている(code-reviewer指摘: `bet-allocation-view.ts`と同じ基準で自ファイルのタイトルにも
+ * 適用する)。
  *
  * 第1〜3段(組合せオッズを renderer まで運ぶ器・候補ビルダー `mixed-candidates.ts`・
  * 取得の有効化)を土台に、実際にユーザーへ提示する配分提案を合成する。**画面
