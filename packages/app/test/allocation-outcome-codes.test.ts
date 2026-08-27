@@ -18,7 +18,8 @@ import {
 
 /**
  * allocation-outcome-codes — Issue #58(#56-2)。見送り理由を「日本語文言」ではなく
- * 「文言を持たないコード」のタプル(route/fallbackReason/skipReasonCode/comboOdds)として
+ * 「文言を持たないコード」のタプル(route/unavailableReason/fallbackReason/skipReasonCode/
+ * comboOdds の全5フィールド)として
  * 復元できることを検証する。永続化(DB書き込み)自体は#59のスコープ。本ファイルは
  * `buildMixedRaceAllocationWithOutcome` が返すコードの正しさだけを検証する。
  */
