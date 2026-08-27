@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
   AnalysisStore,
+  type AnalysisAllocationMetaRecord,
   type AnalysisRecord,
 } from "../../src/ev/analysis-store.js";
 import { ScrapeCache } from "../../src/scraper/cache.js";
@@ -1780,6 +1781,321 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       // 単一トランザクションでなければ、race_combo_payouts側の例外前に既にコミット済みの
       // race_results行が残ってしまう。ここが緑のままだと原子性が壊れていても気づけない。
       expect(store.getResult("R1")).toBeUndefined();
+      store.close();
+    });
+  });
+
+  describe("配分提案の永続化(analysis_allocation_meta / analysis_bets、Issue #59)", () => {
+    /** テスト用のメタ行(#59スキーマ20列)を最小上書きで組み立てる。 */
+    function makeMeta(
+      overrides: Partial<AnalysisAllocationMetaRecord> = {},
+    ): AnalysisAllocationMetaRecord {
+      return {
+        route: "mixed",
+        unavailableReason: null,
+        fallbackReason: null,
+        skipReasonCode: null,
+        comboOddsWide: null,
+        comboOddsTrio: null,
+        bankroll: 100000,
+        perRaceCap: 10000,
+        kellyFraction: 0.5,
+        evThreshold: 1.0,
+        includeComboOdds: true,
+        includeWide: true,
+        includeTrio: true,
+        betUnit: 100,
+        greedySteps: 1000,
+        candidateCap: 2000,
+        modelId: "conditional-bernoulli",
+        modelApproximate: false,
+        oddsStatus: "result",
+        ...overrides,
+      };
+    }
+
+    /** analysis_allocation_meta の生行(snake_case)を取得する。 */
+    function rawMetaRow(store: AnalysisStore, analysisId: number): unknown {
+      return store.rawDatabase
+        .prepare(`SELECT * FROM analysis_allocation_meta WHERE analysis_id = ?`)
+        .get(analysisId);
+    }
+
+    it("AC2: route=unset のメタ行が全20列で固定どおりに保存されること(coreの配分計算に未到達=設定エコー以外は全null)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分unsetレース",
+          allocation: {
+            meta: makeMeta({
+              route: "unset",
+              fallbackReason: null,
+              skipReasonCode: null,
+              comboOddsWide: null,
+              comboOddsTrio: null,
+              bankroll: 0,
+              perRaceCap: 0,
+              includeComboOdds: false,
+              includeWide: true,
+              includeTrio: true,
+              betUnit: null,
+              greedySteps: null,
+              candidateCap: null,
+              modelId: null,
+              modelApproximate: null,
+              oddsStatus: "result",
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "unset",
+        unavailable_reason: null,
+        fallback_reason: null,
+        skip_reason_code: null,
+        combo_odds_wide: null,
+        combo_odds_trio: null,
+        bankroll: 0,
+        per_race_cap: 0,
+        kelly_fraction: 0.5,
+        ev_threshold: 1.0,
+        include_combo_odds: 0,
+        include_wide: 1,
+        include_trio: 1,
+        bet_unit: null,
+        greedy_steps: null,
+        candidate_cap: null,
+        model_id: null,
+        model_approximate: null,
+        odds_status: "result",
+      });
+      store.close();
+    });
+
+    it("AC2: route=place-only(includeComboOdds=false)のメタ行が全20列で固定どおりに保存されること(candidate_capはplace-only経路に存在しないためnull)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分place-onlyレース",
+          allocation: {
+            meta: makeMeta({
+              route: "place-only",
+              unavailableReason: null,
+              fallbackReason: "combo-odds-not-requested",
+              skipReasonCode: "reference-ev-not-positive",
+              comboOddsWide: null,
+              comboOddsTrio: null,
+              includeComboOdds: false,
+              betUnit: 100,
+              greedySteps: 1000,
+              candidateCap: null,
+              modelId: "conditional-bernoulli",
+              modelApproximate: false,
+              oddsStatus: "middle",
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "place-only",
+        unavailable_reason: null,
+        fallback_reason: "combo-odds-not-requested",
+        skip_reason_code: "reference-ev-not-positive",
+        combo_odds_wide: null,
+        combo_odds_trio: null,
+        bankroll: 100000,
+        per_race_cap: 10000,
+        kelly_fraction: 0.5,
+        ev_threshold: 1.0,
+        include_combo_odds: 0,
+        include_wide: 1,
+        include_trio: 1,
+        bet_unit: 100,
+        greedy_steps: 1000,
+        candidate_cap: null,
+        model_id: "conditional-bernoulli",
+        model_approximate: 0,
+        odds_status: "middle",
+      });
+      store.close();
+    });
+
+    it("AC2: route=mixed のメタ行が全20列で固定どおりに保存されること(candidate_cap・comboOdds診断値とも非null)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分mixedレース",
+          allocation: {
+            meta: makeMeta({
+              route: "mixed",
+              unavailableReason: null,
+              fallbackReason: null,
+              skipReasonCode: null,
+              comboOddsWide: "present",
+              comboOddsTrio: "present",
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "mixed",
+        unavailable_reason: null,
+        fallback_reason: null,
+        skip_reason_code: null,
+        combo_odds_wide: "present",
+        combo_odds_trio: "present",
+        bankroll: 100000,
+        per_race_cap: 10000,
+        kelly_fraction: 0.5,
+        ev_threshold: 1.0,
+        include_combo_odds: 1,
+        include_wide: 1,
+        include_trio: 1,
+        bet_unit: 100,
+        greedy_steps: 1000,
+        candidate_cap: 2000,
+        model_id: "conditional-bernoulli",
+        model_approximate: 0,
+        odds_status: "result",
+      });
+      store.close();
+    });
+
+    it("AC3(明細の一部): stake>0の明細行だけが保存され、bet_type・combo_keyがそのまま往復すること(#59決定(b)(c))", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分明細レース",
+          allocation: {
+            meta: makeMeta(),
+            bets: [
+              { betType: "place", comboKey: "07", stake: 300, odds: 2.5, ev: 1.2 },
+              { betType: "wide", comboKey: "0102", stake: 500, odds: 3.1, ev: 1.05 },
+              { betType: "trio", comboKey: "010203", stake: 100, odds: 12.4, ev: 1.4 },
+            ],
+          },
+        }),
+      );
+      const rows = store.rawDatabase
+        .prepare(
+          `SELECT bet_type, combo_key, stake, odds, ev FROM analysis_bets WHERE analysis_id = ? ORDER BY bet_type`,
+        )
+        .all(id);
+      expect(rows).toEqual([
+        { bet_type: "place", combo_key: "07", stake: 300, odds: 2.5, ev: 1.2 },
+        { bet_type: "trio", combo_key: "010203", stake: 100, odds: 12.4, ev: 1.4 },
+        { bet_type: "wide", combo_key: "0102", stake: 500, odds: 3.1, ev: 1.05 },
+      ]);
+      store.close();
+    });
+
+    it("AC4: allocationを渡さずに保存した分析には、メタ行・明細行のいずれも作られないこと(旧分析=記録なしとの区別)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(makeRecord({ raceId: "配分未指定レース" }));
+      expect(rawMetaRow(store, id)).toBeUndefined();
+      const betCount = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM analysis_bets WHERE analysis_id = ?`)
+        .get(id) as { c: number };
+      expect(betCount.c).toBe(0);
+      store.close();
+    });
+
+    it("AC4: 新テーブルが存在しない旧DBを開いても既存データが読め、テーブルが作成され、配分付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // 旧バージョン相当: analyses/analysis_horses のみの最小スキーマ(配分系テーブル自体が無い)。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          PRIMARY KEY (analysis_id, umaban)
+        );
+        INSERT INTO analyses (id, race_id, analyzed_at) VALUES (1, '旧分析レース', '2026-01-01T00:00:00.000Z');
+      `);
+      const store = new AnalysisStore({ database: db });
+      // 既存データ(旧分析)が読めること。
+      expect(store.listAnalyses({ raceId: "旧分析レース" })).toHaveLength(1);
+      // 新規保存(配分付き)ができること = 新テーブルが作成されていること。
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "旧DB配分レース",
+          allocation: { meta: makeMeta(), bets: [{ betType: "place", comboKey: "01", stake: 100, odds: 2.0, ev: 1.1 }] },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toMatchObject({ route: "mixed" });
+      store.close();
+    });
+
+    it("AC5-1(原子性): 明細のPRIMARY KEY違反(同一analysis_id・bet_type・combo_keyが2件)でsaveAnalysisがthrowし、analyses・analysis_horses・メタ・明細のどの行も残らないこと", () => {
+      const store = new AnalysisStore();
+      expect(() =>
+        store.saveAnalysis(
+          makeRecord({
+            raceId: "原子性違反レース",
+            allocation: {
+              meta: makeMeta(),
+              bets: [
+                { betType: "wide", comboKey: "0102", stake: 100, odds: 3.0, ev: 1.1 },
+                { betType: "wide", comboKey: "0102", stake: 200, odds: 3.0, ev: 1.1 }, // 同一キー重複
+              ],
+            },
+          }),
+        ),
+      ).toThrow();
+      // 単一トランザクションでなければ、analyses/analysis_horses/メタ行は例外前に
+      // 既にコミット済みのまま残ってしまう(race_combo_payoutsの原子性テストと同じ検出力)。
+      expect(store.listAnalyses({ raceId: "原子性違反レース" })).toHaveLength(0);
+      const counts = store.rawDatabase
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM analyses) AS analyses,
+             (SELECT COUNT(*) FROM analysis_horses) AS horses,
+             (SELECT COUNT(*) FROM analysis_allocation_meta) AS meta,
+             (SELECT COUNT(*) FROM analysis_bets) AS bets`,
+        )
+        .get() as { analyses: number; horses: number; meta: number; bets: number };
+      expect(counts).toEqual({ analyses: 0, horses: 0, meta: 0, bets: 0 });
+      store.close();
+    });
+
+    it("AC5-2: 配分行を持つ「版不明」分析をdeleteAnalysesWithUnknownPromptVersionで削除でき、FK制約違反にならず、配分の親子行も残らないこと", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "版不明配分レース",
+          promptVersion: null,
+          allocation: {
+            meta: makeMeta(),
+            bets: [{ betType: "place", comboKey: "01", stake: 100, odds: 2.0, ev: 1.1 }],
+          },
+        }),
+      );
+      expect(() => store.deleteAnalysesWithUnknownPromptVersion()).not.toThrow();
+      expect(store.listAnalyses({ raceId: "版不明配分レース" })).toHaveLength(0);
+      const counts = store.rawDatabase
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM analysis_allocation_meta WHERE analysis_id = ?) AS meta,
+             (SELECT COUNT(*) FROM analysis_bets WHERE analysis_id = ?) AS bets`,
+        )
+        .get(id, id) as { meta: number; bets: number };
+      expect(counts).toEqual({ meta: 0, bets: 0 });
       store.close();
     });
   });

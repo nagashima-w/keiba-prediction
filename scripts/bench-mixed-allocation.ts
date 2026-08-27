@@ -89,6 +89,8 @@ async function loadAnalysisResult(): Promise<AnalysisResult> {
     // LLM未使用(analyze:null)。scorerが出すpriorがそのままadjustedProbになる(実prior)。
     analyze: null,
     saveAnalysis: () => 0,
+    // Issue #59: このスクリプトでは配分提案の永続化を検証しない(この呼び出しでは配分計算を行わない)。
+    allocationSettings: null,
   };
   // kaisaiDateを明示する(実レース日2026/06/28。#40「#35-1a」)。渡さないとresolveAnalysisDateが
   // 実行日(now())へフォールバックし、季節分類・休み明け走目の基準日が壁時計時刻とともに

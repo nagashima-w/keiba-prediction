@@ -262,6 +262,9 @@ export {
 } from "./ev/race-opportunity.js";
 export {
   AnalysisStore,
+  type AnalysisAllocationMetaRecord,
+  type AnalysisAllocationRecord,
+  type AnalysisBetRecord,
   type AnalysisFilter,
   type AnalysisHorseRecord,
   type AnalysisRecord,

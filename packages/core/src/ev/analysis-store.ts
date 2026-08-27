@@ -90,6 +90,8 @@ const RACE_RESULTS_TABLE = "race_results";
 const RACE_RESULT_META_TABLE = "race_result_meta";
 const RACE_COMBO_PAYOUTS_TABLE = "race_combo_payouts";
 const RACE_COMBO_PAYOUT_IMPORTS_TABLE = "race_combo_payout_imports";
+const ANALYSIS_ALLOCATION_META_TABLE = "analysis_allocation_meta";
+const ANALYSIS_BETS_TABLE = "analysis_bets";
 
 /**
  * 組合せ払戻(ワイド・3連複)で扱う券種一覧(Issue #52)。
@@ -176,6 +178,78 @@ export interface AnalysisRecord {
    * 〈main/analysis-export.ts の RaceSnapshot〉が定義・検証する)。
    */
   readonly raceSnapshot?: unknown;
+  /**
+   * 配分提案(Issue #59)。省略時(undefined)は配分メタ行・明細行のいずれも保存しない
+   * (呼び出し側が配分計算そのものを行わなかった=「未到達」であり、以前からの分析と区別が
+   * つかない旧形式のまま。#59 AC4「旧分析(記録なし)」に対応する)。
+   * 値を渡す場合は必ず meta を含める(全経路〈unset/yoso/unavailable/place-only/mixed/invalid〉で
+   * 1行書くのが#59の核心の不変条件。呼び出し側〈main/allocation-record.ts〉が保証する)。
+   */
+  readonly allocation?: AnalysisAllocationRecord;
+}
+
+/**
+ * 配分提案(Issue #59)のレース単位メタ + 明細行。
+ *
+ * route・betType・各種理由コードは呼び出し側(app shared/ の AllocationRouteCode 等)が
+ * 定義する文字列をそのまま受け取り、core はその意味を解釈しない(raceSnapshot: unknown と
+ * 同じ流儀。shared/ の型を core へ複製しない)。
+ */
+export interface AnalysisAllocationRecord {
+  readonly meta: AnalysisAllocationMetaRecord;
+  /** stake>0 の明細のみ(呼び出し側でフィルタ済みの前提。#59 決定(a))。 */
+  readonly bets: readonly AnalysisBetRecord[];
+}
+
+/** 配分提案のレース単位メタ行(#59 スキーマ。列一覧は固定。増減は停止条件)。 */
+export interface AnalysisAllocationMetaRecord {
+  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま受け取る。 */
+  readonly route: string;
+  /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
+  readonly unavailableReason: string | null;
+  /** app 側 PlaceOnlyFallbackReason。D-2フォールバックを通っていないときは null(未到達)。 */
+  readonly fallbackReason: string | null;
+  /** app 側 SkipReasonCode。coreの配分計算に未到達、または非skipのときは null。 */
+  readonly skipReasonCode: string | null;
+  /** app 側 ComboOddsAvailabilityCode(ワイド)。診断値を算出していなければ null(未到達)。 */
+  readonly comboOddsWide: string | null;
+  /** app 側 ComboOddsAvailabilityCode(3連複)。診断値を算出していなければ null(未到達)。 */
+  readonly comboOddsTrio: string | null;
+  /** 実効設定(実行時の値をそのまま記録。#59 決定(a): 復元不能な実効値)。 */
+  readonly bankroll: number;
+  readonly perRaceCap: number;
+  readonly kellyFraction: number;
+  readonly evThreshold: number;
+  readonly includeComboOdds: boolean;
+  readonly includeWide: boolean;
+  readonly includeTrio: boolean;
+  /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
+  readonly betUnit: number | null;
+  /** 貪欲逐次配分の分割数。betUnit と同じ到達条件。 */
+  readonly greedySteps: number | null;
+  /** 候補cap(組合せ券種のみに存在する暴走ガード)。複勝のみの経路〈place-only〉には無いため null。 */
+  readonly candidateCap: number | null;
+  /** 配分結果の同時分布モデルID。配分結果(BetAllocationResult/GeneralBetAllocationResult)を
+   * 実際に得られた経路〈place-only/mixed〉のみ非null。 */
+  readonly modelId: string | null;
+  /** 上記モデルが近似か。modelId と同じ到達条件。 */
+  readonly modelApproximate: boolean | null;
+  /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
+  readonly oddsStatus: string;
+}
+
+/** 配分提案の1買い目分の明細行(#59。複勝・ワイド・3連複を共通の形に統合)。 */
+export interface AnalysisBetRecord {
+  /** 券種。app 側の "place" | "wide" | "trio"。 */
+  readonly betType: string;
+  /** buildComboOddsKey(app 側が呼び出し済み)による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみを渡す前提(#59 決定(a))。 */
+  readonly stake: number;
+  /** 採用したオッズ。複勝は候補外ならありえないが、断定せずそのまま写す(null許容)。 */
+  readonly odds: number | null;
+  /** 期待値。odds と同じくそのまま写す。 */
+  readonly ev: number | null;
 }
 
 /** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
@@ -454,6 +528,47 @@ export class AnalysisStore {
         bet_type TEXT NOT NULL,
         PRIMARY KEY (race_id, bet_type)
       );
+      -- 配分提案(Issue #59)のレース単位メタ行。全経路(unset/yoso/unavailable/place-only/
+      -- mixed/invalid)で必ず1行書く契約(#31: 判定不能と判定結果を混ぜない)。列一覧は
+      -- boss着手前ゲート・#59で固定。race_combo_payouts と同じ理由・同じ流儀で
+      -- CREATE TABLE IF NOT EXISTS を使う(新規テーブル追加であり既存データには触れない)。
+      CREATE TABLE IF NOT EXISTS ${ANALYSIS_ALLOCATION_META_TABLE} (
+        analysis_id INTEGER PRIMARY KEY,
+        route TEXT NOT NULL,
+        unavailable_reason TEXT,
+        fallback_reason TEXT,
+        skip_reason_code TEXT,
+        combo_odds_wide TEXT,
+        combo_odds_trio TEXT,
+        bankroll REAL NOT NULL,
+        per_race_cap REAL NOT NULL,
+        kelly_fraction REAL NOT NULL,
+        ev_threshold REAL NOT NULL,
+        include_combo_odds INTEGER NOT NULL,
+        include_wide INTEGER NOT NULL,
+        include_trio INTEGER NOT NULL,
+        bet_unit INTEGER,
+        greedy_steps INTEGER,
+        candidate_cap INTEGER,
+        model_id TEXT,
+        model_approximate INTEGER,
+        odds_status TEXT NOT NULL,
+        FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
+      );
+      -- 配分提案(Issue #59)の買い目明細(stake>0のみ、呼び出し側でフィルタ済み)。
+      -- 複勝・ワイド・3連複を bet_type 列だけで共通化する(GeneralBetAllocation/BetAllocationの
+      -- 両方が continuousFraction/scaledFraction/stake/droppedBelowMinimum を持つため、保存列は
+      -- bet_type/combo_key/stake/odds/ev の5列〈+analysis_id〉に絞れる。#59決定(c))。
+      CREATE TABLE IF NOT EXISTS ${ANALYSIS_BETS_TABLE} (
+        analysis_id INTEGER NOT NULL,
+        bet_type TEXT NOT NULL,
+        combo_key TEXT NOT NULL,
+        stake INTEGER NOT NULL,
+        odds REAL,
+        ev REAL,
+        PRIMARY KEY (analysis_id, bet_type, combo_key),
+        FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
+      );
     `);
     this.migrateResultPayoutColumn();
     this.migrateMarkColumn();
@@ -627,6 +742,20 @@ export class AnalysisStore {
          (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+    // 配分提案(Issue #59)。record.allocation が渡されたときだけ書く(#59 AC4「旧分析(記録なし)」)。
+    const insertAllocationMeta = this.db.prepare(
+      `INSERT INTO ${ANALYSIS_ALLOCATION_META_TABLE}
+         (analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code,
+          combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
+          include_combo_odds, include_wide, include_trio, bet_unit, greedy_steps, candidate_cap,
+          model_id, model_approximate, odds_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertAllocationBet = this.db.prepare(
+      `INSERT INTO ${ANALYSIS_BETS_TABLE}
+         (analysis_id, bet_type, combo_key, stake, odds, ev)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
 
     const tx = this.db.transaction((rec: AnalysisRecord): number => {
       const info = insertAnalysis.run(
@@ -658,6 +787,41 @@ export class AnalysisStore {
           h.mark,
           h.reason ?? null,
         );
+      }
+      if (rec.allocation !== undefined) {
+        const m = rec.allocation.meta;
+        insertAllocationMeta.run(
+          analysisId,
+          m.route,
+          m.unavailableReason,
+          m.fallbackReason,
+          m.skipReasonCode,
+          m.comboOddsWide,
+          m.comboOddsTrio,
+          m.bankroll,
+          m.perRaceCap,
+          m.kellyFraction,
+          m.evThreshold,
+          m.includeComboOdds ? 1 : 0,
+          m.includeWide ? 1 : 0,
+          m.includeTrio ? 1 : 0,
+          m.betUnit,
+          m.greedySteps,
+          m.candidateCap,
+          m.modelId,
+          m.modelApproximate === null ? null : m.modelApproximate ? 1 : 0,
+          m.oddsStatus,
+        );
+        for (const b of rec.allocation.bets) {
+          insertAllocationBet.run(
+            analysisId,
+            b.betType,
+            b.comboKey,
+            b.stake,
+            b.odds,
+            b.ev,
+          );
+        }
       }
       return analysisId;
     });
@@ -1025,6 +1189,21 @@ export class AnalysisStore {
    * @returns 削除した分析(analyses行)の件数
    */
   deleteAnalysesWithUnknownPromptVersion(): number {
+    // 配分提案(Issue #59・analysis_allocation_meta/analysis_bets)も analyses(id) を
+    // 参照するFK(NO ACTION)を持つため、analysis_horsesと同様に親行より先に削除しないと
+    // FOREIGN KEY constraint failed で失敗する(#59 AC5-2。事前にこの経路の存在を実測確認済み)。
+    const deleteBets = this.db.prepare(
+      `DELETE FROM ${ANALYSIS_BETS_TABLE}
+         WHERE analysis_id IN (
+           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
+         )`,
+    );
+    const deleteAllocationMeta = this.db.prepare(
+      `DELETE FROM ${ANALYSIS_ALLOCATION_META_TABLE}
+         WHERE analysis_id IN (
+           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
+         )`,
+    );
     const deleteHorses = this.db.prepare(
       `DELETE FROM ${ANALYSIS_HORSES_TABLE}
          WHERE analysis_id IN (
@@ -1035,7 +1214,11 @@ export class AnalysisStore {
       `DELETE FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL`,
     );
     const tx = this.db.transaction((): number => {
-      // 先に子行(analysis_horses)を消してから親行(analyses)を消す(FK制約違反を避けるため)。
+      // 先に子行(analysis_bets → analysis_allocation_meta → analysis_horses)を消してから
+      // 親行(analyses)を消す(FK制約違反を避けるため)。bets/meta と horses の間に順序制約は
+      // 無い(互いを参照しない兄弟テーブル)が、いずれも analyses より先である必要がある。
+      deleteBets.run();
+      deleteAllocationMeta.run();
       deleteHorses.run();
       const info = deleteAnalyses.run();
       return info.changes;

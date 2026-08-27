@@ -126,6 +126,21 @@ export interface PipelineWiringConfig {
    */
   readonly includeComboOdds?: boolean;
   /**
+   * 配分提案(Issue #59)の設定5項目(`bankroll`/`perRaceCap`/`kellyFraction`/
+   * `includeWideInAllocation`/`includeTrioInAllocation`)。`includeComboOdds`は含めない
+   * (上記の`includeComboOdds`が単一ソース。ここへ二重に持たせない。#59 4節)。
+   * 省略時は `AnalysisPipelineDeps.allocationSettings` が null になり、この呼び出しでは
+   * 配分計算を行わない(既存呼び出し元・`pipeline-deps.test.ts`の20箇所超との後方互換のため
+   * このフィールド自体は任意のままとする。#59着手前確認済み)。
+   */
+  readonly allocationSettings?: {
+    readonly bankroll: number;
+    readonly perRaceCap: number;
+    readonly kellyFraction: number;
+    readonly includeWideInAllocation: boolean;
+    readonly includeTrioInAllocation: boolean;
+  };
+  /**
    * better-sqlite3 のネイティブバインディング(.node)の絶対パス(Issue #60-B)。
    *
    * 背景: bindings パッケージは呼び出し元のスタックトレースからモジュールルートを推測して
@@ -245,6 +260,9 @@ export function createPipelineDeps(
           maxAdjust: clipVariant.maxAdjust,
         })
     : null;
+  // 組合せオッズ取得可否(機能D-2c第3段・Issue #28)を1回だけ解決し、scrapeRace束縛と
+  // deps.allocationSettings(Issue #59)の両方にこの同じ値を使う(#59 4節「二重定義を作らない」)。
+  const includeComboOdds = config.includeComboOdds ?? false;
 
   const deps: AnalysisPipelineDeps = {
     // 組合せオッズ(ワイド・3連複、機能D-2c第3段・Issue #28): 設定画面のチェックボックス
@@ -255,12 +273,20 @@ export function createPipelineDeps(
     // 組合せオッズはcore側〈scrape-race.ts:446〉が単勝・複勝と同じoddsFetchOptionsを流用するため、
     // ここを触ると単勝・複勝のキャッシュ挙動まで変わる)。
     scrape: (raceId: RaceId) =>
-      scrapeRace(raceId, { fetcher }, { includeComboOdds: config.includeComboOdds ?? false }),
+      scrapeRace(raceId, { fetcher }, { includeComboOdds }),
     analyze,
     saveAnalysis: (record) => store.saveAnalysis(record),
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
+    // 配分提案(Issue #59)。config.allocationSettings(5項目)にincludeComboOdds(上で1回だけ
+    // 解決した値。scrape束縛と同じ値)を合成して6項目にする。config.allocationSettingsが
+    // 省略時はnull(この呼び出しでは配分計算を行わない。required-nullableの契約は
+    // analysis-pipeline.ts AnalysisPipelineDeps.allocationSettings参照)。
+    allocationSettings:
+      config.allocationSettings !== undefined
+        ? { ...config.allocationSettings, includeComboOdds }
+        : null,
     additionalInstruction: config.additionalInstruction,
     clipVariant: clipVariant.id,
     // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定モデル名(anthropic-client.tsの
