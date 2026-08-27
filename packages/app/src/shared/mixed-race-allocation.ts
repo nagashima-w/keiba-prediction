@@ -16,10 +16,12 @@ import {
   type GeneralBetAllocationConfig,
   type GeneralBetAllocationResult,
   type JointModelHorse,
+  type SkipReasonCode,
 } from "@keiba/core/ev/combo-bet-allocation";
 
 import {
   buildMixedCandidates,
+  type ComboCandidateDiagnosticsView,
   type MixedCandidateBuildInput,
   type MixedCandidateDiagnostics,
 } from "./mixed-candidates.js";
@@ -27,6 +29,7 @@ import {
   buildRaceAllocation,
   isBetAllocationUnset,
   type BetAllocationSettings,
+  type PlaceBetUnavailableReason,
   type RaceAllocationView,
 } from "./race-allocation.js";
 
@@ -170,53 +173,216 @@ function resolveMixedBetTypes(settings: MixedAllocationSettings): ("place" | "wi
 }
 
 /**
- * D-2フォールバック規則の条件①②(候補構築より前に判定できる、設定だけで決まる条件)。
- * 条件③(ワイド・三連複の候補合計0件)は候補構築後でないと判定できないため別途行う。
+ * D-2フォールバック規則の条件①(候補構築より前に判定できる)。
+ * `includeComboOdds` がOFF(ワイド・3連複のオッズ自体を取得していない)。
  */
-function shouldFallbackBeforeBuildingCandidates(settings: MixedAllocationSettings): boolean {
-  if (!settings.includeComboOdds) {
-    return true;
-  }
-  if (!settings.includeWideInAllocation && !settings.includeTrioInAllocation) {
-    return true;
-  }
-  return false;
+function isComboOddsNotRequested(settings: MixedAllocationSettings): boolean {
+  return !settings.includeComboOdds;
 }
 
 /**
- * 券種横断(複勝・ワイド・3連複)の馬券配分ビューを合成する。
+ * D-2フォールバック規則の条件②(候補構築より前に判定できる)。
+ * ワイド・3連複とも配分対象からOFF(オッズは取得していても配分には使わない設定)。
+ */
+function isComboBetTypesOff(settings: MixedAllocationSettings): boolean {
+  return !settings.includeWideInAllocation && !settings.includeTrioInAllocation;
+}
+
+/**
+ * Issue #58(#56-2)。見送り理由を「日本語文言」ではなく「文言を持たないコード」の
+ * タプルとして復元するための型群。#31(判定不能と判定結果を混ぜない)の踏襲——
+ * 各フィールドの `null` は「判定不能」ではなく「その層の判定に到達していない」ことを表す。
+ * 到達したか否かは `route` から一意に決まる(下記JSDoc参照)。
+ */
+
+/**
+ * 到達状態(層1)。`MixedRaceAllocationView` の判別子とは別に持つ理由は、
+ * `"place-only"` が既存の判別共用体には存在しない状態(D-2フォールバックにより
+ * `RaceAllocationView` の `kind:"computed"` へ潰れる)であるため。既存の
+ * `MixedRaceAllocationView` は一切変更しない(判断2)。
+ */
+export type AllocationRouteCode =
+  | "unset"
+  | "yoso"
+  | "unavailable"
+  | "place-only"
+  | "mixed"
+  | "invalid";
+
+/** D-2フォールバックの分岐理由(どの条件で複勝のみに落ちたか)。 */
+export type PlaceOnlyFallbackReason =
+  | "combo-odds-not-requested" // ① includeComboOdds=false
+  | "combo-bet-types-off" // ② ワイド・3連複とも配分対象OFF
+  | "no-combo-candidates"; // ③ ワイド・3連複の候補合計が0件
+
+/**
+ * 券種ごとの組合せオッズ可用性。`ComboCandidateDiagnosticsView`(診断値)からの純写像で、
+ * 新しい判定を足さない(`comboOddsAvailabilityFromDiagnostics`参照)。
+ *
+ * 注意: `empty`(空オブジェクト)の原因(市場側の発売なし/取得失敗)は`comboOddsState`
+ * でしか判別できないと`mixed-candidates.ts`のJSDocが明記している。本Issue #58では
+ * 保存対象に含めない(`empty`は「空だった」という事実だけを表し、原因は判定しない。
+ * #31準拠——原因不明を原因ラベルにしない)。#59で必要になれば別途追加する。
+ */
+export type ComboOddsAvailabilityCode = "not-requested" | "yoso" | "unfetched" | "empty" | "present";
+
+/**
+ * 見送り理由(判定不能ではなく判定結果)をコードのタプルとして復元するための型。
+ * 日本語文言(`skipReason`等)を経由せず、この4フィールドだけから状態を機械的に
+ * 区別できることをテストで固定する(`allocation-outcome-codes.test.ts`のAC1)。
+ *
+ * 各フィールドの`null`の意味(「未到達」であって「不明」ではない):
+ * - `unavailableReason`: `route==="unavailable"` のときのみ非null。
+ * - `fallbackReason`: D-2フォールバック分岐(①②③のいずれか)を通ったときのみ非null
+ *   (`route`が`"unavailable"`でも非nullになりうる。D-2フォールバックが
+ *   `buildRaceAllocation`を呼んだ結果、頭数不可で`kind:"unavailable"`になる場合)。
+ * - `skipReasonCode`: 層2。coreに到達し(`route`が`"place-only"`または`"mixed"`)、
+ *   かつ`isSkip`のときのみ非null。
+ * - `comboOdds`: `buildMixedCandidates`を実行したときのみ非null(実行していない=
+ *   判定不能ではなく、まだその判定に到達していないことをnullで表す)。
+ *   **`route==="invalid"`でも非nullになりうる**: `buildMixedCandidates`は
+ *   `allocateGeneralBets`の呼び出し(throwしうる)より前に実行済みであり、
+ *   「オッズが取得できていたか」という事実は`allocateGeneralBets`の成否と独立に
+ *   既に判定済みだから(裁定2026年。#31が禁じる「判定済みを未判定に潰す」方向を避ける)。
+ *
+ * `(route, skipReasonCode)`だけで「配分あり」と「core未到達」が区別できる
+ * (`allocation-outcome-codes.test.ts`の不変条件テストで固定):
+ * - `route`が`"unset"`/`"yoso"`/`"unavailable"`/`"invalid"`のいずれかならcore未到達。
+ * - `route`が`"place-only"`/`"mixed"`で`skipReasonCode===null`なら配分あり。
+ */
+export interface AllocationOutcomeCodes {
+  readonly route: AllocationRouteCode;
+  readonly unavailableReason: PlaceBetUnavailableReason | null;
+  readonly fallbackReason: PlaceOnlyFallbackReason | null;
+  readonly skipReasonCode: SkipReasonCode | null;
+  readonly comboOdds: { readonly wide: ComboOddsAvailabilityCode; readonly trio: ComboOddsAvailabilityCode } | null;
+}
+
+/**
+ * `ComboCandidateDiagnosticsView`(mixed-candidates.tsの診断値)から
+ * `ComboOddsAvailabilityCode`への純写像。新しい判定を発明しない
+ * (判別子と`fieldPresence`をそのまま読み替えるだけ)。
+ */
+export function comboOddsAvailabilityFromDiagnostics(
+  diagnostics: ComboCandidateDiagnosticsView,
+): ComboOddsAvailabilityCode {
+  switch (diagnostics.kind) {
+    case "not-requested":
+      return "not-requested";
+    case "yoso":
+      return "yoso";
+    case "built":
+      switch (diagnostics.fieldPresence) {
+        case "absent":
+          return "unfetched";
+        case "empty":
+          return "empty";
+        case "present":
+          return "present";
+      }
+  }
+}
+
+/** `MixedRaceAllocationView`とコード付き到達状態(`AllocationOutcomeCodes`)の組。 */
+export interface MixedRaceAllocationOutcome {
+  readonly view: MixedRaceAllocationView;
+  readonly outcome: AllocationOutcomeCodes;
+}
+
+/** 判定に到達していない(null)ことを表す共通の空`AllocationOutcomeCodes`片。 */
+function unreachedOutcome(route: AllocationRouteCode): AllocationOutcomeCodes {
+  return { route, unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOdds: null };
+}
+
+/**
+ * D-2フォールバック(①②③のいずれか)に該当したときの view・outcome を組み立てる。
+ * `buildRaceAllocation`をそのまま呼び、その戻り値(`kind`)から`route`
+ * (`"unavailable"`または`"place-only"`)を判定する。
+ *
+ * unset/yoso(`kind`が`"unset"`/`"yoso"`)がここで返ることは無い: 呼び出し元
+ * (`buildMixedRaceAllocationWithOutcome`)が本関数を呼ぶ前に同一条件
+ * (`isBetAllocationUnset`・`oddsStatus==="yoso"`)を既にfalseと確認済みであり、
+ * `buildRaceAllocation`は同じ条件を先頭で再評価するだけなので結果は変わらない。
+ */
+function buildPlaceOnlyFallbackOutcome(
+  race: MixedCandidateBuildInput,
+  settings: MixedAllocationSettings,
+  fallbackReason: PlaceOnlyFallbackReason,
+  comboOdds: AllocationOutcomeCodes["comboOdds"],
+): MixedRaceAllocationOutcome {
+  const view = buildRaceAllocation(race, settings);
+  if (view.kind === "unavailable") {
+    return {
+      view,
+      outcome: { route: "unavailable", unavailableReason: view.reason, fallbackReason, skipReasonCode: null, comboOdds },
+    };
+  }
+  if (view.kind === "computed") {
+    return {
+      view,
+      outcome: {
+        route: "place-only",
+        unavailableReason: null,
+        fallbackReason,
+        skipReasonCode: view.result.isSkip ? view.result.skipReasonCode : null,
+        comboOdds,
+      },
+    };
+  }
+  // 契約違反(呼び出し元の前提が崩れている場合の防御)。上記JSDoc参照。
+  throw new Error(
+    `buildPlaceOnlyFallbackOutcome: 呼び出し元が事前にunset/yosoを排除したはずなのに` +
+      `buildRaceAllocationがkind="${view.kind}"を返した(前提が崩れている)`,
+  );
+}
+
+/**
+ * 券種横断(複勝・ワイド・3連複)の馬券配分ビューを、コード付き到達状態
+ * (`AllocationOutcomeCodes`)とともに合成する(Issue #58)。
+ *
+ * `view`の判定ロジック(ゲート順序)は`buildMixedRaceAllocation`(旧実装)と完全に同一。
+ * 本関数はその判定と同時に、通過した経路をコードとして記録する(二重定義を避けるため、
+ * 判定ロジックはこの関数1箇所だけに存在し、`buildMixedRaceAllocation`は本関数を呼んで
+ * `.view`だけを返す薄いラッパーになる)。
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
  * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の4項目)
  */
-export function buildMixedRaceAllocation(
+export function buildMixedRaceAllocationWithOutcome(
   race: MixedCandidateBuildInput,
   settings: MixedAllocationSettings,
-): MixedRaceAllocationView {
+): MixedRaceAllocationOutcome {
   // 1. unset(レース全体のゲート。既存どおり)。
   if (isBetAllocationUnset(settings)) {
-    return buildRaceAllocation(race, settings);
+    return { view: buildRaceAllocation(race, settings), outcome: unreachedOutcome("unset") };
   }
   // 2. yoso(レース全体のゲート。既存どおり)。
   if (race.oddsStatus === "yoso") {
-    return buildRaceAllocation(race, settings);
+    return { view: buildRaceAllocation(race, settings), outcome: unreachedOutcome("yoso") };
   }
   // 3. 頭数不可はここで判定しない(buildMixedCandidatesに委ねる。反証B/反証C)。
 
-  // 4. D-2条件①②(候補構築前に判定できる部分)。
-  if (shouldFallbackBeforeBuildingCandidates(settings)) {
-    return buildRaceAllocation(race, settings);
+  // 4. D-2条件①②(候補構築前に判定できる部分。既存の短絡順序=①→②を保つ)。
+  if (isComboOddsNotRequested(settings)) {
+    return buildPlaceOnlyFallbackOutcome(race, settings, "combo-odds-not-requested", null);
+  }
+  if (isComboBetTypesOff(settings)) {
+    return buildPlaceOnlyFallbackOutcome(race, settings, "combo-bet-types-off", null);
   }
 
   const betTypes = resolveMixedBetTypes(settings);
   const evConfig: EvConfig = { threshold: settings.evThreshold };
   const mixed = buildMixedCandidates(race, { betTypes, evConfig });
+  const comboOdds = {
+    wide: comboOddsAvailabilityFromDiagnostics(mixed.diagnostics.wide),
+    trio: comboOddsAvailabilityFromDiagnostics(mixed.diagnostics.trio),
+  };
 
   // 4. D-2条件③(訂正2: ワイド・三連複の候補合計のみを見る。複勝候補の件数は含めない)。
   const comboCandidateCount = mixed.candidates.filter((c) => c.umabans.length >= 2).length;
   if (comboCandidateCount === 0) {
-    return buildRaceAllocation(race, settings);
+    return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds);
   }
 
   // 5. 混在配分を実際に計算する。
@@ -237,14 +403,41 @@ export function buildMixedRaceAllocation(
   try {
     const result = allocateGeneralBets(horses, mixed.topFinishCount, mixed.candidates, config);
     return {
-      kind: "mixed",
-      result,
-      topFinishCount: mixed.topFinishCount,
-      diagnostics: mixed.diagnostics,
+      view: { kind: "mixed", result, topFinishCount: mixed.topFinishCount, diagnostics: mixed.diagnostics },
+      outcome: {
+        route: "mixed",
+        unavailableReason: null,
+        fallbackReason: null,
+        skipReasonCode: result.isSkip ? result.skipReasonCode : null,
+        comboOdds,
+      },
     };
   } catch (e) {
     // AC17: allocateGeneralBetsのthrow(契約違反。異常な数値を含む候補等)を捕捉し、
     // このレースだけを判別可能な状態にする(画面全体・他レースには波及させない)。
-    return { kind: "invalid", message: e instanceof Error ? e.message : String(e) };
+    // comboOddsは非null(このtryブロックへ到達した時点でmixed.diagnosticsは算出済み。
+    // AllocationOutcomeCodesのJSDoc参照)。
+    return {
+      view: { kind: "invalid", message: e instanceof Error ? e.message : String(e) },
+      outcome: { route: "invalid", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOdds },
+    };
   }
+}
+
+/**
+ * 券種横断(複勝・ワイド・3連複)の馬券配分ビューを合成する。
+ *
+ * Issue #58で実装本体を`buildMixedRaceAllocationWithOutcome`へ移し、本関数はその`.view`だけを
+ * 返す薄いラッパーになった(シグネチャ・戻り型は不変。呼び出し元の`renderer/mixed-allocation-view.ts`
+ * 等に一切変更を要求しない)。
+ *
+ * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
+ *   同じ構造的最小型)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の4項目)
+ */
+export function buildMixedRaceAllocation(
+  race: MixedCandidateBuildInput,
+  settings: MixedAllocationSettings,
+): MixedRaceAllocationView {
+  return buildMixedRaceAllocationWithOutcome(race, settings).view;
 }

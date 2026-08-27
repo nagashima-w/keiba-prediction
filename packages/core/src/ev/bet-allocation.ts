@@ -179,6 +179,21 @@ import {
 export type { JointModelHorse, PlaceJointModel, PlaceOutcome };
 export { CONDITIONAL_BERNOULLI_MODEL };
 
+/**
+ * Issue #58: `SkipReasonCode`(非公開モジュール `allocation-primitives.ts` の型)を、
+ * 既に公開済みのこのサブパスから型のみ re-export する。`packages/core/package.json` の
+ * `exports` へ `./ev/allocation-primitives` を新規追加しない設計判断(boss裁定)に基づく——
+ * 追加すると `resolveBankroll`/`runGreedyAllocation` 等の実装詳細まで公開範囲に入ってしまう。
+ * 型のみの re-export はランタイム出力に何も足さない(上の `JointModelHorse` 等と同じ既存の
+ * 慣行)。
+ *
+ * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物である。あちらは
+ * どこからも import されていない re-export(削除しても app はコンパイルできた)だったのに
+ * 対し、こちらは `shared/mixed-race-allocation.ts`(Issue #58)が実際に import して使う
+ * re-export であり、削除すると app のコンパイルが壊れる。
+ */
+export type { SkipReasonCode };
+
 // 機能D-2a(Issue #14): 防御関数群・畳み込み・貪欲最適化・betUnit丸め・最低額ロジック・
 // 見送り理由判定ロジックは allocation-primitives.ts へ抽出し、組合せ券種(combo-bet-allocation.ts)
 // と実装を共有する(boss着手前ゲート2026-08-05決定)。本ファイルの公開契約
@@ -354,6 +369,13 @@ export interface BetAllocationResult {
   readonly isSkip: boolean;
   /** 見送り理由。見送りでなければ null。 */
   readonly skipReason: string | null;
+  /**
+   * 見送り理由コード(Issue #58)。isSkipのときのみ非null、`skipReason`はこの値から
+   * `skipReasonText`で導出される(コード→文言の一方向依存。逆向きに文言からコードを
+   * 復元する経路は無い)。文言(日本語)を永続化・比較の対象にせず、コードの側を
+   * 安定な識別子として使いたい呼び出し元(見送り理由の記録・分析等)向けに公開する。
+   */
+  readonly skipReasonCode: SkipReasonCode | null;
   /** 1点配分だが分散できる余地があった(分散できていない)旨の注記。 */
   readonly notDiversified: boolean;
   /** 使用した同時分布モデルの識別子。 */
@@ -577,20 +599,21 @@ export function allocateBets(
   // Step6: 見送り理由(6分類・優先順位順)。判定ロジックはallocation-primitives.tsのコードを
   // 共有し、文言化(コード→日本語)だけを本ファイルの責務として残す(決定3: 文言定数は
   // 組合せ券種と分離する)。isSkipのときのみ算出する。
-  const skipReason = isSkip
-    ? skipReasonText(
-        determineSkipReasonCode(
-          bankrollInput,
-          perRaceCapInput,
-          effectivePerRaceCap,
-          betUnit,
-          kellyTargetStake,
-          kellyFraction,
-          candidateHorses.length,
-        ),
+  // Issue #58: コードをskipReasonの計算より前に独立した変数として持つ(一方向依存を型と
+  // 制御フローで強制する。skipReasonTextはコードだけを引数に取り、逆向きに文言から
+  // コードを導出する経路は存在しない)。
+  const skipReasonCode: SkipReasonCode | null = isSkip
+    ? determineSkipReasonCode(
+        bankrollInput,
+        perRaceCapInput,
+        effectivePerRaceCap,
         betUnit,
+        kellyTargetStake,
+        kellyFraction,
+        candidateHorses.length,
       )
     : null;
+  const skipReason = skipReasonCode === null ? null : skipReasonText(skipReasonCode, betUnit);
 
   // notDiversified: betCount===1 のときのみtrueになりうる。betCount===0(見送り)は
   // isSkip/skipReasonが説明責任を負うため常にfalse。
@@ -614,6 +637,7 @@ export function allocateBets(
     betCount,
     isSkip,
     skipReason,
+    skipReasonCode,
     notDiversified,
     modelId: model.id,
     modelApproximate: model.approximate,

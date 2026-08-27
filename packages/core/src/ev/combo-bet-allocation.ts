@@ -118,6 +118,17 @@ import {
 export type { JointModelHorse, PlaceJointModel, PlaceOutcome, EvConfig };
 export { CONDITIONAL_BERNOULLI_MODEL, DEFAULT_EV_CONFIG };
 
+/**
+ * Issue #58: `SkipReasonCode`(非公開モジュール `allocation-primitives.ts` の型)を、
+ * 既に公開済みのこのサブパスから型のみ re-export する。`bet-allocation.ts` と同じ設計判断
+ * (`exports` へ `./ev/allocation-primitives` を新規追加しない。型のみの re-export はランタイム
+ * 出力に何も足さない)。
+ *
+ * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物(削除すれば app が
+ * コンパイルできない=使用される re-export)。詳細は `bet-allocation.ts` の同種コメント参照。
+ */
+export type { SkipReasonCode };
+
 // ============================================================================
 // 汎用エンジン(券種非依存)
 // ============================================================================
@@ -280,6 +291,11 @@ export interface GeneralBetAllocationResult {
   readonly betCount: number;
   readonly isSkip: boolean;
   readonly skipReason: string | null;
+  /**
+   * 見送り理由コード(Issue #58)。isSkipのときのみ非null、`skipReason`はこの値から
+   * `skipReasonText`で導出される(コード→文言の一方向依存。bet-allocation.tsと同じ流儀)。
+   */
+  readonly skipReasonCode: SkipReasonCode | null;
   readonly notDiversified: boolean;
   readonly modelId: string;
   readonly modelApproximate: boolean;
@@ -573,20 +589,20 @@ export function allocateGeneralBets(
   const exceedsKellyTarget = totalStake > kellyTargetStake;
   const advisory = buildAdvisory(exceedsKellyTarget, kellyTargetStake, betUnit);
 
-  const skipReason = isSkip
-    ? skipReasonText(
-        determineSkipReasonCode(
-          bankrollInput,
-          perRaceCapInput,
-          effectivePerRaceCap,
-          betUnit,
-          kellyTargetStake,
-          kellyFraction,
-          finalCandidates.length,
-        ),
+  // Issue #58: コードをskipReasonの計算より前に独立した変数として持つ(bet-allocation.tsと
+  // 同じ流儀。一方向依存を型と制御フローで強制する)。
+  const skipReasonCode: SkipReasonCode | null = isSkip
+    ? determineSkipReasonCode(
+        bankrollInput,
+        perRaceCapInput,
+        effectivePerRaceCap,
         betUnit,
+        kellyTargetStake,
+        kellyFraction,
+        finalCandidates.length,
       )
     : null;
+  const skipReason = skipReasonCode === null ? null : skipReasonText(skipReasonCode, betUnit);
 
   const positiveContinuousCount = continuousFractions.filter((x) => x > 0).length;
   const notDiversified = betCount === 1 && positiveContinuousCount >= 2;
@@ -608,6 +624,7 @@ export function allocateGeneralBets(
     betCount,
     isSkip,
     skipReason,
+    skipReasonCode,
     notDiversified,
     modelId: model.id,
     modelApproximate: model.approximate,

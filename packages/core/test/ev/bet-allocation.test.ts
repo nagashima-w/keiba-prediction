@@ -8,6 +8,7 @@ import {
   type BetAllocationConfig,
   type PlaceJointModel,
   type PlaceOutcome,
+  type SkipReasonCode,
 } from "../../src/ev/bet-allocation.js";
 
 /** 候補馬(EVプラス・オッズあり)を組み立てる補助関数。 */
@@ -715,6 +716,82 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         expect(Number.isFinite(result.plannedStake)).toBe(true);
         expect(typeof result.capApplied).toBe("boolean");
       }
+    });
+  });
+
+  describe("Issue #58: skipReasonCodeがskipReason(日本語文言)と独立に見送り理由を表すこと(AC3)", () => {
+    /**
+     * 6分類それぞれについて、skipReasonの文言に加えてskipReasonCodeが対応するコード値を
+     * 持つことをテーブル駆動で固定する。文言とコードが同じ入力から独立に導出されることの
+     * 構造的検証(AC3(b))。テーブルの各行は「受け入れ条件9」の同一入力を流用する。
+     */
+    const table: {
+      readonly label: string;
+      readonly horses: readonly AllocationHorse[];
+      readonly config: BetAllocationConfig;
+      readonly model?: PlaceJointModel;
+      readonly expectedCode: SkipReasonCode;
+    }[] = [
+      {
+        label: "① bankroll未設定",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 0, perRaceCap: 10000 }),
+        expectedCode: "bankroll-unset",
+      },
+      {
+        label: "② perRaceCap未設定",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 10000, perRaceCap: 0 }),
+        expectedCode: "cap-unset",
+      },
+      {
+        label: "③ 実効上限がbetUnit未満",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 10000, perRaceCap: 50 }),
+        expectedCode: "cap-too-small",
+      },
+      {
+        label: "④ ケリー係数0",
+        horses: [candidate(1, 0.6, 3)],
+        config: config({ bankroll: 10000, perRaceCap: 10000, kellyFraction: 0 }),
+        expectedCode: "kelly-zero",
+      },
+      {
+        label: "⑤ 候補0頭",
+        horses: [nonCandidate(1, 0.3, 2)],
+        config: config({ bankroll: 10000, perRaceCap: 10000 }),
+        expectedCode: "no-candidates",
+      },
+      {
+        label: "⑥ 連続最適解ゼロ(妙味が極小)",
+        horses: [{ umaban: 1, placeProb: 0.5, placeOddsMin: 1.0000001, ev: 1.00000005, isPositive: true }],
+        config: config({ bankroll: 10000, perRaceCap: 10000 }),
+        model: stubModel([
+          { placed: [], probability: 0.5 },
+          { placed: [1], probability: 0.5 },
+        ]),
+        expectedCode: "no-edge",
+      },
+    ];
+
+    it.each(table)("$label はskipReasonCode=$expectedCode になること", ({ horses, config: cfg, model, expectedCode }) => {
+      const result = allocateBets(horses, 1, cfg, model);
+      // 前提固定(空振り防止): このテーブルは見送りケースだけを扱う。
+      expect(result.isSkip).toBe(true);
+      expect(result.skipReasonCode).toBe(expectedCode);
+    });
+
+    it("6分類のskipReasonCodeが互いに異なる値であること(集合サイズで機械的に固定)", () => {
+      const codes = table.map((t) => t.expectedCode);
+      expect(new Set(codes).size).toBe(6);
+    });
+
+    it("見送りでなければskipReasonCode===nullであること(skipReasonと対称)", () => {
+      const horses = [candidate(1, 0.6, 3)];
+      const result = allocateBets(horses, 1, config({ bankroll: 10000, perRaceCap: 10000 }));
+      expect(result.isSkip).toBe(false);
+      expect(result.skipReason).toBeNull();
+      expect(result.skipReasonCode).toBeNull();
     });
   });
 

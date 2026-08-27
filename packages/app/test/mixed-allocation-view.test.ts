@@ -5,6 +5,7 @@ import {
   type AllocationCandidate,
   type GeneralBetAllocation,
   type GeneralBetAllocationResult,
+  type SkipReasonCode,
 } from "@keiba/core/ev/combo-bet-allocation";
 
 import type {
@@ -601,6 +602,9 @@ function generalResult(
     betCount: allocations.filter((a) => a.stake > 0).length,
     isSkip: totalStake === 0,
     skipReason: totalStake === 0 ? "妙味が小さく、賭ける価値のある配分が見つかりませんでした" : null,
+    // Issue #58で追加されたフィールド。既存のskipReason既定値(「妙味が小さく…」)に対応する
+    // コードは"no-edge"(overridesで個別に上書き可能)。
+    skipReasonCode: (totalStake === 0 ? "no-edge" : null) as SkipReasonCode | null,
     notDiversified: false,
     modelId: "conditional-bernoulli",
     modelApproximate: false,
