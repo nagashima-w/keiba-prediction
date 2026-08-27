@@ -320,45 +320,91 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     expect(rec.bets).toEqual([]);
   });
 
-  it("route=place-only(includeComboOdds=false): betUnit/greedyStepsはDEFAULT_BET_ALLOCATION_CONFIG由来・candidateCapはnull・明細はbet_type='place'", () => {
+  it("route=place-only(includeComboOdds=false): メタ行が全フィールドで固定どおりに保存され、明細のodds/evがresult.allocationsの値と一致すること", () => {
     const race = raceInput({ rows: allCandidateRows(8) });
     const s = settings({ includeComboOdds: false });
     const outcome = buildMixedRaceAllocationWithOutcome(race, s);
-    expect(outcome.view.kind).toBe("computed"); // 前提固定(D-2フォールバックでplace-onlyへ)。
+    if (outcome.view.kind !== "computed") {
+      throw new Error(`前提が崩れている(place-onlyに到達しなかった。kind=${outcome.view.kind})`);
+    }
     const rec = buildAllocationRecord(outcome, s, "result");
-    expect(rec.meta.route).toBe("place-only");
-    expect(rec.meta.fallbackReason).toBe("combo-odds-not-requested");
-    expect(rec.meta.comboOddsWide).toBeNull();
-    expect(rec.meta.comboOddsTrio).toBeNull();
-    // #59追加指定: place-only経路はDEFAULT_BET_ALLOCATION_CONFIG(mixed用の
-    // DEFAULT_GENERAL_BET_ALLOCATION_CONFIGとは別オブジェクト)を参照すること。
-    expect(rec.meta.betUnit).toBe(DEFAULT_BET_ALLOCATION_CONFIG.betUnit);
-    expect(rec.meta.greedySteps).toBe(DEFAULT_BET_ALLOCATION_CONFIG.greedySteps);
-    expect(rec.meta.candidateCap).toBeNull(); // BetAllocationConfigにcandidateCapは存在しない。
-    expect(rec.meta.modelId).not.toBeNull();
-    expect(rec.meta.modelApproximate).not.toBeNull();
+    // 要修正1(code-reviewer指摘): フィールド単位の部分検査ではなく、meta全体をtoEqualで固定する
+    // (#59 AC2「部分検査は禁止」。#58でunavailableReasonが検査漏れした事故の再発防止)。
+    expect(rec.meta).toEqual({
+      route: "place-only",
+      unavailableReason: null,
+      fallbackReason: "combo-odds-not-requested",
+      skipReasonCode: null,
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: false,
+      includeWide: true,
+      includeTrio: true,
+      // #59追加指定: place-only経路はDEFAULT_BET_ALLOCATION_CONFIG(mixed用の
+      // DEFAULT_GENERAL_BET_ALLOCATION_CONFIGとは別オブジェクト)を参照すること。
+      betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: null, // BetAllocationConfigにcandidateCapは存在しない。
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "result",
+    });
     // 前提固定: stake>0の明細が実際に1件以上あること(空振り防止)。
-    expect(rec.bets.length).toBeGreaterThan(0);
+    const result = outcome.view.result;
+    const stakePositive = result.allocations.filter((a) => a.stake > 0);
+    expect(stakePositive.length).toBeGreaterThan(0);
+    expect(rec.bets.length).toBe(stakePositive.length);
     for (const b of rec.bets) {
       expect(b.betType).toBe("place");
       expect(b.comboKey).toMatch(/^\d{2}$/);
       expect(b.stake).toBeGreaterThan(0);
     }
+    // 要修正2(code-reviewer指摘): bets[].odds/evがplaceOddsMin/evと取り違えられていないことを、
+    // result.allocationsの対応する要素の値と突き合わせて確認する(#59 AC3・#54が直接使うデータ)。
+    // このfixture(row()の既定値)ではodds(placeOddsMin=3)とev(1.5)が異なる値のため、
+    // 取り違え(odds:a.ev/ev:a.placeOddsMinのような入れ替え)があれば必ず検出できる。
+    for (const a of stakePositive) {
+      const bet = rec.bets.find((b) => b.comboKey === buildComboOddsKey([a.umaban]));
+      expect(bet).toBeDefined();
+      expect(bet!.odds).toBe(a.placeOddsMin);
+      expect(bet!.ev).toBe(a.ev);
+      expect(bet!.odds).not.toBe(bet!.ev); // 取り違えても値が同じでは検出できないための自己チェック。
+    }
   });
 
-  it("route=mixed: betUnit/greedySteps/candidateCapはDEFAULT_GENERAL_BET_ALLOCATION_CONFIG由来・comboOdds診断値は非null", () => {
+  it("route=mixed: メタ行が全フィールドで固定どおりに保存されること", () => {
     const s = settings();
     const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), s);
-    expect(outcome.view.kind).toBe("mixed"); // 前提固定。
+    if (outcome.view.kind !== "mixed") {
+      throw new Error(`前提が崩れている(mixedに到達しなかった。kind=${outcome.view.kind})`);
+    }
     const rec = buildAllocationRecord(outcome, s, "result");
-    expect(rec.meta.route).toBe("mixed");
-    expect(rec.meta.comboOddsWide).toBe("present");
-    expect(rec.meta.comboOddsTrio).toBe("present");
-    expect(rec.meta.betUnit).toBe(DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit);
-    expect(rec.meta.greedySteps).toBe(DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps);
-    expect(rec.meta.candidateCap).toBe(DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap);
-    expect(rec.meta.modelId).not.toBeNull();
-    expect(rec.meta.modelApproximate).not.toBeNull();
+    // 要修正1(code-reviewer指摘): フィールド単位の部分検査ではなく、meta全体をtoEqualで固定する。
+    expect(rec.meta).toEqual({
+      route: "mixed",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: "present",
+      comboOddsTrio: "present",
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "result",
+    });
   });
 
   it("AC3: mixed経路でSUM(stake)===totalStake・COUNT(*)===betCountが成り立ち、bet_typeが複勝/ワイド/3連複それぞれ正しく振り分けられること", () => {
@@ -398,9 +444,23 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     // 3券種とも明細に現れること(前提のstakePositiveByLenと対応)。
     const betTypes = new Set(rec.bets.map((b) => b.betType));
     expect(betTypes).toEqual(new Set(["place", "wide", "trio"]));
+
+    // 要修正2(code-reviewer指摘): mixedBetsOfのodds/evの取り違えを、result.allocationsの
+    // 対応する要素の値と突き合わせて検出できることを固定する(#59 AC3・#54が直接使うデータ)。
+    // このfixture(raceWithDiverseCombos)ではオッズが券種・馬ごとにばらけているため、
+    // odds(a.odds)とev(a.ev)を入れ替えても値が一致し検出できない、という空振りは起きにくいが、
+    // 万一同値になっていないかを自己チェックしたうえで、対応する要素の値と直接比較する。
+    for (const a of result.allocations.filter((x) => x.stake > 0)) {
+      const key = buildComboOddsKey(a.umabans);
+      const bet = rec.bets.find((b) => b.comboKey === key);
+      expect(bet).toBeDefined();
+      expect(bet!.odds).toBe(a.odds);
+      expect(bet!.ev).toBe(a.ev);
+      expect(bet!.odds).not.toBe(bet!.ev); // 取り違えても値が同じでは検出できないための自己チェック。
+    }
   });
 
-  it("route=invalid: allocateGeneralBetsの契約違反throwを内部で捕捉した経路。betUnit/greedySteps/candidateCapはmixedと同じDEFAULT_GENERAL_BET_ALLOCATION_CONFIG由来(#59追加指定)、modelId等はnull、明細は空", () => {
+  it("route=invalid: allocateGeneralBetsの契約違反throwを内部で捕捉した経路のメタ行が全フィールドで固定どおりに保存されること", () => {
     // allocation-outcome-codes.test.tsと同じ「1頭だけ負のオッズ」レシピでallocateGeneralBetsをthrowさせる。
     const rows = allCandidateRows(8).map((r) =>
       r.umaban === 1 ? row({ umaban: 1, placeOddsMin: -5, ev: 2, isPositive: true }) : r,
@@ -409,16 +469,32 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8, { rows }), s);
     expect(outcome.view.kind).toBe("invalid"); // 前提固定。
     const rec = buildAllocationRecord(outcome, s, "result");
-    expect(rec.meta.route).toBe("invalid");
-    // 裁定1(allocation-outcome-codes.test.ts): buildMixedCandidatesはthrow前に実行済みのため
-    // comboOddsは非null。
-    expect(rec.meta.comboOddsWide).toBe("present");
-    expect(rec.meta.comboOddsTrio).toBe("present");
-    expect(rec.meta.betUnit).toBe(DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit);
-    expect(rec.meta.greedySteps).toBe(DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps);
-    expect(rec.meta.candidateCap).toBe(DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap);
-    expect(rec.meta.modelId).toBeNull();
-    expect(rec.meta.modelApproximate).toBeNull();
+    // 要修正1(code-reviewer指摘): フィールド単位の部分検査ではなく、meta全体をtoEqualで固定する。
+    // これにより「...codesColumnsの展開後にunavailableReasonを誤って上書きする」類の
+    // 分岐固有の破壊も検出できる(#58と同型の穴の再発防止)。
+    expect(rec.meta).toEqual({
+      route: "invalid",
+      unavailableReason: null,
+      fallbackReason: null,
+      // 裁定1(allocation-outcome-codes.test.ts): buildMixedCandidatesはthrow前に実行済みのため
+      // comboOddsは非null。
+      skipReasonCode: null,
+      comboOddsWide: "present",
+      comboOddsTrio: "present",
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "result",
+    });
     expect(rec.bets).toEqual([]);
   });
 });

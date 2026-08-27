@@ -171,6 +171,28 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **中央/地方別**: `VerifyVenueFilter`(all / central / nar)で絞り込み集計。
 - **版別**: `computeVerifyReportByPromptVersion` が `PROMPT_VERSION` でグループ化し版別に集計・比較。
   推定 EV(evEstimated)は集計から除外して区別。既定は latest モード(レースごと最新分析のみ)。
+- **配分提案の永続化(Issue #59)**: `saveAnalysis` は分析本体(`analyses`/`analysis_horses`)と
+  同一トランザクションで、5節の配分提案を新テーブル2本へ書く(`AnalysisRecord.allocation`が
+  渡されたときのみ。呼び出し側〈main〉が渡さない旧来の呼び出しでは書かない=「未到達」)。
+  - `analysis_allocation_meta`(`analysis_id`主キー・`analyses`へのFK): レース単位のメタ行で、
+    **全経路(未設定/オッズ未発売/頭数不可/複勝のみ/券種混在/計算例外)で必ず1行書く**
+    (#31の3状態〈記録なし・見送り・配分あり〉をこの1行の有無と内容だけで区別できるようにするための
+    不変条件)。到達状態のコード5列(`route`・`unavailable_reason`・`fallback_reason`・
+    `skip_reason_code`・`combo_odds_wide`/`combo_odds_trio`。null は「未到達」であって「不明」では
+    ない)、実行時の実効設定7列(`bankroll`/`per_race_cap`/`kelly_fraction`/`ev_threshold`/
+    `include_combo_odds`/`include_wide`/`include_trio`)、経路ごとに実際に使われた既定値4列
+    (`bet_unit`/`greedy_steps`/`candidate_cap`/`model_id`+`model_approximate`。複勝のみ経路には
+    `candidate_cap`が存在しないため常にnull、coreの配分計算に未到達の経路は4列とも null)、
+    `odds_status` を持つ。
+  - `analysis_bets`(`analysis_id`/`bet_type`/`combo_key`複合主キー・`analyses`へのFK):
+    実際に配分された(`stake>0`の)買い目の明細のみを保存する(点数・総額は
+    `COUNT`/`SUM`で導出でき、集計列を別途持たない)。複勝・ワイド・三連複を
+    `bet_type`/`combo_key`/`stake`/`odds`/`ev`の共通5列に統合する(`combo_key`は
+    `buildComboOddsKey`による正規化キーで、`race_combo_payouts`と同じ形式)。
+  - 版不明分析の一括削除(`deleteAnalysesWithUnknownPromptVersion`)は、この2テーブルの子行も
+    `analysis_horses`と同じ順序原則(子→親)で先に削除してから`analyses`を削除する。
+  - **読み出しAPI・verify集計・UI表示への反映は本Issueのスコープ外**(#54が回収率検証に、
+    #55が過去分析の再表示に、それぞれ必要な形で読み出しを追加する想定)。
 
 ## 5. 馬券配分の提案(ev/place-joint-model・ev/bet-allocation)
 
