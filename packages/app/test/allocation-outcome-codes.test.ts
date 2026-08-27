@@ -145,10 +145,29 @@ function raceWithPositiveCombos(n: number, overrides: Partial<MixedCandidateBuil
   });
 }
 
-/** AC1のタプル射影(集合サイズで機械的に区別を固定するための最小表現)。 */
+/**
+ * AC1(boss訂正版)のタプル射影。`AllocationOutcomeCodes`の**全フィールド**を対象にする
+ * (部分集合にしない)。`Object.keys(outcome)`から動的に組み立てることで、将来
+ * `AllocationOutcomeCodes`にフィールドが増えても手動更新を忘れにくくする——実装側は
+ * 型がrequiredなフィールドの省略をコンパイルエラーで弾くため(オブジェクトリテラルの
+ * excess/missing property check)、`Object.keys`は常に完全なキー集合を返す。
+ * 直後の自己テストは、この期待フィールド数(5)が実際の型と一致していることを固定する
+ * (フィールドを増やしたとき気づけるようにするためのcanary。フィールドを足したら
+ * そちらのexpect配列も更新すること)。
+ */
 function tupleOf(outcome: AllocationOutcomeCodes): string {
-  return JSON.stringify([outcome.route, outcome.fallbackReason, outcome.skipReasonCode, outcome.comboOdds]);
+  const keys = (Object.keys(outcome) as (keyof AllocationOutcomeCodes)[]).sort();
+  return JSON.stringify(keys.map((k) => outcome[k]));
 }
+
+describe("tupleOf()自己テスト(AC1訂正版: 射影がAllocationOutcomeCodesの全フィールドと一致すること)", () => {
+  it("射影対象のキー集合が5個(comboOdds/fallbackReason/route/skipReasonCode/unavailableReason)であること", () => {
+    const sample = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings()).outcome;
+    const keys = Object.keys(sample).sort();
+    // AllocationOutcomeCodesにフィールドを足したら、この配列も更新すること(canary)。
+    expect(keys).toEqual(["comboOdds", "fallbackReason", "route", "skipReasonCode", "unavailableReason"]);
+  });
+});
 
 describe("テストヘルパー自己テスト", () => {
   it("raceWithPositiveCombos(): 実際に混在配分(kind='mixed')に到達する入力であること(空振り防止)", () => {
@@ -225,13 +244,14 @@ describe("comboOddsAvailabilityFromDiagnostics(診断値からの純写像。新
 });
 
 // ============================================================================
-// AC1: 4つの区別したい状態がタプルだけで復元でき、互いに異なること
+// AC1(boss訂正版): 全5フィールドのタプルだけで状態が区別できること
 // ============================================================================
 
-describe("AC1: (route, fallbackReason, skipReasonCode, comboOdds) だけで4状態が区別できること", () => {
+describe("AC1(訂正版): (route, unavailableReason, fallbackReason, skipReasonCode, comboOdds) の全5フィールドだけで状態が区別できること", () => {
   it("状態1: 総資金が未設定(層1のunset)。bankroll=0", () => {
     const { outcome } = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: 0 }));
     expect(outcome.route).toBe("unset");
+    expect(outcome.unavailableReason).toBeNull();
     expect(outcome.fallbackReason).toBeNull();
     expect(outcome.skipReasonCode).toBeNull();
     expect(outcome.comboOdds).toBeNull();
@@ -244,6 +264,7 @@ describe("AC1: (route, fallbackReason, skipReasonCode, comboOdds) だけで4状�
     );
     // 前提固定: 混在経路(mixed)に実際に到達していること(D-2フォールバックに落ちていないこと)。
     expect(outcome.route).toBe("mixed");
+    expect(outcome.unavailableReason).toBeNull();
     expect(outcome.skipReasonCode).toBe("bankroll-unset");
     expect(outcome.comboOdds).toEqual({ wide: "present", trio: "present" });
   });
@@ -254,6 +275,7 @@ describe("AC1: (route, fallbackReason, skipReasonCode, comboOdds) だけで4状�
     // 前提固定: 実際にD-2フォールバック(place-only)に落ちていること。
     expect(outcome.route).toBe("place-only");
     expect(view.kind).toBe("computed");
+    expect(outcome.unavailableReason).toBeNull();
     expect(outcome.fallbackReason).toBe("no-combo-candidates");
     expect(outcome.comboOdds).toEqual({ wide: "unfetched", trio: "unfetched" });
   });
@@ -261,12 +283,13 @@ describe("AC1: (route, fallbackReason, skipReasonCode, comboOdds) だけで4状�
   it("状態4: 正常な混在配分(オッズ取得済み・見送りなし)", () => {
     const { outcome } = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings());
     expect(outcome.route).toBe("mixed");
+    expect(outcome.unavailableReason).toBeNull();
     expect(outcome.fallbackReason).toBeNull();
     expect(outcome.skipReasonCode).toBeNull();
     expect(outcome.comboOdds).toEqual({ wide: "present", trio: "present" });
   });
 
-  it("4状態のタプルが互いに異なること(集合サイズで機械的に固定)", () => {
+  it("4状態(状態1〜4)のタプルが互いに異なること(集合サイズで機械的に固定)", () => {
     const cases: AllocationOutcomeCodes[] = [
       buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: 0 })).outcome,
       buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: Number.NaN })).outcome,
@@ -275,6 +298,35 @@ describe("AC1: (route, fallbackReason, skipReasonCode, comboOdds) だけで4状�
     ];
     const tuples = new Set(cases.map(tupleOf));
     expect(tuples.size).toBe(4);
+  });
+
+  it("8状態(状態1〜4 + unavailableReasonの3値 + invalid)まで広げてもタプルが互いに異なること" +
+    "(boss懸念2: route='invalid'のcomboOdds非null裁定が、unavailableReasonを加えたタプルでも一意性を壊さないことを確認する)", () => {
+    const invalidRows = allCandidateRows(8).map((r) =>
+      r.umaban === 1 ? row({ umaban: 1, placeOddsMin: -5, ev: 2, isPositive: true }) : r,
+    );
+    const cases: AllocationOutcomeCodes[] = [
+      // 状態1〜4(上のケースと同一入力)。
+      buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: 0 })).outcome,
+      buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: Number.NaN })).outcome,
+      buildMixedRaceAllocationWithOutcome(raceInput({ rows: allCandidateRows(8) }), settings()).outcome,
+      buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings()).outcome,
+      // unavailableReasonの3値(それぞれ別のfallbackReason経由)。
+      buildMixedRaceAllocationWithOutcome(
+        raceInput({ rows: allCandidateRows(3) }),
+        settings({ includeComboOdds: false }),
+      ).outcome,
+      buildMixedRaceAllocationWithOutcome(
+        raceInput({ rows: allCandidateRows(6) }),
+        settings({ includeWideInAllocation: false, includeTrioInAllocation: false }),
+      ).outcome,
+      buildMixedRaceAllocationWithOutcome(raceInput({ rows: [] }), settings({ includeComboOdds: false })).outcome,
+      // route='invalid'。
+      buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8, { rows: invalidRows }), settings()).outcome,
+    ];
+    expect(cases.length).toBe(8);
+    const tuples = new Set(cases.map(tupleOf));
+    expect(tuples.size).toBe(8);
   });
 });
 
@@ -435,6 +487,91 @@ describe("不変条件(boss確定): route∈{unset,yoso,unavailable,invalid}な�
     for (const c of cases) {
       expect(c.isSkip).not.toBeNull();
       expect(c.outcome.skipReasonCode === null).toBe(c.isSkip === false);
+    }
+  });
+});
+
+// ============================================================================
+// unavailableReason: PlaceBetUnavailableReason(not-sold/two-place-only/unknown)の復元
+// (code-reviewer要修正1件・2026年: #31の核心〈判定不能と判定結果を混同しない〉を運ぶ
+// フィールドが無防御だった)
+// ============================================================================
+
+describe("unavailableReason: route==='unavailable'のとき正しいPlaceBetUnavailableReasonに一致すること", () => {
+  it("not-sold(1〜4頭): 3頭・includeComboOdds=falseでunavailableに落ちたとき'not-sold'になること", () => {
+    const race = raceInput({ rows: allCandidateRows(3) });
+    const { outcome } = buildMixedRaceAllocationWithOutcome(race, settings({ includeComboOdds: false }));
+    // 前提固定(空振り防止): 実際にroute==='unavailable'に到達していること。
+    expect(outcome.route).toBe("unavailable");
+    expect(outcome.fallbackReason).toBe("combo-odds-not-requested");
+    expect(outcome.unavailableReason).toBe("not-sold");
+  });
+
+  it("two-place-only(5〜7頭): 6頭・combo-bet-types-offでunavailableに落ちたとき'two-place-only'になること", () => {
+    const race = raceInput({ rows: allCandidateRows(6) });
+    const { outcome } = buildMixedRaceAllocationWithOutcome(
+      race,
+      settings({ includeWideInAllocation: false, includeTrioInAllocation: false }),
+    );
+    expect(outcome.route).toBe("unavailable");
+    expect(outcome.fallbackReason).toBe("combo-bet-types-off");
+    expect(outcome.unavailableReason).toBe("two-place-only");
+  });
+
+  it("unknown(0・負・非整数・非有限): 0頭・includeComboOdds=falseでunavailableに落ちたとき'unknown'になること", () => {
+    const race = raceInput({ rows: [] });
+    const { outcome } = buildMixedRaceAllocationWithOutcome(race, settings({ includeComboOdds: false }));
+    expect(outcome.route).toBe("unavailable");
+    expect(outcome.unavailableReason).toBe("unknown");
+  });
+
+  it("route==='unavailable' ∧ fallbackReason==='no-combo-candidates'(D-2条件③経由でunavailableに落ちる組み合わせ)を直接固定する", () => {
+    // 6頭(two-place-only該当)・comboOdds/bet-typesはすべてON・wideCombo/trioComboはキー不在
+    // (=候補0件)。条件①②はいずれもfalseなので、条件③(no-combo-candidates)経由で
+    // buildRaceAllocationを呼び、そちらの頭数判定でunavailableになる。
+    const race = raceInput({ rows: allCandidateRows(6) });
+    const { outcome } = buildMixedRaceAllocationWithOutcome(race, settings());
+    expect(outcome.route).toBe("unavailable");
+    expect(outcome.fallbackReason).toBe("no-combo-candidates");
+    expect(outcome.unavailableReason).toBe("two-place-only");
+  });
+
+  it("3つのreasonが互いに異なること(#31の核心: not-sold/two-place-onlyという判定結果とunknownという判定不能を区別する)", () => {
+    const notSold = buildMixedRaceAllocationWithOutcome(
+      raceInput({ rows: allCandidateRows(3) }),
+      settings({ includeComboOdds: false }),
+    ).outcome.unavailableReason;
+    const twoPlaceOnly = buildMixedRaceAllocationWithOutcome(
+      raceInput({ rows: allCandidateRows(6) }),
+      settings({ includeWideInAllocation: false, includeTrioInAllocation: false }),
+    ).outcome.unavailableReason;
+    const unknown = buildMixedRaceAllocationWithOutcome(
+      raceInput({ rows: [] }),
+      settings({ includeComboOdds: false }),
+    ).outcome.unavailableReason;
+    expect(new Set([notSold, twoPlaceOnly, unknown]).size).toBe(3);
+  });
+
+  it("route!=='unavailable'(unset/yoso/place-only/mixed)ではunavailableReasonが常にnullであること", () => {
+    const unset = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: 0 }));
+    const yoso = buildMixedRaceAllocationWithOutcome(
+      raceInput({ rows: allCandidateRows(8), oddsStatus: "yoso" }),
+      settings(),
+    );
+    const placeOnly = buildMixedRaceAllocationWithOutcome(
+      raceInput({ rows: allCandidateRows(8) }),
+      settings({ includeComboOdds: false }),
+    );
+    const mixed = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings());
+
+    // 前提固定(空振り防止): 4件それぞれが狙ったrouteに実際に到達していること。
+    expect(unset.outcome.route).toBe("unset");
+    expect(yoso.outcome.route).toBe("yoso");
+    expect(placeOnly.outcome.route).toBe("place-only");
+    expect(mixed.outcome.route).toBe("mixed");
+
+    for (const r of [unset, yoso, placeOnly, mixed]) {
+      expect(r.outcome.unavailableReason).toBeNull();
     }
   });
 });
