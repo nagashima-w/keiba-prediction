@@ -73,6 +73,16 @@ function allCandidateRows(n: number): AnalysisRow[] {
   return umabansOf(n).map((umaban) => row({ umaban }));
 }
 
+/**
+ * 全頭がEVマイナス(複勝候補0頭)になる行。coreの配分計算には到達するが
+ * `isSkip===true`(`skipReasonCode="no-candidates"`)になる入力を作るために使う
+ * (`allocation-outcome-codes.test.ts` の同名ヘルパーと同じレシピ。両ファイルで意図が
+ * 異なるため共有せず独立コピーにする——このファイルの流儀に合わせる)。
+ */
+function allNonCandidateRows(n: number): AnalysisRow[] {
+  return umabansOf(n).map((umaban) => row({ umaban, placeOddsMin: 1.1, ev: 0.5, isPositive: false }));
+}
+
 function combinations<T>(items: readonly T[], k: number): T[][] {
   const results: T[][] = [];
   if (k <= 0 || k > items.length) {
@@ -555,6 +565,113 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       oddsStatus: "result",
     });
     expect(rec.bets).toEqual([]);
+  });
+
+  // ==========================================================================
+  // skip経路(coreの配分計算に到達したが配分0点)。
+  //
+  // coordinator水平展開レビュー(第5の表): 「実際に codesColumnsOf/settingsColumnsOf を
+  // 通した出力を検査する表」(このファイルの7件 + analysis-pipeline-allocation.test.ts の2件)
+  // に条件A(すべての列が2つ以上のテストで異なる値をとる)を当てると、次の2列が落ちていた。
+  //
+  //   - skipReasonCode: 全9行で null。`skipReasonCode: codes.skipReasonCode`(allocation-record.ts)を
+  //     `null` 直書きに変異させても検出できなかった(実測で app 全緑)。
+  //     `AllocationOutcomeCodes.skipReasonCode` が非nullになりうること自体は
+  //     allocation-outcome-codes.test.ts が固定済みだが、それを**メタ行へ写している**ことは
+  //     どのテストも検査していなかった。
+  //   - kellyFraction: 全9行で 0.5(settings()の既定値)。
+  //     `kellyFraction: settings.kellyFraction` を `0.5` 直書きに変異させても検出できなかった。
+  //     (`analysis-store.test.ts` の kelly_fraction: 0.7 は makeMeta() で手組みしたレコードを
+  //     保存する表であり、settingsColumnsOf の束縛そのものを通らないため、この穴は塞げない。)
+  //
+  // 以下の2件で、skipReasonCode の非null2値(no-candidates / cap-too-small)と
+  // kellyFraction≠0.5 を第5の表へ持ち込む。skipReasonCodeを書き込む実装箇所は
+  // place-only経路(mixed-race-allocation.ts:327)とmixed経路(同:411)の2か所あるため、
+  // 両方を通す。
+  //
+  // この2件を加えた第5の表(11行×19列)は、条件A・条件B(どの2列も全行を通じて値が
+  // 完全一致しない。JS値として比較するので 1.0 と 1、0 と false、null と undefined は
+  // 同一とみなす)を両方満たすことを、全171ペアの突き合わせで確認済み。
+  // 条件Aが落ちていたのは上記2列のみで、条件Bは追加前から満たしていた。
+  // ==========================================================================
+
+  it("route=place-only(配分0点・skip): skipReasonCode='no-candidates'がメタ行へ写り、kellyFractionが既定値0.5以外でもそのまま保存されること", () => {
+    const race = raceInput({ rows: allNonCandidateRows(8), oddsStatus: "middle" });
+    const s = settings({ includeComboOdds: false, kellyFraction: 0.42 });
+    const outcome = buildMixedRaceAllocationWithOutcome(race, s);
+    if (outcome.view.kind !== "computed") {
+      throw new Error(`前提が崩れている(place-onlyに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    // 前提固定(空振り防止): coreの配分計算に到達したうえでskip判定であり、写し元が非nullであること。
+    expect(outcome.view.result.isSkip).toBe(true);
+    expect(outcome.outcome.skipReasonCode).toBe("no-candidates");
+    // 前提固定: kellyFractionが settings() の既定値 0.5 と異なること(定数直書きへの変異を検出できる条件)。
+    expect(s.kellyFraction).not.toBe(0.5);
+
+    const rec = buildAllocationRecord(outcome, s, "middle");
+    expect(rec.meta).toEqual({
+      route: "place-only",
+      unavailableReason: null,
+      fallbackReason: "combo-odds-not-requested",
+      skipReasonCode: "no-candidates",
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.42,
+      evThreshold: 1.0,
+      includeComboOdds: false,
+      includeWide: true,
+      includeTrio: true,
+      // skipでも配分計算自体には到達しているため、実効値4列はplace-onlyの通常ケースと同じ。
+      betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: null,
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "middle",
+    });
+    // 値が固定文字列ではなく`AllocationOutcomeCodes`から写っていることを、写し元との一致でも固定する。
+    expect(rec.meta.skipReasonCode).toBe(outcome.outcome.skipReasonCode);
+    expect(rec.meta.kellyFraction).toBe(s.kellyFraction);
+    expect(rec.bets).toEqual([]); // skipなので明細0件。
+  });
+
+  it("route=mixed(配分0点・skip): 1レース上限が小さすぎる場合のskipReasonCode='cap-too-small'がメタ行へ写ること", () => {
+    const s = settings({ perRaceCap: 1 });
+    const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), s);
+    if (outcome.view.kind !== "mixed") {
+      throw new Error(`前提が崩れている(mixedに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    // 前提固定(空振り防止): mixed経路でskip判定であり、写し元が非nullかつplace-only側の値とも異なること。
+    expect(outcome.view.result.isSkip).toBe(true);
+    expect(outcome.outcome.skipReasonCode).toBe("cap-too-small");
+    expect(outcome.outcome.skipReasonCode).not.toBe("no-candidates");
+
+    const rec = buildAllocationRecord(outcome, s, "result");
+    expect(rec.meta).toEqual({
+      route: "mixed",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: "cap-too-small",
+      comboOddsWide: "present",
+      comboOddsTrio: "present",
+      bankroll: 300000,
+      perRaceCap: 1,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "result",
+    });
+    expect(rec.meta.skipReasonCode).toBe(outcome.outcome.skipReasonCode);
+    expect(rec.bets).toEqual([]); // skipなので明細0件。
   });
 });
 
