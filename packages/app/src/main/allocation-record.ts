@@ -27,6 +27,21 @@
  *   `candidateCap`はplace-only経路のconfig(`BetAllocationConfig`)に存在しないフィールドのため
  *   place-onlyは常にnull。model_id/model_approximateは配分結果オブジェクト(`BetAllocationResult`/
  *   `GeneralBetAllocationResult`)由来のため、結果を実際に得た経路(place-only/mixed)のみ非null。
+ *
+ * ## テストで強制できない箇所(#59 レビュー7巡目・bossの判定。塞げないと判定した記録)
+ *
+ * 本ファイルの写像は「束縛箇所ごとに2値以上を観測する」テスト(allocation-record.test.ts)で
+ * 定数直書きへの退行を検出できるようにしてあるが、次の2つだけは**値では強制できない**。
+ * 将来これらが分岐したら、テストで固定できるようになる(そのときに固定すること)。
+ *
+ * - **`DEFAULT_BET_ALLOCATION_CONFIG.*` と `DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.*` の
+ *   参照先の一致**: 経路ごとに参照先を一致させているのは**意図の表明**であり、
+ *   両者の `betUnit`/`greedySteps` は同一の定数(`DEFAULT_BET_UNIT`/`DEFAULT_GREEDY_STEPS`)を
+ *   指しているため、参照先を取り違えても・リテラルに置き換えても値として区別できない。
+ *   両定数が同値である間、この一致はテストでは強制されない。
+ * - **`modelId`/`modelApproximate`**: `PlaceJointModel` の実装は `CONDITIONAL_BERNOULLI_MODEL`
+ *   の1つだけで `approximate` は `true` 固定であり、配分計算の呼び出し側もモデルを上書きしない。
+ *   本番経路で単一値しか取り得ないため、「結果から読んでいること」を値では強制できない。
  */
 
 import {
