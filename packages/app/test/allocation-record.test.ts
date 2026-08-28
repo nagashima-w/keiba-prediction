@@ -250,6 +250,33 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       evThreshold: 2.5,
     });
   });
+
+  it("3件目: includeTrioInAllocationを1件目・2件目とも異なるfalseにし、条件A(定数でない)を満たすこと(coordinator水平展開レビュー対応)", () => {
+    // coordinator指摘: includeTrioInAllocationが1件目・2件目ともtrueで定数のままだと、
+    // `includeTrioInAllocation: settings.includeTrioInAllocation`を`true`直書きに変異させても
+    // 検出できない。booleanは2値しかないため、3項目(includeComboOdds/includeWideInAllocation/
+    // includeTrioInAllocation)を2件だけで「非定数」かつ「互いに異なるパターン」にはできない
+    // (鳩の巣原理。ipc-allocation-wiring.test.tsと同じ理由で3件目を追加する)。
+    // パターン(件1,件2,件3): comboOdds=(T,F,T)・wide=(F,T,T)・trio=(T,T,F)とし、
+    // 3項目とも非定数かつ互いに異なる列にする。
+    const six: AnalysisAllocationSettings = {
+      bankroll: 55555,
+      perRaceCap: 222,
+      kellyFraction: 0.15,
+      includeComboOdds: true,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: false,
+    };
+    expect(toMixedAllocationSettings(six, 3.7)).toEqual({
+      bankroll: 55555,
+      perRaceCap: 222,
+      kellyFraction: 0.15,
+      includeComboOdds: true,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: false,
+      evThreshold: 3.7,
+    });
+  });
 });
 
 // ============================================================================
