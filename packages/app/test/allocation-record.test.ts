@@ -376,9 +376,16 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     }
   });
 
-  it("route=mixed: メタ行が全フィールドで固定どおりに保存されること", () => {
+  it("route=mixed: メタ行が全フィールドで固定どおりに保存されること(wide≠trioのcomboOdds診断値で束縛の入れ替えを検出できること)", () => {
     const s = settings();
-    const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), s);
+    // boss差し戻し(M4): comboOddsWide/Trioが全フィクスチャで同値("present"/"present")だと、
+    // codesColumnsOfでのwide⇄trio束縛の入れ替えを検出できない。trioComboを未取得にして
+    // wide="present"・trio="unfetched"と異ならせる(#59追加確認: 頭数不可はここで判定しない
+    // ため、ワイド候補のみでもcomboCandidateCount>0となりmixed経路に到達する)。
+    const outcome = buildMixedRaceAllocationWithOutcome(
+      raceWithPositiveCombos(8, { trioCombo: undefined }),
+      s,
+    );
     if (outcome.view.kind !== "mixed") {
       throw new Error(`前提が崩れている(mixedに到達しなかった。kind=${outcome.view.kind})`);
     }
@@ -390,7 +397,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       fallbackReason: null,
       skipReasonCode: null,
       comboOddsWide: "present",
-      comboOddsTrio: "present",
+      comboOddsTrio: "unfetched",
       bankroll: 300000,
       perRaceCap: 20000,
       kellyFraction: 0.5,

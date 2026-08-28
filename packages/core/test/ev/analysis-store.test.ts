@@ -1888,6 +1888,10 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               comboOddsWide: null,
               comboOddsTrio: null,
               includeComboOdds: false,
+              // boss差し戻し(M2): include_wide/include_trioが全フィクスチャでtrue/true同値だと
+              // 束縛の入れ替えを検出できない。この経路でtrueとfalseに分ける。
+              includeWide: true,
+              includeTrio: false,
               betUnit: 100,
               greedySteps: 1000,
               candidateCap: null,
@@ -1913,13 +1917,68 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         ev_threshold: 1.0,
         include_combo_odds: 0,
         include_wide: 1,
-        include_trio: 1,
+        include_trio: 0,
         bet_unit: 100,
         greedy_steps: 1000,
         candidate_cap: null,
         model_id: "conditional-bernoulli",
         model_approximate: 0,
         odds_status: "middle",
+      });
+      store.close();
+    });
+
+    it("AC2: route=unavailable のメタ行が全20列で固定どおりに保存されること(unavailable_reasonが非nullになる唯一の経路。boss差し戻しM1の再発防止)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分unavailableレース",
+          allocation: {
+            meta: makeMeta({
+              route: "unavailable",
+              unavailableReason: "two-place-only",
+              fallbackReason: "combo-odds-not-requested",
+              skipReasonCode: null,
+              comboOddsWide: null,
+              comboOddsTrio: null,
+              bankroll: 100000,
+              perRaceCap: 10000,
+              includeComboOdds: false,
+              includeWide: true,
+              includeTrio: true,
+              // coreの配分計算に未到達(unset/yoso/unavailableと同じ扱い)。
+              betUnit: null,
+              greedySteps: null,
+              candidateCap: null,
+              modelId: null,
+              modelApproximate: null,
+              oddsStatus: "result",
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "unavailable",
+        unavailable_reason: "two-place-only",
+        fallback_reason: "combo-odds-not-requested",
+        skip_reason_code: null,
+        combo_odds_wide: null,
+        combo_odds_trio: null,
+        bankroll: 100000,
+        per_race_cap: 10000,
+        kelly_fraction: 0.5,
+        ev_threshold: 1.0,
+        include_combo_odds: 0,
+        include_wide: 1,
+        include_trio: 1,
+        bet_unit: null,
+        greedy_steps: null,
+        candidate_cap: null,
+        model_id: null,
+        model_approximate: null,
+        odds_status: "result",
       });
       store.close();
     });
@@ -1935,8 +1994,10 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               unavailableReason: null,
               fallbackReason: null,
               skipReasonCode: null,
+              // boss差し戻し(M3): combo_odds_wide/trioが全フィクスチャで同値だと束縛の入れ替えを
+              // 検出できない。この経路でwideとtrioを異ならせる。
               comboOddsWide: "present",
-              comboOddsTrio: "present",
+              comboOddsTrio: "empty",
             }),
             bets: [],
           },
@@ -1949,7 +2010,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         fallback_reason: null,
         skip_reason_code: null,
         combo_odds_wide: "present",
-        combo_odds_trio: "present",
+        combo_odds_trio: "empty",
         bankroll: 100000,
         per_race_cap: 10000,
         kelly_fraction: 0.5,
