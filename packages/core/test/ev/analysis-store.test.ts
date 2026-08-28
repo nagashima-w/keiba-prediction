@@ -1836,7 +1836,11 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               bankroll: 0,
               perRaceCap: 0,
               includeComboOdds: false,
-              includeWide: true,
+              // code-reviewer水平展開レビュー(finding1・finding「includeWideのfalse分岐が
+              // 一度も踏まれない」の両方に対応): include_wideがこの describe 全体で常にtrue(=1)
+              // だと、(a) ev_threshold(1.0→JSでは1)との束縛入れ替えを検出できず、
+              // (b) `m.includeWide ? 1 : 0` のfalse分岐を固定できない。この経路でfalseにする。
+              includeWide: false,
               includeTrio: true,
               betUnit: null,
               greedySteps: null,
@@ -1862,7 +1866,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         kelly_fraction: 0.5,
         ev_threshold: 1.0,
         include_combo_odds: 0,
-        include_wide: 1,
+        include_wide: 0,
         include_trio: 1,
         bet_unit: null,
         greedy_steps: null,
@@ -1896,7 +1900,10 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               greedySteps: 1000,
               candidateCap: null,
               modelId: "conditional-bernoulli",
-              modelApproximate: false,
+              // code-reviewer水平展開レビュー(finding2): この describe 全体で
+              // modelApproximateがfalse/nullのみだと、`m.modelApproximate === null ? null :
+              // m.modelApproximate ? 1 : 0` のtrue→1分岐が一度もDB往復を通らない。この経路でtrueにする。
+              modelApproximate: true,
               oddsStatus: "middle",
             }),
             bets: [],
@@ -1922,7 +1929,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         greedy_steps: 1000,
         candidate_cap: null,
         model_id: "conditional-bernoulli",
-        model_approximate: 0,
+        model_approximate: 1,
         odds_status: "middle",
       });
       store.close();
@@ -1943,6 +1950,10 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               comboOddsTrio: null,
               bankroll: 100000,
               perRaceCap: 10000,
+              // coordinator水平展開レビュー(定数置換の穴): kellyFractionが4テストとも0.5だと
+              // `m.kellyFraction`を0.5のリテラル直書きに変異させても検出できない
+              // (実測: core 2072件が全緑になることを確認済み)。この経路で0.5以外にする。
+              kellyFraction: 0.7,
               includeComboOdds: false,
               includeWide: true,
               includeTrio: true,
@@ -1968,7 +1979,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         combo_odds_trio: null,
         bankroll: 100000,
         per_race_cap: 10000,
-        kelly_fraction: 0.5,
+        kelly_fraction: 0.7,
         ev_threshold: 1.0,
         include_combo_odds: 0,
         include_wide: 1,
@@ -1998,6 +2009,10 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // 検出できない。この経路でwideとtrioを異ならせる。
               comboOddsWide: "present",
               comboOddsTrio: "empty",
+              // coordinator水平展開レビュー(定数置換の穴): evThresholdが4テストとも1.0だと
+              // `m.evThreshold`を1.0のリテラル直書きに変異させても検出できない
+              // (実測: core 2072件が全緑になることを確認済み)。この経路で1.0以外にする。
+              evThreshold: 1.3,
             }),
             bets: [],
           },
@@ -2014,7 +2029,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         bankroll: 100000,
         per_race_cap: 10000,
         kelly_fraction: 0.5,
-        ev_threshold: 1.0,
+        ev_threshold: 1.3,
         include_combo_odds: 1,
         include_wide: 1,
         include_trio: 1,

@@ -225,6 +225,31 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       evThreshold: 1.2,
     });
   });
+
+  it("2件目: includeComboOdds≠includeTrioInAllocationの組を1件目と反転させ、フィールド単位の取り違えを検出できること(水平展開レビュー対応)", () => {
+    // 1件目はincludeComboOdds=true・includeTrioInAllocation=trueが同値(booleanは2値しかないため
+    // 1件だけでは3項目のうち必ずどこかの対が同値になる。この2件目で(comboOdds,trio)を
+    // (false,true)にして異ならせ、実装が {...settings, evThreshold} のスプレッドから
+    // フィールド個別列挙(例: includeComboOdds: settings.includeTrioInAllocationのような取り違え)
+    // へ退行しても検出できるようにする。
+    const six: AnalysisAllocationSettings = {
+      bankroll: 999999,
+      perRaceCap: 1,
+      kellyFraction: 0.9,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+    };
+    expect(toMixedAllocationSettings(six, 2.5)).toEqual({
+      bankroll: 999999,
+      perRaceCap: 1,
+      kellyFraction: 0.9,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      evThreshold: 2.5,
+    });
+  });
 });
 
 // ============================================================================

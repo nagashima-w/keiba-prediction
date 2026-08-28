@@ -171,7 +171,20 @@ describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(
 
     await saveHandler(
       fakeEvent,
-      makeUpdate({ includeComboOdds: false, bankroll: 50000, kellyFraction: 0.3 }),
+      makeUpdate({
+        includeComboOdds: false,
+        bankroll: 50000,
+        kellyFraction: 0.3,
+        // code-reviewer水平展開レビュー(finding3): perRaceCap/includeWideInAllocation/
+        // includeTrioInAllocationが2テストとも同一固定値のままだと、`settings.*`の読み出しを
+        // 定数直書きに変異させても検出できない。この経路で3つとも既定値と異なる値にする。
+        // includeWideInAllocationはtrueのまま(test1と同値)にしている——3件目のテストで
+        // T,T,Fのパターンにし、includeComboOdds(T,F,T)・includeTrioInAllocation(F,T,F)の
+        // いずれとも全3件で一致しないようにするため(下記3件目のコメント参照)。
+        perRaceCap: 5000,
+        includeWideInAllocation: true,
+        includeTrioInAllocation: true,
+      }),
     );
     verifyHandler(fakeEvent);
 
@@ -183,12 +196,55 @@ describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(
     };
     expect(config.allocationSettings).toEqual({
       bankroll: 50000,
-      perRaceCap: 20000,
+      perRaceCap: 5000,
       kellyFraction: 0.3,
       includeWideInAllocation: true,
-      includeTrioInAllocation: false,
+      includeTrioInAllocation: true,
     });
     expect(config.includeComboOdds).toBe(false);
+  });
+
+  it("設定の配分5項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(3件目: includeComboOdds/includeWideInAllocation/includeTrioInAllocationの3値パターンを互いに識別できるようにする)", async () => {
+    // code-reviewer水平展開レビュー(finding3の残滓): 2件だけだとboolean項目は非定数化のため
+    // 必ずT/Fの2値を両方使う必要があり、3項目(includeComboOdds/includeWideInAllocation/
+    // includeTrioInAllocation)を2値×2件で非定数にすると鳩の巣原理でどれか2項目が
+    // 全件同一パターンになってしまう(実際にincludeWideInAllocationとincludeComboOddsが
+    // (true,false)/(true,false)で一致していたため、両者を入れ替えても検出できないことを
+    // 変異注入で確認済み)。3件目を追加し、3項目それぞれのパターンを
+    // comboOdds=(T,F,T)・wide=(T,T,F)・trio=(F,T,F)として互いに異ならせる。
+    const { registerIpcHandlers } = await import("../src/main/ipc.js");
+    registerIpcHandlers();
+
+    const saveHandler = handlerFor(IPC_CHANNELS.saveSettings);
+    const verifyHandler = handlerFor(IPC_CHANNELS.getVerifyReport);
+
+    await saveHandler(
+      fakeEvent,
+      makeUpdate({
+        includeComboOdds: true,
+        bankroll: 77777,
+        kellyFraction: 0.9,
+        perRaceCap: 1000,
+        includeWideInAllocation: false,
+        includeTrioInAllocation: false,
+      }),
+    );
+    verifyHandler(fakeEvent);
+
+    const lastCall =
+      createPipelineDepsMock.mock.calls[createPipelineDepsMock.mock.calls.length - 1]!;
+    const config = lastCall[0] as {
+      allocationSettings?: unknown;
+      includeComboOdds?: unknown;
+    };
+    expect(config.allocationSettings).toEqual({
+      bankroll: 77777,
+      perRaceCap: 1000,
+      kellyFraction: 0.9,
+      includeWideInAllocation: false,
+      includeTrioInAllocation: false,
+    });
+    expect(config.includeComboOdds).toBe(true);
   });
 
   it("handleRunBatchAnalysisとhandleRunPeriodBatchAnalysisが、createPipelineDepsが返した同一のdepsオブジェクトをrunAnalysisの第3引数に渡すこと(オブジェクト同一性)", async () => {
