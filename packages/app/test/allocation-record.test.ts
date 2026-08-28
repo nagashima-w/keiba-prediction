@@ -491,6 +491,12 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     for (const a of stakePositive) {
       const bet = rec.bets.find((b) => b.comboKey === buildComboOddsKey([a.umaban]));
       expect(bet).toBeDefined();
+      // boss差し戻し(S1・条件A0): stakeは `expect(b.stake).toBeGreaterThan(0)` という
+      // 述語検査しか無かったため、`stake: a.stake` を `100` 直書きに変異させても
+      // 100>0 が真で素通りしていた(mixed経路はSUM(stake)===totalStakeで固定済みだが、
+      // place-only経路には対応する検査が無かった)。stakeは#54の回収率の分母そのもので、
+      // 定数へ退行すると保存済みの全レースの回収率が静かに誤る。値として突き合わせる。
+      expect(bet!.stake).toBe(a.stake);
       expect(bet!.odds).toBe(a.placeOddsMin);
       expect(bet!.ev).toBe(a.ev);
       expect(bet!.odds).not.toBe(bet!.ev); // 取り違えても値が同じでは検出できないための自己チェック。
