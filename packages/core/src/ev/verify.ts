@@ -16,15 +16,54 @@
  *   同一レースを複数回分析している場合は上記の二重計上が起きる点に注意。集計対象の重複を意図する
  *   バックテスト等で使う。このモードでは supersededAnalysisCount は常に0。
  *
- * 回収率(実配当優先・近似フォールバック):
- * - 結果取込で複勝の確定払戻(placePayout。100円あたりの円)を保存していれば、的中時の払戻に
- *   実配当を用いる(賭け金が100円以外でも 100円あたりで按分)。これが本来の回収率。
- * - 実配当が未取込(旧データ・払戻テーブル欠損)の場合のみ、「保存済み複勝オッズ下限 × 賭け金」で
- *   近似する。下限を使うため近似時の回収率は保守的(実際よりやや低め)に出る。
+ * 概念の分離(Issue#70。#54-A是正): 「3着以内か」と「複勝の払戻対象か」は別概念であり、
+ * 別々のフィールドで表す。
+ * - isInTopThree: 実着順が3着以内(複勝圏)か(finishPosition<=placeMaxRank)。AI予測の精度検証
+ *   (キャリブレーション表・補正傾向サマリ・印別的中率・RaceBreakdownHorse.isPlaced)はこちらだけを
+ *   使う。8頭立て以上では複勝は3着まで発売されるため「払戻対象」と一致するが、5〜7頭立て
+ *   (複勝は2着まで)では3着馬は isInTopThree=true でも払戻対象ではない。
+ * - isPlaceHit: 複勝の払戻対象(馬券として当たったか)。回収率集計(bet.totalReturn等)は
+ *   こちらだけを使う。判定規則は下記「規則H」。
+ * (旧実装はこの2つを isPlaced という1つの変数で表しており、5〜7頭立ての3着馬が回収率計算でも
+ * 的中扱いされ払戻が過大計上される欠陥があった。#51)
+ *
+ * 回収率(実配当優先・近似フォールバック。的中判定は規則H):
+ * - 【規則H】そのレースの race_results に複勝の確定払戻(placePayout)が1件以上保存されていれば
+ *   「複勝払戻が取込済みのレース」とみなし、isPlaceHit は各馬の placePayout が非null かどうかで
+ *   決める(着順は見ない。同着で複数頭に払い戻される場合も placePayout の値をそのまま使うため
+ *   正確)。払戻は実配当(100円あたりの円)を賭け金に応じて按分する。このレースでは placeOddsMin
+ *   は払戻計算に一切使わない。
+ *   (真因: RaceResultEntry.placePayout は「複勝圏外(3着以内だが払戻対象外を含む)」と
+ *   「未取込(旧データ・払戻テーブル欠損)」の両方で null になる〈analysis-store.ts の型定義〉。
+ *   馬単位で actualPayout!==null だけを見ると両者を区別できないため、規則Hはレース単位で
+ *   「payoutテーブル自体が取込済みか」を先に判定してから馬単位の null を解釈する)。
+ * - 複勝払戻が1件も保存されていない(未取込)レースでは、isPlaceHit は isInTopThree と同じ
+ *   (従来どおり)。払戻は「保存済み複勝オッズ下限 × 賭け金」で近似する。下限を使うため近似時の
+ *   回収率は保守的(実際よりやや低め)に出る。
+ * - 【残余(本タスクでは意図的に塞がない)】払戻未取込のレースでは出走頭数を判定できない
+ *   (出走頭数はDBから復元不能。中止・除外・取消はいずれも finishPosition=null に潰され、
+ *   race_results スキーマにも頭数を残す列が無い)。そのため5〜7頭立てでも
+ *   isInTopThree=true の3着馬を近似払戻で的中計上してしまう過大計上が、払戻未取込のレースに限り
+ *   残る。この残余の解消(頭数の何らかの代替復元)は本タスク(#70)のスコープ外。
  * - どちらで払戻を計上したかは bet.actualPayoutCount / bet.approximatePayoutCount に内訳を出す
  *   (的中して払戻を計上した点のみが対象。不的中は払戻0でどちらのカウンタにも入らない)。
- * - 的中判定は実着順3着以内(複勝圏)。着順不明・非数値(finishPosition=null)は集計対象外とし、
- *   賭け金・払戻の双方から除外する(勝敗が確定できないため)。
+ * - 着順不明・非数値(finishPosition=null)は集計対象外とし、賭け金・払戻の双方から除外する
+ *   (勝敗が確定できないため)。
+ *
+ * オッズ判定不能の除外(規則U、Issue#70 AC-A4。#50の防御的堅牢化):
+ * - isPositive=true かつ placeOddsMin が非null だが数値として使えない(0以下・NaN・Infinity。
+ *   allocation-primitives.ts の isUsableOdds に基準を一本化)場合、賭け金・払戻のいずれにも
+ *   計上せず bet.unjudgedOddsCount に別途計上する。現行の本番経路(expected-value.ts)では
+ *   oddsMin が不正なら ev>1 判定自体を通らずそもそも isPositive=true にならないため、この状態には
+ *   到達しない(#50調査済み)。将来の経路追加に備えた防御。
+ * - 判定順序: この判定(unjudgedOdds)は払戻計算より前に行う。オッズが使えないと判定した馬が、
+ *   その後の分岐で賭け金・払戻に計上される経路は無い。
+ * - 【未決定・本タスクでは検討していない】このレースの複勝payoutが規則Hの「ある」側(実配当
+ *   取込済み)であっても、placeOddsMin が不正であれば同様に判定不能として賭け金・払戻から除外する
+ *   (実配当の金額計算自体は placeOddsMin を使わないが、betPlaced の判定に isUsableOdds を含めて
+ *   いるため)。この組み合わせ(実配当取込済み×placeOddsMin不正)が本来どう扱われるべきかは
+ *   #50の調査どおり本番経路では到達不能なため、本タスクでは意図的に決めていない
+ *   (決めていないことを決めたと書かないための注記)。
  *
  * 結果が保存されていない分析はレポートから除外し、その件数を報告する(仕様の要件)。
  *
@@ -130,6 +169,7 @@ import type {
 } from "./analysis-store.js";
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
 import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
+import { isUsableOdds } from "./allocation-primitives.js";
 
 /**
  * verifyレポートの母集団を開催区分で絞り込むフィルタ(Task#32)。
@@ -255,6 +295,12 @@ export interface VerifyBetSummary {
   readonly actualPayoutCount: number;
   /** 的中時の払戻を複勝オッズ下限で近似計上した件数(実配当が未取込の分)。 */
   readonly approximatePayoutCount: number;
+  /**
+   * 規則U(Issue#70 AC-A4)により判定不能として賭け金・払戻のいずれにも計上しなかった件数。
+   * isPositive=true かつ placeOddsMin が非null だが isUsableOdds で使えないと判定された馬が対象
+   * (#50の防御的堅牢化。現行の本番経路では0のまま)。
+   */
+  readonly unjudgedOddsCount: number;
 }
 
 /** verifyレポート。 */
@@ -322,8 +368,11 @@ export interface RaceBreakdownHorse {
   /** 実着順。非数値着順(中止・除外)・結果に馬番が無い場合は null(着順不明)。 */
   readonly finishPosition: number | null;
   /**
-   * 複勝的中(finishPosition <= placeMaxRank)の有無。finishPosition が null(着順不明)なら
-   * 判定不能のため null(verifyの集計対象外と対応する)。
+   * 実着順が3着以内(isInTopThree。finishPosition <= placeMaxRank)かどうか。finishPosition が
+   * null(着順不明)なら判定不能のため null(verifyの集計対象外と対応する)。
+   * 【複勝の払戻対象とは別概念】(Issue#70 #54-A是正)。5〜7頭立て(複勝は2着まで)では
+   * 3着馬はここが true でも複勝の払戻対象ではない。回収率(bet.totalReturn等)は isPlaceHit
+   * (規則H。ファイル先頭コメント参照)で判定しており、この isPlaced 値は使っていない。
    */
   readonly isPlaced: boolean | null;
   /**
@@ -430,9 +479,11 @@ export function computeRaceLedger(
   return latest.map((analysis) => {
     const results = store.getResult(analysis.raceId);
     const hasResult = results !== undefined;
-    const hasPayout =
-      hasResult &&
-      results!.some((r) => r.placePayout !== null && r.placePayout !== undefined);
+    // hasPayout(表示用)と規則HのracePayoutAvailable(集計用)は同じ「そのレースにplacePayout
+    // 非null行が1件以上あるか」という判定式であり、raceHasPlacePayoutに一本化している
+    // (Issue#59で繰り返し問題になった二重定義を避けるため。ここと computeHorseBetOutcome の
+    // 呼び出し元〈buildRaceBreakdown・computeVerifyReportForAnalyses〉が同じ関数を共有する)。
+    const hasPayout = hasResult && raceHasPlacePayout(results!);
     const breakdown = buildRaceBreakdown(analysis, results ?? [], config);
     return {
       raceId: breakdown.raceId,
@@ -604,22 +655,49 @@ function selectIncludedAnalyses(
   return { included, excludedAnalysisCount, supersededAnalysisCount, excludedEstimatedCount };
 }
 
-/** computeHorseBetOutcome の算出結果(Task#34)。 */
+/**
+ * そのレースの実結果に複勝の確定払戻(placePayout)が1件以上あるか(規則H、Issue#70)。
+ * computeRaceLedger の hasPayout(表示用)と computeHorseBetOutcome の racePayoutAvailable
+ * (集計用)が同じ式を指す一本の定義(Issue#59で繰り返し問題になった二重定義を避けるため)。
+ */
+function raceHasPlacePayout(results: readonly RaceResultEntry[]): boolean {
+  return results.some((r) => r.placePayout !== null && r.placePayout !== undefined);
+}
+
+/** computeHorseBetOutcome の算出結果(Task#34。Issue#70で isPlaced を isInTopThree/isPlaceHit に分離)。 */
 interface HorseBetOutcome {
-  /** 複勝的中の有無。finishPosition が null(着順不明)なら null。 */
-  readonly isPlaced: boolean | null;
-  /** EVプラス馬に賭けたか(isPositive かつ placeOddsMin!==null)。 */
+  /**
+   * 実着順が3着以内(複勝圏)か。finishPosition が null(着順不明)なら null。
+   * AI予測の精度検証(キャリブレーション・補正傾向・印別的中率・RaceBreakdownHorse.isPlaced)は
+   * こちらだけを使う。複勝の払戻対象とは別概念(isPlaceHit参照)。
+   */
+  readonly isInTopThree: boolean | null;
+  /**
+   * 複勝の払戻対象(=馬券として当たったか)。規則H(ファイル先頭コメント参照)で判定する。
+   * finishPosition が null(着順不明)なら null。回収率集計(totalReturn等)はこちらだけを使う。
+   */
+  readonly isPlaceHit: boolean | null;
+  /**
+   * EVプラス馬に実際に賭けたか(isPositive かつ placeOddsMinが非nullかつisUsableOddsで使える)。
+   * 規則U(オッズ判定不能)に該当する場合は false になる。
+   */
   readonly betPlaced: boolean;
+  /**
+   * 規則U(Issue#70 AC-A4)による判定不能か。isPositive かつ placeOddsMinが非nullだが
+   * isUsableOddsで使えない場合に true。true のときは betPlaced は必ず false で、
+   * stake/payoutも0(賭け金・払戻のいずれにも計上しない。呼び出し元でunjudgedOddsCountに計上)。
+   */
+  readonly unjudgedOdds: boolean;
   /** 賭け金(円)。betPlaced かつ着順確定分のみ stakePerBet、それ以外は0。 */
   readonly stake: number;
-  /** 払戻(円)。的中でなければ0。 */
+  /** 払戻(円)。的中(isPlaceHit)でなければ0。 */
   readonly payout: number;
   /** payout の算出根拠。的中かつ賭けた馬のみ非null。 */
   readonly payoutSource: "actual" | "approximate" | null;
 }
 
 /**
- * 1頭分の賭け判定・払戻計算(Task#34)。
+ * 1頭分の賭け判定・払戻計算(Task#34。Issue#70で規則H・規則Uを追加)。
  * computeVerifyReportForAnalyses の回収率集計ループと private buildRaceBreakdown(computeRaceLedgerが
  * 内部で再利用)の両方から呼ばれる共通ロジック(「EVプラス馬に stakePerBet 円賭ける・的中時は
  * 実配当優先/複勝オッズ下限で近似フォールバック」)。呼び出し元でのロジック分岐(if文の条件・
@@ -627,44 +705,66 @@ interface HorseBetOutcome {
  * @param horse 分析馬(prior/adjustedProb/placeOddsMin/isPositive等)
  * @param finishPosition 実着順。呼び出し元で既に「着順不明(undefined/null)」を弾いている場合は
  *   非null値を渡す想定だが、念のためnullも受け付け、その場合は判定不能として扱う。
- * @param actualPayout 複勝確定払戻(100円あたりの円)。未取込は null/undefined。
+ * @param actualPayout この馬の複勝確定払戻(100円あたりの円)。未取込・複勝圏外は null/undefined。
+ * @param racePayoutAvailable そのレースに複勝確定払戻が1件以上あるか(規則H。raceHasPlacePayout)。
  * @param config verify設定(stakePerBet・placeMaxRank)
  */
 function computeHorseBetOutcome(
   horse: StoredAnalysisHorse,
   finishPosition: number | null,
   actualPayout: number | null | undefined,
+  racePayoutAvailable: boolean,
   config: VerifyConfig,
 ): HorseBetOutcome {
   const { stakePerBet, placeMaxRank } = config;
-  const betPlaced = horse.isPositive && horse.placeOddsMin !== null;
 
+  // 規則U: オッズ判定不能かどうかは払戻計算より前に決める(判定不能な馬がその後の分岐で
+  // 賭け金・払戻に計上される経路を作らないため。裁定2)。
+  const oddsUsable = horse.placeOddsMin !== null && isUsableOdds(horse.placeOddsMin);
+  const unjudgedOdds = horse.isPositive && horse.placeOddsMin !== null && !oddsUsable;
+  const betPlaced = horse.isPositive && oddsUsable;
+
+  const isInTopThree = finishPosition === null ? null : finishPosition <= placeMaxRank;
+  const hasActualPayout = actualPayout !== undefined && actualPayout !== null;
+  // 規則H: レースに複勝payoutが取込済みなら、この馬のpayout非nullかどうかで的中を判定する
+  // (着順は見ない)。未取込レースでは従来どおり isInTopThree で判定する。
+  const isPlaceHit =
+    finishPosition === null ? null : racePayoutAvailable ? hasActualPayout : isInTopThree;
+
+  if (unjudgedOdds) {
+    // オッズが使えないため判定不能。賭け金・払戻のいずれにも計上しない(規則U)。
+    return { isInTopThree, isPlaceHit, betPlaced, unjudgedOdds, stake: 0, payout: 0, payoutSource: null };
+  }
   if (finishPosition === null) {
     // 着順不明(中止・除外・結果に馬番が無い)は判定不能。集計対象外(stake/payoutは0)。
-    return { isPlaced: null, betPlaced, stake: 0, payout: 0, payoutSource: null };
+    return { isInTopThree: null, isPlaceHit: null, betPlaced, unjudgedOdds, stake: 0, payout: 0, payoutSource: null };
   }
-  const isPlaced = finishPosition <= placeMaxRank;
   if (!betPlaced) {
-    return { isPlaced, betPlaced, stake: 0, payout: 0, payoutSource: null };
+    return { isInTopThree, isPlaceHit, betPlaced, unjudgedOdds, stake: 0, payout: 0, payoutSource: null };
   }
-  if (!isPlaced) {
-    // 賭けたが不的中: 賭け金のみ計上、払戻は0。
-    return { isPlaced, betPlaced, stake: stakePerBet, payout: 0, payoutSource: null };
+  if (!isPlaceHit) {
+    // 賭けたが不的中(規則Hにより「3着以内だが複勝payout対象外」もここに含まれる): 賭け金のみ計上、払戻は0。
+    return { isInTopThree, isPlaceHit, betPlaced, unjudgedOdds, stake: stakePerBet, payout: 0, payoutSource: null };
   }
   // 的中時の払戻: 実配当(placePayout)があればそれを100円あたりで按分して用い、
-  // 無ければ複勝オッズ下限で近似する。
-  if (actualPayout !== undefined && actualPayout !== null) {
+  // 無ければ複勝オッズ下限で近似する(未取込レースのみ到達。規則Hにより取込済みレースでは
+  // isPlaceHit=true は必ず hasActualPayout=true を伴うため、この経路には来ない)。
+  if (hasActualPayout) {
     return {
-      isPlaced,
+      isInTopThree,
+      isPlaceHit,
       betPlaced,
+      unjudgedOdds,
       stake: stakePerBet,
-      payout: actualPayout * (stakePerBet / 100),
+      payout: actualPayout! * (stakePerBet / 100),
       payoutSource: "actual",
     };
   }
   return {
-    isPlaced,
+    isInTopThree,
+    isPlaceHit,
     betPlaced,
+    unjudgedOdds,
     stake: stakePerBet,
     // betPlaced=true は horse.placeOddsMin!==null を含意するため非nullアサーションで安全に参照できる。
     payout: stakePerBet * horse.placeOddsMin!,
@@ -689,6 +789,8 @@ function buildRaceBreakdown(
   const payoutByUmaban = new Map<number, number | null | undefined>(
     results.map((r) => [r.umaban, r.placePayout]),
   );
+  // 規則H: このレース全体で複勝payoutが1件でも取込済みか(raceHasPlacePayoutに一本化)。
+  const racePayoutAvailable = raceHasPlacePayout(results);
 
   let totalStake = 0;
   let totalReturn = 0;
@@ -703,6 +805,7 @@ function buildRaceBreakdown(
       horse,
       finishPosition,
       payoutByUmaban.get(horse.umaban),
+      racePayoutAvailable,
       config,
     );
     if (outcome.betPlaced && outcome.stake > 0) {
@@ -718,7 +821,8 @@ function buildRaceBreakdown(
       ev: horse.ev,
       isPositive: horse.isPositive,
       finishPosition,
-      isPlaced: outcome.isPlaced,
+      // isInTopThree(3着以内)を返す。複勝の払戻対象(isPlaceHit)とは別概念(JSDoc参照)。
+      isPlaced: outcome.isInTopThree,
       stake: outcome.stake,
       payout: outcome.payout,
       payoutSource: outcome.payoutSource,
@@ -794,6 +898,7 @@ function computeVerifyReportForAnalyses(
   let totalReturn = 0;
   let actualPayoutCount = 0;
   let approximatePayoutCount = 0;
+  let unjudgedOddsCount = 0;
 
   for (const { analysis, results } of selected.included) {
     // 馬番 → 実着順(finishPosition)。非数値着順は null。
@@ -804,6 +909,8 @@ function computeVerifyReportForAnalyses(
     const payoutByUmaban = new Map<number, number | null | undefined>(
       results.map((r) => [r.umaban, r.placePayout]),
     );
+    // 規則H: このレース全体で複勝payoutが1件でも取込済みか(raceHasPlacePayoutに一本化)。
+    const racePayoutAvailable = raceHasPlacePayout(results);
 
     for (const horse of analysis.horses) {
       const finish = finishByUmaban.get(horse.umaban);
@@ -811,17 +918,25 @@ function computeVerifyReportForAnalyses(
       if (finish === undefined || finish === null) {
         continue;
       }
-      // 賭け判定・払戻計算・複勝的中判定(isPlaced)は computeHorseBetOutcome に集約
-      // (賭け判定・払戻計算は Task#34 でレース単位ブレークダウンと共有。isPlaced も同関数の
-      // 戻り値を再利用することで、同じ式(finish <= placeMaxRank)をこのループ内で二重に
-      // 計算しない)。finish は上で non-null 確定済みのため isPlaced も必ず non-null。
-      const outcome = computeHorseBetOutcome(horse, finish, payoutByUmaban.get(horse.umaban), config);
-      const isPlaced = outcome.isPlaced!;
+      // 賭け判定・払戻計算・isInTopThree/isPlaceHitの算出は computeHorseBetOutcome に集約
+      // (賭け判定・払戻計算は Task#34 でレース単位ブレークダウンと共有。Issue#70で isPlaced を
+      // isInTopThree〈3着以内〉と isPlaceHit〈複勝payout対象。規則H〉に分離した)。
+      // finish は上で non-null 確定済みのため isInTopThree も必ず non-null。
+      const outcome = computeHorseBetOutcome(
+        horse,
+        finish,
+        payoutByUmaban.get(horse.umaban),
+        racePayoutAvailable,
+        config,
+      );
+      const isInTopThree = outcome.isInTopThree!;
 
+      // キャリブレーション・補正傾向・印別的中率は isInTopThree(3着以内)だけを使う
+      // (複勝payout対象〈isPlaceHit〉とは別概念。Issue#70 AC-A1)。
       // キャリブレーション: 全馬(推定確率帯ごと)に計上する。
       const binIndex = binIndexFor(horse.adjustedProb, calibrationBins);
       bins[binIndex]!.predicted += 1;
-      if (isPlaced) {
+      if (isInTopThree) {
         bins[binIndex]!.placed += 1;
       }
 
@@ -832,7 +947,7 @@ function computeVerifyReportForAnalyses(
       const dCounter = directionCounters[direction];
       dCounter.count += 1;
       dCounter.adjustmentSum += diff;
-      if (isPlaced) {
+      if (isInTopThree) {
         dCounter.placed += 1;
       }
 
@@ -842,16 +957,22 @@ function computeVerifyReportForAnalyses(
       // 集計処理自体がクラッシュしないよう、markCounters に無いキーは「印なし」群にフォールバックする。
       const mCounter = markCounters.get(horse.mark) ?? noMarkCounter;
       mCounter.count += 1;
-      if (isPlaced) {
+      if (isInTopThree) {
         mCounter.placed += 1;
       }
       if (finish === 1) {
         mCounter.won += 1;
       }
 
+      // 規則U(Issue#70 AC-A4): オッズ判定不能は賭け金・払戻いずれにも計上せず、
+      // unjudgedOddsCount に別途計上する(betPlacedは必ずfalseのため下のbetPlacedブロックとは排他)。
+      if (outcome.unjudgedOdds) {
+        unjudgedOddsCount += 1;
+      }
+
       // 回収率: EVプラス馬券のみ複勝を stakePerBet 円で購入したと仮定
       // (outcome は上で計算済み。賭け判定・払戻計算は computeHorseBetOutcome に集約し、
-      // Task#34でレース単位ブレークダウンと共有)。
+      // Task#34でレース単位ブレークダウンと共有。的中判定は isPlaceHit〈規則H〉)。
       if (outcome.betPlaced) {
         betCount += 1;
         totalStake += outcome.stake;
@@ -879,6 +1000,7 @@ function computeVerifyReportForAnalyses(
       recoveryRate: totalStake === 0 ? null : totalReturn / totalStake,
       actualPayoutCount,
       approximatePayoutCount,
+      unjudgedOddsCount,
     },
     calibration,
     trend: {

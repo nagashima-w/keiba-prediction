@@ -436,6 +436,103 @@ describe("computeVerifyReport(verify集計)", () => {
     });
   });
 
+  describe("複勝的中(isPlaceHit)と3着以内(isInTopThree)の分離(Issue#70 #54-A)", () => {
+    /**
+     * 既存フィクスチャの placePayout 監査(AC-A5。裁定3対応):
+     * 本ファイル中で placePayout を保存しているのは次の7箇所のみ(全数)。
+     * 1. :367 "実配当(placePayout)があれば近似ではなく実配当で払戻を計上すること" — R1、1頭
+     *    (finish=1, payout=300)。
+     * 2. :403 "賭け金が100円以外でも実配当を100円あたりで按分して計上すること" — 同上構成。
+     * 3. :1202 "不変条件: 中央のみ+地方のみ=全体..." — 202601010101、1頭(finish=1, payout=280)。
+     * 4. :1269 "単一分析・結果取込済み..." — R1、1頭(finish=1, payout=300)。
+     * 5. :1429 "複数レースを扱う場合..." — R2、1頭(finish=2, payout=180)。
+     * 6. :1483 "通常レース・latest選択で上書きされる旧分析..." — R1、2頭
+     *    (umaban1: finish=1,payout=280 / umaban2: finish=6,payout無し)。
+     * 7. 同テスト内 R3 — 1頭(finish=1, payout=260)。
+     *
+     * いずれも「payoutが非nullの馬は必ずisInTopThree(finish<=3)もtrue」「payoutがnullの馬は
+     * (6.のumaban2のみ該当し)finish=6でisInTopThreeもfalse」であり、isInTopThreeとpayout有無が
+     * 一度も食い違わない(=5〜7頭立てで3着馬に複勝payoutが無い、という規則Hが従来判定と分岐する
+     * 組み合わせを1件も踏んでいない)。そのため規則Hの導入でこれら7フィクスチャの
+     * bet/calibration/trendの数値は変化しない(AC-A5)。
+     * 【将来フィクスチャを追加する人へ】placePayoutを含む新規フィクスチャを足すときは、
+     * この前提(payout有無とisInTopThreeが一致している)が崩れていないか確認すること。
+     * 崩れていれば、崩れた側のテストがAC-A5の非破壊条件を検証する対象になる。
+     */
+    it("6頭立て・複勝払戻取込済みでEVプラス馬が3着のとき、回収率は不的中(規則H)のまま、キャリブレーション・印別的中率は的中(3着以内)として計上されること(#51の回帰確認)", () => {
+      const store = new AnalysisStore();
+      // 6頭立て: 複勝は2着までしか発売されないため、実際の payout も umaban1・2のみに付く
+      // (netkeibaの確定払戻表そのものの構成。umaban3は3着だが複勝の払戻対象ではない)。
+      store.saveAnalysis({
+        raceId: "R_AC_A3",
+        analyzedAt: "t",
+        horses: [
+          horse(1, 0.05, 2.0, 0.1, false),
+          horse(2, 0.15, 2.0, 0.3, false),
+          // umaban3: EVプラスで購入する3着馬。mark="◎"はmarkStats「◎」群の唯一のメンバーにする
+          // ための印(この馬しか◎を付けていないので、count/placeRateの分母分子がこの馬だけになる)。
+          { ...horse(3, 0.55, 2.0, 1.1, true), mark: "◎" as PredictionMark },
+          horse(4, 0.25, 2.0, 0.5, false),
+          horse(5, 0.35, 2.0, 0.7, false),
+          horse(6, 0.45, 2.0, 0.9, false),
+        ],
+      });
+      store.saveResult("R_AC_A3", [
+        { umaban: 1, finishPosition: 1, placePayout: 280 },
+        { umaban: 2, finishPosition: 2, placePayout: 150 },
+        { umaban: 3, finishPosition: 3, placePayout: null }, // 6頭立てのため複勝対象外
+        { umaban: 4, finishPosition: 4, placePayout: null },
+        { umaban: 5, finishPosition: 5, placePayout: null },
+        { umaban: 6, finishPosition: 6, placePayout: null },
+      ]);
+
+      const report = computeVerifyReport(store);
+
+      // --- isInTopThree側(3着以内)の指標: umaban3(prob=0.55)は3着なので的中として計上される ---
+      // 前提固定: 50-60%帯にはumaban3しかいない(他は0.05/0.15/0.25/0.35/0.45で別帯)。
+      const bin = report.calibration[5]!;
+      expect(bin.predictedCount).toBe(1);
+      expect(bin.placedCount).toBe(1); // isInTopThree=true(finish3<=3)として計上
+      expect(bin.actualPlaceRate).toBeCloseTo(1, 10);
+      // 前提固定: mark="◎"の群はumaban3のみ(唯一のメンバー)。
+      const markStat = report.trend.markStats.find((m) => m.mark === "◎")!;
+      expect(markStat.count).toBe(1);
+      expect(markStat.placeRate).toBeCloseTo(1, 10); // count×placeRate=1 → 的中1件相当
+
+      // --- isPlaceHit側(複勝payout対象)の指標: umaban3は6頭立て3着で複勝payout対象外 ---
+      expect(report.bet.betCount).toBe(1); // EVプラスはumaban3のみ
+      expect(report.bet.totalStake).toBe(100);
+      // #51の回帰確認: 3着だが複勝payoutが無いので不的中(旧実装は下限近似で誤って的中扱いした)。
+      expect(report.bet.totalReturn).toBe(0);
+      expect(report.bet.actualPayoutCount).toBe(0);
+      expect(report.bet.approximatePayoutCount).toBe(0);
+
+      store.close();
+    });
+  });
+
+  describe("オッズ判定不能の除外(規則U、Issue#70 AC-A4)", () => {
+    it("isPositive=trueでplaceOddsMinが使えない値(+Infinity)かつ複勝payout未取込のとき、賭け金・払戻に計上せずunjudgedOddsCountに計上すること(#50の防御的堅牢化)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R_AC_A4",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, Number.POSITIVE_INFINITY, 2.0, true)],
+      });
+      // 着順は的中(3着以内)側で保存するが、このレースの複勝payoutは保存しない
+      // (裁定2: 実配当が取込済みだとplaceOddsMinを使わない近似経路自体に入らないため、
+      // 「オッズが使えない」ことが判定に効く一本道にするには payout 未取込である必要がある)。
+      store.saveResult("R_AC_A4", [{ umaban: 1, finishPosition: 1 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.bet.betCount).toBe(0);
+      expect(report.bet.totalStake).toBe(0);
+      expect(report.bet.totalReturn).toBe(0);
+      expect(report.bet.unjudgedOddsCount).toBe(1);
+      store.close();
+    });
+  });
+
   describe("補正傾向サマリ(VerifyTrendReport, Task#26)", () => {
     describe("(1) 補正方向×結果", () => {
       it("分析0件のとき上げ・下げ・据え置きの3群を件数0・rateはnullで返すこと", () => {
