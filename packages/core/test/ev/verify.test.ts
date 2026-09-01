@@ -616,7 +616,8 @@ describe("computeVerifyReport(verify集計)", () => {
         analyzedAt: "t",
         horses: [horse(1, 0.5, Number.POSITIVE_INFINITY, 2.0, true)],
       });
-      // 上の2テスト(払戻未取込)と1つだけ変える変数: このレースは複勝確定払戻を取込済みにする。
+      // 直上の単一馬テスト(R_AC_A4。払戻未取込)と1つだけ変える変数: このレースは複勝確定払戻を
+      // 取込済みにする(もう1本のMULTIテストは馬の頭数も異なるので、1変数比較の相手ではない)。
       // umaban1は1着で実配当300円があるため、規則Hだけを見れば「的中」であり、実配当の金額計算は
       // placeOddsMin を使わない。それでも betPlaced に isUsableOdds を含めているため除外される。
       store.saveResult("R_AC_A4_PAYOUT", [{ umaban: 1, finishPosition: 1, placePayout: 300 }]);
