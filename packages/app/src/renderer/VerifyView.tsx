@@ -313,6 +313,19 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               {report.proposedBet.trio.betCount}点/
               {formatRate(report.proposedBet.trio.recoveryRate)}
             </p>
+            {/*
+             * bossメタレビュー要修正2: unjudgedCount(規則Uで判定不能とした点数)が画面に一切
+             * 表示されていなかった問題への対応。「ワイド0点」が「1点も提案していない」のか
+             * 「提案したが全部判定できない」のかを区別できるようにする(BatchAnalysisView.tsxの
+             * 「0件なら出さない」流儀をそのまま踏襲)。
+             */}
+            {report.proposedBet.overall.unjudgedCount > 0 && (
+              <p style={{ margin: "0.15rem 0", color: "#a60" }}>
+                判定不能(集計対象外): 複勝{report.proposedBet.place.unjudgedCount}点 / ワイド
+                {report.proposedBet.wide.unjudgedCount}点 / 3連複
+                {report.proposedBet.trio.unjudgedCount}点
+              </p>
+            )}
             <p style={{ margin: "0.15rem 0", color: "#666" }}>
               母集団: 配分あり{report.proposedBet.population.allocated}件 / 見送り
               {report.proposedBet.population.skipped}件 / 未到達

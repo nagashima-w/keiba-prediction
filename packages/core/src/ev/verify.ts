@@ -729,6 +729,13 @@ function selectIncludedAnalyses(
  * そのレースの実結果に複勝の確定払戻(placePayout)が1件以上あるか(規則H、Issue#70)。
  * computeRaceLedger の hasPayout(表示用)と computeHorseBetOutcome の racePayoutAvailable
  * (集計用)が同じ式を指す一本の定義(Issue#59で繰り返し問題になった二重定義を避けるため)。
+ *
+ * **真側の意味は#70/#71で共有するが、偽側(false)の扱いは呼び出し元ごとに異なる**(#71メタレビュー
+ * 指摘)。#70(computeHorseBetOutcome)の偽側は複勝オッズ下限へ近似フォールバックし数値を出す。
+ * #71(computeProposedBetReport)の偽側は判定不能として扱い数値を出さない(unjudgedCountに計上)。
+ * この関数自体は「複勝払戻が取込済みか」という事実だけを返し、偽側で何をするかは決めていない
+ * ——将来#70の残余(払戻未取込レースの過大計上)を塞ぐ際、片方の呼び出し元を直しても
+ * もう片方が静かに壊れないよう、この違いを見落とさないこと。
  */
 function raceHasPlacePayout(results: readonly RaceResultEntry[]): boolean {
   return results.some((r) => r.placePayout !== null && r.placePayout !== undefined);
@@ -1148,6 +1155,19 @@ function finalizeProposedBetOverall(
  * 件数・賭け金・払戻のいずれにも計上せず`unjudgedCount`に計上する。`imported`かつ`payouts`が
  * 非空だが該当`combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり、判定不能とは
  * 区別する(規則Uの肝)。
+ *
+ * 【残余(本タスクでは意図的に塞がない。#71メタレビュー指摘)】取消・除外馬(finishPosition=null)を
+ * 含む買い目は現実には返還(全額払戻)されるが、確定払戻表(`race_results.place_payout`/
+ * `race_combo_payouts`)からは「返還」と「不的中(対象外で払戻0)」を区別できない
+ * (finish_position=nullの馬はplace_payoutの行自体を持たないか非nullにならないため、
+ * このコードは該当馬番が逆引きマップ/comboKey一致に無いケースと同じ扱いになり、不的中
+ * 〈betCount+1・totalReturn+0〉として計上される)。回収率はこの分だけ保守的に下振れする。
+ * **同じ状況で既存`bet`系(`computeHorseBetOutcome`)は`finishPosition===null`を集計対象外として
+ * 賭け金・払戻の双方から除外しており〈本ファイル冒頭コメント「着順不明・非数値は集計対象外」〉、
+ * `proposedBet`系とは扱いが異なる。** 正しい扱い(返還として`totalReturn+=stake`/判定不能として
+ * 除外/現状維持のいずれか)は設計判断が必要で、かつ組合せ券(ワイド・3連複)では返還判定に
+ * 構成馬番の複合(`combo_key`のデコード)が要るため、#71では意図的に対処しない
+ * (`combo_key`デコーダの新設は#71スコープ外。着手前ゲート決定)。
  */
 function computeProposedBetReport(
   store: AnalysisStore,

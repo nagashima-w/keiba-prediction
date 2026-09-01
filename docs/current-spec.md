@@ -225,7 +225,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `skip_reason_code`が非null。計算した上での判定結果)、「未到達」(`route∈{unset,yoso,
     unavailable,invalid}`。coreの配分計算そのものに未到達な判定不能)、「記録なし」(メタ行が無い。
     #59より前の旧分析)。**分類は必ず`route`を先に見る**——`route==="unset"`(既定
-    `bankroll<=0`で層1にとどまる経路)は`skip_reason_code`が常にnullになるため、
+    `bankroll<=0 || perRaceCap<=0`で層1にとどまる経路)は`skip_reason_code`が常にnullになるため、
     `skip_reason_code`を先に見ると「未到達」が「配分あり」に混入する。
   - **規則U(判定不能の扱い)の適用**: 複勝はそのレースの複勝払戻が1件も取込済みでなければ、
     ワイド・三連複は`getComboPayouts`が`not_imported`または`imported`かつ`payouts`が空配列で

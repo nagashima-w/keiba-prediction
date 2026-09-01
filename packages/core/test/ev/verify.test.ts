@@ -2042,6 +2042,55 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
     store.close();
   });
 
+  it("要修正1(bossメタレビュー): 取消・除外馬(finishPosition=null)を含む買い目は「返還」ではなく「不的中」として計上され、回収率が保守的に下振れすること(現状維持=挙動固定。computeProposedBetReportのJSDoc「残余」参照)", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "PB_CANCEL",
+      analyzedAt: "t",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      allocation: {
+        meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+        bets: [
+          { betType: "place", comboKey: "05", stake: 500, odds: 1, ev: 1 },
+          { betType: "wide", comboKey: "0105", stake: 300, odds: 1, ev: 1 },
+        ],
+      },
+    });
+    store.saveResult(
+      "PB_CANCEL",
+      [
+        { umaban: 1, finishPosition: 1, placePayout: 140 },
+        { umaban: 2, finishPosition: 2, placePayout: 310 },
+        { umaban: 3, finishPosition: 3, placePayout: 180 },
+        // umaban5は出走取消(現実には返還されるが、race_results/race_combo_payoutsからは
+        // 「返還」と「不的中」を区別できない。#71メタレビューで指摘された残余)。
+        { umaban: 5, finishPosition: null },
+      ],
+      null,
+      {
+        // "0105"(umaban[1,5])は含まれない=imported nonemptyだがcombo_key無し=不的中の経路。
+        wide: { state: "parsed", payouts: [{ umabans: [2, 3], payout: 900 }] },
+      },
+    );
+
+    const report = computeVerifyReport(store);
+    expect(report.proposedBet.place).toEqual({
+      betCount: 1,
+      totalStake: 500,
+      totalReturn: 0,
+      recoveryRate: 0,
+      unjudgedCount: 0,
+    });
+    expect(report.proposedBet.wide).toEqual({
+      betCount: 1,
+      totalStake: 300,
+      totalReturn: 0,
+      recoveryRate: 0,
+      unjudgedCount: 0,
+    });
+    store.close();
+  });
+
   it("AC-B4: Issue本文どおりの数値例(複勝300円→250円払戻=750円、ワイド200円→1500円払戻=3000円)で按分され、3連複はimported nonemptyでもcombo_key無しは不的中(betCount+1・totalReturn+0)になること", () => {
     const store = new AnalysisStore();
     store.saveAnalysis({

@@ -1016,6 +1016,13 @@ export class AnalysisStore {
    * 誰も読まない列にまで #59 の条件B(非衝突)のコストを払わない判断は #59 で8巡した
    * 失敗の再現を避けるため(#71 Issue本文)。#55(過去分析の再表示UI)で残り18列/odds/evが
    * 必要になった時点で別途追加する。
+   *
+   * **`odds`/`ev`を返り値の型に持たせないこと自体は「将来この関数が改修されても読まれない」
+   * ことまでは保証しない**(#71メタレビュー指摘)。本当の保証は、消費側
+   * `ev/verify.test.ts`「AC-B4: analysis_bets.oddsが異常値(+Infinity/NaN)でもproposedBetの
+   * 集計結果が変わらないこと」が、`odds`/`ev`に極端な値(+Infinity・NaN)を入れた分析と
+   * 通常値の分析で`computeVerifyReport(...).proposedBet`が完全一致することを実際に確認している
+   * behavioralなテストの方(型は将来の追加を止めない)。
    * @param analysisId 分析ID
    */
   getAllocationForVerify(analysisId: number): StoredAllocationSummary | undefined {
