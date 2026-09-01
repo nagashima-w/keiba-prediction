@@ -442,8 +442,10 @@ describe("computeVerifyReport(verify集計)", () => {
   describe("複勝的中(isPlaceHit)と3着以内(isInTopThree)の分離(Issue#70 #54-A)", () => {
     /**
      * 既存フィクスチャの placePayout 監査(AC-A5。裁定3対応):
-     * 本ファイル中で placePayout を保存しているのは次の7箇所のみ(全数。行番号は今後の編集で
-     * ずれて腐るため書かない。テスト名で特定できる)。
+     * #70 より前から本ファイルにある(=規則Hの導入で数値が変化してはいけない)フィクスチャのうち、
+     * placePayout を保存しているのは次の7箇所のみ(全数。行番号は今後の編集でずれて腐るため
+     * 書かない。テスト名で特定できる)。#70 自身が規則H・規則Uを検証するために追加した
+     * R_AC_A3(直下のテスト)と R_AC_A4_PAYOUT(規則Uのdescribe内)は、この非破壊監査の対象外。
      * 1. "実配当(placePayout)があれば近似ではなく実配当で払戻を計上すること" — R1、1頭
      *    (finish=1, payout=300)。
      * 2. "賭け金が100円以外でも実配当を100円あたりで按分して計上すること" — 同上構成。
@@ -516,6 +518,46 @@ describe("computeVerifyReport(verify集計)", () => {
       expect(report.bet.actualPayoutCount).toBe(0);
       expect(report.bet.approximatePayoutCount).toBe(0);
 
+      // --- isInTopThree側(3着以内)の指標その2: 補正傾向サマリの補正方向×結果 ---
+      // 前提固定: horse()はprior===adjustedProbのため6頭とも diff=0 → 「据え置き」群にまとまる
+      // (上げ・下げ群は空。1頭だけの退化ケースでも、payout有無と一致する集合でもない)。
+      const raised = report.trend.directionGroups.find((g) => g.direction === "raised")!;
+      const lowered = report.trend.directionGroups.find((g) => g.direction === "lowered")!;
+      const unchanged = report.trend.directionGroups.find((g) => g.direction === "unchanged")!;
+      expect(raised.count).toBe(0);
+      expect(lowered.count).toBe(0);
+      expect(unchanged.count).toBe(6);
+      // 3着以内(umaban1・2・3)の3頭が的中 → 3/6。複勝payout対象(umaban1・2)で数えると2/6に
+      // なるため、この値が isInTopThree と isPlaceHit を区別する(#70 AC-A1の束縛箇所固定)。
+      expect(unchanged.actualPlaceRate).toBeCloseTo(3 / 6, 10);
+
+      // --- レース単位表示(computeRaceLedger)側も同じ分離に従うこと ---
+      const ledger = computeRaceLedger(store);
+      expect(ledger).toHaveLength(1);
+      const entry = ledger[0]!;
+      expect(entry.raceId).toBe("R_AC_A3");
+      // 前提固定: このレースは複勝払戻が取込済み(規則Hの「ある」側)である。
+      expect(entry.hasResult).toBe(true);
+      expect(entry.hasPayout).toBe(true);
+      // RaceBreakdownHorse.isPlaced は「3着以内」(isInTopThree)を返す束縛箇所。
+      // umaban3は3着なのでtrue(複勝payout対象外=isPlaceHitはfalseだが、この列はそれを見ない)。
+      const h3 = entry.horses.find((h) => h.umaban === 3)!;
+      expect(h3.finishPosition).toBe(3);
+      expect(h3.isPlaced).toBe(true);
+      // 前提固定: 3着以内の3頭は全員 isPlaced=true、4着以下の3頭は全員 false
+      // (「3着以内」列であることを、payout有無と一致しない集合として固定する)。
+      expect(entry.horses.filter((h) => h.isPlaced === true).map((h) => h.umaban)).toEqual([1, 2, 3]);
+      expect(entry.horses.filter((h) => h.isPlaced === false).map((h) => h.umaban)).toEqual([4, 5, 6]);
+      // 一方、払戻の計上(規則H)はレース単位表示でも複勝payout有無で判定する。
+      // umaban3は賭けたが不的中: 賭け金のみ計上・払戻0・根拠null(下限近似200円にはならない)。
+      expect(entry.betCount).toBe(1);
+      expect(entry.totalStake).toBe(100);
+      expect(entry.totalReturn).toBe(0);
+      expect(entry.recoveryRate).toBe(0);
+      expect(h3.stake).toBe(100);
+      expect(h3.payout).toBe(0);
+      expect(h3.payoutSource).toBeNull();
+
       store.close();
     });
   });
@@ -564,6 +606,34 @@ describe("computeVerifyReport(verify集計)", () => {
       expect(report.bet.totalReturn).toBe(0);
       // 前提固定: 2頭とも規則Uに該当する(1頭だけの退化ケースではない)。
       expect(report.bet.unjudgedOddsCount).toBe(2);
+      store.close();
+    });
+
+    it("複勝払戻が取込済み(規則Hの「ある」側)のレースでもplaceOddsMinが不正なら判定不能として除外されること(verify.ts先頭コメント「動作自体は決定的」の固定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R_AC_A4_PAYOUT",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, Number.POSITIVE_INFINITY, 2.0, true)],
+      });
+      // 上の2テスト(払戻未取込)と1つだけ変える変数: このレースは複勝確定払戻を取込済みにする。
+      // umaban1は1着で実配当300円があるため、規則Hだけを見れば「的中」であり、実配当の金額計算は
+      // placeOddsMin を使わない。それでも betPlaced に isUsableOdds を含めているため除外される。
+      store.saveResult("R_AC_A4_PAYOUT", [{ umaban: 1, finishPosition: 1, placePayout: 300 }]);
+
+      // 前提固定: このレースが規則Hの「ある」側(複勝払戻取込済み)であること。
+      const [entry] = computeRaceLedger(store);
+      expect(entry!.hasPayout).toBe(true);
+
+      const report = computeVerifyReport(store);
+      // 判定不能として除外: 賭け金・払戻のいずれにも計上せず、unjudgedOddsCountに計上する
+      // (払戻未取込レースの場合とまったく同じ結果=「動作自体は決定的」)。
+      expect(report.bet.betCount).toBe(0);
+      expect(report.bet.totalStake).toBe(0);
+      expect(report.bet.totalReturn).toBe(0);
+      expect(report.bet.actualPayoutCount).toBe(0);
+      expect(report.bet.approximatePayoutCount).toBe(0);
+      expect(report.bet.unjudgedOddsCount).toBe(1);
       store.close();
     });
   });
