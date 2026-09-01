@@ -164,11 +164,14 @@
 
 import type {
   AnalysisStore,
+  RaceComboPayoutsReadResult,
   RaceResultEntry,
+  StoredAllocationSummary,
   StoredAnalysis,
   StoredAnalysisHorse,
 } from "./analysis-store.js";
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
+import { buildComboOddsKey, type ComboBetType } from "../scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
 import { isUsableOdds } from "./allocation-primitives.js";
 
@@ -304,6 +307,70 @@ export interface VerifyBetSummary {
   readonly unjudgedOddsCount: number;
 }
 
+/**
+ * proposedBet系(Issue #71・#54-B)の券種別・合算サマリ。既存 `VerifyBetSummary`(複勝・一律
+ * stakePerBet円、Q-B)とは賭け金の仮定が異なるため、この型は `VerifyBetSummary` と合算しない
+ * (AC-B5)。近似払戻は一切持たない(実配当のみ。#71 Issue本文「系として、proposedBet系には
+ * 近似払戻を一切設けない」)。
+ */
+export interface ProposedBetTypeSummary {
+  /** 判定できた(的中・不的中を問わない)買い目の点数。規則Uで判定不能とした行は含まない。 */
+  readonly betCount: number;
+  /** 賭け金合計(円。analysis_bets.stakeの合計=分析時点で実際に提案した配分額そのもの)。 */
+  readonly totalStake: number;
+  /** 払戻合計(円。実配当のみ。近似は行わない)。 */
+  readonly totalReturn: number;
+  /** 回収率(totalReturn/totalStake)。既存bet系と同じ流儀でtotalStake===0ならnull。 */
+  readonly recoveryRate: number | null;
+  /**
+   * 規則U(Issue #71)により判定不能として件数・賭け金・払戻のいずれにも計上しなかった買い目の点数
+   * (買い目行単位。レース単位ではない)。
+   */
+  readonly unjudgedCount: number;
+}
+
+/**
+ * proposedBet系(Issue #71)の母集団4分類の件数(MECE)。合計は必ず
+ * `VerifyReport.includedAnalysisCount` と一致する(AC-B7。`selectIncludedAnalyses` の結果を
+ * そのまま分類するため)。
+ */
+export interface ProposedBetPopulation {
+  /** メタ行あり かつ route∈{place-only,mixed} かつ skip_reason_code IS NULL(賭け金>0)。 */
+  readonly allocated: number;
+  /** メタ行あり かつ route∈{place-only,mixed} かつ skip_reason_code IS NOT NULL(計算した上で見送り)。 */
+  readonly skipped: number;
+  /** メタ行あり かつ route∈{unset,yoso,unavailable,invalid}(coreの配分計算に未到達=判定不能)。 */
+  readonly unreached: number;
+  /** メタ行が無い(#59より前の旧分析)。 */
+  readonly noRecord: number;
+}
+
+/**
+ * 配分ベースの回収率(Issue #71・#54-B)。分析時点の設定で実際に提案した配分額をそのまま
+ * 賭け金とする(Q-C)。既存 `VerifyReport.bet`(複勝・一律stakePerBet円、Q-B)とは仮定が異なるため、
+ * 両者を合算した値はどこにも作らない(AC-B5)。
+ *
+ * `overall` は place/wide/trio の3券種の合算——**これはAC-B5が禁じる「賭け金の仮定が違う2つの
+ * 合算」には当たらない**。3券種はいずれも同一の仮定(分析時点で実際に提案した配分額)を共有しており、
+ * ケリー配分はそもそも複数券種にまたがるポートフォリオとして計算されているため、券種を横断した
+ * 合計はその仮定の中で意味を持つ(AC-B5がこの合算を明示的に許容している判断理由をここに残す)。
+ * `overall`という名前は「total」「all」の使用を禁じたAC-B5に抵触しない——あの禁止は「どちらの
+ * 賭け金仮定を指すか名前から分からない語」を避けるためのもので、`ProposedBetReport` の内側では
+ * 仮定は既に確定している。
+ */
+export interface ProposedBetReport {
+  /** 母集団4分類の件数。 */
+  readonly population: ProposedBetPopulation;
+  /** 複勝・ワイド・3連複の合算(同一の賭け金仮定を共有するポートフォリオとしての合計)。 */
+  readonly overall: ProposedBetTypeSummary;
+  /** 複勝の内訳。 */
+  readonly place: ProposedBetTypeSummary;
+  /** ワイドの内訳。 */
+  readonly wide: ProposedBetTypeSummary;
+  /** 3連複の内訳。 */
+  readonly trio: ProposedBetTypeSummary;
+}
+
 /** verifyレポート。 */
 export interface VerifyReport {
   /** 集計に含めた分析件数(結果が保存済みで、集計対象に採用したもの)。 */
@@ -327,6 +394,8 @@ export interface VerifyReport {
   readonly calibration: CalibrationBin[];
   /** 補正傾向サマリ(Task#26)。 */
   readonly trend: VerifyTrendReport;
+  /** 配分ベースの回収率(Issue #71・#54-B)。 */
+  readonly proposedBet: ProposedBetReport;
 }
 
 /**
@@ -1013,6 +1082,178 @@ function computeVerifyReportForAnalyses(
         finalizeMarkStat(mark, markCounters.get(mark)!),
       ),
     },
+    proposedBet: computeProposedBetReport(store, selected.included),
+  };
+}
+
+/** proposedBet系(Issue #71)の券種別可変カウンタ。 */
+interface ProposedBetAccumulator {
+  betCount: number;
+  totalStake: number;
+  totalReturn: number;
+  unjudgedCount: number;
+}
+
+/** 空の可変カウンタを作る。 */
+function emptyProposedBetAccumulator(): ProposedBetAccumulator {
+  return { betCount: 0, totalStake: 0, totalReturn: 0, unjudgedCount: 0 };
+}
+
+/**
+ * 可変カウンタを確定値へ変換する。recoveryRateの判定は既存bet系(VerifyBetSummary)と同じ流儀で
+ * `totalStake===0`を使う(`betCount===0`ではない。#71ゲート裁定: 2つの系で判定式が違うと
+ * 次に読む人が「なぜ違うのか」を考える羽目になるため、意味的に同値でも流儀を合わせる)。
+ */
+function finalizeProposedBetSummary(acc: ProposedBetAccumulator): ProposedBetTypeSummary {
+  return {
+    betCount: acc.betCount,
+    totalStake: acc.totalStake,
+    totalReturn: acc.totalReturn,
+    recoveryRate: acc.totalStake === 0 ? null : acc.totalReturn / acc.totalStake,
+    unjudgedCount: acc.unjudgedCount,
+  };
+}
+
+/** 3券種の可変カウンタを合算した確定値を作る(overall。JSDoc「ProposedBetReport」参照)。 */
+function finalizeProposedBetOverall(
+  place: ProposedBetAccumulator,
+  wide: ProposedBetAccumulator,
+  trio: ProposedBetAccumulator,
+): ProposedBetTypeSummary {
+  return finalizeProposedBetSummary({
+    betCount: place.betCount + wide.betCount + trio.betCount,
+    totalStake: place.totalStake + wide.totalStake + trio.totalStake,
+    totalReturn: place.totalReturn + wide.totalReturn + trio.totalReturn,
+    unjudgedCount: place.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+  });
+}
+
+/**
+ * 配分ベースの回収率(proposedBet系、Issue #71・#54-B)を算出する。
+ * `selectIncludedAnalyses` が選定した母集団(`included`)をそのまま使い、独自に再実装しない
+ * (AC-B7)。母集団は各分析の配分提案メタ(`AnalysisStore.getAllocationForVerify`)を読み、
+ * 4分類(配分あり/見送り/未到達/記録なし)へ振り分ける。**判定は必ず`route`を先に見る**
+ * (`route==="unset"`等〈coreの配分計算に未到達〉のとき`skipReasonCode`は常にnullになるため、
+ * `skipReasonCode`を先に見ると「配分あり」に誤って混入する。#71着手前ゲートで実測確認済みの罠)。
+ *
+ * 払戻の突合は近似を一切行わない(実配当のみ。Q-C): 複勝は`results`(`selectIncludedAnalyses`が
+ * 既に取得済みの実結果をそのまま再利用し、二重にDBへ問い合わせない)の各`umaban`に
+ * `buildComboOddsKey`を適用した逆引きマップで突合し、ワイド・3連複は`getComboPayouts`の
+ * 文字列一致で突合する(デコーダ新設なし。AC-B4)。
+ *
+ * 規則U(判定不能の扱い、#71 Issue本文): 複勝はそのレースの複勝払戻が1件も取込済みでなければ
+ * (`raceHasPlacePayout`。規則Hと同じ「取込状態ゲート」を転用——両者とも「このレースの複勝払戻は
+ * 取込済みか」という同じ問いに答えるため、二重定義を避ける)、ワイド・3連複は`getComboPayouts`が
+ * `not_imported`または`imported`かつ`payouts`が空配列であれば、いずれも判定不能として
+ * 件数・賭け金・払戻のいずれにも計上せず`unjudgedCount`に計上する。`imported`かつ`payouts`が
+ * 非空だが該当`combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり、判定不能とは
+ * 区別する(規則Uの肝)。
+ */
+function computeProposedBetReport(
+  store: AnalysisStore,
+  included: ReadonlyArray<{ analysis: StoredAnalysis; results: readonly RaceResultEntry[] }>,
+): ProposedBetReport {
+  let allocated = 0;
+  let skipped = 0;
+  let unreached = 0;
+  let noRecord = 0;
+
+  const place = emptyProposedBetAccumulator();
+  const wide = emptyProposedBetAccumulator();
+  const trio = emptyProposedBetAccumulator();
+
+  // レース×券種ごとにgetComboPayoutsの呼び出しを1回に抑えるキャッシュ(同一レース内に
+  // 複数のワイド/3連複買い目があっても無駄なDBアクセスをしない。値そのものは
+  // getComboPayoutsをそのまま呼ぶのと変わらない=デコーダやロジックの新設ではない)。
+  const comboCache = new Map<string, RaceComboPayoutsReadResult>();
+  function comboPayoutsOf(raceId: string, betType: ComboBetType): RaceComboPayoutsReadResult {
+    const key = `${raceId}:${betType}`;
+    const cached = comboCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const result = store.getComboPayouts(raceId, betType);
+    comboCache.set(key, result);
+    return result;
+  }
+
+  for (const { analysis, results } of included) {
+    const allocation: StoredAllocationSummary | undefined = store.getAllocationForVerify(
+      analysis.id,
+    );
+    if (allocation === undefined) {
+      noRecord += 1;
+      continue;
+    }
+    // 母集団分類は必ずrouteを先に見る(罠の再発防止。JSDoc参照)。
+    const reachedCore = allocation.route === "place-only" || allocation.route === "mixed";
+    if (!reachedCore) {
+      unreached += 1;
+      continue;
+    }
+    if (allocation.skipReasonCode !== null) {
+      skipped += 1;
+      continue;
+    }
+    allocated += 1;
+
+    // 複勝払戻の逆引きマップ(規則Hのracehasplacepayoutゲートを転用)。
+    const racePayoutAvailable = raceHasPlacePayout(results);
+    const placePayoutByComboKey = new Map<string, number>();
+    if (racePayoutAvailable) {
+      for (const r of results) {
+        if (r.placePayout !== null && r.placePayout !== undefined) {
+          placePayoutByComboKey.set(buildComboOddsKey([r.umaban]), r.placePayout);
+        }
+      }
+    }
+
+    for (const bet of allocation.bets) {
+      if (bet.betType !== "place" && bet.betType !== "wide" && bet.betType !== "trio") {
+        // 防御: #59の保存経路はplace/wide/trioのみを書く契約のため、通常到達しない。
+        continue;
+      }
+      const accumulator = bet.betType === "place" ? place : bet.betType === "wide" ? wide : trio;
+
+      if (bet.betType === "place") {
+        if (!racePayoutAvailable) {
+          accumulator.unjudgedCount += 1;
+          continue;
+        }
+        accumulator.betCount += 1;
+        accumulator.totalStake += bet.stake;
+        const payout = placePayoutByComboKey.get(bet.comboKey);
+        if (payout !== undefined) {
+          accumulator.totalReturn += payout * (bet.stake / 100);
+        }
+        continue;
+      }
+
+      // ワイド・3連複。
+      const comboResult = comboPayoutsOf(analysis.raceId, bet.betType);
+      if (comboResult.state === "not_imported") {
+        accumulator.unjudgedCount += 1;
+        continue;
+      }
+      if (comboResult.payouts.length === 0) {
+        accumulator.unjudgedCount += 1;
+        continue;
+      }
+      accumulator.betCount += 1;
+      accumulator.totalStake += bet.stake;
+      const hit = comboResult.payouts.find((p) => p.comboKey === bet.comboKey);
+      if (hit !== undefined) {
+        accumulator.totalReturn += hit.payout * (bet.stake / 100);
+      }
+    }
+  }
+
+  return {
+    population: { allocated, skipped, unreached, noRecord },
+    overall: finalizeProposedBetOverall(place, wide, trio),
+    place: finalizeProposedBetSummary(place),
+    wide: finalizeProposedBetSummary(wide),
+    trio: finalizeProposedBetSummary(trio),
   };
 }
 

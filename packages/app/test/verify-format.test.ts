@@ -55,8 +55,20 @@ function verifyReport(over: Partial<VerifyReportView> = {}): VerifyReportView {
     },
     calibration: [],
     trend: { directionGroups: [], calibrationBias: [], markStats: [] },
+    proposedBet: {
+      population: { allocated: 0, skipped: 0, unreached: 0, noRecord: 0 },
+      overall: emptyProposedBetTypeSummary(),
+      place: emptyProposedBetTypeSummary(),
+      wide: emptyProposedBetTypeSummary(),
+      trio: emptyProposedBetTypeSummary(),
+    },
     ...over,
   };
+}
+
+/** テスト用の空のproposedBet券種別サマリ(Issue #71)。 */
+function emptyProposedBetTypeSummary() {
+  return { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 };
 }
 
 /** テスト用の版別レポート1件を最小構成で組み立てる。 */

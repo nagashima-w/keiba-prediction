@@ -2174,5 +2174,124 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       expect(counts).toEqual({ meta: 0, bets: 0 });
       store.close();
     });
+
+    describe("getAllocationForVerify(配分提案の読み出し。Issue #71 AC-B1/AC-B2)", () => {
+      it("AC-B1: メタ行が無ければundefinedを返すこと(#59より前の旧分析=記録なし)", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(makeRecord({ raceId: "読み出し記録なしレース" }));
+        expect(store.getAllocationForVerify(id)).toBeUndefined();
+        store.close();
+      });
+
+      it("AC-B1: route=unsetのメタ行もroute=\"unset\"としてそのまま読み出せること(配分あり/見送り/未到達の分類自体はverify.ts側の責務であり、ここでは値の往復のみを保証する)", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出しunsetレース",
+            allocation: {
+              meta: makeMeta({
+                route: "unset",
+                skipReasonCode: null,
+                bankroll: 0,
+                perRaceCap: 0,
+                betUnit: null,
+                greedySteps: null,
+                candidateCap: null,
+                modelId: null,
+                modelApproximate: null,
+              }),
+              bets: [],
+            },
+          }),
+        );
+        expect(store.getAllocationForVerify(id)).toEqual({
+          route: "unset",
+          skipReasonCode: null,
+          bets: [],
+        });
+        store.close();
+      });
+
+      it("AC-B2: 5つの束縛箇所(route/skip_reason_code/bet_type/combo_key/stake)が値としてDB往復すること(明細例はIssue本文どおり)", () => {
+        const store = new AnalysisStore();
+
+        // 配分あり相当: 複勝・ワイド・3連複の3明細(Issue本文の明細例をそのまま使う)。
+        const allocatedId = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出し配分ありレース",
+            allocation: {
+              meta: makeMeta({ route: "mixed", skipReasonCode: null }),
+              bets: [
+                { betType: "place", comboKey: "07", stake: 100, odds: 2.5, ev: 1.2 },
+                { betType: "wide", comboKey: "0102", stake: 300, odds: 3.1, ev: 1.05 },
+                { betType: "trio", comboKey: "010203", stake: 200, odds: 12.4, ev: 1.4 },
+              ],
+            },
+          }),
+        );
+        // 見送り相当: 複勝のみ1明細、skip_reason_codeが非null。
+        const skippedId = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出し見送りレース",
+            allocation: {
+              meta: makeMeta({
+                route: "place-only",
+                skipReasonCode: "reference-ev-not-positive",
+              }),
+              bets: [{ betType: "place", comboKey: "09", stake: 400, odds: 2.1, ev: 0.9 }],
+            },
+          }),
+        );
+        // 未到達相当(route=unsetは直上のテストで単独固定済みのため、ここではyosoを使い
+        // routeが3値目を取ることでA'〈2値以上〉を余裕を持って満たす)。
+        const unreachedId = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出し未到達レース",
+            allocation: {
+              meta: makeMeta({
+                route: "yoso",
+                skipReasonCode: null,
+                betUnit: null,
+                greedySteps: null,
+                candidateCap: null,
+                modelId: null,
+                modelApproximate: null,
+              }),
+              bets: [],
+            },
+          }),
+        );
+
+        // 束縛箇所ごとの値の内訳(条件A0・A'):
+        // - route: "mixed"/"place-only"/"yoso" の3値
+        // - skip_reason_code: null / "reference-ev-not-positive" の2値
+        // - bet_type: "place"/"wide"/"trio" の3値(4行中)
+        // - combo_key: "07"/"0102"/"010203"/"09" の4値
+        // - stake: 100/300/200/400 の4値
+        // 条件B: route([mixed,place-only,yoso])とskip_reason_code([null,文字列,null])は
+        // 値の型(nullの有無)からして一致し得ず、bet_type/combo_key/stakeもそれぞれ文字列/
+        // 文字列/数値で値集合が重ならないため、5箇所いずれも他と値ベクトルが一致しない。
+        expect(store.getAllocationForVerify(allocatedId)).toEqual({
+          route: "mixed",
+          skipReasonCode: null,
+          bets: [
+            { betType: "place", comboKey: "07", stake: 100 },
+            { betType: "trio", comboKey: "010203", stake: 200 },
+            { betType: "wide", comboKey: "0102", stake: 300 },
+          ],
+        });
+        expect(store.getAllocationForVerify(skippedId)).toEqual({
+          route: "place-only",
+          skipReasonCode: "reference-ev-not-positive",
+          bets: [{ betType: "place", comboKey: "09", stake: 400 }],
+        });
+        expect(store.getAllocationForVerify(unreachedId)).toEqual({
+          route: "yoso",
+          skipReasonCode: null,
+          bets: [],
+        });
+        store.close();
+      });
+    });
   });
 });

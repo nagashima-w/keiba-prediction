@@ -206,6 +206,33 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `analysis_horses`と同じ順序原則(子→親)で先に削除してから`analyses`を削除する。
   - **読み出しAPI・verify集計・UI表示への反映は本Issueのスコープ外**(#54が回収率検証に、
     #55が過去分析の再表示に、それぞれ必要な形で読み出しを追加する想定)。
+- **配分ベースの回収率(proposedBet系、Issue #71・#54-B)**: `VerifyReport.proposedBet`
+  (`ProposedBetReport`)が、既存の累積回収率(`bet`。複勝一律 stakePerBet 円という仮定、Q-B)とは
+  別に、**分析時点の設定で実際に提案した配分額をそのまま賭け金とする**回収率を出す(Q-C)。
+  賭け金の仮定が異なる2系統のため、`bet` と `proposedBet` を合算した値はどこにも作らない。
+  `proposedBet` 内部の複勝・ワイド・三連複の3券種は同一の賭け金仮定(実際の配分額)を共有する
+  ポートフォリオのため、`overall`(3券種の合算)は持つ。
+  - **読み出しAPI**: `AnalysisStore.getAllocationForVerify(analysisId)` が
+    `analysis_allocation_meta`/`analysis_bets` のうち `route`・`skip_reason_code`・
+    `bet_type`/`combo_key`/`stake` の5列だけを読む(残り18列・`odds`/`ev` は#71のスコープ外。
+    メタ行が無ければ undefined)。`odds`/`ev` を読まないのは、分析時点のオッズで払戻を近似すると
+    「回収率」ではなく「提案時点の期待値の再計算」になり Q-C に反するため——系として
+    `proposedBet` 系は近似払戻を一切持たず、実配当のみで按分する(複勝は
+    `race_results.place_payout`、ワイド/三連複は `race_combo_payouts.payout` を
+    `stake/100` で按分)。
+  - **母集団の4分類**(MECEで合計は`includedAnalysisCount`と一致): 「配分あり」(メタ行あり ∧
+    `route∈{place-only,mixed}` ∧ `skip_reason_code IS NULL`。賭け金>0)、「見送り」(同条件だが
+    `skip_reason_code`が非null。計算した上での判定結果)、「未到達」(`route∈{unset,yoso,
+    unavailable,invalid}`。coreの配分計算そのものに未到達な判定不能)、「記録なし」(メタ行が無い。
+    #59より前の旧分析)。**分類は必ず`route`を先に見る**——`route==="unset"`(既定
+    `bankroll<=0`で層1にとどまる経路)は`skip_reason_code`が常にnullになるため、
+    `skip_reason_code`を先に見ると「未到達」が「配分あり」に混入する。
+  - **規則U(判定不能の扱い)の適用**: 複勝はそのレースの複勝払戻が1件も取込済みでなければ、
+    ワイド・三連複は`getComboPayouts`が`not_imported`または`imported`かつ`payouts`が空配列で
+    あれば、いずれも判定不能として件数・賭け金・払戻のいずれにも計上せず券種別の
+    `unjudgedCount`(買い目行単位)に計上する。`imported`かつ`payouts`が非空だが該当
+    `combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり判定不能とは区別する。
+  - UI(`VerifyView`)は既存の累積回収率の下に、上記overall・券種別内訳・母集団4分類件数を表示する。
 
 ## 5. 馬券配分の提案(ev/place-joint-model・ev/bet-allocation)
 

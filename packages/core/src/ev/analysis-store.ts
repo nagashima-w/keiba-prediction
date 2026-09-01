@@ -238,6 +238,34 @@ export interface AnalysisAllocationMetaRecord {
   readonly oddsStatus: string;
 }
 
+/**
+ * `getAllocationForVerify` が返す配分提案の1買い目分(Issue #71・#54-B)。
+ * `AnalysisBetRecord` の5列のうち `odds`/`ev` を持たない(#71のスコープ外。下記
+ * `getAllocationForVerify` のJSDoc参照)。
+ */
+export interface StoredAllocationBet {
+  /** 券種。app 側の "place" | "wide" | "trio"。 */
+  readonly betType: string;
+  /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみ(#59 決定(a))。 */
+  readonly stake: number;
+}
+
+/**
+ * `getAllocationForVerify` が返す配分提案の最小表現(Issue #71・#54-B)。
+ * メタ行20列のうち `route`/`skip_reason_code` の2列だけを持つ(残り18列は#71のスコープ外。
+ * 下記 `getAllocationForVerify` のJSDoc参照)。
+ */
+export interface StoredAllocationSummary {
+  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま。 */
+  readonly route: string;
+  /** 見送り理由(層2)。coreの配分計算に未到達、または非skipのときは null。 */
+  readonly skipReasonCode: string | null;
+  /** stake>0 の明細のみ(#59 決定(a)を引き継ぐ)。 */
+  readonly bets: readonly StoredAllocationBet[];
+}
+
 /** 配分提案の1買い目分の明細行(#59。複勝・ワイド・3連複を共通の形に統合)。 */
 export interface AnalysisBetRecord {
   /** 券種。app 側の "place" | "wide" | "trio"。 */
@@ -971,6 +999,42 @@ export class AnalysisStore {
       )
       .all(raceId, betType) as StoredComboPayout[];
     return { state: "imported", payouts: rows };
+  }
+
+  /**
+   * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#71(#54-B。
+   * 配分ベースの回収率 `proposedBet` 系)が読む最小列だけを取得する。メタ行が無ければ
+   * undefined を返す(#59 より前に保存された旧分析=「記録なし」。`AnalysisRecord.allocation`
+   * が渡されなかった保存はメタ行を作らない)。
+   *
+   * **意図的に読まない列(#71 着手前ゲート決定)**: メタ行の残り18列
+   * (`unavailable_reason`/`fallback_reason`/`combo_odds_wide`/`combo_odds_trio`/実効設定7列/
+   * 実効値4列/`odds_status`)と、明細の `odds`/`ev` の2列は返さない。#71 が実際に使うのは
+   * `route`・`skip_reason_code`(母集団の4分類)と `bet_type`/`combo_key`/`stake`
+   * (実際の配分額そのものを賭け金とする。Q-C)の5列のみで、`odds`/`ev` を読むと
+   * 「回収率」ではなく「提案時点の期待値の再計算」になってしまう(Q-Cに反する)。
+   * 誰も読まない列にまで #59 の条件B(非衝突)のコストを払わない判断は #59 で8巡した
+   * 失敗の再現を避けるため(#71 Issue本文)。#55(過去分析の再表示UI)で残り18列/odds/evが
+   * 必要になった時点で別途追加する。
+   * @param analysisId 分析ID
+   */
+  getAllocationForVerify(analysisId: number): StoredAllocationSummary | undefined {
+    const metaRow = this.db
+      .prepare(
+        `SELECT route, skip_reason_code AS skipReasonCode
+           FROM ${ANALYSIS_ALLOCATION_META_TABLE} WHERE analysis_id = ?`,
+      )
+      .get(analysisId) as { route: string; skipReasonCode: string | null } | undefined;
+    if (metaRow === undefined) {
+      return undefined;
+    }
+    const bets = this.db
+      .prepare(
+        `SELECT bet_type AS betType, combo_key AS comboKey, stake
+           FROM ${ANALYSIS_BETS_TABLE} WHERE analysis_id = ? ORDER BY bet_type, combo_key`,
+      )
+      .all(analysisId) as StoredAllocationBet[];
+    return { route: metaRow.route, skipReasonCode: metaRow.skipReasonCode, bets };
   }
 
   /**

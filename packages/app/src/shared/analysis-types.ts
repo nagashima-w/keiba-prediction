@@ -519,6 +519,54 @@ export interface VerifyBetView {
 }
 
 /**
+ * 検証画面: proposedBet系の券種別・合算サマリ(表示用。Issue #71 #54-B)。
+ * core `ProposedBetTypeSummary` のプレーン写し。既存 `VerifyBetView`(複勝一律・Q-B)とは
+ * 賭け金の仮定が異なるため合算しない(型としても足し合わせる先を作らない。AC-B5)。
+ */
+export interface ProposedBetTypeSummaryView {
+  /** 判定できた(的中・不的中を問わない)買い目の点数。 */
+  readonly betCount: number;
+  /** 賭け金合計(円。分析時点で実際に提案した配分額そのもの)。 */
+  readonly totalStake: number;
+  /** 払戻合計(円。実配当のみ)。 */
+  readonly totalReturn: number;
+  /** 回収率。totalStake===0ならnull。 */
+  readonly recoveryRate: number | null;
+  /** 規則Uにより判定不能とした買い目の点数(買い目行単位)。 */
+  readonly unjudgedCount: number;
+}
+
+/** 検証画面: proposedBet系の母集団4分類(表示用。Issue #71 #54-B)。 */
+export interface ProposedBetPopulationView {
+  /** 配分あり(賭け金>0)。 */
+  readonly allocated: number;
+  /** 見送り(計算した上で賭けない判定結果)。 */
+  readonly skipped: number;
+  /** 未到達(coreの配分計算に到達していない判定不能)。 */
+  readonly unreached: number;
+  /** 記録なし(#59より前の旧分析)。 */
+  readonly noRecord: number;
+}
+
+/**
+ * 検証画面: 配分ベースの回収率(表示用。Issue #71 #54-B。core `ProposedBetReport` のプレーン写し)。
+ * `overall` は複勝・ワイド・3連複の3券種の合算(同一の賭け金仮定を共有するポートフォリオとしての
+ * 合計。core側JSDoc参照)。
+ */
+export interface ProposedBetReportView {
+  /** 母集団4分類の件数。 */
+  readonly population: ProposedBetPopulationView;
+  /** 複勝・ワイド・3連複の合算。 */
+  readonly overall: ProposedBetTypeSummaryView;
+  /** 複勝の内訳。 */
+  readonly place: ProposedBetTypeSummaryView;
+  /** ワイドの内訳。 */
+  readonly wide: ProposedBetTypeSummaryView;
+  /** 3連複の内訳。 */
+  readonly trio: ProposedBetTypeSummaryView;
+}
+
+/**
  * 検証画面: 検証レポート(表示用)。
  * core の VerifyReport は既にプレーン構造なので、main はそれを構造的にこの型として返す。
  */
@@ -537,6 +585,8 @@ export interface VerifyReportView {
   readonly calibration: readonly CalibrationBinView[];
   /** 補正傾向サマリ(Task#26)。 */
   readonly trend: VerifyTrendReportView;
+  /** 配分ベースの回収率(Issue #71 #54-B)。 */
+  readonly proposedBet: ProposedBetReportView;
 }
 
 /**
