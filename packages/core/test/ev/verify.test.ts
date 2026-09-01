@@ -381,6 +381,9 @@ describe("computeVerifyReport(verify集計)", () => {
       expect(report.bet.totalReturn).toBe(300);
       expect(report.bet.actualPayoutCount).toBe(1);
       expect(report.bet.approximatePayoutCount).toBe(0);
+      // 通常のオッズが使えるシナリオでは規則U(オッズ判定不能)は1件も発生しないこと
+      // (code-reviewer要修正1対応: unjudgedOddsCountが常に1という定数に固定されていないかの反証)。
+      expect(report.bet.unjudgedOddsCount).toBe(0);
       store.close();
     });
 
@@ -439,14 +442,20 @@ describe("computeVerifyReport(verify集計)", () => {
   describe("複勝的中(isPlaceHit)と3着以内(isInTopThree)の分離(Issue#70 #54-A)", () => {
     /**
      * 既存フィクスチャの placePayout 監査(AC-A5。裁定3対応):
-     * 本ファイル中で placePayout を保存しているのは次の7箇所のみ(全数)。
-     * 1. :367 "実配当(placePayout)があれば近似ではなく実配当で払戻を計上すること" — R1、1頭
+     * 本ファイル中で placePayout を保存しているのは次の7箇所のみ(全数。行番号は今後の編集で
+     * ずれて腐るため書かない。テスト名で特定できる)。
+     * 1. "実配当(placePayout)があれば近似ではなく実配当で払戻を計上すること" — R1、1頭
      *    (finish=1, payout=300)。
-     * 2. :403 "賭け金が100円以外でも実配当を100円あたりで按分して計上すること" — 同上構成。
-     * 3. :1202 "不変条件: 中央のみ+地方のみ=全体..." — 202601010101、1頭(finish=1, payout=280)。
-     * 4. :1269 "単一分析・結果取込済み..." — R1、1頭(finish=1, payout=300)。
-     * 5. :1429 "複数レースを扱う場合..." — R2、1頭(finish=2, payout=180)。
-     * 6. :1483 "通常レース・latest選択で上書きされる旧分析..." — R1、2頭
+     * 2. "賭け金が100円以外でも実配当を100円あたりで按分して計上すること" — 同上構成。
+     * 3. "不変条件: 中央のみ+地方のみ=全体(件数・賭け金・払戻の合算が一致すること)" —
+     *    202601010101、1頭(finish=1, payout=280)。
+     * 4. "単一分析・結果取込済み(着順+複勝払戻とも取込済み)ならhasResult/hasPayoutともtrueで
+     *    返すこと" — R1、1頭(finish=1, payout=300)。
+     * 5. "複数レースを扱う場合、各レースIDにつき1件ずつ返すこと(latest統合はレース単位)" —
+     *    R2、1頭(finish=2, payout=180)。
+     * 6. "通常レース・latest選択で上書きされる旧分析・推定EV(結果取込済み含む)・結果未取込・
+     *    全馬着順不明が混在しても、hasResult=trueかつ非推定EVのエントリの合算が
+     *    computeVerifyReportのトータルと一致すること" — R1、2頭
      *    (umaban1: finish=1,payout=280 / umaban2: finish=6,payout無し)。
      * 7. 同テスト内 R3 — 1頭(finish=1, payout=260)。
      *
@@ -529,6 +538,32 @@ describe("computeVerifyReport(verify集計)", () => {
       expect(report.bet.totalStake).toBe(0);
       expect(report.bet.totalReturn).toBe(0);
       expect(report.bet.unjudgedOddsCount).toBe(1);
+      store.close();
+    });
+
+    it("規則U該当馬が2頭いれば unjudgedOddsCount が2になること(code-reviewer要修正1: +=1 が単なる真偽フラグではなく件数として加算されていることの固定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R_AC_A4_MULTI",
+        analyzedAt: "t",
+        horses: [
+          // isUsableOddsで弾かれる異なる不正値を2頭に与える(+Infinityと0)。
+          horse(1, 0.5, Number.POSITIVE_INFINITY, 2.0, true),
+          horse(2, 0.4, 0, 1.5, true),
+        ],
+      });
+      // このレースの複勝payoutは保存しない(裁定2と同じ理由。両馬とも着順は確定させる)。
+      store.saveResult("R_AC_A4_MULTI", [
+        { umaban: 1, finishPosition: 1 },
+        { umaban: 2, finishPosition: 2 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      expect(report.bet.betCount).toBe(0);
+      expect(report.bet.totalStake).toBe(0);
+      expect(report.bet.totalReturn).toBe(0);
+      // 前提固定: 2頭とも規則Uに該当する(1頭だけの退化ケースではない)。
+      expect(report.bet.unjudgedOddsCount).toBe(2);
       store.close();
     });
   });
