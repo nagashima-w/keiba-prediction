@@ -191,18 +191,27 @@ describe("unset: 未設定パターンを3通り区別する(AC3境界)", () => 
 });
 
 describe("unavailable: 理由欠損時は状態を保持し代替文言(boss裁定A。判定不能へ倒さない)", () => {
-  it("unavailable_reasonが既知の値ならplaceBetUnavailableMessageの文言を使うこと", () => {
-    const view = buildAllocationProposalView(
-      allocation({ route: "unavailable", unavailableReason: "two-place-only" }),
-    );
-    expect(view.kind).toBe("unavailable");
-    expect(view.notices).toContain(placeBetUnavailableMessage("two-place-only"));
-  });
+  it.each([
+    ["two-place-only", "複勝が2着までとなり本ツールの3着内率推定と整合しないため配分提案を行いません"],
+    ["not-sold", "複勝が発売されないため対象外です"],
+    ["unknown", "出走頭数を判定できないため配分提案を行いません"],
+  ] as const)(
+    "unavailable_reason=%s(既知3値)はplaceBetUnavailableMessageの文言そのままに固定されること(code-reviewer指摘2巡目: KNOWN_UNAVAILABLE_REASONSの3値すべてをnoticesの値として個別に固定する。not-sold/unknownは1巡目まで未検査だった)",
+    (reason, literalText) => {
+      const view = buildAllocationProposalView(allocation({ route: "unavailable", unavailableReason: reason }));
+      expect(view.kind).toBe("unavailable");
+      expect(view.notices).toEqual([placeBetUnavailableMessage(reason)]);
+      // 定数の中身そのものをリテラルで固定する(placeBetUnavailableMessageの戻り値を
+      // そのまま期待値に使うだけでは、bet-allocation-view.ts側の文言マップが差し替えられても
+      // 検出できないため、ハードコードした日本語文言との一致も別途確認する)。
+      expect(placeBetUnavailableMessage(reason)).toBe(literalText);
+    },
+  );
 
   it("unavailable_reason=null(想定外)でもkindはunavailableのまま、指定の代替文言を出すこと", () => {
     const view = buildAllocationProposalView(allocation({ route: "unavailable", unavailableReason: null }));
     expect(view.kind).toBe("unavailable");
-    expect(view.notices).toContain(UNAVAILABLE_REASON_MISSING_NOTE);
+    expect(view.notices).toEqual([UNAVAILABLE_REASON_MISSING_NOTE]);
     expect(UNAVAILABLE_REASON_MISSING_NOTE).toBe(
       "出走頭数の条件により複勝の配分対象外です(理由の詳細が記録されていません)",
     );
@@ -214,6 +223,16 @@ describe("unavailable: 理由欠損時は状態を保持し代替文言(boss裁�
     );
     expect(view.kind).toBe("unavailable");
     expect(view.notices).toEqual([UNAVAILABLE_REASON_MISSING_NOTE]);
+  });
+
+  it("既知3値・null・未知値の4種の代替文言が互いに異なる値であること(取り違え検出)", () => {
+    const values = [
+      placeBetUnavailableMessage("two-place-only"),
+      placeBetUnavailableMessage("not-sold"),
+      placeBetUnavailableMessage("unknown"),
+      UNAVAILABLE_REASON_MISSING_NOTE,
+    ];
+    expect(new Set(values).size).toBe(4);
   });
 });
 
@@ -260,6 +279,44 @@ describe("skip: no-candidatesの文言がroute='place-only'とroute='mixed'で�
     expect(build().notices).toEqual([SKIP_REASON_UNKNOWN_NOTE]);
     // 定数の中身そのものをリテラルで固定する(理由は上記と同じ)。
     expect(SKIP_REASON_UNKNOWN_NOTE).toBe("見送り理由の詳細が記録されていません。");
+  });
+});
+
+describe("skip: KNOWN_SKIP_REASON_CODESの残り4値(bankroll-unset/cap-unset/kelly-zero/no-edge)もnoticesの値として固定すること(code-reviewer指摘2巡目: cap-too-small/no-candidatesの2値しかnoticesを値検査していなかった)", () => {
+  it.each([
+    ["bankroll-unset", "総資金が未設定のため配分を提案していません"],
+    ["cap-unset", "1レースの上限が未設定のため配分を提案していません"],
+    ["kelly-zero", "ケリー係数が0のため配分しません"],
+    ["no-edge", "妙味が小さく、賭ける価値のある配分が見つかりませんでした"],
+  ] as const)(
+    "skipReasonCode=%s はroute='place-only'でも'mixed'でも同じ文言(%s)に固定されること",
+    (code, literalText) => {
+      const placeOnlyView = buildAllocationProposalView(
+        allocation({ route: "place-only", skipReasonCode: code, betUnit: 100 }),
+      );
+      const mixedView = buildAllocationProposalView(
+        allocation({ route: "mixed", skipReasonCode: code, betUnit: 100 }),
+      );
+      expect(placeOnlyView.kind).toBe("skip");
+      expect(mixedView.kind).toBe("skip");
+      expect(placeOnlyView.notices).toEqual([literalText]);
+      expect(mixedView.notices).toEqual([literalText]);
+      // core側の文言関数(独立にテスト済みのオラクル)と一致することも別途確認する。
+      expect(placeSkipReasonText(code, 100)).toBe(literalText);
+      expect(comboSkipReasonText(code, 100)).toBe(literalText);
+    },
+  );
+
+  it("6分類(cap-too-small/no-candidatesを含む)の見送り文言が互いに異なる値であること(取り違え検出)", () => {
+    const values = [
+      placeSkipReasonText("bankroll-unset", 100),
+      placeSkipReasonText("cap-unset", 100),
+      placeSkipReasonText("cap-too-small", 100),
+      placeSkipReasonText("kelly-zero", 100),
+      placeSkipReasonText("no-candidates", 100),
+      placeSkipReasonText("no-edge", 100),
+    ];
+    expect(new Set(values).size).toBe(6);
   });
 });
 
