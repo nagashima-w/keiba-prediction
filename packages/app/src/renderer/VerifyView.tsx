@@ -786,6 +786,10 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       ) : (
         displayedRaceLedger.map((rb) => {
           const importing = state.importingRaceIds.includes(rb.raceId);
+          // 配分提案(分析時点。Issue #55)。route/skipReasonCode分岐と文言はすべて
+          // allocation-proposal-view.ts側で決定済みで、ここでは返ってきた配列をmapするだけにする
+          // (VerifyView.tsxに本機能の分岐・文言リテラルを置かない設計制約)。
+          const allocationView = buildAllocationProposalView(rb.allocation);
           return (
             <details
               key={rb.raceId}
@@ -904,6 +908,47 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               >
                 分析データをエクスポート
               </button>
+              {/* 配分提案(分析時点。Issue #55)。表示状態・見送り理由・実効設定の判定は
+                  allocation-proposal-view.ts が済ませており、ここでは配列をmapするだけ。 */}
+              <div style={{ marginTop: "0.6rem", borderTop: "1px solid #eee", paddingTop: "0.4rem" }}>
+                <p style={{ fontWeight: 600, margin: "0 0 0.3rem" }}>配分提案(分析時点)</p>
+                {allocationView.notices.map((notice, i) => (
+                  <p key={i} style={{ color: "#666", margin: "0 0 0.3rem" }}>
+                    {notice}
+                  </p>
+                ))}
+                {allocationView.bets.length > 0 && (
+                  <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: "0.4rem" }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>券種</th>
+                        <th style={thStyle}>買い目</th>
+                        <th style={thStyle}>金額</th>
+                        <th style={thStyle}>オッズ</th>
+                        <th style={thStyle}>EV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allocationView.bets.map((row, i) => (
+                        <tr key={i}>
+                          <td style={tdStyle}>{row.betTypeLabel}</td>
+                          <td style={tdStyle}>{row.comboLabel}</td>
+                          <td style={tdStyle}>{row.stake}</td>
+                          <td style={tdStyle}>{row.odds}</td>
+                          <td style={tdStyle}>{row.ev}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {allocationView.settingsRows.length > 0 && (
+                  <ul style={{ color: "#666", fontSize: "0.85rem", margin: 0, paddingLeft: "1.2rem" }}>
+                    {allocationView.settingsRows.map((row, i) => (
+                      <li key={i}>{row}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </details>
           );
         })
