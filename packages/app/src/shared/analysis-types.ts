@@ -749,8 +749,9 @@ export interface StoredAllocationBetView {
 /**
  * 配分提案(表示用。core StoredAllocation のプレーン写し。Issue #55)。
  * メタ13列(route/unavailableReason/fallbackReason/skipReasonCode/実効設定7項目/betUnit/
- * oddsStatus)+ bets。core `getStoredAllocation` が意図的に読まない7列
- * (combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate)は
+ * oddsStatus)+ bets。core `getStoredAllocation` が意図的に読まない6列
+ * (combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate。
+ * メタ行の物理列数20から読む13列と`analysis_id`〈検索キーでありデータ列ではない〉を除いた数)は
  * この型にも持たせない(#71の原則。読まない列は表示型にも持ち込まない)。
  */
 export interface StoredAllocationView {

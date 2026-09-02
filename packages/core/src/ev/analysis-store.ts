@@ -273,12 +273,16 @@ export interface StoredAllocationBetDetail {
 /**
  * `getStoredAllocation` が返す配分提案(Issue #55: 過去分析の再表示で配分提案を出す)。
  *
- * メタ行20列のうち、boss裁定(2026-09-02)により以下の13列だけを読む(残り7列
- * 〈combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate〉は
- * 利用者に意味の無い内部パラメータ、または表示予定が無いため意図的に読まない。#71の原則
- * 「誰も読まない列にコストを払わない」を踏襲する): route/unavailable_reason/fallback_reason/
- * skip_reason_code/bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
- * include_wide/include_trio/bet_unit/odds_status。
+ * メタ行20列(主キー`analysis_id`を含む物理列数。AC2テスト等で使う数え方と同じ)のうち、
+ * boss裁定(2026-09-02)により以下の13列だけを読む。残り7列のうち`analysis_id`は返り値の
+ * データ列ではなく引数(検索キー)そのものであり、列挙の対象外とする。したがって
+ * 実質的に「読まない列」として列挙するのは次の6列〈combo_odds_wide/combo_odds_trio/
+ * greedy_steps/candidate_cap/model_id/model_approximate〉(利用者に意味の無い内部パラメータ、
+ * または表示予定が無いため意図的に読まない。#71の原則「誰も読まない列にコストを払わない」を
+ * 踏襲する。AC2の対象もこの6列):
+ * route/unavailable_reason/fallback_reason/skip_reason_code/bankroll/per_race_cap/
+ * kelly_fraction/ev_threshold/include_combo_odds/include_wide/include_trio/bet_unit/
+ * odds_status。
  *
  * `getAllocationForVerify`(#71。route/skip_reason_codeとbets 3列のみ)とは読む列の範囲が
  * 異なる**別のクエリ**であり、互いに変更の影響を与えない(#71 AC-B4の論拠を壊さないための
@@ -1111,10 +1115,12 @@ export class AnalysisStore {
    * 再表示で配分提案を出す)が読む13列 + bets(betType/comboKey/stake/odds/ev)を取得する。
    * メタ行が無ければ undefined を返す(#59より前の旧分析=「記録なし」)。
    *
-   * **読まない7列(boss裁定2026-09-02)**: `combo_odds_wide`/`combo_odds_trio`/`greedy_steps`/
-   * `candidate_cap`/`model_id`/`model_approximate`。前者2つは表示予定が無く(#55のスコープ外。
-   * 必要になれば#16で追加)、後者4つは利用者に意味の無い内部パラメータ(`getAllocationForVerify`の
-   * JSDocと同じ判断)。詳細は {@link StoredAllocation} のJSDoc参照。
+   * **読まない6列(boss裁定2026-09-02)**: `combo_odds_wide`/`combo_odds_trio`/`greedy_steps`/
+   * `candidate_cap`/`model_id`/`model_approximate`(メタ行の物理列数20から読む13列と
+   * `analysis_id`〈検索キーであり返り値のデータ列ではないため列挙に含めない〉を除いた数)。
+   * 前者2つは表示予定が無く(#55のスコープ外。必要になれば#16で追加)、後者4つは利用者に
+   * 意味の無い内部パラメータ(`getAllocationForVerify`のJSDocと同じ判断)。詳細は
+   * {@link StoredAllocation} のJSDoc参照。
    * @param analysisId 分析ID
    */
   getStoredAllocation(analysisId: number): StoredAllocation | undefined {

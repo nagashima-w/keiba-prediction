@@ -204,8 +204,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `buildComboOddsKey`による正規化キーで、`race_combo_payouts`と同じ形式)。
   - 版不明分析の一括削除(`deleteAnalysesWithUnknownPromptVersion`)は、この2テーブルの子行も
     `analysis_horses`と同じ順序原則(子→親)で先に削除してから`analyses`を削除する。
-  - **読み出しAPI・verify集計・UI表示への反映は本Issueのスコープ外**(#54が回収率検証に、
-    #55が過去分析の再表示に、それぞれ必要な形で読み出しを追加する想定)。
+  - **読み出しAPI・verify集計・UI表示への反映は本Issueのスコープ外**(#54は#71名義で回収率検証
+    〈`getAllocationForVerify`。下記「配分ベースの回収率」参照〉として、#55は過去分析の再表示
+    〈`getStoredAllocation`。下記「過去分析の再表示」参照〉として、それぞれ実装済み)。
 - **配分ベースの回収率(proposedBet系、Issue #71・#54-B)**: `VerifyReport.proposedBet`
   (`ProposedBetReport`)が、既存の累積回収率(`bet`。複勝一律 stakePerBet 円という仮定、Q-B)とは
   別に、**分析時点の設定で実際に提案した配分額をそのまま賭け金とする**回収率を出す(Q-C)。
@@ -233,6 +234,31 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `unjudgedCount`(買い目行単位)に計上する。`imported`かつ`payouts`が非空だが該当
     `combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり判定不能とは区別する。
   - UI(`VerifyView`)は既存の累積回収率の下に、上記overall・券種別内訳・母集団4分類件数を表示する。
+- **過去分析の再表示(Issue #55)**: 検証タブ「レース一覧」の各レースの折りたたみ内に
+  「配分提案(分析時点)」ブロックを表示する。導線は新設せず、既存の「レース一覧」
+  (`RaceLedgerView`)に配分を引き当てるだけ(新規IPCチャネルは追加していない)。的中・払戻・
+  回収率は出さない(#16/#71の領分)。配分の再計算はしない(保存済みを読むだけ)。
+  - **読み出しAPI**: `AnalysisStore.getStoredAllocation(analysisId)` が
+    `analysis_allocation_meta` のうちメタ**13列**
+    (`route`/`unavailable_reason`/`fallback_reason`/`skip_reason_code`/`bankroll`/
+    `per_race_cap`/`kelly_fraction`/`ev_threshold`/`include_combo_odds`/`include_wide`/
+    `include_trio`/`bet_unit`/`odds_status`)+ `analysis_bets` の5列
+    (`bet_type`/`combo_key`/`stake`/`odds`/`ev`)を読む。`combo_odds_wide`/`combo_odds_trio`/
+    `greedy_steps`/`candidate_cap`/`model_id`/`model_approximate`の6列は`getAllocationForVerify`
+    と同じ理由(誰も読まない列にコストを払わない)で読まない。メタ行が無ければ undefined
+    (#59より前の旧分析=「記録なし」)。`getAllocationForVerify`(#71。route/skip_reason_code/
+    bet_type/combo_key/stakeの5列のみ)とは読む列の範囲が異なる別クエリであり、互いに影響しない。
+  - **表示状態(`renderer/allocation-proposal-view.ts`)**: 記録なし/unset/yoso/unavailable/
+    invalid/見送り(skip)/配分ありの7状態に加え、値の矛盾(未知の`route`文字列、または
+    `route∈{place-only,mixed}` ∧ `skip_reason_code=null` ∧ `bets=[]`)を「判定不能」として
+    別枠で扱う(#31: 判定済みを未判定に潰さない)。状態の下位理由・パラメータだけが欠けている
+    場合(`unavailable_reason=null`、`skip_reason_code="cap-too-small"` ∧ `bet_unit=null`)は
+    状態自体は保持し、欠けた部分だけを代替文言で明示する(判定不能へは倒さない)。
+  - 買い目行は券種(複勝「4番」/ワイド「4-7」/3連複「4-7-9」)・金額・分析時点のオッズ/EVを表示し、
+    実効設定8項目(総資金/1レース上限/ケリー係数/EV閾値/ワイド・三連複・組合せオッズ取得の
+    ON・OFF/オッズ状態)を注記として添える。`VerifyView.tsx`には本機能の`route`/
+    `skip_reason_code`分岐と文言リテラルを置かず、`allocation-proposal-view.ts`が返す配列を
+    `.map`するだけにしている。
 
 ## 5. 馬券配分の提案(ev/place-joint-model・ev/bet-allocation)
 

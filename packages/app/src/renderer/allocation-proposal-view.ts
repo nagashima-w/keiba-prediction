@@ -124,14 +124,24 @@ export const UNAVAILABLE_REASON_MISSING_NOTE =
 export const CAP_TOO_SMALL_MISSING_UNIT_NOTE =
   "1レースの上限が最小賭け金単位を下回るため配分できません(単位額が記録されていません)";
 
-/** skipReasonCodeが未知の値(想定外)のときの汎用フォールバック文言。 */
-const SKIP_REASON_UNKNOWN_NOTE = "見送り理由の詳細が記録されていません。";
+/**
+ * skipReasonCodeが未知の値(想定外)のときの汎用フォールバック文言。
+ * code-reviewer指摘対応: テストから値として比較できるようexportする。
+ */
+export const SKIP_REASON_UNKNOWN_NOTE = "見送り理由の詳細が記録されていません。";
 
-/** 未知のroute文字列(判定不能)のときの注記。 */
-const INDETERMINATE_UNKNOWN_ROUTE_NOTE = "配分提案の状態を判定できません(記録された種別が不明です)。";
+/**
+ * 未知のroute文字列(判定不能)のときの注記。
+ * code-reviewer指摘対応: テストから値として比較できるようexportする。
+ */
+export const INDETERMINATE_UNKNOWN_ROUTE_NOTE =
+  "配分提案の状態を判定できません(記録された種別が不明です)。";
 
-/** skipReasonCode=null ∧ bets=[](判定不能)のときの注記。 */
-const INDETERMINATE_ALLOCATED_NO_BETS_NOTE =
+/**
+ * skipReasonCode=null ∧ bets=[](判定不能)のときの注記。
+ * code-reviewer指摘対応: テストから値として比較できるようexportする。
+ */
+export const INDETERMINATE_ALLOCATED_NO_BETS_NOTE =
   "配分提案の状態を判定できません(見送りでも配分ありでもない記録です)。";
 
 /** 総資金のみ0のときの注記。 */

@@ -15,6 +15,9 @@ import type { StoredAllocationBetView, StoredAllocationView } from "../src/share
 import {
   buildAllocationProposalView,
   CAP_TOO_SMALL_MISSING_UNIT_NOTE,
+  INDETERMINATE_ALLOCATED_NO_BETS_NOTE,
+  INDETERMINATE_UNKNOWN_ROUTE_NOTE,
+  SKIP_REASON_UNKNOWN_NOTE,
   UNAVAILABLE_REASON_MISSING_NOTE,
 } from "../src/renderer/allocation-proposal-view.js";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../src/renderer/bet-allocation-view.js";
@@ -106,17 +109,28 @@ describe("buildAllocationProposalView(表示状態の判別。AC3: 7状態+判�
     ).toBe("allocated");
   });
 
-  it("未知のroute文字列はthrowせずkind='indeterminate'になること", () => {
+  it("未知のroute文字列はthrowせずkind='indeterminate'になること。notices自体もINDETERMINATE_UNKNOWN_ROUTE_NOTEに固定する(code-reviewer指摘1-b: kindのみの検査は条件A0を満たさない)", () => {
     const build = () => buildAllocationProposalView(allocation({ route: "SOMETHING_UNKNOWN" }));
     expect(build).not.toThrow();
     expect(build().kind).toBe("indeterminate");
+    expect(build().notices).toEqual([INDETERMINATE_UNKNOWN_ROUTE_NOTE]);
+    // 定数の中身そのものをリテラルで固定する(エクスポートした定数同士を比較するだけでは、
+    // 定数の値が他の定数へ差し替えられても検出できないため。code-reviewer指摘1-bの再発防止)。
+    expect(INDETERMINATE_UNKNOWN_ROUTE_NOTE).toBe(
+      "配分提案の状態を判定できません(記録された種別が不明です)。",
+    );
   });
 
   it.each(["place-only", "mixed"] as const)(
-    "route=%s ∧ skipReasonCode=null ∧ bets=[](想定外・配分ありとも見送りとも決められない)はkind='indeterminate'になること",
+    "route=%s ∧ skipReasonCode=null ∧ bets=[](想定外・配分ありとも見送りとも決められない)はkind='indeterminate'になり、noticesもINDETERMINATE_ALLOCATED_NO_BETS_NOTEに固定されること",
     (route) => {
       const view = buildAllocationProposalView(allocation({ route, skipReasonCode: null, bets: [] }));
       expect(view.kind).toBe("indeterminate");
+      expect(view.notices).toEqual([INDETERMINATE_ALLOCATED_NO_BETS_NOTE]);
+      // 定数の中身そのものをリテラルで固定する(理由は上記と同じ)。
+      expect(INDETERMINATE_ALLOCATED_NO_BETS_NOTE).toBe(
+        "配分提案の状態を判定できません(見送りでも配分ありでもない記録です)。",
+      );
     },
   );
 
@@ -180,6 +194,14 @@ describe("unavailable: 理由欠損時は状態を保持し代替文言(boss裁�
       "出走頭数の条件により複勝の配分対象外です(理由の詳細が記録されていません)",
     );
   });
+
+  it("unavailable_reasonが既知3値(not-sold/two-place-only/unknown)以外の未知の文字列(想定外)でも、kindはunavailableのまま、null時と同じ代替文言を出すこと(code-reviewer指摘1-a: JSDocが『null、または未知の値』と両方を明記しているのにnull側しかテストされていなかった)", () => {
+    const view = buildAllocationProposalView(
+      allocation({ route: "unavailable", unavailableReason: "SOMETHING_UNKNOWN_REASON" }),
+    );
+    expect(view.kind).toBe("unavailable");
+    expect(view.notices).toEqual([UNAVAILABLE_REASON_MISSING_NOTE]);
+  });
 });
 
 describe("skip: cap-too-small ∧ bet_unit=null(想定外)。boss裁定A: 状態を保持し代替文言(数値を捏造しない)", () => {
@@ -217,12 +239,14 @@ describe("skip: no-candidatesの文言がroute='place-only'とroute='mixed'で�
     expect(mixedNotice).toBe(comboSkipReasonText("no-candidates", 100));
   });
 
-  it("未知のskipReasonCode値でもthrowせず汎用文言にフォールバックすること", () => {
+  it("未知のskipReasonCode値でもthrowせず、SKIP_REASON_UNKNOWN_NOTEに固定した汎用文言にフォールバックすること(code-reviewer指摘1-b: toHaveLengthのみでは条件A0を満たさない)", () => {
     const build = () =>
       buildAllocationProposalView(allocation({ route: "mixed", skipReasonCode: "SOMETHING_UNKNOWN" }));
     expect(build).not.toThrow();
     expect(build().kind).toBe("skip");
-    expect(build().notices).toHaveLength(1);
+    expect(build().notices).toEqual([SKIP_REASON_UNKNOWN_NOTE]);
+    // 定数の中身そのものをリテラルで固定する(理由は上記と同じ)。
+    expect(SKIP_REASON_UNKNOWN_NOTE).toBe("見送り理由の詳細が記録されていません。");
   });
 });
 
