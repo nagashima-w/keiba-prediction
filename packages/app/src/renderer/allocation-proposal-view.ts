@@ -99,14 +99,23 @@ export interface AllocationProposalView {
 // 固定文言
 // ============================================================================
 
-/** 記録なし(#59より前の旧分析)の注記。 */
-const NO_RECORD_NOTE = "この分析には配分提案の記録がありません(Issue #59より前の分析です)。";
+/**
+ * 記録なし(#59より前の旧分析)の注記。
+ * code-reviewer指摘対応(2巡目・水平展開): テストから値として比較できるようexportする。
+ */
+export const NO_RECORD_NOTE = "この分析には配分提案の記録がありません(Issue #59より前の分析です)。";
 
-/** yoso(分析時点でオッズ未発売)の注記。過去分析の再表示のため過去形・中立表現にする。 */
-const YOSO_NOTE = "分析時点でオッズが未発売だったため、配分提案を行っていません。";
+/**
+ * yoso(分析時点でオッズ未発売)の注記。過去分析の再表示のため過去形・中立表現にする。
+ * code-reviewer指摘対応(2巡目・水平展開): テストから値として比較できるようexportする。
+ */
+export const YOSO_NOTE = "分析時点でオッズが未発売だったため、配分提案を行っていません。";
 
-/** invalid(配分計算が例外で止まった)の注記。 */
-const INVALID_NOTE = "配分計算中にエラーが発生したため、配分を提案していません。";
+/**
+ * invalid(配分計算が例外で止まった)の注記。
+ * code-reviewer指摘対応(2巡目・水平展開): テストから値として比較できるようexportする。
+ */
+export const INVALID_NOTE = "配分計算中にエラーが発生したため、配分を提案していません。";
 
 /**
  * unavailable_reasonが想定外(null、または未知の値)のときの代替文言(boss裁定A)。
@@ -144,22 +153,46 @@ export const INDETERMINATE_UNKNOWN_ROUTE_NOTE =
 export const INDETERMINATE_ALLOCATED_NO_BETS_NOTE =
   "配分提案の状態を判定できません(見送りでも配分ありでもない記録です)。";
 
-/** 総資金のみ0のときの注記。 */
-const UNSET_BANKROLL_ONLY_NOTE = "総資金が0円のため配分提案を行っていません(1レース上限は設定済みです)。";
+/**
+ * 総資金のみ0のときの注記。
+ * code-reviewer指摘対応(2巡目・水平展開): テストから値として比較できるようexportする。
+ */
+export const UNSET_BANKROLL_ONLY_NOTE =
+  "総資金が0円のため配分提案を行っていません(1レース上限は設定済みです)。";
 
-/** 1レース上限のみ0のときの注記。 */
-const UNSET_PER_RACE_CAP_ONLY_NOTE =
+/**
+ * 1レース上限のみ0のときの注記。
+ * code-reviewer指摘対応(2巡目・水平展開): テストから値として比較できるようexportする。
+ */
+export const UNSET_PER_RACE_CAP_ONLY_NOTE =
   "1レースの上限が0円のため配分提案を行っていません(総資金は設定済みです)。";
 
-/** D-2フォールバック理由(3コード)の注記文言。 */
+/**
+ * D-2フォールバック理由(3コード)の注記文言。個別に定数化してexportする
+ * (code-reviewer指摘対応・2巡目: Record内のリテラルのままだと個別に値として固定しにくいため、
+ * 他の注記定数と同じ形〈名前付きexport定数〉に揃えた)。
+ */
+export const FALLBACK_REASON_COMBO_ODDS_NOT_REQUESTED_NOTE =
+  "組合せオッズを取得しない設定のため複勝のみの配分になっています。";
+export const FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE =
+  "ワイド・三連複が配分対象外の設定のため複勝のみの配分になっています。";
+export const FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE =
+  "ワイド・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。";
+
+/** D-2フォールバック理由コード→注記文言のマップ(上記3定数から組み立てる。複製しない)。 */
 const FALLBACK_REASON_NOTES: Record<string, string> = {
-  "combo-odds-not-requested": "組合せオッズを取得しない設定のため複勝のみの配分になっています。",
-  "combo-bet-types-off": "ワイド・三連複が配分対象外の設定のため複勝のみの配分になっています。",
-  "no-combo-candidates": "ワイド・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。",
+  "combo-odds-not-requested": FALLBACK_REASON_COMBO_ODDS_NOT_REQUESTED_NOTE,
+  "combo-bet-types-off": FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE,
+  "no-combo-candidates": FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE,
 };
 
-/** fallback_reasonが未知の値(想定外)のときの汎用フォールバック文言。 */
-const FALLBACK_REASON_UNKNOWN_NOTE = "複勝のみの配分になっています(理由の詳細は記録されていません)。";
+/**
+ * fallback_reasonが未知の値(想定外)のときの汎用フォールバック文言。
+ * code-reviewer指摘対応(2巡目・水平展開): テストから値として比較できるようexportする
+ * (このケース自体、1巡目までテストが1件も無かった未検査コードパスだった)。
+ */
+export const FALLBACK_REASON_UNKNOWN_NOTE =
+  "複勝のみの配分になっています(理由の詳細は記録されていません)。";
 
 /** 券種コード(bet_type)→日本語ラベル。未知の値はそのまま返す(throwしない)。 */
 function betTypeLabel(betType: string): string {

@@ -15,10 +15,19 @@ import type { StoredAllocationBetView, StoredAllocationView } from "../src/share
 import {
   buildAllocationProposalView,
   CAP_TOO_SMALL_MISSING_UNIT_NOTE,
+  FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE,
+  FALLBACK_REASON_COMBO_ODDS_NOT_REQUESTED_NOTE,
+  FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE,
+  FALLBACK_REASON_UNKNOWN_NOTE,
   INDETERMINATE_ALLOCATED_NO_BETS_NOTE,
   INDETERMINATE_UNKNOWN_ROUTE_NOTE,
+  INVALID_NOTE,
+  NO_RECORD_NOTE,
   SKIP_REASON_UNKNOWN_NOTE,
   UNAVAILABLE_REASON_MISSING_NOTE,
+  UNSET_BANKROLL_ONLY_NOTE,
+  UNSET_PER_RACE_CAP_ONLY_NOTE,
+  YOSO_NOTE,
 } from "../src/renderer/allocation-proposal-view.js";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../src/renderer/bet-allocation-view.js";
 import { formatEv, formatOdds } from "../src/renderer/format.js";
@@ -150,18 +159,22 @@ describe("buildAllocationProposalView(表示状態の判別。AC3: 7状態+判�
 });
 
 describe("unset: 未設定パターンを3通り区別する(AC3境界)", () => {
-  it("総資金のみ0のとき、総資金側だけの専用注記になること", () => {
+  it("総資金のみ0のとき、UNSET_BANKROLL_ONLY_NOTEに固定した専用注記になること", () => {
     const view = buildAllocationProposalView(allocation({ route: "unset", bankroll: 0, perRaceCap: 5000 }));
-    expect(view.notices).toHaveLength(1);
-    expect(view.notices[0]).toContain("総資金");
-    expect(view.notices[0]).not.toBe(BET_ALLOCATION_UNSET_NOTE);
+    expect(view.notices).toEqual([UNSET_BANKROLL_ONLY_NOTE]);
+    // 定数の中身そのものをリテラルで固定する(輸入した定数同士のtoEqualだけでは、定数の中身が
+    // 差し替えられても検出できない。code-reviewer指摘1-bの再発防止パターンを全定数へ適用)。
+    expect(UNSET_BANKROLL_ONLY_NOTE).toBe(
+      "総資金が0円のため配分提案を行っていません(1レース上限は設定済みです)。",
+    );
   });
 
-  it("1レース上限のみ0のとき、1レース上限側だけの専用注記になること", () => {
+  it("1レース上限のみ0のとき、UNSET_PER_RACE_CAP_ONLY_NOTEに固定した専用注記になること", () => {
     const view = buildAllocationProposalView(allocation({ route: "unset", bankroll: 5000, perRaceCap: 0 }));
-    expect(view.notices).toHaveLength(1);
-    expect(view.notices[0]).toContain("1レースの上限");
-    expect(view.notices[0]).not.toBe(BET_ALLOCATION_UNSET_NOTE);
+    expect(view.notices).toEqual([UNSET_PER_RACE_CAP_ONLY_NOTE]);
+    expect(UNSET_PER_RACE_CAP_ONLY_NOTE).toBe(
+      "1レースの上限が0円のため配分提案を行っていません(総資金は設定済みです)。",
+    );
   });
 
   it("両方0のとき、既存のBET_ALLOCATION_UNSET_NOTEを再利用すること", () => {
@@ -251,7 +264,7 @@ describe("skip: no-candidatesの文言がroute='place-only'とroute='mixed'で�
 });
 
 describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行うこと(route='unavailable'経由でも消えないことを含む)", () => {
-  it("route='place-only'由来(D-2フォールバックで複勝のみ・配分あり)でも注記が出ること", () => {
+  it("route='place-only'由来(D-2フォールバックで複勝のみ・配分あり)でも、no-combo-candidatesの注記が末尾に付くこと", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "place-only",
@@ -260,10 +273,14 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
         bets: [bet()],
       }),
     );
-    expect(view.notices.some((n) => n.includes("ワイド・三連複にEVプラスの候補が無かった"))).toBe(true);
+    expect(view.notices).toEqual([FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE]);
+    // 定数の中身そのものをリテラルで固定する(理由は他の定数と同じ)。
+    expect(FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE).toBe(
+      "ワイド・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。",
+    );
   });
 
-  it("route='unavailable'由来(D-2フォールバックが頭数不可でunavailableになった場合)でも注記が出ること", () => {
+  it("route='unavailable'由来(D-2フォールバックが頭数不可でunavailableになった場合)でも、combo-bet-types-offの注記がunavailableReasonの注記に続けて付くこと", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "unavailable",
@@ -271,7 +288,13 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
         fallbackReason: "combo-bet-types-off",
       }),
     );
-    expect(view.notices.some((n) => n.includes("ワイド・三連複が配分対象外の設定"))).toBe(true);
+    expect(view.notices).toEqual([
+      placeBetUnavailableMessage("two-place-only"),
+      FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE,
+    ]);
+    expect(FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE).toBe(
+      "ワイド・三連複が配分対象外の設定のため複勝のみの配分になっています。",
+    );
   });
 
   it("route='mixed'由来(fallback未経由)ではfallback_reasonの注記が出ないこと", () => {
@@ -283,7 +306,7 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
         bets: [bet({ betType: "wide", comboKey: "0407" })],
       }),
     );
-    expect(view.notices.some((n) => n.includes("複勝のみの配分になっています"))).toBe(false);
+    expect(view.notices).toEqual([]);
   });
 
   it("combo-odds-not-requestedの注記が出ること", () => {
@@ -295,7 +318,27 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
         bets: [bet()],
       }),
     );
-    expect(view.notices.some((n) => n.includes("組合せオッズを取得しない設定"))).toBe(true);
+    expect(view.notices).toEqual([FALLBACK_REASON_COMBO_ODDS_NOT_REQUESTED_NOTE]);
+    expect(FALLBACK_REASON_COMBO_ODDS_NOT_REQUESTED_NOTE).toBe(
+      "組合せオッズを取得しない設定のため複勝のみの配分になっています。",
+    );
+  });
+
+  it("未知のfallbackReason値(想定外)でもthrowせず、FALLBACK_REASON_UNKNOWN_NOTEに固定した汎用文言にフォールバックすること(1巡目まで未検査だった経路)", () => {
+    const build = () =>
+      buildAllocationProposalView(
+        allocation({
+          route: "place-only",
+          skipReasonCode: null,
+          fallbackReason: "SOMETHING_UNKNOWN_FALLBACK",
+          bets: [bet()],
+        }),
+      );
+    expect(build).not.toThrow();
+    expect(build().notices).toEqual([FALLBACK_REASON_UNKNOWN_NOTE]);
+    expect(FALLBACK_REASON_UNKNOWN_NOTE).toBe(
+      "複勝のみの配分になっています(理由の詳細は記録されていません)。",
+    );
   });
 });
 
@@ -478,22 +521,31 @@ describe("実効設定(AC5): 8項目がラベル+値の文字列配列として�
 });
 
 describe("固定文言(AC3: yoso/invalid/記録なし)", () => {
-  it("yosoは買い目が空で、固定の注記が1件出ること", () => {
+  it("yosoは買い目が空で、noticesがYOSO_NOTEに固定されること(code-reviewer指摘・2巡目: toHaveLengthのみでは条件A0を満たさない。YOSO_NOTEをINVALID_NOTEへ差し替える変異で実際に検出漏れが実測された)", () => {
     const view = buildAllocationProposalView(allocation({ route: "yoso" }));
     expect(view.bets).toEqual([]);
-    expect(view.notices).toHaveLength(1);
+    expect(view.notices).toEqual([YOSO_NOTE]);
+    // 定数の中身そのものをリテラルで固定する(輸入した定数同士のtoEqualだけでは、他の定数の
+    // 中身へ差し替えられても検出できない。まさに今回検出漏れとして実測された変異)。
+    expect(YOSO_NOTE).toBe("分析時点でオッズが未発売だったため、配分提案を行っていません。");
   });
 
-  it("invalidは買い目が空で、固定の注記が1件出ること", () => {
+  it("invalidは買い目が空で、noticesがINVALID_NOTEに固定されること", () => {
     const view = buildAllocationProposalView(allocation({ route: "invalid" }));
     expect(view.bets).toEqual([]);
-    expect(view.notices).toHaveLength(1);
+    expect(view.notices).toEqual([INVALID_NOTE]);
+    expect(INVALID_NOTE).toBe("配分計算中にエラーが発生したため、配分を提案していません。");
   });
 
-  it("記録なしは買い目・実効設定とも空で、注記が1件出ること", () => {
+  it("記録なしは買い目・実効設定とも空で、noticesがNO_RECORD_NOTEに固定されること", () => {
     const view = buildAllocationProposalView(null);
     expect(view.bets).toEqual([]);
     expect(view.settingsRows).toEqual([]);
-    expect(view.notices).toHaveLength(1);
+    expect(view.notices).toEqual([NO_RECORD_NOTE]);
+    expect(NO_RECORD_NOTE).toBe("この分析には配分提案の記録がありません(Issue #59より前の分析です)。");
+  });
+
+  it("YOSO_NOTE・INVALID_NOTE・NO_RECORD_NOTEが互いに異なる値であること(3定数間の取り違え検出)", () => {
+    expect(new Set([YOSO_NOTE, INVALID_NOTE, NO_RECORD_NOTE]).size).toBe(3);
   });
 });
