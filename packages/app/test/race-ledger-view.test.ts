@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RaceLedgerEntry } from "@keiba/core";
+import type { RaceLedgerEntry, StoredAllocation } from "@keiba/core";
 import { buildRaceLedgerView } from "../src/main/race-ledger-view.js";
 
 /** テスト用のcore RaceLedgerEntryを最小構成で組み立てる。 */
@@ -122,5 +122,57 @@ describe("buildRaceLedgerView(検証画面: レース単位の統合リストの
 
   it("空配列を渡せば空配列を返すこと", () => {
     expect(buildRaceLedgerView([])).toEqual([]);
+  });
+
+  describe("allocation(配分提案の引き当て。Issue #55 AC6)", () => {
+    /** テスト用のStoredAllocationを最小構成で組み立てる。 */
+    function allocation(overrides: Partial<StoredAllocation> = {}): StoredAllocation {
+      return {
+        route: "mixed",
+        unavailableReason: null,
+        fallbackReason: null,
+        skipReasonCode: null,
+        bankroll: 10000,
+        perRaceCap: 3000,
+        kellyFraction: 0.5,
+        evThreshold: 1.0,
+        includeComboOdds: true,
+        includeWide: true,
+        includeTrio: true,
+        betUnit: 100,
+        oddsStatus: "result",
+        bets: [],
+        ...overrides,
+      };
+    }
+
+    it("getAllocationを渡さなければ全エントリのallocationがnullになること(既存呼び出しの非破壊)", () => {
+      const [view] = buildRaceLedgerView([entry({ analysisId: 1 })]);
+      expect(view!.allocation).toBeNull();
+    });
+
+    it("getAllocationがundefinedを返した(#59より前の旧分析)場合、allocationはnullになること", () => {
+      const [view] = buildRaceLedgerView([entry({ analysisId: 1 })], () => undefined);
+      expect(view!.allocation).toBeNull();
+    });
+
+    it("各エントリに、そのエントリのanalysisIdに対応する配分が付くこと(analysisIdが連番でない・内容が相異なる2件で、index束縛や取り違えが無いことを固定)", () => {
+      const source1 = entry({ raceId: "202605020801", analysisId: 5, kaisaiDate: "20260701" });
+      const source2 = entry({ raceId: "202605020802", analysisId: 12, kaisaiDate: "20260702" });
+      const allocationByAnalysisId = new Map<number, StoredAllocation>([
+        [5, allocation({ route: "mixed", bankroll: 111, bets: [{ betType: "place", comboKey: "04", stake: 300, odds: 2.1, ev: 1.05 }] })],
+        [12, allocation({ route: "yoso", bankroll: 222, bets: [] })],
+      ]);
+      const views = buildRaceLedgerView([source1, source2], (analysisId) =>
+        allocationByAnalysisId.get(analysisId),
+      );
+      const view1 = views.find((v) => v.raceId === "202605020801")!;
+      const view2 = views.find((v) => v.raceId === "202605020802")!;
+      expect(view1.allocation).toEqual(allocationByAnalysisId.get(5));
+      expect(view2.allocation).toEqual(allocationByAnalysisId.get(12));
+      // 取り違えていないことの直接固定(index束縛だとここが入れ替わって落ちる)。
+      expect(view1.allocation!.bankroll).toBe(111);
+      expect(view2.allocation!.bankroll).toBe(222);
+    });
   });
 });

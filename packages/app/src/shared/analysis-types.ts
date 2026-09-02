@@ -728,6 +728,49 @@ export interface RaceBreakdownHorseView {
 }
 
 /**
+ * 配分提案の1買い目分(表示用。core StoredAllocationBetDetail のプレーン写し。Issue #55)。
+ * `RaceBreakdownHorseView` と同じ慣行(core側の型を shared 層に構造的に複製する)に倣う。
+ * core への narrow import 規約(ファイル先頭コメント参照)を保つため、型を import せず
+ * 手動で複製する。構造一致は `test/analysis-types-allocation-pin.test.ts` がコンパイル時に固定する。
+ */
+export interface StoredAllocationBetView {
+  /** 券種。app 側の "place" | "wide" | "trio"。未知の値でもそのまま(throwしない)。 */
+  readonly betType: string;
+  /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみ。 */
+  readonly stake: number;
+  /** 分析時点で採用したオッズ。欠損・未確定なら null。 */
+  readonly odds: number | null;
+  /** 分析時点の期待値。欠損・未確定なら null。 */
+  readonly ev: number | null;
+}
+
+/**
+ * 配分提案(表示用。core StoredAllocation のプレーン写し。Issue #55)。
+ * メタ13列(route/unavailableReason/fallbackReason/skipReasonCode/実効設定7項目/betUnit/
+ * oddsStatus)+ bets。core `getStoredAllocation` が意図的に読まない7列
+ * (combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate)は
+ * この型にも持たせない(#71の原則。読まない列は表示型にも持ち込まない)。
+ */
+export interface StoredAllocationView {
+  readonly route: string;
+  readonly unavailableReason: string | null;
+  readonly fallbackReason: string | null;
+  readonly skipReasonCode: string | null;
+  readonly bankroll: number;
+  readonly perRaceCap: number;
+  readonly kellyFraction: number;
+  readonly evThreshold: number;
+  readonly includeComboOdds: boolean;
+  readonly includeWide: boolean;
+  readonly includeTrio: boolean;
+  readonly betUnit: number | null;
+  readonly oddsStatus: string;
+  readonly bets: readonly StoredAllocationBetView[];
+}
+
+/**
  * 検証画面: レース単位の統合リストの1件(表示用。core RaceLedgerEntry に会場名・レース番号を
  * 加えたもの。検証画面UI統合)。
  *
@@ -772,6 +815,11 @@ export interface RaceLedgerView {
   readonly recoveryRate: number | null;
   /** このレースで賭けた点数。結果未取込なら0。 */
   readonly betCount: number;
+  /**
+   * この分析時点の配分提案(Issue #55)。#59より前に保存された旧分析(配分メタ行が無い)は
+   * null(「記録なし」。allocation-proposal-view.tsの判別状態の1つ)。
+   */
+  readonly allocation: StoredAllocationView | null;
 }
 
 /**

@@ -67,6 +67,7 @@ const sampleRaceLedger: RaceLedgerView[] = [
     totalReturn: 300,
     recoveryRate: 3.0,
     betCount: 1,
+    allocation: null,
   },
 ];
 

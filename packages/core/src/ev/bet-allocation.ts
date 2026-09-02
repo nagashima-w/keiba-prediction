@@ -613,7 +613,7 @@ export function allocateBets(
         candidateHorses.length,
       )
     : null;
-  const skipReason = skipReasonCode === null ? null : skipReasonText(skipReasonCode, betUnit);
+  const skipReason = skipReasonCode === null ? null : placeSkipReasonText(skipReasonCode, betUnit);
 
   // notDiversified: betCount===1 のときのみtrueになりうる。betCount===0(見送り)は
   // isSkip/skipReasonが説明責任を負うため常にfalse。
@@ -721,8 +721,13 @@ function computeMarginalDeviationMax(
  * allocation-primitives.ts 側に一元化されているため、本関数は文言のマッピングのみを行う
  * (決定3: 見送り理由・advisoryの文言定数は券種ごとに分離する。既存の①〜⑥の文言・優先順位は
  * 完全に維持している)。
+ *
+ * **Issue #55でexportした**: 過去分析の再表示(検証タブ「レース一覧」)が、保存済みの
+ * `skip_reason_code`(コード)から見送り理由の文言を組み立て直すために必要になったため。
+ * 組合せ券種の `comboSkipReasonText`(combo-bet-allocation.ts)とは `no-candidates` の
+ * 文言だけが異なる(「馬」/「買い目」)別関数であり、本関数を複勝以外に流用しないこと。
  */
-function skipReasonText(code: SkipReasonCode, betUnit: number): string {
+export function placeSkipReasonText(code: SkipReasonCode, betUnit: number): string {
   switch (code) {
     case "bankroll-unset":
       return REASON_BANKROLL_UNSET;

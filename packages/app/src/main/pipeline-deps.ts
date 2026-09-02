@@ -353,7 +353,9 @@ export function createPipelineDeps(
       deletedCount: store.deleteAnalysesWithUnknownPromptVersion(),
     }),
     getRaceLedger: (): readonly RaceLedgerView[] =>
-      buildRaceLedgerView(computeRaceLedger(store)),
+      buildRaceLedgerView(computeRaceLedger(store), (analysisId) =>
+        store.getStoredAllocation(analysisId),
+      ),
     getAnalysisExportInput: (raceId: RaceId): AnalysisExportSource | null => {
       const latest = pickLatestAnalysis(store.listAnalyses({ raceId }));
       if (latest === null) {

@@ -87,7 +87,7 @@ import {
   resolveEvThreshold,
   type EvConfig,
 } from "./expected-value.js";
-import { buildComboOddsKey } from "../scraper/combo-odds-key.js";
+import { buildComboOddsKey, parseComboOddsKey } from "../scraper/combo-odds-key.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   type JointModelHorse,
@@ -313,8 +313,15 @@ function buildCapTooSmallReason(betUnit: number): string {
   return `1レースの上限が${betUnit}円未満のため配分できません`;
 }
 
-/** 見送り理由コード(allocation-primitives.ts)を券種一般の日本語文言へ変換する。 */
-function skipReasonText(code: SkipReasonCode, betUnit: number): string {
+/**
+ * 見送り理由コード(allocation-primitives.ts)を券種一般(ワイド・3連複)の日本語文言へ変換する。
+ *
+ * **Issue #55でexportした**: 過去分析の再表示(検証タブ「レース一覧」)が、保存済みの
+ * `skip_reason_code`(コード)から見送り理由の文言を組み立て直すために必要になったため。
+ * 複勝専用の `placeSkipReasonText`(bet-allocation.ts)とは `no-candidates` の文言だけが
+ * 異なる(「馬」/「買い目」)別関数であり、本関数を複勝に流用しないこと。
+ */
+export function comboSkipReasonText(code: SkipReasonCode, betUnit: number): string {
   switch (code) {
     case "bankroll-unset":
       return REASON_BANKROLL_UNSET;
@@ -602,7 +609,7 @@ export function allocateGeneralBets(
         finalCandidates.length,
       )
     : null;
-  const skipReason = skipReasonCode === null ? null : skipReasonText(skipReasonCode, betUnit);
+  const skipReason = skipReasonCode === null ? null : comboSkipReasonText(skipReasonCode, betUnit);
 
   const positiveContinuousCount = continuousFractions.filter((x) => x > 0).length;
   const notDiversified = betCount === 1 && positiveContinuousCount >= 2;
@@ -656,6 +663,13 @@ export function allocateGeneralBets(
  * 壊さないよう、公開位置(このモジュールからexportされること)は維持する。
  */
 export { buildComboOddsKey };
+
+/**
+ * `buildComboOddsKey` の逆操作(Issue #55: 過去分析の配分提案を馬番表示に戻すためのデコーダ)。
+ * 実体は `buildComboOddsKey` と同じ理由(単一実装の原則)で `../scraper/combo-odds-key.js` に
+ * 置き、ここでは re-export するだけにする。
+ */
+export { parseComboOddsKey };
 
 /**
  * combo オッズの解決結果(判別共用体)。取得済み/欠損(null)/未取得(キー不在)/

@@ -4,6 +4,7 @@ import type {
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 import type { VerifyState } from "./verify-reducer.js";
+import { buildAllocationProposalView } from "./allocation-proposal-view.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { formatEv, MARK_LEGEND } from "./format.js";

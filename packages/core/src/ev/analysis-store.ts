@@ -253,6 +253,68 @@ export interface StoredAllocationBet {
 }
 
 /**
+ * `getStoredAllocation` が返す配分提案の1買い目分(Issue #55)。`StoredAllocationBet`
+ * (`getAllocationForVerify` 用。odds/evを持たない)とは別に、過去分析の再表示(検証タブ
+ * 「レース一覧」)が必要とする odds/ev を含む完全な表示用行として持つ。
+ */
+export interface StoredAllocationBetDetail {
+  /** 券種。app 側の "place" | "wide" | "trio"。未知の値が混入していてもそのまま返す(throwしない)。 */
+  readonly betType: string;
+  /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみ(#59 決定(a))。 */
+  readonly stake: number;
+  /** 分析時点で採用したオッズ。欠損・未確定なら null。 */
+  readonly odds: number | null;
+  /** 分析時点の期待値。欠損・未確定なら null。 */
+  readonly ev: number | null;
+}
+
+/**
+ * `getStoredAllocation` が返す配分提案(Issue #55: 過去分析の再表示で配分提案を出す)。
+ *
+ * メタ行20列のうち、boss裁定(2026-09-02)により以下の13列だけを読む(残り7列
+ * 〈combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate〉は
+ * 利用者に意味の無い内部パラメータ、または表示予定が無いため意図的に読まない。#71の原則
+ * 「誰も読まない列にコストを払わない」を踏襲する): route/unavailable_reason/fallback_reason/
+ * skip_reason_code/bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
+ * include_wide/include_trio/bet_unit/odds_status。
+ *
+ * `getAllocationForVerify`(#71。route/skip_reason_codeとbets 3列のみ)とは読む列の範囲が
+ * 異なる**別のクエリ**であり、互いに変更の影響を与えない(#71 AC-B4の論拠を壊さないための
+ * 意図的な分離)。
+ */
+export interface StoredAllocation {
+  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま。未知の値でもそのまま返す。 */
+  readonly route: string;
+  /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
+  readonly unavailableReason: string | null;
+  /**
+   * app 側 PlaceOnlyFallbackReason。D-2フォールバックを通っていないときは null(未到達)。
+   * `route==="unavailable"` でも非nullになりうる(D-2フォールバックが頭数不可で
+   * `kind:"unavailable"` になった場合。`shared/mixed-race-allocation.ts` の
+   * `AllocationOutcomeCodes` JSDoc参照)。
+   */
+  readonly fallbackReason: string | null;
+  /** app 側 SkipReasonCode。coreの配分計算に未到達、または非skipのときは null。 */
+  readonly skipReasonCode: string | null;
+  /** 実効設定(実行時の値をそのまま記録)。 */
+  readonly bankroll: number;
+  readonly perRaceCap: number;
+  readonly kellyFraction: number;
+  readonly evThreshold: number;
+  readonly includeComboOdds: boolean;
+  readonly includeWide: boolean;
+  readonly includeTrio: boolean;
+  /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
+  readonly betUnit: number | null;
+  /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
+  readonly oddsStatus: string;
+  /** stake>0 の明細のみ(#59 決定(a)を引き継ぐ)。 */
+  readonly bets: readonly StoredAllocationBetDetail[];
+}
+
+/**
  * `getAllocationForVerify` が返す配分提案の最小表現(Issue #71・#54-B)。
  * メタ行20列のうち `route`/`skip_reason_code` の2列だけを持つ(残り18列は#71のスコープ外。
  * 下記 `getAllocationForVerify` のJSDoc参照)。
@@ -1042,6 +1104,71 @@ export class AnalysisStore {
       )
       .all(analysisId) as StoredAllocationBet[];
     return { route: metaRow.route, skipReasonCode: metaRow.skipReasonCode, bets };
+  }
+
+  /**
+   * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#55(過去分析の
+   * 再表示で配分提案を出す)が読む13列 + bets(betType/comboKey/stake/odds/ev)を取得する。
+   * メタ行が無ければ undefined を返す(#59より前の旧分析=「記録なし」)。
+   *
+   * **読まない7列(boss裁定2026-09-02)**: `combo_odds_wide`/`combo_odds_trio`/`greedy_steps`/
+   * `candidate_cap`/`model_id`/`model_approximate`。前者2つは表示予定が無く(#55のスコープ外。
+   * 必要になれば#16で追加)、後者4つは利用者に意味の無い内部パラメータ(`getAllocationForVerify`の
+   * JSDocと同じ判断)。詳細は {@link StoredAllocation} のJSDoc参照。
+   * @param analysisId 分析ID
+   */
+  getStoredAllocation(analysisId: number): StoredAllocation | undefined {
+    const metaRow = this.db
+      .prepare(
+        `SELECT route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason,
+                skip_reason_code AS skipReasonCode, bankroll, per_race_cap AS perRaceCap,
+                kelly_fraction AS kellyFraction, ev_threshold AS evThreshold,
+                include_combo_odds AS includeComboOdds, include_wide AS includeWide,
+                include_trio AS includeTrio, bet_unit AS betUnit, odds_status AS oddsStatus
+           FROM ${ANALYSIS_ALLOCATION_META_TABLE} WHERE analysis_id = ?`,
+      )
+      .get(analysisId) as
+      | {
+          route: string;
+          unavailableReason: string | null;
+          fallbackReason: string | null;
+          skipReasonCode: string | null;
+          bankroll: number;
+          perRaceCap: number;
+          kellyFraction: number;
+          evThreshold: number;
+          includeComboOdds: number;
+          includeWide: number;
+          includeTrio: number;
+          betUnit: number | null;
+          oddsStatus: string;
+        }
+      | undefined;
+    if (metaRow === undefined) {
+      return undefined;
+    }
+    const bets = this.db
+      .prepare(
+        `SELECT bet_type AS betType, combo_key AS comboKey, stake, odds, ev
+           FROM ${ANALYSIS_BETS_TABLE} WHERE analysis_id = ? ORDER BY bet_type, combo_key`,
+      )
+      .all(analysisId) as StoredAllocationBetDetail[];
+    return {
+      route: metaRow.route,
+      unavailableReason: metaRow.unavailableReason,
+      fallbackReason: metaRow.fallbackReason,
+      skipReasonCode: metaRow.skipReasonCode,
+      bankroll: metaRow.bankroll,
+      perRaceCap: metaRow.perRaceCap,
+      kellyFraction: metaRow.kellyFraction,
+      evThreshold: metaRow.evThreshold,
+      includeComboOdds: metaRow.includeComboOdds !== 0,
+      includeWide: metaRow.includeWide !== 0,
+      includeTrio: metaRow.includeTrio !== 0,
+      betUnit: metaRow.betUnit,
+      oddsStatus: metaRow.oddsStatus,
+      bets,
+    };
   }
 
   /**

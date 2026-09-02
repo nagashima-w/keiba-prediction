@@ -274,6 +274,8 @@ export {
   type RaceResultDetail,
   type RaceResultDetailHorse,
   type RaceResultEntry,
+  type StoredAllocation,
+  type StoredAllocationBetDetail,
   type StoredAnalysis,
   type StoredAnalysisHorse,
   type StoredComboPayout,

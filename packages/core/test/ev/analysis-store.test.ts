@@ -4,6 +4,7 @@ import {
   AnalysisStore,
   type AnalysisAllocationMetaRecord,
   type AnalysisRecord,
+  type StoredAllocation,
 } from "../../src/ev/analysis-store.js";
 import { ScrapeCache } from "../../src/scraper/cache.js";
 
@@ -2291,6 +2292,403 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           bets: [],
         });
         store.close();
+      });
+    });
+
+    describe("getStoredAllocation(配分提案の読み出し。Issue #55)", () => {
+      /**
+       * 読む13列の基準値(boss裁定2026-09-02: combo_odds_wide/combo_odds_trioを除いた13列)。
+       * 全列が互いに異なる値を持つよう選び、束縛箇所の取り違え(条件B)を機械的に検出できるようにする。
+       */
+      function baselineMeta(
+        overrides: Partial<AnalysisAllocationMetaRecord> = {},
+      ): AnalysisAllocationMetaRecord {
+        return makeMeta({
+          route: "mixed",
+          unavailableReason: "not-sold",
+          fallbackReason: "no-combo-candidates",
+          skipReasonCode: "kelly-zero",
+          bankroll: 111111,
+          perRaceCap: 22222,
+          kellyFraction: 0.33,
+          evThreshold: 1.05,
+          includeComboOdds: true,
+          includeWide: false,
+          includeTrio: true,
+          betUnit: 150,
+          oddsStatus: "middle",
+          ...overrides,
+        });
+      }
+
+      const BASELINE_BET: {
+        betType: string;
+        comboKey: string;
+        stake: number;
+        odds: number | null;
+        ev: number | null;
+      } = {
+        betType: "place",
+        comboKey: "03",
+        stake: 500,
+        odds: 2.7,
+        ev: 1.15,
+      };
+
+      it("メタ行が無ければundefinedを返すこと(#59より前の旧分析=記録なし)", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(makeRecord({ raceId: "getStoredAllocation記録なしレース" }));
+        expect(store.getStoredAllocation(id)).toBeUndefined();
+        store.close();
+      });
+
+      it("読む13列 + bets(betType/comboKey/stake/odds/ev)がすべて値として往復し、読まない列を戻り値に含まないこと", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(
+          makeRecord({
+            raceId: "getStoredAllocation全体像レース",
+            allocation: {
+              meta: baselineMeta(),
+              bets: [
+                { betType: "place", comboKey: "07", stake: 100, odds: 2.5, ev: 1.2 },
+                { betType: "wide", comboKey: "0102", stake: 300, odds: 3.1, ev: 1.05 },
+                { betType: "trio", comboKey: "010203", stake: 200, odds: 12.4, ev: 1.4 },
+              ],
+            },
+          }),
+        );
+        const result = store.getStoredAllocation(id);
+        expect(result).toEqual({
+          route: "mixed",
+          unavailableReason: "not-sold",
+          fallbackReason: "no-combo-candidates",
+          skipReasonCode: "kelly-zero",
+          bankroll: 111111,
+          perRaceCap: 22222,
+          kellyFraction: 0.33,
+          evThreshold: 1.05,
+          includeComboOdds: true,
+          includeWide: false,
+          includeTrio: true,
+          betUnit: 150,
+          oddsStatus: "middle",
+          bets: [
+            { betType: "place", comboKey: "07", stake: 100, odds: 2.5, ev: 1.2 },
+            { betType: "trio", comboKey: "010203", stake: 200, odds: 12.4, ev: 1.4 },
+            { betType: "wide", comboKey: "0102", stake: 300, odds: 3.1, ev: 1.05 },
+          ],
+        });
+        // 読まない6列(combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/
+        // model_approximate)に対応するキーが戻り値オブジェクトに一切現れないこと(誰も読まない
+        // 列にコストを払わない#71原則の裏返し。余計なフィールドが型を超えて漏れていないか)。
+        expect(Object.keys(result!)).not.toContain("comboOddsWide");
+        expect(Object.keys(result!)).not.toContain("comboOddsTrio");
+        expect(Object.keys(result!)).not.toContain("greedySteps");
+        expect(Object.keys(result!)).not.toContain("candidateCap");
+        expect(Object.keys(result!)).not.toContain("modelId");
+        expect(Object.keys(result!)).not.toContain("modelApproximate");
+        store.close();
+      });
+
+      /** 1件のメタ列差分テストの仕様: どの列を書き換えるか・書き換え後のDB生値・対応するJSフィールドと期待値。 */
+      interface MetaColumnCase {
+        readonly label: string;
+        readonly metaOverride: Partial<AnalysisAllocationMetaRecord>;
+        readonly column: string;
+        readonly sentinelDbValue: number | string | null;
+        readonly field: keyof StoredAllocation;
+        readonly expectedValue: unknown;
+      }
+
+      const metaColumnCases: readonly MetaColumnCase[] = [
+        {
+          label: "route",
+          metaOverride: {},
+          column: "route",
+          sentinelDbValue: "SENTINEL_ROUTE",
+          field: "route",
+          expectedValue: "SENTINEL_ROUTE",
+        },
+        {
+          label: "unavailable_reason(非null→null)",
+          metaOverride: {},
+          column: "unavailable_reason",
+          sentinelDbValue: null,
+          field: "unavailableReason",
+          expectedValue: null,
+        },
+        {
+          label: "unavailable_reason(null→非null)",
+          metaOverride: { unavailableReason: null },
+          column: "unavailable_reason",
+          sentinelDbValue: "SENTINEL_UNAVAILABLE_REASON",
+          field: "unavailableReason",
+          expectedValue: "SENTINEL_UNAVAILABLE_REASON",
+        },
+        {
+          label: "fallback_reason(非null→null)",
+          metaOverride: {},
+          column: "fallback_reason",
+          sentinelDbValue: null,
+          field: "fallbackReason",
+          expectedValue: null,
+        },
+        {
+          label: "fallback_reason(null→非null)",
+          metaOverride: { fallbackReason: null },
+          column: "fallback_reason",
+          sentinelDbValue: "SENTINEL_FALLBACK_REASON",
+          field: "fallbackReason",
+          expectedValue: "SENTINEL_FALLBACK_REASON",
+        },
+        {
+          label: "skip_reason_code(非null→null)",
+          metaOverride: {},
+          column: "skip_reason_code",
+          sentinelDbValue: null,
+          field: "skipReasonCode",
+          expectedValue: null,
+        },
+        {
+          label: "skip_reason_code(null→非null)",
+          metaOverride: { skipReasonCode: null },
+          column: "skip_reason_code",
+          sentinelDbValue: "SENTINEL_SKIP_CODE",
+          field: "skipReasonCode",
+          expectedValue: "SENTINEL_SKIP_CODE",
+        },
+        {
+          label: "bankroll",
+          metaOverride: {},
+          column: "bankroll",
+          sentinelDbValue: 987654.25,
+          field: "bankroll",
+          expectedValue: 987654.25,
+        },
+        {
+          label: "per_race_cap",
+          metaOverride: {},
+          column: "per_race_cap",
+          sentinelDbValue: 54321.5,
+          field: "perRaceCap",
+          expectedValue: 54321.5,
+        },
+        {
+          label: "kelly_fraction",
+          metaOverride: {},
+          column: "kelly_fraction",
+          sentinelDbValue: 0.777,
+          field: "kellyFraction",
+          expectedValue: 0.777,
+        },
+        {
+          label: "ev_threshold",
+          metaOverride: {},
+          column: "ev_threshold",
+          sentinelDbValue: 2.34,
+          field: "evThreshold",
+          expectedValue: 2.34,
+        },
+        {
+          label: "include_combo_odds(true→false)",
+          metaOverride: { includeComboOdds: true },
+          column: "include_combo_odds",
+          sentinelDbValue: 0,
+          field: "includeComboOdds",
+          expectedValue: false,
+        },
+        {
+          label: "include_combo_odds(false→true)",
+          metaOverride: { includeComboOdds: false },
+          column: "include_combo_odds",
+          sentinelDbValue: 1,
+          field: "includeComboOdds",
+          expectedValue: true,
+        },
+        {
+          label: "include_wide(false→true)",
+          metaOverride: { includeWide: false },
+          column: "include_wide",
+          sentinelDbValue: 1,
+          field: "includeWide",
+          expectedValue: true,
+        },
+        {
+          label: "include_wide(true→false)",
+          metaOverride: { includeWide: true },
+          column: "include_wide",
+          sentinelDbValue: 0,
+          field: "includeWide",
+          expectedValue: false,
+        },
+        {
+          label: "include_trio(true→false)",
+          metaOverride: { includeTrio: true },
+          column: "include_trio",
+          sentinelDbValue: 0,
+          field: "includeTrio",
+          expectedValue: false,
+        },
+        {
+          label: "include_trio(false→true)",
+          metaOverride: { includeTrio: false },
+          column: "include_trio",
+          sentinelDbValue: 1,
+          field: "includeTrio",
+          expectedValue: true,
+        },
+        {
+          label: "bet_unit(非null→null)",
+          metaOverride: {},
+          column: "bet_unit",
+          sentinelDbValue: null,
+          field: "betUnit",
+          expectedValue: null,
+        },
+        {
+          label: "bet_unit(null→非null)",
+          metaOverride: { betUnit: null },
+          column: "bet_unit",
+          sentinelDbValue: 777,
+          field: "betUnit",
+          expectedValue: 777,
+        },
+        {
+          label: "odds_status",
+          metaOverride: {},
+          column: "odds_status",
+          sentinelDbValue: "SENTINEL_STATUS",
+          field: "oddsStatus",
+          expectedValue: "SENTINEL_STATUS",
+        },
+      ];
+
+      it.each(metaColumnCases)(
+        "AC1(メタ列): $label の列だけをUPDATEすると、戻り値のそのフィールドだけが変わり他フィールドは変化しないこと",
+        ({ metaOverride, column, sentinelDbValue, field, expectedValue }) => {
+          const store = new AnalysisStore();
+          const id = store.saveAnalysis(
+            makeRecord({
+              raceId: `AC1メタ列-${column}`,
+              allocation: { meta: baselineMeta(metaOverride), bets: [BASELINE_BET] },
+            }),
+          );
+          const baseline = store.getStoredAllocation(id)!;
+          store.rawDatabase
+            .prepare(`UPDATE analysis_allocation_meta SET ${column} = ? WHERE analysis_id = ?`)
+            .run(sentinelDbValue, id);
+          const updated = store.getStoredAllocation(id)!;
+          // 前提固定(条件A0): 書き換え後の値が実際に期待どおり変わっていること。
+          expect(updated[field]).toEqual(expectedValue);
+          // 本題: 対象フィールド以外は基準値から一切変化していないこと。
+          expect({ ...updated, [field]: baseline[field] }).toEqual(baseline);
+          store.close();
+        },
+      );
+
+      /** analysis_bets側(odds/ev)の差分テストの仕様。 */
+      interface BetColumnCase {
+        readonly label: string;
+        readonly betOverride: Partial<typeof BASELINE_BET>;
+        readonly column: "odds" | "ev";
+        readonly sentinelDbValue: number | null;
+        readonly field: "odds" | "ev";
+        readonly expectedValue: number | null;
+      }
+
+      const betColumnCases: readonly BetColumnCase[] = [
+        {
+          label: "odds(非null→null)",
+          betOverride: {},
+          column: "odds",
+          sentinelDbValue: null,
+          field: "odds",
+          expectedValue: null,
+        },
+        {
+          label: "odds(null→非null)",
+          betOverride: { odds: null },
+          column: "odds",
+          sentinelDbValue: 9.99,
+          field: "odds",
+          expectedValue: 9.99,
+        },
+        {
+          label: "ev(非null→null)",
+          betOverride: {},
+          column: "ev",
+          sentinelDbValue: null,
+          field: "ev",
+          expectedValue: null,
+        },
+        {
+          label: "ev(null→非null)",
+          betOverride: { ev: null },
+          column: "ev",
+          sentinelDbValue: 3.21,
+          field: "ev",
+          expectedValue: 3.21,
+        },
+      ];
+
+      it.each(betColumnCases)(
+        "AC1(bets列): $label の列だけをUPDATEすると、戻り値のそのフィールドだけが変わり他フィールドは変化しないこと",
+        ({ betOverride, column, sentinelDbValue, field, expectedValue }) => {
+          const store = new AnalysisStore();
+          const bet = { ...BASELINE_BET, ...betOverride };
+          const id = store.saveAnalysis(
+            makeRecord({
+              raceId: `AC1bet列-${column}-${JSON.stringify(betOverride)}`,
+              allocation: { meta: baselineMeta(), bets: [bet] },
+            }),
+          );
+          const baseline = store.getStoredAllocation(id)!;
+          store.rawDatabase
+            .prepare(
+              `UPDATE analysis_bets SET ${column} = ? WHERE analysis_id = ? AND bet_type = ? AND combo_key = ?`,
+            )
+            .run(sentinelDbValue, id, bet.betType, bet.comboKey);
+          const updated = store.getStoredAllocation(id)!;
+          // 前提固定(条件A0): 書き換え後の値が実際に期待どおり変わっていること。
+          expect(updated.bets[0]![field]).toEqual(expectedValue);
+          // 本題: 対象フィールド以外(bets内の他フィールド・メタ13列全部)は基準値から変化しないこと。
+          expect({
+            ...updated,
+            bets: [{ ...updated.bets[0]!, [field]: baseline.bets[0]![field] }],
+          }).toEqual(baseline);
+          store.close();
+        },
+      );
+
+      describe("AC2: 読まない6列(combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate)に極端な値を入れても戻り値が変わらないこと", () => {
+        const unreadColumnCases = [
+          { label: "combo_odds_wide", column: "combo_odds_wide", sentinelDbValue: "EXTREME_VALUE" },
+          { label: "combo_odds_trio", column: "combo_odds_trio", sentinelDbValue: "EXTREME_VALUE" },
+          { label: "greedy_steps", column: "greedy_steps", sentinelDbValue: 999999999 },
+          { label: "candidate_cap", column: "candidate_cap", sentinelDbValue: -1 },
+          { label: "model_id", column: "model_id", sentinelDbValue: "EXTREME_MODEL_ID" },
+          { label: "model_approximate", column: "model_approximate", sentinelDbValue: 1 },
+        ] as const;
+
+        it.each(unreadColumnCases)(
+          "$label に極端な値を入れても getStoredAllocation の戻り値が完全一致すること",
+          ({ column, sentinelDbValue }) => {
+            const store = new AnalysisStore();
+            const id = store.saveAnalysis(
+              makeRecord({
+                raceId: `AC2-${column}`,
+                allocation: { meta: baselineMeta(), bets: [BASELINE_BET] },
+              }),
+            );
+            const before = store.getStoredAllocation(id);
+            store.rawDatabase
+              .prepare(`UPDATE analysis_allocation_meta SET ${column} = ? WHERE analysis_id = ?`)
+              .run(sentinelDbValue, id);
+            const after = store.getStoredAllocation(id);
+            expect(after).toEqual(before);
+            store.close();
+          },
+        );
       });
     });
   });
