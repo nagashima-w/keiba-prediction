@@ -15,9 +15,16 @@
  * `types.ts` が「単勝オッズ」と明記する `odds` フィールドは、`raceNumber`/`entryCount`/
  * `wakuban`/`umaban`/`ninki`/`kinryo`/`margin`/`last3f` と共用の汎用ヘルパ `numberOrNull`
  * (`Number(t)`直呼び)ではなく、共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber`
- * に委譲する(odds列だけを切り出す。他8フィールドは引き続き `numberOrNull` のまま。再現:
- * `grep -n "numberOrNull(" packages/core/src/scraper/parse-horse-results.ts | grep -v "function numberOrNull"`
- * → 8行〈raceNumber・entryCount・wakuban・umaban・ninki・kinryo・margin・last3f〉)。
+ * に委譲する(odds列だけを切り出す。他8フィールドは引き続き `numberOrNull` のまま。再現
+ * (コメント行を構造的に除外する。単一ファイルを `grep -n`(`-r` なし)で走査する場合、
+ * 出力は `NN:内容` 形式で先頭にファイル名が付かないため、`parse-combo-odds.ts` が使う
+ * `:[0-9]+: *\*`〈`grep -rn` の複数ファイル出力 `path:NN: *…` を前提〉ではコメント行を
+ * 除外できない〈boss メタレビュー2026-09-03指摘。第2段までの出力が9〈定義1+呼び出し8〉
+ * ではなく10になることで発覚した〉。単一ファイル出力の形式 `^NN: *…` に合わせたパターンを
+ * 使う。この行自体が `*` で始まるコメント行のため自己参照で数が変わらない):
+ * `grep -n "numberOrNull(" packages/core/src/scraper/parse-horse-results.ts | grep -vE '^[0-9]+: *\*' | grep -v "function numberOrNull"`
+ * → 8行〈raceNumber・entryCount・wakuban・umaban・ninki・kinryo・margin・last3f〉。
+ * 第2段(コメント行除外)までは9行〈定義1+呼び出し8〉であることも実測済み)。
  *
  * 判断: **(a) odds列だけを共有ヘルパへ委譲する**を選択した。理由は #73 の趣旨
  * 「同一概念(単勝オッズの数値化)が同一リポジトリ内で異なる契約を持つ状態を残さない」
