@@ -23,19 +23,23 @@
  * (妙味の少ない側ではなく、むしろ人気薄=妙味の候補側)を欠損表現に潰してしまう。
  *
  * ## 本ヘルパを経由しない `ninki` 生成経路を追加する場合の注意(Issue #34)
- * 人気を読む主要な消費経路のうち、次の2箇所は「nullish(`null`/`undefined`)のみ」を
- * 欠損として扱う契約になっている。
- * `analyzer/build-prompt.ts` の `popularityText` は `value === null || value === undefined ||
- * !Number.isFinite(value)` で弾くが `Number.isFinite(0)` は `true` であり、`0` は
- * 「不明」扱いにならず素通りする。`main/analysis-pipeline.ts` の
- * `const popularity = race.odds.win[umaban]?.ninki ?? null` の `??` も同様に
- * nullish のみを捕捉し、`0 ?? null` は `0` のまま素通りする。**したがって、本ヘルパを
- * 経由しない新しい `ninki` の生成経路(将来の別の取得元・別モデル等)を追加する場合、
- * 値域外の値(`0`以下・非数値)は必ず生成側でこのヘルパと同じ契約に正規化してから
- * 返すこと。** 消費側で弾く形に倣うと(#31の原則により)判定不能を判定結果に
- * 混ぜてしまう。現状は単勝・複勝(`parse-odds.ts`)・ワイド/3連複(`parse-combo-odds.ts`)・
- * 地方(`parse-nar-odds.ts`)の3パーサすべてが本ヘルパに委譲しているため、この経路での
- * 実害は無い(実データでの `0` 発生も未観測)。
+ * `race.odds.win[umaban]?.ninki` を直接読む消費経路は次の2箇所(`grep -rn
+ * "odds.win\[.*\]?\.ninki" packages/app/src` で確認可能)であり、いずれも
+ * 「nullish(`null`/`undefined`)のみ」を欠損として扱う契約になっている:
+ * `main/analysis-pipeline.ts` の `const popularity = race.odds.win[umaban]?.ninki ?? null`
+ * (LLMプロンプト用の `PromptHorse.popularity` を組み立てる)と、
+ * `main/analysis-export.ts` の `popularity: race.odds.win[umaban]?.ninki ?? null`
+ * (`buildRaceSnapshot`。`analyses.race_snapshot_json` への永続化・CSV/JSON出力の元)。
+ * `??` は nullish のみを捕捉するため `0 ?? null` は `0` のまま素通りする。
+ * 上記いずれかの値をそのまま受け取る `analyzer/build-prompt.ts` の `popularityText` も
+ * `value === null || value === undefined || !Number.isFinite(value)` でのみ弾く契約であり、
+ * `Number.isFinite(0)` は `true` であるため `0` は「不明」扱いにならず素通りする。
+ * **したがって、本ヘルパを経由しない新しい `ninki` の生成経路(将来の別の取得元・
+ * 別モデル等)を追加する場合、値域外の値(`0`以下・非数値)は必ず生成側でこのヘルパと
+ * 同じ契約に正規化してから返すこと。** 消費側で弾く形に倣うと(#31の原則により)
+ * 判定不能を判定結果に混ぜてしまう。現状は単勝・複勝(`parse-odds.ts`)・
+ * ワイド/3連複(`parse-combo-odds.ts`)・地方(`parse-nar-odds.ts`)の3パーサすべてが
+ * 本ヘルパに委譲しているため、この経路での実害は無い(実データでの `0` 発生も未観測)。
  */
 
 /** 人気文字列を数値化する。非数値・"0"(欠損表現)は null。上限は課さない(モジュールJSDoc参照)。 */
