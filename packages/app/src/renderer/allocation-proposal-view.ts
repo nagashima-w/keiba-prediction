@@ -168,6 +168,18 @@ export const UNSET_PER_RACE_CAP_ONLY_NOTE =
   "1レースの上限が0円のため配分提案を行っていません(総資金は設定済みです)。";
 
 /**
+ * route="unset" なのに bankroll・perRaceCap のどちらも0以下ではない(想定外)ときの代替文言
+ * (boss差し戻し対応)。旧実装は3分岐目(else相当)に「1レース上限のみ0」の断定文言を
+ * 割り当てており、この想定外の入力(どちらも正の値)まで断定して飲み込んでいた
+ * (#31/#51/#58/#70と同型の「判定できないものを判定結果として報告する」欠陥)。
+ * `route="unset"`という状態自体は判定済みで、欠けているのは「どちらが未設定だったか」という
+ * 下位理由だけなので、`unavailable_reason=null`と同じ扱いで状態(kind="unset")は保持し、
+ * 数値を捏造せず判定不能である旨だけを明示する。
+ */
+export const UNSET_INDETERMINATE_NOTE =
+  "配分提案を行っていません(総資金・1レース上限のいずれが未設定だったかは記録から判定できません)。";
+
+/**
  * D-2フォールバック理由(3コード)の注記文言。個別に定数化してexportする
  * (code-reviewer指摘対応・2巡目: Record内のリテラルのままだと個別に値として固定しにくいため、
  * 他の注記定数と同じ形〈名前付きexport定数〉に揃えた)。
@@ -334,7 +346,12 @@ function unsetNotices(a: StoredAllocationView): readonly string[] {
   if (bankrollUnset) {
     return [UNSET_BANKROLL_ONLY_NOTE];
   }
-  return [UNSET_PER_RACE_CAP_ONLY_NOTE];
+  if (perRaceCapUnset) {
+    return [UNSET_PER_RACE_CAP_ONLY_NOTE];
+  }
+  // bossの差し戻し対応: どちらも0以下ではない(想定外。route="unset"の書き込み経路上は
+  // 起きないはずだが、末尾のelse相当に断定文言を割り当てない)。
+  return [UNSET_INDETERMINATE_NOTE];
 }
 
 /** unavailable(複勝が配分対象外)の注記。理由欠損時は状態を保持し代替文言(boss裁定A)。 */

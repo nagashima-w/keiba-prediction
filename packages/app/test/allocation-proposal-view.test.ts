@@ -26,6 +26,7 @@ import {
   SKIP_REASON_UNKNOWN_NOTE,
   UNAVAILABLE_REASON_MISSING_NOTE,
   UNSET_BANKROLL_ONLY_NOTE,
+  UNSET_INDETERMINATE_NOTE,
   UNSET_PER_RACE_CAP_ONLY_NOTE,
   YOSO_NOTE,
 } from "../src/renderer/allocation-proposal-view.js";
@@ -158,7 +159,7 @@ describe("buildAllocationProposalView(表示状態の判別。AC3: 7状態+判�
   });
 });
 
-describe("unset: 未設定パターンを3通り区別する(AC3境界)", () => {
+describe("unset: 未設定パターンを4通り区別する(AC3境界。boss差し戻し対応で想定外パターンを追加)", () => {
   it("総資金のみ0のとき、UNSET_BANKROLL_ONLY_NOTEに固定した専用注記になること", () => {
     const view = buildAllocationProposalView(allocation({ route: "unset", bankroll: 0, perRaceCap: 5000 }));
     expect(view.notices).toEqual([UNSET_BANKROLL_ONLY_NOTE]);
@@ -182,11 +183,24 @@ describe("unset: 未設定パターンを3通り区別する(AC3境界)", () => 
     expect(view.notices).toEqual([BET_ALLOCATION_UNSET_NOTE]);
   });
 
-  it("3パターンの注記が互いに異なる値であること", () => {
+  it("route='unset'なのにbankroll・perRaceCapのどちらも0以下ではない(想定外)場合、数値を捏造せずUNSET_INDETERMINATE_NOTEに固定した代替文言を出すこと(boss差し戻し対応: 旧実装は最終elseがこの入力まで『1レース上限のみ0』と断定していた)", () => {
+    const view = buildAllocationProposalView(allocation({ route: "unset", bankroll: 50000, perRaceCap: 5000 }));
+    expect(view.kind).toBe("unset");
+    expect(view.notices).toEqual([UNSET_INDETERMINATE_NOTE]);
+    // 定数の中身そのものをリテラルで固定する(理由は他の定数と同じ)。
+    expect(UNSET_INDETERMINATE_NOTE).toBe(
+      "配分提案を行っていません(総資金・1レース上限のいずれが未設定だったかは記録から判定できません)。",
+    );
+  });
+
+  it("4パターンの注記が互いに異なる値であること(Set.sizeだけに頼らず、各文言のリテラルtoBeも別途固定済み)", () => {
     const a = buildAllocationProposalView(allocation({ route: "unset", bankroll: 0, perRaceCap: 5000 })).notices[0];
     const b = buildAllocationProposalView(allocation({ route: "unset", bankroll: 5000, perRaceCap: 0 })).notices[0];
     const c = buildAllocationProposalView(allocation({ route: "unset", bankroll: 0, perRaceCap: 0 })).notices[0];
-    expect(new Set([a, b, c]).size).toBe(3);
+    const d = buildAllocationProposalView(
+      allocation({ route: "unset", bankroll: 50000, perRaceCap: 5000 }),
+    ).notices[0];
+    expect(new Set([a, b, c, d]).size).toBe(4);
   });
 });
 
