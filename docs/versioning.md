@@ -577,6 +577,57 @@ Q-C(実際に提案した配分額で実績を測る)に反する。
 **どれに変えてもこのテストが落ちる**ことを実測済みで、次に触る人が気づかないうちに規則を
 変えることはない。
 
+## 次の正式版が 1.6.0 である根拠(Issue #55 での変更)
+
+Issue #55 は、検証タブ「レース一覧」の各レースの折りたたみ内に**「配分提案(分析時点)」を
+新規に表示する**変更である。#59 が作った永続化(`analysis_allocation_meta`/`analysis_bets`)を、
+#71(回収率の集計)とは別の目的――**その分析を行った時点で実際に何を提案していたかをそのまま
+再表示する**――のために、新しい読み出しAPI `AnalysisStore.getStoredAllocation` 経由で読む。
+
+**minor である根拠**: 区分表の minor は「**利用者から見てできることが増える**」または
+「分析結果の数値が変わる」。本変更は**前者に該当する**。過去に分析したレースを検証タブで
+開くと、その分析時点での買い目・金額・オッズ/EV・見送り理由・実効設定(総資金・1レース上限・
+ケリー係数・EV閾値・ワイド/三連複/組合せオッズ取得のON/OFF・オッズ状態)が新たに見えるように
+なる。分析結果の数値(prior・補正後確率・EV等)自体は一切変えていない。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポート JSON の後方互換に関わる変更が一切ない。
+`analysis_allocation_meta`/`analysis_bets` のテーブル定義(#59 で確定済み)には触れておらず、
+新設した `getStoredAllocation` は**既存の列を読むだけ**(新規カラム追加なし)。`settings.json` の
+スキーマも変えていない。
+
+**patch でない根拠**: 内部改善やドキュメントのみの変更ではなく、検証タブという既存画面に
+利用者が直接目にする新しい情報(配分提案ブロック)が実際に増えている。
+
+### 読む列と読まない列(#71 との役割分担)
+
+`getStoredAllocation` はメタ行のうち**13列**
+(`route`/`unavailable_reason`/`fallback_reason`/`skip_reason_code`/実効設定7項目
+〈`bankroll`/`per_race_cap`/`kelly_fraction`/`ev_threshold`/`include_combo_odds`/
+`include_wide`/`include_trio`〉/`bet_unit`/`odds_status`)+ `analysis_bets` の5列
+(`bet_type`/`combo_key`/`stake`/`odds`/`ev`)を読む。`combo_odds_wide`/`combo_odds_trio`/
+`greedy_steps`/`candidate_cap`/`model_id`/`model_approximate` の6列は読まない
+(#71 と同じ「誰も読まない列にコストを払わない」原則。前者2つは表示予定が無く、
+後者4つは利用者に意味の無い内部パラメータ)。
+
+`getAllocationForVerify`(#71。`route`/`skip_reason_code`/`bet_type`/`combo_key`/`stake`の
+5列のみ、`odds`/`ev`は読まない)とは**読む列の範囲が異なる別のクエリ**であり、
+互いに変更の影響を与えない。#71 が `odds`/`ev` を読まないのは「回収率」ではなく
+「提案時点の期待値の再計算」になることを避けるためだが、#55 は**回収率を一切計算しない**
+(的中・払戻・回収率は#16/#71の領分のまま出さない)ため、分析時点の`odds`/`ev`をそのまま
+表示することが目的に反しない。
+
+### 表示状態は7状態+判定不能
+
+記録なし/unset/yoso/unavailable/invalid/見送り(skip)/配分ありの7状態に加え、値の矛盾
+(未知の`route`文字列、または`route∈{place-only,mixed}` ∧ `skip_reason_code=null` ∧
+`bets=[]`)を「判定不能」として別枠で扱う(#31: 判定済みを未判定に潰さない)。
+
+状態の下位理由・パラメータだけが欠けている場合(`unavailable_reason=null`、
+`skip_reason_code="cap-too-small"` ∧ `bet_unit=null`、`route="unset"` なのに
+`bankroll`/`per_race_cap`のどちらも0以下でない)は、状態自体は保持し、欠けた部分だけを
+代替文言で明示する(判定不能へは倒さない)。**最後の1件(`route="unset"`の想定外パターン)は
+実装当初は最終分岐が「1レース上限のみ0」と断定する欠陥を持っていたが、レビューで修正した。**
+
 ## 公開後の確認(版数据え置き検査が実際に走ったことの確認)
 
 承認印付き push のあとは、CI run の「版数据え置きを検査(dev-latest 公開前)」ステップのログを必ず見る。

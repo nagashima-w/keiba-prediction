@@ -310,6 +310,15 @@ function isKnownSkipReasonCode(code: string): code is ComboSkipReasonCode {
  * (数値を含まない)を返す。`cap-too-small` 以外のコードは `betUnit` を実際には使わない
  * (`placeSkipReasonText`/`comboSkipReasonText` の実装参照)ため、`betUnit===null` でも
  * 表示に数値が現れない `0` を安全に渡せる。
+ *
+ * **観測窓は`no-candidates`1つだけ(boss実測・2026-09-03)。** `placeSkipReasonText`と
+ * `comboSkipReasonText`は6分類中5分類(`bankroll-unset`/`cap-unset`/`cap-too-small`/
+ * `kelly-zero`/`no-edge`)で完全に同一の文言を返し、両者の違いが観測できるのは`no-candidates`
+ * (「馬」/「買い目」)だけである。したがって本関数の`route`分岐(`placeSkipReasonText`と
+ * `comboSkipReasonText`のどちらを呼ぶか)を守るテストは、実質的に`no-candidates`のケース
+ * 一本にしか依存できない。**将来`no-candidates`のテストを整理・削除すると、この`route`分岐は
+ * 無防備になる**(他の5分類では place/combo を入れ替えても出力が変わらないため、テストが
+ * 検出できない)。`no-candidates`のテストは削除・弱体化しないこと。
  */
 function skipNotice(
   route: "place-only" | "mixed",
