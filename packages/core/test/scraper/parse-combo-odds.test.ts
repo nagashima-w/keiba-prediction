@@ -2,7 +2,9 @@
  * parse-combo-odds(中央ワイド・3連複オッズ、api_get_jra_odds type=5/7)のテスト
  * (機能D-2b-A・Issue #32)。
  *
- * 既存 parse-odds.ts / parse-odds.test.ts は一切変更しない(受け入れ条件1・12)。
+ * 実装当初(#32)は既存 parse-odds.ts / parse-odds.test.ts を一切変更しなかった
+ * (受け入れ条件1・12)。**その後 Issue #34 で、人気(ninki)の数値化のみ `scraper/ninki.ts`
+ * の共有実装に統合された(本ファイルのテストケースは無改変)。**
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

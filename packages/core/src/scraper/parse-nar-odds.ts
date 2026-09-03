@@ -23,6 +23,7 @@
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
+import { toNinki } from "./ninki.js";
 import { NAR_ODDS_SELECTORS as SEL, PATTERNS } from "./selectors.js";
 import type { OddsSnapshot, PlaceOdds, WinOdds } from "./types.js";
 
@@ -111,11 +112,14 @@ function parseFukuRow(
  * 発売前(予想オッズ)の1行から単勝相当オッズを取り出す。
  * 列構成: 人気(列0) / 馬番(列1) / 印(列2) / 馬名(列3) / 予想オッズ(列4=最終列)。
  * オッズセルが非数値(取消等)の場合は odds:null で温存する(構造異常ではない)。
+ * 人気列は共有ヘルパ `scraper/ninki.ts` の `toNinki` で数値化する(Issue #34。
+ * 単勝・複勝〈parse-odds.ts〉/ワイド・3連複〈parse-combo-odds.ts〉と契約を統一。
+ * "0"は欠損表現としてnullになる)。
  */
 function parseYosoRow($row: CheerioSelection): { umaban: number; win: WinOdds } {
   const umaban = umabanOf($row);
   const ninkiText = $row.find("td").eq(0).text().trim();
-  const ninki = /^[0-9]+$/.test(ninkiText) ? Number(ninkiText) : null;
+  const ninki = toNinki(ninkiText);
   const oddsText = $row.find("td").last().text().trim();
   return { umaban, win: { odds: toWinOddsNumber(oddsText), ninki } };
 }

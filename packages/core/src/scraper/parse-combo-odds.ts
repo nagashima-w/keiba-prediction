@@ -2,8 +2,11 @@
  * 中央(race.netkeiba.com)のワイド・3連複オッズ(api_get_jra_odds、type=5/7)のパーサー
  * (機能D-2b-A・Issue #32)。
  *
- * 既存 `parse-odds.ts`(単勝・複勝、type=1/2)は一切変更せず、独立モジュールとして実装する
- * (受け入れ条件1)。同じJSON封筒(`{status, data:{odds:{...}}}`)を使う兄弟APIだが、
+ * 実装当初(#32)は既存 `parse-odds.ts`(単勝・複勝、type=1/2)を一切変更せず、独立モジュールとして
+ * 実装した(受け入れ条件1)。**その後 Issue #34 で、人気(`ninki`)の数値化のみ
+ * `scraper/ninki.ts` の共有実装 `toNinki` に統合した**(単勝・複勝・ワイド/3連複・地方の
+ * 4パーサ全体で契約を統一。詳細は `scraper/ninki.ts` のJSDoc参照)。オッズ(`toOddsNumber`。
+ * 桁区切りカンマ対応等、下記1〜3の差分)は #32 当時のまま本モジュール固有であり、
  * `parse-odds.ts` とは次の3点で契約が異なる:
  *
  * 1. **桁区切りカンマ**: 中央3連複オッズの実測45%(560件中251件。再現:
@@ -29,7 +32,7 @@
  * |---|---|---|---|---|
  * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | `parseComboOdds`(`toOddsNumber`) | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe |
  * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | `parseComboOdds`(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
- * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(`toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**本モジュールの"0"→nullが正であり、既存`parse-odds.ts`のtoNinki(実装上"0"をNumber(0)のまま返す。同名JSDocの「"0"欠損表現はnull」という記述と実装が食い違っている)は既知の欠陥であり是正待ち(Issue #34)。人気は1始まりの値域であり0は値域外、かつ`analysis-pipeline.ts:463`の`race.odds.win[umaban]?.ninki ?? null`は`??`がnullishのみ捕捉するため`0 ?? null`は`0`を返し値域外の値が下流の欠損表現に落ちない経路が構造として存在する(コミット済み全フィクスチャに人気"0"の実データは無く、実データでの発生は未観測。既存テストの"0"は合成データ)。既存側の是正〈テスト期待値の変更を伴う〉はIssue #34側の作業とし、本モジュールでは追認しない** |
+ * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(共有ヘルパ `scraper/ninki.ts` の `toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull。上限は課さない) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**`toNinki` は `scraper/ninki.ts` の共有実装であり、単勝・複勝(`parse-odds.ts`)/地方(`parse-nar-odds.ts`)とも同一の契約を使う(Issue #34で統一。契約の詳細・根拠は `scraper/ninki.ts` のJSDoc参照)** |
  * | 馬番(オッズキー由来。例"0102") | `decodeRawKey`(`validateComboUmabans`経由) | あり | throw(2桁ずつ分解し1〜18範囲外・キー長不一致・昇順違反〈"0201"等〉を検出) | `parse-combo-odds.test.ts`「構造の検証」describe |
  * | 組の要素数(キー長 / 券種との不一致) | `decodeRawKey` | あり | throw(`COMBO_SIZE`との不一致) | 同上 |
  * | JSON封筒(`status`/`data`/`data.odds`/`data.odds[type]`の型・欠落) | `parseComboOdds` | あり | 分類(`unavailable`。throwしない。`JSON.parse`失敗のみthrow) | `parse-combo-odds.test.ts`「未発売・封筒異常」describe |
@@ -45,6 +48,7 @@ import {
   type ComboOddsCell,
   type ComboOddsEntry,
 } from "./combo-odds-key.js";
+import { toNinki } from "./ninki.js";
 
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
@@ -94,19 +98,6 @@ function toOddsNumber(raw: unknown): number | null {
   if (PLAIN_NUMBER.test(trimmed)) return Number(trimmed);
   if (GROUPED_NUMBER.test(trimmed)) return Number(trimmed.replace(/,/g, ""));
   return null;
-}
-
-/**
- * 人気文字列を数値化する。非数値・"0"(欠損表現)は null。
- * 既存 `parse-odds.ts` の同名関数と異なり、本モジュールは"0"を意図的にnullへ丸める
- * (数値防御カバレッジ表参照。ブリーフ〈TDDリスト項目5〉の明示指示に従う独自契約)。
- */
-function toNinki(raw: unknown): number | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (!/^[0-9]+$/.test(trimmed)) return null;
-  const n = Number(trimmed);
-  return n === 0 ? null : n;
 }
 
 /** 配列セル([...])から指定インデックスの要素を安全に取り出す。 */

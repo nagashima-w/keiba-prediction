@@ -61,6 +61,28 @@ describe("parseNarOdds(発売前: 予想オッズのみ→yosoに正規化)", ()
   it("複勝は未発売のため空になること", () => {
     expect(odds.place).toEqual({});
   });
+
+  it('人気列が"0"の場合はninkiがnullになること(Issue #34。parseYosoRow経路)', () => {
+    const yosoRow = (umaban: number, ninki: string, oddsText: string) => `
+      <tr>
+        <td class="Ninki">${ninki}</td>
+        <td class="Waku1">${umaban}</td>
+        <td class="Mark_User"></td>
+        <td class="Horse_Name">テスト馬${umaban}</td>
+        <td class="Odds">${oddsText}</td>
+      </tr>`;
+    const yosoHtml = `
+      <table class="RaceOdds_HorseList_Table Ninki">
+        <tr class="col_label"><th>人気</th><th>馬番</th><th>印</th><th>馬名</th><th>予想オッズ</th></tr>
+        ${yosoRow(1, "0", "5.0")}
+        ${yosoRow(2, "2", "8.5")}
+      </table>`;
+    const zeroOdds = parseNarOdds(yosoHtml);
+    // 人気列が"0"の馬は欠損表現としてninkiがnullになる。
+    expect(zeroOdds.win[1]).toEqual({ odds: 5.0, ninki: null });
+    // 他馬(正常な人気値)は影響を受けない。
+    expect(zeroOdds.win[2]).toEqual({ odds: 8.5, ninki: 2 });
+  });
 });
 
 describe("parseNarOdds(構造異常)", () => {
