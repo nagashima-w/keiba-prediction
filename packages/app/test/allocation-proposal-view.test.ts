@@ -251,13 +251,28 @@ describe("unavailable: 理由欠損時は状態を保持し代替文言(boss裁�
 });
 
 describe("skip: cap-too-small ∧ bet_unit=null(想定外)。boss裁定A: 状態を保持し代替文言(数値を捏造しない)", () => {
-  it("bet_unitが非nullなら従来どおりcoreの文言関数経由で数値を埋め込むこと", () => {
+  it("bet_unitが非nullなら従来どおりcoreの文言関数経由で数値を埋め込むこと(route='place-only')", () => {
     const view = buildAllocationProposalView(
       allocation({ route: "place-only", skipReasonCode: "cap-too-small", betUnit: 300 }),
     );
     expect(view.kind).toBe("skip");
     expect(view.notices).toEqual([placeSkipReasonText("cap-too-small", 300)]);
     expect(view.notices[0]).toContain("300");
+    expect(placeSkipReasonText("cap-too-small", 300)).toBe(
+      "1レースの上限が300円未満のため配分できません",
+    );
+  });
+
+  it("bet_unitが非nullならroute='mixed'でもcomboSkipReasonText経由で数値を埋め込むこと(code-reviewer指摘2巡目の全数確認で発見: cap-too-small×mixed×非nullのbetUnitの組み合わせが未検査だった)", () => {
+    const view = buildAllocationProposalView(
+      allocation({ route: "mixed", skipReasonCode: "cap-too-small", betUnit: 300 }),
+    );
+    expect(view.kind).toBe("skip");
+    expect(view.notices).toEqual([comboSkipReasonText("cap-too-small", 300)]);
+    expect(view.notices[0]).toContain("300");
+    expect(comboSkipReasonText("cap-too-small", 300)).toBe(
+      "1レースの上限が300円未満のため配分できません",
+    );
   });
 
   it("bet_unit=nullなら状態はskipのまま、指定の代替文言(数値なし)を使うこと", () => {
