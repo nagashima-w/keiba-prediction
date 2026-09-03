@@ -226,7 +226,7 @@ describe("parseHorseResults(単勝オッズ列の桁区切りカンマ。Issue #
   // boss メタレビュー指摘: types.ts が「単勝オッズ」と明記する odds 列(COL.odds)は
   // 汎用ヘルパ numberOrNull(Number(t)直呼び)を使っており、共有ヘルパ toOddsNumber とは
   // 別契約のまま残っていた。odds 列だけを toOddsNumber に委譲する(numberOrNull は
-  // entryCount/wakuban/umaban/ninki/kinryo/margin/last3f と共用のため一括変更はしない)。
+  // raceNumber/entryCount/wakuban/umaban/ninki/kinryo/margin/last3f と共用のため一括変更はしない)。
   it('単勝オッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
     const json = buildResultsJson([buildRow({ odds: "1,234.5" })]);
     const r = parseHorseResults(json)[0]!;

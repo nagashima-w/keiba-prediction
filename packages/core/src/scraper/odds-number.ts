@@ -13,6 +13,11 @@
  * (`parse-combo-odds.ts` の実測: 3連複560件中251件がカンマ入り)。
  * そのため実装を本モジュール1本に統合する。
  *
+ * 現在の利用者は**5モジュール・呼び出し箇所13**(`parse-odds.ts`・`parse-combo-odds.ts`・
+ * `parse-nar-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts`〈単勝オッズ列。
+ * Issue #73 R1で追加〉)。内訳・再現コマンドは `parse-combo-odds.ts` 冒頭JSDoc参照
+ * (`scraper/ninki.ts` が現在の利用者集合を自身のJSDocに明記している先例に倣う)。
+ *
  * ## 契約
  * - 非文字列(数値・`null`・`undefined`・配列等) → `null`
  * - 前後空白を trim した結果が `/^[0-9]+(\.[0-9]+)?$/`(プレーンな数値表記) → `Number`化

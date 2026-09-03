@@ -12,10 +12,12 @@
  * (スコアリングでの除外判定に使う)。
  *
  * ## 単勝オッズ列(COL.odds)の数値化(Issue #73 R1。boss メタレビュー2026-09-03指摘)
- * `types.ts` が「単勝オッズ」と明記する `odds` フィールドは、`entryCount`/`wakuban`/
- * `umaban`/`ninki`/`kinryo`/`margin`/`last3f` と共用の汎用ヘルパ `numberOrNull`
+ * `types.ts` が「単勝オッズ」と明記する `odds` フィールドは、`raceNumber`/`entryCount`/
+ * `wakuban`/`umaban`/`ninki`/`kinryo`/`margin`/`last3f` と共用の汎用ヘルパ `numberOrNull`
  * (`Number(t)`直呼び)ではなく、共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber`
- * に委譲する(odds列だけを切り出す。他7フィールドは引き続き `numberOrNull` のまま)。
+ * に委譲する(odds列だけを切り出す。他8フィールドは引き続き `numberOrNull` のまま。再現:
+ * `grep -n "numberOrNull(" packages/core/src/scraper/parse-horse-results.ts | grep -v "function numberOrNull"`
+ * → 8行〈raceNumber・entryCount・wakuban・umaban・ninki・kinryo・margin・last3f〉)。
  *
  * 判断: **(a) odds列だけを共有ヘルパへ委譲する**を選択した。理由は #73 の趣旨
  * 「同一概念(単勝オッズの数値化)が同一リポジトリ内で異なる契約を持つ状態を残さない」
