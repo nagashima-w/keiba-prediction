@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.6.0";
+const EXPECTED_APP_VERSION = "1.6.1";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,10 +234,10 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.6.0(Issue #55: 過去分析の再表示で配分提案を出す)である", () => {
-    // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0。
-    // 本回は #55。検証タブ「レース一覧」に「配分提案(分析時点)」を新規表示する機能追加であり、
-    // 利用者から見てできることが増えるため minor(分析結果の数値自体は変えていない)。
+  it("root と app の version が 1.6.1(Issue #34: 人気の欠損表現を共有ヘルパに統合)である", () => {
+    // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
+    // #55 が 1.6.0。本回は #34。人気("0")の欠損表現を共有ヘルパ(scraper/ninki.ts)に統合する
+    // 不具合修正であり、利用者から見てできることは増えず分析結果の数値も変わらないため patch。
     // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならない
     // ことを固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);

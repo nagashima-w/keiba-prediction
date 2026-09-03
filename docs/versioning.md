@@ -628,6 +628,40 @@ Issue #55 は、検証タブ「レース一覧」の各レースの折りたた�
 代替文言で明示する(判定不能へは倒さない)。**最後の1件(`route="unset"`の想定外パターン)は
 実装当初は最終分岐が「1レース上限のみ0」と断定する欠陥を持っていたが、レビューで修正した。**
 
+## 次の正式版が 1.6.1 である根拠(Issue #34 での変更)
+
+Issue #34 は、単勝・複勝(`parse-odds.ts`)/ワイド・3連複(`parse-combo-odds.ts`)/地方
+(`parse-nar-odds.ts`)の3パーサが個別実装していた人気(`ninki`)の数値化を、共有ヘルパ
+`packages/core/src/scraper/ninki.ts` に統合する変更である。JSDoc は「非数値・`"0"`(欠損表現)は
+`null`」と宣言していたが、`parse-odds.ts`・`parse-nar-odds.ts` の実装は `Number("0")` の `0` を
+そのまま返しており、宣言と実装が食い違っていた(値域外の値〈人気は1始まりで `0` は値域外〉が
+下流の欠損表現に落ちない経路が構造として存在したが、コミット済み全フィクスチャに人気 `"0"` の
+実データは無く、実データでの発生は未観測)。
+
+**patch である根拠**: `70dfd14`(v1.6.0)から本Issueのレビュー往復が確定した時点(`b8c5d7b`)までの
+差分は9ファイル(`git diff --stat 70dfd14 b8c5d7b` で実測)で、内訳は `packages/core` の
+パーサ3本(`parse-odds.ts`/`parse-combo-odds.ts`/`parse-nar-odds.ts`)・新設した共有ヘルパ1本
+(`ninki.ts`)・テスト4本(`ninki.test.ts`・`parse-odds.test.ts`・`parse-combo-odds.test.ts`・
+`parse-nar-odds.test.ts`)・開発運用ドキュメント1本(`.claude/agents/code-reviewer.md`)である。
+本版数上げでは加えて次の3種を変更しているが、いずれもコード・テストの振る舞いを変えない:
+`.claude/agents/tdd-implementer.md`(再発防止の追記。`禁止事項`・`完了報告の形式`の2箇所)、
+`parse-combo-odds.ts` のJSDoc文中の範囲括り(「オッズ…下記1〜3の差分」の対象がずれていた
+記述の是正。コード行・テスト行への変更なし)、および版数運用のチェックリストが要求する版数リテラル自体
+(`package.json` 2件・`docs/current-spec.md`・`keiba-ev-tool-spec.md`・`version-policy.test.ts`・
+`release-gate.test.ts`・本書)。**フィクスチャ由来の期待値変更はゼロ**:
+`parse-combo-odds.test.ts` はヘッダJSDocのみでテスト本文は無改変、`parse-nar-odds.test.ts` は
+新規テストの追加のみで既存行は無改変、`parse-odds.test.ts` で変更した唯一の期待値
+(`ninki: 0` → `ninki: null`)は `buildOddsJson` による**合成データ**への変更であり、実データ
+フィクスチャへの出力ではない。したがって**観測済み実データに対する出力は1バイトも変わらない**。
+
+**minor でない根拠**: 利用者から見てできることは増えない(UI・IPCに変更なし)。分析結果の数値
+(prior・補正後確率・EV・配分提案等)も一切変わらない。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポートJSONの後方互換に関わる変更が一切ない。
+DBスキーマにも触れていない。
+
+よって 1.6.0 → **1.6.1**(patch)が妥当と判断した。
+
 ## 公開後の確認(版数据え置き検査が実際に走ったことの確認)
 
 承認印付き push のあとは、CI run の「版数据え置きを検査(dev-latest 公開前)」ステップのログを必ず見る。
