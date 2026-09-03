@@ -491,7 +491,12 @@ describe("固定注記3点(必ず表示。文言は数値込みで生成)", () =
 
 describe("BET_ALLOCATION_UNSET_NOTE(未設定時・画面全体で1点だけの注記)", () => {
   it("総資金・1レース上限の設定を促す文言であること", () => {
-    expect(BET_ALLOCATION_UNSET_NOTE).toContain("総資金");
-    expect(BET_ALLOCATION_UNSET_NOTE).toContain("1レースの上限");
+    // code-reviewer指摘対応(Issue #55): 部分一致(toContain)のみでは、両方の語を含んだまま
+    // 全く別の文言へ言い換える変異を検出できない(allocation-proposal-view.test.tsがこの定数を
+    // 再利用する側で自己参照比較しているため、定義元である本テストがリテラルで固定する責務を負う)。
+    // 完全一致に格上げする。
+    expect(BET_ALLOCATION_UNSET_NOTE).toBe(
+      "馬券配分の提案には、設定画面で「馬券用の総資金」と「1レースの上限」を入力してください。",
+    );
   });
 });
