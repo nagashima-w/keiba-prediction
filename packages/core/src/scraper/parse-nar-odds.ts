@@ -117,9 +117,33 @@ function parsePlaceOddsRange(text: string): { oddsMin: number | null; oddsMax: n
  * (`parsePlaceOddsRange` 参照。Issue #73)。
  *
  * per-half化(AC5')の非破壊性の実測: 実フィクスチャ(`nar_odds_b1_202654071210.html`)の
- * `#odds_fuku_block`複勝レンジセル12行中、片側だけ数値化できない行は0件(再現:
- * `python3 -c "import re; html=open('fixtures/nar_odds_b1_202654071210.html',encoding='utf-8').read(); seg=html[html.find('odds_fuku_block'):html.find('odds_fuku_block')+6000]; print(len(re.findall(r'<span class=\"Odds ?\">([^<]*)</span>', seg)))"`
- * → 12件)。per-half化はこのフィクスチャの出力に影響しない。
+ * `#odds_fuku_block`複勝レンジ12行のうち、片側だけ数値化できる(もう片側はできない)行は
+ * **0件**(boss メタレビュー2026-09-03指摘の是正。旧コマンドは`<span class="Odds">`要素の
+ * 個数を数えるだけで「片側だけ数値化できない行が0件」という結論を検査できておらず、かつ
+ * `find()`からの固定6000バイト窓に依存し窓幅で答えが変わる不安定なコマンドだった)。
+ * 本コマンドは cheerio で `#odds_fuku_block` の行を実装(`parsePlaceOddsRange`)と同じ
+ * ロジックで走査し、各行の下限・上限それぞれを数値化できるかを直接判定する(固定バイト窓
+ * には依存しない)。再現(`packages/core`ディレクトリで実行):
+ * ```
+ * node -e '
+ *   const cheerio=require("cheerio"),fs=require("fs");
+ *   const html=fs.readFileSync("../../fixtures/nar_odds_b1_202654071210.html","utf-8");
+ *   const $=cheerio.load(html);
+ *   const PLAIN=/^[0-9]+(\.[0-9]+)?$/,GROUPED=/^[0-9]{1,3}(,[0-9]{3})*(\.[0-9]+)?$/;
+ *   const toNum=t=>{t=t.trim();if(PLAIN.test(t))return Number(t);if(GROUPED.test(t))return Number(t.replace(/,/g,""));return null;};
+ *   let rows=0,broken=0;
+ *   $("#odds_fuku_block").find("tr").each((_,row)=>{
+ *     const $r=$(row);
+ *     if($r.find("th").length||!$r.find("td").length)return;
+ *     rows++;
+ *     const parts=$r.find("td").last().text().trim().split(new RegExp("\\s*-\\s*"));
+ *     if(parts.length!==2||!parts[0]||!parts[1])return;
+ *     if((toNum(parts[0])===null)!==(toNum(parts[1])===null))broken++;
+ *   });
+ *   console.log(JSON.stringify({rows,broken}));
+ * '
+ * ```
+ * → `{"rows":12,"broken":0}`。per-half化はこのフィクスチャの出力に影響しない。
  */
 function parseFukuRow(
   $row: CheerioSelection,

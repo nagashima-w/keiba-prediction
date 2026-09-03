@@ -10,11 +10,32 @@
  *
  * 着順は「中止」「除外」等の非数値があり得るため、数値順位か種別かを判別可能な型で返す
  * (スコアリングでの除外判定に使う)。
+ *
+ * ## 単勝オッズ列(COL.odds)の数値化(Issue #73 R1。boss メタレビュー2026-09-03指摘)
+ * `types.ts` が「単勝オッズ」と明記する `odds` フィールドは、`entryCount`/`wakuban`/
+ * `umaban`/`ninki`/`kinryo`/`margin`/`last3f` と共用の汎用ヘルパ `numberOrNull`
+ * (`Number(t)`直呼び)ではなく、共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber`
+ * に委譲する(odds列だけを切り出す。他7フィールドは引き続き `numberOrNull` のまま)。
+ *
+ * 判断: **(a) odds列だけを共有ヘルパへ委譲する**を選択した。理由は #73 の趣旨
+ * 「同一概念(単勝オッズの数値化)が同一リポジトリ内で異なる契約を持つ状態を残さない」
+ * (`scraper/odds-number.ts` JSDoc参照)がここにも直接当てはまるため。
+ *
+ * 実測(severityは低い。放置してもよいと早合点しないための記録):
+ * 実フィクスチャ5件・72行(`fixtures/horse_results_*.json`)を実パーサに通したところ、
+ * カンマ入りセル0件・null(空セル)3件・最大値313.1(いずれも本ヘルパへの委譲前後で
+ * 出力不変を実測確認済み)。指数表記("1e3"等)・符号付き表記("+1.5"等)も0件で、
+ * `numberOrNull`と`toOddsNumber`の契約差(桁区切りカンマ・指数表記・符号)がこのフィクスチャ
+ * 集合には現れていない。消費側も実測: `scraper/parse-horse-results.ts` が返す
+ * `HorseRaceResult.odds` を読む `scorer/*.ts`・`derive-features.ts`・`prior.ts`・
+ * `snapshot-filter.ts` はいずれも参照0件(grep実測)であり、app側の永続化・表示にも
+ * 現れない。
  */
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import { parseRaceId, type RaceId } from "./ids.js";
+import { toOddsNumber } from "./odds-number.js";
 import { HORSE_RESULTS_SELECTORS as SEL, PATTERNS } from "./selectors.js";
 import type {
   BodyWeight,
@@ -287,7 +308,7 @@ function parseRow(
     entryCount: numberOrNull(text(COL.entryCount)),
     wakuban: numberOrNull(text(COL.wakuban)),
     umaban: numberOrNull(text(COL.umaban)),
-    odds: numberOrNull(text(COL.odds)),
+    odds: toOddsNumber(text(COL.odds)),
     ninki: numberOrNull(text(COL.ninki)),
     finishPosition: toFinishPosition(text(COL.finish)),
     jockeyName: textOrNull($jockey.text()),

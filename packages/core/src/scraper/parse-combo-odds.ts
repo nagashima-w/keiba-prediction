@@ -5,10 +5,25 @@
  * 実装当初(#32)は既存 `parse-odds.ts`(単勝・複勝、type=1/2)を一切変更せず、独立モジュールとして
  * 実装した(受け入れ条件1)。**その後 Issue #34 で、人気(`ninki`)の数値化を
  * `scraper/ninki.ts` の共有実装 `toNinki` に統合し、Issue #73 で、オッズ(`toOddsNumber`)の
- * 数値化も `scraper/odds-number.ts` の共有実装に統合した**(単勝・複勝〈`parse-odds.ts`〉/
- * ワイド・3連複(本モジュール)/地方〈`parse-nar-combo-odds.ts`・`parse-nar-odds.ts`〉の
- * 5経路全体で両方の契約を統一。詳細は `scraper/ninki.ts`・`scraper/odds-number.ts` の
- * JSDoc参照)。下記1〜2の差分は #32 当時のまま本モジュール固有であり、
+ * 数値化も `scraper/odds-number.ts` の共有実装に統合した**が、**この2つの共有ヘルパを使う
+ * モジュールの集合は一致しない**(boss メタレビュー2026-09-03指摘。以前「5経路全体で両方の
+ * 契約を統一」と書いていたのは誤り)。
+ *
+ * - `toNinki` を import するのは **3モジュール**: `parse-odds.ts`・本モジュール・
+ *   `parse-nar-odds.ts`(再現: `grep -rl 'from "./ninki.js"' packages/core/src/scraper | wc -l` → `3`)。
+ *   **地方ワイド・3連複(`parse-nar-combo-odds.ts`)はこのドキュメント種別に人気列が
+ *   存在しないため `toNinki` を使わず `ninki: null` を直接2箇所に記述している**
+ *   (再現: `grep -n "ninki: null" packages/core/src/scraper/parse-nar-combo-odds.ts` → 2行)。
+ * - `toOddsNumber` を import するのは **5モジュール**: `parse-odds.ts`・本モジュール・
+ *   `parse-nar-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts`(単勝オッズ列。
+ *   Issue #73 R1で追加。再現: `grep -rl 'from "./odds-number.js"' packages/core/src/scraper | wc -l`
+ *   → `5`)。呼び出し箇所(定義を除く。1行に2式ある箇所を1式ずつ数える)は計**13**
+ *   〈内訳3+2+3+4+1〉。再現(コメント行・定義行を除外してから式単位で数える。この行自体が
+ *   `*` で始まるコメント行のため自己参照で数が変わらない):
+ *   `grep -rn "toOddsNumber(" packages/core/src/scraper/*.ts | grep -vE ':[0-9]+: *\*' | grep -v "function toOddsNumber" | grep -o "toOddsNumber(" | wc -l`
+ *   → `13`。
+ *
+ * 下記1〜2の差分は #32 当時のまま本モジュール固有であり、
  * `parse-odds.ts` とは次の2点で契約が異なる:
  *
  * 1. **3連複の2要素目はダミー**: `["260.2","0.0","103"]` の `"0.0"` を上限として拾わない。
@@ -27,7 +42,7 @@
  *
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
- * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-nar-combo-odds.ts`・`parse-nar-odds.ts` と共有しており、契約は5経路で統一済み(Issue #73で是正) |
+ * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-nar-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts` と共有しており、契約は5モジュール・呼び出し箇所13で統一済み(Issue #73で是正。内訳・再現コマンドはモジュール冒頭JSDoc参照) |
  * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | 同上(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
  * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(共有ヘルパ `scraper/ninki.ts` の `toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull。上限は課さない) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**`toNinki` は `scraper/ninki.ts` の共有実装であり、単勝・複勝(`parse-odds.ts`)/地方(`parse-nar-odds.ts`)とも同一の契約を使う(Issue #34で統一。契約の詳細・根拠は `scraper/ninki.ts` のJSDoc参照)** |
  * | 馬番(オッズキー由来。例"0102") | `decodeRawKey`(`validateComboUmabans`経由) | あり | throw(2桁ずつ分解し1〜18範囲外・キー長不一致・昇順違反〈"0201"等〉を検出) | `parse-combo-odds.test.ts`「構造の検証」describe |
