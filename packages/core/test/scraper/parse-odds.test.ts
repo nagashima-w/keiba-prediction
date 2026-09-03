@@ -151,6 +151,28 @@ describe("parseOdds(人気列の欠損表現。Issue #34)", () => {
   });
 });
 
+describe("parseOdds(桁区切りカンマ。Issue #73)", () => {
+  // 条件A': 単勝odds/複勝oddsMin/複勝oddsMaxのいずれも非nullの異なる数値を生む。
+  // 条件B: 複勝セルは3列すべて異なる値にし、構造体まるごとtoEqualで比較する(#58再発防止)。
+  it('単勝オッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること(経路a)', () => {
+    const json = buildOddsJson({
+      win: { "01": ["1,234.5", "0.0", "5"] },
+      place: { "01": ["3.1", "4.1", "5"] },
+    });
+    const r = parseOdds(json);
+    expect(r.win[1]).toEqual({ odds: 1234.5, ninki: 5 });
+  });
+
+  it('複勝の下限・上限がいずれも桁区切りカンマを含む場合、それぞれ除去して数値化されること(経路b・c)', () => {
+    const json = buildOddsJson({
+      win: { "01": ["9.0", "0.0", "5"] },
+      place: { "01": ["1,234.5", "2,345.6", "3"] },
+    });
+    const r = parseOdds(json);
+    expect(r.place[1]).toEqual({ oddsMin: 1234.5, oddsMax: 2345.6, ninki: 3 });
+  });
+});
+
 describe("parseOdds(馬番の範囲検証)", () => {
   it('馬番 "00" は不正データとして OddsParseError になること', () => {
     const json = buildOddsJson({

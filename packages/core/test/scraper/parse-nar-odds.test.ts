@@ -85,6 +85,45 @@ describe("parseNarOdds(発売前: 予想オッズのみ→yosoに正規化)", ()
   });
 });
 
+describe("parseNarOdds(桁区切りカンマ。Issue #73・経路d)", () => {
+  it('単勝(#odds_tan_block)のオッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
+    const html = `<div id="odds_tan_block">${buildOddsTable(
+      buildOddsRowFor(1, "1,234.5") + buildOddsRowFor(2, "12.3"),
+    )}</div>`;
+    const odds = parseNarOdds(html);
+    expect(odds.win[1]).toEqual({ odds: 1234.5, ninki: null });
+    expect(odds.win[2]).toEqual({ odds: 12.3, ninki: null });
+  });
+});
+
+describe("parseNarOdds(複勝レンジの境界。Issue #73・経路e/f)", () => {
+  // 条件A': 6.8 / 1234.5 / null の3値以上を生む(表の各行を通じて)。
+  // 条件B: oddsMinとoddsMaxの2列は全行を通じて一致しない(1234.5≠2345.6・6.8≠null)。
+  it.each<[string, { oddsMin: number | null; oddsMax: number | null; ninki: null }, string]>([
+    ["6.8 - 8.5", { oddsMin: 6.8, oddsMax: 8.5, ninki: null }, "正常系(実データ形式)"],
+    [
+      "1,234.5 - 2,345.6",
+      { oddsMin: 1234.5, oddsMax: 2345.6, ninki: null },
+      "#73の本丸。カンマとハイフンの同時出現",
+    ],
+    ["6.8 - 8.5 - 9.9", { oddsMin: null, oddsMax: null, ninki: null }, "ハイフン2個以上は不成立"],
+    ["6.8 -", { oddsMin: null, oddsMax: null, ninki: null }, "上限側が空"],
+    ["- 8.5", { oddsMin: null, oddsMax: null, ninki: null }, "下限側が空"],
+    [
+      "6.8 - 取消",
+      { oddsMin: 6.8, oddsMax: null, ninki: null },
+      "per-halfを意図として固定(壊れた側のみnull。Issue #73)",
+    ],
+    ["取消", { oddsMin: null, oddsMax: null, ninki: null }, "ハイフンなし"],
+  ])("複勝オッズテキスト %j は %j になること(%s)", (oddsText, expected) => {
+    const html = `
+      <div id="odds_tan_block">${buildOddsTable(buildOddsRowFor(1, "5.0"))}</div>
+      <div id="odds_fuku_block">${buildOddsTable(buildOddsRowFor(1, oddsText))}</div>`;
+    const odds = parseNarOdds(html);
+    expect(odds.place[1]).toEqual(expected);
+  });
+});
+
 describe("parseNarOdds(構造異常)", () => {
   it("単勝ブロックも予想オッズテーブルも無いHTMLはNarOddsParseErrorになること", () => {
     expect(() => parseNarOdds("<html><body></body></html>")).toThrow(

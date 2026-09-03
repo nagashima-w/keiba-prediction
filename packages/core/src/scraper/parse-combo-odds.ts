@@ -3,22 +3,18 @@
  * (機能D-2b-A・Issue #32)。
  *
  * 実装当初(#32)は既存 `parse-odds.ts`(単勝・複勝、type=1/2)を一切変更せず、独立モジュールとして
- * 実装した(受け入れ条件1)。**その後 Issue #34 で、人気(`ninki`)の数値化のみ
- * `scraper/ninki.ts` の共有実装 `toNinki` に統合した**(単勝・複勝〈`parse-odds.ts`〉/
- * ワイド・3連複(本モジュール)/地方〈`parse-nar-odds.ts`〉の3パーサ全体で契約を統一。
- * 詳細は `scraper/ninki.ts` のJSDoc参照)。オッズ(`toOddsNumber`。桁区切りカンマ対応等)を
- * 含む下記1〜3の差分は #32 当時のまま本モジュール固有であり、
- * `parse-odds.ts` とは次の3点で契約が異なる:
+ * 実装した(受け入れ条件1)。**その後 Issue #34 で、人気(`ninki`)の数値化を
+ * `scraper/ninki.ts` の共有実装 `toNinki` に統合し、Issue #73 で、オッズ(`toOddsNumber`)の
+ * 数値化も `scraper/odds-number.ts` の共有実装に統合した**(単勝・複勝〈`parse-odds.ts`〉/
+ * ワイド・3連複(本モジュール)/地方〈`parse-nar-combo-odds.ts`・`parse-nar-odds.ts`〉の
+ * 5経路全体で両方の契約を統一。詳細は `scraper/ninki.ts`・`scraper/odds-number.ts` の
+ * JSDoc参照)。下記1〜2の差分は #32 当時のまま本モジュール固有であり、
+ * `parse-odds.ts` とは次の2点で契約が異なる:
  *
- * 1. **桁区切りカンマ**: 中央3連複オッズの実測45%(560件中251件。再現:
- *    `python3 -c "import json;o=json.load(open('fixtures/odds_trio_202603020211.json'))['data']['odds']['7'];print(len(o),sum(1 for v in o.values() if ',' in v[0]))"` → `560 251`)が
- *    カンマ区切り("15,462.5"等)であり、`parse-odds.ts` の `toOddsNumber`
- *    (`/^[0-9]+(\.[0-9]+)?$/`)をそのまま使うと高オッズ側(妙味の源泉)に偏ってnull化する。
- *    本モジュールは桁区切りを剥がしてから数値化する。
- * 2. **3連複の2要素目はダミー**: `["260.2","0.0","103"]` の `"0.0"` を上限として拾わない。
+ * 1. **3連複の2要素目はダミー**: `["260.2","0.0","103"]` の `"0.0"` を上限として拾わない。
  *    `oddsMax` は常に `null`(3連複は幅を持たない券種であることを型で表現。決定は
  *    `scraper/combo-odds-key.ts` の `ComboOddsCell` JSDoc参照)。
- * 3. **未発売・封筒異常はunavailableに分類し、throwしない**(受け入れ条件7、改訂版。
+ * 2. **未発売・封筒異常はunavailableに分類し、throwしない**(受け入れ条件7、改訂版。
  *    boss指摘2026-08-06「未発売時の封筒が `{"status":"NG","data":"",...}` のように
  *    `data` がオブジェクトですらない形で返る可能性がある」。throwするとレース全体の
  *    スクレイプが落ちるため、**`JSON.parse` に失敗した場合のみ throw** し、それ以外
@@ -31,8 +27,8 @@
  *
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
- * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | `parseComboOdds`(`toOddsNumber`) | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe |
- * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | `parseComboOdds`(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
+ * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-nar-combo-odds.ts`・`parse-nar-odds.ts` と共有しており、契約は5経路で統一済み(Issue #73で是正) |
+ * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | 同上(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
  * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(共有ヘルパ `scraper/ninki.ts` の `toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull。上限は課さない) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**`toNinki` は `scraper/ninki.ts` の共有実装であり、単勝・複勝(`parse-odds.ts`)/地方(`parse-nar-odds.ts`)とも同一の契約を使う(Issue #34で統一。契約の詳細・根拠は `scraper/ninki.ts` のJSDoc参照)** |
  * | 馬番(オッズキー由来。例"0102") | `decodeRawKey`(`validateComboUmabans`経由) | あり | throw(2桁ずつ分解し1〜18範囲外・キー長不一致・昇順違反〈"0201"等〉を検出) | `parse-combo-odds.test.ts`「構造の検証」describe |
  * | 組の要素数(キー長 / 券種との不一致) | `decodeRawKey` | あり | throw(`COMBO_SIZE`との不一致) | 同上 |
@@ -50,6 +46,7 @@ import {
   type ComboOddsEntry,
 } from "./combo-odds-key.js";
 import { toNinki } from "./ninki.js";
+import { toOddsNumber } from "./odds-number.js";
 
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
@@ -87,19 +84,6 @@ export interface ComboOddsUnavailableReason {
 export type ComboOddsParseResult =
   | { readonly state: "available"; readonly odds: ReadonlyMap<string, ComboOddsCell> }
   | { readonly state: "unavailable"; readonly reason: ComboOddsUnavailableReason };
-
-const PLAIN_NUMBER = /^[0-9]+(\.[0-9]+)?$/;
-/** 桁区切りカンマ付き数値(例: "15,462.5")。3桁ごとの区切りのみ許容し、不正な区切りは拒否する。 */
-const GROUPED_NUMBER = /^[0-9]{1,3}(,[0-9]{3})*(\.[0-9]+)?$/;
-
-/** オッズ文字列(桁区切りカンマ許容)を数値化する。非数値・未確定("---.-"等)は null。 */
-function toOddsNumber(raw: unknown): number | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (PLAIN_NUMBER.test(trimmed)) return Number(trimmed);
-  if (GROUPED_NUMBER.test(trimmed)) return Number(trimmed.replace(/,/g, ""));
-  return null;
-}
 
 /** 配列セル([...])から指定インデックスの要素を安全に取り出す。 */
 function cellAt(value: unknown, index: number): unknown {

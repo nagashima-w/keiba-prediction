@@ -18,7 +18,7 @@
  *
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
- * | オッズ文字列(単勝・複勝下限/上限。`cellAt(value,0/1)`) | `toOddsNumber` | あり | null化(非数値・"---.-"・空文字はnull。桁区切りカンマは非対応) | `parse-odds.test.ts`「未確定・非数値の許容」describe |
+ * | オッズ文字列(単勝・複勝下限/上限。`cellAt(value,0/1)`) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(非数値・"---.-"・空文字はnull。桁区切りカンマは除去してから数値化。Issue #73で是正) | `parse-odds.test.ts`「未確定・非数値の許容」「桁区切りカンマ。Issue #73」describe。`toOddsNumber` は `parse-combo-odds.ts`・`parse-nar-combo-odds.ts`・`parse-nar-odds.ts` と共有しており、契約は5経路で統一済み(Issue #73で是正。詳細は `scraper/odds-number.ts` のJSDoc参照) |
  * | 人気文字列(`cellAt(value,2)`) | 共有ヘルパ `scraper/ninki.ts` の `toNinki` | あり | null化(非数値・"0"は欠損表現としてnull。上限は課さない) | `ninki.test.ts`(ヘルパ直テスト)。配線検査は本ファイルの `parse-odds.test.ts`「人気列の欠損表現。Issue #34」describe(単勝・複勝を別テストに分離)。`toNinki` は `parse-combo-odds.ts`・`parse-nar-odds.ts` と共有しており、契約は3パーサで統一済み(Issue #34で是正。旧・本ファイル独自実装は"0"を`0`のまま返す欠陥を持っていた) |
  * | 馬番キー("01"等) | `toUmaban` | あり | throw(1〜18範囲外・非数字キーを構造異常として失敗させる) | `parse-odds.test.ts`「馬番の範囲検証」describe |
  * | JSON封筒(`status`/`data.odds`/`odds[1]`/`odds[2]`の型・欠落) | `parseOdds` | あり | throw(`OddsParseError`。yosoのみ複勝欠落を許容) | `parse-odds.test.ts`「構造・status異常」describe |
@@ -31,6 +31,7 @@ import type {
   WinOdds,
 } from "./types.js";
 import { toNinki } from "./ninki.js";
+import { toOddsNumber } from "./odds-number.js";
 
 /** 馬番の上限(1〜18)。 */
 const MAX_UMABAN = 18;
@@ -56,18 +57,6 @@ interface OddsResponse {
       "2"?: Record<string, unknown>;
     };
   };
-}
-
-/** オッズ文字列を数値化する。非数値・未確定("---.-"等)は null。 */
-function toOddsNumber(raw: unknown): number | null {
-  if (typeof raw !== "string") {
-    return null;
-  }
-  const trimmed = raw.trim();
-  if (!/^[0-9]+(\.[0-9]+)?$/.test(trimmed)) {
-    return null;
-  }
-  return Number(trimmed);
 }
 
 /** 馬番キー("01"等)を検証して数値化する。範囲外は例外。 */

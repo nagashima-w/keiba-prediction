@@ -24,7 +24,8 @@
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import { toNinki } from "./ninki.js";
-import { NAR_ODDS_SELECTORS as SEL, PATTERNS } from "./selectors.js";
+import { toOddsNumber } from "./odds-number.js";
+import { NAR_ODDS_SELECTORS as SEL } from "./selectors.js";
 import type { OddsSnapshot, PlaceOdds, WinOdds } from "./types.js";
 
 /** 馬番の上限(1〜18)。 */
@@ -66,52 +67,60 @@ function umabanOf($row: CheerioSelection): number {
 }
 
 /**
- * オッズ文字列(単一の数値)を数値化する。
- * 出走取消・除外・未確定等の非数値表記(例: 「取消」「---」「空文字」)はセル値の異常であり
- * 行/レース全体を落とす理由にはならないため、例外を投げず null に落とす
- * (中央 parse-odds.ts の toOddsNumber と契約を揃える。WinOdds.odds は number|null契約)。
- */
-function toWinOddsNumber(raw: string): number | null {
-  const m = PATTERNS.narWinOdds.exec(raw);
-  return m ? Number(raw) : null;
-}
-
-/**
  * 発売後(#odds_tan_block)の1行から単勝オッズを取り出す。
  * オッズ列は最終列(span.Oddsに包まれるが .text() で透過的に取れる)。人気列は無いため null。
  * オッズセルが非数値(取消等)の場合は odds:null で温存する(構造異常ではない)。
+ * オッズ文字列の数値化は共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` に委譲する
+ * (中央・ワイド・3連複と契約を統一。Issue #73)。
  */
 function parseTanRow($row: CheerioSelection): { umaban: number; win: WinOdds } {
   const umaban = umabanOf($row);
   const oddsText = $row.find("td").last().text().trim();
-  return { umaban, win: { odds: toWinOddsNumber(oddsText), ninki: null } };
+  return { umaban, win: { odds: toOddsNumber(oddsText), ninki: null } };
+}
+
+/**
+ * 「下限 - 上限」形式のレンジテキストを分割し、各半分を独立に数値化する(per-half契約。Issue #73)。
+ *
+ * **per-half(壊れた側のみnull)**: 片側が非数値(取消等)でも、読める側の数値は捨てない。
+ * `parse-nar-combo-odds.ts::parseRangeText`(地方ワイド)と契約を統一した(Issue #73。
+ * 旧実装は「片方が壊れたら両方null」〈all-or-nothing〉であり、EV計算が使う複勝下限
+ * (`parse-odds.ts` JSDoc参照)を、無関係な上限側の破損を理由に読める下限ごと捨てていた
+ * 欠陥だった。#31の原則により、判定不能を判定結果に混ぜない側〈per-half〉を採用する)。
+ *
+ * 分割セパレータは ASCII ハイフン(前後の空白を許容して分割する)。現行フィクスチャ
+ * (`nar_odds_b1_202654071210.html` の `#odds_fuku_block`)で観測されたのは
+ * `'6.8 - 8.5'` 形式(ASCIIハイフン+前後空白1つ)であり、全角ハイフン等の発生は
+ * 未観測(どちらの向きにも断定しない)。
+ */
+function parsePlaceOddsRange(text: string): { oddsMin: number | null; oddsMax: number | null } {
+  const parts = text.split(/\s*-\s*/);
+  if (parts.length !== 2 || parts[0] === "" || parts[1] === "") {
+    return { oddsMin: null, oddsMax: null };
+  }
+  return { oddsMin: toOddsNumber(parts[0]!), oddsMax: toOddsNumber(parts[1]!) };
 }
 
 /**
  * 発売後(#odds_fuku_block)の1行から複勝オッズ(下限-上限)を取り出す。人気列は無いため null。
- * オッズセルが「下限 - 上限」形式に一致しない(取消等)場合は oddsMin/oddsMax とも null で
- * 温存する(構造異常ではない。中央 parse-odds.ts の toOddsNumber と契約を揃える)。
+ * レンジとして分割できない(ハイフンが無い・2個以上・片側が空)場合は oddsMin/oddsMax とも
+ * null で温存する(構造異常ではない)。分割できた場合の各半分の数値化は per-half 契約
+ * (`parsePlaceOddsRange` 参照。Issue #73)。
  */
 function parseFukuRow(
   $row: CheerioSelection,
 ): { umaban: number; place: PlaceOdds } {
   const umaban = umabanOf($row);
   const oddsText = $row.find("td").last().text().trim();
-  const m = PATTERNS.narPlaceOddsRange.exec(oddsText);
-  return {
-    umaban,
-    place: {
-      oddsMin: m ? Number(m[1]!) : null,
-      oddsMax: m ? Number(m[2]!) : null,
-      ninki: null,
-    },
-  };
+  const { oddsMin, oddsMax } = parsePlaceOddsRange(oddsText);
+  return { umaban, place: { oddsMin, oddsMax, ninki: null } };
 }
 
 /**
  * 発売前(予想オッズ)の1行から単勝相当オッズを取り出す。
  * 列構成: 人気(列0) / 馬番(列1) / 印(列2) / 馬名(列3) / 予想オッズ(列4=最終列)。
- * オッズセルが非数値(取消等)の場合は odds:null で温存する(構造異常ではない)。
+ * オッズセルが非数値(取消等)の場合は odds:null で温存する(構造異常ではない。
+ * オッズの数値化は共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` に委譲する。Issue #73)。
  * 人気列は共有ヘルパ `scraper/ninki.ts` の `toNinki` で数値化する(Issue #34。
  * 単勝・複勝〈parse-odds.ts〉/ワイド・3連複〈parse-combo-odds.ts〉と契約を統一。
  * "0"は欠損表現としてnullになる)。
@@ -121,7 +130,7 @@ function parseYosoRow($row: CheerioSelection): { umaban: number; win: WinOdds } 
   const ninkiText = $row.find("td").eq(0).text().trim();
   const ninki = toNinki(ninkiText);
   const oddsText = $row.find("td").last().text().trim();
-  return { umaban, win: { odds: toWinOddsNumber(oddsText), ninki } };
+  return { umaban, win: { odds: toOddsNumber(oddsText), ninki } };
 }
 
 /**
