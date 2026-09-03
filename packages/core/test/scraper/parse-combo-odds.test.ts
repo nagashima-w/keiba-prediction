@@ -57,6 +57,24 @@ describe("parseComboOdds(桁区切りカンマ。受け入れ条件3)", () => {
     expect(cell?.oddsMin).toBe(429.3);
     expect(cell?.oddsMax).toBe(432.0);
   });
+
+  // code-reviewer指摘: 実フィクスチャのワイドオッズはカンマを1件も含まない(上の前提固定テスト参照)ため、
+  // oddsMax(cellAt(value,1)、ワイドのみ使用)の呼び出し箇所は実フィクスチャでは独立に検証できない。
+  // 実測: oddsMax側だけを旧実装(カンマ非対応)に戻してもparse-combo-odds.test.tsは全緑のままだった
+  // (レビュアー指摘を受けた変異注入で確認)。合成JSONでoddsMin/oddsMaxに異なるカンマ値を与え、
+  // 構造体まるごとtoEqualで比較する。
+  it("ワイドのoddsMin・oddsMaxがいずれも桁区切りカンマを含む合成データの場合、それぞれ除去して数値化されること", () => {
+    const json = JSON.stringify({
+      status: "result",
+      data: { odds: { "5": { "0102": ["1,234.5", "2,345.6", "10"] } } },
+    });
+    const odds = expectAvailable(parseComboOdds(json, "wide"));
+    expect(odds.get(buildComboOddsKey([1, 2]))).toEqual({
+      oddsMin: 1234.5,
+      oddsMax: 2345.6,
+      ninki: 10,
+    });
+  });
 });
 
 describe("parseComboOdds(3連複の2要素目はダミー。受け入れ条件4)", () => {

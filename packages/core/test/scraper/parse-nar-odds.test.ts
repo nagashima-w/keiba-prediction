@@ -86,13 +86,37 @@ describe("parseNarOdds(発売前: 予想オッズのみ→yosoに正規化)", ()
 });
 
 describe("parseNarOdds(桁区切りカンマ。Issue #73・経路d)", () => {
-  it('単勝(#odds_tan_block)のオッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
+  // code-reviewer指摘: parseTanRow(発売後単勝)とparseYosoRow(発売前予想オッズ)は
+  // 別関数でありtoOddsNumber呼び出しも別箇所のため、片方の回帰は他方のテストでは検出できない。
+  // 実測: parseYosoRow側だけを旧実装(カンマ非対応)に戻してもcore全体が緑のままだった
+  // (レビュアーの変異注入結果)。両者を別々のitで固定する。
+  it('発売後単勝(#odds_tan_block・parseTanRow経路)のオッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
     const html = `<div id="odds_tan_block">${buildOddsTable(
       buildOddsRowFor(1, "1,234.5") + buildOddsRowFor(2, "12.3"),
     )}</div>`;
     const odds = parseNarOdds(html);
     expect(odds.win[1]).toEqual({ odds: 1234.5, ninki: null });
     expect(odds.win[2]).toEqual({ odds: 12.3, ninki: null });
+  });
+
+  it('発売前予想オッズ(parseYosoRow経路)のオッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
+    const yosoRow = (umaban: number, ninki: number, oddsText: string) => `
+      <tr>
+        <td class="Ninki">${ninki}</td>
+        <td class="Waku1">${umaban}</td>
+        <td class="Mark_User"></td>
+        <td class="Horse_Name">テスト馬${umaban}</td>
+        <td class="Odds">${oddsText}</td>
+      </tr>`;
+    const html = `
+      <table class="RaceOdds_HorseList_Table Ninki">
+        <tr class="col_label"><th>人気</th><th>馬番</th><th>印</th><th>馬名</th><th>予想オッズ</th></tr>
+        ${yosoRow(1, 10, "1,234.5")}
+        ${yosoRow(2, 1, "8.5")}
+      </table>`;
+    const odds = parseNarOdds(html);
+    expect(odds.win[1]).toEqual({ odds: 1234.5, ninki: 10 });
+    expect(odds.win[2]).toEqual({ odds: 8.5, ninki: 1 });
   });
 });
 

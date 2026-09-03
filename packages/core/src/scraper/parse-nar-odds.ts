@@ -92,6 +92,15 @@ function parseTanRow($row: CheerioSelection): { umaban: number; win: WinOdds } {
  * (`nar_odds_b1_202654071210.html` の `#odds_fuku_block`)で観測されたのは
  * `'6.8 - 8.5'` 形式(ASCIIハイフン+前後空白1つ)であり、全角ハイフン等の発生は
  * 未観測(どちらの向きにも断定しない)。
+ *
+ * **`parse-nar-combo-odds.ts::parseRangeText` との構造的重複について(code-reviewer指摘)**:
+ * 両関数とも「ハイフンで構造分割→`parts.length!==2`等のガード→各半分を`toOddsNumber`」という
+ * 同一の構造を持つ(数値パターン自体は`scraper/odds-number.ts`に集約済みのためAC2の文言には
+ * 違反しない)。本Issue(#73)のスコープでは統合しない判断とした。理由: 対象ドキュメントが別
+ * (単複ページ`#odds_fuku_block`とワイド組合せページの`td.Odds`セル)で、レンジ以外の周辺処理
+ * (人気列の有無・馬番の抽出方式)も異なり、単純な関数抽出では済まない可能性がある。共通化する
+ * 場合は影響範囲の精査が別途必要なため、将来 `splitOddsRange` のような共有ヘルパへ統合する
+ * 価値があるかどうかは、着手時に改めて判断すること。
  */
 function parsePlaceOddsRange(text: string): { oddsMin: number | null; oddsMax: number | null } {
   const parts = text.split(/\s*-\s*/);
@@ -106,6 +115,11 @@ function parsePlaceOddsRange(text: string): { oddsMin: number | null; oddsMax: n
  * レンジとして分割できない(ハイフンが無い・2個以上・片側が空)場合は oddsMin/oddsMax とも
  * null で温存する(構造異常ではない)。分割できた場合の各半分の数値化は per-half 契約
  * (`parsePlaceOddsRange` 参照。Issue #73)。
+ *
+ * per-half化(AC5')の非破壊性の実測: 実フィクスチャ(`nar_odds_b1_202654071210.html`)の
+ * `#odds_fuku_block`複勝レンジセル12行中、片側だけ数値化できない行は0件(再現:
+ * `python3 -c "import re; html=open('fixtures/nar_odds_b1_202654071210.html',encoding='utf-8').read(); seg=html[html.find('odds_fuku_block'):html.find('odds_fuku_block')+6000]; print(len(re.findall(r'<span class=\"Odds ?\">([^<]*)</span>', seg)))"`
+ * → 12件)。per-half化はこのフィクスチャの出力に影響しない。
  */
 function parseFukuRow(
   $row: CheerioSelection,

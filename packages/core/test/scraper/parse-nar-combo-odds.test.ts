@@ -104,6 +104,21 @@ describe("parseNarComboOdds(値の解釈。合成データ。受け入れ条件6
     expect(cell?.oddsMax).toBe(42.8);
   });
 
+  // code-reviewer指摘: 実フィクスチャ(nar_odds_b5_202654071210.html)の地方ワイドは
+  // 66件中0件がカンマを含む(観測。python3で全td.Oddsを走査して確認)ため、実フィクスチャでは
+  // parseRangeText内のoddsMin/oddsMaxそれぞれの呼び出し箇所を独立に検証できない。
+  // 実測: oddsMin単独・oddsMax単独をそれぞれ旧実装(カンマ非対応)に戻しても
+  // parse-nar-combo-odds.test.tsは全緑のままだった(変異注入で確認)。合成データで
+  // oddsMin・oddsMaxに異なるカンマ値を与え、構造体まるごとtoEqualで比較する。
+  it("ワイドのoddsMin・oddsMaxがいずれも桁区切りカンマを含む合成データの場合、それぞれ除去して数値化されること", () => {
+    const odds = expectAvailable(parseNarComboOdds(synthHtml("1,234.5 - 2,345.6", "b5"), "wide"));
+    expect(odds.get(buildComboOddsKey([1, 2]))).toEqual({
+      oddsMin: 1234.5,
+      oddsMax: 2345.6,
+      ninki: null,
+    });
+  });
+
   it.each(["---.-", "取消", ""])(
     "3連複のオッズ文字列が非数値(%s)の場合はoddsMinがnullであること",
     (text) => {
