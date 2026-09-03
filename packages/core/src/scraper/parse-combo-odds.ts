@@ -4,8 +4,9 @@
  *
  * 実装当初(#32)は既存 `parse-odds.ts`(単勝・複勝、type=1/2)を一切変更せず、独立モジュールとして
  * 実装した(受け入れ条件1)。**その後 Issue #34 で、人気(`ninki`)の数値化のみ
- * `scraper/ninki.ts` の共有実装 `toNinki` に統合した**(単勝・複勝・ワイド/3連複・地方の
- * 4パーサ全体で契約を統一。詳細は `scraper/ninki.ts` のJSDoc参照)。オッズ(`toOddsNumber`。
+ * `scraper/ninki.ts` の共有実装 `toNinki` に統合した**(単勝・複勝〈`parse-odds.ts`〉/
+ * ワイド・3連複(本モジュール)/地方〈`parse-nar-odds.ts`〉の3パーサ全体で契約を統一。
+ * 詳細は `scraper/ninki.ts` のJSDoc参照)。オッズ(`toOddsNumber`。
  * 桁区切りカンマ対応等、下記1〜3の差分)は #32 当時のまま本モジュール固有であり、
  * `parse-odds.ts` とは次の3点で契約が異なる:
  *
