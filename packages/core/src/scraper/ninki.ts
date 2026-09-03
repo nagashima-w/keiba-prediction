@@ -23,8 +23,9 @@
  * (妙味の少ない側ではなく、むしろ人気薄=妙味の候補側)を欠損表現に潰してしまう。
  *
  * ## 本ヘルパを経由しない `ninki` 生成経路を追加する場合の注意(Issue #34)
- * 現在の消費側は「nullish(`null`/`undefined`)のみ」を欠損として扱う契約になっている。
- * `analyzer/build-prompt.ts` の `popularityText` は `value === null || undefined ||
+ * 人気を読む主要な消費経路のうち、次の2箇所は「nullish(`null`/`undefined`)のみ」を
+ * 欠損として扱う契約になっている。
+ * `analyzer/build-prompt.ts` の `popularityText` は `value === null || value === undefined ||
  * !Number.isFinite(value)` で弾くが `Number.isFinite(0)` は `true` であり、`0` は
  * 「不明」扱いにならず素通りする。`main/analysis-pipeline.ts` の
  * `const popularity = race.odds.win[umaban]?.ninki ?? null` の `??` も同様に
@@ -32,8 +33,9 @@
  * 経由しない新しい `ninki` の生成経路(将来の別の取得元・別モデル等)を追加する場合、
  * 値域外の値(`0`以下・非数値)は必ず生成側でこのヘルパと同じ契約に正規化してから
  * 返すこと。** 消費側で弾く形に倣うと(#31の原則により)判定不能を判定結果に
- * 混ぜてしまう。現状は単勝・複勝・ワイド/3連複・地方の4パーサすべてが本ヘルパに
- * 委譲しているため、この経路での実害は無い(実データでの `0` 発生も未観測)。
+ * 混ぜてしまう。現状は単勝・複勝(`parse-odds.ts`)・ワイド/3連複(`parse-combo-odds.ts`)・
+ * 地方(`parse-nar-odds.ts`)の3パーサすべてが本ヘルパに委譲しているため、この経路での
+ * 実害は無い(実データでの `0` 発生も未観測)。
  */
 
 /** 人気文字列を数値化する。非数値・"0"(欠損表現)は null。上限は課さない(モジュールJSDoc参照)。 */
