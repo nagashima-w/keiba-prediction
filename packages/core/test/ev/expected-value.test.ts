@@ -358,6 +358,30 @@ describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換
         expect(result).toBe(Number.POSITIVE_INFINITY);
         expect(isUsableOdds(result!)).toBe(false);
       });
+
+      // boss メタレビューR3(2026-09-04): 「Infinityが混じると常に下限クランプが機能しない」
+      // という過剰一般化した機序をJSDocに書きかけたため、その過剰一般化を否定する側と、
+      // AC-4(b)が名指しした境界(winOdds=1.0)での挙動をテストとして固定する
+      // (散文だけ直すと次に同じ過剰一般化を書き戻せるため)。
+      it(
+        "coef=-Infinityのとき、Math.maxが1.0側にクランプしisUsableOddsを満たすこと" +
+          "(過剰一般化の否定側: 「Infinityが混じると常に壊れる」わけではない)",
+        () => {
+          const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NEGATIVE_INFINITY });
+          expect(result).toBe(1);
+          expect(isUsableOdds(result!)).toBe(true);
+        },
+      );
+
+      it(
+        "coef=+Infinityかつwinodds=1.0(境界)のとき、加算項が0×Infinity=NaNになり" +
+          "戻り値もNaNになること(AC-4(b)が名指しした境界そのもの)",
+        () => {
+          const result = estimatePlaceOddsMinFromWin(1.0, { coef: Number.POSITIVE_INFINITY });
+          expect(result).toBe(Number.NaN);
+          expect(isUsableOdds(result!)).toBe(false);
+        },
+      );
     },
   );
 });

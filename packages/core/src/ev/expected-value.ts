@@ -218,18 +218,30 @@ export interface EstimatedHorseEv extends HorseEv {
  * 確定EV経路(computeRaceEv/HorseEv)とは完全に独立した別関数・別型とすることで、確定EV経路の
  * 計算結果・型には一切影響を与えない(既存の回帰テストが示す挙動は不変)。
  *
- * **残余(boss メタレビューR1・2026-09-04・#74。選択(b): 実装は変えず明記に留める)**:
+ * **残余(boss メタレビューR1・2026-09-04・#74。選択(b): 実装は変えず明記に留める。
+ * 機序はboss メタレビューR3・2026-09-04で是正——最初に書いた版は「Infinityが混じると
+ * 常にInfinityを返す」等、3点で事実と違っていた〈node -eで反証済み〉)**:
  * `evaluateEstimatedHorse` は `estimatedOddsMin === null` しか見ておらず、
- * `estimatePlaceOddsMinFromWin` の非null出力を `isUsableOdds` に通していない。そのため
- * `placeConfig.coef` が非有限(NaN/Infinity)だと、`estimatePlaceOddsMinFromWin` が
- * `isUsableOdds` を満たさない値を返す(`Math.max(MIN_VALID_ODDS, ...)` の `Math.max` は
- * 引数にNaNが混じると常にNaNを返し、Infinityが混じると常にInfinityを返すため、下限クランプが
- * 機能しない)。具体的には `coef=NaN` で `placeOddsMin=NaN`・`ev=NaN`・`isPositive=false`、
- * `coef=+Infinity` で `placeOddsMin=+Infinity`・`ev=+Infinity`・`isPositive=true`
- * になる(実測。`expected-value.test.ts`「残余(boss メタレビューR1・選択(b))」describe参照)。
- * 後者は `isPositive=true` かつ `placeOddsMin` が `isUsableOdds` を満たさないという、
- * `verify.ts` の規則Uが「本番経路では到達しない」と明記している状態そのものであり、
- * `evaluateHorse`(確定EV側。値域外はisUsableOddsで弾く)との間に新しい非対称を作る。
+ * `estimatePlaceOddsMinFromWin` の非null出力を `isUsableOdds` に通していない。ただし
+ * 壊れるのは `estimatePlaceOddsMinFromWin` 内部の
+ * `Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds − MIN_VALID_ODDS) × coef)` において、
+ * 第2引数(加算する項)が **NaN または +Infinity** になる場合に限る。`Math.max` は
+ * 「最大値を返す」関数であり、第2引数が -Infinity なら 1.0 側にクランプされて**正常に
+ * 機能する**(「Infinityが混じると常に下限クランプが機能しなくなる」わけではない。
+ * 符号で結果が変わる):
+ *   - `coef=NaN` → 加算項は常にNaN(winOddsに関わらず)。結果はNaN
+ *   - `coef=±Infinity` かつ `winOdds === MIN_VALID_ODDS`(境界。AC-4(b)が「max(1.0,…)の
+ *     下限と>=1.0が整合する唯一の点」と名指しした点そのもの) → 加算項は `0 × ±Infinity = NaN`
+ *   - `coef=+Infinity` かつ `winOdds > MIN_VALID_ODDS` → 加算項は `+Infinity`。結果は`+Infinity`
+ *   - `coef=-Infinity` かつ `winOdds > MIN_VALID_ODDS` → 加算項は `-Infinity`。`Math.max` が
+ *     1.0にクランプし、結果は**isUsableOddsを満たす**(過剰一般化の否定側。実測)
+ * 具体的には(いずれも `winOdds=5` で実測。境界`winOdds=1.0`は別途 `expected-value.test.ts`
+ * 「残余」describe参照): `coef=NaN` で `placeOddsMin=NaN`・`ev=NaN`・`isPositive=false`、
+ * `coef=+Infinity`(`winOdds>1.0`) で `placeOddsMin=+Infinity`・`ev=+Infinity`・
+ * `isPositive=true` になる(実測。同describe参照)。後者は `isPositive=true` かつ
+ * `placeOddsMin` が `isUsableOdds` を満たさないという、`verify.ts` の規則Uが
+ * 「本番経路では到達しない」と明記している状態そのものであり、`evaluateHorse`
+ * (確定EV側。値域外はisUsableOddsで弾く)との間に新しい非対称を作る。
  *
  * **本番では到達しない**: `placeConfig`(`EstimatedPlaceConfig`)の供給元は
  * `packages/app/src` に存在せず(`analysis-pipeline.ts` の任意dep宣言と
