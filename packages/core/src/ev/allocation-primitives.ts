@@ -584,9 +584,14 @@ export const MIN_VALID_ODDS = 1.0;
  * 再現(このファイルを含む`packages/core/src`全体を対象にすること。`ev/`だけに絞ると
  * `analyzer/build-prompt.ts`の1件を取りこぼす):
  * `grep -c "isUsableOdds(" <各ファイルパス>` でファイルごとの出現**行数**を数え、
- * コメント内出現(本ファイルの本コメント自身・`bet-allocation.ts`1件・`expected-value.ts`1件)を
- * 除いた行が実呼び出し。`grep -rhoE "isUsableOdds\(" packages/core/src | wc -l` は
- * 定義1件を含む**出現数**(#74後は13)であり、これは呼び出し箇所の数ではない。
+ * コメント内出現(`bet-allocation.ts`1件・`expected-value.ts`1件。加えて本ファイル自身の
+ * この段落にも「isUsableOdds(」という字面が複数回登場する)を除いた行が実呼び出し。
+ *
+ * **`grep -rhoE "isUsableOdds\(" packages/core/src | wc -l`(定義・コメント内言及を含む
+ * 総出現数)は、この段落を編集するたびに変わる自己参照値である。固定の数として本文に
+ * 書き込まない(#73 R5・本Issueで一度実際にここで13→14の食い違いを起こした教訓)。
+ * 呼び出し箇所・モジュールの数(上記「#74後: 呼び出し9・モジュール6」)だけが安定した
+ * 意味のある数であり、確認したいときはその都度上記コマンドで数え直すこと。**
  *
  * **null判定は含まない(呼び出し側の責務)**: 引数の型を `number` のみとし `number | null` を
  * 受け取らないのは意図的。「未確定(null)」と「不正値(数値だが使えない)」は意味が異なり、

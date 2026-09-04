@@ -344,6 +344,63 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
     expect(result!.excludedReason).toBeNull();
   });
 
+  describe(
+    "推定複勝下限が算出できない理由の文言(Issue #74 Eスコープ: 偽の断定除去。" +
+      "estimatePlaceOddsMinFromWinはnull/非有限/MIN_VALID_ODDS未満を1つのnull戻り値に" +
+      "統合しているため、「未確定」と断定すると単勝オッズが値域外〈存在するが不正〉の場合に偽になる。" +
+      "code-reviewer指摘: 是正前の旧文言「単勝オッズが未確定のため推定複勝下限を算出できない」に" +
+      "戻しても検出できなかったため、toBeによるリテラル比較を追加する)",
+    () => {
+      // 是正前の旧文言(偽の断定そのもの)。旧文言に戻す変異が入ったら下記テストが赤くなる
+      // ことを、このテストを書く過程で実際に確認した(Red→Green のログは完了報告参照)。
+      const OLD_FALSE_REASON = "単勝オッズが未確定のため推定複勝下限を算出できない";
+      const NEW_REASON = "単勝オッズが未確定または不正な値のため推定複勝下限を算出できない";
+
+      const cases: Array<{ name: string; winOdds: number | null }> = [
+        { name: "単勝オッズがnull(真に未確定)", winOdds: null },
+        { name: "単勝オッズがNaN(非有限。未確定ではなく不正な値)", winOdds: Number.NaN },
+        { name: "単勝オッズが負値(-5。未確定ではなく不正な値)", winOdds: -5 },
+        { name: "単勝オッズが0.9(1.0未満・値域外。未確定ではなく不正な値)", winOdds: 0.9 },
+      ];
+
+      it.each(cases)(
+        "$name → 新文言がリテラルとして固定されること(AC A0: 値として比較)",
+        ({ winOdds }) => {
+          const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+          const odds: OddsSnapshot = {
+            officialDatetime: null,
+            oddsStatus: "yoso",
+            win: { 1: { odds: winOdds, ninki: null } },
+            place: {},
+          };
+          const [result] = computeEstimatedRaceEv(priors, odds);
+          expect(result!.ev).toBeNull();
+          expect(result!.excludedReason).toBe(NEW_REASON);
+          // 旧文言(偽の断定)ではないことも明示的に固定する。
+          expect(result!.excludedReason).not.toBe(OLD_FALSE_REASON);
+        },
+      );
+
+      it("NaN・負値・0.9のいずれも「未確定」ではなく同一の新文言に統一されること(偽の断定を分岐で作り直さない)", () => {
+        const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+        const values = [Number.NaN, -5, 0.9];
+        const reasons = values.map((winOdds) => {
+          const odds: OddsSnapshot = {
+            officialDatetime: null,
+            oddsStatus: "yoso",
+            win: { 1: { odds: winOdds, ninki: null } },
+            place: {},
+          };
+          return computeEstimatedRaceEv(priors, odds)[0]!.excludedReason;
+        });
+        // 前提(無条件expect): 3ケースとも対象外(nullではない理由が付く)であること。
+        expect(reasons.every((r) => r !== null)).toBe(true);
+        expect(new Set(reasons).size).toBe(1);
+        expect(reasons[0]).toBe(NEW_REASON);
+      });
+    },
+  );
+
   it("単勝オッズも欠損している馬は対象外(ev=null・理由付き)", () => {
     const priors: HorsePrior[] = [{ umaban: 3, placeProb: 0.4 }];
     const odds: OddsSnapshot = {
