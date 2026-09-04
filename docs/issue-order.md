@@ -226,6 +226,13 @@ Plackett-Luce を真のモデルとし、真の3着以内確率を条件付き�
 6. #23-C は既存 DB に単勝払戻が1件も無いため**全レースの結果再取込**が要る
    (netkeiba 実リクエスト。レート制限1.5秒 × 件数で長時間)。既存分を判定不能のまま残して
    以後の取込分だけ対象にする選択肢もあり、**ユーザーに確認する**
+7. **`estimatePlaceOddsMinFromWin` の状態統合(#74 R1・boss メタレビュー2026-09-04で発見・
+   選択(b)で残余化)。** null/非有限/値域外(1.0未満)を1つのnull戻り値に統合しているため、
+   `placeConfig.coef` が非有限だと`isUsableOdds`を満たさない値(NaN/+Infinity)がそのまま
+   推定複勝下限として使われうる(`coef=+Infinity`で`isPositive=true`になる。本番は
+   `coef`が常に既定0.2のため到達しない。詳細は`expected-value.ts`の
+   `computeEstimatedRaceEv`JSDoc「残余」参照)。**#23-Bで状態分離(discriminated union化)を
+   行う際は、この残余もあわせて解消すること。**
 
 #### この節の旧記述(経緯として残す)
 

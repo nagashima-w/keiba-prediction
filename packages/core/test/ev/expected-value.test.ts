@@ -9,6 +9,7 @@ import {
   type EvConfig,
   type HorsePrior,
 } from "../../src/ev/expected-value.js";
+import { isUsableOdds } from "../../src/ev/allocation-primitives.js";
 import type { OddsSnapshot, PlaceOdds } from "../../src/scraper/types.js";
 
 /** 複勝オッズ(下限・上限・人気)を最小構成で組み立てる。 */
@@ -317,6 +318,48 @@ describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換
       ).toBeCloseTo(1.0 + 9 * 0.5, 10);
     });
   });
+
+  describe(
+    "AC-4(b)(boss メタレビューR1・2026-09-04): 非nullの戻り値はisUsableOddsを満たす" +
+      "(境界winOdds=1.0はmax(1.0,…)の下限とisUsableOddsの>=1.0が整合する唯一の点。" +
+      "既定coef〈0.2〉・妥当な数値coefの下でこの不変条件が成り立つことを値として固定する。" +
+      "grep -rn \"estimatePlaceOddsMinFromWin\" packages/core/test | grep -i \"isUsableOdds\" が" +
+      "0件だったこと〈本テスト追加前〉がboss指摘の根拠)",
+    () => {
+      const cases: Array<{ name: string; winOdds: number; config?: { coef: number } }> = [
+        { name: "境界winOdds=1.0・既定coef(0.2)", winOdds: 1.0 },
+        { name: "winOdds=1.5・既定coef(0.2)", winOdds: 1.5 },
+        { name: "winOdds=10・既定coef(0.2)", winOdds: 10 },
+        { name: "winOdds=50・既定coef(0.2)", winOdds: 50 },
+        { name: "winOdds=10・coef=0.5(既定以外)", winOdds: 10, config: { coef: 0.5 } },
+      ];
+      it.each(cases)("$name → 戻り値がisUsableOddsを満たす(true)", ({ winOdds, config }) => {
+        const result = estimatePlaceOddsMinFromWin(winOdds, config);
+        expect(result).not.toBeNull();
+        expect(isUsableOdds(result!)).toBe(true);
+      });
+    },
+  );
+
+  describe(
+    "残余(boss メタレビューR1・選択(b)): coefが非有限のときisUsableOddsを満たさない値が" +
+      "そのまま推定複勝下限として使われうる(#23-Bへ送る残余。本番では到達しない。" +
+      "expected-value.tsのcomputeEstimatedRaceEv JSDoc参照)",
+    () => {
+      it("coef=NaNのとき、戻り値はNaN(isUsableOddsを満たさない)であること", () => {
+        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NaN });
+        expect(result).not.toBeNull();
+        expect(Number.isNaN(result!)).toBe(true);
+        expect(isUsableOdds(result!)).toBe(false);
+      });
+
+      it("coef=+Infinityのとき、戻り値は+Infinity(isUsableOddsを満たさない)であること", () => {
+        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.POSITIVE_INFINITY });
+        expect(result).toBe(Number.POSITIVE_INFINITY);
+        expect(isUsableOdds(result!)).toBe(false);
+      });
+    },
+  );
 });
 
 /**
@@ -343,6 +386,56 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
     expect(result!.evEstimated).toBe(true);
     expect(result!.excludedReason).toBeNull();
   });
+
+  describe(
+    "残余(boss メタレビューR1・選択(b)。#23-Bへ送る): evaluateEstimatedHorseは" +
+      "estimatedOddsMin===nullしか見ておらずisUsableOddsを通さないため、非有限coefを渡すと" +
+      "isUsableOddsを満たさないplaceOddsMinがisPositive=trueとして返ることがある" +
+      "(本番では到達しない。estimatedPlaceConfigの供給元はpackages/app/srcに存在せず、" +
+      "常に既定coef=0.2が使われるため)",
+    () => {
+      it("coef=+Infinityのとき、isPositive=trueだがplaceOddsMinはisUsableOddsを満たさないこと", () => {
+        const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+        const odds: OddsSnapshot = {
+          officialDatetime: null,
+          oddsStatus: "yoso",
+          win: { 1: { odds: 5, ninki: null } },
+          place: {},
+        };
+        const [result] = computeEstimatedRaceEv(
+          priors,
+          odds,
+          { threshold: 1.0 },
+          { coef: Number.POSITIVE_INFINITY },
+        );
+        expect(result!.placeOddsMin).toBe(Number.POSITIVE_INFINITY);
+        expect(result!.ev).toBe(Number.POSITIVE_INFINITY);
+        expect(result!.isPositive).toBe(true);
+        expect(result!.excludedReason).toBeNull();
+        expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
+      });
+
+      it("coef=NaNのとき、ev/placeOddsMinはNaNでisPositive=falseになること", () => {
+        const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+        const odds: OddsSnapshot = {
+          officialDatetime: null,
+          oddsStatus: "yoso",
+          win: { 1: { odds: 5, ninki: null } },
+          place: {},
+        };
+        const [result] = computeEstimatedRaceEv(
+          priors,
+          odds,
+          { threshold: 1.0 },
+          { coef: Number.NaN },
+        );
+        expect(Number.isNaN(result!.placeOddsMin!)).toBe(true);
+        expect(Number.isNaN(result!.ev!)).toBe(true);
+        expect(result!.isPositive).toBe(false);
+        expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
+      });
+    },
+  );
 
   describe(
     "推定複勝下限が算出できない理由の文言(Issue #74 Eスコープ: 偽の断定除去。" +

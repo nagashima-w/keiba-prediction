@@ -815,6 +815,17 @@ viewFormWrapperFound: true, oddsCellCount: 12 }`。実際に関数を呼んで�
 変更していない。#50 が「`+Infinity` は正規表現から生成できないため到達不能」とした構造と
 同型であり、**本Issueは防御的堅牢化である**(観測済み実データに対する挙動は変わらない)。
 
+**留意点2(boss メタレビューR1・2026-09-04で発見。R2の指摘に応じて追記)**: 上記の留意点は
+確定EV経路(`computeRaceEv`/`evaluateHorse`)についてのものであり、**推定EV経路
+(`computeEstimatedRaceEv`/`evaluateEstimatedHorse`。発売前レース向け)には当てはまらない**。
+推定EV経路は`isUsableOdds`のゲートが無く、`evThreshold`の設定値に**関係なく**
+`isPositive=true`かつ`isUsableOdds`不成立になりうる(`placeConfig.coef`が非有限のとき。
+実測は`expected-value.ts`の`computeEstimatedRaceEv`JSDoc「残余」参照)。ただし
+`placeConfig`の供給元は`packages/app/src`に存在せず本番では常に既定(`coef=0.2`)が
+使われるため、**この経路も運用上は到達しない**(状態分離は#23-Bへ)。本Issueが
+patch(1.6.3)である根拠(到達可能な入力で数値が1つも動かない)は、確定EV経路(本節上記)・
+推定EV経路(本段落)のいずれについても成立する。
+
 **明示的な上書き(1.4.0根拠セクション末尾の記述との整合)**: 上記「1.4.0である根拠」セクションの
 「`oddsMin` が `0` / 負 / `NaN` なら `ev > 1` が false でそもそも賭けず」という推論は、
 **既定のEV閾値(1.0)を暗黙の前提にしており、一般には成り立たない**(閾値が1.0未満なら

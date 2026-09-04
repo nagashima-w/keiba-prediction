@@ -54,18 +54,31 @@
  * - isPositive=true かつ placeOddsMin が非null だが数値として使えない(1.0未満・NaN・Infinity。
  *   #74でisUsableOddsの基準を`>0`から`>=1.0`へ引き上げ。
  *   allocation-primitives.ts の isUsableOdds に基準を一本化)場合、賭け金・払戻のいずれにも
- *   計上せず bet.unjudgedOddsCount に別途計上する。現行の本番経路(expected-value.ts)では
- *   oddsMin が不正なら ev>1 判定自体を通らずそもそも isPositive=true にならないため、この状態には
- *   到達しない(#50調査済み)。将来の経路追加に備えた防御。
+ *   計上せず bet.unjudgedOddsCount に別途計上する。
+ *
+ *   **到達可能性(#74で機序を更新。AnalysisRowはoddsStatusにより2つの経路のいずれかから
+ *   作られるため、経路ごとに分けて書く。boss メタレビューR2・2026-09-04)**:
+ *   - 確定EV経路(`computeRaceEv`/`evaluateHorse`。oddsStatus="result"/"middle"): #74以降、
+ *     `isUsableOdds`を満たさないoddsMinは専用分岐で`ev=null`に強制されてから`isPositive`が
+ *     計算されるため(旧機序「ev>1判定自体を通らず」ではなく、値域チェックが`ev`の計算より
+ *     前に来る構造そのものが理由)、この経路からは構造的に到達不能。
+ *   - 推定EV経路(`computeEstimatedRaceEv`/`evaluateEstimatedHorse`。oddsStatus="yoso"):
+ *     こちらは`isUsableOdds`のゲートが無く、構造的には到達可能(`placeConfig.coef`が
+ *     非有限だと`isPositive=true`かつ`isUsableOdds`不成立になりうる。#74 boss メタレビューR1で
+ *     発見・残余として明記。`expected-value.ts`の`computeEstimatedRaceEv`JSDoc参照)。
+ *     ただし本番では`placeConfig`の供給元が`packages/app/src`に存在せず常に既定
+ *     (`coef=0.2`)が使われるため、**運用上は到達しない**(#50調査済み。状態分離自体は#23-B)。
+ *   将来の経路追加・#23-Bでの状態分離に備えた防御。
  * - 判定順序: この判定(unjudgedOdds)は払戻計算より前に行う。オッズが使えないと判定した馬が、
  *   その後の分岐で賭け金・払戻に計上される経路は無い。
  * - このレースの複勝payoutが規則Hの「ある」側(実配当取込済み)であっても、動作自体は決定的
  *   (=常に判定不能として除外する): placeOddsMin が不正であれば、実配当の金額計算自体は
  *   placeOddsMin を使わないにもかかわらず、betPlaced の判定に isUsableOdds を含めているため
  *   同様に賭け金・払戻から除外される。【未検討なのは動作ではなく妥当性】この組み合わせ
- *   (実配当取込済み×placeOddsMin不正)で「除外するのが本来正しい扱いか」は、#50の調査どおり
- *   本番経路では到達不能なため本タスクでは検討していない(=挙動が未定義という意味ではない。
- *   決めていないことを決めたと書かないための注記)。
+ *   (実配当取込済み×unjudgedOdds〈isPositive=trueかつplaceOddsMin不正〉)で「除外するのが
+ *   本来正しい扱いか」は、上記の到達可能性の分析(確定EV経路は構造的に到達不能・推定EV経路は
+ *   運用上到達しない)のとおり本番経路では到達不能なため本タスクでは検討していない
+ *   (=挙動が未定義という意味ではない。決めていないことを決めたと書かないための注記)。
  *
  * 結果が保存されていない分析はレポートから除外し、その件数を報告する(仕様の要件)。
  *

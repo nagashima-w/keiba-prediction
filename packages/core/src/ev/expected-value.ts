@@ -218,6 +218,31 @@ export interface EstimatedHorseEv extends HorseEv {
  * 確定EV経路(computeRaceEv/HorseEv)とは完全に独立した別関数・別型とすることで、確定EV経路の
  * 計算結果・型には一切影響を与えない(既存の回帰テストが示す挙動は不変)。
  *
+ * **残余(boss メタレビューR1・2026-09-04・#74。選択(b): 実装は変えず明記に留める)**:
+ * `evaluateEstimatedHorse` は `estimatedOddsMin === null` しか見ておらず、
+ * `estimatePlaceOddsMinFromWin` の非null出力を `isUsableOdds` に通していない。そのため
+ * `placeConfig.coef` が非有限(NaN/Infinity)だと、`estimatePlaceOddsMinFromWin` が
+ * `isUsableOdds` を満たさない値を返す(`Math.max(MIN_VALID_ODDS, ...)` の `Math.max` は
+ * 引数にNaNが混じると常にNaNを返し、Infinityが混じると常にInfinityを返すため、下限クランプが
+ * 機能しない)。具体的には `coef=NaN` で `placeOddsMin=NaN`・`ev=NaN`・`isPositive=false`、
+ * `coef=+Infinity` で `placeOddsMin=+Infinity`・`ev=+Infinity`・`isPositive=true`
+ * になる(実測。`expected-value.test.ts`「残余(boss メタレビューR1・選択(b))」describe参照)。
+ * 後者は `isPositive=true` かつ `placeOddsMin` が `isUsableOdds` を満たさないという、
+ * `verify.ts` の規則Uが「本番経路では到達しない」と明記している状態そのものであり、
+ * `evaluateHorse`(確定EV側。値域外はisUsableOddsで弾く)との間に新しい非対称を作る。
+ *
+ * **本番では到達しない**: `placeConfig`(`EstimatedPlaceConfig`)の供給元は
+ * `packages/app/src` に存在せず(`analysis-pipeline.ts` の任意dep宣言と
+ * `?? DEFAULT_ESTIMATED_PLACE_CONFIG` へのフォールバックの2箇所のみで、実際に非既定値を
+ * 渡す呼び出し元が無い)、本番では常に既定値(`coef=0.2`)が使われる。既定coefおよび
+ * `estimatePlaceOddsMinFromWin` が受理する有限のwinOdds(>=1.0)の組み合わせでは、
+ * 出力は常に `isUsableOdds` を満たす(`expected-value.test.ts`「AC-4(b)」describe参照)。
+ *
+ * **状態の分離(discriminated union化)は本Issueでは行わない。** `estimatePlaceOddsMinFromWin`が
+ * null/非有限/値域外を1つのnull戻り値に統合している設計自体の見直しは #23-B の射程
+ * (`docs/issue-order.md`「#23-B / #23-Cの再ゲートで必ず扱う論点」参照)。ここで新設すると
+ * #23-Bの状態分離設計を先取りすることになる。
+ *
  * @param priors 各馬の馬番と複勝圏内確率
  * @param odds 単勝・複勝オッズのスナップショット(単勝オッズのみ使用)
  * @param config EV設定(省略時は既定閾値1.0)
