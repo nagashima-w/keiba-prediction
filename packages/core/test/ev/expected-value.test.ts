@@ -374,7 +374,7 @@ describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換
       );
 
       it(
-        "coef=+Infinityかつwinodds=1.0(境界)のとき、加算項が0×Infinity=NaNになり" +
+        "coef=+InfinityかつwinOdds=1.0(境界)のとき、加算項が0×Infinity=NaNになり" +
           "戻り値もNaNになること(AC-4(b)が名指しした境界そのもの)",
         () => {
           const result = estimatePlaceOddsMinFromWin(1.0, { coef: Number.POSITIVE_INFINITY });
