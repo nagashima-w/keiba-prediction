@@ -394,7 +394,13 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
       "(本番では到達しない。estimatedPlaceConfigの供給元はpackages/app/srcに存在せず、" +
       "常に既定coef=0.2が使われるため)",
     () => {
-      it("coef=+Infinityのとき、isPositive=trueだがplaceOddsMinはisUsableOddsを満たさないこと", () => {
+      // code-reviewer指摘(2026-09-04): 残余ガードもAC-1と同じ規律(EstimatedHorseEvの
+      // 全7フィールド〈umaban/placeProb/placeOddsMin/ev/isPositive/excludedReason/
+      // evEstimated〉を射影する。一部だけを見るタプルにしない)で揃える。coef=+Infinity側だけ
+      // excludedReasonをtoBeNull()で見ていたのに対しcoef=NaN側は見ておらず非対称だった
+      // (#58のunavailableReason脱落と同型の検出力の穴)。toBe(NaN)はvitestがObject.isで
+      // 比較するため素直に使える(Object.is(NaN,NaN)===trueを実行して確認済み)。
+      it("coef=+Infinityのとき、isPositive=trueだがplaceOddsMinはisUsableOddsを満たさないこと(全7フィールド)", () => {
         const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
         const odds: OddsSnapshot = {
           officialDatetime: null,
@@ -408,14 +414,17 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
           { threshold: 1.0 },
           { coef: Number.POSITIVE_INFINITY },
         );
+        expect(result!.umaban).toBe(1);
+        expect(result!.placeProb).toBe(0.4);
         expect(result!.placeOddsMin).toBe(Number.POSITIVE_INFINITY);
         expect(result!.ev).toBe(Number.POSITIVE_INFINITY);
         expect(result!.isPositive).toBe(true);
         expect(result!.excludedReason).toBeNull();
+        expect(result!.evEstimated).toBe(true);
         expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
       });
 
-      it("coef=NaNのとき、ev/placeOddsMinはNaNでisPositive=falseになること", () => {
+      it("coef=NaNのとき、ev/placeOddsMinはNaNでisPositive=falseになること(全7フィールド)", () => {
         const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
         const odds: OddsSnapshot = {
           officialDatetime: null,
@@ -429,9 +438,13 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
           { threshold: 1.0 },
           { coef: Number.NaN },
         );
-        expect(Number.isNaN(result!.placeOddsMin!)).toBe(true);
-        expect(Number.isNaN(result!.ev!)).toBe(true);
+        expect(result!.umaban).toBe(1);
+        expect(result!.placeProb).toBe(0.4);
+        expect(result!.placeOddsMin).toBe(Number.NaN);
+        expect(result!.ev).toBe(Number.NaN);
         expect(result!.isPositive).toBe(false);
+        expect(result!.excludedReason).toBeNull();
+        expect(result!.evEstimated).toBe(true);
         expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
       });
     },
