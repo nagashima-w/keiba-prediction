@@ -9,6 +9,7 @@ import {
   determineSkipReasonCode,
   foldToCandidateSubsets,
   isUsableOdds,
+  MIN_VALID_ODDS,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
@@ -19,6 +20,8 @@ import {
   type OutcomeIndexSet,
 } from "../../src/ev/allocation-primitives.js";
 import type { PlaceOutcome } from "../../src/ev/place-joint-model.js";
+import { computeRaceEv, type HorsePrior } from "../../src/ev/expected-value.js";
+import type { OddsSnapshot, PlaceOdds } from "../../src/scraper/types.js";
 
 /**
  * allocation-primitives — 機能D-2a(Issue #14)で bet-allocation.ts から抽出した
@@ -464,34 +467,77 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
     });
   });
 
-  describe("isUsableOdds(オッズとして使える値かの判定・Issue #31)", () => {
+  describe("isUsableOdds(オッズとして使える値かの判定・Issue #31→#74で1.0以上へ引き上げ)", () => {
     // 背景: combo-bet-allocation.ts の validateCandidates(:412-416)と resolveComboOdds(:672-674)が
     // `!Number.isFinite(x) || x <= 0` を独立に2回実装していた(将来どちらかだけ直す事故の温床)。
     // 本述語へ1本化し、複勝側(bet-allocation.ts)の候補フィルタを3つ目の委譲先として追加する
-    // (Issue #31)。「正の有限値」であることのみを判定し、null判定は呼び出し側の責務とする
+    // (Issue #31)。「1.0以上の有限値」であることのみを判定し、null判定は呼び出し側の責務とする
     // (「未確定」と「不正値」の区別を呼び出し側に残すため、引数の型はnumberのみでnullを許容しない)。
     //
-    // 適用範囲の注意(boss拘束力のある補足1): 本述語は「オッズ」の3箇所にのみ適用する。
+    // #74: オッズの値域は「1.0以上」であり0は値域外(Issue #74)。旧基準`value > 0`は
+    // [0,1)を通してしまい、複勝EV側(expected-value.ts)がoddsMin=0を「ev=0」という
+    // 正常な判定結果に潰していた(判定不能と判定結果の混同)。基準を`value >= MIN_VALID_ODDS`
+    // (1.0)へ引き上げ、全呼び出し元に同時適用する。
+    // 数(単位を明記): #74着手前は呼び出し6・モジュール3(combo-bet-allocation.ts 2・
+    // bet-allocation.ts 3・verify.ts 1)。本Issueで expected-value.ts・build-prompt.ts・
+    // probability-quality-metrics.ts の3モジュールが新たに委譲し、#74後は呼び出し9・
+    // モジュール6になる(詳細・再現コマンドは allocation-primitives.ts の isUsableOdds JSDoc参照)。
+    //
+    // 適用範囲の注意(boss拘束力のある補足1): 本述語は「オッズ」の判定にのみ適用する
+    // (呼び出し箇所の数は上記のとおり変動するため、ここでは数を断定しない)。
     // validateCandidatesの馬番検証(umabans)は式がたまたま同一なだけで意味論が別(馬番の
     // 妥当性であってオッズの妥当性ではない)であるため、本述語を流用してはならない
     // (将来オッズ側の基準だけを変えた際に馬番の検証まで道連れで変わる事故を防ぐ)。
     const table: Array<{ name: string; value: number; expected: boolean }> = [
       { name: "通常値(2.2)", value: 2.2, expected: true },
-      { name: "正の極小値(1e-9)", value: 1e-9, expected: true },
+      // #74: 旧基準では true だったが、1.0未満は値域外のため false へ変更(引き上げの中核)。
+      { name: "正の極小値(1e-9)", value: 1e-9, expected: false },
       { name: "Number.MAX_VALUE(有限の最大値)", value: Number.MAX_VALUE, expected: true },
-      { name: "0(境界。>0を満たさない)", value: 0, expected: false },
-      // 負のゼロ(-0)。-0 > 0 は false なので現状の実装で正しく除外される想定の境界値
+      { name: "0(境界。1.0以上を満たさない)", value: 0, expected: false },
+      // 負のゼロ(-0)。-0 >= 1.0 は false なので現状の実装で正しく除外される想定の境界値
       // (code-reviewer指摘)。-0 === 0 は true だが Object.is(-0, 0) は false であり、
-      // 実装が `value > 0` を使う限り区別なく false になるはず、という点を明示的に固定する。
-      // it.eachの表示名は上記$name(このオブジェクトのname)を使うため、"0"の行と紛れない。
+      // 実装が `value >= MIN_VALID_ODDS` を使う限り区別なく false になるはず、という点を
+      // 明示的に固定する。it.eachの表示名は上記$name(このオブジェクトのname)を使うため、
+      // "0"の行と紛れない。
       { name: "負のゼロ(-0)", value: -0, expected: false },
       { name: "負値(-1)", value: -1, expected: false },
       { name: "NaN", value: Number.NaN, expected: false },
       { name: "+Infinity", value: Number.POSITIVE_INFINITY, expected: false },
       { name: "-Infinity", value: Number.NEGATIVE_INFINITY, expected: false },
+      // #74 AC-3: 値域の境界(1.0未満/以上)を明示的に固定する。
+      { name: "0.9999999(境界。1.0未満)", value: 0.9999999, expected: false },
+      { name: "1(境界ちょうど。1.0以上を満たす)", value: 1, expected: true },
+      { name: "1.0000001(境界を僅かに超える)", value: 1.0000001, expected: true },
     ];
     it.each(table)("$name → $expected", ({ value, expected }) => {
       expect(isUsableOdds(value)).toBe(expected);
+    });
+
+    it("MIN_VALID_ODDSは1.0である", () => {
+      expect(MIN_VALID_ODDS).toBe(1.0);
+    });
+
+    // boss裁定(Q1(b)・2026-09-04): 値域の定数(MIN_VALID_ODDS)と、その定数を断定的に
+    // 埋め込んだ除外理由の散文(expected-value.ts)を、1つのit()の中で両方ハードコードした
+    // リテラルとして固定する。片方だけ直して緑になる経路を作らないため
+    // (`expect(x).toEqual(実装からimportした定数)`は使わない。#55の自己参照比較の穴)。
+    // MIN_VALID_ODDSを変更したら、このテストと下記2箇所を同時に直すこと:
+    //   - expected-value.ts の除外理由文言「複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外」
+    //   - combo-bet-allocation.ts / bet-allocation.ts のAC-11是正箇所(散文中の「1.0未満」表記)
+    it("値域の定数と除外理由の文言は同時に直す(定数を変えるとこのテストが赤くなる)", () => {
+      expect(MIN_VALID_ODDS).toBe(1.0); // ハードコードしたリテラル
+      const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.5 }];
+      const place: PlaceOdds = { oddsMin: 0, oddsMax: 0, ninki: null };
+      const odds: OddsSnapshot = {
+        officialDatetime: null,
+        oddsStatus: "result",
+        win: {},
+        place: { 1: place },
+      };
+      const [result] = computeRaceEv(priors, odds);
+      expect(result!.excludedReason).toBe(
+        "複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外", // ハードコードしたリテラル
+      );
     });
   });
 });

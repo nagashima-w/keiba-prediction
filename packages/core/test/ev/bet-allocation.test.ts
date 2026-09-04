@@ -10,6 +10,8 @@ import {
   type PlaceOutcome,
   type SkipReasonCode,
 } from "../../src/ev/bet-allocation.js";
+import { computeRaceEv, type HorsePrior } from "../../src/ev/expected-value.js";
+import type { OddsSnapshot } from "../../src/scraper/types.js";
 
 /** 候補馬(EVプラス・オッズあり)を組み立てる補助関数。 */
 function candidate(
@@ -1342,15 +1344,16 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     // 検証していなかった。無関係な1頭に NaN/Infinity が混じると `runGreedyAllocation` の
     // payout計算(`trialX[idx] * odds[idx]`)がNaN汚染され、健全な他の馬の配分まで巻き添えで
     // 消えて「妙味が小さく…」という誤った見送り理由に化けていた(#31再現ログ)。
-    // 判定基準は allocation-primitives.ts の isUsableOdds(正の有限値)に委譲する
-    // (combo-bet-allocation.ts の validateCandidates/resolveComboOdds と同一基準を共有)。
+    // 判定基準は allocation-primitives.ts の isUsableOdds(1.0以上の有限値。#74で`>0`から
+    // 引き上げ)に委譲する(combo-bet-allocation.ts の validateCandidates/resolveComboOdds と
+    // 同一基準を共有)。
 
     describe("候補選定・excludedReasonのテーブル駆動検証", () => {
       const excludedTable: Array<{ name: string; value: number }> = [
         { name: "NaN", value: Number.NaN },
         { name: "+Infinity", value: Number.POSITIVE_INFINITY },
         { name: "-Infinity", value: Number.NEGATIVE_INFINITY },
-        { name: "0(境界。>0を満たさない)", value: 0 },
+        { name: "0(境界。>=1.0を満たさない)", value: 0 },
         { name: "負値(-1)", value: -1 },
       ];
       it.each(excludedTable)(
@@ -1370,7 +1373,10 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       );
 
       const retainedTable: Array<{ name: string; value: number }> = [
-        { name: "正の極小値(1e-9)", value: 1e-9 },
+        // #74でisUsableOddsの基準が`>0`から`>=1.0`へ引き上げられたため、1e-9(旧基準では
+        // 過剰除外の否定側の境界だった)はもう妥当値ではない。境界の採用側である1.0に置換する
+        // (このテストの意図=過剰除外しないことの固定は維持する)。
+        { name: "境界ちょうど(1.0)", value: 1.0 },
         { name: "Number.MAX_VALUE(有限の最大値)", value: Number.MAX_VALUE },
       ];
       it.each(retainedTable)(
@@ -1455,6 +1461,56 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         expect(result.diagnostics.oddsMalformedCount).toBe(result.diagnostics.excludedCount);
       });
     });
+
+    describe(
+      "HorseEv層とBetAllocation層の二重の記録(Issue #74【最重要の裁定】: " +
+        "HorseEv.excludedReasonは「EVを計算しなかった理由」、BetAllocation.excludedReasonは" +
+        "「配分候補にしなかった理由」であり、allocateBetsはHorseEvを経由しない直接呼び出しも" +
+        "受ける公開関数なので、上流を信用せず自分の入力に対して独立に判定する〈#31の門番の原則〉)",
+      () => {
+        it(
+          "computeRaceEvがplaceOddsMin=0(値域外)で返すHorseEvをそのままAllocationHorseへ" +
+            "橋渡しすると、HorseEv側の新文言とBetAllocation側のEXCLUDED_ODDS_MALFORMED/" +
+            "oddsMalformedCountが同時に立つこと(AC-4d: #74引き上げ後もbet-allocation.ts側の" +
+            "値は変更前〈isUsableOdds(0)は#74前後どちらでもfalse〉と同じ)",
+          () => {
+            const priors: HorsePrior[] = [{ umaban: 2, placeProb: 0.35 }];
+            const odds: OddsSnapshot = {
+              officialDatetime: null,
+              oddsStatus: "result",
+              win: {},
+              place: { 2: { oddsMin: 0, oddsMax: 0, ninki: null } },
+            };
+            const [horseEv] = computeRaceEv(priors, odds);
+
+            // 層1(HorseEv): placeOddsMinは生の値(0)のまま保持され、evのみnullになること。
+            expect(horseEv!.placeOddsMin).toBe(0);
+            expect(horseEv!.ev).toBeNull();
+            expect(horseEv!.excludedReason).toBe(
+              "複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外",
+            );
+
+            // 層2(BetAllocation): HorseEvをAllocationHorseへ橋渡しした入力で確認する
+            // (analysis-pipeline.ts:620のAnalysisRow生成と同じ「1箇所でのみ生成される」経路を
+            // 模す)。
+            const horses: AllocationHorse[] = [
+              candidate(1, 0.6, 3),
+              {
+                umaban: horseEv!.umaban,
+                placeProb: horseEv!.placeProb,
+                placeOddsMin: horseEv!.placeOddsMin,
+                ev: horseEv!.ev,
+                isPositive: horseEv!.isPositive,
+              },
+            ];
+            const result = allocateBets(horses, 2, config({ bankroll: 10000, perRaceCap: 10000 }));
+            const allocation = result.allocations.find((a) => a.umaban === 2)!;
+            expect(allocation.excludedReason).toBe("複勝オッズ下限が不正な値のため対象外");
+            expect(result.diagnostics.oddsMalformedCount).toBe(1);
+          },
+        );
+      },
+    );
 
     describe("AC3(#31の本丸): 無関係な1頭の不正値が健全な馬の配分を巻き添えにしないこと", () => {
       it("不正値の馬を、同じplaceProbを持つ候補外の馬(placeOddsMin=null・isPositive=false)に" +

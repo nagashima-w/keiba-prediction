@@ -51,7 +51,8 @@
  *   (勝敗が確定できないため)。
  *
  * オッズ判定不能の除外(規則U、Issue#70 AC-A4。#50の防御的堅牢化):
- * - isPositive=true かつ placeOddsMin が非null だが数値として使えない(0以下・NaN・Infinity。
+ * - isPositive=true かつ placeOddsMin が非null だが数値として使えない(1.0未満・NaN・Infinity。
+ *   #74でisUsableOddsの基準を`>0`から`>=1.0`へ引き上げ。
  *   allocation-primitives.ts の isUsableOdds に基準を一本化)場合、賭け金・払戻のいずれにも
  *   計上せず bet.unjudgedOddsCount に別途計上する。現行の本番経路(expected-value.ts)では
  *   oddsMin が不正なら ev>1 判定自体を通らずそもそも isPositive=true にならないため、この状態には

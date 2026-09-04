@@ -424,8 +424,12 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       for (let a = 1; a <= 4; a++) for (let b = a + 1; b <= 4; b++) combos.push([a, b]);
       const oddsMap = new Map<string, number | null>();
       combos.forEach((c, i) => {
-        // 半数は高オッズ(明らかに正EV)、半数は低オッズ(明らかに非正EV)。
-        oddsMap.set(buildComboOddsKey(c), i % 2 === 0 ? 5 : 0.5);
+        // 半数は高オッズ(明らかに正EV)、半数は低いが妥当なオッズ(明らかに非正EV)。
+        // #74でisUsableOddsの基準が`>0`から`>=1.0`へ引き上げられたため、0.5(値域外)は
+        // もう「妥当だが低いオッズ」ではなくmalformedに分類され、notPositiveCountが0になって
+        // 下記の無条件expect(positiveCount>0 && notPositiveCount>0)が壊れる。妥当な下限値
+        // 1.0(hitProb×1.0<1になり非正EVを保つ)に置換する(boss裁定・前提expectは維持)。
+        oddsMap.set(buildComboOddsKey(c), i % 2 === 0 ? 5 : 1.0);
       });
       return { horses, oddsMap };
     }

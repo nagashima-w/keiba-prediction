@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.6.2)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.6.3)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -21,7 +21,7 @@
   - **単勝オッズ**: 賭け対象ではなく、発売前レースで複勝下限を概算する用途にのみ使う
     (`estimatePlaceOddsMinFromWin`)
   - 馬連・馬単・三連単・枠連・枠単は未対応(拡張のロードマップと技術的な依存関係は GitHub Issue #22)
-- バージョン: ルート/アプリ `1.6.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.6.3`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -91,7 +91,11 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   `biasCorrectionScale=0.3` で一律減衰)を、頭数レベル正規化(目標複勝圏内数 min(3, 頭数)へ寄せる、
   逸脱許容 0.1)したうえで prior を算出。prior は [0.02, 0.95] にクランプ。
 - **EV(期待値)**(`ev/expected-value.ts`): 複勝期待値 = place_prob × **複勝オッズ下限(oddsMin)**。
-  EV > 閾値(既定 1.0、厳密不等号)の馬のみ `isPositive=true`。オッズ欠損馬は EV=null で対象外。
+  EV > 閾値(既定 1.0、厳密不等号)の馬のみ `isPositive=true`。オッズ欠損馬(馬番が無い/下限が
+  null)、および複勝オッズ下限が**値域外**(オッズの値域は1.0以上であり、0を含む1.0未満・非有限は
+  値域外。判定は `ev/allocation-primitives.ts` の `isUsableOdds` に集約。Issue #74)の馬は EV=null
+  で対象外。値域外の場合も `placeOddsMin` は生の値を保持し null に潰さない(判定不能〈値域外〉と
+  判定結果〈EV=0等〉を混ぜない。Issue #31 の原則)。
   発売前(oddsStatus=yoso で複勝オッズが無い)場合は単勝オッズから複勝下限を概算する
   `estimatePlaceOddsMinFromWin`(係数 0.2、あくまで概算で `evEstimated=true` として区別)。
 

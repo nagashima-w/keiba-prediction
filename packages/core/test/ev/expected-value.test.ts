@@ -104,6 +104,99 @@ describe("computeRaceEv(複勝期待値計算)", () => {
     });
   });
 
+  describe(
+    "オッズが値域外の馬の扱い(Issue #74: オッズの値域は1.0以上であり0は値域外。" +
+      "旧実装は`oddsMin===null`しか見ておらず、値域外の値〈0等〉を通して" +
+      "`ev=placeProb×0=0`という「正常な判定結果」に潰していた。判定不能〈値域外〉を" +
+      "判定結果〈EV=0〉に混ぜない)",
+    () => {
+      // 3つの除外理由(馬番が無い/下限が未確定/値域外)。#74で3つ目(値域外)を新設する。
+      const REASON_NO_UMABAN = "複勝オッズに該当馬番が存在しないため対象外";
+      const REASON_NULL = "複勝オッズ下限が未確定(null)のため対象外";
+      // boss裁定Q1(a)(2026-09-04): 到達しうる全入力(0/-0/(0,1)/NaN/±Infinity)に対して
+      // 真であることが必須。「1.0未満」単独だとNaN・+Infinityで偽になる(NaN<1.0もInfinity<1.0も
+      // false)。「1.0未満・非有限」の選言にすることで、値域外(1.0未満)と非有限のどちらで
+      // 除外されても文言が偽にならない。
+      const REASON_MALFORMED = "複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外";
+
+      const placeProb = 0.5;
+
+      /** umaban=1のみを持つOddsSnapshotを組み立てる。undefinedなら馬番自体を含めない。 */
+      function snapshotWith(oddsMin: number | null | undefined): OddsSnapshot {
+        if (oddsMin === undefined) {
+          return oddsSnapshot({});
+        }
+        return oddsSnapshot({ 1: place(oddsMin) });
+      }
+
+      type Case = {
+        name: string;
+        oddsMin: number | null | undefined;
+        expectedEv: number | null;
+        expectedPlaceOddsMin: number | null;
+        expectedReason: string | null;
+      };
+
+      // AC-1: oddsMin ∈ {0, -0, 0.5, 0.9999999, 1, 1.0000001, 2.5, NaN, +Infinity, -Infinity,
+      // null, 馬番自体が無い} × 期待(ev, placeOddsMin, excludedReason)。
+      const cases: Case[] = [
+        { name: "oddsMin=0(値域外・境界)", oddsMin: 0, expectedEv: null, expectedPlaceOddsMin: 0, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=-0(値域外)", oddsMin: -0, expectedEv: null, expectedPlaceOddsMin: -0, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=0.5(値域外)", oddsMin: 0.5, expectedEv: null, expectedPlaceOddsMin: 0.5, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=0.9999999(値域外・境界のすぐ下)", oddsMin: 0.9999999, expectedEv: null, expectedPlaceOddsMin: 0.9999999, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=1(境界ちょうど・値域内)", oddsMin: 1, expectedEv: placeProb * 1, expectedPlaceOddsMin: 1, expectedReason: null },
+        { name: "oddsMin=1.0000001(境界を僅かに超える・値域内)", oddsMin: 1.0000001, expectedEv: placeProb * 1.0000001, expectedPlaceOddsMin: 1.0000001, expectedReason: null },
+        { name: "oddsMin=2.5(通常値・値域内)", oddsMin: 2.5, expectedEv: placeProb * 2.5, expectedPlaceOddsMin: 2.5, expectedReason: null },
+        { name: "oddsMin=NaN(非有限)", oddsMin: Number.NaN, expectedEv: null, expectedPlaceOddsMin: Number.NaN, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=+Infinity(非有限)", oddsMin: Number.POSITIVE_INFINITY, expectedEv: null, expectedPlaceOddsMin: Number.POSITIVE_INFINITY, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=-Infinity(非有限)", oddsMin: Number.NEGATIVE_INFINITY, expectedEv: null, expectedPlaceOddsMin: Number.NEGATIVE_INFINITY, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=null(未確定)", oddsMin: null, expectedEv: null, expectedPlaceOddsMin: null, expectedReason: REASON_NULL },
+        { name: "馬番自体が無い", oddsMin: undefined, expectedEv: null, expectedPlaceOddsMin: null, expectedReason: REASON_NO_UMABAN },
+      ];
+
+      it.each(cases)(
+        "$name → HorseEvの全6フィールド(umaban/placeProb/placeOddsMin/ev/isPositive/excludedReason)を値として固定する(AC-1)",
+        ({ oddsMin, expectedEv, expectedPlaceOddsMin, expectedReason }) => {
+          const priors: HorsePrior[] = [{ umaban: 1, placeProb }];
+          const [result] = computeRaceEv(priors, snapshotWith(oddsMin));
+
+          // HorseEvの全6フィールドを射影する(#58のunavailableReason脱落と同型の検出力低下を
+          // 防ぐため、一部だけを見るタプルにしない)。
+          expect(result!.umaban).toBe(1);
+          expect(result!.placeProb).toBe(placeProb);
+
+          if (typeof expectedPlaceOddsMin === "number" && Number.isNaN(expectedPlaceOddsMin)) {
+            expect(Number.isNaN(result!.placeOddsMin as number)).toBe(true);
+          } else {
+            expect(result!.placeOddsMin).toBe(expectedPlaceOddsMin);
+          }
+
+          if (expectedEv === null) {
+            expect(result!.ev).toBeNull();
+          } else {
+            expect(result!.ev).toBeCloseTo(expectedEv, 10);
+          }
+
+          expect(result!.isPositive).toBe(expectedEv !== null && expectedEv > 1.0);
+          expect(result!.excludedReason).toBe(expectedReason);
+        },
+      );
+
+      it("3つの除外理由(馬番が無い/下限が未確定/値域外)はリテラルとして固定され、相互に相異なる(AC-2)", () => {
+        // リテラルとの一致(#55: 実装からimportした定数とのtoEqualは自己参照になるため使わない。
+        // ここではハードコードした文字列同士を比較する)。
+        expect(REASON_NO_UMABAN).toBe("複勝オッズに該当馬番が存在しないため対象外");
+        expect(REASON_NULL).toBe("複勝オッズ下限が未確定(null)のため対象外");
+        expect(REASON_MALFORMED).toBe("複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外");
+        // 相互相異(Set.sizeだけだと3つ同時に差し替えても通ってしまうため、対ごとの比較も置く)。
+        expect(new Set([REASON_NO_UMABAN, REASON_NULL, REASON_MALFORMED]).size).toBe(3);
+        expect(REASON_NO_UMABAN).not.toBe(REASON_NULL);
+        expect(REASON_NO_UMABAN).not.toBe(REASON_MALFORMED);
+        expect(REASON_NULL).not.toBe(REASON_MALFORMED);
+      });
+    },
+  );
+
   describe("入力全体の扱い", () => {
     it("全馬を入力順で返し、対象外馬も欠落させない", () => {
       const priors: HorsePrior[] = [

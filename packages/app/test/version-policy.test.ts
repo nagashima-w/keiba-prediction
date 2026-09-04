@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.6.2";
+const EXPECTED_APP_VERSION = "1.6.3";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,11 +234,11 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.6.2(Issue #73: オッズの数値化を共有ヘルパに統合し桁区切りカンマを通す)である", () => {
+  it("root と app の version が 1.6.3(Issue #74: 複勝オッズ下限の値域外〈0等〉を判定不能として扱う)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
-    // #55 が 1.6.0、#34 が 1.6.1。本回は #73。オッズ文字列の数値化(桁区切りカンマ対応等)を
-    // 共有ヘルパ(scraper/odds-number.ts)に統合する不具合修正であり、利用者から見てできることは
-    // 増えず分析結果の数値も変わらないため patch。
+    // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2。本回は #74。isUsableOddsの基準を`>0`から
+    // `>=1.0`へ引き上げる不具合修正であり、利用者から見てできることは増えず、コミット済み全
+    // フィクスチャで観測されるオッズ値も一切変わらないため patch(詳細は docs/versioning.md)。
     // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならない
     // ことを固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);

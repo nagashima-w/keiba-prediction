@@ -496,7 +496,9 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       const result = buildComboCandidates(horses, 3, 3, oddsByKey);
 
       expect(result.diagnostics.enumeratedCount).toBe(560); // C(16,3)
-      // スカラー変換された値は常に正の有限値かnullのいずれかであり、malformed(不正値)にならないこと。
+      // スカラー変換された値は常に1.0以上の有限値かnullのいずれかであり(#74でisUsableOddsの
+      // 基準を`>0`から引き上げ後も、フィクスチャの三連複オッズ最小値は2.4で1.0を上回るため
+      // 崩れない。実測は本テストの実行結果参照)、malformed(不正値)にならないこと。
       expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(0);
       const total =
         result.diagnostics.judged.positiveCount +

@@ -2,7 +2,7 @@
   "name": "keiba-ev-tool",
   "private": true,
   "type": "module",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "netkeibaのデータから複勝期待値プラスの馬券を抽出する分析ツール(個人利用専用)",
   "scripts": {
     "test": "pnpm -r test && vitest run",
