@@ -496,7 +496,9 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       const result = buildComboCandidates(horses, 3, 3, oddsByKey);
 
       expect(result.diagnostics.enumeratedCount).toBe(560); // C(16,3)
-      // スカラー変換された値は常に正の有限値かnullのいずれかであり、malformed(不正値)にならないこと。
+      // スカラー変換された値は常に1.0以上の有限値かnullのいずれかであり(#74でisUsableOddsの
+      // 基準を`>0`から引き上げ後も、フィクスチャの三連複オッズ最小値は2.4で1.0を上回るため
+      // 崩れない。実測は本テストの実行結果参照)、malformed(不正値)にならないこと。
       expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(0);
       const total =
         result.diagnostics.judged.positiveCount +
@@ -767,6 +769,11 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(trioWarning!.message.includes("状態②③")).toBe(true);
       // 内訳から実際の失敗件数(1件)が正しく読み取れること。
       expect(trioWarning!.message.includes("取得失敗=1")).toBe(true);
+      // 状態④(取得失敗)の文言に、別原因(構造異常=parseError)向けの「構造が変わった可能性」が
+      // 混入しないこと(偽陽性方向の固定。Issue #15。このシナリオはparseErrorCount=0のため、
+      // comboOddsWarningMessageのstructureWarningは元々空文字列になるはずで、既存挙動の
+      // 特性を固定するテストであり新しいRedを作るものではない)。
+      expect(trioWarning!.message.includes("構造が変わった可能性")).toBe(false);
     });
 
     it("値がnull(missing)の組はtrioComboにキーごと存在し、失敗軸由来の組(unfetched)はキーごと不在であること。JSON往復後も両方向とも保たれること(code-reviewer/boss指摘・要修正1)", async () => {

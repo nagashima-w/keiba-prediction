@@ -1,0 +1,911 @@
+import { describe, expect, it } from "vitest";
+
+import { DEFAULT_BET_ALLOCATION_CONFIG } from "@keiba/core/ev/bet-allocation";
+import {
+  buildComboOddsKey,
+  DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+} from "@keiba/core/ev/combo-bet-allocation";
+
+import {
+  buildAllocationRecord,
+  buildInvalidAllocationRecordForException,
+  toMixedAllocationSettings,
+  type AnalysisAllocationSettings,
+} from "../src/main/allocation-record.js";
+import type { AnalysisRow, ComboOddsFetchDiagnosticsView, ComboOddsFetchOutcomeView } from "../src/shared/analysis-types.js";
+import {
+  buildMixedRaceAllocationWithOutcome,
+  type MixedAllocationSettings,
+} from "../src/shared/mixed-race-allocation.js";
+import type { MixedCandidateBuildInput } from "../src/shared/mixed-candidates.js";
+
+/**
+ * allocation-record.test.ts — Issue #59。`allocation-outcome-codes.test.ts` と同じテスト
+ * ヘルパー流儀(自己テスト付き)を踏襲する(独立コピー。両ファイルで意図が異なるため共有しない)。
+ */
+
+// ============================================================================
+// テストヘルパー
+// ============================================================================
+
+function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
+  return {
+    umaban: overrides.umaban,
+    wakuban: overrides.wakuban ?? 90,
+    horseName: `${overrides.umaban}番`,
+    prior: overrides.prior === undefined ? 0.3 : overrides.prior,
+    adjustedProb: overrides.adjustedProb ?? 0.5,
+    placeOddsMin: overrides.placeOddsMin === undefined ? 3 : overrides.placeOddsMin,
+    ev: overrides.ev === undefined ? 1.5 : overrides.ev,
+    isPositive: overrides.isPositive ?? true,
+    reason: null,
+    careerRunCount: overrides.careerRunCount === undefined ? 999 : overrides.careerRunCount,
+    mark: null,
+    evEstimated: overrides.evEstimated ?? false,
+    conditionChangeTags: [],
+  };
+}
+
+function raceInput(
+  overrides: Partial<MixedCandidateBuildInput> & { rows: readonly AnalysisRow[] },
+): MixedCandidateBuildInput {
+  return { oddsStatus: "result", ...overrides };
+}
+
+function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAllocationSettings {
+  return {
+    bankroll: 300000,
+    perRaceCap: 20000,
+    kellyFraction: 0.5,
+    evThreshold: 1.0,
+    includeComboOdds: true,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+    ...overrides,
+  };
+}
+
+function umabansOf(n: number): number[] {
+  return Array.from({ length: n }, (_, i) => i + 1);
+}
+
+function allCandidateRows(n: number): AnalysisRow[] {
+  return umabansOf(n).map((umaban) => row({ umaban }));
+}
+
+/**
+ * 全頭がEVマイナス(複勝候補0頭)になる行。coreの配分計算には到達するが
+ * `isSkip===true`(`skipReasonCode="no-candidates"`)になる入力を作るために使う
+ * (`allocation-outcome-codes.test.ts` の同名ヘルパーと同じレシピ。両ファイルで意図が
+ * 異なるため共有せず独立コピーにする——このファイルの流儀に合わせる)。
+ */
+function allNonCandidateRows(n: number): AnalysisRow[] {
+  return umabansOf(n).map((umaban) => row({ umaban, placeOddsMin: 1.1, ev: 0.5, isPositive: false }));
+}
+
+function combinations<T>(items: readonly T[], k: number): T[][] {
+  const results: T[][] = [];
+  if (k <= 0 || k > items.length) {
+    return results;
+  }
+  const current: T[] = [];
+  const backtrack = (start: number): void => {
+    if (current.length === k) {
+      results.push([...current]);
+      return;
+    }
+    for (let i = start; i < items.length; i++) {
+      current.push(items[i]!);
+      backtrack(i + 1);
+      current.pop();
+    }
+  };
+  backtrack(0);
+  return results;
+}
+
+function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const combo of combinations(umabans, comboSize)) {
+    record[buildComboOddsKey(combo)] = odds;
+  }
+  return record;
+}
+
+function comboOddsOutcome(
+  betType: "wide" | "trio",
+  state: ComboOddsFetchOutcomeView["state"],
+): ComboOddsFetchOutcomeView {
+  const diagnostics: ComboOddsFetchDiagnosticsView = {
+    betType,
+    requestCount: 0,
+    expectedComboCount: 0,
+    obtainedComboCount: 0,
+    missingComboCount: 0,
+    axisUmabans: [],
+    attempts: [],
+    numericConflictCount: 0,
+    nullWinConflictCount: 0,
+    conflictSamples: [],
+  };
+  return { state, diagnostics };
+}
+
+/** n頭ぶんの、正EVなワイド・3連複オッズ一式を持つ race を作る補助関数(混在経路へ入るための共通材料)。 */
+function raceWithPositiveCombos(n: number, overrides: Partial<MixedCandidateBuildInput> = {}): MixedCandidateBuildInput {
+  const umabans = umabansOf(n);
+  return raceInput({
+    rows: allCandidateRows(n),
+    wideCombo: fullOddsRecord(umabans, 2, 100000),
+    trioCombo: fullOddsRecord(umabans, 3, 100000),
+    comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    ...overrides,
+  });
+}
+
+/**
+ * 簡易疑似乱数(シード固定・再現可能。Math.randomは使わない)。AC3の「複勝・ワイド・3連複が
+ * すべてstake>0になる」入力を作るために使う——`fullOddsRecord`(全組合せ一律オッズ)では
+ * 貪欲最適化が単一券種に丸ごと寄ってしまい(実測: 全組合せのEV・限界効用が完全に同値の
+ * ため、券種間で競合せず1つが総取りする)、券種混在を再現できないことを事前にtsxで実測確認済み。
+ */
+function mulberry32(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** umabans(昇順)から comboSize の組合せを列挙し、[min,max)の範囲でばらけたオッズを割り当てる。 */
+function variedOddsRecord(
+  umabans: readonly number[],
+  comboSize: number,
+  min: number,
+  max: number,
+  seed: number,
+): Record<string, number> {
+  const rnd = mulberry32(seed);
+  const record: Record<string, number> = {};
+  for (const combo of combinations(umabans, comboSize)) {
+    record[buildComboOddsKey(combo)] = Math.round((min + rnd() * (max - min)) * 10) / 10;
+  }
+  return record;
+}
+
+/**
+ * 8頭・複勝オッズも馬ごとに異なる・ワイド[3,25)/3連複[8,80)でばらけたオッズを持つ race。
+ * 複勝・ワイド・3連複の3券種すべてがstake>0で選ばれることを事前にtsxで実測確認済み
+ * (seed=7。AC3の「空振り防止」の根拠)。
+ */
+function raceWithDiverseCombos(): MixedCandidateBuildInput {
+  const n = 8;
+  const umabans = umabansOf(n);
+  const placeOddsByUmaban = [2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0];
+  return raceInput({
+    rows: umabans.map((umaban, i) => row({ umaban, placeOddsMin: placeOddsByUmaban[i] })),
+    wideCombo: variedOddsRecord(umabans, 2, 3, 25, 7),
+    trioCombo: variedOddsRecord(umabans, 3, 8, 80, 107),
+    comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+  });
+}
+
+/**
+ * 8頭・**複勝オッズ(placeOddsMin)とEVを馬ごとにばらけさせた** race(組合せオッズは持たない)。
+ *
+ * coordinator/boss差し戻し(N/P): place-only経路のフィクスチャが `allCandidateRows(8)`
+ * (=`row()`の既定値)だったため、`placeBetsOf` が写す8明細の `odds` が全行 3、`ev` が全行 1.5 の
+ * 定数になっていた。値が定数だと、`odds: a.placeOddsMin` を `3` 直書きに、`ev: a.ev` を `1.5`
+ * 直書きに変異させても検出できない(実測でapp全緑だった)。
+ * これは `.claude/agents/code-reviewer.md` に載っている前例(フィクスチャの明示値が既定値と
+ * 同値で、assertが「この入力での値の一致」しか見ていなかった)の後半にあたる。
+ *
+ * 値の選び方(自己テストで固定する):
+ * - placeOddsMin の8値・ev の8値はそれぞれ互いに異なる
+ * - 2群は値集合として交わらない(odds⇄evの入れ替え変異が値の偶然一致で潰れない)
+ * - どちらも `row()` の既定値(placeOddsMin=3・ev=1.5)を含まない(どの1明細が選ばれても
+ *   既定値直書きへの変異を検出できる)
+ */
+function raceWithDiversePlaceOdds(): MixedCandidateBuildInput {
+  const placeOddsByUmaban = [2.4, 2.8, 3.2, 3.6, 4.2, 4.6, 5.2, 5.6];
+  const evByUmaban = [1.95, 1.85, 1.75, 1.65, 1.45, 1.35, 1.25, 1.15];
+  return raceInput({
+    rows: umabansOf(8).map((umaban, i) =>
+      row({ umaban, placeOddsMin: placeOddsByUmaban[i], ev: evByUmaban[i] }),
+    ),
+  });
+}
+
+describe("テストヘルパー自己テスト", () => {
+  it("raceWithPositiveCombos(): 実際に混在配分(kind='mixed')に到達する入力であること(空振り防止)", () => {
+    const { view } = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings());
+    expect(view.kind).toBe("mixed");
+  });
+
+  it("raceWithDiverseCombos(): 複勝・ワイド・3連複の3券種すべてがstake>0で配分されること(空振り防止)", () => {
+    const outcome = buildMixedRaceAllocationWithOutcome(raceWithDiverseCombos(), settings());
+    if (outcome.view.kind !== "mixed") {
+      throw new Error(`前提が崩れている(mixedに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    const lens = new Set(
+      outcome.view.result.allocations.filter((a) => a.stake > 0).map((a) => a.umabans.length),
+    );
+    expect(lens).toEqual(new Set([1, 2, 3]));
+  });
+
+  it("raceWithDiversePlaceOdds(): placeOddsMin・evが馬ごとに相異なり、2群が交わらず、既定値(3/1.5)を含まないこと(定数直書きへの変異を検出できる条件)", () => {
+    const rows = raceWithDiversePlaceOdds().rows;
+    expect(rows.length).toBe(8); // 前提固定(空振り防止)。
+    const oddsValues = rows.map((r) => r.placeOddsMin);
+    const evValues = rows.map((r) => r.ev);
+    // 8値がそれぞれ互いに異なること。
+    expect(new Set(oddsValues).size).toBe(8);
+    expect(new Set(evValues).size).toBe(8);
+    // 2群が値集合として交わらないこと(odds⇄evの入れ替えが値の一致で潰れない)。
+    expect(oddsValues.some((v) => evValues.includes(v))).toBe(false);
+    // row()の既定値を含まないこと(どの1明細が選ばれても既定値直書きへの変異を検出できる)。
+    expect(oddsValues).not.toContain(3);
+    expect(evValues).not.toContain(1.5);
+  });
+
+  it("raceWithDiversePlaceOdds(): place-only経路でstake>0の明細が2件以上でき、そのodds・evがそれぞれ2値以上になること(定数化の検出条件)", () => {
+    const outcome = buildMixedRaceAllocationWithOutcome(
+      raceWithDiversePlaceOdds(),
+      settings({ includeComboOdds: false }),
+    );
+    if (outcome.view.kind !== "computed") {
+      throw new Error(`前提が崩れている(place-onlyに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    const stakePositive = outcome.view.result.allocations.filter((a) => a.stake > 0);
+    expect(stakePositive.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(stakePositive.map((a) => a.placeOddsMin)).size).toBeGreaterThanOrEqual(2);
+    expect(new Set(stakePositive.map((a) => a.ev)).size).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ============================================================================
+// toMixedAllocationSettings(6項目+evThreshold合成)
+// ============================================================================
+
+describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを避けるための合成)", () => {
+  it("6項目のAnalysisAllocationSettingsにevThresholdを合成し、7項目のMixedAllocationSettingsになること", () => {
+    const six: AnalysisAllocationSettings = {
+      bankroll: 100000,
+      perRaceCap: 10000,
+      kellyFraction: 0.5,
+      includeComboOdds: true,
+      includeWideInAllocation: false,
+      includeTrioInAllocation: true,
+    };
+    expect(toMixedAllocationSettings(six, 1.2)).toEqual({
+      bankroll: 100000,
+      perRaceCap: 10000,
+      kellyFraction: 0.5,
+      includeComboOdds: true,
+      includeWideInAllocation: false,
+      includeTrioInAllocation: true,
+      evThreshold: 1.2,
+    });
+  });
+
+  it("2件目: includeComboOdds≠includeTrioInAllocationの組を1件目と反転させ、フィールド単位の取り違えを検出できること(水平展開レビュー対応)", () => {
+    // 1件目はincludeComboOdds=true・includeTrioInAllocation=trueが同値(booleanは2値しかないため
+    // 1件だけでは3項目のうち必ずどこかの対が同値になる。この2件目で(comboOdds,trio)を
+    // (false,true)にして異ならせ、実装が {...settings, evThreshold} のスプレッドから
+    // フィールド個別列挙(例: includeComboOdds: settings.includeTrioInAllocationのような取り違え)
+    // へ退行しても検出できるようにする。
+    const six: AnalysisAllocationSettings = {
+      bankroll: 999999,
+      perRaceCap: 1,
+      kellyFraction: 0.9,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+    };
+    expect(toMixedAllocationSettings(six, 2.5)).toEqual({
+      bankroll: 999999,
+      perRaceCap: 1,
+      kellyFraction: 0.9,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      evThreshold: 2.5,
+    });
+  });
+
+  it("3件目: includeTrioInAllocationを1件目・2件目とも異なるfalseにし、条件A(定数でない)を満たすこと(coordinator水平展開レビュー対応)", () => {
+    // coordinator指摘: includeTrioInAllocationが1件目・2件目ともtrueで定数のままだと、
+    // `includeTrioInAllocation: settings.includeTrioInAllocation`を`true`直書きに変異させても
+    // 検出できない。booleanは2値しかないため、3項目(includeComboOdds/includeWideInAllocation/
+    // includeTrioInAllocation)を2件だけで「非定数」かつ「互いに異なるパターン」にはできない
+    // (鳩の巣原理。ipc-allocation-wiring.test.tsと同じ理由で3件目を追加する)。
+    // パターン(件1,件2,件3): comboOdds=(T,F,T)・wide=(F,T,T)・trio=(T,T,F)とし、
+    // 3項目とも非定数かつ互いに異なる列にする。
+    const six: AnalysisAllocationSettings = {
+      bankroll: 55555,
+      perRaceCap: 222,
+      kellyFraction: 0.15,
+      includeComboOdds: true,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: false,
+    };
+    expect(toMixedAllocationSettings(six, 3.7)).toEqual({
+      bankroll: 55555,
+      perRaceCap: 222,
+      kellyFraction: 0.15,
+      includeComboOdds: true,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: false,
+      evThreshold: 3.7,
+    });
+  });
+});
+
+// ============================================================================
+// buildAllocationRecord: 経路ごとのメタ行(AC2相当・app層)
+// ============================================================================
+
+describe("buildAllocationRecord(経路ごとのメタ行)", () => {
+  it("route=unset: coreの配分計算に未到達のため、設定エコー7項目以外はすべてnull", () => {
+    const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: 0 }));
+    expect(outcome.view.kind).toBe("unset"); // 前提固定(空振り防止)。
+    const rec = buildAllocationRecord(outcome, settings({ bankroll: 0 }), "result");
+    expect(rec.meta).toEqual({
+      route: "unset",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 0,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: null,
+      greedySteps: null,
+      candidateCap: null,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "result",
+    });
+    expect(rec.bets).toEqual([]);
+  });
+
+  it("route=yoso: coreの配分計算に未到達のため、設定エコー7項目以外はすべてnull", () => {
+    const race = raceWithPositiveCombos(8, { oddsStatus: "yoso" });
+    const s = settings();
+    const outcome = buildMixedRaceAllocationWithOutcome(race, s);
+    expect(outcome.view.kind).toBe("yoso"); // 前提固定。
+    const rec = buildAllocationRecord(outcome, s, "yoso");
+    expect(rec.meta).toEqual({
+      route: "yoso",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: null,
+      greedySteps: null,
+      candidateCap: null,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "yoso",
+    });
+    expect(rec.bets).toEqual([]);
+  });
+
+  it("route=unavailable(頭数不可・D-2フォールバック経由): unavailableReason・fallbackReasonが非null、betUnit等はnull", () => {
+    const race = raceInput({ rows: allCandidateRows(3) }); // 1〜4頭=not-sold
+    const s = settings({ includeComboOdds: false });
+    const outcome = buildMixedRaceAllocationWithOutcome(race, s);
+    expect(outcome.view.kind).toBe("unavailable"); // 前提固定。
+    const rec = buildAllocationRecord(outcome, s, "result");
+    expect(rec.meta).toEqual({
+      route: "unavailable",
+      unavailableReason: "not-sold",
+      fallbackReason: "combo-odds-not-requested",
+      skipReasonCode: null,
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: false,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: null,
+      greedySteps: null,
+      candidateCap: null,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "result",
+    });
+    expect(rec.bets).toEqual([]);
+  });
+
+  it("route=place-only(includeComboOdds=false): メタ行が全フィールドで固定どおりに保存され、明細のodds/evがresult.allocationsの値と一致すること", () => {
+    // フィクスチャは raceWithDiversePlaceOdds()(placeOddsMin・evが馬ごとに異なる)を使う。
+    // 既定値一律(placeOddsMin=3・ev=1.5)のままでは、placeBetsOf の
+    // `odds: a.placeOddsMin` / `ev: a.ev` を既定値の直書きに変異させても検出できない。
+    const race = raceWithDiversePlaceOdds();
+    const s = settings({ includeComboOdds: false });
+    const outcome = buildMixedRaceAllocationWithOutcome(race, s);
+    if (outcome.view.kind !== "computed") {
+      throw new Error(`前提が崩れている(place-onlyに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    const rec = buildAllocationRecord(outcome, s, "result");
+    // 要修正1(code-reviewer指摘): フィールド単位の部分検査ではなく、meta全体をtoEqualで固定する
+    // (#59 AC2「部分検査は禁止」。#58でunavailableReasonが検査漏れした事故の再発防止)。
+    expect(rec.meta).toEqual({
+      route: "place-only",
+      unavailableReason: null,
+      fallbackReason: "combo-odds-not-requested",
+      skipReasonCode: null,
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: false,
+      includeWide: true,
+      includeTrio: true,
+      // #59追加指定: place-only経路はDEFAULT_BET_ALLOCATION_CONFIG(mixed用の
+      // DEFAULT_GENERAL_BET_ALLOCATION_CONFIGとは別オブジェクト)を参照すること。
+      betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: null, // BetAllocationConfigにcandidateCapは存在しない。
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "result",
+    });
+    // 前提固定: stake>0の明細が実際に1件以上あること(空振り防止)。
+    const result = outcome.view.result;
+    const stakePositive = result.allocations.filter((a) => a.stake > 0);
+    expect(stakePositive.length).toBeGreaterThan(0);
+    expect(rec.bets.length).toBe(stakePositive.length);
+    for (const b of rec.bets) {
+      expect(b.betType).toBe("place");
+      expect(b.comboKey).toMatch(/^\d{2}$/);
+      expect(b.stake).toBeGreaterThan(0);
+    }
+    // 要修正2(code-reviewer指摘): bets[].odds/evがplaceOddsMin/evと取り違えられていないことを、
+    // result.allocationsの対応する要素の値と突き合わせて確認する(#59 AC3・#54が直接使うデータ)。
+    // このfixture(raceWithDiversePlaceOdds)ではplaceOddsMinとevが馬ごとに異なり、かつ
+    // 2群が値集合として交わらないため(自己テストで固定)、取り違え(odds:a.ev/ev:a.placeOddsMinの
+    // ような入れ替え)も、既定値への定数直書きも必ず検出できる。
+    for (const a of stakePositive) {
+      const bet = rec.bets.find((b) => b.comboKey === buildComboOddsKey([a.umaban]));
+      expect(bet).toBeDefined();
+      // boss差し戻し(S1・条件A0): stakeは `expect(b.stake).toBeGreaterThan(0)` という
+      // 述語検査しか無かったため、`stake: a.stake` を `100` 直書きに変異させても
+      // 100>0 が真で素通りしていた(mixed経路はSUM(stake)===totalStakeで固定済みだが、
+      // place-only経路には対応する検査が無かった)。stakeは#54の回収率の分母そのもので、
+      // 定数へ退行すると保存済みの全レースの回収率が静かに誤る。値として突き合わせる。
+      expect(bet!.stake).toBe(a.stake);
+      expect(bet!.odds).toBe(a.placeOddsMin);
+      expect(bet!.ev).toBe(a.ev);
+      expect(bet!.odds).not.toBe(bet!.ev); // 取り違えても値が同じでは検出できないための自己チェック。
+    }
+  });
+
+  it("route=mixed: メタ行が全フィールドで固定どおりに保存されること(wide≠trioのcomboOdds診断値で束縛の入れ替えを検出できること)", () => {
+    const s = settings();
+    // boss差し戻し(M4): comboOddsWide/Trioが全フィクスチャで同値("present"/"present")だと、
+    // codesColumnsOfでのwide⇄trio束縛の入れ替えを検出できない。trioComboを未取得にして
+    // wide="present"・trio="unfetched"と異ならせる(#59追加確認: 頭数不可はここで判定しない
+    // ため、ワイド候補のみでもcomboCandidateCount>0となりmixed経路に到達する)。
+    const outcome = buildMixedRaceAllocationWithOutcome(
+      raceWithPositiveCombos(8, { trioCombo: undefined }),
+      s,
+    );
+    if (outcome.view.kind !== "mixed") {
+      throw new Error(`前提が崩れている(mixedに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    const rec = buildAllocationRecord(outcome, s, "result");
+    // 要修正1(code-reviewer指摘): フィールド単位の部分検査ではなく、meta全体をtoEqualで固定する。
+    expect(rec.meta).toEqual({
+      route: "mixed",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: "present",
+      comboOddsTrio: "unfetched",
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "result",
+    });
+  });
+
+  it("AC3: mixed経路でSUM(stake)===totalStake・COUNT(*)===betCountが成り立ち、bet_typeが複勝/ワイド/3連複それぞれ正しく振り分けられること", () => {
+    const s = settings();
+    const outcome = buildMixedRaceAllocationWithOutcome(raceWithDiverseCombos(), s);
+    if (outcome.view.kind !== "mixed") {
+      throw new Error("前提が崩れている(mixedに到達しなかった)");
+    }
+    const result = outcome.view.result;
+    // 前提固定: 複勝・ワイド・3連複のいずれも1件以上stake>0で配分されていること
+    // (raceWithDiverseCombos()の自己テストで既に固定済みだが、この検証自体でも再度固定する)。
+    const stakePositiveByLen = new Map<number, number>();
+    for (const a of result.allocations) {
+      if (a.stake > 0) {
+        stakePositiveByLen.set(a.umabans.length, (stakePositiveByLen.get(a.umabans.length) ?? 0) + 1);
+      }
+    }
+    expect(stakePositiveByLen.get(1)).toBeGreaterThan(0);
+    expect(stakePositiveByLen.get(2)).toBeGreaterThan(0);
+    expect(stakePositiveByLen.get(3)).toBeGreaterThan(0);
+
+    const rec = buildAllocationRecord(outcome, s, "result");
+    expect(rec.bets.length).toBe(result.betCount);
+    expect(rec.bets.reduce((sum, b) => sum + b.stake, 0)).toBe(result.totalStake);
+    for (const b of rec.bets) {
+      expect(b.stake).toBeGreaterThan(0);
+      if (b.betType === "place") {
+        expect(b.comboKey).toMatch(/^\d{2}$/);
+      } else if (b.betType === "wide") {
+        expect(b.comboKey).toMatch(/^\d{4}$/);
+      } else if (b.betType === "trio") {
+        expect(b.comboKey).toMatch(/^\d{6}$/);
+      } else {
+        throw new Error(`想定外のbetType: ${b.betType}`);
+      }
+    }
+    // 3券種とも明細に現れること(前提のstakePositiveByLenと対応)。
+    const betTypes = new Set(rec.bets.map((b) => b.betType));
+    expect(betTypes).toEqual(new Set(["place", "wide", "trio"]));
+
+    // 要修正2(code-reviewer指摘): mixedBetsOfのodds/evの取り違えを、result.allocationsの
+    // 対応する要素の値と突き合わせて検出できることを固定する(#59 AC3・#54が直接使うデータ)。
+    // このfixture(raceWithDiverseCombos)ではオッズが券種・馬ごとにばらけているため、
+    // odds(a.odds)とev(a.ev)を入れ替えても値が一致し検出できない、という空振りは起きにくいが、
+    // 万一同値になっていないかを自己チェックしたうえで、対応する要素の値と直接比較する。
+    for (const a of result.allocations.filter((x) => x.stake > 0)) {
+      const key = buildComboOddsKey(a.umabans);
+      const bet = rec.bets.find((b) => b.comboKey === key);
+      expect(bet).toBeDefined();
+      expect(bet!.odds).toBe(a.odds);
+      expect(bet!.ev).toBe(a.ev);
+      expect(bet!.odds).not.toBe(bet!.ev); // 取り違えても値が同じでは検出できないための自己チェック。
+    }
+  });
+
+  it("route=invalid: allocateGeneralBetsの契約違反throwを内部で捕捉した経路のメタ行が全フィールドで固定どおりに保存されること", () => {
+    // allocation-outcome-codes.test.tsと同じ「1頭だけ負のオッズ」レシピでallocateGeneralBetsをthrowさせる。
+    const rows = allCandidateRows(8).map((r) =>
+      r.umaban === 1 ? row({ umaban: 1, placeOddsMin: -5, ev: 2, isPositive: true }) : r,
+    );
+    const s = settings();
+    const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8, { rows }), s);
+    expect(outcome.view.kind).toBe("invalid"); // 前提固定。
+    const rec = buildAllocationRecord(outcome, s, "result");
+    // 要修正1(code-reviewer指摘): フィールド単位の部分検査ではなく、meta全体をtoEqualで固定する。
+    // これにより「...codesColumnsの展開後にunavailableReasonを誤って上書きする」類の
+    // 分岐固有の破壊も検出できる(#58と同型の穴の再発防止)。
+    expect(rec.meta).toEqual({
+      route: "invalid",
+      unavailableReason: null,
+      fallbackReason: null,
+      // 裁定1(allocation-outcome-codes.test.ts): buildMixedCandidatesはthrow前に実行済みのため
+      // comboOddsは非null。
+      skipReasonCode: null,
+      comboOddsWide: "present",
+      comboOddsTrio: "present",
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "result",
+    });
+    expect(rec.bets).toEqual([]);
+  });
+
+  // ==========================================================================
+  // 束縛箇所ごとの非定数化(boss差し戻し。条件A'の訂正)。
+  //
+  // 条件Aは「列」ではなく「束縛箇所(binding site)」ごとに当てるのが正しい。1つの列の値
+  // ベクトルは複数の分岐にある別々の式が生んだ値の寄せ集めであり、分岐で区切られた列は
+  // 条件A(列として非定数)を満たしたまま定数直書きを素通しする。
+  // boss実測の反例: `codesColumnsOf` の `unavailableReason` を非null側で "not-sold" に潰しても
+  // app 1399件が全緑だった(列としては null と "not-sold" の2値をとるが、**非nullを生む
+  // 束縛箇所が1行しか無い**ため)。以下の3件で、その1行しか無かった束縛箇所に2値目を与える。
+  // ==========================================================================
+
+  it("route=unavailable(6頭・券種OFFによるフォールバック): unavailableReason='two-place-only'・fallbackReason='combo-bet-types-off'が写ること", () => {
+    // 既存のunavailable行は unavailableReason="not-sold"(3頭)・fallbackReason="combo-odds-not-requested"
+    // の1行しか無く、どちらの束縛箇所も定数直書きに変異させても検出できなかった。
+    // 6頭(resolvePlaceBetTarget: runnerCount<=7 → "two-place-only")かつ
+    // includeComboOdds=trueのままワイド・3連複を配分対象外にする(isComboBetTypesOff)ことで、
+    // 2つの束縛箇所に同時に2値目を与える。
+    const race = raceInput({ rows: allCandidateRows(6) });
+    const s = settings({ includeWideInAllocation: false, includeTrioInAllocation: false });
+    const outcome = buildMixedRaceAllocationWithOutcome(race, s);
+    expect(outcome.view.kind).toBe("unavailable"); // 前提固定(空振り防止)。
+    // 前提固定: 既存行(not-sold / combo-odds-not-requested)と実際に異なる値であること。
+    expect(outcome.outcome.unavailableReason).toBe("two-place-only");
+    expect(outcome.outcome.fallbackReason).toBe("combo-bet-types-off");
+
+    const rec = buildAllocationRecord(outcome, s, "result");
+    expect(rec.meta).toEqual({
+      route: "unavailable",
+      unavailableReason: "two-place-only",
+      fallbackReason: "combo-bet-types-off",
+      skipReasonCode: null,
+      // 券種OFFのフォールバックは組合せ候補を組み立てる前に分岐するため診断値を持たない。
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: false,
+      includeTrio: false,
+      betUnit: null,
+      greedySteps: null,
+      candidateCap: null,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "result",
+    });
+    expect(rec.meta.unavailableReason).toBe(outcome.outcome.unavailableReason);
+    expect(rec.meta.fallbackReason).toBe(outcome.outcome.fallbackReason);
+    expect(rec.bets).toEqual([]);
+  });
+
+  it("route=mixed(ワイド未取得・3連複あり): comboOddsWide='unfetched'・comboOddsTrio='present'が写ること(既存mixed行の鏡像)", () => {
+    // 既存のmixed行・invalid行は comboOddsWide が両方とも "present" で、
+    // `comboOddsWide: codes.comboOdds?.wide ?? null` を "present" 直書きに変異させても
+    // 検出できなかった。既存mixed行(trioCombo未取得)の鏡像としてwideを未取得にする。
+    // oddsStatusも合わせて "middle" にする(mixed分岐の `oddsStatus` の読み出しが
+    // 既存2行とも "result" で定数だったため)。
+    const s = settings();
+    const outcome = buildMixedRaceAllocationWithOutcome(
+      raceWithPositiveCombos(8, { wideCombo: undefined, oddsStatus: "middle" }),
+      s,
+    );
+    if (outcome.view.kind !== "mixed") {
+      throw new Error(`前提が崩れている(mixedに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    // 前提固定: wide/trioが実際に異なる値であること(束縛の入れ替え・定数化の双方を検出できる条件)。
+    expect(outcome.outcome.comboOdds?.wide).toBe("unfetched");
+    expect(outcome.outcome.comboOdds?.trio).toBe("present");
+
+    const rec = buildAllocationRecord(outcome, s, "middle");
+    expect(rec.meta).toEqual({
+      route: "mixed",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: "unfetched",
+      comboOddsTrio: "present",
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "middle",
+    });
+  });
+
+  it("route=invalid(2行目・オッズ中間): invalid分岐のoddsStatusが引数どおり保存されること", () => {
+    // invalid分岐を通る行が1行(oddsStatus="result")しか無く、この分岐の
+    // `oddsStatus` の読み出しを "result" 直書きに変異させても検出できなかった。
+    // 既存のinvalid行と同じレシピ(1頭だけ負のオッズ)で、オッズ中間の2行目を作る。
+    const rows = allCandidateRows(8).map((r) =>
+      r.umaban === 1 ? row({ umaban: 1, placeOddsMin: -5, ev: 2, isPositive: true }) : r,
+    );
+    const s = settings();
+    const outcome = buildMixedRaceAllocationWithOutcome(
+      raceWithPositiveCombos(8, { rows, oddsStatus: "middle" }),
+      s,
+    );
+    expect(outcome.view.kind).toBe("invalid"); // 前提固定。
+    const rec = buildAllocationRecord(outcome, s, "middle");
+    expect(rec.meta.oddsStatus).toBe("middle");
+    // 部分検査にしないため、この行もメタ全体を固定する(#59 AC2)。
+    expect(rec.meta).toEqual({
+      route: "invalid",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: "present",
+      comboOddsTrio: "present",
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "middle",
+    });
+    expect(rec.bets).toEqual([]);
+  });
+
+  // ==========================================================================
+  // skip経路(coreの配分計算に到達したが配分0点)。
+  //
+  // coordinator水平展開レビュー(第5の表): 「実際に codesColumnsOf/settingsColumnsOf を
+  // 通した出力を検査する表」(このファイルの7件 + analysis-pipeline-allocation.test.ts の2件)
+  // に条件A(すべての列が2つ以上のテストで異なる値をとる)を当てると、次の2列が落ちていた。
+  //
+  //   - skipReasonCode: 全9行で null。`skipReasonCode: codes.skipReasonCode`(allocation-record.ts)を
+  //     `null` 直書きに変異させても検出できなかった(実測で app 全緑)。
+  //     `AllocationOutcomeCodes.skipReasonCode` が非nullになりうること自体は
+  //     allocation-outcome-codes.test.ts が固定済みだが、それを**メタ行へ写している**ことは
+  //     どのテストも検査していなかった。
+  //   - kellyFraction: 全9行で 0.5(settings()の既定値)。
+  //     `kellyFraction: settings.kellyFraction` を `0.5` 直書きに変異させても検出できなかった。
+  //     (`analysis-store.test.ts` の kelly_fraction: 0.7 は makeMeta() で手組みしたレコードを
+  //     保存する表であり、settingsColumnsOf の束縛そのものを通らないため、この穴は塞げない。)
+  //
+  // 以下の2件で、skipReasonCode の非null2値(no-candidates / cap-too-small)と
+  // kellyFraction≠0.5 を第5の表へ持ち込む。skipReasonCodeを書き込む実装箇所は
+  // place-only経路(mixed-race-allocation.ts:327)とmixed経路(同:411)の2か所あるため、
+  // 両方を通す。
+  //
+  // 現在の表(14行×19列)は、条件A'(束縛箇所ごとに2値以上。上の「束縛箇所ごとの非定数化」
+  // 参照)と条件B(どの2列も全行を通じて値が完全一致しない。JS値として比較するので
+  // 1.0 と 1、0 と false、null と undefined は同一とみなす)を、値で強制できる箇所すべてで
+  // 満たす(全171ペアの突き合わせ・分岐ごとの再検算まで実施済み)。
+  // 値で強制できない箇所(DEFAULT_*_CONFIG の参照先一致、modelId/modelApproximate)は
+  // allocation-record.ts のJSDoc「テストで強制できない箇所」に記録した。
+  // ==========================================================================
+
+  it("route=place-only(配分0点・skip): skipReasonCode='no-candidates'がメタ行へ写り、kellyFractionが既定値0.5以外でもそのまま保存されること", () => {
+    const race = raceInput({ rows: allNonCandidateRows(8), oddsStatus: "middle" });
+    const s = settings({ includeComboOdds: false, kellyFraction: 0.42 });
+    const outcome = buildMixedRaceAllocationWithOutcome(race, s);
+    if (outcome.view.kind !== "computed") {
+      throw new Error(`前提が崩れている(place-onlyに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    // 前提固定(空振り防止): coreの配分計算に到達したうえでskip判定であり、写し元が非nullであること。
+    expect(outcome.view.result.isSkip).toBe(true);
+    expect(outcome.outcome.skipReasonCode).toBe("no-candidates");
+    // 前提固定: kellyFractionが settings() の既定値 0.5 と異なること(定数直書きへの変異を検出できる条件)。
+    expect(s.kellyFraction).not.toBe(0.5);
+
+    const rec = buildAllocationRecord(outcome, s, "middle");
+    expect(rec.meta).toEqual({
+      route: "place-only",
+      unavailableReason: null,
+      fallbackReason: "combo-odds-not-requested",
+      skipReasonCode: "no-candidates",
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 300000,
+      perRaceCap: 20000,
+      kellyFraction: 0.42,
+      evThreshold: 1.0,
+      includeComboOdds: false,
+      includeWide: true,
+      includeTrio: true,
+      // skipでも配分計算自体には到達しているため、実効値4列はplace-onlyの通常ケースと同じ。
+      betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: null,
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "middle",
+    });
+    // 値が固定文字列ではなく`AllocationOutcomeCodes`から写っていることを、写し元との一致でも固定する。
+    expect(rec.meta.skipReasonCode).toBe(outcome.outcome.skipReasonCode);
+    expect(rec.meta.kellyFraction).toBe(s.kellyFraction);
+    expect(rec.bets).toEqual([]); // skipなので明細0件。
+  });
+
+  it("route=mixed(配分0点・skip): 1レース上限が小さすぎる場合のskipReasonCode='cap-too-small'がメタ行へ写ること", () => {
+    const s = settings({ perRaceCap: 1 });
+    const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), s);
+    if (outcome.view.kind !== "mixed") {
+      throw new Error(`前提が崩れている(mixedに到達しなかった。kind=${outcome.view.kind})`);
+    }
+    // 前提固定(空振り防止): mixed経路でskip判定であり、写し元が非nullかつplace-only側の値とも異なること。
+    expect(outcome.view.result.isSkip).toBe(true);
+    expect(outcome.outcome.skipReasonCode).toBe("cap-too-small");
+    expect(outcome.outcome.skipReasonCode).not.toBe("no-candidates");
+
+    const rec = buildAllocationRecord(outcome, s, "result");
+    expect(rec.meta).toEqual({
+      route: "mixed",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: "cap-too-small",
+      comboOddsWide: "present",
+      comboOddsTrio: "present",
+      bankroll: 300000,
+      perRaceCap: 1,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: "conditional-bernoulli",
+      modelApproximate: true,
+      oddsStatus: "result",
+    });
+    expect(rec.meta.skipReasonCode).toBe(outcome.outcome.skipReasonCode);
+    expect(rec.bets).toEqual([]); // skipなので明細0件。
+  });
+});
+
+// ============================================================================
+// buildInvalidAllocationRecordForException(AC6: 呼び出し自体の例外に対するフォールバック)
+// ============================================================================
+
+describe("buildInvalidAllocationRecordForException(AC6: buildMixedRaceAllocationWithOutcome自体が例外を投げたときのフォールバック)", () => {
+  it("route='invalid'・コード5列(unavailable/fallback/skip/comboOdds)はすべてnull・設定エコーは渡した値をそのまま反映・betUnit等はmixedと同じ既定値", () => {
+    const s = settings({ bankroll: 123456, includeWideInAllocation: false });
+    const rec = buildInvalidAllocationRecordForException(s, "middle");
+    expect(rec.meta).toEqual({
+      route: "invalid",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 123456,
+      perRaceCap: 20000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: false,
+      includeTrio: true,
+      betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+      greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+      candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+      modelId: null,
+      modelApproximate: null,
+      oddsStatus: "middle",
+    });
+    expect(rec.bets).toEqual([]);
+  });
+});

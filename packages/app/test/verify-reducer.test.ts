@@ -33,6 +33,13 @@ const sampleReport: VerifyReportView = {
     calibrationBias: [],
     markStats: [],
   },
+  proposedBet: {
+    population: { allocated: 0, skipped: 0, unreached: 0, noRecord: 0 },
+    overall: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    place: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    wide: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    trio: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+  },
 };
 
 const samplePromptVersionReports: PromptVersionVerifyReportView[] = [
@@ -60,6 +67,7 @@ const sampleRaceLedger: RaceLedgerView[] = [
     totalReturn: 300,
     recoveryRate: 3.0,
     betCount: 1,
+    allocation: null,
   },
 ];
 

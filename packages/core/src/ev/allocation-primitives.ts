@@ -546,6 +546,69 @@ export function applyMinimumStake(
 }
 
 /**
+ * オッズの値域の下限(1.0)。オッズは「賭け金が最低でも戻ってくる倍率」であり1.0未満の値は
+ * 値域外(Issue #74)。`0`は構文上は正当な数値だが値域外であり、旧基準`value > 0`は
+ * `[0,1)`をすべて通してしまっていた(#31→#74で1.0へ引き上げ)。
+ *
+ * **この定数を変えたら、以下も同時に直すこと(boss裁定Q1(b)・2026-09-04)**:
+ *   - `expected-value.ts` の除外理由文言「複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外」
+ *   - 値域を断定している散文(`combo-bet-allocation.ts`・`bet-allocation.ts`・`verify.ts`の
+ *     「1.0未満」表記。#74 AC-11で是正した箇所)
+ * 定数だけを変えると `allocation-primitives.test.ts` の「値域の定数と文言は同時に直す」テストが
+ * 赤くなる(1つの `it()` の中で定数と文言の両方をハードコードしたリテラルとして固定しているため)。
+ */
+export const MIN_VALID_ODDS = 1.0;
+
+/**
+ * オッズとして使える値か(1.0以上の有限値)を判定する(Issue #31→#74で基準を`>0`から
+ * `>=MIN_VALID_ODDS`(1.0)へ引き上げ)。
+ *
+ * 背景(Issue #31): `combo-bet-allocation.ts` の `validateCandidates`(門番・throw基準)と
+ * `resolveComboOdds`(分類器・`malformed`基準)が `!Number.isFinite(x) || x <= 0` を独立に
+ * 2回実装していた(将来どちらか一方だけ基準を変えて他方が古いまま残る、本リポジトリが
+ * 繰り返してきた事故形)。複勝経路(`bet-allocation.ts`)の候補フィルタも同じ基準を必要と
+ * したため(候補外の1頭に `NaN`/`Infinity` が混じると `runGreedyAllocation` の増分がNaN汚染され、
+ * 健全な他の馬の配分まで巻き添えで消える)、本述語へ1本化した。
+ *
+ * 背景(Issue #74): オッズの値域は「1.0以上」であり`0`は値域外だが、旧基準`value > 0`は
+ * `[0,1)`を通してしまい、複勝EV側(`expected-value.ts`)が `oddsMin=0` を
+ * `ev = placeProb×0 = 0` という「正常な判定結果」に潰していた(判定不能と判定結果の混同。
+ * #31の原則違反)。基準を`value >= MIN_VALID_ODDS`へ引き上げ、全呼び出し元に同時適用する。
+ * **数(単位を明記。呼び出し箇所=実際に`isUsableOdds(...)`を呼ぶ式の数、モジュール=そのファイル数。
+ * 定義自身の行・コメント内の言及は含まない)**:
+ *   - **#74着手前**: 呼び出し6・モジュール3(`combo-bet-allocation.ts`2・`bet-allocation.ts`3・
+ *     `verify.ts`1)
+ *   - **#74で追加**: `probability-quality-metrics.ts`1・`expected-value.ts`1・
+ *     `build-prompt.ts`1(いずれも本Issueで新規に委譲)
+ *   - **#74後**: 呼び出し9・モジュール6
+ * 再現(このファイルを含む`packages/core/src`全体を対象にすること。`ev/`だけに絞ると
+ * `analyzer/build-prompt.ts`の1件を取りこぼす):
+ * `grep -c "isUsableOdds(" <各ファイルパス>` でファイルごとの出現**行数**を数え、
+ * コメント内出現(`bet-allocation.ts`1件・`expected-value.ts`1件。加えて本ファイル自身の
+ * この段落にも「isUsableOdds(」という字面が複数回登場する)を除いた行が実呼び出し。
+ *
+ * **`grep -rhoE "isUsableOdds\(" packages/core/src | wc -l`(定義・コメント内言及を含む
+ * 総出現数)は、この段落を編集するたびに変わる自己参照値である。固定の数として本文に
+ * 書き込まない(#73 R5・本Issueで一度実際にここで13→14の食い違いを起こした教訓)。
+ * 呼び出し箇所・モジュールの数(上記「#74後: 呼び出し9・モジュール6」)だけが安定した
+ * 意味のある数であり、確認したいときはその都度上記コマンドで数え直すこと。**
+ *
+ * **null判定は含まない(呼び出し側の責務)**: 引数の型を `number` のみとし `number | null` を
+ * 受け取らないのは意図的。「未確定(null)」と「不正値(数値だが使えない)」は意味が異なり、
+ * この区別を呼び出し側が保持し続けることで、excludedReason等の文言分岐(判定不能の内訳)を
+ * 呼び出し側で作り分けられるようにする(本述語に混ぜるとその区別が失われる)。
+ *
+ * **適用範囲は「オッズ」に限る(馬番の検証には使わない)**: `validateCandidates` の馬番検証
+ * (`umabans`)も式としては同一の `!Number.isFinite(u) || u <= 0` だが、これは「馬番として
+ * 妥当か」という別概念であり、式が同じなのは偶然に過ぎない。ここへ本述語を流用すると、
+ * 将来オッズ側の基準だけを変えた際に馬番の検証まで意図せず道連れで変わってしまう
+ * (#74でオッズ側の基準を1.0へ引き上げた際も、馬番側の散文・基準は一切変更していない)。
+ */
+export function isUsableOdds(value: number): boolean {
+  return Number.isFinite(value) && value >= MIN_VALID_ODDS;
+}
+
+/**
  * 見送り理由のコード(文言を持たない判別共用体)。文言は呼び出し側(bet-allocation.ts /
  * combo-bet-allocation.ts)がそれぞれ独立して持つ(見送り理由・advisoryの文言定数は
  * 券種ごとに分離する。boss着手前ゲート2026-08-05決定)。

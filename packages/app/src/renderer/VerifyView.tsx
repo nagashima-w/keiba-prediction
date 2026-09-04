@@ -4,6 +4,7 @@ import type {
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 import type { VerifyState } from "./verify-reducer.js";
+import { buildAllocationProposalView } from "./allocation-proposal-view.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import { inputToYyyymmdd, yyyymmddToInput } from "./date-input.js";
 import { formatEv, MARK_LEGEND } from "./format.js";
@@ -283,6 +284,57 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
             {report.excludedEstimatedCount}件
           </p>
         </div>
+      )}
+
+      {/*
+       * 配分ベースの回収率(proposedBet系。Issue #71 #54-B)。分析時点の設定で実際に提案した
+       * 配分額をそのまま賭け金とする(Q-C)。上の累積回収率(bet、複勝一律100円、Q-B)とは
+       * 賭け金の仮定が異なるため、両者を合算した数値はどこにも出さない(AC-B5)。
+       * 母集団4分類(配分あり/見送り/未到達/記録なし)を併記し、回収率が"-"(recoveryRate=null)の
+       * ときに「集計対象が0件で出ていない」のか「配分ありは無いが母集団自体はある」のかを
+       * 区別できるようにする(AC-B6)。
+       */}
+      {report !== null && (
+        <>
+          <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.25rem" }}>
+            配分ベースの回収率(実際に提案した配分額)
+          </h3>
+          <div style={{ color: "#333", fontSize: "0.9rem" }}>
+            <p style={{ margin: "0.15rem 0" }}>
+              賭け数 {report.proposedBet.overall.betCount}点 / 投資額{" "}
+              {formatYen(report.proposedBet.overall.totalStake)} / 回収額{" "}
+              {formatYen(report.proposedBet.overall.totalReturn)} / 回収率{" "}
+              <strong>{formatRate(report.proposedBet.overall.recoveryRate)}</strong>
+            </p>
+            <p style={{ margin: "0.15rem 0", color: "#666" }}>
+              内訳: 複勝 {report.proposedBet.place.betCount}点/
+              {formatRate(report.proposedBet.place.recoveryRate)} / ワイド{" "}
+              {report.proposedBet.wide.betCount}点/
+              {formatRate(report.proposedBet.wide.recoveryRate)} / 3連複{" "}
+              {report.proposedBet.trio.betCount}点/
+              {formatRate(report.proposedBet.trio.recoveryRate)}
+            </p>
+            {/*
+             * bossメタレビュー要修正2: unjudgedCount(規則Uで判定不能とした点数)が画面に一切
+             * 表示されていなかった問題への対応。「ワイド0点」が「1点も提案していない」のか
+             * 「提案したが全部判定できない」のかを区別できるようにする(BatchAnalysisView.tsxの
+             * 「0件なら出さない」流儀をそのまま踏襲)。
+             */}
+            {report.proposedBet.overall.unjudgedCount > 0 && (
+              <p style={{ margin: "0.15rem 0", color: "#a60" }}>
+                判定不能(集計対象外): 複勝{report.proposedBet.place.unjudgedCount}点 / ワイド
+                {report.proposedBet.wide.unjudgedCount}点 / 3連複
+                {report.proposedBet.trio.unjudgedCount}点
+              </p>
+            )}
+            <p style={{ margin: "0.15rem 0", color: "#666" }}>
+              母集団: 配分あり{report.proposedBet.population.allocated}件 / 見送り
+              {report.proposedBet.population.skipped}件 / 未到達
+              {report.proposedBet.population.unreached}件 / 記録なし
+              {report.proposedBet.population.noRecord}件
+            </p>
+          </div>
+        </>
       )}
 
       {/*
@@ -734,6 +786,10 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
       ) : (
         displayedRaceLedger.map((rb) => {
           const importing = state.importingRaceIds.includes(rb.raceId);
+          // 配分提案(分析時点。Issue #55)。route/skipReasonCode分岐と文言はすべて
+          // allocation-proposal-view.ts側で決定済みで、ここでは返ってきた配列をmapするだけにする
+          // (VerifyView.tsxに本機能の分岐・文言リテラルを置かない設計制約)。
+          const allocationView = buildAllocationProposalView(rb.allocation);
           return (
             <details
               key={rb.raceId}
@@ -852,6 +908,47 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               >
                 分析データをエクスポート
               </button>
+              {/* 配分提案(分析時点。Issue #55)。表示状態・見送り理由・実効設定の判定は
+                  allocation-proposal-view.ts が済ませており、ここでは配列をmapするだけ。 */}
+              <div style={{ marginTop: "0.6rem", borderTop: "1px solid #eee", paddingTop: "0.4rem" }}>
+                <p style={{ fontWeight: 600, margin: "0 0 0.3rem" }}>配分提案(分析時点)</p>
+                {allocationView.notices.map((notice, i) => (
+                  <p key={i} style={{ color: "#666", margin: "0 0 0.3rem" }}>
+                    {notice}
+                  </p>
+                ))}
+                {allocationView.bets.length > 0 && (
+                  <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: "0.4rem" }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>券種</th>
+                        <th style={thStyle}>買い目</th>
+                        <th style={thStyle}>金額</th>
+                        <th style={thStyle}>オッズ</th>
+                        <th style={thStyle}>EV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allocationView.bets.map((row, i) => (
+                        <tr key={i}>
+                          <td style={tdStyle}>{row.betTypeLabel}</td>
+                          <td style={tdStyle}>{row.comboLabel}</td>
+                          <td style={tdStyle}>{row.stake}</td>
+                          <td style={tdStyle}>{row.odds}</td>
+                          <td style={tdStyle}>{row.ev}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {allocationView.settingsRows.length > 0 && (
+                  <ul style={{ color: "#666", fontSize: "0.85rem", margin: 0, paddingLeft: "1.2rem" }}>
+                    {allocationView.settingsRows.map((row, i) => (
+                      <li key={i}>{row}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </details>
           );
         })

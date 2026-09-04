@@ -163,6 +163,7 @@ import {
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
   foldToCandidateSubsets,
+  isUsableOdds,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
@@ -177,6 +178,21 @@ import {
 // place-joint-model.ts の主要な型・既定モデルを re-export する。
 export type { JointModelHorse, PlaceJointModel, PlaceOutcome };
 export { CONDITIONAL_BERNOULLI_MODEL };
+
+/**
+ * Issue #58: `SkipReasonCode`(非公開モジュール `allocation-primitives.ts` の型)を、
+ * 既に公開済みのこのサブパスから型のみ re-export する。`packages/core/package.json` の
+ * `exports` へ `./ev/allocation-primitives` を新規追加しない設計判断(boss裁定)に基づく——
+ * 追加すると `resolveBankroll`/`runGreedyAllocation` 等の実装詳細まで公開範囲に入ってしまう。
+ * 型のみの re-export はランタイム出力に何も足さない(上の `JointModelHorse` 等と同じ既存の
+ * 慣行)。
+ *
+ * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物である。あちらは
+ * どこからも import されていない re-export(削除しても app はコンパイルできた)だったのに
+ * 対し、こちらは `shared/mixed-race-allocation.ts`(Issue #58)が実際に import して使う
+ * re-export であり、削除すると app のコンパイルが壊れる。
+ */
+export type { SkipReasonCode };
 
 // 機能D-2a(Issue #14): 防御関数群・畳み込み・貪欲最適化・betUnit丸め・最低額ロジック・
 // 見送り理由判定ロジックは allocation-primitives.ts へ抽出し、組合せ券種(combo-bet-allocation.ts)
@@ -286,10 +302,24 @@ export interface BetAllocationDiagnostics {
    * 乖離の大きさの最大値(絶対値)。各馬の乖離には方向(正負)が入り混じるため符号は持たない。
    */
   readonly marginalDeviationMax: number;
-  /** 候補馬(isPositive && placeOddsMin!==null)の頭数。 */
+  /**
+   * 候補馬(isPositive && placeOddsMin!==null && オッズが使える値〈1.0以上の有限値〉)の頭数
+   * (Issue #31: 従来はisPositiveとplaceOddsMin!==nullのみで判定しており、NaN/Infinity等の
+   * 不正な数値を持つ馬が候補に混入しうる欠陥があった。isUsableOdds〈allocation-primitives.ts〉
+   * による数値検証を追加した。Issue #74でその基準を`>0`から`>=1.0`へ引き上げ)。
+   */
   readonly candidateCount: number;
   /** 候補外の頭数。 */
   readonly excludedCount: number;
+  /**
+   * 候補外のうち、placeOddsMinが非null(値は入っている)だが数値として使えない
+   * (非有限または1.0未満。#74でisUsableOddsの基準を`>0`から引き上げ)ために候補外にした
+   * 頭数(Issue #31)。
+   * **excludedCountの内訳(部分集合)であり、別枠の頭数ではない**
+   * (0 <= oddsMalformedCount <= excludedCount が常に成立し、candidateCount + excludedCount
+   * が全出走頭数になる不変条件は変わらない。オッズ未確定〈placeOddsMin===null〉はここに含まない)。
+   */
+  readonly oddsMalformedCount: number;
 }
 
 /** 馬券配分の最適化結果。 */
@@ -340,6 +370,13 @@ export interface BetAllocationResult {
   readonly isSkip: boolean;
   /** 見送り理由。見送りでなければ null。 */
   readonly skipReason: string | null;
+  /**
+   * 見送り理由コード(Issue #58)。isSkipのときのみ非null、`skipReason`はこの値から
+   * `skipReasonText`で導出される(コード→文言の一方向依存。逆向きに文言からコードを
+   * 復元する経路は無い)。文言(日本語)を永続化・比較の対象にせず、コードの側を
+   * 安定な識別子として使いたい呼び出し元(見送り理由の記録・分析等)向けに公開する。
+   */
+  readonly skipReasonCode: SkipReasonCode | null;
   /** 1点配分だが分散できる余地があった(分散できていない)旨の注記。 */
   readonly notDiversified: boolean;
   /** 使用した同時分布モデルの識別子。 */
@@ -360,6 +397,13 @@ const REASON_NO_EDGE = "妙味が小さく、賭ける価値のある配分が�
 /** 候補外の理由。 */
 const EXCLUDED_NOT_POSITIVE = "EVがプラスではないため対象外";
 const EXCLUDED_NO_ODDS = "複勝オッズ下限が未確定のため対象外";
+/**
+ * オッズが不正な値(非有限または1.0未満。#74でisUsableOddsの基準を`>0`から引き上げ)の
+ * ため対象外(Issue #31)。
+ * EXCLUDED_NO_ODDS(未確定=null)とは意図的に文言を分ける(「未確定」と「不正値」は別状態。
+ * 混在経路の既存表示語「不正値」〈formatUnjudgedNote〉とも語を揃える)。
+ */
+const EXCLUDED_ODDS_MALFORMED = "複勝オッズ下限が不正な値のため対象外";
 
 /**
  * 複勝の馬券配分を最適化する。
@@ -400,8 +444,26 @@ export function allocateBets(
   const effectivePerRaceCap = resolveEffectivePerRaceCap(perRaceCapInput, betUnit);
 
   // Step1: 候補選定。Step0/Step1の判定結果に関わらず常に行う(設計判断6)。
+  // Issue #31: isPositive && placeOddsMin!==null だけでは「値が使える値か(1.0以上の有限値。
+  // #74で`>0`から引き上げ)」を
+  // 検証しておらず、無関係な1頭のNaN/Infinityが payout計算(runGreedyAllocation)をNaN汚染し、
+  // 健全な他の馬の配分まで巻き添えで消していた。isUsableOdds(allocation-primitives.ts。
+  // combo-bet-allocation.tsのvalidateCandidates/resolveComboOddsと同一基準を共有)による
+  // 数値検証を追加する。
+  //
+  // なぜ AllocationHorse.ev には同じ防御を入れないか(#31本文は placeOddsMin と ev の
+  // 2フィールドを名指ししているが、本タスクでは placeOddsMin のみを対象にした・boss確認済み):
+  // `ev` が本ファイルに現れるのは (a) 型定義(AllocationHorse.ev/BetAllocation.ev)と
+  // (b) 出力オブジェクトへの素通し2箇所(`ev: horse.ev` × 2。候補ループ・候補外ループ)だけで、
+  // 最適化に使う `odds` 配列(直下の行。candidateHorses[i].placeOddsMin から構築)にも
+  // `runGreedyAllocation` の引数にも一切登場しない。したがって `ev=NaN`/`Infinity` は
+  // payout計算をNaN/Infinity汚染できず、#31が問題にした「無関係な1頭が他馬の配分を
+  // 巻き添えにする」欠陥を引き起こす経路にならない(確認方法: 本ファイル内で `horse.ev`/
+  // `h.ev`/`.ev` を grep し、上記(a)(b)以外の出現が無いことを確認した)。`ev` は結果を
+  // 読む利用者への参考情報としてそのまま素通しする(サニタイズしない。他の入力echoフィールド
+  // 〈placeProb等〉と同じ扱い)。
   const candidateHorses = sortedHorses.filter(
-    (h) => h.isPositive && h.placeOddsMin !== null,
+    (h) => h.isPositive && h.placeOddsMin !== null && isUsableOdds(h.placeOddsMin),
   );
   const candidateUmabanSet = new Set(candidateHorses.map((h) => h.umaban));
 
@@ -510,11 +572,23 @@ export function allocateBets(
       placeOddsMin: horse.placeOddsMin,
       ev: horse.ev,
       droppedBelowMinimum: false,
-      // placeOddsMin===null(オッズ未確定)を先に判定する。オッズ未確定の馬は ev===null・
-      // isPositive===false になる(evaluateHorse/excluded と同じ規約)ため、!isPositive を
-      // 先に見ると「まだ判定できていない(オッズ未確定)」馬まで「EVがプラスではない(判定した
-      // 結果マイナス)」と誤ラベルしてしまう。判定不能 > 判定結果マイナス の順に判定する。
-      excludedReason: horse.placeOddsMin === null ? EXCLUDED_NO_ODDS : EXCLUDED_NOT_POSITIVE,
+      // 判定不能 > 判定結果マイナス の順に判定する(Issue #31で3分岐に拡張)。
+      // 1. placeOddsMin===null(オッズ未確定)。オッズ未確定の馬は ev===null・isPositive===false
+      //    になる(evaluateHorse/excluded と同じ規約)ため、!isPositive を先に見ると「まだ判定
+      //    できていない(オッズ未確定)」馬まで「EVがプラスではない(判定した結果マイナス)」と
+      //    誤ラベルしてしまう。
+      // 2. placeOddsMin!==null だが数値として使えない(非有限または1.0未満。#74で
+      //    isUsableOddsの基準を`>0`から引き上げ)。値は入っているが
+      //    「使えない」状態であり、これも「判定不能」の一種として isPositive の値に関わらず
+      //    優先する(isPositive===falseの不正値を「EVがプラスではない」と誤ラベルしない。
+      //    #31が問題視した「判定不能を判定結果として報告する」欠陥の再生産防止)。
+      // 3. 上記いずれでもない(数値としては有効・isPositive===false) → 従来どおり判定結果マイナス。
+      excludedReason:
+        horse.placeOddsMin === null
+          ? EXCLUDED_NO_ODDS
+          : !isUsableOdds(horse.placeOddsMin)
+            ? EXCLUDED_ODDS_MALFORMED
+            : EXCLUDED_NOT_POSITIVE,
     });
   }
 
@@ -529,20 +603,21 @@ export function allocateBets(
   // Step6: 見送り理由(6分類・優先順位順)。判定ロジックはallocation-primitives.tsのコードを
   // 共有し、文言化(コード→日本語)だけを本ファイルの責務として残す(決定3: 文言定数は
   // 組合せ券種と分離する)。isSkipのときのみ算出する。
-  const skipReason = isSkip
-    ? skipReasonText(
-        determineSkipReasonCode(
-          bankrollInput,
-          perRaceCapInput,
-          effectivePerRaceCap,
-          betUnit,
-          kellyTargetStake,
-          kellyFraction,
-          candidateHorses.length,
-        ),
+  // Issue #58: コードをskipReasonの計算より前に独立した変数として持つ(一方向依存を型と
+  // 制御フローで強制する。skipReasonTextはコードだけを引数に取り、逆向きに文言から
+  // コードを導出する経路は存在しない)。
+  const skipReasonCode: SkipReasonCode | null = isSkip
+    ? determineSkipReasonCode(
+        bankrollInput,
+        perRaceCapInput,
+        effectivePerRaceCap,
         betUnit,
+        kellyTargetStake,
+        kellyFraction,
+        candidateHorses.length,
       )
     : null;
+  const skipReason = skipReasonCode === null ? null : placeSkipReasonText(skipReasonCode, betUnit);
 
   // notDiversified: betCount===1 のときのみtrueになりうる。betCount===0(見送り)は
   // isSkip/skipReasonが説明責任を負うため常にfalse。
@@ -566,6 +641,7 @@ export function allocateBets(
     betCount,
     isSkip,
     skipReason,
+    skipReasonCode,
     notDiversified,
     modelId: model.id,
     modelApproximate: model.approximate,
@@ -576,6 +652,13 @@ export function allocateBets(
       marginalDeviationMax,
       candidateCount: candidateHorses.length,
       excludedCount: sortedHorses.length - candidateHorses.length,
+      // oddsMalformedCount(Issue #31): excludedCountの内訳(部分集合)。placeOddsMinが
+      // 非nullだが数値として使えない(非有限または1.0未満。#74でisUsableOddsの基準を
+      // `>0`から引き上げ)馬の頭数。候補選定(Step1)と同一のisUsableOdds基準で数え直す
+      // (二重の基準を作らない)。
+      oddsMalformedCount: sortedHorses.filter(
+        (h) => h.placeOddsMin !== null && !isUsableOdds(h.placeOddsMin),
+      ).length,
     },
   };
 }
@@ -643,8 +726,13 @@ function computeMarginalDeviationMax(
  * allocation-primitives.ts 側に一元化されているため、本関数は文言のマッピングのみを行う
  * (決定3: 見送り理由・advisoryの文言定数は券種ごとに分離する。既存の①〜⑥の文言・優先順位は
  * 完全に維持している)。
+ *
+ * **Issue #55でexportした**: 過去分析の再表示(検証タブ「レース一覧」)が、保存済みの
+ * `skip_reason_code`(コード)から見送り理由の文言を組み立て直すために必要になったため。
+ * 組合せ券種の `comboSkipReasonText`(combo-bet-allocation.ts)とは `no-candidates` の
+ * 文言だけが異なる(「馬」/「買い目」)別関数であり、本関数を複勝以外に流用しないこと。
  */
-function skipReasonText(code: SkipReasonCode, betUnit: number): string {
+export function placeSkipReasonText(code: SkipReasonCode, betUnit: number): string {
   switch (code) {
     case "bankroll-unset":
       return REASON_BANKROLL_UNSET;

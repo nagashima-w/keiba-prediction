@@ -61,6 +61,91 @@ describe("parseNarOdds(発売前: 予想オッズのみ→yosoに正規化)", ()
   it("複勝は未発売のため空になること", () => {
     expect(odds.place).toEqual({});
   });
+
+  it('人気列が"0"の場合はninkiがnullになること(Issue #34。parseYosoRow経路)', () => {
+    const yosoRow = (umaban: number, ninki: string, oddsText: string) => `
+      <tr>
+        <td class="Ninki">${ninki}</td>
+        <td class="Waku1">${umaban}</td>
+        <td class="Mark_User"></td>
+        <td class="Horse_Name">テスト馬${umaban}</td>
+        <td class="Odds">${oddsText}</td>
+      </tr>`;
+    const yosoHtml = `
+      <table class="RaceOdds_HorseList_Table Ninki">
+        <tr class="col_label"><th>人気</th><th>馬番</th><th>印</th><th>馬名</th><th>予想オッズ</th></tr>
+        ${yosoRow(1, "0", "5.0")}
+        ${yosoRow(2, "2", "8.5")}
+      </table>`;
+    const zeroOdds = parseNarOdds(yosoHtml);
+    // 人気列が"0"の馬は欠損表現としてninkiがnullになる。
+    expect(zeroOdds.win[1]).toEqual({ odds: 5.0, ninki: null });
+    // 他馬(正常な人気値)は影響を受けない。
+    expect(zeroOdds.win[2]).toEqual({ odds: 8.5, ninki: 2 });
+  });
+});
+
+describe("parseNarOdds(桁区切りカンマ。Issue #73・経路d)", () => {
+  // code-reviewer指摘: parseTanRow(発売後単勝)とparseYosoRow(発売前予想オッズ)は
+  // 別関数でありtoOddsNumber呼び出しも別箇所のため、片方の回帰は他方のテストでは検出できない。
+  // 実測: parseYosoRow側だけを旧実装(カンマ非対応)に戻してもcore全体が緑のままだった
+  // (レビュアーの変異注入結果)。両者を別々のitで固定する。
+  it('発売後単勝(#odds_tan_block・parseTanRow経路)のオッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
+    const html = `<div id="odds_tan_block">${buildOddsTable(
+      buildOddsRowFor(1, "1,234.5") + buildOddsRowFor(2, "12.3"),
+    )}</div>`;
+    const odds = parseNarOdds(html);
+    expect(odds.win[1]).toEqual({ odds: 1234.5, ninki: null });
+    expect(odds.win[2]).toEqual({ odds: 12.3, ninki: null });
+  });
+
+  it('発売前予想オッズ(parseYosoRow経路)のオッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
+    const yosoRow = (umaban: number, ninki: number, oddsText: string) => `
+      <tr>
+        <td class="Ninki">${ninki}</td>
+        <td class="Waku1">${umaban}</td>
+        <td class="Mark_User"></td>
+        <td class="Horse_Name">テスト馬${umaban}</td>
+        <td class="Odds">${oddsText}</td>
+      </tr>`;
+    const html = `
+      <table class="RaceOdds_HorseList_Table Ninki">
+        <tr class="col_label"><th>人気</th><th>馬番</th><th>印</th><th>馬名</th><th>予想オッズ</th></tr>
+        ${yosoRow(1, 10, "1,234.5")}
+        ${yosoRow(2, 1, "8.5")}
+      </table>`;
+    const odds = parseNarOdds(html);
+    expect(odds.win[1]).toEqual({ odds: 1234.5, ninki: 10 });
+    expect(odds.win[2]).toEqual({ odds: 8.5, ninki: 1 });
+  });
+});
+
+describe("parseNarOdds(複勝レンジの境界。Issue #73・経路e/f)", () => {
+  // 条件A': 6.8 / 1234.5 / null の3値以上を生む(表の各行を通じて)。
+  // 条件B: oddsMinとoddsMaxの2列は全行を通じて一致しない(1234.5≠2345.6・6.8≠null)。
+  it.each<[string, { oddsMin: number | null; oddsMax: number | null; ninki: null }, string]>([
+    ["6.8 - 8.5", { oddsMin: 6.8, oddsMax: 8.5, ninki: null }, "正常系(実データ形式)"],
+    [
+      "1,234.5 - 2,345.6",
+      { oddsMin: 1234.5, oddsMax: 2345.6, ninki: null },
+      "#73の本丸。カンマとハイフンの同時出現",
+    ],
+    ["6.8 - 8.5 - 9.9", { oddsMin: null, oddsMax: null, ninki: null }, "ハイフン2個以上は不成立"],
+    ["6.8 -", { oddsMin: null, oddsMax: null, ninki: null }, "上限側が空"],
+    ["- 8.5", { oddsMin: null, oddsMax: null, ninki: null }, "下限側が空"],
+    [
+      "6.8 - 取消",
+      { oddsMin: 6.8, oddsMax: null, ninki: null },
+      "per-halfを意図として固定(壊れた側のみnull。Issue #73)",
+    ],
+    ["取消", { oddsMin: null, oddsMax: null, ninki: null }, "ハイフンなし"],
+  ])("複勝オッズテキスト %j は %j になること(%s)", (oddsText, expected) => {
+    const html = `
+      <div id="odds_tan_block">${buildOddsTable(buildOddsRowFor(1, "5.0"))}</div>
+      <div id="odds_fuku_block">${buildOddsTable(buildOddsRowFor(1, oddsText))}</div>`;
+    const odds = parseNarOdds(html);
+    expect(odds.place[1]).toEqual(expected);
+  });
 });
 
 describe("parseNarOdds(構造異常)", () => {

@@ -58,17 +58,15 @@ import type { AnalysisResult } from "../packages/app/src/shared/analysis-types.j
 import {
   buildMixedCandidates,
   type MixedCandidateBuildInput,
-} from "../packages/app/src/renderer/mixed-candidates.js";
+} from "../packages/app/src/shared/mixed-candidates.js";
 import {
   allocateGeneralBets,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   type GeneralBetAllocationConfig,
   type JointModelHorse,
 } from "../packages/core/src/ev/combo-bet-allocation.js";
-import {
-  buildMixedAllocationDisplay,
-  type MixedAllocationSettings,
-} from "../packages/app/src/renderer/mixed-allocation-view.js";
+import { buildMixedAllocationDisplay } from "../packages/app/src/renderer/mixed-allocation-view.js";
+import type { MixedAllocationSettings } from "../packages/app/src/shared/mixed-race-allocation.js";
 
 const FIXTURE_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -91,6 +89,8 @@ async function loadAnalysisResult(): Promise<AnalysisResult> {
     // LLM未使用(analyze:null)。scorerが出すpriorがそのままadjustedProbになる(実prior)。
     analyze: null,
     saveAnalysis: () => 0,
+    // Issue #59: このスクリプトでは配分提案の永続化を検証しない(この呼び出しでは配分計算を行わない)。
+    allocationSettings: null,
   };
   // kaisaiDateを明示する(実レース日2026/06/28。#40「#35-1a」)。渡さないとresolveAnalysisDateが
   // 実行日(now())へフォールバックし、季節分類・休み明け走目の基準日が壁時計時刻とともに

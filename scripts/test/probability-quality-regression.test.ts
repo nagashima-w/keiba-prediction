@@ -95,6 +95,8 @@ async function runWithFixture(raceData: RaceData, kaisaiDate: string): Promise<A
     scrape: async () => raceData,
     analyze: null,
     saveAnalysis: () => 0,
+    // Issue #59: この回帰テストでは配分提案を検証しない(この呼び出しでは配分計算を行わない)。
+    allocationSettings: null,
   };
   return runAnalysis(raceData.raceId, parseKaisaiDate(kaisaiDate), deps);
 }

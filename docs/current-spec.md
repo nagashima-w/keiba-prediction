@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.2.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.6.3)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -8,10 +8,20 @@
 
 - ツール名: 競馬期待値分析ツール(keiba-ev-tool)
 - 種別: 複勝の期待値プラス馬券を抽出するデスクトップアプリ(Electron + React)
-- **対応券種: 複勝のみ。** 単勝・ワイド・馬連・馬単・三連複・三連単・枠連・枠単はいずれも未対応
-  (拡張のロードマップと技術的な依存関係は GitHub Issue #22)。単勝オッズは取得しているが賭け対象では
-  なく、発売前レースで複勝下限を概算する用途にのみ使う(`estimatePlaceOddsMinFromWin`)
-- バージョン: ルート/アプリ `1.2.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- **対応券種は用途によって異なる(3点。混同しないこと)**:
+  - **配分提案**: 複勝+ワイド+三連複(ワイド・三連複はオプトイン設定`includeWideInAllocation`/
+    `includeTrioInAllocation`。既定ON。取得自体は`includeComboOdds`が別途必要。5節参照)
+  - **記録・回収率検証**: 複勝のみ(`ev/verify.ts`は複勝の的中判定・払戻のみを扱う。**回収率検証は
+    Issue #52 完了時点でもまだ複勝のみが正**)。`ev/analysis-store.ts`は Issue #52 で
+    ワイド・三連複の**確定払戻の取得・永続化**(`race_combo_payouts`/`race_combo_payout_imports`、
+    `parse-race-result.ts`)まで対応したが、**保存はするが検証(`ev/verify.ts`)への反映は未着手**
+    (読み手は Issue #54)。取得(オッズ・配分提案)と検証(回収率集計)は別軸であることに注意
+    (5節の配分提案は既にワイド・三連複対応済みだが、これは組合せ**オッズ**の話で本項の組合せ**払戻**
+    とは別物。組合せオッズの永続化自体も別Issue #53)
+  - **単勝オッズ**: 賭け対象ではなく、発売前レースで複勝下限を概算する用途にのみ使う
+    (`estimatePlaceOddsMinFromWin`)
+  - 馬連・馬単・三連単・枠連・枠単は未対応(拡張のロードマップと技術的な依存関係は GitHub Issue #22)
+- バージョン: ルート/アプリ `1.6.3`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -81,7 +91,11 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   `biasCorrectionScale=0.3` で一律減衰)を、頭数レベル正規化(目標複勝圏内数 min(3, 頭数)へ寄せる、
   逸脱許容 0.1)したうえで prior を算出。prior は [0.02, 0.95] にクランプ。
 - **EV(期待値)**(`ev/expected-value.ts`): 複勝期待値 = place_prob × **複勝オッズ下限(oddsMin)**。
-  EV > 閾値(既定 1.0、厳密不等号)の馬のみ `isPositive=true`。オッズ欠損馬は EV=null で対象外。
+  EV > 閾値(既定 1.0、厳密不等号)の馬のみ `isPositive=true`。オッズ欠損馬(馬番が無い/下限が
+  null)、および複勝オッズ下限が**値域外**(オッズの値域は1.0以上であり、0を含む1.0未満・非有限は
+  値域外。判定は `ev/allocation-primitives.ts` の `isUsableOdds` に集約。Issue #74)の馬は EV=null
+  で対象外。値域外の場合も `placeOddsMin` は生の値を保持し null に潰さない(判定不能〈値域外〉と
+  判定結果〈EV=0等〉を混ぜない。Issue #31 の原則)。
   発売前(oddsStatus=yoso で複勝オッズが無い)場合は単勝オッズから複勝下限を概算する
   `estimatePlaceOddsMinFromWin`(係数 0.2、あくまで概算で `evEstimated=true` として区別)。
 
@@ -130,16 +144,125 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 
 - **結果取込**: レース結果を取り込み(`parse-race-result.ts`)。未確定レース(結果表はあるが着順行が
   0 件)は構造異常と区別して `RaceResultNotConfirmedError` で穏やかに扱う。未取込レースの一括取込に対応。
-- **回収率サマリ**(`VerifyBetSummary`): EV プラスで購入した点数・賭け金・払戻・回収率。払戻は実配当
-  (placePayout)優先、無ければ複勝下限で近似(近似計上件数を区別)。既定 stake 100 円。
+- **組合せ払戻(ワイド・三連複)の取得・永続化(Issue #52)**: `parseRaceResult` は着順・複勝・単勝に
+  加えて `widePayouts`/`trioPayouts`(判別共用体 `RaceComboPayoutResult`)を返す。組(複数馬番)を
+  表現できない既存 `RacePayoutEntry` は流用せず、`{umabans, payout}` の新型で表す。
+  - **`state:"parsed"`**(組を取得できた。`payouts:[]`は「払戻テーブルはあるがこの券種の行が無かった
+    〈未発売等〉」の意味に限定)と、**`state:"undetermined"`**(構造異常・払戻未公開で判定不能。
+    理由は`kind`で分類: `payoutTableAbsent`/`groupCountMismatch`/`comboSizeMismatch`/
+    `invalidUmaban`/`duplicateCombo`)を明確に区別する(空配列を「判定結果」、undeterminedを
+    「判定不能」として扱う二層原則。`ev/combo-bet-allocation.ts`の`ComboOddsResolution`と同型)。
+    ワイド・三連複の的中組数はレースごとに一定ではない(3着同着でワイドが3組を超える等)ため、
+    組数を固定値で検証しない。ワイド・三連複行の構造異常は複勝・単勝・着順の取込を巻き添えにしない。
+  - 永続化は新テーブル `race_combo_payouts`(値。`race_id`/`bet_type`/`combo_key`/`payout`)と
+    `race_combo_payout_imports`(取込済みマーカー。`race_id`/`bet_type`)の2本。
+    `AnalysisStore.saveResult` の第4引数(`comboPayouts`)として`race_results`・
+    `race_result_meta`と単一トランザクションで書く。`state:"undetermined"`の券種はDBに一切触れない
+    (一過性の構造異常での再取込が正しい過去データを破壊しないため)。再取込で組数が減った場合は
+    delete-then-insertで古い行を残さない。
+  - 読み出しは`AnalysisStore.getComboPayouts(raceId, betType)`。「未取込」(一度も取り込んでいない・
+    Issue #52より前の旧DB・直近の取込が構造異常)と「取り込んだが該当券種の払戻が0件」を、
+    `race_combo_payout_imports`のマーカー行の有無(`race_results`の行の有無ではない)で区別する。
+  - **verify(`ev/verify.ts`)は本Issueでは一切変更していない**(読み手はIssue #54)。
+    取得・永続化はできるが回収率集計には未反映。
+- **回収率サマリ**(`VerifyBetSummary`): EV プラスで購入した点数・賭け金・払戻・回収率。既定 stake 100 円。
+  - **複勝の的中判定は「規則H」**(Issue #70): レースに `placePayout` 非 null の行が**1件以上あれば**
+    「複勝払戻が取込済み」とみなし、的中はその馬の `placePayout` が非 null かどうかで決める
+    (**着順を見ない**)。払戻は実配当。1件も無ければ従来どおり着順(`finish <= placeMaxRank`)で
+    判定し複勝下限で近似する(近似計上件数を区別)。
+    **これにより5〜7頭立て(複勝は2着まで)の3着馬を的中扱いする過大計上が消える**(#51)。
+    出走頭数は DB から復元できない(中止・除外・取消の着順がすべて null に潰される)が、
+    必要なのは「複勝の払戻対象馬の集合」であり、それは公式払戻表そのものとして厳密に取れる。
+    **残余**: 「払戻未取込かつ5〜7頭立て」だけは過大計上が残る(到達は稀。塞がないと決めた)
+  - **オッズが使えない買い目は「規則U」で判定不能として除外**(Issue #50): `isUsableOdds` を
+    通らない `placeOddsMin` の馬は、点数・賭け金・払戻の**いずれにも計上せず** `unjudgedOddsCount`
+    に別に数える。現行の本番経路では到達しない防御的堅牢化
 - **キャリブレーション**: 推定確率帯(既定 10 分割)ごとの実複勝率(`CalibrationBin`)と、過信バイアス
   (`CalibrationBiasBin`、代表予測値 − 実複勝率)。
+  - **「3着以内(`isInTopThree`)」と「複勝の払戻対象(`isPlaceHit`)」は別概念**(Issue #70)。
+    キャリブレーション・補正傾向・印別的中率・`RaceBreakdownHorse.isPlaced` は**前者だけ**を使い、
+    払戻計上は**後者だけ**を使う。6頭立ての3着馬は前者では的中・後者では不的中である
 - **予実ブレークダウン**(`RaceBreakdown`): レース単体ごとに予測(印・EV プラス馬・AI 補正後確率)と
   結果(実着順・複勝的中・賭け金/払戻/回収)を並べる。見出しは日付・競馬場・レース番号。
 - **補正傾向**(`VerifyTrendReport`): 補正方向(上げ/下げ/据え置き)× 結果、印別的中率(`MarkStat`)。
 - **中央/地方別**: `VerifyVenueFilter`(all / central / nar)で絞り込み集計。
 - **版別**: `computeVerifyReportByPromptVersion` が `PROMPT_VERSION` でグループ化し版別に集計・比較。
   推定 EV(evEstimated)は集計から除外して区別。既定は latest モード(レースごと最新分析のみ)。
+- **配分提案の永続化(Issue #59)**: `saveAnalysis` は分析本体(`analyses`/`analysis_horses`)と
+  同一トランザクションで、5節の配分提案を新テーブル2本へ書く(`AnalysisRecord.allocation`が
+  渡されたときのみ。呼び出し側〈main〉が渡さない旧来の呼び出しでは書かない=「未到達」)。
+  - `analysis_allocation_meta`(`analysis_id`主キー・`analyses`へのFK): レース単位のメタ行で、
+    **全経路(未設定/オッズ未発売/頭数不可/複勝のみ/券種混在/計算例外)で必ず1行書く**
+    (#31の3状態〈記録なし・見送り・配分あり〉をこの1行の有無と内容だけで区別できるようにするための
+    不変条件)。到達状態のコード5列(`route`・`unavailable_reason`・`fallback_reason`・
+    `skip_reason_code`・`combo_odds_wide`/`combo_odds_trio`。null は「未到達」であって「不明」では
+    ない)、実行時の実効設定7列(`bankroll`/`per_race_cap`/`kelly_fraction`/`ev_threshold`/
+    `include_combo_odds`/`include_wide`/`include_trio`)、経路ごとに実際に使われた既定値4列
+    (`bet_unit`/`greedy_steps`/`candidate_cap`/`model_id`+`model_approximate`。複勝のみ経路には
+    `candidate_cap`が存在しないため常にnull、coreの配分計算に未到達の経路は4列とも null)、
+    `odds_status` を持つ。
+  - `analysis_bets`(`analysis_id`/`bet_type`/`combo_key`複合主キー・`analyses`へのFK):
+    実際に配分された(`stake>0`の)買い目の明細のみを保存する(点数・総額は
+    `COUNT`/`SUM`で導出でき、集計列を別途持たない)。複勝・ワイド・三連複を
+    `bet_type`/`combo_key`/`stake`/`odds`/`ev`の共通5列に統合する(`combo_key`は
+    `buildComboOddsKey`による正規化キーで、`race_combo_payouts`と同じ形式)。
+  - 版不明分析の一括削除(`deleteAnalysesWithUnknownPromptVersion`)は、この2テーブルの子行も
+    `analysis_horses`と同じ順序原則(子→親)で先に削除してから`analyses`を削除する。
+  - **読み出しAPI・verify集計・UI表示への反映は本Issueのスコープ外**(#54は#71名義で回収率検証
+    〈`getAllocationForVerify`。下記「配分ベースの回収率」参照〉として、#55は過去分析の再表示
+    〈`getStoredAllocation`。下記「過去分析の再表示」参照〉として、それぞれ実装済み)。
+- **配分ベースの回収率(proposedBet系、Issue #71・#54-B)**: `VerifyReport.proposedBet`
+  (`ProposedBetReport`)が、既存の累積回収率(`bet`。複勝一律 stakePerBet 円という仮定、Q-B)とは
+  別に、**分析時点の設定で実際に提案した配分額をそのまま賭け金とする**回収率を出す(Q-C)。
+  賭け金の仮定が異なる2系統のため、`bet` と `proposedBet` を合算した値はどこにも作らない。
+  `proposedBet` 内部の複勝・ワイド・三連複の3券種は同一の賭け金仮定(実際の配分額)を共有する
+  ポートフォリオのため、`overall`(3券種の合算)は持つ。
+  - **読み出しAPI**: `AnalysisStore.getAllocationForVerify(analysisId)` が
+    `analysis_allocation_meta`/`analysis_bets` のうち `route`・`skip_reason_code`・
+    `bet_type`/`combo_key`/`stake` の5列だけを読む(残り18列・`odds`/`ev` は#71のスコープ外。
+    メタ行が無ければ undefined)。`odds`/`ev` を読まないのは、分析時点のオッズで払戻を近似すると
+    「回収率」ではなく「提案時点の期待値の再計算」になり Q-C に反するため——系として
+    `proposedBet` 系は近似払戻を一切持たず、実配当のみで按分する(複勝は
+    `race_results.place_payout`、ワイド/三連複は `race_combo_payouts.payout` を
+    `stake/100` で按分)。
+  - **母集団の4分類**(MECEで合計は`includedAnalysisCount`と一致): 「配分あり」(メタ行あり ∧
+    `route∈{place-only,mixed}` ∧ `skip_reason_code IS NULL`。賭け金>0)、「見送り」(同条件だが
+    `skip_reason_code`が非null。計算した上での判定結果)、「未到達」(`route∈{unset,yoso,
+    unavailable,invalid}`。coreの配分計算そのものに未到達な判定不能)、「記録なし」(メタ行が無い。
+    #59より前の旧分析)。**分類は必ず`route`を先に見る**——`route==="unset"`(既定
+    `bankroll<=0 || perRaceCap<=0`で層1にとどまる経路)は`skip_reason_code`が常にnullになるため、
+    `skip_reason_code`を先に見ると「未到達」が「配分あり」に混入する。
+  - **規則U(判定不能の扱い)の適用**: 複勝はそのレースの複勝払戻が1件も取込済みでなければ、
+    ワイド・三連複は`getComboPayouts`が`not_imported`または`imported`かつ`payouts`が空配列で
+    あれば、いずれも判定不能として件数・賭け金・払戻のいずれにも計上せず券種別の
+    `unjudgedCount`(買い目行単位)に計上する。`imported`かつ`payouts`が非空だが該当
+    `combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり判定不能とは区別する。
+  - UI(`VerifyView`)は既存の累積回収率の下に、上記overall・券種別内訳・母集団4分類件数を表示する。
+- **過去分析の再表示(Issue #55)**: 検証タブ「レース一覧」の各レースの折りたたみ内に
+  「配分提案(分析時点)」ブロックを表示する。導線は新設せず、既存の「レース一覧」
+  (`RaceLedgerView`)に配分を引き当てるだけ(新規IPCチャネルは追加していない)。的中・払戻・
+  回収率は出さない(#16/#71の領分)。配分の再計算はしない(保存済みを読むだけ)。
+  - **読み出しAPI**: `AnalysisStore.getStoredAllocation(analysisId)` が
+    `analysis_allocation_meta` のうちメタ**13列**
+    (`route`/`unavailable_reason`/`fallback_reason`/`skip_reason_code`/`bankroll`/
+    `per_race_cap`/`kelly_fraction`/`ev_threshold`/`include_combo_odds`/`include_wide`/
+    `include_trio`/`bet_unit`/`odds_status`)+ `analysis_bets` の5列
+    (`bet_type`/`combo_key`/`stake`/`odds`/`ev`)を読む。`combo_odds_wide`/`combo_odds_trio`/
+    `greedy_steps`/`candidate_cap`/`model_id`/`model_approximate`の6列は`getAllocationForVerify`
+    と同じ理由(誰も読まない列にコストを払わない)で読まない。メタ行が無ければ undefined
+    (#59より前の旧分析=「記録なし」)。`getAllocationForVerify`(#71。route/skip_reason_code/
+    bet_type/combo_key/stakeの5列のみ)とは読む列の範囲が異なる別クエリであり、互いに影響しない。
+  - **表示状態(`renderer/allocation-proposal-view.ts`)**: 記録なし/unset/yoso/unavailable/
+    invalid/見送り(skip)/配分ありの7状態に加え、値の矛盾(未知の`route`文字列、または
+    `route∈{place-only,mixed}` ∧ `skip_reason_code=null` ∧ `bets=[]`)を「判定不能」として
+    別枠で扱う(#31: 判定済みを未判定に潰さない)。状態の下位理由・パラメータだけが欠けている
+    場合(`unavailable_reason=null`、`skip_reason_code="cap-too-small"` ∧ `bet_unit=null`)は
+    状態自体は保持し、欠けた部分だけを代替文言で明示する(判定不能へは倒さない)。
+  - 買い目行は券種(複勝「4番」/ワイド「4-7」/3連複「4-7-9」)・金額・分析時点のオッズ/EVを表示し、
+    実効設定8項目(総資金/1レース上限/ケリー係数/EV閾値/ワイド・三連複・組合せオッズ取得の
+    ON・OFF/オッズ状態)を注記として添える。`VerifyView.tsx`には本機能の`route`/
+    `skip_reason_code`分岐と文言リテラルを置かず、`allocation-proposal-view.ts`が返す配列を
+    `.map`するだけにしている。
 
 ## 5. 馬券配分の提案(ev/place-joint-model・ev/bet-allocation)
 
@@ -188,7 +311,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   合計が目標から大きく外れているときは信頼性低下の警告を出す(非有限値は表示しない)。
 - **券種横断の配分(機能D-2c・Issue #28)**: 複勝・ワイド・三連複を**同じ1つの予算枠**の中で
   `allocateGeneralBets`(`@keiba/core/ev/combo-bet-allocation`)により同時最適化する
-  (`renderer/mixed-allocation-view.ts`)。ワイド・三連複のオッズ取得(`includeComboOdds`・
+  (`shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
+  `renderer/mixed-allocation-view.ts` から分離した。表示データの導出〈`buildMixedAllocationDisplay`〉は
+  引き続き `renderer/mixed-allocation-view.ts` にある)。ワイド・三連複のオッズ取得(`includeComboOdds`・
   既定OFF)と、取得したオッズを実際に配分へ使うか(`includeWideInAllocation`/
   `includeTrioInAllocation`・それぞれ既定ON)は別設定に分けている(取得と採用の分離)。
   次のいずれかに該当すると、複勝専用の従来経路(`buildRaceAllocation`)の結果を**そのまま**使う
@@ -197,8 +322,12 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   ゲートしない**(ワイド・三連複は複勝と異なり頭数による発売制約を受けないため)。EV判定閾値は
   複勝・ワイド・三連複で統一する。表示は券種別内訳(金額・点数)・複勝のみで計算した場合の提案額との
   併記(混在時に複勝の提案額が変わる理由を数値で示す。寄り先の券種は資金規模・1レース上限・
-  貪欲配分の刻み幅で変わるため断定しない)・個々の買い目全件(stake降順・同額は馬番配列の辞書順)・
-  判定不能(未取得/欠損/不正値)件数・券種ごとの取得状態注記(`{}` を「発売なし」と断定せず取得結果の
+  貪欲配分の刻み幅で変わるため断定しない)・個々の買い目(stake降順・同額は馬番配列の辞書順で
+  ソートした上で、上位20件〈`MIXED_ALLOCATION_VISIBLE_LIMIT`。ユーザー判断によるUXの目安であり
+  計測由来ではない〉を常時表示し、残りは件数・配分額合計付きの折りたたみに収める。Issue #15再スコープ。
+  この上限は混在経路の買い目一覧にのみ適用され、複勝専用経路〈`renderBetAllocationBlock`〉は
+  そもそも上限を適用しないため常に全件のまま)・判定不能(未取得/欠損/不正値)件数・券種ごとの
+  取得状態注記(`{}` を「発売なし」と断定せず取得結果の
   状態で判別する)を含む。**複勝圏内確率の合計が目標から大きく外れているときの信頼性低下の警告は、
   混在経路でも同じ閾値・同じ文言で出す**(複勝専用経路と同じ`probabilitySumWarning`を、
   混在経路が持つ`race.rows[].adjustedProb`合計から同じ形の入力を組み立てて再利用する。既存経路に
@@ -234,8 +363,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 
 - **Windows portable exe**(`keiba-ev-tool-<version>-portable.exe`、インストール不要)。
 - **開発版**: 開発ブランチ(`claude/keiba-ev-tool-dev-cvagiu`・`claude/handover-next-session-x5ki6o`・
-  `claude/keiba-prediction-handover-ojr8t1`)への push のうち、下記の dev-latest 公開ゲート(Issue #43)
-  を満たすものだけが固定タグ **`dev-latest`** のプレリリースを in-place 更新する(ローリング公開。
+  `claude/keiba-prediction-handover-ojr8t1`・`claude/issue-order-processing-wjgpdd`)への push のうち、
+  下記の dev-latest 公開ゲート(Issue #43)を満たすものだけが固定タグ **`dev-latest`** の
+  プレリリースを in-place 更新する(ローリング公開。
   **push すれば常に更新されるわけではない**)。**exe 名がバージョン依存のため、version を上げると
   旧名のアセットが残置される**。これを防ぐため、公開ステップの直後に現行ファイル名以外の `.exe` を
   削除する掃除ステップを置いている(最新 exe が先にアップロード済みの状態を保つ順序)。
@@ -247,8 +377,92 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   すべて公開・孤児掃除の両ステップをスキップする(`CLAUDE.md`「レビュー継続中の中間コミット」節 (f))。
   未承認の自動コミットが1つ割り込むだけで未レビューのコードが公開される事故(Issue #43)を受けて、
   「印が無ければ公開しない」既定安全側に反転した。スキップ時は run のログに `::notice::` を残す。
+- **版数運用の機械検査(Issue #45。`scripts/release-gate.ts`)**: #44-D-1(`docs/versioning.md`)
+  の「公開1回につき必ず1回、版数を上げる」運用を機械で強制する2ステップ。判定核は純関数
+  + 依存注入として `scripts/release-gate.ts` に切り出し、`scripts/test/release-gate.test.ts`
+  で実ふるまいを検証する(yml へのインライン bash では判定ロジック自体がテストされない
+  形骸化を避けるため)。
+  - **版数据え置き検査**(`version-bump-check`。exe 生成の直後・dev-latest 公開の直前):
+    今回ビルドした exe と同名のアセットが dev-latest に既に存在する場合に block する。
+    dev-latest 公開ゲートを満たす push のときだけ実行し(`if:` に
+    `github.event_name == 'push'` を明示)、**`workflow_dispatch`(手動実行)では実行しない**
+    (`docs/versioning.md` が同一コミットの再送を「公開」に含めないと定めているのに合わせた
+    意図的な残存ギャップ。手動実行で新しい内容を配布した場合は版上げが機械で守られない)。
+    アセット一覧取得(GitHub REST API)の失敗(404・403/5xx・タイムアウト・設定不備等)は
+    fail-open(公開を止めず警告のみ)。
+  - **タグ検証**(`tag-version`。依存インストール直後・型検査より前): `v* タグ push` /
+    タグ ref への `workflow_dispatch` で、タグ名と `packages/app/package.json` の
+    version が一致しない場合に block する。こちらは fail-closed(package.json が
+    読めない・不正な場合も block)。据え置き検査と非対称な理由は、タグ検証の入力が
+    ローカルで決定論的に定まる値であり、リモート API のような一過性障害が原理的に
+    起こり得ないため。
 - アイコンは `scripts/gen-icon.mjs`(`pnpm gen:icon`)で生成。パッケージング構成は
   `packages/app/electron-builder.yml`。
+- **ネイティブバインディングの解決(Issue #61)**: 配布(packaged)時は better-sqlite3 の
+  `.node` を `<process.resourcesPath>/app.asar.unpacked/node_modules/better-sqlite3/build/Release/
+  better_sqlite3.node` の絶対パスで**明示指定**し(`packages/app/src/main/native-binding.ts` の
+  `resolveVerifiedNativeBindingPath` → `pipeline-deps.ts` の `new Database` 第2引数。
+  Issue #62 でこの2関数は `ipc.ts` から electron 非依存の `native-binding.ts` へ抽出した。
+  挙動不変・`ipc.ts` は re-export のみ)、`bindings` パッケージの**スタックトレースからの
+  推測解決を使わない**。見つからない場合は、期待した絶対パス・`fs.existsSync` の結果・
+  `process.resourcesPath`・`app.isPackaged` の4要素を含む診断メッセージ付きで**即時失敗**する。
+  非 packaged(開発・テスト)では従来どおり `bindings` に委ねる。
+- **配布 exe の可動性検査(Issue #62。`scripts/artifact-gate.ts`)**: #60(better-sqlite3 が
+  packaged 実行でロードできなかった実機事故)を #61 で是正したが、それまでの検証は
+  「exe が更新されたこと」しか見ておらず「exe が動くこと」を一度も確認していなかった
+  (vitest は Node 環境で走るため、Electron ランタイム・asar・ネイティブモジュールの破綻を
+  原理的に検出できない)。`electron-builder で exe を生成` の直後・`版数据え置きを検査` の
+  前に、判定核を純関数として切り出した2ステップの機械検査を常時関門(`if:` なし)として置く。
+  判定核・依存注入・yml 配線は #43/#45(上記)と同じ方針(yml へインライン bash の判定を書かず、
+  `scripts/test/artifact-gate.test.ts` で実ふるまいを検証する)。
+  - **asar 配置検査**(`asar-layout`。縮小版): A1(`unpacked !== true` な `.node` エントリが
+    asar 内に0件であること。`.node` エントリ自体が1件も無い場合も fail-closed で block)・
+    A2(`dist/main/main.cjs`・`dist/preload/preload.cjs`・`dist/renderer/index.html` が
+    asar 内に存在すること)の2項目のみ。app.asar の読み込み自体が失敗した場合(存在しない等)も
+    fail-closed で block する。asar ヘッダのバイト列パーサ(`parseAsarHeader`)は
+    `@electron/asar` の実出力を実測して確定した実フォーマットに従う(新規依存は追加していない。
+    pnpm 環境で `@electron/asar` を `require.resolve` できないため)。
+  - **ヘッドレススモーク**(`smoke`。本命): 配置検査は asar のヘッダ(ファイルの存在・展開状態)
+    しか見ず `.node` の中身(ABI)を一切読まないため、ABI 不一致を原理的に検出できない
+    (Node 向け `.node` を注入した対照実験で確認済み。配置検査4項目〈当初案〉はすべて PASS した
+    一方、ヘッドレススモークは `NODE_MODULE_VERSION` 不一致で実際に FAIL した)ため、こちらが本命
+    (**v1.3.1 の実物 exe 自体は当初案・スモークともに allow を返す**。誤りだった旧記述の訂正と
+    実測方法は下記「この検査が実際に何を検出できるのか」を参照)。
+    `win-unpacked/*.exe` を一意に解決し(0個/複数個は block)、本番と同一の
+    `resolveVerifiedNativeBindingPath` を呼んでネイティブバインディングの絶対パスを得たうえで、
+    `spawnSync(exe, [子スクリプト, nativeBindingPath, resourcesPath, tmpDbPath], { env:
+    { ELECTRON_RUN_AS_NODE: "1" }, timeout })` で子プロセス(`scripts/artifact-gate-smoke-child.cjs`。
+    plain CJS)を起動する。子プロセスは `process.resourcesPath` の一致確認 →
+    `require.resolve("better-sqlite3", { paths: [...] })` → `new Database(tmp, { nativeBinding })` →
+    CREATE TABLE/INSERT/SELECT(値一致検証)→ close() → センチネル付きJSON1行を stdout に出す。
+    判定(`judgeSmokeOutcome`)は exit code とセンチネルの両方を見る: exit 0 でもセンチネルが
+    無ければ block(静かに何もせず0で返ることを許さない)、exit≠0 でも stdout のセンチネルから
+    `reason` を取り出して message に含める(exit≠0 は何があっても block のまま。fail-closed は
+    弱めない。理由の可視化のみ)。一時ディレクトリは `finally` で必ず削除する。
+  - **射程外**(「#60型の症状を検出できない」とは書かない。#61以降それは事実として誤り):
+    (1) 検査対象は `win-unpacked` であり portable exe 自身の自己展開は通らない、
+    (2) `ELECTRON_RUN_AS_NODE=1` は Node 部分のみで GUI 起動時にしか出ない破綻は検出しない、
+    (3) 本番の呼び出し元(`main.cjs` の `ResourceManager` 経由)そのものは実行しないが、
+    `nativeBinding` を明示指定するため呼び出し元の違いは `.node` のロード可否に影響しない、
+    (4) DB操作は CREATE/INSERT/SELECT のみでスキーマ移行経路は通らない、
+    (5) ビルドマシン上の x64 成果物のみでユーザー実機の環境差は対象外、
+    (6) 実 exe 経路は Linux では原理的に実行できず(`.exe` 拡張子を要求する)、
+    Windows CI が唯一の検証場所である、
+    (7) 本番コードが実際に `nativeBinding` を渡し続けることは対象外(検査は成果物を正しい
+    メカニズムで叩けることを見るだけで、本番コードがそのメカニズムを使っているかは見ない。
+    この配線は `packages/app/test/ipc-native-binding.test.ts` が守る)。
+  - **この検査が実際に何を検出できるのか**: 本検査は v1.3.1 の実物 exe(`.node` が
+    1,918,976 バイトで実在・asar ヘッダ上 `unpacked: true`・`dist` 3点も実在・
+    `nm_version=132`〈Electron 34 向けに正しくビルド済み〉)に対し
+    A1/A2・スモークとも実際に allow を返す(実測確認済み。#60当時の壊れ方はこの検査には
+    映らない。`nm_version` はネイティブアドオンが埋め込む `node_module` 構造体〈`nm_modname`
+    〈+40〉から40バイト遡った位置が `nm_version`〈+0〉〉をバイナリから直接読み取って確認した。
+    詳細は `scripts/artifact-gate.ts` 冒頭「設計の核心」参照)。#60 の真因は `bindings`
+    パッケージの呼び出し元スタック走査であり、そのメカニズムは
+    #61 で除去済みのため、本検査は成果物を*現行(#61後)のメカニズムで*叩くだけで、v1.3.1 当時の
+    壊れ方(呼び出し元スタックに依存した解決失敗)そのものは原理的に再現しない。本検査が守るのは、
+    #61 が新たに単一障害点にした「ハードコードされた絶対パスが実物の配置と一致すること」と、
+    ABI・asar・配置の破綻という(#60より)より広いクラスである。
 
 ## 9. 確率の質の計測基盤(scorer/snapshot-filter・ev/probability-quality。#40「#35-1a」)
 

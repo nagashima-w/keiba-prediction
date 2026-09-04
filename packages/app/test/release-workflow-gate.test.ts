@@ -174,6 +174,12 @@ const STEP_NAMES = {
   cleanup: "dev-latest の孤児 exe アセットを掃除(現行ファイル名以外を削除)",
   skipNotice: "dev-latest 公開スキップをログに記録(承認印なしコミット時)",
   tagRelease: "Releases に公開(正式リリース / v* タグ push 時)",
+  // Issue #45(D-2): 版数運用規約(#44-D-1)の機械検査。
+  tagVerify: "タグとバージョンの一致を検証",
+  versionBumpCheck: "版数据え置きを検査(dev-latest 公開前)",
+  // Issue #62: 配布 exe が「動くこと」を CI で検査するゲート(asar配置検査・ヘッドレススモーク)。
+  asarLayoutCheck: "配布 exe の asar 配置を検査(A1/A2)",
+  smokeCheck: "配布 exe のヘッドレススモークテスト",
 } as const;
 
 /**
@@ -329,6 +335,26 @@ function extractStepBlock(
  */
 const IMPERATIVE_ATTACH_PATTERN = /必ず[\s\S]{0,10}付与/;
 
+/**
+ * yml 本文で `<key>:` が実コード行(行頭のインデントの直後)として出現する回数を数える。
+ * Issue #45(D-2)で追加した `continue-on-error` の全体出現回数の検査に使う。
+ *
+ * extractEnvValue と同じ理由で行頭アンカー(`^\s*<key>:`)にする: 素朴な部分一致だと、
+ * このファイル自身の説明コメント(例:「# continue-on-error は付けない」)がヒットして
+ * 実コードの出現回数と食い違う(実際に本タスクで踏んだ: コメントで1件多く数えてしまい
+ * 「1回のはず」のテストが誤って落ちた)。コメント行は `#` から始まるため
+ * `^\s*continue-on-error:` には一致しない。
+ *
+ * この関数自体が壊れていないことは、下の「正の対照」テスト(合成テキストへ2件注入して
+ * 2 を返すことを確認する)で別途担保する(m7: 検査する側を無害化しても検査される側が
+ * 正しければ緑のままになる、という空振りを防ぐ)。
+ */
+function countKeyLineOccurrences(yml: string, key: string): number {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const lineRegex = new RegExp(`^\\s*${escaped}:`, "gm");
+  return (yml.match(lineRegex) ?? []).length;
+}
+
 describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件)", () => {
   // 改行コードを LF に正規化してから読む(readNormalized)。Windows ランナー上の
   // checkout(actions/checkout)はリポジトリの .gitattributes 設定次第で CRLF になりうる。
@@ -464,20 +490,26 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     // 精密な部分検査に置き換えようとすると、本ファイルが辿った「部分一致の積み上げでは
     // 意味の逆転を検出できない」という失敗に逆戻りする。
     //
-    // 前提固定: このジョブが12ステップから成ることをまず固定する(配列比較が
-    // 空配列同士の一致のような自明なもので満たされないようにするため)。
+    // 前提固定: このジョブが16ステップから成ることをまず固定する(配列比較が
+    // 空配列同士の一致のような自明なもので満たされないようにするため。Issue #45 で
+    // タグ検証・版数据え置き検査の2ステップが増えて12→14になり、Issue #62 で
+    // asar配置検査・ヘッドレススモークの2ステップが増えて14→16になった)。
     const actualNames = extractAllStepNames(yml);
-    expect(actualNames.length).toBeGreaterThan(0);
+    expect(actualNames.length).toBe(16);
 
     expect(actualNames).toEqual([
       "リポジトリを取得",
       "pnpm をセットアップ",
       "Node.js をセットアップ",
       "依存をインストール",
+      STEP_NAMES.tagVerify,
       STEP_NAMES.typecheck,
       "テストを実行",
       STEP_NAMES.build,
       "electron-builder で exe を生成",
+      STEP_NAMES.asarLayoutCheck,
+      STEP_NAMES.smokeCheck,
+      STEP_NAMES.versionBumpCheck,
       STEP_NAMES.publish,
       STEP_NAMES.cleanup,
       STEP_NAMES.skipNotice,
@@ -608,5 +640,101 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     expect(workflowStep7.length).toBeLessThan(350);
     expect(workflowStep7).toContain(APPROVAL_MARK);
     expect(IMPERATIVE_ATTACH_PATTERN.test(workflowStep7)).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #45(D-2): 版数運用規約(#44-D-1)の機械検査(タグ検証・版数据え置き検査)
+  // -------------------------------------------------------------------------
+
+  it("タグ検証ステップの if: が正式リリースステップの if: と一致し、かつ startsWith(github.ref, 'refs/tags/v') そのものである", () => {
+    // 不変条件1と同じ「一致」と「期待値そのもの」の両方を固定する流儀。タグ検証だけが
+    // 別の条件式にずれると、正式リリースされないタグ push でタグ検証が block しない
+    // (または逆に正式リリースされるのにタグ検証が走らない)事故になる。
+    const tagVerifyIf = extractIfLine(extractStep(yml, STEP_NAMES.tagVerify));
+    const tagReleaseIf = extractIfLine(extractStep(yml, STEP_NAMES.tagRelease));
+
+    expect(tagVerifyIf).toBe(tagReleaseIf);
+    expect(tagVerifyIf).toBe("startsWith(github.ref, 'refs/tags/v')");
+  });
+
+  it("版数据え置き検査ステップの if: が env.PUBLISH_DEV_LATEST == 'true' && github.event_name == 'push' で完全一致する", () => {
+    // boss 着手前ゲート(C): env: マップ内から別の env は参照できないため、
+    // PUBLISH_DEV_LATEST の判定式を検査ステップ用に複製することはできない(条件式を
+    // 2箇所以上に複製しない規律への抵触)。この唯一解の字句そのものを固定する。
+    // event_name == 'push' を明示するのは workflow_dispatch(同一コミット再送)を
+    // 据え置き検査の対象から除外するため(docs/versioning.md の申し送り事項)。
+    const checkIf = extractIfLine(extractStep(yml, STEP_NAMES.versionBumpCheck));
+
+    expect(checkIf).toBe("env.PUBLISH_DEV_LATEST == 'true' && github.event_name == 'push'");
+  });
+
+  it("版数据え置き検査ステップが exe 生成の直後・公開ステップの直前に出現する", () => {
+    const exeGenIndex = stepStartIndex(yml, "electron-builder で exe を生成");
+    const checkIndex = stepStartIndex(yml, STEP_NAMES.versionBumpCheck);
+    const publishIndex = stepStartIndex(yml, STEP_NAMES.publish);
+
+    expect(exeGenIndex).toBeLessThan(checkIndex);
+    expect(checkIndex).toBeLessThan(publishIndex);
+  });
+
+  it("タグ検証ステップが「app をビルド」・正式リリースステップより前に出現する", () => {
+    const tagVerifyIndex = stepStartIndex(yml, STEP_NAMES.tagVerify);
+    const buildIndex = stepStartIndex(yml, STEP_NAMES.build);
+    const tagReleaseIndex = stepStartIndex(yml, STEP_NAMES.tagRelease);
+
+    expect(tagVerifyIndex).toBeLessThan(buildIndex);
+    expect(tagVerifyIndex).toBeLessThan(tagReleaseIndex);
+  });
+
+  it("両新ステップの run: 行が完全一致で固定されている(ステップ名だけ残して中身を骨抜きにする変異の検出)", () => {
+    const tagVerifyRun = extractRunBlock(extractStep(yml, STEP_NAMES.tagVerify));
+    const checkRun = extractRunBlock(extractStep(yml, STEP_NAMES.versionBumpCheck));
+
+    // boss メタレビュー(提案 → オーケストレーターが採用): github.ref_name を run: に
+    // 直接展開せず、env: 経由でシェル変数として渡す(タグ名はシェルメタ文字を含みうるため。
+    // 孤児掃除ステップの CURRENT_EXE と同じ「値を env 変数化してから $VAR で参照する」流儀)。
+    expect(tagVerifyRun).toBe(
+      'pnpm exec tsx scripts/release-gate.ts tag-version "$TAG_NAME"',
+    );
+    expect(checkRun).toBe("pnpm exec tsx scripts/release-gate.ts version-bump-check");
+  });
+
+  it("タグ検証ステップの env: TAG_NAME が github.ref_name をそのまま渡している(シェル注入対策の配線)", () => {
+    // extractEnvValue はキーがファイル中に厳密に1回だけ定義されていることも検証する
+    // (PUBLISH_DEV_LATEST と同じ流儀)。TAG_NAME はこのステップの外では使わない前提。
+    expect(extractEnvValue(yml, "TAG_NAME")).toBe("${{ github.ref_name }}");
+  });
+
+  it("continue-on-error が yml 全体で厳密に1回(掃除ステップのみ)出現する", () => {
+    // boss 追加条件: 新設した2ステップのどちらにも continue-on-error を付けない
+    // (block/skip の判定結果は必ずジョブの成否に反映されなければならない。
+    // 付けると exit 1 がジョブ失敗に伝播せず、実装仕様2「continue-on-error を付けない」が
+    // 静かに破られる)。掃除ステップの1件だけが正当な例外として残る。
+    expect(countKeyLineOccurrences(yml, "continue-on-error")).toBe(1);
+  });
+
+  it("countKeyLineOccurrences 自身が複数出現を正しく数える(正の対照。検査する側の空振り防止。m7 対応)", () => {
+    // 上のテストは「1回であること」しか確認しておらず、countKeyLineOccurrences を
+    // 「常に1を返す」ような無害化(検査する側の変異)をしても、掃除ステップの1件と
+    // 偶然辻褄が合って緑のままになる空振りの穴がある。ここでは合成テキストへ意図的に
+    // 2件注入し、検出器が本当に2を返すことを固定する(hasStalePushEverySemantics に対する
+    // 正の対照と同じ流儀)。コメント行への誤爆(上のdocstring参照)が無いことも併せて
+    // 固定するため、合成テキストに紛らわしいコメント行を1件混ぜる。
+    const synthetic =
+      "steps:\n  # continue-on-error は付けない\n  - run: a\n    continue-on-error: true\n  - run: b\n    continue-on-error: true\n";
+    expect(countKeyLineOccurrences(synthetic, "continue-on-error")).toBe(2);
+  });
+
+  it("版数据え置き検査ステップのコメントが、暗黙の success() 依存と block 経路が実物未検証であることに触れている(AC9)", () => {
+    // GitHub Actions の「if: にステータス関数を含まなければ暗黙に success() が付く」という
+    // 仕様(前段が失敗すればこのステップ以降がスキップされる根拠)はテストで検証できない
+    // (yml の式を実際に評価するのは GitHub Actions 側であり、本テストファイルは静的な
+    // テキスト検査に留まる)。boss 追加条件(AC9)により、この仕様依存と、block 経路
+    // (版数据え置きで実際に exit 1 になる CI run)がテスト・ミューテーション以外では
+    // 実物検証されていないことをコメントに明記する。
+    const checkStep = extractStep(yml, STEP_NAMES.versionBumpCheck);
+
+    expect(checkStep).toContain("success()");
+    expect(checkStep).toContain("未検証");
   });
 });

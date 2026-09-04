@@ -47,7 +47,7 @@
  * | `topFinishCount` | `allocateGeneralBets`/`buildComboCandidates`両方(共有gatekeeper`validateTopFinishCount`) | あり | throw(非有限または負値。0・小数は許容) | 呼び出し側が構築する引数そのもの(市場データではない)。`topFinishCount=Infinity`は`place-joint-model.ts`の`k>=n`分岐に落ちて「健全に見える」非スキップ配分を返す(誤りが表面化しない最重症パターン、実測確認済み)。0・小数を許容するのは`place-joint-model.ts`が既にfloor+0クランプで意図的に許容している設計(`k===0`→`[{placed:[],probability:1}]`という明示的な契約)と非対称を作らないため。テスト: `combo-bet-allocation.test.ts`「topFinishCountの数値検証」describe |
  * | `comboSize` | `buildComboCandidates`(内部`kCombinationsOfUmabans`) | 部分的(構造的自己防御。追加防御はしない=対象外の判断) | 対象外(構造的自己防御) | ガード`k<=0\|\|k>items.length`は**NaN比較が常にfalseになるため、NaN・非整数(例:1.5)はこのガードを素通りする**(捕捉ではない)。ただし`backtrack`の停止条件`current.length===k`は`current.length`が常に整数であるためNaN/非整数と一致し得ず、深さ優先探索は**2^n通りの部分集合を最後まで歩いた末に**結果が空配列に収束する(早期returnではない)。実測(本ファイル筆者・n=18・k=NaN): 約4.6ms、k=1.5でも約2.4ms(負値・0・Infinityは`k<=0\|\|k>items.length`ガードで即座に捕捉され約0.001ms)。頭数は最大18で有界なので実用上は無害だが、将来`items`の上限を引き上げる変更をする者はこの2^n探索の存在を踏まえること |
  * | `AllocationCandidate.umabans`(各要素) | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または0以下) | `NaN<=NaN`は常にfalseなので昇順チェックだけでは素通りする。`combo-bet-allocation.test.ts`「入力の正規化」describe(umaban=NaN/0/負値のit.each) |
- * | `AllocationCandidate.odds` | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または0以下) | `combo-bet-allocation.test.ts`「候補の数値検証(odds/evの異常値)」describe |
+ * | `AllocationCandidate.odds` | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または1.0未満。#74でisUsableOddsの基準を`>0`から引き上げ) | `combo-bet-allocation.test.ts`「候補の数値検証(odds/evの異常値)」describe |
  * | `AllocationCandidate.ev` | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限) | 同上 |
  * | `oddsByKey`の値(`ReadonlyMap<string, number\|null>`) | `resolveComboOdds`/`buildComboCandidates`(classifier) | あり | 分類(`malformed`→`unjudged.oddsMalformedCount`。throwしない) | 最大987組を1件ずつ分類するのが仕事であり、1組の異常値のために残りの健全な分類結果を失うのは誤り。`combo-bet-allocation.test.ts`「オッズ4区分」describe |
  * | `evConfig.threshold` | `computeRaceEv`/`computeEstimatedRaceEv`(expected-value.ts)/`buildComboCandidates`(3箇所共有`resolveEvThreshold`) | あり | 既定値フォールバック(非有限→`DEFAULT_EV_CONFIG.threshold`=1.0) | 片側だけ守ると`ev>threshold`の比較が壊れた側だけ壊れる非対称が生まれるため3箇所で共有。`expected-value.test.ts`の`resolveEvThreshold`describe、`combo-bet-allocation.test.ts`「evConfig.thresholdの防御」describe |
@@ -61,9 +61,25 @@
  * `allocateGeneralBets`/`buildComboCandidates`は契約違反(候補の構造・数値異常、topFinishCount異常)を
  * throwで止める設計にした(複勝専用の`allocateBets`が同種の異常を無防備のまま許容しているのとは
  * 対照的。`allocateBets`側にthrowを入れなかった理由は#31参照)。D-3でrenderer側からこれらを呼ぶ際、
- * `BatchAnalysisView.tsx:625`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
- * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。** 組合せ経路では「受け皿を
- * D-3側で用意すること」が前提になっている。
+ * `BatchAnalysisView.tsx`のようにrender内で直接呼ぶと未捕捉例外=画面クラッシュになる。
+ * **呼び出し前に候補を検証して弾くか、error boundaryを置くこと。**
+ *
+ * **この受け皿は充足済み(Issue #31・2026-08-20時点で確認)。** `packages/app/src/shared/
+ * mixed-race-allocation.ts`(Issue #57で`packages/app/src/renderer/mixed-allocation-view.ts`から
+ * 分離した`buildMixedRaceAllocation`)が `allocateGeneralBets` の呼び出しをtry/catchで保護し、
+ * 例外を `MixedRaceAllocationInvalid`(`kind:"invalid"`)へ変換して他レースの計算・画面全体に
+ * 波及させない(受け皿の実体はtry/catchブロック本体。表示側のテストは `packages/app/test/
+ * mixed-allocation-view.test.ts` の **`AC17` を冠する describe 群**〈`grep -n "AC17"` で
+ * 辿れる〉が固定している)。D-3着手時に改めて受け皿を新設する必要はない。
+ *
+ * **件数(旧「〈5件〉」)を書かない。** 旧版はここに具体的な件数を書いていたが、実際に数え直すと
+ * 誤りだった(boss指摘2026-08-20)。件数は`describe`が増減するたびに腐る参照であり、腐った状態が
+ * 気づかれないまま残る(`docs/issue-order.md`の`BatchAnalysisView.tsx:625`行番号参照〈メモ化を
+ * `useMemo`と決め打った記述〉が腐って偽になっていたのと同じ欠陥クラス。この参照先の行は
+ * 本タスク完了後に`docs/issue-order.md`から削除される見込みのため、**検証はコミット
+ * `7151534`時点の`docs/issue-order.md`を参照すること**〈`git show 7151534:docs/issue-order.md`〉)。
+ * 名前(`AC17`)による参照なら、テストが分割されて複数箇所に散っても`grep`で正しく
+ * 拾えるため、以後この種の参照は件数・行番号ではなく名前で行うこと。
  */
 
 import {
@@ -71,7 +87,7 @@ import {
   resolveEvThreshold,
   type EvConfig,
 } from "./expected-value.js";
-import { buildComboOddsKey } from "../scraper/combo-odds-key.js";
+import { buildComboOddsKey, parseComboOddsKey } from "../scraper/combo-odds-key.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   type JointModelHorse,
@@ -87,6 +103,7 @@ import {
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
   foldToCandidateSubsets,
+  isUsableOdds,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
@@ -100,6 +117,17 @@ import {
 
 export type { JointModelHorse, PlaceJointModel, PlaceOutcome, EvConfig };
 export { CONDITIONAL_BERNOULLI_MODEL, DEFAULT_EV_CONFIG };
+
+/**
+ * Issue #58: `SkipReasonCode`(非公開モジュール `allocation-primitives.ts` の型)を、
+ * 既に公開済みのこのサブパスから型のみ re-export する。`bet-allocation.ts` と同じ設計判断
+ * (`exports` へ `./ev/allocation-primitives` を新規追加しない。型のみの re-export はランタイム
+ * 出力に何も足さない)。
+ *
+ * 注意: これは Issue #57 で削除した「未使用の re-export シム」とは別物(削除すれば app が
+ * コンパイルできない=使用される re-export)。詳細は `bet-allocation.ts` の同種コメント参照。
+ */
+export type { SkipReasonCode };
 
 // ============================================================================
 // 汎用エンジン(券種非依存)
@@ -263,6 +291,11 @@ export interface GeneralBetAllocationResult {
   readonly betCount: number;
   readonly isSkip: boolean;
   readonly skipReason: string | null;
+  /**
+   * 見送り理由コード(Issue #58)。isSkipのときのみ非null、`skipReason`はこの値から
+   * `skipReasonText`で導出される(コード→文言の一方向依存。bet-allocation.tsと同じ流儀)。
+   */
+  readonly skipReasonCode: SkipReasonCode | null;
   readonly notDiversified: boolean;
   readonly modelId: string;
   readonly modelApproximate: boolean;
@@ -280,8 +313,15 @@ function buildCapTooSmallReason(betUnit: number): string {
   return `1レースの上限が${betUnit}円未満のため配分できません`;
 }
 
-/** 見送り理由コード(allocation-primitives.ts)を券種一般の日本語文言へ変換する。 */
-function skipReasonText(code: SkipReasonCode, betUnit: number): string {
+/**
+ * 見送り理由コード(allocation-primitives.ts)を券種一般(ワイド・3連複)の日本語文言へ変換する。
+ *
+ * **Issue #55でexportした**: 過去分析の再表示(検証タブ「レース一覧」)が、保存済みの
+ * `skip_reason_code`(コード)から見送り理由の文言を組み立て直すために必要になったため。
+ * 複勝専用の `placeSkipReasonText`(bet-allocation.ts)とは `no-candidates` の文言だけが
+ * 異なる(「馬」/「買い目」)別関数であり、本関数を複勝に流用しないこと。
+ */
+export function comboSkipReasonText(code: SkipReasonCode, betUnit: number): string {
   switch (code) {
     case "bankroll-unset":
       return REASON_BANKROLL_UNSET;
@@ -409,9 +449,11 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
     // 構造検証(umabans)と同じく throw に揃える(除外して続行する設計は採らない。
     // 異常値を黙って除外すると「判定不能」が「候補外」に混ざり、受け入れ条件16
     // 〈オッズ状態分離〉の思想と矛盾するため。呼び出し側が気づくべき異常である)。
-    if (!Number.isFinite(odds) || odds <= 0) {
+    // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #31。
+    // resolveComboOdds・bet-allocation.tsの候補フィルタと同一基準を1箇所で共有する)。
+    if (!isUsableOdds(odds)) {
       throw new Error(
-        `不正な買い目です: oddsは正の有限値である必要があります(umabans=${umabans.join(",")}, odds=${odds})`,
+        `不正な買い目です: oddsは1.0以上の有限値である必要があります(umabans=${umabans.join(",")}, odds=${odds})`,
       );
     }
     // evの非有限チェック: compareCandidatesForCapの `b.ev - a.ev` がNaNを返すと
@@ -554,20 +596,20 @@ export function allocateGeneralBets(
   const exceedsKellyTarget = totalStake > kellyTargetStake;
   const advisory = buildAdvisory(exceedsKellyTarget, kellyTargetStake, betUnit);
 
-  const skipReason = isSkip
-    ? skipReasonText(
-        determineSkipReasonCode(
-          bankrollInput,
-          perRaceCapInput,
-          effectivePerRaceCap,
-          betUnit,
-          kellyTargetStake,
-          kellyFraction,
-          finalCandidates.length,
-        ),
+  // Issue #58: コードをskipReasonの計算より前に独立した変数として持つ(bet-allocation.tsと
+  // 同じ流儀。一方向依存を型と制御フローで強制する)。
+  const skipReasonCode: SkipReasonCode | null = isSkip
+    ? determineSkipReasonCode(
+        bankrollInput,
+        perRaceCapInput,
+        effectivePerRaceCap,
         betUnit,
+        kellyTargetStake,
+        kellyFraction,
+        finalCandidates.length,
       )
     : null;
+  const skipReason = skipReasonCode === null ? null : comboSkipReasonText(skipReasonCode, betUnit);
 
   const positiveContinuousCount = continuousFractions.filter((x) => x > 0).length;
   const notDiversified = betCount === 1 && positiveContinuousCount >= 2;
@@ -589,6 +631,7 @@ export function allocateGeneralBets(
     betCount,
     isSkip,
     skipReason,
+    skipReasonCode,
     notDiversified,
     modelId: model.id,
     modelApproximate: model.approximate,
@@ -622,12 +665,20 @@ export function allocateGeneralBets(
 export { buildComboOddsKey };
 
 /**
+ * `buildComboOddsKey` の逆操作(Issue #55: 過去分析の配分提案を馬番表示に戻すためのデコーダ)。
+ * 実体は `buildComboOddsKey` と同じ理由(単一実装の原則)で `../scraper/combo-odds-key.js` に
+ * 置き、ここでは re-export するだけにする。
+ */
+export { parseComboOddsKey };
+
+/**
  * combo オッズの解決結果(判別共用体)。取得済み/欠損(null)/未取得(キー不在)/
  * **不正な数値(malformed)** の4状態を区別する(決定2。boss指摘2026-08-06で4状態目を追加)。
  * `Map#get(...) ?? null` のような未取得と欠損の同一視を禁止する
  * (本リポジトリが繰り返した「判定不能を判定結果と誤ラベルする」欠陥クラスの再発防止)。
  *
- * ## malformed(非有限・0以下)を追加した理由と、throwしない理由(受け入れ条件18)
+ * ## malformed(1.0未満・非有限。#74でisUsableOddsの基準を`>0`から引き上げ)を追加した理由と、
+ * throwしない理由(受け入れ条件18)
  *
  * `buildComboCandidates` は**入口検証の二層原則**における「データの分類器」であり
  * (対して `allocateGeneralBets`/`validateCandidates` は「公開APIの門番」)、外部データ由来の
@@ -651,8 +702,8 @@ export type ComboOddsResolution =
 
 /**
  * oddsByKeyから馬番の組のオッズを4状態判別共用体で解決する唯一の関数。
- * 数値としての妥当性(非有限・0以下)の判定もこの関数に集約する
- * (`AllocationCandidate.odds`と同じ基準=正の有限値。`validateCandidates`のthrow基準と
+ * 数値としての妥当性(1.0未満・非有限)の判定もこの関数に集約する
+ * (`AllocationCandidate.odds`と同じ基準=1.0以上の有限値。`validateCandidates`のthrow基準と
  * 値としては同じだが、ここでは分類〈malformed〉として扱いthrowはしない)。
  */
 export function resolveComboOdds(
@@ -669,7 +720,9 @@ export function resolveComboOdds(
   if (value === null) {
     return { state: "missing" };
   }
-  if (!Number.isFinite(value) || value <= 0) {
+  // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #31。
+  // validateCandidates・bet-allocation.tsの候補フィルタと同一基準を1箇所で共有する)。
+  if (!isUsableOdds(value)) {
     return { state: "malformed" };
   }
   return { state: "present", odds: value };
@@ -693,8 +746,9 @@ export interface ComboCandidateDiagnostics {
     /** 未取得(Mapにキーが存在しない)のため評価していない数。 */
     readonly oddsUnfetchedCount: number;
     /**
-     * オッズが取得済みだが数値として不正(非有限・0以下)で評価できなかった数
-     * (受け入れ条件18・boss指摘2026-08-06)。判定結果(judged)には絶対に混ざらない。
+     * オッズが取得済みだが数値として不正(1.0未満・非有限。#74でisUsableOddsの基準を
+     * `>0`から引き上げ)で評価できなかった数(受け入れ条件18・boss指摘2026-08-06)。
+     * 判定結果(judged)には絶対に混ざらない。
      */
     readonly oddsMalformedCount: number;
   };

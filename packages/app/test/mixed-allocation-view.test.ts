@@ -5,6 +5,7 @@ import {
   type AllocationCandidate,
   type GeneralBetAllocation,
   type GeneralBetAllocationResult,
+  type SkipReasonCode,
 } from "@keiba/core/ev/combo-bet-allocation";
 
 import type {
@@ -18,32 +19,33 @@ import {
   type MixedCandidateBuildInput,
   type MixedCandidateDiagnostics,
   type PlaceCandidateDiagnostics,
-} from "../src/renderer/mixed-candidates.js";
-import {
-  buildRaceAllocation,
-  NOT_DIVERSIFIED_NOTE,
-  probabilitySumWarning,
-  resolvePlaceBetTarget,
-} from "../src/renderer/bet-allocation-view.js";
+} from "../src/shared/mixed-candidates.js";
+import { NOT_DIVERSIFIED_NOTE, probabilitySumWarning } from "../src/renderer/bet-allocation-view.js";
+import { buildRaceAllocation, resolvePlaceBetTarget } from "../src/shared/race-allocation.js";
 import {
   aggregateUnjudgedCounts,
+  buildHiddenAllocationsBlocks,
   buildMixedAllocationBreakdown,
   buildMixedAllocationDisplay,
   buildMixedAllocationNotices,
-  buildMixedRaceAllocation,
   comboBetTypeNote,
   COMBO_EV_CALIBRATION_NOTE,
+  formatHiddenAllocationsSummary,
   formatUnjudgedNote,
   MIXED_ALLOCATION_INVALID_MESSAGE,
+  MIXED_ALLOCATION_VISIBLE_LIMIT,
   mixedBetTypeLabel,
   placeUnavailableNoteForMixed,
   resolveMixedProbabilitySumWarning,
   resolvePlaceOnlyStake,
   sortMixedAllocationsForDisplay,
+  splitAllocationsForDisplay,
   totalUnjudgedCount,
   type MixedAllocationDisplay,
-  type MixedAllocationSettings,
+  type MixedAllocationSplit,
 } from "../src/renderer/mixed-allocation-view.js";
+import { buildMixedRaceAllocation, type MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
+import { formatYen } from "../src/renderer/verify-format.js";
 
 // ============================================================================
 // テストヘルパー(定義したヘルパーはすべて自己テストする。mixed-candidates.test.tsの流儀を踏襲)
@@ -600,6 +602,9 @@ function generalResult(
     betCount: allocations.filter((a) => a.stake > 0).length,
     isSkip: totalStake === 0,
     skipReason: totalStake === 0 ? "妙味が小さく、賭ける価値のある配分が見つかりませんでした" : null,
+    // Issue #58で追加されたフィールド。既存のskipReason既定値(「妙味が小さく…」)に対応する
+    // コードは"no-edge"(overridesで個別に上書き可能)。
+    skipReasonCode: (totalStake === 0 ? "no-edge" : null) as SkipReasonCode | null,
     notDiversified: false,
     modelId: "conditional-bernoulli",
     modelApproximate: false,
@@ -789,6 +794,259 @@ describe("AC13: sortMixedAllocationsForDisplay — 全件・stake降順(同額�
     expect(sorted).toHaveLength(expectedCount);
     // 前提固定: 空振り防止(実際に複数件あること)。
     expect(expectedCount).toBeGreaterThan(1);
+  });
+});
+
+// ============================================================================
+// 上位N件+折りたたみ(機能D-3再スコープ・Issue #15)
+//
+// splitAllocationsForDisplay(sorted, limit?) は sortMixedAllocationsForDisplay の結果を
+// visible(上位N件)/hidden(残り)に分割する。不変式(可視+隠れ=合計。ev-tool-spec上の用語ではなく
+// 本タスクのブリーフの呼称に合わせ「不変式1〜3」と呼ぶ)は buildMixedAllocationBreakdown・
+// sortMixedAllocationsForDisplayが既に保証している「同じ配列からの集計」という性質の上に
+// 単純な分割を載せるだけなので、分割そのものが不変式を壊さないことをテストで固定する。
+// ============================================================================
+
+/** n件の配分を、stakeが互いに異なる降順(重複なし)で生成する補助関数(タイブレークを気にせず使える)。 */
+function manyDistinctAllocations(n: number): GeneralBetAllocation[] {
+  return Array.from({ length: n }, (_, i) => allocation({ umabans: [i + 1], stake: (n - i) * 10 }));
+}
+
+describe("MIXED_ALLOCATION_VISIBLE_LIMIT — 上位表示件数の既定値", () => {
+  it("既定値は20であること", () => {
+    expect(MIXED_ALLOCATION_VISIBLE_LIMIT).toBe(20);
+  });
+});
+
+describe("splitAllocationsForDisplay — 境界値(0/1/N-1/N/N+1/大量)", () => {
+  it("0件のとき、visible=[]・hidden=[]・hiddenCount=0であること", () => {
+    const split = splitAllocationsForDisplay([]);
+    expect(split.visible).toEqual([]);
+    expect(split.hidden).toEqual([]);
+    expect(split.hiddenCount).toBe(0);
+    expect(split.hiddenStake).toBe(0);
+  });
+
+  it("1件のとき、visible=1件・hiddenCount=0であること", () => {
+    const sorted = manyDistinctAllocations(1);
+    const split = splitAllocationsForDisplay(sorted);
+    expect(split.visible).toHaveLength(1);
+    expect(split.hiddenCount).toBe(0);
+  });
+
+  it("N-1件(19件)のとき、hiddenCount=0であること(まだ打ち切りが発生しない側の境界)", () => {
+    const sorted = manyDistinctAllocations(19);
+    const split = splitAllocationsForDisplay(sorted);
+    expect(split.visible).toHaveLength(19);
+    expect(split.hiddenCount).toBe(0);
+  });
+
+  it("N件ちょうど(20件)のとき、hiddenCount=0であること(『他0件』を出さない境界)", () => {
+    const sorted = manyDistinctAllocations(20);
+    const split = splitAllocationsForDisplay(sorted);
+    expect(split.visible).toHaveLength(20);
+    expect(split.hidden).toEqual([]);
+    expect(split.hiddenCount).toBe(0);
+  });
+
+  it("【条項4の核心】limit引数を渡さず(=本番既定)21件を入れると、visible.length===20・hiddenCount===1になること(定数値の間接参照ではなく、実際の分割挙動をハードコードした数値で固定する)", () => {
+    const sorted = manyDistinctAllocations(21);
+    const split = splitAllocationsForDisplay(sorted);
+    expect(split.visible).toHaveLength(20);
+    expect(split.hidden).toHaveLength(1);
+    expect(split.hiddenCount).toBe(1);
+    // hiddenStakeは21番目(最後尾)の1件のstakeそのものであること。
+    expect(split.hiddenStake).toBe(sorted[20]!.stake);
+    expect(split.hidden[0]).toEqual(sorted[20]);
+  });
+
+  it("大量(100件)のとき、visible+hiddenの件数がstake>0の総件数と一致すること(不変式3相当の最小形)", () => {
+    const sorted = manyDistinctAllocations(100);
+    const split = splitAllocationsForDisplay(sorted);
+    // 前提固定(空振り防止): 実際に打ち切りが発生していること。
+    expect(split.hiddenCount).toBeGreaterThan(0);
+    expect(split.visible.length + split.hiddenCount).toBe(100);
+  });
+
+  it("limit引数に非有限・負値・0を渡すと既定値(20)へフォールバックすること(resolveBetUnit等と同じ流儀)", () => {
+    const sorted = manyDistinctAllocations(25);
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -5, 0]) {
+      const split = splitAllocationsForDisplay(sorted, bad);
+      expect(split.visible).toHaveLength(20);
+    }
+  });
+
+  it("visible ++ hiddenが元のsorted配列と順序・要素ともに完全一致すること(AC5)", () => {
+    const sorted = manyDistinctAllocations(45);
+    const split = splitAllocationsForDisplay(sorted);
+    expect([...split.visible, ...split.hidden]).toEqual(sorted);
+  });
+});
+
+describe("splitAllocationsForDisplay — 同額が境界をまたぐ場合の決定性(馬番配列の辞書順タイブレーク・入力順シャッフル耐性)", () => {
+  it("境界(20/21番目)で同額のとき、馬番の辞書順が小さい方がvisibleに残り、大きい方がhiddenへ回ること。入力順をシャッフルしても結果が同一であること", () => {
+    // 18件の「大きいstake」(重複なし)+3件の「同額(500)」を用意する。
+    // 同額3件の馬番は[2]・[5]・[10]で、辞書順(数値昇順)は[2] < [5] < [10]。
+    // 20件目までに[2]・[5]が入り、[10]だけがhiddenへ回る想定。
+    const bigOnes = Array.from({ length: 18 }, (_, i) => allocation({ umabans: [100 + i], stake: 1000 - i }));
+    const tied = [
+      allocation({ umabans: [10], stake: 500 }),
+      allocation({ umabans: [2], stake: 500 }),
+      allocation({ umabans: [5], stake: 500 }),
+    ];
+    const original = [...bigOnes, ...tied];
+    const shuffled = [...tied, ...bigOnes].reverse();
+    // 前提固定: 2つの入力配列が(順序を除き)同じ要素集合であること。
+    expect(original).toHaveLength(shuffled.length);
+
+    const sortedFromOriginal = sortMixedAllocationsForDisplay(generalResult(original));
+    const sortedFromShuffled = sortMixedAllocationsForDisplay(generalResult(shuffled));
+    const splitFromOriginal = splitAllocationsForDisplay(sortedFromOriginal);
+    const splitFromShuffled = splitAllocationsForDisplay(sortedFromShuffled);
+
+    expect(splitFromOriginal.hidden.map((a) => a.umabans)).toEqual([[10]]);
+    expect(splitFromOriginal.visible.map((a) => a.umabans)).toContainEqual([2]);
+    expect(splitFromOriginal.visible.map((a) => a.umabans)).toContainEqual([5]);
+    // 決定性: 入力順をシャッフルしても、visible/hiddenの中身(馬番)が完全に同一であること。
+    expect(splitFromShuffled.visible.map((a) => a.umabans)).toEqual(splitFromOriginal.visible.map((a) => a.umabans));
+    expect(splitFromShuffled.hidden.map((a) => a.umabans)).toEqual(splitFromOriginal.hidden.map((a) => a.umabans));
+  });
+});
+
+describe("不変式1〜3(可視+隠れ=合計。有限なstakeの下で成り立つ主張)", () => {
+  it("大量(103件・stake>0が100件+stake=0が3件・複勝/ワイド/三連複混在)のとき、不変式1〜3がすべて成り立つこと", () => {
+    const placeAllocs = Array.from({ length: 30 }, (_, i) => allocation({ umabans: [i + 1], stake: 100 + i }));
+    const wideAllocs = Array.from({ length: 40 }, (_, i) => allocation({ umabans: [i + 1, i + 2], stake: 50 + i }));
+    const trioAllocs = Array.from({ length: 30 }, (_, i) =>
+      allocation({ umabans: [i + 1, i + 2, i + 3], stake: 30 + i }),
+    );
+    // boss指摘(採用2): stake===0の行を1件では終わらせず券種ごとに混ぜる。これが無いと、
+    // 「countがstake>0基準であること」という不変式3の主張が、buildMixedAllocationBreakdown
+    // 自身の既存契約(AC10)と同じ土俵で二重に確認しているだけになり、合成した主張として
+    // 自立しない(仮に本関数がstake>=0基準に取り違えても、stake===0の入力が無ければ
+    // どちらの基準でも同じ数になり検知できない)。
+    const zeroStakeAllocs = [
+      allocation({ umabans: [901], stake: 0 }),
+      allocation({ umabans: [902, 903], stake: 0 }),
+      allocation({ umabans: [904, 905, 906], stake: 0 }),
+    ];
+    const allocations = [...placeAllocs, ...wideAllocs, ...trioAllocs, ...zeroStakeAllocs];
+    const result = generalResult(allocations);
+    const sorted = sortMixedAllocationsForDisplay(result);
+    const split = splitAllocationsForDisplay(sorted);
+    const breakdown = buildMixedAllocationBreakdown(result);
+    // 不変式3の右辺(count)を、production関数(buildMixedAllocationBreakdown)に頼らず
+    // 生の入力配列から独立に数え直す(自立した主張にするため。boss指摘)。
+    const expectedPositiveCount = allocations.filter((a) => a.stake > 0).length;
+
+    // 前提固定(空振り防止): 実際に打ち切りが発生し、totalStakeが有限の正値であり、
+    // かつstake=0の行が実在すること(不変式3を自立させる前提そのもの)。
+    expect(result.totalStake).toBeGreaterThan(0);
+    expect(split.hiddenCount).toBeGreaterThan(0);
+    expect(allocations.filter((a) => a.stake === 0)).toHaveLength(3);
+    // 前提固定: stake=0の3件はstake>0の100件とは別枠であり、合計103件であること。
+    expect(allocations).toHaveLength(103);
+    expect(expectedPositiveCount).toBe(100);
+
+    // 不変式1: visible.stake合計 + hidden.stake合計 === totalStake
+    const visibleStake = split.visible.reduce((sum, a) => sum + a.stake, 0);
+    expect(visibleStake + split.hiddenStake).toBe(result.totalStake);
+
+    // 不変式2: totalStake === breakdown.place+wide+trio(buildMixedAllocationBreakdownの既存契約AC10)
+    expect(breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake).toBe(result.totalStake);
+
+    // 不変式3: visible.length + hiddenCount === breakdown.place.count+wide.count+trio.count
+    // （かつ、生入力から独立に数えたstake>0件数〈100〉とも一致すること。自立した主張の核心）。
+    expect(split.visible.length + split.hiddenCount).toBe(
+      breakdown.place.count + breakdown.wide.count + breakdown.trio.count,
+    );
+    expect(split.visible.length + split.hiddenCount).toBe(expectedPositiveCount);
+  });
+});
+
+describe("buildMixedAllocationDisplay — display.splitはdisplay.sortedAllocationsから導出されること(条項4・AC13)", () => {
+  it("実データ(混在配分)で、display.split.visible ++ display.split.hiddenがdisplay.sortedAllocationsと完全一致すること", () => {
+    const n = 8;
+    const umabans = umabansOf(n);
+    const race = raceInput({
+      rows: allCandidateRows(n),
+      wideCombo: fullOddsRecord(umabans, 2, 30000),
+      trioCombo: fullOddsRecord(umabans, 3, 90000),
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定(空振り防止): 実際に買い目が1件以上あること。
+    expect(view.display.sortedAllocations.length).toBeGreaterThan(0);
+    expect([...view.display.split.visible, ...view.display.split.hidden]).toEqual(
+      view.display.sortedAllocations,
+    );
+  });
+});
+
+// ============================================================================
+// AC1(強化): 折りたたみブロックは0/1要素の配列として返し、JSXは.mapするだけにする
+// (buildMixedAllocationNoticesと同型。JSXに条件式`hiddenCount > 0 &&`を書かない設計)。
+//
+// 経緯: `>`を`>=`に変える変異が入っても、hiddenCountが0であることしか検証していないテストは
+// 検知できない(pushの1行削除がすり抜けた事故と同じ構造。boss指摘)。折りたたみブロックの
+// 「出る/出ない」自体を配列の長さとして値で固定する。
+// ============================================================================
+
+describe("buildHiddenAllocationsBlocks — 折りたたみブロックを0/1要素の配列として返すこと(AC1)", () => {
+  it("hiddenCount===0のとき、配列長が0であること(『他0件』ブロックを出さない側の直接固定)", () => {
+    const split: MixedAllocationSplit = { visible: manyDistinctAllocations(5), hidden: [], hiddenCount: 0, hiddenStake: 0 };
+    const blocks = buildHiddenAllocationsBlocks(split);
+    expect(blocks).toHaveLength(0);
+  });
+
+  it("hiddenCount>0のとき、配列長が1であり、summaryTextとrows(=split.hidden)を持つこと", () => {
+    const hidden = [allocation({ umabans: [21], stake: 300 }), allocation({ umabans: [22], stake: 100 })];
+    const split: MixedAllocationSplit = {
+      visible: manyDistinctAllocations(20),
+      hidden,
+      hiddenCount: 2,
+      hiddenStake: 400,
+    };
+    const blocks = buildHiddenAllocationsBlocks(split);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.rows).toEqual(hidden);
+    expect(blocks[0]!.summaryText).toBe(formatHiddenAllocationsSummary(split));
+  });
+});
+
+// ============================================================================
+// AC2(強化): 見出しの金額が「隠れている買い目の配分額合計」であることが文言だけで一意に読めること
+// (合計行〈総額〉と読み違えられない)。
+// ============================================================================
+
+describe("formatHiddenAllocationsSummary — 件数と、隠れている買い目の配分額合計であることが分かる金額の両方を含むこと", () => {
+  it("件数(hiddenCount)と金額(formatYen(hiddenStake))の両方が文言に含まれること", () => {
+    const split: MixedAllocationSplit = {
+      visible: manyDistinctAllocations(20),
+      hidden: [allocation({ umabans: [21], stake: 1200 })],
+      hiddenCount: 1,
+      hiddenStake: 1200,
+    };
+    const text = formatHiddenAllocationsSummary(split);
+    expect(text.includes("1件")).toBe(true);
+    expect(text.includes(formatYen(1200))).toBe(true);
+  });
+
+  it("金額が『隠れている買い目の配分額合計』であることを示す語(合計行と取り違えない語)を含むこと", () => {
+    // 前提固定(空振り防止): hiddenStakeが合計行(totalStake)とは別の値であること
+    // (visibleが1件以上あるため、hiddenStake < totalStakeが成立する構図で確認する)。
+    const visible = manyDistinctAllocations(20);
+    const hidden = [allocation({ umabans: [21], stake: 1200 })];
+    const totalStake = [...visible, ...hidden].reduce((sum, a) => sum + a.stake, 0);
+    expect(hidden[0]!.stake).toBeLessThan(totalStake);
+
+    const split: MixedAllocationSplit = { visible, hidden, hiddenCount: 1, hiddenStake: 1200 };
+    const text = formatHiddenAllocationsSummary(split);
+    // 「非表示」等、隠れている分であることを明示する語を含むこと(合計行の文言と同一にしない)。
+    expect(text.includes("非表示")).toBe(true);
   });
 });
 
@@ -1181,6 +1439,8 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
     placeUnavailableNote: null,
     placeOnlyStake: null,
     probabilitySumWarning: null,
+    // splitの既定値(上位N件+折りたたみ・Issue #15再スコープ)。全件visible・隠れなし。
+    split: { visible: [], hidden: [], hiddenCount: 0, hiddenStake: 0 },
     ...overrides,
   };
 }

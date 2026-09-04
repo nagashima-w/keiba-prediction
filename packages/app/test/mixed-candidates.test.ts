@@ -15,7 +15,7 @@ import {
   ALL_MIXED_CANDIDATE_BET_TYPES,
   buildMixedCandidates,
   type MixedCandidateBuildInput,
-} from "../src/renderer/mixed-candidates.js";
+} from "../src/shared/mixed-candidates.js";
 
 // ============================================================================
 // テストヘルパー(定義したヘルパーはすべて自己テストする。「テストを書くときの注意」参照)

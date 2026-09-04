@@ -519,6 +519,54 @@ export interface VerifyBetView {
 }
 
 /**
+ * 検証画面: proposedBet系の券種別・合算サマリ(表示用。Issue #71 #54-B)。
+ * core `ProposedBetTypeSummary` のプレーン写し。既存 `VerifyBetView`(複勝一律・Q-B)とは
+ * 賭け金の仮定が異なるため合算しない(型としても足し合わせる先を作らない。AC-B5)。
+ */
+export interface ProposedBetTypeSummaryView {
+  /** 判定できた(的中・不的中を問わない)買い目の点数。 */
+  readonly betCount: number;
+  /** 賭け金合計(円。分析時点で実際に提案した配分額そのもの)。 */
+  readonly totalStake: number;
+  /** 払戻合計(円。実配当のみ)。 */
+  readonly totalReturn: number;
+  /** 回収率。totalStake===0ならnull。 */
+  readonly recoveryRate: number | null;
+  /** 規則Uにより判定不能とした買い目の点数(買い目行単位)。 */
+  readonly unjudgedCount: number;
+}
+
+/** 検証画面: proposedBet系の母集団4分類(表示用。Issue #71 #54-B)。 */
+export interface ProposedBetPopulationView {
+  /** 配分あり(賭け金>0)。 */
+  readonly allocated: number;
+  /** 見送り(計算した上で賭けない判定結果)。 */
+  readonly skipped: number;
+  /** 未到達(coreの配分計算に到達していない判定不能)。 */
+  readonly unreached: number;
+  /** 記録なし(#59より前の旧分析)。 */
+  readonly noRecord: number;
+}
+
+/**
+ * 検証画面: 配分ベースの回収率(表示用。Issue #71 #54-B。core `ProposedBetReport` のプレーン写し)。
+ * `overall` は複勝・ワイド・3連複の3券種の合算(同一の賭け金仮定を共有するポートフォリオとしての
+ * 合計。core側JSDoc参照)。
+ */
+export interface ProposedBetReportView {
+  /** 母集団4分類の件数。 */
+  readonly population: ProposedBetPopulationView;
+  /** 複勝・ワイド・3連複の合算。 */
+  readonly overall: ProposedBetTypeSummaryView;
+  /** 複勝の内訳。 */
+  readonly place: ProposedBetTypeSummaryView;
+  /** ワイドの内訳。 */
+  readonly wide: ProposedBetTypeSummaryView;
+  /** 3連複の内訳。 */
+  readonly trio: ProposedBetTypeSummaryView;
+}
+
+/**
  * 検証画面: 検証レポート(表示用)。
  * core の VerifyReport は既にプレーン構造なので、main はそれを構造的にこの型として返す。
  */
@@ -537,6 +585,8 @@ export interface VerifyReportView {
   readonly calibration: readonly CalibrationBinView[];
   /** 補正傾向サマリ(Task#26)。 */
   readonly trend: VerifyTrendReportView;
+  /** 配分ベースの回収率(Issue #71 #54-B)。 */
+  readonly proposedBet: ProposedBetReportView;
 }
 
 /**
@@ -678,6 +728,50 @@ export interface RaceBreakdownHorseView {
 }
 
 /**
+ * 配分提案の1買い目分(表示用。core StoredAllocationBetDetail のプレーン写し。Issue #55)。
+ * `RaceBreakdownHorseView` と同じ慣行(core側の型を shared 層に構造的に複製する)に倣う。
+ * core への narrow import 規約(ファイル先頭コメント参照)を保つため、型を import せず
+ * 手動で複製する。構造一致は `test/analysis-types-allocation-pin.test.ts` がコンパイル時に固定する。
+ */
+export interface StoredAllocationBetView {
+  /** 券種。app 側の "place" | "wide" | "trio"。未知の値でもそのまま(throwしない)。 */
+  readonly betType: string;
+  /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみ。 */
+  readonly stake: number;
+  /** 分析時点で採用したオッズ。欠損・未確定なら null。 */
+  readonly odds: number | null;
+  /** 分析時点の期待値。欠損・未確定なら null。 */
+  readonly ev: number | null;
+}
+
+/**
+ * 配分提案(表示用。core StoredAllocation のプレーン写し。Issue #55)。
+ * メタ13列(route/unavailableReason/fallbackReason/skipReasonCode/実効設定7項目/betUnit/
+ * oddsStatus)+ bets。core `getStoredAllocation` が意図的に読まない6列
+ * (combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate。
+ * メタ行の物理列数20から読む13列と`analysis_id`〈検索キーでありデータ列ではない〉を除いた数)は
+ * この型にも持たせない(#71の原則。読まない列は表示型にも持ち込まない)。
+ */
+export interface StoredAllocationView {
+  readonly route: string;
+  readonly unavailableReason: string | null;
+  readonly fallbackReason: string | null;
+  readonly skipReasonCode: string | null;
+  readonly bankroll: number;
+  readonly perRaceCap: number;
+  readonly kellyFraction: number;
+  readonly evThreshold: number;
+  readonly includeComboOdds: boolean;
+  readonly includeWide: boolean;
+  readonly includeTrio: boolean;
+  readonly betUnit: number | null;
+  readonly oddsStatus: string;
+  readonly bets: readonly StoredAllocationBetView[];
+}
+
+/**
  * 検証画面: レース単位の統合リストの1件(表示用。core RaceLedgerEntry に会場名・レース番号を
  * 加えたもの。検証画面UI統合)。
  *
@@ -722,6 +816,11 @@ export interface RaceLedgerView {
   readonly recoveryRate: number | null;
   /** このレースで賭けた点数。結果未取込なら0。 */
   readonly betCount: number;
+  /**
+   * この分析時点の配分提案(Issue #55)。#59より前に保存された旧分析(配分メタ行が無い)は
+   * null(「記録なし」。allocation-proposal-view.tsの判別状態の1つ)。
+   */
+  readonly allocation: StoredAllocationView | null;
 }
 
 /**

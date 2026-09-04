@@ -377,6 +377,20 @@ describe("computeMarketImpliedPlaceProbabilities", () => {
     expect(result.reason).toContain("馬番2");
   });
 
+  it(
+    "1頭でも複勝オッズ下限が値域外(1.0未満だが0より大きい)ならレース全体を算出不能にする" +
+      "(Issue #74: isUsableOddsへ委譲する前は`odds<=0`のみを見ており(0,1)を素通りさせていた)",
+    () => {
+      const result = computeMarketImpliedPlaceProbabilities([
+        { umaban: 1, placeOddsMin: 2 },
+        { umaban: 2, placeOddsMin: 0.5 }, // #74: 値域外(1.0未満)。0より大きいが不正。
+        { umaban: 3, placeOddsMin: 4 },
+      ]);
+      expect(result.values).toBeNull();
+      expect(result.reason).toContain("馬番2");
+    },
+  );
+
   it("通常ケース(3頭)はΣ=3に正規化される", () => {
     const result = computeMarketImpliedPlaceProbabilities([
       { umaban: 1, placeOddsMin: 2 },
