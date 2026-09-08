@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.6.3";
+const EXPECTED_APP_VERSION = "1.6.4";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,7 +234,7 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.6.3(Issue #74: 複勝オッズ下限の値域外〈0等〉を判定不能として扱う)である", () => {
+  it("root と app の version が 1.6.4(Issue #76: 買い目の券種を umabans.length からの推定ではなく値として運ぶ)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
     // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2。本回は #74。isUsableOddsの基準を`>0`から
     // `>=1.0`へ引き上げる不具合修正であり、利用者から見てできることは増えず、コミット済み全

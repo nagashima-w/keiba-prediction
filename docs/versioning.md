@@ -706,6 +706,33 @@ JSDoc・テストコメントに書いた数の検算不足が原因だった。
 
 よって 1.6.1 → **1.6.2**(patch)が妥当と判断した。
 
+## 次の正式版が 1.6.4 である根拠(Issue #76 での変更)
+
+Issue #76(#23-A)は、買い目の券種を `umabans.length`(1=複勝 / 2=ワイド / 3=三連複)から
+逆算する構造をやめ、`AllocationCandidate` と `GeneralBetAllocation` の**両方**に
+`betType` を必須フィールドとして持たせた。あわせて `verify.ts` が未知の券種コードの行を
+無言で `continue` していた穴を、`ProposedBetReport.unknownBetType` として独立に計上する
+形で塞いだ。
+
+### patch と判断した理由
+
+- **major に該当しない。** DB スキーマ・`settings.json`・エクスポート JSON はいずれも不変。
+  `analysis_bets.bet_type` に書かれる値も変わらない(`betTypeOfUmabans` が返していた値と
+  候補が運ぶ `betType` は現行データで一致する)
+- **minor に該当しない。** **配分額・EV・回収率の数値は1つも変わらない。** 本体(コミット1)は
+  挙動不変であり、`git diff 59f52ad <コミット1> -- '**/*.test.ts' | grep '^-' | grep -v '^---'
+  | grep -v betType` の60行はすべて入力側の書き換えで、**期待値の右辺は不変**である
+  (内訳: `buildComboCandidates` の引数型変更20 / `AllocationCandidate` リテラルへの
+  フィールド追加34 / `mixedBetTypeLabel` の describe ブロック書き換え6)
+- **AC-A5 が足す表示行(`unknownBetType` の注記)は、現行データでは常に非表示。**
+  保存経路が `place`/`wide`/`trio` しか書かないため `count` が 0 のままであり、
+  `formatUnknownBetTypeNotice` は `null` を返す
+- `AllocationCandidate` への必須フィールド追加は `@keiba/core` の型としては破壊的変更だが、
+  本書「表記ルール」のとおり **`packages/core`(`@keiba/core`)は版数運用の対象外・据え置き**
+  であり、root/app の版数区分は**利用者から見た基準**でしか判定しない
+
+よって 1.6.3 → **1.6.4**(patch)が妥当と判断した。
+
 ## 次の正式版が 1.6.3 である根拠(Issue #74 での変更)
 
 Issue #74 は、オッズの値域(1.0以上・0を含む1.0未満は値域外)の判定基準
