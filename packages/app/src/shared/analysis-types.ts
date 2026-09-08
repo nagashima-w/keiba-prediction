@@ -536,6 +536,20 @@ export interface ProposedBetTypeSummaryView {
   readonly unjudgedCount: number;
 }
 
+/**
+ * 検証画面: 未知の券種コードの内訳(表示用。Issue #76。core `ProposedBetUnknownBetType` のプレーン写し)。
+ * 規則U(判定不能)とは原因が異なるため`overall`には合算しない。未知券種行が1件も無い通常時は
+ * `{ count: 0, totalStake: 0, betTypes: [] }`(このフィールド自体が省略されることはない)。
+ */
+export interface ProposedBetUnknownBetTypeView {
+  /** 該当した買い目行の点数。 */
+  readonly count: number;
+  /** 該当行のstake合計(円)。どの券種のtotalStakeにも含まれない。 */
+  readonly totalStake: number;
+  /** 実際に現れた券種コード(昇順・重複なし)。 */
+  readonly betTypes: readonly string[];
+}
+
 /** 検証画面: proposedBet系の母集団4分類(表示用。Issue #71 #54-B)。 */
 export interface ProposedBetPopulationView {
   /** 配分あり(賭け金>0)。 */
@@ -564,6 +578,8 @@ export interface ProposedBetReportView {
   readonly wide: ProposedBetTypeSummaryView;
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummaryView;
+  /** 未知の券種コードの内訳(Issue #76。`overall`には合算しない)。 */
+  readonly unknownBetType: ProposedBetUnknownBetTypeView;
 }
 
 /**

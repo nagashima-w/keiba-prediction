@@ -19,6 +19,7 @@ import {
   formatKaisaiDate,
   formatPayoutBreakdown,
   formatRate,
+  formatUnknownBetTypeNotice,
   formatYen,
   hasUnknownPromptVersionGroup,
   importButtonLabel,
@@ -61,6 +62,7 @@ function verifyReport(over: Partial<VerifyReportView> = {}): VerifyReportView {
       place: emptyProposedBetTypeSummary(),
       wide: emptyProposedBetTypeSummary(),
       trio: emptyProposedBetTypeSummary(),
+      unknownBetType: { count: 0, totalStake: 0, betTypes: [] },
     },
     ...over,
   };
@@ -151,6 +153,19 @@ describe("verify画面の表示整形(純関数)", () => {
         approximatePayoutCount: 1,
       };
       expect(formatPayoutBreakdown(bet)).toBe("実配当 3件 / 近似 1件");
+    });
+  });
+
+  describe("formatUnknownBetTypeNotice(未知の券種コードの注記。Issue #76)", () => {
+    it("count===0はnullを返すこと(未知券種行が1件も無い通常時)", () => {
+      expect(formatUnknownBetTypeNotice({ count: 0, totalStake: 0, betTypes: [] })).toBeNull();
+    });
+
+    it("count>0は点数・賭け金合計・券種コードを含む文字列を返すこと", () => {
+      const text = formatUnknownBetTypeNotice({ count: 3, totalStake: 600, betTypes: ["quinella", "win"] });
+      expect(text).toBe(
+        "未対応の券種コード(quinella、win)の買い目が3点 (賭け金合計600円)あり、回収率の集計から除外しています。",
+      );
     });
   });
 

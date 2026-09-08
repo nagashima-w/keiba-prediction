@@ -29,6 +29,7 @@ import {
   formatFinishPosition,
   formatPayoutBreakdown,
   formatRate,
+  formatUnknownBetTypeNotice,
   formatYen,
   hasUnknownPromptVersionGroup,
   importButtonLabel,
@@ -325,6 +326,17 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
                 判定不能(集計対象外): 複勝{report.proposedBet.place.unjudgedCount}点 / ワイド
                 {report.proposedBet.wide.unjudgedCount}点 / 3連複
                 {report.proposedBet.trio.unjudgedCount}点
+              </p>
+            )}
+            {/*
+             * Issue #76: 未対応の券種コード(place/wide/trio以外)の買い目がある旨の注記。
+             * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す
+             * (formatUnknownBetTypeNoticeがcount===0のときnullを返すので、その条件でだけ表示する
+             * 純関数側の設計。JSX側にはcount>0の条件式1つだけを置く)。
+             */}
+            {formatUnknownBetTypeNotice(report.proposedBet.unknownBetType) !== null && (
+              <p style={{ margin: "0.15rem 0", color: "#a60" }}>
+                {formatUnknownBetTypeNotice(report.proposedBet.unknownBetType)}
               </p>
             )}
             <p style={{ margin: "0.15rem 0", color: "#666" }}>

@@ -360,6 +360,26 @@ export interface ProposedBetPopulation {
 }
 
 /**
+ * 保存されている券種コードが place/wide/trio のいずれでもなかった買い目行(Issue #76)。
+ * 規則U(判定不能。原因は払戻の取込状態)とは原因が違うため `unjudgedCount` には混ぜない。
+ * この行は betCount/totalStake/totalReturn/unjudgedCount のいずれにも計上されない。
+ *
+ * 混ぜない理由(#76着手前ゲート裁定): (1) `overall.unjudgedCount === place.unjudgedCount +
+ * wide.unjudgedCount + trio.unjudgedCount` という不変条件テストが `verify.test.ts` に2本あり、
+ * 混ぜると崩れる (2) `VerifyView.tsx` は複勝・ワイド・3連複の3内訳だけを表示しており、混ぜると
+ * 表示と合計が食い違う (3) `unjudgedCount` のJSDocは「規則U(Issue #71)により」と原因を
+ * 名指ししており、混ぜると原因ラベルが誤りになる(#31・#55・#58の誤ラベル欠陥クラスの再生産)。
+ */
+export interface ProposedBetUnknownBetType {
+  /** 該当した買い目行の点数。 */
+  readonly count: number;
+  /** 該当行の stake 合計(円)。どの券種の totalStake にも含まれない。 */
+  readonly totalStake: number;
+  /** 実際に現れた券種コード(昇順・重複なし)。原因を判別する唯一の手段。 */
+  readonly betTypes: readonly string[];
+}
+
+/**
  * 配分ベースの回収率(Issue #71・#54-B)。分析時点の設定で実際に提案した配分額をそのまま
  * 賭け金とする(Q-C)。既存 `VerifyReport.bet`(複勝・一律stakePerBet円、Q-B)とは仮定が異なるため、
  * 両者を合算した値はどこにも作らない(AC-B5)。
@@ -383,6 +403,14 @@ export interface ProposedBetReport {
   readonly wide: ProposedBetTypeSummary;
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummary;
+  /**
+   * 保存されている券種コードが place/wide/trio のいずれでもなかった買い目行(Issue #76)。
+   * `overall` には合算しない(`ProposedBetUnknownBetType` のJSDoc参照)。未知券種行が
+   * 1件も無い通常時は `{ count: 0, totalStake: 0, betTypes: [] }`。このフィールド自体が
+   * 省略されることはない(#71で`unjudgedCount`がJSDoc止まりでUIに出ず差し戻しになった
+   * 前例があるため、値の非表示ではなく値自体を常在させる設計にする)。
+   */
+  readonly unknownBetType: ProposedBetUnknownBetType;
 }
 
 /** verifyレポート。 */
@@ -1120,6 +1148,27 @@ function emptyProposedBetAccumulator(): ProposedBetAccumulator {
   return { betCount: 0, totalStake: 0, totalReturn: 0, unjudgedCount: 0 };
 }
 
+/** 未知券種行(Issue #76)の可変カウンタ。`betTypes`は集合として集める(重複を避ける)。 */
+interface UnknownBetTypeAccumulator {
+  count: number;
+  totalStake: number;
+  betTypes: Set<string>;
+}
+
+/** 空の未知券種カウンタを作る。 */
+function emptyUnknownBetTypeAccumulator(): UnknownBetTypeAccumulator {
+  return { count: 0, totalStake: 0, betTypes: new Set() };
+}
+
+/** 未知券種カウンタを確定値へ変換する。`betTypes`は昇順・重複なしにする(JSDoc契約)。 */
+function finalizeUnknownBetType(acc: UnknownBetTypeAccumulator): ProposedBetUnknownBetType {
+  return {
+    count: acc.count,
+    totalStake: acc.totalStake,
+    betTypes: [...acc.betTypes].sort(),
+  };
+}
+
 /**
  * 可変カウンタを確定値へ変換する。recoveryRateの判定は既存bet系(VerifyBetSummary)と同じ流儀で
  * `totalStake===0`を使う(`betCount===0`ではない。#71ゲート裁定: 2つの系で判定式が違うと
@@ -1195,6 +1244,7 @@ function computeProposedBetReport(
   const place = emptyProposedBetAccumulator();
   const wide = emptyProposedBetAccumulator();
   const trio = emptyProposedBetAccumulator();
+  const unknown = emptyUnknownBetTypeAccumulator();
 
   // レース×券種ごとにgetComboPayoutsの呼び出しを1回に抑えるキャッシュ(同一レース内に
   // 複数のワイド/3連複買い目があっても無駄なDBアクセスをしない。値そのものは
@@ -1244,7 +1294,13 @@ function computeProposedBetReport(
 
     for (const bet of allocation.bets) {
       if (bet.betType !== "place" && bet.betType !== "wide" && bet.betType !== "trio") {
-        // 防御: #59の保存経路はplace/wide/trioのみを書く契約のため、通常到達しない。
+        // Issue #76: #59の保存経路はplace/wide/trioのみを書く契約のため通常到達しないが、
+        // 到達した場合に無言でcontinueして投資額を静かに過小計上する(=回収率が偽って
+        // 良く見える)欠陥があった。規則Uとは原因が異なるためunjudgedCountには混ぜず、
+        // 専用の内訳(unknownBetType)へ計上する(ProposedBetUnknownBetTypeのJSDoc参照)。
+        unknown.count += 1;
+        unknown.totalStake += bet.stake;
+        unknown.betTypes.add(bet.betType);
         continue;
       }
       const accumulator = bet.betType === "place" ? place : bet.betType === "wide" ? wide : trio;
@@ -1288,6 +1344,7 @@ function computeProposedBetReport(
     place: finalizeProposedBetSummary(place),
     wide: finalizeProposedBetSummary(wide),
     trio: finalizeProposedBetSummary(trio),
+    unknownBetType: finalizeUnknownBetType(unknown),
   };
 }
 
