@@ -464,7 +464,7 @@ function renderMixedAllocationBlock(
         <tbody>
           {display.split.visible.map((a) => (
             <tr key={a.umabans.join("-")}>
-              <td style={tdStyle}>{mixedBetTypeLabel(a.umabans.length)}</td>
+              <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
               <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
               <td style={tdStyle}>{formatYen(a.stake)}</td>
             </tr>
@@ -495,7 +495,7 @@ function renderMixedAllocationBlock(
             <tbody>
               {block.rows.map((a) => (
                 <tr key={a.umabans.join("-")}>
-                  <td style={tdStyle}>{mixedBetTypeLabel(a.umabans.length)}</td>
+                  <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
                   <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
                   <td style={tdStyle}>{formatYen(a.stake)}</td>
                 </tr>

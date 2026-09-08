@@ -91,6 +91,7 @@
 import {
   buildComboCandidates,
   DEFAULT_EV_CONFIG,
+  type AllocationBetType,
   type AllocationCandidate,
   type ComboCandidateDiagnostics,
   type EvConfig,
@@ -105,8 +106,15 @@ import type {
 } from "./analysis-types.js";
 import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-allocation.js";
 
-/** 券種横断の買い目候補ビルダーが対象にできる券種。 */
-export type MixedCandidateBetType = "place" | "wide" | "trio";
+/**
+ * 券種横断の買い目候補ビルダーが対象にできる券種。
+ *
+ * `@keiba/core`の`AllocationBetType`の別名(Issue #76)。券種ユニオンの3重定義
+ * (本エイリアス・`mixed-race-allocation.ts`のインライン`("place"|"wide"|"trio")[]`・core
+ * `AllocationBetType`)を防ぐため、本ファイルはcoreの型をそのまま参照し、再定義しない
+ * (#24で「馬連」を1箇所だけ足す事故を構造的に防ぐ)。
+ */
+export type MixedCandidateBetType = AllocationBetType;
 
 /** 既定の対象券種(全券種)。boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない。 */
 export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
@@ -222,9 +230,6 @@ export interface MixedCandidateBuildResult {
   readonly diagnostics: MixedCandidateDiagnostics;
 }
 
-/** ワイド・3連複それぞれの買い目構成頭数(`@keiba/core` の `COMBO_SIZE` と同じ値。券種非依存モジュール間の依存を増やさないため独立して持つ)。 */
-const COMBO_SIZE: Record<"wide" | "trio", number> = { wide: 2, trio: 3 };
-
 /** ワイド・3連複の的中判定に使う上位着数。複勝の払戻対象人数とは無関係の独立した定数(反証C)。 */
 const COMBO_TOP_FINISH_COUNT = 3;
 
@@ -257,7 +262,13 @@ function buildPlaceCandidates(race: MixedCandidateBuildInput): {
       continue;
     }
     positiveCount++;
-    candidates.push({ umabans: [row.umaban], odds: row.placeOddsMin, ev: row.ev, isPositive: true });
+    candidates.push({
+      betType: "place",
+      umabans: [row.umaban],
+      odds: row.placeOddsMin,
+      ev: row.ev,
+      isPositive: true,
+    });
   }
   return {
     candidates,
@@ -297,13 +308,8 @@ function buildComboCandidatesForBetType(
   const comboOddsState = race.comboOdds?.[betType]?.state ?? "unknown";
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
   // D-4: evConfigを渡し、複勝(row.isPositive)と同じ閾値・同じ厳密不等号で判定させる。
-  const result = buildComboCandidates(
-    horses,
-    COMBO_TOP_FINISH_COUNT,
-    COMBO_SIZE[betType],
-    oddsByKey,
-    evConfig,
-  );
+  // Issue #76: 第3引数はcomboSize(数値)ではなくbetType自体を渡す(umabanCountOfへ内部で委譲)。
+  const result = buildComboCandidates(horses, COMBO_TOP_FINISH_COUNT, betType, oddsByKey, evConfig);
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },

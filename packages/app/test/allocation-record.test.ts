@@ -4,6 +4,8 @@ import { DEFAULT_BET_ALLOCATION_CONFIG } from "@keiba/core/ev/bet-allocation";
 import {
   buildComboOddsKey,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+  type GeneralBetAllocation,
+  type GeneralBetAllocationResult,
 } from "@keiba/core/ev/combo-bet-allocation";
 
 import {
@@ -16,6 +18,7 @@ import type { AnalysisRow, ComboOddsFetchDiagnosticsView, ComboOddsFetchOutcomeV
 import {
   buildMixedRaceAllocationWithOutcome,
   type MixedAllocationSettings,
+  type MixedRaceAllocationOutcome,
 } from "../src/shared/mixed-race-allocation.js";
 import type { MixedCandidateBuildInput } from "../src/shared/mixed-candidates.js";
 
@@ -907,5 +910,100 @@ describe("buildInvalidAllocationRecordForException(AC6: buildMixedRaceAllocation
       oddsStatus: "middle",
     });
     expect(rec.bets).toEqual([]);
+  });
+});
+
+// ============================================================================
+// Issue #76 AC-A1: mixedBetsOf(buildAllocationRecord経由)がumabans.lengthではなく
+// 候補が運ぶbetTypeを直接使うことの検出力テスト
+// ============================================================================
+
+/** テスト用のGeneralBetAllocationResultを、指定したallocations配列から最小構成で組み立てる。 */
+function minimalGeneralResult(allocations: readonly GeneralBetAllocation[]): GeneralBetAllocationResult {
+  const totalStake = allocations.reduce((sum, a) => sum + a.stake, 0);
+  return {
+    allocations,
+    totalStake,
+    bankrollInput: 300000,
+    perRaceCapInput: 20000,
+    resolvedBankroll: 300000,
+    effectivePerRaceCap: 20000,
+    kellyTargetStake: totalStake,
+    plannedStake: totalStake,
+    capApplied: false,
+    minimumStakeApplied: false,
+    exceedsKellyTarget: false,
+    advisory: null,
+    kellyFraction: 0.5,
+    betCount: allocations.filter((a) => a.stake > 0).length,
+    isSkip: totalStake === 0,
+    skipReason: null,
+    skipReasonCode: null,
+    notDiversified: false,
+    modelId: "conditional-bernoulli",
+    modelApproximate: true,
+    diagnostics: { inputCandidateCount: allocations.length, truncatedByCapCount: 0, candidateCount: allocations.length, converged: true },
+  };
+}
+
+/** テスト用のMixedRaceAllocationOutcome(kind="mixed")を、指定したallocations配列から組み立てる。 */
+function mixedOutcomeFor(allocations: readonly GeneralBetAllocation[]): MixedRaceAllocationOutcome {
+  return {
+    view: {
+      kind: "mixed",
+      result: minimalGeneralResult(allocations),
+      topFinishCount: 3,
+      diagnostics: {
+        place: { kind: "not-requested" },
+        wide: { kind: "not-requested" },
+        trio: { kind: "not-requested" },
+      },
+    },
+    outcome: {
+      route: "mixed",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOdds: null,
+    },
+  };
+}
+
+describe("mixedBetsOf(buildAllocationRecord経由) — betTypeを直接使い、umabans.lengthから再導出しないこと(Issue #76)", () => {
+  it("umabans:[1]の2件をbetType:\"place\"と\"wide\"にして混ぜても、AnalysisBetRecordのbetTypeがそれぞれ別の値に分かれること", () => {
+    // umabans.lengthはどちらも1だが、betTypeを明示的に食い違わせる(旧実装の
+    // betTypeOfUmabans(umabans.length)ではこの2件は両方「place」に潰れ、区別できなかった)。
+    const allocations: GeneralBetAllocation[] = [
+      {
+        umabans: [1],
+        betType: "place",
+        stake: 100,
+        continuousFraction: 0.1,
+        scaledFraction: 0.05,
+        hitProb: 0.5,
+        odds: 3,
+        ev: 1.5,
+        droppedBelowMinimum: false,
+      },
+      {
+        umabans: [1],
+        betType: "wide",
+        stake: 200,
+        continuousFraction: 0.2,
+        scaledFraction: 0.1,
+        hitProb: 0.5,
+        odds: 3,
+        ev: 1.5,
+        droppedBelowMinimum: false,
+      },
+    ];
+    const outcome = mixedOutcomeFor(allocations);
+    const rec = buildAllocationRecord(outcome, settings(), "result");
+
+    // 前提固定(空振り防止): stake>0の2件がどちらも明細として残ること。
+    expect(rec.bets).toHaveLength(2);
+    const key = buildComboOddsKey([1]);
+    const betTypesForKey = rec.bets.filter((b) => b.comboKey === key).map((b) => b.betType);
+    expect(new Set(betTypesForKey)).toEqual(new Set(["place", "wide"]));
   });
 });

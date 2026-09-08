@@ -22,6 +22,7 @@ import {
 import {
   buildMixedCandidates,
   type ComboCandidateDiagnosticsView,
+  type MixedCandidateBetType,
   type MixedCandidateBuildInput,
   type MixedCandidateDiagnostics,
 } from "./mixed-candidates.js";
@@ -160,9 +161,13 @@ export type MixedRaceAllocationView =
   | MixedRaceAllocationComputed
   | MixedRaceAllocationInvalid;
 
-/** D-1: 設定(2つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。複勝は常に含める。 */
-function resolveMixedBetTypes(settings: MixedAllocationSettings): ("place" | "wide" | "trio")[] {
-  const betTypes: ("place" | "wide" | "trio")[] = ["place"];
+/**
+ * D-1: 設定(2つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。複勝は常に含める。
+ * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
+ * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。
+ */
+function resolveMixedBetTypes(settings: MixedAllocationSettings): MixedCandidateBetType[] {
+  const betTypes: MixedCandidateBetType[] = ["place"];
   if (settings.includeWideInAllocation) {
     betTypes.push("wide");
   }
@@ -380,7 +385,10 @@ export function buildMixedRaceAllocationWithOutcome(
   };
 
   // 4. D-2条件③(訂正2: ワイド・三連複の候補合計のみを見る。複勝候補の件数は含めない)。
-  const comboCandidateCount = mixed.candidates.filter((c) => c.umabans.length >= 2).length;
+  // Issue #76: umabans.length>=2からの逆算ではなくbetTypeで判定する(値として運ぶ)。
+  const comboCandidateCount = mixed.candidates.filter(
+    (c) => c.betType === "wide" || c.betType === "trio",
+  ).length;
   if (comboCandidateCount === 0) {
     return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds);
   }

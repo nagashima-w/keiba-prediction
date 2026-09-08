@@ -493,7 +493,7 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
         umaban: h.shutuba.umaban,
         placeProb: 0.3, // 橋渡しの型・値検証が目的でありEV値そのものの妥当性は検証しない
       }));
-      const result = buildComboCandidates(horses, 3, 3, oddsByKey);
+      const result = buildComboCandidates(horses, 3, "trio", oddsByKey);
 
       expect(result.diagnostics.enumeratedCount).toBe(560); // C(16,3)
       // スカラー変換された値は常に1.0以上の有限値かnullのいずれかであり(#74でisUsableOddsの

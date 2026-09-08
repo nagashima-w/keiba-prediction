@@ -565,10 +565,28 @@ describe("AC17: 異常な数値(placeOddsMin<=0/ev=NaN/umaban非有限)を含ん
 // 表示データ導出(AC10〜AC16)のテストヘルパー
 // ============================================================================
 
+/**
+ * `umabans.length`から券種を推定する(Issue #76より前の全ファイルで使われていた写像そのもの)。
+ * 本ヘルパー専用の既定値導出としてのみ残す(`overrides.betType`で個別に上書きできる。
+ * `betType`が`umabans.length`と食い違う不整合な入力を意図的に作るテスト——例えば
+ * `buildMixedAllocationBreakdown`がbetTypeで群分けすることを検出する変異注入テスト——は
+ * この既定値をoverridesで上書きして作る)。
+ */
+function betTypeOfLengthForTestFixture(length: number): "place" | "wide" | "trio" {
+  if (length === 1) {
+    return "place";
+  }
+  if (length === 2) {
+    return "wide";
+  }
+  return "trio";
+}
+
 /** テスト用のGeneralBetAllocationを組み立てる補助関数。 */
 function allocation(overrides: Partial<GeneralBetAllocation> & { umabans: readonly number[] }): GeneralBetAllocation {
   return {
     umabans: overrides.umabans,
+    betType: overrides.betType ?? betTypeOfLengthForTestFixture(overrides.umabans.length),
     stake: overrides.stake ?? 0,
     continuousFraction: overrides.continuousFraction ?? 0.01,
     scaledFraction: overrides.scaledFraction ?? 0.005,
@@ -736,6 +754,21 @@ describe("AC10: buildMixedAllocationBreakdown — 券種別内訳(金額・点�
     // 前提固定: 実際に金額が動いていること(空振り防止)。
     expect(view.result.totalStake).toBeGreaterThan(0);
     expect(sum).toBe(view.result.totalStake);
+  });
+
+  it("Issue #76検出力: umabans:[1]の2件をbetType:\"place\"と\"wide\"にしても別バケツに分かれること(umabans.lengthからの逆算では検出できない不整合入力)", () => {
+    // allocateGeneralBetsを経由しないプレーンオブジェクトのため、umabans.length(=1)とbetTypeが
+    // 食い違う入力を意図的に作れる(旧実装のumabans.length===1判定では両方「place」に
+    // 潰れてしまい、この2件は区別できなかった)。
+    const allocations = [
+      allocation({ umabans: [1], betType: "place", stake: 100 }),
+      allocation({ umabans: [1], betType: "wide", stake: 200 }),
+    ];
+    const result = generalResult(allocations);
+    const breakdown = buildMixedAllocationBreakdown(result);
+    expect(breakdown.place).toEqual({ stake: 100, count: 1 });
+    expect(breakdown.wide).toEqual({ stake: 200, count: 1 });
+    expect(breakdown.trio).toEqual({ stake: 0, count: 0 });
   });
 });
 
@@ -1050,13 +1083,13 @@ describe("formatHiddenAllocationsSummary — 件数と、隠れている買い�
   });
 });
 
-describe("mixedBetTypeLabel — umabans.lengthから券種ラベルを返すこと", () => {
+describe("mixedBetTypeLabel — betTypeから券種ラベルを返すこと(Issue #76: umabans.lengthからの逆算をやめた)", () => {
   it.each([
-    [1, "複勝"],
-    [2, "ワイド"],
-    [3, "三連複"],
-  ] as const)("length=%i は %s", (length, expected) => {
-    expect(mixedBetTypeLabel(length)).toBe(expected);
+    ["place", "複勝"],
+    ["wide", "ワイド"],
+    ["trio", "三連複"],
+  ] as const)("betType=%s は %s", (betType, expected) => {
+    expect(mixedBetTypeLabel(betType)).toBe(expected);
   });
 });
 

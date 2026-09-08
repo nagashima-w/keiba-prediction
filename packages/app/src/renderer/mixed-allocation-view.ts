@@ -32,7 +32,11 @@
  * (`buildMixedAllocationDisplay`・内訳・並べ替え・折りたたみ分割・注記等)が残る。
  */
 
-import type { GeneralBetAllocation, GeneralBetAllocationResult } from "@keiba/core/ev/combo-bet-allocation";
+import type {
+  AllocationBetType,
+  GeneralBetAllocation,
+  GeneralBetAllocationResult,
+} from "@keiba/core/ev/combo-bet-allocation";
 
 import type {
   ComboCandidateDiagnosticsView,
@@ -73,20 +77,20 @@ export interface MixedAllocationBreakdown {
 }
 
 /**
- * `result.allocations` を `umabans.length`(1=複勝/2=ワイド/3=三連複)で3群に分け、
- * 金額合計・点数(`stake>0`の件数)を求める(AC10・AC13の点数)。
+ * `result.allocations` を `betType`(Issue #76: `umabans.length`からの逆算をやめ、候補自身が
+ * 運ぶ値で群分けする)で3群に分け、金額合計・点数(`stake>0`の件数)を求める(AC10・AC13の点数)。
  */
 export function buildMixedAllocationBreakdown(
   result: GeneralBetAllocationResult,
 ): MixedAllocationBreakdown {
-  const groupOf = (n: number): { stake: number; count: number } => {
-    const inGroup = result.allocations.filter((a) => a.umabans.length === n);
+  const groupOf = (betType: AllocationBetType): { stake: number; count: number } => {
+    const inGroup = result.allocations.filter((a) => a.betType === betType);
     return {
       stake: inGroup.reduce((sum, a) => sum + a.stake, 0),
       count: inGroup.filter((a) => a.stake > 0).length,
     };
   };
-  return { place: groupOf(1), wide: groupOf(2), trio: groupOf(3) };
+  return { place: groupOf("place"), wide: groupOf("wide"), trio: groupOf("trio") };
 }
 
 /**
@@ -230,15 +234,28 @@ export function buildHiddenAllocationsBlocks(
   return [{ summaryText: formatHiddenAllocationsSummary(split), rows: split.hidden }];
 }
 
-/** `umabans.length`から券種の日本語ラベルを返す(表示用。1=複勝/2=ワイド/3=三連複)。 */
-export function mixedBetTypeLabel(umabansLength: number): "複勝" | "ワイド" | "三連複" {
-  if (umabansLength === 1) {
-    return "複勝";
+/**
+ * `betType`から券種の日本語ラベルを返す(表示用。Issue #76: `umabans.length`からの逆算をやめた)。
+ * `betType`は閉じたユニオン(`AllocationBetType`)のため`switch`は網羅的であり、TSが
+ * ケース漏れをコンパイルエラーで検出する。是正前は`if 1 / if 2 / elseすべて三連複`という
+ * 構造で、想定外の頭数(例: 4)を渡すと黙って「三連複」を返していた(`code-reviewer.md`
+ * 「多分岐の最後の else が残った1つを断定」の実例)。この副産物は`betType`引数化で
+ * 構造的に消える(未知の`betType`はそもそも上流〈`validateCandidates`/`umabanCountOf`〉が
+ * throwするため、ここに到達しない)。
+ *
+ * `allocation-proposal-view.ts`の`betTypeLabel`(DB由来の開いた文字列を扱う、統合しない
+ * 別実装)と3つの日本語ラベルが同一であることは
+ * `allocation-proposal-view.test.ts`「betTypeLabelとmixedBetTypeLabel…」でリテラル固定する。
+ */
+export function mixedBetTypeLabel(betType: AllocationBetType): "複勝" | "ワイド" | "三連複" {
+  switch (betType) {
+    case "place":
+      return "複勝";
+    case "wide":
+      return "ワイド";
+    case "trio":
+      return "三連複";
   }
-  if (umabansLength === 2) {
-    return "ワイド";
-  }
-  return "三連複";
 }
 
 /** 券種横断で判定不能(unjudged)だった件数(AC15)。 */

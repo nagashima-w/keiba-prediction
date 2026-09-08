@@ -134,24 +134,6 @@ function settingsColumnsOf(
   };
 }
 
-/** 買い目を構成する馬番の頭数から券種コードを決める(1→複勝・2→ワイド・3→3連複)。 */
-function betTypeOfUmabans(umabans: readonly number[]): "place" | "wide" | "trio" {
-  switch (umabans.length) {
-    case 1:
-      return "place";
-    case 2:
-      return "wide";
-    case 3:
-      return "trio";
-    default:
-      // allocateGeneralBets が返す候補は buildMixedCandidates が betTypes(place/wide/trio)
-      // からしか作らないため、頭数はこの3値以外にならない(契約違反の防御)。
-      throw new Error(
-        `betTypeOfUmabans: 想定外の頭数(${umabans.length})の買い目(umabans=${JSON.stringify(umabans)})`,
-      );
-  }
-}
-
 /** 複勝配分結果(`BetAllocationResult.allocations`)から stake>0 の明細行だけを作る。 */
 function placeBetsOf(allocations: readonly BetAllocation[]): AnalysisBetRecord[] {
   return allocations
@@ -165,12 +147,16 @@ function placeBetsOf(allocations: readonly BetAllocation[]): AnalysisBetRecord[]
     }));
 }
 
-/** 混在配分結果(`GeneralBetAllocationResult.allocations`)から stake>0 の明細行だけを作る。 */
+/**
+ * 混在配分結果(`GeneralBetAllocationResult.allocations`)から stake>0 の明細行だけを作る。
+ * Issue #76: betTypeは候補が運ぶ値(`a.betType`)をそのまま使い、`umabans.length`から
+ * 逆算しない(逆算は`place`と将来の`win`〈#23-B〉が頭数1で衝突するため単射になれない)。
+ */
 function mixedBetsOf(allocations: readonly GeneralBetAllocation[]): AnalysisBetRecord[] {
   return allocations
     .filter((a) => a.stake > 0)
     .map((a) => ({
-      betType: betTypeOfUmabans(a.umabans),
+      betType: a.betType,
       comboKey: buildComboOddsKey(a.umabans),
       stake: a.stake,
       odds: a.odds,

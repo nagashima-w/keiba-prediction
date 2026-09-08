@@ -145,9 +145,9 @@ function run(seed: number, noiseFactor: NoiseFactorFn): void {
   const n = 18;
   const { horses, oddsByKey } = buildRaceData(n, seed, noiseFactor);
 
-  const built1: ComboCandidateBuildResult = buildComboCandidates(horses, 3, 1, oddsByKey);
-  const built2: ComboCandidateBuildResult = buildComboCandidates(horses, 3, 2, oddsByKey);
-  const built3: ComboCandidateBuildResult = buildComboCandidates(horses, 3, 3, oddsByKey);
+  const built1: ComboCandidateBuildResult = buildComboCandidates(horses, 3, "place", oddsByKey);
+  const built2: ComboCandidateBuildResult = buildComboCandidates(horses, 3, "wide", oddsByKey);
+  const built3: ComboCandidateBuildResult = buildComboCandidates(horses, 3, "trio", oddsByKey);
   const allCandidates: AllocationCandidate[] = [
     ...built1.candidates,
     ...built2.candidates,

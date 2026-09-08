@@ -2,16 +2,20 @@ import { describe, expect, it } from "vitest";
 import { allocateBets, type AllocationHorse, DEFAULT_BET_ALLOCATION_CONFIG } from "../../src/ev/bet-allocation.js";
 import { DEFAULT_EV_CONFIG } from "../../src/ev/expected-value.js";
 import {
+  ALLOCATION_BET_TYPE_UMABAN_COUNT,
   allocateGeneralBets,
   buildComboCandidates,
   buildComboOddsKey,
   DEFAULT_CANDIDATE_CAP,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   resolveComboOdds,
+  umabanCountOf,
+  type AllocationBetType,
   type AllocationCandidate,
   type GeneralBetAllocationConfig,
   type SkipReasonCode,
 } from "../../src/ev/combo-bet-allocation.js";
+import { COMBO_SIZE } from "../../src/scraper/combo-odds-key.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   type JointModelHorse,
@@ -104,12 +108,123 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
+  describe("ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf(券種→頭数の唯一の写像。Issue #76)", () => {
+    it("place=1・wide=2・trio=3であること(ハードコードしたリテラル。#55の自己参照比較を防ぐ)", () => {
+      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT).toEqual({ place: 1, wide: 2, trio: 3 });
+    });
+
+    it("wide/trioの値がcombo-odds-key.tsのCOMBO_SIZEと一致すること(2つの「券種→頭数」定義の乖離を機械検出)", () => {
+      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.wide).toBe(COMBO_SIZE.wide);
+      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.trio).toBe(COMBO_SIZE.trio);
+    });
+
+    it("umabanCountOf: place/wide/trioそれぞれの構成頭数を返すこと", () => {
+      expect(umabanCountOf("place")).toBe(1);
+      expect(umabanCountOf("wide")).toBe(2);
+      expect(umabanCountOf("trio")).toBe(3);
+    });
+
+    it("umabanCountOf: 未知の券種はthrowすること(Record添字アクセスがundefinedを返す危険の直接防御)", () => {
+      expect(() => umabanCountOf("win" as AllocationBetType)).toThrow(/不正な券種です/);
+    });
+  });
+
+  describe("validateCandidates: 券種(betType)の検証(Issue #76・AC-A7。umabans.length(0〜4)×betType(place/wide/trio/未知)=20セル)", () => {
+    const UMABANS_BY_LENGTH: Record<number, number[]> = {
+      0: [],
+      1: [1],
+      2: [1, 2],
+      3: [1, 2, 3],
+      4: [1, 2, 3, 4],
+    };
+
+    type ExpectKind = "empty" | "unknown" | "mismatch" | "ok";
+
+    const table: { length: number; betType: AllocationBetType; expectKind: ExpectKind }[] = [];
+    for (const length of [0, 1, 2, 3, 4] as const) {
+      for (const rawBetType of ["place", "wide", "trio", "win"] as const) {
+        const isUnknown = rawBetType === "win";
+        const betType = rawBetType as AllocationBetType;
+        const expectKind: ExpectKind =
+          length === 0
+            ? "empty" // 既存の「空」チェックが最優先(検査順の裁定。既存メッセージを温存)。
+            : isUnknown
+              ? "unknown"
+              : ALLOCATION_BET_TYPE_UMABAN_COUNT[betType] === length
+                ? "ok"
+                : "mismatch";
+        table.push({ length, betType, expectKind });
+      }
+    }
+
+    // 前提固定(空振り防止): 20セルの内訳がempty4/ok3(place×1,wide×2,trio×3の一致セルのみ)/
+    // unknown4/mismatch9(残り)であること。
+    it("テーブル自己検証: 20セルの内訳がempty4/ok3/unknown4/mismatch9であること", () => {
+      expect(table).toHaveLength(20);
+      expect(table.filter((t) => t.expectKind === "empty")).toHaveLength(4);
+      expect(table.filter((t) => t.expectKind === "ok")).toHaveLength(3);
+      expect(table.filter((t) => t.expectKind === "unknown")).toHaveLength(4);
+      expect(table.filter((t) => t.expectKind === "mismatch")).toHaveLength(9);
+    });
+
+    it.each(table)(
+      "umabans.length=$length, betType=$betType は $expectKind になること",
+      ({ length, betType, expectKind }) => {
+        const horses = evenHorses(5, 3);
+        const candidate: AllocationCandidate = {
+          umabans: UMABANS_BY_LENGTH[length]!,
+          odds: 3,
+          ev: 2,
+          isPositive: true,
+          betType,
+        };
+        if (expectKind === "empty") {
+          expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/馬番の組が空です/);
+        } else if (expectKind === "unknown") {
+          expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/不正な券種です/);
+        } else if (expectKind === "mismatch") {
+          expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
+            /の買い目は\d頭の組である必要があります/,
+          );
+        } else {
+          expect(() => allocateGeneralBets(horses, 3, [candidate])).not.toThrow();
+        }
+      },
+    );
+  });
+
+  describe("buildComboCandidates: 券種(betType)の検証(Issue #76追加裁定。未知の券種は候補0件ではなくthrowすること)", () => {
+    it.each([
+      { betType: "place" as const, comboSize: 1 },
+      { betType: "wide" as const, comboSize: 2 },
+      { betType: "trio" as const, comboSize: 3 },
+    ])("betType=$betType はC(頭数,$comboSize)件で正常に列挙すること(候補0件へ化けない)", ({ betType, comboSize }) => {
+      const n = 5;
+      const horses = evenHorses(n, 3);
+      const oddsMap = uniformOddsMap(n, comboSize, 3);
+      const result = buildComboCandidates(horses, 3, betType, oddsMap);
+      const expectedEnumerated =
+        comboSize === 1 ? n : comboSize === 2 ? (n * (n - 1)) / 2 : (n * (n - 1) * (n - 2)) / 6;
+      // 前提(無条件expect): 列挙件数が0でない非退化値であること。
+      expect(expectedEnumerated).toBeGreaterThan(0);
+      expect(result.diagnostics.enumeratedCount).toBe(expectedEnumerated);
+    });
+
+    it("未知の券種を渡すと、候補0件という判定結果ではなく必ずthrowすること(boss着手前ゲートで実測: k=undefinedはkCombinationsOfUmabansのガードを素通りし2^n探索の末に候補0件を返していた)", () => {
+      const horses = evenHorses(18, 3);
+      const oddsMap = new Map<string, number | null>();
+      expect(() => buildComboCandidates(horses, 3, "win" as AllocationBetType, oddsMap)).toThrow(
+        /不正な券種です/,
+      );
+    });
+  });
+
   describe("buildComboCandidates: 候補列挙の頭数境界", () => {
     it("n=0,1はワイド(comboSize=2)候補0件(enumeratedCount===0)であること(C(n,2)=0)", () => {
       for (const n of [0, 1]) {
         const horses = evenHorses(n, 3);
         const oddsMap = uniformOddsMap(n, 2, 3);
-        const result = buildComboCandidates(horses, 3, 2, oddsMap);
+        const result = buildComboCandidates(horses, 3, "wide", oddsMap);
         expect(result.diagnostics.enumeratedCount).toBe(0);
       }
     });
@@ -120,18 +235,18 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       // 契機に、組合せ論の事実に合わせて期待値を訂正した(報告参照)。
       const horses = evenHorses(2, 3);
       const oddsMap = uniformOddsMap(2, 2, 3);
-      const result = buildComboCandidates(horses, 3, 2, oddsMap);
+      const result = buildComboCandidates(horses, 3, "wide", oddsMap);
       expect(result.diagnostics.enumeratedCount).toBe(1);
     });
 
     it("n=3で3連複(comboSize=3)はちょうど1件、n<3では0件(enumeratedCount)であること", () => {
       const oddsMap3 = uniformOddsMap(3, 3, 5);
-      const result3 = buildComboCandidates(evenHorses(3, 3), 3, 3, oddsMap3);
+      const result3 = buildComboCandidates(evenHorses(3, 3), 3, "trio", oddsMap3);
       expect(result3.diagnostics.enumeratedCount).toBe(1);
 
       for (const n of [0, 1, 2]) {
         const oddsMap = uniformOddsMap(n, 3, 5);
-        const result = buildComboCandidates(evenHorses(n, 3), 3, 3, oddsMap);
+        const result = buildComboCandidates(evenHorses(n, 3), 3, "trio", oddsMap);
         expect(result.diagnostics.enumeratedCount).toBe(0);
       }
     });
@@ -143,7 +258,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const horses = evenHorses(6, 3);
       const model = stubModel([{ placed: [1, 2, 3], probability: 1 }]);
       const oddsMap = uniformOddsMap(6, 3, 10); // hitProb=1(1,2,3のみ)×odds10 → 高EV
-      const result = buildComboCandidates(horses, 3, 3, oddsMap, DEFAULT_EV_CONFIG, model);
+      const result = buildComboCandidates(horses, 3, "trio", oddsMap, DEFAULT_EV_CONFIG, model);
       // 前提: 少なくとも1件は正のEV候補になること(このテストの土台)。
       expect(result.diagnostics.judged.positiveCount).toBeGreaterThan(0);
     });
@@ -154,7 +269,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       // 要素数3の組が部分集合として含まれることは組合せ論的に不可能(3>2)。
       const horses = evenHorses(6, 2);
       const oddsMap = uniformOddsMap(6, 3, 10); // オッズは十分あるが誤用のため全滅するはず
-      const result = buildComboCandidates(horses, 2, 3, oddsMap);
+      const result = buildComboCandidates(horses, 2, "trio", oddsMap);
       expect(result.diagnostics.enumeratedCount).toBeGreaterThan(0); // 列挙自体はされている
       expect(result.diagnostics.judged.positiveCount).toBe(0); // 誤用の症状: 的中確率0でEVも0
       expect(result.diagnostics.judged.notPositiveCount).toBe(result.diagnostics.enumeratedCount);
@@ -190,7 +305,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       { name: "topFinishCount=負値(-1)", topFinishCount: -1 },
     ])("$name だと allocateGeneralBets が例外を投げること", ({ topFinishCount }) => {
       const horses = evenHorses(5, 3);
-      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true }];
+      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true, betType: "wide" }];
       expect(() =>
         allocateGeneralBets(horses, topFinishCount, cand, {
           ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
@@ -210,24 +325,24 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       ({ topFinishCount }) => {
         const horses = evenHorses(4, 3);
         const oddsMap = uniformOddsMap(4, 2, 5);
-        expect(() => buildComboCandidates(horses, topFinishCount, 2, oddsMap)).toThrow();
+        expect(() => buildComboCandidates(horses, topFinishCount, "wide", oddsMap)).toThrow();
       },
     );
 
     it("topFinishCount=0・小数(1.5)は例外にならないこと(境界の確認。place-joint-model.tsの既存トレランスと非対称な過剰拒否を防ぐ)", () => {
       const horses = evenHorses(5, 3);
-      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true }];
+      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true, betType: "wide" }];
       expect(() => allocateGeneralBets(horses, 0, cand)).not.toThrow();
       expect(() => allocateGeneralBets(horses, 1.5, cand)).not.toThrow();
 
       const oddsMap = uniformOddsMap(4, 2, 5);
-      expect(() => buildComboCandidates(evenHorses(4, 3), 0, 2, oddsMap)).not.toThrow();
-      expect(() => buildComboCandidates(evenHorses(4, 3), 1.5, 2, oddsMap)).not.toThrow();
+      expect(() => buildComboCandidates(evenHorses(4, 3), 0, "wide", oddsMap)).not.toThrow();
+      expect(() => buildComboCandidates(evenHorses(4, 3), 1.5, "wide", oddsMap)).not.toThrow();
     });
 
     it("回帰テスト: topFinishCount=Infinityが誤って健全に見える非スキップ配分を返していた症状(この修正前の実測: isSkip=false, totalStake=49900)が再現しないこと", () => {
       const horses = evenHorses(5, 3);
-      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true }];
+      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true, betType: "wide" }];
       expect(() =>
         allocateGeneralBets(horses, Number.POSITIVE_INFINITY, cand, {
           ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
@@ -309,7 +424,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         { placed: [3, 4, 5], probability: 0.5 },
       ]);
       const oddsMap = uniformOddsMap(5, 2, 3); // odds=3, hitProb=0.5ならEV=1.5>1(正)
-      const built = buildComboCandidates(horses, 3, 2, oddsMap, DEFAULT_EV_CONFIG, correlated);
+      const built = buildComboCandidates(horses, 3, "wide", oddsMap, DEFAULT_EV_CONFIG, correlated);
       const pair12 = built.candidates.find((c) => c.umabans.join(",") === "1,2");
       // 前提(無条件expect): 1-2ワイドが候補として存在すること(EVプラス)。
       expect(pair12).toBeDefined();
@@ -340,7 +455,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         { placed: [2, 3, 4], probability: 0.5 },
       ]);
       const oddsMap = uniformOddsMap(5, 2, 100); // オッズを高くしてもEVはhitProb=0なら0
-      const built = buildComboCandidates(horses, 3, 2, oddsMap, DEFAULT_EV_CONFIG, exclusive);
+      const built = buildComboCandidates(horses, 3, "wide", oddsMap, DEFAULT_EV_CONFIG, exclusive);
       const pair12 = built.candidates.find((c) => c.umabans.join(",") === "1,2");
       // 排他的なので1-2ワイドはEVが必ず0になり、候補にすら残らないはず。
       expect(pair12).toBeUndefined();
@@ -365,7 +480,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       oddsMap.set(buildComboOddsKey(allCombos[2]!), null); // missing
       // allCombos[3..5] は未設定のまま(unfetched)
 
-      const result = buildComboCandidates(horses, 3, 2, oddsMap);
+      const result = buildComboCandidates(horses, 3, "wide", oddsMap);
       expect(result.diagnostics.enumeratedCount).toBe(6);
       expect(result.diagnostics.unjudged.oddsMissingCount).toBe(2);
       expect(result.diagnostics.unjudged.oddsUnfetchedCount).toBe(3);
@@ -393,7 +508,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         oddsMap.set(buildComboOddsKey(allCombos[i]!), 5); // 残り5組は健全(高オッズで正EV)
       }
 
-      const result = buildComboCandidates(horses, 3, 2, oddsMap);
+      const result = buildComboCandidates(horses, 3, "wide", oddsMap);
       expect(result.diagnostics.enumeratedCount).toBe(6);
       // 【回帰の本体】NaNの1組はjudgedのどちらにも入らず、oddsMalformedCountだけが1になること。
       expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(1);
@@ -408,7 +523,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const horses = evenHorses(4, 3);
       const oddsMap = new Map<string, number | null>();
       oddsMap.set(buildComboOddsKey([1, 2]), Number.POSITIVE_INFINITY);
-      const result = buildComboCandidates(horses, 3, 2, oddsMap);
+      const result = buildComboCandidates(horses, 3, "wide", oddsMap);
       expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(1);
       expect(result.candidates.some((c) => !Number.isFinite(c.odds) || !Number.isFinite(c.ev))).toBe(false);
     });
@@ -442,14 +557,14 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       "$name は既定閾値(1.0)へフォールバックし、既定閾値を明示指定した場合と一致すること",
       ({ threshold }) => {
         const { horses, oddsMap } = buildMixedScenario();
-        const expected = buildComboCandidates(horses, 3, 2, oddsMap, { threshold: 1.0 });
+        const expected = buildComboCandidates(horses, 3, "wide", oddsMap, { threshold: 1.0 });
         // 前提(無条件expect): 既定閾値では正EV・非正EVの両方が生じる混在データであること
         // (どちらか一方に偏っていると、異常なthresholdが「たまたま」既定と同じ結果になり
         // このテストの判別力が失われる)。
         expect(expected.diagnostics.judged.positiveCount).toBeGreaterThan(0);
         expect(expected.diagnostics.judged.notPositiveCount).toBeGreaterThan(0);
 
-        const actual = buildComboCandidates(horses, 3, 2, oddsMap, { threshold });
+        const actual = buildComboCandidates(horses, 3, "wide", oddsMap, { threshold });
         expect(actual.diagnostics).toEqual(expected.diagnostics);
         expect(actual.candidates).toEqual(expected.candidates);
       },
@@ -459,12 +574,12 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const horses = evenHorses(4, 3);
       const oddsMap = uniformOddsMap(4, 2, 5); // odds=5(明らかに正EV)
       // 前提(無条件expect): threshold=1.0(既定)ならpositiveCount>0であること。
-      const healthy = buildComboCandidates(horses, 3, 2, oddsMap, { threshold: 1.0 });
+      const healthy = buildComboCandidates(horses, 3, "wide", oddsMap, { threshold: 1.0 });
       expect(healthy.diagnostics.judged.positiveCount).toBeGreaterThan(0);
 
       // 修正後は防御によりNaNが1.0へフォールバックされるため、結果はhealthyと一致する
       // (=「全滅」という誤った結果には決して化けない)。
-      const withNaNThreshold = buildComboCandidates(horses, 3, 2, oddsMap, { threshold: Number.NaN });
+      const withNaNThreshold = buildComboCandidates(horses, 3, "wide", oddsMap, { threshold: Number.NaN });
       expect(withNaNThreshold.diagnostics.judged.positiveCount).toBe(
         healthy.diagnostics.judged.positiveCount,
       );
@@ -483,6 +598,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         odds: 3,
         ev: 1.5,
         isPositive: true,
+        betType: "place",
       }));
       const result = allocateGeneralBets(horses, 3, candidates, {
         ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
@@ -530,9 +646,9 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         candidateCap: 2,
       };
       const candidates: AllocationCandidate[] = [
-        { umabans: [1, 2], odds: 3, ev: 1.1, isPositive: true }, // 最下位EV → 切り捨てられる
-        { umabans: [3, 4], odds: 3, ev: 2.0, isPositive: true },
-        { umabans: [5, 6], odds: 3, ev: 2.0, isPositive: true }, // 同値EV・馬番辞書順で3,4より後
+        { umabans: [1, 2], odds: 3, ev: 1.1, isPositive: true, betType: "wide" }, // 最下位EV → 切り捨てられる
+        { umabans: [3, 4], odds: 3, ev: 2.0, isPositive: true, betType: "wide" },
+        { umabans: [5, 6], odds: 3, ev: 2.0, isPositive: true, betType: "wide" }, // 同値EV・馬番辞書順で3,4より後
       ];
       const result = allocateGeneralBets(horses, 3, candidates, config);
       expect(result.diagnostics.truncatedByCapCount).toBe(1);
@@ -545,28 +661,28 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
   describe("入力の正規化(馬番の組は昇順・重複なし)", () => {
     it("{3,3}のような不正な組(非昇順・重複含む)を渡すと例外を投げること", () => {
       const horses = evenHorses(4, 3);
-      const bad: AllocationCandidate[] = [{ umabans: [3, 3], odds: 3, ev: 2, isPositive: true }];
+      const bad: AllocationCandidate[] = [{ umabans: [3, 3], odds: 3, ev: 2, isPositive: true, betType: "wide" }];
       expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
     });
 
     it("降順など非昇順の組を渡すと例外を投げること", () => {
       const horses = evenHorses(4, 3);
-      const bad: AllocationCandidate[] = [{ umabans: [2, 1], odds: 3, ev: 2, isPositive: true }];
+      const bad: AllocationCandidate[] = [{ umabans: [2, 1], odds: 3, ev: 2, isPositive: true, betType: "wide" }];
       expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
     });
 
     it("同じ組の重複入力を渡すと例外を投げること(黙って通さない)", () => {
       const horses = evenHorses(4, 3);
       const dup: AllocationCandidate[] = [
-        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true },
-        { umabans: [1, 2], odds: 3.5, ev: 2.1, isPositive: true },
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+        { umabans: [1, 2], odds: 3.5, ev: 2.1, isPositive: true, betType: "wide" },
       ];
       expect(() => allocateGeneralBets(horses, 3, dup)).toThrow();
     });
 
     it("馬番の組が空(umabans: [])の候補を渡すと例外を投げること(code-reviewer提案2)", () => {
       const horses = evenHorses(4, 3);
-      const empty: AllocationCandidate[] = [{ umabans: [], odds: 3, ev: 2, isPositive: true }];
+      const empty: AllocationCandidate[] = [{ umabans: [], odds: 3, ev: 2, isPositive: true, betType: "wide" }];
       expect(() => allocateGeneralBets(horses, 3, empty)).toThrow();
     });
 
@@ -580,7 +696,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       ({ umaban }) => {
         const horses = evenHorses(4, 3);
         const bad: AllocationCandidate[] = [
-          { umabans: [umaban, umaban + 100], odds: 3, ev: 2, isPositive: true },
+          { umabans: [umaban, umaban + 100], odds: 3, ev: 2, isPositive: true, betType: "wide" },
         ];
         expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
       },
@@ -607,7 +723,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       { name: "odds=負値(-5)", odds: -5 },
     ])("$name の候補を渡すと例外を投げること", ({ odds }) => {
       const horses = evenHorses(4, 3);
-      const bad: AllocationCandidate[] = [{ umabans: [1, 2], odds, ev: 2, isPositive: true }];
+      const bad: AllocationCandidate[] = [{ umabans: [1, 2], odds, ev: 2, isPositive: true, betType: "wide" }];
       expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
     });
 
@@ -617,7 +733,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       { name: "ev=-Infinity", ev: Number.NEGATIVE_INFINITY },
     ])("$name の候補を渡すと例外を投げること", ({ ev }) => {
       const horses = evenHorses(4, 3);
-      const bad: AllocationCandidate[] = [{ umabans: [1, 2], odds: 3, ev, isPositive: true }];
+      const bad: AllocationCandidate[] = [{ umabans: [1, 2], odds: 3, ev, isPositive: true, betType: "wide" }];
       expect(() => allocateGeneralBets(horses, 3, bad)).toThrow();
     });
 
@@ -626,7 +742,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       // 引き写しではない。前提〈健全な1件が正の配分を得ること〉を無条件expectで固定する)。
       const horses = evenHorses(4, 3);
       const healthyOnly: AllocationCandidate[] = [
-        { umabans: [1, 2], odds: 5, ev: 2.5, isPositive: true },
+        { umabans: [1, 2], odds: 5, ev: 2.5, isPositive: true, betType: "wide" },
       ];
       const config = { ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, bankroll: 100000, perRaceCap: 100000 };
 
@@ -646,7 +762,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       // 到達しない。
       const withNaNCandidate: AllocationCandidate[] = [
         ...healthyOnly,
-        { umabans: [3, 4], odds: Number.NaN, ev: 1.5, isPositive: true },
+        { umabans: [3, 4], odds: Number.NaN, ev: 1.5, isPositive: true, betType: "wide" },
       ];
       expect(() => allocateGeneralBets(horses, 3, withNaNCandidate, config)).toThrow();
     });
@@ -655,8 +771,8 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
   describe("既存の防御が組合せでも生きること(betUnit/λ/greedySteps/bankroll/perRaceCapの異常値)", () => {
     const horses = evenHorses(5, 3);
     const candidates: AllocationCandidate[] = [
-      { umabans: [1, 2], odds: 3, ev: 1.8, isPositive: true },
-      { umabans: [1, 3], odds: 2.5, ev: 1.5, isPositive: true },
+      { umabans: [1, 2], odds: 3, ev: 1.8, isPositive: true, betType: "wide" },
+      { umabans: [1, 3], odds: 2.5, ev: 1.5, isPositive: true, betType: "wide" },
     ];
 
     it("betUnit=0/NaN/非整数でもNaN/Infinityが混入せず、既定betUnit相当の結果になること", () => {
@@ -796,7 +912,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
      * describe と同一の入力を流用する。
      */
     const jointHorses: JointModelHorse[] = [{ umaban: 1, placeProb: 0.6 }];
-    const candidates: AllocationCandidate[] = [{ umabans: [1], odds: 3, ev: 1.8, isPositive: true }];
+    const candidates: AllocationCandidate[] = [{ umabans: [1], odds: 3, ev: 1.8, isPositive: true, betType: "place" }];
 
     const table: {
       readonly label: string;
@@ -844,7 +960,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       {
         label: "⑥ 連続最適解ゼロ(妙味が極小)",
         jointHorses,
-        candidates: [{ umabans: [1], odds: 1.0000001, ev: 1.00000005, isPositive: true }],
+        candidates: [{ umabans: [1], odds: 1.0000001, ev: 1.00000005, isPositive: true, betType: "place" }],
         config: { ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, bankroll: 10000, perRaceCap: 10000 },
         model: stubModel([
           { placed: [], probability: 0.5 },
@@ -904,9 +1020,9 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       ]);
       // odds=5・正しいhitProb=0.3ならEV=1.5>1(正の妙味)で、貪欲最適化がstakeを配分するはず。
       const candidates: AllocationCandidate[] = [
-        { umabans: [1], odds: 5, ev: 1.5, isPositive: true }, // 複勝相当(1頭)
-        { umabans: [2, 3], odds: 5, ev: 1.5, isPositive: true }, // ワイド相当(2頭組)
-        { umabans: [4, 5, 6], odds: 5, ev: 1.5, isPositive: true }, // 3連複相当(3頭組)
+        { umabans: [1], odds: 5, ev: 1.5, isPositive: true, betType: "place" }, // 複勝相当(1頭)
+        { umabans: [2, 3], odds: 5, ev: 1.5, isPositive: true, betType: "wide" }, // ワイド相当(2頭組)
+        { umabans: [4, 5, 6], odds: 5, ev: 1.5, isPositive: true, betType: "trio" }, // 3連複相当(3頭組)
       ];
 
       const result = allocateGeneralBets(
@@ -971,9 +1087,9 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         { placed: [3], probability: 1 / 3 },
       ]);
       const candidates: AllocationCandidate[] = [
-        { umabans: [1], odds: 10, ev: 3.33, isPositive: true },
-        { umabans: [2], odds: 10, ev: 3.33, isPositive: true },
-        { umabans: [3], odds: 10, ev: 3.33, isPositive: true },
+        { umabans: [1], odds: 10, ev: 3.33, isPositive: true, betType: "place" },
+        { umabans: [2], odds: 10, ev: 3.33, isPositive: true, betType: "place" },
+        { umabans: [3], odds: 10, ev: 3.33, isPositive: true, betType: "place" },
       ];
       // greedySteps=5のように小さい値で強制的に打ち切らせる(前提: この構造は
       // greedySteps=1000でも打ち切られる。低レイヤ〈allocation-primitives.test.ts〉で
@@ -1003,7 +1119,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         { placed: [], probability: 1 - 1 / 2000 },
       ]);
       const oddsMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), 3000]]);
-      const built = buildComboCandidates(horses, 3, 2, oddsMap, DEFAULT_EV_CONFIG, model);
+      const built = buildComboCandidates(horses, 3, "wide", oddsMap, DEFAULT_EV_CONFIG, model);
       const result = allocateGeneralBets(horses, 3, built.candidates, {
         ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
         bankroll: 100000,
@@ -1044,7 +1160,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const jointHorses: JointModelHorse[] = rawHorses.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
       const candidates: AllocationCandidate[] = allocationHorses
         .filter((h) => h.isPositive && h.placeOddsMin !== null)
-        .map((h) => ({ umabans: [h.umaban], odds: h.placeOddsMin!, ev: h.ev!, isPositive: true }));
+        .map((h) => ({ umabans: [h.umaban], odds: h.placeOddsMin!, ev: h.ev!, isPositive: true, betType: "place" }));
       const actual = allocateGeneralBets(jointHorses, 2, candidates, {
         ...config,
         candidateCap: DEFAULT_CANDIDATE_CAP,
@@ -1075,7 +1191,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         { umaban: 1, placeProb: 0.6, placeOddsMin: 3, ev: 1.8, isPositive: true },
       ];
       const jointHorses: JointModelHorse[] = [{ umaban: 1, placeProb: 0.6 }];
-      const candidates: AllocationCandidate[] = [{ umabans: [1], odds: 3, ev: 1.8, isPositive: true }];
+      const candidates: AllocationCandidate[] = [{ umabans: [1], odds: 3, ev: 1.8, isPositive: true, betType: "place" }];
 
       const cases: Array<Partial<{ bankroll: number; perRaceCap: number; kellyFraction: number }>> = [
         { bankroll: 0, perRaceCap: 10000 }, // ①
@@ -1133,6 +1249,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           odds: 1.0000001,
           ev: 1.00000005,
           isPositive: true,
+          betType: "place",
         };
         const actual = allocateGeneralBets(
           jointHorses,
@@ -1153,9 +1270,9 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     it("同一入力で複数回呼んでも行の順序・値が安定していること(馬番配列の辞書順)", () => {
       const horses = evenHorses(6, 3);
       const candidates: AllocationCandidate[] = [
-        { umabans: [3, 4], odds: 3, ev: 1.8, isPositive: true },
-        { umabans: [1, 2], odds: 3, ev: 1.8, isPositive: true },
-        { umabans: [2, 5], odds: 3, ev: 1.8, isPositive: true },
+        { umabans: [3, 4], odds: 3, ev: 1.8, isPositive: true, betType: "wide" },
+        { umabans: [1, 2], odds: 3, ev: 1.8, isPositive: true, betType: "wide" },
+        { umabans: [2, 5], odds: 3, ev: 1.8, isPositive: true, betType: "wide" },
       ];
       const config = { ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, bankroll: 10000, perRaceCap: 10000 };
       const r1 = allocateGeneralBets(horses, 3, candidates, config);
@@ -1177,5 +1294,5 @@ function makeAscendingUniqueCandidates(count: number): AllocationCandidate[] {
       combos.push([a, b]);
     }
   }
-  return combos.map((c, i) => ({ umabans: c, odds: 3, ev: 2 + i * 0.0001, isPositive: true }));
+  return combos.map((c, i) => ({ umabans: c, odds: 3, ev: 2 + i * 0.0001, isPositive: true, betType: "wide" }));
 }

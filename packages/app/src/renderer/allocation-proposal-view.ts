@@ -206,7 +206,16 @@ const FALLBACK_REASON_NOTES: Record<string, string> = {
 export const FALLBACK_REASON_UNKNOWN_NOTE =
   "複勝のみの配分になっています(理由の詳細は記録されていません)。";
 
-/** 券種コード(bet_type)→日本語ラベル。未知の値はそのまま返す(throwしない)。 */
+/**
+ * 券種コード(bet_type)→日本語ラベル。未知の値はそのまま返す(throwしない)。
+ *
+ * `mixed-allocation-view.ts`の`mixedBetTypeLabel`(閉じたユニオン`AllocationBetType`。
+ * 未知値は上流がthrowする)とは**統合しない**(Issue #76裁定): 本関数はDB由来の開いた
+ * `string`を扱う契約であり、統合すると`mixedBetTypeLabel`側が未知分岐を持つことになって
+ * `switch`の網羅性(TSによる保護)が失われる。place/wide/trioの3つの日本語ラベルが両関数で
+ * 同一であることは`allocation-proposal-view.test.ts`
+ * 「betTypeLabelとmixedBetTypeLabel…」がリテラルで固定する。
+ */
 function betTypeLabel(betType: string): string {
   switch (betType) {
     case "place":

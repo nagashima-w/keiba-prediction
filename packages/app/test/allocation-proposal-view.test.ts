@@ -32,6 +32,7 @@ import {
 } from "../src/renderer/allocation-proposal-view.js";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../src/renderer/bet-allocation-view.js";
 import { formatEv, formatOdds } from "../src/renderer/format.js";
+import { mixedBetTypeLabel } from "../src/renderer/mixed-allocation-view.js";
 import { formatYen } from "../src/renderer/verify-format.js";
 
 /** テスト用のStoredAllocationViewを最小構成で組み立てる。 */
@@ -512,6 +513,27 @@ describe("買い目行(AC4)", () => {
       }),
     );
     expect(view.bets[0]!.comboLabel).toBe("0X");
+  });
+});
+
+describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の3ラベルが同一文字列であること(Issue #76: 統合はしないが値は一致させる。相互参照JSDoc対応)", () => {
+  it("place/wide/trioそれぞれで同じ日本語ラベルを返すこと", () => {
+    const view = buildAllocationProposalView(
+      allocation({
+        route: "mixed",
+        skipReasonCode: null,
+        bets: [
+          bet({ betType: "place", comboKey: "04" }),
+          bet({ betType: "wide", comboKey: "0407" }),
+          bet({ betType: "trio", comboKey: "040709" }),
+        ],
+      }),
+    );
+    expect(view.bets.map((b) => b.betTypeLabel)).toEqual([
+      mixedBetTypeLabel("place"),
+      mixedBetTypeLabel("wide"),
+      mixedBetTypeLabel("trio"),
+    ]);
   });
 });
 
