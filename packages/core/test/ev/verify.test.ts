@@ -2276,6 +2276,33 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
     // 「Redの作り方」参照)。単勝("win")は#23-Bで追加予定の値であり、着手前ゲート時点では
     // 未対応の券種の代表例として使う。
 
+    it("正の対照(fail-open検出。bossメタレビューR1): 未知券種行を1件も含まない通常のレポートでは、unknownBetTypeが{count:0, totalStake:0, betTypes:[]}になること(place/wide/trioが未知券種として誤検知されないこと)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_0",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+            { betType: "wide", comboKey: "0102", stake: 200, odds: 1, ev: 1 },
+            { betType: "trio", comboKey: "010203", stake: 300, odds: 1, ev: 1 },
+          ],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_0", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const report = computeVerifyReport(store);
+      // 前提固定(空振り防止): 実際にplace/wide/trioの3券種すべてがbetCount>0で計上されていること
+      // (この前提が崩れていると「発火しない側」の検査として空振りする)。
+      expect(report.proposedBet.place.betCount).toBeGreaterThan(0);
+      expect(report.proposedBet.wide.betCount).toBeGreaterThan(0);
+      expect(report.proposedBet.trio.betCount).toBeGreaterThan(0);
+      expect(report.proposedBet.unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+      store.close();
+    });
+
     it("未知券種(win)の行が、place/wide/trio/overallのbetCount・totalStake・totalReturn・unjudgedCountの4フィールドすべてに現れないこと", () => {
       const store = new AnalysisStore();
       store.saveAnalysis({
@@ -2384,7 +2411,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       store.close();
     });
 
-    it("betTypesが複数種類・重複ありの入力で昇順・重複なしになること", () => {
+    it("betTypesが重複ありの入力で重複なしになること(同一分析内。SQLのORDER BY bet_typeにより到着順は既に昇順)", () => {
       const store = new AnalysisStore();
       store.saveAnalysis({
         raceId: "PB_UNKNOWN_5",
@@ -2402,10 +2429,53 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       store.saveResult("PB_UNKNOWN_5", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
 
       const report = computeVerifyReport(store);
+      // 注意: `getAllocationForVerify`のSQLは`ORDER BY bet_type, combo_key`
+      // (analysis-store.ts)のため、同一分析内の買い目行は既にbet_type昇順で到着する。
+      // したがってこの1件だけでは重複排除(Setの性質)しか検証できず、`.sort()`自体の
+      // 必要性は次の「複数分析にまたがる」テストで固定する(bossメタレビューR2)。
       expect(report.proposedBet.unknownBetType).toEqual({
         count: 3,
         totalStake: 600,
-        betTypes: ["quinella", "win"], // 昇順(q<w)・重複なし(winは1つだけ)。
+        betTypes: ["quinella", "win"], // 重複なし(winは1つだけ)。
+      });
+      store.close();
+    });
+
+    it("betTypesが複数の分析にまたがって非昇順の順序で到着しても昇順になること(.sort()自体の検出力。bossメタレビューR2)", () => {
+      const store = new AnalysisStore();
+      // 分析idは保存順に採番され(analysis-store.ts listAnalysesはORDER BY id)、
+      // selectIncludedAnalysesはこの順序をそのまま辿る。同一分析内はbet_type昇順で
+      // 到着するため(上のテスト参照)、「非昇順の到着」を作るには**複数の分析にまたがせ、
+      // 後から保存した分析の方が辞書順で先に来る券種を持たせる**しかない。
+      // 1件目(id小): betType="zzz"のみ → Setに最初に挿入されるのは"zzz"。
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_6A",
+        analyzedAt: "t1",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "zzz", comboKey: "01", stake: 100, odds: 3, ev: 1.5 }],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_6A", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+      // 2件目(id大・後保存): betType="aaa"("zzz"より辞書順で先) → Setには"zzz"の後に挿入される。
+      // .sort()が無ければ`[...Set]`は挿入順["zzz","aaa"]のままで、["aaa","zzz"]と一致しない。
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_6B",
+        analyzedAt: "t2",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "aaa", comboKey: "01", stake: 200, odds: 3, ev: 1.5 }],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_6B", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.proposedBet.unknownBetType).toEqual({
+        count: 2,
+        totalStake: 300,
+        betTypes: ["aaa", "zzz"], // 到着順(zzz→aaa)とは逆順=.sort()が実際に効いていないと一致しない。
       });
       store.close();
     });

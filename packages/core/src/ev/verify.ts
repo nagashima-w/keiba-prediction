@@ -365,8 +365,11 @@ export interface ProposedBetPopulation {
  * この行は betCount/totalStake/totalReturn/unjudgedCount のいずれにも計上されない。
  *
  * 混ぜない理由(#76着手前ゲート裁定): (1) `overall.unjudgedCount === place.unjudgedCount +
- * wide.unjudgedCount + trio.unjudgedCount` という不変条件テストが `verify.test.ts` に2本あり、
- * 混ぜると崩れる (2) `VerifyView.tsx` は複勝・ワイド・3連複の3内訳だけを表示しており、混ぜると
+ * wide.unjudgedCount + trio.unjudgedCount` という不変条件テストが `verify.test.ts` に3本ある
+ * (ベース時点で2本。本Issue自身が「未知券種を含む入力でも成り立つこと」を確認する3本目を
+ * 追加した。boss メタレビューR3: この数を断定する行を書くたびに`git show <ベースコミット>:
+ * <このファイル>`と比較し、差分自身が数を動かしていないか検算すること)、混ぜると崩れる
+ * (2) `VerifyView.tsx` は複勝・ワイド・3連複の3内訳だけを表示しており、混ぜると
  * 表示と合計が食い違う (3) `unjudgedCount` のJSDocは「規則U(Issue #71)により」と原因を
  * 名指ししており、混ぜると原因ラベルが誤りになる(#31・#55・#58の誤ラベル欠陥クラスの再生産)。
  */
@@ -407,8 +410,10 @@ export interface ProposedBetReport {
    * 保存されている券種コードが place/wide/trio のいずれでもなかった買い目行(Issue #76)。
    * `overall` には合算しない(`ProposedBetUnknownBetType` のJSDoc参照)。未知券種行が
    * 1件も無い通常時は `{ count: 0, totalStake: 0, betTypes: [] }`。このフィールド自体が
-   * 省略されることはない(#71で`unjudgedCount`がJSDoc止まりでUIに出ず差し戻しになった
-   * 前例があるため、値の非表示ではなく値自体を常在させる設計にする)。
+   * 省略されることはない(#71で`unjudgedCount`が core→shared View 型までは配線されながら
+   * `VerifyView.tsx` に一度も表示されず差し戻しになった前例〈型の配線は`af75683`、表示の追加は
+   * 後続の`ab4f448`〉があるため。「型まで配線すれば十分」ではなく、値自体を常在させたうえで
+   * 表示配線まで本Issue内で完結させる設計にする。boss メタレビューR4対応)。
    */
   readonly unknownBetType: ProposedBetUnknownBetType;
 }

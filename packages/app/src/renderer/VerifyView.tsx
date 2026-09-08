@@ -194,6 +194,11 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
   const isFiltering = isRaceLedgerFilterActive(state.raceLedgerFilter);
   const displayedRaceLedger = isFiltering ? filteredRaceLedger : [];
   const venueNameOptions = distinctVenueNames(state.raceLedger);
+  // Issue #76: formatUnknownBetTypeNoticeは1回だけ呼び、結果(string|null)をJSX側でnull判定
+  // するだけにする(2回呼んでいた旧実装のboss指摘R5対応。呼び出しを1つに減らせば
+  // 「条件式1つだけ」というコメントの主張と実装が一致する)。
+  const unknownBetTypeNotice =
+    report !== null ? formatUnknownBetTypeNotice(report.proposedBet.unknownBetType) : null;
 
   return (
     <section style={{ marginTop: "1rem" }}>
@@ -330,14 +335,13 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
             )}
             {/*
              * Issue #76: 未対応の券種コード(place/wide/trio以外)の買い目がある旨の注記。
-             * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す
-             * (formatUnknownBetTypeNoticeがcount===0のときnullを返すので、その条件でだけ表示する
-             * 純関数側の設計。JSX側にはcount>0の条件式1つだけを置く)。
+             * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す。
+             * 文言の組み立て(count===0ならnull)はformatUnknownBetTypeNotice(純関数)の責務で、
+             * ここは`unknownBetTypeNotice`(コンポーネント冒頭で1回だけ呼んだ結果)のnull判定
+             * 1つだけを置く(bossメタレビューR5: 呼び出しを2つ置いていた実装をコメントに合わせて是正)。
              */}
-            {formatUnknownBetTypeNotice(report.proposedBet.unknownBetType) !== null && (
-              <p style={{ margin: "0.15rem 0", color: "#a60" }}>
-                {formatUnknownBetTypeNotice(report.proposedBet.unknownBetType)}
-              </p>
+            {unknownBetTypeNotice !== null && (
+              <p style={{ margin: "0.15rem 0", color: "#a60" }}>{unknownBetTypeNotice}</p>
             )}
             <p style={{ margin: "0.15rem 0", color: "#666" }}>
               母集団: 配分あり{report.proposedBet.population.allocated}件 / 見送り

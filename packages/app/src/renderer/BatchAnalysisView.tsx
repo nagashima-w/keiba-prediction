@@ -462,8 +462,14 @@ function renderMixedAllocationBlock(
           </tr>
         </thead>
         <tbody>
+          {/*
+            keyにbetTypeを含める(bossメタレビューR6)。umabansだけをkeyにすると、
+            #23-Bで単勝を追加した際にwin:[5]とplace:[5]が同一keyになりうる
+            (ALLOCATION_BET_TYPE_UMABAN_COUNTのJSDocが「#24で馬連を1箇所だけ足す事故を
+            構造的に防ぐ」と述べているのと同種の一貫性)。
+          */}
           {display.split.visible.map((a) => (
-            <tr key={a.umabans.join("-")}>
+            <tr key={`${a.betType}-${a.umabans.join("-")}`}>
               <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
               <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
               <td style={tdStyle}>{formatYen(a.stake)}</td>
@@ -494,7 +500,7 @@ function renderMixedAllocationBlock(
             </thead>
             <tbody>
               {block.rows.map((a) => (
-                <tr key={a.umabans.join("-")}>
+                <tr key={`${a.betType}-${a.umabans.join("-")}`}>
                   <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
                   <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
                   <td style={tdStyle}>{formatYen(a.stake)}</td>
