@@ -2291,7 +2291,10 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
           ],
         },
       });
-      store.saveResult("PB_UNKNOWN_0", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+      store.saveResult("PB_UNKNOWN_0", [{ umaban: 1, finishPosition: 1, placePayout: 250 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 1000 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 999 }] },
+      });
 
       const report = computeVerifyReport(store);
       // 前提固定(空振り防止): 実際にplace/wide/trioの3券種すべてがbetCount>0で計上されていること
