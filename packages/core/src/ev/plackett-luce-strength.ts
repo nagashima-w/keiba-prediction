@@ -128,10 +128,21 @@ export const MAX_FIT_ITERATIONS = 2000;
 
 /**
  * 自由集合の反復フィットの収束許容誤差(残差 max_i|F_i(θ)-q_i| がこれ未満で収束とみなす)。
- * θ の動的レンジが大きいほど閉形式の桁落ちが大きくなる(θ比1e9で残差下限が理論上2.2e-7程度に
- * なることを computePlackettLuceMarginals のブルートフォース照合テストで固定している)ため、
- * 1e-12 のような固定の極小値にはしない。production 到達可能域での動的レンジを踏まえ、
- * 余裕を持った値として 1e-6 を採用する(scripts/bench-joint-model.ts で再現可能)。
+ *
+ * **要修正3で是正(誤った根拠の訂正)**: 当初「θ比1e9で閉形式の残差下限が2.2e-7になる」ことを
+ * 根拠にしていたが、これは k=5(production では reducedPlaceCount<=placeCount<=3 のため
+ * 到達不能)の場合の値であり、**k<=3(production が実際に使う唯一の範囲)では θ比1e9・1e12でも
+ * 誤差は 1e-14 オーダーに留まる**(computePlackettLuceMarginals のブルートフォース照合テストで
+ * 自分で測り直して確認。`k=1,2,3・ratio=1e3〜1e12` の全組み合わせで最大誤差 2.6e-15)。
+ * つまり **k<=3 の範囲では閉形式の桁落ちは FIT_TOLERANCE を制約しない**。
+ *
+ * 実際に FIT_TOLERANCE を左右するのは、反復更新(θ←θ・q/F)の収束速度そのものである。
+ * production 到達可能域(scorer/prior.ts の [minPrior=0.02, maxPrior=0.95] と
+ * clip-variants.ts の CLIP_VARIANTS〈±0.10 / ±0.15〉)で自分の実装を測ったところ、
+ * 目標が1に極めて近い残余ケース(例: 縮約後の1頭が q=0.995 近傍)ほど反復回数が急増し
+ * (0.99で421回・0.995で841回。tol=1e-6 実測)、1e-9 のような過度に厳しい値にすると
+ * AC-9 の性能予算(5ms未満)を大きく超える。1e-6 は「収束速度の実用的な上限」として選んだ値
+ * であり、閉形式の精度限界とは無関係(scripts/bench-joint-model.ts で再現可能)。
  */
 export const FIT_TOLERANCE = 1e-6;
 
@@ -196,7 +207,15 @@ function combinationsOf(items: readonly number[], k: number): number[][] {
  *
  * 計算量: 各iについてd=0..k-1それぞれでC(n-1,d)通りの部分集合を数え上げるため、
  * 全体でO(n·C(n-1,k-1))(k=3ならO(n^3))。反復フィットのループ内で毎回呼ぶ前提のため、
- * 816通りの分布を毎回構築する素朴な実装(約160倍遅い。JSDoc冒頭参照)より高速。
+ * 816通りの分布を毎回構築する素朴な実装より高速(要修正2で是正: `scripts/bench-joint-model.ts`
+ * の `runNaiveVsClosedFormComparison` で実測・再現可能。18頭・k=3で実測した結果は
+ * `pnpm tsx scripts/bench-joint-model.ts` の出力「要修正2」節を参照。実測値そのものは
+ * 実行環境・JITの状態に依存するため本JSDocには固定値を転記しない)。
+ *
+ * **【提案B・レビューで記録】任意の k を許すと C(n-1,k-1) で組合せ爆発する**(code-reviewerの
+ * 実測: n=40・k=20 付近で実行がハングする)。production は placeCount<=3(reducedPlaceCount も
+ * それ以下)のみを使うため #77(#20-A)のスコープでは実害が無いが、**将来この関数を大きい k で
+ * 呼ぶ呼び出し元ができた場合の懸念として記録する**。対応(上限のガード等)は現時点では行わない。
  */
 export function computePlackettLuceMarginals(
   theta: readonly number[],

@@ -10,25 +10,40 @@
  *   `scripts/bench-allocation.ts`(配分結果の性能計測。別目的)は本スクリプトで置き換えない
  *   (両者は併存する)。
  *
- * ## 入力の作り方(production 到達可能域を模す)
- * `scorer/prior.ts` の [minPrior=0.02, maxPrior=0.95] と `analyzer/clip-variants.ts` の
- * CLIP_VARIANTS(既定±0.10・wide15±0.15)を組み合わせ、決定的な疑似乱数(LCG。外部ライブラリ
- * 不使用)で 18頭・複勝人数3 のレースを大量に生成する。各馬の prior を [0.02,0.95] から一様に
- * 引き、それぞれ ±maxAdjust の範囲でさらに一様乱数を加えて adjustedProb(=placeProb)とする
- * (p=0/p=1の境界にも実際に到達する。CLIP_VARIANTSのmaxAdjust・prior.tsのminPrior/maxPrior
- * どちらも実装から値を読み込み、転記しない)。
+ * ## 入力の作り方(production 到達可能域を模す。要修正5で是正)
+ * `scorer/prior.ts` の `computeFieldPriors`(:246-297)と同じ「クランプ → Σを
+ * min(targetPlaceCount, 頭数) へ一律スケールで正規化(逸脱が normalizeTolerance を超えるときのみ)
+ * → 再クランプ」という順序を、本スクリプトの `computeNormalizedRawPriors` として再現する
+ * (`computeFieldPriors` 自体は `DerivedRaceFeature`/`TodayRaceConditions` 等の重い依存を要求し、
+ * 過去走を空にすると全馬同一の退化した prior になってしまうため、正規化アルゴリズムだけを
+ * ミラーする設計にした。定数〈minPrior/maxPrior/targetPlaceCount/normalizeTolerance〉は
+ * `DEFAULT_SCORER_CONFIG.prior` から直接読み込み、二重定義しない)。
+ *
+ * 是正前(#77初回実装)は各馬の placeProb を `[minPrior,maxPrior]` から独立一様乱色で生成しており、
+ * Σが正規化されないまま `avgSumP≈8.8`(目標3の約3倍)という production では起こらない入力で
+ * 計測していた(code-reviewerの指摘・メインの実物検算で判明)。是正後は正規化により
+ * Σprior が概ね `min(3,頭数)` に寄るため、既定(±0.10)なら Σp∈[3-1.8,3+1.8]=[1.2,4.8]
+ * 相当の範囲に収まる(boss 着手前ゲート第2回の実測と算術的に整合する)。
+ *
+ * `analyzer/clip-variants.ts` の CLIP_VARIANTS(既定±0.10・wide15±0.15)と組み合わせ、
+ * 決定的な疑似乱数(LCG。外部ライブラリ不使用)で 18頭・複勝人数3 のレースを大量に生成する。
+ * 正規化後の prior に対して ±maxAdjust の範囲でさらに一様乱数を加えて adjustedProb
+ * (=placeProb)とする(p=0/p=1の境界にも実際に到達する)。
  *
  * ## 使い方
  *   pnpm tsx scripts/bench-joint-model.ts
  *
  * 出力される ms 値は本スクリプトの実行結果そのものであり、再現手段は「このスクリプトを実行する」
  * こと自体である(JSDocに再現手段のない ms 値を書かない、というAC-9の要求への対応)。
+ * `computePlackettLuceMarginals`(閉形式)と「816通りの分布を毎回構築する素朴な実装」の速度差
+ * (要修正2)も本スクリプトの `runNaiveVsClosedFormComparison` で測り、実測比を出力する。
  */
 
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   PLACKETT_LUCE_MODEL,
   fitPlackettLuceStrengths,
+  computePlackettLuceMarginals,
   MAX_FIT_ITERATIONS,
   FIT_TOLERANCE,
   type JointModelHorse,
@@ -36,6 +51,26 @@ import {
 } from "../packages/core/src/ev/place-joint-model.js";
 import { DEFAULT_SCORER_CONFIG } from "../packages/core/src/scorer/config.js";
 import { CLIP_VARIANTS } from "../packages/core/src/analyzer/clip-variants.js";
+
+/**
+ * `scorer/prior.ts` の `computeFieldPriors` と同じ正規化アルゴリズムを、素の数値配列に対して
+ * 再現する(クランプ → Σが目標から `normalizeTolerance` を超えて逸脱していれば一律スケール →
+ * 再クランプ)。定数は DEFAULT_SCORER_CONFIG.prior から直接読む(二重定義しない)。
+ */
+function computeNormalizedRawPriors(rawPriors: readonly number[]): number[] {
+  const { minPrior, maxPrior, targetPlaceCount, normalizeTolerance } =
+    DEFAULT_SCORER_CONFIG.prior;
+  const fieldSize = rawPriors.length;
+  const target = Math.min(targetPlaceCount, fieldSize);
+  const clamp = (x: number, min: number, max: number) => Math.min(max, Math.max(min, x));
+  const clamped = rawPriors.map((v) => clamp(v, minPrior, maxPrior));
+  const sumClamped = clamped.reduce((a, b) => a + b, 0);
+  let scale = 1;
+  if (sumClamped > 0 && Math.abs(sumClamped - target) / target > normalizeTolerance) {
+    scale = target / sumClamped;
+  }
+  return clamped.map((v) => clamp(v * scale, minPrior, maxPrior));
+}
 
 /** 決定的な疑似乱数生成器(LCG)。 */
 function makeRng(seed: number): () => number {
@@ -51,16 +86,23 @@ function uniform(rand: () => number, min: number, max: number): number {
   return min + rand() * (max - min);
 }
 
-/** production 相当の18頭・複勝人数3のレースを1件生成する(clipVariantで±maxAdjustを切替)。 */
+/**
+ * production 相当の18頭・複勝人数3のレースを1件生成する(clipVariantで±maxAdjustを切替)。
+ * 要修正5: raw prior → computeNormalizedRawPriors(Σを min(3,頭数) へ正規化) → ±maxAdjust の
+ * クリップ、という production と同じ順序(prior.ts のクランプ→正規化→再クランプ、
+ * その後 parse-response.ts の ±maxAdjust クリップ)で生成する。
+ */
 function buildRaceHorses(
   rand: () => number,
   clipVariantId: keyof typeof CLIP_VARIANTS,
 ): JointModelHorse[] {
-  const { minPrior, maxPrior } = DEFAULT_SCORER_CONFIG.prior;
   const maxAdjust = CLIP_VARIANTS[clipVariantId].maxAdjust;
   const n = 18;
-  return Array.from({ length: n }, (_, i) => {
-    const prior = uniform(rand, minPrior, maxPrior);
+  // raw prior(正規化前)は neutralProb(=min(3,n)/n≈0.167) 付近を中心に、補正で大きく
+  // ぶれる実態を模して [0, 1.2] の一様乱数から引く(clamp→正規化で現実的な散らばりになる)。
+  const rawPriors = Array.from({ length: n }, () => uniform(rand, 0, 1.2));
+  const priors = computeNormalizedRawPriors(rawPriors);
+  return priors.map((prior, i) => {
     const lower = Math.max(0, prior - maxAdjust);
     const upper = Math.min(1, prior + maxAdjust);
     const placeProb = uniform(rand, lower, upper);
@@ -259,8 +301,95 @@ function runColdStartMeasurement(): void {
   console.log(`  outcome数=${distribution.length}(C(18,3)=816)`);
 }
 
+/** items(添字配列)からk個を選ぶ組合せを列挙する(小さいkのみを想定)。 */
+function combinationsOf(items: readonly number[], k: number): number[][] {
+  const results: number[][] = [];
+  const current: number[] = [];
+  const backtrack = (start: number): void => {
+    if (current.length === k) {
+      results.push([...current]);
+      return;
+    }
+    for (let i = start; i < items.length; i++) {
+      current.push(items[i]!);
+      backtrack(i + 1);
+      current.pop();
+    }
+  };
+  backtrack(0);
+  return results;
+}
+
+/** 配列の順列を全列挙する(小さい配列のみを想定)。 */
+function permutationsOf(items: readonly number[]): number[][] {
+  if (items.length <= 1) return [items.slice()];
+  const results: number[][] = [];
+  for (let i = 0; i < items.length; i++) {
+    const rest = [...items.slice(0, i), ...items.slice(i + 1)];
+    for (const p of permutationsOf(rest)) {
+      results.push([items[i]!, ...p]);
+    }
+  }
+  return results;
+}
+
+/**
+ * 「816通りの分布を毎回構築する素朴な実装」で周辺確率を計算する(比較用。本番コードではない)。
+ * 各組合せSについてk!通りの並び順の和で確率を求め、馬ごとに含まれる組合せの確率を合算する。
+ */
+function naiveMarginalsViaFullEnumeration(theta: readonly number[], k: number): number[] {
+  const n = theta.length;
+  const Theta = theta.reduce((a, b) => a + b, 0);
+  const indices = theta.map((_, i) => i);
+  const marginals = new Array(n).fill(0);
+  for (const combo of combinationsOf(indices, k)) {
+    let comboProb = 0;
+    for (const perm of permutationsOf(combo)) {
+      let denom = Theta;
+      let prob = 1;
+      for (const idx of perm) {
+        prob *= theta[idx]! / denom;
+        denom -= theta[idx]!;
+      }
+      comboProb += prob;
+    }
+    for (const idx of combo) marginals[idx] += comboProb;
+  }
+  return marginals;
+}
+
+/**
+ * 要修正2: 「816通りの分布を毎回構築する素朴な実装」と閉形式(computePlackettLuceMarginals)の
+ * 速度差を実測する(反復フィットのループ内で毎回呼ばれる想定を模し、複数回呼んだ平均で比較する)。
+ */
+function runNaiveVsClosedFormComparison(): void {
+  console.log("\n=== 要修正2: 閉形式 vs 素朴な実装(816通り毎回構築)の速度差実測 ===");
+  const n = 18;
+  const theta = Array.from({ length: n }, (_, i) => 0.3 + (i % 7) * 0.4);
+  const k = 3;
+  const repeats = 50;
+
+  // ウォームアップ。
+  for (let i = 0; i < 10; i++) {
+    computePlackettLuceMarginals(theta, k);
+    naiveMarginalsViaFullEnumeration(theta, k);
+  }
+
+  const t0 = performance.now();
+  for (let i = 0; i < repeats; i++) computePlackettLuceMarginals(theta, k);
+  const t1 = performance.now();
+  for (let i = 0; i < repeats; i++) naiveMarginalsViaFullEnumeration(theta, k);
+  const t2 = performance.now();
+
+  const closedFormMs = (t1 - t0) / repeats;
+  const naiveMs = (t2 - t1) / repeats;
+  console.log(`  閉形式: ${closedFormMs.toFixed(4)}ms/回 / 素朴な実装: ${naiveMs.toFixed(4)}ms/回`);
+  console.log(`  速度比(素朴/閉形式): ${(naiveMs / closedFormMs).toFixed(1)}倍`);
+}
+
 console.log(`MAX_FIT_ITERATIONS=${MAX_FIT_ITERATIONS} / FIT_TOLERANCE=${FIT_TOLERANCE}`);
 runColdStartMeasurement();
 runSingleShotPerformanceCheck();
+runNaiveVsClosedFormComparison();
 runModelLayer("default", 200);
 runModelLayer("wide15", 200);

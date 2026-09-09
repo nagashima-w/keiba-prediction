@@ -192,6 +192,16 @@ function buildOutcomesFromFullTheta(
     const comboSet = new Set(combo);
     const containsAllFixed = [...fixedSet].every((idx) => comboSet.has(idx));
     const excludesAllZero = [...zeroSet].every((idx) => !comboSet.has(idx));
+    // 【提案A・レビューで記録】この2条件のANDをテストで「常にtrue」に変異させても、
+    // 実測では誤った非ゼロ確率は生じない(構造的にfail-safeになっている。対応しない判断)。
+    // 理由: containsAllFixed=trueへの変異が実際に効くのは「comboがfixedSetを全て含まない」
+    // 場合だが、そのときも freePart(=combo−fixedSet)のサイズが kPrime と一致しない
+    // (fixedSetの一部しか除けないため freePart が大きすぎる)ことが多く、
+    // probByComboKey のキー(kPrime個の添字の組)に一致しないため確率は0のまま拾われる。
+    // 逆にexcludesAllZero=trueへの変異でzeroSetを含むcomboを通しても、freePartにzeroの
+    // 添字がそのまま残り、freeIndices由来のkeyと一致しないため同様に0のまま拾われる。
+    // つまり「キー長・キーの中身の不一致」が二重の安全網になっており、この2フラグ自体は
+    // 現状のテストでは変異検出力がない(対応しない判断。#77完了報告に記録)。
     let probability = 0;
     if (containsAllFixed && excludesAllZero) {
       const freePart = combo.filter((idx) => !fixedSet.has(idx));

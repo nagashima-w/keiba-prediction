@@ -103,8 +103,10 @@ describe("computePlackettLuceMarginals(θからの周辺確率の閉形式)", ()
         it(`${name}, k=${k}`, () => {
           const closedForm = computePlackettLuceMarginals(theta, k);
           const brute = bruteForceMarginals(theta, k);
-          // θの動的レンジが1e7に達するため、許容誤差はゆるめ(1e-6)にリテラルで固定する
-          // (★2の桁落ち表: θ比1e9で残差下限2.2e-7。1e7ならさらに小さい誤差で収まる想定)。
+          // k<=3(production到達域)では、θの動的レンジが1e7程度でも誤差は1e-14オーダーに
+          // 留まることを自分で測定済み(下の「θ比1e9・k<=3」テストで別途固定)。ここでは
+          // 複数の異なるθ配置(単調増加・非単調・小数含み等)を広く1e-6という十分緩い許容誤差で
+          // まとめて検算する(個々のfixtureの厳密な桁を主張する意図ではない)。
           for (let i = 0; i < n; i++) {
             expect(Math.abs(closedForm[i]! - brute[i]!)).toBeLessThan(1e-6);
           }
@@ -157,11 +159,16 @@ describe("computePlackettLuceMarginals(θからの周辺確率の閉形式)", ()
     }
   });
 
-  describe("桁落ちの上限(θの動的レンジと誤差の関係。テストで固定)", () => {
+  describe("桁落ちの上限(θの動的レンジと誤差の関係。テストで固定。要修正3で追加)", () => {
     // n=6,k=3で θ_max/θ_min を変えたときの、ブルートフォースとの最大絶対誤差を固定する。
+    // 要修正3: production が唯一使うk<=3では、θ比が1e9・1e12に達しても誤差は1e-14
+    // オーダーに留まる(自分の実装で実測)。FIT_TOLERANCE=1e-6の根拠は「閉形式の桁落ち」
+    // ではなく反復更新の収束速度であることの裏付けになる(FIT_TOLERANCEのJSDoc参照)。
     const cases: Array<{ name: string; ratio: number; maxError: number }> = [
       { name: "θ比1e3", ratio: 1e3, maxError: 1e-9 },
       { name: "θ比1e6", ratio: 1e6, maxError: 1e-6 },
+      { name: "θ比1e9(k<=3ではk=5と違い誤差は極小)", ratio: 1e9, maxError: 1e-13 },
+      { name: "θ比1e12(k<=3ではさらに動的レンジを広げても誤差は極小)", ratio: 1e12, maxError: 1e-13 },
     ];
     for (const { name, ratio, maxError } of cases) {
       it(name, () => {
@@ -322,11 +329,14 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
     });
 
     it("p=1の馬のθは厳密にInfinity", () => {
+      // Σp=1+0.4+0.3+0.2+0.1=2=kちょうどなのでrescaleApplied=false・固定は入力のp=1由来の1頭のみ
+      // (要修正7の指摘を受け、他のテストと同様に述語検査ではなく厳密値で固定する)。
       const result = fitPlackettLuceStrengths(horses([1, 0.4, 0.3, 0.2, 0.1]), 2);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.theta[0]).toBe(Number.POSITIVE_INFINITY);
-        expect(result.degenerateFixedCount).toBeGreaterThanOrEqual(1);
+        expect(result.rescaleApplied).toBe(false);
+        expect(result.degenerateFixedCount).toBe(1);
       }
     });
   });
@@ -341,8 +351,11 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.rescaleApplied).toBe(true);
-        expect(result.rescaleInducedFixedCount).toBeGreaterThanOrEqual(1);
+        // 自分の実装で実測した厳密値(要修正7と同型の指摘への対応。述語検査ではなく値で固定する)。
+        expect(result.rescaleFactor).toBeCloseTo(1.724137931034482, 9);
+        expect(result.rescaleInducedFixedCount).toBe(1);
         expect(result.degenerateZeroCount).toBe(0);
+        expect(result.degenerateFixedCount).toBe(1);
       }
     });
 
@@ -354,7 +367,7 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.rescaleApplied).toBe(false);
-        expect(result.degenerateZeroCount).toBeGreaterThanOrEqual(1);
+        expect(result.degenerateZeroCount).toBe(1);
       }
     });
   });
@@ -370,21 +383,23 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
     });
 
     it("Σp<k: rescaleAppliedがtrueでrescaleFactorが値として固定される(>1)", () => {
+      // Σp=1.2、クランプが発生しないためλ=k/Σp=3/1.2=2.5を厳密に計算できる(要修正7)。
       const result = fitPlackettLuceStrengths(horses([0.3, 0.3, 0.3, 0.3]), 3);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.rescaleApplied).toBe(true);
-        expect(result.rescaleFactor).toBeGreaterThan(1);
+        expect(result.rescaleFactor).toBeCloseTo(2.5, 9);
       }
     });
 
     it("Σp>k: rescaleAppliedがtrueでrescaleFactorが値として固定される(<1)", () => {
       // Σ=3.7(>k=3を浮動小数の丸め誤差なく明確に上回る値にする)。
+      // クランプが発生しないためλ=k/Σp=3/3.7を厳密に計算できる(要修正7)。
       const result = fitPlackettLuceStrengths(horses([0.8, 0.8, 0.8, 0.7, 0.6]), 3);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.rescaleApplied).toBe(true);
-        expect(result.rescaleFactor).toBeLessThan(1);
+        expect(result.rescaleFactor).toBeCloseTo(3 / 3.7, 9);
       }
     });
   });
@@ -469,17 +484,14 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
     });
   });
 
-  describe("反復上限・許容誤差の公開定数(#55: リテラル併置)", () => {
-    it("MAX_FIT_ITERATIONSが正の整数としてリテラルで固定されている", () => {
-      expect(MAX_FIT_ITERATIONS).toBe(MAX_FIT_ITERATIONS);
-      expect(typeof MAX_FIT_ITERATIONS).toBe("number");
-      expect(Number.isInteger(MAX_FIT_ITERATIONS)).toBe(true);
-      expect(MAX_FIT_ITERATIONS).toBeGreaterThan(0);
+  describe("反復上限・許容誤差の公開定数(#55: リテラル併置。要修正1で是正)", () => {
+    it("MAX_FIT_ITERATIONSが2000にリテラルで固定されている", () => {
+      // 変異(2000→5等)を検出できるよう、実装からimportした値と別にリテラル2000を併記する。
+      expect(MAX_FIT_ITERATIONS).toBe(2000);
     });
 
-    it("FIT_TOLERANCEが正の数としてリテラルで固定されている", () => {
-      expect(typeof FIT_TOLERANCE).toBe("number");
-      expect(FIT_TOLERANCE).toBeGreaterThan(0);
+    it("FIT_TOLERANCEが1e-6にリテラルで固定されている", () => {
+      expect(FIT_TOLERANCE).toBe(1e-6);
     });
   });
 });

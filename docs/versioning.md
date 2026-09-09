@@ -910,8 +910,10 @@ plackett-luce-strength.ts`・`plackett-luce-model.ts`・`plackett-luce-win-prob.
 DB スキーマにも触れていない。
 
 **AC-10(非破壊)の例外として扱ったファイル**: `packages/app/test/version-policy.test.ts` は
-`packages/*/test/**` に一致するが、版数運用のチェックリスト(本書)が要求する版数リテラルの
-更新(`EXPECTED_APP_VERSION` とそれに対応する it 名)のみが差分であり、既存の判定ロジック・
+`packages/*/test/**` に一致するが、差分は**版数運用のチェックリスト(本書)が要求する
+版数リテラル(`EXPECTED_APP_VERSION`)・it 名・it 名直後の版数履歴コメント3行(「#74 が
+1.6.3、#76 が 1.6.4。本回は…」の記帳)のみ**であり(code-reviewerの指摘で「it名のみ」という
+記述が実差分〈コメント3行も含む〉と食い違っていたことが判明し是正した)、既存の判定ロジック・
 他のテストケースには一切触れていない。
 
 よって 1.6.4 → **1.6.5**(patch)が妥当と判断した。
