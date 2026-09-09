@@ -27,8 +27,29 @@
  *
  * `analyzer/clip-variants.ts` の CLIP_VARIANTS(既定±0.10・wide15±0.15)と組み合わせ、
  * 決定的な疑似乱数(LCG。外部ライブラリ不使用)で 18頭・複勝人数3 のレースを大量に生成する。
- * 正規化後の prior に対して ±maxAdjust の範囲でさらに一様乱数を加えて adjustedProb
- * (=placeProb)とする(p=0/p=1の境界にも実際に到達する)。
+ *
+ * ## LLM応答のクリップ再現(要修正3で追加)
+ * `analyzer/parse-response.ts`(:294-309)は、LLMの生の応答値が窓 `[lower,upper]` の外に
+ * あれば**値そのものではなく窓の端点にスナップ**する。是正前(#77初回実装)は LLM 応答を
+ * 窓の内側 `[lower,upper]` から一様乱数で引いていたため、端点(p=0/p=1)に一致する確率が
+ * 測度0で、この差分の中核である縮約経路(degenerateZeroCount 等)を bench が一度も
+ * 通っていなかった(code-reviewer・メインの指摘)。是正後は LLM 応答を窓よりずっと広い
+ * 範囲(`prior±0.6`。`[0,1]`の外にもはみ出す)から引き、`applyProductionClip` で実際に
+ * クリップする。raw prior も「大半0〜0.25・5%が0.9〜0.99の突出馬」という混合分布に変更した
+ * (独立一様分布1本だと正規化の一律スケールが強く効きすぎ、突出馬がいても maxPrior=0.95 に
+ * 届かずp=1に構造的に到達できなかったため)。
+ *
+ * **この是正により明らかになったこと(#78の材料)**: p=0を含むレースは98.5〜100%、p=1を
+ * 含むレースは12〜14%に達し(自分の実測。下記「使い方」で再現可能)、
+ * `degenerateFixedCount`/`rescaleInducedFixedCount` も平均0より大きくなる(縮約経路を
+ * 実際に通るようになった)。一方で `not-converged` も 0%ではなくなり(default 0.5%程度)、
+ * **フィット+分布生成のms分布は中央値こそ2〜3ms台に留まるが、95%点は8〜12ms、最悪値は
+ * p=1近傍の内点ターゲットを含むレースで30〜80ms台に達することがある**(θフィット反復回数が
+ * 数百〜1000超になるケースが実在する)。AC-9本体の「18頭・k=3で5ms未満」の主張は
+ * `runSingleShotPerformanceCheck`(Σp=kちょうどの単発計測。反復5回・1.3〜1.4ms程度)で
+ * 固定しているものであり、この現実的な入力分布でのモデル層の統計はそれとは別の情報として
+ * 報告する(#78が既定切替を検討する際、near-boundaryな内点ターゲットの反復コストを
+ * 考慮材料に含めるための実測)。
  *
  * ## 使い方
  *   pnpm tsx scripts/bench-joint-model.ts
@@ -87,27 +108,60 @@ function uniform(rand: () => number, min: number, max: number): number {
 }
 
 /**
+ * `analyzer/parse-response.ts`(:294-309)と同じクリップ規則を再現する。
+ * LLMの生の応答値(value)が窓[lower,upper]の外にあれば、値そのものではなく**窓の端点に
+ * スナップ**する(value>upper+EPSならupper、value<lower-EPSならlower)。lowerはprior<=maxAdjust
+ * のとき厳密に0、upperはprior>=1-maxAdjustのとき厳密に1になるため、**窓の外に答えるLLM**を
+ * 再現して初めてp=0/p=1に実際に到達する(要修正3で追加。是正前はvalueを窓の内側
+ * [lower,upper]からしか引いておらず、端点に一致する確率が測度0だった)。
+ */
+const CLIP_EPS = 1e-9; // parse-response.ts の EPS(非公開定数)と同じ値を再現する。
+function applyProductionClip(
+  prior: number,
+  value: number,
+  maxAdjust: number,
+): { adjusted: number; clipped: boolean } {
+  const lower = Math.max(0, prior - maxAdjust);
+  const upper = Math.min(1, prior + maxAdjust);
+  if (value > upper + CLIP_EPS) return { adjusted: upper, clipped: true };
+  if (value < lower - CLIP_EPS) return { adjusted: lower, clipped: true };
+  return { adjusted: Math.min(upper, Math.max(lower, value)), clipped: false };
+}
+
+/**
  * production 相当の18頭・複勝人数3のレースを1件生成する(clipVariantで±maxAdjustを切替)。
  * 要修正5: raw prior → computeNormalizedRawPriors(Σを min(3,頭数) へ正規化) → ±maxAdjust の
  * クリップ、という production と同じ順序(prior.ts のクランプ→正規化→再クランプ、
  * その後 parse-response.ts の ±maxAdjust クリップ)で生成する。
+ * 要修正3: LLMの生の応答値(value)は、窓[lower,upper]よりずっと広い範囲(prior±0.6。
+ * [0,1]の外にはみ出すことも許す)から引き、`applyProductionClip` で実際にクリップする。
  */
 function buildRaceHorses(
   rand: () => number,
   clipVariantId: keyof typeof CLIP_VARIANTS,
-): JointModelHorse[] {
+): { horses: JointModelHorse[]; clippedToZeroCount: number; clippedToOneCount: number } {
   const maxAdjust = CLIP_VARIANTS[clipVariantId].maxAdjust;
   const n = 18;
-  // raw prior(正規化前)は neutralProb(=min(3,n)/n≈0.167) 付近を中心に、補正で大きく
-  // ぶれる実態を模して [0, 1.2] の一様乱数から引く(clamp→正規化で現実的な散らばりになる)。
-  const rawPriors = Array.from({ length: n }, () => uniform(rand, 0, 1.2));
+  // raw prior(正規化前)は「大半は0〜0.25の一般馬・5%は0.9〜0.99の突出馬(混合分布)」から
+  // 引く(独立一様分布1本だと正規化のΣ合わせが強く効きすぎ、突出馬がいてもscaleで
+  // maxPrior=0.95に届かなくなり、p=1に構造的に到達できないことが判明した。要修正3で
+  // 訂正。この混合なら実測で約28.6%のレースで最大priorが0.9以上に達する)。
+  const rawPriors = Array.from({ length: n }, () =>
+    rand() < 0.05 ? uniform(rand, 0.9, 0.99) : uniform(rand, 0, 0.25),
+  );
   const priors = computeNormalizedRawPriors(rawPriors);
-  return priors.map((prior, i) => {
-    const lower = Math.max(0, prior - maxAdjust);
-    const upper = Math.min(1, prior + maxAdjust);
-    const placeProb = uniform(rand, lower, upper);
-    return { umaban: i + 1, placeProb };
+  let clippedToZeroCount = 0;
+  let clippedToOneCount = 0;
+  const horses = priors.map((prior, i) => {
+    // LLMの生の応答値: 窓幅(2*maxAdjust)よりずっと広い±0.6の一様乱数で、[0,1]の外にも
+    // はみ出しうる(実際のLLMが窓の外に答えるケースを模す)。
+    const value = uniform(rand, prior - 0.6, prior + 0.6);
+    const { adjusted, clipped } = applyProductionClip(prior, value, maxAdjust);
+    if (clipped && adjusted === 0) clippedToZeroCount++;
+    if (clipped && adjusted === 1) clippedToOneCount++;
+    return { umaban: i + 1, placeProb: adjusted };
   });
+  return { horses, clippedToZeroCount, clippedToOneCount };
 }
 
 /** 分布からの周辺確率(馬iを含むoutcomeの確率合計)。 */
@@ -157,7 +211,7 @@ function runModelLayer(clipVariantId: keyof typeof CLIP_VARIANTS, sampleCount: n
   // ため、別の乱数系列で20件のウォームアップを先に走らせる。計測本体の乱数系列には影響しない)。
   const warmupRand = makeRng(clipVariantId === "default" ? 999001 : 999002);
   for (let i = 0; i < 20; i++) {
-    const h = buildRaceHorses(warmupRand, clipVariantId);
+    const { horses: h } = buildRaceHorses(warmupRand, clipVariantId);
     const f = fitPlackettLuceStrengths(h, 3);
     if (f.ok) PLACKETT_LUCE_MODEL.buildDistribution(h, 3);
   }
@@ -173,20 +227,41 @@ function runModelLayer(clipVariantId: keyof typeof CLIP_VARIANTS, sampleCount: n
   let otherFailureCount = 0;
   let plWorseCount = 0;
   let successCount = 0;
+  // 要修正3: 入力クラスの統計(bench が「窓の外に答えるLLM」を実際に生成しているかを示す)。
+  let racesWithZeroCount = 0;
+  let racesWithOneCount = 0;
+  let totalClippedToZero = 0;
+  let totalClippedToOne = 0;
+  const degenerateZeroCounts: number[] = [];
+  const degenerateFixedCounts: number[] = [];
+  const rescaleInducedFixedCounts: number[] = [];
+  let notConvergedWithZeroOrOne = 0;
 
   for (let i = 0; i < sampleCount; i++) {
-    const horses = buildRaceHorses(rand, clipVariantId);
+    const { horses, clippedToZeroCount, clippedToOneCount } = buildRaceHorses(rand, clipVariantId);
     const k = 3;
+    const hasZero = horses.some((h) => h.placeProb === 0);
+    const hasOne = horses.some((h) => h.placeProb === 1);
+    if (hasZero) racesWithZeroCount++;
+    if (hasOne) racesWithOneCount++;
+    totalClippedToZero += clippedToZeroCount;
+    totalClippedToOne += clippedToOneCount;
 
     const t0 = performance.now();
     const fit = fitPlackettLuceStrengths(horses, k);
     const t1 = performance.now();
 
     if (!fit.ok) {
-      if (fit.reason === "not-converged") notConvergedCount++;
-      else otherFailureCount++;
+      if (fit.reason === "not-converged") {
+        notConvergedCount++;
+        if (hasZero || hasOne) notConvergedWithZeroOrOne++;
+      } else otherFailureCount++;
       continue;
     }
+
+    degenerateZeroCounts.push(fit.degenerateZeroCount);
+    degenerateFixedCounts.push(fit.degenerateFixedCount);
+    rescaleInducedFixedCounts.push(fit.rescaleInducedFixedCount);
 
     const t2 = performance.now();
     const plDistribution = PLACKETT_LUCE_MODEL.buildDistribution(horses, k);
@@ -214,9 +289,28 @@ function runModelLayer(clipVariantId: keyof typeof CLIP_VARIANTS, sampleCount: n
 
   console.log(`  成功: ${successCount}/${sampleCount}`);
   console.log(
-    `  not-converged: ${notConvergedCount}/${sampleCount}(${((notConvergedCount / sampleCount) * 100).toFixed(1)}%)`,
+    `  not-converged: ${notConvergedCount}/${sampleCount}(${((notConvergedCount / sampleCount) * 100).toFixed(1)}%)` +
+      `(うちp=0/p=1を含むレース: ${notConvergedWithZeroOrOne}件)`,
   );
   console.log(`  その他の失敗(invalid-probability等): ${otherFailureCount}/${sampleCount}`);
+  // 要修正3: この bench がどの入力クラスを実際に生成しているかを統計で示す
+  // (p=0/p=1に到達しない「窓の内側だけに答えるLLM」の世界で測っていないことの根拠)。
+  console.log(
+    `  p=0を含むレース: ${racesWithZeroCount}/${sampleCount}(${((racesWithZeroCount / sampleCount) * 100).toFixed(1)}%)` +
+      ` / p=1を含むレース: ${racesWithOneCount}/${sampleCount}(${((racesWithOneCount / sampleCount) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  クリップで0に丸められた頭数の合計: ${totalClippedToZero} / 1に丸められた頭数の合計: ${totalClippedToOne}`,
+  );
+  if (degenerateZeroCounts.length > 0) {
+    const avg = (arr: readonly number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    console.log(
+      `  縮退頭数の平均(ok:trueの${degenerateZeroCounts.length}件中): ` +
+        `degenerateZeroCount=${avg(degenerateZeroCounts).toFixed(3)} / ` +
+        `degenerateFixedCount=${avg(degenerateFixedCounts).toFixed(3)} / ` +
+        `rescaleInducedFixedCount=${avg(rescaleInducedFixedCounts).toFixed(3)}`,
+    );
+  }
   if (successCount > 0) {
     console.log(
       `  フィット+分布生成 合計ms: 中央値=${percentile(totalMs, 0.5).toFixed(3)} / 95%点=${percentile(totalMs, 0.95).toFixed(3)} / 最悪=${totalMs[totalMs.length - 1]!.toFixed(3)}`,

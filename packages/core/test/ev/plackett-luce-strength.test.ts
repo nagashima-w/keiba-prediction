@@ -8,6 +8,7 @@ import {
   type PlackettLuceFitFailureReason,
   type PlackettLuceFitSuccess,
 } from "../../src/ev/plackett-luce-strength.js";
+import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
 import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
 
 /** 出走馬を umaban 昇順で組み立てる補助関数。 */
@@ -404,24 +405,65 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
     });
   });
 
-  describe("p=1をm頭含む入力は(n-m,k-m)の縮約問題と一致する(ブルートフォース照合)", () => {
-    it("5頭中2頭がp=1・k=3 -> 縮約後(3頭,k=1)の分布とブルートフォースで一致", () => {
-      const probs = [1, 1, 0.5, 0.3, 0.2];
-      const k = 3;
-      const result = fitPlackettLuceStrengths(horses(probs), k);
+  describe("p=1をm頭含む入力は(n-m,k-m)の縮約問題と一致する(ブルートフォース照合。重大1で是正)", () => {
+    /**
+     * 標準のPlackett-Luce厳密式(k!通りの並び順の和)でP(S=上位k集合)を計算する
+     * ブルートフォース(このテストファイル専用の検算実装。本体の実装からは独立)。
+     */
+    function bruteForceSetProbability(theta: readonly number[], combo: readonly number[]): number {
+      const Theta = theta.reduce((a, b) => a + b, 0);
+      let total = 0;
+      for (const perm of permutations(combo)) {
+        let denom = Theta;
+        let prob = 1;
+        for (const idx of perm) {
+          prob *= theta[idx]! / denom;
+          denom -= theta[idx]!;
+        }
+        total += prob;
+      }
+      return total;
+    }
+
+    it("6頭中1頭がp=1・k=3 -> 縮約後(5頭,k'=2)がブルートフォース(固定馬をθ=巨大値に置換したフル6頭モデル)と一致する", () => {
+      // reducedPlaceCount=1(前回の欠陥テスト)はΣF_i=k'=1の恒等式が効いて何でも通ってしまう
+      // ため、k'>=2になる縮約ケースを使う(boss指摘)。
+      const probs = [1, 0.6, 0.5, 0.4, 0.3, 0.2];
+      const sum = probs.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(3, 9); // 前提: Σp=k=3ちょうど(再スケールなしの素直なケース)。
+
+      const result = fitPlackettLuceStrengths(horses(probs), 3);
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      expect(result.degenerateFixedCount).toBe(2);
-      expect(result.reducedPlaceCount).toBe(1);
-      expect(result.reducedHorseCount).toBe(3);
-      // 縮約後3頭(theta[2],theta[3],theta[4])のk'=1周辺確率は、フルセット(5頭,k=3)の
-      // 「固定2頭を除いた残り3頭のうち誰が3人目に選ばれるか」の確率と一致するはず。
-      const freeTheta = [result.theta[2]!, result.theta[3]!, result.theta[4]!];
-      const reducedMarginals = computePlackettLuceMarginals(freeTheta, 1);
-      // ブルートフォース: フルthetaで「固定2頭+自由1頭」の周辺確率を求め、固定2頭を除いた分だけ
-      // 自由3頭で正規化(このケースはreducedPlaceCount=1なので、reducedMarginalsの合計は1)。
-      const sum = reducedMarginals.reduce((a, b) => a + b, 0);
-      expect(Math.abs(sum - 1)).toBeLessThan(1e-9);
+      expect(result.degenerateFixedCount).toBe(1);
+      expect(result.reducedPlaceCount).toBe(2); // 前提: k'>=2の縮約ケースであることを固定する。
+      expect(result.reducedHorseCount).toBe(5);
+
+      // 固定馬(添字0)をθ=M(巨大値)に置き換えたフル6頭のθで、標準のPL式によるブルートフォースを
+      // 行う。M→∞の極限でPLACKETT_LUCE_MODELの縮約結果と一致するはず(自分で実測: M=1e6で
+      // 最大誤差1.3e-11。M=1e4/1e8でも同オーダー。十分な余裕を持たせ1e-6を閾値にする)。
+      const M = 1_000_000;
+      const freeTheta = result.theta.slice(1) as number[];
+      const fullTheta = [M, ...freeTheta];
+
+      const modelDistribution = PLACKETT_LUCE_MODEL.buildDistribution(horses(probs), 3);
+      const modelByKey = new Map(modelDistribution.map((o) => [o.placed.join(","), o.probability]));
+
+      // 馬0(umaban=1、固定馬)を含むC(5,2)=10通りの組合せすべてを検算する。
+      const otherIndices = [1, 2, 3, 4, 5];
+      const combosOfOthers = combinations(otherIndices, 2);
+      expect(combosOfOthers.length).toBe(10); // 前提: C(5,2)=10通りであることを固定する。
+
+      let maxDiff = 0;
+      for (const combo of combosOfOthers) {
+        const fullCombo = [0, ...combo];
+        const bfProb = bruteForceSetProbability(fullTheta, fullCombo);
+        const umabans = fullCombo.map((idx) => idx + 1).sort((a, b) => a - b);
+        const modelProb = modelByKey.get(umabans.join(","));
+        expect(modelProb).toBeDefined();
+        maxDiff = Math.max(maxDiff, Math.abs(bfProb - modelProb!));
+      }
+      expect(maxDiff).toBeLessThan(1e-6);
     });
   });
 
@@ -432,14 +474,24 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
       if (result.ok) expect(result.theta.length).toBe(4);
     });
 
-    it("スケール規約: 自由集合のΣθ = reducedHorseCount(値として固定)", () => {
-      const result = fitPlackettLuceStrengths(horses([0.3, 0.3, 0.3, 0.3]), 2);
+    it("スケール規約: 自由集合のΣθ = reducedHorseCount(値として固定。重大2で是正)", () => {
+      // 対称フィクスチャ([0.3,0.3,0.3,0.3])は初期値q/(1-q)の時点で既にΣθ=n'が成立し、
+      // scale=1(no-op)になってしまい M6(scale=1への変異)を検出できなかった(boss実測)。
+      // 非対称フィクスチャに変え、reducedHorseCount をリテラルで別掲(自己参照を避ける)、
+      // さらにθの各要素も自分の実測値でリテラル固定する。
+      const result = fitPlackettLuceStrengths(horses([0.5, 0.3, 0.2, 0.4]), 2);
       expect(result.ok).toBe(true);
       if (result.ok) {
+        expect(result.reducedHorseCount).toBe(4); // リテラル(resultの他フィールドと比較しない)。
         const freeSum = result.theta
           .filter((t) => Number.isFinite(t) && t > 0)
           .reduce((a, b) => a + b, 0);
-        expect(freeSum).toBeCloseTo(result.reducedHorseCount, 6);
+        expect(freeSum).toBeCloseTo(4, 6); // リテラル4(reducedHorseCountを介さない)。
+        // θの各要素も自分の実測値でリテラル固定する(M6=scaleを1に変異させると全て変わる)。
+        expect(result.theta[0]).toBeCloseTo(1.617521102703636, 6);
+        expect(result.theta[1]).toBeCloseTo(0.7778448169590897, 6);
+        expect(result.theta[2]).toBeCloseTo(0.49609338581274703, 6);
+        expect(result.theta[3]).toBeCloseTo(1.108540694524527, 6);
       }
     });
 
@@ -462,6 +514,42 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
       for (let i = 0; i < theta.length; i++) {
         expect(Math.abs(f1[i]! - f2[i]!)).toBeLessThan(1e-9);
       }
+    });
+  });
+
+  describe("収束後の再検算ガード(要修正1・M5対策)", () => {
+    it("residualMaxは、返されたthetaから自分で再計算した残差と一致する(生のループ内残差ではない。M5検出)", () => {
+      // M5(residualMax: finalResidual → fit.residualMaxに変異)を検出するテスト。
+      // 一般のフィクスチャでは「正規化前(ループ内)の残差」と「正規化後(返り値)の残差」の差が
+      // 1e-12〜1e-16程度と極小で、緩い許容誤差では変異を検出できない(自分で実測して確認済み)。
+      // k(=reducedPlaceCount)をnに近づけて桁落ちを誘発すると差が測定可能な大きさ(約2.2e-10)に
+      // なることを実測した(このテスト専用のフィクスチャ。production の k<=3 制約とは無関係の
+      // 内部一般性のテスト——fitPlackettLuceStrengths自体はkを汎用に扱う設計のため)。
+      const n = 13;
+      const k = 6; // reducedPlaceCount=6(n=13に対して桁落ちが測定可能になる程度に近い)。
+      const near = 0.9830729289680128;
+      const rest = (k - near) / (n - 1);
+      const probs = [near, ...Array.from({ length: n - 1 }, () => rest)];
+      const sum = probs.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(k, 9); // 前提: Σp=kちょうど(再スケールなし)を固定する。
+
+      const result = fitPlackettLuceStrengths(horses(probs), k);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.rescaleApplied).toBe(false);
+      expect(result.reducedHorseCount).toBe(n); // 前提: 全馬が自由集合であることを固定する。
+
+      // 自由集合のthetaとその目標q(=λ・p=p、クランプなし)を再構成する。
+      const freeTheta = result.theta as number[];
+      const recomputedF = computePlackettLuceMarginals(freeTheta, result.reducedPlaceCount);
+      let recomputedResidual = 0;
+      for (let i = 0; i < probs.length; i++) {
+        recomputedResidual = Math.max(recomputedResidual, Math.abs(recomputedF[i]! - probs[i]!));
+      }
+      // 独立に再計算した残差が result.residualMax と一致すること。このフィクスチャでは
+      // 「正規化前(ループ内)残差」との差が約2.2e-10あるため、1e-11という桁落ち由来の
+      // 誤差より十分小さい許容誤差で、生のループ内残差(M5の変異後の値)との違いを検出できる。
+      expect(Math.abs(result.residualMax - recomputedResidual)).toBeLessThan(1e-11);
     });
   });
 

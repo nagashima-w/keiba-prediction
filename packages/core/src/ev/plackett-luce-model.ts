@@ -194,10 +194,13 @@ function buildOutcomesFromFullTheta(
     const excludesAllZero = [...zeroSet].every((idx) => !comboSet.has(idx));
     // 【提案A・レビューで記録】この2条件のANDをテストで「常にtrue」に変異させても、
     // 実測では誤った非ゼロ確率は生じない(構造的にfail-safeになっている。対応しない判断)。
-    // 理由: containsAllFixed=trueへの変異が実際に効くのは「comboがfixedSetを全て含まない」
-    // 場合だが、そのときも freePart(=combo−fixedSet)のサイズが kPrime と一致しない
-    // (fixedSetの一部しか除けないため freePart が大きすぎる)ことが多く、
-    // probByComboKey のキー(kPrime個の添字の組)に一致しないため確率は0のまま拾われる。
+    // 理由(断定できる。code-reviewer指摘により「ことが多く」という弱い書き方から訂正):
+    // containsAllFixed=trueへの変異が実際に効くのは「comboがfixedSetをf個(f>=1)含まない」
+    // 場合だが、そのとき freePart(=combo−fixedSet)のサイズは必ず kPrime+f(>kPrime)になる
+    // (|freePart|=|combo|-|combo∩fixedSet|=k-(|fixedSet|-f)=kPrime+f。f>=1なので常にkPrimeを
+    // 超える)。probByComboKeyのキーは必ずkPrime個の添字の組であり、freePartのサイズがそれと
+    // 異なる以上、Mapのキーとして一致することは構造的にあり得ない(「多くの場合」ではなく
+    // 「常に」構造的に到達しない)ため確率は0のまま拾われる。
     // 逆にexcludesAllZero=trueへの変異でzeroSetを含むcomboを通しても、freePartにzeroの
     // 添字がそのまま残り、freeIndices由来のkeyと一致しないため同様に0のまま拾われる。
     // つまり「キー長・キーの中身の不一致」が二重の安全網になっており、この2フラグ自体は

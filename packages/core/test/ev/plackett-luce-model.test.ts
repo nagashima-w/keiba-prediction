@@ -277,5 +277,42 @@ describe("PLACKETT_LUCE_MODEL", () => {
       expect(cbDev).toBeCloseTo(0.01077, 5);
       expect(plDev).toBeLessThan(cbDev);
     });
+
+    it("クリップ域(λ・p_max>1で恒等式のminが実際に発動するケース。要修正2で追加)", () => {
+      // 18頭、1頭だけp=0.7・残り17頭で(1.2-0.7)を均等分割。Σp=1.2<k=3で
+      // λ=k/Σp=2.5相当まで拡大されるが、突出した1頭はλ・0.7>1になりclipされる
+      // (=degenerateFixedCount>=1。恒等式のmin(1,...)が実際に効くケースを固定する)。
+      const rest = (1.2 - 0.7) / 17;
+      const probs = [0.7, ...Array.from({ length: 17 }, () => rest)];
+      const sum = probs.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(1.2, 9); // 前提: Σp=1.2<k=3を固定する。
+
+      const hs = horses(probs);
+      const fit = fitPlackettLuceStrengths(hs, 3);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      // 前提: λ・p_max>1でclipが実際に発動していることを固定する(空振り防止)。
+      expect(fit.degenerateFixedCount).toBeGreaterThanOrEqual(1);
+      expect(fit.rescaleFactor * probs[0]!).toBeGreaterThan(1);
+      // 自分の実測値でリテラル固定する。
+      expect(fit.rescaleFactor).toBeCloseTo(4, 6);
+      expect(fit.degenerateFixedCount).toBe(1);
+      expect(fit.rescaleInducedFixedCount).toBe(1);
+
+      const plDistribution = PLACKETT_LUCE_MODEL.buildDistribution(hs, 3);
+      const cbDistribution = CONDITIONAL_BERNOULLI_MODEL.buildDistribution(hs, 3);
+      const plDev = marginalDeviationMax(hs, plDistribution);
+      const cbDev = marginalDeviationMax(hs, cbDistribution);
+      expect(plDev).toBeCloseTo(0.3, 5);
+      expect(cbDev).toBeCloseTo(0.239024, 5);
+
+      // 恒等式(min込み)がこのクリップ域でも成立することを固定する。
+      const lambda = fit.rescaleFactor;
+      let identityDev = 0;
+      for (const h of hs) {
+        identityDev = Math.max(identityDev, Math.abs(Math.min(1, lambda * h.placeProb) - h.placeProb));
+      }
+      expect(Math.abs(plDev - identityDev)).toBeLessThan(1e-4);
+    });
   });
 });
