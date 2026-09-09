@@ -879,6 +879,43 @@ fail-open でスキップされており版数据え置きを検出できてい�
 exe が更新されたという事実だけでは「比較して問題なかった」のか「比較できずに素通りした」のかを
 区別できないため、この確認は省略しない。
 
+## 次の正式版が 1.6.5 である根拠(Issue #77・#20-A での変更)
+
+Issue #77(#20-A)は、Plackett-Luce の潜在強度 θ の推定器(`fitPlackettLuceStrengths`)・
+それを使う `PLACKETT_LUCE_MODEL`(`PlaceJointModel` の新実装)・`θ→1着確率` の純関数
+(`winProbabilitiesFromStrengths`)を追加する変更である(`packages/core/src/ev/
+plackett-luce-strength.ts`・`plackett-luce-model.ts`・`plackett-luce-win-prob.ts` の3ファイル
+新設と、`place-joint-model.ts` からの re-export)。
+
+**patch である根拠**: 区分表の minor は「**利用者から見てできることが増える**」または
+「**分析結果の数値が変わる**」だが、本変更は**どちらにも該当しない**。
+
+- **既定モデルは変えていない**: `bet-allocation.ts`・`combo-bet-allocation.ts` の既定引数は
+  無改変で、両ファイルとも `model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL` のまま
+  (`grep -n "CONDITIONAL_BERNOULLI_MODEL" packages/core/src/ev/bet-allocation.ts
+  packages/core/src/ev/combo-bet-allocation.ts` でデフォルト引数の行が変わっていないことを
+  確認できる)。
+- **`PLACKETT_LUCE_MODEL` の production 呼び出し元はゼロ件**(#20-A 時点。新設したモデルは
+  テスト・ベンチスクリプトからのみ参照される)。よって既存のどのレースの配分結果・EV・
+  回収率も1円たりとも変わらない。
+- **`PlaceJointModel` インターフェース自体は無改変**(`buildDistribution`/`id`/`approximate`
+  のシグネチャに変更なし)。`approximate` フィールドの JSDoc・`docs/current-spec.md` の記述は
+  意味を明確化した(「UIが表記を出し分けるためのフラグ」→「同時分布が入力の周辺確率を再現
+  しないかだけを表すフラグ。予測精度の保証ではない」)が、値そのもの・呼び出し契約は変えていない。
+- **`packages/core/package.json` の `exports` は無改変**(新規ファイルは既存の唯一の公開サブパス
+  `./ev/place-joint-model` から re-export する設計。`git diff --stat -- packages/core/package.json`
+  が空であることで確認できる)。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポート JSON の後方互換に関わる変更が一切ない。
+DB スキーマにも触れていない。
+
+**AC-10(非破壊)の例外として扱ったファイル**: `packages/app/test/version-policy.test.ts` は
+`packages/*/test/**` に一致するが、版数運用のチェックリスト(本書)が要求する版数リテラルの
+更新(`EXPECTED_APP_VERSION` とそれに対応する it 名)のみが差分であり、既存の判定ロジック・
+他のテストケースには一切触れていない。
+
+よって 1.6.4 → **1.6.5**(patch)が妥当と判断した。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

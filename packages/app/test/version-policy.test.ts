@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.6.4";
+const EXPECTED_APP_VERSION = "1.6.5";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,11 +234,12 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.6.4(Issue #76: 買い目の券種を umabans.length からの推定ではなく値として運ぶ)である", () => {
+  it("root と app の version が 1.6.5(Issue #77・#20-A: Plackett-Luceのθ推定器とPLACKETT_LUCE_MODELを追加。既定は不変)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
-    // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2。本回は #74。isUsableOddsの基準を`>0`から
-    // `>=1.0`へ引き上げる不具合修正であり、利用者から見てできることは増えず、コミット済み全
-    // フィクスチャで観測されるオッズ値も一切変わらないため patch(詳細は docs/versioning.md)。
+    // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4。本回は #77(#20-A)。
+    // θ推定器・PLACKETT_LUCE_MODEL・θ→1着確率の純関数を追加するが、既定モデル
+    // (CONDITIONAL_BERNOULLI_MODEL)は変えておらず、本番呼び出し元もゼロ件のため利用者から見て
+    // できることは増えず、分析結果の数値も一切変わらない。よって patch(詳細は docs/versioning.md)。
     // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならない
     // ことを固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);

@@ -16,8 +16,15 @@
  *   - 正確な同時分布(例: Plackett-Luce モデルで着順分布を明示的に生成し、複勝圏内の組合せ確率を
  *     積分する等)は理論的により厳密だが実装・検証コストが高い。ユーザー要望「なる早で厳密に
  *     やりたい」を踏まえ、C-1では本モデルを PlaceJointModel インターフェースの1実装として
- *     切り出すことで、Phase 2 で本ファイルだけを差し替えれば済む設計にした(bet-allocation.ts は
- *     このモデルの実装詳細に一切依存しない)。
+ *     切り出した。
+ *
+ *     **「本ファイルだけを差し替えれば済む」という当初の想定は、既に偽である**(Issue #77・
+ *     #20-A で判明)。`probability-quality-metrics.ts` が `CONDITIONAL_BERNOULLI_MODEL` を
+ *     2箇所で直接 import・呼び出ししており、モデルを差し替えるにはそちらの呼び出し元も
+ *     書き換える必要がある。実際に Plackett-Luce 実装(`plackett-luce-model.ts` の
+ *     `PLACKETT_LUCE_MODEL`)を追加した #20-A の時点でも、`bet-allocation.ts`・
+ *     `combo-bet-allocation.ts` の既定モデルはまだ `CONDITIONAL_BERNOULLI_MODEL` のままで
+ *     あり(#20-B で切替予定)、`PlaceJointModel` インターフェース自体は無改変(受け入れ条件)。
  *
  *   既知の不完全性(Phase 1として明記):
  *   - 条件付け後の周辺確率(各馬がいずれかの組に含まれる確率の合計)は、入力の placeProb と
@@ -63,8 +70,12 @@ export interface PlaceJointModel {
   /** モデル識別子(結果に載せ、どのモデルで計算したかを追跡できるようにする)。 */
   readonly id: string;
   /**
-   * 近似モデルか(true)厳密モデルか(false)。UIが「近似計算」表記を機械的に出し分けるための
-   * フラグ(受け入れ条件10: modelApproximate が結果に載る)。
+   * 近似モデルか(true)厳密モデルか(false)。「同時分布が入力の周辺確率(placeProb)を
+   * 再現しないか」だけを表すフラグであり、**「1着確率や3着内率の予測が当たる」ことは意味しない**
+   * (#77・#20-A で意味を明確化。false は数学的な性質であって予測精度の保証ではない)。
+   *
+   * 現時点で本フラグの UI 消費者は存在しない(`modelApproximate` は結果に載り DB にも保存されるが、
+   * 表示を出し分ける画面はまだ無い。当初の JSDoc「UIが表記を出し分けるためのフラグ」は既に偽)。
    */
   readonly approximate: boolean;
   /**
@@ -190,3 +201,25 @@ function clamp(value: number, min: number, max: number): number {
   }
   return value;
 }
+
+// ---------------------------------------------------------------------------
+// Plackett-Luce モデル(Issue #77・#20-A)の re-export。
+//
+// `packages/core/package.json` の `exports` には `./ev/place-joint-model` のみが公開されており、
+// 新規サブパスは追加しない(#58 の裁定と同じ流儀)。実体は `plackett-luce-strength.ts`・
+// `plackett-luce-model.ts`・`plackett-luce-win-prob.ts` の3ファイルに分割して実装し、
+// ここから re-export することで既存の公開サブパス経由で参照できるようにする。
+// ---------------------------------------------------------------------------
+export {
+  fitPlackettLuceStrengths,
+  computePlackettLuceMarginals,
+  PlackettLuceFitError,
+  MAX_FIT_ITERATIONS,
+  FIT_TOLERANCE,
+  type PlackettLuceFitFailureReason,
+  type PlackettLuceFitSuccess,
+  type PlackettLuceFitFailure,
+  type PlackettLuceFitResult,
+} from "./plackett-luce-strength.js";
+export { PLACKETT_LUCE_MODEL } from "./plackett-luce-model.js";
+export { winProbabilitiesFromStrengths } from "./plackett-luce-win-prob.js";
