@@ -53,10 +53,24 @@
  * 反復5回・実測1.3〜1.4ms)だけであり、`runModelLayer` が測るこの現実的な入力分布では
  * 95%点10.6ms・最悪36.7ms(default)/78.1ms(wide15)で、5msの2〜16倍に達する。
  * `MAX_FIT_ITERATIONS=2000`(`plackett-luce-strength.ts`)は「5msの予算より
- * `not-converged`率を優先した」選択であり、上限を200に下げれば最悪3.56ms・非収束14.5%
- * (boss着手前ゲート第3回の実測)というトレードオフの反対端になる。この未達は
- * **#20-A では `PLACKETT_LUCE_MODEL` の production 呼び出し元がゼロのため実害が無く**、
- * #78 が既定モデルの切替を検討する際の前提として申し送る。
+ * `not-converged`率を優先した」選択である。**この上限を50〜20000まで振ったときの
+ * not-converged率・フィット所要msの表(Issue #80・#78-A・実測是正)は、二重管理を避けるため
+ * `plackett-luce-strength.ts` の `MAX_FIT_ITERATIONS` JSDocに一本化して置いた**
+ * (旧版がここに書いていた「上限200では最悪3.56ms・非収束14.5%」という単一の数字は、
+ * `runModelLayer`〈頭数18固定・N=200〉と母集団が異なる旧世代の試作実装での値であり
+ * HEADでは再現しない。#78のゲートで検出・是正した。この表を得る `runFitPerformanceSweep`
+ * を本スクリプト末尾に追加した)。この未達は **#20-A では `PLACKETT_LUCE_MODEL` の
+ * production 呼び出し元がゼロのため実害が無く**、既定モデルの切替(#81)を検討する際の
+ * 前提として申し送る。
+ *
+ * **`marginalDeviationMax`(下記`runModelLayer`が出力する中央値・PL劣化割合)についての
+ * 申し送りの経緯**: 以前このJSDoc・`docs/issue-order.md`に書かれていた「57.5% / 75.5%」
+ * 「PL 0.018619 / CB 0.018329」は、bench がLLM応答のクリップ経路(p=0/p=1への到達)を
+ * まだ再現していなかった`f6cc6d4`世代の値を、オーケストレーターが「是正後」と誤って
+ * ラベル付けし転記したものだった(#78のゲートでboss が検出・是正。詳細は
+ * `docs/issue-order.md`「#80に着手する前に必ず読むもの」参照)。**HEAD(`f2312ae`)の実測は
+ * PL 0.061835 / CB 0.046275(中央値)・PLが悪化する割合 default 58.8% / wide15 71.5%**
+ * であり、本スクリプトの`runModelLayer`実行結果として毎回再現できる(下記「使い方」参照)。
  *
  * ## 使い方
  *   pnpm tsx scripts/bench-joint-model.ts
@@ -65,6 +79,9 @@
  * こと自体である(JSDocに再現手段のない ms 値を書かない、というAC-9の要求への対応)。
  * `computePlackettLuceMarginals`(閉形式)と「816通りの分布を毎回構築する素朴な実装」の速度差
  * (要修正2)も本スクリプトの `runNaiveVsClosedFormComparison` で測り、実測比を出力する。
+ * `MAX_FIT_ITERATIONS`を振った8段階の表(Issue #80 AC-A8)を再現するには、
+ * `plackett-luce-strength.ts`の`MAX_FIT_ITERATIONS`を一時的に書き換えてから本スクリプトを
+ * 実行し、出力の`Issue #80(#78-A)AC-A8`セクションを読む(同ファイルのJSDoc「再現手順」参照)。
  */
 
 import {
@@ -146,9 +163,9 @@ function applyProductionClip(
 function buildRaceHorses(
   rand: () => number,
   clipVariantId: keyof typeof CLIP_VARIANTS,
+  n = 18,
 ): { horses: JointModelHorse[]; clippedToZeroCount: number; clippedToOneCount: number } {
   const maxAdjust = CLIP_VARIANTS[clipVariantId].maxAdjust;
-  const n = 18;
   // raw prior(正規化前)は「大半は0〜0.25の一般馬・5%は0.9〜0.99の突出馬(混合分布)」から
   // 引く(独立一様分布1本だと正規化のΣ合わせが強く効きすぎ、突出馬がいてもscaleで
   // maxPrior=0.95に届かなくなり、p=1に構造的に到達できないことが判明した。要修正3で
@@ -488,9 +505,65 @@ function runNaiveVsClosedFormComparison(): void {
   console.log(`  速度比(素朴/閉形式): ${(naiveMs / closedFormMs).toFixed(1)}倍`);
 }
 
+/**
+ * Issue #80(#78-A)AC-A8: `MAX_FIT_ITERATIONS`の値ごとの性能(not-converged率・
+ * フィット所要msの99%点・最悪値)を、頭数を18/16/14/12/10/8/6/5と振って計測する
+ * (k=3固定・頭数ごとに`samplesPerHeadcount`件=既定400件、variantあたり合計N=3200)。
+ *
+ * `MAX_FIT_ITERATIONS`自体はこの関数の引数にしない(`fitPlackettLuceStrengths`へ
+ * 上限を注入する経路を新設しない。Issue #80 Q6裁定: 定数の定義箇所を2箇所に増やす
+ * ことを避けるため)。**このスクリプトが今インポートしている`MAX_FIT_ITERATIONS`の値
+ * そのものを使って計測する**——つまり8段階の表を得るには、`plackett-luce-strength.ts`の
+ * `MAX_FIT_ITERATIONS`を手作業で書き換えたうえで本スクリプトを実行し直す、という
+ * 再現手順そのものが実測手段である(下記「使い方」参照)。
+ */
+function runFitPerformanceSweep(clipVariantId: keyof typeof CLIP_VARIANTS, samplesPerHeadcount: number): void {
+  const headcounts = [18, 16, 14, 12, 10, 8, 6, 5];
+  const rand = makeRng(clipVariantId === "default" ? 20260909100 : 20260910100);
+
+  // ウォームアップ(JIT最適化。計測対象から外す)。
+  const warmupRand = makeRng(clipVariantId === "default" ? 999101 : 999102);
+  for (let i = 0; i < 20; i++) {
+    const { horses } = buildRaceHorses(warmupRand, clipVariantId, 18);
+    fitPlackettLuceStrengths(horses, 3);
+  }
+
+  const fitMs: number[] = [];
+  let notConvergedCount = 0;
+  let sampleCount = 0;
+
+  for (const n of headcounts) {
+    const k = Math.min(3, n);
+    for (let i = 0; i < samplesPerHeadcount; i++) {
+      const { horses } = buildRaceHorses(rand, clipVariantId, n);
+      sampleCount++;
+      const t0 = performance.now();
+      const fit = fitPlackettLuceStrengths(horses, k);
+      const t1 = performance.now();
+      fitMs.push(t1 - t0);
+      if (!fit.ok && fit.reason === "not-converged") {
+        notConvergedCount++;
+      }
+    }
+  }
+
+  const sorted = [...fitMs].sort((a, b) => a - b);
+  const p99 = percentile(sorted, 0.99);
+  const worst = sorted[sorted.length - 1]!;
+  const notConvergedRate = (notConvergedCount / sampleCount) * 100;
+  console.log(
+    `  MAX_FIT_ITERATIONS=${MAX_FIT_ITERATIONS} clipVariant=${clipVariantId} ` +
+      `(頭数${headcounts.join("/")}×各${samplesPerHeadcount}件=N=${sampleCount}): ` +
+      `not-converged=${notConvergedRate.toFixed(2)}% fit99%点=${p99.toFixed(2)}ms fit最悪=${worst.toFixed(1)}ms`,
+  );
+}
+
 console.log(`MAX_FIT_ITERATIONS=${MAX_FIT_ITERATIONS} / FIT_TOLERANCE=${FIT_TOLERANCE}`);
 runColdStartMeasurement();
 runSingleShotPerformanceCheck();
 runNaiveVsClosedFormComparison();
+console.log("\n=== Issue #80(#78-A)AC-A8: MAX_FIT_ITERATIONS別の性能(現在の値のみ。8段階の表は手作業で書き換えて再実行) ===");
+runFitPerformanceSweep("default", 400);
+runFitPerformanceSweep("wide15", 400);
 runModelLayer("default", 200);
 runModelLayer("wide15", 200);

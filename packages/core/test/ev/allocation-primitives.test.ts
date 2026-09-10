@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_SKIP_REASON_CODES,
   applyMinimumStake,
   buildOutcomeIndexSets,
   computeKellyTarget,
@@ -464,6 +465,28 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
 
     it("優先順位: λ=0かつ候補0頭 → kelly-zeroが優先されること(no-candidatesではない)", () => {
       expect(determineSkipReasonCode(10000, 10000, 10000, 100, 0, 0, 0)).toBe("kelly-zero");
+    });
+  });
+
+  describe("ALL_SKIP_REASON_CODES(Issue #80 AC-A5: SkipReasonCodeを増やしていないことの機械検査)", () => {
+    it("6値ちょうどであり、値の集合がリテラル配列と一致すること", () => {
+      // 前提固定(空振り防止): 6という数はALL_SKIP_REASON_CODES.length自身からではなく、
+      // このリテラル配列(実装からのimportではない、このテストが書く独立した期待値)から来る。
+      const expected = [
+        "bankroll-unset",
+        "cap-unset",
+        "cap-too-small",
+        "kelly-zero",
+        "no-candidates",
+        "no-edge",
+      ];
+      expect(expected).toHaveLength(6);
+      // 順序に依存しない比較(定義順が変わっても壊れないよう、両者をソートしてtoEqual)。
+      expect([...ALL_SKIP_REASON_CODES].sort()).toEqual([...expected].sort());
+    });
+
+    it("重複が無いこと(Setに変換しても6件のまま)", () => {
+      expect(new Set(ALL_SKIP_REASON_CODES).size).toBe(6);
     });
   });
 

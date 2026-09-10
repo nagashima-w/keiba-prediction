@@ -68,12 +68,22 @@ import {
  * `placeOddsMin<=0`・`ev=NaN`・`umaban`非有限は弾かない(素通りしてAllocationCandidateへ
  * 混入しうる)。呼び出し元(`BatchAnalysisView.tsx`)は render 内 IIFE でこの合成関数を呼ぶが、
  * リポジトリに React error boundary は1つも無い(grep 0件)。したがって本モジュール内で
- * `allocateGeneralBets` の呼び出しを try/catch で保護し、例外を`kind:"invalid"`という
+ * `allocateGeneralBets` の呼び出しを try/catch(内側catch)で保護し、例外を`kind:"invalid"`という
  * 判別可能な状態へ変換する(呼び出し前に`validateCandidates`と同じ数値検証を複製すると
  * 二重定義になり将来ズレるリスクがあるため、`allocateGeneralBets`自身の門番に判定を委ね、
  * 本モジュールは例外の受け皿だけを持つ設計にした)。これにより異常なレース1件だけが
  * `kind:"invalid"`として判別可能になり、他レースの計算・画面全体には波及しない
  * (各レースは独立した関数呼び出しであるため)。
+ *
+ * **Issue #80(#78-A)で対象を拡張**: `allocateGeneralBets`だけでなく`PLACKETT_LUCE_MODEL`を
+ * 含む任意の同時分布モデルが`buildDistribution`でthrowしても外へ漏れないようにするため、
+ * `buildComboCandidates`(候補構築。ワイド・3連複それぞれでモデルを呼ぶ)と、D-2フォールバック
+ * 経由の`buildRaceAllocation`→`allocateBets`も受け皿の対象に加えた。ただし内側catch
+ * (`allocateGeneralBets`用)は`comboOdds`が実値になる契約を持つため統合できず、
+ * `buildMixedRaceAllocationWithOutcome`(外側catch)として別に用意した
+ * (詳細は同関数と`AllocationOutcomeCodes.comboOdds`のJSDoc参照)。
+ * `resolvePlaceOnlyStake`(`renderer/mixed-allocation-view.ts`)にも同種のtry/catchを追加した
+ * (同ファイルの当該JSDoc参照)。
  *
  * ## greedySteps が構成比を左右する事実(AC22・Issue #36)
  *
@@ -245,10 +255,17 @@ export type ComboOddsAvailabilityCode = "not-requested" | "yoso" | "unfetched" |
  *   かつ`isSkip`のときのみ非null。
  * - `comboOdds`: `buildMixedCandidates`を実行したときのみ非null(実行していない=
  *   判定不能ではなく、まだその判定に到達していないことをnullで表す)。
- *   **`route==="invalid"`でも非nullになりうる**: `buildMixedCandidates`は
- *   `allocateGeneralBets`の呼び出し(throwしうる)より前に実行済みであり、
- *   「オッズが取得できていたか」という事実は`allocateGeneralBets`の成否と独立に
- *   既に判定済みだから(裁定2026年。#31が禁じる「判定済みを未判定に潰す」方向を避ける)。
+ *   **`route==="invalid"`のとき`comboOdds`が非nullになるのは、内側catch
+ *   (`allocateGeneralBets`の例外。`buildMixedRaceAllocationCore`内)を通った場合に限る。**
+ *   この場合は例外の前に`mixed.diagnostics`の算出が完了しており、「オッズが取得できていたか」
+ *   は配分計算の成否と独立に確定している(裁定2026年。#31が禁じる「判定済みを未判定に潰す」
+ *   方向を避ける)。
+ *   一方、**外側catch(#80で新設。候補構築〈`buildComboCandidates`〉やD-2フォールバックの
+ *   `allocateBets`が投げた場合。`buildMixedRaceAllocationWithOutcome`内)を通ると`comboOdds`は
+ *   nullになる。** これは「取得できていなかった」という判定結果ではなく、**判定に到達していない
+ *   (判定不能)**ことを表す(#31の原則)。**この非対称は仕様である。** 内側catchを外側へ
+ *   一本化すると非null契約が失われるため、統合してはならない(`mixed-race-allocation-crash-safety.test.ts`
+ *   の変異M3がこれを検出する)。
  *
  * `(route, skipReasonCode)`だけで「配分あり」と「core未到達」が区別できる
  * (`allocation-outcome-codes.test.ts`の不変条件テストで固定):
@@ -343,18 +360,33 @@ function buildPlaceOnlyFallbackOutcome(
 
 /**
  * 券種横断(複勝・ワイド・3連複)の馬券配分ビューを、コード付き到達状態
- * (`AllocationOutcomeCodes`)とともに合成する(Issue #58)。
+ * (`AllocationOutcomeCodes`)とともに合成する本体(Issue #58)。
  *
  * `view`の判定ロジック(ゲート順序)は`buildMixedRaceAllocation`(旧実装)と完全に同一。
  * 本関数はその判定と同時に、通過した経路をコードとして記録する(二重定義を避けるため、
- * 判定ロジックはこの関数1箇所だけに存在し、`buildMixedRaceAllocation`は本関数を呼んで
- * `.view`だけを返す薄いラッパーになる)。
+ * 判定ロジックはこの関数1箇所だけに存在し、`buildMixedRaceAllocation`は
+ * `buildMixedRaceAllocationWithOutcome`(本関数を外側try/catchで包む薄いラッパー)を
+ * 呼んで`.view`だけを返す)。
+ *
+ * ## 外側try/catch(#80)が本関数の外に存在する理由
+ * Issue #80(#78-A)により、`PLACKETT_LUCE_MODEL`を含む任意の同時分布モデルが
+ * `buildDistribution`でthrowしても production 経路の外へ例外が漏れないことを保証する。
+ * 本関数の呼び出し元(`buildMixedRaceAllocationWithOutcome`)がその外側catchを持ち、
+ * 本関数内の`buildMixedCandidates`呼び出し(ワイド・3連複の`buildComboCandidates`を
+ * 経由してモデルを呼ぶ)と`buildPlaceOnlyFallbackOutcome`(D-2フォールバック経由で
+ * `buildRaceAllocation`→`allocateBets`がモデルを呼ぶ)の両方を覆う。
+ *
+ * 一方、下記`try`ブロック(`allocateGeneralBets`用)は**内側catch**として従来どおり
+ * 本関数内に残す。内側catchは外側catchと`comboOdds`の扱いが異なる契約を持つため
+ * (`AllocationOutcomeCodes.comboOdds`のJSDoc参照)、統合してはならない
+ * (統合するとその契約が失われる。テスト`mixed-race-allocation-crash-safety.test.ts`の
+ * 変異M3がこれを検出する)。
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
  * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の4項目)
  */
-export function buildMixedRaceAllocationWithOutcome(
+function buildMixedRaceAllocationCore(
   race: MixedCandidateBuildInput,
   settings: MixedAllocationSettings,
 ): MixedRaceAllocationOutcome {
@@ -428,6 +460,55 @@ export function buildMixedRaceAllocationWithOutcome(
     return {
       view: { kind: "invalid", message: e instanceof Error ? e.message : String(e) },
       outcome: { route: "invalid", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOdds },
+    };
+  }
+}
+
+/**
+ * 券種横断(複勝・ワイド・3連複)の馬券配分ビューを、コード付き到達状態
+ * (`AllocationOutcomeCodes`)とともに合成する(Issue #58)。実体は`buildMixedRaceAllocationCore`
+ * だが、本関数はそれを**外側try/catch(Issue #80・#78-A)**で包む薄いラッパーになっている。
+ *
+ * ## 何を覆うか
+ * `buildMixedRaceAllocationCore`内の以下2箇所は、`allocateGeneralBets`用の内側catch
+ * (同関数内、410行目付近)の**外**にあり、同時分布モデルが`buildDistribution`でthrowすると
+ * 従来は例外がそのまま外へ漏れていた(#80着手前ゲートで実測: いずれも production 到達可能):
+ * - `buildMixedCandidates`呼び出し(ワイド・3連複の`buildComboCandidates`がモデルを呼ぶ)
+ * - `buildPlaceOnlyFallbackOutcome`(D-2フォールバック①②③のいずれか。
+ *   `buildRaceAllocation`→`allocateBets`がモデルを呼ぶ)
+ *
+ * 本関数はこの2箇所を含む`buildMixedRaceAllocationCore`全体を try/catch し、例外を
+ * 内側catchと同じ`kind:"invalid"`/`route:"invalid"`へ変換する(受け皿を新設せず、
+ * 既存の判別共用体に一本化する。#80のスコープ判断)。
+ *
+ * ## `comboOdds`が内側catchと異なる理由(非対称は意図)
+ * 内側catch(`allocateGeneralBets`用)へ到達した時点では`mixed.diagnostics`の算出が
+ * 既に完了しており、「オッズが取得できていたか」はモデルの成否と独立に確定済みのため
+ * `comboOdds`は実値になる。一方、本関数の外側catchが拾う2箇所
+ * (`buildMixedCandidates`自体の例外・D-2フォールバックの例外)では、例外の時点で
+ * `mixed.diagnostics`がまだ存在しない(前者は算出中に例外、後者はそもそも算出しない経路)
+ * ため、`comboOdds`は`null`にする。これは「取得できていなかった」という判定結果ではなく
+ * **判定に到達していない(判定不能)**ことを表す(#31の原則)。この非対称は仕様であり、
+ * 内側catchを本関数の外側catchへ統合してはならない(統合すると`comboOdds`の非null契約が
+ * 失われる。`mixed-race-allocation-crash-safety.test.ts`の変異M3が検出する)。
+ *
+ * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
+ *   同じ構造的最小型)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の4項目)
+ */
+export function buildMixedRaceAllocationWithOutcome(
+  race: MixedCandidateBuildInput,
+  settings: MixedAllocationSettings,
+): MixedRaceAllocationOutcome {
+  try {
+    return buildMixedRaceAllocationCore(race, settings);
+  } catch (e) {
+    // Issue #80: buildMixedRaceAllocationCore内の内側catchでは覆えない2箇所
+    // (buildMixedCandidates自体の例外・D-2フォールバックのallocateBetsの例外)を吸収する。
+    // comboOddsをnullにする理由は本関数のJSDoc「非対称は意図」参照。
+    return {
+      view: { kind: "invalid", message: e instanceof Error ? e.message : String(e) },
+      outcome: { route: "invalid", unavailableReason: null, fallbackReason: null, skipReasonCode: null, comboOdds: null },
     };
   }
 }

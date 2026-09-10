@@ -358,13 +358,31 @@ export function placeUnavailableNoteForMixed(place: PlaceCandidateDiagnostics): 
  * `kind:"computed"`以外(このレースが既にunset/yoso/headcount不可を通過済みのため理論上
  * `unavailable`のみ発生しうる。5〜7頭・4頭以下で複勝自体が対象外の場合)は`null`
  * (「複勝のみなら提案不能」を意味する。0円〈見送り〉とは異なる状態として区別する)。
+ *
+ * ## Issue #80(#78-A): try/catchによる例外の吸収
+ * `buildRaceAllocation`は内部で`allocateBets`(同時分布モデルを呼ぶ)を呼ぶが、本関数は
+ * render内IIFE(`BatchAnalysisView.tsx`)から直接呼ばれ、リポジトリにReact error boundaryは
+ * 1つも無い(`mixed-race-allocation.ts`冒頭JSDoc参照)。`PLACKETT_LUCE_MODEL`を含む任意の
+ * モデルが`buildDistribution`でthrowしても画面全体を巻き添えにしないよう、本関数内で
+ * try/catchし、throw時は`null`を返す。
+ *
+ * この catch は**防御的な二重化**である。**現行の production 経路では単独で発火しない**:
+ * 本関数が使う入力(全出走馬の`adjustedProb`・`placeCount=3`)は、混在経路
+ * (`COMBO_TOP_FINISH_COUNT=3`)と頭数・確率・k のすべてが同一であり、モデルが失敗するなら
+ * 先に混在経路が失敗して`kind:"invalid"`を返すため、`kind:"mixed"`の分岐にある本関数へは
+ * 到達しない。**到達不能であることを証明したわけではない**(将来どちらかの入力の作り方が
+ * 変われば破れる)。`null`は既存の「複勝のみなら提案不能」と同じ意味で返す。
  */
 export function resolvePlaceOnlyStake(
   race: MixedCandidateBuildInput,
   settings: MixedAllocationSettings,
 ): number | null {
-  const view = buildRaceAllocation(race, settings);
-  return view.kind === "computed" ? view.result.totalStake : null;
+  try {
+    const view = buildRaceAllocation(race, settings);
+    return view.kind === "computed" ? view.result.totalStake : null;
+  } catch {
+    return null;
+  }
 }
 
 /** #35の較正注記(AC14)。組合せ券種のEVが過大評価であること・較正未実施であることを明記する。 */

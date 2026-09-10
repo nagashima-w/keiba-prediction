@@ -918,6 +918,44 @@ DB スキーマにも触れていない。
 
 よって 1.6.4 → **1.6.5**(patch)が妥当と判断した。
 
+## 次の正式版が 1.6.6 である根拠(Issue #80・#78-A での変更)
+
+Issue #80(#78-A)は、`PLACKETT_LUCE_MODEL` を含む任意の同時分布モデルが
+`model.buildDistribution` で throw しても production のどの経路からも例外が外へ漏れない
+ようにする変更である。受け皿は新設せず、既存の `route:"invalid"`/`kind:"invalid"` に一本化
+した(`mixed-race-allocation.ts` に外側 try/catch を1つ新設、`mixed-allocation-view.ts` の
+`resolvePlaceOnlyStake` に try/catch を1つ新設。既存の内側 catch はそのまま残す)。
+
+**patch である根拠**: 区分表の minor は「**利用者から見てできることが増える**」または
+「**分析結果の数値が変わる**」だが、本変更は**どちらにも該当しない**。
+
+- **既定モデルは変えていない**: `bet-allocation.ts`・`combo-bet-allocation.ts` の既定引数は
+  無改変で、両ファイルとも `model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL` のまま。
+  `packages/core/test/ev/default-model-invariant.test.ts`(本Issueで新設)が3つの公開入口
+  (`allocateBets`・`allocateGeneralBets`・`buildComboCandidates`)それぞれで
+  `modelId==="conditional-bernoulli"`(または既定モデルとの構造的同値)をリテラルで固定する。
+- **throwしない限り、既存のどの入力・どのレースの配分結果・EV・回収率も1円たりとも変わらない**:
+  受け皿は「モデルが契約違反でthrowした」という異常系にのみ作用し、正常系の計算経路
+  (貪欲配分・ケリー基準・丸め処理等)には一切触れていない。
+  `packages/app/test/mixed-race-allocation-crash-safety.test.ts`(本Issueで新設)の
+  「黙っているべき側」describeが、throwしない限り既存の view/outcome が変わらないことを固定する。
+- **`SkipReasonCode` は増やしていない**(6値のまま。`packages/core/test/ev/
+  allocation-primitives.test.ts` に追加した `ALL_SKIP_REASON_CODES` の型検査により、
+  型に新しい値を足すと`pnpm typecheck`がコンパイルエラーで検出する)。`verify.ts`・
+  `VerifyView`・`formatUnjudgedNote`・DB スキーマは無改変。
+- **`packages/core/package.json` の `exports` は無改変**(`git diff --stat -- packages/core/
+  package.json` が空であることで確認できる)。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポート JSON の後方互換に関わる変更が一切ない。
+DB スキーマにも触れていない。
+
+**AC-10(非破壊)の例外として扱ったファイル**: `packages/app/test/version-policy.test.ts` は
+`packages/*/test/**` に一致するが、差分は**版数運用のチェックリスト(本書)が要求する
+版数リテラル(`EXPECTED_APP_VERSION`)・it 名・it 名直後の版数履歴コメントのみ**であり、
+既存の判定ロジック・他のテストケースには一切触れていない(#77 と同じ扱い)。
+
+よって 1.6.5 → **1.6.6**(patch)が妥当と判断した。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

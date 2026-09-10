@@ -622,6 +622,35 @@ export type SkipReasonCode =
   | "no-edge";
 
 /**
+ * `SkipReasonCode`の全メンバーの一覧(Issue #80・AC-A5)。
+ *
+ * この配列自体はテストの期待値ではなく、`SkipReasonCode`という**型**が今後増えていないことを
+ * 機械的に検査するための唯一の正である(`packages/core/test/ev/allocation-primitives.test.ts`が
+ * 独立したリテラル配列と`toEqual`で突き合わせる)。
+ *
+ * 下記`AssertAllSkipReasonCodesCovered`は、`SkipReasonCode`に新しい値を追加してこの配列の
+ * 更新を忘れると型検査(`pnpm typecheck`)がコンパイルエラーで検出する仕掛け
+ * (`Exclude<SkipReasonCode, 本配列の要素型>`が`never`にならなければ、`= true`の代入が失敗する)。
+ * 逆方向(本配列が`SkipReasonCode`に無い値を含む)は`satisfies readonly SkipReasonCode[]`が
+ * 型検査時点で弾く。両方向により本配列は`SkipReasonCode`と過不足なく一致する。
+ */
+export const ALL_SKIP_REASON_CODES = [
+  "bankroll-unset",
+  "cap-unset",
+  "cap-too-small",
+  "kelly-zero",
+  "no-candidates",
+  "no-edge",
+] as const satisfies readonly SkipReasonCode[];
+
+type MissingSkipReasonCodes = Exclude<SkipReasonCode, (typeof ALL_SKIP_REASON_CODES)[number]>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- 型検査だけが目的の代入(値は使わない)。
+const _assertAllSkipReasonCodesCovered: MissingSkipReasonCodes extends never
+  ? true
+  : ["SkipReasonCodeに値を追加したらALL_SKIP_REASON_CODESも更新すること", MissingSkipReasonCodes] = true;
+void _assertAllSkipReasonCodesCovered;
+
+/**
  * 見送り理由を6分類・優先順位順に決定する(コードのみ。文言化は呼び出し側の責務)。
  * isSkip(totalStake===0)のときにのみ呼び出される想定。
  *

@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.6.5";
+const EXPECTED_APP_VERSION = "1.6.6";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,14 +234,15 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.6.5(Issue #77・#20-A: Plackett-Luceのθ推定器とPLACKETT_LUCE_MODELを追加。既定は不変)である", () => {
+  it("root と app の version が 1.6.6(Issue #80・#78-A: 任意モデルのthrowが外へ漏れない受け皿を既存invalid経路に一本化・既定は不変)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
-    // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4。本回は #77(#20-A)。
-    // θ推定器・PLACKETT_LUCE_MODEL・θ→1着確率の純関数を追加するが、既定モデル
-    // (CONDITIONAL_BERNOULLI_MODEL)は変えておらず、本番呼び出し元もゼロ件のため利用者から見て
-    // できることは増えず、分析結果の数値も一切変わらない。よって patch(詳細は docs/versioning.md)。
-    // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならない
-    // ことを固定する。
+    // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5。
+    // 本回は #80(#78-A)。`PLACKETT_LUCE_MODEL`を含む任意の同時分布モデルが`buildDistribution`で
+    // throwしても production のどの経路からも例外が外へ出ないよう、既存の`route:"invalid"`/
+    // `kind:"invalid"`の受け皿を拡張したが、既定モデル(CONDITIONAL_BERNOULLI_MODEL)・
+    // すべての数値は変えておらず、利用者から見て分析結果の数値は一切変わらない。
+    // よって patch(詳細は docs/versioning.md)。公開1回につき1回上げる運用により、
+    // EXPECTED_APP_VERSION 据え置きのままにならないことを固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);
     expect(appPkg.version).toBe(EXPECTED_APP_VERSION);
   });
