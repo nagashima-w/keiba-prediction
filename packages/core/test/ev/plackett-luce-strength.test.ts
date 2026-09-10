@@ -553,6 +553,69 @@ describe("fitPlackettLuceStrengths(θ推定器・判別共用体)", () => {
     });
   });
 
+  describe("収束後の再検算ガードの発火(要修正A・M3対策)", () => {
+    // M3(if (finalResidual >= FIT_TOLERANCE) → if (false))を殺す入力。
+    //
+    // 発火の機序: 両極端(非常に小さいtinyと非常に大きいrest)をほぼ同数混ぜると、θの動的
+    // レンジが極端(1e12オーダー)に達する。自由集合のΣθをreducedHorseCountへ正規化する
+    // 乗算(t * scale)自体の相対丸め(浮動小数点の1ULP、約1e-16)が、この極端な条件数の
+    // 下では閉形式の計算を通じて増幅され、正規化前(ループ内)の残差がFIT_TOLERANCE未満でも
+    // 正規化後(実際に返すtheta)の残差がFIT_TOLERANCE以上になりうる。
+    //
+    // これまでの探索(このファイルの「numerically-unstableの根拠」と同種の片側だけを極端に
+    // する探索)がこの入力を見つけられなかったのは、両極端を「同時に」振る必要があったため
+    // (どちらか一方だけを極端にしても、もう一方が中庸だと条件数が上がりきらない)。
+    it("(正)n=14・k=7・tiny=1e-6を7頭+rest=0.999999を7頭 -> not-convergedになる", () => {
+      const n = 14;
+      const k = 7;
+      const tiny = 1e-6;
+      const rest = 0.999999;
+      const probs = [
+        ...Array.from({ length: 7 }, () => tiny),
+        ...Array.from({ length: 7 }, () => rest),
+      ];
+      const sum = probs.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(k, 9); // 前提: Σp=kちょうど(再スケールなし)を固定する。
+
+      const result = fitPlackettLuceStrengths(horses(probs), k);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe("not-converged");
+    });
+
+    it("(負の対照)tinyとrestをわずかに変えるとok:trueに戻る(ガードが無差別に発火していないことの確認)", () => {
+      // (正)からtiny/restを1桁だけ変えた近傍の入力。ガードが「常に発火する」壊れた実装
+      // ではないことを示す対照(#31「判定不能と判定結果を混同しない」の逆側の確認)。
+      const n = 14;
+      const k = 7;
+      const tiny = 1e-7;
+      const rest = 0.9999999;
+      const probs = [
+        ...Array.from({ length: 7 }, () => tiny),
+        ...Array.from({ length: 7 }, () => rest),
+      ];
+      const sum = probs.reduce((a, b) => a + b, 0);
+      expect(sum).toBeCloseTo(k, 9);
+
+      const result = fitPlackettLuceStrengths(horses(probs), k);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.iterations).toBe(0); // k'=7だが実質縮退せず全馬自由集合(閉形式には非該当)。
+      // 自分の実測値をリテラルで固定する(boss実測の1.0004e-7と同オーダーであることを確認済み)。
+      expect(result.residualMax).toBeCloseTo(1.0003750661180533e-7, 12);
+    });
+
+    // 【到達可能性の記録・テスト化はしない(空振りになるため)】
+    // 上の(正)入力は n=14・placeCount=7 であり、production範囲外(placeCount<=3)。
+    // fitPlackettLuceStrengths のJSDoc(「本関数自体も防御的に妥当な結果を返す〈将来の
+    // 呼び出し元のための頑健性〉」)がカバーする一般性の検査であり、production到達可能性の
+    // 主張ではない。k<=3(production到達可能な唯一の範囲)で同じ両極端構造
+    // (n=4..18・k∈{2,3}・nt=1..n-1・tiny=1e-4〜1e-12)を自分で2295件掃引したが、
+    // finalResidual>=FIT_TOLERANCEに達する(=ガードが発火する)入力は見つかっていない
+    // (numerically-unstableと同じ流儀。「実現不能」とは断定しない。再現コマンドは
+    // 完了報告に記載する)。
+  });
+
   describe("k'=1の反復回数(閉形式・反復不要)", () => {
     it("outer k=1(縮退なし)ではiterationsが厳密に0", () => {
       const result = fitPlackettLuceStrengths(horses([0.5, 0.3, 0.2]), 1);

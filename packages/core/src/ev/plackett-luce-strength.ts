@@ -118,11 +118,23 @@ export interface PlackettLuceFitFailure {
 export type PlackettLuceFitResult = PlackettLuceFitSuccess | PlackettLuceFitFailure;
 
 /**
- * 自由集合の反復フィットの上限回数。production 到達可能域(scorer/prior.ts の
- * [minPrior=0.02, maxPrior=0.95] と clip-variants.ts の CLIP_VARIANTS〈±0.10 / ±0.15〉)で
- * 実測した反復回数の分布に基づき、`scripts/bench-joint-model.ts` で再現可能な形で決定する
- * (boss が別の実装で測定した「4652反復」はそのまま転記していない。自分の実装で測り直した
- * 結果は完了報告に記載する)。
+ * 自由集合の反復フィットの上限回数。
+ *
+ * **AC-9(18頭・k=3のフィット+分布生成が5ms未満)は、本番相当分布に対しては未達である
+ * (要修正Bで明記。「別物として明記する」という読み替えは差し戻された)。** AC-9 の5ms が
+ * 実際に成立するのは `scripts/bench-joint-model.ts` の `runSingleShotPerformanceCheck`
+ * (Σp=kちょうどの単発計測。実測1.3〜1.4ms)だけであり、production 到達可能域
+ * (scorer/prior.ts の [minPrior=0.02, maxPrior=0.95] と clip-variants.ts の
+ * CLIP_VARIANTS〈±0.10・±0.15〉、かつ LLM 応答が窓の外に答えてクリップされる現実的な分布)
+ * では `scripts/bench-joint-model.ts` の実測で 95%点10.6ms・最悪36.7ms(default)/
+ * 78.1ms(wide15)であり、5ms を大きく超える。
+ *
+ * `MAX_FIT_ITERATIONS=2000` はこの上限を**5msの予算より`not-converged`率を優先して**
+ * 選んだ値であり(反復回数実測分布に基づく)、トレードオフの反対端として上限200では
+ * 最悪3.56ms・非収束14.5%になる(boss着手前ゲート第3回の実測)ことも申し送る。
+ * この未達は **#20-A では `PLACKETT_LUCE_MODEL` の production 呼び出し元がゼロのため
+ * 実害が無く**、#78 が既定モデルの切替を検討する際、反復上限(ひいてはこのトレードオフ)を
+ * 見直すかどうかの前提として引き継ぐ。
  */
 export const MAX_FIT_ITERATIONS = 2000;
 
@@ -489,15 +501,17 @@ export function fitPlackettLuceStrengths(
   // ループ内部の判定だけを信じて楽観的に ok:true を返すと、「収束していないのに収束したと
   // 申告する」欠陥になる(本タスクが最も戒めている類)。
   //
-  // **この経路が実際に発火する具体的な入力は見つかっていない(要修正1で誠実に訂正)**。
-  // production 到達可能域(near-boundary の内点ターゲットを中心に)で反復回数の多い入力を
-  // 約1.2万件(このファイルの検証時に自分で探索)・boss が別途約19万件探索したが、
-  // いずれも「正規化前後の残差の差」は最大で約8e-13(FIT_TOLERANCE=1e-6の1万分の1以下)に
-  // 留まり、この差だけで finalResidual が FIT_TOLERANCE を上回った例は観測されていない
-  // (`numerically-unstable` と同じ流儀: 到達不能とは断定せず、探索の範囲と結果だけを記録する)。
-  // 発火する入力が見つかっていない以上、このガード自体の「正しさ」は上記の理論的根拠
-  // (θの動的レンジが大きいと桁落ちが増える、という一般論)によって支えられており、
-  // 実測で発火を確認したわけではない。
+  // **この経路は実際に発火する(要修正Aで実測確認)**。片側だけを極端にする探索(near-boundary
+  // の内点ターゲットを中心にした約1.2万件・boss の約19万件)では見つからなかったが、
+  // **両極端(非常に小さいtinyと1に非常に近いrest)をほぼ同数混ぜる**と、自由集合のθの動的
+  // レンジが極端(1e12オーダー)に達し、ΣθをreducedHorseCountへ正規化する乗算(t * scale)
+  // 自体の相対丸め(浮動小数点1ULP、約1e-16)が、この極端な条件数の下で閉形式の計算を通じて
+  // 増幅され、正規化前(ループ内)の残差がFIT_TOLERANCE未満でも正規化後の残差がFIT_TOLERANCE
+  // 以上になる(自分の実測: n=14・placeCount=7〈production範囲外〉・7頭がp=1e-6・7頭が
+  // p=0.999999で、ガードを外すと residualMax=1.0000e-6≥FIT_TOLERANCE のまま ok:true を
+  // 返してしまうことを確認。この関数のテストで固定している)。k<=3(production到達可能な
+  // 唯一の範囲)では同じ両極端構造で2295件探索して発火する入力は見つかっていない
+  // (`numerically-unstable` と同じ流儀。断定はしない)。
   const finalF = computePlackettLuceMarginals(normalizedFreeTheta, reducedPlaceCount);
   let finalResidual = 0;
   for (let i = 0; i < freeTargets.length; i++) {
