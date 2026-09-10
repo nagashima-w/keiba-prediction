@@ -148,9 +148,20 @@ core の非公開モジュール(`exports` に0件)にあること、`skipReason
 
 1. **AC-9(5ms)は本番相当分布では未達。** 95%点 10.6ms・最悪 36.7ms(default)/ 78.1ms(wide15)。
    `MAX_FIT_ITERATIONS = 2000` が「5ms より非収束率(0.5%/0.0%)を優先した」帰結であり、
-   反対端(**HEAD 実測**: 上限200 で非収束 default 3.09% / wide15 2.63%・最悪 10.1/7.0ms)と合わせて
-   **#78 が曲線上のどの点を採るかを選ぶ**。⚠️ 以前ここに書いていた「上限200 で非収束 14.5%・最悪 3.56ms」は
-   **前 boss の試作実装での値であり HEAD では再現しない**(#78 のゲートで是正)
+   反対端(上限200 で非収束 **default 3.09% / wide15 3.00%**)と合わせて
+   **#81 が曲線上のどの点を採るかを選ぶ**。**トレードオフの全表は
+   `packages/core/src/ev/plackett-luce-strength.ts` の `MAX_FIT_ITERATIONS` の JSDoc にあり、
+   `scripts/bench-joint-model.ts` の `runFitPerformanceSweep` で再現できる**(#80 で新設)。
+
+   ⚠️ **この数値は2度訂正されている。過去の値を引用しないこと**:
+   - 「上限200 で非収束 14.5%・最悪 3.56ms」= #78 ゲート第3回の**試作実装**の値。HEAD では再現しない
+   - 「上限200 で wide15 2.63%」= #78 ゲートで boss が出した値だが、**再現できない**。
+     測定に使ったスイープは boss の**未コミットスクリプト**であり、`runFitPerformanceSweep` が
+     リポジトリに入ったのは #80(`8aa290b`)から(`git show 9b50de0:scripts/bench-joint-model.ts`
+     に当該関数が存在しないことで確認)。**default の 3.09% は一致するが wide15 だけ食い違い、
+     原因は特定できていない**(boss 側のスクリプトを参照できないため)
+   - **`not-converged` は決定的**である(code-reviewer が上限200・2000 で各3回実行し完全一致を確認)。
+     ms 値のみウォールクロックで変動する。**したがって wide15 の食い違いは測定誤差では説明できない**
 2. **「既定を PL にすれば確率の質が上がる」は成立しない。** `marginalDeviationMax` で PL が現行 CB より
    悪いレースは **default 58.8% / wide15 71.5%**、`marginalDeviationMax` の中央値は
    **PL 0.061835 / CB 0.046275**(HEAD `f2312ae` の `pnpm tsx scripts/bench-joint-model.ts` 実測)。
