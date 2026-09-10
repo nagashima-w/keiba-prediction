@@ -57,11 +57,16 @@
  * not-converged率・フィット所要msの表(Issue #80・#78-A・実測是正)は、二重管理を避けるため
  * `plackett-luce-strength.ts` の `MAX_FIT_ITERATIONS` JSDocに一本化して置いた**
  * (旧版がここに書いていた「上限200では最悪3.56ms・非収束14.5%」という単一の数字は、
- * `runModelLayer`〈頭数18固定・N=200〉と母集団が異なる旧世代の試作実装での値であり
- * HEADでは再現しない。#78のゲートで検出・是正した。この表を得る `runFitPerformanceSweep`
- * を本スクリプト末尾に追加した)。この未達は **#20-A では `PLACKETT_LUCE_MODEL` の
- * production 呼び出し元がゼロのため実害が無く**、既定モデルの切替(#81)を検討する際の
- * 前提として申し送る。
+ * `#20-A`申し送り〈前boss側が別実装で測った値〉であり、HEADの実装では再現しない
+ * ——実際に本スクリプトの`runModelLayer`を上限200で走らせると not-converged
+ * 1.0%〈default〉/1.5%〈wide15〉になり、14.5%とは1桁違う。旧版はこの食い違いの原因を
+ * 「頭数18固定・N=200の`runModelLayer`と母集団が異なる」という誤った理由に帰属させて
+ * いたが、実際に`runModelLayer`を走らせるとその主張自体が数値と食い違っていた
+ * ——#80メタレビュー差し戻しで検出・是正した〈CLAUDE.md #74の教訓「数の食い違いを
+ * 検算せず方法の違いという体裁の説明で埋めない」への違反だった〉。この表を得る
+ * `runFitPerformanceSweep`を本スクリプト末尾に追加した)。この未達は **#20-A では
+ * `PLACKETT_LUCE_MODEL` の production 呼び出し元がゼロのため実害が無く**、
+ * 既定モデルの切替(#81)を検討する際の前提として申し送る。
  *
  * **`marginalDeviationMax`(下記`runModelLayer`が出力する中央値・PL劣化割合)についての
  * 申し送りの経緯**: 以前このJSDoc・`docs/issue-order.md`に書かれていた「57.5% / 75.5%」
