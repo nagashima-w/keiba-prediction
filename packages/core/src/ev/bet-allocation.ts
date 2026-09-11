@@ -413,7 +413,7 @@ const EXCLUDED_ODDS_MALFORMED = "複勝オッズ下限が不正な値のため�
  * @param horses 出走全頭(候補馬に限らない。同時分布は全頭に依存するため)
  * @param placeCount 複勝の対象人数(何着まで複勝圏内か。3をハードコードしない)
  * @param config 馬券配分の設定(省略時は既定・bankroll=perRaceCap=0=未設定)
- * @param model 同時分布モデル(省略時は条件付きベルヌーイ。Phase 2の差し替え単位)
+ * @param model 同時分布モデル(省略時は `PLACKETT_LUCE_MODEL`。#81(#78-B)で `CONDITIONAL_BERNOULLI_MODEL` から切替済み。Phase 2の差し替え単位)
  */
 export function allocateBets(
   horses: readonly AllocationHorse[],

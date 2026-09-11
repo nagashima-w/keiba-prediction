@@ -566,7 +566,7 @@ function computeHitProbabilities(n: number, outcomeIndexSets: readonly OutcomeIn
  * @param candidates 買い目候補。isPositive===falseの候補は最適化対象から除外される
  *   (0件行としても出力されない。判定結果の内訳は呼び出し側〈候補ビルダー〉の診断値が持つ)。
  * @param config 配分設定(省略時は既定・bankroll=perRaceCap=0=未設定)
- * @param model 同時分布モデル(省略時は条件付きベルヌーイ)
+ * @param model 同時分布モデル(省略時は `PLACKETT_LUCE_MODEL`。#81(#78-B)で `CONDITIONAL_BERNOULLI_MODEL` から切替済み)
  */
 export function allocateGeneralBets(
   horses: readonly JointModelHorse[],
@@ -893,7 +893,7 @@ function computeComboHitProb(combo: readonly number[], rawDistribution: readonly
  *   呼び出し側(D-2b・Issue #27)が済ませてから渡すこと(AllocationCandidate.oddsのJSDoc参照)。
  * @param evConfig EV判定の設定(省略時は既存expected-value.tsの既定閾値1.0・厳密不等号を再利用。
  *   閾値を二重定義しない)
- * @param model 同時分布モデル(省略時は条件付きベルヌーイ)
+ * @param model 同時分布モデル(省略時は `PLACKETT_LUCE_MODEL`。#81(#78-B)で `CONDITIONAL_BERNOULLI_MODEL` から切替済み)
  */
 export function buildComboCandidates(
   horses: readonly JointModelHorse[],
