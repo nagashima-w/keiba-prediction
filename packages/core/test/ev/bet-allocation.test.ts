@@ -602,9 +602,10 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       const cost = constrainedGreedyF! - propF!;
       expect(cost).toBeCloseTo(0.00026427344172264, 10);
       expect(cost).toBeGreaterThan(0);
-      // 上界は実測値(0.00026427344172264)の2倍以内(旧CB版の値0.00101をそのまま流用しない。
-      // boss着手前ゲート指摘)。
-      expect(cost).toBeLessThan(0.00053);
+      // 上界は実測値(0.00026427344172264)の2倍以内(実測値×2=0.00052854688344528。
+      // 0.00052はその約1.9677倍で2倍未満。旧CB版の値0.00101をそのまま流用しない。
+      // boss着手前ゲート指摘・#81再レビュー指摘で是正)。
+      expect(cost).toBeLessThan(0.00052);
     });
   });
 
