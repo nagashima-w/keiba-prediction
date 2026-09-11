@@ -1494,6 +1494,16 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       const actualRatio = first!.stake / second!.stake;
       const expectedRatio = first!.continuousFraction / second!.continuousFraction;
       const relativeError = Math.abs(actualRatio - expectedRatio) / expectedRatio;
+      // 実測値そのものもリテラルで固定する(code-reviewer提案・boss採用指示): 上界
+      // toBeLessThan(0.3)だけだと、この閾値がCB版0.15から緩められた経緯(このdescribe冒頭
+      // コメント参照)が「緩めた上界」のままテストに残り、将来さらに緩めても検出できない。
+      // 実測値0.24812593703148436(このファイルのallocateBetsを本テストと同じ引数で呼べば
+      // 再現できる。手元のtsxスクリプトでも独立に算出し一致を確認済み)をtoBeCloseToで固定する
+      // ことで、この値そのものが特性化され、閾値0.3への変更もこの値からの乖離としてテストが
+      // 検出できるようになる(殺す変異: DEFAULT_BET_ALLOCATION_CONFIG.betUnitを100→150に
+      // 変えるとrelativeErrorは0.49775112443778124になり、下のtoBeCloseToが落ちることを
+      // 確認済み)。
+      expect(relativeError).toBeCloseTo(0.24812593703148436, 10);
       expect(relativeError).toBeLessThan(0.3);
     });
 

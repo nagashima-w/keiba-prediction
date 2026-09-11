@@ -41,9 +41,11 @@
  *   両定数が同値である間、この一致はテストでは強制されない。
  * - **`modelId`/`modelApproximate`**: `PlaceJointModel` の実装は `CONDITIONAL_BERNOULLI_MODEL`
  *   の1つだけ、**ではなくなった**(Issue #77・#20-A で `PLACKETT_LUCE_MODEL` を追加)。
- *   ただし **`bet-allocation.ts`・`combo-bet-allocation.ts` の既定引数は無改変で、配分計算の
- *   呼び出し側もモデルを上書きしない(#20-A のスコープ。#20-B で既定切替を検討)ため、
- *   本番経路で単一値しか取り得ないことは、まだ真である**。「結果から読んでいること」を値では
+ *   `bet-allocation.ts`・`combo-bet-allocation.ts` の既定引数は、追加直後の #20-A 時点では
+ *   `CONDITIONAL_BERNOULLI_MODEL` のまま無改変だったが、**Issue #81(#78-B)で
+ *   `PLACKETT_LUCE_MODEL` へ切り替わった(現在の既定値)**。ただし **配分計算の呼び出し側が
+ *   モデルを上書きしない点は#20-Aから変わっておらず、本番経路で単一値(現在は
+ *   `plackett-luce`)しか取り得ないことは、まだ真である**。「結果から読んでいること」を値では
  *   強制できない、という結論(下記)も変わらない。
  *
  * **どこまで無防備かを取り違えないこと。** 上記が強制できないのは「**定数直書きへの退行**」と
