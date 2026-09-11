@@ -245,7 +245,14 @@ export const PLACKETT_LUCE_MODEL: PlaceJointModel = {
    * 高いことを意味しない。** 同じ実測(clipVariant=default・N=200)で `marginalDeviationMax`
    * (実際に構築した同時分布の周辺確率と入力placeProbとの最大絶対差)の中央値は
    * PL=0.061835・CB=0.046275 であり、**PLの方が悪化する**。PLがCBより悪化するレースの割合は
-   * 117/199(58.8%。clipVariant=wide15・N=200では143/200=71.5%)に達する。
+   * 117/199(58.8%。clipVariant=wide15・N=200では143/200=71.5%)に達する
+   * (分母がclipVariantで199と200で異なるのは母数の取り方の違いではなく、`runModelLayer`が
+   * `plWorseCount/successCount`〈フィット成功件数を分母にする〉を出力しているため:
+   * clipVariant=defaultはN=200中`not-converged`が1件発生し成功件数が199件になるのに対し、
+   * wide15は`not-converged`が0件でN=200のまま成功件数と一致する。
+   * `pnpm tsx scripts/bench-joint-model.ts` 実行結果の
+   * 「成功: 199/200」「not-converged: 1/200」〈default〉/「成功: 200/200」〈wide15〉で
+   * 再現できる)。
    *
    * **重要: false は「1着確率や3着内率の予測が当たる」ことを一切意味しない。**
    * 「同時分布が周辺確率をどれだけ忠実に再現するか」という数学的な性質のフラグであり、

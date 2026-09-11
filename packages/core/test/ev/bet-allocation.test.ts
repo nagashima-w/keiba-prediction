@@ -493,6 +493,121 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     });
   });
 
+  /**
+   * AC-B5'(Issue #81・#78-Bレビュー指摘の是正): 直前の「受け入れ条件7」describe(CB明示・
+   * 変更禁止)のPL版双子。production の既定モデルはPLになったため、比例縮小の代償が
+   * PLの下でも(CBと同様に)正であることを別途固定する。
+   *
+   * **このフィクスチャでは PL の marginalDeviationMax(0.1333)が CB(0.1532)より小さいが、
+   * これは少数派であり一般的な優劣を意味しない。** 実測(`scripts/bench-joint-model.ts`)では
+   * PL が CB より悪化するレースが default 58.8%(117/199)・wide15 71.5%(143/200)を占め、
+   * marginalDeviationMax の中央値も PL 0.061835 / CB 0.046275 で PL の方が悪い。本テストの
+   * cost(比例縮小の代償)がCBよりPLの方が小さい(=良い)という結果も、上記と同じ「このフィクスチャ
+   * 固有の少数派の配置」であり、PLの方が優れているという一般的な結論は一切導けない(#81は
+   * 精度改善ではなく、#23-B/#25で1レース内に2モデルが混在するのを避けるための技術的前提)。
+   */
+  describe("AC-B5': 受け入れ条件7のPL版(比例縮小の代償の定量化。#81)", () => {
+    it("capApplied===trueのとき、比例縮小は制約付き最適(cap内で貪欲打ち切り)よりF値が実測差だけ劣ること(PL)", () => {
+      // 受け入れ条件7(CB版)と同一のフィクスチャ・同一の設定。modelだけをPLへ差し替える。
+      const candidates = [candidate(1, 0.4, 3), candidate(2, 0.35, 3.2)];
+      const model = PLACKETT_LUCE_MODEL;
+      const placeCount = 1;
+      const bankroll = 10000;
+      const perRaceCap = 3000;
+      const steps = 200;
+      const delta = 1 / steps;
+
+      // 前提(無条件expect): このフィクスチャがPLでdegenerateFixedCount===0
+      // (縮退せずθフィットを実際に解いている)こと。自分で実測して0であることを確認済み。
+      const jointHorses0 = candidates.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
+      const fit = fitPlackettLuceStrengths(jointHorses0, placeCount);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      expect(fit.degenerateFixedCount).toBe(0);
+
+      const result = allocateBets(
+        candidates,
+        placeCount,
+        config({ bankroll, perRaceCap, kellyFraction: 1, betUnit: 1, greedySteps: steps }),
+        model,
+      );
+
+      // 前提(無条件expect): キャップが実際に拘束していること。拘束していなければ
+      // 比例縮小のs=1となり、以降の比較はAC-B5'が測ろうとしている代償を何も検証しない。
+      expect(result.capApplied).toBe(true);
+
+      const jointHorses = candidates.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
+      const distribution = model.buildDistribution(jointHorses, placeCount);
+      const odds = [candidates[0]!.placeOddsMin!, candidates[1]!.placeOddsMin!];
+
+      function objective(x1: number, x2: number): number | null {
+        let total = 0;
+        for (const outcome of distribution) {
+          const has1 = outcome.placed.includes(1);
+          const has2 = outcome.placed.includes(2);
+          const wealth = 1 - x1 - x2 + (has1 ? x1 * odds[0]! : 0) + (has2 ? x2 * odds[1]! : 0);
+          if (wealth <= 0) {
+            return null;
+          }
+          total += outcome.probability * Math.log(wealth);
+        }
+        return total;
+      }
+
+      // (A) 実装が実際に出力したstakeを、バンクロール比率(fraction)へ変換する。
+      const propX1 = result.allocations.find((a) => a.umaban === 1)!.stake / result.resolvedBankroll;
+      const propX2 = result.allocations.find((a) => a.umaban === 2)!.stake / result.resolvedBankroll;
+      const propF = objective(propX1, propX2);
+      expect(propF).not.toBeNull();
+
+      // (B) 参照実装: capFraction(=perRaceCap/bankroll)を超えないよう打ち切る制約付き貪欲
+      // (CB版と同一ロジック。テスト内実装で可であることはCB版と同じboss許可に基づく)。
+      const capFraction = perRaceCap / bankroll;
+      const greedyX = [0, 0];
+      let sumX = 0;
+      let currentF = objective(0, 0)!;
+      for (let step = 0; step < steps; step++) {
+        const trialSumX = sumX + delta;
+        if (trialSumX > capFraction + 1e-12) {
+          break;
+        }
+        let bestIdx = -1;
+        let bestIncrement = 0;
+        for (let i = 0; i < 2; i++) {
+          const trialX = greedyX.slice();
+          trialX[i] = trialX[i]! + delta;
+          const f = objective(trialX[0]!, trialX[1]!);
+          if (f === null) {
+            continue;
+          }
+          const increment = f - currentF;
+          if (increment > bestIncrement) {
+            bestIncrement = increment;
+            bestIdx = i;
+          }
+        }
+        if (bestIdx === -1) {
+          break;
+        }
+        greedyX[bestIdx] = greedyX[bestIdx]! + delta;
+        sumX = trialSumX;
+        currentF = objective(greedyX[0]!, greedyX[1]!)!;
+      }
+      const constrainedGreedyF = objective(greedyX[0]!, greedyX[1]!);
+      expect(constrainedGreedyF).not.toBeNull();
+
+      // 実測(自分で実行して確認。CB版の同一構成に対する実測cost≈0.0010101201357806122とは
+      // 別に、PLではcost≈0.00026427344172264になる〈CBの約1/3.82〉。この差自体もモデル固有の
+      // 数値であり「PLの方が優れている」ことの根拠ではない(上記JSDoc参照)。
+      const cost = constrainedGreedyF! - propF!;
+      expect(cost).toBeCloseTo(0.00026427344172264, 10);
+      expect(cost).toBeGreaterThan(0);
+      // 上界は実測値(0.00026427344172264)の2倍以内(旧CB版の値0.00101をそのまま流用しない。
+      // boss着手前ゲート指摘)。
+      expect(cost).toBeLessThan(0.00053);
+    });
+  });
+
   describe("受け入れ条件8・最低額ロジック(4ケース必須)", () => {
     it("(a) 単一候補でkellyTargetStakeが100円未満 → totalStake=100・exceedsKellyTarget=true・advisory≠null", () => {
       const horses = [candidate(1, 0.5, 2.2)];

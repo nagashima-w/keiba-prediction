@@ -297,7 +297,9 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   `clipVariant=default`・`N=200`)では、実際に構築した同時分布の周辺確率と入力`placeProb`との
   最大絶対差(`marginalDeviationMax`)の中央値は `PLACKETT_LUCE_MODEL=0.061835` /
   `CONDITIONAL_BERNOULLI_MODEL=0.046275` であり、**PLの方が悪化する**(中央値で約33.6%
-  〈0.061835/0.046275−1〉)。PLがCBより悪化するレースの割合は117/199=58.8%
+  〈0.061835/0.046275−1。この「約33.6%」自体は`scripts/bench-joint-model.ts`の出力する
+  中央値2つからの手計算であり、スクリプトの出力そのものにこの値は現れない〉)。
+  PLがCBより悪化するレースの割合は117/199=58.8%
   (`clipVariant=wide15`・`N=200`では143/200=71.5%)に達する。**この数値は
   `scripts/bench-joint-model.ts` が合成する入力(`N=200`)による標本比率であり、
   production の実分布そのものを測ったものではない**(スクリプトのJSDoc「使い方」参照)。
