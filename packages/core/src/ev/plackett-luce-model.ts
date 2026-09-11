@@ -220,22 +220,39 @@ function buildOutcomesFromFullTheta(
 
 /**
  * Plackett-Luce モデル(PlaceJointModel の厳密実装)。
- * `approximate: false` ——「入力の周辺確率(placeProb)を厳密に再現する」という意味に限定する
- * (JSDoc冒頭「近似の意味の再定義」参照)。「1着確率が当たる」ことを意味しない。
+ * `approximate: false` ——「**Σp=kちょうどのとき**、入力の周辺確率(placeProb)を厳密に再現する」
+ * という意味に限定する(JSDoc冒頭「近似の意味の再定義」参照。#81でΣp≠kの実際の挙動を追記)。
+ * 「1着確率が当たる」ことを意味しない。
  */
 export const PLACKETT_LUCE_MODEL: PlaceJointModel = {
   id: "plackett-luce",
   /**
    * 近似の意味の再定義(#20-A): このフラグは「同時分布が入力の周辺確率(placeProb)を
    * 再現しないか」だけを表す。CONDITIONAL_BERNOULLI_MODEL は条件付け後の周辺確率が入力と
-   * 厳密には一致しないため true(近似)。本モデルは入力の周辺確率を厳密に再現する
-   * (フィットが収束する限り)ため false としている。
+   * 厳密には一致しないため true(近似)。本モデルは **Σp=kちょうどの入力に対しては**
+   * 周辺確率を厳密に再現する(フィットが収束する限り)ため false としている。
+   *
+   * **Σp≠kの入力(production の大半)に対する追記(#81): 再現されるのは入力の placeProb
+   * そのものではなく、水詰め射影(water-filling)による再スケール後の目標 q である。**
+   * `fitPlackettLuceStrengths`(`plackett-luce-strength.ts`)は Σp≠k の入力を
+   * `q_i=min(1,λ・p_i)`(Σq=k)へ射影してから解く。`scripts/bench-joint-model.ts` の実測
+   * (`pnpm tsx scripts/bench-joint-model.ts` で再現可能。clipVariant=default・N=200)では
+   * p=0を含むレースが197/200(98.5%)に達し、再スケールがほぼ常時働く。つまり
+   * production では「false」が指す“厳密な再現”の対象はほとんどの場合 placeProb 自体では
+   * なく再スケール後の q であり、この q は placeProb と一致しない。
+   *
+   * **さらに、この false は CONDITIONAL_BERNOULLI_MODEL(true)より周辺確率の再現精度が
+   * 高いことを意味しない。** 同じ実測(clipVariant=default・N=200)で `marginalDeviationMax`
+   * (実際に構築した同時分布の周辺確率と入力placeProbとの最大絶対差)の中央値は
+   * PL=0.061835・CB=0.046275 であり、**PLの方が悪化する**。PLがCBより悪化するレースの割合は
+   * 117/199(58.8%。clipVariant=wide15・N=200では143/200=71.5%)に達する。
    *
    * **重要: false は「1着確率や3着内率の予測が当たる」ことを一切意味しない。**
    * 「同時分布が周辺確率をどれだけ忠実に再現するか」という数学的な性質のフラグであり、
    * 予測の的中率・実測妥当性は本フラグの対象外(#23の着手前ゲートはPLを真のモデルと
    * *仮定*して条件付きベルヌーイの誤差を測ったのであって、PL自体の妥当性を検証したのではない。
-   * それが検証されるまで、false を「精度が高い」という意味で読んではならない)。
+   * それが検証されるまで、false を「精度が高い」という意味で読んではならない。#81でΣp≠kの
+   * 実測により、精度が高いどころか中央値では悪化することが分かった)。
    */
   approximate: false,
   buildDistribution(horses, placeCount) {

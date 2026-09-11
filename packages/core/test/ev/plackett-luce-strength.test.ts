@@ -669,3 +669,85 @@ describe("PlackettLuceFitError", () => {
     }
   });
 });
+
+/**
+ * 収束の崖(Issue #81・AC-B6'(d))。
+ *
+ * #81 のゲートで、当初「production で約0.17%のレースが判定不能になる」という比率を
+ * `docs/current-spec.md` に書こうとしたが、その比率は合成prior生成器による標本比率であり
+ * production の実分布での値である保証がなく、boss がその場で書いた使い捨てスクリプトの出力で
+ * リポジトリに再現手段が存在しなかった(#80で差し戻したのと同じ欠陥の再演。boss自身の言葉で
+ * 「情状酌量の余地がない」)。そのため比率は一切書かず、代わりに**decision的で再現可能な
+ * 「非収束の崖」の機構**をここに固定する。
+ *
+ * p=[p0, 0.5, 0.1], k=2 の固定入力で p0 だけを動かすと、再スケール後の目標(q)の最大値が
+ * 1のすぐ下に近づくほど θ→∞ が必要になり反復回数が増え、MAX_FIT_ITERATIONS(2000)に達すると
+ * not-converged で打ち切られる。1以上(水詰めでq=1に厳密固定)側に振れると即座に
+ * degenerateFixedCount>=1 の閉形式(iterations=0)に落ちるため、この崖は**片側だけ**にある
+ * (固定側は破綻しない)。
+ *
+ * 数値は本ファイルの `fitPlackettLuceStrengths` を直接呼んだ実測(`npx vitest` で毎回
+ * 同じ値が出る。RNG・種・N は一切使わない決定的な入力なので再現手順そのものが実測手段)。
+ * `MAX_FIT_ITERATIONS`・`FIT_TOLERANCE` を変更するとこの崖の位置(p0の閾値)・反復回数が
+ * 動くため、変更した場合はこの節を測り直すこと(*殺す変異*: 定数を変える→この節が崩れる)。
+ */
+describe("収束の崖(Issue #81・AC-B6'(d)): p=[p0,0.5,0.1] k=2でp0を動かした片側の崖", () => {
+  function fitAt(p0: number) {
+    return fitPlackettLuceStrengths(horses([p0, 0.5, 0.1]), 2);
+  }
+
+  it("p0=0.61(水詰めでq=1に固定される側): ok・degenerateFixedCount=1・iterations=0(閉形式・反復不要)", () => {
+    const fit = fitAt(0.61);
+    expect(fit.ok).toBe(true);
+    if (!fit.ok) return;
+    expect(fit.degenerateFixedCount).toBe(1);
+    expect(fit.iterations).toBe(0);
+  });
+
+  it("p0=0.6(ちょうど崖の頂点): not-converged", () => {
+    const fit = fitAt(0.6);
+    expect(fit.ok).toBe(false);
+    if (fit.ok) return;
+    expect(fit.reason).toBe("not-converged");
+  });
+
+  it("p0=0.5999(崖の直下): not-converged", () => {
+    const fit = fitAt(0.5999);
+    expect(fit.ok).toBe(false);
+    if (fit.ok) return;
+    expect(fit.reason).toBe("not-converged");
+  });
+
+  it("p0=0.599(崖の直下): not-converged", () => {
+    const fit = fitAt(0.599);
+    expect(fit.ok).toBe(false);
+    if (fit.ok) return;
+    expect(fit.reason).toBe("not-converged");
+  });
+
+  it("p0=0.59(崖からわずかに離れる): ok・degenerateFixedCount=0(自由集合を反復で解く)・iterations=390(崖に近いほど反復が増える側)", () => {
+    const fit = fitAt(0.59);
+    expect(fit.ok).toBe(true);
+    if (!fit.ok) return;
+    expect(fit.degenerateFixedCount).toBe(0);
+    expect(fit.iterations).toBe(390);
+  });
+
+  it("p0=0.55(崖からさらに離れる): ok・degenerateFixedCount=0・iterations=91(0.59より崖から遠く反復が少ない。単調性の直接証拠)", () => {
+    const fit = fitAt(0.55);
+    expect(fit.ok).toBe(true);
+    if (!fit.ok) return;
+    expect(fit.degenerateFixedCount).toBe(0);
+    expect(fit.iterations).toBe(91);
+  });
+
+  it("単調性(無条件expect): 崖に近いp0=0.59の反復回数は、より遠いp0=0.55より多いこと(iterations=0の閉形式側と混同しない)", () => {
+    const near = fitAt(0.59);
+    const far = fitAt(0.55);
+    expect(near.ok).toBe(true);
+    expect(far.ok).toBe(true);
+    if (!near.ok || !far.ok) return;
+    expect(near.iterations).toBeGreaterThan(far.iterations);
+  });
+
+});

@@ -472,8 +472,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: null, // BetAllocationConfigにcandidateCapは存在しない。
-      modelId: "conditional-bernoulli",
-      modelApproximate: true,
+      modelId: "plackett-luce",
+      modelApproximate: false,
       oddsStatus: "result",
     });
     // 前提固定: stake>0の明細が実際に1件以上あること(空振り防止)。
@@ -538,8 +538,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
-      modelId: "conditional-bernoulli",
-      modelApproximate: true,
+      modelId: "plackett-luce",
+      modelApproximate: false,
       oddsStatus: "result",
     });
   });
@@ -724,8 +724,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
-      modelId: "conditional-bernoulli",
-      modelApproximate: true,
+      modelId: "plackett-luce",
+      modelApproximate: false,
       oddsStatus: "middle",
     });
   });
@@ -832,8 +832,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: null,
-      modelId: "conditional-bernoulli",
-      modelApproximate: true,
+      modelId: "plackett-luce",
+      modelApproximate: false,
       oddsStatus: "middle",
     });
     // 値が固定文字列ではなく`AllocationOutcomeCodes`から写っていることを、写し元との一致でも固定する。
@@ -871,8 +871,8 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
-      modelId: "conditional-bernoulli",
-      modelApproximate: true,
+      modelId: "plackett-luce",
+      modelApproximate: false,
       oddsStatus: "result",
     });
     expect(rec.meta.skipReasonCode).toBe(outcome.outcome.skipReasonCode);

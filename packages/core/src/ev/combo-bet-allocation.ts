@@ -92,6 +92,7 @@ import {
 import { buildComboOddsKey, parseComboOddsKey } from "../scraper/combo-odds-key.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
+  PLACKETT_LUCE_MODEL,
   type JointModelHorse,
   type PlaceJointModel,
   type PlaceOutcome,
@@ -572,7 +573,7 @@ export function allocateGeneralBets(
   topFinishCount: number,
   candidates: readonly AllocationCandidate[],
   config: GeneralBetAllocationConfig = DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
-  model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL,
+  model: PlaceJointModel = PLACKETT_LUCE_MODEL,
 ): GeneralBetAllocationResult {
   validateTopFinishCount(topFinishCount);
   validateCandidates(candidates);
@@ -900,7 +901,7 @@ export function buildComboCandidates(
   betType: AllocationBetType,
   oddsByKey: ReadonlyMap<string, number | null>,
   evConfig: EvConfig = DEFAULT_EV_CONFIG,
-  model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL,
+  model: PlaceJointModel = PLACKETT_LUCE_MODEL,
 ): ComboCandidateBuildResult {
   validateTopFinishCount(topFinishCount);
   // 未知のbetTypeはここでthrowする(Issue #76。umabanCountOfへ判定を集約)。

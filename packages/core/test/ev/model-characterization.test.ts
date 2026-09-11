@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import { allocateBets, type AllocationHorse, DEFAULT_BET_ALLOCATION_CONFIG } from "../../src/ev/bet-allocation.js";
+import { CONDITIONAL_BERNOULLI_MODEL } from "../../src/ev/place-joint-model.js";
 import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
 import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js";
 import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
 
 /**
- * model-characterization — Issue #80(#78-A)のAC-A7(本タスクの主目的)。
+ * model-characterization — 元は Issue #80(#78-A)の AC-A7 として新設。Issue #81(#78-B)で
+ * 既定モデルを`PLACKETT_LUCE_MODEL`へ切り替えたため、AC-B2' として**3行構成**へ改める
+ * (#81着手前ゲートで確定)。
  *
- * `CONDITIONAL_BERNOULLI_MODEL`(既定)と`PLACKETT_LUCE_MODEL`が、**同一の入力(候補馬・オッズ・
+ * `CONDITIONAL_BERNOULLI_MODEL`と`PLACKETT_LUCE_MODEL`が、**同一の入力(候補馬・オッズ・
  * 配分設定)**に対してどれだけ異なる配分結果を返すかを、テーブル駆動でリテラル固定する。
- * これは#81(既定モデルをPLへ切り替える)が実際に配分額を動かすことを検出するための土台であり、
- * 本タスク自体は既定モデル・数値を一切変更しない(#80着手前ゲート確定)。
+ * `EXPECTED_CB`・`EXPECTED_PL`の数値リテラルは#80から**一切変更していない**(#81のACの
+ * 明示的な要求)。CB行・PL行はそれぞれ`CONDITIONAL_BERNOULLI_MODEL`・`PLACKETT_LUCE_MODEL`を
+ * 明示的に渡し、既定切替の影響を受けないようにした上で、新たに「既定行」(model引数省略)を
+ * 追加し、既定が`EXPECTED_PL`と一致する(`modelId==="plackett-luce"`)ことを検証する。
  *
  * ## フィクスチャの出処(boss着手前ゲートで指定・本テストで独立に再実測)
  * 6フィクスチャ(F1〜F6)は境界条件を打ち抜くよう設計されている(bankroll=500000・
@@ -19,6 +24,8 @@ import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
  * - F1: Σp=k厳密(dyadic)。PLの反復フィッタはFIT_TOLERANCE(1e-6)未満で停止するため
  *   marginalDeviationMaxは理論上の0にはならない(`toBe(0)`は使わない。boss訂正3)。
  * - F2: k≥nの退化ケース(全馬が上位k枠に厳密固定)。CBとPLの結果が完全一致する対照。
+ *   **既定行の唯一の検出手段が`modelId`になる箇所**(数値がCB/PLで完全一致するため。
+ *   下記の既定行のit参照)。
  * - F3: Σp<k・capが実質無拘束。betCount(7 vs 8)を含め内訳が大きく割れる。
  * - F4: Σp>k。`isSkip`がCB=false/PL=trueと反転する最強の判別ケース。
  * - F5: p=1を含む(θ=Infinityで厳格固定される馬がいる)。PLのmdevがCBより**良い**少数派の例
@@ -30,8 +37,9 @@ import type { JointModelHorse } from "../../src/ev/place-joint-model.js";
  * betCount・isSkip・marginalDeviationMaxである**(F3・F6のtotalStakeが近接しているにも
  * かかわらずstake配列は別物であることをテストで直接示す)。
  *
- * *殺す変異*: 既定モデルをPLに差し替える(#81の先取り)→ F2(CB=PLが元々同一)を除く
- * 全フィクスチャのCB行の期待値が崩れ、必ず赤くなる(下記「変異の実行結果」参照)。
+ * *殺す変異*: 既定を CB に戻す(#81が成就した既定切替を巻き戻す)→ F2を除く全フィクスチャの
+ * 既定行の期待値が崩れ、必ず赤くなる。CB行・PL行はmodel引数を明示するため、この変異では
+ * 赤くならない(検出力は既定行だけが持つ)。
  */
 
 interface Fixture {
@@ -113,17 +121,13 @@ function stakesByUmaban(result: { allocations: readonly { umaban: number; stake:
   return out;
 }
 
-describe("AC-A7: CONDITIONAL_BERNOULLI_MODELとPLACKETT_LUCE_MODELの配分結果の特性化(#81検出力の土台)", () => {
+describe("AC-B2': CONDITIONAL_BERNOULLI_MODEL・PLACKETT_LUCE_MODEL・既定(model省略)の配分結果の特性化(#81)", () => {
   describe.each(FIXTURES)("$name", (f) => {
     const horses = horsesOf(f);
 
-    it("CB(既定モデル。#81検出のためmodel引数を渡さず既定値に依存する)の配分結果がリテラルと一致すること", () => {
-      // #81(既定モデルをPLへ切り替える)がここを壊すことを意図してmodel引数を省略する
-      // (production呼び出し元もmodel引数を渡さない設計であり、ここも同じ形にすることで
-      // 「既定を差し替えると本テストが赤くなる」というAC-A7の殺す変異が成立する。
-      // 明示的にCONDITIONAL_BERNOULLI_MODELを渡すと、#81の既定切替と無関係に常に緑のまま
-      // になってしまい検出力が無い)。
-      const result = allocateBets(horses, f.k, { ...CONFIG_BASE, perRaceCap: f.cap });
+    it("CB(CONDITIONAL_BERNOULLI_MODELを明示指定)の配分結果がリテラルと一致すること", () => {
+      // #81で既定がPLへ切り替わったため、CB行はmodel引数を明示する(EXPECTED_CBの数値は不変)。
+      const result = allocateBets(horses, f.k, { ...CONFIG_BASE, perRaceCap: f.cap }, CONDITIONAL_BERNOULLI_MODEL);
       expect(result.modelId).toBe("conditional-bernoulli");
       expect(result.isSkip).toBe(EXPECTED_CB[f.name]!.isSkip);
       expect(result.betCount).toBe(EXPECTED_CB[f.name]!.betCount);
@@ -132,8 +136,18 @@ describe("AC-A7: CONDITIONAL_BERNOULLI_MODELとPLACKETT_LUCE_MODELの配分結�
       expect(result.diagnostics.marginalDeviationMax).toBe(EXPECTED_CB[f.name]!.marginalDeviationMax);
     });
 
-    it("PL(PLACKETT_LUCE_MODEL)の配分結果がリテラルと一致すること", () => {
+    it("PL(PLACKETT_LUCE_MODELを明示指定)の配分結果がリテラルと一致すること", () => {
       const result = allocateBets(horses, f.k, { ...CONFIG_BASE, perRaceCap: f.cap }, PLACKETT_LUCE_MODEL);
+      expect(result.modelId).toBe("plackett-luce");
+      expect(result.isSkip).toBe(EXPECTED_PL[f.name]!.isSkip);
+      expect(result.betCount).toBe(EXPECTED_PL[f.name]!.betCount);
+      expect(result.totalStake).toBe(EXPECTED_PL[f.name]!.totalStake);
+      expect(stakesByUmaban(result, f.p.length)).toEqual(EXPECTED_PL[f.name]!.stakes);
+      expect(result.diagnostics.marginalDeviationMax).toBe(EXPECTED_PL[f.name]!.marginalDeviationMax);
+    });
+
+    it("既定(model引数省略)の配分結果がEXPECTED_PLと一致すること(#81: 既定切替の検出。F2はmodelId以外CB/PLの数値が完全一致するため、modelIdがこの行の唯一の検出手段になる)", () => {
+      const result = allocateBets(horses, f.k, { ...CONFIG_BASE, perRaceCap: f.cap });
       expect(result.modelId).toBe("plackett-luce");
       expect(result.isSkip).toBe(EXPECTED_PL[f.name]!.isSkip);
       expect(result.betCount).toBe(EXPECTED_PL[f.name]!.betCount);

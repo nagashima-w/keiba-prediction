@@ -22,6 +22,8 @@ import {
   type PlaceJointModel,
   type PlaceOutcome,
 } from "../../src/ev/place-joint-model.js";
+import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
+import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js";
 
 /**
  * combo-bet-allocation — 機能D-2a(Issue #14)。買い目が「馬の組」になる券種
@@ -330,14 +332,45 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     );
 
     it("topFinishCount=0・小数(1.5)は例外にならないこと(境界の確認。place-joint-model.tsの既存トレランスと非対称な過剰拒否を防ぐ)", () => {
+      // AC-B3'(D)(a)裁定(#81): PLの`validatePlaceCountOrThrow`は非整数(1.5)のplaceCountを
+      // throwするが、CBは許容する契約。CONDITIONAL_BERNOULLI_MODELを明示的に渡してこの契約を
+      // 保存する(PL側の契約は下記「AC-B3'(a): PL版」で別途固定する)。
       const horses = evenHorses(5, 3);
       const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true, betType: "wide" }];
-      expect(() => allocateGeneralBets(horses, 0, cand)).not.toThrow();
-      expect(() => allocateGeneralBets(horses, 1.5, cand)).not.toThrow();
+      expect(() =>
+        allocateGeneralBets(horses, 0, cand, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, CONDITIONAL_BERNOULLI_MODEL),
+      ).not.toThrow();
+      expect(() =>
+        allocateGeneralBets(horses, 1.5, cand, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, CONDITIONAL_BERNOULLI_MODEL),
+      ).not.toThrow();
 
       const oddsMap = uniformOddsMap(4, 2, 5);
-      expect(() => buildComboCandidates(evenHorses(4, 3), 0, "wide", oddsMap)).not.toThrow();
-      expect(() => buildComboCandidates(evenHorses(4, 3), 1.5, "wide", oddsMap)).not.toThrow();
+      expect(() =>
+        buildComboCandidates(evenHorses(4, 3), 0, "wide", oddsMap, undefined, CONDITIONAL_BERNOULLI_MODEL),
+      ).not.toThrow();
+      expect(() =>
+        buildComboCandidates(evenHorses(4, 3), 1.5, "wide", oddsMap, undefined, CONDITIONAL_BERNOULLI_MODEL),
+      ).not.toThrow();
+    });
+
+    it("AC-B3'(a)(#81): PL版。topFinishCount=0は例外にならないが、非整数(1.5)はinvalid-place-countとしてthrowすること", () => {
+      const horses = evenHorses(5, 3);
+      const cand: AllocationCandidate[] = [{ umabans: [1, 2], odds: 5, ev: 1.5, isPositive: true, betType: "wide" }];
+      // 0は非有限/負/非整数のいずれにも該当しないため、PLでも例外にならない(CBと同じ)。
+      expect(() =>
+        allocateGeneralBets(horses, 0, cand, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, PLACKETT_LUCE_MODEL),
+      ).not.toThrow();
+      expect(() =>
+        buildComboCandidates(evenHorses(4, 3), 0, "wide", uniformOddsMap(4, 2, 5), undefined, PLACKETT_LUCE_MODEL),
+      ).not.toThrow();
+
+      // 1.5(非整数)はPLではthrowする(CBとの契約差そのもの)。
+      expect(() =>
+        allocateGeneralBets(horses, 1.5, cand, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, PLACKETT_LUCE_MODEL),
+      ).toThrowError(expect.objectContaining({ name: "PlackettLuceFitError", reason: "invalid-place-count" }));
+      expect(() =>
+        buildComboCandidates(evenHorses(4, 3), 1.5, "wide", uniformOddsMap(4, 2, 5), undefined, PLACKETT_LUCE_MODEL),
+      ).toThrowError(expect.objectContaining({ name: "PlackettLuceFitError", reason: "invalid-place-count" }));
     });
 
     it("回帰テスト: topFinishCount=Infinityが誤って健全に見える非スキップ配分を返していた症状(この修正前の実測: isSkip=false, totalStake=49900)が再現しないこと", () => {
@@ -1136,6 +1169,8 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
   describe("後方互換(複勝相当・単一要素combo): allocateBetsとの厳密一致(toBe)", () => {
     it("受け入れ条件6シナリオを単一要素comboで再現し、totalStake/各stake/kellyTargetStakeがtoBeで一致すること", () => {
       // bet-allocation.test.ts「受け入れ条件6」と同一の入力(placeCount=2・3頭・cap拘束)。
+      // AC-B3'(D)(b)裁定(#81): このフィクスチャはPLで`not-converged`によりthrowするため、
+      // CONDITIONAL_BERNOULLI_MODELを明示的に渡す(PL版は下記「AC-B3'(b): PL版」参照)。
       const rawHorses: Array<{ umaban: number; placeProb: number; placeOddsMin: number }> = [
         { umaban: 1, placeProb: 0.6, placeOddsMin: 2.5 },
         { umaban: 2, placeProb: 0.5, placeOddsMin: 2.2 },
@@ -1155,16 +1190,19 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
         greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
       };
-      const expected = allocateBets(allocationHorses, 2, config);
+      const expected = allocateBets(allocationHorses, 2, config, CONDITIONAL_BERNOULLI_MODEL);
 
       const jointHorses: JointModelHorse[] = rawHorses.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
       const candidates: AllocationCandidate[] = allocationHorses
         .filter((h) => h.isPositive && h.placeOddsMin !== null)
         .map((h) => ({ umabans: [h.umaban], odds: h.placeOddsMin!, ev: h.ev!, isPositive: true, betType: "place" }));
-      const actual = allocateGeneralBets(jointHorses, 2, candidates, {
-        ...config,
-        candidateCap: DEFAULT_CANDIDATE_CAP,
-      });
+      const actual = allocateGeneralBets(
+        jointHorses,
+        2,
+        candidates,
+        { ...config, candidateCap: DEFAULT_CANDIDATE_CAP },
+        CONDITIONAL_BERNOULLI_MODEL,
+      );
 
       expect(actual.totalStake).toBe(expected.totalStake);
       expect(actual.kellyTargetStake).toBe(expected.kellyTargetStake);
@@ -1177,6 +1215,76 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(actual.notDiversified).toBe(expected.notDiversified);
 
       // 各候補のstake/continuousFraction/scaledFractionがtoBeで一致すること(umaban対応)。
+      for (const exp of expected.allocations.filter((a) => a.excludedReason === null)) {
+        const act = actual.allocations.find((a) => a.umabans[0] === exp.umaban);
+        expect(act).toBeDefined();
+        expect(act!.stake).toBe(exp.stake);
+        expect(act!.continuousFraction).toBe(exp.continuousFraction);
+        expect(act!.scaledFraction).toBe(exp.scaledFraction);
+      }
+    });
+
+    /**
+     * AC-B3'(b): PL版。#80版はp=[0.6,0.5,0.1]・k=2だったが、PLでは`not-converged`で
+     * throwするため使えない(#81着手前ゲートboss実測)。degenerateFixedCount===0で
+     * 収束するp=[0.5,0.4,0.3]・k=2へ差し替え、同じ後方互換の不変条件(allocateBetsと
+     * allocateGeneralBetsの厳密一致)をPLの下でも検査する。
+     */
+    it("AC-B3'(b)(#81): PL版。受け入れ条件6相当のシナリオを単一要素comboで再現し、totalStake/各stake/kellyTargetStakeがtoBeで一致すること", () => {
+      const rawHorses: Array<{ umaban: number; placeProb: number; placeOddsMin: number }> = [
+        { umaban: 1, placeProb: 0.5, placeOddsMin: 2.5 },
+        { umaban: 2, placeProb: 0.4, placeOddsMin: 2.2 },
+        { umaban: 3, placeProb: 0.3, placeOddsMin: 5 },
+      ];
+
+      // 前提(無条件expect): このフィクスチャがPLでdegenerateFixedCount===0(縮退せずθフィットを
+      // 実際に解く)であること。
+      const fit = fitPlackettLuceStrengths(
+        rawHorses.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb })),
+        2,
+      );
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      expect(fit.degenerateFixedCount).toBe(0);
+
+      const allocationHorses: AllocationHorse[] = rawHorses.map((h) => ({
+        umaban: h.umaban,
+        placeProb: h.placeProb,
+        placeOddsMin: h.placeOddsMin,
+        ev: h.placeProb * h.placeOddsMin,
+        isPositive: h.placeProb * h.placeOddsMin > 1,
+      }));
+      const config = {
+        bankroll: 1000000,
+        perRaceCap: 800,
+        kellyFraction: 1,
+        betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
+        greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
+      };
+      const expected = allocateBets(allocationHorses, 2, config, PLACKETT_LUCE_MODEL);
+
+      const jointHorses: JointModelHorse[] = rawHorses.map((h) => ({ umaban: h.umaban, placeProb: h.placeProb }));
+      const candidates: AllocationCandidate[] = allocationHorses
+        .filter((h) => h.isPositive && h.placeOddsMin !== null)
+        .map((h) => ({ umabans: [h.umaban], odds: h.placeOddsMin!, ev: h.ev!, isPositive: true, betType: "place" }));
+      const actual = allocateGeneralBets(
+        jointHorses,
+        2,
+        candidates,
+        { ...config, candidateCap: DEFAULT_CANDIDATE_CAP },
+        PLACKETT_LUCE_MODEL,
+      );
+
+      expect(actual.totalStake).toBe(expected.totalStake);
+      expect(actual.kellyTargetStake).toBe(expected.kellyTargetStake);
+      expect(actual.plannedStake).toBe(expected.plannedStake);
+      expect(actual.capApplied).toBe(expected.capApplied);
+      expect(actual.minimumStakeApplied).toBe(expected.minimumStakeApplied);
+      expect(actual.exceedsKellyTarget).toBe(expected.exceedsKellyTarget);
+      expect(actual.betCount).toBe(expected.betCount);
+      expect(actual.isSkip).toBe(expected.isSkip);
+      expect(actual.notDiversified).toBe(expected.notDiversified);
+
       for (const exp of expected.allocations.filter((a) => a.excludedReason === null)) {
         const act = actual.allocations.find((a) => a.umabans[0] === exp.umaban);
         expect(act).toBeDefined();

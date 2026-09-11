@@ -150,6 +150,7 @@
 
 import {
   CONDITIONAL_BERNOULLI_MODEL,
+  PLACKETT_LUCE_MODEL,
   type JointModelHorse,
   type PlaceJointModel,
   type PlaceOutcome,
@@ -416,7 +417,7 @@ export function allocateBets(
   horses: readonly AllocationHorse[],
   placeCount: number,
   config: BetAllocationConfig = DEFAULT_BET_ALLOCATION_CONFIG,
-  model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL,
+  model: PlaceJointModel = PLACKETT_LUCE_MODEL,
 ): BetAllocationResult {
   const bankrollInput = config.bankroll;
   const perRaceCapInput = config.perRaceCap;

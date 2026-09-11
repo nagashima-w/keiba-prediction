@@ -956,6 +956,52 @@ DB スキーマにも触れていない。
 
 よって 1.6.5 → **1.6.6**(patch)が妥当と判断した。
 
+## 次の正式版が 1.7.0 である根拠(Issue #81・#78-B での変更)
+
+Issue #81(#78-B)は、既定の同時分布モデルを `CONDITIONAL_BERNOULLI_MODEL` から
+`PLACKETT_LUCE_MODEL` へ切り替える変更である。**production コードの変更は
+`bet-allocation.ts`(:419 付近)・`combo-bet-allocation.ts`(:575・:903 付近)の
+既定引数3行のみ**(`model: PlaceJointModel = CONDITIONAL_BERNOULLI_MODEL` →
+`= PLACKETT_LUCE_MODEL`。`git diff --stat` で確認できる)。
+
+**minor である根拠**: 区分表の minor(「利用者から見てできることが増える」または
+**「分析結果の数値が変わる」**)のうち後者に該当する。既定モデルが変わることで、
+model 引数を渡さない production の全呼び出し元(`allocateBets`・`allocateGeneralBets`・
+`buildComboCandidates`)が返す配分結果(stake配列・betCount・isSkip・kellyTargetStake等)が
+**新規分析から実際に変わる**(`packages/core/test/ev/model-characterization.test.ts` の
+F1〜F6がCB/PL両モデルの数値差をリテラルで固定しており、F4は`isSkip`がCB=false/PL=trueと
+反転する)。`modelId`/`modelApproximate` の保存値も `"conditional-bernoulli"`/`true` から
+`"plackett-luce"`/`false` へ変わる(`allocation-record.test.ts`)。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポート JSON の後方互換に関わる変更はない。
+`model_id`/`model_approximate` の DB 列は #80 時点で既に存在しており(スキーマ変更なし)、
+過去に保存された分析行(`model_id="conditional-bernoulli"`)はそのまま読める。切替は
+**新規分析以降にのみ**適用され、既存の保存データを書き換えたり読めなくしたりしない。
+
+**この切替は「配分の精度が上がる」ことを意味しない**(#81 の位置づけそのもの)。根拠は
+「同一の θ から1着確率・上位k集合確率・順列確率を導出できる」という #23-B・#25 の技術的前提
+(1レース内で2つのモデルが混在するのを避けるための依存関係上の要請)であり、精度改善では
+ない。むしろ `scripts/bench-joint-model.ts` の実測(`pnpm tsx scripts/bench-joint-model.ts`
+で再現可能)では `marginalDeviationMax` の中央値が PL 0.061835 / CB 0.046275(clipVariant=
+default・N=200)で PL が**悪化**し、PL が CB より悪化する割合は同条件で 117/199(58.8%)・
+wide15 条件(N=200)で 143/200(71.5%)だった(自分で実行して確認した値。詳細は
+`docs/current-spec.md`「5. 馬券配分の提案」参照)。
+
+**設定項目は追加していない**(`MAX_FIT_ITERATIONS`・`FIT_TOLERANCE` も #80 の値のまま据え置き)。
+**`SkipReasonCode` は増やしていない**(6値のまま。フィット非収束は既存の
+`route:"invalid"`→`unreached`(判定不能)に分類され、`verify.ts`・`VerifyView`・
+`formatUnjudgedNote`・DB スキーマは無改変)。#80 で新設した例外の受け皿(外側 try/catch・
+`resolvePlaceOnlyStake` の catch・既存の内側 catch の計2箇所)も統合していない。
+**`packages/core/package.json` の `exports` は無改変**(`git diff --stat -- packages/core/
+package.json` が空であることで確認できる)。
+
+**AC-10(非破壊)の例外として扱ったファイル**: `packages/app/test/version-policy.test.ts` は
+`packages/*/test/**` に一致するが、差分は**版数運用のチェックリスト(本書)が要求する
+版数リテラル(`EXPECTED_APP_VERSION`)・it 名・it 名直後の版数履歴コメントのみ**であり、
+既存の判定ロジック・他のテストケースには一切触れていない(#77・#80 と同じ扱い)。
+
+よって 1.6.6 → **1.7.0**(minor)が妥当と判断した。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

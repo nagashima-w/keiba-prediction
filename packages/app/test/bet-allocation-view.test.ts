@@ -111,6 +111,26 @@ describe("resolvePlaceBetTarget(頭数→複勝対象人数の判定。boss着�
       throw new Error("8頭はavailable:trueになるはず");
     }
   });
+
+  /**
+   * AC-B3'(a)(Issue #81): PLの`validatePlaceCountOrThrow`は非整数のplaceCountをthrowするが、
+   * production の`resolvePlaceBetTarget`が返す`placeCount`が非整数になることは無い、という
+   * 主張を実際に検査する(#81着手前ゲートboss裁定。「production では起きない」を誰も検査
+   * していない状態を避ける)。頭数1〜30の全整数を走査し、`available:true`のときは常に
+   * 整数の3を返すことを固定する。
+   */
+  it("AC-B3'(a): 頭数1〜30のすべてで、available:trueのときplaceCountは常に整数の3であること(#81。PLへ非整数が到達しないことの直接証拠)", () => {
+    let availableTrueCount = 0;
+    for (let runnerCount = 1; runnerCount <= 30; runnerCount++) {
+      const target = resolvePlaceBetTarget(runnerCount);
+      if (!target.available) continue;
+      availableTrueCount++;
+      expect(Number.isInteger(target.placeCount)).toBe(true);
+      expect(target.placeCount).toBe(3);
+    }
+    // 空振り防止: available:trueの走査対象が実際に1件以上あること。
+    expect(availableTrueCount).toBeGreaterThan(0);
+  });
 });
 
 describe("placeBetUnavailableMessage(reasonコード→文言のマップ。renderer側1箇所に集約)", () => {
