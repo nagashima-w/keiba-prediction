@@ -64,9 +64,11 @@
  * いたが、実際に`runModelLayer`を走らせるとその主張自体が数値と食い違っていた
  * ——#80メタレビュー差し戻しで検出・是正した〈CLAUDE.md #74の教訓「数の食い違いを
  * 検算せず方法の違いという体裁の説明で埋めない」への違反だった〉。この表を得る
- * `runFitPerformanceSweep`を本スクリプト末尾に追加した)。この未達は **#20-A では
- * `PLACKETT_LUCE_MODEL` の production 呼び出し元がゼロのため実害が無く**、
- * 既定モデルの切替(#81)を検討する際の前提として申し送る。
+ * `runFitPerformanceSweep`を本スクリプト末尾に追加した)。この未達は **#20-A の時点では
+ * `PLACKETT_LUCE_MODEL` の production 呼び出し元がゼロのため実害が無かったが、#81(#78-B)で
+ * 既定モデルが本モデルへ切り替わった現在は production からも到達しうる**
+ * (トレードオフの詳細・#81後も見直していない旨は `plackett-luce-strength.ts` の
+ * `MAX_FIT_ITERATIONS` JSDoc参照)。
  *
  * **`marginalDeviationMax`(下記`runModelLayer`が出力する中央値・PL劣化割合)についての
  * 申し送りの経緯**: 以前このJSDoc・`docs/issue-order.md`に書かれていた「57.5% / 75.5%」

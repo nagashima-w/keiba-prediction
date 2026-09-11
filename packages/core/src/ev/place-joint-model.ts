@@ -63,9 +63,12 @@ export interface PlaceOutcome {
 }
 
 /**
- * 複勝の同時分布モデル。Phase 2 で厳密なモデル(Plackett-Luce 等)に差し替える際は、
- * この interface を満たす別実装を追加し、bet-allocation.ts の呼び出し側で model 引数を
- * 差し替えるだけで済むようにする。
+ * 複勝の同時分布モデル。この interface を満たす別実装を追加し、呼び出し側(bet-allocation.ts 等)で
+ * model 引数を差し替えることでモデルを入れ替えられるように設計している。実際に Plackett-Luce 実装
+ * (`PLACKETT_LUCE_MODEL`)をこの形で追加し、#81(#78-B)で既定モデルもそちらへ切替済み
+ * (「呼び出し側の model 引数を差し替えるだけで完結する」という当初の想定自体は
+ * `probability-quality-metrics.ts` の直接呼び出しにより既に崩れている。詳細は本ファイル冒頭の
+ * コメント参照)。
  */
 export interface PlaceJointModel {
   /** モデル識別子(結果に載せ、どのモデルで計算したかを追跡できるようにする)。 */
@@ -94,7 +97,8 @@ export interface PlaceJointModel {
 const EPS = 1e-9;
 
 /**
- * 条件付きベルヌーイモデル(Phase 1 既定実装)。
+ * 条件付きベルヌーイモデル(Phase 1 で導入した近似実装。#81(#78-B)で既定は
+ * `PLACKETT_LUCE_MODEL` へ切替済みであり、現在の既定実装ではない)。
  * 各馬の的中を独立ベルヌーイとみなし、「複勝人数ちょうど k 頭が当たる」で条件付けた分布。
  * P(S) = Π_{i∈S} w_i / Σ_{|S'|=k} Π_{i∈S'} w_i 、w_i = p_i/(1-p_i)。
  */
