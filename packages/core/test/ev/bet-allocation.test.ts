@@ -1268,12 +1268,18 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
     });
 
     it("差し替えたモデルのid/approximateが反映されること(C-1由来の回帰テスト。model引数を無視して既定値をハードコードで返す退行の検出)", () => {
-      // 既定(CONDITIONAL_BERNOULLI_MODEL: id="conditional-bernoulli"・approximate=true)とは
-      // 異なるid・approximateを持つスタブモデルを注入し、結果にそのまま反映されることを確認する。
+      // 現在の既定(PLACKETT_LUCE_MODEL: id="plackett-luce"・approximate=false。#81で既定に
+      // 採用)とは異なるid・approximateを持つスタブモデルを注入し、結果にそのまま反映される
+      // ことを確認する。approximateはbooleanで値が2つしかないため、CONDITIONAL_BERNOULLI_MODEL
+      // (approximate=true)の値と同時に「両既定と異なる」ことは表現できない。この`it`の契約は
+      // 「model引数を無視して既定値をハードコードで返す退行の検出」であり、「既定」とは現在の
+      // 既定(PL)を指すため、スタブのapproximateはPLと異なる値(true)に固定し、比較対象もPLに
+      // 揃える(#81メタレビュー差し戻し: 旧版はスタブがapproximate=falseで新既定PLと同値になり、
+      // PLへのハードコード退行がapproximate軸で検出できていなかった)。
       const horses = [candidate(1, 0.6, 3)];
       const swappedModel: PlaceJointModel = {
         id: "exact-future-model",
-        approximate: false,
+        approximate: true,
         buildDistribution: () => [
           { placed: [], probability: 0.4 },
           { placed: [1], probability: 0.6 },
@@ -1286,10 +1292,11 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         swappedModel,
       );
       expect(result.modelId).toBe("exact-future-model");
-      expect(result.modelApproximate).toBe(false);
-      // 既定モデルの値と異なることも積極的に確認する(既定へのハードコード退行の直接検出)。
-      expect(result.modelId).not.toBe(CONDITIONAL_BERNOULLI_MODEL.id);
-      expect(result.modelApproximate).not.toBe(CONDITIONAL_BERNOULLI_MODEL.approximate);
+      expect(result.modelApproximate).toBe(true);
+      // 現在の既定モデル(PL)の値と異なることも積極的に確認する(既定へのハードコード退行の
+      // 直接検出)。
+      expect(result.modelId).not.toBe(PLACKETT_LUCE_MODEL.id);
+      expect(result.modelApproximate).not.toBe(PLACKETT_LUCE_MODEL.approximate);
     });
 
     it("診断値(placeProbSum等)が見送り時も含め算出されること", () => {
@@ -1486,9 +1493,16 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
       // (約0.667/0.333≈2.003)に対しstake比(500/200=2.5)の相対誤差は約24.8%になる
       // (このファイルの `allocateBets` を同じ引数〈horses・placeCount=2・perRaceCap=800・
       // bankroll=1000000・PLACKETT_LUCE_MODEL〉で呼べば再現できる)。CB版(受け入れ条件6)の
-      // 相対誤差は同じ計算で約8.5%であり、CB版の閾値0.15はPL版では小さすぎる(PLはcf比が
-      // 2.003と2.5から離れており、betUnit=100という同じ粗さの丸めでも相対誤差が大きく出る
-      // ため、CB版と同じ閾値を課すのは券種・モデル固有の丸め特性を無視した誤った移植になる)。
+      // 相対誤差は、CB版自身のフィクスチャ(p=[0.6,0.5,0.1])で測ると同じ計算で約8.5%であり、
+      // CB版の閾値0.15はPL版のこのフィクスチャでは小さすぎる。
+      // ★ただし、この差はモデル固有の丸め特性に帰属するものではない(#81メタレビュー差し戻し
+      // で判明): 本テストと同じPLフィクスチャ(p=[0.5,0.4,0.3]・odds=[2.5,2.2,5]・
+      // placeCount=2・perRaceCap=800)を、第4引数だけCONDITIONAL_BERNOULLI_MODELに差し替えて
+      // 測ると、relativeErrorは0.19315141787051907になり、CB版自身の閾値0.15を既に上回る
+      // (このファイルの`allocateBets`を本テストと同じ引数・model引数のみCB差し替えで呼べば
+      // 再現できる)。つまり0.15→0.3への引き上げが必要になった主因は、モデル(CB/PL)の
+      // 丸め特性差ではなく、フィクスチャを差し替えたことでcontinuousFraction比が
+      // 0.15の閾値では収まらない値(約2.003)になったことである。
       // 実測値(約0.248)に安全マージンを載せた0.3を、PL版の閾値として採用する。
       const [first, second] = withStake;
       const actualRatio = first!.stake / second!.stake;
