@@ -176,7 +176,9 @@ import {
 } from "./allocation-primitives.js";
 
 // Phase 2 で同時分布モデルを差し替える際、C-2/C-3 が1本のサブパスで完結できるように
-// place-joint-model.ts の主要な型・既定モデルを re-export する。
+// place-joint-model.ts の主要な型と CONDITIONAL_BERNOULLI_MODEL を re-export する
+// (このモデルは #81(#78-B)より前の既定モデルであり、現在の既定は PLACKETT_LUCE_MODEL
+// である。そちらは plackett-luce-model.ts から個別に import する)。
 export type { JointModelHorse, PlaceJointModel, PlaceOutcome };
 export { CONDITIONAL_BERNOULLI_MODEL };
 

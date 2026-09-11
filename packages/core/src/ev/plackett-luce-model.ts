@@ -4,10 +4,12 @@
  * `fitPlackettLuceStrengths` で推定した θ から、複勝圏内の組合せ(部分集合)の同時分布を厳密に
  * 構築する。`PlaceJointModel` インタフェース自体は変更しない(既存の呼び出し元は無改変)。
  *
- * ## 既定は変えない(#20-A のスコープ)
- * `bet-allocation.ts`・`combo-bet-allocation.ts` の既定モデルは引き続き `CONDITIONAL_BERNOULLI_MODEL`
- * のまま。本モデルへの切替は #20-B(#78)のスコープであり、#20-A 時点で本モデルの production
- * 呼び出し元はゼロ件(`grep`で実測。完了報告参照)。
+ * ## 既定モデルの切替(#78-B・#81)
+ * `bet-allocation.ts`・`combo-bet-allocation.ts` の既定モデルは**現在は本モデル
+ * (`PLACKETT_LUCE_MODEL`)である**(#81(#78-B)で `CONDITIONAL_BERNOULLI_MODEL` から切替済み)。
+ * 履歴として: #20-A(#77)でこのファイルを新設した時点では、両ファイルの既定モデルはまだ
+ * `CONDITIONAL_BERNOULLI_MODEL` のままで、本モデルの production 呼び出し元はゼロ件だった
+ * (`grep`で実測。#77完了報告参照)。
  *
  * ## θ→C(n,k)分布の厳密変換
  * 部分集合 S(|S|=k)が「上位k集合」になる確率は、S内のk!通りの並び順それぞれについて
@@ -20,8 +22,12 @@
  *
  * ## フィット不能な入力への対応(第2回着手前ゲートの最重要裁定)
  * `fitPlackettLuceStrengths` が `ok:false` を返す入力に対しては、均等分布へ黙ってフォールバック
- * せず `PlackettLuceFitError` を例外として投げる。#20-A 時点では production 呼び出し元がゼロなので
- * 波及もゼロ(#20-Bでこの例外を捕捉し見送り経路に振り分ける設計になる想定)。
+ * せず `PlackettLuceFitError` を例外として投げる。#20-A(#77)時点では production 呼び出し元が
+ * ゼロだったため波及もゼロだったが、#81(#78-B)で既定モデルが本モデルへ切り替わった現在は
+ * production からも到達しうる。この例外は `mixed-race-allocation.ts`・
+ * `mixed-allocation-view.ts` 側の外側 try/catch(#80・#78-A で新設。型を問わず汎用的に捕捉する)
+ * が拾い、`route:"invalid"`/`kind:"invalid"` の見送り経路へ振り分ける(本例外専用の catch は
+ * 設けていない)。
  *
  * ## 除外(θ=0)・固定(θ=Infinity)馬の扱い
  * `fitPlackettLuceStrengths` が返す θ は、除外された馬(θ=0)・固定された馬(θ=+Infinity)を

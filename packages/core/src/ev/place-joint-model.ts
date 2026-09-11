@@ -21,10 +21,11 @@
  *     **「本ファイルだけを差し替えれば済む」という当初の想定は、既に偽である**(Issue #77・
  *     #20-A で判明)。`probability-quality-metrics.ts` が `CONDITIONAL_BERNOULLI_MODEL` を
  *     2箇所で直接 import・呼び出ししており、モデルを差し替えるにはそちらの呼び出し元も
- *     書き換える必要がある。実際に Plackett-Luce 実装(`plackett-luce-model.ts` の
- *     `PLACKETT_LUCE_MODEL`)を追加した #20-A の時点でも、`bet-allocation.ts`・
- *     `combo-bet-allocation.ts` の既定モデルはまだ `CONDITIONAL_BERNOULLI_MODEL` のままで
- *     あり(#20-B で切替予定)、`PlaceJointModel` インターフェース自体は無改変(受け入れ条件)。
+ *     書き換える必要がある。Plackett-Luce 実装(`plackett-luce-model.ts` の
+ *     `PLACKETT_LUCE_MODEL`)を追加した #20-A の時点では、`bet-allocation.ts`・
+ *     `combo-bet-allocation.ts` の既定モデルはまだ `CONDITIONAL_BERNOULLI_MODEL` のままだった
+ *     (その後 #81(#78-B)で本モデルへ切替済み。**現在の既定モデルは `PLACKETT_LUCE_MODEL`**)。
+ *     `PlaceJointModel` インターフェース自体は無改変(受け入れ条件)。
  *
  *   既知の不完全性(Phase 1として明記):
  *   - 条件付け後の周辺確率(各馬がいずれかの組に含まれる確率の合計)は、入力の placeProb と

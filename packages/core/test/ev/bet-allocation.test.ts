@@ -1467,6 +1467,34 @@ describe("allocateBets(馬券配分の最適化・機能C-2契約)", () => {
         const expectedFloored = expected < DEFAULT_BET_ALLOCATION_CONFIG.betUnit ? 0 : expected;
         expect(a.stake).toBe(expectedFloored);
       }
+
+      // 前提(無条件expect。元のCB版「受け入れ条件6」が持つ主張をそのまま引き継ぐ。boss差し戻し
+      // #81 AC-B3'(D)(b)③): 正のcontinuousFractionを持つ2頭が、丸め後もどちらも正のstakeを
+      // 維持していること(退化解〈1頭だけに全額集中〉ではないことの直接証拠)。上のformula検証
+      // (計算式そのものの再計算)はstakeの値がscaledFractionと内部的に整合していることしか見ず、
+      // scaledFraction自体が1頭に退化していても機械的に成立してしまうため、この2行は独立した
+      // 保証として必要(このテストを cap=250 に変えて実行すると、stakeが[100,0,0]に退化して
+      // withStakeが1頭になり、下のtoHaveLength(2)が落ちることで直接確認できる)。
+      const positiveNarrow = narrow.allocations.filter((a) => a.continuousFraction > 0);
+      expect(positiveNarrow).toHaveLength(2);
+      const withStake = positiveNarrow.filter((a) => a.stake > 0);
+      expect(withStake).toHaveLength(2);
+
+      // 比率保持の直接検証: stake比がcontinuousFraction比とbetUnitの丸め誤差程度で一致すること。
+      // このテストを実行すると narrow.allocations の stake は [umaban1: 500, umaban2: 0,
+      // umaban3: 200] になり(continuousFractionが正の2頭はumaban1・3)、continuousFraction比
+      // (約0.667/0.333≈2.003)に対しstake比(500/200=2.5)の相対誤差は約24.8%になる
+      // (このファイルの `allocateBets` を同じ引数〈horses・placeCount=2・perRaceCap=800・
+      // bankroll=1000000・PLACKETT_LUCE_MODEL〉で呼べば再現できる)。CB版(受け入れ条件6)の
+      // 相対誤差は同じ計算で約8.5%であり、CB版の閾値0.15はPL版では小さすぎる(PLはcf比が
+      // 2.003と2.5から離れており、betUnit=100という同じ粗さの丸めでも相対誤差が大きく出る
+      // ため、CB版と同じ閾値を課すのは券種・モデル固有の丸め特性を無視した誤った移植になる)。
+      // 実測値(約0.248)に安全マージンを載せた0.3を、PL版の閾値として採用する。
+      const [first, second] = withStake;
+      const actualRatio = first!.stake / second!.stake;
+      const expectedRatio = first!.continuousFraction / second!.continuousFraction;
+      const relativeError = Math.abs(actualRatio - expectedRatio) / expectedRatio;
+      expect(relativeError).toBeLessThan(0.3);
     });
 
     it("受け入れ条件13相当: 2点以上配分されるときはnotDiversified=falseであること(PL)", () => {
