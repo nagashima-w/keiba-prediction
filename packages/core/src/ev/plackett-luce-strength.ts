@@ -149,10 +149,15 @@ export type PlackettLuceFitResult = PlackettLuceFitSuccess | PlackettLuceFitFail
  * 生成方法の異なる他の計測(`runModelLayer`等)と直接比較しない。
  *
  * **本表の`not-converged`は無作為入力からの標本比率であり(variantあたりN=3200)、
- * 種を変えると±0.3〜0.7pp程度動く(実測: 種のみ変更でdefault 3.09%→2.72%・
- * wide15 2.63%→3.31%)。行間の大小(上限を下げると率が上がる)は頑健だが、
- * 隣接行の差やvariant間の差(例: 「200ではwide15の方がdefaultより良い」)に
- * 意味を読まないこと。**
+ * 種を変えると動く。実測(現行の上限2000・`scripts/bench-joint-model.ts`の
+ * `runFitPerformanceSweep`第3引数`seedOffset`を0〜4に変えて再実行。下記「再現手順」参照):
+ * **default 0.25〜0.38% / wide15 0.19〜0.38%**(理論値: p≈0.0026・N=3200の標本比率の
+ * 標準偏差はおよそ`sqrt(0.0026×0.9974/3200)≈0.09pp`で、実測レンジと整合する)。
+ * 表の2000行(0.25%/0.28%)はこのばらつきの中の1点にすぎず、**`seedOffset=1`・`3`では
+ * wide15がdefaultを下回り大小関係が逆転する**(`seedOffset=1`: default 0.38%/
+ * wide15 0.31%、`seedOffset=3`: default 0.28%/wide15 0.19%)。行間の大小(上限を下げると
+ * 率が上がる)は頑健だが、隣接行の差やvariant間の差(例: 「2000ではwide15の方がdefault
+ * より良い」)に意味を読まないこと。**
  *
  * | `MAX_FIT_ITERATIONS` | not-converged (default / wide15) | fit 99%点 ms | fit 最悪 ms |
  * |---|---|---|---|
@@ -177,6 +182,12 @@ export type PlackettLuceFitResult = PlackettLuceFitSuccess | PlackettLuceFitFail
  * `pnpm tsx scripts/bench-joint-model.ts` を実行して出力の
  * `Issue #80(#78-A)AC-A8`セクションを読み、書き換えを元に戻す。これを8つの値
  * (50/100/200/500/1000/2000/5000/20000)それぞれについて繰り返すと上表が再現できる。
+ *
+ * **種を変えたときの変動幅の再現手順(本定数は変更しない)**: `scripts/bench-joint-model.ts`
+ * 末尾の`runFitPerformanceSweep("default", 400)`・`runFitPerformanceSweep("wide15", 400)`
+ * 呼び出しに第3引数`seedOffset`(既定0。ベンチ内ローカルなオフセットで、production定数の
+ * 定義を増やさない)を渡して(例: `runFitPerformanceSweep("default", 400, 1)`)実行し直すと、
+ * 上表2000行の値がどれだけ動くかを確認できる(上記「変動幅」の段落の数値の出所)。
  */
 export const MAX_FIT_ITERATIONS = 2000;
 

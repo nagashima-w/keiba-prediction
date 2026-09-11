@@ -521,10 +521,22 @@ function runNaiveVsClosedFormComparison(): void {
  * そのものを使って計測する**——つまり8段階の表を得るには、`plackett-luce-strength.ts`の
  * `MAX_FIT_ITERATIONS`を手作業で書き換えたうえで本スクリプトを実行し直す、という
  * 再現手順そのものが実測手段である(下記「使い方」参照)。
+ *
+ * `seedOffset`(既定0。基準種に加算するだけのベンチ内ローカルなオフセット。production
+ * 定数の定義を増やすものではないため上記Q6裁定と矛盾しない)は、`not-converged`率が
+ * 種によってどれだけ動くかを**コミット済みコードだけで再現可能**にするための引数
+ * (Issue #80メタレビュー是正: 種を変えた場合の変動幅は、この引数を0〜4等に変えて
+ * 本スクリプトを実行し直すことで確認する。数値をJSDocに固定で書かず、再現手段
+ * 〈この引数〉として持たせる)。既定値0では、この引数を追加する前と1桁も値が
+ * 変わらないことを確認済み(下記「使い方」参照)。
  */
-function runFitPerformanceSweep(clipVariantId: keyof typeof CLIP_VARIANTS, samplesPerHeadcount: number): void {
+function runFitPerformanceSweep(
+  clipVariantId: keyof typeof CLIP_VARIANTS,
+  samplesPerHeadcount: number,
+  seedOffset = 0,
+): void {
   const headcounts = [18, 16, 14, 12, 10, 8, 6, 5];
-  const rand = makeRng(clipVariantId === "default" ? 20260909100 : 20260910100);
+  const rand = makeRng((clipVariantId === "default" ? 20260909100 : 20260910100) + seedOffset);
 
   // ウォームアップ(JIT最適化。計測対象から外す)。
   const warmupRand = makeRng(clipVariantId === "default" ? 999101 : 999102);
@@ -557,7 +569,7 @@ function runFitPerformanceSweep(clipVariantId: keyof typeof CLIP_VARIANTS, sampl
   const worst = sorted[sorted.length - 1]!;
   const notConvergedRate = (notConvergedCount / sampleCount) * 100;
   console.log(
-    `  MAX_FIT_ITERATIONS=${MAX_FIT_ITERATIONS} clipVariant=${clipVariantId} ` +
+    `  MAX_FIT_ITERATIONS=${MAX_FIT_ITERATIONS} clipVariant=${clipVariantId} seedOffset=${seedOffset} ` +
       `(頭数${headcounts.join("/")}×各${samplesPerHeadcount}件=N=${sampleCount}): ` +
       `not-converged=${notConvergedRate.toFixed(2)}% fit99%点=${p99.toFixed(2)}ms fit最悪=${worst.toFixed(1)}ms`,
   );
