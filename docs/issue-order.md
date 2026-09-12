@@ -250,9 +250,21 @@ core の非公開モジュール(`exports` に0件)にあること、`skipReason
   分布を構築しない」実装に限る**(ナイーブ実装は 108 ms = 約160倍)
 - **`probability-quality-metrics.ts` の2関数は `model` 引数で差し替えられない**(直接参照)。
   この事実により `place-joint-model.ts` の「本ファイルだけを差し替えれば済む」は**既に偽** → #79
-- **保存値と表示値の非対称**: `verify.ts` は保存済み `analysis_bets` を読むので**過去の回収率は
-  変わらない**が、renderer は表示のたびに**再計算する**ので**過去分析を開き直すと表示が変わる**。
-  #20-B で `docs/current-spec.md` に明記する
+- **保存値と表示値の非対称は「無い」**(⚠️ **この項目の当初の記述は偽だった。#81 で是正済み**)。
+  当初ここには「renderer は表示のたびに再計算するので**過去分析を開き直すと表示が変わる**」と
+  書いていたが、**実物を追った結果これは事実に反する**。#78 の着手前ゲートが AC-B6'(b) で
+  名指しして否定し、#81 で `docs/current-spec.md` に正しい内容を書いた。
+  **正しくは**: `verify.ts` は保存済み `analysis_bets` を読み、**過去分析の再表示も
+  `store.getStoredAllocation` の保存値を読む**(`allocation-proposal-view.ts:12`
+  「配分の再計算はしない(保存済みを読むだけ)」/ `VerifyView.tsx:808` は
+  `buildAllocationProposalView` を呼ぶだけで `allocateBets` 系の呼び出しは0件)。
+  再計算する `buildMixedAllocationDisplay`(`BatchAnalysisView.tsx:899`)の入力は
+  `state.run.outcomes` 由来で、**保存済み分析を復元して流し込む経路は存在しない**
+  (`batch-analysis-reducer.ts` でこれを設定するのは一括分析の開始・完了・期間バッチ完了の
+  3アクションのみ)。**したがって過去の回収率も過去分析の再表示もどちらも変わらない。**
+  **本当の非対称はこちら**: 新規分析以降が PL になるため **DB 内に CB 期と PL 期のレコードが
+  混在する**。区別する `analysis_allocation_meta.model_id` 列は「意図的に読まない6列」なので
+  **回収率集計は両者を層別できない**(#85)。回収率の前後比較は切替コミットの日時で区切る
 - **#41/#42(確率の質)の前提は #20-B(#78)とする**(配分の数値が変わるため、
   それ以前に測ると母集団が割れる)
 
