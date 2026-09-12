@@ -9,6 +9,7 @@ import type {
   AdjustmentDirection,
   CalibrationBinView,
   PredictionMark,
+  ProposedBetUnknownBetTypeView,
   PromptVersionVerifyReportView,
   RaceBreakdownHorseView,
   RaceLedgerView,
@@ -44,6 +45,24 @@ export function formatBinRange(bin: CalibrationBinView): string {
 /** 実配当/近似の内訳注記(例: "実配当 3件 / 近似 1件")。 */
 export function formatPayoutBreakdown(bet: VerifyBetView): string {
   return `実配当 ${bet.actualPayoutCount}件 / 近似 ${bet.approximatePayoutCount}件`;
+}
+
+/**
+ * 未知の券種コードの注記(Issue #76)。`count===0`(未知券種行が1件も無い通常時)は`null`
+ * (呼び出し側は戻り値を1回だけ受け取り、`!== null`を条件に描画するだけにできる。
+ * `VerifyView.tsx`の呼び出し箇所参照。`formatUnjudgedNote`〈mixed-allocation-view.ts〉と
+ * 同じ「0件なら注記を出さない」流儀)。
+ * 点数だけでなくstake合計・実際に現れた券種コードも示す(点数だけでは「投資額がどれだけ
+ * 静かに過小計上されているか」の規模が分からず、原因〈単勝なのか壊れた行なのか〉も判別できない)。
+ */
+export function formatUnknownBetTypeNotice(unknownBetType: ProposedBetUnknownBetTypeView): string | null {
+  if (unknownBetType.count === 0) {
+    return null;
+  }
+  return (
+    `未対応の券種コード(${unknownBetType.betTypes.join("、")})の買い目が${unknownBetType.count}点 ` +
+    `(賭け金合計${formatYen(unknownBetType.totalStake)})あり、回収率の集計から除外しています。`
+  );
 }
 
 /**

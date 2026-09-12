@@ -16,6 +16,7 @@ import {
   buildComboOddsKey,
   ComboOddsKeyError,
   mergeAxisComboOddsMaps,
+  parseComboOddsKey,
   toComboOddsScalarMap,
   validateComboUmabans,
   type AxisComboOddsMap,
@@ -36,6 +37,30 @@ describe("buildComboOddsKey(#14からの移設。既存の挙動を変えない)
     expect(buildComboOddsKey([2, 1])).toBe("0102"); // 入力順に依らない
     expect(buildComboOddsKey([1, 2, 3])).toBe("010203");
     expect(buildComboOddsKey([12, 3])).toBe("0312");
+  });
+});
+
+describe("parseComboOddsKey(buildComboOddsKeyの逆操作。Issue #55: 過去分析の配分提案を馬番表示に戻すためのデコーダ)", () => {
+  it("2桁ごとに区切って馬番配列(昇順)へ復元すること(複勝1頭・ワイド2頭・3連複3頭)", () => {
+    expect(parseComboOddsKey("04")).toEqual([4]);
+    expect(parseComboOddsKey("0407")).toEqual([4, 7]);
+    expect(parseComboOddsKey("040709")).toEqual([4, 7, 9]);
+  });
+
+  it("buildComboOddsKeyが生成したキーを完全に往復復元できること(合成のラウンドトリップ)", () => {
+    expect(parseComboOddsKey(buildComboOddsKey([7, 4]))).toEqual([4, 7]);
+    expect(parseComboOddsKey(buildComboOddsKey([12, 3, 8]))).toEqual([3, 8, 12]);
+  });
+
+  it.each([
+    ["空文字列", ""],
+    ["奇数桁(2桁区切りにならない)", "040"],
+    ["数字以外の文字を含む", "0X"],
+    ["馬番が1未満(00)", "00"],
+    ["馬番が19以上(上限18を超える)", "19"],
+    ["空白を含む", "04 7"],
+  ])("%s(%s)はnullを返すこと(throwしない)", (_label, rawKey) => {
+    expect(parseComboOddsKey(rawKey)).toBeNull();
   });
 });
 

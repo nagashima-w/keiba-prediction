@@ -58,17 +58,16 @@ import type { AnalysisResult } from "../packages/app/src/shared/analysis-types.j
 import {
   buildMixedCandidates,
   type MixedCandidateBuildInput,
-} from "../packages/app/src/renderer/mixed-candidates.js";
+} from "../packages/app/src/shared/mixed-candidates.js";
 import {
   allocateGeneralBets,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+  type AllocationBetType,
   type GeneralBetAllocationConfig,
   type JointModelHorse,
 } from "../packages/core/src/ev/combo-bet-allocation.js";
-import {
-  buildMixedAllocationDisplay,
-  type MixedAllocationSettings,
-} from "../packages/app/src/renderer/mixed-allocation-view.js";
+import { buildMixedAllocationDisplay } from "../packages/app/src/renderer/mixed-allocation-view.js";
+import type { MixedAllocationSettings } from "../packages/app/src/shared/mixed-race-allocation.js";
 
 const FIXTURE_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -91,6 +90,8 @@ async function loadAnalysisResult(): Promise<AnalysisResult> {
     // LLM未使用(analyze:null)。scorerが出すpriorがそのままadjustedProbになる(実prior)。
     analyze: null,
     saveAnalysis: () => 0,
+    // Issue #59: このスクリプトでは配分提案の永続化を検証しない(この呼び出しでは配分計算を行わない)。
+    allocationSettings: null,
   };
   // kaisaiDateを明示する(実レース日2026/06/28。#40「#35-1a」)。渡さないとresolveAnalysisDateが
   // 実行日(now())へフォールバックし、季節分類・休み明け走目の基準日が壁時計時刻とともに
@@ -109,13 +110,16 @@ function toMixedCandidateInput(result: AnalysisResult): MixedCandidateBuildInput
   };
 }
 
-/** 券種別(umabans.length)に金額・点数を集計する(mixed-allocation-view.tsのbuildMixedAllocationBreakdownと同じ集計方式)。 */
+/**
+ * 券種別(betType)に金額・点数を集計する(mixed-allocation-view.tsのbuildMixedAllocationBreakdownと
+ * 同じ集計方式。Issue #76でumabans.lengthからの逆算をやめ、候補自身が運ぶbetTypeで集計する)。
+ */
 function summarizeByBetType(
-  allocations: readonly { readonly umabans: readonly number[]; readonly stake: number }[],
+  allocations: readonly { readonly betType: AllocationBetType; readonly stake: number }[],
 ): { place: number; wide: number; trio: number } {
-  const sumOf = (n: number): number =>
-    allocations.filter((a) => a.umabans.length === n).reduce((s, a) => s + a.stake, 0);
-  return { place: sumOf(1), wide: sumOf(2), trio: sumOf(3) };
+  const sumOf = (betType: AllocationBetType): number =>
+    allocations.filter((a) => a.betType === betType).reduce((s, a) => s + a.stake, 0);
+  return { place: sumOf("place"), wide: sumOf("wide"), trio: sumOf("trio") };
 }
 
 async function runGreedyStepsSensitivity(result: AnalysisResult): Promise<void> {
@@ -128,9 +132,9 @@ async function runGreedyStepsSensitivity(result: AnalysisResult): Promise<void> 
 
   console.log("=== greedySteps 感度(中央16頭・実オッズ・実prior・λ=0.5) ===");
   console.log(
-    `候補: 複勝${mixed.candidates.filter((c) => c.umabans.length === 1).length}件 / ` +
-      `ワイド${mixed.candidates.filter((c) => c.umabans.length === 2).length}件 / ` +
-      `三連複${mixed.candidates.filter((c) => c.umabans.length === 3).length}件`,
+    `候補: 複勝${mixed.candidates.filter((c) => c.betType === "place").length}件 / ` +
+      `ワイド${mixed.candidates.filter((c) => c.betType === "wide").length}件 / ` +
+      `三連複${mixed.candidates.filter((c) => c.betType === "trio").length}件`,
   );
 
   const scenarios: { readonly label: string; readonly bankroll: number; readonly perRaceCap: number }[] = [

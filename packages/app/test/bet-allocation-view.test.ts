@@ -4,19 +4,21 @@ import type { AnalysisResult, AnalysisRow } from "../src/shared/analysis-types.j
 import {
   BET_ALLOCATION_UNSET_NOTE,
   buildAllocationNotices,
-  buildRaceAllocation,
   CROSS_RACE_OVERBET_NOTE,
   evThresholdFootnote,
   formatAllocationSummary,
   NOT_DIVERSIFIED_NOTE,
   formatBetLabel,
-  isBetAllocationUnset,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
   probabilitySumWarning,
+} from "../src/renderer/bet-allocation-view.js";
+import {
+  buildRaceAllocation,
+  isBetAllocationUnset,
   resolvePlaceBetTarget,
   type BetAllocationSettings,
-} from "../src/renderer/bet-allocation-view.js";
+} from "../src/shared/race-allocation.js";
 
 /** テスト用のAnalysisRowを組み立てる補助関数。 */
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
@@ -108,6 +110,26 @@ describe("resolvePlaceBetTarget(頭数→複勝対象人数の判定。boss着�
     } else {
       throw new Error("8頭はavailable:trueになるはず");
     }
+  });
+
+  /**
+   * AC-B3'(a)(Issue #81): PLの`validatePlaceCountOrThrow`は非整数のplaceCountをthrowするが、
+   * production の`resolvePlaceBetTarget`が返す`placeCount`が非整数になることは無い、という
+   * 主張を実際に検査する(#81着手前ゲートboss裁定。「production では起きない」を誰も検査
+   * していない状態を避ける)。頭数1〜30の全整数を走査し、`available:true`のときは常に
+   * 整数の3を返すことを固定する。
+   */
+  it("AC-B3'(a): 頭数1〜30のすべてで、available:trueのときplaceCountは常に整数の3であること(#81。PLへ非整数が到達しないことの直接証拠)", () => {
+    let availableTrueCount = 0;
+    for (let runnerCount = 1; runnerCount <= 30; runnerCount++) {
+      const target = resolvePlaceBetTarget(runnerCount);
+      if (!target.available) continue;
+      availableTrueCount++;
+      expect(Number.isInteger(target.placeCount)).toBe(true);
+      expect(target.placeCount).toBe(3);
+    }
+    // 空振り防止: available:trueの走査対象が実際に1件以上あること。
+    expect(availableTrueCount).toBeGreaterThan(0);
   });
 });
 
@@ -489,7 +511,12 @@ describe("固定注記3点(必ず表示。文言は数値込みで生成)", () =
 
 describe("BET_ALLOCATION_UNSET_NOTE(未設定時・画面全体で1点だけの注記)", () => {
   it("総資金・1レース上限の設定を促す文言であること", () => {
-    expect(BET_ALLOCATION_UNSET_NOTE).toContain("総資金");
-    expect(BET_ALLOCATION_UNSET_NOTE).toContain("1レースの上限");
+    // code-reviewer指摘対応(Issue #55): 部分一致(toContain)のみでは、両方の語を含んだまま
+    // 全く別の文言へ言い換える変異を検出できない(allocation-proposal-view.test.tsがこの定数を
+    // 再利用する側で自己参照比較しているため、定義元である本テストがリテラルで固定する責務を負う)。
+    // 完全一致に格上げする。
+    expect(BET_ALLOCATION_UNSET_NOTE).toBe(
+      "馬券配分の提案には、設定画面で「馬券用の総資金」と「1レースの上限」を入力してください。",
+    );
   });
 });

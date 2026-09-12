@@ -222,6 +222,24 @@ describe("parseHorseResults(中央場コードだが不正な12桁IDでも行を
   });
 });
 
+describe("parseHorseResults(単勝オッズ列の桁区切りカンマ。Issue #73 R1)", () => {
+  // boss メタレビュー指摘: types.ts が「単勝オッズ」と明記する odds 列(COL.odds)は
+  // 汎用ヘルパ numberOrNull(Number(t)直呼び)を使っており、共有ヘルパ toOddsNumber とは
+  // 別契約のまま残っていた。odds 列だけを toOddsNumber に委譲する(numberOrNull は
+  // raceNumber/entryCount/wakuban/umaban/ninki/kinryo/margin/last3f と共用のため一括変更はしない)。
+  it('単勝オッズが桁区切りカンマ("1,234.5")の場合、カンマを除去して数値化されること', () => {
+    const json = buildResultsJson([buildRow({ odds: "1,234.5" })]);
+    const r = parseHorseResults(json)[0]!;
+    expect(r.odds).toBe(1234.5);
+  });
+
+  it("単勝オッズが空セルの場合はoddsがnullになること(既存契約の維持)", () => {
+    const json = buildResultsJson([buildRow({ odds: "" })]);
+    const r = parseHorseResults(json)[0]!;
+    expect(r.odds).toBeNull();
+  });
+});
+
 describe("parseHorseResults(JSON・status検証)", () => {
   it("JSONとして解釈できない入力は HorseResultsParseError になること", () => {
     expect(() => parseHorseResults("これはJSONではない")).toThrow(
@@ -302,6 +320,7 @@ function buildRow(
     weight?: string;
     raceLink?: boolean;
     raceCellHtml?: string;
+    odds?: string;
   } = {},
 ): string {
   const chakujun = opts.chakujun ?? "1";
@@ -310,6 +329,7 @@ function buildRow(
   const last3f = opts.last3f ?? "38.0";
   const weight = opts.weight ?? "496(+2)";
   const raceLink = opts.raceLink ?? true;
+  const odds = opts.odds ?? "34.1";
   // raceCellHtml が指定されればそれを最優先(不正IDリンク等の検証用)。
   const raceCell =
     opts.raceCellHtml ??
@@ -326,7 +346,7 @@ function buildRow(
     "10", // 頭数
     "1", // 枠番
     "1", // 馬番
-    "34.1", // オッズ
+    odds, // オッズ
     "7", // 人気
     chakujun, // 着順
     '<a href="https://db.netkeiba.com/jockey/result/recent/01221/">舟山瑠泉</a>', // 騎手

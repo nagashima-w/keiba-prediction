@@ -15,7 +15,7 @@ import {
   ALL_MIXED_CANDIDATE_BET_TYPES,
   buildMixedCandidates,
   type MixedCandidateBuildInput,
-} from "../src/renderer/mixed-candidates.js";
+} from "../src/shared/mixed-candidates.js";
 
 // ============================================================================
 // テストヘルパー(定義したヘルパーはすべて自己テストする。「テストを書くときの注意」参照)
@@ -480,8 +480,8 @@ function findCandidateByUmabans(
 describe("入力フィールド→出力フィールドの写像(取り違え検知)", () => {
   it("findCandidateByUmabans(): 完全一致する候補を返し、無ければ例外を投げること(自己テスト)", () => {
     const candidates: AllocationCandidate[] = [
-      { umabans: [1, 2], odds: 3, ev: 2, isPositive: true },
-      { umabans: [1, 3], odds: 5, ev: 4, isPositive: true },
+      { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+      { umabans: [1, 3], odds: 5, ev: 4, isPositive: true, betType: "wide" },
     ];
     expect(findCandidateByUmabans(candidates, [1, 3]).odds).toBe(5);
     expect(() => findCandidateByUmabans(candidates, [2, 3])).toThrow();
@@ -941,5 +941,42 @@ describe("EV閾値の統一(options.evConfig。渡し忘れると既定1.0のま
     );
     expect(wideOnly.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(0);
     expect(trioOnly.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Issue #76 AC-A6: 挙動不変の実質的な担保(旧写像との等価性)
+// ============================================================================
+
+describe("Issue #76 AC-A6: production から消えた「umabans.length→券種」の旧写像との等価性", () => {
+  it("実際の候補生成経路(buildMixedCandidates)で複勝・ワイド・3連複が同時に立つフィクスチャに対し、betTypeとumabans.lengthが{place:1, wide:2, trio:3}の対応どおりであること", () => {
+    // production からは「長さ→券種」の逆写像を完全に削除した(Issue #76)。この対応表は
+    // テスト側にのみリテラルとして残し、実際の候補生成経路(buildMixedCandidates。頭数境界
+    // describeで使用実績のあるn=8全EVプラスフィクスチャを流用)が今も同じ対応を守っている
+    // ことを固定する。これが「挙動不変」の実質的な担保である。
+    const OLD_LENGTH_TO_BET_TYPE: Record<number, "place" | "wide" | "trio"> = {
+      1: "place",
+      2: "wide",
+      3: "trio",
+    };
+    const n = 8;
+    const umabans = umabansOf(n);
+    const race = raceInput({
+      rows: allCandidateRows(n),
+      wideCombo: fullOddsRecord(umabans, 2, 100000),
+      trioCombo: fullOddsRecord(umabans, 3, 100000),
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    });
+    const result = buildMixedCandidates(race);
+
+    // 前提固定(空振り防止): 複勝(8)・ワイド(C(8,2)=28)・3連複(C(8,3)=56)の3券種すべてが
+    // 実際に候補として生成されていること(1種類にしか到達していなければ以下の対応検査が空振りする)。
+    expect(result.candidates.filter((c) => c.umabans.length === 1)).toHaveLength(8);
+    expect(result.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(28);
+    expect(result.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(56);
+
+    for (const candidate of result.candidates) {
+      expect(candidate.betType).toBe(OLD_LENGTH_TO_BET_TYPE[candidate.umabans.length]);
+    }
   });
 });

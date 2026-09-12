@@ -74,6 +74,16 @@ import {
 } from "./settings-store.js";
 import { toRaceListItem } from "./to-race-list-item.js";
 import { withErrorLogging } from "./with-error-logging.js";
+import {
+  resolveNativeBindingPath,
+  resolveVerifiedNativeBindingPath,
+} from "./native-binding.js";
+
+// resolveNativeBindingPath / resolveVerifiedNativeBindingPath は electron 非依存の
+// 独立モジュール(./native-binding.js)へ抽出した(Issue #62)。ipc.ts はここで re-export し、
+// 既存の呼び出し元(このファイル内の resourceManager 配線)・既存テスト
+// (test/ipc-native-binding.test.ts、"../src/main/ipc.js" からの import)を無改変で保つ。
+export { resolveNativeBindingPath, resolveVerifiedNativeBindingPath };
 
 /**
  * main プロセスの IPC ハンドラをまとめて登録する。
@@ -216,8 +226,16 @@ export function closeResources(): void {
 const resourceManager = new ResourceManager<PipelineResources>({
   create: () => {
     const settings = getSettingsStore().load();
+    // better-sqlite3のネイティブバインディング絶対パス(Issue #60-B)。packaged実行時のみ解決し、
+    // .nodeが見つからなければここで診断メッセージ付きの例外を投げる(createPipelineDeps/
+    // new Databaseへは到達しない)。非packagedはundefinedのまま(従来どおりbindingsに委ねる)。
+    const nativeBindingPath = resolveVerifiedNativeBindingPath({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+    });
     return createPipelineDeps({
       dbPath: path.join(app.getPath("userData"), "keiba.db"),
+      nativeBindingPath,
       apiKey: resolveEffectiveApiKey(settings, process.env.ANTHROPIC_API_KEY),
       scorerConfig: buildScorerConfig(settings),
       evConfig: buildEvConfig(settings),
@@ -229,6 +247,15 @@ const resourceManager = new ResourceManager<PipelineResources>({
       // (未設定は pipeline-deps.ts 側の `??` が既定false〈組合せオッズを取得しない〉へ
       // フォールバックする)。
       includeComboOdds: settings.includeComboOdds,
+      // 配分提案(Issue #59)の設定5項目。includeComboOddsは上で渡し済みのため含めない
+      // (pipeline-deps.ts が1箇所で解決し、scrape束縛とここへ同じ値を使う。#59 4節)。
+      allocationSettings: {
+        bankroll: settings.bankroll,
+        perRaceCap: settings.perRaceCap,
+        kellyFraction: settings.kellyFraction,
+        includeWideInAllocation: settings.includeWideInAllocation,
+        includeTrioInAllocation: settings.includeTrioInAllocation,
+      },
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,
       // HttpClient(core)のサポート外charset警告をログ基盤へ接続する(要修正4)。

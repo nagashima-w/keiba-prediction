@@ -9,6 +9,7 @@ import {
   type EvConfig,
   type HorsePrior,
 } from "../../src/ev/expected-value.js";
+import { isUsableOdds } from "../../src/ev/allocation-primitives.js";
 import type { OddsSnapshot, PlaceOdds } from "../../src/scraper/types.js";
 
 /** 複勝オッズ(下限・上限・人気)を最小構成で組み立てる。 */
@@ -103,6 +104,99 @@ describe("computeRaceEv(複勝期待値計算)", () => {
       expect(result!.excludedReason).toContain("下限");
     });
   });
+
+  describe(
+    "オッズが値域外の馬の扱い(Issue #74: オッズの値域は1.0以上であり0は値域外。" +
+      "旧実装は`oddsMin===null`しか見ておらず、値域外の値〈0等〉を通して" +
+      "`ev=placeProb×0=0`という「正常な判定結果」に潰していた。判定不能〈値域外〉を" +
+      "判定結果〈EV=0〉に混ぜない)",
+    () => {
+      // 3つの除外理由(馬番が無い/下限が未確定/値域外)。#74で3つ目(値域外)を新設する。
+      const REASON_NO_UMABAN = "複勝オッズに該当馬番が存在しないため対象外";
+      const REASON_NULL = "複勝オッズ下限が未確定(null)のため対象外";
+      // boss裁定Q1(a)(2026-09-04): 到達しうる全入力(0/-0/(0,1)/NaN/±Infinity)に対して
+      // 真であることが必須。「1.0未満」単独だとNaN・+Infinityで偽になる(NaN<1.0もInfinity<1.0も
+      // false)。「1.0未満・非有限」の選言にすることで、値域外(1.0未満)と非有限のどちらで
+      // 除外されても文言が偽にならない。
+      const REASON_MALFORMED = "複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外";
+
+      const placeProb = 0.5;
+
+      /** umaban=1のみを持つOddsSnapshotを組み立てる。undefinedなら馬番自体を含めない。 */
+      function snapshotWith(oddsMin: number | null | undefined): OddsSnapshot {
+        if (oddsMin === undefined) {
+          return oddsSnapshot({});
+        }
+        return oddsSnapshot({ 1: place(oddsMin) });
+      }
+
+      type Case = {
+        name: string;
+        oddsMin: number | null | undefined;
+        expectedEv: number | null;
+        expectedPlaceOddsMin: number | null;
+        expectedReason: string | null;
+      };
+
+      // AC-1: oddsMin ∈ {0, -0, 0.5, 0.9999999, 1, 1.0000001, 2.5, NaN, +Infinity, -Infinity,
+      // null, 馬番自体が無い} × 期待(ev, placeOddsMin, excludedReason)。
+      const cases: Case[] = [
+        { name: "oddsMin=0(値域外・境界)", oddsMin: 0, expectedEv: null, expectedPlaceOddsMin: 0, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=-0(値域外)", oddsMin: -0, expectedEv: null, expectedPlaceOddsMin: -0, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=0.5(値域外)", oddsMin: 0.5, expectedEv: null, expectedPlaceOddsMin: 0.5, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=0.9999999(値域外・境界のすぐ下)", oddsMin: 0.9999999, expectedEv: null, expectedPlaceOddsMin: 0.9999999, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=1(境界ちょうど・値域内)", oddsMin: 1, expectedEv: placeProb * 1, expectedPlaceOddsMin: 1, expectedReason: null },
+        { name: "oddsMin=1.0000001(境界を僅かに超える・値域内)", oddsMin: 1.0000001, expectedEv: placeProb * 1.0000001, expectedPlaceOddsMin: 1.0000001, expectedReason: null },
+        { name: "oddsMin=2.5(通常値・値域内)", oddsMin: 2.5, expectedEv: placeProb * 2.5, expectedPlaceOddsMin: 2.5, expectedReason: null },
+        { name: "oddsMin=NaN(非有限)", oddsMin: Number.NaN, expectedEv: null, expectedPlaceOddsMin: Number.NaN, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=+Infinity(非有限)", oddsMin: Number.POSITIVE_INFINITY, expectedEv: null, expectedPlaceOddsMin: Number.POSITIVE_INFINITY, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=-Infinity(非有限)", oddsMin: Number.NEGATIVE_INFINITY, expectedEv: null, expectedPlaceOddsMin: Number.NEGATIVE_INFINITY, expectedReason: REASON_MALFORMED },
+        { name: "oddsMin=null(未確定)", oddsMin: null, expectedEv: null, expectedPlaceOddsMin: null, expectedReason: REASON_NULL },
+        { name: "馬番自体が無い", oddsMin: undefined, expectedEv: null, expectedPlaceOddsMin: null, expectedReason: REASON_NO_UMABAN },
+      ];
+
+      it.each(cases)(
+        "$name → HorseEvの全6フィールド(umaban/placeProb/placeOddsMin/ev/isPositive/excludedReason)を値として固定する(AC-1)",
+        ({ oddsMin, expectedEv, expectedPlaceOddsMin, expectedReason }) => {
+          const priors: HorsePrior[] = [{ umaban: 1, placeProb }];
+          const [result] = computeRaceEv(priors, snapshotWith(oddsMin));
+
+          // HorseEvの全6フィールドを射影する(#58のunavailableReason脱落と同型の検出力低下を
+          // 防ぐため、一部だけを見るタプルにしない)。
+          expect(result!.umaban).toBe(1);
+          expect(result!.placeProb).toBe(placeProb);
+
+          if (typeof expectedPlaceOddsMin === "number" && Number.isNaN(expectedPlaceOddsMin)) {
+            expect(Number.isNaN(result!.placeOddsMin as number)).toBe(true);
+          } else {
+            expect(result!.placeOddsMin).toBe(expectedPlaceOddsMin);
+          }
+
+          if (expectedEv === null) {
+            expect(result!.ev).toBeNull();
+          } else {
+            expect(result!.ev).toBeCloseTo(expectedEv, 10);
+          }
+
+          expect(result!.isPositive).toBe(expectedEv !== null && expectedEv > 1.0);
+          expect(result!.excludedReason).toBe(expectedReason);
+        },
+      );
+
+      it("3つの除外理由(馬番が無い/下限が未確定/値域外)はリテラルとして固定され、相互に相異なる(AC-2)", () => {
+        // リテラルとの一致(#55: 実装からimportした定数とのtoEqualは自己参照になるため使わない。
+        // ここではハードコードした文字列同士を比較する)。
+        expect(REASON_NO_UMABAN).toBe("複勝オッズに該当馬番が存在しないため対象外");
+        expect(REASON_NULL).toBe("複勝オッズ下限が未確定(null)のため対象外");
+        expect(REASON_MALFORMED).toBe("複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外");
+        // 相互相異(Set.sizeだけだと3つ同時に差し替えても通ってしまうため、対ごとの比較も置く)。
+        expect(new Set([REASON_NO_UMABAN, REASON_NULL, REASON_MALFORMED]).size).toBe(3);
+        expect(REASON_NO_UMABAN).not.toBe(REASON_NULL);
+        expect(REASON_NO_UMABAN).not.toBe(REASON_MALFORMED);
+        expect(REASON_NULL).not.toBe(REASON_MALFORMED);
+      });
+    },
+  );
 
   describe("入力全体の扱い", () => {
     it("全馬を入力順で返し、対象外馬も欠落させない", () => {
@@ -224,6 +318,72 @@ describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換
       ).toBeCloseTo(1.0 + 9 * 0.5, 10);
     });
   });
+
+  describe(
+    "AC-4(b)(boss メタレビューR1・2026-09-04): 非nullの戻り値はisUsableOddsを満たす" +
+      "(境界winOdds=1.0はmax(1.0,…)の下限とisUsableOddsの>=1.0が整合する唯一の点。" +
+      "既定coef〈0.2〉・妥当な数値coefの下でこの不変条件が成り立つことを値として固定する。" +
+      "grep -rn \"estimatePlaceOddsMinFromWin\" packages/core/test | grep -i \"isUsableOdds\" が" +
+      "0件だったこと〈本テスト追加前〉がboss指摘の根拠)",
+    () => {
+      const cases: Array<{ name: string; winOdds: number; config?: { coef: number } }> = [
+        { name: "境界winOdds=1.0・既定coef(0.2)", winOdds: 1.0 },
+        { name: "winOdds=1.5・既定coef(0.2)", winOdds: 1.5 },
+        { name: "winOdds=10・既定coef(0.2)", winOdds: 10 },
+        { name: "winOdds=50・既定coef(0.2)", winOdds: 50 },
+        { name: "winOdds=10・coef=0.5(既定以外)", winOdds: 10, config: { coef: 0.5 } },
+      ];
+      it.each(cases)("$name → 戻り値がisUsableOddsを満たす(true)", ({ winOdds, config }) => {
+        const result = estimatePlaceOddsMinFromWin(winOdds, config);
+        expect(result).not.toBeNull();
+        expect(isUsableOdds(result!)).toBe(true);
+      });
+    },
+  );
+
+  describe(
+    "残余(boss メタレビューR1・選択(b)): coefが非有限のときisUsableOddsを満たさない値が" +
+      "そのまま推定複勝下限として使われうる(#23-Bへ送る残余。本番では到達しない。" +
+      "expected-value.tsのcomputeEstimatedRaceEv JSDoc参照)",
+    () => {
+      it("coef=NaNのとき、戻り値はNaN(isUsableOddsを満たさない)であること", () => {
+        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NaN });
+        expect(result).not.toBeNull();
+        expect(Number.isNaN(result!)).toBe(true);
+        expect(isUsableOdds(result!)).toBe(false);
+      });
+
+      it("coef=+Infinityのとき、戻り値は+Infinity(isUsableOddsを満たさない)であること", () => {
+        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.POSITIVE_INFINITY });
+        expect(result).toBe(Number.POSITIVE_INFINITY);
+        expect(isUsableOdds(result!)).toBe(false);
+      });
+
+      // boss メタレビューR3(2026-09-04): 「Infinityが混じると常に下限クランプが機能しない」
+      // という過剰一般化した機序をJSDocに書きかけたため、その過剰一般化を否定する側と、
+      // AC-4(b)が名指しした境界(winOdds=1.0)での挙動をテストとして固定する
+      // (散文だけ直すと次に同じ過剰一般化を書き戻せるため)。
+      it(
+        "coef=-Infinityのとき、Math.maxが1.0側にクランプしisUsableOddsを満たすこと" +
+          "(過剰一般化の否定側: 「Infinityが混じると常に壊れる」わけではない)",
+        () => {
+          const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NEGATIVE_INFINITY });
+          expect(result).toBe(1);
+          expect(isUsableOdds(result!)).toBe(true);
+        },
+      );
+
+      it(
+        "coef=+InfinityかつwinOdds=1.0(境界)のとき、加算項が0×Infinity=NaNになり" +
+          "戻り値もNaNになること(AC-4(b)が名指しした境界そのもの)",
+        () => {
+          const result = estimatePlaceOddsMinFromWin(1.0, { coef: Number.POSITIVE_INFINITY });
+          expect(result).toBe(Number.NaN);
+          expect(isUsableOdds(result!)).toBe(false);
+        },
+      );
+    },
+  );
 });
 
 /**
@@ -250,6 +410,126 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
     expect(result!.evEstimated).toBe(true);
     expect(result!.excludedReason).toBeNull();
   });
+
+  describe(
+    "残余(boss メタレビューR1・選択(b)。#23-Bへ送る): evaluateEstimatedHorseは" +
+      "estimatedOddsMin===nullしか見ておらずisUsableOddsを通さないため、非有限coefを渡すと" +
+      "isUsableOddsを満たさないplaceOddsMinがisPositive=trueとして返ることがある" +
+      "(本番では到達しない。estimatedPlaceConfigの供給元はpackages/app/srcに存在せず、" +
+      "常に既定coef=0.2が使われるため)",
+    () => {
+      // code-reviewer指摘(2026-09-04): 残余ガードもAC-1と同じ規律(EstimatedHorseEvの
+      // 全7フィールド〈umaban/placeProb/placeOddsMin/ev/isPositive/excludedReason/
+      // evEstimated〉を射影する。一部だけを見るタプルにしない)で揃える。coef=+Infinity側だけ
+      // excludedReasonをtoBeNull()で見ていたのに対しcoef=NaN側は見ておらず非対称だった
+      // (#58のunavailableReason脱落と同型の検出力の穴)。toBe(NaN)はvitestがObject.isで
+      // 比較するため素直に使える(Object.is(NaN,NaN)===trueを実行して確認済み)。
+      it("coef=+Infinityのとき、isPositive=trueだがplaceOddsMinはisUsableOddsを満たさないこと(全7フィールド)", () => {
+        const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+        const odds: OddsSnapshot = {
+          officialDatetime: null,
+          oddsStatus: "yoso",
+          win: { 1: { odds: 5, ninki: null } },
+          place: {},
+        };
+        const [result] = computeEstimatedRaceEv(
+          priors,
+          odds,
+          { threshold: 1.0 },
+          { coef: Number.POSITIVE_INFINITY },
+        );
+        expect(result!.umaban).toBe(1);
+        expect(result!.placeProb).toBe(0.4);
+        expect(result!.placeOddsMin).toBe(Number.POSITIVE_INFINITY);
+        expect(result!.ev).toBe(Number.POSITIVE_INFINITY);
+        expect(result!.isPositive).toBe(true);
+        expect(result!.excludedReason).toBeNull();
+        expect(result!.evEstimated).toBe(true);
+        expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
+      });
+
+      it("coef=NaNのとき、ev/placeOddsMinはNaNでisPositive=falseになること(全7フィールド)", () => {
+        const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+        const odds: OddsSnapshot = {
+          officialDatetime: null,
+          oddsStatus: "yoso",
+          win: { 1: { odds: 5, ninki: null } },
+          place: {},
+        };
+        const [result] = computeEstimatedRaceEv(
+          priors,
+          odds,
+          { threshold: 1.0 },
+          { coef: Number.NaN },
+        );
+        expect(result!.umaban).toBe(1);
+        expect(result!.placeProb).toBe(0.4);
+        expect(result!.placeOddsMin).toBe(Number.NaN);
+        expect(result!.ev).toBe(Number.NaN);
+        expect(result!.isPositive).toBe(false);
+        expect(result!.excludedReason).toBeNull();
+        expect(result!.evEstimated).toBe(true);
+        expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
+      });
+    },
+  );
+
+  describe(
+    "推定複勝下限が算出できない理由の文言(Issue #74 Eスコープ: 偽の断定除去。" +
+      "estimatePlaceOddsMinFromWinはnull/非有限/MIN_VALID_ODDS未満を1つのnull戻り値に" +
+      "統合しているため、「未確定」と断定すると単勝オッズが値域外〈存在するが不正〉の場合に偽になる。" +
+      "code-reviewer指摘: 是正前の旧文言「単勝オッズが未確定のため推定複勝下限を算出できない」に" +
+      "戻しても検出できなかったため、toBeによるリテラル比較を追加する)",
+    () => {
+      // 是正前の旧文言(偽の断定そのもの)。旧文言に戻す変異が入ったら下記テストが赤くなる
+      // ことを、このテストを書く過程で実際に確認した(Red→Green のログは完了報告参照)。
+      const OLD_FALSE_REASON = "単勝オッズが未確定のため推定複勝下限を算出できない";
+      const NEW_REASON = "単勝オッズが未確定または不正な値のため推定複勝下限を算出できない";
+
+      const cases: Array<{ name: string; winOdds: number | null }> = [
+        { name: "単勝オッズがnull(真に未確定)", winOdds: null },
+        { name: "単勝オッズがNaN(非有限。未確定ではなく不正な値)", winOdds: Number.NaN },
+        { name: "単勝オッズが負値(-5。未確定ではなく不正な値)", winOdds: -5 },
+        { name: "単勝オッズが0.9(1.0未満・値域外。未確定ではなく不正な値)", winOdds: 0.9 },
+      ];
+
+      it.each(cases)(
+        "$name → 新文言がリテラルとして固定されること(AC A0: 値として比較)",
+        ({ winOdds }) => {
+          const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+          const odds: OddsSnapshot = {
+            officialDatetime: null,
+            oddsStatus: "yoso",
+            win: { 1: { odds: winOdds, ninki: null } },
+            place: {},
+          };
+          const [result] = computeEstimatedRaceEv(priors, odds);
+          expect(result!.ev).toBeNull();
+          expect(result!.excludedReason).toBe(NEW_REASON);
+          // 旧文言(偽の断定)ではないことも明示的に固定する。
+          expect(result!.excludedReason).not.toBe(OLD_FALSE_REASON);
+        },
+      );
+
+      it("NaN・負値・0.9のいずれも「未確定」ではなく同一の新文言に統一されること(偽の断定を分岐で作り直さない)", () => {
+        const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+        const values = [Number.NaN, -5, 0.9];
+        const reasons = values.map((winOdds) => {
+          const odds: OddsSnapshot = {
+            officialDatetime: null,
+            oddsStatus: "yoso",
+            win: { 1: { odds: winOdds, ninki: null } },
+            place: {},
+          };
+          return computeEstimatedRaceEv(priors, odds)[0]!.excludedReason;
+        });
+        // 前提(無条件expect): 3ケースとも対象外(nullではない理由が付く)であること。
+        expect(reasons.every((r) => r !== null)).toBe(true);
+        expect(new Set(reasons).size).toBe(1);
+        expect(reasons[0]).toBe(NEW_REASON);
+      });
+    },
+  );
 
   it("単勝オッズも欠損している馬は対象外(ev=null・理由付き)", () => {
     const priors: HorsePrior[] = [{ umaban: 3, placeProb: 0.4 }];

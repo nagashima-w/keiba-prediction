@@ -47,6 +47,7 @@
 import type { JointModelHorse } from "./place-joint-model.js";
 import { CONDITIONAL_BERNOULLI_MODEL } from "./place-joint-model.js";
 import { resolveComboOdds } from "./combo-bet-allocation.js";
+import { isUsableOdds } from "./allocation-primitives.js";
 
 // ---------------------------------------------------------------------------
 // 共通の型
@@ -160,9 +161,10 @@ export type MarketImpliedPlaceProbabilities =
 /**
  * `1/placeOddsMin` から市場含意複勝確率を求め、Σ=min(3,頭数)に正規化する。
  *
- * `placeOddsMin` が欠損(null)・非有限・0以下の馬が**1頭でもいる**レースは、Σ=一定への
- * 正規化そのものが崩れるため、レース全体の市場系指標を算出不能(`values: null`)として扱う
- * (一部の馬だけ除外して正規化すると、残りの馬の値も歪むため)。
+ * `placeOddsMin` が欠損(null)・値域外(1.0未満・非有限。Issue #74。判定基準は
+ * `allocation-primitives.ts` の `isUsableOdds` に委譲する)の馬が**1頭でもいる**レースは、
+ * Σ=一定への正規化そのものが崩れるため、レース全体の市場系指標を算出不能(`values: null`)
+ * として扱う(一部の馬だけ除外して正規化すると、残りの馬の値も歪むため)。
  *
  * `oddsStatus === "yoso"`(発売前)は `OddsSnapshot.place` が常に空オブジェクトになる
  * (複勝オッズ自体が未発売)。呼び出し側が生の `OddsSnapshot.place` から `placeOddsMin` を
@@ -183,7 +185,10 @@ export function computeMarketImpliedPlaceProbabilities(
   const inverses: { umaban: number; inv: number }[] = [];
   for (const h of horses) {
     const odds = h.placeOddsMin;
-    if (odds === null || !Number.isFinite(odds) || odds <= 0) {
+    // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #74。旧実装は
+    // `!Number.isFinite(odds) || odds <= 0` を独立に再実装しており、isUsableOddsの基準
+    // 〈#74で>0から>=1.0へ引き上げ〉と食い違うと片方だけ古いまま残る事故の温床になっていた)。
+    if (odds === null || !isUsableOdds(odds)) {
       return {
         values: null,
         reason: `馬番${h.umaban}の複勝オッズ下限が欠損または不正な値のため、レース全体のΣ=一定への正規化が崩れる(oddsStatus="yoso"では常にこの経路に入る)`,

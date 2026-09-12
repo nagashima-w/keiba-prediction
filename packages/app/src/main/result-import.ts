@@ -10,6 +10,7 @@ import {
   raceResultUrl,
   RaceResultNotConfirmedError,
   type CourseType,
+  type RaceComboPayoutsSaveInput,
   type RaceId,
   type RaceResult,
   type RaceResultEntry,
@@ -75,15 +76,19 @@ export interface ImportResultDeps {
   /** 取得HTMLをパースする(通常は core parseRaceResult)。結果テーブル欠落時は例外を投げる。 */
   readonly parse: (html: string) => RaceResult;
   /**
-   * 実着順・通過順・上がり3F・複勝払戻を保存する(通常は AnalysisStore.saveResult)。
-   * courseType(面、タスク#27-A2)はレース単位の別引数として渡す。パース結果に面が
-   * 無い(未解決)場合は undefined を渡し、AnalysisStore 側が race_result_meta へ
-   * 書き込まないようにする。
+   * 実着順・通過順・上がり3F・複勝払戻・組合せ払戻(ワイド・3連複、Issue #52)を保存する
+   * (通常は AnalysisStore.saveResult)。courseType(面、タスク#27-A2)はレース単位の
+   * 別引数として渡す。パース結果に面が無い(未解決)場合は undefined を渡し、
+   * AnalysisStore 側が race_result_meta へ書き込まないようにする。
+   * comboPayouts(第4引数)は parseRaceResult が返す判別共用体(RaceComboPayoutResult)を
+   * そのまま渡す(boss裁定R-7: 呼び出し側〈importRaceResult〉に「undeterminedを空配列に
+   * 変換する」等の判断を持たせない。素通しのみ)。
    */
   readonly saveResult: (
     raceId: RaceId,
     entries: readonly RaceResultEntry[],
     courseType?: CourseType | null,
+    comboPayouts?: RaceComboPayoutsSaveInput,
   ) => void;
 }
 
@@ -122,6 +127,12 @@ export async function importRaceResult(
     // 構造異常等はそのまま伝播 → 以降の保存に到達しない。
     throw e;
   }
-  deps.saveResult(raceId, toResultEntries(result), result.courseType);
+  // boss裁定R-7: result.widePayouts/result.trioPayouts(parseRaceResultが返す判別共用体)を
+  // そのまま第4引数へ渡すだけで、ここでは一切の判断(undeterminedを[]に変換する・
+  // 握りつぶす等)をしない。判断の余地を無くすことがR-7の要点。
+  deps.saveResult(raceId, toResultEntries(result), result.courseType, {
+    wide: result.widePayouts,
+    trio: result.trioPayouts,
+  });
   return summarizeImport(raceId, result);
 }

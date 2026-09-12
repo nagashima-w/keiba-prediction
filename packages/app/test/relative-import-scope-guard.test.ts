@@ -26,6 +26,12 @@
  * 抜け穴になりうる。実装は変更しない)。
  *
  * スコープ外: `packages/core` への同種ガードは今回入れない(boss裁定・Issue #38)。
+ *
+ * 【Issue #57 で追記】上記は package 境界(`packages/app` の外を指さないこと)のガードであり、
+ * `packages/app` 内部の層(`shared`/`renderer`/`main`)の向きは別問題として最下部の describe で
+ * 追加した(「`shared/**` の相対 import を自身のディレクトリ基準で解決すると、すべて
+ * `packages/app/src/shared` 配下を指す」)。パーサ(`extractRelativeImportSpecifiers`)・
+ * 判定ロジック(`findOutOfScopeRelativeImports`)は複製せず、`scopeRoot` を差し替えて再利用する。
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -137,7 +143,7 @@ export function extractRelativeImportSpecifiers(source: string): string[] {
  * 各ファイルの相対 import 指定子を自身のディレクトリ基準で解決し、`scopeRoot` の外を
  * 指しているものを列挙する。
  */
-function findOutOfScopeRelativeImports(
+export function findOutOfScopeRelativeImports(
   files: ReadonlyMap<string, string>,
   scopeRoot: string,
 ): { file: string; specifier: string }[] {
@@ -248,6 +254,99 @@ describe("packages/appの相対importがpackages/appの外を指していない�
     expect(files.size).toBeGreaterThan(0);
 
     const violations = findOutOfScopeRelativeImports(files, appRoot);
+    expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * Issue #57: 層内の逆依存ガード(`shared` → `renderer`/`main`)。
+ *
+ * ルール: `packages/app/src/shared/**` の相対 import 指定子を自身のディレクトリ基準で
+ * 解決すると、すべて `packages/app/src/shared` 配下を指す(非相対 import は
+ * `extractRelativeImportSpecifiers` が既に除外済みのため対象外)。`renderer`/`main` を
+ * 名指しする言い回しにしないことで、将来 `preload` 等の層が増えても列挙漏れなく機能する。
+ *
+ * 検出器(パーサ+判定ロジック)は複製しない。上の2つのdescribeが使っている
+ * `extractRelativeImportSpecifiers`・`findOutOfScopeRelativeImports` を、`scopeRoot` を
+ * `packages/app/src/shared` に差し替えてそのまま再利用する。
+ */
+describe("shared配下の相対importがshared配下の外を指していないこと(Issue #57)", () => {
+  const sharedDir = path.join(appRoot, "src", "shared");
+
+  describe("合成Mapに対するpositive control(検出器が生きていることの常設証拠。M1〜M4)", () => {
+    // 「toEqual([])だけのテスト」は検出器自体を壊しても永久に緑になる(boss裁定)。
+    // 実際に違反を含む合成入力を用意し、検出器が違反を検知できることを常に固定する。
+    it("M1: 型import(renderer)を含む合成ファイルが違反として検出されること", () => {
+      const files = new Map([
+        [
+          path.join(sharedDir, "analysis-types.ts"),
+          'import type { X } from "../renderer/verify-format.js";',
+        ],
+      ]);
+      const violations = findOutOfScopeRelativeImports(files, sharedDir);
+      expect(violations).toEqual([
+        { file: path.join(sharedDir, "analysis-types.ts"), specifier: "../renderer/verify-format.js" },
+      ]);
+    });
+
+    it("M2: 値import(renderer)を含む合成ファイルが違反として検出されること", () => {
+      const files = new Map([
+        [
+          path.join(sharedDir, "analysis-types.ts"),
+          'import { formatYen } from "../renderer/verify-format.js";',
+        ],
+      ]);
+      const violations = findOutOfScopeRelativeImports(files, sharedDir);
+      expect(violations).toEqual([
+        { file: path.join(sharedDir, "analysis-types.ts"), specifier: "../renderer/verify-format.js" },
+      ]);
+    });
+
+    it("M3: 動的import(main)を含む合成ファイルが違反として検出されること", () => {
+      const files = new Map([
+        [path.join(sharedDir, "analysis-types.ts"), 'const m = await import("../main/logger.js");'],
+      ]);
+      const violations = findOutOfScopeRelativeImports(files, sharedDir);
+      expect(violations).toEqual([
+        { file: path.join(sharedDir, "analysis-types.ts"), specifier: "../main/logger.js" },
+      ]);
+    });
+
+    it("M4: 副作用のみのimport(main)を含む合成ファイルが違反として検出されること", () => {
+      const files = new Map([
+        [path.join(sharedDir, "analysis-types.ts"), 'import "../main/logger.js";'],
+      ]);
+      const violations = findOutOfScopeRelativeImports(files, sharedDir);
+      expect(violations).toEqual([
+        { file: path.join(sharedDir, "analysis-types.ts"), specifier: "../main/logger.js" },
+      ]);
+    });
+
+    it("誤検知しないこと(shared内の兄弟import・非相対importは違反にならない)", () => {
+      const files = new Map([
+        [
+          path.join(sharedDir, "analysis-types.ts"),
+          [
+            'import type { X } from "./settings.js";',
+            'import { allocateBets } from "@keiba/core/ev/bet-allocation";',
+            'import { readFileSync } from "node:fs";',
+            'import { useState } from "react";',
+          ].join("\n"),
+        ],
+      ]);
+      expect(findOutOfScopeRelativeImports(files, sharedDir)).toEqual([]);
+    });
+  });
+
+  it("実ファイル走査: shared配下が空でなく、shared/analysis-types.tsが走査対象に含まれること(空振り防止)", () => {
+    const files = readSourceFiles(sharedDir, [".ts"]);
+    expect(files.size).toBeGreaterThan(0);
+    expect(files.has(path.join(sharedDir, "analysis-types.ts"))).toBe(true);
+  });
+
+  it("shared配下(.ts)の相対importをすべて解決しても、shared配下の外を指すものが0件であること", () => {
+    const files = readSourceFiles(sharedDir, [".ts"]);
+    const violations = findOutOfScopeRelativeImports(files, sharedDir);
     expect(violations).toEqual([]);
   });
 });

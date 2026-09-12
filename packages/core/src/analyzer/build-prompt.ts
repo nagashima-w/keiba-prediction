@@ -178,6 +178,7 @@ import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
 import type { MarketGapSummary } from "./market-gap.js";
 import type { JockeyChangeSummary } from "./jockey-change.js";
 import type { MarginTrendSummary } from "./margin-trend.js";
+import { isUsableOdds } from "../ev/allocation-primitives.js";
 import {
   clipAbsoluteLabel,
   clipPercentLabel,
@@ -294,13 +295,17 @@ export interface PromptHorse {
  * ev/expected-value.ts の computeRaceEv(全馬・OddsSnapshot前提)を呼び回す必要はなく、
  * analyzer 層に閉じた単純計算で済む(呼び出し側が PromptHorse.referenceEv に渡す値の算出に使う)。
  * @param prior 3着内率(scorerのprior)
- * @param placeOddsMin 複勝オッズ下限。欠損(null)なら参考EVは算出不可としてnullを返す。
+ * @param placeOddsMin 複勝オッズ下限。欠損(null)・値域外(1.0未満・非有限。Issue #74)なら
+ *   参考EVは算出不可としてnullを返す。
  */
 export function computeReferenceEv(
   prior: number,
   placeOddsMin: number | null,
 ): number | null {
-  if (placeOddsMin === null || !Number.isFinite(placeOddsMin)) {
+  // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(Issue #74。旧実装は
+  // `!Number.isFinite(placeOddsMin)`のみを見ており、値域外(0等)を通して
+  // `prior×0=0`という「参考EVが算出できた」結果に潰していた)。
+  if (placeOddsMin === null || !isUsableOdds(placeOddsMin)) {
     return null;
   }
   if (!Number.isFinite(prior)) {

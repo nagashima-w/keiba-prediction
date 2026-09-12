@@ -223,6 +223,69 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
     expect(courseType).toBeUndefined();
   });
 
+  describe("組合せ払戻(ワイド・3連複、Issue #52)の素通し(boss裁定R-7・R-10)", () => {
+    it("パース結果のwidePayouts/trioPayoutsを、saveResultの第4引数へそのまま(判断を挟まず)渡すこと", async () => {
+      const saveResult = vi.fn();
+      const wide: RaceResult["widePayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [2, 4], payout: 190 }],
+      };
+      const trio: RaceResult["trioPayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 4], payout: 2210 }],
+      };
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () => buildRaceResult({ widePayouts: wide, trioPayouts: trio }),
+        saveResult,
+      });
+      expect(saveResult).toHaveBeenCalledTimes(1);
+      const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+      expect(comboPayouts).toEqual({ wide, trio });
+    });
+
+    it("ワイドが state:'undetermined'(構造異常)のときも、判断を挟まずそのままsaveResultの第4引数へ渡り、着順・複勝は通常どおり保存されること", async () => {
+      const saveResult = vi.fn();
+      const undeterminedWide: RaceResult["widePayouts"] = {
+        state: "undetermined",
+        reason: {
+          kind: "groupCountMismatch",
+          message: "テスト用",
+          observedGroupCount: 2,
+          observedPayoutCount: 1,
+          rawHtml: null,
+        },
+      };
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () => buildRaceResult({ widePayouts: undeterminedWide }),
+        saveResult,
+      });
+      expect(saveResult).toHaveBeenCalledTimes(1);
+      const [savedRaceId, entries, , comboPayouts] = saveResult.mock.calls[0]!;
+      // 巻き添え無し: 着順(→entries)は通常どおり保存される。
+      expect(savedRaceId).toBe(raceId);
+      expect(entries).toEqual(toResultEntries(buildRaceResult()));
+      // ワイドの undetermined がそのまま渡っている(呼び出し側〈result-import.ts〉が
+      // これを空配列に変換したり握りつぶしたりしていないこと)。
+      expect(comboPayouts).toEqual({
+        wide: undeterminedWide,
+        trio: undefined,
+      });
+    });
+
+    it("パース結果にwidePayouts/trioPayoutsが無い(未設定)場合は、saveResultの第4引数もundefinedのままになること", async () => {
+      const saveResult = vi.fn();
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () => buildRaceResult(), // widePayouts/trioPayouts省略
+        saveResult,
+      });
+      const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+      expect(comboPayouts).toEqual({ wide: undefined, trio: undefined });
+    });
+  });
+
   it("結果テーブル欠落(構造異常のパース失敗)時は保存せずエラーを伝播する(DBを汚さない)", async () => {
     const saveResult = vi.fn();
     await expect(

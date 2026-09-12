@@ -108,8 +108,13 @@ function buildRaceData(
     placeProb: (p / sum) * 3,
   }));
 
-  // 真の的中確率は本番と同じ条件付きベルヌーイモデル(CONDITIONAL_BERNOULLI_MODEL)から
-  // 直接求める(buildComboCandidates内部の計算経路と同一のモデル)。
+  // 「真の的中確率」(オッズ生成の基準値)は条件付きベルヌーイモデル(CONDITIONAL_BERNOULLI_MODEL)
+  // から直接求める、本スクリプト固有の基準として固定する(下記buildComboCandidates呼び出しが
+  // 内部で使うモデルとは独立。buildComboCandidatesの既定モデルは#81(#78-B)でPLACKETT_LUCE_MODELへ
+  // 切り替わっており、両者はもはや同一ではない。この乖離がベンチの数値に与える影響は
+  // 「全点正EV regime」(987点全件が正EV候補になり打ち切りが発生する)を含め自分で実行して
+  // 再現・確認済みで、本ベンチが観測している性質〈候補数の飽和による貪欲法の打ち切り〉自体は
+  // 崩れていない)。
   const rawDistribution: readonly PlaceOutcome[] = CONDITIONAL_BERNOULLI_MODEL.buildDistribution(
     horses,
     3,
@@ -145,9 +150,9 @@ function run(seed: number, noiseFactor: NoiseFactorFn): void {
   const n = 18;
   const { horses, oddsByKey } = buildRaceData(n, seed, noiseFactor);
 
-  const built1: ComboCandidateBuildResult = buildComboCandidates(horses, 3, 1, oddsByKey);
-  const built2: ComboCandidateBuildResult = buildComboCandidates(horses, 3, 2, oddsByKey);
-  const built3: ComboCandidateBuildResult = buildComboCandidates(horses, 3, 3, oddsByKey);
+  const built1: ComboCandidateBuildResult = buildComboCandidates(horses, 3, "place", oddsByKey);
+  const built2: ComboCandidateBuildResult = buildComboCandidates(horses, 3, "wide", oddsByKey);
+  const built3: ComboCandidateBuildResult = buildComboCandidates(horses, 3, "trio", oddsByKey);
   const allCandidates: AllocationCandidate[] = [
     ...built1.candidates,
     ...built2.candidates,

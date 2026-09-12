@@ -26,6 +26,7 @@ function view(overrides: Partial<RaceLedgerView> = {}): RaceLedgerView {
     totalReturn: 0,
     recoveryRate: null,
     betCount: 0,
+    allocation: null,
     ...overrides,
   };
 }

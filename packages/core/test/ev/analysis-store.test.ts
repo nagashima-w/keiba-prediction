@@ -2,7 +2,9 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
   AnalysisStore,
+  type AnalysisAllocationMetaRecord,
   type AnalysisRecord,
+  type StoredAllocation,
 } from "../../src/ev/analysis-store.js";
 import { ScrapeCache } from "../../src/scraper/cache.js";
 
@@ -1351,6 +1353,1343 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       expect(cache.get("k")!.value).toBe("v2");
       expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
       db.close();
+    });
+  });
+
+  describe("placeOddsMinの非有限値がDB往復でどうなるか(Issue #50・回帰テスト)", () => {
+    // 【このテストの目的(4点)】
+    // boss メタレビュー(要修正2)を契機に、オーケストレーターの判断で本テストを追加した
+    // (テスト追加そのものはboss指示ではない。boss が求めたのは要修正2の走査結果の記録まで)。
+    // 目的は次の4点。
+    //
+    // 1. 「DBを通るから非有限値は消える」という一般化は誤りであることの固定。
+    //    本テスト作成の経緯: Issue #31(#50)の調査中、実装担当者が本番の AnalysisStore
+    //    (better-sqlite3、in-memory)へ NaN/+Infinity/-Infinity を実際に保存・復元する
+    //    プローブを1回限りのスクリプトで実行し、「NaNだけがnullへ自己修復され、Infinityは
+    //    そのまま生き残る」ことを実測した。この結果を code-reviewer が本番の AnalysisStore を
+    //    使って再現しようとした際に一度は逆の結論(Infinityもnullになる)を得て差し戻しに
+    //    至ったが、オーケストレーターが3度目の実測(in-memory・ファイルベース両方、
+    //    生SQLのtypeof併用)を行い、当初の実測が正しいことを確定させた。
+    //    **「非有限値はNaN・Infinityをまとめて1つの性質として扱ってよい」
+    //    という直感は、少なくとも better-sqlite3 経由のREAL列では成立しない。**
+    //
+    // 2. これは better-sqlite3 の挙動への依存であり、バージョン更新で変わりうる。
+    //    本テストはその依存を明示的に固定する回帰テストであり、将来 better-sqlite3(または
+    //    SQLiteそのもの)のバージョンが上がって挙動が変わったら、このテストが落ちて気づける
+    //    ようにすることが目的(「気づけない」状態を作らないための固定)。
+    //
+    // 3. Issue #50 のリスク評価はこの事実に依存している: 将来 placeOddsMin に Infinity を
+    //    書き込む経路が生まれた場合、**DBは防波堤にならない**(NaNは自己修復されて無害化するが、
+    //    Infinityは往復してそのまま残り、verify.ts:640/669等の同型サイトに到達しうる)。
+    //
+    // 4. この挙動を「望ましい」と承認しているわけではない。これは better-sqlite3 の現状の
+    //    実装の記録であって、仕様としての追認ではない(本番コードは本タスクで一切変更していない)。
+    //
+    // 【確認手順の注意(code-reviewer自身が特定した誤りの根本原因)】
+    // この挙動を確認するとき `JSON.stringify` で表示してはならない。`JSON.stringify` は
+    // 仕様上 NaN・Infinity・-Infinity をすべて null に変換して出力する(JSONに非有限数の
+    // 表現が無いため)。このため「DBが3つとも null に自己修復した」ように見えてしまう
+    // (実際に本タスクのレビューで一度この誤認が起きた: code-reviewerが
+    // `console.log(JSON.stringify(loaded?.horses, null, 2))` で結果を表示したところ、
+    // SQLite側で本当にnullになるNaNと、実際にはInfinityのまま生きているが表示上nullに
+    // 潰されていた+Infinity/-Infinityの区別がつかなくなり、「Infinityもnullになる」という
+    // 誤った結論に至った)。確認するときは値そのものを typeof・Number.isFinite と
+    // あわせて直接出力すること(本テスト本体のアサーションも、当然ながら JSON.stringify を
+    // 経由せず toBe(Number.POSITIVE_INFINITY) 等で値を直接比較している)。
+    //
+    // 対照として通常値(3.5)が素通しされることも併記し、「異常値だけが変な挙動をする」ことを
+    // 明確にする(通常値まで巻き添えで壊れているわけではないことの確認)。
+    const table: Array<{ name: string; value: number; expected: number | null }> = [
+      { name: "NaN → null(自己修復される)", value: Number.NaN, expected: null },
+      {
+        name: "+Infinity → +Infinityのまま(自己修復されない)",
+        value: Number.POSITIVE_INFINITY,
+        expected: Number.POSITIVE_INFINITY,
+      },
+      {
+        name: "-Infinity → -Infinityのまま(自己修復されない)",
+        value: Number.NEGATIVE_INFINITY,
+        expected: Number.NEGATIVE_INFINITY,
+      },
+      { name: "通常値(3.5・対照)はそのまま素通しされる", value: 3.5, expected: 3.5 },
+    ];
+    it.each(table)("$name", ({ value, expected }) => {
+      // :memory: で十分(オーケストレーターがファイルベースでも同結果であることを実測済み)。テストは一時ファイルを残さない。
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({
+          raceId: "非有限値往復テスト",
+          horses: [
+            {
+              umaban: 1,
+              prior: 0.5,
+              adjustedProb: 0.5,
+              placeOddsMin: value,
+              ev: 1.0,
+              isPositive: true,
+              contributions: null,
+              mark: null,
+            },
+          ],
+        }),
+      );
+      const restored = store.listAnalyses({ raceId: "非有限値往復テスト" })[0]!;
+      const restoredOdds = restored.horses[0]!.placeOddsMin;
+      if (expected === null) {
+        expect(restoredOdds).toBeNull();
+      } else {
+        // Object.is基準(toBe)で比較する。+Infinity/-Infinityの符号違いを
+        // 取り違えないようにするため(NaN行は上のnull分岐で扱う)。
+        expect(restoredOdds).toBe(expected);
+      }
+      store.close();
+    });
+  });
+
+  describe("組合せ払戻テーブルの新設(race_combo_payouts / race_combo_payout_imports、Issue #52)", () => {
+    it("旧DB(combo系テーブルが存在しない)でAnalysisStoreを開くとテーブルが作成され、組合せ払戻付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // 旧バージョン相当: race_results のみの最小スキーマ(combo系テーブル自体が無い)。
+      db.exec(`
+        CREATE TABLE race_results (
+          race_id TEXT NOT NULL,
+          umaban INTEGER NOT NULL,
+          finish_position INTEGER,
+          PRIMARY KEY (race_id, umaban)
+        );
+      `);
+      const store = new AnalysisStore({ database: db });
+      expect(() =>
+        store.saveResult(
+          "組合せ払戻テストレース",
+          [{ umaban: 1, finishPosition: 1 }],
+          null,
+          {
+            wide: {
+              state: "parsed",
+              payouts: [{ umabans: [1, 2], payout: 120 }],
+            },
+          },
+        ),
+      ).not.toThrow();
+      expect(store.getComboPayouts("組合せ払戻テストレース", "wide")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0102", payout: 120 }],
+      });
+      store.close();
+    });
+
+    it("同一DBで2回目のAnalysisStore構築(再オープン相当)でもCREATE TABLE IF NOT EXISTSがno-opで既存データを保持すること", () => {
+      const db = new Database(":memory:");
+      const store1 = new AnalysisStore({ database: db });
+      store1.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 120 }] },
+      });
+      const store2 = new AnalysisStore({ database: db });
+      expect(store2.getComboPayouts("R1", "wide")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0102", payout: 120 }],
+      });
+      db.close();
+    });
+  });
+
+  describe("getComboPayouts(組合せ払戻の読み出し契約。Issue #52 AC9・boss裁定R-4〜R-6)", () => {
+    it("一度も取り込んでいないレースは not_imported を返すこと", () => {
+      const store = new AnalysisStore();
+      expect(store.getComboPayouts("未保存", "wide")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("旧DB(race_results に行があるがcombo系マーカーが無い)を開いた直後は not_imported を返すこと(R-4がAC9・AC12を同時に満たすことの直接証明)", () => {
+      const db = new Database(":memory:");
+      // 旧バージョン相当: race_results には既にこのレースの行がある(#52より前に取り込んだ想定)。
+      db.exec(`
+        CREATE TABLE race_results (
+          race_id TEXT NOT NULL,
+          umaban INTEGER NOT NULL,
+          finish_position INTEGER,
+          PRIMARY KEY (race_id, umaban)
+        );
+        INSERT INTO race_results (race_id, umaban, finish_position)
+        VALUES ('旧DBレース', 1, 1);
+      `);
+      const store = new AnalysisStore({ database: db });
+      // race_results には行があるが、combo系テーブルにはこのレースの行が無い。
+      // 「race_resultsの行の有無」を根拠に判定すると誤って imported/[] を返してしまう
+      // (=過去の全レースがワイド・3連複払戻0円という偽の確定値になる)ため、
+      // race_combo_payout_imports のマーカー行の有無で判定しなければならない。
+      expect(store.getComboPayouts("旧DBレース", "wide")).toEqual({
+        state: "not_imported",
+      });
+      expect(store.getComboPayouts("旧DBレース", "trio")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("state:'parsed'かつpayouts:[]で保存すると、imported かつ空配列を返すこと(未発売等・0件でもnot_importedへ退行しない)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [] },
+      });
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "imported",
+        payouts: [],
+      });
+      store.close();
+    });
+
+    it("1件以上の払戻を保存すると、そのまま復元できること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        trio: {
+          state: "parsed",
+          payouts: [{ umabans: [1, 2, 5], payout: 240 }],
+        },
+      });
+      expect(store.getComboPayouts("R1", "trio")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "010205", payout: 240 }],
+      });
+      store.close();
+    });
+
+    it("state:'undetermined'を渡して保存しても、DBに一切触れず not_imported のままであること(R-5)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "undetermined",
+          reason: {
+            kind: "payoutTableAbsent",
+            message: "テスト用",
+            observedGroupCount: null,
+            observedPayoutCount: null,
+            rawHtml: null,
+          },
+        },
+      });
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("comboPayouts自体を省略した既存互換の呼び出しでは、DBに一切触れず not_imported のままであること(AC13: 既存呼び出しの非破壊)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "not_imported",
+      });
+      expect(store.getComboPayouts("R1", "trio")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+
+    it("複数組を保存すると combo_key 昇順で決定的に返ること(getResultのORDER BY umabanと同じ流儀)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [
+            { umabans: [1, 4], payout: 150 },
+            { umabans: [1, 2], payout: 100 },
+            { umabans: [2, 4], payout: 200 },
+          ],
+        },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      expect(result.state).toBe("imported");
+      if (result.state === "imported") {
+        expect(result.payouts.map((p) => p.comboKey)).toEqual([
+          "0102",
+          "0104",
+          "0204",
+        ]);
+      }
+      store.close();
+    });
+
+    it("wideとtrioは互いに独立して保存・読み出しできること(片方だけ保存してももう片方はnot_importedのまま)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 100 }] },
+      });
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0102", payout: 100 }],
+      });
+      expect(store.getComboPayouts("R1", "trio")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+  });
+
+  describe("saveResultの組合せ払戻: 単一トランザクション・再取込の境界(Issue #52 AC7・AC8・boss裁定R-7〜R-9)", () => {
+    it("courseType同様、comboPayouts省略時はrace_combo_payouts/race_combo_payout_importsに一切触れないこと(既存呼び出しの非破壊)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const comboRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_combo_payouts WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const markerRow = store.rawDatabase
+        .prepare(
+          `SELECT COUNT(*) AS c FROM race_combo_payout_imports WHERE race_id = ?`,
+        )
+        .get("R1") as { c: number };
+      expect(comboRow.c).toBe(0);
+      expect(markerRow.c).toBe(0);
+      store.close();
+    });
+
+    it("再取込の境界1: 3組保存済みの状態で2組に減らして再取込すると、古い行が1つも残らないこと(AC8)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [
+            { umabans: [1, 2], payout: 100 },
+            { umabans: [1, 3], payout: 150 },
+            { umabans: [2, 3], payout: 200 },
+          ],
+        },
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [{ umabans: [1, 2], payout: 110 }],
+        },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      // 前提: 再取込後の件数をまず無条件に固定する(空振り防止。「1組も残らない」は
+      // 「2件消えて1件残る」ことを含意するため、件数そのものを固定する)。
+      expect(result.state).toBe("imported");
+      if (result.state === "imported") {
+        expect(result.payouts).toHaveLength(1);
+        expect(result.payouts).toEqual([{ comboKey: "0102", payout: 110 }]);
+      }
+      store.close();
+    });
+
+    it("再取込の境界2: 3組保存済みの状態でstate:'undetermined'で再取込すると、3組がそのまま保持されること(消えない。一過性の構造異常で正しい過去データを破壊しない)", () => {
+      const store = new AnalysisStore();
+      const threeEntries = [
+        { umabans: [1, 2], payout: 100 },
+        { umabans: [1, 3], payout: 150 },
+        { umabans: [2, 3], payout: 200 },
+      ];
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: threeEntries },
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "undetermined",
+          reason: {
+            kind: "groupCountMismatch",
+            message: "テスト用(一過性の構造異常を模す)",
+            observedGroupCount: 2,
+            observedPayoutCount: 1,
+            rawHtml: null,
+          },
+        },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      expect(result.state).toBe("imported");
+      if (result.state === "imported") {
+        expect(result.payouts).toHaveLength(3);
+        expect(result.payouts.map((p) => p.comboKey)).toEqual([
+          "0102",
+          "0103",
+          "0203",
+        ]);
+      }
+      store.close();
+    });
+
+    it("再取込の境界3: 3組保存済みの状態でstate:'parsed'かつpayouts:[]で再取込すると、0組になりimportedのまま(not_importedへ退行しない)であること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: {
+          state: "parsed",
+          payouts: [
+            { umabans: [1, 2], payout: 100 },
+            { umabans: [1, 3], payout: 150 },
+            { umabans: [2, 3], payout: 200 },
+          ],
+        },
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [] },
+      });
+      const result = store.getComboPayouts("R1", "wide");
+      expect(result).toEqual({ state: "imported", payouts: [] });
+      store.close();
+    });
+
+    it("race_results・race_combo_payoutsを単一トランザクションで書くこと(AC7の直接固定)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 100 }] },
+      });
+      const resultRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_results WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const comboRow = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM race_combo_payouts WHERE race_id = ?`)
+        .get("R1") as { c: number };
+      const markerRow = store.rawDatabase
+        .prepare(
+          `SELECT COUNT(*) AS c FROM race_combo_payout_imports WHERE race_id = ? AND bet_type = 'wide'`,
+        )
+        .get("R1") as { c: number };
+      expect(resultRow.c).toBe(1);
+      expect(comboRow.c).toBe(1);
+      expect(markerRow.c).toBe(1);
+      store.close();
+    });
+
+    /**
+     * 上のテスト(件数1/1/1)は「保存できたこと」の事後条件であり、非トランザクション実装
+     * (race_resultsを書いた後にrace_combo_payoutsの書き込みで例外が起きても、race_results側は
+     * 巻き戻らない実装)でも同じ値になる。これでは「単一トランザクションで書くこと」自体の
+     * 検出力が無い(boss メタレビュー・要修正2)。
+     *
+     * 検出力のある反例: 正規化後(buildComboOddsKey適用後)で同一になる組を2件渡すと、
+     * race_combo_payoutsのPRIMARY KEY(race_id, bet_type, combo_key)違反で例外が飛ぶ
+     * (このテスト自体はcode-reviewerの一次レビューR-12プローブがアドホックに確認した現象を
+     * 固定化したもの)。単一トランザクションで書かれているなら、この例外でrace_results側も
+     * 巻き戻り、getResultはundefinedを返すはずである。もし将来 db.transaction(...) が
+     * 素の関数呼び出しに置き換えられる退行が起きた場合、race_resultsの書き込みは既に
+     * コミット済みのまま残ってしまい、このアサーションが失敗して検知できる。
+     */
+    it("正規化後に重複するcombo_key(例: [1,2]と[2,1]はどちらも\"0102\")を渡すとPRIMARY KEY違反で例外を投げ、race_results側も巻き戻ってgetResultがundefinedになること(AC7の原子性を検出力を持たせて直接固定する)", () => {
+      const store = new AnalysisStore();
+      expect(() =>
+        store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+          wide: {
+            state: "parsed",
+            payouts: [
+              { umabans: [1, 2], payout: 100 },
+              { umabans: [2, 1], payout: 100 }, // 正規化後は同一キー"0102"
+            ],
+          },
+        }),
+      ).toThrow();
+      // 単一トランザクションでなければ、race_combo_payouts側の例外前に既にコミット済みの
+      // race_results行が残ってしまう。ここが緑のままだと原子性が壊れていても気づけない。
+      expect(store.getResult("R1")).toBeUndefined();
+      store.close();
+    });
+  });
+
+  describe("配分提案の永続化(analysis_allocation_meta / analysis_bets、Issue #59)", () => {
+    /** テスト用のメタ行(#59スキーマ20列)を最小上書きで組み立てる。 */
+    function makeMeta(
+      overrides: Partial<AnalysisAllocationMetaRecord> = {},
+    ): AnalysisAllocationMetaRecord {
+      return {
+        route: "mixed",
+        unavailableReason: null,
+        fallbackReason: null,
+        skipReasonCode: null,
+        comboOddsWide: null,
+        comboOddsTrio: null,
+        bankroll: 100000,
+        perRaceCap: 10000,
+        kellyFraction: 0.5,
+        evThreshold: 1.0,
+        includeComboOdds: true,
+        includeWide: true,
+        includeTrio: true,
+        betUnit: 100,
+        greedySteps: 1000,
+        candidateCap: 2000,
+        modelId: "conditional-bernoulli",
+        modelApproximate: false,
+        oddsStatus: "result",
+        ...overrides,
+      };
+    }
+
+    /** analysis_allocation_meta の生行(snake_case)を取得する。 */
+    function rawMetaRow(store: AnalysisStore, analysisId: number): unknown {
+      return store.rawDatabase
+        .prepare(`SELECT * FROM analysis_allocation_meta WHERE analysis_id = ?`)
+        .get(analysisId);
+    }
+
+    it("AC2: route=unset のメタ行が全20列で固定どおりに保存されること(coreの配分計算に未到達=設定エコー以外は全null)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分unsetレース",
+          allocation: {
+            meta: makeMeta({
+              route: "unset",
+              fallbackReason: null,
+              skipReasonCode: null,
+              comboOddsWide: null,
+              comboOddsTrio: null,
+              bankroll: 0,
+              perRaceCap: 0,
+              includeComboOdds: false,
+              // code-reviewer水平展開レビュー(finding1・finding「includeWideのfalse分岐が
+              // 一度も踏まれない」の両方に対応): include_wideがこの describe 全体で常にtrue(=1)
+              // だと、(a) ev_threshold(1.0→JSでは1)との束縛入れ替えを検出できず、
+              // (b) `m.includeWide ? 1 : 0` のfalse分岐を固定できない。この経路でfalseにする。
+              includeWide: false,
+              includeTrio: true,
+              betUnit: null,
+              greedySteps: null,
+              candidateCap: null,
+              modelId: null,
+              modelApproximate: null,
+              oddsStatus: "result",
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "unset",
+        unavailable_reason: null,
+        fallback_reason: null,
+        skip_reason_code: null,
+        combo_odds_wide: null,
+        combo_odds_trio: null,
+        bankroll: 0,
+        per_race_cap: 0,
+        kelly_fraction: 0.5,
+        ev_threshold: 1.0,
+        include_combo_odds: 0,
+        include_wide: 0,
+        include_trio: 1,
+        bet_unit: null,
+        greedy_steps: null,
+        candidate_cap: null,
+        model_id: null,
+        model_approximate: null,
+        odds_status: "result",
+      });
+      store.close();
+    });
+
+    it("AC2: route=place-only(includeComboOdds=false)のメタ行が全20列で固定どおりに保存されること(candidate_capはplace-only経路に存在しないためnull)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分place-onlyレース",
+          allocation: {
+            meta: makeMeta({
+              route: "place-only",
+              unavailableReason: null,
+              fallbackReason: "combo-odds-not-requested",
+              skipReasonCode: "reference-ev-not-positive",
+              comboOddsWide: null,
+              comboOddsTrio: null,
+              includeComboOdds: false,
+              // boss差し戻し(M2): include_wide/include_trioが全フィクスチャでtrue/true同値だと
+              // 束縛の入れ替えを検出できない。この経路でtrueとfalseに分ける。
+              includeWide: true,
+              includeTrio: false,
+              betUnit: 100,
+              greedySteps: 1000,
+              candidateCap: null,
+              modelId: "conditional-bernoulli",
+              // code-reviewer水平展開レビュー(finding2): この describe 全体で
+              // modelApproximateがfalse/nullのみだと、`m.modelApproximate === null ? null :
+              // m.modelApproximate ? 1 : 0` のtrue→1分岐が一度もDB往復を通らない。この経路でtrueにする。
+              modelApproximate: true,
+              oddsStatus: "middle",
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "place-only",
+        unavailable_reason: null,
+        fallback_reason: "combo-odds-not-requested",
+        skip_reason_code: "reference-ev-not-positive",
+        combo_odds_wide: null,
+        combo_odds_trio: null,
+        bankroll: 100000,
+        per_race_cap: 10000,
+        kelly_fraction: 0.5,
+        ev_threshold: 1.0,
+        include_combo_odds: 0,
+        include_wide: 1,
+        include_trio: 0,
+        bet_unit: 100,
+        greedy_steps: 1000,
+        candidate_cap: null,
+        model_id: "conditional-bernoulli",
+        model_approximate: 1,
+        odds_status: "middle",
+      });
+      store.close();
+    });
+
+    it("AC2: route=unavailable のメタ行が全20列で固定どおりに保存されること(unavailable_reasonが非nullになる唯一の経路。boss差し戻しM1の再発防止)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分unavailableレース",
+          allocation: {
+            meta: makeMeta({
+              route: "unavailable",
+              unavailableReason: "two-place-only",
+              fallbackReason: "combo-odds-not-requested",
+              skipReasonCode: null,
+              comboOddsWide: null,
+              comboOddsTrio: null,
+              bankroll: 100000,
+              perRaceCap: 10000,
+              // coordinator水平展開レビュー(定数置換の穴): kellyFractionが4テストとも0.5だと
+              // `m.kellyFraction`を0.5のリテラル直書きに変異させても検出できない
+              // (実測: core 2072件が全緑になることを確認済み)。この経路で0.5以外にする。
+              kellyFraction: 0.7,
+              includeComboOdds: false,
+              includeWide: true,
+              includeTrio: true,
+              // coreの配分計算に未到達(unset/yoso/unavailableと同じ扱い)。
+              betUnit: null,
+              greedySteps: null,
+              candidateCap: null,
+              modelId: null,
+              modelApproximate: null,
+              oddsStatus: "result",
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "unavailable",
+        unavailable_reason: "two-place-only",
+        fallback_reason: "combo-odds-not-requested",
+        skip_reason_code: null,
+        combo_odds_wide: null,
+        combo_odds_trio: null,
+        bankroll: 100000,
+        per_race_cap: 10000,
+        kelly_fraction: 0.7,
+        ev_threshold: 1.0,
+        include_combo_odds: 0,
+        include_wide: 1,
+        include_trio: 1,
+        bet_unit: null,
+        greedy_steps: null,
+        candidate_cap: null,
+        model_id: null,
+        model_approximate: null,
+        odds_status: "result",
+      });
+      store.close();
+    });
+
+    it("AC2: route=mixed のメタ行が全20列で固定どおりに保存されること(candidate_cap・comboOdds診断値とも非null)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分mixedレース",
+          allocation: {
+            meta: makeMeta({
+              route: "mixed",
+              unavailableReason: null,
+              fallbackReason: null,
+              skipReasonCode: null,
+              // boss差し戻し(M3): combo_odds_wide/trioが全フィクスチャで同値だと束縛の入れ替えを
+              // 検出できない。この経路でwideとtrioを異ならせる。
+              comboOddsWide: "present",
+              comboOddsTrio: "empty",
+              // coordinator水平展開レビュー(定数置換の穴): evThresholdが4テストとも1.0だと
+              // `m.evThreshold`を1.0のリテラル直書きに変異させても検出できない
+              // (実測: core 2072件が全緑になることを確認済み)。この経路で1.0以外にする。
+              evThreshold: 1.3,
+            }),
+            bets: [],
+          },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toEqual({
+        analysis_id: id,
+        route: "mixed",
+        unavailable_reason: null,
+        fallback_reason: null,
+        skip_reason_code: null,
+        combo_odds_wide: "present",
+        combo_odds_trio: "empty",
+        bankroll: 100000,
+        per_race_cap: 10000,
+        kelly_fraction: 0.5,
+        ev_threshold: 1.3,
+        include_combo_odds: 1,
+        include_wide: 1,
+        include_trio: 1,
+        bet_unit: 100,
+        greedy_steps: 1000,
+        candidate_cap: 2000,
+        model_id: "conditional-bernoulli",
+        model_approximate: 0,
+        odds_status: "result",
+      });
+      store.close();
+    });
+
+    it("AC3(明細の一部): stake>0の明細行だけが保存され、bet_type・combo_keyがそのまま往復すること(#59決定(b)(c))", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "配分明細レース",
+          allocation: {
+            meta: makeMeta(),
+            bets: [
+              { betType: "place", comboKey: "07", stake: 300, odds: 2.5, ev: 1.2 },
+              { betType: "wide", comboKey: "0102", stake: 500, odds: 3.1, ev: 1.05 },
+              { betType: "trio", comboKey: "010203", stake: 100, odds: 12.4, ev: 1.4 },
+            ],
+          },
+        }),
+      );
+      const rows = store.rawDatabase
+        .prepare(
+          `SELECT bet_type, combo_key, stake, odds, ev FROM analysis_bets WHERE analysis_id = ? ORDER BY bet_type`,
+        )
+        .all(id);
+      expect(rows).toEqual([
+        { bet_type: "place", combo_key: "07", stake: 300, odds: 2.5, ev: 1.2 },
+        { bet_type: "trio", combo_key: "010203", stake: 100, odds: 12.4, ev: 1.4 },
+        { bet_type: "wide", combo_key: "0102", stake: 500, odds: 3.1, ev: 1.05 },
+      ]);
+      store.close();
+    });
+
+    it("AC4: allocationを渡さずに保存した分析には、メタ行・明細行のいずれも作られないこと(旧分析=記録なしとの区別)", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(makeRecord({ raceId: "配分未指定レース" }));
+      expect(rawMetaRow(store, id)).toBeUndefined();
+      const betCount = store.rawDatabase
+        .prepare(`SELECT COUNT(*) AS c FROM analysis_bets WHERE analysis_id = ?`)
+        .get(id) as { c: number };
+      expect(betCount.c).toBe(0);
+      store.close();
+    });
+
+    it("AC4: 新テーブルが存在しない旧DBを開いても既存データが読め、テーブルが作成され、配分付きで保存できること", () => {
+      const db = new Database(":memory:");
+      // 旧バージョン相当: analyses/analysis_horses のみの最小スキーマ(配分系テーブル自体が無い)。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          PRIMARY KEY (analysis_id, umaban)
+        );
+        INSERT INTO analyses (id, race_id, analyzed_at) VALUES (1, '旧分析レース', '2026-01-01T00:00:00.000Z');
+      `);
+      const store = new AnalysisStore({ database: db });
+      // 既存データ(旧分析)が読めること。
+      expect(store.listAnalyses({ raceId: "旧分析レース" })).toHaveLength(1);
+      // 新規保存(配分付き)ができること = 新テーブルが作成されていること。
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "旧DB配分レース",
+          allocation: { meta: makeMeta(), bets: [{ betType: "place", comboKey: "01", stake: 100, odds: 2.0, ev: 1.1 }] },
+        }),
+      );
+      expect(rawMetaRow(store, id)).toMatchObject({ route: "mixed" });
+      store.close();
+    });
+
+    it("AC5-1(原子性): 明細のPRIMARY KEY違反(同一analysis_id・bet_type・combo_keyが2件)でsaveAnalysisがthrowし、analyses・analysis_horses・メタ・明細のどの行も残らないこと", () => {
+      const store = new AnalysisStore();
+      expect(() =>
+        store.saveAnalysis(
+          makeRecord({
+            raceId: "原子性違反レース",
+            allocation: {
+              meta: makeMeta(),
+              bets: [
+                { betType: "wide", comboKey: "0102", stake: 100, odds: 3.0, ev: 1.1 },
+                { betType: "wide", comboKey: "0102", stake: 200, odds: 3.0, ev: 1.1 }, // 同一キー重複
+              ],
+            },
+          }),
+        ),
+      ).toThrow();
+      // 単一トランザクションでなければ、analyses/analysis_horses/メタ行は例外前に
+      // 既にコミット済みのまま残ってしまう(race_combo_payoutsの原子性テストと同じ検出力)。
+      expect(store.listAnalyses({ raceId: "原子性違反レース" })).toHaveLength(0);
+      const counts = store.rawDatabase
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM analyses) AS analyses,
+             (SELECT COUNT(*) FROM analysis_horses) AS horses,
+             (SELECT COUNT(*) FROM analysis_allocation_meta) AS meta,
+             (SELECT COUNT(*) FROM analysis_bets) AS bets`,
+        )
+        .get() as { analyses: number; horses: number; meta: number; bets: number };
+      expect(counts).toEqual({ analyses: 0, horses: 0, meta: 0, bets: 0 });
+      store.close();
+    });
+
+    it("AC5-2: 配分行を持つ「版不明」分析をdeleteAnalysesWithUnknownPromptVersionで削除でき、FK制約違反にならず、配分の親子行も残らないこと", () => {
+      const store = new AnalysisStore();
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "版不明配分レース",
+          promptVersion: null,
+          allocation: {
+            meta: makeMeta(),
+            bets: [{ betType: "place", comboKey: "01", stake: 100, odds: 2.0, ev: 1.1 }],
+          },
+        }),
+      );
+      expect(() => store.deleteAnalysesWithUnknownPromptVersion()).not.toThrow();
+      expect(store.listAnalyses({ raceId: "版不明配分レース" })).toHaveLength(0);
+      const counts = store.rawDatabase
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM analysis_allocation_meta WHERE analysis_id = ?) AS meta,
+             (SELECT COUNT(*) FROM analysis_bets WHERE analysis_id = ?) AS bets`,
+        )
+        .get(id, id) as { meta: number; bets: number };
+      expect(counts).toEqual({ meta: 0, bets: 0 });
+      store.close();
+    });
+
+    describe("getAllocationForVerify(配分提案の読み出し。Issue #71 AC-B1/AC-B2)", () => {
+      it("AC-B1: メタ行が無ければundefinedを返すこと(#59より前の旧分析=記録なし)", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(makeRecord({ raceId: "読み出し記録なしレース" }));
+        expect(store.getAllocationForVerify(id)).toBeUndefined();
+        store.close();
+      });
+
+      it("AC-B1: route=unsetのメタ行もroute=\"unset\"としてそのまま読み出せること(配分あり/見送り/未到達の分類自体はverify.ts側の責務であり、ここでは値の往復のみを保証する)", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出しunsetレース",
+            allocation: {
+              meta: makeMeta({
+                route: "unset",
+                skipReasonCode: null,
+                bankroll: 0,
+                perRaceCap: 0,
+                betUnit: null,
+                greedySteps: null,
+                candidateCap: null,
+                modelId: null,
+                modelApproximate: null,
+              }),
+              bets: [],
+            },
+          }),
+        );
+        expect(store.getAllocationForVerify(id)).toEqual({
+          route: "unset",
+          skipReasonCode: null,
+          bets: [],
+        });
+        store.close();
+      });
+
+      it("AC-B2: 5つの束縛箇所(route/skip_reason_code/bet_type/combo_key/stake)が値としてDB往復すること(明細例はIssue本文どおり)", () => {
+        const store = new AnalysisStore();
+
+        // 配分あり相当: 複勝・ワイド・3連複の3明細(Issue本文の明細例をそのまま使う)。
+        const allocatedId = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出し配分ありレース",
+            allocation: {
+              meta: makeMeta({ route: "mixed", skipReasonCode: null }),
+              bets: [
+                { betType: "place", comboKey: "07", stake: 100, odds: 2.5, ev: 1.2 },
+                { betType: "wide", comboKey: "0102", stake: 300, odds: 3.1, ev: 1.05 },
+                { betType: "trio", comboKey: "010203", stake: 200, odds: 12.4, ev: 1.4 },
+              ],
+            },
+          }),
+        );
+        // 見送り相当: 複勝のみ1明細、skip_reason_codeが非null。
+        const skippedId = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出し見送りレース",
+            allocation: {
+              meta: makeMeta({
+                route: "place-only",
+                skipReasonCode: "reference-ev-not-positive",
+              }),
+              bets: [{ betType: "place", comboKey: "09", stake: 400, odds: 2.1, ev: 0.9 }],
+            },
+          }),
+        );
+        // 未到達相当(route=unsetは直上のテストで単独固定済みのため、ここではyosoを使い
+        // routeが3値目を取ることでA'〈2値以上〉を余裕を持って満たす)。
+        const unreachedId = store.saveAnalysis(
+          makeRecord({
+            raceId: "読み出し未到達レース",
+            allocation: {
+              meta: makeMeta({
+                route: "yoso",
+                skipReasonCode: null,
+                betUnit: null,
+                greedySteps: null,
+                candidateCap: null,
+                modelId: null,
+                modelApproximate: null,
+              }),
+              bets: [],
+            },
+          }),
+        );
+
+        // 束縛箇所ごとの値の内訳(条件A0・A'):
+        // - route: "mixed"/"place-only"/"yoso" の3値
+        // - skip_reason_code: null / "reference-ev-not-positive" の2値
+        // - bet_type: "place"/"wide"/"trio" の3値(4行中)
+        // - combo_key: "07"/"0102"/"010203"/"09" の4値
+        // - stake: 100/300/200/400 の4値
+        // 条件B: route([mixed,place-only,yoso])とskip_reason_code([null,文字列,null])は
+        // 値の型(nullの有無)からして一致し得ず、bet_type/combo_key/stakeもそれぞれ文字列/
+        // 文字列/数値で値集合が重ならないため、5箇所いずれも他と値ベクトルが一致しない。
+        expect(store.getAllocationForVerify(allocatedId)).toEqual({
+          route: "mixed",
+          skipReasonCode: null,
+          bets: [
+            { betType: "place", comboKey: "07", stake: 100 },
+            { betType: "trio", comboKey: "010203", stake: 200 },
+            { betType: "wide", comboKey: "0102", stake: 300 },
+          ],
+        });
+        expect(store.getAllocationForVerify(skippedId)).toEqual({
+          route: "place-only",
+          skipReasonCode: "reference-ev-not-positive",
+          bets: [{ betType: "place", comboKey: "09", stake: 400 }],
+        });
+        expect(store.getAllocationForVerify(unreachedId)).toEqual({
+          route: "yoso",
+          skipReasonCode: null,
+          bets: [],
+        });
+        store.close();
+      });
+    });
+
+    describe("getStoredAllocation(配分提案の読み出し。Issue #55)", () => {
+      /**
+       * 読む13列の基準値(boss裁定2026-09-02: combo_odds_wide/combo_odds_trioを除いた13列)。
+       * 全列が互いに異なる値を持つよう選び、束縛箇所の取り違え(条件B)を機械的に検出できるようにする。
+       */
+      function baselineMeta(
+        overrides: Partial<AnalysisAllocationMetaRecord> = {},
+      ): AnalysisAllocationMetaRecord {
+        return makeMeta({
+          route: "mixed",
+          unavailableReason: "not-sold",
+          fallbackReason: "no-combo-candidates",
+          skipReasonCode: "kelly-zero",
+          bankroll: 111111,
+          perRaceCap: 22222,
+          kellyFraction: 0.33,
+          evThreshold: 1.05,
+          includeComboOdds: true,
+          includeWide: false,
+          includeTrio: true,
+          betUnit: 150,
+          oddsStatus: "middle",
+          ...overrides,
+        });
+      }
+
+      const BASELINE_BET: {
+        betType: string;
+        comboKey: string;
+        stake: number;
+        odds: number | null;
+        ev: number | null;
+      } = {
+        betType: "place",
+        comboKey: "03",
+        stake: 500,
+        odds: 2.7,
+        ev: 1.15,
+      };
+
+      it("メタ行が無ければundefinedを返すこと(#59より前の旧分析=記録なし)", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(makeRecord({ raceId: "getStoredAllocation記録なしレース" }));
+        expect(store.getStoredAllocation(id)).toBeUndefined();
+        store.close();
+      });
+
+      it("読む13列 + bets(betType/comboKey/stake/odds/ev)がすべて値として往復し、読まない列を戻り値に含まないこと", () => {
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(
+          makeRecord({
+            raceId: "getStoredAllocation全体像レース",
+            allocation: {
+              meta: baselineMeta(),
+              bets: [
+                { betType: "place", comboKey: "07", stake: 100, odds: 2.5, ev: 1.2 },
+                { betType: "wide", comboKey: "0102", stake: 300, odds: 3.1, ev: 1.05 },
+                { betType: "trio", comboKey: "010203", stake: 200, odds: 12.4, ev: 1.4 },
+              ],
+            },
+          }),
+        );
+        const result = store.getStoredAllocation(id);
+        expect(result).toEqual({
+          route: "mixed",
+          unavailableReason: "not-sold",
+          fallbackReason: "no-combo-candidates",
+          skipReasonCode: "kelly-zero",
+          bankroll: 111111,
+          perRaceCap: 22222,
+          kellyFraction: 0.33,
+          evThreshold: 1.05,
+          includeComboOdds: true,
+          includeWide: false,
+          includeTrio: true,
+          betUnit: 150,
+          oddsStatus: "middle",
+          bets: [
+            { betType: "place", comboKey: "07", stake: 100, odds: 2.5, ev: 1.2 },
+            { betType: "trio", comboKey: "010203", stake: 200, odds: 12.4, ev: 1.4 },
+            { betType: "wide", comboKey: "0102", stake: 300, odds: 3.1, ev: 1.05 },
+          ],
+        });
+        // 読まない6列(combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/
+        // model_approximate)に対応するキーが戻り値オブジェクトに一切現れないこと(誰も読まない
+        // 列にコストを払わない#71原則の裏返し。余計なフィールドが型を超えて漏れていないか)。
+        expect(Object.keys(result!)).not.toContain("comboOddsWide");
+        expect(Object.keys(result!)).not.toContain("comboOddsTrio");
+        expect(Object.keys(result!)).not.toContain("greedySteps");
+        expect(Object.keys(result!)).not.toContain("candidateCap");
+        expect(Object.keys(result!)).not.toContain("modelId");
+        expect(Object.keys(result!)).not.toContain("modelApproximate");
+        store.close();
+      });
+
+      /** 1件のメタ列差分テストの仕様: どの列を書き換えるか・書き換え後のDB生値・対応するJSフィールドと期待値。 */
+      interface MetaColumnCase {
+        readonly label: string;
+        readonly metaOverride: Partial<AnalysisAllocationMetaRecord>;
+        readonly column: string;
+        readonly sentinelDbValue: number | string | null;
+        readonly field: keyof StoredAllocation;
+        readonly expectedValue: unknown;
+      }
+
+      const metaColumnCases: readonly MetaColumnCase[] = [
+        {
+          label: "route",
+          metaOverride: {},
+          column: "route",
+          sentinelDbValue: "SENTINEL_ROUTE",
+          field: "route",
+          expectedValue: "SENTINEL_ROUTE",
+        },
+        {
+          label: "unavailable_reason(非null→null)",
+          metaOverride: {},
+          column: "unavailable_reason",
+          sentinelDbValue: null,
+          field: "unavailableReason",
+          expectedValue: null,
+        },
+        {
+          label: "unavailable_reason(null→非null)",
+          metaOverride: { unavailableReason: null },
+          column: "unavailable_reason",
+          sentinelDbValue: "SENTINEL_UNAVAILABLE_REASON",
+          field: "unavailableReason",
+          expectedValue: "SENTINEL_UNAVAILABLE_REASON",
+        },
+        {
+          label: "fallback_reason(非null→null)",
+          metaOverride: {},
+          column: "fallback_reason",
+          sentinelDbValue: null,
+          field: "fallbackReason",
+          expectedValue: null,
+        },
+        {
+          label: "fallback_reason(null→非null)",
+          metaOverride: { fallbackReason: null },
+          column: "fallback_reason",
+          sentinelDbValue: "SENTINEL_FALLBACK_REASON",
+          field: "fallbackReason",
+          expectedValue: "SENTINEL_FALLBACK_REASON",
+        },
+        {
+          label: "skip_reason_code(非null→null)",
+          metaOverride: {},
+          column: "skip_reason_code",
+          sentinelDbValue: null,
+          field: "skipReasonCode",
+          expectedValue: null,
+        },
+        {
+          label: "skip_reason_code(null→非null)",
+          metaOverride: { skipReasonCode: null },
+          column: "skip_reason_code",
+          sentinelDbValue: "SENTINEL_SKIP_CODE",
+          field: "skipReasonCode",
+          expectedValue: "SENTINEL_SKIP_CODE",
+        },
+        {
+          label: "bankroll",
+          metaOverride: {},
+          column: "bankroll",
+          sentinelDbValue: 987654.25,
+          field: "bankroll",
+          expectedValue: 987654.25,
+        },
+        {
+          label: "per_race_cap",
+          metaOverride: {},
+          column: "per_race_cap",
+          sentinelDbValue: 54321.5,
+          field: "perRaceCap",
+          expectedValue: 54321.5,
+        },
+        {
+          label: "kelly_fraction",
+          metaOverride: {},
+          column: "kelly_fraction",
+          sentinelDbValue: 0.777,
+          field: "kellyFraction",
+          expectedValue: 0.777,
+        },
+        {
+          label: "ev_threshold",
+          metaOverride: {},
+          column: "ev_threshold",
+          sentinelDbValue: 2.34,
+          field: "evThreshold",
+          expectedValue: 2.34,
+        },
+        {
+          label: "include_combo_odds(true→false)",
+          metaOverride: { includeComboOdds: true },
+          column: "include_combo_odds",
+          sentinelDbValue: 0,
+          field: "includeComboOdds",
+          expectedValue: false,
+        },
+        {
+          label: "include_combo_odds(false→true)",
+          metaOverride: { includeComboOdds: false },
+          column: "include_combo_odds",
+          sentinelDbValue: 1,
+          field: "includeComboOdds",
+          expectedValue: true,
+        },
+        {
+          label: "include_wide(false→true)",
+          metaOverride: { includeWide: false },
+          column: "include_wide",
+          sentinelDbValue: 1,
+          field: "includeWide",
+          expectedValue: true,
+        },
+        {
+          label: "include_wide(true→false)",
+          metaOverride: { includeWide: true },
+          column: "include_wide",
+          sentinelDbValue: 0,
+          field: "includeWide",
+          expectedValue: false,
+        },
+        {
+          label: "include_trio(true→false)",
+          metaOverride: { includeTrio: true },
+          column: "include_trio",
+          sentinelDbValue: 0,
+          field: "includeTrio",
+          expectedValue: false,
+        },
+        {
+          label: "include_trio(false→true)",
+          metaOverride: { includeTrio: false },
+          column: "include_trio",
+          sentinelDbValue: 1,
+          field: "includeTrio",
+          expectedValue: true,
+        },
+        {
+          label: "bet_unit(非null→null)",
+          metaOverride: {},
+          column: "bet_unit",
+          sentinelDbValue: null,
+          field: "betUnit",
+          expectedValue: null,
+        },
+        {
+          label: "bet_unit(null→非null)",
+          metaOverride: { betUnit: null },
+          column: "bet_unit",
+          sentinelDbValue: 777,
+          field: "betUnit",
+          expectedValue: 777,
+        },
+        {
+          label: "odds_status",
+          metaOverride: {},
+          column: "odds_status",
+          sentinelDbValue: "SENTINEL_STATUS",
+          field: "oddsStatus",
+          expectedValue: "SENTINEL_STATUS",
+        },
+      ];
+
+      it.each(metaColumnCases)(
+        "AC1(メタ列): $label の列だけをUPDATEすると、戻り値のそのフィールドだけが変わり他フィールドは変化しないこと",
+        ({ metaOverride, column, sentinelDbValue, field, expectedValue }) => {
+          const store = new AnalysisStore();
+          const id = store.saveAnalysis(
+            makeRecord({
+              raceId: `AC1メタ列-${column}`,
+              allocation: { meta: baselineMeta(metaOverride), bets: [BASELINE_BET] },
+            }),
+          );
+          const baseline = store.getStoredAllocation(id)!;
+          store.rawDatabase
+            .prepare(`UPDATE analysis_allocation_meta SET ${column} = ? WHERE analysis_id = ?`)
+            .run(sentinelDbValue, id);
+          const updated = store.getStoredAllocation(id)!;
+          // 前提固定(条件A0): 書き換え後の値が実際に期待どおり変わっていること。
+          expect(updated[field]).toEqual(expectedValue);
+          // 本題: 対象フィールド以外は基準値から一切変化していないこと。
+          expect({ ...updated, [field]: baseline[field] }).toEqual(baseline);
+          store.close();
+        },
+      );
+
+      /** analysis_bets側(odds/ev)の差分テストの仕様。 */
+      interface BetColumnCase {
+        readonly label: string;
+        readonly betOverride: Partial<typeof BASELINE_BET>;
+        readonly column: "odds" | "ev";
+        readonly sentinelDbValue: number | null;
+        readonly field: "odds" | "ev";
+        readonly expectedValue: number | null;
+      }
+
+      const betColumnCases: readonly BetColumnCase[] = [
+        {
+          label: "odds(非null→null)",
+          betOverride: {},
+          column: "odds",
+          sentinelDbValue: null,
+          field: "odds",
+          expectedValue: null,
+        },
+        {
+          label: "odds(null→非null)",
+          betOverride: { odds: null },
+          column: "odds",
+          sentinelDbValue: 9.99,
+          field: "odds",
+          expectedValue: 9.99,
+        },
+        {
+          label: "ev(非null→null)",
+          betOverride: {},
+          column: "ev",
+          sentinelDbValue: null,
+          field: "ev",
+          expectedValue: null,
+        },
+        {
+          label: "ev(null→非null)",
+          betOverride: { ev: null },
+          column: "ev",
+          sentinelDbValue: 3.21,
+          field: "ev",
+          expectedValue: 3.21,
+        },
+      ];
+
+      it.each(betColumnCases)(
+        "AC1(bets列): $label の列だけをUPDATEすると、戻り値のそのフィールドだけが変わり他フィールドは変化しないこと",
+        ({ betOverride, column, sentinelDbValue, field, expectedValue }) => {
+          const store = new AnalysisStore();
+          const bet = { ...BASELINE_BET, ...betOverride };
+          const id = store.saveAnalysis(
+            makeRecord({
+              raceId: `AC1bet列-${column}-${JSON.stringify(betOverride)}`,
+              allocation: { meta: baselineMeta(), bets: [bet] },
+            }),
+          );
+          const baseline = store.getStoredAllocation(id)!;
+          store.rawDatabase
+            .prepare(
+              `UPDATE analysis_bets SET ${column} = ? WHERE analysis_id = ? AND bet_type = ? AND combo_key = ?`,
+            )
+            .run(sentinelDbValue, id, bet.betType, bet.comboKey);
+          const updated = store.getStoredAllocation(id)!;
+          // 前提固定(条件A0): 書き換え後の値が実際に期待どおり変わっていること。
+          expect(updated.bets[0]![field]).toEqual(expectedValue);
+          // 本題: 対象フィールド以外(bets内の他フィールド・メタ13列全部)は基準値から変化しないこと。
+          expect({
+            ...updated,
+            bets: [{ ...updated.bets[0]!, [field]: baseline.bets[0]![field] }],
+          }).toEqual(baseline);
+          store.close();
+        },
+      );
+
+      describe("AC2: 読まない6列(combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate)に極端な値を入れても戻り値が変わらないこと", () => {
+        const unreadColumnCases = [
+          { label: "combo_odds_wide", column: "combo_odds_wide", sentinelDbValue: "EXTREME_VALUE" },
+          { label: "combo_odds_trio", column: "combo_odds_trio", sentinelDbValue: "EXTREME_VALUE" },
+          { label: "greedy_steps", column: "greedy_steps", sentinelDbValue: 999999999 },
+          { label: "candidate_cap", column: "candidate_cap", sentinelDbValue: -1 },
+          { label: "model_id", column: "model_id", sentinelDbValue: "EXTREME_MODEL_ID" },
+          { label: "model_approximate", column: "model_approximate", sentinelDbValue: 1 },
+        ] as const;
+
+        it.each(unreadColumnCases)(
+          "$label に極端な値を入れても getStoredAllocation の戻り値が完全一致すること",
+          ({ column, sentinelDbValue }) => {
+            const store = new AnalysisStore();
+            const id = store.saveAnalysis(
+              makeRecord({
+                raceId: `AC2-${column}`,
+                allocation: { meta: baselineMeta(), bets: [BASELINE_BET] },
+              }),
+            );
+            const before = store.getStoredAllocation(id);
+            store.rawDatabase
+              .prepare(`UPDATE analysis_allocation_meta SET ${column} = ? WHERE analysis_id = ?`)
+              .run(sentinelDbValue, id);
+            const after = store.getStoredAllocation(id);
+            expect(after).toEqual(before);
+            store.close();
+          },
+        );
+      });
     });
   });
 });

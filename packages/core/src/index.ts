@@ -262,15 +262,23 @@ export {
 } from "./ev/race-opportunity.js";
 export {
   AnalysisStore,
+  type AnalysisAllocationMetaRecord,
+  type AnalysisAllocationRecord,
+  type AnalysisBetRecord,
   type AnalysisFilter,
   type AnalysisHorseRecord,
   type AnalysisRecord,
   type AnalysisStoreOptions,
+  type RaceComboPayoutsReadResult,
+  type RaceComboPayoutsSaveInput,
   type RaceResultDetail,
   type RaceResultDetailHorse,
   type RaceResultEntry,
+  type StoredAllocation,
+  type StoredAllocationBetDetail,
   type StoredAnalysis,
   type StoredAnalysisHorse,
+  type StoredComboPayout,
 } from "./ev/analysis-store.js";
 export {
   computeRaceLedger,
@@ -459,6 +467,9 @@ export type {
   OikiriResult,
   OikiriSkippedRow,
   PlaceOdds,
+  RaceComboPayoutAnomaly,
+  RaceComboPayoutEntry,
+  RaceComboPayoutResult,
   RaceListEntry,
   RacePayoutEntry,
   RaceResult,

@@ -8,10 +8,14 @@
  *   レンジで確定するため、下限を使う本計算は期待値を保守的(過小)に見積もる。
  * - EVプラス判定は「EV > 閾値」の厳密不等号とする。EV=閾値ちょうどは「プラスではない」。
  *   閾値ちょうどは控除率を織り込むと期待値が中立(妙味なし)であり、境界を拾わない方が安全なため。
- * - オッズ欠損馬(複勝オッズに馬番がない/下限が null)は EV を計算せず対象外とし、
- *   理由(excludedReason)を明示する。呼び出し側で欠落に気づけるよう ev=null で全馬分を返す。
+ * - オッズ欠損馬(複勝オッズに馬番がない/下限が null)、および複勝オッズ下限が値域外
+ *   (1.0未満・非有限。Issue #74)の馬は EV を計算せず対象外とし、理由(excludedReason)を
+ *   明示する。呼び出し側で欠落・値域外に気づけるよう ev=null で全馬分を返す
+ *   (値域外の場合もplaceOddsMinは生の値を保持し、nullに潰さない。#31の「判定不能と判定結果を
+ *   混ぜない」原則を計算側でも守るため。詳細はevaluateHorse実装参照)。
  */
 
+import { isUsableOdds, MIN_VALID_ODDS } from "./allocation-primitives.js";
 import type { OddsSnapshot } from "../scraper/types.js";
 
 /** EV計算の設定。 */
@@ -85,17 +89,18 @@ export const DEFAULT_ESTIMATED_PLACE_CONFIG: EstimatedPlaceConfig = {
  * などの要因で複勝配当は単勝から一意には決まらないため、この関数は事前スクリーニング用の概算値を
  * 返すに留める。複勝オッズが発売され次第、確定オッズで再分析することが前提となる。
  *
- * @param winOdds 単勝オッズ。null・非有限(NaN/Infinity)・1未満は推定不可としてnullを返す。
+ * @param winOdds 単勝オッズ。null・非有限(NaN/Infinity)・MIN_VALID_ODDS(1.0)未満は
+ *   推定不可としてnullを返す。
  * @param config 推定係数(省略時は既定coef=0.2)。
  */
 export function estimatePlaceOddsMinFromWin(
   winOdds: number | null,
   config: EstimatedPlaceConfig = DEFAULT_ESTIMATED_PLACE_CONFIG,
 ): number | null {
-  if (winOdds === null || !Number.isFinite(winOdds) || winOdds < 1) {
+  if (winOdds === null || !Number.isFinite(winOdds) || winOdds < MIN_VALID_ODDS) {
     return null;
   }
-  return Math.max(1.0, 1.0 + (winOdds - 1.0) * config.coef);
+  return Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds - MIN_VALID_ODDS) * config.coef);
 }
 
 /** 1頭分のEV計算結果。 */
@@ -148,6 +153,29 @@ function evaluateHorse(
   }
 
   const oddsMin = placeOdds.oddsMin;
+
+  // 複勝オッズ下限が値域外(Issue #74)。オッズの値域は1.0以上であり、`0`は構文上は正当な
+  // 数値だが値域外。判定基準は allocation-primitives.ts の isUsableOdds(>=MIN_VALID_ODDS)へ
+  // 委譲する(V-2: 新しい述語を作らず既存述語に集約)。
+  //
+  // 【重要】excluded()には流さない。excluded()はplaceOddsMinをnullに潰すため、下流
+  // (bet-allocation.ts)が「未確定(EXCLUDED_NO_ODDS)」と誤認し、oddsMalformedCountが
+  // 静かに0になる退行を起こす(#31の成果を計算側で自分で壊すことになる。boss着手前ゲート
+  // 【最重要の裁定】参照)。値域外だけはplaceOddsMinを生の値のまま保持し、evのみnullにする。
+  if (!isUsableOdds(oddsMin)) {
+    return {
+      umaban: prior.umaban,
+      placeProb: prior.placeProb,
+      placeOddsMin: oddsMin,
+      ev: null,
+      isPositive: false,
+      // boss裁定Q1(a)(2026-09-04): 到達しうる全入力(0/-0/(0,1)/NaN/±Infinity)に対して
+      // 真であることが必須。「1.0未満」単独だとNaN・+Infinityで偽になる(NaN<1.0も
+      // Infinity<1.0もfalse)。「1.0未満・非有限」の選言にすることで常に真になる。
+      excludedReason: "複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外",
+    };
+  }
+
   const ev = prior.placeProb * oddsMin;
   return {
     umaban: prior.umaban,
@@ -190,6 +218,43 @@ export interface EstimatedHorseEv extends HorseEv {
  * 確定EV経路(computeRaceEv/HorseEv)とは完全に独立した別関数・別型とすることで、確定EV経路の
  * 計算結果・型には一切影響を与えない(既存の回帰テストが示す挙動は不変)。
  *
+ * **残余(boss メタレビューR1・2026-09-04・#74。選択(b): 実装は変えず明記に留める。
+ * 機序はboss メタレビューR3・2026-09-04で是正——最初に書いた版は「Infinityが混じると
+ * 常にInfinityを返す」等、3点で事実と違っていた〈node -eで反証済み〉)**:
+ * `evaluateEstimatedHorse` は `estimatedOddsMin === null` しか見ておらず、
+ * `estimatePlaceOddsMinFromWin` の非null出力を `isUsableOdds` に通していない。ただし
+ * 壊れるのは `estimatePlaceOddsMinFromWin` 内部の
+ * `Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds − MIN_VALID_ODDS) × coef)` において、
+ * 第2引数(加算する項)が **NaN または +Infinity** になる場合に限る。`Math.max` は
+ * 「最大値を返す」関数であり、第2引数が -Infinity なら 1.0 側にクランプされて**正常に
+ * 機能する**(「Infinityが混じると常に下限クランプが機能しなくなる」わけではない。
+ * 符号で結果が変わる):
+ *   - `coef=NaN` → 加算項は常にNaN(winOddsに関わらず)。結果はNaN
+ *   - `coef=±Infinity` かつ `winOdds === MIN_VALID_ODDS`(境界。AC-4(b)が「max(1.0,…)の
+ *     下限と>=1.0が整合する唯一の点」と名指しした点そのもの) → 加算項は `0 × ±Infinity = NaN`
+ *   - `coef=+Infinity` かつ `winOdds > MIN_VALID_ODDS` → 加算項は `+Infinity`。結果は`+Infinity`
+ *   - `coef=-Infinity` かつ `winOdds > MIN_VALID_ODDS` → 加算項は `-Infinity`。`Math.max` が
+ *     1.0にクランプし、結果は**isUsableOddsを満たす**(過剰一般化の否定側。実測)
+ * 具体的には(いずれも `winOdds=5` で実測。境界`winOdds=1.0`は別途 `expected-value.test.ts`
+ * 「残余」describe参照): `coef=NaN` で `placeOddsMin=NaN`・`ev=NaN`・`isPositive=false`、
+ * `coef=+Infinity`(`winOdds>1.0`) で `placeOddsMin=+Infinity`・`ev=+Infinity`・
+ * `isPositive=true` になる(実測。同describe参照)。後者は `isPositive=true` かつ
+ * `placeOddsMin` が `isUsableOdds` を満たさないという、`verify.ts` の規則Uが
+ * 「本番経路では到達しない」と明記している状態そのものであり、`evaluateHorse`
+ * (確定EV側。値域外はisUsableOddsで弾く)との間に新しい非対称を作る。
+ *
+ * **本番では到達しない**: `placeConfig`(`EstimatedPlaceConfig`)の供給元は
+ * `packages/app/src` に存在せず(`analysis-pipeline.ts` の任意dep宣言と
+ * `?? DEFAULT_ESTIMATED_PLACE_CONFIG` へのフォールバックの2箇所のみで、実際に非既定値を
+ * 渡す呼び出し元が無い)、本番では常に既定値(`coef=0.2`)が使われる。既定coefおよび
+ * `estimatePlaceOddsMinFromWin` が受理する有限のwinOdds(>=1.0)の組み合わせでは、
+ * 出力は常に `isUsableOdds` を満たす(`expected-value.test.ts`「AC-4(b)」describe参照)。
+ *
+ * **状態の分離(discriminated union化)は本Issueでは行わない。** `estimatePlaceOddsMinFromWin`が
+ * null/非有限/値域外を1つのnull戻り値に統合している設計自体の見直しは #23-B の射程
+ * (`docs/issue-order.md`「#23-B / #23-Cの再ゲートで必ず扱う論点」参照)。ここで新設すると
+ * #23-Bの状態分離設計を先取りすることになる。
+ *
  * @param priors 各馬の馬番と複勝圏内確率
  * @param odds 単勝・複勝オッズのスナップショット(単勝オッズのみ使用)
  * @param config EV設定(省略時は既定閾値1.0)
@@ -217,7 +282,11 @@ function evaluateEstimatedHorse(
 
   if (estimatedOddsMin === null) {
     return {
-      ...excluded(prior, "単勝オッズが未確定のため推定複勝下限を算出できない"),
+      // Issue #74: estimatePlaceOddsMinFromWinはnull/非有限/MIN_VALID_ODDS未満を1つの
+      // null戻り値に統合しているため、「未確定」と断定すると値域外(単勝オッズは存在するが
+      // 1.0未満・非有限)の場合に偽になる。到達しうる全ケースで真になる選言にする
+      // (状態を分離するdiscriminated union化は#23-Bへ。本Issueでは文言の偽の断定除去のみ)。
+      ...excluded(prior, "単勝オッズが未確定または不正な値のため推定複勝下限を算出できない"),
       evEstimated: true,
     };
   }

@@ -37,8 +37,8 @@
  *
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
- * | オッズ文字列(下限・単一値。td.Oddsの直接テキストノード) | `parseNarComboOdds`(`toOddsNumber`) | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(地方3連複55件中5件がカンマ入り)。`parse-nar-combo-odds.test.ts`「桁区切りカンマ」「値の解釈」describe |
- * | オッズ文字列(上限。"下限 - 上限"レンジのハイフン以降。ワイドのみ) | `parseNarComboOdds`(レンジ分割+`toOddsNumber`) | あり | null化(レンジとして分割できない場合は下限・上限とも null) | 同上 |
+ * | オッズ文字列(下限・単一値。td.Oddsの直接テキストノード) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(地方3連複55件中5件がカンマ入り)。`parse-nar-combo-odds.test.ts`「桁区切りカンマ」「値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts` と共有しており、契約は5モジュール・呼び出し箇所13で統一済み(Issue #73で是正。内訳・再現コマンドは `parse-combo-odds.ts` 冒頭JSDoc参照) |
+ * | オッズ文字列(上限。"下限 - 上限"レンジのハイフン以降。ワイドのみ) | `parseNarComboOdds`(レンジ分割+同上`toOddsNumber`) | あり | null化(レンジとして分割できない場合は下限・上限とも null) | 同上 |
  * | 人気(このドキュメント種別に列自体が存在しない) | `parseNarComboOdds` | あり | 対象外(常にnull固定。実測でこの表示種別に人気列が無いことを確認済みのため防御ではなく仕様) | `parse-nar-combo-odds.test.ts`「値の解釈」describe |
  * | 馬番(td.Oddsのid属性由来) | `decodeCellId`(`validateComboUmabans`経由) | あり | throw(1〜18範囲外・昇順違反〈重複含む〉を検出) | `parse-nar-combo-odds.test.ts`「構造の検証」describe |
  * | 組の要素数(セルidの数値グループ数が券種〈comboSize〉と不一致。code-reviewer指摘5・#14の教訓「表を作る過程で穴が見つかる」を踏まえた全数走査で発見) | `decodeCellId`(comboSizeで2/3グループ固定の正規表現を選択) | あり | throw(anchoredな正規表現が一致しない。例: `_b5_c0_1_2_3`〈3グループ〉をwideパーサ〈2グループ想定〉に渡すと不一致) | `parse-nar-combo-odds.test.ts`「構造の検証」describe「セルidの数値グループ数が券種と不一致」it |
@@ -48,6 +48,7 @@
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
+import { toOddsNumber } from "./odds-number.js";
 import { NAR_COMBO_ODDS_SELECTORS as SEL } from "./selectors.js";
 import {
   buildComboOddsCellMap,
@@ -133,18 +134,6 @@ export interface NarComboOddsUnavailableReason {
 export type NarComboOddsParseResult =
   | { readonly state: "available"; readonly odds: ReadonlyMap<string, ComboOddsCell> }
   | { readonly state: "unavailable"; readonly reason: NarComboOddsUnavailableReason };
-
-const PLAIN_NUMBER = /^[0-9]+(\.[0-9]+)?$/;
-/** 桁区切りカンマ付き数値(例: "1,172.4")。3桁ごとの区切りのみ許容し、不正な区切りは拒否する。 */
-const GROUPED_NUMBER = /^[0-9]{1,3}(,[0-9]{3})*(\.[0-9]+)?$/;
-
-/** オッズ文字列(桁区切りカンマ許容)を数値化する。非数値・未確定("---.-"等)は null。 */
-function toOddsNumber(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (PLAIN_NUMBER.test(trimmed)) return Number(trimmed);
-  if (GROUPED_NUMBER.test(trimmed)) return Number(trimmed.replace(/,/g, ""));
-  return null;
-}
 
 /**
  * td.Odds要素の「直接の」テキストノードのみを連結して返す(子要素のテキストを含めない)。
