@@ -244,13 +244,21 @@ export function buildHiddenAllocationsBlocks(
  * throwするため、ここに到達しない)。
  *
  * `allocation-proposal-view.ts`の`betTypeLabel`(DB由来の開いた文字列を扱う、統合しない
- * 別実装)と3つの日本語ラベルが同一であることは
+ * 別実装)とplace/wide/trioの3つの日本語ラベルが同一であることは
  * `allocation-proposal-view.test.ts`「betTypeLabelとmixedBetTypeLabel…」でリテラル固定する。
+ *
+ * **`"win"`は例外(#91・#23-B1a)。** `betTypeLabel`は`"win"`のcaseを持たず(`default`分岐で
+ * DB由来の生文字列`"win"`をそのまま返す)、本関数は`"単勝"`という日本語ラベルを返す。
+ * したがって**`"win"`だけは両関数の戻り値が一致しない**(place/wide/trioの一致とは非対称)。
+ * この不一致は#91が自ら作った既知の非対称であり、解消(`betTypeLabel`側への`"win"`ケース追加)は
+ * #23-Cの射程(`allocation-proposal-view.ts`・そのテストへの変更は#91のスコープ外)。
  */
-export function mixedBetTypeLabel(betType: AllocationBetType): "複勝" | "ワイド" | "三連複" {
+export function mixedBetTypeLabel(betType: AllocationBetType): "複勝" | "単勝" | "ワイド" | "三連複" {
   switch (betType) {
     case "place":
       return "複勝";
+    case "win":
+      return "単勝";
     case "wide":
       return "ワイド";
     case "trio":

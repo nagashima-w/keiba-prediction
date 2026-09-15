@@ -137,16 +137,22 @@ export type { SkipReasonCode };
 // ============================================================================
 
 /**
- * 配分候補が扱える券種(Issue #76)。`"win"`(単勝)は未対応(#23-B)。
+ * 配分候補が扱える券種(Issue #76・#23-B1a(#91)で`"win"`を追加)。
+ *
+ * `"win"`(単勝)は**券種としては認識するが、候補の構築・検証はまだ未対応**(#92で対応)。
+ * `umabanCountOf`は`win`の構成頭数(1)を返せるが、`buildComboCandidates`(候補ビルダー)と
+ * `validateCandidates`(`allocateGeneralBets`の門番)はどちらも`win`を専用の門番でthrowする
+ * (理由は各関数のJSDoc参照。1着確率〈順序付きoutcome空間〉の計算を#91では一切行わないため)。
  *
  * 逆写像(頭数→券種)は本ファイルに一切作らない: `umabans.length` から券種を引く関数は
  * production に存在しない(`ALLOCATION_BET_TYPE_UMABAN_COUNT` は券種→頭数の一方向のみ)。
- * 単勝(#23-B)を追加すると頭数1が`place`と衝突するため、逆写像は単射になれない。
+ * `win`と`place`はどちらも頭数1のため、逆写像は単射になれない
+ * (`umabans.length===1 ? "place" : ...`のような実装をどこにも作らないこと)。
  */
-export type AllocationBetType = "place" | "wide" | "trio";
+export type AllocationBetType = "place" | "win" | "wide" | "trio";
 
 /**
- * 券種→買い目を構成する頭数の唯一の写像(Issue #76)。
+ * 券種→買い目を構成する頭数の唯一の写像(Issue #76・#91で`win`追加)。
  *
  * `combo-odds-key.ts` の `COMBO_SIZE`(`{wide:2, trio:3}`)とは**意図的に独立した定義**である。
  * `COMBO_SIZE` は `analysis-store.ts` が `Object.keys(COMBO_SIZE)` で組合せ払戻の取込ループの
@@ -155,9 +161,14 @@ export type AllocationBetType = "place" | "wide" | "trio";
  * `COMBO_SIZE` とは別にここへ新設する(2つ目の「券種→頭数」の定義ではあるが、この2つは
  * 目的が異なり統合できない。整合は `combo-bet-allocation.test.ts`
  * 「ALLOCATION_BET_TYPE_UMABAN_COUNT」describe のテストで機械的に確認する)。
+ *
+ * **キーの挿入順は頭数の昇順(place, win, wide, trio)。** `umabanCountOf`が未知の券種を
+ * throwする際、この`Object.keys`の順序をそのままメッセージに埋め込むため(下記参照)、
+ * 挿入順を変えるとエラーメッセージの券種列挙順が変わる。
  */
 export const ALLOCATION_BET_TYPE_UMABAN_COUNT: Record<AllocationBetType, number> = {
   place: 1,
+  win: 1,
   wide: 2,
   trio: 3,
 };
@@ -172,7 +183,7 @@ export const ALLOCATION_BET_TYPE_UMABAN_COUNT: Record<AllocationBetType, number>
  *
  * `Record<AllocationBetType, number>` の添字アクセスはTSの型システム上`number`に確定するため、
  * 未知値を渡す分岐は型上「到達不能」に見える。しかし実行時には型アサーション
- * (`"win" as AllocationBetType`のような呼び出し側の契約違反)で未知値が渡ることがあり、
+ * (`"quinella" as AllocationBetType`のような呼び出し側の契約違反)で未知値が渡ることがあり、
  * その場合`ALLOCATION_BET_TYPE_UMABAN_COUNT[betType]`は例外を投げずに`undefined`を返す。
  *
  * この`undefined`を検証なしで`buildComboCandidates`の内部`kCombinationsOfUmabans`へ渡すと、
@@ -182,11 +193,21 @@ export const ALLOCATION_BET_TYPE_UMABAN_COUNT: Record<AllocationBetType, number>
  * 判定結果を返してしまう**(本リポジトリで繰り返し是正してきた「判定不能を判定結果として
  * 報告する」欠陥クラスの新規発生。boss着手前ゲートで実測: n=18のとき`k=undefined`は
  * 例外もなく候補0件を返す)。
+ *
+ * ## メッセージの券種列挙を写像から導出する理由(#91・boss裁定)
+ *
+ * 有効な券種名をこの関数のエラーメッセージにベタ書きすると、`ALLOCATION_BET_TYPE_UMABAN_COUNT`
+ * と2つ目の「有効な券種の列挙」定義が生まれ、新しい券種を追加するたびにメッセージが
+ * 黙って古いまま(=偽の言い切り)になる欠陥クラス(#88と同型)を生む。
+ * `Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT)`から導出することで、`ALLOCATION_BET_TYPE_UMABAN_COUNT`
+ * のキー追加にメッセージが自動追従する(キーの挿入順がそのままメッセージの列挙順になる。
+ * 上記`ALLOCATION_BET_TYPE_UMABAN_COUNT`のJSDoc参照)。
  */
 export function umabanCountOf(betType: AllocationBetType): number {
   if (!Object.hasOwn(ALLOCATION_BET_TYPE_UMABAN_COUNT, betType)) {
+    const validBetTypes = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).join("/");
     throw new Error(
-      `不正な券種です: betTypeはplace/wide/trioのいずれかである必要があります(betType=${String(betType)})`,
+      `不正な券種です: betTypeは${validBetTypes}のいずれかである必要があります(betType=${String(betType)})`,
     );
   }
   return ALLOCATION_BET_TYPE_UMABAN_COUNT[betType];
@@ -473,6 +494,10 @@ function validateTopFinishCount(topFinishCount: number): void {
 /**
  * 候補の正規化を検証する(受け入れ条件7)。馬番の組が「厳密な昇順」(=重複なし)でない候補、
  * または同じ組が複数回登場する場合は例外を投げる(黙って通さない)。
+ *
+ * 検査順(#91・boss裁定): 「空(構造そのものの契約違反)」→「win(券種の対応可否)」→
+ * 「未知の券種」→「頭数不一致」。対応可否の判定を未知値判定の直前に置くのは、
+ * `buildComboCandidates`(下記参照)と検査順の形を揃えるための意図的な設計。
  */
 function validateCandidates(candidates: readonly AllocationCandidate[]): void {
   const seen = new Set<string>();
@@ -481,9 +506,23 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
     if (umabans.length === 0) {
       throw new Error("不正な買い目です: 馬番の組が空です");
     }
+    // 単勝(win)の暫定門番(#91・#23-B1a)。
+    //
+    // 【この門番は暫定措置であり、#92(#23-B1b)で撤去され、`winOutcome`のような判別共用体に
+    // よる申告に置き換わる。】#91の時点ではcoreに単勝候補ビルダーが存在せず、
+    // 呼び出し側(buildComboCandidates・app側のbuildPlaceCandidates)はどちらもbetType:"win"の
+    // 候補を産出できない。したがってここでwinを拒否するのは「データ由来の判定不能」ではなく
+    // 「呼び出し側の契約違反」であり、空・未知・頭数不一致と同じ性格の門番として扱う
+    // (#92が扱う「呼び出し側は正しくwinを要求したがデータが1着確率を定めない」という
+    // 別種の状態と混同しないこと。#31が禁じる混同)。
+    if (betType === "win") {
+      throw new Error(
+        "不正な買い目です: 単勝(win)の買い目候補はこの段階では未対応です(#92で対応予定。betType=win)",
+      );
+    }
     // 券種の検証(Issue #76)。umabans.length===0の既存チェックの直後に置く
     // (既存メッセージを温存=挙動不変。boss着手前ゲート裁定の検査順:
-    // 「空」→「未知の券種」→「頭数不一致」)。umabanCountOfが未知のbetTypeをthrowするため、
+    // 「空」→「win」→「未知の券種」→「頭数不一致」)。umabanCountOfが未知のbetTypeをthrowするため、
     // 「未知の券種」と「頭数不一致」の判定はこの1呼び出し+直後の比較だけで両方満たせる。
     const expectedUmabanCount = umabanCountOf(betType);
     if (umabans.length !== expectedUmabanCount) {
@@ -881,12 +920,25 @@ function computeComboHitProb(combo: readonly number[], rawDistribution: readonly
 /**
  * ワイド・三連複向けの買い目候補を構築する(列挙+オッズ4状態解決+EV算出)。
  *
+ * **単勝(win)専用の候補はこの関数では構築しない(#91・恒久的な契約)。** `betType==="win"`は
+ * `umabanCountOf`に処理を委ねず、この関数自身が専用の門番でthrowする(下記実装参照)。
+ * 理由: `win`追加後は`umabanCountOf("win")`が例外なく`1`を返すため、`umabanCountOf`に
+ * 委ねると`kCombinationsOfUmabans(umabans, 1)`が1頭ずつの組を列挙し、`resolveComboOdds`が
+ * 生成するオッズキー(`buildComboOddsKey([u])`)は**複勝の払戻キー(`verify.ts`の
+ * `buildComboOddsKey([r.umaban])`)と完全に同一の形式**になる。さらに`computeComboHitProb`は
+ * 集合分布(`combo.length===1`のとき「その馬が上位`topFinishCount`着以内に入る確率」)から
+ * 直接ヒット確率を返すため、結果として**単勝の的中確率ではなく複勝(3着内)の的中確率で
+ * 値付けされた候補**が`betType:"win"`のラベルで返ってしまう(1着確率〈順序付きoutcome空間〉
+ * を計算する経路がこの関数には存在しないため)。この関数は組合せ(ワイド・三連複)専用の
+ * ビルダーであり、単勝はこの関数の責務外(#92で専用のビルダーを新設する)。
+ *
  * @param horses 出走全頭(複勝圏内確率。同時分布構築に使う)
  * @param topFinishCount 上位何着までを的中判定に使うか(ワイド・三連複は常に3。JSDoc冒頭参照)
  * @param betType 買い目の券種(Issue #76)。買い目を構成する頭数は`umabanCountOf(betType)`
  *   (=`ALLOCATION_BET_TYPE_UMABAN_COUNT[betType]`)から導く。外部から任意の数値`comboSize`を
  *   受け取っていた旧引数はIssue #76で廃止した(未知の券種は`umabanCountOf`がthrowする。
- *   数値防御カバレッジ表の`comboSize`行参照)
+ *   数値防御カバレッジ表の`comboSize`行参照)。`"win"`は未知の券種ではないが、上記の理由で
+ *   この関数自身が別途throwする
  * @param oddsByKey buildComboOddsKeyで生成したキーへのオッズMap(値がnullなら欠損、
  *   キーが無ければ未取得)。**値はスカラー(既に1つに決まったオッズ)であること。**
  *   ワイドのレンジ表現(下限-上限)から下限を選び出す変換は本関数の責務ではなく、
@@ -904,6 +956,15 @@ export function buildComboCandidates(
   model: PlaceJointModel = PLACKETT_LUCE_MODEL,
 ): ComboCandidateBuildResult {
   validateTopFinishCount(topFinishCount);
+  // 単勝(win)専用の恒久的な門番(#91)。umabanCountOfへは委ねない(上記関数JSDoc参照:
+  // win追加後はumabanCountOf("win")が例外なく1を返すため、委ねると複勝と同一形式の
+  // オッズキー・複勝(3着内)の的中確率で値付けされた候補が黙って構築されてしまう)。
+  if (betType === "win") {
+    throw new Error(
+      "buildComboCandidatesは組合せ(ワイド・三連複)専用の候補ビルダーです。" +
+        "単勝(win)の買い目候補はこの関数では構築できません(betType=win)",
+    );
+  }
   // 未知のbetTypeはここでthrowする(Issue #76。umabanCountOfへ判定を集約)。
   const comboSize = umabanCountOf(betType);
   const umabans = [...horses].map((h) => h.umaban).sort((a, b) => a - b);

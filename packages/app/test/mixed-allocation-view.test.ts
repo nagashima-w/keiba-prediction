@@ -1083,11 +1083,12 @@ describe("formatHiddenAllocationsSummary — 件数と、隠れている買い�
   });
 });
 
-describe("mixedBetTypeLabel — betTypeから券種ラベルを返すこと(Issue #76: umabans.lengthからの逆算をやめた)", () => {
+describe("mixedBetTypeLabel — betTypeから券種ラベルを返すこと(Issue #76: umabans.lengthからの逆算をやめた。#91でwinを追加)", () => {
   it.each([
     ["place", "複勝"],
     ["wide", "ワイド"],
     ["trio", "三連複"],
+    ["win", "単勝"],
   ] as const)("betType=%s は %s", (betType, expected) => {
     expect(mixedBetTypeLabel(betType)).toBe(expected);
   });

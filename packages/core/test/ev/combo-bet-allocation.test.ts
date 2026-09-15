@@ -110,9 +110,19 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
-  describe("ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf(券種→頭数の唯一の写像。Issue #76)", () => {
-    it("place=1・wide=2・trio=3であること(ハードコードしたリテラル。#55の自己参照比較を防ぐ)", () => {
-      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT).toEqual({ place: 1, wide: 2, trio: 3 });
+  /**
+   * `ALLOCATION_BET_TYPE_UMABAN_COUNT`に実在しない代表値(Issue #91)。
+   *
+   * **実在しうる券種名を使わないこと。** 過去に`"win"`を代表値にしていたため、
+   * 単勝の実装時に表からwin列が消えかけた(#91)。boss着手前ゲートは`"quinella"`を
+   * 一時的に例示したが、馬連は#24で実装予定の実在券種であり、#91が是正しようとしている
+   * 欠陥そのものの再生産になるため採らない。
+   */
+  const UNKNOWN_BET_TYPE = "__unknown__";
+
+  describe("ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf(券種→頭数の唯一の写像。Issue #76・#91でwin追加)", () => {
+    it("place=1・win=1・wide=2・trio=3であること(ハードコードしたリテラル。#55の自己参照比較を防ぐ)", () => {
+      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT).toEqual({ place: 1, win: 1, wide: 2, trio: 3 });
     });
 
     it("wide/trioの値がcombo-odds-key.tsのCOMBO_SIZEと一致すること(2つの「券種→頭数」定義の乖離を機械検出)", () => {
@@ -120,18 +130,29 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.trio).toBe(COMBO_SIZE.trio);
     });
 
-    it("umabanCountOf: place/wide/trioそれぞれの構成頭数を返すこと", () => {
+    it("umabanCountOf: place/win/wide/trioそれぞれの構成頭数を返すこと", () => {
       expect(umabanCountOf("place")).toBe(1);
+      expect(umabanCountOf("win")).toBe(1);
       expect(umabanCountOf("wide")).toBe(2);
       expect(umabanCountOf("trio")).toBe(3);
     });
 
-    it("umabanCountOf: 未知の券種はthrowすること(Record添字アクセスがundefinedを返す危険の直接防御)", () => {
-      expect(() => umabanCountOf("win" as AllocationBetType)).toThrow(/不正な券種です/);
+    it("umabanCountOf: 未知の券種はthrowし、有効な券種の列挙はALLOCATION_BET_TYPE_UMABAN_COUNTから導出されること(Record添字アクセスがundefinedを返す危険の直接防御。#91: winは既に有効な券種になったため代表値をUNKNOWN_BET_TYPEに差し替え)", () => {
+      expect(() => umabanCountOf(UNKNOWN_BET_TYPE as AllocationBetType)).toThrow(
+        /不正な券種です: betTypeはplace\/win\/wide\/trioのいずれかである必要があります/,
+      );
+    });
+
+    // フィクスチャ健全性の保証(#91・無条件expect): 代表値が「未知」であり続けること、
+    // winが「未知」ではなく「既知だが未対応」であることを機械的に固定する。
+    // これで#24で馬連を足したときに代表値が実在の券種になれば本テストが落ちて気づける。
+    it("UNKNOWN_BET_TYPEはALLOCATION_BET_TYPE_UMABAN_COUNTに存在せず、winは存在すること(代表値の健全性の機械保証)", () => {
+      expect(Object.hasOwn(ALLOCATION_BET_TYPE_UMABAN_COUNT, UNKNOWN_BET_TYPE)).toBe(false);
+      expect(Object.hasOwn(ALLOCATION_BET_TYPE_UMABAN_COUNT, "win")).toBe(true);
     });
   });
 
-  describe("validateCandidates: 券種(betType)の検証(Issue #76・AC-A7。umabans.length(0〜4)×betType(place/wide/trio/未知)=20セル)", () => {
+  describe("validateCandidates: 券種(betType)の検証(Issue #76・#91・AC-A7。umabans.length(0〜4)×betType(place/win/wide/trio/未知)=25セル)", () => {
     const UMABANS_BY_LENGTH: Record<number, number[]> = {
       0: [],
       1: [1],
@@ -140,31 +161,36 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       4: [1, 2, 3, 4],
     };
 
-    type ExpectKind = "empty" | "unknown" | "mismatch" | "ok";
+    type ExpectKind = "empty" | "unsupported" | "unknown" | "mismatch" | "ok";
 
     const table: { length: number; betType: AllocationBetType; expectKind: ExpectKind }[] = [];
     for (const length of [0, 1, 2, 3, 4] as const) {
-      for (const rawBetType of ["place", "wide", "trio", "win"] as const) {
-        const isUnknown = rawBetType === "win";
+      for (const rawBetType of ["place", "wide", "trio", "win", UNKNOWN_BET_TYPE] as const) {
+        const isWin = rawBetType === "win";
+        const isUnknown = rawBetType === UNKNOWN_BET_TYPE;
         const betType = rawBetType as AllocationBetType;
+        // 検査順(#91・boss裁定): 空→win(未対応)→未知→頭数不一致。
         const expectKind: ExpectKind =
           length === 0
             ? "empty" // 既存の「空」チェックが最優先(検査順の裁定。既存メッセージを温存)。
-            : isUnknown
-              ? "unknown"
-              : ALLOCATION_BET_TYPE_UMABAN_COUNT[betType] === length
-                ? "ok"
-                : "mismatch";
+            : isWin
+              ? "unsupported" // winは頭数に関わらず常に未対応(暫定門番が頭数判定より先)。
+              : isUnknown
+                ? "unknown"
+                : ALLOCATION_BET_TYPE_UMABAN_COUNT[betType] === length
+                  ? "ok"
+                  : "mismatch";
         table.push({ length, betType, expectKind });
       }
     }
 
-    // 前提固定(空振り防止): 20セルの内訳がempty4/ok3(place×1,wide×2,trio×3の一致セルのみ)/
-    // unknown4/mismatch9(残り)であること。
-    it("テーブル自己検証: 20セルの内訳がempty4/ok3/unknown4/mismatch9であること", () => {
-      expect(table).toHaveLength(20);
-      expect(table.filter((t) => t.expectKind === "empty")).toHaveLength(4);
+    // 前提固定(空振り防止): 25セルの内訳がempty5/ok3(place×1,wide×2,trio×3の一致セルのみ)/
+    // unsupported4(win×1〜4)/unknown4/mismatch9(残り)であること。
+    it("テーブル自己検証: 25セルの内訳がempty5/ok3/unsupported4/unknown4/mismatch9であること", () => {
+      expect(table).toHaveLength(25);
+      expect(table.filter((t) => t.expectKind === "empty")).toHaveLength(5);
       expect(table.filter((t) => t.expectKind === "ok")).toHaveLength(3);
+      expect(table.filter((t) => t.expectKind === "unsupported")).toHaveLength(4);
       expect(table.filter((t) => t.expectKind === "unknown")).toHaveLength(4);
       expect(table.filter((t) => t.expectKind === "mismatch")).toHaveLength(9);
     });
@@ -182,8 +208,14 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         };
         if (expectKind === "empty") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/馬番の組が空です/);
+        } else if (expectKind === "unsupported") {
+          expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
+            /単勝\(win\)の買い目候補はこの段階では未対応です/,
+          );
         } else if (expectKind === "unknown") {
-          expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/不正な券種です/);
+          expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
+            /不正な券種です: betTypeはplace\/win\/wide\/trioのいずれかである必要があります/,
+          );
         } else if (expectKind === "mismatch") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
             /の買い目は\d頭の組である必要があります/,
@@ -195,7 +227,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     );
   });
 
-  describe("buildComboCandidates: 券種(betType)の検証(Issue #76追加裁定。未知の券種は候補0件ではなくthrowすること)", () => {
+  describe("buildComboCandidates: 券種(betType)の検証(Issue #76追加裁定・#91でwin専用門番を追加。未知の券種は候補0件ではなくthrowすること)", () => {
     it.each([
       { betType: "place" as const, comboSize: 1 },
       { betType: "wide" as const, comboSize: 2 },
@@ -212,11 +244,42 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(result.diagnostics.enumeratedCount).toBe(expectedEnumerated);
     });
 
-    it("未知の券種を渡すと、候補0件という判定結果ではなく必ずthrowすること(boss着手前ゲートで実測: k=undefinedはkCombinationsOfUmabansのガードを素通りし2^n探索の末に候補0件を返していた)", () => {
+    it("未知の券種を渡すと、候補0件という判定結果ではなく必ずthrowすること(boss着手前ゲートで実測: k=undefinedはkCombinationsOfUmabansのガードを素通りし2^n探索の末に候補0件を返していた。#91: winは既に有効な券種になったため代表値をUNKNOWN_BET_TYPEに差し替え)", () => {
       const horses = evenHorses(18, 3);
       const oddsMap = new Map<string, number | null>();
-      expect(() => buildComboCandidates(horses, 3, "win" as AllocationBetType, oddsMap)).toThrow(
-        /不正な券種です/,
+      expect(() => buildComboCandidates(horses, 3, UNKNOWN_BET_TYPE as AllocationBetType, oddsMap)).toThrow(
+        /不正な券種です: betTypeはplace\/win\/wide\/trioのいずれかである必要があります/,
+      );
+    });
+
+    /**
+     * ★AC-B1a-2: win専用門番のRedステップそのものを「誤用経路の観測」にする(boss裁定)。
+     *
+     * このテストが赤くなる(=throwしない)ということは、`buildComboCandidates`が
+     * `betType:"win"`を組合せ候補ビルダーに通してしまったことを意味する。その場合に
+     * 何が起きるかを実際に観測した結果は以下のとおり(本ファイル筆者が実測。
+     * `git stash`等でwin門番を一時的に無効化し、本テストと同一の入力(n=5・全馬odds=3.0・
+     * 均等複勝確率)で`buildComboCandidates`を`betType:"win"`と`betType:"place"`の
+     * 両方で呼んで`candidates`を比較した):
+     *
+     * - win候補・place候補は**betType以外のフィールドがすべて一致**した
+     *   (umabans/odds/ev/isPositiveが完全一致。5頭とも)
+     * - 機構(数値ではなく再現可能な理由): `buildComboOddsKey([umaban])`は
+     *   単一馬番のキーを2桁ゼロ埋めで生成するため、win用に組んだオッズMapのキー形式は
+     *   `resolveComboOdds`が複勝候補向けに参照するキー形式と**構造的に同一**である
+     *   (`verify.ts`が複勝払戻の取込に使う`buildComboOddsKey([r.umaban])`と同じ形式)。
+     *   さらに`computeComboHitProb`は`combo.length===1`のとき「その馬が
+     *   `topFinishCount`(=3)着以内に入る確率」を集合分布からそのまま返すため、
+     *   1着確率(順序付きoutcome空間)を一切計算せずに複勝(3着内率)相当の値で
+     *   `ev = hitProb × odds`を算出してしまう。この機構が本テストの再現条件そのものであり、
+     *   n・odds・確率分布の具体値を変えても同じ機構で一致する(#77: 数値をJSDocに焼き付けない)
+     */
+    it("betType='win'は候補を黙って構築せず必ずthrowすること(恒久的な誤用経路の封鎖)", () => {
+      const n = 5;
+      const horses = evenHorses(n, 3);
+      const oddsMap = uniformOddsMap(n, 1, 3);
+      expect(() => buildComboCandidates(horses, 3, "win", oddsMap)).toThrow(
+        /buildComboCandidatesは組合せ\(ワイド・三連複\)専用の候補ビルダーです/,
       );
     });
   });
