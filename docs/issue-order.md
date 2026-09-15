@@ -260,8 +260,10 @@ core の非公開モジュール(`exports` に0件)にあること、`skipReason
   `buildAllocationProposalView` を呼ぶだけで `allocateBets` 系の呼び出しは0件)。
   再計算する `buildMixedAllocationDisplay`(`BatchAnalysisView.tsx:899`)の入力は
   `state.run.outcomes` 由来で、**保存済み分析を復元して流し込む経路は存在しない**
-  (`batch-analysis-reducer.ts` でこれを設定するのは一括分析の開始・完了・期間バッチ完了の
-  3アクションのみ)。**したがって過去の回収率も過去分析の再表示もどちらも変わらない。**
+  (`batch-analysis-reducer.ts` で `state.run.outcomes` を設定するのは「一括分析開始」
+  「一括分析完了」の2アクションだけで、いずれも実行中バッチの結果である。「期間バッチ実行完了」が
+  設定するのは別状態〈`PeriodBatchRunState.outcomes`。型も `BatchRaceOutcome[]` で別〉であり、
+  `App.tsx:661` が `BatchAnalysisView` に渡すのは `state.run.outcomes` のみなので届かない)。**したがって過去の回収率も過去分析の再表示もどちらも変わらない。**
   **本当の非対称はこちら**: 新規分析以降が PL になるため **DB 内に CB 期と PL 期のレコードが
   混在する**。区別する `analysis_allocation_meta.model_id` 列は「意図的に読まない6列」なので
   **回収率集計は両者を層別できない**(#85)。回収率の前後比較は切替コミットの日時で区切る
@@ -512,15 +514,22 @@ Plackett-Luce を真のモデルとし、真の3着以内確率を条件付き�
   ⚠️ **DB 内に CB 期と PL 期のレコードが混在する。** `verify.ts` は保存値を読むので過去の回収率は
   変わらないが、`model_id` 列は「意図的に読まない列」なので**回収率集計は両者を層別できない**
   (#85 として起票済み)。回収率の前後比較は切替コミットの日時で区切る必要がある。
-  **レビューは7巡した。** production の変更は3行だけだったが、「既定はまだ CB」「これから切り替える」と
-  述べる散文が各所に残っており、**毎回『前巡の走査範囲の外側』から次が出た**
-  (`core/src` → `app/src` → `@param` の「省略時」→ `scripts/` → `docs/current-spec.md` の別節 →
-  `test/` のコメント本文)。とくに `@param model` 3箇所は**#81 の本体コミット自身が持ち込んだ**もので、
+  **レビューは巡を重ね、毎回『前巡の走査範囲の外側』から次が出続けた**(巡数そのものは書かない。
+  巡ごとに増えるため、書けばその記述が毎回偽になる)。production の変更は3行だけだったが、
+  「既定はまだ CB」「これから切り替える」と述べる散文が各所に残っており、走査範囲は
+  `core/src` → `app/src` → `@param` の「省略時」→ `scripts/` → `docs/current-spec.md` の別節 →
+  `test/` のコメント本文 → **本ファイルの「確定した論点」ブロック**(着手前ゲートが ⚠️ 付きで
+  「事実に反する」と名指しした当の文が、正しい内容を `current-spec.md` に書かせた後も原文のまま
+  残っていた)と広がった。とくに `@param model` 3箇所は**#81 の本体コミット自身が持ち込んだ**もので、
   既定引数を変えた当のコミットがその2行上の `@param` を更新していなかった。
-  最後に boss が、スタブモデルの `approximate: false` が**新既定 PL と同値**になったため
+  途中で boss が、スタブモデルの `approximate: false` が**新既定 PL と同値**になったため
   「既定へのハードコード退行の検出」を名乗る回帰テストが `approximate` 軸で**空振りしていた**ことを
-  変異注入で検出した。**教訓は「散文が偽になったら、その散文に紐づくアサーションの意味も変わる」**
-  で、`.claude/agents/code-reviewer.md` に走査語の活用形の網羅とあわせて明文化した。
+  変異注入で検出し(`bet-allocation.ts`。是正済み)、さらに同じ手続きを
+  `combo-bet-allocation.ts:714-715` に適用して**現在の既定へのハードコードが全テスト緑のまま通る**
+  穴を見つけた(#86。`allocateGeneralBets` に非既定モデルを注入して `modelId`/`modelApproximate` を
+  検査する `it` が無いため。#81 起因ではない既往)。**教訓は「散文が偽になったら、その散文に紐づく
+  アサーションの意味も変わる」**と「**検出力の確認は grep 形ではなく変異注入形で行う**」で、
+  `.claude/agents/code-reviewer.md` に明文化した。
 
 - **#74** — オッズの値域(1.0以上)判定の非対称。v1.6.3。**#34 の全数走査で発見(H5)。
   実データでの発生は未観測。** `ev/allocation-primitives.ts` の `isUsableOdds` を
