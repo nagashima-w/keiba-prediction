@@ -183,7 +183,7 @@ export const ALLOCATION_BET_TYPE_UMABAN_COUNT: Record<AllocationBetType, number>
  *
  * `Record<AllocationBetType, number>` の添字アクセスはTSの型システム上`number`に確定するため、
  * 未知値を渡す分岐は型上「到達不能」に見える。しかし実行時には型アサーション
- * (`"quinella" as AllocationBetType`のような呼び出し側の契約違反)で未知値が渡ることがあり、
+ * (`"__unknown__" as AllocationBetType`のような呼び出し側の契約違反)で未知値が渡ることがあり、
  * その場合`ALLOCATION_BET_TYPE_UMABAN_COUNT[betType]`は例外を投げずに`undefined`を返す。
  *
  * この`undefined`を検証なしで`buildComboCandidates`の内部`kCombinationsOfUmabans`へ渡すと、
