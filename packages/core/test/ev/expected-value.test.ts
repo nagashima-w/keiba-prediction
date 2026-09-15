@@ -265,66 +265,133 @@ describe("resolveEvThreshold(EV閾値の防御。受け入れ条件19)", () => {
 });
 
 /**
- * estimatePlaceOddsMinFromWin(推定複勝下限の換算)。
+ * estimatePlaceOddsMinFromWin(推定複勝下限の換算・判別共用体)。
  * ユーザー要望(Task#25): 発売前(oddsStatus=yoso)は予想単勝オッズしかなく複勝が無いため、
  * 単勝オッズから複勝下限を経験則ベースで概算する。既定式:
  *   推定複勝下限 = max(1.0, 1.0 + (winOdds − 1.0) × coef)、coef 既定0.2。
+ *
+ * Issue #88(#23-B0): 戻り値がnull/非有限/値域外を1つのnullへ統合していた設計
+ * (#74 R1 boss メタレビュー2026-09-04で発見・選択(b)で残余化)を判別共用体
+ * (EstimatedPlaceOddsMinResult)化し、「算出成功」「単勝オッズ未確定」「単勝オッズ値域外」
+ * 「算出値不正(coefが非有限に由来)」の4状態を互いに区別できるようにした。
  */
-describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換算)", () => {
-  describe("既定係数(coef=0.2)での換算値", () => {
+describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換算・判別共用体・Issue #88)", () => {
+  /** kind="算出成功"であることを固定しつつvalueを取り出す(型ガードを兼ねるヘルパー)。 */
+  function okValue(result: ReturnType<typeof estimatePlaceOddsMinFromWin>): number {
+    expect(result.kind).toBe("算出成功");
+    if (result.kind !== "算出成功") {
+      throw new Error("到達しないはずの分岐(直前のtoBeで既に検出されている)");
+    }
+    return result.value;
+  }
+
+  describe('kind="算出成功"(既定係数coef=0.2での換算値)', () => {
     const cases: Array<{ winOdds: number; expected: number }> = [
       { winOdds: 1.5, expected: 1.1 },
       { winOdds: 10, expected: 2.8 },
       { winOdds: 50, expected: 10.8 },
     ];
     for (const c of cases) {
-      it(`単勝${c.winOdds}倍 → 推定複勝下限${c.expected}`, () => {
-        expect(
-          estimatePlaceOddsMinFromWin(c.winOdds, DEFAULT_ESTIMATED_PLACE_CONFIG),
-        ).toBeCloseTo(c.expected, 10);
+      it(`単勝${c.winOdds}倍 → kind="算出成功"・推定複勝下限${c.expected}`, () => {
+        const result = estimatePlaceOddsMinFromWin(c.winOdds, DEFAULT_ESTIMATED_PLACE_CONFIG);
+        expect(okValue(result)).toBeCloseTo(c.expected, 10);
       });
     }
 
     it("configを省略するとデフォルト係数(0.2)が使われる", () => {
       expect(DEFAULT_ESTIMATED_PLACE_CONFIG.coef).toBe(0.2);
-      expect(estimatePlaceOddsMinFromWin(10)).toBeCloseTo(2.8, 10);
-    });
-  });
-
-  describe("境界・異常値の扱い", () => {
-    it("単勝オッズが1.0ちょうどのときは推定複勝下限も1.0(max(1.0, ...)の下限)", () => {
-      expect(estimatePlaceOddsMinFromWin(1.0)).toBeCloseTo(1.0, 10);
+      expect(okValue(estimatePlaceOddsMinFromWin(10))).toBeCloseTo(2.8, 10);
     });
 
-    it("winOddsがnullのときはnullを返す", () => {
-      expect(estimatePlaceOddsMinFromWin(null)).toBeNull();
-    });
-
-    it("winOddsが1未満のときはnullを返す(オッズとして不正)", () => {
-      expect(estimatePlaceOddsMinFromWin(0.9)).toBeNull();
-    });
-
-    it("winOddsがNaNのときはnullを返す(非有限)", () => {
-      expect(estimatePlaceOddsMinFromWin(Number.NaN)).toBeNull();
-    });
-
-    it("winOddsがInfinityのときはnullを返す(非有限)", () => {
-      expect(estimatePlaceOddsMinFromWin(Number.POSITIVE_INFINITY)).toBeNull();
+    it('単勝オッズが1.0ちょうどのときはkind="算出成功"・推定複勝下限も1.0(max(1.0, ...)の下限)', () => {
+      expect(okValue(estimatePlaceOddsMinFromWin(1.0))).toBeCloseTo(1.0, 10);
     });
 
     it("coefを変えると換算値も変わる(config化されていること)", () => {
-      expect(
-        estimatePlaceOddsMinFromWin(10, { coef: 0.5 }),
-      ).toBeCloseTo(1.0 + 9 * 0.5, 10);
+      expect(okValue(estimatePlaceOddsMinFromWin(10, { coef: 0.5 }))).toBeCloseTo(1.0 + 9 * 0.5, 10);
+    });
+  });
+
+  describe('kind="単勝オッズ未確定"(状態(b): winOdds===null。真に未確定)', () => {
+    it('winOddsがnullのとき、kind="単勝オッズ未確定"を返す(状態(c)「値域外」とは別の状態)', () => {
+      const result = estimatePlaceOddsMinFromWin(null);
+      expect(result.kind).toBe("単勝オッズ未確定");
+    });
+  });
+
+  describe('kind="単勝オッズ値域外"(状態(c): winOddsは存在するが非有限・1.0未満)', () => {
+    const cases: Array<{ name: string; winOdds: number }> = [
+      { name: "winOddsが1未満(0.9)", winOdds: 0.9 },
+      { name: "winOddsがNaN(非有限)", winOdds: Number.NaN },
+      { name: "winOddsが+Infinity(非有限)", winOdds: Number.POSITIVE_INFINITY },
+      { name: "winOddsが負値(-5)", winOdds: -5 },
+    ];
+    it.each(cases)('$name → kind="単勝オッズ値域外"・winOddsを生の値のまま保持する', ({ winOdds }) => {
+      const result = estimatePlaceOddsMinFromWin(winOdds);
+      expect(result.kind).toBe("単勝オッズ値域外");
+      if (result.kind === "単勝オッズ値域外") {
+        if (Number.isNaN(winOdds)) {
+          expect(Number.isNaN(result.winOdds)).toBe(true);
+        } else {
+          expect(result.winOdds).toBe(winOdds);
+        }
+      }
     });
   });
 
   describe(
-    "AC-4(b)(boss メタレビューR1・2026-09-04): 非nullの戻り値はisUsableOddsを満たす" +
+    'kind="算出値不正"(状態(d): winOddsは値域内だがcoefが非有限で算出結果がisUsableOddsを' +
+      "満たさない。#74 R1で発見された残余の解消対象。本番はcoefが常に既定0.2のため到達しない)",
+    () => {
+      it('coef=NaNのとき、kind="算出値不正"・valueはNaNであること', () => {
+        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NaN });
+        expect(result.kind).toBe("算出値不正");
+        if (result.kind === "算出値不正") {
+          expect(Number.isNaN(result.value)).toBe(true);
+          expect(isUsableOdds(result.value)).toBe(false);
+        }
+      });
+
+      it('coef=+Infinityのとき、kind="算出値不正"・valueは+Infinityであること', () => {
+        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.POSITIVE_INFINITY });
+        expect(result.kind).toBe("算出値不正");
+        if (result.kind === "算出値不正") {
+          expect(result.value).toBe(Number.POSITIVE_INFINITY);
+          expect(isUsableOdds(result.value)).toBe(false);
+        }
+      });
+
+      it(
+        'coef=+InfinityかつwinOdds=1.0(境界)のとき、加算項が0×Infinity=NaNになりkind="算出値不正"・' +
+          "valueもNaNになること(AC-4(b)相当が名指しした境界そのもの)",
+        () => {
+          const result = estimatePlaceOddsMinFromWin(1.0, { coef: Number.POSITIVE_INFINITY });
+          expect(result.kind).toBe("算出値不正");
+          if (result.kind === "算出値不正") {
+            expect(Number.isNaN(result.value)).toBe(true);
+          }
+        },
+      );
+
+      // boss メタレビューR3(2026-09-04): 「Infinityが混じると常に下限クランプが機能しない」という
+      // 過剰一般化を否定する側。coef=-Infinityは加算項が-Infinityになりclamp後は1.0
+      // (isUsableOddsを満たす)なのでkind="算出成功"になる(「算出値不正」には分類されない)。
+      it(
+        'coef=-Infinityのとき、Math.maxが1.0側にクランプしkind="算出成功"になること' +
+          "(過剰一般化の否定側: 「Infinityが混じると常に壊れる」わけではない)",
+        () => {
+          const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NEGATIVE_INFINITY });
+          expect(result.kind).toBe("算出成功");
+          expect(okValue(result)).toBe(1);
+        },
+      );
+    },
+  );
+
+  describe(
+    'AC-4(b)相当(boss メタレビューR1・2026-09-04): kind="算出成功"のvalueはisUsableOddsを満たす' +
       "(境界winOdds=1.0はmax(1.0,…)の下限とisUsableOddsの>=1.0が整合する唯一の点。" +
-      "既定coef〈0.2〉・妥当な数値coefの下でこの不変条件が成り立つことを値として固定する。" +
-      "grep -rn \"estimatePlaceOddsMinFromWin\" packages/core/test | grep -i \"isUsableOdds\" が" +
-      "0件だったこと〈本テスト追加前〉がboss指摘の根拠)",
+      "既定coef〈0.2〉・妥当な数値coefの下でこの不変条件が成り立つことを値として固定する)",
     () => {
       const cases: Array<{ name: string; winOdds: number; config?: { coef: number } }> = [
         { name: "境界winOdds=1.0・既定coef(0.2)", winOdds: 1.0 },
@@ -333,55 +400,47 @@ describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換
         { name: "winOdds=50・既定coef(0.2)", winOdds: 50 },
         { name: "winOdds=10・coef=0.5(既定以外)", winOdds: 10, config: { coef: 0.5 } },
       ];
-      it.each(cases)("$name → 戻り値がisUsableOddsを満たす(true)", ({ winOdds, config }) => {
+      it.each(cases)('$name → kind="算出成功"・isUsableOddsを満たす(true)', ({ winOdds, config }) => {
         const result = estimatePlaceOddsMinFromWin(winOdds, config);
-        expect(result).not.toBeNull();
-        expect(isUsableOdds(result!)).toBe(true);
+        expect(result.kind).toBe("算出成功");
+        expect(isUsableOdds(okValue(result))).toBe(true);
       });
     },
   );
 
   describe(
-    "残余(boss メタレビューR1・選択(b)): coefが非有限のときisUsableOddsを満たさない値が" +
-      "そのまま推定複勝下限として使われうる(#23-Bへ送る残余。本番では到達しない。" +
-      "expected-value.tsのcomputeEstimatedRaceEv JSDoc参照)",
+    "AC-B0-1: 4状態(算出成功/単勝オッズ未確定/単勝オッズ値域外/算出値不正)が互いに区別できること" +
+      "(kindが4通りの相異なるリテラルであることをテーブル駆動で無条件expectする。" +
+      "殺す変異: (b)と(c)を同一kindに潰す・(d)の枝を削って(a)に合流させる)",
     () => {
-      it("coef=NaNのとき、戻り値はNaN(isUsableOddsを満たさない)であること", () => {
-        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NaN });
-        expect(result).not.toBeNull();
-        expect(Number.isNaN(result!)).toBe(true);
-        expect(isUsableOdds(result!)).toBe(false);
+      const cases: Array<{
+        name: string;
+        winOdds: number | null;
+        config?: { coef: number };
+        expectedKind: string;
+      }> = [
+        { name: "算出成功(既定coef・winOdds=10)", winOdds: 10, expectedKind: "算出成功" },
+        { name: "単勝オッズ未確定(winOdds=null)", winOdds: null, expectedKind: "単勝オッズ未確定" },
+        { name: "単勝オッズ値域外(winOdds=0.9)", winOdds: 0.9, expectedKind: "単勝オッズ値域外" },
+        {
+          name: "算出値不正(winOdds=5・coef=+Infinity)",
+          winOdds: 5,
+          config: { coef: Number.POSITIVE_INFINITY },
+          expectedKind: "算出値不正",
+        },
+      ];
+
+      it.each(cases)("$name → kindが$expectedKindであること", ({ winOdds, config, expectedKind }) => {
+        const result = estimatePlaceOddsMinFromWin(winOdds, config);
+        expect(result.kind).toBe(expectedKind);
       });
 
-      it("coef=+Infinityのとき、戻り値は+Infinity(isUsableOddsを満たさない)であること", () => {
-        const result = estimatePlaceOddsMinFromWin(5, { coef: Number.POSITIVE_INFINITY });
-        expect(result).toBe(Number.POSITIVE_INFINITY);
-        expect(isUsableOdds(result!)).toBe(false);
+      it("4状態のkind文字列は相互に相異なる(Set.sizeが4)", () => {
+        const kinds = cases.map((c) => estimatePlaceOddsMinFromWin(c.winOdds, c.config).kind);
+        // 前提(無条件expect): 4ケース分のkindが実際に収集できていること。
+        expect(kinds.length).toBe(4);
+        expect(new Set(kinds).size).toBe(4);
       });
-
-      // boss メタレビューR3(2026-09-04): 「Infinityが混じると常に下限クランプが機能しない」
-      // という過剰一般化した機序をJSDocに書きかけたため、その過剰一般化を否定する側と、
-      // AC-4(b)が名指しした境界(winOdds=1.0)での挙動をテストとして固定する
-      // (散文だけ直すと次に同じ過剰一般化を書き戻せるため)。
-      it(
-        "coef=-Infinityのとき、Math.maxが1.0側にクランプしisUsableOddsを満たすこと" +
-          "(過剰一般化の否定側: 「Infinityが混じると常に壊れる」わけではない)",
-        () => {
-          const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NEGATIVE_INFINITY });
-          expect(result).toBe(1);
-          expect(isUsableOdds(result!)).toBe(true);
-        },
-      );
-
-      it(
-        "coef=+InfinityかつwinOdds=1.0(境界)のとき、加算項が0×Infinity=NaNになり" +
-          "戻り値もNaNになること(AC-4(b)が名指しした境界そのもの)",
-        () => {
-          const result = estimatePlaceOddsMinFromWin(1.0, { coef: Number.POSITIVE_INFINITY });
-          expect(result).toBe(Number.NaN);
-          expect(isUsableOdds(result!)).toBe(false);
-        },
-      );
     },
   );
 });
@@ -412,64 +471,97 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
   });
 
   describe(
-    "残余(boss メタレビューR1・選択(b)。#23-Bへ送る): evaluateEstimatedHorseは" +
-      "estimatedOddsMin===nullしか見ておらずisUsableOddsを通さないため、非有限coefを渡すと" +
-      "isUsableOddsを満たさないplaceOddsMinがisPositive=trueとして返ることがある" +
-      "(本番では到達しない。estimatedPlaceConfigの供給元はpackages/app/srcに存在せず、" +
-      "常に既定coef=0.2が使われるため)",
+    "AC-B0-2(Issue #88): coefが非有限で算出値不正(kind=\"算出値不正\")になったとき、" +
+      "isPositive=trueにならず対象外(ev=null)になること(#74 R1の残余の解消。" +
+      "旧版はcoef=+InfinityでisusableでないplaceOddsMinがisPositive=trueとして返っていた" +
+      "——その挙動が消えたことを固定する。殺す変異: isUsableOddsの適用〈kind=\"算出値不正\"の" +
+      "分岐〉を外し\"算出成功\"と同じ扱いに合流させる)",
     () => {
-      // code-reviewer指摘(2026-09-04): 残余ガードもAC-1と同じ規律(EstimatedHorseEvの
-      // 全7フィールド〈umaban/placeProb/placeOddsMin/ev/isPositive/excludedReason/
-      // evEstimated〉を射影する。一部だけを見るタプルにしない)で揃える。coef=+Infinity側だけ
-      // excludedReasonをtoBeNull()で見ていたのに対しcoef=NaN側は見ておらず非対称だった
-      // (#58のunavailableReason脱落と同型の検出力の穴)。toBe(NaN)はvitestがObject.isで
-      // 比較するため素直に使える(Object.is(NaN,NaN)===trueを実行して確認済み)。
-      it("coef=+Infinityのとき、isPositive=trueだがplaceOddsMinはisUsableOddsを満たさないこと(全7フィールド)", () => {
+      // code-reviewer指摘(2026-09-04)由来の規律を維持: EstimatedHorseEvの全7フィールド
+      // (umaban/placeProb/placeOddsMin/ev/isPositive/excludedReason/evEstimated)を射影する。
+      // 一部だけを見るタプルにしない(#58のunavailableReason脱落と同型の検出力の穴を防ぐ)。
+      // toBe(NaN)はvitestがObject.isで比較するため素直に使える(Object.is(NaN,NaN)===true)。
+      it(
+        "coef=+Infinityのとき、対象外(ev=null・isPositive=false)になり、" +
+          "rawなplaceOddsMin(+Infinity)は#31原則どおりnullに潰さず保持すること(全7フィールド)",
+        () => {
+          const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+          const odds: OddsSnapshot = {
+            officialDatetime: null,
+            oddsStatus: "yoso",
+            win: { 1: { odds: 5, ninki: null } },
+            place: {},
+          };
+          const [result] = computeEstimatedRaceEv(
+            priors,
+            odds,
+            { threshold: 1.0 },
+            { coef: Number.POSITIVE_INFINITY },
+          );
+          expect(result!.umaban).toBe(1);
+          expect(result!.placeProb).toBe(0.4);
+          expect(result!.placeOddsMin).toBe(Number.POSITIVE_INFINITY);
+          expect(result!.ev).toBeNull();
+          expect(result!.isPositive).toBe(false);
+          expect(result!.excludedReason).not.toBeNull();
+          expect(result!.evEstimated).toBe(true);
+          expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
+        },
+      );
+
+      it(
+        "coef=NaNのとき、対象外(ev=null・isPositive=false)になり、" +
+          "rawなplaceOddsMin(NaN)は#31原則どおりnullに潰さず保持すること(全7フィールド)",
+        () => {
+          const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
+          const odds: OddsSnapshot = {
+            officialDatetime: null,
+            oddsStatus: "yoso",
+            win: { 1: { odds: 5, ninki: null } },
+            place: {},
+          };
+          const [result] = computeEstimatedRaceEv(
+            priors,
+            odds,
+            { threshold: 1.0 },
+            { coef: Number.NaN },
+          );
+          expect(result!.umaban).toBe(1);
+          expect(result!.placeProb).toBe(0.4);
+          expect(result!.placeOddsMin).toBe(Number.NaN);
+          expect(result!.ev).toBeNull();
+          expect(result!.isPositive).toBe(false);
+          expect(result!.excludedReason).not.toBeNull();
+          expect(result!.evEstimated).toBe(true);
+          expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
+        },
+      );
+
+      it("coef=+Infinity・coef=NaNのどちらも除外理由が同一のリテラルであること(算出値不正の文言を固定)", () => {
+        const REASON = "推定複勝下限が不正な値(1.0未満・非有限)のため対象外";
         const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
-        const odds: OddsSnapshot = {
+        const oddsFor = (): OddsSnapshot => ({
           officialDatetime: null,
           oddsStatus: "yoso",
           win: { 1: { odds: 5, ninki: null } },
           place: {},
-        };
-        const [result] = computeEstimatedRaceEv(
+        });
+        const infReason = computeEstimatedRaceEv(
           priors,
-          odds,
+          oddsFor(),
           { threshold: 1.0 },
           { coef: Number.POSITIVE_INFINITY },
-        );
-        expect(result!.umaban).toBe(1);
-        expect(result!.placeProb).toBe(0.4);
-        expect(result!.placeOddsMin).toBe(Number.POSITIVE_INFINITY);
-        expect(result!.ev).toBe(Number.POSITIVE_INFINITY);
-        expect(result!.isPositive).toBe(true);
-        expect(result!.excludedReason).toBeNull();
-        expect(result!.evEstimated).toBe(true);
-        expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
-      });
-
-      it("coef=NaNのとき、ev/placeOddsMinはNaNでisPositive=falseになること(全7フィールド)", () => {
-        const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
-        const odds: OddsSnapshot = {
-          officialDatetime: null,
-          oddsStatus: "yoso",
-          win: { 1: { odds: 5, ninki: null } },
-          place: {},
-        };
-        const [result] = computeEstimatedRaceEv(
+        )[0]!.excludedReason;
+        const nanReason = computeEstimatedRaceEv(
           priors,
-          odds,
+          oddsFor(),
           { threshold: 1.0 },
           { coef: Number.NaN },
-        );
-        expect(result!.umaban).toBe(1);
-        expect(result!.placeProb).toBe(0.4);
-        expect(result!.placeOddsMin).toBe(Number.NaN);
-        expect(result!.ev).toBe(Number.NaN);
-        expect(result!.isPositive).toBe(false);
-        expect(result!.excludedReason).toBeNull();
-        expect(result!.evEstimated).toBe(true);
-        expect(isUsableOdds(result!.placeOddsMin!)).toBe(false);
+        )[0]!.excludedReason;
+        expect(infReason).toBe(REASON);
+        expect(nanReason).toBe(REASON);
+        // 「未確定/値域外」側の文言(状態(b)/(c))とは別のリテラルであることも固定する。
+        expect(infReason).not.toBe("単勝オッズが未確定または不正な値のため推定複勝下限を算出できない");
       });
     },
   );

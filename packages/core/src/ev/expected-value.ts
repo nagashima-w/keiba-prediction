@@ -78,6 +78,31 @@ export const DEFAULT_ESTIMATED_PLACE_CONFIG: EstimatedPlaceConfig = {
 };
 
 /**
+ * estimatePlaceOddsMinFromWin の戻り値(判別共用体。Issue #88・#23-B0)。
+ *
+ * 旧版は「未確定(winOdds===null)」「値域外(winOddsが非有限・1.0未満)」「算出結果自体が
+ * isUsableOddsを満たさない(coefが非有限に由来)」の3状況を1つのnullへ統合していた
+ * (#74 R1・boss メタレビュー2026-09-04で発見・選択(b)で残余化)。本共用体はこれを
+ * 次の4状態として区別する:
+ * - `算出成功`: winOddsが値域内(finite・>=MIN_VALID_ODDS)で、算出値もisUsableOddsを満たす。
+ *   `value` に推定複勝下限を持つ。
+ * - `単勝オッズ未確定`: `winOdds === null`。真に未確定(オッズ自体が存在しない)。
+ * - `単勝オッズ値域外`: `winOdds` は存在するが非有限(NaN/±Infinity)または1.0未満。
+ *   `winOdds` に入力の生の値を保持する(#31「判定不能と判定結果を混ぜない」原則。
+ *   呼び出し側が必要なら元の値を参照できるようにする)。
+ * - `算出値不正`: winOddsは値域内だが、`coef` が非有限(NaN/±Infinity)であるために
+ *   `Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds − MIN_VALID_ODDS) × coef)` の結果が
+ *   isUsableOddsを満たさない(NaN/+Infinity)。`value` に算出済みの生の値を保持する。
+ *   **本番では到達しない**(`EstimatedPlaceConfig` の供給元は `packages/app/src` に存在せず、
+ *   常に既定値 `coef=0.2` が使われるため)。
+ */
+export type EstimatedPlaceOddsMinResult =
+  | { readonly kind: "算出成功"; readonly value: number }
+  | { readonly kind: "単勝オッズ未確定" }
+  | { readonly kind: "単勝オッズ値域外"; readonly winOdds: number }
+  | { readonly kind: "算出値不正"; readonly value: number };
+
+/**
  * 単勝オッズから複勝オッズ下限を推定する(経験則ベースの概算)。
  *
  * 換算式(既定): 推定複勝下限 = max(1.0, 1.0 + (winOdds − 1.0) × coef)、coef 既定0.2。
@@ -90,17 +115,24 @@ export const DEFAULT_ESTIMATED_PLACE_CONFIG: EstimatedPlaceConfig = {
  * 返すに留める。複勝オッズが発売され次第、確定オッズで再分析することが前提となる。
  *
  * @param winOdds 単勝オッズ。null・非有限(NaN/Infinity)・MIN_VALID_ODDS(1.0)未満は
- *   推定不可としてnullを返す。
+ *   推定不可として、それぞれ区別可能な状態(EstimatedPlaceOddsMinResult参照)を返す。
  * @param config 推定係数(省略時は既定coef=0.2)。
  */
 export function estimatePlaceOddsMinFromWin(
   winOdds: number | null,
   config: EstimatedPlaceConfig = DEFAULT_ESTIMATED_PLACE_CONFIG,
-): number | null {
-  if (winOdds === null || !Number.isFinite(winOdds) || winOdds < MIN_VALID_ODDS) {
-    return null;
+): EstimatedPlaceOddsMinResult {
+  if (winOdds === null) {
+    return { kind: "単勝オッズ未確定" };
   }
-  return Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds - MIN_VALID_ODDS) * config.coef);
+  if (!Number.isFinite(winOdds) || winOdds < MIN_VALID_ODDS) {
+    return { kind: "単勝オッズ値域外", winOdds };
+  }
+  const value = Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds - MIN_VALID_ODDS) * config.coef);
+  if (!isUsableOdds(value)) {
+    return { kind: "算出値不正", value };
+  }
+  return { kind: "算出成功", value };
 }
 
 /** 1頭分のEV計算結果。 */
@@ -218,42 +250,13 @@ export interface EstimatedHorseEv extends HorseEv {
  * 確定EV経路(computeRaceEv/HorseEv)とは完全に独立した別関数・別型とすることで、確定EV経路の
  * 計算結果・型には一切影響を与えない(既存の回帰テストが示す挙動は不変)。
  *
- * **残余(boss メタレビューR1・2026-09-04・#74。選択(b): 実装は変えず明記に留める。
- * 機序はboss メタレビューR3・2026-09-04で是正——最初に書いた版は「Infinityが混じると
- * 常にInfinityを返す」等、3点で事実と違っていた〈node -eで反証済み〉)**:
- * `evaluateEstimatedHorse` は `estimatedOddsMin === null` しか見ておらず、
- * `estimatePlaceOddsMinFromWin` の非null出力を `isUsableOdds` に通していない。ただし
- * 壊れるのは `estimatePlaceOddsMinFromWin` 内部の
- * `Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds − MIN_VALID_ODDS) × coef)` において、
- * 第2引数(加算する項)が **NaN または +Infinity** になる場合に限る。`Math.max` は
- * 「最大値を返す」関数であり、第2引数が -Infinity なら 1.0 側にクランプされて**正常に
- * 機能する**(「Infinityが混じると常に下限クランプが機能しなくなる」わけではない。
- * 符号で結果が変わる):
- *   - `coef=NaN` → 加算項は常にNaN(winOddsに関わらず)。結果はNaN
- *   - `coef=±Infinity` かつ `winOdds === MIN_VALID_ODDS`(境界。AC-4(b)が「max(1.0,…)の
- *     下限と>=1.0が整合する唯一の点」と名指しした点そのもの) → 加算項は `0 × ±Infinity = NaN`
- *   - `coef=+Infinity` かつ `winOdds > MIN_VALID_ODDS` → 加算項は `+Infinity`。結果は`+Infinity`
- *   - `coef=-Infinity` かつ `winOdds > MIN_VALID_ODDS` → 加算項は `-Infinity`。`Math.max` が
- *     1.0にクランプし、結果は**isUsableOddsを満たす**(過剰一般化の否定側。実測)
- * 具体的には(いずれも `winOdds=5` で実測。境界`winOdds=1.0`は別途 `expected-value.test.ts`
- * 「残余」describe参照): `coef=NaN` で `placeOddsMin=NaN`・`ev=NaN`・`isPositive=false`、
- * `coef=+Infinity`(`winOdds>1.0`) で `placeOddsMin=+Infinity`・`ev=+Infinity`・
- * `isPositive=true` になる(実測。同describe参照)。後者は `isPositive=true` かつ
- * `placeOddsMin` が `isUsableOdds` を満たさないという、`verify.ts` の規則Uが
- * 「本番経路では到達しない」と明記している状態そのものであり、`evaluateHorse`
- * (確定EV側。値域外はisUsableOddsで弾く)との間に新しい非対称を作る。
- *
- * **本番では到達しない**: `placeConfig`(`EstimatedPlaceConfig`)の供給元は
- * `packages/app/src` に存在せず(`analysis-pipeline.ts` の任意dep宣言と
- * `?? DEFAULT_ESTIMATED_PLACE_CONFIG` へのフォールバックの2箇所のみで、実際に非既定値を
- * 渡す呼び出し元が無い)、本番では常に既定値(`coef=0.2`)が使われる。既定coefおよび
- * `estimatePlaceOddsMinFromWin` が受理する有限のwinOdds(>=1.0)の組み合わせでは、
- * 出力は常に `isUsableOdds` を満たす(`expected-value.test.ts`「AC-4(b)」describe参照)。
- *
- * **状態の分離(discriminated union化)は本Issueでは行わない。** `estimatePlaceOddsMinFromWin`が
- * null/非有限/値域外を1つのnull戻り値に統合している設計自体の見直しは #23-B の射程
- * (`docs/issue-order.md`「#23-B / #23-Cの再ゲートで必ず扱う論点」参照)。ここで新設すると
- * #23-Bの状態分離設計を先取りすることになる。
+ * `evaluateEstimatedHorse` は `estimatePlaceOddsMinFromWin` の判別共用体
+ * (`EstimatedPlaceOddsMinResult`。Issue #88・#23-B0)の全kindを分岐し、`算出成功`のときのみ
+ * EVを計算する。`単勝オッズ未確定`・`単勝オッズ値域外`・`算出値不正`はいずれも対象外
+ * (`ev=null`・`isPositive=false`)として扱い、`算出値不正`(coefが非有限に由来し
+ * `isUsableOdds` を満たさない値)が誤って `isPositive=true` として使われることはない
+ * (#74 R1で発見された残余の解消。`evaluateHorse` (確定EV側。値域外はisUsableOddsで弾く)
+ * との非対称も解消される)。
  *
  * @param priors 各馬の馬番と複勝圏内確率
  * @param odds 単勝・複勝オッズのスナップショット(単勝オッズのみ使用)
@@ -270,7 +273,7 @@ export function computeEstimatedRaceEv(
   return priors.map((p) => evaluateEstimatedHorse(p, odds, threshold, placeConfig));
 }
 
-/** 1頭分の推定EVを評価する(単勝オッズ欠損は対象外として理由付きで返す)。 */
+/** 1頭分の推定EVを評価する(単勝オッズ欠損・値域外・算出値不正は対象外として理由付きで返す)。 */
 function evaluateEstimatedHorse(
   prior: HorsePrior,
   odds: OddsSnapshot,
@@ -278,27 +281,43 @@ function evaluateEstimatedHorse(
   placeConfig: EstimatedPlaceConfig,
 ): EstimatedHorseEv {
   const winOdds = odds.win[prior.umaban]?.odds ?? null;
-  const estimatedOddsMin = estimatePlaceOddsMinFromWin(winOdds, placeConfig);
+  const estimated = estimatePlaceOddsMinFromWin(winOdds, placeConfig);
 
-  if (estimatedOddsMin === null) {
-    return {
-      // Issue #74: estimatePlaceOddsMinFromWinはnull/非有限/MIN_VALID_ODDS未満を1つの
-      // null戻り値に統合しているため、「未確定」と断定すると値域外(単勝オッズは存在するが
-      // 1.0未満・非有限)の場合に偽になる。到達しうる全ケースで真になる選言にする
-      // (状態を分離するdiscriminated union化は#23-Bへ。本Issueでは文言の偽の断定除去のみ)。
-      ...excluded(prior, "単勝オッズが未確定または不正な値のため推定複勝下限を算出できない"),
-      evEstimated: true,
-    };
+  switch (estimated.kind) {
+    case "単勝オッズ未確定":
+    case "単勝オッズ値域外":
+      // 状態(b)・(c)は「単勝オッズ自体が未確定または不正」という同一の対象外理由に統合する
+      // (Issue #74 Eスコープの偽の断定除去を維持。判別共用体化後もこの文言・統合方針は不変)。
+      return {
+        ...excluded(prior, "単勝オッズが未確定または不正な値のため推定複勝下限を算出できない"),
+        evEstimated: true,
+      };
+
+    case "算出値不正":
+      // 状態(d): coefが非有限に由来しisUsableOddsを満たさない値。excluded()には流さず
+      // #31原則(判定不能を判定結果に混ぜない)どおりplaceOddsMinを生の値のまま保持しつつ、
+      // evのみnullにする(evaluateHorseの値域外分岐と同じ流儀。Issue #88でこの非対称を解消)。
+      return {
+        umaban: prior.umaban,
+        placeProb: prior.placeProb,
+        placeOddsMin: estimated.value,
+        ev: null,
+        isPositive: false,
+        excludedReason: "推定複勝下限が不正な値(1.0未満・非有限)のため対象外",
+        evEstimated: true,
+      };
+
+    case "算出成功": {
+      const ev = prior.placeProb * estimated.value;
+      return {
+        umaban: prior.umaban,
+        placeProb: prior.placeProb,
+        placeOddsMin: estimated.value,
+        ev,
+        isPositive: ev > threshold,
+        excludedReason: null,
+        evEstimated: true,
+      };
+    }
   }
-
-  const ev = prior.placeProb * estimatedOddsMin;
-  return {
-    umaban: prior.umaban,
-    placeProb: prior.placeProb,
-    placeOddsMin: estimatedOddsMin,
-    ev,
-    isPositive: ev > threshold,
-    excludedReason: null,
-    evEstimated: true,
-  };
 }
