@@ -270,10 +270,13 @@ describe("resolveEvThreshold(EV閾値の防御。受け入れ条件19)", () => {
  * 単勝オッズから複勝下限を経験則ベースで概算する。既定式:
  *   推定複勝下限 = max(1.0, 1.0 + (winOdds − 1.0) × coef)、coef 既定0.2。
  *
- * Issue #88(#23-B0): 戻り値がnull/非有限/値域外を1つのnullへ統合していた設計
- * (#74 R1 boss メタレビュー2026-09-04で発見・選択(b)で残余化)を判別共用体
- * (EstimatedPlaceOddsMinResult)化し、「算出成功」「単勝オッズ未確定」「単勝オッズ値域外」
- * 「算出値不正(coefが非有限に由来)」の4状態を互いに区別できるようにした。
+ * Issue #88(#23-B0): 旧版(`git show a12af62:...`)は「未確定」「値域外」の2状況をnullへ
+ * 統合する一方、算出結果自体がisUsableOddsを満たさない状況は判定すらせず、生のNaN/+Infinityを
+ * そのまま返していた(#74 R1 boss メタレビュー2026-09-04で発見・選択(b)で残余化)。これを
+ * 判別共用体(EstimatedPlaceOddsMinResult)化し、「算出成功」「単勝オッズ未確定」
+ * 「単勝オッズ値域外」「算出値不正(算出結果自体がisUsableOddsを満たさない。到達条件は
+ * coefが非有限であることではない。詳細はEstimatedPlaceOddsMinResultのJSDoc参照)」の4状態を
+ * 互いに区別できるようにした。
  */
 describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換算・判別共用体・Issue #88)", () => {
   /** kind="算出成功"であることを固定しつつvalueを取り出す(型ガードを兼ねるヘルパー)。 */
@@ -340,8 +343,10 @@ describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換
   });
 
   describe(
-    'kind="算出値不正"(状態(d): winOddsは値域内だがcoefが非有限で算出結果がisUsableOddsを' +
-      "満たさない。#74 R1で発見された残余の解消対象。本番はcoefが常に既定0.2のため到達しない)",
+    'kind="算出値不正"(状態(d): winOddsは値域内だが算出結果自体がisUsableOddsを満たさない。' +
+      "到達条件は「coefが非有限であること」ではない(次項の否定側テストが反例を固定する)。" +
+      "#74 R1で発見された残余の解消対象。本番はcoefが常に既定0.2であり、かつこの固定値では" +
+      "オーバーフローも起きないため到達しない)",
     () => {
       it('coef=NaNのとき、kind="算出値不正"・valueはNaNであること', () => {
         const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NaN });
@@ -538,7 +543,10 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
       );
 
       it("coef=+Infinity・coef=NaNのどちらも除外理由が同一のリテラルであること(算出値不正の文言を固定)", () => {
-        const REASON = "推定複勝下限が不正な値(1.0未満・非有限)のため対象外";
+        // boss メタレビュー差し戻し(Issue #88要修正3): valueはMath.max(MIN_VALID_ODDS, ...)の
+        // 結果であり有限かつ1.0未満を取ることが構造上ありえないため、文言から「1.0未満」を外し
+        // 「非有限」のみにする(到達可能な原因だけを書く)。
+        const REASON = "推定複勝下限の算出結果が不正な値(非有限)のため対象外";
         const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.4 }];
         const oddsFor = (): OddsSnapshot => ({
           officialDatetime: null,
@@ -568,10 +576,12 @@ describe("computeEstimatedRaceEv(推定複勝下限によるEV概算)", () => {
 
   describe(
     "推定複勝下限が算出できない理由の文言(Issue #74 Eスコープ: 偽の断定除去。" +
-      "estimatePlaceOddsMinFromWinはnull/非有限/MIN_VALID_ODDS未満を1つのnull戻り値に" +
-      "統合しているため、「未確定」と断定すると単勝オッズが値域外〈存在するが不正〉の場合に偽になる。" +
-      "code-reviewer指摘: 是正前の旧文言「単勝オッズが未確定のため推定複勝下限を算出できない」に" +
-      "戻しても検出できなかったため、toBeによるリテラル比較を追加する)",
+      "estimatePlaceOddsMinFromWinは現在(Issue #88で判別共用体化した後)、" +
+      "「単勝オッズ未確定」〈winOdds===null〉と「単勝オッズ値域外」〈非有限・MIN_VALID_ODDS未満〉を" +
+      "kindで区別できるが、evaluateEstimatedHorse側はこの2kindを同一の対象外理由に統合して返す" +
+      "設計を維持している。そのため「未確定」とだけ断定すると単勝オッズが値域外〈存在するが不正〉の" +
+      "場合に偽になる。code-reviewer指摘: 是正前の旧文言「単勝オッズが未確定のため推定複勝下限を" +
+      "算出できない」に戻しても検出できなかったため、toBeによるリテラル比較を追加する)",
     () => {
       // 是正前の旧文言(偽の断定そのもの)。旧文言に戻す変異が入ったら下記テストが赤くなる
       // ことを、このテストを書く過程で実際に確認した(Red→Green のログは完了報告参照)。

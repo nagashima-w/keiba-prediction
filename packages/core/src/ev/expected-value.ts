@@ -80,21 +80,30 @@ export const DEFAULT_ESTIMATED_PLACE_CONFIG: EstimatedPlaceConfig = {
 /**
  * estimatePlaceOddsMinFromWin の戻り値(判別共用体。Issue #88・#23-B0)。
  *
- * 旧版は「未確定(winOdds===null)」「値域外(winOddsが非有限・1.0未満)」「算出結果自体が
- * isUsableOddsを満たさない(coefが非有限に由来)」の3状況を1つのnullへ統合していた
- * (#74 R1・boss メタレビュー2026-09-04で発見・選択(b)で残余化)。本共用体はこれを
- * 次の4状態として区別する:
+ * 旧版(`git show a12af62:.../expected-value.ts`)は「未確定(winOdds===null)」と
+ * 「値域外(winOddsが非有限・1.0未満)」の2状況をnullへ統合する一方、算出結果
+ * (`Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds − MIN_VALID_ODDS) × coef)`)自体が
+ * isUsableOddsを満たさない状況は判定すらしておらず、生のNaN/+Infinityがそのまま(nullにも
+ * ならず)戻り値として漏れていた(#74 R1・boss メタレビュー2026-09-04で発見・選択(b)で残余化。
+ * これが本Issue #88の発端そのもの)。本共用体はこれを次の4状態として区別する:
  * - `算出成功`: winOddsが値域内(finite・>=MIN_VALID_ODDS)で、算出値もisUsableOddsを満たす。
  *   `value` に推定複勝下限を持つ。
  * - `単勝オッズ未確定`: `winOdds === null`。真に未確定(オッズ自体が存在しない)。
  * - `単勝オッズ値域外`: `winOdds` は存在するが非有限(NaN/±Infinity)または1.0未満。
  *   `winOdds` に入力の生の値を保持する(#31「判定不能と判定結果を混ぜない」原則。
  *   呼び出し側が必要なら元の値を参照できるようにする)。
- * - `算出値不正`: winOddsは値域内だが、`coef` が非有限(NaN/±Infinity)であるために
- *   `Math.max(MIN_VALID_ODDS, MIN_VALID_ODDS + (winOdds − MIN_VALID_ODDS) × coef)` の結果が
- *   isUsableOddsを満たさない(NaN/+Infinity)。`value` に算出済みの生の値を保持する。
- *   **本番では到達しない**(`EstimatedPlaceConfig` の供給元は `packages/app/src` に存在せず、
- *   常に既定値 `coef=0.2` が使われるため)。
+ * - `算出値不正`: winOddsは値域内(finite・>=MIN_VALID_ODDS)だが、算出結果自体がisUsableOdds
+ *   を満たさない(NaN/+Infinity)。`value` に算出済みの生の値を保持する。到達条件は
+ *   「coefが非有限であること」ではない: coef=-Infinityでも`Math.max`が1.0側にクランプするため
+ *   `算出成功`になる一方(実測: `estimatePlaceOddsMinFromWin(5, {coef:-Infinity})`→
+ *   `kind="算出成功"`・`value=1`)、coefが有限でも極端な値の組み合わせ(実測:
+ *   `winOdds=1e308, coef=1e10` → `Infinity`)ではオーバーフローしてこの分岐に入る。
+ *   **本番では到達しない**: (1) `packages/app/src/main/pipeline-deps.ts` が組み立てる
+ *   `AnalysisPipelineDeps` は `estimatedPlaceConfig` を供給しないため常に既定値 `coef=0.2` が
+ *   使われる。(2) この固定coef=0.2の下では、値域内の有限winOddsをどれだけ大きくしても
+ *   (実測: `winOdds=Number.MAX_VALUE` でも算出値は約 `3.60e307` でfinite)オーバーフローせず、
+ *   非有限winOddsは算出前の `単勝オッズ値域外` 分岐で既に弾かれるため、この2つが組み合わさって
+ *   到達不能になる。
  */
 export type EstimatedPlaceOddsMinResult =
   | { readonly kind: "算出成功"; readonly value: number }
@@ -253,10 +262,10 @@ export interface EstimatedHorseEv extends HorseEv {
  * `evaluateEstimatedHorse` は `estimatePlaceOddsMinFromWin` の判別共用体
  * (`EstimatedPlaceOddsMinResult`。Issue #88・#23-B0)の全kindを分岐し、`算出成功`のときのみ
  * EVを計算する。`単勝オッズ未確定`・`単勝オッズ値域外`・`算出値不正`はいずれも対象外
- * (`ev=null`・`isPositive=false`)として扱い、`算出値不正`(coefが非有限に由来し
- * `isUsableOdds` を満たさない値)が誤って `isPositive=true` として使われることはない
- * (#74 R1で発見された残余の解消。`evaluateHorse` (確定EV側。値域外はisUsableOddsで弾く)
- * との非対称も解消される)。
+ * (`ev=null`・`isPositive=false`)として扱い、`算出値不正`(算出結果自体が `isUsableOdds`
+ * を満たさない値。到達条件の詳細は `EstimatedPlaceOddsMinResult` のJSDoc参照)が誤って
+ * `isPositive=true` として使われることはない(#74 R1で発見された残余の解消。
+ * `evaluateHorse` (確定EV側。値域外はisUsableOddsで弾く)との非対称も解消される)。
  *
  * @param priors 各馬の馬番と複勝圏内確率
  * @param odds 単勝・複勝オッズのスナップショット(単勝オッズのみ使用)
@@ -294,16 +303,24 @@ function evaluateEstimatedHorse(
       };
 
     case "算出値不正":
-      // 状態(d): coefが非有限に由来しisUsableOddsを満たさない値。excluded()には流さず
-      // #31原則(判定不能を判定結果に混ぜない)どおりplaceOddsMinを生の値のまま保持しつつ、
-      // evのみnullにする(evaluateHorseの値域外分岐と同じ流儀。Issue #88でこの非対称を解消)。
+      // 状態(d): 算出結果自体がisUsableOddsを満たさない値(NaN/+Infinity。到達条件が
+      // 「coefが非有限であること」ではないことの反例はEstimatedPlaceOddsMinResultのJSDoc参照)。
+      // excluded()には流さず#31原則(判定不能を判定結果に混ぜない)どおりplaceOddsMinを
+      // 生の値のまま保持しつつ、evのみnullにする(evaluateHorseの値域外分岐と同じ流儀。
+      // Issue #88でこの非対称を解消)。
+      //
+      // excludedReasonが「非有限」のみで「1.0未満」を含まないのは、`value` が
+      // `Math.max(MIN_VALID_ODDS, ...)` の結果であり、有限かつ1.0未満の値を取ることが
+      // 構造上ありえないため(Math.max(1.0, y)は y>=1.0ならy、それ以外は1.0・NaN・+Infinityの
+      // いずれかにしかならない。実測: Math.max(1.0,-Infinity)=1, Math.max(1.0,NaN)=NaN,
+      // Math.max(1.0,Infinity)=Infinity)。
       return {
         umaban: prior.umaban,
         placeProb: prior.placeProb,
         placeOddsMin: estimated.value,
         ev: null,
         isPositive: false,
-        excludedReason: "推定複勝下限が不正な値(1.0未満・非有限)のため対象外",
+        excludedReason: "推定複勝下限の算出結果が不正な値(非有限)のため対象外",
         evEstimated: true,
       };
 
