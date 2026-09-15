@@ -379,15 +379,55 @@ describe("estimatePlaceOddsMinFromWin(単勝オッズ→推定複勝下限の換
       );
 
       // boss メタレビューR3(2026-09-04): 「Infinityが混じると常に下限クランプが機能しない」という
-      // 過剰一般化を否定する側。coef=-Infinityは加算項が-Infinityになりclamp後は1.0
-      // (isUsableOddsを満たす)なのでkind="算出成功"になる(「算出値不正」には分類されない)。
+      // 過剰一般化を否定する側。winOdds=5・coef=-Infinityでは加算項が(5-1)×(-Infinity)=-Infinityに
+      // なりclamp後は1.0(isUsableOddsを満たす)なのでkind="算出成功"になる(「算出値不正」には
+      // 分類されない)。ただしこれはwinOdds=5に限った話であり、winOdds=1.0(境界)では加算項が
+      // 0×(-Infinity)=NaNになりkind="算出値不正"になる(直後のテストが反例として固定する。
+      // boss差し戻し(Issue #88再メタレビュー要修正1): この文言がwinOddsについて全称として
+      // 読めてしまい、winOdds=1.0で偽になっていたことの是正)。
       it(
-        'coef=-Infinityのとき、Math.maxが1.0側にクランプしkind="算出成功"になること' +
+        'coef=-Infinity・winOdds=5のとき、Math.maxが1.0側にクランプしkind="算出成功"になること' +
           "(過剰一般化の否定側: 「Infinityが混じると常に壊れる」わけではない)",
         () => {
           const result = estimatePlaceOddsMinFromWin(5, { coef: Number.NEGATIVE_INFINITY });
           expect(result.kind).toBe("算出成功");
           expect(okValue(result)).toBe(1);
+        },
+      );
+
+      // boss差し戻し(Issue #88再メタレビュー要修正1)の反例そのものを固定する: 直前のテスト
+      // (winOdds=5・coef=-Infinity→算出成功)と対になり、境界winOdds=1.0では同じcoef=-Infinityでも
+      // 算出値不正になることを示す(「coef=-Infinityなら算出成功になる」という全称命題の反証)。
+      it(
+        'coef=-Infinity・winOdds=1.0(境界)のとき、加算項が0×(-Infinity)=NaNになりkind="算出値不正"・' +
+          "valueもNaNになること(直前のテスト〈winOdds=5・coef=-Infinity→算出成功〉と対になる反例)",
+        () => {
+          const result = estimatePlaceOddsMinFromWin(1.0, { coef: Number.NEGATIVE_INFINITY });
+          expect(result.kind).toBe("算出値不正");
+          if (result.kind === "算出値不正") {
+            expect(Number.isNaN(result.value)).toBe(true);
+          }
+        },
+      );
+
+      // boss差し戻し(Issue #88再メタレビュー要修正2): JSDocが「coefが有限でも到達する」根拠として
+      // 掲げた実測例(winOdds=1e308, coef=1e10)がテストで固定されておらず、次の編集者が
+      // 「coefが非有限であるために」へ書き戻してもこのテストが1本も赤くならない穴があった。
+      // coefが有限であることを無条件expectで固定し、その退化(非有限coefへの書き戻し)にも
+      // 気づけるようにする。
+      it(
+        "coef=1e10(有限)・winOdds=1e308のとき、算出結果がオーバーフローし+Infinityになり" +
+          'kind="算出値不正"になること(coefが有限でも到達することの反例。coefが有限であることを' +
+          "同時に固定し、非有限coefへの書き戻しでこのテストの前提が壊れることも検出できるようにする)",
+        () => {
+          const finiteCoef = 1e10;
+          // 前提(無条件expect): coefが実際に有限であること。
+          expect(Number.isFinite(finiteCoef)).toBe(true);
+          const result = estimatePlaceOddsMinFromWin(1e308, { coef: finiteCoef });
+          expect(result.kind).toBe("算出値不正");
+          if (result.kind === "算出値不正") {
+            expect(Number.isFinite(result.value)).toBe(false);
+          }
         },
       );
     },

@@ -94,10 +94,14 @@ export const DEFAULT_ESTIMATED_PLACE_CONFIG: EstimatedPlaceConfig = {
  *   呼び出し側が必要なら元の値を参照できるようにする)。
  * - `算出値不正`: winOddsは値域内(finite・>=MIN_VALID_ODDS)だが、算出結果自体がisUsableOdds
  *   を満たさない(NaN/+Infinity)。`value` に算出済みの生の値を保持する。到達条件は
- *   「coefが非有限であること」ではない: coef=-Infinityでも`Math.max`が1.0側にクランプするため
- *   `算出成功`になる一方(実測: `estimatePlaceOddsMinFromWin(5, {coef:-Infinity})`→
- *   `kind="算出成功"`・`value=1`)、coefが有限でも極端な値の組み合わせ(実測:
- *   `winOdds=1e308, coef=1e10` → `Infinity`)ではオーバーフローしてこの分岐に入る。
+ *   「coefが非有限であること」ではない: 例えば winOdds=5・coef=-Infinity では加算項が
+ *   (5−1)×(−Infinity)=−Infinityになり`Math.max`が1.0側にクランプするため`算出成功`になる
+ *   (実測: `estimatePlaceOddsMinFromWin(5, {coef:-Infinity})`→`kind="算出成功"`・`value=1`)。
+ *   ただし同じcoef=-Infinityでも winOdds=1.0(MIN_VALID_ODDS) では加算項が
+ *   (1.0−1.0)×(−Infinity)=0×(−Infinity)=NaNになり`算出値不正`になる(実測:
+ *   `estimatePlaceOddsMinFromWin(1.0, {coef:-Infinity})`→`kind="算出値不正"`・`value=NaN`)。
+ *   coefが有限でも極端な値の組み合わせでは到達する(実測: `winOdds=1e308, coef=1e10`
+ *   〈coefは有限〉→ 加算項がオーバーフローし `value=Infinity`)。
  *   **本番では到達しない**: (1) `packages/app/src/main/pipeline-deps.ts` が組み立てる
  *   `AnalysisPipelineDeps` は `estimatedPlaceConfig` を供給しないため常に既定値 `coef=0.2` が
  *   使われる。(2) この固定coef=0.2の下では、値域内の有限winOddsをどれだけ大きくしても
@@ -311,9 +315,9 @@ function evaluateEstimatedHorse(
       //
       // excludedReasonが「非有限」のみで「1.0未満」を含まないのは、`value` が
       // `Math.max(MIN_VALID_ODDS, ...)` の結果であり、有限かつ1.0未満の値を取ることが
-      // 構造上ありえないため(Math.max(1.0, y)は y>=1.0ならy、それ以外は1.0・NaN・+Infinityの
-      // いずれかにしかならない。実測: Math.max(1.0,-Infinity)=1, Math.max(1.0,NaN)=NaN,
-      // Math.max(1.0,Infinity)=Infinity)。
+      // 構造上ありえないため(Math.max(1.0, y) は、yがNaNならNaN、y<1.0なら1.0、それ以外はy
+      // 〈+Infinityを含む〉のいずれかにしかならない。実測: Math.max(1.0,-Infinity)=1,
+      // Math.max(1.0,NaN)=NaN, Math.max(1.0,Infinity)=Infinity)。
       return {
         umaban: prior.umaban,
         placeProb: prior.placeProb,
