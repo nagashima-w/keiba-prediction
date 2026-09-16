@@ -1023,6 +1023,27 @@ Issue #88(#23-B0)は、`estimatePlaceOddsMinFromWin` の戻り値を4状態の�
 
 よって 1.7.0 → **1.7.1**(patch)が妥当と判断した。
 
+## 次の正式版が 1.7.2 である根拠(Issue #91・#23-B1a での変更)
+
+Issue #91(#23-B1a)は、`AllocationBetType`(`packages/core/src/ev/combo-bet-allocation.ts`)に
+`"win"`(単勝)を追加し、`buildComboCandidates`・`validateCandidates` の両方に
+`betType==="win"` 専用の門番(throw)を新設した変更である。
+
+**patch である根拠**: `AllocationCandidate` を本番で生成している箇所は
+`combo-bet-allocation.ts`・`packages/app/src/shared/mixed-candidates.ts` の**2箇所のみ**であり、
+どちらも `"win"` を含む候補を産出できない。加えて `resolveMixedBetTypes`
+(`packages/app/src/shared/mixed-race-allocation.ts`)が組み立てる `betTypes` は `["place"]` に
+`wide`/`trio` を足すのみで `"win"` を積まない。したがって新設した2つの `throw` も、
+`mixedBetTypeLabel("win")`(`packages/app/src/renderer/mixed-allocation-view.ts`)も**本番からは
+到達不能**であり、**利用者から見える変化・分析結果の数値変化は一切ない**。振る舞いの差分は
+`AllocationBetType` という型の許容範囲が広がったこと(型システム上の変化)のみであり、
+区分表の patch(「利用者から見て動作は変わらない内部改善・バグ修正」)に該当し、minor の基準
+(できることが増える・分析結果の数値が変わる)には該当しない。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポート JSON の後方互換に関わる変更はない。
+
+よって 1.7.1 → **1.7.2**(patch)が妥当と判断した。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

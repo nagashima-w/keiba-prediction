@@ -122,7 +122,7 @@ import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-al
  * 「全券種」等の言い回し)はこのエイリアスでは守られない。実際に#91で`AllocationBetType`
  * に`win`が加わった際、まさにこの「1箇所だけ足す事故」(配列は3値のまま、散文だけが
  * 「全券種」と言い続ける)が起きた。メンバー列挙・散文は別途テストで守ること
- * (`mixed-candidates.test.ts`の「意図的に除外している券種」describe参照)。
+ * (`mixed-candidates.test.ts`の「意図的に除外している券種」it参照)。
  */
 export type MixedCandidateBetType = AllocationBetType;
 
