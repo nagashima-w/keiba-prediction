@@ -627,6 +627,7 @@ function generalResult(
     modelId: "conditional-bernoulli",
     modelApproximate: false,
     diagnostics: { inputCandidateCount: allocations.length, truncatedByCapCount: 0, candidateCount: allocations.length, converged: true },
+    winOutcome: { kind: "not-applicable" },
     ...overrides,
   };
 }
@@ -769,6 +770,26 @@ describe("AC10: buildMixedAllocationBreakdown — 券種別内訳(金額・点�
     expect(breakdown.place).toEqual({ stake: 100, count: 1 });
     expect(breakdown.wide).toEqual({ stake: 200, count: 1 });
     expect(breakdown.trio).toEqual({ stake: 0, count: 0 });
+  });
+
+  it("Issue #92: betType='win'の配分行は内訳(place/wide/trio)のどのバケツにも計上されないこと(MixedAllocationBreakdownはplace/wide/trioの3群のみを持つ。winは#90まで実データに現れないが、型としてbetType='win'を許容するようになったため意図的な除外を固定する)", () => {
+    const allocations = [
+      allocation({ umabans: [1], betType: "win", stake: 1000 }),
+      allocation({ umabans: [2], betType: "place", stake: 300 }),
+    ];
+    const result = generalResult(allocations);
+    const breakdown = buildMixedAllocationBreakdown(result);
+    // winのstakeがどこにも紛れ込んでいないことを固定する(placeに誤って混入しないこと含む)。
+    expect(breakdown.place).toEqual({ stake: 300, count: 1 });
+    expect(breakdown.wide).toEqual({ stake: 0, count: 0 });
+    expect(breakdown.trio).toEqual({ stake: 0, count: 0 });
+    // 前提の裏返し: 3群の合計(1300ではなく300)はtotalStake(1300)とは一致しない。
+    // これはbuildMixedAllocationBreakdownの契約(place/wide/trioの3群のみが対象)であって
+    // バグではないことを明示する(AC10の「合計=totalStake」はwinが存在しない前提の契約)。
+    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
+    expect(sum).toBe(300);
+    expect(result.totalStake).toBe(1300);
+    expect(sum).not.toBe(result.totalStake);
   });
 });
 

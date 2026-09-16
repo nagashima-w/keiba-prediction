@@ -38,7 +38,12 @@
  * フォールバックとは違う)。
  */
 
-import type { JointModelHorse, PlaceJointModel, PlaceOutcome } from "./place-joint-model.js";
+import type {
+  JointModelHorse,
+  OrderedOutcome,
+  OrderedPlaceJointModel,
+  PlaceOutcome,
+} from "./place-joint-model.js";
 import { fitPlackettLuceStrengths, PlackettLuceFitError } from "./plackett-luce-strength.js";
 
 /** items(添字配列)からk個を選ぶ組合せを列挙する(小さいkのみを想定)。 */
@@ -225,12 +230,126 @@ function buildOutcomesFromFullTheta(
 }
 
 /**
+ * items(添字配列)から重複なくk個を順序付きで選ぶ(P(n,k)=n·(n-1)·…·(n-k+1)通り。小さいkのみ想定)。
+ * `combinationsOf`(順序を持たない組合せ)との違いは、選ぶ順序も区別する点のみ。
+ */
+function kPermutationsOf(items: readonly number[], k: number): number[][] {
+  const results: number[][] = [];
+  const used = new Array<boolean>(items.length).fill(false);
+  const current: number[] = [];
+  const backtrack = (): void => {
+    if (current.length === k) {
+      results.push([...current]);
+      return;
+    }
+    for (let i = 0; i < items.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      current.push(items[i]!);
+      backtrack();
+      current.pop();
+      used[i] = false;
+    }
+  };
+  backtrack();
+  return results;
+}
+
+/**
+ * 自由集合(全要素が有限正のθ)だけから、上位k'着の順序付き分布を厳密に列挙する
+ * (P(n',k')通り)。各着順(σ(1),…,σ(k'))の確率は
+ *   ∏_{t=1}^{k'} θ_{σ(t)} / (Θ_free − Σ_{u<t} θ_{σ(u)})
+ * (`comboProbability`が集合確率を得るために内部で計算し合計している、まさにこの個別の値)。
+ * `Θ_free` は自由集合だけの合計(呼び出し側で既に除外・固定馬を取り除いた添字だけを渡すため、
+ * 除外馬θ=0は寄与せず、固定馬は呼び出し側が別途「1着固定」として扱うのでここには現れない)。
+ */
+function enumerateFreeSetOrderedDistribution(
+  freeIndices: readonly number[],
+  theta: readonly number[],
+  kPrime: number,
+): Array<{ orderIndices: number[]; probability: number }> {
+  if (kPrime === 0) {
+    return [{ orderIndices: [], probability: 1 }];
+  }
+  const thetaTotal = freeIndices.reduce((a, idx) => a + theta[idx]!, 0);
+  const perms = kPermutationsOf(freeIndices, kPrime);
+  return perms.map((order) => {
+    let denom = thetaTotal;
+    let probability = 1;
+    for (const idx of order) {
+      probability *= theta[idx]! / denom;
+      denom -= theta[idx]!;
+    }
+    return { orderIndices: order, probability };
+  });
+}
+
+/**
+ * fitPlackettLuceStrengths が返す θ(出走全頭ぶん)から、順序付き outcome 空間(上位k着の
+ * 着順分布)を構築する。`buildOutcomesFromFullTheta`(集合空間)と対になる関数だが、
+ * **除外(θ=0)・固定(θ=Infinity)馬の扱いは集合空間と異なる**:
+ *
+ * - 除外馬(θ=0): 集合空間と同じく一切現れない(確率0の組合せにすら数えない。単に対象外)。
+ * - 固定馬(θ=Infinity)が2頭以上: 呼び出し側(buildOrderedDistribution)がこの関数を呼ぶ前に
+ *   判定不能(null)として弾く(この関数は「固定馬0頭または1頭」の前提でのみ呼ばれる)。
+ * - 固定馬がちょうど1頭: **その馬は確率1で1着**(指数レース表現でθ→+Infinityの馬の到達時刻は
+ *   T→0に退化し、他のどの有限θの馬よりも必ず先着するため。他の固定馬が存在しない=競合する
+ *   「同じく確実な1着候補」がいないので、順序としては一意に定まる)。2着以下(k-1着ぶん)は
+ *   自由集合だけのPL順序展開(k'=k-1)で決まる。この k'=k-1 は
+ *   `fitPlackettLuceStrengths` が返す `reducedPlaceCount` と一致する値であり、
+ *   固定馬を除いた「残り枠を自由集合で争う」という水詰め射影の意味そのものである。
+ */
+function buildOrderedOutcomesFromFullTheta(
+  horses: readonly JointModelHorse[],
+  theta: readonly number[],
+  k: number,
+): readonly OrderedOutcome[] | null {
+  const n = theta.length;
+  const fixedIndices: number[] = [];
+  const freeIndices: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (theta[i] === Number.POSITIVE_INFINITY) {
+      fixedIndices.push(i);
+    } else if (theta[i] !== 0) {
+      freeIndices.push(i);
+    }
+    // theta[i]===0(除外馬)はどちらにも加えない(順序空間に一切現れない)。
+  }
+
+  if (fixedIndices.length >= 2) {
+    // 複数の固定馬のうち誰が1着かは、水詰め射影+反復フィットの縮約過程で失われており
+    // 構造的に不定(θ=Infinity同士に相対的な強さの情報が残っていない)。判定不能。
+    return null;
+  }
+
+  if (fixedIndices.length === 1) {
+    const fixedIdx = fixedIndices[0]!;
+    const rest = enumerateFreeSetOrderedDistribution(freeIndices, theta, k - 1);
+    return rest.map((d) => ({
+      order: [fixedIdx, ...d.orderIndices].map((idx) => horses[idx]!.umaban),
+      probability: d.probability,
+    }));
+  }
+
+  const dist = enumerateFreeSetOrderedDistribution(freeIndices, theta, k);
+  return dist.map((d) => ({
+    order: d.orderIndices.map((idx) => horses[idx]!.umaban),
+    probability: d.probability,
+  }));
+}
+
+/**
  * Plackett-Luce モデル(PlaceJointModel の厳密実装)。
  * `approximate: false` ——「**Σp=kちょうどのとき**、入力の周辺確率(placeProb)を厳密に再現する」
  * という意味に限定する(JSDoc冒頭「近似の意味の再定義」参照。#81でΣp≠kの実際の挙動を追記)。
  * 「1着確率が当たる」ことを意味しない。
+ *
+ * **`OrderedPlaceJointModel`(Issue #92)。** `CONDITIONAL_BERNOULLI_MODEL`は定式化上、
+ * 順序展開を持てないため`PlaceJointModel`のまま。型注釈を`OrderedPlaceJointModel`に
+ * すること自体が「本モデルは順序展開を実装している」というコンパイラ検査になる
+ * (`buildOrderedDistribution`を書き忘れるとこの型注釈でコンパイルエラーになる)。
  */
-export const PLACKETT_LUCE_MODEL: PlaceJointModel = {
+export const PLACKETT_LUCE_MODEL: OrderedPlaceJointModel = {
   id: "plackett-luce",
   /**
    * 近似の意味の再定義(#20-A): このフラグは「同時分布が入力の周辺確率(placeProb)を
@@ -292,5 +411,47 @@ export const PLACKETT_LUCE_MODEL: PlaceJointModel = {
       );
     }
     return buildOutcomesFromFullTheta(horses, fit.theta, k);
+  },
+  /**
+   * 順序付き outcome 空間(上位k着の着順分布)を構築する(Issue #92)。
+   *
+   * `buildDistribution`と**同じ`fitPlackettLuceStrengths`呼び出し規約**
+   * (同じhorses・同じk→常に同じθ。関数が純粋・決定的なため、呼び出し回数によらず
+   * 数学的に同一のθが得られる)を用いる。これにより、`buildDistribution`が返す集合空間と
+   * 本メソッドが返す順序空間は常に同じθから導出され、集合周辺化の一致(AC-B1b-1(b))が成立する。
+   *
+   * 1着(以降)が構造的に一意に定まらない入力ではnullを返す(判定不能。throwしない)。
+   * 対象: (1) 頭数2以上でtopFinishCount>=頭数(placeProbが全員「上位k内確率=1」に潰れ、
+   * 順序を決める情報を一切運ばない。fitPlackettLuceStrengths自体を呼ばない縮退分岐なので
+   * θが存在しない)。(2) 固定馬(θ=Infinity)が2頭以上(buildOrderedOutcomesFromFullTheta参照)。
+   */
+  buildOrderedDistribution(horses, topFinishCount) {
+    validatePlaceCountOrThrow(topFinishCount);
+    const n = horses.length;
+    const k = topFinishCount;
+
+    if (n === 0 || k === 0) {
+      return [{ order: [], probability: 1 }];
+    }
+    if (k >= n) {
+      if (n === 1) {
+        // 1頭しかいないため、strengthの比較を要さず自明に1着(判定不能ではない)。
+        return [{ order: [horses[0]!.umaban], probability: 1 }];
+      }
+      // n>=2: 全頭が上位k内であることは確実だが、placeProbは「上位k内確率」であり
+      // n>=2かつk>=nでは全員1に潰れるため、1着以下の相対順序を一意に定める情報が無い
+      // (buildDistributionのこの分岐もfitPlackettLuceStrengthsを呼ばず、θを推定しない)。
+      return null;
+    }
+
+    const fit = fitPlackettLuceStrengths(horses, k);
+    if (!fit.ok) {
+      throw new PlackettLuceFitError(
+        fit.reason,
+        `PLACKETT_LUCE_MODEL.buildOrderedDistribution: θ推定に失敗しました(reason=${fit.reason}, ` +
+          `頭数=${n}, topFinishCount=${k})`,
+      );
+    }
+    return buildOrderedOutcomesFromFullTheta(horses, fit.theta, k);
   },
 };

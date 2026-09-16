@@ -21,7 +21,14 @@ import { describe, expect, it } from "vitest";
  * `probability-quality-metrics.ts`は`CONDITIONAL_BERNOULLI_MODEL`をハードコードしておりモデルを
  * 差し替える経路自体が存在しないため対象外。#79のスコープ)。
  *
- * *殺す変異*: 6つ目の呼び出し元を追加する / `combo-bet-allocation.ts`の1件を数から落とす
+ * **Issue #92で合計6箇所・`combo-bet-allocation.ts`3箇所へ改定。** `allocateGeneralBets`は
+ * win候補を含む呼び出しで、順序付きoutcome空間が判定不能(degenerateFixedCount>=2)だった
+ * 場合に限り、place/wide/trioを既存の集合空間経路で計算し直すための**2件目**の
+ * `model.buildDistribution(`呼び出しを持つ(win候補が無い呼び出しは従来どおり1件目だけを通り、
+ * この2件目には到達しない。AC-B1b-2の非破壊性)。`buildComboCandidates`の1件と合わせて
+ * `combo-bet-allocation.ts`は3箇所(旧2箇所+1)。
+ *
+ * *殺す変異*: 7つ目の呼び出し元を追加する / `combo-bet-allocation.ts`の1件を数から落とす
  *  → 合計・内訳のいずれかのリテラルと不一致になり必ず落ちる。
  */
 
@@ -46,7 +53,7 @@ function countBuildDistributionCalls(content: string): number {
   return matches?.length ?? 0;
 }
 
-describe("packages/core/src全体: model.buildDistribution(の呼び出し箇所が合計5箇所であること", () => {
+describe("packages/core/src全体: model.buildDistribution(の呼び出し箇所が合計6箇所であること(Issue #92で5→6)", () => {
   it("ヘルパー自己テスト(空振り防止): 呼び出し構文とメソッド定義を区別できること", () => {
     const callOnly = "  const d = model.buildDistribution(horses, 3);\n";
     const definitionOnly = "  buildDistribution(horses, placeCount) {\n    return [];\n  },\n";
@@ -54,13 +61,13 @@ describe("packages/core/src全体: model.buildDistribution(の呼び出し箇所
     expect(countBuildDistributionCalls(definitionOnly)).toBe(0);
   });
 
-  it("合計5箇所(前提固定。内訳の和と一致することも兼ねて検算)", () => {
+  it("合計6箇所(前提固定。内訳の和と一致することも兼ねて検算。Issue #92でcombo-bet-allocation.tsに1箇所増)", () => {
     const files = readSourceFiles(coreSrcDir);
     let total = 0;
     for (const content of files.values()) {
       total += countBuildDistributionCalls(content);
     }
-    expect(total).toBe(5);
+    expect(total).toBe(6);
   });
 
   it("内訳: bet-allocation.tsが1箇所", () => {
@@ -70,11 +77,11 @@ describe("packages/core/src全体: model.buildDistribution(の呼び出し箇所
     expect(countBuildDistributionCalls(content!)).toBe(1);
   });
 
-  it("内訳: combo-bet-allocation.tsが2箇所", () => {
+  it("内訳: combo-bet-allocation.tsが3箇所(Issue #92でwin判定不能時のフォールバック経路が1箇所増)", () => {
     const files = readSourceFiles(coreSrcDir);
     const content = files.get("ev/combo-bet-allocation.ts");
     expect(content).toBeDefined();
-    expect(countBuildDistributionCalls(content!)).toBe(2);
+    expect(countBuildDistributionCalls(content!)).toBe(3);
   });
 
   it("内訳: probability-quality-metrics.tsが2箇所(#80の受け皿対象外。CONDITIONAL_BERNOULLI_MODEL固定のため)", () => {
@@ -113,11 +120,11 @@ describe("packages/core/src全体: model.buildDistribution(の呼び出し箇所
     expect(otherFilesWithCalls).toEqual([]);
   });
 
-  it("#80が受け皿を用意すべきものは前3件のうちbet-allocation.ts+combo-bet-allocation.tsの3箇所(1+2)であること", () => {
+  it("#80が受け皿を用意すべきものはbet-allocation.ts+combo-bet-allocation.tsの4箇所(1+3。Issue #92で+1)であること", () => {
     const files = readSourceFiles(coreSrcDir);
     const receptacleTargetCount =
       countBuildDistributionCalls(files.get("ev/bet-allocation.ts")!) +
       countBuildDistributionCalls(files.get("ev/combo-bet-allocation.ts")!);
-    expect(receptacleTargetCount).toBe(3);
+    expect(receptacleTargetCount).toBe(4);
   });
 });

@@ -14,6 +14,7 @@ import {
   type AllocationCandidate,
   type GeneralBetAllocationConfig,
   type SkipReasonCode,
+  type WinOutcome,
 } from "../../src/ev/combo-bet-allocation.js";
 import { COMBO_SIZE } from "../../src/scraper/combo-odds-key.js";
 import {
@@ -152,7 +153,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
-  describe("validateCandidates: 券種(betType)の検証(Issue #76・#91・AC-A7。umabans.length(0〜4)×betType(place/win/wide/trio/未知)=25セル)", () => {
+  describe("validateCandidates: 券種(betType)の検証(Issue #76・#91・#92・AC-A7。umabans.length(0〜4)×betType(place/win/wide/trio/未知)=25セル)", () => {
     const UMABANS_BY_LENGTH: Record<number, number[]> = {
       0: [],
       1: [1],
@@ -161,38 +162,36 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       4: [1, 2, 3, 4],
     };
 
-    type ExpectKind = "empty" | "unsupported" | "unknown" | "mismatch" | "ok";
+    type ExpectKind = "empty" | "unknown" | "mismatch" | "ok";
 
     const table: { length: number; betType: AllocationBetType; expectKind: ExpectKind }[] = [];
     for (const length of [0, 1, 2, 3, 4] as const) {
       for (const rawBetType of ["place", "wide", "trio", "win", UNKNOWN_BET_TYPE] as const) {
-        const isWin = rawBetType === "win";
         const isUnknown = rawBetType === UNKNOWN_BET_TYPE;
         const betType = rawBetType as AllocationBetType;
-        // 検査順(#91・boss裁定): 空→win(未対応)→未知→頭数不一致。
+        // 検査順(#91・boss裁定): 空→未知→頭数不一致。
+        // **#92でwin専用門番(暫定措置)を撤去した。** winは他の券種と同じくumabanCountOfの
+        // 頭数一致だけで判定される(umabanCountOf("win")===1なのでlength=1のみok)。
         const expectKind: ExpectKind =
           length === 0
             ? "empty" // 既存の「空」チェックが最優先(検査順の裁定。既存メッセージを温存)。
-            : isWin
-              ? "unsupported" // winは頭数に関わらず常に未対応(暫定門番が頭数判定より先)。
-              : isUnknown
-                ? "unknown"
-                : ALLOCATION_BET_TYPE_UMABAN_COUNT[betType] === length
-                  ? "ok"
-                  : "mismatch";
+            : isUnknown
+              ? "unknown"
+              : ALLOCATION_BET_TYPE_UMABAN_COUNT[betType] === length
+                ? "ok"
+                : "mismatch";
         table.push({ length, betType, expectKind });
       }
     }
 
-    // 前提固定(空振り防止): 25セルの内訳がempty5/ok3(place×1,wide×2,trio×3の一致セルのみ)/
-    // unsupported4(win×1〜4)/unknown4/mismatch9(残り)であること。
-    it("テーブル自己検証: 25セルの内訳がempty5/ok3/unsupported4/unknown4/mismatch9であること", () => {
+    // 前提固定(空振り防止): 25セルの内訳がempty5/ok4(place×1,win×1,wide×2,trio×3の一致セル)/
+    // unknown4/mismatch12(残り)であること(#92でunsupportedカテゴリが消滅)。
+    it("テーブル自己検証: 25セルの内訳がempty5/ok4/unknown4/mismatch12であること", () => {
       expect(table).toHaveLength(25);
       expect(table.filter((t) => t.expectKind === "empty")).toHaveLength(5);
-      expect(table.filter((t) => t.expectKind === "ok")).toHaveLength(3);
-      expect(table.filter((t) => t.expectKind === "unsupported")).toHaveLength(4);
+      expect(table.filter((t) => t.expectKind === "ok")).toHaveLength(4);
       expect(table.filter((t) => t.expectKind === "unknown")).toHaveLength(4);
-      expect(table.filter((t) => t.expectKind === "mismatch")).toHaveLength(9);
+      expect(table.filter((t) => t.expectKind === "mismatch")).toHaveLength(12);
     });
 
     it.each(table)(
@@ -208,10 +207,6 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         };
         if (expectKind === "empty") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/馬番の組が空です/);
-        } else if (expectKind === "unsupported") {
-          expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
-            /単勝\(win\)の買い目候補はこの段階では未対応です/,
-          );
         } else if (expectKind === "unknown") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
             /不正な券種です: betTypeはplace\/win\/wide\/trioのいずれかである必要があります/,
@@ -774,6 +769,37 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         { umabans: [1, 2], odds: 3.5, ev: 2.1, isPositive: true, betType: "wide" },
       ];
       expect(() => allocateGeneralBets(horses, 3, dup)).toThrow();
+    });
+
+    describe("重複判定キーはbetTypeを含む(AC-B1b-8。#92でwinを受理するようになったため、" +
+      "同じ馬番でも券種が違えば別の買い目である。umabans.join(\",\")だけをキーにすると" +
+      "win[3]とplace[3]が同じキー\"3\"に潰れて誤って重複扱いされる)", () => {
+      it("win[3]とplace[3](同じ馬番・異なる券種)は重複ではなく受理されること", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [3], odds: 3, ev: 2, isPositive: true, betType: "win" },
+          { umabans: [3], odds: 3, ev: 2, isPositive: true, betType: "place" },
+        ];
+        expect(() => allocateGeneralBets(horses, 3, candidates)).not.toThrow();
+      });
+
+      it("place[3]を2件(同じ馬番・同じ券種)渡すと、betTypeを含めても引き続きthrowすること(非破壊性)", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [3], odds: 3, ev: 2, isPositive: true, betType: "place" },
+          { umabans: [3], odds: 3.5, ev: 2.1, isPositive: true, betType: "place" },
+        ];
+        expect(() => allocateGeneralBets(horses, 3, candidates)).toThrow(/重複した買い目/);
+      });
+
+      it("win[3]を2件(同じ馬番・同じ券種)渡すとthrowすること", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [3], odds: 3, ev: 2, isPositive: true, betType: "win" },
+          { umabans: [3], odds: 3.5, ev: 2.1, isPositive: true, betType: "win" },
+        ];
+        expect(() => allocateGeneralBets(horses, 3, candidates)).toThrow(/重複した買い目/);
+      });
     });
 
     it("馬番の組が空(umabans: [])の候補を渡すと例外を投げること(code-reviewer提案2)", () => {
@@ -1453,6 +1479,317 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       );
       // 辞書順: [1,2] < [2,5] < [3,4]
       expect(r1.allocations.map((a) => a.umabans.join(","))).toEqual(["1,2", "2,5", "3,4"]);
+    });
+  });
+
+  describe("allocateGeneralBets: 単勝(win)候補の統合(Issue #92・#23-B1b)", () => {
+    describe("非破壊性(AC-B1b-2): win候補が無い呼び出しは、winOutcome以外の全フィールドがHEAD時点の値と一致すること", () => {
+      // このリテラル値は、#92着手前(コミット9137afb時点)の`allocateGeneralBets`を実際に
+      // 実行して得た値をそのまま転記したもの(`git stash`で一時的にHEADへ戻し、本テストと
+      // 同一の horses/candidates/config で実行して確認済み。再現手順:
+      // `git stash; node_modules/.bin/tsx <このhorses/candidates/configを渡すスクリプト>; git stash pop`)。
+      it("wide+trio混在(win無し)の全フィールドがHEAD時点の値と一致すること", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+          { umabans: [1, 2, 3], odds: 5, ev: 2, isPositive: true, betType: "trio" },
+        ];
+        const config: GeneralBetAllocationConfig = {
+          ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+          bankroll: 100000,
+          perRaceCap: 100000,
+        };
+        const result = allocateGeneralBets(horses, 3, candidates, config);
+        const { winOutcome, ...rest } = result;
+        expect(rest).toEqual({
+          allocations: [
+            {
+              betType: "wide",
+              umabans: [1, 2],
+              stake: 0,
+              continuousFraction: 0,
+              scaledFraction: 0,
+              hitProb: 0.3,
+              odds: 3,
+              ev: 2,
+              droppedBelowMinimum: false,
+            },
+            {
+              betType: "trio",
+              umabans: [1, 2, 3],
+              stake: 0,
+              continuousFraction: 0,
+              scaledFraction: 0,
+              hitProb: 0.09999999999999999,
+              odds: 5,
+              ev: 2,
+              droppedBelowMinimum: false,
+            },
+          ],
+          totalStake: 0,
+          bankrollInput: 100000,
+          perRaceCapInput: 100000,
+          resolvedBankroll: 100000,
+          effectivePerRaceCap: 100000,
+          kellyTargetStake: 0,
+          plannedStake: 0,
+          capApplied: false,
+          minimumStakeApplied: false,
+          exceedsKellyTarget: false,
+          advisory: null,
+          kellyFraction: 0.5,
+          betCount: 0,
+          isSkip: true,
+          skipReason: "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
+          skipReasonCode: "no-edge",
+          notDiversified: false,
+          modelId: "plackett-luce",
+          modelApproximate: false,
+          diagnostics: {
+            inputCandidateCount: 2,
+            truncatedByCapCount: 0,
+            candidateCount: 2,
+            converged: true,
+          },
+        });
+        // winOutcomeだけが#92で新設されたフィールド(既存フィールドの値には一切含まれない)。
+        expect(winOutcome).toEqual<WinOutcome>({ kind: "not-applicable" });
+      });
+    });
+
+    describe("winOutcome(3値。判別共用体)", () => {
+      it("win候補が無ければnot-applicable(既存挙動と完全一致。非破壊性の核)", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+        ];
+        const result = allocateGeneralBets(horses, 3, candidates);
+        expect(result.winOutcome).toEqual<WinOutcome>({ kind: "not-applicable" });
+      });
+
+      it("win候補がありdeg=0(通常ケース)ならdetermined", () => {
+        const horses = evenHorses(9, 3); // 均等9頭・k=3 → 対称なdeg=0
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        const result = allocateGeneralBets(horses, 3, candidates);
+        expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+      });
+
+      it("win候補がありdeg>=2(固定馬2頭以上)ならindeterminate(reasonはdegenerate-fixed-countのみ)", () => {
+        const horses: JointModelHorse[] = [
+          { umaban: 1, placeProb: 1 },
+          { umaban: 2, placeProb: 1 },
+          { umaban: 3, placeProb: 0.5 },
+          { umaban: 4, placeProb: 0.3 },
+          { umaban: 5, placeProb: 0.2 },
+        ];
+        // 前提の検算(空振り防止): このフィクスチャがdeg>=2であること。
+        const fit = fitPlackettLuceStrengths(horses, 3);
+        expect(fit.ok).toBe(true);
+        if (fit.ok) expect(fit.degenerateFixedCount).toBeGreaterThanOrEqual(2);
+
+        const candidates: AllocationCandidate[] = [
+          { umabans: [3], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        const result = allocateGeneralBets(horses, 3, candidates);
+        expect(result.winOutcome).toEqual<WinOutcome>({
+          kind: "indeterminate",
+          reason: "degenerate-fixed-count",
+        });
+      });
+
+      it("deg>=2でindeterminateでも、同時に渡したwide候補は既存の集合空間で正しく判定されること(既存側は誤っていない)", () => {
+        const horses: JointModelHorse[] = [
+          { umaban: 1, placeProb: 1 },
+          { umaban: 2, placeProb: 1 },
+          { umaban: 3, placeProb: 0.5 },
+          { umaban: 4, placeProb: 0.3 },
+          { umaban: 5, placeProb: 0.2 },
+        ];
+        const candidates: AllocationCandidate[] = [
+          { umabans: [3], odds: 3, ev: 2, isPositive: true, betType: "win" },
+          { umabans: [1, 2], odds: 1.2, ev: 1.15, isPositive: true, betType: "wide" },
+        ];
+        const result = allocateGeneralBets(horses, 3, candidates);
+        expect(result.winOutcome).toEqual<WinOutcome>({
+          kind: "indeterminate",
+          reason: "degenerate-fixed-count",
+        });
+        const wideAlloc = result.allocations.find((a) => a.betType === "wide")!;
+        expect(wideAlloc).toBeDefined();
+        // 固定馬2頭(umaban=1,2)は上位3集合に確実に含まれるため、ワイド[1,2]の的中確率は1。
+        expect(wideAlloc.hitProb).toBeCloseTo(1, 9);
+        // win候補は的中確率を割り当てられない(除外される。indeterminateだからhitProb=0)。
+        const winAlloc = result.allocations.find((a) => a.betType === "win")!;
+        expect(winAlloc).toBeDefined();
+        expect(winAlloc.hitProb).toBe(0);
+      });
+    });
+
+    describe("throw条件(呼び出し側の契約違反。#31: データ由来のindeterminateとは区別する)", () => {
+      it("win候補がありCONDITIONAL_BERNOULLI_MODEL(順序展開非対応)を明示的に渡すとthrow", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        expect(() =>
+          allocateGeneralBets(
+            horses,
+            3,
+            candidates,
+            DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+            CONDITIONAL_BERNOULLI_MODEL,
+          ),
+        ).toThrow(/順序付きoutcome空間を構築できるモデルが必要です/);
+      });
+
+      it("win候補が無ければCONDITIONAL_BERNOULLI_MODELを渡してもthrowしない(非破壊性)", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+        ];
+        expect(() =>
+          allocateGeneralBets(
+            horses,
+            3,
+            candidates,
+            DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+            CONDITIONAL_BERNOULLI_MODEL,
+          ),
+        ).not.toThrow();
+      });
+
+      it.each([
+        { topFinishCount: 0, name: "0" },
+        { topFinishCount: 1.5, name: "非整数(1.5)" },
+      ])("win候補がありtopFinishCount=$nameだとthrow", ({ topFinishCount }) => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        expect(() => allocateGeneralBets(horses, topFinishCount, candidates)).toThrow();
+      });
+
+      it("win候補が無ければtopFinishCount=0でも従来どおりthrowしない(既存契約と非対称にしない)", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+        ];
+        expect(() => allocateGeneralBets(horses, 0, candidates)).not.toThrow();
+      });
+
+      it("win候補が無くCONDITIONAL_BERNOULLI_MODELなら、topFinishCount=1.5(非整数)でも従来どおりthrowしない(CBのfloor+0クランプは非対称にしない。既定PLは非整数で元々throwするため、この非破壊性確認にはCBを使う)", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+        ];
+        expect(() =>
+          allocateGeneralBets(
+            horses,
+            1.5,
+            candidates,
+            DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+            CONDITIONAL_BERNOULLI_MODEL,
+          ),
+        ).not.toThrow();
+      });
+    });
+
+    describe("k(topFinishCount)=0/1/非整数 × モデル(CB/PL)のテーブル(AC-B1b-6)", () => {
+      type Cell = { k: number; model: "cb" | "pl"; expect: "throw" | "ok" };
+      const cells: Cell[] = [
+        { k: 0, model: "pl", expect: "throw" },
+        { k: 0, model: "cb", expect: "throw" },
+        { k: 1, model: "pl", expect: "ok" },
+        { k: 1, model: "cb", expect: "throw" },
+        { k: 1.5, model: "pl", expect: "throw" },
+        { k: 1.5, model: "cb", expect: "throw" },
+      ];
+      // 前提固定(空振り防止): throw4/ok1(セル数の合計と一致することを確認)。
+      it("テーブル自己検証: 6セルの内訳がthrow5/ok1であること", () => {
+        expect(cells).toHaveLength(6);
+        expect(cells.filter((c) => c.expect === "throw")).toHaveLength(5);
+        expect(cells.filter((c) => c.expect === "ok")).toHaveLength(1);
+      });
+
+      it.each(cells)("k=$k, model=$model は $expect になること(win候補あり)", ({ k, model, expect: exp }) => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        const m = model === "pl" ? PLACKETT_LUCE_MODEL : CONDITIONAL_BERNOULLI_MODEL;
+        if (exp === "throw") {
+          expect(() =>
+            allocateGeneralBets(horses, k, candidates, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, m),
+          ).toThrow();
+        } else {
+          expect(() =>
+            allocateGeneralBets(horses, k, candidates, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, m),
+          ).not.toThrow();
+        }
+      });
+    });
+
+    describe("end-to-endのhitProb(deg=1でのNaN汚染を検出する。殺す変異の実測固定)", () => {
+      // 9頭・[0.9, 0.2×8]・k=3。固定馬(umaban=1)がちょうど1頭のdeg=1フィクスチャ
+      // (plackett-luce-ordered-model.test.tsと同一の前提)。
+      const horses9deg1: JointModelHorse[] = [
+        { umaban: 1, placeProb: 0.9 },
+        ...Array.from({ length: 8 }, (_, i) => ({ umaban: i + 2, placeProb: 0.2 })),
+      ];
+
+      // 実配当(stake>0)を発生させるための現実的な config(既定はbankroll=0=未設定でisSkipが
+      // 常にtrueになり、NaN由来の見せかけのskipと区別が付かなくなるため)。
+      const realConfig: GeneralBetAllocationConfig = {
+        ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        bankroll: 100000,
+        perRaceCap: 100000,
+      };
+
+      it("固定馬(umaban=1)のwin候補は的中確率1・NaNではないこと(素朴にΘ=Infinityで計算するとNaNになる)", () => {
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 1.05, ev: 1.05, isPositive: true, betType: "win" },
+        ];
+        const result = allocateGeneralBets(horses9deg1, 3, candidates, realConfig);
+        const winAlloc = result.allocations.find((a) => a.betType === "win")!;
+        expect(winAlloc).toBeDefined();
+        expect(Number.isFinite(winAlloc.hitProb)).toBe(true);
+        expect(winAlloc.hitProb).toBeCloseTo(1, 9);
+        // NaNが`runGreedyAllocation`を通過すると`isSkip:true`(totalStake=0)という
+        // 「一見健全な判定結果」に化ける(boss実測)。hitProbが正しく1であれば、
+        // オッズ1.05×確率1のev>1のためisSkipにはならないはずであることも併せて固定する
+        // (的中確実〈hitProb=1〉な買い目はgreedyStepsを使い切るまで増やし続けるのが
+        // 正しい挙動であり、convergedがfalseになること自体はNaNの兆候ではない。
+        // ここではconvergedの値は断定しない)。
+        expect(result.isSkip).toBe(false);
+      });
+
+      it("固定馬以外(umaban=2)のwin候補は的中確率が正確に0であること(固定馬が確率1で1着のため、他馬の1着確率は0。NaNや中途半端な値に化けていないことの確認)", () => {
+        const candidates: AllocationCandidate[] = [
+          { umabans: [2], odds: 20, ev: 2, isPositive: true, betType: "win" },
+        ];
+        const result = allocateGeneralBets(horses9deg1, 3, candidates, realConfig);
+        const winAlloc = result.allocations.find((a) => a.betType === "win")!;
+        expect(winAlloc).toBeDefined();
+        expect(Number.isFinite(winAlloc.hitProb)).toBe(true);
+        expect(winAlloc.hitProb).toBe(0);
+      });
+
+      it("自由集合内の2頭のワイド候補は、NaNではなく0より大きく1未満の有限値であること(win併存時も非win候補が正しく順序空間経由で判定される)", () => {
+        // umaban=2,3は自由集合(θ有限正)。2着・3着の並びに応じて的中する組合せがあるため、
+        // 的中確率は0と1の間の非退化な値になるはず(空振り防止)。
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 1.05, ev: 1.05, isPositive: true, betType: "win" },
+          { umabans: [2, 3], odds: 2, ev: 1.5, isPositive: true, betType: "wide" },
+        ];
+        const result = allocateGeneralBets(horses9deg1, 3, candidates, realConfig);
+        const wideAlloc = result.allocations.find((a) => a.betType === "wide")!;
+        expect(wideAlloc).toBeDefined();
+        expect(Number.isFinite(wideAlloc.hitProb)).toBe(true);
+        expect(wideAlloc.hitProb).toBeGreaterThan(0);
+        expect(wideAlloc.hitProb).toBeLessThan(1);
+      });
     });
   });
 });

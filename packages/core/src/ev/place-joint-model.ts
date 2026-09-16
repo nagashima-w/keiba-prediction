@@ -93,6 +93,79 @@ export interface PlaceJointModel {
   ): readonly PlaceOutcome[];
 }
 
+/**
+ * 順序付き outcome(着順)とその確率(Issue #92・#23-B1b)。
+ *
+ * `PlaceOutcome.placed` は「複勝圏内に入った馬番の集合」で着順を持たないのに対し、`order` は
+ * **着順そのもの**(0番目が1着、1番目が2着、…)を表す。**`order` はソートしない。** ソートすると
+ * 着順情報が失われ、`PlaceOutcome` と区別が付かなくなる(`foldToCandidateSubsets` が
+ * `.sort((a,b)=>a-b)` して畳み込むのはまさにこの「順序を捨てて集合として扱う」操作であり、
+ * `OrderedOutcome` にこの関数を誤って通すと着順が黙って消える。型を分けているのはこの誤用を
+ * コンパイルエラーにするため)。
+ */
+export interface OrderedOutcome {
+  /** 着順(0番目が1着、…、(topFinishCount-1)番目がtopFinishCount着)。馬番。ソートしない。 */
+  readonly order: readonly number[];
+  /** この着順が実現する確率。全 OrderedOutcome の合計は常に1(判定不能でない限り)。 */
+  readonly probability: number;
+}
+
+/**
+ * 順序付き outcome 空間を構築できる `PlaceJointModel`(Issue #92・#23-B1b)。
+ *
+ * ## `PlaceJointModel` を直接拡張せず派生 interface にした理由
+ *
+ * 順序展開は Plackett-Luce のような「潜在強度から着順分布を導出するモデル」だけが持てる能力であり、
+ * `CONDITIONAL_BERNOULLI_MODEL` はそもそも定式化上これを持ちようがない(各馬の的中を独立ベルヌーイと
+ * みなし「ちょうどk頭」で条件付けるだけの近似であり、着順という概念が定式化に存在しない)。
+ * 「持てないモデルが存在する」という事実を、`PlaceJointModel` 自体に任意メソッドを足すのではなく
+ * 派生 interface として切り出すことで、複勝系の同時分布にしか関心のない実装(`PlaceJointModel`
+ * だけを満たす実装)の定義を順序関連の型で汚さない(ISP)。将来の馬単・三連単(#24・#25)も同じ
+ * `buildOrderedDistribution` を(topFinishCountを2・3にして)再利用できる。
+ *
+ * ただし正直に記録する: TypeScript の構造的型システムでは、「順序展開を実装し忘れたモデル」と
+ * 「意図的に実装しないモデル」を型だけで区別することはできない(派生 interface にしても、新しい
+ * モデルが単に `PlaceJointModel` として定義されれば、順序非対応であることをコンパイラは咎めない)。
+ * この穴を実際に塞いでいるのは型ではなく**挙動契約**である: win候補があるのに
+ * `isOrderedPlaceJointModel` が false を返すモデルが渡された場合、`allocateGeneralBets` は
+ * 黙って別モデルへ差し替えたり判定不能に倒したりせず、呼び出し側の契約違反として throw する
+ * (`combo-bet-allocation.ts` 参照)。「forgot」なモデルは初回のwin利用で即座に例外になるため、
+ * サイレントな誤答にはならない。
+ */
+export interface OrderedPlaceJointModel extends PlaceJointModel {
+  /**
+   * 出走全頭の複勝確率から、順序付き outcome 空間(上位 topFinishCount 着の着順分布。
+   * P(出走頭数, topFinishCount) 通り)を構築する。
+   *
+   * 1着(以降の着順)が構造的に一意に定まらない入力(例: 潜在強度に2頭以上の +Infinity(=上位k枠に
+   * 厳密に固定)が含まれ、固定馬同士の相対的な強さが縮約の過程で失われている場合)に対しては、
+   * 例外を投げず **`null`** を返す(判定不能。呼び出し側の契約違反ではなく、データ由来の
+   * 判定不能であるため throw と区別する)。
+   *
+   * @param horses 出走全頭(候補馬に限らない。同時分布は全頭の確率に依存するため)
+   * @param topFinishCount 上位何着までを着順判定に使うか
+   */
+  buildOrderedDistribution(
+    horses: readonly JointModelHorse[],
+    topFinishCount: number,
+  ): readonly OrderedOutcome[] | null;
+}
+
+/**
+ * model が順序付き outcome 空間を構築できるか判定する型ガード(Issue #92)。
+ *
+ * `allocateGeneralBets` はこの関数**1箇所**を検査点とし、`typeof model.buildOrderedDistribution
+ * === "function"` のようなインライン判定を呼び出し側に散らさない(Issue #76 の「判定を1箇所に
+ * 集約する」流儀)。
+ */
+export function isOrderedPlaceJointModel(
+  model: PlaceJointModel,
+): model is OrderedPlaceJointModel {
+  return (
+    typeof (model as Partial<OrderedPlaceJointModel>).buildOrderedDistribution === "function"
+  );
+}
+
 /** クランプに使う微小値。p=0/p=1 の境界でゼロ除算・発散を起こさないための下駄。 */
 const EPS = 1e-9;
 
