@@ -943,7 +943,7 @@ function minimalGeneralResult(allocations: readonly GeneralBetAllocation[]): Gen
     modelId: "conditional-bernoulli",
     modelApproximate: true,
     diagnostics: { inputCandidateCount: allocations.length, truncatedByCapCount: 0, candidateCount: allocations.length, converged: true },
-    winOutcome: { kind: "not-applicable" },
+    winOutcome: { kind: "not-requested" },
   };
 }
 

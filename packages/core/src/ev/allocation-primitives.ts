@@ -148,6 +148,14 @@ export interface OutcomeIndexSet {
  * 「的中」の定義は呼び出し側が isHit で与える(券種非依存性の要): 複勝なら
  * `outcome.placed.includes(candidate.umaban)`、組合せ券種なら
  * `candidate.umabans.every(u => outcome.placed.includes(u))`(部分集合包含)。
+ *
+ * **単勝(win)の的中判定はこの部分集合包含ではない**(Issue #92)。win候補は
+ * `outcome.order[0] === candidate.umaban`(1着の identity 判定)であり、`foldedOutcomes`
+ * (`PlaceOutcome[]`。順序を持たない)を経由できない(`order`情報自体を持たないため)。
+ * `combo-bet-allocation.ts`の`allocateGeneralBets`はwin候補がある呼び出しで、本関数
+ * (`buildOutcomeIndexSets`)を通さず、`OrderedOutcome[]`から`OutcomeIndexSet[]`を直接
+ * 構築する(型ジェネリック`<T>`は候補型のみで、outcome型は`PlaceOutcome`に固定されたまま。
+ * outcome型を汎用化する変更は#92のスコープでは行わなかった)。
  */
 export function buildOutcomeIndexSets<T>(
   candidates: readonly T[],

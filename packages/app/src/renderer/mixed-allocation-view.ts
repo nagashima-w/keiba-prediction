@@ -69,7 +69,10 @@ import { formatYen } from "./verify-format.js";
 // 非破壊性〈AC2〉に影響しないようにする)。
 // ============================================================================
 
-/** 券種別の内訳(金額・点数)。AC10: 3つの合計は必ずtotalStakeと一致する(同じ配列から集計するため)。 */
+/** 券種別の内訳(金額・点数)。AC10: 3つの合計は必ずtotalStakeと一致する(app側の候補ビルダー
+ *  〈mixed-candidates.ts〉がplace/wide/trioしか産出しないため。Issue #92でcoreの
+ *  allocateGeneralBetsはwin候補も受理できるようになったが、win行を産む候補ビルダーは
+ *  #90まで存在しない)。 */
 export interface MixedAllocationBreakdown {
   readonly place: { readonly stake: number; readonly count: number };
   readonly wide: { readonly stake: number; readonly count: number };
@@ -178,8 +181,9 @@ export interface MixedAllocationSplit {
  * `sortMixedAllocationsForDisplay`・`buildMixedAllocationBreakdown`が既に持つ同一の前提であり、
  * 本関数が新設する穴ではない。NaN防御は本タスクのスコープ外・到達可能性も未調査):
  * 1. `visible`のstake合計 + `hiddenStake` === 元の`GeneralBetAllocationResult.totalStake`
- * 2. `totalStake` === `buildMixedAllocationBreakdown`の`place+wide+trio`のstake合計(既存契約AC10)
- * 3. `visible.length + hiddenCount` === `place+wide+trio`のcount合計
+ * 2. `totalStake` === `buildMixedAllocationBreakdown`の`place+wide+trio`のstake合計(既存契約AC10。
+ *    app側の候補ビルダー〈mixed-candidates.ts〉がplace/wide/trioしか産出しないために成立する)
+ * 3. `visible.length + hiddenCount` === `place+wide+trio`のcount合計(同上の理由による)
  */
 export function splitAllocationsForDisplay(
   sorted: readonly GeneralBetAllocation[],

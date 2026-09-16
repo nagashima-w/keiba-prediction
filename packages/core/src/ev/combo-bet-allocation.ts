@@ -27,7 +27,9 @@
  *
  * k(topFinishCount)についての重要な注意:
  *   ワイド・三連複の的中判定は「同時分布モデルが返す上位k着の集合に、買い目の全馬番が
- *   含まれるか(部分集合包含)」である。boss着手前ゲートで実測したフィクスチャ(5頭立てで
+ *   含まれるか(部分集合包含)」である。**単勝(win)の的中判定はこれとは別のルール**
+ *   (`outcome.order[0]===candidate.umaban`。Issue #92)であり、部分集合包含の対象外
+ *   (`allocateGeneralBets`本体参照)。boss着手前ゲートで実測したフィクスチャ(5頭立てで
  *   複勝2点・ワイド3点=C(3,2))が示すとおり、ワイド・三連複はkが7頭以下でも常に3である。
  *   これは複勝の払戻対象人数(`resolvePlaceBetTarget().placeCount`。5〜7頭は対象外/4頭以下は
  *   非発売という別の判定)とは**無関係の独立した概念**である。呼び出し側は
@@ -366,27 +368,44 @@ export interface GeneralBetAllocationDiagnostics {
 }
 
 /**
- * 単勝(win)候補の1着確率(順序付き outcome 空間)を、この呼び出しで決定できたかの申告
- * (Issue #92・AC-B1b-3)。3値の判別共用体で、**"indeterminate"に入る理由は
- * `"degenerate-fixed-count"`ただ1つに保つ**(reasonユニオンを広げない。#31: チャネルを
- * 1つに保つことで判定不能の内訳が増殖し「判定結果」と紛れることを防ぐ)。
+ * win候補の順序付き outcome 空間が判定不能(indeterminate)になる原因(Issue #92)。
+ * **原因は2つあり、どちらか一方に押し込めない**(#31。boss裁定: 「reasonユニオンを
+ * 広げるな」は「1つの原因を保て」ではなく「原因が増えたら増えたと申告しろ(1つの
+ * 嘘のラベルに複数の原因を押し込めるな)」の意)。
  *
- * - `"not-applicable"`: 候補にwin(単勝)が1件も含まれていない(既存の複勝・ワイド・三連複
- *   専用の呼び出しは常にこれ)。
+ * - `"degenerate-fixed-count"`: 潜在強度θの推定自体は成功したが、2頭以上が+Infinity
+ *   〈上位k枠に厳密に固定〉となり、固定馬同士の相対的な強さの情報が縮約の過程で
+ *   失われている(`fitPlackettLuceStrengths`は呼ばれ成功する)。
+ * - `"top-k-covers-all-runners"`: 出走頭数が2頭以上で`topFinishCount>=出走頭数`
+ *   (`buildOrderedDistribution`が縮退分岐を取り、`fitPlackettLuceStrengths`自体を
+ *   呼ばない。placeProbが全員「上位k内確率=1」に潰れ、順序を決める情報を一切運ばない)。
+ */
+export type WinOutcomeIndeterminateReason = "degenerate-fixed-count" | "top-k-covers-all-runners";
+
+/**
+ * 単勝(win)候補の1着確率(順序付き outcome 空間)を、この呼び出しで決定できたかの申告
+ * (Issue #92・AC-B1b-3)。3値の判別共用体。
+ *
+ * - `"not-requested"`: 候補にwin(単勝)が1件も含まれていない(既存の複勝・ワイド・三連複
+ *   専用の呼び出しは常にこれ)。**「候補として要求されなかった」ことだけを表す。**
+ *   「単勝が発売されていない」「頭数が単勝の発売条件を満たさない」という*真の*
+ *   not-applicableは#90(#23-B2)のスコープであり、この値とは意味が異なる
+ *   (#90が導入する際にこの値と混同しないよう、あえて`not-applicable`という語を
+ *   避けている)。
  * - `"determined"`: win候補があり、順序付き outcome 空間を構築でき、的中確率
  *   (`GeneralBetAllocation.hitProb`)が決定された。
- * - `"indeterminate"`: win候補があり、順序付き outcome 空間は構築できた(=データとして
- *   異常ではない)が、1着(以降)が構造的に一意に定まらなかった(`degenerateFixedCount>=2`。
- *   潜在強度に2頭以上の+Infinity〈上位k枠に厳密に固定〉が含まれ、固定馬同士の相対的な
- *   強さの情報が縮約の過程で失われている)。この場合、win候補は最適化対象から除外される
- *   (的中確率を割り当てられないため)。**モデルが順序展開に非対応、またはtopFinishCountが
- *   win候補を伴うには不正(0/非整数)な場合は、ここには入らず`allocateGeneralBets`自体が
- *   throwする**(呼び出し側の契約違反であり、データ由来の判定不能ではないため。#31)。
+ * - `"indeterminate"`: win候補があり、順序付き outcome 空間が構造的に一意に定まらなかった
+ *   (原因は`WinOutcomeIndeterminateReason`参照)。**この場合、win候補は最適化対象から
+ *   実際に除外される**(`allocateGeneralBets`が候補配列からwin候補を取り除いてから
+ *   最適化する。`hitProb`欄に「導出していない0」を捏造しない)。**モデルが順序展開に
+ *   非対応、またはtopFinishCount・出走頭数がwin候補を伴うには不正(0/非整数/0頭)な場合は、
+ *   ここには入らず`allocateGeneralBets`自体がthrowする**(呼び出し側の契約違反であり、
+ *   データ由来の判定不能ではないため。#31)。
  */
 export type WinOutcome =
-  | { readonly kind: "not-applicable" }
+  | { readonly kind: "not-requested" }
   | { readonly kind: "determined" }
-  | { readonly kind: "indeterminate"; readonly reason: "degenerate-fixed-count" };
+  | { readonly kind: "indeterminate"; readonly reason: WinOutcomeIndeterminateReason };
 
 /** 券種一般の配分最適化結果。 */
 export interface GeneralBetAllocationResult {
@@ -417,7 +436,7 @@ export interface GeneralBetAllocationResult {
   readonly modelApproximate: boolean;
   readonly diagnostics: GeneralBetAllocationDiagnostics;
   /** 単勝(win)候補の1着確率が決定できたか(Issue #92)。win候補が無い呼び出しは常に
-   *  `{kind:"not-applicable"}`(既存の複勝・ワイド・三連複専用呼び出しへの非破壊性)。 */
+   *  `{kind:"not-requested"}`(既存の複勝・ワイド・三連複専用呼び出しへの非破壊性)。 */
   readonly winOutcome: WinOutcome;
 }
 
@@ -531,6 +550,11 @@ function validateTopFinishCount(topFinishCount: number): void {
  * 契約違反」であり、データ由来の判定不能(indeterminate)とは性質が違う(#31。AC-B1b-5(3)と
  * 同じ線引き)。
  *
+ * - `horses.length`が0: `buildOrderedDistribution`は`n===0`を`[{order:[],probability:1}]`
+ *   (空の着順が確率1)として扱うが、これは「1着という位置そのものが存在しない」縮退であり、
+ *   `topFinishCount=0`と論理的に同じ性質の問題である(#31着手前ゲート裁定と同型の二重基準を
+ *   避けるため、topFinishCount=0と同じくthrowにする)。win候補が無い呼び出しの
+ *   `n===0`の既存挙動(`place-joint-model.ts`の縮退分岐)は一切変えない。
  * - `topFinishCount`が非整数、または0: `validateTopFinishCount`はplace/wide/trioのために
  *   0・非整数を許容する(place-joint-model.tsのfloor+0クランプに合わせた既存の意図的な
  *   非対称)。しかしwinは「1着」という位置そのものが存在しないoutcome空間しか構築できず、
@@ -540,11 +564,27 @@ function validateTopFinishCount(topFinishCount: number): void {
  * - `model`が順序展開に非対応(`isOrderedPlaceJointModel`がfalse。例:
  *   `CONDITIONAL_BERNOULLI_MODEL`を明示的に渡した場合): `PLACKETT_LUCE_MODEL`へ
  *   黙って差し替えたりindeterminateへ倒したりしない(AC-B1b-5(3))。
+ *
+ * **`topFinishCount>=horses.length`(頭数2以上)はここでthrowしない。** 順序空間は
+ * 構築できないが(`buildOrderedDistribution`がnullを返す)、これは「呼び出し側が
+ * 引数を差し替えれば解消する契約違反」ではなく、レースの頭数という**データ**に起因する
+ * 状態である(ワイド・三連複は頭数が少なくてもtopFinishCount=3を使う設計〈本ファイル
+ * 冒頭JSDoc参照〉なので、この状況はむしろ通常起こりうる)。呼び出しごと止めると
+ * 小頭数レースでwin候補を含めただけでplace/wide/trioの計算まで巻き添えで止まる。
+ * `winOutcome.kind="indeterminate"`(reason="top-k-covers-all-runners")として申告し、
+ * win候補だけを除外して残りを計算する(`allocateGeneralBets`本体参照)。
  */
 function validateWinCandidatesSupported(
+  horsesLength: number,
   topFinishCount: number,
   model: PlaceJointModel,
 ): asserts model is OrderedPlaceJointModel {
+  if (horsesLength === 0) {
+    throw new Error(
+      "不正な買い目です: 単勝(win)の買い目候補を含む場合、出走頭数が0の呼び出しには対応でき" +
+        "ません(1着という位置そのものが存在しないため。horses.length=0)",
+    );
+  }
   if (!Number.isInteger(topFinishCount) || topFinishCount === 0) {
     throw new Error(
       "不正な買い目です: 単勝(win)の買い目候補を含む場合、topFinishCountは1以上の整数である" +
@@ -676,13 +716,59 @@ export function allocateGeneralBets(
 ): GeneralBetAllocationResult {
   validateTopFinishCount(topFinishCount);
   validateCandidates(candidates);
-  // win候補があるときだけ、順序付きoutcome空間を構築するための追加の前提を検証する
-  // (Issue #92)。win候補が無い呼び出しはこの検証を一切行わず、既存の挙動を1ビットも
-  // 変えない(AC-B1b-2の非破壊性)。
+
+  // win候補の有無を判定し(Issue #92)、winOutcome(3値)を確定する。win候補が無い呼び出しは
+  // ここで確定した`winOutcome:{kind:"not-requested"}`以外、以降のロジックを一切変えない
+  // (AC-B1b-2の非破壊性)。win候補があるときだけ、順序付きoutcome空間を構築するための
+  // 追加の前提を検証し(0頭・0/非整数topFinishCount・順序展開非対応モデルはthrow。#31:
+  // いずれも「呼び出し側が引数を差し替えれば解消できる契約違反」)、その後で実際に
+  // 順序付きoutcome空間を構築する(1回だけ。model.buildDistributionとmodel.buildOrderedDistribution
+  // はどちらも同じhorses・同じtopFinishCountから導出されるため、純粋関数の決定性により
+  // 常に同一のθに基づく)。
   const inputHasWinCandidates = candidates.some((c) => c.betType === "win");
-  if (inputHasWinCandidates) {
-    validateWinCandidatesSupported(topFinishCount, model);
+  let winOutcome: WinOutcome;
+  let orderedRaw: readonly OrderedOutcome[] | null = null;
+  if (!inputHasWinCandidates) {
+    winOutcome = { kind: "not-requested" };
+  } else {
+    // validateWinCandidatesSupportedは`asserts model is OrderedPlaceJointModel`で宣言されており、
+    // 直前でthrowせず戻った時点でTSはこのブロック内のmodelをOrderedPlaceJointModelへ
+    // 絞り込む(この呼び出しの直後で使う限りnarrowingが有効。離れた場所で再利用する場合は
+    // 別途ガードが必要になる点に注意)。
+    validateWinCandidatesSupported(horses.length, topFinishCount, model);
+    orderedRaw = model.buildOrderedDistribution(horses, topFinishCount);
+    if (orderedRaw === null) {
+      // データ由来の判定不能。原因は2つある(buildOrderedDistributionのJSDoc参照)ため、
+      // ここで区別して申告する(#31: 異なる原因を1つのラベルに押し込めない。boss裁定)。
+      // 区別の根拠: この時点でvalidateWinCandidatesSupportedによりhorses.length>=1・
+      // topFinishCountは1以上の整数であることが確定している。残る2つの縮退経路
+      // (buildOrderedDistributionのJSDoc「対象」参照)は互いに排他的にtopFinishCountと
+      // horses.lengthの大小関係だけで判別できる: horses.length>=2かつ
+      // topFinishCount>=horses.lengthなら「上位k枠が全頭を覆い、fitPlackettLuceStrengths
+      // 自体を呼ばない縮退分岐」由来(θが存在しない)。それ以外(horses.length>topFinishCount)
+      // でnullが返るのは「固定馬2頭以上」由来しかない。
+      // ⚠️この判別はPLACKETT_LUCE_MODELが文書化している2つの縮退条件に依存する
+      // ヒューリスティックであり、将来ここに渡るOrderedPlaceJointModel実装が異なる原因で
+      // nullを返す可能性までは保証しない(その場合は本判別自体を再検討すること)。
+      const reason: WinOutcomeIndeterminateReason =
+        horses.length >= 2 && topFinishCount >= horses.length
+          ? "top-k-covers-all-runners"
+          : "degenerate-fixed-count";
+      winOutcome = { kind: "indeterminate", reason };
+    } else {
+      winOutcome = { kind: "determined" };
+    }
   }
+
+  // winOutcomeが"determined"でなければ、win候補を最適化の対象から完全に除外する
+  // (AC-B1b-3(b)。isHitを常にfalseにするだけでは、candidateUmabanSet・candidateCap選抜・
+  // 診断値の件数にwin候補の痕跡が残り、win候補が無い呼び出しと畳み込みの粒度・件数が
+  // 微妙に異なってしまう〈浮動小数点の加算順序が変わり、的中確率がビット一致しない〉。
+  // ここで候補配列そのものからwinを取り除くことで、"not-requested"と"indeterminate"の
+  // 両方が完全に同じ経路(この関数の残り全体)を通り、win候補が無い呼び出しと構造的に
+  // 同一の計算になることを保証する)。
+  const candidatesForOptimization =
+    winOutcome.kind === "determined" ? candidates : candidates.filter((c) => c.betType !== "win");
 
   const bankrollInput = config.bankroll;
   const perRaceCapInput = config.perRaceCap;
@@ -695,7 +781,7 @@ export function allocateGeneralBets(
   const effectivePerRaceCap = resolveEffectivePerRaceCap(perRaceCapInput, betUnit);
 
   // isPositiveな候補だけを対象にする(bet-allocation.tsのStep1と同じ思想)。
-  const positiveCandidates = candidates.filter((c) => c.isPositive);
+  const positiveCandidates = candidatesForOptimization.filter((c) => c.isPositive);
 
   // 候補cap: EV降順・同値は馬番配列の辞書順で選抜する(決定5)。
   const rankedForCap = [...positiveCandidates].sort(compareCandidatesForCap);
@@ -712,71 +798,40 @@ export function allocateGeneralBets(
     }
   }
 
-  // win候補の有無で経路を分ける(Issue #92)。
+  // outcome空間の構築(Issue #92)。
   //
-  // win候補が無い場合: 既存どおり集合空間(model.buildDistributionが返すもの)+
-  // foldToCandidateSubsets(候補集合への畳み込み)を通す(AC-B1b-2の非破壊性。1ビットも
-  // 変えない)。
+  // winOutcomeが"determined"でない場合: 既存どおり集合空間(model.buildDistributionが
+  // 返すもの)+foldToCandidateSubsets(候補集合への畳み込み)を通す
+  // (AC-B1b-2の非破壊性。finalCandidatesは上記でwinを除外済みのため、win候補が無い
+  // 呼び出しと構造的に同一)。
   //
-  // win候補がある場合: 「誰が1着か」(win)と「上位topFinishCount集合は何か」
+  // winOutcomeが"determined"の場合: 「誰が1着か」(win)と「上位topFinishCount集合は何か」
   // (place/wide/trio)を**同じ確率空間**(Σ=1)から同時に決定する必要があるため
-  // (boss裁定。片方の空間だけでは他方が決定できない)、順序付きoutcome空間
-  // (model.buildOrderedDistribution。P(頭数,topFinishCount)通り)を1回だけ構築し、
-  // win・place/wide/trioいずれのisHitもこの同じ生の分布から直接判定する
-  // (foldToCandidateSubsetsは通さない。順序を保つ畳み込みは#92のスコープ外
-  // 〈性能最適化であり正しさの要件ではない。#93コメント参照〉)。
-  let winOutcome: WinOutcome;
+  // (boss裁定。片方の空間だけでは他方が決定できない)、既に構築済みの順序付きoutcome空間
+  // (orderedRaw。P(頭数,topFinishCount)通り)を使い、win・place/wide/trioいずれのisHitも
+  // この同じ生の分布から直接判定する(foldToCandidateSubsetsは通さない。順序を保つ畳み込みは
+  // #92のスコープ外〈性能最適化であり正しさの要件ではない。#93コメント参照〉)。
   let outcomeIndexSets: readonly OutcomeIndexSet[];
-  if (!inputHasWinCandidates) {
-    winOutcome = { kind: "not-applicable" };
+  if (winOutcome.kind === "determined") {
+    outcomeIndexSets = orderedRaw!.map((outcome) => {
+      const orderSet = new Set(outcome.order);
+      const indices: number[] = [];
+      for (let i = 0; i < finalCandidates.length; i++) {
+        const c = finalCandidates[i]!;
+        const isHit =
+          c.betType === "win"
+            ? outcome.order[0] === c.umabans[0]
+            : c.umabans.every((u) => orderSet.has(u));
+        if (isHit) indices.push(i);
+      }
+      return { indices, probability: outcome.probability };
+    });
+  } else {
     const rawDistribution = model.buildDistribution(horses, topFinishCount);
     const foldedOutcomes = foldToCandidateSubsets(rawDistribution, candidateUmabanSet);
     outcomeIndexSets = buildOutcomeIndexSets(finalCandidates, foldedOutcomes, (c, outcome) =>
       c.umabans.every((u) => outcome.placed.includes(u)),
     );
-  } else {
-    // validateWinCandidatesSupportedが(冒頭で)throwせず戻っているため、実行時には
-    // modelは必ずOrderedPlaceJointModelだが、TSのnarrowingは離れたif文をまたがないため
-    // ここで再度ガードする(型の絞り込み目的。実行時に到達しない分岐)。
-    if (!isOrderedPlaceJointModel(model)) {
-      throw new Error(
-        `不正な状態です: win候補の検証を通過したのに順序展開に非対応のモデルです(modelId=${model.id})`,
-      );
-    }
-    const orderedRaw: readonly OrderedOutcome[] | null = model.buildOrderedDistribution(
-      horses,
-      topFinishCount,
-    );
-
-    if (orderedRaw === null) {
-      // データ由来の判定不能(degenerateFixedCount>=2)。win候補は的中確率を割り当てられない
-      // ため除外し(isHitを常にfalseにする。他の候補の配分には影響しない)、
-      // place/wide/trioは既存の集合空間経路で計算を続ける(既存側は誤っていない。
-      // 順序が不定でも上位k集合の判定は影響を受けないため)。
-      winOutcome = { kind: "indeterminate", reason: "degenerate-fixed-count" };
-      const rawDistribution = model.buildDistribution(horses, topFinishCount);
-      const foldedOutcomes = foldToCandidateSubsets(rawDistribution, candidateUmabanSet);
-      outcomeIndexSets = buildOutcomeIndexSets(
-        finalCandidates,
-        foldedOutcomes,
-        (c, outcome) => c.betType !== "win" && c.umabans.every((u) => outcome.placed.includes(u)),
-      );
-    } else {
-      winOutcome = { kind: "determined" };
-      outcomeIndexSets = orderedRaw.map((outcome) => {
-        const orderSet = new Set(outcome.order);
-        const indices: number[] = [];
-        for (let i = 0; i < finalCandidates.length; i++) {
-          const c = finalCandidates[i]!;
-          const isHit =
-            c.betType === "win"
-              ? outcome.order[0] === c.umabans[0]
-              : c.umabans.every((u) => orderSet.has(u));
-          if (isHit) indices.push(i);
-        }
-        return { indices, probability: outcome.probability };
-      });
-    }
   }
   const hitProbs = computeHitProbabilities(finalCandidates.length, outcomeIndexSets);
   const odds = finalCandidates.map((c) => c.odds);

@@ -419,7 +419,8 @@ function renderMixedAllocationBlock(
         </p>
       )}
 
-      {/* 券種別内訳(AC10: 合計はtotalStakeと一致・AC13: 点数)。 */}
+      {/* 券種別内訳(AC10: 合計はtotalStakeと一致・AC13: 点数。app側の候補ビルダーが
+          place/wide/trioしか産出しないため成立する)。 */}
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>

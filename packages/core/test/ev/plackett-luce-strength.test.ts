@@ -750,4 +750,49 @@ describe("収束の崖(Issue #81・AC-B6'(d)): p=[p0,0.5,0.1] k=2でp0を動か�
     expect(near.iterations).toBeGreaterThan(far.iterations);
   });
 
+  describe("Issue #92 boss裁定: 固定馬の有無はΣpの大小では決まらない(機構はp_i>=Σp/kという集中度)", () => {
+    it("「Σp>kなら固定は起きない」は真: Σp=2.7(k=3未満)でも固定0頭", () => {
+      const fit = fitPlackettLuceStrengths(horses([0.6, 0.6, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]), 3);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      const sum = 0.6 + 0.6 + 0.05 * 16;
+      expect(sum).toBeLessThan(3); // 前提: Σp<kであること(空振り防止)。
+      expect(fit.degenerateFixedCount).toBe(0);
+    });
+
+    it("「Σp<kなら固定される」は偽: p=0.125を16頭・k=3(Σp=2.0<3)でも固定0頭(集中度p_i>=Σp/3=0.667を誰も満たさない)", () => {
+      const probs = Array(16).fill(0.125);
+      const fit = fitPlackettLuceStrengths(horses(probs), 3);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      const sum = probs.reduce((a, b) => a + b, 0);
+      expect(sum).toBeLessThan(3); // 前提: Σp<kであること。
+      expect(fit.degenerateFixedCount).toBe(0);
+    });
+
+    it("「Σp=kなら固定されない」は偽: [1,1,0.5,0.5](Σp=3=kちょうど)でも2頭が固定される(p=1は集中度に関わらず常に固定)", () => {
+      const fit = fitPlackettLuceStrengths(horses([1, 1, 0.5, 0.5]), 3);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      const sum = 1 + 1 + 0.5 + 0.5;
+      expect(sum).toBe(3); // 前提: Σp=kちょうどであること。
+      expect(fit.degenerateFixedCount).toBe(2);
+    });
+
+    it("[0.9,0.8,0.7,0×15](18頭)は水詰めのm===k分岐(p>0の頭数がちょうどk=3)であり、通常の水詰め(λ=k/Σp)とは別機構であること(2つの分岐を1つの物語にまとめない)", () => {
+      const probs = [0.9, 0.8, 0.7, ...Array(15).fill(0)];
+      const fit = fitPlackettLuceStrengths(horses(probs), 3);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      // 前提固定: p>0の頭数がちょうど3(=k)であること(m===k分岐に入る条件)。
+      expect(probs.filter((p) => p > 0).length).toBe(3);
+      expect(fit.degenerateFixedCount).toBe(3);
+      // m===k分岐のλは「全員が確実にq=1に達する最小のλ」= 1/min(p>0) であり、
+      // 通常の水詰め公式(λ=k/Σp)を機械的に当てはめた値とは異なることを固定する
+      // (p が均一だとΣp=k・p_minの2式が偶然一致するため、あえて非対称な値を使う)。
+      const naiveFormulaLambda = 3 / (0.9 + 0.8 + 0.7);
+      expect(fit.rescaleFactor).not.toBeCloseTo(naiveFormulaLambda, 6);
+      expect(fit.rescaleFactor).toBeCloseTo(1 / 0.7, 9);
+    });
+  });
 });

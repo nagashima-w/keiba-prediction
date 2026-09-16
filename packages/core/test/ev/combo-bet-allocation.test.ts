@@ -1553,18 +1553,88 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           },
         });
         // winOutcomeだけが#92で新設されたフィールド(既存フィールドの値には一切含まれない)。
-        expect(winOutcome).toEqual<WinOutcome>({ kind: "not-applicable" });
+        expect(winOutcome).toEqual<WinOutcome>({ kind: "not-requested" });
+      });
+    });
+
+    describe("AC-B1b-3(b): win候補がindeterminateのとき、複勝・ワイド・三連複の配分結果がwinを要求しなかった場合と完全一致する(無条件expect)", () => {
+      // 8頭・[0.7,0.7,0.05×6]・k=3。degenerateFixedCount=2(固定馬2頭)のindeterminateフィクスチャ。
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 0.7 },
+        { umaban: 2, placeProb: 0.7 },
+        { umaban: 3, placeProb: 0.05 },
+        { umaban: 4, placeProb: 0.05 },
+        { umaban: 5, placeProb: 0.05 },
+        { umaban: 6, placeProb: 0.05 },
+        { umaban: 7, placeProb: 0.05 },
+        { umaban: 8, placeProb: 0.05 },
+      ];
+      const nonWinCandidates: AllocationCandidate[] = [
+        { umabans: [1, 2], odds: 2, ev: 1.5, isPositive: true, betType: "wide" },
+        { umabans: [1, 2, 3], odds: 5, ev: 1.5, isPositive: true, betType: "trio" },
+        { umabans: [1, 3], odds: 3, ev: 1.5, isPositive: true, betType: "wide" },
+      ];
+      const config: GeneralBetAllocationConfig = {
+        ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        bankroll: 100000,
+        perRaceCap: 100000,
+      };
+
+      it("前提固定(空振り防止): このフィクスチャはdegenerateFixedCount=2(indeterminate)であること", () => {
+        const fit = fitPlackettLuceStrengths(horses, 3);
+        expect(fit.ok).toBe(true);
+        if (fit.ok) expect(fit.degenerateFixedCount).toBe(2);
+      });
+
+      it("win[4]を追加してもwinOutcomeはindeterminateであること(前提固定)", () => {
+        const withWin4 = [
+          ...nonWinCandidates,
+          { umabans: [4], odds: 10, ev: 1.5, isPositive: true, betType: "win" as const },
+        ];
+        const result = allocateGeneralBets(horses, 3, withWin4, config);
+        expect(result.winOutcome).toEqual<WinOutcome>({
+          kind: "indeterminate",
+          reason: "degenerate-fixed-count",
+        });
+      });
+
+      it("win[4]を追加しても、複勝・ワイド・三連複の配分結果(allocations・diagnostics等、winOutcome以外の全フィールド)がwinを要求しなかった場合とtoEqualで完全一致すること", () => {
+        const withoutWin = allocateGeneralBets(horses, 3, nonWinCandidates, config);
+        const withWin4 = [
+          ...nonWinCandidates,
+          { umabans: [4], odds: 10, ev: 1.5, isPositive: true, betType: "win" as const },
+        ];
+        const withWin = allocateGeneralBets(horses, 3, withWin4, config);
+
+        const { winOutcome: _wo1, ...withoutWinRest } = withoutWin;
+        const { winOutcome: _wo2, ...withWinRest } = withWin;
+        // 前提(無条件expect・空振り防止): hitProbが退化した1.0固定ではなく、
+        // 浮動小数点誤差が現れうる非退化値(0.9999999999999999)であること。
+        const wide12 = withoutWin.allocations.find(
+          (a) => a.betType === "wide" && a.umabans.join(",") === "1,2",
+        )!;
+        expect(wide12).toBeDefined();
+        expect(wide12.hitProb).not.toBe(1);
+        expect(wide12.hitProb).toBeCloseTo(1, 9);
+
+        expect(withWinRest).toEqual(withoutWinRest);
+        // candidateCount/inputCandidateCountも一致すること(win候補が実際に除外されている証拠)。
+        expect(withWin.diagnostics.candidateCount).toBe(withoutWin.diagnostics.candidateCount);
+        expect(withWin.diagnostics.inputCandidateCount).toBe(withoutWin.diagnostics.inputCandidateCount);
+        // allocationsにwin行が残っていないこと(要修正1・4: 除外は「isHit常にfalse」ではなく
+        // 候補配列そのものからの除去であること)。
+        expect(withWin.allocations.find((a) => a.betType === "win")).toBeUndefined();
       });
     });
 
     describe("winOutcome(3値。判別共用体)", () => {
-      it("win候補が無ければnot-applicable(既存挙動と完全一致。非破壊性の核)", () => {
+      it("win候補が無ければnot-requested(既存挙動と完全一致。非破壊性の核)", () => {
         const horses = evenHorses(5, 3);
         const candidates: AllocationCandidate[] = [
           { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
         ];
         const result = allocateGeneralBets(horses, 3, candidates);
-        expect(result.winOutcome).toEqual<WinOutcome>({ kind: "not-applicable" });
+        expect(result.winOutcome).toEqual<WinOutcome>({ kind: "not-requested" });
       });
 
       it("win候補がありdeg=0(通常ケース)ならdetermined", () => {
@@ -1620,10 +1690,14 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         expect(wideAlloc).toBeDefined();
         // 固定馬2頭(umaban=1,2)は上位3集合に確実に含まれるため、ワイド[1,2]の的中確率は1。
         expect(wideAlloc.hitProb).toBeCloseTo(1, 9);
-        // win候補は的中確率を割り当てられない(除外される。indeterminateだからhitProb=0)。
-        const winAlloc = result.allocations.find((a) => a.betType === "win")!;
-        expect(winAlloc).toBeDefined();
-        expect(winAlloc.hitProb).toBe(0);
+        // win候補は的中確率を割り当てられない(要修正1・4: isHitをfalseにするだけでなく、
+        // 候補配列そのものから実際に除外される。hitProb:0という捏造された判定結果を
+        // allocationsに残さない)。
+        const winAlloc = result.allocations.find((a) => a.betType === "win");
+        expect(winAlloc).toBeUndefined();
+        // diagnosticsもwin候補が最初から無かったかのように1件(wideのみ)になること。
+        expect(result.diagnostics.inputCandidateCount).toBe(1);
+        expect(result.diagnostics.candidateCount).toBe(1);
       });
     });
 
@@ -1694,27 +1768,57 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           ),
         ).not.toThrow();
       });
-    });
 
-    describe("k(topFinishCount)=0/1/非整数 × モデル(CB/PL)のテーブル(AC-B1b-6)", () => {
-      type Cell = { k: number; model: "cb" | "pl"; expect: "throw" | "ok" };
-      const cells: Cell[] = [
-        { k: 0, model: "pl", expect: "throw" },
-        { k: 0, model: "cb", expect: "throw" },
-        { k: 1, model: "pl", expect: "ok" },
-        { k: 1, model: "cb", expect: "throw" },
-        { k: 1.5, model: "pl", expect: "throw" },
-        { k: 1.5, model: "cb", expect: "throw" },
-      ];
-      // 前提固定(空振り防止): throw4/ok1(セル数の合計と一致することを確認)。
-      it("テーブル自己検証: 6セルの内訳がthrow5/ok1であること", () => {
-        expect(cells).toHaveLength(6);
-        expect(cells.filter((c) => c.expect === "throw")).toHaveLength(5);
-        expect(cells.filter((c) => c.expect === "ok")).toHaveLength(1);
+      it("要修正3: win候補があり出走頭数0(horses=[])だとthrow(1着という位置そのものが存在しないため。topFinishCount=0と同じ理屈で二重基準を避ける)", () => {
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        expect(() => allocateGeneralBets([], 3, candidates)).toThrow(/出走頭数が0の呼び出しには対応できません/);
       });
 
-      it.each(cells)("k=$k, model=$model は $expect になること(win候補あり)", ({ k, model, expect: exp }) => {
-        const horses = evenHorses(5, 3);
+      it("win候補が無ければ出走頭数0でも従来どおりthrowしない(既存挙動を変えない。AC-B1b-2)", () => {
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+        ];
+        expect(() => allocateGeneralBets([], 3, candidates)).not.toThrow();
+      });
+
+      it("要修正3の反証(空振り防止): n=0+win候補が捏造されたdetermined/hitProb:0を返さなくなったこと(修正前はkind='determined'・hitProb=0を返していた)", () => {
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        let caught: unknown;
+        try {
+          allocateGeneralBets([], 3, candidates);
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeInstanceOf(Error);
+      });
+    });
+
+    describe("k(topFinishCount)=0/1/非整数/k>=n × モデル(CB/PL)のテーブル(AC-B1b-6。要修正2でk>=n行を追加)", () => {
+      type Cell = { n: number; k: number; model: "cb" | "pl"; expect: "throw" | "ok" };
+      const cells: Cell[] = [
+        { n: 5, k: 0, model: "pl", expect: "throw" },
+        { n: 5, k: 0, model: "cb", expect: "throw" },
+        { n: 5, k: 1, model: "pl", expect: "ok" },
+        { n: 5, k: 1, model: "cb", expect: "throw" },
+        { n: 5, k: 1.5, model: "pl", expect: "throw" },
+        { n: 5, k: 1.5, model: "cb", expect: "throw" },
+        // 要修正2: k>=n(頭数2以上)は「呼び出し側の契約違反」ではなくデータ由来の
+        // indeterminateとして扱う裁定(選択(a))なので、throwせずokになる。
+        { n: 5, k: 5, model: "pl", expect: "ok" },
+      ];
+      // 前提固定(空振り防止): 7セルの内訳がthrow5/ok2であること。
+      it("テーブル自己検証: 7セルの内訳がthrow5/ok2であること", () => {
+        expect(cells).toHaveLength(7);
+        expect(cells.filter((c) => c.expect === "throw")).toHaveLength(5);
+        expect(cells.filter((c) => c.expect === "ok")).toHaveLength(2);
+      });
+
+      it.each(cells)("n=$n, k=$k, model=$model は $expect になること(win候補あり)", ({ n, k, model, expect: exp }) => {
+        const horses = evenHorses(n, 3);
         const candidates: AllocationCandidate[] = [
           { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
         ];
@@ -1727,6 +1831,44 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           expect(() =>
             allocateGeneralBets(horses, k, candidates, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, m),
           ).not.toThrow();
+        }
+      });
+
+      it("k>=n(n=5,k=5)はthrowせず、winOutcomeがindeterminate(reason='top-k-covers-all-runners')になること", () => {
+        const horses = evenHorses(5, 3);
+        const candidates: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        const result = allocateGeneralBets(horses, 5, candidates);
+        expect(result.winOutcome).toEqual<WinOutcome>({
+          kind: "indeterminate",
+          reason: "top-k-covers-all-runners",
+        });
+      });
+
+      it("degenerateFixedCount>=2由来のindeterminateとreasonが異なること(2つの原因を1つのラベルに押し込めていないことの直接確認)", () => {
+        const horsesFixed2: JointModelHorse[] = [
+          { umaban: 1, placeProb: 1 },
+          { umaban: 2, placeProb: 1 },
+          { umaban: 3, placeProb: 0.5 },
+          { umaban: 4, placeProb: 0.3 },
+          { umaban: 5, placeProb: 0.2 },
+        ];
+        const candidatesFixed: AllocationCandidate[] = [
+          { umabans: [3], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        const fixedResult = allocateGeneralBets(horsesFixed2, 3, candidatesFixed);
+
+        const horsesKn = evenHorses(5, 3);
+        const candidatesKn: AllocationCandidate[] = [
+          { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        ];
+        const knResult = allocateGeneralBets(horsesKn, 5, candidatesKn);
+
+        expect(fixedResult.winOutcome.kind).toBe("indeterminate");
+        expect(knResult.winOutcome.kind).toBe("indeterminate");
+        if (fixedResult.winOutcome.kind === "indeterminate" && knResult.winOutcome.kind === "indeterminate") {
+          expect(fixedResult.winOutcome.reason).not.toBe(knResult.winOutcome.reason);
         }
       });
     });

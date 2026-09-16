@@ -627,7 +627,7 @@ function generalResult(
     modelId: "conditional-bernoulli",
     modelApproximate: false,
     diagnostics: { inputCandidateCount: allocations.length, truncatedByCapCount: 0, candidateCount: allocations.length, converged: true },
-    winOutcome: { kind: "not-applicable" },
+    winOutcome: { kind: "not-requested" },
     ...overrides,
   };
 }
