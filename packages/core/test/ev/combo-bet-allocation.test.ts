@@ -25,6 +25,7 @@ import {
 } from "../../src/ev/place-joint-model.js";
 import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
 import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js";
+import { winProbabilitiesFromStrengths } from "../../src/ev/plackett-luce-win-prob.js";
 
 /**
  * combo-bet-allocation — 機能D-2a(Issue #14)。買い目が「馬の組」になる券種
@@ -1869,6 +1870,104 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         expect(knResult.winOutcome.kind).toBe("indeterminate");
         if (fixedResult.winOutcome.kind === "indeterminate" && knResult.winOutcome.kind === "indeterminate") {
           expect(fixedResult.winOutcome.reason).not.toBe(knResult.winOutcome.reason);
+        }
+      });
+    });
+
+    describe("AC-B1b-1(d): allocateGeneralBetsが返すwin候補のhitProbが(a)と一致する(畳み込みを通したend-to-end。code-reviewer要修正)", () => {
+      // 非一様・deg=0のフィクスチャ(AC「フィクスチャの性質」: 一様入力では誤った構成〈p_i/Σp、
+      // 集合S制限PL〉も真値と一致してしまい変異が死ぬため、必ず非一様にする)。
+      const probs = [0.6, 0.5, 0.4, 0.3, 0.2];
+      const horses: JointModelHorse[] = probs.map((placeProb, i) => ({ umaban: i + 1, placeProb }));
+
+      it("前提固定(空振り防止): このフィクスチャはdeg=0であり、placeProbが一様でないこと", () => {
+        const fit = fitPlackettLuceStrengths(horses, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        expect(fit.degenerateFixedCount).toBe(0);
+        // 一様でないことを直接固定する(全要素が同じ値ではない)。
+        expect(new Set(probs).size).toBeGreaterThan(1);
+      });
+
+      it("誤った構成(1): 1着確率をp_i/Σpに差し替えると、真値(a)との最大差が許容誤差より桁で大きいこと(殺す変異1がこのフィクスチャで実際に死なないことの確認)", () => {
+        const fit = fitPlackettLuceStrengths(horses, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        const trueWin = winProbabilitiesFromStrengths(fit.theta);
+        const sumP = probs.reduce((a, b) => a + b, 0);
+        const naive = probs.map((p) => p / sumP);
+        const maxDiff = Math.max(...trueWin.map((w, i) => Math.abs(w - naive[i]!)));
+        // 自分で実測: maxDiff≈0.127。採用する許容誤差(1e-9)より8桁以上大きいことを固定する。
+        expect(maxDiff).toBeGreaterThan(1e-2);
+      });
+
+      it("誤った構成(2): 上位3集合Sに制限したPL(P(1着=a|S)=θa/Σ_{i∈S}θi)の周辺確率は、真値(a)との最大差が許容誤差より桁で大きいこと(前任bossが実際に間違えた構成。必ず実際に計算して赤になることを固定する)", () => {
+        const fit = fitPlackettLuceStrengths(horses, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        const trueWin = winProbabilitiesFromStrengths(fit.theta);
+        const setDist = PLACKETT_LUCE_MODEL.buildDistribution(horses, 3);
+        const wrongMarginal = new Array(horses.length).fill(0) as number[];
+        for (const outcome of setDist) {
+          const sIndices = outcome.placed.map((u) => u - 1);
+          const sumThetaS = sIndices.reduce((a, idx) => a + fit.theta[idx]!, 0);
+          for (const idx of sIndices) {
+            wrongMarginal[idx] = wrongMarginal[idx]! + outcome.probability * (fit.theta[idx]! / sumThetaS);
+          }
+        }
+        const maxDiff = Math.max(...trueWin.map((w, i) => Math.abs(w - wrongMarginal[i]!)));
+        // 自分で実測: maxDiff≈0.085。採用する許容誤差(1e-9)より7桁以上大きいことを固定する。
+        expect(maxDiff).toBeGreaterThan(1e-2);
+      });
+
+      it("(a): このタスクで構築した順序outcome空間(allocateGeneralBetsの内部で使うもの)を1着で周辺化した値が、winProbabilitiesFromStrengths(fit.theta)と一致すること(自己比較ではない。左辺はテスト側でorderedRawから集計する)", () => {
+        const fit = fitPlackettLuceStrengths(horses, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        const expected = winProbabilitiesFromStrengths(fit.theta);
+        // 左辺: モデルが実際に構築する順序outcome空間をテスト側で1着周辺化する
+        // (winProbabilitiesFromStrengthsの戻り値を左辺には使わない。AC-B1b-1(a)の縛り)。
+        const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)!;
+        const marginals = new Array(horses.length).fill(0) as number[];
+        for (const outcome of ordered) {
+          const winnerUmaban = outcome.order[0]!;
+          marginals[winnerUmaban - 1] = marginals[winnerUmaban - 1]! + outcome.probability;
+        }
+        for (let i = 0; i < horses.length; i++) {
+          expect(marginals[i]).toBeCloseTo(expected[i]!, 9);
+        }
+      });
+
+      it("(d)★中核: allocateGeneralBetsが返すwin候補のhitProbが、(a)の値(winProbabilitiesFromStrengths(fit.theta)の該当要素)とtoBeCloseToで一致すること(畳み込みを通したend-to-end)", () => {
+        const fit = fitPlackettLuceStrengths(horses, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        const expected = winProbabilitiesFromStrengths(fit.theta);
+
+        const config: GeneralBetAllocationConfig = {
+          ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+          bankroll: 100000,
+          perRaceCap: 100000,
+        };
+        const winCandidates: AllocationCandidate[] = probs.map((_, i) => ({
+          umabans: [i + 1],
+          odds: 3,
+          ev: 1.5,
+          isPositive: true,
+          betType: "win",
+        }));
+        const result = allocateGeneralBets(horses, 3, winCandidates, config);
+        expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+        // 空振り防止: 5頭分すべての割当が実際に見つかること。
+        expect(result.allocations.length).toBe(5);
+        for (let i = 0; i < horses.length; i++) {
+          const alloc = result.allocations.find((a) => a.umabans[0] === i + 1);
+          expect(alloc).toBeDefined();
+          // 許容誤差は(a)の値をそのまま流用せず自分で実測して決めた: 実測した差は
+          // 1e-16〜1e-17オーダー(浮動小数点の丸め由来)であり、1e-9は安全に上回りつつ
+          // 誤った構成(上記2件。差0.08〜0.13オーダー)とは7桁以上乖離している。
+          expect(alloc!.hitProb).toBeCloseTo(expected[i]!, 9);
         }
       });
     });
