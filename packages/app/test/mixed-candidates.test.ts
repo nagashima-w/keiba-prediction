@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALLOCATION_BET_TYPE_UMABAN_COUNT,
   allocateGeneralBets,
   buildComboOddsKey,
   type AllocationCandidate,
@@ -14,6 +15,7 @@ import type {
 import {
   ALL_MIXED_CANDIDATE_BET_TYPES,
   buildMixedCandidates,
+  type MixedCandidateBetType,
   type MixedCandidateBuildInput,
 } from "../src/shared/mixed-candidates.js";
 
@@ -719,11 +721,11 @@ describe("yoso×組合せ(候補ゼロの理由が「未取得」か「yoso」�
 });
 
 // ============================================================================
-// 券種フィルタ(省略時=全券種。一部指定時は非対象の列挙自体を行わない)
+// 券種フィルタ(省略時=ALL_MIXED_CANDIDATE_BET_TYPES。一部指定時は非対象の列挙自体を行わない)
 // ============================================================================
 
 describe("券種フィルタ(options.betTypes)", () => {
-  it("省略時は全券種(ALL_MIXED_CANDIDATE_BET_TYPES)が対象になること", () => {
+  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/wide/trio)が対象になること", () => {
     expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "wide", "trio"]);
     const rows = allCandidateRows(8);
     const umabans = umabansOf(8);
@@ -771,6 +773,23 @@ describe("券種フィルタ(options.betTypes)", () => {
     const rows = allCandidateRows(8);
     // @ts-expect-error: betTypes以外のフィールド(妙味度等)は型エラーになること。
     buildMixedCandidates(raceInput({ rows }), { betTypes: ["place"], opportunityThreshold: 1 });
+  });
+
+  /**
+   * ★構造的な再発防止(#91・boss裁定)。
+   *
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`が`AllocationBetType`(core)の全メンバーを含むとは
+   * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定する。
+   * `AllocationBetType`にメンバーが増えたとき(#92完了後の#90〈#23-B2〉でのwin対応・#24の馬連等)、この配列に
+   * 足すべきかどうかの判断を人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」
+   * 事故〈配列は3値のまま、JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が
+   * 起きないよう機械的に検出する)。
+   */
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種を固定すること(#91: winのみ)", () => {
+    const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
+      (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
+    );
+    expect(excluded).toEqual(["win"]);
   });
 });
 

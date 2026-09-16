@@ -74,7 +74,10 @@
  * ## 券種フィルタ(`options.betTypes`)についての注意
  *
  * これは**第3段以降のための受け口**であり、本段(第2段)では妙味度による券種切り替えを
- * 実装しない(ユーザー決定Q2「常に全券種」)。既定値は全券種。型定義上、妙味度・
+ * 実装しない(ユーザー決定Q2「常に全券種」)。既定値は`ALL_MIXED_CANDIDATE_BET_TYPES`
+ * (place/wide/trioの3券種。**`AllocationBetType`の全メンバーではない**。#91で`AllocationBetType`
+ * に`win`が加わったが、単勝の候補ビルダーが存在しないため対象に含めていない。下記
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照)。型定義上、妙味度・
  * `RaceOpportunity` に類する値は本モジュールの入力に一切現れない(受け取れない)。
  *
  * ## EV閾値の統一(`options.evConfig`。機能D-2c第4段・Issue #28・D-4)
@@ -113,10 +116,34 @@ import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-al
  * (本エイリアス・`mixed-race-allocation.ts`のインライン`("place"|"wide"|"trio")[]`・core
  * `AllocationBetType`)を防ぐため、本ファイルはcoreの型をそのまま参照し、再定義しない
  * (#24で「馬連」を1箇所だけ足す事故を構造的に防ぐ)。
+ *
+ * **構造的に防げるのはユニオンの再定義(型エイリアスの分岐)までである。** メンバーを
+ * 手で列挙する配列・散文(直下の`ALL_MIXED_CANDIDATE_BET_TYPES`とそのJSDoc・散文中の
+ * 「全券種」等の言い回し)はこのエイリアスでは守られない。実際に#91で`AllocationBetType`
+ * に`win`が加わった際、まさにこの「1箇所だけ足す事故」(配列は3値のまま、散文だけが
+ * 「全券種」と言い続ける)が起きた。メンバー列挙・散文は別途テストで守ること
+ * (`mixed-candidates.test.ts`の「意図的に除外している券種」describe参照)。
  */
 export type MixedCandidateBetType = AllocationBetType;
 
-/** 既定の対象券種(全券種)。boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない。 */
+/**
+ * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーではない。**
+ *
+ * #91で`AllocationBetType`に`win`(単勝)が加わったが、本配列には含めていない。理由:
+ * (1) coreに単勝候補ビルダーが存在せず、`win`を対象にしても構築できる候補が無い。
+ * (2) `buildMixedCandidates`は`betTypes.includes("place"/"wide"/"trio")`の3つしか参照しない
+ * ため(下記実装参照)、`win`をこの配列に足しても`buildMixedCandidates`の挙動は一切変わらず、
+ * 「対象にする」という宣言だけが実体を伴わずに増える(#91が是正している欠陥クラスの再生産)。
+ * `win`への対応は#92完了後の#90(#23-B2)の射程(`docs/issue-order.md`: #90は
+ * 「`winOdds`のIPC追加・候補ビルダー・UI・永続化・docs」で、候補ビルダーが明示的に
+ * 列挙されている。#92はcoreのみが射程でapp側は対象外)。
+ *
+ * **定数名の`ALL_`は現在この配列の内容(3要素)より広く読める。** 改名はexport面の変更に
+ * なるため#91では行わず、対応要否の判断は#92完了後の#90(#23-B2)に送る。
+ *
+ * boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない(#91時点でも真: `options.betTypes`
+ * 以外のフィルタは実装に存在しない)。
+ */
 export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
   "place",
   "wide",
@@ -130,7 +157,7 @@ export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
  * 類する値を受け取るフィールドは意図的に存在しない(型レベルの保証)。
  */
 export interface MixedCandidateBuildOptions {
-  /** 対象券種(省略時は全券種 `ALL_MIXED_CANDIDATE_BET_TYPES`)。 */
+  /** 対象券種(省略時は`ALL_MIXED_CANDIDATE_BET_TYPES`。`AllocationBetType`の全メンバーではない。同定数のJSDoc参照)。 */
   readonly betTypes?: readonly MixedCandidateBetType[];
   /**
    * ワイド・3連複のEV判定に使う閾値設定(省略時は `DEFAULT_EV_CONFIG` = 閾値1.0)。
@@ -320,7 +347,8 @@ function buildComboCandidatesForBetType(
  * 券種横断(複勝・ワイド・3連複)の買い目候補を構築する。
  *
  * @param race レース情報の最小構造(`AnalysisResult` をそのまま渡せる)
- * @param options 対象券種(省略時は全券種)。第3段以降のための受け口(第2段では絞り込みを実装しない)
+ * @param options 対象券種(省略時は`ALL_MIXED_CANDIDATE_BET_TYPES`。`AllocationBetType`の全メンバーではない。
+ *   同定数のJSDoc参照)。第3段以降のための受け口(第2段では絞り込みを実装しない)
  */
 export function buildMixedCandidates(
   race: MixedCandidateBuildInput,
