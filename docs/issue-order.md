@@ -139,6 +139,8 @@ core の非公開モジュール(`exports` に0件)にあること、`skipReason
 | 8 | **#93**(#23-B1c) | 順序付き outcome 空間の性能計測(`scripts/` のみ) | **#92 完了必須。再ゲートする** | なし |
 | 9 | **#90**(#23-B2) | `winOdds` の IPC 追加・候補ビルダー・UI・永続化・docs | **#92 完了必須。再ゲートする** | あり |
 | 10 | **#23-C** | 単勝の確定払戻の永続化と回収率検証への反映(#23 で再ゲート) | #76, #90 | なし |
+| — | **#94** | `betTypeLabel` と `mixedBetTypeLabel` の等価性テストが自己参照比較 | **#23-C と同時が自然**(単独着手も可) | なし |
+| — | **#95** | 判定不能の `reason` の造り分け責務を `OrderedPlaceJointModel` 実装側へ移す | **2つ目の `OrderedPlaceJointModel` 実装を追加するとき**(条件付き open) | なし |
 | — | **#79**(#20-C) | 確率の質の計測を PL に切り替えるか裁定(**切り替えない結論もあり得る**) | **#81 完了済み**。着手可 | 裁定次第 |
 
 **#92 の最大の裁定**(#89 のゲートで確定し、検算でも維持された): `topFinishCount=1` での
@@ -536,6 +538,8 @@ Plackett-Luce を真のモデルとし、真の3着以内確率を条件付き�
 | ~~**#74**~~ | オッズ 0 が値域外なのに通り、`computeRaceEv` が EV=0 を返す | **後回しではなくなった。2026-09-04 の #23 着手前ゲートで §1-2 の 7 番へ繰り上げた**(裁定 V-3・V-4)。**#34 の全数走査で発見(H5)。実データでの発生は未観測。** 同じ `expected-value.ts` 内で `estimatePlaceOddsMinFromWin` は `winOdds < 1` を null 化しているのに `computeRaceEv` の内部 `evaluateHorse` は `oddsMin === null` しか見ない、という**値域チェックの非対称**。EV が 0 になるだけで誤って賭ける方向の誤りにはならないが、「オッズが壊れている」事実が「EV が 0 だった」という正常な判定結果に潰される(#31)。**旧記述はこの対象を `computePlaceEv` という実在しない名前で指していた**(§1-2 末尾の注記を参照) |
 | **#75** | 過去走の人気 0 が相対人気の計算に入り、負の相対人気から判定結果が返る | **#34 の全数走査で発見(H3)。実データでの発生は未観測。** `parse-horse-results.ts` の `numberOrNull` が `"0"` を通し、`market-gap.ts` の `isFiniteNumber` も 0 を受理するため、`judgeRun` の `(ninki-1)/(entryCount-1)` が**負の相対人気**を生む。#34 は当日オッズ由来の人気(`WinOdds.ninki` 等)を型境界として対応しており、`HorseRaceResult.ninki` は別の型・別の消費者のため分離した。**生成側で直す**(#34 で確立した原則。`market-gap.ts` 側に防御を足すのは生成側の欠陥を隠すため採らない)。同クラスの H4(`parse-grade-winner.ts`)は消費側の `isPositiveFinite` が 0 を除外しており実害が無いため優先度が低い |
 | **#18** | リポジトリ内ファイルを読むテストの改行正規化を共通化する | **着手条件を満たした。** #45 で `scripts/test/release-gate.test.ts` が3件目としてリポジトリ内ファイルを読むようになった(`release-workflow-gate.test.ts`・`version-policy.test.ts` と合わせて3件) |
+| **#94** | `betTypeLabel` と `mixedBetTypeLabel` の等価性テストが自己参照比較になっており、2ファイルの JSDoc が偽を述べている | **#91 の着手前ゲートで発見**(オーケストレーターが AC を検算する過程)。`allocation-proposal-view.test.ts:531-537` の期待値が `mixedBetTypeLabel("place")` 等**実装側の関数を呼んだ結果**になっており、両関数を同時に `"複勝(改)"` 等へ書き換えても緑のまま通る。固定されているのは「2つの関数が互いに一致すること」だけで「ラベルが何であるか」は1つも固定されていない(**#55 の自己参照比較そのもの**)。⚠️ **2ファイルの JSDoc が「リテラルで固定する」と偽を述べており、これが発見を妨げている**(読者は中身を見ない)。**#23-C で `betTypeLabel` に `case "win"` を足すとき必ずこのテストを触るので、そこで同時に是正するのが自然。#23-C の AC に「このテストと2つの JSDoc を必ず是正する」を前提として書き込むこと** |
+| **#95** | 判定不能の原因(`reason`)の造り分け責務を `OrderedPlaceJointModel` 実装側へ移す | **条件付き open。着手条件は「2つ目の `OrderedPlaceJointModel` 実装を追加するとき」**(それまでは着手不要)。#92 の code-reviewer 一次レビューで【提案】として挙がり、boss が3条件付きで Issue 化を承認した。`combo-bet-allocation.ts` の `reason` 判別が `horses.length >= 2 && topFinishCount >= horses.length` という、**`PLACKETT_LUCE_MODEL` が唯一の実装であることに依存したヒューリスティック**で、原因を知っているモデル側が `null` の1ビットに潰したものを呼び出し側が復元している。**今日の欠陥ではない**(両分岐が正しい `reason` を返すことを #92 で boss が実行して確認済み)。実装の警告コメントから #95 を参照させてある |
 
 ## 4. 着手しない(記録として残す)
 
