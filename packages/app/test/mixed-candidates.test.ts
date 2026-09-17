@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALLOCATION_BET_TYPE_UMABAN_COUNT,
   allocateGeneralBets,
   buildComboOddsKey,
   type AllocationCandidate,
@@ -14,8 +15,9 @@ import type {
 import {
   ALL_MIXED_CANDIDATE_BET_TYPES,
   buildMixedCandidates,
+  type MixedCandidateBetType,
   type MixedCandidateBuildInput,
-} from "../src/renderer/mixed-candidates.js";
+} from "../src/shared/mixed-candidates.js";
 
 // ============================================================================
 // テストヘルパー(定義したヘルパーはすべて自己テストする。「テストを書くときの注意」参照)
@@ -480,8 +482,8 @@ function findCandidateByUmabans(
 describe("入力フィールド→出力フィールドの写像(取り違え検知)", () => {
   it("findCandidateByUmabans(): 完全一致する候補を返し、無ければ例外を投げること(自己テスト)", () => {
     const candidates: AllocationCandidate[] = [
-      { umabans: [1, 2], odds: 3, ev: 2, isPositive: true },
-      { umabans: [1, 3], odds: 5, ev: 4, isPositive: true },
+      { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+      { umabans: [1, 3], odds: 5, ev: 4, isPositive: true, betType: "wide" },
     ];
     expect(findCandidateByUmabans(candidates, [1, 3]).odds).toBe(5);
     expect(() => findCandidateByUmabans(candidates, [2, 3])).toThrow();
@@ -719,11 +721,11 @@ describe("yoso×組合せ(候補ゼロの理由が「未取得」か「yoso」�
 });
 
 // ============================================================================
-// 券種フィルタ(省略時=全券種。一部指定時は非対象の列挙自体を行わない)
+// 券種フィルタ(省略時=ALL_MIXED_CANDIDATE_BET_TYPES。一部指定時は非対象の列挙自体を行わない)
 // ============================================================================
 
 describe("券種フィルタ(options.betTypes)", () => {
-  it("省略時は全券種(ALL_MIXED_CANDIDATE_BET_TYPES)が対象になること", () => {
+  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/wide/trio)が対象になること", () => {
     expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "wide", "trio"]);
     const rows = allCandidateRows(8);
     const umabans = umabansOf(8);
@@ -771,6 +773,23 @@ describe("券種フィルタ(options.betTypes)", () => {
     const rows = allCandidateRows(8);
     // @ts-expect-error: betTypes以外のフィールド(妙味度等)は型エラーになること。
     buildMixedCandidates(raceInput({ rows }), { betTypes: ["place"], opportunityThreshold: 1 });
+  });
+
+  /**
+   * ★構造的な再発防止(#91・boss裁定)。
+   *
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`が`AllocationBetType`(core)の全メンバーを含むとは
+   * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定する。
+   * `AllocationBetType`にメンバーが増えたとき(#92完了後の#90〈#23-B2〉でのwin対応・#24の馬連等)、この配列に
+   * 足すべきかどうかの判断を人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」
+   * 事故〈配列は3値のまま、JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が
+   * 起きないよう機械的に検出する)。
+   */
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種を固定すること(#91: winのみ)", () => {
+    const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
+      (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
+    );
+    expect(excluded).toEqual(["win"]);
   });
 });
 
@@ -941,5 +960,42 @@ describe("EV閾値の統一(options.evConfig。渡し忘れると既定1.0のま
     );
     expect(wideOnly.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(0);
     expect(trioOnly.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Issue #76 AC-A6: 挙動不変の実質的な担保(旧写像との等価性)
+// ============================================================================
+
+describe("Issue #76 AC-A6: production から消えた「umabans.length→券種」の旧写像との等価性", () => {
+  it("実際の候補生成経路(buildMixedCandidates)で複勝・ワイド・3連複が同時に立つフィクスチャに対し、betTypeとumabans.lengthが{place:1, wide:2, trio:3}の対応どおりであること", () => {
+    // production からは「長さ→券種」の逆写像を完全に削除した(Issue #76)。この対応表は
+    // テスト側にのみリテラルとして残し、実際の候補生成経路(buildMixedCandidates。頭数境界
+    // describeで使用実績のあるn=8全EVプラスフィクスチャを流用)が今も同じ対応を守っている
+    // ことを固定する。これが「挙動不変」の実質的な担保である。
+    const OLD_LENGTH_TO_BET_TYPE: Record<number, "place" | "wide" | "trio"> = {
+      1: "place",
+      2: "wide",
+      3: "trio",
+    };
+    const n = 8;
+    const umabans = umabansOf(n);
+    const race = raceInput({
+      rows: allCandidateRows(n),
+      wideCombo: fullOddsRecord(umabans, 2, 100000),
+      trioCombo: fullOddsRecord(umabans, 3, 100000),
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
+    });
+    const result = buildMixedCandidates(race);
+
+    // 前提固定(空振り防止): 複勝(8)・ワイド(C(8,2)=28)・3連複(C(8,3)=56)の3券種すべてが
+    // 実際に候補として生成されていること(1種類にしか到達していなければ以下の対応検査が空振りする)。
+    expect(result.candidates.filter((c) => c.umabans.length === 1)).toHaveLength(8);
+    expect(result.candidates.filter((c) => c.umabans.length === 2)).toHaveLength(28);
+    expect(result.candidates.filter((c) => c.umabans.length === 3)).toHaveLength(56);
+
+    for (const candidate of result.candidates) {
+      expect(candidate.betType).toBe(OLD_LENGTH_TO_BET_TYPE[candidate.umabans.length]);
+    }
   });
 });

@@ -18,7 +18,7 @@ import { deriveBatchAvailability } from "./batch-availability.js";
 import { canCollectPeriodBatch } from "./period-batch-gate.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
-import type { MixedAllocationSettings } from "./mixed-allocation-view.js";
+import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
 import { PeriodBatchView } from "./PeriodBatchView.js";
 import type { RaceLedgerFilter } from "./race-ledger-filter.js";
 import {

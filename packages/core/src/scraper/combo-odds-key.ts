@@ -49,6 +49,39 @@ export function buildComboOddsKey(umabans: readonly number[]): string {
 }
 
 /**
+ * `buildComboOddsKey` の逆操作(Issue #55: 過去分析の配分提案を馬番表示に戻すためのデコーダ)。
+ * 2桁ずつ区切って整数配列に戻す(`buildComboOddsKey`が常に2桁ゼロ埋めで連結するため、
+ * 正しく生成されたキーは必ず偶数長になる)。
+ *
+ * **throwしない(呼び出し元が生キー文字列をそのまま表示にフォールバックできるようにするため)**:
+ * 次のいずれかに該当すれば `null` を返す。
+ * - 偶数長でない(空文字列を含む)
+ * - 各2桁チャンクが数字2文字ぴったりでない(空白混入・非数字混入)
+ * - 各チャンクの数値が馬番の範囲外(1〜{@link MAX_UMABAN})
+ *
+ * 昇順であることの検証はしない(`buildComboOddsKey`自体が入力を昇順ソートしてから連結するため、
+ * 正しく生成されたキーは必然的に昇順になっている。ここでは「馬番として妥当な値の並びか」だけを見る)。
+ */
+export function parseComboOddsKey(key: string): readonly number[] | null {
+  if (key.length === 0 || key.length % 2 !== 0) {
+    return null;
+  }
+  const umabans: number[] = [];
+  for (let i = 0; i < key.length; i += 2) {
+    const chunk = key.slice(i, i + 2);
+    if (!/^\d{2}$/.test(chunk)) {
+      return null;
+    }
+    const umaban = Number(chunk);
+    if (umaban < 1 || umaban > MAX_UMABAN) {
+      return null;
+    }
+    umabans.push(umaban);
+  }
+  return umabans;
+}
+
+/**
  * 組合せオッズ1件の値(下限・上限・人気)。
  *
  * **注意: 3連複では `oddsMin` は「下限」ではなく単一値そのものを表す**(フィールド名だけを見て

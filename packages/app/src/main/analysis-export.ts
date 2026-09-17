@@ -87,9 +87,13 @@ export interface RaceSnapshot {
    * **この値自体は「JSON永続化用のスナップショット」であり、馬券配分の計算には使われない**
    * (この記述は今も正しい)。第4段(Issue #28)で券種横断の配分が実際に使うのは、
    * このスナップショットではなく**別の生きた経路**(`AnalysisResult.wideCombo` →
-   * `renderer/mixed-allocation-view.ts`。DB保存を経ずに分析結果からその場で計算する)である。
-   * 混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・DB保存専用の写しに
-   * すぎず、配分計算の入力としては一切参照されない。
+   * `shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
+   * `renderer/mixed-allocation-view.ts` から分離した。DB保存を経ずに分析結果からその場で
+   * 計算する)である。混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・
+   * DB保存専用の写しにすぎず、配分計算の入力としては一切参照されない。
+   * **さらなる追記予定(#56-3)**: main が実際にこの経路を配線したら、「DB保存を経ずに
+   * 分析結果からその場で計算する」という記述は main 起点の呼び出しが生まれた分だけ
+   * 古くなる可能性があるため、#56-3 着手時にこの段落を再確認・再更新すること。
    */
   readonly wideCombo?: Record<string, number | null>;
   /** 三連複オッズ(機能D-2c第3段)。`wideCombo`と同じ条件・同じ理由でoptional。 */

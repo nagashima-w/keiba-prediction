@@ -4,8 +4,12 @@
  * boss着手前ゲート(第2段Go)で確定した設計。第1段(`AnalysisResult` に `wideCombo?`/`trioCombo?`/
  * `comboOdds?` を追加)を土台に、`@keiba/core/ev/combo-bet-allocation` の汎用配分エンジン
  * (`allocateGeneralBets`)にそのまま渡せる `AllocationCandidate[]` を組み立てる純関数
- * `buildMixedCandidates` を提供する。**画面(`BatchAnalysisView.tsx`)・既存の複勝専用ビュー
- * (`bet-allocation-view.ts`)は一切変更しない**(本ファイルからは import するだけ)。
+ * `buildMixedCandidates` を提供する。**着手当時(第2段)は画面(`BatchAnalysisView.tsx`)・
+ * 既存の複勝専用ビュー(`bet-allocation-view.ts`)を一切変更しなかった**(本ファイルからは
+ * import するだけだった)。**追記(Issue #57)**: 本ファイル自体は `renderer/mixed-candidates.ts`
+ * から `shared/mixed-candidates.ts` へ移動した(ファイル名は不変)。import 先も
+ * `resolvePlaceBetTarget`/`PlaceBetUnavailableReason` の移設に伴い `./race-allocation.js`
+ * (旧`./bet-allocation-view.js`)へ変わっている(下記import文参照)。
  *
  * ## 反証(boss着手前ゲートで実コードから確認済み。実装方針の前提)
  *
@@ -23,7 +27,7 @@
  *   発売されていた一次証拠)。→ **ワイド・3連複は頭数による門前払いを一切しない**
  *   (`buildComboCandidates` が `comboSize > 出走頭数` のとき組合せ列挙自体が0件になる、という
  *   構造的な結果に委ねる。頭数チェックを本ファイルには書かない)。
- * - **反証C**: 既存 `bet-allocation-view.ts` の `buildRaceAllocation` は `resolvePlaceBetTarget`
+ * - **反証C**: 既存 `race-allocation.ts` の `buildRaceAllocation` は `resolvePlaceBetTarget`
  *   の可用性判定を「レース全体の表示ゲート」として使っている。本モジュールでは同じ関数を
  *   「複勝候補を載せるか否かの判定」に**格下げ**して再利用する(`combo-bet-allocation.ts` の
  *   JSDocが警告する「`resolvePlaceBetTarget` の結果を `topFinishCount` に誤用してはならない」
@@ -32,7 +36,7 @@
  * ## yosoガードの複勝適用(boss裁定・ブリーフ差し替え。反証Cの誤り訂正)
  *
  * 当初のブリーフは複勝候補の条件を3つ(`placeOddsMin`/`ev`/`isPositive`)としていたが、これは
- * `bet-allocation-view.ts:134` の `buildRaceAllocation` が `resolvePlaceBetTarget` より**手前**で
+ * `race-allocation.ts` の `buildRaceAllocation` が `resolvePlaceBetTarget` より**手前**で
  * 判定している `oddsStatus==="yoso"` ガードを取りこぼしていた(反証Cで頭数判定だけを論じた際に
  * 一緒に落とした)。実コードで確認した事実:
  * - `analysis-pipeline.ts:587` は `oddsStatus==="yoso"` のとき `computeEstimatedRaceEv`
@@ -70,7 +74,10 @@
  * ## 券種フィルタ(`options.betTypes`)についての注意
  *
  * これは**第3段以降のための受け口**であり、本段(第2段)では妙味度による券種切り替えを
- * 実装しない(ユーザー決定Q2「常に全券種」)。既定値は全券種。型定義上、妙味度・
+ * 実装しない(ユーザー決定Q2「常に全券種」)。既定値は`ALL_MIXED_CANDIDATE_BET_TYPES`
+ * (place/wide/trioの3券種。**`AllocationBetType`の全メンバーではない**。#91で`AllocationBetType`
+ * に`win`が加わったが、単勝の候補ビルダーが存在しないため対象に含めていない。下記
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照)。型定義上、妙味度・
  * `RaceOpportunity` に類する値は本モジュールの入力に一切現れない(受け取れない)。
  *
  * ## EV閾値の統一(`options.evConfig`。機能D-2c第4段・Issue #28・D-4)
@@ -78,7 +85,7 @@
  * 第4段のboss裁定B-2「閾値を揃える」により、`options.evConfig`(省略時は
  * `DEFAULT_EV_CONFIG`=閾値1.0)を`buildComboCandidates`へそのまま渡す。複勝候補は
  * `row.isPositive`(呼び出し元が`AppSettings.evThreshold`で既に判定済みの値)をそのまま使う
- * ため、呼び出し元(`mixed-allocation-view.ts`)が**同じ`evThreshold`から組み立てた`evConfig`**を
+ * ため、呼び出し元(`mixed-race-allocation.ts` の `buildMixedRaceAllocation`)が**同じ`evThreshold`から組み立てた`evConfig`**を
  * ここへ渡すことで、複勝・ワイド・3連複が同一の閾値・同一の厳密不等号(`ev > threshold`)で
  * 判定される(`bet-allocation-view.ts`の`evThresholdFootnote`「配分の対象はEV閾値を上回った
  * 買い目のみです」という注記と実際の判定基準を一致させる)。
@@ -87,6 +94,7 @@
 import {
   buildComboCandidates,
   DEFAULT_EV_CONFIG,
+  type AllocationBetType,
   type AllocationCandidate,
   type ComboCandidateDiagnostics,
   type EvConfig,
@@ -98,13 +106,44 @@ import type {
   ComboOddsFetchOutcomeView,
   ComboOddsScrapeOutcomeView,
   OddsStatus,
-} from "../shared/analysis-types.js";
-import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./bet-allocation-view.js";
+} from "./analysis-types.js";
+import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-allocation.js";
 
-/** 券種横断の買い目候補ビルダーが対象にできる券種。 */
-export type MixedCandidateBetType = "place" | "wide" | "trio";
+/**
+ * 券種横断の買い目候補ビルダーが対象にできる券種。
+ *
+ * `@keiba/core`の`AllocationBetType`の別名(Issue #76)。券種ユニオンの3重定義
+ * (本エイリアス・`mixed-race-allocation.ts`のインライン`("place"|"wide"|"trio")[]`・core
+ * `AllocationBetType`)を防ぐため、本ファイルはcoreの型をそのまま参照し、再定義しない
+ * (#24で「馬連」を1箇所だけ足す事故を構造的に防ぐ)。
+ *
+ * **構造的に防げるのはユニオンの再定義(型エイリアスの分岐)までである。** メンバーを
+ * 手で列挙する配列・散文(直下の`ALL_MIXED_CANDIDATE_BET_TYPES`とそのJSDoc・散文中の
+ * 「全券種」等の言い回し)はこのエイリアスでは守られない。実際に#91で`AllocationBetType`
+ * に`win`が加わった際、まさにこの「1箇所だけ足す事故」(配列は3値のまま、散文だけが
+ * 「全券種」と言い続ける)が起きた。メンバー列挙・散文は別途テストで守ること
+ * (`mixed-candidates.test.ts`の「意図的に除外している券種」it参照)。
+ */
+export type MixedCandidateBetType = AllocationBetType;
 
-/** 既定の対象券種(全券種)。boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない。 */
+/**
+ * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーではない。**
+ *
+ * #91で`AllocationBetType`に`win`(単勝)が加わったが、本配列には含めていない。理由:
+ * (1) coreに単勝候補ビルダーが存在せず、`win`を対象にしても構築できる候補が無い。
+ * (2) `buildMixedCandidates`は`betTypes.includes("place"/"wide"/"trio")`の3つしか参照しない
+ * ため(下記実装参照)、`win`をこの配列に足しても`buildMixedCandidates`の挙動は一切変わらず、
+ * 「対象にする」という宣言だけが実体を伴わずに増える(#91が是正している欠陥クラスの再生産)。
+ * `win`への対応は#92完了後の#90(#23-B2)の射程(`docs/issue-order.md`: #90は
+ * 「`winOdds`のIPC追加・候補ビルダー・UI・永続化・docs」で、候補ビルダーが明示的に
+ * 列挙されている。#92はcoreのみが射程でapp側は対象外)。
+ *
+ * **定数名の`ALL_`は現在この配列の内容(3要素)より広く読める。** 改名はexport面の変更に
+ * なるため#91では行わず、対応要否の判断は#92完了後の#90(#23-B2)に送る。
+ *
+ * boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない(#91時点でも真: `options.betTypes`
+ * 以外のフィルタは実装に存在しない)。
+ */
 export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
   "place",
   "wide",
@@ -118,7 +157,7 @@ export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
  * 類する値を受け取るフィールドは意図的に存在しない(型レベルの保証)。
  */
 export interface MixedCandidateBuildOptions {
-  /** 対象券種(省略時は全券種 `ALL_MIXED_CANDIDATE_BET_TYPES`)。 */
+  /** 対象券種(省略時は`ALL_MIXED_CANDIDATE_BET_TYPES`。`AllocationBetType`の全メンバーではない。同定数のJSDoc参照)。 */
   readonly betTypes?: readonly MixedCandidateBetType[];
   /**
    * ワイド・3連複のEV判定に使う閾値設定(省略時は `DEFAULT_EV_CONFIG` = 閾値1.0)。
@@ -130,7 +169,7 @@ export interface MixedCandidateBuildOptions {
 
 /**
  * `buildMixedCandidates` が受け取るレース情報の最小構造(`AnalysisResult` からそのまま渡せる。
- * `RaceAllocationInput`〈bet-allocation-view.ts〉と同じ流儀の構造的最小型)。
+ * `RaceAllocationInput`〈race-allocation.ts〉と同じ流儀の構造的最小型)。
  */
 export interface MixedCandidateBuildInput {
   readonly oddsStatus: OddsStatus;
@@ -218,9 +257,6 @@ export interface MixedCandidateBuildResult {
   readonly diagnostics: MixedCandidateDiagnostics;
 }
 
-/** ワイド・3連複それぞれの買い目構成頭数(`@keiba/core` の `COMBO_SIZE` と同じ値。券種非依存モジュール間の依存を増やさないため独立して持つ)。 */
-const COMBO_SIZE: Record<"wide" | "trio", number> = { wide: 2, trio: 3 };
-
 /** ワイド・3連複の的中判定に使う上位着数。複勝の払戻対象人数とは無関係の独立した定数(反証C)。 */
 const COMBO_TOP_FINISH_COUNT = 3;
 
@@ -253,7 +289,13 @@ function buildPlaceCandidates(race: MixedCandidateBuildInput): {
       continue;
     }
     positiveCount++;
-    candidates.push({ umabans: [row.umaban], odds: row.placeOddsMin, ev: row.ev, isPositive: true });
+    candidates.push({
+      betType: "place",
+      umabans: [row.umaban],
+      odds: row.placeOddsMin,
+      ev: row.ev,
+      isPositive: true,
+    });
   }
   return {
     candidates,
@@ -293,13 +335,8 @@ function buildComboCandidatesForBetType(
   const comboOddsState = race.comboOdds?.[betType]?.state ?? "unknown";
   const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
   // D-4: evConfigを渡し、複勝(row.isPositive)と同じ閾値・同じ厳密不等号で判定させる。
-  const result = buildComboCandidates(
-    horses,
-    COMBO_TOP_FINISH_COUNT,
-    COMBO_SIZE[betType],
-    oddsByKey,
-    evConfig,
-  );
+  // Issue #76: 第3引数はcomboSize(数値)ではなくbetType自体を渡す(umabanCountOfへ内部で委譲)。
+  const result = buildComboCandidates(horses, COMBO_TOP_FINISH_COUNT, betType, oddsByKey, evConfig);
   return {
     candidates: result.candidates,
     diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
@@ -310,7 +347,8 @@ function buildComboCandidatesForBetType(
  * 券種横断(複勝・ワイド・3連複)の買い目候補を構築する。
  *
  * @param race レース情報の最小構造(`AnalysisResult` をそのまま渡せる)
- * @param options 対象券種(省略時は全券種)。第3段以降のための受け口(第2段では絞り込みを実装しない)
+ * @param options 対象券種(省略時は`ALL_MIXED_CANDIDATE_BET_TYPES`。`AllocationBetType`の全メンバーではない。
+ *   同定数のJSDoc参照)。第3段以降のための受け口(第2段では絞り込みを実装しない)
  */
 export function buildMixedCandidates(
   race: MixedCandidateBuildInput,

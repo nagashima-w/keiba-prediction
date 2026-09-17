@@ -1,4 +1,4 @@
-import type { AppInfo } from "../main/app-info.js";
+import type { AppInfo } from "./app-info-types.js";
 import type {
   AnalysisExportOutcome,
   BatchProgress,

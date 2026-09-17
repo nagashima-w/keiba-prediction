@@ -12,8 +12,8 @@
  * 約93ms・12レースで約1.1秒/レンダー」という記述に対しリポジトリ内に再現手段が無かった。
  * `performance.now()`/`Date.now()`の計測コードが0件で、実行環境が変われば数値も変わる)。
  * **再現可能な計測: `pnpm tsx scripts/bench-mixed-allocation.ts`**(ネットワークに出ない。
- * `mixed-allocation-view.ts`の「greedySteps が構成比を左右する事実」と同じスクリプトが
- * 1レースあたりの所要時間も出力する)。
+ * `shared/mixed-race-allocation.ts`(Issue #57で`mixed-allocation-view.ts`から分離)の
+ * 「greedySteps が構成比を左右する事実」と同じスクリプトが1レースあたりの所要時間も出力する)。
  *
  * **しかし性能そのものより危険なのは、キャッシュキーに含める入力を1つでも
  * 漏らすと「設定を変えたのに前回の金額が表示され続ける」という静かな誤りが起きること**。

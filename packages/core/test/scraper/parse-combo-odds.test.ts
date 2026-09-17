@@ -2,7 +2,9 @@
  * parse-combo-odds(中央ワイド・3連複オッズ、api_get_jra_odds type=5/7)のテスト
  * (機能D-2b-A・Issue #32)。
  *
- * 既存 parse-odds.ts / parse-odds.test.ts は一切変更しない(受け入れ条件1・12)。
+ * 実装当初(#32)は既存 parse-odds.ts / parse-odds.test.ts を一切変更しなかった
+ * (受け入れ条件1・12)。**その後 Issue #34 で、人気(ninki)の数値化のみ `scraper/ninki.ts`
+ * の共有実装に統合された(本ファイルのテストケースは無改変)。**
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -54,6 +56,24 @@ describe("parseComboOdds(桁区切りカンマ。受け入れ条件3)", () => {
     const cell = odds.get(buildComboOddsKey([4, 10]));
     expect(cell?.oddsMin).toBe(429.3);
     expect(cell?.oddsMax).toBe(432.0);
+  });
+
+  // code-reviewer指摘: 実フィクスチャのワイドオッズはカンマを1件も含まない(上の前提固定テスト参照)ため、
+  // oddsMax(cellAt(value,1)、ワイドのみ使用)の呼び出し箇所は実フィクスチャでは独立に検証できない。
+  // 実測: oddsMax側だけを旧実装(カンマ非対応)に戻してもparse-combo-odds.test.tsは全緑のままだった
+  // (レビュアー指摘を受けた変異注入で確認)。合成JSONでoddsMin/oddsMaxに異なるカンマ値を与え、
+  // 構造体まるごとtoEqualで比較する。
+  it("ワイドのoddsMin・oddsMaxがいずれも桁区切りカンマを含む合成データの場合、それぞれ除去して数値化されること", () => {
+    const json = JSON.stringify({
+      status: "result",
+      data: { odds: { "5": { "0102": ["1,234.5", "2,345.6", "10"] } } },
+    });
+    const odds = expectAvailable(parseComboOdds(json, "wide"));
+    expect(odds.get(buildComboOddsKey([1, 2]))).toEqual({
+      oddsMin: 1234.5,
+      oddsMax: 2345.6,
+      ninki: 10,
+    });
   });
 });
 

@@ -223,6 +223,8 @@ describe("runAnalysis(分析パイプライン)", () => {
       }),
       now: () => FIXED_NOW,
       llmSkipReason: "APIキー未設定",
+      // Issue #59: この呼び出しでは配分計算を行わない(既存テストの回帰を防ぐ既定値)。
+      allocationSettings: null,
     });
   });
 
@@ -2626,6 +2628,8 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       }),
       now: () => FIXED_NOW,
       llmSkipReason: "APIキー未設定",
+      // Issue #59: この呼び出しでは配分計算を行わない(既存テストの回帰を防ぐ既定値)。
+      allocationSettings: null,
     });
   });
 
