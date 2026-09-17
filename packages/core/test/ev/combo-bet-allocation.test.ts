@@ -1874,7 +1874,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       });
     });
 
-    describe("AC-B1b-1(d): allocateGeneralBetsが返すwin候補のhitProbが(a)と一致する(畳み込みを通したend-to-end。code-reviewer要修正)", () => {
+    describe("AC-B1b-1(d): allocateGeneralBetsが返すwin候補のhitProbが(a)と一致する(allocateGeneralBetsを通したend-to-end。code-reviewer要修正)", () => {
       // 非一様・deg=0のフィクスチャ(AC「フィクスチャの性質」: 一様入力では誤った構成〈p_i/Σp、
       // 集合S制限PL〉も真値と一致してしまい変異が死ぬため、必ず非一様にする)。
       const probs = [0.6, 0.5, 0.4, 0.3, 0.2];
@@ -1938,7 +1938,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         }
       });
 
-      it("(d)★中核: allocateGeneralBetsが返すwin候補のhitProbが、(a)の値(winProbabilitiesFromStrengths(fit.theta)の該当要素)とtoBeCloseToで一致すること(畳み込みを通したend-to-end)", () => {
+      it("(d)★中核: allocateGeneralBetsが返すwin候補のhitProbが、(a)の値(winProbabilitiesFromStrengths(fit.theta)の該当要素)とtoBeCloseToで一致すること(allocateGeneralBetsを通したend-to-end。win候補が絡む呼び出しはfoldToCandidateSubsetsを通らない設計〈combo-bet-allocation.tsの該当コメント参照〉)", () => {
         const fit = fitPlackettLuceStrengths(horses, 3);
         expect(fit.ok).toBe(true);
         if (!fit.ok) return;
@@ -2017,19 +2017,46 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         expect(winAlloc.hitProb).toBe(0);
       });
 
-      it("自由集合内の2頭のワイド候補は、NaNではなく0より大きく1未満の有限値であること(win併存時も非win候補が正しく順序空間経由で判定される)", () => {
+      it("自由集合内の2頭のワイド候補は、win無しの呼び出しと同じhitProbになること(値による固定。boss指摘: 述語だけの検査〈0<x<1〉ではeveryをsomeに変異させても検出できない)", () => {
         // umaban=2,3は自由集合(θ有限正)。2着・3着の並びに応じて的中する組合せがあるため、
-        // 的中確率は0と1の間の非退化な値になるはず(空振り防止)。
-        const candidates: AllocationCandidate[] = [
-          { umabans: [1], odds: 1.05, ev: 1.05, isPositive: true, betType: "win" },
-          { umabans: [2, 3], odds: 2, ev: 1.5, isPositive: true, betType: "wide" },
-        ];
-        const result = allocateGeneralBets(horses9deg1, 3, candidates, realConfig);
-        const wideAlloc = result.allocations.find((a) => a.betType === "wide")!;
-        expect(wideAlloc).toBeDefined();
-        expect(Number.isFinite(wideAlloc.hitProb)).toBe(true);
-        expect(wideAlloc.hitProb).toBeGreaterThan(0);
-        expect(wideAlloc.hitProb).toBeLessThan(1);
+        // 的中確率は0と1の間の非退化な値になるはず(空振り防止。ただし述語のみに頼らない
+        // よう、下記でwin無しの呼び出しとの値の一致も固定する)。
+        const wideCandidate: AllocationCandidate = {
+          umabans: [2, 3],
+          odds: 2,
+          ev: 1.5,
+          isPositive: true,
+          betType: "wide",
+        };
+        const winCandidate: AllocationCandidate = {
+          umabans: [1],
+          odds: 1.05,
+          ev: 1.05,
+          isPositive: true,
+          betType: "win",
+        };
+
+        // ベースライン: win候補を渡さない呼び出し(既存の集合空間経路。foldToCandidateSubsets+
+        // buildOutcomeIndexSetsの`every`述語を通る、信頼できる基準値)。
+        const withoutWin = allocateGeneralBets(horses9deg1, 3, [wideCandidate], realConfig);
+        expect(withoutWin.winOutcome).toEqual<WinOutcome>({ kind: "not-requested" });
+        const wideWithoutWin = withoutWin.allocations.find((a) => a.betType === "wide")!;
+        expect(wideWithoutWin).toBeDefined();
+        // 前提(空振り防止): 退化した0/1ではなく、非退化な値であること。
+        expect(wideWithoutWin.hitProb).toBeGreaterThan(0);
+        expect(wideWithoutWin.hitProb).toBeLessThan(1);
+
+        // 比較対象: 同じワイド候補にwin候補を併せて渡した呼び出し(determined分岐。
+        // 順序付きoutcome空間から直接isHitを判定する新設コードパスを通る)。
+        const withWin = allocateGeneralBets(horses9deg1, 3, [winCandidate, wideCandidate], realConfig);
+        expect(withWin.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+        const wideWithWin = withWin.allocations.find((a) => a.betType === "wide")!;
+        expect(wideWithWin).toBeDefined();
+
+        // ★中核: win候補の有無でワイド[2,3]のhitProbが変わらないこと(値による固定)。
+        // 自分で実測した差は0(実測: 本コメント執筆時点で完全一致)だが、加算順に依存しうる
+        // ため`toBe`ではなく`toBeCloseTo`で固定する(ビット一致を根拠にしない)。
+        expect(wideWithWin.hitProb).toBeCloseTo(wideWithoutWin.hitProb, 9);
       });
     });
   });

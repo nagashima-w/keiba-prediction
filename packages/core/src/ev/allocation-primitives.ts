@@ -191,8 +191,10 @@ export interface GreedyAllocationResult {
  * 貪欲逐次配分で連続最適比率(ケリー基準のバンクロール比率 x*_i、0〜1)を求める。
  * 目的関数 F(x) = Σ_T P(T)·log(1 − Σx_i + Σ_{i∈T}x_i·o_i)。
  * 総資金・1レース上限には一切依存しない(スケール不変)。候補が「馬」か「馬の組」かには
- * 一切依存しない(odds・outcomeIndexSetsだけを参照する。的中判定はbuildOutcomeIndexSetsで
- * 済んでいる前提)。
+ * 一切依存しない(odds・outcomeIndexSetsだけを参照する。的中判定は呼び出し側で既に済んで
+ * いる前提。**構築元は`buildOutcomeIndexSets`とは限らない**(Issue #92)。win候補があり
+ * 順序が決定できた呼び出しは`buildOutcomeIndexSets`を通さず、順序付きoutcome空間から
+ * 直接`indices`を構築する。本関数はどちらの構築元でも同じロジックで動作し区別しない)。
  *
  * 貪欲法に大域最適の理論保証は無い(bet-allocation.ts 由来の既知の注記。目的関数Fはlogの内側で
  * 変数x_iが結合しており分離可能ではないため)。試した範囲では全探索の最適格子点と経験的に

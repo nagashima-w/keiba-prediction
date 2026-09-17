@@ -683,7 +683,16 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
   }
 }
 
-/** 畳み込み済みoutcomeから各候補の的中確率(周辺確率)を導出する。 */
+/**
+ * outcomeIndexSetsから各候補の的中確率(周辺確率)を導出する。
+ *
+ * **`outcomeIndexSets`の構築元は呼び出し側の分岐で変わる**(Issue #92)。win候補が無い、
+ * または順序が判定不能な呼び出しは`foldToCandidateSubsets`(畳み込み)経由で構築されるが、
+ * win候補があり順序が決定できた呼び出しは`foldToCandidateSubsets`を通らず、順序付き
+ * outcome空間から直接構築される(`allocateGeneralBets`の`determined`分岐参照)。
+ * 本関数自体はどちらの経路で構築された`outcomeIndexSets`でも同じロジック(indices配列に
+ * 挙がっている候補へ確率を加算する)で動作し、構築元を区別しない。
+ */
 function computeHitProbabilities(n: number, outcomeIndexSets: readonly OutcomeIndexSet[]): number[] {
   const hitProbs = new Array<number>(n).fill(0);
   for (const outcome of outcomeIndexSets) {
@@ -749,7 +758,8 @@ export function allocateGeneralBets(
       // でnullが返るのは「固定馬2頭以上」由来しかない。
       // ⚠️この判別はPLACKETT_LUCE_MODELが文書化している2つの縮退条件に依存する
       // ヒューリスティックであり、将来ここに渡るOrderedPlaceJointModel実装が異なる原因で
-      // nullを返す可能性までは保証しない(その場合は本判別自体を再検討すること)。
+      // nullを返す可能性までは保証しない(その場合は本判別自体を再検討すること。Issue #95。
+      // 2つ目のOrderedPlaceJointModel実装を追加するときに解消する)。
       const reason: WinOutcomeIndeterminateReason =
         horses.length >= 2 && topFinishCount >= horses.length
           ? "top-k-covers-all-runners"
