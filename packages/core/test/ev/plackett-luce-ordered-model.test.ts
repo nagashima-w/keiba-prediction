@@ -5,7 +5,7 @@ import {
   type JointModelHorse,
   type OrderedOutcome,
 } from "../../src/ev/place-joint-model.js";
-import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js";
+import { fitPlackettLuceStrengths, PlackettLuceFitError } from "../../src/ev/plackett-luce-strength.js";
 import { winProbabilitiesFromStrengths } from "../../src/ev/plackett-luce-win-prob.js";
 
 /**
@@ -290,6 +290,60 @@ describe("PLACKETT_LUCE_MODEL.buildOrderedDistribution(Issue #92)", () => {
     it("負値はthrowする", () => {
       const hs = horses([0.5, 0.3, 0.2]);
       expect(() => PLACKETT_LUCE_MODEL.buildOrderedDistribution(hs, -1)).toThrow();
+    });
+  });
+
+  describe("フィット失敗(infeasible-support)。buildDistributionと同じ経路のPlackettLuceFitErrorをthrowすること(code-reviewer.md(d)指摘: 既存側〈buildDistribution〉には専用テストがあるのに新設側に無かった空白セル)", () => {
+    it("p>0の頭数がk未満(infeasible-support)ならPlackettLuceFitErrorをthrowする(plackett-luce-model.test.tsと同一フィクスチャ)", () => {
+      const hs = horses([0.9, 0, 0, 0]);
+      expect(() => PLACKETT_LUCE_MODEL.buildOrderedDistribution(hs, 2)).toThrow(PlackettLuceFitError);
+    });
+  });
+
+  describe("除外馬(θ=0)混在(code-reviewer.md(d)指摘: buildOrderedOutcomesFromFullThetaが集合空間側のθ分類を複製しているのに、θ=0を含むフィクスチャが1件も無かった空白セル)", () => {
+    // 7頭・[0.5,0.45,0.4,0.35,0.3,0,0]・k=3。umaban=6,7がplaceProb=0(除外馬)、
+    // 残り5頭は自由集合(deg=0。固定馬なし)という非退化フィクスチャ。
+    const hsWithZero = horses([0.5, 0.45, 0.4, 0.35, 0.3, 0, 0]);
+
+    it("前提固定(空振り防止): このフィクスチャはdeg=0で、除外馬(θ=0)がちょうど2頭であること", () => {
+      const fit = fitPlackettLuceStrengths(hsWithZero, 3);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      expect(fit.degenerateFixedCount).toBe(0);
+      expect(fit.degenerateZeroCount).toBe(2);
+      expect(fit.theta.filter((t) => t === 0).length).toBe(2);
+    });
+
+    it("除外馬(umaban=6,7)はどの着順にも一切現れないこと(JSDocの契約を直接expect)", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(hsWithZero, 3);
+      expect(ordered).not.toBeNull();
+      expect(ordered!.length).toBeGreaterThan(0);
+      for (const outcome of ordered!) {
+        expect(outcome.order).not.toContain(6);
+        expect(outcome.order).not.toContain(7);
+      }
+    });
+
+    it("AC-B1b-1(b): θ=0混在でも上位3集合周辺はbuildDistribution(集合空間)と一致すること", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(hsWithZero, 3)!;
+      const setDist = PLACKETT_LUCE_MODEL.buildDistribution(hsWithZero, 3);
+      const orderedSetMarginals = setMarginals(ordered);
+      // 前提(空振り防止): 除外馬を含む組合せの確率が実際に0であること(除外が正しく効いている)。
+      const comboWithExcluded = setDist.find(
+        (o) => o.placed.includes(6) || o.placed.includes(7),
+      );
+      expect(comboWithExcluded).toBeDefined();
+      expect(comboWithExcluded!.probability).toBe(0);
+      let matchedNonZero = 0;
+      for (const outcome of setDist) {
+        const key = [...outcome.placed].sort((a, b) => a - b).join(",");
+        const orderedValue = orderedSetMarginals.get(key) ?? 0;
+        expect(orderedValue).toBeCloseTo(outcome.probability, 6);
+        if (outcome.probability > 0) matchedNonZero++;
+      }
+      // 空振り防止: 確率0の組合せだけで自明に一致するテストになっていないことを固定する
+      // (除外馬を含まない組合せどうしの非ゼロ一致が複数あることを要求する)。
+      expect(matchedNonZero).toBeGreaterThan(1);
     });
   });
 });

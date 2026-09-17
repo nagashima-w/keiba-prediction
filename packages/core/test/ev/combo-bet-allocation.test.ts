@@ -1938,7 +1938,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         }
       });
 
-      it("(d)★中核: allocateGeneralBetsが返すwin候補のhitProbが、(a)の値(winProbabilitiesFromStrengths(fit.theta)の該当要素)とtoBeCloseToで一致すること(allocateGeneralBetsを通したend-to-end。win候補が絡む呼び出しはfoldToCandidateSubsetsを通らない設計〈combo-bet-allocation.tsの該当コメント参照〉)", () => {
+      it("(d)★中核: allocateGeneralBetsが返すwin候補のhitProbが、(a)の値(winProbabilitiesFromStrengths(fit.theta)の該当要素)とtoBeCloseToで一致すること(allocateGeneralBetsを通したend-to-end。順序が決定できた〈determined〉呼び出しはfoldToCandidateSubsetsを通らない設計〈combo-bet-allocation.tsの該当コメント参照。indeterminate分岐はelse枝でfoldを通るため対象外〉)", () => {
         const fit = fitPlackettLuceStrengths(horses, 3);
         expect(fit.ok).toBe(true);
         if (!fit.ok) return;
@@ -1968,6 +1968,58 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           // 1e-16〜1e-17オーダー(浮動小数点の丸め由来)であり、1e-9は安全に上回りつつ
           // 誤った構成(上記2件。差0.08〜0.13オーダー)とは7桁以上乖離している。
           expect(alloc!.hitProb).toBeCloseTo(expected[i]!, 9);
+        }
+      });
+    });
+
+    describe("end-to-endのhitProb: 除外馬(θ=0)混在(code-reviewer.md(d)指摘。plackett-luce-ordered-model.test.tsと同一フィクスチャ)", () => {
+      // 7頭・[0.5,0.45,0.4,0.35,0.3,0,0]・k=3。umaban=6,7がplaceProb=0(除外馬)。
+      const horsesWithZero: JointModelHorse[] = [0.5, 0.45, 0.4, 0.35, 0.3, 0, 0].map(
+        (placeProb, i) => ({ umaban: i + 1, placeProb }),
+      );
+      const realConfig: GeneralBetAllocationConfig = {
+        ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        bankroll: 100000,
+        perRaceCap: 100000,
+      };
+
+      it("前提固定(空振り防止): deg=0であり、除外馬(θ=0)がちょうど2頭であること", () => {
+        const fit = fitPlackettLuceStrengths(horsesWithZero, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        expect(fit.degenerateFixedCount).toBe(0);
+        expect(fit.degenerateZeroCount).toBe(2);
+      });
+
+      it("除外馬(umaban=6,7)のwin候補はhitProbが正確に0であり、他馬のwin候補はwinProbabilitiesFromStrengthsと一致すること", () => {
+        const fit = fitPlackettLuceStrengths(horsesWithZero, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        const expected = winProbabilitiesFromStrengths(fit.theta);
+
+        const candidates: AllocationCandidate[] = horsesWithZero.map((h) => ({
+          umabans: [h.umaban],
+          odds: 3,
+          ev: 1.5,
+          isPositive: true,
+          betType: "win",
+        }));
+        const result = allocateGeneralBets(horsesWithZero, 3, candidates, realConfig);
+        expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+        for (let i = 0; i < horsesWithZero.length; i++) {
+          const alloc = result.allocations.find((a) => a.umabans[0] === i + 1);
+          if (i >= 5) {
+            // umaban=6,7(除外馬)は的中確率0(theta=0。expected[i]も0のはず)。
+            expect(expected[i]).toBe(0);
+            // 除外馬のwin候補はhitProb=0であり配分対象にもならない(indeterminateとは異なり
+            // "determined"では候補自体は残るが、hitProb=0で自然に賭けの対象から外れる)。
+            expect(alloc).toBeDefined();
+            expect(alloc!.hitProb).toBe(0);
+          } else {
+            expect(alloc).toBeDefined();
+            expect(alloc!.hitProb).toBeCloseTo(expected[i]!, 9);
+          }
         }
       });
     });
