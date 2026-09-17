@@ -152,10 +152,12 @@ export interface OutcomeIndexSet {
  * **単勝(win)の的中判定はこの部分集合包含ではない**(Issue #92)。win候補は
  * `outcome.order[0] === candidate.umaban`(1着の identity 判定)であり、`foldedOutcomes`
  * (`PlaceOutcome[]`。順序を持たない)を経由できない(`order`情報自体を持たないため)。
- * `combo-bet-allocation.ts`の`allocateGeneralBets`はwin候補がある呼び出しで、本関数
- * (`buildOutcomeIndexSets`)を通さず、`OrderedOutcome[]`から`OutcomeIndexSet[]`を直接
- * 構築する(型ジェネリック`<T>`は候補型のみで、outcome型は`PlaceOutcome`に固定されたまま。
- * outcome型を汎用化する変更は#92のスコープでは行わなかった)。
+ * `combo-bet-allocation.ts`の`allocateGeneralBets`はwin候補があり順序が決定できた
+ * (`determined`)呼び出しで、本関数(`buildOutcomeIndexSets`)を通さず、`OrderedOutcome[]`
+ * から`OutcomeIndexSet[]`を直接構築する(win候補があっても`indeterminate`の呼び出しは
+ * `else`枝に落ちて本関数を通る。`combo-bet-allocation.ts`の該当コメント参照)。
+ * 型ジェネリック`<T>`は候補型のみで、outcome型は`PlaceOutcome`に固定されたまま。
+ * outcome型を汎用化する変更は#92のスコープでは行わなかった。
  */
 export function buildOutcomeIndexSets<T>(
   candidates: readonly T[],

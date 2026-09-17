@@ -346,4 +346,67 @@ describe("PLACKETT_LUCE_MODEL.buildOrderedDistribution(Issue #92)", () => {
       expect(matchedNonZero).toBeGreaterThan(1);
     });
   });
+
+  describe("組合せ軸の空白セル(code-reviewer提案1): fixedIndices.length===1×zero>=1・fixedIndices.length>=2×zero>=1", () => {
+    describe("fixedIndices.length===1 かつ zero>=1。6頭・[1,0.6,0.5,0.4,0,0]・k=3", () => {
+      const hs = horses([1, 0.6, 0.5, 0.4, 0, 0]);
+
+      it("前提固定(空振り防止): degenerateFixedCount=1・degenerateZeroCount=2であること", () => {
+        const fit = fitPlackettLuceStrengths(hs, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        expect(fit.degenerateFixedCount).toBe(1);
+        expect(fit.degenerateZeroCount).toBe(2);
+      });
+
+      it("固定馬1着分岐(fixedIndices.length===1)の内部でも、除外馬(umaban=5,6)はどの着順にも一切現れないこと(典型的なリファクタバグ〈この分岐内でfreeIndicesをθ=0除外なしに再計算する〉を殺す)", () => {
+        const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(hs, 3);
+        expect(ordered).not.toBeNull();
+        expect(ordered!.length).toBeGreaterThan(0);
+        for (const outcome of ordered!) {
+          expect(outcome.order).not.toContain(5);
+          expect(outcome.order).not.toContain(6);
+          // 固定馬(umaban=1)が常に1着であることも併せて固定する(この分岐の主契約)。
+          expect(outcome.order[0]).toBe(1);
+        }
+      });
+    });
+
+    describe("fixedIndices.length>=2 かつ zero>=1。6頭・[1,1,0.5,0.4,0,0]・k=3", () => {
+      const hs = horses([1, 1, 0.5, 0.4, 0, 0]);
+
+      it("前提固定(空振り防止): degenerateFixedCount=2・degenerateZeroCount=2であること", () => {
+        const fit = fitPlackettLuceStrengths(hs, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        expect(fit.degenerateFixedCount).toBe(2);
+        expect(fit.degenerateZeroCount).toBe(2);
+      });
+
+      it("除外馬が混在していても、buildOrderedDistributionはnullを返すこと(判定不能の原因は除外馬の有無に左右されない)", () => {
+        expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(hs, 3)).toBeNull();
+      });
+    });
+  });
+
+  describe("kPrime===0到達経路の直接テスト(code-reviewer提案2): fixedIndices.length===1 && topFinishCount===1の1通りのみで到達する", () => {
+    // 3頭のうち1頭だけplaceProb>0(m===k=1分岐)。k=1でfixedIndices.length===1になる
+    // 唯一の構成(k=1でp_maxが固定されるにはp>0の頭数がちょうど1でなければならない。
+    // JSDoc「水詰めのm===k分岐」参照)。
+    const hs = horses([0.5, 0, 0]);
+
+    it("前提固定(空振り防止): degenerateFixedCount=1・reducedHorseCount=0(自由集合が空。kPrime=k-1=0に到達する構成)であること", () => {
+      const fit = fitPlackettLuceStrengths(hs, 1);
+      expect(fit.ok).toBe(true);
+      if (!fit.ok) return;
+      expect(fit.degenerateFixedCount).toBe(1);
+      expect(fit.reducedHorseCount).toBe(0);
+      expect(fit.reducedPlaceCount).toBe(0);
+    });
+
+    it("固定馬が確率1で1着(=k=1の全体)であること。自由集合が空(kPrime=0)でも順序空間が正しく1件に定まる", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(hs, 1);
+      expect(ordered).toEqual<readonly OrderedOutcome[]>([{ order: [1], probability: 1 }]);
+    });
+  });
 });

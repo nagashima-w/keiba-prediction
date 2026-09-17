@@ -2024,6 +2024,99 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       });
     });
 
+    describe("end-to-endのhitProb: 固定馬(deg=1)×除外馬(θ=0)混在(code-reviewer提案1のcombo側展開。6頭・[1,0.6,0.5,0.4,0,0]・k=3)", () => {
+      // ordered-model側(plackett-luce-ordered-model.test.ts)で「除外馬は着順に一切現れない」
+      // 契約をfixedIndices.length===1×zero>=1の組合せでも固定済みだが、combo-bet-allocation側の
+      // isHit判定(orderSet.has(u)/order[0]===umaban)がその保証を正しく的中確率へ反映するかも
+      // 独立に固定する(ordered-model側の保証と、それを消費するcombo側のロジックは別のコードで
+      // あり、後者に固有のバグ〈umaban⇔index変換の誤り等〉が無いことはこのテストでしか確認できない)。
+      const horsesFixedAndZero: JointModelHorse[] = [1, 0.6, 0.5, 0.4, 0, 0].map((placeProb, i) => ({
+        umaban: i + 1,
+        placeProb,
+      }));
+      const realConfig: GeneralBetAllocationConfig = {
+        ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        bankroll: 100000,
+        perRaceCap: 100000,
+      };
+
+      it("前提固定(空振り防止): degenerateFixedCount=1・degenerateZeroCount=2であること", () => {
+        const fit = fitPlackettLuceStrengths(horsesFixedAndZero, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        expect(fit.degenerateFixedCount).toBe(1);
+        expect(fit.degenerateZeroCount).toBe(2);
+      });
+
+      it("固定馬(umaban=1)のwin候補はhitProb=1、除外馬(umaban=5,6)のwin候補はhitProb=0、自由集合の馬のwin候補はwinProbabilitiesFromStrengthsと一致すること", () => {
+        const fit = fitPlackettLuceStrengths(horsesFixedAndZero, 3);
+        expect(fit.ok).toBe(true);
+        if (!fit.ok) return;
+        const expected = winProbabilitiesFromStrengths(fit.theta);
+
+        const candidates: AllocationCandidate[] = horsesFixedAndZero.map((h) => ({
+          umabans: [h.umaban],
+          odds: 3,
+          ev: 1.5,
+          isPositive: true,
+          betType: "win",
+        }));
+        const result = allocateGeneralBets(horsesFixedAndZero, 3, candidates, realConfig);
+        expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+        for (let i = 0; i < horsesFixedAndZero.length; i++) {
+          const alloc = result.allocations.find((a) => a.umabans[0] === i + 1);
+          expect(alloc).toBeDefined();
+          if (i === 0) {
+            // umaban=1(固定馬)は確率1で1着。
+            expect(expected[i]).toBe(1);
+            expect(alloc!.hitProb).toBeCloseTo(1, 9);
+          } else if (i >= 4) {
+            // umaban=5,6(除外馬)は的中確率0。
+            expect(expected[i]).toBe(0);
+            expect(alloc!.hitProb).toBe(0);
+          } else {
+            expect(alloc!.hitProb).toBeCloseTo(expected[i]!, 9);
+          }
+        }
+      });
+
+      it("固定馬×除外馬混在でも、自由集合内2頭のワイド候補がwin無しの呼び出しと同じhitProbになること(AC-B1b-3(b)と同型の非破壊性)", () => {
+        const wideCandidate: AllocationCandidate = {
+          umabans: [2, 3],
+          odds: 2,
+          ev: 1.5,
+          isPositive: true,
+          betType: "wide",
+        };
+        const winCandidate: AllocationCandidate = {
+          umabans: [1],
+          odds: 1.05,
+          ev: 1.05,
+          isPositive: true,
+          betType: "win",
+        };
+
+        const withoutWin = allocateGeneralBets(horsesFixedAndZero, 3, [wideCandidate], realConfig);
+        expect(withoutWin.winOutcome).toEqual<WinOutcome>({ kind: "not-requested" });
+        const wideWithoutWin = withoutWin.allocations.find((a) => a.betType === "wide")!;
+        expect(wideWithoutWin).toBeDefined();
+        expect(wideWithoutWin.hitProb).toBeGreaterThan(0);
+        expect(wideWithoutWin.hitProb).toBeLessThan(1);
+
+        const withWin = allocateGeneralBets(
+          horsesFixedAndZero,
+          3,
+          [winCandidate, wideCandidate],
+          realConfig,
+        );
+        expect(withWin.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+        const wideWithWin = withWin.allocations.find((a) => a.betType === "wide")!;
+        expect(wideWithWin).toBeDefined();
+        expect(wideWithWin.hitProb).toBeCloseTo(wideWithoutWin.hitProb, 9);
+      });
+    });
+
     describe("end-to-endのhitProb(deg=1でのNaN汚染を検出する。殺す変異の実測固定)", () => {
       // 9頭・[0.9, 0.2×8]・k=3。固定馬(umaban=1)がちょうど1頭のdeg=1フィクスチャ
       // (plackett-luce-ordered-model.test.tsと同一の前提)。
