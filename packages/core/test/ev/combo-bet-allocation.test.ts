@@ -2026,10 +2026,15 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
 
     describe("end-to-endのhitProb: 固定馬(deg=1)×除外馬(θ=0)混在(code-reviewer提案1のcombo側展開。6頭・[1,0.6,0.5,0.4,0,0]・k=3)", () => {
       // ordered-model側(plackett-luce-ordered-model.test.ts)で「除外馬は着順に一切現れない」
-      // 契約をfixedIndices.length===1×zero>=1の組合せでも固定済みだが、combo-bet-allocation側の
-      // isHit判定(orderSet.has(u)/order[0]===umaban)がその保証を正しく的中確率へ反映するかも
-      // 独立に固定する(ordered-model側の保証と、それを消費するcombo側のロジックは別のコードで
-      // あり、後者に固有のバグ〈umaban⇔index変換の誤り等〉が無いことはこのテストでしか確認できない)。
+      // 契約をfixedIndices.length===1×zero>=1の組合せでも固定済み。本テストは、その保証を
+      // 消費するcombo-bet-allocation側のisHit判定(orderSet.has(u)/order[0]===umaban。
+      // いずれもumaban値空間で完結し、明示的なindex変換は行わない。#92メタレビューで実測確認済み)
+      // が、fixed×zero混在という新しいデータパターンに対しても末端(allocateGeneralBets)まで
+      // 正しく的中確率へ反映することを確認する回帰カバレッジである。isHit判定ロジック自体は
+      // deg=0/deg=1の既存フィクスチャで既に一般に検証済みであり、本テストが無いとこの種の
+      // バグが検出できない、という排他的な位置づけではない(実際、win isHitを位置判定から
+      // 存在判定〈orderSet.has(c.umabans[0])〉へ弱体化する変異は、本テスト追加前の既存
+      // フィクスチャ〈deg=1・θ=0単独混在等〉だけで既に複数件検出できることを実測済み)。
       const horsesFixedAndZero: JointModelHorse[] = [1, 0.6, 0.5, 0.4, 0, 0].map((placeProb, i) => ({
         umaban: i + 1,
         placeProb,
