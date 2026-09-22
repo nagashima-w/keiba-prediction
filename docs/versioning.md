@@ -1023,6 +1023,41 @@ Issue #88(#23-B0)は、`estimatePlaceOddsMinFromWin` の戻り値を4状態の�
 
 よって 1.7.0 → **1.7.1**(patch)が妥当と判断した。
 
+## 次の正式版が 1.7.3 である根拠(Issue #92・#23-B1b での変更)
+
+Issue #92(#23-B1b)は、単勝を配分エンジンで扱うための**順序付き outcome 空間**を
+`packages/core` に新設した変更である。主な追加は `OrderedOutcome` /
+`OrderedPlaceJointModel` / `isOrderedPlaceJointModel`(`place-joint-model.ts`)、
+`PLACKETT_LUCE_MODEL.buildOrderedDistribution`(`plackett-luce-model.ts`)、
+`GeneralBetAllocationResult.winOutcome`(3値の判別共用体)と、
+`allocateGeneralBets` の `determined` 分岐(順序空間から直接 isHit を判定し、
+`foldToCandidateSubsets` を通さない経路)。あわせて `validateCandidates` の
+重複判定キーに `betType` を含め、#91 の暫定門番(win を throw)を撤去した。
+
+**patch である根拠**: 新設した経路は **production から到達不能**である。
+`allocateGeneralBets` の production 呼び出し元は
+`packages/app/src/shared/mixed-race-allocation.ts:444` の**1箇所のみ**で、そこへ渡る候補は
+`buildMixedCandidates` 由来に限られる。`resolveMixedBetTypes`(同ファイル `:180-185`)が
+組み立てる `betTypes` は `["place"]` に `wide`・`trio` を条件付きで足すだけで、
+**`"win"` を積む分岐が存在しない**。したがって `winOutcome` は production では常に
+`{ kind: "not-requested" }` であり、`determined`・`indeterminate` のどちらの経路にも
+到達しない。**win 行を産む app 側の候補ビルダーは #90(#23-B2)まで存在しない。**
+
+`winOutcome` は必須フィールドとして全結果に載るが、`allocation-record.ts` は
+`GeneralBetAllocationResult` を丸ごとスプレッドせず `modelId` / `modelApproximate` /
+`allocations` を**名指しで**読むため、**永続化されない**(保存済みデータの形は変わらない)。
+
+以上から、**利用者から見える変化も、分析結果の数値変化も無い**。振る舞いの差分は
+「型と内部経路が単勝を扱えるようになった」ことのみであり、区分表の patch
+(「利用者から見て動作は変わらない内部改善・バグ修正」)に該当する。minor の基準
+(できることが増える・分析結果の数値が変わる)には、**#90 で app 側が win 候補を
+産み始めるまで**該当しない。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポート JSON の後方互換に関わる変更はない
+(上記のとおり `winOutcome` は永続化されない)。
+
+よって 1.7.2 → **1.7.3**(patch)が妥当と判断した。
+
 ## 次の正式版が 1.7.2 である根拠(Issue #91・#23-B1a での変更)
 
 Issue #91(#23-B1a)は、`AllocationBetType`(`packages/core/src/ev/combo-bet-allocation.ts`)に
