@@ -6,6 +6,7 @@ import {
   allocateGeneralBets,
   buildComboCandidates,
   buildComboOddsKey,
+  buildWinCandidates,
   DEFAULT_CANDIDATE_CAP,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   resolveComboOdds,
@@ -2222,3 +2223,198 @@ function makeAscendingUniqueCandidates(count: number): AllocationCandidate[] {
   }
   return combos.map((c, i) => ({ umabans: c, odds: 3, ev: 2 + i * 0.0001, isPositive: true, betType: "wide" }));
 }
+
+// ============================================================================
+// buildWinCandidates(単勝候補ビルダー・Issue #90・#23-B2)
+// ============================================================================
+
+describe("buildWinCandidates(単勝候補ビルダー・#90)", () => {
+  // n=2・topFinishCount=1の対称フィクスチャ。PLACKETT_LUCE_MODELは対称入力に対し
+  // 厳密に均等な1着確率(winProb=0.5ちょうど)を返す(本ファイル筆者が
+  // `PLACKETT_LUCE_MODEL.buildOrderedDistribution`を直接呼んで実測・確認済み:
+  // [{order:[1],probability:0.5},{order:[2],probability:0.5}])。
+  // odds=2.0でev=1.0(閾値ちょうど)という境界値をfloat演算なしで作れるため、
+  // EV閾値の厳密不等号テストにこのフィクスチャを使う。
+  const symmetricHorses: JointModelHorse[] = [
+    { umaban: 1, placeProb: 0.5 },
+    { umaban: 2, placeProb: 0.5 },
+  ];
+
+  it("前提固定(空振り防止): symmetricHorsesの1着確率(umaban=1)はちょうど0.5であること", () => {
+    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(symmetricHorses, 1);
+    expect(ordered).not.toBeNull();
+    const winProb1 = ordered!
+      .filter((o) => o.order[0] === 1)
+      .reduce((sum, o) => sum + o.probability, 0);
+    expect(winProb1).toBe(0.5);
+  });
+
+  describe("オッズ3状態 × EV閾値の境界(テーブル駆動)", () => {
+    const cases: {
+      readonly label: string;
+      readonly odds: number | null;
+      readonly expect: "missing" | "malformed" | "not-positive" | "positive";
+    }[] = [
+      { label: "オッズ欠損(null)", odds: null, expect: "missing" },
+      { label: "オッズ0(malformed: 1.0未満)", odds: 0, expect: "malformed" },
+      { label: "オッズ0.5(malformed: 1.0未満)", odds: 0.5, expect: "malformed" },
+      { label: "オッズNaN(malformed: 非有限)", odds: NaN, expect: "malformed" },
+      { label: "オッズ+Infinity(malformed: 非有限)", odds: Infinity, expect: "malformed" },
+      { label: "ev<閾値(odds=1.9999 → ev=0.99995)", odds: 1.9999, expect: "not-positive" },
+      { label: "evちょうど閾値(odds=2.0 → ev=1.0。厳密不等号のため非採用)", odds: 2.0, expect: "not-positive" },
+      { label: "ev>閾値(odds=2.0001 → ev=1.00005)", odds: 2.0001, expect: "positive" },
+    ];
+
+    it.each(cases)("$label", ({ odds, expect: expected }) => {
+      // umaban=1・2の両方に同じoddsを与える(symmetricHorsesは対称フィクスチャのため、
+      // 片方だけ別状態にすると診断値のカウントが汚染される。両方同条件にして件数=2で検証する)。
+      const oddsByUmaban = new Map<number, number | null>([
+        [1, odds],
+        [2, odds],
+      ]);
+      const result = buildWinCandidates(symmetricHorses, 1, oddsByUmaban);
+      const cand1 = result.candidates.find((c) => c.umabans[0] === 1);
+      switch (expected) {
+        case "missing":
+          expect(cand1).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsMissingCount).toBe(2);
+          expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(0);
+          break;
+        case "malformed":
+          expect(cand1).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(2);
+          expect(result.diagnostics.unjudged.oddsMissingCount).toBe(0);
+          break;
+        case "not-positive":
+          expect(cand1).toBeUndefined();
+          expect(result.diagnostics.judged.notPositiveCount).toBe(2);
+          expect(result.diagnostics.judged.positiveCount).toBe(0);
+          break;
+        case "positive":
+          expect(cand1).toBeDefined();
+          expect(cand1!.betType).toBe("win");
+          expect(cand1!.umabans).toEqual([1]);
+          expect(cand1!.odds).toBe(odds);
+          expect(cand1!.isPositive).toBe(true);
+          expect(cand1!.ev).toBeCloseTo(0.5 * (odds as number), 9);
+          expect(result.diagnostics.judged.positiveCount).toBe(2);
+          break;
+      }
+    });
+  });
+
+  describe("buildOrderedDistributionがnullを返す入力(throwせず候補0件で返すこと)", () => {
+    it("潜在強度に+Infinityが2頭以上(固定馬2頭以上)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 1 },
+        { umaban: 2, placeProb: 1 },
+        { umaban: 3, placeProb: 0.5 },
+        { umaban: 4, placeProb: 0.3 },
+        { umaban: 5, placeProb: 0.2 },
+      ];
+      // 前提固定(空振り防止): このフィクスチャで実際にbuildOrderedDistributionがnullを返すこと。
+      expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)).toBeNull();
+
+      const oddsByUmaban = new Map<number, number | null>(horses.map((h) => [h.umaban, 10]));
+      let result: ReturnType<typeof buildWinCandidates> | undefined;
+      expect(() => {
+        result = buildWinCandidates(horses, 3, oddsByUmaban);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+    });
+
+    it("topFinishCount>=出走頭数(上位k枠が全頭を覆う)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 0.5 },
+        { umaban: 2, placeProb: 0.3 },
+        { umaban: 3, placeProb: 0.2 },
+      ];
+      // 前提固定(空振り防止): このフィクスチャで実際にbuildOrderedDistributionがnullを返すこと。
+      expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)).toBeNull();
+
+      const oddsByUmaban = new Map<number, number | null>(horses.map((h) => [h.umaban, 10]));
+      let result: ReturnType<typeof buildWinCandidates> | undefined;
+      expect(() => {
+        result = buildWinCandidates(horses, 3, oddsByUmaban);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+    });
+  });
+
+  describe("退化入力(0頭・1頭でthrowしないこと)", () => {
+    it("0頭", () => {
+      const oddsByUmaban = new Map<number, number | null>();
+      let result: ReturnType<typeof buildWinCandidates> | undefined;
+      expect(() => {
+        result = buildWinCandidates([], 3, oddsByUmaban);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      expect(result!.diagnostics.enumeratedCount).toBe(0);
+    });
+
+    it("1頭", () => {
+      const horses: JointModelHorse[] = [{ umaban: 1, placeProb: 0.5 }];
+      // n=1のときbuildOrderedDistributionはnullを返さず、単一馬が確実に1着になる
+      // (order:[1], probability:1)を返す(本ファイル筆者が実測・確認済み)。
+      expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)).toEqual([
+        { order: [1], probability: 1 },
+      ]);
+      const oddsByUmaban = new Map<number, number | null>([[1, 10]]);
+      let result: ReturnType<typeof buildWinCandidates> | undefined;
+      expect(() => {
+        result = buildWinCandidates(horses, 3, oddsByUmaban);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([
+        { betType: "win", umabans: [1], odds: 10, ev: 10, isPositive: true },
+      ]);
+    });
+  });
+
+  it("モデルが順序展開に非対応(CONDITIONAL_BERNOULLI_MODEL)ならthrow(新しい述語を作らずisOrderedPlaceJointModelを再利用)", () => {
+    const oddsByUmaban = new Map<number, number | null>([
+      [1, 10],
+      [2, 10],
+    ]);
+    expect(() =>
+      buildWinCandidates(symmetricHorses, 1, oddsByUmaban, DEFAULT_EV_CONFIG, CONDITIONAL_BERNOULLI_MODEL),
+    ).toThrow(/順序付きoutcome空間を構築できるモデルが必要です/);
+  });
+});
+
+// ============================================================================
+// AC2(#90): 単勝の値付けが「複勝(3着内)確率」で行われていないことの無条件固定
+// ============================================================================
+
+describe("AC2(#90): allocateGeneralBetsのwin配分行がev≈hitProb×oddsを満たし、winProbがplaceProbとは有意に異なること", () => {
+  it("evenHorses(9,3)フィクスチャでwinProbとplaceProbが有意に異なり、win配分行がev≈hitProb×oddsを満たすこと", () => {
+    const horses = evenHorses(9, 3);
+    // 前提固定(空振り防止): placeProb(3着内確率の入力)は3/9=0.333...であること。
+    horses.forEach((h) => expect(h.placeProb).toBeCloseTo(1 / 3, 9));
+
+    const oddsByUmaban = new Map<number, number | null>(horses.map((h) => [h.umaban, 10]));
+    const build = buildWinCandidates(horses, 3, oddsByUmaban);
+    const cand1 = build.candidates.find((c) => c.umabans[0] === 1);
+    expect(cand1).toBeDefined();
+    const winProb1 = cand1!.ev / cand1!.odds;
+
+    // ★中核(空振り防止): 1着確率(winProb)は9頭対称のため1/9であり、
+    // 3着内確率(placeProb=1/3)とは大きく異なること(許容誤差1e-9を大きく超える差)。
+    expect(winProb1).toBeCloseTo(1 / 9, 6);
+    expect(Math.abs(winProb1 - horses[0]!.placeProb)).toBeGreaterThan(0.2);
+
+    const result = allocateGeneralBets(horses, 3, build.candidates, {
+      ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+      bankroll: 1000000,
+      perRaceCap: 1000000,
+    });
+    const winAlloc = result.allocations.find((a) => a.betType === "win" && a.umabans[0] === 1);
+    expect(winAlloc).toBeDefined();
+    // ★中核: win配分行のev・hitProb・oddsの間にev≈hitProb×oddsが成り立つこと
+    // (「3着内確率で単勝を値付けする」欠陥が混入していれば、hitProb〈1着確率〉と
+    // ev〈3着内確率ベースで算出されていた場合〉が食い違い、この等式が崩れる)。
+    expect(winAlloc!.ev).toBeCloseTo(winAlloc!.hitProb * winAlloc!.odds, 9);
+    // 前提の裏返し(空振り防止): hitProbも1/3ではなく1/9に近い値であること
+    // (複勝確率ではなく1着確率が使われている直接証拠)。
+    expect(winAlloc!.hitProb).toBeCloseTo(1 / 9, 6);
+  });
+});

@@ -41,6 +41,7 @@ function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow 
     prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,
     placeOddsMin: overrides.placeOddsMin === undefined ? 3 : overrides.placeOddsMin,
+    winOdds: overrides.winOdds === undefined ? 10 : overrides.winOdds,
     ev: overrides.ev === undefined ? 1.5 : overrides.ev,
     isPositive: overrides.isPositive ?? true,
     reason: null,
@@ -208,7 +209,9 @@ describe("頭数境界(複勝候補が載るのは8頭のみ。ワイド・3連�
       trioCombo: fullOddsRecord(umabans, 3, 100000),
       comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
     });
-    const result = buildMixedCandidates(race);
+    // betTypesをplace/wide/trioに絞る(本テストの関心事は#90より前からの反証Bであり、
+    // winは`umabans.length===1`の候補も産むため絞らないと下記のumabans.length判定が汚染される)。
+    const result = buildMixedCandidates(race, { betTypes: ["place", "wide", "trio"] });
 
     // 複勝: 8頭のときだけ候補が載る(判定結果の中身も無条件で固定する)。
     if (n === 8) {
@@ -608,7 +611,7 @@ describe("入力フィールド→出力フィールドの写像(取り違え検
       row({ umaban: 8, isPositive: true, evEstimated: false }),
     ];
     const result = buildMixedCandidates(raceInput({ rows }));
-    const placeUmabans = result.candidates.filter((c) => c.umabans.length === 1).map((c) => c.umabans[0]);
+    const placeUmabans = result.candidates.filter((c) => c.betType === "place").map((c) => c.umabans[0]);
     expect(placeUmabans).toEqual([8]);
   });
 });
@@ -626,7 +629,7 @@ describe("複勝の除外境界(placeOddsMin===null / ev===null / isPositive===f
     }
     expect(result.diagnostics.place.judged).toEqual({ positiveCount: 7, notPositiveCount: 0 });
     expect(result.diagnostics.place.unjudged).toEqual({ oddsMissingCount: 1 });
-    const placeUmabans = result.candidates.filter((c) => c.umabans.length === 1).map((c) => c.umabans[0]);
+    const placeUmabans = result.candidates.filter((c) => c.betType === "place").map((c) => c.umabans[0]);
     expect(placeUmabans).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
@@ -638,7 +641,7 @@ describe("複勝の除外境界(placeOddsMin===null / ev===null / isPositive===f
     }
     expect(result.diagnostics.place.judged).toEqual({ positiveCount: 7, notPositiveCount: 0 });
     expect(result.diagnostics.place.unjudged).toEqual({ oddsMissingCount: 1 });
-    const placeUmabans = result.candidates.filter((c) => c.umabans.length === 1).map((c) => c.umabans[0]);
+    const placeUmabans = result.candidates.filter((c) => c.betType === "place").map((c) => c.umabans[0]);
     expect(placeUmabans).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
@@ -650,7 +653,7 @@ describe("複勝の除外境界(placeOddsMin===null / ev===null / isPositive===f
     }
     expect(result.diagnostics.place.judged).toEqual({ positiveCount: 7, notPositiveCount: 1 });
     expect(result.diagnostics.place.unjudged).toEqual({ oddsMissingCount: 0 });
-    const placeUmabans = result.candidates.filter((c) => c.umabans.length === 1).map((c) => c.umabans[0]);
+    const placeUmabans = result.candidates.filter((c) => c.betType === "place").map((c) => c.umabans[0]);
     expect(placeUmabans).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 });
@@ -725,8 +728,8 @@ describe("yoso×組合せ(候補ゼロの理由が「未取得」か「yoso」�
 // ============================================================================
 
 describe("券種フィルタ(options.betTypes)", () => {
-  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/wide/trio)が対象になること", () => {
-    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "wide", "trio"]);
+  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/win/wide/trio)が対象になること", () => {
+    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "win", "wide", "trio"]);
     const rows = allCandidateRows(8);
     const umabans = umabansOf(8);
     const result = buildMixedCandidates(
@@ -776,20 +779,21 @@ describe("券種フィルタ(options.betTypes)", () => {
   });
 
   /**
-   * ★構造的な再発防止(#91・boss裁定)。
+   * ★構造的な再発防止(#91・boss裁定。#90でwinを追加した後の状態を固定)。
    *
    * `ALL_MIXED_CANDIDATE_BET_TYPES`が`AllocationBetType`(core)の全メンバーを含むとは
    * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定する。
-   * `AllocationBetType`にメンバーが増えたとき(#92完了後の#90〈#23-B2〉でのwin対応・#24の馬連等)、この配列に
-   * 足すべきかどうかの判断を人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」
-   * 事故〈配列は3値のまま、JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が
-   * 起きないよう機械的に検出する)。
+   * #90でwinの候補ビルダー(`buildWinCandidates`)が新設されたため、除外は無くなった
+   * (`AllocationBetType`の全メンバーと一致する)。`AllocationBetType`に新しいメンバーが
+   * 増えたとき(#24の馬連等)、この配列に足すべきかどうかの判断を人間が必ず一度は行うように
+   * する(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、JSDocは「全券種」と
+   * 言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種を固定すること(#91: winのみ)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種を固定すること(#90: 除外は無い)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual(["win"]);
+    expect(excluded).toEqual([]);
   });
 });
 
@@ -986,7 +990,11 @@ describe("Issue #76 AC-A6: production から消えた「umabans.length→券種�
       trioCombo: fullOddsRecord(umabans, 3, 100000),
       comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
     });
-    const result = buildMixedCandidates(race);
+    // betTypesをplace/wide/trioの3券種に絞る(#90でwinが既定対象に加わり、winもumabans.length===1の
+    // 候補を産むため、絞らないとOLD_LENGTH_TO_BET_TYPE[1]="place"の前提〈umabans.length===1は
+    // placeのみ〉が崩れる。本テストの関心事は#76時代の3券種の対応表であり、winとの区別は
+    // 下記「win候補(#90)」describeで別途検証する)。
+    const result = buildMixedCandidates(race, { betTypes: ["place", "wide", "trio"] });
 
     // 前提固定(空振り防止): 複勝(8)・ワイド(C(8,2)=28)・3連複(C(8,3)=56)の3券種すべてが
     // 実際に候補として生成されていること(1種類にしか到達していなければ以下の対応検査が空振りする)。
@@ -997,5 +1005,104 @@ describe("Issue #76 AC-A6: production から消えた「umabans.length→券種�
     for (const candidate of result.candidates) {
       expect(candidate.betType).toBe(OLD_LENGTH_TO_BET_TYPE[candidate.umabans.length]);
     }
+  });
+});
+
+// ============================================================================
+// win候補(単勝・Issue #90・#23-B2)
+// ============================================================================
+
+describe("win候補(#90・#23-B2)", () => {
+  it("betTypesにwinを含めない場合: kind='not-requested'、候補も0件", () => {
+    const rows = allCandidateRows(8);
+    const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["place", "wide", "trio"] });
+    expect(result.diagnostics.win).toEqual({ kind: "not-requested" });
+    expect(result.candidates.filter((c) => c.betType === "win")).toHaveLength(0);
+  });
+
+  it("yosoガード(D-4): oddsStatus='yoso'のときwinOddsが供給されていてもkind='unavailable'(reason='yoso')で候補0件", () => {
+    const rows = allCandidateRows(8).map((r) => row({ ...r, winOdds: 100 }));
+    const result = buildMixedCandidates(raceInput({ rows, oddsStatus: "yoso" }), {
+      betTypes: ["place", "win"],
+    });
+    expect(result.diagnostics.win).toEqual({ kind: "unavailable", reason: "yoso" });
+    expect(result.candidates.filter((c) => c.betType === "win")).toHaveLength(0);
+  });
+
+  it("yosoガードの独立性: oddsStatusだけを'result'に変えると同じ行データでwin候補が生成されること", () => {
+    const rows = allCandidateRows(8).map((r) => row({ ...r, winOdds: 100 }));
+    const result = buildMixedCandidates(raceInput({ rows, oddsStatus: "result" }), {
+      betTypes: ["win"],
+    });
+    expect(result.diagnostics.win.kind).toBe("judged");
+    expect(result.candidates.filter((c) => c.betType === "win").length).toBeGreaterThan(0);
+  });
+
+  it("オッズ状態(judged): winOdds=null→oddsMissingCount、malformed(0.5)→oddsMalformedCount、EV非プラス→notPositiveCount、EVプラス→positiveCountかつ候補に出ること", () => {
+    const rows: AnalysisRow[] = [
+      row({ umaban: 1, winOdds: null }), // 欠損
+      row({ umaban: 2, winOdds: 0.5 }), // malformed(1.0未満)
+      row({ umaban: 3, winOdds: 1.01 }), // 正常だがEV非プラス(1着確率が低いため)
+      row({ umaban: 4, winOdds: 1000 }), // 正常・EVプラス
+      row({ umaban: 5, winOdds: 1000 }),
+      row({ umaban: 6, winOdds: 1000 }),
+      row({ umaban: 7, winOdds: 1000 }),
+      row({ umaban: 8, winOdds: 1000 }),
+    ];
+    const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["win"] });
+    expect(result.diagnostics.win.kind).toBe("judged");
+    if (result.diagnostics.win.kind !== "judged") throw new Error("kind='judged'のはず");
+    expect(result.diagnostics.win.unjudged.oddsMissingCount).toBe(1);
+    expect(result.diagnostics.win.unjudged.oddsMalformedCount).toBe(1);
+    expect(result.diagnostics.win.judged.notPositiveCount).toBeGreaterThanOrEqual(1);
+    expect(result.diagnostics.win.judged.positiveCount).toBeGreaterThanOrEqual(1);
+    const winCandidates = result.candidates.filter((c) => c.betType === "win");
+    expect(winCandidates.every((c) => c.isPositive)).toBe(true);
+    expect(winCandidates.find((c) => c.umabans[0] === 1)).toBeUndefined();
+    expect(winCandidates.find((c) => c.umabans[0] === 2)).toBeUndefined();
+  });
+
+  /**
+   * 反証B相当(頭数による門前払いをしない。AC3): 1〜4頭・5〜7頭でもwin候補が
+   * 「頭数」を理由に除外されないこと(resolvePlaceBetTargetをwinには適用しない)。
+   * n=2・3はPLACKETT_LUCE_MODEL自身の構造的縮退(topFinishCount=3が出走頭数を覆う)により
+   * buildOrderedDistributionがnullを返し候補が0件になるが、これは「頭数門前払い」ではなく
+   * モデルの数学的な性質である(診断値がkind='judged'のまま〈'unavailable'にならない〉
+   * ことで、本コードが独自の頭数ゲートを追加していないことを区別して固定する)。
+   */
+  describe.each([1, 2, 3, 4, 5, 6, 7])("頭数=%i頭でも「頭数」を理由にwin候補が除外されないこと", (n) => {
+    it(`n=${n}: diagnostics.win.kindは常に'judged'(unavailableにならない)`, () => {
+      const rows = allCandidateRows(n).map((r) => row({ ...r, winOdds: 1000 }));
+      const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["win"] });
+      expect(result.diagnostics.win.kind).toBe("judged");
+    });
+  });
+
+  it("n=1・4〜7では実際にwin候補が1件以上生成されること(モデルが解ける頭数での実証)", () => {
+    for (const n of [1, 4, 5, 6, 7]) {
+      const rows = allCandidateRows(n).map((r) => row({ ...r, winOdds: 1000 }));
+      const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["win"] });
+      expect(result.candidates.filter((c) => c.betType === "win").length).toBeGreaterThan(0);
+    }
+  });
+
+  it("n=2・3ではモデルの構造的縮退によりwin候補が0件になること(頭数門前払いではない証拠として、診断値は'judged'のまま)", () => {
+    for (const n of [2, 3]) {
+      const rows = allCandidateRows(n).map((r) => row({ ...r, winOdds: 1000 }));
+      const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["win"] });
+      expect(result.candidates.filter((c) => c.betType === "win")).toHaveLength(0);
+      expect(result.diagnostics.win).toEqual({
+        kind: "judged",
+        judged: { positiveCount: 0, notPositiveCount: 0 },
+        unjudged: { oddsMissingCount: 0, oddsMalformedCount: 0 },
+      });
+    }
+  });
+
+  it("既定(betTypes省略)でもwinが対象に含まれること(ALL_MIXED_CANDIDATE_BET_TYPESにwinが入ったため)", () => {
+    const rows = allCandidateRows(8).map((r) => row({ ...r, winOdds: 1000 }));
+    const result = buildMixedCandidates(raceInput({ rows }));
+    expect(result.diagnostics.win.kind).toBe("judged");
+    expect(result.candidates.filter((c) => c.betType === "win").length).toBeGreaterThan(0);
   });
 });

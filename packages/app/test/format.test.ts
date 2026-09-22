@@ -79,6 +79,7 @@ describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
     prior: 0.4,
     adjustedProb: 0.4,
     placeOddsMin: 3,
+    winOdds: 10,
     ev: isPositive ? 1.2 : 0.8,
     isPositive,
     reason: null,

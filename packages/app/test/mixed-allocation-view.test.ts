@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ALLOCATION_BET_TYPE_UMABAN_COUNT,
   buildComboOddsKey,
   type AllocationCandidate,
   type GeneralBetAllocation,
@@ -19,6 +20,7 @@ import {
   type MixedCandidateBuildInput,
   type MixedCandidateDiagnostics,
   type PlaceCandidateDiagnostics,
+  type WinCandidateDiagnosticsView,
 } from "../src/shared/mixed-candidates.js";
 import { NOT_DIVERSIFIED_NOTE, probabilitySumWarning } from "../src/renderer/bet-allocation-view.js";
 import { buildRaceAllocation, resolvePlaceBetTarget } from "../src/shared/race-allocation.js";
@@ -26,6 +28,7 @@ import {
   aggregateUnjudgedCounts,
   buildHiddenAllocationsBlocks,
   buildMixedAllocationBreakdown,
+  type MixedAllocationBreakdown,
   buildMixedAllocationDisplay,
   buildMixedAllocationNotices,
   comboBetTypeNote,
@@ -33,6 +36,7 @@ import {
   formatHiddenAllocationsSummary,
   formatUnjudgedNote,
   MIXED_ALLOCATION_INVALID_MESSAGE,
+  MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER,
   MIXED_ALLOCATION_VISIBLE_LIMIT,
   mixedBetTypeLabel,
   placeUnavailableNoteForMixed,
@@ -60,6 +64,7 @@ function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow 
     prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,
     placeOddsMin: overrides.placeOddsMin === undefined ? 3 : overrides.placeOddsMin,
+    winOdds: overrides.winOdds === undefined ? 10 : overrides.winOdds,
     ev: overrides.ev === undefined ? 1.5 : overrides.ev,
     isPositive: overrides.isPositive ?? true,
     reason: null,
@@ -664,6 +669,7 @@ function builtComboDiag(overrides: {
 /** テスト用のMixedCandidateDiagnosticsを組み立てる補助関数。 */
 function mixedDiagnostics(overrides: {
   place?: PlaceCandidateDiagnostics;
+  win?: WinCandidateDiagnosticsView;
   wide?: ComboCandidateDiagnosticsView;
   trio?: ComboCandidateDiagnosticsView;
 } = {}): MixedCandidateDiagnostics {
@@ -672,6 +678,11 @@ function mixedDiagnostics(overrides: {
       kind: "judged",
       judged: { positiveCount: 1, notPositiveCount: 0 },
       unjudged: { oddsMissingCount: 0 },
+    },
+    win: overrides.win ?? {
+      kind: "judged",
+      judged: { positiveCount: 0, notPositiveCount: 0 },
+      unjudged: { oddsMissingCount: 0, oddsMalformedCount: 0 },
     },
     wide: overrides.wide ?? builtComboDiag(),
     trio: overrides.trio ?? builtComboDiag(),
@@ -709,7 +720,25 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
 // AC10: 券種別内訳の合計がtotalStakeと一致すること
 // ============================================================================
 
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90): 表示順配列がALLOCATION_BET_TYPE_UMABAN_COUNTのキー集合と同一集合であること", () => {
+  it("キーの集合が一致すること(順序は指定しない)", () => {
+    const orderSet = new Set(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER);
+    const umabanCountKeySet = new Set(Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT));
+    expect(orderSet).toEqual(umabanCountKeySet);
+    // 前提固定(空振り防止): 集合が空でないこと(両方0件なら空虚な一致になる)。
+    expect(orderSet.size).toBeGreaterThan(0);
+  });
+});
+
 describe("AC10: buildMixedAllocationBreakdown — 券種別内訳(金額・点数)の合計がtotalStakeと一致すること", () => {
+  /** breakdown(Record<AllocationBetType,{stake;count}>)をキー手書きせずに走査して合算する(AC5)。 */
+  function sumBreakdown(breakdown: MixedAllocationBreakdown): { stake: number; count: number } {
+    return Object.values(breakdown).reduce(
+      (acc, g) => ({ stake: acc.stake + g.stake, count: acc.count + g.count }),
+      { stake: 0, count: 0 },
+    );
+  }
+
   it("複勝・ワイド・3連複それぞれ異なる金額・点数を持つ場合に正しく集計されること(非対称データ)", () => {
     const allocations = [
       allocation({ umabans: [1], stake: 300 }),
@@ -721,28 +750,33 @@ describe("AC10: buildMixedAllocationBreakdown — 券種別内訳(金額・点�
     const result = generalResult(allocations);
     const breakdown = buildMixedAllocationBreakdown(result);
     expect(breakdown.place).toEqual({ stake: 300, count: 1 });
+    expect(breakdown.win).toEqual({ stake: 0, count: 0 });
     expect(breakdown.wide).toEqual({ stake: 1200, count: 2 });
     expect(breakdown.trio).toEqual({ stake: 1100, count: 1 });
-    // 前提固定: 3群の合計がtotalStakeと一致すること(AC10の核心)。
-    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
-    expect(sum).toBe(result.totalStake);
+    // 前提固定: 4群の合計がtotalStakeと一致すること(AC10の核心)。
+    expect(sumBreakdown(breakdown).stake).toBe(result.totalStake);
   });
 
   it("空の配分(allocations=[])でも合計0でtotalStakeと一致すること", () => {
     const result = generalResult([]);
     const breakdown = buildMixedAllocationBreakdown(result);
-    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
+    const sum = sumBreakdown(breakdown).stake;
     expect(sum).toBe(0);
     expect(sum).toBe(result.totalStake);
   });
 
-  it("実データ(buildMixedRaceAllocationの本物の結果)でも内訳の合計がtotalStakeと一致すること(統合確認)", () => {
+  it("実データ(buildMixedRaceAllocationの本物の結果)でも内訳の合計がtotalStakeと一致すること(統合確認。win行を含むフィクスチャ)", () => {
     const n = 8;
     const umabans = umabansOf(n);
+    // winOddsを高め(5000倍)にし、ワイド・3連複のオッズは控えめ(50倍・100倍)にする。
+    // win候補のEV(約625)がワイド・3連複のEV(1桁〜10程度)を大きく上回るようにすることで、
+    // 貪欲配分が実際にwinへ予算を配分すること(stake>0)を安定して再現する
+    // (実測: winOdds=10・combo=30000/90000だとwinのEV〈約125〉がワイド・3連複のEV
+    // 〈約3000〜〉に負けてstakeが常に0になった。本ファイル筆者がスクリプトで実測・確認済み)。
     const race = raceInput({
-      rows: allCandidateRows(n),
-      wideCombo: fullOddsRecord(umabans, 2, 30000),
-      trioCombo: fullOddsRecord(umabans, 3, 90000),
+      rows: allCandidateRows(n).map((r) => row({ ...r, winOdds: 5000 })),
+      wideCombo: fullOddsRecord(umabans, 2, 50),
+      trioCombo: fullOddsRecord(umabans, 3, 100),
       comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available") },
     });
     const view = buildMixedRaceAllocation(race, settings());
@@ -751,10 +785,12 @@ describe("AC10: buildMixedAllocationBreakdown — 券種別内訳(金額・点�
       throw new Error("kind='mixed'のはず");
     }
     const breakdown = buildMixedAllocationBreakdown(view.result);
-    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
+    // 前提固定(空振り防止): 実際にwin行(stake>0)が含まれていること。
+    expect(view.result.allocations.some((a) => a.betType === "win" && a.stake > 0)).toBe(true);
+    expect(breakdown.win.stake).toBeGreaterThan(0);
     // 前提固定: 実際に金額が動いていること(空振り防止)。
     expect(view.result.totalStake).toBeGreaterThan(0);
-    expect(sum).toBe(view.result.totalStake);
+    expect(sumBreakdown(breakdown).stake).toBe(view.result.totalStake);
   });
 
   it("Issue #76検出力: umabans:[1]の2件をbetType:\"place\"と\"wide\"にしても別バケツに分かれること(umabans.lengthからの逆算では検出できない不整合入力)", () => {
@@ -772,24 +808,25 @@ describe("AC10: buildMixedAllocationBreakdown — 券種別内訳(金額・点�
     expect(breakdown.trio).toEqual({ stake: 0, count: 0 });
   });
 
-  it("Issue #92: betType='win'の配分行は内訳(place/wide/trio)のどのバケツにも計上されないこと(MixedAllocationBreakdownはplace/wide/trioの3群のみを持つ。winは#90まで実データに現れないが、型としてbetType='win'を許容するようになったため意図的な除外を固定する)", () => {
+  it("D-2改訂(#90): betType='win'の配分行は独立した4群目として計上され、他のバケツ(place等)には混入しないこと(place/win/wide/trioの4群がすべてtotalStakeへ合算される)", () => {
     const allocations = [
       allocation({ umabans: [1], betType: "win", stake: 1000 }),
       allocation({ umabans: [2], betType: "place", stake: 300 }),
     ];
     const result = generalResult(allocations);
     const breakdown = buildMixedAllocationBreakdown(result);
-    // winのstakeがどこにも紛れ込んでいないことを固定する(placeに誤って混入しないこと含む)。
+    // winが専用のバケツに計上され、placeへ誤って混入していないこと。
+    expect(breakdown.win).toEqual({ stake: 1000, count: 1 });
     expect(breakdown.place).toEqual({ stake: 300, count: 1 });
     expect(breakdown.wide).toEqual({ stake: 0, count: 0 });
     expect(breakdown.trio).toEqual({ stake: 0, count: 0 });
-    // 前提の裏返し: 3群の合計(1300ではなく300)はtotalStake(1300)とは一致しない。
-    // これはbuildMixedAllocationBreakdownの契約(place/wide/trioの3群のみが対象)であって
-    // バグではないことを明示する(AC10の「合計=totalStake」はwinが存在しない前提の契約)。
-    const sum = breakdown.place.stake + breakdown.wide.stake + breakdown.trio.stake;
-    expect(sum).toBe(300);
+    // ★中核(#92時代からの反転): 4群の合計(1300)はtotalStake(1300)と一致すること
+    // (win専用バケツが加わったことで、Record全体を走査すれば常にtotalStakeへ合算される
+    // というAC10の不変式がwin行を含むフィクスチャでも成り立つ)。
+    const sum = sumBreakdown(breakdown).stake;
+    expect(sum).toBe(1300);
     expect(result.totalStake).toBe(1300);
-    expect(sum).not.toBe(result.totalStake);
+    expect(sum).toBe(result.totalStake);
   });
 });
 
@@ -1137,6 +1174,34 @@ describe("AC15: aggregateUnjudgedCounts/totalUnjudgedCount — 券種横断の�
     expect(totalUnjudgedCount(counts)).toBe(0);
   });
 
+  it("D-3(#90): winのoddsMissingCount/oddsMalformedCountも合算されること(oddsUnfetchedCountは持たないため加算しない)", () => {
+    const diagnostics = mixedDiagnostics({
+      place: { kind: "judged", judged: { positiveCount: 1, notPositiveCount: 0 }, unjudged: { oddsMissingCount: 2 } },
+      win: {
+        kind: "judged",
+        judged: { positiveCount: 1, notPositiveCount: 0 },
+        unjudged: { oddsMissingCount: 4, oddsMalformedCount: 7 },
+      },
+      wide: builtComboDiag({ oddsMissingCount: 3, oddsUnfetchedCount: 5, oddsMalformedCount: 1 }),
+      trio: builtComboDiag({ oddsMissingCount: 1, oddsUnfetchedCount: 0, oddsMalformedCount: 2 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    // place(2)+win(4)+wide(3)+trio(1)=10、oddsUnfetchedCountはwinを持たないためwide+trioのみ(5)、
+    // oddsMalformedCountはwin(7)+wide(1)+trio(2)=10。
+    expect(counts).toEqual({ oddsMissingCount: 10, oddsUnfetchedCount: 5, oddsMalformedCount: 10 });
+  });
+
+  it("D-3(#90): winがnot-requested/unavailableのときは0として扱われること(対象外と判定不能を混同しない)", () => {
+    const notRequested = aggregateUnjudgedCounts(mixedDiagnostics({ win: { kind: "not-requested" } }));
+    expect(notRequested.oddsMissingCount).toBe(0);
+    expect(notRequested.oddsMalformedCount).toBe(0);
+    const unavailable = aggregateUnjudgedCounts(
+      mixedDiagnostics({ win: { kind: "unavailable", reason: "yoso" } }),
+    );
+    expect(unavailable.oddsMissingCount).toBe(0);
+    expect(unavailable.oddsMalformedCount).toBe(0);
+  });
+
   it("not-requested(対象外にした券種)は判定不能に加算しないこと(対象外と判定不能を混同しない)", () => {
     const diagnostics = mixedDiagnostics({
       wide: { kind: "not-requested" },
@@ -1318,16 +1383,22 @@ describe("MIXED_ALLOCATION_INVALID_MESSAGE — ユーザー向け文言であり
 // 一致するケースと大きく食い違うケースの両方を持つ(boss指示)。
 // ============================================================================
 
-/** 複勝のみ1頭が候補になる8頭立ての行配列を作る(bet-allocation-view.test.tsの流儀を踏襲)。 */
+/**
+ * 複勝のみ1頭が候補になる8頭立ての行配列を作る(bet-allocation-view.test.tsの流儀を踏襲)。
+ * winOddsは全頭nullにする(Issue #90でwinが既定対象に加わったため。本describeの関心事は
+ * 複勝とワイド・3連複の関係〈AC11〉であり、winが同じ予算枠を奪い合うと「一致するケース」の
+ * 前提〈組合せ〈ワイド・3連複〉に1円も配分されなければ複勝のみの提案額と一致する〉が崩れる。
+ * win固有の予算競合は`mixed-race-allocation-win.test.ts`で別途検証する)。
+ */
 function candidateRow(umaban: number, adjustedProb: number, placeOddsMin: number): AnalysisRow {
   const ev = adjustedProb * placeOddsMin;
-  return row({ umaban, adjustedProb, placeOddsMin, ev, isPositive: ev > 1 });
+  return row({ umaban, adjustedProb, placeOddsMin, ev, isPositive: ev > 1, winOdds: null });
 }
 function eightRunnersOnePlaceCandidate(): AnalysisRow[] {
   return [
     candidateRow(1, 0.5, 2.5),
     ...[2, 3, 4, 5, 6, 7, 8].map((u) =>
-      row({ umaban: u, adjustedProb: 0.36, isPositive: false, ev: null, placeOddsMin: null }),
+      row({ umaban: u, adjustedProb: 0.36, isPositive: false, ev: null, placeOddsMin: null, winOdds: null }),
     ),
   ];
 }
@@ -1486,7 +1557,12 @@ describe("buildMixedAllocationDisplay — display.probabilitySumWarningがkind='
 /** テスト用のMixedAllocationDisplayを組み立てる補助関数(probabilitySumWarning以外は空・0値の既定)。 */
 function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAllocationDisplay {
   return {
-    breakdown: { place: { stake: 0, count: 0 }, wide: { stake: 0, count: 0 }, trio: { stake: 0, count: 0 } },
+    breakdown: {
+      place: { stake: 0, count: 0 },
+      win: { stake: 0, count: 0 },
+      wide: { stake: 0, count: 0 },
+      trio: { stake: 0, count: 0 },
+    },
     sortedAllocations: [],
     unjudged: { oddsMissingCount: 0, oddsUnfetchedCount: 0, oddsMalformedCount: 0 },
     wideNote: null,

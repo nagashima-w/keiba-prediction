@@ -2312,6 +2312,64 @@ describe("runAnalysis(分析パイプライン)", () => {
     expect(horse1.referenceEv).toBeNull(); // 複勝オッズ下限が無いため算出不可。
   });
 
+  it("result.rows[].winOdds に単勝オッズを供給する(Issue #90・#23-B2。promptInput.horsesと同じ供給元)", async () => {
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      baseDeps(),
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    // 1番: 単勝5.2倍(fakeRaceDataのwin[1].odds)。
+    expect(byUmaban.get(1)!.winOdds).toBe(5.2);
+    // 3番: 単勝オッズ欠損(fakeRaceDataのwin[3].odds=null)→ null。
+    expect(byUmaban.get(3)!.winOdds).toBeNull();
+  });
+
+  it("result.rows[].winOdds は yoso(複勝未発売)でも予想オッズ値をそのまま供給する(promptInput.horsesと同じ挙動)", async () => {
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceData(RACE_ID, {}, "yoso")),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    expect(byUmaban.get(1)!.winOdds).toBe(5.2);
+    expect(byUmaban.get(1)!.evEstimated).toBe(true); // 前提(空振り防止): yosoで推定EV経路であること。
+  });
+
+  it("result.rows[].winOdds は値域外(0・1.0未満・非有限)でも生値のまま保持しnullに潰さない(placeOddsMinと同じ流儀)", async () => {
+    const base = fakeRaceData(RACE_ID, {}, "result");
+    const race: RaceData = {
+      ...base,
+      odds: {
+        ...base.odds,
+        win: {
+          ...base.odds.win,
+          1: { odds: 0, ninki: 1 },
+          2: { odds: 0.5, ninki: 2 },
+        },
+      },
+    };
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => race),
+    };
+    const result = await runAnalysis(
+      parseRaceId(RACE_ID),
+      parseKaisaiDate(KAISAI),
+      deps,
+      onProgress,
+    );
+    const byUmaban = new Map(result.rows.map((r) => [r.umaban, r]));
+    expect(byUmaban.get(1)!.winOdds).toBe(0);
+    expect(byUmaban.get(2)!.winOdds).toBe(0.5);
+  });
+
   it("LLMがフェイルセーフで prior にフォールバックした場合、result.fallback=true を返す", async () => {
     const analyze = vi.fn(
       async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({

@@ -39,6 +39,7 @@ function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow 
     prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,
     placeOddsMin: overrides.placeOddsMin === undefined ? 3 : overrides.placeOddsMin,
+    winOdds: overrides.winOdds === undefined ? 10 : overrides.winOdds,
     ev: overrides.ev === undefined ? 1.5 : overrides.ev,
     isPositive: overrides.isPositive ?? true,
     reason: null,
@@ -956,6 +957,7 @@ function mixedOutcomeFor(allocations: readonly GeneralBetAllocation[]): MixedRac
       topFinishCount: 3,
       diagnostics: {
         place: { kind: "not-requested" },
+        win: { kind: "not-requested" },
         wide: { kind: "not-requested" },
         trio: { kind: "not-requested" },
       },
@@ -1006,5 +1008,44 @@ describe("mixedBetsOf(buildAllocationRecord経由) — betTypeを直接使い、
     const key = buildComboOddsKey([1]);
     const betTypesForKey = rec.bets.filter((b) => b.comboKey === key).map((b) => b.betType);
     expect(new Set(betTypesForKey)).toEqual(new Set(["place", "wide"]));
+  });
+
+  it("AC7(#90): betType='win'の配分行は('win', buildComboOddsKey([u]))として保存され、同じ馬のbetType='place'行とは別行になること(allocation-record.tsはコード変更不要のはず)", () => {
+    const allocations: GeneralBetAllocation[] = [
+      {
+        umabans: [3],
+        betType: "win",
+        stake: 500,
+        continuousFraction: 0.05,
+        scaledFraction: 0.025,
+        hitProb: 0.2,
+        odds: 8,
+        ev: 1.6,
+        droppedBelowMinimum: false,
+      },
+      {
+        umabans: [3],
+        betType: "place",
+        stake: 300,
+        continuousFraction: 0.1,
+        scaledFraction: 0.05,
+        hitProb: 0.5,
+        odds: 3,
+        ev: 1.5,
+        droppedBelowMinimum: false,
+      },
+    ];
+    const outcome = mixedOutcomeFor(allocations);
+    const rec = buildAllocationRecord(outcome, settings(), "result");
+
+    expect(rec.bets).toHaveLength(2);
+    const key = buildComboOddsKey([3]);
+    const winBet = rec.bets.find((b) => b.betType === "win");
+    const placeBet = rec.bets.find((b) => b.betType === "place");
+    // ★中核: win行のcomboKeyはbuildComboOddsKey([u])(=複勝と同一形式)であり、
+    // betTypeだけが異なる別行として保存されること。
+    expect(winBet).toEqual({ betType: "win", comboKey: key, stake: 500, odds: 8, ev: 1.6 });
+    expect(placeBet).toEqual({ betType: "place", comboKey: key, stake: 300, odds: 3, ev: 1.5 });
+    expect(winBet!.comboKey).toBe(placeBet!.comboKey);
   });
 });

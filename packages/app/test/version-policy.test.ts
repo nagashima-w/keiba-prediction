@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.7.3";
+const EXPECTED_APP_VERSION = "1.8.0";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,17 +234,32 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.7.3(Issue #92・#23-B1b: 順序付き outcome 空間と判定不能の受け皿)である", () => {
+  it("root と app の version が 1.8.0(Issue #90・#23-B2: 単勝(win)の候補ビルダー・配分経路配線・UI表示・永続化)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
     // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5、
-    // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2。
-    // 本回は #91(#23-B1a)。`AllocationBetType` に `"win"` を追加し、`buildComboCandidates`・
-    // `validateCandidates` に `betType==="win"` 専用の門番(throw)を新設した。ただし
-    // `resolveMixedBetTypes`(`mixed-race-allocation.ts`)は`["place"]`にwide/trioしか積まず、
-    // `AllocationCandidate`の本番生成箇所(`combo-bet-allocation.ts`・`mixed-candidates.ts`の
-    // 2箇所のみ)もどちらも`"win"`を産出できないため、新設した2つのthrowも
-    // `mixedBetTypeLabel("win")`も本番からは到達不能。利用者から見える変化・分析結果の数値変化は
-    // 一切ない。振る舞いの差分は型の許容範囲拡大のみのため patch(詳細は docs/versioning.md)。
+    // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2、
+    // #92(#23-B1b)が 1.7.3。
+    // 本回は #90(#23-B2)。minor(利用者から見てできることが増える・分析結果の数値が変わる)。
+    // #91(#23-B1a)・#92(#23-B1b)は型・アルゴリズムの土台を先に用意しただけで「本番からは
+    // 到達不能」だったが、**#90でその到達不能性が解消された**:
+    // - `mixed-candidates.ts`の`buildWinCandidatesForBetType`(core`buildWinCandidates`委譲)が
+    //   `betType:"win"`のAllocationCandidateを実際に生成するようになった
+    //   (`ALL_MIXED_CANDIDATE_BET_TYPES`にwinを追加)。
+    // - `mixed-race-allocation.ts`の`resolveMixedBetTypes`が`"win"`を`"place"`と同じく常時
+    //   積むようになり(専用ON/OFF設定は作っていない。D-10)、混在配分経路(`buildMixedRaceAllocation`)
+    //   の戻り値に`betType:"win"`の配分行が実際に現れる。
+    // - `allocation-proposal-view.ts`の`betTypeLabel`が`"win"`ケースを持つようになり、
+    //   `mixedBetTypeLabel("win")`(既に#91で「単勝」を返していた)との非対称が解消された。
+    // したがって**旧版のこのコメントが述べていた「利用者から見える変化・分析結果の数値変化は
+    // 一切ない」は#90で偽になった**(D-11指摘)。実際の変化:
+    // - 単勝がアプリの配分提案に実際に登場するようになった(できることが増える)。
+    // - win候補が1件でもあると`allocateGeneralBets`が集合空間+畳み込み(foldToCandidateSubsets)
+    //   ではなく順序付きoutcome空間を使う経路に切り替わるため、**win自体だけでなく
+    //   place/wide/trioの配分額も従来と変わりうる**(同一の確率空間から同時に配分を決める設計。
+    //   `combo-bet-allocation.ts`の`allocateGeneralBets`JSDoc参照)。
+    // major ではない根拠: 保存済みデータ・設定・エクスポートJSONへの後方非互換は無い。
+    // `analysis_bets`テーブルはスキーマ変更なしで`bet_type="win"`行が増えるだけであり
+    // (`allocation-record.ts`は無変更)、既存の複勝・ワイド・三連複の行の形は変わらない。
     // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならないことを
     // 固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);

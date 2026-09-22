@@ -223,6 +223,13 @@ export interface AnalysisRow {
   /** 使用した複勝オッズ下限。欠損なら null。 */
   readonly placeOddsMin: number | null;
   /**
+   * 単勝オッズ(Issue #90・#23-B2)。`placeOddsMin`と同じ流儀で、値域外(0・1.0未満・非有限)
+   * でも生値をそのまま保持しnullに潰さない(値域判定は消費側`isUsableOdds`の責務)。
+   * オッズ未発売(`oddsStatus="yoso"`)でも予想オッズ値が入ることがある
+   * (`analysis-pipeline.ts`のwinOdds解決ヘルパ参照)。欠損時はnull。
+   */
+  readonly winOdds: number | null;
+  /**
    * 期待値(補正後確率 × 複勝下限)。オッズ欠損なら null。
    * TODO(将来改善): EV=null の行に対し、core HorseEv.excludedReason(「複勝オッズに該当馬番が無い」等)を
    * 行レベルでUI表示する。現状は null を一律「-」表示にしており、対象外の理由までは画面に出していない。

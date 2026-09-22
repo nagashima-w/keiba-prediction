@@ -489,19 +489,20 @@ describe("買い目行(AC4)", () => {
     expect(view.bets[0]!.ev).toBe(formatEv(null));
   });
 
-  it("並び順はview model側で決定的に決めること(入力順を崩しても券種順に並ぶ)", () => {
+  it("並び順はview model側で決定的に決めること(入力順を崩しても券種順に並ぶ。D-5: winはplaceの次)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
         skipReasonCode: null,
         bets: [
           bet({ betType: "trio", comboKey: "040709", stake: 300, odds: 12, ev: 1.3 }),
-          bet({ betType: "place", comboKey: "04", stake: 100, odds: 2, ev: 1.1 }),
           bet({ betType: "wide", comboKey: "0407", stake: 200, odds: 3, ev: 1.2 }),
+          bet({ betType: "win", comboKey: "04", stake: 50, odds: 8, ev: 1.6 }),
+          bet({ betType: "place", comboKey: "04", stake: 100, odds: 2, ev: 1.1 }),
         ],
       }),
     );
-    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "ワイド", "三連複"]);
+    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "三連複"]);
   });
 
   it("comboKeyが復号不能(parseComboOddsKeyがnull)なら生キーをそのまま表示すること(bet_typeとの長さ不一致は検査しない)", () => {
@@ -516,24 +517,27 @@ describe("買い目行(AC4)", () => {
   });
 });
 
-describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の3ラベルが同一文字列であること(Issue #76: 統合はしないが値は一致させる。相互参照JSDoc対応)", () => {
-  it("place/wide/trioそれぞれで同じ日本語ラベルを返すこと", () => {
+describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の4ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応)", () => {
+  it("place/win/wide/trioそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
         skipReasonCode: null,
         bets: [
           bet({ betType: "place", comboKey: "04" }),
+          bet({ betType: "win", comboKey: "05" }),
           bet({ betType: "wide", comboKey: "0407" }),
           bet({ betType: "trio", comboKey: "040709" }),
         ],
       }),
     );
-    expect(view.bets.map((b) => b.betTypeLabel)).toEqual([
-      mixedBetTypeLabel("place"),
-      mixedBetTypeLabel("wide"),
-      mixedBetTypeLabel("trio"),
-    ]);
+    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "三連複"]);
+    // mixedBetTypeLabel側も同じ日本語リテラルを返すことを、betTypeLabelとは独立に固定する
+    // (両関数を比較する形〈旧実装〉だと両方が一緒にずれても緑のまま通ってしまう。boss指摘)。
+    expect(mixedBetTypeLabel("place")).toBe("複勝");
+    expect(mixedBetTypeLabel("win")).toBe("単勝");
+    expect(mixedBetTypeLabel("wide")).toBe("ワイド");
+    expect(mixedBetTypeLabel("trio")).toBe("三連複");
   });
 });
 

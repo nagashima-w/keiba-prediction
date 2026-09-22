@@ -172,12 +172,18 @@ export type MixedRaceAllocationView =
   | MixedRaceAllocationInvalid;
 
 /**
- * D-1: 設定(2つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。複勝は常に含める。
+ * D-1: 設定(2つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
+ * 複勝・単勝は常に含める(A-2是正・Issue #90・#23-B2)。単勝には`includeWinInAllocation`の
+ * ような専用トグルを作らない(D-10・boss裁定): 作ると`MixedAllocationSettings`が7→8項目に
+ * なり、メタ行の設定エコー(実効設定7列)がスキーマ変更になるため。単勝は混在経路が
+ * 実際に計算される限り常に対象であり、D-2フォールバック(ワイド・3連複が使えない設定・
+ * 状況)に該当すれば`buildRaceAllocation`(複勝専用の従来経路)へ丸ごと落ちるため、
+ * winだけを個別にOFFにする設定は不要(D-7)。
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。
  */
 function resolveMixedBetTypes(settings: MixedAllocationSettings): MixedCandidateBetType[] {
-  const betTypes: MixedCandidateBetType[] = ["place"];
+  const betTypes: MixedCandidateBetType[] = ["place", "win"];
   if (settings.includeWideInAllocation) {
     betTypes.push("wide");
   }

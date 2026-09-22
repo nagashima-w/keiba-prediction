@@ -146,9 +146,10 @@ export type { SkipReasonCode };
  *
  * `"win"`(単勝)は**`allocateGeneralBets`(配分エンジン)では#92(#23-B1b)で対応済み**
  * (順序付きoutcome空間から1着確率を導出する。`GeneralBetAllocationResult.winOutcome`参照)。
- * ただし**候補の構築**(オッズから`AllocationCandidate`〈betType="win"〉を組み立てる経路)は
- * まだ未対応(#90(#23-B2)の射程)であり、`buildComboCandidates`(組合せ専用の候補ビルダー)は
- * 引き続き`win`を専用の門番でthrowする(ワイド・三連複専用であり単勝の候補構築には使えない。
+ * **候補の構築**(オッズから`AllocationCandidate`〈betType="win"〉を組み立てる経路)も
+ * #90(#23-B2)で対応済み(専用の候補ビルダー`buildWinCandidates`。本ファイル下方参照)。
+ * `buildComboCandidates`(組合せ専用の候補ビルダー)は引き続き`win`を専用の門番でthrowする
+ * (ワイド・三連複専用であり単勝の候補構築には使えない。単勝は`buildWinCandidates`を使うこと。
  * `buildComboCandidates`のJSDoc参照)。
  *
  * 逆写像(頭数→券種)は本ファイルに一切作らない: `umabans.length` から券種を引く関数は
@@ -231,8 +232,8 @@ export function umabanCountOf(betType: AllocationBetType): number {
  * `allocateGeneralBets` は例外を投げる(黙って通さない。受け入れ条件7)。
  */
 export interface AllocationCandidate {
-  /** 券種(Issue #76。`place`=複勝/`win`=単勝(#91で追加、#92で`allocateGeneralBets`が対応。
-   *  候補の構築のみ#90で対応予定)/`wide`=ワイド/`trio`=三連複)。 */
+  /** 券種(Issue #76。`place`=複勝/`win`=単勝(#91で追加、#92で`allocateGeneralBets`が対応、
+   *  #90で候補の構築〈`buildWinCandidates`〉にも対応)/`wide`=ワイド/`trio`=三連複)。 */
   readonly betType: AllocationBetType;
   /** 買い目を構成する馬番の組(昇順・重複なし)。 */
   readonly umabans: readonly number[];
@@ -1124,7 +1125,9 @@ function computeComboHitProb(combo: readonly number[], rawDistribution: readonly
  * 直接ヒット確率を返すため、結果として**単勝の的中確率ではなく複勝(3着内)の的中確率で
  * 値付けされた候補**が`betType:"win"`のラベルで返ってしまう(1着確率〈順序付きoutcome空間〉
  * を計算する経路がこの関数には存在しないため)。この関数は組合せ(ワイド・三連複)専用の
- * ビルダーであり、単勝はこの関数の責務外(#92で専用のビルダーを新設する)。
+ * ビルダーであり、単勝はこの関数の責務外——**単勝専用の候補ビルダーは`buildWinCandidates`
+ * (本ファイル下方。#90・#23-B2で新設)を使うこと**(1着確率を順序付きoutcome空間から
+ * 導出する別実装であり、本関数と値付けの基準が異なる)。
  *
  * @param horses 出走全頭(複勝圏内確率。同時分布構築に使う)
  * @param topFinishCount 上位何着までを的中判定に使うか(ワイド・三連複は常に3。JSDoc冒頭参照)
@@ -1206,6 +1209,154 @@ export function buildComboCandidates(
       enumeratedCount: combos.length,
       judged: { positiveCount: candidates.length, notPositiveCount },
       unjudged: { oddsMissingCount, oddsUnfetchedCount, oddsMalformedCount },
+    },
+  };
+}
+
+/**
+ * win(単勝)候補ビルダーの診断値(Issue #90・#23-B2)。
+ * `ComboCandidateDiagnostics`と異なり`oddsUnfetchedCount`を持たない: `oddsByUmaban`は
+ * 呼び出し側(`horses`と同じ出走全頭を写した`AnalysisRow.winOdds`由来)が必ず全馬ぶんの
+ * エントリを持つ契約であり、「キーが無い」という構造的な未取得状態が存在しないため
+ * (値がnullの欠損〈oddsMissingCount〉とは型として区別する)。
+ */
+export interface WinCandidateDiagnostics {
+  /** 列挙した買い目の総数(= horses.length)。 */
+  readonly enumeratedCount: number;
+  /** 判定結果(オッズを取得でき、EVを計算できた買い目)。 */
+  readonly judged: {
+    /** EVプラスと判定し候補にした数(= candidates.length)。 */
+    readonly positiveCount: number;
+    /** EV非プラスで候補外にした数。 */
+    readonly notPositiveCount: number;
+  };
+  /** 判定不能(オッズが取得できず、または数値として不正でEVを計算できなかった買い目)。 */
+  readonly unjudged: {
+    /** オッズ欠損(Mapの値がnull、またはキー自体が無い)で評価できなかった数。 */
+    readonly oddsMissingCount: number;
+    /** オッズが取得済みだが数値として不正(1.0未満・非有限)で評価できなかった数。 */
+    readonly oddsMalformedCount: number;
+  };
+}
+
+/** win(単勝)候補ビルダーの結果。 */
+export interface WinCandidateBuildResult {
+  /** EVプラスと判定した候補(allocateGeneralBetsへそのまま渡せる)。 */
+  readonly candidates: readonly AllocationCandidate[];
+  readonly diagnostics: WinCandidateDiagnostics;
+}
+
+/**
+ * 単勝(win)向けの買い目候補を構築する(1着確率の導出+オッズ状態解決+EV算出。Issue #90・#23-B2)。
+ *
+ * `buildComboCandidates`(ワイド・三連複専用)とは値付けの基準が異なる。単勝は「複勝(3着内)
+ * 確率」ではなく「1着確率」で値付けする必要があり、1着確率は集合分布(`model.buildDistribution`)
+ * からは導出できない(集合分布は「複勝圏内に入ったか」の情報しか持たず、着順を持たない)。
+ * そのため本関数は`model.buildOrderedDistribution`(順序付きoutcome空間。Issue #92で導入)を
+ * 使い、各馬について「1着(`order[0]`)である outcome の確率」を合算して1着確率(周辺確率)を得る。
+ *
+ * `buildOrderedDistribution`が`null`(判定不能。固定馬2頭以上、または`topFinishCount`が
+ * 出走頭数を覆う縮退)を返した場合、本関数は**throwせず候補0件で返す**(`buildComboCandidates`と
+ * 同じ「入口検証の二層原則」における「データの分類器」。`allocateGeneralBets`/
+ * `validateWinCandidatesSupported`のような「公開APIの門番」ではない)。この設計により、
+ * 本関数が候補を1件も返さなければ`allocateGeneralBets`は`candidates.some(c=>c.betType==="win")`
+ * が偽になり`winOutcome:"not-requested"`となる。したがって「候補ビルダー(本関数)が判定不能に
+ * より候補を出さなかった」ケースと「`allocateGeneralBets`が`winOutcome:"indeterminate"`と
+ * 申告するケース」は互いに排他的である(本関数と`allocateGeneralBets`は同じ純粋関数
+ * `model.buildOrderedDistribution(horses, topFinishCount)`を同じ引数で呼ぶため、決定性により
+ * 常に同じ判定不能/判定可能の結論に至る。呼び出し側〈`mixed-candidates.ts`〉がこの2引数を
+ * 変更せずに両方へ渡す契約を守る限り、本関数が候補を出した場合は`allocateGeneralBets`側も
+ * 必ず`"determined"`になる)。
+ *
+ * @param horses 出走全頭(候補馬に限らない。同時分布は全頭の確率に依存するため)
+ * @param topFinishCount 上位何着まで着順を展開するか(`model.buildOrderedDistribution`へ
+ *   そのまま渡す。1着確率の算出には`order[0]`しか使わないが、`allocateGeneralBets`が別途
+ *   同じ引数で順序付きoutcome空間を再構築するため〈上記JSDoc参照〉、呼び出し側と同じ値
+ *   〈ワイド・三連複と同じtopFinishCount=3〉を渡すこと)
+ * @param oddsByUmaban 馬番→単勝オッズのMap(値がnullなら欠損)。`buildComboCandidates`の
+ *   `oddsByKey`と異なり文字列キーではなく馬番(`number`)をキーにする(単勝は組合せキーを
+ *   持たない1頭単位の券種のため)。**キー自体が無い場合もオッズ欠損(`oddsMissingCount`)として
+ *   扱う**(`oddsByUmaban.get(umaban) ?? null`。`ComboOddsResolution`の`"unfetched"`に相当する
+ *   状態を型として作らない。上記`WinCandidateDiagnostics`のJSDoc参照)
+ * @param evConfig EV判定の設定(省略時は既存expected-value.tsの既定閾値1.0・厳密不等号を再利用)
+ * @param model 同時分布モデル(省略時は`PLACKETT_LUCE_MODEL`)。`isOrderedPlaceJointModel`が
+ *   falseを返すモデル(例: `CONDITIONAL_BERNOULLI_MODEL`)を渡すとthrowする(新しい述語を
+ *   作らず、`allocateGeneralBets`/`validateWinCandidatesSupported`と同じ判定関数を再利用する)
+ */
+export function buildWinCandidates(
+  horses: readonly JointModelHorse[],
+  topFinishCount: number,
+  oddsByUmaban: ReadonlyMap<number, number | null>,
+  evConfig: EvConfig = DEFAULT_EV_CONFIG,
+  model: PlaceJointModel = PLACKETT_LUCE_MODEL,
+): WinCandidateBuildResult {
+  validateTopFinishCount(topFinishCount);
+  if (!isOrderedPlaceJointModel(model)) {
+    throw new Error(
+      "不正な買い目です: 単勝(win)の買い目候補を構築するには、順序付きoutcome空間を構築できる" +
+        `モデルが必要です(modelId=${model.id})`,
+    );
+  }
+  const threshold = resolveEvThreshold(evConfig.threshold);
+
+  const orderedRaw = model.buildOrderedDistribution(horses, topFinishCount);
+  const emptyDiagnostics: WinCandidateDiagnostics = {
+    enumeratedCount: horses.length,
+    judged: { positiveCount: 0, notPositiveCount: 0 },
+    unjudged: { oddsMissingCount: 0, oddsMalformedCount: 0 },
+  };
+  if (orderedRaw === null) {
+    // データ由来の判定不能(固定馬2頭以上、またはtopFinishCountが出走頭数を覆う縮退)。
+    // 呼び出し側の契約違反ではないためthrowしない(本関数のJSDoc「入口検証の二層原則」参照)。
+    return { candidates: [], diagnostics: emptyDiagnostics };
+  }
+
+  // 各馬の1着確率(周辺確率)を、順序付きoutcome空間からorder[0]で集計して導出する。
+  const winProbByUmaban = new Map<number, number>();
+  for (const outcome of orderedRaw) {
+    const winner = outcome.order[0];
+    if (winner === undefined) {
+      // horses.length===0の縮退(空の着順)。この場合はhorsesが空なので下記ループ自体が
+      // 回らず、この分岐に実害は無い(horses.length===0のテスト参照)。
+      continue;
+    }
+    winProbByUmaban.set(winner, (winProbByUmaban.get(winner) ?? 0) + outcome.probability);
+  }
+
+  const candidates: AllocationCandidate[] = [];
+  let notPositiveCount = 0;
+  let oddsMissingCount = 0;
+  let oddsMalformedCount = 0;
+  for (const h of horses) {
+    // buildComboCandidatesのoddsByKeyと異なり「キー自体が無い」状態を別枝にしない
+    // (本関数のJSDoc・WinCandidateDiagnosticsのJSDoc参照)。
+    const odds = oddsByUmaban.get(h.umaban) ?? null;
+    if (odds === null) {
+      oddsMissingCount++;
+      continue;
+    }
+    // 判定基準は allocation-primitives.ts の isUsableOdds に委譲する(既存の候補ビルダーと
+    // 同一基準を1箇所で共有する)。
+    if (!isUsableOdds(odds)) {
+      oddsMalformedCount++;
+      continue;
+    }
+    const winProb = winProbByUmaban.get(h.umaban) ?? 0;
+    const ev = winProb * odds;
+    const isPositive = ev > threshold;
+    if (!isPositive) {
+      notPositiveCount++;
+      continue;
+    }
+    candidates.push({ betType: "win", umabans: [h.umaban], odds, ev, isPositive: true });
+  }
+
+  return {
+    candidates,
+    diagnostics: {
+      enumeratedCount: horses.length,
+      judged: { positiveCount: candidates.length, notPositiveCount },
+      unjudged: { oddsMissingCount, oddsMalformedCount },
     },
   };
 }

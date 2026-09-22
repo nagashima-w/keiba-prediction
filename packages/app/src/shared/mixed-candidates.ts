@@ -93,12 +93,14 @@
 
 import {
   buildComboCandidates,
+  buildWinCandidates,
   DEFAULT_EV_CONFIG,
   type AllocationBetType,
   type AllocationCandidate,
   type ComboCandidateDiagnostics,
   type EvConfig,
   type JointModelHorse,
+  type WinCandidateDiagnostics,
 } from "@keiba/core/ev/combo-bet-allocation";
 
 import type {
@@ -121,31 +123,33 @@ import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-al
  * 手で列挙する配列・散文(直下の`ALL_MIXED_CANDIDATE_BET_TYPES`とそのJSDoc・散文中の
  * 「全券種」等の言い回し)はこのエイリアスでは守られない。実際に#91で`AllocationBetType`
  * に`win`が加わった際、まさにこの「1箇所だけ足す事故」(配列は3値のまま、散文だけが
- * 「全券種」と言い続ける)が起きた。メンバー列挙・散文は別途テストで守ること
- * (`mixed-candidates.test.ts`の「意図的に除外している券種」it参照)。
+ * 「全券種」と言い続ける)が起きた(#90で解消済み。下記`ALL_MIXED_CANDIDATE_BET_TYPES`参照)。
+ * メンバー列挙・散文は別途テストで守ること(`mixed-candidates.test.ts`の
+ * 「意図的に除外している券種」it参照)。
  */
 export type MixedCandidateBetType = AllocationBetType;
 
 /**
- * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーではない。**
+ * 既定の対象券種。**現在`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーと一致する**
+ * (place/win/wide/trioの4つ)。
  *
- * #91で`AllocationBetType`に`win`(単勝)が加わったが、本配列には含めていない。理由:
- * (1) coreに単勝候補ビルダーが存在せず、`win`を対象にしても構築できる候補が無い。
- * (2) `buildMixedCandidates`は`betTypes.includes("place"/"wide"/"trio")`の3つしか参照しない
- * ため(下記実装参照)、`win`をこの配列に足しても`buildMixedCandidates`の挙動は一切変わらず、
- * 「対象にする」という宣言だけが実体を伴わずに増える(#91が是正している欠陥クラスの再生産)。
- * `win`への対応は#92完了後の#90(#23-B2)の射程(`docs/issue-order.md`: #90は
- * 「`winOdds`のIPC追加・候補ビルダー・UI・永続化・docs」で、候補ビルダーが明示的に
- * 列挙されている。#92はcoreのみが射程でapp側は対象外)。
+ * #91で`AllocationBetType`に`win`(単勝)が加わった時点では、coreに単勝候補ビルダーが
+ * 存在せず`buildMixedCandidates`も`win`を一切参照していなかったため、本配列は意図的に
+ * `win`を含めていなかった(#91の裁定)。**#90(#23-B2)で単勝の候補ビルダー
+ * (`buildWinCandidates`。core `combo-bet-allocation.ts`)を新設し、下記実装が
+ * `betTypes.includes("win")`を参照するようになったため、本配列にも`win`を加えた。**
+ * 「対象にする」宣言と実体(`buildWinCandidatesForBetType`)が揃っている状態であり、
+ * #91が是正した「宣言だけが実体を伴わずに増える」欠陥は再生産していない。
  *
- * **定数名の`ALL_`は現在この配列の内容(3要素)より広く読める。** 改名はexport面の変更に
- * なるため#91では行わず、対応要否の判断は#92完了後の#90(#23-B2)に送る。
+ * **定数名の`ALL_`は#90時点で実態(全メンバー)に追いつく。** 改名はしない(boss裁定:
+ * 全メンバーと一致する名前が実態を正しく表しているため、改名の動機自体が無くなった)。
  *
- * boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない(#91時点でも真: `options.betTypes`
- * 以外のフィルタは実装に存在しない)。
+ * boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない(`options.betTypes`
+ * 以外のフィルタは実装に存在しない。#90時点でも真)。
  */
 export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
   "place",
+  "win",
   "wide",
   "trio",
 ];
@@ -238,9 +242,40 @@ export type ComboCandidateDiagnosticsView =
       readonly build: ComboCandidateDiagnostics;
     };
 
+/**
+ * win(単勝)候補ビルドの診断値(判別共用体。Issue #90・#23-B2)。
+ * - `not-requested`: `options.betTypes` に `"win"` が含まれていない(列挙自体を行っていない)。
+ * - `unavailable`(reason:"yoso"): `oddsStatus==="yoso"`。理由は「予想オッズが不正確だから」
+ *   ではなく「発売前で買えないから」(D-4・boss裁定。`winOdds`はyosoでも予想オッズ値が
+ *   入ることがあるが、それとは無関係にこのガードで一律除外する)。`PlaceCandidateDiagnostics`
+ *   と同じ`unavailable`+`reason`の形にする(`ComboCandidateDiagnosticsView`の独立した
+ *   `kind:"yoso"`枝とは異なる形。winは複勝と同じ「1頭単位の券種」であり、頭数由来の
+ *   `PlaceCandidateUnavailableReason`と同じ判別共用体の位置に`"yoso"`を並べる設計)。
+ * - `judged`: `buildWinCandidates`(core)に委譲して判定した結果。**頭数由来の`unavailable`は
+ *   存在しない**(反証B・AC3: winに頭数による門前払いを書かない。頭数が小さすぎて
+ *   `buildOrderedDistribution`が判定不能を返した場合も、判定した上で0件だった
+ *   〈`judged`かつ全カウント0〉として扱う。`oddsUnfetchedCount`は持たない
+ *   〈D-3・`WinCandidateDiagnostics`のJSDoc参照〉)。
+ */
+export type WinCandidateDiagnosticsView =
+  | { readonly kind: "not-requested" }
+  | { readonly kind: "unavailable"; readonly reason: "yoso" }
+  | {
+      readonly kind: "judged";
+      readonly judged: {
+        readonly positiveCount: number;
+        readonly notPositiveCount: number;
+      };
+      readonly unjudged: {
+        readonly oddsMissingCount: number;
+        readonly oddsMalformedCount: number;
+      };
+    };
+
 /** `buildMixedCandidates` の診断値(券種ごと)。 */
 export interface MixedCandidateDiagnostics {
   readonly place: PlaceCandidateDiagnostics;
+  readonly win: WinCandidateDiagnosticsView;
   readonly wide: ComboCandidateDiagnosticsView;
   readonly trio: ComboCandidateDiagnosticsView;
 }
@@ -315,6 +350,38 @@ function resolveFieldPresence(record: Record<string, number | null> | undefined)
   return Object.keys(record).length === 0 ? "empty" : "present";
 }
 
+/**
+ * win(単勝)候補を構築する(Issue #90・#23-B2)。反証B相当: 頭数門前払いを一切しない
+ * (`resolvePlaceBetTarget`をwinには適用しない。委譲先`buildWinCandidates`〈core〉の
+ * 判定結果〈候補0件になりうる〉に委ねる)。判定順序はyosoガード→委譲の2段のみ
+ * (`buildPlaceCandidates`の4段〈yoso→頭数→行レベル2条件〉と異なり、頭数判定が無いため)。
+ */
+function buildWinCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: WinCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード(D-4): 発売前で買えないため一律除外する(推定精度の問題ではない。
+  // WinCandidateDiagnosticsViewのJSDoc参照)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "unavailable", reason: "yoso" } };
+  }
+  const oddsByUmaban = new Map<number, number | null>(race.rows.map((r) => [r.umaban, r.winOdds]));
+  const result = buildWinCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByUmaban, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: {
+      kind: "judged",
+      judged: result.diagnostics.judged,
+      unjudged: result.diagnostics.unjudged,
+    },
+  };
+}
+
 /** ワイド・3連複候補を構築する(反証B: 頭数門前払いをしない。委譲先 buildComboCandidates の列挙結果に委ねる)。 */
 function buildComboCandidatesForBetType(
   betType: "wide" | "trio",
@@ -361,12 +428,13 @@ export function buildMixedCandidates(
   const place = betTypes.includes("place")
     ? buildPlaceCandidates(race)
     : { candidates: [] as AllocationCandidate[], diagnostics: { kind: "not-requested" } as PlaceCandidateDiagnostics };
+  const win = buildWinCandidatesForBetType(betTypes.includes("win"), race, horses, evConfig);
   const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses, evConfig);
   const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig);
 
   return {
-    candidates: [...place.candidates, ...wide.candidates, ...trio.candidates],
+    candidates: [...place.candidates, ...win.candidates, ...wide.candidates, ...trio.candidates],
     topFinishCount: COMBO_TOP_FINISH_COUNT,
-    diagnostics: { place: place.diagnostics, wide: wide.diagnostics, trio: trio.diagnostics },
+    diagnostics: { place: place.diagnostics, win: win.diagnostics, wide: wide.diagnostics, trio: trio.diagnostics },
   };
 }

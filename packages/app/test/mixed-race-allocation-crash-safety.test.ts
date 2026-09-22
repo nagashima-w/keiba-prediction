@@ -81,6 +81,7 @@ function row(overrides: Partial<AnalysisRowType> & { umaban: number }): Analysis
     prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,
     placeOddsMin: overrides.placeOddsMin === undefined ? 3 : overrides.placeOddsMin,
+    winOdds: overrides.winOdds === undefined ? 10 : overrides.winOdds,
     ev: overrides.ev === undefined ? 1.5 : overrides.ev,
     isPositive: overrides.isPositive ?? true,
     reason: null,
@@ -349,9 +350,13 @@ describe("黙っているべき側: どの境界もthrowしなければ現行HEA
 describe("既定切替の数値検出(#81・AC-B10): 非対称・キャップ非拘束フィクスチャでmodelId以外の数値も変わること", () => {
   function asymmetricRace(): MixedCandidateBuildInput {
     // 5頭・全馬adjustedProbが相異なる(0.75/0.65/0.55/0.45/0.35)。
+    // winOdds: null(Issue #90でwinが既定対象に加わったため)。本describeの関心事は#81の
+    // モデル既定切替(ワイド・3連複の配分額)であり、winがリテラル固定した配分結果へ
+    // 混入しないよう明示的に除外する(win固有の予算競合は`mixed-race-allocation-win.test.ts`
+    // で別途検証する)。
     const probs = [0.75, 0.65, 0.55, 0.45, 0.35];
     const umabans = umabansOf(5);
-    const rows = umabans.map((umaban, i) => row({ umaban, adjustedProb: probs[i] }));
+    const rows = umabans.map((umaban, i) => row({ umaban, adjustedProb: probs[i], winOdds: null }));
     return raceInput({
       rows,
       wideCombo: fullOddsRecord(umabans, 2, 100000),

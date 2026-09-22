@@ -32,10 +32,11 @@
  * (`buildMixedAllocationDisplay`・内訳・並べ替え・折りたたみ分割・注記等)が残る。
  */
 
-import type {
-  AllocationBetType,
-  GeneralBetAllocation,
-  GeneralBetAllocationResult,
+import {
+  ALLOCATION_BET_TYPE_UMABAN_COUNT,
+  type AllocationBetType,
+  type GeneralBetAllocation,
+  type GeneralBetAllocationResult,
 } from "@keiba/core/ev/combo-bet-allocation";
 
 import type {
@@ -69,19 +70,41 @@ import { formatYen } from "./verify-format.js";
 // 非破壊性〈AC2〉に影響しないようにする)。
 // ============================================================================
 
-/** 券種別の内訳(金額・点数)。AC10: 3つの合計は必ずtotalStakeと一致する(app側の候補ビルダー
- *  〈mixed-candidates.ts〉がplace/wide/trioしか産出しないため。Issue #92でcoreの
- *  allocateGeneralBetsはwin候補も受理できるようになったが、win行を産む候補ビルダーは
- *  #90まで存在しない)。 */
-export interface MixedAllocationBreakdown {
-  readonly place: { readonly stake: number; readonly count: number };
-  readonly wide: { readonly stake: number; readonly count: number };
-  readonly trio: { readonly stake: number; readonly count: number };
-}
+/**
+ * 券種別の内訳(金額・点数)。**`AllocationBetType`の全券種ぶんのキーを持つ**
+ * (Issue #90・#23-B2で4群化。place/win/wide/trio)。`Object.values(breakdown)`で走査した
+ * 合計は必ず`totalStake`と一致する(AC10。win行を含むフィクスチャでも成立する。
+ * `mixed-allocation-view.test.ts`のAC10 describe参照)。
+ *
+ * キーを手で列挙せず`Record<AllocationBetType, ...>`にしている理由(D-2・boss裁定):
+ * 4フィールド並記(place/win/wide/trio個別プロパティ)にすると、#24で馬連を足すとき
+ * 「1箇所だけ足す事故」(`buildMixedAllocationBreakdown`の実装には足したが、この型定義・
+ * 合計計算のどちらかに足し忘れる)が再発しうる。`Record`にすることで、券種の一覧は
+ * `ALLOCATION_BET_TYPE_UMABAN_COUNT`(core・唯一の正)1箇所に保たれ、本ファイル・
+ * `BatchAnalysisView.tsx`の両方がそれを走査するだけで新しい券種に自動追従する。
+ */
+export type MixedAllocationBreakdown = Record<AllocationBetType, { readonly stake: number; readonly count: number }>;
+
+/**
+ * `MixedAllocationBreakdown`(内訳表)の表示順(Issue #90・#23-B2)。**順序自体に契約上の意味は
+ * 無い**(表示上の読みやすさのための並びであり、頭数の昇順=`ALLOCATION_BET_TYPE_UMABAN_COUNT`の
+ * 挿入順と揃えているだけ)。**キーの集合は`ALLOCATION_BET_TYPE_UMABAN_COUNT`のキー集合と
+ * 常に同一であることをテストで固定する**(D-2・boss裁定。`mixed-allocation-view.test.ts`
+ * 「MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER」describe参照)。`BatchAnalysisView.tsx`の内訳表は
+ * この配列を`.map`して`mixedBetTypeLabel`でラベルを引くだけにする(券種を手で4行書かない)。
+ */
+export const MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER: readonly AllocationBetType[] = [
+  "place",
+  "win",
+  "wide",
+  "trio",
+];
 
 /**
  * `result.allocations` を `betType`(Issue #76: `umabans.length`からの逆算をやめ、候補自身が
- * 運ぶ値で群分けする)で3群に分け、金額合計・点数(`stake>0`の件数)を求める(AC10・AC13の点数)。
+ * 運ぶ値で群分けする)で券種ごとに分け、金額合計・点数(`stake>0`の件数)を求める
+ * (AC10・AC13の点数)。**券種の列挙は`ALLOCATION_BET_TYPE_UMABAN_COUNT`のキーを走査する**
+ * (D-2・boss裁定。券種の列挙をこのファイルで新たに増やさない)。
  */
 export function buildMixedAllocationBreakdown(
   result: GeneralBetAllocationResult,
@@ -93,7 +116,8 @@ export function buildMixedAllocationBreakdown(
       count: inGroup.filter((a) => a.stake > 0).length,
     };
   };
-  return { place: groupOf("place"), wide: groupOf("wide"), trio: groupOf("trio") };
+  const betTypes = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT) as AllocationBetType[];
+  return Object.fromEntries(betTypes.map((betType) => [betType, groupOf(betType)])) as MixedAllocationBreakdown;
 }
 
 /**
@@ -181,9 +205,10 @@ export interface MixedAllocationSplit {
  * `sortMixedAllocationsForDisplay`・`buildMixedAllocationBreakdown`が既に持つ同一の前提であり、
  * 本関数が新設する穴ではない。NaN防御は本タスクのスコープ外・到達可能性も未調査):
  * 1. `visible`のstake合計 + `hiddenStake` === 元の`GeneralBetAllocationResult.totalStake`
- * 2. `totalStake` === `buildMixedAllocationBreakdown`の`place+wide+trio`のstake合計(既存契約AC10。
- *    app側の候補ビルダー〈mixed-candidates.ts〉がplace/wide/trioしか産出しないために成立する)
- * 3. `visible.length + hiddenCount` === `place+wide+trio`のcount合計(同上の理由による)
+ * 2. `totalStake` === `buildMixedAllocationBreakdown`の全券種(`Object.values(breakdown)`)の
+ *    stake合計(既存契約AC10。Issue #90で4群化〈place/win/wide/trio〉した後も、
+ *    `Record`全体を走査する限り成立する)
+ * 3. `visible.length + hiddenCount` === 全券種のcount合計(同上の理由による)
  */
 export function splitAllocationsForDisplay(
   sorted: readonly GeneralBetAllocation[],
@@ -278,22 +303,34 @@ export interface MixedUnjudgedCounts {
 }
 
 /**
- * 券種横断(複勝・ワイド・3連複)で判定不能だった件数を合算する(AC15)。
- * `kind!=="built"`(`not-requested`。ユーザーが対象外にした券種)は判定不能ではなく
- * 「対象外」なので0として扱う(判定不能〈unjudged〉と対象外〈not-requested〉を混同しない)。
- * 複勝は`unjudged.oddsMissingCount`のみ持つ(`oddsUnfetchedCount`/`oddsMalformedCount`は
- * ワイド・3連複固有の概念のため複勝には存在しない)。
+ * 券種横断(複勝・単勝・ワイド・3連複)で判定不能だった件数を合算する(AC15・Issue #90で
+ * winを追加)。`kind!=="built"/"judged"`(`not-requested`・`unavailable`。ユーザーが対象外に
+ * した券種、またはwinのyosoガード)は判定不能ではなく「対象外」なので0として扱う
+ * (判定不能〈unjudged〉と対象外〈not-requested`/`unavailable`〉を混同しない)。
+ * **`oddsMalformedCount`はワイド・3連複固有の概念ではない**(旧記述は誤り。#90でwinも
+ * `oddsMalformedCount`を持つようになったため加算対象に加えた。この記述の誤りは
+ * 「加算漏れを誘発する」〈D-3・boss裁定〉ため実装と併せて直す)。複勝は
+ * `unjudged.oddsMissingCount`のみ持つ・winは`oddsMissingCount`/`oddsMalformedCount`を持つが
+ * `oddsUnfetchedCount`は持たない(`winOdds`はAnalysisRowのフィールドであり「キーが無い」
+ * 未取得状態が構造的に存在しないため。`WinCandidateDiagnosticsView`のJSDoc参照)。
  */
 export function aggregateUnjudgedCounts(diagnostics: MixedCandidateDiagnostics): MixedUnjudgedCounts {
   const placeMissing =
     diagnostics.place.kind === "judged" ? diagnostics.place.unjudged.oddsMissingCount : 0;
+  const winUnjudged = diagnostics.win.kind === "judged" ? diagnostics.win.unjudged : null;
   const wideUnjudged = diagnostics.wide.kind === "built" ? diagnostics.wide.build.unjudged : null;
   const trioUnjudged = diagnostics.trio.kind === "built" ? diagnostics.trio.build.unjudged : null;
   return {
     oddsMissingCount:
-      placeMissing + (wideUnjudged?.oddsMissingCount ?? 0) + (trioUnjudged?.oddsMissingCount ?? 0),
+      placeMissing +
+      (winUnjudged?.oddsMissingCount ?? 0) +
+      (wideUnjudged?.oddsMissingCount ?? 0) +
+      (trioUnjudged?.oddsMissingCount ?? 0),
     oddsUnfetchedCount: (wideUnjudged?.oddsUnfetchedCount ?? 0) + (trioUnjudged?.oddsUnfetchedCount ?? 0),
-    oddsMalformedCount: (wideUnjudged?.oddsMalformedCount ?? 0) + (trioUnjudged?.oddsMalformedCount ?? 0),
+    oddsMalformedCount:
+      (winUnjudged?.oddsMalformedCount ?? 0) +
+      (wideUnjudged?.oddsMalformedCount ?? 0) +
+      (trioUnjudged?.oddsMalformedCount ?? 0),
   };
 }
 

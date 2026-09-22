@@ -29,6 +29,7 @@ function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow 
     prior: 0.3,
     adjustedProb: overrides.adjustedProb ?? 0.3,
     placeOddsMin: overrides.placeOddsMin ?? 3,
+    winOdds: overrides.winOdds ?? 10,
     ev: overrides.ev ?? 0.9,
     isPositive: overrides.isPositive ?? false,
     reason: null,

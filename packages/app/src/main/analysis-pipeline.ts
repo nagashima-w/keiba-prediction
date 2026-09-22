@@ -301,6 +301,20 @@ function conditionChangeRunsOf(
 }
 
 /**
+ * race.odds.win から馬番の単勝オッズを取り出す唯一のヘルパ(Issue #90・#23-B2)。
+ * `promptInput.horses`(【出走馬】プロンプト用。下記race.horses.mapコールバック内)と
+ * `rows`(`AnalysisResult.rows`。手順(5)の別のrace.horses.mapコールバック内)の**両方**が
+ * この関数を経由することで、`race.odds.win[umaban]?.odds ?? null` という式のリテラルな
+ * 重複を増やさない(A-1是正・D-1・boss裁定)。`analysis-export.ts:139`にも同一の式が
+ * 独立に存在するが、そちらは別プロセス境界・別責務のため統合しない(boss裁定によりスコープ外)。
+ * オッズ未発売(oddsStatus="yoso")でも予想オッズ値が入ることがある(scraper側の仕様。
+ * 呼び出し元コメント参照)。
+ */
+function winOddsOf(race: RaceData, umaban: number): number | null {
+  return race.odds.win[umaban]?.odds ?? null;
+}
+
+/**
  * 1レースを分析する。
  * @param raceId 対象レースID(検証済み)
  * @param kaisaiDate 選択済み開催日(YYYYMMDD)。null の場合のみ当日日付で近似する。
@@ -477,7 +491,7 @@ export async function runAnalysis(
         // 市場データ(Task#22: 予想印の判断材料)。oddsStatus="yoso"(複勝未発売)では
         // race.odds.place が空になるため placeOddsMin/referenceEv は自然に null になる。
         // winOdds(単勝)は yoso でも予想オッズ値が入るためそのまま渡す。
-        const winOdds = race.odds.win[umaban]?.odds ?? null;
+        const winOdds = winOddsOf(race, umaban);
         const popularity = race.odds.win[umaban]?.ninki ?? null;
         const placeOddsMin = race.odds.place[umaban]?.oddsMin ?? null;
         return {
@@ -630,6 +644,9 @@ export async function runAnalysis(
         prior: prior.prior,
         adjustedProb: adjusted.adjustedProb,
         placeOddsMin: ev.placeOddsMin,
+        // 単勝オッズ(Issue #90・#23-B2)。yosoでも予想オッズ値が入るためそのまま渡す
+        // (promptInput.horses側と同じヘルパを共有する。winOddsOfのJSDoc参照)。
+        winOdds: winOddsOf(race, umaban),
         ev: ev.ev,
         isPositive: ev.isPositive,
         reason: adjusted.reason,

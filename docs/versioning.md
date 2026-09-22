@@ -1023,6 +1023,48 @@ Issue #88(#23-B0)は、`estimatePlaceOddsMinFromWin` の戻り値を4状態の�
 
 よって 1.7.0 → **1.7.1**(patch)が妥当と判断した。
 
+## 次の正式版が 1.8.0 である根拠(Issue #90・#23-B2 での変更)
+
+Issue #90(#23-B2)は、単勝(win)を実際にアプリの配分提案へ組み込んだ変更である。
+`packages/core/src/ev/combo-bet-allocation.ts` に単勝専用の候補ビルダー `buildWinCandidates`
+(順序付き outcome 空間から1着確率を導出し、単勝オッズと掛けてEVを算出する。複勝〈3着内〉
+確率では値付けしない)を新設し、`packages/app/src/shared/mixed-candidates.ts` の
+`buildMixedCandidates`(`ALL_MIXED_CANDIDATE_BET_TYPES` に `"win"` を追加)・
+`packages/app/src/shared/mixed-race-allocation.ts` の `resolveMixedBetTypes`(複勝と同じく
+`"win"` を常時積む。専用のON/OFF設定は作っていない)から実際に配線した。
+
+**#91(1.7.2)・#92(1.7.3)が「production からは到達不能」としていた型・内部経路
+(`AllocationBetType` の `"win"`、`allocateGeneralBets` の順序付き outcome 空間経路)が、
+#90 でその到達不能性を解消した**(直前の #91・#92 のセクション参照)。
+
+**minor である根拠**:
+- **できることが増える**: 単勝が実際にアプリの配分提案(`BatchAnalysisView.tsx`の券種別内訳・
+  買い目一覧)に登場するようになった。以前は単勝オッズを複勝下限の概算にしか使わなかったが、
+  単勝そのものが賭け対象になった。
+- **分析結果の数値が変わる**: win候補が1件でもEVプラスとして存在すると、`allocateGeneralBets`は
+  集合空間+畳み込み(`foldToCandidateSubsets`)ではなく順序付き outcome 空間を使う経路
+  (`determined`分岐。#92で新設)に切り替わる。win・複勝・ワイド・三連複は同じ1つの予算枠
+  (ケリー基準の貪欲逐次配分)を奪い合うため、**win自体の配分額だけでなく、複勝・ワイド・
+  三連複の配分額も従来(winを含めない場合)とは変わりうる**。実際に変わることを
+  `scripts/bench-mixed-allocation.ts`(保存済み実オッズフィクスチャ・ネットワークに出ない)で
+  自分で測って確認済み(win追加前後でワイド・三連複の配分額・点数・合計額がいずれも変化する。
+  具体的な数値は実行環境・実データ更新により変動しうるため本書には書かない。再現手順は
+  同スクリプトの JSDoc「計測条件」参照)。
+
+**major でない根拠**: 保存済みデータ・設定・エクスポート JSON の後方互換に関わる変更はない。
+`analysis_bets`テーブルはスキーマ変更なしで`bet_type="win"`行が増えるだけであり
+(`allocation-record.ts`の`mixedBetsOf`は`betType`列に候補が運ぶ値をそのまま書く既存実装のまま
+無変更)、既存の複勝・ワイド・三連複の行の形・意味は変わらない。設定
+(`MixedAllocationSettings`)にも単勝専用の項目を追加していない(7項目のまま。D-10裁定)。
+
+**既知の制限(参考記録)**: 単勝は現時点で性能上のコストが大きい(win候補があると
+順序付き outcome 空間〈P(出走頭数,3)〉を使うため、集合空間+畳み込み〈C(出走頭数,3)〉より
+計算量が増える。`scripts/bench-mixed-allocation.ts`で再現できる実測で約7〜8倍の所要時間増加を
+確認済み)。この対応は#90の受容判断(2026-09-22ユーザー決定: 「このタイミングでは受容するが
+早いうちに対応する」)により、#90完了後に着手する別Issue(性能チューニング)のスコープとする。
+
+よって 1.7.3 → **1.8.0**(minor)が妥当と判断した。
+
 ## 次の正式版が 1.7.3 である根拠(Issue #92・#23-B1b での変更)
 
 Issue #92(#23-B1b)は、単勝を配分エンジンで扱うための**順序付き outcome 空間**を

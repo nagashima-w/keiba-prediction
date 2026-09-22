@@ -26,6 +26,7 @@ import {
   COMBO_EV_CALIBRATION_NOTE,
   formatUnjudgedNote,
   mixedBetTypeLabel,
+  MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER,
   MIXED_ALLOCATION_INVALID_MESSAGE,
   totalUnjudgedCount,
   type MixedRaceAllocationDisplayView,
@@ -199,6 +200,7 @@ function ResultTable(props: {
             >
               {LABEL_ADJUSTED_PROB}
             </th>
+            <th style={thStyle}>単勝</th>
             <th style={thStyle}>複勝下限</th>
             <th style={thStyle}>EV</th>
             <th style={thStyle}>LLM根拠</th>
@@ -215,6 +217,7 @@ function ResultTable(props: {
               <td style={tdStyle}>{row.horseName}</td>
               <td style={tdStyle}>{formatPercent(row.prior)}</td>
               <td style={tdStyle}>{formatPercent(row.adjustedProb)}</td>
+              <td style={tdStyle}>{formatOdds(row.winOdds)}</td>
               <td style={tdStyle}>{formatOdds(row.placeOddsMin)}</td>
               <td
                 style={{
@@ -419,8 +422,9 @@ function renderMixedAllocationBlock(
         </p>
       )}
 
-      {/* 券種別内訳(AC10: 合計はtotalStakeと一致・AC13: 点数。app側の候補ビルダーが
-          place/wide/trioしか産出しないため成立する)。 */}
+      {/* 券種別内訳(AC10: 合計はtotalStakeと一致・AC13: 点数。Issue #90で4群化
+          〈place/win/wide/trio〉。表示順は`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`
+          〈mixed-allocation-view.ts〉を`.map`するだけにし、券種を本ファイルで手書きしない)。 */}
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
@@ -430,9 +434,9 @@ function renderMixedAllocationBlock(
           </tr>
         </thead>
         <tbody>
-          {breakdownRow("複勝", display.breakdown.place)}
-          {breakdownRow("ワイド", display.breakdown.wide)}
-          {breakdownRow("三連複", display.breakdown.trio)}
+          {MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.map((betType) =>
+            breakdownRow(mixedBetTypeLabel(betType), display.breakdown[betType]),
+          )}
         </tbody>
       </table>
 

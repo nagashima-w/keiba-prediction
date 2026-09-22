@@ -212,14 +212,24 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
  * `mixed-allocation-view.ts`の`mixedBetTypeLabel`(閉じたユニオン`AllocationBetType`。
  * 未知値は上流がthrowする)とは**統合しない**(Issue #76裁定): 本関数はDB由来の開いた
  * `string`を扱う契約であり、統合すると`mixedBetTypeLabel`側が未知分岐を持つことになって
- * `switch`の網羅性(TSによる保護)が失われる。place/wide/trioの3つの日本語ラベルが両関数で
- * 同一であることは`allocation-proposal-view.test.ts`
- * 「betTypeLabelとmixedBetTypeLabel…」がリテラルで固定する。
+ * `switch`の網羅性(TSによる保護)が失われる。place/win/wide/trioの4つの日本語ラベルが
+ * 両関数で同一であることは`allocation-proposal-view.test.ts`
+ * 「betTypeLabelとmixedBetTypeLabel…」が**日本語リテラルに対して**固定する(#90本体・D-5。
+ * 旧版は`mixedBetTypeLabel(...)`をexpectedに使っており、両関数が一緒にずれても緑のまま
+ * 通ってしまう欠陥があった)。
+ *
+ * `"win"`(単勝)はIssue #90・#23-B2でcaseを追加した(#91時点では意図的に無く、
+ * `default`分岐でDB由来の生文字列`"win"`をそのまま返していた——`mixed-allocation-view.ts`の
+ * `mixedBetTypeLabel`とは非対称だった。#90でwinがproductionに到達可能になったため
+ * (`allocation-record.ts`が`bet_type="win"`行をコード変更なしで保存する)、この非対称は
+ * 利用者から見える誤り〈生の"win"がUIに表示される〉になっていた。本caseの追加で解消)。
  */
 function betTypeLabel(betType: string): string {
   switch (betType) {
     case "place":
       return "複勝";
+    case "win":
+      return "単勝";
     case "wide":
       return "ワイド";
     case "trio":
@@ -277,8 +287,8 @@ function comboLabelOf(comboKey: string): string {
   return formatBetLabel(umabans);
 }
 
-/** 券種の表示順(複勝→ワイド→3連複)。未知の券種は末尾へ(値99)。 */
-const BET_TYPE_ORDER: Record<string, number> = { place: 0, wide: 1, trio: 2 };
+/** 券種の表示順(複勝→単勝→ワイド→3連複。Issue #90でwinを追加)。未知の券種は末尾へ(値99)。 */
+const BET_TYPE_ORDER: Record<string, number> = { place: 0, win: 1, wide: 2, trio: 3 };
 
 function betTypeRank(betType: string): number {
   return BET_TYPE_ORDER[betType] ?? 99;
