@@ -1168,6 +1168,62 @@ win 候補があるときに使う順序付き outcome 空間(`P(n,3)`)に対し
 純粋な計算経路のみの変更であり、`pnpm --filter @keiba/app build`(renderer / main / preload)も成功。
 
 
+## 次の正式版が 1.9.0 である根拠(Issue #100・#23-C での変更)
+
+**minor**(利用者から見てできることが増え、かつ**分析結果の数値も変わる**)。
+
+### 変更内容
+
+単勝(`bet_type="win"`)の確定払戻を DB に永続化し、回収率検証(`ev/verify.ts`)が単勝の買い目を
+判定できるようにした。
+
+- `race_results` に `win_payout REAL` 列を後付け(`migrateResultWinPayoutColumn`。既存の
+  `migrateResultPayoutColumn` の逐語コピー)。`RaceResultEntry.winPayout` を追加し
+  `saveResult` / `getResult` に配線
+- `toResultEntries`(`result-import.ts`)に `winPayoutByUmaban` を追加(`placePayoutByUmaban` と同型)
+- `verify.ts` に `raceHasWinPayout`(`raceHasPlacePayout` の鏡写し・**別関数として新設**)と
+  `win` アキュムレータ、`winPayoutByComboKey` を追加。照合キーは `analysis_bets.combo_key` を作る
+  `buildComboOddsKey` と**同一の関数**で生成する(ゼロ埋めロジックを書き起こさない)
+- `ProposedBetReportView` に `win` を追加し、`VerifyView.tsx` の「内訳」行と
+  「判定不能(集計対象外)」行の**両方**に単勝を表示
+
+### minor である根拠
+
+区分表の minor は「利用者から見てできることが増える、**または分析結果の数値が変わる**変更」だが、
+本件は**両方**に当たる:
+
+- **できることが増える**: 検証画面に単勝の内訳・判定不能が出るようになった。#90(v1.8.0)で単勝が
+  配分提案に載るようになったが、払戻が DB に無いため判定できず、#76 の `unknownBetType` として
+  「未対応の券種コード(win)」警告が出ていた
+- **数値が変わる**: `proposedBet.overall` が win を含む**4券種**の合算になったため、**回収率の数値が
+  変わる**(従来は単勝の投資額・払戻が `overall` に入らず集計から除外されていた)
+
+### major ではない根拠
+
+`race_results` への列追加は `ALTER TABLE ADD COLUMN` による後付けで、**旧 DB は開いたまま既存行を
+保持する**。boss がメタレビューで**旧スキーマの実ファイル DB を作って実測**した:
+
+```
+既存行:   [{"umaban":4,"finishPosition":1,"placePayout":210,"winPayout":null}]
+再取込後: [{"umaban":4,"finishPosition":1,"placePayout":210,"winPayout":670}]
+再オープン: [{"umaban":4,"finishPosition":1,"placePayout":210,"winPayout":670}]
+```
+
+マイグレーションは正しく動き、冪等である。設定・エクスポート JSON・IPC の後方非互換も無い。
+
+⚠️ **ただし、この旧 DB マイグレーションのテストはコミットされていない**(boss の実測はスクラッチ)。
+同ファイル `analysis-store.test.ts` には旧スキーマ DB を開くテストの先例が7件あるが、
+`win_payout` だけがそれを持たない。**【記録】として Issue に積んである。**
+`CREATE TABLE IF NOT EXISTS` に列を足すと**新規 DB では必ず緑**になるため、
+テストがすべてインメモリ新規である限りこの経路は自動では守られない。
+
+### 既存 DB への反映方針
+
+**(b) 以後の取込分のみ。** 過去レースの一括再取込は**利得ゼロ**である:
+`bet_type="win"` の行を書けるようになったのは `3abe0f1`(#90, v1.8.0)が唯一なので、
+それ以前に保存された分析には照合相手の買い目行が存在しえない。
+
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
