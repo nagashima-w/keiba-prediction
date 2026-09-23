@@ -15,7 +15,7 @@
  * 本タスク(#103)は取得対象が複数(中央/地方 × 馬連/馬単 × 複数レース × presale探索)かつ
  * 探索の分岐で対象が変わるため、URL・保存先ファイル名をCLI引数で受け取る汎用版にした
  * (boss裁定Q6「AC-A7を満たすには必須」への対応。個別URLごとの再現コマンドは
- * `docs/umaren-umatan-odds-investigation.md` の実リクエスト一覧表に記録する)。
+ * `docs/quinella-exacta-odds-investigation.md` の実リクエスト一覧表に記録する)。
  *
  * ## 400のリトライ規律(2026-09-23、オーケストレーターの変数切り分けを反映)
  *
@@ -46,7 +46,7 @@
  *     odds_quinella_202603020211.json
  *
  * 取得日時・HTTPステータス・保存先・バイト数を標準エラー出力に記録する
- * (実行者はこの出力を `docs/umaren-umatan-odds-investigation.md` の実リクエスト一覧表へ転記する)。
+ * (実行者はこの出力を `docs/quinella-exacta-odds-investigation.md` の実リクエスト一覧表へ転記する)。
  * 403/429応答時は `HttpClient` が即座に `HttpError` を投げるため、その旨とステータスを出力して
  * 非ゼロ終了する(保存は行わない。ボディが無いため。再試行はしない)。
  *
