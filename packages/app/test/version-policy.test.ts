@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.9.0";
+const EXPECTED_APP_VERSION = "1.9.1";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,25 +234,22 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.9.0(Issue #100・#23-C: 単勝の確定払戻の永続化と回収率検証への反映)である", () => {
+  it("root と app の version が 1.9.1(Issue #103・#24-A: 馬連・馬単オッズの実測調査とフィクスチャ整備)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
     // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5、
     // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2、
-    // #92(#23-B1b)が 1.7.3、#90(#23-B2)が 1.8.0、#96 が 1.8.1。
-    // 本回は #100(#23-C)。**minor**(利用者から見てできることが増え、かつ分析結果の数値も変わる)。
-    // 変更内容: 単勝(bet_type="win")の確定払戻を race_results.win_payout 列に永続化し、
-    // 回収率検証(verify.ts)が単勝の買い目を判定できるようにした。
-    // **利用者から見える変化**:
-    // - 検証画面の「内訳」行と「判定不能(集計対象外)」行に単勝が出るようになった
-    //   (#90 で単勝が配分提案に載るようになったが、払戻が DB に無いため判定できず、
-    //    #76 の unknownBetType として「未対応の券種コード(win)」警告が出ていた)。
-    // - **proposedBet.overall が win を含む4券種の合算になったため、回収率の数値が変わる**
-    //   (従来は単勝の投資額・払戻が overall に入らず、集計から除外されていた)。
-    // major ではない根拠: race_results への列追加は ALTER TABLE ADD COLUMN による後付けで
-    // (migrateResultWinPayoutColumn。既存の migrateResultPayoutColumn の逐語コピー)、
-    // 旧 DB は開いたまま既存行を保持する(boss が旧スキーマの実ファイル DB で実測。
-    // 既存行の placePayout=210 が保持され、再取込で winPayout=670 が入り、再オープンでも維持)。
-    // 設定・エクスポート JSON・IPC の後方非互換も無い。
+    // #92(#23-B1b)が 1.7.3、#90(#23-B2)が 1.8.0、#96 が 1.8.1、#100(#23-C)が 1.9.0。
+    // 本回は #103(#24-A)。**patch**(調査タスク。`packages/*/src` を1行も変更していない)。
+    // 変更内容: 馬連・馬単のオッズ取得経路を実測し、`fixtures/` に一次データを保存して
+    // `docs/quinella-exacta-odds-investigation.md` に記録、`packages/core/test/scraper/`に
+    // 集合一致テストを追加した。#24(馬連・馬単)は着手前ゲートで【No-Go】となり6分割され、
+    // 本回はその第1子(#24-A)。
+    // **patch である根拠**: 利用者から見てできることは1つも増えておらず、分析結果の数値も
+    // 一切変わらない。差分は `docs/` + `fixtures/` + `scripts/`(単発取得スクリプト)+
+    // 新規テスト1本のみで、**production のコードパスに到達する変更が無い**
+    // (`git diff --stat -- packages/core/src packages/app/src` が空であることを確認済み)。
+    // major/minor ではない根拠: 保存済みデータ・設定・エクスポート JSON・IPC・DB スキーマの
+    // いずれにも触れていない。
     // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならないことを
     // 固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);

@@ -227,6 +227,7 @@
 - [`docs/lessons-learned.md`](./docs/lessons-learned.md) — 過去セッションの重大失敗(ツール結果・ユーザー同意の捏造等)の記録と再発防止の鉄則。本ファイル冒頭「最重要」の詳細。
 - [`docs/nar-scraping-plan.md`](./docs/nar-scraping-plan.md) — 地方競馬(NAR)スクレイピングの実測調査結果と対応方針(URL・HTML構造・race_id体系の中央との差分)。
 - [`docs/wide-trio-odds-investigation.md`](./docs/wide-trio-odds-investigation.md) — ワイド・3連複オッズ(機能D-1、Issue #13)の実測調査記録。中央/地方の取得経路・型(幅/単一値)・1レース分の必要リクエスト数(地方3連複は軸馬別取得)・発売条件4状態・フィクスチャ対応表。
+- [`docs/quinella-exacta-odds-investigation.md`](./docs/quinella-exacta-odds-investigation.md) — 馬連・馬単オッズ(Issue #103・#24-A)の実測調査記録。中央/地方の取得経路・キー形式・**1レースのリクエスト数は券種・主催者を問わず1**(3連複の軸馬別とは異なる)・**馬単のキーが順序付きである**こと・未発売時のフォールバック・全22発火のリクエスト一覧。⚠️ **「馬単キーの1桁目が1着」である決定的な根拠はまだリポジトリ内に無い**(#24-B の着手条件で `result.html` の払戻と突合して確定させる)。
 - [`docs/phase1-scraping-plan.md`](./docs/phase1-scraping-plan.md) — Phase 1 の中央競馬 HTML 構造調査・対象ページ URL・セレクタ・フィクスチャ取得計画。
 - [`docs/prompt-improvement-plan.md`](./docs/prompt-improvement-plan.md) — 検証結果(回収率)に基づく LLM プロンプト改善の仕組みの検討メモ(過学習リスク・記録/可視化を先行する方針)。
 - [`docs/handover-next-session.md`](./docs/handover-next-session.md) — 過去セッションから次セッションへの引き継ぎ(実装済みタスクの仕様記録・技術メモ)。
