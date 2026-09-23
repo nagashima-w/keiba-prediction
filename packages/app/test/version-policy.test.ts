@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.8.0";
+const EXPECTED_APP_VERSION = "1.8.1";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,32 +234,28 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.8.0(Issue #90・#23-B2: 単勝(win)の候補ビルダー・配分経路配線・UI表示・永続化)である", () => {
+  it("root と app の version が 1.8.1(Issue #96: 順序付き outcome 空間の署名畳み込みとメモ化による高速化)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
     // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5、
     // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2、
-    // #92(#23-B1b)が 1.7.3。
-    // 本回は #90(#23-B2)。minor(利用者から見てできることが増える・分析結果の数値が変わる)。
-    // #91(#23-B1a)・#92(#23-B1b)は型・アルゴリズムの土台を先に用意しただけで「本番からは
-    // 到達不能」だったが、**#90でその到達不能性が解消された**:
-    // - `mixed-candidates.ts`の`buildWinCandidatesForBetType`(core`buildWinCandidates`委譲)が
-    //   `betType:"win"`のAllocationCandidateを実際に生成するようになった
-    //   (`ALL_MIXED_CANDIDATE_BET_TYPES`にwinを追加)。
-    // - `mixed-race-allocation.ts`の`resolveMixedBetTypes`が`"win"`を`"place"`と同じく常時
-    //   積むようになり(専用ON/OFF設定は作っていない。D-10)、混在配分経路(`buildMixedRaceAllocation`)
-    //   の戻り値に`betType:"win"`の配分行が実際に現れる。
-    // - `allocation-proposal-view.ts`の`betTypeLabel`が`"win"`ケースを持つようになり、
-    //   `mixedBetTypeLabel("win")`(既に#91で「単勝」を返していた)との非対称が解消された。
-    // したがって**旧版のこのコメントが述べていた「利用者から見える変化・分析結果の数値変化は
-    // 一切ない」は#90で偽になった**(D-11指摘)。実際の変化:
-    // - 単勝がアプリの配分提案に実際に登場するようになった(できることが増える)。
-    // - win候補が1件でもあると`allocateGeneralBets`が集合空間+畳み込み(foldToCandidateSubsets)
-    //   ではなく順序付きoutcome空間を使う経路に切り替わるため、**win自体だけでなく
-    //   place/wide/trioの配分額も従来と変わりうる**(同一の確率空間から同時に配分を決める設計。
-    //   `combo-bet-allocation.ts`の`allocateGeneralBets`JSDoc参照)。
-    // major ではない根拠: 保存済みデータ・設定・エクスポートJSONへの後方非互換は無い。
-    // `analysis_bets`テーブルはスキーマ変更なしで`bet_type="win"`行が増えるだけであり
-    // (`allocation-record.ts`は無変更)、既存の複勝・ワイド・三連複の行の形は変わらない。
+    // #92(#23-B1b)が 1.7.3、#90(#23-B2)が 1.8.0。
+    // 本回は #96。**patch**(内部改善。利用者から見てできることは増えず、表示される数値も変わらない)。
+    // 変更内容: win 候補があるときに使う順序付き outcome 空間に対し、
+    // (A) 的中パターン(`indices`)が同一の outcome の確率を合算する「署名畳み込み」
+    //     (`foldOutcomeIndexSetsBySignature`)と、
+    // (B) 貪欲ループ内の `Math.log(commonWealth)` と候補ごとの fresh wealth のメモ化
+    // を入れた。中央16頭で outcome 3360 → 1023、Σ|indices| 12486 → 5386 に減り、
+    // 1レースあたり約 1460ms → 約 370〜385ms(約 3.8〜3.9 倍)になった。
+    // **minor ではない根拠(数値が変わらないこと)**: (A) は
+    // `P1*log(w) + P2*log(w) = (P1+P2)*log(w)` という厳密な等式に基づく畳み込みであり近似ではない。
+    // 実測でも、boss が中央/地方 × win有無の4フィクスチャ(候補 405/14/128/8 件)で
+    // 畳み込み前の生の順序空間を直接流した結果と照合し、`continuousFraction` は全件ビット一致。
+    // `hitProb` のみ加算順序の違いで最終ビットが動くが最大差 4.441e-16 で、**表示桁の変化は 0**。
+    // しかも `hitProb` は `packages/app/src` から 0 参照(UI に届かない内部診断値)である。
+    // **順序情報は破壊していない**: 畳み込みは `indices` 配列を一切書き換えず `probability` だけを
+    // まとめる。#92 の裁定で win 同居時に使えないと判断した `foldToCandidateSubsets`
+    // (`placed` を昇順ソートして順序を潰す)とは別物である。
+    // major ではない根拠: 保存済みデータ・設定・エクスポート JSON・IPC・DB スキーマはいずれも無変更。
     // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならないことを
     // 固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);

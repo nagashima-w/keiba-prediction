@@ -1121,6 +1121,53 @@ Issue #91(#23-B1a)は、`AllocationBetType`(`packages/core/src/ev/combo-bet-allo
 
 よって 1.7.1 → **1.7.2**(patch)が妥当と判断した。
 
+## 次の正式版が 1.8.1 である根拠(Issue #96 での変更)
+
+**patch**(内部改善)。1.8.0 以降に入った変更は #96 の高速化のみであり、利用者から見てできることは
+増えず、**表示される数値も変わらない**。
+
+### 変更内容
+
+win 候補があるときに使う順序付き outcome 空間(`P(n,3)`)に対して次の2つを入れた
+(`packages/core/src/ev/allocation-primitives.ts`):
+
+- **(A) 署名畳み込み** `foldOutcomeIndexSetsBySignature`: 的中パターン(`indices`)が同一の outcome の
+  `probability` を合算する。`wealth_T` は `indices`・`x`・`odds` だけで決まるため、`indices` が一致する
+  outcome は同一の `wealth` を与える。したがって `P1*log(w) + P2*log(w) = (P1+P2)*log(w)` が
+  **厳密に成立する**(近似ではない)。
+- **(B) メモ化** `runGreedyAllocation` 内で `Math.log(commonWealth[j])` と候補ごとの fresh wealth を
+  それぞれ1回だけ計算して使い回す。式・項順・分岐は削除前の `computeFreshWealth` と逐語一致させており、
+  「同じ引数に対する同じ関数値の再利用」なのでビット同一。
+
+中央16頭で outcome **3360 → 1023**、Σ|indices| **12486 → 5386**。1レースあたりの所要時間は
+約 1460ms → 約 370〜385ms(**約 3.8〜3.9 倍**)。
+
+### minor ではない根拠(分析結果の数値が変わらないこと)
+
+区分表の minor は「利用者から見てできることが増える、**または分析結果の数値が変わる**変更」だが、
+本件はどちらにも当たらない。実測(boss のメタレビュー):
+
+| フィクスチャ | 候補数 | outcome 畳み込み | `continuousFraction` 不一致 | `hitProb` 最大差 | 表示桁の変化 |
+|---|---|---|---|---|---|
+| `central-on` | 405 | 3360 → 1023 | **0/405** | 4.441e-16 | **0** |
+| `central-off` | 14 | 3360 → 162 | **0/14** | 3.331e-16 | **0** |
+| `nar-on` | 128 | 1320 → 331 | **0/128** | 1.943e-16 | **0** |
+| `nar-off` | 8 | 1320 → 33 | **0/8** | 1.388e-16 | **0** |
+
+配分額(`continuousFraction`)は全件ビット一致。`hitProb` のみ加算順序の違いで最終ビットが動くが、
+表示桁は 1 件も変わらず、そもそも `hitProb` は `packages/app/src` から **0 参照**(UI に届かない
+内部診断値)である。
+
+**順序情報は破壊していない。** 畳み込みは `indices` 配列を一切書き換えず `probability` だけをまとめる。
+#92 の裁定で win 同居時に使えないと判断した `foldToCandidateSubsets`(`placed` を昇順ソートして
+順序を潰す)とは別物である。
+
+### major ではない根拠
+
+保存済みデータ・設定・エクスポート JSON・IPC・DB スキーマはいずれも無変更。`packages/core` の
+純粋な計算経路のみの変更であり、`pnpm --filter @keiba/app build`(renderer / main / preload)も成功。
+
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
