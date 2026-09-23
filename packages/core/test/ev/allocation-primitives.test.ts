@@ -8,6 +8,7 @@ import {
   DEFAULT_GREEDY_STEPS,
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
+  foldOutcomeIndexSetsBySignature,
   foldToCandidateSubsets,
   isUsableOdds,
   MIN_VALID_ODDS,
@@ -165,6 +166,99 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
     });
   });
 
+  describe("foldOutcomeIndexSetsBySignature(indices署名畳み込み・Issue #96)", () => {
+    // 背景: 単勝(win)候補が1件でもあると、combo-bet-allocation.tsのdetermined枝が
+    // 順序付きoutcome空間(P(頭数,topFinishCount)通り、畳み込み無し)をそのままrunGreedyAllocation/
+    // computeHitProbabilitiesへ渡すため計算量が跳ね上がる(Issue #96)。的中パターン(indices)が
+    // 完全一致するoutcomeは`wealth_T`が同一なので、`P1·log(w)+P2·log(w)=(P1+P2)·log(w)`により
+    // 確率を合算しても厳密に等価(win識別性〈indices列そのもの〉は一切失わない。
+    // foldToCandidateSubsetsとは異なる畳み込みであることに注意: foldToCandidateSubsetsは
+    // `placed`を候補集合と交差させ昇順ソートする「順序を捨てる」畳み込みであり、winの
+    // identity判定〈order[0]===umaban〉を壊すため通せない。本関数はindices列自体を一切
+    // 変更せず、同じindices列を持つ要素をまとめるだけなので、win識別性を壊さない)。
+    it("(a)(b) 同一署名(indices完全一致)のoutcomeをまとめ、件数が減り確率総和が保存されること(値を直書きで固定)", () => {
+      const input: OutcomeIndexSet[] = [
+        { indices: [0, 2], probability: 0.1 },
+        { indices: [1], probability: 0.2 },
+        { indices: [0, 2], probability: 0.3 }, // 署名[0,2]がinput[0]と重複
+        { indices: [], probability: 0.4 },
+      ];
+      const folded = foldOutcomeIndexSetsBySignature(input);
+      // (a) 4件→3件(署名[0,2]の2件が1件にまとまる。件数を直書きで固定)。
+      expect(folded).toHaveLength(3);
+      const byKey = new Map(folded.map((o) => [o.indices.join(","), o.probability]));
+      expect(byKey.get("0,2")).toBeCloseTo(0.4, 10); // 0.1+0.3
+      expect(byKey.get("1")).toBeCloseTo(0.2, 10);
+      expect(byKey.get("")).toBeCloseTo(0.4, 10);
+      // (b) 確率総和が保存されること(自明でない: 畳み込みで確率を落とさないことの確認)。
+      const total = folded.reduce((sum, o) => sum + o.probability, 0);
+      expect(total).toBeCloseTo(1.0, 10);
+    });
+
+    it("(c) 署名がすべて異なる入力では件数・順序・probabilityが入力と完全に一致すること(ビット等価)", () => {
+      const input: OutcomeIndexSet[] = [
+        { indices: [0], probability: 0.3 },
+        { indices: [1], probability: 0.25 },
+        { indices: [0, 1], probability: 0.45 },
+      ];
+      const folded = foldOutcomeIndexSetsBySignature(input);
+      expect(folded).toHaveLength(3);
+      for (let i = 0; i < input.length; i++) {
+        expect(folded[i]!.indices).toEqual(input[i]!.indices);
+        // toBeによるビット等価(toBeCloseToではない)。
+        expect(folded[i]!.probability).toBe(input[i]!.probability);
+      }
+    });
+
+    it("(d) 出力順が決定的であること(同じ入力で2回呼んでtoEqual)", () => {
+      const input: OutcomeIndexSet[] = [
+        { indices: [0, 2], probability: 0.1 },
+        { indices: [1], probability: 0.2 },
+        { indices: [0, 2], probability: 0.3 },
+      ];
+      const first = foldOutcomeIndexSetsBySignature(input);
+      const second = foldOutcomeIndexSetsBySignature(input);
+      expect(first).toEqual(second);
+    });
+
+    it("(e) 畳み込み前後でrunGreedyAllocationのfractionsがビット一致すること(確率をべき乗値で構成した代表的な単純入力)", () => {
+      // 0.125+0.125=0.25はどちらも2進で厳密に表現できる値同士の加算(倍精度で丸め誤差が
+      // 出ない)であり、「一致するフィクスチャを恣意的に選ぶ」のではなく、代表的な単純入力
+      // (2候補・4outcome、うち1組が同一署名)でargmaxの選択列が畳み込み前後で変わらない
+      // ことを実行して確認する目的で構成した(boss指摘: 中間値〈commonLogSum等〉の一致では
+      // なくfractions自体の一致が目的。argmaxが変わらない限りfractionsは同じ加算列になる)。
+      const unfolded: OutcomeIndexSet[] = [
+        { indices: [0], probability: 0.125 },
+        { indices: [0], probability: 0.125 }, // 署名[0]がunfolded[0]と重複
+        { indices: [1], probability: 0.25 },
+        { indices: [0, 1], probability: 0.5 },
+      ];
+      const odds = [3, 5];
+      const folded = foldOutcomeIndexSetsBySignature(unfolded);
+      // 前提(空振り防止): 実際に畳み込まれて件数が減っていること。
+      expect(folded.length).toBeLessThan(unfolded.length);
+      expect(folded).toHaveLength(3);
+
+      for (const greedySteps of [10, 100, 1000]) {
+        const before = runGreedyAllocation(2, odds, unfolded, greedySteps);
+        const after = runGreedyAllocation(2, odds, folded, greedySteps);
+        expect(Object.is(after.fractions[0], before.fractions[0])).toBe(true);
+        expect(Object.is(after.fractions[1], before.fractions[1])).toBe(true);
+        expect(after.converged).toBe(before.converged);
+      }
+    });
+
+    it("indicesが空・候補0件・n=0の縮退入力で壊れないこと", () => {
+      expect(foldOutcomeIndexSetsBySignature([])).toEqual([]);
+      const onlyEmpty: OutcomeIndexSet[] = [
+        { indices: [], probability: 0.6 },
+        { indices: [], probability: 0.4 },
+      ];
+      const folded = foldOutcomeIndexSetsBySignature(onlyEmpty);
+      expect(folded).toEqual([{ indices: [], probability: 1.0 }]);
+    });
+  });
+
   describe("runGreedyAllocation(貪欲逐次配分・機能D-2a高速化後)", () => {
     it("候補0件は空配列・converged=trueを返す", () => {
       expect(runGreedyAllocation(0, [], [], 1000)).toEqual({ fractions: [], converged: true });
@@ -301,26 +395,25 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
       expect(converged).toBe(false);
     });
 
-    it("高速パス(候補が多く安全域)とフォールバック相当のブルートフォースが同じ結果になること(数学的同値性の直接検証)", () => {
-      // 候補20・outcome10のランダムだが決定的な構成で、通常は安全域(高速パス)を通るはず。
-      // 参照実装として、旧来のブルートフォース版をこのテスト内に再実装し、
-      // 本体(高速化後のrunGreedyAllocation)の出力と厳密一致(toBe)することを確認する。
-      const n = 20;
-      const outcomeIndexSets: OutcomeIndexSet[] = [];
-      let seed = 42;
-      const rand = () => {
-        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-        return seed / 0x7fffffff;
-      };
-      for (let j = 0; j < 10; j++) {
-        const indices: number[] = [];
-        for (let i = 0; i < n; i++) {
-          if (rand() < 0.15) indices.push(i);
-        }
-        outcomeIndexSets.push({ indices, probability: 1 / 10 });
-      }
-      const odds = Array.from({ length: n }, () => 2 + rand() * 4);
-
+    describe("高速パス(候補が多く安全域)とフォールバック相当のブルートフォースが同じ結果になること(数学的同値性の直接検証・テーブル駆動)", () => {
+      // Issue #96(ビット厳密なメモ化。commonWealth[j]のlog・freshWealthの候補ごとの
+      // 事前計算)がargmaxの選択を反転させていないかを検出する唯一の網(このファイルの
+      // 他のテストはargmax反転を直接は検出しない)。
+      // 【採用C(computeFreshWealthのO(1)化)は不採用】: 数学的には同値だが浮動小数演算として
+      // ビット一致するとは限らず、実際に`bet-allocation.test.ts`の退化ケース(全odds=3で
+      // 目的関数が平坦になる番人テスト)でargmax反転(betCount 2→1)を引き起こしたため
+      // 不採用にした(`runGreedyAllocation`のJSDoc「検討したが採用しなかった案」参照)。
+      // 本テーブルはこの反転を再現しなかった(4条件×2水準すべてtoEqual一致)が、それは
+      // 「メモ化のみ(採用C抜き)ではargmax反転が起きない」ことの確認であり、Cを採用した
+      // 場合に反転が起きないことの確認ではない(Cはproduction codeに存在しない)。
+      // 参照実装(旧来のブルートフォース)は元のテストのものをそのまま使い、一切弱めない
+      // (toEqualによる厳密一致を維持する)。
+      //
+      // ★boss指摘への対応: 候補数・outcome数・接触密度・オッズ分布の異なる4条件以上、
+      // greedySteps2水準以上のテーブルへ拡張する(旧版は1条件・greedySteps=500のみだった)。
+      // 旧版の条件(候補20・outcome10・接触密度0.15・オッズ2-6・greedySteps=500・seed=42)は
+      // 下記シナリオ1つ目としてそのまま保持し、条件を追加する形で拡張する(既存の保証を
+      // 弱めない)。
       const bruteForce = (
         nn: number,
         oddsArr: readonly number[],
@@ -365,9 +458,101 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
         return x;
       };
 
-      const expected = bruteForce(n, odds, outcomeIndexSets, 500);
-      const { fractions: actual } = runGreedyAllocation(n, odds, outcomeIndexSets, 500);
-      expect(actual).toEqual(expected);
+      /** 決定的な疑似乱数生成器(元テストと同じ線形合同法)。 */
+      function makeRand(seed: number): () => number {
+        let s = seed;
+        return () => {
+          s = (s * 1103515245 + 12345) & 0x7fffffff;
+          return s / 0x7fffffff;
+        };
+      }
+
+      function buildScenario(
+        n: number,
+        outcomeCount: number,
+        contactProbability: number,
+        oddsMin: number,
+        oddsMax: number,
+        seed: number,
+      ): { outcomeIndexSets: OutcomeIndexSet[]; odds: number[] } {
+        const rand = makeRand(seed);
+        const outcomeIndexSets: OutcomeIndexSet[] = [];
+        for (let j = 0; j < outcomeCount; j++) {
+          const indices: number[] = [];
+          for (let i = 0; i < n; i++) {
+            if (rand() < contactProbability) indices.push(i);
+          }
+          outcomeIndexSets.push({ indices, probability: 1 / outcomeCount });
+        }
+        const odds = Array.from({ length: n }, () => oddsMin + rand() * (oddsMax - oddsMin));
+        return { outcomeIndexSets, odds };
+      }
+
+      const scenarios: {
+        readonly label: string;
+        readonly n: number;
+        readonly outcomeCount: number;
+        readonly contactProbability: number;
+        readonly oddsMin: number;
+        readonly oddsMax: number;
+        readonly seed: number;
+      }[] = [
+        {
+          label: "候補20・outcome10・接触密度0.15・オッズ2-6(旧版と同条件)",
+          n: 20,
+          outcomeCount: 10,
+          contactProbability: 0.15,
+          oddsMin: 2,
+          oddsMax: 6,
+          seed: 42,
+        },
+        {
+          label: "候補5・outcome3・接触密度0.6(高密度)・オッズ1.5-3(低オッズ)",
+          n: 5,
+          outcomeCount: 3,
+          contactProbability: 0.6,
+          oddsMin: 1.5,
+          oddsMax: 3,
+          seed: 7,
+        },
+        {
+          label: "候補50・outcome30・接触密度0.05(低密度)・オッズ3-20(高オッズ)",
+          n: 50,
+          outcomeCount: 30,
+          contactProbability: 0.05,
+          oddsMin: 3,
+          oddsMax: 20,
+          seed: 123,
+        },
+        {
+          label: "候補8・outcome60(候補数よりoutcome数が多い)・接触密度0.3・オッズ1.1-2(1.0近傍)",
+          n: 8,
+          outcomeCount: 60,
+          contactProbability: 0.3,
+          oddsMin: 1.1,
+          oddsMax: 2,
+          seed: 999,
+        },
+      ];
+      const greedyStepsValues = [50, 500];
+
+      for (const scenario of scenarios) {
+        for (const greedySteps of greedyStepsValues) {
+          it(`${scenario.label} / greedySteps=${greedySteps}`, () => {
+            const { outcomeIndexSets, odds } = buildScenario(
+              scenario.n,
+              scenario.outcomeCount,
+              scenario.contactProbability,
+              scenario.oddsMin,
+              scenario.oddsMax,
+              scenario.seed,
+            );
+            const expected = bruteForce(scenario.n, odds, outcomeIndexSets, greedySteps);
+            const { fractions: actual } = runGreedyAllocation(scenario.n, odds, outcomeIndexSets, greedySteps);
+            expect(actual).toEqual(expected);
+          });
+        }
+      }
     });
   });
 

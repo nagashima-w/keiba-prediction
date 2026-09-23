@@ -113,13 +113,17 @@ function toMixedCandidateInput(result: AnalysisResult): MixedCandidateBuildInput
 /**
  * 券種別(betType)に金額・点数を集計する(mixed-allocation-view.tsのbuildMixedAllocationBreakdownと
  * 同じ集計方式。Issue #76でumabans.lengthからの逆算をやめ、候補自身が運ぶbetTypeで集計する)。
+ *
+ * **Issue #96 AC-6: winを追加した。** #90で単勝(win)がアプリの配分提案に対応した後も
+ * この集計はplace/wide/trioの3券種だけを見ていたため、構成比の合計が100%に満たない
+ * (win分が構成比のどこにも計上されない)状態になっていた。
  */
 function summarizeByBetType(
   allocations: readonly { readonly betType: AllocationBetType; readonly stake: number }[],
-): { place: number; wide: number; trio: number } {
+): { win: number; place: number; wide: number; trio: number } {
   const sumOf = (betType: AllocationBetType): number =>
     allocations.filter((a) => a.betType === betType).reduce((s, a) => s + a.stake, 0);
-  return { place: sumOf("place"), wide: sumOf("wide"), trio: sumOf("trio") };
+  return { win: sumOf("win"), place: sumOf("place"), wide: sumOf("wide"), trio: sumOf("trio") };
 }
 
 async function runGreedyStepsSensitivity(result: AnalysisResult): Promise<void> {
@@ -132,7 +136,8 @@ async function runGreedyStepsSensitivity(result: AnalysisResult): Promise<void> 
 
   console.log("=== greedySteps 感度(中央16頭・実オッズ・実prior・λ=0.5) ===");
   console.log(
-    `候補: 複勝${mixed.candidates.filter((c) => c.betType === "place").length}件 / ` +
+    `候補: 単勝${mixed.candidates.filter((c) => c.betType === "win").length}件 / ` +
+      `複勝${mixed.candidates.filter((c) => c.betType === "place").length}件 / ` +
       `ワイド${mixed.candidates.filter((c) => c.betType === "wide").length}件 / ` +
       `三連複${mixed.candidates.filter((c) => c.betType === "trio").length}件`,
   );
@@ -161,7 +166,7 @@ async function runGreedyStepsSensitivity(result: AnalysisResult): Promise<void> 
       console.log(
         `  ${scenario.label} / greedySteps=${greedySteps}: ` +
           `総額${total.toLocaleString()}円 / ${alloc.betCount}点 / ` +
-          `複勝${pct(byType.place)} / ワイド${pct(byType.wide)} / 三連複${pct(byType.trio)}`,
+          `単勝${pct(byType.win)} / 複勝${pct(byType.place)} / ワイド${pct(byType.wide)} / 三連複${pct(byType.trio)}`,
       );
     }
   }

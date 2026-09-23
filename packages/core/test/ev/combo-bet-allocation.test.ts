@@ -2249,6 +2249,80 @@ describe("buildWinCandidates(単勝候補ビルダー・#90)", () => {
     expect(winProb1).toBe(0.5);
   });
 
+  describe("非一様なplaceProb(#97回収・Issue #96 AC-7): 1着確率が1/nに退化しない具体値で固定", () => {
+    // symmetricHorses・evenHorses(9,3)はどちらも対称(全馬placeProb同値)なフィクスチャであり、
+    // 1着確率がたまたま1/n(均等)になる。`winProb = winProbByUmaban.get(h.umaban) ?? 0`を
+    // `winProb = 1 / horses.length`に差し替える変異が対称フィクスチャでは検出できない
+    // (どちらの式でも同じ値になってしまうため)。本テストは各馬のplaceProbが互いに異なる
+    // 非対称フィクスチャを使い、1着確率を`1/n`ではない具体値で固定する。
+    // 3頭のplaceProbが互いに異なる非対称フィクスチャ。実測(本ファイル筆者が
+    // `PLACKETT_LUCE_MODEL.buildOrderedDistribution`を直接呼んで確認済み):
+    // 1着確率は[umaban1: 約0.714, umaban2: 約0.214, umaban3: 約0.0714]であり、
+    // いずれも1/3(0.3333...)から0.05以上離れている(3頭とも「たまたま1/3に一致する」
+    // 退化を避けるため、複数の候補で実測して選定した)。
+    const asymmetricHorses: JointModelHorse[] = [
+      { umaban: 1, placeProb: 0.5 },
+      { umaban: 2, placeProb: 0.15 },
+      { umaban: 3, placeProb: 0.05 },
+    ];
+
+    it("前提固定(空振り防止): 3頭の1着確率が互いに異なり、どれも1/3(均等)から0.05以上離れていること", () => {
+      // buildWinCandidatesの実装(内部でmodel.buildOrderedDistributionを呼ぶ)には依存せず、
+      // PLACKETT_LUCE_MODEL.buildOrderedDistributionをテスト内で直接呼んで独立に算出する
+      // (自己参照比較を避ける。symmetricHorsesの前提固定テスト・(d)テストと同じ流儀)。
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(asymmetricHorses, 1);
+      expect(ordered).not.toBeNull();
+      const winProbByUmaban = new Map<number, number>();
+      for (const outcome of ordered!) {
+        const winner = outcome.order[0]!;
+        winProbByUmaban.set(winner, (winProbByUmaban.get(winner) ?? 0) + outcome.probability);
+      }
+      const winProb1 = winProbByUmaban.get(1) ?? 0;
+      const winProb2 = winProbByUmaban.get(2) ?? 0;
+      const winProb3 = winProbByUmaban.get(3) ?? 0;
+      // 3頭とも1/3(均等)から有意に離れていること(空振り防止の核心)。
+      expect(Math.abs(winProb1 - 1 / 3)).toBeGreaterThan(0.05);
+      expect(Math.abs(winProb2 - 1 / 3)).toBeGreaterThan(0.05);
+      expect(Math.abs(winProb3 - 1 / 3)).toBeGreaterThan(0.05);
+      // 3頭が互いに異なること。
+      expect(winProb1).not.toBeCloseTo(winProb2, 6);
+      expect(winProb2).not.toBeCloseTo(winProb3, 6);
+      expect(winProb1).not.toBeCloseTo(winProb3, 6);
+      // 確率の総和が1であること(自明でない: 3頭で全確率を尽くしていることの確認)。
+      expect(winProb1 + winProb2 + winProb3).toBeCloseTo(1, 9);
+    });
+
+    it("★中核: buildWinCandidatesが返すev(=winProb×odds)から逆算したwinProbが、独立に算出した1着確率と一致し、1/3(均等)ではないこと", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(asymmetricHorses, 1)!;
+      const winProbByUmaban = new Map<number, number>();
+      for (const outcome of ordered) {
+        const winner = outcome.order[0]!;
+        winProbByUmaban.set(winner, (winProbByUmaban.get(winner) ?? 0) + outcome.probability);
+      }
+
+      // オッズは3頭とも同じ値(20)にする: もし実装がoddsを取り違えていても検出できるよう、
+      // ev/oddsで逆算したwinProbを比較の基準にする(oddsそのものは各馬で区別しない設計)。
+      // odds=20は最も1着確率が低い馬(umaban=3・約0.0714)でもev>1(閾値)を満たすために選んだ
+      // (0.0714*20≈1.43>1。候補として採用されなければ以下のtoBeDefinedが空振りする)。
+      const oddsByUmaban = new Map<number, number | null>([
+        [1, 20],
+        [2, 20],
+        [3, 20],
+      ]);
+      const build = buildWinCandidates(asymmetricHorses, 1, oddsByUmaban);
+
+      for (const umaban of [1, 2, 3]) {
+        const cand = build.candidates.find((c) => c.umabans[0] === umaban);
+        expect(cand).toBeDefined();
+        const derivedWinProb = cand!.ev / cand!.odds;
+        const expected = winProbByUmaban.get(umaban) ?? 0;
+        expect(derivedWinProb).toBeCloseTo(expected, 9);
+        // ★空振り防止の核心: 1/3(均等)から0.05以上離れていること。
+        expect(Math.abs(derivedWinProb - 1 / 3)).toBeGreaterThan(0.05);
+      }
+    });
+  });
+
   describe("オッズ3状態 × EV閾値の境界(テーブル駆動)", () => {
     const cases: {
       readonly label: string;

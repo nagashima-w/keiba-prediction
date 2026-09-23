@@ -110,6 +110,7 @@ import {
   DEFAULT_GREEDY_STEPS,
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
+  foldOutcomeIndexSetsBySignature,
   foldToCandidateSubsets,
   isUsableOdds,
   resolveBankroll,
@@ -820,11 +821,22 @@ export function allocateGeneralBets(
   // (place/wide/trio)を**同じ確率空間**(Σ=1)から同時に決定する必要があるため
   // (boss裁定。片方の空間だけでは他方が決定できない)、既に構築済みの順序付きoutcome空間
   // (orderedRaw。P(頭数,topFinishCount)通り)を使い、win・place/wide/trioいずれのisHitも
-  // この同じ生の分布から直接判定する(foldToCandidateSubsetsは通さない。順序を保つ畳み込みは
-  // #92のスコープ外〈性能最適化であり正しさの要件ではない。#93コメント参照〉)。
+  // この同じ生の分布から直接判定する。**`foldToCandidateSubsets`は通さない**(#92の裁定を
+  // 維持。`foldToCandidateSubsets`は`placed`を候補集合と交差させ昇順ソートする「順序を
+  // 捨てる」畳み込みであり、winのidentity判定〈`order[0]===umaban`〉を壊すため通せない)。
+  //
+  // **一方、Issue #96で`foldOutcomeIndexSetsBySignature`(署名畳み込み)を新たに適用する**。
+  // これは`foldToCandidateSubsets`とは別物: `indices`列(どの買い目候補が的中したか)自体は
+  // 一切変更せず、`indices`が完全一致するoutcome同士の確率を合算するだけなので、winの
+  // identity判定を一切失わない(`indices`が同じなら`wealth`は常に同一になるため確率を
+  // 合算しても厳密に等価。導出は`allocation-primitives.ts`の同関数JSDoc参照)。win候補が
+  // 1件でもあると順序付きoutcome空間(畳み込み無しではP(候補数,3)通り)がそのまま
+  // `runGreedyAllocation`/`computeHitProbabilities`に渡り計算量が跳ね上がっていたため
+  // (実測: 中央16頭の実オッズで`buildMixedAllocationDisplay`が約7.9倍遅くなった)、
+  // 両方へ渡す前にここで1回だけ畳み込む。
   let outcomeIndexSets: readonly OutcomeIndexSet[];
   if (winOutcome.kind === "determined") {
-    outcomeIndexSets = orderedRaw!.map((outcome) => {
+    const rawOutcomeIndexSets = orderedRaw!.map((outcome) => {
       const orderSet = new Set(outcome.order);
       const indices: number[] = [];
       for (let i = 0; i < finalCandidates.length; i++) {
@@ -837,6 +849,7 @@ export function allocateGeneralBets(
       }
       return { indices, probability: outcome.probability };
     });
+    outcomeIndexSets = foldOutcomeIndexSetsBySignature(rawOutcomeIndexSets);
   } else {
     const rawDistribution = model.buildDistribution(horses, topFinishCount);
     const foldedOutcomes = foldToCandidateSubsets(rawDistribution, candidateUmabanSet);
