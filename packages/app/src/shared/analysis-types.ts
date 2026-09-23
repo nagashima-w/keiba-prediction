@@ -571,16 +571,18 @@ export interface ProposedBetPopulationView {
 
 /**
  * 検証画面: 配分ベースの回収率(表示用。Issue #71 #54-B。core `ProposedBetReport` のプレーン写し)。
- * `overall` は複勝・ワイド・3連複の3券種の合算(同一の賭け金仮定を共有するポートフォリオとしての
- * 合計。core側JSDoc参照)。
+ * `overall` は複勝・単勝・ワイド・3連複の4券種の合算(同一の賭け金仮定を共有するポートフォリオ
+ * としての合計。core側JSDoc参照)。単勝はIssue #100・#23-Cで追加。
  */
 export interface ProposedBetReportView {
   /** 母集団4分類の件数。 */
   readonly population: ProposedBetPopulationView;
-  /** 複勝・ワイド・3連複の合算。 */
+  /** 複勝・単勝・ワイド・3連複の合算。 */
   readonly overall: ProposedBetTypeSummaryView;
   /** 複勝の内訳。 */
   readonly place: ProposedBetTypeSummaryView;
+  /** 単勝の内訳(Issue #100・#23-C)。 */
+  readonly win: ProposedBetTypeSummaryView;
   /** ワイドの内訳。 */
   readonly wide: ProposedBetTypeSummaryView;
   /** 3連複の内訳。 */

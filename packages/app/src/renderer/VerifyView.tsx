@@ -314,7 +314,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
             </p>
             <p style={{ margin: "0.15rem 0", color: "#666" }}>
               内訳: 複勝 {report.proposedBet.place.betCount}点/
-              {formatRate(report.proposedBet.place.recoveryRate)} / ワイド{" "}
+              {formatRate(report.proposedBet.place.recoveryRate)} / 単勝{" "}
+              {report.proposedBet.win.betCount}点/
+              {formatRate(report.proposedBet.win.recoveryRate)} / ワイド{" "}
               {report.proposedBet.wide.betCount}点/
               {formatRate(report.proposedBet.wide.recoveryRate)} / 3連複{" "}
               {report.proposedBet.trio.betCount}点/
@@ -328,13 +330,14 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
              */}
             {report.proposedBet.overall.unjudgedCount > 0 && (
               <p style={{ margin: "0.15rem 0", color: "#a60" }}>
-                判定不能(集計対象外): 複勝{report.proposedBet.place.unjudgedCount}点 / ワイド
+                判定不能(集計対象外): 複勝{report.proposedBet.place.unjudgedCount}点 / 単勝
+                {report.proposedBet.win.unjudgedCount}点 / ワイド
                 {report.proposedBet.wide.unjudgedCount}点 / 3連複
                 {report.proposedBet.trio.unjudgedCount}点
               </p>
             )}
             {/*
-             * Issue #76: 未対応の券種コード(place/wide/trio以外)の買い目がある旨の注記。
+             * Issue #76: 未対応の券種コード(place/win/wide/trio以外)の買い目がある旨の注記。
              * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す。
              * 文言の組み立て(count===0ならnull)はformatUnknownBetTypeNotice(純関数)の責務で、
              * ここは`unknownBetTypeNotice`(コンポーネント冒頭で1回だけ呼んだ結果)のnull判定

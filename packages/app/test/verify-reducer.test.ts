@@ -37,6 +37,7 @@ const sampleReport: VerifyReportView = {
     population: { allocated: 0, skipped: 0, unreached: 0, noRecord: 0 },
     overall: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     place: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    win: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     wide: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     trio: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     unknownBetType: { count: 0, totalStake: 0, betTypes: [] },

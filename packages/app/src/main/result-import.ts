@@ -22,12 +22,18 @@ import type { ImportResultOutcome } from "../shared/analysis-types.js";
  * - 着順(FinishPosition)は数値順位のみ number にし、非数値(中止など)・null は null にする。
  *   降着(demoted)でも確定着順 value を採用する。
  * - 複勝の確定払戻(placePayout)を馬番で対応付ける。払戻の無い馬は null。
+ * - 単勝の確定払戻(winPayout、Issue #100・#23-C)を馬番で対応付ける。placePayoutと同じ
+ *   対応付けロジック(payoutByUmaban)。1着以外の馬は null。1着同着の場合は該当する
+ *   複数馬がそれぞれ自分の払戻額を持つ(winPayoutsの件数はparsePayoutRoutが固定しないため)。
  * - 通過順(passing)・上がり3F(last3f、タスク#27-A2)は各馬の値をそのまま詰める
  *   (parseRaceResult が既に非throwフォールバック済みのため、ここでの追加変換は不要)。
  */
 export function toResultEntries(result: RaceResult): RaceResultEntry[] {
-  const payoutByUmaban = new Map(
+  const placePayoutByUmaban = new Map(
     result.placePayouts.map((p) => [p.umaban, p.payout]),
+  );
+  const winPayoutByUmaban = new Map(
+    result.winPayouts.map((p) => [p.umaban, p.payout]),
   );
   return result.horses.map((h) => {
     const finishPosition =
@@ -37,7 +43,8 @@ export function toResultEntries(result: RaceResult): RaceResultEntry[] {
     return {
       umaban: h.umaban,
       finishPosition,
-      placePayout: payoutByUmaban.get(h.umaban) ?? null,
+      placePayout: placePayoutByUmaban.get(h.umaban) ?? null,
+      winPayout: winPayoutByUmaban.get(h.umaban) ?? null,
       passing: h.passing,
       last3f: h.last3f,
     };

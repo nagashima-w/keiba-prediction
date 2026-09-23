@@ -66,6 +66,7 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
       umaban: 4,
       finishPosition: 1,
       placePayout: 210,
+      winPayout: 670,
       passing: [],
       last3f: null,
     });
@@ -73,6 +74,7 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
       umaban: 9,
       finishPosition: 3,
       placePayout: 1060,
+      winPayout: null,
       passing: [],
       last3f: null,
     });
@@ -97,6 +99,7 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
       umaban: 4,
       finishPosition: 1,
       placePayout: 210,
+      winPayout: 670,
       passing: [2, 2, 4, 2],
       last3f: 37.2,
     });
@@ -112,6 +115,39 @@ describe("toResultEntries(結果→保存レコード変換)", () => {
     const entries = toResultEntries(buildRaceResult());
     const d = entries.find((e) => e.umaban === 5)!;
     expect(d.placePayout).toBeNull();
+  });
+
+  // Issue #100(#23-C): winPayoutもplacePayoutと同じ対応付けロジック(payoutByUmaban)で
+  // 詰められることを固定する。
+  it("単勝払戻の無い馬は winPayout=null にすること", () => {
+    const entries = toResultEntries(buildRaceResult());
+    const d = entries.find((e) => e.umaban === 5)!;
+    expect(d.winPayout).toBeNull();
+  });
+
+  it("単勝払戻のある馬(1着)には確定払戻を対応付けること", () => {
+    const entries = toResultEntries(buildRaceResult());
+    const a = entries.find((e) => e.umaban === 4)!;
+    expect(a.winPayout).toBe(670);
+  });
+
+  // AC1(1着同着): winPayouts.length>=2 の実経路(toResultEntries経由)テスト。
+  // boss裁定A: winPayouts[0]だけを拾う・単一値で持つ等の実装欠陥はtoResultEntries内にしか
+  // 存在しないため、RaceResultEntry[]を手で組み立てるのではなくRaceResultを合成して
+  // toResultEntriesに通す(実経路を通す)。
+  it("単勝の1着同着(winPayouts.length>=2)でも、対象馬それぞれの払戻額が対応付けられること", () => {
+    const entries = toResultEntries(
+      buildRaceResult({
+        winPayouts: [
+          { umaban: 4, payout: 670 },
+          { umaban: 2, payout: 340 },
+        ],
+      }),
+    );
+    const byUmaban = new Map(entries.map((e) => [e.umaban, e.winPayout]));
+    // 両方とも非null、かつ「片方だけ拾う」「同額を複製する」実装を落とせるよう別額で固定する。
+    expect(byUmaban.get(4)).toBe(670);
+    expect(byUmaban.get(2)).toBe(340);
   });
 
   it("降着(demoted)でも確定着順(value)を採用すること", () => {

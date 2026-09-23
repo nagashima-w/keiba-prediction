@@ -360,17 +360,18 @@ export interface ProposedBetPopulation {
 }
 
 /**
- * 保存されている券種コードが place/wide/trio のいずれでもなかった買い目行(Issue #76)。
+ * 保存されている券種コードが place/win/wide/trio のいずれでもなかった買い目行(Issue #76。
+ * winはIssue #100・#23-Cで既知の券種に追加された)。
  * 規則U(判定不能。原因は払戻の取込状態)とは原因が違うため `unjudgedCount` には混ぜない。
  * この行は betCount/totalStake/totalReturn/unjudgedCount のいずれにも計上されない。
  *
  * 混ぜない理由(#76着手前ゲート裁定): (1) `overall.unjudgedCount === place.unjudgedCount +
- * wide.unjudgedCount + trio.unjudgedCount` という不変条件テストが `verify.test.ts` に3本ある
- * (ベース時点で2本。本Issue自身が「未知券種を含む入力でも成り立つこと」を確認する3本目を
- * 追加した。boss メタレビューR3: この数を断定する行を書くたびに`git show <ベースコミット>:
- * <このファイル>`と比較し、差分自身が数を動かしていないか検算すること)、混ぜると崩れる
- * (2) `VerifyView.tsx` は複勝・ワイド・3連複の3内訳だけを表示しており、混ぜると
- * 表示と合計が食い違う (3) `unjudgedCount` のJSDocは「規則U(Issue #71)により」と原因を
+ * win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount` という不変条件テストが
+ * `verify.test.ts` に3本ある(ベース時点で2本。#76自身が「未知券種を含む入力でも成り立つこと」を
+ * 確認する3本目を追加した。boss メタレビューR3: この数を断定する行を書くたびに`git show
+ * <ベースコミット>:<このファイル>`と比較し、差分自身が数を動かしていないか検算すること)、
+ * 混ぜると崩れる (2) `VerifyView.tsx` は複勝・単勝・ワイド・3連複の4内訳だけを表示しており、
+ * 混ぜると表示と合計が食い違う (3) `unjudgedCount` のJSDocは「規則U(Issue #71)により」と原因を
  * 名指ししており、混ぜると原因ラベルが誤りになる(#31・#55・#58の誤ラベル欠陥クラスの再生産)。
  */
 export interface ProposedBetUnknownBetType {
@@ -387,10 +388,11 @@ export interface ProposedBetUnknownBetType {
  * 賭け金とする(Q-C)。既存 `VerifyReport.bet`(複勝・一律stakePerBet円、Q-B)とは仮定が異なるため、
  * 両者を合算した値はどこにも作らない(AC-B5)。
  *
- * `overall` は place/wide/trio の3券種の合算——**これはAC-B5が禁じる「賭け金の仮定が違う2つの
- * 合算」には当たらない**。3券種はいずれも同一の仮定(分析時点で実際に提案した配分額)を共有しており、
- * ケリー配分はそもそも複数券種にまたがるポートフォリオとして計算されているため、券種を横断した
- * 合計はその仮定の中で意味を持つ(AC-B5がこの合算を明示的に許容している判断理由をここに残す)。
+ * `overall` は place/win/wide/trio の4券種の合算(winはIssue #100・#23-Cで追加)——**これは
+ * AC-B5が禁じる「賭け金の仮定が違う2つの合算」には当たらない**。4券種はいずれも同一の仮定
+ * (分析時点で実際に提案した配分額)を共有しており、ケリー配分はそもそも複数券種にまたがる
+ * ポートフォリオとして計算されているため、券種を横断した合計はその仮定の中で意味を持つ
+ * (AC-B5がこの合算を明示的に許容している判断理由をここに残す)。
  * `overall`という名前は「total」「all」の使用を禁じたAC-B5に抵触しない——あの禁止は「どちらの
  * 賭け金仮定を指すか名前から分からない語」を避けるためのもので、`ProposedBetReport` の内側では
  * 仮定は既に確定している。
@@ -398,16 +400,18 @@ export interface ProposedBetUnknownBetType {
 export interface ProposedBetReport {
   /** 母集団4分類の件数。 */
   readonly population: ProposedBetPopulation;
-  /** 複勝・ワイド・3連複の合算(同一の賭け金仮定を共有するポートフォリオとしての合計)。 */
+  /** 複勝・単勝・ワイド・3連複の合算(同一の賭け金仮定を共有するポートフォリオとしての合計)。 */
   readonly overall: ProposedBetTypeSummary;
   /** 複勝の内訳。 */
   readonly place: ProposedBetTypeSummary;
+  /** 単勝の内訳(Issue #100・#23-C)。 */
+  readonly win: ProposedBetTypeSummary;
   /** ワイドの内訳。 */
   readonly wide: ProposedBetTypeSummary;
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummary;
   /**
-   * 保存されている券種コードが place/wide/trio のいずれでもなかった買い目行(Issue #76)。
+   * 保存されている券種コードが place/win/wide/trio のいずれでもなかった買い目行(Issue #76)。
    * `overall` には合算しない(`ProposedBetUnknownBetType` のJSDoc参照)。未知券種行が
    * 1件も無い通常時は `{ count: 0, totalStake: 0, betTypes: [] }`。このフィールド自体が
    * 省略されることはない(#71で`unjudgedCount`が core→shared View 型までは配線されながら
@@ -786,6 +790,16 @@ function selectIncludedAnalyses(
  */
 function raceHasPlacePayout(results: readonly RaceResultEntry[]): boolean {
   return results.some((r) => r.placePayout !== null && r.placePayout !== undefined);
+}
+
+/**
+ * そのレースの実結果に単勝の確定払戻(winPayout)が1件以上あるか(Issue #100・#23-C)。
+ * raceHasPlacePayout の鏡写し(winPayoutはplacePayoutと同型の後付け列のため、同じ
+ * 「取込状態ゲート」を単勝側にも用意する。汎用化はしない——理由はcomputeProposedBetReport
+ * のwin分岐のコメント参照)。
+ */
+function raceHasWinPayout(results: readonly RaceResultEntry[]): boolean {
+  return results.some((r) => r.winPayout !== null && r.winPayout !== undefined);
 }
 
 /** computeHorseBetOutcome の算出結果(Task#34。Issue#70で isPlaced を isInTopThree/isPlaceHit に分離)。 */
@@ -1189,17 +1203,22 @@ function finalizeProposedBetSummary(acc: ProposedBetAccumulator): ProposedBetTyp
   };
 }
 
-/** 3券種の可変カウンタを合算した確定値を作る(overall。JSDoc「ProposedBetReport」参照)。 */
+/**
+ * 4券種の可変カウンタを合算した確定値を作る(overall。JSDoc「ProposedBetReport」参照)。
+ * Issue #100・#23-Cで単勝(win)を追加。
+ */
 function finalizeProposedBetOverall(
   place: ProposedBetAccumulator,
+  win: ProposedBetAccumulator,
   wide: ProposedBetAccumulator,
   trio: ProposedBetAccumulator,
 ): ProposedBetTypeSummary {
   return finalizeProposedBetSummary({
-    betCount: place.betCount + wide.betCount + trio.betCount,
-    totalStake: place.totalStake + wide.totalStake + trio.totalStake,
-    totalReturn: place.totalReturn + wide.totalReturn + trio.totalReturn,
-    unjudgedCount: place.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+    betCount: place.betCount + win.betCount + wide.betCount + trio.betCount,
+    totalStake: place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
+    totalReturn: place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+    unjudgedCount:
+      place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
   });
 }
 
@@ -1247,6 +1266,7 @@ function computeProposedBetReport(
   let noRecord = 0;
 
   const place = emptyProposedBetAccumulator();
+  const win = emptyProposedBetAccumulator();
   const wide = emptyProposedBetAccumulator();
   const trio = emptyProposedBetAccumulator();
   const unknown = emptyUnknownBetTypeAccumulator();
@@ -1297,9 +1317,26 @@ function computeProposedBetReport(
       }
     }
 
+    // 単勝払戻の逆引きマップ(Issue #100・#23-C。placePayoutByComboKeyの鏡写し。
+    // raceHasWinPayoutが規則Hのwin版=「単勝payoutテーブル自体が取込済みか」を先に判定する)。
+    const winPayoutAvailable = raceHasWinPayout(results);
+    const winPayoutByComboKey = new Map<string, number>();
+    if (winPayoutAvailable) {
+      for (const r of results) {
+        if (r.winPayout !== null && r.winPayout !== undefined) {
+          winPayoutByComboKey.set(buildComboOddsKey([r.umaban]), r.winPayout);
+        }
+      }
+    }
+
     for (const bet of allocation.bets) {
-      if (bet.betType !== "place" && bet.betType !== "wide" && bet.betType !== "trio") {
-        // Issue #76: #59の保存経路はplace/wide/trioのみを書く契約のため通常到達しないが、
+      if (
+        bet.betType !== "place" &&
+        bet.betType !== "win" &&
+        bet.betType !== "wide" &&
+        bet.betType !== "trio"
+      ) {
+        // Issue #76: #59の保存経路はplace/win/wide/trioのみを書く契約のため通常到達しないが、
         // 到達した場合に無言でcontinueして投資額を静かに過小計上する(=回収率が偽って
         // 良く見える)欠陥があった。規則Uとは原因が異なるためunjudgedCountには混ぜず、
         // 専用の内訳(unknownBetType)へ計上する(ProposedBetUnknownBetTypeのJSDoc参照)。
@@ -1308,7 +1345,14 @@ function computeProposedBetReport(
         unknown.betTypes.add(bet.betType);
         continue;
       }
-      const accumulator = bet.betType === "place" ? place : bet.betType === "wide" ? wide : trio;
+      const accumulator =
+        bet.betType === "place"
+          ? place
+          : bet.betType === "win"
+            ? win
+            : bet.betType === "wide"
+              ? wide
+              : trio;
 
       if (bet.betType === "place") {
         if (!racePayoutAvailable) {
@@ -1318,6 +1362,22 @@ function computeProposedBetReport(
         accumulator.betCount += 1;
         accumulator.totalStake += bet.stake;
         const payout = placePayoutByComboKey.get(bet.comboKey);
+        if (payout !== undefined) {
+          accumulator.totalReturn += payout * (bet.stake / 100);
+        }
+        continue;
+      }
+
+      if (bet.betType === "win") {
+        // place分岐の鏡写し(Issue #100・#23-C)。単勝はplaceと同じ「1頭=1買い目」の構造を
+        // 持つため、判定ロジックも同型(raceHasWinPayout→winPayoutByComboKeyの取込状態ゲート)。
+        if (!winPayoutAvailable) {
+          accumulator.unjudgedCount += 1;
+          continue;
+        }
+        accumulator.betCount += 1;
+        accumulator.totalStake += bet.stake;
+        const payout = winPayoutByComboKey.get(bet.comboKey);
         if (payout !== undefined) {
           accumulator.totalReturn += payout * (bet.stake / 100);
         }
@@ -1345,8 +1405,9 @@ function computeProposedBetReport(
 
   return {
     population: { allocated, skipped, unreached, noRecord },
-    overall: finalizeProposedBetOverall(place, wide, trio),
+    overall: finalizeProposedBetOverall(place, win, wide, trio),
     place: finalizeProposedBetSummary(place),
+    win: finalizeProposedBetSummary(win),
     wide: finalizeProposedBetSummary(wide),
     trio: finalizeProposedBetSummary(trio),
     unknownBetType: finalizeUnknownBetType(unknown),

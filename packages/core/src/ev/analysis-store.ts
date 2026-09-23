@@ -414,6 +414,13 @@ export interface RaceResultEntry {
    */
   readonly placePayout?: number | null;
   /**
+   * 単勝の確定払戻(100円あたりの円、Issue #100・#23-C)。placePayoutと同型・同じ由来
+   * (`parsePayoutRow`の出力)。1着以外の馬・未取込(旧データ)は null。省略時もnull扱い
+   * (placePayoutと同じ非破壊optional追加)。1着同着の場合は該当する複数馬がそれぞれ
+   * 自分の払戻額を持つ(`parsePayoutRow`は件数を固定しない)。
+   */
+  readonly winPayout?: number | null;
+  /**
    * 通過順位(例: [2,3,4,3]、タスク#27-A2)。取得できない場合は空配列。
    * 省略時は空配列として保存する(placePayoutと同方針の非破壊optional追加)。
    */
@@ -589,6 +596,7 @@ export class AnalysisStore {
         umaban INTEGER NOT NULL,
         finish_position INTEGER,
         place_payout REAL,
+        win_payout REAL,
         PRIMARY KEY (race_id, umaban)
       );
       CREATE TABLE IF NOT EXISTS ${RACE_RESULT_META_TABLE} (
@@ -665,6 +673,7 @@ export class AnalysisStore {
       );
     `);
     this.migrateResultPayoutColumn();
+    this.migrateResultWinPayoutColumn();
     this.migrateMarkColumn();
     this.migrateEvEstimatedColumn();
     this.migratePromptVersionColumn();
@@ -802,6 +811,23 @@ export class AnalysisStore {
   }
 
   /**
+   * 実配当列(win_payout)を後付けするマイグレーション(Issue #100・#23-C)。
+   * migrateResultPayoutColumn(place_payout)の逐語コピー。旧バージョンで作成済みの
+   * race_results には win_payout 列が無いため、存在しなければ追加する
+   * (既存行は NULL=未取込となり、verifyは判定不能として扱う=後方互換)。
+   */
+  private migrateResultWinPayoutColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "win_payout")) {
+      this.db.exec(
+        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN win_payout REAL`,
+      );
+    }
+  }
+
+  /**
    * 通過順(passing_json)・上がり3F(last3f)列を後付けするマイグレーション(タスク#27-A2)。
    * 旧バージョンで作成済みの race_results にはこれらの列が無いため、存在しなければ追加する
    * (既存行は passing_json=NULL→復元時 passing=[]、last3f=NULLのまま読める=後方互換)。
@@ -924,10 +950,11 @@ export class AnalysisStore {
   }
 
   /**
-   * レース後の実着順(通過順・上がり3F・複勝確定払戻)と、レース単位の面(course_type)を保存する。
-   * (race_id, umaban) 主キーで再保存は上書きする。
-   * placePayout/passing/last3f を省略した場合はそれぞれ null/空配列/null で保存する
-   * (未取込項目=後続の復元・verifyは欠損値として扱う)。
+   * レース後の実着順(通過順・上がり3F・複勝確定払戻・単勝確定払戻)と、レース単位の面
+   * (course_type)を保存する。(race_id, umaban) 主キーで再保存は上書きする。
+   * placePayout/winPayout/passing/last3f を省略した場合はそれぞれ null/null/空配列/null で
+   * 保存する(未取込項目=後続の復元・verifyは欠損値として扱う)。winPayout は placePayout と
+   * 同型の後付け列(win_payout、Issue #100・#23-C)。
    *
    * race_results(馬単位)・race_result_meta(レース単位の面)・race_combo_payouts/
    * race_combo_payout_imports(組合せ払戻、Issue #52)は単一の db.transaction 内で書く
@@ -964,11 +991,12 @@ export class AnalysisStore {
   ): void {
     const upsertResult = this.db.prepare(
       `INSERT INTO ${RACE_RESULTS_TABLE}
-         (race_id, umaban, finish_position, place_payout, passing_json, last3f)
-       VALUES (?, ?, ?, ?, ?, ?)
+         (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(race_id, umaban) DO UPDATE SET
          finish_position = excluded.finish_position,
          place_payout = excluded.place_payout,
+         win_payout = excluded.win_payout,
          passing_json = excluded.passing_json,
          last3f = excluded.last3f`,
     );
@@ -1001,6 +1029,7 @@ export class AnalysisStore {
             r.umaban,
             r.finishPosition,
             r.placePayout ?? null,
+            r.winPayout ?? null,
             JSON.stringify(r.passing ?? []),
             r.last3f ?? null,
           );
@@ -1184,13 +1213,15 @@ export class AnalysisStore {
   getResult(raceId: string): RaceResultEntry[] | undefined {
     const rows = this.db
       .prepare(
-        `SELECT umaban, finish_position AS finishPosition, place_payout AS placePayout
+        `SELECT umaban, finish_position AS finishPosition, place_payout AS placePayout,
+                win_payout AS winPayout
            FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`,
       )
       .all(raceId) as Array<{
       umaban: number;
       finishPosition: number | null;
       placePayout: number | null;
+      winPayout: number | null;
     }>;
     if (rows.length === 0) {
       return undefined;
@@ -1199,6 +1230,7 @@ export class AnalysisStore {
       umaban: r.umaban,
       finishPosition: r.finishPosition,
       placePayout: r.placePayout,
+      winPayout: r.winPayout,
     }));
   }
 

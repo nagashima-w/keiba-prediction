@@ -208,6 +208,60 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       expect(updated[0]!.placePayout).toBe(210);
       store.close();
     });
+
+    // Issue #100(#23-C): 単勝の確定払戻(winPayout)。placePayoutと同型の後付け列(win_payout)。
+    it("単勝の確定払戻(winPayout)を保存・取得できること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [
+        { umaban: 4, finishPosition: 1, winPayout: 670 },
+        { umaban: 2, finishPosition: 2 }, // 単勝は1着のみ払戻対象。2着以下は払戻なし。
+      ]);
+      const byUmaban = new Map(
+        store.getResult("R1")!.map((r) => [r.umaban, r.winPayout]),
+      );
+      expect(byUmaban.get(4)).toBe(670);
+      // winPayout を省略した馬(1着以外)は null。
+      expect(byUmaban.get(2)).toBeNull();
+      store.close();
+    });
+
+    it("winPayout を指定せず保存した既存互換の呼び出しでは winPayout が null になること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      expect(store.getResult("R1")![0]!.winPayout).toBeNull();
+      store.close();
+    });
+
+    it("払戻なしで取り込んだ後、払戻ありで再取込すると winPayout が更新されること", () => {
+      const store = new AnalysisStore();
+      // 確定直前: 着順のみ(払戻なし)。
+      store.saveResult("R1", [{ umaban: 4, finishPosition: 1 }]);
+      expect(store.getResult("R1")![0]!.winPayout).toBeNull();
+      // 確定後の再取込: 単勝払戻が付く。
+      store.saveResult("R1", [{ umaban: 4, finishPosition: 1, winPayout: 670 }]);
+      const updated = store.getResult("R1")!;
+      expect(updated).toHaveLength(1);
+      expect(updated[0]!.finishPosition).toBe(1);
+      expect(updated[0]!.winPayout).toBe(670);
+      store.close();
+    });
+
+    // AC1(1着同着): winPayouts.length>=2 の入力で全件が保存されること。
+    // parsePayoutRowは件数を固定していないため実在しうる(合成入力)。
+    it("単勝の1着同着(2頭とも払戻あり)で、両馬それぞれの払戻額が保存されること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [
+        { umaban: 3, finishPosition: 1, winPayout: 150 },
+        { umaban: 7, finishPosition: 1, winPayout: 320 }, // 同着でも金額は馬ごとに異なりうる
+      ]);
+      const byUmaban = new Map(
+        store.getResult("R1")!.map((r) => [r.umaban, r.winPayout]),
+      );
+      // 両方とも非null、かつ「片方だけ拾う」「同額を複製する」実装を落とせるよう別額で固定する。
+      expect(byUmaban.get(3)).toBe(150);
+      expect(byUmaban.get(7)).toBe(320);
+      store.close();
+    });
   });
 
   describe("外部キー制約の実効化", () => {
@@ -1302,8 +1356,8 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
-  describe("非破壊回帰: getResultは従来どおりの出力を維持すること(タスク#27-A2)", () => {
-    it("passing/last3f/courseTypeを保存した後もgetResultはumaban/finishPosition/placePayoutのみを返すこと", () => {
+  describe("非破壊回帰: getResultは従来どおりの出力を維持すること(タスク#27-A2・Issue #100)", () => {
+    it("passing/last3f/courseTypeを保存した後もgetResultはumaban/finishPosition/placePayout/winPayoutのみを返すこと", () => {
       const store = new AnalysisStore();
       store.saveResult(
         "R1",
@@ -1312,6 +1366,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
             umaban: 1,
             finishPosition: 1,
             placePayout: 210,
+            winPayout: 670,
             passing: [2, 3],
             last3f: 35.0,
           },
@@ -1320,7 +1375,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       );
       const results = store.getResult("R1")!;
       expect(results).toEqual([
-        { umaban: 1, finishPosition: 1, placePayout: 210 },
+        { umaban: 1, finishPosition: 1, placePayout: 210, winPayout: 670 },
       ]);
       store.close();
     });

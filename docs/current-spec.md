@@ -16,17 +16,19 @@
     `includeComboOdds`がOFF・ワイド/三連複とも配分対象OFF・ワイド/三連複の候補合計が0件、の
     いずれかに該当して複勝専用の従来経路へフォールバックする状況では、**単勝もワイド・三連複と
     同様に提案されなくなる**(現状の制限として維持。5節参照)
-  - **記録・回収率検証**: 複勝のみ正式対応(`ev/verify.ts`は複勝の的中判定・払戻のみを扱う。**回収率検証は
-    Issue #52 完了時点でもまだ複勝のみが正**)。単勝(Issue #90)・ワイド・三連複の買い目は
-    `analysis_bets`テーブルへ`bet_type`列付きでそのまま保存されるが、`ev/verify.ts`は
-    複勝・ワイド・三連複以外の`bet_type`を「未対応の券種コード」として別集計
-    (`unknownBetType`)へ計上し、回収率集計(overall)からは除外する(検証画面には除外している旨の
-    注記が出る)。単勝の回収率集計への反映はIssue #23-Cで対応する。`ev/analysis-store.ts`は
-    Issue #52 で ワイド・三連複の**確定払戻の取得・永続化**(`race_combo_payouts`/
-    `race_combo_payout_imports`、`parse-race-result.ts`)まで対応したが、**保存はするが検証
-    (`ev/verify.ts`)への反映は未着手**(読み手は Issue #54)。取得(オッズ・配分提案)と検証
-    (回収率集計)は別軸であることに注意(5節の配分提案は既に単勝・ワイド・三連複対応済みだが、
-    これは組合せ**オッズ**の話で本項の組合せ**払戻**とは別物。組合せオッズの永続化自体も別Issue #53)
+  - **記録・回収率検証**: 新方式(proposedBet系、`ev/verify.ts`の`computeProposedBetReport`。
+    Issue #71・#54-B)は複勝・単勝・ワイド・三連複の4券種に対応(単勝はIssue #100・#23-Cで追加。
+    それ以前は単勝が「未対応の券種コード」扱いだった)。`analysis_bets`テーブルへ`bet_type`列付きで
+    保存された買い目のうち、この4券種以外の`bet_type`は引き続き「未対応の券種コード」として
+    別集計(`unknownBetType`)へ計上し、回収率集計(overall)からは除外する(検証画面には除外している旨の
+    注記が出る)。旧方式(`VerifyReport.bet`。複勝一律100円ずつ買ったと仮定した累積回収率)は
+    複勝のみを対象とする設計(賭け金の仮定がproposedBet系と異なるため合算しない。AC-B5)で、
+    こちらは変更していない。`ev/analysis-store.ts`は複勝の確定払戻(`race_results.place_payout`)・
+    単勝の確定払戻(`race_results.win_payout`、Issue #100)をレース結果テーブルへ、
+    ワイド・三連複の確定払戻(Issue #52)を`race_combo_payouts`/`race_combo_payout_imports`
+    テーブルへ、それぞれ永続化する。取得(オッズ・配分提案)と検証(回収率集計)は別軸であることに
+    注意(5節の配分提案は既に単勝・ワイド・三連複対応済みだが、これは組合せ**オッズ**の話で
+    本項の組合せ**払戻**とは別物。組合せオッズの永続化自体も別Issue #53)
   - **単勝オッズ**: Issue #90以降は2つの用途を持つ。(a) 発売前レースで複勝下限を概算する用途
     (`estimatePlaceOddsMinFromWin`。従来どおり)、(b) 5節の配分提案における単勝の候補自体の
     値付け(`ev/combo-bet-allocation.ts`の`buildWinCandidates`が同時分布モデルの順序付き
@@ -214,9 +216,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     `odds_status` を持つ。
   - `analysis_bets`(`analysis_id`/`bet_type`/`combo_key`複合主キー・`analyses`へのFK):
     実際に配分された(`stake>0`の)買い目の明細のみを保存する(点数・総額は
-    `COUNT`/`SUM`で導出でき、集計列を別途持たない)。複勝・ワイド・三連複を
+    `COUNT`/`SUM`で導出でき、集計列を別途持たない)。複勝・単勝・ワイド・三連複を
     `bet_type`/`combo_key`/`stake`/`odds`/`ev`の共通5列に統合する(`combo_key`は
-    `buildComboOddsKey`による正規化キーで、`race_combo_payouts`と同じ形式)。
+    `buildComboOddsKey`による正規化キーで、`race_combo_payouts`と同じ形式。単勝は
+    1頭のみのキー〈例"05"〉になる)。
   - 版不明分析の一括削除(`deleteAnalysesWithUnknownPromptVersion`)は、この2テーブルの子行も
     `analysis_horses`と同じ順序原則(子→親)で先に削除してから`analyses`を削除する。
   - **読み出しAPI・verify集計・UI表示への反映は本Issueのスコープ外**(#54は#71名義で回収率検証
@@ -226,16 +229,16 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   (`ProposedBetReport`)が、既存の累積回収率(`bet`。複勝一律 stakePerBet 円という仮定、Q-B)とは
   別に、**分析時点の設定で実際に提案した配分額をそのまま賭け金とする**回収率を出す(Q-C)。
   賭け金の仮定が異なる2系統のため、`bet` と `proposedBet` を合算した値はどこにも作らない。
-  `proposedBet` 内部の複勝・ワイド・三連複の3券種は同一の賭け金仮定(実際の配分額)を共有する
-  ポートフォリオのため、`overall`(3券種の合算)は持つ。
+  `proposedBet` 内部の複勝・単勝・ワイド・三連複の4券種(単勝はIssue #100・#23-Cで追加)は
+  同一の賭け金仮定(実際の配分額)を共有するポートフォリオのため、`overall`(4券種の合算)は持つ。
   - **読み出しAPI**: `AnalysisStore.getAllocationForVerify(analysisId)` が
     `analysis_allocation_meta`/`analysis_bets` のうち `route`・`skip_reason_code`・
     `bet_type`/`combo_key`/`stake` の5列だけを読む(残り18列・`odds`/`ev` は#71のスコープ外。
     メタ行が無ければ undefined)。`odds`/`ev` を読まないのは、分析時点のオッズで払戻を近似すると
     「回収率」ではなく「提案時点の期待値の再計算」になり Q-C に反するため——系として
     `proposedBet` 系は近似払戻を一切持たず、実配当のみで按分する(複勝は
-    `race_results.place_payout`、ワイド/三連複は `race_combo_payouts.payout` を
-    `stake/100` で按分)。
+    `race_results.place_payout`、単勝は `race_results.win_payout`(Issue #100)、
+    ワイド/三連複は `race_combo_payouts.payout` を、それぞれ `stake/100` で按分)。
   - **母集団の4分類**(MECEで合計は`includedAnalysisCount`と一致): 「配分あり」(メタ行あり ∧
     `route∈{place-only,mixed}` ∧ `skip_reason_code IS NULL`。賭け金>0)、「見送り」(同条件だが
     `skip_reason_code`が非null。計算した上での判定結果)、「未到達」(`route∈{unset,yoso,
@@ -243,11 +246,12 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     #59より前の旧分析)。**分類は必ず`route`を先に見る**——`route==="unset"`(既定
     `bankroll<=0 || perRaceCap<=0`で層1にとどまる経路)は`skip_reason_code`が常にnullになるため、
     `skip_reason_code`を先に見ると「未到達」が「配分あり」に混入する。
-  - **規則U(判定不能の扱い)の適用**: 複勝はそのレースの複勝払戻が1件も取込済みでなければ、
-    ワイド・三連複は`getComboPayouts`が`not_imported`または`imported`かつ`payouts`が空配列で
-    あれば、いずれも判定不能として件数・賭け金・払戻のいずれにも計上せず券種別の
-    `unjudgedCount`(買い目行単位)に計上する。`imported`かつ`payouts`が非空だが該当
-    `combo_key`が無い場合は「不的中」(betCount+1・totalReturn+0)であり判定不能とは区別する。
+  - **規則U(判定不能の扱い)の適用**: 複勝はそのレースの複勝払戻が、単勝(Issue #100)はそのレースの
+    単勝払戻(`race_results.win_payout`)が、それぞれ1件も取込済みでなければ、ワイド・三連複は
+    `getComboPayouts`が`not_imported`または`imported`かつ`payouts`が空配列であれば、いずれも
+    判定不能として件数・賭け金・払戻のいずれにも計上せず券種別の`unjudgedCount`(買い目行単位)に
+    計上する。`imported`かつ`payouts`が非空だが該当`combo_key`が無い場合は「不的中」
+    (betCount+1・totalReturn+0)であり判定不能とは区別する。
   - UI(`VerifyView`)は既存の累積回収率の下に、上記overall・券種別内訳・母集団4分類件数を表示する。
 - **過去分析の再表示(Issue #55)**: 検証タブ「レース一覧」の各レースの折りたたみ内に
   「配分提案(分析時点)」ブロックを表示する。導線は新設せず、既存の「レース一覧」

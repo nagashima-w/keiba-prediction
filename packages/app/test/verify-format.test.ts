@@ -60,6 +60,7 @@ function verifyReport(over: Partial<VerifyReportView> = {}): VerifyReportView {
       population: { allocated: 0, skipped: 0, unreached: 0, noRecord: 0 },
       overall: emptyProposedBetTypeSummary(),
       place: emptyProposedBetTypeSummary(),
+      win: emptyProposedBetTypeSummary(),
       wide: emptyProposedBetTypeSummary(),
       trio: emptyProposedBetTypeSummary(),
       unknownBetType: { count: 0, totalStake: 0, betTypes: [] },

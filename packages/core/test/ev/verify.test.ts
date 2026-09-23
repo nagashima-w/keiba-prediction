@@ -1847,7 +1847,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
     });
   }
 
-  it("AC-B1/AC-B2/AC-B7/PM指定(b): 配分あり2件・見送り1件・未到達1件・記録なし2件が値として区別され、券種別内訳とoverall(3券種の和)が一致すること", () => {
+  it("AC-B1/AC-B2/AC-B7/PM指定(b): 配分あり2件・見送り1件・未到達1件・記録なし2件が値として区別され、券種別内訳とoverall(4券種の和)が一致すること", () => {
     const store = new AnalysisStore();
 
     // 配分あり(1): 複勝1点的中・ワイド1点的中・3連複1点不的中(imported nonemptyだがcombo_key無し)。
@@ -1959,14 +1959,22 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       unjudgedCount: 0,
     });
 
-    // PM指定(b): overallがplace+wide+trioの和であることを関係として固定する(単独のリテラル値だけだと
-    // 3券種の集計と独立にoverallの集計がずれても気づけないため。#70で読み手側の分離漏れを繰り返した
-    // 教訓の裏返し=今回は複数の値から1つを作る側の穴)。
-    expect(overall.betCount).toBe(place.betCount + wide.betCount + trio.betCount);
-    expect(overall.totalStake).toBe(place.totalStake + wide.totalStake + trio.totalStake);
-    expect(overall.totalReturn).toBe(place.totalReturn + wide.totalReturn + trio.totalReturn);
+    // PM指定(b): overallがplace+win+wide+trioの和であることを関係として固定する(単独のリテラル値
+    // だけだと4券種の集計と独立にoverallの集計がずれても気づけないため。#70で読み手側の分離漏れを
+    // 繰り返した教訓の裏返し=今回は複数の値から1つを作る側の穴。Issue #100でwinを追加)。
+    // このフィクスチャにはwin買い目が無いため win.*=0 であり、この関係式単体は「winを足し忘れても
+    // 通る」(win.*が常に0のため)。win買い目がある場での検出力は「単勝(win)の回収率集計」
+    // describe内のAC5-bで別途固定する。
+    const { win } = report.proposedBet;
+    expect(overall.betCount).toBe(place.betCount + win.betCount + wide.betCount + trio.betCount);
+    expect(overall.totalStake).toBe(
+      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
+    );
+    expect(overall.totalReturn).toBe(
+      place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+    );
     expect(overall.unjudgedCount).toBe(
-      place.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+      place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
     );
     expect(overall.recoveryRate).toBe(
       overall.totalStake === 0 ? null : overall.totalReturn / overall.totalStake,
@@ -2149,12 +2157,17 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
     });
 
     // PM指定(b)を別フィクスチャでも再固定(2箇所目。1箇所だけだと偶然の一致を否定できないため)。
-    const { overall, place, wide, trio } = report.proposedBet;
-    expect(overall.betCount).toBe(place.betCount + wide.betCount + trio.betCount);
-    expect(overall.totalStake).toBe(place.totalStake + wide.totalStake + trio.totalStake);
-    expect(overall.totalReturn).toBe(place.totalReturn + wide.totalReturn + trio.totalReturn);
+    // このフィクスチャにもwin買い目が無い(win.*=0)。win買い目がある場での検出力はAC5-b参照。
+    const { overall, place, wide, trio, win } = report.proposedBet;
+    expect(overall.betCount).toBe(place.betCount + win.betCount + wide.betCount + trio.betCount);
+    expect(overall.totalStake).toBe(
+      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
+    );
+    expect(overall.totalReturn).toBe(
+      place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+    );
     expect(overall.unjudgedCount).toBe(
-      place.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+      place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
     );
     store.close();
   });
@@ -2270,11 +2283,150 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
     store.close();
   });
 
+  describe("単勝(win)の回収率集計(Issue #100・#23-C)", () => {
+    it("AC2: 馬番が1桁の馬(ゼロ埋めが効く)の単勝買い目が的中として計上されること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_WIN_1",
+        analyzedAt: "t",
+        horses: [horse(5, 0.4, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          // comboKey"05"はbuildComboOddsKey([5])と同じ規則(2桁ゼロ埋め)で生成される
+          // (allocation-record.tsのmixedBetsOfが実際に生成するキーと同じ形)。
+          bets: [{ betType: "win", comboKey: "05", stake: 100, odds: 4.8, ev: 1.2 }],
+        },
+      });
+      // 単勝払戻はwinPayoutByComboKey側もbuildComboOddsKey([r.umaban])で"05"に正規化される
+      // ため、馬番5(1桁)でもゼロ埋めキーが一致して的中計上されることを固定する。
+      store.saveResult("PB_WIN_1", [{ umaban: 5, finishPosition: 1, winPayout: 480 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.proposedBet.win).toEqual({
+        betCount: 1,
+        totalStake: 100,
+        totalReturn: 480,
+        recoveryRate: 4.8,
+        unjudgedCount: 0,
+      });
+      store.close();
+    });
+
+    it("AC3/AC5-b: 単勝払戻が取込済みのレースで、的中・不的中それぞれ正しく計上され、unknownBetTypeがゼロ値のまま・unjudgedCountが0・overallが4券種の和になること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_WIN_E2E",
+        analyzedAt: "t",
+        horses: [
+          horse(1, 0.5, 2.0, 1.0, true),
+          horse(2, 0.3, 2.0, 1.0, true),
+          horse(3, 0.2, 2.0, 1.0, true),
+        ],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+            // 単勝: umaban1(1着)は的中、umaban2は不的中(winPayoutが無い)。
+            { betType: "win", comboKey: "01", stake: 50, odds: 3, ev: 1 },
+            { betType: "win", comboKey: "02", stake: 30, odds: 3, ev: 1 },
+            { betType: "wide", comboKey: "0102", stake: 60, odds: 1, ev: 1 },
+            { betType: "trio", comboKey: "010203", stake: 40, odds: 1, ev: 1 },
+          ],
+        },
+      });
+      store.saveResult(
+        "PB_WIN_E2E",
+        [
+          { umaban: 1, finishPosition: 1, placePayout: 140, winPayout: 350 },
+          { umaban: 2, finishPosition: 2, placePayout: 210 }, // winPayoutなし=単勝不的中。
+          { umaban: 3, finishPosition: 3, placePayout: 180 },
+        ],
+        null,
+        {
+          wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 900 }] },
+          trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 2000 }] },
+        },
+      );
+
+      const report = computeVerifyReport(store);
+      const { place, win, wide, trio, overall, unknownBetType } = report.proposedBet;
+
+      // AC3(a): 未対応の券種コード警告が出ないこと。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // AC3(b): 的中・不的中の2ケース。的中(umaban1: 350*50/100=175)のみが計上され、
+      // 不的中(umaban2: comboKey"02")は加算されないこと(betCount/totalStakeには乗るが
+      // totalReturnには乗らない)。
+      expect(win.betCount).toBe(2);
+      expect(win.totalStake).toBe(80);
+      expect(win.totalReturn).toBe(175);
+
+      // AC3(c): 判定不能が0件であること(本Issueの目的そのもの)。
+      expect(win.unjudgedCount).toBe(0);
+
+      // 前提固定(空振り防止): place/wide/trioも実際に的中として計上されていること。
+      expect(place.betCount).toBeGreaterThan(0);
+      expect(wide.betCount).toBeGreaterThan(0);
+      expect(trio.betCount).toBeGreaterThan(0);
+
+      // AC5-b: win.betCount>0の場でoverallが4券種の和になっていること(winを足し忘れると
+      // ここで検出される。上のPM指定(b)の2箇所はwin買い目が無いフィクスチャのため
+      // win.*=0で「足し忘れ」を検出できない=このテストが唯一の検出箇所)。
+      expect(overall).toEqual({
+        betCount: 5,
+        totalStake: 280,
+        totalReturn: 1655,
+        recoveryRate: 1655 / 280,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(place.betCount + win.betCount + wide.betCount + trio.betCount);
+      expect(overall.totalStake).toBe(
+        place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+      );
+      store.close();
+    });
+
+    it("AC4: 単勝払戻が未取込のレース(旧DB相当)では、win買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(不的中として計上してはならない)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_WIN_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "win", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
+        },
+      });
+      // winPayoutを渡さない(placePayoutのみ。旧DB相当=単勝payout未取込のレース)。
+      store.saveResult("PB_WIN_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { win } = report.proposedBet;
+      expect(win.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(win.betCount).toBe(0);
+      expect(win.totalStake).toBe(0);
+      expect(win.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
   describe("Issue #76(AC-A5): 未知の券種コードの行が投資額を静かに過小計上しないこと", () => {
     // analysis_betsのDDLはbet_type TEXT NOT NULLでCHECK制約が無いため、生SQLを書かずに
-    // 「place/wide/trio以外」を持つ買い目行をsaveAnalysis経由でそのまま作れる(Issue本文の
-    // 「Redの作り方」参照)。単勝("win")は#23-Bで追加予定の値であり、着手前ゲート時点では
-    // 未対応の券種の代表例として使う。
+    // 「place/win/wide/trio以外」を持つ買い目行をsaveAnalysis経由でそのまま作れる(Issue本文の
+    // 「Redの作り方」参照)。
+    //
+    // 未知券種の代表例には実在の券種名を使わない("xyz"。boss裁定C・Issue #100)。かつて
+    // ここでは単勝("win")を代表例に使っていたが、#100(#23-C)でwinが既知の券種になったため
+    // 差し替えた。券種拡張シリーズ(#24馬連・馬単/#25三連単/#26残り)で`AllocationBetType`に
+    // 加わりうる実在の券種コード(和称・英称とも)を使うと、その券種が実装されるたびに
+    // このdescribe全体の差し替え作業が再発する(#100と同じ罠を繰り返す)ため、将来も
+    // 実在の券種名になりえない非券種文字列を使う(既存の"zzz"/"aaa"と同じ流儀)。
 
     it("正の対照(fail-open検出。bossメタレビューR1): 未知券種行を1件も含まない通常のレポートでは、unknownBetTypeが{count:0, totalStake:0, betTypes:[]}になること(place/wide/trioが未知券種として誤検知されないこと)", () => {
       const store = new AnalysisStore();
@@ -2306,7 +2458,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       store.close();
     });
 
-    it("未知券種(win)の行が、place/wide/trio/overallのbetCount・totalStake・totalReturn・unjudgedCountの4フィールドすべてに現れないこと", () => {
+    it("未知券種(xyz)の行が、place/win/wide/trio/overallのbetCount・totalStake・totalReturn・unjudgedCountの4フィールドすべてに現れないこと", () => {
       const store = new AnalysisStore();
       store.saveAnalysis({
         raceId: "PB_UNKNOWN_1",
@@ -2314,15 +2466,15 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         horses: [horse(1, 0.5, 2.0, 1.0, true)],
         allocation: {
           meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
-          bets: [{ betType: "win", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
+          bets: [{ betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
         },
       });
       store.saveResult("PB_UNKNOWN_1", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
 
       const report = computeVerifyReport(store);
-      const { place, wide, trio, overall } = report.proposedBet;
+      const { place, win, wide, trio, overall } = report.proposedBet;
       // 4フィールドすべてに現れないこと(投資額500円がどこにも計上されない=静かな過小計上がないこと)。
-      for (const summary of [place, wide, trio, overall]) {
+      for (const summary of [place, win, wide, trio, overall]) {
         expect(summary.betCount).toBe(0);
         expect(summary.totalStake).toBe(0);
         expect(summary.totalReturn).toBe(0);
@@ -2339,7 +2491,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         horses: [horse(1, 0.5, 2.0, 1.0, true)],
         allocation: {
           meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
-          bets: [{ betType: "win", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
+          bets: [{ betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
         },
       });
       store.saveResult("PB_UNKNOWN_2", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
@@ -2348,7 +2500,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(report.proposedBet.unknownBetType).toEqual({
         count: 1,
         totalStake: 500,
-        betTypes: ["win"],
+        betTypes: ["xyz"],
       });
       store.close();
     });
@@ -2362,7 +2514,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         allocation: {
           meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
           bets: [
-            { betType: "win", comboKey: "01", stake: 500, odds: 3, ev: 1.5 },
+            { betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 },
             { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
           ],
         },
@@ -2381,12 +2533,12 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(report.proposedBet.unknownBetType).toEqual({
         count: 1,
         totalStake: 500,
-        betTypes: ["win"],
+        betTypes: ["xyz"],
       });
       store.close();
     });
 
-    it("既存の不変条件overall.unjudgedCount===place+wide+trioが、未知券種を含む入力でも成り立つこと(混ぜていないことの正の対照)", () => {
+    it("既存の不変条件overall.unjudgedCount===place+win+wide+trioが、未知券種を含む入力でも成り立つこと(混ぜていないことの正の対照)", () => {
       const store = new AnalysisStore();
       // 規則Uで判定不能(placePayout取込なし)の複勝行と、未知券種の行を同居させる。
       store.saveAnalysis({
@@ -2396,7 +2548,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         allocation: {
           meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
           bets: [
-            { betType: "win", comboKey: "01", stake: 500, odds: 3, ev: 1.5 },
+            { betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 },
             { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
           ],
         },
@@ -2405,12 +2557,14 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       store.saveResult("PB_UNKNOWN_4", [{ umaban: 1, finishPosition: 1 }]);
 
       const report = computeVerifyReport(store);
-      const { place, wide, trio, overall, unknownBetType } = report.proposedBet;
+      const { place, win, wide, trio, overall, unknownBetType } = report.proposedBet;
       // 前提固定(空振り防止): 規則Uが実際に発火していること(unjudgedCountが0ではない)。
       expect(place.unjudgedCount).toBe(1);
-      expect(overall.unjudgedCount).toBe(place.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount);
+      expect(overall.unjudgedCount).toBe(
+        place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+      );
       // 未知券種行は規則Uのunjudgedにも一切混ざらず、独立して計上されていること。
-      expect(unknownBetType).toEqual({ count: 1, totalStake: 500, betTypes: ["win"] });
+      expect(unknownBetType).toEqual({ count: 1, totalStake: 500, betTypes: ["xyz"] });
       store.close();
     });
 
@@ -2423,9 +2577,9 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         allocation: {
           meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
           bets: [
-            { betType: "win", comboKey: "01", stake: 100, odds: 3, ev: 1.5 },
+            { betType: "xyz", comboKey: "01", stake: 100, odds: 3, ev: 1.5 },
             { betType: "quinella", comboKey: "0102", stake: 200, odds: 3, ev: 1.5 },
-            { betType: "win", comboKey: "02", stake: 300, odds: 3, ev: 1.5 }, // winの重複。
+            { betType: "xyz", comboKey: "02", stake: 300, odds: 3, ev: 1.5 }, // xyzの重複。
           ],
         },
       });
@@ -2439,7 +2593,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(report.proposedBet.unknownBetType).toEqual({
         count: 3,
         totalStake: 600,
-        betTypes: ["quinella", "win"], // 重複なし(winは1つだけ)。
+        betTypes: ["quinella", "xyz"], // 重複なし(xyzは1つだけ)。
       });
       store.close();
     });
