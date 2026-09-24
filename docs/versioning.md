@@ -1466,6 +1466,33 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`race_combo_payouts` の PK は `(race_id, bet_type, combo_key)` で、
 馬連の行はそのまま入る)。
 
+## 次の正式版が 1.9.8 である根拠(Issue #115・#24-D3a での変更)
+
+**patch**(内部改善。利用者から見てできることは増えず、分析結果・配分提案の数値も変わらない)。
+
+### 変更内容
+
+設定に「馬連を配分に含める」(`includeQuinellaInAllocation`、**初期値 ON**。CLAUDE.md「新しい券種は配分の対象に
+初期値で含める」)を追加し、設定の保存・読込(`settings-store.ts`)・更新(`settings-reducer.ts`)・IPC(`ipc.ts`)・
+分析パイプライン(`pipeline-deps.ts`)・配分設定の型(`MixedAllocationSettings`)・配分キャッシュのキー
+(`mixed-allocation-cache.ts`・`BatchAnalysisView.tsx`)まで値を運ぶ配線を入れた。
+
+### patch である根拠
+
+- 値は配分計算まで運ばれるが、**券種の選択(`resolveMixedBetTypes`・`isComboBetTypesOff`)はこの値を読まない**。
+  配分提案が馬連の買い目を作るのは #24-D3b からで、**配分提案の数値は変わらない**(感度表
+  `scripts/bench-mixed-allocation.ts` の出力が #114 時点と同一であることを確認済み)
+- 設定画面にトグルはまだ無い(#24-D3b)。利用者がこの設定を見たり変えたりする手段は無い
+- 配分キャッシュのキーに項目が1つ増えたが、キャッシュはメモリ上のものでセッションを跨がない
+
+### major / minor ではない根拠
+
+- settings.json は**後方互換**: キーが無い既存の settings.json は初期値(ON)で読まれる
+  (`includeWideInAllocation`・`includeTrioInAllocation` と同じ読み方)。読めなくなる設定は無い
+- DB スキーマは無変更(配分メタ `analysis_allocation_meta` の列追加は #59 の列凍結との兼ね合いで #24-D3b に回した)
+- エクスポート JSON は無変更。IPC の設定ペイロードに項目が増えたが、main と renderer は同じ exe の中で
+  同時に更新されるため、版の食い違いは起きない
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

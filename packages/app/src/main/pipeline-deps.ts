@@ -286,8 +286,8 @@ export function createPipelineDeps(
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
-    // 配分提案(Issue #59)。config.allocationSettings(5項目)にincludeComboOdds(上で1回だけ
-    // 解決した値。scrape束縛と同じ値)を合成して6項目にする。config.allocationSettingsが
+    // 配分提案(Issue #59)。config.allocationSettings(6項目)にincludeComboOdds(上で1回だけ
+    // 解決した値。scrape束縛と同じ値)を合成して7項目にする。config.allocationSettingsが
     // 省略時はnull(この呼び出しでは配分計算を行わない。required-nullableの契約は
     // analysis-pipeline.ts AnalysisPipelineDeps.allocationSettings参照)。
     allocationSettings:

@@ -9,7 +9,7 @@ import { DEFAULT_APP_SETTINGS } from "../src/main/settings-store.js";
 import type { SettingsUpdate } from "../src/shared/settings.js";
 
 /**
- * ipc.ts が設定画面の配分5項目(shared/settings.ts の AppSettings.bankroll ほか)を
+ * ipc.ts が設定画面の配分6項目(shared/settings.ts の AppSettings.bankroll ほか)を
  * createPipelineDeps へ実際に渡していること、および単日一括分析
  * (handleRunBatchAnalysis)と期間バッチ(handleRunPeriodBatchAnalysis)が
  * createPipelineDeps が返した**同一の**deps オブジェクトを runAnalysis の第3引数に渡していることを
@@ -59,7 +59,7 @@ function handlerFor(channel: string): (...args: unknown[]) => unknown {
   return call[1] as (...args: unknown[]) => unknown;
 }
 
-/** 有効な設定更新ペイロード(配分5項目・includeComboOdds以外は固定値)を組み立てる。 */
+/** 有効な設定更新ペイロード(配分6項目・includeComboOdds以外は固定値)を組み立てる。 */
 function makeUpdate(overrides: Partial<SettingsUpdate> = {}): SettingsUpdate {
   return {
     discordWebhookUrl: "",
