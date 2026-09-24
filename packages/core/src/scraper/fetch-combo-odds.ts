@@ -2,15 +2,18 @@
  * fetch-combo-odds — 組合せオッズ(ワイド・3連複)取得のオーケストレーション層
  * (機能D-2b-B・Issue #33第3段。boss着手前ゲート2026-08-07裁定)。
  *
- * `HttpClient`(構造的に互換な最小フェッチャ)を受け取り、中央/地方 × ワイド/三連複の
- * 4経路を束ねて「成否と診断値」を返す純粋な取得層。**`OddsSnapshot`拡張・`scrapeRace`配線
+ * `HttpClient`(構造的に互換な最小フェッチャ)を受け取り、中央/地方 × 券種の各経路
+ * (下記「## 経路」参照)を束ねて「成否と診断値」を返す純粋な取得層。**`OddsSnapshot`拡張・`scrapeRace`配線
  * (第4段のスコープ)には一切触れない**。`scraper/`配下の葉モジュール(`scrape-race.ts`)を
  * importすると層依存が逆流するため、フェッチャの型もローカルに独立定義する
  * (`ScrapeWarning`/`ScrapeWarningKind`の生成・拡張も第4段の責務)。
  *
- * ## 4経路
- * - 中央ワイド/3連複: `wideOddsApiUrl`/`trioOddsApiUrl` を1リクエスト → `parseComboOdds`
- * - 地方ワイド: `narWideOddsPageUrl` を1リクエスト → `parseNarComboOdds`
+ * ## 経路(中央・地方 × 単発リクエスト/軸走査で分岐する。券種が増えるたびに厳密な本数を
+ * 書き直さずに済むよう、ここでは形で分類する。個々のURL関数は`urls.ts`参照)
+ * - 中央(ワイド/3連複/馬単/馬連): `wideOddsApiUrl`/`trioOddsApiUrl`/`exactaOddsApiUrl`/
+ *   `quinellaOddsApiUrl` を各1リクエスト → `parseComboOdds`
+ * - 地方(ワイド/馬単/馬連): `narWideOddsPageUrl`/`narExactaOddsPageUrl`/
+ *   `narQuinellaOddsPageUrl` を各1リクエスト → `parseNarComboOdds`
  *   (軸馬別の制限を受けない。`urls.ts`のJSDoc参照)
  * - 地方3連複: `deriveNarTrioAxisUmabans` で軸集合を導出し、各軸に `narTrioOddsAxisUrl` を
  *   1リクエストずつ直列に発行 → `parseNarComboOdds` → `mergeAxisComboOddsMaps` でマージ
@@ -268,9 +271,8 @@ function buildResult(
   };
 }
 
-/** 中央ワイド/3連複・地方ワイド(いずれも1リクエストで完結)を取得する。 */
 /**
- * 単発リクエストで完結する経路(中央ワイド/3連複/馬単・地方ワイド/馬単)のURLを選ぶ
+ * 単発リクエストで完結する経路(中央ワイド/3連複/馬単/馬連・地方ワイド/馬単/馬連)のURLを選ぶ
  * (Issue #106・#24-B: 馬単を追加した際、既存の`betType === "wide" ? ... : trioOddsApiUrl`
  * という2値三項演算子に馬単を追加せず、3連複用URLを誤って使ってしまう欠陥が着手前ゲートで
  * 見つかった。網羅的なswitchにして同種の欠陥を再発させない)。
@@ -315,6 +317,11 @@ function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean):
   }
 }
 
+/**
+ * 単発リクエストで完結する経路(中央ワイド/3連複/馬単/馬連・地方ワイド/馬単/馬連)を取得する
+ * (URLの選択は`comboOddsUrlFor`に委譲する。地方3連複は軸馬別取得が必要なため対象外
+ * 〈呼び出し元`fetchComboOdds`が`fetchNarTrioComboOdds`へ別途分岐する〉)。
+ */
 async function fetchSingleRequestComboOdds(
   raceId: RaceId,
   betType: ComboBetType,

@@ -1419,6 +1419,29 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。
 
+
+## 次の正式版が 1.9.6 である根拠(Issue #113・#24-D2 での変更)
+
+**patch**(内部改善。production から到達しない。利用者から見てできることは増えず、分析結果の数値も変わらない)。
+
+### 変更内容
+
+`ComboBetType` に `quinella`(馬連)を追加し、オッズのパーサ・取得関数・URL を対応させた
+(#106 で馬単を足したのと同じ形)。中央は `api_get_jra_odds` の `type=4`、地方は `odds/index.html?type=b4`。
+馬連のキーは昇順に正規化されており(順不同)、値は単一値形式。
+
+### patch である根拠(production から到達しない)
+
+- `scrape-race.ts` の取得処理は従来どおりワイドと3連複だけを呼ぶ(馬連の取得は配線していない。#24-D3)。
+  配線しないのは、#24-D3 までの間に使われない馬連オッズの取得が1レース1本ずつ増えるのを避けるため
+- 払戻保存ループ(`analysis-store.ts` の `COMBO_BET_TYPES`)は馬連も回すようになったが、
+  `result-import.ts` が `{ wide, trio }` しか渡さないので馬連の払戻行は書かれない(テストで固定)
+
+### major / minor ではない根拠
+
+DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`race_combo_payouts` は PK が
+`(race_id, bet_type, combo_key)` なので列追加も不要)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
