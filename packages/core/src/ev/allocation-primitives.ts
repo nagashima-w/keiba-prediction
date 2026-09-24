@@ -148,9 +148,16 @@ export function foldToCandidateSubsets(
  * O(1)の恒等式(`runGreedyAllocation`の`computeFreshWealth`をO(1)化する案)が依存する
  * 前提として洗い出したものである。**この案自体は同Issueで不採用になった**(数学的には
  * 同値だが浮動小数演算としてはビット一致するとは限らず、実際に既存テストの結果を反転
- * させたため。`runGreedyAllocation`のJSDoc「検討したが採用しなかった案」参照)が、
- * この不変条件自体は`indices`の構築ロジックが持つ性質として引き続き真であり、
- * 将来同種の最適化を検討する際の前提として記録しておく。
+ * させたため。`runGreedyAllocation`のJSDoc「検討したが採用しなかった案」参照)。
+ *
+ * **★Issue #107で状況が変わった: 現在の`runGreedyAllocation`はこの不変条件に依存している
+ * (過去形の記録ではない)。** 同Issueが導入した接頭辞和の再利用(`prefixSum`+
+ * `contactPositionFlat`)は、「候補iがoutcome jの`indices`内にちょうど1回しか現れない」
+ * ことを前提に、その1回の出現位置を`indices`内での一意な位置として扱う。この不変条件が
+ * 破れる(同一outcome内に同じインデックスが2回以上現れる)と、位置の特定自体が破綻し、
+ * `runGreedyAllocation`のJSDoc「Issue #107」節と異なる(採用Cとも異なる)第三の誤った値を
+ * 返しうる。**将来この不変条件を弱める変更(構築元に重複を許す等)をする場合は、
+ * `runGreedyAllocation`の接頭辞和の再利用を同時に見直すこと。**
  */
 export interface OutcomeIndexSet {
   /** この outcome で的中している候補のインデックス(candidates配列内の位置)。重複なし(上記JSDoc参照)。 */

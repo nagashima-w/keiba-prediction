@@ -1312,6 +1312,54 @@ buildComboOddsCellMap / buildComboOddsCellMapFor
 (過剰に強い主張だった)。`grep -rn 'テーブル自体を分離'` で旧文言が残っていないことを確認済み。
 
 
+## 次の正式版が 1.9.3 である根拠(Issue #107・#24-C での変更)
+
+**patch**(内部改善。利用者から見てできることは増えず、**分析結果の数値も1ビットも変わらない**)。
+
+### 変更内容
+
+`runGreedyAllocation`(`allocation-primitives.ts`)を、**演算列を1つも書き換えずに**定数倍だけ速くした。
+馬連・馬単を配分に載せる #24-D / #24-E の前提として、#24 の着手前ゲートが実測した
+「馬連候補を足すだけで約5倍遅くなる」への対処である。
+
+入れたものは3つで、いずれも加算の被加数・順序・アキュムレータ値を変えない:
+
+1. **接頭辞和の再利用** —— `indices` に重複が無い不変条件(`OutcomeIndexSet` の JSDoc)により、
+   候補 i が現れる位置より前の部分和は候補に依らず不変。`commonWealth` の前方累算の途中経過を
+   `prefixSum` に保存して再開する
+2. **CSR 化** —— `outcomeIndexSets[].indices` と候補→接触先の逆引きを
+   `Int32Array` + オフセットへ。連結するだけなので走査順は不変
+3. **バッファの巻き上げ** —— 毎ステップ確保していた配列をループ外で `Float64Array` として
+   1回だけ確保し、毎ステップ全要素を書き潰して再利用
+
+### patch である根拠(数値が変わらないことの実地確認)
+
+`docs/versioning.md` の区分表で minor の引き金になるのは「**分析結果の数値が変わる**」ことだが、
+本変更は**ビット一致**である:
+
+- `pnpm tsx scripts/bench-mixed-allocation.ts` の greedySteps 感度表(総額・点数・券種構成比)が
+  最適化の前後で**1文字も違わず一致**する(オーケストレーターと code-reviewer が独立に確認。
+  後者は `git show` による旧ファイル差し替えで再現した)
+- `scripts/bench-run-greedy-allocation.ts` の AC-1b 自己検査
+  (自前構築の `OutcomeIndexSet[]` による結果と `allocateGeneralBets` の
+  `continuousFraction` の `===` 一致)が最適化後も全候補で通る
+- 構造的な値(outcome 数・Σ\|indices\|・実際の使用ステップ数・`converged`)が前後で完全に不変
+- **#96 で「採用C」を殺した番人**(`bet-allocation.test.ts` の
+  「キャップでbetCountが2頭→1頭に減り、notDiversifiedが立つこと」)が、
+  **最適化の前と後のどちらでも**採用C相当の変異に対して赤になる(番人が鈍っていない)
+
+### major / minor ではない根拠
+
+DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。公開 API の形も変えていない
+(`runGreedyAllocation` の返す `fractions` は `number[]` のまま。内部だけ TypedArray)。
+利用者から見えるのは「速くなった」ことだけで、**表示される数値・配分額・判定結果はすべて同じ**である。
+
+### 申し送り
+
+馬連・馬単相当を足した規模では、最適化の前後を通じて貪欲ループが `converged=false`
+(`greedySteps` を使い切る)のままである。速度だけを変えて収束判定を含む答えを変えていないことの
+追加確認でもあるが、**#24-D 以降で `greedySteps`(#36)の議論が必要になる**ことを意味する。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
