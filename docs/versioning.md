@@ -1269,6 +1269,49 @@ win 候補があるときに使う順序付き outcome 空間(`P(n,3)`)に対し
 **#24-B の着手条件として `result.html` の馬単払戻との突合で確定させる。**
 
 
+## 次の正式版が 1.9.2 である根拠(Issue #106・#24-B での変更)
+
+**patch**(内部改善。利用者から見てできることは増えず、分析結果の数値も変わらない)。
+
+### 変更内容
+
+`ComboBetType` に `exacta`(馬単)を追加し、キー生成・検証・オッズ取得・払戻保存の全経路を
+**betType 別の順序方針**(`COMBO_KEY_ORDER`)に対応させた。
+
+**この変更の危険の本質**: 既存の `buildComboOddsKey` は**常に `.sort()` する**。`COMBO_SIZE` に
+`exacta` を足すと `analysis-store.ts` の払戻保存ループ(`COMBO_BET_TYPES` 駆動)が**自動的に
+馬単を回し始め**、`1着13・2着8` と `1着8・2着13` が同じ `"0813"` に潰れる。**型エラーは出ない。**
+
+採った設計(#103 の「同一ヘルパに引数で分岐させない」と同じ流儀):
+
+```
+buildComboOddsKey(umabans)              既存のまま(ソートする)。順不同専用
+buildOrderedComboOddsKey(umabans)       新設(ソートしない)
+buildComboOddsKeyFor(betType, umabans)  新設(COMBO_KEY_ORDER で振り分け)
+validateComboUmabans / validateOrderedComboUmabans / validateComboUmabansFor
+buildComboOddsCellMap / buildComboOddsCellMapFor
+```
+
+`betType` を持つ経路(払戻保存ループ・両パーサ)は必ず `...For` を使う。単一馬番の6箇所は無改修。
+
+### patch である根拠(production から到達しない)
+
+- `scrape-race.ts` の `fetchComboBetTypeOdds` 呼び出しは **wide/trio のハードコード2箇所のみ**で、
+  **馬単のライブ取得は配線されていない**(配線は #24-D / #24-E)
+- `result-import.ts` の `saveResult` 呼び出しは `{ wide, trio }` しか渡さず、`saveResult` のループは
+  `combo?.[betType] === undefined` で `continue` するため、**production では exacta 行が1件も
+  書き込まれない**
+- **`AllocationBetType`(配分側の型)は無変更**。馬単が配分提案・UI・回収率検証に現れる経路は存在しない
+
+### major / minor ではない根拠
+
+**DB スキーマは無変更。** `race_combo_payouts` の PK が `(race_id, bet_type, combo_key)` なので
+順序付きキーをそのまま保持でき、列追加もしていない。設定・エクスポート JSON・IPC の後方非互換も無い。
+
+⚠️ この差分で **AC10 とスキーマコメントの「列/テーブル自体を分離する必要がある」を撤回した**
+(過剰に強い主張だった)。`grep -rn 'テーブル自体を分離'` で旧文言が残っていないことを確認済み。
+
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

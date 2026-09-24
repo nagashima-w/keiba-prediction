@@ -163,7 +163,9 @@ export type AllocationBetType = "place" | "win" | "wide" | "trio";
 /**
  * 券種→買い目を構成する頭数の唯一の写像(Issue #76・#91で`win`追加)。
  *
- * `combo-odds-key.ts` の `COMBO_SIZE`(`{wide:2, trio:3}`)とは**意図的に独立した定義**である。
+ * `combo-odds-key.ts` の `COMBO_SIZE`(券種→組の構成頭数の写像)とは**意図的に独立した定義**
+ * である(字面の内容をここに引用しない: `COMBO_SIZE`はIssue #106・#24-Bで`exacta`が
+ * 追加され、以後も券種拡張シリーズで増える。引用すると増えるたびに本コメントが陳腐化する)。
  * `COMBO_SIZE` は `analysis-store.ts` が `Object.keys(COMBO_SIZE)` で組合せ払戻の取込ループの
  * 券種一覧を導出するために使われており、ここに `place` を足すと `race_combo_payouts` へ
  * place 行を書きに行ってしまう(データ層の挙動変更)。したがって `place` を持つ写像は

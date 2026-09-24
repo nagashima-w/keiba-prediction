@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.9.1";
+const EXPECTED_APP_VERSION = "1.9.2";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,22 +234,28 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.9.1(Issue #103・#24-A: 馬連・馬単オッズの実測調査とフィクスチャ整備)である", () => {
+  it("root と app の version が 1.9.2(Issue #106・#24-B: 順序付きキー表現の導入と馬単の ComboBetType 追加)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
     // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5、
     // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2、
-    // #92(#23-B1b)が 1.7.3、#90(#23-B2)が 1.8.0、#96 が 1.8.1、#100(#23-C)が 1.9.0。
-    // 本回は #103(#24-A)。**patch**(調査タスク。`packages/*/src` を1行も変更していない)。
-    // 変更内容: 馬連・馬単のオッズ取得経路を実測し、`fixtures/` に一次データを保存して
-    // `docs/quinella-exacta-odds-investigation.md` に記録、`packages/core/test/scraper/`に
-    // 集合一致テストを追加した。#24(馬連・馬単)は着手前ゲートで【No-Go】となり6分割され、
-    // 本回はその第1子(#24-A)。
-    // **patch である根拠**: 利用者から見てできることは1つも増えておらず、分析結果の数値も
-    // 一切変わらない。差分は `docs/` + `fixtures/` + `scripts/`(単発取得スクリプト)+
-    // 新規テスト1本のみで、**production のコードパスに到達する変更が無い**
-    // (`git diff --stat -- packages/core/src packages/app/src` が空であることを確認済み)。
-    // major/minor ではない根拠: 保存済みデータ・設定・エクスポート JSON・IPC・DB スキーマの
-    // いずれにも触れていない。
+    // #92(#23-B1b)が 1.7.3、#90(#23-B2)が 1.8.0、#96 が 1.8.1、#100(#23-C)が 1.9.0、
+    // #103(#24-A)が 1.9.1。
+    // 本回は #106(#24-B)。**patch**(内部改善。利用者から見てできることは増えず、
+    // 分析結果の数値も変わらない)。
+    // 変更内容: `ComboBetType` に `exacta`(馬単)を追加し、キー生成・検証・オッズ取得・
+    // 払戻保存の全経路を betType 別の順序方針(`COMBO_KEY_ORDER`)に対応させた。
+    // **patch である根拠(production から到達しないこと)**:
+    // - `scrape-race.ts` の `fetchComboBetTypeOdds` 呼び出しは wide/trio のハードコード2箇所のみで、
+    //   **馬単のライブ取得は配線されていない**(配線は #24-D / #24-E)。
+    // - `result-import.ts` の `saveResult` 呼び出しは `{ wide, trio }` しか渡さず、
+    //   `saveResult` のループは `combo?.[betType] === undefined` で `continue` するため、
+    //   **production では exacta 行が1件も書き込まれない**。
+    // - `AllocationBetType`(配分側の型。`combo-bet-allocation.ts`)は**無変更**であり、
+    //   馬単が配分提案・UI・回収率検証に現れる経路は存在しない。
+    // したがって利用者から見える変化は無い。
+    // major/minor ではない根拠: DB スキーマは無変更(`race_combo_payouts` の PK が
+    // `(race_id, bet_type, combo_key)` なので順序付きキーをそのまま保持でき、列追加もしていない)。
+    // 設定・エクスポート JSON・IPC の後方非互換も無い。
     // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならないことを
     // 固定する。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);
