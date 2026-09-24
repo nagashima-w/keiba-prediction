@@ -43,6 +43,13 @@
  *    総額・点数・券種別構成比(複勝/ワイド/三連複)を表示する。
  * 2. 1レースあたりの所要時間(`buildMixedAllocationDisplay` を実運用と同じ既定設定で
  *    複数回実行した平均。ウォームアップ1回を除く)。
+ * 3. 馬連(quinella)を候補ビルダーに追加したときの性能・構成の実測(Issue #116 AC-7)。
+ *    `fixtures/odds_quinella_202603020211.json`(同レース・同16頭)を`parseComboOdds`
+ *    経由でパースして`quinellaCombo`を作り、`betTypes=[place,win,wide,trio]`と
+ *    `[place,win,wide,trio,quinella]`の2条件で`buildMixedCandidates`+`allocateGeneralBets`
+ *    の1レースあたりの所要時間(平均・ウォームアップ除く)・券種別候補数・点数・
+ *    券種別構成比を並べて出す。**#117でresolveMixedBetTypesが接続するまで、
+ *    この節はproductionの挙動を変えない(betTypesを明示的に指定した場合の実測にすぎない)**。
  */
 
 import { readFileSync } from "node:fs";
@@ -68,6 +75,8 @@ import {
 } from "../packages/core/src/ev/combo-bet-allocation.js";
 import { buildMixedAllocationDisplay } from "../packages/app/src/renderer/mixed-allocation-view.js";
 import type { MixedAllocationSettings } from "../packages/app/src/shared/mixed-race-allocation.js";
+import { parseComboOdds } from "../packages/core/src/scraper/parse-combo-odds.js";
+import { toComboOddsScalarMap } from "../packages/core/src/scraper/combo-odds-key.js";
 
 const FIXTURE_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -77,6 +86,31 @@ const FIXTURE_PATH = path.resolve(
   "combo-odds-real-fetch",
   "central-on.json",
 );
+
+/**
+ * 馬連フィクスチャ(Issue #116 AC-7)。`central-on.json`と同じレース(202603020211・16頭)
+ * のため、既存の`greedySteps`感度・所要時間計測と同じ出走馬番の宇宙で比較できる。
+ */
+const QUINELLA_FIXTURE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "odds_quinella_202603020211.json",
+);
+
+/**
+ * 馬連フィクスチャをパースし`quinellaCombo`(Record形)を作る。`scrape-race.ts`の
+ * `fetchComboBetTypeOdds`と同じ変換経路(`parseComboOdds`→`toComboOddsScalarMap`→
+ * `Object.fromEntries`)をそのまま使う(規則を再実装しない)。
+ */
+function loadQuinellaCombo(): Record<string, number | null> {
+  const json = readFileSync(QUINELLA_FIXTURE_PATH, "utf-8");
+  const parsed = parseComboOdds(json, "quinella");
+  if (parsed.state !== "available") {
+    throw new Error(`馬連フィクスチャが available ではありません(state=${parsed.state})`);
+  }
+  return Object.fromEntries(toComboOddsScalarMap(parsed.odds));
+}
 
 /** フィクスチャ(保存済みRaceData)を読み、runAnalysisを実LLM無しで実行してAnalysisResultを得る。 */
 async function loadAnalysisResult(): Promise<AnalysisResult> {
@@ -210,11 +244,127 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
   );
 }
 
+/**
+ * 券種別にstakeを集計する(`summarizeByBetType`の馬連版。Issue #116 AC-7)。
+ * 既存の`summarizeByBetType`(win/place/wide/trioの4券種)は変更せず、この節専用に
+ * `quinella`を加えた別関数として持つ(既存節の出力を変えないため)。
+ */
+function summarizeByBetTypeWithQuinella(
+  allocations: readonly { readonly betType: AllocationBetType; readonly stake: number }[],
+): { win: number; place: number; wide: number; trio: number; quinella: number } {
+  const sumOf = (betType: AllocationBetType): number =>
+    allocations.filter((a) => a.betType === betType).reduce((s, a) => s + a.stake, 0);
+  return {
+    win: sumOf("win"),
+    place: sumOf("place"),
+    wide: sumOf("wide"),
+    trio: sumOf("trio"),
+    quinella: sumOf("quinella"),
+  };
+}
+
+/** 1回の`buildMixedCandidates`+`allocateGeneralBets`実行の計測結果。 */
+interface QuinellaComparisonSample {
+  readonly ms: number;
+  readonly candidateCounts: Readonly<Record<string, number>>;
+  readonly betCount: number;
+  readonly totalStake: number;
+  readonly byType: ReturnType<typeof summarizeByBetTypeWithQuinella>;
+}
+
+/**
+ * 馬連(quinella)を候補ビルダーに追加したときの性能・構成を実測する(Issue #116 AC-7)。
+ *
+ * `betTypes=[place,win,wide,trio]`(馬連なし。既定の`ALL_MIXED_CANDIDATE_BET_TYPES`と同じ)と
+ * `[place,win,wide,trio,quinella]`(馬連あり。`buildMixedCandidates`の`options.betTypes`へ
+ * 明示的に`"quinella"`を渡す。#117で`resolveMixedBetTypes`が接続するまでproductionからは
+ * 到達しない組み合わせ)の2条件を比較する。
+ */
+async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise<void> {
+  const baseRace = toMixedCandidateInput(result);
+  const quinellaCombo = loadQuinellaCombo();
+  const raceWithQuinella: MixedCandidateBuildInput = { ...baseRace, quinellaCombo };
+  const horses: JointModelHorse[] = result.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
+
+  const config: GeneralBetAllocationConfig = {
+    bankroll: 1_000_000,
+    perRaceCap: 100_000,
+    kellyFraction: 0.5,
+    betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+    greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+    candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+  };
+
+  const scenarios: readonly {
+    readonly label: string;
+    readonly race: MixedCandidateBuildInput;
+    readonly betTypes: readonly AllocationBetType[];
+  }[] = [
+    { label: "馬連なし(place/win/wide/trio)", race: baseRace, betTypes: ["place", "win", "wide", "trio"] },
+    {
+      label: "馬連あり(place/win/wide/trio/quinella)",
+      race: raceWithQuinella,
+      betTypes: ["place", "win", "wide", "trio", "quinella"],
+    },
+  ];
+
+  console.log("");
+  console.log("=== 馬連(quinella)追加時の性能・構成比較(中央16頭・実オッズ。Issue #116 AC-7) ===");
+
+  for (const scenario of scenarios) {
+    const measure = (): QuinellaComparisonSample => {
+      const t0 = performance.now();
+      const mixed = buildMixedCandidates(scenario.race, {
+        evConfig: { threshold: 1.0 },
+        betTypes: scenario.betTypes,
+      });
+      const alloc = allocateGeneralBets(horses, mixed.topFinishCount, mixed.candidates, config);
+      const ms = performance.now() - t0;
+      const candidateCounts: Record<string, number> = {};
+      for (const bt of scenario.betTypes) {
+        candidateCounts[bt] = mixed.candidates.filter((c) => c.betType === bt).length;
+      }
+      return {
+        ms,
+        candidateCounts,
+        betCount: alloc.betCount,
+        totalStake: alloc.totalStake,
+        byType: summarizeByBetTypeWithQuinella(alloc.allocations),
+      };
+    };
+
+    measure(); // ウォームアップ1回(JITの影響を減らす。既存節と同じ流儀)。
+    const iterations = 30;
+    const samples: QuinellaComparisonSample[] = [];
+    for (let i = 0; i < iterations; i++) {
+      samples.push(measure());
+    }
+    const avgMs = samples.reduce((s, x) => s + x.ms, 0) / samples.length;
+    // 候補数・配分結果は入力が同一なら決定的(乱数を使わない)なので、最後の1回を代表値として使う。
+    const last = samples[samples.length - 1]!;
+    const total = last.totalStake;
+    const pct = (n: number): string => (total > 0 ? `${((n / total) * 100).toFixed(1)}%` : "0.0%");
+    console.log(`--- ${scenario.label} ---`);
+    console.log(
+      `  候補数: ${scenario.betTypes.map((bt) => `${bt}=${last.candidateCounts[bt]}件`).join(" / ")}`,
+    );
+    console.log(
+      `  所要時間: 平均${avgMs.toFixed(1)}ms(n=${iterations}回・buildMixedCandidates+allocateGeneralBetsの合計)`,
+    );
+    console.log(
+      `  配分: 総額${total.toLocaleString()}円 / ${last.betCount}点 / ` +
+        `単勝${pct(last.byType.win)} / 複勝${pct(last.byType.place)} / ワイド${pct(last.byType.wide)} / ` +
+        `三連複${pct(last.byType.trio)} / 馬連${pct(last.byType.quinella)}`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const result = await loadAnalysisResult();
   console.log(`raceId=${result.raceId} rows=${result.rows.length}頭 oddsStatus=${result.oddsStatus}`);
   await runGreedyStepsSensitivity(result);
   await runPerRaceTiming(result);
+  await runQuinellaPerformanceComparison(result);
 }
 
 main().catch((e: unknown) => {

@@ -44,8 +44,15 @@
     **馬連オッズのパーサ・取得関数も対応済み**(Issue #113・v1.9.6。中央 `api_get_jra_odds` の
     `type=4`・地方 `odds/index.html?type=b4`。キーは昇順正規化・値は単一値)。**馬連の確定払戻の
     取込・回収率検証も対応済み**(Issue #114・#24-F1。上記「記録・回収率検証」参照)。
-    ただし `scrape-race.ts`(オッズ取得)には配線しておらず、配分提案の候補にも組み込んでいない
-    (#24-D3)ため、**利用者から見える変化はまだ無い**(検証画面にも馬連の行は出さない)
+    **`scrape-race.ts`(オッズ取得)への配線・分析結果/保存スナップショットへの搭載・
+    `shared/mixed-candidates.ts`の候補ビルダー(`buildMixedCandidates`)対応も完了した**
+    (Issue #116・#24-D3b-1。`includeComboOdds: true`のとき、既存のワイド・
+    3連複の**後**に馬連オッズを1リクエスト追加で取得する〈中央 `type=4`・地方 `type=b4`、
+    いずれも単発リクエストで完結。地方3連複の軸馬別取得とは異なる〉)。
+    ただし**配分の券種選択(`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`)には
+    まだ接続していない**(`ALL_MIXED_CANDIDATE_BET_TYPES`・`resolveMixedBetTypes`の既定
+    呼び出しは馬連を含めないまま)ため、**利用者から見える変化はまだ無い**(検証画面にも
+    馬連の行は出さない。配分に含めるのは#117・#24-D3b-2)
 - バージョン: ルート/アプリ `1.9.8`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))

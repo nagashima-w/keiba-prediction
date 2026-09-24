@@ -284,13 +284,18 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
     const hasOwn = (obj: object, key: string): boolean =>
       Object.prototype.hasOwnProperty.call(obj, key);
 
-    /** ワイド・三連複を含むraceDataを組み立てる(odds/metaの3フィールドを個別に上書きできる)。 */
+    /**
+     * ワイド・三連複・馬連を含むraceDataを組み立てる(odds/metaのフィールドを個別に
+     * 上書きできる)。馬連(quinellaCombo)はIssue #116・#24-D3b-1で追加。
+     */
     function makeComboRaceData(overrides: {
       wideCombo?: Record<string, number | null>;
       trioCombo?: Record<string, number | null>;
+      quinellaCombo?: Record<string, number | null>;
       comboOdds?: {
         wide?: ReturnType<typeof makeComboOddsFetchOutcome>;
         trio?: ReturnType<typeof makeComboOddsFetchOutcome>;
+        quinella?: ReturnType<typeof makeComboOddsFetchOutcome>;
       };
     }): RaceData {
       return makeRaceData({
@@ -304,6 +309,9 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
           },
           ...(overrides.wideCombo !== undefined ? { wideCombo: overrides.wideCombo } : {}),
           ...(overrides.trioCombo !== undefined ? { trioCombo: overrides.trioCombo } : {}),
+          ...(overrides.quinellaCombo !== undefined
+            ? { quinellaCombo: overrides.quinellaCombo }
+            : {}),
         },
         meta: {
           fetchedAt: "2026-07-24T09:00:00.000Z",
@@ -314,28 +322,34 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       });
     }
 
-    it("OFF(includeComboOdds未使用): race.odds.wideCombo/trioCombo・race.meta.comboOddsが" +
-      "undefinedのままなら、スナップショットにキー自体が生えないこと(受け入れ条件7)", () => {
-      // makeRaceData()の既定odds/metaにはwideCombo/trioCombo/comboOddsを含めていない
-      // (scrapeRaceのincludeComboOdds:false相当)。まず前提を無条件expectで固定する。
+    it("OFF(includeComboOdds未使用): race.odds.wideCombo/trioCombo/quinellaCombo・" +
+      "race.meta.comboOddsがundefinedのままなら、スナップショットにキー自体が生えないこと" +
+      "(受け入れ条件7。馬連はIssue #116 AC-4)", () => {
+      // makeRaceData()の既定odds/metaにはwideCombo/trioCombo/quinellaCombo/comboOddsを
+      // 含めていない(scrapeRaceのincludeComboOdds:false相当)。まず前提を無条件expectで固定する。
       const race = makeRaceData();
       expect(race.odds.wideCombo).toBeUndefined();
       expect(race.odds.trioCombo).toBeUndefined();
+      expect(race.odds.quinellaCombo).toBeUndefined();
       expect(race.meta.comboOdds).toBeUndefined();
 
       const snapshot = buildRaceSnapshot(race);
       expect(hasOwn(snapshot, "wideCombo")).toBe(false);
       expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(false);
       expect(hasOwn(snapshot, "comboOdds")).toBe(false);
     });
 
-    it("ON・取得成功: race.odds.wideCombo/trioCombo・race.meta.comboOddsの値が欠落なく写ること(受け入れ条件7・3キーすべて有)", () => {
+    it("ON・取得成功: race.odds.wideCombo/trioCombo/quinellaCombo・race.meta.comboOddsの値が" +
+      "欠落なく写ること(受け入れ条件7・4キーすべて有。馬連はIssue #116 AC-4)", () => {
       const race = makeComboRaceData({
         wideCombo: { "1-2": 3.4 },
         trioCombo: { "1-2-3": 12.5 },
+        quinellaCombo: { "1-4": 5.6 },
         comboOdds: {
           wide: makeComboOddsFetchOutcome("available"),
           trio: makeComboOddsFetchOutcome("available"),
+          quinella: makeComboOddsFetchOutcome("available"),
         },
       });
 
@@ -344,11 +358,28 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       expect(hasOwn(snapshot, "wideCombo")).toBe(true);
       expect(snapshot.trioCombo).toEqual({ "1-2-3": 12.5 });
       expect(hasOwn(snapshot, "trioCombo")).toBe(true);
+      expect(snapshot.quinellaCombo).toEqual({ "1-4": 5.6 });
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(true);
       expect(snapshot.comboOdds).toEqual({
         wide: makeComboOddsFetchOutcome("available"),
         trio: makeComboOddsFetchOutcome("available"),
+        quinella: makeComboOddsFetchOutcome("available"),
       });
       expect(hasOwn(snapshot, "comboOdds")).toBe(true);
+    });
+
+    it("quinellaComboのみ設定・wide/trioComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。馬連はIssue #116 AC-4)", () => {
+      const race = makeComboRaceData({ quinellaCombo: { "1-4": 5.6 } });
+
+      const snapshot = buildRaceSnapshot(race);
+      expect(snapshot.quinellaCombo).toEqual({ "1-4": 5.6 });
+      expect(hasOwn(snapshot, "quinellaCombo")).toBe(true);
+      expect(snapshot.wideCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "wideCombo")).toBe(false);
+      expect(snapshot.trioCombo).toBeUndefined();
+      expect(hasOwn(snapshot, "trioCombo")).toBe(false);
+      expect(snapshot.comboOdds).toBeUndefined();
+      expect(hasOwn(snapshot, "comboOdds")).toBe(false);
     });
 
     /**

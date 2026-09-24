@@ -482,6 +482,13 @@ export interface OddsSnapshot {
    * ではなく単一値そのものが入る)。optional・`Record`である理由は`wideCombo`と同じ。
    */
   readonly trioCombo?: Record<string, number | null>;
+  /**
+   * 馬連オッズ(馬番の組の正規化キー〈例"0102"。1着・2着の順不同。`wideCombo`と同じキー形式〉
+   * →オッズ。単一値。`oddsMax`という概念を持たない券種のため`trioCombo`と同じ扱い。
+   * Issue #116・#24-D3b-1で`scrapeRace`に配線した。optional・`Record`である理由は
+   * `wideCombo`と同じ)。
+   */
+  readonly quinellaCombo?: Record<string, number | null>;
 }
 
 /**

@@ -670,12 +670,18 @@ function builtComboDiag(overrides: {
   };
 }
 
-/** テスト用のMixedCandidateDiagnosticsを組み立てる補助関数。 */
+/**
+ * テスト用のMixedCandidateDiagnosticsを組み立てる補助関数。
+ * `quinella`はIssue #116・#24-D3b-1で追加。既定値`{kind:"not-requested"}`は現状の
+ * production呼び出し(`ALL_MIXED_CANDIDATE_BET_TYPES`が馬連を含まない)と一致させる
+ * (画面〈本ファイル〉はまだ馬連を表示しない。#117のスコープ)。
+ */
 function mixedDiagnostics(overrides: {
   place?: PlaceCandidateDiagnostics;
   win?: WinCandidateDiagnosticsView;
   wide?: ComboCandidateDiagnosticsView;
   trio?: ComboCandidateDiagnosticsView;
+  quinella?: ComboCandidateDiagnosticsView;
 } = {}): MixedCandidateDiagnostics {
   return {
     place: overrides.place ?? {
@@ -690,6 +696,7 @@ function mixedDiagnostics(overrides: {
     },
     wide: overrides.wide ?? builtComboDiag(),
     trio: overrides.trio ?? builtComboDiag(),
+    quinella: overrides.quinella ?? { kind: "not-requested" },
   };
 }
 

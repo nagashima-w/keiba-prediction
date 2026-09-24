@@ -93,6 +93,7 @@
 
 import {
   buildComboCandidates,
+  buildQuinellaCandidates,
   buildWinCandidates,
   DEFAULT_EV_CONFIG,
   type AllocationBetType,
@@ -142,11 +143,13 @@ export type MixedCandidateBetType = AllocationBetType;
  * #91が是正した「宣言だけが実体を伴わずに増える」欠陥は再生産していない。
  *
  * **#112(#24-D1)で`quinella`(馬連)が`AllocationBetType`に加わったが、本配列には
- * まだ含めていない。** 理由はwinのときと同型: core側に馬連の候補ビルダー
- * (`buildQuinellaCandidates`)は#112で新設されたが、`buildMixedCandidates`(本ファイル)は
- * まだそれを一切参照していない(app側の候補組み立て・設定・表示は#24-D3のスコープ)。
- * 「対象にする」宣言だけを先に増やして実体を伴わない状態を作らないため、#24-D3で
- * `buildQuinellaCandidatesForBetType`相当の実装を追加するときに、本配列へも加える。
+ * まだ含めていない。** winのときとは異なり、**#116(#24-D3b-1)で`buildQuinellaCandidatesForBetType`
+ * (core `buildQuinellaCandidates`を呼ぶ本ファイルの実装)を新設した後も、意図的に本配列へは
+ * 加えていない**。`buildMixedCandidates`自体は`betTypes`に`"quinella"`が含まれていれば
+ * 馬連の候補を構築できるが、`options.betTypes`を渡さない既定呼び出し(=本配列)では
+ * 対象にならない。配分の券種選択(`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`)
+ * が実際に`"quinella"`を渡すよう接続し、利用者から見える配分結果を変えるのは#117
+ * (#24-D3b-2)のスコープ(オーケストレーター裁定・Issue #116 Q1)。
  *
  * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いついたが、#112で再び
  * 「全メンバーではない」状態に戻った。** 改名はしない(#91当時のboss裁定を維持:
@@ -189,6 +192,8 @@ export interface MixedCandidateBuildInput {
   readonly rows: readonly AnalysisRow[];
   readonly wideCombo?: Record<string, number | null>;
   readonly trioCombo?: Record<string, number | null>;
+  /** 馬連オッズ(Issue #116・#24-D3b-1)。`options.betTypes`に`"quinella"`があるときのみ参照される。 */
+  readonly quinellaCombo?: Record<string, number | null>;
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
 }
 
@@ -287,6 +292,13 @@ export interface MixedCandidateDiagnostics {
   readonly win: WinCandidateDiagnosticsView;
   readonly wide: ComboCandidateDiagnosticsView;
   readonly trio: ComboCandidateDiagnosticsView;
+  /**
+   * 馬連の候補ビルド診断値(Issue #116・#24-D3b-1)。`wide`/`trio`と同じ
+   * `ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
+   * `options.betTypes`に`"quinella"`を渡さない既定呼び出しでは常に`kind:"not-requested"`
+   * になる(`ALL_MIXED_CANDIDATE_BET_TYPES`が馬連を含まないため。#117で接続予定)。
+   */
+  readonly quinella: ComboCandidateDiagnosticsView;
 }
 
 /** `buildMixedCandidates` の結果。 */
@@ -420,7 +432,42 @@ function buildComboCandidatesForBetType(
 }
 
 /**
- * 券種横断(複勝・ワイド・3連複)の買い目候補を構築する。
+ * 馬連候補を構築する(Issue #116・#24-D3b-1)。`buildComboCandidatesForBetType`(ワイド・3連複)
+ * を`betType:"quinella"`に拡張するのではなく別関数にする: core `buildComboCandidates`は
+ * `betType==="quinella"`を専用にthrowする安全装置を持つ(#112。馬連にワイド・3連複用の
+ * 「上位k着の集合」的中確率を誤って使わせないため)。したがって馬連は`buildQuinellaCandidates`
+ * (core。順序付きoutcome空間から1着・2着の周辺化で的中確率を求める)へ直接委譲する
+ * (`buildWinCandidatesForBetType`と同型)。反証B相当: 頭数門前払いはしない
+ * (`buildQuinellaCandidates`自身の判定不能〈固定馬2頭以上等〉に委ねる)。
+ */
+function buildQuinellaCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード: 発売前は組合せオッズが存在しない(wide/trioと同じ理由。誤ラベル禁止)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "yoso" } };
+  }
+  const record = race.quinellaCombo;
+  const fieldPresence = resolveFieldPresence(record);
+  const comboOddsState = race.comboOdds?.quinella?.state ?? "unknown";
+  const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
+  // D-4: evConfigを渡し、複勝・ワイド・3連複と同じ閾値・同じ厳密不等号で判定させる。
+  const result = buildQuinellaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
+  };
+}
+
+/**
+ * 券種横断(複勝・ワイド・3連複。馬連は候補ビルダーとして実装済みだが既定の対象には含まれない
+ * 〈`ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照〉)の買い目候補を構築する。
  *
  * @param race レース情報の最小構造(`AnalysisResult` をそのまま渡せる)
  * @param options 対象券種(省略時は`ALL_MIXED_CANDIDATE_BET_TYPES`。`AllocationBetType`の全メンバーではない。
@@ -440,10 +487,23 @@ export function buildMixedCandidates(
   const win = buildWinCandidatesForBetType(betTypes.includes("win"), race, horses, evConfig);
   const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses, evConfig);
   const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig);
+  const quinella = buildQuinellaCandidatesForBetType(betTypes.includes("quinella"), race, horses, evConfig);
 
   return {
-    candidates: [...place.candidates, ...win.candidates, ...wide.candidates, ...trio.candidates],
+    candidates: [
+      ...place.candidates,
+      ...win.candidates,
+      ...wide.candidates,
+      ...trio.candidates,
+      ...quinella.candidates,
+    ],
     topFinishCount: COMBO_TOP_FINISH_COUNT,
-    diagnostics: { place: place.diagnostics, win: win.diagnostics, wide: wide.diagnostics, trio: trio.diagnostics },
+    diagnostics: {
+      place: place.diagnostics,
+      win: win.diagnostics,
+      wide: wide.diagnostics,
+      trio: trio.diagnostics,
+      quinella: quinella.diagnostics,
+    },
   };
 }

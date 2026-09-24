@@ -156,7 +156,8 @@ export interface ScrapeWarning {
 }
 
 /**
- * 組合せオッズ(ワイド or 3連複)1件分の取得結果の要約(機能D-2b-B・Issue #33第4段)。
+ * 組合せオッズ(ワイド・3連複・馬連のいずれか)1件分の取得結果の要約
+ * (機能D-2b-B・Issue #33第4段。馬連はIssue #116・#24-D3b-1で追加)。
  *
  * 第3段`ComboOddsFetchResult`の`odds`(`ReadonlyMap<string, ComboOddsCell>`)は含めない。
  * `RaceDataMeta`もIPC/`JSON.stringify`を経由しうる`RaceData`の一部であり、Mapを載せると
@@ -171,10 +172,14 @@ export interface ComboOddsFetchOutcome {
   readonly diagnostics: ComboOddsFetchDiagnostics;
 }
 
-/** 組合せオッズ(ワイド・3連複)取得結果のペア。`options.includeComboOdds`がtrueのときのみ設定される。 */
+/**
+ * 組合せオッズ(ワイド・3連複・馬連)取得結果のペア。`options.includeComboOdds`がtrueのときのみ
+ * 設定される(馬連はIssue #116・#24-D3b-1で追加)。
+ */
 export interface ComboOddsScrapeOutcome {
   readonly wide?: ComboOddsFetchOutcome;
   readonly trio?: ComboOddsFetchOutcome;
+  readonly quinella?: ComboOddsFetchOutcome;
 }
 
 /** 1頭分の統合データ(出馬表情報+全戦績+調教評価)。 */
@@ -454,9 +459,11 @@ export async function scrapeRace(
   // (5)自体が実行されないため、この行の位置に関わらず既存の挙動と完全に一致する)。
   const oddsFetchedAt = now().toISOString();
 
-  // (5) 組合せオッズ(ワイド・3連複。オプトイン。既定OFF。機能D-2b-B・Issue #33第4段):
-  // options.includeComboOddsがtrueの場合のみ実行する。既定呼び出しでは本ステップは
-  // 一切実行されず、発行URL列・リクエスト数は現行と完全に一致する(AC4)。
+  // (5) 組合せオッズ(ワイド・3連複・馬連。オプトイン。既定OFF。機能D-2b-B・Issue #33第4段。
+  // 馬連はIssue #116・#24-D3b-1で追加): options.includeComboOddsがtrueの場合のみ実行する。
+  // 既定呼び出しでは本ステップは一切実行されず、発行URL列・リクエスト数は現行と完全に一致する
+  // (AC4)。馬連はワイド・3連複の**後**に取得する(既存URL列の先頭部分を変えないため。
+  // Issue #116 AC-1)。
   //
   // 防御カバレッジ表への追記(AC8。fetch-combo-odds.tsの表に対する追加出口):
   // | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
@@ -465,6 +472,7 @@ export async function scrapeRace(
   // | narTrioOddsAxisUrlの契約違反throw(AC-6のfail fast経由) | fetchComboBetTypeOddsのcatch | あり | 分類(警告に落とす。他の任意データ〈調教〉と同じ扱い。レース全体は落とさない) | 本ファイル内コメント参照。専用の合成テストは今回未追加(発生させるにはshutuba由来の出走馬番自体が破損している必要があり、既存parse-shutubaの馬番検証〈1〜18範囲・throw〉が既に上流で防いでいるため実質到達不能経路。到達可能にする改変〈shutuba側の検証を弱める等〉があれば別途テストを追加すること) |
   let wideCombo: Record<string, number | null> | undefined;
   let trioCombo: Record<string, number | null> | undefined;
+  let quinellaCombo: Record<string, number | null> | undefined;
   let comboOdds: ComboOddsScrapeOutcome | undefined;
   if (options.includeComboOdds) {
     const startingUmabans = shutuba.horses.map((h) => h.umaban);
@@ -486,15 +494,25 @@ export async function scrapeRace(
       oddsFetchOptions,
       warnings,
     );
+    const quinellaOutcome = await fetchComboBetTypeOdds(
+      "quinella",
+      raceId,
+      startingUmabans,
+      deps.fetcher,
+      oddsFetchOptions,
+      warnings,
+    );
     wideCombo = wideOutcome?.record;
     trioCombo = trioOutcome?.record;
-    comboOdds = { wide: wideOutcome?.outcome, trio: trioOutcome?.outcome };
+    quinellaCombo = quinellaOutcome?.record;
+    comboOdds = { wide: wideOutcome?.outcome, trio: trioOutcome?.outcome, quinella: quinellaOutcome?.outcome };
   }
 
   const odds: OddsSnapshot = {
     ...baseOdds,
     ...(wideCombo !== undefined ? { wideCombo } : {}),
     ...(trioCombo !== undefined ? { trioCombo } : {}),
+    ...(quinellaCombo !== undefined ? { quinellaCombo } : {}),
   };
 
   const horses: RaceHorseData[] = shutuba.horses.map((shutubaHorse) => ({

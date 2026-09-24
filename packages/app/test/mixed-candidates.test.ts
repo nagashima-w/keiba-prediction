@@ -92,7 +92,7 @@ function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: num
 
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身自体はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio",
+  betType: "wide" | "trio" | "quinella",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -1107,5 +1107,115 @@ describe("win候補(#90・#23-B2)", () => {
     const result = buildMixedCandidates(raceInput({ rows }));
     expect(result.diagnostics.win.kind).toBe("judged");
     expect(result.candidates.filter((c) => c.betType === "win").length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 馬連(quinella)候補(Issue #116・#24-D3b-1)。
+ *
+ * n=4を使う理由: `buildQuinellaCandidates`は`buildOrderedDistribution`(順序付きoutcome空間)に
+ * 委譲するため、`topFinishCount`(常に3)が出走頭数を覆う縮退(n<=3)ではnullが返り候補が
+ * 常に0件になる(win候補と同じ制約。「頭数=%i頭でも…」describe参照)。n=4以上で意味のある
+ * 候補が得られることを事前に実行して確認済み(n=4・placeProb一律0.5・全ペアオッズ999で
+ * hitProb=1/6・ev=166.5になることを実測)。
+ */
+describe("馬連(quinella)候補(#116・#24-D3b-1)", () => {
+  it("betTypesにquinellaを含めない場合(既定含む): kind='not-requested'、候補も0件(ALL_MIXED_CANDIDATE_BET_TYPESが馬連を含まないため)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, quinellaCombo: fullOddsRecord(umabans, 2, 999) }),
+    );
+    expect(result.diagnostics.quinella).toEqual({ kind: "not-requested" });
+    expect(result.candidates.filter((c) => c.betType === "quinella")).toHaveLength(0);
+  });
+
+  it("betTypesに明示的にquinellaを含めれば候補が構築されること(kind='built')", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, quinellaCombo: fullOddsRecord(umabans, 2, 999) }),
+      { betTypes: ["quinella"] },
+    );
+    expect(result.diagnostics.quinella.kind).toBe("built");
+    const quinellaCandidates = result.candidates.filter((c) => c.betType === "quinella");
+    expect(quinellaCandidates).toHaveLength(6); // C(4,2)
+    expect(quinellaCandidates.every((c) => c.odds === 999)).toBe(true);
+  });
+
+  it("yosoガード: oddsStatus='yoso'のときquinellaComboが供給されていてもkind='yoso'で候補0件", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        oddsStatus: "yoso",
+        quinellaCombo: fullOddsRecord(umabans, 2, 999),
+      }),
+      { betTypes: ["quinella"] },
+    );
+    expect(result.diagnostics.quinella).toEqual({ kind: "yoso" });
+    expect(result.candidates.filter((c) => c.betType === "quinella")).toHaveLength(0);
+  });
+
+  it("fieldPresence・comboOddsStateがwide/trioと同じ形で反映されること(quinellaComboキー不在=absent・comboOdds未設定=unknown)", () => {
+    const rows = allCandidateRows(4);
+    const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["quinella"] });
+    if (result.diagnostics.quinella.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.quinella.fieldPresence).toBe("absent");
+    expect(result.diagnostics.quinella.comboOddsState).toBe("unknown");
+    expect(result.candidates.filter((c) => c.betType === "quinella")).toHaveLength(0);
+  });
+
+  it("comboOdds.quinella.stateが反映されること(wide/trioと独立)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        quinellaCombo: fullOddsRecord(umabans, 2, 999),
+        comboOdds: { quinella: comboOddsOutcome("quinella", "available") },
+      }),
+      { betTypes: ["quinella"] },
+    );
+    if (result.diagnostics.quinella.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.quinella.fieldPresence).toBe("present");
+    expect(result.diagnostics.quinella.comboOddsState).toBe("available");
+  });
+
+  /**
+   * 殺すべき変異(Issue #116 AC-5・ブリーフ明記): 「馬連の候補にwideComboのオッズを使う」。
+   * wideComboとquinellaComboに同じキー(組)で異なる値を与え、馬連候補のoddsが
+   * quinellaCombo側の値(999)であって、wideCombo側の値(5)ではないことを固定する。
+   * 値も分けて設計(999→ev=166.5でEVプラス、5→ev=0.8335でEV非プラスかつ閾値1.0を下回る)
+   * ため、混同する変異は「候補が0件になる」「oddsの値が違う」の両方向で検知できる
+   * (事前にscripts配下のスクリプトで実測済み。core buildComboCandidatesはbetType="quinella"を
+   * 専用にthrowする安全装置を持つため〈#112〉、この変異はbuildComboCandidatesForBetTypeを
+   * 誤ってquinellaへ流用する形では起こり得ず、race.wideComboを読む形でのみ起こりうる)。
+   */
+  it("馬連候補のオッズはquinellaComboの値であり、wideComboの値と混同されないこと(殺すべき変異の直接検知)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        wideCombo: fullOddsRecord(umabans, 2, 5), // ev=0.8335(EV非プラス)になる値
+        quinellaCombo: fullOddsRecord(umabans, 2, 999), // ev=166.5(EVプラス)になる値
+      }),
+      { betTypes: ["quinella"] }, // wideは対象外にし、quinella側の値だけを見る。
+    );
+    // 前提固定: wideComboとquinellaComboで異なる値を与えていること。
+    expect(result.diagnostics.quinella.kind).toBe("built");
+    const quinellaCandidates = result.candidates.filter((c) => c.betType === "quinella");
+    expect(quinellaCandidates.length).toBeGreaterThan(0); // 空振り防止(wideの値〈ev非プラス〉が混入すると0件になる)。
+    expect(quinellaCandidates).toHaveLength(6); // C(4,2)
+    for (const c of quinellaCandidates) {
+      expect(c.odds).toBe(999);
+      expect(c.odds).not.toBe(5);
+    }
   });
 });

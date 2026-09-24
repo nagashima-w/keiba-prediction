@@ -266,11 +266,13 @@ export interface AppSettings {
    * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
    * `includeTrioInAllocation` と同じ(そちらのJSDoc参照)。
    *
-   * **#24-D3a時点ではこの設定は画面に出ない(SettingsView.tsxにトグルを追加しない)。**
-   * 候補ビルダー(`shared/mixed-race-allocation.ts` の `resolveMixedBetTypes`)もまだ馬連の
-   * 候補を作らないため、この設定を変えても配分結果は変わらない(D-2フォールバック規則
-   * `isComboBetTypesOff` にもまだ加えない)。実際に画面へ出し、候補ビルダー・フォールバック
-   * 規則に組み込むのは #24-D3b(Issue #115本文参照)。
+   * **この設定はまだ画面に出ない(SettingsView.tsxにトグルを追加しない)。**
+   * 候補ビルダー自体(`shared/mixed-candidates.ts` の `buildMixedCandidates`)は
+   * Issue #116・#24-D3b-1で馬連の候補を構築できるようになったが、`shared/mixed-race-allocation.ts`
+   * の `resolveMixedBetTypes` はまだこの設定を読まず`betTypes`に`"quinella"`を渡さないため、
+   * **この設定を変えても配分結果は変わらない**(D-2フォールバック規則`isComboBetTypesOff`にも
+   * まだ加えない)。実際に画面へ出し、`resolveMixedBetTypes`・フォールバック規則に
+   * 組み込むのは #117(#24-D3b-2。Issue #115本文参照)。
    */
   readonly includeQuinellaInAllocation: boolean;
 }
