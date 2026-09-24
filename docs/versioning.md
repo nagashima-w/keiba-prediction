@@ -1392,6 +1392,33 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 1レースの計算中は画面が止まる(止まる時間がレース1つ分に縮み、その合間に進捗が更新される)。
 完全に止まらなくするには計算を別スレッド(Web Worker)へ移す必要があり、#110 のスコープ外とした。
 
+
+## 次の正式版が 1.9.5 である根拠(Issue #112・#24-D1 での変更)
+
+**patch**(内部改善。production から到達しない。利用者から見てできることは増えず、分析結果の数値も変わらない)。
+
+### 変更内容
+
+`AllocationBetType` に `quinella`(馬連)を追加し、core の確率・候補ビルダー・配分を対応させた。
+
+- `buildQuinellaCandidates` / `computeQuinellaHitProb`(新設): 上位3着でフィットした θ の順序付き分布から
+  `{order[0], order[1]}` を周辺化して馬連の的中確率を求める。**上位3着の集合から求めるとワイドと同じ値になり、
+  EV が過大になる**ため。`buildComboCandidates` は馬連を渡すと throw する
+- `ALLOCATION_BET_TYPE_REQUIRES_ORDER`(新設): 順序付き outcome 空間を要する券種の唯一の写像。
+  `allocateGeneralBets` の門番・的中判定・判定不能時の除外をこれで一般化した
+- 順序を要する候補があるとき、`topFinishCount` がその券種の構成頭数以上でなければ throw する
+
+### patch である根拠(production から到達しない)
+
+- app は馬連の候補を作らない(`mixed-candidates.ts` の `ALL_MIXED_CANDIDATE_BET_TYPES` から意図的に除外し、
+  テストで固定)。内訳表の表示順配列からも除外した(除外しないと「馬連 ¥0 0点」の行が常に出るため)
+- 馬連の候補を含まない入力では結果がビット一致する(`scripts/bench-mixed-allocation.ts` の greedySteps 感度表が
+  変更前と1文字も違わないことを確認)
+
+### major / minor ではない根拠
+
+DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
