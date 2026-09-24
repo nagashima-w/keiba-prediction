@@ -1493,6 +1493,33 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - エクスポート JSON は無変更。IPC の設定ペイロードに項目が増えたが、main と renderer は同じ exe の中で
   同時に更新されるため、版の食い違いは起きない
 
+## 次の正式版が 1.9.9 である根拠(Issue #116・#24-D3b-1 での変更)
+
+**patch**(内部改善。利用者から見てできることは増えず、配分提案の数値も変わらない)。
+
+### 変更内容
+
+「組合せオッズを取得する」(`includeComboOdds`)が ON のとき、ワイド・三連複に続けて**馬連のオッズも取得する**
+ようにした(`scrape-race.ts`。1レースあたり +1 リクエスト)。取得した馬連のオッズは分析結果(`AnalysisResult.quinellaCombo`)と
+保存用スナップショット(`race_snapshot_json`)に載り、候補ビルダー(`mixed-candidates.ts`)は `betTypes` に馬連が
+含まれれば馬連の候補を作れる。
+
+### patch である根拠
+
+- 配分の券種選択(`resolveMixedBetTypes`)と既定の券種一覧(`ALL_MIXED_CANDIDATE_BET_TYPES`)は馬連を含まないため、
+  **production の配分計算に馬連の候補は入らない**。配分の感度表(`scripts/bench-mixed-allocation.ts`)は
+  #115 時点と同一(code-reviewer が worktree で変更前と比較して確認)
+- 利用者から見える変化は、取得のリクエストが1本増えること(`includeComboOdds` ON のときだけ。1.5秒間隔のため
+  1レースあたり約1.5秒長くなる)と、馬連の取得に失敗したときに「馬連」の警告が出ることだけ
+- 画面・Discord・検証画面には馬連はまだ出ない(#117)
+
+### major / minor ではない根拠
+
+- DB スキーマは無変更(`race_snapshot_json` は JSON 文字列の列で、キーが1つ増えるだけ。`quinellaCombo` を持たない
+  過去のスナップショットもそのまま読める)
+- 設定・IPC は無変更。エクスポート JSON は無変更(スナップショットの組合せオッズはエクスポート文書に写されない。
+  code-reviewer が `buildAnalysisExportDocument` で確認)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

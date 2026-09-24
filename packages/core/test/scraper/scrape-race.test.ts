@@ -572,6 +572,36 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
         result.diagnostics.unjudged.oddsMalformedCount;
       expect(total).toBe(560);
     });
+
+    it("馬連の取得だけが失敗してもレースは落ちず、wideCombo/trioComboは不変で、警告に「馬連」が出ること(Issue #116 AC-3。メタレビュー指摘で追加)", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=4")) {
+          throw new Error("馬連オッズのHTTP取得に失敗した(模擬)");
+        }
+        return comboAwareCentralHandler(url);
+      });
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // wide/trioは馬連の失敗に引きずられず、従来どおり全件取得できていること。
+      expect(Object.keys(data.odds.wideCombo!)).toHaveLength(120); // C(16,2)
+      expect(Object.keys(data.odds.trioCombo!)).toHaveLength(560); // C(16,3)
+      expect(data.meta.comboOdds?.wide?.state).toBe("available");
+      expect(data.meta.comboOdds?.trio?.state).toBe("available");
+
+      // 馬連は取得0件(空オブジェクト)のまま、state="failed"(②③〈発売なし〉と混同しない)。
+      expect(data.odds.quinellaCombo).toEqual({});
+      expect(data.meta.comboOdds?.quinella?.state).toBe("failed");
+
+      // 警告に「馬連」を含むものが出ること(kind==="組合せオッズ")。
+      const quinellaWarning = data.meta.warnings.find(
+        (w) => w.kind === "組合せオッズ" && w.message.includes("馬連"),
+      );
+      expect(quinellaWarning).toBeDefined();
+    });
   });
 
   describe("地方(NAR)馬連(quinella)の単発取得(includeComboOdds:true。Issue #116・#24-D3b-1)", () => {
