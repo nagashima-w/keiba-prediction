@@ -553,6 +553,128 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
           });
         }
       }
+
+      // ★Red-0(Issue #107・#24-C・ゲート裁定§6(1)への対応)。
+      //
+      // 上記4シナリオは「候補ごとに独立なベルヌーイ試行」でindicesを作っており、outcome数は
+      // 60以下、|indices|はn×contactProbability(最大30程度)まで大きくなりうる。
+      // これは実際の順序付きoutcome空間(券種拡張シリーズ〈#91〜〉が実際に通す経路。
+      // combo-bet-allocation.tsのdetermined枝〈win候補を含む呼び出し〉)とは大小関係が
+      // **逆**である。実際は
+      //   - outcome数が大きい(P(頭数,3)通り。中央16頭の実オッズで最大3360、署名畳み込み後でも
+      //     1023。`scripts/bench-run-greedy-allocation.ts`で再現可能)
+      //   - 1outcomeあたりの的中候補数(|indices|)は小さい値に偏る(win=1着identityで高々1件、
+      //     trio=上位3着の3頭組そのもので高々1件、place=上位3着メンバーで高々3件、
+      //     wide=上位3着からの2頭組で高々3件という構造的な上限がある)
+      // という形になる。本シナリオはP(n,3)通りの順列を直接列挙し、win/place/wide/trioの
+      // isHitルール(combo-bet-allocation.tsのdetermined枝と同型の判定式)でindicesを構築する
+      // ことで、この実際の形(outcome数3桁・|indices|が候補種別ごとに偏る)を再現する。
+      describe("実際の順序付きoutcome空間の形(outcome数3桁・|indices|が候補種別ごとに偏る)を再現するシナリオ", () => {
+        /** n頭からの3着までの順列(P(n,3)通り)をすべて決定的に列挙する。 */
+        function permutations3(n: number): number[][] {
+          const results: number[][] = [];
+          for (let a = 0; a < n; a++) {
+            for (let b = 0; b < n; b++) {
+              if (b === a) continue;
+              for (let c = 0; c < n; c++) {
+                if (c === a || c === b) continue;
+                results.push([a, b, c]);
+              }
+            }
+          }
+          return results;
+        }
+
+        /** items(昇順)からk個の組合せを列挙する(決定的backtrack。bruteForceとは独立の実装)。 */
+        function combinationsOf(items: readonly number[], k: number): number[][] {
+          const results: number[][] = [];
+          const current: number[] = [];
+          const backtrack = (start: number): void => {
+            if (current.length === k) {
+              results.push([...current]);
+              return;
+            }
+            for (let i = start; i < items.length; i++) {
+              current.push(items[i]!);
+              backtrack(i + 1);
+              current.pop();
+            }
+          };
+          backtrack(0);
+          return results;
+        }
+
+        /** P(7,3)=210通り(3桁)。候補はwin7+place7+wide21(=C(7,2))+trio35(=C(7,3))=70件。 */
+        const N_HORSES = 7;
+
+        type RealisticCandidate = {
+          readonly kind: "win" | "place" | "wide" | "trio";
+          readonly umabans: readonly number[];
+        };
+
+        function buildRealisticOrderedScenario(seed: number): {
+          outcomeIndexSets: OutcomeIndexSet[];
+          odds: number[];
+        } {
+          const rand = makeRand(seed);
+          const horses = Array.from({ length: N_HORSES }, (_, i) => i + 1);
+
+          const allCombos: RealisticCandidate[] = [
+            ...horses.map((u): RealisticCandidate => ({ kind: "win", umabans: [u] })),
+            ...horses.map((u): RealisticCandidate => ({ kind: "place", umabans: [u] })),
+            ...combinationsOf(horses, 2).map((umabans): RealisticCandidate => ({ kind: "wide", umabans })),
+            ...combinationsOf(horses, 3).map((umabans): RealisticCandidate => ({ kind: "trio", umabans })),
+          ];
+          // 実際のcombo-bet-allocation.tsはEVプラスの組合せだけを候補にする(全組合せが
+          // 候補になるわけではない)。ここでも各組合せを独立確率0.5で残すことで、outcomeごとの
+          // |indices|が「候補種別ごとの上限(win/trioは高々1、place/wideは高々3)」の範囲内で
+          // 実際にばらつく(全組合せを候補にすると、どのoutcomeも一律win1+place3+wide3+trio1=8で
+          // 揃ってしまい、変動が消えてしまうため)。
+          const candidates = allCombos.filter(() => rand() < 0.5);
+          const odds = candidates.map(() => 1.5 + rand() * 8); // 1.5〜9.5倍(現実的なレンジ)。
+
+          const orders = permutations3(N_HORSES).map((order) => order.map((i) => horses[i]!));
+          // 0を避けた重みを正規化する(全outcomeが正の確率を持つようにする)。
+          const rawWeights = orders.map(() => rand() + 0.01);
+          const totalWeight = rawWeights.reduce((a, b) => a + b, 0);
+
+          const outcomeIndexSets: OutcomeIndexSet[] = orders.map((order, oi) => {
+            const orderSet = new Set(order);
+            const indices: number[] = [];
+            for (let ci = 0; ci < candidates.length; ci++) {
+              const c = candidates[ci]!;
+              // combo-bet-allocation.tsのdetermined枝と同型の判定式
+              // (win: order[0]とのidentity判定 / それ以外: 部分集合包含)。
+              const isHit =
+                c.kind === "win" ? order[0] === c.umabans[0] : c.umabans.every((u) => orderSet.has(u));
+              if (isHit) {
+                indices.push(ci);
+              }
+            }
+            return { indices, probability: rawWeights[oi]! / totalWeight };
+          });
+
+          return { outcomeIndexSets, odds };
+        }
+
+        for (const greedySteps of [50, 500]) {
+          it(`実際の形(outcome数3桁・的中判定が実装と同型)でも高速パスとブルートフォースが一致すること / greedySteps=${greedySteps}`, () => {
+            const { outcomeIndexSets, odds } = buildRealisticOrderedScenario(2026);
+            const n = odds.length;
+
+            // 前提1: outcome数が3桁であること(既存4シナリオが覆っていなかった形の固定)。
+            expect(outcomeIndexSets.length).toBeGreaterThanOrEqual(100);
+            // 前提2: |indices|が一様でなく偏っていること(win/place/trioは高々1件、wideは高々3件と
+            // 候補種別ごとに構造的に決まるため、単一の値には潰れない)。
+            const distinctSizes = new Set(outcomeIndexSets.map((s) => s.indices.length));
+            expect(distinctSizes.size).toBeGreaterThanOrEqual(2);
+
+            const expected = bruteForce(n, odds, outcomeIndexSets, greedySteps);
+            const { fractions: actual } = runGreedyAllocation(n, odds, outcomeIndexSets, greedySteps);
+            expect(actual).toEqual(expected);
+          });
+        }
+      });
     });
   });
 
