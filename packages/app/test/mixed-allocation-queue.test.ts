@@ -429,4 +429,50 @@ describe("createAllocationScheduler(計算ループの再開判断を切り出�
     expect(runner.step).not.toHaveBeenCalled();
     expect(onStepped).not.toHaveBeenCalled();
   });
+
+  it("dispose後に作り直した新インスタンスは正常に動作すること(React 18 StrictModeのsetup→cleanup→setup相当。Issue #110さらなるメタレビュー差し戻し)", () => {
+    // BatchAnalysisView.tsxはStrictMode対策として、スケジューラの生成自体をuseEffect(..., [])の
+    // 中で行い、setupのたびに新しいインスタンスを作る(CopyErrorButton.tsxの前例と同じ設計。
+    // copy-error-controller.test.tsの同名テスト参照)。ここでは「1つ目をdisposeしても、
+    // 同じrunnerを共有する2つ目のインスタンスは道連れにならず正常に動く」ことを固定する。
+    //
+    // ★このテストが固定するのはスケジューラ単体の性質のみである。BatchAnalysisView.tsxの
+    // useEffectが実際にStrictModeのsetup→cleanup→setupで2つ目のインスタンスを作ることは、
+    // このリポジトリにReact描画テスト基盤が無いためテストでは確認できず、配線の読解でのみ
+    // 確認している(報告参照)。
+    const runner = createFakeRunner(["race-1"]);
+    const timers = createFakeTimerSource();
+    const onStepped = vi.fn();
+
+    // 1つ目のインスタンス(1回目のsetup)を作ってすぐdispose(1回目のcleanup、StrictModeの疑似実行)。
+    const first = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped,
+    });
+    first.sync(); // タイマーid=1が張られる。
+    first.dispose();
+
+    // 2つ目のインスタンス(2回目のsetup、実際に使われ続けるインスタンス)。同じrunnerを共有する
+    // (BatchAnalysisView.tsxではallocationRunner自体は再生成されず、スケジューラだけが
+    // 作り直される設計のため)。
+    const second = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped,
+    });
+    second.sync(); // タイマーid=2が張られる。
+
+    // 1つ目のタイマー(id=1)が万一発火しても、1つ目は既にdispose済みなので計算しないこと。
+    timers.fire(1);
+    expect(runner.step).not.toHaveBeenCalled();
+    expect(onStepped).not.toHaveBeenCalled();
+
+    // 2つ目のタイマー(id=2)は正常に発火し、計算が進むこと。
+    timers.fire(2);
+    expect(runner.step).toHaveBeenCalledTimes(1);
+    expect(onStepped).toHaveBeenCalledTimes(1);
+  });
 });

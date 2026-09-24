@@ -19,6 +19,7 @@ import {
   createAllocationQueueRunner,
   createAllocationScheduler,
   type AllocationOutcome,
+  type AllocationScheduler,
 } from "./mixed-allocation-queue.js";
 import {
   type MixedAllocationCache,
@@ -678,32 +679,46 @@ export function BatchAnalysisView(
   // 対策として、判断ロジックを`createAllocationScheduler`(過去の真偽値を一切記憶せず、
   // 呼ばれた時点の「今、タイマーが張られているか」「今、未計算があるか」だけを見る冪等な
   // オブジェクト。`mixed-allocation-queue.ts`のJSDoc「設計上の危険その3」・
-  // `mixed-allocation-queue.test.ts`のAC-9テスト参照)へ切り出した。Reactの配線は
-  // 依存配列を付けない`sync()`(コミットのたびに必ず呼ぶ。冪等なのでcleanup不要)と、
-  // アンマウント時にのみ発火する`dispose()`(裁定1: 見えない画面の計算のために
-  // 見えている画面を遅くしない)の2つの`useEffect`に薄く保つ。
+  // `mixed-allocation-queue.test.ts`のAC-9テスト参照)へ切り出した。
+  //
+  // ★Issue #110さらなるメタレビュー差し戻し: スケジューラの生成を**render中の`useRef`遅延
+  // 初期化**にしていたが、これは`CopyErrorButton.tsx`が一度踏んだのと同じ罠だった。
+  // `main.tsx`はアプリ全体を`<StrictMode>`で包んでおり、開発モードでは`useEffect`が
+  // setup→cleanup→setupと2重実行される。render中生成だとインスタンスは1つしか作られず、
+  // 1回目のcleanupで`dispose()`された唯一のインスタンスを2回目以降のsetup後も使い続けることに
+  // なり、以後`sync()`は`disposed`を見て何もしなくなる(開発モードで配分が永遠に
+  // 「計算中…」のままになる。本番ビルドは2重実行が無いため顕在化しない)。
+  // `CopyErrorButton.tsx`の前例に倣い、**スケジューラの生成そのものを`useEffect(..., [])`の
+  // 中へ移し**、setupのたびに新しいインスタンスを作って対応するcleanupでそのインスタンスだけを
+  // `dispose()`する(クロージャで捕まえた自分自身の値と比較してからrefをnullに戻す。
+  // StrictModeの1回目cleanupが2回目setup後のrefを誤って消さないようにするため)。
+  // マウント直後の最初のコミットを取りこぼさないよう、生成直後に`sync()`を1回呼び、かつ
+  // 「毎コミットsync()する」effectより**先に宣言する**(宣言順に実行されるため。
+  // どちらか一方が欠けても、マウント直後の最初のsync()を取りこぼす経路が残る)。
   const [, forceAllocationRerender] = useReducer((c: number) => c + 1, 0);
-  const allocationSchedulerRef = useRef<ReturnType<typeof createAllocationScheduler> | null>(
-    null,
-  );
-  if (allocationSchedulerRef.current === null) {
-    allocationSchedulerRef.current = createAllocationScheduler({
+  const allocationSchedulerRef = useRef<AllocationScheduler | null>(null);
+  useEffect(() => {
+    const scheduler = createAllocationScheduler({
       runner: allocationRunner,
       schedule: (callback) => window.setTimeout(callback, 0),
       cancel: (handle) => window.clearTimeout(handle),
       onStepped: forceAllocationRerender,
     });
-  }
-  const allocationScheduler = allocationSchedulerRef.current;
-  useEffect(() => {
-    allocationScheduler.sync();
-  });
-  useEffect(() => {
+    allocationSchedulerRef.current = scheduler;
+    scheduler.sync();
     return () => {
-      allocationScheduler.dispose();
+      scheduler.dispose();
+      // クロージャで捕まえた自分自身のインスタンスだけをnullに戻す
+      // (CopyErrorButton.tsxと同じ理由。参照ではなく「このeffect実行が生成した値」で判定する)。
+      if (allocationSchedulerRef.current === scheduler) {
+        allocationSchedulerRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    allocationSchedulerRef.current?.sync();
+  });
 
   const expandedSet = new Set(props.expandedRaceIds);
   // 実行前スナップショット(全pending)だけの状態では結果表示はまだ出さない。
