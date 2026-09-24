@@ -779,21 +779,24 @@ describe("券種フィルタ(options.betTypes)", () => {
   });
 
   /**
-   * ★構造的な再発防止(#91・boss裁定。#90でwinを追加した後の状態を固定)。
+   * ★構造的な再発防止(#91・boss裁定。#90でwinを追加した後の状態を固定・
+   * #112〈#24-D1〉で馬連〈quinella〉が除外に加わった状態に更新)。
    *
    * `ALL_MIXED_CANDIDATE_BET_TYPES`が`AllocationBetType`(core)の全メンバーを含むとは
    * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定する。
-   * #90でwinの候補ビルダー(`buildWinCandidates`)が新設されたため、除外は無くなった
-   * (`AllocationBetType`の全メンバーと一致する)。`AllocationBetType`に新しいメンバーが
-   * 増えたとき(#24の馬連等)、この配列に足すべきかどうかの判断を人間が必ず一度は行うように
-   * する(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、JSDocは「全券種」と
-   * 言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
+   * #90でwinの候補ビルダー(`buildWinCandidates`)が新設されたため、当時は除外が無かった
+   * (`AllocationBetType`の全メンバーと一致していた)。**#112で`AllocationBetType`に
+   * `quinella`(馬連)が加わったが、`buildMixedCandidates`(app側)はまだそれを参照しない
+   * (app側の候補組み立ては#24-D3のスコープ)ため、`quinella`が新たに除外へ加わった。**
+   * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
+   * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
+   * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種を固定すること(#90: 除外は無い)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種を固定すること(#112: quinellaが除外に加わった)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual([]);
+    expect(excluded).toEqual(["quinella"]);
   });
 });
 

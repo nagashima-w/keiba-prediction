@@ -130,8 +130,8 @@ import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-al
 export type MixedCandidateBetType = AllocationBetType;
 
 /**
- * 既定の対象券種。**現在`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーと一致する**
- * (place/win/wide/trioの4つ)。
+ * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーとは
+ * 再び一致しない(#112〈#24-D1〉で`quinella`〈馬連〉が除外に加わったため)。**
  *
  * #91で`AllocationBetType`に`win`(単勝)が加わった時点では、coreに単勝候補ビルダーが
  * 存在せず`buildMixedCandidates`も`win`を一切参照していなかったため、本配列は意図的に
@@ -141,8 +141,17 @@ export type MixedCandidateBetType = AllocationBetType;
  * 「対象にする」宣言と実体(`buildWinCandidatesForBetType`)が揃っている状態であり、
  * #91が是正した「宣言だけが実体を伴わずに増える」欠陥は再生産していない。
  *
- * **定数名の`ALL_`は#90時点で実態(全メンバー)に追いつく。** 改名はしない(boss裁定:
- * 全メンバーと一致する名前が実態を正しく表しているため、改名の動機自体が無くなった)。
+ * **#112(#24-D1)で`quinella`(馬連)が`AllocationBetType`に加わったが、本配列には
+ * まだ含めていない。** 理由はwinのときと同型: core側に馬連の候補ビルダー
+ * (`buildQuinellaCandidates`)は#112で新設されたが、`buildMixedCandidates`(本ファイル)は
+ * まだそれを一切参照していない(app側の候補組み立て・設定・表示は#24-D3のスコープ)。
+ * 「対象にする」宣言だけを先に増やして実体を伴わない状態を作らないため、#24-D3で
+ * `buildQuinellaCandidatesForBetType`相当の実装を追加するときに、本配列へも加える。
+ *
+ * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いついたが、#112で再び
+ * 「全メンバーではない」状態に戻った。** 改名はしない(#91当時のboss裁定を維持:
+ * 定数名は「意図的な対象集合」を表す既存の名として扱い、メンバー数の増減のたびに
+ * 改名しない)。
  *
  * boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない(`options.betTypes`
  * 以外のフィルタは実装に存在しない。#90時点でも真)。

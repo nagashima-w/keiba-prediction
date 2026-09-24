@@ -91,12 +91,16 @@ export type MixedAllocationBreakdown = Record<AllocationBetType, { readonly stak
  * 挿入順と揃えているだけ)。**キーの集合は`ALLOCATION_BET_TYPE_UMABAN_COUNT`のキー集合と
  * 常に同一であることをテストで固定する**(D-2・boss裁定。`mixed-allocation-view.test.ts`
  * 「MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER」describe参照)。`BatchAnalysisView.tsx`の内訳表は
- * この配列を`.map`して`mixedBetTypeLabel`でラベルを引くだけにする(券種を手で4行書かない)。
+ * この配列を`.map`して`mixedBetTypeLabel`でラベルを引くだけにする(券種を手で行数分書かない)。
+ * Issue #112で`quinella`(馬連)を追加した(app はまだ馬連の候補を作らないため、
+ * `buildMixedAllocationBreakdown`の集計は常に`{stake:0,count:0}`になるが、キー集合の
+ * 整合テストが要求する追随であり、`app`側の表示に馬連の行が新たに現れるわけではない)。
  */
 export const MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER: readonly AllocationBetType[] = [
   "place",
   "win",
   "wide",
+  "quinella",
   "trio",
 ];
 
@@ -276,13 +280,17 @@ export function buildHiddenAllocationsBlocks(
  * 別実装)とplace/wide/trioの3つの日本語ラベルが同一であることは
  * `allocation-proposal-view.test.ts`「betTypeLabelとmixedBetTypeLabel…」でリテラル固定する。
  *
- * **`"win"`は例外(#91・#23-B1a)。** `betTypeLabel`は`"win"`のcaseを持たず(`default`分岐で
- * DB由来の生文字列`"win"`をそのまま返す)、本関数は`"単勝"`という日本語ラベルを返す。
- * したがって**`"win"`だけは両関数の戻り値が一致しない**(place/wide/trioの一致とは非対称)。
- * この不一致は#91が自ら作った既知の非対称であり、解消(`betTypeLabel`側への`"win"`ケース追加)は
- * #23-Cの射程(`allocation-proposal-view.ts`・そのテストへの変更は#91のスコープ外)。
+ * **`"win"`・`"quinella"`は例外(#91・#23-B1a、#112・#24-D1)。** `betTypeLabel`は
+ * `"win"`・`"quinella"`のcaseを持たず(`default`分岐でDB由来の生文字列をそのまま返す)、
+ * 本関数はそれぞれ`"単勝"`・`"馬連"`という日本語ラベルを返す。したがって**`"win"`・
+ * `"quinella"`だけは両関数の戻り値が一致しない**(place/wide/trioの一致とは非対称)。
+ * この不一致は#91が自ら作った既知の非対称であり(#112はそれを踏襲しただけで新設していない)、
+ * 解消(`betTypeLabel`側へのケース追加)は#23-Cの射程(`allocation-proposal-view.ts`・
+ * そのテストへの変更は#91・#112のスコープ外)。
  */
-export function mixedBetTypeLabel(betType: AllocationBetType): "複勝" | "単勝" | "ワイド" | "三連複" {
+export function mixedBetTypeLabel(
+  betType: AllocationBetType,
+): "複勝" | "単勝" | "ワイド" | "馬連" | "三連複" {
   switch (betType) {
     case "place":
       return "複勝";
@@ -290,6 +298,8 @@ export function mixedBetTypeLabel(betType: AllocationBetType): "複勝" | "単�
       return "単勝";
     case "wide":
       return "ワイド";
+    case "quinella":
+      return "馬連";
     case "trio":
       return "三連複";
   }

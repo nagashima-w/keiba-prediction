@@ -1143,12 +1143,13 @@ describe("formatHiddenAllocationsSummary — 件数と、隠れている買い�
   });
 });
 
-describe("mixedBetTypeLabel — betTypeから券種ラベルを返すこと(Issue #76: umabans.lengthからの逆算をやめた。#91でwinを追加)", () => {
+describe("mixedBetTypeLabel — betTypeから券種ラベルを返すこと(Issue #76: umabans.lengthからの逆算をやめた。#91でwin・#112で馬連〈quinella〉を追加)", () => {
   it.each([
     ["place", "複勝"],
     ["wide", "ワイド"],
     ["trio", "三連複"],
     ["win", "単勝"],
+    ["quinella", "馬連"],
   ] as const)("betType=%s は %s", (betType, expected) => {
     expect(mixedBetTypeLabel(betType)).toBe(expected);
   });
@@ -1563,6 +1564,7 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
       place: { stake: 0, count: 0 },
       win: { stake: 0, count: 0 },
       wide: { stake: 0, count: 0 },
+      quinella: { stake: 0, count: 0 },
       trio: { stake: 0, count: 0 },
     },
     sortedAllocations: [],

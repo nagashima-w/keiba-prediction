@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { allocateBets, type AllocationHorse, DEFAULT_BET_ALLOCATION_CONFIG } from "../../src/ev/bet-allocation.js";
 import { DEFAULT_EV_CONFIG } from "../../src/ev/expected-value.js";
 import {
+  ALLOCATION_BET_TYPE_REQUIRES_ORDER,
   ALLOCATION_BET_TYPE_UMABAN_COUNT,
   allocateGeneralBets,
   buildComboCandidates,
   buildComboOddsKey,
+  buildQuinellaCandidates,
   buildWinCandidates,
   DEFAULT_CANDIDATE_CAP,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
@@ -21,6 +23,7 @@ import { COMBO_SIZE } from "../../src/scraper/combo-odds-key.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   type JointModelHorse,
+  type OrderedOutcome,
   type PlaceJointModel,
   type PlaceOutcome,
 } from "../../src/ev/place-joint-model.js";
@@ -123,39 +126,60 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
    */
   const UNKNOWN_BET_TYPE = "__unknown__";
 
-  describe("ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf(券種→頭数の唯一の写像。Issue #76・#91でwin追加)", () => {
-    it("place=1・win=1・wide=2・trio=3であること(ハードコードしたリテラル。#55の自己参照比較を防ぐ)", () => {
-      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT).toEqual({ place: 1, win: 1, wide: 2, trio: 3 });
+  describe("ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf(券種→頭数の唯一の写像。Issue #76・#91でwin追加・#112で馬連〈quinella〉追加)", () => {
+    it("place=1・win=1・wide=2・quinella=2・trio=3であること(ハードコードしたリテラル。#55の自己参照比較を防ぐ)", () => {
+      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT).toEqual({ place: 1, win: 1, wide: 2, quinella: 2, trio: 3 });
     });
 
-    it("wide/trioの値がcombo-odds-key.tsのCOMBO_SIZEと一致すること(2つの「券種→頭数」定義の乖離を機械検出)", () => {
+    it("wide/trioの値がcombo-odds-key.tsのCOMBO_SIZEと一致すること(2つの「券種→頭数」定義の乖離を機械検出。quinellaはCOMBO_SIZEにまだ存在しない〈#24-D2のスコープ〉ため対象外)", () => {
       expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.wide).toBe(COMBO_SIZE.wide);
       expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.trio).toBe(COMBO_SIZE.trio);
     });
 
-    it("umabanCountOf: place/win/wide/trioそれぞれの構成頭数を返すこと", () => {
+    it("umabanCountOf: place/win/wide/quinella/trioそれぞれの構成頭数を返すこと", () => {
       expect(umabanCountOf("place")).toBe(1);
       expect(umabanCountOf("win")).toBe(1);
       expect(umabanCountOf("wide")).toBe(2);
+      expect(umabanCountOf("quinella")).toBe(2);
       expect(umabanCountOf("trio")).toBe(3);
     });
 
     it("umabanCountOf: 未知の券種はthrowし、有効な券種の列挙はALLOCATION_BET_TYPE_UMABAN_COUNTから導出されること(Record添字アクセスがundefinedを返す危険の直接防御。#91: winは既に有効な券種になったため代表値をUNKNOWN_BET_TYPEに差し替え)", () => {
       expect(() => umabanCountOf(UNKNOWN_BET_TYPE as AllocationBetType)).toThrow(
-        /不正な券種です: betTypeはplace\/win\/wide\/trioのいずれかである必要があります/,
+        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/trioのいずれかである必要があります/,
       );
     });
 
     // フィクスチャ健全性の保証(#91・無条件expect): 代表値が「未知」であり続けること、
     // winが「未知」ではなく「既知だが未対応」であることを機械的に固定する。
-    // これで#24で馬連を足したときに代表値が実在の券種になれば本テストが落ちて気づける。
-    it("UNKNOWN_BET_TYPEはALLOCATION_BET_TYPE_UMABAN_COUNTに存在せず、winは存在すること(代表値の健全性の機械保証)", () => {
+    // これで#24で馬連を足したときに代表値が実在の券種になれば本テストが落ちて気づける
+    // (実際に#112で馬連を追加した後もこのアサーションは崩れていないことを確認する)。
+    it("UNKNOWN_BET_TYPEはALLOCATION_BET_TYPE_UMABAN_COUNTに存在せず、win/quinellaは存在すること(代表値の健全性の機械保証)", () => {
       expect(Object.hasOwn(ALLOCATION_BET_TYPE_UMABAN_COUNT, UNKNOWN_BET_TYPE)).toBe(false);
       expect(Object.hasOwn(ALLOCATION_BET_TYPE_UMABAN_COUNT, "win")).toBe(true);
+      expect(Object.hasOwn(ALLOCATION_BET_TYPE_UMABAN_COUNT, "quinella")).toBe(true);
     });
   });
 
-  describe("validateCandidates: 券種(betType)の検証(Issue #76・#91・#92・AC-A7。umabans.length(0〜4)×betType(place/win/wide/trio/未知)=25セル)", () => {
+  describe("ALLOCATION_BET_TYPE_REQUIRES_ORDER(順序付きoutcome空間を要する券種の唯一の写像。Issue #112・#24-D1)", () => {
+    it("win/quinellaはtrue、place/wide/trioはfalseであること(ハードコードしたリテラル)", () => {
+      expect(ALLOCATION_BET_TYPE_REQUIRES_ORDER).toEqual({
+        place: false,
+        win: true,
+        wide: false,
+        quinella: true,
+        trio: false,
+      });
+    });
+
+    it("キーの集合がALLOCATION_BET_TYPE_UMABAN_COUNTのキー集合と同一であること(券種が増えたときの追随漏れを機械検出)", () => {
+      expect(new Set(Object.keys(ALLOCATION_BET_TYPE_REQUIRES_ORDER))).toEqual(
+        new Set(Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT)),
+      );
+    });
+  });
+
+  describe("validateCandidates: 券種(betType)の検証(Issue #76・#91・#92・AC-A7・#112。umabans.length(0〜4)×betType(place/win/wide/quinella/trio/未知)=30セル)", () => {
     const UMABANS_BY_LENGTH: Record<number, number[]> = {
       0: [],
       1: [1],
@@ -168,12 +192,14 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
 
     const table: { length: number; betType: AllocationBetType; expectKind: ExpectKind }[] = [];
     for (const length of [0, 1, 2, 3, 4] as const) {
-      for (const rawBetType of ["place", "wide", "trio", "win", UNKNOWN_BET_TYPE] as const) {
+      for (const rawBetType of ["place", "wide", "trio", "win", "quinella", UNKNOWN_BET_TYPE] as const) {
         const isUnknown = rawBetType === UNKNOWN_BET_TYPE;
         const betType = rawBetType as AllocationBetType;
         // 検査順(#91・boss裁定): 空→未知→頭数不一致。
         // **#92でwin専用門番(暫定措置)を撤去した。** winは他の券種と同じくumabanCountOfの
         // 頭数一致だけで判定される(umabanCountOf("win")===1なのでlength=1のみok)。
+        // #112で馬連(quinella)も同じ経路(umabanCountOf("quinella")===2)で判定される
+        // (専用の暫定門番は置かない。win撤去済みの流儀を踏襲)。
         const expectKind: ExpectKind =
           length === 0
             ? "empty" // 既存の「空」チェックが最優先(検査順の裁定。既存メッセージを温存)。
@@ -186,14 +212,14 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       }
     }
 
-    // 前提固定(空振り防止): 25セルの内訳がempty5/ok4(place×1,win×1,wide×2,trio×3の一致セル)/
-    // unknown4/mismatch12(残り)であること(#92でunsupportedカテゴリが消滅)。
-    it("テーブル自己検証: 25セルの内訳がempty5/ok4/unknown4/mismatch12であること", () => {
-      expect(table).toHaveLength(25);
-      expect(table.filter((t) => t.expectKind === "empty")).toHaveLength(5);
-      expect(table.filter((t) => t.expectKind === "ok")).toHaveLength(4);
+    // 前提固定(空振り防止): 30セルの内訳がempty6/ok5(place×1,win×1,wide×2,quinella×2,
+    // trio×3の一致セル)/unknown4/mismatch15(残り)であること(#92でunsupportedカテゴリが消滅)。
+    it("テーブル自己検証: 30セルの内訳がempty6/ok5/unknown4/mismatch15であること", () => {
+      expect(table).toHaveLength(30);
+      expect(table.filter((t) => t.expectKind === "empty")).toHaveLength(6);
+      expect(table.filter((t) => t.expectKind === "ok")).toHaveLength(5);
       expect(table.filter((t) => t.expectKind === "unknown")).toHaveLength(4);
-      expect(table.filter((t) => t.expectKind === "mismatch")).toHaveLength(12);
+      expect(table.filter((t) => t.expectKind === "mismatch")).toHaveLength(15);
     });
 
     it.each(table)(
@@ -211,7 +237,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/馬番の組が空です/);
         } else if (expectKind === "unknown") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
-            /不正な券種です: betTypeはplace\/win\/wide\/trioのいずれかである必要があります/,
+            /不正な券種です: betTypeはplace\/win\/wide\/quinella\/trioのいずれかである必要があります/,
           );
         } else if (expectKind === "mismatch") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
@@ -245,7 +271,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const horses = evenHorses(18, 3);
       const oddsMap = new Map<string, number | null>();
       expect(() => buildComboCandidates(horses, 3, UNKNOWN_BET_TYPE as AllocationBetType, oddsMap)).toThrow(
-        /不正な券種です: betTypeはplace\/win\/wide\/trioのいずれかである必要があります/,
+        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/trioのいずれかである必要があります/,
       );
     });
 
@@ -276,6 +302,28 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const horses = evenHorses(n, 3);
       const oddsMap = uniformOddsMap(n, 1, 3);
       expect(() => buildComboCandidates(horses, 3, "win", oddsMap)).toThrow(
+        /buildComboCandidatesは組合せ\(ワイド・三連複\)専用の候補ビルダーです/,
+      );
+    });
+
+    /**
+     * ★Issue #112(#24-D1): 馬連(quinella)専用門番のRedステップを「誤用経路の観測」にする
+     * (win専用門番〈AC-B1a-2〉と同じ設計。上のJSDoc参照)。
+     *
+     * quinella(comboSize=2)は`wide`と全く同じ頭数・オッズキー形式であるため、この門番が
+     * 無いと`buildComboCandidates`は`computeComboHitProb`(上位k着の**集合**分布)で
+     * 馬連の的中確率を計算してしまい、**ワイドと完全に同一の候補**(betType以外のフィールドが
+     * 全て一致)を返す(win専用門番のときと同型の誤用機構。本ファイル筆者が実測:
+     * `betType:"quinella"`と`betType:"wide"`を同一入力〈n=5・全馬odds=3.0・均等複勝確率〉で
+     * 呼ぶと、門番を外した状態ではcandidatesがumabans/odds/ev/isPositive全て一致した)。
+     * 正しい的中確率(1着・2着の周辺化)を計算するには`buildQuinellaCandidates`
+     * (順序付きoutcome空間を使う。本ファイル下方参照)を使うこと。
+     */
+    it("betType='quinella'は候補を黙って構築せず必ずthrowすること(恒久的な誤用経路の封鎖。#112)", () => {
+      const n = 5;
+      const horses = evenHorses(n, 3);
+      const oddsMap = uniformOddsMap(n, 2, 3);
+      expect(() => buildComboCandidates(horses, 3, "quinella", oddsMap)).toThrow(
         /buildComboCandidatesは組合せ\(ワイド・三連複\)専用の候補ビルダーです/,
       );
     });
@@ -2490,5 +2538,446 @@ describe("AC2(#90): allocateGeneralBetsのwin配分行がev≈hitProb×oddsを�
     // 前提の裏返し(空振り防止): hitProbも1/3ではなく1/9に近い値であること
     // (複勝確率ではなく1着確率が使われている直接証拠)。
     expect(winAlloc!.hitProb).toBeCloseTo(1 / 9, 6);
+  });
+});
+
+// ============================================================================
+// 馬連(quinella)・Issue #112(#24-D1): 的中確率・候補ビルダー・配分の門番
+// ============================================================================
+
+/**
+ * 馬連{a,b}(a,bが順不同で1着・2着を占める確率)を、順序付き分布(`OrderedOutcome[]`)から
+ * 総当たりで周辺化する(テスト側の独立実装。production側の`computeQuinellaHitProb`
+ * 〈非公開〉を呼ばず、AC-1(i)「総当たりで周辺化した値と一致」を自己参照なしで検証する)。
+ */
+function bruteForceQuinellaHitProb(combo: readonly [number, number], ordered: readonly OrderedOutcome[]): number {
+  const [a, b] = combo;
+  let total = 0;
+  for (const outcome of ordered) {
+    const first = outcome.order[0];
+    const second = outcome.order[1];
+    if ((first === a && second === b) || (first === b && second === a)) {
+      total += outcome.probability;
+    }
+  }
+  return total;
+}
+
+describe("buildQuinellaCandidates(馬連候補ビルダー・Issue #112・#24-D1)", () => {
+  // 非一様(placeProbが互いに異なる)なフィクスチャ。一様入力では馬連とワイドの確率差が
+  // 出にくいケースや、退化した1/n定数との区別ができないケースがあるため(#97回収の教訓。
+  // 本ファイル冒頭の他のdescribeが使うasymmetricHorsesと同型の設計判断)非一様にする。
+  const nonUniformHorses: JointModelHorse[] = [0.6, 0.5, 0.4, 0.3, 0.2].map((placeProb, i) => ({
+    umaban: i + 1,
+    placeProb,
+  }));
+
+  it("前提固定(空振り防止): nonUniformHorsesはdeg=0であり、placeProbが互いに異なること(非一様)", () => {
+    const fit = fitPlackettLuceStrengths(nonUniformHorses, 3);
+    expect(fit.ok).toBe(true);
+    if (!fit.ok) return;
+    expect(fit.degenerateFixedCount).toBe(0);
+    expect(new Set(nonUniformHorses.map((h) => h.placeProb)).size).toBe(nonUniformHorses.length);
+  });
+
+  describe("★AC-1: 馬連の的中確率が順序付き分布の総当たり周辺化と一致し、ワイドと異なること", () => {
+    it("馬連{1,2}のev/oddsが、順序付き分布を総当たりで周辺化した値(brute force)とtoBeCloseToで一致すること(AC-1(i))", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses, 3)!;
+      expect(ordered).not.toBeNull();
+      const expected = bruteForceQuinellaHitProb([1, 2], ordered);
+      // 前提(空振り防止): 退化した0や1ではない非退化値であること。
+      expect(expected).toBeGreaterThan(0);
+      expect(expected).toBeLessThan(1);
+
+      const oddsMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), 100]]);
+      const build = buildQuinellaCandidates(nonUniformHorses, 3, oddsMap);
+      const cand = build.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2);
+      expect(cand).toBeDefined();
+      expect(cand!.betType).toBe("quinella");
+      const derivedHitProb = cand!.ev / cand!.odds;
+      expect(derivedHitProb).toBeCloseTo(expected, 9);
+    });
+
+    it("馬連{1,2}の的中確率が、同じ{1,2}のワイドの的中確率より構造的に小さいこと(AC-1(ii)。馬連⊂ワイドの事象なので常に成り立つ)", () => {
+      const oddsMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), 100]]);
+      const quinellaBuild = buildQuinellaCandidates(nonUniformHorses, 3, oddsMap);
+      const wideBuild = buildComboCandidates(nonUniformHorses, 3, "wide", oddsMap);
+      const quinellaCand = quinellaBuild.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2);
+      const wideCand = wideBuild.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2);
+      expect(quinellaCand).toBeDefined();
+      expect(wideCand).toBeDefined();
+      const quinellaHitProb = quinellaCand!.ev / quinellaCand!.odds;
+      const wideHitProb = wideCand!.ev / wideCand!.odds;
+      // ★中核(殺すべき変異: 馬連の的中確率をcomputeComboHitProbで求める→ワイドと一致し
+      // 以下のtoBeLessThanが偽になる)。
+      expect(quinellaHitProb).toBeLessThan(wideHitProb);
+      // 空振り防止: 差が浮動小数点誤差ではなく意味のある大きさであること。
+      expect(wideHitProb - quinellaHitProb).toBeGreaterThan(0.01);
+    });
+  });
+
+  describe("オッズ4状態(欠損/未取得/不正/候補外)×EV閾値の境界(buildComboCandidatesと同じ流儀)", () => {
+    const cases: {
+      readonly label: string;
+      readonly odds: number | null | "unfetched";
+      readonly expect: "missing" | "unfetched" | "malformed" | "not-positive" | "positive";
+    }[] = [
+      { label: "オッズ欠損(null)", odds: null, expect: "missing" },
+      { label: "オッズ未取得(キー不在)", odds: "unfetched", expect: "unfetched" },
+      { label: "オッズ0(malformed: 1.0未満)", odds: 0, expect: "malformed" },
+      { label: "オッズNaN(malformed: 非有限)", odds: NaN, expect: "malformed" },
+    ];
+
+    it.each(cases)("$label", ({ odds, expect: expected }) => {
+      // 対象の組{1,2}以外の全組には正常なオッズ(2.0)を敷いておく(nonUniformHorsesは
+      // 5頭でC(5,2)=10組あるため、対象を隔離しないと「未取得」ケースで残り9組まで
+      // unfetchedに数えられてしまい、対象組1件だけの件数固定ができない)。
+      const oddsMap = new Map<string, number | null>();
+      for (const combo of [
+        [1, 3], [1, 4], [1, 5], [2, 3], [2, 4], [2, 5], [3, 4], [3, 5], [4, 5],
+      ]) {
+        oddsMap.set(buildComboOddsKey(combo), 2.0);
+      }
+      if (odds !== "unfetched") {
+        oddsMap.set(buildComboOddsKey([1, 2]), odds);
+      }
+      const result = buildQuinellaCandidates(nonUniformHorses, 3, oddsMap);
+      const cand = result.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2);
+      switch (expected) {
+        case "missing":
+          expect(cand).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsMissingCount).toBe(1);
+          break;
+        case "unfetched":
+          expect(cand).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsUnfetchedCount).toBe(1);
+          break;
+        case "malformed":
+          expect(cand).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(1);
+          break;
+      }
+    });
+
+    it("evが厳密閾値(1.0)を上回るときのみ候補になること(厳密不等号の境界)", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses, 3)!;
+      const hitProb = bruteForceQuinellaHitProb([1, 2], ordered);
+      // 前提(空振り防止): hitProbが0より大きい(オッズで境界を作れる)こと。
+      expect(hitProb).toBeGreaterThan(0);
+      const oddsAtThreshold = 1 / hitProb; // ev = hitProb * odds = ちょうど1.0
+      const belowMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), oddsAtThreshold]]);
+      const atThreshold = buildQuinellaCandidates(nonUniformHorses, 3, belowMap);
+      expect(atThreshold.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2)).toBeUndefined();
+      expect(atThreshold.diagnostics.judged.notPositiveCount).toBeGreaterThan(0);
+
+      const aboveMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), oddsAtThreshold * 1.0001]]);
+      const aboveThreshold = buildQuinellaCandidates(nonUniformHorses, 3, aboveMap);
+      expect(aboveThreshold.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2)).toBeDefined();
+    });
+  });
+
+  describe("buildOrderedDistributionがnullを返す入力(throwせず候補0件で返すこと。AC-3)", () => {
+    it("潜在強度に+Infinityが2頭以上(固定馬2頭以上)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 1 },
+        { umaban: 2, placeProb: 1 },
+        { umaban: 3, placeProb: 0.5 },
+        { umaban: 4, placeProb: 0.3 },
+        { umaban: 5, placeProb: 0.2 },
+      ];
+      expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)).toBeNull();
+      const oddsMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), 10]]);
+      let result: ReturnType<typeof buildQuinellaCandidates> | undefined;
+      expect(() => {
+        result = buildQuinellaCandidates(horses, 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      // 前提固定(空振り防止): 列挙自体は行われ、判定不能で0件になったことが診断値から
+      // 区別できること(候補ゼロが「列挙もされなかった」わけではない)。
+      expect(result!.diagnostics.enumeratedCount).toBeGreaterThan(0);
+    });
+
+    it("topFinishCount>=出走頭数(上位k枠が全頭を覆う)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 0.5 },
+        { umaban: 2, placeProb: 0.3 },
+        { umaban: 3, placeProb: 0.2 },
+      ];
+      expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)).toBeNull();
+      const oddsMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), 10]]);
+      let result: ReturnType<typeof buildQuinellaCandidates> | undefined;
+      expect(() => {
+        result = buildQuinellaCandidates(horses, 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+    });
+  });
+
+  it("モデルが順序展開に非対応(CONDITIONAL_BERNOULLI_MODEL)ならthrow(AC-4。新しい述語を作らずisOrderedPlaceJointModelを再利用)", () => {
+    const oddsMap = new Map<string, number | null>([[buildComboOddsKey([1, 2]), 10]]);
+    expect(() =>
+      buildQuinellaCandidates(nonUniformHorses, 3, oddsMap, DEFAULT_EV_CONFIG, CONDITIONAL_BERNOULLI_MODEL),
+    ).toThrow(/順序付きoutcome空間を構築できるモデルが必要です/);
+  });
+
+  describe("退化入力(0頭・1頭でthrowせず候補0件になること。C(n,2)=0)", () => {
+    it("0頭", () => {
+      const oddsMap = new Map<string, number | null>();
+      let result: ReturnType<typeof buildQuinellaCandidates> | undefined;
+      expect(() => {
+        result = buildQuinellaCandidates([], 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      expect(result!.diagnostics.enumeratedCount).toBe(0);
+    });
+
+    it("1頭", () => {
+      const horses: JointModelHorse[] = [{ umaban: 1, placeProb: 0.5 }];
+      const oddsMap = new Map<string, number | null>();
+      let result: ReturnType<typeof buildQuinellaCandidates> | undefined;
+      expect(() => {
+        result = buildQuinellaCandidates(horses, 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      expect(result!.diagnostics.enumeratedCount).toBe(0);
+    });
+  });
+});
+
+describe("allocateGeneralBets: 馬連(quinella)候補の統合(Issue #112・#24-D1)", () => {
+  const nonUniformHorses: JointModelHorse[] = [0.6, 0.5, 0.4, 0.3, 0.2].map((placeProb, i) => ({
+    umaban: i + 1,
+    placeProb,
+  }));
+  const realConfig: GeneralBetAllocationConfig = {
+    ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+    bankroll: 100000,
+    perRaceCap: 100000,
+  };
+
+  describe("★AC-2: 単勝の候補が無く馬連の候補があるレースで、配分に使われる馬連の的中確率がワイドと異なること", () => {
+    it("門番が馬連を見落とすと同じ値になる(殺すべき変異: 門番をbetType==='win'のままにする)", () => {
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "quinella" },
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+      ];
+      // 前提固定(空振り防止): win候補は1件も含まれていないこと。
+      expect(candidates.some((c) => c.betType === "win")).toBe(false);
+
+      const result = allocateGeneralBets(nonUniformHorses, 3, candidates, realConfig);
+      // 門番が正しく発火していれば、馬連単独でも順序付きoutcome空間が使われdeterminedになる。
+      expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+      const quinellaAlloc = result.allocations.find((a) => a.betType === "quinella");
+      const wideAlloc = result.allocations.find((a) => a.betType === "wide");
+      expect(quinellaAlloc).toBeDefined();
+      expect(wideAlloc).toBeDefined();
+      // ★中核: 門番がbetType==="win"のままだと、馬連候補は集合空間(else枝)に落ち、
+      // ワイドと全く同じ的中確率(c.umabans.every((u) => outcome.placed.includes(u)))になる。
+      expect(quinellaAlloc!.hitProb).toBeLessThan(wideAlloc!.hitProb);
+      expect(wideAlloc!.hitProb - quinellaAlloc!.hitProb).toBeGreaterThan(0.01);
+    });
+  });
+
+  describe("非破壊性: 馬連候補が無い呼び出しはwinOutcome以外の全フィールドが不変であること", () => {
+    it("wide+trio混在(馬連無し)の全フィールドが、#112着手前の値と一致すること", () => {
+      const horses = evenHorses(5, 3);
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "wide" },
+        { umabans: [1, 2, 3], odds: 5, ev: 2, isPositive: true, betType: "trio" },
+      ];
+      const result = allocateGeneralBets(horses, 3, candidates, realConfig);
+      const { winOutcome, ...rest } = result;
+      expect(rest).toEqual({
+        allocations: [
+          {
+            betType: "wide",
+            umabans: [1, 2],
+            stake: 0,
+            continuousFraction: 0,
+            scaledFraction: 0,
+            hitProb: 0.3,
+            odds: 3,
+            ev: 2,
+            droppedBelowMinimum: false,
+          },
+          {
+            betType: "trio",
+            umabans: [1, 2, 3],
+            stake: 0,
+            continuousFraction: 0,
+            scaledFraction: 0,
+            hitProb: 0.09999999999999999,
+            odds: 5,
+            ev: 2,
+            droppedBelowMinimum: false,
+          },
+        ],
+        totalStake: 0,
+        bankrollInput: 100000,
+        perRaceCapInput: 100000,
+        resolvedBankroll: 100000,
+        effectivePerRaceCap: 100000,
+        kellyTargetStake: 0,
+        plannedStake: 0,
+        capApplied: false,
+        minimumStakeApplied: false,
+        exceedsKellyTarget: false,
+        advisory: null,
+        kellyFraction: 0.5,
+        betCount: 0,
+        isSkip: true,
+        skipReason: "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
+        skipReasonCode: "no-edge",
+        notDiversified: false,
+        modelId: "plackett-luce",
+        modelApproximate: false,
+        diagnostics: {
+          inputCandidateCount: 2,
+          truncatedByCapCount: 0,
+          candidateCount: 2,
+          converged: true,
+        },
+      });
+      expect(winOutcome).toEqual<WinOutcome>({ kind: "not-requested" });
+    });
+  });
+
+  describe("★AC-3: 順序付き分布が判定不能のとき、馬連候補は単勝と同様に除外されること", () => {
+    it("degenerateFixedCount>=2(固定馬2頭以上)で馬連候補が除外され、ワイド・三連複は既存どおり判定されること", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 1 },
+        { umaban: 2, placeProb: 1 },
+        { umaban: 3, placeProb: 0.5 },
+        { umaban: 4, placeProb: 0.3 },
+        { umaban: 5, placeProb: 0.2 },
+      ];
+      const fit = fitPlackettLuceStrengths(horses, 3);
+      expect(fit.ok).toBe(true);
+      if (fit.ok) expect(fit.degenerateFixedCount).toBeGreaterThanOrEqual(2);
+
+      const candidates: AllocationCandidate[] = [
+        { umabans: [3, 4], odds: 3, ev: 2, isPositive: true, betType: "quinella" },
+        { umabans: [1, 2], odds: 1.2, ev: 1.15, isPositive: true, betType: "wide" },
+      ];
+      const result = allocateGeneralBets(horses, 3, candidates, realConfig);
+      expect(result.winOutcome).toEqual<WinOutcome>({
+        kind: "indeterminate",
+        reason: "degenerate-fixed-count",
+      });
+      expect(result.allocations.find((a) => a.betType === "quinella")).toBeUndefined();
+      const wideAlloc = result.allocations.find((a) => a.betType === "wide");
+      expect(wideAlloc).toBeDefined();
+      expect(wideAlloc!.hitProb).toBeCloseTo(1, 9);
+      expect(result.diagnostics.inputCandidateCount).toBe(1);
+      expect(result.diagnostics.candidateCount).toBe(1);
+    });
+
+    it("topFinishCount>=出走頭数(k>=n)で馬連候補が除外され、reasonがtop-k-covers-all-runnersであること", () => {
+      const horses = evenHorses(5, 3);
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "quinella" },
+      ];
+      const result = allocateGeneralBets(horses, 5, candidates);
+      expect(result.winOutcome).toEqual<WinOutcome>({
+        kind: "indeterminate",
+        reason: "top-k-covers-all-runners",
+      });
+      expect(result.allocations.find((a) => a.betType === "quinella")).toBeUndefined();
+      expect(result.diagnostics.inputCandidateCount).toBe(0);
+      expect(result.diagnostics.candidateCount).toBe(0);
+    });
+  });
+
+  describe("★AC-4: 順序付き分布を作れないモデルで馬連候補を渡すとthrowすること(単勝と同じ契約)", () => {
+    it("馬連候補がありCONDITIONAL_BERNOULLI_MODEL(順序展開非対応)を明示的に渡すとthrow", () => {
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "quinella" },
+      ];
+      expect(() =>
+        allocateGeneralBets(nonUniformHorses, 3, candidates, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG, CONDITIONAL_BERNOULLI_MODEL),
+      ).toThrow(/順序付きoutcome空間を構築できるモデルが必要です/);
+    });
+  });
+
+  describe("AC(#112裁定2): 順序を要する候補はtopFinishCountがその券種の構成頭数以上であること(#31: 呼び出し側の契約違反はthrowで止める)", () => {
+    it.each([
+      {
+        name: "quinella, topFinishCount=1(構成頭数2未満)",
+        betType: "quinella" as const,
+        umabans: [1, 2],
+        topFinishCount: 1,
+        expectThrow: true,
+      },
+      {
+        name: "quinella, topFinishCount=2(構成頭数と一致)",
+        betType: "quinella" as const,
+        umabans: [1, 2],
+        topFinishCount: 2,
+        expectThrow: false,
+      },
+      {
+        name: "quinella, topFinishCount=3(ワイド・三連複と同じ既定値)",
+        betType: "quinella" as const,
+        umabans: [1, 2],
+        topFinishCount: 3,
+        expectThrow: false,
+      },
+      {
+        name: "win, topFinishCount=1(構成頭数1と一致。回帰: 新検証がwinの既存契約を壊さないこと)",
+        betType: "win" as const,
+        umabans: [1],
+        topFinishCount: 1,
+        expectThrow: false,
+      },
+    ])("$name", ({ betType, umabans, topFinishCount, expectThrow }) => {
+      const horses = evenHorses(6, 3);
+      const candidates: AllocationCandidate[] = [{ umabans, odds: 3, ev: 2, isPositive: true, betType }];
+      if (expectThrow) {
+        expect(() => allocateGeneralBets(horses, topFinishCount, candidates)).toThrow();
+      } else {
+        expect(() => allocateGeneralBets(horses, topFinishCount, candidates)).not.toThrow();
+      }
+    });
+
+    it("throwのメッセージがtopFinishCount不足であることを説明すること", () => {
+      const horses = evenHorses(6, 3);
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "quinella" },
+      ];
+      expect(() => allocateGeneralBets(horses, 1, candidates)).toThrow(
+        /topFinishCountは2以上の整数である必要があります/,
+      );
+    });
+  });
+
+  describe("end-to-endのhitProb: 単勝・馬連・ワイドが同時に候補にあるとき、それぞれ独立に正しく判定されること", () => {
+    it("馬連のhitProbが独立算出した周辺確率と一致し、単勝・ワイドのhitProbも崩れないこと", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses, 3)!;
+      const expectedQuinella12 = bruteForceQuinellaHitProb([1, 2], ordered);
+      const expectedWin1 = ordered
+        .filter((o) => o.order[0] === 1)
+        .reduce((sum, o) => sum + o.probability, 0);
+
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "quinella" },
+        { umabans: [1, 2], odds: 2, ev: 1.5, isPositive: true, betType: "wide" },
+      ];
+      const result = allocateGeneralBets(nonUniformHorses, 3, candidates, realConfig);
+      expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+      const winAlloc = result.allocations.find((a) => a.betType === "win")!;
+      const quinellaAlloc = result.allocations.find((a) => a.betType === "quinella")!;
+      const wideAlloc = result.allocations.find((a) => a.betType === "wide")!;
+      expect(winAlloc).toBeDefined();
+      expect(quinellaAlloc).toBeDefined();
+      expect(wideAlloc).toBeDefined();
+
+      expect(winAlloc.hitProb).toBeCloseTo(expectedWin1, 9);
+      expect(quinellaAlloc.hitProb).toBeCloseTo(expectedQuinella12, 9);
+      // ワイド{1,2}は馬連{1,2}より的中確率が大きいこと(構造的な順序関係。AC-1(ii)と同型)。
+      expect(wideAlloc.hitProb).toBeGreaterThan(quinellaAlloc.hitProb);
+    });
   });
 });
