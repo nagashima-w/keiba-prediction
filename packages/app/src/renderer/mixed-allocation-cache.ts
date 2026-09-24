@@ -37,6 +37,10 @@
  * 上記9項目のいずれか1つでも比較から漏れると、その項目だけを変えた操作でキャッシュが
  * 誤ってヒットし続ける(`mixed-allocation-cache.test.ts`のテーブル駆動テストが、
  * 1項目ずつ変えたときに必ずミスすることを固定している)。
+ *
+ * **この表はキー材料の唯一の定義であり、`get`・`peek`のどちらでも同じ`cacheKeyEquals`を
+ * 使う(Issue #110で`peek`を追加した際も、この表・この比較関数はどちらも変更していない。
+ * 新しい経路〈`mixed-allocation-queue.ts`〉が独自のキー定義を持つことはない)。**
  */
 
 /** キャッシュキー(表の9項目をそのまま構造体にしたもの)。 */
@@ -61,6 +65,19 @@ export interface MixedAllocationCache<T> {
    * 保存してから返す。
    */
   get(key: MixedAllocationCacheKey, compute: () => T): T;
+  /**
+   * `compute`を一切呼ばずに照会する(副作用なし)。`key`の9項目すべてが前回`get`/`step`で
+   * 書き込んだときのキーと一致すればその値を返し、一致しなければ(未計算、または別の設定で
+   * 書かれていれば)`undefined`を返す。`get`と同じ`cacheKeyEquals`を使う(比較ロジックを
+   * 二重に持たない)。
+   *
+   * Issue #110(#24-C2): 配分計算をレース単位に分割して進める仕組み
+   * (`mixed-allocation-queue.ts`)が、「まだ計算していないレースか」を`compute`を誘発せずに
+   * 判定するために使う。表示側(`BatchAnalysisView.tsx`)もこれを直接使い、「今の設定の
+   * キーでヒットするか」だけを見て描画する(ヒットしなければ古い値を出さず「計算中」を表示する。
+   * AC-3'(a)の要)。
+   */
+  peek(key: MixedAllocationCacheKey): T | undefined;
 }
 
 /** キー9項目すべてが一致するかを判定する(表の全項目を漏れなく比較する唯一の場所)。 */
@@ -94,6 +111,13 @@ export function createMixedAllocationCache<T>(): MixedAllocationCache<T> {
       const value = compute();
       store.set(key.raceId, { key, value });
       return value;
+    },
+    peek(key) {
+      const cached = store.get(key.raceId);
+      if (cached !== undefined && cacheKeyEquals(cached.key, key)) {
+        return cached.value;
+      }
+      return undefined;
     },
   };
 }

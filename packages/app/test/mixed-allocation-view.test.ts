@@ -26,6 +26,8 @@ import { NOT_DIVERSIFIED_NOTE, probabilitySumWarning } from "../src/renderer/bet
 import { buildRaceAllocation, resolvePlaceBetTarget } from "../src/shared/race-allocation.js";
 import {
   aggregateUnjudgedCounts,
+  ALLOCATION_COMPUTE_ERROR_NOTE,
+  allocationProgressText,
   buildHiddenAllocationsBlocks,
   buildMixedAllocationBreakdown,
   type MixedAllocationBreakdown,
@@ -1679,5 +1681,33 @@ describe("buildMixedAllocationDisplay — kind!=='mixed'のときは合成ロジ
     expect(fallbackView).toEqual(buildMixedRaceAllocation(race, fallbackSettings));
     // 前提固定: "display"フィールドが存在しないこと(型と実体の両方で非mixed状態であることの確認)。
     expect(fallbackView).not.toHaveProperty("display");
+  });
+});
+
+// ============================================================================
+// Issue #110(#24-C2): 配分計算をレース単位に分けて進める際の表示文言
+// (AC-1: 待ちの明示・全体進捗。AC-7': 失敗レースの一言)
+// ============================================================================
+
+describe("allocationProgressText — 配分計算の進捗文言(AC-1)", () => {
+  it("Issue本文の例と同じ形式(「配分を計算中… done / total レース」)になること", () => {
+    expect(allocationProgressText(3, 12)).toBe("配分を計算中… 3 / 12 レース");
+  });
+
+  it("done=0(まだ1件も終わっていない)でも正しい文言になること(境界値)", () => {
+    expect(allocationProgressText(0, 5)).toBe("配分を計算中… 0 / 5 レース");
+  });
+
+  it("done===total(全件終了)でも文言自体は生成できること(呼び出し側が表示要否を判定する契約)", () => {
+    // 「全部終わったら表示を消す」判定はBatchAnalysisView.tsx側の責務とし、
+    // 本関数自体は文言の組み立てにのみ責任を持つ(0件時に注記を出さないformatUnjudgedNoteと
+    // 同じ役割分担)。
+    expect(allocationProgressText(5, 5)).toBe("配分を計算中… 5 / 5 レース");
+  });
+});
+
+describe("ALLOCATION_COMPUTE_ERROR_NOTE — 1レースの配分計算が失敗したときの一言(AC-7')", () => {
+  it("空文字列ではないこと(自己テスト・退化防止)", () => {
+    expect(ALLOCATION_COMPUTE_ERROR_NOTE.length).toBeGreaterThan(0);
   });
 });

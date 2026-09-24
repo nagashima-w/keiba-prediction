@@ -565,6 +565,33 @@ export function buildMixedAllocationNotices(
  * `buildMixedRaceAllocation`(合成ロジック本体)自体は変更せず、`kind:"mixed"`のときだけ
  * 追加計算(内訳・並べ替え・判定不能集計・状態注記・複勝のみ比較額)を行う薄いラッパー。
  */
+// ============================================================================
+// Issue #110(#24-C2): 配分計算をレース単位に分けて進める際の表示文言
+// (AC-1: 待ちの明示・全体進捗。AC-7': 失敗レースの一言)。計算の進め方自体は
+// `mixed-allocation-queue.ts`が担い、本節はそれが返す状態をどう文言にするかだけを持つ。
+// ============================================================================
+
+/**
+ * 配分計算の全体進捗の文言(AC-1)。`done`=既に結果が出たレース数、`total`=対象レース数
+ * (`betAllocationUnset`のときは対象自体が0)。表示するかどうか(`done===total`になったら
+ * 消す等)は呼び出し側(`BatchAnalysisView.tsx`)の責務とする(`formatUnjudgedNote`が
+ * 0件時の非表示判定を呼び出し側に委ねているのと同じ役割分担)。
+ */
+export function allocationProgressText(done: number, total: number): string {
+  return `配分を計算中… ${done} / ${total} レース`;
+}
+
+/**
+ * 1レースの配分計算(`buildMixedAllocationDisplay`)が例外を投げて失敗したときの一言(AC-7')。
+ * 「計算中」のまま表示し続けると利用者に事実と異なることを言い続けることになるため、
+ * 失敗が確定した(`AllocationOutcome.status==="error"`)レースにはこの注記を出す。
+ * `MIXED_ALLOCATION_INVALID_MESSAGE`(kind:"invalid"用の文言)とは別の状況
+ * (`buildMixedRaceAllocation`自体は例外を投げない設計〈AC17〉であり、これは
+ * `mixed-allocation-queue.ts`が防御的に用意するtry/catchが実際に捕まえた場合の文言)。
+ */
+export const ALLOCATION_COMPUTE_ERROR_NOTE =
+  "このレースの配分計算でエラーが発生しました。設定を変更するか、再分析すると再計算されます。";
+
 export function buildMixedAllocationDisplay(
   race: MixedCandidateBuildInput,
   settings: MixedAllocationSettings,
