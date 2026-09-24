@@ -5,6 +5,7 @@ import {
   type AnalysisHorseRecord,
 } from "../../src/ev/analysis-store.js";
 import type { PredictionMark } from "../../src/analyzer/parse-response.js";
+import { buildComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import {
   computeRaceLedger,
   computeVerifyReport,
@@ -1959,22 +1960,34 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       unjudgedCount: 0,
     });
 
-    // PM指定(b): overallがplace+win+wide+trioの和であることを関係として固定する(単独のリテラル値
-    // だけだと4券種の集計と独立にoverallの集計がずれても気づけないため。#70で読み手側の分離漏れを
-    // 繰り返した教訓の裏返し=今回は複数の値から1つを作る側の穴。Issue #100でwinを追加)。
-    // このフィクスチャにはwin買い目が無いため win.*=0 であり、この関係式単体は「winを足し忘れても
-    // 通る」(win.*が常に0のため)。win買い目がある場での検出力は「単勝(win)の回収率集計」
-    // describe内のAC5-bで別途固定する。
-    const { win } = report.proposedBet;
-    expect(overall.betCount).toBe(place.betCount + win.betCount + wide.betCount + trio.betCount);
+    // PM指定(b): overallがplace+win+wide+trio+quinellaの和であることを関係として固定する
+    // (単独のリテラル値だけだと5券種の集計と独立にoverallの集計がずれても気づけないため。
+    // #70で読み手側の分離漏れを繰り返した教訓の裏返し=今回は複数の値から1つを作る側の穴。
+    // Issue #100でwinを、Issue #114・#24-F1でquinellaを追加)。
+    // このフィクスチャにはwin・quinella買い目が無いためwin.*=quinella.*=0であり、この関係式
+    // 単体は「足し忘れても通る」(常に0のため)。win買い目がある場での検出力は「単勝(win)の
+    // 回収率集計」describe内のAC5-bで、quinella買い目がある場での検出力は「馬連(quinella)の
+    // 回収率集計」describe内のAC-3で別途固定する。
+    const { win, quinella } = report.proposedBet;
+    expect(overall.betCount).toBe(
+      place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+    );
     expect(overall.totalStake).toBe(
-      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
+      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
     );
     expect(overall.totalReturn).toBe(
-      place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+      place.totalReturn +
+        win.totalReturn +
+        wide.totalReturn +
+        trio.totalReturn +
+        quinella.totalReturn,
     );
     expect(overall.unjudgedCount).toBe(
-      place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+      place.unjudgedCount +
+        win.unjudgedCount +
+        wide.unjudgedCount +
+        trio.unjudgedCount +
+        quinella.unjudgedCount,
     );
     expect(overall.recoveryRate).toBe(
       overall.totalStake === 0 ? null : overall.totalReturn / overall.totalStake,
@@ -2157,17 +2170,28 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
     });
 
     // PM指定(b)を別フィクスチャでも再固定(2箇所目。1箇所だけだと偶然の一致を否定できないため)。
-    // このフィクスチャにもwin買い目が無い(win.*=0)。win買い目がある場での検出力はAC5-b参照。
-    const { overall, place, wide, trio, win } = report.proposedBet;
-    expect(overall.betCount).toBe(place.betCount + win.betCount + wide.betCount + trio.betCount);
+    // このフィクスチャにもwin・quinella買い目が無い(win.*=quinella.*=0)。検出力はAC5-b・
+    // AC-3参照。
+    const { overall, place, wide, trio, win, quinella } = report.proposedBet;
+    expect(overall.betCount).toBe(
+      place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+    );
     expect(overall.totalStake).toBe(
-      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
+      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
     );
     expect(overall.totalReturn).toBe(
-      place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+      place.totalReturn +
+        win.totalReturn +
+        wide.totalReturn +
+        trio.totalReturn +
+        quinella.totalReturn,
     );
     expect(overall.unjudgedCount).toBe(
-      place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+      place.unjudgedCount +
+        win.unjudgedCount +
+        wide.unjudgedCount +
+        trio.unjudgedCount +
+        quinella.unjudgedCount,
     );
     store.close();
   });
@@ -2349,7 +2373,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       );
 
       const report = computeVerifyReport(store);
-      const { place, win, wide, trio, overall, unknownBetType } = report.proposedBet;
+      const { place, win, wide, trio, quinella, overall, unknownBetType } = report.proposedBet;
 
       // AC3(a): 未対応の券種コード警告が出ないこと。
       expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
@@ -2369,9 +2393,11 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(wide.betCount).toBeGreaterThan(0);
       expect(trio.betCount).toBeGreaterThan(0);
 
-      // AC5-b: win.betCount>0の場でoverallが4券種の和になっていること(winを足し忘れると
-      // ここで検出される。上のPM指定(b)の2箇所はwin買い目が無いフィクスチャのため
-      // win.*=0で「足し忘れ」を検出できない=このテストが唯一の検出箇所)。
+      // AC5-b: win.betCount>0の場でoverallが5券種の和になっていること(winを足し忘れると
+      // ここで検出される。上のPM指定(b)の2箇所はwin・quinella買い目が無いフィクスチャのため
+      // win.*=quinella.*=0で「足し忘れ」を検出できない=このテストがwinの唯一の検出箇所。
+      // quinella買い目がある場での検出力は「馬連(quinella)の回収率集計」describe内のAC-3参照。
+      // このフィクスチャにはquinella買い目が無いためquinella.*=0で数値自体は変わらない)。
       expect(overall).toEqual({
         betCount: 5,
         totalStake: 280,
@@ -2379,12 +2405,18 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
         recoveryRate: 1655 / 280,
         unjudgedCount: 0,
       });
-      expect(overall.betCount).toBe(place.betCount + win.betCount + wide.betCount + trio.betCount);
+      expect(overall.betCount).toBe(
+        place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+      );
       expect(overall.totalStake).toBe(
-        place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
+        place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
       );
       expect(overall.totalReturn).toBe(
-        place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn,
       );
       store.close();
     });
@@ -2412,6 +2444,144 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(win.betCount).toBe(0);
       expect(win.totalStake).toBe(0);
       expect(win.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("馬連(quinella)の回収率集計(Issue #114・#24-F1)", () => {
+    it("AC-4: 買い目の馬番が降順([13, 8])から生成したcomboKeyでも、払戻(馬番は[8, 13]で保存)と正しく突合されること", () => {
+      const store = new AnalysisStore();
+      // 前提固定(空振り防止): 降順入力[13, 8]からのキー生成が実際に中央フィクスチャの
+      // 実測値(8-13=4,550円)のキーと一致する"0813"になっていること(buildComboOddsKeyは
+      // 常に昇順ソートしてからエンコードするため、入力順に依存しない)。
+      expect(buildComboOddsKey([13, 8])).toBe("0813");
+
+      store.saveAnalysis({
+        raceId: "PB_QUINELLA_ORDER",
+        analyzedAt: "t",
+        horses: [horse(8, 0.1, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "quinella", comboKey: buildComboOddsKey([13, 8]), stake: 300, odds: 45.5, ev: 1.2 },
+          ],
+        },
+      });
+      // 払戻側は馬番[8, 13](昇順)で保存する(parseComboPayoutRowが実際に返す並び)。
+      store.saveResult("PB_QUINELLA_ORDER", [{ umaban: 8, finishPosition: 3 }], null, {
+        quinella: { state: "parsed", payouts: [{ umabans: [8, 13], payout: 4550 }] },
+      });
+
+      const report = computeVerifyReport(store);
+      expect(report.proposedBet.quinella).toEqual({
+        betCount: 1,
+        totalStake: 300,
+        totalReturn: 13650, // 4550 * (300 / 100)
+        recoveryRate: 13650 / 300,
+        unjudgedCount: 0,
+      });
+      store.close();
+    });
+
+    it("AC-3(★判定): 馬連の的中・不的中が正しく計上され、overallに合算されること(1件のみの退化を避けるため的中1件・不的中1件の2点で固定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_QUINELLA_E2E",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true), horse(2, 0.3, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+            // 馬連: comboKey"0102"(的中)・comboKey"0304"(不的中)の2点。
+            { betType: "quinella", comboKey: "0102", stake: 300, odds: 8, ev: 1.2 },
+            { betType: "quinella", comboKey: "0304", stake: 200, odds: 8, ev: 1.2 },
+          ],
+        },
+      });
+      store.saveResult(
+        "PB_QUINELLA_E2E",
+        [
+          { umaban: 1, finishPosition: 1, placePayout: 140 },
+          { umaban: 2, finishPosition: 2, placePayout: 210 },
+        ],
+        null,
+        {
+          quinella: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 850 }] },
+        },
+      );
+
+      const report = computeVerifyReport(store);
+      const { place, win, wide, trio, quinella, overall, unknownBetType } = report.proposedBet;
+
+      // AC3(a): 未対応の券種コード警告が出ないこと(quinellaは既知)。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // AC3(b): 的中(comboKey"0102": 850*300/100=2550)・不的中(comboKey"0304")の2ケース。
+      // 不的中側はbetCount/totalStakeには乗るがtotalReturnには乗らないこと。
+      expect(quinella).toEqual({
+        betCount: 2,
+        totalStake: 500,
+        totalReturn: 2550,
+        recoveryRate: 2550 / 500,
+        unjudgedCount: 0,
+      });
+
+      // 前提固定(空振り防止): place以外(win/wide/trio)は0件で、overallはplace+quinellaのみで
+      // 構成されること(このフィクスチャがwin/wide/trioを一切含まないことの確認)。
+      expect(place.betCount).toBeGreaterThan(0);
+      expect(win.betCount).toBe(0);
+      expect(wide.betCount).toBe(0);
+      expect(trio.betCount).toBe(0);
+
+      // ★AC-3の要(overallへの合算。足し忘れの変異を殺せること): 絶対値リテラルで固定する
+      // (関係式だけだと両辺が同時に壊れる変異を見逃すため、#100のAC5-bと同じく両方を書く)。
+      expect(overall).toEqual({
+        betCount: 3, // place(1) + quinella(2)
+        totalStake: 600, // place(100) + quinella(500)
+        totalReturn: 2690, // place(140) + quinella(2550)
+        recoveryRate: 2690 / 600,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(
+        place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+      );
+      expect(overall.totalStake).toBe(
+        place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn,
+      );
+      store.close();
+    });
+
+    it("AC-5: 馬連払戻が未取込のレース(旧DB相当)では、馬連買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(0円の不的中として計上してはならない)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_QUINELLA_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "quinella", comboKey: "0102", stake: 500, odds: 8, ev: 1.2 }],
+        },
+      });
+      // quinellaを渡さない(旧DB相当=馬連payout未取込のレース。placePayoutのみ保存)。
+      store.saveResult("PB_QUINELLA_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { quinella } = report.proposedBet;
+      expect(quinella.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(quinella.betCount).toBe(0);
+      expect(quinella.totalStake).toBe(0);
+      expect(quinella.totalReturn).toBe(0);
       store.close();
     });
   });
@@ -2538,7 +2708,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       store.close();
     });
 
-    it("既存の不変条件overall.unjudgedCount===place+win+wide+trioが、未知券種を含む入力でも成り立つこと(混ぜていないことの正の対照)", () => {
+    it("既存の不変条件overall.unjudgedCount===place+win+wide+trio+quinellaが、未知券種を含む入力でも成り立つこと(混ぜていないことの正の対照)", () => {
       const store = new AnalysisStore();
       // 規則Uで判定不能(placePayout取込なし)の複勝行と、未知券種の行を同居させる。
       store.saveAnalysis({
@@ -2557,11 +2727,15 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       store.saveResult("PB_UNKNOWN_4", [{ umaban: 1, finishPosition: 1 }]);
 
       const report = computeVerifyReport(store);
-      const { place, win, wide, trio, overall, unknownBetType } = report.proposedBet;
+      const { place, win, wide, trio, quinella, overall, unknownBetType } = report.proposedBet;
       // 前提固定(空振り防止): 規則Uが実際に発火していること(unjudgedCountが0ではない)。
       expect(place.unjudgedCount).toBe(1);
       expect(overall.unjudgedCount).toBe(
-        place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+        place.unjudgedCount +
+          win.unjudgedCount +
+          wide.unjudgedCount +
+          trio.unjudgedCount +
+          quinella.unjudgedCount,
       );
       // 未知券種行は規則Uのunjudgedにも一切混ざらず、独立して計上されていること。
       expect(unknownBetType).toEqual({ count: 1, totalStake: 500, betTypes: ["xyz"] });
@@ -2578,7 +2752,10 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
           meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
           bets: [
             { betType: "xyz", comboKey: "01", stake: 100, odds: 3, ev: 1.5 },
-            { betType: "quinella", comboKey: "0102", stake: 200, odds: 3, ev: 1.5 },
+            // "xyz2"は架空の券種コード(Issue #114で"quinella"が既知券種になったため、
+            // 従来ここで使っていた"quinella"を"xyz"と衝突しない別の架空コードへ差し替えた。
+            // #100で"win"を既知化した際に"xyz"へ差し替えた前例と同型)。
+            { betType: "xyz2", comboKey: "0102", stake: 200, odds: 3, ev: 1.5 },
             { betType: "xyz", comboKey: "02", stake: 300, odds: 3, ev: 1.5 }, // xyzの重複。
           ],
         },
@@ -2593,7 +2770,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(report.proposedBet.unknownBetType).toEqual({
         count: 3,
         totalStake: 600,
-        betTypes: ["quinella", "xyz"], // 重複なし(xyzは1つだけ)。
+        betTypes: ["xyz", "xyz2"], // 重複なし(xyzは1つだけ)。
       });
       store.close();
     });

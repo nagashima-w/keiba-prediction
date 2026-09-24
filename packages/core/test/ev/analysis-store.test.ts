@@ -1600,9 +1600,16 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
    *
    * AC-6(★地雷の確認): `COMBO_SIZE`に`quinella`が追加されたことで`COMBO_BET_TYPES`
    * (`Object.keys(COMBO_SIZE)`由来の払戻保存ループ)が馬連も回すようになるが、
-   * `comboPayouts`に`quinella`を渡さない限りDBには一切書かれないことを固定する
-   * (`result-import.ts`は引き続き`{wide, trio}`のみを渡す。production構成そのままの
-   * 呼び出し形を再現する)。
+   * `comboPayouts`に`quinella`キー自体が無ければDBには一切書かれないことを固定する
+   * (このテストは`saveResult`を直接呼び、`quinella`キーを省略した`{wide, trio}`だけを
+   * 渡すことでその状況を再現する)。
+   *
+   * ★`result-import.ts`は引き続き`{wide, trio}`のみを渡す、という記述は本テスト追加時点
+   * (#113)では真だったが、**Issue #114・#24-F1で`quinella: result.quinellaPayouts`が
+   * 追加され、現在のproductionはこの3つを渡す**(`result-import.test.ts`「組合せ払戻
+   * (馬連、Issue #114・#24-F1)の素通し」describe参照)。このテスト自体は
+   * `saveResult`の`COMBO_BET_TYPES`ループが`quinella`キー省略時にどう振る舞うかを見る
+   * 単体テストであり、production呼び出し形の変化とは独立に成立し続ける。
    */
   describe("馬連の払戻(Issue #113・#24-D2)", () => {
     it("馬連を明示的に渡すと保存・復元できること(型追加が正しく機能することの確認。ワイドと同じ順不同キー)", () => {
@@ -1617,7 +1624,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
-    it("AC-6: comboPayoutsが{wide, trio}のみ(result-import.tsの実際の呼び出し形)の場合、馬連はCOMBO_BET_TYPESに含まれてもnot_importedのままであること(馬連の払戻行は書かれない)", () => {
+    it("AC-6: comboPayoutsに{wide, trio}のみを渡し馬連(quinella)キーを省略した場合、馬連はCOMBO_BET_TYPESに含まれてもnot_importedのままであること(馬連の払戻行は書かれない。Issue #114以降のresult-import.tsは実際にはquinellaも渡すが、そのこととは独立に成立する単体テスト)", () => {
       const store = new AnalysisStore();
       store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
         wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 120 }] },

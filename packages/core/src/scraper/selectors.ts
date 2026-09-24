@@ -185,6 +185,13 @@ export const RACE_RESULT_SELECTORS = {
   /** 三連複の払戻行(Issue #52)。wideRow と同じ理由で行セレクタを直指定する。 */
   trioRow: "tr.Fuku3",
   /**
+   * 馬連の払戻行(Issue #114・#24-F1)。wideRow と同じ理由で行セレクタを直指定する。
+   * 単勝・複勝と同じ1つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html`・`fixtures/nar_result_202654071210.html`。
+   * `class="Umaren"`は文書中に1回だけしか出現しない)。
+   */
+  quinellaRow: "tr.Umaren",
+  /**
    * ワイド・三連複の払戻行内で1組を表す `<ul>`(Issue #52)。組内の的中馬番は
    * 各 `<li>` のテキスト(空の `<li></li>` は区切り用でワイドの末尾に付く)。
    */

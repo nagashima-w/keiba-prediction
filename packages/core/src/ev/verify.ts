@@ -388,19 +388,26 @@ export interface ProposedBetUnknownBetType {
  * 賭け金とする(Q-C)。既存 `VerifyReport.bet`(複勝・一律stakePerBet円、Q-B)とは仮定が異なるため、
  * 両者を合算した値はどこにも作らない(AC-B5)。
  *
- * `overall` は place/win/wide/trio の4券種の合算(winはIssue #100・#23-Cで追加)——**これは
- * AC-B5が禁じる「賭け金の仮定が違う2つの合算」には当たらない**。4券種はいずれも同一の仮定
- * (分析時点で実際に提案した配分額)を共有しており、ケリー配分はそもそも複数券種にまたがる
- * ポートフォリオとして計算されているため、券種を横断した合計はその仮定の中で意味を持つ
- * (AC-B5がこの合算を明示的に許容している判断理由をここに残す)。
+ * `overall` は place/win/wide/trio/quinella の5券種の合算(winはIssue #100・#23-Cで追加、
+ * 馬連〈quinella〉はIssue #114・#24-F1で追加)——**これは AC-B5が禁じる「賭け金の仮定が違う
+ * 2つの合算」には当たらない**。5券種はいずれも同一の仮定(分析時点で実際に提案した配分額)を
+ * 共有しており、ケリー配分はそもそも複数券種にまたがるポートフォリオとして計算されているため、
+ * 券種を横断した合計はその仮定の中で意味を持つ(AC-B5がこの合算を明示的に許容している判断理由を
+ * ここに残す)。
  * `overall`という名前は「total」「all」の使用を禁じたAC-B5に抵触しない——あの禁止は「どちらの
  * 賭け金仮定を指すか名前から分からない語」を避けるためのもので、`ProposedBetReport` の内側では
  * 仮定は既に確定している。
+ *
+ * ★馬連(quinella)は#24-D3(配分提案への組み込み)までapp側が候補を作らないため`quinella`の
+ * `betCount`は常に0だが、値自体はこの内側に保持し**画面(`VerifyView.tsx`)には表示しない**
+ * (#112「馬連 ¥0 0点」の事故と同型を避けるため。Issue #114 AC-6)。
  */
 export interface ProposedBetReport {
   /** 母集団4分類の件数。 */
   readonly population: ProposedBetPopulation;
-  /** 複勝・単勝・ワイド・3連複の合算(同一の賭け金仮定を共有するポートフォリオとしての合計)。 */
+  /**
+   * 複勝・単勝・ワイド・3連複・馬連の合算(同一の賭け金仮定を共有するポートフォリオとしての合計)。
+   */
   readonly overall: ProposedBetTypeSummary;
   /** 複勝の内訳。 */
   readonly place: ProposedBetTypeSummary;
@@ -411,13 +418,19 @@ export interface ProposedBetReport {
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummary;
   /**
-   * 保存されている券種コードが place/win/wide/trio のいずれでもなかった買い目行(Issue #76)。
-   * `overall` には合算しない(`ProposedBetUnknownBetType` のJSDoc参照)。未知券種行が
-   * 1件も無い通常時は `{ count: 0, totalStake: 0, betTypes: [] }`。このフィールド自体が
-   * 省略されることはない(#71で`unjudgedCount`が core→shared View 型までは配線されながら
-   * `VerifyView.tsx` に一度も表示されず差し戻しになった前例〈型の配線は`af75683`、表示の追加は
-   * 後続の`ab4f448`〉があるため。「型まで配線すれば十分」ではなく、値自体を常在させたうえで
-   * 表示配線まで本Issue内で完結させる設計にする。boss メタレビューR4対応)。
+   * 馬連の内訳(Issue #114・#24-F1)。#24-D3まで買い目が構造的に0件のため、画面には出さない
+   * (このJSDoc冒頭の注意参照)。
+   */
+  readonly quinella: ProposedBetTypeSummary;
+  /**
+   * 保存されている券種コードが place/win/wide/trio/quinella のいずれでもなかった買い目行
+   * (Issue #76。馬連はIssue #114・#24-F1で既知化)。`overall` には合算しない
+   * (`ProposedBetUnknownBetType` のJSDoc参照)。未知券種行が1件も無い通常時は
+   * `{ count: 0, totalStake: 0, betTypes: [] }`。このフィールド自体が省略されることはない
+   * (#71で`unjudgedCount`が core→shared View 型までは配線されながら`VerifyView.tsx`に
+   * 一度も表示されず差し戻しになった前例〈型の配線は`af75683`、表示の追加は後続の`ab4f448`〉が
+   * あるため。「型まで配線すれば十分」ではなく、値自体を常在させたうえで表示配線まで本Issue内で
+   * 完結させる設計にする。boss メタレビューR4対応)。
    */
   readonly unknownBetType: ProposedBetUnknownBetType;
 }
@@ -1204,21 +1217,33 @@ function finalizeProposedBetSummary(acc: ProposedBetAccumulator): ProposedBetTyp
 }
 
 /**
- * 4券種の可変カウンタを合算した確定値を作る(overall。JSDoc「ProposedBetReport」参照)。
- * Issue #100・#23-Cで単勝(win)を追加。
+ * 5券種の可変カウンタを合算した確定値を作る(overall。JSDoc「ProposedBetReport」参照)。
+ * Issue #100・#23-Cで単勝(win)を追加。Issue #114・#24-F1で馬連(quinella)を追加。
  */
 function finalizeProposedBetOverall(
   place: ProposedBetAccumulator,
   win: ProposedBetAccumulator,
   wide: ProposedBetAccumulator,
   trio: ProposedBetAccumulator,
+  quinella: ProposedBetAccumulator,
 ): ProposedBetTypeSummary {
   return finalizeProposedBetSummary({
-    betCount: place.betCount + win.betCount + wide.betCount + trio.betCount,
-    totalStake: place.totalStake + win.totalStake + wide.totalStake + trio.totalStake,
-    totalReturn: place.totalReturn + win.totalReturn + wide.totalReturn + trio.totalReturn,
+    betCount:
+      place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+    totalStake:
+      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
+    totalReturn:
+      place.totalReturn +
+      win.totalReturn +
+      wide.totalReturn +
+      trio.totalReturn +
+      quinella.totalReturn,
     unjudgedCount:
-      place.unjudgedCount + win.unjudgedCount + wide.unjudgedCount + trio.unjudgedCount,
+      place.unjudgedCount +
+      win.unjudgedCount +
+      wide.unjudgedCount +
+      trio.unjudgedCount +
+      quinella.unjudgedCount,
   });
 }
 
@@ -1269,6 +1294,7 @@ function computeProposedBetReport(
   const win = emptyProposedBetAccumulator();
   const wide = emptyProposedBetAccumulator();
   const trio = emptyProposedBetAccumulator();
+  const quinella = emptyProposedBetAccumulator();
   const unknown = emptyUnknownBetTypeAccumulator();
 
   // レース×券種ごとにgetComboPayoutsの呼び出しを1回に抑えるキャッシュ(同一レース内に
@@ -1334,12 +1360,14 @@ function computeProposedBetReport(
         bet.betType !== "place" &&
         bet.betType !== "win" &&
         bet.betType !== "wide" &&
-        bet.betType !== "trio"
+        bet.betType !== "trio" &&
+        bet.betType !== "quinella"
       ) {
-        // Issue #76: #59の保存経路はplace/win/wide/trioのみを書く契約のため通常到達しないが、
-        // 到達した場合に無言でcontinueして投資額を静かに過小計上する(=回収率が偽って
-        // 良く見える)欠陥があった。規則Uとは原因が異なるためunjudgedCountには混ぜず、
-        // 専用の内訳(unknownBetType)へ計上する(ProposedBetUnknownBetTypeのJSDoc参照)。
+        // Issue #76: #59の保存経路はplace/win/wide/trio/quinella(馬連はIssue #114・#24-F1で
+        // 追加)のみを書く契約のため通常到達しないが、到達した場合に無言でcontinueして
+        // 投資額を静かに過小計上する(=回収率が偽って良く見える)欠陥があった。規則Uとは
+        // 原因が異なるためunjudgedCountには混ぜず、専用の内訳(unknownBetType)へ計上する
+        // (ProposedBetUnknownBetTypeのJSDoc参照)。
         unknown.count += 1;
         unknown.totalStake += bet.stake;
         unknown.betTypes.add(bet.betType);
@@ -1352,7 +1380,9 @@ function computeProposedBetReport(
             ? win
             : bet.betType === "wide"
               ? wide
-              : trio;
+              : bet.betType === "trio"
+                ? trio
+                : quinella;
 
       if (bet.betType === "place") {
         if (!racePayoutAvailable) {
@@ -1384,7 +1414,7 @@ function computeProposedBetReport(
         continue;
       }
 
-      // ワイド・3連複。
+      // ワイド・3連複・馬連(Issue #114・#24-F1で馬連を追加。3者とも同じ組合せ判定)。
       const comboResult = comboPayoutsOf(analysis.raceId, bet.betType);
       if (comboResult.state === "not_imported") {
         accumulator.unjudgedCount += 1;
@@ -1405,11 +1435,12 @@ function computeProposedBetReport(
 
   return {
     population: { allocated, skipped, unreached, noRecord },
-    overall: finalizeProposedBetOverall(place, win, wide, trio),
+    overall: finalizeProposedBetOverall(place, win, wide, trio, quinella),
     place: finalizeProposedBetSummary(place),
     win: finalizeProposedBetSummary(win),
     wide: finalizeProposedBetSummary(wide),
     trio: finalizeProposedBetSummary(trio),
+    quinella: finalizeProposedBetSummary(quinella),
     unknownBetType: finalizeUnknownBetType(unknown),
   };
 }

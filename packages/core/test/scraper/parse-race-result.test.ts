@@ -961,3 +961,49 @@ describe("組合せ払戻(ワイド・三連複、Issue #52)", () => {
     });
   });
 });
+
+/**
+ * 組合せ払戻(馬連、Issue #114・#24-F1)。
+ *
+ * AC-1: 実データ(中央・地方それぞれ1レース)の馬連の確定払戻をリテラルで固定する。
+ * 馬連はワイド・三連複と異なり、単勝・複勝と同じ1つ目の払戻テーブル
+ * (`tr.Umaren`)に入る(`SEL.quinellaRow`のJSDoc参照)。
+ *
+ * 実測値(オーケストレーターが払戻テーブルのテキストを確認済み。着手前ゲートコメント参照):
+ * - 中央 `fixtures/result_202603020211.html`: 馬連 8-13 = 4,550円・19人気
+ * - 地方 `fixtures/nar_result_202654071210.html`: 馬連 5-7 = 5,230円・25人気
+ */
+describe("組合せ払戻(馬連、Issue #114・#24-F1)", () => {
+  it("中央(fixtures/result_202603020211.html)の馬連8-13=4,550円をパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("result_202603020211.html"));
+    // 前提固定(空振り防止): 払戻テーブル自体は取れていること。
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.quinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [8, 13], payout: 4550 }],
+    });
+  });
+
+  it("地方(fixtures/nar_result_202654071210.html)の馬連5-7=5,230円をパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("nar_result_202654071210.html"));
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.quinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [5, 7], payout: 5230 }],
+    });
+  });
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、widePayouts/trioPayoutsと同じくstate:undeterminedになること(payoutTableAbsent。ワイド・三連複と同じ非対称)", () => {
+    // 既存ヘルパー(buildHtmlWithWideRowと兄弟)が無いため、払戻テーブルを含まない
+    // 最小HTMLを直接組み立てる(courseType系テストと同じ流儀)。
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+    if (result.quinellaPayouts!.state === "undetermined") {
+      expect(result.quinellaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    // 巻き添え無し(widePayouts/trioPayoutsも同じ理由で同じくundeterminedであること)。
+    expect(result.widePayouts!.state).toBe("undetermined");
+    expect(result.trioPayouts!.state).toBe("undetermined");
+  });
+});

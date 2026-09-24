@@ -322,6 +322,73 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
     });
   });
 
+  describe("組合せ払戻(馬連、Issue #114・#24-F1)の素通し(#52のR-7・R-10をquinellaにも適用)", () => {
+    it("パース結果のquinellaPayoutsを、wide/trioと同時にsaveResultの第4引数へそのまま(判断を挟まず)渡すこと(AC-2)", async () => {
+      const saveResult = vi.fn();
+      const wide: RaceResult["widePayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [2, 4], payout: 190 }],
+      };
+      const trio: RaceResult["trioPayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 4], payout: 2210 }],
+      };
+      const quinella: RaceResult["quinellaPayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [8, 13], payout: 4550 }],
+      };
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () =>
+          buildRaceResult({ widePayouts: wide, trioPayouts: trio, quinellaPayouts: quinella }),
+        saveResult,
+      });
+      expect(saveResult).toHaveBeenCalledTimes(1);
+      const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+      expect(comboPayouts).toEqual({ wide, trio, quinella });
+    });
+
+    it("馬連がstate:'undetermined'(構造異常)のときも、判断を挟まずそのままsaveResultの第4引数へ渡り、着順・複勝は通常どおり保存されること", async () => {
+      const saveResult = vi.fn();
+      const undeterminedQuinella: RaceResult["quinellaPayouts"] = {
+        state: "undetermined",
+        reason: {
+          kind: "payoutTableAbsent",
+          message: "テスト用",
+          observedGroupCount: null,
+          observedPayoutCount: null,
+          rawHtml: null,
+        },
+      };
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () => buildRaceResult({ quinellaPayouts: undeterminedQuinella }),
+        saveResult,
+      });
+      expect(saveResult).toHaveBeenCalledTimes(1);
+      const [savedRaceId, entries, , comboPayouts] = saveResult.mock.calls[0]!;
+      // 巻き添え無し: 着順(→entries)は通常どおり保存される。
+      expect(savedRaceId).toBe(raceId);
+      expect(entries).toEqual(toResultEntries(buildRaceResult()));
+      expect(comboPayouts).toEqual({
+        wide: undefined,
+        trio: undefined,
+        quinella: undeterminedQuinella,
+      });
+    });
+
+    it("パース結果にquinellaPayoutsが無い(未設定)場合は、saveResultの第4引数もundefinedのままになること", async () => {
+      const saveResult = vi.fn();
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () => buildRaceResult(), // quinellaPayouts省略
+        saveResult,
+      });
+      const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+      expect(comboPayouts).toEqual({ wide: undefined, trio: undefined, quinella: undefined });
+    });
+  });
+
   it("結果テーブル欠落(構造異常のパース失敗)時は保存せずエラーを伝播する(DBを汚さない)", async () => {
     const saveResult = vi.fn();
     await expect(

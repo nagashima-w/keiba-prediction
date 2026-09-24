@@ -40,6 +40,7 @@ const sampleReport: VerifyReportView = {
     win: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     wide: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     trio: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    quinella: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     unknownBetType: { count: 0, totalStake: 0, betTypes: [] },
   },
 };

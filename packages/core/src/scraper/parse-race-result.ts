@@ -568,6 +568,13 @@ export function parseRaceResult(html: string): RaceResult {
       "三連複",
       payoutTablePresent,
     ),
+    quinellaPayouts: parseComboPayoutRow(
+      $,
+      SEL.quinellaRow,
+      "quinella",
+      "馬連",
+      payoutTablePresent,
+    ),
     courseType: parseCourseType($),
   };
 }

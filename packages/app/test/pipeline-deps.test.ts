@@ -341,6 +341,9 @@ describe("createPipelineDeps(本番依存の配線)", () => {
       expect(comboPayouts).toEqual({
         wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 100 }] },
         trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 500 }] },
+        // 馬連(Issue #114・#24-F1): この合成HTMLにはtr.Umaren行が無いため「発売なし」の
+        // 空配列(payoutTableAbsentではない。payoutTablePresent=trueかつ行が0件のケース)。
+        quinella: { state: "parsed", payouts: [] },
       });
     });
   });

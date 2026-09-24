@@ -409,6 +409,12 @@ export interface RaceResult {
   readonly widePayouts?: RaceComboPayoutResult;
   /** 三連複の確定払戻(Issue #52)。`widePayouts` と同じ契約・同じ非対称。 */
   readonly trioPayouts?: RaceComboPayoutResult;
+  /**
+   * 馬連の確定払戻(Issue #114・#24-F1)。`widePayouts` と同じ契約・同じ非対称
+   * (払戻テーブル自体が無い場合は `state:"undetermined"` になり、空配列にはならない)。
+   * 単勝・複勝と同じ1つ目の払戻テーブル内の行(`tr.Umaren`)から読む。
+   */
+  readonly quinellaPayouts?: RaceComboPayoutResult;
 }
 
 /** 単勝オッズ(1頭分)。未確定・非数値は null。 */

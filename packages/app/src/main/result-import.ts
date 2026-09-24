@@ -134,12 +134,14 @@ export async function importRaceResult(
     // 構造異常等はそのまま伝播 → 以降の保存に到達しない。
     throw e;
   }
-  // boss裁定R-7: result.widePayouts/result.trioPayouts(parseRaceResultが返す判別共用体)を
-  // そのまま第4引数へ渡すだけで、ここでは一切の判断(undeterminedを[]に変換する・
-  // 握りつぶす等)をしない。判断の余地を無くすことがR-7の要点。
+  // boss裁定R-7: result.widePayouts/result.trioPayouts/result.quinellaPayouts(いずれも
+  // parseRaceResultが返す判別共用体)をそのまま第4引数へ渡すだけで、ここでは一切の判断
+  // (undeterminedを[]に変換する・握りつぶす等)をしない。判断の余地を無くすことがR-7の要点
+  // (馬連はIssue #114・#24-F1でwide/trioと同型のまま追加)。
   deps.saveResult(raceId, toResultEntries(result), result.courseType, {
     wide: result.widePayouts,
     trio: result.trioPayouts,
+    quinella: result.quinellaPayouts,
   });
   return summarizeImport(raceId, result);
 }
