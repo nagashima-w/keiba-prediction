@@ -6,7 +6,9 @@ import {
 } from "../src/renderer/mixed-allocation-cache.js";
 import {
   createAllocationQueueRunner,
+  createAllocationScheduler,
   type AllocationOutcome,
+  type AllocationSchedulable,
 } from "../src/renderer/mixed-allocation-queue.js";
 
 // mixed-allocation-cache.test.tsのkey()と同じ流儀(既定は互いに異なる値を持つ1つの安定した
@@ -225,5 +227,206 @@ describe("createAllocationQueueRunner(配分計算を1レースずつ進める�
       const directResult = `computed(bankroll=200000,race-2)`;
       expect(runner.peek("race-2")).toEqual({ status: "ok", value: directResult });
     });
+  });
+});
+
+// ============================================================================
+// Issue #110差し戻し(メタレビュー): 「計算ループが止まったまま再開しない」経路
+//
+// 旧実装(BatchAnalysisView.tsx側の`useEffect(..., [hasPendingAllocation])`)は、
+// 「未計算0件→1件以上」という**真偽値の遷移**でしか再起動しなかった。しかしReactの
+// バッチ処理により、ループが最後の1件を計算して止まった直後に別の更新(設定変更等)が
+// 同じコミットへまとめられると、`hasPendingAllocation`は`true→(falseを経由せず)→true`と
+// なり、依存配列の変化が起きないため**effectが再実行されず、ループが再開しない**
+// (詳細はIssue #110のメタレビュー差し戻しコメント参照)。
+//
+// 対策として、判断ロジックを`sync()`(冪等: タイマーが張られているか・未計算があるかの
+// 「今の状態」だけを見る。過去の真偽値を記憶しない)という純粋なオブジェクトへ切り出す。
+// ============================================================================
+
+/** テスト用のダミーrunner(pendingRaceIdsを外から差し替えられる)。 */
+function createFakeRunner(initialPending: readonly string[]): AllocationSchedulable & {
+  readonly step: ReturnType<typeof vi.fn>;
+  setPending(ids: readonly string[]): void;
+} {
+  let current = [...initialPending];
+  const step = vi.fn(() => {
+    // 実際のAllocationQueueRunner.step()と同じく、先頭の1件を消費する形を模す。
+    current = current.slice(1);
+  });
+  return {
+    pendingRaceIds: () => current,
+    step,
+    setPending(ids) {
+      current = [...ids];
+    },
+  };
+}
+
+/**
+ * テスト用の偽スケジューラ(setTimeout相当)。`schedule`が返すidに対応するコールバックを
+ * `fire(id)`で手動発火できる(「テストでは手でステップを進める」という本タスクの
+ * テスト方針に倣う)。`cancel`は呼び出し記録のみで実際にはコールバックを消さない
+ * (dispose後に「万一発火してしまった」場合の二重防御をテストするため)。
+ */
+function createFakeTimerSource() {
+  let nextId = 1;
+  const callbacksById = new Map<number, () => void>();
+  const schedule = vi.fn((callback: () => void) => {
+    const id = nextId;
+    nextId += 1;
+    callbacksById.set(id, callback);
+    return id;
+  });
+  const cancel = vi.fn((_id: number) => {
+    // 記録のみ(意図的にcallbacksByIdからは消さない。上記コメント参照)。
+  });
+  return {
+    schedule,
+    cancel,
+    fire(id: number) {
+      const callback = callbacksById.get(id);
+      if (callback === undefined) {
+        throw new Error(`id ${id} はscheduleされていません`);
+      }
+      callback();
+    },
+  };
+}
+
+describe("createAllocationScheduler(計算ループの再開判断を切り出した純粋なオブジェクト。AC-9)", () => {
+  it("sync(): 未計算があり、タイマーが張られていなければ1つ張ること", () => {
+    const runner = createFakeRunner(["race-1"]);
+    const timers = createFakeTimerSource();
+    const scheduler = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped: vi.fn(),
+    });
+    scheduler.sync();
+    expect(timers.schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("未計算が無ければ何も張らないこと", () => {
+    const runner = createFakeRunner([]);
+    const timers = createFakeTimerSource();
+    const scheduler = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped: vi.fn(),
+    });
+    scheduler.sync();
+    expect(timers.schedule).not.toHaveBeenCalled();
+  });
+
+  it("AC-9(飢餓防止): タイマーが既に張られている状態でsync()を何回呼んでも、張られるタイマーは1つだけであること", () => {
+    const runner = createFakeRunner(["race-1", "race-2"]);
+    const timers = createFakeTimerSource();
+    const scheduler = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped: vi.fn(),
+    });
+    scheduler.sync();
+    scheduler.sync();
+    scheduler.sync();
+    // 前提固定: この時点でまだ発火していないので未計算は変わらず残っていること
+    // (「たまたま1回で終わって0件になった」ことによる空振りではないことの確認)。
+    expect(runner.pendingRaceIds()).toEqual(["race-1", "race-2"]);
+    expect(timers.schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("タイマー発火でrunner.step()とonStepped()が呼ばれ、タイマーが「無い」状態に戻ること", () => {
+    const runner = createFakeRunner(["race-1"]);
+    const timers = createFakeTimerSource();
+    const onStepped = vi.fn();
+    const scheduler = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped,
+    });
+    scheduler.sync();
+    timers.fire(1);
+    expect(runner.step).toHaveBeenCalledTimes(1);
+    expect(onStepped).toHaveBeenCalledTimes(1);
+    // 前提固定: 発火によりrace-1が消費され、未計算が0件になっていること。
+    expect(runner.pendingRaceIds()).toEqual([]);
+    // 未計算が無いので、続けてsync()しても新たなタイマーは張らない。
+    scheduler.sync();
+    expect(timers.schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC-9(最重要・コードレビュー指摘の再現): 最後の1件を計算してタイマーが無くなった直後に、sync()を挟まずに入力が変わって未計算が生じても、次のsync()でタイマーが張られ計算が再開すること", () => {
+    const runner = createFakeRunner(["race-1"]);
+    const timers = createFakeTimerSource();
+    const onStepped = vi.fn();
+    const scheduler = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped,
+    });
+    scheduler.sync();
+    timers.fire(1); // race-1を計算。タイマーは「無い」状態に戻る。
+    expect(runner.step).toHaveBeenCalledTimes(1);
+    expect(runner.pendingRaceIds()).toEqual([]);
+
+    // ★ここが本質: 「未計算0件」の状態でsync()を一度も呼ばずに、いきなり設定変更相当で
+    // 新たな未計算が生じる(Reactのバッチ処理により中間の「0件」コミットが観測されない
+    // シナリオを模す。メタレビュー差し戻しコメントの手順4〜8参照)。
+    runner.setPending(["race-2"]);
+
+    scheduler.sync();
+    // 殺すべき変異: sync()を「前回呼んだ時からpendingが0件→1件以上に変わったときだけ張る」
+    // (=真偽値の遷移だけを見る)実装にすると、内部の「前回はpendingありだった」という
+    // 記憶のせいでここが再スケジュールされず、この expect が赤になる。
+    expect(timers.schedule).toHaveBeenCalledTimes(2);
+
+    timers.fire(2);
+    expect(runner.step).toHaveBeenCalledTimes(2);
+    expect(onStepped).toHaveBeenCalledTimes(2);
+  });
+
+  it("dispose(): 張られていたタイマーをcancelし、以降sync()しても新たに張らないこと", () => {
+    const runner = createFakeRunner(["race-1"]);
+    const timers = createFakeTimerSource();
+    const scheduler = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped: vi.fn(),
+    });
+    scheduler.sync();
+    scheduler.dispose();
+    expect(timers.cancel).toHaveBeenCalledTimes(1);
+
+    // 前提固定: disposeの時点ではまだrace-1が未消費(=本来ならsyncで再度張られてしまう
+    // はずの状況)であること。
+    expect(runner.pendingRaceIds()).toEqual(["race-1"]);
+    scheduler.sync();
+    expect(timers.schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispose()後にタイマーが発火しても計算しないこと(cancelが間に合わなかった場合の二重防御)", () => {
+    const runner = createFakeRunner(["race-1"]);
+    const timers = createFakeTimerSource();
+    const onStepped = vi.fn();
+    const scheduler = createAllocationScheduler({
+      runner,
+      schedule: timers.schedule,
+      cancel: timers.cancel,
+      onStepped,
+    });
+    scheduler.sync();
+    scheduler.dispose();
+    // cancelが実際にはタイマーを止められなかった状況を模し、直接コールバックを発火させる
+    // (createFakeTimerSourceのcancelは記録のみでコールバックを消さない設計)。
+    timers.fire(1);
+    expect(runner.step).not.toHaveBeenCalled();
+    expect(onStepped).not.toHaveBeenCalled();
   });
 });

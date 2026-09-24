@@ -1707,7 +1707,9 @@ describe("allocationProgressText — 配分計算の進捗文言(AC-1)", () => {
 });
 
 describe("ALLOCATION_COMPUTE_ERROR_NOTE — 1レースの配分計算が失敗したときの一言(AC-7')", () => {
-  it("空文字列ではないこと(自己テスト・退化防止)", () => {
-    expect(ALLOCATION_COMPUTE_ERROR_NOTE.length).toBeGreaterThan(0);
+  it("文言の中身をリテラルで固定すること(allocationProgressTextと同じ厳しさ。中身をすり替える変異を検知するため)", () => {
+    expect(ALLOCATION_COMPUTE_ERROR_NOTE).toBe(
+      "このレースの配分計算でエラーが発生しました。設定を変更するか、再分析すると再計算されます。",
+    );
   });
 });

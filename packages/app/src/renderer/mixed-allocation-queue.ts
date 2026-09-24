@@ -45,6 +45,32 @@
  * 現時点であるかは調査していない。既存の`resolvePlaceOnlyStake`のtry/catchと同じ
  * 「防御的な二重化」として置く(本リポジトリにReact error boundaryが1つも無いため。
  * `mixed-allocation-view.ts`の`resolvePlaceOnlyStake`のJSDoc参照)。
+ *
+ * ## 設計上の危険その3(AC-9・Issue #110メタレビュー差し戻し): 「ループが止まったまま再開しない」
+ *
+ * 当初の実装は、Reactの`useEffect(..., [hasPendingAllocation])`(未計算が1件以上あるかの
+ * **真偽値**を依存配列にする)で「1ステップ進めては次のタイマーを張る」ループを駆動していた。
+ * しかしcode-reviewerがReact 18本体のソース(`ensureRootIsScheduled`)を根拠に指摘した
+ * とおり、**「既に予約済みの描画タスクがあると、同じ優先度の別の更新はその描画にまとめられる」**
+ * ため、次の手順で**ループが止まったまま二度と再開しない**経路が実在する:
+ *
+ * 1. ループが最後の1件を計算し終え、未計算が0件になってタイマーが張られなくなる
+ * 2. その直後(次のコミットが実際に走る前)に設定変更等で未計算が再び生じる
+ * 3. Reactのバッチ処理により、「未計算0件」を経由するコミットが実際には発生せず、
+ *    依存配列`[hasPendingAllocation]`の値は`true`(直前)→`true`(直後)のまま変化しない
+ * 4. 依存配列が変化しないため`useEffect`は再実行されず、新しいタイマーが張られない
+ * 5. → 利用者には「配分を計算中…」と出続けるが実際には何も計算されない状態が固定化する
+ *    (別のタブへ行って戻り、コンポーネントが再マウントされるまで直らない)
+ *
+ * **対策**: 再開の判断を「直前の状態からの遷移」ではなく、**呼ばれるたびに「今、タイマーが
+ * 張られているか」「今、未計算があるか」だけを見る冪等な判定**に変える
+ * (`createAllocationScheduler`の`sync()`)。過去の真偽値を一切記憶しないため、
+ * 「0件を経由しないバッチ処理」が起きても、`sync()`が**呼ばれた時点の実際の状態**を見て
+ * 正しく再スケジュールする。呼び出し側(`BatchAnalysisView.tsx`)は依存配列の無い
+ * `useEffect(() => { scheduler.sync(); })`(コミットのたびに必ず呼ぶ。cleanupは持たない)
+ * にする。`sync()`自体が「既に張られていれば何もしない」ため、無関係な再描画のたびに
+ * 呼んでもタイマーを張り直し続けて発火しない「飢餓」は起きない(`mixed-allocation-queue.test.ts`
+ * 「createAllocationScheduler」のテーブル駆動テスト参照)。
  */
 
 import type { MixedAllocationCache, MixedAllocationCacheKey } from "./mixed-allocation-cache.js";
@@ -149,6 +175,90 @@ export function createAllocationQueueRunner<T>(
       // 成功・失敗いずれも同じ書き込み経路(get)を使う(AC-7'。失敗を記録しないと、
       // 次のpendingRaceIds()でまた「未計算」に見えてしまい無限ループになる)。
       cache.get(raceKey, () => outcome);
+    },
+  };
+}
+
+/**
+ * `createAllocationScheduler`が操作する対象の最小限の形。`AllocationQueueRunner<T>`は
+ * どんな`T`でもこの形を満たす(`pendingRaceIds`・`step`のどちらのシグネチャも`T`を
+ * 参照しないため)。スケジューラ自体は値の型を一切知らなくてよい。
+ */
+export interface AllocationSchedulable {
+  pendingRaceIds(): readonly string[];
+  step(): void;
+}
+
+/** `createAllocationScheduler`が受け取る依存(タイマー等はReact側から注入する)。 */
+export interface AllocationSchedulerDeps {
+  readonly runner: AllocationSchedulable;
+  /**
+   * 「後で1回呼んでほしい」処理を予約し、識別できるハンドルを返す。
+   * 呼び出し側(`BatchAnalysisView.tsx`)は`(cb) => window.setTimeout(cb, 0)`を渡す想定。
+   */
+  readonly schedule: (callback: () => void) => number;
+  /** `schedule`が返したハンドルを取り消す(`window.clearTimeout`相当)。 */
+  readonly cancel: (handle: number) => void;
+  /**
+   * 1レース計算した直後に呼ぶ(再描画の要求。呼び出し側がReactのstateを更新する想定)。
+   * この呼び出しの結果として新しいコミットが起き、その後の`sync()`呼び出しで続きが
+   * 判断される(スケジューラ自身は再帰しない。上記モジュールJSDoc「設計上の危険その3」参照)。
+   */
+  readonly onStepped: () => void;
+}
+
+/**
+ * 計算ループを1ステップずつ進めるための「再開してよいか」の判断だけを持つ、
+ * Reactに依存しない純粋なオブジェクト(AC-9・Issue #110メタレビュー差し戻し)。
+ */
+export interface AllocationScheduler {
+  /**
+   * 描画のたびに(依存配列を付けず、コミットのたびに)呼ぶ。**呼ばれた時点の実際の状態
+   * だけを見る**(タイマーが既に張られているか・未計算があるか)。過去にどんな真偽値を
+   * 見たかは一切記憶しない。既に張られていれば何もしない(冪等。飢餓の防止)。
+   */
+  sync(): void;
+  /** アンマウント時に呼ぶ。張られているタイマーがあれば取り消す。 */
+  dispose(): void;
+}
+
+export function createAllocationScheduler(deps: AllocationSchedulerDeps): AllocationScheduler {
+  let timerHandle: number | null = null;
+  let disposed = false;
+
+  const fire = (): void => {
+    // 発火した時点で「タイマーが無い」状態に戻す(次のsync()が正しく再スケジュールできるように、
+    // runner.step()より前に必ず行う)。
+    timerHandle = null;
+    if (disposed) {
+      // disposeより後にどうしても発火してしまった場合の二重防御(cancelを呼んでいても、
+      // 実行環境によっては間に合わないことがありうる想定。上記モジュールJSDoc参照)。
+      return;
+    }
+    deps.runner.step();
+    deps.onStepped();
+  };
+
+  return {
+    sync() {
+      if (disposed) {
+        return;
+      }
+      if (timerHandle !== null) {
+        // 既に張られている(冪等。無関係な再描画のたびに呼んでも張り直さない)。
+        return;
+      }
+      if (deps.runner.pendingRaceIds().length === 0) {
+        return;
+      }
+      timerHandle = deps.schedule(fire);
+    },
+    dispose() {
+      disposed = true;
+      if (timerHandle !== null) {
+        deps.cancel(timerHandle);
+        timerHandle = null;
+      }
     },
   };
 }

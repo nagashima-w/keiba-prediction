@@ -17,6 +17,7 @@ import {
 } from "./bet-allocation-view.js";
 import {
   createAllocationQueueRunner,
+  createAllocationScheduler,
   type AllocationOutcome,
 } from "./mixed-allocation-queue.js";
 import {
@@ -667,43 +668,42 @@ export function BatchAnalysisView(
   const hasPendingAllocation = pendingAllocationRaceIds.length > 0;
 
   // 1ステップ=1レースで計算を進め、レースとレースの間に描画の機会を作る(AC-2)。
-  // 依存配列は`hasPendingAllocation`(真偽値)のみにする: これにより、計算待ちが
-  // 継続している間の無関係な再レンダー(Discord送信状態の変化等)ではeffectが
-  // 再起動されず、`tick`の再帰ループがそのまま生き続ける(=描画のたびにタイマーを
-  // 張り直して発火しない、という飢餓状態を防ぐ)。ループ自体は`allocationRunner`
-  // (安定した参照)を読むだけなので、いつ発火しても直近のレンダーで`setInputs`された
-  // 最新の設定を使う(古い設定を捕まえたクロージャを実行することはない)。
-  // アンマウント時(分析タブから離れたとき)はクリーンアップで確実にタイマーを止める
-  // (裁定1: 見えない画面の計算のために見えている画面を遅くしない)。
+  //
+  // ★Issue #110メタレビュー差し戻し(AC-9): 当初は`useEffect(..., [hasPendingAllocation])`
+  // (未計算が1件以上あるかの**真偽値**を依存配列にする)で駆動していたが、code-reviewerが
+  // React 18本体のソース(`ensureRootIsScheduled`)を根拠に指摘したとおり、Reactのバッチ処理
+  // により「未計算0件」を経由しないコミットが起き、依存配列の値が`true→true`のまま変化せず
+  // **ループが止まったまま二度と再開しない**経路が実在した。
+  //
+  // 対策として、判断ロジックを`createAllocationScheduler`(過去の真偽値を一切記憶せず、
+  // 呼ばれた時点の「今、タイマーが張られているか」「今、未計算があるか」だけを見る冪等な
+  // オブジェクト。`mixed-allocation-queue.ts`のJSDoc「設計上の危険その3」・
+  // `mixed-allocation-queue.test.ts`のAC-9テスト参照)へ切り出した。Reactの配線は
+  // 依存配列を付けない`sync()`(コミットのたびに必ず呼ぶ。冪等なのでcleanup不要)と、
+  // アンマウント時にのみ発火する`dispose()`(裁定1: 見えない画面の計算のために
+  // 見えている画面を遅くしない)の2つの`useEffect`に薄く保つ。
   const [, forceAllocationRerender] = useReducer((c: number) => c + 1, 0);
+  const allocationSchedulerRef = useRef<ReturnType<typeof createAllocationScheduler> | null>(
+    null,
+  );
+  if (allocationSchedulerRef.current === null) {
+    allocationSchedulerRef.current = createAllocationScheduler({
+      runner: allocationRunner,
+      schedule: (callback) => window.setTimeout(callback, 0),
+      cancel: (handle) => window.clearTimeout(handle),
+      onStepped: forceAllocationRerender,
+    });
+  }
+  const allocationScheduler = allocationSchedulerRef.current;
   useEffect(() => {
-    if (!hasPendingAllocation) {
-      return;
-    }
-    let cancelled = false;
-    let timer: number | undefined;
-    const tick = (): void => {
-      if (cancelled) {
-        return;
-      }
-      if (allocationRunner.pendingRaceIds().length === 0) {
-        return;
-      }
-      timer = window.setTimeout(() => {
-        allocationRunner.step();
-        forceAllocationRerender();
-        tick();
-      }, 0);
-    };
-    tick();
+    allocationScheduler.sync();
+  });
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
+      allocationScheduler.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPendingAllocation]);
+  }, []);
 
   const expandedSet = new Set(props.expandedRaceIds);
   // 実行前スナップショット(全pending)だけの状態では結果表示はまだ出さない。
