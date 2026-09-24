@@ -458,14 +458,18 @@ export interface RaceComboPayoutsSaveInput {
   /**
    * 馬連の確定払戻(Issue #113・#24-D2)。ワイド・3連複と同じ順不同の組。
    *
-   * **この追加は取込の配線ではなく型を壊さないための最小追加**(着手前ゲートで発見):
-   * `saveResult`内のループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`由来)を走査して
-   * `combo?.[betType]`を読むため、`ComboBetType`に`quinella`が追加されると、この
-   * フィールドが無いままでは`combo?.[betType]`が`ComboBetType`の全メンバーを添字に
+   * **この追加自体は当初(#113時点)、取込の配線ではなく型を壊さないための最小追加だった**
+   * (着手前ゲートで発見): `saveResult`内のループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`
+   * 由来)を走査して`combo?.[betType]`を読むため、`ComboBetType`に`quinella`が追加されると、
+   * このフィールドが無いままでは`combo?.[betType]`が`ComboBetType`の全メンバーを添字に
    * 取れず`pnpm typecheck`がTS7053で落ちる(#106でexactaを追加した際も同型の理由で
-   * 追加されている)。`result-import.ts`は引き続き`{wide, trio}`のみを渡すため、
-   * このフィールドを追加しても馬連の払戻行が実際に書かれるようにはならない
-   * (`analysis-store.test.ts`「馬連の払戻」AC-6参照)。
+   * 追加されている)。#113時点では`result-import.ts`が`{wide, trio}`のみを渡していたため、
+   * このフィールドを追加しても馬連の払戻行は実際には書かれなかった。
+   *
+   * ★**Issue #114・#24-F1で`result-import.ts`が`quinella: result.quinellaPayouts`も渡すように
+   * なり、上記は過去の状態になった。現在は馬連の払戻行が実際に書かれる**
+   * (`analysis-store.test.ts`「馬連の払戻」AC-6のJSDoc・`result-import.test.ts`
+   * 「組合せ払戻(馬連、Issue #114・#24-F1)の素通し」describe参照)。
    */
   readonly quinella?: RaceComboPayoutResult;
 }

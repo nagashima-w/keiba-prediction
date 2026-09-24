@@ -337,7 +337,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               </p>
             )}
             {/*
-             * Issue #76: 未対応の券種コード(place/win/wide/trio以外)の買い目がある旨の注記。
+             * Issue #76: 未対応の券種コード(place/win/wide/trio/quinella以外。馬連は
+             * Issue #114・#24-F1で既知化されたが、#24-D3まで買い目自体が0件のため画面には
+             * 出さない)の買い目がある旨の注記。
              * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す。
              * 文言の組み立て(count===0ならnull)はformatUnknownBetTypeNotice(純関数)の責務で、
              * ここは`unknownBetTypeNotice`(コンポーネント冒頭で1回だけ呼んだ結果)のnull判定

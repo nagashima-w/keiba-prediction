@@ -360,8 +360,9 @@ export interface ProposedBetPopulation {
 }
 
 /**
- * 保存されている券種コードが place/win/wide/trio のいずれでもなかった買い目行(Issue #76。
- * winはIssue #100・#23-Cで既知の券種に追加された)。
+ * 保存されている券種コードが place/win/wide/trio/quinella のいずれでもなかった買い目行
+ * (Issue #76。winはIssue #100・#23-Cで、馬連〈quinella〉はIssue #114・#24-F1で既知の
+ * 券種に追加された)。
  * 規則U(判定不能。原因は払戻の取込状態)とは原因が違うため `unjudgedCount` には混ぜない。
  * この行は betCount/totalStake/totalReturn/unjudgedCount のいずれにも計上されない。
  *

@@ -1442,6 +1442,30 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`race_combo_payouts` は PK が
 `(race_id, bet_type, combo_key)` なので列追加も不要)。
 
+
+## 次の正式版が 1.9.7 である根拠(Issue #114・#24-F1 での変更)
+
+**patch**(内部改善。利用者から見てできることは増えず、分析結果・検証結果の数値も変わらない)。
+
+### 変更内容
+
+馬連の確定払戻をレース結果から取り込み(`parse-race-result.ts` の `quinellaPayouts` → `result-import.ts`)、
+回収率検証(`verify.ts`)で馬連の買い目を判定できるようにした(`ProposedBetReport.quinella`・`overall` への合算)。
+ワイド・三連複(#52 + #54)、単勝(#100)と同じ形。
+
+### patch である根拠
+
+- **production から到達する部分**は「結果の取込で馬連の払戻行が `race_combo_payouts` に保存され始める」ことだけで、
+  画面には何も出ない
+- 配分提案はまだ馬連の買い目を作らない(#24-D3)ので、**検証で馬連が判定される場面は今は無く、
+  `overall` を含む検証結果の数値は変わらない**(既存テストの関係式を5項にしても数値は不変)
+- 検証画面(`VerifyView.tsx`)には馬連の行を**意図的に出していない**(#24-D3 までは常に0件になるため。#112 の教訓)
+
+### major / minor ではない根拠
+
+DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`race_combo_payouts` の PK は `(race_id, bet_type, combo_key)` で、
+馬連の行はそのまま入る)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
