@@ -615,9 +615,15 @@ describe("build-windows.yml の dev-latest 公開ゲート(静的な不変条件
     const claudeMd = readNormalized(CLAUDE_MD_PATH);
     const developmentWorkflow = readNormalized(DEVELOPMENT_WORKFLOW_PATH);
 
+    // 2026-09-24 に boss サブエージェントを廃止し(ユーザー指定)、着手前ゲートとメタレビューを
+    // オーケストレーターが担うようになったため、手順6の書き出しが
+    // 「6. bossの承認が出たら」→「6. メタレビューの承認が出たら」へ変わった。
+    // **この検査が固定しているのは「承認印と命令形が手順6に同居すること」**であり、
+    // 書き出しの文言そのものではない。マーカーだけを実態に合わせ、検出力は一切緩めていない
+    // (下の3つの expect は無変更)。
     const claudeStep6 = extractStepBlock(
       claudeMd,
-      "6. bossの承認が出たら",
+      "6. メタレビューの承認が出たら",
       "\n7. ",
     );
     // 前提固定: 抽出範囲が手順6だけに収まっており、手順7(次のリスト項目)まで伸びていないこと・
