@@ -17,6 +17,8 @@ import {
   buildComboOddsKey,
   buildComboOddsKeyFor,
   buildOrderedComboOddsKey,
+  COMBO_KEY_ORDER,
+  COMBO_SIZE,
   ComboOddsKeyError,
   mergeAxisComboOddsMaps,
   parseComboOddsKey,
@@ -412,6 +414,46 @@ describe("validateComboUmabansFor(betType別の順序方針振り分け。Issue 
 
   it("3連複は従来どおり降順をthrowすること", () => {
     expect(() => validateComboUmabansFor("trio", [3, 1, 2], 3)).toThrow(ComboOddsKeyError);
+  });
+});
+
+/**
+ * 馬連(quinella)の追加(Issue #113・#24-D2)。
+ *
+ * 馬連はワイド・3連複と同じ「順不同の組」であり、`COMBO_KEY_ORDER.quinella`は既存の
+ * "unordered"経路にそのまま乗る(馬単のような新しい順序方針の追加は不要)。ここでは
+ * `COMBO_SIZE`/`COMBO_KEY_ORDER`という2つのRecordに`quinella`が正しく登録され、
+ * 既存の`...For`系ゲートウェイが「ワイドと同じ振る舞い」をすることだけを固定する。
+ */
+describe("馬連(quinella)。Issue #113・#24-D2", () => {
+  it("COMBO_SIZE.quinella=2であること(買い目を構成する頭数)", () => {
+    expect(COMBO_SIZE.quinella).toBe(2);
+  });
+
+  it("COMBO_KEY_ORDER.quinella=\"unordered\"であること(ワイド・3連複と同じ順不同の組)", () => {
+    expect(COMBO_KEY_ORDER.quinella).toBe("unordered");
+  });
+
+  it("buildComboOddsKeyForは馬連を順不同として扱うこと(入力順に依らず同じキーになる)", () => {
+    const a = buildComboOddsKeyFor("quinella", [13, 8]);
+    const b = buildComboOddsKeyFor("quinella", [8, 13]);
+    expect(a).toBe("0813");
+    expect(b).toBe("0813");
+    expect(a).toBe(b);
+  });
+
+  it("validateComboUmabansForは馬連の降順入力をthrowすること(ワイドと同じ)", () => {
+    expect(() => validateComboUmabansFor("quinella", [13, 8], 2)).toThrow(ComboOddsKeyError);
+  });
+
+  it("buildComboOddsCellMapForは馬連の順不同の組を1件に集約すること(ワイドと同じ)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [1, 2], cell: { oddsMin: 3.0, oddsMax: null, ninki: 1 } },
+      { umabans: [2, 1], cell: { oddsMin: 3.0, oddsMax: null, ninki: 1 } },
+    ];
+    const map = buildComboOddsCellMapFor("quinella", entries);
+    expect(map.size).toBe(1);
+    expect(map.get("0102")).toEqual({ oddsMin: 3.0, oddsMax: null, ninki: 1 });
   });
 });
 

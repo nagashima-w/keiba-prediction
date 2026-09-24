@@ -131,9 +131,10 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(ALLOCATION_BET_TYPE_UMABAN_COUNT).toEqual({ place: 1, win: 1, wide: 2, quinella: 2, trio: 3 });
     });
 
-    it("wide/trioの値がcombo-odds-key.tsのCOMBO_SIZEと一致すること(2つの「券種→頭数」定義の乖離を機械検出。quinellaはCOMBO_SIZEにまだ存在しない〈#24-D2のスコープ〉ため対象外)", () => {
+    it("wide/trio/quinellaの値がcombo-odds-key.tsのCOMBO_SIZEと一致すること(2つの「券種→頭数」定義の乖離を機械検出。quinellaはIssue #113・#24-D2でCOMBO_SIZEに追加されたため対象に含める)", () => {
       expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.wide).toBe(COMBO_SIZE.wide);
       expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.trio).toBe(COMBO_SIZE.trio);
+      expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.quinella).toBe(COMBO_SIZE.quinella);
     });
 
     it("umabanCountOf: place/win/wide/quinella/trioそれぞれの構成頭数を返すこと", () => {

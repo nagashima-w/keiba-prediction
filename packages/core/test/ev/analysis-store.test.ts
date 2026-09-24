@@ -1591,6 +1591,49 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  /**
+   * 馬連の払戻(Issue #113・#24-D2)。
+   *
+   * `RaceComboPayoutsSaveInput`に`quinella?`フィールドを追加する(#106のexactaと同じ形。
+   * `combo?.[betType]`が`ComboBetType`の全メンバーを添字に取るため、追加しないと
+   * `pnpm typecheck`がTS7053で落ちる。着手前ゲートで発見)。
+   *
+   * AC-6(★地雷の確認): `COMBO_SIZE`に`quinella`が追加されたことで`COMBO_BET_TYPES`
+   * (`Object.keys(COMBO_SIZE)`由来の払戻保存ループ)が馬連も回すようになるが、
+   * `comboPayouts`に`quinella`を渡さない限りDBには一切書かれないことを固定する
+   * (`result-import.ts`は引き続き`{wide, trio}`のみを渡す。production構成そのままの
+   * 呼び出し形を再現する)。
+   */
+  describe("馬連の払戻(Issue #113・#24-D2)", () => {
+    it("馬連を明示的に渡すと保存・復元できること(型追加が正しく機能することの確認。ワイドと同じ順不同キー)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        quinella: { state: "parsed", payouts: [{ umabans: [8, 13], payout: 4550 }] },
+      });
+      expect(store.getComboPayouts("R1", "quinella")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0813", payout: 4550 }],
+      });
+      store.close();
+    });
+
+    it("AC-6: comboPayoutsが{wide, trio}のみ(result-import.tsの実際の呼び出し形)の場合、馬連はCOMBO_BET_TYPESに含まれてもnot_importedのままであること(馬連の払戻行は書かれない)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 120 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 5], payout: 240 }] },
+      });
+      // 前提固定(空振り防止): wide/trioは従来どおり書かれること。
+      expect(store.getComboPayouts("R1", "wide").state).toBe("imported");
+      expect(store.getComboPayouts("R1", "trio").state).toBe("imported");
+      // 本題: quinellaを渡していないので、COMBO_BET_TYPESループが回っても書かれない。
+      expect(store.getComboPayouts("R1", "quinella")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+  });
+
   describe("getComboPayouts(組合せ払戻の読み出し契約。Issue #52 AC9・boss裁定R-4〜R-6)", () => {
     it("一度も取り込んでいないレースは not_imported を返すこと", () => {
       const store = new AnalysisStore();

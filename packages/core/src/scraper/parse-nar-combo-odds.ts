@@ -64,7 +64,7 @@ import {
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** 地方ワイド・3連複・馬単オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
+/** 地方ワイド・3連複・馬単・馬連オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
 export class NarComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -73,11 +73,18 @@ export class NarComboOddsParseError extends Error {
 }
 
 /**
- * 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複、"b6"=馬単)。
+ * 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複、"b6"=馬単、"b4"=馬連)。
  * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.2・
- * `fixtures/nar_odds_b6_202654071210.html`のセルid`chk_..._b6_c0_..._..._`で再現可能)。
+ * `fixtures/nar_odds_b6_202654071210.html`のセルid`chk_..._b6_c0_..._..._`で再現可能)。馬連の
+ * 値も同じ#24-A(#103)の実測で確定(同docs §3.2、`fixtures/nar_odds_b4_202654071210.html`の
+ * セルid`chk_..._b4_c0_..._..._`で再現可能。Issue #113・#24-D2)。
  */
-const ID_MARKER: Record<ComboBetType, string> = { wide: "b5", trio: "b7", exacta: "b6" };
+const ID_MARKER: Record<ComboBetType, string> = {
+  wide: "b5",
+  trio: "b7",
+  exacta: "b6",
+  quinella: "b4",
+};
 
 /**
  * `unavailable`の理由(生信号のみ。boss裁定2026-08-07)。
@@ -221,17 +228,18 @@ function documentSignals($: CheerioAPI): DocumentSignals {
 }
 
 /**
- * 地方ワイド・3連複・馬単オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
+ * 地方ワイド・3連複・馬単・馬連オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7): オッズ文書として正当と判定できない
  * HTML、またはセルidから馬番を復元できない(範囲外・重複。馬単は昇順を要求しない。
  * Issue #106・#24-B)場合は throw する。
  * 文書としては正当だが組合せセルが1件も見つからない場合(発売なし・未発売・型の取り違え等、
  * 区別できない事実を型で偽らない。受け入れ条件10)は `unavailable` に分類する(throwしない)。
- * 馬単(exacta)は3連複と同じく単一値の券種として扱う(oddsMax=null固定。下記`else`分岐)。
+ * 馬単(exacta)・馬連(quinella)は3連複と同じく単一値の券種として扱う
+ * (oddsMax=null固定。下記`else`分岐。馬連はIssue #113・#24-D2)。
  *
  * @param html odds/index.html?type=b5|b7|b6 または odds_get_form.html のHTML文字列
- * @param betType "wide"(b5)・"trio"(b7)・"exacta"(b6)
+ * @param betType "wide"(b5)・"trio"(b7)・"exacta"(b6)・"quinella"(b4。Issue #113・#24-D2)
  */
 export function parseNarComboOdds(html: string, betType: ComboBetType): NarComboOddsParseResult {
   const $ = cheerio.load(html);

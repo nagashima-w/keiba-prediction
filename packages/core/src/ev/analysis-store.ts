@@ -455,6 +455,19 @@ export interface RaceComboPayoutsSaveInput {
   readonly trio?: RaceComboPayoutResult;
   /** 馬単の確定払戻(Issue #106・#24-B)。umabansは着順順(1着→2着)。ソートしない。 */
   readonly exacta?: RaceComboPayoutResult;
+  /**
+   * 馬連の確定払戻(Issue #113・#24-D2)。ワイド・3連複と同じ順不同の組。
+   *
+   * **この追加は取込の配線ではなく型を壊さないための最小追加**(着手前ゲートで発見):
+   * `saveResult`内のループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`由来)を走査して
+   * `combo?.[betType]`を読むため、`ComboBetType`に`quinella`が追加されると、この
+   * フィールドが無いままでは`combo?.[betType]`が`ComboBetType`の全メンバーを添字に
+   * 取れず`pnpm typecheck`がTS7053で落ちる(#106でexactaを追加した際も同型の理由で
+   * 追加されている)。`result-import.ts`は引き続き`{wide, trio}`のみを渡すため、
+   * このフィールドを追加しても馬連の払戻行が実際に書かれるようにはならない
+   * (`analysis-store.test.ts`「馬連の払戻」AC-6参照)。
+   */
+  readonly quinella?: RaceComboPayoutResult;
 }
 
 /** `race_combo_payouts` の1行(読み出し専用の軽量表現。Issue #52・boss裁定R-6)。 */
@@ -1088,11 +1101,11 @@ export class AnalysisStore {
    * 混同しない)。
    *
    * 未知の bet_type 文字列が紛れ込んだ場合の防御(boss裁定R-6): この関数は呼び出し側が
-   * 渡す型付きの betType("wide"|"trio")で WHERE 句を等価比較するため、DBに万一未知の
+   * 渡す型付きの betType(`ComboBetType`)で WHERE 句を等価比較するため、DBに万一未知の
    * bet_type 値が混入していても、そのレース・その betType の一致行以外は自動的に除外される
    * (toStoredCourseType のような追加の防御的フォールバック関数を別途持つ必要が無い)。
    * @param raceId レースID
-   * @param betType 券種("wide"|"trio")
+   * @param betType 券種(`ComboBetType`)
    */
   getComboPayouts(raceId: string, betType: ComboBetType): RaceComboPayoutsReadResult {
     const marker = this.db

@@ -15,12 +15,14 @@ import {
   narExactaOddsPageUrl,
   narOddsPageUrl,
   NarUnsupportedError,
+  narQuinellaOddsPageUrl,
   narRaceListSubUrl,
   narTrioOddsAxisUrl,
   narTrioOddsPageUrl,
   narWideOddsPageUrl,
   oddsApiUrl,
   oikiriUrl,
+  quinellaOddsApiUrl,
   raceListSubUrl,
   raceResultUrl,
   shutubaUrl,
@@ -204,6 +206,27 @@ describe("exactaOddsApiUrl(中央 馬単オッズJSON API。Issue #106・#24-B)"
   });
 });
 
+/**
+ * quinellaOddsApiUrl(中央 馬連オッズJSON API。Issue #113・#24-D2。実測は#24-A・#103)。
+ *
+ * type=4の値は#24-A(#103)の実測(race_id=202603020211・16頭)で確定
+ * (`docs/quinella-exacta-odds-investigation.md` §3.1、
+ * `fixtures/odds_quinella_202603020211.json`の`data.odds["4"]`で再現可能。推測ではない)。
+ * 既存関数と同じ形のリテラル`toBe`で固定する(理由はexactaOddsApiUrlの同種コメント参照。
+ * 自己参照アサーションだけではtype値の変異〈例: 4→999〉を検出できない)。
+ */
+describe("quinellaOddsApiUrl(中央 馬連オッズJSON API。Issue #113・#24-D2)", () => {
+  it("quinellaOddsApiUrlは中央race_idで馬連オッズJSON APIのURL(type=4)を返すこと", () => {
+    expect(quinellaOddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=4&action=init",
+    );
+  });
+
+  it("quinellaOddsApiUrlに地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => quinellaOddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+});
+
 describe("narWideOddsPageUrl/narTrioOddsPageUrl(地方 ワイド・三連複オッズページ。機能D-1 実測2026-08-04)", () => {
   // 実測(2026-08-04, race_id=202654071210・12頭): type=b5(ワイド)は静的HTMLに全軸の
   // テーブルが1ページに含まれ、C(12,2)=66件と完全一致(軸馬別の制限なし)。
@@ -239,6 +262,22 @@ describe("narExactaOddsPageUrl(地方 馬単オッズページ。Issue #106・#2
   it("narExactaOddsPageUrlはtype=b6固定のクエリ付き地方馬単オッズページURLを返すこと", () => {
     expect(narExactaOddsPageUrl(narRaceId)).toBe(
       "https://nar.netkeiba.com/odds/index.html?type=b6&race_id=202654071210",
+    );
+  });
+});
+
+/**
+ * narQuinellaOddsPageUrl(地方 馬連オッズページ。Issue #113・#24-D2。実測は#24-A・#103)。
+ *
+ * type=b4の値は#24-A(#103)の実測(race_id=202654071210・12頭)で確定
+ * (`docs/quinella-exacta-odds-investigation.md` §3.2、
+ * `fixtures/nar_odds_b4_202654071210.html`のセルid規約〈`chk_..._b4_c0_..._..._`〉で
+ * 再現可能。推測ではない)。既存関数と同じ形のリテラル`toBe`で固定する。
+ */
+describe("narQuinellaOddsPageUrl(地方 馬連オッズページ。Issue #113・#24-D2)", () => {
+  it("narQuinellaOddsPageUrlはtype=b4固定のクエリ付き地方馬連オッズページURLを返すこと", () => {
+    expect(narQuinellaOddsPageUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/odds/index.html?type=b4&race_id=202654071210",
     );
   });
 });

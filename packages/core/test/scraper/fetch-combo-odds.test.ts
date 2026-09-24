@@ -18,8 +18,10 @@ import { parseRaceId } from "../../src/scraper/ids.js";
 import {
   exactaOddsApiUrl,
   narExactaOddsPageUrl,
+  narQuinellaOddsPageUrl,
   narTrioOddsAxisUrl,
   narWideOddsPageUrl,
+  quinellaOddsApiUrl,
   trioOddsApiUrl,
 } from "../../src/scraper/urls.js";
 
@@ -443,6 +445,44 @@ describe("fetchComboOdds(中央: 馬単。expectedComboCountが順列で計算�
     expect(result.state).toBe("available");
     expect(result.odds.size).toBe(132); // P(12,2)、実測
     expect(result.diagnostics.expectedComboCount).toBe(132);
+    expect(result.diagnostics.axisUmabans).toEqual([]);
+  });
+});
+
+/**
+ * 馬連(quinella)の配線(Issue #113・#24-D2)。
+ *
+ * 馬連はワイドと同じ「順不同・単発リクエスト」の券種であり、`comboOddsUrlFor`の両switch
+ * (中央/地方)に`case "quinella"`が無い場合はコンパイルエラー(exhaustiveCheck: never)に
+ * なるため、実装前はビルド自体が通らない形でRedになる。
+ */
+describe("fetchComboOdds(馬連。Issue #113・#24-D2)", () => {
+  it("中央馬連: 1リクエストのみ発行し、quinellaOddsApiUrlを叩き、parseComboOddsのavailableがそのまま写ること(16頭・C(16,2)=120)", async () => {
+    const json = loadFixture("odds_quinella_202603020211.json");
+    const { fetcher, calls } = createFakeFetcher(() => json);
+    const startingUmabans = Array.from({ length: 16 }, (_, i) => i + 1);
+
+    const result = await fetchComboOdds(CENTRAL_RACE_ID, "quinella", startingUmabans, fetcher);
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.url).toBe(quinellaOddsApiUrl(CENTRAL_RACE_ID));
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(120); // C(16,2)、実測(fixtures/odds_quinella_202603020211.json)
+    expect(result.diagnostics.expectedComboCount).toBe(120); // unorderedなのでC(16,2)。P(16,2)=240ではない
+  });
+
+  it("地方馬連: 1リクエストのみ発行し、narQuinellaOddsPageUrlを叩き、parseNarComboOddsのavailableがそのまま写ること(12頭・C(12,2)=66)", async () => {
+    const html = loadFixture("nar_odds_b4_202654071210.html");
+    const { fetcher, calls } = createFakeFetcher(() => html);
+    const startingUmabans = Array.from({ length: 12 }, (_, i) => i + 1);
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "quinella", startingUmabans, fetcher);
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.url).toBe(narQuinellaOddsPageUrl(NAR_RACE_ID));
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(66); // C(12,2)、実測
+    expect(result.diagnostics.expectedComboCount).toBe(66);
     expect(result.diagnostics.axisUmabans).toEqual([]);
   });
 });

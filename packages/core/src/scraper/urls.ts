@@ -242,6 +242,24 @@ export function exactaOddsApiUrl(raceId: RaceId): string {
 }
 
 /**
+ * 馬連オッズを返す内部API(JSON、中央のみ、Issue #113・#24-D2)。
+ *
+ * `data.odds["4"]` に馬番ペア(4桁。例 "0102")をキーとした [値,0.0(ダミー),人気] が入る。
+ * ワイドと異なり下限・上限を持たない単一値の券種(2要素目は常に"0.0"のダミー。3連複・馬単と
+ * 同型)。実測(#24-A・#103、race_id=202603020211・16頭)で1リクエストにC(16,2)=120件
+ * 全組合せが返ることを確認済み(`fixtures/odds_quinella_202603020211.json`。
+ * `docs/quinella-exacta-odds-investigation.md` §3.1参照)。type値の観測方法は
+ * wideOddsApiUrl と同じ(odds_get_form.html?type=b4 フラグメント内 `oddsType:'4'`)。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(wideOddsApiUrlと同じ理由)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narQuinellaOddsPageUrl を使うこと)。
+ */
+export function quinellaOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "馬連オッズJSON API(api_get_jra_odds、type=4)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=4&action=init`;
+}
+
+/**
  * ワイドオッズページのURL(地方のみ、機能D-1)。
  *
  * 中央と異なりJSON APIが存在しないため、静的HTML(odds/index.html?type=b5)をパースする
@@ -264,6 +282,19 @@ export function narWideOddsPageUrl(raceId: RaceId): string {
  */
 export function narExactaOddsPageUrl(raceId: RaceId): string {
   return `${NAR_BASE}/odds/index.html?type=b6&race_id=${raceId}`;
+}
+
+/**
+ * 馬連オッズページのURL(地方のみ、Issue #113・#24-D2)。
+ *
+ * ワイド(`narWideOddsPageUrl`)と同じく、軸馬別の制限を受けず1リクエストで全組合せが
+ * 取得できる(3連複〈`narTrioOddsPageUrl`〉とは異なる)。実測(#24-A・#103、
+ * race_id=202654071210・12頭)で、静的HTML(odds/index.html?type=b4)にC(12,2)=66件
+ * 全組合せが1リクエストで含まれることを確認済み(`fixtures/nar_odds_b4_202654071210.html`。
+ * `docs/quinella-exacta-odds-investigation.md` §3.2参照)。
+ */
+export function narQuinellaOddsPageUrl(raceId: RaceId): string {
+  return `${NAR_BASE}/odds/index.html?type=b4&race_id=${raceId}`;
 }
 
 /**

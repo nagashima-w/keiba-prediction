@@ -95,8 +95,10 @@ import {
 import {
   exactaOddsApiUrl,
   narExactaOddsPageUrl,
+  narQuinellaOddsPageUrl,
   narTrioOddsAxisUrl,
   narWideOddsPageUrl,
+  quinellaOddsApiUrl,
   trioOddsApiUrl,
   wideOddsApiUrl,
 } from "./urls.js";
@@ -285,6 +287,8 @@ function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean):
         return narWideOddsPageUrl(raceId);
       case "exacta":
         return narExactaOddsPageUrl(raceId);
+      case "quinella":
+        return narQuinellaOddsPageUrl(raceId);
       case "trio":
         throw new Error(
           "地方3連複は単発リクエストでは扱えません(呼び出し元はfetchNarTrioComboOddsへ分岐すること)",
@@ -302,6 +306,8 @@ function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean):
       return trioOddsApiUrl(raceId);
     case "exacta":
       return exactaOddsApiUrl(raceId);
+    case "quinella":
+      return quinellaOddsApiUrl(raceId);
     default: {
       const exhaustiveCheck: never = betType;
       throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
@@ -408,10 +414,11 @@ async function fetchNarTrioComboOdds(
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬単)を取得する(中央/地方 × 券種の経路を自動選択)。
+ * 組合せオッズ(ワイド・3連複・馬単・馬連)を取得する(中央/地方 × 券種の経路を自動選択)。
  *
  * @param raceId 対象レースID(検証済み。中央/地方は`venueKindOfRaceId`で自動判定)
- * @param betType "wide"(ワイド)・"trio"(3連複)・"exacta"(馬単。Issue #106・#24-B)
+ * @param betType "wide"(ワイド)・"trio"(3連複)・"exacta"(馬単。Issue #106・#24-B)・
+ *   "quinella"(馬連。ワイドと同じ単発リクエスト。Issue #113・#24-D2)
  * @param startingUmabans 出走馬番の集合(順不同・重複ありうる。期待組合せ数の算出・
  *   地方3連複の軸導出に使う。`parseShutuba`の結果由来)
  * @param fetcher HTTP取得を担うフェッチャ(`HttpClient`/`CachedFetcher`のいずれも可)

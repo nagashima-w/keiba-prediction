@@ -257,11 +257,15 @@ describe("parseComboOdds(状態③=未発売の実測。受け入れ条件9。�
 });
 
 describe("parseComboOdds(件数の完全性。TDDリスト項目14)", () => {
-  it("16頭(202603020211): ワイドC(16,2)=120・3連複C(16,3)=560と完全一致すること", () => {
+  it("16頭(202603020211): ワイドC(16,2)=120・3連複C(16,3)=560・馬連C(16,2)=120と完全一致すること", () => {
     const wide = expectAvailable(parseComboOdds(loadFixture("odds_wide_202603020211.json"), "wide"));
     const trio = expectAvailable(parseComboOdds(loadFixture("odds_trio_202603020211.json"), "trio"));
+    const quinella = expectAvailable(
+      parseComboOdds(loadFixture("odds_quinella_202603020211.json"), "quinella"),
+    );
     expect(wide.size).toBe(120);
     expect(trio.size).toBe(560);
+    expect(quinella.size).toBe(120);
   });
 
   it("6頭(202602010605): ワイドC(6,2)=15・3連複C(6,3)=20と完全一致すること", () => {
@@ -328,5 +332,56 @@ describe("parseComboOdds(馬単。Issue #106・#24-B AC-B6・AC-B9)", () => {
     for (const cell of odds.values()) {
       expect(cell.oddsMax).toBeNull();
     }
+  });
+});
+
+/**
+ * 馬連(quinella、type=4)の配線(Issue #113・#24-D2 AC-1・AC-2)。
+ *
+ * 馬連はワイド・3連複と同じ「順不同の組」であり、キーは昇順に正規化される
+ * (中央 "0813" = 45.5倍・19人気。"1308" は存在しない。着手前ゲートで実測確認済み:
+ * `python3 -c "import json;o=json.load(open('fixtures/odds_quinella_202603020211.json'))['data']['odds']['4'];print(len(o),o.get('0813'),o.get('1308'))"`
+ * → `120 ['45.5', '0.0', '19'] None`)。確定払戻(馬連8-13=4,550円・19人気)との突合は
+ * オッズ・人気の両方が一致することをリテラルで固定する(集合一致だけでは値の取り違えを
+ * 検出できない。#103の教訓)。
+ */
+describe("parseComboOdds(馬連。Issue #113・#24-D2 AC-1・AC-2)", () => {
+  it("実フィクスチャ(16頭・C(16,2)=120件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_quinella_202603020211.json"), "quinella"));
+    expect(odds.size).toBe(120);
+  });
+
+  it("キーは昇順に正規化されること(\"0813\"はあるが\"1308\"は無い。ワイド・3連複と同じ順不同の組)", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_quinella_202603020211.json"), "quinella"));
+    expect(odds.has("0813")).toBe(true);
+    expect(odds.has("1308")).toBe(false);
+  });
+
+  it("AC-2: 確定払戻(馬連8-13=4,550円・19人気)とキー\"0813\"のオッズ・人気がリテラルで一致すること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_quinella_202603020211.json"), "quinella"));
+    const cell = odds.get("0813");
+    expect(cell).toBeDefined();
+    expect(cell?.oddsMin).toBe(45.5);
+    expect(cell?.ninki).toBe(19);
+  });
+
+  it("馬連は3連複と同じく単一値の券種であり、oddsMaxは常にnullであること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_quinella_202603020211.json"), "quinella"));
+    expect(odds.size).toBeGreaterThan(0);
+    for (const cell of odds.values()) {
+      expect(cell.oddsMax).toBeNull();
+    }
+  });
+
+  it("未発売の封筒異常(dataが空文字列。type非依存のためワイド用フィクスチャを流用)をthrowせずunavailableに分類できること", () => {
+    const json = loadFixture("odds_wide_presale_202604020511_20260806.json");
+    const result = parseComboOdds(json, "quinella");
+    expect(result.state).toBe("unavailable");
+    if (result.state !== "unavailable") throw new Error("unreachable");
+    expect(result.reason).toEqual({
+      rawStatus: "NG",
+      rawReason: "empty free odds schedule",
+      missingKey: "data",
+    });
   });
 });

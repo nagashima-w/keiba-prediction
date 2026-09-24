@@ -184,8 +184,8 @@ export type AllocationBetType = "place" | "win" | "wide" | "quinella" | "trio";
  * `COMBO_SIZE` とは別にここへ新設する(2つ目の「券種→頭数」の定義ではあるが、この2つは
  * 目的が異なり統合できない。整合は `combo-bet-allocation.test.ts`
  * 「ALLOCATION_BET_TYPE_UMABAN_COUNT」describe のテストで機械的に確認する)。
- * `quinella`はオッズ取得(`ComboBetType`への追加)が#24-D2のスコープであり、本Issue(#112)
- * 時点では`COMBO_SIZE`に対応するキーがまだ無い(意図的。整合テストの対象外)。
+ * `quinella`のオッズ取得(`ComboBetType`への追加)はIssue #113・#24-D2で対応済み
+ * (`COMBO_SIZE.quinella`も2で一致する。整合は下記テストで機械的に確認する)。
  *
  * **キーの挿入順は頭数の昇順(place, win, wide, quinella, trio)。** `umabanCountOf`が未知の
  * 券種をthrowする際、この`Object.keys`の順序をそのままメッセージに埋め込むため(下記参照)、

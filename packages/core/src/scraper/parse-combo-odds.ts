@@ -66,7 +66,7 @@ import { toOddsNumber } from "./odds-number.js";
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** ワイド・3連複・馬単オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
+/** ワイド・3連複・馬単・馬連オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
 export class ComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -75,11 +75,18 @@ export class ComboOddsParseError extends Error {
 }
 
 /**
- * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単)。
+ * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単、"4"=馬連)。
  * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.1・
- * `fixtures/odds_exacta_202603020211.json`の `data.odds["6"]` で再現可能)。
+ * `fixtures/odds_exacta_202603020211.json`の `data.odds["6"]` で再現可能)。馬連の値も同じ
+ * #24-A(#103)の実測で確定(同docs §3.1、`fixtures/odds_quinella_202603020211.json`の
+ * `data.odds["4"]` で再現可能。Issue #113・#24-D2)。
  */
-const JSON_ODDS_KEY: Record<ComboBetType, string> = { wide: "5", trio: "7", exacta: "6" };
+const JSON_ODDS_KEY: Record<ComboBetType, string> = {
+  wide: "5",
+  trio: "7",
+  exacta: "6",
+  quinella: "4",
+};
 
 /**
  * オッズが取得できなかった理由(受け入れ条件7b)。
@@ -149,7 +156,7 @@ function unavailable(
 }
 
 /**
- * 中央のワイド・3連複・馬単オッズAPI応答(api_get_jra_odds、type=5/7/6)をパースする。
+ * 中央のワイド・3連複・馬単・馬連オッズAPI応答(api_get_jra_odds、type=5/7/6/4)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7)に加え、「封筒異常は unavailable」
  * という第3の扱いを持つ(モジュール冒頭JSDoc参照)。throwするのは **JSON.parse に失敗した
@@ -160,7 +167,8 @@ function unavailable(
  *
  * @param json api_get_jra_odds のJSON文字列
  * @param betType "wide"(type=5)・"trio"(type=7)・"exacta"(type=6。着順が意味を持つため
- *   `decodeRawKey`/`buildComboOddsCellMapFor`は昇順を要求せずソートもしない。Issue #106・#24-B)
+ *   `decodeRawKey`/`buildComboOddsCellMapFor`は昇順を要求せずソートもしない。Issue #106・#24-B)・
+ *   "quinella"(type=4。ワイド・3連複と同じ順不同の組。Issue #113・#24-D2)
  */
 export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsParseResult {
   let parsed: unknown;

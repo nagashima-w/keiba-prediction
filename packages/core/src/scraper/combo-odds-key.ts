@@ -24,26 +24,28 @@
 const MAX_UMABAN = 18;
 
 /**
- * 券種(ワイド・3連複・馬単)。買い目を構成する頭数(comboSize)が一意に決まる。
+ * 券種(ワイド・3連複・馬単・馬連)。買い目を構成する頭数(comboSize)が一意に決まる。
  *
- * **順序方針は券種で異なる**(Issue #106・#24-B裁定): ワイド・3連複は着順を問わない
+ * **順序方針は券種で異なる**(Issue #106・#24-B裁定): ワイド・3連複・馬連は着順を問わない
  * 「組」(馬番の集合)だが、馬単は着順(1着・2着)が意味を持つ「並び」である。
  * この違いは`COMBO_KEY_ORDER`で表現し、`buildComboOddsKey`(常にソートする。順不同専用)
  * と`buildOrderedComboOddsKey`(ソートしない)のどちらを使うべきかを`buildComboOddsKeyFor`
- * が振り分ける。
+ * が振り分ける。馬連(quinella)はワイド・3連複と同じ「順不同」であり、新しい順序方針の
+ * 追加は不要だった(Issue #113・#24-D2)。
  */
-export type ComboBetType = "wide" | "trio" | "exacta";
+export type ComboBetType = "wide" | "trio" | "exacta" | "quinella";
 
-/** 券種ごとの買い目構成頭数(ワイド=2、3連複=3、馬単=2)。中央・地方の両パーサが共有する。 */
+/** 券種ごとの買い目構成頭数(ワイド=2、3連複=3、馬単=2、馬連=2)。中央・地方の両パーサが共有する。 */
 export const COMBO_SIZE: Record<ComboBetType, number> = {
   wide: 2,
   trio: 3,
   exacta: 2,
+  quinella: 2,
 };
 
 /**
  * キー生成・検証における順序方針(Issue #106・#24-B)。
- * - "unordered": 馬番の組(順不同)。ワイド・3連複。
+ * - "unordered": 馬番の組(順不同)。ワイド・3連複・馬連。
  * - "ordered": 馬番の並び(着順が意味を持つ)。馬単。
  *
  * `buildComboOddsKeyFor`・`validateComboUmabansFor`・`buildComboOddsCellMapFor`が
@@ -52,11 +54,12 @@ export const COMBO_SIZE: Record<ComboBetType, number> = {
  */
 export type ComboKeyOrder = "unordered" | "ordered";
 
-/** 券種ごとの順序方針(`COMBO_SIZE`の隣に置く。Issue #106・#24-B)。 */
+/** 券種ごとの順序方針(`COMBO_SIZE`の隣に置く。Issue #106・#24-B。馬連はIssue #113・#24-D2)。 */
 export const COMBO_KEY_ORDER: Record<ComboBetType, ComboKeyOrder> = {
   wide: "unordered",
   trio: "unordered",
   exacta: "ordered",
+  quinella: "unordered",
 };
 
 /**
@@ -69,7 +72,7 @@ function encodeUmabans(umabans: readonly number[]): string {
 
 /**
  * 組合せオッズキー生成の正規化関数(#14からの移設。仕様・挙動は不変)。**順不同の組
- * (ワイド・3連複)専用**(Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には
+ * (ワイド・3連複・馬連)専用**(Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には
  * `buildOrderedComboOddsKey`を使うこと。券種を持っている呼び出し元は`buildComboOddsKeyFor`
  * を使えば振り分けを気にせず済む)。
  * netkeibaの実キー形式(ワイド"0102"・3連複"010203")に一致させる: 馬番昇順ソート後、
@@ -233,7 +236,7 @@ function validateComboUmabansStructure(
 }
 
 /**
- * 馬番の組を検証する(構造の最低条件。throw側)。**順不同の組(ワイド・3連複)専用**
+ * 馬番の組を検証する(構造の最低条件。throw側)。**順不同の組(ワイド・3連複・馬連)専用**
  * (Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には`validateOrderedComboUmabans`を
  * 使うこと。券種を持っている呼び出し元は`validateComboUmabansFor`を使えば振り分けを
  * 気にせず済む)。
