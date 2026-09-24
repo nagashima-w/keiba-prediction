@@ -425,11 +425,17 @@ interface PhaseTimings {
 const BENCH_NUMERIC_EPS = 1e-9;
 
 /**
- * `runGreedyAllocation`(allocation-primitives.ts:374)と**構造的に同一の演算列**を複製し、
- * ステップループ内の各フェーズを`performance.now()`で計測する(本ファイルJSDoc参照)。
- * 加算順序・走査順序・分岐条件は本家から一切変えていない(演算そのものは変えず、
- * 各フェーズの前後にタイマーを挟んだだけ)。呼び出し側が本家の出力とのビット一致を
- * 検証してから内訳を信頼すること(`reportPhaseBreakdown`参照)。
+ * `runGreedyAllocation`(allocation-primitives.ts:438、Issue #107最適化後)と**構造的に
+ * 同一の演算列**を複製し、ステップループ内の各フェーズを`performance.now()`で計測する
+ * (本ファイルJSDoc参照)。CSR化・バッファ再利用・接頭辞和の再利用を含め、本家の実装と
+ * 同じ構造にする(加算順序・走査順序・分岐条件は一切変えず、各フェーズの前後にタイマーを
+ * 挟んだだけ)。呼び出し側が本家の出力とのビット一致を検証してから内訳を信頼すること
+ * (`reportPhaseBreakdown`参照)。
+ *
+ * ★このベンチ専用の複製は、production側`runGreedyAllocation`のアルゴリズムが変わるたびに
+ * 追従が必要である(Issue #107の最初のドラフトでは最適化前の構造のまま残っており、
+ * `reportPhaseBreakdown`のビット一致検証自体は通っていた〈両アルゴリズムが数学的に
+ * 同値なため〉が、内訳の中身が最適化前のものになってしまっていた。この事実は報告に明記する)。
  */
 function runGreedyAllocationInstrumented(
   n: number,
@@ -453,10 +459,49 @@ function runGreedyAllocationInstrumented(
   }
 
   const outcomeCount = outcomeIndexSets.length;
-  const contactsByCandidate: number[][] = Array.from({ length: n }, () => [] as number[]);
+
+  // CSR化(outcome-major)。production版と同じ構築手順。
+  const outcomeOffsets = new Int32Array(outcomeCount + 1);
   for (let j = 0; j < outcomeCount; j++) {
-    for (const idx of outcomeIndexSets[j]!.indices) {
-      contactsByCandidate[idx]!.push(j);
+    outcomeOffsets[j + 1] = outcomeOffsets[j]! + outcomeIndexSets[j]!.indices.length;
+  }
+  const totalEdges = outcomeOffsets[outcomeCount]!;
+  const outcomeIndicesFlat = new Int32Array(totalEdges);
+  const outcomeProbabilities = new Float64Array(outcomeCount);
+  {
+    let g = 0;
+    for (let j = 0; j < outcomeCount; j++) {
+      outcomeProbabilities[j] = outcomeIndexSets[j]!.probability;
+      for (const idx of outcomeIndexSets[j]!.indices) {
+        outcomeIndicesFlat[g] = idx;
+        g++;
+      }
+    }
+  }
+
+  // CSR化(candidate-major)。production版と同じ構築手順(位置pも記録)。
+  const contactCountByCandidate = new Int32Array(n);
+  for (let g = 0; g < totalEdges; g++) {
+    contactCountByCandidate[outcomeIndicesFlat[g]!]!++;
+  }
+  const contactOffsets = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    contactOffsets[i + 1] = contactOffsets[i]! + contactCountByCandidate[i]!;
+  }
+  const contactOutcomeFlat = new Int32Array(totalEdges);
+  const contactPositionFlat = new Int32Array(totalEdges);
+  {
+    const cursor = contactOffsets.slice(0, n);
+    for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
+      for (let g = start; g < end; g++) {
+        const idx = outcomeIndicesFlat[g]!;
+        const w = cursor[idx]!;
+        contactOutcomeFlat[w] = j;
+        contactPositionFlat[w] = g - start;
+        cursor[idx] = w + 1;
+      }
     }
   }
 
@@ -464,18 +509,26 @@ function runGreedyAllocationInstrumented(
   const delta = 1 / greedySteps;
   let sumX = 0;
 
+  const commonWealth = new Float64Array(outcomeCount);
+  const prefixSum = new Float64Array(totalEdges);
+  const commonLogWealth = new Float64Array(outcomeCount);
+  const freshFlat = new Float64Array(totalEdges);
+
   const computeF = (trialSumX: number, trialX: readonly number[]): number | null => {
     let total = 0;
-    for (const outcome of outcomeIndexSets) {
+    for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
       let payout = 0;
-      for (const idx of outcome.indices) {
+      for (let g = start; g < end; g++) {
+        const idx = outcomeIndicesFlat[g]!;
         payout += trialX[idx]! * odds[idx]!;
       }
       const wealth = 1 - trialSumX + payout;
       if (wealth <= BENCH_NUMERIC_EPS) {
         return null;
       }
-      total += outcome.probability * Math.log(wealth);
+      total += outcomeProbabilities[j]! * Math.log(wealth);
     }
     return total;
   };
@@ -487,11 +540,16 @@ function runGreedyAllocationInstrumented(
     timings.stepCount++;
     const trialSumX = sumX + delta;
 
+    // commonWealth計算+接頭辞和の記録(★接頭辞和の再利用。1つのフェーズにまとめて計測する。
+    // productionでも同じ1本のループでprefixSumを記録している)。
     let t0 = performance.now();
-    const commonWealth = new Array<number>(outcomeCount);
     for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
       let payout = 0;
-      for (const idx of outcomeIndexSets[j]!.indices) {
+      for (let g = start; g < end; g++) {
+        prefixSum[g] = payout;
+        const idx = outcomeIndicesFlat[g]!;
         payout += x[idx]! * odds[idx]!;
       }
       commonWealth[j] = 1 - trialSumX + payout;
@@ -507,26 +565,31 @@ function runGreedyAllocationInstrumented(
     }
     timings.worstCommonScanMs += performance.now() - t0;
 
+    // freshByCandidate相当(接頭辞和の再利用でΣ|indices_j|(|indices_j|+1)/2程度に削減)。
     t0 = performance.now();
     let worstFresh = Infinity;
-    const freshByCandidate: number[][] = new Array(n);
     for (let i = 0; i < n; i++) {
-      const contacts = contactsByCandidate[i]!;
-      const freshValues = new Array<number>(contacts.length);
-      for (let k = 0; k < contacts.length; k++) {
-        const j = contacts[k]!;
-        let payout = 0;
-        for (const idx of outcomeIndexSets[j]!.indices) {
-          const v = idx === i ? x[idx]! + delta : x[idx]!;
-          payout += v * odds[idx]!;
+      const cStart = contactOffsets[i]!;
+      const cEnd = contactOffsets[i + 1]!;
+      const freshTerm = (x[i]! + delta) * odds[i]!;
+      for (let c = cStart; c < cEnd; c++) {
+        const j = contactOutcomeFlat[c]!;
+        const p = contactPositionFlat[c]!;
+        const start = outcomeOffsets[j]!;
+        const end = outcomeOffsets[j + 1]!;
+        const g = start + p;
+        let payout = prefixSum[g]!;
+        payout += freshTerm;
+        for (let g2 = g + 1; g2 < end; g2++) {
+          const idx2 = outcomeIndicesFlat[g2]!;
+          payout += x[idx2]! * odds[idx2]!;
         }
         const fresh = 1 - trialSumX + payout;
-        freshValues[k] = fresh;
+        freshFlat[c] = fresh;
         if (fresh < worstFresh) {
           worstFresh = fresh;
         }
       }
-      freshByCandidate[i] = freshValues;
     }
     timings.freshByCandidateMs += performance.now() - t0;
 
@@ -538,23 +601,22 @@ function runGreedyAllocationInstrumented(
     if (safe) {
       t0 = performance.now();
       let commonLogSum = 0;
-      const commonLogWealth = new Array<number>(outcomeCount);
       for (let j = 0; j < outcomeCount; j++) {
         const logW = Math.log(commonWealth[j]!);
         commonLogWealth[j] = logW;
-        commonLogSum += outcomeIndexSets[j]!.probability * logW;
+        commonLogSum += outcomeProbabilities[j]! * logW;
       }
       timings.commonLogWealthMs += performance.now() - t0;
 
       t0 = performance.now();
       for (let i = 0; i < n; i++) {
         let trialLogSum = commonLogSum;
-        const contacts = contactsByCandidate[i]!;
-        const freshValues = freshByCandidate[i]!;
-        for (let k = 0; k < contacts.length; k++) {
-          const j = contacts[k]!;
-          const prob = outcomeIndexSets[j]!.probability;
-          trialLogSum = trialLogSum - prob * commonLogWealth[j]! + prob * Math.log(freshValues[k]!);
+        const cStart = contactOffsets[i]!;
+        const cEnd = contactOffsets[i + 1]!;
+        for (let c = cStart; c < cEnd; c++) {
+          const j = contactOutcomeFlat[c]!;
+          const prob = outcomeProbabilities[j]!;
+          trialLogSum = trialLogSum - prob * commonLogWealth[j]! + prob * Math.log(freshFlat[c]!);
         }
         const increment = trialLogSum - currentF;
         if (increment > bestIncrement) {

@@ -335,7 +335,7 @@ export interface GreedyAllocationResult {
  *    同種の共通部分式除去。したがって上記1点目〈署名畳み込み〉を適用しない限り、本関数
  *    単体の挙動はこのIssueの前後で1ビットも変わらない)。
  *
- * ### 検討したが採用しなかった案: computeFreshWealthのO(1)化
+ * ### 検討したが採用しなかった案: computeFreshWealthのO(1)化(採用C・Issue #96)
  *
  * `fresh = commonWealth[j] + delta·odds[i]`という恒等式(前提:
  * `i`が`outcomeIndexSets[j].indices`に重複なくちょうど1回含まれること。`OutcomeIndexSet`の
@@ -356,20 +356,84 @@ export interface GreedyAllocationResult {
  * (boss確認済み。署名畳み込み〈上記1点目〉だけでも実測3360→1023outcomeの削減効果があり、
  * #96の目的は達成できる)。
  *
+ * ## Issue #107(#24-C): ビット一致を保ったままの定数倍削減(CSR化・バッファ再利用・接頭辞和の再利用)
+ *
+ * `pnpm tsx scripts/bench-run-greedy-allocation.ts`のフェーズ別内訳実測により、
+ * ステップループの支配的コストは`freshByCandidate`相当の計算(候補ごとに、接触先outcomeの
+ * `indices`を毎回全部なめ直してpayoutを再構成する箇所。計算量`Σ_j|indices_j|²`)であることが
+ * 判明した(具体的な比率は実行環境に依存するため、再現コマンドの実出力で確認すること。
+ * AC-5)。本Issueは次の3点を、**演算そのもの・加算順序を一切変えずに**適用する。
+ *
+ * 1. **CSR化**: `outcomeIndexSets[j].indices`(オブジェクト配列の中のプレーン配列)を、
+ *    ステップループの外で1回だけ`Int32Array`+オフセット配列(`outcomeIndicesFlat`/
+ *    `outcomeOffsets`)へ平坦化する。走査順序は元の`indices`配列の順序をそのまま保つ
+ *    (連結するだけなので、走査順が変わらないことは構成上自明)。候補→接触先outcomeの
+ *    逆引き(旧`contactsByCandidate`)も同様に`contactOutcomeFlat`/`contactOffsets`へ
+ *    平坦化し、書き込み順序(=候補ごとの接触先の並び順)は旧実装(outcome番号jを0から
+ *    昇順に走査しながらpushする)と同じにする。
+ * 2. **バッファ再利用**: `commonWealth`・`commonLogWealth`・`freshFlat`(旧`freshByCandidate`
+ *    相当)は、ステップループの外で`Float64Array`として1回だけ確保し、毎ステップ再利用する。
+ *    安全性: `commonWealth`・`freshFlat`は`if(safe)`の外で毎ステップ全要素を書き潰してから
+ *    読むため(下記実装参照)、ステップ間で古い値が紛れ込む経路は無い。`commonLogWealth`は
+ *    `if(safe)`の中でのみ書かれるが、読み出しも同じ`if(safe)`ブロック内の2箇所
+ *    (`commonLogSum`算出直後の候補評価ループ)でしか発生せず、`safe===false`のステップでは
+ *    一切読まれない。`safe`なステップに入るたびoutcome数ぶん全走査して書き潰してから読むので、
+ *    前の`safe`ステップの古い値が紛れ込む経路も無い(実装者が読んで確認済み。#107ゲート裁定
+ *    §6(2))。
+ * 3. **接頭辞和の再利用(採用Cとは異なる、ビット一致するO(Σ|indices_j|(|indices_j|+1)/2)化)**:
+ *    `commonWealth`計算のための各outcome内forward累算(`payout += x[idx]·odds[idx]`を
+ *    `indices`の順に足していく)は、そのままだと「途中経過」を捨てているだけである。
+ *    この途中経過(位置pより**前**までの累算値。現在のx、未変更)を`prefixSum`
+ *    (`Float64Array`、CSRと同じ平坦配置)へ位置ごとに保存しておくと、候補iが位置pに
+ *    いるoutcome jの`fresh`値は
+ *    ```
+ *    payout = prefixSum[position(i,j)]        // 位置pより前(旧実装と同じ累算値。同じ操作列)
+ *    payout += (x[i]+δ)·odds[i]               // 置き換わる1項(旧実装のv=x[i]+δの項と同一)
+ *    payout += t_{p+1} + t_{p+2} + ... + t_end // 位置pより後を元の順序のまま歩いて加算
+ *    ```
+ *    として求まる。**採用Cとの違いはここが本質**: 採用Cは`commonWealth[j]`(全項を
+ *    accumulateし終えた最終値)に対して`+delta·odds[i]`を**後から**足す(=`(a+δ)·o`と
+ *    `a·o+δ·o`の分配則に依存する別の演算列)のに対し、本手法は**旧実装と同じ順序で同じ
+ *    被加数を同じアキュムレータに足していく操作を、位置pより前の部分だけ結果を使い回して
+ *    再生する**(位置pより後は旧実装と全く同じ「forループで1項ずつ足す」処理をそのまま行う)。
+ *    IEEE754の加算は決定的(同じ操作列は同じ結果を返す)なので、位置pより前の部分和が
+ *    旧実装の対応する中間状態とビット一致する限り、後続の加算も含めた最終結果は旧実装の
+ *    ループを最初から回した場合とビット一致する。
+ *
+ *    計算量は、outcome jの位置pにいる候補について旧実装がO(|indices_j|)(全項を毎回歩く)
+ *    だったのに対し、本手法はO(|indices_j|−p)(位置pより後だけを歩く)になる。outcome j内の
+ *    全候補について合計すると`Σ_{p=0}^{|indices_j|-1}(|indices_j|-p-1)`
+ *    `= |indices_j|(|indices_j|-1)/2`となり、旧実装の`|indices_j|²`から**概ね半分**へ
+ *    減る(前段の`commonWealth`計算ループに`prefixSum`への1回のstoreを追加するだけなので、
+ *    その部分の追加コストはO(1)/要素で無視できる)。
+ *
+ *    ★`worstFresh`の走査順序(候補メジャー: 候補iについて0からn-1、各候補の接触先を
+ *    outcome番号昇順)は本Issueの前後で**変えていない**(接頭辞和は別の平坦配列
+ *    `prefixSum`〈outcomeメジャーで構築〉から値を引くだけで、`freshFlat`への書き込み・
+ *    `worstFresh`の更新自体は旧実装と同じ候補メジャーのループ構造のまま行う)。
+ *    NaNが混じった場合の扱い(`fresh < worstFresh`がfalseになり更新されない)も、
+ *    比較の構造自体を変えていないため旧実装と同一の挙動になる。
+ *
  * ### 確認できた範囲(鉄則8: 観測していないことを断定しない)
  *
  * 確認できているのは次の点である:
- *   1. 既存 `bet-allocation.test.ts` の80件超(複勝経路。無改変)が、D-2a・#96いずれの
+ *   1. 既存 `bet-allocation.test.ts` の80件超(複勝経路。無改変)が、D-2a・#96・#107いずれの
  *      置き換えの前後でも出力がビット一致すること(`toBe` による厳密等価)
  *   2. `allocation-primitives.test.ts`の「高速パスとブルートフォースが同じ結果になること」
- *      (テーブル駆動。候補数・outcome数・接触密度・オッズ分布の異なる複数条件×greedySteps
- *      複数水準)が、Issue #96のメモ化導入後もブルートフォース参照実装(未改変)と`toEqual`で
- *      厳密一致すること
+ *      (テーブル駆動。候補数・outcome数・接触密度・オッズ分布の異なる複数条件、および
+ *      Issue #107(#24-C)で追加した「実際の順序付きoutcome空間の形」シナリオ×greedySteps
+ *      複数水準)が、Issue #96・#107いずれのメモ化・CSR化・接頭辞和再利用導入後も
+ *      ブルートフォース参照実装(未改変)と`toEqual`で厳密一致すること
+ *   3. `scripts/bench-run-greedy-allocation.ts`のAC-1b自己検査(自前構築した`OutcomeIndexSet[]`
+ *      に対する本関数の結果が、同じ入力に対する`allocateGeneralBets`の`continuousFraction`と
+ *      `===`で一致すること)が、Issue #107の最適化前後どちらでも通ること
  * この確認範囲を超えて「あらゆる入力で常にビット一致する」とは主張しない。
  *
  * 実測: `pnpm tsx scripts/bench-allocation.ts`(D-2a時点)・
- * `pnpm tsx scripts/bench-mixed-allocation.ts`(Issue #96時点)。具体的な数値は実行環境に
- * 依存するため、再現コマンドで都度確認すること(固定の数値をここに書き込まない)。
+ * `pnpm tsx scripts/bench-mixed-allocation.ts`(Issue #96時点)・
+ * `pnpm tsx scripts/bench-run-greedy-allocation.ts`(Issue #107時点。フェーズ別内訳・
+ * `runGreedyAllocation`単体の所要時間を含む)。具体的な数値は実行環境に依存するため、
+ * 再現コマンドで都度確認すること(固定の数値をここに書き込まない)。
  */
 export function runGreedyAllocation(
   n: number,
@@ -383,11 +447,56 @@ export function runGreedyAllocation(
 
   const outcomeCount = outcomeIndexSets.length;
 
-  // 候補→接触先outcomeの逆引き(「総接触数」分だけ。ステップループの外で1回だけ構築する)。
-  const contactsByCandidate: number[][] = Array.from({ length: n }, () => [] as number[]);
+  // ── CSR化(outcome-major・Issue #107)。outcomeIndexSets[j].indicesを1本のInt32Arrayへ
+  // 連結する。走査順序は元の`indices`配列の順序(候補インデックス昇順。OutcomeIndexSetの
+  // 不変条件)をそのまま保つ(連結するだけなので走査順は変わらない)。ステップループの外で
+  // 1回だけ構築する。
+  const outcomeOffsets = new Int32Array(outcomeCount + 1);
   for (let j = 0; j < outcomeCount; j++) {
-    for (const idx of outcomeIndexSets[j]!.indices) {
-      contactsByCandidate[idx]!.push(j);
+    outcomeOffsets[j + 1] = outcomeOffsets[j]! + outcomeIndexSets[j]!.indices.length;
+  }
+  const totalEdges = outcomeOffsets[outcomeCount]!;
+  const outcomeIndicesFlat = new Int32Array(totalEdges);
+  const outcomeProbabilities = new Float64Array(outcomeCount);
+  {
+    let g = 0;
+    for (let j = 0; j < outcomeCount; j++) {
+      outcomeProbabilities[j] = outcomeIndexSets[j]!.probability;
+      for (const idx of outcomeIndexSets[j]!.indices) {
+        outcomeIndicesFlat[g] = idx;
+        g++;
+      }
+    }
+  }
+
+  // ── CSR化(candidate-major・Issue #107)。候補→接触先outcomeの逆引き(旧
+  // `contactsByCandidate`)を平坦化する。書き込み順序(=候補ごとの接触先の並び順)は
+  // 旧実装(outcome番号jを0から昇順に走査しながらpushする)と同じにする。
+  // `contactPositionFlat`は「候補iがoutcome jのindices配列の中で何番目(0始まり)か」を
+  // 記録する(`OutcomeIndexSet`の不変条件〈重複なし〉により一意に決まる)。接頭辞和の再利用
+  // (下記)で使う。
+  const contactCountByCandidate = new Int32Array(n);
+  for (let g = 0; g < totalEdges; g++) {
+    contactCountByCandidate[outcomeIndicesFlat[g]!]!++;
+  }
+  const contactOffsets = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    contactOffsets[i + 1] = contactOffsets[i]! + contactCountByCandidate[i]!;
+  }
+  const contactOutcomeFlat = new Int32Array(totalEdges);
+  const contactPositionFlat = new Int32Array(totalEdges);
+  {
+    const cursor = contactOffsets.slice(0, n); // 候補ごとの書き込みカーソル(初期値=開始オフセット)。
+    for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
+      for (let g = start; g < end; g++) {
+        const idx = outcomeIndicesFlat[g]!;
+        const w = cursor[idx]!;
+        contactOutcomeFlat[w] = j;
+        contactPositionFlat[w] = g - start; // outcome j内での位置(0始まり)。
+        cursor[idx] = w + 1;
+      }
     }
   }
 
@@ -395,13 +504,28 @@ export function runGreedyAllocation(
   const delta = 1 / greedySteps;
   let sumX = 0;
 
+  // ── ステップループの外で1回だけ確保し、毎ステップ全要素を書き潰して再利用するバッファ
+  // (Issue #107)。commonWealth・freshFlatはif(safe)の外で毎ステップ全要素を書き潰してから
+  // 読むため安全。commonLogWealthはif(safe)の中でのみ書かれるが、読み出しも同じif(safe)
+  // ブロック内でしか発生しないため、safe===falseのステップで前回の値が紛れ込むことはない
+  // (本関数JSDoc「Issue #107」節参照)。
+  const commonWealth = new Float64Array(outcomeCount);
+  const prefixSum = new Float64Array(totalEdges); // outcome-major(上記CSRと同じ配置)。
+  const commonLogWealth = new Float64Array(outcomeCount);
+  const freshFlat = new Float64Array(totalEdges); // candidate-major(上記CSRと同じ配置)。
+
   // 旧来のブルートフォース計算。フォールバック専用として温存する(EPSガードがきわどい
-  // 稀なステップと、状態更新〈currentFの再計算〉の両方で使う。既存実装と完全に同じ式)。
+  // 稀なステップと、状態更新〈currentFの再計算〉の両方で使う)。CSR化した配列を使うが、
+  // 走査順序・演算順序は旧実装(outcomeIndexSets[j].indicesを順に辿る版)と完全に同じ
+  // (outcomeIndicesFlatは`indices`を元の順序のまま連結しただけであるため)。
   const computeF = (trialSumX: number, trialX: readonly number[]): number | null => {
     let total = 0;
-    for (const outcome of outcomeIndexSets) {
+    for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
       let payout = 0;
-      for (const idx of outcome.indices) {
+      for (let g = start; g < end; g++) {
+        const idx = outcomeIndicesFlat[g]!;
         payout += trialX[idx]! * odds[idx]!;
       }
       const wealth = 1 - trialSumX + payout;
@@ -409,7 +533,7 @@ export function runGreedyAllocation(
         // 資産が0以下になる割当は候補から除外する(logの定義域外)。
         return null;
       }
-      total += outcome.probability * Math.log(wealth);
+      total += outcomeProbabilities[j]! * Math.log(wealth);
     }
     return total;
   };
@@ -420,11 +544,16 @@ export function runGreedyAllocation(
   for (let step = 0; step < greedySteps; step++) {
     const trialSumX = sumX + delta;
 
-    // commonWealth_T = 1 - trialSumX + P_T(現在のxでのpayout)。
-    const commonWealth = new Array<number>(outcomeCount);
+    // commonWealth_T = 1 - trialSumX + P_T(現在のxでのpayout)。同じforward累算の中で、
+    // 位置pより前までの部分和(現在のx。未変更)を`prefixSum`へ保存する(接頭辞和の再利用。
+    // 追加コストはstore1回/要素だけなので、このループ自体のコストは実質変わらない)。
     for (let j = 0; j < outcomeCount; j++) {
+      const start = outcomeOffsets[j]!;
+      const end = outcomeOffsets[j + 1]!;
       let payout = 0;
-      for (const idx of outcomeIndexSets[j]!.indices) {
+      for (let g = start; g < end; g++) {
+        prefixSum[g] = payout; // このoutcome内で位置(g-start)より前までの和。
+        const idx = outcomeIndicesFlat[g]!;
         payout += x[idx]! * odds[idx]!;
       }
       commonWealth[j] = 1 - trialSumX + payout;
@@ -439,41 +568,39 @@ export function runGreedyAllocation(
       }
     }
 
-    // 採用B(2)(Issue #96): 接触先outcome1件分のfreshWealthを、旧実装(bet-allocation.test.ts
-    // 抽出前からの既存式)と全く同じ式・操作列で1回だけ計算し、候補ごとの配列に保存して
-    // 下記の候補評価ループ(高速パス)で再利用する(同じ値を2回計算しない。「同じ引数に対する
-    // 同じ関数値を1回だけ計算する」だけなので値はビット同一になる)。
-    //
-    // 【採用C(fresh = commonWealth[j] + delta*odds[i]というO(1)の恒等式)は不採用】
-    // (Issue #96・boss確認済み)。数学的には同値だが、浮動小数演算としては旧来のループ版と
-    // ビット一致しない(IEEE754の乗算・加算は分配則を厳密には満たさないため)。この差が
-    // argmax(bestIdx)の反転を実際に引き起こすことを`bet-allocation.test.ts`「キャップで
-    // betCountが2頭→1頭に減り、notDiversifiedが立つこと」(全odds=3で目的関数が平坦になる
-    // 退化ケース。同ファイルのJSDocが「貪欲の評価順序・加算順序が生む丸め誤差というタイブレーク
-    // がたまたま選んだ1点」の検知用番人と明記している)で実測した(betCountが2→1に変化し
-    // `pnpm --filter @keiba/core test`が赤くなった。C抜き・旧来のループ版に戻すと全2544件が
-    // 緑に戻ることも実測済み)。AC-3(既存テストの非破壊)を満たせないため、Cは採用しない
-    // (署名畳み込み〈採用A〉だけでも実測3360→1023outcomeの削減効果があり、#96の目的は
-    // A+Bで達成できる)。
+    // 接頭辞和の再利用(Issue #107)。候補iについて、接触先outcome j(位置p)のfreshは
+    //   payout = prefixSum[position(i,j)]        ← 位置pより前(旧実装と同じ累算値・同じ操作列)
+    //   payout += (x[i]+δ)·odds[i]               ← 置き換わる1項(旧実装のv=x[i]+δの項と同一)
+    //   payout += t_{p+1} + ... + t_end           ← 位置pより後を元の順序のまま歩いて加算
+    // として求まる(本関数JSDoc「Issue #107」節参照)。旧実装(位置0からoutcome末尾まで
+    // 毎回フルスキャン)と同じ被加数を同じ順序・同じアキュムレータの上に足すだけであり、
+    // IEEE754の加算は決定的なのでビット一致する(採用C〈commonWealth[j]+delta·odds[i]〉が
+    // 分配則に依存する別演算列で不採用だったのとは異なる。上記JSDoc参照)。
+    // 走査順序(候補メジャー: 候補iを0からn-1、各候補の接触先をoutcome番号昇順)は旧実装から
+    // 変えていない。
     let worstFresh = Infinity;
-    const freshByCandidate: number[][] = new Array(n);
     for (let i = 0; i < n; i++) {
-      const contacts = contactsByCandidate[i]!;
-      const freshValues = new Array<number>(contacts.length);
-      for (let k = 0; k < contacts.length; k++) {
-        const j = contacts[k]!;
-        let payout = 0;
-        for (const idx of outcomeIndexSets[j]!.indices) {
-          const v = idx === i ? x[idx]! + delta : x[idx]!;
-          payout += v * odds[idx]!;
+      const cStart = contactOffsets[i]!;
+      const cEnd = contactOffsets[i + 1]!;
+      const freshTerm = (x[i]! + delta) * odds[i]!;
+      for (let c = cStart; c < cEnd; c++) {
+        const j = contactOutcomeFlat[c]!;
+        const p = contactPositionFlat[c]!;
+        const start = outcomeOffsets[j]!;
+        const end = outcomeOffsets[j + 1]!;
+        const g = start + p;
+        let payout = prefixSum[g]!;
+        payout += freshTerm;
+        for (let g2 = g + 1; g2 < end; g2++) {
+          const idx2 = outcomeIndicesFlat[g2]!;
+          payout += x[idx2]! * odds[idx2]!;
         }
         const fresh = 1 - trialSumX + payout;
-        freshValues[k] = fresh;
+        freshFlat[c] = fresh;
         if (fresh < worstFresh) {
           worstFresh = fresh;
         }
       }
-      freshByCandidate[i] = freshValues;
     }
     const safe = Math.min(worstCommon, worstFresh) > NUMERIC_EPS;
 
@@ -481,25 +608,22 @@ export function runGreedyAllocation(
     let bestIncrement = 0; // 増分の最大値が0以下になったら停止するため、初期値は0(厳密に上回る候補のみ採用)。
 
     if (safe) {
-      // 高速パス: O(outcome数+総接触数)。
-      // 採用B(1)(Issue #96): commonLogSum(全候補共通)の算出と同じループで
-      // Math.log(commonWealth[j])を1回だけ計算して配列に保持し、候補評価ループで再利用する
-      // (旧実装は候補ごとに同じlogを再計算していた)。
+      // 高速パス: O(outcome数+総接触数)相当(接頭辞和の再利用によりfreshFlat算出自体も
+      // Σ|indices_j|(|indices_j|+1)/2程度に削減済み。本関数JSDoc「Issue #107」節参照)。
       let commonLogSum = 0;
-      const commonLogWealth = new Array<number>(outcomeCount);
       for (let j = 0; j < outcomeCount; j++) {
         const logW = Math.log(commonWealth[j]!);
         commonLogWealth[j] = logW;
-        commonLogSum += outcomeIndexSets[j]!.probability * logW;
+        commonLogSum += outcomeProbabilities[j]! * logW;
       }
       for (let i = 0; i < n; i++) {
         let trialLogSum = commonLogSum;
-        const contacts = contactsByCandidate[i]!;
-        const freshValues = freshByCandidate[i]!;
-        for (let k = 0; k < contacts.length; k++) {
-          const j = contacts[k]!;
-          const prob = outcomeIndexSets[j]!.probability;
-          trialLogSum = trialLogSum - prob * commonLogWealth[j]! + prob * Math.log(freshValues[k]!);
+        const cStart = contactOffsets[i]!;
+        const cEnd = contactOffsets[i + 1]!;
+        for (let c = cStart; c < cEnd; c++) {
+          const j = contactOutcomeFlat[c]!;
+          const prob = outcomeProbabilities[j]!;
+          trialLogSum = trialLogSum - prob * commonLogWealth[j]! + prob * Math.log(freshFlat[c]!);
         }
         const increment = trialLogSum - currentF;
         if (increment > bestIncrement) {

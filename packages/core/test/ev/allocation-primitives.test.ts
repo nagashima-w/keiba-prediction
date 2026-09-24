@@ -664,7 +664,7 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
 
             // 前提1: outcome数が3桁であること(既存4シナリオが覆っていなかった形の固定)。
             expect(outcomeIndexSets.length).toBeGreaterThanOrEqual(100);
-            // 前提2: |indices|が一様でなく偏っていること(win/place/trioは高々1件、wideは高々3件と
+            // 前提2: |indices|が一様でなく偏っていること(win/trioは高々1件、place/wideは高々3件と
             // 候補種別ごとに構造的に決まるため、単一の値には潰れない)。
             const distinctSizes = new Set(outcomeIndexSets.map((s) => s.indices.length));
             expect(distinctSizes.size).toBeGreaterThanOrEqual(2);
