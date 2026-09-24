@@ -260,6 +260,19 @@ export interface AppSettings {
    * 意味論・設計判断は `includeWideInAllocation` と同じ(そちらのJSDoc参照)。
    */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。既定true(ユーザー指定:
+   * 新しい券種は配分の対象に初期値で含める。`CLAUDE.md`「現在の優先順位」参照)。
+   * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
+   * `includeTrioInAllocation` と同じ(そちらのJSDoc参照)。
+   *
+   * **#24-D3a時点ではこの設定は画面に出ない(SettingsView.tsxにトグルを追加しない)。**
+   * 候補ビルダー(`shared/mixed-race-allocation.ts` の `resolveMixedBetTypes`)もまだ馬連の
+   * 候補を作らないため、この設定を変えても配分結果は変わらない(D-2フォールバック規則
+   * `isComboBetTypesOff` にもまだ加えない)。実際に画面へ出し、候補ビルダー・フォールバック
+   * 規則に組み込むのは #24-D3b(Issue #115本文参照)。
+   */
+  readonly includeQuinellaInAllocation: boolean;
 }
 
 /**
@@ -299,6 +312,12 @@ export interface MaskedSettings {
   readonly includeWideInAllocation: boolean;
   /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段)。往復編集フォームとして表示するためそのまま返す。 */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。往復編集フォームとして表示するため
+   * そのまま返す。#24-D3a時点では対応する画面トグルが無いため往復対象は無いが、往復自体は
+   * 他の配分対象設定と同じ形にしておく(D3bでトグルを追加したときの配線を変えないため)。
+   */
+  readonly includeQuinellaInAllocation: boolean;
 }
 
 /**
@@ -346,6 +365,11 @@ export interface SettingsUpdate {
    * (既定true・boolean以外は既定へフォールバック)。
    */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。意味論は`includeWideInAllocation`と
+   * 同じ(既定true・boolean以外は既定へフォールバック)。
+   */
+  readonly includeQuinellaInAllocation: boolean;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */

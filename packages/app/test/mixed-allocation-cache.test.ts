@@ -23,6 +23,7 @@ function key(overrides: Partial<MixedAllocationCacheKey> = {}): MixedAllocationC
     includeComboOdds: true,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -61,8 +62,9 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     expect(computeB).toHaveBeenCalledTimes(1);
   });
 
-  // AC21強化: キャッシュキーの9項目を1つずつ変えたとき、必ずキャッシュがミスする
-  // (compute()が再度呼ばれる)ことをテーブル駆動で固定する。1項目でも比較から漏れると、
+  // AC21強化(#24-D3a・Issue #115でincludeQuinellaInAllocationを追加し10項目化): キャッシュキーの
+  // 10項目を1つずつ変えたとき、必ずキャッシュがミスする(compute()が再度呼ばれる)ことを
+  // テーブル駆動で固定する。1項目でも比較から漏れると、
   // 「設定を変えたのに前回の金額が表示され続ける」静かな誤りになる。
   const baseKey = key();
   const mutationCases: { name: string; mutate: (k: MixedAllocationCacheKey) => MixedAllocationCacheKey }[] = [
@@ -75,6 +77,7 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     { name: "includeComboOdds", mutate: (k) => ({ ...k, includeComboOdds: !k.includeComboOdds }) },
     { name: "includeWideInAllocation", mutate: (k) => ({ ...k, includeWideInAllocation: !k.includeWideInAllocation }) },
     { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
+    { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
   ];
 
   it.each(mutationCases)(
@@ -97,7 +100,7 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     },
   );
 
-  it("9項目すべてが一致すれば(新しいオブジェクトのkeyでも)ヒットすること(項目過剰検知にならないことの確認)", () => {
+  it("10項目すべてが一致すれば(新しいオブジェクトのkeyでも)ヒットすること(項目過剰検知にならないことの確認)", () => {
     const cache = createMixedAllocationCache<string>();
     const compute = vi.fn(() => "value");
     cache.get(key(), compute);
@@ -126,8 +129,9 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
 
 // Issue #110(#24-C2): 配分計算を1レースずつ進める仕組み(mixed-allocation-queue.ts)は、
 // 「計算せずに今の値だけを覗く」経路が必要なため`peek`を追加する。
-// `peek`は表示の読み出し経路そのもの(AC-3'(a)の要)なので、`get`と同じ9項目の厳しさで
-// 独立にテーブル駆動テストを固定する(既存の`get`用テーブル・アサーションは1件も変更しない。
+// `peek`は表示の読み出し経路そのもの(AC-3'(a)の要)なので、`get`と同じ10項目
+// (#24-D3a・Issue #115でincludeQuinellaInAllocationを追加)の厳しさで独立にテーブル駆動
+// テストを固定する(既存の`get`用テーブル・アサーションは1件も変更しない。
 // 上のdescribeブロックとは別の新規テーブルとして持つ)。
 describe("createMixedAllocationCache().peek(値を計算せずに照会する。Issue #110)", () => {
   it("computeを呼んだことが無いキーはundefinedを返すこと(副作用なし=computeを一切呼ばない)", () => {
@@ -145,7 +149,7 @@ describe("createMixedAllocationCache().peek(値を計算せずに照会する。
     expect(compute).toHaveBeenCalledTimes(1);
   });
 
-  // AC-3'(a)相当: キー9項目を1つずつ変えたとき、peekは必ずミス(undefined)すること。
+  // AC-3'(a)相当: キー10項目を1つずつ変えたとき、peekは必ずミス(undefined)すること。
   // 「設定を変えたのに古い金額がpeekでヒットし続ける」ことをこのテーブルで塞ぐ。
   const peekBaseKey = key();
   const peekMutationCases: { name: string; mutate: (k: MixedAllocationCacheKey) => MixedAllocationCacheKey }[] = [
@@ -158,6 +162,7 @@ describe("createMixedAllocationCache().peek(値を計算せずに照会する。
     { name: "includeComboOdds", mutate: (k) => ({ ...k, includeComboOdds: !k.includeComboOdds }) },
     { name: "includeWideInAllocation", mutate: (k) => ({ ...k, includeWideInAllocation: !k.includeWideInAllocation }) },
     { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
+    { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
   ];
 
   it.each(peekMutationCases)(

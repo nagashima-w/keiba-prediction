@@ -33,8 +33,12 @@
  * | `includeComboOdds` | D-2フォールバック規則の条件①に直結(ONOFFで混在経路に入るか自体が変わる) |
  * | `includeWideInAllocation` | D-1の`betTypes`組み立てに直結 |
  * | `includeTrioInAllocation` | 同上 |
+ * | `includeQuinellaInAllocation` | #24-D3a(Issue #115)で追加。D3a時点では`resolveMixedBetTypes`に
+ *   未接続で表示データを一切左右しないが、D3bで接続されたときに漏れが起きないよう先に
+ *   キー材料へ含める(表全体の唯一の定義元として、この表を更新してから型・比較関数・
+ *   `BatchAnalysisView.tsx`のキー組み立てを直す、という導入手順を踏む) |
  *
- * 上記9項目のいずれか1つでも比較から漏れると、その項目だけを変えた操作でキャッシュが
+ * 上記10項目のいずれか1つでも比較から漏れると、その項目だけを変えた操作でキャッシュが
  * 誤ってヒットし続ける(`mixed-allocation-cache.test.ts`のテーブル駆動テストが、
  * 1項目ずつ変えたときに必ずミスすることを固定している)。
  *
@@ -43,7 +47,7 @@
  * 新しい経路〈`mixed-allocation-queue.ts`〉が独自のキー定義を持つことはない)。**
  */
 
-/** キャッシュキー(表の9項目をそのまま構造体にしたもの)。 */
+/** キャッシュキー(表の10項目をそのまま構造体にしたもの)。 */
 export interface MixedAllocationCacheKey {
   readonly raceId: string;
   /** `AnalysisResult`への参照。内容比較ではなく参照(`===`)で同一性を判定する。 */
@@ -55,6 +59,7 @@ export interface MixedAllocationCacheKey {
   readonly includeComboOdds: boolean;
   readonly includeWideInAllocation: boolean;
   readonly includeTrioInAllocation: boolean;
+  readonly includeQuinellaInAllocation: boolean;
 }
 
 /** レース単位でメモ化するキャッシュ(値の型`T`は呼び出し側が決める。表示データを想定)。 */
@@ -66,7 +71,7 @@ export interface MixedAllocationCache<T> {
    */
   get(key: MixedAllocationCacheKey, compute: () => T): T;
   /**
-   * `compute`を一切呼ばずに照会する(副作用なし)。`key`の9項目すべてが前回`get`/`step`で
+   * `compute`を一切呼ばずに照会する(副作用なし)。`key`の10項目すべてが前回`get`/`step`で
    * 書き込んだときのキーと一致すればその値を返し、一致しなければ(未計算、または別の設定で
    * 書かれていれば)`undefined`を返す。`get`と同じ`cacheKeyEquals`を使う(比較ロジックを
    * 二重に持たない)。
@@ -80,7 +85,7 @@ export interface MixedAllocationCache<T> {
   peek(key: MixedAllocationCacheKey): T | undefined;
 }
 
-/** キー9項目すべてが一致するかを判定する(表の全項目を漏れなく比較する唯一の場所)。 */
+/** キー10項目すべてが一致するかを判定する(表の全項目を漏れなく比較する唯一の場所)。 */
 function cacheKeyEquals(a: MixedAllocationCacheKey, b: MixedAllocationCacheKey): boolean {
   return (
     a.raceId === b.raceId &&
@@ -91,7 +96,8 @@ function cacheKeyEquals(a: MixedAllocationCacheKey, b: MixedAllocationCacheKey):
     a.evThreshold === b.evThreshold &&
     a.includeComboOdds === b.includeComboOdds &&
     a.includeWideInAllocation === b.includeWideInAllocation &&
-    a.includeTrioInAllocation === b.includeTrioInAllocation
+    a.includeTrioInAllocation === b.includeTrioInAllocation &&
+    a.includeQuinellaInAllocation === b.includeQuinellaInAllocation
   );
 }
 

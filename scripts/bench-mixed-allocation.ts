@@ -182,6 +182,9 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     includeComboOdds: true,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    // #24-D3a(Issue #115)で追加。候補ビルダーはまだ馬連の候補を作らないため
+    // (resolveMixedBetTypes未接続)、この値は感度表の出力に一切影響しない。
+    includeQuinellaInAllocation: true,
   };
 
   // ウォームアップ1回(JITの影響を減らす)を除いた上で、実運用の1レース分の呼び出し

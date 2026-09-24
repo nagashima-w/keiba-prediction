@@ -126,12 +126,18 @@ export interface PipelineWiringConfig {
    */
   readonly includeComboOdds?: boolean;
   /**
-   * 配分提案(Issue #59)の設定5項目(`bankroll`/`perRaceCap`/`kellyFraction`/
-   * `includeWideInAllocation`/`includeTrioInAllocation`)。`includeComboOdds`は含めない
-   * (上記の`includeComboOdds`が単一ソース。ここへ二重に持たせない。#59 4節)。
-   * 省略時は `AnalysisPipelineDeps.allocationSettings` が null になり、この呼び出しでは
-   * 配分計算を行わない(既存呼び出し元・`pipeline-deps.test.ts`の20箇所超との後方互換のため
-   * このフィールド自体は任意のままとする。#59着手前確認済み)。
+   * 配分提案(Issue #59)の設定6項目(`bankroll`/`perRaceCap`/`kellyFraction`/
+   * `includeWideInAllocation`/`includeTrioInAllocation`/`includeQuinellaInAllocation`)。
+   * `includeComboOdds`は含めない(上記の`includeComboOdds`が単一ソース。ここへ二重に
+   * 持たせない。#59 4節)。省略時は `AnalysisPipelineDeps.allocationSettings` が null になり、
+   * この呼び出しでは配分計算を行わない(既存呼び出し元・`pipeline-deps.test.ts`の20箇所超との
+   * 後方互換のためこのフィールド自体は任意のままとする。#59着手前確認済み)。
+   *
+   * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は5→6項目化した追加分。ここで
+   * 受け取り、下でincludeComboOddsと合成した`AnalysisAllocationSettings`(main/allocation-record.ts)
+   * までそのまま運ぶが、`allocation-record.ts`のメタ行(`analysis_allocation_meta`)へは
+   * 書かない(#59が固定した列一覧の凍結を解除するのは#24-D3b。`allocation-record.ts`冒頭の
+   * JSDoc参照)。
    */
   readonly allocationSettings?: {
     readonly bankroll: number;
@@ -139,6 +145,7 @@ export interface PipelineWiringConfig {
     readonly kellyFraction: number;
     readonly includeWideInAllocation: boolean;
     readonly includeTrioInAllocation: boolean;
+    readonly includeQuinellaInAllocation: boolean;
   };
   /**
    * better-sqlite3 のネイティブバインディング(.node)の絶対パス(Issue #60-B)。

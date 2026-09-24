@@ -65,6 +65,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeComboOdds: true,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -275,22 +276,24 @@ describe("テストヘルパー自己テスト", () => {
 // ============================================================================
 
 describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを避けるための合成)", () => {
-  it("6項目のAnalysisAllocationSettingsにevThresholdを合成し、7項目のMixedAllocationSettingsになること", () => {
-    const six: AnalysisAllocationSettings = {
+  it("7項目のAnalysisAllocationSettingsにevThresholdを合成し、8項目のMixedAllocationSettingsになること", () => {
+    const seven: AnalysisAllocationSettings = {
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
       includeComboOdds: true,
       includeWideInAllocation: false,
       includeTrioInAllocation: true,
+      includeQuinellaInAllocation: false,
     };
-    expect(toMixedAllocationSettings(six, 1.2)).toEqual({
+    expect(toMixedAllocationSettings(seven, 1.2)).toEqual({
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
       includeComboOdds: true,
       includeWideInAllocation: false,
       includeTrioInAllocation: true,
+      includeQuinellaInAllocation: false,
       evThreshold: 1.2,
     });
   });
@@ -301,21 +304,23 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
     // (false,true)にして異ならせ、実装が {...settings, evThreshold} のスプレッドから
     // フィールド個別列挙(例: includeComboOdds: settings.includeTrioInAllocationのような取り違え)
     // へ退行しても検出できるようにする。
-    const six: AnalysisAllocationSettings = {
+    const seven: AnalysisAllocationSettings = {
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
     };
-    expect(toMixedAllocationSettings(six, 2.5)).toEqual({
+    expect(toMixedAllocationSettings(seven, 2.5)).toEqual({
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
       evThreshold: 2.5,
     });
   });
@@ -323,26 +328,30 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
   it("3件目: includeTrioInAllocationを1件目・2件目とも異なるfalseにし、条件A(定数でない)を満たすこと(coordinator水平展開レビュー対応)", () => {
     // coordinator指摘: includeTrioInAllocationが1件目・2件目ともtrueで定数のままだと、
     // `includeTrioInAllocation: settings.includeTrioInAllocation`を`true`直書きに変異させても
-    // 検出できない。booleanは2値しかないため、3項目(includeComboOdds/includeWideInAllocation/
-    // includeTrioInAllocation)を2件だけで「非定数」かつ「互いに異なるパターン」にはできない
-    // (鳩の巣原理。ipc-allocation-wiring.test.tsと同じ理由で3件目を追加する)。
-    // パターン(件1,件2,件3): comboOdds=(T,F,T)・wide=(F,T,T)・trio=(T,T,F)とし、
-    // 3項目とも非定数かつ互いに異なる列にする。
-    const six: AnalysisAllocationSettings = {
+    // 検出できない。booleanは2値しかないため、4項目(includeComboOdds/includeWideInAllocation/
+    // includeTrioInAllocation/includeQuinellaInAllocation)を2件だけで「非定数」かつ
+    // 「互いに異なるパターン」にはできない(鳩の巣原理。ipc-allocation-wiring.test.tsと同じ
+    // 理由で3件目を追加する)。
+    // パターン(件1,件2,件3): comboOdds=(T,F,T)・wide=(F,T,T)・trio=(T,T,F)・quinella=(F,T,F)とし、
+    // 4項目とも非定数かつ互いに異なる列にする(#24-D3aでquinella列を追加。3ビットパターン
+    // 8通りのうち既存3列〈TFT・FTT・TTF〉と異ならせ、かつ非定数〈全件同値でない〉ものを選ぶ)。
+    const seven: AnalysisAllocationSettings = {
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: false,
+      includeQuinellaInAllocation: false,
     };
-    expect(toMixedAllocationSettings(six, 3.7)).toEqual({
+    expect(toMixedAllocationSettings(seven, 3.7)).toEqual({
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
       includeComboOdds: true,
       includeWideInAllocation: true,
       includeTrioInAllocation: false,
+      includeQuinellaInAllocation: false,
       evThreshold: 3.7,
     });
   });
@@ -543,6 +552,24 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       modelApproximate: false,
       oddsStatus: "result",
     });
+  });
+
+  it("route=mixed: includeQuinellaInAllocation(#24-D3a・Issue #115)をtrue/falseに変えてもメタ行が一切変わらないこと(#59スキーマ固定を#24-D3aでは解除しない。DB列追加は#24-D3bへ送る裁定の確認)", () => {
+    const race = raceWithPositiveCombos(8, { trioCombo: undefined });
+    const sOn = settings({ includeQuinellaInAllocation: true });
+    const sOff = settings({ includeQuinellaInAllocation: false });
+    const outcomeOn = buildMixedRaceAllocationWithOutcome(race, sOn);
+    const outcomeOff = buildMixedRaceAllocationWithOutcome(race, sOff);
+    if (outcomeOn.view.kind !== "mixed" || outcomeOff.view.kind !== "mixed") {
+      throw new Error("前提が崩れている(mixedに到達しなかった)");
+    }
+    const recOn = buildAllocationRecord(outcomeOn, sOn, "result");
+    const recOff = buildAllocationRecord(outcomeOff, sOff, "result");
+    // 前提固定: メタ行に "includeQuinella" というキー自体が無いこと(#59スキーマ固定。
+    // これが無いことは上のtoEqualテストで既に保証されているが、ここでも明示する)。
+    expect(Object.keys(recOn.meta)).not.toContain("includeQuinella");
+    expect(recOff.meta).toEqual(recOn.meta);
+    expect(recOff.bets).toEqual(recOn.bets);
   });
 
   it("AC3: mixed経路でSUM(stake)===totalStake・COUNT(*)===betCountが成り立ち、bet_typeが複勝/ワイド/3連複それぞれ正しく振り分けられること", () => {

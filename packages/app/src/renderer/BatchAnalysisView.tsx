@@ -651,6 +651,7 @@ export function BatchAnalysisView(
       includeComboOdds: s.includeComboOdds,
       includeWideInAllocation: s.includeWideInAllocation,
       includeTrioInAllocation: s.includeTrioInAllocation,
+      includeQuinellaInAllocation: s.includeQuinellaInAllocation,
     };
   };
   // 実際の計算。既存の同期経路(旧実装)と全く同じ関数・同じ引数で呼ぶ(AC-6: 答えを変えない)。

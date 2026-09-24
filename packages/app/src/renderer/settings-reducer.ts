@@ -80,6 +80,14 @@ export interface SettingsFormState {
   readonly includeWideInAllocation: boolean;
   /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。既定true。 */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。既定true。
+   * #24-D3a時点では対応する切替アクション(SettingsAction)を持たない
+   * (SettingsView.tsxにトグルを出さないため。D3bで「馬連配分対象切替」アクションを追加する)。
+   * それでも読込・保存の往復・isDirty判定の対象には含める(将来トグルを追加したときの配線を
+   * この時点で通しておく)。
+   */
+  readonly includeQuinellaInAllocation: boolean;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -201,6 +209,8 @@ export interface SettingsSnapshot {
   readonly includeWideInAllocation: boolean;
   /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。 */
   readonly includeTrioInAllocation: boolean;
+  /** 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。 */
+  readonly includeQuinellaInAllocation: boolean;
 }
 
 /** 空文字ベースの初期スナップショットを作る。 */
@@ -221,6 +231,7 @@ function emptySnapshot(): SettingsSnapshot {
     // (createInitialSettingsStateも同様。ここはあくまで「まだ何も読み込んでいない」状態の表現)。
     includeWideInAllocation: false,
     includeTrioInAllocation: false,
+    includeQuinellaInAllocation: false,
   };
 }
 
@@ -244,6 +255,7 @@ export function createInitialSettingsState(): SettingsFormState {
     includeComboOdds: false,
     includeWideInAllocation: false,
     includeTrioInAllocation: false,
+    includeQuinellaInAllocation: false,
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -283,6 +295,7 @@ function applyMasked(
   const includeComboOdds = settings.includeComboOdds;
   const includeWideInAllocation = settings.includeWideInAllocation;
   const includeTrioInAllocation = settings.includeTrioInAllocation;
+  const includeQuinellaInAllocation = settings.includeQuinellaInAllocation;
   return {
     ...state,
     loaded: true,
@@ -303,6 +316,7 @@ function applyMasked(
     includeComboOdds,
     includeWideInAllocation,
     includeTrioInAllocation,
+    includeQuinellaInAllocation,
     savedSnapshot: {
       discordWebhookUrl,
       evThreshold,
@@ -317,6 +331,7 @@ function applyMasked(
       includeComboOdds,
       includeWideInAllocation,
       includeTrioInAllocation,
+      includeQuinellaInAllocation,
     },
   };
 }
@@ -466,6 +481,7 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     includeComboOdds: state.includeComboOdds,
     includeWideInAllocation: state.includeWideInAllocation,
     includeTrioInAllocation: state.includeTrioInAllocation,
+    includeQuinellaInAllocation: state.includeQuinellaInAllocation,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
@@ -515,6 +531,9 @@ export function isDirty(state: SettingsFormState): boolean {
     return true;
   }
   if (state.includeTrioInAllocation !== snap.includeTrioInAllocation) {
+    return true;
+  }
+  if (state.includeQuinellaInAllocation !== snap.includeQuinellaInAllocation) {
     return true;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

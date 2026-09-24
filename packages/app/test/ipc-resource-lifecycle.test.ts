@@ -64,6 +64,7 @@ const validUpdate: SettingsUpdate = {
   includeComboOdds: false,
   includeWideInAllocation: true,
   includeTrioInAllocation: true,
+  includeQuinellaInAllocation: true,
 };
 
 /** 登録済みハンドラを取得する。 */

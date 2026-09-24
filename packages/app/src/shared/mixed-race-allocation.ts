@@ -130,6 +130,16 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
   readonly includeWideInAllocation: boolean;
   /** 三連複を配分対象に含めるか(`AppSettings.includeTrioInAllocation`)。 */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を配分対象に含めるか(`AppSettings.includeQuinellaInAllocation`。#24-D3a・Issue #115)。
+   *
+   * **#24-D3a時点ではこのフィールドは未使用**(`resolveMixedBetTypes`・`isComboBetTypesOff`の
+   * どちらも参照しない。`quinella-allocation-setting-wiring.test.ts`がソース走査で固定する)。
+   * 候補ビルダーが実際に馬連の候補を作り、D-2フォールバック規則にも組み込むのは#24-D3b。
+   * D3aで組み込むと、馬連の候補が無いまま混在経路に入り配分の答えが変わりうるため
+   * (Issue #115本文「踏む地雷(3)」)、意図的に未接続のまま設定だけを配管する。
+   */
+  readonly includeQuinellaInAllocation: boolean;
 }
 
 /**
@@ -174,11 +184,19 @@ export type MixedRaceAllocationView =
 /**
  * D-1: 設定(2つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
  * 複勝・単勝は常に含める(A-2是正・Issue #90・#23-B2)。単勝には`includeWinInAllocation`の
- * ような専用トグルを作らない(D-10・boss裁定): 作ると`MixedAllocationSettings`が7→8項目に
- * なり、メタ行の設定エコー(実効設定7列)がスキーマ変更になるため。単勝は混在経路が
- * 実際に計算される限り常に対象であり、D-2フォールバック(ワイド・3連複が使えない設定・
- * 状況)に該当すれば`buildRaceAllocation`(複勝専用の従来経路)へ丸ごと落ちるため、
- * winだけを個別にOFFにする設定は不要(D-7)。
+ * ような専用トグルを作らない(D-10・boss裁定): 作ると`MixedAllocationSettings`の項目が増え、
+ * メタ行の設定エコーがスキーマ変更になるため。単勝は混在経路が実際に計算される限り常に対象であり、
+ * D-2フォールバック(ワイド・3連複が使えない設定・状況)に該当すれば`buildRaceAllocation`
+ * (複勝専用の従来経路)へ丸ごと落ちるため、winだけを個別にOFFにする設定は不要(D-7)。
+ *
+ * **馬連(`includeQuinellaInAllocation`。#24-D3a・Issue #115)は単勝と異なりトグル自体は
+ * 設ける**が、この関数(候補ビルダー)には接続しない。`MixedAllocationSettings`の項目が
+ * 7→8項目になった一方、`allocation-record.ts`の設定エコー7列(メタ行スキーマ)は変えない
+ * (呼び出し側が渡した8項目のうち7項目だけをメタ行へ写す。全項目を機械的にエコーする
+ * 契約ではない)。#59が固定した「メタ行の列一覧は増減が停止条件」という制約はここでは
+ * 解除しない(読む人がまだいないため。#59原則「誰も読まない列にコストを払わない」)。
+ * トグルを候補ビルダー・メタ行の両方へ接続するのは#24-D3b。
+ *
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。
  */

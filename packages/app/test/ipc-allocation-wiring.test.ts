@@ -75,6 +75,7 @@ function makeUpdate(overrides: Partial<SettingsUpdate> = {}): SettingsUpdate {
     includeComboOdds: true,
     includeWideInAllocation: true,
     includeTrioInAllocation: false,
+    includeQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -134,15 +135,18 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(Issue #59・AC1)", () => {
-  it("設定の配分5項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=true)", async () => {
+describe("ipc: 配分提案の設定6項目をcreatePipelineDepsへ配線する(Issue #59・AC1・#24-D3a)", () => {
+  it("設定の配分6項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=true)", async () => {
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
     const saveHandler = handlerFor(IPC_CHANNELS.saveSettings);
     const verifyHandler = handlerFor(IPC_CHANNELS.getVerifyReport);
 
-    await saveHandler(fakeEvent, makeUpdate({ includeComboOdds: true }));
+    await saveHandler(
+      fakeEvent,
+      makeUpdate({ includeComboOdds: true, includeQuinellaInAllocation: false }),
+    );
     verifyHandler(fakeEvent);
 
     const lastCall =
@@ -157,12 +161,13 @@ describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(
       kellyFraction: 0.5,
       includeWideInAllocation: true,
       includeTrioInAllocation: false,
+      includeQuinellaInAllocation: false,
     });
     // includeComboOddsはallocationSettingsに含めない(既存フィールドが単一ソース。#59 4節)。
     expect(config.includeComboOdds).toBe(true);
   });
 
-  it("設定の配分5項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=false)", async () => {
+  it("設定の配分6項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=false)", async () => {
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -181,9 +186,12 @@ describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(
         // includeWideInAllocationはtrueのまま(test1と同値)にしている——3件目のテストで
         // T,T,Fのパターンにし、includeComboOdds(T,F,T)・includeTrioInAllocation(F,T,F)の
         // いずれとも全3件で一致しないようにするため(下記3件目のコメント参照)。
+        // includeQuinellaInAllocation(#24-D3a)もtrueにし、件1(false)・件3(true)と合わせて
+        // FTTのパターンにする(既存3列TFT・TTF・FTFのいずれとも異なる4列目)。
         perRaceCap: 5000,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
+        includeQuinellaInAllocation: true,
       }),
     );
     verifyHandler(fakeEvent);
@@ -200,18 +208,21 @@ describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(
       kellyFraction: 0.3,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
     });
     expect(config.includeComboOdds).toBe(false);
   });
 
-  it("設定の配分5項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(3件目: includeComboOdds/includeWideInAllocation/includeTrioInAllocationの3値パターンを互いに識別できるようにする)", async () => {
+  it("設定の配分6項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(3件目: includeComboOdds/includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocationの4値パターンを互いに識別できるようにする)", async () => {
     // code-reviewer水平展開レビュー(finding3の残滓): 2件だけだとboolean項目は非定数化のため
     // 必ずT/Fの2値を両方使う必要があり、3項目(includeComboOdds/includeWideInAllocation/
     // includeTrioInAllocation)を2値×2件で非定数にすると鳩の巣原理でどれか2項目が
     // 全件同一パターンになってしまう(実際にincludeWideInAllocationとincludeComboOddsが
     // (true,false)/(true,false)で一致していたため、両者を入れ替えても検出できないことを
-    // 変異注入で確認済み)。3件目を追加し、3項目それぞれのパターンを
-    // comboOdds=(T,F,T)・wide=(T,T,F)・trio=(F,T,F)として互いに異ならせる。
+    // 変異注入で確認済み)。3件目を追加し、4項目それぞれのパターンを
+    // comboOdds=(T,F,T)・wide=(T,T,F)・trio=(F,T,F)・quinella=(F,T,T)として互いに異ならせる
+    // (#24-D3aでquinella列を追加。3ビットパターン8通りのうち既存3列と異ならせ、かつ
+    // 非定数〈全件同値でない〉ものを選ぶ)。
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -227,6 +238,7 @@ describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(
         perRaceCap: 1000,
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
+        includeQuinellaInAllocation: true,
       }),
     );
     verifyHandler(fakeEvent);
@@ -243,6 +255,7 @@ describe("ipc: 配分提案の設定5項目をcreatePipelineDepsへ配線する(
       kellyFraction: 0.9,
       includeWideInAllocation: false,
       includeTrioInAllocation: false,
+      includeQuinellaInAllocation: true,
     });
     expect(config.includeComboOdds).toBe(true);
   });

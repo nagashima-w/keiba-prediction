@@ -63,6 +63,7 @@ function makeUpdate(
     includeComboOdds: false,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
     ...overrides,
   };
 }

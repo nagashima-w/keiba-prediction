@@ -121,6 +121,7 @@ export function App(): React.JSX.Element {
     includeComboOdds: false,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
   });
 
   // 券種横断の馬券配分の表示データキャッシュ(機能D-2c第4段・Issue #28・AC21)。
@@ -204,6 +205,7 @@ export function App(): React.JSX.Element {
           includeComboOdds: s.includeComboOdds,
           includeWideInAllocation: s.includeWideInAllocation,
           includeTrioInAllocation: s.includeTrioInAllocation,
+          includeQuinellaInAllocation: s.includeQuinellaInAllocation,
         });
       })
       .catch(() => {

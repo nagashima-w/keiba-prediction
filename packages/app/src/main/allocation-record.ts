@@ -12,6 +12,12 @@
  * - 設定エコー7列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
  *   include_wide/include_trio): 呼び出し時に渡した `MixedAllocationSettings`(7項目)をそのまま写す。
  *   route に関わらず常に非null(実行時に確定している値のため)。
+ *
+ *   **#24-D3a(Issue #115)で`MixedAllocationSettings`は8項目(`includeQuinellaInAllocation`追加)に
+ *   なったが、この設定エコーは7列のまま据え置く**(`settingsColumnsOf`が8項目目を読まない)。
+ *   「#59スキーマ固定・増減は停止条件」を#24-D3aでは解除しないという着手前ゲート裁定
+ *   (2026-09-24)による。列を読む人(#55過去分析再表示の「馬連: ON/OFF」)が実在するタスクで
+ *   解除する(見込みは#24-D3b。Issue #115本文参照)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
  * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
@@ -80,9 +86,19 @@ import type {
 } from "../shared/mixed-race-allocation.js";
 
 /**
- * `AnalysisPipelineDeps.allocationSettings` が持つ6項目(`evThreshold` を含まない)。
+ * `AnalysisPipelineDeps.allocationSettings` が持つ7項目(`evThreshold` を含まない)。
  * `evThreshold` は `deps.evConfig ?? DEFAULT_EV_CONFIG` から別途導出し、二重ソースを
  * 作らない(analysis-pipeline.ts 側の責務。#59 3節)。
+ *
+ * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は6→7項目化した追加分。
+ * **メタ行(`analysis_allocation_meta`)へは書かない**: `settingsColumnsOf`
+ * (下記「## 列の由来」参照)はこのフィールドを読まず、メタ行の設定エコーは
+ * 引き続き`include_wide`/`include_trio`の2列のまま据え置く(#59が固定した
+ * 「列一覧は固定・増減は停止条件」を#24-D3aでは解除しない。列を読む人〈#55再表示の
+ * 「馬連: ON/OFF」〉が実在する#24-D3bで解除する)。この型に持たせる目的は、
+ * `MixedAllocationSettings`(7→8項目)まで値を運ぶ配管の一部としてのみであり、
+ * D3a時点では`resolveMixedBetTypes`・`isComboBetTypesOff`のどちらにも接続されない
+ * (`shared/mixed-race-allocation.ts`のJSDoc参照)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;
@@ -91,11 +107,12 @@ export interface AnalysisAllocationSettings {
   readonly includeComboOdds: boolean;
   readonly includeWideInAllocation: boolean;
   readonly includeTrioInAllocation: boolean;
+  readonly includeQuinellaInAllocation: boolean;
 }
 
 /**
- * 6項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
- * `buildMixedRaceAllocationWithOutcome` が要求する7項目の `MixedAllocationSettings` を作る。
+ * 7項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
+ * `buildMixedRaceAllocationWithOutcome` が要求する8項目の `MixedAllocationSettings` を作る。
  */
 export function toMixedAllocationSettings(
   settings: AnalysisAllocationSettings,
