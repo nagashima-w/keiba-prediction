@@ -88,19 +88,37 @@ export type MixedAllocationBreakdown = Record<AllocationBetType, { readonly stak
 /**
  * `MixedAllocationBreakdown`(内訳表)の表示順(Issue #90・#23-B2)。**順序自体に契約上の意味は
  * 無い**(表示上の読みやすさのための並びであり、頭数の昇順=`ALLOCATION_BET_TYPE_UMABAN_COUNT`の
- * 挿入順と揃えているだけ)。**キーの集合は`ALLOCATION_BET_TYPE_UMABAN_COUNT`のキー集合と
- * 常に同一であることをテストで固定する**(D-2・boss裁定。`mixed-allocation-view.test.ts`
- * 「MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER」describe参照)。`BatchAnalysisView.tsx`の内訳表は
- * この配列を`.map`して`mixedBetTypeLabel`でラベルを引くだけにする(券種を手で行数分書かない)。
- * Issue #112で`quinella`(馬連)を追加した(app はまだ馬連の候補を作らないため、
- * `buildMixedAllocationBreakdown`の集計は常に`{stake:0,count:0}`になるが、キー集合の
- * 整合テストが要求する追随であり、`app`側の表示に馬連の行が新たに現れるわけではない)。
+ * 挿入順と揃えているだけ)。`BatchAnalysisView.tsx`の内訳表はこの配列を`.map`して
+ * `mixedBetTypeLabel`でラベルを引くだけにする(券種を手で行数分書かない)——**つまり
+ * この配列に載っている券種は無条件に内訳表の行として描画される**(`stake===0`等の
+ * 判定分岐は`BatchAnalysisView.tsx`側に一切無い)。
+ *
+ * **キーの集合は`ALLOCATION_BET_TYPE_UMABAN_COUNT`のキー集合と常に同一ではない**
+ * (Issue #112・code-reviewer【重大】指摘・メタレビュー差し戻し2026-09-24で訂正)。
+ * 旧版は「常に同一」として固定していたが、この設計だと`AllocationBetType`に新しい
+ * 券種を足すたびに「表示すべきか」を考えずこの配列にも機械的に追随させる圧力を生み、
+ * 実際に#112で`quinella`(馬連)を追加してしまった。app はまだ馬連の候補を一切
+ * 作らない(#24-D3まで)ため、`buildMixedAllocationBreakdown`の集計は常に
+ * `{stake:0,count:0}`になり、内訳表に**常に「馬連 ¥0 0点」の行が出る**という
+ * 利用者から見える誤りになっていた(単勝・三連複の¥0は「妙味が無かったという
+ * 判定結果」だが、馬連の¥0は「一度も評価していない」ことを判定結果のように
+ * 見せてしまう——#31〈判定不能と判定結果を混ぜない〉のUI版)。
+ *
+ * **したがって`quinella`はここに含めない。** `ALL_MIXED_CANDIDATE_BET_TYPES`
+ * (`mixed-candidates.ts`)が既に採用している設計(「意図的に除外している券種の集合」を
+ * リテラルで固定し、新メンバー追加のたびに人間の判断を強制する)と同じ形で、
+ * `mixed-allocation-view.test.ts`「MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER」describe が
+ * 除外集合を`["quinella"]`として固定する。#24-D3でappが馬連の候補を作るように
+ * なったら、そのテストが「除外を外す判断」を人間に強制する。
+ *
+ * (`display.breakdown`自体〈`MixedAllocationBreakdown`型〉には`Record<AllocationBetType,…>`
+ * である以上`quinella`のキーが残るが、それは合計計算に使われるだけで表示には出さない。
+ * データに0が入っていることと、表示に出さないことは別の話)。
  */
 export const MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER: readonly AllocationBetType[] = [
   "place",
   "win",
   "wide",
-  "quinella",
   "trio",
 ];
 

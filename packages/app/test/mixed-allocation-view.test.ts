@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALLOCATION_BET_TYPE_UMABAN_COUNT,
   buildComboOddsKey,
+  type AllocationBetType,
   type AllocationCandidate,
   type GeneralBetAllocation,
   type GeneralBetAllocationResult,
@@ -722,13 +723,38 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
 // AC10: 券種別内訳の合計がtotalStakeと一致すること
 // ============================================================================
 
-describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90): 表示順配列がALLOCATION_BET_TYPE_UMABAN_COUNTのキー集合と同一集合であること", () => {
-  it("キーの集合が一致すること(順序は指定しない)", () => {
-    const orderSet = new Set(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER);
-    const umabanCountKeySet = new Set(Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT));
-    expect(orderSet).toEqual(umabanCountKeySet);
-    // 前提固定(空振り防止): 集合が空でないこと(両方0件なら空虚な一致になる)。
-    expect(orderSet.size).toBeGreaterThan(0);
+/**
+ * ★利用者から見える誤りの再発防止(Issue #112・code-reviewer【重大】指摘・メタレビュー
+ * 差し戻し2026-09-24)。
+ *
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`は`BatchAnalysisView.tsx`が`.map`して
+ * **内訳表の行として無条件に描画する**配列である(`display.breakdown[betType]`をそのまま
+ * `breakdownRow`に渡すだけで、`stake===0`等の判定分岐は一切無い)。この配列を旧版のように
+ * 「`ALLOCATION_BET_TYPE_UMABAN_COUNT`のキー集合と常に同一」というテストで固定すると、
+ * 新しい券種を`AllocationBetType`に足すたびに**表示可否を検討せずこの配列にも自動的に
+ * 追随させる圧力**を生む(実際に#112でこの圧力に押されて`quinella`を追加してしまい、
+ * appが候補を一切作らない馬連の行が常に「馬連 ¥0 0点」として表示される欠陥を作った。
+ * 単勝・三連複の¥0は「妙味が無かったという判定結果」だが、馬連の¥0は「一度も評価して
+ * いない」ことを判定結果のように見せてしまう——#31〈判定不能と判定結果を混ぜない〉のUI版)。
+ *
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`(`mixed-candidates.ts`)が既に採用している設計
+ * (「意図的に除外している券種の集合」をリテラルで固定し、新メンバー追加のたびに人間の
+ * 判断を強制する)と同じ形に統一する。
+ */
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90。#112でquinellaを意図的に除外)", () => {
+  it("★内訳表に描画される券種にquinella(馬連)が含まれないこと(appはまだ馬連の候補を作らないため。殺すべき変異: quinellaを配列へ戻す)", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).not.toContain("quinella");
+  });
+
+  it("意図的に除外している券種がquinellaのみであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#24-D3でappが馬連の候補を作るようになったら、このテストが「除外を外す判断」を人間に強制する)", () => {
+    const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
+      (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
+    );
+    expect(excluded).toEqual(["quinella"]);
+  });
+
+  it("前提固定(空振り防止): 除外分を除いても表示順配列が空でないこと", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.length).toBeGreaterThan(0);
   });
 });
 
