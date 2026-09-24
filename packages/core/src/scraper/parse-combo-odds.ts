@@ -51,11 +51,11 @@
  */
 
 import {
-  buildComboOddsCellMap,
+  buildComboOddsCellMapFor,
   buildComboOddsKey,
   COMBO_SIZE,
   ComboOddsKeyError,
-  validateComboUmabans,
+  validateComboUmabansFor,
   type ComboBetType,
   type ComboOddsCell,
   type ComboOddsEntry,
@@ -66,7 +66,7 @@ import { toOddsNumber } from "./odds-number.js";
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** ワイド・3連複オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
+/** ワイド・3連複・馬単オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
 export class ComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -74,8 +74,12 @@ export class ComboOddsParseError extends Error {
   }
 }
 
-/** 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複)。 */
-const JSON_ODDS_KEY: Record<ComboBetType, string> = { wide: "5", trio: "7" };
+/**
+ * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単)。
+ * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.1・
+ * `fixtures/odds_exacta_202603020211.json`の `data.odds["6"]` で再現可能)。
+ */
+const JSON_ODDS_KEY: Record<ComboBetType, string> = { wide: "5", trio: "7", exacta: "6" };
 
 /**
  * オッズが取得できなかった理由(受け入れ条件7b)。
@@ -122,7 +126,11 @@ function decodeRawKey(rawKey: string, betType: ComboBetType): number[] {
     umabans.push(Number(segment));
   }
   try {
-    validateComboUmabans(umabans, comboSize);
+    // betType別の順序方針で検証する(Issue #106・#24-B): 馬単(exacta)は着順が意味を持つため
+    // 昇順を要求しない(`validateComboUmabansFor`が振り分ける)。ここで無条件に
+    // `validateComboUmabans`(昇順のみ許容)を呼ぶと、馬単の「1着>2着」の組(実測で全体の
+    // 半数)が構造異常として誤ってthrowしてしまう。
+    validateComboUmabansFor(betType, umabans, comboSize);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new ComboOddsParseError(`${e.message}(key="${rawKey}")`);
@@ -141,7 +149,7 @@ function unavailable(
 }
 
 /**
- * 中央のワイド・3連複オッズAPI応答(api_get_jra_odds、type=5/7)をパースする。
+ * 中央のワイド・3連複・馬単オッズAPI応答(api_get_jra_odds、type=5/7/6)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7)に加え、「封筒異常は unavailable」
  * という第3の扱いを持つ(モジュール冒頭JSDoc参照)。throwするのは **JSON.parse に失敗した
@@ -151,7 +159,8 @@ function unavailable(
  * のに内容が壊れている、という別種の異常であるため)。
  *
  * @param json api_get_jra_odds のJSON文字列
- * @param betType "wide"(type=5)または"trio"(type=7)
+ * @param betType "wide"(type=5)・"trio"(type=7)・"exacta"(type=6。着順が意味を持つため
+ *   `decodeRawKey`/`buildComboOddsCellMapFor`は昇順を要求せずソートもしない。Issue #106・#24-B)
  */
 export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsParseResult {
   let parsed: unknown;
@@ -201,7 +210,11 @@ export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsPa
 
   let cellMap: Map<string, ComboOddsCell>;
   try {
-    cellMap = buildComboOddsCellMap(entries);
+    // betType別の順序方針でMap化する(Issue #106・#24-B): 馬単は着順が別の買い目のため
+    // ソートしない`buildComboOddsCellMapFor`を使う。`buildComboOddsCellMap`(常にソート)を
+    // 直接使うと、逆順の2組(例: "1308"と"0813")が同じキーに潰れ、値が食い違うため
+    // `ComboOddsKeyError`でthrowしてしまう(実測: 240件中120件が該当)。
+    cellMap = buildComboOddsCellMapFor(betType, entries);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new ComboOddsParseError(e.message);

@@ -242,9 +242,30 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 券種の日本語表示名(警告メッセージ用)。 */
+/**
+ * 券種の日本語表示名(警告メッセージ用)。
+ *
+ * **網羅的なswitchにする理由(Issue #106・#24-B着手前ゲートで発見)**: 従来は
+ * `betType === "wide" ? "ワイド" : "3連複"` という2値専用の三項演算子だった。
+ * `ComboBetType`に`exacta`(馬単)を追加した際、この三項演算子はコンパイルエラーを
+ * 出さずに馬単を誤って「3連複」と表示する状態になっていた(現状は本ファイルの
+ * `fetchComboBetTypeOdds`呼び出しが`wide`/`trio`固定〈#24-D/E以降で馬単のライブ取得を
+ * 配線するまでproductionからは到達しない〉が、`default`のnever到達チェックにより、
+ * 次に券種を追加する際〈#26等〉は必ずコンパイルエラーで気づける形にしておく)。
+ */
 function comboBetTypeLabel(betType: ComboBetType): string {
-  return betType === "wide" ? "ワイド" : "3連複";
+  switch (betType) {
+    case "wide":
+      return "ワイド";
+    case "trio":
+      return "3連複";
+    case "exacta":
+      return "馬単";
+    default: {
+      const exhaustiveCheck: never = betType;
+      throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
+    }
+  }
 }
 
 /**

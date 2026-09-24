@@ -73,6 +73,7 @@
 
 import type { CachedFetchTextOptions } from "./cache.js";
 import {
+  COMBO_KEY_ORDER,
   COMBO_SIZE,
   mergeAxisComboOddsMaps,
   type AxisComboOddsMap,
@@ -92,6 +93,8 @@ import {
   type NarComboOddsUnavailableReason,
 } from "./parse-nar-combo-odds.js";
 import {
+  exactaOddsApiUrl,
+  narExactaOddsPageUrl,
   narTrioOddsAxisUrl,
   narWideOddsPageUrl,
   trioOddsApiUrl,
@@ -131,7 +134,10 @@ export interface ComboOddsFetchDiagnostics {
   readonly betType: ComboBetType;
   /** 発行したHTTPリクエスト数。 */
   readonly requestCount: number;
-  /** 出走馬番から導出した期待組合せ数(ワイド: C(n,2)、3連複: C(n,3))。 */
+  /**
+   * 出走馬番から導出した期待組合せ数(ワイド: C(n,2)、3連複: C(n,3)、馬単: P(n,2)。
+   * Issue #106・#24-B: 馬単は着順が意味を持つため組合せではなく順列で計算する)。
+   */
   readonly expectedComboCount: number;
   /** マージ後に実際に得られた組合せ数。 */
   readonly obtainedComboCount: number;
@@ -171,7 +177,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 組合せ数 C(n, r) を計算する(n<r または r<0 は0件)。 */
+/** 組合せ数 C(n, r) を計算する(n<r または r<0 は0件)。**順不同の券種(ワイド・3連複)専用**。 */
 function combinationCount(n: number, r: number): number {
   if (r < 0 || n < r) return 0;
   let result = 1;
@@ -179,6 +185,30 @@ function combinationCount(n: number, r: number): number {
     result = (result * (n - i)) / (i + 1);
   }
   return Math.round(result);
+}
+
+/**
+ * 順列数 P(n, r) = n!/(n-r)! を計算する(n<r または r<0 は0件)。**着順が意味を持つ券種
+ * (馬単)専用**(Issue #106・#24-B)。
+ *
+ * ワイド・3連複は「組」(順不同)なのでC(n,r)だが、馬単は「並び」(1着・2着の順序が
+ * 別の買い目)なのでP(n,r)=C(n,r)×r!になる(r=2なら2倍)。実測: 16頭の馬単で
+ * P(16,2)=240件全順列が1リクエストで返る(`urls.ts`の`exactaOddsApiUrl`JSDoc参照。
+ * 誤ってC(16,2)=120を使うと、実際には240件取得できているのに120件を「期待超過」と
+ * 誤診断する〈着手前ゲートで発見〉)。
+ */
+function permutationCount(n: number, r: number): number {
+  if (r < 0 || n < r) return 0;
+  let result = 1;
+  for (let i = 0; i < r; i++) {
+    result *= n - i;
+  }
+  return result;
+}
+
+/** betTypeの順序方針に応じてC(n,r)/P(n,r)を振り分ける(Issue #106・#24-B)。 */
+function expectedCountFor(betType: ComboBetType, n: number, r: number): number {
+  return COMBO_KEY_ORDER[betType] === "ordered" ? permutationCount(n, r) : combinationCount(n, r);
 }
 
 /**
@@ -210,7 +240,7 @@ function buildResult(
   conflicts: readonly ComboOddsCellConflict[],
 ): ComboOddsFetchResult {
   const n = new Set(startingUmabans).size;
-  const expectedComboCount = combinationCount(n, COMBO_SIZE[betType]);
+  const expectedComboCount = expectedCountFor(betType, n, COMBO_SIZE[betType]);
   const obtainedComboCount = odds.size;
   const missingComboCount = Math.max(0, expectedComboCount - obtainedComboCount);
   const numericConflictCount = conflicts.filter((c) => c.kind === "numeric").length;
@@ -237,6 +267,48 @@ function buildResult(
 }
 
 /** 中央ワイド/3連複・地方ワイド(いずれも1リクエストで完結)を取得する。 */
+/**
+ * 単発リクエストで完結する経路(中央ワイド/3連複/馬単・地方ワイド/馬単)のURLを選ぶ
+ * (Issue #106・#24-B: 馬単を追加した際、既存の`betType === "wide" ? ... : trioOddsApiUrl`
+ * という2値三項演算子に馬単を追加せず、3連複用URLを誤って使ってしまう欠陥が着手前ゲートで
+ * 見つかった。網羅的なswitchにして同種の欠陥を再発させない)。
+ *
+ * 地方3連複は軸馬別取得が必要なため単発リクエストでは扱えず、呼び出し元
+ * (`fetchComboOdds`)が`isNar && betType === "trio"`を`fetchNarTrioComboOdds`へ
+ * 別途分岐している。したがってこの関数に`isNar=true, betType="trio"`が渡ることは
+ * production からは到達しない(呼び出し元の不変条件が壊れた場合の検出用にthrowする)。
+ */
+function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean): string {
+  if (isNar) {
+    switch (betType) {
+      case "wide":
+        return narWideOddsPageUrl(raceId);
+      case "exacta":
+        return narExactaOddsPageUrl(raceId);
+      case "trio":
+        throw new Error(
+          "地方3連複は単発リクエストでは扱えません(呼び出し元はfetchNarTrioComboOddsへ分岐すること)",
+        );
+      default: {
+        const exhaustiveCheck: never = betType;
+        throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
+      }
+    }
+  }
+  switch (betType) {
+    case "wide":
+      return wideOddsApiUrl(raceId);
+    case "trio":
+      return trioOddsApiUrl(raceId);
+    case "exacta":
+      return exactaOddsApiUrl(raceId);
+    default: {
+      const exhaustiveCheck: never = betType;
+      throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
+    }
+  }
+}
+
 async function fetchSingleRequestComboOdds(
   raceId: RaceId,
   betType: ComboBetType,
@@ -245,11 +317,7 @@ async function fetchSingleRequestComboOdds(
   fetcher: ComboOddsFetcher,
   options: CachedFetchTextOptions,
 ): Promise<ComboOddsFetchResult> {
-  const url = isNar
-    ? narWideOddsPageUrl(raceId)
-    : betType === "wide"
-      ? wideOddsApiUrl(raceId)
-      : trioOddsApiUrl(raceId);
+  const url = comboOddsUrlFor(raceId, betType, isNar);
 
   let attempt: ComboOddsFetchAttempt;
   let odds: ReadonlyMap<string, ComboOddsCell> = new Map();
@@ -340,10 +408,10 @@ async function fetchNarTrioComboOdds(
 }
 
 /**
- * 組合せオッズ(ワイド・3連複)を取得する(中央/地方 × ワイド/3連複の4経路を自動選択)。
+ * 組合せオッズ(ワイド・3連複・馬単)を取得する(中央/地方 × 券種の経路を自動選択)。
  *
  * @param raceId 対象レースID(検証済み。中央/地方は`venueKindOfRaceId`で自動判定)
- * @param betType "wide"(ワイド)または"trio"(3連複)
+ * @param betType "wide"(ワイド)・"trio"(3連複)・"exacta"(馬単。Issue #106・#24-B)
  * @param startingUmabans 出走馬番の集合(順不同・重複ありうる。期待組合せ数の算出・
  *   地方3連複の軸導出に使う。`parseShutuba`の結果由来)
  * @param fetcher HTTP取得を担うフェッチャ(`HttpClient`/`CachedFetcher`のいずれも可)

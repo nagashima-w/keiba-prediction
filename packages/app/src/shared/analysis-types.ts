@@ -153,8 +153,15 @@ export interface ComboOddsCellConflictView {
  * 機能D-2c第1段・Issue #28)。
  */
 export interface ComboOddsFetchDiagnosticsView {
-  /** 券種("wide" | "trio")。 */
-  readonly betType: "wide" | "trio";
+  /**
+   * 券種("wide" | "trio" | "exacta")。core `ComboBetType` に馬単(exacta)が追加された
+   * ことに伴うプレーン写し(Issue #106・#24-B)。`ComboOddsScrapeOutcomeView`自体は
+   * `wide?`/`trio?`のみを持ち`exacta?`は未追加(scrape-race.tsが馬単のライブ取得を
+   * まだ配線していないため。#24-D/E以降のスコープ)だが、`ComboOddsFetchDiagnostics.betType`
+   * はcore側で`ComboBetType`型をそのまま参照する共有フィールドのため、この型だけは
+   * core型と完全一致させる必要がある(analysis-types-combo-odds-pin.test.tsが検知する)。
+   */
+  readonly betType: "wide" | "trio" | "exacta";
   /** 発行したHTTPリクエスト数。 */
   readonly requestCount: number;
   /** 出走馬番から導出した期待組合せ数。 */

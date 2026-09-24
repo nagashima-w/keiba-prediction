@@ -1549,6 +1549,48 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("馬単の払戻(順序付きキー。Issue #106・#24-B AC-B2)", () => {
+    it("逆順の2組(1着13・2着8 と 1着8・2着13)が別キー・別値のまま保存・復元されること", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        exacta: {
+          state: "parsed",
+          payouts: [
+            { umabans: [13, 8], payout: 8360 },
+            { umabans: [8, 13], payout: 11880 },
+          ],
+        },
+      });
+      const result = store.getComboPayouts("R1", "exacta");
+      expect(result.state).toBe("imported");
+      if (result.state !== "imported") throw new Error("unreachable");
+      expect(result.payouts).toHaveLength(2);
+      const byKey = new Map(result.payouts.map((p) => [p.comboKey, p.payout]));
+      expect(byKey.get("1308")).toBe(8360);
+      expect(byKey.get("0813")).toBe(11880);
+      expect(byKey.get("1308")).not.toBe(byKey.get("0813"));
+      store.close();
+    });
+
+    it("★変異確認用の前提固定: ワイド・3連複は従来どおり順不同キーで保存されること(回帰)", () => {
+      // 馬単対応でワイド・3連複の既存挙動を壊していないことを同時に固定する(退行防止)。
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 120 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 5], payout: 240 }] },
+      });
+      expect(store.getComboPayouts("R1", "wide")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0102", payout: 120 }],
+      });
+      expect(store.getComboPayouts("R1", "trio")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "010205", payout: 240 }],
+      });
+      store.close();
+    });
+  });
+
   describe("getComboPayouts(組合せ払戻の読み出し契約。Issue #52 AC9・boss裁定R-4〜R-6)", () => {
     it("一度も取り込んでいないレースは not_imported を返すこと", () => {
       const store = new AnalysisStore();

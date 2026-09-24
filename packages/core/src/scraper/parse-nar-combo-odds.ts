@@ -51,11 +51,11 @@ import type { CheerioAPI } from "cheerio";
 import { toOddsNumber } from "./odds-number.js";
 import { NAR_COMBO_ODDS_SELECTORS as SEL } from "./selectors.js";
 import {
-  buildComboOddsCellMap,
+  buildComboOddsCellMapFor,
   buildComboOddsKey,
   COMBO_SIZE,
   ComboOddsKeyError,
-  validateComboUmabans,
+  validateComboUmabansFor,
   type ComboBetType,
   type ComboOddsCell,
   type ComboOddsEntry,
@@ -64,7 +64,7 @@ import {
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** 地方ワイド・3連複オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
+/** 地方ワイド・3連複・馬単オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
 export class NarComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -72,8 +72,12 @@ export class NarComboOddsParseError extends Error {
   }
 }
 
-/** 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複)。 */
-const ID_MARKER: Record<ComboBetType, string> = { wide: "b5", trio: "b7" };
+/**
+ * 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複、"b6"=馬単)。
+ * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.2・
+ * `fixtures/nar_odds_b6_202654071210.html`のセルid`chk_..._b6_c0_..._..._`で再現可能)。
+ */
+const ID_MARKER: Record<ComboBetType, string> = { wide: "b5", trio: "b7", exacta: "b6" };
 
 /**
  * `unavailable`の理由(生信号のみ。boss裁定2026-08-07)。
@@ -183,7 +187,10 @@ function decodeCellId(id: string, betType: ComboBetType): number[] {
   }
   const umabans = m.slice(1).map((s) => Number(s));
   try {
-    validateComboUmabans(umabans, comboSize);
+    // betType別の順序方針で検証する(Issue #106・#24-B): 馬単(exacta)は着順が意味を持つため
+    // 昇順を要求しない(`validateComboUmabansFor`が振り分ける)。理由はparse-combo-odds.tsの
+    // 同種コメント参照。
+    validateComboUmabansFor(betType, umabans, comboSize);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new NarComboOddsParseError(`${e.message}(id="${id}")`);
@@ -214,15 +221,17 @@ function documentSignals($: CheerioAPI): DocumentSignals {
 }
 
 /**
- * 地方ワイド・3連複オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
+ * 地方ワイド・3連複・馬単オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7): オッズ文書として正当と判定できない
- * HTML、またはセルidから馬番を復元できない(範囲外・昇順違反)場合は throw する。
+ * HTML、またはセルidから馬番を復元できない(範囲外・重複。馬単は昇順を要求しない。
+ * Issue #106・#24-B)場合は throw する。
  * 文書としては正当だが組合せセルが1件も見つからない場合(発売なし・未発売・型の取り違え等、
  * 区別できない事実を型で偽らない。受け入れ条件10)は `unavailable` に分類する(throwしない)。
+ * 馬単(exacta)は3連複と同じく単一値の券種として扱う(oddsMax=null固定。下記`else`分岐)。
  *
- * @param html odds/index.html?type=b5|b7 または odds_get_form.html のHTML文字列
- * @param betType "wide"(b5)または"trio"(b7)
+ * @param html odds/index.html?type=b5|b7|b6 または odds_get_form.html のHTML文字列
+ * @param betType "wide"(b5)・"trio"(b7)・"exacta"(b6)
  */
 export function parseNarComboOdds(html: string, betType: ComboBetType): NarComboOddsParseResult {
   const $ = cheerio.load(html);
@@ -276,7 +285,9 @@ export function parseNarComboOdds(html: string, betType: ComboBetType): NarCombo
 
   let cellMap: Map<string, ComboOddsCell>;
   try {
-    cellMap = buildComboOddsCellMap(entries);
+    // betType別の順序方針でMap化する(Issue #106・#24-B)。理由はparse-combo-odds.tsの
+    // 同種コメント参照(馬単の逆順2組が同じキーに潰れることを防ぐ)。
+    cellMap = buildComboOddsCellMapFor(betType, entries);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new NarComboOddsParseError(e.message);

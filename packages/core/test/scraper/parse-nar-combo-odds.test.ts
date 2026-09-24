@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildComboOddsKey } from "../../src/scraper/combo-odds-key.js";
+import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import {
   NarComboOddsParseError,
   parseNarComboOdds,
@@ -437,5 +437,35 @@ describe("parseNarComboOdds(キー正規化の一致。受け入れ条件5)", ()
       const umabans = [Number(key.slice(0, 2)), Number(key.slice(2, 4))];
       expect(buildComboOddsKey(umabans)).toBe(key);
     }
+  });
+});
+
+/**
+ * 馬単(exacta、id内部コードb6)の配線(Issue #106・#24-B AC-B6・AC-B9)。
+ *
+ * #24-A(#103)の実測フィクスチャ(12頭、P(12,2)=132件)をthrowせず全件パースできること、
+ * かつ逆順の組(id "..._b6_c0_5_7" と "..._b6_c0_7_5")が別キー・別値のまま保持されることを
+ * 固定する(実測値: docs/quinella-exacta-odds-investigation.md §5.1、5→7=129.7倍、7→5=96.3倍)。
+ *
+ * ★このdescribeは実装前(betType="exacta"をID_MARKER/decodeCellId/buildComboOddsCellMapが
+ * 順序未対応のまま)ではRedになる(combo-odds-key.tsが馬単に順不同のまま流用された場合の欠陥)。
+ */
+describe("parseNarComboOdds(馬単。Issue #106・#24-B AC-B6・AC-B9)", () => {
+  it("実フィクスチャ(12頭・P(12,2)=132件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b6_202654071210.html"), "exacta"));
+    expect(odds.size).toBe(132);
+  });
+
+  it("逆順の組(5→7 と 7→5)が別キー・別値のまま保持されること", () => {
+    const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b6_202654071210.html"), "exacta"));
+    const forwardKey = buildOrderedComboOddsKey([5, 7]);
+    const backwardKey = buildOrderedComboOddsKey([7, 5]);
+    expect(forwardKey).toBe("0507");
+    expect(backwardKey).toBe("0705");
+    const forward = odds.get(forwardKey);
+    const backward = odds.get(backwardKey);
+    expect(forward?.oddsMin).toBe(129.7);
+    expect(backward?.oddsMin).toBe(96.3);
+    expect(forward?.oddsMin).not.toBe(backward?.oddsMin);
   });
 });

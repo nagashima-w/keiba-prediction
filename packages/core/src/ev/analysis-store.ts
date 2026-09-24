@@ -81,7 +81,11 @@
 import Database from "better-sqlite3";
 
 import type { PredictionMark } from "../analyzer/parse-response.js";
-import { buildComboOddsKey, COMBO_SIZE, type ComboBetType } from "../scraper/combo-odds-key.js";
+import {
+  buildComboOddsKeyFor,
+  COMBO_SIZE,
+  type ComboBetType,
+} from "../scraper/combo-odds-key.js";
 import type { CourseType, RaceComboPayoutResult } from "../scraper/types.js";
 
 const ANALYSES_TABLE = "analyses";
@@ -449,23 +453,30 @@ export interface RaceResultEntry {
 export interface RaceComboPayoutsSaveInput {
   readonly wide?: RaceComboPayoutResult;
   readonly trio?: RaceComboPayoutResult;
+  /** 馬単の確定払戻(Issue #106・#24-B)。umabansは着順順(1着→2着)。ソートしない。 */
+  readonly exacta?: RaceComboPayoutResult;
 }
 
 /** `race_combo_payouts` の1行(読み出し専用の軽量表現。Issue #52・boss裁定R-6)。 */
 export interface StoredComboPayout {
   /**
-   * `buildComboOddsKey` で得られる正規化キー(例: ワイド"0102")。復号(umabans配列への
-   * 復元)は本Issueのスコープ外(不明点4。#54が表示で必要になった時点で追加する)。
-   * 呼び出し側は `buildComboOddsKey` で購入候補側を同じキーへ正規化して比較すればよい。
+   * `buildComboOddsKeyFor(betType, umabans)` で得られる正規化キー(例: ワイド"0102"、
+   * 馬単"1308")。復号(umabans配列への復元)は本Issueのスコープ外(不明点4。#54が表示で
+   * 必要になった時点で追加する)。呼び出し側は `buildComboOddsKeyFor` で購入候補側を
+   * 同じキーへ正規化して比較すればよい。
    *
-   * **AC10(流用禁止)**: `buildComboOddsKey` は馬番を**昇順に正規化してから**連結するため、
-   * 順不同の組(ワイド・3連複)でしか意味を持たない。**着順が意味を持つ券種(馬単・三連単)には
-   * このキー生成規則を流用してはならない**(例: 馬単「1着1・2着2」と「1着2・2着1」は別の
-   * 買い目だが、`buildComboOddsKey([1,2])` はどちらも同じ"0102"に潰してしまい区別できなくなる)。
-   * `race_combo_payouts.bet_type` 列は将来の券種追加を「行追加だけで足りる」形にしてあるが、
-   * それは**順不同の組(ワイド系)に限った話**であり、馬単・三連単を同じ `combo_key` 列に
-   * 追加する場合は、着順を保持できるキー生成規則へ分岐させる(または列/テーブル自体を
-   * 分離する)必要がある。
+   * **AC10改訂(Issue #106・#24-B裁定)**: 当初(Issue #52時点)は「着順が意味を持つ券種
+   * (馬単・三連単)には`buildComboOddsKey`のキー生成規則を流用してはならず、列/テーブル
+   * 自体を分離する必要がある」としていたが、これは過剰に強い主張だった。`combo_key`列は
+   * ただの`TEXT`で、主キーが`(race_id, bet_type, combo_key)`であるため、**順序付きキー
+   * (馬単。着順を保持したまま連結する。ソートしない)をそのまま同じ列・同じテーブルに
+   * 保持できる**(列/テーブル分離は不要)。実際に必要だったのは「betTypeごとに
+   * ソートするか否かを切り替えるキー生成関数」(`buildComboOddsKeyFor`。
+   * `combo-odds-key.ts`の`COMBO_KEY_ORDER`参照)だけだった。
+   * `buildComboOddsKey`(常にソート)を券種を見ずに直接使うことは引き続き禁止する
+   * (例: 馬単「1着1・2着2」と「1着2・2着1」は別の買い目だが、`buildComboOddsKey([1,2])`
+   * はどちらも同じ"0102"に潰してしまい区別できなくなる。実際に発生していた欠陥。
+   * `analysis-store.test.ts`「馬単の払戻(順序付きキー」describe参照)。
    */
   readonly comboKey: string;
   /** 100円あたりの払戻額(円)。 */
@@ -612,12 +623,13 @@ export class AnalysisStore {
       -- (行の個数ではなく行の有無で判定する必要があるため。listUnimportedRaceIdsが
       -- race_resultsの行の有無でNOT EXISTS判定する既存流儀と同じ)。
       --
-      -- combo_key は buildComboOddsKey による「馬番昇順正規化キー」であり、順不同の組
-      -- (ワイド・3連複)でしか意味を持たない(AC10)。着順を持つ券種(馬単・三連単)には
-      -- このキー生成規則を流用できない(1着1・2着2 と 1着2・2着1 が同じキーに潰れて
-      -- 区別できなくなるため)。bet_type列を増やすだけで足りるのはワイド系(順不同の組)に
-      -- 限られ、馬単・三連単を追加する際はキー生成規則を分岐させるか、combo_key列/
-      -- テーブル自体を分離する必要がある。詳細: StoredComboPayout.comboKey のJSDoc。
+      -- combo_key は buildComboOddsKeyFor(betType, umabans) による正規化キーであり、
+      -- betTypeごとに順序方針(ソートする/しない)が異なる(ワイド・3連複は順不同、
+      -- 馬単は着順ありのまま連結。COMBO_KEY_ORDER参照。Issue #106・#24-B裁定)。
+      -- combo_keyはただのTEXTで、主キーが(race_id, bet_type, combo_key)であるため、
+      -- 順序付きキー(馬単)もこの同じ列・同じテーブルに保持できる(列/テーブル分離は
+      -- 不要。AC10改訂: Issue #52時点の「分離が必要」という記述は過剰に強かった)。
+      -- 詳細: StoredComboPayout.comboKey のJSDoc。
       CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUTS_TABLE} (
         race_id TEXT NOT NULL,
         bet_type TEXT NOT NULL,
@@ -1049,7 +1061,11 @@ export class AnalysisStore {
             insertCombo.run(
               raceId,
               betType,
-              buildComboOddsKey(entry.umabans),
+              // betType別の順序方針でキー化する(Issue #106・#24-B): 馬単(exacta)は着順が
+              // 意味を持つため、betTypeを見ずに常にソートする`buildComboOddsKey`を直接
+              // 使うと「1着13・2着8」と「1着8・2着13」が同じキーに潰れ、UNIQUE制約違反
+              // (または黙った上書き)を起こす欠陥があった(着手前ゲートで発見)。
+              buildComboOddsKeyFor(betType, entry.umabans),
               entry.payout,
             );
           }

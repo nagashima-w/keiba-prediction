@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildComboOddsKey } from "../../src/scraper/combo-odds-key.js";
+import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import {
   ComboOddsParseError,
   parseComboOdds,
@@ -287,6 +287,46 @@ describe("parseComboOdds(キー正規化の一致。受け入れ条件5)", () =>
       // キー(6桁)を2桁ずつに分解して馬番配列を復元し、buildComboOddsKeyで再生成して一致を見る。
       const umabans = [Number(key.slice(0, 2)), Number(key.slice(2, 4)), Number(key.slice(4, 6))];
       expect(buildComboOddsKey(umabans)).toBe(key);
+    }
+  });
+});
+
+/**
+ * 馬単(exacta、type=6)の配線(Issue #106・#24-B AC-B6・AC-B9)。
+ *
+ * #24-A(#103)の実測フィクスチャ(16頭、P(16,2)=240件)をthrowせず全件パースできること、
+ * かつ逆順の組(1着13・2着8 と 1着8・2着13)が別キー・別値のまま保持されることを固定する。
+ *
+ * ★このdescribeは実装前(betType="exacta"をJSON_ODDS_KEY/decodeRawKey/buildComboOddsCellMapが
+ * 順序未対応のまま)ではRedになる: `decodeRawKey`内の`validateComboUmabans`(昇順のみ許容)が
+ * 240件中120件(1着>2着の組)でthrowするか、あるいは昇順チェックを回避できても
+ * `buildComboOddsCellMap`が逆順2組の値不一致でthrowする(いずれもcombo-odds-key.tsの
+ * 実装がbetType非対応のまま馬単に流用された場合の欠陥。着手前ゲートの実測参照)。
+ */
+describe("parseComboOdds(馬単。Issue #106・#24-B AC-B6・AC-B9)", () => {
+  it("実フィクスチャ(16頭・P(16,2)=240件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_exacta_202603020211.json"), "exacta"));
+    expect(odds.size).toBe(240);
+  });
+
+  it("逆順の組(1着13・2着8 と 1着8・2着13)が別キー・別値のまま保持されること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_exacta_202603020211.json"), "exacta"));
+    const forwardKey = buildOrderedComboOddsKey([13, 8]);
+    const backwardKey = buildOrderedComboOddsKey([8, 13]);
+    expect(forwardKey).toBe("1308");
+    expect(backwardKey).toBe("0813");
+    const forward = odds.get(forwardKey);
+    const backward = odds.get(backwardKey);
+    expect(forward?.oddsMin).toBe(83.6);
+    expect(backward?.oddsMin).toBe(118.8);
+    expect(forward?.oddsMin).not.toBe(backward?.oddsMin);
+  });
+
+  it("馬単は3連複と同じく単一値の券種であり、oddsMaxは常にnullであること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_exacta_202603020211.json"), "exacta"));
+    expect(odds.size).toBeGreaterThan(0);
+    for (const cell of odds.values()) {
+      expect(cell.oddsMax).toBeNull();
     }
   });
 });

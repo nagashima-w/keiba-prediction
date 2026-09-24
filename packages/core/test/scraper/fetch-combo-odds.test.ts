@@ -16,6 +16,8 @@ import {
 } from "../../src/scraper/fetch-combo-odds.js";
 import { parseRaceId } from "../../src/scraper/ids.js";
 import {
+  exactaOddsApiUrl,
+  narExactaOddsPageUrl,
   narTrioOddsAxisUrl,
   narWideOddsPageUrl,
   trioOddsApiUrl,
@@ -382,6 +384,65 @@ describe("fetchComboOdds(地方ワイド: 1リクエストで軸ループを回�
     expect(calls[0]!.url).toBe(narWideOddsPageUrl(NAR_RACE_ID));
     expect(result.state).toBe("available");
     expect(result.odds.size).toBe(66); // C(12,2)、実測(urls.ts JSDoc参照)
+    expect(result.diagnostics.axisUmabans).toEqual([]);
+  });
+});
+
+/**
+ * 馬単(exacta)のexpectedComboCountは順列P(n,2)で計算されること(Issue #106・#24-B AC-B3)。
+ *
+ * ★このdescribeは実装前(fetch-combo-odds.tsのexpectedComboCountがcombinationCount〈組合せ
+ * C(n,r)〉のまま)ではRedになる: 16頭で期待されるのはP(16,2)=240だが、C(16,2)=120が返る。
+ * 同じ16頭でワイド(unordered)がC(16,2)=120のままであることも同時に固定し、
+ * 「同じヘルパでどちらも通る」形になっていないことを確認する(順列/組合せの分岐が
+ * comboSize===2固定ではなく順序方針で決まっていることの証明)。
+ *
+ * ★用語注記: ブリーフは「馬連は120のまま」としていたが、`ComboBetType`に「馬連」
+ * (umaren・quinella)は存在しない(#24-Bが追加するのは`exacta`のみ。馬連の追加は#24-D)。
+ * 本テストでは既存の`wide`(comboSize=2・unordered)を対比対象として使う
+ * (comboSize=2で順序方針だけが異なる型を比較する、という意図には合致すると判断した。
+ * 解釈が違う場合は指摘してほしい)。
+ */
+describe("fetchComboOdds(中央: 馬単。expectedComboCountが順列で計算されること。Issue #106・#24-B AC-B3)", () => {
+  it("16頭の馬単: expectedComboCountがP(16,2)=240になること(C(16,2)=120ではない)", async () => {
+    const json = loadFixture("odds_exacta_202603020211.json");
+    const { fetcher, calls } = createFakeFetcher(() => json);
+    const startingUmabans = Array.from({ length: 16 }, (_, i) => i + 1);
+
+    const result = await fetchComboOdds(CENTRAL_RACE_ID, "exacta", startingUmabans, fetcher);
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.url).toBe(exactaOddsApiUrl(CENTRAL_RACE_ID));
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(240); // P(16,2)、実測(fixtures/odds_exacta_202603020211.json)
+    expect(result.diagnostics.expectedComboCount).toBe(240);
+  });
+
+  it("同じ16頭でもワイド(unordered)はexpectedComboCountがC(16,2)=120のままであること(回帰・対比)", async () => {
+    const json = loadFixture("odds_wide_202603020211.json");
+    const { fetcher, calls } = createFakeFetcher(() => json);
+    const startingUmabans = Array.from({ length: 16 }, (_, i) => i + 1);
+
+    const result = await fetchComboOdds(CENTRAL_RACE_ID, "wide", startingUmabans, fetcher);
+
+    expect(calls.length).toBe(1);
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(120); // C(16,2)、実測
+    expect(result.diagnostics.expectedComboCount).toBe(120);
+  });
+
+  it("地方馬単: 1リクエストのみ発行し、parseNarComboOddsのavailableがそのまま写ること(12頭・P(12,2)=132)", async () => {
+    const html = loadFixture("nar_odds_b6_202654071210.html");
+    const { fetcher, calls } = createFakeFetcher(() => html);
+    const startingUmabans = Array.from({ length: 12 }, (_, i) => i + 1);
+
+    const result = await fetchComboOdds(NAR_RACE_ID, "exacta", startingUmabans, fetcher);
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.url).toBe(narExactaOddsPageUrl(NAR_RACE_ID));
+    expect(result.state).toBe("available");
+    expect(result.odds.size).toBe(132); // P(12,2)、実測
+    expect(result.diagnostics.expectedComboCount).toBe(132);
     expect(result.diagnostics.axisUmabans).toEqual([]);
   });
 });
