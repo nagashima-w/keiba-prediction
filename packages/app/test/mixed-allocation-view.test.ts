@@ -755,17 +755,28 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
  * 同様に「¥0 0点」を注記なしで表示する。これは#112当時のような「原理的に評価不能」ではなく
  * 「ユーザーがOFFにした」という到達可能な理由であり、既存のワイド・3連複と同じ扱いを
  * 受け入れる設計とする)。したがって馬連の除外を解除する。
+ *
+ * **Issue #120(#24-E1)で`AllocationBetType`に`exacta`(馬単)が加わったが、appはまだ
+ * 馬単の候補を一切作らない(`mixed-candidates.ts`のオッズ配線は#122のスコープ)。**
+ * #112当時の馬連と全く同じ理由(原理的に評価不能な券種の¥0 0点表示)で、`exacta`は
+ * この配列に含めない(`buildMixedAllocationBreakdown`自体は`ALLOCATION_BET_TYPE_UMABAN_COUNT`
+ * の全キーを無条件に集計するため`breakdown.exacta`は`{stake:0,count:0}`として存在するが、
+ * `BatchAnalysisView.tsx`は本配列を`.map`するだけなので`exacta`行はそもそも描画されない)。
  */
-describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除)", () => {
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #120で馬単を除外に追加)", () => {
   it("内訳表に描画される券種にquinella(馬連)が含まれること(Issue #117でワイド・3連複と対称になったため)", () => {
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("quinella");
   });
 
-  it("意図的に除外している券種が無いこと(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外していたが、Issue #117でその除外を解除した)", () => {
+  it("内訳表に描画される券種にexacta(馬単)が含まれないこと(Issue #120: #122でオッズ配線するまで#112当時のquinellaと同じ理由で除外する)", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).not.toContain("exacta");
+  });
+
+  it("意図的に除外している券種が['exacta']だけであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外していたが、Issue #117でその除外を解除し、Issue #120で馬単を新たに除外に加えた)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
     );
-    expect(excluded).toEqual([]);
+    expect(excluded).toEqual(["exacta"]);
   });
 
   it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→3連複)であること", () => {
@@ -1694,6 +1705,7 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
       win: { stake: 0, count: 0 },
       wide: { stake: 0, count: 0 },
       quinella: { stake: 0, count: 0 },
+      exacta: { stake: 0, count: 0 },
       trio: { stake: 0, count: 0 },
     },
     sortedAllocations: [],

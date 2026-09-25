@@ -781,7 +781,8 @@ describe("券種フィルタ(options.betTypes)", () => {
   /**
    * ★構造的な再発防止(#91・boss裁定。#90でwinを追加した後の状態を固定・
    * #112〈#24-D1〉で馬連〈quinella〉が除外に加わった状態に更新・Issue #117で
-   * 再びAllocationBetTypeの全メンバーと一致する状態に更新)。
+   * 再びAllocationBetTypeの全メンバーと一致する状態に更新・Issue #120で馬単〈exacta〉が
+   * 除外に加わった状態に更新)。
    *
    * `ALL_MIXED_CANDIDATE_BET_TYPES`が`AllocationBetType`(core)の全メンバーを含むとは
    * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定していた。
@@ -792,18 +793,23 @@ describe("券種フィルタ(options.betTypes)", () => {
    * **Issue #117(#24-D3b-2)で`resolveMixedBetTypes`〈shared/mixed-race-allocation.ts〉が
    * 実際に`"quinella"`を渡すよう接続し、`ALL_MIXED_CANDIDATE_BET_TYPES`にも`quinella`を
    * 加えたため、除外集合は再び空になった。**
+   * **Issue #120(#24-E1)で`AllocationBetType`に`exacta`(馬単)が加わったが、
+   * `mixed-candidates.ts`から馬単の候補を作る経路はまだ無い(オッズ配線は#122のスコープ)。**
+   * `quinella`のときと同じ理由(app側候補ビルダーが未接続の券種を対象集合に含めると
+   * `resolveMixedBetTypes`経由でも実際には評価されない=常に「¥0 0点」相当になる)で、
+   * `exacta`を今回も除外に加える。
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
-   * 除外集合が空であることを直接固定することで、将来また新しい券種が
-   * `AllocationBetType`へ加わったとき(除外が復活したとき)にこのテストが再び赤くなり、
-   * 「足すかどうかの判断」を人間に強制する。
+   * 除外集合を`["exacta"]`と直接固定することで、`exacta`以外の券種が誤って除外に混ざったり、
+   * `exacta`の除外が誤って解除されたり(#122より前に解除すると「馬単 ¥0 0点」の再発になる)
+   * すれば、このテストが赤くなり「足すかどうかの判断」を人間に強制する。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が無いこと(Issue #117: #112で加わったquinellaの除外を解消した)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['exacta']だけであること(Issue #120: 馬単のオッズ配線〈#122〉が終わるまで除外する)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual([]);
+    expect(excluded).toEqual(["exacta"]);
   });
 });
 

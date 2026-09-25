@@ -567,6 +567,23 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
   });
 });
 
+describe("馬単(exacta)のラベル(Issue #120・#24-E1): mixedBetTypeLabelとbetTypeLabelが意図的に非対称であること", () => {
+  it("mixedBetTypeLabel('exacta')は'馬単'を返すこと(AllocationBetTypeを引数に取る閉じたswitchのため、追加しないと型エラーになる)", () => {
+    expect(mixedBetTypeLabel("exacta")).toBe("馬単");
+  });
+
+  it("betTypeLabel(allocation-proposal-view.ts)は'exacta'のcaseをまだ持たず、生値をそのまま表示すること(#122でオッズ配線するまでproductionから'exacta'は渡らないため、win/quinellaのときと同じ判断でcaseを足さない)", () => {
+    const view = buildAllocationProposalView(
+      allocation({
+        route: "mixed",
+        skipReasonCode: null,
+        bets: [bet({ betType: "exacta", comboKey: "0407" })],
+      }),
+    );
+    expect(view.bets[0]!.betTypeLabel).toBe("exacta");
+  });
+});
+
 describe("実効設定(AC5): 9項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目)", () => {
   it("1組目の値ベクトルで9行すべてが期待どおりであること", () => {
     const view = buildAllocationProposalView(

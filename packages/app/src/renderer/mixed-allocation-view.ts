@@ -303,10 +303,21 @@ export function buildHiddenAllocationsBlocks(
  * 本関数との戻り値が一致しない非対称があった。`"win"`は#90(#23-B2)、`"quinella"`は
  * Issue #117(#24-D3b-2)でそれぞれ`betTypeLabel`側にもcaseを追加し、この非対称は解消済み
  * (現在は5値すべてで両関数の戻り値が一致する)。
+ *
+ * **`"exacta"`(馬単)はIssue #120(#24-E1)で本関数にcaseを追加したが、`betTypeLabel`側には
+ * まだ足していない(意図的な非対称)。** `exacta`はまだ`ALL_MIXED_CANDIDATE_BET_TYPES`・
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`に入っておらず(#122でオッズ配線するまで
+ * `mixed-candidates.ts`が馬単候補を一切作らない)、`allocation-record.ts`が
+ * `bet_type="exacta"`行を書く経路も無い(=`betTypeLabel`にproductionから`"exacta"`が
+ * 渡ることは無い)。`"win"`・`"quinella"`のときと同じ判断(app側候補ビルダーが未接続の
+ * うちはcaseを足さずdefaultの生文字列フォールバックのままにする)を踏襲する。
+ * **本関数(`AllocationBetType`を引数に取る閉じたswitch)は`exacta`を追加してもTSの
+ * 網羅性チェックで型エラーになるため、こちらは追加が必須**(`betTypeLabel`は`string`引数+
+ * `default`ありのため型エラーにならない、という違いがこの非対称の理由)。
  */
 export function mixedBetTypeLabel(
   betType: AllocationBetType,
-): "複勝" | "単勝" | "ワイド" | "馬連" | "三連複" {
+): "複勝" | "単勝" | "ワイド" | "馬連" | "三連複" | "馬単" {
   switch (betType) {
     case "place":
       return "複勝";
@@ -318,6 +329,8 @@ export function mixedBetTypeLabel(
       return "馬連";
     case "trio":
       return "三連複";
+    case "exacta":
+      return "馬単";
   }
 }
 
