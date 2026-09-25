@@ -15,16 +15,18 @@ import {
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
 } from "./bet-allocation-view.js";
-import {
-  createAllocationQueueRunner,
-  createAllocationScheduler,
-  type AllocationOutcome,
-  type AllocationScheduler,
-} from "./mixed-allocation-queue.js";
+import { type AllocationOutcome } from "./mixed-allocation-queue.js";
 import {
   type MixedAllocationCache,
   type MixedAllocationCacheKey,
 } from "./mixed-allocation-cache.js";
+import {
+  createAllocationRunner,
+  createRealAllocationWorker,
+  type AllocationRunner,
+} from "./mixed-allocation-worker-pool.js";
+import type { AllocationWorkerRequest } from "./mixed-allocation-worker-handler.js";
+import { buildRendererErrorPayload } from "./renderer-error-payload.js";
 import {
   ALLOCATION_COMPUTE_ERROR_NOTE,
   allocationProgressText,
@@ -617,22 +619,22 @@ export function BatchAnalysisView(
   const betAllocationUnset = isBetAllocationUnset(props.betAllocationSettings);
 
   // ==========================================================================
-  // 券種横断の馬券配分(機能D-2c第4段・Issue #28)を、レース単位に分けて進める仕組み
-  // (Issue #110・#24-C2)。値の記憶(キャッシュ)は`props.mixedAllocationCache`として
-  // App側から受け取る(寿命がBatchAnalysisViewを超えるようにするため。propの型JSDoc参照)。
-  // 進め方(1ステップ=1レース・失敗の記録)は`mixed-allocation-queue.ts`に切り出し済み。
+  // 券種横断の馬券配分(機能D-2c第4段・Issue #28)を、レース単位に分けてWorkerプールで
+  // 並列に進める仕組み(Issue #119・#24-C3。#110の逐次実行〈1ステップ=1レース〉を置き換える
+  // のではなく、Worker起動に失敗したときのフォールバック先として温存する)。
+  // 値の記憶(キャッシュ)は`props.mixedAllocationCache`としてApp側から受け取る
+  // (寿命がBatchAnalysisViewを超えるようにするため。propの型JSDoc参照)。
   //
-  // `runner`自体はキャッシュへの参照以外の永続状態を持たない(直近の`setInputs`しか
-  // 覚えない)ため、`BatchAnalysisView`が再マウントされてもローカルに新規作成してよい
-  // (進捗=`props.mixedAllocationCache`の中身はAppが持ち続けているので引き継がれる)。
+  // **読み出し(peek)は駆動役(runner)を経由せず、常に`props.mixedAllocationCache`へ直接
+  // 今のキー(`keyForAllocation`)で照会する**(下記JSX参照)。理由: Worker(実スレッド)を
+  // 保持する駆動役は、StrictModeの2重実行対策(下記)のため`useEffect(..., [])`の中で
+  // **1コミット遅れて**生成される。もし表示の読み出しまでこの駆動役経由にすると、
+  // 「このレンダーの`props.betAllocationSettings`」と「駆動役が最後に`setInputs`された
+  // 設定」が1コミットずれ、画面が古い設定のキーで照会してしまう瞬間が生じうる。
+  // `props.mixedAllocationCache`自体はApp所有で安定しており、`keyForAllocation`は
+  // 毎レンダー作り直す純関数なので、これを直接使えば表示は常にそのレンダーの設定を
+  // 反映する(AC-3'(a)と同じ保証を、駆動役の生成タイミングに依存させずに保つ)。
   // ==========================================================================
-  const allocationRunnerRef = useRef<ReturnType<
-    typeof createAllocationQueueRunner<MixedRaceAllocationDisplayView>
-  > | null>(null);
-  if (allocationRunnerRef.current === null) {
-    allocationRunnerRef.current = createAllocationQueueRunner(props.mixedAllocationCache);
-  }
-  const allocationRunner = allocationRunnerRef.current;
 
   // 計算対象レースの表示順(ハイライトの表示順。Issue #110「計算の順番はハイライトの表示順」)。
   // 未設定時(betAllocationUnset)は対象自体が無い(画面全体の注記に一本化しているため)。
@@ -660,71 +662,78 @@ export function BatchAnalysisView(
       includeQuinellaInAllocation: s.includeQuinellaInAllocation,
     };
   };
-  // 実際の計算。既存の同期経路(旧実装)と全く同じ関数・同じ引数で呼ぶ(AC-6: 答えを変えない)。
+  // 実際の計算(逐次フォールバック用)。既存の同期経路(#110時点の実装)と全く同じ関数・
+  // 同じ引数で呼ぶ(AC-6: 答えを変えない。AC-1: Worker側〈mixed-allocation-worker-handler.ts〉
+  // もこれと全く同じ関数を呼ぶ。別実装を作らない)。
   const computeAllocation = (raceId: string): MixedRaceAllocationDisplayView => {
     const fullResult = analysisResultByRaceId.get(raceId)!;
     return buildMixedAllocationDisplay(fullResult, props.betAllocationSettings);
   };
-  // 毎レンダーで最新の入力に差し替える(setInputsは呼ぶたびに全採用する契約。
-  // mixed-allocation-queue.tsのJSDoc・AC-3'参照)。
-  allocationRunner.setInputs({
-    order: allocationOrder,
-    keyFor: keyForAllocation,
-    compute: (raceId) => computeAllocation(raceId),
-  });
-  const pendingAllocationRaceIds = allocationRunner.pendingRaceIds();
+  // Workerへ送るリクエストを組み立てる(structuredClone可能な値のみ。AC-5)。
+  const buildAllocationWorkerRequest = (raceId: string): AllocationWorkerRequest => {
+    const fullResult = analysisResultByRaceId.get(raceId)!;
+    return { raceId, race: fullResult, settings: props.betAllocationSettings };
+  };
+
+  // 未計算件数(進捗表示用)は駆動役を経由せず、直接キャッシュへ照会する(上記コメント参照)。
+  const pendingAllocationRaceIds = allocationOrder.filter(
+    (raceId) => props.mixedAllocationCache.peek(keyForAllocation(raceId)) === undefined,
+  );
   const hasPendingAllocation = pendingAllocationRaceIds.length > 0;
 
-  // 1ステップ=1レースで計算を進め、レースとレースの間に描画の機会を作る(AC-2)。
+  // ★Issue #110メタレビュー差し戻し(AC-9)由来の設計を継承する: 駆動役(Workerプール/
+  // 逐次フォールバックの統合ロジック)の`pump()`は、過去の真偽値を一切記憶せず、
+  // 呼ばれた時点の「今、何が未計算か」だけを見て次の発注を決める(`createAllocationRunner`・
+  // `createAllocationWorkerPool`のJSDoc参照)。
   //
-  // ★Issue #110メタレビュー差し戻し(AC-9): 当初は`useEffect(..., [hasPendingAllocation])`
-  // (未計算が1件以上あるかの**真偽値**を依存配列にする)で駆動していたが、code-reviewerが
-  // React 18本体のソース(`ensureRootIsScheduled`)を根拠に指摘したとおり、Reactのバッチ処理
-  // により「未計算0件」を経由しないコミットが起き、依存配列の値が`true→true`のまま変化せず
-  // **ループが止まったまま二度と再開しない**経路が実在した。
-  //
-  // 対策として、判断ロジックを`createAllocationScheduler`(過去の真偽値を一切記憶せず、
-  // 呼ばれた時点の「今、タイマーが張られているか」「今、未計算があるか」だけを見る冪等な
-  // オブジェクト。`mixed-allocation-queue.ts`のJSDoc「設計上の危険その3」・
-  // `mixed-allocation-queue.test.ts`のAC-9テスト参照)へ切り出した。
-  //
-  // ★Issue #110さらなるメタレビュー差し戻し: スケジューラの生成を**render中の`useRef`遅延
-  // 初期化**にしていたが、これは`CopyErrorButton.tsx`が一度踏んだのと同じ罠だった。
-  // `main.tsx`はアプリ全体を`<StrictMode>`で包んでおり、開発モードでは`useEffect`が
-  // setup→cleanup→setupと2重実行される。render中生成だとインスタンスは1つしか作られず、
-  // 1回目のcleanupで`dispose()`された唯一のインスタンスを2回目以降のsetup後も使い続けることに
-  // なり、以後`sync()`は`disposed`を見て何もしなくなる(開発モードで配分が永遠に
-  // 「計算中…」のままになる。本番ビルドは2重実行が無いため顕在化しない)。
-  // `CopyErrorButton.tsx`の前例に倣い、**スケジューラの生成そのものを`useEffect(..., [])`の
-  // 中へ移し**、setupのたびに新しいインスタンスを作って対応するcleanupでそのインスタンスだけを
-  // `dispose()`する(クロージャで捕まえた自分自身の値と比較してからrefをnullに戻す。
-  // StrictModeの1回目cleanupが2回目setup後のrefを誤って消さないようにするため)。
-  // マウント直後の最初のコミットを取りこぼさないよう、生成直後に`sync()`を1回呼び、かつ
-  // 「毎コミットsync()する」effectより**先に宣言する**(宣言順に実行されるため。
-  // どちらか一方が欠けても、マウント直後の最初のsync()を取りこぼす経路が残る)。
+  // ★Issue #110さらなるメタレビュー差し戻し由来の設計も継承する: 駆動役はWorker(実スレッド)
+  // という実資源を保持するため、`CopyErrorButton.tsx`・#110のスケジューラと同じく
+  // **生成そのものを`useEffect(..., [])`の中で行い**、StrictModeのsetup→cleanup→setupで
+  // 2重実行されても、cleanupは「そのeffect実行が生成した自分自身のインスタンス」だけを
+  // `dispose()`する(クロージャで捕まえた値と比較してからrefをnullに戻す)。
+  // マウント直後の最初のコミットを取りこぼさないよう、生成直後に`pump()`を1回呼び、かつ
+  // 「毎コミットpump()する」effectより**先に宣言する**(宣言順に実行されるため)。
   const [, forceAllocationRerender] = useReducer((c: number) => c + 1, 0);
-  const allocationSchedulerRef = useRef<AllocationScheduler | null>(null);
+  const allocationRunnerRef = useRef<AllocationRunner<
+    AllocationWorkerRequest,
+    MixedRaceAllocationDisplayView
+  > | null>(null);
   useEffect(() => {
-    const scheduler = createAllocationScheduler({
-      runner: allocationRunner,
+    const runner = createAllocationRunner<AllocationWorkerRequest, MixedRaceAllocationDisplayView>({
+      cache: props.mixedAllocationCache,
+      createWorker: createRealAllocationWorker,
+      hardwareConcurrency: navigator.hardwareConcurrency,
       schedule: (callback) => window.setTimeout(callback, 0),
       cancel: (handle) => window.clearTimeout(handle),
-      onStepped: forceAllocationRerender,
+      onProgress: forceAllocationRerender,
+      onLog: (operation, error) => {
+        // ベストエフォート(ログ集約自体の失敗はUI表示に影響させない。App.tsxの既存catch節と
+        // 同じ流儀)。Worker起動失敗・異常終了はmain側のログファイルへ集約する(AC-4)。
+        window.keibaApi
+          .logRendererError(buildRendererErrorPayload(operation, error))
+          .catch(() => {});
+      },
     });
-    allocationSchedulerRef.current = scheduler;
-    scheduler.sync();
+    allocationRunnerRef.current = runner;
+    runner.pump();
     return () => {
-      scheduler.dispose();
+      runner.dispose();
       // クロージャで捕まえた自分自身のインスタンスだけをnullに戻す
       // (CopyErrorButton.tsxと同じ理由。参照ではなく「このeffect実行が生成した値」で判定する)。
-      if (allocationSchedulerRef.current === scheduler) {
-        allocationSchedulerRef.current = null;
+      if (allocationRunnerRef.current === runner) {
+        allocationRunnerRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    allocationSchedulerRef.current?.sync();
+    allocationRunnerRef.current?.setInputs({
+      order: allocationOrder,
+      keyFor: keyForAllocation,
+      buildRequest: buildAllocationWorkerRequest,
+      compute: computeAllocation,
+    });
+    allocationRunnerRef.current?.pump();
   });
 
   const expandedSet = new Set(props.expandedRaceIds);
@@ -1021,12 +1030,13 @@ export function BatchAnalysisView(
                     JSDoc参照(Issue #57で計算本体と共にそちらへ移設した。本タスクではgreedySteps
                     自体は変更しない)。
                     AC21: レース単位でメモ化する(details開閉等の再レンダーで再計算しない)。
-                    Issue #110: 計算をレース単位に分けて進めるため(AC-2)、ここでは`compute`を
-                    誘発しない`peek`だけを見る。閉じた<details>の中でも(React自身は開閉に
-                    関わらず子要素を評価するため)このIIFEは毎レンダー実行されるが、実際の
-                    計算(`allocationRunner.step()`)は上の`useEffect`側で1ステップずつ
-                    別途進む(ここでは「今の結果があるかどうか」を覗くだけで、無ければ
-                    「計算中」を出す)。
+                    Issue #110・#119: 計算をレース単位に分けてWorkerプールで進めるため、
+                    ここでは`compute`を誘発しない`peek`だけを見る(`props.mixedAllocationCache`
+                    へ直接照会する。上のモジュール冒頭コメント「読み出しは駆動役を経由しない」
+                    参照)。閉じた<details>の中でも(React自身は開閉に関わらず子要素を評価する
+                    ため)このIIFEは毎レンダー実行されるが、実際の計算は上の`useEffect`側
+                    (`allocationRunnerRef`)で別途進む(ここでは「今の結果があるかどうか」を
+                    覗くだけで、無ければ「計算中」を出す)。
                   */}
                   {!betAllocationUnset &&
                     (() => {
@@ -1034,7 +1044,9 @@ export function BatchAnalysisView(
                       if (fullResult === undefined) {
                         return null;
                       }
-                      const outcome = allocationRunner.peek(highlight.raceId);
+                      const outcome = props.mixedAllocationCache.peek(
+                        keyForAllocation(highlight.raceId),
+                      );
                       if (outcome === undefined) {
                         return (
                           <p style={{ color: "#666", fontSize: "0.85rem" }}>

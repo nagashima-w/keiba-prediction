@@ -115,8 +115,15 @@ function loadQuinellaCombo(): Record<string, number | null> {
   return Object.fromEntries(toComboOddsScalarMap(parsed.odds));
 }
 
-/** フィクスチャ(保存済みRaceData)を読み、runAnalysisを実LLM無しで実行してAnalysisResultを得る。 */
-async function loadAnalysisResult(): Promise<AnalysisResult> {
+/**
+ * フィクスチャ(保存済みRaceData)を読み、runAnalysisを実LLM無しで実行してAnalysisResultを得る。
+ *
+ * **Issue #119(#24-C3)でexportした**: `scripts/verify-worker-pool-prepare.ts`(Workerプールの
+ * 実機確認・実測用フィクスチャ生成)が、本スクリプトと同じ実オッズ・実prior・同じ計測条件
+ * (上記JSDoc参照)でAnalysisResultを得るために再利用する(単一定義の原則。読み込みロジックの
+ * 再実装をしない)。
+ */
+export async function loadAnalysisResult(): Promise<AnalysisResult> {
   const raw = readFileSync(FIXTURE_PATH, "utf-8");
   // 保存済みフィクスチャは scrapeRace の戻り値(RaceData)をそのまま JSON.stringify したもの
   // (scripts/investigate-combo-odds-real-fetch.ts が書き出した形式)。ネットワークには出ない。
@@ -373,7 +380,15 @@ async function main(): Promise<void> {
   await runQuinellaPerformanceComparison(result);
 }
 
-main().catch((e: unknown) => {
-  console.error(e);
-  process.exitCode = 1;
-});
+// このファイルを直接実行したとき(`pnpm tsx scripts/bench-mixed-allocation.ts`)だけ計測一式を
+// 走らせる。Issue #119(#24-C3)で`loadAnalysisResult`を他スクリプト
+// (`scripts/verify-worker-pool-prepare.ts`)からexportして再利用するようにしたため、
+// このガードが無いと**importしただけ**でも本スクリプトの計測一式(コンソール出力)が
+// 副作用として実行されてしまう(単一定義の原則を守るための変更で、既存の直接実行時の
+// 挙動・出力は一切変えない)。
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main().catch((e: unknown) => {
+    console.error(e);
+    process.exitCode = 1;
+  });
+}

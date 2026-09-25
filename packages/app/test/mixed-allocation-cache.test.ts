@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  cacheKeyEquals,
   createMixedAllocationCache,
   type MixedAllocationCacheKey,
 } from "../src/renderer/mixed-allocation-cache.js";
@@ -188,4 +189,42 @@ describe("createMixedAllocationCache().peek(値を計算せずに照会する。
     const newKey = key({ bankroll: 200000 });
     expect(cache.peek(newKey)).toBeUndefined();
   });
+});
+
+// Issue #119(#24-C3): 配分計算のWorkerプール化で「送信時のキー」と「完了時点の最新キー」を
+// 比較し、不一致なら結果を破棄する(古い結果が新しい設定の値を上書きしない)ために、
+// `get`/`peek`が使っているのと同じ等価判定を再利用する。**新しい経路が独自のキー定義・
+// 独自の比較関数を持たない**(このファイル冒頭JSDoc「この表はキー材料の唯一の定義」)ため、
+// 再実装せずexportして使う。
+describe("cacheKeyEquals(get/peekと同じキー等価判定をexportして再利用可能にする。Issue #119)", () => {
+  it("10項目すべてが一致すれば true を返すこと(新しく組み立てたオブジェクトでも)", () => {
+    expect(cacheKeyEquals(key(), key())).toBe(true);
+  });
+
+  // get/peek用のテーブル(mutationCases・peekMutationCases)とは意図的に独立させる
+  // (このファイルの既存の流儀: 「既存のテーブル・アサーションは1件も変更しない」
+  // 「別のdescribeブロックとは別の新規テーブルとして持つ」に倣う)。
+  const cacheKeyEqualsMutationCases: { name: string; mutate: (k: MixedAllocationCacheKey) => MixedAllocationCacheKey }[] = [
+    { name: "raceId", mutate: (k) => ({ ...k, raceId: "202601010102" }) },
+    { name: "race(参照)", mutate: (k) => ({ ...k, race: { marker: "race-B" } }) },
+    { name: "bankroll", mutate: (k) => ({ ...k, bankroll: k.bankroll + 1 }) },
+    { name: "perRaceCap", mutate: (k) => ({ ...k, perRaceCap: k.perRaceCap + 1 }) },
+    { name: "kellyFraction", mutate: (k) => ({ ...k, kellyFraction: k.kellyFraction + 0.01 }) },
+    { name: "evThreshold", mutate: (k) => ({ ...k, evThreshold: k.evThreshold + 0.1 }) },
+    { name: "includeComboOdds", mutate: (k) => ({ ...k, includeComboOdds: !k.includeComboOdds }) },
+    { name: "includeWideInAllocation", mutate: (k) => ({ ...k, includeWideInAllocation: !k.includeWideInAllocation }) },
+    { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
+    { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
+  ];
+
+  it.each(cacheKeyEqualsMutationCases)(
+    "$name だけが異なれば false を返すこと(get/peekのミス判定と同じ基準であることの確認)",
+    ({ mutate }) => {
+      const base = key();
+      const mutated = mutate(base);
+      // 前提固定: 実際に値が変わっていること。
+      expect(mutated).not.toEqual(base);
+      expect(cacheKeyEquals(base, mutated)).toBe(false);
+    },
+  );
 });

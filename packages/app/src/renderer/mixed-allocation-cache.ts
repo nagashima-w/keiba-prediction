@@ -85,8 +85,18 @@ export interface MixedAllocationCache<T> {
   peek(key: MixedAllocationCacheKey): T | undefined;
 }
 
-/** キー10項目すべてが一致するかを判定する(表の全項目を漏れなく比較する唯一の場所)。 */
-function cacheKeyEquals(a: MixedAllocationCacheKey, b: MixedAllocationCacheKey): boolean {
+/**
+ * キー10項目すべてが一致するかを判定する(表の全項目を漏れなく比較する唯一の場所)。
+ *
+ * **Issue #119(#24-C3)でexportした**: 配分計算をWorkerプールへ移す際、Worker完了時に
+ * 「送信時のキー」と「その時点の最新キー」を比較し、不一致なら結果を破棄する
+ * (設定変更・再分析後に届いた古い結果が新しいキャッシュを上書きしないようにする)ために、
+ * `mixed-allocation-worker-pool.ts`がこの関数をそのまま再利用する。本ファイル冒頭JSDoc
+ * 「この表はキー材料の唯一の定義であり…新しい経路が独自のキー定義を持つことはない」を
+ * 維持するため、比較ロジックを再実装せずexportする(`get`/`peek`の挙動・このexport追加
+ * 自体は非破壊。既存の呼び出し元・既存テストは変更していない)。
+ */
+export function cacheKeyEquals(a: MixedAllocationCacheKey, b: MixedAllocationCacheKey): boolean {
   return (
     a.raceId === b.raceId &&
     a.race === b.race &&
