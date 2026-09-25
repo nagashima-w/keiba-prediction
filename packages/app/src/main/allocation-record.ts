@@ -16,8 +16,9 @@
  *   **#24-D3a(Issue #115)で`MixedAllocationSettings`は8項目(`includeQuinellaInAllocation`追加)に
  *   なったが、この設定エコーは7列のまま据え置く**(`settingsColumnsOf`が8項目目を読まない)。
  *   「#59スキーマ固定・増減は停止条件」を#24-D3aでは解除しないという着手前ゲート裁定
- *   (2026-09-24)による。列を読む人(#55過去分析再表示の「馬連: ON/OFF」)が実在するタスクで
- *   解除する(見込みは#24-D3b。Issue #115本文参照)。
+ *   (2026-09-24)による。Issue #117(#24-D3b-2)で券種の選択・D-2フォールバック規則・画面表示は
+ *   接続されたが、このメタ行7列のスキーマは引き続き据え置いている(列を読む人〈#55過去分析
+ *   再表示の「馬連: ON/OFF」〉が実在するタスク=Issue #118で解除する)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
  * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
@@ -95,10 +96,10 @@ import type {
  * (下記「## 列の由来」参照)はこのフィールドを読まず、メタ行の設定エコーは
  * 引き続き`include_wide`/`include_trio`の2列のまま据え置く(#59が固定した
  * 「列一覧は固定・増減は停止条件」を#24-D3aでは解除しない。列を読む人〈#55再表示の
- * 「馬連: ON/OFF」〉が実在する#24-D3bで解除する)。この型に持たせる目的は、
+ * 「馬連: ON/OFF」〉が実在するIssue #118で解除する)。この型に持たせる目的は、
  * `MixedAllocationSettings`(7→8項目)まで値を運ぶ配管の一部としてのみであり、
- * D3a時点では`resolveMixedBetTypes`・`isComboBetTypesOff`のどちらにも接続されない
- * (`shared/mixed-race-allocation.ts`のJSDoc参照)。
+ * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #117(#24-D3b-2)で
+ * 完了した(`shared/mixed-race-allocation.ts`のJSDoc参照)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;

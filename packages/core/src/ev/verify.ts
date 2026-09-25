@@ -399,9 +399,10 @@ export interface ProposedBetUnknownBetType {
  * 賭け金仮定を指すか名前から分からない語」を避けるためのもので、`ProposedBetReport` の内側では
  * 仮定は既に確定している。
  *
- * ★馬連(quinella)は#24-D3(配分提案への組み込み)までapp側が候補を作らないため`quinella`の
- * `betCount`は常に0だが、値自体はこの内側に保持し**画面(`VerifyView.tsx`)には表示しない**
- * (#112「馬連 ¥0 0点」の事故と同型を避けるため。Issue #114 AC-6)。
+ * ★馬連(quinella)はIssue #117(#24-D3b-2)でapp側の配分提案への組み込みが完了し、
+ * `quinella`の`betCount`が実際に発生するようになったため、画面(`VerifyView.tsx`)の
+ * 内訳・判定不能の行にもワイドと3連複の間に表示する(#116までは買い目が構造的に0件だったため、
+ * #112「馬連 ¥0 0点」の事故と同型を避けるためあえて表示しない設計だった。Issue #114 AC-6)。
  */
 export interface ProposedBetReport {
   /** 母集団4分類の件数。 */
@@ -419,7 +420,8 @@ export interface ProposedBetReport {
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummary;
   /**
-   * 馬連の内訳(Issue #114・#24-F1)。#24-D3まで買い目が構造的に0件のため、画面には出さない
+   * 馬連の内訳(Issue #114・#24-F1)。Issue #117(#24-D3b-2)でapp側の配分提案への組み込みが
+   * 完了し買い目が実際に発生するようになったため、画面(`VerifyView.tsx`)にも表示する
    * (このJSDoc冒頭の注意参照)。
    */
   readonly quinella: ProposedBetTypeSummary;

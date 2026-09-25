@@ -296,8 +296,9 @@ export interface MixedCandidateDiagnostics {
   /**
    * 馬連の候補ビルド診断値(Issue #116・#24-D3b-1)。`wide`/`trio`と同じ
    * `ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
-   * `options.betTypes`に`"quinella"`を渡さない既定呼び出しでは常に`kind:"not-requested"`
-   * になる(`ALL_MIXED_CANDIDATE_BET_TYPES`が馬連を含まないため。#117で接続予定)。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`はIssue #117(#24-D3b-2)で馬連を含むようになったため、
+   * `options.betTypes`省略時の既定呼び出しでも馬連の候補が実際に構築される
+   * (`options.betTypes`に明示的に`"quinella"`を含めない場合のみ`kind:"not-requested"`になる)。
    */
   readonly quinella: ComboCandidateDiagnosticsView;
 }

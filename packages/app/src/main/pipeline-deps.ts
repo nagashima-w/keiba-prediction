@@ -136,7 +136,7 @@ export interface PipelineWiringConfig {
    * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は5→6項目化した追加分。ここで
    * 受け取り、下でincludeComboOddsと合成した`AnalysisAllocationSettings`(main/allocation-record.ts)
    * までそのまま運ぶが、`allocation-record.ts`のメタ行(`analysis_allocation_meta`)へは
-   * 書かない(#59が固定した列一覧の凍結を解除するのは#24-D3b。`allocation-record.ts`冒頭の
+   * 書かない(#59が固定した列一覧の凍結を解除するのはIssue #118。`allocation-record.ts`冒頭の
    * JSDoc参照)。
    */
   readonly allocationSettings?: {

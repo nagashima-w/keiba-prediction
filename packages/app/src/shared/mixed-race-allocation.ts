@@ -50,10 +50,11 @@ import {
  *    (`BatchAnalysisView.tsx`。第4段後半)が既存の `placeBetUnavailableMessage(reason)` を
  *    そのまま使って1行を追加する(新しい文言を作らない)。
  * 4. D-2 フォールバック規則(単一定義の原則。3条件のいずれかで既存 `buildRaceAllocation` の
- *    結果をそのまま返す):
+ *    結果をそのまま返す。Issue #117(#24-D3b-2)で馬連〈quinella〉を条件②③に加えた):
  *    - `includeComboOdds` が OFF
- *    - ワイド・三連複とも配分対象OFF(`includeWideInAllocation`/`includeTrioInAllocation`)
- *    - **ワイド・三連複の候補合計が0件**(boss訂正2: 複勝候補の件数は含めない。複勝が0件でも
+ *    - ワイド・三連複・馬連がすべて配分対象OFF(`includeWideInAllocation`/
+ *      `includeTrioInAllocation`/`includeQuinellaInAllocation`)
+ *    - **ワイド・三連複・馬連の候補合計が0件**(boss訂正2: 複勝候補の件数は含めない。複勝が0件でも
  *      組合せ候補が1件以上あれば混在経路に入る)
  * 5. 非該当なら `buildMixedCandidates` + `allocateGeneralBets` で実際に混在配分を計算する
  *    (`kind:"mixed"`)。
@@ -119,25 +120,21 @@ import {
 
 /**
  * 混在配分の合成に必要な設定(既存の複勝配分3項目 `BetAllocationSettings` に、
- * EV閾値統一〈D-4〉・券種選択〈D-1〉の4項目を加えた形)。
+ * EV閾値統一〈D-4〉・券種選択〈D-1・#24-D3a/b〉の5項目を加えた形)。
  */
 export interface MixedAllocationSettings extends BetAllocationSettings {
-  /** EVプラス判定の閾値(`AppSettings.evThreshold`)。ワイド・三連複にも同じ値を適用する(D-4)。 */
+  /** EVプラス判定の閾値(`AppSettings.evThreshold`)。ワイド・馬連・三連複にも同じ値を適用する(D-4)。 */
   readonly evThreshold: number;
-  /** ワイド・三連複のオッズを取得するか(`AppSettings.includeComboOdds`)。 */
+  /** ワイド・馬連・三連複のオッズを取得するか(`AppSettings.includeComboOdds`)。 */
   readonly includeComboOdds: boolean;
   /** ワイドを配分対象に含めるか(`AppSettings.includeWideInAllocation`)。 */
   readonly includeWideInAllocation: boolean;
   /** 三連複を配分対象に含めるか(`AppSettings.includeTrioInAllocation`)。 */
   readonly includeTrioInAllocation: boolean;
   /**
-   * 馬連を配分対象に含めるか(`AppSettings.includeQuinellaInAllocation`。#24-D3a・Issue #115)。
-   *
-   * **#24-D3a時点ではこのフィールドは未使用**(`resolveMixedBetTypes`・`isComboBetTypesOff`の
-   * どちらも参照しない。`quinella-allocation-setting-wiring.test.ts`がソース走査で固定する)。
-   * 候補ビルダーが実際に馬連の候補を作り、D-2フォールバック規則にも組み込むのは#24-D3b。
-   * D3aで組み込むと、馬連の候補が無いまま混在経路に入り配分の答えが変わりうるため
-   * (Issue #115本文「踏む地雷(3)」)、意図的に未接続のまま設定だけを配管する。
+   * 馬連を配分対象に含めるか(`AppSettings.includeQuinellaInAllocation`。#24-D3a・Issue #115で
+   * 設定項目を新設し、Issue #117(#24-D3b-2)で`resolveMixedBetTypes`・`isComboBetTypesOff`
+   * (D-2フォールバック規則の条件②③)へ実際に接続した)。
    */
   readonly includeQuinellaInAllocation: boolean;
 }

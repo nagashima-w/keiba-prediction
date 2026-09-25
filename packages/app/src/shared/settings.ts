@@ -285,13 +285,9 @@ export interface AppSettings {
    * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
    * `includeTrioInAllocation` と同じ(そちらのJSDoc参照)。
    *
-   * **この設定はまだ画面に出ない(SettingsView.tsxにトグルを追加しない)。**
-   * 候補ビルダー自体(`shared/mixed-candidates.ts` の `buildMixedCandidates`)は
-   * Issue #116・#24-D3b-1で馬連の候補を構築できるようになったが、`shared/mixed-race-allocation.ts`
-   * の `resolveMixedBetTypes` はまだこの設定を読まず`betTypes`に`"quinella"`を渡さないため、
-   * **この設定を変えても配分結果は変わらない**(D-2フォールバック規則`isComboBetTypesOff`にも
-   * まだ加えない)。実際に画面へ出し、`resolveMixedBetTypes`・フォールバック規則に
-   * 組み込むのは #117(#24-D3b-2。Issue #115本文参照)。
+   * `SettingsView.tsx`のチェックボックス(ワイドと三連複の間)・`shared/mixed-race-allocation.ts`の
+   * `resolveMixedBetTypes`・D-2フォールバック規則`isComboBetTypesOff`への接続は
+   * Issue #117(#24-D3b-2)で完了した(この設定を変えると実際に配分結果が変わる)。
    */
   readonly includeQuinellaInAllocation: boolean;
 }
@@ -335,8 +331,7 @@ export interface MaskedSettings {
   readonly includeTrioInAllocation: boolean;
   /**
    * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。往復編集フォームとして表示するため
-   * そのまま返す。#24-D3a時点では対応する画面トグルが無いため往復対象は無いが、往復自体は
-   * 他の配分対象設定と同じ形にしておく(D3bでトグルを追加したときの配線を変えないため)。
+   * そのまま返す。対応する画面トグル(`SettingsView.tsx`)はIssue #117(#24-D3b-2)で追加した。
    */
   readonly includeQuinellaInAllocation: boolean;
 }

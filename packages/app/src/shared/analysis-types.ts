@@ -594,9 +594,10 @@ export interface ProposedBetPopulationView {
  * ポートフォリオとしての合計。core側JSDoc参照)。単勝はIssue #100・#23-Cで、馬連は
  * Issue #114・#24-F1で追加。
  *
- * ★`quinella`フィールドは型としては保持するが、`VerifyView.tsx`は#24-D3まで
- * この値を一切参照しない(画面に馬連の行を出さない。#112「馬連 ¥0 0点」の事故と同型を
- * 避けるため。Issue #114 AC-6・着手前ゲートの合意)。
+ * ★`quinella`フィールドはIssue #117(#24-D3b-2)でapp側の配分提案への組み込みが完了し
+ * 買い目が実際に発生するようになったため、`VerifyView.tsx`も画面に馬連の行を出す
+ * (#116までは買い目が構造的に0件だったため、#112「馬連 ¥0 0点」の事故と同型を避けるため
+ * あえて表示しない設計だった。Issue #114 AC-6・着手前ゲートの合意)。
  */
 export interface ProposedBetReportView {
   /** 母集団4分類の件数。 */
@@ -612,8 +613,8 @@ export interface ProposedBetReportView {
   /** 3連複の内訳。 */
   readonly trio: ProposedBetTypeSummaryView;
   /**
-   * 馬連の内訳(Issue #114・#24-F1)。#24-D3まで`VerifyView.tsx`はこの値を表示しない
-   * (このJSDoc冒頭の注意参照)。
+   * 馬連の内訳(Issue #114・#24-F1)。Issue #117(#24-D3b-2)以降、`VerifyView.tsx`はこの値を
+   * 表示する(このJSDoc冒頭の注意参照)。
    */
   readonly quinella: ProposedBetTypeSummaryView;
   /** 未知の券種コードの内訳(Issue #76。`overall`には合算しない)。 */

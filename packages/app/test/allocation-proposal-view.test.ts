@@ -362,11 +362,20 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
     );
     expect(view.notices).toEqual([FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE]);
     // 定数の中身そのものをリテラルで固定する(理由は他の定数と同じ)。
-    // Issue #117: 条件③(no-combo-candidates)は馬連の候補も数えるようになったため、
-    // 文言も「ワイド・馬連・三連複」の3券種に直す(旧「ワイド・三連複」は既に事実と食い違う)。
+    // メタレビュー差し戻し(Issue #117): 券種を列挙する文言(「ワイド・馬連・三連複」)は、
+    // 保存済みの過去分析(馬連を一度も評価していない記録)を再表示したときにも同じ文言が出る。
+    // その記録にとって「馬連にEVプラスの候補が無かった」は事実ではない(評価していないものを
+    // 判定結果のように見せる。#31の原則に反する)。したがって券種を列挙しない、
+    // どの時期の記録にも真になる文言に直す。
     expect(FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE).toBe(
-      "ワイド・馬連・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。",
+      "組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。",
     );
+  });
+
+  it("メタレビュー差し戻し(Issue #117): no-combo-candidatesの注記が特定の券種名を含まないこと(過去の記録にも今の記録にも真であるべきため、券種を列挙し直す退行を防ぐ)", () => {
+    expect(FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE).not.toContain("馬連");
+    expect(FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE).not.toContain("ワイド");
+    expect(FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE).not.toContain("三連複");
   });
 
   it("route='unavailable'由来(D-2フォールバックが頭数不可でunavailableになった場合)でも、combo-bet-types-offの注記がunavailableReasonの注記に続けて付くこと", () => {
@@ -381,11 +390,19 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
       placeBetUnavailableMessage("two-place-only"),
       FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE,
     ]);
-    // Issue #117: 条件②(combo-bet-types-off)はワイド・3連複・馬連がすべてOFFのときに
-    // 発生するようになったため、文言も「ワイド・馬連・三連複」の3券種に直す。
+    // メタレビュー差し戻し(Issue #117): 券種を列挙する文言(「ワイド・馬連・三連複」)は、
+    // 保存済みの過去分析(馬連の設定自体がまだ無かった記録)を再表示したときにも同じ文言が出る。
+    // その記録にとって「馬連が配分対象外の設定」というのは事実ではない(#31の原則に反する)。
+    // 券種を列挙しない、どの時期の記録にも真になる文言に直す。
     expect(FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE).toBe(
-      "ワイド・馬連・三連複が配分対象外の設定のため複勝のみの配分になっています。",
+      "組合せ券種がすべて配分対象外の設定のため複勝のみの配分になっています。",
     );
+  });
+
+  it("メタレビュー差し戻し(Issue #117): combo-bet-types-offの注記が特定の券種名を含まないこと(過去の記録にも今の記録にも真であるべきため、券種を列挙し直す退行を防ぐ)", () => {
+    expect(FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE).not.toContain("馬連");
+    expect(FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE).not.toContain("ワイド");
+    expect(FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE).not.toContain("三連複");
   });
 
   it("route='mixed'由来(fallback未経由)ではfallback_reasonの注記が出ないこと", () => {
