@@ -227,6 +227,12 @@ export interface AnalysisAllocationMetaRecord {
   readonly includeComboOdds: boolean;
   readonly includeWide: boolean;
   readonly includeTrio: boolean;
+  /**
+   * 馬連を配分に使うか(Issue #118・#24-D3b-3で追加)。DB列(`include_quinella`)はNULLを許す
+   * ため、書き込み型としては非nullable(新規保存は常に値ありとして扱う。呼び出し側
+   * `allocation-record.ts`の`settingsColumnsOf`が必ず値を渡す)。
+   */
+  readonly includeQuinella: boolean;
   /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
   readonly betUnit: number | null;
   /** 貪欲逐次配分の分割数。betUnit と同じ到達条件。 */
@@ -277,16 +283,17 @@ export interface StoredAllocationBetDetail {
 /**
  * `getStoredAllocation` が返す配分提案(Issue #55: 過去分析の再表示で配分提案を出す)。
  *
- * メタ行20列(主キー`analysis_id`を含む物理列数。AC2テスト等で使う数え方と同じ)のうち、
- * boss裁定(2026-09-02)により以下の13列だけを読む。残り7列のうち`analysis_id`は返り値の
- * データ列ではなく引数(検索キー)そのものであり、列挙の対象外とする。したがって
- * 実質的に「読まない列」として列挙するのは次の6列〈combo_odds_wide/combo_odds_trio/
- * greedy_steps/candidate_cap/model_id/model_approximate〉(利用者に意味の無い内部パラメータ、
- * または表示予定が無いため意図的に読まない。#71の原則「誰も読まない列にコストを払わない」を
- * 踏襲する。AC2の対象もこの6列):
+ * メタ行21列(主キー`analysis_id`を含む物理列数。AC2テスト等で使う数え方と同じ。
+ * Issue #118〈#24-D3b-3〉でinclude_quinella列を追加し20→21列)のうち、
+ * boss裁定(2026-09-02)により以下の14列だけを読む(include_quinellaはIssue #118で
+ * 読む列に追加した)。残り7列のうち`analysis_id`は返り値のデータ列ではなく引数(検索キー)
+ * そのものであり、列挙の対象外とする。したがって実質的に「読まない列」として列挙するのは
+ * 次の6列〈combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/
+ * model_approximate〉(利用者に意味の無い内部パラメータ、または表示予定が無いため意図的に
+ * 読まない。#71の原則「誰も読まない列にコストを払わない」を踏襲する。AC2の対象もこの6列):
  * route/unavailable_reason/fallback_reason/skip_reason_code/bankroll/per_race_cap/
- * kelly_fraction/ev_threshold/include_combo_odds/include_wide/include_trio/bet_unit/
- * odds_status。
+ * kelly_fraction/ev_threshold/include_combo_odds/include_wide/include_trio/
+ * include_quinella/bet_unit/odds_status。
  *
  * `getAllocationForVerify`(#71。route/skip_reason_codeとbets 3列のみ)とは読む列の範囲が
  * 異なる**別のクエリ**であり、互いに変更の影響を与えない(#71 AC-B4の論拠を壊さないための
@@ -314,6 +321,11 @@ export interface StoredAllocation {
   readonly includeComboOdds: boolean;
   readonly includeWide: boolean;
   readonly includeTrio: boolean;
+  /**
+   * 馬連を配分に使うか(Issue #118・#24-D3b-3で追加)。列追加前(Issue #118より前)に保存された
+   * 記録は null(「記録なし」。#31: OFFと断定しない。読み出し側の表示は「馬連: 記録なし」)。
+   */
+  readonly includeQuinella: boolean | null;
   /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
   readonly betUnit: number | null;
   /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
@@ -324,8 +336,10 @@ export interface StoredAllocation {
 
 /**
  * `getAllocationForVerify` が返す配分提案の最小表現(Issue #71・#54-B)。
- * メタ行20列のうち `route`/`skip_reason_code` の2列だけを持つ(残り18列は#71のスコープ外。
- * 下記 `getAllocationForVerify` のJSDoc参照)。
+ * メタ行21列(Issue #118でinclude_quinella列を追加し20→21列)のうち `route`/`skip_reason_code`
+ * の2列だけを持つ(残り19列は#71のスコープ外。`getAllocationForVerify`自体はIssue #118で
+ * 変更していない〈SELECT文がroute/skip_reason_codeしか読まないため無関係〉。下記
+ * `getAllocationForVerify` のJSDoc参照)。
  */
 export interface StoredAllocationSummary {
   /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま。 */
@@ -661,8 +675,14 @@ export class AnalysisStore {
       );
       -- 配分提案(Issue #59)のレース単位メタ行。全経路(unset/yoso/unavailable/place-only/
       -- mixed/invalid)で必ず1行書く契約(#31: 判定不能と判定結果を混ぜない)。列一覧は
-      -- boss着手前ゲート・#59で固定。race_combo_payouts と同じ理由・同じ流儀で
+      -- boss着手前ゲート・#59で固定(Issue #118〈#24-D3b-3〉で include_quinella 列を追加し
+      -- 20→21列。列を読む人〈過去分析の再表示「馬連: ON/OFF/記録なし」〉が実在するに至った
+      -- ため #59 の凍結を部分的に解除した唯一の例外)。race_combo_payouts と同じ理由・同じ流儀で
       -- CREATE TABLE IF NOT EXISTS を使う(新規テーブル追加であり既存データには触れない)。
+      -- include_quinella は NULL を許す(NOT NULL にしない・DEFAULT も付けない): 列追加前
+      -- (Issue #118より前)に保存された行は「馬連の設定を記録していない」のであって
+      -- 「馬連を配分に使わなかった」のではないため、0で埋めるとOFFと断定する誤りになる
+      -- (#31の原則。着手前ゲート裁定)。
       CREATE TABLE IF NOT EXISTS ${ANALYSIS_ALLOCATION_META_TABLE} (
         analysis_id INTEGER PRIMARY KEY,
         route TEXT NOT NULL,
@@ -678,6 +698,7 @@ export class AnalysisStore {
         include_combo_odds INTEGER NOT NULL,
         include_wide INTEGER NOT NULL,
         include_trio INTEGER NOT NULL,
+        include_quinella INTEGER,
         bet_unit INTEGER,
         greedy_steps INTEGER,
         candidate_cap INTEGER,
@@ -711,6 +732,22 @@ export class AnalysisStore {
     this.migrateResultDetailColumns();
     this.migrateAnalysisExportColumns();
     this.migrateHorseReasonColumn();
+    this.migrateAllocationQuinellaColumn();
+  }
+
+  /**
+   * 配分提案メタ行のinclude_quinella列を後付けするマイグレーション(Issue #118・#24-D3b-3)。
+   * Issue #118より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
+   * 追加する(既存行はALTER TABLEでNULLが入る=「馬連の設定を記録していない」として読める。
+   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照)。
+   */
+  private migrateAllocationQuinellaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_quinella")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_quinella INTEGER`);
+    }
   }
 
   /**
@@ -896,9 +933,9 @@ export class AnalysisStore {
       `INSERT INTO ${ANALYSIS_ALLOCATION_META_TABLE}
          (analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code,
           combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
-          include_combo_odds, include_wide, include_trio, bet_unit, greedy_steps, candidate_cap,
-          model_id, model_approximate, odds_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          include_combo_odds, include_wide, include_trio, include_quinella, bet_unit, greedy_steps,
+          candidate_cap, model_id, model_approximate, odds_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertAllocationBet = this.db.prepare(
       `INSERT INTO ${ANALYSIS_BETS_TABLE}
@@ -954,6 +991,7 @@ export class AnalysisStore {
           m.includeComboOdds ? 1 : 0,
           m.includeWide ? 1 : 0,
           m.includeTrio ? 1 : 0,
+          m.includeQuinella ? 1 : 0,
           m.betUnit,
           m.greedySteps,
           m.candidateCap,
@@ -1174,15 +1212,21 @@ export class AnalysisStore {
 
   /**
    * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#55(過去分析の
-   * 再表示で配分提案を出す)が読む13列 + bets(betType/comboKey/stake/odds/ev)を取得する。
+   * 再表示で配分提案を出す)が読む14列 + bets(betType/comboKey/stake/odds/ev)を取得する
+   * (include_quinellaはIssue #118〈#24-D3b-3〉で読む列に追加した。13→14列)。
    * メタ行が無ければ undefined を返す(#59より前の旧分析=「記録なし」)。
    *
    * **読まない6列(boss裁定2026-09-02)**: `combo_odds_wide`/`combo_odds_trio`/`greedy_steps`/
-   * `candidate_cap`/`model_id`/`model_approximate`(メタ行の物理列数20から読む13列と
-   * `analysis_id`〈検索キーであり返り値のデータ列ではないため列挙に含めない〉を除いた数)。
+   * `candidate_cap`/`model_id`/`model_approximate`(メタ行の物理列数21から読む14列と
+   * `analysis_id`〈検索キーであり返り値のデータ列ではないため列挙に含めない〉を除いた数。
+   * Issue #118でinclude_quinella列が追加され20→21列になったが、読まない6列自体は変わらない)。
    * 前者2つは表示予定が無く(#55のスコープ外。必要になれば#16で追加)、後者4つは利用者に
    * 意味の無い内部パラメータ(`getAllocationForVerify`のJSDocと同じ判断)。詳細は
    * {@link StoredAllocation} のJSDoc参照。
+   *
+   * `include_quinella`は他13列と異なりNULLを許す列のため、DB値が`null`のときは
+   * `includeQuinella: null`(記録なし)としてそのまま返す(0/1のときのみ`!== 0`でboolean化する。
+   * #31: 記録なしをfalseに丸めない)。
    * @param analysisId 分析ID
    */
   getStoredAllocation(analysisId: number): StoredAllocation | undefined {
@@ -1192,7 +1236,8 @@ export class AnalysisStore {
                 skip_reason_code AS skipReasonCode, bankroll, per_race_cap AS perRaceCap,
                 kelly_fraction AS kellyFraction, ev_threshold AS evThreshold,
                 include_combo_odds AS includeComboOdds, include_wide AS includeWide,
-                include_trio AS includeTrio, bet_unit AS betUnit, odds_status AS oddsStatus
+                include_trio AS includeTrio, include_quinella AS includeQuinella,
+                bet_unit AS betUnit, odds_status AS oddsStatus
            FROM ${ANALYSIS_ALLOCATION_META_TABLE} WHERE analysis_id = ?`,
       )
       .get(analysisId) as
@@ -1208,6 +1253,7 @@ export class AnalysisStore {
           includeComboOdds: number;
           includeWide: number;
           includeTrio: number;
+          includeQuinella: number | null;
           betUnit: number | null;
           oddsStatus: string;
         }
@@ -1233,6 +1279,7 @@ export class AnalysisStore {
       includeComboOdds: metaRow.includeComboOdds !== 0,
       includeWide: metaRow.includeWide !== 0,
       includeTrio: metaRow.includeTrio !== 0,
+      includeQuinella: metaRow.includeQuinella === null ? null : metaRow.includeQuinella !== 0,
       betUnit: metaRow.betUnit,
       oddsStatus: metaRow.oddsStatus,
       bets,

@@ -175,7 +175,11 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     expect(saved[0]!.allocation).toBeUndefined();
   });
 
-  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定7項目(evThresholdはevConfig由来)が反映されること(route=unsetで確認)。includeQuinellaInAllocation(#24-D3a)はメタ行に漏れないこと", async () => {
+  // Issue #118(#24-D3b-3)で契約反転: このテストはIssue #117まで「includeQuinellaInAllocationは
+  // メタ行に漏れない(#59スキーマ固定を#24-D3aでは解除しない)」ことを保証していた。
+  // Issue #118でこの凍結を解除した(coordinator裁定(A))ため、逆にincludeQuinellaInAllocationが
+  // メタ行のincludeQuinellaへ反映されることを保証するテストへ書き換える。
+  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定8項目(evThresholdはevConfig由来・includeQuinellaはIssue #118で追加)が反映されること(route=unsetで確認)", async () => {
     const saved: AnalysisRecord[] = [];
     const deps: AnalysisPipelineDeps = {
       ...baseDeps(),
@@ -191,8 +195,6 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeComboOdds: true,
         includeWideInAllocation: true,
         includeTrioInAllocation: false,
-        // #24-D3a(Issue #115): メタ行のスキーマは#59で凍結されたまま(既存7列を保つ)なので、
-        // trueにしてもメタ行のincludeWide/includeTrio以外は一切変わらないはず(下のtoEqualで固定)。
         includeQuinellaInAllocation: true,
       },
     };
@@ -200,9 +202,6 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     expect(saved).toHaveLength(1); // 前提固定。
     const allocation = saved[0]!.allocation;
     expect(allocation).not.toBeUndefined();
-    // includeQuinellaInAllocation=trueを渡しているが、メタ行(#59スキーマ固定)には
-    // "includeQuinella"というキー自体が無い(このtoEqualが完全一致のため、もし実装が
-    // 誤って追加してしまえばここで検出される。#24-D3a裁定: DB列追加は#24-D3bへ送る)。
     expect(allocation!.meta).toEqual({
       route: "unset",
       unavailableReason: null,
@@ -217,6 +216,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeComboOdds: true,
       includeWide: true,
       includeTrio: false,
+      includeQuinella: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -268,6 +268,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,

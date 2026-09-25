@@ -91,7 +91,7 @@ export interface AllocationProposalView {
   readonly notices: readonly string[];
   /** 買い目行(配分ありのときのみ非空)。 */
   readonly bets: readonly AllocationBetRowView[];
-  /** 実効設定8項目(「ラベル: 値」の文字列配列)。記録が無ければ空配列。 */
+  /** 実効設定9項目(「ラベル: 値」の文字列配列。Issue #118で馬連を追加し8→9項目)。記録が無ければ空配列。 */
   readonly settingsRows: readonly string[];
 }
 
@@ -282,7 +282,22 @@ function onOff(value: boolean): string {
   return value ? "ON" : "OFF";
 }
 
-/** 実効設定8項目(AC5)を「ラベル: 値」の文字列配列にする。 */
+/**
+ * boolean|null→ON/OFF/記録なし表記(Issue #118・#24-D3b-3)。
+ * `null`(列追加前=Issue #118より前の記録)を`OFF`に丸めない(#31: 判定不能と判定結果を
+ * 混ぜない。着手前ゲート裁定「NULLを許す・OFFと断定しない」)。
+ */
+function onOffOrUnrecorded(value: boolean | null): string {
+  if (value === null) {
+    return "記録なし";
+  }
+  return onOff(value);
+}
+
+/**
+ * 実効設定9項目(AC5。Issue #118〈#24-D3b-3〉で「馬連」をワイドと三連複の間に追加し8→9項目)を
+ * 「ラベル: 値」の文字列配列にする。
+ */
 function buildSettingsRows(a: StoredAllocationView): readonly string[] {
   return [
     `総資金: ${formatYen(a.bankroll)}`,
@@ -290,6 +305,7 @@ function buildSettingsRows(a: StoredAllocationView): readonly string[] {
     `ケリー係数: ${a.kellyFraction}`,
     `EV閾値: ${a.evThreshold}`,
     `ワイド: ${onOff(a.includeWide)}`,
+    `馬連: ${onOffOrUnrecorded(a.includeQuinella)}`,
     `三連複: ${onOff(a.includeTrio)}`,
     `組合せオッズ取得: ${onOff(a.includeComboOdds)}`,
     `オッズ状態: ${oddsStatusLabelForPastAnalysis(a.oddsStatus)}`,

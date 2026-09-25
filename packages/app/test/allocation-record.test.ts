@@ -380,6 +380,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -410,6 +411,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -440,6 +442,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: false,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -477,6 +480,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: false,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       // #59追加指定: place-only経路はDEFAULT_BET_ALLOCATION_CONFIG(mixed用の
       // DEFAULT_GENERAL_BET_ALLOCATION_CONFIGとは別オブジェクト)を参照すること。
       betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
@@ -545,6 +549,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -554,7 +559,13 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     });
   });
 
-  it("route=mixed: includeQuinellaInAllocation(#24-D3a・Issue #115)をtrue/falseに変えてもメタ行が一切変わらないこと(#59スキーマ固定を#24-D3aでは解除しない。DB列追加は#24-D3bへ送る裁定の確認)", () => {
+  // Issue #118(#24-D3b-3)で契約反転: このテストはIssue #117まで「#59スキーマ固定を#24-D3aでは
+  // 解除しない」ことを保証していた(旧テストが保証していた内容: (a) メタ行に"includeQuinella"
+  // というキー自体が無いこと、(b) includeQuinellaInAllocationの値に関わらずメタ行が完全一致する
+  // こと)。Issue #118でこの凍結を解除した(coordinator裁定(A))ため、新契約(逆に、
+  // includeQuinellaInAllocationの値がメタ行のincludeQuinellaへ反映され、それ以外のメタ列は
+  // 変わらないこと)を保証するテストへ書き換える。
+  it("route=mixed: includeQuinellaInAllocation(#24-D3a・Issue #115)のtrue/falseがメタ行のincludeQuinellaへ反映され、それ以外のメタ列は変わらないこと(#59スキーマ固定をIssue #118〈#24-D3b-3〉で部分的に解除した契約の確認)", () => {
     const race = raceWithPositiveCombos(8, { trioCombo: undefined });
     const sOn = settings({ includeQuinellaInAllocation: true });
     const sOff = settings({ includeQuinellaInAllocation: false });
@@ -565,10 +576,11 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     }
     const recOn = buildAllocationRecord(outcomeOn, sOn, "result");
     const recOff = buildAllocationRecord(outcomeOff, sOff, "result");
-    // 前提固定: メタ行に "includeQuinella" というキー自体が無いこと(#59スキーマ固定。
-    // これが無いことは上のtoEqualテストで既に保証されているが、ここでも明示する)。
-    expect(Object.keys(recOn.meta)).not.toContain("includeQuinella");
-    expect(recOff.meta).toEqual(recOn.meta);
+    // 本題: includeQuinellaがtrue/falseそれぞれの入力どおりに反映されること。
+    expect(recOn.meta.includeQuinella).toBe(true);
+    expect(recOff.meta.includeQuinella).toBe(false);
+    // 対象フィールド以外は変化しないこと(includeQuinellaだけを揃えれば完全一致するはず)。
+    expect({ ...recOff.meta, includeQuinella: recOn.meta.includeQuinella }).toEqual(recOn.meta);
     expect(recOff.bets).toEqual(recOn.bets);
   });
 
@@ -653,6 +665,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -709,6 +722,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: false,
       includeTrio: false,
+      includeQuinella: false,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -754,6 +768,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -793,6 +808,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -861,6 +877,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: false,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       // skipでも配分計算自体には到達しているため、実効値4列はplace-onlyの通常ケースと同じ。
       betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
@@ -901,6 +918,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -935,6 +953,7 @@ describe("buildInvalidAllocationRecordForException(AC6: buildMixedRaceAllocation
       includeComboOdds: true,
       includeWide: false,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,

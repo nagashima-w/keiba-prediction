@@ -139,6 +139,7 @@ describe("buildRaceLedgerView(検証画面: レース単位の統合リストの
         includeComboOdds: true,
         includeWide: true,
         includeTrio: true,
+        includeQuinella: true,
         betUnit: 100,
         oddsStatus: "result",
         bets: [],

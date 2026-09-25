@@ -7,18 +7,21 @@
  * 変換する純関数を持つ。呼び出し側(main/analysis-pipeline.ts)の変更を最小に保つため、
  * 経路網羅のロジックはすべてこのファイルに集約する(boss着手前ゲート2026-08-27・#59)。
  *
- * ## 列の由来(#59スキーマ固定。増減は停止条件)
+ * ## 列の由来(#59スキーマ固定。増減は停止条件。Issue #118で唯一の例外を追加)
  *
- * - 設定エコー7列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
- *   include_wide/include_trio): 呼び出し時に渡した `MixedAllocationSettings`(7項目)をそのまま写す。
- *   route に関わらず常に非null(実行時に確定している値のため)。
+ * - 設定エコー8列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
+ *   include_wide/include_trio/include_quinella): 呼び出し時に渡した `MixedAllocationSettings`
+ *   (8項目)をそのまま写す。route に関わらず常に非null(実行時に確定している値のため)。
  *
  *   **#24-D3a(Issue #115)で`MixedAllocationSettings`は8項目(`includeQuinellaInAllocation`追加)に
- *   なったが、この設定エコーは7列のまま据え置く**(`settingsColumnsOf`が8項目目を読まない)。
- *   「#59スキーマ固定・増減は停止条件」を#24-D3aでは解除しないという着手前ゲート裁定
- *   (2026-09-24)による。Issue #117(#24-D3b-2)で券種の選択・D-2フォールバック規則・画面表示は
- *   接続されたが、このメタ行7列のスキーマは引き続き据え置いている(列を読む人〈#55過去分析
- *   再表示の「馬連: ON/OFF」〉が実在するタスク=Issue #118で解除する)。
+ *   なったが、当初(Issue #117まで)はこの設定エコーを7列のまま据え置いていた**
+ *   (`settingsColumnsOf`が8項目目を読まなかった)。「#59スキーマ固定・増減は停止条件」を
+ *   #24-D3aでは解除しないという着手前ゲート裁定(2026-09-24)による。Issue #117(#24-D3b-2)で
+ *   券種の選択・D-2フォールバック規則・画面表示は接続されたが、このメタ行のスキーマは
+ *   据え置いたままだった(列を読む人〈#55過去分析再表示の「馬連: ON/OFF」〉が実在するに至った
+ *   タスク=**Issue #118(#24-D3b-3)で7→8列へ解除した**。DB列`include_quinella`はNULLを許す
+ *   〈`AnalysisStore`の該当CREATE TABLEコメント参照〉ため、Issue #118より前に保存された行は
+ *   `includeQuinella: null`〈記録なし〉のまま読める)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
  * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
@@ -92,14 +95,14 @@ import type {
  * 作らない(analysis-pipeline.ts 側の責務。#59 3節)。
  *
  * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は6→7項目化した追加分。
- * **メタ行(`analysis_allocation_meta`)へは書かない**: `settingsColumnsOf`
- * (下記「## 列の由来」参照)はこのフィールドを読まず、メタ行の設定エコーは
- * 引き続き`include_wide`/`include_trio`の2列のまま据え置く(#59が固定した
- * 「列一覧は固定・増減は停止条件」を#24-D3aでは解除しない。列を読む人〈#55再表示の
- * 「馬連: ON/OFF」〉が実在するIssue #118で解除する)。この型に持たせる目的は、
- * `MixedAllocationSettings`(7→8項目)まで値を運ぶ配管の一部としてのみであり、
- * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #117(#24-D3b-2)で
- * 完了した(`shared/mixed-race-allocation.ts`のJSDoc参照)。
+ * **メタ行(`analysis_allocation_meta`)への書き込みはIssue #118(#24-D3b-3)で接続した**:
+ * `settingsColumnsOf`(下記「## 列の由来」参照)がこのフィールドを読み、メタ行の設定エコーは
+ * `include_wide`/`include_trio`/`include_quinella`の3列になった(#59が固定した「列一覧は
+ * 固定・増減は停止条件」を、列を読む人〈#55再表示の「馬連: ON/OFF/記録なし」〉が実在するに
+ * 至ったIssue #118で解除した)。#117時点までは、この型に持たせる目的は`MixedAllocationSettings`
+ * (7→8項目)まで値を運ぶ配管の一部としてのみだった(`resolveMixedBetTypes`・
+ * `isComboBetTypesOff`への実際の接続はIssue #117(#24-D3b-2)で完了。
+ * `shared/mixed-race-allocation.ts`のJSDoc参照)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;
@@ -139,12 +142,19 @@ function codesColumnsOf(
   };
 }
 
-/** `MixedAllocationSettings`(7項目)を、メタ行の設定エコー7列へ写す。 */
+/** `MixedAllocationSettings`(8項目)を、メタ行の設定エコー8列へ写す(Issue #118でincludeQuinellaを追加)。 */
 function settingsColumnsOf(
   settings: MixedAllocationSettings,
 ): Pick<
   AnalysisAllocationMetaRecord,
-  "bankroll" | "perRaceCap" | "kellyFraction" | "evThreshold" | "includeComboOdds" | "includeWide" | "includeTrio"
+  | "bankroll"
+  | "perRaceCap"
+  | "kellyFraction"
+  | "evThreshold"
+  | "includeComboOdds"
+  | "includeWide"
+  | "includeTrio"
+  | "includeQuinella"
 > {
   return {
     bankroll: settings.bankroll,
@@ -154,6 +164,7 @@ function settingsColumnsOf(
     includeComboOdds: settings.includeComboOdds,
     includeWide: settings.includeWideInAllocation,
     includeTrio: settings.includeTrioInAllocation,
+    includeQuinella: settings.includeQuinellaInAllocation,
   };
 }
 

@@ -1804,7 +1804,7 @@ describe("computeRaceLedger(検証画面: レース単位の統合リスト。la
 });
 
 describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => {
-  /** 配分提案メタ行(#59スキーマ20列)を最小上書きで組み立てる(analysis-store.test.tsのmakeMetaと同型)。 */
+  /** 配分提案メタ行(#59スキーマ21列。Issue #118でinclude_quinella追加)を最小上書きで組み立てる(analysis-store.test.tsのmakeMetaと同型)。 */
   function allocationMeta(
     overrides: Partial<AnalysisAllocationMetaRecord> = {},
   ): AnalysisAllocationMetaRecord {
@@ -1822,6 +1822,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       includeComboOdds: true,
       includeWide: true,
       includeTrio: true,
+      includeQuinella: true,
       betUnit: 100,
       greedySteps: 1000,
       candidateCap: 2000,

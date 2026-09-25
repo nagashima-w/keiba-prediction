@@ -1952,6 +1952,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         includeComboOdds: true,
         includeWide: true,
         includeTrio: true,
+        includeQuinella: true,
         betUnit: 100,
         greedySteps: 1000,
         candidateCap: 2000,
@@ -1969,7 +1970,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         .get(analysisId);
     }
 
-    it("AC2: route=unset のメタ行が全20列で固定どおりに保存されること(coreの配分計算に未到達=設定エコー以外は全null)", () => {
+    it("AC2: route=unset のメタ行が全21列で固定どおりに保存されること(coreの配分計算に未到達=設定エコー以外は全null。Issue #118でinclude_quinella列を追加し20→21列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -1990,6 +1991,9 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // (b) `m.includeWide ? 1 : 0` のfalse分岐を固定できない。この経路でfalseにする。
               includeWide: false,
               includeTrio: true,
+              // Issue #118(#24-D3b-3): include_quinellaがこのdescribe全体でtrueのみだと
+              // `m.includeQuinella ? 1 : 0`のfalse分岐を固定できない。この経路でfalseにする。
+              includeQuinella: false,
               betUnit: null,
               greedySteps: null,
               candidateCap: null,
@@ -2016,6 +2020,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_combo_odds: 0,
         include_wide: 0,
         include_trio: 1,
+        include_quinella: 0,
         bet_unit: null,
         greedy_steps: null,
         candidate_cap: null,
@@ -2026,7 +2031,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
-    it("AC2: route=place-only(includeComboOdds=false)のメタ行が全20列で固定どおりに保存されること(candidate_capはplace-only経路に存在しないためnull)", () => {
+    it("AC2: route=place-only(includeComboOdds=false)のメタ行が全21列で固定どおりに保存されること(candidate_capはplace-only経路に存在しないためnull。Issue #118でinclude_quinella列を追加し20→21列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -2044,6 +2049,9 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // 束縛の入れ替えを検出できない。この経路でtrueとfalseに分ける。
               includeWide: true,
               includeTrio: false,
+              // Issue #118(#24-D3b-3): unsetテストでfalseを踏んだので、この経路ではtrueにする
+              // (2値以上を観測。「定数直書き」への退行を検出できるようにする)。
+              includeQuinella: true,
               betUnit: 100,
               greedySteps: 1000,
               candidateCap: null,
@@ -2073,6 +2081,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_combo_odds: 0,
         include_wide: 1,
         include_trio: 0,
+        include_quinella: 1,
         bet_unit: 100,
         greedy_steps: 1000,
         candidate_cap: null,
@@ -2083,7 +2092,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
-    it("AC2: route=unavailable のメタ行が全20列で固定どおりに保存されること(unavailable_reasonが非nullになる唯一の経路。boss差し戻しM1の再発防止)", () => {
+    it("AC2: route=unavailable のメタ行が全21列で固定どおりに保存されること(unavailable_reasonが非nullになる唯一の経路。boss差し戻しM1の再発防止。Issue #118でinclude_quinella列を追加し20→21列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -2105,6 +2114,9 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               includeComboOdds: false,
               includeWide: true,
               includeTrio: true,
+              // Issue #118(#24-D3b-3): unsetでfalse・place-onlyでtrueを踏んだので、
+              // この経路でも改めてtrueにする(この経路自体でも非デフォルトの値を通す)。
+              includeQuinella: true,
               // coreの配分計算に未到達(unset/yoso/unavailableと同じ扱い)。
               betUnit: null,
               greedySteps: null,
@@ -2132,6 +2144,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_combo_odds: 0,
         include_wide: 1,
         include_trio: 1,
+        include_quinella: 1,
         bet_unit: null,
         greedy_steps: null,
         candidate_cap: null,
@@ -2142,7 +2155,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
-    it("AC2: route=mixed のメタ行が全20列で固定どおりに保存されること(candidate_cap・comboOdds診断値とも非null)", () => {
+    it("AC2: route=mixed のメタ行が全21列で固定どおりに保存されること(candidate_cap・comboOdds診断値とも非null。Issue #118でinclude_quinella列を追加し20→21列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -2161,6 +2174,9 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // `m.evThreshold`を1.0のリテラル直書きに変異させても検出できない
               // (実測: core 2072件が全緑になることを確認済み)。この経路で1.0以外にする。
               evThreshold: 1.3,
+              // Issue #118(#24-D3b-3): unset/false・place-only/true・unavailable/trueと来たので、
+              // この経路(mixed)ではfalseに戻す(4テスト全体でtrue/falseの両方を踏む)。
+              includeQuinella: false,
             }),
             bets: [],
           },
@@ -2181,6 +2197,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_combo_odds: 1,
         include_wide: 1,
         include_trio: 1,
+        include_quinella: 0,
         bet_unit: 100,
         greedy_steps: 1000,
         candidate_cap: 2000,
@@ -2323,6 +2340,150 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
+    describe("include_quinella列の後方互換マイグレーション(Issue #118・#24-D3b-3)", () => {
+      it("include_quinella列が無い旧スキーマのDBを開いても、既存の配分メタ行はincludeQuinella=null(記録なし)で読め、新規保存はtrue/false付きで保存・復元できること", () => {
+        const db = new Database(":memory:");
+        // Issue #118より前のバージョン相当のスキーマ(analysis_allocation_metaにinclude_quinella
+        // 列が無い)を直接作る。列一覧は現行のCREATE TABLE文(initSchema)からinclude_quinella
+        // だけを除いたもの(coordinator裁定(C): 別の列の有無による交絡を避けるため)。
+        db.exec(`
+          CREATE TABLE analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            race_id TEXT NOT NULL,
+            analyzed_at TEXT NOT NULL,
+            ev_estimated INTEGER,
+            prompt_version TEXT,
+            additional_instruction TEXT,
+            kaisai_date TEXT,
+            model TEXT,
+            raw_response TEXT,
+            race_snapshot_json TEXT
+          );
+          CREATE TABLE analysis_horses (
+            analysis_id INTEGER NOT NULL,
+            umaban INTEGER NOT NULL,
+            prior REAL NOT NULL,
+            adjusted_prob REAL NOT NULL,
+            place_odds_min REAL,
+            ev REAL,
+            is_positive INTEGER NOT NULL,
+            contributions_json TEXT,
+            mark TEXT,
+            reason TEXT,
+            PRIMARY KEY (analysis_id, umaban),
+            FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+          );
+          CREATE TABLE analysis_allocation_meta (
+            analysis_id INTEGER PRIMARY KEY,
+            route TEXT NOT NULL,
+            unavailable_reason TEXT,
+            fallback_reason TEXT,
+            skip_reason_code TEXT,
+            combo_odds_wide TEXT,
+            combo_odds_trio TEXT,
+            bankroll REAL NOT NULL,
+            per_race_cap REAL NOT NULL,
+            kelly_fraction REAL NOT NULL,
+            ev_threshold REAL NOT NULL,
+            include_combo_odds INTEGER NOT NULL,
+            include_wide INTEGER NOT NULL,
+            include_trio INTEGER NOT NULL,
+            bet_unit INTEGER,
+            greedy_steps INTEGER,
+            candidate_cap INTEGER,
+            model_id TEXT,
+            model_approximate INTEGER,
+            odds_status TEXT NOT NULL,
+            FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+          );
+          CREATE TABLE analysis_bets (
+            analysis_id INTEGER NOT NULL,
+            bet_type TEXT NOT NULL,
+            combo_key TEXT NOT NULL,
+            stake INTEGER NOT NULL,
+            odds REAL,
+            ev REAL,
+            PRIMARY KEY (analysis_id, bet_type, combo_key),
+            FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+          );
+          INSERT INTO analyses (id, race_id, analyzed_at) VALUES (1, '旧配分レース', '2026-01-01T00:00:00.000Z');
+          INSERT INTO analysis_allocation_meta (
+            analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code,
+            combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
+            include_combo_odds, include_wide, include_trio, bet_unit, greedy_steps, candidate_cap,
+            model_id, model_approximate, odds_status
+          ) VALUES (
+            1, 'mixed', NULL, NULL, NULL,
+            NULL, NULL, 100000, 10000, 0.5, 1.0,
+            1, 1, 1, 100, 1000, 2000,
+            'conditional-bernoulli', 0, 'result'
+          );
+        `);
+
+        // 新バージョンの AnalysisStore で開く(include_quinella列が無ければ ALTER TABLE で
+        // 追加されるはず)。
+        const store = new AnalysisStore({ database: db });
+
+        // 旧配分メタ行はinclude_quinella列を後付けしても、既存行はincludeQuinella=null
+        // (#118より前の記録=判定不能。裁定「NULLを許す・OFFと断定しない」)として読める。
+        const oldAllocation = store.getStoredAllocation(1)!;
+        expect(oldAllocation.includeQuinella).toBeNull();
+        // 他の13列は列追加の影響を受けず、そのまま読めること(交絡が無いことの確認)。
+        expect(oldAllocation).toEqual({
+          route: "mixed",
+          unavailableReason: null,
+          fallbackReason: null,
+          skipReasonCode: null,
+          bankroll: 100000,
+          perRaceCap: 10000,
+          kellyFraction: 0.5,
+          evThreshold: 1.0,
+          includeComboOdds: true,
+          includeWide: true,
+          includeTrio: true,
+          includeQuinella: null,
+          betUnit: 100,
+          oddsStatus: "result",
+          bets: [],
+        });
+
+        // 新規保存(include_quinella付き)はtrue/falseそれぞれで保存・復元できる(後方互換を確認)。
+        const idTrue = store.saveAnalysis(
+          makeRecord({
+            raceId: "新配分レースtrue",
+            allocation: { meta: makeMeta({ includeQuinella: true }), bets: [] },
+          }),
+        );
+        expect(store.getStoredAllocation(idTrue)!.includeQuinella).toBe(true);
+
+        const idFalse = store.saveAnalysis(
+          makeRecord({
+            raceId: "新配分レースfalse",
+            allocation: { meta: makeMeta({ includeQuinella: false }), bets: [] },
+          }),
+        );
+        expect(store.getStoredAllocation(idFalse)!.includeQuinella).toBe(false);
+
+        store.close();
+      });
+
+      it("同一DBで2回目のAnalysisStore構築(再オープン相当)でもALTER TABLEが再実行されず、既存データを保持すること(冪等性)", () => {
+        const db = new Database(":memory:");
+        const store1 = new AnalysisStore({ database: db });
+        const id = store1.saveAnalysis(
+          makeRecord({
+            raceId: "冪等性レース",
+            allocation: { meta: makeMeta({ includeQuinella: true }), bets: [] },
+          }),
+        );
+        // 同じDBで再度AnalysisStoreを構築(再オープン相当)してもエラーにならない。
+        expect(() => new AnalysisStore({ database: db })).not.toThrow();
+        const store2 = new AnalysisStore({ database: db });
+        expect(store2.getStoredAllocation(id)!.includeQuinella).toBe(true);
+        db.close();
+      });
+    });
+
     describe("getAllocationForVerify(配分提案の読み出し。Issue #71 AC-B1/AC-B2)", () => {
       it("AC-B1: メタ行が無ければundefinedを返すこと(#59より前の旧分析=記録なし)", () => {
         const store = new AnalysisStore();
@@ -2444,7 +2605,8 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
 
     describe("getStoredAllocation(配分提案の読み出し。Issue #55)", () => {
       /**
-       * 読む13列の基準値(boss裁定2026-09-02: combo_odds_wide/combo_odds_trioを除いた13列)。
+       * 読む14列の基準値(boss裁定2026-09-02: combo_odds_wide/combo_odds_trioを除いた13列。
+       * Issue #118(#24-D3b-3)でinclude_quinellaを追加し13→14列)。
        * 全列が互いに異なる値を持つよう選び、束縛箇所の取り違え(条件B)を機械的に検出できるようにする。
        */
       function baselineMeta(
@@ -2462,6 +2624,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeComboOdds: true,
           includeWide: false,
           includeTrio: true,
+          includeQuinella: true,
           betUnit: 150,
           oddsStatus: "middle",
           ...overrides,
@@ -2489,7 +2652,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         store.close();
       });
 
-      it("読む13列 + bets(betType/comboKey/stake/odds/ev)がすべて値として往復し、読まない列を戻り値に含まないこと", () => {
+      it("読む14列 + bets(betType/comboKey/stake/odds/ev)がすべて値として往復し、読まない列を戻り値に含まないこと(Issue #118でinclude_quinellaを追加し13→14列)", () => {
         const store = new AnalysisStore();
         const id = store.saveAnalysis(
           makeRecord({
@@ -2517,6 +2680,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeComboOdds: true,
           includeWide: false,
           includeTrio: true,
+          includeQuinella: true,
           betUnit: 150,
           oddsStatus: "middle",
           bets: [
@@ -2684,6 +2848,36 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           field: "includeTrio",
           expectedValue: true,
         },
+        // Issue #118(#24-D3b-3): include_quinella列の追加(13→14列)。他列と異なりNULLを
+        // 許容する列のため、真偽の入れ替えに加えて非null⇔nullの往復も観測する(下記2ケース)。
+        // 「null→非null」方向は`AnalysisAllocationMetaRecord.includeQuinella`がboolean(非null)
+        // 型のため、このテーブル駆動の枠組み(baselineをこの型経由の保存で作る)では作れない
+        // (型上NULLを書けない)。その方向は本テーブルの外に単独テストとして置く
+        // (「include_quinella(null→非null、#118より前の記録を模す)」describe末尾参照)。
+        {
+          label: "include_quinella(true→false)",
+          metaOverride: { includeQuinella: true },
+          column: "include_quinella",
+          sentinelDbValue: 0,
+          field: "includeQuinella",
+          expectedValue: false,
+        },
+        {
+          label: "include_quinella(false→true)",
+          metaOverride: { includeQuinella: false },
+          column: "include_quinella",
+          sentinelDbValue: 1,
+          field: "includeQuinella",
+          expectedValue: true,
+        },
+        {
+          label: "include_quinella(非null→null)",
+          metaOverride: { includeQuinella: true },
+          column: "include_quinella",
+          sentinelDbValue: null,
+          field: "includeQuinella",
+          expectedValue: null,
+        },
         {
           label: "bet_unit(非null→null)",
           metaOverride: {},
@@ -2732,6 +2926,34 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           store.close();
         },
       );
+
+      it("include_quinella(null→非null、Issue #118より前の記録を模す): 列が既にNULLの行をUPDATEすると、includeQuinellaだけがtrue/falseに変わり他フィールドは変化しないこと", () => {
+        // metaColumnCasesのコメントの通り、`AnalysisAllocationMetaRecord.includeQuinella`は
+        // boolean(非null)型のため、この型経由の保存ではNULLの初期値を作れない。
+        // #118より前に保存された記録(列追加前=NULL)を模すため、通常保存の直後に
+        // 生SQLでinclude_quinellaだけをNULLへ書き戻す。
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(
+          makeRecord({
+            raceId: "AC1メタ列-include_quinella-null-to-nonnull",
+            allocation: { meta: baselineMeta(), bets: [BASELINE_BET] },
+          }),
+        );
+        store.rawDatabase
+          .prepare(`UPDATE analysis_allocation_meta SET include_quinella = NULL WHERE analysis_id = ?`)
+          .run(id);
+        const baseline = store.getStoredAllocation(id)!;
+        // 前提固定: NULLへの書き戻しが効いていること(includeQuinella=記録なし)。
+        expect(baseline.includeQuinella).toBeNull();
+        store.rawDatabase
+          .prepare(`UPDATE analysis_allocation_meta SET include_quinella = ? WHERE analysis_id = ?`)
+          .run(1, id);
+        const updated = store.getStoredAllocation(id)!;
+        // 本題: null→非null(true)に変わり、他フィールドは基準値から一切変化していないこと。
+        expect(updated.includeQuinella).toBe(true);
+        expect({ ...updated, includeQuinella: baseline.includeQuinella }).toEqual(baseline);
+        store.close();
+      });
 
       /** analysis_bets側(odds/ev)の差分テストの仕様。 */
       interface BetColumnCase {
