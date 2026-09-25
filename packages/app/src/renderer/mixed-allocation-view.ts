@@ -104,21 +104,21 @@ export type MixedAllocationBreakdown = Record<AllocationBetType, { readonly stak
  * 判定結果」だが、馬連の¥0は「一度も評価していない」ことを判定結果のように
  * 見せてしまう——#31〈判定不能と判定結果を混ぜない〉のUI版)。
  *
- * **したがって`quinella`はここに含めない。** `ALL_MIXED_CANDIDATE_BET_TYPES`
- * (`mixed-candidates.ts`)が既に採用している設計(「意図的に除外している券種の集合」を
- * リテラルで固定し、新メンバー追加のたびに人間の判断を強制する)と同じ形で、
- * `mixed-allocation-view.test.ts`「MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER」describe が
- * 除外集合を`["quinella"]`として固定する。#24-D3でappが馬連の候補を作るように
- * なったら、そのテストが「除外を外す判断」を人間に強制する。
- *
- * (`display.breakdown`自体〈`MixedAllocationBreakdown`型〉には`Record<AllocationBetType,…>`
- * である以上`quinella`のキーが残るが、それは合計計算に使われるだけで表示には出さない。
- * データに0が入っていることと、表示に出さないことは別の話)。
+ * **Issue #117(#24-D3b-2)で`quinella`の除外を解除した。** `resolveMixedBetTypes`
+ * (`shared/mixed-race-allocation.ts`)が`includeQuinellaInAllocation`設定を実際に参照する
+ * ようになったことで、馬連はワイド・3連複と同じ「ユーザーが設定でON/OFFできる、ONならば
+ * 実際に評価される」券種になった。ワイド・3連複も、ユーザーが個別にOFFにした状態
+ * (他方がONで混在経路に入る場合)では同様に「¥0 0点」を注記なしで表示する
+ * (`buildMixedAllocationBreakdown`は`ALLOCATION_BET_TYPE_UMABAN_COUNT`の全キーを無条件に
+ * 集計するため)。これは#112当時のような「原理的に評価不能」ではなく「ユーザーがOFFに
+ * した」という到達可能な理由であり、既存のワイド・3連複と同じ扱いを受け入れる設計とする。
+ * したがって馬連もこの配列に含める。表示順は頭数の昇順(複勝→単勝→ワイド→馬連→3連複)。
  */
 export const MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER: readonly AllocationBetType[] = [
   "place",
   "win",
   "wide",
+  "quinella",
   "trio",
 ];
 
@@ -295,16 +295,14 @@ export function buildHiddenAllocationsBlocks(
  * throwするため、ここに到達しない)。
  *
  * `allocation-proposal-view.ts`の`betTypeLabel`(DB由来の開いた文字列を扱う、統合しない
- * 別実装)とplace/wide/trioの3つの日本語ラベルが同一であることは
+ * 別実装)とplace/win/wide/quinella/trioの5つの日本語ラベルが同一であることは
  * `allocation-proposal-view.test.ts`「betTypeLabelとmixedBetTypeLabel…」でリテラル固定する。
  *
- * **`"win"`・`"quinella"`は例外(#91・#23-B1a、#112・#24-D1)。** `betTypeLabel`は
- * `"win"`・`"quinella"`のcaseを持たず(`default`分岐でDB由来の生文字列をそのまま返す)、
- * 本関数はそれぞれ`"単勝"`・`"馬連"`という日本語ラベルを返す。したがって**`"win"`・
- * `"quinella"`だけは両関数の戻り値が一致しない**(place/wide/trioの一致とは非対称)。
- * この不一致は#91が自ら作った既知の非対称であり(#112はそれを踏襲しただけで新設していない)、
- * 解消(`betTypeLabel`側へのケース追加)は#23-Cの射程(`allocation-proposal-view.ts`・
- * そのテストへの変更は#91・#112のスコープ外)。
+ * **かつては`"win"`・`"quinella"`が例外だった(#91・#23-B1a、#112・#24-D1)。** 当時
+ * `betTypeLabel`はこの2値のcaseを持たず(`default`分岐でDB由来の生文字列をそのまま返す)、
+ * 本関数との戻り値が一致しない非対称があった。`"win"`は#90(#23-B2)、`"quinella"`は
+ * Issue #117(#24-D3b-2)でそれぞれ`betTypeLabel`側にもcaseを追加し、この非対称は解消済み
+ * (現在は5値すべてで両関数の戻り値が一致する)。
  */
 export function mixedBetTypeLabel(
   betType: AllocationBetType,
@@ -331,16 +329,20 @@ export interface MixedUnjudgedCounts {
 }
 
 /**
- * 券種横断(複勝・単勝・ワイド・3連複)で判定不能だった件数を合算する(AC15・Issue #90で
- * winを追加)。`kind!=="built"/"judged"`(`not-requested`・`unavailable`。ユーザーが対象外に
- * した券種、またはwinのyosoガード)は判定不能ではなく「対象外」なので0として扱う
- * (判定不能〈unjudged〉と対象外〈not-requested`/`unavailable`〉を混同しない)。
+ * 券種横断(複勝・単勝・ワイド・馬連・3連複)で判定不能だった件数を合算する(AC15・Issue #90で
+ * winを追加・Issue #117で馬連〈quinella〉を追加)。`kind!=="built"/"judged"`(`not-requested`・
+ * `unavailable`。ユーザーが対象外にした券種、またはwinのyosoガード)は判定不能ではなく
+ * 「対象外」なので0として扱う(判定不能〈unjudged〉と対象外〈not-requested`/`unavailable`〉を
+ * 混同しない)。
  * **`oddsMalformedCount`はワイド・3連複固有の概念ではない**(旧記述は誤り。#90でwinも
  * `oddsMalformedCount`を持つようになったため加算対象に加えた。この記述の誤りは
  * 「加算漏れを誘発する」〈D-3・boss裁定〉ため実装と併せて直す)。複勝は
  * `unjudged.oddsMissingCount`のみ持つ・winは`oddsMissingCount`/`oddsMalformedCount`を持つが
  * `oddsUnfetchedCount`は持たない(`winOdds`はAnalysisRowのフィールドであり「キーが無い」
  * 未取得状態が構造的に存在しないため。`WinCandidateDiagnosticsView`のJSDoc参照)。
+ * 馬連(quinella)はワイド・3連複と同型の`ComboCandidateDiagnosticsView`(`kind:"built"`のとき
+ * `oddsMissingCount`/`oddsUnfetchedCount`/`oddsMalformedCount`をすべて持つ)を共有するため、
+ * wide/trioと同じ形で加算する。
  */
 export function aggregateUnjudgedCounts(diagnostics: MixedCandidateDiagnostics): MixedUnjudgedCounts {
   const placeMissing =
@@ -348,17 +350,23 @@ export function aggregateUnjudgedCounts(diagnostics: MixedCandidateDiagnostics):
   const winUnjudged = diagnostics.win.kind === "judged" ? diagnostics.win.unjudged : null;
   const wideUnjudged = diagnostics.wide.kind === "built" ? diagnostics.wide.build.unjudged : null;
   const trioUnjudged = diagnostics.trio.kind === "built" ? diagnostics.trio.build.unjudged : null;
+  const quinellaUnjudged = diagnostics.quinella.kind === "built" ? diagnostics.quinella.build.unjudged : null;
   return {
     oddsMissingCount:
       placeMissing +
       (winUnjudged?.oddsMissingCount ?? 0) +
       (wideUnjudged?.oddsMissingCount ?? 0) +
-      (trioUnjudged?.oddsMissingCount ?? 0),
-    oddsUnfetchedCount: (wideUnjudged?.oddsUnfetchedCount ?? 0) + (trioUnjudged?.oddsUnfetchedCount ?? 0),
+      (trioUnjudged?.oddsMissingCount ?? 0) +
+      (quinellaUnjudged?.oddsMissingCount ?? 0),
+    oddsUnfetchedCount:
+      (wideUnjudged?.oddsUnfetchedCount ?? 0) +
+      (trioUnjudged?.oddsUnfetchedCount ?? 0) +
+      (quinellaUnjudged?.oddsUnfetchedCount ?? 0),
     oddsMalformedCount:
       (winUnjudged?.oddsMalformedCount ?? 0) +
       (wideUnjudged?.oddsMalformedCount ?? 0) +
-      (trioUnjudged?.oddsMalformedCount ?? 0),
+      (trioUnjudged?.oddsMalformedCount ?? 0) +
+      (quinellaUnjudged?.oddsMalformedCount ?? 0),
   };
 }
 
@@ -462,9 +470,14 @@ export function resolvePlaceOnlyStake(
   }
 }
 
-/** #35の較正注記(AC14)。組合せ券種のEVが過大評価であること・較正未実施であることを明記する。 */
+/**
+ * #35の較正注記(AC14)。組合せ券種のEVが過大評価であること・較正未実施であることを明記する。
+ * Issue #117: 例示にワイド・3連複に加えて馬連も含めた(馬連も同じ「複数頭の組み合わせによる
+ * 確率誤差の増幅」を受ける組合せ券種であり、ワイド・3連複だけを挙げる旧文言はこれを言い落として
+ * いた)。
+ */
 export const COMBO_EV_CALIBRATION_NOTE =
-  "ワイド・三連複など組合せ券種のEVは、推定確率の誤差が組み合わせ人数ぶん増幅されるため過大評価になりやすいことが実測でわかっています(較正は未実施・Issue #35)。表示額を鵜呑みにせず、資金管理は慎重に行ってください。";
+  "ワイド・馬連・三連複など組合せ券種のEVは、推定確率の誤差が組み合わせ人数ぶん増幅されるため過大評価になりやすいことが実測でわかっています(較正は未実施・Issue #35)。表示額を鵜呑みにせず、資金管理は慎重に行ってください。";
 
 /**
  * `kind:"invalid"`のユーザー向け表示文言(AC17)。`MixedRaceAllocationInvalid.message`は
@@ -523,6 +536,8 @@ export interface MixedAllocationDisplay {
   readonly wideNote: string | null;
   /** 3連複の状態注記(AC16。無ければnull)。 */
   readonly trioNote: string | null;
+  /** 馬連の状態注記(Issue #117・AC-5。wide/trioと同じcomboBetTypeNoteを使う。無ければnull)。 */
+  readonly quinellaNote: string | null;
   /** 頭数不可で複勝が対象外のときの注記(AC3改訂。無ければnull)。 */
   readonly placeUnavailableNote: string | null;
   /** 複勝のみで計算した場合の提案額(AC11。算出不能ならnull)。 */
@@ -637,6 +652,7 @@ export function buildMixedAllocationDisplay(
     unjudged: aggregateUnjudgedCounts(view.diagnostics),
     wideNote: comboBetTypeNote(view.diagnostics.wide),
     trioNote: comboBetTypeNote(view.diagnostics.trio),
+    quinellaNote: comboBetTypeNote(view.diagnostics.quinella),
     placeUnavailableNote: placeUnavailableNoteForMixed(view.diagnostics.place),
     placeOnlyStake: resolvePlaceOnlyStake(race, settings),
     probabilitySumWarning: resolveMixedProbabilitySumWarning(race, view.topFinishCount),

@@ -13,7 +13,11 @@ import { buildComboOddsKey } from "@keiba/core/ev/combo-bet-allocation";
 
 import type { AnalysisRow } from "../src/shared/analysis-types.js";
 import type { MixedCandidateBuildInput } from "../src/shared/mixed-candidates.js";
-import { buildMixedRaceAllocation, type MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
+import {
+  buildMixedRaceAllocation,
+  buildMixedRaceAllocationWithOutcome,
+  type MixedAllocationSettings,
+} from "../src/shared/mixed-race-allocation.js";
 
 // ============================================================================
 // テストヘルパー(mixed-allocation-view.test.tsの流儀を踏襲)
@@ -142,21 +146,60 @@ describe("D-7フォールバック規則の制限(現状維持。win候補があ
     }
   });
 
-  it("②ワイド・3連複とも配分対象OFF: win候補があってもplace-onlyへ落ち、win行は現れないこと", () => {
-    const view = buildMixedRaceAllocation(
+  it("②ワイド・3連複・馬連とも配分対象OFF: win候補があってもplace-onlyへ落ち、win行は現れず、fallbackReasonが'combo-bet-types-off'であること(Issue #117で馬連も条件②に加わったため、馬連も明示的にOFFにする。kindだけでは②③の区別がつかないためfallbackReasonまで確認する)", () => {
+    const outcome = buildMixedRaceAllocationWithOutcome(
       mixedRace(8),
-      settings({ includeWideInAllocation: false, includeTrioInAllocation: false }),
+      settings({
+        includeWideInAllocation: false,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: false,
+      }),
     );
-    expect(view.kind).not.toBe("mixed");
-    expect(view.kind).not.toBe("invalid");
+    expect(outcome.view.kind).not.toBe("mixed");
+    expect(outcome.view.kind).not.toBe("invalid");
+    expect(outcome.outcome.fallbackReason).toBe("combo-bet-types-off");
   });
 
-  it("③ワイド・3連複の候補合計が0件(オッズ未提供): win候補があってもplace-onlyへ落ち、win行は現れないこと", () => {
-    // wideCombo/trioComboを一切渡さない(未取得) → 組合せ候補が0件になる。
+  it("②'馬連込み: ワイド・3連複はOFFでも馬連がON・候補ありならcombo-bet-types-offにならずmixedになり、win行も現れること(Issue #117。条件②が馬連ONを見落とさないことの確認)", () => {
+    const race: MixedCandidateBuildInput = {
+      ...mixedRace(8),
+      quinellaCombo: fullOddsRecord(umabansOf(8), 2, 3000),
+    };
+    const outcome = buildMixedRaceAllocationWithOutcome(
+      race,
+      settings({ includeWideInAllocation: false, includeTrioInAllocation: false }),
+    );
+    expect(outcome.outcome.route).toBe("mixed");
+    expect(outcome.view.kind).toBe("mixed");
+    if (outcome.view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const winAllocations = outcome.view.result.allocations.filter((a) => a.betType === "win");
+    expect(winAllocations.length).toBeGreaterThan(0);
+  });
+
+  it("③ワイド・3連複・馬連の候補合計が0件(オッズ未提供): win候補があってもplace-onlyへ落ち、win行は現れず、fallbackReasonが'no-combo-candidates'であること", () => {
+    // wideCombo/trioCombo/quinellaComboを一切渡さない(未取得) → 組合せ候補が0件になる。
     const race = raceInput({ rows: allCandidateRows(8) });
-    const view = buildMixedRaceAllocation(race, settings());
-    expect(view.kind).not.toBe("mixed");
-    expect(view.kind).not.toBe("invalid");
+    const outcome = buildMixedRaceAllocationWithOutcome(race, settings());
+    expect(outcome.view.kind).not.toBe("mixed");
+    expect(outcome.view.kind).not.toBe("invalid");
+    expect(outcome.outcome.fallbackReason).toBe("no-combo-candidates");
+  });
+
+  it("③'馬連込み: ワイド・3連複の候補は0件でも馬連に候補があればno-combo-candidatesにならずmixedになり、win行も現れること(Issue #117。条件③が馬連の候補を数えることの確認)", () => {
+    const race = raceInput({
+      rows: allCandidateRows(8),
+      quinellaCombo: fullOddsRecord(umabansOf(8), 2, 3000),
+    });
+    const outcome = buildMixedRaceAllocationWithOutcome(race, settings());
+    expect(outcome.outcome.route).toBe("mixed");
+    expect(outcome.view.kind).toBe("mixed");
+    if (outcome.view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const winAllocations = outcome.view.result.allocations.filter((a) => a.betType === "win");
+    expect(winAllocations.length).toBeGreaterThan(0);
   });
 
   it("(対照)①〜③のいずれにも該当しない場合はkind='mixed'になること(D-7が過剰に発動していないことの確認)", () => {

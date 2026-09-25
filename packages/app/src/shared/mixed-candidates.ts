@@ -131,8 +131,8 @@ import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-al
 export type MixedCandidateBetType = AllocationBetType;
 
 /**
- * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーとは
- * 再び一致しない(#112〈#24-D1〉で`quinella`〈馬連〉が除外に加わったため)。**
+ * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーと
+ * 再び一致する(Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉を追加したため)。**
  *
  * #91で`AllocationBetType`に`win`(単勝)が加わった時点では、coreに単勝候補ビルダーが
  * 存在せず`buildMixedCandidates`も`win`を一切参照していなかったため、本配列は意図的に
@@ -142,19 +142,19 @@ export type MixedCandidateBetType = AllocationBetType;
  * 「対象にする」宣言と実体(`buildWinCandidatesForBetType`)が揃っている状態であり、
  * #91が是正した「宣言だけが実体を伴わずに増える」欠陥は再生産していない。
  *
- * **#112(#24-D1)で`quinella`(馬連)が`AllocationBetType`に加わったが、本配列には
- * まだ含めていない。** winのときとは異なり、**#116(#24-D3b-1)で`buildQuinellaCandidatesForBetType`
- * (core `buildQuinellaCandidates`を呼ぶ本ファイルの実装)を新設した後も、意図的に本配列へは
- * 加えていない**。`buildMixedCandidates`自体は`betTypes`に`"quinella"`が含まれていれば
- * 馬連の候補を構築できるが、`options.betTypes`を渡さない既定呼び出し(=本配列)では
- * 対象にならない。配分の券種選択(`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`)
- * が実際に`"quinella"`を渡すよう接続し、利用者から見える配分結果を変えるのは#117
- * (#24-D3b-2)のスコープ(オーケストレーター裁定・Issue #116 Q1)。
+ * **#112(#24-D1)で`quinella`(馬連)が`AllocationBetType`に加わったが、当初は本配列に
+ * 含めていなかった。** #116(#24-D3b-1)で`buildQuinellaCandidatesForBetType`
+ * (core `buildQuinellaCandidates`を呼ぶ本ファイルの実装)を新設した後も、配分の券種選択
+ * (`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`)が実際に`"quinella"`を渡すまでは
+ * 利用者から見える配分結果を変えないよう、意図的に本配列へ加えるのを見送っていた
+ * (オーケストレーター裁定・Issue #116 Q1)。**Issue #117でその接続を行い、本配列にも
+ * `quinella`を加えた**(「対象にする」宣言と実体〈`buildQuinellaCandidatesForBetType`・
+ * `resolveMixedBetTypes`〉が揃った状態)。
  *
- * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いついたが、#112で再び
- * 「全メンバーではない」状態に戻った。** 改名はしない(#91当時のboss裁定を維持:
- * 定数名は「意図的な対象集合」を表す既存の名として扱い、メンバー数の増減のたびに
- * 改名しない)。
+ * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いつき、#112でいったん
+ * 「全メンバーではない」状態に戻ったが、#117で再び全メンバーと一致した。** 改名はしない
+ * (#91当時のboss裁定を維持: 定数名は「意図的な対象集合」を表す既存の名として扱い、
+ * メンバー数の増減のたびに改名しない)。
  *
  * boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない(`options.betTypes`
  * 以外のフィルタは実装に存在しない。#90時点でも真)。
@@ -163,6 +163,7 @@ export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
   "place",
   "win",
   "wide",
+  "quinella",
   "trio",
 ];
 

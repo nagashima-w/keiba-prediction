@@ -362,8 +362,10 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
     );
     expect(view.notices).toEqual([FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE]);
     // 定数の中身そのものをリテラルで固定する(理由は他の定数と同じ)。
+    // Issue #117: 条件③(no-combo-candidates)は馬連の候補も数えるようになったため、
+    // 文言も「ワイド・馬連・三連複」の3券種に直す(旧「ワイド・三連複」は既に事実と食い違う)。
     expect(FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE).toBe(
-      "ワイド・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。",
+      "ワイド・馬連・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。",
     );
   });
 
@@ -379,8 +381,10 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
       placeBetUnavailableMessage("two-place-only"),
       FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE,
     ]);
+    // Issue #117: 条件②(combo-bet-types-off)はワイド・3連複・馬連がすべてOFFのときに
+    // 発生するようになったため、文言も「ワイド・馬連・三連複」の3券種に直す。
     expect(FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE).toBe(
-      "ワイド・三連複が配分対象外の設定のため複勝のみの配分になっています。",
+      "ワイド・馬連・三連複が配分対象外の設定のため複勝のみの配分になっています。",
     );
   });
 
@@ -431,16 +435,18 @@ describe("fallback_reason: 分岐はrouteではなくfallbackReason!==nullで行
 
 describe("未知のbet_type値でもthrowしないこと(境界。生値をそのまま表示)", () => {
   it("throwせず、生値をそのままbetTypeLabelに表示すること", () => {
+    // "xyz2"は架空の券種コード(Issue #117で"quinella"がbetTypeLabelの既知券種になったため、
+    // 「未知の値」の具体例をIssue #114〈verify.test.ts〉と同じ架空コードへ差し替える)。
     const build = () =>
       buildAllocationProposalView(
         allocation({
           route: "mixed",
           skipReasonCode: null,
-          bets: [bet({ betType: "quinella", comboKey: "0407" })],
+          bets: [bet({ betType: "xyz2", comboKey: "0407" })],
         }),
       );
     expect(build).not.toThrow();
-    expect(build().bets[0]!.betTypeLabel).toBe("quinella");
+    expect(build().bets[0]!.betTypeLabel).toBe("xyz2");
   });
 });
 
@@ -517,8 +523,8 @@ describe("買い目行(AC4)", () => {
   });
 });
 
-describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の4ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応)", () => {
-  it("place/win/wide/trioそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
+describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の5ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応。Issue #117で馬連〈quinella〉を追加し4→5ラベルに拡張)", () => {
+  it("place/win/wide/quinella/trioそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -527,16 +533,18 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
           bet({ betType: "place", comboKey: "04" }),
           bet({ betType: "win", comboKey: "05" }),
           bet({ betType: "wide", comboKey: "0407" }),
+          bet({ betType: "quinella", comboKey: "0407" }),
           bet({ betType: "trio", comboKey: "040709" }),
         ],
       }),
     );
-    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "三連複"]);
+    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "馬連", "三連複"]);
     // mixedBetTypeLabel側も同じ日本語リテラルを返すことを、betTypeLabelとは独立に固定する
     // (両関数を比較する形〈旧実装〉だと両方が一緒にずれても緑のまま通ってしまう。boss指摘)。
     expect(mixedBetTypeLabel("place")).toBe("複勝");
     expect(mixedBetTypeLabel("win")).toBe("単勝");
     expect(mixedBetTypeLabel("wide")).toBe("ワイド");
+    expect(mixedBetTypeLabel("quinella")).toBe("馬連");
     expect(mixedBetTypeLabel("trio")).toBe("三連複");
   });
 });

@@ -318,7 +318,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               {report.proposedBet.win.betCount}点/
               {formatRate(report.proposedBet.win.recoveryRate)} / ワイド{" "}
               {report.proposedBet.wide.betCount}点/
-              {formatRate(report.proposedBet.wide.recoveryRate)} / 3連複{" "}
+              {formatRate(report.proposedBet.wide.recoveryRate)} / 馬連{" "}
+              {report.proposedBet.quinella.betCount}点/
+              {formatRate(report.proposedBet.quinella.recoveryRate)} / 3連複{" "}
               {report.proposedBet.trio.betCount}点/
               {formatRate(report.proposedBet.trio.recoveryRate)}
             </p>
@@ -332,14 +334,17 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               <p style={{ margin: "0.15rem 0", color: "#a60" }}>
                 判定不能(集計対象外): 複勝{report.proposedBet.place.unjudgedCount}点 / 単勝
                 {report.proposedBet.win.unjudgedCount}点 / ワイド
-                {report.proposedBet.wide.unjudgedCount}点 / 3連複
+                {report.proposedBet.wide.unjudgedCount}点 / 馬連
+                {report.proposedBet.quinella.unjudgedCount}点 / 3連複
                 {report.proposedBet.trio.unjudgedCount}点
               </p>
             )}
             {/*
-             * Issue #76: 未対応の券種コード(place/win/wide/trio/quinella以外。馬連は
-             * Issue #114・#24-F1で既知化されたが、#24-D3まで買い目自体が0件のため画面には
-             * 出さない)の買い目がある旨の注記。
+             * Issue #76: 未対応の券種コード(place/win/wide/quinella/trio以外)の買い目がある旨の
+             * 注記。馬連(quinella)はIssue #114・#24-F1で確定払戻の既知券種になり、
+             * Issue #117(#24-D3b-2)で配分提案にも組み込まれたため、上の「内訳」「判定不能」の
+             * 2行に既知券種として表示するようになった(#24-D3まで買い目が構造的に0件だったため
+             * 画面に出していなかった状態は解消済み)。
              * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す。
              * 文言の組み立て(count===0ならnull)はformatUnknownBetTypeNotice(純関数)の責務で、
              * ここは`unknownBetTypeNotice`(コンポーネント冒頭で1回だけ呼んだ結果)のnull判定

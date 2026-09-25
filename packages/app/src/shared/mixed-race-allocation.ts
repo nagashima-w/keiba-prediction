@@ -182,23 +182,21 @@ export type MixedRaceAllocationView =
   | MixedRaceAllocationInvalid;
 
 /**
- * D-1: 設定(2つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
+ * D-1: 設定(3つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
  * 複勝・単勝は常に含める(A-2是正・Issue #90・#23-B2)。単勝には`includeWinInAllocation`の
  * ような専用トグルを作らない(D-10・boss裁定): 作ると`MixedAllocationSettings`の項目が増え、
  * メタ行の設定エコーがスキーマ変更になるため。単勝は混在経路が実際に計算される限り常に対象であり、
- * D-2フォールバック(ワイド・3連複が使えない設定・状況)に該当すれば`buildRaceAllocation`
+ * D-2フォールバック(ワイド・3連複・馬連が使えない設定・状況)に該当すれば`buildRaceAllocation`
  * (複勝専用の従来経路)へ丸ごと落ちるため、winだけを個別にOFFにする設定は不要(D-7)。
  *
- * **馬連(`includeQuinellaInAllocation`。#24-D3a・Issue #115)は単勝と異なりトグル自体は
- * 設ける**が、この関数(`resolveMixedBetTypes`)にはまだ接続しない。候補ビルダー自体
- * (`shared/mixed-candidates.ts` の `buildMixedCandidates`)はIssue #116・#24-D3b-1で
- * 馬連の候補を構築できるようになったが、この関数が`betTypes`に`"quinella"`を含めない限り
- * production からは呼ばれない。`MixedAllocationSettings`の項目が7→8項目になった一方、
- * `allocation-record.ts`の設定エコー7列(メタ行スキーマ)は変えない(呼び出し側が渡した
- * 8項目のうち7項目だけをメタ行へ写す。全項目を機械的にエコーする契約ではない)。
- * #59が固定した「メタ行の列一覧は増減が停止条件」という制約はここでは解除しない
- * (読む人がまだいないため。#59原則「誰も読まない列にコストを払わない」)。
- * この関数・メタ行の両方へ接続するのは#117(#24-D3b-2)。
+ * **馬連(`includeQuinellaInAllocation`。#24-D3a・Issue #115)は#117(#24-D3b-2)で本関数へ接続した。**
+ * #115時点ではトグル自体は設けたが本関数には未接続(候補ビルダー`buildMixedCandidates`
+ * 〈#116・#24-D3b-1〉が実際に馬連の候補を構築できるようになった後も、この関数が`betTypes`に
+ * `"quinella"`を含めない限りproductionからは呼ばれない状態を意図的に保っていた)。
+ * `MixedAllocationSettings`の項目は8項目のままだが、`allocation-record.ts`の設定エコー7列
+ * (メタ行スキーマ)は#117でも変えない(呼び出し側が渡した8項目のうち7項目だけをメタ行へ写す。
+ * 全項目を機械的にエコーする契約ではない。#59が固定した「メタ行の列一覧は増減が停止条件」という
+ * 制約はここでは解除しない。DB列`include_quinella`の追加は#118のスコープ)。
  *
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。
@@ -210,6 +208,9 @@ function resolveMixedBetTypes(settings: MixedAllocationSettings): MixedCandidate
   }
   if (settings.includeTrioInAllocation) {
     betTypes.push("trio");
+  }
+  if (settings.includeQuinellaInAllocation) {
+    betTypes.push("quinella");
   }
   return betTypes;
 }
@@ -224,10 +225,15 @@ function isComboOddsNotRequested(settings: MixedAllocationSettings): boolean {
 
 /**
  * D-2フォールバック規則の条件②(候補構築より前に判定できる)。
- * ワイド・3連複とも配分対象からOFF(オッズは取得していても配分には使わない設定)。
+ * ワイド・3連複・馬連のすべてが配分対象からOFF(オッズは取得していても配分には使わない設定。
+ * #117で馬連を条件に加えた。#115時点はワイド・3連複の2項目のみだった)。
  */
 function isComboBetTypesOff(settings: MixedAllocationSettings): boolean {
-  return !settings.includeWideInAllocation && !settings.includeTrioInAllocation;
+  return (
+    !settings.includeWideInAllocation &&
+    !settings.includeTrioInAllocation &&
+    !settings.includeQuinellaInAllocation
+  );
 }
 
 /**
@@ -443,10 +449,11 @@ function buildMixedRaceAllocationCore(
     trio: comboOddsAvailabilityFromDiagnostics(mixed.diagnostics.trio),
   };
 
-  // 4. D-2条件③(訂正2: ワイド・三連複の候補合計のみを見る。複勝候補の件数は含めない)。
+  // 4. D-2条件③(訂正2: ワイド・三連複・馬連の候補合計のみを見る。複勝候補の件数は含めない。
+  // #117で馬連を数える対象に加えた)。
   // Issue #76: umabans.length>=2からの逆算ではなくbetTypeで判定する(値として運ぶ)。
   const comboCandidateCount = mixed.candidates.filter(
-    (c) => c.betType === "wide" || c.betType === "trio",
+    (c) => c.betType === "wide" || c.betType === "trio" || c.betType === "quinella",
   ).length;
   if (comboCandidateCount === 0) {
     return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds);

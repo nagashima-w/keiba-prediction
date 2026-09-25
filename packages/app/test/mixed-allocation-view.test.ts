@@ -143,7 +143,7 @@ function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: num
 
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio",
+  betType: "wide" | "trio" | "quinella",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -672,9 +672,11 @@ function builtComboDiag(overrides: {
 
 /**
  * テスト用のMixedCandidateDiagnosticsを組み立てる補助関数。
- * `quinella`はIssue #116・#24-D3b-1で追加。既定値`{kind:"not-requested"}`は現状の
- * production呼び出し(`ALL_MIXED_CANDIDATE_BET_TYPES`が馬連を含まない)と一致させる
- * (画面〈本ファイル〉はまだ馬連を表示しない。#117のスコープ)。
+ * `quinella`はIssue #116・#24-D3b-1で追加。既定値`{kind:"not-requested"}`は
+ * (馬連を配分対象にしていない設定を想定した)ヘルパーの既定値であり、馬連関連の
+ * 振る舞い(AC-4のaggregateUnjudgedCounts・AC-5のcomboBetTypeNote)を検証するテストは
+ * `overrides.quinella`で明示的に上書きする(Issue #117でresolveMixedBetTypesが接続された後は
+ * 画面にも馬連の表示が現れる。builtComboDiag()を渡すと`kind:"built"`のケースを作れる)。
  */
 function mixedDiagnostics(overrides: {
   place?: PlaceCandidateDiagnostics;
@@ -733,36 +735,105 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
 
 /**
  * ★利用者から見える誤りの再発防止(Issue #112・code-reviewer【重大】指摘・メタレビュー
- * 差し戻し2026-09-24)。
+ * 差し戻し2026-09-24)と、Issue #117での除外解除。
  *
  * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`は`BatchAnalysisView.tsx`が`.map`して
  * **内訳表の行として無条件に描画する**配列である(`display.breakdown[betType]`をそのまま
- * `breakdownRow`に渡すだけで、`stake===0`等の判定分岐は一切無い)。この配列を旧版のように
- * 「`ALLOCATION_BET_TYPE_UMABAN_COUNT`のキー集合と常に同一」というテストで固定すると、
- * 新しい券種を`AllocationBetType`に足すたびに**表示可否を検討せずこの配列にも自動的に
- * 追随させる圧力**を生む(実際に#112でこの圧力に押されて`quinella`を追加してしまい、
- * appが候補を一切作らない馬連の行が常に「馬連 ¥0 0点」として表示される欠陥を作った。
- * 単勝・三連複の¥0は「妙味が無かったという判定結果」だが、馬連の¥0は「一度も評価して
- * いない」ことを判定結果のように見せてしまう——#31〈判定不能と判定結果を混ぜない〉のUI版)。
+ * `breakdownRow`に渡すだけで、`stake===0`等の判定分岐は一切無い)。#112時点では
+ * `quinella`(馬連)をこの配列に含めていた旧版があり、appがまだ馬連の候補を**一切**
+ * 作らない(`ALL_MIXED_CANDIDATE_BET_TYPES`が馬連を含まず、どんな設定でも
+ * `resolveMixedBetTypes`が馬連をbetTypesに渡すことが無い)状態だったため、
+ * 馬連の行が常に「馬連 ¥0 0点」として表示される欠陥になっていた(単勝・3連複の¥0は
+ * 「妙味が無かったという判定結果」だが、当時の馬連の¥0は「一度も評価していない」ことを
+ * 判定結果のように見せてしまう——#31〈判定不能と判定結果を混ぜない〉のUI版)。
+ * このためcode-reviewer指摘・メタレビュー差し戻しで一旦除外していた。
  *
- * `ALL_MIXED_CANDIDATE_BET_TYPES`(`mixed-candidates.ts`)が既に採用している設計
- * (「意図的に除外している券種の集合」をリテラルで固定し、新メンバー追加のたびに人間の
- * 判断を強制する)と同じ形に統一する。
+ * **Issue #117(#24-D3b-2)で`resolveMixedBetTypes`が`includeQuinellaInAllocation`設定を
+ * 実際に参照するようになり、馬連はワイド・3連複と同じ「ユーザーが設定でON/OFFできる、
+ * ONならば実際に評価される」券種になった。** これによりワイド・3連複と対称になった
+ * (ワイド・3連複も、ユーザーが個別にOFFにした状態〈他方がONで混在経路に入る場合〉では
+ * 同様に「¥0 0点」を注記なしで表示する。これは#112当時のような「原理的に評価不能」ではなく
+ * 「ユーザーがOFFにした」という到達可能な理由であり、既存のワイド・3連複と同じ扱いを
+ * 受け入れる設計とする)。したがって馬連の除外を解除する。
  */
-describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90。#112でquinellaを意図的に除外)", () => {
-  it("★内訳表に描画される券種にquinella(馬連)が含まれないこと(appはまだ馬連の候補を作らないため。殺すべき変異: quinellaを配列へ戻す)", () => {
-    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).not.toContain("quinella");
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除)", () => {
+  it("内訳表に描画される券種にquinella(馬連)が含まれること(Issue #117でワイド・3連複と対称になったため)", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("quinella");
   });
 
-  it("意図的に除外している券種がquinellaのみであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#24-D3でappが馬連の候補を作るようになったら、このテストが「除外を外す判断」を人間に強制する)", () => {
+  it("意図的に除外している券種が無いこと(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外していたが、Issue #117でその除外を解除した)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
     );
-    expect(excluded).toEqual(["quinella"]);
+    expect(excluded).toEqual([]);
   });
 
-  it("前提固定(空振り防止): 除外分を除いても表示順配列が空でないこと", () => {
+  it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→3連複)であること", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toEqual(["place", "win", "wide", "quinella", "trio"]);
+  });
+
+  it("前提固定(空振り防止): 表示順配列が空でないこと", () => {
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// AC-5(Issue #117): display.quinellaNote — wide/trioと同じcomboBetTypeNoteを
+// 馬連にも適用すること
+// ============================================================================
+
+describe("buildMixedAllocationDisplay — display.quinellaNote(Issue #117・AC-5)", () => {
+  it("馬連が対象外(includeQuinellaInAllocation=false)のときはnullであること(wide/trioが対象外のときと同じくnot-requestedはnull)", () => {
+    const race = raceWithPositiveCombos(8);
+    const view = buildMixedAllocationDisplay(race, settings({ includeQuinellaInAllocation: false }));
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.diagnostics.quinella.kind).toBe("not-requested");
+    expect(view.display.quinellaNote).toBeNull();
+  });
+
+  it("馬連が発売されていない(comboOddsState='unavailable')ときは、comboBetTypeNoteと同じ文言になること(wide/trioと同じロジックを共有していることの確認)", () => {
+    const umabans = umabansOf(8);
+    const race = raceWithPositiveCombos(8, {
+      quinellaCombo: {},
+      comboOdds: { wide: comboOddsOutcome("wide", "available"), trio: comboOddsOutcome("trio", "available"), quinella: comboOddsOutcome("quinella", "unavailable") },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定(空振り防止): 実際にkind='built'まで到達していること。
+    expect(view.diagnostics.quinella.kind).toBe("built");
+    expect(view.display.quinellaNote).toBe(comboBetTypeNote(view.diagnostics.quinella));
+    expect(view.display.quinellaNote).not.toBeNull();
+    void umabans;
+  });
+
+  it("馬連にEVプラスの候補があるときはnull(注記なし)であること", () => {
+    const umabans = umabansOf(8);
+    const race = raceWithPositiveCombos(8, {
+      quinellaCombo: fullOddsRecord(umabans, 2, 100000),
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        quinella: comboOddsOutcome("quinella", "available"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.diagnostics.quinella.kind).toBe("built");
+    if (view.diagnostics.quinella.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    // 前提固定(空振り防止): 実際にEVプラスの候補が1件以上あること。
+    expect(view.diagnostics.quinella.build.judged.positiveCount).toBeGreaterThan(0);
+    expect(view.display.quinellaNote).toBeNull();
   });
 });
 
@@ -1259,6 +1330,26 @@ describe("AC15: aggregateUnjudgedCounts/totalUnjudgedCount — 券種横断の�
     expect(counts.oddsUnfetchedCount).toBe(12);
     expect(totalUnjudgedCount(counts)).toBeGreaterThan(0);
   });
+
+  it("Issue #117(AC-4): 馬連(quinella)のoddsMissingCount/oddsUnfetchedCount/oddsMalformedCountも合算されること(wide/trioと同型のComboCandidateDiagnosticsViewを共有するため)", () => {
+    const diagnostics = mixedDiagnostics({
+      place: { kind: "judged", judged: { positiveCount: 1, notPositiveCount: 0 }, unjudged: { oddsMissingCount: 2 } },
+      wide: builtComboDiag({ oddsMissingCount: 3, oddsUnfetchedCount: 5, oddsMalformedCount: 1 }),
+      trio: builtComboDiag({ oddsMissingCount: 1, oddsUnfetchedCount: 0, oddsMalformedCount: 2 }),
+      quinella: builtComboDiag({ oddsMissingCount: 4, oddsUnfetchedCount: 7, oddsMalformedCount: 6 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    // place(2)+wide(3)+trio(1)+quinella(4)=10、oddsUnfetchedCountはwide(5)+trio(0)+quinella(7)=12、
+    // oddsMalformedCountはwide(1)+trio(2)+quinella(6)=9。
+    expect(counts).toEqual({ oddsMissingCount: 10, oddsUnfetchedCount: 12, oddsMalformedCount: 9 });
+  });
+
+  it("Issue #117(AC-4): 馬連がnot-requestedのときは0として扱われること(対象外と判定不能を混同しない)", () => {
+    const notRequested = aggregateUnjudgedCounts(mixedDiagnostics({ quinella: { kind: "not-requested" } }));
+    expect(notRequested.oddsMissingCount).toBe(0);
+    expect(notRequested.oddsUnfetchedCount).toBe(0);
+    expect(notRequested.oddsMalformedCount).toBe(0);
+  });
 });
 
 describe("formatUnjudgedNote — 判定不能件数の注記文言(0件の区分は文言に含めない)", () => {
@@ -1366,6 +1457,10 @@ describe("AC14: COMBO_EV_CALIBRATION_NOTE — 組合せ券種のEV過大評価�
   it("『過大評価』『較正』の両方の趣旨を含むこと", () => {
     expect(COMBO_EV_CALIBRATION_NOTE).toContain("過大評価");
     expect(COMBO_EV_CALIBRATION_NOTE).toMatch(/較正/);
+  });
+
+  it("Issue #117: 組合せ券種の例示に馬連(quinella)も含むこと(ワイド・3連複だけを挙げる旧文言は、馬連も同じ較正未実施の対象であることを言い落とす)", () => {
+    expect(COMBO_EV_CALIBRATION_NOTE).toContain("馬連");
   });
 });
 
@@ -1605,6 +1700,7 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
     unjudged: { oddsMissingCount: 0, oddsUnfetchedCount: 0, oddsMalformedCount: 0 },
     wideNote: null,
     trioNote: null,
+    quinellaNote: null,
     placeUnavailableNote: null,
     placeOnlyStake: null,
     probabilitySumWarning: null,

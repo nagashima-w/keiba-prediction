@@ -728,8 +728,8 @@ describe("yoso×組合せ(候補ゼロの理由が「未取得」か「yoso」�
 // ============================================================================
 
 describe("券種フィルタ(options.betTypes)", () => {
-  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/win/wide/trio)が対象になること", () => {
-    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "win", "wide", "trio"]);
+  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/win/wide/quinella/trio。Issue #117で馬連を追加)が対象になること", () => {
+    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "win", "wide", "quinella", "trio"]);
     const rows = allCandidateRows(8);
     const umabans = umabansOf(8);
     const result = buildMixedCandidates(
@@ -780,23 +780,30 @@ describe("券種フィルタ(options.betTypes)", () => {
 
   /**
    * ★構造的な再発防止(#91・boss裁定。#90でwinを追加した後の状態を固定・
-   * #112〈#24-D1〉で馬連〈quinella〉が除外に加わった状態に更新)。
+   * #112〈#24-D1〉で馬連〈quinella〉が除外に加わった状態に更新・Issue #117で
+   * 再びAllocationBetTypeの全メンバーと一致する状態に更新)。
    *
    * `ALL_MIXED_CANDIDATE_BET_TYPES`が`AllocationBetType`(core)の全メンバーを含むとは
-   * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定する。
+   * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定していた。
    * #90でwinの候補ビルダー(`buildWinCandidates`)が新設されたため、当時は除外が無かった
    * (`AllocationBetType`の全メンバーと一致していた)。**#112で`AllocationBetType`に
    * `quinella`(馬連)が加わったが、`buildMixedCandidates`(app側)はまだそれを参照しない
-   * (app側の候補組み立ては#24-D3のスコープ)ため、`quinella`が新たに除外へ加わった。**
+   * (app側の候補組み立ては#24-D3のスコープ)ため、`quinella`が一時的に除外へ加わった。**
+   * **Issue #117(#24-D3b-2)で`resolveMixedBetTypes`〈shared/mixed-race-allocation.ts〉が
+   * 実際に`"quinella"`を渡すよう接続し、`ALL_MIXED_CANDIDATE_BET_TYPES`にも`quinella`を
+   * 加えたため、除外集合は再び空になった。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
+   * 除外集合が空であることを直接固定することで、将来また新しい券種が
+   * `AllocationBetType`へ加わったとき(除外が復活したとき)にこのテストが再び赤くなり、
+   * 「足すかどうかの判断」を人間に強制する。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種を固定すること(#112: quinellaが除外に加わった)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が無いこと(Issue #117: #112で加わったquinellaの除外を解消した)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual(["quinella"]);
+    expect(excluded).toEqual([]);
   });
 });
 
@@ -1120,11 +1127,22 @@ describe("win候補(#90・#23-B2)", () => {
  * hitProb=1/6・ev=166.5になることを実測)。
  */
 describe("馬連(quinella)候補(#116・#24-D3b-1)", () => {
-  it("betTypesにquinellaを含めない場合(既定含む): kind='not-requested'、候補も0件(ALL_MIXED_CANDIDATE_BET_TYPESが馬連を含まないため)", () => {
+  it("既定(betTypes省略)でも馬連が対象に含まれること(Issue #117でALL_MIXED_CANDIDATE_BET_TYPESに馬連が入ったため。#116時点は既定でnot-requestedだったが反転した)", () => {
     const rows = allCandidateRows(4);
     const umabans = umabansOf(4);
     const result = buildMixedCandidates(
       raceInput({ rows, quinellaCombo: fullOddsRecord(umabans, 2, 999) }),
+    );
+    expect(result.diagnostics.quinella.kind).toBe("built");
+    expect(result.candidates.filter((c) => c.betType === "quinella").length).toBeGreaterThan(0);
+  });
+
+  it("betTypesを明示的に馬連以外に絞った場合: kind='not-requested'、候補も0件であること(not-requested分岐自体は引き続き到達可能であることの確認)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, quinellaCombo: fullOddsRecord(umabans, 2, 999) }),
+      { betTypes: ["place"] },
     );
     expect(result.diagnostics.quinella).toEqual({ kind: "not-requested" });
     expect(result.candidates.filter((c) => c.betType === "quinella")).toHaveLength(0);

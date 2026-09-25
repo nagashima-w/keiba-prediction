@@ -9,13 +9,15 @@
 - ツール名: 競馬期待値分析ツール(keiba-ev-tool)
 - 種別: 複勝の期待値プラス馬券を抽出するデスクトップアプリ(Electron + React)
 - **対応券種は用途によって異なる(3点。混同しないこと)**:
-  - **配分提案**: 複勝+単勝+ワイド+三連複(単勝はIssue #90・#23-B2で追加)。複勝・単勝は常時対象、
-    ワイド・三連複はオプトイン設定`includeWideInAllocation`/`includeTrioInAllocation`(既定ON。
-    取得自体は`includeComboOdds`が別途必要。5節参照)。**単勝には専用のON/OFF設定を作っていない**
-    (単勝は複勝・ワイド・三連複と同じ1つの予算枠に常に含める設計。D-10裁定)。そのため
-    `includeComboOdds`がOFF・ワイド/三連複とも配分対象OFF・ワイド/三連複の候補合計が0件、の
-    いずれかに該当して複勝専用の従来経路へフォールバックする状況では、**単勝もワイド・三連複と
-    同様に提案されなくなる**(現状の制限として維持。5節参照)
+  - **配分提案**: 複勝+単勝+ワイド+馬連+三連複(単勝はIssue #90・#23-B2で、馬連はIssue #117・
+    #24-D3b-2で追加)。複勝・単勝は常時対象、ワイド・馬連・三連複はオプトイン設定
+    `includeWideInAllocation`/`includeQuinellaInAllocation`/`includeTrioInAllocation`
+    (既定ON。取得自体は`includeComboOdds`が別途必要。5節参照)。**単勝には専用のON/OFF設定を
+    作っていない**(単勝は複勝・ワイド・馬連・三連複と同じ1つの予算枠に常に含める設計。
+    D-10裁定)。そのため`includeComboOdds`がOFF・ワイド/馬連/三連複がすべて配分対象OFF・
+    ワイド/馬連/三連複の候補合計が0件、のいずれかに該当して複勝専用の従来経路へフォールバック
+    する状況では、**単勝もワイド・馬連・三連複と同様に提案されなくなる**(現状の制限として
+    維持。5節参照)
   - **記録・回収率検証**: 新方式(proposedBet系、`ev/verify.ts`の`computeProposedBetReport`。
     Issue #71・#54-B)は複勝・単勝・ワイド・三連複・馬連の5券種に対応(単勝はIssue #100・#23-Cで、
     馬連はIssue #114・#24-F1で追加。それ以前はそれぞれが「未対応の券種コード」扱いだった)。
@@ -28,31 +30,34 @@
     単勝の確定払戻(`race_results.win_payout`、Issue #100)をレース結果テーブルへ、
     ワイド・三連複・馬連の確定払戻(ワイド・三連複はIssue #52、馬連はIssue #114・#24-F1)を
     `race_combo_payouts`/`race_combo_payout_imports`テーブルへ、それぞれ永続化する。
-    **馬連は#24-D3(配分提案への組み込み)まで買い目が構造的に0件のため、`quinella`の
-    値自体は保持するが検証画面には表示しない**(#112「馬連 ¥0 0点」の事故と同型を避けるため)。
+    **馬連はIssue #117(#24-D3b-2)で配分提案への組み込みが完了し、買い目が実際に発生する
+    ようになったため、検証画面(`VerifyView.tsx`)の内訳・判定不能の行にもワイドと3連複の
+    間に表示するようになった**(#116までは買い目が構造的に0件だったため、#112「馬連
+    ¥0 0点」の事故と同型を避けるためあえて表示しない設計だった)。
     取得(オッズ・配分提案)と検証(回収率集計)は別軸であることに注意(5節の配分提案は
-    既に単勝・ワイド・三連複対応済みだが、これは組合せ**オッズ**の話で本項の組合せ**払戻**とは
-    別物。組合せオッズの永続化自体も別Issue #53)
+    既に単勝・ワイド・馬連・三連複対応済みだが、これは組合せ**オッズ**の話で本項の組合せ**払戻**
+    とは別物。組合せオッズの永続化自体も別Issue #53)
   - **単勝オッズ**: Issue #90以降は2つの用途を持つ。(a) 発売前レースで複勝下限を概算する用途
     (`estimatePlaceOddsMinFromWin`。従来どおり)、(b) 5節の配分提案における単勝の候補自体の
     値付け(`ev/combo-bet-allocation.ts`の`buildWinCandidates`が同時分布モデルの順序付き
     outcome空間から導出した1着確率×単勝オッズでEVを算出する。複勝〈3着内〉確率では値付けしない)
-  - 馬連・馬単・三連単・枠連・枠単は配分提案・画面表示は未対応(拡張のロードマップと技術的な依存関係は
-    GitHub Issue #22)。ただし**馬連は core の確率・候補ビルダー・配分だけ先に対応済み**
-    (Issue #112・v1.9.5。`buildQuinellaCandidates` が順序付き outcome 空間から1着・2着の集合を
-    周辺化して的中確率を求める。上位3着の集合から求めるとワイドと同じ値になるため)。
-    **馬連オッズのパーサ・取得関数も対応済み**(Issue #113・v1.9.6。中央 `api_get_jra_odds` の
-    `type=4`・地方 `odds/index.html?type=b4`。キーは昇順正規化・値は単一値)。**馬連の確定払戻の
-    取込・回収率検証も対応済み**(Issue #114・#24-F1。上記「記録・回収率検証」参照)。
-    **`scrape-race.ts`(オッズ取得)への配線・分析結果/保存スナップショットへの搭載・
-    `shared/mixed-candidates.ts`の候補ビルダー(`buildMixedCandidates`)対応も完了した**
-    (Issue #116・#24-D3b-1。`includeComboOdds: true`のとき、既存のワイド・
-    3連複の**後**に馬連オッズを1リクエスト追加で取得する〈中央 `type=4`・地方 `type=b4`、
-    いずれも単発リクエストで完結。地方3連複の軸馬別取得とは異なる〉)。
-    ただし**配分の券種選択(`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`)には
-    まだ接続していない**(`ALL_MIXED_CANDIDATE_BET_TYPES`・`resolveMixedBetTypes`の既定
-    呼び出しは馬連を含めないまま)ため、**利用者から見える変化はまだ無い**(検証画面にも
-    馬連の行は出さない。配分に含めるのは#117・#24-D3b-2)
+  - **馬連は配分提案・画面表示まで含めて対応済み**(#24-D3シリーズ)。馬単・三連単・枠連・枠単は
+    引き続き未対応(拡張のロードマップと技術的な依存関係はGitHub Issue #22)。馬連対応の経緯:
+    core の確率・候補ビルダー・配分(Issue #112・v1.9.5。`buildQuinellaCandidates` が順序付き
+    outcome 空間から1着・2着の集合を周辺化して的中確率を求める。上位3着の集合から求めると
+    ワイドと同じ値になるため)→ 馬連オッズのパーサ・取得関数(Issue #113・v1.9.6。中央
+    `api_get_jra_odds` の`type=4`・地方 `odds/index.html?type=b4`。キーは昇順正規化・値は
+    単一値)→ 馬連の確定払戻の取込・回収率検証(Issue #114・#24-F1。上記「記録・回収率検証」
+    参照)→ 配分に含めるかの設定`includeQuinellaInAllocation`の配管(Issue #115・#24-D3a。
+    既定ON)→ `scrape-race.ts`(オッズ取得)への配線・分析結果/保存スナップショットへの搭載・
+    `shared/mixed-candidates.ts`の候補ビルダー(`buildMixedCandidates`)対応(Issue #116・
+    #24-D3b-1。`includeComboOdds: true`のとき、既存のワイド・3連複の**後**に馬連オッズを
+    1リクエスト追加で取得する〈中央 `type=4`・地方 `type=b4`、いずれも単発リクエストで
+    完結。地方3連複の軸馬別取得とは異なる〉)→ **配分の券種選択
+    (`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`・D-2フォールバック規則)への
+    接続と画面表示(Issue #117・#24-D3b-2)**。これにより`includeQuinellaInAllocation`がONで
+    馬連オッズが取得できていれば、一括分析画面の配分内訳・検証画面の回収率内訳に馬連が
+    ワイドと3連複の間に表示されるようになった(利用者から見える変化はここで初めて生じた)
 - バージョン: ルート/アプリ `1.9.9`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
@@ -250,8 +255,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   賭け金の仮定が異なる2系統のため、`bet` と `proposedBet` を合算した値はどこにも作らない。
   `proposedBet` 内部の複勝・単勝・ワイド・三連複・馬連の5券種(単勝はIssue #100・#23-Cで、
   馬連はIssue #114・#24-F1で追加)は同一の賭け金仮定(実際の配分額)を共有するポートフォリオの
-  ため、`overall`(5券種の合算)は持つ。馬連は#24-D3まで買い目が構造的に0件のため、`quinella`は
-  値として保持するが検証画面(`VerifyView.tsx`)には表示しない。
+  ため、`overall`(5券種の合算)は持つ。**馬連はIssue #117(#24-D3b-2)で配分提案への組み込みが
+  完了し買い目が実際に発生するようになったため、`quinella`は検証画面(`VerifyView.tsx`)の
+  内訳・判定不能の行にもワイドと3連複の間に表示する**(#116までは買い目が構造的に0件だったため
+  値のみ保持し画面には表示しない設計だった)。
   - **読み出しAPI**: `AnalysisStore.getAllocationForVerify(analysisId)` が
     `analysis_allocation_meta`/`analysis_bets` のうち `route`・`skip_reason_code`・
     `bet_type`/`combo_key`/`stake` の5列だけを読む(残り18列・`odds`/`ev` は#71のスコープ外。
@@ -402,21 +409,24 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   (1)賭け額の考え方、(2)**レース横断のオーバーベット警告**(配分はレースごとに独立計算のため、複数
   レースを同時購入すると合計はケリー最適を超える)、(3)EV 閾値の脚注を常時表示する。複勝圏内確率の
   合計が目標から大きく外れているときは信頼性低下の警告を出す(非有限値は表示しない)。
-- **券種横断の配分(機能D-2c・Issue #28)**: 複勝・ワイド・三連複を**同じ1つの予算枠**の中で
-  `allocateGeneralBets`(`@keiba/core/ev/combo-bet-allocation`)により同時最適化する
+- **券種横断の配分(機能D-2c・Issue #28。馬連はIssue #117・#24-D3b-2で追加)**: 複勝・ワイド・
+  馬連・三連複を**同じ1つの予算枠**の中で`allocateGeneralBets`
+  (`@keiba/core/ev/combo-bet-allocation`)により同時最適化する
   (`shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
   `renderer/mixed-allocation-view.ts` から分離した。表示データの導出〈`buildMixedAllocationDisplay`〉は
-  引き続き `renderer/mixed-allocation-view.ts` にある)。ワイド・三連複のオッズ取得(`includeComboOdds`・
-  既定OFF)と、取得したオッズを実際に配分へ使うか(`includeWideInAllocation`/
+  引き続き `renderer/mixed-allocation-view.ts` にある)。ワイド・馬連・三連複のオッズ取得
+  (`includeComboOdds`・既定OFF。1つのフラグでワイド・馬連・3連複をまとめて取得する)と、
+  取得したオッズを実際に配分へ使うか(`includeWideInAllocation`/`includeQuinellaInAllocation`/
   `includeTrioInAllocation`・それぞれ既定ON)は別設定に分けている(取得と採用の分離)。
-  馬連用の `includeQuinellaInAllocation`(既定ON。Issue #115・#24-D3a)も設定として保存・受け渡しされるが、
-  **現時点では券種の選択〈`resolveMixedBetTypes`〉はこの値を読まず、設定画面にも出ない**
-  (馬連のオッズ取得と候補の組み立ては #116 で配線済み。配分提案が馬連を扱うのは #117 から)。
-  次のいずれかに該当すると、複勝専用の従来経路(`buildRaceAllocation`)の結果を**そのまま**使う
-  (単一定義の原則によるフォールバック): オッズ取得OFF / ワイド・三連複とも配分対象OFF /
-  ワイド・三連複の候補合計が0件。**頭数不可(4以下・5〜7頭)は複勝候補だけを除外し、レース全体は
-  ゲートしない**(ワイド・三連複は複勝と異なり頭数による発売制約を受けないため)。EV判定閾値は
-  複勝・ワイド・三連複で統一する。表示は券種別内訳(金額・点数)・複勝のみで計算した場合の提案額との
+  `includeQuinellaInAllocation`はIssue #115・#24-D3aで設定として先行配管し、Issue #117で
+  券種の選択(`resolveMixedBetTypes`)・D-2フォールバック規則・設定画面のチェックボックスへ
+  実際に接続した。次のいずれかに該当すると、複勝専用の従来経路(`buildRaceAllocation`)の
+  結果を**そのまま**使う(単一定義の原則によるフォールバック): オッズ取得OFF /
+  ワイド・馬連・三連複がすべて配分対象OFF / ワイド・馬連・三連複の候補合計が0件。
+  **頭数不可(4以下・5〜7頭)は複勝候補だけを除外し、レース全体はゲートしない**
+  (ワイド・馬連・三連複は複勝と異なり頭数による発売制約を受けないため)。EV判定閾値は
+  複勝・ワイド・馬連・三連複で統一する。表示は券種別内訳(金額・点数。複勝→単勝→ワイド→
+  馬連→3連複の順)・複勝のみで計算した場合の提案額との
   併記(混在時に複勝の提案額が変わる理由を数値で示す。寄り先の券種は資金規模・1レース上限・
   貪欲配分の刻み幅で変わるため断定しない)・個々の買い目(stake降順・同額は馬番配列の辞書順で
   ソートした上で、上位20件〈`MIXED_ALLOCATION_VISIBLE_LIMIT`。ユーザー判断によるUXの目安であり

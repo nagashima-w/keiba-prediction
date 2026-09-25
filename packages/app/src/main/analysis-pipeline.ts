@@ -679,8 +679,9 @@ export async function runAnalysis(
     // MixedCandidateBuildInput は条件付きspreadで組む(scripts/bench-mixed-allocation.tsの
     // toMixedCandidateInputと同じ形。戻り値末尾のwideCombo/trioCombo/quinellaCombo/comboOddsの
     // 条件付きspreadと同一データソースなので、その部分は結果を待たずここで組み立てられる)。
-    // quinellaComboはIssue #116・#24-D3b-1で追加(候補ビルダーが参照できるようにするだけで、
-    // `resolveMixedBetTypes`〈#117〉が接続するまで配分結果には影響しない)。
+    // quinellaComboはIssue #116・#24-D3b-1で追加。Issue #117(#24-D3b-2)で`resolveMixedBetTypes`が
+    // `includeQuinellaInAllocation`設定を実際に参照するようになったため、このフィールドは
+    // production の配分結果に実際に影響する(`analysis-pipeline-allocation.test.ts`のAC-10参照)。
     const raceForAllocation: MixedCandidateBuildInput = {
       oddsStatus,
       rows,

@@ -187,9 +187,9 @@ export const UNSET_INDETERMINATE_NOTE =
 export const FALLBACK_REASON_COMBO_ODDS_NOT_REQUESTED_NOTE =
   "組合せオッズを取得しない設定のため複勝のみの配分になっています。";
 export const FALLBACK_REASON_COMBO_BET_TYPES_OFF_NOTE =
-  "ワイド・三連複が配分対象外の設定のため複勝のみの配分になっています。";
+  "ワイド・馬連・三連複が配分対象外の設定のため複勝のみの配分になっています。";
 export const FALLBACK_REASON_NO_COMBO_CANDIDATES_NOTE =
-  "ワイド・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。";
+  "ワイド・馬連・三連複にEVプラスの候補が無かったため複勝のみの配分になっています。";
 
 /** D-2フォールバック理由コード→注記文言のマップ(上記3定数から組み立てる。複製しない)。 */
 const FALLBACK_REASON_NOTES: Record<string, string> = {
@@ -223,6 +223,12 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
  * `mixedBetTypeLabel`とは非対称だった。#90でwinがproductionに到達可能になったため
  * (`allocation-record.ts`が`bet_type="win"`行をコード変更なしで保存する)、この非対称は
  * 利用者から見える誤り〈生の"win"がUIに表示される〉になっていた。本caseの追加で解消)。
+ *
+ * `"quinella"`(馬連)はIssue #117(#24-D3b-2)でcaseを追加した(#112時点では
+ * `AllocationBetType`に加わっていたがapp側候補ビルダーが未接続だったため、
+ * `default`分岐で生文字列`"quinella"`をそのまま返していた。#117で`resolveMixedBetTypes`
+ * が実際に馬連を配分対象に含めるようになり`allocation-record.ts`が`bet_type="quinella"`行を
+ * 保存するようになったため、winのときと同じ理由で本caseを追加した)。
  */
 function betTypeLabel(betType: string): string {
   switch (betType) {
@@ -232,6 +238,8 @@ function betTypeLabel(betType: string): string {
       return "単勝";
     case "wide":
       return "ワイド";
+    case "quinella":
+      return "馬連";
     case "trio":
       return "三連複";
     default:
@@ -287,8 +295,8 @@ function comboLabelOf(comboKey: string): string {
   return formatBetLabel(umabans);
 }
 
-/** 券種の表示順(複勝→単勝→ワイド→3連複。Issue #90でwinを追加)。未知の券種は末尾へ(値99)。 */
-const BET_TYPE_ORDER: Record<string, number> = { place: 0, win: 1, wide: 2, trio: 3 };
+/** 券種の表示順(複勝→単勝→ワイド→馬連→3連複。Issue #90でwin、Issue #117で馬連〈quinella〉を追加)。未知の券種は末尾へ(値99)。 */
+const BET_TYPE_ORDER: Record<string, number> = { place: 0, win: 1, wide: 2, quinella: 3, trio: 4 };
 
 function betTypeRank(betType: string): number {
   return BET_TYPE_ORDER[betType] ?? 99;

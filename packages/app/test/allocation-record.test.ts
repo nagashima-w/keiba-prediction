@@ -678,10 +678,15 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     // 既存のunavailable行は unavailableReason="not-sold"(3頭)・fallbackReason="combo-odds-not-requested"
     // の1行しか無く、どちらの束縛箇所も定数直書きに変異させても検出できなかった。
     // 6頭(resolvePlaceBetTarget: runnerCount<=7 → "two-place-only")かつ
-    // includeComboOdds=trueのままワイド・3連複を配分対象外にする(isComboBetTypesOff)ことで、
-    // 2つの束縛箇所に同時に2値目を与える。
+    // includeComboOdds=trueのままワイド・3連複・馬連を配分対象外にする(isComboBetTypesOff。
+    // Issue #117で馬連も条件②に加わったため、馬連もOFFにしないと候補0件〈条件③〉に落ちてしまう)
+    // ことで、2つの束縛箇所に同時に2値目を与える。
     const race = raceInput({ rows: allCandidateRows(6) });
-    const s = settings({ includeWideInAllocation: false, includeTrioInAllocation: false });
+    const s = settings({
+      includeWideInAllocation: false,
+      includeTrioInAllocation: false,
+      includeQuinellaInAllocation: false,
+    });
     const outcome = buildMixedRaceAllocationWithOutcome(race, s);
     expect(outcome.view.kind).toBe("unavailable"); // 前提固定(空振り防止)。
     // 前提固定: 既存行(not-sold / combo-odds-not-requested)と実際に異なる値であること。

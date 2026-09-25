@@ -43,13 +43,16 @@
  *    総額・点数・券種別構成比(複勝/ワイド/三連複)を表示する。
  * 2. 1レースあたりの所要時間(`buildMixedAllocationDisplay` を実運用と同じ既定設定で
  *    複数回実行した平均。ウォームアップ1回を除く)。
- * 3. 馬連(quinella)を候補ビルダーに追加したときの性能・構成の実測(Issue #116 AC-7)。
- *    `fixtures/odds_quinella_202603020211.json`(同レース・同16頭)を`parseComboOdds`
- *    経由でパースして`quinellaCombo`を作り、`betTypes=[place,win,wide,trio]`と
+ * 3. 馬連(quinella)を候補ビルダーに追加したときの性能・構成の実測(Issue #116 AC-7・
+ *    Issue #117で追記)。`fixtures/odds_quinella_202603020211.json`(同レース・同16頭)を
+ *    `parseComboOdds`経由でパースして`quinellaCombo`を作り、`betTypes=[place,win,wide,trio]`と
  *    `[place,win,wide,trio,quinella]`の2条件で`buildMixedCandidates`+`allocateGeneralBets`
  *    の1レースあたりの所要時間(平均・ウォームアップ除く)・券種別候補数・点数・
- *    券種別構成比を並べて出す。**#117でresolveMixedBetTypesが接続するまで、
- *    この節はproductionの挙動を変えない(betTypesを明示的に指定した場合の実測にすぎない)**。
+ *    券種別構成比を並べて出す。**Issue #117で`resolveMixedBetTypes`(`includeQuinellaInAllocation`
+ *    設定)が実際に接続された**が、本節は依然として`buildMixedCandidates`の`options.betTypes`へ
+ *    明示的に条件を渡す実測であり、設定のON/OFFを経由しない(#1の`greedySteps`感度表が使う
+ *    `central-on.json`フィクスチャには`quinellaCombo`が無いため、そちらは本節と無関係に
+ *    馬連の候補が常に0件になる。両者を混同しないこと)。
  */
 
 import { readFileSync } from "node:fs";
@@ -216,8 +219,11 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     includeComboOdds: true,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
-    // #24-D3a(Issue #115)で追加。候補ビルダーはまだ馬連の候補を作らないため
-    // (resolveMixedBetTypes未接続)、この値は感度表の出力に一切影響しない。
+    // #24-D3a(Issue #115)で追加。Issue #117で`resolveMixedBetTypes`が接続されたため、
+    // trueにすると候補ビルダーは実際に馬連を評価しにいく。ただし`toMixedCandidateInput`
+    // (このファイル)は`result.quinellaCombo`をraceへ渡さないため、馬連の候補は常に0件
+    // (unfetched)になり、配分額・構成比の出力は変わらない。一方、判定不能の分類自体は
+    // 実行されるため、所要時間にはわずかな増分がありうる(実測で確認すること)。
     includeQuinellaInAllocation: true,
   };
 
@@ -275,10 +281,10 @@ interface QuinellaComparisonSample {
 /**
  * 馬連(quinella)を候補ビルダーに追加したときの性能・構成を実測する(Issue #116 AC-7)。
  *
- * `betTypes=[place,win,wide,trio]`(馬連なし。既定の`ALL_MIXED_CANDIDATE_BET_TYPES`と同じ)と
- * `[place,win,wide,trio,quinella]`(馬連あり。`buildMixedCandidates`の`options.betTypes`へ
- * 明示的に`"quinella"`を渡す。#117で`resolveMixedBetTypes`が接続するまでproductionからは
- * 到達しない組み合わせ)の2条件を比較する。
+ * `betTypes=[place,win,wide,trio]`(馬連なし。**Issue #117で`ALL_MIXED_CANDIDATE_BET_TYPES`に
+ * 馬連が加わったため、この配列はもう既定値と同じではない**〈既定値は
+ * `[place,win,wide,quinella,trio]`〉。ここでは意図的に馬連を除いた比較用の配列として
+ * 明示的に指定する)と`[place,win,wide,trio,quinella]`(馬連あり)の2条件を比較する。
  */
 async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise<void> {
   const baseRace = toMixedCandidateInput(result);

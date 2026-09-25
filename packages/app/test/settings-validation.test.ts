@@ -162,6 +162,14 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("記録のみ");
       expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("配分提案には使いません");
     });
+
+    // Issue #117(AC-9): v1.9.9(#116)からincludeComboOddsは馬連オッズも取得している
+    // (scrape-race.tsがワイド・3連複の後に馬連を1リクエスト追加で取得する)。
+    // 「ワイド・三連複のオッズも取得する」という2券種だけの文言は事実と食い違う。
+    it("チェックボックス・補助文がどちらも馬連(quinella)の取得に言及すること(Issue #117。v1.9.9から馬連も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("馬連");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("馬連");
+    });
   });
 
   describe("INCLUDE_COMBO_ODDS_BATCH_NOTE(一括分析画面の固定注記。機能D-2c第3段・Issue #28)", () => {
@@ -175,41 +183,50 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("配分に使う");
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("記録のみ");
     });
+
+    it("馬連(quinella)の配分利用にも言及すること(Issue #117)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("馬連");
+    });
   });
 
-  // 券種横断の馬券配分対象チェックボックス文言(機能D-2c第4段・Issue #28)。
-  // AC24必須要件3点をwide/trioそれぞれで個別に固定する(片方だけ直して他方が古い文言のまま
-  // 残る欠陥を防ぐため、必ず2券種とも同じアサーションを通す)。
-  describe("ALLOCATION_BET_TYPE_LABELS(券種横断の配分対象チェックボックス文言。機能D-2c第4段・Issue #28・AC24)", () => {
-    it.each(["wide", "trio"] as const)(
+  // 券種横断の馬券配分対象チェックボックス文言(機能D-2c第4段・Issue #28。
+  // Issue #117で馬連〈quinella〉を追加)。
+  // AC24必須要件3点をwide/quinella/trioそれぞれで個別に固定する(1つだけ直して他が古い文言のまま
+  // 残る欠陥を防ぐため、必ず3券種とも同じアサーションを通す)。
+  describe("ALLOCATION_BET_TYPE_LABELS(券種横断の配分対象チェックボックス文言。機能D-2c第4段・Issue #28・AC24。Issue #117で馬連を追加)", () => {
+    it.each(["wide", "quinella", "trio"] as const)(
       "%sのチェックボックスラベルが空でない",
       (betType) => {
         expect(ALLOCATION_BET_TYPE_LABELS[betType].checkbox).toBeTruthy();
       },
     );
 
-    it.each(["wide", "trio"] as const)(
+    it.each(["wide", "quinella", "trio"] as const)(
       "%sの補助文がincludeComboOdds(オッズ取得)への依存を明示する(AC24必須要件1)",
       (betType) => {
         // 「オッズ取得がOFFの間は効果がない」ことを書かないと、「ONにしたのに何も変わらない」を
         // 未実装と誤認させる(第3段のINCLUDE_COMBO_ODDS_LABELS.helpと対になる必須記述)。
+        // Issue #117: INCLUDE_COMBO_ODDS_LABELS.checkboxが「ワイド・馬連・三連複」に変わったため、
+        // ここでの引用文言もそれに合わせる(古い引用のままだと実際のチェックボックス名と
+        // 一致しない参照になる)。
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(
-          "ワイド・三連複のオッズも取得する",
+          "ワイド・馬連・三連複のオッズも取得する",
         );
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("OFFの間は効果がありません");
       },
     );
 
-    it.each(["wide", "trio"] as const)(
+    it.each(["wide", "quinella", "trio"] as const)(
       "%sの補助文が既定ONであることを明示する(AC24必須要件3)",
       (betType) => {
-        // includeComboOdds自体は既定OFF(オプトイン)だが、この2項目は逆に既定ON(D-1裁定)。
+        // includeComboOdds自体は既定OFF(オプトイン)だが、この3項目は逆に既定ON(D-1裁定。
+        // 馬連はユーザー指定によりIssue #115以降の新券種すべてに適用)。
         // 逆向きの既定値であることを書かないと誤解を招く。
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("既定でON");
       },
     );
 
-    it.each(["wide", "trio"] as const)(
+    it.each(["wide", "quinella", "trio"] as const)(
       "%sの補助文が寄り先の券種を断定する表現を含まないこと(AC24必須要件2・AC12と同じ理由)",
       (betType) => {
         // 資金規模・1レース上限・greedySteps(#36)で寄り先が変わるため、断定した瞬間に
@@ -218,5 +235,9 @@ describe("設定フォームの入力検証(純関数)", () => {
         expect(help).not.toMatch(/集中|寄る|偏る/);
       },
     );
+
+    it("quinellaのチェックボックスラベルが『馬連を馬券配分に使う』であること(wide/trioと同じ命名規則)", () => {
+      expect(ALLOCATION_BET_TYPE_LABELS.quinella.checkbox).toBe("馬連を馬券配分に使う");
+    });
   });
 });

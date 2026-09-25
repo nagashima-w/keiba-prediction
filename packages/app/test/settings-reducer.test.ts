@@ -144,7 +144,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(flipped.includeTrioInAllocation).toBe(false);
   });
 
-  it("読込成功でincludeQuinellaInAllocation(#24-D3a・Issue #115)を反映すること(OFF/ON両方向)。対応するUIトグルはまだ無いが、フォーム状態としては保持・往復させる", () => {
+  it("読込成功でincludeQuinellaInAllocation(#24-D3a・Issue #115。Issue #117でUIトグルを追加)を反映すること(OFF/ON両方向)", () => {
     expect(
       loadedState(fakeMasked({ includeQuinellaInAllocation: false }))
         .includeQuinellaInAllocation,
@@ -206,6 +206,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     s = settingsReducer(s, { type: "組合せオッズ取得切替", value: true });
     s = settingsReducer(s, { type: "ワイド配分対象切替", value: false });
     s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
+    s = settingsReducer(s, { type: "馬連配分対象切替", value: false });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -221,6 +222,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.includeComboOdds).toBe(true);
     expect(s.includeWideInAllocation).toBe(false);
     expect(s.includeTrioInAllocation).toBe(false);
+    expect(s.includeQuinellaInAllocation).toBe(false);
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -417,7 +419,7 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(update.includeTrioInAllocation).toBe(true);
   });
 
-  it("includeQuinellaInAllocation(#24-D3a)を含めること(読込値どおり、OFF/ON両方向。対応するUIトグルが無いため切替アクションではなく読込値の往復で確認する)", () => {
+  it("includeQuinellaInAllocation(#24-D3a)を含めること(読込値どおり、OFF/ON両方向)", () => {
     expect(
       buildUpdate(loadedState(fakeMasked({ includeQuinellaInAllocation: false })))
         .includeQuinellaInAllocation,
@@ -426,6 +428,15 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
       buildUpdate(loadedState(fakeMasked({ includeQuinellaInAllocation: true })))
         .includeQuinellaInAllocation,
     ).toBe(true);
+  });
+
+  it("馬連配分対象切替(Issue #117)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "馬連配分対象切替", value: false });
+    expect(buildUpdate(s).includeQuinellaInAllocation).toBe(false);
+
+    s = settingsReducer(s, { type: "馬連配分対象切替", value: true });
+    expect(buildUpdate(s).includeQuinellaInAllocation).toBe(true);
   });
 });
 
@@ -468,6 +479,10 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     {
       name: "三連複配分対象切替",
       action: { type: "三連複配分対象切替", value: false },
+    },
+    {
+      name: "馬連配分対象切替",
+      action: { type: "馬連配分対象切替", value: false },
     },
     ...BIAS_WEIGHT_KEYS.map((key) => ({
       name: `バイアス重み入力(${key})`,
@@ -548,13 +563,13 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     expect(JSON.stringify(s)).toBe(before);
   });
 
-  it("includeQuinellaInAllocation(#24-D3a)がsavedSnapshotと異なればdirty判定されること(対応する切替アクションがまだ無いため、読込直後の状態を直接組み立てて検証する。D3bでトグルを追加したときisDirtyの比較漏れが起きないことの土台)", () => {
+  it("includeQuinellaInAllocation(#24-D3a)がsavedSnapshotと異なればdirty判定されること(Issue #117で「馬連配分対象切替」アクションを追加したため、実際にそのアクション経由で確認する)", () => {
     const base = loadedState();
     expect(isDirty(base)).toBe(false);
-    const changed: SettingsFormState = {
-      ...base,
-      includeQuinellaInAllocation: !base.includeQuinellaInAllocation,
-    };
+    const changed = settingsReducer(base, {
+      type: "馬連配分対象切替",
+      value: !base.includeQuinellaInAllocation,
+    });
     expect(isDirty(changed)).toBe(true);
   });
 });

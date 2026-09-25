@@ -81,11 +81,10 @@ export interface SettingsFormState {
   /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。既定true。 */
   readonly includeTrioInAllocation: boolean;
   /**
-   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。既定true。
-   * #24-D3a時点では対応する切替アクション(SettingsAction)を持たない
-   * (SettingsView.tsxにトグルを出さないため。D3bで「馬連配分対象切替」アクションを追加する)。
-   * それでも読込・保存の往復・isDirty判定の対象には含める(将来トグルを追加したときの配線を
-   * この時点で通しておく)。
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115。Issue #117でトグルを追加)。既定true。
+   * #24-D3a時点では対応する切替アクション(SettingsAction)を持たなかったが、
+   * Issue #117(#24-D3b-2)で「馬連配分対象切替」アクションと`SettingsView.tsx`のチェックボックスを
+   * 追加した。
    */
   readonly includeQuinellaInAllocation: boolean;
   /** 保存操作の状態。 */
@@ -137,6 +136,7 @@ export type SettingsAction =
   | { readonly type: "組合せオッズ取得切替"; readonly value: boolean }
   | { readonly type: "ワイド配分対象切替"; readonly value: boolean }
   | { readonly type: "三連複配分対象切替"; readonly value: boolean }
+  | { readonly type: "馬連配分対象切替"; readonly value: boolean }
   | { readonly type: "保存開始" }
   | { readonly type: "保存成功"; readonly settings: MaskedSettings }
   | { readonly type: "保存失敗"; readonly message: string }
@@ -401,6 +401,9 @@ export function settingsReducer(
 
     case "三連複配分対象切替":
       return { ...state, includeTrioInAllocation: action.value };
+
+    case "馬連配分対象切替":
+      return { ...state, includeQuinellaInAllocation: action.value };
 
     case "保存開始":
       return { ...state, status: "saving", message: null };

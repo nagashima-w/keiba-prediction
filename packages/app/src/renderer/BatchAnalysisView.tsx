@@ -559,6 +559,12 @@ function renderMixedAllocationBlock(
           ワイド: {display.wideNote}
         </p>
       )}
+      {/* Issue #117(AC-5): 馬連の状態注記。表示順(ワイド→馬連→3連複)に合わせてワイドと3連複の間に置く。 */}
+      {display.quinellaNote !== null && (
+        <p style={{ margin: "0.2rem 0 0", color: "#666", fontSize: "0.8rem" }}>
+          馬連: {display.quinellaNote}
+        </p>
+      )}
       {display.trioNote !== null && (
         <p style={{ margin: "0.2rem 0 0", color: "#666", fontSize: "0.8rem" }}>
           三連複: {display.trioNote}

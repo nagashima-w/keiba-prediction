@@ -8,7 +8,7 @@ import {
   type ShutubaHorse,
 } from "@keiba/core";
 import type { AnalysisRecord } from "@keiba/core";
-import { DEFAULT_GENERAL_BET_ALLOCATION_CONFIG } from "@keiba/core/ev/combo-bet-allocation";
+import { buildComboOddsKey, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG } from "@keiba/core/ev/combo-bet-allocation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runAnalysis, type AnalysisPipelineDeps } from "../src/main/analysis-pipeline.js";
@@ -88,6 +88,55 @@ function fakeRaceData(raceId: string): RaceData {
       fetchedAt: "2026-07-09T00:00:00.000Z",
       oddsFetchedAt: "2026-07-09T00:00:05.000Z",
       warnings: [],
+    },
+  };
+}
+
+/** items(昇順)から要素数kの組合せをすべて列挙する(テスト専用)。 */
+function combinations<T>(items: readonly T[], k: number): T[][] {
+  const results: T[][] = [];
+  if (k <= 0 || k > items.length) {
+    return results;
+  }
+  const current: T[] = [];
+  const backtrack = (start: number): void => {
+    if (current.length === k) {
+      results.push([...current]);
+      return;
+    }
+    for (let i = start; i < items.length; i++) {
+      current.push(items[i]!);
+      backtrack(i + 1);
+      current.pop();
+    }
+  };
+  backtrack(0);
+  return results;
+}
+
+/** umabans(昇順)からcomboSizeの組合せをすべて列挙し、一律のオッズ値を割り当てたRecordを作る。 */
+function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const combo of combinations(umabans, comboSize)) {
+    record[buildComboOddsKey(combo)] = odds;
+  }
+  return record;
+}
+
+/**
+ * 8頭・複勝オッズに加えてワイド・3連複・馬連のオッズも一律高値(EVプラス確実)で持つ
+ * フェイクレースデータ(Issue #117・AC-10)。
+ */
+function fakeRaceDataWithCombos(raceId: string): RaceData {
+  const base = fakeRaceData(raceId);
+  const umabans = base.horses.map((h) => h.shutuba.umaban);
+  return {
+    ...base,
+    odds: {
+      ...base.odds,
+      wideCombo: fullOddsRecord(umabans, 2, 100000),
+      trioCombo: fullOddsRecord(umabans, 3, 100000),
+      quinellaCombo: fullOddsRecord(umabans, 2, 100000),
     },
   };
 }
@@ -227,5 +276,67 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       oddsStatus: "result",
     });
     expect(allocation!.bets).toEqual([]);
+  });
+
+  it("Issue #117(AC-10): raceForAllocationのquinellaCombo/comboOddsが実際に消費され、馬連オッズあり・includeQuinellaInAllocation=ONのとき保存される配分記録(analysis_bets)にbet_type='quinella'の行が入ること", async () => {
+    const saved: AnalysisRecord[] = [];
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceDataWithCombos(RACE_ID)),
+      saveAnalysis: (rec) => {
+        saved.push(rec);
+        return 1;
+      },
+      allocationSettings: {
+        // wide/trioはOFFにする(実測して確認: ワイドは「2頭が上位3着以内」というquinellaより
+        // 緩い的中条件のため、同じオッズ〈100000〉ではワイドのEVがquinellaより大きく上回り、
+        // greedy配分が予算をワイドだけで使い切ってしまい馬連に1円も配分されない。券種間の
+        // 競合はこのテストの関心事ではないため、wide/tri併存によるEV競合を避け、
+        // quinellaComboの配線そのもの〈AC-10の主張〉を単独で確認できる形にする)。
+        bankroll: 300000,
+        perRaceCap: 20000,
+        kellyFraction: 0.5,
+        includeComboOdds: true,
+        includeWideInAllocation: false,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: true,
+      },
+    };
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+    expect(saved).toHaveLength(1); // 前提固定。
+    const allocation = saved[0]!.allocation;
+    expect(allocation).not.toBeUndefined();
+    // 前提固定(空振り防止): 実際に混在配分が計算されたこと(route='invalid'/'unset'等ではないこと)。
+    expect(allocation!.meta.route).toBe("mixed");
+    const quinellaBets = allocation!.bets.filter((b) => b.betType === "quinella");
+    expect(quinellaBets.length).toBeGreaterThan(0);
+  });
+
+  it("Issue #117(AC-10): includeQuinellaInAllocation=OFFなら、馬連オッズがあっても保存される配分記録にbet_type='quinella'の行が入らないこと(対照)", async () => {
+    const saved: AnalysisRecord[] = [];
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceDataWithCombos(RACE_ID)),
+      saveAnalysis: (rec) => {
+        saved.push(rec);
+        return 1;
+      },
+      allocationSettings: {
+        bankroll: 3000000,
+        perRaceCap: 3000000,
+        kellyFraction: 0.5,
+        includeComboOdds: true,
+        includeWideInAllocation: true,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: false,
+      },
+    };
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+    expect(saved).toHaveLength(1); // 前提固定。
+    const allocation = saved[0]!.allocation;
+    expect(allocation).not.toBeUndefined();
+    expect(allocation!.meta.route).toBe("mixed");
+    const quinellaBets = allocation!.bets.filter((b) => b.betType === "quinella");
+    expect(quinellaBets).toEqual([]);
   });
 });
