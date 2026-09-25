@@ -165,7 +165,7 @@ function buildFullResultHtml(headerRow: string, rows: string[]): string {
  * (「円」を含めて呼び出し側が指定する)。
  */
 function buildComboRow(
-  rowClass: "Wide" | "Fuku3",
+  rowClass: "Wide" | "Fuku3" | "Umatan",
   label: string,
   groups: readonly (readonly string[])[],
   payoutTexts: readonly string[],
@@ -1005,5 +1005,141 @@ describe("組合せ払戻(馬連、Issue #114・#24-F1)", () => {
     // 巻き添え無し(widePayouts/trioPayoutsも同じ理由で同じくundeterminedであること)。
     expect(result.widePayouts!.state).toBe("undetermined");
     expect(result.trioPayouts!.state).toBe("undetermined");
+  });
+});
+
+/**
+ * 組合せ払戻(馬単、Issue #121・#24-F2)。
+ *
+ * 馬単はワイド・三連複・馬連と異なり「1着→2着」の並びが意味を持つ(#106・#24-Bで
+ * `COMBO_KEY_ORDER.exacta = "ordered"`が既に確定済み)。`parseComboPayoutRow`が
+ * 常に`validateComboUmabans`(昇順必須)・`buildComboOddsKey`(常にソート)を使っていると、
+ * 1着13・2着8の払戻が「不正な馬番」として undetermined に落ちるか、キーが昇順化されて
+ * 逆順の買い目と区別できなくなる(着手前ゲート申し送り。Issue #121コメント参照)。
+ * この describe は betType別の順序方針(`validateComboUmabansFor`/`buildComboOddsKeyFor`)へ
+ * 切り替えたことを固定する。
+ *
+ * 実測値(HTML実物で確認済み):
+ * - 中央 `fixtures/result_202603020211.html:1967`: 馬単 13→8 = 8,360円・32人気
+ * - 地方 `fixtures/nar_result_202654071210.html:1730`: 馬単 5→7 = 12,970円・66人気
+ */
+describe("組合せ払戻(馬単、Issue #121・#24-F2)", () => {
+  it("中央(fixtures/result_202603020211.html)の馬単13→8=8,360円を、着順どおりの並び([13, 8])のままソートせずにパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("result_202603020211.html"));
+    // 前提固定(空振り防止): 払戻テーブル自体は取れていること。
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [13, 8], payout: 8360 }],
+    });
+  });
+
+  it("地方(fixtures/nar_result_202654071210.html)の馬単5→7=12,970円を、着順どおりの並び([5, 7])のままパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("nar_result_202654071210.html"));
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [5, 7], payout: 12970 }],
+    });
+  });
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、wide/trio/quinellaと同じくstate:undeterminedになること(payoutTableAbsent。同じ非対称)", () => {
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.exactaPayouts!.state).toBe("undetermined");
+    if (result.exactaPayouts!.state === "undetermined") {
+      expect(result.exactaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    // 巻き添え無し(wide/trio/quinellaも同じ理由で同じくundeterminedであること)。
+    expect(result.widePayouts!.state).toBe("undetermined");
+    expect(result.trioPayouts!.state).toBe("undetermined");
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+  });
+
+  it("1着同着(合成HTML: 1着1・1着2〈同着〉・2着3)で馬単の的中組が1着側の頭数だけ増えること(AC-6。以下は合成HTMLであり実測由来ではない)", () => {
+    // 1着が同着で2頭(1・2)、2着が3のケース: 馬単は「1着→2着」なので
+    // (1着1→2着3)と(1着2→2着3)の2組が的中する想定(3連複のC(4,2)同着テストと同型の考え方)。
+    const exactaRow = buildComboRow(
+      "Umatan",
+      "馬単",
+      [
+        ["1", "3"],
+        ["2", "3"],
+      ],
+      ["500円", "620円"],
+    );
+    const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([exactaRow, trioRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [1, 3], payout: 500 },
+        { umabans: [2, 3], payout: 620 },
+      ],
+    });
+    // 前提固定(空振り防止): 通常時(同着なし)は1組のみであるのに対し、ここは2組であること。
+    if (result.exactaPayouts!.state === "parsed") {
+      expect(result.exactaPayouts!.payouts).toHaveLength(2);
+      expect(result.exactaPayouts!.payouts.length).not.toBe(1);
+    }
+    // 巻き添え無し: 3連複は通常どおりparsed。
+    expect(result.trioPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+    });
+  });
+
+  it("★重複検出も順序を見ること: 逆順の2組([13,8]と[8,13])が同じ行に現れても、duplicateComboとして誤って弾かれないこと(以下は合成HTMLであり実測由来ではない。買い目の並びを保持する専用キーで重複判定していることの直接固定)", () => {
+    const exactaRow = buildComboRow(
+      "Umatan",
+      "馬単",
+      [
+        ["13", "8"],
+        ["8", "13"],
+      ],
+      ["8,360円", "11,880円"],
+    );
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([exactaRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [13, 8], payout: 8360 },
+        { umabans: [8, 13], payout: 11880 },
+      ],
+    });
+  });
+
+  /**
+   * ★非退行の直接固定(AC-2。着手前ゲート・コーディネーター指定): 馬単対応で
+   * `parseComboPayoutRow`をbetType別の順序方針(`validateComboUmabansFor`/`buildComboOddsKeyFor`)へ
+   * 切り替えたことで、ワイド・3連複・馬連(順不同の券種)が誤って"ordered"方針(昇順要求なし・
+   * ソートなし)になっていないことを固定する。
+   *
+   * 実測により確認した前提(このテストが意味を持つための土台): 既存のワイド・3連複の
+   * テスト(実フィクスチャ・合成HTMLとも)はいずれも`<li>`の生の並びが最初から昇順
+   * (netkeibaが常に昇順で表示するため)であり、「ソートするかどうか」を区別できない
+   * (`grep -n 'buildComboRow(' parse-race-result.test.ts`で全呼び出しを確認済み、
+   * いずれも昇順ペア)。したがって「全券種を"ordered"にする変異」を検出するには、
+   * ここで意図的に**降順の生入力**を与える必要がある。
+   */
+  it("★非退行: ワイドの降順入力([3, 1])は、馬単対応後も従来どおりkind:'invalidUmaban'でundeterminedになること(以下は合成HTMLであり実測由来ではない)", () => {
+    const wideRow = buildComboRow("Wide", "ワイド", [["3", "1"]], ["100円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([wideRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.widePayouts!.state).toBe("undetermined");
+    if (result.widePayouts!.state === "undetermined") {
+      expect(result.widePayouts!.reason.kind).toBe("invalidUmaban");
+    }
   });
 });

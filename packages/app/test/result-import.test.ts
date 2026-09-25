@@ -389,6 +389,92 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
     });
   });
 
+  describe("組合せ払戻(馬単、Issue #121・#24-F2)の素通し(#52のR-7・R-10をexactaにも適用)", () => {
+    it("パース結果のexactaPayoutsを、wide/trio/quinellaと同時にsaveResultの第4引数へそのまま(判断を挟まず)渡すこと(AC-3)", async () => {
+      const saveResult = vi.fn();
+      const wide: RaceResult["widePayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [2, 4], payout: 190 }],
+      };
+      const trio: RaceResult["trioPayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 4], payout: 2210 }],
+      };
+      const quinella: RaceResult["quinellaPayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [8, 13], payout: 4550 }],
+      };
+      // 馬単は着順どおりの並び([13, 8])のまま渡ってくる(ソートしない。AC-3の要)。
+      const exacta: RaceResult["exactaPayouts"] = {
+        state: "parsed",
+        payouts: [{ umabans: [13, 8], payout: 8360 }],
+      };
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () =>
+          buildRaceResult({
+            widePayouts: wide,
+            trioPayouts: trio,
+            quinellaPayouts: quinella,
+            exactaPayouts: exacta,
+          }),
+        saveResult,
+      });
+      expect(saveResult).toHaveBeenCalledTimes(1);
+      const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+      expect(comboPayouts).toEqual({ wide, trio, quinella, exacta });
+      // ★空振り防止: 並びが昇順化されていないこと(渡された[13, 8]のまま)を直接固定する。
+      expect(comboPayouts.exacta.payouts[0].umabans).toEqual([13, 8]);
+      expect(comboPayouts.exacta.payouts[0].umabans).not.toEqual([8, 13]);
+    });
+
+    it("馬単がstate:'undetermined'(構造異常)のときも、判断を挟まずそのままsaveResultの第4引数へ渡り、着順・複勝は通常どおり保存されること", async () => {
+      const saveResult = vi.fn();
+      const undeterminedExacta: RaceResult["exactaPayouts"] = {
+        state: "undetermined",
+        reason: {
+          kind: "payoutTableAbsent",
+          message: "テスト用",
+          observedGroupCount: null,
+          observedPayoutCount: null,
+          rawHtml: null,
+        },
+      };
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () => buildRaceResult({ exactaPayouts: undeterminedExacta }),
+        saveResult,
+      });
+      expect(saveResult).toHaveBeenCalledTimes(1);
+      const [savedRaceId, entries, , comboPayouts] = saveResult.mock.calls[0]!;
+      // 巻き添え無し: 着順(→entries)は通常どおり保存される。
+      expect(savedRaceId).toBe(raceId);
+      expect(entries).toEqual(toResultEntries(buildRaceResult()));
+      expect(comboPayouts).toEqual({
+        wide: undefined,
+        trio: undefined,
+        quinella: undefined,
+        exacta: undeterminedExacta,
+      });
+    });
+
+    it("パース結果にexactaPayoutsが無い(未設定)場合は、saveResultの第4引数もundefinedのままになること", async () => {
+      const saveResult = vi.fn();
+      await importRaceResult(raceId, {
+        fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+        parse: () => buildRaceResult(), // exactaPayouts省略
+        saveResult,
+      });
+      const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+      expect(comboPayouts).toEqual({
+        wide: undefined,
+        trio: undefined,
+        quinella: undefined,
+        exacta: undefined,
+      });
+    });
+  });
+
   it("結果テーブル欠落(構造異常のパース失敗)時は保存せずエラーを伝播する(DBを汚さない)", async () => {
     const saveResult = vi.fn();
     await expect(

@@ -325,6 +325,14 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               {formatRate(report.proposedBet.trio.recoveryRate)}
             </p>
             {/*
+             * Issue #121・#24-F2: 馬単(exacta)はcore側(ProposedBetReport.exacta)には
+             * 既に配線済みだが、この内訳・判定不能の行にはまだ出さない。配分が馬単の
+             * 買い目をまだ作らない(#123・#24-E3bで対応予定)ため`betCount`が構造的に常に0で、
+             * 馬連(quinella)が#116まで辿った「買い目0件の間は画面に出さない」経緯
+             * (#112「馬連 ¥0 0点」の事故と同型を避ける。Issue #114 AC-6)と同じ理由による。
+             * 表示追加は#123で行う。
+             */}
+            {/*
              * bossメタレビュー要修正2: unjudgedCount(規則Uで判定不能とした点数)が画面に一切
              * 表示されていなかった問題への対応。「ワイド0点」が「1点も提案していない」のか
              * 「提案したが全部判定できない」のかを区別できるようにする(BatchAnalysisView.tsxの

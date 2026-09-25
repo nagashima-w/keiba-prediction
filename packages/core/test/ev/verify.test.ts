@@ -5,7 +5,7 @@ import {
   type AnalysisHorseRecord,
 } from "../../src/ev/analysis-store.js";
 import type { PredictionMark } from "../../src/analyzer/parse-response.js";
-import { buildComboOddsKey } from "../../src/scraper/combo-odds-key.js";
+import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import {
   computeRaceLedger,
   computeVerifyReport,
@@ -2583,6 +2583,127 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(quinella.betCount).toBe(0);
       expect(quinella.totalStake).toBe(0);
       expect(quinella.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("馬単(exacta)の回収率集計(Issue #121・#24-F2)", () => {
+    it("AC-4(★判定): 正順(1着13→2着8)の買い目は払戻13→8=8,360円と的中し、逆順(1着8→2着13)の買い目は同じ払戻で不的中になること(合成データ。配分はまだ馬単の買い目を作らないためallocation.betsを直接構成する)", () => {
+      const store = new AnalysisStore();
+      // 前提固定(空振り防止): 正順・逆順のキーが異なる文字列であること(非可換性の直接証明。
+      // buildComboOddsKey〈常に昇順ソート〉と違い、buildOrderedComboOddsKeyは入力順に依存する)。
+      expect(buildOrderedComboOddsKey([13, 8])).toBe("1308");
+      expect(buildOrderedComboOddsKey([8, 13])).toBe("0813");
+      expect(buildOrderedComboOddsKey([13, 8])).not.toBe(buildOrderedComboOddsKey([8, 13]));
+
+      store.saveAnalysis({
+        raceId: "PB_EXACTA_ORDER",
+        analyzedAt: "t",
+        horses: [horse(13, 0.1, null, 1.2, true), horse(8, 0.05, null, 1.1, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            // 正順(1着13→2着8): 払戻と一致し的中する想定。
+            { betType: "exacta", comboKey: "1308", stake: 300, odds: 83.6, ev: 1.2 },
+            // 逆順(1着8→2着13、殺すべき変異: どちらかのキーを昇順化すると的中してしまう)。
+            { betType: "exacta", comboKey: "0813", stake: 200, odds: 118.8, ev: 1.1 },
+          ],
+        },
+      });
+      // 払戻は実測どおり1着13・2着8=8,360円のみ(parseComboPayoutRowが実際に返す並び)。
+      store.saveResult(
+        "PB_EXACTA_ORDER",
+        [
+          { umaban: 13, finishPosition: 1 },
+          { umaban: 8, finishPosition: 2 },
+        ],
+        null,
+        { exacta: { state: "parsed", payouts: [{ umabans: [13, 8], payout: 8360 }] } },
+      );
+
+      const report = computeVerifyReport(store);
+      const { exacta, overall, place, win, wide, trio, quinella, unknownBetType } =
+        report.proposedBet;
+
+      // AC-4(a): 未対応の券種コード警告が出ないこと(exactaは既知)。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // AC-4(b): 正順(的中: 8360*300/100=25080)・逆順(不的中)の2ケース。
+      // 不的中側はbetCount/totalStakeには乗るがtotalReturnには乗らないこと。
+      expect(exacta).toEqual({
+        betCount: 2,
+        totalStake: 500,
+        totalReturn: 25080,
+        recoveryRate: 25080 / 500,
+        unjudgedCount: 0,
+      });
+
+      // 前提固定(空振り防止): place/win/wide/trio/quinellaは0件で、overallはexactaのみで
+      // 構成されること(このフィクスチャがexacta以外を一切含まないことの確認)。
+      expect(place.betCount).toBe(0);
+      expect(win.betCount).toBe(0);
+      expect(wide.betCount).toBe(0);
+      expect(trio.betCount).toBe(0);
+      expect(quinella.betCount).toBe(0);
+
+      // ★overallへの合算(足し忘れの変異を殺せること): 絶対値リテラルで固定する。
+      expect(overall).toEqual({
+        betCount: 2,
+        totalStake: 500,
+        totalReturn: 25080,
+        recoveryRate: 25080 / 500,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(
+        place.betCount +
+          win.betCount +
+          wide.betCount +
+          trio.betCount +
+          quinella.betCount +
+          exacta.betCount,
+      );
+      expect(overall.totalStake).toBe(
+        place.totalStake +
+          win.totalStake +
+          wide.totalStake +
+          trio.totalStake +
+          quinella.totalStake +
+          exacta.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn +
+          exacta.totalReturn,
+      );
+      store.close();
+    });
+
+    it("AC-5: 馬単払戻が未取込のレース(旧DB相当)では、馬単買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(0円の不的中として計上してはならない。合成データ)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_EXACTA_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "exacta", comboKey: "0102", stake: 500, odds: 8, ev: 1.2 }],
+        },
+      });
+      // exactaを渡さない(旧DB相当=馬単payout未取込のレース。placePayoutのみ保存)。
+      store.saveResult("PB_EXACTA_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { exacta } = report.proposedBet;
+      expect(exacta.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(exacta.betCount).toBe(0);
+      expect(exacta.totalStake).toBe(0);
+      expect(exacta.totalReturn).toBe(0);
       store.close();
     });
   });

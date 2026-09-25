@@ -192,6 +192,16 @@ export const RACE_RESULT_SELECTORS = {
    */
   quinellaRow: "tr.Umaren",
   /**
+   * 馬単の払戻行(Issue #121・#24-F2)。wideRow/trioRow と同じ理由で行セレクタを直指定する。
+   * ワイド・3連複と同じ2つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html:1967`・`fixtures/nar_result_202654071210.html:1730`。
+   * `class="Umatan"`は文書中に1回だけしか出現しない)。**構造(td.Result内のul/li・単一値の
+   * td.Payout)はwide/trio/quinellaと同型だが、馬単は「1着→2着」の並びが意味を持つため、
+   * `parseComboPayoutRow`はbetTypeを見て並びをソートしない(`combo-odds-key.ts`の
+   * `COMBO_KEY_ORDER`参照)。**
+   */
+  exactaRow: "tr.Umatan",
+  /**
    * ワイド・三連複の払戻行内で1組を表す `<ul>`(Issue #52)。組内の的中馬番は
    * 各 `<li>` のテキスト(空の `<li></li>` は区切り用でワイドの末尾に付く)。
    */

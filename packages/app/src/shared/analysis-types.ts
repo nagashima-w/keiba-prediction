@@ -590,19 +590,23 @@ export interface ProposedBetPopulationView {
 
 /**
  * 検証画面: 配分ベースの回収率(表示用。Issue #71 #54-B。core `ProposedBetReport` のプレーン写し)。
- * `overall` は複勝・単勝・ワイド・3連複・馬連の5券種の合算(同一の賭け金仮定を共有する
+ * `overall` は複勝・単勝・ワイド・3連複・馬連・馬単の6券種の合算(同一の賭け金仮定を共有する
  * ポートフォリオとしての合計。core側JSDoc参照)。単勝はIssue #100・#23-Cで、馬連は
- * Issue #114・#24-F1で追加。
+ * Issue #114・#24-F1で、馬単はIssue #121・#24-F2で追加。
  *
  * ★`quinella`フィールドはIssue #117(#24-D3b-2)でapp側の配分提案への組み込みが完了し
  * 買い目が実際に発生するようになったため、`VerifyView.tsx`も画面に馬連の行を出す
  * (#116までは買い目が構造的に0件だったため、#112「馬連 ¥0 0点」の事故と同型を避けるため
  * あえて表示しない設計だった。Issue #114 AC-6・着手前ゲートの合意)。
+ *
+ * ★`exacta`フィールドはIssue #121・#24-F2で追加したが、配分は馬単の買い目をまだ作らない
+ * (#123・#24-E3bで対応予定)ため`betCount`は構造的に常に0であり、quinellaと同じ理由で
+ * `VerifyView.tsx`への表示は#123へ申し送る(core `ProposedBetReport` JSDoc参照)。
  */
 export interface ProposedBetReportView {
   /** 母集団4分類の件数。 */
   readonly population: ProposedBetPopulationView;
-  /** 複勝・単勝・ワイド・3連複・馬連の合算。 */
+  /** 複勝・単勝・ワイド・3連複・馬連・馬単の合算。 */
   readonly overall: ProposedBetTypeSummaryView;
   /** 複勝の内訳。 */
   readonly place: ProposedBetTypeSummaryView;
@@ -617,6 +621,11 @@ export interface ProposedBetReportView {
    * 表示する(このJSDoc冒頭の注意参照)。
    */
   readonly quinella: ProposedBetTypeSummaryView;
+  /**
+   * 馬単の内訳(Issue #121・#24-F2)。配分が馬単の買い目をまだ作らないため`betCount`は
+   * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#123で行う。
+   */
+  readonly exacta: ProposedBetTypeSummaryView;
   /** 未知の券種コードの内訳(Issue #76。`overall`には合算しない)。 */
   readonly unknownBetType: ProposedBetUnknownBetTypeView;
 }

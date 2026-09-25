@@ -344,6 +344,9 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         // 馬連(Issue #114・#24-F1): この合成HTMLにはtr.Umaren行が無いため「発売なし」の
         // 空配列(payoutTableAbsentではない。payoutTablePresent=trueかつ行が0件のケース)。
         quinella: { state: "parsed", payouts: [] },
+        // 馬単(Issue #121・#24-F2): この合成HTMLにはtr.Umatan行が無いため、quinellaと
+        // 同じ理由で「発売なし」の空配列になる。
+        exacta: { state: "parsed", payouts: [] },
       });
     });
   });

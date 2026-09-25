@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import {
@@ -6,7 +8,14 @@ import {
   type AnalysisRecord,
   type StoredAllocation,
 } from "../../src/ev/analysis-store.js";
+import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
 import { ScrapeCache } from "../../src/scraper/cache.js";
+
+/** フィクスチャHTMLを読み込む(parse-race-result.test.ts の loadFixture と同じ流儀)。 */
+function loadFixture(name: string): string {
+  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
+  return readFileSync(fileURLToPath(url), "utf-8");
+}
 
 /** テスト用の分析レコードを最小構成で組み立てる。 */
 function makeRecord(overrides: Partial<AnalysisRecord> = {}): AnalysisRecord {
@@ -1587,6 +1596,31 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         state: "imported",
         payouts: [{ comboKey: "010205", payout: 240 }],
       });
+      store.close();
+    });
+  });
+
+  describe("馬単の確定払戻の取り込み(Issue #121・#24-F2: parseRaceResultからgetComboPayoutsまでの結線)", () => {
+    it("実フィクスチャ(fixtures/result_202603020211.html)をparseRaceResult→saveResultで保存し、getComboPayoutsで読み出したキーが正順'1308'のままであること(パーサ・ストアのどちらかで昇順化が混入すると'0813'になり赤くなる)", () => {
+      const html = loadFixture("result_202603020211.html");
+      const parsed = parseRaceResult(html);
+      // 前提固定(空振り防止): パース結果自体が着順どおりの並び([13, 8])であること。
+      expect(parsed.exactaPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [13, 8], payout: 8360 }],
+      });
+
+      const store = new AnalysisStore();
+      store.saveResult("202603020211", [{ umaban: 13, finishPosition: 1 }], parsed.courseType, {
+        exacta: parsed.exactaPayouts,
+      });
+
+      const result = store.getComboPayouts("202603020211", "exacta");
+      expect(result.state).toBe("imported");
+      if (result.state !== "imported") throw new Error("unreachable");
+      expect(result.payouts).toEqual([{ comboKey: "1308", payout: 8360 }]);
+      // ★変異確認用の直接固定: 昇順化されたキー'0813'になっていないこと。
+      expect(result.payouts.map((p) => p.comboKey)).not.toContain("0813");
       store.close();
     });
   });

@@ -52,10 +52,11 @@
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import {
-  buildComboOddsKey,
+  buildComboOddsKeyFor,
+  COMBO_KEY_ORDER,
   COMBO_SIZE,
   ComboOddsKeyError,
-  validateComboUmabans,
+  validateComboUmabansFor,
   type ComboBetType,
 } from "./combo-odds-key.js";
 import {
@@ -441,7 +442,13 @@ function parseComboPayoutRow(
 
     const umabans = slots.map((t) => Number(t));
     try {
-      validateComboUmabans(umabans, comboSize);
+      // betType別の順序方針でキー化・検証する(Issue #106・#24-B裁定。馬単はIssue #121・
+      // #24-F2で追加): 馬単(exacta)は着順(1着→2着)が意味を持つ「並び」のため昇順を
+      // 要求せずソートもしない一方、ワイド・3連複・馬連は従来どおり昇順必須・ソート済みで
+      // 扱う(betTypeを見ずに`validateComboUmabans`/`buildComboOddsKey`を直接呼ぶと、
+      // 馬単の逆順2組〈1着13・2着8 と 1着8・2着13〉が同じキーに潰れるか、「不正な馬番」
+      // として弾かれてしまう)。
+      validateComboUmabansFor(betType, umabans, comboSize);
     } catch (e) {
       if (e instanceof ComboOddsKeyError) {
         return undeterminedComboPayout(
@@ -455,7 +462,7 @@ function parseComboPayoutRow(
       throw e;
     }
 
-    const key = buildComboOddsKey(umabans);
+    const key = buildComboOddsKeyFor(betType, umabans);
     if (seenKeys.has(key)) {
       return undeterminedComboPayout(
         "duplicateCombo",
@@ -467,7 +474,12 @@ function parseComboPayoutRow(
     }
     seenKeys.add(key);
 
-    entries.push({ umabans: [...umabans].sort((a, b) => a - b), payout: payouts[i]! });
+    // 並びの保持方針もbetType別に分ける(COMBO_KEY_ORDER参照): 馬単は着順どおりの並びを
+    // 保存する(ソートすると1着・2着の情報が失われる)。ワイド・3連複・馬連は従来どおり
+    // 昇順に正規化する(既存の保存形式・比較方式を変えない)。
+    const orderedUmabans =
+      COMBO_KEY_ORDER[betType] === "ordered" ? umabans : [...umabans].sort((a, b) => a - b);
+    entries.push({ umabans: orderedUmabans, payout: payouts[i]! });
   }
 
   return { state: "parsed", payouts: entries };
@@ -573,6 +585,13 @@ export function parseRaceResult(html: string): RaceResult {
       SEL.quinellaRow,
       "quinella",
       "馬連",
+      payoutTablePresent,
+    ),
+    exactaPayouts: parseComboPayoutRow(
+      $,
+      SEL.exactaRow,
+      "exacta",
+      "馬単",
       payoutTablePresent,
     ),
     courseType: parseCourseType($),
