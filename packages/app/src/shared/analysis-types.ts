@@ -156,11 +156,10 @@ export interface ComboOddsFetchDiagnosticsView {
   /**
    * 券種("wide" | "trio" | "exacta" | "quinella")。core `ComboBetType` に馬単(exacta)・
    * 馬連(quinella)が追加されたことに伴うプレーン写し(Issue #106・#24-B、馬連はIssue
-   * #113・#24-D2)。`ComboOddsScrapeOutcomeView`自体は`wide?`/`trio?`/`quinella?`を持つ
-   * (馬連はIssue #116・#24-D3b-1でscrape-race.tsに配線した時点で追加)。`exacta?`は
-   * まだ未追加(scrape-race.tsが馬単のライブ取得をまだ配線していないため。#24-E以降の
-   * スコープ)。`ComboOddsFetchDiagnostics.betType`はcore側で`ComboBetType`型をそのまま
-   * 参照する共有フィールドのため、この型だけはcore型と完全一致させる必要がある
+   * #113・#24-D2)。`ComboOddsScrapeOutcomeView`自体は`wide?`/`trio?`/`quinella?`/`exacta?`を
+   * 持つ(馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2でscrape-race.tsに配線した
+   * 時点でそれぞれ追加)。`ComboOddsFetchDiagnostics.betType`はcore側で`ComboBetType`型を
+   * そのまま参照する共有フィールドのため、この型だけはcore型と完全一致させる必要がある
    * (analysis-types-combo-odds-pin.test.tsが検知する)。
    */
   readonly betType: "wide" | "trio" | "exacta" | "quinella";
@@ -196,15 +195,16 @@ export interface ComboOddsFetchOutcomeView {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬連)取得結果のペア(core `ComboOddsScrapeOutcome` のプレーン
- * 写し。機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1で追加)。
- * core `RaceDataMeta.comboOdds` と同じく、`options.includeComboOdds`がtrueのときのみ
- * 設定される。
+ * 組合せオッズ(ワイド・3連複・馬連・馬単)取得結果のペア(core `ComboOddsScrapeOutcome` の
+ * プレーン写し。機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・
+ * #24-E2で追加)。core `RaceDataMeta.comboOdds` と同じく、`options.includeComboOdds`がtrueの
+ * ときのみ設定される。
  */
 export interface ComboOddsScrapeOutcomeView {
   readonly wide?: ComboOddsFetchOutcomeView;
   readonly trio?: ComboOddsFetchOutcomeView;
   readonly quinella?: ComboOddsFetchOutcomeView;
+  readonly exacta?: ComboOddsFetchOutcomeView;
 }
 
 /** 進捗イベント(main→renderer に webContents.send で通知)。 */
@@ -377,14 +377,26 @@ export interface AnalysisResult {
    */
   readonly quinellaCombo?: Record<string, number | null>;
   /**
-   * 組合せオッズ(ワイド・3連複・馬連)の取得結果(core `RaceDataMeta.comboOdds` のプレーン写し。
-   * 機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1で追加)。このフィールド自身の有無は
-   * `wideCombo`/`trioCombo`/`quinellaCombo`とは異なり`includeComboOdds`の指定と1対1で対応する
-   * (`scrapeRace`は`includeComboOdds:true`のとき、いずれかの取得処理が例外で失敗しても
-   * `comboOdds`自体〈`wide`/`trio`/`quinella`がそれぞれoptionalなオブジェクト〉は必ず設定する)。
+   * 馬単オッズ(馬番の組の正規化キー〈`buildOrderedComboOddsKey`形式。例"0102"。1着・2着の
+   * 順序が意味を持つ。"0102"と"0201"は別の値〉→オッズ。単一値。core
+   * `OddsSnapshot.exactaCombo` のプレーン写し。Issue #122・#24-E2)。`Record`である理由・
+   * 状態と原因が1対1に対応しないことは`wideCombo`と同じ(原因の判別は
+   * `comboOdds.exacta.state`を見ること)。
    *
-   * `wide`/`trio`/`quinella`それぞれの`state`(`"available" | "unavailable" | "failed"`)が、
-   * 対応する`*Combo`が空(`{}`)になった原因(発売なし/未発売なのか、取得失敗
+   * **配分・画面への配線はまだ無い**(このフィールドを保持・伝播するだけ。#24-E2〈#122〉の
+   * スコープ。配分の券種選択〈`resolveMixedBetTypes`〉への接続は#123)。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズ(ワイド・3連複・馬連・馬単)の取得結果(core `RaceDataMeta.comboOdds` のプレーン
+   * 写し。機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2で
+   * 追加)。このフィールド自身の有無は`wideCombo`/`trioCombo`/`quinellaCombo`/`exactaCombo`とは
+   * 異なり`includeComboOdds`の指定と1対1で対応する(`scrapeRace`は`includeComboOdds:true`の
+   * とき、いずれかの取得処理が例外で失敗しても`comboOdds`自体〈`wide`/`trio`/`quinella`/`exacta`
+   * がそれぞれoptionalなオブジェクト〉は必ず設定する)。
+   *
+   * `wide`/`trio`/`quinella`/`exacta`それぞれの`state`(`"available" | "unavailable" | "failed"`)
+   * が、対応する`*Combo`が空(`{}`)になった原因(発売なし/未発売なのか、取得失敗
    * なのか)を判別する唯一の手段である(`wideCombo`のJSDoc参照)。
    */
   readonly comboOdds?: ComboOddsScrapeOutcomeView;

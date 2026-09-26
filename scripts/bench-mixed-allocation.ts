@@ -43,16 +43,23 @@
  *    総額・点数・券種別構成比(複勝/ワイド/三連複)を表示する。
  * 2. 1レースあたりの所要時間(`buildMixedAllocationDisplay` を実運用と同じ既定設定で
  *    複数回実行した平均。ウォームアップ1回を除く)。
- * 3. 馬連(quinella)を候補ビルダーに追加したときの性能・構成の実測(Issue #116 AC-7・
- *    Issue #117で追記)。`fixtures/odds_quinella_202603020211.json`(同レース・同16頭)を
- *    `parseComboOdds`経由でパースして`quinellaCombo`を作り、`betTypes=[place,win,wide,trio]`と
- *    `[place,win,wide,trio,quinella]`の2条件で`buildMixedCandidates`+`allocateGeneralBets`
- *    の1レースあたりの所要時間(平均・ウォームアップ除く)・券種別候補数・点数・
- *    券種別構成比を並べて出す。**Issue #117で`resolveMixedBetTypes`(`includeQuinellaInAllocation`
- *    設定)が実際に接続された**が、本節は依然として`buildMixedCandidates`の`options.betTypes`へ
- *    明示的に条件を渡す実測であり、設定のON/OFFを経由しない(#1の`greedySteps`感度表が使う
- *    `central-on.json`フィクスチャには`quinellaCombo`が無いため、そちらは本節と無関係に
- *    馬連の候補が常に0件になる。両者を混同しないこと)。
+ * 3. 馬連(quinella)・馬単(exacta)を候補ビルダーに追加したときの性能・構成の実測
+ *    (Issue #116 AC-7・Issue #117で追記・Issue #122 AC-7で馬単の構成を追加)。
+ *    `fixtures/odds_quinella_202603020211.json`・`fixtures/odds_exacta_202603020211.json`
+ *    (いずれも同レース・同16頭)を`parseComboOdds`経由でパースしてそれぞれ`quinellaCombo`・
+ *    `exactaCombo`を作り、`[place,win,wide,trio]`(馬連・馬単なし)・
+ *    `[place,win,wide,trio,quinella]`(馬連あり)・`[place,win,wide,trio,quinella,exacta]`
+ *    (馬単も追加)の3条件で`buildMixedCandidates`+`allocateGeneralBets`の1レースあたりの
+ *    所要時間(平均・ウォームアップ除く)・券種別候補数・点数・券種別構成比を並べて出す。
+ *    **Issue #117で`resolveMixedBetTypes`(`includeQuinellaInAllocation`設定)が実際に
+ *    接続された**が、本節は依然として`buildMixedCandidates`の`options.betTypes`へ明示的に
+ *    条件を渡す実測であり、設定のON/OFFを経由しない(#1の`greedySteps`感度表が使う
+ *    `central-on.json`フィクスチャには`quinellaCombo`/`exactaCombo`が無いため、そちらは
+ *    本節と無関係に馬連・馬単の候補が常に0件になる。両者を混同しないこと)。
+ *    **馬単(exacta)は`includeExactaInAllocation`という設定自体がまだ存在せず(#123未着手)、
+ *    resolveMixedBetTypesもexactaを一切生成しないため、本節の3条件目もあくまで
+ *    `options.betTypes`への直接指定による性能実測であり、productionの配分結果を模した
+ *    ものではない**(既存2条件と同じ位置づけ)。
  */
 
 import { readFileSync } from "node:fs";
@@ -111,6 +118,31 @@ function loadQuinellaCombo(): Record<string, number | null> {
   const parsed = parseComboOdds(json, "quinella");
   if (parsed.state !== "available") {
     throw new Error(`馬連フィクスチャが available ではありません(state=${parsed.state})`);
+  }
+  return Object.fromEntries(toComboOddsScalarMap(parsed.odds));
+}
+
+/**
+ * 馬単フィクスチャ(Issue #122 AC-7)。`central-on.json`と同じレース(202603020211・16頭)
+ * のため、既存の`greedySteps`感度・所要時間計測と同じ出走馬番の宇宙で比較できる。
+ */
+const EXACTA_FIXTURE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "odds_exacta_202603020211.json",
+);
+
+/**
+ * 馬単フィクスチャをパースし`exactaCombo`(Record形)を作る。`loadQuinellaCombo`と同じ
+ * 変換経路(`parseComboOdds`→`toComboOddsScalarMap`→`Object.fromEntries`)をそのまま使う
+ * (規則を再実装しない)。
+ */
+function loadExactaCombo(): Record<string, number | null> {
+  const json = readFileSync(EXACTA_FIXTURE_PATH, "utf-8");
+  const parsed = parseComboOdds(json, "exacta");
+  if (parsed.state !== "available") {
+    throw new Error(`馬単フィクスチャが available ではありません(state=${parsed.state})`);
   }
   return Object.fromEntries(toComboOddsScalarMap(parsed.odds));
 }
@@ -258,13 +290,14 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
 }
 
 /**
- * 券種別にstakeを集計する(`summarizeByBetType`の馬連版。Issue #116 AC-7)。
- * 既存の`summarizeByBetType`(win/place/wide/trioの4券種)は変更せず、この節専用に
- * `quinella`を加えた別関数として持つ(既存節の出力を変えないため)。
+ * 券種別にstakeを集計する(`summarizeByBetType`の馬連・馬単版。Issue #116 AC-7・
+ * Issue #122 AC-7で`exacta`を追加)。既存の`summarizeByBetType`(win/place/wide/trioの
+ * 4券種)は変更せず、この節専用に`quinella`・`exacta`を加えた別関数として持つ
+ * (既存節の出力を変えないため)。
  */
 function summarizeByBetTypeWithQuinella(
   allocations: readonly { readonly betType: AllocationBetType; readonly stake: number }[],
-): { win: number; place: number; wide: number; trio: number; quinella: number } {
+): { win: number; place: number; wide: number; trio: number; quinella: number; exacta: number } {
   const sumOf = (betType: AllocationBetType): number =>
     allocations.filter((a) => a.betType === betType).reduce((s, a) => s + a.stake, 0);
   return {
@@ -273,6 +306,7 @@ function summarizeByBetTypeWithQuinella(
     wide: sumOf("wide"),
     trio: sumOf("trio"),
     quinella: sumOf("quinella"),
+    exacta: sumOf("exacta"),
   };
 }
 
@@ -286,17 +320,21 @@ interface QuinellaComparisonSample {
 }
 
 /**
- * 馬連(quinella)を候補ビルダーに追加したときの性能・構成を実測する(Issue #116 AC-7)。
+ * 馬連(quinella)・馬単(exacta)を候補ビルダーに追加したときの性能・構成を実測する
+ * (Issue #116 AC-7・Issue #122 AC-7で3条件目〈馬単〉を追加)。
  *
- * `betTypes=[place,win,wide,trio]`(馬連なし。**Issue #117で`ALL_MIXED_CANDIDATE_BET_TYPES`に
- * 馬連が加わったため、この配列はもう既定値と同じではない**〈既定値は
- * `[place,win,wide,quinella,trio]`〉。ここでは意図的に馬連を除いた比較用の配列として
- * 明示的に指定する)と`[place,win,wide,trio,quinella]`(馬連あり)の2条件を比較する。
+ * `betTypes=[place,win,wide,trio]`(馬連・馬単なし。**Issue #117で
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`に馬連が加わったため、この配列はもう既定値と同じではない**
+ * 〈既定値は`[place,win,wide,quinella,trio]`〉。ここでは意図的に馬連・馬単を除いた比較用の
+ * 配列として明示的に指定する)・`[place,win,wide,trio,quinella]`(馬連あり)・
+ * `[place,win,wide,trio,quinella,exacta]`(馬単も追加。Issue #122 AC-7)の3条件を比較する。
  */
 async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise<void> {
   const baseRace = toMixedCandidateInput(result);
   const quinellaCombo = loadQuinellaCombo();
   const raceWithQuinella: MixedCandidateBuildInput = { ...baseRace, quinellaCombo };
+  const exactaCombo = loadExactaCombo();
+  const raceWithExacta: MixedCandidateBuildInput = { ...raceWithQuinella, exactaCombo };
   const horses: JointModelHorse[] = result.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
 
   const config: GeneralBetAllocationConfig = {
@@ -319,10 +357,15 @@ async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise
       race: raceWithQuinella,
       betTypes: ["place", "win", "wide", "trio", "quinella"],
     },
+    {
+      label: "馬単も追加(place/win/wide/trio/quinella/exacta)",
+      race: raceWithExacta,
+      betTypes: ["place", "win", "wide", "trio", "quinella", "exacta"],
+    },
   ];
 
   console.log("");
-  console.log("=== 馬連(quinella)追加時の性能・構成比較(中央16頭・実オッズ。Issue #116 AC-7) ===");
+  console.log("=== 馬連(quinella)・馬単(exacta)追加時の性能・構成比較(中央16頭・実オッズ。Issue #116 AC-7・Issue #122 AC-7) ===");
 
   for (const scenario of scenarios) {
     const measure = (): QuinellaComparisonSample => {
@@ -367,7 +410,7 @@ async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise
     console.log(
       `  配分: 総額${total.toLocaleString()}円 / ${last.betCount}点 / ` +
         `単勝${pct(last.byType.win)} / 複勝${pct(last.byType.place)} / ワイド${pct(last.byType.wide)} / ` +
-        `三連複${pct(last.byType.trio)} / 馬連${pct(last.byType.quinella)}`,
+        `三連複${pct(last.byType.trio)} / 馬連${pct(last.byType.quinella)} / 馬単${pct(last.byType.exacta)}`,
     );
   }
 }

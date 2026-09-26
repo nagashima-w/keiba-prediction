@@ -173,13 +173,14 @@ export interface ComboOddsFetchOutcome {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬連)取得結果のペア。`options.includeComboOdds`がtrueのときのみ
- * 設定される(馬連はIssue #116・#24-D3b-1で追加)。
+ * 組合せオッズ(ワイド・3連複・馬連・馬単)取得結果のペア。`options.includeComboOdds`がtrueの
+ * ときのみ設定される(馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2で追加)。
  */
 export interface ComboOddsScrapeOutcome {
   readonly wide?: ComboOddsFetchOutcome;
   readonly trio?: ComboOddsFetchOutcome;
   readonly quinella?: ComboOddsFetchOutcome;
+  readonly exacta?: ComboOddsFetchOutcome;
 }
 
 /** 1頭分の統合データ(出馬表情報+全戦績+調教評価)。 */
@@ -459,11 +460,11 @@ export async function scrapeRace(
   // (5)自体が実行されないため、この行の位置に関わらず既存の挙動と完全に一致する)。
   const oddsFetchedAt = now().toISOString();
 
-  // (5) 組合せオッズ(ワイド・3連複・馬連。オプトイン。既定OFF。機能D-2b-B・Issue #33第4段。
-  // 馬連はIssue #116・#24-D3b-1で追加): options.includeComboOddsがtrueの場合のみ実行する。
-  // 既定呼び出しでは本ステップは一切実行されず、発行URL列・リクエスト数は現行と完全に一致する
-  // (AC4)。馬連はワイド・3連複の**後**に取得する(既存URL列の先頭部分を変えないため。
-  // Issue #116 AC-1)。
+  // (5) 組合せオッズ(ワイド・3連複・馬連・馬単。オプトイン。既定OFF。機能D-2b-B・Issue #33
+  // 第4段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2で追加):
+  // options.includeComboOddsがtrueの場合のみ実行する。既定呼び出しでは本ステップは一切実行
+  // されず、発行URL列・リクエスト数は現行と完全に一致する(AC4)。馬連・馬単はワイド・3連複の
+  // **後**に取得する(既存URL列の先頭部分を変えないため。Issue #116 AC-1・Issue #122 AC-1)。
   //
   // 防御カバレッジ表への追記(AC8。fetch-combo-odds.tsの表に対する追加出口):
   // | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
@@ -473,6 +474,7 @@ export async function scrapeRace(
   let wideCombo: Record<string, number | null> | undefined;
   let trioCombo: Record<string, number | null> | undefined;
   let quinellaCombo: Record<string, number | null> | undefined;
+  let exactaCombo: Record<string, number | null> | undefined;
   let comboOdds: ComboOddsScrapeOutcome | undefined;
   if (options.includeComboOdds) {
     const startingUmabans = shutuba.horses.map((h) => h.umaban);
@@ -502,10 +504,24 @@ export async function scrapeRace(
       oddsFetchOptions,
       warnings,
     );
+    const exactaOutcome = await fetchComboBetTypeOdds(
+      "exacta",
+      raceId,
+      startingUmabans,
+      deps.fetcher,
+      oddsFetchOptions,
+      warnings,
+    );
     wideCombo = wideOutcome?.record;
     trioCombo = trioOutcome?.record;
     quinellaCombo = quinellaOutcome?.record;
-    comboOdds = { wide: wideOutcome?.outcome, trio: trioOutcome?.outcome, quinella: quinellaOutcome?.outcome };
+    exactaCombo = exactaOutcome?.record;
+    comboOdds = {
+      wide: wideOutcome?.outcome,
+      trio: trioOutcome?.outcome,
+      quinella: quinellaOutcome?.outcome,
+      exacta: exactaOutcome?.outcome,
+    };
   }
 
   const odds: OddsSnapshot = {
@@ -513,6 +529,7 @@ export async function scrapeRace(
     ...(wideCombo !== undefined ? { wideCombo } : {}),
     ...(trioCombo !== undefined ? { trioCombo } : {}),
     ...(quinellaCombo !== undefined ? { quinellaCombo } : {}),
+    ...(exactaCombo !== undefined ? { exactaCombo } : {}),
   };
 
   const horses: RaceHorseData[] = shutuba.horses.map((shutubaHorse) => ({

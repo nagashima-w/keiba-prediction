@@ -170,6 +170,34 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("馬連");
       expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("馬連");
     });
+
+    /**
+     * Issue #122(#24-E2・オーケストレーター指定2026-09-25): #116で「取得しているのに
+     * チェックボックスのラベルが古いまま1リリース残った」という同じ誤りを、馬単でも
+     * 繰り返さない。#122の時点でscrape-race.tsは馬単オッズも取得し始める
+     * (includeComboOdds:trueのとき、ワイド・3連複・馬連の後に馬単を1リクエスト追加で
+     * 取得する)ため、チェックボックス・補助文とも「何を取得するか」「その費用」の事実を
+     * 更新する。ただし「配分に使うかどうかは下記の設定に従います」という列挙(ワイド・
+     * 馬連・三連複の3項目)には馬単を加えない(`includeExactaInAllocation`という設定が
+     * まだ存在せず、実際には配分に使っていないため、列挙に足すと事実と食い違う。#123で
+     * その設定が新設された時点で初めて4項目に直す)。
+     */
+    it("チェックボックス・補助文がどちらも馬単(exacta)の取得に言及すること(Issue #122。#122から馬単も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("馬単");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("馬単");
+    });
+
+    it("補助文の費用説明が馬単も1レースあたり1リクエスト追加であることに言及すること(Issue #122)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/馬単[^。]*1レースあたり[^。]*1リクエスト追加/);
+    });
+
+    it("補助文の『配分に使うかどうかは下記の設定に従う』という列挙は3項目(ワイド・馬連・三連複)のままで、馬単を配分に使う設定への言及を含まないこと(Issue #122: includeExactaInAllocationはまだ無いため列挙に足すと嘘になる。#123で追加予定)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("馬単を配分に使う");
+    });
+
+    it("補助文が『馬単は現在は取得のみで配分には使わない』旨を明示すること(Issue #122: 取得と配分利用の状態を混同させないため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/馬単[^。]*配分には使いません/);
+    });
   });
 
   describe("INCLUDE_COMBO_ODDS_BATCH_NOTE(一括分析画面の固定注記。機能D-2c第3段・Issue #28)", () => {
@@ -186,6 +214,21 @@ describe("設定フォームの入力検証(純関数)", () => {
 
     it("馬連(quinella)の配分利用にも言及すること(Issue #117)", () => {
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("馬連");
+    });
+
+    // Issue #122(#24-E2): INCLUDE_COMBO_ODDS_LABELSと同じ理由(#116の同種の誤りの再発防止)で、
+    // 一括分析画面の注記も「何を取得しているか」の事実を更新する。配分利用の列挙(3項目)は
+    // 変えない(INCLUDE_COMBO_ODDS_LABELS.helpと同じ判断)。
+    it("馬単(exacta)の取得にも言及すること(Issue #122。取得の事実を更新)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("馬単");
+    });
+
+    it("馬単を配分に使う設定への言及を含まないこと(Issue #122: includeExactaInAllocationはまだ無い)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("馬単を配分に使う");
+    });
+
+    it("『馬単は現在は取得のみで配分には使わない』旨を明示すること(Issue #122)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toMatch(/馬単[^。]*配分には使いません/);
     });
   });
 
@@ -208,9 +251,10 @@ describe("設定フォームの入力検証(純関数)", () => {
         // 未実装と誤認させる(第3段のINCLUDE_COMBO_ODDS_LABELS.helpと対になる必須記述)。
         // Issue #117: INCLUDE_COMBO_ODDS_LABELS.checkboxが「ワイド・馬連・三連複」に変わったため、
         // ここでの引用文言もそれに合わせる(古い引用のままだと実際のチェックボックス名と
-        // 一致しない参照になる)。
+        // 一致しない参照になる)。Issue #122でさらに「ワイド・馬連・馬単・三連複」に変わった
+        // ため、引用文言も再度合わせる(同じ理由の繰り返し)。
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(
-          "ワイド・馬連・三連複のオッズも取得する",
+          "ワイド・馬連・馬単・三連複のオッズも取得する",
         );
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("OFFの間は効果がありません");
       },

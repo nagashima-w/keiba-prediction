@@ -104,10 +104,16 @@ export interface RaceSnapshot {
    */
   readonly quinellaCombo?: Record<string, number | null>;
   /**
-   * 組合せオッズの取得診断値(機能D-2c第3段。馬連はIssue #116・#24-D3b-1で追加)。
-   * `wideCombo`/`trioCombo`/`quinellaCombo`が空({})になった原因(発売なし/未発売なのか、
-   * 取得失敗なのか)を判別する唯一の手段(`comboOdds.<betType>.state`)。
-   * core `RaceDataMeta.comboOdds`のプレーン写し。
+   * 馬単オッズ(Issue #122・#24-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは順序付き(1着・2着の順序が意味を持つ)。配分・画面への配線はまだ無い
+   * (このスナップショットに保持するだけ。#123のスコープ)。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズの取得診断値(機能D-2c第3段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・
+   * #24-E2で追加)。`wideCombo`/`trioCombo`/`quinellaCombo`/`exactaCombo`が空({})になった
+   * 原因(発売なし/未発売なのか、取得失敗なのか)を判別する唯一の手段
+   * (`comboOdds.<betType>.state`)。core `RaceDataMeta.comboOdds`のプレーン写し。
    */
   readonly comboOdds?: ComboOddsScrapeOutcome;
 }
@@ -149,15 +155,17 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         oikiriRank: h.oikiri?.rank ?? null,
       };
     }),
-    // 組合せオッズ(ワイド・三連複・馬連、機能D-2c第3段・Issue #28。馬連はIssue #116・
-    // #24-D3b-1で追加): race.odds.wideCombo/trioCombo/quinellaCombo・race.meta.comboOdds は
-    // いずれも scrapeRace の options.includeComboOdds が true のときだけ設定される
-    // optional フィールド。ここでは「写すだけ」で新たな解釈・変換は行わない
-    // (analysis-pipeline.ts の AnalysisResult 組み立て〈同じ写し方〉と同じ流儀。条件付きspreadで、
-    // 未設定〈undefined〉のときはキー自体を持たせない)。
+    // 組合せオッズ(ワイド・三連複・馬連・馬単、機能D-2c第3段・Issue #28。馬連はIssue #116・
+    // #24-D3b-1、馬単はIssue #122・#24-E2で追加): race.odds.wideCombo/trioCombo/
+    // quinellaCombo/exactaCombo・race.meta.comboOdds はいずれも scrapeRace の
+    // options.includeComboOdds が true のときだけ設定される optional フィールド。
+    // ここでは「写すだけ」で新たな解釈・変換は行わない(analysis-pipeline.ts の
+    // AnalysisResult 組み立て〈同じ写し方〉と同じ流儀。条件付きspreadで、未設定
+    // 〈undefined〉のときはキー自体を持たせない)。
     ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
     ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
     ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
+    ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
     ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }

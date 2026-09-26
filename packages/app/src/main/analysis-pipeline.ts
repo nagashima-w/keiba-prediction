@@ -677,17 +677,25 @@ export async function runAnalysis(
     const evThreshold = (deps.evConfig ?? DEFAULT_EV_CONFIG).threshold;
     const mixedSettings = toMixedAllocationSettings(deps.allocationSettings, evThreshold);
     // MixedCandidateBuildInput は条件付きspreadで組む(scripts/bench-mixed-allocation.tsの
-    // toMixedCandidateInputと同じ形。戻り値末尾のwideCombo/trioCombo/quinellaCombo/comboOddsの
-    // 条件付きspreadと同一データソースなので、その部分は結果を待たずここで組み立てられる)。
-    // quinellaComboはIssue #116・#24-D3b-1で追加。Issue #117(#24-D3b-2)で`resolveMixedBetTypes`が
-    // `includeQuinellaInAllocation`設定を実際に参照するようになったため、このフィールドは
-    // production の配分結果に実際に影響する(`analysis-pipeline-allocation.test.ts`のAC-10参照)。
+    // toMixedCandidateInputと同じ形。戻り値末尾のwideCombo/trioCombo/quinellaCombo/exactaCombo/
+    // comboOddsの条件付きspreadと同一データソースなので、その部分は結果を待たずここで
+    // 組み立てられる)。quinellaComboはIssue #116・#24-D3b-1で追加。Issue #117(#24-D3b-2)で
+    // `resolveMixedBetTypes`が`includeQuinellaInAllocation`設定を実際に参照するようになった
+    // ため、このフィールドは production の配分結果に実際に影響する
+    // (`analysis-pipeline-allocation.test.ts`のAC-10参照)。
+    // **exactaComboはIssue #122・#24-E2で追加した。** `includeExactaInAllocation`設定・
+    // `resolveMixedBetTypes`への接続は#123のスコープであり、本段階ではproductionの配分結果には
+    // 一切影響しない(`ALL_MIXED_CANDIDATE_BET_TYPES`が`"exacta"`を含まないため)。それでも
+    // ここで先にspreadしておく理由は`quinellaCombo`と同じ(#116→#117の間と同型の順序): 取得
+    // (#122)と配分接続(#123)を分離し、後続タスクが`raceForAllocation`側の配線を待たずに
+    // 進められるようにするため。
     const raceForAllocation: MixedCandidateBuildInput = {
       oddsStatus,
       rows,
       ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
       ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
       ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
+      ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
       ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
     };
     try {
@@ -781,17 +789,18 @@ export async function runAnalysis(
     rows,
     warnings: race.meta.warnings.map((w) => w.message),
     analyzedAt,
-    // 組合せオッズ(ワイド・3連複・馬連、機能D-2c第1段・Issue #28。馬連はIssue #116・
-    // #24-D3b-1で追加): race.odds.wideCombo/trioCombo/quinellaCombo・race.meta.comboOdds は
-    // いずれも scrapeRace の options.includeComboOdds が true のときだけ設定される
-    // optional フィールド(#33)。ここでは「写し取るだけ」で新たな解釈・変換は行わない。
-    // 条件付きspreadで、未設定(undefined)のときはキー自体を持たせない
-    // (`wideCombo: undefined` という明示的な代入はしない。`"wideCombo" in result` が
-    // false のままであることを型・値の両方で守るため。scrape-race.ts の
-    // `...(wideCombo !== undefined ? { wideCombo } : {})` と同じ流儀)。
+    // 組合せオッズ(ワイド・3連複・馬連・馬単、機能D-2c第1段・Issue #28。馬連はIssue #116・
+    // #24-D3b-1、馬単はIssue #122・#24-E2で追加): race.odds.wideCombo/trioCombo/
+    // quinellaCombo/exactaCombo・race.meta.comboOdds はいずれも scrapeRace の
+    // options.includeComboOdds が true のときだけ設定される optional フィールド(#33)。
+    // ここでは「写し取るだけ」で新たな解釈・変換は行わない。条件付きspreadで、未設定
+    // (undefined)のときはキー自体を持たせない(`wideCombo: undefined` という明示的な代入は
+    // しない。`"wideCombo" in result` が false のままであることを型・値の両方で守るため。
+    // scrape-race.ts の `...(wideCombo !== undefined ? { wideCombo } : {})` と同じ流儀)。
     ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
     ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
     ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
+    ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
     ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }

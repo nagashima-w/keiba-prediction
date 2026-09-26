@@ -92,7 +92,7 @@ function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: num
 
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身自体はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio" | "quinella",
+  betType: "wide" | "trio" | "quinella" | "exacta",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -113,6 +113,29 @@ function comboOddsOutcome(
 /** n頭ぶんの馬番配列(1..n)。 */
 function umabansOf(n: number): number[] {
   return Array.from({ length: n }, (_, i) => i + 1);
+}
+
+/**
+ * umabansの順序付き全ペア(a≠b、順不同ではなく並びを区別する。P(n,2)通り)を列挙し、
+ * 一律のオッズ値を割り当てたRecordを作る(`fullOddsRecord`の馬単版。テスト専用の独立実装
+ * であり本体の`orderedPairsOfUmabans`〈combo-bet-allocation.ts〉とは無関係)。
+ * キー形式は`buildOrderedComboOddsKey`と同じ(2桁ゼロ埋め・ソートしない連結)だが、
+ * `@keiba/core/ev/combo-bet-allocation`はこの関数を再exportしていないため、本ファイルの
+ * `combinations`と同じ流儀でキー生成自体もテスト内に持つ。
+ */
+function orderedKey(a: number, b: number): string {
+  return `${String(a).padStart(2, "0")}${String(b).padStart(2, "0")}`;
+}
+function fullOrderedOddsRecord(umabans: readonly number[], odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const a of umabans) {
+    for (const b of umabans) {
+      if (a !== b) {
+        record[orderedKey(a, b)] = odds;
+      }
+    }
+  }
+  return record;
 }
 
 /** n頭立て・全馬EVプラス(複勝候補になる)行配列を作る。 */
@@ -1241,5 +1264,134 @@ describe("馬連(quinella)候補(#116・#24-D3b-1)", () => {
       expect(c.odds).toBe(999);
       expect(c.odds).not.toBe(5);
     }
+  });
+});
+
+/**
+ * 馬単(exacta)候補(Issue #122・#24-E2)。core自体の的中確率・候補ビルダー・配分の門番は
+ * Issue #120・#24-E1で先行済み(`buildExactaCandidates`)。本ブロックは`mixed-candidates.ts`の
+ * `buildExactaCandidatesForBetType`を通した配線を検証する(`buildQuinellaCandidates`と
+ * 同型の骨格。ただし馬単は`ALL_MIXED_CANDIDATE_BET_TYPES`に含めない〈#123まで〉ため、
+ * 「既定でも対象になる」quinellaの1本目のテストとは対称的に「既定では対象外」を確認する)。
+ *
+ * オッズ値の実測(4頭・adjustedProb=0.5均等・topFinishCount=3。`buildExactaCandidates`を
+ * 直接呼んで確認済み): 各順序付きペアの的中確率は1/12(P(4,2)=12通りに均等分配される)。
+ * odds=999 → ev=83.25(EVプラス)、odds=5 → ev=0.4167(EV非プラス、閾値1.0未満)。
+ */
+describe("馬単(exacta)候補(#122・#24-E2)", () => {
+  it("既定(betTypes省略)では馬単は対象外(kind='not-requested')であること(#123で配分接続するまでALL_MIXED_CANDIDATE_BET_TYPESに含まれないため)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, exactaCombo: fullOrderedOddsRecord(umabans, 999) }),
+    );
+    expect(result.diagnostics.exacta).toEqual({ kind: "not-requested" });
+    expect(result.candidates.filter((c) => c.betType === "exacta")).toHaveLength(0);
+  });
+
+  it("betTypesに明示的にexactaを含めれば候補が構築されること(kind='built'。P(4,2)=12件)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, exactaCombo: fullOrderedOddsRecord(umabans, 999) }),
+      { betTypes: ["exacta"] },
+    );
+    expect(result.diagnostics.exacta.kind).toBe("built");
+    const exactaCandidates = result.candidates.filter((c) => c.betType === "exacta");
+    expect(exactaCandidates).toHaveLength(12); // P(4,2)
+    expect(exactaCandidates.every((c) => c.odds === 999)).toBe(true);
+  });
+
+  it("yosoガード: oddsStatus='yoso'のときexactaComboが供給されていてもkind='yoso'で候補0件", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        oddsStatus: "yoso",
+        exactaCombo: fullOrderedOddsRecord(umabans, 999),
+      }),
+      { betTypes: ["exacta"] },
+    );
+    expect(result.diagnostics.exacta).toEqual({ kind: "yoso" });
+    expect(result.candidates.filter((c) => c.betType === "exacta")).toHaveLength(0);
+  });
+
+  it("fieldPresence・comboOddsStateがwide/trio/quinellaと同じ形で反映されること(exactaComboキー不在=absent・comboOdds未設定=unknown)", () => {
+    const rows = allCandidateRows(4);
+    const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["exacta"] });
+    if (result.diagnostics.exacta.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.exacta.fieldPresence).toBe("absent");
+    expect(result.diagnostics.exacta.comboOddsState).toBe("unknown");
+    expect(result.candidates.filter((c) => c.betType === "exacta")).toHaveLength(0);
+  });
+
+  it("comboOdds.exacta.stateが反映されること(wide/trio/quinellaと独立)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        exactaCombo: fullOrderedOddsRecord(umabans, 999),
+        comboOdds: { exacta: comboOddsOutcome("exacta", "available") },
+      }),
+      { betTypes: ["exacta"] },
+    );
+    if (result.diagnostics.exacta.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.exacta.fieldPresence).toBe("present");
+    expect(result.diagnostics.exacta.comboOddsState).toBe("available");
+  });
+
+  /**
+   * 殺すべき変異(Issue #122 AC-5・ブリーフ明記): 「馬単の候補にquinellaCombo(または
+   * wideCombo)のオッズを使う」。quinellaComboとexactaComboに同じキー(組)で異なる値を
+   * 与え、馬単候補のoddsがexactaCombo側の値(999)であって、quinellaCombo側の値(5)では
+   * ないことを固定する。値も分けて設計(999→ev=83.25でEVプラス、5→ev=0.4167でEV非プラス
+   * かつ閾値1.0を下回る。上記モジュールJSDocで実測済み)ため、混同する変異は
+   * 「候補が0件になる」「oddsの値が違う」の両方向で検知できる(core `buildComboCandidates`
+   * はbetType="exacta"を専用にthrowする安全装置を持つため〈#120〉、この変異は
+   * `buildComboCandidatesForBetType`を誤ってexactaへ流用する形では起こり得ず、
+   * `race.quinellaCombo`/`race.wideCombo`を読む形でのみ起こりうる)。
+   */
+  it("馬単候補のオッズはexactaComboの値であり、quinellaComboの値と混同されないこと(殺すべき変異の直接検知)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        quinellaCombo: fullOddsRecord(umabans, 2, 5), // ev非プラスになる値(馬連の組合せキー)
+        exactaCombo: fullOrderedOddsRecord(umabans, 999), // ev=83.25(EVプラス)になる値
+      }),
+      { betTypes: ["exacta"] }, // quinellaは対象外にし、exacta側の値だけを見る。
+    );
+    expect(result.diagnostics.exacta.kind).toBe("built");
+    const exactaCandidates = result.candidates.filter((c) => c.betType === "exacta");
+    expect(exactaCandidates.length).toBeGreaterThan(0); // 空振り防止(quinellaの値〈ev非プラス〉が混入すると0件になる)。
+    expect(exactaCandidates).toHaveLength(12); // P(4,2)
+    for (const c of exactaCandidates) {
+      expect(c.odds).toBe(999);
+      expect(c.odds).not.toBe(5);
+    }
+  });
+
+  it("馬単候補のumabansは順序付きのまま(昇順に潰されない)であること(馬単固有の回帰観点)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, exactaCombo: fullOrderedOddsRecord(umabans, 999) }),
+      { betTypes: ["exacta"] },
+    );
+    const exactaCandidates = result.candidates.filter((c) => c.betType === "exacta");
+    // 前提固定: [2,1](降順)が候補として存在すること。
+    const descending = exactaCandidates.find((c) => c.umabans[0] === 2 && c.umabans[1] === 1);
+    expect(descending).toBeDefined();
+    const ascending = exactaCandidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2);
+    expect(ascending).toBeDefined();
+    // 両方が別々の候補として存在する(昇順ソートで片方に潰されていない)。
+    expect(exactaCandidates.length).toBe(12);
   });
 });

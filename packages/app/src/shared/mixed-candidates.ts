@@ -93,6 +93,7 @@
 
 import {
   buildComboCandidates,
+  buildExactaCandidates,
   buildQuinellaCandidates,
   buildWinCandidates,
   DEFAULT_EV_CONFIG,
@@ -195,6 +196,12 @@ export interface MixedCandidateBuildInput {
   readonly trioCombo?: Record<string, number | null>;
   /** 馬連オッズ(Issue #116・#24-D3b-1)。`options.betTypes`に`"quinella"`があるときのみ参照される。 */
   readonly quinellaCombo?: Record<string, number | null>;
+  /**
+   * 馬単オッズ(Issue #122・#24-E2)。`options.betTypes`に`"exacta"`があるときのみ参照される。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"exacta"`を含まないため(#123まで)、既定呼び出しでは
+   * 参照されない(`options.betTypes`へ明示的に`"exacta"`を渡した場合のみ到達する)。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
 }
 
@@ -301,6 +308,14 @@ export interface MixedCandidateDiagnostics {
    * (`options.betTypes`に明示的に`"quinella"`を含めない場合のみ`kind:"not-requested"`になる)。
    */
   readonly quinella: ComboCandidateDiagnosticsView;
+  /**
+   * 馬単の候補ビルド診断値(Issue #122・#24-E2)。`wide`/`trio`/`quinella`と同じ
+   * `ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"exacta"`を含まない(#123まで)ため、
+   * `options.betTypes`省略時の既定呼び出しでは常に`kind:"not-requested"`になる
+   * (`options.betTypes`に明示的に`"exacta"`を含めたときのみ`"built"`/`"yoso"`になりうる)。
+   */
+  readonly exacta: ComboCandidateDiagnosticsView;
 }
 
 /** `buildMixedCandidates` の結果。 */
@@ -468,6 +483,42 @@ function buildQuinellaCandidatesForBetType(
 }
 
 /**
+ * 馬単候補を構築する(Issue #122・#24-E2)。`buildQuinellaCandidatesForBetType`と同型の骨格
+ * (別関数にする理由も同じ: core `buildComboCandidates`は`betType==="exacta"`を専用にthrowする
+ * 安全装置を持つため〈#120〉、馬単は`buildExactaCandidates`〈core。順序付きoutcome空間から
+ * 着順どおりの的中確率を求める〉へ直接委譲する)。反証B相当: 頭数門前払いはしない
+ * (`buildExactaCandidates`自身の判定不能〈固定馬2頭以上等〉に委ねる)。
+ *
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"exacta"`を含まない(#123まで)ため、`requested`は
+ * `options.betTypes`に明示的に`"exacta"`を渡した場合のみtrueになる(既定呼び出しでは
+ * 常に`false`=`kind:"not-requested"`)。
+ */
+function buildExactaCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード: 発売前は組合せオッズが存在しない(wide/trio/quinellaと同じ理由。誤ラベル禁止)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "yoso" } };
+  }
+  const record = race.exactaCombo;
+  const fieldPresence = resolveFieldPresence(record);
+  const comboOddsState = race.comboOdds?.exacta?.state ?? "unknown";
+  const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
+  // D-4: evConfigを渡し、複勝・ワイド・3連複・馬連と同じ閾値・同じ厳密不等号で判定させる。
+  const result = buildExactaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
+  };
+}
+
+/**
  * 券種横断(複勝・ワイド・3連複。馬連は候補ビルダーとして実装済みだが既定の対象には含まれない
  * 〈`ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照〉)の買い目候補を構築する。
  *
@@ -490,6 +541,7 @@ export function buildMixedCandidates(
   const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses, evConfig);
   const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig);
   const quinella = buildQuinellaCandidatesForBetType(betTypes.includes("quinella"), race, horses, evConfig);
+  const exacta = buildExactaCandidatesForBetType(betTypes.includes("exacta"), race, horses, evConfig);
 
   return {
     candidates: [
@@ -498,6 +550,7 @@ export function buildMixedCandidates(
       ...wide.candidates,
       ...trio.candidates,
       ...quinella.candidates,
+      ...exacta.candidates,
     ],
     topFinishCount: COMBO_TOP_FINISH_COUNT,
     diagnostics: {
@@ -506,6 +559,7 @@ export function buildMixedCandidates(
       wide: wide.diagnostics,
       trio: trio.diagnostics,
       quinella: quinella.diagnostics,
+      exacta: exacta.diagnostics,
     },
   };
 }

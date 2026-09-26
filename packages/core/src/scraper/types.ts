@@ -503,6 +503,16 @@ export interface OddsSnapshot {
    * `wideCombo`と同じ)。
    */
   readonly quinellaCombo?: Record<string, number | null>;
+  /**
+   * 馬単オッズ(馬番の組の正規化キー〈`buildOrderedComboOddsKey`形式。例"0102"。1着・2着の
+   * **順序が意味を持つ**。"0102"〈1着1番・2着2番〉と"0201"〈1着2番・2着1番〉は別の値を持つ。
+   * `wideCombo`/`quinellaCombo`の昇順ソート済みキーとは異なる〉→オッズ。単一値。`oddsMax`
+   * という概念を持たない券種のため`trioCombo`と同じ扱い。Issue #122・#24-E2で`scrapeRace`に
+   * 配線した(core自体の的中確率・候補ビルダー・配分の門番はIssue #120・#24-E1、順序付き
+   * キー表現・`ComboBetType`への追加はIssue #106・#24-Bで先行済み)。optional・`Record`である
+   * 理由は`wideCombo`と同じ。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
 }
 
 /**
