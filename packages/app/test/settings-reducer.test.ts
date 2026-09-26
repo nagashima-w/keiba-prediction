@@ -247,6 +247,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     s = settingsReducer(s, { type: "ワイド配分対象切替", value: false });
     s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
     s = settingsReducer(s, { type: "馬連配分対象切替", value: false });
+    s = settingsReducer(s, { type: "馬単配分対象切替", value: false });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -263,6 +264,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.includeWideInAllocation).toBe(false);
     expect(s.includeTrioInAllocation).toBe(false);
     expect(s.includeQuinellaInAllocation).toBe(false);
+    expect(s.includeExactaInAllocation).toBe(false);
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -479,7 +481,15 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(buildUpdate(s).includeQuinellaInAllocation).toBe(true);
   });
 
-  it("includeExactaInAllocation(#24-E3a)を含めること(読込値どおり、OFF/ON両方向。対応するUIトグルが無いため切替アクションではなく読込値の往復で確認する)", () => {
+  // 【Issue #125(#24-E3b)で改訂】旧版(#124時点)は対応するUIトグルが無かったため、
+  // 切替アクションではなく読込値の往復でincludeExactaInAllocationの配管を確認していた。
+  // 何を保証していたか(新旧対応表):
+  //   旧: buildUpdate(loadedState(fakeMasked({includeExactaInAllocation})))が読込値どおり
+  //       (OFF/ON両方向)であること → 「馬単配分対象切替」アクションを追加した現在も
+  //       読込→buildUpdateの往復自体は変わらず成立するはず(下のテストで維持)
+  //   新: 追加で「馬単配分対象切替」アクション経由でも同じ値がbuildUpdateへ反映されること
+  //       (馬連の「馬連配分対象切替(Issue #117)を含めること」と同型のテストを追加)
+  it("includeExactaInAllocation(#24-E3a)を含めること(読込値どおり、OFF/ON両方向)", () => {
     expect(
       buildUpdate(loadedState(fakeMasked({ includeExactaInAllocation: false })))
         .includeExactaInAllocation,
@@ -488,6 +498,15 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
       buildUpdate(loadedState(fakeMasked({ includeExactaInAllocation: true })))
         .includeExactaInAllocation,
     ).toBe(true);
+  });
+
+  it("馬単配分対象切替(Issue #125)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "馬単配分対象切替", value: false });
+    expect(buildUpdate(s).includeExactaInAllocation).toBe(false);
+
+    s = settingsReducer(s, { type: "馬単配分対象切替", value: true });
+    expect(buildUpdate(s).includeExactaInAllocation).toBe(true);
   });
 });
 
@@ -534,6 +553,10 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     {
       name: "馬連配分対象切替",
       action: { type: "馬連配分対象切替", value: false },
+    },
+    {
+      name: "馬単配分対象切替",
+      action: { type: "馬単配分対象切替", value: false },
     },
     ...BIAS_WEIGHT_KEYS.map((key) => ({
       name: `バイアス重み入力(${key})`,
@@ -624,13 +647,18 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     expect(isDirty(changed)).toBe(true);
   });
 
-  it("includeExactaInAllocation(#24-E3a)がsavedSnapshotと異なればdirty判定されること(対応する切替アクションがまだ無いため、読込直後の状態を直接組み立てて検証する。E3bでトグルを追加したときisDirtyの比較漏れが起きないことの土台)", () => {
+  // 【Issue #125で改訂】旧版(#124時点)は対応する切替アクションがまだ無く、読込直後の状態を
+  // 直接組み立てて(SettingsFormStateのspread)検証していた。#125で「馬単配分対象切替」
+  // アクションを追加したため、馬連の「Issue #117で『馬連配分対象切替』アクションを追加した
+  // ため、実際にそのアクション経由で確認する」と同じ形に直す(直接spreadでの確認は
+  // singleFieldCasesの「馬単配分対象切替」ケースが引き続き担う)。
+  it("includeExactaInAllocation(#24-E3a)がsavedSnapshotと異なればdirty判定されること(Issue #125で「馬単配分対象切替」アクションを追加したため、実際にそのアクション経由で確認する)", () => {
     const base = loadedState();
     expect(isDirty(base)).toBe(false);
-    const changed: SettingsFormState = {
-      ...base,
-      includeExactaInAllocation: !base.includeExactaInAllocation,
-    };
+    const changed = settingsReducer(base, {
+      type: "馬単配分対象切替",
+      value: !base.includeExactaInAllocation,
+    });
     expect(isDirty(changed)).toBe(true);
   });
 });

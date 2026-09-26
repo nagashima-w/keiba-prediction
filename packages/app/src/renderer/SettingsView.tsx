@@ -339,6 +339,21 @@ export function SettingsView(): React.JSX.Element {
         <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.quinella.help}</p>
       </div>
 
+      {/* 馬単(#24-E3b・Issue #125)。表示順(馬連→馬単→三連複)に合わせて馬連と三連複の間に置く。 */}
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeExactaInAllocation}
+            onChange={(e) =>
+              dispatch({ type: "馬単配分対象切替", value: e.target.checked })
+            }
+          />{" "}
+          {ALLOCATION_BET_TYPE_LABELS.exacta.checkbox}
+        </label>
+        <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.exacta.help}</p>
+      </div>
+
       <div style={fieldStyle}>
         <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
           <input

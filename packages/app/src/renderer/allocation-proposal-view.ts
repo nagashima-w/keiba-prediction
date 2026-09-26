@@ -42,12 +42,13 @@
 import {
   comboSkipReasonText,
   parseComboOddsKey,
+  type AllocationBetType,
   type SkipReasonCode as ComboSkipReasonCode,
 } from "@keiba/core/ev/combo-bet-allocation";
 import { placeSkipReasonText } from "@keiba/core/ev/bet-allocation";
 
 import type { StoredAllocationBetView, StoredAllocationView } from "../shared/analysis-types.js";
-import { BET_ALLOCATION_UNSET_NOTE, formatBetLabel, placeBetUnavailableMessage } from "./bet-allocation-view.js";
+import { BET_ALLOCATION_UNSET_NOTE, formatComboBetLabel, placeBetUnavailableMessage } from "./bet-allocation-view.js";
 import { formatEv, formatOdds } from "./format.js";
 import { formatYen } from "./verify-format.js";
 
@@ -239,6 +240,12 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
  * `default`分岐で生文字列`"quinella"`をそのまま返していた。#117で`resolveMixedBetTypes`
  * が実際に馬連を配分対象に含めるようになり`allocation-record.ts`が`bet_type="quinella"`行を
  * 保存するようになったため、winのときと同じ理由で本caseを追加した)。
+ *
+ * `"exacta"`(馬単)はIssue #125(#24-E3b)でcaseを追加した(#120時点では`AllocationBetType`に
+ * 加わっていたがapp側候補ビルダーが未接続だったため、`default`分岐で生文字列`"exacta"`を
+ * そのまま返していた。#125で`resolveMixedBetTypes`が実際に馬単を配分対象に含めるように
+ * なり`allocation-record.ts`が`bet_type="exacta"`行を保存するようになったため、
+ * quinellaのときと同じ理由で本caseを追加した)。
  */
 function betTypeLabel(betType: string): string {
   switch (betType) {
@@ -250,6 +257,8 @@ function betTypeLabel(betType: string): string {
       return "ワイド";
     case "quinella":
       return "馬連";
+    case "exacta":
+      return "馬単";
     case "trio":
       return "三連複";
     default:
@@ -312,17 +321,29 @@ function buildSettingsRows(a: StoredAllocationView): readonly string[] {
   ];
 }
 
-/** comboKeyを馬番ラベルへデコードする。復号不能(parseComboOddsKeyがnull)なら生キーを返す。 */
-function comboLabelOf(comboKey: string): string {
+/**
+ * comboKeyを馬番ラベルへデコードする。復号不能(parseComboOddsKeyがnull)なら生キーを返す。
+ *
+ * **Issue #125(#24-E3b・AC-6): betTypeを見て`formatComboBetLabel`に委譲する。** 馬単
+ * (exacta)は着順の並びが意味を持つ券種であり、`parseComboOddsKey`は並びをソートせず
+ * そのまま復元するため(`combo-odds-key.ts`のJSDoc参照)、ここで`formatBetLabel`
+ * (常にハイフン区切り)へ渡すと[13,8]も[8,13]も同じ見た目にはならないが、着順の情報を
+ * 伝える「→」表記にはならない。`betType`はDB由来の開いた`string`(`StoredAllocationBetView`)
+ * のため、`AllocationBetType`ではない値(未知の券種)が来た場合は`formatComboBetLabel`の
+ * 引数型と合わないが、`formatComboBetLabel`は`betType==="exacta"`の等値比較しかしないため、
+ * 未知の文字列を渡しても`formatBetLabel`と同じ結果(ハイフン区切り)にフォールバックする
+ * (実行時に例外にはならない)。
+ */
+function comboLabelOf(comboKey: string, betType: string): string {
   const umabans = parseComboOddsKey(comboKey);
   if (umabans === null) {
     return comboKey;
   }
-  return formatBetLabel(umabans);
+  return formatComboBetLabel(betType as AllocationBetType, umabans);
 }
 
-/** 券種の表示順(複勝→単勝→ワイド→馬連→3連複。Issue #90でwin、Issue #117で馬連〈quinella〉を追加)。未知の券種は末尾へ(値99)。 */
-const BET_TYPE_ORDER: Record<string, number> = { place: 0, win: 1, wide: 2, quinella: 3, trio: 4 };
+/** 券種の表示順(複勝→単勝→ワイド→馬連→馬単→3連複。Issue #90でwin、Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉を追加)。未知の券種は末尾へ(値99)。 */
+const BET_TYPE_ORDER: Record<string, number> = { place: 0, win: 1, wide: 2, quinella: 3, exacta: 4, trio: 5 };
 
 function betTypeRank(betType: string): number {
   return BET_TYPE_ORDER[betType] ?? 99;
@@ -344,7 +365,7 @@ function buildBetRows(bets: readonly StoredAllocationBetView[]): readonly Alloca
     })
     .map((b) => ({
       betTypeLabel: betTypeLabel(b.betType),
-      comboLabel: comboLabelOf(b.comboKey),
+      comboLabel: comboLabelOf(b.comboKey, b.betType),
       stake: formatYen(b.stake),
       odds: formatOdds(b.odds),
       ev: formatEv(b.ev),

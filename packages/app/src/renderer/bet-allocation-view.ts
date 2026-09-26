@@ -12,6 +12,7 @@
  */
 
 import type { BetAllocationResult } from "@keiba/core/ev/bet-allocation";
+import type { AllocationBetType } from "@keiba/core/ev/combo-bet-allocation";
 
 import type { PlaceBetUnavailableReason } from "../shared/race-allocation.js";
 import { formatYen } from "./verify-format.js";
@@ -53,6 +54,26 @@ export function formatBetLabel(umaban: number | readonly number[]): string {
     return `${umaban[0]}番`;
   }
   return umaban.join("-");
+}
+
+/**
+ * 券種混在の買い目一覧向けラベル生成(Issue #125・#24-E3b・AC-6)。`formatBetLabel`を
+ * 置き換えるのではなく、その上に薄く被せる: **馬単(exacta)だけ**着順の並びが意味を持つ
+ * (`AllocationCandidate.umabans`は`exacta`のときソートしない。`allocationBetTypeKeyOrder`
+ * のJSDoc参照)ため、`formatBetLabel`のハイフン区切り(`"N-M"`)では[13,8]と[8,13]が
+ * 「8-13」に潰れて見え、着順の情報が失われる。本関数はexactaのときだけ`"N→M"`(netkeibaの
+ * 表記に合わせる)で並びをそのまま出し、それ以外(place/win/wide/quinella/trio)は
+ * `formatBetLabel`にそのまま委譲する(表記を変えない。呼び出し元は`BatchAnalysisView.tsx`の
+ * 混在配分一覧・`allocation-proposal-view.ts`の`comboLabelOf`)。
+ *
+ * `formatBetLabel`自体はここでは変更しない(単勝・複勝の単一馬番表示など、betTypeを
+ * 持たない既存呼び出し元〈`BatchAnalysisView.tsx`の単勝候補一覧〉に影響させないため)。
+ */
+export function formatComboBetLabel(betType: AllocationBetType, umabans: readonly number[]): string {
+  if (betType === "exacta") {
+    return umabans.join("→");
+  }
+  return formatBetLabel(umabans);
 }
 
 /**

@@ -8,7 +8,11 @@ import {
   type ShutubaHorse,
 } from "@keiba/core";
 import type { AnalysisRecord } from "@keiba/core";
-import { buildComboOddsKey, DEFAULT_GENERAL_BET_ALLOCATION_CONFIG } from "@keiba/core/ev/combo-bet-allocation";
+import {
+  buildAllocationBetComboKey,
+  buildComboOddsKey,
+  DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+} from "@keiba/core/ev/combo-bet-allocation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runAnalysis, type AnalysisPipelineDeps } from "../src/main/analysis-pipeline.js";
@@ -124,8 +128,26 @@ function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: num
 }
 
 /**
+ * n頭(昇順)から順序付きの全ペア(a≠b)を列挙し、一律のオッズ値を割り当てたRecordを作る
+ * (馬単〈exacta〉専用。Issue #125)。`buildAllocationBetComboKey("exacta", pair)`
+ * (唯一のゲートウェイ)でキー化するため、キー生成ロジック自体は複製しない。
+ */
+function fullOrderedOddsRecord(umabans: readonly number[], odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const pair of combinations(umabans, 2)) {
+    const [a, b] = pair as [number, number];
+    record[buildAllocationBetComboKey("exacta", [a, b])] = odds;
+    record[buildAllocationBetComboKey("exacta", [b, a])] = odds;
+  }
+  return record;
+}
+
+/**
  * 8頭・複勝オッズに加えてワイド・3連複・馬連のオッズも一律高値(EVプラス確実)で持つ
- * フェイクレースデータ(Issue #117・AC-10)。
+ * フェイクレースデータ(Issue #117・AC-10)。**馬単(exactaCombo)は含めない**
+ * (既存のquinella用AC-10テストが使う共有フィクスチャのため、exactaを混ぜると
+ * greedy配分がexactaとquinellaの間でEVを奪い合い、既存テストの前提〈馬連に1円以上
+ * 配分される〉が意図せず変わりうる。馬単専用の確認は`fakeRaceDataWithExacta`を使う)。
  */
 function fakeRaceDataWithCombos(raceId: string): RaceData {
   const base = fakeRaceData(raceId);
@@ -137,6 +159,43 @@ function fakeRaceDataWithCombos(raceId: string): RaceData {
       wideCombo: fullOddsRecord(umabans, 2, 100000),
       trioCombo: fullOddsRecord(umabans, 3, 100000),
       quinellaCombo: fullOddsRecord(umabans, 2, 100000),
+    },
+  };
+}
+
+/**
+ * 8頭・複勝オッズに加えて馬単のオッズも一律高値(EVプラス確実)で持つフェイクレースデータ
+ * (Issue #125・AC-10)。`fakeRaceDataWithCombos`と同じレシピに倣うが、馬単の候補だけを
+ * 単独で確認できるよう、ワイド・3連複・馬連のオッズは含めない
+ * (`mixed-race-allocation-quinella.test.ts`の`quinellaOnlyRace`と同じ考え方)。
+ */
+function fakeRaceDataWithExacta(raceId: string): RaceData {
+  const base = fakeRaceData(raceId);
+  const umabans = base.horses.map((h) => h.shutuba.umaban);
+  return {
+    ...base,
+    odds: {
+      ...base.odds,
+      exactaCombo: fullOrderedOddsRecord(umabans, 100000),
+    },
+  };
+}
+
+/**
+ * `fakeRaceDataWithCombos`(ワイド・3連複・馬連)に馬単のオッズも足した、4券種すべてを
+ * 持つフェイクレースデータ(Issue #125・AC-10の対照テスト専用)。includeExactaInAllocation=
+ * OFFのときに他の組合せ券種(ワイド等)の存在によって混在経路(kind='mixed')に留まった
+ * まま「馬単だけが現れない」ことを確認するために、`fakeRaceDataWithExacta`(馬単のみ)とは
+ * 別に用意する。
+ */
+function fakeRaceDataWithAllCombos(raceId: string): RaceData {
+  const base = fakeRaceDataWithCombos(raceId);
+  const umabans = base.horses.map((h) => h.shutuba.umaban);
+  return {
+    ...base,
+    odds: {
+      ...base.odds,
+      exactaCombo: fullOrderedOddsRecord(umabans, 100000),
     },
   };
 }
@@ -348,48 +407,26 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     expect(quinellaBets).toEqual([]);
   });
 
-  /**
-   * Issue #122(AC-4): 馬単(exacta)の`resolveMixedBetTypes`への接続は#24-E3b(Issue #125)の
-   * スコープであり、本Issueの時点では`raceForAllocation.exactaCombo`が production の配分結果
-   * (保存される`analysis_bets`)に影響することはない(`ALL_MIXED_CANDIDATE_BET_TYPES`が
-   * `"exacta"`を含まないため、Issue #117以前のquinellaComboと同じ状態)。
-   * `includeExactaInAllocation`という設定自体は#24-E3a(Issue #124)で新設したが、その配管も
-   * `resolveMixedBetTypes`には接続しない(#24-E3aのJSDoc・`exacta-allocation-setting-wiring.test.ts`
-   * 参照)ため、この結論(exactaがまだ配分結果に影響しない)自体は変わらない。そのため
-   * 「保存された配分にexacta由来の買い目が入ること」を直接確認するAC-10型のテストは書けない。
-   * 代わりに、本ファイル冒頭で`buildMixedRaceAllocationWithOutcome`をラップしている
-   * `buildMixedRaceAllocationWithOutcomeMock`(実装へフォールスルーする。#59導入時点からの
-   * 既存の仕組み)の呼び出し引数を直接捕捉し、`analysis-pipeline.ts`が組み立てる
-   * `raceForAllocation`に`exactaCombo`・`comboOdds.exacta`が実際に渡っていることを確認する
-   * (殺す変異: `raceForAllocation`のexactaComboの条件付きspreadを落とす。設定に依存しないため
-   * #24-E3b・E3cを待たずに固定できる)。
-   */
-  it("Issue #122(AC-4): raceForAllocationにexactaCombo・comboOdds.exactaが渡っていること(raceForAllocationのexactaComboのspreadを落とす変異を検知)", async () => {
+  // 【Issue #125(#24-E3b)で改訂】旧版(#122時点)は`resolveMixedBetTypes`への接続が
+  // #125のスコープで、その時点ではraceForAllocation.exactaComboが配分結果に一切影響しない
+  // ことが結論だったため、「保存された配分にexacta由来の買い目が入ること」を直接確認する
+  // AC-10型のテストが書けず、代わりに`buildMixedRaceAllocationWithOutcomeMock`の呼び出し
+  // 引数を捕捉して「spreadが渡っていること」だけを確認していた(「配分結果には影響しない」
+  // ことも対照として確認)。#125で接続されたため、quinellaのAC-10テスト
+  // (Issue #117・上記287行目付近)と同じ形の「実際に保存されることの直接確認」に反転する。
+  // 何を保証していたか(新旧対応表):
+  //   旧: raceForAllocationにexactaCombo・comboOdds.exactaが渡っていること(モック引数捕捉)
+  //       + includeExactaInAllocation=trueでも配分結果には一切影響しないこと(対照)
+  //   新: 「Issue #125(AC-10): raceForAllocationのexactaCombo/comboOddsが実際に消費され、
+  //       馬単オッズあり・includeExactaInAllocation=ONのとき保存される配分記録に
+  //       bet_type='exacta'の行が入ること」+「OFFなら入らないこと(対照)」
+  //       (quinellaのAC-10テストと同型。「渡っている」ことは「実際に使われて結果に出ること」
+  //       で包含して確認するため、モック引数の直接捕捉は不要になった)
+  it("Issue #125(AC-10): raceForAllocationのexactaCombo/comboOddsが実際に消費され、馬単オッズあり・includeExactaInAllocation=ONのとき保存される配分記録(analysis_bets)にbet_type='exacta'の行が入ること", async () => {
     const saved: AnalysisRecord[] = [];
-    const base = fakeRaceData(RACE_ID);
-    const exactaOutcome = {
-      state: "available" as const,
-      diagnostics: {
-        betType: "exacta" as const,
-        requestCount: 1,
-        expectedComboCount: 2,
-        obtainedComboCount: 2,
-        missingComboCount: 0,
-        axisUmabans: [],
-        attempts: [],
-        numericConflictCount: 0,
-        nullWinConflictCount: 0,
-        conflictSamples: [],
-      },
-    };
-    const race: RaceData = {
-      ...base,
-      odds: { ...base.odds, exactaCombo: { "0102": 50000, "0201": 60000 } },
-      meta: { ...base.meta, comboOdds: { exacta: exactaOutcome } },
-    };
     const deps: AnalysisPipelineDeps = {
       ...baseDeps(),
-      scrape: vi.fn(async () => race),
+      scrape: vi.fn(async () => fakeRaceDataWithExacta(RACE_ID)),
       saveAnalysis: (rec) => {
         saved.push(rec);
         return 1;
@@ -407,22 +444,39 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
     expect(saved).toHaveLength(1); // 前提固定。
-
-    // buildMixedRaceAllocationWithOutcomeMockはモック実装を返さない(undefined)ため実装へ
-    // フォールスルーするが、呼び出し自体は記録される。第1引数がraceForAllocation。
-    expect(buildMixedRaceAllocationWithOutcomeMock).toHaveBeenCalledTimes(1);
-    const raceForAllocation = buildMixedRaceAllocationWithOutcomeMock.mock.calls[0]![0] as {
-      readonly exactaCombo?: Record<string, number | null>;
-      readonly comboOdds?: { readonly exacta?: unknown };
-    };
-    expect(raceForAllocation.exactaCombo).toEqual({ "0102": 50000, "0201": 60000 });
-    expect(raceForAllocation.comboOdds?.exacta).toEqual(exactaOutcome);
-
-    // #24-E3b(Issue #125)未着手のため、includeExactaInAllocation=trueを渡していても
-    // exactaは実際にはどの配分にも影響しないこと(既定挙動が不変であることの確認。
-    // AC-6の趣旨と同じ)。
     const allocation = saved[0]!.allocation;
     expect(allocation).not.toBeUndefined();
+    // 前提固定(空振り防止): 実際に混在配分が計算されたこと(route='invalid'/'unset'等ではないこと)。
+    expect(allocation!.meta.route).toBe("mixed");
+    const exactaBets = allocation!.bets.filter((b) => b.betType === "exacta");
+    expect(exactaBets.length).toBeGreaterThan(0);
+  });
+
+  it("Issue #125(AC-10): includeExactaInAllocation=OFFなら、馬単オッズがあっても保存される配分記録にbet_type='exacta'の行が入らないこと(対照)", async () => {
+    const saved: AnalysisRecord[] = [];
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceDataWithAllCombos(RACE_ID)),
+      saveAnalysis: (rec) => {
+        saved.push(rec);
+        return 1;
+      },
+      allocationSettings: {
+        bankroll: 3000000,
+        perRaceCap: 3000000,
+        kellyFraction: 0.5,
+        includeComboOdds: true,
+        includeWideInAllocation: true,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: true,
+        includeExactaInAllocation: false,
+      },
+    };
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+    expect(saved).toHaveLength(1); // 前提固定。
+    const allocation = saved[0]!.allocation;
+    expect(allocation).not.toBeUndefined();
+    expect(allocation!.meta.route).toBe("mixed");
     const exactaBets = allocation!.bets.filter((b) => b.betType === "exacta");
     expect(exactaBets).toEqual([]);
   });

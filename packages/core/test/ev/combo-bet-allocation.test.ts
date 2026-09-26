@@ -6,6 +6,7 @@ import {
   ALLOCATION_BET_TYPE_UMABAN_COUNT,
   allocateGeneralBets,
   allocationBetTypeKeyOrder,
+  buildAllocationBetComboKey,
   buildComboCandidates,
   buildComboOddsKey,
   buildExactaCandidates,
@@ -254,6 +255,42 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       expect(allocationBetTypeKeyOrder("trio")).toBe(COMBO_KEY_ORDER.trio);
       expect(allocationBetTypeKeyOrder("quinella")).toBe(COMBO_KEY_ORDER.quinella);
       expect(allocationBetTypeKeyOrder("exacta")).toBe(COMBO_KEY_ORDER.exacta);
+    });
+  });
+
+  describe("buildAllocationBetComboKey: AllocationBetTypeから唯一のゲートウェイでキー生成すること(Issue #125・#24-E3b)", () => {
+    /**
+     * ★AC-5核心(オーケストレーター裁定2026-09-26): `allocation-record.ts`の`mixedBetsOf`が
+     * 券種を問わず`buildComboOddsKey(a.umabans)`(常に昇順ソート)で保存キーを組み立てていたため、
+     * 馬単の買い目([13,8]と[8,13]は別の買い目)が同じキーに潰れる欠陥があった
+     * (#123のゲートコメント参照)。本関数は`allocationBetTypeKeyOrder`の判定だけで
+     * `buildOrderedComboOddsKey`(並びを保持)/`buildComboOddsKey`(昇順ソート)を振り分ける
+     * 唯一のゲートウェイであり、新しいキー生成ロジックはここに書かない。
+     */
+    it.each([
+      { betType: "place" as const, umabans: [8], expected: "08" },
+      { betType: "win" as const, umabans: [8], expected: "08" },
+      { betType: "wide" as const, umabans: [13, 8], expected: "0813" },
+      { betType: "quinella" as const, umabans: [13, 8], expected: "0813" },
+      { betType: "trio" as const, umabans: [13, 8, 1], expected: "010813" },
+      { betType: "exacta" as const, umabans: [13, 8], expected: "1308" },
+    ])("betType=$betType, umabans=$umabans → $expected", ({ betType, umabans, expected }) => {
+      expect(buildAllocationBetComboKey(betType, umabans)).toBe(expected);
+    });
+
+    it("馬単[13,8]→'1308'・馬単[8,13]→'0813'(着順の並びを保持し、別の買い目として別キーになること)", () => {
+      expect(buildAllocationBetComboKey("exacta", [13, 8])).toBe("1308");
+      expect(buildAllocationBetComboKey("exacta", [8, 13])).toBe("0813");
+    });
+
+    it("馬連[13,8]→'0813'・馬連[8,13]→'0813'(馬単とは異なり並びに関わらず同じキーへ昇順化されること。馬単との対比)", () => {
+      expect(buildAllocationBetComboKey("quinella", [13, 8])).toBe("0813");
+      expect(buildAllocationBetComboKey("quinella", [8, 13])).toBe("0813");
+    });
+
+    it("allocationBetTypeKeyOrderの判定どおりbuildOrderedComboOddsKey/buildComboOddsKeyへ委譲すること(実装を2つ作らないことの直接確認)", () => {
+      expect(buildAllocationBetComboKey("exacta", [13, 8])).toBe(buildOrderedComboOddsKey([13, 8]));
+      expect(buildAllocationBetComboKey("wide", [13, 8])).toBe(buildComboOddsKey([13, 8]));
     });
   });
 

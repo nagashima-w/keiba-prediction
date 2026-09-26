@@ -147,13 +147,14 @@ describe("D-7フォールバック規則の制限(現状維持。win候補があ
     }
   });
 
-  it("②ワイド・3連複・馬連とも配分対象OFF: win候補があってもplace-onlyへ落ち、win行は現れず、fallbackReasonが'combo-bet-types-off'であること(Issue #117で馬連も条件②に加わったため、馬連も明示的にOFFにする。kindだけでは②③の区別がつかないためfallbackReasonまで確認する)", () => {
+  it("②ワイド・3連複・馬連・馬単とも配分対象OFF: win候補があってもplace-onlyへ落ち、win行は現れず、fallbackReasonが'combo-bet-types-off'であること(Issue #117で馬連、Issue #125で馬単も条件②に加わったため、両方とも明示的にOFFにする。kindだけでは②③の区別がつかないためfallbackReasonまで確認する)", () => {
     const outcome = buildMixedRaceAllocationWithOutcome(
       mixedRace(8),
       settings({
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
+        includeExactaInAllocation: false,
       }),
     );
     expect(outcome.view.kind).not.toBe("mixed");

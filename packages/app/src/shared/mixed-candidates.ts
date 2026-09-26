@@ -133,7 +133,8 @@ export type MixedCandidateBetType = AllocationBetType;
 
 /**
  * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーと
- * 再び一致する(Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉を追加したため)。**
+ * 再び一致する(Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、Issue #125〈#24-E3b〉で
+ * `exacta`〈馬単〉を追加したため)。**
  *
  * #91で`AllocationBetType`に`win`(単勝)が加わった時点では、coreに単勝候補ビルダーが
  * 存在せず`buildMixedCandidates`も`win`を一切参照していなかったため、本配列は意図的に
@@ -152,8 +153,15 @@ export type MixedCandidateBetType = AllocationBetType;
  * `quinella`を加えた**(「対象にする」宣言と実体〈`buildQuinellaCandidatesForBetType`・
  * `resolveMixedBetTypes`〉が揃った状態)。
  *
+ * **Issue #120(#24-E1)で`exacta`(馬単)が`AllocationBetType`に加わったが、`quinella`と
+ * 同じ理由で当初は本配列に含めていなかった。** #122(#24-E2)で`buildExactaCandidatesForBetType`
+ * を新設した後も、`resolveMixedBetTypes`が実際に`"exacta"`を渡すまでは意図的に本配列へ
+ * 加えるのを見送っていた。**Issue #125(#24-E3b)でその接続を行い、本配列にも`exacta`を
+ * 加えた**(「対象にする」宣言と実体が揃った状態)。
+ *
  * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いつき、#112でいったん
- * 「全メンバーではない」状態に戻ったが、#117で再び全メンバーと一致した。** 改名はしない
+ * 「全メンバーではない」状態に戻ったが#117で再び全メンバーと一致し、#120で三たび
+ * 「全メンバーではない」状態に戻ったが#125で再び全メンバーと一致した。** 改名はしない
  * (#91当時のboss裁定を維持: 定数名は「意図的な対象集合」を表す既存の名として扱い、
  * メンバー数の増減のたびに改名しない)。
  *
@@ -165,6 +173,7 @@ export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
   "win",
   "wide",
   "quinella",
+  "exacta",
   "trio",
 ];
 

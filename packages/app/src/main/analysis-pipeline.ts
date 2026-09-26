@@ -683,12 +683,10 @@ export async function runAnalysis(
     // `resolveMixedBetTypes`が`includeQuinellaInAllocation`設定を実際に参照するようになった
     // ため、このフィールドは production の配分結果に実際に影響する
     // (`analysis-pipeline-allocation.test.ts`のAC-10参照)。
-    // **exactaComboはIssue #122・#24-E2で追加した。** `includeExactaInAllocation`設定・
-    // `resolveMixedBetTypes`への接続は#123のスコープであり、本段階ではproductionの配分結果には
-    // 一切影響しない(`ALL_MIXED_CANDIDATE_BET_TYPES`が`"exacta"`を含まないため)。それでも
-    // ここで先にspreadしておく理由は`quinellaCombo`と同じ(#116→#117の間と同型の順序): 取得
-    // (#122)と配分接続(#123)を分離し、後続タスクが`raceForAllocation`側の配線を待たずに
-    // 進められるようにするため。
+    // exactaComboはIssue #122・#24-E2で追加した。Issue #125(#24-E3b)で`resolveMixedBetTypes`
+    // が`includeExactaInAllocation`設定を実際に参照するようになったため、quinellaComboと
+    // 同じく、このフィールドも production の配分結果に実際に影響する
+    // (`analysis-pipeline-allocation.test.ts`のAC-10参照)。
     const raceForAllocation: MixedCandidateBuildInput = {
       oddsStatus,
       rows,

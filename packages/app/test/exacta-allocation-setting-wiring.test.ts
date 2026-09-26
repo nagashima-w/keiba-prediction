@@ -1,8 +1,11 @@
 /**
  * exacta-allocation-setting-wiring.test.ts — 設定「馬単を配分に含める」の配管
- * (#24-E3a・Issue #124)を固定するテスト。
+ * (#24-E3a・Issue #124 → #24-E3b・Issue #125)を固定するテスト。
  *
- * Issue #124(#24-E3a)の確定スコープ(オーケストレーター着手前ゲート合意 2026-09-26):
+ * `quinella-allocation-setting-wiring.test.ts`(馬連版・Issue #115→#117)と同じ構造を踏襲する。
+ *
+ * ## 経緯
+ * Issue #124(#24-E3a)確定スコープ時点では:
  * - `AppSettings.includeExactaInAllocation` を新設し、保存・IPC・`MixedAllocationSettings`・
  *   キャッシュキーまで配管する
  * - **候補ビルダー(`resolveMixedBetTypes`)・D-2フォールバック規則(`isComboBetTypesOff`)・
@@ -10,23 +13,37 @@
  *   #24-E3b〈Issue #125〉の仕事。E3aで変えると配分の答えが変わりうる)
  * - **設定画面(`SettingsView.tsx`)にトグルを出さない**
  * - DB列(`analysis_allocation_meta.include_exacta`)の追加は#24-E3c(Issue #126)へ送る
- *   (`analysis_allocation_meta`の列一覧は#59で「固定・増減は停止条件」と凍結されており、
- *   読む人が実在するタスクで解除する。馬連〈#115→#118〉と同じ切り方)
  *
- * ## 「参照していないこと」の確認方法(#117の教訓を先取りする)
+ * このファイルは当時、上記2点(未接続・未表示)を「値の一致(toEqual)」の振る舞いテストと
+ * 「参照していないこと」のソース走査を経由しない値比較で固定していた(#117の教訓を先取りし、
+ * 最初からソース走査の否定は使っていない)。
  *
- * 馬連の#115時点(D3a)では、この「未接続」を関数本体のソース走査(`not.toContain`)で
- * 固定していたが、Issue #117で「ソース走査の否定をソース走査の肯定に替えるのではなく、
- * 値で結果が実際に変わらないことを観測する形を優先する」という裁定が出た
- * (`quinella-allocation-setting-wiring.test.ts`の経緯コメント参照)。本ファイルは
- * 最初からその教訓を踏まえ、ソース走査を経由せず、`buildMixedRaceAllocation`の
- * 値比較(mixed経路・place-only経路それぞれでtrue/falseがビット一致すること)だけで
- * AC-4(未接続の固定)を保証する。
+ * **Issue #125(#24-E3b)でこの2点をどちらも接続した**(#117と同じ裁定「値で接続を観測する形を
+ * 優先する」)。本ファイルはその接続を「値」で固定する形に反転する。より詳細な配線の行列
+ * (D-2フォールバック条件②③それぞれの分岐)は`mixed-race-allocation-exacta.test.ts`に
+ * 分離した(`mixed-race-allocation-quinella.test.ts`と同じ構造)。本ファイルは
+ * 「#124で配管した設定項目が、#125で実際に接続されたこと」を確認する最小限の回帰に絞る。
+ *
+ * ## 旧テスト→新テストの対応表(何を保証していたか)
+ *
+ * | 旧テスト(#124時点) | 何を保証していたか | 新テスト(#125) | 何を保証するか |
+ * |---|---|---|---|
+ * | 「mixed経路(8頭)でincludeExactaInAllocationをtrue/falseに変えても、kind・result全体がビット一致すること」 | 値を変えても計算結果が一切変わらない(未接続の証明) | 「resolveMixedBetTypes配線: includeExactaInAllocationの値でbetType='exacta'の有無が変わること」(値) | true/falseを実際に渡し、betType='exacta'の配分行の有無が切り替わること(接続されたことを値で確認) |
+ * | 「isComboBetTypesOff配線(D-2フォールバック規則の条件②)経路でincludeExactaInAllocationを変えても結果・理由コードが変わらないこと」 | 条件②の判定式がincludeExactaInAllocationを参照しない(値を変えても`fallbackReason`が一切変わらない) | 「isComboBetTypesOff配線: includeExactaInAllocationの値でfallbackReasonが変わること」(値) | ワイド・3連複・馬連OFFのまま馬単だけtrue/falseを切り替えると、fallbackReasonが'combo-bet-types-off'かどうかが切り替わること |
+ * | (#124時点に無し。SettingsView.tsxのソース走査は元々このファイルの対象外) | — | 「SettingsView.tsxがincludeExactaInAllocationを参照すること」(ソース走査の肯定) | #125でチェックボックスを追加したため、識別子が実在すること(JSX直書きでレンダリングテスト基盤が無いため、この項目のみソース走査で確認する。`quinella-allocation-setting-wiring.test.ts`・`combo-odds-scope-guard.test.ts`と同じ流儀) |
+ *
+ * 設定の保存・読込・キャッシュキー等(#124で配管した「参照していないこと」以外の部分)を
+ * 固定する往復テストは本ファイルには元々存在しない(`settings-reducer.test.ts`・
+ * `settings-store.test.ts`・`ipc-*-wiring.test.ts`が担う。それらは本タスクでは変更しない)。
  */
+
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { buildComboOddsKey } from "@keiba/core/ev/combo-bet-allocation";
+import { buildAllocationBetComboKey } from "@keiba/core/ev/combo-bet-allocation";
 
 import type { AnalysisRow } from "../src/shared/analysis-types.js";
 import type { MixedCandidateBuildInput } from "../src/shared/mixed-candidates.js";
@@ -35,6 +52,27 @@ import {
   buildMixedRaceAllocationWithOutcome,
   type MixedAllocationSettings,
 } from "../src/shared/mixed-race-allocation.js";
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const rendererDir = path.join(currentDir, "../src/renderer");
+
+describe("SettingsView.tsxがincludeExactaInAllocationを参照すること(Issue #125。#124時点は未参照だったが#125でチェックボックスを追加した)", () => {
+  it("SettingsView.tsxのソースにincludeExactaInAllocationという識別子が出現すること(JSX直書きでレンダリングテスト基盤が無いためソース走査で確認する。quinella-allocation-setting-wiring.test.ts・combo-odds-scope-guard.test.tsと同じ流儀)", () => {
+    const source = readFileSync(path.join(rendererDir, "SettingsView.tsx"), "utf8");
+    // 前提固定: 既存3券種のチェックボックスは実在すること(空振り防止。ファイルを正しく読めていることの確認)。
+    expect(source).toContain("includeWideInAllocation");
+    expect(source).toContain("includeQuinellaInAllocation");
+    expect(source).toContain("includeTrioInAllocation");
+    expect(source).toContain("includeExactaInAllocation");
+  });
+});
+
+// ============================================================================
+// 振る舞いレベル: MixedAllocationSettings.includeExactaInAllocationの値で
+// 混在配分の計算結果が実際に変わること(Issue #125で接続)。
+// より詳細な行列(D-2フォールバック条件②③それぞれの分岐)は
+// mixed-race-allocation-exacta.test.ts に分離してある。
+// ============================================================================
 
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
   return {
@@ -91,29 +129,47 @@ function combinations<T>(items: readonly T[], k: number): T[][] {
   return results;
 }
 
-/** umabans(昇順)からcomboSizeの組合せをすべて列挙し、一律のオッズ値を割り当てたRecordを作る。 */
-function fullOddsRecord(
+/**
+ * n頭(昇順)から順序付きの全ペア(a≠b)を列挙し、一律のオッズ値を割り当てたRecordを作る。
+ * `buildAllocationBetComboKey("exacta", pair)`(本タスクでcoreに追加した唯一のゲートウェイ)で
+ * キー化するため、キー生成ロジック自体は複製しない(mixed-race-allocation-exacta.test.tsと
+ * 同じ流儀)。
+ */
+function fullOrderedOddsRecord(umabans: readonly number[], odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const pair of combinations(umabans, 2)) {
+    const [a, b] = pair as [number, number];
+    record[buildAllocationBetComboKey("exacta", [a, b])] = odds;
+    record[buildAllocationBetComboKey("exacta", [b, a])] = odds;
+  }
+  return record;
+}
+
+function fullUnorderedOddsRecord(
   umabans: readonly number[],
   comboSize: number,
   odds: number,
 ): Record<string, number> {
   const record: Record<string, number> = {};
   for (const combo of combinations(umabans, comboSize)) {
-    record[buildComboOddsKey(combo)] = odds;
+    record[buildAllocationBetComboKey("wide", combo)] = odds;
   }
   return record;
 }
 
 /**
- * n=8頭・ワイド/3連複オッズも用意した「混在経路(kind='mixed')に入る」標準フィクスチャ
- * (mixed-race-allocation-win.test.tsのmixedRace()と同じレシピ)。
+ * n=8頭・ワイド/3連複/馬連/馬単オッズをすべて用意した「混在経路(kind='mixed')に入る」
+ * 標準フィクスチャ(mixed-race-allocation-quinella.test.tsのmixedRaceWithQuinella()と
+ * 同じレシピに馬単オッズを足したもの)。
  */
-function mixedRace(n = 8): MixedCandidateBuildInput {
+function mixedRaceWithExacta(n = 8): MixedCandidateBuildInput {
   const umabans = umabansOf(n);
   return raceInput({
     rows: allCandidateRows(n),
-    wideCombo: fullOddsRecord(umabans, 2, 30000),
-    trioCombo: fullOddsRecord(umabans, 3, 90000),
+    wideCombo: fullUnorderedOddsRecord(umabans, 2, 30000),
+    trioCombo: fullUnorderedOddsRecord(umabans, 3, 90000),
+    quinellaCombo: fullUnorderedOddsRecord(umabans, 2, 3000),
+    exactaCombo: fullOrderedOddsRecord(umabans, 3000),
   });
 }
 
@@ -133,44 +189,64 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
   };
 }
 
-describe("buildMixedRaceAllocation: includeExactaInAllocationの値を変えても結果が変わらないこと(#24-E3a。候補ビルダー未接続の直接確認)", () => {
-  it("mixed経路(8頭)でincludeExactaInAllocationをtrue/falseに変えても、kind・result全体がビット一致すること", () => {
-    const race = mixedRace(8);
+describe("resolveMixedBetTypes配線: includeExactaInAllocationの値でbetType='exacta'の有無が変わること(Issue #125)", () => {
+  it("mixed経路(8頭・馬単オッズあり)でincludeExactaInAllocationをtrue/falseに変えると、馬単配分行の有無が切り替わること", () => {
+    const race = mixedRaceWithExacta(8);
     const withExactaOn = buildMixedRaceAllocation(race, settings({ includeExactaInAllocation: true }));
     const withExactaOff = buildMixedRaceAllocation(race, settings({ includeExactaInAllocation: false }));
-    // 前提固定: 実際に混在経路(kind="mixed")に到達していること(空振り防止。unset/yoso等の
-    // 早期リターンではincludeExactaInAllocationを見る機会自体が無いため、それらでの一致は無意味)。
+    // 前提固定: 実際に混在経路(kind="mixed")に到達していること(空振り防止)。
     expect(withExactaOn.kind).toBe("mixed");
     expect(withExactaOff.kind).toBe("mixed");
-    expect(withExactaOff).toEqual(withExactaOn);
+    if (withExactaOn.kind !== "mixed" || withExactaOff.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const hasExactaOn = withExactaOn.result.allocations.some((a) => a.betType === "exacta");
+    const hasExactaOff = withExactaOff.result.allocations.some((a) => a.betType === "exacta");
+    expect(hasExactaOn).toBe(true);
+    expect(hasExactaOff).toBe(false);
+    // 接続された結果、bit-for-bitでは一致しないこと(#124時点はここがtoEqualで一致していた)。
+    expect(withExactaOff).not.toEqual(withExactaOn);
+  });
+});
+
+describe("isComboBetTypesOff配線: includeExactaInAllocationの値でfallbackReasonが変わること(Issue #125)", () => {
+  it("ワイド・3連複・馬連OFFのまま馬単だけtrue/falseを切り替えると、combo-bet-types-offになるかどうかが切り替わること", () => {
+    const race = mixedRaceWithExacta(8);
+    const base = settings({
+      includeWideInAllocation: false,
+      includeTrioInAllocation: false,
+      includeQuinellaInAllocation: false,
+    });
+
+    const withExactaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeExactaInAllocation: true });
+    expect(withExactaOn.outcome.route).toBe("mixed");
+    expect(withExactaOn.outcome.fallbackReason).toBeNull();
+
+    const withExactaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeExactaInAllocation: false });
+    expect(withExactaOff.outcome.route).toBe("place-only");
+    expect(withExactaOff.outcome.fallbackReason).toBe("combo-bet-types-off");
   });
 
-  it("isComboBetTypesOff配線(D-2フォールバック規則の条件②)経路でincludeExactaInAllocationを変えても結果・理由コードが変わらないこと", () => {
-    // ワイド・三連複・馬連の3つを明示的にOFFにし、isComboBetTypesOff(条件②)を真に成立させる
-    // (`isComboBetTypesOff`は現状この3項目しか見ない。3つともOFFにしないと、Issue #117以降の
-    // 既定ON〈includeQuinellaInAllocation〉が残ってcondition②が成立せず、
-    // 候補0件による条件③〈no-combo-candidates〉に落ちてしまい、条件②自体を検証できない)。
+  it("(オッズ自体が無いケース。#124時点からの回帰) place-only経路(ワイド・3連複・馬連とも候補0件)でincludeExactaInAllocationを変えても、view.kindと中身は一致すること——ただし理由(fallbackReason)は② combo-bet-types-off / ③ no-combo-candidatesで異なる", () => {
+    // このrace自体にexactaComboを含まないため、includeExactaInAllocationをtrueにしても
+    // 馬単の候補は0件になり(オッズが無い)、最終的にどちらも「組合せ候補ゼロ」という
+    // 同じ結末(view.kind="computed"・中身も同一)に到達する。理由コード(fallbackReason)は
+    // trueなら③no-combo-candidates、falseなら②combo-bet-types-offと異なる値になる
+    // (「接続後も一律に無視される」という意味ではないことに注意)。
     const race = raceInput({ rows: allCandidateRows(8) });
     const base = settings({
       includeWideInAllocation: false,
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
     });
-    const withExactaOn = buildMixedRaceAllocationWithOutcome(race, {
-      ...base,
-      includeExactaInAllocation: true,
-    });
-    const withExactaOff = buildMixedRaceAllocationWithOutcome(race, {
-      ...base,
-      includeExactaInAllocation: false,
-    });
-    // 前提固定: 実際に条件②(combo-bet-types-off)経由でplace-onlyへ落ちていること
-    // (includeExactaInAllocationの値に関わらず、isComboBetTypesOffがこのフィールドを
-    // 参照しない限りfallbackReasonは変わらないはず)。
-    expect(withExactaOn.outcome.fallbackReason).toBe("combo-bet-types-off");
-    expect(withExactaOff.outcome.fallbackReason).toBe("combo-bet-types-off");
+    const withExactaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeExactaInAllocation: true });
+    const withExactaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeExactaInAllocation: false });
+    // 前提固定: 実際にD-2フォールバック経路(複勝専用。kind="computed")に到達していること。
     expect(withExactaOn.view.kind).toBe("computed");
     expect(withExactaOff.view.kind).toBe("computed");
     expect(withExactaOff.view).toEqual(withExactaOn.view);
+    // 理由コードは異なること(前提固定。同じなら本itのタイトルの前提が崩れる)。
+    expect(withExactaOn.outcome.fallbackReason).toBe("no-combo-candidates");
+    expect(withExactaOff.outcome.fallbackReason).toBe("combo-bet-types-off");
   });
 });

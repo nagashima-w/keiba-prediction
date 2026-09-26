@@ -751,8 +751,8 @@ describe("yoso×組合せ(候補ゼロの理由が「未取得」か「yoso」�
 // ============================================================================
 
 describe("券種フィルタ(options.betTypes)", () => {
-  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/win/wide/quinella/trio。Issue #117で馬連を追加)が対象になること", () => {
-    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "win", "wide", "quinella", "trio"]);
+  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/win/wide/quinella/exacta/trio。Issue #117で馬連、Issue #125で馬単を追加)が対象になること", () => {
+    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "win", "wide", "quinella", "exacta", "trio"]);
     const rows = allCandidateRows(8);
     const umabans = umabansOf(8);
     const result = buildMixedCandidates(
@@ -805,7 +805,8 @@ describe("券種フィルタ(options.betTypes)", () => {
    * ★構造的な再発防止(#91・boss裁定。#90でwinを追加した後の状態を固定・
    * #112〈#24-D1〉で馬連〈quinella〉が除外に加わった状態に更新・Issue #117で
    * 再びAllocationBetTypeの全メンバーと一致する状態に更新・Issue #120で馬単〈exacta〉が
-   * 除外に加わった状態に更新)。
+   * 除外に加わった状態に更新・Issue #125で再びAllocationBetTypeの全メンバーと一致する
+   * 状態に更新)。
    *
    * `ALL_MIXED_CANDIDATE_BET_TYPES`が`AllocationBetType`(core)の全メンバーを含むとは
    * 限らない設計を、「意図的に除外している券種の集合」としてリテラルで固定していた。
@@ -817,22 +818,24 @@ describe("券種フィルタ(options.betTypes)", () => {
    * 実際に`"quinella"`を渡すよう接続し、`ALL_MIXED_CANDIDATE_BET_TYPES`にも`quinella`を
    * 加えたため、除外集合は再び空になった。**
    * **Issue #120(#24-E1)で`AllocationBetType`に`exacta`(馬単)が加わったが、
-   * `mixed-candidates.ts`から馬単の候補を作る経路はまだ無い(オッズ配線は#122のスコープ)。**
-   * `quinella`のときと同じ理由(app側候補ビルダーが未接続の券種を対象集合に含めると
-   * `resolveMixedBetTypes`経由でも実際には評価されない=常に「¥0 0点」相当になる)で、
-   * `exacta`を今回も除外に加える。
+   * `mixed-candidates.ts`から馬単の候補を作る経路はまだ無かった(オッズ配線は#122・
+   * 配分接続は#125のスコープ)ため、`exacta`が一時的に除外へ加わった(`quinella`のときと
+   * 同じ理由: app側候補ビルダーが未接続の券種を対象集合に含めると`resolveMixedBetTypes`
+   * 経由でも実際には評価されない=常に「¥0 0点」相当になるため)。**
+   * **Issue #125(#24-E3b)で`resolveMixedBetTypes`が実際に`"exacta"`を渡すよう接続し、
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`にも`exacta`を加えたため、除外集合は再び空になった。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
-   * 除外集合を`["exacta"]`と直接固定することで、`exacta`以外の券種が誤って除外に混ざったり、
-   * `exacta`の除外が誤って解除されたり(#122より前に解除すると「馬単 ¥0 0点」の再発になる)
-   * すれば、このテストが赤くなり「足すかどうかの判断」を人間に強制する。
+   * 除外集合を空配列と直接固定することで、将来新しい券種が`AllocationBetType`に加わって
+   * 除外へ紛れ込んでも(候補ビルダー未接続のまま)、このテストが赤くなり
+   * 「足すかどうかの判断」を人間に強制する。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['exacta']だけであること(Issue #120: 馬単のオッズ配線〈#122〉が終わるまで除外する)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が無いこと(AllocationBetTypeの全メンバーと一致する。Issue #125で馬単の除外を解除した)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual(["exacta"]);
+    expect(excluded).toEqual([]);
   });
 });
 
@@ -1271,22 +1274,32 @@ describe("馬連(quinella)候補(#116・#24-D3b-1)", () => {
  * 馬単(exacta)候補(Issue #122・#24-E2)。core自体の的中確率・候補ビルダー・配分の門番は
  * Issue #120・#24-E1で先行済み(`buildExactaCandidates`)。本ブロックは`mixed-candidates.ts`の
  * `buildExactaCandidatesForBetType`を通した配線を検証する(`buildQuinellaCandidates`と
- * 同型の骨格。ただし馬単は`ALL_MIXED_CANDIDATE_BET_TYPES`に含めない〈#123まで〉ため、
- * 「既定でも対象になる」quinellaの1本目のテストとは対称的に「既定では対象外」を確認する)。
+ * 同型の骨格)。
+ *
+ * 【Issue #125(#24-E3b)で改訂】旧版(#122時点)は馬単が`ALL_MIXED_CANDIDATE_BET_TYPES`に
+ * 含まれない〈#125まで〉ため、「既定でも対象になる」quinellaの1本目のテストとは対称的に
+ * 「既定では対象外(kind='not-requested')」を確認していた。#125で`ALL_MIXED_CANDIDATE_BET_TYPES`
+ * に`exacta`を加えたため、以下の1本目はquinellaの1本目と対称な「既定でも対象に含まれる」形に
+ * 反転する。
+ * 何を保証していたか(新旧対応表):
+ *   旧: 既定(betTypes省略)呼び出しでkind='not-requested'・候補0件であること
+ *       (=未接続の確認)
+ *   新: 既定(betTypes省略)呼び出しでkind='built'・候補12件(P(4,2))であること
+ *       (=接続されたことの確認。券種を明示指定する2本目のテストと結果が同じになる)
  *
  * オッズ値の実測(4頭・adjustedProb=0.5均等・topFinishCount=3。`buildExactaCandidates`を
  * 直接呼んで確認済み): 各順序付きペアの的中確率は1/12(P(4,2)=12通りに均等分配される)。
  * odds=999 → ev=83.25(EVプラス)、odds=5 → ev=0.4167(EV非プラス、閾値1.0未満)。
  */
-describe("馬単(exacta)候補(#122・#24-E2)", () => {
-  it("既定(betTypes省略)では馬単は対象外(kind='not-requested')であること(#123で配分接続するまでALL_MIXED_CANDIDATE_BET_TYPESに含まれないため)", () => {
+describe("馬単(exacta)候補(#122・#24-E2。Issue #125で既定でも対象になった)", () => {
+  it("既定(betTypes省略)でも馬単が対象に含まれること(Issue #125でALL_MIXED_CANDIDATE_BET_TYPESに馬単が入ったため。#122時点は既定でnot-requestedだったが反転した)", () => {
     const rows = allCandidateRows(4);
     const umabans = umabansOf(4);
     const result = buildMixedCandidates(
       raceInput({ rows, exactaCombo: fullOrderedOddsRecord(umabans, 999) }),
     );
-    expect(result.diagnostics.exacta).toEqual({ kind: "not-requested" });
-    expect(result.candidates.filter((c) => c.betType === "exacta")).toHaveLength(0);
+    expect(result.diagnostics.exacta.kind).toBe("built");
+    expect(result.candidates.filter((c) => c.betType === "exacta").length).toBeGreaterThan(0);
   });
 
   it("betTypesに明示的にexactaを含めれば候補が構築されること(kind='built'。P(4,2)=12件)", () => {

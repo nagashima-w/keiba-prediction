@@ -75,6 +75,7 @@ import {
   type BetAllocation,
 } from "@keiba/core/ev/bet-allocation";
 import {
+  buildAllocationBetComboKey,
   buildComboOddsKey,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   type GeneralBetAllocation,
@@ -199,13 +200,22 @@ function placeBetsOf(allocations: readonly BetAllocation[]): AnalysisBetRecord[]
  * 混在配分結果(`GeneralBetAllocationResult.allocations`)から stake>0 の明細行だけを作る。
  * Issue #76: betTypeは候補が運ぶ値(`a.betType`)をそのまま使い、`umabans.length`から
  * 逆算しない(逆算は`place`と将来の`win`〈#23-B〉が頭数1で衝突するため単射になれない)。
+ *
+ * **★Issue #125(#24-E3b・AC-5): comboKeyは`buildAllocationBetComboKey(a.betType, a.umabans)`
+ * (唯一のゲートウェイ)で組み立てる。** 旧版は券種を問わず`buildComboOddsKey(a.umabans)`
+ * (常に昇順ソート)を使っており、馬単(exacta)の買い目([13,8]=13着→8着 と
+ * [8,13]=8着→13着は別の買い目・別のオッズ)が同じキー("0813")へ潰れる欠陥があった
+ * (#123ゲートコメントが殺す変異そのもの: 昇順化すると#121の回収率検証が逆順の払戻と
+ * 誤って突き合わさる)。`buildAllocationBetComboKey`は`allocationBetTypeKeyOrder`の
+ * 判定で自動的に振り分けるため、place/win/wide/quinella/trioの既存キー(常に昇順)は
+ * この変更で一切変わらない(`allocation-record.test.ts`のAC-5テストで固定)。
  */
 function mixedBetsOf(allocations: readonly GeneralBetAllocation[]): AnalysisBetRecord[] {
   return allocations
     .filter((a) => a.stake > 0)
     .map((a) => ({
       betType: a.betType,
-      comboKey: buildComboOddsKey(a.umabans),
+      comboKey: buildAllocationBetComboKey(a.betType, a.umabans),
       stake: a.stake,
       odds: a.odds,
       ev: a.ev,

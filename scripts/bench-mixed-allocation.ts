@@ -51,15 +51,12 @@
  *    `[place,win,wide,trio,quinella]`(馬連あり)・`[place,win,wide,trio,quinella,exacta]`
  *    (馬単も追加)の3条件で`buildMixedCandidates`+`allocateGeneralBets`の1レースあたりの
  *    所要時間(平均・ウォームアップ除く)・券種別候補数・点数・券種別構成比を並べて出す。
- *    **Issue #117で`resolveMixedBetTypes`(`includeQuinellaInAllocation`設定)が実際に
+ *    **Issue #117で`resolveMixedBetTypes`(`includeQuinellaInAllocation`設定)、
+ *    Issue #125で`resolveMixedBetTypes`(`includeExactaInAllocation`設定)がそれぞれ実際に
  *    接続された**が、本節は依然として`buildMixedCandidates`の`options.betTypes`へ明示的に
  *    条件を渡す実測であり、設定のON/OFFを経由しない(#1の`greedySteps`感度表が使う
  *    `central-on.json`フィクスチャには`quinellaCombo`/`exactaCombo`が無いため、そちらは
- *    本節と無関係に馬連・馬単の候補が常に0件になる。両者を混同しないこと)。
- *    **馬単(exacta)は`includeExactaInAllocation`という設定自体がまだ存在せず(#123未着手)、
- *    resolveMixedBetTypesもexactaを一切生成しないため、本節の3条件目もあくまで
- *    `options.betTypes`への直接指定による性能実測であり、productionの配分結果を模した
- *    ものではない**(既存2条件と同じ位置づけ)。
+ *    本節と無関係に馬連・馬単の候補が常に0件になる。両者を混同しないこと。AC-11参照)。
  */
 
 import { readFileSync } from "node:fs";
@@ -264,8 +261,10 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     // (unfetched)になり、配分額・構成比の出力は変わらない。一方、判定不能の分類自体は
     // 実行されるため、所要時間にはわずかな増分がありうる(実測で確認すること)。
     includeQuinellaInAllocation: true,
-    // #24-E3a(Issue #124)で追加。候補ビルダーはまだ馬単の候補を作らないため
-    // (resolveMixedBetTypes未接続)、この値は感度表の出力に一切影響しない。
+    // #24-E3a(Issue #124)で追加。Issue #125で`resolveMixedBetTypes`が接続されたため、
+    // trueにすると候補ビルダーは実際に馬単を評価しにいく。ただし`toMixedCandidateInput`
+    // (このファイル)は`result.exactaCombo`をraceへ渡さないため、馬単の候補は常に0件
+    // (unfetched)になり、配分額・構成比の出力は変わらない(quinellaと同じ理由。AC-11参照)。
     includeExactaInAllocation: true,
   };
 

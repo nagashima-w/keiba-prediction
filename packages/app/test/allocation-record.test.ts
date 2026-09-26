@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_BET_ALLOCATION_CONFIG } from "@keiba/core/ev/bet-allocation";
 import {
+  buildAllocationBetComboKey,
   buildComboOddsKey,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   type GeneralBetAllocation,
@@ -717,14 +718,15 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     // 既存のunavailable行は unavailableReason="not-sold"(3頭)・fallbackReason="combo-odds-not-requested"
     // の1行しか無く、どちらの束縛箇所も定数直書きに変異させても検出できなかった。
     // 6頭(resolvePlaceBetTarget: runnerCount<=7 → "two-place-only")かつ
-    // includeComboOdds=trueのままワイド・3連複・馬連を配分対象外にする(isComboBetTypesOff。
-    // Issue #117で馬連も条件②に加わったため、馬連もOFFにしないと候補0件〈条件③〉に落ちてしまう)
-    // ことで、2つの束縛箇所に同時に2値目を与える。
+    // includeComboOdds=trueのままワイド・3連複・馬連・馬単を配分対象外にする(isComboBetTypesOff。
+    // Issue #117で馬連、Issue #125で馬単も条件②に加わったため、両方ともOFFにしないと
+    // 候補0件〈条件③〉に落ちてしまう)ことで、2つの束縛箇所に同時に2値目を与える。
     const race = raceInput({ rows: allCandidateRows(6) });
     const s = settings({
       includeWideInAllocation: false,
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
+      includeExactaInAllocation: false,
     });
     const outcome = buildMixedRaceAllocationWithOutcome(race, s);
     expect(outcome.view.kind).toBe("unavailable"); // 前提固定(空振り防止)。
@@ -1126,5 +1128,97 @@ describe("mixedBetsOf(buildAllocationRecord経由) — betTypeを直接使い、
     expect(winBet).toEqual({ betType: "win", comboKey: key, stake: 500, odds: 8, ev: 1.6 });
     expect(placeBet).toEqual({ betType: "place", comboKey: key, stake: 300, odds: 3, ev: 1.5 });
     expect(winBet!.comboKey).toBe(placeBet!.comboKey);
+  });
+});
+
+// ============================================================================
+// AC-5(Issue #125・★必須): mixedBetsOfが馬単の買い目を昇順化せず、着順の並びを
+// 保ったまま保存すること(buildAllocationBetComboKeyへの委譲を経由する)。
+// 殺す変異: buildComboOddsKey(a.umabans)のまま(常に昇順化)にすると、13→8の買い目が
+// "0813"(8→13と同じキー)で保存され、#121の回収率検証で8→13の払戻と誤って突き合わさる。
+// ============================================================================
+
+describe("mixedBetsOf(buildAllocationRecord経由) — 馬単(exacta)の保存キーが着順の並びを保つこと(Issue #125・AC-5)", () => {
+  it("umabans:[13,8](13着→8着)の馬単配分行が、昇順化されたキー'0813'ではなく並びを保った'1308'で保存されること", () => {
+    const allocations: GeneralBetAllocation[] = [
+      {
+        umabans: [13, 8],
+        betType: "exacta",
+        stake: 500,
+        continuousFraction: 0.1,
+        scaledFraction: 0.05,
+        hitProb: 0.02,
+        odds: 83.6,
+        ev: 1.672,
+        droppedBelowMinimum: false,
+      },
+    ];
+    const outcome = mixedOutcomeFor(allocations);
+    const rec = buildAllocationRecord(outcome, settings(), "result");
+
+    expect(rec.bets).toHaveLength(1);
+    const bet = rec.bets[0]!;
+    expect(bet.betType).toBe("exacta");
+    // 前提固定(空振り防止): 昇順化すれば"0813"になるはずのキーが、それとは異なること。
+    expect(bet.comboKey).not.toBe(buildComboOddsKey([13, 8]));
+    expect(bet.comboKey).toBe("1308");
+    expect(bet.comboKey).toBe(buildAllocationBetComboKey("exacta", [13, 8]));
+  });
+
+  it("逆順の2組([13,8]と[8,13])が別の買い目として別のcomboKeyで保存されること(#123ゲートコメントが殺す変異: 昇順化すると同じキーに潰れる)", () => {
+    const allocations: GeneralBetAllocation[] = [
+      {
+        umabans: [13, 8],
+        betType: "exacta",
+        stake: 500,
+        continuousFraction: 0.1,
+        scaledFraction: 0.05,
+        hitProb: 0.02,
+        odds: 83.6,
+        ev: 1.672,
+        droppedBelowMinimum: false,
+      },
+      {
+        umabans: [8, 13],
+        betType: "exacta",
+        stake: 300,
+        continuousFraction: 0.06,
+        scaledFraction: 0.03,
+        hitProb: 0.015,
+        odds: 118.8,
+        ev: 1.782,
+        droppedBelowMinimum: false,
+      },
+    ];
+    const outcome = mixedOutcomeFor(allocations);
+    const rec = buildAllocationRecord(outcome, settings(), "result");
+
+    expect(rec.bets).toHaveLength(2);
+    const keys = rec.bets.map((b) => b.comboKey);
+    // 前提固定(空振り防止): 2件のキーが実際に異なること(同じキーに潰れていないこと)。
+    expect(new Set(keys).size).toBe(2);
+    expect(keys).toEqual(["1308", "0813"]);
+  });
+
+  it("馬連(quinella)は馬単と異なり、引き続き昇順化されたキーで保存されること(馬単だけの例外にする。並び違いの2件が同じキーに集約されること自体は既存契約のまま)", () => {
+    const allocations: GeneralBetAllocation[] = [
+      {
+        umabans: [13, 8],
+        betType: "quinella",
+        stake: 500,
+        continuousFraction: 0.1,
+        scaledFraction: 0.05,
+        hitProb: 0.02,
+        odds: 20,
+        ev: 0.4,
+        droppedBelowMinimum: false,
+      },
+    ];
+    const outcome = mixedOutcomeFor(allocations);
+    const rec = buildAllocationRecord(outcome, settings(), "result");
+
+    expect(rec.bets).toHaveLength(1);
+    expect(rec.bets[0]!.comboKey).toBe("0813");
+    expect(rec.bets[0]!.comboKey).toBe(buildComboOddsKey([13, 8]));
   });
 });

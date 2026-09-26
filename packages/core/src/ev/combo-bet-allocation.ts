@@ -326,6 +326,32 @@ export function allocationBetTypeKeyOrder(betType: AllocationBetType): ComboKeyO
 }
 
 /**
+ * `AllocationBetType`から組合せオッズキーを生成する唯一のゲートウェイ(Issue #125・#24-E3b)。
+ *
+ * `allocation-record.ts`の`mixedBetsOf`(配分提案の保存)が、券種を問わず
+ * `buildComboOddsKey(a.umabans)`(常に昇順ソート)で保存キーを組み立てていたため、
+ * 馬単の買い目([13,8]と[8,13]は別の買い目・別のオッズ)が同じキーへ潰れ、回収率検証
+ * (#121)が逆順の払戻と突き合わせてしまう欠陥があった(#123 D3-D5ゲートコメント参照)。
+ *
+ * `buildComboOddsKeyFor`(`combo-odds-key.ts`)は`ComboBetType`(`place`・`win`を持たない)を
+ * 引数に取るため、`place`/`win`を含む`AllocationBetType`の値をそのまま渡せない。呼び出し側
+ * (`allocation-record.ts`)は候補の`betType`(`AllocationBetType`)をそのまま持っているため、
+ * `AllocationBetType`→`ComboBetType`の変換を別途書くのではなく、既に存在する
+ * `allocationBetTypeKeyOrder`(本ファイル上方。`place`/`win`も`"unordered"`を返す)で
+ * 順序方針を引き、`buildOrderedComboOddsKey`(並びを保持)/`buildComboOddsKey`(昇順ソート)へ
+ * 振り分けるだけにする。新しいキー生成ロジックはここに書かない(実装は`combo-odds-key.ts`の
+ * 2関数のみ。モジュール冒頭JSDoc「実装は1つだけ」の精神をAllocationBetType側でも保つ)。
+ */
+export function buildAllocationBetComboKey(
+  betType: AllocationBetType,
+  umabans: readonly number[],
+): string {
+  return allocationBetTypeKeyOrder(betType) === "ordered"
+    ? buildOrderedComboOddsKey(umabans)
+    : buildComboOddsKey(umabans);
+}
+
+/**
  * 券種一般の買い目候補(構造的最小型)。券種は`betType`が値として運ぶ(Issue #76。
  * `umabans.length`からの逆算はしない)。`umabans.length`は`betType`に対応する構成頭数
  * (`ALLOCATION_BET_TYPE_UMABAN_COUNT[betType]`)と一致していなければならず、違反すると

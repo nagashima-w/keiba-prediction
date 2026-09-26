@@ -390,13 +390,14 @@ describe("fallbackReason: D-2フォールバックの3分岐が別々の値と�
     expect(outcome.fallbackReason).toBe("combo-odds-not-requested");
   });
 
-  it("② ワイド・3連複・馬連とも配分対象OFF → 'combo-bet-types-off'(Issue #117で馬連も条件②に加わったため、馬連もOFFにする)", () => {
+  it("② ワイド・3連複・馬連・馬単とも配分対象OFF → 'combo-bet-types-off'(Issue #117で馬連、Issue #125で馬単も条件②に加わったため、両方ともOFFにする)", () => {
     const { outcome } = buildMixedRaceAllocationWithOutcome(
       raceWithPositiveCombos(8),
       settings({
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
+        includeExactaInAllocation: false,
       }),
     );
     expect(outcome.fallbackReason).toBe("combo-bet-types-off");
@@ -420,7 +421,12 @@ describe("fallbackReason: D-2フォールバックの3分岐が別々の値と�
     const r1 = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ includeComboOdds: false })).outcome.fallbackReason;
     const r2 = buildMixedRaceAllocationWithOutcome(
       raceWithPositiveCombos(8),
-      settings({ includeWideInAllocation: false, includeTrioInAllocation: false, includeQuinellaInAllocation: false }),
+      settings({
+        includeWideInAllocation: false,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: false,
+        includeExactaInAllocation: false,
+      }),
     ).outcome.fallbackReason;
     const r3 = buildMixedRaceAllocationWithOutcome(raceInput({ rows: allCandidateRows(8) }), settings()).outcome.fallbackReason;
     expect(new Set([r1, r2, r3]).size).toBe(3);
@@ -518,7 +524,7 @@ describe("unavailableReason: route==='unavailable'のとき正しいPlaceBetUnav
     expect(outcome.unavailableReason).toBe("not-sold");
   });
 
-  it("two-place-only(5〜7頭): 6頭・combo-bet-types-offでunavailableに落ちたとき'two-place-only'になること(Issue #117で馬連も条件②に加わったため、馬連もOFFにする)", () => {
+  it("two-place-only(5〜7頭): 6頭・combo-bet-types-offでunavailableに落ちたとき'two-place-only'になること(Issue #117で馬連、Issue #125で馬単も条件②に加わったため、両方ともOFFにする)", () => {
     const race = raceInput({ rows: allCandidateRows(6) });
     const { outcome } = buildMixedRaceAllocationWithOutcome(
       race,
@@ -526,6 +532,7 @@ describe("unavailableReason: route==='unavailable'のとき正しいPlaceBetUnav
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
+        includeExactaInAllocation: false,
       }),
     );
     expect(outcome.route).toBe("unavailable");

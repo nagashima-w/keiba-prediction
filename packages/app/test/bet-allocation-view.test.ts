@@ -9,6 +9,7 @@ import {
   formatAllocationSummary,
   NOT_DIVERSIFIED_NOTE,
   formatBetLabel,
+  formatComboBetLabel,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
   probabilitySumWarning,
@@ -243,6 +244,39 @@ describe("formatBetLabel(買い目ラベルの純関数生成。umabanをJSXに�
       // 同じ2要素でも中身が違えば出力も違うこと(定数返却になっていないことの空振り防止)。
       expect(formatBetLabel([2, 5])).not.toBe(formatBetLabel([4, 7]));
     });
+  });
+});
+
+/**
+ * formatComboBetLabel(Issue #125・#24-E3b・AC-6): 馬単(exacta)は「1着→2着」の並びが
+ * 意味を持つ券種であり、ワイド・馬連・3連複と同じ「N-M」表記(区切りがハイフン、実質的に
+ * 昇順の組として表示)にすると、着順の情報が失われる(13→8と8→13が同じ「8-13」に
+ * 潰れて見える)。本関数はbetTypeを見て、exactaだけはumabansの並びをそのまま保った
+ * 「N→M」表記(netkeibaの表記に合わせる)にし、それ以外(place/win/wide/quinella/trio)は
+ * 既存の`formatBetLabel`と同じ表記のままにする(呼び出し元〈BatchAnalysisView.tsx・
+ * allocation-proposal-view.ts〉を書き換えても、馬単以外の券種の見た目は変えない)。
+ */
+describe("formatComboBetLabel(券種を見て表記を切り替える。Issue #125・#24-E3b・AC-6)", () => {
+  it("馬単(exacta)は『N→M』形式になり、並びをそのまま保つこと(13→8と8→13は別の表記になる。殺す変異: 並べ替える/ハイフンにする)", () => {
+    expect(formatComboBetLabel("exacta", [13, 8])).toBe("13→8");
+    expect(formatComboBetLabel("exacta", [8, 13])).toBe("8→13");
+    expect(formatComboBetLabel("exacta", [13, 8])).not.toBe(formatComboBetLabel("exacta", [8, 13]));
+  });
+
+  it("ワイド・馬連・3連複は従来どおり『N-M』『N-M-L』形式(ハイフン区切り)のままであること(馬単だけの例外にする)", () => {
+    expect(formatComboBetLabel("wide", [4, 7])).toBe("4-7");
+    expect(formatComboBetLabel("quinella", [4, 7])).toBe("4-7");
+    expect(formatComboBetLabel("trio", [3, 4, 7])).toBe("3-4-7");
+  });
+
+  it("複勝・単勝(要素数1)は『N番』形式のままであること", () => {
+    expect(formatComboBetLabel("place", [4])).toBe("4番");
+    expect(formatComboBetLabel("win", [4])).toBe("4番");
+  });
+
+  it("exacta以外はformatBetLabelと同じ結果を返すこと(formatBetLabel自体は変更していないことの直接確認)", () => {
+    expect(formatComboBetLabel("wide", [4, 7])).toBe(formatBetLabel([4, 7]));
+    expect(formatComboBetLabel("trio", [3, 4, 7])).toBe(formatBetLabel([3, 4, 7]));
   });
 });
 

@@ -139,13 +139,8 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
   readonly includeQuinellaInAllocation: boolean;
   /**
    * 馬単を配分対象に含めるか(`AppSettings.includeExactaInAllocation`。#24-E3a・Issue #124で
-   * 設定項目を新設した)。
-   *
-   * **#24-E3a時点ではこのフィールドは未使用**(`resolveMixedBetTypes`・`isComboBetTypesOff`の
-   * どちらも参照しない。`exacta-allocation-setting-wiring.test.ts`が値の比較で固定する)。
-   * 候補ビルダーが実際に馬単の候補を作り、D-2フォールバック規則にも組み込むのは
-   * #24-E3b(Issue #125)。D3aで組み込むと、馬単の候補が無いまま混在経路に入り配分の答えが
-   * 変わりうるため(馬連〈#24-D3a〉と同じ理由)、意図的に未接続のまま設定だけを配管する。
+   * 設定項目を新設し、Issue #125(#24-E3b)で`resolveMixedBetTypes`・`isComboBetTypesOff`
+   * (D-2フォールバック規則の条件②③)へ実際に接続した)。
    */
   readonly includeExactaInAllocation: boolean;
 }
@@ -190,21 +185,24 @@ export type MixedRaceAllocationView =
   | MixedRaceAllocationInvalid;
 
 /**
- * D-1: 設定(3つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
+ * D-1: 設定(4つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
  * 複勝・単勝は常に含める(A-2是正・Issue #90・#23-B2)。単勝には`includeWinInAllocation`の
  * ような専用トグルを作らない(D-10・boss裁定): 作ると`MixedAllocationSettings`の項目が増え、
  * メタ行の設定エコーがスキーマ変更になるため。単勝は混在経路が実際に計算される限り常に対象であり、
- * D-2フォールバック(ワイド・3連複・馬連が使えない設定・状況)に該当すれば`buildRaceAllocation`
- * (複勝専用の従来経路)へ丸ごと落ちるため、winだけを個別にOFFにする設定は不要(D-7)。
+ * D-2フォールバック(ワイド・3連複・馬連・馬単が使えない設定・状況)に該当すれば
+ * `buildRaceAllocation`(複勝専用の従来経路)へ丸ごと落ちるため、winだけを個別にOFFにする設定は
+ * 不要(D-7)。
  *
  * **馬連(`includeQuinellaInAllocation`。#24-D3a・Issue #115)は#117(#24-D3b-2)で本関数へ接続した。**
  * #115時点ではトグル自体は設けたが本関数には未接続(候補ビルダー`buildMixedCandidates`
  * 〈#116・#24-D3b-1〉が実際に馬連の候補を構築できるようになった後も、この関数が`betTypes`に
  * `"quinella"`を含めない限りproductionからは呼ばれない状態を意図的に保っていた)。
- * `MixedAllocationSettings`の項目は8項目のままだが、`allocation-record.ts`の設定エコー7列
- * (メタ行スキーマ)は#117でも変えない(呼び出し側が渡した8項目のうち7項目だけをメタ行へ写す。
- * 全項目を機械的にエコーする契約ではない。#59が固定した「メタ行の列一覧は増減が停止条件」という
- * 制約はここでは解除しない。DB列`include_quinella`の追加は#118のスコープ)。
+ *
+ * **馬単(`includeExactaInAllocation`。#24-E3a・Issue #124)も同じ経緯を辿り、#125(#24-E3b)で
+ * 本関数へ接続した。** `MixedAllocationSettings`の項目は9項目のままだが、`allocation-record.ts`
+ * の設定エコー8列(メタ行スキーマ)は#125でも変えない(呼び出し側が渡した9項目のうち8項目だけを
+ * メタ行へ写す。全項目を機械的にエコーする契約ではない。#59が固定した「メタ行の列一覧は増減が
+ * 停止条件」という制約はここでは解除しない。DB列`include_exacta`の追加は#126のスコープ)。
  *
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。
@@ -220,6 +218,9 @@ function resolveMixedBetTypes(settings: MixedAllocationSettings): MixedCandidate
   if (settings.includeQuinellaInAllocation) {
     betTypes.push("quinella");
   }
+  if (settings.includeExactaInAllocation) {
+    betTypes.push("exacta");
+  }
   return betTypes;
 }
 
@@ -233,14 +234,18 @@ function isComboOddsNotRequested(settings: MixedAllocationSettings): boolean {
 
 /**
  * D-2フォールバック規則の条件②(候補構築より前に判定できる)。
- * ワイド・3連複・馬連のすべてが配分対象からOFF(オッズは取得していても配分には使わない設定。
- * #117で馬連を条件に加えた。#115時点はワイド・3連複の2項目のみだった)。
+ * ワイド・3連複・馬連・馬単のすべてが配分対象からOFF(オッズは取得していても配分には
+ * 使わない設定。#117で馬連、#125で馬単を条件に加えた。#115時点はワイド・3連複の2項目のみ
+ * だった)。**4項目のうち1つでもtrueなら成立しない**(#124が見つけた罠: 新券種を既定ONの
+ * まま追加すると、既存の「残り2項目をOFFにする」テストが黙って条件③〈no-combo-candidates〉
+ * 側へ流れてしまう。本関数の呼び出し元テストは4項目とも明示的にOFFにすること)。
  */
 function isComboBetTypesOff(settings: MixedAllocationSettings): boolean {
   return (
     !settings.includeWideInAllocation &&
     !settings.includeTrioInAllocation &&
-    !settings.includeQuinellaInAllocation
+    !settings.includeQuinellaInAllocation &&
+    !settings.includeExactaInAllocation
   );
 }
 
@@ -457,11 +462,11 @@ function buildMixedRaceAllocationCore(
     trio: comboOddsAvailabilityFromDiagnostics(mixed.diagnostics.trio),
   };
 
-  // 4. D-2条件③(訂正2: ワイド・三連複・馬連の候補合計のみを見る。複勝候補の件数は含めない。
-  // #117で馬連を数える対象に加えた)。
+  // 4. D-2条件③(訂正2: ワイド・三連複・馬連・馬単の候補合計のみを見る。複勝候補の件数は
+  // 含めない。#117で馬連、#125で馬単を数える対象に加えた)。
   // Issue #76: umabans.length>=2からの逆算ではなくbetTypeで判定する(値として運ぶ)。
   const comboCandidateCount = mixed.candidates.filter(
-    (c) => c.betType === "wide" || c.betType === "trio" || c.betType === "quinella",
+    (c) => c.betType === "wide" || c.betType === "trio" || c.betType === "quinella" || c.betType === "exacta",
   ).length;
   if (comboCandidateCount === 0) {
     return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds);

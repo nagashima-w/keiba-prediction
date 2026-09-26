@@ -501,6 +501,37 @@ describe("買い目行(AC4)", () => {
     expect(view.bets.map((b) => b.comboLabel)).toEqual(["4番", "4-7", "4-7-9"]);
   });
 
+  it("馬単(exacta)のcomboLabelは『1着→2着』の並びを保ち、ハイフンにも昇順にもならないこと(Issue #125・AC-6。殺す変異: 並べ替える/ハイフンにする)", () => {
+    const view = buildAllocationProposalView(
+      allocation({
+        route: "mixed",
+        skipReasonCode: null,
+        bets: [
+          // comboKey="1308"は buildOrderedComboOddsKey([13,8]) の形(1着13・2着8。着順の
+          // 並びをソートしないキー。docs/quinella-exacta-odds-investigation.md §5.1参照)。
+          bet({ betType: "exacta", comboKey: "1308", stake: 500, odds: 20, ev: 1.4 }),
+        ],
+      }),
+    );
+    expect(view.bets[0]!.comboLabel).toBe("13→8");
+    expect(view.bets[0]!.comboLabel).not.toBe("8-13");
+    expect(view.bets[0]!.comboLabel).not.toBe("13-8");
+  });
+
+  it("ワイド・馬連は馬単と違って引き続き『N-M』のハイフン表記のままであること(馬単だけの例外にする。Issue #125)", () => {
+    const view = buildAllocationProposalView(
+      allocation({
+        route: "mixed",
+        skipReasonCode: null,
+        bets: [
+          bet({ betType: "wide", comboKey: "0813", stake: 100, odds: 3, ev: 1.1 }),
+          bet({ betType: "quinella", comboKey: "0813", stake: 100, odds: 6, ev: 1.2 }),
+        ],
+      }),
+    );
+    expect(view.bets.map((b) => b.comboLabel)).toEqual(["8-13", "8-13"]);
+  });
+
   it("odds/evがnullの行の表示も固定されること", () => {
     const view = buildAllocationProposalView(
       allocation({
@@ -529,6 +560,24 @@ describe("買い目行(AC4)", () => {
     expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "三連複"]);
   });
 
+  it("並び順(Issue #125): 馬連・馬単を混ぜても入力順を崩して券種順(複勝→単勝→ワイド→馬連→馬単→三連複)に並ぶこと(馬単がBET_TYPE_ORDERの馬連と三連複の間に正しく挿入されていることの直接確認)", () => {
+    const view = buildAllocationProposalView(
+      allocation({
+        route: "mixed",
+        skipReasonCode: null,
+        bets: [
+          bet({ betType: "trio", comboKey: "040709", stake: 300, odds: 12, ev: 1.3 }),
+          bet({ betType: "exacta", comboKey: "0407", stake: 250, odds: 20, ev: 1.4 }),
+          bet({ betType: "wide", comboKey: "0407", stake: 200, odds: 3, ev: 1.2 }),
+          bet({ betType: "quinella", comboKey: "0407", stake: 150, odds: 6, ev: 1.5 }),
+          bet({ betType: "win", comboKey: "04", stake: 50, odds: 8, ev: 1.6 }),
+          bet({ betType: "place", comboKey: "04", stake: 100, odds: 2, ev: 1.1 }),
+        ],
+      }),
+    );
+    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "馬連", "馬単", "三連複"]);
+  });
+
   it("comboKeyが復号不能(parseComboOddsKeyがnull)なら生キーをそのまま表示すること(bet_typeとの長さ不一致は検査しない)", () => {
     const view = buildAllocationProposalView(
       allocation({
@@ -541,8 +590,17 @@ describe("買い目行(AC4)", () => {
   });
 });
 
-describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の5ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応。Issue #117で馬連〈quinella〉を追加し4→5ラベルに拡張)", () => {
-  it("place/win/wide/quinella/trioそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
+// 【Issue #125(#24-E3b)で改訂】旧版(#122時点)は馬単(exacta)がbetTypeLabelにcaseを
+// 持たず、mixedBetTypeLabelとは意図的に非対称だった(別describeで固定していた)。
+// #125で`allocation-record.ts`が実際に`bet_type="exacta"`行を保存するようになったため、
+// win・quinellaのときと同じ理由でbetTypeLabelにもcaseを追加し、非対称を解消した。
+// 何を保証していたか(新旧対応表):
+//   旧: 「place/win/wide/quinella/trioの5ラベルが一致」(別describe: 「mixedBetTypeLabel
+//       ('exacta')は'馬単'を返す」「betTypeLabel は'exacta'のcaseをまだ持たず生値を表示」)
+//   新: 「place/win/wide/quinella/exacta/trioの6ラベルが一致」(1つのdescribeに統合。
+//       非対称を固定する専用describeは廃止)
+describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の6ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応。Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉を追加し4→6ラベルに拡張)", () => {
+  it("place/win/wide/quinella/exacta/trioそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -552,35 +610,20 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
           bet({ betType: "win", comboKey: "05" }),
           bet({ betType: "wide", comboKey: "0407" }),
           bet({ betType: "quinella", comboKey: "0407" }),
+          bet({ betType: "exacta", comboKey: "0407" }),
           bet({ betType: "trio", comboKey: "040709" }),
         ],
       }),
     );
-    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "馬連", "三連複"]);
+    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "馬連", "馬単", "三連複"]);
     // mixedBetTypeLabel側も同じ日本語リテラルを返すことを、betTypeLabelとは独立に固定する
     // (両関数を比較する形〈旧実装〉だと両方が一緒にずれても緑のまま通ってしまう。boss指摘)。
     expect(mixedBetTypeLabel("place")).toBe("複勝");
     expect(mixedBetTypeLabel("win")).toBe("単勝");
     expect(mixedBetTypeLabel("wide")).toBe("ワイド");
     expect(mixedBetTypeLabel("quinella")).toBe("馬連");
-    expect(mixedBetTypeLabel("trio")).toBe("三連複");
-  });
-});
-
-describe("馬単(exacta)のラベル(Issue #120・#24-E1): mixedBetTypeLabelとbetTypeLabelが意図的に非対称であること", () => {
-  it("mixedBetTypeLabel('exacta')は'馬単'を返すこと(AllocationBetTypeを引数に取る閉じたswitchのため、追加しないと型エラーになる)", () => {
     expect(mixedBetTypeLabel("exacta")).toBe("馬単");
-  });
-
-  it("betTypeLabel(allocation-proposal-view.ts)は'exacta'のcaseをまだ持たず、生値をそのまま表示すること(#122でオッズ配線するまでproductionから'exacta'は渡らないため、win/quinellaのときと同じ判断でcaseを足さない)", () => {
-    const view = buildAllocationProposalView(
-      allocation({
-        route: "mixed",
-        skipReasonCode: null,
-        bets: [bet({ betType: "exacta", comboKey: "0407" })],
-      }),
-    );
-    expect(view.bets[0]!.betTypeLabel).toBe("exacta");
+    expect(mixedBetTypeLabel("trio")).toBe("三連複");
   });
 });
 

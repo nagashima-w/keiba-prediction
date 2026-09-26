@@ -191,9 +191,13 @@ describe("resolveMixedBetTypes配線: includeQuinellaInAllocationの値でbetTyp
 });
 
 describe("isComboBetTypesOff配線: includeQuinellaInAllocationの値でfallbackReasonが変わること(Issue #117)", () => {
-  it("ワイド・3連複OFFのまま馬連だけtrue/falseを切り替えると、combo-bet-types-offになるかどうかが切り替わること", () => {
+  it("ワイド・3連複・馬単OFFのまま馬連だけtrue/falseを切り替えると、combo-bet-types-offになるかどうかが切り替わること(Issue #125で馬単も条件②に加わったため、明示的にOFFにする)", () => {
     const race = mixedRaceWithQuinella(8);
-    const base = settings({ includeWideInAllocation: false, includeTrioInAllocation: false });
+    const base = settings({
+      includeWideInAllocation: false,
+      includeTrioInAllocation: false,
+      includeExactaInAllocation: false,
+    });
 
     const withQuinellaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeQuinellaInAllocation: true });
     expect(withQuinellaOn.outcome.route).toBe("mixed");
@@ -211,7 +215,11 @@ describe("isComboBetTypesOff配線: includeQuinellaInAllocationの値でfallback
     // trueなら③no-combo-candidates、falseなら②combo-bet-types-offと異なる値になる
     // (「接続後も一律に無視される」という意味ではないことに注意)。
     const race = raceInput({ rows: allCandidateRows(8) });
-    const base = settings({ includeWideInAllocation: false, includeTrioInAllocation: false });
+    const base = settings({
+      includeWideInAllocation: false,
+      includeTrioInAllocation: false,
+      includeExactaInAllocation: false,
+    });
     const withQuinellaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeQuinellaInAllocation: true });
     const withQuinellaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeQuinellaInAllocation: false });
     // 前提固定: 実際にD-2フォールバック経路(複勝専用。kind="computed")に到達していること。

@@ -186,13 +186,14 @@ describe("D-2フォールバック規則(AC-2・Issue #117): 条件②・条件�
     expect(quinellaAllocations.length).toBeGreaterThan(0);
   });
 
-  it("ワイド・3連複・馬連すべてOFF → 条件②(combo-bet-types-off)でplace-onlyへ落ちること", () => {
+  it("ワイド・3連複・馬連・馬単すべてOFF → 条件②(combo-bet-types-off)でplace-onlyへ落ちること(Issue #125で馬単も条件②に加わったため、明示的にOFFにする)", () => {
     const outcome = buildMixedRaceAllocationWithOutcome(
       fullComboRace(8),
       settings({
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
+        includeExactaInAllocation: false,
       }),
     );
     expect(outcome.outcome.route).toBe("place-only");

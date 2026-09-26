@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ALLOCATION_BET_TYPE_UMABAN_COUNT,
+  buildAllocationBetComboKey,
   buildComboOddsKey,
   type AllocationBetType,
   type AllocationCandidate,
@@ -142,9 +143,24 @@ function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: num
   return record;
 }
 
+/**
+ * n頭(昇順)から順序付きの全ペア(a≠b)を列挙し、一律のオッズ値を割り当てたRecordを作る
+ * (馬単〈exacta〉専用。Issue #125)。`buildAllocationBetComboKey("exacta", pair)`
+ * (唯一のゲートウェイ)でキー化するため、キー生成ロジック自体は複製しない。
+ */
+function fullOrderedOddsRecord(umabans: readonly number[], odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const pair of combinations(umabans, 2)) {
+    const [a, b] = pair as [number, number];
+    record[buildAllocationBetComboKey("exacta", [a, b])] = odds;
+    record[buildAllocationBetComboKey("exacta", [b, a])] = odds;
+  }
+  return record;
+}
+
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio" | "quinella",
+  betType: "wide" | "trio" | "quinella" | "exacta",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -759,31 +775,40 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
  * 「ユーザーがOFFにした」という到達可能な理由であり、既存のワイド・3連複と同じ扱いを
  * 受け入れる設計とする)。したがって馬連の除外を解除する。
  *
- * **Issue #120(#24-E1)で`AllocationBetType`に`exacta`(馬単)が加わったが、appはまだ
- * 馬単の候補を一切作らない(`mixed-candidates.ts`のオッズ配線は#122のスコープ)。**
- * #112当時の馬連と全く同じ理由(原理的に評価不能な券種の¥0 0点表示)で、`exacta`は
- * この配列に含めない(`buildMixedAllocationBreakdown`自体は`ALLOCATION_BET_TYPE_UMABAN_COUNT`
- * の全キーを無条件に集計するため`breakdown.exacta`は`{stake:0,count:0}`として存在するが、
- * `BatchAnalysisView.tsx`は本配列を`.map`するだけなので`exacta`行はそもそも描画されない)。
+ * **Issue #120(#24-E1)で`AllocationBetType`に`exacta`(馬単)が加わったが、当時appはまだ
+ * 馬単の候補を一切作らなかった(`mixed-candidates.ts`のオッズ配線は#122・配分接続は#125の
+ * スコープ)。** #112当時の馬連と全く同じ理由(原理的に評価不能な券種の¥0 0点表示)で、
+ * `exacta`はこの配列に含めていなかった。
+ *
+ * **Issue #125(#24-E3b)で`resolveMixedBetTypes`が`includeExactaInAllocation`設定を
+ * 実際に参照するようになり、馬単はワイド・馬連・3連複と同じ「ユーザーが設定でON/OFFできる、
+ * ONならば実際に評価される」券種になった。** #117での馬連と全く同じ理由で、馬単の除外を
+ * 解除する。
+ * 何を保証していたか(新旧対応表):
+ *   旧: 「exacta(馬単)が含まれないこと」「意図的な除外が['exacta']だけであること」を保証
+ *       → 未接続の間の「¥0 0点」誤表示防止(#112と同型の欠陥予防)
+ *   新: 「exacta(馬単)が含まれること」「意図的な除外が無いこと(全メンバーと一致)」を保証
+ *       → 接続後は#112当時のような原理的評価不能ではなく、既存のワイド・馬連・3連複と
+ *         同じ「ユーザーがOFFにした」到達可能な理由になったため
  */
-describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #120で馬単を除外に追加)", () => {
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #125で馬単の除外を解除)", () => {
   it("内訳表に描画される券種にquinella(馬連)が含まれること(Issue #117でワイド・3連複と対称になったため)", () => {
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("quinella");
   });
 
-  it("内訳表に描画される券種にexacta(馬単)が含まれないこと(Issue #120: #122でオッズ配線するまで#112当時のquinellaと同じ理由で除外する)", () => {
-    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).not.toContain("exacta");
+  it("内訳表に描画される券種にexacta(馬単)が含まれること(Issue #125でワイド・馬連・3連複と対称になったため。#122時点は除外していたが反転した)", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("exacta");
   });
 
-  it("意図的に除外している券種が['exacta']だけであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外していたが、Issue #117でその除外を解除し、Issue #120で馬単を新たに除外に加えた)", () => {
+  it("意図的に除外している券種が無いこと(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し、Issue #117でその除外を解除、#120で馬単を新たに除外し、Issue #125でその除外も解除した)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
     );
-    expect(excluded).toEqual(["exacta"]);
+    expect(excluded).toEqual([]);
   });
 
-  it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→3連複)であること", () => {
-    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toEqual(["place", "win", "wide", "quinella", "trio"]);
+  it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複)であること", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toEqual(["place", "win", "wide", "quinella", "exacta", "trio"]);
   });
 
   it("前提固定(空振り防止): 表示順配列が空でないこと", () => {
@@ -848,6 +873,70 @@ describe("buildMixedAllocationDisplay — display.quinellaNote(Issue #117・AC-5
     // 前提固定(空振り防止): 実際にEVプラスの候補が1件以上あること。
     expect(view.diagnostics.quinella.build.judged.positiveCount).toBeGreaterThan(0);
     expect(view.display.quinellaNote).toBeNull();
+  });
+});
+
+// ============================================================================
+// AC-4(Issue #125): display.exactaNote — wide/trio/quinellaと同じcomboBetTypeNoteを
+// 馬単にも適用すること(quinellaNoteと同じ構造)
+// ============================================================================
+
+describe("buildMixedAllocationDisplay — display.exactaNote(Issue #125・AC-4)", () => {
+  it("馬単が対象外(includeExactaInAllocation=false)のときはnullであること(wide/trio/quinellaが対象外のときと同じくnot-requestedはnull)", () => {
+    const race = raceWithPositiveCombos(8);
+    const view = buildMixedAllocationDisplay(race, settings({ includeExactaInAllocation: false }));
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.diagnostics.exacta.kind).toBe("not-requested");
+    expect(view.display.exactaNote).toBeNull();
+  });
+
+  it("馬単が発売されていない(comboOddsState='unavailable')ときは、comboBetTypeNoteと同じ文言になること(wide/trio/quinellaと同じロジックを共有していることの確認)", () => {
+    const umabans = umabansOf(8);
+    const race = raceWithPositiveCombos(8, {
+      exactaCombo: {},
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        exacta: comboOddsOutcome("exacta", "unavailable"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定(空振り防止): 実際にkind='built'まで到達していること。
+    expect(view.diagnostics.exacta.kind).toBe("built");
+    expect(view.display.exactaNote).toBe(comboBetTypeNote(view.diagnostics.exacta));
+    expect(view.display.exactaNote).not.toBeNull();
+    void umabans;
+  });
+
+  it("馬単にEVプラスの候補があるときはnull(注記なし)であること", () => {
+    const umabans = umabansOf(8);
+    const race = raceWithPositiveCombos(8, {
+      exactaCombo: fullOrderedOddsRecord(umabans, 100000),
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        exacta: comboOddsOutcome("exacta", "available"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.diagnostics.exacta.kind).toBe("built");
+    if (view.diagnostics.exacta.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    // 前提固定(空振り防止): 実際にEVプラスの候補が1件以上あること。
+    expect(view.diagnostics.exacta.build.judged.positiveCount).toBeGreaterThan(0);
+    expect(view.display.exactaNote).toBeNull();
   });
 });
 
@@ -1364,6 +1453,26 @@ describe("AC15: aggregateUnjudgedCounts/totalUnjudgedCount — 券種横断の�
     expect(notRequested.oddsUnfetchedCount).toBe(0);
     expect(notRequested.oddsMalformedCount).toBe(0);
   });
+
+  it("Issue #125(AC-4): 馬単(exacta)のoddsMissingCount/oddsUnfetchedCount/oddsMalformedCountも合算されること(wide/trio/quinellaと同型のComboCandidateDiagnosticsViewを共有するため)", () => {
+    const diagnostics = mixedDiagnostics({
+      place: { kind: "judged", judged: { positiveCount: 1, notPositiveCount: 0 }, unjudged: { oddsMissingCount: 2 } },
+      wide: builtComboDiag({ oddsMissingCount: 3, oddsUnfetchedCount: 5, oddsMalformedCount: 1 }),
+      trio: builtComboDiag({ oddsMissingCount: 1, oddsUnfetchedCount: 0, oddsMalformedCount: 2 }),
+      exacta: builtComboDiag({ oddsMissingCount: 8, oddsUnfetchedCount: 9, oddsMalformedCount: 10 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    // place(2)+wide(3)+trio(1)+exacta(8)=14、oddsUnfetchedCountはwide(5)+trio(0)+exacta(9)=14、
+    // oddsMalformedCountはwide(1)+trio(2)+exacta(10)=13。
+    expect(counts).toEqual({ oddsMissingCount: 14, oddsUnfetchedCount: 14, oddsMalformedCount: 13 });
+  });
+
+  it("Issue #125(AC-4): 馬単がnot-requestedのときは0として扱われること(対象外と判定不能を混同しない)", () => {
+    const notRequested = aggregateUnjudgedCounts(mixedDiagnostics({ exacta: { kind: "not-requested" } }));
+    expect(notRequested.oddsMissingCount).toBe(0);
+    expect(notRequested.oddsUnfetchedCount).toBe(0);
+    expect(notRequested.oddsMalformedCount).toBe(0);
+  });
 });
 
 describe("formatUnjudgedNote — 判定不能件数の注記文言(0件の区分は文言に含めない)", () => {
@@ -1475,6 +1584,10 @@ describe("AC14: COMBO_EV_CALIBRATION_NOTE — 組合せ券種のEV過大評価�
 
   it("Issue #117: 組合せ券種の例示に馬連(quinella)も含むこと(ワイド・3連複だけを挙げる旧文言は、馬連も同じ較正未実施の対象であることを言い落とす)", () => {
     expect(COMBO_EV_CALIBRATION_NOTE).toContain("馬連");
+  });
+
+  it("Issue #125: 組合せ券種の例示に馬単(exacta)も含むこと(ワイド・馬連・3連複だけを挙げる旧文言は、馬単も同じ較正未実施の対象であることを言い落とす)", () => {
+    expect(COMBO_EV_CALIBRATION_NOTE).toContain("馬単");
   });
 });
 
@@ -1716,6 +1829,7 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
     wideNote: null,
     trioNote: null,
     quinellaNote: null,
+    exactaNote: null,
     placeUnavailableNote: null,
     placeOnlyStake: null,
     probabilitySumWarning: null,

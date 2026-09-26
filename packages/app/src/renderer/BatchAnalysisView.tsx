@@ -12,6 +12,7 @@ import {
   evThresholdFootnote,
   formatAllocationSummary,
   formatBetLabel,
+  formatComboBetLabel,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
 } from "./bet-allocation-view.js";
@@ -499,7 +500,7 @@ function renderMixedAllocationBlock(
           {display.split.visible.map((a) => (
             <tr key={`${a.betType}-${a.umabans.join("-")}`}>
               <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
-              <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
+              <td style={tdStyle}>{formatComboBetLabel(a.betType, a.umabans)}</td>
               <td style={tdStyle}>{formatYen(a.stake)}</td>
             </tr>
           ))}
@@ -530,7 +531,7 @@ function renderMixedAllocationBlock(
               {block.rows.map((a) => (
                 <tr key={`${a.betType}-${a.umabans.join("-")}`}>
                   <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
-                  <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
+                  <td style={tdStyle}>{formatComboBetLabel(a.betType, a.umabans)}</td>
                   <td style={tdStyle}>{formatYen(a.stake)}</td>
                 </tr>
               ))}
