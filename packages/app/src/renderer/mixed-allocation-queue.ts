@@ -2,7 +2,7 @@
  * mixed-allocation-queue — 混在配分の計算をレース単位に分割し、1ステップ=1レースで
  * 進める「実行役」(Issue #110・#24-C2)。
  *
- * `mixed-allocation-cache.ts`(値の記憶。キーの9項目・比較ロジックの唯一の定義)と
+ * `mixed-allocation-cache.ts`(値の記憶。キーの11項目・比較ロジックの唯一の定義)と
  * 組み合わせて使う。本モジュール自体はReactに依存しない純粋なオブジェクト/関数として実装し、
  * `BatchAnalysisView.tsx`からは1インスタンスを`useRef`で保持して呼び出すだけの薄い配線にする
  * (既存の`mixedAllocationCacheRef`と同じ流儀)。

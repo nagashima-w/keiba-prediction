@@ -122,13 +122,17 @@ export const BET_ALLOCATION_LABELS = {
  * 更新する。v1.10.4以降(Issue #122)、`includeComboOdds`はワイド・3連複・馬連に加えて
  * 馬単オッズも取得している(ワイド・3連複・馬連の**後**に馬単を1レースあたり常に
  * 1リクエスト追加で取得する)。**ただし「配分に使うかどうかは下記の設定に従います」という
- * 列挙(ワイド・馬連・三連複の3項目)には馬単を加えない**: `includeExactaInAllocation`と
- * いう設定自体がまだ存在せず(`ALLOCATION_BET_TYPE_LABELS`参照)、実際には配分に一切
- * 使われていないため、列挙に加えると「馬単を配分に使う設定がある」という事実に反する
- * 記述になる(足すこと自体が#116と同種の欠陥を新たに作る)。代わりに「馬単は現在は
- * 取得のみで配分には使わない」という取得/配分利用の状態を明示する一文を末尾に添える。
- * `includeExactaInAllocation`が新設された時点(#123)で、この一文を削り列挙を4項目に
- * 直すこと。
+ * 列挙(ワイド・馬連・三連複の3項目)には馬単を加えない**: `includeExactaInAllocation`という
+ * 設定自体は#24-E3a(Issue #124)で新設したが(`shared/settings.ts`の`AppSettings`参照)、
+ * この画面のチェックボックス自体を追加するのは#24-E3b(Issue #125)であり、それより前に
+ * 列挙へ「馬単を配分に使う」を加えると、存在しないチェックボックスを指す文言になり事実と
+ * 食い違う(`includeExactaInAllocation`は`resolveMixedBetTypes`にまだ接続されておらず、
+ * 実際には配分に一切使われていない。足すこと自体が#116と同種の欠陥を新たに作る)。代わりに
+ * 「馬単は現在は取得のみで配分には使わない」という取得/配分利用の状態を明示する一文を
+ * 末尾に添える。**#24-E3b(Issue #125)でチェックボックスを追加した時点**で、この一文を
+ * 削り列挙を4項目に直すこと(旧: 「#123で追加された時点」という記述は、E3a/E3b/E3cへの
+ * 分割〈2026-09-25〉より前に書かれたもので、分割後の実際の担当タスクとは#123ではなく
+ * #125である。#24-E3a・Issue #124着手前ゲートでの是正)。
  */
 export const INCLUDE_COMBO_ODDS_LABELS = {
   /** 設定画面のチェックボックスのラベル。 */
@@ -308,6 +312,19 @@ export interface AppSettings {
    * Issue #117(#24-D3b-2)で完了した(この設定を変えると実際に配分結果が変わる)。
    */
   readonly includeQuinellaInAllocation: boolean;
+  /**
+   * 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。既定true(ユーザー指定:
+   * 新しい券種は配分の対象に初期値で含める。`CLAUDE.md`「現在の優先順位」参照)。
+   * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
+   * `includeTrioInAllocation`/`includeQuinellaInAllocation` と同じ(そちらのJSDoc参照)。
+   *
+   * **#24-E3a時点ではこの設定は画面に出ない(`SettingsView.tsx`にチェックボックスを追加しない)。**
+   * 候補ビルダー(`shared/mixed-race-allocation.ts` の `resolveMixedBetTypes`)もまだ馬単の
+   * 候補を作らないため、この設定を変えても配分結果は変わらない(D-2フォールバック規則
+   * `isComboBetTypesOff` にもまだ加えない)。実際に画面へ出し、候補ビルダー・フォールバック
+   * 規則に組み込むのは #24-E3b(Issue #125)。
+   */
+  readonly includeExactaInAllocation: boolean;
 }
 
 /**
@@ -352,6 +369,12 @@ export interface MaskedSettings {
    * そのまま返す。対応する画面トグル(`SettingsView.tsx`)はIssue #117(#24-D3b-2)で追加した。
    */
   readonly includeQuinellaInAllocation: boolean;
+  /**
+   * 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。往復編集フォームとして表示するため
+   * そのまま返す。#24-E3a時点では対応する画面トグルが無いため往復対象は無いが、往復自体は
+   * 他の配分対象設定と同じ形にしておく(E3bでトグルを追加したときの配線を変えないため)。
+   */
+  readonly includeExactaInAllocation: boolean;
 }
 
 /**
@@ -404,6 +427,11 @@ export interface SettingsUpdate {
    * 同じ(既定true・boolean以外は既定へフォールバック)。
    */
   readonly includeQuinellaInAllocation: boolean;
+  /**
+   * 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。意味論は`includeWideInAllocation`と
+   * 同じ(既定true・boolean以外は既定へフォールバック)。
+   */
+  readonly includeExactaInAllocation: boolean;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */

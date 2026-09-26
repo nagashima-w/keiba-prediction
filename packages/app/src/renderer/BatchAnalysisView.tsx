@@ -130,7 +130,7 @@ export interface BatchAnalysisViewProps {
    * 設定を変えていなくても全レースを再計算してしまう。Appは分析タブへ切り替わっても
    * アンマウントされないため、Appが`useRef`で保持し、propsとして受け取ることで
    * 「戻ったときにそのまま当たる」を実現する(AC-5)。
-   * キーの定義(9項目の全数列挙表)は`mixed-allocation-cache.ts`のJSDocが唯一の正であり、
+   * キーの定義(11項目の全数列挙表)は`mixed-allocation-cache.ts`のJSDocが唯一の正であり、
    * 本コンポーネントはこれを組み立てて`peek`/`step`(`mixed-allocation-queue.ts`)に渡すだけ。
    */
   readonly mixedAllocationCache: MixedAllocationCache<AllocationOutcome<MixedRaceAllocationDisplayView>>;
@@ -660,6 +660,7 @@ export function BatchAnalysisView(
       includeWideInAllocation: s.includeWideInAllocation,
       includeTrioInAllocation: s.includeTrioInAllocation,
       includeQuinellaInAllocation: s.includeQuinellaInAllocation,
+      includeExactaInAllocation: s.includeExactaInAllocation,
     };
   };
   // 実際の計算(逐次フォールバック用)。既存の同期経路(#110時点の実装)と全く同じ関数・

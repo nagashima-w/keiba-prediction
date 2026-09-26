@@ -87,6 +87,14 @@ export interface SettingsFormState {
    * 追加した。
    */
   readonly includeQuinellaInAllocation: boolean;
+  /**
+   * 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。既定true。
+   * #24-E3a時点では対応する切替アクション(SettingsAction)を持たない
+   * (SettingsView.tsxにトグルを出さないため。E3bで「馬単配分対象切替」アクションを追加する)。
+   * それでも読込・保存の往復・isDirty判定の対象には含める(将来トグルを追加したときの配線を
+   * この時点で通しておく)。
+   */
+  readonly includeExactaInAllocation: boolean;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -211,6 +219,8 @@ export interface SettingsSnapshot {
   readonly includeTrioInAllocation: boolean;
   /** 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。 */
   readonly includeQuinellaInAllocation: boolean;
+  /** 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。 */
+  readonly includeExactaInAllocation: boolean;
 }
 
 /** 空文字ベースの初期スナップショットを作る。 */
@@ -232,6 +242,7 @@ function emptySnapshot(): SettingsSnapshot {
     includeWideInAllocation: false,
     includeTrioInAllocation: false,
     includeQuinellaInAllocation: false,
+    includeExactaInAllocation: false,
   };
 }
 
@@ -256,6 +267,7 @@ export function createInitialSettingsState(): SettingsFormState {
     includeWideInAllocation: false,
     includeTrioInAllocation: false,
     includeQuinellaInAllocation: false,
+    includeExactaInAllocation: false,
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -296,6 +308,7 @@ function applyMasked(
   const includeWideInAllocation = settings.includeWideInAllocation;
   const includeTrioInAllocation = settings.includeTrioInAllocation;
   const includeQuinellaInAllocation = settings.includeQuinellaInAllocation;
+  const includeExactaInAllocation = settings.includeExactaInAllocation;
   return {
     ...state,
     loaded: true,
@@ -317,6 +330,7 @@ function applyMasked(
     includeWideInAllocation,
     includeTrioInAllocation,
     includeQuinellaInAllocation,
+    includeExactaInAllocation,
     savedSnapshot: {
       discordWebhookUrl,
       evThreshold,
@@ -332,6 +346,7 @@ function applyMasked(
       includeWideInAllocation,
       includeTrioInAllocation,
       includeQuinellaInAllocation,
+      includeExactaInAllocation,
     },
   };
 }
@@ -485,6 +500,7 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     includeWideInAllocation: state.includeWideInAllocation,
     includeTrioInAllocation: state.includeTrioInAllocation,
     includeQuinellaInAllocation: state.includeQuinellaInAllocation,
+    includeExactaInAllocation: state.includeExactaInAllocation,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
@@ -537,6 +553,9 @@ export function isDirty(state: SettingsFormState): boolean {
     return true;
   }
   if (state.includeQuinellaInAllocation !== snap.includeQuinellaInAllocation) {
+    return true;
+  }
+  if (state.includeExactaInAllocation !== snap.includeExactaInAllocation) {
     return true;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

@@ -11,7 +11,10 @@
  *
  * - 設定エコー8列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
  *   include_wide/include_trio/include_quinella): 呼び出し時に渡した `MixedAllocationSettings`
- *   (8項目)をそのまま写す。route に関わらず常に非null(実行時に確定している値のため)。
+ *   のうちこの8項目をそのまま写す。route に関わらず常に非null(実行時に確定している値のため)。
+ *   **#24-E3a(Issue #124)で`MixedAllocationSettings`は9項目(`includeExactaInAllocation`追加)に
+ *   なったが、この設定エコーは8列のまま据え置く**(`settingsColumnsOf`が9項目目を読まない。
+ *   全項目を機械的にエコーする契約ではない。詳細は下記`AnalysisAllocationSettings`のJSDoc参照)。
  *
  *   **#24-D3a(Issue #115)で`MixedAllocationSettings`は8項目(`includeQuinellaInAllocation`追加)に
  *   なったが、当初(Issue #117まで)はこの設定エコーを7列のまま据え置いていた**
@@ -90,7 +93,7 @@ import type {
 } from "../shared/mixed-race-allocation.js";
 
 /**
- * `AnalysisPipelineDeps.allocationSettings` が持つ7項目(`evThreshold` を含まない)。
+ * `AnalysisPipelineDeps.allocationSettings` が持つ8項目(`evThreshold` を含まない)。
  * `evThreshold` は `deps.evConfig ?? DEFAULT_EV_CONFIG` から別途導出し、二重ソースを
  * 作らない(analysis-pipeline.ts 側の責務。#59 3節)。
  *
@@ -103,6 +106,16 @@ import type {
  * (7→8項目)まで値を運ぶ配管の一部としてのみだった(`resolveMixedBetTypes`・
  * `isComboBetTypesOff`への実際の接続はIssue #117(#24-D3b-2)で完了。
  * `shared/mixed-race-allocation.ts`のJSDoc参照)。
+ *
+ * `includeExactaInAllocation`(#24-E3a・Issue #124)は7→8項目化した追加分。**メタ行への
+ * 書き込みは接続しない**: `settingsColumnsOf`は8列(`bankroll`/`perRaceCap`/`kellyFraction`/
+ * `evThreshold`/`includeComboOdds`/`includeWide`/`includeTrio`/`includeQuinella`)のまま
+ * このフィールドを読まない(#59が固定した「列一覧は固定・増減は停止条件」を#24-E3aでは
+ * 解除しない。列を読む人〈過去分析再表示の「馬単: ON/OFF」〉が実在するに至るタスク=
+ * Issue #126〈#24-E3c〉で解除する見込み)。この型に持たせる目的は`MixedAllocationSettings`
+ * (8→9項目)まで値を運ぶ配管の一部としてのみであり、`resolveMixedBetTypes`・
+ * `isComboBetTypesOff`への実際の接続は#24-E3a時点では行わない(Issue #125〈#24-E3b〉のスコープ。
+ * `shared/mixed-race-allocation.ts`のJSDoc参照)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;
@@ -112,11 +125,12 @@ export interface AnalysisAllocationSettings {
   readonly includeWideInAllocation: boolean;
   readonly includeTrioInAllocation: boolean;
   readonly includeQuinellaInAllocation: boolean;
+  readonly includeExactaInAllocation: boolean;
 }
 
 /**
- * 7項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
- * `buildMixedRaceAllocationWithOutcome` が要求する8項目の `MixedAllocationSettings` を作る。
+ * 8項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
+ * `buildMixedRaceAllocationWithOutcome` が要求する9項目の `MixedAllocationSettings` を作る。
  */
 export function toMixedAllocationSettings(
   settings: AnalysisAllocationSettings,

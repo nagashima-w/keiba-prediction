@@ -264,6 +264,9 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     // (unfetched)になり、配分額・構成比の出力は変わらない。一方、判定不能の分類自体は
     // 実行されるため、所要時間にはわずかな増分がありうる(実測で確認すること)。
     includeQuinellaInAllocation: true,
+    // #24-E3a(Issue #124)で追加。候補ビルダーはまだ馬単の候補を作らないため
+    // (resolveMixedBetTypes未接続)、この値は感度表の出力に一切影響しない。
+    includeExactaInAllocation: true,
   };
 
   // ウォームアップ1回(JITの影響を減らす)を除いた上で、実運用の1レース分の呼び出し

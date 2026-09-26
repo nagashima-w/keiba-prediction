@@ -196,6 +196,10 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeWideInAllocation: true,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
+        // #24-E3a(Issue #124): メタ行のスキーマは#59で凍結されたまま(既存8列を保つ)なので、
+        // trueにしてもメタ行のincludeWide/includeTrio/includeQuinella以外は一切変わらないはず
+        // (下のtoEqualで固定。"includeExacta"というキー自体が無い)。
+        includeExactaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -246,6 +250,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
       },
     };
     // runAnalysis自体が例外を投げず正常終了すること(分析本体を失わない)。
@@ -301,6 +306,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -330,6 +336,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: false,
+        includeExactaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -342,17 +349,20 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
   });
 
   /**
-   * Issue #122(AC-4): 馬単(exacta)の`includeExactaInAllocation`設定・`resolveMixedBetTypes`
-   * への接続は#123のスコープであり、本Issueの時点では`raceForAllocation.exactaCombo`が
-   * production の配分結果(保存される`analysis_bets`)に影響することはない
-   * (`ALL_MIXED_CANDIDATE_BET_TYPES`が`"exacta"`を含まないため、Issue #117以前の
-   * quinellaComboと同じ状態)。そのため「保存された配分にexacta由来の買い目が入ること」を
-   * 直接確認するAC-10型のテストは書けない。代わりに、本ファイル冒頭で
-   * `buildMixedRaceAllocationWithOutcome`をラップしている`buildMixedRaceAllocationWithOutcomeMock`
-   * (実装へフォールスルーする。#59導入時点からの既存の仕組み)の呼び出し引数を直接捕捉し、
-   * `analysis-pipeline.ts`が組み立てる`raceForAllocation`に`exactaCombo`・`comboOdds.exacta`が
-   * 実際に渡っていることを確認する(殺す変異: `raceForAllocation`のexactaComboの条件付き
-   * spreadを落とす。設定に依存しないため#123を待たずに固定できる)。
+   * Issue #122(AC-4): 馬単(exacta)の`resolveMixedBetTypes`への接続は#24-E3b(Issue #125)の
+   * スコープであり、本Issueの時点では`raceForAllocation.exactaCombo`が production の配分結果
+   * (保存される`analysis_bets`)に影響することはない(`ALL_MIXED_CANDIDATE_BET_TYPES`が
+   * `"exacta"`を含まないため、Issue #117以前のquinellaComboと同じ状態)。
+   * `includeExactaInAllocation`という設定自体は#24-E3a(Issue #124)で新設したが、その配管も
+   * `resolveMixedBetTypes`には接続しない(#24-E3aのJSDoc・`exacta-allocation-setting-wiring.test.ts`
+   * 参照)ため、この結論(exactaがまだ配分結果に影響しない)自体は変わらない。そのため
+   * 「保存された配分にexacta由来の買い目が入ること」を直接確認するAC-10型のテストは書けない。
+   * 代わりに、本ファイル冒頭で`buildMixedRaceAllocationWithOutcome`をラップしている
+   * `buildMixedRaceAllocationWithOutcomeMock`(実装へフォールスルーする。#59導入時点からの
+   * 既存の仕組み)の呼び出し引数を直接捕捉し、`analysis-pipeline.ts`が組み立てる
+   * `raceForAllocation`に`exactaCombo`・`comboOdds.exacta`が実際に渡っていることを確認する
+   * (殺す変異: `raceForAllocation`のexactaComboの条件付きspreadを落とす。設定に依存しないため
+   * #24-E3b・E3cを待たずに固定できる)。
    */
   it("Issue #122(AC-4): raceForAllocationにexactaCombo・comboOdds.exactaが渡っていること(raceForAllocationのexactaComboのspreadを落とす変異を検知)", async () => {
     const saved: AnalysisRecord[] = [];
@@ -392,6 +402,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeWideInAllocation: false,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
+        includeExactaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -407,8 +418,9 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     expect(raceForAllocation.exactaCombo).toEqual({ "0102": 50000, "0201": 60000 });
     expect(raceForAllocation.comboOdds?.exacta).toEqual(exactaOutcome);
 
-    // #123未着手のため、exactaは実際にはどの配分にも影響しないこと(既定挙動が不変であることの
-    // 確認。AC-6の趣旨と同じ)。
+    // #24-E3b(Issue #125)未着手のため、includeExactaInAllocation=trueを渡していても
+    // exactaは実際にはどの配分にも影響しないこと(既定挙動が不変であることの確認。
+    // AC-6の趣旨と同じ)。
     const allocation = saved[0]!.allocation;
     expect(allocation).not.toBeUndefined();
     const exactaBets = allocation!.bets.filter((b) => b.betType === "exacta");

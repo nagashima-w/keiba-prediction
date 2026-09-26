@@ -108,7 +108,7 @@ export interface AnalysisPipelineDeps {
   /** 分析結果の保存(通常は AnalysisStore.saveAnalysis)。採番IDを返す。 */
   readonly saveAnalysis: (record: AnalysisRecord) => number;
   /**
-   * 配分提案(Issue #59)を計算するための設定(6項目。`evThreshold`を含まない——EV閾値は
+   * 配分提案(Issue #59)を計算するための設定(8項目。`evThreshold`を含まない——EV閾値は
    * `evConfig ?? DEFAULT_EV_CONFIG`から導出し二重ソースを作らない。#59 3節)。
    * `null`は「この呼び出しでは配分計算をしない」という明示的な選択を表す(required-nullable。
    * optionalにしないことで、構築側〈pipeline-deps.ts〉に選択を強制する。#59着手前ゲート)。

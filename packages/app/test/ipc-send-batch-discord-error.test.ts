@@ -84,6 +84,7 @@ async function saveValidWebhookUrl(): Promise<void> {
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
   };
   await handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 }

@@ -34,7 +34,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
     }
   });
 
-  it("config.allocationSettings(6項目)を渡すと、includeComboOddsを合成した7項目がdeps.allocationSettingsへ届くこと(includeComboOdds=true)", async () => {
+  it("config.allocationSettings(7項目)を渡すと、includeComboOddsを合成した8項目がdeps.allocationSettingsへ届くこと(includeComboOdds=true)", async () => {
     const r = createPipelineDeps({
       dbPath: ":memory:",
       includeComboOdds: true,
@@ -45,6 +45,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeWideInAllocation: true,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
       },
     });
     try {
@@ -56,6 +57,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeWideInAllocation: true,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
       });
       // 同じincludeComboOdds(true)がscrapeRaceの第3引数にも届いていること(単一解決の実証)。
       await r.deps.scrape(parseRaceId("202605020811"));
@@ -76,6 +78,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
       },
     });
     try {

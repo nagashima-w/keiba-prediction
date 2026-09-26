@@ -42,8 +42,9 @@
     値付け(`ev/combo-bet-allocation.ts`の`buildWinCandidates`が同時分布モデルの順序付き
     outcome空間から導出した1着確率×単勝オッズでEVを算出する。複勝〈3着内〉確率では値付けしない)
   - **馬連は配分提案・画面表示まで含めて対応済み**(#24-D3シリーズ)。**馬単はcore・確定払戻の
-    取込・オッズ取得までは完了しているが、配分・画面への接続はまだ**(#24-Eシリーズ。
-    #123〈#24-E3〉で対応予定)。三連単・枠連・枠単は引き続き未対応(拡張のロードマップと
+    取込・オッズ取得までは完了しており、配分に含めるかの設定`includeExactaInAllocation`も
+    Issue #124(#24-E3a。既定ON)で先行配管したが、配分・画面への接続はまだ**(#24-Eシリーズ。
+    #125〈#24-E3b〉で対応予定)。三連単・枠連・枠単は引き続き未対応(拡張のロードマップと
     技術的な依存関係はGitHub Issue #22)。馬連対応の経緯:
     core の確率・候補ビルダー・配分(Issue #112・v1.9.5。`buildQuinellaCandidates` が順序付き
     outcome 空間から1着・2着の集合を周辺化して的中確率を求める。上位3着の集合から求めると
@@ -69,9 +70,10 @@
     `shared/mixed-candidates.ts`の候補ビルダー(`buildExactaCandidatesForBetType`)対応
     (Issue #122・#24-E2・v1.10.5。`includeComboOdds: true`のとき、既存のワイド・3連複・馬連の**後**に
     馬単オッズを1リクエスト追加で取得する〈中央`type=6`・地方`type=b6`、いずれも単発
-    リクエストで完結〉)。**配分の券種選択への接続・画面表示は未着手**(#123のスコープ。
-    `ALL_MIXED_CANDIDATE_BET_TYPES`・`resolveMixedBetTypes`は`"exacta"`を含まないため、
-    利用者から見える配分結果はIssue #122の時点では変わらない)
+    リクエストで完結〉)→ 配分に含めるかの設定`includeExactaInAllocation`の配管
+    (Issue #124・#24-E3a。既定ON)。**配分の券種選択への接続・画面表示は未着手**(#125〈#24-E3b〉の
+    スコープ。`ALL_MIXED_CANDIDATE_BET_TYPES`・`resolveMixedBetTypes`は`"exacta"`を含まないため、
+    利用者から見える配分結果はIssue #124の時点でも変わらない)
 - バージョン: ルート/アプリ `1.10.5`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
@@ -442,13 +444,15 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   馬単はIssue #122・#24-E2で追加。既存のワイド・3連複・馬連の**後**に1レース1リクエスト
   追加で取得する)と、取得したオッズを実際に配分へ使うか(`includeWideInAllocation`/
   `includeQuinellaInAllocation`/`includeTrioInAllocation`・それぞれ既定ON)は別設定に
-  分けている(取得と採用の分離)。**馬単には`includeExactaInAllocation`に相当する設定が
-  まだ無く**(#123のスコープ)、取得はしても配分には一切使われない(下記フォールバック規則・
-  `ALL_MIXED_CANDIDATE_BET_TYPES`のいずれにも`"exacta"`を含めていないため)。
+  分けている(取得と採用の分離)。馬単用の`includeExactaInAllocation`(既定ON。Issue #124・
+  #24-E3a)も設定として保存・受け渡しされるが、**現時点では券種の選択〈`resolveMixedBetTypes`〉は
+  この値を読まず、設定画面にも出ない**(配分提案が馬単を扱うのは#24-E3b〈Issue #125〉から。
+  取得はしても配分には一切使われない。下記フォールバック規則・`ALL_MIXED_CANDIDATE_BET_TYPES`の
+  いずれにも`"exacta"`を含めていないため)。
   `includeQuinellaInAllocation`はIssue #115・#24-D3aで設定として先行配管し、Issue #117で
   券種の選択(`resolveMixedBetTypes`)・D-2フォールバック規則・設定画面のチェックボックスへ
-  実際に接続した。次のいずれかに該当すると、複勝専用の従来経路(`buildRaceAllocation`)の
-  結果を**そのまま**使う(単一定義の原則によるフォールバック): オッズ取得OFF /
+  実際に接続した(馬単も同じ経緯を辿る見込み)。次のいずれかに該当すると、複勝専用の従来経路
+  (`buildRaceAllocation`)の結果を**そのまま**使う(単一定義の原則によるフォールバック): オッズ取得OFF /
   ワイド・馬連・三連複がすべて配分対象OFF / ワイド・馬連・三連複の候補合計が0件。
   **頭数不可(4以下・5〜7頭)は複勝候補だけを除外し、レース全体はゲートしない**
   (ワイド・馬連・三連複は複勝と異なり頭数による発売制約を受けないため)。EV判定閾値は

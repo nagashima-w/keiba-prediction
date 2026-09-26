@@ -49,6 +49,7 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
     ...overrides,
   };
 }
@@ -177,6 +178,45 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(flipped.includeWideInAllocation).toBe(false);
     expect(flipped.includeTrioInAllocation).toBe(true);
     expect(flipped.includeQuinellaInAllocation).toBe(false);
+  });
+
+  it("読込成功でincludeExactaInAllocation(#24-E3a・Issue #124)を反映すること(OFF/ON両方向)。対応するUIトグルはまだ無いが、フォーム状態としては保持・往復させる", () => {
+    expect(
+      loadedState(fakeMasked({ includeExactaInAllocation: false }))
+        .includeExactaInAllocation,
+    ).toBe(false);
+    expect(
+      loadedState(fakeMasked({ includeExactaInAllocation: true }))
+        .includeExactaInAllocation,
+    ).toBe(true);
+  });
+
+  it("includeExactaInAllocationが他の配分対象boolean項目(includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation)と取り違えられないこと", () => {
+    const s = loadedState(
+      fakeMasked({
+        includeWideInAllocation: true,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: true,
+        includeExactaInAllocation: false,
+      }),
+    );
+    expect(s.includeWideInAllocation).toBe(true);
+    expect(s.includeTrioInAllocation).toBe(false);
+    expect(s.includeQuinellaInAllocation).toBe(true);
+    expect(s.includeExactaInAllocation).toBe(false);
+
+    const flipped = loadedState(
+      fakeMasked({
+        includeWideInAllocation: false,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: false,
+        includeExactaInAllocation: true,
+      }),
+    );
+    expect(flipped.includeWideInAllocation).toBe(false);
+    expect(flipped.includeTrioInAllocation).toBe(true);
+    expect(flipped.includeQuinellaInAllocation).toBe(false);
+    expect(flipped.includeExactaInAllocation).toBe(true);
   });
 
   it("各フィールドの入力アクションで値を更新する", () => {
@@ -438,6 +478,17 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     s = settingsReducer(s, { type: "馬連配分対象切替", value: true });
     expect(buildUpdate(s).includeQuinellaInAllocation).toBe(true);
   });
+
+  it("includeExactaInAllocation(#24-E3a)を含めること(読込値どおり、OFF/ON両方向。対応するUIトグルが無いため切替アクションではなく読込値の往復で確認する)", () => {
+    expect(
+      buildUpdate(loadedState(fakeMasked({ includeExactaInAllocation: false })))
+        .includeExactaInAllocation,
+    ).toBe(false);
+    expect(
+      buildUpdate(loadedState(fakeMasked({ includeExactaInAllocation: true })))
+        .includeExactaInAllocation,
+    ).toBe(true);
+  });
 });
 
 describe("isDirty(未保存インジケータ、Issue #11)", () => {
@@ -570,6 +621,16 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
       type: "馬連配分対象切替",
       value: !base.includeQuinellaInAllocation,
     });
+    expect(isDirty(changed)).toBe(true);
+  });
+
+  it("includeExactaInAllocation(#24-E3a)がsavedSnapshotと異なればdirty判定されること(対応する切替アクションがまだ無いため、読込直後の状態を直接組み立てて検証する。E3bでトグルを追加したときisDirtyの比較漏れが起きないことの土台)", () => {
+    const base = loadedState();
+    expect(isDirty(base)).toBe(false);
+    const changed: SettingsFormState = {
+      ...base,
+      includeExactaInAllocation: !base.includeExactaInAllocation,
+    };
     expect(isDirty(changed)).toBe(true);
   });
 });

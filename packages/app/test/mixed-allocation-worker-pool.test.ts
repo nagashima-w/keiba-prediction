@@ -29,6 +29,7 @@ function key(overrides: Partial<MixedAllocationCacheKey> = {}): MixedAllocationC
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
     ...overrides,
   };
 }
