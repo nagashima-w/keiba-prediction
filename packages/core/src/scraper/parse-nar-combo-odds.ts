@@ -37,8 +37,8 @@
  *
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
- * | オッズ文字列(下限・単一値。td.Oddsの直接テキストノード) | `parseNarComboOdds`(`toOddsNumber`) | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(地方3連複55件中5件がカンマ入り)。`parse-nar-combo-odds.test.ts`「桁区切りカンマ」「値の解釈」describe |
- * | オッズ文字列(上限。"下限 - 上限"レンジのハイフン以降。ワイドのみ) | `parseNarComboOdds`(レンジ分割+`toOddsNumber`) | あり | null化(レンジとして分割できない場合は下限・上限とも null) | 同上 |
+ * | オッズ文字列(下限・単一値。td.Oddsの直接テキストノード) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(地方3連複55件中5件がカンマ入り)。`parse-nar-combo-odds.test.ts`「桁区切りカンマ」「値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts` と共有しており、契約は5モジュール・呼び出し箇所13で統一済み(Issue #73で是正。内訳・再現コマンドは `parse-combo-odds.ts` 冒頭JSDoc参照) |
+ * | オッズ文字列(上限。"下限 - 上限"レンジのハイフン以降。ワイドのみ) | `parseNarComboOdds`(レンジ分割+同上`toOddsNumber`) | あり | null化(レンジとして分割できない場合は下限・上限とも null) | 同上 |
  * | 人気(このドキュメント種別に列自体が存在しない) | `parseNarComboOdds` | あり | 対象外(常にnull固定。実測でこの表示種別に人気列が無いことを確認済みのため防御ではなく仕様) | `parse-nar-combo-odds.test.ts`「値の解釈」describe |
  * | 馬番(td.Oddsのid属性由来) | `decodeCellId`(`validateComboUmabans`経由) | あり | throw(1〜18範囲外・昇順違反〈重複含む〉を検出) | `parse-nar-combo-odds.test.ts`「構造の検証」describe |
  * | 組の要素数(セルidの数値グループ数が券種〈comboSize〉と不一致。code-reviewer指摘5・#14の教訓「表を作る過程で穴が見つかる」を踏まえた全数走査で発見) | `decodeCellId`(comboSizeで2/3グループ固定の正規表現を選択) | あり | throw(anchoredな正規表現が一致しない。例: `_b5_c0_1_2_3`〈3グループ〉をwideパーサ〈2グループ想定〉に渡すと不一致) | `parse-nar-combo-odds.test.ts`「構造の検証」describe「セルidの数値グループ数が券種と不一致」it |
@@ -48,13 +48,14 @@
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
+import { toOddsNumber } from "./odds-number.js";
 import { NAR_COMBO_ODDS_SELECTORS as SEL } from "./selectors.js";
 import {
-  buildComboOddsCellMap,
+  buildComboOddsCellMapFor,
   buildComboOddsKey,
   COMBO_SIZE,
   ComboOddsKeyError,
-  validateComboUmabans,
+  validateComboUmabansFor,
   type ComboBetType,
   type ComboOddsCell,
   type ComboOddsEntry,
@@ -63,7 +64,7 @@ import {
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** 地方ワイド・3連複オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
+/** 地方ワイド・3連複・馬単・馬連・三連単オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
 export class NarComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -71,8 +72,22 @@ export class NarComboOddsParseError extends Error {
   }
 }
 
-/** 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複)。 */
-const ID_MARKER: Record<ComboBetType, string> = { wide: "b5", trio: "b7" };
+/**
+ * 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複、"b6"=馬単、"b4"=馬連、
+ * "b8"=三連単)。馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md`
+ * §3.2・`fixtures/nar_odds_b6_202654071210.html`のセルid`chk_..._b6_c0_..._..._`で再現可能)。馬連の
+ * 値も同じ#24-A(#103)の実測で確定(同docs §3.2、`fixtures/nar_odds_b4_202654071210.html`の
+ * セルid`chk_..._b4_c0_..._..._`で再現可能。Issue #113・#24-D2)。三連単の値は#127の実測で確定
+ * (`docs/trifecta-odds-investigation.md` §3.1、`fixtures/nar_odds_b8_jiku5_202654071210.html`の
+ * セルid`chk_..._b8_c0_..._..._..._`で再現可能。Issue #130・#25-D)。
+ */
+const ID_MARKER: Record<ComboBetType, string> = {
+  wide: "b5",
+  trio: "b7",
+  exacta: "b6",
+  quinella: "b4",
+  trifecta: "b8",
+};
 
 /**
  * `unavailable`の理由(生信号のみ。boss裁定2026-08-07)。
@@ -134,18 +149,6 @@ export type NarComboOddsParseResult =
   | { readonly state: "available"; readonly odds: ReadonlyMap<string, ComboOddsCell> }
   | { readonly state: "unavailable"; readonly reason: NarComboOddsUnavailableReason };
 
-const PLAIN_NUMBER = /^[0-9]+(\.[0-9]+)?$/;
-/** 桁区切りカンマ付き数値(例: "1,172.4")。3桁ごとの区切りのみ許容し、不正な区切りは拒否する。 */
-const GROUPED_NUMBER = /^[0-9]{1,3}(,[0-9]{3})*(\.[0-9]+)?$/;
-
-/** オッズ文字列(桁区切りカンマ許容)を数値化する。非数値・未確定("---.-"等)は null。 */
-function toOddsNumber(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (PLAIN_NUMBER.test(trimmed)) return Number(trimmed);
-  if (GROUPED_NUMBER.test(trimmed)) return Number(trimmed.replace(/,/g, ""));
-  return null;
-}
-
 /**
  * td.Odds要素の「直接の」テキストノードのみを連結して返す(子要素のテキストを含めない)。
  * 同一id同居の隠しinput/labelの文字混入を構造的に防ぐ(input自体はテキストノードを
@@ -194,7 +197,10 @@ function decodeCellId(id: string, betType: ComboBetType): number[] {
   }
   const umabans = m.slice(1).map((s) => Number(s));
   try {
-    validateComboUmabans(umabans, comboSize);
+    // betType別の順序方針で検証する(Issue #106・#24-B): 馬単(exacta)は着順が意味を持つため
+    // 昇順を要求しない(`validateComboUmabansFor`が振り分ける)。理由はparse-combo-odds.tsの
+    // 同種コメント参照。
+    validateComboUmabansFor(betType, umabans, comboSize);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new NarComboOddsParseError(`${e.message}(id="${id}")`);
@@ -225,15 +231,18 @@ function documentSignals($: CheerioAPI): DocumentSignals {
 }
 
 /**
- * 地方ワイド・3連複オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
+ * 地方ワイド・3連複・馬単・馬連・三連単オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7): オッズ文書として正当と判定できない
- * HTML、またはセルidから馬番を復元できない(範囲外・昇順違反)場合は throw する。
+ * HTML、またはセルidから馬番を復元できない(範囲外・重複。馬単は昇順を要求しない。
+ * Issue #106・#24-B)場合は throw する。
  * 文書としては正当だが組合せセルが1件も見つからない場合(発売なし・未発売・型の取り違え等、
  * 区別できない事実を型で偽らない。受け入れ条件10)は `unavailable` に分類する(throwしない)。
+ * 馬単(exacta)・馬連(quinella)は3連複と同じく単一値の券種として扱う
+ * (oddsMax=null固定。下記`else`分岐。馬連はIssue #113・#24-D2)。
  *
- * @param html odds/index.html?type=b5|b7 または odds_get_form.html のHTML文字列
- * @param betType "wide"(b5)または"trio"(b7)
+ * @param html odds/index.html?type=b5|b7|b6 または odds_get_form.html のHTML文字列
+ * @param betType "wide"(b5)・"trio"(b7)・"exacta"(b6)・"quinella"(b4。Issue #113・#24-D2)
  */
 export function parseNarComboOdds(html: string, betType: ComboBetType): NarComboOddsParseResult {
   const $ = cheerio.load(html);
@@ -287,7 +296,9 @@ export function parseNarComboOdds(html: string, betType: ComboBetType): NarCombo
 
   let cellMap: Map<string, ComboOddsCell>;
   try {
-    cellMap = buildComboOddsCellMap(entries);
+    // betType別の順序方針でMap化する(Issue #106・#24-B)。理由はparse-combo-odds.tsの
+    // 同種コメント参照(馬単の逆順2組が同じキーに潰れることを防ぐ)。
+    cellMap = buildComboOddsCellMapFor(betType, entries);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new NarComboOddsParseError(e.message);

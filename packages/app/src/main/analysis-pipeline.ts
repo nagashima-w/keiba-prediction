@@ -56,6 +56,7 @@ import {
   summarizeMarginTrend,
   summarizeMarketGap,
   venueKindOfRaceId,
+  type AnalysisAllocationRecord,
   type AnalysisRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
@@ -82,6 +83,14 @@ import type {
   AnalysisResult,
   AnalysisRow,
 } from "../shared/analysis-types.js";
+import type { MixedCandidateBuildInput } from "../shared/mixed-candidates.js";
+import { buildMixedRaceAllocationWithOutcome } from "../shared/mixed-race-allocation.js";
+import {
+  buildAllocationRecord,
+  buildInvalidAllocationRecordForException,
+  toMixedAllocationSettings,
+  type AnalysisAllocationSettings,
+} from "./allocation-record.js";
 import { buildRaceSnapshot } from "./analysis-export.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
 
@@ -98,6 +107,15 @@ export interface AnalysisPipelineDeps {
     | null;
   /** 分析結果の保存(通常は AnalysisStore.saveAnalysis)。採番IDを返す。 */
   readonly saveAnalysis: (record: AnalysisRecord) => number;
+  /**
+   * 配分提案(Issue #59)を計算するための設定(8項目。`evThreshold`を含まない——EV閾値は
+   * `evConfig ?? DEFAULT_EV_CONFIG`から導出し二重ソースを作らない。#59 3節)。
+   * `null`は「この呼び出しでは配分計算をしない」という明示的な選択を表す(required-nullable。
+   * optionalにしないことで、構築側〈pipeline-deps.ts〉に選択を強制する。#59着手前ゲート)。
+   * 非nullのときのみ `AnalysisRecord.allocation` を計算して積む(nullなら行を書かない=
+   * 旧分析と区別できない「未到達」のまま。#59 AC4)。
+   */
+  readonly allocationSettings: AnalysisAllocationSettings | null;
   /** 現在時刻(analyzedAt・当日近似日付に使う)。既定 () => new Date()。 */
   readonly now?: () => Date;
   /** EV設定(閾値)。省略時は既定(閾値1.0)。 */
@@ -283,6 +301,20 @@ function conditionChangeRunsOf(
 }
 
 /**
+ * race.odds.win から馬番の単勝オッズを取り出す唯一のヘルパ(Issue #90・#23-B2)。
+ * `promptInput.horses`(【出走馬】プロンプト用。下記race.horses.mapコールバック内)と
+ * `rows`(`AnalysisResult.rows`。手順(5)の別のrace.horses.mapコールバック内)の**両方**が
+ * この関数を経由することで、`race.odds.win[umaban]?.odds ?? null` という式のリテラルな
+ * 重複を増やさない(A-1是正・D-1・boss裁定)。`analysis-export.ts:139`にも同一の式が
+ * 独立に存在するが、そちらは別プロセス境界・別責務のため統合しない(boss裁定によりスコープ外)。
+ * オッズ未発売(oddsStatus="yoso")でも予想オッズ値が入ることがある(scraper側の仕様。
+ * 呼び出し元コメント参照)。
+ */
+function winOddsOf(race: RaceData, umaban: number): number | null {
+  return race.odds.win[umaban]?.odds ?? null;
+}
+
+/**
  * 1レースを分析する。
  * @param raceId 対象レースID(検証済み)
  * @param kaisaiDate 選択済み開催日(YYYYMMDD)。null の場合のみ当日日付で近似する。
@@ -459,7 +491,7 @@ export async function runAnalysis(
         // 市場データ(Task#22: 予想印の判断材料)。oddsStatus="yoso"(複勝未発売)では
         // race.odds.place が空になるため placeOddsMin/referenceEv は自然に null になる。
         // winOdds(単勝)は yoso でも予想オッズ値が入るためそのまま渡す。
-        const winOdds = race.odds.win[umaban]?.odds ?? null;
+        const winOdds = winOddsOf(race, umaban);
         const popularity = race.odds.win[umaban]?.ninki ?? null;
         const placeOddsMin = race.odds.place[umaban]?.oddsMin ?? null;
         return {
@@ -595,7 +627,88 @@ export async function runAnalysis(
     : computeRaceEv(evPriors, race.odds, deps.evConfig ?? DEFAULT_EV_CONFIG);
   const evByUmaban = new Map(evResults.map((e) => [e.umaban, e]));
 
-  // (5) 保存。
+  // (5) 結果行の組み立て(馬番昇順)。本来は手順(6)相当だったが、Issue #59で
+  // 配分提案の算出(手順6)がこの rows(MixedCandidateBuildInput の構造的最小型)を必要と
+  // するため、保存(旧手順5)より前へ移動した。record 自体には依存しない純粋な写像のため、
+  // 位置を上げても挙動は変わらない(#59着手前確認済み)。
+  const rows: AnalysisRow[] = race.horses
+    .map((h) => {
+      const umaban = h.shutuba.umaban;
+      const prior = priorByUmaban.get(umaban)!;
+      const adjusted = adjustedByUmaban.get(umaban)!;
+      const ev = evByUmaban.get(umaban)!;
+      return {
+        umaban,
+        wakuban: h.shutuba.wakuban,
+        horseName: h.shutuba.name,
+        prior: prior.prior,
+        adjustedProb: adjusted.adjustedProb,
+        placeOddsMin: ev.placeOddsMin,
+        // 単勝オッズ(Issue #90・#23-B2)。yosoでも予想オッズ値が入るためそのまま渡す
+        // (promptInput.horses側と同じヘルパを共有する。winOddsOfのJSDoc参照)。
+        winOdds: winOddsOf(race, umaban),
+        ev: ev.ev,
+        isPositive: ev.isPositive,
+        reason: adjusted.reason,
+        // 戦績走数(低データ判定用)。戦績取得失敗(results=null)は不明として null にし、
+        // 新馬(results=[] → 0走)と区別する(妙味スコアの低データ集計から除外させる)。
+        careerRunCount: h.results === null ? null : h.results.length,
+        mark: adjusted.mark,
+        evEstimated,
+        // 条件替わり(妙味材料)。promptInput.horses[].runConditions と同一の元データ
+        // (race.race.courseType/distance・venueKind・h.results)から算出するため、
+        // LLM分析を使った場合のプロンプト行(【出走馬】の「条件替わり=」)と必ず一致する。
+        conditionChangeTags: computeConditionChangeTags({
+          currentCourseType: race.race.courseType,
+          currentDistance: race.race.distance,
+          currentVenueKind: venueKind,
+          pastRuns: conditionChangeRunsOf(h.results),
+        }),
+      };
+    })
+    .sort((a, b) => a.umaban - b.umaban);
+
+  // (6) 配分提案(Issue #59)。deps.allocationSettings===null(この呼び出しでは配分計算を
+  // 行わない選択)のときは何もしない(record.allocationを省略=「未到達」のまま。#59 AC4)。
+  const oddsStatus = race.odds.oddsStatus;
+  let allocation: AnalysisAllocationRecord | undefined;
+  if (deps.allocationSettings !== null) {
+    // EV閾値は evConfig から導出する単一ソース(#59 3節。allocationSettings には持たせない)。
+    const evThreshold = (deps.evConfig ?? DEFAULT_EV_CONFIG).threshold;
+    const mixedSettings = toMixedAllocationSettings(deps.allocationSettings, evThreshold);
+    // MixedCandidateBuildInput は条件付きspreadで組む(scripts/bench-mixed-allocation.tsの
+    // toMixedCandidateInputと同じ形。戻り値末尾のwideCombo/trioCombo/quinellaCombo/exactaCombo/
+    // comboOddsの条件付きspreadと同一データソースなので、その部分は結果を待たずここで
+    // 組み立てられる)。quinellaComboはIssue #116・#24-D3b-1で追加。Issue #117(#24-D3b-2)で
+    // `resolveMixedBetTypes`が`includeQuinellaInAllocation`設定を実際に参照するようになった
+    // ため、このフィールドは production の配分結果に実際に影響する
+    // (`analysis-pipeline-allocation.test.ts`のAC-10参照)。
+    // exactaComboはIssue #122・#24-E2で追加した。Issue #125(#24-E3b)で`resolveMixedBetTypes`
+    // が`includeExactaInAllocation`設定を実際に参照するようになったため、quinellaComboと
+    // 同じく、このフィールドも production の配分結果に実際に影響する
+    // (`analysis-pipeline-allocation.test.ts`のAC-10参照)。
+    const raceForAllocation: MixedCandidateBuildInput = {
+      oddsStatus,
+      rows,
+      ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
+      ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
+      ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
+      ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
+      ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
+    };
+    try {
+      const outcome = buildMixedRaceAllocationWithOutcome(raceForAllocation, mixedSettings);
+      allocation = buildAllocationRecord(outcome, mixedSettings, oddsStatus);
+    } catch {
+      // AC6: buildMixedRaceAllocationWithOutcome自体の例外(呼び出し元の前提が崩れている
+      // 場合の防御。極めて稀)を捕捉し、分析本体の保存を失わせない(この分析はLLM呼び出し
+      // 〈実課金〉を済ませている可能性があるため、無料で再計算できる配分の例外で失わせない)。
+      // 診断ログは持たない(#59スコープ外。メタ行のroute="invalid"で十分)。
+      allocation = buildInvalidAllocationRecordForException(mixedSettings, oddsStatus);
+    }
+  }
+
+  // (7) 保存。
   const analyzedAt = now().toISOString();
   notify({
     stage: "保存",
@@ -650,43 +763,11 @@ export async function runAnalysis(
         reason: adjusted.reason,
       };
     }),
+    // 配分提案(Issue #59)。deps.allocationSettings===nullのときはキー自体を持たせない
+    // (`allocation: undefined`という明示的な代入はしない。手順(6)のwideCombo等と同じ流儀)。
+    ...(allocation !== undefined ? { allocation } : {}),
   };
   deps.saveAnalysis(record);
-
-  // (6) 結果組み立て(馬番昇順)。
-  const rows: AnalysisRow[] = race.horses
-    .map((h) => {
-      const umaban = h.shutuba.umaban;
-      const prior = priorByUmaban.get(umaban)!;
-      const adjusted = adjustedByUmaban.get(umaban)!;
-      const ev = evByUmaban.get(umaban)!;
-      return {
-        umaban,
-        wakuban: h.shutuba.wakuban,
-        horseName: h.shutuba.name,
-        prior: prior.prior,
-        adjustedProb: adjusted.adjustedProb,
-        placeOddsMin: ev.placeOddsMin,
-        ev: ev.ev,
-        isPositive: ev.isPositive,
-        reason: adjusted.reason,
-        // 戦績走数(低データ判定用)。戦績取得失敗(results=null)は不明として null にし、
-        // 新馬(results=[] → 0走)と区別する(妙味スコアの低データ集計から除外させる)。
-        careerRunCount: h.results === null ? null : h.results.length,
-        mark: adjusted.mark,
-        evEstimated,
-        // 条件替わり(妙味材料)。promptInput.horses[].runConditions と同一の元データ
-        // (race.race.courseType/distance・venueKind・h.results)から算出するため、
-        // LLM分析を使った場合のプロンプト行(【出走馬】の「条件替わり=」)と必ず一致する。
-        conditionChangeTags: computeConditionChangeTags({
-          currentCourseType: race.race.courseType,
-          currentDistance: race.race.distance,
-          currentVenueKind: venueKind,
-          pastRuns: conditionChangeRunsOf(h.results),
-        }),
-      };
-    })
-    .sort((a, b) => a.umaban - b.umaban);
 
   return {
     raceId,
@@ -706,15 +787,18 @@ export async function runAnalysis(
     rows,
     warnings: race.meta.warnings.map((w) => w.message),
     analyzedAt,
-    // 組合せオッズ(ワイド・3連複、機能D-2c第1段・Issue #28): race.odds.wideCombo/trioCombo・
-    // race.meta.comboOdds はいずれも scrapeRace の options.includeComboOdds が true のときだけ
-    // 設定される optional フィールド(#33)。ここでは「写し取るだけ」で新たな解釈・変換は行わない。
-    // 条件付きspreadで、未設定(undefined)のときはキー自体を持たせない
-    // (`wideCombo: undefined` という明示的な代入はしない。`"wideCombo" in result` が
-    // false のままであることを型・値の両方で守るため。scrape-race.ts の
-    // `...(wideCombo !== undefined ? { wideCombo } : {})` と同じ流儀)。
+    // 組合せオッズ(ワイド・3連複・馬連・馬単、機能D-2c第1段・Issue #28。馬連はIssue #116・
+    // #24-D3b-1、馬単はIssue #122・#24-E2で追加): race.odds.wideCombo/trioCombo/
+    // quinellaCombo/exactaCombo・race.meta.comboOdds はいずれも scrapeRace の
+    // options.includeComboOdds が true のときだけ設定される optional フィールド(#33)。
+    // ここでは「写し取るだけ」で新たな解釈・変換は行わない。条件付きspreadで、未設定
+    // (undefined)のときはキー自体を持たせない(`wideCombo: undefined` という明示的な代入は
+    // しない。`"wideCombo" in result` が false のままであることを型・値の両方で守るため。
+    // scrape-race.ts の `...(wideCombo !== undefined ? { wideCombo } : {})` と同じ流儀)。
     ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
     ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
+    ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
+    ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
     ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }

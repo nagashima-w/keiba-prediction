@@ -48,6 +48,8 @@ function fakeMasked(overrides: Partial<MaskedSettings> = {}): MaskedSettings {
     includeComboOdds: false,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
     ...overrides,
   };
 }
@@ -143,6 +145,80 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(flipped.includeTrioInAllocation).toBe(false);
   });
 
+  it("読込成功でincludeQuinellaInAllocation(#24-D3a・Issue #115。Issue #117でUIトグルを追加)を反映すること(OFF/ON両方向)", () => {
+    expect(
+      loadedState(fakeMasked({ includeQuinellaInAllocation: false }))
+        .includeQuinellaInAllocation,
+    ).toBe(false);
+    expect(
+      loadedState(fakeMasked({ includeQuinellaInAllocation: true }))
+        .includeQuinellaInAllocation,
+    ).toBe(true);
+  });
+
+  it("includeQuinellaInAllocationが他の配分対象boolean項目(includeWideInAllocation/includeTrioInAllocation)と取り違えられないこと", () => {
+    const s = loadedState(
+      fakeMasked({
+        includeWideInAllocation: true,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: true,
+      }),
+    );
+    expect(s.includeWideInAllocation).toBe(true);
+    expect(s.includeTrioInAllocation).toBe(false);
+    expect(s.includeQuinellaInAllocation).toBe(true);
+
+    const flipped = loadedState(
+      fakeMasked({
+        includeWideInAllocation: false,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: false,
+      }),
+    );
+    expect(flipped.includeWideInAllocation).toBe(false);
+    expect(flipped.includeTrioInAllocation).toBe(true);
+    expect(flipped.includeQuinellaInAllocation).toBe(false);
+  });
+
+  it("読込成功でincludeExactaInAllocation(#24-E3a・Issue #124)を反映すること(OFF/ON両方向)。対応するUIトグルはまだ無いが、フォーム状態としては保持・往復させる", () => {
+    expect(
+      loadedState(fakeMasked({ includeExactaInAllocation: false }))
+        .includeExactaInAllocation,
+    ).toBe(false);
+    expect(
+      loadedState(fakeMasked({ includeExactaInAllocation: true }))
+        .includeExactaInAllocation,
+    ).toBe(true);
+  });
+
+  it("includeExactaInAllocationが他の配分対象boolean項目(includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation)と取り違えられないこと", () => {
+    const s = loadedState(
+      fakeMasked({
+        includeWideInAllocation: true,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: true,
+        includeExactaInAllocation: false,
+      }),
+    );
+    expect(s.includeWideInAllocation).toBe(true);
+    expect(s.includeTrioInAllocation).toBe(false);
+    expect(s.includeQuinellaInAllocation).toBe(true);
+    expect(s.includeExactaInAllocation).toBe(false);
+
+    const flipped = loadedState(
+      fakeMasked({
+        includeWideInAllocation: false,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: false,
+        includeExactaInAllocation: true,
+      }),
+    );
+    expect(flipped.includeWideInAllocation).toBe(false);
+    expect(flipped.includeTrioInAllocation).toBe(true);
+    expect(flipped.includeQuinellaInAllocation).toBe(false);
+    expect(flipped.includeExactaInAllocation).toBe(true);
+  });
+
   it("各フィールドの入力アクションで値を更新する", () => {
     let s = loadedState();
     s = settingsReducer(s, { type: "APIキー入力", value: "sk-ant-new" });
@@ -170,6 +246,8 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     s = settingsReducer(s, { type: "組合せオッズ取得切替", value: true });
     s = settingsReducer(s, { type: "ワイド配分対象切替", value: false });
     s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
+    s = settingsReducer(s, { type: "馬連配分対象切替", value: false });
+    s = settingsReducer(s, { type: "馬単配分対象切替", value: false });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -185,6 +263,8 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.includeComboOdds).toBe(true);
     expect(s.includeWideInAllocation).toBe(false);
     expect(s.includeTrioInAllocation).toBe(false);
+    expect(s.includeQuinellaInAllocation).toBe(false);
+    expect(s.includeExactaInAllocation).toBe(false);
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -380,6 +460,54 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(update.includeWideInAllocation).toBe(true);
     expect(update.includeTrioInAllocation).toBe(true);
   });
+
+  it("includeQuinellaInAllocation(#24-D3a)を含めること(読込値どおり、OFF/ON両方向)", () => {
+    expect(
+      buildUpdate(loadedState(fakeMasked({ includeQuinellaInAllocation: false })))
+        .includeQuinellaInAllocation,
+    ).toBe(false);
+    expect(
+      buildUpdate(loadedState(fakeMasked({ includeQuinellaInAllocation: true })))
+        .includeQuinellaInAllocation,
+    ).toBe(true);
+  });
+
+  it("馬連配分対象切替(Issue #117)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "馬連配分対象切替", value: false });
+    expect(buildUpdate(s).includeQuinellaInAllocation).toBe(false);
+
+    s = settingsReducer(s, { type: "馬連配分対象切替", value: true });
+    expect(buildUpdate(s).includeQuinellaInAllocation).toBe(true);
+  });
+
+  // 【Issue #125(#24-E3b)で改訂】旧版(#124時点)は対応するUIトグルが無かったため、
+  // 切替アクションではなく読込値の往復でincludeExactaInAllocationの配管を確認していた。
+  // 何を保証していたか(新旧対応表):
+  //   旧: buildUpdate(loadedState(fakeMasked({includeExactaInAllocation})))が読込値どおり
+  //       (OFF/ON両方向)であること → 「馬単配分対象切替」アクションを追加した現在も
+  //       読込→buildUpdateの往復自体は変わらず成立するはず(下のテストで維持)
+  //   新: 追加で「馬単配分対象切替」アクション経由でも同じ値がbuildUpdateへ反映されること
+  //       (馬連の「馬連配分対象切替(Issue #117)を含めること」と同型のテストを追加)
+  it("includeExactaInAllocation(#24-E3a)を含めること(読込値どおり、OFF/ON両方向)", () => {
+    expect(
+      buildUpdate(loadedState(fakeMasked({ includeExactaInAllocation: false })))
+        .includeExactaInAllocation,
+    ).toBe(false);
+    expect(
+      buildUpdate(loadedState(fakeMasked({ includeExactaInAllocation: true })))
+        .includeExactaInAllocation,
+    ).toBe(true);
+  });
+
+  it("馬単配分対象切替(Issue #125)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "馬単配分対象切替", value: false });
+    expect(buildUpdate(s).includeExactaInAllocation).toBe(false);
+
+    s = settingsReducer(s, { type: "馬単配分対象切替", value: true });
+    expect(buildUpdate(s).includeExactaInAllocation).toBe(true);
+  });
 });
 
 describe("isDirty(未保存インジケータ、Issue #11)", () => {
@@ -421,6 +549,14 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     {
       name: "三連複配分対象切替",
       action: { type: "三連複配分対象切替", value: false },
+    },
+    {
+      name: "馬連配分対象切替",
+      action: { type: "馬連配分対象切替", value: false },
+    },
+    {
+      name: "馬単配分対象切替",
+      action: { type: "馬単配分対象切替", value: false },
     },
     ...BIAS_WEIGHT_KEYS.map((key) => ({
       name: `バイアス重み入力(${key})`,
@@ -499,6 +635,31 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     const before = JSON.stringify(s);
     isDirty(s);
     expect(JSON.stringify(s)).toBe(before);
+  });
+
+  it("includeQuinellaInAllocation(#24-D3a)がsavedSnapshotと異なればdirty判定されること(Issue #117で「馬連配分対象切替」アクションを追加したため、実際にそのアクション経由で確認する)", () => {
+    const base = loadedState();
+    expect(isDirty(base)).toBe(false);
+    const changed = settingsReducer(base, {
+      type: "馬連配分対象切替",
+      value: !base.includeQuinellaInAllocation,
+    });
+    expect(isDirty(changed)).toBe(true);
+  });
+
+  // 【Issue #125で改訂】旧版(#124時点)は対応する切替アクションがまだ無く、読込直後の状態を
+  // 直接組み立てて(SettingsFormStateのspread)検証していた。#125で「馬単配分対象切替」
+  // アクションを追加したため、馬連の「Issue #117で『馬連配分対象切替』アクションを追加した
+  // ため、実際にそのアクション経由で確認する」と同じ形に直す(直接spreadでの確認は
+  // singleFieldCasesの「馬単配分対象切替」ケースが引き続き担う)。
+  it("includeExactaInAllocation(#24-E3a)がsavedSnapshotと異なればdirty判定されること(Issue #125で「馬単配分対象切替」アクションを追加したため、実際にそのアクション経由で確認する)", () => {
+    const base = loadedState();
+    expect(isDirty(base)).toBe(false);
+    const changed = settingsReducer(base, {
+      type: "馬単配分対象切替",
+      value: !base.includeExactaInAllocation,
+    });
+    expect(isDirty(changed)).toBe(true);
   });
 });
 

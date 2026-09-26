@@ -81,12 +81,28 @@
 import Database from "better-sqlite3";
 
 import type { PredictionMark } from "../analyzer/parse-response.js";
-import type { CourseType } from "../scraper/types.js";
+import {
+  buildComboOddsKeyFor,
+  COMBO_SIZE,
+  type ComboBetType,
+} from "../scraper/combo-odds-key.js";
+import type { CourseType, RaceComboPayoutResult } from "../scraper/types.js";
 
 const ANALYSES_TABLE = "analyses";
 const ANALYSIS_HORSES_TABLE = "analysis_horses";
 const RACE_RESULTS_TABLE = "race_results";
 const RACE_RESULT_META_TABLE = "race_result_meta";
+const RACE_COMBO_PAYOUTS_TABLE = "race_combo_payouts";
+const RACE_COMBO_PAYOUT_IMPORTS_TABLE = "race_combo_payout_imports";
+const ANALYSIS_ALLOCATION_META_TABLE = "analysis_allocation_meta";
+const ANALYSIS_BETS_TABLE = "analysis_bets";
+
+/**
+ * 組合せ払戻(ワイド・3連複)で扱う券種一覧(Issue #52)。
+ * `COMBO_SIZE`(`combo-odds-key.ts`)のキーをそのまま使い、券種一覧を別の場所で
+ * 二重に列挙しない(単一ソース。AC10)。
+ */
+const COMBO_BET_TYPES = Object.keys(COMBO_SIZE) as ComboBetType[];
 
 /** 保存する分析の1頭分。 */
 export interface AnalysisHorseRecord {
@@ -166,6 +182,200 @@ export interface AnalysisRecord {
    * 〈main/analysis-export.ts の RaceSnapshot〉が定義・検証する)。
    */
   readonly raceSnapshot?: unknown;
+  /**
+   * 配分提案(Issue #59)。省略時(undefined)は配分メタ行・明細行のいずれも保存しない
+   * (呼び出し側が配分計算そのものを行わなかった=「未到達」であり、以前からの分析と区別が
+   * つかない旧形式のまま。#59 AC4「旧分析(記録なし)」に対応する)。
+   * 値を渡す場合は必ず meta を含める(全経路〈unset/yoso/unavailable/place-only/mixed/invalid〉で
+   * 1行書くのが#59の核心の不変条件。呼び出し側〈main/allocation-record.ts〉が保証する)。
+   */
+  readonly allocation?: AnalysisAllocationRecord;
+}
+
+/**
+ * 配分提案(Issue #59)のレース単位メタ + 明細行。
+ *
+ * route・betType・各種理由コードは呼び出し側(app shared/ の AllocationRouteCode 等)が
+ * 定義する文字列をそのまま受け取り、core はその意味を解釈しない(raceSnapshot: unknown と
+ * 同じ流儀。shared/ の型を core へ複製しない)。
+ */
+export interface AnalysisAllocationRecord {
+  readonly meta: AnalysisAllocationMetaRecord;
+  /** stake>0 の明細のみ(呼び出し側でフィルタ済みの前提。#59 決定(a))。 */
+  readonly bets: readonly AnalysisBetRecord[];
+}
+
+/** 配分提案のレース単位メタ行(#59 スキーマ。列一覧は固定。増減は停止条件)。 */
+export interface AnalysisAllocationMetaRecord {
+  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま受け取る。 */
+  readonly route: string;
+  /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
+  readonly unavailableReason: string | null;
+  /** app 側 PlaceOnlyFallbackReason。D-2フォールバックを通っていないときは null(未到達)。 */
+  readonly fallbackReason: string | null;
+  /** app 側 SkipReasonCode。coreの配分計算に未到達、または非skipのときは null。 */
+  readonly skipReasonCode: string | null;
+  /** app 側 ComboOddsAvailabilityCode(ワイド)。診断値を算出していなければ null(未到達)。 */
+  readonly comboOddsWide: string | null;
+  /** app 側 ComboOddsAvailabilityCode(3連複)。診断値を算出していなければ null(未到達)。 */
+  readonly comboOddsTrio: string | null;
+  /** 実効設定(実行時の値をそのまま記録。#59 決定(a): 復元不能な実効値)。 */
+  readonly bankroll: number;
+  readonly perRaceCap: number;
+  readonly kellyFraction: number;
+  readonly evThreshold: number;
+  readonly includeComboOdds: boolean;
+  readonly includeWide: boolean;
+  readonly includeTrio: boolean;
+  /**
+   * 馬連を配分に使うか(Issue #118・#24-D3b-3で追加)。DB列(`include_quinella`)はNULLを許す
+   * ため、書き込み型としては非nullable(新規保存は常に値ありとして扱う。呼び出し側
+   * `allocation-record.ts`の`settingsColumnsOf`が必ず値を渡す)。
+   */
+  readonly includeQuinella: boolean;
+  /**
+   * 馬単を配分に使うか(Issue #126・#24-E3cで追加)。DB列(`include_exacta`)はNULLを許す
+   * ため、書き込み型としては非nullable(新規保存は常に値ありとして扱う。呼び出し側
+   * `allocation-record.ts`の`settingsColumnsOf`が必ず値を渡す。`includeQuinella`と同型)。
+   */
+  readonly includeExacta: boolean;
+  /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
+  readonly betUnit: number | null;
+  /** 貪欲逐次配分の分割数。betUnit と同じ到達条件。 */
+  readonly greedySteps: number | null;
+  /** 候補cap(組合せ券種のみに存在する暴走ガード)。複勝のみの経路〈place-only〉には無いため null。 */
+  readonly candidateCap: number | null;
+  /** 配分結果の同時分布モデルID。配分結果(BetAllocationResult/GeneralBetAllocationResult)を
+   * 実際に得られた経路〈place-only/mixed〉のみ非null。 */
+  readonly modelId: string | null;
+  /** 上記モデルが近似か。modelId と同じ到達条件。 */
+  readonly modelApproximate: boolean | null;
+  /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
+  readonly oddsStatus: string;
+}
+
+/**
+ * `getAllocationForVerify` が返す配分提案の1買い目分(Issue #71・#54-B)。
+ * `AnalysisBetRecord` の5列のうち `odds`/`ev` を持たない(#71のスコープ外。下記
+ * `getAllocationForVerify` のJSDoc参照)。
+ */
+export interface StoredAllocationBet {
+  /** 券種。app 側の "place" | "wide" | "trio"。 */
+  readonly betType: string;
+  /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみ(#59 決定(a))。 */
+  readonly stake: number;
+}
+
+/**
+ * `getStoredAllocation` が返す配分提案の1買い目分(Issue #55)。`StoredAllocationBet`
+ * (`getAllocationForVerify` 用。odds/evを持たない)とは別に、過去分析の再表示(検証タブ
+ * 「レース一覧」)が必要とする odds/ev を含む完全な表示用行として持つ。
+ */
+export interface StoredAllocationBetDetail {
+  /** 券種。app 側の "place" | "wide" | "trio"。未知の値が混入していてもそのまま返す(throwしない)。 */
+  readonly betType: string;
+  /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみ(#59 決定(a))。 */
+  readonly stake: number;
+  /** 分析時点で採用したオッズ。欠損・未確定なら null。 */
+  readonly odds: number | null;
+  /** 分析時点の期待値。欠損・未確定なら null。 */
+  readonly ev: number | null;
+}
+
+/**
+ * `getStoredAllocation` が返す配分提案(Issue #55: 過去分析の再表示で配分提案を出す)。
+ *
+ * メタ行22列(主キー`analysis_id`を含む物理列数。AC2テスト等で使う数え方と同じ。
+ * Issue #118〈#24-D3b-3〉でinclude_quinella列を追加し20→21列、Issue #126〈#24-E3c〉で
+ * include_exacta列を追加し21→22列)のうち、boss裁定(2026-09-02)により以下の15列だけを読む
+ * (include_quinellaはIssue #118で、include_exactaはIssue #126で、それぞれ読む列に追加した)。
+ * 残り7列のうち`analysis_id`は返り値のデータ列ではなく引数(検索キー)そのものであり、
+ * 列挙の対象外とする。したがって実質的に「読まない列」として列挙するのは
+ * 次の6列〈combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/
+ * model_approximate〉(利用者に意味の無い内部パラメータ、または表示予定が無いため意図的に
+ * 読まない。#71の原則「誰も読まない列にコストを払わない」を踏襲する。AC2の対象もこの6列。
+ * Issue #126で列が増えても読まない6列自体は変わらない):
+ * route/unavailable_reason/fallback_reason/skip_reason_code/bankroll/per_race_cap/
+ * kelly_fraction/ev_threshold/include_combo_odds/include_wide/include_trio/
+ * include_quinella/include_exacta/bet_unit/odds_status。
+ *
+ * `getAllocationForVerify`(#71。route/skip_reason_codeとbets 3列のみ)とは読む列の範囲が
+ * 異なる**別のクエリ**であり、互いに変更の影響を与えない(#71 AC-B4の論拠を壊さないための
+ * 意図的な分離)。
+ */
+export interface StoredAllocation {
+  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま。未知の値でもそのまま返す。 */
+  readonly route: string;
+  /** app 側 PlaceBetUnavailableReason。route!=="unavailable" のときは null(未到達)。 */
+  readonly unavailableReason: string | null;
+  /**
+   * app 側 PlaceOnlyFallbackReason。D-2フォールバックを通っていないときは null(未到達)。
+   * `route==="unavailable"` でも非nullになりうる(D-2フォールバックが頭数不可で
+   * `kind:"unavailable"` になった場合。`shared/mixed-race-allocation.ts` の
+   * `AllocationOutcomeCodes` JSDoc参照)。
+   */
+  readonly fallbackReason: string | null;
+  /** app 側 SkipReasonCode。coreの配分計算に未到達、または非skipのときは null。 */
+  readonly skipReasonCode: string | null;
+  /** 実効設定(実行時の値をそのまま記録)。 */
+  readonly bankroll: number;
+  readonly perRaceCap: number;
+  readonly kellyFraction: number;
+  readonly evThreshold: number;
+  readonly includeComboOdds: boolean;
+  readonly includeWide: boolean;
+  readonly includeTrio: boolean;
+  /**
+   * 馬連を配分に使うか(Issue #118・#24-D3b-3で追加)。列追加前(Issue #118より前)に保存された
+   * 記録は null(「記録なし」。#31: OFFと断定しない。読み出し側の表示は「馬連: 記録なし」)。
+   */
+  readonly includeQuinella: boolean | null;
+  /**
+   * 馬単を配分に使うか(Issue #126・#24-E3cで追加)。列追加前(Issue #126より前)に保存された
+   * 記録は null(「記録なし」。#31: OFFと断定しない。読み出し側の表示は「馬単: 記録なし」。
+   * `includeQuinella`と同型)。
+   */
+  readonly includeExacta: boolean | null;
+  /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
+  readonly betUnit: number | null;
+  /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
+  readonly oddsStatus: string;
+  /** stake>0 の明細のみ(#59 決定(a)を引き継ぐ)。 */
+  readonly bets: readonly StoredAllocationBetDetail[];
+}
+
+/**
+ * `getAllocationForVerify` が返す配分提案の最小表現(Issue #71・#54-B)。
+ * メタ行22列(Issue #118でinclude_quinella列を追加し20→21列、Issue #126でinclude_exacta列を
+ * 追加し21→22列)のうち `route`/`skip_reason_code` の2列だけを持つ(残り20列は#71のスコープ外。
+ * `getAllocationForVerify`自体はIssue #118・#126のいずれでも変更していない〈SELECT文が
+ * route/skip_reason_codeしか読まないため無関係〉。下記`getAllocationForVerify` のJSDoc参照)。
+ */
+export interface StoredAllocationSummary {
+  /** 到達状態(層1)。app 側 AllocationRouteCode の値をそのまま。 */
+  readonly route: string;
+  /** 見送り理由(層2)。coreの配分計算に未到達、または非skipのときは null。 */
+  readonly skipReasonCode: string | null;
+  /** stake>0 の明細のみ(#59 決定(a)を引き継ぐ)。 */
+  readonly bets: readonly StoredAllocationBet[];
+}
+
+/** 配分提案の1買い目分の明細行(#59。複勝・ワイド・3連複を共通の形に統合)。 */
+export interface AnalysisBetRecord {
+  /** 券種。app 側の "place" | "wide" | "trio"。 */
+  readonly betType: string;
+  /** buildComboOddsKey(app 側が呼び出し済み)による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみを渡す前提(#59 決定(a))。 */
+  readonly stake: number;
+  /** 採用したオッズ。複勝は候補外ならありえないが、断定せずそのまま写す(null許容)。 */
+  readonly odds: number | null;
+  /** 期待値。odds と同じくそのまま写す。 */
+  readonly ev: number | null;
 }
 
 /** 復元した分析の1頭分(contributions は JSON からパース済み)。 */
@@ -236,6 +446,13 @@ export interface RaceResultEntry {
    */
   readonly placePayout?: number | null;
   /**
+   * 単勝の確定払戻(100円あたりの円、Issue #100・#23-C)。placePayoutと同型・同じ由来
+   * (`parsePayoutRow`の出力)。1着以外の馬・未取込(旧データ)は null。省略時もnull扱い
+   * (placePayoutと同じ非破壊optional追加)。1着同着の場合は該当する複数馬がそれぞれ
+   * 自分の払戻額を持つ(`parsePayoutRow`は件数を固定しない)。
+   */
+  readonly winPayout?: number | null;
+  /**
    * 通過順位(例: [2,3,4,3]、タスク#27-A2)。取得できない場合は空配列。
    * 省略時は空配列として保存する(placePayoutと同方針の非破壊optional追加)。
    */
@@ -245,6 +462,106 @@ export interface RaceResultEntry {
    */
   readonly last3f?: number | null;
 }
+
+/**
+ * saveResult に渡す組合せ払戻(ワイド・3連複)の入力(Issue #52・boss裁定R-7)。
+ *
+ * 各券種の値は `parseRaceResult` が返す判別共用体(`RaceComboPayoutResult`)をそのまま渡す
+ * 設計にし、「構造異常なのに空配列として渡してしまう」ことを型として表現不能にする
+ * (呼び出し側〈result-import.ts〉に判断を持たせない。R-7の要点)。
+ *
+ * - `state:"undetermined"`: その券種の `race_combo_payouts`/`race_combo_payout_imports` に
+ *   一切触れない(既存値があれば保持する。R-5)。一過性の構造異常・払戻未公開の再取込で
+ *   正しい過去データを破壊しないための設計。
+ * - `state:"parsed"`: 既存行を DELETE してから保存し直す(`payouts:[]` なら明示的に空へ
+ *   クリアする。AC8)。
+ * - 券種キー省略・`comboPayouts` 自体の省略: 触れない(`courseType` と同じ非破壊 optional。
+ *   AC13。既存呼び出しは無改変で通る)。
+ */
+export interface RaceComboPayoutsSaveInput {
+  readonly wide?: RaceComboPayoutResult;
+  readonly trio?: RaceComboPayoutResult;
+  /** 馬単の確定払戻(Issue #106・#24-B)。umabansは着順順(1着→2着)。ソートしない。 */
+  readonly exacta?: RaceComboPayoutResult;
+  /**
+   * 馬連の確定払戻(Issue #113・#24-D2)。ワイド・3連複と同じ順不同の組。
+   *
+   * **この追加自体は当初(#113時点)、取込の配線ではなく型を壊さないための最小追加だった**
+   * (着手前ゲートで発見): `saveResult`内のループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`
+   * 由来)を走査して`combo?.[betType]`を読むため、`ComboBetType`に`quinella`が追加されると、
+   * このフィールドが無いままでは`combo?.[betType]`が`ComboBetType`の全メンバーを添字に
+   * 取れず`pnpm typecheck`がTS7053で落ちる(#106でexactaを追加した際も同型の理由で
+   * 追加されている)。#113時点では`result-import.ts`が`{wide, trio}`のみを渡していたため、
+   * このフィールドを追加しても馬連の払戻行は実際には書かれなかった。
+   *
+   * ★**Issue #114・#24-F1で`result-import.ts`が`quinella: result.quinellaPayouts`も渡すように
+   * なり、上記は過去の状態になった。現在は馬連の払戻行が実際に書かれる**
+   * (`analysis-store.test.ts`「馬連の払戻」AC-6のJSDoc・`result-import.test.ts`
+   * 「組合せ払戻(馬連、Issue #114・#24-F1)の素通し」describe参照)。
+   */
+  readonly quinella?: RaceComboPayoutResult;
+  /**
+   * 三連単の確定払戻(Issue #130・#25-D)。umabansは着順順(1着→2着→3着)。ソートしない。
+   *
+   * **本追加も#106・#113と同型の理由(型を壊さないための最小追加)**: `saveResult`内の
+   * ループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`由来)を走査して`combo?.[betType]`を
+   * 読むため、`ComboBetType`に`trifecta`が追加されると、このフィールドが無いままでは
+   * `combo?.[betType]`が`ComboBetType`の全メンバーを添字に取れず`pnpm typecheck`がTS7053で
+   * 落ちる。**払戻の取込の配線(`result-import.ts`が`trifecta: result.trifectaPayouts`を
+   * 渡すようにすること)は#131のスコープであり、本Issue(#130)の時点ではこのフィールドを
+   * 追加しても三連単の払戻行は実際には書かれない**(`combo?.trifecta`が常に`undefined`のため
+   * `saveResult`の該当反復はcontinueするだけで、DBへの書き込み・削除は発生しない。
+   * `analysis-store.test.ts`「三連単の払戻」AC-6相当のテストで直接固定済み)。
+   */
+  readonly trifecta?: RaceComboPayoutResult;
+}
+
+/** `race_combo_payouts` の1行(読み出し専用の軽量表現。Issue #52・boss裁定R-6)。 */
+export interface StoredComboPayout {
+  /**
+   * `buildComboOddsKeyFor(betType, umabans)` で得られる正規化キー(例: ワイド"0102"、
+   * 馬単"1308")。復号(umabans配列への復元)は本Issueのスコープ外(不明点4。#54が表示で
+   * 必要になった時点で追加する)。呼び出し側は `buildComboOddsKeyFor` で購入候補側を
+   * 同じキーへ正規化して比較すればよい。
+   *
+   * **AC10改訂(Issue #106・#24-B裁定)**: 当初(Issue #52時点)は「着順が意味を持つ券種
+   * (馬単・三連単)には`buildComboOddsKey`のキー生成規則を流用してはならず、列/テーブル
+   * 自体を分離する必要がある」としていたが、これは過剰に強い主張だった。`combo_key`列は
+   * ただの`TEXT`で、主キーが`(race_id, bet_type, combo_key)`であるため、**順序付きキー
+   * (馬単。着順を保持したまま連結する。ソートしない)をそのまま同じ列・同じテーブルに
+   * 保持できる**(列/テーブル分離は不要)。実際に必要だったのは「betTypeごとに
+   * ソートするか否かを切り替えるキー生成関数」(`buildComboOddsKeyFor`。
+   * `combo-odds-key.ts`の`COMBO_KEY_ORDER`参照)だけだった。
+   * `buildComboOddsKey`(常にソート)を券種を見ずに直接使うことは引き続き禁止する
+   * (例: 馬単「1着1・2着2」と「1着2・2着1」は別の買い目だが、`buildComboOddsKey([1,2])`
+   * はどちらも同じ"0102"に潰してしまい区別できなくなる。実際に発生していた欠陥。
+   * `analysis-store.test.ts`「馬単の払戻(順序付きキー」describe参照)。
+   */
+  readonly comboKey: string;
+  /** 100円あたりの払戻額(円)。 */
+  readonly payout: number;
+}
+
+/**
+ * `getComboPayouts` の返り値(判別共用体。Issue #52 AC9・boss裁定R-4〜R-6)。
+ *
+ * 現実の事象と state の対応(#54 が読む契約。曖昧さを残さないためここに列挙する):
+ * - `"not_imported"`: 次のいずれか。(a) このレース・券種を一度も取り込んでいない。
+ *   (b) 本機能(Issue #52)より前に取り込んだ旧DB(`race_combo_payout_imports` にマーカー行が
+ *   無い。`race_results` には行があってもこの判定には使わない。R-4)。(c) 直近の取込で
+ *   この券種が構造異常・払戻未公開だった(`RaceComboPayoutResult` の `state:"undetermined"`。
+ *   `saveResult` はこの場合DBに一切触れないため、初回なら `not_imported` のまま、
+ *   再取込なら前回の正しい値が保持される)。
+ *   → #54はこの状態を**分母から除外する(判定不能)**。
+ * - `"imported"` かつ `payouts` が空配列: 払戻テーブルは取れたがこの券種の行が無かった
+ *   (未発売等)。
+ *   → #54はこの状態を**「払戻0円」ではなく「この券種は成立していない」ものとして扱う**
+ *   (具体的な集計方法自体は#54が決める)。
+ * - `"imported"` かつ `payouts.length >= 1`: 確定払戻。
+ */
+export type RaceComboPayoutsReadResult =
+  | { readonly state: "not_imported" }
+  | { readonly state: "imported"; readonly payouts: readonly StoredComboPayout[] };
 
 /** 復元したレース結果詳細の1頭分(getRaceResultDetail、タスク#27-A2)。 */
 export interface RaceResultDetailHorse {
@@ -349,14 +666,94 @@ export class AnalysisStore {
         umaban INTEGER NOT NULL,
         finish_position INTEGER,
         place_payout REAL,
+        win_payout REAL,
         PRIMARY KEY (race_id, umaban)
       );
       CREATE TABLE IF NOT EXISTS ${RACE_RESULT_META_TABLE} (
         race_id TEXT PRIMARY KEY,
         course_type TEXT
       );
+      -- 組合せ払戻(ワイド・3連複)の値テーブルとマーカーテーブル(Issue #52・AC12)。
+      -- race_result_meta(タスク#27-A2)と同じ理由・同じ流儀で CREATE TABLE IF NOT EXISTS
+      -- を使う(ALTER TABLE ADD COLUMN ではない): これらは既存テーブルへの列追加ではなく
+      -- 新規テーブルの追加であり、旧DBを開いた際に無ければ作成されるだけで既存データには
+      -- 触れない(冪等・非破壊)。2テーブルに分けた理由(R-4): 値テーブル(下記)だけでは
+      -- 「未取込」と「取り込んだが該当券種の払戻が0件だった」を区別できない
+      -- (行の個数ではなく行の有無で判定する必要があるため。listUnimportedRaceIdsが
+      -- race_resultsの行の有無でNOT EXISTS判定する既存流儀と同じ)。
+      --
+      -- combo_key は buildComboOddsKeyFor(betType, umabans) による正規化キーであり、
+      -- betTypeごとに順序方針(ソートする/しない)が異なる(ワイド・3連複は順不同、
+      -- 馬単は着順ありのまま連結。COMBO_KEY_ORDER参照。Issue #106・#24-B裁定)。
+      -- combo_keyはただのTEXTで、主キーが(race_id, bet_type, combo_key)であるため、
+      -- 順序付きキー(馬単)もこの同じ列・同じテーブルに保持できる(列/テーブル分離は
+      -- 不要。AC10改訂: Issue #52時点の「分離が必要」という記述は過剰に強かった)。
+      -- 詳細: StoredComboPayout.comboKey のJSDoc。
+      CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUTS_TABLE} (
+        race_id TEXT NOT NULL,
+        bet_type TEXT NOT NULL,
+        combo_key TEXT NOT NULL,
+        payout INTEGER NOT NULL,
+        PRIMARY KEY (race_id, bet_type, combo_key)
+      );
+      CREATE TABLE IF NOT EXISTS ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} (
+        race_id TEXT NOT NULL,
+        bet_type TEXT NOT NULL,
+        PRIMARY KEY (race_id, bet_type)
+      );
+      -- 配分提案(Issue #59)のレース単位メタ行。全経路(unset/yoso/unavailable/place-only/
+      -- mixed/invalid)で必ず1行書く契約(#31: 判定不能と判定結果を混ぜない)。列一覧は
+      -- boss着手前ゲート・#59で固定(Issue #118〈#24-D3b-3〉で include_quinella 列を追加し
+      -- 20→21列、Issue #126〈#24-E3c〉で include_exacta 列を追加し21→22列。列を読む人
+      -- 〈過去分析の再表示「馬連/馬単: ON/OFF/記録なし」〉が実在するに至ったため #59 の凍結を
+      -- 部分的に解除した2つの例外)。race_combo_payouts と同じ理由・同じ流儀で
+      -- CREATE TABLE IF NOT EXISTS を使う(新規テーブル追加であり既存データには触れない)。
+      -- include_quinella・include_exacta はいずれも NULL を許す(NOT NULL にしない・DEFAULT も
+      -- 付けない): 列追加前(それぞれIssue #118・#126より前)に保存された行は「馬連/馬単の設定を
+      -- 記録していない」のであって「馬連/馬単を配分に使わなかった」のではないため、0で埋めると
+      -- OFFと断定する誤りになる(#31の原則。着手前ゲート裁定)。
+      CREATE TABLE IF NOT EXISTS ${ANALYSIS_ALLOCATION_META_TABLE} (
+        analysis_id INTEGER PRIMARY KEY,
+        route TEXT NOT NULL,
+        unavailable_reason TEXT,
+        fallback_reason TEXT,
+        skip_reason_code TEXT,
+        combo_odds_wide TEXT,
+        combo_odds_trio TEXT,
+        bankroll REAL NOT NULL,
+        per_race_cap REAL NOT NULL,
+        kelly_fraction REAL NOT NULL,
+        ev_threshold REAL NOT NULL,
+        include_combo_odds INTEGER NOT NULL,
+        include_wide INTEGER NOT NULL,
+        include_trio INTEGER NOT NULL,
+        include_quinella INTEGER,
+        include_exacta INTEGER,
+        bet_unit INTEGER,
+        greedy_steps INTEGER,
+        candidate_cap INTEGER,
+        model_id TEXT,
+        model_approximate INTEGER,
+        odds_status TEXT NOT NULL,
+        FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
+      );
+      -- 配分提案(Issue #59)の買い目明細(stake>0のみ、呼び出し側でフィルタ済み)。
+      -- 複勝・ワイド・3連複を bet_type 列だけで共通化する(GeneralBetAllocation/BetAllocationの
+      -- 両方が continuousFraction/scaledFraction/stake/droppedBelowMinimum を持つため、保存列は
+      -- bet_type/combo_key/stake/odds/ev の5列〈+analysis_id〉に絞れる。#59決定(c))。
+      CREATE TABLE IF NOT EXISTS ${ANALYSIS_BETS_TABLE} (
+        analysis_id INTEGER NOT NULL,
+        bet_type TEXT NOT NULL,
+        combo_key TEXT NOT NULL,
+        stake INTEGER NOT NULL,
+        odds REAL,
+        ev REAL,
+        PRIMARY KEY (analysis_id, bet_type, combo_key),
+        FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
+      );
     `);
     this.migrateResultPayoutColumn();
+    this.migrateResultWinPayoutColumn();
     this.migrateMarkColumn();
     this.migrateEvEstimatedColumn();
     this.migratePromptVersionColumn();
@@ -365,6 +762,38 @@ export class AnalysisStore {
     this.migrateResultDetailColumns();
     this.migrateAnalysisExportColumns();
     this.migrateHorseReasonColumn();
+    this.migrateAllocationQuinellaColumn();
+    this.migrateAllocationExactaColumn();
+  }
+
+  /**
+   * 配分提案メタ行のinclude_quinella列を後付けするマイグレーション(Issue #118・#24-D3b-3)。
+   * Issue #118より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
+   * 追加する(既存行はALTER TABLEでNULLが入る=「馬連の設定を記録していない」として読める。
+   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照)。
+   */
+  private migrateAllocationQuinellaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_quinella")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_quinella INTEGER`);
+    }
+  }
+
+  /**
+   * 配分提案メタ行のinclude_exacta列を後付けするマイグレーション(Issue #126・#24-E3c)。
+   * Issue #126より前に作成済みの analysis_allocation_meta にはこの列が無いため、存在しなければ
+   * 追加する(既存行はALTER TABLEでNULLが入る=「馬単の設定を記録していない」として読める。
+   * #31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`と同型)。
+   */
+  private migrateAllocationExactaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_exacta")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_exacta INTEGER`);
+    }
   }
 
   /**
@@ -494,6 +923,23 @@ export class AnalysisStore {
   }
 
   /**
+   * 実配当列(win_payout)を後付けするマイグレーション(Issue #100・#23-C)。
+   * migrateResultPayoutColumn(place_payout)の逐語コピー。旧バージョンで作成済みの
+   * race_results には win_payout 列が無いため、存在しなければ追加する
+   * (既存行は NULL=未取込となり、verifyは判定不能として扱う=後方互換)。
+   */
+  private migrateResultWinPayoutColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${RACE_RESULTS_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "win_payout")) {
+      this.db.exec(
+        `ALTER TABLE ${RACE_RESULTS_TABLE} ADD COLUMN win_payout REAL`,
+      );
+    }
+  }
+
+  /**
    * 通過順(passing_json)・上がり3F(last3f)列を後付けするマイグレーション(タスク#27-A2)。
    * 旧バージョンで作成済みの race_results にはこれらの列が無いため、存在しなければ追加する
    * (既存行は passing_json=NULL→復元時 passing=[]、last3f=NULLのまま読める=後方互換)。
@@ -528,6 +974,20 @@ export class AnalysisStore {
          (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+    // 配分提案(Issue #59)。record.allocation が渡されたときだけ書く(#59 AC4「旧分析(記録なし)」)。
+    const insertAllocationMeta = this.db.prepare(
+      `INSERT INTO ${ANALYSIS_ALLOCATION_META_TABLE}
+         (analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code,
+          combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
+          include_combo_odds, include_wide, include_trio, include_quinella, include_exacta, bet_unit,
+          greedy_steps, candidate_cap, model_id, model_approximate, odds_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertAllocationBet = this.db.prepare(
+      `INSERT INTO ${ANALYSIS_BETS_TABLE}
+         (analysis_id, bet_type, combo_key, stake, odds, ev)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
 
     const tx = this.db.transaction((rec: AnalysisRecord): number => {
       const info = insertAnalysis.run(
@@ -560,6 +1020,43 @@ export class AnalysisStore {
           h.reason ?? null,
         );
       }
+      if (rec.allocation !== undefined) {
+        const m = rec.allocation.meta;
+        insertAllocationMeta.run(
+          analysisId,
+          m.route,
+          m.unavailableReason,
+          m.fallbackReason,
+          m.skipReasonCode,
+          m.comboOddsWide,
+          m.comboOddsTrio,
+          m.bankroll,
+          m.perRaceCap,
+          m.kellyFraction,
+          m.evThreshold,
+          m.includeComboOdds ? 1 : 0,
+          m.includeWide ? 1 : 0,
+          m.includeTrio ? 1 : 0,
+          m.includeQuinella ? 1 : 0,
+          m.includeExacta ? 1 : 0,
+          m.betUnit,
+          m.greedySteps,
+          m.candidateCap,
+          m.modelId,
+          m.modelApproximate === null ? null : m.modelApproximate ? 1 : 0,
+          m.oddsStatus,
+        );
+        for (const b of rec.allocation.bets) {
+          insertAllocationBet.run(
+            analysisId,
+            b.betType,
+            b.comboKey,
+            b.stake,
+            b.odds,
+            b.ev,
+          );
+        }
+      }
       return analysisId;
     });
 
@@ -567,31 +1064,53 @@ export class AnalysisStore {
   }
 
   /**
-   * レース後の実着順(通過順・上がり3F・複勝確定払戻)と、レース単位の面(course_type)を保存する。
-   * (race_id, umaban) 主キーで再保存は上書きする。
-   * placePayout/passing/last3f を省略した場合はそれぞれ null/空配列/null で保存する
-   * (未取込項目=後続の復元・verifyは欠損値として扱う)。
+   * レース後の実着順(通過順・上がり3F・複勝確定払戻・単勝確定払戻)と、レース単位の面
+   * (course_type)を保存する。(race_id, umaban) 主キーで再保存は上書きする。
+   * placePayout/winPayout/passing/last3f を省略した場合はそれぞれ null/null/空配列/null で
+   * 保存する(未取込項目=後続の復元・verifyは欠損値として扱う)。winPayout は placePayout と
+   * 同型の後付け列(win_payout、Issue #100・#23-C)。
    *
-   * race_results(馬単位)・race_result_meta(レース単位の面)の2テーブルは単一の
-   * db.transaction 内で書く(better-sqlite3のtransactionは例外で全ロールバックされるため、
-   * 2テーブル書き込みの原子性を担保する)。courseType が null/未指定の場合は
-   * race_result_meta に行を作らない(面が取れないレースまで不確かな行を残さないため)。
+   * race_results(馬単位)・race_result_meta(レース単位の面)・race_combo_payouts/
+   * race_combo_payout_imports(組合せ払戻、Issue #52)は単一の db.transaction 内で書く
+   * (better-sqlite3のtransactionは例外で全ロールバックされるため、複数テーブル書き込みの
+   * 原子性を担保する。AC7)。courseType が null/未指定の場合は race_result_meta に行を
+   * 作らない(面が取れないレースまで不確かな行を残さないため)。
+   *
+   * comboPayouts の各券種は、`state:"undetermined"`(構造異常・払戻未公開)なら
+   * その券種のテーブルに一切触れない(boss裁定R-5・R-7: 一過性の構造異常での再取込が
+   * 正しい過去データを破壊しないため)。`state:"parsed"` なら既存行を削除してから
+   * 保存し直す(delete-then-insert。AC8: 再取込で組数が減っても孤児行を残さない)。
+   * 券種キー省略・comboPayouts自体の省略は「触れない」と同義(courseTypeと同じ非破壊
+   * optional。AC13)。
+   *
+   * **呼び出し側への警告(提案・boss メタレビュー対応)**: `payouts` に正規化後(`buildComboOddsKey`
+   * 適用後)で同一になる組が2件以上含まれていると、`race_combo_payouts` の
+   * PRIMARY KEY(race_id, bet_type, combo_key)違反で例外が飛び、この呼び出し全体が
+   * ロールバックされる(=着順(`race_results`)まで巻き戻る。この関数自身は重複を検知して
+   * 除外したりしない)。`parseRaceResult` は `duplicateCombo` を検出して
+   * `state:"undetermined"` に倒すため通常この経路には来ないが、将来 `parseRaceResult` を
+   * 経由しない呼び出し元(#53〜#55等)が増えたときは、呼び出し側が事前に重複を検証するか、
+   * この関数側の防御を検討すること(`analysis-store.test.ts`「単一トランザクション」describe
+   * に、この事故が発生した際に着順まで巻き戻ることを直接固定したテストがある)。
    * @param raceId レースID
    * @param results 馬番→着順・複勝払戻・通過順・上がり3F(非数値着順は finishPosition=null)
    * @param courseType レース単位の面(芝/ダ/障)。取得できない・省略時は race_result_meta を書かない
+   * @param comboPayouts ワイド・3連複の確定払戻(Issue #52)。省略時は組合せ払戻テーブルに触れない
    */
   saveResult(
     raceId: string,
     results: readonly RaceResultEntry[],
     courseType?: CourseType | null,
+    comboPayouts?: RaceComboPayoutsSaveInput,
   ): void {
     const upsertResult = this.db.prepare(
       `INSERT INTO ${RACE_RESULTS_TABLE}
-         (race_id, umaban, finish_position, place_payout, passing_json, last3f)
-       VALUES (?, ?, ?, ?, ?, ?)
+         (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(race_id, umaban) DO UPDATE SET
          finish_position = excluded.finish_position,
          place_payout = excluded.place_payout,
+         win_payout = excluded.win_payout,
          passing_json = excluded.passing_json,
          last3f = excluded.last3f`,
     );
@@ -600,14 +1119,31 @@ export class AnalysisStore {
        VALUES (?, ?)
        ON CONFLICT(race_id) DO UPDATE SET course_type = excluded.course_type`,
     );
+    const deleteCombo = this.db.prepare(
+      `DELETE FROM ${RACE_COMBO_PAYOUTS_TABLE} WHERE race_id = ? AND bet_type = ?`,
+    );
+    const insertCombo = this.db.prepare(
+      `INSERT INTO ${RACE_COMBO_PAYOUTS_TABLE} (race_id, bet_type, combo_key, payout)
+       VALUES (?, ?, ?, ?)`,
+    );
+    const markComboImported = this.db.prepare(
+      `INSERT INTO ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} (race_id, bet_type)
+       VALUES (?, ?)
+       ON CONFLICT(race_id, bet_type) DO NOTHING`,
+    );
     const tx = this.db.transaction(
-      (rows: readonly RaceResultEntry[], meta: CourseType | null | undefined) => {
+      (
+        rows: readonly RaceResultEntry[],
+        meta: CourseType | null | undefined,
+        combo: RaceComboPayoutsSaveInput | undefined,
+      ) => {
         for (const r of rows) {
           upsertResult.run(
             raceId,
             r.umaban,
             r.finishPosition,
             r.placePayout ?? null,
+            r.winPayout ?? null,
             JSON.stringify(r.passing ?? []),
             r.last3f ?? null,
           );
@@ -615,9 +1151,194 @@ export class AnalysisStore {
         if (meta !== undefined && meta !== null) {
           upsertMeta.run(raceId, meta);
         }
+        for (const betType of COMBO_BET_TYPES) {
+          const result = combo?.[betType];
+          if (result === undefined || result.state === "undetermined") {
+            // R-5・R-7: 判定不能(構造異常・払戻未公開)または未指定はDBに判定結果として
+            // 残さない。再取込で一過性の異常が起きても、既存の正しい値を保持する。
+            continue;
+          }
+          deleteCombo.run(raceId, betType);
+          for (const entry of result.payouts) {
+            insertCombo.run(
+              raceId,
+              betType,
+              // betType別の順序方針でキー化する(Issue #106・#24-B): 馬単(exacta)は着順が
+              // 意味を持つため、betTypeを見ずに常にソートする`buildComboOddsKey`を直接
+              // 使うと「1着13・2着8」と「1着8・2着13」が同じキーに潰れ、UNIQUE制約違反
+              // (または黙った上書き)を起こす欠陥があった(着手前ゲートで発見)。
+              buildComboOddsKeyFor(betType, entry.umabans),
+              entry.payout,
+            );
+          }
+          markComboImported.run(raceId, betType);
+        }
       },
     );
-    tx(results, courseType);
+    tx(results, courseType, comboPayouts);
+  }
+
+  /**
+   * ワイド・3連複の確定払戻を取得する(Issue #52。返り値契約は RaceComboPayoutsReadResult
+   * のJSDoc参照)。
+   *
+   * 「未取込」の判定は race_combo_payout_imports のマーカー行の有無で行う
+   * (race_results の行の有無を根拠にしてはならない。boss裁定R-4): 旧DB
+   * (本機能より前に取り込んだレース)は race_results に行があるがこのマーカーが無いため、
+   * 正しく not_imported と判定できる。marker が有る(=取込試行が成功した)場合のみ
+   * race_combo_payouts を読み、0件でも imported として返す(未発売等と not_imported を
+   * 混同しない)。
+   *
+   * 未知の bet_type 文字列が紛れ込んだ場合の防御(boss裁定R-6): この関数は呼び出し側が
+   * 渡す型付きの betType(`ComboBetType`)で WHERE 句を等価比較するため、DBに万一未知の
+   * bet_type 値が混入していても、そのレース・その betType の一致行以外は自動的に除外される
+   * (toStoredCourseType のような追加の防御的フォールバック関数を別途持つ必要が無い)。
+   * @param raceId レースID
+   * @param betType 券種(`ComboBetType`)
+   */
+  getComboPayouts(raceId: string, betType: ComboBetType): RaceComboPayoutsReadResult {
+    const marker = this.db
+      .prepare(
+        `SELECT 1 FROM ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} WHERE race_id = ? AND bet_type = ?`,
+      )
+      .get(raceId, betType);
+    if (marker === undefined) {
+      return { state: "not_imported" };
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT combo_key AS comboKey, payout FROM ${RACE_COMBO_PAYOUTS_TABLE}
+           WHERE race_id = ? AND bet_type = ? ORDER BY combo_key`,
+      )
+      .all(raceId, betType) as StoredComboPayout[];
+    return { state: "imported", payouts: rows };
+  }
+
+  /**
+   * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#71(#54-B。
+   * 配分ベースの回収率 `proposedBet` 系)が読む最小列だけを取得する。メタ行が無ければ
+   * undefined を返す(#59 より前に保存された旧分析=「記録なし」。`AnalysisRecord.allocation`
+   * が渡されなかった保存はメタ行を作らない)。
+   *
+   * **意図的に読まない列(#71 着手前ゲート決定)**: メタ行の残り20列(`analysis_id`を含む。
+   * Issue #118でinclude_quinella・#126でinclude_exactaがそれぞれ実効設定の一員として加わり、
+   * 物理列数の増加分〈20→21→22〉だけこの残り列数も増えている。実測: 物理22列のうち本メソッドが
+   * 読むのは`route`/`skip_reason_code`の2列だけなので、残りは22-2=20列)
+   * (`unavailable_reason`/`fallback_reason`/`combo_odds_wide`/`combo_odds_trio`/実効設定9列
+   * 〈bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/include_wide/
+   * include_trio/include_quinella/include_exacta〉/実効値4列/`odds_status`/`analysis_id`)と、
+   * 明細の `odds`/`ev` の2列は返さない。#71 が実際に使うのは
+   * `route`・`skip_reason_code`(母集団の4分類)と `bet_type`/`combo_key`/`stake`
+   * (実際の配分額そのものを賭け金とする。Q-C)の5列のみで、`odds`/`ev` を読むと
+   * 「回収率」ではなく「提案時点の期待値の再計算」になってしまう(Q-Cに反する)。
+   * 誰も読まない列にまで #59 の条件B(非衝突)のコストを払わない判断は #59 で8巡した
+   * 失敗の再現を避けるため(#71 Issue本文)。#55(過去分析の再表示UI)で残り20列/odds/evが
+   * 必要になった時点で別途追加する。
+   *
+   * **`odds`/`ev`を返り値の型に持たせないこと自体は「将来この関数が改修されても読まれない」
+   * ことまでは保証しない**(#71メタレビュー指摘)。本当の保証は、消費側
+   * `ev/verify.test.ts`「AC-B4: analysis_bets.oddsが異常値(+Infinity/NaN)でもproposedBetの
+   * 集計結果が変わらないこと」が、`odds`/`ev`に極端な値(+Infinity・NaN)を入れた分析と
+   * 通常値の分析で`computeVerifyReport(...).proposedBet`が完全一致することを実際に確認している
+   * behavioralなテストの方(型は将来の追加を止めない)。
+   * @param analysisId 分析ID
+   */
+  getAllocationForVerify(analysisId: number): StoredAllocationSummary | undefined {
+    const metaRow = this.db
+      .prepare(
+        `SELECT route, skip_reason_code AS skipReasonCode
+           FROM ${ANALYSIS_ALLOCATION_META_TABLE} WHERE analysis_id = ?`,
+      )
+      .get(analysisId) as { route: string; skipReasonCode: string | null } | undefined;
+    if (metaRow === undefined) {
+      return undefined;
+    }
+    const bets = this.db
+      .prepare(
+        `SELECT bet_type AS betType, combo_key AS comboKey, stake
+           FROM ${ANALYSIS_BETS_TABLE} WHERE analysis_id = ? ORDER BY bet_type, combo_key`,
+      )
+      .all(analysisId) as StoredAllocationBet[];
+    return { route: metaRow.route, skipReasonCode: metaRow.skipReasonCode, bets };
+  }
+
+  /**
+   * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#55(過去分析の
+   * 再表示で配分提案を出す)が読む15列 + bets(betType/comboKey/stake/odds/ev)を取得する
+   * (include_quinellaはIssue #118〈#24-D3b-3〉で13→14列、include_exactaはIssue #126〈#24-E3c〉で
+   * 14→15列、それぞれ読む列に追加した)。
+   * メタ行が無ければ undefined を返す(#59より前の旧分析=「記録なし」)。
+   *
+   * **読まない6列(boss裁定2026-09-02)**: `combo_odds_wide`/`combo_odds_trio`/`greedy_steps`/
+   * `candidate_cap`/`model_id`/`model_approximate`(メタ行の物理列数22から読む15列と
+   * `analysis_id`〈検索キーであり返り値のデータ列ではないため列挙に含めない〉を除いた数。
+   * Issue #118・#126で列が20→21→22列に増えても、読まない6列自体は変わらない)。
+   * 前者2つは表示予定が無く(#55のスコープ外。必要になれば#16で追加)、後者4つは利用者に
+   * 意味の無い内部パラメータ(`getAllocationForVerify`のJSDocと同じ判断)。詳細は
+   * {@link StoredAllocation} のJSDoc参照。
+   *
+   * `include_quinella`/`include_exacta`は他13列と異なりNULLを許す列のため、DB値が`null`のときは
+   * それぞれ`includeQuinella: null`/`includeExacta: null`(記録なし)としてそのまま返す
+   * (0/1のときのみ`!== 0`でboolean化する。#31: 記録なしをfalseに丸めない)。
+   * @param analysisId 分析ID
+   */
+  getStoredAllocation(analysisId: number): StoredAllocation | undefined {
+    const metaRow = this.db
+      .prepare(
+        `SELECT route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason,
+                skip_reason_code AS skipReasonCode, bankroll, per_race_cap AS perRaceCap,
+                kelly_fraction AS kellyFraction, ev_threshold AS evThreshold,
+                include_combo_odds AS includeComboOdds, include_wide AS includeWide,
+                include_trio AS includeTrio, include_quinella AS includeQuinella,
+                include_exacta AS includeExacta, bet_unit AS betUnit, odds_status AS oddsStatus
+           FROM ${ANALYSIS_ALLOCATION_META_TABLE} WHERE analysis_id = ?`,
+      )
+      .get(analysisId) as
+      | {
+          route: string;
+          unavailableReason: string | null;
+          fallbackReason: string | null;
+          skipReasonCode: string | null;
+          bankroll: number;
+          perRaceCap: number;
+          kellyFraction: number;
+          evThreshold: number;
+          includeComboOdds: number;
+          includeWide: number;
+          includeTrio: number;
+          includeQuinella: number | null;
+          includeExacta: number | null;
+          betUnit: number | null;
+          oddsStatus: string;
+        }
+      | undefined;
+    if (metaRow === undefined) {
+      return undefined;
+    }
+    const bets = this.db
+      .prepare(
+        `SELECT bet_type AS betType, combo_key AS comboKey, stake, odds, ev
+           FROM ${ANALYSIS_BETS_TABLE} WHERE analysis_id = ? ORDER BY bet_type, combo_key`,
+      )
+      .all(analysisId) as StoredAllocationBetDetail[];
+    return {
+      route: metaRow.route,
+      unavailableReason: metaRow.unavailableReason,
+      fallbackReason: metaRow.fallbackReason,
+      skipReasonCode: metaRow.skipReasonCode,
+      bankroll: metaRow.bankroll,
+      perRaceCap: metaRow.perRaceCap,
+      kellyFraction: metaRow.kellyFraction,
+      evThreshold: metaRow.evThreshold,
+      includeComboOdds: metaRow.includeComboOdds !== 0,
+      includeWide: metaRow.includeWide !== 0,
+      includeTrio: metaRow.includeTrio !== 0,
+      includeQuinella: metaRow.includeQuinella === null ? null : metaRow.includeQuinella !== 0,
+      includeExacta: metaRow.includeExacta === null ? null : metaRow.includeExacta !== 0,
+      betUnit: metaRow.betUnit,
+      oddsStatus: metaRow.oddsStatus,
+      bets,
+    };
   }
 
   /**
@@ -627,13 +1348,15 @@ export class AnalysisStore {
   getResult(raceId: string): RaceResultEntry[] | undefined {
     const rows = this.db
       .prepare(
-        `SELECT umaban, finish_position AS finishPosition, place_payout AS placePayout
+        `SELECT umaban, finish_position AS finishPosition, place_payout AS placePayout,
+                win_payout AS winPayout
            FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`,
       )
       .all(raceId) as Array<{
       umaban: number;
       finishPosition: number | null;
       placePayout: number | null;
+      winPayout: number | null;
     }>;
     if (rows.length === 0) {
       return undefined;
@@ -642,6 +1365,7 @@ export class AnalysisStore {
       umaban: r.umaban,
       finishPosition: r.finishPosition,
       placePayout: r.placePayout,
+      winPayout: r.winPayout,
     }));
   }
 
@@ -836,6 +1560,21 @@ export class AnalysisStore {
    * @returns 削除した分析(analyses行)の件数
    */
   deleteAnalysesWithUnknownPromptVersion(): number {
+    // 配分提案(Issue #59・analysis_allocation_meta/analysis_bets)も analyses(id) を
+    // 参照するFK(NO ACTION)を持つため、analysis_horsesと同様に親行より先に削除しないと
+    // FOREIGN KEY constraint failed で失敗する(#59 AC5-2。事前にこの経路の存在を実測確認済み)。
+    const deleteBets = this.db.prepare(
+      `DELETE FROM ${ANALYSIS_BETS_TABLE}
+         WHERE analysis_id IN (
+           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
+         )`,
+    );
+    const deleteAllocationMeta = this.db.prepare(
+      `DELETE FROM ${ANALYSIS_ALLOCATION_META_TABLE}
+         WHERE analysis_id IN (
+           SELECT id FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL
+         )`,
+    );
     const deleteHorses = this.db.prepare(
       `DELETE FROM ${ANALYSIS_HORSES_TABLE}
          WHERE analysis_id IN (
@@ -846,7 +1585,11 @@ export class AnalysisStore {
       `DELETE FROM ${ANALYSES_TABLE} WHERE prompt_version IS NULL`,
     );
     const tx = this.db.transaction((): number => {
-      // 先に子行(analysis_horses)を消してから親行(analyses)を消す(FK制約違反を避けるため)。
+      // 先に子行(analysis_bets → analysis_allocation_meta → analysis_horses)を消してから
+      // 親行(analyses)を消す(FK制約違反を避けるため)。bets/meta と horses の間に順序制約は
+      // 無い(互いを参照しない兄弟テーブル)が、いずれも analyses より先である必要がある。
+      deleteBets.run();
+      deleteAllocationMeta.run();
       deleteHorses.run();
       const info = deleteAnalyses.run();
       return info.changes;

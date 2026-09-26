@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildComboOddsKey } from "../../src/scraper/combo-odds-key.js";
+import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import {
   NarComboOddsParseError,
   parseNarComboOdds,
@@ -102,6 +102,21 @@ describe("parseNarComboOdds(値の解釈。合成データ。受け入れ条件6
     const cell = odds.get(buildComboOddsKey([1, 2]));
     expect(cell?.oddsMin).toBe(41.9);
     expect(cell?.oddsMax).toBe(42.8);
+  });
+
+  // code-reviewer指摘: 実フィクスチャ(nar_odds_b5_202654071210.html)の地方ワイドは
+  // 66件中0件がカンマを含む(観測。python3で全td.Oddsを走査して確認)ため、実フィクスチャでは
+  // parseRangeText内のoddsMin/oddsMaxそれぞれの呼び出し箇所を独立に検証できない。
+  // 実測: oddsMin単独・oddsMax単独をそれぞれ旧実装(カンマ非対応)に戻しても
+  // parse-nar-combo-odds.test.tsは全緑のままだった(変異注入で確認)。合成データで
+  // oddsMin・oddsMaxに異なるカンマ値を与え、構造体まるごとtoEqualで比較する。
+  it("ワイドのoddsMin・oddsMaxがいずれも桁区切りカンマを含む合成データの場合、それぞれ除去して数値化されること", () => {
+    const odds = expectAvailable(parseNarComboOdds(synthHtml("1,234.5 - 2,345.6", "b5"), "wide"));
+    expect(odds.get(buildComboOddsKey([1, 2]))).toEqual({
+      oddsMin: 1234.5,
+      oddsMax: 2345.6,
+      ninki: null,
+    });
   });
 
   it.each(["---.-", "取消", ""])(
@@ -282,6 +297,11 @@ describe("parseNarComboOdds(件数の完全性。実フィクスチャ。TDDリ�
     expect(odds.size).toBe(55);
   });
 
+  it("12頭(202654071210): 馬連C(12,2)=66件と完全一致すること(Issue #113・#24-D2 AC-1)", () => {
+    const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b4_202654071210.html"), "quinella"));
+    expect(odds.size).toBe(66);
+  });
+
   it("6頭(202646071203): ワイドC(6,2)=15件と完全一致すること", () => {
     const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b5_202646071203.html"), "wide"));
     expect(odds.size).toBe(15);
@@ -422,5 +442,134 @@ describe("parseNarComboOdds(キー正規化の一致。受け入れ条件5)", ()
       const umabans = [Number(key.slice(0, 2)), Number(key.slice(2, 4))];
       expect(buildComboOddsKey(umabans)).toBe(key);
     }
+  });
+});
+
+/**
+ * 馬単(exacta、id内部コードb6)の配線(Issue #106・#24-B AC-B6・AC-B9)。
+ *
+ * #24-A(#103)の実測フィクスチャ(12頭、P(12,2)=132件)をthrowせず全件パースできること、
+ * かつ逆順の組(id "..._b6_c0_5_7" と "..._b6_c0_7_5")が別キー・別値のまま保持されることを
+ * 固定する(実測値: docs/quinella-exacta-odds-investigation.md §5.1、5→7=129.7倍、7→5=96.3倍)。
+ *
+ * ★このdescribeは実装前(betType="exacta"をID_MARKER/decodeCellId/buildComboOddsCellMapが
+ * 順序未対応のまま)ではRedになる(combo-odds-key.tsが馬単に順不同のまま流用された場合の欠陥)。
+ */
+describe("parseNarComboOdds(馬単。Issue #106・#24-B AC-B6・AC-B9)", () => {
+  it("実フィクスチャ(12頭・P(12,2)=132件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b6_202654071210.html"), "exacta"));
+    expect(odds.size).toBe(132);
+  });
+
+  it("逆順の組(5→7 と 7→5)が別キー・別値のまま保持されること", () => {
+    const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b6_202654071210.html"), "exacta"));
+    const forwardKey = buildOrderedComboOddsKey([5, 7]);
+    const backwardKey = buildOrderedComboOddsKey([7, 5]);
+    expect(forwardKey).toBe("0507");
+    expect(backwardKey).toBe("0705");
+    const forward = odds.get(forwardKey);
+    const backward = odds.get(backwardKey);
+    expect(forward?.oddsMin).toBe(129.7);
+    expect(backward?.oddsMin).toBe(96.3);
+    expect(forward?.oddsMin).not.toBe(backward?.oddsMin);
+  });
+});
+
+/**
+ * 馬連(quinella、id内部コードb4)の配線(Issue #113・#24-D2 AC-1・AC-2・AC-3)。
+ *
+ * 馬連はワイド・3連複と同じ「順不同の組」であり、キーは昇順に正規化される(id
+ * "chk_..._b4_c0_5_7" のみが存在し "..._b4_c0_7_5" は存在しない。着手前ゲートで実測確認済み)。
+ * 確定払戻(馬連5-7=5,230円)との突合をキー"0507"=52.3でリテラル固定する
+ * (集合一致だけでは値の取り違えを検出できない。#103の教訓)。
+ */
+describe("parseNarComboOdds(馬連。Issue #113・#24-D2 AC-1・AC-2)", () => {
+  it("実フィクスチャ(12頭・C(12,2)=66件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b4_202654071210.html"), "quinella"));
+    expect(odds.size).toBe(66);
+  });
+
+  it("キーは昇順に正規化されること(id \"..._b4_c0_5_7\"のみ存在し、逆順\"..._b4_c0_7_5\"は存在しない)", () => {
+    const html = loadFixture("nar_odds_b4_202654071210.html");
+    expect(html).toContain("_b4_c0_5_7");
+    expect(html).not.toContain("_b4_c0_7_5");
+    const odds = expectAvailable(parseNarComboOdds(html, "quinella"));
+    expect(odds.has(buildComboOddsKey([5, 7]))).toBe(true);
+  });
+
+  it("AC-2: 確定払戻(馬連5-7=5,230円)とキー\"0507\"のオッズがリテラルで一致すること", () => {
+    const odds = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b4_202654071210.html"), "quinella"));
+    const key = buildComboOddsKey([5, 7]);
+    expect(key).toBe("0507");
+    expect(odds.get(key)?.oddsMin).toBe(52.3);
+  });
+
+  it("AC-3: 未発売(#odds_selectが無く#odds_view_formがある構造)でthrowせずunavailableになること", () => {
+    const html = loadFixture("nar_odds_b4_presale_202642092401_20260923.html");
+    expect(html).not.toContain('id="odds_select"');
+    expect(html).toContain('id="odds_view_form"');
+    const result = parseNarComboOdds(html, "quinella");
+    expect(result.state).toBe("unavailable");
+  });
+});
+
+/**
+ * 三連単(trifecta、id内部コードb8)の配線(Issue #130・#25-D)。
+ *
+ * 三連単は馬単と同じ「着順が意味を持つ並び」であり、地方は軸=1着固定の軸馬別取得
+ * (#127実測。docs/trifecta-odds-investigation.md §3)。ここでは1軸ぶんのフラグメント
+ * (軸5。P(11,2)=110件)をthrowせずパースでき、かつ逆順の組(id
+ * "..._b8_c0_5_7_1" と "..._b8_c0_5_1_7")が別キー・別値のまま保持されることを固定する
+ * (実測値: docs/trifecta-odds-investigation.md §5.2、5→7→1=2,600.9倍、5→1→7=3,212.9倍)。
+ *
+ * ★このdescribeは実装前(betType="trifecta"をID_MARKER/decodeCellId/buildComboOddsCellMapが
+ * 順序未対応のまま)ではRedになる(combo-odds-key.tsが三連単に順不同のまま流用された場合の欠陥)。
+ */
+describe("parseNarComboOdds(三連単。Issue #130・#25-D)", () => {
+  it("実フィクスチャ(軸馬5固定・P(11,2)=110件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    expect(odds.size).toBe(110);
+  });
+
+  it("逆順の組(5→7→1 と 5→1→7)が別キー・別値のまま保持されること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    const forwardKey = buildOrderedComboOddsKey([5, 7, 1]);
+    const backwardKey = buildOrderedComboOddsKey([5, 1, 7]);
+    expect(forwardKey).toBe("050701");
+    expect(backwardKey).toBe("050107");
+    const forward = odds.get(forwardKey);
+    const backward = odds.get(backwardKey);
+    expect(forward?.oddsMin).toBeCloseTo(2600.9, 5);
+    expect(backward?.oddsMin).toBeCloseTo(3212.9, 5);
+    expect(forward?.oddsMin).not.toBe(backward?.oddsMin);
+  });
+
+  it("AC-A3(b): 地方の確定払戻(5→7→1=260,090円)とキー\"050701\"のオッズが一致すること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    expect(odds.get("050701")?.oddsMin).toBeCloseTo(2600.9, 5);
+  });
+
+  it("三連単は3連複と同じく単一値の券種であり、oddsMaxは常にnullであること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    expect(odds.size).toBeGreaterThan(0);
+    for (const cell of odds.values()) {
+      expect(cell.oddsMax).toBeNull();
+    }
+  });
+
+  it("presale(未発売)でthrowせずunavailableになること(#odds_selectが無く#odds_view_formがある構造)", () => {
+    const html = loadFixture("nar_odds_b8_presale_202654092701_20260926.html");
+    expect(html).not.toContain('id="odds_select"');
+    expect(html).toContain('id="odds_view_form"');
+    const result = parseNarComboOdds(html, "trifecta");
+    expect(result.state).toBe("unavailable");
   });
 });

@@ -153,8 +153,19 @@ export interface ComboOddsCellConflictView {
  * 機能D-2c第1段・Issue #28)。
  */
 export interface ComboOddsFetchDiagnosticsView {
-  /** 券種("wide" | "trio")。 */
-  readonly betType: "wide" | "trio";
+  /**
+   * 券種("wide" | "trio" | "exacta" | "quinella" | "trifecta")。core `ComboBetType` に
+   * 馬単(exacta)・馬連(quinella)・三連単(trifecta)が追加されたことに伴うプレーン写し
+   * (Issue #106・#24-B、馬連はIssue #113・#24-D2、三連単はIssue #130・#25-D)。
+   * `ComboOddsScrapeOutcomeView`自体は`wide?`/`trio?`/`quinella?`/`exacta?`を持つ(馬連は
+   * Issue #116・#24-D3b-1、馬単はIssue #122・#24-E2でscrape-race.tsに配線した時点で
+   * それぞれ追加。**三連単はIssue #130時点ではscrape-race.tsに配線していない〈#132の
+   * スコープ〉ため、`trifecta?`フィールドはまだ追加しない**)。
+   * `ComboOddsFetchDiagnostics.betType`はcore側で`ComboBetType`型をそのまま参照する
+   * 共有フィールドのため、この型だけはcore型と完全一致させる必要がある
+   * (analysis-types-combo-odds-pin.test.tsが検知する)。
+   */
+  readonly betType: "wide" | "trio" | "exacta" | "quinella" | "trifecta";
   /** 発行したHTTPリクエスト数。 */
   readonly requestCount: number;
   /** 出走馬番から導出した期待組合せ数。 */
@@ -187,13 +198,16 @@ export interface ComboOddsFetchOutcomeView {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複)取得結果のペア(core `ComboOddsScrapeOutcome` のプレーン写し。
- * 機能D-2c第1段・Issue #28)。core `RaceDataMeta.comboOdds` と同じく、
- * `options.includeComboOdds`がtrueのときのみ設定される。
+ * 組合せオッズ(ワイド・3連複・馬連・馬単)取得結果のペア(core `ComboOddsScrapeOutcome` の
+ * プレーン写し。機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・
+ * #24-E2で追加)。core `RaceDataMeta.comboOdds` と同じく、`options.includeComboOdds`がtrueの
+ * ときのみ設定される。
  */
 export interface ComboOddsScrapeOutcomeView {
   readonly wide?: ComboOddsFetchOutcomeView;
   readonly trio?: ComboOddsFetchOutcomeView;
+  readonly quinella?: ComboOddsFetchOutcomeView;
+  readonly exacta?: ComboOddsFetchOutcomeView;
 }
 
 /** 進捗イベント(main→renderer に webContents.send で通知)。 */
@@ -222,6 +236,13 @@ export interface AnalysisRow {
   readonly adjustedProb: number;
   /** 使用した複勝オッズ下限。欠損なら null。 */
   readonly placeOddsMin: number | null;
+  /**
+   * 単勝オッズ(Issue #90・#23-B2)。`placeOddsMin`と同じ流儀で、値域外(0・1.0未満・非有限)
+   * でも生値をそのまま保持しnullに潰さない(値域判定は消費側`isUsableOdds`の責務)。
+   * オッズ未発売(`oddsStatus="yoso"`)でも予想オッズ値が入ることがある
+   * (`analysis-pipeline.ts`のwinOdds解決ヘルパ参照)。欠損時はnull。
+   */
+  readonly winOdds: number | null;
   /**
    * 期待値(補正後確率 × 複勝下限)。オッズ欠損なら null。
    * TODO(将来改善): EV=null の行に対し、core HorseEv.excludedReason(「複勝オッズに該当馬番が無い」等)を
@@ -349,16 +370,36 @@ export interface AnalysisResult {
    */
   readonly trioCombo?: Record<string, number | null>;
   /**
-   * 組合せオッズ(ワイド・3連複)の取得結果(core `RaceDataMeta.comboOdds` のプレーン写し。
-   * 機能D-2c第1段・Issue #28)。このフィールド自身の有無は`wideCombo`/`trioCombo`とは異なり
-   * `includeComboOdds`の指定と1対1で対応する(`scrapeRace`は`includeComboOdds:true`のとき、
-   * ワイド・3連複いずれかの取得処理が例外で失敗しても`comboOdds`自体〈`wide`/`trio`が
-   * それぞれoptionalなオブジェクト〉は必ず設定する。現状は第1段では常にundefined。
-   * 取得自体は`includeComboOdds`がtrueのときのみ発生し、第1段はこれを既定falseで
-   * 固定配線している)。
+   * 馬連オッズ(馬番の組の正規化キー〈例"0102"〉→オッズ。単一値。core
+   * `OddsSnapshot.quinellaCombo` のプレーン写し。Issue #116・#24-D3b-1)。
+   * `Record`である理由・状態と原因が1対1に対応しないことは`wideCombo`と同じ
+   * (原因の判別は`comboOdds.quinella.state`を見ること)。
    *
-   * `wide`/`trio`それぞれの`state`(`"available" | "unavailable" | "failed"`)が、
-   * `wideCombo`/`trioCombo`が空(`{}`)になった原因(発売なし/未発売なのか、取得失敗
+   * **配分・画面への配線はまだ無い**(このフィールドを保持・伝播するだけ。#24-D3b-1〈#116〉の
+   * スコープ。配分の券種選択〈`resolveMixedBetTypes`〉に組み込むのは#117)。
+   */
+  readonly quinellaCombo?: Record<string, number | null>;
+  /**
+   * 馬単オッズ(馬番の組の正規化キー〈`buildOrderedComboOddsKey`形式。例"0102"。1着・2着の
+   * 順序が意味を持つ。"0102"と"0201"は別の値〉→オッズ。単一値。core
+   * `OddsSnapshot.exactaCombo` のプレーン写し。Issue #122・#24-E2)。`Record`である理由・
+   * 状態と原因が1対1に対応しないことは`wideCombo`と同じ(原因の判別は
+   * `comboOdds.exacta.state`を見ること)。
+   *
+   * **配分・画面への配線はまだ無い**(このフィールドを保持・伝播するだけ。#24-E2〈#122〉の
+   * スコープ。配分の券種選択〈`resolveMixedBetTypes`〉への接続は#123)。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズ(ワイド・3連複・馬連・馬単)の取得結果(core `RaceDataMeta.comboOdds` のプレーン
+   * 写し。機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2で
+   * 追加)。このフィールド自身の有無は`wideCombo`/`trioCombo`/`quinellaCombo`/`exactaCombo`とは
+   * 異なり`includeComboOdds`の指定と1対1で対応する(`scrapeRace`は`includeComboOdds:true`の
+   * とき、いずれかの取得処理が例外で失敗しても`comboOdds`自体〈`wide`/`trio`/`quinella`/`exacta`
+   * がそれぞれoptionalなオブジェクト〉は必ず設定する)。
+   *
+   * `wide`/`trio`/`quinella`/`exacta`それぞれの`state`(`"available" | "unavailable" | "failed"`)
+   * が、対応する`*Combo`が空(`{}`)になった原因(発売なし/未発売なのか、取得失敗
    * なのか)を判別する唯一の手段である(`wideCombo`のJSDoc参照)。
    */
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
@@ -519,6 +560,103 @@ export interface VerifyBetView {
 }
 
 /**
+ * 検証画面: proposedBet系の券種別・合算サマリ(表示用。Issue #71 #54-B)。
+ * core `ProposedBetTypeSummary` のプレーン写し。既存 `VerifyBetView`(複勝一律・Q-B)とは
+ * 賭け金の仮定が異なるため合算しない(型としても足し合わせる先を作らない。AC-B5)。
+ */
+export interface ProposedBetTypeSummaryView {
+  /** 判定できた(的中・不的中を問わない)買い目の点数。 */
+  readonly betCount: number;
+  /** 賭け金合計(円。分析時点で実際に提案した配分額そのもの)。 */
+  readonly totalStake: number;
+  /** 払戻合計(円。実配当のみ)。 */
+  readonly totalReturn: number;
+  /** 回収率。totalStake===0ならnull。 */
+  readonly recoveryRate: number | null;
+  /** 規則Uにより判定不能とした買い目の点数(買い目行単位)。 */
+  readonly unjudgedCount: number;
+}
+
+/**
+ * 検証画面: 未知の券種コードの内訳(表示用。Issue #76。core `ProposedBetUnknownBetType` のプレーン写し)。
+ * 規則U(判定不能)とは原因が異なるため`overall`には合算しない。未知券種行が1件も無い通常時は
+ * `{ count: 0, totalStake: 0, betTypes: [] }`(このフィールド自体が省略されることはない)。
+ */
+export interface ProposedBetUnknownBetTypeView {
+  /** 該当した買い目行の点数。 */
+  readonly count: number;
+  /** 該当行のstake合計(円)。どの券種のtotalStakeにも含まれない。 */
+  readonly totalStake: number;
+  /** 実際に現れた券種コード(昇順・重複なし)。 */
+  readonly betTypes: readonly string[];
+}
+
+/** 検証画面: proposedBet系の母集団4分類(表示用。Issue #71 #54-B)。 */
+export interface ProposedBetPopulationView {
+  /** 配分あり(賭け金>0)。 */
+  readonly allocated: number;
+  /** 見送り(計算した上で賭けない判定結果)。 */
+  readonly skipped: number;
+  /** 未到達(coreの配分計算に到達していない判定不能)。 */
+  readonly unreached: number;
+  /** 記録なし(#59より前の旧分析)。 */
+  readonly noRecord: number;
+}
+
+/**
+ * 検証画面: 配分ベースの回収率(表示用。Issue #71 #54-B。core `ProposedBetReport` のプレーン写し)。
+ * `overall` は複勝・単勝・ワイド・3連複・馬連・馬単・三連単の7券種の合算(同一の賭け金仮定を
+ * 共有するポートフォリオとしての合計。core側JSDoc参照)。単勝はIssue #100・#23-Cで、馬連は
+ * Issue #114・#24-F1で、馬単はIssue #121・#24-F2で、三連単はIssue #131・#25-Fで追加。
+ *
+ * ★`quinella`フィールドはIssue #117(#24-D3b-2)でapp側の配分提案への組み込みが完了し
+ * 買い目が実際に発生するようになったため、`VerifyView.tsx`も画面に馬連の行を出す
+ * (#116までは買い目が構造的に0件だったため、#112「馬連 ¥0 0点」の事故と同型を避けるため
+ * あえて表示しない設計だった。Issue #114 AC-6・着手前ゲートの合意)。
+ *
+ * ★`exacta`フィールドはIssue #121・#24-F2で追加したが、配分は馬単の買い目をまだ作らない
+ * (#123・#24-E3bで対応予定)ため`betCount`は構造的に常に0であり、quinellaと同じ理由で
+ * `VerifyView.tsx`への表示は#123へ申し送る(core `ProposedBetReport` JSDoc参照)。
+ *
+ * ★`trifecta`フィールドはIssue #131・#25-Fで追加した。本インターフェースは「coreの型の
+ * プレーン写し」を設計原則としており(この段落自体がその原則の記述)、画面表示の有無に
+ * かかわらず core `ProposedBetReport` に追加されたフィールドは即座に写す(#121〈exacta〉と
+ * 同じ扱い)。`VerifyView.tsx`への表示は#132へ申し送る(exactaと同じ理由。配分が三連単の
+ * 買い目をまだ作らないため`betCount`は構造的に常に0)。
+ */
+export interface ProposedBetReportView {
+  /** 母集団4分類の件数。 */
+  readonly population: ProposedBetPopulationView;
+  /** 複勝・単勝・ワイド・3連複・馬連・馬単・三連単の合算。 */
+  readonly overall: ProposedBetTypeSummaryView;
+  /** 複勝の内訳。 */
+  readonly place: ProposedBetTypeSummaryView;
+  /** 単勝の内訳(Issue #100・#23-C)。 */
+  readonly win: ProposedBetTypeSummaryView;
+  /** ワイドの内訳。 */
+  readonly wide: ProposedBetTypeSummaryView;
+  /** 3連複の内訳。 */
+  readonly trio: ProposedBetTypeSummaryView;
+  /**
+   * 馬連の内訳(Issue #114・#24-F1)。Issue #117(#24-D3b-2)以降、`VerifyView.tsx`はこの値を
+   * 表示する(このJSDoc冒頭の注意参照)。
+   */
+  readonly quinella: ProposedBetTypeSummaryView;
+  /**
+   * 馬単の内訳(Issue #121・#24-F2)。配分が馬単の買い目をまだ作らないため`betCount`は
+   * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#123で行う。
+   */
+  readonly exacta: ProposedBetTypeSummaryView;
+  /**
+   * 三連単の内訳(Issue #131・#25-F)。配分が三連単の買い目をまだ作らないため`betCount`は
+   * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#132で行う。
+   */
+  readonly trifecta: ProposedBetTypeSummaryView;
+  /** 未知の券種コードの内訳(Issue #76。`overall`には合算しない)。 */
+  readonly unknownBetType: ProposedBetUnknownBetTypeView;
+}
+
+/**
  * 検証画面: 検証レポート(表示用)。
  * core の VerifyReport は既にプレーン構造なので、main はそれを構造的にこの型として返す。
  */
@@ -537,6 +675,8 @@ export interface VerifyReportView {
   readonly calibration: readonly CalibrationBinView[];
   /** 補正傾向サマリ(Task#26)。 */
   readonly trend: VerifyTrendReportView;
+  /** 配分ベースの回収率(Issue #71 #54-B)。 */
+  readonly proposedBet: ProposedBetReportView;
 }
 
 /**
@@ -678,6 +818,65 @@ export interface RaceBreakdownHorseView {
 }
 
 /**
+ * 配分提案の1買い目分(表示用。core StoredAllocationBetDetail のプレーン写し。Issue #55)。
+ * `RaceBreakdownHorseView` と同じ慣行(core側の型を shared 層に構造的に複製する)に倣う。
+ * core への narrow import 規約(ファイル先頭コメント参照)を保つため、型を import せず
+ * 手動で複製する。構造一致は `test/analysis-types-allocation-pin.test.ts` がコンパイル時に固定する。
+ */
+export interface StoredAllocationBetView {
+  /** 券種。app 側の "place" | "wide" | "trio"。未知の値でもそのまま(throwしない)。 */
+  readonly betType: string;
+  /** buildComboOddsKey による正規化キー。複勝は2桁ゼロ埋め1個のみ。 */
+  readonly comboKey: string;
+  /** 実際の配分額(円)。stake>0 の行のみ。 */
+  readonly stake: number;
+  /** 分析時点で採用したオッズ。欠損・未確定なら null。 */
+  readonly odds: number | null;
+  /** 分析時点の期待値。欠損・未確定なら null。 */
+  readonly ev: number | null;
+}
+
+/**
+ * 配分提案(表示用。core StoredAllocation のプレーン写し。Issue #55)。
+ * メタ15列(route/unavailableReason/fallbackReason/skipReasonCode/実効設定9項目/betUnit/
+ * oddsStatus。実効設定8項目目のincludeQuinellaはIssue #118〈#24-D3b-3〉で、9項目目の
+ * includeExactaはIssue #126〈#24-E3c〉で、それぞれ追加)+ bets。
+ * core `getStoredAllocation` が意図的に読まない6列
+ * (combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate。
+ * メタ行の物理列数22から読む15列と`analysis_id`〈検索キーでありデータ列ではない〉を除いた数。
+ * Issue #118・#126でinclude_quinella・include_exacta列が追加され20→21→22列になったが、
+ * 読まない6列自体は変わらない)はこの型にも持たせない(#71の原則。読まない列は表示型にも
+ * 持ち込まない)。
+ */
+export interface StoredAllocationView {
+  readonly route: string;
+  readonly unavailableReason: string | null;
+  readonly fallbackReason: string | null;
+  readonly skipReasonCode: string | null;
+  readonly bankroll: number;
+  readonly perRaceCap: number;
+  readonly kellyFraction: number;
+  readonly evThreshold: number;
+  readonly includeComboOdds: boolean;
+  readonly includeWide: boolean;
+  readonly includeTrio: boolean;
+  /**
+   * 馬連を配分に使うか(Issue #118・#24-D3b-3で追加)。列追加前(Issue #118より前)に保存された
+   * 記録は null(「記録なし」。#31: OFFと断定しない。表示は「馬連: 記録なし」)。
+   */
+  readonly includeQuinella: boolean | null;
+  /**
+   * 馬単を配分に使うか(Issue #126・#24-E3cで追加)。列追加前(Issue #126より前)に保存された
+   * 記録は null(「記録なし」。#31: OFFと断定しない。表示は「馬単: 記録なし」。`includeQuinella`と
+   * 同型)。
+   */
+  readonly includeExacta: boolean | null;
+  readonly betUnit: number | null;
+  readonly oddsStatus: string;
+  readonly bets: readonly StoredAllocationBetView[];
+}
+
+/**
  * 検証画面: レース単位の統合リストの1件(表示用。core RaceLedgerEntry に会場名・レース番号を
  * 加えたもの。検証画面UI統合)。
  *
@@ -722,6 +921,11 @@ export interface RaceLedgerView {
   readonly recoveryRate: number | null;
   /** このレースで賭けた点数。結果未取込なら0。 */
   readonly betCount: number;
+  /**
+   * この分析時点の配分提案(Issue #55)。#59より前に保存された旧分析(配分メタ行が無い)は
+   * null(「記録なし」。allocation-proposal-view.tsの判別状態の1つ)。
+   */
+  readonly allocation: StoredAllocationView | null;
 }
 
 /**

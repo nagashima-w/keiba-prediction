@@ -2,19 +2,34 @@
  * 中央(race.netkeiba.com)のワイド・3連複オッズ(api_get_jra_odds、type=5/7)のパーサー
  * (機能D-2b-A・Issue #32)。
  *
- * 既存 `parse-odds.ts`(単勝・複勝、type=1/2)は一切変更せず、独立モジュールとして実装する
- * (受け入れ条件1)。同じJSON封筒(`{status, data:{odds:{...}}}`)を使う兄弟APIだが、
- * `parse-odds.ts` とは次の3点で契約が異なる:
+ * 実装当初(#32)は既存 `parse-odds.ts`(単勝・複勝、type=1/2)を一切変更せず、独立モジュールとして
+ * 実装した(受け入れ条件1)。**その後 Issue #34 で、人気(`ninki`)の数値化を
+ * `scraper/ninki.ts` の共有実装 `toNinki` に統合し、Issue #73 で、オッズ(`toOddsNumber`)の
+ * 数値化も `scraper/odds-number.ts` の共有実装に統合した**が、**この2つの共有ヘルパを使う
+ * モジュールの集合は一致しない**(boss メタレビュー2026-09-03指摘。以前「5経路全体で両方の
+ * 契約を統一」と書いていたのは誤り)。
  *
- * 1. **桁区切りカンマ**: 中央3連複オッズの実測45%(560件中251件。再現:
- *    `python3 -c "import json;o=json.load(open('fixtures/odds_trio_202603020211.json'))['data']['odds']['7'];print(len(o),sum(1 for v in o.values() if ',' in v[0]))"` → `560 251`)が
- *    カンマ区切り("15,462.5"等)であり、`parse-odds.ts` の `toOddsNumber`
- *    (`/^[0-9]+(\.[0-9]+)?$/`)をそのまま使うと高オッズ側(妙味の源泉)に偏ってnull化する。
- *    本モジュールは桁区切りを剥がしてから数値化する。
- * 2. **3連複の2要素目はダミー**: `["260.2","0.0","103"]` の `"0.0"` を上限として拾わない。
+ * - `toNinki` を import するのは **3モジュール**: `parse-odds.ts`・本モジュール・
+ *   `parse-nar-odds.ts`(再現: `grep -rl 'from "./ninki.js"' packages/core/src/scraper | wc -l` → `3`)。
+ *   **地方ワイド・3連複(`parse-nar-combo-odds.ts`)はこのドキュメント種別に人気列が
+ *   存在しないため `toNinki` を使わず `ninki: null` を直接2箇所に記述している**
+ *   (再現: `grep -n "ninki: null" packages/core/src/scraper/parse-nar-combo-odds.ts` → 2行)。
+ * - `toOddsNumber` を import するのは **5モジュール**: `parse-odds.ts`・本モジュール・
+ *   `parse-nar-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts`(単勝オッズ列。
+ *   Issue #73 R1で追加。再現: `grep -rl 'from "./odds-number.js"' packages/core/src/scraper | wc -l`
+ *   → `5`)。呼び出し箇所(定義を除く。1行に2式ある箇所を1式ずつ数える)は計**13**
+ *   〈内訳3+2+3+4+1〉。再現(コメント行・定義行を除外してから式単位で数える。この行自体が
+ *   `*` で始まるコメント行のため自己参照で数が変わらない):
+ *   `grep -rn "toOddsNumber(" packages/core/src/scraper/*.ts | grep -vE ':[0-9]+: *\*' | grep -v "function toOddsNumber" | grep -o "toOddsNumber(" | wc -l`
+ *   → `13`。
+ *
+ * 下記1〜2の差分は #32 当時のまま本モジュール固有であり、
+ * `parse-odds.ts` とは次の2点で契約が異なる:
+ *
+ * 1. **3連複の2要素目はダミー**: `["260.2","0.0","103"]` の `"0.0"` を上限として拾わない。
  *    `oddsMax` は常に `null`(3連複は幅を持たない券種であることを型で表現。決定は
  *    `scraper/combo-odds-key.ts` の `ComboOddsCell` JSDoc参照)。
- * 3. **未発売・封筒異常はunavailableに分類し、throwしない**(受け入れ条件7、改訂版。
+ * 2. **未発売・封筒異常はunavailableに分類し、throwしない**(受け入れ条件7、改訂版。
  *    boss指摘2026-08-06「未発売時の封筒が `{"status":"NG","data":"",...}` のように
  *    `data` がオブジェクトですらない形で返る可能性がある」。throwするとレース全体の
  *    スクレイプが落ちるため、**`JSON.parse` に失敗した場合のみ throw** し、それ以外
@@ -27,29 +42,31 @@
  *
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
- * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | `parseComboOdds`(`toOddsNumber`) | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe |
- * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | `parseComboOdds`(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
- * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(`toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**本モジュールの"0"→nullが正であり、既存`parse-odds.ts`のtoNinki(実装上"0"をNumber(0)のまま返す。同名JSDocの「"0"欠損表現はnull」という記述と実装が食い違っている)は既知の欠陥であり是正待ち(Issue #34)。人気は1始まりの値域であり0は値域外、かつ`analysis-pipeline.ts:463`の`race.odds.win[umaban]?.ninki ?? null`は`??`がnullishのみ捕捉するため`0 ?? null`は`0`を返し値域外の値が下流の欠損表現に落ちない経路が構造として存在する(コミット済み全フィクスチャに人気"0"の実データは無く、実データでの発生は未観測。既存テストの"0"は合成データ)。既存側の是正〈テスト期待値の変更を伴う〉はIssue #34側の作業とし、本モジュールでは追認しない** |
+ * | オッズ文字列(下限・単一値。`cellAt(value,0)`) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(560件中251件がカンマ入り)。`parse-combo-odds.test.ts`「桁区切りカンマ」「非数値の値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-nar-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts` と共有しており、契約は5モジュール・呼び出し箇所13で統一済み(Issue #73で是正。内訳・再現コマンドはモジュール冒頭JSDoc参照) |
+ * | オッズ文字列(上限。`cellAt(value,1)`。ワイドのみ使用) | 同上(`toOddsNumber`) | あり | null化(同上)。3連複はこの列を一切読まず常に`oddsMax=null`固定 | 同上。「3連複の2要素目はダミー」describe |
+ * | 人気文字列(`cellAt(value,2)`) | `parseComboOdds`(共有ヘルパ `scraper/ninki.ts` の `toNinki`) | あり | null化(非数値・"0"は欠損表現としてnull。上限は課さない) | `parse-combo-odds.test.ts`「非数値の値の解釈」describe。**`toNinki` は `scraper/ninki.ts` の共有実装であり、単勝・複勝(`parse-odds.ts`)/地方(`parse-nar-odds.ts`)とも同一の契約を使う(Issue #34で統一。契約の詳細・根拠は `scraper/ninki.ts` のJSDoc参照)** |
  * | 馬番(オッズキー由来。例"0102") | `decodeRawKey`(`validateComboUmabans`経由) | あり | throw(2桁ずつ分解し1〜18範囲外・キー長不一致・昇順違反〈"0201"等〉を検出) | `parse-combo-odds.test.ts`「構造の検証」describe |
  * | 組の要素数(キー長 / 券種との不一致) | `decodeRawKey` | あり | throw(`COMBO_SIZE`との不一致) | 同上 |
  * | JSON封筒(`status`/`data`/`data.odds`/`data.odds[type]`の型・欠落) | `parseComboOdds` | あり | 分類(`unavailable`。throwしない。`JSON.parse`失敗のみthrow) | `parse-combo-odds.test.ts`「未発売・封筒異常」describe |
  */
 
 import {
-  buildComboOddsCellMap,
+  buildComboOddsCellMapFor,
   buildComboOddsKey,
   COMBO_SIZE,
   ComboOddsKeyError,
-  validateComboUmabans,
+  validateComboUmabansFor,
   type ComboBetType,
   type ComboOddsCell,
   type ComboOddsEntry,
 } from "./combo-odds-key.js";
+import { toNinki } from "./ninki.js";
+import { toOddsNumber } from "./odds-number.js";
 
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** ワイド・3連複オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
+/** ワイド・3連複・馬単・馬連・三連単オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
 export class ComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -57,8 +74,49 @@ export class ComboOddsParseError extends Error {
   }
 }
 
-/** 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複)。 */
-const JSON_ODDS_KEY: Record<ComboBetType, string> = { wide: "5", trio: "7" };
+/**
+ * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単、"4"=馬連、"8"=三連単)。
+ * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.1・
+ * `fixtures/odds_exacta_202603020211.json`の `data.odds["6"]` で再現可能)。馬連の値も同じ
+ * #24-A(#103)の実測で確定(同docs §3.1、`fixtures/odds_quinella_202603020211.json`の
+ * `data.odds["4"]` で再現可能。Issue #113・#24-D2)。三連単の値は#127の実測で確定
+ * (`docs/trifecta-odds-investigation.md` §2.1、`fixtures/odds_trifecta_202603020211.json`の
+ * `data.odds["8"]` で再現可能。Issue #130・#25-D)。
+ */
+const JSON_ODDS_KEY: Record<ComboBetType, string> = {
+  wide: "5",
+  trio: "7",
+  exacta: "6",
+  quinella: "4",
+  trifecta: "8",
+};
+
+/**
+ * 上限キャップ値(#130・#25-D。オーケストレーター裁定2026-09-26)。
+ *
+ * 中央presale(`status:"middle"`)応答では、票数がまだ少ない組合せがこの値
+ * ("999,999.9")で表示される(三連単presaleフィクスチャの実測: 3360件中2644件=78.7%。
+ * `docs/trifecta-odds-investigation.md` §6.2)。実オッズとして読むとEVが桁外れのプラスに
+ * なり配分がそこへ偏るため、欠損(null)として扱う。
+ *
+ * **券種で分岐させない**(裁定の言葉どおり): 組合せ券種共通のパーサである本ファイル
+ * (`parseComboOdds`)の中でoddsMin・oddsMaxの両方に一律適用する。単勝・複勝
+ * (`parse-odds.ts`・`parse-nar-odds.ts`)や過去走(`parse-horse-results.ts`)が使う
+ * 共有ヘルパ`toOddsNumber`自体には入れない(これらの経路で上限値が観測された例が無く、
+ * 影響範囲を組合せ券種の外へ広げないため)。地方の組合せパーサ(`parse-nar-combo-odds.ts`)も
+ * 同様の値の観測例が無いため、本Issueでは対象外とする。
+ */
+const ODDS_CAP_VALUE = 999999.9;
+
+/**
+ * `toOddsNumber`の結果から上限キャップ値をnullに変換する(券種非依存。上記
+ * `ODDS_CAP_VALUE`のJSDoc参照)。丁度`ODDS_CAP_VALUE`と一致する場合のみnullにし、
+ * 隣接する値(例: 999999.8)はそのまま数値として残す。
+ */
+function toComboOddsNumber(raw: unknown): number | null {
+  const value = toOddsNumber(raw);
+  return value === ODDS_CAP_VALUE ? null : value;
+}
 
 /**
  * オッズが取得できなかった理由(受け入れ条件7b)。
@@ -83,32 +141,6 @@ export type ComboOddsParseResult =
   | { readonly state: "available"; readonly odds: ReadonlyMap<string, ComboOddsCell> }
   | { readonly state: "unavailable"; readonly reason: ComboOddsUnavailableReason };
 
-const PLAIN_NUMBER = /^[0-9]+(\.[0-9]+)?$/;
-/** 桁区切りカンマ付き数値(例: "15,462.5")。3桁ごとの区切りのみ許容し、不正な区切りは拒否する。 */
-const GROUPED_NUMBER = /^[0-9]{1,3}(,[0-9]{3})*(\.[0-9]+)?$/;
-
-/** オッズ文字列(桁区切りカンマ許容)を数値化する。非数値・未確定("---.-"等)は null。 */
-function toOddsNumber(raw: unknown): number | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (PLAIN_NUMBER.test(trimmed)) return Number(trimmed);
-  if (GROUPED_NUMBER.test(trimmed)) return Number(trimmed.replace(/,/g, ""));
-  return null;
-}
-
-/**
- * 人気文字列を数値化する。非数値・"0"(欠損表現)は null。
- * 既存 `parse-odds.ts` の同名関数と異なり、本モジュールは"0"を意図的にnullへ丸める
- * (数値防御カバレッジ表参照。ブリーフ〈TDDリスト項目5〉の明示指示に従う独自契約)。
- */
-function toNinki(raw: unknown): number | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (!/^[0-9]+$/.test(trimmed)) return null;
-  const n = Number(trimmed);
-  return n === 0 ? null : n;
-}
-
 /** 配列セル([...])から指定インデックスの要素を安全に取り出す。 */
 function cellAt(value: unknown, index: number): unknown {
   return Array.isArray(value) ? value[index] : undefined;
@@ -131,7 +163,11 @@ function decodeRawKey(rawKey: string, betType: ComboBetType): number[] {
     umabans.push(Number(segment));
   }
   try {
-    validateComboUmabans(umabans, comboSize);
+    // betType別の順序方針で検証する(Issue #106・#24-B): 馬単(exacta)は着順が意味を持つため
+    // 昇順を要求しない(`validateComboUmabansFor`が振り分ける)。ここで無条件に
+    // `validateComboUmabans`(昇順のみ許容)を呼ぶと、馬単の「1着>2着」の組(実測で全体の
+    // 半数)が構造異常として誤ってthrowしてしまう。
+    validateComboUmabansFor(betType, umabans, comboSize);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new ComboOddsParseError(`${e.message}(key="${rawKey}")`);
@@ -150,7 +186,7 @@ function unavailable(
 }
 
 /**
- * 中央のワイド・3連複オッズAPI応答(api_get_jra_odds、type=5/7)をパースする。
+ * 中央のワイド・3連複・馬単・馬連・三連単オッズAPI応答(api_get_jra_odds、type=5/7/6/4/8)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7)に加え、「封筒異常は unavailable」
  * という第3の扱いを持つ(モジュール冒頭JSDoc参照)。throwするのは **JSON.parse に失敗した
@@ -160,7 +196,9 @@ function unavailable(
  * のに内容が壊れている、という別種の異常であるため)。
  *
  * @param json api_get_jra_odds のJSON文字列
- * @param betType "wide"(type=5)または"trio"(type=7)
+ * @param betType "wide"(type=5)・"trio"(type=7)・"exacta"(type=6。着順が意味を持つため
+ *   `decodeRawKey`/`buildComboOddsCellMapFor`は昇順を要求せずソートもしない。Issue #106・#24-B)・
+ *   "quinella"(type=4。ワイド・3連複と同じ順不同の組。Issue #113・#24-D2)
  */
 export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsParseResult {
   let parsed: unknown;
@@ -198,8 +236,8 @@ export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsPa
   const entries: ComboOddsEntry[] = [];
   for (const [rawKey, value] of Object.entries(combo as Record<string, unknown>)) {
     const umabans = decodeRawKey(rawKey, betType);
-    const oddsMin = toOddsNumber(cellAt(value, 0));
-    const oddsMax = betType === "wide" ? toOddsNumber(cellAt(value, 1)) : null;
+    const oddsMin = toComboOddsNumber(cellAt(value, 0));
+    const oddsMax = betType === "wide" ? toComboOddsNumber(cellAt(value, 1)) : null;
     const ninki = toNinki(cellAt(value, 2));
     entries.push({ umabans, cell: { oddsMin, oddsMax, ninki } });
   }
@@ -210,7 +248,11 @@ export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsPa
 
   let cellMap: Map<string, ComboOddsCell>;
   try {
-    cellMap = buildComboOddsCellMap(entries);
+    // betType別の順序方針でMap化する(Issue #106・#24-B): 馬単は着順が別の買い目のため
+    // ソートしない`buildComboOddsCellMapFor`を使う。`buildComboOddsCellMap`(常にソート)を
+    // 直接使うと、逆順の2組(例: "1308"と"0813")が同じキーに潰れ、値が食い違うため
+    // `ComboOddsKeyError`でthrowしてしまう(実測: 240件中120件が該当)。
+    cellMap = buildComboOddsCellMapFor(betType, entries);
   } catch (e) {
     if (e instanceof ComboOddsKeyError) {
       throw new ComboOddsParseError(e.message);

@@ -23,17 +23,66 @@
 /** 馬番の上限(1〜18)。parse-odds.ts / parse-nar-odds.ts の MAX_UMABAN と同じ基準。 */
 const MAX_UMABAN = 18;
 
-/** 券種(ワイド・3連複)。買い目を構成する頭数(comboSize)が一意に決まる。 */
-export type ComboBetType = "wide" | "trio";
+/**
+ * 券種(ワイド・3連複・馬単・馬連・三連単)。買い目を構成する頭数(comboSize)が一意に決まる。
+ *
+ * **順序方針は券種で異なる**(Issue #106・#24-B裁定): ワイド・3連複・馬連は着順を問わない
+ * 「組」(馬番の集合)だが、馬単・三連単は着順(馬単は1着・2着、三連単は1着・2着・3着)が
+ * 意味を持つ「並び」である。この違いは`COMBO_KEY_ORDER`で表現し、`buildComboOddsKey`
+ * (常にソートする。順不同専用)と`buildOrderedComboOddsKey`(ソートしない)のどちらを
+ * 使うべきかを`buildComboOddsKeyFor`が振り分ける。馬連(quinella)はワイド・3連複と同じ
+ * 「順不同」であり、新しい順序方針の追加は不要だった(Issue #113・#24-D2)。三連単(trifecta)は
+ * 馬単と同じ「順序付き」であり、既存の"ordered"経路にcomboSize=3のままそのまま乗る
+ * (Issue #130・#25-D)。
+ */
+export type ComboBetType = "wide" | "trio" | "exacta" | "quinella" | "trifecta";
 
-/** 券種ごとの買い目構成頭数(ワイド=2、3連複=3)。中央・地方の両パーサが共有する。 */
+/** 券種ごとの買い目構成頭数(ワイド=2、3連複=3、馬単=2、馬連=2、三連単=3)。中央・地方の両パーサが共有する。 */
 export const COMBO_SIZE: Record<ComboBetType, number> = {
   wide: 2,
   trio: 3,
+  exacta: 2,
+  quinella: 2,
+  trifecta: 3,
 };
 
 /**
- * 組合せオッズキー生成の唯一の正規化関数(#14からの移設。仕様・挙動は不変)。
+ * キー生成・検証における順序方針(Issue #106・#24-B)。
+ * - "unordered": 馬番の組(順不同)。ワイド・3連複・馬連。
+ * - "ordered": 馬番の並び(着順が意味を持つ)。馬単。
+ *
+ * `buildComboOddsKeyFor`・`validateComboUmabansFor`・`buildComboOddsCellMapFor`が
+ * この写像で振り分ける。**新しい券種を追加するたびに`Record<ComboBetType, ...>`の
+ * 型制約によりこのマップへの追加がコンパイル時に強制される**(`COMBO_SIZE`と同じ仕組み)。
+ */
+export type ComboKeyOrder = "unordered" | "ordered";
+
+/**
+ * 券種ごとの順序方針(`COMBO_SIZE`の隣に置く。Issue #106・#24-B。馬連はIssue #113・#24-D2。
+ * 三連単はIssue #130・#25-D。馬単と同じ"ordered"で、comboSize=3でも既存の振り分け経路が
+ * 汎用的にそのまま動く)。
+ */
+export const COMBO_KEY_ORDER: Record<ComboBetType, ComboKeyOrder> = {
+  wide: "unordered",
+  trio: "unordered",
+  exacta: "ordered",
+  quinella: "unordered",
+  trifecta: "ordered",
+};
+
+/**
+ * 2桁ゼロ埋め連結の唯一の実装(モジュール冒頭JSDoc「実装は1つだけ」)。
+ * ソートするかどうかは呼び出し元(`buildComboOddsKey`/`buildOrderedComboOddsKey`)が決める。
+ */
+function encodeUmabans(umabans: readonly number[]): string {
+  return umabans.map((u) => String(u).padStart(2, "0")).join("");
+}
+
+/**
+ * 組合せオッズキー生成の正規化関数(#14からの移設。仕様・挙動は不変)。**順不同の組
+ * (ワイド・3連複・馬連)専用**(Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には
+ * `buildOrderedComboOddsKey`を使うこと。券種を持っている呼び出し元は`buildComboOddsKeyFor`
+ * を使えば振り分けを気にせず済む)。
  * netkeibaの実キー形式(ワイド"0102"・3連複"010203")に一致させる: 馬番昇順ソート後、
  * 2桁ゼロ埋めで連結する。呼び出し側にキー文字列を組み立てさせない。
  *
@@ -42,10 +91,77 @@ export const COMBO_SIZE: Record<ComboBetType, number> = {
  * (この関数だけに頼ると、ソース側の異常を黙って「直して」しまう)。
  */
 export function buildComboOddsKey(umabans: readonly number[]): string {
-  return [...umabans]
-    .sort((a, b) => a - b)
-    .map((u) => String(u).padStart(2, "0"))
-    .join("");
+  return encodeUmabans([...umabans].sort((a, b) => a - b));
+}
+
+/**
+ * 順序付きキー生成(Issue #106・#24-B)。**着順が意味を持つ券種(馬単)専用**。
+ * `buildComboOddsKey`とは異なり**ソートしない**: 入力の並びをそのまま2桁ゼロ埋めで
+ * 連結する(例: `[13, 8]` → "1308"、`[8, 13]` → "0813"。この2つは別の買い目であり、
+ * 同じキーに潰してはならない)。
+ *
+ * 実測(fixtures/odds_exacta_202603020211.json、中央16頭・馬単): "1308"=83.6倍、
+ * "0813"=118.8倍と別の値を持つことを確認済み(parse-combo-odds.test.ts参照)。
+ */
+export function buildOrderedComboOddsKey(umabans: readonly number[]): string {
+  return encodeUmabans(umabans);
+}
+
+/**
+ * betTypeから順序方針を引いて`buildComboOddsKey`/`buildOrderedComboOddsKey`を振り分ける
+ * 唯一のゲートウェイ(Issue #106・#24-B)。betTypeを持っている呼び出し元(払戻保存ループ・
+ * 各パーサ)は必ずこちらを使うこと(`buildComboOddsKey`を直接呼ぶと、`analysis-store.ts`の
+ * 払戻保存ループで実際に起きた欠陥〈betTypeを見ずに常にソートし、馬単の逆順2組を同じキーに
+ * 潰す〉を再発させる)。
+ */
+export function buildComboOddsKeyFor(
+  betType: ComboBetType,
+  umabans: readonly number[],
+): string {
+  return COMBO_KEY_ORDER[betType] === "ordered"
+    ? buildOrderedComboOddsKey(umabans)
+    : buildComboOddsKey(umabans);
+}
+
+/**
+ * `buildComboOddsKey` の逆操作(Issue #55: 過去分析の配分提案を馬番表示に戻すためのデコーダ)。
+ * 2桁ずつ区切って整数配列に戻す(`buildComboOddsKey`が常に2桁ゼロ埋めで連結するため、
+ * 正しく生成されたキーは必ず偶数長になる)。
+ *
+ * **throwしない(呼び出し元が生キー文字列をそのまま表示にフォールバックできるようにするため)**:
+ * 次のいずれかに該当すれば `null` を返す。
+ * - 偶数長でない(空文字列を含む)
+ * - 各2桁チャンクが数字2文字ぴったりでない(空白混入・非数字混入)
+ * - 各チャンクの数値が馬番の範囲外(1〜{@link MAX_UMABAN})
+ *
+ * 昇順であることの検証はしない。**この差分(Issue #106・#24-B)で以下の前提が崩れた**:
+ * 旧版は「`buildComboOddsKey`自体が入力を昇順ソートしてから連結するため、正しく生成された
+ * キーは必然的に昇順になっている」としていたが、`buildOrderedComboOddsKey`(馬単等の
+ * 順序付き券種用。ソートしない)が生成する`"1308"`は**正しく生成されたキーだが昇順ではない**
+ * (1着13・2着8を表す)。
+ *
+ * したがって本関数は**並びをソートせずそのまま復元する**(順序付き券種のキーを昇順に
+ * 「直して」しまうと、着順が逆転して表示される欠陥になる。#24-Dが`AllocationBetType`に
+ * 馬単を足して配分提案の表示にこのデコーダを使う際は、この関数が並びを保存したまま
+ * 返すことを前提にすること。ここでは「馬番として妥当な値の並びか」だけを見る)。
+ */
+export function parseComboOddsKey(key: string): readonly number[] | null {
+  if (key.length === 0 || key.length % 2 !== 0) {
+    return null;
+  }
+  const umabans: number[] = [];
+  for (let i = 0; i < key.length; i += 2) {
+    const chunk = key.slice(i, i + 2);
+    if (!/^\d{2}$/.test(chunk)) {
+      return null;
+    }
+    const umaban = Number(chunk);
+    if (umaban < 1 || umaban > MAX_UMABAN) {
+      return null;
+    }
+    umabans.push(umaban);
+  }
+  return umabans;
 }
 
 /**
@@ -111,7 +227,27 @@ function validateComboUmabanRange(umabans: readonly number[]): void {
 }
 
 /**
- * 馬番の組を検証する(構造の最低条件。throw側)。
+ * 要素数・範囲の検証(順不同・順序付き両方に共通する構造チェック。Issue #106・#24-B)。
+ * `validateComboUmabans`/`validateOrderedComboUmabans`の共有実装(重複禁止・昇順の
+ * 要否だけが両者で異なるため、それ以外をここに1箇所へ集約する)。
+ */
+function validateComboUmabansStructure(
+  umabans: readonly number[],
+  comboSize: number,
+): void {
+  if (umabans.length !== comboSize) {
+    throw new ComboOddsKeyError(
+      `組の要素数が券種と一致しません(期待: ${comboSize}, 実際: ${umabans.length}, umabans=${umabans.join(",")})`,
+    );
+  }
+  validateComboUmabanRange(umabans);
+}
+
+/**
+ * 馬番の組を検証する(構造の最低条件。throw側)。**順不同の組(ワイド・3連複・馬連)専用**
+ * (Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には`validateOrderedComboUmabans`を
+ * 使うこと。券種を持っている呼び出し元は`validateComboUmabansFor`を使えば振り分けを
+ * 気にせず済む)。
  * - 要素数が comboSize と一致すること
  * - 各馬番が1〜18の範囲であること(`validateComboUmabanRange`)
  * - 厳密な昇順(重複なし)であること。`buildComboOddsKey` 自体は入力をソートして受理して
@@ -122,18 +258,52 @@ export function validateComboUmabans(
   umabans: readonly number[],
   comboSize: number,
 ): void {
-  if (umabans.length !== comboSize) {
-    throw new ComboOddsKeyError(
-      `組の要素数が券種と一致しません(期待: ${comboSize}, 実際: ${umabans.length}, umabans=${umabans.join(",")})`,
-    );
-  }
-  validateComboUmabanRange(umabans);
+  validateComboUmabansStructure(umabans, comboSize);
   for (let i = 1; i < umabans.length; i++) {
     if (umabans[i]! <= umabans[i - 1]!) {
       throw new ComboOddsKeyError(
         `馬番の組は昇順・重複なしである必要があります(umabans=${umabans.join(",")})`,
       );
     }
+  }
+}
+
+/**
+ * 馬番の並びを検証する(構造の最低条件。throw側)。**着順が意味を持つ券種(馬単)専用**
+ * (Issue #106・#24-B)。
+ * - 要素数・範囲は`validateComboUmabans`と共有(`validateComboUmabansStructure`)
+ * - **昇順は要求しない**(馬単は「1着>2着」の組み合わせが構造的に半数を占める。実測:
+ *   fixtures/odds_exacta_202603020211.json の240件中120件が降順)
+ * - **重複は拒否する**(1頭の馬が1着・2着を同時に取ることは構造的にありえないため。
+ *   昇順チェックの副作用〈`<=`により同値も弾く〉に相当する契約を、昇順を要求しない形でも
+ *   維持する)
+ */
+export function validateOrderedComboUmabans(
+  umabans: readonly number[],
+  comboSize: number,
+): void {
+  validateComboUmabansStructure(umabans, comboSize);
+  if (new Set(umabans).size !== umabans.length) {
+    throw new ComboOddsKeyError(
+      `馬番の並びに同一馬番の重複があります(umabans=${umabans.join(",")})`,
+    );
+  }
+}
+
+/**
+ * betTypeから順序方針を引いて`validateComboUmabans`/`validateOrderedComboUmabans`を
+ * 振り分ける唯一のゲートウェイ(Issue #106・#24-B)。betTypeを持っている呼び出し元
+ * (各パーサの`decodeRawKey`/`decodeCellId`)は必ずこちらを使うこと。
+ */
+export function validateComboUmabansFor(
+  betType: ComboBetType,
+  umabans: readonly number[],
+  comboSize: number,
+): void {
+  if (COMBO_KEY_ORDER[betType] === "ordered") {
+    validateOrderedComboUmabans(umabans, comboSize);
+  } else {
+    validateComboUmabans(umabans, comboSize);
   }
 }
 
@@ -183,10 +353,21 @@ function cellsEqual(a: ComboOddsCell, b: ComboOddsCell): boolean {
 export function buildComboOddsCellMap(
   entries: readonly ComboOddsEntry[],
 ): Map<string, ComboOddsCell> {
+  return buildComboOddsCellMapWithKeyFn(entries, buildComboOddsKey);
+}
+
+/**
+ * `buildComboOddsCellMap`/`buildComboOddsCellMapFor`の共有実装(Issue #106・#24-B)。
+ * キー生成方法だけを差し替えられるようにし、Map化・衝突検出のロジックを1箇所に保つ。
+ */
+function buildComboOddsCellMapWithKeyFn(
+  entries: readonly ComboOddsEntry[],
+  keyFn: (umabans: readonly number[]) => string,
+): Map<string, ComboOddsCell> {
   const map = new Map<string, ComboOddsCell>();
   for (const { umabans, cell } of entries) {
     validateComboUmabanRange(umabans);
-    const key = buildComboOddsKey(umabans);
+    const key = keyFn(umabans);
     const existing = map.get(key);
     if (existing !== undefined) {
       if (!cellsEqual(existing, cell)) {
@@ -200,6 +381,23 @@ export function buildComboOddsCellMap(
     map.set(key, cell);
   }
   return map;
+}
+
+/**
+ * betTypeから順序方針を引いて`buildComboOddsKey`/`buildOrderedComboOddsKey`のいずれかで
+ * Map化する唯一のゲートウェイ(Issue #106・#24-B)。betTypeを持っている呼び出し元
+ * (各パーサの`parseComboOdds`/`parseNarComboOdds`)は必ずこちらを使うこと
+ * (`buildComboOddsCellMap`を直接呼ぶと、馬単の逆順2組が同じキーに潰れて値の不一致で
+ * throwする。`combo-odds-key.test.ts`「従来のbuildComboOddsCellMapに同じ逆順2組を渡すと
+ * …」で固定済み)。
+ */
+export function buildComboOddsCellMapFor(
+  betType: ComboBetType,
+  entries: readonly ComboOddsEntry[],
+): Map<string, ComboOddsCell> {
+  return buildComboOddsCellMapWithKeyFn(entries, (umabans) =>
+    buildComboOddsKeyFor(betType, umabans),
+  );
 }
 
 /**

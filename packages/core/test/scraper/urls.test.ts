@@ -6,22 +6,28 @@ import {
 } from "../../src/scraper/ids.js";
 import {
   commentUrl,
+  exactaOddsApiUrl,
   gradeWinnerApiUrl,
   gradeWinnerOriginUrl,
   gradeWinnerRefererUrl,
   horseResultsApiUrl,
   horseUrl,
+  narExactaOddsPageUrl,
   narOddsPageUrl,
   NarUnsupportedError,
+  narQuinellaOddsPageUrl,
   narRaceListSubUrl,
+  narTrifectaOddsAxisUrl,
   narTrioOddsAxisUrl,
   narTrioOddsPageUrl,
   narWideOddsPageUrl,
   oddsApiUrl,
   oikiriUrl,
+  quinellaOddsApiUrl,
   raceListSubUrl,
   raceResultUrl,
   shutubaUrl,
+  trifectaOddsApiUrl,
   trioOddsApiUrl,
   wideOddsApiUrl,
 } from "../../src/scraper/urls.js";
@@ -180,6 +186,49 @@ describe("wideOddsApiUrl/trioOddsApiUrl(中央 ワイド・三連複オッズJSO
   });
 });
 
+/**
+ * exactaOddsApiUrl(中央 馬単オッズJSON API。Issue #106・#24-B。実測は#24-A・#103)。
+ *
+ * type=6の値は#24-A(#103)の実測(race_id=202603020211・16頭)で確定
+ * (`docs/quinella-exacta-odds-investigation.md` §3.1「中央・馬単type値独立観測」、
+ * `fixtures/odds_exacta_202603020211.json`の`data.odds["6"]`で再現可能。推測ではない)。
+ * 既存4関数(wideOddsApiUrl等)と同じ形のリテラル`toBe`で固定する
+ * (code-reviewer指摘: 実装からimportした関数どうしを比較する自己参照アサーションだけでは
+ * type値の変異〈例: 6→999〉を検出できないため)。
+ */
+describe("exactaOddsApiUrl(中央 馬単オッズJSON API。Issue #106・#24-B)", () => {
+  it("exactaOddsApiUrlは中央race_idで馬単オッズJSON APIのURL(type=6)を返すこと", () => {
+    expect(exactaOddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=6&action=init",
+    );
+  });
+
+  it("exactaOddsApiUrlに地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => exactaOddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+});
+
+/**
+ * quinellaOddsApiUrl(中央 馬連オッズJSON API。Issue #113・#24-D2。実測は#24-A・#103)。
+ *
+ * type=4の値は#24-A(#103)の実測(race_id=202603020211・16頭)で確定
+ * (`docs/quinella-exacta-odds-investigation.md` §3.1、
+ * `fixtures/odds_quinella_202603020211.json`の`data.odds["4"]`で再現可能。推測ではない)。
+ * 既存関数と同じ形のリテラル`toBe`で固定する(理由はexactaOddsApiUrlの同種コメント参照。
+ * 自己参照アサーションだけではtype値の変異〈例: 4→999〉を検出できない)。
+ */
+describe("quinellaOddsApiUrl(中央 馬連オッズJSON API。Issue #113・#24-D2)", () => {
+  it("quinellaOddsApiUrlは中央race_idで馬連オッズJSON APIのURL(type=4)を返すこと", () => {
+    expect(quinellaOddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=4&action=init",
+    );
+  });
+
+  it("quinellaOddsApiUrlに地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => quinellaOddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+});
+
 describe("narWideOddsPageUrl/narTrioOddsPageUrl(地方 ワイド・三連複オッズページ。機能D-1 実測2026-08-04)", () => {
   // 実測(2026-08-04, race_id=202654071210・12頭): type=b5(ワイド)は静的HTMLに全軸の
   // テーブルが1ページに含まれ、C(12,2)=66件と完全一致(軸馬別の制限なし)。
@@ -199,6 +248,59 @@ describe("narWideOddsPageUrl/narTrioOddsPageUrl(地方 ワイド・三連複オ�
     expect(narTrioOddsPageUrl(narRaceId)).toBe(
       "https://nar.netkeiba.com/odds/index.html?type=b7&race_id=202654071210",
     );
+  });
+});
+
+/**
+ * narExactaOddsPageUrl(地方 馬単オッズページ。Issue #106・#24-B。実測は#24-A・#103)。
+ *
+ * type=b6の値は#24-A(#103)の実測(race_id=202654071210・12頭)で確定
+ * (`docs/quinella-exacta-odds-investigation.md` §3.2「馬単(type=b6、#11)」、
+ * `fixtures/nar_odds_b6_202654071210.html`のセルid規約〈`chk_..._b6_c0_..._..._`〉で
+ * 再現可能。推測ではない)。既存関数と同じ形のリテラル`toBe`で固定する(理由は
+ * exactaOddsApiUrlの同種コメント参照)。
+ */
+describe("narExactaOddsPageUrl(地方 馬単オッズページ。Issue #106・#24-B)", () => {
+  it("narExactaOddsPageUrlはtype=b6固定のクエリ付き地方馬単オッズページURLを返すこと", () => {
+    expect(narExactaOddsPageUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/odds/index.html?type=b6&race_id=202654071210",
+    );
+  });
+});
+
+/**
+ * narQuinellaOddsPageUrl(地方 馬連オッズページ。Issue #113・#24-D2。実測は#24-A・#103)。
+ *
+ * type=b4の値は#24-A(#103)の実測(race_id=202654071210・12頭)で確定
+ * (`docs/quinella-exacta-odds-investigation.md` §3.2、
+ * `fixtures/nar_odds_b4_202654071210.html`のセルid規約〈`chk_..._b4_c0_..._..._`〉で
+ * 再現可能。推測ではない)。既存関数と同じ形のリテラル`toBe`で固定する。
+ */
+describe("narQuinellaOddsPageUrl(地方 馬連オッズページ。Issue #113・#24-D2)", () => {
+  it("narQuinellaOddsPageUrlはtype=b4固定のクエリ付き地方馬連オッズページURLを返すこと", () => {
+    expect(narQuinellaOddsPageUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/odds/index.html?type=b4&race_id=202654071210",
+    );
+  });
+});
+
+/**
+ * trifectaOddsApiUrl(中央 三連単オッズJSON API。Issue #130・#25-D。実測は#127)。
+ *
+ * type=8の値は#127実測(race_id=202603020211・16頭)で確定
+ * (`docs/trifecta-odds-investigation.md` §2.1「type値の独立観測」、
+ * `fixtures/odds_trifecta_202603020211.json`の`data.odds["8"]`で再現可能。推測ではない)。
+ * 既存関数と同じ形のリテラル`toBe`で固定する(自己参照アサーションだけではtype値の変異を検出できない)。
+ */
+describe("trifectaOddsApiUrl(中央 三連単オッズJSON API。Issue #130・#25-D)", () => {
+  it("trifectaOddsApiUrlは中央race_idで三連単オッズJSON APIのURL(type=8)を返すこと", () => {
+    expect(trifectaOddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=8&action=init",
+    );
+  });
+
+  it("trifectaOddsApiUrlに地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => trifectaOddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
   });
 });
 
@@ -223,6 +325,39 @@ describe("narTrioOddsAxisUrl(地方3連複の軸馬別AJAXフラグメントURL�
     ["上限超過(19)", 19],
   ])("jikuが契約違反(%s)の場合は投げること", (_label, jiku) => {
     expect(() => narTrioOddsAxisUrl(narRaceId, jiku)).toThrow();
+  });
+});
+
+/**
+ * narTrifectaOddsAxisUrl(地方三連単の軸馬別AJAXフラグメントURL。Issue #130・#25-D)。
+ *
+ * `docs/trifecta-odds-investigation.md` §3(実測: race_id=202654071210・12頭)により、
+ * 三連単の軸は「1着を固定する」意味であり(3連複の「含む」とは異なる)、全組合せに
+ * n回(頭数分)のリクエストが必要と確定済み(本Issueでは全軸を回す関数は作らない。
+ * オーケストレーター裁定Q2)。`narTrioOddsAxisUrl`と同じ契約(jikuは1〜18の整数)を
+ * type=b8で共有する。
+ */
+describe("narTrifectaOddsAxisUrl(地方三連単の軸馬別AJAXフラグメントURL。Issue #130・#25-D)", () => {
+  it("type=b8固定・raceId/jikuクエリ付きのURLを返すこと", () => {
+    expect(narTrifectaOddsAxisUrl(narRaceId, 1)).toBe(
+      "https://nar.netkeiba.com/odds/odds_get_form.html?type=b8&race_id=202654071210&jiku=1",
+    );
+    // 上限(18)も正常系として通ること
+    expect(narTrifectaOddsAxisUrl(narRaceId, 18)).toBe(
+      "https://nar.netkeiba.com/odds/odds_get_form.html?type=b8&race_id=202654071210&jiku=18",
+    );
+  });
+
+  it.each([
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+    ["-Infinity", -Infinity],
+    ["小数(1.5)", 1.5],
+    ["0", 0],
+    ["負値(-1)", -1],
+    ["上限超過(19)", 19],
+  ])("jikuが契約違反(%s)の場合は投げること", (_label, jiku) => {
+    expect(() => narTrifectaOddsAxisUrl(narRaceId, jiku)).toThrow();
   });
 });
 

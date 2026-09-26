@@ -174,6 +174,50 @@ export const RACE_RESULT_SELECTORS = {
   payoutResult: "td.Result",
   /** 払戻行の払戻金額セル(内部で <br> 区切り。複数点あり)。 */
   payoutAmount: "td.Payout",
+  /**
+   * ワイドの払戻行(Issue #52)。行セレクタを直指定するため、文書内に払戻テーブルが
+   * 複数(単勝・複勝・馬連を含む1つ目/ワイド・馬単・三連複・三連単を含む2つ目)存在しても
+   * 取りこぼさない(実測: `fixtures/result_202602010605.html`・
+   * `fixtures/nar_result_202630062407.html` はいずれも `tr.Wide` が2つ目のテーブルに入るが、
+   * `class="Wide"` は文書中に1回だけしか出現しないため `.first()` を挟まずとも一意に取れる)。
+   */
+  wideRow: "tr.Wide",
+  /** 三連複の払戻行(Issue #52)。wideRow と同じ理由で行セレクタを直指定する。 */
+  trioRow: "tr.Fuku3",
+  /**
+   * 馬連の払戻行(Issue #114・#24-F1)。wideRow と同じ理由で行セレクタを直指定する。
+   * 単勝・複勝と同じ1つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html`・`fixtures/nar_result_202654071210.html`。
+   * `class="Umaren"`は文書中に1回だけしか出現しない)。
+   */
+  quinellaRow: "tr.Umaren",
+  /**
+   * 馬単の払戻行(Issue #121・#24-F2)。wideRow/trioRow と同じ理由で行セレクタを直指定する。
+   * ワイド・3連複と同じ2つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html:1967`・`fixtures/nar_result_202654071210.html:1730`。
+   * `class="Umatan"`は文書中に1回だけしか出現しない)。**構造(td.Result内のul/li・単一値の
+   * td.Payout)はwide/trio/quinellaと同型だが、馬単は「1着→2着」の並びが意味を持つため、
+   * `parseComboPayoutRow`はbetTypeを見て並びをソートしない(`combo-odds-key.ts`の
+   * `COMBO_KEY_ORDER`参照)。**
+   */
+  exactaRow: "tr.Umatan",
+  /**
+   * 三連単の払戻行(Issue #131・#25-F)。wideRow/trioRow/exactaRow と同じ理由で行セレクタを
+   * 直指定する。ワイド・3連複・馬単と同じ2つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html:1995`・`fixtures/nar_result_202654071210.html:1758`。
+   * `class="Tan3"`は文書中に1回だけしか出現しない)。**構造(td.Result内のul/li・単一値の
+   * td.Payout)はwide/trio/quinella/exactaと同型だが、三連単は「1着→2着→3着」の並びが
+   * 意味を持つため、`parseComboPayoutRow`はbetTypeを見て並びをソートしない(馬単と同じ
+   * 順序方針。`combo-odds-key.ts`の`COMBO_KEY_ORDER`参照)。**
+   */
+  trifectaRow: "tr.Tan3",
+  /**
+   * ワイド・三連複の払戻行内で1組を表す `<ul>`(Issue #52)。組内の的中馬番は
+   * 各 `<li>` のテキスト(空の `<li></li>` は区切り用でワイドの末尾に付く)。
+   */
+  comboGroup: "ul",
+  /** 組内の的中馬番を表すセル(Issue #52。空要素は呼び出し側でフィルタする)。 */
+  comboSlot: "li",
 } as const;
 
 /**
@@ -365,10 +409,6 @@ export const PATTERNS = {
   demotedFinish: /^(\d+)\s*[(（]\s*降\s*[)）]$/,
   /** 結果テーブルの枠セル判定(class に Waku{n} を含むか)。 */
   wakuClass: /\bWaku\d/,
-  /** NARオッズの単勝セル(単一の数値。例: 24.8)。 */
-  narWinOdds: /^[0-9]+(\.[0-9]+)?$/,
-  /** NARオッズの複勝セル(下限 - 上限。例: 6.8 - 8.5)。 */
-  narPlaceOddsRange: /^([0-9]+(?:\.[0-9]+)?)\s*-\s*([0-9]+(?:\.[0-9]+)?)$/,
   /**
    * 交流重賞(Jpn1/2/3)のグレード表記。半角数字("Jpn1"等)またはローマ数字
    * ("JpnⅠ"等)のみを受理し、全角数字("Jpn１")は受理しない(実測で確認済みの

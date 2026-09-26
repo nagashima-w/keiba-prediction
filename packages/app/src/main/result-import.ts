@@ -10,6 +10,7 @@ import {
   raceResultUrl,
   RaceResultNotConfirmedError,
   type CourseType,
+  type RaceComboPayoutsSaveInput,
   type RaceId,
   type RaceResult,
   type RaceResultEntry,
@@ -21,12 +22,18 @@ import type { ImportResultOutcome } from "../shared/analysis-types.js";
  * - 着順(FinishPosition)は数値順位のみ number にし、非数値(中止など)・null は null にする。
  *   降着(demoted)でも確定着順 value を採用する。
  * - 複勝の確定払戻(placePayout)を馬番で対応付ける。払戻の無い馬は null。
+ * - 単勝の確定払戻(winPayout、Issue #100・#23-C)を馬番で対応付ける。placePayoutと同じ
+ *   対応付けロジック(payoutByUmaban)。1着以外の馬は null。1着同着の場合は該当する
+ *   複数馬がそれぞれ自分の払戻額を持つ(winPayoutsの件数はparsePayoutRoutが固定しないため)。
  * - 通過順(passing)・上がり3F(last3f、タスク#27-A2)は各馬の値をそのまま詰める
  *   (parseRaceResult が既に非throwフォールバック済みのため、ここでの追加変換は不要)。
  */
 export function toResultEntries(result: RaceResult): RaceResultEntry[] {
-  const payoutByUmaban = new Map(
+  const placePayoutByUmaban = new Map(
     result.placePayouts.map((p) => [p.umaban, p.payout]),
+  );
+  const winPayoutByUmaban = new Map(
+    result.winPayouts.map((p) => [p.umaban, p.payout]),
   );
   return result.horses.map((h) => {
     const finishPosition =
@@ -36,7 +43,8 @@ export function toResultEntries(result: RaceResult): RaceResultEntry[] {
     return {
       umaban: h.umaban,
       finishPosition,
-      placePayout: payoutByUmaban.get(h.umaban) ?? null,
+      placePayout: placePayoutByUmaban.get(h.umaban) ?? null,
+      winPayout: winPayoutByUmaban.get(h.umaban) ?? null,
       passing: h.passing,
       last3f: h.last3f,
     };
@@ -75,15 +83,19 @@ export interface ImportResultDeps {
   /** 取得HTMLをパースする(通常は core parseRaceResult)。結果テーブル欠落時は例外を投げる。 */
   readonly parse: (html: string) => RaceResult;
   /**
-   * 実着順・通過順・上がり3F・複勝払戻を保存する(通常は AnalysisStore.saveResult)。
-   * courseType(面、タスク#27-A2)はレース単位の別引数として渡す。パース結果に面が
-   * 無い(未解決)場合は undefined を渡し、AnalysisStore 側が race_result_meta へ
-   * 書き込まないようにする。
+   * 実着順・通過順・上がり3F・複勝払戻・組合せ払戻(ワイド・3連複、Issue #52)を保存する
+   * (通常は AnalysisStore.saveResult)。courseType(面、タスク#27-A2)はレース単位の
+   * 別引数として渡す。パース結果に面が無い(未解決)場合は undefined を渡し、
+   * AnalysisStore 側が race_result_meta へ書き込まないようにする。
+   * comboPayouts(第4引数)は parseRaceResult が返す判別共用体(RaceComboPayoutResult)を
+   * そのまま渡す(boss裁定R-7: 呼び出し側〈importRaceResult〉に「undeterminedを空配列に
+   * 変換する」等の判断を持たせない。素通しのみ)。
    */
   readonly saveResult: (
     raceId: RaceId,
     entries: readonly RaceResultEntry[],
     courseType?: CourseType | null,
+    comboPayouts?: RaceComboPayoutsSaveInput,
   ) => void;
 }
 
@@ -122,6 +134,17 @@ export async function importRaceResult(
     // 構造異常等はそのまま伝播 → 以降の保存に到達しない。
     throw e;
   }
-  deps.saveResult(raceId, toResultEntries(result), result.courseType);
+  // boss裁定R-7: result.widePayouts/result.trioPayouts/result.quinellaPayouts/
+  // result.exactaPayouts/result.trifectaPayouts(いずれもparseRaceResultが返す判別共用体)を
+  // そのまま第4引数へ渡すだけで、ここでは一切の判断(undeterminedを[]に変換する・握りつぶす等)
+  // をしない。判断の余地を無くすことがR-7の要点(馬連はIssue #114・#24-F1、馬単はIssue #121・
+  // #24-F2、三連単はIssue #131・#25-Fでwide/trioと同型のまま追加)。
+  deps.saveResult(raceId, toResultEntries(result), result.courseType, {
+    wide: result.widePayouts,
+    trio: result.trioPayouts,
+    quinella: result.quinellaPayouts,
+    exacta: result.exactaPayouts,
+    trifecta: result.trifectaPayouts,
+  });
   return summarizeImport(raceId, result);
 }

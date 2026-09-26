@@ -18,7 +18,13 @@ import { deriveBatchAvailability } from "./batch-availability.js";
 import { canCollectPeriodBatch } from "./period-batch-gate.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
-import type { MixedAllocationSettings } from "./mixed-allocation-view.js";
+import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+import {
+  createMixedAllocationCache,
+  type MixedAllocationCache,
+} from "./mixed-allocation-cache.js";
+import type { AllocationOutcome } from "./mixed-allocation-queue.js";
+import type { MixedRaceAllocationDisplayView } from "./mixed-allocation-view.js";
 import { PeriodBatchView } from "./PeriodBatchView.js";
 import type { RaceLedgerFilter } from "./race-ledger-filter.js";
 import {
@@ -115,7 +121,22 @@ export function App(): React.JSX.Element {
     includeComboOdds: false,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
   });
+
+  // 券種横断の馬券配分の表示データキャッシュ(機能D-2c第4段・Issue #28・AC21)。
+  // Issue #110(#24-C2)でBatchAnalysisView.tsxからここへ寿命を移した: 分析タブから離れて
+  // 戻ると`BatchAnalysisView`自体が再マウントされる(下の`{verify.activeTab === "分析" && ...}`)
+  // ため、キャッシュをそちら側のuseRefで持つと消えてしまう。Appは分析タブへ切り替わっても
+  // アンマウントされないため、ここで1つだけ持ち、BatchAnalysisViewへpropsで渡す
+  // (`useRef`の遅延初期化。毎レンダー新しいキャッシュを作らない)。
+  const mixedAllocationCacheRef = useRef<MixedAllocationCache<
+    AllocationOutcome<MixedRaceAllocationDisplayView>
+  > | null>(null);
+  if (mixedAllocationCacheRef.current === null) {
+    mixedAllocationCacheRef.current = createMixedAllocationCache();
+  }
 
   // 実行中バッチの世代ID。一括分析開始時に固定し、完了で null に戻す。
   // 進捗イベントにはこの「開始時に固定した runId」を添えるため、完了後に遅れて届いた
@@ -185,6 +206,8 @@ export function App(): React.JSX.Element {
           includeComboOdds: s.includeComboOdds,
           includeWideInAllocation: s.includeWideInAllocation,
           includeTrioInAllocation: s.includeTrioInAllocation,
+          includeQuinellaInAllocation: s.includeQuinellaInAllocation,
+          includeExactaInAllocation: s.includeExactaInAllocation,
         });
       })
       .catch(() => {
@@ -670,6 +693,7 @@ export function App(): React.JSX.Element {
             onSendDiscord={() => handleSendDiscord(completedOutcomes)}
             onExportAnalysis={handleExportAnalysis}
             betAllocationSettings={betAllocationSettings}
+            mixedAllocationCache={mixedAllocationCacheRef.current}
           />
 
           <PeriodBatchView

@@ -28,7 +28,7 @@
  * 廃止時にそのままこのファイルの private ヘルパーとして残している。)
  */
 
-import { kaisaiDateFromNarRaceId, type RaceLedgerEntry } from "@keiba/core";
+import { kaisaiDateFromNarRaceId, type RaceLedgerEntry, type StoredAllocation } from "@keiba/core";
 
 import type { RaceLedgerView } from "../shared/analysis-types.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
@@ -78,9 +78,13 @@ function compareByKaisaiDateDescThenRaceIdAsc<
  * core RaceLedgerEntry の一覧を検証画面表示用(RaceLedgerView)へ変換し、
  * 開催日降順(null は最後)→レースID昇順に並べ替える。
  * @param entries core computeRaceLedger の結果(latest統合済み。結果取込の有無を問わない)
+ * @param getAllocation 分析IDから配分提案(Issue #55)を引き当てる関数。省略時は常にundefined
+ *   (allocation=null)を返す既定関数を使う(呼び出し元の追加を要求しない、非破壊の拡張。
+ *   pipeline-deps.ts の実呼び出しは `store.getStoredAllocation` を渡す)。
  */
 export function buildRaceLedgerView(
   entries: readonly RaceLedgerEntry[],
+  getAllocation: (analysisId: number) => StoredAllocation | undefined = () => undefined,
 ): RaceLedgerView[] {
   return entries
     .map(
@@ -99,6 +103,7 @@ export function buildRaceLedgerView(
         totalReturn: e.totalReturn,
         recoveryRate: e.recoveryRate,
         betCount: e.betCount,
+        allocation: getAllocation(e.analysisId) ?? null,
       }),
     )
     .sort(compareByKaisaiDateDescThenRaceIdAsc);

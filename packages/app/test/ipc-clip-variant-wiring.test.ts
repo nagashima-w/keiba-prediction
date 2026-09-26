@@ -101,6 +101,8 @@ describe("ipc: 設定のクリップ幅版(clipVariant)をcreatePipelineDepsへ�
       includeComboOdds: false,
       includeWideInAllocation: true,
       includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
     };
     await saveHandler(fakeEvent, update);
 

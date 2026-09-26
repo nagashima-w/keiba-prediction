@@ -223,6 +223,66 @@ export function trioOddsApiUrl(raceId: RaceId): string {
 }
 
 /**
+ * 馬単オッズを返す内部API(JSON、中央のみ、Issue #106・#24-B)。
+ *
+ * `data.odds["6"]` に馬番の並び(4桁。例 "0102"。**着順が意味を持つ**: 1着・2着の順に
+ * 2桁ずつ連結される)をキーとした [値,0.0(ダミー),人気] が入る。3連複と同様、下限・上限を
+ * 持たない単一値の券種(2要素目は常に"0.0"のダミー)。実測(#24-A・#103、
+ * race_id=202603020211・16頭)で1リクエストにP(16,2)=240件全順列が返ることを確認済み
+ * (`fixtures/odds_exacta_202603020211.json`。`docs/quinella-exacta-odds-investigation.md`
+ * §3.1参照)。type値の観測方法は wideOddsApiUrl と同じ(odds_get_form.html?type=b6
+ * フラグメント内 `oddsType:'6'`)。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(wideOddsApiUrlと同じ理由)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narExactaOddsPageUrl を使うこと)。
+ */
+export function exactaOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "馬単オッズJSON API(api_get_jra_odds、type=6)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=6&action=init`;
+}
+
+/**
+ * 馬連オッズを返す内部API(JSON、中央のみ、Issue #113・#24-D2)。
+ *
+ * `data.odds["4"]` に馬番ペア(4桁。例 "0102")をキーとした [値,0.0(ダミー),人気] が入る。
+ * ワイドと異なり下限・上限を持たない単一値の券種(2要素目は常に"0.0"のダミー。3連複・馬単と
+ * 同型)。実測(#24-A・#103、race_id=202603020211・16頭)で1リクエストにC(16,2)=120件
+ * 全組合せが返ることを確認済み(`fixtures/odds_quinella_202603020211.json`。
+ * `docs/quinella-exacta-odds-investigation.md` §3.1参照)。type値の観測方法は
+ * wideOddsApiUrl と同じ(odds_get_form.html?type=b4 フラグメント内 `oddsType:'4'`)。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(wideOddsApiUrlと同じ理由)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narQuinellaOddsPageUrl を使うこと)。
+ */
+export function quinellaOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "馬連オッズJSON API(api_get_jra_odds、type=4)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=4&action=init`;
+}
+
+/**
+ * 三連単オッズを返す内部API(JSON、中央のみ、Issue #130・#25-D)。
+ *
+ * `data.odds["8"]` に馬番の並び(6桁。例 "010203"。**着順が意味を持つ**: 1着・2着・3着の順に
+ * 2桁ずつ連結される)をキーとした [値,0.0(ダミー),人気] が入る。馬単・3連複と同様、下限・上限を
+ * 持たない単一値の券種(2要素目は常に"0.0"のダミー)。実測(#127、race_id=202603020211・16頭)で
+ * 1リクエストにP(16,3)=3360件全順列が返ることを確認済み(`fixtures/odds_trifecta_202603020211.json`。
+ * `docs/trifecta-odds-investigation.md` §2参照)。type値の観測方法は wideOddsApiUrl と同じ
+ * (odds_get_form.html?type=b8 フラグメント内 `oddsType:'8'`)。
+ *
+ * **上限キャップ値`"999,999.9"`について**: 中央presale(`status:"middle"`)応答では、
+ * 票数がまだ少ない組合せがこの値で表示される(実測3360件中2644件。詳細は
+ * `docs/trifecta-odds-investigation.md` §6.2)。実オッズとして読まないための変換は
+ * `parse-combo-odds.ts`(組合せ券種共通のパーサ)側で行う。本関数はURL構築のみを担う。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(wideOddsApiUrlと同じ理由)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narTrifectaOddsAxisUrl を使うこと)。
+ */
+export function trifectaOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "三連単オッズJSON API(api_get_jra_odds、type=8)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=8&action=init`;
+}
+
+/**
  * ワイドオッズページのURL(地方のみ、機能D-1)。
  *
  * 中央と異なりJSON APIが存在しないため、静的HTML(odds/index.html?type=b5)をパースする
@@ -232,6 +292,32 @@ export function trioOddsApiUrl(raceId: RaceId): string {
  */
 export function narWideOddsPageUrl(raceId: RaceId): string {
   return `${NAR_BASE}/odds/index.html?type=b5&race_id=${raceId}`;
+}
+
+/**
+ * 馬単オッズページのURL(地方のみ、Issue #106・#24-B)。
+ *
+ * ワイド(`narWideOddsPageUrl`)と同じく、軸馬別の制限を受けず1リクエストで全順列が
+ * 取得できる(3連複〈`narTrioOddsPageUrl`〉とは異なる)。実測(#24-A・#103、
+ * race_id=202654071210・12頭)で、静的HTML(odds/index.html?type=b6)にP(12,2)=132件
+ * 全順列が1リクエストで含まれることを確認済み(`fixtures/nar_odds_b6_202654071210.html`。
+ * `docs/quinella-exacta-odds-investigation.md` §3.2参照)。
+ */
+export function narExactaOddsPageUrl(raceId: RaceId): string {
+  return `${NAR_BASE}/odds/index.html?type=b6&race_id=${raceId}`;
+}
+
+/**
+ * 馬連オッズページのURL(地方のみ、Issue #113・#24-D2)。
+ *
+ * ワイド(`narWideOddsPageUrl`)と同じく、軸馬別の制限を受けず1リクエストで全組合せが
+ * 取得できる(3連複〈`narTrioOddsPageUrl`〉とは異なる)。実測(#24-A・#103、
+ * race_id=202654071210・12頭)で、静的HTML(odds/index.html?type=b4)にC(12,2)=66件
+ * 全組合せが1リクエストで含まれることを確認済み(`fixtures/nar_odds_b4_202654071210.html`。
+ * `docs/quinella-exacta-odds-investigation.md` §3.2参照)。
+ */
+export function narQuinellaOddsPageUrl(raceId: RaceId): string {
+  return `${NAR_BASE}/odds/index.html?type=b4&race_id=${raceId}`;
 }
 
 /**
@@ -288,4 +374,25 @@ export function narTrioOddsAxisUrl(raceId: RaceId, jiku: number): string {
     );
   }
   return `${NAR_BASE}/odds/odds_get_form.html?type=b7&race_id=${raceId}&jiku=${jiku}`;
+}
+
+/**
+ * 地方(NAR)三連単オッズの軸馬別AJAXフラグメントのURL(Issue #130・#25-D)。
+ *
+ * `docs/trifecta-odds-investigation.md` §3(実測: race_id=202654071210・12頭)により、
+ * 三連単の軸は「1着を固定する」意味であり(3連複〈`narTrioOddsAxisUrl`〉の「(順不同で)含む」
+ * とは異なる)、`jiku=k`は「1着=kの全順列」P(n-1,2)件を返す。全組合せP(n,3)を得るには
+ * 軸1〜n(頭数分。3連複のn-2とは異なる式)を叩く必要があるが、**全軸を回すオーケストレーション
+ * 関数は本Issueでは作らない**(#132で判断。`fetchNarTrifectaAxisOdds`参照)。
+ *
+ * `jiku` は馬番(1〜{@link MAX_UMABAN}の整数)。契約は`narTrioOddsAxisUrl`と同じ
+ * (呼び出し側が構築する引数であり市場データではないため、契約違反はthrowする)。
+ */
+export function narTrifectaOddsAxisUrl(raceId: RaceId, jiku: number): string {
+  if (!Number.isInteger(jiku) || jiku < 1 || jiku > MAX_UMABAN) {
+    throw new Error(
+      `軸馬番(jiku)は1〜${MAX_UMABAN}の整数である必要があります(jiku=${jiku})`,
+    );
+  }
+  return `${NAR_BASE}/odds/odds_get_form.html?type=b8&race_id=${raceId}&jiku=${jiku}`;
 }

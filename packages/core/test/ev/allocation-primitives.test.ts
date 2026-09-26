@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_SKIP_REASON_CODES,
   applyMinimumStake,
   buildOutcomeIndexSets,
   computeKellyTarget,
@@ -7,7 +8,10 @@ import {
   DEFAULT_GREEDY_STEPS,
   DEFAULT_KELLY_FRACTION,
   determineSkipReasonCode,
+  foldOutcomeIndexSetsBySignature,
   foldToCandidateSubsets,
+  isUsableOdds,
+  MIN_VALID_ODDS,
   resolveBankroll,
   resolveBetUnit,
   resolveEffectivePerRaceCap,
@@ -18,6 +22,8 @@ import {
   type OutcomeIndexSet,
 } from "../../src/ev/allocation-primitives.js";
 import type { PlaceOutcome } from "../../src/ev/place-joint-model.js";
+import { computeRaceEv, type HorsePrior } from "../../src/ev/expected-value.js";
+import type { OddsSnapshot, PlaceOdds } from "../../src/scraper/types.js";
 
 /**
  * allocation-primitives — 機能D-2a(Issue #14)で bet-allocation.ts から抽出した
@@ -160,6 +166,99 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
     });
   });
 
+  describe("foldOutcomeIndexSetsBySignature(indices署名畳み込み・Issue #96)", () => {
+    // 背景: 単勝(win)候補が1件でもあると、combo-bet-allocation.tsのdetermined枝が
+    // 順序付きoutcome空間(P(頭数,topFinishCount)通り、畳み込み無し)をそのままrunGreedyAllocation/
+    // computeHitProbabilitiesへ渡すため計算量が跳ね上がる(Issue #96)。的中パターン(indices)が
+    // 完全一致するoutcomeは`wealth_T`が同一なので、`P1·log(w)+P2·log(w)=(P1+P2)·log(w)`により
+    // 確率を合算しても厳密に等価(win識別性〈indices列そのもの〉は一切失わない。
+    // foldToCandidateSubsetsとは異なる畳み込みであることに注意: foldToCandidateSubsetsは
+    // `placed`を候補集合と交差させ昇順ソートする「順序を捨てる」畳み込みであり、winの
+    // identity判定〈order[0]===umaban〉を壊すため通せない。本関数はindices列自体を一切
+    // 変更せず、同じindices列を持つ要素をまとめるだけなので、win識別性を壊さない)。
+    it("(a)(b) 同一署名(indices完全一致)のoutcomeをまとめ、件数が減り確率総和が保存されること(値を直書きで固定)", () => {
+      const input: OutcomeIndexSet[] = [
+        { indices: [0, 2], probability: 0.1 },
+        { indices: [1], probability: 0.2 },
+        { indices: [0, 2], probability: 0.3 }, // 署名[0,2]がinput[0]と重複
+        { indices: [], probability: 0.4 },
+      ];
+      const folded = foldOutcomeIndexSetsBySignature(input);
+      // (a) 4件→3件(署名[0,2]の2件が1件にまとまる。件数を直書きで固定)。
+      expect(folded).toHaveLength(3);
+      const byKey = new Map(folded.map((o) => [o.indices.join(","), o.probability]));
+      expect(byKey.get("0,2")).toBeCloseTo(0.4, 10); // 0.1+0.3
+      expect(byKey.get("1")).toBeCloseTo(0.2, 10);
+      expect(byKey.get("")).toBeCloseTo(0.4, 10);
+      // (b) 確率総和が保存されること(自明でない: 畳み込みで確率を落とさないことの確認)。
+      const total = folded.reduce((sum, o) => sum + o.probability, 0);
+      expect(total).toBeCloseTo(1.0, 10);
+    });
+
+    it("(c) 署名がすべて異なる入力では件数・順序・probabilityが入力と完全に一致すること(ビット等価)", () => {
+      const input: OutcomeIndexSet[] = [
+        { indices: [0], probability: 0.3 },
+        { indices: [1], probability: 0.25 },
+        { indices: [0, 1], probability: 0.45 },
+      ];
+      const folded = foldOutcomeIndexSetsBySignature(input);
+      expect(folded).toHaveLength(3);
+      for (let i = 0; i < input.length; i++) {
+        expect(folded[i]!.indices).toEqual(input[i]!.indices);
+        // toBeによるビット等価(toBeCloseToではない)。
+        expect(folded[i]!.probability).toBe(input[i]!.probability);
+      }
+    });
+
+    it("(d) 出力順が決定的であること(同じ入力で2回呼んでtoEqual)", () => {
+      const input: OutcomeIndexSet[] = [
+        { indices: [0, 2], probability: 0.1 },
+        { indices: [1], probability: 0.2 },
+        { indices: [0, 2], probability: 0.3 },
+      ];
+      const first = foldOutcomeIndexSetsBySignature(input);
+      const second = foldOutcomeIndexSetsBySignature(input);
+      expect(first).toEqual(second);
+    });
+
+    it("(e) 畳み込み前後でrunGreedyAllocationのfractionsがビット一致すること(確率をべき乗値で構成した代表的な単純入力)", () => {
+      // 0.125+0.125=0.25はどちらも2進で厳密に表現できる値同士の加算(倍精度で丸め誤差が
+      // 出ない)であり、「一致するフィクスチャを恣意的に選ぶ」のではなく、代表的な単純入力
+      // (2候補・4outcome、うち1組が同一署名)でargmaxの選択列が畳み込み前後で変わらない
+      // ことを実行して確認する目的で構成した(boss指摘: 中間値〈commonLogSum等〉の一致では
+      // なくfractions自体の一致が目的。argmaxが変わらない限りfractionsは同じ加算列になる)。
+      const unfolded: OutcomeIndexSet[] = [
+        { indices: [0], probability: 0.125 },
+        { indices: [0], probability: 0.125 }, // 署名[0]がunfolded[0]と重複
+        { indices: [1], probability: 0.25 },
+        { indices: [0, 1], probability: 0.5 },
+      ];
+      const odds = [3, 5];
+      const folded = foldOutcomeIndexSetsBySignature(unfolded);
+      // 前提(空振り防止): 実際に畳み込まれて件数が減っていること。
+      expect(folded.length).toBeLessThan(unfolded.length);
+      expect(folded).toHaveLength(3);
+
+      for (const greedySteps of [10, 100, 1000]) {
+        const before = runGreedyAllocation(2, odds, unfolded, greedySteps);
+        const after = runGreedyAllocation(2, odds, folded, greedySteps);
+        expect(Object.is(after.fractions[0], before.fractions[0])).toBe(true);
+        expect(Object.is(after.fractions[1], before.fractions[1])).toBe(true);
+        expect(after.converged).toBe(before.converged);
+      }
+    });
+
+    it("indicesが空・候補0件・n=0の縮退入力で壊れないこと", () => {
+      expect(foldOutcomeIndexSetsBySignature([])).toEqual([]);
+      const onlyEmpty: OutcomeIndexSet[] = [
+        { indices: [], probability: 0.6 },
+        { indices: [], probability: 0.4 },
+      ];
+      const folded = foldOutcomeIndexSetsBySignature(onlyEmpty);
+      expect(folded).toEqual([{ indices: [], probability: 1.0 }]);
+    });
+  });
+
   describe("runGreedyAllocation(貪欲逐次配分・機能D-2a高速化後)", () => {
     it("候補0件は空配列・converged=trueを返す", () => {
       expect(runGreedyAllocation(0, [], [], 1000)).toEqual({ fractions: [], converged: true });
@@ -296,26 +395,25 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
       expect(converged).toBe(false);
     });
 
-    it("高速パス(候補が多く安全域)とフォールバック相当のブルートフォースが同じ結果になること(数学的同値性の直接検証)", () => {
-      // 候補20・outcome10のランダムだが決定的な構成で、通常は安全域(高速パス)を通るはず。
-      // 参照実装として、旧来のブルートフォース版をこのテスト内に再実装し、
-      // 本体(高速化後のrunGreedyAllocation)の出力と厳密一致(toBe)することを確認する。
-      const n = 20;
-      const outcomeIndexSets: OutcomeIndexSet[] = [];
-      let seed = 42;
-      const rand = () => {
-        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-        return seed / 0x7fffffff;
-      };
-      for (let j = 0; j < 10; j++) {
-        const indices: number[] = [];
-        for (let i = 0; i < n; i++) {
-          if (rand() < 0.15) indices.push(i);
-        }
-        outcomeIndexSets.push({ indices, probability: 1 / 10 });
-      }
-      const odds = Array.from({ length: n }, () => 2 + rand() * 4);
-
+    describe("高速パス(候補が多く安全域)とフォールバック相当のブルートフォースが同じ結果になること(数学的同値性の直接検証・テーブル駆動)", () => {
+      // Issue #96(ビット厳密なメモ化。commonWealth[j]のlog・freshWealthの候補ごとの
+      // 事前計算)がargmaxの選択を反転させていないかを検出する唯一の網(このファイルの
+      // 他のテストはargmax反転を直接は検出しない)。
+      // 【採用C(computeFreshWealthのO(1)化)は不採用】: 数学的には同値だが浮動小数演算として
+      // ビット一致するとは限らず、実際に`bet-allocation.test.ts`の退化ケース(全odds=3で
+      // 目的関数が平坦になる番人テスト)でargmax反転(betCount 2→1)を引き起こしたため
+      // 不採用にした(`runGreedyAllocation`のJSDoc「検討したが採用しなかった案」参照)。
+      // 本テーブルはこの反転を再現しなかった(4条件×2水準すべてtoEqual一致)が、それは
+      // 「メモ化のみ(採用C抜き)ではargmax反転が起きない」ことの確認であり、Cを採用した
+      // 場合に反転が起きないことの確認ではない(Cはproduction codeに存在しない)。
+      // 参照実装(旧来のブルートフォース)は元のテストのものをそのまま使い、一切弱めない
+      // (toEqualによる厳密一致を維持する)。
+      //
+      // ★boss指摘への対応: 候補数・outcome数・接触密度・オッズ分布の異なる4条件以上、
+      // greedySteps2水準以上のテーブルへ拡張する(旧版は1条件・greedySteps=500のみだった)。
+      // 旧版の条件(候補20・outcome10・接触密度0.15・オッズ2-6・greedySteps=500・seed=42)は
+      // 下記シナリオ1つ目としてそのまま保持し、条件を追加する形で拡張する(既存の保証を
+      // 弱めない)。
       const bruteForce = (
         nn: number,
         oddsArr: readonly number[],
@@ -360,9 +458,223 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
         return x;
       };
 
-      const expected = bruteForce(n, odds, outcomeIndexSets, 500);
-      const { fractions: actual } = runGreedyAllocation(n, odds, outcomeIndexSets, 500);
-      expect(actual).toEqual(expected);
+      /** 決定的な疑似乱数生成器(元テストと同じ線形合同法)。 */
+      function makeRand(seed: number): () => number {
+        let s = seed;
+        return () => {
+          s = (s * 1103515245 + 12345) & 0x7fffffff;
+          return s / 0x7fffffff;
+        };
+      }
+
+      function buildScenario(
+        n: number,
+        outcomeCount: number,
+        contactProbability: number,
+        oddsMin: number,
+        oddsMax: number,
+        seed: number,
+      ): { outcomeIndexSets: OutcomeIndexSet[]; odds: number[] } {
+        const rand = makeRand(seed);
+        const outcomeIndexSets: OutcomeIndexSet[] = [];
+        for (let j = 0; j < outcomeCount; j++) {
+          const indices: number[] = [];
+          for (let i = 0; i < n; i++) {
+            if (rand() < contactProbability) indices.push(i);
+          }
+          outcomeIndexSets.push({ indices, probability: 1 / outcomeCount });
+        }
+        const odds = Array.from({ length: n }, () => oddsMin + rand() * (oddsMax - oddsMin));
+        return { outcomeIndexSets, odds };
+      }
+
+      const scenarios: {
+        readonly label: string;
+        readonly n: number;
+        readonly outcomeCount: number;
+        readonly contactProbability: number;
+        readonly oddsMin: number;
+        readonly oddsMax: number;
+        readonly seed: number;
+      }[] = [
+        {
+          label: "候補20・outcome10・接触密度0.15・オッズ2-6(旧版と同条件)",
+          n: 20,
+          outcomeCount: 10,
+          contactProbability: 0.15,
+          oddsMin: 2,
+          oddsMax: 6,
+          seed: 42,
+        },
+        {
+          label: "候補5・outcome3・接触密度0.6(高密度)・オッズ1.5-3(低オッズ)",
+          n: 5,
+          outcomeCount: 3,
+          contactProbability: 0.6,
+          oddsMin: 1.5,
+          oddsMax: 3,
+          seed: 7,
+        },
+        {
+          label: "候補50・outcome30・接触密度0.05(低密度)・オッズ3-20(高オッズ)",
+          n: 50,
+          outcomeCount: 30,
+          contactProbability: 0.05,
+          oddsMin: 3,
+          oddsMax: 20,
+          seed: 123,
+        },
+        {
+          label: "候補8・outcome60(候補数よりoutcome数が多い)・接触密度0.3・オッズ1.1-2(1.0近傍)",
+          n: 8,
+          outcomeCount: 60,
+          contactProbability: 0.3,
+          oddsMin: 1.1,
+          oddsMax: 2,
+          seed: 999,
+        },
+      ];
+      const greedyStepsValues = [50, 500];
+
+      for (const scenario of scenarios) {
+        for (const greedySteps of greedyStepsValues) {
+          it(`${scenario.label} / greedySteps=${greedySteps}`, () => {
+            const { outcomeIndexSets, odds } = buildScenario(
+              scenario.n,
+              scenario.outcomeCount,
+              scenario.contactProbability,
+              scenario.oddsMin,
+              scenario.oddsMax,
+              scenario.seed,
+            );
+            const expected = bruteForce(scenario.n, odds, outcomeIndexSets, greedySteps);
+            const { fractions: actual } = runGreedyAllocation(scenario.n, odds, outcomeIndexSets, greedySteps);
+            expect(actual).toEqual(expected);
+          });
+        }
+      }
+
+      // ★Red-0(Issue #107・#24-C・ゲート裁定§6(1)への対応)。
+      //
+      // 上記4シナリオは「候補ごとに独立なベルヌーイ試行」でindicesを作っており、outcome数は
+      // 60以下、|indices|はn×contactProbability(最大30程度)まで大きくなりうる。
+      // これは実際の順序付きoutcome空間(券種拡張シリーズ〈#91〜〉が実際に通す経路。
+      // combo-bet-allocation.tsのdetermined枝〈win候補を含む呼び出し〉)とは大小関係が
+      // **逆**である。実際は
+      //   - outcome数が大きい(P(頭数,3)通り。中央16頭の実オッズで最大3360、署名畳み込み後でも
+      //     1023。`scripts/bench-run-greedy-allocation.ts`で再現可能)
+      //   - 1outcomeあたりの的中候補数(|indices|)は小さい値に偏る(win=1着identityで高々1件、
+      //     trio=上位3着の3頭組そのもので高々1件、place=上位3着メンバーで高々3件、
+      //     wide=上位3着からの2頭組で高々3件という構造的な上限がある)
+      // という形になる。本シナリオはP(n,3)通りの順列を直接列挙し、win/place/wide/trioの
+      // isHitルール(combo-bet-allocation.tsのdetermined枝と同型の判定式)でindicesを構築する
+      // ことで、この実際の形(outcome数3桁・|indices|が候補種別ごとに偏る)を再現する。
+      describe("実際の順序付きoutcome空間の形(outcome数3桁・|indices|が候補種別ごとに偏る)を再現するシナリオ", () => {
+        /** n頭からの3着までの順列(P(n,3)通り)をすべて決定的に列挙する。 */
+        function permutations3(n: number): number[][] {
+          const results: number[][] = [];
+          for (let a = 0; a < n; a++) {
+            for (let b = 0; b < n; b++) {
+              if (b === a) continue;
+              for (let c = 0; c < n; c++) {
+                if (c === a || c === b) continue;
+                results.push([a, b, c]);
+              }
+            }
+          }
+          return results;
+        }
+
+        /** items(昇順)からk個の組合せを列挙する(決定的backtrack。bruteForceとは独立の実装)。 */
+        function combinationsOf(items: readonly number[], k: number): number[][] {
+          const results: number[][] = [];
+          const current: number[] = [];
+          const backtrack = (start: number): void => {
+            if (current.length === k) {
+              results.push([...current]);
+              return;
+            }
+            for (let i = start; i < items.length; i++) {
+              current.push(items[i]!);
+              backtrack(i + 1);
+              current.pop();
+            }
+          };
+          backtrack(0);
+          return results;
+        }
+
+        /** P(7,3)=210通り(3桁)。候補はwin7+place7+wide21(=C(7,2))+trio35(=C(7,3))=70件。 */
+        const N_HORSES = 7;
+
+        type RealisticCandidate = {
+          readonly kind: "win" | "place" | "wide" | "trio";
+          readonly umabans: readonly number[];
+        };
+
+        function buildRealisticOrderedScenario(seed: number): {
+          outcomeIndexSets: OutcomeIndexSet[];
+          odds: number[];
+        } {
+          const rand = makeRand(seed);
+          const horses = Array.from({ length: N_HORSES }, (_, i) => i + 1);
+
+          const allCombos: RealisticCandidate[] = [
+            ...horses.map((u): RealisticCandidate => ({ kind: "win", umabans: [u] })),
+            ...horses.map((u): RealisticCandidate => ({ kind: "place", umabans: [u] })),
+            ...combinationsOf(horses, 2).map((umabans): RealisticCandidate => ({ kind: "wide", umabans })),
+            ...combinationsOf(horses, 3).map((umabans): RealisticCandidate => ({ kind: "trio", umabans })),
+          ];
+          // 実際のcombo-bet-allocation.tsはEVプラスの組合せだけを候補にする(全組合せが
+          // 候補になるわけではない)。ここでも各組合せを独立確率0.5で残すことで、outcomeごとの
+          // |indices|が「候補種別ごとの上限(win/trioは高々1、place/wideは高々3)」の範囲内で
+          // 実際にばらつく(全組合せを候補にすると、どのoutcomeも一律win1+place3+wide3+trio1=8で
+          // 揃ってしまい、変動が消えてしまうため)。
+          const candidates = allCombos.filter(() => rand() < 0.5);
+          const odds = candidates.map(() => 1.5 + rand() * 8); // 1.5〜9.5倍(現実的なレンジ)。
+
+          const orders = permutations3(N_HORSES).map((order) => order.map((i) => horses[i]!));
+          // 0を避けた重みを正規化する(全outcomeが正の確率を持つようにする)。
+          const rawWeights = orders.map(() => rand() + 0.01);
+          const totalWeight = rawWeights.reduce((a, b) => a + b, 0);
+
+          const outcomeIndexSets: OutcomeIndexSet[] = orders.map((order, oi) => {
+            const orderSet = new Set(order);
+            const indices: number[] = [];
+            for (let ci = 0; ci < candidates.length; ci++) {
+              const c = candidates[ci]!;
+              // combo-bet-allocation.tsのdetermined枝と同型の判定式
+              // (win: order[0]とのidentity判定 / それ以外: 部分集合包含)。
+              const isHit =
+                c.kind === "win" ? order[0] === c.umabans[0] : c.umabans.every((u) => orderSet.has(u));
+              if (isHit) {
+                indices.push(ci);
+              }
+            }
+            return { indices, probability: rawWeights[oi]! / totalWeight };
+          });
+
+          return { outcomeIndexSets, odds };
+        }
+
+        for (const greedySteps of [50, 500]) {
+          it(`実際の形(outcome数3桁・的中判定が実装と同型)でも高速パスとブルートフォースが一致すること / greedySteps=${greedySteps}`, () => {
+            const { outcomeIndexSets, odds } = buildRealisticOrderedScenario(2026);
+            const n = odds.length;
+
+            // 前提1: outcome数が3桁であること(既存4シナリオが覆っていなかった形の固定)。
+            expect(outcomeIndexSets.length).toBeGreaterThanOrEqual(100);
+            // 前提2: |indices|が一様でなく偏っていること(win/trioは高々1件、place/wideは高々3件と
+            // 候補種別ごとに構造的に決まるため、単一の値には潰れない)。
+            const distinctSizes = new Set(outcomeIndexSets.map((s) => s.indices.length));
+            expect(distinctSizes.size).toBeGreaterThanOrEqual(2);
+
+            const expected = bruteForce(n, odds, outcomeIndexSets, greedySteps);
+            const { fractions: actual } = runGreedyAllocation(n, odds, outcomeIndexSets, greedySteps);
+            expect(actual).toEqual(expected);
+          });
+        }
+      });
     });
   });
 
@@ -460,6 +772,102 @@ describe("allocation-primitives(券種非依存プリミティブ・機能D-2a)"
 
     it("優先順位: λ=0かつ候補0頭 → kelly-zeroが優先されること(no-candidatesではない)", () => {
       expect(determineSkipReasonCode(10000, 10000, 10000, 100, 0, 0, 0)).toBe("kelly-zero");
+    });
+  });
+
+  describe("ALL_SKIP_REASON_CODES(Issue #80 AC-A5: SkipReasonCodeを増やしていないことの機械検査)", () => {
+    it("6値ちょうどであり、値の集合がリテラル配列と一致すること", () => {
+      // 前提固定(空振り防止): 6という数はALL_SKIP_REASON_CODES.length自身からではなく、
+      // このリテラル配列(実装からのimportではない、このテストが書く独立した期待値)から来る。
+      const expected = [
+        "bankroll-unset",
+        "cap-unset",
+        "cap-too-small",
+        "kelly-zero",
+        "no-candidates",
+        "no-edge",
+      ];
+      expect(expected).toHaveLength(6);
+      // 順序に依存しない比較(定義順が変わっても壊れないよう、両者をソートしてtoEqual)。
+      expect([...ALL_SKIP_REASON_CODES].sort()).toEqual([...expected].sort());
+    });
+
+    it("重複が無いこと(Setに変換しても6件のまま)", () => {
+      expect(new Set(ALL_SKIP_REASON_CODES).size).toBe(6);
+    });
+  });
+
+  describe("isUsableOdds(オッズとして使える値かの判定・Issue #31→#74で1.0以上へ引き上げ)", () => {
+    // 背景: combo-bet-allocation.ts の validateCandidates(:412-416)と resolveComboOdds(:672-674)が
+    // `!Number.isFinite(x) || x <= 0` を独立に2回実装していた(将来どちらかだけ直す事故の温床)。
+    // 本述語へ1本化し、複勝側(bet-allocation.ts)の候補フィルタを3つ目の委譲先として追加する
+    // (Issue #31)。「1.0以上の有限値」であることのみを判定し、null判定は呼び出し側の責務とする
+    // (「未確定」と「不正値」の区別を呼び出し側に残すため、引数の型はnumberのみでnullを許容しない)。
+    //
+    // #74: オッズの値域は「1.0以上」であり0は値域外(Issue #74)。旧基準`value > 0`は
+    // [0,1)を通してしまい、複勝EV側(expected-value.ts)がoddsMin=0を「ev=0」という
+    // 正常な判定結果に潰していた(判定不能と判定結果の混同)。基準を`value >= MIN_VALID_ODDS`
+    // (1.0)へ引き上げ、全呼び出し元に同時適用する。
+    // 数(単位を明記): #74着手前は呼び出し6・モジュール3(combo-bet-allocation.ts 2・
+    // bet-allocation.ts 3・verify.ts 1)。本Issueで expected-value.ts・build-prompt.ts・
+    // probability-quality-metrics.ts の3モジュールが新たに委譲し、#74後は呼び出し9・
+    // モジュール6になる(詳細・再現コマンドは allocation-primitives.ts の isUsableOdds JSDoc参照)。
+    //
+    // 適用範囲の注意(boss拘束力のある補足1): 本述語は「オッズ」の判定にのみ適用する
+    // (呼び出し箇所の数は上記のとおり変動するため、ここでは数を断定しない)。
+    // validateCandidatesの馬番検証(umabans)は式がたまたま同一なだけで意味論が別(馬番の
+    // 妥当性であってオッズの妥当性ではない)であるため、本述語を流用してはならない
+    // (将来オッズ側の基準だけを変えた際に馬番の検証まで道連れで変わる事故を防ぐ)。
+    const table: Array<{ name: string; value: number; expected: boolean }> = [
+      { name: "通常値(2.2)", value: 2.2, expected: true },
+      // #74: 旧基準では true だったが、1.0未満は値域外のため false へ変更(引き上げの中核)。
+      { name: "正の極小値(1e-9)", value: 1e-9, expected: false },
+      { name: "Number.MAX_VALUE(有限の最大値)", value: Number.MAX_VALUE, expected: true },
+      { name: "0(境界。1.0以上を満たさない)", value: 0, expected: false },
+      // 負のゼロ(-0)。-0 >= 1.0 は false なので現状の実装で正しく除外される想定の境界値
+      // (code-reviewer指摘)。-0 === 0 は true だが Object.is(-0, 0) は false であり、
+      // 実装が `value >= MIN_VALID_ODDS` を使う限り区別なく false になるはず、という点を
+      // 明示的に固定する。it.eachの表示名は上記$name(このオブジェクトのname)を使うため、
+      // "0"の行と紛れない。
+      { name: "負のゼロ(-0)", value: -0, expected: false },
+      { name: "負値(-1)", value: -1, expected: false },
+      { name: "NaN", value: Number.NaN, expected: false },
+      { name: "+Infinity", value: Number.POSITIVE_INFINITY, expected: false },
+      { name: "-Infinity", value: Number.NEGATIVE_INFINITY, expected: false },
+      // #74 AC-3: 値域の境界(1.0未満/以上)を明示的に固定する。
+      { name: "0.9999999(境界。1.0未満)", value: 0.9999999, expected: false },
+      { name: "1(境界ちょうど。1.0以上を満たす)", value: 1, expected: true },
+      { name: "1.0000001(境界を僅かに超える)", value: 1.0000001, expected: true },
+    ];
+    it.each(table)("$name → $expected", ({ value, expected }) => {
+      expect(isUsableOdds(value)).toBe(expected);
+    });
+
+    it("MIN_VALID_ODDSは1.0である", () => {
+      expect(MIN_VALID_ODDS).toBe(1.0);
+    });
+
+    // boss裁定(Q1(b)・2026-09-04): 値域の定数(MIN_VALID_ODDS)と、その定数を断定的に
+    // 埋め込んだ除外理由の散文(expected-value.ts)を、1つのit()の中で両方ハードコードした
+    // リテラルとして固定する。片方だけ直して緑になる経路を作らないため
+    // (`expect(x).toEqual(実装からimportした定数)`は使わない。#55の自己参照比較の穴)。
+    // MIN_VALID_ODDSを変更したら、このテストと下記2箇所を同時に直すこと:
+    //   - expected-value.ts の除外理由文言「複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外」
+    //   - combo-bet-allocation.ts / bet-allocation.ts のAC-11是正箇所(散文中の「1.0未満」表記)
+    it("値域の定数と除外理由の文言は同時に直す(定数を変えるとこのテストが赤くなる)", () => {
+      expect(MIN_VALID_ODDS).toBe(1.0); // ハードコードしたリテラル
+      const priors: HorsePrior[] = [{ umaban: 1, placeProb: 0.5 }];
+      const place: PlaceOdds = { oddsMin: 0, oddsMax: 0, ninki: null };
+      const odds: OddsSnapshot = {
+        officialDatetime: null,
+        oddsStatus: "result",
+        win: {},
+        place: { 1: place },
+      };
+      const [result] = computeRaceEv(priors, odds);
+      expect(result!.excludedReason).toBe(
+        "複勝オッズ下限が不正な値(1.0未満・非有限)のため対象外", // ハードコードしたリテラル
+      );
     });
   });
 });

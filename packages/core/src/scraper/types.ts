@@ -298,10 +298,92 @@ export interface RacePayoutEntry {
 }
 
 /**
+ * 確定払戻の1組(ワイド・三連複など、複数馬番の組で的中を判定する券種。Issue #52)。
+ * payout は `RacePayoutEntry` と同じ単位規約(100円あたりの払戻額・円)。
+ */
+export interface RaceComboPayoutEntry {
+  /**
+   * 的中組の馬番。**ワイド・三連複・馬連は昇順・重複なし。馬単(exacta、Issue #121・
+   * #24-F2)・三連単(trifecta、Issue #131・#25-F)だけは例外で、着順どおりの並び
+   * (馬単は1着→2着、三連単は1着→2着→3着)のまま保持し、ソートしない**
+   * (`scraper/combo-odds-key.ts`の`COMBO_KEY_ORDER`参照。馬単は「1着13・2着8」と
+   * 「1着8・2着13」が別の買い目であり、昇順に正規化すると区別できなくなるため。
+   * 三連単も同じ理由)。
+   */
+  readonly umabans: readonly number[];
+  /** 100円あたりの払戻額(円)。 */
+  readonly payout: number;
+}
+
+/**
+ * 組合せ払戻(ワイド・三連複)が構造異常・未公開により判定できなかった理由
+ * (Issue #52・boss裁定R-1)。
+ *
+ * - "payoutTableAbsent": 払戻テーブル(`.Payout_Detail_Table`)自体が文書に1つも無い。
+ *   着順は確定しているが払戻がまだ公開されていない窓が現実に存在しうる
+ *   (実測: `fixtures/nar_result_presale_202642071612.html` に
+ *   「レース確定後10分前後で公開予定です。」という文言がある)。この窓では
+ *   「払戻0円」という確定値と区別する必要があるため `RaceComboPayoutResult` の
+ *   `state:"undetermined"` にする(複勝・単勝は既存どおり空配列のままで非対称。理由は
+ *   `RaceResult.widePayouts` のJSDoc参照)。
+ * - "groupCountMismatch": 組(`<ul>`)の数と `td.Payout` を`<br>`分割して得た払戻件数が
+ *   一致しない。
+ * - "comboSizeMismatch": 1組内の非空要素数が券種の構成頭数(`COMBO_SIZE[betType]`)と
+ *   一致しない。
+ * - "invalidUmaban": 組の馬番が `validateComboUmabans` の検証(1〜18範囲・整数・昇順・
+ *   重複なし)を通らない。
+ * - "duplicateCombo": 同一組(`buildComboOddsKey` で同じキーになる組)が2回以上出現する。
+ *   永続化層の PRIMARY KEY(race_id, bet_type, combo_key)違反によるトランザクション巻き添え
+ *   (着順・複勝・単勝の保存まで失敗する)を防ぐため、DBに到達する前のパース段階で検出する。
+ */
+export interface RaceComboPayoutAnomaly {
+  readonly kind:
+    | "payoutTableAbsent"
+    | "groupCountMismatch"
+    | "comboSizeMismatch"
+    | "invalidUmaban"
+    | "duplicateCombo";
+  /** 人間向けの説明(何が想定外だったか)。 */
+  readonly message: string;
+  /** 観測された組数(`<ul>`の数)。判定に至らなかった場合は null。 */
+  readonly observedGroupCount: number | null;
+  /** 観測された払戻件数(`td.Payout`の`<br>`分割件数)。判定に至らなかった場合は null。 */
+  readonly observedPayoutCount: number | null;
+  /**
+   * 異常が起きた行の生HTML(再現・デバッグ用)。診断値はログ・IPCを経由しうるため
+   * 一定長で切り詰める(`parse-race-result.ts` の `ANOMALY_RAW_HTML_MAX_LENGTH`)。
+   * 取得できない場合は null。
+   */
+  readonly rawHtml: string | null;
+}
+
+/**
+ * 組合せ払戻(ワイド・三連複)1券種分のパース結果(判別共用体。Issue #52・boss裁定R-1)。
+ *
+ * `state:"parsed"` かつ `payouts` が空配列の意味は**「払戻テーブルは存在したが当該券種の
+ * 行(`tr.Wide`/`tr.Fuku3`)が無かった(未発売等)」に限定する**。構造異常・払戻未公開は
+ * `state:"undetermined"` に分類され、空配列としては表現しない
+ * (空配列を「判定結果」、undeterminedを「判定不能」として明確に分ける。
+ * `ev/combo-bet-allocation.ts` の `ComboOddsResolution` と同じ二層原則で、
+ * 「`Map#get(...) ?? null` のような未取得と欠損の同一視を禁止する」という
+ * 同モジュールJSDocの教訓をそのまま踏襲する)。
+ */
+export type RaceComboPayoutResult =
+  | { readonly state: "parsed"; readonly payouts: readonly RaceComboPayoutEntry[] }
+  | { readonly state: "undetermined"; readonly reason: RaceComboPayoutAnomaly };
+
+/**
  * レース結果ページ(result.html)のパース結果。
  *
- * 全着順テーブル(#All_Result_Table)から各馬の着順を、払戻テーブルから複勝・単勝の
- * 確定払戻を取り出す。未確定レース等で払戻テーブルが無い場合、payout類は空配列になる。
+ * 全着順テーブル(#All_Result_Table)から各馬の着順を、払戻テーブルから複勝・単勝・
+ * ワイド・三連複の確定払戻を取り出す。
+ *
+ * **払戻テーブルが無い場合の挙動は券種によって非対称(boss裁定R-2。要修正4で明記)**:
+ * 複勝・単勝(`placePayouts`/`winPayouts`)は空配列になる。一方、ワイド・三連複
+ * (`widePayouts`/`trioPayouts`)は空配列に**ならず** `state:"undetermined"`
+ * (`kind:"payoutTableAbsent"`)になる(着順は確定しているが払戻がまだ公開されていない窓が
+ * 実在するため、「払戻0円」という確定値と取り違えないようにする設計。詳細は
+ * `widePayouts` のJSDoc・`RaceComboPayoutResult`/`RaceComboPayoutAnomaly` のJSDoc参照)。
  */
 export interface RaceResult {
   /** 各馬の着順(全着順テーブルの並び順)。 */
@@ -317,6 +399,48 @@ export interface RaceResult {
    * optional にしているのは既存の RaceResult リテラル(テスト等)を非破壊にするため。
    */
   readonly courseType?: CourseType | null;
+  /**
+   * ワイドの確定払戻(Issue #52)。`parseRaceResult` は常にこのフィールドを populate するが、
+   * optional にしているのは既存の `RaceResult` リテラル(テスト等。例:
+   * `packages/app/test/result-import.test.ts` の `buildRaceResult`、
+   * `packages/core/test/analyzer/same-day-trend.test.ts`)を非破壊にするため
+   * (courseType と同じ理由・同じ流儀)。
+   *
+   * **複勝・単勝(`placePayouts`/`winPayouts`)との非対称に注意**: 払戻テーブル自体が
+   * 文書に無い場合、複勝・単勝は従来どおり空配列のままだが、ワイド・三連複は
+   * `state:"undetermined"`(`kind:"payoutTableAbsent"`)になる。複勝・単勝は「行が無ければ
+   * 空配列」という単純な非throwフォールバックで十分だったが、ワイド・三連複は
+   * 「払戻0円」という確定値をverify(#54)の分母に混入させると偽の集計になるため、
+   * 意図的にこの非対称を導入した(boss裁定R-2)。
+   */
+  readonly widePayouts?: RaceComboPayoutResult;
+  /** 三連複の確定払戻(Issue #52)。`widePayouts` と同じ契約・同じ非対称。 */
+  readonly trioPayouts?: RaceComboPayoutResult;
+  /**
+   * 馬連の確定払戻(Issue #114・#24-F1)。`widePayouts` と同じ契約・同じ非対称
+   * (払戻テーブル自体が無い場合は `state:"undetermined"` になり、空配列にはならない)。
+   * 単勝・複勝と同じ1つ目の払戻テーブル内の行(`tr.Umaren`)から読む。
+   */
+  readonly quinellaPayouts?: RaceComboPayoutResult;
+  /**
+   * 馬単の確定払戻(Issue #121・#24-F2)。`widePayouts` と同じ契約・同じ非対称
+   * (払戻テーブル自体が無い場合は `state:"undetermined"` になり、空配列にはならない)。
+   * ワイド・3連複と同じ2つ目の払戻テーブル内の行(`tr.Umatan`)から読む。
+   *
+   * **馬単は着順(1着→2着)が意味を持つ「並び」であり、`payouts[].umabans`は
+   * 昇順に正規化されない**(`RaceComboPayoutEntry.umabans`のJSDoc参照)。
+   */
+  readonly exactaPayouts?: RaceComboPayoutResult;
+  /**
+   * 三連単の確定払戻(Issue #131・#25-F)。`widePayouts` と同じ契約・同じ非対称
+   * (払戻テーブル自体が無い場合は `state:"undetermined"` になり、空配列にはならない)。
+   * ワイド・3連複・馬単と同じ2つ目の払戻テーブル内の行(`tr.Tan3`)から読む。
+   *
+   * **三連単は着順(1着→2着→3着)が意味を持つ「並び」であり、`payouts[].umabans`は
+   * 昇順に正規化されない**(`exactaPayouts`と同じ方針。`RaceComboPayoutEntry.umabans`の
+   * JSDoc参照)。
+   */
+  readonly trifectaPayouts?: RaceComboPayoutResult;
 }
 
 /** 単勝オッズ(1頭分)。未確定・非数値は null。 */
@@ -384,6 +508,23 @@ export interface OddsSnapshot {
    * ではなく単一値そのものが入る)。optional・`Record`である理由は`wideCombo`と同じ。
    */
   readonly trioCombo?: Record<string, number | null>;
+  /**
+   * 馬連オッズ(馬番の組の正規化キー〈例"0102"。1着・2着の順不同。`wideCombo`と同じキー形式〉
+   * →オッズ。単一値。`oddsMax`という概念を持たない券種のため`trioCombo`と同じ扱い。
+   * Issue #116・#24-D3b-1で`scrapeRace`に配線した。optional・`Record`である理由は
+   * `wideCombo`と同じ)。
+   */
+  readonly quinellaCombo?: Record<string, number | null>;
+  /**
+   * 馬単オッズ(馬番の組の正規化キー〈`buildOrderedComboOddsKey`形式。例"0102"。1着・2着の
+   * **順序が意味を持つ**。"0102"〈1着1番・2着2番〉と"0201"〈1着2番・2着1番〉は別の値を持つ。
+   * `wideCombo`/`quinellaCombo`の昇順ソート済みキーとは異なる〉→オッズ。単一値。`oddsMax`
+   * という概念を持たない券種のため`trioCombo`と同じ扱い。Issue #122・#24-E2で`scrapeRace`に
+   * 配線した(core自体の的中確率・候補ビルダー・配分の門番はIssue #120・#24-E1、順序付き
+   * キー表現・`ComboBetType`への追加はIssue #106・#24-Bで先行済み)。optional・`Record`である
+   * 理由は`wideCombo`と同じ。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
 }
 
 /**

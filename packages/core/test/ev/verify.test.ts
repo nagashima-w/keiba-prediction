@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { AnalysisStore, type AnalysisHorseRecord } from "../../src/ev/analysis-store.js";
+import {
+  AnalysisStore,
+  type AnalysisAllocationMetaRecord,
+  type AnalysisHorseRecord,
+} from "../../src/ev/analysis-store.js";
 import type { PredictionMark } from "../../src/analyzer/parse-response.js";
+import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
 import {
   computeRaceLedger,
   computeVerifyReport,
@@ -381,6 +386,9 @@ describe("computeVerifyReport(verify集計)", () => {
       expect(report.bet.totalReturn).toBe(300);
       expect(report.bet.actualPayoutCount).toBe(1);
       expect(report.bet.approximatePayoutCount).toBe(0);
+      // 通常のオッズが使えるシナリオでは規則U(オッズ判定不能)は1件も発生しないこと
+      // (code-reviewer要修正1対応: unjudgedOddsCountが常に1という定数に固定されていないかの反証)。
+      expect(report.bet.unjudgedOddsCount).toBe(0);
       store.close();
     });
 
@@ -432,6 +440,206 @@ describe("computeVerifyReport(verify集計)", () => {
       expect(report.bet.totalReturn).toBe(0);
       expect(report.bet.actualPayoutCount).toBe(0);
       expect(report.bet.approximatePayoutCount).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("複勝的中(isPlaceHit)と3着以内(isInTopThree)の分離(Issue#70 #54-A)", () => {
+    /**
+     * 既存フィクスチャの placePayout 監査(AC-A5。裁定3対応):
+     * #70 より前から本ファイルにある(=規則Hの導入で数値が変化してはいけない)フィクスチャのうち、
+     * placePayout を保存しているのは次の7箇所のみ(全数。行番号は今後の編集でずれて腐るため
+     * 書かない。テスト名で特定できる)。#70 自身が規則H・規則Uを検証するために追加した
+     * R_AC_A3(直下のテスト)と R_AC_A4_PAYOUT(規則Uのdescribe内)は、この非破壊監査の対象外。
+     * 1. "実配当(placePayout)があれば近似ではなく実配当で払戻を計上すること" — R1、1頭
+     *    (finish=1, payout=300)。
+     * 2. "賭け金が100円以外でも実配当を100円あたりで按分して計上すること" — 同上構成。
+     * 3. "不変条件: 中央のみ+地方のみ=全体(件数・賭け金・払戻の合算が一致すること)" —
+     *    202601010101、1頭(finish=1, payout=280)。
+     * 4. "単一分析・結果取込済み(着順+複勝払戻とも取込済み)ならhasResult/hasPayoutともtrueで
+     *    返すこと" — R1、1頭(finish=1, payout=300)。
+     * 5. "複数レースを扱う場合、各レースIDにつき1件ずつ返すこと(latest統合はレース単位)" —
+     *    R2、1頭(finish=2, payout=180)。
+     * 6. "通常レース・latest選択で上書きされる旧分析・推定EV(結果取込済み含む)・結果未取込・
+     *    全馬着順不明が混在しても、hasResult=trueかつ非推定EVのエントリの合算が
+     *    computeVerifyReportのトータルと一致すること" — R1、2頭
+     *    (umaban1: finish=1,payout=280 / umaban2: finish=6,payout無し)。
+     * 7. 同テスト内 R3 — 1頭(finish=1, payout=260)。
+     *
+     * いずれも「payoutが非nullの馬は必ずisInTopThree(finish<=3)もtrue」「payoutがnullの馬は
+     * (6.のumaban2のみ該当し)finish=6でisInTopThreeもfalse」であり、isInTopThreeとpayout有無が
+     * 一度も食い違わない(=5〜7頭立てで3着馬に複勝payoutが無い、という規則Hが従来判定と分岐する
+     * 組み合わせを1件も踏んでいない)。そのため規則Hの導入でこれら7フィクスチャの
+     * bet/calibration/trendの数値は変化しない(AC-A5)。
+     * 【将来フィクスチャを追加する人へ】placePayoutを含む新規フィクスチャを足すときは、
+     * この前提(payout有無とisInTopThreeが一致している)が崩れていないか確認すること。
+     * 崩れていれば、崩れた側のテストがAC-A5の非破壊条件を検証する対象になる。
+     */
+    it("6頭立て・複勝払戻取込済みでEVプラス馬が3着のとき、回収率は不的中(規則H)のまま、キャリブレーション・印別的中率は的中(3着以内)として計上されること(#51の回帰確認)", () => {
+      const store = new AnalysisStore();
+      // 6頭立て: 複勝は2着までしか発売されないため、実際の payout も umaban1・2のみに付く
+      // (netkeibaの確定払戻表そのものの構成。umaban3は3着だが複勝の払戻対象ではない)。
+      store.saveAnalysis({
+        raceId: "R_AC_A3",
+        analyzedAt: "t",
+        horses: [
+          horse(1, 0.05, 2.0, 0.1, false),
+          horse(2, 0.15, 2.0, 0.3, false),
+          // umaban3: EVプラスで購入する3着馬。mark="◎"はmarkStats「◎」群の唯一のメンバーにする
+          // ための印(この馬しか◎を付けていないので、count/placeRateの分母分子がこの馬だけになる)。
+          { ...horse(3, 0.55, 2.0, 1.1, true), mark: "◎" as PredictionMark },
+          horse(4, 0.25, 2.0, 0.5, false),
+          horse(5, 0.35, 2.0, 0.7, false),
+          horse(6, 0.45, 2.0, 0.9, false),
+        ],
+      });
+      store.saveResult("R_AC_A3", [
+        { umaban: 1, finishPosition: 1, placePayout: 280 },
+        { umaban: 2, finishPosition: 2, placePayout: 150 },
+        { umaban: 3, finishPosition: 3, placePayout: null }, // 6頭立てのため複勝対象外
+        { umaban: 4, finishPosition: 4, placePayout: null },
+        { umaban: 5, finishPosition: 5, placePayout: null },
+        { umaban: 6, finishPosition: 6, placePayout: null },
+      ]);
+
+      const report = computeVerifyReport(store);
+
+      // --- isInTopThree側(3着以内)の指標: umaban3(prob=0.55)は3着なので的中として計上される ---
+      // 前提固定: 50-60%帯にはumaban3しかいない(他は0.05/0.15/0.25/0.35/0.45で別帯)。
+      const bin = report.calibration[5]!;
+      expect(bin.predictedCount).toBe(1);
+      expect(bin.placedCount).toBe(1); // isInTopThree=true(finish3<=3)として計上
+      expect(bin.actualPlaceRate).toBeCloseTo(1, 10);
+      // 前提固定: mark="◎"の群はumaban3のみ(唯一のメンバー)。
+      const markStat = report.trend.markStats.find((m) => m.mark === "◎")!;
+      expect(markStat.count).toBe(1);
+      expect(markStat.placeRate).toBeCloseTo(1, 10); // count×placeRate=1 → 的中1件相当
+
+      // --- isPlaceHit側(複勝payout対象)の指標: umaban3は6頭立て3着で複勝payout対象外 ---
+      expect(report.bet.betCount).toBe(1); // EVプラスはumaban3のみ
+      expect(report.bet.totalStake).toBe(100);
+      // #51の回帰確認: 3着だが複勝payoutが無いので不的中(旧実装は下限近似で誤って的中扱いした)。
+      expect(report.bet.totalReturn).toBe(0);
+      expect(report.bet.actualPayoutCount).toBe(0);
+      expect(report.bet.approximatePayoutCount).toBe(0);
+
+      // --- isInTopThree側(3着以内)の指標その2: 補正傾向サマリの補正方向×結果 ---
+      // 前提固定: horse()はprior===adjustedProbのため6頭とも diff=0 → 「据え置き」群にまとまる
+      // (上げ・下げ群は空。1頭だけの退化ケースでも、payout有無と一致する集合でもない)。
+      const raised = report.trend.directionGroups.find((g) => g.direction === "raised")!;
+      const lowered = report.trend.directionGroups.find((g) => g.direction === "lowered")!;
+      const unchanged = report.trend.directionGroups.find((g) => g.direction === "unchanged")!;
+      expect(raised.count).toBe(0);
+      expect(lowered.count).toBe(0);
+      expect(unchanged.count).toBe(6);
+      // 3着以内(umaban1・2・3)の3頭が的中 → 3/6。複勝payout対象(umaban1・2)で数えると2/6に
+      // なるため、この値が isInTopThree と isPlaceHit を区別する(#70 AC-A1の束縛箇所固定)。
+      expect(unchanged.actualPlaceRate).toBeCloseTo(3 / 6, 10);
+
+      // --- レース単位表示(computeRaceLedger)側も同じ分離に従うこと ---
+      const ledger = computeRaceLedger(store);
+      expect(ledger).toHaveLength(1);
+      const entry = ledger[0]!;
+      expect(entry.raceId).toBe("R_AC_A3");
+      // 前提固定: このレースは複勝払戻が取込済み(規則Hの「ある」側)である。
+      expect(entry.hasResult).toBe(true);
+      expect(entry.hasPayout).toBe(true);
+      // RaceBreakdownHorse.isPlaced は「3着以内」(isInTopThree)を返す束縛箇所。
+      // umaban3は3着なのでtrue(複勝payout対象外=isPlaceHitはfalseだが、この列はそれを見ない)。
+      const h3 = entry.horses.find((h) => h.umaban === 3)!;
+      expect(h3.finishPosition).toBe(3);
+      expect(h3.isPlaced).toBe(true);
+      // 前提固定: 3着以内の3頭は全員 isPlaced=true、4着以下の3頭は全員 false
+      // (「3着以内」列であることを、payout有無と一致しない集合として固定する)。
+      expect(entry.horses.filter((h) => h.isPlaced === true).map((h) => h.umaban)).toEqual([1, 2, 3]);
+      expect(entry.horses.filter((h) => h.isPlaced === false).map((h) => h.umaban)).toEqual([4, 5, 6]);
+      // 一方、払戻の計上(規則H)はレース単位表示でも複勝payout有無で判定する。
+      // umaban3は賭けたが不的中: 賭け金のみ計上・払戻0・根拠null(下限近似200円にはならない)。
+      expect(entry.betCount).toBe(1);
+      expect(entry.totalStake).toBe(100);
+      expect(entry.totalReturn).toBe(0);
+      expect(entry.recoveryRate).toBe(0);
+      expect(h3.stake).toBe(100);
+      expect(h3.payout).toBe(0);
+      expect(h3.payoutSource).toBeNull();
+
+      store.close();
+    });
+  });
+
+  describe("オッズ判定不能の除外(規則U、Issue#70 AC-A4)", () => {
+    it("isPositive=trueでplaceOddsMinが使えない値(+Infinity)かつ複勝payout未取込のとき、賭け金・払戻に計上せずunjudgedOddsCountに計上すること(#50の防御的堅牢化)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R_AC_A4",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, Number.POSITIVE_INFINITY, 2.0, true)],
+      });
+      // 着順は的中(3着以内)側で保存するが、このレースの複勝payoutは保存しない
+      // (裁定2: 実配当が取込済みだとplaceOddsMinを使わない近似経路自体に入らないため、
+      // 「オッズが使えない」ことが判定に効く一本道にするには payout 未取込である必要がある)。
+      store.saveResult("R_AC_A4", [{ umaban: 1, finishPosition: 1 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.bet.betCount).toBe(0);
+      expect(report.bet.totalStake).toBe(0);
+      expect(report.bet.totalReturn).toBe(0);
+      expect(report.bet.unjudgedOddsCount).toBe(1);
+      store.close();
+    });
+
+    it("規則U該当馬が2頭いれば unjudgedOddsCount が2になること(code-reviewer要修正1: +=1 が単なる真偽フラグではなく件数として加算されていることの固定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R_AC_A4_MULTI",
+        analyzedAt: "t",
+        horses: [
+          // isUsableOddsで弾かれる異なる不正値を2頭に与える(+Infinityと0)。
+          horse(1, 0.5, Number.POSITIVE_INFINITY, 2.0, true),
+          horse(2, 0.4, 0, 1.5, true),
+        ],
+      });
+      // このレースの複勝payoutは保存しない(裁定2と同じ理由。両馬とも着順は確定させる)。
+      store.saveResult("R_AC_A4_MULTI", [
+        { umaban: 1, finishPosition: 1 },
+        { umaban: 2, finishPosition: 2 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      expect(report.bet.betCount).toBe(0);
+      expect(report.bet.totalStake).toBe(0);
+      expect(report.bet.totalReturn).toBe(0);
+      // 前提固定: 2頭とも規則Uに該当する(1頭だけの退化ケースではない)。
+      expect(report.bet.unjudgedOddsCount).toBe(2);
+      store.close();
+    });
+
+    it("複勝払戻が取込済み(規則Hの「ある」側)のレースでもplaceOddsMinが不正なら判定不能として除外されること(verify.ts先頭コメント「動作自体は決定的」の固定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R_AC_A4_PAYOUT",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, Number.POSITIVE_INFINITY, 2.0, true)],
+      });
+      // 直上の単一馬テスト(R_AC_A4。払戻未取込)と1つだけ変える変数: このレースは複勝確定払戻を
+      // 取込済みにする(もう1本のMULTIテストは馬の頭数も異なるので、1変数比較の相手ではない)。
+      // umaban1は1着で実配当300円があるため、規則Hだけを見れば「的中」であり、実配当の金額計算は
+      // placeOddsMin を使わない。それでも betPlaced に isUsableOdds を含めているため除外される。
+      store.saveResult("R_AC_A4_PAYOUT", [{ umaban: 1, finishPosition: 1, placePayout: 300 }]);
+
+      // 前提固定: このレースが規則Hの「ある」側(複勝払戻取込済み)であること。
+      const [entry] = computeRaceLedger(store);
+      expect(entry!.hasPayout).toBe(true);
+
+      const report = computeVerifyReport(store);
+      // 判定不能として除外: 賭け金・払戻のいずれにも計上せず、unjudgedOddsCountに計上する
+      // (払戻未取込レースの場合とまったく同じ結果=「動作自体は決定的」)。
+      expect(report.bet.betCount).toBe(0);
+      expect(report.bet.totalStake).toBe(0);
+      expect(report.bet.totalReturn).toBe(0);
+      expect(report.bet.actualPayoutCount).toBe(0);
+      expect(report.bet.approximatePayoutCount).toBe(0);
+      expect(report.bet.unjudgedOddsCount).toBe(1);
       store.close();
     });
   });
@@ -1590,6 +1798,1288 @@ describe("computeRaceLedger(検証画面: レース単位の統合リスト。la
       expect(summedStake).toBe(300);
       expect(summedReturn).toBe(580);
       expect(summedBetCount).toBe(3);
+      store.close();
+    });
+  });
+});
+
+describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => {
+  /** 配分提案メタ行(#59スキーマ22列。Issue #118でinclude_quinella・#126でinclude_exactaを追加)を最小上書きで組み立てる(analysis-store.test.tsのmakeMetaと同型)。 */
+  function allocationMeta(
+    overrides: Partial<AnalysisAllocationMetaRecord> = {},
+  ): AnalysisAllocationMetaRecord {
+    return {
+      route: "mixed",
+      unavailableReason: null,
+      fallbackReason: null,
+      skipReasonCode: null,
+      comboOddsWide: null,
+      comboOddsTrio: null,
+      bankroll: 100000,
+      perRaceCap: 10000,
+      kellyFraction: 0.5,
+      evThreshold: 1.0,
+      includeComboOdds: true,
+      includeWide: true,
+      includeTrio: true,
+      includeQuinella: true,
+      includeExacta: true,
+      betUnit: 100,
+      greedySteps: 1000,
+      candidateCap: 2000,
+      modelId: "conditional-bernoulli",
+      modelApproximate: false,
+      oddsStatus: "result",
+      ...overrides,
+    };
+  }
+
+  /**
+   * coreの配分計算に未到達な経路(unset/yoso/unavailable/invalid)のメタ行を組み立てる
+   * (実効値4列が実際にnullになる形。allocation-record.tsの実際の書き込み内容に合わせる)。
+   */
+  function unreachedAllocationMeta(route: string): AnalysisAllocationMetaRecord {
+    return allocationMeta({
+      route,
+      skipReasonCode: null,
+      betUnit: null,
+      greedySteps: null,
+      candidateCap: null,
+      modelId: null,
+      modelApproximate: null,
+    });
+  }
+
+  it("AC-B1/AC-B2/AC-B7/PM指定(b): 配分あり2件・見送り1件・未到達1件・記録なし2件が値として区別され、券種別内訳とoverall(4券種の和)が一致すること", () => {
+    const store = new AnalysisStore();
+
+    // 配分あり(1): 複勝1点的中・ワイド1点的中・3連複1点不的中(imported nonemptyだがcombo_key無し)。
+    // oddsは異常値にしておく(AC-B4「読んでいないこと」の水平展開)。
+    store.saveAnalysis({
+      raceId: "PB_R1_A1",
+      analyzedAt: "t",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      allocation: {
+        meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+        bets: [
+          { betType: "place", comboKey: "01", stake: 100, odds: 999999, ev: -1 },
+          { betType: "wide", comboKey: "0102", stake: 300, odds: 999999, ev: -1 },
+          { betType: "trio", comboKey: "010203", stake: 200, odds: 999999, ev: -1 },
+        ],
+      },
+    });
+    store.saveResult("PB_R1_A1", [{ umaban: 1, finishPosition: 1, placePayout: 250 }], null, {
+      wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 1000 }] },
+      trio: { state: "parsed", payouts: [{ umabans: [4, 5, 6], payout: 999 }] },
+    });
+
+    // 配分あり(2): 複勝1点的中(2点目。複勝がwide/trioと異なる点数を持つ経路を作る)。
+    store.saveAnalysis({
+      raceId: "PB_R1_A2",
+      analyzedAt: "t",
+      horses: [horse(2, 0.4, 2.0, 1.0, true)],
+      allocation: {
+        meta: allocationMeta({ route: "place-only", skipReasonCode: null }),
+        bets: [{ betType: "place", comboKey: "02", stake: 400, odds: 1, ev: 1 }],
+      },
+    });
+    store.saveResult("PB_R1_A2", [{ umaban: 2, finishPosition: 1, placePayout: 125 }]);
+
+    // 見送り(1)。
+    store.saveAnalysis({
+      raceId: "PB_R1_A3",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+      allocation: { meta: allocationMeta({ route: "mixed", skipReasonCode: "no-edge" }), bets: [] },
+    });
+    store.saveResult("PB_R1_A3", [{ umaban: 1, finishPosition: 3 }]);
+
+    // 未到達(1、route="unset")。
+    store.saveAnalysis({
+      raceId: "PB_R1_A4",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+      allocation: { meta: unreachedAllocationMeta("unset"), bets: [] },
+    });
+    store.saveResult("PB_R1_A4", [{ umaban: 1, finishPosition: 2 }]);
+
+    // 記録なし(2。allocationを渡さない=#59より前の旧分析)。
+    store.saveAnalysis({
+      raceId: "PB_R1_A5",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+    });
+    store.saveResult("PB_R1_A5", [{ umaban: 1, finishPosition: 4 }]);
+    store.saveAnalysis({
+      raceId: "PB_R1_A6",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+    });
+    store.saveResult("PB_R1_A6", [{ umaban: 1, finishPosition: 5 }]);
+
+    const report = computeVerifyReport(store);
+    expect(report.includedAnalysisCount).toBe(6);
+
+    const { population, overall, place, wide, trio } = report.proposedBet;
+
+    // AC-B7: 母集団4分類の合計がincludedAnalysisCountと一致すること。
+    expect(
+      population.allocated + population.skipped + population.unreached + population.noRecord,
+    ).toBe(report.includedAnalysisCount);
+    expect(population).toEqual({ allocated: 2, skipped: 1, unreached: 1, noRecord: 2 });
+
+    // AC-B1: route="unset"の分析が「配分あり」に混入していないことを単独のアサーションで固定する
+    // (#71ゲートで実測確認済みの罠の再発防止。上のtoEqualで既にallocated=2だが、あえて切り出す)。
+    expect(population.allocated).toBe(2);
+
+    // 内訳: A1(place stake100・payout250→250円) + A2(place stake400・payout125→500円) = 750円。
+    expect(place).toEqual({
+      betCount: 2,
+      totalStake: 500,
+      totalReturn: 750,
+      recoveryRate: 1.5,
+      unjudgedCount: 0,
+    });
+    expect(wide).toEqual({
+      betCount: 1,
+      totalStake: 300,
+      totalReturn: 3000,
+      recoveryRate: 10,
+      unjudgedCount: 0,
+    });
+    expect(trio).toEqual({
+      betCount: 1,
+      totalStake: 200,
+      totalReturn: 0,
+      recoveryRate: 0,
+      unjudgedCount: 0,
+    });
+    expect(overall).toEqual({
+      betCount: 4,
+      totalStake: 1000,
+      totalReturn: 3750,
+      recoveryRate: 3.75,
+      unjudgedCount: 0,
+    });
+
+    // PM指定(b): overallがplace+win+wide+trio+quinellaの和であることを関係として固定する
+    // (単独のリテラル値だけだと5券種の集計と独立にoverallの集計がずれても気づけないため。
+    // #70で読み手側の分離漏れを繰り返した教訓の裏返し=今回は複数の値から1つを作る側の穴。
+    // Issue #100でwinを、Issue #114・#24-F1でquinellaを追加)。
+    // このフィクスチャにはwin・quinella買い目が無いためwin.*=quinella.*=0であり、この関係式
+    // 単体は「足し忘れても通る」(常に0のため)。win買い目がある場での検出力は「単勝(win)の
+    // 回収率集計」describe内のAC5-bで、quinella買い目がある場での検出力は「馬連(quinella)の
+    // 回収率集計」describe内のAC-3で別途固定する。
+    const { win, quinella } = report.proposedBet;
+    expect(overall.betCount).toBe(
+      place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+    );
+    expect(overall.totalStake).toBe(
+      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
+    );
+    expect(overall.totalReturn).toBe(
+      place.totalReturn +
+        win.totalReturn +
+        wide.totalReturn +
+        trio.totalReturn +
+        quinella.totalReturn,
+    );
+    expect(overall.unjudgedCount).toBe(
+      place.unjudgedCount +
+        win.unjudgedCount +
+        wide.unjudgedCount +
+        trio.unjudgedCount +
+        quinella.unjudgedCount,
+    );
+    expect(overall.recoveryRate).toBe(
+      overall.totalStake === 0 ? null : overall.totalReturn / overall.totalStake,
+    );
+    store.close();
+  });
+
+  it("AC-B3(規則U): 複勝(全馬payout未取込)・ワイド(not_imported)・3連複(imported空)がそれぞれ別の経路で判定不能になり、買い目行単位でunjudgedCountに計上されること", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "PB_R2_A1",
+      analyzedAt: "t",
+      horses: [horse(3, 0.3, null, null, false)],
+      allocation: {
+        meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+        bets: [
+          { betType: "place", comboKey: "03", stake: 150, odds: 1, ev: 1 },
+          { betType: "wide", comboKey: "0203", stake: 350, odds: 1, ev: 1 },
+          { betType: "wide", comboKey: "0405", stake: 150, odds: 1, ev: 1 },
+          { betType: "trio", comboKey: "020304", stake: 100, odds: 1, ev: 1 },
+          { betType: "trio", comboKey: "030405", stake: 80, odds: 1, ev: 1 },
+          { betType: "trio", comboKey: "040506", stake: 70, odds: 1, ev: 1 },
+        ],
+      },
+    });
+    // placePayoutを渡さない(全馬null)。comboPayoutsはtrioだけ空配列で渡し、wideキー自体を省略する
+    // (getComboPayoutsが規則どおりwide=not_imported・trio=imported空を返すようにする)。
+    store.saveResult("PB_R2_A1", [{ umaban: 3, finishPosition: 2 }], null, {
+      trio: { state: "parsed", payouts: [] },
+    });
+
+    // 前提固定: 規則Uの3状態がそれぞれ本当に別の経路で判定不能になっていること(集計前に直接確認)。
+    expect(computeRaceLedger(store).find((e) => e.raceId === "PB_R2_A1")!.hasPayout).toBe(false);
+    expect(store.getComboPayouts("PB_R2_A1", "wide")).toEqual({ state: "not_imported" });
+    expect(store.getComboPayouts("PB_R2_A1", "trio")).toEqual({ state: "imported", payouts: [] });
+
+    const report = computeVerifyReport(store);
+    expect(report.proposedBet.population).toEqual({
+      allocated: 1,
+      skipped: 0,
+      unreached: 0,
+      noRecord: 0,
+    });
+    // 買い目行単位で計上されること: wideは2行・trioは3行あり、レース丸ごと1件に潰れていないこと。
+    expect(report.proposedBet.place).toEqual({
+      betCount: 0,
+      totalStake: 0,
+      totalReturn: 0,
+      recoveryRate: null,
+      unjudgedCount: 1,
+    });
+    expect(report.proposedBet.wide).toEqual({
+      betCount: 0,
+      totalStake: 0,
+      totalReturn: 0,
+      recoveryRate: null,
+      unjudgedCount: 2,
+    });
+    expect(report.proposedBet.trio).toEqual({
+      betCount: 0,
+      totalStake: 0,
+      totalReturn: 0,
+      recoveryRate: null,
+      unjudgedCount: 3,
+    });
+    expect(report.proposedBet.overall).toEqual({
+      betCount: 0,
+      totalStake: 0,
+      totalReturn: 0,
+      recoveryRate: null,
+      unjudgedCount: 6,
+    });
+    store.close();
+  });
+
+  it("要修正1(bossメタレビュー): 取消・除外馬(finishPosition=null)を含む買い目は「返還」ではなく「不的中」として計上され、回収率が保守的に下振れすること(現状維持=挙動固定。computeProposedBetReportのJSDoc「残余」参照)", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "PB_CANCEL",
+      analyzedAt: "t",
+      horses: [horse(1, 0.5, 2.0, 1.0, true)],
+      allocation: {
+        meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+        bets: [
+          { betType: "place", comboKey: "05", stake: 500, odds: 1, ev: 1 },
+          { betType: "wide", comboKey: "0105", stake: 300, odds: 1, ev: 1 },
+        ],
+      },
+    });
+    store.saveResult(
+      "PB_CANCEL",
+      [
+        { umaban: 1, finishPosition: 1, placePayout: 140 },
+        { umaban: 2, finishPosition: 2, placePayout: 310 },
+        { umaban: 3, finishPosition: 3, placePayout: 180 },
+        // umaban5は出走取消(現実には返還されるが、race_results/race_combo_payoutsからは
+        // 「返還」と「不的中」を区別できない。#71メタレビューで指摘された残余)。
+        { umaban: 5, finishPosition: null },
+      ],
+      null,
+      {
+        // "0105"(umaban[1,5])は含まれない=imported nonemptyだがcombo_key無し=不的中の経路。
+        wide: { state: "parsed", payouts: [{ umabans: [2, 3], payout: 900 }] },
+      },
+    );
+
+    const report = computeVerifyReport(store);
+    expect(report.proposedBet.place).toEqual({
+      betCount: 1,
+      totalStake: 500,
+      totalReturn: 0,
+      recoveryRate: 0,
+      unjudgedCount: 0,
+    });
+    expect(report.proposedBet.wide).toEqual({
+      betCount: 1,
+      totalStake: 300,
+      totalReturn: 0,
+      recoveryRate: 0,
+      unjudgedCount: 0,
+    });
+    store.close();
+  });
+
+  it("AC-B4: Issue本文どおりの数値例(複勝300円→250円払戻=750円、ワイド200円→1500円払戻=3000円)で按分され、3連複はimported nonemptyでもcombo_key無しは不的中(betCount+1・totalReturn+0)になること", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "PB_R3_A1",
+      analyzedAt: "t",
+      horses: [horse(4, 0.6, 2.0, 1.0, true)],
+      allocation: {
+        meta: allocationMeta({ route: "place-only", skipReasonCode: null }),
+        bets: [
+          { betType: "place", comboKey: "04", stake: 300, odds: -999999, ev: -1 },
+          { betType: "wide", comboKey: "0304", stake: 200, odds: -999999, ev: -1 },
+          { betType: "trio", comboKey: "010203", stake: 250, odds: -999999, ev: -1 },
+          { betType: "trio", comboKey: "040506", stake: 50, odds: -999999, ev: -1 },
+        ],
+      },
+    });
+    store.saveResult("PB_R3_A1", [{ umaban: 4, finishPosition: 1, placePayout: 250 }], null, {
+      wide: { state: "parsed", payouts: [{ umabans: [3, 4], payout: 1500 }] },
+      trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 2000 }] },
+    });
+
+    const report = computeVerifyReport(store);
+    expect(report.proposedBet.population).toEqual({
+      allocated: 1,
+      skipped: 0,
+      unreached: 0,
+      noRecord: 0,
+    });
+    expect(report.proposedBet.place).toEqual({
+      betCount: 1,
+      totalStake: 300,
+      totalReturn: 750,
+      recoveryRate: 2.5,
+      unjudgedCount: 0,
+    });
+    expect(report.proposedBet.wide).toEqual({
+      betCount: 1,
+      totalStake: 200,
+      totalReturn: 3000,
+      recoveryRate: 15,
+      unjudgedCount: 0,
+    });
+    expect(report.proposedBet.trio).toEqual({
+      betCount: 2,
+      totalStake: 300,
+      totalReturn: 5000,
+      recoveryRate: 5000 / 300,
+      unjudgedCount: 0,
+    });
+    expect(report.proposedBet.overall).toEqual({
+      betCount: 4,
+      totalStake: 800,
+      totalReturn: 8750,
+      recoveryRate: 8750 / 800,
+      unjudgedCount: 0,
+    });
+
+    // PM指定(b)を別フィクスチャでも再固定(2箇所目。1箇所だけだと偶然の一致を否定できないため)。
+    // このフィクスチャにもwin・quinella買い目が無い(win.*=quinella.*=0)。検出力はAC5-b・
+    // AC-3参照。
+    const { overall, place, wide, trio, win, quinella } = report.proposedBet;
+    expect(overall.betCount).toBe(
+      place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+    );
+    expect(overall.totalStake).toBe(
+      place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
+    );
+    expect(overall.totalReturn).toBe(
+      place.totalReturn +
+        win.totalReturn +
+        wide.totalReturn +
+        trio.totalReturn +
+        quinella.totalReturn,
+    );
+    expect(overall.unjudgedCount).toBe(
+      place.unjudgedCount +
+        win.unjudgedCount +
+        wide.unjudgedCount +
+        trio.unjudgedCount +
+        quinella.unjudgedCount,
+    );
+    store.close();
+  });
+
+  it("AC-B4: analysis_bets.oddsが異常値(+Infinity/NaN)でもproposedBetの集計結果が変わらないこと(oddsを読んでいないことの固定)", () => {
+    function build(oddsValue: number, evValue: number) {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_ODDS",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "place", comboKey: "01", stake: 100, odds: oddsValue, ev: evValue },
+            { betType: "wide", comboKey: "0102", stake: 300, odds: oddsValue, ev: evValue },
+            { betType: "trio", comboKey: "010203", stake: 200, odds: oddsValue, ev: evValue },
+          ],
+        },
+      });
+      store.saveResult("PB_ODDS", [{ umaban: 1, finishPosition: 1, placePayout: 250 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 900 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 1800 }] },
+      });
+      const result = computeVerifyReport(store).proposedBet;
+      store.close();
+      return result;
+    }
+
+    const normal = build(2.5, 1.2);
+    const absurd = build(Number.POSITIVE_INFINITY, Number.NaN);
+    expect(normal).toEqual(absurd);
+    // 前提固定: 両方0円で自明一致しているのではないこと。
+    expect(normal.overall.totalReturn).toBeGreaterThan(0);
+  });
+
+  it("AC-B6: 既定bankroll=0相当(route=\"unset\")のみのフィクスチャでrecoveryRateがnull(0ではない)、母集団が未到達=1・残り0になること", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "PB_R4_A1",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+      allocation: { meta: unreachedAllocationMeta("unset"), bets: [] },
+    });
+    store.saveResult("PB_R4_A1", [{ umaban: 1, finishPosition: 3 }]);
+
+    const report = computeVerifyReport(store);
+    expect(report.proposedBet.population).toEqual({
+      allocated: 0,
+      skipped: 0,
+      unreached: 1,
+      noRecord: 0,
+    });
+    expect(report.proposedBet.overall.recoveryRate).toBeNull();
+    // 前提固定: nullは「0ではない」ことを明示する(0だと「回収率0%」という誤解を招く表示になる)。
+    expect(report.proposedBet.overall.recoveryRate).not.toBe(0);
+    store.close();
+  });
+
+  it("AC-B7: 見送り2件・未到達1件・記録なし2件(配分あり0件)でも母集団4分類の合計がincludedAnalysisCountと一致すること", () => {
+    const store = new AnalysisStore();
+    store.saveAnalysis({
+      raceId: "PB_R5_A1",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+      allocation: { meta: allocationMeta({ route: "mixed", skipReasonCode: "no-edge" }), bets: [] },
+    });
+    store.saveResult("PB_R5_A1", [{ umaban: 1, finishPosition: 1 }]);
+    store.saveAnalysis({
+      raceId: "PB_R5_A2",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+      allocation: {
+        meta: allocationMeta({ route: "place-only", skipReasonCode: "cap-too-small" }),
+        bets: [],
+      },
+    });
+    store.saveResult("PB_R5_A2", [{ umaban: 1, finishPosition: 2 }]);
+    store.saveAnalysis({
+      raceId: "PB_R5_A3",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+      allocation: { meta: unreachedAllocationMeta("yoso"), bets: [] },
+    });
+    store.saveResult("PB_R5_A3", [{ umaban: 1, finishPosition: 3 }]);
+    store.saveAnalysis({
+      raceId: "PB_R5_A4",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+    });
+    store.saveResult("PB_R5_A4", [{ umaban: 1, finishPosition: 4 }]);
+    store.saveAnalysis({
+      raceId: "PB_R5_A5",
+      analyzedAt: "t",
+      horses: [horse(1, 0.3, null, null, false)],
+    });
+    store.saveResult("PB_R5_A5", [{ umaban: 1, finishPosition: 5 }]);
+
+    const report = computeVerifyReport(store);
+    expect(report.includedAnalysisCount).toBe(5);
+    expect(report.proposedBet.population).toEqual({
+      allocated: 0,
+      skipped: 2,
+      unreached: 1,
+      noRecord: 2,
+    });
+    expect(
+      report.proposedBet.population.allocated +
+        report.proposedBet.population.skipped +
+        report.proposedBet.population.unreached +
+        report.proposedBet.population.noRecord,
+    ).toBe(report.includedAnalysisCount);
+    store.close();
+  });
+
+  describe("単勝(win)の回収率集計(Issue #100・#23-C)", () => {
+    it("AC2: 馬番が1桁の馬(ゼロ埋めが効く)の単勝買い目が的中として計上されること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_WIN_1",
+        analyzedAt: "t",
+        horses: [horse(5, 0.4, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          // comboKey"05"はbuildComboOddsKey([5])と同じ規則(2桁ゼロ埋め)で生成される
+          // (allocation-record.tsのmixedBetsOfが実際に生成するキーと同じ形)。
+          bets: [{ betType: "win", comboKey: "05", stake: 100, odds: 4.8, ev: 1.2 }],
+        },
+      });
+      // 単勝払戻はwinPayoutByComboKey側もbuildComboOddsKey([r.umaban])で"05"に正規化される
+      // ため、馬番5(1桁)でもゼロ埋めキーが一致して的中計上されることを固定する。
+      store.saveResult("PB_WIN_1", [{ umaban: 5, finishPosition: 1, winPayout: 480 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.proposedBet.win).toEqual({
+        betCount: 1,
+        totalStake: 100,
+        totalReturn: 480,
+        recoveryRate: 4.8,
+        unjudgedCount: 0,
+      });
+      store.close();
+    });
+
+    it("AC3/AC5-b: 単勝払戻が取込済みのレースで、的中・不的中それぞれ正しく計上され、unknownBetTypeがゼロ値のまま・unjudgedCountが0・overallが4券種の和になること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_WIN_E2E",
+        analyzedAt: "t",
+        horses: [
+          horse(1, 0.5, 2.0, 1.0, true),
+          horse(2, 0.3, 2.0, 1.0, true),
+          horse(3, 0.2, 2.0, 1.0, true),
+        ],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+            // 単勝: umaban1(1着)は的中、umaban2は不的中(winPayoutが無い)。
+            { betType: "win", comboKey: "01", stake: 50, odds: 3, ev: 1 },
+            { betType: "win", comboKey: "02", stake: 30, odds: 3, ev: 1 },
+            { betType: "wide", comboKey: "0102", stake: 60, odds: 1, ev: 1 },
+            { betType: "trio", comboKey: "010203", stake: 40, odds: 1, ev: 1 },
+          ],
+        },
+      });
+      store.saveResult(
+        "PB_WIN_E2E",
+        [
+          { umaban: 1, finishPosition: 1, placePayout: 140, winPayout: 350 },
+          { umaban: 2, finishPosition: 2, placePayout: 210 }, // winPayoutなし=単勝不的中。
+          { umaban: 3, finishPosition: 3, placePayout: 180 },
+        ],
+        null,
+        {
+          wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 900 }] },
+          trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 2000 }] },
+        },
+      );
+
+      const report = computeVerifyReport(store);
+      const { place, win, wide, trio, quinella, overall, unknownBetType } = report.proposedBet;
+
+      // AC3(a): 未対応の券種コード警告が出ないこと。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // AC3(b): 的中・不的中の2ケース。的中(umaban1: 350*50/100=175)のみが計上され、
+      // 不的中(umaban2: comboKey"02")は加算されないこと(betCount/totalStakeには乗るが
+      // totalReturnには乗らない)。
+      expect(win.betCount).toBe(2);
+      expect(win.totalStake).toBe(80);
+      expect(win.totalReturn).toBe(175);
+
+      // AC3(c): 判定不能が0件であること(本Issueの目的そのもの)。
+      expect(win.unjudgedCount).toBe(0);
+
+      // 前提固定(空振り防止): place/wide/trioも実際に的中として計上されていること。
+      expect(place.betCount).toBeGreaterThan(0);
+      expect(wide.betCount).toBeGreaterThan(0);
+      expect(trio.betCount).toBeGreaterThan(0);
+
+      // AC5-b: win.betCount>0の場でoverallが5券種の和になっていること(winを足し忘れると
+      // ここで検出される。上のPM指定(b)の2箇所はwin・quinella買い目が無いフィクスチャのため
+      // win.*=quinella.*=0で「足し忘れ」を検出できない=このテストがwinの唯一の検出箇所。
+      // quinella買い目がある場での検出力は「馬連(quinella)の回収率集計」describe内のAC-3参照。
+      // このフィクスチャにはquinella買い目が無いためquinella.*=0で数値自体は変わらない)。
+      expect(overall).toEqual({
+        betCount: 5,
+        totalStake: 280,
+        totalReturn: 1655,
+        recoveryRate: 1655 / 280,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(
+        place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+      );
+      expect(overall.totalStake).toBe(
+        place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn,
+      );
+      store.close();
+    });
+
+    it("AC4: 単勝払戻が未取込のレース(旧DB相当)では、win買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(不的中として計上してはならない)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_WIN_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "win", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
+        },
+      });
+      // winPayoutを渡さない(placePayoutのみ。旧DB相当=単勝payout未取込のレース)。
+      store.saveResult("PB_WIN_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { win } = report.proposedBet;
+      expect(win.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(win.betCount).toBe(0);
+      expect(win.totalStake).toBe(0);
+      expect(win.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("馬連(quinella)の回収率集計(Issue #114・#24-F1)", () => {
+    it("AC-4: 買い目の馬番が降順([13, 8])から生成したcomboKeyでも、払戻(馬番は[8, 13]で保存)と正しく突合されること", () => {
+      const store = new AnalysisStore();
+      // 前提固定(空振り防止): 降順入力[13, 8]からのキー生成が実際に中央フィクスチャの
+      // 実測値(8-13=4,550円)のキーと一致する"0813"になっていること(buildComboOddsKeyは
+      // 常に昇順ソートしてからエンコードするため、入力順に依存しない)。
+      expect(buildComboOddsKey([13, 8])).toBe("0813");
+
+      store.saveAnalysis({
+        raceId: "PB_QUINELLA_ORDER",
+        analyzedAt: "t",
+        horses: [horse(8, 0.1, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "quinella", comboKey: buildComboOddsKey([13, 8]), stake: 300, odds: 45.5, ev: 1.2 },
+          ],
+        },
+      });
+      // 払戻側は馬番[8, 13](昇順)で保存する(parseComboPayoutRowが実際に返す並び)。
+      store.saveResult("PB_QUINELLA_ORDER", [{ umaban: 8, finishPosition: 3 }], null, {
+        quinella: { state: "parsed", payouts: [{ umabans: [8, 13], payout: 4550 }] },
+      });
+
+      const report = computeVerifyReport(store);
+      expect(report.proposedBet.quinella).toEqual({
+        betCount: 1,
+        totalStake: 300,
+        totalReturn: 13650, // 4550 * (300 / 100)
+        recoveryRate: 13650 / 300,
+        unjudgedCount: 0,
+      });
+      store.close();
+    });
+
+    it("AC-3(★判定): 馬連の的中・不的中が正しく計上され、overallに合算されること(1件のみの退化を避けるため的中1件・不的中1件の2点で固定)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_QUINELLA_E2E",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true), horse(2, 0.3, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+            // 馬連: comboKey"0102"(的中)・comboKey"0304"(不的中)の2点。
+            { betType: "quinella", comboKey: "0102", stake: 300, odds: 8, ev: 1.2 },
+            { betType: "quinella", comboKey: "0304", stake: 200, odds: 8, ev: 1.2 },
+          ],
+        },
+      });
+      store.saveResult(
+        "PB_QUINELLA_E2E",
+        [
+          { umaban: 1, finishPosition: 1, placePayout: 140 },
+          { umaban: 2, finishPosition: 2, placePayout: 210 },
+        ],
+        null,
+        {
+          quinella: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 850 }] },
+        },
+      );
+
+      const report = computeVerifyReport(store);
+      const { place, win, wide, trio, quinella, overall, unknownBetType } = report.proposedBet;
+
+      // AC3(a): 未対応の券種コード警告が出ないこと(quinellaは既知)。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // AC3(b): 的中(comboKey"0102": 850*300/100=2550)・不的中(comboKey"0304")の2ケース。
+      // 不的中側はbetCount/totalStakeには乗るがtotalReturnには乗らないこと。
+      expect(quinella).toEqual({
+        betCount: 2,
+        totalStake: 500,
+        totalReturn: 2550,
+        recoveryRate: 2550 / 500,
+        unjudgedCount: 0,
+      });
+
+      // 前提固定(空振り防止): place以外(win/wide/trio)は0件で、overallはplace+quinellaのみで
+      // 構成されること(このフィクスチャがwin/wide/trioを一切含まないことの確認)。
+      expect(place.betCount).toBeGreaterThan(0);
+      expect(win.betCount).toBe(0);
+      expect(wide.betCount).toBe(0);
+      expect(trio.betCount).toBe(0);
+
+      // ★AC-3の要(overallへの合算。足し忘れの変異を殺せること): 絶対値リテラルで固定する
+      // (関係式だけだと両辺が同時に壊れる変異を見逃すため、#100のAC5-bと同じく両方を書く)。
+      expect(overall).toEqual({
+        betCount: 3, // place(1) + quinella(2)
+        totalStake: 600, // place(100) + quinella(500)
+        totalReturn: 2690, // place(140) + quinella(2550)
+        recoveryRate: 2690 / 600,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(
+        place.betCount + win.betCount + wide.betCount + trio.betCount + quinella.betCount,
+      );
+      expect(overall.totalStake).toBe(
+        place.totalStake + win.totalStake + wide.totalStake + trio.totalStake + quinella.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn,
+      );
+      store.close();
+    });
+
+    it("AC-5: 馬連払戻が未取込のレース(旧DB相当)では、馬連買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(0円の不的中として計上してはならない)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_QUINELLA_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "quinella", comboKey: "0102", stake: 500, odds: 8, ev: 1.2 }],
+        },
+      });
+      // quinellaを渡さない(旧DB相当=馬連payout未取込のレース。placePayoutのみ保存)。
+      store.saveResult("PB_QUINELLA_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { quinella } = report.proposedBet;
+      expect(quinella.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(quinella.betCount).toBe(0);
+      expect(quinella.totalStake).toBe(0);
+      expect(quinella.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("馬単(exacta)の回収率集計(Issue #121・#24-F2)", () => {
+    it("AC-4(★判定): 正順(1着13→2着8)の買い目は払戻13→8=8,360円と的中し、逆順(1着8→2着13)の買い目は同じ払戻で不的中になること(合成データ。配分はまだ馬単の買い目を作らないためallocation.betsを直接構成する)", () => {
+      const store = new AnalysisStore();
+      // 前提固定(空振り防止): 正順・逆順のキーが異なる文字列であること(非可換性の直接証明。
+      // buildComboOddsKey〈常に昇順ソート〉と違い、buildOrderedComboOddsKeyは入力順に依存する)。
+      expect(buildOrderedComboOddsKey([13, 8])).toBe("1308");
+      expect(buildOrderedComboOddsKey([8, 13])).toBe("0813");
+      expect(buildOrderedComboOddsKey([13, 8])).not.toBe(buildOrderedComboOddsKey([8, 13]));
+
+      store.saveAnalysis({
+        raceId: "PB_EXACTA_ORDER",
+        analyzedAt: "t",
+        horses: [horse(13, 0.1, null, 1.2, true), horse(8, 0.05, null, 1.1, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            // 正順(1着13→2着8): 払戻と一致し的中する想定。
+            { betType: "exacta", comboKey: "1308", stake: 300, odds: 83.6, ev: 1.2 },
+            // 逆順(1着8→2着13、殺すべき変異: どちらかのキーを昇順化すると的中してしまう)。
+            { betType: "exacta", comboKey: "0813", stake: 200, odds: 118.8, ev: 1.1 },
+          ],
+        },
+      });
+      // 払戻は実測どおり1着13・2着8=8,360円のみ(parseComboPayoutRowが実際に返す並び)。
+      store.saveResult(
+        "PB_EXACTA_ORDER",
+        [
+          { umaban: 13, finishPosition: 1 },
+          { umaban: 8, finishPosition: 2 },
+        ],
+        null,
+        { exacta: { state: "parsed", payouts: [{ umabans: [13, 8], payout: 8360 }] } },
+      );
+
+      const report = computeVerifyReport(store);
+      const { exacta, overall, place, win, wide, trio, quinella, unknownBetType } =
+        report.proposedBet;
+
+      // AC-4(a): 未対応の券種コード警告が出ないこと(exactaは既知)。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // AC-4(b): 正順(的中: 8360*300/100=25080)・逆順(不的中)の2ケース。
+      // 不的中側はbetCount/totalStakeには乗るがtotalReturnには乗らないこと。
+      expect(exacta).toEqual({
+        betCount: 2,
+        totalStake: 500,
+        totalReturn: 25080,
+        recoveryRate: 25080 / 500,
+        unjudgedCount: 0,
+      });
+
+      // 前提固定(空振り防止): place/win/wide/trio/quinellaは0件で、overallはexactaのみで
+      // 構成されること(このフィクスチャがexacta以外を一切含まないことの確認)。
+      expect(place.betCount).toBe(0);
+      expect(win.betCount).toBe(0);
+      expect(wide.betCount).toBe(0);
+      expect(trio.betCount).toBe(0);
+      expect(quinella.betCount).toBe(0);
+
+      // ★overallへの合算(足し忘れの変異を殺せること): 絶対値リテラルで固定する。
+      expect(overall).toEqual({
+        betCount: 2,
+        totalStake: 500,
+        totalReturn: 25080,
+        recoveryRate: 25080 / 500,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(
+        place.betCount +
+          win.betCount +
+          wide.betCount +
+          trio.betCount +
+          quinella.betCount +
+          exacta.betCount,
+      );
+      expect(overall.totalStake).toBe(
+        place.totalStake +
+          win.totalStake +
+          wide.totalStake +
+          trio.totalStake +
+          quinella.totalStake +
+          exacta.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn +
+          exacta.totalReturn,
+      );
+      store.close();
+    });
+
+    it("AC-5: 馬単払戻が未取込のレース(旧DB相当)では、馬単買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(0円の不的中として計上してはならない。合成データ)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_EXACTA_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "exacta", comboKey: "0102", stake: 500, odds: 8, ev: 1.2 }],
+        },
+      });
+      // exactaを渡さない(旧DB相当=馬単payout未取込のレース。placePayoutのみ保存)。
+      store.saveResult("PB_EXACTA_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { exacta } = report.proposedBet;
+      expect(exacta.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(exacta.betCount).toBe(0);
+      expect(exacta.totalStake).toBe(0);
+      expect(exacta.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("三連単(trifecta)の回収率集計(Issue #131・#25-F)", () => {
+    it("AC-6(★判定): 払戻13→8→5=52,690円に対し、正順の買い目だけが的中し、同じ3頭の他の5通りの並び(5→8→13・13→5→8・8→13→5・8→5→13・5→13→8)はすべて不的中になること(合成データ。配分はまだ三連単の買い目を作らないためallocation.betsを直接構成する。ループで6通りを網羅する)", () => {
+      const store = new AnalysisStore();
+      const correctOrder = [13, 8, 5];
+      const payout = 52690;
+      // 3頭の並び6通り(3!=6)。正順は先頭の1通りのみ、残り5通りは着手前ゲート指定の
+      // 「5→8→13・13→5→8・8→13→5・8→5→13・5→13→8」。
+      const allOrders: readonly number[][] = [
+        correctOrder,
+        [5, 8, 13],
+        [13, 5, 8],
+        [8, 13, 5],
+        [8, 5, 13],
+        [5, 13, 8],
+      ];
+      // 前提固定(空振り防止): 6通りが実際に3頭{13,8,5}の順列全体を成すこと(順列の取りこぼし・
+      // 重複が無いこと)。同じ順列を2回買ってしまうと「不的中側の点数」が水増しされ、
+      // このテストが意図しない形で緩くなる。
+      const orderKeys = new Set(allOrders.map((o) => o.join(",")));
+      expect(orderKeys.size).toBe(6);
+      for (const perm of allOrders) {
+        expect([...perm].sort((a, b) => a - b)).toEqual([5, 8, 13]);
+      }
+      expect(allOrders[0]).toEqual(correctOrder);
+
+      const stakePerBet = 100;
+      store.saveAnalysis({
+        raceId: "PB_TRIFECTA_ORDER",
+        analyzedAt: "t",
+        horses: [
+          horse(13, 0.1, null, 1.2, true),
+          horse(8, 0.05, null, 1.1, true),
+          horse(5, 0.03, null, 1.05, true),
+        ],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: allOrders.map((order) => ({
+            betType: "trifecta" as const,
+            comboKey: buildOrderedComboOddsKey(order),
+            stake: stakePerBet,
+            odds: payout / 100,
+            ev: 1.0,
+          })),
+        },
+      });
+      // 払戻は実測どおり1着13・2着8・3着5=52,690円のみ(parseComboPayoutRowが実際に返す並び)。
+      store.saveResult(
+        "PB_TRIFECTA_ORDER",
+        [
+          { umaban: 13, finishPosition: 1 },
+          { umaban: 8, finishPosition: 2 },
+          { umaban: 5, finishPosition: 3 },
+        ],
+        null,
+        { trifecta: { state: "parsed", payouts: [{ umabans: correctOrder, payout }] } },
+      );
+
+      const report = computeVerifyReport(store);
+      const { trifecta, overall, place, win, wide, trio, quinella, exacta, unknownBetType } =
+        report.proposedBet;
+
+      // 未対応の券種コード警告が出ないこと(trifectaは既知)。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // 6点購入・正順1点だけ的中(52690*100/100=52690)・残り5点は不的中(totalReturnに寄与0)。
+      expect(trifecta).toEqual({
+        betCount: 6,
+        totalStake: 600,
+        totalReturn: 52690,
+        recoveryRate: 52690 / 600,
+        unjudgedCount: 0,
+      });
+
+      // 前提固定(空振り防止): 他の5券種は0件で、overallはtrifectaのみで構成されること。
+      expect(place.betCount).toBe(0);
+      expect(win.betCount).toBe(0);
+      expect(wide.betCount).toBe(0);
+      expect(trio.betCount).toBe(0);
+      expect(quinella.betCount).toBe(0);
+      expect(exacta.betCount).toBe(0);
+
+      // ★overallへの合算(足し忘れの変異を殺せること): 絶対値リテラルで固定する。
+      expect(overall).toEqual({
+        betCount: 6,
+        totalStake: 600,
+        totalReturn: 52690,
+        recoveryRate: 52690 / 600,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(
+        place.betCount +
+          win.betCount +
+          wide.betCount +
+          trio.betCount +
+          quinella.betCount +
+          exacta.betCount +
+          trifecta.betCount,
+      );
+      expect(overall.totalStake).toBe(
+        place.totalStake +
+          win.totalStake +
+          wide.totalStake +
+          trio.totalStake +
+          quinella.totalStake +
+          exacta.totalStake +
+          trifecta.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn +
+          exacta.totalReturn +
+          trifecta.totalReturn,
+      );
+      store.close();
+    });
+
+    it("三連単払戻が未取込のレース(旧DB相当)では、三連単買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(0円の不的中として計上してはならない。合成データ)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_TRIFECTA_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "trifecta", comboKey: "010203", stake: 500, odds: 8, ev: 1.2 }],
+        },
+      });
+      // trifectaを渡さない(旧DB相当=三連単payout未取込のレース。placePayoutのみ保存)。
+      store.saveResult("PB_TRIFECTA_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { trifecta } = report.proposedBet;
+      expect(trifecta.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(trifecta.betCount).toBe(0);
+      expect(trifecta.totalStake).toBe(0);
+      expect(trifecta.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("Issue #76(AC-A5): 未知の券種コードの行が投資額を静かに過小計上しないこと", () => {
+    // analysis_betsのDDLはbet_type TEXT NOT NULLでCHECK制約が無いため、生SQLを書かずに
+    // 「place/win/wide/trio以外」を持つ買い目行をsaveAnalysis経由でそのまま作れる(Issue本文の
+    // 「Redの作り方」参照)。
+    //
+    // 未知券種の代表例には実在の券種名を使わない("xyz"。boss裁定C・Issue #100)。かつて
+    // ここでは単勝("win")を代表例に使っていたが、#100(#23-C)でwinが既知の券種になったため
+    // 差し替えた。券種拡張シリーズ(#24馬連・馬単/#25三連単/#26残り)で`AllocationBetType`に
+    // 加わりうる実在の券種コード(和称・英称とも)を使うと、その券種が実装されるたびに
+    // このdescribe全体の差し替え作業が再発する(#100と同じ罠を繰り返す)ため、将来も
+    // 実在の券種名になりえない非券種文字列を使う(既存の"zzz"/"aaa"と同じ流儀)。
+
+    it("正の対照(fail-open検出。bossメタレビューR1): 未知券種行を1件も含まない通常のレポートでは、unknownBetTypeが{count:0, totalStake:0, betTypes:[]}になること(place/wide/trioが未知券種として誤検知されないこと)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_0",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+            { betType: "wide", comboKey: "0102", stake: 200, odds: 1, ev: 1 },
+            { betType: "trio", comboKey: "010203", stake: 300, odds: 1, ev: 1 },
+          ],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_0", [{ umaban: 1, finishPosition: 1, placePayout: 250 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 1000 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 3], payout: 999 }] },
+      });
+
+      const report = computeVerifyReport(store);
+      // 前提固定(空振り防止): 実際にplace/wide/trioの3券種すべてがbetCount>0で計上されていること
+      // (この前提が崩れていると「発火しない側」の検査として空振りする)。
+      expect(report.proposedBet.place.betCount).toBeGreaterThan(0);
+      expect(report.proposedBet.wide.betCount).toBeGreaterThan(0);
+      expect(report.proposedBet.trio.betCount).toBeGreaterThan(0);
+      expect(report.proposedBet.unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+      store.close();
+    });
+
+    it("未知券種(xyz)の行が、place/win/wide/trio/overallのbetCount・totalStake・totalReturn・unjudgedCountの4フィールドすべてに現れないこと", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_1", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const report = computeVerifyReport(store);
+      const { place, win, wide, trio, overall } = report.proposedBet;
+      // 4フィールドすべてに現れないこと(投資額500円がどこにも計上されない=静かな過小計上がないこと)。
+      for (const summary of [place, win, wide, trio, overall]) {
+        expect(summary.betCount).toBe(0);
+        expect(summary.totalStake).toBe(0);
+        expect(summary.totalReturn).toBe(0);
+        expect(summary.unjudgedCount).toBe(0);
+      }
+      store.close();
+    });
+
+    it("unknownBetTypeの全3フィールド(count/totalStake/betTypes)が固定どおりであること", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_2",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 }],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_2", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.proposedBet.unknownBetType).toEqual({
+        count: 1,
+        totalStake: 500,
+        betTypes: ["xyz"],
+      });
+      store.close();
+    });
+
+    it("正の対照: 同じ分析に健全なplace行を混ぜても、そちらは通常どおり計上されること(未知券種行の巻き添えを受けない)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_3",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 },
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+          ],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_3", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const report = computeVerifyReport(store);
+      // 前提固定(空振り防止): healthyな複勝行が実際に的中として計上されていること。
+      expect(report.proposedBet.place).toEqual({
+        betCount: 1,
+        totalStake: 100,
+        totalReturn: 250,
+        recoveryRate: 2.5,
+        unjudgedCount: 0,
+      });
+      expect(report.proposedBet.unknownBetType).toEqual({
+        count: 1,
+        totalStake: 500,
+        betTypes: ["xyz"],
+      });
+      store.close();
+    });
+
+    it("既存の不変条件overall.unjudgedCount===place+win+wide+trio+quinellaが、未知券種を含む入力でも成り立つこと(混ぜていないことの正の対照)", () => {
+      const store = new AnalysisStore();
+      // 規則Uで判定不能(placePayout取込なし)の複勝行と、未知券種の行を同居させる。
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_4",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, null, false)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "xyz", comboKey: "01", stake: 500, odds: 3, ev: 1.5 },
+            { betType: "place", comboKey: "01", stake: 100, odds: 1, ev: 1 },
+          ],
+        },
+      });
+      // placePayoutを渡さない(規則U該当。全馬payout未取込)。
+      store.saveResult("PB_UNKNOWN_4", [{ umaban: 1, finishPosition: 1 }]);
+
+      const report = computeVerifyReport(store);
+      const { place, win, wide, trio, quinella, overall, unknownBetType } = report.proposedBet;
+      // 前提固定(空振り防止): 規則Uが実際に発火していること(unjudgedCountが0ではない)。
+      expect(place.unjudgedCount).toBe(1);
+      expect(overall.unjudgedCount).toBe(
+        place.unjudgedCount +
+          win.unjudgedCount +
+          wide.unjudgedCount +
+          trio.unjudgedCount +
+          quinella.unjudgedCount,
+      );
+      // 未知券種行は規則Uのunjudgedにも一切混ざらず、独立して計上されていること。
+      expect(unknownBetType).toEqual({ count: 1, totalStake: 500, betTypes: ["xyz"] });
+      store.close();
+    });
+
+    it("betTypesが重複ありの入力で重複なしになること(同一分析内。SQLのORDER BY bet_typeにより到着順は既に昇順)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_5",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [
+            { betType: "xyz", comboKey: "01", stake: 100, odds: 3, ev: 1.5 },
+            // "xyz2"は架空の券種コード(Issue #114で"quinella"が既知券種になったため、
+            // 従来ここで使っていた"quinella"を"xyz"と衝突しない別の架空コードへ差し替えた。
+            // #100で"win"を既知化した際に"xyz"へ差し替えた前例と同型)。
+            { betType: "xyz2", comboKey: "0102", stake: 200, odds: 3, ev: 1.5 },
+            { betType: "xyz", comboKey: "02", stake: 300, odds: 3, ev: 1.5 }, // xyzの重複。
+          ],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_5", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const report = computeVerifyReport(store);
+      // 注意: `getAllocationForVerify`のSQLは`ORDER BY bet_type, combo_key`
+      // (analysis-store.ts)のため、同一分析内の買い目行は既にbet_type昇順で到着する。
+      // したがってこの1件だけでは重複排除(Setの性質)しか検証できず、`.sort()`自体の
+      // 必要性は次の「複数分析にまたがる」テストで固定する(bossメタレビューR2)。
+      expect(report.proposedBet.unknownBetType).toEqual({
+        count: 3,
+        totalStake: 600,
+        betTypes: ["xyz", "xyz2"], // 重複なし(xyzは1つだけ)。
+      });
+      store.close();
+    });
+
+    it("betTypesが複数の分析にまたがって非昇順の順序で到着しても昇順になること(.sort()自体の検出力。bossメタレビューR2)", () => {
+      const store = new AnalysisStore();
+      // 分析idは保存順に採番され(analysis-store.ts listAnalysesはORDER BY id)、
+      // selectIncludedAnalysesはこの順序をそのまま辿る。同一分析内はbet_type昇順で
+      // 到着するため(上のテスト参照)、「非昇順の到着」を作るには**複数の分析にまたがせ、
+      // 後から保存した分析の方が辞書順で先に来る券種を持たせる**しかない。
+      // 1件目(id小): betType="zzz"のみ → Setに最初に挿入されるのは"zzz"。
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_6A",
+        analyzedAt: "t1",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "zzz", comboKey: "01", stake: 100, odds: 3, ev: 1.5 }],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_6A", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+      // 2件目(id大・後保存): betType="aaa"("zzz"より辞書順で先) → Setには"zzz"の後に挿入される。
+      // .sort()が無ければ`[...Set]`は挿入順["zzz","aaa"]のままで、["aaa","zzz"]と一致しない。
+      store.saveAnalysis({
+        raceId: "PB_UNKNOWN_6B",
+        analyzedAt: "t2",
+        horses: [horse(1, 0.5, 2.0, 1.0, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "aaa", comboKey: "01", stake: 200, odds: 3, ev: 1.5 }],
+        },
+      });
+      store.saveResult("PB_UNKNOWN_6B", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const report = computeVerifyReport(store);
+      expect(report.proposedBet.unknownBetType).toEqual({
+        count: 2,
+        totalStake: 300,
+        betTypes: ["aaa", "zzz"], // 到着順(zzz→aaa)とは逆順=.sort()が実際に効いていないと一致しない。
+      });
       store.close();
     });
   });

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 
 import type { AnalysisResult, BatchProgress } from "../shared/analysis-types.js";
 import type {
@@ -12,26 +12,38 @@ import {
   evThresholdFootnote,
   formatAllocationSummary,
   formatBetLabel,
-  isBetAllocationUnset,
+  formatComboBetLabel,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
-  type RaceAllocationView,
 } from "./bet-allocation-view.js";
+import { type AllocationOutcome } from "./mixed-allocation-queue.js";
 import {
-  createMixedAllocationCache,
   type MixedAllocationCache,
+  type MixedAllocationCacheKey,
 } from "./mixed-allocation-cache.js";
 import {
+  createAllocationRunner,
+  createRealAllocationWorker,
+  type AllocationRunner,
+} from "./mixed-allocation-worker-pool.js";
+import type { AllocationWorkerRequest } from "./mixed-allocation-worker-handler.js";
+import { buildRendererErrorPayload } from "./renderer-error-payload.js";
+import {
+  ALLOCATION_COMPUTE_ERROR_NOTE,
+  allocationProgressText,
+  buildHiddenAllocationsBlocks,
   buildMixedAllocationDisplay,
   buildMixedAllocationNotices,
   COMBO_EV_CALIBRATION_NOTE,
   formatUnjudgedNote,
   mixedBetTypeLabel,
+  MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER,
   MIXED_ALLOCATION_INVALID_MESSAGE,
   totalUnjudgedCount,
-  type MixedAllocationSettings,
   type MixedRaceAllocationDisplayView,
 } from "./mixed-allocation-view.js";
+import { isBetAllocationUnset, type RaceAllocationView } from "../shared/race-allocation.js";
+import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
 import { INCLUDE_COMBO_ODDS_BATCH_NOTE } from "../shared/settings.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
@@ -110,6 +122,19 @@ export interface BatchAnalysisViewProps {
    * なった)。
    */
   readonly betAllocationSettings: MixedAllocationSettings;
+  /**
+   * 券種横断の馬券配分の表示データキャッシュ(機能D-2c第4段・Issue #28・AC21)。
+   *
+   * **Issue #110(#24-C2)でApp.tsx側の所有に変更した**: 分析タブから離れて戻ると
+   * `BatchAnalysisView`自体が再マウントされる(`App.tsx`の`{verify.activeTab === "分析" && ...}`
+   * による条件描画)。キャッシュを本コンポーネントの`useRef`で持つと再マウントのたびに消え、
+   * 設定を変えていなくても全レースを再計算してしまう。Appは分析タブへ切り替わっても
+   * アンマウントされないため、Appが`useRef`で保持し、propsとして受け取ることで
+   * 「戻ったときにそのまま当たる」を実現する(AC-5)。
+   * キーの定義(11項目の全数列挙表)は`mixed-allocation-cache.ts`のJSDocが唯一の正であり、
+   * 本コンポーネントはこれを組み立てて`peek`/`step`(`mixed-allocation-queue.ts`)に渡すだけ。
+   */
+  readonly mixedAllocationCache: MixedAllocationCache<AllocationOutcome<MixedRaceAllocationDisplayView>>;
 }
 
 const thStyle: React.CSSProperties = {
@@ -199,6 +224,7 @@ function ResultTable(props: {
             >
               {LABEL_ADJUSTED_PROB}
             </th>
+            <th style={thStyle}>単勝</th>
             <th style={thStyle}>複勝下限</th>
             <th style={thStyle}>EV</th>
             <th style={thStyle}>LLM根拠</th>
@@ -215,6 +241,7 @@ function ResultTable(props: {
               <td style={tdStyle}>{row.horseName}</td>
               <td style={tdStyle}>{formatPercent(row.prior)}</td>
               <td style={tdStyle}>{formatPercent(row.adjustedProb)}</td>
+              <td style={tdStyle}>{formatOdds(row.winOdds)}</td>
               <td style={tdStyle}>{formatOdds(row.placeOddsMin)}</td>
               <td
                 style={{
@@ -368,7 +395,8 @@ function breakdownRow(
  * - `invalid`: core由来の生の例外メッセージではなく、ユーザー向け文言
  *   (`MIXED_ALLOCATION_INVALID_MESSAGE`)を表示する(AC17)。
  * - `mixed`: 券種別内訳(AC10・AC13の点数)・複勝のみの提案額との併記(AC11)・個々の買い目
- *   全件(AC13)・判定不能件数(AC15)・券種別の状態注記(AC16)・#35較正注記(AC14)を表示する。
+ *   (AC13。上位`MIXED_ALLOCATION_VISIBLE_LIMIT`件+折りたたみ。Issue #15再スコープ)・
+ *   判定不能件数(AC15)・券種別の状態注記(AC16)・#35較正注記(AC14)を表示する。
  */
 function renderMixedAllocationBlock(
   view: MixedRaceAllocationDisplayView,
@@ -418,7 +446,9 @@ function renderMixedAllocationBlock(
         </p>
       )}
 
-      {/* 券種別内訳(AC10: 合計はtotalStakeと一致・AC13: 点数)。 */}
+      {/* 券種別内訳(AC10: 合計はtotalStakeと一致・AC13: 点数。Issue #90で4群化
+          〈place/win/wide/trio〉。表示順は`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`
+          〈mixed-allocation-view.ts〉を`.map`するだけにし、券種を本ファイルで手書きしない)。 */}
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
@@ -428,9 +458,9 @@ function renderMixedAllocationBlock(
           </tr>
         </thead>
         <tbody>
-          {breakdownRow("複勝", display.breakdown.place)}
-          {breakdownRow("ワイド", display.breakdown.wide)}
-          {breakdownRow("三連複", display.breakdown.trio)}
+          {MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.map((betType) =>
+            breakdownRow(mixedBetTypeLabel(betType), display.breakdown[betType]),
+          )}
         </tbody>
       </table>
 
@@ -446,7 +476,12 @@ function renderMixedAllocationBlock(
         でした(この配分での複勝ぶん〈{formatYen(display.breakdown.place.stake)}〉とは別の計算です)。
       </p>
 
-      {/* AC13: 個々の買い目を全件・stake降順(同額は馬番配列の辞書順)で列挙。打ち切りはしない。 */}
+      {/*
+        AC13: 個々の買い目をstake降順(同額は馬番配列の辞書順)で列挙する。上位
+        MIXED_ALLOCATION_VISIBLE_LIMIT件を常時表示し、残りは直後の折りたたみに入れる
+        (Issue #15再スコープ)。「配分額の大きい順」以外の断定的なキャプション
+        (例: 「上位20件」)は、実際に20件未満のとき嘘になるため付けない。
+      */}
       <table style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.5rem" }}>
         <thead>
           <tr>
@@ -456,15 +491,54 @@ function renderMixedAllocationBlock(
           </tr>
         </thead>
         <tbody>
-          {display.sortedAllocations.map((a) => (
-            <tr key={a.umabans.join("-")}>
-              <td style={tdStyle}>{mixedBetTypeLabel(a.umabans.length)}</td>
-              <td style={tdStyle}>{formatBetLabel(a.umabans)}</td>
+          {/*
+            keyにbetTypeを含める(bossメタレビューR6)。umabansだけをkeyにすると、
+            #23-Bで単勝を追加した際にwin:[5]とplace:[5]が同一keyになりうる
+            (ALLOCATION_BET_TYPE_UMABAN_COUNTのJSDocが「#24で馬連を1箇所だけ足す事故を
+            構造的に防ぐ」と述べているのと同種の一貫性)。
+          */}
+          {display.split.visible.map((a) => (
+            <tr key={`${a.betType}-${a.umabans.join("-")}`}>
+              <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
+              <td style={tdStyle}>{formatComboBetLabel(a.betType, a.umabans)}</td>
               <td style={tdStyle}>{formatYen(a.stake)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+
+      {/*
+        隠れている買い目の折りたたみ(Issue #15再スコープ)。hiddenCount===0のときは
+        buildHiddenAllocationsBlocksが空配列を返すため、この.mapは何も描画しない
+        (JSXに`hiddenCount > 0 &&`という条件式を書かない。AC1強化・boss指摘)。
+        ネイティブ<details>/<summary>を使い、Reactのstateを持たない(再レンダーを
+        起こさずメモ化の前提を崩さない。boss裁定)。
+      */}
+      {buildHiddenAllocationsBlocks(display.split).map((block) => (
+        <details key="hidden-allocations" style={{ marginTop: "0.5rem" }}>
+          <summary style={{ cursor: "pointer", color: "#666", fontSize: "0.8rem" }}>
+            {block.summaryText}
+          </summary>
+          <table style={{ borderCollapse: "collapse", width: "100%", marginTop: "0.3rem" }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>券種</th>
+                <th style={thStyle}>買い目</th>
+                <th style={thStyle}>配分額</th>
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((a) => (
+                <tr key={`${a.betType}-${a.umabans.join("-")}`}>
+                  <td style={tdStyle}>{mixedBetTypeLabel(a.betType)}</td>
+                  <td style={tdStyle}>{formatComboBetLabel(a.betType, a.umabans)}</td>
+                  <td style={tdStyle}>{formatYen(a.stake)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      ))}
 
       <p style={{ margin: "0.4rem 0 0", fontWeight: 700, fontSize: "0.85rem" }}>
         {formatAllocationSummary(result)}
@@ -486,6 +560,12 @@ function renderMixedAllocationBlock(
       {display.wideNote !== null && (
         <p style={{ margin: "0.3rem 0 0", color: "#666", fontSize: "0.8rem" }}>
           ワイド: {display.wideNote}
+        </p>
+      )}
+      {/* Issue #117(AC-5): 馬連の状態注記。表示順(ワイド→馬連→3連複)に合わせてワイドと3連複の間に置く。 */}
+      {display.quinellaNote !== null && (
+        <p style={{ margin: "0.2rem 0 0", color: "#666", fontSize: "0.8rem" }}>
+          馬連: {display.quinellaNote}
         </p>
       )}
       {display.trioNote !== null && (
@@ -538,17 +618,126 @@ export function BatchAnalysisView(
     }
   }
   const betAllocationUnset = isBetAllocationUnset(props.betAllocationSettings);
-  // 券種横断の馬券配分(機能D-2c第4段・Issue #28)の表示データキャッシュ(AC21)。
-  // コンポーネントの生存期間中1つのインスタンスを保持し(useRefの遅延初期化。毎レンダー
-  // 新しいMapを作らない)、details開閉・Discord送信状態の変化等どんな再レンダーでも
-  // 「レースの内容(参照)・配分設定7項目」が変わらない限り再計算しない。
-  // キャッシュキーに含める入力の全数列挙は mixed-allocation-cache.ts のJSDoc参照。
-  const mixedAllocationCacheRef = useRef<MixedAllocationCache<MixedRaceAllocationDisplayView> | null>(
-    null,
+
+  // ==========================================================================
+  // 券種横断の馬券配分(機能D-2c第4段・Issue #28)を、レース単位に分けてWorkerプールで
+  // 並列に進める仕組み(Issue #119・#24-C3。#110の逐次実行〈1ステップ=1レース〉を置き換える
+  // のではなく、Worker起動に失敗したときのフォールバック先として温存する)。
+  // 値の記憶(キャッシュ)は`props.mixedAllocationCache`としてApp側から受け取る
+  // (寿命がBatchAnalysisViewを超えるようにするため。propの型JSDoc参照)。
+  //
+  // **読み出し(peek)は駆動役(runner)を経由せず、常に`props.mixedAllocationCache`へ直接
+  // 今のキー(`keyForAllocation`)で照会する**(下記JSX参照)。理由: Worker(実スレッド)を
+  // 保持する駆動役は、StrictModeの2重実行対策(下記)のため`useEffect(..., [])`の中で
+  // **1コミット遅れて**生成される。もし表示の読み出しまでこの駆動役経由にすると、
+  // 「このレンダーの`props.betAllocationSettings`」と「駆動役が最後に`setInputs`された
+  // 設定」が1コミットずれ、画面が古い設定のキーで照会してしまう瞬間が生じうる。
+  // `props.mixedAllocationCache`自体はApp所有で安定しており、`keyForAllocation`は
+  // 毎レンダー作り直す純関数なので、これを直接使えば表示は常にそのレンダーの設定を
+  // 反映する(AC-3'(a)と同じ保証を、駆動役の生成タイミングに依存させずに保つ)。
+  // ==========================================================================
+
+  // 計算対象レースの表示順(ハイライトの表示順。Issue #110「計算の順番はハイライトの表示順」)。
+  // 未設定時(betAllocationUnset)は対象自体が無い(画面全体の注記に一本化しているため)。
+  const allocationOrder: readonly string[] = betAllocationUnset
+    ? []
+    : highlights
+        .filter((h) => analysisResultByRaceId.has(h.raceId))
+        .map((h) => h.raceId);
+
+  // レースIDから「今の」キャッシュキーを組み立てる。毎レンダーで作り直す(過去のレンダーの
+  // ものを使い回さない。AC-3'の要)。
+  const keyForAllocation = (raceId: string): MixedAllocationCacheKey => {
+    const fullResult = analysisResultByRaceId.get(raceId)!;
+    const s = props.betAllocationSettings;
+    return {
+      raceId,
+      race: fullResult,
+      bankroll: s.bankroll,
+      perRaceCap: s.perRaceCap,
+      kellyFraction: s.kellyFraction,
+      evThreshold: s.evThreshold,
+      includeComboOdds: s.includeComboOdds,
+      includeWideInAllocation: s.includeWideInAllocation,
+      includeTrioInAllocation: s.includeTrioInAllocation,
+      includeQuinellaInAllocation: s.includeQuinellaInAllocation,
+      includeExactaInAllocation: s.includeExactaInAllocation,
+    };
+  };
+  // 実際の計算(逐次フォールバック用)。既存の同期経路(#110時点の実装)と全く同じ関数・
+  // 同じ引数で呼ぶ(AC-6: 答えを変えない。AC-1: Worker側〈mixed-allocation-worker-handler.ts〉
+  // もこれと全く同じ関数を呼ぶ。別実装を作らない)。
+  const computeAllocation = (raceId: string): MixedRaceAllocationDisplayView => {
+    const fullResult = analysisResultByRaceId.get(raceId)!;
+    return buildMixedAllocationDisplay(fullResult, props.betAllocationSettings);
+  };
+  // Workerへ送るリクエストを組み立てる(structuredClone可能な値のみ。AC-5)。
+  const buildAllocationWorkerRequest = (raceId: string): AllocationWorkerRequest => {
+    const fullResult = analysisResultByRaceId.get(raceId)!;
+    return { raceId, race: fullResult, settings: props.betAllocationSettings };
+  };
+
+  // 未計算件数(進捗表示用)は駆動役を経由せず、直接キャッシュへ照会する(上記コメント参照)。
+  const pendingAllocationRaceIds = allocationOrder.filter(
+    (raceId) => props.mixedAllocationCache.peek(keyForAllocation(raceId)) === undefined,
   );
-  if (mixedAllocationCacheRef.current === null) {
-    mixedAllocationCacheRef.current = createMixedAllocationCache();
-  }
+  const hasPendingAllocation = pendingAllocationRaceIds.length > 0;
+
+  // ★Issue #110メタレビュー差し戻し(AC-9)由来の設計を継承する: 駆動役(Workerプール/
+  // 逐次フォールバックの統合ロジック)の`pump()`は、過去の真偽値を一切記憶せず、
+  // 呼ばれた時点の「今、何が未計算か」だけを見て次の発注を決める(`createAllocationRunner`・
+  // `createAllocationWorkerPool`のJSDoc参照)。
+  //
+  // ★Issue #110さらなるメタレビュー差し戻し由来の設計も継承する: 駆動役はWorker(実スレッド)
+  // という実資源を保持するため、`CopyErrorButton.tsx`・#110のスケジューラと同じく
+  // **生成そのものを`useEffect(..., [])`の中で行い**、StrictModeのsetup→cleanup→setupで
+  // 2重実行されても、cleanupは「そのeffect実行が生成した自分自身のインスタンス」だけを
+  // `dispose()`する(クロージャで捕まえた値と比較してからrefをnullに戻す)。
+  // マウント直後の最初のコミットを取りこぼさないよう、生成直後に`pump()`を1回呼び、かつ
+  // 「毎コミットpump()する」effectより**先に宣言する**(宣言順に実行されるため)。
+  const [, forceAllocationRerender] = useReducer((c: number) => c + 1, 0);
+  const allocationRunnerRef = useRef<AllocationRunner<
+    AllocationWorkerRequest,
+    MixedRaceAllocationDisplayView
+  > | null>(null);
+  useEffect(() => {
+    const runner = createAllocationRunner<AllocationWorkerRequest, MixedRaceAllocationDisplayView>({
+      cache: props.mixedAllocationCache,
+      createWorker: createRealAllocationWorker,
+      hardwareConcurrency: navigator.hardwareConcurrency,
+      schedule: (callback) => window.setTimeout(callback, 0),
+      cancel: (handle) => window.clearTimeout(handle),
+      onProgress: forceAllocationRerender,
+      onLog: (operation, error) => {
+        // ベストエフォート(ログ集約自体の失敗はUI表示に影響させない。App.tsxの既存catch節と
+        // 同じ流儀)。Worker起動失敗・異常終了はmain側のログファイルへ集約する(AC-4)。
+        window.keibaApi
+          .logRendererError(buildRendererErrorPayload(operation, error))
+          .catch(() => {});
+      },
+    });
+    allocationRunnerRef.current = runner;
+    runner.pump();
+    return () => {
+      runner.dispose();
+      // クロージャで捕まえた自分自身のインスタンスだけをnullに戻す
+      // (CopyErrorButton.tsxと同じ理由。参照ではなく「このeffect実行が生成した値」で判定する)。
+      if (allocationRunnerRef.current === runner) {
+        allocationRunnerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    allocationRunnerRef.current?.setInputs({
+      order: allocationOrder,
+      keyFor: keyForAllocation,
+      buildRequest: buildAllocationWorkerRequest,
+      compute: computeAllocation,
+    });
+    allocationRunnerRef.current?.pump();
+  });
+
   const expandedSet = new Set(props.expandedRaceIds);
   // 実行前スナップショット(全pending)だけの状態では結果表示はまだ出さない。
   const hasCompleted = outcomes.some((o) => o.status !== "pending");
@@ -559,7 +748,7 @@ export function BatchAnalysisView(
 
       {/*
         組合せオッズ取得設定(機能D-2c第3段・Issue #28): 設定がONのときだけ表示する固定注記1行
-        (数値を含まない。対象レース数・所要時間の動的な見積りは#15/第4段のスコープ)。
+        (数値を含まない。対象レース数・所要時間の動的な見積りは判断済み・出さない。Issue #15再スコープ)。
       */}
       {props.betAllocationSettings.includeComboOdds && (
         <p style={{ color: "#a60", fontSize: "0.85rem", margin: "0 0 0.5rem" }}>
@@ -706,6 +895,18 @@ export function BatchAnalysisView(
                 {BET_ALLOCATION_UNSET_NOTE}
               </p>
             )}
+            {/*
+              配分計算の全体進捗(Issue #110・AC-1)。全部終わったら(hasPendingAllocationが
+              falseになったら)表示を消す(裁定2の指示どおり)。
+            */}
+            {hasPendingAllocation && (
+              <p style={{ color: "#0a58ca", fontSize: "0.85rem", margin: "0 0 0.5rem" }}>
+                {allocationProgressText(
+                  allocationOrder.length - pendingAllocationRaceIds.length,
+                  allocationOrder.length,
+                )}
+              </p>
+            )}
             {highlights.length === 0 ? (
               <p style={{ color: "#666" }}>該当なし</p>
             ) : (
@@ -827,9 +1028,17 @@ export function BatchAnalysisView(
                     このブロックは常に判定対象)。券種横断の配分(buildMixedAllocationDisplay)
                     へ切り替え済み(D-2のフォールバック規則により、対象外設定時は既存の
                     複勝専用経路と完全に同じ結果になる)。greedySteps(貪欲配分の刻み幅)が
-                    券種構成比を左右する事実・Issue #36の詳細は mixed-allocation-view.ts の
-                    JSDoc参照(本タスクではgreedySteps自体は変更しない)。
+                    券種構成比を左右する事実・Issue #36の詳細は shared/mixed-race-allocation.ts の
+                    JSDoc参照(Issue #57で計算本体と共にそちらへ移設した。本タスクではgreedySteps
+                    自体は変更しない)。
                     AC21: レース単位でメモ化する(details開閉等の再レンダーで再計算しない)。
+                    Issue #110・#119: 計算をレース単位に分けてWorkerプールで進めるため、
+                    ここでは`compute`を誘発しない`peek`だけを見る(`props.mixedAllocationCache`
+                    へ直接照会する。上のモジュール冒頭コメント「読み出しは駆動役を経由しない」
+                    参照)。閉じた<details>の中でも(React自身は開閉に関わらず子要素を評価する
+                    ため)このIIFEは毎レンダー実行されるが、実際の計算は上の`useEffect`側
+                    (`allocationRunnerRef`)で別途進む(ここでは「今の結果があるかどうか」を
+                    覗くだけで、無ければ「計算中」を出す)。
                   */}
                   {!betAllocationUnset &&
                     (() => {
@@ -837,22 +1046,27 @@ export function BatchAnalysisView(
                       if (fullResult === undefined) {
                         return null;
                       }
-                      const s = props.betAllocationSettings;
-                      const view = mixedAllocationCacheRef.current!.get(
-                        {
-                          raceId: highlight.raceId,
-                          race: fullResult,
-                          bankroll: s.bankroll,
-                          perRaceCap: s.perRaceCap,
-                          kellyFraction: s.kellyFraction,
-                          evThreshold: s.evThreshold,
-                          includeComboOdds: s.includeComboOdds,
-                          includeWideInAllocation: s.includeWideInAllocation,
-                          includeTrioInAllocation: s.includeTrioInAllocation,
-                        },
-                        () => buildMixedAllocationDisplay(fullResult, s),
+                      const outcome = props.mixedAllocationCache.peek(
+                        keyForAllocation(highlight.raceId),
                       );
-                      return renderMixedAllocationBlock(view, s.evThreshold);
+                      if (outcome === undefined) {
+                        return (
+                          <p style={{ color: "#666", fontSize: "0.85rem" }}>
+                            配分を計算中…
+                          </p>
+                        );
+                      }
+                      if (outcome.status === "error") {
+                        return (
+                          <p style={{ color: "#c0392b", fontSize: "0.85rem" }}>
+                            {ALLOCATION_COMPUTE_ERROR_NOTE}
+                          </p>
+                        );
+                      }
+                      return renderMixedAllocationBlock(
+                        outcome.value,
+                        props.betAllocationSettings.evThreshold,
+                      );
                     })()}
                 </details>
               ))

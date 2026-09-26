@@ -13,11 +13,19 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildComboOddsCellMap,
+  buildComboOddsCellMapFor,
   buildComboOddsKey,
+  buildComboOddsKeyFor,
+  buildOrderedComboOddsKey,
+  COMBO_KEY_ORDER,
+  COMBO_SIZE,
   ComboOddsKeyError,
   mergeAxisComboOddsMaps,
+  parseComboOddsKey,
   toComboOddsScalarMap,
   validateComboUmabans,
+  validateComboUmabansFor,
+  validateOrderedComboUmabans,
   type AxisComboOddsMap,
   type ComboOddsCell,
   type ComboOddsEntry,
@@ -36,6 +44,30 @@ describe("buildComboOddsKey(#14からの移設。既存の挙動を変えない)
     expect(buildComboOddsKey([2, 1])).toBe("0102"); // 入力順に依らない
     expect(buildComboOddsKey([1, 2, 3])).toBe("010203");
     expect(buildComboOddsKey([12, 3])).toBe("0312");
+  });
+});
+
+describe("parseComboOddsKey(buildComboOddsKeyの逆操作。Issue #55: 過去分析の配分提案を馬番表示に戻すためのデコーダ)", () => {
+  it("2桁ごとに区切って馬番配列(昇順)へ復元すること(複勝1頭・ワイド2頭・3連複3頭)", () => {
+    expect(parseComboOddsKey("04")).toEqual([4]);
+    expect(parseComboOddsKey("0407")).toEqual([4, 7]);
+    expect(parseComboOddsKey("040709")).toEqual([4, 7, 9]);
+  });
+
+  it("buildComboOddsKeyが生成したキーを完全に往復復元できること(合成のラウンドトリップ)", () => {
+    expect(parseComboOddsKey(buildComboOddsKey([7, 4]))).toEqual([4, 7]);
+    expect(parseComboOddsKey(buildComboOddsKey([12, 3, 8]))).toEqual([3, 8, 12]);
+  });
+
+  it.each([
+    ["空文字列", ""],
+    ["奇数桁(2桁区切りにならない)", "040"],
+    ["数字以外の文字を含む", "0X"],
+    ["馬番が1未満(00)", "00"],
+    ["馬番が19以上(上限18を超える)", "19"],
+    ["空白を含む", "04 7"],
+  ])("%s(%s)はnullを返すこと(throwしない)", (_label, rawKey) => {
+    expect(parseComboOddsKey(rawKey)).toBeNull();
   });
 });
 
@@ -308,5 +340,198 @@ describe("mergeAxisComboOddsMaps(衝突の解決規則。合成データ。#33�
     expect(odds.size).toBe(1);
     expect(odds.get(keyOnlyAxis1)).toEqual({ oddsMin: 12.0, oddsMax: null, ninki: null });
     expect(conflicts.length).toBe(0);
+  });
+});
+
+/**
+ * 順序付きキー(馬単)の裁定と導入(Issue #106・#24-B)。
+ *
+ * 馬単は着順(1着・2着)が意味を持つ券種のため、`buildComboOddsKey`(常に昇順ソート)を
+ * そのまま使うと「1着13・2着8」と「1着8・2着13」が同じキー"0813"に潰れて区別できなくなる
+ * (実測: fixtures/odds_exacta_202603020211.json の実データで検証。後述の
+ * parse-combo-odds.test.ts/parse-nar-combo-odds.test.ts参照)。
+ *
+ * 採る形(オーケストレーター裁定): `buildComboOddsKey`(既存・ソートする)は無改修のまま残し、
+ * `buildOrderedComboOddsKey`(新設・ソートしない)を追加し、`buildComboOddsKeyFor(betType, ...)`
+ * が`COMBO_KEY_ORDER`で両者を振り分ける。#103の裁定(同一ヘルパを引数で分岐させない。
+ * 用途ごとに別関数にする)と同じ流儀。
+ */
+describe("buildOrderedComboOddsKey(馬単等の順序付きキー。ソートしない)", () => {
+  it("入力の並びをソートせずにそのままゼロ埋め連結すること", () => {
+    expect(buildOrderedComboOddsKey([13, 8])).toBe("1308");
+    expect(buildOrderedComboOddsKey([8, 13])).toBe("0813");
+  });
+
+  it("buildComboOddsKey(ソートする既存関数)とは異なる結果になること(降順入力で前提を固定)", () => {
+    // 前提固定: [13, 8] は昇順ではない(この前提が崩れると本テストは自明になる)。
+    expect(13).toBeGreaterThan(8);
+    expect(buildOrderedComboOddsKey([13, 8])).not.toBe(buildComboOddsKey([13, 8]));
+    expect(buildComboOddsKey([13, 8])).toBe("0813"); // 既存関数はソートするため昇順キーになる
+  });
+});
+
+describe("buildComboOddsKeyFor(betType別の順序方針振り分け。Issue #106)", () => {
+  it("馬単(exacta)は逆順の2組を別キーとして扱うこと", () => {
+    const forward = buildComboOddsKeyFor("exacta", [13, 8]);
+    const backward = buildComboOddsKeyFor("exacta", [8, 13]);
+    expect(forward).toBe("1308");
+    expect(backward).toBe("0813");
+    expect(forward).not.toBe(backward);
+  });
+
+  it("ワイド・3連複(unordered)は従来どおり入力順に依らず同じキーになること(同じ入力で両方通る形にしないための対比)", () => {
+    const a = buildComboOddsKeyFor("wide", [13, 8]);
+    const b = buildComboOddsKeyFor("wide", [8, 13]);
+    expect(a).toBe("0813");
+    expect(b).toBe("0813");
+    expect(a).toBe(b);
+  });
+});
+
+describe("validateOrderedComboUmabans(馬単等の順序付き構造検証。昇順は要求しないが重複は拒否)", () => {
+  it("降順(1着>2着)でもthrowしないこと", () => {
+    expect(() => validateOrderedComboUmabans([13, 8], 2)).not.toThrow();
+  });
+
+  it("同一馬番の重複はthrowすること(1頭が1着・2着を同時に取ることは構造的にありえないため)", () => {
+    expect(() => validateOrderedComboUmabans([5, 5], 2)).toThrow(ComboOddsKeyError);
+  });
+
+  it("要素数が券種と一致しない場合はthrowすること(構造検証はunorderedと共有)", () => {
+    expect(() => validateOrderedComboUmabans([1, 2, 3], 2)).toThrow(ComboOddsKeyError);
+  });
+
+  it("範囲外の馬番はthrowすること(構造検証はunorderedと共有)", () => {
+    expect(() => validateOrderedComboUmabans([0, 5], 2)).toThrow(ComboOddsKeyError);
+  });
+});
+
+describe("validateComboUmabansFor(betType別の順序方針振り分け。Issue #106)", () => {
+  it("同じ降順入力[13,8]でも、馬単(exacta)はthrowせず、ワイドはthrowすること(同じ入力で両方通る形にしないための対比)", () => {
+    expect(() => validateComboUmabansFor("exacta", [13, 8], 2)).not.toThrow();
+    expect(() => validateComboUmabansFor("wide", [13, 8], 2)).toThrow(ComboOddsKeyError);
+  });
+
+  it("3連複は従来どおり降順をthrowすること", () => {
+    expect(() => validateComboUmabansFor("trio", [3, 1, 2], 3)).toThrow(ComboOddsKeyError);
+  });
+});
+
+/**
+ * 馬連(quinella)の追加(Issue #113・#24-D2)。
+ *
+ * 馬連はワイド・3連複と同じ「順不同の組」であり、`COMBO_KEY_ORDER.quinella`は既存の
+ * "unordered"経路にそのまま乗る(馬単のような新しい順序方針の追加は不要)。ここでは
+ * `COMBO_SIZE`/`COMBO_KEY_ORDER`という2つのRecordに`quinella`が正しく登録され、
+ * 既存の`...For`系ゲートウェイが「ワイドと同じ振る舞い」をすることだけを固定する。
+ */
+describe("馬連(quinella)。Issue #113・#24-D2", () => {
+  it("COMBO_SIZE.quinella=2であること(買い目を構成する頭数)", () => {
+    expect(COMBO_SIZE.quinella).toBe(2);
+  });
+
+  it("COMBO_KEY_ORDER.quinella=\"unordered\"であること(ワイド・3連複と同じ順不同の組)", () => {
+    expect(COMBO_KEY_ORDER.quinella).toBe("unordered");
+  });
+
+  it("buildComboOddsKeyForは馬連を順不同として扱うこと(入力順に依らず同じキーになる)", () => {
+    const a = buildComboOddsKeyFor("quinella", [13, 8]);
+    const b = buildComboOddsKeyFor("quinella", [8, 13]);
+    expect(a).toBe("0813");
+    expect(b).toBe("0813");
+    expect(a).toBe(b);
+  });
+
+  it("validateComboUmabansForは馬連の降順入力をthrowすること(ワイドと同じ)", () => {
+    expect(() => validateComboUmabansFor("quinella", [13, 8], 2)).toThrow(ComboOddsKeyError);
+  });
+
+  it("buildComboOddsCellMapForは馬連の順不同の組を1件に集約すること(ワイドと同じ)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [1, 2], cell: { oddsMin: 3.0, oddsMax: null, ninki: 1 } },
+      { umabans: [2, 1], cell: { oddsMin: 3.0, oddsMax: null, ninki: 1 } },
+    ];
+    const map = buildComboOddsCellMapFor("quinella", entries);
+    expect(map.size).toBe(1);
+    expect(map.get("0102")).toEqual({ oddsMin: 3.0, oddsMax: null, ninki: 1 });
+  });
+});
+
+/**
+ * 三連単(trifecta)の追加(Issue #130・#25-D)。
+ *
+ * 三連単は馬単と同じ「着順が意味を持つ並び」であり(1着・2着・3着の3頭)、
+ * `COMBO_KEY_ORDER.trifecta`は既存の"ordered"経路(#106で導入)にそのまま乗る
+ * (新しい順序方針の追加は不要)。ここでは`COMBO_SIZE`/`COMBO_KEY_ORDER`という2つの
+ * Recordに`trifecta`が正しく登録され、既存の`...For`系ゲートウェイが「馬単と同じ振る舞い」を
+ * comboSize=3でもすることを固定する。
+ */
+describe("三連単(trifecta)。Issue #130・#25-D", () => {
+  it("COMBO_SIZE.trifecta=3であること(買い目を構成する頭数)", () => {
+    expect(COMBO_SIZE.trifecta).toBe(3);
+  });
+
+  it("COMBO_KEY_ORDER.trifecta=\"ordered\"であること(馬単と同じ着順が意味を持つ並び)", () => {
+    expect(COMBO_KEY_ORDER.trifecta).toBe("ordered");
+  });
+
+  it("buildComboOddsKeyForは三連単を着順どおり(ソートしない)に扱うこと(実測: 13→8→5=52,690円のキーは\"130805\"。docs/trifecta-odds-investigation.md §5.2)", () => {
+    const key = buildComboOddsKeyFor("trifecta", [13, 8, 5]);
+    expect(key).toBe("130805");
+    // 完全反転(3着↔1着)は別キーになること(着順が意味を持つことの直接証拠)。
+    const reversed = buildComboOddsKeyFor("trifecta", [5, 8, 13]);
+    expect(reversed).toBe("050813");
+    expect(key).not.toBe(reversed);
+  });
+
+  it("validateComboUmabansForは三連単の非昇順入力(13,8,5)をthrowしないこと(馬単と同じ。3連複〈unordered〉はthrowする対比)", () => {
+    expect(() => validateComboUmabansFor("trifecta", [13, 8, 5], 3)).not.toThrow();
+    expect(() => validateComboUmabansFor("trio", [13, 8, 5], 3)).toThrow(ComboOddsKeyError);
+  });
+
+  it("validateComboUmabansForは三連単の同一馬番重複をthrowすること(1頭が1着・2着を同時に取ることは構造的にありえない)", () => {
+    expect(() => validateComboUmabansFor("trifecta", [13, 13, 5], 3)).toThrow(ComboOddsKeyError);
+  });
+
+  it("buildComboOddsCellMapForは三連単の完全反転(1着↔3着)を別キー・別値として保持すること(実データに基づく値。fixtures/odds_trifecta_202603020211.json由来。130805=526.9・050813=442.7)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [13, 8, 5], cell: { oddsMin: 526.9, oddsMax: null, ninki: 113 } },
+      { umabans: [5, 8, 13], cell: { oddsMin: 442.7, oddsMax: null, ninki: 79 } },
+    ];
+    const map = buildComboOddsCellMapFor("trifecta", entries);
+    expect(map.size).toBe(2);
+    expect(map.get("130805")).toEqual({ oddsMin: 526.9, oddsMax: null, ninki: 113 });
+    expect(map.get("050813")).toEqual({ oddsMin: 442.7, oddsMax: null, ninki: 79 });
+  });
+});
+
+describe("buildComboOddsCellMapFor(betType別の順序方針でMap化。Issue #106)", () => {
+  it("馬単は逆順の2組を別キー・別値として保持すること(実データに基づく値。 fixtures/odds_exacta_202603020211.json 由来)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [13, 8], cell: { oddsMin: 83.6, oddsMax: null, ninki: 32 } },
+      { umabans: [8, 13], cell: { oddsMin: 118.8, oddsMax: null, ninki: 52 } },
+    ];
+    const map = buildComboOddsCellMapFor("exacta", entries);
+    expect(map.size).toBe(2);
+    expect(map.get("1308")).toEqual({ oddsMin: 83.6, oddsMax: null, ninki: 32 });
+    expect(map.get("0813")).toEqual({ oddsMin: 118.8, oddsMax: null, ninki: 52 });
+  });
+
+  it("従来のbuildComboOddsCellMap(betType非対応)に同じ逆順2組を渡すと、値の不一致でthrowすること(順序方針を通さないと壊れることの証明)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [13, 8], cell: { oddsMin: 83.6, oddsMax: null, ninki: 32 } },
+      { umabans: [8, 13], cell: { oddsMin: 118.8, oddsMax: null, ninki: 52 } },
+    ];
+    expect(() => buildComboOddsCellMap(entries)).toThrow(ComboOddsKeyError);
+  });
+
+  it("ワイドは従来どおり順不同の組を1件に集約すること(回帰確認)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [1, 2], cell: { oddsMin: 3.0, oddsMax: 5.0, ninki: 1 } },
+      { umabans: [2, 1], cell: { oddsMin: 3.0, oddsMax: 5.0, ninki: 1 } },
+    ];
+    const map = buildComboOddsCellMapFor("wide", entries);
+    expect(map.size).toBe(1);
+    expect(map.get("0102")).toEqual({ oddsMin: 3.0, oddsMax: 5.0, ninki: 1 });
   });
 });

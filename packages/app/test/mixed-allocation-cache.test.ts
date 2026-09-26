@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  cacheKeyEquals,
   createMixedAllocationCache,
   type MixedAllocationCacheKey,
 } from "../src/renderer/mixed-allocation-cache.js";
@@ -23,6 +24,8 @@ function key(overrides: Partial<MixedAllocationCacheKey> = {}): MixedAllocationC
     includeComboOdds: true,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
     ...overrides,
   };
 }
@@ -61,8 +64,10 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     expect(computeB).toHaveBeenCalledTimes(1);
   });
 
-  // AC21強化: キャッシュキーの9項目を1つずつ変えたとき、必ずキャッシュがミスする
-  // (compute()が再度呼ばれる)ことをテーブル駆動で固定する。1項目でも比較から漏れると、
+  // AC21強化(#24-D3a・Issue #115でincludeQuinellaInAllocationを追加し10項目化、
+  // #24-E3a・Issue #124でincludeExactaInAllocationを追加し11項目化): キャッシュキーの
+  // 11項目を1つずつ変えたとき、必ずキャッシュがミスする(compute()が再度呼ばれる)ことを
+  // テーブル駆動で固定する。1項目でも比較から漏れると、
   // 「設定を変えたのに前回の金額が表示され続ける」静かな誤りになる。
   const baseKey = key();
   const mutationCases: { name: string; mutate: (k: MixedAllocationCacheKey) => MixedAllocationCacheKey }[] = [
@@ -75,6 +80,8 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     { name: "includeComboOdds", mutate: (k) => ({ ...k, includeComboOdds: !k.includeComboOdds }) },
     { name: "includeWideInAllocation", mutate: (k) => ({ ...k, includeWideInAllocation: !k.includeWideInAllocation }) },
     { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
+    { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
+    { name: "includeExactaInAllocation", mutate: (k) => ({ ...k, includeExactaInAllocation: !k.includeExactaInAllocation }) },
   ];
 
   it.each(mutationCases)(
@@ -97,7 +104,7 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     },
   );
 
-  it("9項目すべてが一致すれば(新しいオブジェクトのkeyでも)ヒットすること(項目過剰検知にならないことの確認)", () => {
+  it("11項目すべてが一致すれば(新しいオブジェクトのkeyでも)ヒットすること(項目過剰検知にならないことの確認)", () => {
     const cache = createMixedAllocationCache<string>();
     const compute = vi.fn(() => "value");
     cache.get(key(), compute);
@@ -122,4 +129,108 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     expect(cache.get(keyA, compute)).toBe(3);
     expect(compute).toHaveBeenCalledTimes(3);
   });
+});
+
+// Issue #110(#24-C2): 配分計算を1レースずつ進める仕組み(mixed-allocation-queue.ts)は、
+// 「計算せずに今の値だけを覗く」経路が必要なため`peek`を追加する。
+// `peek`は表示の読み出し経路そのもの(AC-3'(a)の要)なので、`get`と同じ11項目
+// (#24-D3a・Issue #115でincludeQuinellaInAllocationを追加、#24-E3a・Issue #124で
+// includeExactaInAllocationを追加)の厳しさで独立にテーブル駆動
+// テストを固定する(既存の`get`用テーブル・アサーションは1件も変更しない。
+// 上のdescribeブロックとは別の新規テーブルとして持つ)。
+describe("createMixedAllocationCache().peek(値を計算せずに照会する。Issue #110)", () => {
+  it("computeを呼んだことが無いキーはundefinedを返すこと(副作用なし=computeを一切呼ばない)", () => {
+    const cache = createMixedAllocationCache<string>();
+    expect(cache.peek(key())).toBeUndefined();
+  });
+
+  it("getで一度値を計算した後、同じキーでpeekするとcomputeを呼ばずにその値を返すこと", () => {
+    const cache = createMixedAllocationCache<string>();
+    const compute = vi.fn(() => "computed-value");
+    cache.get(key(), compute);
+    const peeked = cache.peek(key());
+    expect(peeked).toBe("computed-value");
+    // 前提固定: peek自体はcomputeを再度呼ばない(呼び出し回数がgetの1回のままであること)。
+    expect(compute).toHaveBeenCalledTimes(1);
+  });
+
+  // AC-3'(a)相当: キー11項目を1つずつ変えたとき、peekは必ずミス(undefined)すること。
+  // 「設定を変えたのに古い金額がpeekでヒットし続ける」ことをこのテーブルで塞ぐ。
+  const peekBaseKey = key();
+  const peekMutationCases: { name: string; mutate: (k: MixedAllocationCacheKey) => MixedAllocationCacheKey }[] = [
+    { name: "raceId", mutate: (k) => ({ ...k, raceId: "202601010102" }) },
+    { name: "race(参照)", mutate: (k) => ({ ...k, race: { marker: "race-B" } }) },
+    { name: "bankroll", mutate: (k) => ({ ...k, bankroll: k.bankroll + 1 }) },
+    { name: "perRaceCap", mutate: (k) => ({ ...k, perRaceCap: k.perRaceCap + 1 }) },
+    { name: "kellyFraction", mutate: (k) => ({ ...k, kellyFraction: k.kellyFraction + 0.01 }) },
+    { name: "evThreshold", mutate: (k) => ({ ...k, evThreshold: k.evThreshold + 0.1 }) },
+    { name: "includeComboOdds", mutate: (k) => ({ ...k, includeComboOdds: !k.includeComboOdds }) },
+    { name: "includeWideInAllocation", mutate: (k) => ({ ...k, includeWideInAllocation: !k.includeWideInAllocation }) },
+    { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
+    { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
+    { name: "includeExactaInAllocation", mutate: (k) => ({ ...k, includeExactaInAllocation: !k.includeExactaInAllocation }) },
+  ];
+
+  it.each(peekMutationCases)(
+    "$name だけを変えたキーでpeekすると undefined になること(古い値を返さない)",
+    ({ mutate }) => {
+      const cache = createMixedAllocationCache<string>();
+      cache.get(peekBaseKey, () => "base-value");
+      const mutatedKey = mutate(peekBaseKey);
+      // 前提固定: 実際に値が変わっていること。
+      expect(mutatedKey).not.toEqual(peekBaseKey);
+      expect(cache.peek(mutatedKey)).toBeUndefined();
+      // 前提固定: 変更前のキーではまだヒットすること(peek自体が壊れて常にmissするのではないことの確認)。
+      expect(cache.peek(peekBaseKey)).toBe("base-value");
+    },
+  );
+
+  it("AC-3'(a): 計算済みの値がある状態で設定を変えると、そのキーでのpeekは古い金額を返さずundefinedになること", () => {
+    const cache = createMixedAllocationCache<string>();
+    const oldKey = key({ bankroll: 100000 });
+    cache.get(oldKey, () => "computed-with-bankroll-100000");
+    // 前提固定: 変更前は計算済みの値がpeekできること。
+    expect(cache.peek(oldKey)).toBe("computed-with-bankroll-100000");
+    const newKey = key({ bankroll: 200000 });
+    expect(cache.peek(newKey)).toBeUndefined();
+  });
+});
+
+// Issue #119(#24-C3): 配分計算のWorkerプール化で「送信時のキー」と「完了時点の最新キー」を
+// 比較し、不一致なら結果を破棄する(古い結果が新しい設定の値を上書きしない)ために、
+// `get`/`peek`が使っているのと同じ等価判定を再利用する。**新しい経路が独自のキー定義・
+// 独自の比較関数を持たない**(このファイル冒頭JSDoc「この表はキー材料の唯一の定義」)ため、
+// 再実装せずexportして使う。
+describe("cacheKeyEquals(get/peekと同じキー等価判定をexportして再利用可能にする。Issue #119)", () => {
+  it("11項目すべてが一致すれば true を返すこと(新しく組み立てたオブジェクトでも)", () => {
+    expect(cacheKeyEquals(key(), key())).toBe(true);
+  });
+
+  // get/peek用のテーブル(mutationCases・peekMutationCases)とは意図的に独立させる
+  // (このファイルの既存の流儀: 「既存のテーブル・アサーションは1件も変更しない」
+  // 「別のdescribeブロックとは別の新規テーブルとして持つ」に倣う)。
+  const cacheKeyEqualsMutationCases: { name: string; mutate: (k: MixedAllocationCacheKey) => MixedAllocationCacheKey }[] = [
+    { name: "raceId", mutate: (k) => ({ ...k, raceId: "202601010102" }) },
+    { name: "race(参照)", mutate: (k) => ({ ...k, race: { marker: "race-B" } }) },
+    { name: "bankroll", mutate: (k) => ({ ...k, bankroll: k.bankroll + 1 }) },
+    { name: "perRaceCap", mutate: (k) => ({ ...k, perRaceCap: k.perRaceCap + 1 }) },
+    { name: "kellyFraction", mutate: (k) => ({ ...k, kellyFraction: k.kellyFraction + 0.01 }) },
+    { name: "evThreshold", mutate: (k) => ({ ...k, evThreshold: k.evThreshold + 0.1 }) },
+    { name: "includeComboOdds", mutate: (k) => ({ ...k, includeComboOdds: !k.includeComboOdds }) },
+    { name: "includeWideInAllocation", mutate: (k) => ({ ...k, includeWideInAllocation: !k.includeWideInAllocation }) },
+    { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
+    { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
+    { name: "includeExactaInAllocation", mutate: (k) => ({ ...k, includeExactaInAllocation: !k.includeExactaInAllocation }) },
+  ];
+
+  it.each(cacheKeyEqualsMutationCases)(
+    "$name だけが異なれば false を返すこと(get/peekのミス判定と同じ基準であることの確認)",
+    ({ mutate }) => {
+      const base = key();
+      const mutated = mutate(base);
+      // 前提固定: 実際に値が変わっていること。
+      expect(mutated).not.toEqual(base);
+      expect(cacheKeyEquals(base, mutated)).toBe(false);
+    },
+  );
 });

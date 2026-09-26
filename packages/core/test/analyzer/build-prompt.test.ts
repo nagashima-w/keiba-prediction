@@ -217,6 +217,13 @@ describe("computeReferenceEv(参考EV = 3着内率 × 複勝オッズ下限)", (
     { label: "通常計算", prior: 0.4, placeOddsMin: 2.0, expected: 0.8 },
     { label: "複勝オッズ下限がnullならnull", prior: 0.4, placeOddsMin: null, expected: null },
     { label: "prior=0でも0を返す(nullにしない)", prior: 0, placeOddsMin: 2.0, expected: 0 },
+    // Issue #74: オッズの値域は1.0以上であり0は値域外。isUsableOddsへ委譲する前は
+    // `placeOddsMin===null || !Number.isFinite(placeOddsMin)`のみを見ており、0を通して
+    // `prior×0=0`という「参考EVが算出できた」結果に潰していた。
+    { label: "複勝オッズ下限=0(値域外)ならnull(#74)", prior: 0.4, placeOddsMin: 0, expected: null },
+    { label: "複勝オッズ下限=0.5(値域外)ならnull(#74)", prior: 0.4, placeOddsMin: 0.5, expected: null },
+    // 過剰除外の否定側: 境界ちょうど(1.0)は値域内であり算出されること。
+    { label: "複勝オッズ下限=1.0(境界ちょうど・値域内)は算出されること(#74)", prior: 0.4, placeOddsMin: 1.0, expected: 0.4 },
   ];
   it.each(cases)("$label", ({ prior, placeOddsMin, expected }) => {
     expect(computeReferenceEv(prior, placeOddsMin)).toEqual(expected);
@@ -269,6 +276,38 @@ describe("buildPrompt(市場データ: 単勝オッズ・人気・複勝オッ�
     const p = withOdds({ referenceEv: null });
     expect(p).toContain("算出不可");
   });
+
+  describe(
+    "複勝オッズ下限が値域外(Issue #74)の行の表記(boss裁定Q2: oddsTextは0.0倍のまま表示し、" +
+      "referenceEv=computeReferenceEv(prior, oddsMin)がnullを返すことで「算出不可」に自然に乗る。" +
+      "「複勝未発売」に潰すと『発売されていない』という偽の断定になるため変更しない)",
+    () => {
+      it(
+        "placeOddsMin=0(値域外)の行は「複勝オッズ下限=0.0倍, 参考EV=算出不可,」を含むこと" +
+          "(AC-5。toContainの期待値は両セグメントを含む1つの連結リテラルにする。" +
+          "「参考EV=算出不可」だけを見ると複勝オッズ下限側を「複勝未発売」に潰す変異が素通りする)",
+        () => {
+          const p = withOdds({
+            placeOddsMin: 0,
+            referenceEv: computeReferenceEv(0.4, 0),
+          });
+          expect(p).toContain("複勝オッズ下限=0.0倍, 参考EV=算出不可,");
+        },
+      );
+
+      it(
+        "対照(過剰除外の否定側): placeOddsMin=1.0(境界ちょうど・値域内)の行は" +
+          "「複勝オッズ下限=1.0倍, 参考EV=0.40,」を含むこと(AC-5)",
+        () => {
+          const p = withOdds({
+            placeOddsMin: 1.0,
+            referenceEv: computeReferenceEv(0.4, 1.0),
+          });
+          expect(p).toContain("複勝オッズ下限=1.0倍, 参考EV=0.40,");
+        },
+      );
+    },
+  );
 
   it("市場データ未指定(フィールド省略)でも落ちずに既定表記になること", () => {
     const input = baseInput();

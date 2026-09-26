@@ -1,0 +1,583 @@
+/**
+ * mixed-candidates — 券種横断(複勝・ワイド・三連複)の買い目候補ビルダー(機能D-2c第2段・Issue #28)。
+ *
+ * boss着手前ゲート(第2段Go)で確定した設計。第1段(`AnalysisResult` に `wideCombo?`/`trioCombo?`/
+ * `comboOdds?` を追加)を土台に、`@keiba/core/ev/combo-bet-allocation` の汎用配分エンジン
+ * (`allocateGeneralBets`)にそのまま渡せる `AllocationCandidate[]` を組み立てる純関数
+ * `buildMixedCandidates` を提供する。**着手当時(第2段)は画面(`BatchAnalysisView.tsx`)・
+ * 既存の複勝専用ビュー(`bet-allocation-view.ts`)を一切変更しなかった**(本ファイルからは
+ * import するだけだった)。**追記(Issue #57)**: 本ファイル自体は `renderer/mixed-candidates.ts`
+ * から `shared/mixed-candidates.ts` へ移動した(ファイル名は不変)。import 先も
+ * `resolvePlaceBetTarget`/`PlaceBetUnavailableReason` の移設に伴い `./race-allocation.js`
+ * (旧`./bet-allocation-view.js`)へ変わっている(下記import文参照)。
+ *
+ * ## 反証(boss着手前ゲートで実コードから確認済み。実装方針の前提)
+ *
+ * - **反証A**: `allocateGeneralBets` は配分計算に使う的中確率を同時分布から一律再導出する。
+ *   候補の `ev` は (a) `isPositive` の入口フィルタ (b) 候補cap選抜の並べ替え(既定2000で発動しない)
+ *   **だけ**に使われ、最適化そのものには入らない。したがって複勝(周辺確率ベースのEV)と
+ *   組合せ(同時分布ベースのEV)の基準が異なっていても、**配分額は歪まない**(影響は「どの候補を
+ *   載せるか」の入口判定だけ)。→ 複勝のEV基準は行の `ev`/`isPositive`(`computeRaceEv`/
+ *   `computeEstimatedRaceEv` の値)を**そのまま**使う。既存の固定注記 `evThresholdFootnote`
+ *   (`bet-allocation-view.ts`)が「配分の対象はEV閾値を上回った馬のみ」と述べている基準と
+ *   一致させる(別基準にすると注記が事実と食い違う)。
+ * - **反証B**: `docs/wide-trio-odds-investigation.md` §6 は「4頭以下でワイド・3連複が発売
+ *   されないことは未確認」と記録している。頭数閾値をハードコードすると「未確認を判定結果として
+ *   報告する」欠陥になる。発売可否はデータから直接観測できる(オッズが1件でも取れていれば
+ *   発売されていた一次証拠)。→ **ワイド・3連複は頭数による門前払いを一切しない**
+ *   (`buildComboCandidates` が `comboSize > 出走頭数` のとき組合せ列挙自体が0件になる、という
+ *   構造的な結果に委ねる。頭数チェックを本ファイルには書かない)。
+ * - **反証C**: 既存 `race-allocation.ts` の `buildRaceAllocation` は `resolvePlaceBetTarget`
+ *   の可用性判定を「レース全体の表示ゲート」として使っている。本モジュールでは同じ関数を
+ *   「複勝候補を載せるか否かの判定」に**格下げ**して再利用する(`combo-bet-allocation.ts` の
+ *   JSDocが警告する「`resolvePlaceBetTarget` の結果を `topFinishCount` に誤用してはならない」
+ *   と同種の取り違えを避けるため、本ファイルでは `topFinishCount` に流用せず常に定数3を使う)。
+ *
+ * ## yosoガードの複勝適用(boss裁定・ブリーフ差し替え。反証Cの誤り訂正)
+ *
+ * 当初のブリーフは複勝候補の条件を3つ(`placeOddsMin`/`ev`/`isPositive`)としていたが、これは
+ * `race-allocation.ts` の `buildRaceAllocation` が `resolvePlaceBetTarget` より**手前**で
+ * 判定している `oddsStatus==="yoso"` ガードを取りこぼしていた(反証Cで頭数判定だけを論じた際に
+ * 一緒に落とした)。実コードで確認した事実:
+ * - `analysis-pipeline.ts:587` は `oddsStatus==="yoso"` のとき `computeEstimatedRaceEv`
+ *   (単勝オッズからの推定複勝下限、誤差±20〜30%)を使い、`placeOddsMin`/`ev`/`isPositive` は
+ *   **null にならず**(`evEstimated:true` として区別される)通常どおり算出される。
+ * - `docs/current-spec.md`(180行目)は「オッズ未発売(`oddsStatus="yoso"` の推定EVは誤差
+ *   ±20〜30%で賭け金に直接効く)」を **提案しないレース** として明文化している。
+ *
+ * したがって3条件だけを実装すると、誤差±20〜30%の推定EVで選ばれた複勝馬が実資金配分候補に
+ * 混入し、既存ポリシーから逸脱する。boss裁定によりこの段では **(a)** を採用する:
+ * 複勝候補の条件を4つ(yosoガードを先頭に追加)とし、判定順序を
+ * `1.yosoガード → 2.頭数可用性 → 3・4.行レベルの3条件` に固定する。
+ *
+ * yosoガードの理由は本質的に2つに分解できる(boss裁定):
+ * - (i) 発売前だから組合せオッズが存在しない(全券種に等しく効く。データ状態として自然に表現される)
+ * - (ii) 推定EVは誤差±20〜30%で賭け金に直接効くから使わない(**複勝の推定EVに固有**のポリシー)
+ * 本モジュールでは複勝について (ii) を理由に候補ゼロを返し、診断値に `"yoso"` の理由コードを
+ * 載せる(ワイド・3連複と対称)。**理由コードのみを返し、表示文言は持たない**
+ * (`allocation-primitives.ts` の `SkipReasonCode` と同じ「コードを返し文言は呼び出し側」の
+ * 流儀に揃える。`PLACE_BET_UNAVAILABLE_MESSAGES` 等の文言定義を複製しない)。
+ *
+ * `buildRaceAllocation` の `kind:"yoso"`(レース全体の表示ゲート)は本段では変更しない
+ * (第4段で二重化を解消するかは第4段で判断する。現時点では判定が2箇所に現れることを許容する)。
+ *
+ * ## 第2段の既知の限界(誤読防止)
+ *
+ * 第2段時点では `scrapeRace` の `includeComboOdds` は既定 `false` で固定配線されている
+ * (第1段のスコープ)。したがって現状は**全レースで** `wideCombo`/`trioCombo` が未取得
+ * (`comboOdds` も `undefined`)になる。yoso のときにワイド・3連複の候補が0件になる理由は
+ * 「yosoだから」ではなく「(第2段の配線上)未取得だから」であり、本ファイルはこの2つの
+ * ゼロ件理由を診断値の型(`kind:"yoso"` と `kind:"built"` かつ `fieldPresence:"absent"`)で
+ * 明確に区別する(誤ラベル禁止。yosoのときは列挙自体を行わず、`kind:"yoso"` を返す。
+ * 実際に組合せオッズが取得済みかどうかとは無関係に、yosoである限りこの理由コードが優先される)。
+ *
+ * ## 券種フィルタ(`options.betTypes`)についての注意
+ *
+ * これは**第3段以降のための受け口**であり、本段(第2段)では妙味度による券種切り替えを
+ * 実装しない(ユーザー決定Q2「常に全券種」)。既定値は`ALL_MIXED_CANDIDATE_BET_TYPES`
+ * (place/wide/trioの3券種。**`AllocationBetType`の全メンバーではない**。#91で`AllocationBetType`
+ * に`win`が加わったが、単勝の候補ビルダーが存在しないため対象に含めていない。下記
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照)。型定義上、妙味度・
+ * `RaceOpportunity` に類する値は本モジュールの入力に一切現れない(受け取れない)。
+ *
+ * ## EV閾値の統一(`options.evConfig`。機能D-2c第4段・Issue #28・D-4)
+ *
+ * 第4段のboss裁定B-2「閾値を揃える」により、`options.evConfig`(省略時は
+ * `DEFAULT_EV_CONFIG`=閾値1.0)を`buildComboCandidates`へそのまま渡す。複勝候補は
+ * `row.isPositive`(呼び出し元が`AppSettings.evThreshold`で既に判定済みの値)をそのまま使う
+ * ため、呼び出し元(`mixed-race-allocation.ts` の `buildMixedRaceAllocation`)が**同じ`evThreshold`から組み立てた`evConfig`**を
+ * ここへ渡すことで、複勝・ワイド・3連複が同一の閾値・同一の厳密不等号(`ev > threshold`)で
+ * 判定される(`bet-allocation-view.ts`の`evThresholdFootnote`「配分の対象はEV閾値を上回った
+ * 買い目のみです」という注記と実際の判定基準を一致させる)。
+ */
+
+import {
+  buildComboCandidates,
+  buildExactaCandidates,
+  buildQuinellaCandidates,
+  buildWinCandidates,
+  DEFAULT_EV_CONFIG,
+  type AllocationBetType,
+  type AllocationCandidate,
+  type ComboCandidateDiagnostics,
+  type EvConfig,
+  type JointModelHorse,
+  type WinCandidateDiagnostics,
+} from "@keiba/core/ev/combo-bet-allocation";
+
+import type {
+  AnalysisRow,
+  ComboOddsFetchOutcomeView,
+  ComboOddsScrapeOutcomeView,
+  OddsStatus,
+} from "./analysis-types.js";
+import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-allocation.js";
+
+/**
+ * 券種横断の買い目候補ビルダーが対象にできる券種。
+ *
+ * `@keiba/core`の`AllocationBetType`の別名(Issue #76)。券種ユニオンの3重定義
+ * (本エイリアス・`mixed-race-allocation.ts`のインライン`("place"|"wide"|"trio")[]`・core
+ * `AllocationBetType`)を防ぐため、本ファイルはcoreの型をそのまま参照し、再定義しない
+ * (#24で「馬連」を1箇所だけ足す事故を構造的に防ぐ)。
+ *
+ * **構造的に防げるのはユニオンの再定義(型エイリアスの分岐)までである。** メンバーを
+ * 手で列挙する配列・散文(直下の`ALL_MIXED_CANDIDATE_BET_TYPES`とそのJSDoc・散文中の
+ * 「全券種」等の言い回し)はこのエイリアスでは守られない。実際に#91で`AllocationBetType`
+ * に`win`が加わった際、まさにこの「1箇所だけ足す事故」(配列は3値のまま、散文だけが
+ * 「全券種」と言い続ける)が起きた(#90で解消済み。下記`ALL_MIXED_CANDIDATE_BET_TYPES`参照)。
+ * メンバー列挙・散文は別途テストで守ること(`mixed-candidates.test.ts`の
+ * 「意図的に除外している券種」it参照)。
+ */
+export type MixedCandidateBetType = AllocationBetType;
+
+/**
+ * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーと
+ * 再び一致する(Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、Issue #125〈#24-E3b〉で
+ * `exacta`〈馬単〉を追加したため)。**
+ *
+ * #91で`AllocationBetType`に`win`(単勝)が加わった時点では、coreに単勝候補ビルダーが
+ * 存在せず`buildMixedCandidates`も`win`を一切参照していなかったため、本配列は意図的に
+ * `win`を含めていなかった(#91の裁定)。**#90(#23-B2)で単勝の候補ビルダー
+ * (`buildWinCandidates`。core `combo-bet-allocation.ts`)を新設し、下記実装が
+ * `betTypes.includes("win")`を参照するようになったため、本配列にも`win`を加えた。**
+ * 「対象にする」宣言と実体(`buildWinCandidatesForBetType`)が揃っている状態であり、
+ * #91が是正した「宣言だけが実体を伴わずに増える」欠陥は再生産していない。
+ *
+ * **#112(#24-D1)で`quinella`(馬連)が`AllocationBetType`に加わったが、当初は本配列に
+ * 含めていなかった。** #116(#24-D3b-1)で`buildQuinellaCandidatesForBetType`
+ * (core `buildQuinellaCandidates`を呼ぶ本ファイルの実装)を新設した後も、配分の券種選択
+ * (`shared/mixed-race-allocation.ts`の`resolveMixedBetTypes`)が実際に`"quinella"`を渡すまでは
+ * 利用者から見える配分結果を変えないよう、意図的に本配列へ加えるのを見送っていた
+ * (オーケストレーター裁定・Issue #116 Q1)。**Issue #117でその接続を行い、本配列にも
+ * `quinella`を加えた**(「対象にする」宣言と実体〈`buildQuinellaCandidatesForBetType`・
+ * `resolveMixedBetTypes`〉が揃った状態)。
+ *
+ * **Issue #120(#24-E1)で`exacta`(馬単)が`AllocationBetType`に加わったが、`quinella`と
+ * 同じ理由で当初は本配列に含めていなかった。** #122(#24-E2)で`buildExactaCandidatesForBetType`
+ * を新設した後も、`resolveMixedBetTypes`が実際に`"exacta"`を渡すまでは意図的に本配列へ
+ * 加えるのを見送っていた。**Issue #125(#24-E3b)でその接続を行い、本配列にも`exacta`を
+ * 加えた**(「対象にする」宣言と実体が揃った状態)。
+ *
+ * **Issue #128(#25-B)で`trifecta`(三連単)が`AllocationBetType`に加わったが、
+ * `quinella`・`exacta`と同じ理由で当初は本配列に含めていない。** core側(的中確率・
+ * 候補ビルダー`buildTrifectaCandidates`・配分の門番)は#128で実装済みだが、
+ * `mixed-candidates.ts`から三連単の候補を作る経路(`buildTrifectaCandidatesForBetType`
+ * 相当の実装・`resolveMixedBetTypes`の接続)はまだ無い(オッズ配線・配分接続は#132のスコープ)。
+ * その接続が終わるまでは意図的に本配列へ加えるのを見送る(`quinella`・`exacta`のときと
+ * 同じ判断)。
+ *
+ * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いつき、#112でいったん
+ * 「全メンバーではない」状態に戻ったが#117で再び全メンバーと一致し、#120で三たび
+ * 「全メンバーではない」状態に戻ったが#125で再び全メンバーと一致し、#128で四たび
+ * 「全メンバーではない」状態に戻った。** 改名はしない
+ * (#91当時のboss裁定を維持: 定数名は「意図的な対象集合」を表す既存の名として扱い、
+ * メンバー数の増減のたびに改名しない)。
+ *
+ * boss裁定Q2により、第2段はこれ以外の絞り込みを実装しない(`options.betTypes`
+ * 以外のフィルタは実装に存在しない。#90時点でも真)。
+ */
+export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
+  "place",
+  "win",
+  "wide",
+  "quinella",
+  "exacta",
+  "trio",
+];
+
+/**
+ * `buildMixedCandidates` のオプション。
+ *
+ * `betTypes` は**第3段以降のための受け口**(受け入れ条件)。妙味度・`RaceOpportunity` に
+ * 類する値を受け取るフィールドは意図的に存在しない(型レベルの保証)。
+ */
+export interface MixedCandidateBuildOptions {
+  /** 対象券種(省略時は`ALL_MIXED_CANDIDATE_BET_TYPES`。`AllocationBetType`の全メンバーではない。同定数のJSDoc参照)。 */
+  readonly betTypes?: readonly MixedCandidateBetType[];
+  /**
+   * ワイド・3連複のEV判定に使う閾値設定(省略時は `DEFAULT_EV_CONFIG` = 閾値1.0)。
+   * 複勝候補は`row.isPositive`をそのまま使う(呼び出し元が同じ閾値で既に判定済みの値)ため、
+   * 呼び出し元がここへ同じ閾値の`evConfig`を渡すことで全券種の判定基準を統一できる(D-4)。
+   */
+  readonly evConfig?: EvConfig;
+}
+
+/**
+ * `buildMixedCandidates` が受け取るレース情報の最小構造(`AnalysisResult` からそのまま渡せる。
+ * `RaceAllocationInput`〈race-allocation.ts〉と同じ流儀の構造的最小型)。
+ */
+export interface MixedCandidateBuildInput {
+  readonly oddsStatus: OddsStatus;
+  readonly rows: readonly AnalysisRow[];
+  readonly wideCombo?: Record<string, number | null>;
+  readonly trioCombo?: Record<string, number | null>;
+  /** 馬連オッズ(Issue #116・#24-D3b-1)。`options.betTypes`に`"quinella"`があるときのみ参照される。 */
+  readonly quinellaCombo?: Record<string, number | null>;
+  /**
+   * 馬単オッズ(Issue #122・#24-E2)。`options.betTypes`に`"exacta"`があるときのみ参照される。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"exacta"`を含まないため(#123まで)、既定呼び出しでは
+   * 参照されない(`options.betTypes`へ明示的に`"exacta"`を渡した場合のみ到達する)。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
+  readonly comboOdds?: ComboOddsScrapeOutcomeView;
+}
+
+/**
+ * 複勝候補が対象外の理由コード。頭数由来(`PlaceBetUnavailableReason`)に加えて `"yoso"` を持つ
+ * (boss裁定。頭数由来のコードとは別値であることを型で保証する)。
+ */
+export type PlaceCandidateUnavailableReason = "yoso" | PlaceBetUnavailableReason;
+
+/**
+ * 複勝候補ビルドの診断値(判別共用体)。判定結果(`judged`)と判定不能(このユニオン自体の
+ * `unavailable`/`not-requested` 分岐)を型レベルで分離する。
+ * - `not-requested`: `options.betTypes` に `"place"` が含まれていない(列挙自体を行っていない)。
+ * - `unavailable`: yosoガード、または頭数可用性(`resolvePlaceBetTarget`)により対象外。
+ *   理由コードは判定順序(yoso→頭数)で1つに決まる。
+ * - `judged`: 各行を判定した結果。`judged` は候補化した/EV非プラスで外した数、`unjudged` は
+ *   オッズ・EVが欠損していて判定できなかった数(型で混ざらない)。
+ */
+export type PlaceCandidateDiagnostics =
+  | { readonly kind: "not-requested" }
+  | { readonly kind: "unavailable"; readonly reason: PlaceCandidateUnavailableReason }
+  | {
+      readonly kind: "judged";
+      readonly judged: {
+        readonly positiveCount: number;
+        readonly notPositiveCount: number;
+      };
+      readonly unjudged: {
+        readonly oddsMissingCount: number;
+      };
+    };
+
+/**
+ * `wideCombo`/`trioCombo` フィールド自体の状態(値の中身とは独立に、まず「どういう状態の
+ * フィールドを受け取ったか」を表す)。`{}` を「発売なし」と断定しないための3分類。
+ * - `absent`: キー自体が無い(`undefined`)。
+ * - `empty`: 空オブジェクト(`{}`)。
+ * - `present`: 1件以上の値を持つ。
+ */
+export type ComboFieldPresence = "absent" | "empty" | "present";
+
+/**
+ * ワイド・3連複候補ビルドの診断値(判別共用体)。
+ * - `not-requested`: `options.betTypes` に対象券種が含まれていない(列挙自体を行っていない)。
+ * - `yoso`: `oddsStatus==="yoso"`。発売前は組合せオッズが存在しないため列挙自体を行わず候補ゼロ
+ *   (第2段の既知の限界により「未取得」と紛らわしいが、型として明確に別枝にして誤ラベルを防ぐ)。
+ * - `built`: `buildComboCandidates` に委譲して列挙・判定した。`fieldPresence`
+ *   (`wideCombo`/`trioCombo` フィールド自体の状態)と `comboOddsState`
+ *   (`comboOdds.<betType>.state`。取得できなければ `"unknown"`)を**両方**載せる
+ *   (`{}` になった原因〈市場側の unavailable なのか取得失敗の failed なのか〉は
+ *   `comboOddsState` でのみ判別できる。`AnalysisResult.wideCombo` のJSDoc参照)。
+ */
+export type ComboCandidateDiagnosticsView =
+  | { readonly kind: "not-requested" }
+  | { readonly kind: "yoso" }
+  | {
+      readonly kind: "built";
+      readonly fieldPresence: ComboFieldPresence;
+      readonly comboOddsState: ComboOddsFetchOutcomeView["state"] | "unknown";
+      readonly build: ComboCandidateDiagnostics;
+    };
+
+/**
+ * win(単勝)候補ビルドの診断値(判別共用体。Issue #90・#23-B2)。
+ * - `not-requested`: `options.betTypes` に `"win"` が含まれていない(列挙自体を行っていない)。
+ * - `unavailable`(reason:"yoso"): `oddsStatus==="yoso"`。理由は「予想オッズが不正確だから」
+ *   ではなく「発売前で買えないから」(D-4・boss裁定。`winOdds`はyosoでも予想オッズ値が
+ *   入ることがあるが、それとは無関係にこのガードで一律除外する)。`PlaceCandidateDiagnostics`
+ *   と同じ`unavailable`+`reason`の形にする(`ComboCandidateDiagnosticsView`の独立した
+ *   `kind:"yoso"`枝とは異なる形。winは複勝と同じ「1頭単位の券種」であり、頭数由来の
+ *   `PlaceCandidateUnavailableReason`と同じ判別共用体の位置に`"yoso"`を並べる設計)。
+ * - `judged`: `buildWinCandidates`(core)に委譲して判定した結果。**頭数由来の`unavailable`は
+ *   存在しない**(反証B・AC3: winに頭数による門前払いを書かない。頭数が小さすぎて
+ *   `buildOrderedDistribution`が判定不能を返した場合も、判定した上で0件だった
+ *   〈`judged`かつ全カウント0〉として扱う。`oddsUnfetchedCount`は持たない
+ *   〈D-3・`WinCandidateDiagnostics`のJSDoc参照〉)。
+ */
+export type WinCandidateDiagnosticsView =
+  | { readonly kind: "not-requested" }
+  | { readonly kind: "unavailable"; readonly reason: "yoso" }
+  | {
+      readonly kind: "judged";
+      readonly judged: {
+        readonly positiveCount: number;
+        readonly notPositiveCount: number;
+      };
+      readonly unjudged: {
+        readonly oddsMissingCount: number;
+        readonly oddsMalformedCount: number;
+      };
+    };
+
+/** `buildMixedCandidates` の診断値(券種ごと)。 */
+export interface MixedCandidateDiagnostics {
+  readonly place: PlaceCandidateDiagnostics;
+  readonly win: WinCandidateDiagnosticsView;
+  readonly wide: ComboCandidateDiagnosticsView;
+  readonly trio: ComboCandidateDiagnosticsView;
+  /**
+   * 馬連の候補ビルド診断値(Issue #116・#24-D3b-1)。`wide`/`trio`と同じ
+   * `ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`はIssue #117(#24-D3b-2)で馬連を含むようになったため、
+   * `options.betTypes`省略時の既定呼び出しでも馬連の候補が実際に構築される
+   * (`options.betTypes`に明示的に`"quinella"`を含めない場合のみ`kind:"not-requested"`になる)。
+   */
+  readonly quinella: ComboCandidateDiagnosticsView;
+  /**
+   * 馬単の候補ビルド診断値(Issue #122・#24-E2)。`wide`/`trio`/`quinella`と同じ
+   * `ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"exacta"`を含まない(#123まで)ため、
+   * `options.betTypes`省略時の既定呼び出しでは常に`kind:"not-requested"`になる
+   * (`options.betTypes`に明示的に`"exacta"`を含めたときのみ`"built"`/`"yoso"`になりうる)。
+   */
+  readonly exacta: ComboCandidateDiagnosticsView;
+}
+
+/** `buildMixedCandidates` の結果。 */
+export interface MixedCandidateBuildResult {
+  /** `allocateGeneralBets` にそのまま渡せる買い目候補(券種混在)。 */
+  readonly candidates: readonly AllocationCandidate[];
+  /**
+   * 上位何着までを的中判定に使うか。**常に3**(`resolvePlaceBetTarget().placeCount` を
+   * 流用しない。反証C)。
+   */
+  readonly topFinishCount: number;
+  readonly diagnostics: MixedCandidateDiagnostics;
+}
+
+/** ワイド・3連複の的中判定に使う上位着数。複勝の払戻対象人数とは無関係の独立した定数(反証C)。 */
+const COMBO_TOP_FINISH_COUNT = 3;
+
+/** 複勝候補を構築する(boss裁定(a): yosoガード→頭数可用性→行レベル3条件の優先順位)。 */
+function buildPlaceCandidates(race: MixedCandidateBuildInput): {
+  candidates: AllocationCandidate[];
+  diagnostics: PlaceCandidateDiagnostics;
+} {
+  // 1. yosoガード(boss裁定。頭数判定より先に判定する)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "unavailable", reason: "yoso" } };
+  }
+  // 2. 頭数可用性(既存 resolvePlaceBetTarget を「候補を載せるか否か」の判定に格下げして再利用)。
+  const target = resolvePlaceBetTarget(race.rows.length);
+  if (!target.available) {
+    return { candidates: [], diagnostics: { kind: "unavailable", reason: target.reason } };
+  }
+  // 3・4. 行レベル: placeOddsMin!==null かつ ev!==null(判定不能)、isPositive===true(判定結果)。
+  const candidates: AllocationCandidate[] = [];
+  let positiveCount = 0;
+  let notPositiveCount = 0;
+  let oddsMissingCount = 0;
+  for (const row of race.rows) {
+    if (row.placeOddsMin === null || row.ev === null) {
+      oddsMissingCount++;
+      continue;
+    }
+    if (row.isPositive !== true) {
+      notPositiveCount++;
+      continue;
+    }
+    positiveCount++;
+    candidates.push({
+      betType: "place",
+      umabans: [row.umaban],
+      odds: row.placeOddsMin,
+      ev: row.ev,
+      isPositive: true,
+    });
+  }
+  return {
+    candidates,
+    diagnostics: {
+      kind: "judged",
+      judged: { positiveCount, notPositiveCount },
+      unjudged: { oddsMissingCount },
+    },
+  };
+}
+
+/** `Record<string, number|null> | undefined` からフィールド自体の状態を判定する。 */
+function resolveFieldPresence(record: Record<string, number | null> | undefined): ComboFieldPresence {
+  if (record === undefined) {
+    return "absent";
+  }
+  return Object.keys(record).length === 0 ? "empty" : "present";
+}
+
+/**
+ * win(単勝)候補を構築する(Issue #90・#23-B2)。反証B相当: 頭数門前払いを一切しない
+ * (`resolvePlaceBetTarget`をwinには適用しない。委譲先`buildWinCandidates`〈core〉の
+ * 判定結果〈候補0件になりうる〉に委ねる)。判定順序はyosoガード→委譲の2段のみ
+ * (`buildPlaceCandidates`の4段〈yoso→頭数→行レベル2条件〉と異なり、頭数判定が無いため)。
+ */
+function buildWinCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: WinCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード(D-4): 発売前で買えないため一律除外する(推定精度の問題ではない。
+  // WinCandidateDiagnosticsViewのJSDoc参照)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "unavailable", reason: "yoso" } };
+  }
+  const oddsByUmaban = new Map<number, number | null>(race.rows.map((r) => [r.umaban, r.winOdds]));
+  const result = buildWinCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByUmaban, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: {
+      kind: "judged",
+      judged: result.diagnostics.judged,
+      unjudged: result.diagnostics.unjudged,
+    },
+  };
+}
+
+/** ワイド・3連複候補を構築する(反証B: 頭数門前払いをしない。委譲先 buildComboCandidates の列挙結果に委ねる)。 */
+function buildComboCandidatesForBetType(
+  betType: "wide" | "trio",
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード: 発売前は組合せオッズが存在しない(第2段の「未取得」とは別理由。誤ラベル禁止)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "yoso" } };
+  }
+  const record = betType === "wide" ? race.wideCombo : race.trioCombo;
+  const fieldPresence = resolveFieldPresence(record);
+  const comboOddsState = race.comboOdds?.[betType]?.state ?? "unknown";
+  const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
+  // D-4: evConfigを渡し、複勝(row.isPositive)と同じ閾値・同じ厳密不等号で判定させる。
+  // Issue #76: 第3引数はcomboSize(数値)ではなくbetType自体を渡す(umabanCountOfへ内部で委譲)。
+  const result = buildComboCandidates(horses, COMBO_TOP_FINISH_COUNT, betType, oddsByKey, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
+  };
+}
+
+/**
+ * 馬連候補を構築する(Issue #116・#24-D3b-1)。`buildComboCandidatesForBetType`(ワイド・3連複)
+ * を`betType:"quinella"`に拡張するのではなく別関数にする: core `buildComboCandidates`は
+ * `betType==="quinella"`を専用にthrowする安全装置を持つ(#112。馬連にワイド・3連複用の
+ * 「上位k着の集合」的中確率を誤って使わせないため)。したがって馬連は`buildQuinellaCandidates`
+ * (core。順序付きoutcome空間から1着・2着の周辺化で的中確率を求める)へ直接委譲する
+ * (`buildWinCandidatesForBetType`と同型)。反証B相当: 頭数門前払いはしない
+ * (`buildQuinellaCandidates`自身の判定不能〈固定馬2頭以上等〉に委ねる)。
+ */
+function buildQuinellaCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード: 発売前は組合せオッズが存在しない(wide/trioと同じ理由。誤ラベル禁止)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "yoso" } };
+  }
+  const record = race.quinellaCombo;
+  const fieldPresence = resolveFieldPresence(record);
+  const comboOddsState = race.comboOdds?.quinella?.state ?? "unknown";
+  const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
+  // D-4: evConfigを渡し、複勝・ワイド・3連複と同じ閾値・同じ厳密不等号で判定させる。
+  const result = buildQuinellaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
+  };
+}
+
+/**
+ * 馬単候補を構築する(Issue #122・#24-E2)。`buildQuinellaCandidatesForBetType`と同型の骨格
+ * (別関数にする理由も同じ: core `buildComboCandidates`は`betType==="exacta"`を専用にthrowする
+ * 安全装置を持つため〈#120〉、馬単は`buildExactaCandidates`〈core。順序付きoutcome空間から
+ * 着順どおりの的中確率を求める〉へ直接委譲する)。反証B相当: 頭数門前払いはしない
+ * (`buildExactaCandidates`自身の判定不能〈固定馬2頭以上等〉に委ねる)。
+ *
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"exacta"`を含まない(#123まで)ため、`requested`は
+ * `options.betTypes`に明示的に`"exacta"`を渡した場合のみtrueになる(既定呼び出しでは
+ * 常に`false`=`kind:"not-requested"`)。
+ */
+function buildExactaCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード: 発売前は組合せオッズが存在しない(wide/trio/quinellaと同じ理由。誤ラベル禁止)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "yoso" } };
+  }
+  const record = race.exactaCombo;
+  const fieldPresence = resolveFieldPresence(record);
+  const comboOddsState = race.comboOdds?.exacta?.state ?? "unknown";
+  const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
+  // D-4: evConfigを渡し、複勝・ワイド・3連複・馬連と同じ閾値・同じ厳密不等号で判定させる。
+  const result = buildExactaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
+  };
+}
+
+/**
+ * 券種横断(複勝・ワイド・3連複。馬連は候補ビルダーとして実装済みだが既定の対象には含まれない
+ * 〈`ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照〉)の買い目候補を構築する。
+ *
+ * @param race レース情報の最小構造(`AnalysisResult` をそのまま渡せる)
+ * @param options 対象券種(省略時は`ALL_MIXED_CANDIDATE_BET_TYPES`。`AllocationBetType`の全メンバーではない。
+ *   同定数のJSDoc参照)。第3段以降のための受け口(第2段では絞り込みを実装しない)
+ */
+export function buildMixedCandidates(
+  race: MixedCandidateBuildInput,
+  options: MixedCandidateBuildOptions = {},
+): MixedCandidateBuildResult {
+  const betTypes = options.betTypes ?? ALL_MIXED_CANDIDATE_BET_TYPES;
+  const evConfig = options.evConfig ?? DEFAULT_EV_CONFIG;
+  const horses: JointModelHorse[] = race.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
+
+  const place = betTypes.includes("place")
+    ? buildPlaceCandidates(race)
+    : { candidates: [] as AllocationCandidate[], diagnostics: { kind: "not-requested" } as PlaceCandidateDiagnostics };
+  const win = buildWinCandidatesForBetType(betTypes.includes("win"), race, horses, evConfig);
+  const wide = buildComboCandidatesForBetType("wide", betTypes.includes("wide"), race, horses, evConfig);
+  const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig);
+  const quinella = buildQuinellaCandidatesForBetType(betTypes.includes("quinella"), race, horses, evConfig);
+  const exacta = buildExactaCandidatesForBetType(betTypes.includes("exacta"), race, horses, evConfig);
+
+  return {
+    candidates: [
+      ...place.candidates,
+      ...win.candidates,
+      ...wide.candidates,
+      ...trio.candidates,
+      ...quinella.candidates,
+      ...exacta.candidates,
+    ],
+    topFinishCount: COMBO_TOP_FINISH_COUNT,
+    diagnostics: {
+      place: place.diagnostics,
+      win: win.diagnostics,
+      wide: wide.diagnostics,
+      trio: trio.diagnostics,
+      quinella: quinella.diagnostics,
+      exacta: exacta.diagnostics,
+    },
+  };
+}

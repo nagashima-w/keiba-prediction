@@ -125,6 +125,44 @@ export interface PipelineWiringConfig {
    * (第1段までの既定挙動と発行URL列・リクエスト数が完全に一致する)。
    */
   readonly includeComboOdds?: boolean;
+  /**
+   * 配分提案(Issue #59)の設定7項目(`bankroll`/`perRaceCap`/`kellyFraction`/
+   * `includeWideInAllocation`/`includeTrioInAllocation`/`includeQuinellaInAllocation`/
+   * `includeExactaInAllocation`)。`includeComboOdds`は含めない(上記の`includeComboOdds`が
+   * 単一ソース。ここへ二重に持たせない。#59 4節)。省略時は `AnalysisPipelineDeps.allocationSettings`
+   * が null になり、この呼び出しでは配分計算を行わない(既存呼び出し元・`pipeline-deps.test.ts`の
+   * 20箇所超との後方互換のためこのフィールド自体は任意のままとする。#59着手前確認済み)。
+   *
+   * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は5→6項目化した追加分。
+   * `includeExactaInAllocation`(#24-E3a・Issue #124)は6→7項目化した追加分。ここで
+   * 受け取り、下でincludeComboOddsと合成した`AnalysisAllocationSettings`(main/allocation-record.ts)
+   * までそのまま運ぶが、`allocation-record.ts`のメタ行(`analysis_allocation_meta`)へは
+   * 書かない(馬連は#59が固定した列一覧の凍結をIssue #118で解除したが、馬単は#24-E3a時点では
+   * 解除しない。`allocation-record.ts`冒頭のJSDoc参照)。
+   */
+  readonly allocationSettings?: {
+    readonly bankroll: number;
+    readonly perRaceCap: number;
+    readonly kellyFraction: number;
+    readonly includeWideInAllocation: boolean;
+    readonly includeTrioInAllocation: boolean;
+    readonly includeQuinellaInAllocation: boolean;
+    readonly includeExactaInAllocation: boolean;
+  };
+  /**
+   * better-sqlite3 のネイティブバインディング(.node)の絶対パス(Issue #60-B)。
+   *
+   * 背景: bindings パッケージは呼び出し元のスタックトレースからモジュールルートを推測して
+   * .node を探すが、packaged(asar化)実行では推測が崩れて `Could not locate the bindings file`
+   * になりうる(実機バグ報告)。この推測を経路ごと外すため、packaged 時は呼び出し側(ipc.ts)が
+   * app.asar.unpacked 配下の絶対パスを解決・実在確認した上でここへ渡し、
+   * `new Database(dbPath, { nativeBinding })` として明示指定する。
+   * 省略時(非packaged・開発・vitest)は従来どおり `new Database(dbPath)` のみで、
+   * bindings パッケージの推測解決に委ねる(挙動を変えない)。
+   * このモジュールは electron に依存させないため、解決・実在確認そのものは行わない
+   * (呼び出し側から解決済みの値を受け取るだけ)。
+   */
+  readonly nativeBindingPath?: string;
 }
 
 /** 配線済みの依存一式(runAnalysis 用 deps + レース一覧取得 + 検証 + 後始末)。 */
@@ -196,7 +234,13 @@ export function shouldUseLlm(apiKey: string | undefined): boolean {
 export function createPipelineDeps(
   config: PipelineWiringConfig,
 ): PipelineResources {
-  const db = new Database(config.dbPath);
+  // nativeBindingPath(Issue #60-B)を渡された場合のみ明示指定する。bindings パッケージの
+  // スタックトレース探索は packaged 実行での失敗要因になり得るため、その経路自体を通さない。
+  // 省略時(非packaged・開発・vitest)は従来どおり第2引数無しで開き、bindings に解決を委ねる。
+  const db =
+    config.nativeBindingPath !== undefined
+      ? new Database(config.dbPath, { nativeBinding: config.nativeBindingPath })
+      : new Database(config.dbPath);
   const cache = new ScrapeCache({ database: db });
   // fetch を注入すると undici 既定経路を通らず、Electron main では net.fetch(Chromium スタック)で取得する。
   const httpClient = new HttpClient({ fetch: config.fetch, onWarn: config.onWarn });
@@ -225,6 +269,9 @@ export function createPipelineDeps(
           maxAdjust: clipVariant.maxAdjust,
         })
     : null;
+  // 組合せオッズ取得可否(機能D-2c第3段・Issue #28)を1回だけ解決し、scrapeRace束縛と
+  // deps.allocationSettings(Issue #59)の両方にこの同じ値を使う(#59 4節「二重定義を作らない」)。
+  const includeComboOdds = config.includeComboOdds ?? false;
 
   const deps: AnalysisPipelineDeps = {
     // 組合せオッズ(ワイド・3連複、機能D-2c第3段・Issue #28): 設定画面のチェックボックス
@@ -235,12 +282,20 @@ export function createPipelineDeps(
     // 組合せオッズはcore側〈scrape-race.ts:446〉が単勝・複勝と同じoddsFetchOptionsを流用するため、
     // ここを触ると単勝・複勝のキャッシュ挙動まで変わる)。
     scrape: (raceId: RaceId) =>
-      scrapeRace(raceId, { fetcher }, { includeComboOdds: config.includeComboOdds ?? false }),
+      scrapeRace(raceId, { fetcher }, { includeComboOdds }),
     analyze,
     saveAnalysis: (record) => store.saveAnalysis(record),
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
+    // 配分提案(Issue #59)。config.allocationSettings(7項目)にincludeComboOdds(上で1回だけ
+    // 解決した値。scrape束縛と同じ値)を合成して8項目にする。config.allocationSettingsが
+    // 省略時はnull(この呼び出しでは配分計算を行わない。required-nullableの契約は
+    // analysis-pipeline.ts AnalysisPipelineDeps.allocationSettings参照)。
+    allocationSettings:
+      config.allocationSettings !== undefined
+        ? { ...config.allocationSettings, includeComboOdds }
+        : null,
     additionalInstruction: config.additionalInstruction,
     clipVariant: clipVariant.id,
     // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定モデル名(anthropic-client.tsの
@@ -288,11 +343,13 @@ export function createPipelineDeps(
         // 常にライブ取得(キャッシュ毒化回避)。パース失敗時は saveResult に到達しない。
         fetchText: (url, options) => fetcher.fetchText(url, options),
         parse: parseRaceResult,
-        // courseType(面、タスク#27-A2)を素通しする。ここで引数を落とすと、
-        // importRaceResult が渡す result.courseType が本番経路で握り潰される
-        // (テストは緑でも実際にはrace_result_metaへ書かれない)ため、必ず転送する。
-        saveResult: (rid, entries, courseType) =>
-          store.saveResult(rid, entries, courseType),
+        // courseType(面、タスク#27-A2)・comboPayouts(ワイド・3連複、Issue #52)を素通しする。
+        // ここで引数を落とすと、importRaceResult が渡す result.courseType /
+        // widePayouts・trioPayouts が本番経路で握り潰される(テストは緑でも実際には
+        // race_result_meta・race_combo_payoutsへ書かれない。#27-A2と同型の事故)ため、
+        // 必ず転送する(boss裁定R-8)。
+        saveResult: (rid, entries, courseType, comboPayouts) =>
+          store.saveResult(rid, entries, courseType, comboPayouts),
       }),
     listUnimportedRaceIds: (): readonly string[] => store.listUnimportedRaceIds(),
     listAnalyzedRaceIdsByPromptVersion: (version: string): readonly string[] =>
@@ -305,7 +362,9 @@ export function createPipelineDeps(
       deletedCount: store.deleteAnalysesWithUnknownPromptVersion(),
     }),
     getRaceLedger: (): readonly RaceLedgerView[] =>
-      buildRaceLedgerView(computeRaceLedger(store)),
+      buildRaceLedgerView(computeRaceLedger(store), (analysisId) =>
+        store.getStoredAllocation(analysisId),
+      ),
     getAnalysisExportInput: (raceId: RaceId): AnalysisExportSource | null => {
       const latest = pickLatestAnalysis(store.listAnalyses({ raceId }));
       if (latest === null) {

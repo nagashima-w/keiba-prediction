@@ -4,19 +4,22 @@ import type { AnalysisResult, AnalysisRow } from "../src/shared/analysis-types.j
 import {
   BET_ALLOCATION_UNSET_NOTE,
   buildAllocationNotices,
-  buildRaceAllocation,
   CROSS_RACE_OVERBET_NOTE,
   evThresholdFootnote,
   formatAllocationSummary,
   NOT_DIVERSIFIED_NOTE,
   formatBetLabel,
-  isBetAllocationUnset,
+  formatComboBetLabel,
   KELLY_CAP_EXPLANATION_NOTE,
   placeBetUnavailableMessage,
   probabilitySumWarning,
+} from "../src/renderer/bet-allocation-view.js";
+import {
+  buildRaceAllocation,
+  isBetAllocationUnset,
   resolvePlaceBetTarget,
   type BetAllocationSettings,
-} from "../src/renderer/bet-allocation-view.js";
+} from "../src/shared/race-allocation.js";
 
 /** テスト用のAnalysisRowを組み立てる補助関数。 */
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
@@ -27,6 +30,7 @@ function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow 
     prior: 0.3,
     adjustedProb: overrides.adjustedProb ?? 0.3,
     placeOddsMin: overrides.placeOddsMin ?? 3,
+    winOdds: overrides.winOdds ?? 10,
     ev: overrides.ev ?? 0.9,
     isPositive: overrides.isPositive ?? false,
     reason: null,
@@ -108,6 +112,26 @@ describe("resolvePlaceBetTarget(頭数→複勝対象人数の判定。boss着�
     } else {
       throw new Error("8頭はavailable:trueになるはず");
     }
+  });
+
+  /**
+   * AC-B3'(a)(Issue #81): PLの`validatePlaceCountOrThrow`は非整数のplaceCountをthrowするが、
+   * production の`resolvePlaceBetTarget`が返す`placeCount`が非整数になることは無い、という
+   * 主張を実際に検査する(#81着手前ゲートboss裁定。「production では起きない」を誰も検査
+   * していない状態を避ける)。頭数1〜30の全整数を走査し、`available:true`のときは常に
+   * 整数の3を返すことを固定する。
+   */
+  it("AC-B3'(a): 頭数1〜30のすべてで、available:trueのときplaceCountは常に整数の3であること(#81。PLへ非整数が到達しないことの直接証拠)", () => {
+    let availableTrueCount = 0;
+    for (let runnerCount = 1; runnerCount <= 30; runnerCount++) {
+      const target = resolvePlaceBetTarget(runnerCount);
+      if (!target.available) continue;
+      availableTrueCount++;
+      expect(Number.isInteger(target.placeCount)).toBe(true);
+      expect(target.placeCount).toBe(3);
+    }
+    // 空振り防止: available:trueの走査対象が実際に1件以上あること。
+    expect(availableTrueCount).toBeGreaterThan(0);
   });
 });
 
@@ -220,6 +244,39 @@ describe("formatBetLabel(買い目ラベルの純関数生成。umabanをJSXに�
       // 同じ2要素でも中身が違えば出力も違うこと(定数返却になっていないことの空振り防止)。
       expect(formatBetLabel([2, 5])).not.toBe(formatBetLabel([4, 7]));
     });
+  });
+});
+
+/**
+ * formatComboBetLabel(Issue #125・#24-E3b・AC-6): 馬単(exacta)は「1着→2着」の並びが
+ * 意味を持つ券種であり、ワイド・馬連・3連複と同じ「N-M」表記(区切りがハイフン、実質的に
+ * 昇順の組として表示)にすると、着順の情報が失われる(13→8と8→13が同じ「8-13」に
+ * 潰れて見える)。本関数はbetTypeを見て、exactaだけはumabansの並びをそのまま保った
+ * 「N→M」表記(netkeibaの表記に合わせる)にし、それ以外(place/win/wide/quinella/trio)は
+ * 既存の`formatBetLabel`と同じ表記のままにする(呼び出し元〈BatchAnalysisView.tsx・
+ * allocation-proposal-view.ts〉を書き換えても、馬単以外の券種の見た目は変えない)。
+ */
+describe("formatComboBetLabel(券種を見て表記を切り替える。Issue #125・#24-E3b・AC-6)", () => {
+  it("馬単(exacta)は『N→M』形式になり、並びをそのまま保つこと(13→8と8→13は別の表記になる。殺す変異: 並べ替える/ハイフンにする)", () => {
+    expect(formatComboBetLabel("exacta", [13, 8])).toBe("13→8");
+    expect(formatComboBetLabel("exacta", [8, 13])).toBe("8→13");
+    expect(formatComboBetLabel("exacta", [13, 8])).not.toBe(formatComboBetLabel("exacta", [8, 13]));
+  });
+
+  it("ワイド・馬連・3連複は従来どおり『N-M』『N-M-L』形式(ハイフン区切り)のままであること(馬単だけの例外にする)", () => {
+    expect(formatComboBetLabel("wide", [4, 7])).toBe("4-7");
+    expect(formatComboBetLabel("quinella", [4, 7])).toBe("4-7");
+    expect(formatComboBetLabel("trio", [3, 4, 7])).toBe("3-4-7");
+  });
+
+  it("複勝・単勝(要素数1)は『N番』形式のままであること", () => {
+    expect(formatComboBetLabel("place", [4])).toBe("4番");
+    expect(formatComboBetLabel("win", [4])).toBe("4番");
+  });
+
+  it("exacta以外はformatBetLabelと同じ結果を返すこと(formatBetLabel自体は変更していないことの直接確認)", () => {
+    expect(formatComboBetLabel("wide", [4, 7])).toBe(formatBetLabel([4, 7]));
+    expect(formatComboBetLabel("trio", [3, 4, 7])).toBe(formatBetLabel([3, 4, 7]));
   });
 });
 
@@ -489,7 +546,12 @@ describe("固定注記3点(必ず表示。文言は数値込みで生成)", () =
 
 describe("BET_ALLOCATION_UNSET_NOTE(未設定時・画面全体で1点だけの注記)", () => {
   it("総資金・1レース上限の設定を促す文言であること", () => {
-    expect(BET_ALLOCATION_UNSET_NOTE).toContain("総資金");
-    expect(BET_ALLOCATION_UNSET_NOTE).toContain("1レースの上限");
+    // code-reviewer指摘対応(Issue #55): 部分一致(toContain)のみでは、両方の語を含んだまま
+    // 全く別の文言へ言い換える変異を検出できない(allocation-proposal-view.test.tsがこの定数を
+    // 再利用する側で自己参照比較しているため、定義元である本テストがリテラルで固定する責務を負う)。
+    // 完全一致に格上げする。
+    expect(BET_ALLOCATION_UNSET_NOTE).toBe(
+      "馬券配分の提案には、設定画面で「馬券用の総資金」と「1レースの上限」を入力してください。",
+    );
   });
 });

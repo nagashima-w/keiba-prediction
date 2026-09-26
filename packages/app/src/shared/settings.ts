@@ -100,33 +100,67 @@ export const BET_ALLOCATION_LABELS = {
  *
  * **第4段(Issue #28)で「記録のみ」の記述を更新した(AC19)**: 取得したオッズは、
  * `includeWideInAllocation`/`includeTrioInAllocation`(下記 `ALLOCATION_BET_TYPE_LABELS`)が
- * ONの券種について実際に配分提案へ使われる(`mixed-allocation-view.ts`)。「使うかどうかは
+ * ONの券種について実際に配分提案へ使われる(`shared/mixed-candidates.ts`。Issue #57で
+ * `renderer/mixed-candidates.ts` から移動した。ファイル名は不変)。「使うかどうかは
  * 別設定に従う」という条件付きの表現にすることで、状態(このcheckboxがONで、かつ配分対象
  * checkboxがOFFのとき等)によらず文言が事実と食い違わないようにする(この欠陥クラスは
  * 本リポジトリで6回目。`c63d7b2`のレビュー観点参照)。
  * 数値(最大16リクエスト・約24秒・+約5分)は`docs/wide-trio-odds-investigation.md`§5の
  * n-2と1.5秒レート制限からの**導出値**であり、測定値の口調にしない。
+ *
+ * **Issue #117(#24-D3b-2)で「馬連」も取得対象に明記した**: v1.9.9(Issue #116)から
+ * `includeComboOdds`はワイド・3連複に加えて馬連オッズも取得している
+ * (`scrape-race.ts`がワイド・3連複の**後**に馬連を1レースあたり常に1リクエスト追加で
+ * 取得する。`docs/quinella-exacta-odds-investigation.md`参照)。「ワイド・三連複」という
+ * 2券種だけの文言は既に事実と食い違っていたため、3券種の文言に直す(馬連の追加リクエストは
+ * 三連複の最大16リクエストに比べて小さいため、既存の導出値〈約24秒・+約5分〉自体は
+ * 変更しない)。
+ *
+ * **Issue #122(#24-E2)で「馬単」の取得を明記した(オーケストレーター指定2026-09-25)**:
+ * #117のときと同じ欠陥(取得を先に始めてから、ラベルの更新が1リリース遅れる)を繰り返さない
+ * ため、`scrape-race.ts`が馬単の取得を配線するのと同じタスクでチェックボックス・補助文を
+ * 更新する。v1.10.4以降(Issue #122)、`includeComboOdds`はワイド・3連複・馬連に加えて
+ * 馬単オッズも取得している(ワイド・3連複・馬連の**後**に馬単を1レースあたり常に
+ * 1リクエスト追加で取得する)。#122時点では「配分に使うかどうかは下記の設定に従います」と
+ * いう列挙(ワイド・馬連・三連複の3項目)に馬単を加えず、代わりに「馬単は現在は取得のみで
+ * 配分には使わない」という取得/配分利用の状態を明示する一文を末尾に添えていた
+ * (`includeExactaInAllocation`という設定自体は#24-E3a・Issue #124で新設したが、この画面の
+ * チェックボックス自体は#24-E3b・Issue #125で追加するまで、列挙に足すと存在しない
+ * チェックボックスを指す文言になり事実と食い違うため)。
+ *
+ * **Issue #125(#24-E3b)でこの画面に「馬単を馬券配分に使う」チェックボックスを追加し、
+ * `resolveMixedBetTypes`にも接続した。** これにより馬単は実際に配分へ使われるようになった
+ * ため、列挙を4項目(ワイド・馬連・馬単・三連複)に直し、「馬単は現在は取得のみで配分には
+ * 使わない」という一文を削った(この一文を残すと、#125以降は事実と食い違う旧文言になる)。
  */
 export const INCLUDE_COMBO_ODDS_LABELS = {
   /** 設定画面のチェックボックスのラベル。 */
-  checkbox: "ワイド・三連複のオッズも取得する(上級)",
+  checkbox: "ワイド・馬連・馬単・三連複のオッズも取得する(上級)",
   /** チェックボックス直下の補助文。 */
   help:
-    "取得に時間がかかります(地方競馬の三連複は1レースあたり最大16リクエスト・約24秒。12レース一括で+約5分)。取得したオッズを馬券配分に使うかどうかは、下記「ワイドを配分に使う」「三連複を配分に使う」の設定に従います。",
+    "取得に時間がかかります(地方競馬の三連複は1レースあたり最大16リクエスト・約24秒。馬連・馬単はそれぞれ1レースあたり常に1リクエスト追加。12レース一括で+約5分)。取得したオッズを馬券配分に使うかどうかは、下記「ワイドを配分に使う」「馬連を配分に使う」「馬単を配分に使う」「三連複を配分に使う」の設定に従います。",
 } as const;
 
 /**
  * 一括分析画面に、設定(includeComboOdds)がONのときだけ表示する固定注記1行(機能D-2c第3段)。
  * BET_ALLOCATION_UNSET_NOTE(bet-allocation-view.ts)と同じ「画面全体で1点だけの固定注記」の
- * 前例に倣う。対象レース数・所要時間の動的な見積りは含めない(#15/第4段のスコープ)。
+ * 前例に倣う。対象レース数・所要時間の動的な見積りは含めない(判断済み・出さない。Issue #15再スコープ)。
  *
  * **第4段でAC19により更新**: 「記録のみで配分提案にはまだ使用していません」は第3段時点の
  * 事実だったが、第4段以降は`includeWideInAllocation`/`includeTrioInAllocation`次第で実際に
  * 使われるため、その依存関係を明記する条件付きの文言に直した(INCLUDE_COMBO_ODDS_LABELS.help
  * と同じ理由)。
+ *
+ * **Issue #117で馬連も明記した**(INCLUDE_COMBO_ODDS_LABELS.helpと同じ理由)。
+ *
+ * **Issue #122で馬単の取得を明記した**(当時は配分利用の列挙〈3項目〉には加えず、末尾に
+ * 「馬単は現在は取得のみで配分には使わない」旨を添えていた)。
+ *
+ * **Issue #125(#24-E3b)で馬単を配分利用の列挙にも加え、「取得のみ」の一文を削った**
+ * (INCLUDE_COMBO_ODDS_LABELS.helpと同じ理由・同じ判断)。
  */
 export const INCLUDE_COMBO_ODDS_BATCH_NOTE =
-  "設定でワイド・三連複のオッズ取得をONにしています。取得したオッズを馬券配分に使うかどうかは「ワイドを配分に使う」「三連複を配分に使う」の設定に従います。";
+  "設定でワイド・馬連・馬単・三連複のオッズ取得をONにしています。取得したオッズを馬券配分に使うかどうかは「ワイドを配分に使う」「馬連を配分に使う」「馬単を配分に使う」「三連複を配分に使う」の設定に従います。";
 
 /**
  * 券種横断の馬券配分(機能D-2c第4段・Issue #28)で、ワイド・三連複を配分対象に含めるかの
@@ -147,13 +181,31 @@ export const ALLOCATION_BET_TYPE_LABELS = {
     checkbox: "ワイドを馬券配分に使う",
     /** チェックボックス直下の補助文。 */
     help:
-      "既定でONです。上記「ワイド・三連複のオッズも取得する」がOFFの間は効果がありません(取得したオッズが無いため)。ONにすると、複勝の提案額が変わることがあります(理由は一括分析画面の配分内訳に表示します)。",
+      "既定でONです。上記「ワイド・馬連・馬単・三連複のオッズも取得する」がOFFの間は効果がありません(取得したオッズが無いため)。ONにすると、複勝の提案額が変わることがあります(理由は一括分析画面の配分内訳に表示します)。",
+  },
+  /**
+   * 馬連を配分対象にするチェックボックスのラベル(#24-D3b-2・Issue #117)。
+   * 意味論・設計判断(取得と採用の分離・既定ON)はwide/trioと同じ(そちらのJSDoc参照)。
+   */
+  quinella: {
+    checkbox: "馬連を馬券配分に使う",
+    help:
+      "既定でONです。上記「ワイド・馬連・馬単・三連複のオッズも取得する」がOFFの間は効果がありません(取得したオッズが無いため)。ONにすると、複勝の提案額が変わることがあります(理由は一括分析画面の配分内訳に表示します)。",
+  },
+  /**
+   * 馬単を配分対象にするチェックボックスのラベル(#24-E3b・Issue #125)。
+   * 意味論・設計判断(取得と採用の分離・既定ON)はwide/quinella/trioと同じ(そちらのJSDoc参照)。
+   */
+  exacta: {
+    checkbox: "馬単を馬券配分に使う",
+    help:
+      "既定でONです。上記「ワイド・馬連・馬単・三連複のオッズも取得する」がOFFの間は効果がありません(取得したオッズが無いため)。ONにすると、複勝の提案額が変わることがあります(理由は一括分析画面の配分内訳に表示します)。",
   },
   /** 三連複を配分対象にするチェックボックスのラベル。 */
   trio: {
     checkbox: "三連複を馬券配分に使う",
     help:
-      "既定でONです。上記「ワイド・三連複のオッズも取得する」がOFFの間は効果がありません(取得したオッズが無いため)。ONにすると、複勝の提案額が変わることがあります(理由は一括分析画面の配分内訳に表示します)。",
+      "既定でONです。上記「ワイド・馬連・馬単・三連複のオッズも取得する」がOFFの間は効果がありません(取得したオッズが無いため)。ONにすると、複勝の提案額が変わることがあります(理由は一括分析画面の配分内訳に表示します)。",
   },
 } as const;
 
@@ -237,7 +289,8 @@ export interface AppSettings {
    *
    * **第4段(Issue #28)で「記録のみ」の制約を解除した(AC19)**: 取得したオッズは、
    * `includeWideInAllocation`/`includeTrioInAllocation`(下記)がONの券種について
-   * `mixed-allocation-view.ts` の馬券配分提案に実際に使われる。第3段時点の「配分提案には
+   * `shared/mixed-candidates.ts`(Issue #57で`renderer/mixed-candidates.ts`から移動。
+   * ファイル名は不変)の馬券配分提案に実際に使われる。第3段時点の「配分提案には
    * 一切使わない」という記述は事実ではなくなったため削除した。
    */
   readonly includeComboOdds: boolean;
@@ -245,7 +298,8 @@ export interface AppSettings {
    * ワイドを馬券配分の対象に含めるか(機能D-2c第4段・Issue #28)。既定true。
    * `includeComboOdds`が取得の可否、この項目は**取得できたワイドオッズを配分計算に採用するか**
    * (boss裁定B-1「取得と採用を分離」)。`includeComboOdds`がfalse、またはこの項目がfalseのときは
-   * `mixed-allocation-view.ts` が `MixedCandidateBuildOptions.betTypes` にワイドを含めない
+   * `shared/mixed-race-allocation.ts`(Issue #57で`renderer/mixed-allocation-view.ts`から分離)
+   * が `MixedCandidateBuildOptions.betTypes` にワイドを含めない
    * (`buildMixedCandidates` の `not-requested` 診断値になる)。
    * 配列型ではなくboolean 2項目に分ける設計判断は `includeTrioInAllocation` と共通(D-1。
    * `coerceSettings` の防御が `typeof === "boolean"` 1行で済み、既存 `includeComboOdds` と
@@ -257,6 +311,30 @@ export interface AppSettings {
    * 意味論・設計判断は `includeWideInAllocation` と同じ(そちらのJSDoc参照)。
    */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。既定true(ユーザー指定:
+   * 新しい券種は配分の対象に初期値で含める。`CLAUDE.md`「現在の優先順位」参照)。
+   * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
+   * `includeTrioInAllocation` と同じ(そちらのJSDoc参照)。
+   *
+   * `SettingsView.tsx`のチェックボックス(ワイドと三連複の間)・`shared/mixed-race-allocation.ts`の
+   * `resolveMixedBetTypes`・D-2フォールバック規則`isComboBetTypesOff`への接続は
+   * Issue #117(#24-D3b-2)で完了した(この設定を変えると実際に配分結果が変わる)。
+   */
+  readonly includeQuinellaInAllocation: boolean;
+  /**
+   * 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。既定true(ユーザー指定:
+   * 新しい券種は配分の対象に初期値で含める。`CLAUDE.md`「現在の優先順位」参照)。
+   * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
+   * `includeTrioInAllocation`/`includeQuinellaInAllocation` と同じ(そちらのJSDoc参照)。
+   *
+   * **#24-E3a時点ではこの設定は画面に出ない(`SettingsView.tsx`にチェックボックスを追加しない)。**
+   * 候補ビルダー(`shared/mixed-race-allocation.ts` の `resolveMixedBetTypes`)もまだ馬単の
+   * 候補を作らないため、この設定を変えても配分結果は変わらない(D-2フォールバック規則
+   * `isComboBetTypesOff` にもまだ加えない)。実際に画面へ出し、候補ビルダー・フォールバック
+   * 規則に組み込むのは #24-E3b(Issue #125)。
+   */
+  readonly includeExactaInAllocation: boolean;
 }
 
 /**
@@ -296,6 +374,17 @@ export interface MaskedSettings {
   readonly includeWideInAllocation: boolean;
   /** 三連複を馬券配分の対象に含めるか(機能D-2c第4段)。往復編集フォームとして表示するためそのまま返す。 */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。往復編集フォームとして表示するため
+   * そのまま返す。対応する画面トグル(`SettingsView.tsx`)はIssue #117(#24-D3b-2)で追加した。
+   */
+  readonly includeQuinellaInAllocation: boolean;
+  /**
+   * 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。往復編集フォームとして表示するため
+   * そのまま返す。#24-E3a時点では対応する画面トグルが無いため往復対象は無いが、往復自体は
+   * 他の配分対象設定と同じ形にしておく(E3bでトグルを追加したときの配線を変えないため)。
+   */
+  readonly includeExactaInAllocation: boolean;
 }
 
 /**
@@ -343,6 +432,16 @@ export interface SettingsUpdate {
    * (既定true・boolean以外は既定へフォールバック)。
    */
   readonly includeTrioInAllocation: boolean;
+  /**
+   * 馬連を馬券配分の対象に含めるか(#24-D3a・Issue #115)。意味論は`includeWideInAllocation`と
+   * 同じ(既定true・boolean以外は既定へフォールバック)。
+   */
+  readonly includeQuinellaInAllocation: boolean;
+  /**
+   * 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124)。意味論は`includeWideInAllocation`と
+   * 同じ(既定true・boolean以外は既定へフォールバック)。
+   */
+  readonly includeExactaInAllocation: boolean;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */
