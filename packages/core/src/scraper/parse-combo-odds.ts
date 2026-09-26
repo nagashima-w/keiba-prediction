@@ -66,7 +66,7 @@ import { toOddsNumber } from "./odds-number.js";
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** ワイド・3連複・馬単・馬連オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
+/** ワイド・3連複・馬単・馬連・三連単オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
 export class ComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -186,7 +186,7 @@ function unavailable(
 }
 
 /**
- * 中央のワイド・3連複・馬単・馬連オッズAPI応答(api_get_jra_odds、type=5/7/6/4)をパースする。
+ * 中央のワイド・3連複・馬単・馬連・三連単オッズAPI応答(api_get_jra_odds、type=5/7/6/4/8)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7)に加え、「封筒異常は unavailable」
  * という第3の扱いを持つ(モジュール冒頭JSDoc参照)。throwするのは **JSON.parse に失敗した

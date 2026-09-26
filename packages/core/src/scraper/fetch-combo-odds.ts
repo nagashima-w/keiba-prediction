@@ -301,9 +301,11 @@ function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean):
         // 地方三連単も3連複と同じく軸馬別取得が必要で単発リクエストでは扱えない(Issue #130・
         // #25-D)。ただし3連複と異なり、本Issueでは全軸を回すオーケストレーション関数
         // (fetchNarTrioComboOdds相当)を作らない(オーケストレーター裁定Q2)ため、呼び出し元
-        // (fetchComboOdds)にtrio用の専用分岐は無い。したがってisNar&&"trifecta"はこの関数まで
-        // 素通しで到達しうる(trioとは異なりproductionからも到達しうる。#132で全軸取得の
-        // 実装を追加するまでは、地方三連単は1軸単位の`fetchNarTrifectaAxisOdds`を直接使うこと)。
+        // (fetchComboOdds)にtrio用の専用分岐は無く、isNar&&"trifecta"はこの関数まで素通しで
+        // 到達する形になっている。**現時点ではproductionから到達しない**(scrape-race.tsの
+        // fetchComboBetTypeOdds呼び出しはwide/trio/quinella/exactaの4リテラルのみを渡しており、
+        // "trifecta"は渡していない)。#132で三連単を配線する際は、地方については本関数
+        // (fetchComboOdds)を使わず、1軸単位の`fetchNarTrifectaAxisOdds`へ分岐させる必要がある。
         throw new Error(
           "地方三連単は単発リクエストでは扱えません(1軸単位のfetchNarTrifectaAxisOddsを使うこと。全軸を回す関数は#132で追加予定)",
         );
@@ -493,7 +495,7 @@ export async function fetchNarTrifectaAxisOdds(
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬単・馬連)を取得する(中央/地方 × 券種の経路を自動選択)。
+ * 組合せ券種(ワイド・3連複・馬単・馬連・三連単)を取得する(中央/地方 × 券種の経路を自動選択)。
  *
  * @param raceId 対象レースID(検証済み。中央/地方は`venueKindOfRaceId`で自動判定)
  * @param betType "wide"(ワイド)・"trio"(3連複)・"exacta"(馬単。Issue #106・#24-B)・

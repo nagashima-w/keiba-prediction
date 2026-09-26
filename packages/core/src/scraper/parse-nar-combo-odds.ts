@@ -64,7 +64,7 @@ import {
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** 地方ワイド・3連複・馬単・馬連オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
+/** 地方ワイド・3連複・馬単・馬連・三連単オッズのパース失敗(構造不一致・馬番範囲外等)を表す例外。 */
 export class NarComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -231,7 +231,7 @@ function documentSignals($: CheerioAPI): DocumentSignals {
 }
 
 /**
- * 地方ワイド・3連複・馬単・馬連オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
+ * 地方ワイド・3連複・馬単・馬連・三連単オッズページ(通常ページ・AJAXフラグメントとも)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7): オッズ文書として正当と判定できない
  * HTML、またはセルidから馬番を復元できない(範囲外・重複。馬単は昇順を要求しない。
