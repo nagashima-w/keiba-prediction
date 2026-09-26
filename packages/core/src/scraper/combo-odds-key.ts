@@ -24,23 +24,26 @@
 const MAX_UMABAN = 18;
 
 /**
- * 券種(ワイド・3連複・馬単・馬連)。買い目を構成する頭数(comboSize)が一意に決まる。
+ * 券種(ワイド・3連複・馬単・馬連・三連単)。買い目を構成する頭数(comboSize)が一意に決まる。
  *
  * **順序方針は券種で異なる**(Issue #106・#24-B裁定): ワイド・3連複・馬連は着順を問わない
- * 「組」(馬番の集合)だが、馬単は着順(1着・2着)が意味を持つ「並び」である。
- * この違いは`COMBO_KEY_ORDER`で表現し、`buildComboOddsKey`(常にソートする。順不同専用)
- * と`buildOrderedComboOddsKey`(ソートしない)のどちらを使うべきかを`buildComboOddsKeyFor`
- * が振り分ける。馬連(quinella)はワイド・3連複と同じ「順不同」であり、新しい順序方針の
- * 追加は不要だった(Issue #113・#24-D2)。
+ * 「組」(馬番の集合)だが、馬単・三連単は着順(馬単は1着・2着、三連単は1着・2着・3着)が
+ * 意味を持つ「並び」である。この違いは`COMBO_KEY_ORDER`で表現し、`buildComboOddsKey`
+ * (常にソートする。順不同専用)と`buildOrderedComboOddsKey`(ソートしない)のどちらを
+ * 使うべきかを`buildComboOddsKeyFor`が振り分ける。馬連(quinella)はワイド・3連複と同じ
+ * 「順不同」であり、新しい順序方針の追加は不要だった(Issue #113・#24-D2)。三連単(trifecta)は
+ * 馬単と同じ「順序付き」であり、既存の"ordered"経路にcomboSize=3のままそのまま乗る
+ * (Issue #130・#25-D)。
  */
-export type ComboBetType = "wide" | "trio" | "exacta" | "quinella";
+export type ComboBetType = "wide" | "trio" | "exacta" | "quinella" | "trifecta";
 
-/** 券種ごとの買い目構成頭数(ワイド=2、3連複=3、馬単=2、馬連=2)。中央・地方の両パーサが共有する。 */
+/** 券種ごとの買い目構成頭数(ワイド=2、3連複=3、馬単=2、馬連=2、三連単=3)。中央・地方の両パーサが共有する。 */
 export const COMBO_SIZE: Record<ComboBetType, number> = {
   wide: 2,
   trio: 3,
   exacta: 2,
   quinella: 2,
+  trifecta: 3,
 };
 
 /**
@@ -54,12 +57,17 @@ export const COMBO_SIZE: Record<ComboBetType, number> = {
  */
 export type ComboKeyOrder = "unordered" | "ordered";
 
-/** 券種ごとの順序方針(`COMBO_SIZE`の隣に置く。Issue #106・#24-B。馬連はIssue #113・#24-D2)。 */
+/**
+ * 券種ごとの順序方針(`COMBO_SIZE`の隣に置く。Issue #106・#24-B。馬連はIssue #113・#24-D2。
+ * 三連単はIssue #130・#25-D。馬単と同じ"ordered"で、comboSize=3でも既存の振り分け経路が
+ * 汎用的にそのまま動く)。
+ */
 export const COMBO_KEY_ORDER: Record<ComboBetType, ComboKeyOrder> = {
   wide: "unordered",
   trio: "unordered",
   exacta: "ordered",
   quinella: "unordered",
+  trifecta: "ordered",
 };
 
 /**

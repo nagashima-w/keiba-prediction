@@ -259,6 +259,10 @@ function errorMessage(error: unknown): string {
  * exacta〈Issue #122・#24-E2〉の4券種すべてを取得しており、4つともproductionから
  * 到達する**)。`default`のnever到達チェックにより、次に券種を追加する際〈#26等〉は
  * 必ずコンパイルエラーで気づける形にしておく。
+ *
+ * **三連単(trifecta)はIssue #130・#25-Dで`ComboBetType`に追加されたが、本ファイルの
+ * `fetchComboBetTypeOdds`呼び出しは増やしていない(配線は#132のスコープ)。** そのため
+ * このcaseは現時点ではproductionから到達しない(型の網羅性を満たすためだけの追加)。
  */
 function comboBetTypeLabel(betType: ComboBetType): string {
   switch (betType) {
@@ -270,6 +274,8 @@ function comboBetTypeLabel(betType: ComboBetType): string {
       return "馬単";
     case "quinella":
       return "馬連";
+    case "trifecta":
+      return "三連単";
     default: {
       const exhaustiveCheck: never = betType;
       throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);

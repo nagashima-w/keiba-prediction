@@ -512,3 +512,64 @@ describe("parseNarComboOdds(馬連。Issue #113・#24-D2 AC-1・AC-2)", () => {
     expect(result.state).toBe("unavailable");
   });
 });
+
+/**
+ * 三連単(trifecta、id内部コードb8)の配線(Issue #130・#25-D)。
+ *
+ * 三連単は馬単と同じ「着順が意味を持つ並び」であり、地方は軸=1着固定の軸馬別取得
+ * (#127実測。docs/trifecta-odds-investigation.md §3)。ここでは1軸ぶんのフラグメント
+ * (軸5。P(11,2)=110件)をthrowせずパースでき、かつ逆順の組(id
+ * "..._b8_c0_5_7_1" と "..._b8_c0_5_1_7")が別キー・別値のまま保持されることを固定する
+ * (実測値: docs/trifecta-odds-investigation.md §5.2、5→7→1=2,600.9倍、5→1→7=3,212.9倍)。
+ *
+ * ★このdescribeは実装前(betType="trifecta"をID_MARKER/decodeCellId/buildComboOddsCellMapが
+ * 順序未対応のまま)ではRedになる(combo-odds-key.tsが三連単に順不同のまま流用された場合の欠陥)。
+ */
+describe("parseNarComboOdds(三連単。Issue #130・#25-D)", () => {
+  it("実フィクスチャ(軸馬5固定・P(11,2)=110件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    expect(odds.size).toBe(110);
+  });
+
+  it("逆順の組(5→7→1 と 5→1→7)が別キー・別値のまま保持されること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    const forwardKey = buildOrderedComboOddsKey([5, 7, 1]);
+    const backwardKey = buildOrderedComboOddsKey([5, 1, 7]);
+    expect(forwardKey).toBe("050701");
+    expect(backwardKey).toBe("050107");
+    const forward = odds.get(forwardKey);
+    const backward = odds.get(backwardKey);
+    expect(forward?.oddsMin).toBeCloseTo(2600.9, 5);
+    expect(backward?.oddsMin).toBeCloseTo(3212.9, 5);
+    expect(forward?.oddsMin).not.toBe(backward?.oddsMin);
+  });
+
+  it("AC-A3(b): 地方の確定払戻(5→7→1=260,090円)とキー\"050701\"のオッズが一致すること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    expect(odds.get("050701")?.oddsMin).toBeCloseTo(2600.9, 5);
+  });
+
+  it("三連単は3連複と同じく単一値の券種であり、oddsMaxは常にnullであること", () => {
+    const odds = expectAvailable(
+      parseNarComboOdds(loadFixture("nar_odds_b8_jiku5_202654071210.html"), "trifecta"),
+    );
+    expect(odds.size).toBeGreaterThan(0);
+    for (const cell of odds.values()) {
+      expect(cell.oddsMax).toBeNull();
+    }
+  });
+
+  it("presale(未発売)でthrowせずunavailableになること(#odds_selectが無く#odds_view_formがある構造)", () => {
+    const html = loadFixture("nar_odds_b8_presale_202654092701_20260926.html");
+    expect(html).not.toContain('id="odds_select"');
+    expect(html).toContain('id="odds_view_form"');
+    const result = parseNarComboOdds(html, "trifecta");
+    expect(result.state).toBe("unavailable");
+  });
+});

@@ -385,3 +385,125 @@ describe("parseComboOdds(馬連。Issue #113・#24-D2 AC-1・AC-2)", () => {
     });
   });
 });
+
+/**
+ * 三連単(trifecta、type=8)の配線(Issue #130・#25-D)。
+ *
+ * 三連単は馬単と同じ「着順が意味を持つ並び」であり、キーはソートしない
+ * (実測: 13→8→5=52,690円のキーは"130805"。docs/trifecta-odds-investigation.md §5.2)。
+ *
+ * ★このdescribeは実装前(betType="trifecta"をJSON_ODDS_KEY/decodeRawKey/
+ * buildComboOddsCellMapが順序未対応のまま)ではRedになる(馬単と同型の欠陥)。
+ */
+describe("parseComboOdds(三連単。Issue #130・#25-D)", () => {
+  it("実フィクスチャ(16頭・P(16,3)=3360件)をthrowせず全件パースできること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_trifecta_202603020211.json"), "trifecta"));
+    expect(odds.size).toBe(3360);
+  });
+
+  it("完全反転(1着↔3着)の組(13→8→5 と 5→8→13)が別キー・別値のまま保持されること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_trifecta_202603020211.json"), "trifecta"));
+    const forwardKey = buildOrderedComboOddsKey([13, 8, 5]);
+    const backwardKey = buildOrderedComboOddsKey([5, 8, 13]);
+    expect(forwardKey).toBe("130805");
+    expect(backwardKey).toBe("050813");
+    const forward = odds.get(forwardKey);
+    const backward = odds.get(backwardKey);
+    expect(forward?.oddsMin).toBe(526.9);
+    expect(backward?.oddsMin).toBe(442.7);
+    expect(forward?.oddsMin).not.toBe(backward?.oddsMin);
+  });
+
+  it("AC-A3(b): 中央の確定払戻(13→8→5=52,690円)とキー\"130805\"のオッズが一致すること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_trifecta_202603020211.json"), "trifecta"));
+    const cell = odds.get("130805");
+    expect(cell).toBeDefined();
+    expect(cell?.oddsMin).toBeCloseTo(526.9, 5);
+  });
+
+  it("三連単は3連複と同じく単一値の券種であり、oddsMaxは常にnullであること", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_trifecta_202603020211.json"), "trifecta"));
+    expect(odds.size).toBeGreaterThan(0);
+    for (const cell of odds.values()) {
+      expect(cell.oddsMax).toBeNull();
+    }
+  });
+});
+
+/**
+ * 上限キャップ値"999,999.9"のnull化(Issue #130・#25-D。オーケストレーター裁定2026-09-26)。
+ *
+ * 中央presale(`status:"middle"`)応答では、票数がまだ少ない組合せがこの値で表示される
+ * (実測3360件中2644件〈78.7%〉。docs/trifecta-odds-investigation.md §6.2)。実オッズとして
+ * 読むとEVが桁外れのプラスになり配分が偏るため、欠損(null)として扱う。
+ *
+ * ★この変換は「組合せ券種共通のパーサ(`parseComboOdds`)の中で券種分岐させない」実装であり
+ * (オーケストレーター裁定の言葉どおり)、`toOddsNumber`(単勝・複勝・過去走とも共有する
+ * より広いヘルパ)には入れない。したがって(c)は三連単以外の券種の合成データでも
+ * 同じくnull化されることを確認する。
+ */
+describe("parseComboOdds(上限キャップ値'999,999.9'のnull化。Issue #130・#25-D)", () => {
+  /** テスト専用の最小限の組合せオッズJSON応答を組み立てる(封筒構造は本番と同じ)。 */
+  function buildEnvelope(
+    status: string,
+    typeKey: string,
+    odds: Record<string, [string, string, string]>,
+  ): string {
+    return JSON.stringify({ status, reason: "", data: { odds: { [typeKey]: odds } } });
+  }
+
+  it("(a) 三連単の発売中フィクスチャ(実物): 上限値2644件がnullになり、残り716件は数値で残ること(再現: node -e スクリプトで別途確認した実測値と一致)", () => {
+    const odds = expectAvailable(
+      parseComboOdds(loadFixture("odds_trifecta_presale_202606040901_20260926.json"), "trifecta"),
+    );
+    // 前提を無条件expectで先に固定(空振り防止): 全体が3360件(P(16,3))であること。
+    expect(odds.size).toBe(3360);
+
+    const nullCells = [...odds.values()].filter((c) => c.oddsMin === null);
+    const numericCells = [...odds.values()].filter((c) => c.oddsMin !== null);
+    expect(nullCells.length).toBe(2644);
+    expect(numericCells.length).toBe(716);
+
+    // 個別サンプル(実測。node -e '...odds_trifecta_presale_202606040901_20260926.json...'で確認済み)。
+    expect(odds.get("100102")?.oddsMin).toBeNull(); // 上限値"999,999.9"のセル
+    expect(odds.get("100107")?.oddsMin).toBeCloseTo(1992.3, 5); // 実数らしい値のセル
+  });
+
+  it("(b) 上限値のすぐ隣の値(999,999.8)はnullにならないこと(丁度999999.9だけを特別扱いすることの確認)", () => {
+    const json = buildEnvelope("middle", "8", {
+      "010203": ["999,999.9", "0.0", "1"],
+      "040506": ["999,999.8", "0.0", "2"],
+    });
+    const odds = expectAvailable(parseComboOdds(json, "trifecta"));
+    expect(odds.get("010203")?.oddsMin).toBeNull();
+    expect(odds.get("040506")?.oddsMin).toBeCloseTo(999999.8, 5);
+  });
+
+  it("(c) 券種に依存しないこと(ワイド・馬単の合成JSONに上限値を入れてもnullになる。券種で分岐させない実装であることの直接証拠)", () => {
+    const wideJson = buildEnvelope("middle", "5", {
+      "0102": ["999,999.9", "999,999.9", "1"],
+    });
+    const wideOdds = expectAvailable(parseComboOdds(wideJson, "wide"));
+    // ワイドはoddsMin・oddsMaxとも上限値を読みうる(幅を持つ券種のため)。両方nullになること。
+    expect(wideOdds.get("0102")?.oddsMin).toBeNull();
+    expect(wideOdds.get("0102")?.oddsMax).toBeNull();
+
+    const exactaJson = buildEnvelope("middle", "6", {
+      "0102": ["999,999.9", "0.0", "1"],
+    });
+    const exactaOdds = expectAvailable(parseComboOdds(exactaJson, "exacta"));
+    expect(exactaOdds.get("0102")?.oddsMin).toBeNull();
+  });
+
+  it("(d) 既存フィクスチャ(ワイド・3連複)のパース結果は上限値の導入前後で変わらないこと(回帰確認。上限値を含まない実測データのため無条件expectで件数・代表値を固定)", () => {
+    const wideOdds = expectAvailable(parseComboOdds(loadFixture("odds_wide_202603020211.json"), "wide"));
+    expect(wideOdds.size).toBe(120); // C(16,2)。既存挙動と同じ(#13実測)。
+    const trioOdds = expectAvailable(parseComboOdds(loadFixture("odds_trio_202603020211.json"), "trio"));
+    expect(trioOdds.size).toBe(560); // C(16,3)。既存挙動と同じ(#13実測)。
+    // 前提: 既存フィクスチャに上限値"999,999.9"は1件も含まれないこと(このテストが検出対象を
+    // 持っていることの確認。含まれていれば(d)の主張〈変わらない〉が無意味になる)。
+    for (const cell of [...wideOdds.values(), ...trioOdds.values()]) {
+      expect(cell.oddsMin).not.toBe(999999.9);
+    }
+  });
+});

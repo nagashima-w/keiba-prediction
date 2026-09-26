@@ -500,6 +500,20 @@ export interface RaceComboPayoutsSaveInput {
    * 「組合せ払戻(馬連、Issue #114・#24-F1)の素通し」describe参照)。
    */
   readonly quinella?: RaceComboPayoutResult;
+  /**
+   * 三連単の確定払戻(Issue #130・#25-D)。umabansは着順順(1着→2着→3着)。ソートしない。
+   *
+   * **本追加も#106・#113と同型の理由(型を壊さないための最小追加)**: `saveResult`内の
+   * ループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`由来)を走査して`combo?.[betType]`を
+   * 読むため、`ComboBetType`に`trifecta`が追加されると、このフィールドが無いままでは
+   * `combo?.[betType]`が`ComboBetType`の全メンバーを添字に取れず`pnpm typecheck`がTS7053で
+   * 落ちる。**払戻の取込の配線(`result-import.ts`が`trifecta: result.trifectaPayouts`を
+   * 渡すようにすること)は#131のスコープであり、本Issue(#130)の時点ではこのフィールドを
+   * 追加しても三連単の払戻行は実際には書かれない**(`combo?.trifecta`が常に`undefined`のため
+   * `saveResult`の該当反復はcontinueするだけで、DBへの書き込み・削除は発生しない。
+   * `analysis-store.test.ts`「三連単の払戻」AC-6相当のテストで直接固定済み)。
+   */
+  readonly trifecta?: RaceComboPayoutResult;
 }
 
 /** `race_combo_payouts` の1行(読み出し専用の軽量表現。Issue #52・boss裁定R-6)。 */

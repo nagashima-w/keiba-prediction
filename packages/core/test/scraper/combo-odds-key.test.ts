@@ -457,6 +457,54 @@ describe("馬連(quinella)。Issue #113・#24-D2", () => {
   });
 });
 
+/**
+ * 三連単(trifecta)の追加(Issue #130・#25-D)。
+ *
+ * 三連単は馬単と同じ「着順が意味を持つ並び」であり(1着・2着・3着の3頭)、
+ * `COMBO_KEY_ORDER.trifecta`は既存の"ordered"経路(#106で導入)にそのまま乗る
+ * (新しい順序方針の追加は不要)。ここでは`COMBO_SIZE`/`COMBO_KEY_ORDER`という2つの
+ * Recordに`trifecta`が正しく登録され、既存の`...For`系ゲートウェイが「馬単と同じ振る舞い」を
+ * comboSize=3でもすることを固定する。
+ */
+describe("三連単(trifecta)。Issue #130・#25-D", () => {
+  it("COMBO_SIZE.trifecta=3であること(買い目を構成する頭数)", () => {
+    expect(COMBO_SIZE.trifecta).toBe(3);
+  });
+
+  it("COMBO_KEY_ORDER.trifecta=\"ordered\"であること(馬単と同じ着順が意味を持つ並び)", () => {
+    expect(COMBO_KEY_ORDER.trifecta).toBe("ordered");
+  });
+
+  it("buildComboOddsKeyForは三連単を着順どおり(ソートしない)に扱うこと(実測: 13→8→5=52,690円のキーは\"130805\"。docs/trifecta-odds-investigation.md §5.2)", () => {
+    const key = buildComboOddsKeyFor("trifecta", [13, 8, 5]);
+    expect(key).toBe("130805");
+    // 完全反転(3着↔1着)は別キーになること(着順が意味を持つことの直接証拠)。
+    const reversed = buildComboOddsKeyFor("trifecta", [5, 8, 13]);
+    expect(reversed).toBe("050813");
+    expect(key).not.toBe(reversed);
+  });
+
+  it("validateComboUmabansForは三連単の非昇順入力(13,8,5)をthrowしないこと(馬単と同じ。3連複〈unordered〉はthrowする対比)", () => {
+    expect(() => validateComboUmabansFor("trifecta", [13, 8, 5], 3)).not.toThrow();
+    expect(() => validateComboUmabansFor("trio", [13, 8, 5], 3)).toThrow(ComboOddsKeyError);
+  });
+
+  it("validateComboUmabansForは三連単の同一馬番重複をthrowすること(1頭が1着・2着を同時に取ることは構造的にありえない)", () => {
+    expect(() => validateComboUmabansFor("trifecta", [13, 13, 5], 3)).toThrow(ComboOddsKeyError);
+  });
+
+  it("buildComboOddsCellMapForは三連単の完全反転(1着↔3着)を別キー・別値として保持すること(実データに基づく値。fixtures/odds_trifecta_202603020211.json由来。130805=526.9・050813=442.7)", () => {
+    const entries: ComboOddsEntry[] = [
+      { umabans: [13, 8, 5], cell: { oddsMin: 526.9, oddsMax: null, ninki: 113 } },
+      { umabans: [5, 8, 13], cell: { oddsMin: 442.7, oddsMax: null, ninki: 79 } },
+    ];
+    const map = buildComboOddsCellMapFor("trifecta", entries);
+    expect(map.size).toBe(2);
+    expect(map.get("130805")).toEqual({ oddsMin: 526.9, oddsMax: null, ninki: 113 });
+    expect(map.get("050813")).toEqual({ oddsMin: 442.7, oddsMax: null, ninki: 79 });
+  });
+});
+
 describe("buildComboOddsCellMapFor(betType別の順序方針でMap化。Issue #106)", () => {
   it("馬単は逆順の2組を別キー・別値として保持すること(実データに基づく値。 fixtures/odds_exacta_202603020211.json 由来)", () => {
     const entries: ComboOddsEntry[] = [

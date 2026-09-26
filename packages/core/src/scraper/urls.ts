@@ -260,6 +260,29 @@ export function quinellaOddsApiUrl(raceId: RaceId): string {
 }
 
 /**
+ * 三連単オッズを返す内部API(JSON、中央のみ、Issue #130・#25-D)。
+ *
+ * `data.odds["8"]` に馬番の並び(6桁。例 "010203"。**着順が意味を持つ**: 1着・2着・3着の順に
+ * 2桁ずつ連結される)をキーとした [値,0.0(ダミー),人気] が入る。馬単・3連複と同様、下限・上限を
+ * 持たない単一値の券種(2要素目は常に"0.0"のダミー)。実測(#127、race_id=202603020211・16頭)で
+ * 1リクエストにP(16,3)=3360件全順列が返ることを確認済み(`fixtures/odds_trifecta_202603020211.json`。
+ * `docs/trifecta-odds-investigation.md` §2参照)。type値の観測方法は wideOddsApiUrl と同じ
+ * (odds_get_form.html?type=b8 フラグメント内 `oddsType:'8'`)。
+ *
+ * **上限キャップ値`"999,999.9"`について**: 中央presale(`status:"middle"`)応答では、
+ * 票数がまだ少ない組合せがこの値で表示される(実測3360件中2644件。詳細は
+ * `docs/trifecta-odds-investigation.md` §6.2)。実オッズとして読まないための変換は
+ * `parse-combo-odds.ts`(組合せ券種共通のパーサ)側で行う。本関数はURL構築のみを担う。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(wideOddsApiUrlと同じ理由)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narTrifectaOddsAxisUrl を使うこと)。
+ */
+export function trifectaOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "三連単オッズJSON API(api_get_jra_odds、type=8)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=8&action=init`;
+}
+
+/**
  * ワイドオッズページのURL(地方のみ、機能D-1)。
  *
  * 中央と異なりJSON APIが存在しないため、静的HTML(odds/index.html?type=b5)をパースする
@@ -351,4 +374,25 @@ export function narTrioOddsAxisUrl(raceId: RaceId, jiku: number): string {
     );
   }
   return `${NAR_BASE}/odds/odds_get_form.html?type=b7&race_id=${raceId}&jiku=${jiku}`;
+}
+
+/**
+ * 地方(NAR)三連単オッズの軸馬別AJAXフラグメントのURL(Issue #130・#25-D)。
+ *
+ * `docs/trifecta-odds-investigation.md` §3(実測: race_id=202654071210・12頭)により、
+ * 三連単の軸は「1着を固定する」意味であり(3連複〈`narTrioOddsAxisUrl`〉の「(順不同で)含む」
+ * とは異なる)、`jiku=k`は「1着=kの全順列」P(n-1,2)件を返す。全組合せP(n,3)を得るには
+ * 軸1〜n(頭数分。3連複のn-2とは異なる式)を叩く必要があるが、**全軸を回すオーケストレーション
+ * 関数は本Issueでは作らない**(#132で判断。`fetchNarTrifectaAxisOdds`参照)。
+ *
+ * `jiku` は馬番(1〜{@link MAX_UMABAN}の整数)。契約は`narTrioOddsAxisUrl`と同じ
+ * (呼び出し側が構築する引数であり市場データではないため、契約違反はthrowする)。
+ */
+export function narTrifectaOddsAxisUrl(raceId: RaceId, jiku: number): string {
+  if (!Number.isInteger(jiku) || jiku < 1 || jiku > MAX_UMABAN) {
+    throw new Error(
+      `軸馬番(jiku)は1〜${MAX_UMABAN}の整数である必要があります(jiku=${jiku})`,
+    );
+  }
+  return `${NAR_BASE}/odds/odds_get_form.html?type=b8&race_id=${raceId}&jiku=${jiku}`;
 }

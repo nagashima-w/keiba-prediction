@@ -99,9 +99,11 @@ import {
   exactaOddsApiUrl,
   narExactaOddsPageUrl,
   narQuinellaOddsPageUrl,
+  narTrifectaOddsAxisUrl,
   narTrioOddsAxisUrl,
   narWideOddsPageUrl,
   quinellaOddsApiUrl,
+  trifectaOddsApiUrl,
   trioOddsApiUrl,
   wideOddsApiUrl,
 } from "./urls.js";
@@ -295,6 +297,16 @@ function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean):
         throw new Error(
           "地方3連複は単発リクエストでは扱えません(呼び出し元はfetchNarTrioComboOddsへ分岐すること)",
         );
+      case "trifecta":
+        // 地方三連単も3連複と同じく軸馬別取得が必要で単発リクエストでは扱えない(Issue #130・
+        // #25-D)。ただし3連複と異なり、本Issueでは全軸を回すオーケストレーション関数
+        // (fetchNarTrioComboOdds相当)を作らない(オーケストレーター裁定Q2)ため、呼び出し元
+        // (fetchComboOdds)にtrio用の専用分岐は無い。したがってisNar&&"trifecta"はこの関数まで
+        // 素通しで到達しうる(trioとは異なりproductionからも到達しうる。#132で全軸取得の
+        // 実装を追加するまでは、地方三連単は1軸単位の`fetchNarTrifectaAxisOdds`を直接使うこと)。
+        throw new Error(
+          "地方三連単は単発リクエストでは扱えません(1軸単位のfetchNarTrifectaAxisOddsを使うこと。全軸を回す関数は#132で追加予定)",
+        );
       default: {
         const exhaustiveCheck: never = betType;
         throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
@@ -310,6 +322,8 @@ function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean):
       return exactaOddsApiUrl(raceId);
     case "quinella":
       return quinellaOddsApiUrl(raceId);
+    case "trifecta":
+      return trifectaOddsApiUrl(raceId);
     default: {
       const exhaustiveCheck: never = betType;
       throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);
@@ -420,12 +434,73 @@ async function fetchNarTrioComboOdds(
   );
 }
 
+/** `fetchNarTrifectaAxisOdds` の戻り値(Issue #130・#25-D Q2裁定)。 */
+export interface NarTrifectaAxisFetchResult {
+  /** その軸の取得試行の結末(`axis`には呼び出し時に指定した軸番号がそのまま入る)。 */
+  readonly attempt: ComboOddsFetchAttempt;
+  /** availableのときのみ組合せを含む(unavailable/fetchFailed/parseErrorのときは空Map)。 */
+  readonly odds: ReadonlyMap<string, ComboOddsCell>;
+}
+
+/**
+ * 地方三連単オッズを軸(1着の馬番)単位で取得する(Issue #130・#25-D Q2裁定)。
+ *
+ * `fetchNarTrioComboOdds`(3連複。全軸を内部でループし`mergeAxisComboOddsMaps`でマージする
+ * オーケストレーション関数)とは異なり、**1軸ぶんだけを取得する関数**として提供する
+ * (docs/trifecta-odds-investigation.md §9への申し送りどおり、全軸を回すかどうか・
+ * 何軸まで回すかは#132の判断に委ねるため、本Issueでは全軸ループを作らない)。
+ *
+ * 分類ロジック(available/unavailable/fetchFailed/parseError)は`fetchNarTrioComboOdds`の
+ * ループ本体と同じ(Q3裁定「本階層は基本的にthrowしない」を1軸単位でも踏襲する)。
+ * `axis`の契約違反(1〜18の整数でない)は`narTrifectaOddsAxisUrl`自身がHTTP発行前にthrowする
+ * (二層原則の門番側。#132で全軸ループを実装する際は、この関数の呼び出し前に軸集合を
+ * 検証してfail fastする設計〈`fetchNarTrioComboOdds`のAC-6と同じ〉を踏襲すること)。
+ *
+ * @param raceId 対象レースID(地方)
+ * @param axis 軸馬番(1着に固定する馬番。1〜18の整数)
+ * @param fetcher HTTP取得を担うフェッチャ
+ * @param options `maxAgeMs`/`bypassCache`等
+ */
+export async function fetchNarTrifectaAxisOdds(
+  raceId: RaceId,
+  axis: number,
+  fetcher: ComboOddsFetcher,
+  options: CachedFetchTextOptions = {},
+): Promise<NarTrifectaAxisFetchResult> {
+  const url = narTrifectaOddsAxisUrl(raceId, axis); // 契約違反はここでthrow(HTTP発行前)。
+
+  let attempt: ComboOddsFetchAttempt;
+  let odds: ReadonlyMap<string, ComboOddsCell> = new Map();
+
+  try {
+    const text = await fetcher.fetchText(url, options);
+    try {
+      const parsed = parseNarComboOdds(text, "trifecta");
+      if (parsed.state === "available") {
+        odds = parsed.odds;
+        attempt = { axis, state: "available", comboCount: parsed.odds.size };
+      } else {
+        attempt = { axis, state: "unavailable", reason: parsed.reason };
+      }
+    } catch (error) {
+      attempt = { axis, state: "parseError", message: errorMessage(error) };
+    }
+  } catch (error) {
+    attempt = { axis, state: "fetchFailed", message: errorMessage(error) };
+  }
+
+  return { attempt, odds };
+}
+
 /**
  * 組合せオッズ(ワイド・3連複・馬単・馬連)を取得する(中央/地方 × 券種の経路を自動選択)。
  *
  * @param raceId 対象レースID(検証済み。中央/地方は`venueKindOfRaceId`で自動判定)
  * @param betType "wide"(ワイド)・"trio"(3連複)・"exacta"(馬単。Issue #106・#24-B)・
- *   "quinella"(馬連。ワイドと同じ単発リクエスト。Issue #113・#24-D2)
+ *   "quinella"(馬連。ワイドと同じ単発リクエスト。Issue #113・#24-D2)・"trifecta"
+ *   (三連単。中央は単発リクエストで扱えるが、地方は軸馬別取得が必要で単発では扱えないため
+ *   isNarがtrueの場合はthrowする。地方は`fetchNarTrifectaAxisOdds`を軸ごとに直接使うこと。
+ *   Issue #130・#25-D)
  * @param startingUmabans 出走馬番の集合(順不同・重複ありうる。期待組合せ数の算出・
  *   地方3連複の軸導出に使う。`parseShutuba`の結果由来)
  * @param fetcher HTTP取得を担うフェッチャ(`HttpClient`/`CachedFetcher`のいずれも可)

@@ -1675,6 +1675,61 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  /**
+   * 三連単の払戻(Issue #130・#25-D)。
+   *
+   * `RaceComboPayoutsSaveInput`に`trifecta?`フィールドを追加する(#106のexacta・#113の
+   * quinellaと同じ形。`combo?.[betType]`が`ComboBetType`の全メンバーを添字に取るため、
+   * 追加しないと`pnpm typecheck`がTS7053で落ちる。着手前確認で発見)。
+   *
+   * AC-6相当(★地雷の確認): `COMBO_SIZE`に`trifecta`が追加されたことで`COMBO_BET_TYPES`
+   * (`Object.keys(COMBO_SIZE)`由来の払戻保存ループ)が三連単も回すようになるが、
+   * `comboPayouts`に`trifecta`キー自体が無ければDBには一切書かれないことを固定する
+   * (このテストは`saveResult`を直接呼び、`trifecta`キーを省略した`{wide, trio}`だけを
+   * 渡すことでその状況を再現する。払戻の取込配線自体は#131のスコープ)。
+   */
+  describe("三連単の払戻(Issue #130・#25-D)", () => {
+    it("三連単を明示的に渡すと保存・復元できること(型追加が正しく機能することの確認。馬単と同じ順序付きキー)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        trifecta: { state: "parsed", payouts: [{ umabans: [13, 8, 5], payout: 52690 }] },
+      });
+      expect(store.getComboPayouts("R1", "trifecta")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "130805", payout: 52690 }],
+      });
+      store.close();
+    });
+
+    it("三連単の完全反転(5→8→13)は別キーとして保存されること(着順が意味を持つ券種であることの回帰確認)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        trifecta: { state: "parsed", payouts: [{ umabans: [5, 8, 13], payout: 44270 }] },
+      });
+      expect(store.getComboPayouts("R1", "trifecta")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "050813", payout: 44270 }],
+      });
+      store.close();
+    });
+
+    it("AC-6相当: comboPayoutsに{wide, trio}のみを渡し三連単(trifecta)キーを省略した場合、三連単はCOMBO_BET_TYPESに含まれてもnot_importedのままであること(三連単の払戻行は書かれない)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 120 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 5], payout: 240 }] },
+      });
+      // 前提固定(空振り防止): wide/trioは従来どおり書かれること。
+      expect(store.getComboPayouts("R1", "wide").state).toBe("imported");
+      expect(store.getComboPayouts("R1", "trio").state).toBe("imported");
+      // 本題: trifectaを渡していないので、COMBO_BET_TYPESループが回っても書かれない。
+      expect(store.getComboPayouts("R1", "trifecta")).toEqual({
+        state: "not_imported",
+      });
+      store.close();
+    });
+  });
+
   describe("getComboPayouts(組合せ払戻の読み出し契約。Issue #52 AC9・boss裁定R-4〜R-6)", () => {
     it("一度も取り込んでいないレースは not_imported を返すこと", () => {
       const store = new AnalysisStore();

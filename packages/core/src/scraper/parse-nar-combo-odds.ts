@@ -73,17 +73,20 @@ export class NarComboOddsParseError extends Error {
 }
 
 /**
- * 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複、"b6"=馬単、"b4"=馬連)。
- * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.2・
- * `fixtures/nar_odds_b6_202654071210.html`のセルid`chk_..._b6_c0_..._..._`で再現可能)。馬連の
+ * 券種→セルidに埋め込まれるページ内部コード("b5"=ワイド、"b7"=3連複、"b6"=馬単、"b4"=馬連、
+ * "b8"=三連単)。馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md`
+ * §3.2・`fixtures/nar_odds_b6_202654071210.html`のセルid`chk_..._b6_c0_..._..._`で再現可能)。馬連の
  * 値も同じ#24-A(#103)の実測で確定(同docs §3.2、`fixtures/nar_odds_b4_202654071210.html`の
- * セルid`chk_..._b4_c0_..._..._`で再現可能。Issue #113・#24-D2)。
+ * セルid`chk_..._b4_c0_..._..._`で再現可能。Issue #113・#24-D2)。三連単の値は#127の実測で確定
+ * (`docs/trifecta-odds-investigation.md` §3.1、`fixtures/nar_odds_b8_jiku5_202654071210.html`の
+ * セルid`chk_..._b8_c0_..._..._..._`で再現可能。Issue #130・#25-D)。
  */
 const ID_MARKER: Record<ComboBetType, string> = {
   wide: "b5",
   trio: "b7",
   exacta: "b6",
   quinella: "b4",
+  trifecta: "b8",
 };
 
 /**

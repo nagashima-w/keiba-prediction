@@ -75,18 +75,48 @@ export class ComboOddsParseError extends Error {
 }
 
 /**
- * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単、"4"=馬連)。
+ * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単、"4"=馬連、"8"=三連単)。
  * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.1・
  * `fixtures/odds_exacta_202603020211.json`の `data.odds["6"]` で再現可能)。馬連の値も同じ
  * #24-A(#103)の実測で確定(同docs §3.1、`fixtures/odds_quinella_202603020211.json`の
- * `data.odds["4"]` で再現可能。Issue #113・#24-D2)。
+ * `data.odds["4"]` で再現可能。Issue #113・#24-D2)。三連単の値は#127の実測で確定
+ * (`docs/trifecta-odds-investigation.md` §2.1、`fixtures/odds_trifecta_202603020211.json`の
+ * `data.odds["8"]` で再現可能。Issue #130・#25-D)。
  */
 const JSON_ODDS_KEY: Record<ComboBetType, string> = {
   wide: "5",
   trio: "7",
   exacta: "6",
   quinella: "4",
+  trifecta: "8",
 };
+
+/**
+ * 上限キャップ値(#130・#25-D。オーケストレーター裁定2026-09-26)。
+ *
+ * 中央presale(`status:"middle"`)応答では、票数がまだ少ない組合せがこの値
+ * ("999,999.9")で表示される(三連単presaleフィクスチャの実測: 3360件中2644件=78.7%。
+ * `docs/trifecta-odds-investigation.md` §6.2)。実オッズとして読むとEVが桁外れのプラスに
+ * なり配分がそこへ偏るため、欠損(null)として扱う。
+ *
+ * **券種で分岐させない**(裁定の言葉どおり): 組合せ券種共通のパーサである本ファイル
+ * (`parseComboOdds`)の中でoddsMin・oddsMaxの両方に一律適用する。単勝・複勝
+ * (`parse-odds.ts`・`parse-nar-odds.ts`)や過去走(`parse-horse-results.ts`)が使う
+ * 共有ヘルパ`toOddsNumber`自体には入れない(これらの経路で上限値が観測された例が無く、
+ * 影響範囲を組合せ券種の外へ広げないため)。地方の組合せパーサ(`parse-nar-combo-odds.ts`)も
+ * 同様の値の観測例が無いため、本Issueでは対象外とする。
+ */
+const ODDS_CAP_VALUE = 999999.9;
+
+/**
+ * `toOddsNumber`の結果から上限キャップ値をnullに変換する(券種非依存。上記
+ * `ODDS_CAP_VALUE`のJSDoc参照)。丁度`ODDS_CAP_VALUE`と一致する場合のみnullにし、
+ * 隣接する値(例: 999999.8)はそのまま数値として残す。
+ */
+function toComboOddsNumber(raw: unknown): number | null {
+  const value = toOddsNumber(raw);
+  return value === ODDS_CAP_VALUE ? null : value;
+}
 
 /**
  * オッズが取得できなかった理由(受け入れ条件7b)。
@@ -206,8 +236,8 @@ export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsPa
   const entries: ComboOddsEntry[] = [];
   for (const [rawKey, value] of Object.entries(combo as Record<string, unknown>)) {
     const umabans = decodeRawKey(rawKey, betType);
-    const oddsMin = toOddsNumber(cellAt(value, 0));
-    const oddsMax = betType === "wide" ? toOddsNumber(cellAt(value, 1)) : null;
+    const oddsMin = toComboOddsNumber(cellAt(value, 0));
+    const oddsMax = betType === "wide" ? toComboOddsNumber(cellAt(value, 1)) : null;
     const ninki = toNinki(cellAt(value, 2));
     entries.push({ umabans, cell: { oddsMin, oddsMax, ninki } });
   }
