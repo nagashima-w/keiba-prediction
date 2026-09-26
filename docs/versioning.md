@@ -1797,6 +1797,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - DB スキーマは無変更(`race_combo_payouts` の `bet_type` は文字列列で、`"trifecta"` の行が増えるだけ)
 - 設定・エクスポート JSON・IPC の形は無変更(`ProposedBetReportView` に `trifecta` が増えるが画面には出ない)
 
+## 次の正式版が 1.11.6 である根拠(Issue #129・#25-C での変更)
+
+**patch**(計測スクリプトの追加のみ。`packages/*/src` は無変更)。
+
+### 変更内容
+
+`scripts/bench-trifecta-allocation.ts` を追加した。三連単を含む配分計算の所要時間・候補数・`candidateCap` による切り捨ての
+券種別内訳を、実オッズ・発売中オッズ・18頭合成の最悪ケースで測る。
+
+### patch である根拠
+
+- 利用者から見てできることは増えず、分析結果の数値も変わらない
+- production のコードパスに到達する変更が無い(`git diff --stat -- packages/core/src packages/app/src` が空)
+
+### major / minor ではない根拠
+
+- 設定・DB・エクスポート JSON・IPC はすべて無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
