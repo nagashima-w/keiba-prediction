@@ -756,3 +756,22 @@ p = [1e-6 ×7頭, 0.999999 ×7頭]      (Σp = 7 ちょうど。λ = 1、再ス�
 
 **再発防止**: push は `git push origin HEAD:<ブランチ名>` の形で **HEAD を明示**する。
 サブエージェントが worktree を使う運用では、本体が detached HEAD になりうる。
+
+## 追加事例(2026-09-26): 承認印付きコミットの**本文**に「レビュー継続中」を引用し、exe が公開されなかった(#126)
+
+#126 の確定コミット `ca68543` は件名末尾に `[PUBLISH-APPROVED]` を付けていたが、本文に
+「b339821(レビュー継続中)の実装に対し…」と**直前の中間コミットの件名を引用**していた。
+CI の公開条件(`build-windows.yml` の `PUBLISH_DEV_LATEST`)は
+`contains(head_commit.message, '[PUBLISH-APPROVED]') && !contains(head_commit.message, 'レビュー継続中')` で、
+**件名だけでなくメッセージ全体**を見る。そのため run は `conclusion=success` になったが、公開ステップは
+スキップされ、`dev-latest` の exe は 1.11.0 のまま残った。
+
+**検出できたのは、CLAUDE.md の「承認印付き push の後は exe の `updated_at` を実物で確認する」を省略しなかったから。**
+`conclusion=success` だけを見ていれば見逃していた(この局面で success は exe 更新を意味しない)。
+
+**回復**: `workflow_dispatch` はこのセッションの GitHub 連携の権限では 403 で使えなかった。
+空コミットは使わず、本記録を追加するコミットを承認印付きで push して公開し直した。
+
+**再発防止**: 承認印付きコミットのメッセージ(件名・本文とも)には「レビュー継続中」の語を書かない。
+中間コミットを参照するときはハッシュだけで書く(例: 「b339821 の実装に対し」)。
+push 前に `git log -1 --format=%B | grep -c 'レビュー継続中'` が 0 であることを確かめる。
