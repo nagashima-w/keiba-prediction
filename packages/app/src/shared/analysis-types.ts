@@ -824,13 +824,15 @@ export interface StoredAllocationBetView {
 
 /**
  * 配分提案(表示用。core StoredAllocation のプレーン写し。Issue #55)。
- * メタ14列(route/unavailableReason/fallbackReason/skipReasonCode/実効設定8項目/betUnit/
- * oddsStatus。実効設定8項目目のincludeQuinellaはIssue #118〈#24-D3b-3〉で追加)+ bets。
+ * メタ15列(route/unavailableReason/fallbackReason/skipReasonCode/実効設定9項目/betUnit/
+ * oddsStatus。実効設定8項目目のincludeQuinellaはIssue #118〈#24-D3b-3〉で、9項目目の
+ * includeExactaはIssue #126〈#24-E3c〉で、それぞれ追加)+ bets。
  * core `getStoredAllocation` が意図的に読まない6列
  * (combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/model_approximate。
- * メタ行の物理列数21から読む14列と`analysis_id`〈検索キーでありデータ列ではない〉を除いた数。
- * Issue #118でinclude_quinella列が追加され20→21列になったが、読まない6列自体は変わらない)は
- * この型にも持たせない(#71の原則。読まない列は表示型にも持ち込まない)。
+ * メタ行の物理列数22から読む15列と`analysis_id`〈検索キーでありデータ列ではない〉を除いた数。
+ * Issue #118・#126でinclude_quinella・include_exacta列が追加され20→21→22列になったが、
+ * 読まない6列自体は変わらない)はこの型にも持たせない(#71の原則。読まない列は表示型にも
+ * 持ち込まない)。
  */
 export interface StoredAllocationView {
   readonly route: string;
@@ -849,6 +851,12 @@ export interface StoredAllocationView {
    * 記録は null(「記録なし」。#31: OFFと断定しない。表示は「馬連: 記録なし」)。
    */
   readonly includeQuinella: boolean | null;
+  /**
+   * 馬単を配分に使うか(Issue #126・#24-E3cで追加)。列追加前(Issue #126より前)に保存された
+   * 記録は null(「記録なし」。#31: OFFと断定しない。表示は「馬単: 記録なし」。`includeQuinella`と
+   * 同型)。
+   */
+  readonly includeExacta: boolean | null;
   readonly betUnit: number | null;
   readonly oddsStatus: string;
   readonly bets: readonly StoredAllocationBetView[];

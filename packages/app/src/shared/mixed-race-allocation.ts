@@ -199,10 +199,13 @@ export type MixedRaceAllocationView =
  * `"quinella"`を含めない限りproductionからは呼ばれない状態を意図的に保っていた)。
  *
  * **馬単(`includeExactaInAllocation`。#24-E3a・Issue #124)も同じ経緯を辿り、#125(#24-E3b)で
- * 本関数へ接続した。** `MixedAllocationSettings`の項目は9項目のままだが、`allocation-record.ts`
- * の設定エコー8列(メタ行スキーマ)は#125でも変えない(呼び出し側が渡した9項目のうち8項目だけを
- * メタ行へ写す。全項目を機械的にエコーする契約ではない。#59が固定した「メタ行の列一覧は増減が
- * 停止条件」という制約はここでは解除しない。DB列`include_exacta`の追加は#126のスコープ)。
+ * 本関数へ接続した。** `MixedAllocationSettings`の項目は9項目のままで、#125時点では
+ * `allocation-record.ts`の設定エコーは8列(メタ行スキーマ)のまま据え置いていた(呼び出し側が
+ * 渡した9項目のうち8項目だけをメタ行へ写し、全項目を機械的にエコーする契約ではなかった)。
+ * その後**Issue #126(#24-E3c)でDB列`include_exacta`を追加し、設定エコーも9列へ解除した**
+ * (`allocation-record.ts`の「## 列の由来」JSDoc参照。列を読む人〈過去分析再表示の
+ * 「馬単: ON/OFF/記録なし」〉が実在するに至ったための解除で、馬連〈`include_quinella`〉と
+ * 同型の経緯)。
  *
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。

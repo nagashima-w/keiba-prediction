@@ -76,9 +76,9 @@
     接続と画面表示(Issue #125・#24-E3b)**。これにより`includeExactaInAllocation`がONで
     馬単オッズが取得できていれば、一括分析画面の配分内訳・検証画面の回収率内訳に馬単が
     馬連と3連複の間に表示されるようになった(利用者から見える変化はここで初めて生じた)。
-    配分記録のメタ行への`include_exacta`列追加・過去分析再表示の「馬単: ON/OFF」は
-    #24-E3c(Issue #126)のスコープで、本書時点では未対応(馬連の`include_quinella`と同じ
-    切り方。下記「配分記録の永続化」節参照)
+    配分記録のメタ行への`include_exacta`列追加・過去分析再表示の「馬単: ON/OFF/記録なし」は
+    #24-E3c(Issue #126)で対応済み(馬連の`include_quinella`と同じ切り方。詳細は下記
+    「配分記録の永続化」節参照)
 - バージョン: ルート/アプリ `1.11.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
@@ -254,11 +254,12 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     (#31の3状態〈記録なし・見送り・配分あり〉をこの1行の有無と内容だけで区別できるようにするための
     不変条件)。到達状態のコード5列(`route`・`unavailable_reason`・`fallback_reason`・
     `skip_reason_code`・`combo_odds_wide`/`combo_odds_trio`。null は「未到達」であって「不明」では
-    ない)、実行時の実効設定8列(`bankroll`/`per_race_cap`/`kelly_fraction`/`ev_threshold`/
-    `include_combo_odds`/`include_wide`/`include_trio`/`include_quinella`。`include_quinella`は
-    Issue #118〈#24-D3b-3〉で追加し7→8列。他の設定エコー列と異なりNULLを許す〈NOT NULL・DEFAULT
-    いずれも付けない〉列で、列追加前(Issue #118より前)に保存された行はNULL=「馬連の設定を
-    記録していない」であり、0(OFF)に丸めない〈#31〉)、経路ごとに実際に使われた既定値4列
+    ない)、実行時の実効設定9列(`bankroll`/`per_race_cap`/`kelly_fraction`/`ev_threshold`/
+    `include_combo_odds`/`include_wide`/`include_trio`/`include_quinella`/`include_exacta`。
+    `include_quinella`はIssue #118〈#24-D3b-3〉で追加し7→8列、`include_exacta`はIssue #126
+    〈#24-E3c〉で追加し8→9列。この2列は他の設定エコー列と異なりNULLを許す〈NOT NULL・DEFAULT
+    いずれも付けない〉列で、列追加前(それぞれIssue #118・#126より前)に保存された行はNULL=
+    「馬連/馬単の設定を記録していない」であり、0(OFF)に丸めない〈#31〉)、経路ごとに実際に使われた既定値4列
     (`bet_unit`/`greedy_steps`/`candidate_cap`/`model_id`+`model_approximate`。複勝のみ経路には
     `candidate_cap`が存在しないため常にnull、coreの配分計算に未到達の経路は4列とも null)、
     `odds_status` を持つ。
@@ -286,7 +287,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   値のみ保持し画面には表示しない設計だった)。
   - **読み出しAPI**: `AnalysisStore.getAllocationForVerify(analysisId)` が
     `analysis_allocation_meta`/`analysis_bets` のうち `route`・`skip_reason_code`・
-    `bet_type`/`combo_key`/`stake` の5列だけを読む(残り18列・`odds`/`ev` は#71のスコープ外。
+    `bet_type`/`combo_key`/`stake` の5列だけを読む(残り20列・`odds`/`ev` は#71のスコープ外。
     メタ行が無ければ undefined)。`odds`/`ev` を読まないのは、分析時点のオッズで払戻を近似すると
     「回収率」ではなく「提案時点の期待値の再計算」になり Q-C に反するため——系として
     `proposedBet` 系は近似払戻を一切持たず、実配当のみで按分する(複勝は
@@ -311,19 +312,19 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   (`RaceLedgerView`)に配分を引き当てるだけ(新規IPCチャネルは追加していない)。的中・払戻・
   回収率は出さない(#16/#71の領分)。配分の再計算はしない(保存済みを読むだけ)。
   - **読み出しAPI**: `AnalysisStore.getStoredAllocation(analysisId)` が
-    `analysis_allocation_meta` のうちメタ**14列**(Issue #118〈#24-D3b-3〉で`include_quinella`を
-    読む列に追加し13→14列)
+    `analysis_allocation_meta` のうちメタ**15列**(Issue #118〈#24-D3b-3〉で`include_quinella`を
+    読む列に追加し13→14列、Issue #126〈#24-E3c〉で`include_exacta`を追加し14→15列)
     (`route`/`unavailable_reason`/`fallback_reason`/`skip_reason_code`/`bankroll`/
     `per_race_cap`/`kelly_fraction`/`ev_threshold`/`include_combo_odds`/`include_wide`/
-    `include_trio`/`include_quinella`/`bet_unit`/`odds_status`)+ `analysis_bets` の5列
+    `include_trio`/`include_quinella`/`include_exacta`/`bet_unit`/`odds_status`)+ `analysis_bets` の5列
     (`bet_type`/`combo_key`/`stake`/`odds`/`ev`)を読む。`combo_odds_wide`/`combo_odds_trio`/
     `greedy_steps`/`candidate_cap`/`model_id`/`model_approximate`の6列は`getAllocationForVerify`
     と同じ理由(誰も読まない列にコストを払わない)で読まない。メタ行が無ければ undefined
-    (#59より前の旧分析=「記録なし」)。`include_quinella`は他13列と異なりNULLを許す列のため、
-    DB値がNULLのときは`includeQuinella: null`(記録なし)としてそのまま返す(0/1のときのみ
-    booleanへ変換する。#31: 記録なしをOFFに丸めない)。`getAllocationForVerify`(#71。
-    route/skip_reason_code/bet_type/combo_key/stakeの5列のみ)とは読む列の範囲が異なる別クエリで
-    あり、互いに影響しない。
+    (#59より前の旧分析=「記録なし」)。`include_quinella`/`include_exacta`は他13列と異なりNULLを
+    許す列のため、DB値がNULLのときはそれぞれ`includeQuinella: null`/`includeExacta: null`
+    (記録なし)としてそのまま返す(0/1のときのみbooleanへ変換する。#31: 記録なしをOFFに丸めない)。
+    `getAllocationForVerify`(#71。route/skip_reason_code/bet_type/combo_key/stakeの5列のみ)とは
+    読む列の範囲が異なる別クエリであり、互いに影響しない。
   - **表示状態(`renderer/allocation-proposal-view.ts`)**: 記録なし/unset/yoso/unavailable/
     invalid/見送り(skip)/配分ありの7状態に加え、値の矛盾(未知の`route`文字列、または
     `route∈{place-only,mixed}` ∧ `skip_reason_code=null` ∧ `bets=[]`)を「判定不能」として
@@ -334,12 +335,13 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     1着→2着の並びが意味を持つため、ワイド・馬連・3連複のハイフン区切りとは異なり並びを
     保った「N→M」表記にする〈Issue #125・#24-E3b・AC-6。`formatComboBetLabel`〉)・
     金額・分析時点のオッズ/EVを表示し、
-    実効設定9項目(総資金/1レース上限/ケリー係数/EV閾値/ワイド・馬連・三連複・組合せオッズ取得の
-    ON・OFF/オッズ状態。「馬連」はIssue #118〈#24-D3b-3〉でワイドと三連複の間に追加し8→9項目)を
-    注記として添える。馬連は他と異なりON/OFFに加え「記録なし」(Issue #118より前の記録で
-    `includeQuinella=null`)を表示する(#31: OFFと断定しない)。`VerifyView.tsx`には本機能の`route`/
-    `skip_reason_code`分岐と文言リテラルを置かず、`allocation-proposal-view.ts`が返す配列を
-    `.map`するだけにしている。
+    実効設定10項目(総資金/1レース上限/ケリー係数/EV閾値/ワイド・馬連・馬単・三連複・組合せオッズ取得の
+    ON・OFF/オッズ状態。「馬連」はIssue #118〈#24-D3b-3〉でワイドと三連複の間に追加し8→9項目、
+    「馬単」はIssue #126〈#24-E3c〉で馬連と三連複の間に追加し9→10項目)を
+    注記として添える。馬連・馬単はいずれも他と異なりON/OFFに加え「記録なし」(それぞれIssue #118・
+    #126より前の記録で`includeQuinella=null`/`includeExacta=null`)を表示する(#31: OFFと断定しない)。
+    `VerifyView.tsx`には本機能の`route`/`skip_reason_code`分岐と文言リテラルを置かず、
+    `allocation-proposal-view.ts`が返す配列を`.map`するだけにしている。
 
 ## 5. 馬券配分の提案(ev/place-joint-model・ev/bet-allocation)
 

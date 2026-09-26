@@ -238,7 +238,11 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
   // メタ行に漏れない(#59スキーマ固定を#24-D3aでは解除しない)」ことを保証していた。
   // Issue #118でこの凍結を解除した(coordinator裁定(A))ため、逆にincludeQuinellaInAllocationが
   // メタ行のincludeQuinellaへ反映されることを保証するテストへ書き換える。
-  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定8項目(evThresholdはevConfig由来・includeQuinellaはIssue #118で追加)が反映されること(route=unsetで確認)", async () => {
+  // さらにIssue #126(#24-E3c)で契約反転: 同じテストがIssue #125まで「includeExactaInAllocationは
+  // メタ行に漏れない(#59スキーマ固定を#24-E3aでは解除しない)」ことも保証していた。Issue #126で
+  // この凍結も解除したため、includeExactaInAllocationがメタ行のincludeExactaへ反映されることも
+  // あわせて保証する。
+  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定9項目(evThresholdはevConfig由来・includeQuinellaはIssue #118・includeExactaはIssue #126で追加)が反映されること(route=unsetで確認)", async () => {
     const saved: AnalysisRecord[] = [];
     const deps: AnalysisPipelineDeps = {
       ...baseDeps(),
@@ -255,9 +259,8 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeWideInAllocation: true,
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
-        // #24-E3a(Issue #124): メタ行のスキーマは#59で凍結されたまま(既存8列を保つ)なので、
-        // trueにしてもメタ行のincludeWide/includeTrio/includeQuinella以外は一切変わらないはず
-        // (下のtoEqualで固定。"includeExacta"というキー自体が無い)。
+        // #24-E3c(Issue #126)でメタ行のスキーマが9列に解除されたため、trueがそのまま
+        // メタ行のincludeExactaへ反映される(下のtoEqualで固定)。
         includeExactaInAllocation: true,
       },
     };
@@ -280,6 +283,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeWide: true,
       includeTrio: false,
       includeQuinella: true,
+      includeExacta: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -333,6 +337,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeWide: true,
       includeTrio: true,
       includeQuinella: true,
+      includeExacta: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,

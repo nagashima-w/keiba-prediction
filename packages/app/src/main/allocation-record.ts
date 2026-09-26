@@ -7,14 +7,12 @@
  * 変換する純関数を持つ。呼び出し側(main/analysis-pipeline.ts)の変更を最小に保つため、
  * 経路網羅のロジックはすべてこのファイルに集約する(boss着手前ゲート2026-08-27・#59)。
  *
- * ## 列の由来(#59スキーマ固定。増減は停止条件。Issue #118で唯一の例外を追加)
+ * ## 列の由来(#59スキーマ固定。増減は停止条件。Issue #118・#126で2つの例外を追加)
  *
- * - 設定エコー8列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
- *   include_wide/include_trio/include_quinella): 呼び出し時に渡した `MixedAllocationSettings`
- *   のうちこの8項目をそのまま写す。route に関わらず常に非null(実行時に確定している値のため)。
- *   **#24-E3a(Issue #124)で`MixedAllocationSettings`は9項目(`includeExactaInAllocation`追加)に
- *   なったが、この設定エコーは8列のまま据え置く**(`settingsColumnsOf`が9項目目を読まない。
- *   全項目を機械的にエコーする契約ではない。詳細は下記`AnalysisAllocationSettings`のJSDoc参照)。
+ * - 設定エコー9列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
+ *   include_wide/include_trio/include_quinella/include_exacta): 呼び出し時に渡した
+ *   `MixedAllocationSettings`(9項目)をそのまま写す。route に関わらず常に非null(実行時に
+ *   確定している値のため)。
  *
  *   **#24-D3a(Issue #115)で`MixedAllocationSettings`は8項目(`includeQuinellaInAllocation`追加)に
  *   なったが、当初(Issue #117まで)はこの設定エコーを7列のまま据え置いていた**
@@ -25,6 +23,15 @@
  *   タスク=**Issue #118(#24-D3b-3)で7→8列へ解除した**。DB列`include_quinella`はNULLを許す
  *   〈`AnalysisStore`の該当CREATE TABLEコメント参照〉ため、Issue #118より前に保存された行は
  *   `includeQuinella: null`〈記録なし〉のまま読める)。
+ *
+ *   **#24-E3a(Issue #124)で`MixedAllocationSettings`は9項目(`includeExactaInAllocation`追加)に
+ *   なったが、当初(Issue #125まで)はこの設定エコーを8列のまま据え置いていた**
+ *   (`settingsColumnsOf`が9項目目を読まなかった)。券種の選択・D-2フォールバック規則・画面表示は
+ *   Issue #125(#24-E3b)で接続されたが、このメタ行のスキーマは据え置いたままだった(列を読む人
+ *   〈過去分析再表示の「馬単: ON/OFF/記録なし」〉が実在するに至ったタスク=**Issue #126
+ *   (#24-E3c)で8→9列へ解除した**。DB列`include_exacta`はNULLを許す〈`AnalysisStore`の該当
+ *   CREATE TABLEコメント参照〉ため、Issue #126より前に保存された行は`includeExacta: null`
+ *   〈記録なし〉のまま読める。`includeQuinella`と同型)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
  * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
@@ -109,14 +116,13 @@ import type {
  * `shared/mixed-race-allocation.ts`のJSDoc参照)。
  *
  * `includeExactaInAllocation`(#24-E3a・Issue #124)は7→8項目化した追加分。**メタ行への
- * 書き込みは接続しない**: `settingsColumnsOf`は8列(`bankroll`/`perRaceCap`/`kellyFraction`/
- * `evThreshold`/`includeComboOdds`/`includeWide`/`includeTrio`/`includeQuinella`)のまま
- * このフィールドを読まない(#59が固定した「列一覧は固定・増減は停止条件」を#24-E3aでは
- * 解除しない。列を読む人〈過去分析再表示の「馬単: ON/OFF」〉が実在するに至るタスク=
- * Issue #126〈#24-E3c〉で解除する見込み)。この型に持たせる目的は`MixedAllocationSettings`
- * (8→9項目)まで値を運ぶ配管の一部としてのみであり、`resolveMixedBetTypes`・
- * `isComboBetTypesOff`への実際の接続は#24-E3a時点では行わない(Issue #125〈#24-E3b〉のスコープ。
- * `shared/mixed-race-allocation.ts`のJSDoc参照)。
+ * 書き込みはIssue #126(#24-E3c)で接続した**: `settingsColumnsOf`(上記「## 列の由来」参照)が
+ * このフィールドを読み、メタ行の設定エコーは`include_wide`/`include_trio`/`include_quinella`/
+ * `include_exacta`の4列になった(#59が固定した「列一覧は固定・増減は停止条件」を、列を読む人
+ * 〈過去分析再表示の「馬単: ON/OFF/記録なし」〉が実在するに至ったIssue #126で解除した)。
+ * #125時点までは、この型に持たせる目的は`MixedAllocationSettings`(8→9項目)まで値を運ぶ配管の
+ * 一部としてのみだった(`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #125
+ * 〈#24-E3b〉で完了。`shared/mixed-race-allocation.ts`のJSDoc参照)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;
@@ -157,7 +163,7 @@ function codesColumnsOf(
   };
 }
 
-/** `MixedAllocationSettings`(9項目)のうち8項目を、メタ行の設定エコー8列へ写す(Issue #118でincludeQuinellaを追加。includeExactaInAllocationはまだ書かない〈#126〉)。 */
+/** `MixedAllocationSettings`(9項目)を、メタ行の設定エコー9列へ写す(Issue #118でincludeQuinella・Issue #126でincludeExactaを追加。全9項目を機械的にエコーする)。 */
 function settingsColumnsOf(
   settings: MixedAllocationSettings,
 ): Pick<
@@ -170,6 +176,7 @@ function settingsColumnsOf(
   | "includeWide"
   | "includeTrio"
   | "includeQuinella"
+  | "includeExacta"
 > {
   return {
     bankroll: settings.bankroll,
@@ -180,6 +187,7 @@ function settingsColumnsOf(
     includeWide: settings.includeWideInAllocation,
     includeTrio: settings.includeTrioInAllocation,
     includeQuinella: settings.includeQuinellaInAllocation,
+    includeExacta: settings.includeExactaInAllocation,
   };
 }
 

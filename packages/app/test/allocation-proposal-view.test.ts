@@ -50,6 +50,7 @@ function allocation(overrides: Partial<StoredAllocationView> = {}): StoredAlloca
     includeWide: true,
     includeTrio: true,
     includeQuinella: true,
+    includeExacta: true,
     betUnit: 100,
     oddsStatus: "result",
     bets: [],
@@ -627,8 +628,8 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
   });
 });
 
-describe("実効設定(AC5): 9項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目)", () => {
-  it("1組目の値ベクトルで9行すべてが期待どおりであること", () => {
+describe("実効設定(AC5): 10項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目、Issue #126〈#24-E3c〉で「馬単」を追加し9→10項目)", () => {
+  it("1組目の値ベクトルで10行すべてが期待どおりであること", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -640,6 +641,7 @@ describe("実効設定(AC5): 9項目がラベル+値の文字列配列として�
         includeWide: true,
         includeTrio: false,
         includeQuinella: false,
+        includeExacta: true,
         includeComboOdds: true,
         oddsStatus: "middle",
         bets: [],
@@ -652,13 +654,14 @@ describe("実効設定(AC5): 9項目がラベル+値の文字列配列として�
       `EV閾値: 1.08`,
       `ワイド: ON`,
       `馬連: OFF`,
+      `馬単: ON`,
       `三連複: OFF`,
       `組合せオッズ取得: ON`,
       `オッズ状態: 中間(発売中)`,
     ]);
   });
 
-  it("2組目の異なる値ベクトルでも9行すべてが期待どおりであること(取り違え検出)", () => {
+  it("2組目の異なる値ベクトルでも10行すべてが期待どおりであること(取り違え検出)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "unset",
@@ -669,6 +672,7 @@ describe("実効設定(AC5): 9項目がラベル+値の文字列配列として�
         includeWide: false,
         includeTrio: true,
         includeQuinella: true,
+        includeExacta: false,
         includeComboOdds: false,
         oddsStatus: "yoso",
       }),
@@ -680,6 +684,7 @@ describe("実効設定(AC5): 9項目がラベル+値の文字列配列として�
       `EV閾値: 2.5`,
       `ワイド: OFF`,
       `馬連: ON`,
+      `馬単: OFF`,
       `三連複: ON`,
       `組合せオッズ取得: OFF`,
       `オッズ状態: 発売前`,
@@ -706,6 +711,26 @@ describe("実効設定(AC5): 9項目がラベル+値の文字列配列として�
     expect(view.settingsRows).not.toContain("馬連: OFF");
   });
 
+  // Issue #126(#24-E3c)コーディネーター裁定: includeExactaもincludeQuinellaと同じくON/OFF/
+  // 記録なしの3値をそれぞれ確かめる(nullをOFFと表示する変異を殺す。上記2組でON/OFFは既に
+  // 固定済みなので、ここでは「馬単」の行だけを対象に3値目〈記録なし=null〉を追加で固定する)。
+  it("馬単: includeExacta=trueのとき『馬単: ON』になること", () => {
+    const view = buildAllocationProposalView(allocation({ includeExacta: true }));
+    expect(view.settingsRows).toContain("馬単: ON");
+  });
+
+  it("馬単: includeExacta=falseのとき『馬単: OFF』になること", () => {
+    const view = buildAllocationProposalView(allocation({ includeExacta: false }));
+    expect(view.settingsRows).toContain("馬単: OFF");
+  });
+
+  it("馬単: includeExacta=null(Issue #126より前の記録)のとき『馬単: 記録なし』になること(OFFと断定しない。#31)", () => {
+    const view = buildAllocationProposalView(allocation({ includeExacta: null }));
+    expect(view.settingsRows).toContain("馬単: 記録なし");
+    // 前提固定の裏返し: 「馬単: OFF」ではないこと(nullをOFFへ丸める変異を殺す)。
+    expect(view.settingsRows).not.toContain("馬単: OFF");
+  });
+
   it("oddsStatus='result'は『確定』になること", () => {
     const view = buildAllocationProposalView(allocation({ oddsStatus: "result" }));
     expect(view.settingsRows.at(-1)).toBe("オッズ状態: 確定");
@@ -721,23 +746,23 @@ describe("実効設定(AC5): 9項目がラベル+値の文字列配列として�
   });
 
   it.each(["unset", "yoso", "invalid"] as const)(
-    "route=%s(記録はある状態)でも実効設定9項目が出ること",
+    "route=%s(記録はある状態)でも実効設定10項目が出ること",
     (route) => {
-      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(9);
+      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(10);
     },
   );
 
-  it("route='unavailable'でも実効設定9項目が出ること", () => {
+  it("route='unavailable'でも実効設定10項目が出ること", () => {
     expect(
       buildAllocationProposalView(
         allocation({ route: "unavailable", unavailableReason: "not-sold" }),
       ).settingsRows,
-    ).toHaveLength(9);
+    ).toHaveLength(10);
   });
 
-  it("判定不能(未知route)でも実効設定9項目が出ること(実効設定自体は正常な値のため)", () => {
+  it("判定不能(未知route)でも実効設定10項目が出ること(実効設定自体は正常な値のため)", () => {
     expect(buildAllocationProposalView(allocation({ route: "SOMETHING_UNKNOWN" })).settingsRows).toHaveLength(
-      9,
+      10,
     );
   });
 });

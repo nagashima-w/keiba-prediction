@@ -92,7 +92,7 @@ export interface AllocationProposalView {
   readonly notices: readonly string[];
   /** 買い目行(配分ありのときのみ非空)。 */
   readonly bets: readonly AllocationBetRowView[];
-  /** 実効設定9項目(「ラベル: 値」の文字列配列。Issue #118で馬連を追加し8→9項目)。記録が無ければ空配列。 */
+  /** 実効設定10項目(「ラベル: 値」の文字列配列。Issue #118で馬連を追加し8→9項目、Issue #126で馬単を追加し9→10項目)。記録が無ければ空配列。 */
   readonly settingsRows: readonly string[];
 }
 
@@ -269,7 +269,7 @@ function betTypeLabel(betType: string): string {
 /** オッズ発売状態(odds_status)→日本語ラベル。
  *
  * 既存の `oddsStatusNote`(format.ts)は流用しない: (i) `"result"`(確定)で `null` を返す設計
- * (実効設定は8項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
+ * (実効設定は10項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
  * 再分析推奨」)で過去分析の再表示には不適切、という用途の違いによる(`oddsStatusNote` 自体は
  * 改変しない。`BatchAnalysisView.tsx` が依存しているため)。
  */
@@ -304,7 +304,8 @@ function onOffOrUnrecorded(value: boolean | null): string {
 }
 
 /**
- * 実効設定9項目(AC5。Issue #118〈#24-D3b-3〉で「馬連」をワイドと三連複の間に追加し8→9項目)を
+ * 実効設定10項目(AC5。Issue #118〈#24-D3b-3〉で「馬連」をワイドと三連複の間に追加し8→9項目、
+ * Issue #126〈#24-E3c〉で「馬単」を馬連と三連複の間に追加し9→10項目)を
  * 「ラベル: 値」の文字列配列にする。
  */
 function buildSettingsRows(a: StoredAllocationView): readonly string[] {
@@ -315,6 +316,7 @@ function buildSettingsRows(a: StoredAllocationView): readonly string[] {
     `EV閾値: ${a.evThreshold}`,
     `ワイド: ${onOff(a.includeWide)}`,
     `馬連: ${onOffOrUnrecorded(a.includeQuinella)}`,
+    `馬単: ${onOffOrUnrecorded(a.includeExacta)}`,
     `三連複: ${onOff(a.includeTrio)}`,
     `組合せオッズ取得: ${onOff(a.includeComboOdds)}`,
     `オッズ状態: ${oddsStatusLabelForPastAnalysis(a.oddsStatus)}`,
