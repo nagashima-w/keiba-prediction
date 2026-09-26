@@ -157,7 +157,7 @@ function codesColumnsOf(
   };
 }
 
-/** `MixedAllocationSettings`(8項目)を、メタ行の設定エコー8列へ写す(Issue #118でincludeQuinellaを追加)。 */
+/** `MixedAllocationSettings`(9項目)のうち8項目を、メタ行の設定エコー8列へ写す(Issue #118でincludeQuinellaを追加。includeExactaInAllocationはまだ書かない〈#126〉)。 */
 function settingsColumnsOf(
   settings: MixedAllocationSettings,
 ): Pick<
