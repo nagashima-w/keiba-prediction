@@ -202,6 +202,16 @@ export const RACE_RESULT_SELECTORS = {
    */
   exactaRow: "tr.Umatan",
   /**
+   * 三連単の払戻行(Issue #131・#25-F)。wideRow/trioRow/exactaRow と同じ理由で行セレクタを
+   * 直指定する。ワイド・3連複・馬単と同じ2つ目の払戻テーブルに入る(実測:
+   * `fixtures/result_202603020211.html:1995`・`fixtures/nar_result_202654071210.html:1758`。
+   * `class="Tan3"`は文書中に1回だけしか出現しない)。**構造(td.Result内のul/li・単一値の
+   * td.Payout)はwide/trio/quinella/exactaと同型だが、三連単は「1着→2着→3着」の並びが
+   * 意味を持つため、`parseComboPayoutRow`はbetTypeを見て並びをソートしない(馬単と同じ
+   * 順序方針。`combo-odds-key.ts`の`COMBO_KEY_ORDER`参照)。**
+   */
+  trifectaRow: "tr.Tan3",
+  /**
    * ワイド・三連複の払戻行内で1組を表す `<ul>`(Issue #52)。組内の的中馬番は
    * 各 `<li>` のテキスト(空の `<li></li>` は区切り用でワイドの末尾に付く)。
    */

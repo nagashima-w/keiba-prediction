@@ -1625,6 +1625,31 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("三連単の確定払戻の取り込み(Issue #131・#25-F: parseRaceResultからgetComboPayoutsまでの結線)", () => {
+    it("実フィクスチャ(fixtures/result_202603020211.html)をparseRaceResult→saveResultで保存し、getComboPayoutsで読み出したキーが正順'130805'のままであること(パーサ・ストアのどちらかで昇順化が混入すると'050813'のような別のキーになり赤くなる)", () => {
+      const html = loadFixture("result_202603020211.html");
+      const parsed = parseRaceResult(html);
+      // 前提固定(空振り防止): パース結果自体が着順どおりの並び([13, 8, 5])であること。
+      expect(parsed.trifectaPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [13, 8, 5], payout: 52690 }],
+      });
+
+      const store = new AnalysisStore();
+      store.saveResult("202603020211", [{ umaban: 13, finishPosition: 1 }], parsed.courseType, {
+        trifecta: parsed.trifectaPayouts,
+      });
+
+      const result = store.getComboPayouts("202603020211", "trifecta");
+      expect(result.state).toBe("imported");
+      if (result.state !== "imported") throw new Error("unreachable");
+      expect(result.payouts).toEqual([{ comboKey: "130805", payout: 52690 }]);
+      // ★変異確認用の直接固定: 昇順化されたキー'050813'になっていないこと。
+      expect(result.payouts.map((p) => p.comboKey)).not.toContain("050813");
+      store.close();
+    });
+  });
+
   /**
    * 馬連の払戻(Issue #113・#24-D2)。
    *

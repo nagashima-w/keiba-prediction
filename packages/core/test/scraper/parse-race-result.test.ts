@@ -165,7 +165,7 @@ function buildFullResultHtml(headerRow: string, rows: string[]): string {
  * (「円」を含めて呼び出し側が指定する)。
  */
 function buildComboRow(
-  rowClass: "Wide" | "Fuku3" | "Umatan",
+  rowClass: "Wide" | "Fuku3" | "Umatan" | "Tan3",
   label: string,
   groups: readonly (readonly string[])[],
   payoutTexts: readonly string[],
@@ -1140,6 +1140,150 @@ describe("組合せ払戻(馬単、Issue #121・#24-F2)", () => {
     expect(result.widePayouts!.state).toBe("undetermined");
     if (result.widePayouts!.state === "undetermined") {
       expect(result.widePayouts!.reason.kind).toBe("invalidUmaban");
+    }
+  });
+});
+
+/**
+ * 組合せ払戻(三連単、Issue #131・#25-F)。
+ *
+ * 三連単は馬単と同じく「着順どおりの並び」が意味を持つ券種であり、`COMBO_KEY_ORDER.trifecta =
+ * "ordered"`(Issue #130・#25-D)が既に確定済みのため、`parseComboPayoutRow`は
+ * betType別の順序方針にそのまま乗る(関数本体の変更は不要。呼び出し追加のみ)。
+ *
+ * 実測値(HTML実物で確認済み):
+ * - 中央 `fixtures/result_202603020211.html:1995`: 三連単 13→8→5 = 52,690円・113人気
+ * - 地方 `fixtures/nar_result_202654071210.html:1758`: 三連単 5→7→1 = 260,090円・947人気
+ */
+describe("組合せ払戻(三連単、Issue #131・#25-F)", () => {
+  it("中央(fixtures/result_202603020211.html)の三連単13→8→5=52,690円を、着順どおりの並び([13, 8, 5])のままソートせずにパースできること(AC-1・AC-2)", () => {
+    const result = parseRaceResult(loadFixture("result_202603020211.html"));
+    // 前提固定(空振り防止): 払戻テーブル自体は取れていること。
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [13, 8, 5], payout: 52690 }],
+    });
+  });
+
+  it("地方(fixtures/nar_result_202654071210.html)の三連単5→7→1=260,090円を、着順どおりの並び([5, 7, 1])のままパースできること(AC-1・AC-2。この並びは昇順でも降順でもない〈5<7だが7>1〉非単調な実データ)", () => {
+    const result = parseRaceResult(loadFixture("nar_result_202654071210.html"));
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [5, 7, 1], payout: 260090 }],
+    });
+  });
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、wide/trio/quinella/exactaと同じくstate:undeterminedになること(payoutTableAbsent。同じ非対称)", () => {
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts!.state).toBe("undetermined");
+    if (result.trifectaPayouts!.state === "undetermined") {
+      expect(result.trifectaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    // 巻き添え無し(wide/trio/quinella/exactaも同じ理由で同じくundeterminedであること)。
+    expect(result.widePayouts!.state).toBe("undetermined");
+    expect(result.trioPayouts!.state).toBe("undetermined");
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+    expect(result.exactaPayouts!.state).toBe("undetermined");
+  });
+
+  it("1着同着(合成HTML: 1着1・1着2〈同着〉・2着3・3着4)で三連単の的中組が1着側の頭数だけ増えること(AC-6。以下は合成HTMLであり実測由来ではない)", () => {
+    // 1着が同着で2頭(1・2)、2着3・3着4は固定のケース: 三連単は「1着→2着→3着」なので
+    // (1着1→2着3→3着4)と(1着2→2着3→3着4)の2組が的中する想定(馬単の1着同着テストと同型)。
+    const trifectaRow = buildComboRow(
+      "Tan3",
+      "3連単",
+      [
+        ["1", "3", "4"],
+        ["2", "3", "4"],
+      ],
+      ["500円", "620円"],
+    );
+    const trioRow = buildComboRow("Fuku3", "3連複", [["1", "3", "4"]], ["500円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trifectaRow, trioRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [1, 3, 4], payout: 500 },
+        { umabans: [2, 3, 4], payout: 620 },
+      ],
+    });
+    // 前提固定(空振り防止): 通常時(同着なし)は1組のみであるのに対し、ここは2組であること。
+    if (result.trifectaPayouts!.state === "parsed") {
+      expect(result.trifectaPayouts!.payouts).toHaveLength(2);
+      expect(result.trifectaPayouts!.payouts.length).not.toBe(1);
+    }
+    // 巻き添え無し: 3連複は通常どおりparsed(三連単とcomboSize=3を共有する兄弟券種)。
+    expect(result.trioPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [1, 3, 4], payout: 500 }],
+    });
+  });
+
+  it("★重複検出も順序を見ること: 逆順の2組([13,8,5]と[5,8,13])が同じ行に現れても、duplicateComboとして誤って弾かれないこと(以下は合成HTMLであり実測由来ではない。買い目の並びを保持する専用キーで重複判定していることの直接固定)", () => {
+    const trifectaRow = buildComboRow(
+      "Tan3",
+      "3連単",
+      [
+        ["13", "8", "5"],
+        ["5", "8", "13"],
+      ],
+      ["52,690円", "61,200円"],
+    );
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trifectaRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [13, 8, 5], payout: 52690 },
+        { umabans: [5, 8, 13], payout: 61200 },
+      ],
+    });
+  });
+
+  it("★非昇順の並びを直接固定すること: 合成HTMLの[8, 13, 5](昇順でも降順でもない)がソートされず、そのままの並びでパースされること(AC-2・着手前ゲート指定Q2)", () => {
+    const trifectaRow = buildComboRow("Tan3", "3連単", [["8", "13", "5"]], ["1,000円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trifectaRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [8, 13, 5], payout: 1000 }],
+    });
+    // ★空振り防止: 昇順([5, 8, 13])に化けていないことを直接固定する。
+    if (result.trifectaPayouts!.state === "parsed") {
+      expect(result.trifectaPayouts!.payouts[0]!.umabans).not.toEqual([5, 8, 13]);
+    }
+  });
+
+  /**
+   * ★非退行の直接固定(三連単対応で`parseComboPayoutRow`の呼び出しを追加したことが、
+   * comboSize=3を共有する兄弟券種(3連複、順不同)を誤って"ordered"方針(昇順要求なし・
+   * ソートなし)にしていないことを固定する。馬単対応時にワイドで行った非退行テストと同型だが、
+   * 三連単はワイド(comboSize=2)ではなく3連複(comboSize=3)と構成頭数を共有するため、
+   * より紛れやすい兄弟としてこちらを対象にする)。
+   */
+  it("★非退行: 3連複の降順入力([3, 2, 1])は、三連単対応後も従来どおりkind:'invalidUmaban'でundeterminedになること(以下は合成HTMLであり実測由来ではない)", () => {
+    const trioRow = buildComboRow("Fuku3", "3連複", [["3", "2", "1"]], ["500円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trioRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trioPayouts!.state).toBe("undetermined");
+    if (result.trioPayouts!.state === "undetermined") {
+      expect(result.trioPayouts!.reason.kind).toBe("invalidUmaban");
     }
   });
 });

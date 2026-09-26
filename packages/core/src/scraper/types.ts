@@ -304,9 +304,11 @@ export interface RacePayoutEntry {
 export interface RaceComboPayoutEntry {
   /**
    * 的中組の馬番。**ワイド・三連複・馬連は昇順・重複なし。馬単(exacta、Issue #121・
-   * #24-F2)だけは例外で、着順どおりの並び(1着→2着)のまま保持し、ソートしない**
+   * #24-F2)・三連単(trifecta、Issue #131・#25-F)だけは例外で、着順どおりの並び
+   * (馬単は1着→2着、三連単は1着→2着→3着)のまま保持し、ソートしない**
    * (`scraper/combo-odds-key.ts`の`COMBO_KEY_ORDER`参照。馬単は「1着13・2着8」と
-   * 「1着8・2着13」が別の買い目であり、昇順に正規化すると区別できなくなるため)。
+   * 「1着8・2着13」が別の買い目であり、昇順に正規化すると区別できなくなるため。
+   * 三連単も同じ理由)。
    */
   readonly umabans: readonly number[];
   /** 100円あたりの払戻額(円)。 */
@@ -429,6 +431,16 @@ export interface RaceResult {
    * 昇順に正規化されない**(`RaceComboPayoutEntry.umabans`のJSDoc参照)。
    */
   readonly exactaPayouts?: RaceComboPayoutResult;
+  /**
+   * 三連単の確定払戻(Issue #131・#25-F)。`widePayouts` と同じ契約・同じ非対称
+   * (払戻テーブル自体が無い場合は `state:"undetermined"` になり、空配列にはならない)。
+   * ワイド・3連複・馬単と同じ2つ目の払戻テーブル内の行(`tr.Tan3`)から読む。
+   *
+   * **三連単は着順(1着→2着→3着)が意味を持つ「並び」であり、`payouts[].umabans`は
+   * 昇順に正規化されない**(`exactaPayouts`と同じ方針。`RaceComboPayoutEntry.umabans`の
+   * JSDoc参照)。
+   */
+  readonly trifectaPayouts?: RaceComboPayoutResult;
 }
 
 /** 単勝オッズ(1頭分)。未確定・非数値は null。 */

@@ -2709,6 +2709,152 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
     });
   });
 
+  describe("三連単(trifecta)の回収率集計(Issue #131・#25-F)", () => {
+    it("AC-6(★判定): 払戻13→8→5=52,690円に対し、正順の買い目だけが的中し、同じ3頭の他の5通りの並び(5→8→13・13→5→8・8→13→5・8→5→13・5→13→8)はすべて不的中になること(合成データ。配分はまだ三連単の買い目を作らないためallocation.betsを直接構成する。ループで6通りを網羅する)", () => {
+      const store = new AnalysisStore();
+      const correctOrder = [13, 8, 5];
+      const payout = 52690;
+      // 3頭の並び6通り(3!=6)。正順は先頭の1通りのみ、残り5通りは着手前ゲート指定の
+      // 「5→8→13・13→5→8・8→13→5・8→5→13・5→13→8」。
+      const allOrders: readonly number[][] = [
+        correctOrder,
+        [5, 8, 13],
+        [13, 5, 8],
+        [8, 13, 5],
+        [8, 5, 13],
+        [5, 13, 8],
+      ];
+      // 前提固定(空振り防止): 6通りが実際に3頭{13,8,5}の順列全体を成すこと(順列の取りこぼし・
+      // 重複が無いこと)。同じ順列を2回買ってしまうと「不的中側の点数」が水増しされ、
+      // このテストが意図しない形で緩くなる。
+      const orderKeys = new Set(allOrders.map((o) => o.join(",")));
+      expect(orderKeys.size).toBe(6);
+      for (const perm of allOrders) {
+        expect([...perm].sort((a, b) => a - b)).toEqual([5, 8, 13]);
+      }
+      expect(allOrders[0]).toEqual(correctOrder);
+
+      const stakePerBet = 100;
+      store.saveAnalysis({
+        raceId: "PB_TRIFECTA_ORDER",
+        analyzedAt: "t",
+        horses: [
+          horse(13, 0.1, null, 1.2, true),
+          horse(8, 0.05, null, 1.1, true),
+          horse(5, 0.03, null, 1.05, true),
+        ],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: allOrders.map((order) => ({
+            betType: "trifecta" as const,
+            comboKey: buildOrderedComboOddsKey(order),
+            stake: stakePerBet,
+            odds: payout / 100,
+            ev: 1.0,
+          })),
+        },
+      });
+      // 払戻は実測どおり1着13・2着8・3着5=52,690円のみ(parseComboPayoutRowが実際に返す並び)。
+      store.saveResult(
+        "PB_TRIFECTA_ORDER",
+        [
+          { umaban: 13, finishPosition: 1 },
+          { umaban: 8, finishPosition: 2 },
+          { umaban: 5, finishPosition: 3 },
+        ],
+        null,
+        { trifecta: { state: "parsed", payouts: [{ umabans: correctOrder, payout }] } },
+      );
+
+      const report = computeVerifyReport(store);
+      const { trifecta, overall, place, win, wide, trio, quinella, exacta, unknownBetType } =
+        report.proposedBet;
+
+      // 未対応の券種コード警告が出ないこと(trifectaは既知)。
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+
+      // 6点購入・正順1点だけ的中(52690*100/100=52690)・残り5点は不的中(totalReturnに寄与0)。
+      expect(trifecta).toEqual({
+        betCount: 6,
+        totalStake: 600,
+        totalReturn: 52690,
+        recoveryRate: 52690 / 600,
+        unjudgedCount: 0,
+      });
+
+      // 前提固定(空振り防止): 他の5券種は0件で、overallはtrifectaのみで構成されること。
+      expect(place.betCount).toBe(0);
+      expect(win.betCount).toBe(0);
+      expect(wide.betCount).toBe(0);
+      expect(trio.betCount).toBe(0);
+      expect(quinella.betCount).toBe(0);
+      expect(exacta.betCount).toBe(0);
+
+      // ★overallへの合算(足し忘れの変異を殺せること): 絶対値リテラルで固定する。
+      expect(overall).toEqual({
+        betCount: 6,
+        totalStake: 600,
+        totalReturn: 52690,
+        recoveryRate: 52690 / 600,
+        unjudgedCount: 0,
+      });
+      expect(overall.betCount).toBe(
+        place.betCount +
+          win.betCount +
+          wide.betCount +
+          trio.betCount +
+          quinella.betCount +
+          exacta.betCount +
+          trifecta.betCount,
+      );
+      expect(overall.totalStake).toBe(
+        place.totalStake +
+          win.totalStake +
+          wide.totalStake +
+          trio.totalStake +
+          quinella.totalStake +
+          exacta.totalStake +
+          trifecta.totalStake,
+      );
+      expect(overall.totalReturn).toBe(
+        place.totalReturn +
+          win.totalReturn +
+          wide.totalReturn +
+          trio.totalReturn +
+          quinella.totalReturn +
+          exacta.totalReturn +
+          trifecta.totalReturn,
+      );
+      store.close();
+    });
+
+    it("三連単払戻が未取込のレース(旧DB相当)では、三連単買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(0円の不的中として計上してはならない。合成データ)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "PB_TRIFECTA_UNIMPORTED",
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: [{ betType: "trifecta", comboKey: "010203", stake: 500, odds: 8, ev: 1.2 }],
+        },
+      });
+      // trifectaを渡さない(旧DB相当=三連単payout未取込のレース。placePayoutのみ保存)。
+      store.saveResult("PB_TRIFECTA_UNIMPORTED", [
+        { umaban: 1, finishPosition: 1, placePayout: 250 },
+      ]);
+
+      const report = computeVerifyReport(store);
+      const { trifecta } = report.proposedBet;
+      expect(trifecta.unjudgedCount).toBe(1);
+      // 不的中(betCount+1・totalReturn+0)として計上されていないこと。
+      expect(trifecta.betCount).toBe(0);
+      expect(trifecta.totalStake).toBe(0);
+      expect(trifecta.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
   describe("Issue #76(AC-A5): 未知の券種コードの行が投資額を静かに過小計上しないこと", () => {
     // analysis_betsのDDLはbet_type TEXT NOT NULLでCHECK制約が無いため、生SQLを書かずに
     // 「place/win/wide/trio以外」を持つ買い目行をsaveAnalysis経由でそのまま作れる(Issue本文の

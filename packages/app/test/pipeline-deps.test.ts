@@ -347,6 +347,9 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         // 馬単(Issue #121・#24-F2): この合成HTMLにはtr.Umatan行が無いため、quinellaと
         // 同じ理由で「発売なし」の空配列になる。
         exacta: { state: "parsed", payouts: [] },
+        // 三連単(Issue #131・#25-F): この合成HTMLにはtr.Tan3行が無いため、quinella/exactaと
+        // 同じ理由で「発売なし」の空配列になる。
+        trifecta: { state: "parsed", payouts: [] },
       });
     });
   });

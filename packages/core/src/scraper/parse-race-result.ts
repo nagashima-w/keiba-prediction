@@ -594,6 +594,13 @@ export function parseRaceResult(html: string): RaceResult {
       "馬単",
       payoutTablePresent,
     ),
+    trifectaPayouts: parseComboPayoutRow(
+      $,
+      SEL.trifectaRow,
+      "trifecta",
+      "三連単",
+      payoutTablePresent,
+    ),
     courseType: parseCourseType($),
   };
 }
