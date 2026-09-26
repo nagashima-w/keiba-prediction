@@ -27,12 +27,14 @@
  *
  * k(topFinishCount)についての重要な注意:
  *   ワイド・三連複の的中判定は「同時分布モデルが返す上位k着の集合に、買い目の全馬番が
- *   含まれるか(部分集合包含)」である。**単勝(win)・馬連(quinella)・馬単(exacta)の的中判定は
- *   これとは別のルール**(win: `outcome.order[0]===candidate.umaban`〈Issue #92〉。馬連:
- *   `{outcome.order[0],outcome.order[1]}`の集合が買い目の2頭と一致するか〈順不同。
- *   Issue #112〉。馬単: `outcome.order[0]===candidate.umabans[0] && outcome.order[1]===
- *   candidate.umabans[1]`〈着順どおりの一致。馬連と異なりreversedのORは取らない。
- *   Issue #120〉)であり、部分集合包含の対象外(`allocateGeneralBets`本体参照)。
+ *   含まれるか(部分集合包含)」である。**単勝(win)・馬連(quinella)・馬単(exacta)・
+ *   三連単(trifecta)の的中判定はこれとは別のルール**(win: `outcome.order[0]===
+ *   candidate.umaban`〈Issue #92〉。馬連: `{outcome.order[0],outcome.order[1]}`の集合が
+ *   買い目の2頭と一致するか〈順不同。Issue #112〉。馬単: `outcome.order[0]===
+ *   candidate.umabans[0] && outcome.order[1]===candidate.umabans[1]`〈着順どおりの一致。
+ *   馬連と異なりreversedのORは取らない。Issue #120〉。三連単: 上記馬単の式に
+ *   `outcome.order[2]===candidate.umabans[2]`を加えた3着まで着順どおりの一致
+ *   〈Issue #128〉)であり、部分集合包含の対象外(`allocateGeneralBets`本体参照)。
  *   boss着手前ゲートで実測したフィクスチャ(5頭立てで
  *   複勝2点・ワイド3点=C(3,2))が示すとおり、ワイド・三連複はkが7頭以下でも常に3である。
  *   これは複勝の払戻対象人数(`resolvePlaceBetTarget().placeCount`。5〜7頭は対象外/4頭以下は
@@ -52,7 +54,7 @@
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
  * | `topFinishCount` | `allocateGeneralBets`/`buildComboCandidates`両方(共有gatekeeper`validateTopFinishCount`) | あり | throw(非有限または負値。0・小数は許容) | 呼び出し側が構築する引数そのもの(市場データではない)。`topFinishCount=Infinity`は`place-joint-model.ts`の`k>=n`分岐に落ちて「健全に見える」非スキップ配分を返す(誤りが表面化しない最重症パターン、実測確認済み)。0・小数を許容するのは`place-joint-model.ts`が既にfloor+0クランプで意図的に許容している設計(`k===0`→`[{placed:[],probability:1}]`という明示的な契約)と非対称を作らないため。テスト: `combo-bet-allocation.test.ts`「topFinishCountの数値検証」describe。**#92で追加**: 順序付きoutcome空間を要する候補(win・#112で馬連も追加)が1件でも含まれる場合、上記の0・小数の許容は`validateOrderedCandidatesSupported`(#112でリネーム。旧`validateWinCandidatesSupported`)が締め出し、throwする(0・小数以外の候補〈place/wide/trio〉が同時に含まれていても、そのような候補が1件あれば締め出し対象。テスト: 「k(topFinishCount)=0/1/非整数×モデル(CB/PL)のテーブル」describe) |
- * | `topFinishCount`(構成頭数に対する下限。**#112で新規追加**) | `allocateGeneralBets`(`validateOrderedCandidatesSupported`) | あり | throw(順序付きoutcome空間を要する候補の構成頭数〈`umabanCountOf`の最大値。win=1・馬連=2・馬単=2〉未満) | 馬連・馬単は「1着・2着の並び」を要するため、`topFinishCount=1`だと`order[1]`が存在せず、`computeQuinellaHitProb`/`computeExactaHitProb`が全combo で0を返す(#31が禁じる「判定不能を判定結果〈EVマイナス〉に混ぜる」欠陥。winは既存の0除外だけで`order[0]`の存在が保証されるため実害が無い〈`requiredMinTopFinishCount`は候補の構成頭数の最大値なのでwin単独では発火しない〉)。テスト: `combo-bet-allocation.test.ts`「AC(#112裁定2): 順序を要する候補はtopFinishCountがその券種の構成頭数以上であること」describe |
+ * | `topFinishCount`(構成頭数に対する下限。**#112で新規追加**) | `allocateGeneralBets`(`validateOrderedCandidatesSupported`) | あり | throw(順序付きoutcome空間を要する候補の構成頭数〈`umabanCountOf`の最大値。win=1・馬連=2・馬単=2・三連単=3〉未満) | 馬連・馬単は「1着・2着の並び」を要するため、`topFinishCount=1`だと`order[1]`が存在せず、`computeQuinellaHitProb`/`computeExactaHitProb`が全combo で0を返す(#31が禁じる「判定不能を判定結果〈EVマイナス〉に混ぜる」欠陥。winは既存の0除外だけで`order[0]`の存在が保証されるため実害が無い〈`requiredMinTopFinishCount`は候補の構成頭数の最大値なのでwin単独では発火しない〉)。テスト: `combo-bet-allocation.test.ts`「AC(#112裁定2): 順序を要する候補はtopFinishCountがその券種の構成頭数以上であること」describe |
  * | `AllocationCandidate.betType` | `allocateGeneralBets`(gatekeeper`validateCandidates`)/`buildComboCandidates`。未知券種の判定は両関数とも共有ヘルパ`umabanCountOf`経由。**#92で`validateCandidates`側の`"win"`専用門番(#91が置いた暫定措置)を撤去した**。`validateCandidates`は現在`win`を他の券種と同じく`umabanCountOf`ベースの頭数一致判定だけで扱う(頭数が合えば受理し、`allocateGeneralBets`本体が別途win固有の追加検証を行う。上記`validateOrderedCandidatesSupported`参照)。**`buildComboCandidates`側の`"win"`専用門番は#92でも撤去していない(恒久的な契約)**——組合せ(ワイド・三連複)専用の候補ビルダーであり、単勝の候補構築(#90の射程)には使えないため。**#112で`"quinella"`にも同型の専用門番を追加した**(理由も同型: 馬連の構成頭数〈2〉はワイドと同一のため、委ねるとワイドと同一形式のオッズキー・ワイドの的中確率で値付けされてしまう)。**#120で`"exacta"`(馬単)にも同型の専用門番を追加した**(理由も同型: 馬単の構成頭数〈2〉はワイド・馬連と同一のため、委ねると昇順キー・ワイドの的中確率で値付けされてしまう)。**#128で`"trifecta"`(三連単)にも同型の専用門番を追加した**(理由も同型: 三連単の構成頭数〈3〉は三連複と同一のため、委ねると昇順キー・三連複の的中確率で値付けされてしまう) | あり | throw。`validateCandidates`のthrow条件は2種(#92で1種減): (1)`ALLOCATION_BET_TYPE_UMABAN_COUNT`に無い値(未知券種。`Object.hasOwn`で明示判定。`umabanCountOf`のJSDoc参照)、(2)頭数不一致(`win`・`quinella`・`exacta`・`trifecta`も含め全券種共通)。`buildComboCandidates`は上記に加えて`betType==="win"`・`betType==="quinella"`・`betType==="exacta"`・`betType==="trifecta"`で専用にthrowする | `Record<AllocationBetType, number>`の添字アクセスはTSで`number`型に確定するため、未知値の分岐が型上「到達不能」に見えるが実行時には`undefined`が返りうる(型アサーションによる契約違反)。**未知券種についてはこの判定を`umabanCountOf`1箇所に集約し**、`validateCandidates`・`buildComboCandidates`の両方がこれを通すことで「券種→頭数」の写像と「未知券種→throw」が定義1つになる(Issue #76)。テスト: `combo-bet-allocation.test.ts`「ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf」「validateCandidates: 券種(betType)の検証」「buildComboCandidates: 券種(betType)の検証」各describe |
  * | `comboSize`(**Issue #76でこの引数自体が消滅した旧仕様。以下は#76以前の`buildComboCandidates`第3引数`comboSize: number`時代の記録**) | (旧)`buildComboCandidates`(内部`kCombinationsOfUmabans`) | 対象外(経路が消滅) | 対象外(経路が消滅。現在`kCombinationsOfUmabans`の第2引数は`umabanCountOf(betType)`が返す1/2/3のいずれかに限定され、外部から任意の数値を渡す経路自体が無い) | (旧記述をそのまま保存): ガード`k<=0\|\|k>items.length`は**NaN比較が常にfalseになるため、NaN・非整数(例:1.5)はこのガードを素通りする**(捕捉ではない)。ただし`backtrack`の停止条件`current.length===k`は`current.length`が常に整数であるためNaN/非整数と一致し得ず、深さ優先探索は**2^n通りの部分集合を最後まで歩いた末に**結果が空配列に収束する(早期returnではない)。実測(本ファイル筆者・n=18・k=NaN、#76以前のcomboSize:number引数時代): 約4.6ms、k=1.5でも約2.4ms(負値・0・Infinityは`k<=0\|\|k>items.length`ガードで即座に捕捉され約0.001ms)。**Issue #76で`buildComboCandidates`の第3引数が`betType: AllocationBetType`に置き換わったことで、この経路(外部由来の任意の数値がkに渡ること)自体が消滅した**が、`kCombinationsOfUmabans`自体が2^n探索であるという性質は変わらず真であり、将来`items`の上限を引き上げる変更をする者はこの事実を踏まえること |
  * | `AllocationCandidate.umabans`(各要素) | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または0以下) | `NaN<=NaN`は常にfalseなので昇順チェックだけでは素通りする。`combo-bet-allocation.test.ts`「入力の正規化」describe(umaban=NaN/0/負値のit.each) |

@@ -3725,11 +3725,71 @@ describe("validateOrderedCandidatesSupported: trifectaのtopFinishCount下限(Is
   });
 });
 
+/**
+ * n頭(昇順)から順序付きの全トリプルへ一律の(巨大な)オッズを敷いたオッズMapを作る。
+ * AC2の恒等式テスト(下記)専用のテストヘルパー(製品コードには存在しない)。
+ *
+ * **このヘルパーは期待値の計算には一切使わない**(オッズを敷くだけで的中確率の計算式は
+ * 一切含まない)。テストが検証したい値そのもの(hitProb)は、このオッズMapを
+ * `buildTrifectaCandidates`(製品コード)に渡して得た`candidates[].ev / candidates[].odds`
+ * から読み取る。odds(=`HUGE_ODDS`)を一律の巨大値にする理由は、EV = hitProb×odds が
+ * 券種を問わず必ず閾値(既定1.0)を上回るようにし、全P(n,3)通りが漏れなく候補配列に
+ * 現れるようにするため(#128レビュー指摘対応: (a)〜(d)を製品コード経由の値で検証する)。
+ */
+function buildUniformOrderedTripleOddsMap(umabans: readonly number[], odds: number): Map<string, number | null> {
+  const map = new Map<string, number | null>();
+  for (const a of umabans) {
+    for (const b of umabans) {
+      if (b === a) continue;
+      for (const c of umabans) {
+        if (c === a || c === b) continue;
+        map.set(buildOrderedComboOddsKey([a, b, c]), odds);
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * 三連単の的中確率(AC2: 順序付き分布からの導出の恒等式。Issue #128・#25-B)。
+ *
+ * ★#128レビュー指摘(修正2026-09-26): 旧版は(a)〜(d)すべてを`bruteForceTrifectaHitProb`
+ * (テスト側の独立実装。`PLACKETT_LUCE_MODEL.buildOrderedDistribution`の結果を直接
+ * 足し合わせるだけ)で計算しており、製品コード(`computeTrifectaHitProb`・
+ * `buildTrifectaCandidates`)を一切経由していなかった。そのため「三連単の的中確率を
+ * 三連複の集合確率で置き換える」変異を注入しても(a)〜(d)は赤くならず(実際にレビューで
+ * 確認された)、この恒等式describeが謳う保証を実際には検証できていなかった。
+ *
+ * 修正: 各テストの実測値(左辺)は`buildTrifectaCandidates`(全P(n,3)通りにEVが確実に
+ * プラスになる一律の巨大オッズ`HUGE_ODDS`を敷いて呼ぶ)が返す`candidates[].ev / odds`
+ * から読み取る。期待値(右辺。オラクル)は、独立に計算した値
+ * (`PLACKETT_LUCE_MODEL.buildDistribution`の三連複集合確率・`buildOrderedDistribution`
+ * から直接求めた馬単周辺確率)のままとし、左辺だけを製品コード経由に置き換える
+ * (テストの対象は「製品コードが正しいか」であり、オラクル側まで製品コードにすると
+ * 自己参照になり変異を検出できなくなるため)。
+ */
 describe("三連単の的中確率(AC2: 順序付き分布からの導出の恒等式。Issue #128・#25-B)", () => {
   const nonUniformHorses5: JointModelHorse[] = [0.6, 0.5, 0.4, 0.3, 0.2].map((placeProb, i) => ({
     umaban: i + 1,
     placeProb,
   }));
+  const umabans5 = nonUniformHorses5.map((h) => h.umaban);
+  // 実測(本ファイル筆者・pnpm tsxで確認): nonUniformHorses5のP(5,3)=60通りのうち
+  // 最小hitProbは約0.00155。HUGE_ODDS=1,000,000ならどの組合せもev(=hitProb×odds)が
+  // 1,000以上になり、既定閾値1.0を安全に超える(全60通りが候補から漏れない)。
+  const HUGE_ODDS = 1_000_000;
+
+  /** {umabans:[a,b,c]}に完全一致する候補のhitProb(ev/odds)を取り出す(見つからなければ失敗)。 */
+  function hitProbOf(
+    candidates: readonly AllocationCandidate[],
+    triple: readonly [number, number, number],
+  ): number {
+    const cand = candidates.find(
+      (c) => c.umabans[0] === triple[0] && c.umabans[1] === triple[1] && c.umabans[2] === triple[2],
+    );
+    expect(cand).toBeDefined();
+    return cand!.ev / cand!.odds;
+  }
 
   it("前提固定(空振り防止): nonUniformHorses5はdeg=0であり、placeProbが互いに異なること(非一様)", () => {
     const fit = fitPlackettLuceStrengths(nonUniformHorses5, 3);
@@ -3739,16 +3799,20 @@ describe("三連単の的中確率(AC2: 順序付き分布からの導出の恒�
     expect(new Set(nonUniformHorses5.map((h) => h.placeProb)).size).toBe(nonUniformHorses5.length);
   });
 
-  it("(a) 全P(5,3)=60通りの確率和が1であること(前提: 60通りであることを無条件expectで先に固定)", () => {
-    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
-    expect(ordered).not.toBeNull();
-    expect(ordered.length).toBe(60);
-    const sum = ordered.reduce((s, o) => s + o.probability, 0);
+  it("(a) 製品コード(buildTrifectaCandidates)経由で得た全P(5,3)=60通りのhitProbの和が1であること", () => {
+    const oddsMap = buildUniformOrderedTripleOddsMap(umabans5, HUGE_ODDS);
+    const build = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
+    // 前提固定(空振り防止): 全60通りが1件も欠けず候補になっていること(HUGE_ODDSが
+    // 小さすぎて一部が候補外〈EV非プラス〉に落ちていないことの直接確認)。
+    expect(build.diagnostics.enumeratedCount).toBe(60);
+    expect(build.candidates.length).toBe(60);
+    const sum = build.candidates.reduce((s, c) => s + c.ev / c.odds, 0);
     expect(sum).toBeCloseTo(1, 9);
   });
 
-  it("(b) {1,2,3}の6通りの並びの確率和が、同一モデルインスタンスの集合分布(buildDistribution)が返す三連複{1,2,3}の的中確率とtoBeCloseToで一致すること", () => {
-    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+  it("(b) 製品コード経由で得た{1,2,3}の6通りの並びのhitProbの和が、同一モデルインスタンスの集合分布(buildDistribution)が返す三連複{1,2,3}の的中確率とtoBeCloseToで一致すること", () => {
+    const oddsMap = buildUniformOrderedTripleOddsMap(umabans5, HUGE_ODDS);
+    const build = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
     const setDist = PLACKETT_LUCE_MODEL.buildDistribution(nonUniformHorses5, 3);
     const perms: [number, number, number][] = [
       [1, 2, 3],
@@ -3760,7 +3824,7 @@ describe("三連単の的中確率(AC2: 順序付き分布からの導出の恒�
     ];
     let sumOrdered = 0;
     for (const p of perms) {
-      sumOrdered += bruteForceTrifectaHitProb(p, ordered);
+      sumOrdered += hitProbOf(build.candidates, p);
     }
     const trioOutcome = setDist.find(
       (o) => o.placed.length === 3 && [1, 2, 3].every((u) => o.placed.includes(u)),
@@ -3772,14 +3836,16 @@ describe("三連単の的中確率(AC2: 順序付き分布からの導出の恒�
     expect(sumOrdered).toBeCloseTo(trioOutcome!.probability, 9);
   });
 
-  it("(c) cについて和をとると馬単P(1着=1,2着=2)に一致すること", () => {
-    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+  it("(c) 製品コード経由で得た、cについて和をとった値が馬単P(1着=1,2着=2)に一致すること", () => {
+    const oddsMap = buildUniformOrderedTripleOddsMap(umabans5, HUGE_ODDS);
+    const build = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
     const a = 1;
     const b = 2;
     let sumOverC = 0;
     for (const c of [3, 4, 5]) {
-      sumOverC += bruteForceTrifectaHitProb([a, b, c], ordered);
+      sumOverC += hitProbOf(build.candidates, [a, b, c]);
     }
+    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
     const expectedExacta = ordered
       .filter((o) => o.order[0] === a && o.order[1] === b)
       .reduce((s, o) => s + o.probability, 0);
@@ -3789,8 +3855,9 @@ describe("三連単の的中確率(AC2: 順序付き分布からの導出の恒�
     expect(sumOverC).toBeCloseTo(expectedExacta, 9);
   });
 
-  it("(d) 強さの異なる馬の入力で、{1,2,3}の6通りの並びのうち少なくとも2つが異なる値になること", () => {
-    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+  it("(d) 製品コード経由で得た、強さの異なる馬の入力での{1,2,3}の6通りの並びのうち少なくとも2つが異なる値になること", () => {
+    const oddsMap = buildUniformOrderedTripleOddsMap(umabans5, HUGE_ODDS);
+    const build = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
     const perms: [number, number, number][] = [
       [1, 2, 3],
       [1, 3, 2],
@@ -3799,7 +3866,7 @@ describe("三連単の的中確率(AC2: 順序付き分布からの導出の恒�
       [3, 1, 2],
       [3, 2, 1],
     ];
-    const values = perms.map((p) => bruteForceTrifectaHitProb(p, ordered));
+    const values = perms.map((p) => hitProbOf(build.candidates, p));
     // 前提(空振り防止): 6値が非退化(すべて0より大きい)であること。
     for (const v of values) {
       expect(v).toBeGreaterThan(0);

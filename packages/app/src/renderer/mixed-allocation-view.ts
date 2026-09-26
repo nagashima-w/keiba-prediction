@@ -317,7 +317,7 @@ export function buildHiddenAllocationsBlocks(
  * 本caseの追加はコンパイルを通すための最小限であり(`betType`は閉じたユニオンのため
  * 網羅的switchが要求する)、`betTypeLabel`側へのcase追加・
  * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加は行わない**
- * (app はまだ三連単の候補を一切作らない。オッズ配線・配分接続は#132〈#25-Fのスコープ〉。
+ * (app はまだ三連単の候補を一切作らない。オッズ配線・配分接続は#132〈#25-E〉のスコープ。
  * `win`/`quinella`/`exacta`が最初にそうだったのと同じ経緯)。
  */
 export function mixedBetTypeLabel(
