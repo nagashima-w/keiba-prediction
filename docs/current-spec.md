@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.10.4)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.10.5)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -67,12 +67,12 @@
     求める)→ 馬単の確定払戻の取込・回収率検証(Issue #121・#24-F2・v1.10.4)→
     `scrape-race.ts`(オッズ取得)への配線・分析結果/保存スナップショットへの搭載・
     `shared/mixed-candidates.ts`の候補ビルダー(`buildExactaCandidatesForBetType`)対応
-    (Issue #122・#24-E2。`includeComboOdds: true`のとき、既存のワイド・3連複・馬連の**後**に
+    (Issue #122・#24-E2・v1.10.5。`includeComboOdds: true`のとき、既存のワイド・3連複・馬連の**後**に
     馬単オッズを1リクエスト追加で取得する〈中央`type=6`・地方`type=b6`、いずれも単発
     リクエストで完結〉)。**配分の券種選択への接続・画面表示は未着手**(#123のスコープ。
     `ALL_MIXED_CANDIDATE_BET_TYPES`・`resolveMixedBetTypes`は`"exacta"`を含まないため、
     利用者から見える配分結果はIssue #122の時点では変わらない)
-- バージョン: ルート/アプリ `1.10.4`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.10.5`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から

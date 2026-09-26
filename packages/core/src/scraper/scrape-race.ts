@@ -254,10 +254,11 @@ function errorMessage(error: unknown): string {
  * **網羅的なswitchにする理由(Issue #106・#24-B着手前ゲートで発見)**: 従来は
  * `betType === "wide" ? "ワイド" : "3連複"` という2値専用の三項演算子だった。
  * `ComboBetType`に`exacta`(馬単)を追加した際、この三項演算子はコンパイルエラーを
- * 出さずに馬単を誤って「3連複」と表示する状態になっていた(現状は本ファイルの
- * `fetchComboBetTypeOdds`呼び出しが`wide`/`trio`固定〈#24-D/E以降で馬単のライブ取得を
- * 配線するまでproductionからは到達しない〉が、`default`のnever到達チェックにより、
- * 次に券種を追加する際〈#26等〉は必ずコンパイルエラーで気づける形にしておく)。
+ * 出さずに馬単を誤って「3連複」と表示する状態になっていた(**現在は本ファイルの
+ * `fetchComboBetTypeOdds`呼び出しがwide・trio・quinella〈Issue #116・#24-D3b-1〉・
+ * exacta〈Issue #122・#24-E2〉の4券種すべてを取得しており、4つともproductionから
+ * 到達する**)。`default`のnever到達チェックにより、次に券種を追加する際〈#26等〉は
+ * 必ずコンパイルエラーで気づける形にしておく。
  */
 function comboBetTypeLabel(betType: ComboBetType): string {
   switch (betType) {
