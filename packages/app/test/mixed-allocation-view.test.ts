@@ -791,7 +791,7 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
  *       → 接続後は#112当時のような原理的評価不能ではなく、既存のワイド・馬連・3連複と
  *         同じ「ユーザーがOFFにした」到達可能な理由になったため
  */
-describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #125で馬単の除外を解除)", () => {
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #125で馬単の除外を解除・Issue #128で三連単を除外に追加)", () => {
   it("内訳表に描画される券種にquinella(馬連)が含まれること(Issue #117でワイド・3連複と対称になったため)", () => {
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("quinella");
   });
@@ -800,11 +800,15 @@ describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬�
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("exacta");
   });
 
-  it("意図的に除外している券種が無いこと(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し、Issue #117でその除外を解除、#120で馬単を新たに除外し、Issue #125でその除外も解除した)", () => {
+  it("内訳表に描画される券種にtrifecta(三連単)が含まれないこと(Issue #128〈#25-B〉: appはまだ三連単の候補を一切作らないため、#112当時のquinella・#120当時のexactaと同じ理由で除外する。オッズ配線・配分接続は#132のスコープ)", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).not.toContain("trifecta");
+  });
+
+  it("意図的に除外している券種が['trifecta']だけであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し、Issue #117でその除外を解除、#120で馬単を新たに除外し、Issue #125でその除外も解除し、Issue #128で三連単を新たに除外に加えた)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
     );
-    expect(excluded).toEqual([]);
+    expect(excluded).toEqual(["trifecta"]);
   });
 
   it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複)であること", () => {
@@ -1823,6 +1827,7 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
       quinella: { stake: 0, count: 0 },
       exacta: { stake: 0, count: 0 },
       trio: { stake: 0, count: 0 },
+      trifecta: { stake: 0, count: 0 },
     },
     sortedAllocations: [],
     unjudged: { oddsMissingCount: 0, oddsUnfetchedCount: 0, oddsMalformedCount: 0 },

@@ -53,7 +53,7 @@
  * |---|---|---|---|---|
  * | `topFinishCount` | `allocateGeneralBets`/`buildComboCandidates`両方(共有gatekeeper`validateTopFinishCount`) | あり | throw(非有限または負値。0・小数は許容) | 呼び出し側が構築する引数そのもの(市場データではない)。`topFinishCount=Infinity`は`place-joint-model.ts`の`k>=n`分岐に落ちて「健全に見える」非スキップ配分を返す(誤りが表面化しない最重症パターン、実測確認済み)。0・小数を許容するのは`place-joint-model.ts`が既にfloor+0クランプで意図的に許容している設計(`k===0`→`[{placed:[],probability:1}]`という明示的な契約)と非対称を作らないため。テスト: `combo-bet-allocation.test.ts`「topFinishCountの数値検証」describe。**#92で追加**: 順序付きoutcome空間を要する候補(win・#112で馬連も追加)が1件でも含まれる場合、上記の0・小数の許容は`validateOrderedCandidatesSupported`(#112でリネーム。旧`validateWinCandidatesSupported`)が締め出し、throwする(0・小数以外の候補〈place/wide/trio〉が同時に含まれていても、そのような候補が1件あれば締め出し対象。テスト: 「k(topFinishCount)=0/1/非整数×モデル(CB/PL)のテーブル」describe) |
  * | `topFinishCount`(構成頭数に対する下限。**#112で新規追加**) | `allocateGeneralBets`(`validateOrderedCandidatesSupported`) | あり | throw(順序付きoutcome空間を要する候補の構成頭数〈`umabanCountOf`の最大値。win=1・馬連=2・馬単=2〉未満) | 馬連・馬単は「1着・2着の並び」を要するため、`topFinishCount=1`だと`order[1]`が存在せず、`computeQuinellaHitProb`/`computeExactaHitProb`が全combo で0を返す(#31が禁じる「判定不能を判定結果〈EVマイナス〉に混ぜる」欠陥。winは既存の0除外だけで`order[0]`の存在が保証されるため実害が無い〈`requiredMinTopFinishCount`は候補の構成頭数の最大値なのでwin単独では発火しない〉)。テスト: `combo-bet-allocation.test.ts`「AC(#112裁定2): 順序を要する候補はtopFinishCountがその券種の構成頭数以上であること」describe |
- * | `AllocationCandidate.betType` | `allocateGeneralBets`(gatekeeper`validateCandidates`)/`buildComboCandidates`。未知券種の判定は両関数とも共有ヘルパ`umabanCountOf`経由。**#92で`validateCandidates`側の`"win"`専用門番(#91が置いた暫定措置)を撤去した**。`validateCandidates`は現在`win`を他の券種と同じく`umabanCountOf`ベースの頭数一致判定だけで扱う(頭数が合えば受理し、`allocateGeneralBets`本体が別途win固有の追加検証を行う。上記`validateOrderedCandidatesSupported`参照)。**`buildComboCandidates`側の`"win"`専用門番は#92でも撤去していない(恒久的な契約)**——組合せ(ワイド・三連複)専用の候補ビルダーであり、単勝の候補構築(#90の射程)には使えないため。**#112で`"quinella"`にも同型の専用門番を追加した**(理由も同型: 馬連の構成頭数〈2〉はワイドと同一のため、委ねるとワイドと同一形式のオッズキー・ワイドの的中確率で値付けされてしまう)。**#120で`"exacta"`(馬単)にも同型の専用門番を追加した**(理由も同型: 馬単の構成頭数〈2〉はワイド・馬連と同一のため、委ねると昇順キー・ワイドの的中確率で値付けされてしまう) | あり | throw。`validateCandidates`のthrow条件は2種(#92で1種減): (1)`ALLOCATION_BET_TYPE_UMABAN_COUNT`に無い値(未知券種。`Object.hasOwn`で明示判定。`umabanCountOf`のJSDoc参照)、(2)頭数不一致(`win`・`quinella`・`exacta`も含め全券種共通)。`buildComboCandidates`は上記に加えて`betType==="win"`・`betType==="quinella"`・`betType==="exacta"`で専用にthrowする | `Record<AllocationBetType, number>`の添字アクセスはTSで`number`型に確定するため、未知値の分岐が型上「到達不能」に見えるが実行時には`undefined`が返りうる(型アサーションによる契約違反)。**未知券種についてはこの判定を`umabanCountOf`1箇所に集約し**、`validateCandidates`・`buildComboCandidates`の両方がこれを通すことで「券種→頭数」の写像と「未知券種→throw」が定義1つになる(Issue #76)。テスト: `combo-bet-allocation.test.ts`「ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf」「validateCandidates: 券種(betType)の検証」「buildComboCandidates: 券種(betType)の検証」各describe |
+ * | `AllocationCandidate.betType` | `allocateGeneralBets`(gatekeeper`validateCandidates`)/`buildComboCandidates`。未知券種の判定は両関数とも共有ヘルパ`umabanCountOf`経由。**#92で`validateCandidates`側の`"win"`専用門番(#91が置いた暫定措置)を撤去した**。`validateCandidates`は現在`win`を他の券種と同じく`umabanCountOf`ベースの頭数一致判定だけで扱う(頭数が合えば受理し、`allocateGeneralBets`本体が別途win固有の追加検証を行う。上記`validateOrderedCandidatesSupported`参照)。**`buildComboCandidates`側の`"win"`専用門番は#92でも撤去していない(恒久的な契約)**——組合せ(ワイド・三連複)専用の候補ビルダーであり、単勝の候補構築(#90の射程)には使えないため。**#112で`"quinella"`にも同型の専用門番を追加した**(理由も同型: 馬連の構成頭数〈2〉はワイドと同一のため、委ねるとワイドと同一形式のオッズキー・ワイドの的中確率で値付けされてしまう)。**#120で`"exacta"`(馬単)にも同型の専用門番を追加した**(理由も同型: 馬単の構成頭数〈2〉はワイド・馬連と同一のため、委ねると昇順キー・ワイドの的中確率で値付けされてしまう)。**#128で`"trifecta"`(三連単)にも同型の専用門番を追加した**(理由も同型: 三連単の構成頭数〈3〉は三連複と同一のため、委ねると昇順キー・三連複の的中確率で値付けされてしまう) | あり | throw。`validateCandidates`のthrow条件は2種(#92で1種減): (1)`ALLOCATION_BET_TYPE_UMABAN_COUNT`に無い値(未知券種。`Object.hasOwn`で明示判定。`umabanCountOf`のJSDoc参照)、(2)頭数不一致(`win`・`quinella`・`exacta`・`trifecta`も含め全券種共通)。`buildComboCandidates`は上記に加えて`betType==="win"`・`betType==="quinella"`・`betType==="exacta"`・`betType==="trifecta"`で専用にthrowする | `Record<AllocationBetType, number>`の添字アクセスはTSで`number`型に確定するため、未知値の分岐が型上「到達不能」に見えるが実行時には`undefined`が返りうる(型アサーションによる契約違反)。**未知券種についてはこの判定を`umabanCountOf`1箇所に集約し**、`validateCandidates`・`buildComboCandidates`の両方がこれを通すことで「券種→頭数」の写像と「未知券種→throw」が定義1つになる(Issue #76)。テスト: `combo-bet-allocation.test.ts`「ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf」「validateCandidates: 券種(betType)の検証」「buildComboCandidates: 券種(betType)の検証」各describe |
  * | `comboSize`(**Issue #76でこの引数自体が消滅した旧仕様。以下は#76以前の`buildComboCandidates`第3引数`comboSize: number`時代の記録**) | (旧)`buildComboCandidates`(内部`kCombinationsOfUmabans`) | 対象外(経路が消滅) | 対象外(経路が消滅。現在`kCombinationsOfUmabans`の第2引数は`umabanCountOf(betType)`が返す1/2/3のいずれかに限定され、外部から任意の数値を渡す経路自体が無い) | (旧記述をそのまま保存): ガード`k<=0\|\|k>items.length`は**NaN比較が常にfalseになるため、NaN・非整数(例:1.5)はこのガードを素通りする**(捕捉ではない)。ただし`backtrack`の停止条件`current.length===k`は`current.length`が常に整数であるためNaN/非整数と一致し得ず、深さ優先探索は**2^n通りの部分集合を最後まで歩いた末に**結果が空配列に収束する(早期returnではない)。実測(本ファイル筆者・n=18・k=NaN、#76以前のcomboSize:number引数時代): 約4.6ms、k=1.5でも約2.4ms(負値・0・Infinityは`k<=0\|\|k>items.length`ガードで即座に捕捉され約0.001ms)。**Issue #76で`buildComboCandidates`の第3引数が`betType: AllocationBetType`に置き換わったことで、この経路(外部由来の任意の数値がkに渡ること)自体が消滅した**が、`kCombinationsOfUmabans`自体が2^n探索であるという性質は変わらず真であり、将来`items`の上限を引き上げる変更をする者はこの事実を踏まえること |
  * | `AllocationCandidate.umabans`(各要素) | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または0以下) | `NaN<=NaN`は常にfalseなので昇順チェックだけでは素通りする。`combo-bet-allocation.test.ts`「入力の正規化」describe(umaban=NaN/0/負値のit.each) |
  * | `AllocationCandidate.odds` | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限または1.0未満。#74でisUsableOddsの基準を`>0`から引き上げ) | `combo-bet-allocation.test.ts`「候補の数値検証(odds/evの異常値)」describe |
@@ -186,13 +186,21 @@ export type { SkipReasonCode };
  * (comboSize=2は`wide`/`quinella`と同じ頭数のため、門番が無いと昇順キー・集合分布で
  * 値付けされてしまう)。
  *
+ * `"trifecta"`(三連単)はIssue #128(#25-B)で対応済み。馬単と同じく着順そのものに意味が
+ * あり(1着=a・2着=b・3着=cという並びが買い目そのもの)、`AllocationCandidate.umabans`は
+ * 着順の並びをそのまま保持する(`allocationBetTypeKeyOrder`が`exacta`と同じ`"ordered"`を
+ * 返す)。候補の構築は専用の候補ビルダー`buildTrifectaCandidates`(本ファイル下方)が担い、
+ * `buildComboCandidates`は`exacta`と同じ理由で`trifecta`も専用の門番でthrowする
+ * (comboSize=3は`trio`と同じ頭数のため、門番が無いと三連複の的中確率〈集合分布〉で
+ * 値付けされてしまう)。
+ *
  * 逆写像(頭数→券種)は本ファイルに一切作らない: `umabans.length` から券種を引く関数は
  * production に存在しない(`ALLOCATION_BET_TYPE_UMABAN_COUNT` は券種→頭数の一方向のみ)。
- * `win`と`place`はどちらも頭数1、`wide`と`quinella`と`exacta`はどちらも頭数2のため、
- * 逆写像は単射になれない(`umabans.length===1 ? "place" : ...`のような実装をどこにも
- * 作らないこと)。
+ * `win`と`place`はどちらも頭数1、`wide`と`quinella`と`exacta`はどちらも頭数2、
+ * `trio`と`trifecta`はどちらも頭数3のため、逆写像は単射になれない
+ * (`umabans.length===1 ? "place" : ...`のような実装をどこにも作らないこと)。
  */
-export type AllocationBetType = "place" | "win" | "wide" | "quinella" | "trio" | "exacta";
+export type AllocationBetType = "place" | "win" | "wide" | "quinella" | "trio" | "exacta" | "trifecta";
 
 /**
  * 券種→買い目を構成する頭数の唯一の写像(Issue #76・#91で`win`追加・#112で`quinella`追加・
@@ -209,12 +217,14 @@ export type AllocationBetType = "place" | "win" | "wide" | "quinella" | "trio" |
  * 「ALLOCATION_BET_TYPE_UMABAN_COUNT」describe のテストで機械的に確認する)。
  * `quinella`のオッズ取得(`ComboBetType`への追加)はIssue #113・#24-D2、`exacta`は
  * Issue #106・#24-Bで対応済み(`COMBO_SIZE.quinella`/`COMBO_SIZE.exacta`もいずれも2で
- * 一致する。整合は下記テストで機械的に確認する)。
+ * 一致する。整合は下記テストで機械的に確認する)。`trifecta`(三連単)はIssue #130・#25-Dで
+ * `COMBO_SIZE`に追加済み(`COMBO_SIZE.trifecta===3`。ここでの追加はIssue #128・#25-B)。
  *
- * **キーの挿入順は頭数の昇順(place, win, wide, quinella, exacta, trio)。**
+ * **キーの挿入順は頭数の昇順(place, win, wide, quinella, exacta, trio, trifecta)。**
  * `umabanCountOf`が未知の券種をthrowする際、この`Object.keys`の順序をそのままメッセージに
  * 埋め込むため(下記参照)、挿入順を変えるとエラーメッセージの券種列挙順が変わる。
  * `quinella`・`exacta`は`wide`と同じ頭数(2)のため`wide`の直後にまとめて置く。
+ * `trifecta`は`trio`と同じ頭数(3)のため`trio`の直後に置く。
  */
 export const ALLOCATION_BET_TYPE_UMABAN_COUNT: Record<AllocationBetType, number> = {
   place: 1,
@@ -223,6 +233,7 @@ export const ALLOCATION_BET_TYPE_UMABAN_COUNT: Record<AllocationBetType, number>
   quinella: 2,
   exacta: 2,
   trio: 3,
+  trifecta: 3,
 };
 
 /**
@@ -287,6 +298,11 @@ export function umabanCountOf(betType: AllocationBetType): number {
  * 追加した(旧文言「この写像に1行足すだけで済み、isHit分岐を再度書き換える必要はない」は
  * 馬単には成立しなかった。isHit分岐本体のコメント参照)。
  *
+ * **三連単(`trifecta`)もIssue #128・#25-Bで`true`を追加した。** 馬単と同じ理由(写像への
+ * 追加だけでは`requiredMinTopFinishCount`・`validateOrderedCandidatesSupported`しか
+ * 自動拡張されず、isHit分岐には`betType==="trifecta"`の専用ケース〈着順どおり3着まで一致〉を
+ * 別途追加する必要がある)。
+ *
  * **`allocationBetTypeKeyOrder`(下記)と混同しないこと。** 本写像が答えるのは
  * 「的中判定に順序付きoutcome空間が必要か」であり(`quinella`もtrue: 1着・2着の周辺確率を
  * 求めるため)、`allocationBetTypeKeyOrder`が答える「`umabans`の並び自体が意味を持つか」
@@ -303,6 +319,7 @@ export const ALLOCATION_BET_TYPE_REQUIRES_ORDER: Readonly<Record<AllocationBetTy
   quinella: true,
   trio: false,
   exacta: true,
+  trifecta: true,
 };
 
 /**
@@ -317,9 +334,10 @@ export const ALLOCATION_BET_TYPE_REQUIRES_ORDER: Readonly<Record<AllocationBetTy
  * `ALLOCATION_BET_TYPE_REQUIRES_ORDER.quinella`は`true`だが(的中判定に順序付きoutcome空間が
  * 必要という意味)、`quinella`の`umabans`は常に昇順2頭の組として表現し、順不同ペア一致で
  * 的中判定する(`buildQuinellaCandidates`・isHit分岐参照)。したがって本写像では
- * `quinella`は`"unordered"`(昇順を要求する)であり、`"ordered"`は`exacta`(馬単)だけである
- * (`a→b`と`b→a`は別の買い目・別のオッズであり、`umabans`が並びをそのまま保持する必要が
- * あるため)。`validateCandidates`の昇順要求緩和(#120 AC-5)はこの写像を根拠にする。
+ * `quinella`は`"unordered"`(昇順を要求する)であり、`"ordered"`は`exacta`(馬単)・`trifecta`
+ * (三連単。Issue #128・#25-Bで追加)の2つである(`a→b→c`と`c→b→a`は別の買い目・別のオッズで
+ * あり、`umabans`が並びをそのまま保持する必要があるため)。`validateCandidates`の昇順要求
+ * 緩和(#120 AC-5)はこの写像を根拠にする。
  */
 export function allocationBetTypeKeyOrder(betType: AllocationBetType): ComboKeyOrder {
   return Object.hasOwn(COMBO_KEY_ORDER, betType) ? COMBO_KEY_ORDER[betType as ComboBetType] : "unordered";
@@ -359,8 +377,9 @@ export function buildAllocationBetComboKey(
  * odds/ev/isPositiveは呼び出し側(buildComboCandidates等)が算出済みの値を渡す。
  *
  * 契約: umabansは**昇順・重複なし**であること。ただし`allocationBetTypeKeyOrder(betType)`が
- * `"ordered"`を返す券種(現状は`exacta`〈馬単〉のみ)は例外で、着順の並びをそのまま保持し
- * 昇順は要求しない(重複=同一馬番の繰り返しは引き続き拒否する。Issue #120・AC-5)。
+ * `"ordered"`を返す券種(`exacta`〈馬単〉・`trifecta`〈三連単。Issue #128で追加〉)は例外で、
+ * 着順の並びをそのまま保持し昇順は要求しない(重複=同一馬番の繰り返しは引き続き拒否する。
+ * Issue #120・AC-5)。
  * 違反する候補が1件でも含まれる場合、`allocateGeneralBets` は例外を投げる
  * (黙って通さない。受け入れ条件7)。
  */
@@ -785,11 +804,12 @@ function validateOrderedCandidatesSupported(
  *
  * **馬番の並び検証はIssue #120で券種ごとに分岐する。** `allocationBetTypeKeyOrder(betType)`が
  * `"unordered"`(place/win/wide/quinella/trio)の候補は従来どおり厳密な昇順を要求するが、
- * `"ordered"`(現状はexacta〈馬単〉のみ)の候補は着順の並びをそのまま許容し、
- * 「同一馬番の重複」だけを拒否する(a→aは引き続きthrow。`AllocationCandidate.umabans`の
- * JSDoc参照)。**`quinella`は`ALLOCATION_BET_TYPE_REQUIRES_ORDER`が`true`だが、ここでは
- * `"unordered"`のまま**(umabansは常に昇順2頭の組として表現し、順不同ペア一致はisHit側で
- * 行うため。2つの写像を混同しないこと〈`allocationBetTypeKeyOrder`のJSDoc参照〉)。
+ * `"ordered"`(exacta〈馬単〉・trifecta〈三連単。Issue #128で追加〉)の候補は着順の並びを
+ * そのまま許容し、「同一馬番の重複」だけを拒否する(a→aは引き続きthrow。
+ * `AllocationCandidate.umabans`のJSDoc参照)。**`quinella`は`ALLOCATION_BET_TYPE_REQUIRES_ORDER`が
+ * `true`だが、ここでは`"unordered"`のまま**(umabansは常に昇順2頭の組として表現し、
+ * 順不同ペア一致はisHit側で行うため。2つの写像を混同しないこと
+ * 〈`allocationBetTypeKeyOrder`のJSDoc参照〉)。
  */
 function validateCandidates(candidates: readonly AllocationCandidate[]): void {
   const seen = new Set<string>();
@@ -829,7 +849,7 @@ function validateCandidates(candidates: readonly AllocationCandidate[]): void {
         }
       }
     } else {
-      // 順序付き券種(現状はexacta〈馬単〉のみ。Issue #120)。並びは保存するため
+      // 順序付き券種(exacta〈馬単〉・trifecta〈三連単。Issue #120・#128〉)。並びは保存するため
       // 昇順は要求しないが、同一馬番の重複(a→a)は引き続き拒否する。
       const seenUmaban = new Set<number>();
       for (const u of umabans) {
@@ -1049,9 +1069,12 @@ export function allocateGeneralBets(
         // exacta(馬単): 1着・2着が買い目の並びどおりに一致するか(順序どおり。reversedの
         // ORは取らない。Issue #120)。quinellaと違い「同じ2頭の逆順」は的中にならない
         // (`docs/quinella-exacta-odds-investigation.md` §5.1で確定払戻突合により確認済み)。
+        // trifecta(三連単): 1着・2着・3着が買い目の並びどおりに一致するか(順序どおり3着まで。
+        // Issue #128)。exactaと同じ「並びそのものが買い目」という性質を3着まで拡張しただけで、
+        // 別の判定式ではない。
         // **`ALLOCATION_BET_TYPE_REQUIRES_ORDER`に1行足すだけでは、この的中判定の式自体は
         // 自動的に拡張されない**(同定数のJSDoc「訂正」参照)。次に順序を要する券種を
-        // 追加するときも、判定式が既存のwin/quinella/exactaのいずれとも異なるなら、
+        // 追加するときも、判定式が既存のwin/quinella/exacta/trifectaのいずれとも異なるなら、
         // ここに新しい分岐を書く必要がある。
         // それ以外(place/wide/trio): 買い目の全馬番が上位k着の集合に含まれるか(部分集合包含)。
         const isHit =
@@ -1062,7 +1085,11 @@ export function allocateGeneralBets(
                 (outcome.order[0] === c.umabans[1] && outcome.order[1] === c.umabans[0])
               : c.betType === "exacta"
                 ? outcome.order[0] === c.umabans[0] && outcome.order[1] === c.umabans[1]
-                : c.umabans.every((u) => orderSet.has(u));
+                : c.betType === "trifecta"
+                  ? outcome.order[0] === c.umabans[0] &&
+                    outcome.order[1] === c.umabans[1] &&
+                    outcome.order[2] === c.umabans[2]
+                  : c.umabans.every((u) => orderSet.has(u));
         if (isHit) indices.push(i);
       }
       return { indices, probability: outcome.probability };
@@ -1396,13 +1423,25 @@ function computeComboHitProb(combo: readonly number[], rawDistribution: readonly
  * あり、馬単はこの関数の責務外——**馬単専用の候補ビルダーは`buildExactaCandidates`
  * (本ファイル下方。#120で新設)を使うこと**。
  *
+ * **三連単(trifecta)専用の候補もこの関数では構築しない(#128・#25-Bで追加・恒久的な契約)。**
+ * `betType==="trifecta"`は`exacta`と全く同じ理由でthrowする(下記実装参照)。理由:
+ * 三連単の構成頭数(`umabanCountOf("trifecta")===3`)は`trio`と同一のため、`umabanCountOf`に
+ * 委ねると`kCombinationsOfUmabans(umabans, 3)`が**昇順ソート済みの**3頭組を列挙し、
+ * `resolveComboOdds`(betType省略)が生成するオッズキーも`trio`と完全に同一の昇順キーに
+ * なる(三連単の着順の区別が失われる)。さらに`computeComboHitProb`は集合分布から的中確率を
+ * 返すため、結果として**三連単の的中確率(着順どおりの一致)ではなく三連複の的中確率**で
+ * 値付けされた候補が`betType:"trifecta"`のラベルで返ってしまう(win/quinella/exactaと
+ * 同型の危険クラス)。この関数は組合せ(ワイド・三連複)専用のビルダーであり、三連単は
+ * この関数の責務外——**三連単専用の候補ビルダーは`buildTrifectaCandidates`(本ファイル
+ * 下方。#128で新設)を使うこと**。
+ *
  * @param horses 出走全頭(複勝圏内確率。同時分布構築に使う)
  * @param topFinishCount 上位何着までを的中判定に使うか(ワイド・三連複は常に3。JSDoc冒頭参照)
  * @param betType 買い目の券種(Issue #76)。買い目を構成する頭数は`umabanCountOf(betType)`
  *   (=`ALLOCATION_BET_TYPE_UMABAN_COUNT[betType]`)から導く。外部から任意の数値`comboSize`を
  *   受け取っていた旧引数はIssue #76で廃止した(未知の券種は`umabanCountOf`がthrowする。
- *   数値防御カバレッジ表の`comboSize`行参照)。`"win"`・`"quinella"`・`"exacta"`は未知の
- *   券種ではないが、上記の理由でこの関数自身が別途throwする
+ *   数値防御カバレッジ表の`comboSize`行参照)。`"win"`・`"quinella"`・`"exacta"`・`"trifecta"`は
+ *   未知の券種ではないが、上記の理由でこの関数自身が別途throwする
  * @param oddsByKey buildComboOddsKeyで生成したキーへのオッズMap(値がnullなら欠損、
  *   キーが無ければ未取得)。**値はスカラー(既に1つに決まったオッズ)であること。**
  *   ワイドのレンジ表現(下限-上限)から下限を選び出す変換は本関数の責務ではなく、
@@ -1445,6 +1484,15 @@ export function buildComboCandidates(
     throw new Error(
       "buildComboCandidatesは組合せ(ワイド・三連複)専用の候補ビルダーです。" +
         "馬単(exacta)の買い目候補はこの関数では構築できません(betType=exacta)",
+    );
+  }
+  // 三連単(trifecta)専用の恒久的な門番(#128)。umabanCountOfへは委ねない(上記関数JSDoc参照:
+  // 三連単の構成頭数はtrioと同一〈3〉のため、委ねると昇順キー・三連複の的中確率で
+  // 値付けされた候補が黙って構築されてしまう)。
+  if (betType === "trifecta") {
+    throw new Error(
+      "buildComboCandidatesは組合せ(ワイド・三連複)専用の候補ビルダーです。" +
+        "三連単(trifecta)の買い目候補はこの関数では構築できません(betType=trifecta)",
     );
   }
   // 未知のbetTypeはここでthrowする(Issue #76。umabanCountOfへ判定を集約)。
@@ -1759,6 +1807,157 @@ export function buildExactaCandidates(
     candidates,
     diagnostics: {
       enumeratedCount: pairs.length,
+      judged: { positiveCount: candidates.length, notPositiveCount },
+      unjudged: { oddsMissingCount, oddsUnfetchedCount, oddsMalformedCount },
+    },
+  };
+}
+
+// ============================================================================
+// 三連単(trifecta)・Issue #128(#25-B): 的中確率・候補ビルダー・配分の門番
+// ============================================================================
+
+/**
+ * 三連単(trifecta)の的中確率を、順序付きoutcome空間(1着・2着・3着の並び)から直接導出する
+ * (Issue #128・#25-B)。`computeComboHitProb`(上位k着の**集合**分布から的中確率を求める。
+ * 三連複用)とは別物であり、三連単には使わない(使うと同じ3頭の6通りの並びをすべて的中に
+ * 含めてしまい過大評価になる=三連複と同じ値になる)。三連単は**着順そのもの**
+ * P(1着=a, 2着=b, 3着=c)であり、`triple`は`[1着として狙う馬番, 2着として狙う馬番,
+ * 3着として狙う馬番]`という順序付きの並びとして扱う(`[a,b,c]`と他の5通りの並び替えは
+ * すべて別の買い目)。`computeExactaHitProb`の3着版で、`{outcome.order[0]===a &&
+ * outcome.order[1]===b && outcome.order[2]===c}`の確率を合算するだけで、他の並びのORは
+ * 取らない。
+ */
+function computeTrifectaHitProb(
+  triple: readonly number[],
+  orderedDistribution: readonly OrderedOutcome[],
+): number {
+  const [a, b, c] = triple;
+  let total = 0;
+  for (const outcome of orderedDistribution) {
+    if (outcome.order[0] === a && outcome.order[1] === b && outcome.order[2] === c) {
+      total += outcome.probability;
+    }
+  }
+  return total;
+}
+
+/**
+ * n頭(昇順)から順序付きの全トリプル(a・b・cが互いに異なる)を列挙する(Issue #128)。
+ * `kCombinationsOfUmabans`(順不同の組。昇順ソートして重複を除いた組合せ)とは別物で、
+ * `[a,b,c]`とその5通りの並び替えをすべて別要素として列挙する(n頭ならP(n,3)=n×(n-1)×(n-2)
+ * 通り)。`orderedPairsOfUmabans`(馬単用。#120)の3頭版であり、列挙順は`items`(昇順)への
+ * 三重ループでの出現順であり決定的。
+ */
+function orderedTriplesOfUmabans(items: readonly number[]): number[][] {
+  const results: number[][] = [];
+  for (const a of items) {
+    for (const b of items) {
+      if (b === a) continue;
+      for (const c of items) {
+        if (c === a || c === b) continue;
+        results.push([a, b, c]);
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * 三連単(trifecta)向けの買い目候補を構築する(着順どおりの的中確率の導出+オッズ4状態解決
+ * (順序付きキー)+EV算出。Issue #128・#25-B)。
+ *
+ * `buildExactaCandidates`と同型の骨格だが、次の2点が異なる(いずれも三連単が馬単と同じく
+ * 「着順そのものに意味がある」券種であることに由来する。三連単のキー確定は
+ * `docs/trifecta-odds-investigation.md` §5.1参照):
+ * 1. **列挙**: `kCombinationsOfUmabans`(昇順・重複除去)ではなく`orderedTriplesOfUmabans`
+ *    (順序付きの全トリプル。n頭ならP(n,3)=n×(n-1)×(n-2)通り)を使う。`[a,b,c]`とその
+ *    並び替えは別の買い目。
+ * 2. **オッズの引き当て**: `resolveComboOdds`に`betType="trifecta"`を渡し、
+ *    `buildOrderedComboOddsKey`(並びをソートしない)でキーを引く。`betType`省略時の
+ *    `buildComboOddsKey`(常に昇順ソート)のままだと並び違いの組が同じキーに潰れ、
+ *    異なる並びのオッズが入れ替わって値付けされてしまう(#128 AC1が殺す変異そのもの)。
+ *
+ * 返す候補の`umabans`は**着順の並びをそのまま保持する**(昇順ではない。
+ * `AllocationCandidate.umabans`のJSDoc参照)。
+ *
+ * `buildOrderedDistribution`が`null`(判定不能。固定馬2頭以上、または`topFinishCount`が
+ * 出走頭数を覆う縮退)を返した場合、本関数は`buildExactaCandidates`と同じく**throwせず
+ * 候補0件で返す**(「入口検証の二層原則」における「データの分類器」)。
+ *
+ * @param horses 出走全頭(複勝圏内確率。同時分布構築に使う)
+ * @param topFinishCount 上位何着まで着順を展開するか(`allocateGeneralBets`と同じ値
+ *   〈ワイド・三連複と同じtopFinishCount=3〉を渡すこと。3未満だと3着までの判定が
+ *   できず的中確率が構造的に0になる)
+ * @param oddsByKey `buildOrderedComboOddsKey`で生成したキー(並びをソートしない)への
+ *   オッズMap(値がnullなら欠損、キーが無ければ未取得)
+ * @param evConfig EV判定の設定(省略時は既存expected-value.tsの既定閾値1.0・厳密不等号を再利用)
+ * @param model 同時分布モデル(省略時は`PLACKETT_LUCE_MODEL`)。`isOrderedPlaceJointModel`が
+ *   falseを返すモデルを渡すとthrowする(win・馬連・馬単と同じ契約)
+ */
+export function buildTrifectaCandidates(
+  horses: readonly JointModelHorse[],
+  topFinishCount: number,
+  oddsByKey: ReadonlyMap<string, number | null>,
+  evConfig: EvConfig = DEFAULT_EV_CONFIG,
+  model: PlaceJointModel = PLACKETT_LUCE_MODEL,
+): ComboCandidateBuildResult {
+  validateTopFinishCount(topFinishCount);
+  if (!isOrderedPlaceJointModel(model)) {
+    throw new Error(
+      "不正な買い目です: 三連単(trifecta)の買い目候補を構築するには、順序付きoutcome空間を構築できる" +
+        `モデルが必要です(modelId=${model.id})`,
+    );
+  }
+  const threshold = resolveEvThreshold(evConfig.threshold);
+  const umabans = [...horses].map((h) => h.umaban).sort((a, b) => a - b);
+  const triples = orderedTriplesOfUmabans(umabans);
+
+  const orderedRaw = model.buildOrderedDistribution(horses, topFinishCount);
+  const emptyDiagnostics: ComboCandidateDiagnostics = {
+    enumeratedCount: triples.length,
+    judged: { positiveCount: 0, notPositiveCount: 0 },
+    unjudged: { oddsMissingCount: 0, oddsUnfetchedCount: 0, oddsMalformedCount: 0 },
+  };
+  if (orderedRaw === null) {
+    // データ由来の判定不能(固定馬2頭以上、またはtopFinishCountが出走頭数を覆う縮退)。
+    // 呼び出し側の契約違反ではないためthrowしない(本関数のJSDoc「入口検証の二層原則」参照)。
+    return { candidates: [], diagnostics: emptyDiagnostics };
+  }
+
+  const candidates: AllocationCandidate[] = [];
+  let notPositiveCount = 0;
+  let oddsMissingCount = 0;
+  let oddsUnfetchedCount = 0;
+  let oddsMalformedCount = 0;
+  for (const triple of triples) {
+    const resolution = resolveComboOdds(oddsByKey, triple, "trifecta");
+    if (resolution.state === "unfetched") {
+      oddsUnfetchedCount++;
+      continue;
+    }
+    if (resolution.state === "missing") {
+      oddsMissingCount++;
+      continue;
+    }
+    if (resolution.state === "malformed") {
+      oddsMalformedCount++;
+      continue;
+    }
+    const hitProb = computeTrifectaHitProb(triple, orderedRaw);
+    const ev = hitProb * resolution.odds;
+    const isPositive = ev > threshold;
+    if (!isPositive) {
+      notPositiveCount++;
+      continue;
+    }
+    candidates.push({ betType: "trifecta", umabans: triple, odds: resolution.odds, ev, isPositive: true });
+  }
+
+  return {
+    candidates,
+    diagnostics: {
+      enumeratedCount: triples.length,
       judged: { positiveCount: candidates.length, notPositiveCount },
       unjudged: { oddsMissingCount, oddsUnfetchedCount, oddsMalformedCount },
     },

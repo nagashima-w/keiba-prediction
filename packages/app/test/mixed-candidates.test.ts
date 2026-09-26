@@ -824,18 +824,23 @@ describe("券種フィルタ(options.betTypes)", () => {
    * 経由でも実際には評価されない=常に「¥0 0点」相当になるため)。**
    * **Issue #125(#24-E3b)で`resolveMixedBetTypes`が実際に`"exacta"`を渡すよう接続し、
    * `ALL_MIXED_CANDIDATE_BET_TYPES`にも`exacta`を加えたため、除外集合は再び空になった。**
+   * **Issue #128(#25-B)で`AllocationBetType`に`trifecta`(三連単)が加わったが、
+   * `mixed-candidates.ts`から三連単の候補を作る経路はまだ無い(オッズ配線・配分接続は
+   * #132のスコープ)ため、`quinella`・`exacta`のときと同じ理由で`trifecta`が一時的に
+   * 除外へ加わった。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
-   * 除外集合を空配列と直接固定することで、将来新しい券種が`AllocationBetType`に加わって
-   * 除外へ紛れ込んでも(候補ビルダー未接続のまま)、このテストが赤くなり
+   * 除外集合を`["trifecta"]`と直接固定することで、`trifecta`以外の券種が誤って除外に
+   * 混ざったり、`trifecta`の除外が誤って解除されたり(#132より前に解除すると
+   * 「三連単 ¥0 0点」の再発になる)すれば、このテストが赤くなり
    * 「足すかどうかの判断」を人間に強制する。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が無いこと(AllocationBetTypeの全メンバーと一致する。Issue #125で馬単の除外を解除した)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['trifecta']だけであること(Issue #128: 三連単のオッズ配線・配分接続〈#132〉が終わるまで除外する)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual([]);
+    expect(excluded).toEqual(["trifecta"]);
   });
 });
 

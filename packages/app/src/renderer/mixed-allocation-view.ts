@@ -312,10 +312,17 @@ export function buildHiddenAllocationsBlocks(
  * (#23-B2)、`"quinella"`はIssue #117(#24-D3b-2)、`"exacta"`はIssue #125(#24-E3b)で
  * それぞれ`betTypeLabel`側にもcaseを追加し、この非対称は解消済み(現在は6値すべてで
  * 両関数の戻り値が一致する)。
+ *
+ * **`"trifecta"`(三連単)はIssue #128(#25-B)で`AllocationBetType`に加わったが、
+ * 本caseの追加はコンパイルを通すための最小限であり(`betType`は閉じたユニオンのため
+ * 網羅的switchが要求する)、`betTypeLabel`側へのcase追加・
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加は行わない**
+ * (app はまだ三連単の候補を一切作らない。オッズ配線・配分接続は#132〈#25-Fのスコープ〉。
+ * `win`/`quinella`/`exacta`が最初にそうだったのと同じ経緯)。
  */
 export function mixedBetTypeLabel(
   betType: AllocationBetType,
-): "複勝" | "単勝" | "ワイド" | "馬連" | "三連複" | "馬単" {
+): "複勝" | "単勝" | "ワイド" | "馬連" | "三連複" | "馬単" | "三連単" {
   switch (betType) {
     case "place":
       return "複勝";
@@ -329,6 +336,8 @@ export function mixedBetTypeLabel(
       return "三連複";
     case "exacta":
       return "馬単";
+    case "trifecta":
+      return "三連単";
   }
 }
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { allocateBets, type AllocationHorse, DEFAULT_BET_ALLOCATION_CONFIG } from "../../src/ev/bet-allocation.js";
 import { DEFAULT_EV_CONFIG } from "../../src/ev/expected-value.js";
@@ -11,6 +13,7 @@ import {
   buildComboOddsKey,
   buildExactaCandidates,
   buildQuinellaCandidates,
+  buildTrifectaCandidates,
   buildWinCandidates,
   DEFAULT_CANDIDATE_CAP,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
@@ -22,17 +25,30 @@ import {
   type SkipReasonCode,
   type WinOutcome,
 } from "../../src/ev/combo-bet-allocation.js";
-import { buildOrderedComboOddsKey, COMBO_KEY_ORDER, COMBO_SIZE } from "../../src/scraper/combo-odds-key.js";
+import {
+  buildOrderedComboOddsKey,
+  COMBO_KEY_ORDER,
+  COMBO_SIZE,
+  toComboOddsScalarMap,
+} from "../../src/scraper/combo-odds-key.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   type JointModelHorse,
   type OrderedOutcome,
+  type OrderedPlaceJointModel,
   type PlaceJointModel,
   type PlaceOutcome,
 } from "../../src/ev/place-joint-model.js";
 import { PLACKETT_LUCE_MODEL } from "../../src/ev/plackett-luce-model.js";
 import { fitPlackettLuceStrengths } from "../../src/ev/plackett-luce-strength.js";
 import { winProbabilitiesFromStrengths } from "../../src/ev/plackett-luce-win-prob.js";
+import { parseComboOdds } from "../../src/scraper/parse-combo-odds.js";
+
+/** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(parse-combo-odds.test.tsと同じ解決方法)。 */
+function loadFixture(name: string): string {
+  const url = new URL(`../../../../fixtures/${name}`, import.meta.url);
+  return readFileSync(fileURLToPath(url), "utf-8");
+}
 
 /**
  * combo-bet-allocation — 機能D-2a(Issue #14)。買い目が「馬の組」になる券種
@@ -168,7 +184,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
   const UNKNOWN_BET_TYPE = "__unknown__";
 
   describe("ALLOCATION_BET_TYPE_UMABAN_COUNT/umabanCountOf(券種→頭数の唯一の写像。Issue #76・#91でwin追加・#112で馬連〈quinella〉追加・#120で馬単〈exacta〉追加)", () => {
-    it("place=1・win=1・wide=2・quinella=2・exacta=2・trio=3であること(ハードコードしたリテラル。#55の自己参照比較を防ぐ)", () => {
+    it("place=1・win=1・wide=2・quinella=2・exacta=2・trio=3・trifecta=3であること(ハードコードしたリテラル。#55の自己参照比較を防ぐ)", () => {
       expect(ALLOCATION_BET_TYPE_UMABAN_COUNT).toEqual({
         place: 1,
         win: 1,
@@ -176,6 +192,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         quinella: 2,
         exacta: 2,
         trio: 3,
+        trifecta: 3,
       });
     });
 
@@ -197,7 +214,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
 
     it("umabanCountOf: 未知の券種はthrowし、有効な券種の列挙はALLOCATION_BET_TYPE_UMABAN_COUNTから導出されること(Record添字アクセスがundefinedを返す危険の直接防御。#91: winは既に有効な券種になったため代表値をUNKNOWN_BET_TYPEに差し替え)", () => {
       expect(() => umabanCountOf(UNKNOWN_BET_TYPE as AllocationBetType)).toThrow(
-        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trioのいずれかである必要があります/,
+        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
       );
     });
 
@@ -215,7 +232,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
   });
 
   describe("ALLOCATION_BET_TYPE_REQUIRES_ORDER(順序付きoutcome空間を要する券種の唯一の写像。Issue #112・#24-D1。#120で馬単〈exacta〉追加)", () => {
-    it("win/quinella/exactaはtrue、place/wide/trioはfalseであること(ハードコードしたリテラル)", () => {
+    it("win/quinella/exacta/trifectaはtrue、place/wide/trioはfalseであること(ハードコードしたリテラル)", () => {
       expect(ALLOCATION_BET_TYPE_REQUIRES_ORDER).toEqual({
         place: false,
         win: true,
@@ -223,6 +240,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         quinella: true,
         trio: false,
         exacta: true,
+        trifecta: true,
       });
     });
 
@@ -353,7 +371,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/馬番の組が空です/);
         } else if (expectKind === "unknown") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
-            /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trioのいずれかである必要があります/,
+            /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
           );
         } else if (expectKind === "mismatch") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
@@ -387,7 +405,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const horses = evenHorses(18, 3);
       const oddsMap = new Map<string, number | null>();
       expect(() => buildComboCandidates(horses, 3, UNKNOWN_BET_TYPE as AllocationBetType, oddsMap)).toThrow(
-        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trioのいずれかである必要があります/,
+        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
       );
     });
 
@@ -3577,6 +3595,735 @@ describe("allocateGeneralBets: 馬単(exacta)候補の統合(Issue #120・#24-E1
       expect(exactaAlloc.hitProb).toBeLessThan(quinellaAlloc.hitProb);
       // ワイド{1,2}は馬連{1,2}より的中確率が大きいこと(既存AC-1(ii)と同型)。
       expect(wideAlloc.hitProb).toBeGreaterThan(quinellaAlloc.hitProb);
+    });
+  });
+});
+
+// ============================================================================
+// 三連単(trifecta)・Issue #128(#25-B): 的中確率・候補ビルダー・配分の門番
+// ============================================================================
+
+/**
+ * 三連単(1着=a・2着=b・3着=cという着順そのもの)を、順序付き分布(`OrderedOutcome[]`)から
+ * 総当たりで計算する(テスト側の独立実装。production側の`computeTrifectaHitProb`〈非公開〉を
+ * 呼ばず、AC2「総当たりと一致」を自己参照なしで検証する)。`bruteForceExactaHitProb`と
+ * 同型だが3着目まで見る。
+ */
+function bruteForceTrifectaHitProb(
+  triple: readonly [number, number, number],
+  ordered: readonly OrderedOutcome[],
+): number {
+  const [a, b, c] = triple;
+  let total = 0;
+  for (const outcome of ordered) {
+    if (outcome.order[0] === a && outcome.order[1] === b && outcome.order[2] === c) {
+      total += outcome.probability;
+    }
+  }
+  return total;
+}
+
+describe("umabanCountOf/ALLOCATION_BET_TYPE_UMABAN_COUNT: trifecta追加(Issue #128・#25-B)", () => {
+  it("umabanCountOf('trifecta')が3を返し、ALLOCATION_BET_TYPE_UMABAN_COUNT.trifectaがCOMBO_SIZE.trifectaと一致すること", () => {
+    expect(umabanCountOf("trifecta")).toBe(3);
+    expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.trifecta).toBe(3);
+    expect(ALLOCATION_BET_TYPE_UMABAN_COUNT.trifecta).toBe(COMBO_SIZE.trifecta);
+  });
+
+  it("未知の券種のエラーメッセージにtrifectaが含まれること(Object.keysからの自動導出。#128で列挙が1件増える)", () => {
+    const UNKNOWN_BET_TYPE = "__unknown_trifecta_test__";
+    expect(() => umabanCountOf(UNKNOWN_BET_TYPE as AllocationBetType)).toThrow(
+      /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
+    );
+  });
+});
+
+describe("ALLOCATION_BET_TYPE_REQUIRES_ORDER: trifectaはtrue(Issue #128・#25-B)", () => {
+  it("trifectaがtrueであること(三連単は着順どおりの一致を要するため、winと同じ順序付きoutcome空間が必要)", () => {
+    expect(ALLOCATION_BET_TYPE_REQUIRES_ORDER.trifecta).toBe(true);
+  });
+});
+
+describe("allocationBetTypeKeyOrder/buildAllocationBetComboKey: trifectaは'ordered'(Issue #128・#25-B)", () => {
+  it("allocationBetTypeKeyOrder('trifecta')が'ordered'を返し、COMBO_KEY_ORDER.trifectaと一致すること", () => {
+    expect(allocationBetTypeKeyOrder("trifecta")).toBe("ordered");
+    expect(allocationBetTypeKeyOrder("trifecta")).toBe(COMBO_KEY_ORDER.trifecta);
+  });
+
+  it("★AC1核心・AC7(降順入力): 13→8→5→'130805'、5→8→13→'050813'(昇順ソートせず並びをそのまま保持すること)", () => {
+    expect(buildAllocationBetComboKey("trifecta", [13, 8, 5])).toBe("130805");
+    expect(buildAllocationBetComboKey("trifecta", [5, 8, 13])).toBe("050813");
+    expect(buildAllocationBetComboKey("trifecta", [13, 8, 5])).not.toBe(
+      buildAllocationBetComboKey("trifecta", [5, 8, 13]),
+    );
+    expect(buildAllocationBetComboKey("trifecta", [13, 8, 5])).toBe(buildOrderedComboOddsKey([13, 8, 5]));
+  });
+});
+
+describe("validateCandidates: trifectaの並び検証(Issue #128・#25-B)", () => {
+  const horses = evenHorses(5, 3);
+
+  it("降順・非昇順のumabans([5,3,1]や[2,3,1])を渡してもthrowしないこと(順序付き券種は昇順を要求しない)", () => {
+    const descCandidate: AllocationCandidate = {
+      umabans: [5, 3, 1],
+      odds: 3,
+      ev: 2,
+      isPositive: true,
+      betType: "trifecta",
+    };
+    const mixedCandidate: AllocationCandidate = {
+      umabans: [2, 3, 1],
+      odds: 3,
+      ev: 2,
+      isPositive: true,
+      betType: "trifecta",
+    };
+    expect(() => allocateGeneralBets(horses, 3, [descCandidate])).not.toThrow();
+    expect(() => allocateGeneralBets(horses, 3, [mixedCandidate])).not.toThrow();
+  });
+
+  it("同一馬番の重複(例: [1,1,2])はthrowすること", () => {
+    const candidate: AllocationCandidate = {
+      umabans: [1, 1, 2],
+      odds: 3,
+      ev: 2,
+      isPositive: true,
+      betType: "trifecta",
+    };
+    expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
+      /馬番の組に重複があります/,
+    );
+  });
+});
+
+describe("buildComboCandidates: trifecta専用門番(Issue #128・#25-B。三連複と同じ構成頭数3のため、門番が無いと三連複の的中確率〈集合分布〉で値付けされてしまう)", () => {
+  it("betType='trifecta'は候補を黙って構築せず必ずthrowすること(恒久的な誤用経路の封鎖)", () => {
+    const n = 5;
+    const horses = evenHorses(n, 3);
+    const oddsMap = uniformOddsMap(n, 3, 3);
+    expect(() => buildComboCandidates(horses, 3, "trifecta", oddsMap)).toThrow(
+      /buildComboCandidatesは組合せ\(ワイド・三連複\)専用の候補ビルダーです/,
+    );
+  });
+});
+
+describe("validateOrderedCandidatesSupported: trifectaのtopFinishCount下限(Issue #128・#25-B。#112裁定2の踏襲)", () => {
+  it.each([
+    { name: "trifecta, topFinishCount=1(構成頭数3未満)", topFinishCount: 1, expectThrow: true },
+    { name: "trifecta, topFinishCount=2(構成頭数3未満)", topFinishCount: 2, expectThrow: true },
+    { name: "trifecta, topFinishCount=3(構成頭数と一致)", topFinishCount: 3, expectThrow: false },
+  ])("$name", ({ topFinishCount, expectThrow }) => {
+    const horses = evenHorses(6, 3);
+    const candidates: AllocationCandidate[] = [
+      { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+    ];
+    if (expectThrow) {
+      expect(() => allocateGeneralBets(horses, topFinishCount, candidates)).toThrow();
+    } else {
+      expect(() => allocateGeneralBets(horses, topFinishCount, candidates)).not.toThrow();
+    }
+  });
+});
+
+describe("三連単の的中確率(AC2: 順序付き分布からの導出の恒等式。Issue #128・#25-B)", () => {
+  const nonUniformHorses5: JointModelHorse[] = [0.6, 0.5, 0.4, 0.3, 0.2].map((placeProb, i) => ({
+    umaban: i + 1,
+    placeProb,
+  }));
+
+  it("前提固定(空振り防止): nonUniformHorses5はdeg=0であり、placeProbが互いに異なること(非一様)", () => {
+    const fit = fitPlackettLuceStrengths(nonUniformHorses5, 3);
+    expect(fit.ok).toBe(true);
+    if (!fit.ok) return;
+    expect(fit.degenerateFixedCount).toBe(0);
+    expect(new Set(nonUniformHorses5.map((h) => h.placeProb)).size).toBe(nonUniformHorses5.length);
+  });
+
+  it("(a) 全P(5,3)=60通りの確率和が1であること(前提: 60通りであることを無条件expectで先に固定)", () => {
+    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+    expect(ordered).not.toBeNull();
+    expect(ordered.length).toBe(60);
+    const sum = ordered.reduce((s, o) => s + o.probability, 0);
+    expect(sum).toBeCloseTo(1, 9);
+  });
+
+  it("(b) {1,2,3}の6通りの並びの確率和が、同一モデルインスタンスの集合分布(buildDistribution)が返す三連複{1,2,3}の的中確率とtoBeCloseToで一致すること", () => {
+    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+    const setDist = PLACKETT_LUCE_MODEL.buildDistribution(nonUniformHorses5, 3);
+    const perms: [number, number, number][] = [
+      [1, 2, 3],
+      [1, 3, 2],
+      [2, 1, 3],
+      [2, 3, 1],
+      [3, 1, 2],
+      [3, 2, 1],
+    ];
+    let sumOrdered = 0;
+    for (const p of perms) {
+      sumOrdered += bruteForceTrifectaHitProb(p, ordered);
+    }
+    const trioOutcome = setDist.find(
+      (o) => o.placed.length === 3 && [1, 2, 3].every((u) => o.placed.includes(u)),
+    );
+    expect(trioOutcome).toBeDefined();
+    // 前提(空振り防止): 両者が非退化(0より大きい)であること。
+    expect(sumOrdered).toBeGreaterThan(0);
+    expect(trioOutcome!.probability).toBeGreaterThan(0);
+    expect(sumOrdered).toBeCloseTo(trioOutcome!.probability, 9);
+  });
+
+  it("(c) cについて和をとると馬単P(1着=1,2着=2)に一致すること", () => {
+    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+    const a = 1;
+    const b = 2;
+    let sumOverC = 0;
+    for (const c of [3, 4, 5]) {
+      sumOverC += bruteForceTrifectaHitProb([a, b, c], ordered);
+    }
+    const expectedExacta = ordered
+      .filter((o) => o.order[0] === a && o.order[1] === b)
+      .reduce((s, o) => s + o.probability, 0);
+    // 前提(空振り防止): 両者が非退化であること。
+    expect(sumOverC).toBeGreaterThan(0);
+    expect(expectedExacta).toBeGreaterThan(0);
+    expect(sumOverC).toBeCloseTo(expectedExacta, 9);
+  });
+
+  it("(d) 強さの異なる馬の入力で、{1,2,3}の6通りの並びのうち少なくとも2つが異なる値になること", () => {
+    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+    const perms: [number, number, number][] = [
+      [1, 2, 3],
+      [1, 3, 2],
+      [2, 1, 3],
+      [2, 3, 1],
+      [3, 1, 2],
+      [3, 2, 1],
+    ];
+    const values = perms.map((p) => bruteForceTrifectaHitProb(p, ordered));
+    // 前提(空振り防止): 6値が非退化(すべて0より大きい)であること。
+    for (const v of values) {
+      expect(v).toBeGreaterThan(0);
+    }
+    const distinct = new Set(values.map((v) => v.toFixed(12)));
+    expect(distinct.size).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("buildTrifectaCandidates(三連単候補ビルダー・Issue #128・#25-B)", () => {
+  const nonUniformHorses5: JointModelHorse[] = [0.6, 0.5, 0.4, 0.3, 0.2].map((placeProb, i) => ({
+    umaban: i + 1,
+    placeProb,
+  }));
+
+  describe("★AC2核心: 三連単の的中確率が順序付き分布の総当たりと一致し、並び違いとは異なること(降順入力を含む。AC7)", () => {
+    it("三連単[1→2→3](昇順)のev/oddsが、総当たり(brute force)とtoBeCloseToで一致すること", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+      const expected = bruteForceTrifectaHitProb([1, 2, 3], ordered);
+      // 前提(空振り防止): 退化した0や1ではない非退化値であること。
+      expect(expected).toBeGreaterThan(0);
+      expect(expected).toBeLessThan(1);
+
+      const oddsMap = new Map<string, number | null>([[buildOrderedComboOddsKey([1, 2, 3]), 1000]]);
+      const build = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
+      const cand = build.candidates.find(
+        (c) => c.umabans[0] === 1 && c.umabans[1] === 2 && c.umabans[2] === 3,
+      );
+      expect(cand).toBeDefined();
+      expect(cand!.betType).toBe("trifecta");
+      const derivedHitProb = cand!.ev / cand!.odds;
+      expect(derivedHitProb).toBeCloseTo(expected, 9);
+    });
+
+    it("★AC7核心(降順入力): 三連単[5→3→1](降順)のev/oddsが総当たりと一致し、昇順[1→3→5]とは異なる値になること(昇順化して同一キーへ潰す変異を殺す)", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+      const expectedDesc = bruteForceTrifectaHitProb([5, 3, 1], ordered);
+      const expectedAsc = bruteForceTrifectaHitProb([1, 3, 5], ordered);
+      // 前提固定(空振り防止・非対称フィクスチャの直接証拠): 両者が非退化かつ異なること。
+      expect(expectedDesc).toBeGreaterThan(0);
+      expect(expectedAsc).toBeGreaterThan(0);
+      expect(Math.abs(expectedDesc - expectedAsc)).toBeGreaterThan(0.001);
+
+      const descKey = buildOrderedComboOddsKey([5, 3, 1]);
+      const ascKey = buildOrderedComboOddsKey([1, 3, 5]);
+      // 前提固定(空振り防止): 2キーが実際に異なる文字列であること(昇順化されていれば
+      // 両方とも同じキーに潰れ、Mapへ2エントリ仕込めない=このテスト自体が成立しない)。
+      expect(descKey).not.toBe(ascKey);
+      const oddsMap = new Map<string, number | null>([
+        [descKey, 1000],
+        [ascKey, 1000],
+      ]);
+      const build = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
+      const descCand = build.candidates.find(
+        (c) => c.umabans[0] === 5 && c.umabans[1] === 3 && c.umabans[2] === 1,
+      );
+      const ascCand = build.candidates.find(
+        (c) => c.umabans[0] === 1 && c.umabans[1] === 3 && c.umabans[2] === 5,
+      );
+      expect(descCand).toBeDefined();
+      expect(ascCand).toBeDefined();
+      expect(descCand!.ev / descCand!.odds).toBeCloseTo(expectedDesc, 9);
+      expect(ascCand!.ev / ascCand!.odds).toBeCloseTo(expectedAsc, 9);
+      expect(descCand!.ev / descCand!.odds).not.toBeCloseTo(ascCand!.ev / ascCand!.odds, 9);
+    });
+  });
+
+  describe("★AC1: オッズの引き当ては順序付きキーで行うこと(昇順化すると並び違いのオッズが入れ替わる)", () => {
+    it("[1,2,3]と[3,2,1]に異なるオッズを仕込むと、それぞれ対応するオッズでEVが計算されること", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+      const forwardHitProb = bruteForceTrifectaHitProb([1, 2, 3], ordered);
+      const backwardHitProb = bruteForceTrifectaHitProb([3, 2, 1], ordered);
+      expect(forwardHitProb).toBeGreaterThan(0);
+      expect(backwardHitProb).toBeGreaterThan(0);
+      const forwardOdds = (1 / forwardHitProb) * 10;
+      const backwardOdds = (1 / backwardHitProb) * 10;
+      const oddsMap = new Map<string, number | null>([
+        [buildOrderedComboOddsKey([1, 2, 3]), forwardOdds],
+        [buildOrderedComboOddsKey([3, 2, 1]), backwardOdds],
+      ]);
+      const build = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
+      const forward = build.candidates.find(
+        (c) => c.umabans[0] === 1 && c.umabans[1] === 2 && c.umabans[2] === 3,
+      );
+      const backward = build.candidates.find(
+        (c) => c.umabans[0] === 3 && c.umabans[1] === 2 && c.umabans[2] === 1,
+      );
+      expect(forward).toBeDefined();
+      expect(backward).toBeDefined();
+      expect(forward!.odds).toBe(forwardOdds);
+      expect(backward!.odds).toBe(backwardOdds);
+    });
+  });
+
+  describe("オッズ4状態(欠損/未取得/不正/候補外)×EV閾値の境界(buildExactaCandidatesと同じ流儀)", () => {
+    const cases: {
+      readonly label: string;
+      readonly odds: number | null | "unfetched";
+      readonly expect: "missing" | "unfetched" | "malformed";
+    }[] = [
+      { label: "オッズ欠損(null)", odds: null, expect: "missing" },
+      { label: "オッズ未取得(キー不在)", odds: "unfetched", expect: "unfetched" },
+      { label: "オッズ0(malformed: 1.0未満)", odds: 0, expect: "malformed" },
+      { label: "オッズNaN(malformed: 非有限)", odds: NaN, expect: "malformed" },
+    ];
+
+    it.each(cases)("$label", ({ odds, expect: expected }) => {
+      // 対象[1,2,3]以外の全ての順序トリプルには正常なオッズ(2.0)を敷いておく。
+      const oddsMap = new Map<string, number | null>();
+      for (const a of [1, 2, 3, 4, 5]) {
+        for (const b of [1, 2, 3, 4, 5]) {
+          if (a === b) continue;
+          for (const c of [1, 2, 3, 4, 5]) {
+            if (c === a || c === b) continue;
+            if (a === 1 && b === 2 && c === 3) continue;
+            oddsMap.set(buildOrderedComboOddsKey([a, b, c]), 2.0);
+          }
+        }
+      }
+      if (odds !== "unfetched") {
+        oddsMap.set(buildOrderedComboOddsKey([1, 2, 3]), odds);
+      }
+      const result = buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap);
+      const cand = result.candidates.find(
+        (c) => c.umabans[0] === 1 && c.umabans[1] === 2 && c.umabans[2] === 3,
+      );
+      switch (expected) {
+        case "missing":
+          expect(cand).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsMissingCount).toBe(1);
+          break;
+        case "unfetched":
+          expect(cand).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsUnfetchedCount).toBe(1);
+          break;
+        case "malformed":
+          expect(cand).toBeUndefined();
+          expect(result.diagnostics.unjudged.oddsMalformedCount).toBe(1);
+          break;
+      }
+    });
+
+    it("evが厳密閾値(1.0)を上回るときのみ候補になること(厳密不等号の境界)", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+      const hitProb = bruteForceTrifectaHitProb([1, 2, 3], ordered);
+      expect(hitProb).toBeGreaterThan(0);
+      const oddsAtThreshold = 1 / hitProb;
+      const belowMap = new Map<string, number | null>([[buildOrderedComboOddsKey([1, 2, 3]), oddsAtThreshold]]);
+      const atThreshold = buildTrifectaCandidates(nonUniformHorses5, 3, belowMap);
+      expect(
+        atThreshold.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2 && c.umabans[2] === 3),
+      ).toBeUndefined();
+      expect(atThreshold.diagnostics.judged.notPositiveCount).toBeGreaterThan(0);
+
+      const aboveMap = new Map<string, number | null>([
+        [buildOrderedComboOddsKey([1, 2, 3]), oddsAtThreshold * 1.0001],
+      ]);
+      const aboveThreshold = buildTrifectaCandidates(nonUniformHorses5, 3, aboveMap);
+      expect(
+        aboveThreshold.candidates.find((c) => c.umabans[0] === 1 && c.umabans[1] === 2 && c.umabans[2] === 3),
+      ).toBeDefined();
+    });
+  });
+
+  describe("AC3: 候補列挙(順序付き全トリプル。P(n,3)=n×(n-1)×(n-2))", () => {
+    it.each([
+      { n: 4, expectedEnumerated: 24 },
+      { n: 5, expectedEnumerated: 60 },
+      { n: 16, expectedEnumerated: 3360 },
+    ])("n=$n頭はn×(n-1)×(n-2)=$expectedEnumerated件で正常に列挙すること(候補0件へ化けない)", ({ n, expectedEnumerated }) => {
+      const horses = evenHorses(n, 3);
+      const oddsMap = uniformOddsMap(n, 3, 3);
+      // uniformOddsMap(既存ヘルパ)は昇順キーしか埋めないため、オッズを引けなくても
+      // enumeratedCount自体は列挙段階で決まる値であることを確認する。
+      const result = buildTrifectaCandidates(horses, 3, oddsMap);
+      // 前提(無条件expect): 列挙件数が0でない非退化値であること。
+      expect(expectedEnumerated).toBeGreaterThan(0);
+      expect(result.diagnostics.enumeratedCount).toBe(expectedEnumerated);
+    });
+
+    it("同じ馬番の重複を含むトリプルは列挙しないこと(n^3ではなくn(n-1)(n-2)件)", () => {
+      const n = 4;
+      const horses = evenHorses(n, 3);
+      const oddsMap = new Map<string, number | null>();
+      const result = buildTrifectaCandidates(horses, 3, oddsMap);
+      expect(result.diagnostics.enumeratedCount).toBe(n * (n - 1) * (n - 2));
+      expect(result.diagnostics.enumeratedCount).not.toBe(n * n * n);
+    });
+  });
+
+  describe("buildOrderedDistributionがnullを返す入力(throwせず候補0件で返すこと)", () => {
+    it("潜在強度に+Infinityが2頭以上(固定馬2頭以上)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 1 },
+        { umaban: 2, placeProb: 1 },
+        { umaban: 3, placeProb: 0.5 },
+        { umaban: 4, placeProb: 0.3 },
+        { umaban: 5, placeProb: 0.2 },
+      ];
+      expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)).toBeNull();
+      const oddsMap = new Map<string, number | null>([[buildOrderedComboOddsKey([1, 2, 3]), 10]]);
+      let result: ReturnType<typeof buildTrifectaCandidates> | undefined;
+      expect(() => {
+        result = buildTrifectaCandidates(horses, 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      // 前提固定(空振り防止): 列挙自体は行われ、判定不能で0件になったことが診断値から
+      // 区別できること(候補ゼロが「列挙もされなかった」わけではない)。
+      expect(result!.diagnostics.enumeratedCount).toBeGreaterThan(0);
+    });
+
+    it("topFinishCount>=出走頭数(上位k枠が全頭を覆う)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 0.5 },
+        { umaban: 2, placeProb: 0.3 },
+        { umaban: 3, placeProb: 0.2 },
+      ];
+      expect(PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, 3)).toBeNull();
+      const oddsMap = new Map<string, number | null>([[buildOrderedComboOddsKey([1, 2, 3]), 10]]);
+      let result: ReturnType<typeof buildTrifectaCandidates> | undefined;
+      expect(() => {
+        result = buildTrifectaCandidates(horses, 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+    });
+  });
+
+  it("モデルが順序展開に非対応(CONDITIONAL_BERNOULLI_MODEL)ならthrow(新しい述語を作らずisOrderedPlaceJointModelを再利用)", () => {
+    const oddsMap = new Map<string, number | null>([[buildOrderedComboOddsKey([1, 2, 3]), 10]]);
+    expect(() =>
+      buildTrifectaCandidates(nonUniformHorses5, 3, oddsMap, DEFAULT_EV_CONFIG, CONDITIONAL_BERNOULLI_MODEL),
+    ).toThrow(/順序付きoutcome空間を構築できるモデルが必要です/);
+  });
+
+  describe("退化入力(0〜2頭でthrowせず候補0件になること。三連単は3頭未満だとP(n,3)=0)", () => {
+    it("0頭", () => {
+      const oddsMap = new Map<string, number | null>();
+      let result: ReturnType<typeof buildTrifectaCandidates> | undefined;
+      expect(() => {
+        result = buildTrifectaCandidates([], 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      expect(result!.diagnostics.enumeratedCount).toBe(0);
+    });
+
+    it("1頭", () => {
+      const horses: JointModelHorse[] = [{ umaban: 1, placeProb: 0.5 }];
+      const oddsMap = new Map<string, number | null>();
+      let result: ReturnType<typeof buildTrifectaCandidates> | undefined;
+      expect(() => {
+        result = buildTrifectaCandidates(horses, 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      expect(result!.diagnostics.enumeratedCount).toBe(0);
+    });
+
+    it("2頭(P(2,3)=0。三連複はn=2で0件になるのと同じ境界)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 0.6 },
+        { umaban: 2, placeProb: 0.4 },
+      ];
+      const oddsMap = new Map<string, number | null>();
+      let result: ReturnType<typeof buildTrifectaCandidates> | undefined;
+      expect(() => {
+        result = buildTrifectaCandidates(horses, 3, oddsMap);
+      }).not.toThrow();
+      expect(result!.candidates).toEqual([]);
+      expect(result!.diagnostics.enumeratedCount).toBe(0);
+    });
+  });
+});
+
+describe("buildTrifectaCandidates: 発売中フィクスチャの上限値がoddsMissingCountに数えられ候補外になること(Issue #128・AC3。#130のnull化と接続)", () => {
+  // オーケストレーター指定: 16頭分の合成horses(非一様なplaceProb)。
+  const horses16: JointModelHorse[] = Array.from({ length: 16 }, (_, i) => ({
+    umaban: i + 1,
+    placeProb: 0.9 - i * 0.05,
+  }));
+
+  it("前提固定(空振り防止): horses16はdeg=0であり、P(16,3)=3360通りに展開できること", () => {
+    const fit = fitPlackettLuceStrengths(horses16, 3);
+    expect(fit.ok).toBe(true);
+    if (!fit.ok) return;
+    expect(fit.degenerateFixedCount).toBe(0);
+    const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses16, 3);
+    expect(ordered).not.toBeNull();
+    expect(ordered!.length).toBe(3360);
+  });
+
+  it("上限値999,999.9の組合せ2644件がoddsMissingCountに数えられ、候補(例: 1着10・2着01・3着02)に含まれないこと", () => {
+    const parsed = parseComboOdds(
+      loadFixture("odds_trifecta_presale_202606040901_20260926.json"),
+      "trifecta",
+    );
+    expect(parsed.state).toBe("available");
+    if (parsed.state !== "available") return;
+    const oddsMap = toComboOddsScalarMap(parsed.odds);
+
+    // 前提固定(空振り防止・parse-combo-odds.test.tsの実測と同じ値): 全体3360件のうち
+    // 2644件が上限値でnull化され、716件が数値のまま残ること。
+    const nullCells = [...oddsMap.values()].filter((v) => v === null);
+    const numericCells = [...oddsMap.values()].filter((v) => v !== null);
+    expect(oddsMap.size).toBe(3360);
+    expect(nullCells.length).toBe(2644);
+    expect(numericCells.length).toBe(716);
+
+    const result = buildTrifectaCandidates(horses16, 3, oddsMap);
+    // ★AC3核心: oddsMissingCountが上限値の件数2644と一致すること。
+    expect(result.diagnostics.unjudged.oddsMissingCount).toBe(2644);
+    // ★AC3核心: 上限値のセル("100102"。1着10・2着01・3着02)が候補に含まれないこと。
+    expect(oddsMap.get("100102")).toBeNull();
+    expect(
+      result.candidates.find(
+        (c) => c.umabans[0] === 10 && c.umabans[1] === 1 && c.umabans[2] === 2,
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("allocateGeneralBets: 三連単(trifecta)候補の統合(Issue #128・#25-B)", () => {
+  const nonUniformHorses5: JointModelHorse[] = [0.6, 0.5, 0.4, 0.3, 0.2].map((placeProb, i) => ({
+    umaban: i + 1,
+    placeProb,
+  }));
+  const realConfig: GeneralBetAllocationConfig = {
+    ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+    bankroll: 100000,
+    perRaceCap: 100000,
+  };
+
+  describe("★AC5核心: 同じ3頭の並び違いが別の買い目として独立に判定されること", () => {
+    it("三連単[1,2,3]と[3,2,1](降順。AC7)のhitProbが異なり、それぞれ独立算出した周辺確率と一致すること(殺すべき変異: isHitを集合包含のフォールバックにする→両方とも同じ値〈1〉になる)", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+      const expectedForward = bruteForceTrifectaHitProb([1, 2, 3], ordered);
+      const expectedBackward = bruteForceTrifectaHitProb([3, 2, 1], ordered);
+      // 前提固定(空振り防止・非対称フィクスチャの直接証拠): 両者が異なること。
+      expect(Math.abs(expectedForward - expectedBackward)).toBeGreaterThan(0.001);
+
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+        { umabans: [3, 2, 1], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+      ];
+      const result = allocateGeneralBets(nonUniformHorses5, 3, candidates, realConfig);
+      expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+      const forwardAlloc = result.allocations.find(
+        (a) => a.betType === "trifecta" && a.umabans[0] === 1 && a.umabans[1] === 2 && a.umabans[2] === 3,
+      )!;
+      const backwardAlloc = result.allocations.find(
+        (a) => a.betType === "trifecta" && a.umabans[0] === 3 && a.umabans[1] === 2 && a.umabans[2] === 1,
+      )!;
+      expect(forwardAlloc).toBeDefined();
+      expect(backwardAlloc).toBeDefined();
+      expect(forwardAlloc.hitProb).toBeCloseTo(expectedForward, 9);
+      expect(backwardAlloc.hitProb).toBeCloseTo(expectedBackward, 9);
+      expect(forwardAlloc.hitProb).not.toBeCloseTo(backwardAlloc.hitProb, 9);
+    });
+
+    /**
+     * ★AC5の決定的な反証(オーケストレーター指示2026-09-26): 専用ケースを外して
+     * 集合包含のフォールバック(`c.umabans.every((u) => orderSet.has(u))`)に落ちる変異を
+     * 直接殺すテスト。実現した着順を[1,2,3]ちょうど1通りに固定するスタブモデルを使い、
+     * 「片方だけ的中し、もう片方は外れる」ことを配分結果(hitProb)で固定する。
+     * フォールバックに落ちると、orderSet={1,2,3}は並びを問わず両候補を含むため、
+     * [1,2,3]・[3,2,1]どちらもhitProb=1になってしまう(本テストが赤くなる)。
+     */
+    it("実現した着順が[1,2,3]ちょうどのとき、[1,2,3]は的中(hitProb=1)し[3,2,1]は外れる(hitProb=0)こと(集合包含フォールバックを直接殺す)", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 1 },
+        { umaban: 2, placeProb: 1 },
+        { umaban: 3, placeProb: 1 },
+      ];
+      const stubOrderedModel: OrderedPlaceJointModel = {
+        id: "stub-ordered-trifecta",
+        approximate: false,
+        buildDistribution: () => [{ placed: [1, 2, 3], probability: 1 }],
+        buildOrderedDistribution: () => [{ order: [1, 2, 3], probability: 1 }],
+      };
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+        { umabans: [3, 2, 1], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+      ];
+      const result = allocateGeneralBets(
+        horses,
+        3,
+        candidates,
+        DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        stubOrderedModel,
+      );
+      expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+      const forward = result.allocations.find(
+        (a) => a.betType === "trifecta" && a.umabans[0] === 1 && a.umabans[1] === 2 && a.umabans[2] === 3,
+      )!;
+      const backward = result.allocations.find(
+        (a) => a.betType === "trifecta" && a.umabans[0] === 3 && a.umabans[1] === 2 && a.umabans[2] === 1,
+      )!;
+      expect(forward).toBeDefined();
+      expect(backward).toBeDefined();
+      expect(forward.hitProb).toBe(1);
+      expect(backward.hitProb).toBe(0);
+    });
+
+    it("門番が三連単を見落とすと集合分布(三連複と同じ判定)に落ちる(殺すべき変異: 順序方針の写像にtrifectaを足し忘れる)", () => {
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+        { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trio" },
+      ];
+      const result = allocateGeneralBets(nonUniformHorses5, 3, candidates, realConfig);
+      expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+      const trifectaAlloc = result.allocations.find((a) => a.betType === "trifecta");
+      const trioAlloc = result.allocations.find((a) => a.betType === "trio");
+      expect(trifectaAlloc).toBeDefined();
+      expect(trioAlloc).toBeDefined();
+      // ★中核: 三連単の的中確率(着順どおり6通りのうち1つ)は三連複(6通り全部)より必ず小さい。
+      expect(trifectaAlloc!.hitProb).toBeLessThan(trioAlloc!.hitProb);
+      expect(trioAlloc!.hitProb - trifectaAlloc!.hitProb).toBeGreaterThan(0.001);
+    });
+  });
+
+  describe("AC4(#112裁定2の踏襲): 三連単もtopFinishCountがその構成頭数(3)以上であること", () => {
+    it.each([
+      { name: "trifecta, topFinishCount=1(構成頭数3未満)", topFinishCount: 1, expectThrow: true },
+      { name: "trifecta, topFinishCount=2(構成頭数3未満)", topFinishCount: 2, expectThrow: true },
+      { name: "trifecta, topFinishCount=3(構成頭数と一致)", topFinishCount: 3, expectThrow: false },
+    ])("$name", ({ topFinishCount, expectThrow }) => {
+      const horses = evenHorses(6, 3);
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+      ];
+      if (expectThrow) {
+        expect(() => allocateGeneralBets(horses, topFinishCount, candidates)).toThrow();
+      } else {
+        expect(() => allocateGeneralBets(horses, topFinishCount, candidates)).not.toThrow();
+      }
+    });
+  });
+
+  describe("★AC(検算): 順序付き分布が判定不能のとき、三連単候補も他の順序券種と同様に除外されること", () => {
+    it("degenerateFixedCount>=2(固定馬2頭以上)で三連単候補が除外され、ワイドは既存どおり判定されること", () => {
+      const horses: JointModelHorse[] = [
+        { umaban: 1, placeProb: 1 },
+        { umaban: 2, placeProb: 1 },
+        { umaban: 3, placeProb: 0.5 },
+        { umaban: 4, placeProb: 0.3 },
+        { umaban: 5, placeProb: 0.2 },
+      ];
+      const fit = fitPlackettLuceStrengths(horses, 3);
+      expect(fit.ok).toBe(true);
+      if (fit.ok) expect(fit.degenerateFixedCount).toBeGreaterThanOrEqual(2);
+
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+        { umabans: [1, 2], odds: 1.2, ev: 1.15, isPositive: true, betType: "wide" },
+      ];
+      const result = allocateGeneralBets(horses, 3, candidates, realConfig);
+      expect(result.winOutcome).toEqual<WinOutcome>({
+        kind: "indeterminate",
+        reason: "degenerate-fixed-count",
+      });
+      expect(result.allocations.find((a) => a.betType === "trifecta")).toBeUndefined();
+      const wideAlloc = result.allocations.find((a) => a.betType === "wide");
+      expect(wideAlloc).toBeDefined();
+      expect(wideAlloc!.hitProb).toBeCloseTo(1, 9);
+    });
+  });
+
+  it("モデルが順序展開に非対応(CONDITIONAL_BERNOULLI_MODEL)で三連単候補を渡すとthrow(win・馬連・馬単と同じ契約)", () => {
+    const candidates: AllocationCandidate[] = [
+      { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+    ];
+    expect(() =>
+      allocateGeneralBets(
+        nonUniformHorses5,
+        3,
+        candidates,
+        DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        CONDITIONAL_BERNOULLI_MODEL,
+      ),
+    ).toThrow(/順序付きoutcome空間を構築できるモデルが必要です/);
+  });
+
+  describe("end-to-endのhitProb: 単勝・馬連・馬単・三連単・三連複・ワイドが同時に候補にあるとき、それぞれ独立に正しく判定されること", () => {
+    it("三連単のhitProbが独立算出した値と一致し、他券種のhitProbも崩れないこと", () => {
+      const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(nonUniformHorses5, 3)!;
+      const expectedTrifecta123 = bruteForceTrifectaHitProb([1, 2, 3], ordered);
+      const expectedExacta12 = ordered
+        .filter((o) => o.order[0] === 1 && o.order[1] === 2)
+        .reduce((sum, o) => sum + o.probability, 0);
+      const expectedWin1 = ordered.filter((o) => o.order[0] === 1).reduce((sum, o) => sum + o.probability, 0);
+
+      const candidates: AllocationCandidate[] = [
+        { umabans: [1], odds: 3, ev: 2, isPositive: true, betType: "win" },
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "quinella" },
+        { umabans: [1, 2], odds: 3, ev: 2, isPositive: true, betType: "exacta" },
+        { umabans: [1, 2, 3], odds: 3, ev: 2, isPositive: true, betType: "trifecta" },
+        { umabans: [1, 2, 3], odds: 2, ev: 1.5, isPositive: true, betType: "trio" },
+        { umabans: [1, 2], odds: 2, ev: 1.5, isPositive: true, betType: "wide" },
+      ];
+      const result = allocateGeneralBets(nonUniformHorses5, 3, candidates, realConfig);
+      expect(result.winOutcome).toEqual<WinOutcome>({ kind: "determined" });
+
+      const winAlloc = result.allocations.find((a) => a.betType === "win")!;
+      const exactaAlloc = result.allocations.find((a) => a.betType === "exacta")!;
+      const trifectaAlloc = result.allocations.find((a) => a.betType === "trifecta")!;
+      const trioAlloc = result.allocations.find((a) => a.betType === "trio")!;
+      const wideAlloc = result.allocations.find((a) => a.betType === "wide")!;
+      expect(winAlloc).toBeDefined();
+      expect(exactaAlloc).toBeDefined();
+      expect(trifectaAlloc).toBeDefined();
+      expect(trioAlloc).toBeDefined();
+      expect(wideAlloc).toBeDefined();
+
+      expect(winAlloc.hitProb).toBeCloseTo(expectedWin1, 9);
+      expect(exactaAlloc.hitProb).toBeCloseTo(expectedExacta12, 9);
+      expect(trifectaAlloc.hitProb).toBeCloseTo(expectedTrifecta123, 9);
+      // 三連単{1,2,3}(着順どおり)は馬単{1→2}(2着までの一致)より的中確率が小さいこと
+      // (三連単⊂馬単の事象なので常に成り立つ)。
+      expect(trifectaAlloc.hitProb).toBeLessThan(exactaAlloc.hitProb);
+      // 三連単{1,2,3}は三連複{1,2,3}(6通り全部を許容)より的中確率が小さいこと。
+      expect(trifectaAlloc.hitProb).toBeLessThan(trioAlloc.hitProb);
+      // ワイド{1,2}は馬単{1→2}より的中確率が大きいこと(既存AC-1(ii)と同型)。
+      expect(wideAlloc.hitProb).toBeGreaterThan(exactaAlloc.hitProb);
     });
   });
 });
