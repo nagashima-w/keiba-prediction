@@ -1719,6 +1719,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
   既存の記録は読めなくならない
 - 設定・エクスポート JSON・IPC は無変更
 
+## 次の正式版が 1.11.2 である根拠(Issue #127・#25-A での変更)
+
+**patch**(調査タスク。`packages/*/src` を1行も変更していない)。
+
+### 変更内容
+
+三連単のオッズ取得経路を実測し、一次データを `fixtures/` に保存して `docs/trifecta-odds-investigation.md` に記録し、
+`packages/core/test/scraper/trifecta-odds-fixtures.test.ts` に集合一致・着順の向き・確定払戻突合のテストを追加した。
+#25(三連単)は着手前ゲートで6分割され(#127〜#132)、本回はその第1子(#25-A)。#103(1.9.1)と同じ型のタスク。
+
+### patch である根拠
+
+- **利用者から見てできることは1つも増えていない**(三連単が使えるようになるのは #132)
+- **分析結果の数値も一切変わらない**
+- **production のコードパスに到達する変更が無い**: `git diff --stat -- packages/core/src packages/app/src` が空
+
+### major / minor ではない根拠
+
+- 設定・DB・エクスポート JSON・IPC はすべて無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
