@@ -919,18 +919,22 @@ function runAc5(
   console.log("");
   console.log("=== AC5: 署名畳み込み後のoutcome数・Σ|indices|・runGreedyAllocation単体の時間 ===");
 
-  const config = buildConfig();
-  // +trifectaの候補数(AC1実測: 2637件)は既定candidateCap(2000)を超えるため、既定candidateCapの
-  // シナリオだけを見ると「candidateCapによって偶然一部の順序付き候補が間引かれた後」の
-  // outcome数・Σ|indices|になり、#96の署名畳み込みが三連単本来の候補規模でどう振る舞うかを
-  // 覆い隠してしまう。**candidateCapを外した(uncapped相当)シナリオも別途出す**(AC5の趣旨
-  // 「畳み込みがスケールしないことを確かめる」に対して、cap由来の間引き効果と分離するため)。
-  const uncappedConfig = buildConfig({ candidateCap: 3000 });
+  // Issue #136でDEFAULT_CANDIDATE_CAPを2000→8000へ引き上げたため、`buildConfig()`
+  // (candidateCapは既定値=8000)は+trifectaの候補数(AC1実測: 2637件)を下回らず、この
+  // シナリオ単体では「candidateCapによって偶然一部の順序付き候補が間引かれた後」の
+  // outcome数・Σ|indices|にはならない(#96の署名畳み込みが三連単本来の候補規模〈間引きなし〉で
+  // どう振る舞うかを直接見られる、という意味で「無制限相当」の役割をそのまま既定値が担う)。
+  // 一方、**cap由来の間引きが#96の畳み込みにどう効くか(#129が実測した637件切り捨て)は
+  // これだけでは再現できなくなった**ため、旧既定candidateCap=2000を明示的に渡すシナリオを
+  // 別途残す(レビュー指摘・2026-09-27。既存ベンチの比較対象として、切り捨てが発生する場合と
+  // 発生しない場合の両方を出す、というAC5本来の趣旨を維持する)。
+  const config = buildConfig(); // candidateCap=DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap(=8000。無制限相当)
+  const oldDefaultCapConfig = buildConfig({ candidateCap: 2000 }); // 旧既定(#129当時の値)を明示指定
 
   for (const [label, scenario, scenarioConfig] of [
     ["baseline(place/win/wide/trio/quinella/exacta)", baseline, config],
-    ["+trifecta(三連単を追加。candidateCap既定2000)", withTrifecta, config],
-    ["+trifecta(三連単を追加。candidateCap無制限相当=3000)", withTrifecta, uncappedConfig],
+    ["+trifecta(三連単を追加。旧既定のcandidateCap=2000を明示。#129の637件切り捨てを再現)", withTrifecta, oldDefaultCapConfig],
+    ["+trifecta(三連単を追加。candidateCap既定8000。無制限相当)", withTrifecta, config],
   ] as const) {
     const candidates = scenario.buildCandidates();
     const positiveCandidates = candidates.filter((c) => c.isPositive);
