@@ -54,6 +54,15 @@
  *   (`NODE_OPTIONS=--expose-gc pnpm tsx scripts/bench-trifecta-allocation.ts`)は計測前後で
  *   明示的にGCを走らせてから差分を取り、使えない場合はその旨を出力に明記した上でGC無しの
  *   値を出す(参考値であることを明記する)。
+ * - **AC-18(Issue #136・#25-E0で追加)**: `docs/investigations/combo-odds-real-fetch/central18-on.json`
+ *   (中央18頭・確定オッズ・実レース日2026/08/08・race_id=202604020511)+
+ *   `fixtures/odds_trifecta_202604020511.json`(同レースの三連単確定オッズ・4896件=P(18,3))。
+ *   ネットワークには一切出ない(取得手順・実リクエスト一覧は
+ *   `docs/trifecta-odds-investigation.md`§10、取得スクリプトは
+ *   `scripts/fetch-trifecta-18horse-snapshot.ts`)。priorはA案(戦績→scorerの実prior。
+ *   `docs/trifecta-odds-investigation.md`§10.2に採用理由を記載)。目的:
+ *   `DEFAULT_CANDIDATE_CAP`を2000→8000へ引き上げた根拠(18頭・7券種の理論上の最大6360)の
+ *   実データでの裏付けと、Workerプール12レース見積もりを16頭実測から18頭実測へ更新すること。
  *
  * ## 使い方
  *   pnpm tsx scripts/bench-trifecta-allocation.ts
@@ -65,6 +74,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadAnalysisResult } from "./bench-mixed-allocation.js";
+import { parseKaisaiDate, type RaceData } from "../packages/core/src/index.js";
+import { runAnalysis, type AnalysisPipelineDeps } from "../packages/app/src/main/analysis-pipeline.js";
 import type { AnalysisResult } from "../packages/app/src/shared/analysis-types.js";
 import { buildMixedCandidates, type MixedCandidateBuildInput } from "../packages/app/src/shared/mixed-candidates.js";
 import {
@@ -104,6 +115,33 @@ const TRIFECTA_PRESALE_FIXTURE_PATH = path.resolve(
   "odds_trifecta_presale_202606040901_20260926.json",
 );
 
+/**
+ * 18頭・実オッズの三連単フィクスチャ(Issue #136。race_id=202604020511・中央・2026-08-08開催
+ * 11R・18頭・確定オッズ。`docs/trifecta-odds-investigation.md`§10参照)。
+ */
+const TRIFECTA_18_FIXTURE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "odds_trifecta_202604020511.json",
+);
+
+/**
+ * 18頭・実オッズの統合スナップショット(Issue #136。`scrapeRace`の戻り値をそのまま保存したもの。
+ * `scripts/fetch-trifecta-18horse-snapshot.ts`が生成した。単勝・複勝・ワイド・3連複・馬連・
+ * 馬単の4組合せ券種は`scrapeRace`の`includeComboOdds:true`経由で既に埋め込まれている
+ * 〈中央16頭の`central-on.json`〈#28〉と異なり、quinellaCombo/exactaComboも最初から含む〉。
+ * 三連単だけは`scrapeRace`が未配線〈#132〉のため`TRIFECTA_18_FIXTURE_PATH`から別途読む)。
+ */
+const CENTRAL18_ON_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "docs",
+  "investigations",
+  "combo-odds-real-fetch",
+  "central18-on.json",
+);
+
 /** 三連単オッズフィクスチャを読み、`buildTrifectaCandidates`の`oddsByKey`(キーは`buildOrderedComboOddsKey`と同形)を作る。 */
 function loadTrifectaOddsByKey(fixturePath: string): Map<string, number | null> {
   const json = readFileSync(fixturePath, "utf-8");
@@ -116,15 +154,46 @@ function loadTrifectaOddsByKey(fixturePath: string): Map<string, number | null> 
 
 /** AnalysisResultから、buildMixedCandidates/buildTrifectaCandidatesが要求する最小構造を取り出す
  *  (`bench-mixed-allocation.ts`・`bench-run-greedy-allocation.ts`と同じ複製。単一定義にはしない
- *  ——各ベンチが自己完結することを優先する既存の流儀)。 */
+ *  ——各ベンチが自己完結することを優先する既存の流儀)。
+ *
+ * **Issue #136でquinellaCombo/exactaComboの中継を追加した。** 16頭の`central-on.json`(#28)は
+ * これらのフィールドを持たない(取得当時まだ馬連・馬単が`scrapeRace`に配線されていなかった
+ * ため。`main()`が`loadComboRecord`で別途フィクスチャから足し込んでいる)ため、この関数が
+ * 何もしなければ16頭側の既存経路には影響しない(`result.quinellaCombo`が常にundefined)。
+ * 一方、Issue #136で新規取得した18頭の`central18-on.json`は`scrapeRace`の
+ * `includeComboOdds:true`で最初からquinellaCombo/exactaComboを含むため、この関数がそれを
+ * 中継しないと18頭側で馬連・馬単の候補が常に0件になってしまう。 */
 function toMixedCandidateInput(result: AnalysisResult): MixedCandidateBuildInput {
   return {
     oddsStatus: result.oddsStatus,
     rows: result.rows,
     ...(result.wideCombo !== undefined ? { wideCombo: result.wideCombo } : {}),
     ...(result.trioCombo !== undefined ? { trioCombo: result.trioCombo } : {}),
+    ...(result.quinellaCombo !== undefined ? { quinellaCombo: result.quinellaCombo } : {}),
+    ...(result.exactaCombo !== undefined ? { exactaCombo: result.exactaCombo } : {}),
     ...(result.comboOdds !== undefined ? { comboOdds: result.comboOdds } : {}),
   };
+}
+
+/**
+ * 18頭・実オッズのスナップショット(`CENTRAL18_ON_PATH`)を読み、`runAnalysis`をLLM未使用
+ * (`deps.analyze:null`)で実行してAnalysisResultを得る(Issue #136。`bench-mixed-allocation.ts`の
+ * `loadAnalysisResult`と同じ経路・同じ計測条件。オーケストレーター着手前ゲートQ2でA案
+ * 〈戦績→scorer〉採用。先読みリークは遮断していない。詳細は
+ * `docs/trifecta-odds-investigation.md`§10.2参照)。
+ */
+async function loadAnalysisResult18(): Promise<AnalysisResult> {
+  const raw = readFileSync(CENTRAL18_ON_PATH, "utf-8");
+  const raceData = JSON.parse(raw) as RaceData;
+
+  const deps: AnalysisPipelineDeps = {
+    scrape: async () => raceData,
+    analyze: null,
+    saveAnalysis: () => 0,
+    allocationSettings: null,
+  };
+  // kaisaiDateを明示する(実レース日2026/08/08。§10.1)。
+  return runAnalysis(raceData.raceId, parseKaisaiDate("20260808"), deps);
 }
 
 /** 既存2本のベンチと同じ馬連・馬単フィクスチャ(中央16頭・同レース)を読み、Recordへ変換する。 */
@@ -710,13 +779,142 @@ function runAc3(): void {
 }
 
 // ============================================================================
+// AC-18(Issue #136): 18頭・実オッズ(現行6券種 vs +三連単。candidateCap引き上げ後の実測)
+// ============================================================================
+
+/**
+ * 18頭・実オッズ(race_id=202604020511)で、AC1(16頭)と同じ比較(現行6券種 vs +三連単)を行う。
+ * 目的(Issue #136受け入れ条件2): (a)券種別の候補数、(b)candidateCap(新既定8000)による
+ * 切り捨ての有無、(c)上限なしの1レース時間(`allocateGeneralBets`全体・`runGreedyAllocation`単体)
+ * を実測する。`buildConfig()`は`DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap`
+ * (=8000。本Issueで2000から引き上げ後の値)をそのまま使うため、ここで切り捨てが0件であることが
+ * 確認できれば「18頭・実オッズでは新既定candidateCapは発動しない」という受け入れ条件3の実測的
+ * 裏付けにもなる(理論値6360の直接確認は`combo-bet-allocation.test.ts`の
+ * 「★AC(Issue #136・#25-E0)」テストが別途固定している)。
+ */
+function runAc18Real(result: AnalysisResult): { readonly withTrifectaAvgMs: number } {
+  console.log("");
+  console.log("=== AC-18(Issue #136): 18頭・実オッズ(現行6券種 vs +三連単。race_id=202604020511) ===");
+  console.log(
+    "  ⚠️ prior: A案(戦績→scorerの実prior。LLM未使用)。先読みリークは遮断していない" +
+      "(#129の16頭ベンチと同条件。詳細はdocs/trifecta-odds-investigation.md §10.2参照)。",
+  );
+
+  const horses: JointModelHorse[] = result.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
+  const race = toMixedCandidateInput(result);
+  const trifectaOddsByKey = loadTrifectaOddsByKey(TRIFECTA_18_FIXTURE_PATH);
+
+  const baselineOnce = buildMixedCandidates(race, { evConfig: EV_CONFIG, betTypes: BASELINE_BET_TYPES });
+  const topFinishCount = baselineOnce.topFinishCount;
+
+  const baseline: Ac1Scenario = {
+    race,
+    horses,
+    topFinishCount,
+    buildCandidates: () => buildMixedCandidates(race, { evConfig: EV_CONFIG, betTypes: BASELINE_BET_TYPES }).candidates,
+  };
+  const withTrifecta: Ac1Scenario = {
+    race,
+    horses,
+    topFinishCount,
+    buildCandidates: () => {
+      const mixed = buildMixedCandidates(race, { evConfig: EV_CONFIG, betTypes: BASELINE_BET_TYPES });
+      const trifecta = buildTrifectaCandidates(horses, mixed.topFinishCount, trifectaOddsByKey, EV_CONFIG);
+      return [...mixed.candidates, ...trifecta.candidates];
+    },
+  };
+
+  const config = buildConfig(); // candidateCap=DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap(=8000)
+  const avgMsByLabel = new Map<"baseline" | "withTrifecta", number>();
+
+  for (const [key, label, scenario] of [
+    ["baseline", "baseline(place/win/wide/trio/quinella/exacta)", baseline],
+    ["withTrifecta", "+trifecta(三連単を追加)", withTrifecta],
+  ] as const) {
+    let lastCandidates: readonly AllocationCandidate[] = [];
+    const timing = measureWithBudget(() => {
+      const candidates = scenario.buildCandidates();
+      allocateGeneralBets(scenario.horses, scenario.topFinishCount, candidates, config, PLACKETT_LUCE_MODEL);
+      lastCandidates = candidates;
+    });
+    avgMsByLabel.set(key, timing.avgMs);
+    const alloc = allocateGeneralBets(scenario.horses, scenario.topFinishCount, lastCandidates, config, PLACKETT_LUCE_MODEL);
+    const counts = countByBetType(lastCandidates);
+    const byType = summarizeByBetType(alloc.allocations);
+    const total = alloc.totalStake;
+    console.log(`--- ${label} ---`);
+    console.log(
+      `  候補数: 単勝${counts.win} / 複勝${counts.place} / ワイド${counts.wide} / 三連複${counts.trio} / ` +
+        `馬連${counts.quinella} / 馬単${counts.exacta} / 三連単${counts.trifecta}(合計${lastCandidates.length}件)`,
+    );
+    console.log(
+      `  所要時間(allocateGeneralBets全体・candidateCap=${config.candidateCap}〈新既定〉): 平均${timing.avgMs.toFixed(1)}ms / ` +
+        `最大${timing.maxMs.toFixed(1)}ms(反復${timing.iterations}回・ウォームアップ${timing.warmupMs.toFixed(1)}ms)`,
+    );
+    console.log(
+      `  配分: 総額${total.toLocaleString()}円 / ${alloc.betCount}点 / ${formatComposition(total, byType)}`,
+    );
+    console.log(
+      `  診断: candidateCapで${alloc.diagnostics.truncatedByCapCount}件切り捨て(candidateCap=${config.candidateCap})、` +
+        `converged=${alloc.diagnostics.converged}`,
+    );
+
+    if (key === "withTrifecta") {
+      const breakdown = computeCandidateCapBreakdown(lastCandidates, config.candidateCap);
+      const types: AllocationBetType[] = ["win", "place", "wide", "trio", "quinella", "exacta", "trifecta"];
+      const labelOf: Record<AllocationBetType, string> = {
+        win: "単勝",
+        place: "複勝",
+        wide: "ワイド",
+        trio: "三連複",
+        quinella: "馬連",
+        exacta: "馬単",
+        trifecta: "三連単",
+      };
+      console.log(`  candidateCap切り詰めの券種別内訳(cap前→cap後、[切り捨て件数]):`);
+      for (const t of types) {
+        console.log(
+          `    ${labelOf[t]}: ${breakdown.beforeByType[t]}件 → ${breakdown.afterByType[t]}件 ` +
+            `[切り捨て${breakdown.droppedByType[t]}件]`,
+        );
+      }
+    }
+  }
+
+  // 上限なしの`runGreedyAllocation`単体の所要時間(受け入れ条件2の「runGreedyAllocation単体」)。
+  // candidateCap=新既定(8000)の時点で既に切り捨て0件(上記診断ログ参照)であるため、この
+  // config自体が既に「18頭の実候補数に対する事実上の無制限」を意味する(AC3の合成データとは
+  // 異なり、実オッズではEVプラス候補が理論最大〈6360〉よりずっと少なく、8000は十分な余裕がある)。
+  const positiveWithTrifecta = withTrifecta.buildCandidates().filter((c) => c.isPositive);
+  const { sortedProdCandidates, outcomeIndexSets } = selfCheckAgainstProduction(
+    "+trifecta(18頭・runGreedyAllocation単体)",
+    horses,
+    topFinishCount,
+    positiveWithTrifecta,
+    config,
+  );
+  const odds = sortedProdCandidates.map((c) => c.odds);
+  const timingGreedyAlone = measureWithBudget(() => {
+    runGreedyAllocation(sortedProdCandidates.length, odds, outcomeIndexSets, config.greedySteps);
+  });
+  console.log(
+    `  runGreedyAllocation単体の所要時間(+trifecta・18頭・candidateCap=${config.candidateCap}〈新既定・` +
+      `切り捨て0件〉): 平均${timingGreedyAlone.avgMs.toFixed(1)}ms / 最大${timingGreedyAlone.maxMs.toFixed(1)}ms` +
+      `(反復${timingGreedyAlone.iterations}回・ウォームアップ${timingGreedyAlone.warmupMs.toFixed(1)}ms、` +
+      `候補${sortedProdCandidates.length}件・畳み込み後outcome数${outcomeIndexSets.length})`,
+  );
+
+  return { withTrifectaAvgMs: avgMsByLabel.get("withTrifecta")! };
+}
+
+// ============================================================================
 // AC5: 署名畳み込み後のoutcome数・Σ|indices|・時間、Workerプール見積もり
 // ============================================================================
 
 function runAc5(
   baseline: Ac1Scenario,
   withTrifecta: Ac1Scenario,
-  ac1WithTrifectaAvgMs: number,
+  worker12EstimateAvgMs: number,
 ): void {
   console.log("");
   console.log("=== AC5: 署名畳み込み後のoutcome数・Σ|indices|・runGreedyAllocation単体の時間 ===");
@@ -763,16 +961,19 @@ function runAc5(
     "  ⚠️ Workerプール(#119)の12レース一括見積もり(算術見積もりであり、実際にWorker Poolを" +
       "起動して測ったものではない)。並列数の上限式: max(1, min(hardwareConcurrency−1, 4))" +
       "(mixed-allocation-worker-pool.tsのcomputeAllocationWorkerPoolCap)。" +
-      "AC1の「+trifecta」条件(buildMixedCandidates+buildTrifectaCandidates+allocateGeneralBets)の" +
-      `1レース平均${ac1WithTrifectaAvgMs.toFixed(1)}msを使う。`,
+      "**Issue #136で16頭(AC1)実測から18頭(AC-18)実測へ更新**: AC-18の「+trifecta」条件" +
+      "(buildMixedCandidates+buildTrifectaCandidates+allocateGeneralBets、18頭・実オッズ・" +
+      "candidateCap=新既定8000)の" +
+      `1レース平均${worker12EstimateAvgMs.toFixed(1)}msを使う(18頭は中央競馬のゲート数上限であり、` +
+      "12レース中に18頭立てが混ざりうる現実の最悪ケースをより保守的に見積もるため)。",
   );
   for (const concurrency of [2, 4] as const) {
     const races = 12;
     const rounds = Math.ceil(races / concurrency);
-    const estimateMs = rounds * ac1WithTrifectaAvgMs;
+    const estimateMs = rounds * worker12EstimateAvgMs;
     console.log(
       `  並列数${concurrency}(${concurrency === 2 ? "3コア機相当" : "5コア以上相当"}): ` +
-        `ceil(12/${concurrency})=${rounds}ラウンド × ${ac1WithTrifectaAvgMs.toFixed(1)}ms ≈ ${estimateMs.toFixed(0)}ms`,
+        `ceil(12/${concurrency})=${rounds}ラウンド × ${worker12EstimateAvgMs.toFixed(1)}ms ≈ ${estimateMs.toFixed(0)}ms`,
     );
   }
 }
@@ -785,19 +986,30 @@ async function main(): Promise<void> {
   const result = await loadAnalysisResult();
   console.log(`raceId=${result.raceId} rows=${result.rows.length}頭 oddsStatus=${result.oddsStatus}`);
 
-  // AC1で使う馬連・馬単フィクスチャを読み込み、raceへ足し込む(loadAnalysisResult自体は
-  // wideCombo/trioComboしか持たないため。toMixedCandidateInputはresultからwideCombo/trioCombo/
-  // comboOddsしか読まないため、quinellaCombo/exactaComboは別途足す必要がある。
-  // bench-mixed-allocation.tsのAC1条件と同じ形)。
+  // AC1で使う馬連・馬単フィクスチャを読み込み、raceへ足し込む(16頭の`central-on.json`〈#28〉
+  // 自体はquinellaCombo/exactaComboを持たない〈取得当時まだ馬連・馬単が`scrapeRace`に配線
+  // されていなかったため〉。`toMixedCandidateInput`はIssue #136でquinellaCombo/exactaComboの
+  // 中継にも対応したが、16頭側の`result`自体にその2フィールドが無い〈undefined〉ため、
+  // ここで別途フィクスチャから足し込む必要は変わらず残る。bench-mixed-allocation.tsのAC1条件と
+  // 同じ形)。
   const quinellaCombo = loadComboRecord(QUINELLA_FIXTURE_PATH, "quinella");
   const exactaCombo = loadComboRecord(EXACTA_FIXTURE_PATH, "exacta");
   const baseRace = toMixedCandidateInput(result);
   const raceWithCombos: MixedCandidateBuildInput = { ...baseRace, quinellaCombo, exactaCombo };
 
-  const { baseline, withTrifecta, withTrifectaAvgMs } = runAc1(result, raceWithCombos);
+  const { baseline, withTrifecta } = runAc1(result, raceWithCombos);
   runAc2(result);
   runAc3();
-  runAc5(baseline, withTrifecta, withTrifectaAvgMs);
+
+  // Issue #136: 18頭・実オッズ(race_id=202604020511)。quinellaCombo/exactaComboは
+  // `central18-on.json`自体に最初から含まれる(取得時点で`scrapeRace`が既に馬連・馬単を
+  // 配線済みだったため)ため、16頭側のような別フィクスチャの足し込みは不要。
+  const result18 = await loadAnalysisResult18();
+  console.log("");
+  console.log(`raceId=${result18.raceId} rows=${result18.rows.length}頭 oddsStatus=${result18.oddsStatus}`);
+  const { withTrifectaAvgMs: withTrifectaAvgMs18 } = runAc18Real(result18);
+
+  runAc5(baseline, withTrifecta, withTrifectaAvgMs18);
 }
 
 /**

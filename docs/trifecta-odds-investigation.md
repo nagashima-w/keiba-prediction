@@ -449,3 +449,110 @@ pnpm tsx scripts/fetch-quinella-exacta-raw.ts \
    `AllocationBetType`等のメンバー名は#128で別途決定すること(§0)
 6. 三連単確定払戻の突合はAC-A3(b)として完全達成(中央・地方とも1件ずつ、決定的な一致)。
    代替は発生していない
+
+## 10. 18頭立て・7券種の実測(Issue #136・#25-E0、2026-09-27)
+
+`candidateCap`(既定値。`packages/core/src/ev/combo-bet-allocation.ts`の`DEFAULT_CANDIDATE_CAP`)を
+「18頭で全組合せがEVプラスでも切り捨てが起きない値」へ引き上げるにあたり、実オッズでの
+候補数・性能を測るため、18頭立て・確定済みの中央レースで7券種(単勝・複勝・ワイド・馬連・
+馬単・3連複・三連単)すべての確定オッズを実測した(`scripts/bench-trifecta-allocation.ts`の
+AC1〈16頭〉に続く18頭ケース)。
+
+### 10.1 対象レースの選定
+
+race_id=**202604020511**(中央、2026-08-08開催 11R「3歳以上1勝クラス」・芝1000m・18頭)。
+
+頭数18は**新規リクエスト不要**で確認済み: 既存コミット済みフィクスチャ
+`fixtures/race_list_sub_20260808.html`(2026-08-06実施の#32調査で取得済み)に、この race_id の
+直後に`<span class="RaceList_Itemnumber">18頭 </span>`が含まれる(`docs/wide-trio-odds-investigation.md:394`
+にも「18頭最大」と記録済み)。この race_id には発売前(unavailable)の既存フィクスチャ
+(`odds_wide_presale_202604020511_20260806.json`・`odds_trio_presale_202604020511_20260806.json`。
+2026-08-06取得、レース開催〈8/8〉の2日前)があるが、確定オッズではないため今回とは無関係
+(ファイル名の衝突もない)。
+
+**安全確認**(オーケストレーター着手前ゲートQ1「最初の1本で確定オッズが返らなければレースを
+選び直す」): 単勝・複勝オッズ(type=1)を最初の1本として取得したところ、
+`{"status":"result","data":{"official_datetime":"2026-08-08 17:57:14","odds":{...}}}`という
+確定済みの実データが返り(レース日8/8と一致)、レースの選び直しは不要と判断した。
+
+### 10.2 prior(placeProb)の作り方: A案(戦績→scorer)を採用
+
+オーケストレーター着手前ゲートQ2の裁定により、B案(市場示唆確率)ではなくA案(18頭分の戦績を
+取得し scorer に通す)を採用した。理由(裁定の要旨): 市場示唆確率をpriorにするとEV≈払戻率
+(約0.75)となり候補のほとんどがEVマイナスになってしまい、「18頭の実際の分析で候補数・所要時間を
+測る」という本タスクの目的を測れない。#129(16頭)ではscorerのpriorで三連単候補の66%がEVプラス
+だった実績があり、市場とscorerの食い違いこそが候補を生む構造のため、同じscorerを通す必要がある。
+
+具体的には、`scripts/bench-mixed-allocation.ts`の`loadAnalysisResult`と同じ経路
+(`runAnalysis`を`deps.analyze:null`〈LLM未使用〉で実行し、scorerが出す実priorをそのまま使う)を
+18頭の新規スナップショットに対して適用する。**先読みリーク(当該レース自身の着順が戦績に
+混入する)は#129のベンチと同様に遮断していない**(目的が候補数・所要時間の実測であり、prior自体の
+精度検証ではないため。是正は#39のスコープ)。
+
+### 10.3 実リクエスト一覧(合計26本。全件HTTP 200。400は0本)
+
+すべて`HttpClient`(既定`minIntervalMs`=1500ms・UA明示)経由。新規に作成した
+`scripts/fetch-trifecta-18horse-snapshot.ts`を使用した(#103の`fetch-quinella-exacta-raw.ts`とは
+別に新設。理由: 出馬表・戦績18頭・調教を`scrapeRace`にまとめて任せつつ、単勝複勝・4種の組合せ
+オッズは個別フィクスチャとして先に生テキストで保存し、`scrapeRace`内部からの重複リクエストを
+`ScrapeCache`への事前投入で防ぐ設計〈スクリプト冒頭のJSDoc参照〉が汎用の単発取得スクリプトでは
+表現できないため)。実行は2回に分かれた(1回目は`status==="OK"`という誤った検証条件で
+中断。実データ自体は`status:"result"`で正しく取得できており、2回目はこの1本を再取得せず
+再利用した。詳細はスクリプト内コメント参照)。
+
+| # | 目的 | URL | 結果 | 保存先(バイト数) |
+|---|---|---|---|---|
+| 1 | 単勝・複勝(type=1。安全確認を兼ねる) | `https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202604020511&type=1&action=init` | **200** | `fixtures/odds_202604020511.json`(1005バイト) |
+| 2 | ワイド(type=5) | 同上 type=5 | **200** | `fixtures/odds_wide_202604020511.json`(4618バイト) |
+| 3 | 3連複(type=7) | 同上 type=7 | **200** | `fixtures/odds_trio_202604020511.json`(26711バイト) |
+| 4 | 馬連(type=4) | 同上 type=4 | **200** | `fixtures/odds_quinella_202604020511.json`(4525バイト) |
+| 5 | 馬単(type=6) | 同上 type=6 | **200** | `fixtures/odds_exacta_202604020511.json`(9170バイト) |
+| 6 | 三連単(type=8) | 同上 type=8 | **200** | `fixtures/odds_trifecta_202604020511.json`(169082バイト) |
+| 7 | 出馬表(`scrapeRace`が発火) | `shutuba.html?race_id=202604020511` | **200** | `docs/investigations/combo-odds-real-fetch/central18-on.json`(統合スナップショットにまとめて保存。個別フィクスチャ化していない。#28の`central-on.json`と同じ流儀) |
+| 8〜25 | 戦績(`scrapeRace`が18頭分発火。db.netkeiba.com) | 各馬の`horseResultsApiUrl` | 全件**200** | 同上 |
+| 26 | 調教・追い切り(`scrapeRace`が発火) | `oikiri.html?race_id=202604020511` | **200** | 同上 |
+
+**#2〜#6は`ScrapeCache`へ事前投入済みのため、`scrapeRace`内部からの再発火は無い**
+(取得直後にキャッシュへ`set`し、`scrapeRace`のオッズ取得ステップが同一URLをキーにキャッシュ
+命中する設計。スクリプトのJSDoc参照)。**#1(type=1)は前回実行〈中断前〉で取得済みの実応答を
+本実行では再取得せず再利用した**ため、本実行で新規に発火したのは#2〜#26の25本のみ
+(#1と合わせて実質26本)。400は0本(自動再試行ロジックも未発火)。
+
+再現コマンド:
+```
+pnpm tsx scripts/fetch-trifecta-18horse-snapshot.ts
+```
+(`fixtures/odds_202604020511.json`が既に存在する場合、#1は再取得せず読み直す。新規にゼロから
+再現する場合はこのファイルを削除してから実行すること。)
+
+### 10.4 取得結果の検算(実測)
+
+```
+node -e '
+const d = require("./docs/investigations/combo-odds-real-fetch/central18-on.json");
+console.log("horses", d.horses.length);
+console.log("warnings", d.meta.warnings.length);
+for (const k of ["wideCombo","trioCombo","quinellaCombo","exactaCombo"]) {
+  console.log(k, Object.keys(d.odds[k]).length);
+}
+'
+→ horses 18 / warnings 0 /
+  wideCombo 153(=C(18,2)) / trioCombo 816(=C(18,3)) /
+  quinellaCombo 153(=C(18,2)) / exactaCombo 306(=P(18,2))
+```
+
+三連単(`fixtures/odds_trifecta_202604020511.json`)はキー集合がP(18,3)=4896件と一致することを
+`scripts/bench-trifecta-allocation.ts`側の実測(§後述)で確認する(本ドキュメントでは取得結果の
+記録に徹し、パース結果の集合一致は同ベンチのAC1実行結果を参照)。
+
+### 10.5 フィクスチャ対応表(追加分)
+
+| ファイル名 | レース | 頭数 | 状態 | 頭数の情報源 |
+|---|---|---|---|---|
+| `odds_202604020511.json` | 中央・8/8開催11R(3歳以上1勝クラス) | 18 | ①発売済み(確定) | `race_list_sub_20260808.html`の`RaceList_Itemnumber`(既存フィクスチャ流用) |
+| `odds_wide_202604020511.json` | 同上 | 18 | 同上 | 同上 |
+| `odds_trio_202604020511.json` | 同上 | 18 | 同上 | 同上 |
+| `odds_quinella_202604020511.json` | 同上 | 18 | 同上 | 同上 |
+| `odds_exacta_202604020511.json` | 同上 | 18 | 同上 | 同上 |
+| `odds_trifecta_202604020511.json` | 同上 | 18 | 同上 | 同上 |
+| `docs/investigations/combo-odds-real-fetch/central18-on.json` | 同上(出馬表・戦績18頭分・調教・単勝複勝オッズの統合スナップショット。`scrapeRace`の戻り値そのもの) | 18 | 同上 | `race.horses.length`(取得結果自身) |

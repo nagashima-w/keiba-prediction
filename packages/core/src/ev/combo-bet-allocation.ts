@@ -62,7 +62,7 @@
  * | `AllocationCandidate.ev` | `allocateGeneralBets`(gatekeeper`validateCandidates`) | あり | throw(非有限) | 同上 |
  * | `oddsByKey`の値(`ReadonlyMap<string, number\|null>`) | `resolveComboOdds`/`buildComboCandidates`(classifier) | あり | 分類(`malformed`→`unjudged.oddsMalformedCount`。throwしない) | 最大987組を1件ずつ分類するのが仕事であり、1組の異常値のために残りの健全な分類結果を失うのは誤り。`combo-bet-allocation.test.ts`「オッズ4区分」describe |
  * | `evConfig.threshold` | `computeRaceEv`/`computeEstimatedRaceEv`(expected-value.ts)/`buildComboCandidates`(3箇所共有`resolveEvThreshold`) | あり | 既定値フォールバック(非有限→`DEFAULT_EV_CONFIG.threshold`=1.0) | 片側だけ守ると`ev>threshold`の比較が壊れた側だけ壊れる非対称が生まれるため3箇所で共有。`expected-value.test.ts`の`resolveEvThreshold`describe、`combo-bet-allocation.test.ts`「evConfig.thresholdの防御」describe |
- * | `GeneralBetAllocationConfig.candidateCap` | `allocateGeneralBets`(`resolveCandidateCap`) | あり | 既定値フォールバック(非有限・0以下→2000。暴走ガードとして再定義。旧来の性能チューニング値ではない) | `combo-bet-allocation.test.ts`「候補上限(候補cap)の境界」describe |
+ * | `GeneralBetAllocationConfig.candidateCap` | `allocateGeneralBets`(`resolveCandidateCap`) | あり | 既定値フォールバック(非有限・0以下→`DEFAULT_CANDIDATE_CAP`。暴走ガードとして再定義。旧来の性能チューニング値ではない。Issue #136で18頭・7券種の理論上の最大〈6360〉でも発動しない値へ引き上げた) | `combo-bet-allocation.test.ts`「候補上限(候補cap)の境界」describe |
  * | `GeneralBetAllocationConfig.bankroll`/`perRaceCap`/`betUnit`/`greedySteps`/`kellyFraction` | `allocateGeneralBets`(`allocation-primitives.ts`の`resolveBankroll`等。複勝経路`bet-allocation.ts`と共有・D-2aでの変更なし) | あり(pre-existing) | 既定値フォールバック | `combo-bet-allocation.test.ts`「既存の防御が組合せでも生きること」describe |
  * | `horses[].placeProb` | `allocateGeneralBets`/`buildComboCandidates`(`model.buildDistribution`。`place-joint-model.ts`、D-2a未変更) | あり(pre-existing) | 対象外(既存防御に委ねる) | `place-joint-model.ts`が`[EPS,1-EPS]`クランプ+分母非有限時の均等分布フォールバックで吸収する(同ファイルのJSDocに明記済みの設計)。実測(本ファイル筆者): `placeProb`にNaN/±Infinity/-5を注入しても`allocateGeneralBets`の`totalStake`は常に有限値(クラッシュなし)。`bet-allocation.ts`の`allocateBets`と全く同一の消費パターンであり、D-2aが新規に開いた経路ではない |
  * | `horses[].umaban` | `allocateGeneralBets`(`model.buildDistribution`経由の同時分布)/`buildComboCandidates`(組合せ列挙の元データ) | あり(2つの異なる経路それぞれで) | 対象外(前者)+throw(後者、`allocateGeneralBets`への受け渡し時に`validateCandidates`が捕捉) | 実測(本ファイル筆者): (1)`allocateGeneralBets`が直接受け取る`horses[].umaban`が非有限でも、`foldToCandidateSubsets`が`candidateUmabanSet`(検証済み候補の馬番のみを含む集合)でフィルタするため、健全な候補のtotalStakeは不変(baseline一致を確認)。(2)一方、`buildComboCandidates`は`horses[].umaban`をそのまま組合せ列挙に使うため、非有限な馬番が`AllocationCandidate.umabans`に紛れ込んだ候補を生成しうる(実測: `isPositive:true`の候補として生成されるケースを確認)。この候補がそのまま`allocateGeneralBets`に渡されると`validateCandidates`が例外を投げて可視化する(実測で確認)。**buildComboCandidates自身はこの値を検証しない**(gatekeeperではなくclassifierであるため)ことに注意 |
@@ -441,8 +441,35 @@ export interface AllocationCandidate {
  * 実際に想定される最大値に十分な余裕を持たせた2000とした(987の2倍強)。
  * 候補上限を意図的に絞りたい場合は `GeneralBetAllocationConfig.candidateCap` を
  * 明示的に指定すること(既定値はもはや「性能チューニングの推奨値」ではない)。
+ *
+ * **2026-09-26(Issue #136・#25-E0)で 2000→8000 へ再度引き上げた。** 三連単(Issue #128)を
+ * 足したことで、987件だった「複勝+ワイド+3連複+馬連+馬単」の現実的な最大候補数に
+ * 三連単が加わり、18頭・7券種(複勝・単勝・ワイド・馬連・馬単・3連複・三連単)の
+ * **理論上の最大候補数(=出走馬全頭がEVプラス判定される極端なケース)**は次の式で
+ * 6360件になる(`node -e`で検算可能):
+ *
+ * ```
+ * 複勝  C(18,1) =   18
+ * 単勝  C(18,1) =   18
+ * ワイド C(18,2) =  153
+ * 馬連  C(18,2) =  153
+ * 馬単  P(18,2) =  306
+ * 3連複 C(18,3) =  816
+ * 三連単 P(18,3) = 4896
+ * 合計                6360
+ * ```
+ *
+ * 2000のままだと、#129の実測(中央16頭・実オッズ)で三連単を足すと候補が607件→2637件に
+ * 増え、637件が既定candidateCapで切り捨てられる(うち177件は三連単以外の既存券種の候補が
+ * 押し出される)ことを確認済み(`docs/issue-order.md`#129の行、`scripts/bench-trifecta-allocation.ts`
+ * AC1)。**18頭は中央競馬のゲート数上限であり、これを超える頭数のレースは存在しない**ため、
+ * 6360が「全組合せがEVプラスになる」場合の構造的な上限値である。8000は6360に約26%の余裕を
+ * 持たせた値であり、将来枠連・枠単(#26。8枠ベースのためC(8,2)=28・P(8,2)=56程度しか
+ * 候補が増えない)が加わっても理論上の最大は6360+84=6444程度にとどまり、8000の余裕の
+ * 範囲に収まる。**この値も暴走ガードであり性能チューニングの推奨値ではない**(位置づけは
+ * 2026-08-05の裁定のまま変更していない)。
  */
-export const DEFAULT_CANDIDATE_CAP = 2000;
+export const DEFAULT_CANDIDATE_CAP = 8000;
 
 /** 券種一般の配分最適化設定。bet-allocation.tsのBetAllocationConfigに candidateCap を加えた形。 */
 export interface GeneralBetAllocationConfig {
@@ -454,7 +481,8 @@ export interface GeneralBetAllocationConfig {
   /**
    * 最適化に渡す候補数の上限(EV降順・同値は馬番配列の辞書順でタイブレークして選抜)。
    * **暴走ガードであり、性能チューニングのためのパラメータではない**(DEFAULT_CANDIDATE_CAPの
-   * JSDoc参照)。既定値(2000)は現実的な最大候補数を大きく上回るため通常は発動しない。
+   * JSDoc参照)。既定値(`DEFAULT_CANDIDATE_CAP`=8000)は18頭・7券種の理論上の最大候補数
+   * (6360)を上回るため通常は発動しない。
    */
   readonly candidateCap: number;
 }
@@ -664,7 +692,10 @@ function buildAdvisory(exceedsKellyTarget: boolean, kellyTargetStake: number, be
 }
 
 /**
- * candidateCap(候補上限)を防御する。非有限・0以下・非整数は既定値(50)へフォールバックする
+ * candidateCap(候補上限)を防御する。非有限・0以下・非整数は既定値(`DEFAULT_CANDIDATE_CAP`。
+ * 値そのものはこの関数の外〈`DEFAULT_CANDIDATE_CAP`のJSDoc〉で管理し、ここに数値を転記しない。
+ * 転記すると値の改定のたびに片方だけ古いまま残る〈2000→8000への改定時、この行が旧値の
+ * 「50」のまま2026-09-26まで取り残されていたのと同型の欠陥。Issue #136で発見)へフォールバックする
  * (resolveBetUnit等と同じ流儀)。
  */
 function resolveCandidateCap(candidateCap: number): number {

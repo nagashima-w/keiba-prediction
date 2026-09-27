@@ -880,12 +880,12 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
   });
 
-  describe("候補上限(候補cap)の境界。boss指摘2026-08-05により「暴走ガード」へ位置づけ変更", () => {
-    it("既定上限は2000であること(DEFAULT_CANDIDATE_CAP。性能のための間引きではなく暴走ガード)", () => {
-      expect(DEFAULT_CANDIDATE_CAP).toBe(2000);
+  describe("候補上限(候補cap)の境界。boss指摘2026-08-05により「暴走ガード」へ位置づけ変更。Issue #136(#25-E0)で2000→8000へ再引き上げ", () => {
+    it("既定上限は8000であること(DEFAULT_CANDIDATE_CAP。三連単込みでも18頭の理論上の最大〈6360〉を上回る)", () => {
+      expect(DEFAULT_CANDIDATE_CAP).toBe(8000);
     });
 
-    it("複勝相当(18件)の入力ではcapが発動しないこと(上限2000>=18)", () => {
+    it("複勝相当(18件)の入力ではcapが発動しないこと(上限8000>=18)", () => {
       const horses = evenHorses(18, 3);
       const candidates: AllocationCandidate[] = Array.from({ length: 18 }, (_, i) => ({
         umabans: [i + 1],
@@ -904,9 +904,10 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
     });
 
     it("現実的な最大(18頭・C(18,2)=153件のワイド相当)でも既定candidateCapでは発動しないこと(廃止の直接確認)", () => {
-      // boss指摘: candidateCapは「性能のための打ち切り」としては廃止した。既定値(2000)は
-      // 現実的な最大候補数(複勝18+ワイド153+3連複816=987)を大きく上回るため、
-      // 実際にありうる最大規模の入力でも切り捨てが発動しないことを直接確認する。
+      // boss指摘: candidateCapは「性能のための打ち切り」としては廃止した。既定値(現在8000。
+      // Issue #136で2000から引き上げ)は153を大きく上回るため、
+      // 実際にありうる最大規模の入力でも切り捨てが発動しないことを直接確認する
+      // (7券種・6360件の理論上の最大は下記「★AC(Issue #136)」のテストで別途固定する)。
       const horses = evenHorses(18, 3);
       const candidates = makeAscendingUniqueCandidates(153); // C(18,2)の全件
       const result = allocateGeneralBets(horses, 3, candidates, {
@@ -916,6 +917,24 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       });
       expect(result.diagnostics.truncatedByCapCount).toBe(0);
       expect(result.diagnostics.candidateCount).toBe(153);
+    });
+
+    it("★AC(Issue #136・#25-E0): 18頭・7券種の理論上の最大(6360件、全候補EVプラス)でも既定candidateCapでは切り捨てが起きないこと", () => {
+      const horses = evenHorses(18, 3);
+      const candidates = makeAllBetTypesFullCombinationCandidates(18);
+      // 前提固定(空振り防止): 6360件という数そのものが構築側のバグで既に減っていないこと
+      // (`DEFAULT_CANDIDATE_CAP`のJSDocに記した式 18+18+153+153+306+816+4896=6360 の直接検証)。
+      expect(candidates.length).toBe(6360);
+      const result = allocateGeneralBets(horses, 3, candidates, {
+        ...DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+        bankroll: 100000,
+        perRaceCap: 100000,
+        // 本テストの関心はcandidateCapの発動有無(cap選抜はgreedySteps適用より前の処理)であり、
+        // 貪欲法の収束精度ではないため、既定より小さくして実行時間を抑える。
+        greedySteps: 50,
+      });
+      expect(result.diagnostics.truncatedByCapCount).toBe(0);
+      expect(result.diagnostics.candidateCount).toBe(6360);
     });
 
     it("上限ちょうど/上限+1の境界(選抜メカニズム自体の検証。既定値の大小に依存しないよう明示的なcandidateCapを指定)", () => {
@@ -2469,6 +2488,60 @@ function makeAscendingUniqueCandidates(count: number): AllocationCandidate[] {
     }
   }
   return combos.map((c, i) => ({ umabans: c, odds: 3, ev: 2 + i * 0.0001, isPositive: true, betType: "wide" }));
+}
+
+/**
+ * n頭・7券種(複勝・単勝・ワイド・馬連・馬単・3連複・三連単)の**全組合せ・全順列**を
+ * 過不足なく作る補助関数(Issue #136。`DEFAULT_CANDIDATE_CAP`のJSDocに記した
+ * 6360件〈n=18〉の内訳をテスト側でも独立に構築する)。全候補isPositive:true・オッズ固定・
+ * EVは列挙順に単調増加させるだけ(タイブレークの検証はこの関数の対象外。「上限による
+ * 切り捨ての選抜は…」テストが別途担う)。
+ */
+function makeAllBetTypesFullCombinationCandidates(n: number): AllocationCandidate[] {
+  const candidates: AllocationCandidate[] = [];
+  let evSeq = 0;
+  const nextEv = (): number => {
+    evSeq += 1;
+    return 2 + evSeq * 0.0001;
+  };
+  // 複勝・単勝: 各n件(C(n,1))。
+  for (let a = 1; a <= n; a++) {
+    candidates.push({ umabans: [a], odds: 3, ev: nextEv(), isPositive: true, betType: "place" });
+    candidates.push({ umabans: [a], odds: 3, ev: nextEv(), isPositive: true, betType: "win" });
+  }
+  // ワイド・馬連: 各C(n,2)件(昇順の組)。
+  for (let a = 1; a <= n; a++) {
+    for (let b = a + 1; b <= n; b++) {
+      candidates.push({ umabans: [a, b], odds: 3, ev: nextEv(), isPositive: true, betType: "wide" });
+      candidates.push({ umabans: [a, b], odds: 3, ev: nextEv(), isPositive: true, betType: "quinella" });
+    }
+  }
+  // 馬単: P(n,2)件(順序付き。a→bとb→aは別候補)。
+  for (let a = 1; a <= n; a++) {
+    for (let b = 1; b <= n; b++) {
+      if (b === a) continue;
+      candidates.push({ umabans: [a, b], odds: 3, ev: nextEv(), isPositive: true, betType: "exacta" });
+    }
+  }
+  // 3連複: C(n,3)件(昇順の組)。
+  for (let a = 1; a <= n; a++) {
+    for (let b = a + 1; b <= n; b++) {
+      for (let c = b + 1; c <= n; c++) {
+        candidates.push({ umabans: [a, b, c], odds: 3, ev: nextEv(), isPositive: true, betType: "trio" });
+      }
+    }
+  }
+  // 三連単: P(n,3)件(順序付き。着順の並びすべてが別候補)。
+  for (let a = 1; a <= n; a++) {
+    for (let b = 1; b <= n; b++) {
+      if (b === a) continue;
+      for (let c = 1; c <= n; c++) {
+        if (c === a || c === b) continue;
+        candidates.push({ umabans: [a, b, c], odds: 3, ev: nextEv(), isPositive: true, betType: "trifecta" });
+      }
+    }
+  }
+  return candidates;
 }
 
 // ============================================================================
