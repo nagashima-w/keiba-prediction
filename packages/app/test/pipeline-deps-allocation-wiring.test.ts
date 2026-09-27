@@ -34,7 +34,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
     }
   });
 
-  it("config.allocationSettings(7項目)を渡すと、includeComboOddsを合成した8項目がdeps.allocationSettingsへ届くこと(includeComboOdds=true)", async () => {
+  it("config.allocationSettings(8項目)を渡すと、includeComboOddsを合成した9項目がdeps.allocationSettingsへ届くこと(includeComboOdds=true)", async () => {
     const r = createPipelineDeps({
       dbPath: ":memory:",
       includeComboOdds: true,

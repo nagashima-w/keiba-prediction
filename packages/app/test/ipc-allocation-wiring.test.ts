@@ -9,7 +9,7 @@ import { DEFAULT_APP_SETTINGS } from "../src/main/settings-store.js";
 import type { SettingsUpdate } from "../src/shared/settings.js";
 
 /**
- * ipc.ts が設定画面の配分6項目(shared/settings.ts の AppSettings.bankroll ほか)を
+ * ipc.ts が設定画面の配分の設定項目(shared/settings.ts の AppSettings.bankroll ほか。項目数は下の各テストの期待値が正)を
  * createPipelineDeps へ実際に渡していること、および単日一括分析
  * (handleRunBatchAnalysis)と期間バッチ(handleRunPeriodBatchAnalysis)が
  * createPipelineDeps が返した**同一の**deps オブジェクトを runAnalysis の第3引数に渡していることを
