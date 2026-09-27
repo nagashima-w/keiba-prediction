@@ -126,12 +126,13 @@ export interface PipelineWiringConfig {
    */
   readonly includeComboOdds?: boolean;
   /**
-   * 配分提案(Issue #59)の設定7項目(`bankroll`/`perRaceCap`/`kellyFraction`/
+   * 配分提案(Issue #59)の設定8項目(`bankroll`/`perRaceCap`/`kellyFraction`/
    * `includeWideInAllocation`/`includeTrioInAllocation`/`includeQuinellaInAllocation`/
-   * `includeExactaInAllocation`)。`includeComboOdds`は含めない(上記の`includeComboOdds`が
-   * 単一ソース。ここへ二重に持たせない。#59 4節)。省略時は `AnalysisPipelineDeps.allocationSettings`
-   * が null になり、この呼び出しでは配分計算を行わない(既存呼び出し元・`pipeline-deps.test.ts`の
-   * 20箇所超との後方互換のためこのフィールド自体は任意のままとする。#59着手前確認済み)。
+   * `includeExactaInAllocation`/`includeTrifectaInAllocation`)。`includeComboOdds`は含めない
+   * (上記の`includeComboOdds`が単一ソース。ここへ二重に持たせない。#59 4節)。省略時は
+   * `AnalysisPipelineDeps.allocationSettings` が null になり、この呼び出しでは配分計算を行わない
+   * (既存呼び出し元・`pipeline-deps.test.ts`の20箇所超との後方互換のためこのフィールド自体は
+   * 任意のままとする。#59着手前確認済み)。
    *
    * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は5→6項目化した追加分。
    * `includeExactaInAllocation`(#24-E3a・Issue #124)は6→7項目化した追加分。ここで
@@ -139,6 +140,12 @@ export interface PipelineWiringConfig {
    * までそのまま運ぶが、`allocation-record.ts`のメタ行(`analysis_allocation_meta`)へは
    * 書かない(馬連は#59が固定した列一覧の凍結をIssue #118で解除したが、馬単は#24-E3a時点では
    * 解除しない。`allocation-record.ts`冒頭のJSDoc参照)。
+   *
+   * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は7→8項目化した追加分。馬単(#24-E3a)と
+   * 同じ経緯を辿る: この型に持たせる目的は`AnalysisAllocationSettings`(8→9項目)まで値を運ぶ
+   * 配管の一部としてのみで、`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は
+   * #25-E3b(Issue #139)のスコープ、メタ行への書き込みは#25-E3c(Issue #140)のスコープ
+   * (`allocation-record.ts`冒頭のJSDoc参照)。
    */
   readonly allocationSettings?: {
     readonly bankroll: number;
@@ -148,6 +155,7 @@ export interface PipelineWiringConfig {
     readonly includeTrioInAllocation: boolean;
     readonly includeQuinellaInAllocation: boolean;
     readonly includeExactaInAllocation: boolean;
+    readonly includeTrifectaInAllocation: boolean;
   };
   /**
    * better-sqlite3 のネイティブバインディング(.node)の絶対パス(Issue #60-B)。
@@ -288,8 +296,8 @@ export function createPipelineDeps(
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
-    // 配分提案(Issue #59)。config.allocationSettings(7項目)にincludeComboOdds(上で1回だけ
-    // 解決した値。scrape束縛と同じ値)を合成して8項目にする。config.allocationSettingsが
+    // 配分提案(Issue #59)。config.allocationSettings(8項目)にincludeComboOdds(上で1回だけ
+    // 解決した値。scrape束縛と同じ値)を合成して9項目にする。config.allocationSettingsが
     // 省略時はnull(この呼び出しでは配分計算を行わない。required-nullableの契約は
     // analysis-pipeline.ts AnalysisPipelineDeps.allocationSettings参照)。
     allocationSettings:

@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
   };
   const expected = buildMixedAllocationDisplay(race, settings);
 

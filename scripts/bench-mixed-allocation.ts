@@ -293,6 +293,9 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     // (このファイル)は`result.exactaCombo`をraceへ渡さないため、馬単の候補は常に0件
     // (unfetched)になり、配分額・構成比の出力は変わらない(quinellaと同じ理由。AC-11参照)。
     includeExactaInAllocation: true,
+    // #25-E3a(Issue #138)で追加。候補ビルダーはまだ三連単の候補を作らないため
+    // (resolveMixedBetTypes未接続)、この値は感度表の出力に一切影響しない。
+    includeTrifectaInAllocation: true,
   };
 
   // ウォームアップ1回(JITの影響を減らす)を除いた上で、実運用の1レース分の呼び出し

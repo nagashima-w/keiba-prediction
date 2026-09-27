@@ -46,6 +46,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       },
     });
     try {
@@ -58,6 +59,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       });
       // 同じincludeComboOdds(true)がscrapeRaceの第3引数にも届いていること(単一解決の実証)。
       await r.deps.scrape(parseRaceId("202605020811"));
@@ -79,6 +81,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       },
     });
     try {

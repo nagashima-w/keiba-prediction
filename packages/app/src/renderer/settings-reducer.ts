@@ -94,6 +94,14 @@ export interface SettingsFormState {
    * 追加した。
    */
   readonly includeExactaInAllocation: boolean;
+  /**
+   * 三連単を馬券配分の対象に含めるか(#25-E3a・Issue #138)。既定true。
+   * #25-E3a時点では対応する切替アクション(SettingsAction)を持たない
+   * (SettingsView.tsxにトグルを出さないため。#25-E3b〈Issue #139〉で「三連単配分対象切替」
+   * アクションを追加する見込み。馬単〈#24-E3a→#24-E3b〉と同じ切り方)。それでも読込・保存の
+   * 往復・isDirty判定の対象には含める(将来トグルを追加したときの配線をこの時点で通しておく)。
+   */
+  readonly includeTrifectaInAllocation: boolean;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -221,6 +229,8 @@ export interface SettingsSnapshot {
   readonly includeQuinellaInAllocation: boolean;
   /** 馬単を馬券配分の対象に含めるか(#24-E3a・Issue #124。Issue #125でトグルを追加)。 */
   readonly includeExactaInAllocation: boolean;
+  /** 三連単を馬券配分の対象に含めるか(#25-E3a・Issue #138)。 */
+  readonly includeTrifectaInAllocation: boolean;
 }
 
 /** 空文字ベースの初期スナップショットを作る。 */
@@ -243,6 +253,7 @@ function emptySnapshot(): SettingsSnapshot {
     includeTrioInAllocation: false,
     includeQuinellaInAllocation: false,
     includeExactaInAllocation: false,
+    includeTrifectaInAllocation: false,
   };
 }
 
@@ -268,6 +279,7 @@ export function createInitialSettingsState(): SettingsFormState {
     includeTrioInAllocation: false,
     includeQuinellaInAllocation: false,
     includeExactaInAllocation: false,
+    includeTrifectaInAllocation: false,
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -309,6 +321,7 @@ function applyMasked(
   const includeTrioInAllocation = settings.includeTrioInAllocation;
   const includeQuinellaInAllocation = settings.includeQuinellaInAllocation;
   const includeExactaInAllocation = settings.includeExactaInAllocation;
+  const includeTrifectaInAllocation = settings.includeTrifectaInAllocation;
   return {
     ...state,
     loaded: true,
@@ -331,6 +344,7 @@ function applyMasked(
     includeTrioInAllocation,
     includeQuinellaInAllocation,
     includeExactaInAllocation,
+    includeTrifectaInAllocation,
     savedSnapshot: {
       discordWebhookUrl,
       evThreshold,
@@ -347,6 +361,7 @@ function applyMasked(
       includeTrioInAllocation,
       includeQuinellaInAllocation,
       includeExactaInAllocation,
+      includeTrifectaInAllocation,
     },
   };
 }
@@ -504,6 +519,7 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     includeTrioInAllocation: state.includeTrioInAllocation,
     includeQuinellaInAllocation: state.includeQuinellaInAllocation,
     includeExactaInAllocation: state.includeExactaInAllocation,
+    includeTrifectaInAllocation: state.includeTrifectaInAllocation,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
@@ -559,6 +575,9 @@ export function isDirty(state: SettingsFormState): boolean {
     return true;
   }
   if (state.includeExactaInAllocation !== snap.includeExactaInAllocation) {
+    return true;
+  }
+  if (state.includeTrifectaInAllocation !== snap.includeTrifectaInAllocation) {
     return true;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

@@ -49,6 +49,10 @@ describe("DEFAULT_APP_SETTINGS(既定設定)", () => {
     expect(DEFAULT_APP_SETTINGS.includeExactaInAllocation).toBe(true);
   });
 
+  it("三連単の配分対象(#25-E3a・Issue #138)も既定ON(新しい券種は配分の対象に初期値で含める、というユーザー指定)", () => {
+    expect(DEFAULT_APP_SETTINGS.includeTrifectaInAllocation).toBe(true);
+  });
+
   it("馬券配分3項目(機能C-2)は既定でbankroll=0・perRaceCap=0(未設定)・kellyFraction=0.5", () => {
     expect(DEFAULT_APP_SETTINGS.bankroll).toBe(0);
     expect(DEFAULT_APP_SETTINGS.perRaceCap).toBe(0);
@@ -292,6 +296,55 @@ describe("coerceSettings(バリデーション+デフォルトマージ)", () =>
     });
   });
 
+  describe("includeTrifectaInAllocation(三連単の配分対象。#25-E3a・Issue #138): boolean以外は既定(true)へフォールバック", () => {
+    it.each([
+      { name: "欠損はtrue", raw: undefined, expected: true },
+      { name: "文字列'false'はtrue", raw: "false", expected: true },
+      { name: "数値0はtrue", raw: 0, expected: true },
+      { name: "nullはtrue", raw: null, expected: true },
+      { name: "true(boolean)はtrueのまま採用", raw: true, expected: true },
+      { name: "false(boolean)はfalseのまま採用", raw: false, expected: false },
+    ])("$name", ({ raw, expected }) => {
+      const input = raw === undefined ? {} : { includeTrifectaInAllocation: raw };
+      expect(coerceSettings(input).includeTrifectaInAllocation).toBe(expected);
+    });
+
+    // 隣接boolean項目(includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation/
+    // includeExactaInAllocation/includeComboOdds)との取り違え検知: 6項目すべてに異なる値を与え、
+    // 互いに独立に反映されることを固定する。
+    it("includeTrifectaInAllocationが他の5つのboolean配分設定と取り違えられないこと", () => {
+      const a = coerceSettings({
+        includeComboOdds: true,
+        includeWideInAllocation: false,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: false,
+        includeExactaInAllocation: true,
+        includeTrifectaInAllocation: false,
+      });
+      expect(a.includeComboOdds).toBe(true);
+      expect(a.includeWideInAllocation).toBe(false);
+      expect(a.includeTrioInAllocation).toBe(true);
+      expect(a.includeQuinellaInAllocation).toBe(false);
+      expect(a.includeExactaInAllocation).toBe(true);
+      expect(a.includeTrifectaInAllocation).toBe(false);
+
+      const b = coerceSettings({
+        includeComboOdds: false,
+        includeWideInAllocation: true,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: true,
+        includeExactaInAllocation: false,
+        includeTrifectaInAllocation: true,
+      });
+      expect(b.includeComboOdds).toBe(false);
+      expect(b.includeWideInAllocation).toBe(true);
+      expect(b.includeTrioInAllocation).toBe(false);
+      expect(b.includeQuinellaInAllocation).toBe(true);
+      expect(b.includeExactaInAllocation).toBe(false);
+      expect(b.includeTrifectaInAllocation).toBe(true);
+    });
+  });
+
   describe("馬券配分3項目(機能C-2): 欠損/非数値/負/非有限/非整数/範囲外は既定へフォールバック", () => {
     it.each([
       { name: "妥当な整数はそのまま採用", raw: 50000, expected: 50000 },
@@ -412,6 +465,30 @@ describe("coerceSettings(バリデーション+デフォルトマージ)", () =>
       // includeExactaInAllocation を意図的に含めない。
     };
     expect(coerceSettings(legacy).includeExactaInAllocation).toBe(true);
+  });
+
+  it("includeTrifectaInAllocationキーの無い既存settings.json(#25-E3a以前)を読むとON(既定値)として読めること(AC-1)", () => {
+    // #24-E3a(Issue #124)〜#25-E3a(Issue #138)以前のsettings.json相当(このキー自体を含まない)。
+    const legacy = {
+      apiKey: "sk-ant-legacy",
+      discordWebhookUrl: "",
+      evThreshold: 1.0,
+      biasWeights: DEFAULT_SCORER_CONFIG.weights,
+      baseScoreWeights: DEFAULT_SCORER_CONFIG.baseScore.weights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 0,
+      perRaceCap: 0,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
+      // includeTrifectaInAllocation を意図的に含めない。
+    };
+    expect(coerceSettings(legacy).includeTrifectaInAllocation).toBe(true);
   });
 });
 
@@ -548,6 +625,17 @@ describe("maskSettings(レンダラー向けマスク+環境変数優先)", () =
     ).toBe(true);
   });
 
+  it("includeTrifectaInAllocation(#25-E3a)をそのまま返すこと(往復編集フォーム表示のため平文。OFF/ON両方向)", () => {
+    expect(
+      maskSettings({ ...base, includeTrifectaInAllocation: false }, undefined)
+        .includeTrifectaInAllocation,
+    ).toBe(false);
+    expect(
+      maskSettings({ ...base, includeTrifectaInAllocation: true }, undefined)
+        .includeTrifectaInAllocation,
+    ).toBe(true);
+  });
+
   it("環境変数が設定済みなら環境変数を優先し fromEnv=true・環境キーをマスク", () => {
     const masked = maskSettings(base, "sk-ant-env-key-value");
     expect(masked.apiKeyFromEnv).toBe(true);
@@ -600,6 +688,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.apiKey).toBe("keep-me");
     expect(next.discordWebhookUrl).toBe("https://new.example.com/x");
@@ -625,6 +714,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(replaced.apiKey).toBe("new-key");
 
@@ -645,6 +735,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(cleared.apiKey).toBe("");
   });
@@ -668,6 +759,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(withNull.apiKey).toBe("keep-me");
 
@@ -688,6 +780,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(withNumber.apiKey).toBe("keep-me");
   });
@@ -709,6 +802,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.evThreshold).toBe(1.0);
     expect(next.biasWeights.venue).toBe(DEFAULT_SCORER_CONFIG.weights.venue);
@@ -731,6 +825,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.additionalInstruction).toBe("人気薄の複勝率は慎重に見積もること");
   });
@@ -752,6 +847,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.clipVariant).toBe("wide15");
   });
@@ -773,6 +869,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.clipVariant).toBe("default");
   });
@@ -794,6 +891,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.bankroll).toBe(500000);
     expect(next.perRaceCap).toBe(30000);
@@ -819,6 +917,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.bankroll).toBe(0);
     expect(next.perRaceCap).toBe(0);
@@ -842,6 +941,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(onNext.includeComboOdds).toBe(true);
 
@@ -861,6 +961,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(offNext.includeComboOdds).toBe(false);
   });
@@ -882,6 +983,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.autoSendDiscord).toBe(true);
     expect(next.includeComboOdds).toBe(false);
@@ -904,6 +1006,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.includeWideInAllocation).toBe(false);
     expect(next.includeTrioInAllocation).toBe(true);
@@ -924,6 +1027,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(flipped.includeWideInAllocation).toBe(true);
     expect(flipped.includeTrioInAllocation).toBe(false);
@@ -946,6 +1050,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: 0 as unknown as boolean,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(next.includeWideInAllocation).toBe(true);
     expect(next.includeTrioInAllocation).toBe(true);
@@ -968,6 +1073,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(offNext.includeQuinellaInAllocation).toBe(false);
 
@@ -987,6 +1093,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: "false" as unknown as boolean,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
     });
     expect(invalidNext.includeQuinellaInAllocation).toBe(true);
   });
@@ -1008,6 +1115,7 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: false,
     });
     expect(offNext.includeExactaInAllocation).toBe(false);
 
@@ -1027,8 +1135,51 @@ describe("applyUpdate(現在設定への更新適用)", () => {
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: "false" as unknown as boolean,
+      includeTrifectaInAllocation: "false" as unknown as boolean,
     });
     expect(invalidNext.includeExactaInAllocation).toBe(true);
+  });
+
+  it("includeTrifectaInAllocation(#25-E3a)を渡すとそのまま反映され(OFF/ON両方向)、不正な値は既定(true)へフォールバックされること", () => {
+    const offNext = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: false,
+    });
+    expect(offNext.includeTrifectaInAllocation).toBe(false);
+
+    const invalidNext = applyUpdate(current, {
+      discordWebhookUrl: "",
+      evThreshold: 1,
+      biasWeights: DEFAULT_APP_SETTINGS.biasWeights,
+      baseScoreWeights: DEFAULT_APP_SETTINGS.baseScoreWeights,
+      autoSendDiscord: false,
+      additionalInstruction: "",
+      clipVariant: "default",
+      bankroll: 10000,
+      perRaceCap: 5000,
+      kellyFraction: 0.5,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: "false" as unknown as boolean,
+    });
+    expect(invalidNext.includeTrifectaInAllocation).toBe(true);
   });
 });
 

@@ -64,6 +64,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
     ...overrides,
   };
 }
@@ -194,6 +195,7 @@ describe("D-2フォールバック規則(AC-2・Issue #117): 条件②・条件�
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       }),
     );
     expect(outcome.outcome.route).toBe("place-only");

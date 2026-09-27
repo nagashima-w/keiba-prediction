@@ -11,8 +11,8 @@
  *
  * - 設定エコー9列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
  *   include_wide/include_trio/include_quinella/include_exacta): 呼び出し時に渡した
- *   `MixedAllocationSettings`(9項目)をそのまま写す。route に関わらず常に非null(実行時に
- *   確定している値のため)。
+ *   `MixedAllocationSettings`(#25-E3a・Issue #138で10項目になった。下記参照)のうち9項目を
+ *   そのまま写す。route に関わらず常に非null(実行時に確定している値のため)。
  *
  *   **#24-D3a(Issue #115)で`MixedAllocationSettings`は8項目(`includeQuinellaInAllocation`追加)に
  *   なったが、当初(Issue #117まで)はこの設定エコーを7列のまま据え置いていた**
@@ -32,6 +32,12 @@
  *   (#24-E3c)で8→9列へ解除した**。DB列`include_exacta`はNULLを許す〈`AnalysisStore`の該当
  *   CREATE TABLEコメント参照〉ため、Issue #126より前に保存された行は`includeExacta: null`
  *   〈記録なし〉のまま読める。`includeQuinella`と同型)。
+ *
+ *   **#25-E3a(Issue #138)で`MixedAllocationSettings`は10項目(`includeTrifectaInAllocation`追加)に
+ *   なったが、この設定エコーは9列のまま据え置く**(`settingsColumnsOf`が10項目目を読まない。
+ *   馬連〈#115〉・馬単〈#124〉と同じ切り方: 券種の選択・D-2フォールバック規則・画面表示は
+ *   #25-E3b(Issue #139)のスコープ、このメタ行のスキーマ解除(列を読む人〈過去分析再表示の
+ *   「三連単: ON/OFF/記録なし」〉が実在するに至った時点)は#25-E3c(Issue #140)のスコープ)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
  * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
@@ -123,6 +129,15 @@ import type {
  * #125時点までは、この型に持たせる目的は`MixedAllocationSettings`(8→9項目)まで値を運ぶ配管の
  * 一部としてのみだった(`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #125
  * 〈#24-E3b〉で完了。`shared/mixed-race-allocation.ts`のJSDoc参照)。
+ *
+ * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は8→9項目化した追加分。**メタ行への
+ * 書き込みは接続しない**: `settingsColumnsOf`(上記「## 列の由来」参照)は9列
+ * (`include_wide`/`include_trio`/`include_quinella`/`include_exacta`)のままこのフィールドを
+ * 読まない(#59が固定した「列一覧は固定・増減は停止条件」を#25-E3aでは解除しない。列を読む人が
+ * 実在するに至るタスク=Issue #140〈#25-E3c〉で解除する見込み)。この型に持たせる目的は
+ * `MixedAllocationSettings`(9→10項目)まで値を運ぶ配管の一部としてのみであり、
+ * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は#25-E3a時点では行わない
+ * (Issue #139〈#25-E3b〉のスコープ。`shared/mixed-race-allocation.ts`のJSDoc参照)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;
@@ -133,11 +148,12 @@ export interface AnalysisAllocationSettings {
   readonly includeTrioInAllocation: boolean;
   readonly includeQuinellaInAllocation: boolean;
   readonly includeExactaInAllocation: boolean;
+  readonly includeTrifectaInAllocation: boolean;
 }
 
 /**
- * 8項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
- * `buildMixedRaceAllocationWithOutcome` が要求する9項目の `MixedAllocationSettings` を作る。
+ * 9項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
+ * `buildMixedRaceAllocationWithOutcome` が要求する10項目の `MixedAllocationSettings` を作る。
  */
 export function toMixedAllocationSettings(
   settings: AnalysisAllocationSettings,
@@ -163,7 +179,13 @@ function codesColumnsOf(
   };
 }
 
-/** `MixedAllocationSettings`(9項目)を、メタ行の設定エコー9列へ写す(Issue #118でincludeQuinella・Issue #126でincludeExactaを追加。全9項目を機械的にエコーする)。 */
+/**
+ * `MixedAllocationSettings`(#25-E3aで10項目になった)を、メタ行の設定エコー9列へ写す
+ * (Issue #118でincludeQuinella・Issue #126でincludeExactaを追加し、この9列を全項目
+ * 機械的にエコーする形にした。#25-E3a・Issue #138で追加された10項目目
+ * `includeTrifectaInAllocation`は、#25-E3c〈Issue #140〉で列を追加するまで読まない
+ * ——`AnalysisAllocationSettings`冒頭のJSDoc参照)。
+ */
 function settingsColumnsOf(
   settings: MixedAllocationSettings,
 ): Pick<

@@ -68,6 +68,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
     ...overrides,
   };
 }
@@ -274,12 +275,12 @@ describe("テストヘルパー自己テスト", () => {
 });
 
 // ============================================================================
-// toMixedAllocationSettings(8項目+evThreshold合成)
+// toMixedAllocationSettings(9項目+evThreshold合成)
 // ============================================================================
 
 describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを避けるための合成)", () => {
-  it("8項目のAnalysisAllocationSettingsにevThresholdを合成し、9項目のMixedAllocationSettingsになること", () => {
-    const eight: AnalysisAllocationSettings = {
+  it("9項目のAnalysisAllocationSettingsにevThresholdを合成し、10項目のMixedAllocationSettingsになること", () => {
+    const nine: AnalysisAllocationSettings = {
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
@@ -288,8 +289,9 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: true,
     };
-    expect(toMixedAllocationSettings(eight, 1.2)).toEqual({
+    expect(toMixedAllocationSettings(nine, 1.2)).toEqual({
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
@@ -298,6 +300,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: true,
       evThreshold: 1.2,
     });
   });
@@ -308,7 +311,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
     // (false,true)にして異ならせ、実装が {...settings, evThreshold} のスプレッドから
     // フィールド個別列挙(例: includeComboOdds: settings.includeTrioInAllocationのような取り違え)
     // へ退行しても検出できるようにする。
-    const eight: AnalysisAllocationSettings = {
+    const nine: AnalysisAllocationSettings = {
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
@@ -317,8 +320,9 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: false,
     };
-    expect(toMixedAllocationSettings(eight, 2.5)).toEqual({
+    expect(toMixedAllocationSettings(nine, 2.5)).toEqual({
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
@@ -327,6 +331,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: false,
       evThreshold: 2.5,
     });
   });
@@ -334,15 +339,15 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
   it("3件目: includeTrioInAllocationを1件目・2件目とも異なるfalseにし、条件A(定数でない)を満たすこと(coordinator水平展開レビュー対応)", () => {
     // coordinator指摘: includeTrioInAllocationが1件目・2件目ともtrueで定数のままだと、
     // `includeTrioInAllocation: settings.includeTrioInAllocation`を`true`直書きに変異させても
-    // 検出できない。booleanは2値しかないため、5項目(includeComboOdds/includeWideInAllocation/
-    // includeTrioInAllocation/includeQuinellaInAllocation/includeExactaInAllocation)を2件だけで
-    // 「非定数」かつ「互いに異なるパターン」にはできない(鳩の巣原理。
-    // ipc-allocation-wiring.test.tsと同じ理由で3件目を追加する)。
+    // 検出できない。booleanは2値しかないため、6項目(includeComboOdds/includeWideInAllocation/
+    // includeTrioInAllocation/includeQuinellaInAllocation/includeExactaInAllocation/
+    // includeTrifectaInAllocation)を2件だけで「非定数」かつ「互いに異なるパターン」には
+    // できない(鳩の巣原理。ipc-allocation-wiring.test.tsと同じ理由で3件目を追加する)。
     // パターン(件1,件2,件3): comboOdds=(T,F,T)・wide=(F,T,T)・trio=(T,T,F)・quinella=(F,T,F)・
-    // exacta=(F,F,T)とし、5項目とも非定数かつ互いに異なる列にする(#24-D3aでquinella列を追加、
-    // #24-E3aでexacta列を追加。3ビットパターン8通りのうち既存4列〈TFT・FTT・TTF・FTF〉と
-    // 異ならせ、かつ非定数〈全件同値でない〉ものを選ぶ)。
-    const eight: AnalysisAllocationSettings = {
+    // exacta=(F,F,T)・trifecta=(T,F,F)とし、6項目とも非定数かつ互いに異なる列にする
+    // (#24-D3aでquinella列、#24-E3aでexacta列、#25-E3aでtrifecta列を追加。3ビットパターン
+    // 8通りのうち非定数6通り全てを使い切る)。
+    const nine: AnalysisAllocationSettings = {
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
@@ -351,8 +356,9 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: false,
     };
-    expect(toMixedAllocationSettings(eight, 3.7)).toEqual({
+    expect(toMixedAllocationSettings(nine, 3.7)).toEqual({
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
@@ -361,6 +367,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: false,
       evThreshold: 3.7,
     });
   });
@@ -621,6 +628,24 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     expect(recOff.meta.includeExacta).toBe(false);
     // 対象フィールド以外は変化しないこと(includeExactaだけを揃えれば完全一致するはず)。
     expect({ ...recOff.meta, includeExacta: recOn.meta.includeExacta }).toEqual(recOn.meta);
+    expect(recOff.bets).toEqual(recOn.bets);
+  });
+
+  it("route=mixed: includeTrifectaInAllocation(#25-E3a・Issue #138)をtrue/falseに変えてもメタ行が一切変わらないこと(#59スキーマ固定を#25-E3aでは解除しない。DB列追加は#25-E3c〈Issue #140〉へ送る裁定の確認。馬単〈#24-E3a→#24-E3c〉と同じ切り方)", () => {
+    const race = raceWithPositiveCombos(8, { trioCombo: undefined });
+    const sOn = settings({ includeTrifectaInAllocation: true });
+    const sOff = settings({ includeTrifectaInAllocation: false });
+    const outcomeOn = buildMixedRaceAllocationWithOutcome(race, sOn);
+    const outcomeOff = buildMixedRaceAllocationWithOutcome(race, sOff);
+    if (outcomeOn.view.kind !== "mixed" || outcomeOff.view.kind !== "mixed") {
+      throw new Error("前提が崩れている(mixedに到達しなかった)");
+    }
+    const recOn = buildAllocationRecord(outcomeOn, sOn, "result");
+    const recOff = buildAllocationRecord(outcomeOff, sOff, "result");
+    // 前提固定: メタ行に "includeTrifecta" というキー自体が無いこと(#59スキーマ固定。
+    // これが無いことは下のtoEqualで既に保証されているが、ここでも明示する)。
+    expect(Object.keys(recOn.meta)).not.toContain("includeTrifecta");
+    expect(recOff.meta).toEqual(recOn.meta);
     expect(recOff.bets).toEqual(recOn.bets);
   });
 

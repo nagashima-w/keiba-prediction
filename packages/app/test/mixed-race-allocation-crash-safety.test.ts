@@ -109,6 +109,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
     ...overrides,
   };
 }

@@ -59,7 +59,7 @@ function handlerFor(channel: string): (...args: unknown[]) => unknown {
   return call[1] as (...args: unknown[]) => unknown;
 }
 
-/** 有効な設定更新ペイロード(配分7項目・includeComboOdds以外は固定値)を組み立てる。 */
+/** 有効な設定更新ペイロード(配分8項目・includeComboOdds以外は固定値)を組み立てる。 */
 function makeUpdate(overrides: Partial<SettingsUpdate> = {}): SettingsUpdate {
   return {
     discordWebhookUrl: "",
@@ -77,6 +77,7 @@ function makeUpdate(overrides: Partial<SettingsUpdate> = {}): SettingsUpdate {
     includeTrioInAllocation: false,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
     ...overrides,
   };
 }
@@ -136,8 +137,8 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe("ipc: 配分提案の設定7項目をcreatePipelineDepsへ配線する(Issue #59・AC1・#24-D3a・#24-E3a)", () => {
-  it("設定の配分7項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=true)", async () => {
+describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(Issue #59・AC1・#24-D3a・#24-E3a・#25-E3a)", () => {
+  it("設定の配分8項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=true)", async () => {
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -152,6 +153,10 @@ describe("ipc: 配分提案の設定7項目をcreatePipelineDepsへ配線する(
         // includeExactaInAllocation(#24-E3a)もfalseにし、件2(false)・件3(true)と合わせて
         // FFTのパターンにする(既存4列TFT・TTF・FTF・FTTのいずれとも異なる5列目)。
         includeExactaInAllocation: false,
+        // includeTrifectaInAllocation(#25-E3a)はtrueにし、件2(false)・件3(false)と合わせて
+        // TFFのパターンにする(既存5列TFT・TTF・FTF・FTT・FFTのいずれとも異なる残り1つの6列目。
+        // 3ビットパターン8通りのうち非定数6通りから既存5列を引いた残りが一意に定まる)。
+        includeTrifectaInAllocation: true,
       }),
     );
     verifyHandler(fakeEvent);
@@ -170,12 +175,13 @@ describe("ipc: 配分提案の設定7項目をcreatePipelineDepsへ配線する(
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: true,
     });
     // includeComboOddsはallocationSettingsに含めない(既存フィールドが単一ソース。#59 4節)。
     expect(config.includeComboOdds).toBe(true);
   });
 
-  it("設定の配分7項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=false)", async () => {
+  it("設定の配分8項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=false)", async () => {
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -198,11 +204,14 @@ describe("ipc: 配分提案の設定7項目をcreatePipelineDepsへ配線する(
         // FTTのパターンにする(既存3列TFT・TTF・FTFのいずれとも異なる4列目)。
         // includeExactaInAllocation(#24-E3a)もfalseにし、件1(false)・件3(true)と合わせて
         // FFTのパターンにする(既存4列TFT・TTF・FTF・FTTのいずれとも異なる5列目)。
+        // includeTrifectaInAllocation(#25-E3a)もfalseにし、件1(true)・件3(false)と合わせて
+        // TFFのパターンにする(既存5列TFT・TTF・FTF・FTT・FFTのいずれとも異なる残り1つの6列目)。
         perRaceCap: 5000,
         includeWideInAllocation: true,
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       }),
     );
     verifyHandler(fakeEvent);
@@ -221,20 +230,22 @@ describe("ipc: 配分提案の設定7項目をcreatePipelineDepsへ配線する(
       includeTrioInAllocation: true,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: false,
     });
     expect(config.includeComboOdds).toBe(false);
   });
 
-  it("設定の配分7項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(3件目: includeComboOdds/includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation/includeExactaInAllocationの5値パターンを互いに識別できるようにする)", async () => {
+  it("設定の配分8項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(3件目: includeComboOdds/includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation/includeExactaInAllocation/includeTrifectaInAllocationの6値パターンを互いに識別できるようにする)", async () => {
     // code-reviewer水平展開レビュー(finding3の残滓): 2件だけだとboolean項目は非定数化のため
     // 必ずT/Fの2値を両方使う必要があり、3項目(includeComboOdds/includeWideInAllocation/
     // includeTrioInAllocation)を2値×2件で非定数にすると鳩の巣原理でどれか2項目が
     // 全件同一パターンになってしまう(実際にincludeWideInAllocationとincludeComboOddsが
     // (true,false)/(true,false)で一致していたため、両者を入れ替えても検出できないことを
-    // 変異注入で確認済み)。3件目を追加し、5項目それぞれのパターンを
-    // comboOdds=(T,F,T)・wide=(T,T,F)・trio=(F,T,F)・quinella=(F,T,T)・exacta=(F,F,T)として
-    // 互いに異ならせる(#24-D3aでquinella列、#24-E3aでexacta列を追加。3ビットパターン8通りの
-    // うち既存4列〈TFT・TTF・FTF・FTT〉と異ならせ、かつ非定数〈全件同値でない〉ものを選ぶ)。
+    // 変異注入で確認済み)。3件目を追加し、6項目それぞれのパターンを
+    // comboOdds=(T,F,T)・wide=(T,T,F)・trio=(F,T,F)・quinella=(F,T,T)・exacta=(F,F,T)・
+    // trifecta=(T,F,F)として互いに異ならせる(#24-D3aでquinella列、#24-E3aでexacta列、
+    // #25-E3aでtrifecta列を追加。3ビットパターン8通りのうち非定数6通り全てを使い切り、
+    // 6列それぞれを異ならせる)。
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -252,6 +263,7 @@ describe("ipc: 配分提案の設定7項目をcreatePipelineDepsへ配線する(
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: false,
       }),
     );
     verifyHandler(fakeEvent);
@@ -270,6 +282,7 @@ describe("ipc: 配分提案の設定7項目をcreatePipelineDepsへ配線する(
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
+      includeTrifectaInAllocation: false,
     });
     expect(config.includeComboOdds).toBe(true);
   });

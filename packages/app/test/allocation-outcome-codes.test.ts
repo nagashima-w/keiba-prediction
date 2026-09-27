@@ -67,6 +67,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
     ...overrides,
   };
 }
@@ -398,6 +399,7 @@ describe("fallbackReason: D-2フォールバックの3分岐が別々の値と�
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       }),
     );
     expect(outcome.fallbackReason).toBe("combo-bet-types-off");
@@ -426,6 +428,7 @@ describe("fallbackReason: D-2フォールバックの3分岐が別々の値と�
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       }),
     ).outcome.fallbackReason;
     const r3 = buildMixedRaceAllocationWithOutcome(raceInput({ rows: allCandidateRows(8) }), settings()).outcome.fallbackReason;
@@ -533,6 +536,7 @@ describe("unavailableReason: route==='unavailable'のとき正しいPlaceBetUnav
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       }),
     );
     expect(outcome.route).toBe("unavailable");

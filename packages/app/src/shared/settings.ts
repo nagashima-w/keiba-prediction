@@ -144,12 +144,13 @@ export const BET_ALLOCATION_LABELS = {
  * 補助文に「地方競馬では取得しません」を明示する。
  *
  * 「配分に使うかどうかは下記の設定に従います」という列挙(現在4項目: ワイド・馬連・馬単・
- * 三連複)には三連単を加えない(`includeTrifectaInAllocation`という設定自体がまだ存在せず
- * 〈#138のスコープ〉、実際には配分に一切使われていないため、列挙に加えると事実と食い違う
- * 記述になる。#122当時の馬単と同じ判断)。代わりに「三連単は現在は取得のみで配分には
+ * 三連複)には三連単を加えない(`includeTrifectaInAllocation`という設定自体は#25-E3a・
+ * Issue #138で新設したが、この画面のチェックボックス自体は#25-E3b・Issue #139で追加する
+ * までは、列挙に足すと存在しないチェックボックスを指す文言になり事実と食い違うため。
+ * #122当時の馬単〈#24-E3a→#24-E3b〉と同じ判断)。代わりに「三連単は現在は取得のみで配分には
  * 使わない」という取得/配分利用の状態を明示する一文を末尾に添える。
- * `includeTrifectaInAllocation`が新設され、この画面にチェックボックスが追加された時点
- * (#139)で、この一文を削り列挙を5項目に直すこと。
+ * この画面にチェックボックスが追加された時点(#25-E3b・Issue #139)で、この一文を削り
+ * 列挙を5項目に直すこと。
  */
 export const INCLUDE_COMBO_ODDS_LABELS = {
   /** 設定画面のチェックボックスのラベル。 */
@@ -357,6 +358,20 @@ export interface AppSettings {
    * 規則に組み込むのは #24-E3b(Issue #125)。
    */
   readonly includeExactaInAllocation: boolean;
+  /**
+   * 三連単を馬券配分の対象に含めるか(#25-E3a・Issue #138)。既定true(ユーザー指定:
+   * 新しい券種は配分の対象に初期値で含める。`CLAUDE.md`「現在の優先順位」参照)。
+   * 意味論・設計判断(取得と採用の分離・boolean 1項目)は `includeWideInAllocation`/
+   * `includeTrioInAllocation`/`includeQuinellaInAllocation`/`includeExactaInAllocation` と
+   * 同じ(そちらのJSDoc参照)。
+   *
+   * **#25-E3a時点ではこの設定は画面に出ない(`SettingsView.tsx`にチェックボックスを追加しない)。**
+   * 候補ビルダー(`shared/mixed-race-allocation.ts` の `resolveMixedBetTypes`)もまだ三連単の
+   * 候補を作らないため、この設定を変えても配分結果は変わらない(D-2フォールバック規則
+   * `isComboBetTypesOff` にもまだ加えない)。実際に画面へ出し、候補ビルダー・フォールバック
+   * 規則に組み込むのは #25-E3b(Issue #139)。馬単(#24-E3a→#24-E3b)と同じ切り方。
+   */
+  readonly includeTrifectaInAllocation: boolean;
 }
 
 /**
@@ -407,6 +422,12 @@ export interface MaskedSettings {
    * 他の配分対象設定と同じ形にしておく(E3bでトグルを追加したときの配線を変えないため)。
    */
   readonly includeExactaInAllocation: boolean;
+  /**
+   * 三連単を馬券配分の対象に含めるか(#25-E3a・Issue #138)。往復編集フォームとして表示するため
+   * そのまま返す。#25-E3a時点では対応する画面トグルが無いため往復対象は無いが、往復自体は
+   * 他の配分対象設定と同じ形にしておく(#24-E3aの馬単と同じ理由)。
+   */
+  readonly includeTrifectaInAllocation: boolean;
 }
 
 /**
@@ -464,6 +485,11 @@ export interface SettingsUpdate {
    * 同じ(既定true・boolean以外は既定へフォールバック)。
    */
   readonly includeExactaInAllocation: boolean;
+  /**
+   * 三連単を馬券配分の対象に含めるか(#25-E3a・Issue #138)。意味論は`includeWideInAllocation`と
+   * 同じ(既定true・boolean以外は既定へフォールバック)。
+   */
+  readonly includeTrifectaInAllocation: boolean;
 }
 
 /** 文字列入力を数値へ解釈する(空・空白・非数値は null)。 */

@@ -62,6 +62,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
     ...overrides,
   };
 }
@@ -155,6 +156,7 @@ describe("D-7フォールバック規則の制限(現状維持。win候補があ
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       }),
     );
     expect(outcome.view.kind).not.toBe("mixed");

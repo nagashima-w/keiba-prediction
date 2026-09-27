@@ -26,6 +26,7 @@ function key(overrides: Partial<MixedAllocationCacheKey> = {}): MixedAllocationC
     includeTrioInAllocation: true,
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
     ...overrides,
   };
 }
@@ -65,8 +66,9 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
   });
 
   // AC21強化(#24-D3a・Issue #115でincludeQuinellaInAllocationを追加し10項目化、
-  // #24-E3a・Issue #124でincludeExactaInAllocationを追加し11項目化): キャッシュキーの
-  // 11項目を1つずつ変えたとき、必ずキャッシュがミスする(compute()が再度呼ばれる)ことを
+  // #24-E3a・Issue #124でincludeExactaInAllocationを追加し11項目化、
+  // #25-E3a・Issue #138でincludeTrifectaInAllocationを追加し12項目化): キャッシュキーの
+  // 12項目を1つずつ変えたとき、必ずキャッシュがミスする(compute()が再度呼ばれる)ことを
   // テーブル駆動で固定する。1項目でも比較から漏れると、
   // 「設定を変えたのに前回の金額が表示され続ける」静かな誤りになる。
   const baseKey = key();
@@ -82,6 +84,7 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
     { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
     { name: "includeExactaInAllocation", mutate: (k) => ({ ...k, includeExactaInAllocation: !k.includeExactaInAllocation }) },
+    { name: "includeTrifectaInAllocation", mutate: (k) => ({ ...k, includeTrifectaInAllocation: !k.includeTrifectaInAllocation }) },
   ];
 
   it.each(mutationCases)(
@@ -104,7 +107,7 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
     },
   );
 
-  it("11項目すべてが一致すれば(新しいオブジェクトのkeyでも)ヒットすること(項目過剰検知にならないことの確認)", () => {
+  it("12項目すべてが一致すれば(新しいオブジェクトのkeyでも)ヒットすること(項目過剰検知にならないことの確認)", () => {
     const cache = createMixedAllocationCache<string>();
     const compute = vi.fn(() => "value");
     cache.get(key(), compute);
@@ -133,9 +136,10 @@ describe("createMixedAllocationCache(混在配分の表示データキャッシ�
 
 // Issue #110(#24-C2): 配分計算を1レースずつ進める仕組み(mixed-allocation-queue.ts)は、
 // 「計算せずに今の値だけを覗く」経路が必要なため`peek`を追加する。
-// `peek`は表示の読み出し経路そのもの(AC-3'(a)の要)なので、`get`と同じ11項目
+// `peek`は表示の読み出し経路そのもの(AC-3'(a)の要)なので、`get`と同じ12項目
 // (#24-D3a・Issue #115でincludeQuinellaInAllocationを追加、#24-E3a・Issue #124で
-// includeExactaInAllocationを追加)の厳しさで独立にテーブル駆動
+// includeExactaInAllocationを追加、#25-E3a・Issue #138でincludeTrifectaInAllocationを追加)
+// の厳しさで独立にテーブル駆動
 // テストを固定する(既存の`get`用テーブル・アサーションは1件も変更しない。
 // 上のdescribeブロックとは別の新規テーブルとして持つ)。
 describe("createMixedAllocationCache().peek(値を計算せずに照会する。Issue #110)", () => {
@@ -154,7 +158,7 @@ describe("createMixedAllocationCache().peek(値を計算せずに照会する。
     expect(compute).toHaveBeenCalledTimes(1);
   });
 
-  // AC-3'(a)相当: キー11項目を1つずつ変えたとき、peekは必ずミス(undefined)すること。
+  // AC-3'(a)相当: キー12項目を1つずつ変えたとき、peekは必ずミス(undefined)すること。
   // 「設定を変えたのに古い金額がpeekでヒットし続ける」ことをこのテーブルで塞ぐ。
   const peekBaseKey = key();
   const peekMutationCases: { name: string; mutate: (k: MixedAllocationCacheKey) => MixedAllocationCacheKey }[] = [
@@ -169,6 +173,7 @@ describe("createMixedAllocationCache().peek(値を計算せずに照会する。
     { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
     { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
     { name: "includeExactaInAllocation", mutate: (k) => ({ ...k, includeExactaInAllocation: !k.includeExactaInAllocation }) },
+    { name: "includeTrifectaInAllocation", mutate: (k) => ({ ...k, includeTrifectaInAllocation: !k.includeTrifectaInAllocation }) },
   ];
 
   it.each(peekMutationCases)(
@@ -202,7 +207,7 @@ describe("createMixedAllocationCache().peek(値を計算せずに照会する。
 // 独自の比較関数を持たない**(このファイル冒頭JSDoc「この表はキー材料の唯一の定義」)ため、
 // 再実装せずexportして使う。
 describe("cacheKeyEquals(get/peekと同じキー等価判定をexportして再利用可能にする。Issue #119)", () => {
-  it("11項目すべてが一致すれば true を返すこと(新しく組み立てたオブジェクトでも)", () => {
+  it("12項目すべてが一致すれば true を返すこと(新しく組み立てたオブジェクトでも)", () => {
     expect(cacheKeyEquals(key(), key())).toBe(true);
   });
 
@@ -221,6 +226,7 @@ describe("cacheKeyEquals(get/peekと同じキー等価判定をexportして再�
     { name: "includeTrioInAllocation", mutate: (k) => ({ ...k, includeTrioInAllocation: !k.includeTrioInAllocation }) },
     { name: "includeQuinellaInAllocation", mutate: (k) => ({ ...k, includeQuinellaInAllocation: !k.includeQuinellaInAllocation }) },
     { name: "includeExactaInAllocation", mutate: (k) => ({ ...k, includeExactaInAllocation: !k.includeExactaInAllocation }) },
+    { name: "includeTrifectaInAllocation", mutate: (k) => ({ ...k, includeTrifectaInAllocation: !k.includeTrifectaInAllocation }) },
   ];
 
   it.each(cacheKeyEqualsMutationCases)(

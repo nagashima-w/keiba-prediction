@@ -262,6 +262,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         // #24-E3c(Issue #126)でメタ行のスキーマが9列に解除されたため、trueがそのまま
         // メタ行のincludeExactaへ反映される(下のtoEqualで固定)。
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -314,6 +315,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       },
     };
     // runAnalysis自体が例外を投げず正常終了すること(分析本体を失わない)。
@@ -371,6 +373,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -401,6 +404,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -445,6 +449,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -475,6 +480,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeTrioInAllocation: true,
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -539,6 +545,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeTrioInAllocation: false,
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);

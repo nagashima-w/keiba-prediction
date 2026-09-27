@@ -120,7 +120,7 @@ import {
 
 /**
  * 混在配分の合成に必要な設定(既存の複勝配分3項目 `BetAllocationSettings` に、
- * EV閾値統一〈D-4〉・券種選択〈D-1・#24-D3a/b・#24-E3a〉の6項目を加えた形)。
+ * EV閾値統一〈D-4〉・券種選択〈D-1・#24-D3a/b・#24-E3a/b・#25-E3a〉の7項目を加えた形)。
  */
 export interface MixedAllocationSettings extends BetAllocationSettings {
   /** EVプラス判定の閾値(`AppSettings.evThreshold`)。ワイド・馬連・三連複にも同じ値を適用する(D-4)。 */
@@ -143,6 +143,18 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
    * (D-2フォールバック規則の条件②③)へ実際に接続した)。
    */
   readonly includeExactaInAllocation: boolean;
+  /**
+   * 三連単を配分対象に含めるか(`AppSettings.includeTrifectaInAllocation`。#25-E3a・Issue #138で
+   * 設定項目を新設した)。
+   *
+   * **#25-E3a時点ではこのフィールドは未使用**(`resolveMixedBetTypes`・`isComboBetTypesOff`の
+   * どちらも参照しない。`trifecta-allocation-setting-wiring.test.ts`が値の比較で固定する)。
+   * 候補ビルダーが実際に三連単の候補を作り、D-2フォールバック規則にも組み込むのは
+   * #25-E3b(Issue #139)。D3aで組み込むと、三連単の候補が無いまま混在経路に入り配分の答えが
+   * 変わりうるため(馬連〈#24-D3a〉・馬単〈#24-E3a〉と同じ理由)、意図的に未接続のまま設定だけを
+   * 配管する。
+   */
+  readonly includeTrifectaInAllocation: boolean;
 }
 
 /**
@@ -433,7 +445,7 @@ function buildPlaceOnlyFallbackOutcome(
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
- * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の5項目)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の6項目)
  */
 function buildMixedRaceAllocationCore(
   race: MixedCandidateBuildInput,
@@ -544,7 +556,7 @@ function buildMixedRaceAllocationCore(
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
- * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の5項目)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の6項目)
  */
 export function buildMixedRaceAllocationWithOutcome(
   race: MixedCandidateBuildInput,
@@ -572,7 +584,7 @@ export function buildMixedRaceAllocationWithOutcome(
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
- * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の5項目)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の6項目)
  */
 export function buildMixedRaceAllocation(
   race: MixedCandidateBuildInput,

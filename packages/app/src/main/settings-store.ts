@@ -72,6 +72,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   // 馬単の配分対象(#24-E3a・Issue #124)。既定ON(ユーザー指定「新しい券種は配分の対象に
   // 初期値で含める」。CLAUDE.md「現在の優先順位」参照)。ワイド・馬連・三連複と同じ流儀。
   includeExactaInAllocation: true,
+  // 三連単の配分対象(#25-E3a・Issue #138)。既定ON(ユーザー指定「新しい券種は配分の対象に
+  // 初期値で含める」。CLAUDE.md「現在の優先順位」参照)。ワイド・馬連・馬単・三連複と同じ流儀。
+  includeTrifectaInAllocation: true,
 };
 
 /** raw が number かつ有限かつ述語を満たせば採用、さもなくば fallback。 */
@@ -242,6 +245,13 @@ export function coerceSettings(raw: unknown): AppSettings {
       typeof rec.includeExactaInAllocation === "boolean"
         ? rec.includeExactaInAllocation
         : DEFAULT_APP_SETTINGS.includeExactaInAllocation,
+    // 三連単の配分対象(#25-E3a・Issue #138)。既定trueへフォールバックする点・流儀は
+    // includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation/
+    // includeExactaInAllocationと同じ(受け入れ条件AC-1)。
+    includeTrifectaInAllocation:
+      typeof rec.includeTrifectaInAllocation === "boolean"
+        ? rec.includeTrifectaInAllocation
+        : DEFAULT_APP_SETTINGS.includeTrifectaInAllocation,
   };
 }
 
@@ -314,6 +324,8 @@ export function maskSettings(
     includeQuinellaInAllocation: settings.includeQuinellaInAllocation,
     // 馬単の配分対象(#24-E3a・Issue #124)も往復編集フォームとして表示するため平文のまま返す。
     includeExactaInAllocation: settings.includeExactaInAllocation,
+    // 三連単の配分対象(#25-E3a・Issue #138)も往復編集フォームとして表示するため平文のまま返す。
+    includeTrifectaInAllocation: settings.includeTrifectaInAllocation,
   };
 }
 
@@ -344,6 +356,7 @@ export function applyUpdate(
     includeTrioInAllocation: update.includeTrioInAllocation,
     includeQuinellaInAllocation: update.includeQuinellaInAllocation,
     includeExactaInAllocation: update.includeExactaInAllocation,
+    includeTrifectaInAllocation: update.includeTrifectaInAllocation,
   });
 }
 
