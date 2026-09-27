@@ -44,8 +44,9 @@
     値付け(`ev/combo-bet-allocation.ts`の`buildWinCandidates`が同時分布モデルの順序付き
     outcome空間から導出した1着確率×単勝オッズでEVを算出する。複勝〈3着内〉確率では値付けしない)
   - **馬連・馬単ともに配分提案・画面表示まで含めて対応済み**(#24-D3シリーズ・#24-Eシリーズ)。
-    三連単・枠連・枠単は引き続き未対応(拡張のロードマップと技術的な依存関係はGitHub Issue #22)。
-    馬連対応の経緯:
+    **三連単はcore・確定払戻の取込・オッズ取得(中央のみ)までは完了しているが、配分・画面への
+    接続はまだ**(#25シリーズ。#139〈#25-E3b〉で対応予定)。枠連・枠単は引き続き未対応
+    (拡張のロードマップと技術的な依存関係はGitHub Issue #22)。馬連対応の経緯:
     core の確率・候補ビルダー・配分(Issue #112・v1.9.5。`buildQuinellaCandidates` が順序付き
     outcome 空間から1着・2着の集合を周辺化して的中確率を求める。上位3着の集合から求めると
     ワイドと同じ値になるため)→ 馬連オッズのパーサ・取得関数(Issue #113・v1.9.6。中央
@@ -78,7 +79,35 @@
     馬連と3連複の間に表示されるようになった(利用者から見える変化はここで初めて生じた)。
     配分記録のメタ行への`include_exacta`列追加・過去分析再表示の「馬単: ON/OFF/記録なし」は
     #24-E3c(Issue #126)で対応済み(馬連の`include_quinella`と同じ切り方。詳細は下記
-    「配分記録の永続化」節参照)
+    「配分記録の永続化」節参照)。
+    **三連単対応の経緯**(馬連・馬単と同じ切り方。`#25`は`#127`〈A: 実測調査〉/`#128`
+    〈B: core〉/`#129`〈C: 性能〉/`#130`〈D: データ〉/`#131`〈F: 払戻と検証〉/`#132`〈E: app〉に
+    分割し、`#132`はさらに`#136`〈E0〉/`#137`〈E2〉/`#138`〈E3a〉/`#139`〈E3b〉/`#140`〈E3c〉に
+    分割): core の的中確率・候補ビルダー・配分の門番(Issue #128・#25-B。三連単は馬単と同じく
+    着順が意味を持つ券種のため、順序付きキー〈`buildOrderedComboOddsKey`〉でオッズを引き、
+    `buildTrifectaCandidates`がP(n,3)通りの順序付きトリプルを列挙してP(1着=a,2着=b,3着=c)で
+    的中確率を求める)→ 三連単の確定払戻の取込・回収率検証(Issue #131・#25-F)→
+    配分計算の性能実測とcandidateCap引き上げ(Issue #129・#25-C、Issue #136・#25-E0。
+    既定2000→8000)→ `scrape-race.ts`(オッズ取得)への配線・分析結果/保存スナップショットへの
+    搭載・`shared/mixed-candidates.ts`の候補ビルダー(`buildTrifectaCandidatesForBetType`)対応
+    (Issue #137・#25-E2。`includeComboOdds: true`のとき、既存のワイド・3連複・馬連・馬単の
+    **後**に三連単オッズを1リクエスト追加で取得する〈中央`type=8`のみ、単発リクエストで
+    完結〉)。**三連単は地方(NAR)では取得しない**(ユーザー判断2026-09-27。地方三連単は
+    軸馬別取得〈1着固定・頭数分のリクエストが必要〉のコストが大きく、当面実装しない。
+    `scrapeRace`は地方では調教〈oikiri〉と同じ`if (!isNar)`の明示ガードで三連単の取得自体を
+    試みない)。**配分の券種選択への接続・画面表示は未着手**(#139〈#25-E3b〉のスコープ。
+    `ALL_MIXED_CANDIDATE_BET_TYPES`・`resolveMixedBetTypes`は`"trifecta"`を含まないため、
+    利用者から見える配分結果はIssue #137の時点では変わらない)。
+    **DBサイズへの影響(2026-09-27実測)**: `trifectaCombo`は出走頭数nに対しP(n,3)通りの
+    キーを持つ(他券種〈ワイド・3連複・馬連・馬単〉より1桁多い)。実測(中央16頭・
+    race_id=202603020211・`fixtures/odds_trifecta_202603020211.json`。再現:
+    `pnpm tsx scripts/bench-mixed-allocation.ts`の「trifectaComboのJSONサイズ実測」節)では
+    3360キー・`JSON.stringify`後53,785バイト(約52.5KB)。この値は`analyses.race_snapshot_json`
+    (SQLite TEXT列。`RaceSnapshot.trifectaCombo`のプレーン写しがそのまま保存される)へ
+    `includeComboOdds:true`の分析を保存するたびに追加されるため、18頭立て(P(18,3)=4896キー)
+    では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
+    実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
+    `trifectaCombo`追加自体を妨げない)
 - バージョン: ルート/アプリ `1.11.7`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
@@ -456,6 +485,12 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   追加で取得する)と、取得したオッズを実際に配分へ使うか(`includeWideInAllocation`/
   `includeQuinellaInAllocation`/`includeExactaInAllocation`/`includeTrioInAllocation`・
   それぞれ既定ON)は別設定に分けている(取得と採用の分離)。
+  **`includeComboOdds`はIssue #137・#25-E2で三連単オッズも取得するようになった**
+  (既存のワイド・3連複・馬連・馬単の**後**に、中央競馬のみ1レース1リクエスト追加で
+  取得する。**地方競馬では取得しない**〈ユーザー判断2026-09-27〉)。ただし
+  `includeTrifectaInAllocation`に相当する設定はまだ無く(#138のスコープ)、取得はしても
+  配分には一切使われない(下記フォールバック規則・`ALL_MIXED_CANDIDATE_BET_TYPES`の
+  いずれにも`"trifecta"`を含めていないため)。
   `includeQuinellaInAllocation`はIssue #115・#24-D3aで、`includeExactaInAllocation`は
   Issue #124・#24-E3aでそれぞれ設定として先行配管し、Issue #117・Issue #125で
   券種の選択(`resolveMixedBetTypes`)・D-2フォールバック規則・設定画面のチェックボックスへ

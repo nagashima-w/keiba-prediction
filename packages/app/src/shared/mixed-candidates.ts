@@ -96,6 +96,7 @@ import {
   buildComboCandidates,
   buildExactaCandidates,
   buildQuinellaCandidates,
+  buildTrifectaCandidates,
   buildWinCandidates,
   DEFAULT_EV_CONFIG,
   type AllocationBetType,
@@ -162,11 +163,13 @@ export type MixedCandidateBetType = AllocationBetType;
  *
  * **Issue #128(#25-B)で`trifecta`(三連単)が`AllocationBetType`に加わったが、
  * `quinella`・`exacta`と同じ理由で当初は本配列に含めていない。** core側(的中確率・
- * 候補ビルダー`buildTrifectaCandidates`・配分の門番)は#128で実装済みだが、
- * `mixed-candidates.ts`から三連単の候補を作る経路(`buildTrifectaCandidatesForBetType`
- * 相当の実装・`resolveMixedBetTypes`の接続)はまだ無い(オッズ配線・配分接続は#132のスコープ)。
- * その接続が終わるまでは意図的に本配列へ加えるのを見送る(`quinella`・`exacta`のときと
- * 同じ判断)。
+ * 候補ビルダー`buildTrifectaCandidates`・配分の門番)は#128で実装済み。**Issue #137
+ * (#25-E2)で`buildTrifectaCandidatesForBetType`(本ファイル)を新設し、オッズ取得の配線
+ * (`scrapeRace`・中央のみ)・分析結果/スナップショットへの搭載も完了したが、
+ * `resolveMixedBetTypes`への接続(設定`includeTrifectaInAllocation`の新設は#138、実際の
+ * 接続は#139)はまだ無い。** その接続が終わるまでは`quinella`・`exacta`のときと同じ理由で
+ * 意図的に本配列へ加えるのを見送る(`buildTrifectaCandidatesForBetType`自体は#137で
+ * 呼べる状態にあるが、`options.betTypes`に明示的に`"trifecta"`を渡した場合のみ到達する)。
  *
  * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いつき、#112でいったん
  * 「全メンバーではない」状態に戻ったが#117で再び全メンバーと一致し、#120で三たび
@@ -221,6 +224,14 @@ export interface MixedCandidateBuildInput {
    * 参照されない(`options.betTypes`へ明示的に`"exacta"`を渡した場合のみ到達する)。
    */
   readonly exactaCombo?: Record<string, number | null>;
+  /**
+   * 三連単オッズ(Issue #137・#25-E2)。`options.betTypes`に`"trifecta"`があるときのみ
+   * 参照される。`ALL_MIXED_CANDIDATE_BET_TYPES`は`"trifecta"`を含まないため(#139まで)、
+   * 既定呼び出しでは参照されない(`options.betTypes`へ明示的に`"trifecta"`を渡した場合の
+   * み到達する)。**地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の
+   * 三連単は当面取得しないため)。
+   */
+  readonly trifectaCombo?: Record<string, number | null>;
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
 }
 
@@ -335,6 +346,14 @@ export interface MixedCandidateDiagnostics {
    * (`options.betTypes`に明示的に`"exacta"`を含めたときのみ`"built"`/`"yoso"`になりうる)。
    */
   readonly exacta: ComboCandidateDiagnosticsView;
+  /**
+   * 三連単の候補ビルド診断値(Issue #137・#25-E2)。`wide`/`trio`/`quinella`/`exacta`と同じ
+   * `ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"trifecta"`を含まない(#139まで)ため、
+   * `options.betTypes`省略時の既定呼び出しでは常に`kind:"not-requested"`になる
+   * (`options.betTypes`に明示的に`"trifecta"`を含めたときのみ`"built"`/`"yoso"`になりうる)。
+   */
+  readonly trifecta: ComboCandidateDiagnosticsView;
 }
 
 /** `buildMixedCandidates` の結果。 */
@@ -538,6 +557,42 @@ function buildExactaCandidatesForBetType(
 }
 
 /**
+ * 三連単候補を構築する(Issue #137・#25-E2)。`buildExactaCandidatesForBetType`と同型の骨格
+ * (別関数にする理由も同じ: core `buildComboCandidates`は`betType==="trifecta"`を専用にthrow
+ * する安全装置を持つため〈#128〉、三連単は`buildTrifectaCandidates`〈core。順序付きoutcome
+ * 空間から着順どおりの的中確率を求める〉へ直接委譲する)。反証B相当: 頭数門前払いはしない
+ * (`buildTrifectaCandidates`自身の判定不能〈固定馬2頭以上等〉に委ねる)。
+ *
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"trifecta"`を含まない(#139まで)ため、`requested`は
+ * `options.betTypes`に明示的に`"trifecta"`を渡した場合のみtrueになる(既定呼び出しでは
+ * 常に`false`=`kind:"not-requested"`)。
+ */
+function buildTrifectaCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly JointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード: 発売前は組合せオッズが存在しない(wide/trio/quinella/exactaと同じ理由。誤ラベル禁止)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "yoso" } };
+  }
+  const record = race.trifectaCombo;
+  const fieldPresence = resolveFieldPresence(record);
+  const comboOddsState = race.comboOdds?.trifecta?.state ?? "unknown";
+  const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
+  // D-4: evConfigを渡し、複勝・ワイド・3連複・馬連・馬単と同じ閾値・同じ厳密不等号で判定させる。
+  const result = buildTrifectaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
+  };
+}
+
+/**
  * 券種横断(複勝・ワイド・3連複。馬連は候補ビルダーとして実装済みだが既定の対象には含まれない
  * 〈`ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照〉)の買い目候補を構築する。
  *
@@ -561,6 +616,7 @@ export function buildMixedCandidates(
   const trio = buildComboCandidatesForBetType("trio", betTypes.includes("trio"), race, horses, evConfig);
   const quinella = buildQuinellaCandidatesForBetType(betTypes.includes("quinella"), race, horses, evConfig);
   const exacta = buildExactaCandidatesForBetType(betTypes.includes("exacta"), race, horses, evConfig);
+  const trifecta = buildTrifectaCandidatesForBetType(betTypes.includes("trifecta"), race, horses, evConfig);
 
   return {
     candidates: [
@@ -570,6 +626,7 @@ export function buildMixedCandidates(
       ...trio.candidates,
       ...quinella.candidates,
       ...exacta.candidates,
+      ...trifecta.candidates,
     ],
     topFinishCount: COMBO_TOP_FINISH_COUNT,
     diagnostics: {
@@ -579,6 +636,7 @@ export function buildMixedCandidates(
       trio: trio.diagnostics,
       quinella: quinella.diagnostics,
       exacta: exacta.diagnostics,
+      trifecta: trifecta.diagnostics,
     },
   };
 }

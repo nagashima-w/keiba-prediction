@@ -216,6 +216,39 @@ describe("設定フォームの入力検証(純関数)", () => {
     it("補助文が『馬単は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #125: 配分に使うようになったため、この断定は事実と食い違う)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toMatch(/馬単[^。]*配分には使いません/);
     });
+
+    /**
+     * Issue #137(#25-E2・オーケストレーター指定2026-09-27): 馬単(#122)・馬連(#116)と
+     * 同じ欠陥(取得を先に始めてから、ラベルの更新が1リリース遅れる)を三連単でも
+     * 繰り返さない。#137の時点でscrape-race.tsは三連単オッズも取得し始める
+     * (includeComboOdds:trueのとき、ワイド・3連複・馬連・馬単の後に三連単を1レースあたり
+     * 1リクエスト追加で取得する。ただし**中央競馬のみ**。地方は当面取得しない
+     * 〈ユーザー判断2026-09-27〉)ため、チェックボックス・補助文とも「何を取得するか」
+     * 「その費用」「地方では取得しないこと」の事実を更新する。
+     */
+    it("チェックボックス・補助文がどちらも三連単(trifecta)の取得に言及すること(Issue #137。#137から三連単も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("三連単");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("三連単");
+    });
+
+    it("補助文の費用説明が三連単も1レースあたり1リクエスト追加であることに言及すること(Issue #137)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/三連単[^。]*1レースあたり[^。]*1リクエスト追加/);
+    });
+
+    // ユーザー判断(2026-09-27)「地方は当面取らない」を必ず明示する(オーケストレーター指定)。
+    it("補助文が『三連単は地方競馬では取得しません』旨を明示すること(Issue #137・ユーザー判断2026-09-27)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("地方競馬では取得しません");
+    });
+
+    // 馬単(#122時点)・馬連(#116時点)と同じ判断: includeTrifectaInAllocationという設定自体が
+    // まだ存在しない(#138のスコープ)ため、配分利用の列挙(4項目)に三連単を加えない。
+    it("補助文の『配分に使うかどうかは下記の設定に従う』という列挙は4項目(ワイド・馬連・馬単・三連複)のままで、三連単を配分に使う設定への言及を含まないこと(Issue #137: includeTrifectaInAllocationはまだ無いため列挙に足すと嘘になる。#138で追加予定)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("三連単を配分に使う");
+    });
+
+    it("補助文が『三連単は現在は取得のみで配分には使わない』旨を明示すること(Issue #137: 取得と配分利用の状態を混同させないため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/三連単[^。]*配分には使いません/);
+    });
   });
 
   describe("INCLUDE_COMBO_ODDS_BATCH_NOTE(一括分析画面の固定注記。機能D-2c第3段・Issue #28)", () => {
@@ -249,6 +282,25 @@ describe("設定フォームの入力検証(純関数)", () => {
     it("『馬単は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #125: 配分に使うようになったため、この断定は事実と食い違う)", () => {
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toMatch(/馬単[^。]*配分には使いません/);
     });
+
+    // Issue #137(#25-E2): INCLUDE_COMBO_ODDS_LABELSと同じ理由で、一括分析画面の注記も
+    // 「何を取得しているか」「地方では取得しないこと」の事実を更新する。配分利用の列挙
+    // (4項目)は変えない(INCLUDE_COMBO_ODDS_LABELS.helpと同じ判断)。
+    it("三連単(trifecta)の取得にも言及すること(Issue #137。取得の事実を更新)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("三連単");
+    });
+
+    it("『三連単は地方競馬では取得しません』旨を明示すること(Issue #137・ユーザー判断2026-09-27)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("地方競馬では取得しません");
+    });
+
+    it("三連単を配分に使う設定への言及を含まないこと(Issue #137: includeTrifectaInAllocationはまだ無い)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("三連単を配分に使う");
+    });
+
+    it("『三連単は現在は取得のみで配分には使わない』旨を明示すること(Issue #137)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toMatch(/三連単[^。]*配分には使いません/);
+    });
   });
 
   // 券種横断の馬券配分対象チェックボックス文言(機能D-2c第4段・Issue #28。
@@ -271,9 +323,10 @@ describe("設定フォームの入力検証(純関数)", () => {
         // Issue #117: INCLUDE_COMBO_ODDS_LABELS.checkboxが「ワイド・馬連・三連複」に変わったため、
         // ここでの引用文言もそれに合わせる(古い引用のままだと実際のチェックボックス名と
         // 一致しない参照になる)。Issue #122でさらに「ワイド・馬連・馬単・三連複」に変わった
-        // ため、引用文言も再度合わせる(同じ理由の繰り返し)。
+        // ため、引用文言も再度合わせる(同じ理由の繰り返し)。Issue #137でさらに
+        // 「ワイド・馬連・馬単・三連複・三連単」に変わったため、引用文言も再度合わせる。
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(
-          "ワイド・馬連・馬単・三連複のオッズも取得する",
+          "ワイド・馬連・馬単・三連複・三連単のオッズも取得する",
         );
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("OFFの間は効果がありません");
       },

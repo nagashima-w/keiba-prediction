@@ -173,14 +173,21 @@ export interface ComboOddsFetchOutcome {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬連・馬単)取得結果のペア。`options.includeComboOdds`がtrueの
- * ときのみ設定される(馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2で追加)。
+ * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉)取得結果のペア。
+ * `options.includeComboOdds`がtrueのときのみ設定される(馬連はIssue #116・#24-D3b-1、
+ * 馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2で追加)。
  */
 export interface ComboOddsScrapeOutcome {
   readonly wide?: ComboOddsFetchOutcome;
   readonly trio?: ComboOddsFetchOutcome;
   readonly quinella?: ComboOddsFetchOutcome;
   readonly exacta?: ComboOddsFetchOutcome;
+  /**
+   * 三連単の取得結果(Issue #137・#25-E2)。**地方(NAR)では常に`undefined`**
+   * (ユーザー判断2026-09-27により地方は当面取得しないため。`OddsSnapshot.trifectaCombo`の
+   * JSDoc参照)。中央では他の4券種と同じく`options.includeComboOdds`がtrueのとき設定される。
+   */
+  readonly trifecta?: ComboOddsFetchOutcome;
 }
 
 /** 1頭分の統合データ(出馬表情報+全戦績+調教評価)。 */
@@ -256,13 +263,14 @@ function errorMessage(error: unknown): string {
  * `ComboBetType`に`exacta`(馬単)を追加した際、この三項演算子はコンパイルエラーを
  * 出さずに馬単を誤って「3連複」と表示する状態になっていた(**現在は本ファイルの
  * `fetchComboBetTypeOdds`呼び出しがwide・trio・quinella〈Issue #116・#24-D3b-1〉・
- * exacta〈Issue #122・#24-E2〉の4券種すべてを取得しており、4つともproductionから
- * 到達する**)。`default`のnever到達チェックにより、次に券種を追加する際〈#26等〉は
- * 必ずコンパイルエラーで気づける形にしておく。
+ * exacta〈Issue #122・#24-E2〉・trifecta〈Issue #137・#25-E2。ただし中央のみ〉の
+ * 5券種すべてを取得しており、5つともproductionから到達する**)。`default`のnever
+ * 到達チェックにより、次に券種を追加する際〈#26等〉は必ずコンパイルエラーで
+ * 気づける形にしておく。
  *
- * **三連単(trifecta)はIssue #130・#25-Dで`ComboBetType`に追加されたが、本ファイルの
- * `fetchComboBetTypeOdds`呼び出しは増やしていない(配線は#132のスコープ)。** そのため
- * このcaseは現時点ではproductionから到達しない(型の網羅性を満たすためだけの追加)。
+ * **三連単(trifecta)は地方(NAR)では`fetchComboBetTypeOdds`が呼ばれない**
+ * (ユーザー判断2026-09-27。`scrapeRace`の`if (!isNar)`ガード参照)ため、このcaseの
+ * 地方分岐は依然として到達しないが、中央分岐は#137で到達するようになった。
  */
 function comboBetTypeLabel(betType: ComboBetType): string {
   switch (betType) {
@@ -467,11 +475,21 @@ export async function scrapeRace(
   // (5)自体が実行されないため、この行の位置に関わらず既存の挙動と完全に一致する)。
   const oddsFetchedAt = now().toISOString();
 
-  // (5) 組合せオッズ(ワイド・3連複・馬連・馬単。オプトイン。既定OFF。機能D-2b-B・Issue #33
-  // 第4段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2で追加):
+  // (5) 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉。オプトイン。既定OFF。
+  // 機能D-2b-B・Issue #33第4段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、
+  // 三連単はIssue #137・#25-E2で追加):
   // options.includeComboOddsがtrueの場合のみ実行する。既定呼び出しでは本ステップは一切実行
-  // されず、発行URL列・リクエスト数は現行と完全に一致する(AC4)。馬連・馬単はワイド・3連複の
-  // **後**に取得する(既存URL列の先頭部分を変えないため。Issue #116 AC-1・Issue #122 AC-1)。
+  // されず、発行URL列・リクエスト数は現行と完全に一致する(AC4)。馬連・馬単・三連単は
+  // ワイド・3連複の**後**に取得する(既存URL列の先頭部分を変えないため。Issue #116 AC-1・
+  // Issue #122 AC-1・Issue #137 AC-1)。
+  //
+  // **三連単は中央のみ取得する(ユーザー判断2026-09-27)**: 地方三連単は軸馬別取得
+  // (1着固定・頭数分のリクエストが必要。`docs/trifecta-odds-investigation.md` §3.3)だが、
+  // 当面実装しない(取得しない)と決めたため、調教(oikiri)と同じ`if (!isNar)`で明示的に
+  // ガードする(wide/trio/quinella/exactaのように無条件で`fetchComboBetTypeOdds`を呼び
+  // `fetch-combo-odds.ts`の地方三連単throwに委ねる設計は採らない。その方式だと地方の
+  // 分析のたびに「想定外の例外」という警告が混入し、意図的な仕様であることと矛盾する。
+  // `comboOddsUrlFor`の地方三連単throwは、本ガードにより到達不能のまま残る)。
   //
   // 防御カバレッジ表への追記(AC8。fetch-combo-odds.tsの表に対する追加出口):
   // | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
@@ -482,6 +500,7 @@ export async function scrapeRace(
   let trioCombo: Record<string, number | null> | undefined;
   let quinellaCombo: Record<string, number | null> | undefined;
   let exactaCombo: Record<string, number | null> | undefined;
+  let trifectaCombo: Record<string, number | null> | undefined;
   let comboOdds: ComboOddsScrapeOutcome | undefined;
   if (options.includeComboOdds) {
     const startingUmabans = shutuba.horses.map((h) => h.umaban);
@@ -519,15 +538,29 @@ export async function scrapeRace(
       oddsFetchOptions,
       warnings,
     );
+    // 三連単は中央のみ(調教と同じ明示ガード。上記コメント参照)。地方では
+    // fetchComboBetTypeOdds自体を呼ばないため、リクエストも警告も発生しない。
+    const trifectaOutcome = isNar
+      ? undefined
+      : await fetchComboBetTypeOdds(
+          "trifecta",
+          raceId,
+          startingUmabans,
+          deps.fetcher,
+          oddsFetchOptions,
+          warnings,
+        );
     wideCombo = wideOutcome?.record;
     trioCombo = trioOutcome?.record;
     quinellaCombo = quinellaOutcome?.record;
     exactaCombo = exactaOutcome?.record;
+    trifectaCombo = trifectaOutcome?.record;
     comboOdds = {
       wide: wideOutcome?.outcome,
       trio: trioOutcome?.outcome,
       quinella: quinellaOutcome?.outcome,
       exacta: exactaOutcome?.outcome,
+      trifecta: trifectaOutcome?.outcome,
     };
   }
 
@@ -537,6 +570,7 @@ export async function scrapeRace(
     ...(trioCombo !== undefined ? { trioCombo } : {}),
     ...(quinellaCombo !== undefined ? { quinellaCombo } : {}),
     ...(exactaCombo !== undefined ? { exactaCombo } : {}),
+    ...(trifectaCombo !== undefined ? { trifectaCombo } : {}),
   };
 
   const horses: RaceHorseData[] = shutuba.horses.map((shutubaHorse) => ({

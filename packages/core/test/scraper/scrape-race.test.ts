@@ -414,7 +414,7 @@ describe("listNarRaces(地方の開催日→レース一覧)", () => {
  * `fetcher.calls`検査)を主たる回帰ピンとする。
  */
 describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B・Issue #33第4段)", () => {
-  it("デフォルト(includeComboOdds未指定)ではwideCombo/trioCombo/quinellaCombo/exactaComboを含まず、comboOddsも設定されないこと(馬単はIssue #122 AC-2)", async () => {
+  it("デフォルト(includeComboOdds未指定)ではwideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaComboを含まず、comboOddsも設定されないこと(馬単はIssue #122 AC-2、三連単はIssue #137 AC-2)", async () => {
     const fetcher = new RecordingFetcher(defaultHandler);
     const data = await scrapeRace(RACE_ID, { fetcher, now: FIXED_NOW });
 
@@ -422,9 +422,10 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
     expect(data.odds.trioCombo).toBeUndefined();
     expect(data.odds.quinellaCombo).toBeUndefined();
     expect(data.odds.exactaCombo).toBeUndefined();
+    expect(data.odds.trifectaCombo).toBeUndefined();
     expect(data.meta.comboOdds).toBeUndefined();
     // 組合せオッズ関連のURL(type=4〈馬連〉/type=5/type=6〈馬単。Issue #122 AC-2〉/type=7/
-    // odds_get_form.html)への発行が1件も無いこと。
+    // type=8〈三連単。Issue #137 AC-2〉/odds_get_form.html)への発行が1件も無いこと。
     expect(
       fetcher.calls.some(
         (c) =>
@@ -432,6 +433,7 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
           c.url.includes("type=5") ||
           c.url.includes("type=6") ||
           c.url.includes("type=7") ||
+          c.url.includes("type=8") ||
           c.url.includes("odds_get_form.html"),
       ),
     ).toBe(false);
@@ -457,22 +459,24 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
 
   describe("中央(includeComboOdds:true)", () => {
     /**
-     * 中央3連複・ワイド・馬連・馬単の実フィクスチャを追加で解決する既定ハンドラ(既存
+     * 中央3連複・ワイド・馬連・馬単・三連単の実フィクスチャを追加で解決する既定ハンドラ(既存
      * defaultHandlerを包む)。馬連(`type=4`)はIssue #116・#24-D3b-1、馬単(`type=6`)は
-     * Issue #122・#24-E2で追加。`defaultHandler`は`api_get_jra_odds`を含むURL全般を
-     * 単勝・複勝フィクスチャにフォールバックさせるため、`type=4`/`type=6`を明示判定しないと
-     * 馬連・馬単が誤って単勝・複勝の応答として解釈され"unavailable"に丸められてしまう
-     * (このdescribe配下の「全件取得できている」前提と食い違う)。
+     * Issue #122・#24-E2、三連単(`type=8`)はIssue #137・#25-E2で追加。`defaultHandler`は
+     * `api_get_jra_odds`を含むURL全般を単勝・複勝フィクスチャにフォールバックさせるため、
+     * `type=4`/`type=6`/`type=8`を明示判定しないと馬連・馬単・三連単が誤って単勝・複勝の
+     * 応答として解釈され"unavailable"に丸められてしまう(このdescribe配下の「全件取得
+     * できている」前提と食い違う)。
      */
     function comboAwareCentralHandler(url: string): string {
       if (url.includes("type=5")) return loadFixture("odds_wide_202603020211.json");
       if (url.includes("type=7")) return loadFixture("odds_trio_202603020211.json");
       if (url.includes("type=4")) return loadFixture("odds_quinella_202603020211.json");
       if (url.includes("type=6")) return loadFixture("odds_exacta_202603020211.json");
+      if (url.includes("type=8")) return loadFixture("odds_trifecta_202603020211.json");
       return defaultHandler(url);
     }
 
-    it("wideCombo/trioCombo/quinellaCombo/exactaComboがRecordとして載り、JSON.stringifyを通しても値が消えないこと(Map化していないことの回帰テスト。馬連はIssue #116 AC-1、馬単はIssue #122 AC-1)", async () => {
+    it("wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaComboがRecordとして載り、JSON.stringifyを通しても値が消えないこと(Map化していないことの回帰テスト。馬連はIssue #116 AC-1、馬単はIssue #122 AC-1、三連単はIssue #137 AC-1)", async () => {
       const fetcher = new RecordingFetcher(comboAwareCentralHandler);
       const data = await scrapeRace(
         RACE_ID,
@@ -484,21 +488,29 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(data.odds.trioCombo).toBeDefined();
       expect(data.odds.quinellaCombo).toBeDefined();
       expect(data.odds.exactaCombo).toBeDefined();
+      expect(data.odds.trifectaCombo).toBeDefined();
       // Mapではない(plainオブジェクト)ことを直接確認する。
       expect(data.odds.wideCombo instanceof Map).toBe(false);
       expect(data.odds.trioCombo instanceof Map).toBe(false);
       expect(data.odds.quinellaCombo instanceof Map).toBe(false);
       expect(data.odds.exactaCombo instanceof Map).toBe(false);
+      expect(data.odds.trifectaCombo instanceof Map).toBe(false);
       expect(Object.keys(data.odds.wideCombo!)).toHaveLength(120); // C(16,2)、実測(urls.ts JSDoc)
       expect(Object.keys(data.odds.trioCombo!)).toHaveLength(560); // C(16,3)、実測
       expect(Object.keys(data.odds.quinellaCombo!)).toHaveLength(120); // C(16,2)、実測(python3でodds_quinella_202603020211.jsonのdata.odds["4"]を実測)
       expect(Object.keys(data.odds.exactaCombo!)).toHaveLength(240); // P(16,2)、実測(tsxでodds_exacta_202603020211.jsonをparseComboOddsに通した結果。Issue #122)
+      expect(Object.keys(data.odds.trifectaCombo!)).toHaveLength(3360); // P(16,3)、実測(fetch-combo-odds.test.ts/trifecta-odds-fixtures.test.tsで固定済みの値と同じフィクスチャ。Issue #137)
       // 順序付きキーが保たれていること(1着・2着の向きで別の値。Issue #122 AC-1)。
       // 実測: "1308"=83.6(13番→8番)、"0813"=118.8(8番→13番)で別値
       // (docs/quinella-exacta-odds-investigation.md §5.1の確定払戻突合と整合)。
       expect(data.odds.exactaCombo!["1308"]).toBe(83.6);
       expect(data.odds.exactaCombo!["0813"]).toBe(118.8);
       expect(data.odds.exactaCombo!["1308"]).not.toBe(data.odds.exactaCombo!["0813"]);
+      // 三連単も同じく着順の並びを保つこと(完全反転で別値。実測はcombo-odds-key.test.ts
+      // 「buildComboOddsCellMapForは三連単の完全反転…」で固定済みの値と同じフィクスチャ)。
+      expect(data.odds.trifectaCombo!["130805"]).toBe(526.9);
+      expect(data.odds.trifectaCombo!["050813"]).toBe(442.7);
+      expect(data.odds.trifectaCombo!["130805"]).not.toBe(data.odds.trifectaCombo!["050813"]);
 
       // JSON.stringify→JSON.parseを通しても中身が消えないこと。Mapを載せていたら
       // JSON.stringify(new Map(...))は"{}"になり、roundTrip後は0件になる(この回帰を検知する)。
@@ -507,17 +519,20 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
         trioCombo: Record<string, number | null>;
         quinellaCombo: Record<string, number | null>;
         exactaCombo: Record<string, number | null>;
+        trifectaCombo: Record<string, number | null>;
       };
       expect(Object.keys(roundTripped.wideCombo)).toHaveLength(120);
       expect(Object.keys(roundTripped.trioCombo)).toHaveLength(560);
       expect(Object.keys(roundTripped.quinellaCombo)).toHaveLength(120);
       expect(Object.keys(roundTripped.exactaCombo)).toHaveLength(240);
+      expect(Object.keys(roundTripped.trifectaCombo)).toHaveLength(3360);
 
       // 診断値が取り出せること(第3段ComboOddsFetchDiagnosticsの受け渡し)。
       expect(data.meta.comboOdds?.wide?.state).toBe("available");
       expect(data.meta.comboOdds?.trio?.state).toBe("available");
       expect(data.meta.comboOdds?.quinella?.state).toBe("available");
       expect(data.meta.comboOdds?.exacta?.state).toBe("available");
+      expect(data.meta.comboOdds?.trifecta?.state).toBe("available");
       expect(data.meta.comboOdds?.wide?.diagnostics.requestCount).toBe(1);
       expect(data.meta.comboOdds?.trio?.diagnostics.requestCount).toBe(1);
       expect(data.meta.comboOdds?.quinella?.diagnostics.requestCount).toBe(1); // Issue #116 AC-1
@@ -531,7 +546,7 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ")).toEqual([]);
     });
 
-    it("未発売(unavailable)では警告0件・stateが\"unavailable\"であること(馬連はIssue #116、馬単はIssue #122で対象に追加)", async () => {
+    it("未発売(unavailable)では警告0件・stateが\"unavailable\"であること(馬連はIssue #116、馬単はIssue #122、三連単はIssue #137で対象に追加)", async () => {
       const fetcher = new RecordingFetcher((url) => {
         if (url.includes("type=5")) {
           return loadFixture("odds_wide_presale_202604020511_20260806.json");
@@ -549,6 +564,10 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
           // 馬単専用の未発売フィクスチャも無いが、上記馬連と同じ理由で流用できる。
           return loadFixture("odds_wide_presale_202604020511_20260806.json");
         }
+        if (url.includes("type=8")) {
+          // 三連単専用の未発売フィクスチャも無いが、上記と同じ理由で流用できる。
+          return loadFixture("odds_wide_presale_202604020511_20260806.json");
+        }
         return defaultHandler(url);
       });
       const data = await scrapeRace(
@@ -561,10 +580,12 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(data.meta.comboOdds?.trio?.state).toBe("unavailable");
       expect(data.meta.comboOdds?.quinella?.state).toBe("unavailable");
       expect(data.meta.comboOdds?.exacta?.state).toBe("unavailable");
+      expect(data.meta.comboOdds?.trifecta?.state).toBe("unavailable");
       expect(data.odds.wideCombo).toEqual({});
       expect(data.odds.trioCombo).toEqual({});
       expect(data.odds.quinellaCombo).toEqual({});
       expect(data.odds.exactaCombo).toEqual({});
+      expect(data.odds.trifectaCombo).toEqual({});
       expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ")).toEqual([]);
     });
 
@@ -657,6 +678,105 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
         (w) => w.kind === "組合せオッズ" && w.message.includes("馬単"),
       );
       expect(exactaWarning).toBeDefined();
+    });
+
+    it("三連単の取得だけが失敗してもレースは落ちず、wideCombo/trioCombo/quinellaCombo/exactaComboは不変で、警告に「三連単」が出ること(Issue #137 AC-1(隔離)。#122 AC-3と同型)", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=8")) {
+          throw new Error("三連単オッズのHTTP取得に失敗した(模擬)");
+        }
+        return comboAwareCentralHandler(url);
+      });
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // wide/trio/quinella/exactaは三連単の失敗に引きずられず、従来どおり全件取得できていること。
+      expect(Object.keys(data.odds.wideCombo!)).toHaveLength(120); // C(16,2)
+      expect(Object.keys(data.odds.trioCombo!)).toHaveLength(560); // C(16,3)
+      expect(Object.keys(data.odds.quinellaCombo!)).toHaveLength(120); // C(16,2)
+      expect(Object.keys(data.odds.exactaCombo!)).toHaveLength(240); // P(16,2)
+      expect(data.meta.comboOdds?.wide?.state).toBe("available");
+      expect(data.meta.comboOdds?.trio?.state).toBe("available");
+      expect(data.meta.comboOdds?.quinella?.state).toBe("available");
+      expect(data.meta.comboOdds?.exacta?.state).toBe("available");
+
+      // 三連単は取得0件(空オブジェクト)のまま、state="failed"(②③〈発売なし〉と混同しない)。
+      expect(data.odds.trifectaCombo).toEqual({});
+      expect(data.meta.comboOdds?.trifecta?.state).toBe("failed");
+
+      // 警告に「三連単」を含むものが出ること(kind==="組合せオッズ")。
+      const trifectaWarning = data.meta.warnings.find(
+        (w) => w.kind === "組合せオッズ" && w.message.includes("三連単"),
+      );
+      expect(trifectaWarning).toBeDefined();
+    });
+
+    it("発売中(presale)フィクスチャの上限キャップ値'999,999.9'はnull化されたままtrifectaComboにキーとして残ること(0や欠落に化けない。Issue #137 AC-5)", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=8")) {
+          // race_id自体は突き合わせない(中央の単発リクエスト経路はJSONを検証なしでそのまま
+          // パースする。docs/current-spec.md参照)。実際に発売中だった別レース
+          // (202606040901)のオッズJSONを流用する(parse-combo-odds.test.tsで
+          // 「3360件中2644件がnull・716件が数値」と固定済みの実フィクスチャ)。
+          return loadFixture("odds_trifecta_presale_202606040901_20260926.json");
+        }
+        return comboAwareCentralHandler(url);
+      });
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 全体件数が3360件(P(16,3))であること。
+      expect(Object.keys(data.odds.trifectaCombo!)).toHaveLength(3360);
+      // 上限キャップ値のセルはキーとして存在し、値はnull(0でも欠落でもない)であること。
+      expect(
+        Object.prototype.hasOwnProperty.call(data.odds.trifectaCombo!, "100102"),
+      ).toBe(true);
+      expect(data.odds.trifectaCombo!["100102"]).toBeNull();
+      expect(data.odds.trifectaCombo!["100102"]).not.toBe(0);
+      // 実数らしい値のセルは数値のまま残ること(null化が券種全体に誤爆していないこと)。
+      expect(data.odds.trifectaCombo!["100107"]).toBeCloseTo(1992.3, 5);
+      expect(data.meta.comboOdds?.trifecta?.state).toBe("available");
+    });
+  });
+
+  describe("地方(NAR)三連単(trifecta)は取得しないこと(ユーザー判断2026-09-27・Issue #137 AC-1)", () => {
+    it("includeComboOdds:trueでも、地方では三連単のリクエストが発生せず、trifectaCombo・comboOdds.trifectaのいずれも設定されないこと(調教〈oikiri〉と同じ、対象外としての明示スキップ。警告も出ないこと)", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=b4")) return loadFixture("nar_odds_b4_202654071210.html");
+        if (url.includes("type=b6")) return loadFixture("nar_odds_b6_202654071210.html");
+        return narHandler(url);
+      });
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 他の組合せオッズ(馬連・馬単)は地方でも通常どおり取得できて
+      // いること(三連単だけが対象外であることをこの前提と対比させる)。
+      expect(data.meta.comboOdds?.quinella?.state).toBe("available");
+      expect(data.meta.comboOdds?.exacta?.state).toBe("available");
+
+      expect(data.odds.trifectaCombo).toBeUndefined();
+      expect(data.meta.comboOdds?.trifecta).toBeUndefined();
+      // 三連単関連のURL(中央type=8・地方type=b8)への発行が1件も無いこと。
+      expect(
+        fetcher.calls.some((c) => c.url.includes("type=8") || c.url.includes("type=b8")),
+      ).toBe(false);
+      // 対象外は調教と同じ扱いであり、想定外の例外として警告を出さないこと
+      // (fetch-combo-odds.tsのcomboOddsUrlForが持つ「地方三連単は単発リクエストでは
+      // 扱えません」というthrowは、本テストの経路では一切発火しない=到達不能のまま)。
+      expect(
+        data.meta.warnings.filter(
+          (w) => w.kind === "組合せオッズ" && w.message.includes("三連単"),
+        ),
+      ).toEqual([]);
     });
   });
 

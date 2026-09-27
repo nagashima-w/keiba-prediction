@@ -157,10 +157,9 @@ export interface ComboOddsFetchDiagnosticsView {
    * 券種("wide" | "trio" | "exacta" | "quinella" | "trifecta")。core `ComboBetType` に
    * 馬単(exacta)・馬連(quinella)・三連単(trifecta)が追加されたことに伴うプレーン写し
    * (Issue #106・#24-B、馬連はIssue #113・#24-D2、三連単はIssue #130・#25-D)。
-   * `ComboOddsScrapeOutcomeView`自体は`wide?`/`trio?`/`quinella?`/`exacta?`を持つ(馬連は
-   * Issue #116・#24-D3b-1、馬単はIssue #122・#24-E2でscrape-race.tsに配線した時点で
-   * それぞれ追加。**三連単はIssue #130時点ではscrape-race.tsに配線していない〈#132の
-   * スコープ〉ため、`trifecta?`フィールドはまだ追加しない**)。
+   * `ComboOddsScrapeOutcomeView`自体は`wide?`/`trio?`/`quinella?`/`exacta?`/`trifecta?`を
+   * 持つ(馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・
+   * #25-E2でscrape-race.tsに配線した時点でそれぞれ追加)。
    * `ComboOddsFetchDiagnostics.betType`はcore側で`ComboBetType`型をそのまま参照する
    * 共有フィールドのため、この型だけはcore型と完全一致させる必要がある
    * (analysis-types-combo-odds-pin.test.tsが検知する)。
@@ -198,16 +197,22 @@ export interface ComboOddsFetchOutcomeView {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬連・馬単)取得結果のペア(core `ComboOddsScrapeOutcome` の
- * プレーン写し。機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・
- * #24-E2で追加)。core `RaceDataMeta.comboOdds` と同じく、`options.includeComboOdds`がtrueの
- * ときのみ設定される。
+ * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉)取得結果のペア(core
+ * `ComboOddsScrapeOutcome` のプレーン写し。機能D-2c第1段・Issue #28。馬連はIssue #116・
+ * #24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2で追加)。core
+ * `RaceDataMeta.comboOdds` と同じく、`options.includeComboOdds`がtrueのときのみ設定される。
  */
 export interface ComboOddsScrapeOutcomeView {
   readonly wide?: ComboOddsFetchOutcomeView;
   readonly trio?: ComboOddsFetchOutcomeView;
   readonly quinella?: ComboOddsFetchOutcomeView;
   readonly exacta?: ComboOddsFetchOutcomeView;
+  /**
+   * 三連単の取得結果(Issue #137・#25-E2)。**地方(NAR)では常に`undefined`**
+   * (ユーザー判断2026-09-27により地方は当面取得しないため。`AnalysisResult.trifectaCombo`
+   * のJSDoc参照)。中央では他の4券種と同じく`options.includeComboOdds`がtrueのとき設定される。
+   */
+  readonly trifecta?: ComboOddsFetchOutcomeView;
 }
 
 /** 進捗イベント(main→renderer に webContents.send で通知)。 */
@@ -391,16 +396,38 @@ export interface AnalysisResult {
    */
   readonly exactaCombo?: Record<string, number | null>;
   /**
-   * 組合せオッズ(ワイド・3連複・馬連・馬単)の取得結果(core `RaceDataMeta.comboOdds` のプレーン
-   * 写し。機能D-2c第1段・Issue #28。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2で
-   * 追加)。このフィールド自身の有無は`wideCombo`/`trioCombo`/`quinellaCombo`/`exactaCombo`とは
-   * 異なり`includeComboOdds`の指定と1対1で対応する(`scrapeRace`は`includeComboOdds:true`の
-   * とき、いずれかの取得処理が例外で失敗しても`comboOdds`自体〈`wide`/`trio`/`quinella`/`exacta`
-   * がそれぞれoptionalなオブジェクト〉は必ず設定する)。
+   * 三連単オッズ(馬番の組の正規化キー〈`buildOrderedComboOddsKey`形式。例"010203"〉→オッズ。
+   * 1着・2着・3着の順序が意味を持つ(馬単`exactaCombo`と同じ性質)。単一値。core
+   * `OddsSnapshot.trifectaCombo` のプレーン写し。Issue #137・#25-E2)。`Record`である理由・
+   * 状態と原因が1対1に対応しないことは`wideCombo`と同じ(原因の判別は
+   * `comboOdds.trifecta.state`を見ること)。
    *
-   * `wide`/`trio`/`quinella`/`exacta`それぞれの`state`(`"available" | "unavailable" | "failed"`)
-   * が、対応する`*Combo`が空(`{}`)になった原因(発売なし/未発売なのか、取得失敗
-   * なのか)を判別する唯一の手段である(`wideCombo`のJSDoc参照)。
+   * **地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の三連単は当面取得
+   * しないため。地方では`scrapeRace`が調教と同じ`if (!isNar)`ガードで取得自体を試みない
+   * 〈`comboOdds.trifecta`もあわせて`undefined`のまま〉。中央では他の4券種と同じ挙動)。
+   *
+   * **配分・画面への配線はまだ無い**(このフィールドを保持・伝播するだけ。#25-E2〈#137〉の
+   * スコープ。配分の券種選択〈`resolveMixedBetTypes`〉への接続は#138〈`includeTrifectaInAllocation`
+   * の配管〉・#139〈実際の接続〉)。
+   */
+  readonly trifectaCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉)の取得結果(core
+   * `RaceDataMeta.comboOdds` のプレーン写し。機能D-2c第1段・Issue #28。馬連はIssue #116・
+   * #24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2で
+   * 追加)。このフィールド自身(外側の`comboOdds`オブジェクト)の有無は`wideCombo`/
+   * `trioCombo`/`quinellaCombo`/`exactaCombo`/`trifectaCombo`とは異なり`includeComboOdds`の
+   * 指定と1対1で対応する(`scrapeRace`は`includeComboOdds:true`のとき、いずれかの取得処理が
+   * 例外で失敗しても`comboOdds`自体〈`wide`/`trio`/`quinella`/`exacta`/`trifecta`がそれぞれ
+   * optionalなサブフィールド〉は必ず設定する)。
+   *
+   * **`comboOdds.trifecta`だけは例外的に、`includeComboOdds:true`でも地方(NAR)では常に
+   * `undefined`になる**(ユーザー判断2026-09-27。`trifectaCombo`のJSDoc参照。他の4券種は
+   * 中央・地方いずれも`includeComboOdds:true`なら必ず値が入る)。
+   *
+   * `wide`/`trio`/`quinella`/`exacta`/`trifecta`それぞれの`state`
+   * (`"available" | "unavailable" | "failed"`)が、対応する`*Combo`が空(`{}`)になった原因
+   * (発売なし/未発売なのか、取得失敗なのか)を判別する唯一の手段である(`wideCombo`のJSDoc参照)。
    */
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
 }

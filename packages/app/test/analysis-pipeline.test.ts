@@ -2826,9 +2826,9 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
     const hasOwn = (obj: object, key: string): boolean =>
       Object.prototype.hasOwnProperty.call(obj, key);
 
-    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo・race.meta.comboOddsが未設定(未取得)なら、結果のwideCombo/trioCombo/quinellaCombo/exactaCombo/comboOddsもキー自体が無いままであること({}に化けないこと。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4)", async () => {
-      // fakeRaceData(RACE_ID) は wideCombo/trioCombo/quinellaCombo/exactaCombo/meta.comboOdds を
-      // 持たない(scrapeRaceのincludeComboOdds未指定=既定の未取得状態を模す)。
+    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo・race.meta.comboOddsが未設定(未取得)なら、結果のwideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo/comboOddsもキー自体が無いままであること({}に化けないこと。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", async () => {
+      // fakeRaceData(RACE_ID) は wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo/
+      // meta.comboOdds を持たない(scrapeRaceのincludeComboOdds未指定=既定の未取得状態を模す)。
       const result = await runAnalysis(
         parseRaceId(RACE_ID),
         parseKaisaiDate(KAISAI),
@@ -2840,6 +2840,7 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(result.trioCombo).toBeUndefined();
       expect(result.quinellaCombo).toBeUndefined();
       expect(result.exactaCombo).toBeUndefined();
+      expect(result.trifectaCombo).toBeUndefined();
       expect(result.comboOdds).toBeUndefined();
       // 「undefinedという値の代入」と「キー自体が無いこと」は違う(JSON.stringifyでは
       // 両者が区別できない)。hasOwnPropertyで直接キーの有無を見る。
@@ -2847,10 +2848,11 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(hasOwn(result, "trioCombo")).toBe(false);
       expect(hasOwn(result, "quinellaCombo")).toBe(false);
       expect(hasOwn(result, "exactaCombo")).toBe(false);
+      expect(hasOwn(result, "trifectaCombo")).toBe(false);
       expect(hasOwn(result, "comboOdds")).toBe(false);
     });
 
-    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaComboが設定されていれば結果にそのまま伝播し、JSON往復(IPC相当)でも中身が消えないこと(馬連はIssue #116 AC-4、馬単はIssue #122 AC-4)", async () => {
+    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaComboが設定されていれば結果にそのまま伝播し、JSON往復(IPC相当)でも中身が消えないこと(馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", async () => {
       const base = fakeRaceData(RACE_ID);
       const race: RaceData = {
         ...base,
@@ -2860,6 +2862,7 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
           trioCombo: { "010203": 2.3 },
           quinellaCombo: { "0104": 4.5, "0105": null },
           exactaCombo: { "0106": 6.5, "0601": 9.8 },
+          trifectaCombo: { "010203": 15.2, "030201": 88.4 },
         },
       };
       const deps: AnalysisPipelineDeps = {
@@ -2879,16 +2882,20 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(result.quinellaCombo).toEqual({ "0104": 4.5, "0105": null });
       // 順序付きキー("0106"と"0601")が別値のまま伝播すること(馬単固有の回帰観点)。
       expect(result.exactaCombo).toEqual({ "0106": 6.5, "0601": 9.8 });
+      // 三連単も同じく順序付きキー("010203"と"030201")が別値のまま伝播すること。
+      expect(result.trifectaCombo).toEqual({ "010203": 15.2, "030201": 88.4 });
       // Mapではない(plainオブジェクト)ことを直接確認する(#33と同じ回帰観点)。
       expect(result.wideCombo instanceof Map).toBe(false);
       expect(result.trioCombo instanceof Map).toBe(false);
       expect(result.quinellaCombo instanceof Map).toBe(false);
       expect(result.exactaCombo instanceof Map).toBe(false);
-      // boss指摘・要修正1: このケース(wideCombo/trioCombo/quinellaCombo/exactaComboが有・
-      // comboOddsが無)でcomboOddsのキー自体が無いことも固定する。comboOddsの条件式が
-      // `race.meta.comboOdds !== undefined || race.odds.wideCombo !== undefined` のように
-      // wideCombo側へ広がる変異(fail-open)は、wideComboが有るこのテストでこそ露呈する
-      // (fail-open変異は「選言が真になる状態でキー不在を主張する」テストでしか検知できない)。
+      expect(result.trifectaCombo instanceof Map).toBe(false);
+      // boss指摘・要修正1: このケース(wideCombo/trioCombo/quinellaCombo/exactaCombo/
+      // trifectaComboが有・comboOddsが無)でcomboOddsのキー自体が無いことも固定する。
+      // comboOddsの条件式が`race.meta.comboOdds !== undefined || race.odds.wideCombo !==
+      // undefined` のようにwideCombo側へ広がる変異(fail-open)は、wideComboが有るこの
+      // テストでこそ露呈する(fail-open変異は「選言が真になる状態でキー不在を主張する」
+      // テストでしか検知できない)。
       expect(result.comboOdds).toBeUndefined();
       expect(hasOwn(result, "comboOdds")).toBe(false);
 
@@ -2899,18 +2906,27 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
         trioCombo: Record<string, number | null>;
         quinellaCombo: Record<string, number | null>;
         exactaCombo: Record<string, number | null>;
+        trifectaCombo: Record<string, number | null>;
       };
       expect(roundTripped.wideCombo).toEqual({ "0102": 1.5, "0103": null });
       expect(roundTripped.trioCombo).toEqual({ "010203": 2.3 });
       expect(roundTripped.quinellaCombo).toEqual({ "0104": 4.5, "0105": null });
       expect(roundTripped.exactaCombo).toEqual({ "0106": 6.5, "0601": 9.8 });
+      expect(roundTripped.trifectaCombo).toEqual({ "010203": 15.2, "030201": 88.4 });
     });
 
-    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaComboが空オブジェクト(1件も取得できなかった。発売なし/取得失敗いずれの原因でも起こりうる)なら、結果も空オブジェクトのまま(undefinedへ化けない)であること(未取得との2状態を区別。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4)", async () => {
+    it("race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaComboが空オブジェクト(1件も取得できなかった。発売なし/取得失敗いずれの原因でも起こりうる)なら、結果も空オブジェクトのまま(undefinedへ化けない)であること(未取得との2状態を区別。馬連はIssue #116 AC-4、馬単はIssue #122 AC-4、三連単はIssue #137 AC-2)", async () => {
       const base = fakeRaceData(RACE_ID);
       const race: RaceData = {
         ...base,
-        odds: { ...base.odds, wideCombo: {}, trioCombo: {}, quinellaCombo: {}, exactaCombo: {} },
+        odds: {
+          ...base.odds,
+          wideCombo: {},
+          trioCombo: {},
+          quinellaCombo: {},
+          exactaCombo: {},
+          trifectaCombo: {},
+        },
       };
       const deps: AnalysisPipelineDeps = {
         ...baseDeps(),
@@ -2928,13 +2944,16 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(result.trioCombo).toEqual({});
       expect(result.quinellaCombo).toEqual({});
       expect(result.exactaCombo).toEqual({});
+      expect(result.trifectaCombo).toEqual({});
       // 未取得(前テスト。キー自体が無い)とは異なり、こちらはキーが存在すること。
       expect(hasOwn(result, "wideCombo")).toBe(true);
       expect(hasOwn(result, "trioCombo")).toBe(true);
       expect(hasOwn(result, "quinellaCombo")).toBe(true);
       expect(hasOwn(result, "exactaCombo")).toBe(true);
-      // boss指摘・要修正1: このケース(wideCombo/trioCombo/quinellaCombo/exactaComboが有〈空〉・
-      // comboOddsが無)でもcomboOddsのキー自体が無いことを固定する(fail-open変異の検知)。
+      expect(hasOwn(result, "trifectaCombo")).toBe(true);
+      // boss指摘・要修正1: このケース(wideCombo/trioCombo/quinellaCombo/exactaCombo/
+      // trifectaComboが有〈空〉・comboOddsが無)でもcomboOddsのキー自体が無いことを固定する
+      // (fail-open変異の検知)。
       expect(result.comboOdds).toBeUndefined();
       expect(hasOwn(result, "comboOdds")).toBe(false);
     });
@@ -3004,6 +3023,44 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(result.quinellaCombo).toBeUndefined();
       expect(hasOwn(result, "quinellaCombo")).toBe(false);
       // exactaComboが有るこのケースでも、comboOddsの条件式がexactaCombo側へ
+      // 広がる変異(fail-open)を検知できるよう、キー自体が無いことを固定する。
+      expect(result.comboOdds).toBeUndefined();
+      expect(hasOwn(result, "comboOdds")).toBe(false);
+    });
+
+    it("trifectaComboのみ設定・wide/trio/quinella/exactaComboは未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース。三連単はIssue #137 AC-2。trifectaComboの条件式がwideCombo等と独立していることの回帰ピン)", async () => {
+      const base = fakeRaceData(RACE_ID);
+      const race: RaceData = {
+        ...base,
+        odds: {
+          ...base.odds,
+          trifectaCombo: { "010203": 15.2 },
+          // wideCombo/trioCombo/quinellaCombo/exactaComboはキー自体を持たせない(=未取得のまま)。
+        },
+      };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+      };
+
+      const result = await runAnalysis(
+        parseRaceId(RACE_ID),
+        parseKaisaiDate(KAISAI),
+        deps,
+        onProgress,
+      );
+
+      expect(result.trifectaCombo).toEqual({ "010203": 15.2 });
+      expect(hasOwn(result, "trifectaCombo")).toBe(true);
+      expect(result.wideCombo).toBeUndefined();
+      expect(hasOwn(result, "wideCombo")).toBe(false);
+      expect(result.trioCombo).toBeUndefined();
+      expect(hasOwn(result, "trioCombo")).toBe(false);
+      expect(result.quinellaCombo).toBeUndefined();
+      expect(hasOwn(result, "quinellaCombo")).toBe(false);
+      expect(result.exactaCombo).toBeUndefined();
+      expect(hasOwn(result, "exactaCombo")).toBe(false);
+      // trifectaComboが有るこのケースでも、comboOddsの条件式がtrifectaCombo側へ
       // 広がる変異(fail-open)を検知できるよう、キー自体が無いことを固定する。
       expect(result.comboOdds).toBeUndefined();
       expect(hasOwn(result, "comboOdds")).toBe(false);

@@ -145,6 +145,33 @@ function loadExactaCombo(): Record<string, number | null> {
 }
 
 /**
+ * 三連単フィクスチャ(Issue #137 AC-6)。`central-on.json`と同じレース(202603020211・16頭)
+ * のため、既存の`greedySteps`感度・所要時間計測と同じ出走馬番の宇宙で比較できる
+ * (P(16,3)=3360件。`fetch-combo-odds.test.ts`/`trifecta-odds-fixtures.test.ts`で
+ * 固定済みの値と同じフィクスチャ)。
+ */
+const TRIFECTA_FIXTURE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "odds_trifecta_202603020211.json",
+);
+
+/**
+ * 三連単フィクスチャをパースし`trifectaCombo`(Record形)を作る。`loadExactaCombo`と同じ
+ * 変換経路(`parseComboOdds`→`toComboOddsScalarMap`→`Object.fromEntries`)をそのまま使う
+ * (規則を再実装しない)。
+ */
+function loadTrifectaCombo(): Record<string, number | null> {
+  const json = readFileSync(TRIFECTA_FIXTURE_PATH, "utf-8");
+  const parsed = parseComboOdds(json, "trifecta");
+  if (parsed.state !== "available") {
+    throw new Error(`三連単フィクスチャが available ではありません(state=${parsed.state})`);
+  }
+  return Object.fromEntries(toComboOddsScalarMap(parsed.odds));
+}
+
+/**
  * フィクスチャ(保存済みRaceData)を読み、runAnalysisを実LLM無しで実行してAnalysisResultを得る。
  *
  * **Issue #119(#24-C3)でexportした**: `scripts/verify-worker-pool-prepare.ts`(Workerプールの
@@ -292,14 +319,22 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
 }
 
 /**
- * 券種別にstakeを集計する(`summarizeByBetType`の馬連・馬単版。Issue #116 AC-7・
- * Issue #122 AC-7で`exacta`を追加)。既存の`summarizeByBetType`(win/place/wide/trioの
- * 4券種)は変更せず、この節専用に`quinella`・`exacta`を加えた別関数として持つ
- * (既存節の出力を変えないため)。
+ * 券種別にstakeを集計する(`summarizeByBetType`の馬連・馬単・三連単版。Issue #116 AC-7・
+ * Issue #122 AC-7で`exacta`、Issue #137 AC-6で`trifecta`を追加)。既存の
+ * `summarizeByBetType`(win/place/wide/trioの4券種)は変更せず、この節専用に
+ * `quinella`・`exacta`・`trifecta`を加えた別関数として持つ(既存節の出力を変えないため)。
  */
 function summarizeByBetTypeWithQuinella(
   allocations: readonly { readonly betType: AllocationBetType; readonly stake: number }[],
-): { win: number; place: number; wide: number; trio: number; quinella: number; exacta: number } {
+): {
+  win: number;
+  place: number;
+  wide: number;
+  trio: number;
+  quinella: number;
+  exacta: number;
+  trifecta: number;
+} {
   const sumOf = (betType: AllocationBetType): number =>
     allocations.filter((a) => a.betType === betType).reduce((s, a) => s + a.stake, 0);
   return {
@@ -309,6 +344,7 @@ function summarizeByBetTypeWithQuinella(
     trio: sumOf("trio"),
     quinella: sumOf("quinella"),
     exacta: sumOf("exacta"),
+    trifecta: sumOf("trifecta"),
   };
 }
 
@@ -337,7 +373,24 @@ async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise
   const raceWithQuinella: MixedCandidateBuildInput = { ...baseRace, quinellaCombo };
   const exactaCombo = loadExactaCombo();
   const raceWithExacta: MixedCandidateBuildInput = { ...raceWithQuinella, exactaCombo };
+  const trifectaCombo = loadTrifectaCombo();
+  const raceWithTrifecta: MixedCandidateBuildInput = { ...raceWithExacta, trifectaCombo };
   const horses: JointModelHorse[] = result.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
+
+  // Issue #137(AC-6・docs/current-spec.md向けのDBサイズ再現手段): trifectaComboを
+  // JSON.stringifyしたバイト数を実測する(analyses.race_snapshot_jsonへ保存される
+  // RaceSnapshot.trifectaComboと同じ形〈Record<string, number|null>〉・同じ変換経路)。
+  // 再現: `pnpm tsx scripts/bench-mixed-allocation.ts` を実行しこの行の出力を見る。
+  const trifectaComboJson = JSON.stringify(trifectaCombo);
+  console.log("");
+  console.log(
+    `=== trifectaComboのJSONサイズ実測(中央16頭・実オッズ。Issue #137 AC-6・docs/current-spec.md向け) ===`,
+  );
+  console.log(
+    `  キー数=${Object.keys(trifectaCombo).length}件(P(16,3)) / ` +
+      `JSON.stringifyのバイト数=${trifectaComboJson.length}バイト` +
+      `(analyses.race_snapshot_jsonへ保存されるRaceSnapshot.trifectaComboと同じ形)`,
+  );
 
   const config: GeneralBetAllocationConfig = {
     bankroll: 1_000_000,
@@ -364,10 +417,24 @@ async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise
       race: raceWithExacta,
       betTypes: ["place", "win", "wide", "trio", "quinella", "exacta"],
     },
+    {
+      label: "三連単も追加(place/win/wide/trio/quinella/exacta/trifecta)",
+      race: raceWithTrifecta,
+      betTypes: ["place", "win", "wide", "trio", "quinella", "exacta", "trifecta"],
+    },
   ];
 
   console.log("");
-  console.log("=== 馬連(quinella)・馬単(exacta)追加時の性能・構成比較(中央16頭・実オッズ。Issue #116 AC-7・Issue #122 AC-7) ===");
+  console.log(
+    "=== 馬連(quinella)・馬単(exacta)・三連単(trifecta)追加時の性能・構成比較(中央16頭・実オッズ。" +
+      "Issue #116 AC-7・Issue #122 AC-7・Issue #137 AC-6) ===",
+  );
+  console.log(
+    "    (三連単なしの最初の3シナリオはIssue #137で数値が変わらないこと自体を確認する回帰観点。" +
+      "buildMixedCandidatesのALL_MIXED_CANDIDATE_BET_TYPESにtrifectaを追加していないため" +
+      "〈#139まで〉、betTypesを明示していないこの3シナリオの計算経路自体はIssue #137による" +
+      "変更を一切受けない)",
+  );
 
   for (const scenario of scenarios) {
     const measure = (): QuinellaComparisonSample => {
@@ -412,7 +479,8 @@ async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise
     console.log(
       `  配分: 総額${total.toLocaleString()}円 / ${last.betCount}点 / ` +
         `単勝${pct(last.byType.win)} / 複勝${pct(last.byType.place)} / ワイド${pct(last.byType.wide)} / ` +
-        `三連複${pct(last.byType.trio)} / 馬連${pct(last.byType.quinella)} / 馬単${pct(last.byType.exacta)}`,
+        `三連複${pct(last.byType.trio)} / 馬連${pct(last.byType.quinella)} / 馬単${pct(last.byType.exacta)} / ` +
+        `三連単${pct(last.byType.trifecta)}`,
     );
   }
 }

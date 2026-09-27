@@ -92,7 +92,7 @@ function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: num
 
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身自体はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio" | "quinella" | "exacta",
+  betType: "wide" | "trio" | "quinella" | "exacta" | "trifecta",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -132,6 +132,31 @@ function fullOrderedOddsRecord(umabans: readonly number[], odds: number): Record
     for (const b of umabans) {
       if (a !== b) {
         record[orderedKey(a, b)] = odds;
+      }
+    }
+  }
+  return record;
+}
+
+/**
+ * umabansの順序付き全トリプル(a・b・cが互いに異なる。P(n,3)通り)を列挙し、一律のオッズ値を
+ * 割り当てたRecordを作る(`fullOrderedOddsRecord`の三連単版。Issue #137)。キー形式は
+ * `buildOrderedComboOddsKey`と同じ(2桁ゼロ埋め・ソートしない連結の3連結)。
+ */
+function orderedTripleKey(a: number, b: number, c: number): string {
+  return `${String(a).padStart(2, "0")}${String(b).padStart(2, "0")}${String(c).padStart(2, "0")}`;
+}
+function fullOrderedTripleOddsRecord(
+  umabans: readonly number[],
+  odds: number,
+): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const a of umabans) {
+    for (const b of umabans) {
+      if (b === a) continue;
+      for (const c of umabans) {
+        if (c === a || c === b) continue;
+        record[orderedTripleKey(a, b, c)] = odds;
       }
     }
   }
@@ -825,18 +850,21 @@ describe("券種フィルタ(options.betTypes)", () => {
    * **Issue #125(#24-E3b)で`resolveMixedBetTypes`が実際に`"exacta"`を渡すよう接続し、
    * `ALL_MIXED_CANDIDATE_BET_TYPES`にも`exacta`を加えたため、除外集合は再び空になった。**
    * **Issue #128(#25-B)で`AllocationBetType`に`trifecta`(三連単)が加わったが、
-   * `mixed-candidates.ts`から三連単の候補を作る経路はまだ無い(オッズ配線・配分接続は
-   * #132のスコープ)ため、`quinella`・`exacta`のときと同じ理由で`trifecta`が一時的に
-   * 除外へ加わった。**
+   * `mixed-candidates.ts`から三連単の候補を作る経路はまだ無かった(オッズ配線・候補ビルダーは
+   * #137、配分接続は#139のスコープ)ため、`quinella`・`exacta`のときと同じ理由で`trifecta`が
+   * 一時的に除外へ加わった。** **Issue #137(#25-E2)で`buildTrifectaCandidatesForBetType`
+   * (オッズ配線・候補ビルダー)は完了したが、`resolveMixedBetTypes`への接続(#139)がまだの
+   * ため、除外は引き続き維持する(`quinella`・`exacta`が#116→#117・#122→#125の間で
+   * 除外されていたのと同じ状態)。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
    * 除外集合を`["trifecta"]`と直接固定することで、`trifecta`以外の券種が誤って除外に
-   * 混ざったり、`trifecta`の除外が誤って解除されたり(#132より前に解除すると
+   * 混ざったり、`trifecta`の除外が誤って解除されたり(#139より前に解除すると
    * 「三連単 ¥0 0点」の再発になる)すれば、このテストが赤くなり
    * 「足すかどうかの判断」を人間に強制する。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['trifecta']だけであること(Issue #128: 三連単のオッズ配線・配分接続〈#132〉が終わるまで除外する)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['trifecta']だけであること(Issue #128・#137: 三連単のオッズ配線・候補ビルダー〈#137〉は完了したが、配分接続〈#139〉が終わるまで除外する)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
@@ -1411,5 +1439,141 @@ describe("馬単(exacta)候補(#122・#24-E2。Issue #125で既定でも対象�
     expect(ascending).toBeDefined();
     // 両方が別々の候補として存在する(昇順ソートで片方に潰されていない)。
     expect(exactaCandidates.length).toBe(12);
+  });
+});
+
+/**
+ * 三連単(trifecta)候補(Issue #137・#25-E2)。core自体の的中確率・候補ビルダー・配分の門番は
+ * Issue #128・#25-Bで先行済み(`buildTrifectaCandidates`)。本ブロックは`mixed-candidates.ts`の
+ * `buildTrifectaCandidatesForBetType`を通した配線を検証する(`buildExactaCandidatesForBetType`と
+ * 同型の骨格)。
+ *
+ * **`ALL_MIXED_CANDIDATE_BET_TYPES`には三連単をまだ加えない**(#139〈#25-E3b〉のスコープ。
+ * 「ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['trifecta']だけであること」
+ * describeがこれを固定している)。したがって以下の1本目は既定(betTypes省略)呼び出しで
+ * kind='not-requested'・候補0件のままであることを確認する(#122時点のexactaの1本目と
+ * 同型。#125のような反転はまだ起きない)。
+ *
+ * オッズ値の実測(4頭・adjustedProb=0.5均等・topFinishCount=3): 各順序付きトリプルの的中確率は
+ * 1/24(P(4,3)=24通りに均等分配される。均等重みのPlackett-Luceでは全順列が等確率になるため、
+ * 馬単のP(4,2)=12通りで1/12だったのと同じ理屈)。odds=999 → ev=41.625(EVプラス)、
+ * odds=5 → ev=0.2083(EV非プラス、閾値1.0未満)。
+ */
+describe("三連単(trifecta)候補(#137・#25-E2)", () => {
+  it("既定(betTypes省略)では三連単は対象外(kind='not-requested')のままであること(#139で配分・既定に接続するまでの暫定状態)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, trifectaCombo: fullOrderedTripleOddsRecord(umabans, 999) }),
+    );
+    expect(result.diagnostics.trifecta).toEqual({ kind: "not-requested" });
+    expect(result.candidates.filter((c) => c.betType === "trifecta")).toHaveLength(0);
+  });
+
+  it("betTypesに明示的にtrifectaを含めれば候補が構築されること(kind='built'。P(4,3)=24件)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, trifectaCombo: fullOrderedTripleOddsRecord(umabans, 999) }),
+      { betTypes: ["trifecta"] },
+    );
+    expect(result.diagnostics.trifecta.kind).toBe("built");
+    const trifectaCandidates = result.candidates.filter((c) => c.betType === "trifecta");
+    expect(trifectaCandidates).toHaveLength(24); // P(4,3)
+    expect(trifectaCandidates.every((c) => c.odds === 999)).toBe(true);
+  });
+
+  it("yosoガード: oddsStatus='yoso'のときtrifectaComboが供給されていてもkind='yoso'で候補0件", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        oddsStatus: "yoso",
+        trifectaCombo: fullOrderedTripleOddsRecord(umabans, 999),
+      }),
+      { betTypes: ["trifecta"] },
+    );
+    expect(result.diagnostics.trifecta).toEqual({ kind: "yoso" });
+    expect(result.candidates.filter((c) => c.betType === "trifecta")).toHaveLength(0);
+  });
+
+  it("fieldPresence・comboOddsStateがwide/trio/quinella/exactaと同じ形で反映されること(trifectaComboキー不在=absent・comboOdds未設定=unknown)", () => {
+    const rows = allCandidateRows(4);
+    const result = buildMixedCandidates(raceInput({ rows }), { betTypes: ["trifecta"] });
+    if (result.diagnostics.trifecta.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.trifecta.fieldPresence).toBe("absent");
+    expect(result.diagnostics.trifecta.comboOddsState).toBe("unknown");
+    expect(result.candidates.filter((c) => c.betType === "trifecta")).toHaveLength(0);
+  });
+
+  it("comboOdds.trifecta.stateが反映されること(wide/trio/quinella/exactaと独立)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        trifectaCombo: fullOrderedTripleOddsRecord(umabans, 999),
+        comboOdds: { trifecta: comboOddsOutcome("trifecta", "available") },
+      }),
+      { betTypes: ["trifecta"] },
+    );
+    if (result.diagnostics.trifecta.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.trifecta.fieldPresence).toBe("present");
+    expect(result.diagnostics.trifecta.comboOddsState).toBe("available");
+  });
+
+  /**
+   * 殺すべき変異(#122 AC-5と同型): 「三連単の候補にtrioCombo(3連複)のオッズを使う」。
+   * trioComboとtrifectaComboに同じ3頭の組で異なる値を与え、三連単候補のoddsが
+   * trifectaCombo側の値(999)であって、trioCombo側の値(5)ではないことを固定する
+   * (core `buildComboCandidates`はbetType="trifecta"を専用にthrowする安全装置を持つため
+   * 〈#128〉、この変異は`buildComboCandidatesForBetType`を誤ってtrifectaへ流用する形では
+   * 起こり得ず、`race.trioCombo`を読む形でのみ起こりうる)。
+   */
+  it("三連単候補のオッズはtrifectaComboの値であり、trioComboの値と混同されないこと(殺すべき変異の直接検知)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        trioCombo: fullOddsRecord(umabans, 3, 5), // ev非プラスになる値(3連複の組合せキー)
+        trifectaCombo: fullOrderedTripleOddsRecord(umabans, 999), // EVプラスになる値
+      }),
+      { betTypes: ["trifecta"] }, // trioは対象外にし、trifecta側の値だけを見る。
+    );
+    expect(result.diagnostics.trifecta.kind).toBe("built");
+    const trifectaCandidates = result.candidates.filter((c) => c.betType === "trifecta");
+    expect(trifectaCandidates.length).toBeGreaterThan(0); // 空振り防止(trioの値〈ev非プラス〉が混入すると0件になる)。
+    expect(trifectaCandidates).toHaveLength(24); // P(4,3)
+    for (const c of trifectaCandidates) {
+      expect(c.odds).toBe(999);
+      expect(c.odds).not.toBe(5);
+    }
+  });
+
+  it("三連単候補のumabansは着順の並びのまま(昇順に潰されない)であること(三連単固有の回帰観点)", () => {
+    const rows = allCandidateRows(4);
+    const umabans = umabansOf(4);
+    const result = buildMixedCandidates(
+      raceInput({ rows, trifectaCombo: fullOrderedTripleOddsRecord(umabans, 999) }),
+      { betTypes: ["trifecta"] },
+    );
+    const trifectaCandidates = result.candidates.filter((c) => c.betType === "trifecta");
+    // 前提固定: [3,2,1](降順)が候補として存在すること。
+    const descending = trifectaCandidates.find(
+      (c) => c.umabans[0] === 3 && c.umabans[1] === 2 && c.umabans[2] === 1,
+    );
+    expect(descending).toBeDefined();
+    const ascending = trifectaCandidates.find(
+      (c) => c.umabans[0] === 1 && c.umabans[1] === 2 && c.umabans[2] === 3,
+    );
+    expect(ascending).toBeDefined();
+    // 両方が別々の候補として存在する(昇順ソートで片方に潰されていない)。
+    expect(trifectaCandidates.length).toBe(24);
   });
 });

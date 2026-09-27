@@ -702,6 +702,7 @@ function mixedDiagnostics(overrides: {
   trio?: ComboCandidateDiagnosticsView;
   quinella?: ComboCandidateDiagnosticsView;
   exacta?: ComboCandidateDiagnosticsView;
+  trifecta?: ComboCandidateDiagnosticsView;
 } = {}): MixedCandidateDiagnostics {
   return {
     place: overrides.place ?? {
@@ -718,6 +719,7 @@ function mixedDiagnostics(overrides: {
     trio: overrides.trio ?? builtComboDiag(),
     quinella: overrides.quinella ?? { kind: "not-requested" },
     exacta: overrides.exacta ?? { kind: "not-requested" },
+    trifecta: overrides.trifecta ?? { kind: "not-requested" },
   };
 }
 

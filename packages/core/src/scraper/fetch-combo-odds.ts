@@ -302,12 +302,18 @@ function comboOddsUrlFor(raceId: RaceId, betType: ComboBetType, isNar: boolean):
         // #25-D)。ただし3連複と異なり、本Issueでは全軸を回すオーケストレーション関数
         // (fetchNarTrioComboOdds相当)を作らない(オーケストレーター裁定Q2)ため、呼び出し元
         // (fetchComboOdds)にtrio用の専用分岐は無く、isNar&&"trifecta"はこの関数まで素通しで
-        // 到達する形になっている。**現時点ではproductionから到達しない**(scrape-race.tsの
-        // fetchComboBetTypeOdds呼び出しはwide/trio/quinella/exactaの4リテラルのみを渡しており、
-        // "trifecta"は渡していない)。#132で三連単を配線する際は、地方については本関数
-        // (fetchComboOdds)を使わず、1軸単位の`fetchNarTrifectaAxisOdds`へ分岐させる必要がある。
+        // 到達しうる形になっている。
+        //
+        // **Issue #137(#25-E2・ユーザー判断2026-09-27)で「地方の三連単は当面取得しない」と
+        // 確定した。** `scrape-race.ts`は地方(NAR)では`fetchComboBetTypeOdds("trifecta", …)`
+        // 自体を呼ばない(調教と同じ`if (!isNar)`の明示ガード)ため、この`throw`は
+        // **productionからは到達しないガードとして残る**(#130時点の「#132で配線する際は
+        // 1軸単位のfetchNarTrifectaAxisOddsへ分岐させる必要がある」という記述は、地方対応
+        // そのものを当面行わないと決めたことで前提が変わった。将来もし地方三連単を
+        // 実装することになれば、そのときは呼び出し元〈fetchComboOdds〉にtrio用と同型の
+        // 専用分岐を追加し、1軸単位の`fetchNarTrifectaAxisOdds`〈#130で実装済み〉を使うこと)。
         throw new Error(
-          "地方三連単は単発リクエストでは扱えません(1軸単位のfetchNarTrifectaAxisOddsを使うこと。全軸を回す関数は#132で追加予定)",
+          "地方三連単は単発リクエストでは扱えません(1軸単位のfetchNarTrifectaAxisOddsを使うこと。地方三連単の取得自体は#137〈2026-09-27〉時点で未実装・対応予定なし)",
         );
       default: {
         const exhaustiveCheck: never = betType;

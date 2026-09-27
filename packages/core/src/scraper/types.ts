@@ -525,6 +525,21 @@ export interface OddsSnapshot {
    * 理由は`wideCombo`と同じ。
    */
   readonly exactaCombo?: Record<string, number | null>;
+  /**
+   * 三連単オッズ(馬番の組の正規化キー〈`buildOrderedComboOddsKey`形式。例"010203"〉→オッズ。
+   * 1着・2着・3着の**順序が意味を持つ**(馬単`exactaCombo`と同じ性質)。単一値。`oddsMax`
+   * という概念を持たない券種のため`exactaCombo`と同じ扱い。Issue #137・#25-E2で
+   * `scrapeRace`に配線した(core自体の的中確率・候補ビルダー・配分の門番はIssue #128・
+   * #25-B、確定払戻の取込はIssue #131・#25-F、順序付きキー表現・`ComboBetType`への追加は
+   * Issue #128・#130で先行済み)。
+   *
+   * **地方(NAR)では取得しない(ユーザー判断2026-09-27)**: 地方三連単は軸馬別取得
+   * (1着固定・頭数分のリクエストが必要。`docs/trifecta-odds-investigation.md` §3.3)が
+   * 必要だが、当面実装しない(取得しない)と決めたため、地方では本フィールド自体が
+   * `undefined`のまま(`scrapeRace`が地方では取得を試みない。調教と同じ「対象外」扱い)。
+   * optional・`Record`である理由は`exactaCombo`と同じ。
+   */
+  readonly trifectaCombo?: Record<string, number | null>;
 }
 
 /**
