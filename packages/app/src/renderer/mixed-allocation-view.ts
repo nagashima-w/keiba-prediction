@@ -119,7 +119,14 @@ export type MixedAllocationBreakdown = Record<AllocationBetType, { readonly stak
  * #112当時の馬連と全く同じ理由で、`exacta`は当初この配列に含めていなかった。
  * **Issue #125(#24-E3b)で`resolveMixedBetTypes`が`includeExactaInAllocation`設定を
  * 実際に参照するようになり、#117での馬連と全く同じ理由で馬単の除外も解除した。**
- * 表示順は頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複)。
+ *
+ * **Issue #128(#25-B)で`AllocationBetType`に`trifecta`(三連単)が加わったが、当時appは
+ * まだ三連単の候補を一切作らなかった(オッズ配線は#137・配分接続は#139のスコープ)。**
+ * #112当時の馬連・#120当時の馬単と全く同じ理由で、`trifecta`は当初この配列に含めていなかった。
+ * **Issue #139(#25-E3b)で`resolveMixedBetTypes`が`includeTrifectaInAllocation`設定を
+ * 実際に参照するようになり、#125での馬単と全く同じ理由で三連単の除外も解除した。**
+ * 表示順は頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複→三連単。三連単は3連複と同じ頭数
+ * 〈3〉のため3連複の直後に置く)。
  */
 export const MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER: readonly AllocationBetType[] = [
   "place",
@@ -128,6 +135,7 @@ export const MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER: readonly AllocationBetTyp
   "quinella",
   "exacta",
   "trio",
+  "trifecta",
 ];
 
 /**
@@ -445,6 +453,104 @@ export function comboBetTypeNote(diag: ComboCandidateDiagnosticsView): string | 
 }
 
 /**
+ * レースIDの場コード(5〜6桁目)から中央/地方を判定する(Issue #139・#25-E3b・AC4)。
+ *
+ * 中央/地方の判定ロジック自体は core `venueKindOfRaceId`(scraper/ids.ts)と同じ場コード範囲
+ * (中央01〜10)によるが、renderer層は core のバレル(`@keiba/core`)をそのまま import すると
+ * native依存(better-sqlite3等。core/package.json の exports コメント参照)をバンドルに巻き込んで
+ * しまい、この判定だけの狭いsubpathも無いため、この一行の閾値判定のみをここに複製する
+ * (`renderer/race-ledger-filter.ts`の`venueKindOfRaceLedgerRaceId`と同じ前例・同じ理由。
+ * `pnpm --filter @keiba/app build`が検出する`node:zlib`混入と同種の事故を避けるため)。
+ *
+ * `raceId`が無い(旧データ・raceIdを持たない最小テスト入力)場合は`false`(中央として扱う)を
+ * 返す。production では`AnalysisResult.raceId`が常に存在するため、raceId欠落は「未知」を
+ * 意味するだけであり、判定不能を「地方」と断定してはならない(#31の原則)。
+ *
+ * `mixed-allocation-view.test.ts`が本関数の判定と core `venueKindOfRaceId` の判定を
+ * 中央・地方それぞれ1件で直接比較して固定する(複製が本家からずれる事故を防ぐ)。
+ */
+export function isNarRaceId(raceId: string | undefined): boolean {
+  if (raceId === undefined || raceId.length < 6) {
+    return false;
+  }
+  return Number(raceId.slice(4, 6)) > 10;
+}
+
+/**
+ * 地方競馬では三連単を取得していない旨の注記(Issue #139・#25-E3b・AC4)。
+ * `trifectaBetTypeNote`が地方レースの"unknown"状態に対して返す固定文言。
+ */
+export const NAR_TRIFECTA_NOTE = "地方競馬では三連単を取得していません。";
+
+/**
+ * 三連単の状態注記(Issue #139・#25-E3b・AC4)。wide/trio/quinella/exactaの`comboBetTypeNote`と
+ * 基本は同じだが、地方(NAR)は三連単を当面取得しない(ユーザー判断2026-09-27。
+ * `scrapeRace`が調教と同じ`if (!isNar)`ガードで取得自体を試みない)という三連単固有の事情が
+ * あるため、`comboOddsState==="unknown"`のときだけ地方/中央で文言を分ける。
+ *
+ * 中央の"unknown"(未取得。設定変更後に再分析すると反映される)は`comboBetTypeNote`の
+ * 既存文言をそのまま使う(再分析〈`includeComboOdds`をONにする〉すれば実際に取得されるため、
+ * 文言は事実と一致する)。地方の場合は、再分析しても三連単は取得されない
+ * (`docs/trifecta-odds-investigation.md`。地方は当面非対応)ため、その既存文言をそのまま
+ * 出すと「設定変更後に再分析すると反映されます」という誤った案内になる。代わりに
+ * `NAR_TRIFECTA_NOTE`(「地方競馬では三連単を取得していません」)を返す。
+ *
+ * `unavailable`/`failed`/`available`(EVプラス0件)は中央・地方を問わず同じ意味を持つため
+ * (発売なし・取得失敗・EVプラスなしはいずれも「取得は試みた結果」であり、地方特例の対象では
+ * ない)、`comboBetTypeNote`にそのまま委譲する。
+ */
+export function trifectaBetTypeNote(
+  diag: ComboCandidateDiagnosticsView,
+  raceId: string | undefined,
+): string | null {
+  if (diag.kind === "built" && diag.comboOddsState === "unknown" && isNarRaceId(raceId)) {
+    return NAR_TRIFECTA_NOTE;
+  }
+  return comboBetTypeNote(diag);
+}
+
+/**
+ * `buildComboBetTypeNotices`が返す1件(表示するラベルと注記文言)。
+ */
+export interface ComboBetTypeNoticeItem {
+  readonly label: string;
+  readonly note: string;
+}
+
+/**
+ * 組合せ券種(ワイド・馬連・馬単・3連複・三連単)の状態注記を、表示順
+ * (ワイド→馬連→馬単→3連複→三連単。`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`と同じ並び)に
+ * 並べ、`null`(注記なし)の券種を省いた配列にする純関数(Issue #139・#25-E3b・Q1)。
+ *
+ * ## 経緯(#125のexactaNote欠落の再発防止)
+ * Issue #125(#24-E3b)で`display.exactaNote`を新設したが、`BatchAnalysisView.tsx`側に
+ * 対応する`<p>`を追加し忘れる欠落(利用者から見える欠落)が本Issue(#139)着手前確認で
+ * 発覚した。原因は「券種を増やすたびにJSXへ`<p>`を1行手で足す」構造そのものにあったため、
+ * 本関数を新設し、`BatchAnalysisView.tsx`はこの配列を`.map`で描画するだけにする
+ * (`buildMixedAllocationNotices`〈advisory等を並べる既存の純関数〉と同じ考え方)。
+ * これにより、次に券種を足すときの描画漏れは「表示順の全券種が含まれること」を固定する
+ * テストで検出できる。
+ *
+ * ラベルは`mixedBetTypeLabel`をそのまま使う(`BatchAnalysisView.tsx`が従来
+ * 「ワイド:」「馬連:」「3連複:」と直書きしていたラベルと同じ日本語であることを、
+ * ラベル文言の複製を作らずに保証する)。
+ */
+export function buildComboBetTypeNotices(
+  display: Pick<MixedAllocationDisplay, "wideNote" | "quinellaNote" | "exactaNote" | "trioNote" | "trifectaNote">,
+): readonly ComboBetTypeNoticeItem[] {
+  const entries: ReadonlyArray<{ readonly betType: AllocationBetType; readonly note: string | null }> = [
+    { betType: "wide", note: display.wideNote },
+    { betType: "quinella", note: display.quinellaNote },
+    { betType: "exacta", note: display.exactaNote },
+    { betType: "trio", note: display.trioNote },
+    { betType: "trifecta", note: display.trifectaNote },
+  ];
+  return entries
+    .filter((e): e is { betType: AllocationBetType; note: string } => e.note !== null)
+    .map((e) => ({ label: mixedBetTypeLabel(e.betType), note: e.note }));
+}
+
+/**
  * 頭数不可(4以下・5〜7)で複勝が対象外のときの一言注記(AC3改訂)。既存の
  * `placeBetUnavailableMessage`をそのまま使い、新しい文言を作らない。
  * `reason:"yoso"`はゲート順序上、混在経路(`kind:"mixed"`)には到達しない値だが、型上は
@@ -564,6 +670,13 @@ export interface MixedAllocationDisplay {
   readonly quinellaNote: string | null;
   /** 馬単の状態注記(Issue #125・AC-4。wide/trio/quinellaと同じcomboBetTypeNoteを使う。無ければnull)。 */
   readonly exactaNote: string | null;
+  /**
+   * 三連単の状態注記(Issue #139・AC4。`trifectaBetTypeNote`を使う。無ければnull)。
+   * 地方(NAR)では`comboOddsState==='unknown'`のとき`comboBetTypeNote`の中央向け文言
+   * (「設定変更後に再分析すると反映されます」)ではなく`NAR_TRIFECTA_NOTE`になる点が
+   * wide/trio/quinella/exactaと異なる(`trifectaBetTypeNote`のJSDoc参照)。
+   */
+  readonly trifectaNote: string | null;
   /** 頭数不可で複勝が対象外のときの注記(AC3改訂。無ければnull)。 */
   readonly placeUnavailableNote: string | null;
   /** 複勝のみで計算した場合の提案額(AC11。算出不能ならnull)。 */
@@ -680,6 +793,7 @@ export function buildMixedAllocationDisplay(
     trioNote: comboBetTypeNote(view.diagnostics.trio),
     quinellaNote: comboBetTypeNote(view.diagnostics.quinella),
     exactaNote: comboBetTypeNote(view.diagnostics.exacta),
+    trifectaNote: trifectaBetTypeNote(view.diagnostics.trifecta, race.raceId),
     placeUnavailableNote: placeUnavailableNoteForMixed(view.diagnostics.place),
     placeOnlyStake: resolvePlaceOnlyStake(race, settings),
     probabilitySumWarning: resolveMixedProbabilitySumWarning(race, view.topFinishCount),

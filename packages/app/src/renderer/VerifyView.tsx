@@ -324,7 +324,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               {report.proposedBet.exacta.betCount}点/
               {formatRate(report.proposedBet.exacta.recoveryRate)} / 3連複{" "}
               {report.proposedBet.trio.betCount}点/
-              {formatRate(report.proposedBet.trio.recoveryRate)}
+              {formatRate(report.proposedBet.trio.recoveryRate)} / 三連単{" "}
+              {report.proposedBet.trifecta.betCount}点/
+              {formatRate(report.proposedBet.trifecta.recoveryRate)}
             </p>
             {/*
              * Issue #121・#24-F2: 馬単(exacta)はcore側(ProposedBetReport.exacta)に配線済み。
@@ -332,7 +334,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
              * 構造的に0ではなくなったため、この内訳・判定不能の行に馬連(quinella)と3連複の間で
              * 表示するようになった(馬連(quinella)が#116→#117で辿った「買い目0件の間は画面に
              * 出さない→接続後に表示する」経緯と同じ、#112「馬連 ¥0 0点」の事故と同型を避ける
-             * ための順番)。
+             * ための順番)。三連単(trifecta)も同じ経緯を辿り、Issue #131・#25-Fで確定払戻の
+             * 既知券種になり、Issue #139(#25-E3b)で配分提案にも組み込まれたため、この内訳・
+             * 判定不能の行に3連複の直後(表示順の末尾)で表示するようになった。
              */}
             {/*
              * bossメタレビュー要修正2: unjudgedCount(規則Uで判定不能とした点数)が画面に一切
@@ -347,17 +351,20 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
                 {report.proposedBet.wide.unjudgedCount}点 / 馬連
                 {report.proposedBet.quinella.unjudgedCount}点 / 馬単
                 {report.proposedBet.exacta.unjudgedCount}点 / 3連複
-                {report.proposedBet.trio.unjudgedCount}点
+                {report.proposedBet.trio.unjudgedCount}点 / 三連単
+                {report.proposedBet.trifecta.unjudgedCount}点
               </p>
             )}
             {/*
-             * Issue #76: 未対応の券種コード(place/win/wide/quinella/exacta/trio以外)の
+             * Issue #76: 未対応の券種コード(place/win/wide/quinella/exacta/trio/trifecta以外)の
              * 買い目がある旨の注記。馬連(quinella)はIssue #114・#24-F1で確定払戻の既知券種に
              * なり、Issue #117(#24-D3b-2)で配分提案にも組み込まれたため、上の「内訳」「判定
              * 不能」の2行に既知券種として表示するようになった(#24-D3まで買い目が構造的に0件
              * だったため画面に出していなかった状態は解消済み)。馬単(exacta)も同じ経緯を辿り、
              * Issue #121・#24-F2で確定払戻の既知券種になり、Issue #125(#24-E3b)で配分提案にも
-             * 組み込まれたため、上の2行に既知券種として表示するようになった。
+             * 組み込まれたため、上の2行に既知券種として表示するようになった。三連単(trifecta)も
+             * 同じ経緯を辿り、Issue #131・#25-Fで確定払戻の既知券種になり、Issue #139(#25-E3b)で
+             * 配分提案にも組み込まれたため、上の2行に既知券種として表示するようになった。
              * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す。
              * 文言の組み立て(count===0ならnull)はformatUnknownBetTypeNotice(純関数)の責務で、
              * ここは`unknownBetTypeNotice`(コンポーネント冒頭で1回だけ呼んだ結果)のnull判定

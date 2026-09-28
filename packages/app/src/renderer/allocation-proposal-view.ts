@@ -246,6 +246,12 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
  * そのまま返していた。#125で`resolveMixedBetTypes`が実際に馬単を配分対象に含めるように
  * なり`allocation-record.ts`が`bet_type="exacta"`行を保存するようになったため、
  * quinellaのときと同じ理由で本caseを追加した)。
+ *
+ * `"trifecta"`(三連単)はIssue #139(#25-E3b)でcaseを追加した(#128時点では`AllocationBetType`に
+ * 加わっていたがapp側候補ビルダーが未接続だったため、`default`分岐で生文字列`"trifecta"`を
+ * そのまま返していた。#139で`resolveMixedBetTypes`が実際に三連単を配分対象に含めるように
+ * なり`allocation-record.ts`が`bet_type="trifecta"`行を保存するようになったため、
+ * exactaのときと同じ理由で本caseを追加した)。
  */
 function betTypeLabel(betType: string): string {
   switch (betType) {
@@ -261,6 +267,8 @@ function betTypeLabel(betType: string): string {
       return "馬単";
     case "trio":
       return "三連複";
+    case "trifecta":
+      return "三連単";
     default:
       return betType;
   }
@@ -344,8 +352,16 @@ function comboLabelOf(comboKey: string, betType: string): string {
   return formatComboBetLabel(betType as AllocationBetType, umabans);
 }
 
-/** 券種の表示順(複勝→単勝→ワイド→馬連→馬単→3連複。Issue #90でwin、Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉を追加)。未知の券種は末尾へ(値99)。 */
-const BET_TYPE_ORDER: Record<string, number> = { place: 0, win: 1, wide: 2, quinella: 3, exacta: 4, trio: 5 };
+/** 券種の表示順(複勝→単勝→ワイド→馬連→馬単→3連複→三連単。Issue #90でwin、Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉を追加)。未知の券種は末尾へ(値99)。 */
+const BET_TYPE_ORDER: Record<string, number> = {
+  place: 0,
+  win: 1,
+  wide: 2,
+  quinella: 3,
+  exacta: 4,
+  trio: 5,
+  trifecta: 6,
+};
 
 function betTypeRank(betType: string): number {
   return BET_TYPE_ORDER[betType] ?? 99;

@@ -162,19 +162,19 @@ export type MixedCandidateBetType = AllocationBetType;
  * 加えた**(「対象にする」宣言と実体が揃った状態)。
  *
  * **Issue #128(#25-B)で`trifecta`(三連単)が`AllocationBetType`に加わったが、
- * `quinella`・`exacta`と同じ理由で当初は本配列に含めていない。** core側(的中確率・
- * 候補ビルダー`buildTrifectaCandidates`・配分の門番)は#128で実装済み。**Issue #137
+ * `quinella`・`exacta`と同じ理由で当初は本配列に含めていなかった。** core側(的中確率・
+ * 候補ビルダー`buildTrifectaCandidates`・配分の門番)は#128で実装済み。Issue #137
  * (#25-E2)で`buildTrifectaCandidatesForBetType`(本ファイル)を新設し、オッズ取得の配線
  * (`scrapeRace`・中央のみ)・分析結果/スナップショットへの搭載も完了したが、
- * `resolveMixedBetTypes`への接続(設定`includeTrifectaInAllocation`の新設は#138、実際の
- * 接続は#139)はまだ無い。** その接続が終わるまでは`quinella`・`exacta`のときと同じ理由で
- * 意図的に本配列へ加えるのを見送る(`buildTrifectaCandidatesForBetType`自体は#137で
- * 呼べる状態にあるが、`options.betTypes`に明示的に`"trifecta"`を渡した場合のみ到達する)。
+ * `resolveMixedBetTypes`への接続(設定`includeTrifectaInAllocation`の新設は#138)は
+ * まだだった。**Issue #139(#25-E3b)でその接続を行い、本配列にも`trifecta`を加えた**
+ * (「対象にする」宣言と実体〈`buildTrifectaCandidatesForBetType`・`resolveMixedBetTypes`〉が
+ * 揃った状態)。
  *
  * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いつき、#112でいったん
  * 「全メンバーではない」状態に戻ったが#117で再び全メンバーと一致し、#120で三たび
  * 「全メンバーではない」状態に戻ったが#125で再び全メンバーと一致し、#128で四たび
- * 「全メンバーではない」状態に戻った。** 改名はしない
+ * 「全メンバーではない」状態に戻ったが#139で再び全メンバーと一致した。** 改名はしない
  * (#91当時のboss裁定を維持: 定数名は「意図的な対象集合」を表す既存の名として扱い、
  * メンバー数の増減のたびに改名しない)。
  *
@@ -188,6 +188,7 @@ export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
   "quinella",
   "exacta",
   "trio",
+  "trifecta",
 ];
 
 /**
@@ -226,13 +227,22 @@ export interface MixedCandidateBuildInput {
   readonly exactaCombo?: Record<string, number | null>;
   /**
    * 三連単オッズ(Issue #137・#25-E2)。`options.betTypes`に`"trifecta"`があるときのみ
-   * 参照される。`ALL_MIXED_CANDIDATE_BET_TYPES`は`"trifecta"`を含まないため(#139まで)、
-   * 既定呼び出しでは参照されない(`options.betTypes`へ明示的に`"trifecta"`を渡した場合の
-   * み到達する)。**地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の
-   * 三連単は当面取得しないため)。
+   * 参照される。Issue #139(#25-E3b)で`ALL_MIXED_CANDIDATE_BET_TYPES`が`"trifecta"`を
+   * 含むようになったため、既定呼び出しでも実際に参照される。**地方(NAR)では常に`undefined`**
+   * (ユーザー判断2026-09-27により地方の三連単は当面取得しないため)。
    */
   readonly trifectaCombo?: Record<string, number | null>;
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
+  /**
+   * レースID(Issue #139・#25-E3b・AC4)。本ファイル自体は参照しない(候補構築は中央/地方を
+   * 問わず同一ロジック)。`renderer/mixed-allocation-view.ts`が三連単の状態注記
+   * (`trifectaBetTypeNote`)で「地方は当面三連単を取得しない」ことを判別するためだけに使う。
+   * `AnalysisResult`は常に`raceId`を持つため、`buildMixedAllocationDisplay`の実際の呼び出し元
+   * (`BatchAnalysisView.tsx`等)は`AnalysisResult`をそのまま渡せば構造的に値が入る。
+   * テスト等でraceIdを持たない最小入力を渡した場合はoptionalのままundefinedになり、
+   * `isNarRaceId(undefined)`が`false`(中央として扱う。判定不能を地方と断定しない)を返す。
+   */
+  readonly raceId?: string;
 }
 
 /**

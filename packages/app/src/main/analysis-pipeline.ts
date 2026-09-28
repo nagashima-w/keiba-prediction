@@ -687,15 +687,17 @@ export async function runAnalysis(
     // が`includeExactaInAllocation`設定を実際に参照するようになったため、quinellaComboと
     // 同じく、このフィールドも production の配分結果に実際に影響する
     // (`analysis-pipeline-allocation.test.ts`のAC-10参照)。
-    // trifectaComboはIssue #137・#25-E2で追加した。**#138(`includeTrifectaInAllocation`の
-    // 配管)・#139(`resolveMixedBetTypes`への実際の接続)がまだのため、本Issueの時点では
-    // このフィールドは production の配分結果に一切影響しない**
-    // (`ALL_MIXED_CANDIDATE_BET_TYPES`が`"trifecta"`を含まないため。quinellaCombo・
-    // exactaComboが#117・#125で接続される前と同じ状態。
-    // `analysis-pipeline-allocation.test.ts`のIssue #137(AC-2)テスト参照)。
+    // trifectaComboはIssue #137・#25-E2で追加した。Issue #138で`includeTrifectaInAllocation`を
+    // 配管し、Issue #139(#25-E3b)で`resolveMixedBetTypes`への実際の接続を行ったため、
+    // このフィールドは production の配分結果に実際に影響する(quinellaCombo・exactaComboが
+    // #117・#125で接続されたのと同じ経緯。`analysis-pipeline-allocation.test.ts`のAC-10参照)。
+    // raceIdはIssue #139(#25-E3b・AC4)で追加した。三連単の状態注記
+    // (`renderer/mixed-allocation-view.ts`の`trifectaBetTypeNote`)が中央/地方を判別するために
+    // 使う値で、本ファイル(main)自身は参照しない。
     const raceForAllocation: MixedCandidateBuildInput = {
       oddsStatus,
       rows,
+      raceId,
       ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
       ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
       ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),

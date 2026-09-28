@@ -368,6 +368,21 @@ export function SettingsView(): React.JSX.Element {
         <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.trio.help}</p>
       </div>
 
+      {/* 三連単(#25-E3b・Issue #139)。表示順(複勝→単勝→ワイド→馬連→馬単→三連複→三連単)に合わせて三連複の直後に置く。 */}
+      <div style={fieldStyle}>
+        <label style={{ fontSize: "0.9rem", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={state.includeTrifectaInAllocation}
+            onChange={(e) =>
+              dispatch({ type: "三連単配分対象切替", value: e.target.checked })
+            }
+          />{" "}
+          {ALLOCATION_BET_TYPE_LABELS.trifecta.checkbox}
+        </label>
+        <p style={noteStyle}>{ALLOCATION_BET_TYPE_LABELS.trifecta.help}</p>
+      </div>
+
       {/*
        * 馬券配分(機能C-2)。総資金・1レース上限は既定0(未設定=配分提案を出さない・opt-in)。
        * ケリー係数は上級設定として折りたたみで区別する(仕様「UI ラベル」要件)。

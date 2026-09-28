@@ -757,15 +757,17 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     // 既存のunavailable行は unavailableReason="not-sold"(3頭)・fallbackReason="combo-odds-not-requested"
     // の1行しか無く、どちらの束縛箇所も定数直書きに変異させても検出できなかった。
     // 6頭(resolvePlaceBetTarget: runnerCount<=7 → "two-place-only")かつ
-    // includeComboOdds=trueのままワイド・3連複・馬連・馬単を配分対象外にする(isComboBetTypesOff。
-    // Issue #117で馬連、Issue #125で馬単も条件②に加わったため、両方ともOFFにしないと
-    // 候補0件〈条件③〉に落ちてしまう)ことで、2つの束縛箇所に同時に2値目を与える。
+    // includeComboOdds=trueのままワイド・3連複・馬連・馬単・三連単を配分対象外にする
+    // (isComboBetTypesOff。Issue #117で馬連、Issue #125で馬単、Issue #139で三連単も
+    // 条件②に加わったため、全項目をOFFにしないと候補0件〈条件③〉に落ちてしまう)ことで、
+    // 2つの束縛箇所に同時に2値目を与える。
     const race = raceInput({ rows: allCandidateRows(6) });
     const s = settings({
       includeWideInAllocation: false,
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
+      includeTrifectaInAllocation: false,
     });
     const outcome = buildMixedRaceAllocationWithOutcome(race, s);
     expect(outcome.view.kind).toBe("unavailable"); // 前提固定(空振り防止)。
@@ -1266,5 +1268,77 @@ describe("mixedBetsOf(buildAllocationRecord経由) — 馬単(exacta)の保存�
     expect(rec.bets).toHaveLength(1);
     expect(rec.bets[0]!.comboKey).toBe("0813");
     expect(rec.bets[0]!.comboKey).toBe(buildComboOddsKey([13, 8]));
+  });
+});
+
+// ============================================================================
+// AC3(Issue #139・★必須): mixedBetsOfが三連単の買い目を昇順化せず、着順の並びを
+// 保ったまま保存すること(buildAllocationBetComboKeyへの委譲を経由する。exacta〈馬単〉の
+// AC-5〈Issue #125〉と同じ構造)。
+// 殺す変異: buildComboOddsKey(a.umabans)のまま(常に昇順化)にすると、13→8→5の買い目が
+// "050813"(5→8→13と同じキー)で保存され、#131の回収率検証で5→8→13の払戻と誤って
+// 突き合わさる。
+// ============================================================================
+
+describe("mixedBetsOf(buildAllocationRecord経由) — 三連単(trifecta)の保存キーが着順の並びを保つこと(Issue #139・AC3)", () => {
+  it("umabans:[13,8,5](13着→8着→5着)の三連単配分行が、昇順化されたキー'050813'ではなく並びを保った'130805'で保存されること", () => {
+    const allocations: GeneralBetAllocation[] = [
+      {
+        umabans: [13, 8, 5],
+        betType: "trifecta",
+        stake: 500,
+        continuousFraction: 0.1,
+        scaledFraction: 0.05,
+        hitProb: 0.005,
+        odds: 336.0,
+        ev: 1.68,
+        droppedBelowMinimum: false,
+      },
+    ];
+    const outcome = mixedOutcomeFor(allocations);
+    const rec = buildAllocationRecord(outcome, settings(), "result");
+
+    expect(rec.bets).toHaveLength(1);
+    const bet = rec.bets[0]!;
+    expect(bet.betType).toBe("trifecta");
+    // 前提固定(空振り防止): 昇順化すれば"050813"になるはずのキーが、それとは異なること。
+    expect(bet.comboKey).not.toBe(buildComboOddsKey([13, 8, 5]));
+    expect(bet.comboKey).toBe("130805");
+    expect(bet.comboKey).toBe(buildAllocationBetComboKey("trifecta", [13, 8, 5]));
+  });
+
+  it("並びの異なる2組([13,8,5]と[5,8,13])が別の買い目として別のcomboKeyで保存されること(昇順化すると同じキーに潰れる変異を殺す)", () => {
+    const allocations: GeneralBetAllocation[] = [
+      {
+        umabans: [13, 8, 5],
+        betType: "trifecta",
+        stake: 500,
+        continuousFraction: 0.1,
+        scaledFraction: 0.05,
+        hitProb: 0.005,
+        odds: 336.0,
+        ev: 1.68,
+        droppedBelowMinimum: false,
+      },
+      {
+        umabans: [5, 8, 13],
+        betType: "trifecta",
+        stake: 300,
+        continuousFraction: 0.06,
+        scaledFraction: 0.03,
+        hitProb: 0.004,
+        odds: 420.0,
+        ev: 1.68,
+        droppedBelowMinimum: false,
+      },
+    ];
+    const outcome = mixedOutcomeFor(allocations);
+    const rec = buildAllocationRecord(outcome, settings(), "result");
+
+    expect(rec.bets).toHaveLength(2);
+    const keys = rec.bets.map((b) => b.comboKey);
+    // 前提固定(空振り防止): 2件のキーが実際に異なること(同じキーに潰れていないこと)。
+    expect(new Set(keys).size).toBe(2);
+    expect(keys).toEqual(["130805", "050813"]);
   });
 });

@@ -114,8 +114,10 @@ export interface RaceSnapshot {
    * キーは順序付き(1着・2着・3着の順序が意味を持つ。馬単`exactaCombo`と同じ性質)。
    *
    * **地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の三連単は当面
-   * 取得しないため)。配分・画面への配線はまだ無い(このスナップショットに保持するだけ。
-   * #138〈`includeTrifectaInAllocation`の配管〉・#139〈実際の接続〉のスコープ)。
+   * 取得しないため)。このスナップショット自体は保持・エクスポート専用の写しであり、
+   * 配分計算の入力としては一切参照されない(このファイル冒頭JSDocの`wideCombo`と同じ設計。
+   * 実際の配分接続〈Issue #139・#25-E3b〉は`AnalysisResult.trifectaCombo`
+   * 〈`shared/analysis-types.ts`〉側で完結している)。
    *
    * **サイズについての注記(2026-09-27実測。`docs/current-spec.md`参照)**: 出走頭数nに対し
    * P(n,3)通りのキーを持ち(16頭なら3360キー・18頭なら4896キー)、`wideCombo`/`trioCombo`/

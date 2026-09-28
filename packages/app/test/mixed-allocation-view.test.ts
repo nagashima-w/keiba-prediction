@@ -10,6 +10,7 @@ import {
   type GeneralBetAllocationResult,
   type SkipReasonCode,
 } from "@keiba/core/ev/combo-bet-allocation";
+import { parseRaceId, venueKindOfRaceId } from "@keiba/core";
 
 import type {
   AnalysisRow,
@@ -30,6 +31,8 @@ import {
   aggregateUnjudgedCounts,
   ALLOCATION_COMPUTE_ERROR_NOTE,
   allocationProgressText,
+  buildComboBetTypeNotices,
+  type ComboBetTypeNoticeItem,
   buildHiddenAllocationsBlocks,
   buildMixedAllocationBreakdown,
   type MixedAllocationBreakdown,
@@ -39,16 +42,19 @@ import {
   COMBO_EV_CALIBRATION_NOTE,
   formatHiddenAllocationsSummary,
   formatUnjudgedNote,
+  isNarRaceId,
   MIXED_ALLOCATION_INVALID_MESSAGE,
   MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER,
   MIXED_ALLOCATION_VISIBLE_LIMIT,
   mixedBetTypeLabel,
+  NAR_TRIFECTA_NOTE,
   placeUnavailableNoteForMixed,
   resolveMixedProbabilitySumWarning,
   resolvePlaceOnlyStake,
   sortMixedAllocationsForDisplay,
   splitAllocationsForDisplay,
   totalUnjudgedCount,
+  trifectaBetTypeNote,
   type MixedAllocationDisplay,
   type MixedAllocationSplit,
 } from "../src/renderer/mixed-allocation-view.js";
@@ -159,9 +165,45 @@ function fullOrderedOddsRecord(umabans: readonly number[], odds: number): Record
   return record;
 }
 
+/** items(昇順)から要素数kの順列(並びが異なれば別要素)をすべて列挙する(三連単専用。テスト専用)。 */
+function permutations<T>(items: readonly T[], k: number): T[][] {
+  const results: T[][] = [];
+  const used = new Array(items.length).fill(false);
+  const current: T[] = [];
+  const backtrack = (): void => {
+    if (current.length === k) {
+      results.push([...current]);
+      return;
+    }
+    for (let i = 0; i < items.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      current.push(items[i]!);
+      backtrack();
+      current.pop();
+      used[i] = false;
+    }
+  };
+  backtrack();
+  return results;
+}
+
+/**
+ * n頭(昇順)から順序付きの全3つ組を列挙し、一律のオッズ値を割り当てたRecordを作る
+ * (三連単〈trifecta〉専用。Issue #139)。`buildAllocationBetComboKey("trifecta", triple)`
+ * (唯一のゲートウェイ)でキー化するため、キー生成ロジック自体は複製しない。
+ */
+function fullOrderedTripleOddsRecord(umabans: readonly number[], odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const triple of permutations(umabans, 3)) {
+    record[buildAllocationBetComboKey("trifecta", triple)] = odds;
+  }
+  return record;
+}
+
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio" | "quinella" | "exacta",
+  betType: "wide" | "trio" | "quinella" | "exacta" | "trifecta",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -794,7 +836,7 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
  *       → 接続後は#112当時のような原理的評価不能ではなく、既存のワイド・馬連・3連複と
  *         同じ「ユーザーがOFFにした」到達可能な理由になったため
  */
-describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #125で馬単の除外を解除・Issue #128で三連単を除外に追加)", () => {
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #125で馬単の除外を解除・Issue #139で三連単の除外を解除)", () => {
   it("内訳表に描画される券種にquinella(馬連)が含まれること(Issue #117でワイド・3連複と対称になったため)", () => {
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("quinella");
   });
@@ -803,19 +845,32 @@ describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬�
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("exacta");
   });
 
-  it("内訳表に描画される券種にtrifecta(三連単)が含まれないこと(Issue #128〈#25-B〉: appはまだ三連単の候補を一切作らないため、#112当時のquinella・#120当時のexactaと同じ理由で除外する。オッズ配線・配分接続は#132のスコープ)", () => {
-    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).not.toContain("trifecta");
+  // 【Issue #139で改訂】旧版(#128時点)は「trifectaが含まれないこと」を固定していた
+  // (appがまだ三連単の候補を一切作らなかったため)。#139で配分接続が完了したため反転する。
+  // 何を保証していたか(新旧対応表):
+  //   旧: MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDERにtrifectaが含まれないこと(未接続の証明)
+  //   新: MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDERにtrifectaが含まれること(接続されたことの確認)
+  it("内訳表に描画される券種にtrifecta(三連単)が含まれること(Issue #139でワイド・馬連・馬単・3連複と対称になったため。#137時点は除外していたが反転した)", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("trifecta");
   });
 
-  it("意図的に除外している券種が['trifecta']だけであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し、Issue #117でその除外を解除、#120で馬単を新たに除外し、Issue #125でその除外も解除し、Issue #128で三連単を新たに除外に加えた)", () => {
+  it("意図的に除外している券種が無いこと(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し#117で解除、#120で馬単を除外し#125で解除、#128で三連単を除外し#139で解除。全メンバーと再び一致する)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
     );
-    expect(excluded).toEqual(["trifecta"]);
+    expect(excluded).toEqual([]);
   });
 
-  it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複)であること", () => {
-    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toEqual(["place", "win", "wide", "quinella", "exacta", "trio"]);
+  it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複→三連単)であること", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toEqual([
+      "place",
+      "win",
+      "wide",
+      "quinella",
+      "exacta",
+      "trio",
+      "trifecta",
+    ]);
   });
 
   it("前提固定(空振り防止): 表示順配列が空でないこと", () => {
@@ -944,6 +999,216 @@ describe("buildMixedAllocationDisplay — display.exactaNote(Issue #125・AC-4)"
     // 前提固定(空振り防止): 実際にEVプラスの候補が1件以上あること。
     expect(view.diagnostics.exacta.build.judged.positiveCount).toBeGreaterThan(0);
     expect(view.display.exactaNote).toBeNull();
+  });
+});
+
+// ============================================================================
+// AC4(Issue #139): isNarRaceId — coreのvenueKindOfRaceIdと同じ判定をrenderer層で複製する
+// (`race-ledger-filter.ts`の`venueKindOfRaceLedgerRaceId`と同じ前例・同じ理由)。
+// 複製がcoreの本家からずれていないことを、中央・地方それぞれ1件で直接比較して固定する。
+// ============================================================================
+
+describe("isNarRaceId — coreのvenueKindOfRaceIdと同じ判定になること(Issue #139・AC4)", () => {
+  it("中央のrace_id(202603020211。場コード03)でfalse(中央)になり、coreのvenueKindOfRaceIdと一致すること", () => {
+    const raceId = "202603020211";
+    expect(isNarRaceId(raceId)).toBe(false);
+    // 前提固定+直接比較: coreの判定結果("central")と一致すること。
+    expect(venueKindOfRaceId(parseRaceId(raceId))).toBe("central");
+  });
+
+  it("地方のrace_id(202654071210。場コード54)でtrue(地方)になり、coreのvenueKindOfRaceIdと一致すること", () => {
+    const raceId = "202654071210";
+    expect(isNarRaceId(raceId)).toBe(true);
+    // 前提固定+直接比較: coreの判定結果("nar")と一致すること。
+    expect(venueKindOfRaceId(parseRaceId(raceId))).toBe("nar");
+  });
+
+  it("raceIdが無い(旧データ)ときはfalse(中央として扱う。判定不能を地方と断定しない)こと", () => {
+    expect(isNarRaceId(undefined)).toBe(false);
+  });
+});
+
+// ============================================================================
+// AC4(Issue #139): display.trifectaNote — wide/trio/quinella/exactaと同じcomboBetTypeNoteを
+// 三連単にも適用するが、地方(NAR)では"unknown"の文言を「地方競馬では三連単を取得していません」
+// に差し替えること(地方は当面三連単を取得しないため、再分析しても反映されない)。
+// ============================================================================
+
+describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)", () => {
+  it("三連単が対象外(includeTrifectaInAllocation=false)のときはnullであること(wide/trio/quinella/exactaが対象外のときと同じくnot-requestedはnull)", () => {
+    const race = raceWithPositiveCombos(8);
+    const view = buildMixedAllocationDisplay(race, settings({ includeTrifectaInAllocation: false }));
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.diagnostics.trifecta.kind).toBe("not-requested");
+    expect(view.display.trifectaNote).toBeNull();
+  });
+
+  it("三連単が発売されていない(comboOddsState='unavailable')ときは、comboBetTypeNoteと同じ文言になること(raceIdが中央でも地方でも同じ。unavailableはNAR特例の対象外)", () => {
+    const umabans = umabansOf(8);
+    const race = raceWithPositiveCombos(8, {
+      raceId: "202603020211",
+      trifectaCombo: {},
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        trifecta: comboOddsOutcome("trifecta", "unavailable"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定(空振り防止): 実際にkind='built'まで到達していること。
+    expect(view.diagnostics.trifecta.kind).toBe("built");
+    expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
+    expect(view.display.trifectaNote).not.toBeNull();
+    void umabans;
+  });
+
+  it("三連単にEVプラスの候補があるときはnull(注記なし)であること", () => {
+    const umabans = umabansOf(8);
+    const race = raceWithPositiveCombos(8, {
+      raceId: "202603020211",
+      trifectaCombo: fullOrderedTripleOddsRecord(umabans, 100000),
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        trifecta: comboOddsOutcome("trifecta", "available"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.diagnostics.trifecta.kind).toBe("built");
+    if (view.diagnostics.trifecta.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    // 前提固定(空振り防止): 実際にEVプラスの候補が1件以上あること。
+    expect(view.diagnostics.trifecta.build.judged.positiveCount).toBeGreaterThan(0);
+    expect(view.display.trifectaNote).toBeNull();
+  });
+
+  it("★AC4の核心: 中央のレースで三連単が未取得(comboOddsState='unknown')のときは、既存の『設定変更後に再分析すると反映されます』を出すこと(再分析すれば実際に取得されるため)", () => {
+    const race = raceWithPositiveCombos(8, { raceId: "202603020211" });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定(空振り防止): 実際にfieldPresence='absent'・comboOddsState='unknown'に到達していること。
+    if (view.diagnostics.trifecta.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    expect(view.diagnostics.trifecta.comboOddsState).toBe("unknown");
+    expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
+    expect(view.display.trifectaNote).not.toBe(NAR_TRIFECTA_NOTE);
+  });
+
+  it("★AC4の核心: 地方のレースで三連単が未取得(comboOddsState='unknown')のときは、『地方競馬では三連単を取得していません』を出し、既存の『設定変更後に再分析すると反映されます』は出さないこと(地方は当面取得しないため、再分析しても反映されない)", () => {
+    const race = raceWithPositiveCombos(8, { raceId: "202654071210" });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    if (view.diagnostics.trifecta.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    // 前提固定(空振り防止): 実際にcomboOddsState='unknown'に到達していること。
+    expect(view.diagnostics.trifecta.comboOddsState).toBe("unknown");
+    // 前提固定(空振り防止): 既存のcomboBetTypeNote(中央向け文言)とは異なる文言であること。
+    expect(view.display.trifectaNote).not.toBe(comboBetTypeNote(view.diagnostics.trifecta));
+    expect(view.display.trifectaNote).toBe(NAR_TRIFECTA_NOTE);
+  });
+
+  it("trifectaBetTypeNoteを直接呼んでも同じ結果になること(display.trifectaNoteが本関数へ委譲していることの確認)", () => {
+    expect(trifectaBetTypeNote({ kind: "not-requested" }, "202654071210")).toBeNull();
+  });
+});
+
+// ============================================================================
+// Q1(Issue #139): buildComboBetTypeNotices — 券種別の状態注記(ワイド・馬連・馬単・3連複・
+// 三連単)を表示順に並べ、nullの券種を省いた配列にする純関数。BatchAnalysisView.tsxは
+// 個々の<p>を直書きせず、この配列をmapで描画するだけにする(#125でexactaNoteの<p>を
+// 追加し忘れた欠落=利用者から見える欠落の再発防止)。
+// ============================================================================
+
+describe("buildComboBetTypeNotices(Issue #139): 表示順の全券種を含み、nullの券種を省くこと", () => {
+  it("5券種すべてに注記があるとき、表示順(ワイド→馬連→馬単→3連複→三連単)どおり5件返すこと", () => {
+    const notices = buildComboBetTypeNotices({
+      wideNote: "ワイドの注記",
+      quinellaNote: "馬連の注記",
+      exactaNote: "馬単の注記",
+      trioNote: "3連複の注記",
+      trifectaNote: "三連単の注記",
+    });
+    const expected: readonly ComboBetTypeNoticeItem[] = [
+      { label: "ワイド", note: "ワイドの注記" },
+      { label: "馬連", note: "馬連の注記" },
+      { label: "馬単", note: "馬単の注記" },
+      { label: "三連複", note: "3連複の注記" },
+      { label: "三連単", note: "三連単の注記" },
+    ];
+    expect(notices).toEqual(expected);
+  });
+
+  it("noteがnullの券種は省かれること(馬単のみnull)", () => {
+    const notices = buildComboBetTypeNotices({
+      wideNote: "ワイドの注記",
+      quinellaNote: "馬連の注記",
+      exactaNote: null,
+      trioNote: "3連複の注記",
+      trifectaNote: "三連単の注記",
+    });
+    expect(notices.map((n) => n.label)).toEqual(["ワイド", "馬連", "三連複", "三連単"]);
+  });
+
+  it("全券種がnullなら空配列を返すこと", () => {
+    const notices = buildComboBetTypeNotices({
+      wideNote: null,
+      quinellaNote: null,
+      exactaNote: null,
+      trioNote: null,
+      trifectaNote: null,
+    });
+    expect(notices).toEqual([]);
+  });
+
+  it("三連単のみ非nullなら1件だけ(三連単)を返すこと(次に券種を足したときの描画漏れを検出する土台)", () => {
+    const notices = buildComboBetTypeNotices({
+      wideNote: null,
+      quinellaNote: null,
+      exactaNote: null,
+      trioNote: null,
+      trifectaNote: "三連単だけの注記",
+    });
+    expect(notices).toEqual([{ label: "三連単", note: "三連単だけの注記" }]);
+  });
+
+  it("buildMixedAllocationDisplayが返すdisplayを実際にそのまま渡しても、5フィールドすべてから正しく組み立てられること(統合確認)", () => {
+    const race = raceWithPositiveCombos(8, {
+      raceId: "202603020211",
+      trifectaCombo: {},
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        trifecta: comboOddsOutcome("trifecta", "unavailable"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const notices = buildComboBetTypeNotices(view.display);
+    // 前提固定(空振り防止): 三連単の注記が実際に含まれていること(#125のexactaNote欠落と
+    // 同型の欠落を、この統合テストで検出できることの確認)。
+    expect(notices.some((n) => n.label === "三連単")).toBe(true);
   });
 });
 
@@ -1838,6 +2103,7 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
     trioNote: null,
     quinellaNote: null,
     exactaNote: null,
+    trifectaNote: null,
     placeUnavailableNote: null,
     placeOnlyStake: null,
     probabilitySumWarning: null,

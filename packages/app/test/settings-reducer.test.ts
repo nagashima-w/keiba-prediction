@@ -292,6 +292,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     s = settingsReducer(s, { type: "三連複配分対象切替", value: false });
     s = settingsReducer(s, { type: "馬連配分対象切替", value: false });
     s = settingsReducer(s, { type: "馬単配分対象切替", value: false });
+    s = settingsReducer(s, { type: "三連単配分対象切替", value: false });
 
     expect(s.apiKeyInput).toBe("sk-ant-new");
     expect(s.discordWebhookUrl).toBe("https://x.example/y");
@@ -309,6 +310,7 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(s.includeTrioInAllocation).toBe(false);
     expect(s.includeQuinellaInAllocation).toBe(false);
     expect(s.includeExactaInAllocation).toBe(false);
+    expect(s.includeTrifectaInAllocation).toBe(false);
   });
 
   it("保存開始→保存成功でstatusが遷移し、APIキー入力をクリアしマスクを更新する", () => {
@@ -553,9 +555,14 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(buildUpdate(s).includeExactaInAllocation).toBe(true);
   });
 
-  // 馬単(#24-E3a)と同じ経緯: #25-E3a時点では対応するUIトグル・切替アクションが無いため、
-  // 読込値の往復のみを確認する。#25-E3b(Issue #139)で「三連単配分対象切替」アクションを
-  // 追加した時点で、上の「馬単配分対象切替(Issue #125)を含めること」と同型のテストを追加すること。
+  // 【Issue #139(#25-E3b)で改訂】旧版(#138時点)は対応するUIトグルが無かったため、
+  // 切替アクションではなく読込値の往復でincludeTrifectaInAllocationの配管を確認していた。
+  // 何を保証していたか(新旧対応表):
+  //   旧: buildUpdate(loadedState(fakeMasked({includeTrifectaInAllocation})))が読込値どおり
+  //       (OFF/ON両方向)であること → 「三連単配分対象切替」アクションを追加した現在も
+  //       読込→buildUpdateの往復自体は変わらず成立するはず(下のテストで維持)
+  //   新: 追加で「三連単配分対象切替」アクション経由でも同じ値がbuildUpdateへ反映されること
+  //       (馬単の「馬単配分対象切替(Issue #125)を含めること」と同型のテストを追加)
   it("includeTrifectaInAllocation(#25-E3a)を含めること(読込値どおり、OFF/ON両方向)", () => {
     expect(
       buildUpdate(loadedState(fakeMasked({ includeTrifectaInAllocation: false })))
@@ -565,6 +572,15 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
       buildUpdate(loadedState(fakeMasked({ includeTrifectaInAllocation: true })))
         .includeTrifectaInAllocation,
     ).toBe(true);
+  });
+
+  it("三連単配分対象切替(Issue #139)を含めること(OFF/ON両方向)", () => {
+    let s = loadedState();
+    s = settingsReducer(s, { type: "三連単配分対象切替", value: false });
+    expect(buildUpdate(s).includeTrifectaInAllocation).toBe(false);
+
+    s = settingsReducer(s, { type: "三連単配分対象切替", value: true });
+    expect(buildUpdate(s).includeTrifectaInAllocation).toBe(true);
   });
 });
 
@@ -615,6 +631,10 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     {
       name: "馬単配分対象切替",
       action: { type: "馬単配分対象切替", value: false },
+    },
+    {
+      name: "三連単配分対象切替",
+      action: { type: "三連単配分対象切替", value: false },
     },
     ...BIAS_WEIGHT_KEYS.map((key) => ({
       name: `バイアス重み入力(${key})`,
@@ -720,17 +740,17 @@ describe("isDirty(未保存インジケータ、Issue #11)", () => {
     expect(isDirty(changed)).toBe(true);
   });
 
-  // 馬単(#24-E3a→#24-E3b)と同じ経緯: #25-E3a時点では対応する切替アクションがまだ無いため、
-  // 読込直後の状態を直接組み立てて(SettingsFormStateのspread)検証する。#25-E3b(Issue #139)で
-  // 「三連単配分対象切替」アクションを追加した時点で、馬連〈#684〉・馬単〈#699〉と同じ
-  // アクション経由の形に直すこと。
-  it("includeTrifectaInAllocation(#25-E3a)がsavedSnapshotと異なればdirty判定されること(対応する切替アクションがまだ無いため、状態を直接組み立てて確認する)", () => {
+  // 【Issue #139で改訂】旧版(#138時点)は対応する切替アクションがまだ無く、読込直後の状態を
+  // 直接組み立てて(SettingsFormStateのspread)検証していた。#139で「三連単配分対象切替」
+  // アクションを追加したため、馬連・馬単と同じ「実際にそのアクション経由で確認する」形に直す
+  // (直接spreadでの確認はsingleFieldCasesの「三連単配分対象切替」ケースが引き続き担う)。
+  it("includeTrifectaInAllocation(#25-E3a)がsavedSnapshotと異なればdirty判定されること(Issue #139で「三連単配分対象切替」アクションを追加したため、実際にそのアクション経由で確認する)", () => {
     const base = loadedState();
     expect(isDirty(base)).toBe(false);
-    const changed: SettingsFormState = {
-      ...base,
-      includeTrifectaInAllocation: !base.includeTrifectaInAllocation,
-    };
+    const changed = settingsReducer(base, {
+      type: "三連単配分対象切替",
+      value: !base.includeTrifectaInAllocation,
+    });
     expect(isDirty(changed)).toBe(true);
   });
 });

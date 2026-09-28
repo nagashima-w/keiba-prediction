@@ -1,12 +1,11 @@
 /**
  * trifecta-allocation-setting-wiring.test.ts — 設定「三連単を配分に含める」の配管
- * (#25-E3a・Issue #138)を固定するテスト。
+ * (#25-E3a・Issue #138 → #25-E3b・Issue #139)を固定するテスト。
  *
- * `exacta-allocation-setting-wiring.test.ts`(馬単版・Issue #124)の**#24-E3a時点版**
- * (`git show 7c70caa:packages/app/test/exacta-allocation-setting-wiring.test.ts`。
- * まだ`resolveMixedBetTypes`へ接続していない時点の版)と同じ構造を踏襲する。
+ * `exacta-allocation-setting-wiring.test.ts`(馬単版・Issue #124→#125)と同じ構造を踏襲する。
  *
- * Issue #138(#25-E3a)確定スコープ(オーケストレーター着手前ゲート合意 2026-09-27):
+ * ## 経緯
+ * Issue #138(#25-E3a)確定スコープ時点では:
  * - `AppSettings.includeTrifectaInAllocation` を新設し、保存・IPC・`MixedAllocationSettings`・
  *   キャッシュキーまで配管する
  * - **候補ビルダー(`resolveMixedBetTypes`)・D-2フォールバック規則(`isComboBetTypesOff`)・
@@ -14,26 +13,36 @@
  *   #25-E3b〈Issue #139〉の仕事。E3aで変えると配分の答えが変わりうる)
  * - **設定画面(`SettingsView.tsx`)にトグルを出さない**
  * - DB列(`analysis_allocation_meta.include_trifecta`)の追加は#25-E3c(Issue #140)へ送る
- *   (`analysis_allocation_meta`の列一覧は#59で「固定・増減は停止条件」と凍結されており、
- *   読む人が実在するタスクで解除する。馬連〈#115→#118〉・馬単〈#124→#126〉と同じ切り方)
  *
- * ## 「参照していないこと」の確認方法(#117の教訓を先取りする)
+ * このファイルは当時、上記2点(未接続・未表示)を「値の一致(toEqual)」の振る舞いテストと
+ * 「参照していないこと」のソース走査を経由しない値比較で固定していた。
  *
- * 馬単の#24-E3a時点(このファイルの元となった版)と同じく、本ファイルは最初からソース走査
- * (`not.toContain`)を経由せず、`buildMixedRaceAllocation`/`buildMixedRaceAllocationWithOutcome`の
- * 値比較(mixed経路・isComboBetTypesOff経路それぞれでtrue/falseがビット一致すること)だけで
- * AC-4(未接続の固定)を保証する。
+ * **Issue #139(#25-E3b)でこの2点をどちらも接続した**(#125と同じ裁定「値で接続を観測する形を
+ * 優先する」)。本ファイルはその接続を「値」で固定する形に反転する。より詳細な配線の行列
+ * (D-2フォールバック条件②③それぞれの分岐)は`mixed-race-allocation-trifecta.test.ts`に
+ * 分離した(`mixed-race-allocation-exacta.test.ts`と同じ構造)。本ファイルは
+ * 「#138で配管した設定項目が、#139で実際に接続されたこと」を確認する最小限の回帰に絞る。
  *
- * **注意: このファイルは#25-E3b(Issue #139)で反転される見込みである。** #139で
- * `resolveMixedBetTypes`・`isComboBetTypesOff`が実際に`includeTrifectaInAllocation`を
- * 参照するようになったら、本ファイルの「値が変わらないこと」を保証するテストは
- * 「値が変わること」を保証するテストへ書き換える(馬単が#124→#125で辿った反転と同型。
- * `exacta-allocation-setting-wiring.test.ts`冒頭の「旧テスト→新テストの対応表」参照)。
+ * ## 旧テスト→新テストの対応表(何を保証していたか)
+ *
+ * | 旧テスト(#138時点) | 何を保証していたか | 新テスト(#139) | 何を保証するか |
+ * |---|---|---|---|
+ * | 「mixed経路(8頭)でincludeTrifectaInAllocationをtrue/falseに変えても、kind・result全体がビット一致すること」 | 値を変えても計算結果が一切変わらない(未接続の証明) | 「resolveMixedBetTypes配線: includeTrifectaInAllocationの値でbetType='trifecta'の有無が変わること」(値) | true/falseを実際に渡し、betType='trifecta'の配分行の有無が切り替わること(接続されたことを値で確認) |
+ * | 「isComboBetTypesOff配線(D-2フォールバック規則の条件②)経路でincludeTrifectaInAllocationを変えても結果・理由コードが変わらないこと」 | 条件②の判定式がincludeTrifectaInAllocationを参照しない(値を変えても`fallbackReason`が一切変わらない) | 「isComboBetTypesOff配線: includeTrifectaInAllocationの値でfallbackReasonが変わること」(値) | ワイド・3連複・馬連・馬単OFFのまま三連単だけtrue/falseを切り替えると、fallbackReasonが'combo-bet-types-off'かどうかが切り替わること |
+ * | (#138時点に無し。SettingsView.tsxのソース走査は元々このファイルの対象外) | — | 「SettingsView.tsxがincludeTrifectaInAllocationを参照すること」(ソース走査の肯定) | #139でチェックボックスを追加したため、識別子が実在すること(JSX直書きでレンダリングテスト基盤が無いため、この項目のみソース走査で確認する。`exacta-allocation-setting-wiring.test.ts`・`combo-odds-scope-guard.test.ts`と同じ流儀) |
+ *
+ * 設定の保存・読込・キャッシュキー等(#138で配管した「参照していないこと」以外の部分)を
+ * 固定する往復テストは本ファイルには元々存在しない(`settings-reducer.test.ts`・
+ * `settings-store.test.ts`・`ipc-*-wiring.test.ts`が担う。それらは本タスクでは変更しない)。
  */
+
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { buildComboOddsKey } from "@keiba/core/ev/combo-bet-allocation";
+import { buildAllocationBetComboKey } from "@keiba/core/ev/combo-bet-allocation";
 
 import type { AnalysisRow } from "../src/shared/analysis-types.js";
 import type { MixedCandidateBuildInput } from "../src/shared/mixed-candidates.js";
@@ -42,6 +51,28 @@ import {
   buildMixedRaceAllocationWithOutcome,
   type MixedAllocationSettings,
 } from "../src/shared/mixed-race-allocation.js";
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const rendererDir = path.join(currentDir, "../src/renderer");
+
+describe("SettingsView.tsxがincludeTrifectaInAllocationを参照すること(Issue #139。#138時点は未参照だったが#139でチェックボックスを追加した)", () => {
+  it("SettingsView.tsxのソースにincludeTrifectaInAllocationという識別子が出現すること(JSX直書きでレンダリングテスト基盤が無いためソース走査で確認する。exacta-allocation-setting-wiring.test.ts・combo-odds-scope-guard.test.tsと同じ流儀)", () => {
+    const source = readFileSync(path.join(rendererDir, "SettingsView.tsx"), "utf8");
+    // 前提固定: 既存4券種のチェックボックスは実在すること(空振り防止。ファイルを正しく読めていることの確認)。
+    expect(source).toContain("includeWideInAllocation");
+    expect(source).toContain("includeQuinellaInAllocation");
+    expect(source).toContain("includeTrioInAllocation");
+    expect(source).toContain("includeExactaInAllocation");
+    expect(source).toContain("includeTrifectaInAllocation");
+  });
+});
+
+// ============================================================================
+// 振る舞いレベル: MixedAllocationSettings.includeTrifectaInAllocationの値で
+// 混在配分の計算結果が実際に変わること(Issue #139で接続)。
+// より詳細な行列(D-2フォールバック条件②③それぞれの分岐)は
+// mixed-race-allocation-trifecta.test.ts に分離してある。
+// ============================================================================
 
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
   return {
@@ -76,52 +107,61 @@ function allCandidateRows(n: number): AnalysisRow[] {
   return umabansOf(n).map((umaban) => row({ umaban }));
 }
 
-/** items(昇順)から要素数kの組合せをすべて列挙する(テスト専用)。 */
-function combinations<T>(items: readonly T[], k: number): T[][] {
+/** items(昇順)から要素数kの順列(並びが異なれば別要素)をすべて列挙する(テスト専用)。 */
+function permutations<T>(items: readonly T[], k: number): T[][] {
   const results: T[][] = [];
-  if (k <= 0 || k > items.length) {
-    return results;
-  }
+  const used = new Array(items.length).fill(false);
   const current: T[] = [];
-  const backtrack = (start: number): void => {
+  const backtrack = (): void => {
     if (current.length === k) {
       results.push([...current]);
       return;
     }
-    for (let i = start; i < items.length; i++) {
+    for (let i = 0; i < items.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
       current.push(items[i]!);
-      backtrack(i + 1);
+      backtrack();
       current.pop();
+      used[i] = false;
     }
   };
-  backtrack(0);
+  backtrack();
   return results;
 }
 
-/** umabans(昇順)からcomboSizeの組合せをすべて列挙し、一律のオッズ値を割り当てたRecordを作る。 */
-function fullOddsRecord(
-  umabans: readonly number[],
-  comboSize: number,
-  odds: number,
-): Record<string, number> {
+/** n頭(昇順)から順序付きの全3つ組(着順どおり)を列挙し、一律のオッズ値を割り当てたRecordを作る(三連単用)。 */
+function fullOrderedTriplesOddsRecord(umabans: readonly number[], odds: number): Record<string, number> {
   const record: Record<string, number> = {};
-  for (const combo of combinations(umabans, comboSize)) {
-    record[buildComboOddsKey(combo)] = odds;
+  for (const triple of permutations(umabans, 3)) {
+    record[buildAllocationBetComboKey("trifecta", triple)] = odds;
   }
   return record;
 }
 
 /**
  * n=8頭・ワイド/3連複オッズも用意した「混在経路(kind='mixed')に入る」標準フィクスチャ
- * (mixed-race-allocation-win.test.tsのmixedRace()と同じレシピ。三連単オッズ自体は
- * 未接続のため用意しなくても混在経路に到達できる)。
+ * (mixed-race-allocation-win.test.tsのmixedRace()と同じレシピ)。
  */
 function mixedRace(n = 8): MixedCandidateBuildInput {
   const umabans = umabansOf(n);
+  const wideCombo: Record<string, number> = {};
+  const trioCombo: Record<string, number> = {};
+  for (const combo of permutations(umabans, 2)) {
+    // ワイド・3連複は順不同のため、昇順の組だけを採用する(重複を避ける)。
+    if (combo[0]! < combo[1]!) {
+      wideCombo[buildAllocationBetComboKey("wide", combo)] = 30000;
+    }
+  }
+  for (const combo of permutations(umabans, 3)) {
+    if (combo[0]! < combo[1]! && combo[1]! < combo[2]!) {
+      trioCombo[buildAllocationBetComboKey("trio", combo)] = 90000;
+    }
+  }
   return raceInput({
     rows: allCandidateRows(n),
-    wideCombo: fullOddsRecord(umabans, 2, 30000),
-    trioCombo: fullOddsRecord(umabans, 3, 90000),
+    wideCombo,
+    trioCombo,
   });
 }
 
@@ -142,23 +182,57 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
   };
 }
 
-describe("buildMixedRaceAllocation: includeTrifectaInAllocationの値を変えても結果が変わらないこと(#25-E3a。候補ビルダー未接続の直接確認)", () => {
-  it("mixed経路(8頭)でincludeTrifectaInAllocationをtrue/falseに変えても、kind・result全体がビット一致すること", () => {
-    const race = mixedRace(8);
+describe("resolveMixedBetTypes配線: includeTrifectaInAllocationの値でbetType='trifecta'の有無が変わること(Issue #139)", () => {
+  it("mixed経路(8頭・三連単オッズあり)でincludeTrifectaInAllocationをtrue/falseに変えると、三連単配分行の有無が切り替わること", () => {
+    const base = mixedRace(8);
+    const race: MixedCandidateBuildInput = {
+      ...base,
+      trifectaCombo: fullOrderedTriplesOddsRecord(umabansOf(8), 3000),
+    };
     const withTrifectaOn = buildMixedRaceAllocation(race, settings({ includeTrifectaInAllocation: true }));
     const withTrifectaOff = buildMixedRaceAllocation(race, settings({ includeTrifectaInAllocation: false }));
-    // 前提固定: 実際に混在経路(kind="mixed")に到達していること(空振り防止。unset/yoso等の
-    // 早期リターンではincludeTrifectaInAllocationを見る機会自体が無いため、それらでの一致は無意味)。
+    // 前提固定: 実際に混在経路(kind="mixed")に到達していること(空振り防止)。
     expect(withTrifectaOn.kind).toBe("mixed");
     expect(withTrifectaOff.kind).toBe("mixed");
-    expect(withTrifectaOff).toEqual(withTrifectaOn);
+    if (withTrifectaOn.kind !== "mixed" || withTrifectaOff.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    const hasTrifectaOn = withTrifectaOn.result.allocations.some((a) => a.betType === "trifecta");
+    const hasTrifectaOff = withTrifectaOff.result.allocations.some((a) => a.betType === "trifecta");
+    expect(hasTrifectaOn).toBe(true);
+    expect(hasTrifectaOff).toBe(false);
+    // 接続された結果、bit-for-bitでは一致しないこと(#138時点はここがtoEqualで一致していた)。
+    expect(withTrifectaOff).not.toEqual(withTrifectaOn);
+  });
+});
+
+describe("isComboBetTypesOff配線: includeTrifectaInAllocationの値でfallbackReasonが変わること(Issue #139)", () => {
+  it("ワイド・3連複・馬連・馬単OFFのまま三連単だけtrue/falseを切り替えると、combo-bet-types-offになるかどうかが切り替わること", () => {
+    const race: MixedCandidateBuildInput = {
+      ...raceInput({ rows: allCandidateRows(8) }),
+      trifectaCombo: fullOrderedTriplesOddsRecord(umabansOf(8), 3000),
+    };
+    const base = settings({
+      includeWideInAllocation: false,
+      includeTrioInAllocation: false,
+      includeQuinellaInAllocation: false,
+      includeExactaInAllocation: false,
+    });
+
+    const withTrifectaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeTrifectaInAllocation: true });
+    expect(withTrifectaOn.outcome.route).toBe("mixed");
+    expect(withTrifectaOn.outcome.fallbackReason).toBeNull();
+
+    const withTrifectaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeTrifectaInAllocation: false });
+    expect(withTrifectaOff.outcome.route).toBe("place-only");
+    expect(withTrifectaOff.outcome.fallbackReason).toBe("combo-bet-types-off");
   });
 
-  it("isComboBetTypesOff配線(D-2フォールバック規則の条件②)経路でincludeTrifectaInAllocationを変えても結果・理由コードが変わらないこと", () => {
-    // ワイド・三連複・馬連・馬単の4つを明示的にOFFにし、isComboBetTypesOff(条件②)を真に成立させる
-    // (`isComboBetTypesOff`は現状この4項目しか見ない。4つともOFFにしないと、既定ON〈馬連・馬単〉が
-    // 残ってcondition②が成立せず、候補0件による条件③〈no-combo-candidates〉に落ちてしまい、
-    // 条件②自体を検証できない)。
+  it("(オッズ自体が無いケース。#138時点からの回帰) place-only経路(ワイド・3連複・馬連・馬単とも候補0件)でincludeTrifectaInAllocationを変えても、view.kindと中身は一致すること——ただし理由(fallbackReason)は② combo-bet-types-off / ③ no-combo-candidatesで異なる", () => {
+    // このrace自体にtrifectaComboを含まないため、includeTrifectaInAllocationをtrueにしても
+    // 三連単の候補は0件になり(オッズが無い)、最終的にどちらも「組合せ候補ゼロ」という
+    // 同じ結末(view.kind="computed"・中身も同一)に到達する。理由コード(fallbackReason)は
+    // trueなら③no-combo-candidates、falseなら②combo-bet-types-offと異なる値になる。
     const race = raceInput({ rows: allCandidateRows(8) });
     const base = settings({
       includeWideInAllocation: false,
@@ -166,21 +240,14 @@ describe("buildMixedRaceAllocation: includeTrifectaInAllocationの値を変え�
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
     });
-    const withTrifectaOn = buildMixedRaceAllocationWithOutcome(race, {
-      ...base,
-      includeTrifectaInAllocation: true,
-    });
-    const withTrifectaOff = buildMixedRaceAllocationWithOutcome(race, {
-      ...base,
-      includeTrifectaInAllocation: false,
-    });
-    // 前提固定: 実際に条件②(combo-bet-types-off)経由でplace-onlyへ落ちていること
-    // (includeTrifectaInAllocationの値に関わらず、isComboBetTypesOffがこのフィールドを
-    // 参照しない限りfallbackReasonは変わらないはず)。
-    expect(withTrifectaOn.outcome.fallbackReason).toBe("combo-bet-types-off");
-    expect(withTrifectaOff.outcome.fallbackReason).toBe("combo-bet-types-off");
+    const withTrifectaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeTrifectaInAllocation: true });
+    const withTrifectaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeTrifectaInAllocation: false });
+    // 前提固定: 実際にD-2フォールバック経路(複勝専用。kind="computed")に到達していること。
     expect(withTrifectaOn.view.kind).toBe("computed");
     expect(withTrifectaOff.view.kind).toBe("computed");
     expect(withTrifectaOff.view).toEqual(withTrifectaOn.view);
+    // 理由コードは異なること(前提固定。同じなら本itのタイトルの前提が崩れる)。
+    expect(withTrifectaOn.outcome.fallbackReason).toBe("no-combo-candidates");
+    expect(withTrifectaOff.outcome.fallbackReason).toBe("combo-bet-types-off");
   });
 });

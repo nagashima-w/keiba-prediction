@@ -31,6 +31,7 @@ import { buildRendererErrorPayload } from "./renderer-error-payload.js";
 import {
   ALLOCATION_COMPUTE_ERROR_NOTE,
   allocationProgressText,
+  buildComboBetTypeNotices,
   buildHiddenAllocationsBlocks,
   buildMixedAllocationDisplay,
   buildMixedAllocationNotices,
@@ -558,23 +559,23 @@ function renderMixedAllocationBlock(
         </p>
       )}
 
-      {/* AC16: {}を「発売なし」と断定しない、券種別の状態注記(無ければ表示しない)。 */}
-      {display.wideNote !== null && (
-        <p style={{ margin: "0.3rem 0 0", color: "#666", fontSize: "0.8rem" }}>
-          ワイド: {display.wideNote}
+      {/*
+        AC16: {}を「発売なし」と断定しない、券種別(ワイド・馬連・馬単・3連複・三連単)の状態
+        注記(無ければ表示しない)。Issue #139(#25-E3b)着手前確認で、#125が`exactaNote`
+        (馬単の状態注記)の<p>をこのJSXへ追加し忘れていた欠落(利用者から見える欠落)が
+        発覚した。原因は「券種を増やすたびにJSXへ<p>を1行手で足す」構造そのものにあったため、
+        `buildComboBetTypeNotices`(表示順に並べ、nullを省いた配列を返す純関数)を新設し、
+        ここはその配列を`.map`で描画するだけにする(次に券種を足すときの描画漏れは、
+        同関数のテスト「表示順の全券種が含まれること」が検出する)。
+      */}
+      {buildComboBetTypeNotices(display).map((notice, i) => (
+        <p
+          key={notice.label}
+          style={{ margin: i === 0 ? "0.3rem 0 0" : "0.2rem 0 0", color: "#666", fontSize: "0.8rem" }}
+        >
+          {notice.label}: {notice.note}
         </p>
-      )}
-      {/* Issue #117(AC-5): 馬連の状態注記。表示順(ワイド→馬連→3連複)に合わせてワイドと3連複の間に置く。 */}
-      {display.quinellaNote !== null && (
-        <p style={{ margin: "0.2rem 0 0", color: "#666", fontSize: "0.8rem" }}>
-          馬連: {display.quinellaNote}
-        </p>
-      )}
-      {display.trioNote !== null && (
-        <p style={{ margin: "0.2rem 0 0", color: "#666", fontSize: "0.8rem" }}>
-          三連複: {display.trioNote}
-        </p>
-      )}
+      ))}
 
       <p style={{ margin: "0.4rem 0 0", color: "#666", fontSize: "0.75rem" }}>
         {KELLY_CAP_EXPLANATION_NOTE}

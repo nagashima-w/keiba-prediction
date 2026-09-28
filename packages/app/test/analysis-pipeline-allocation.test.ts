@@ -200,6 +200,76 @@ function fakeRaceDataWithAllCombos(raceId: string): RaceData {
   };
 }
 
+/** items(昇順)から要素数kの順列(並びが異なれば別要素)をすべて列挙する(三連単専用。テスト専用)。 */
+function permutations<T>(items: readonly T[], k: number): T[][] {
+  const results: T[][] = [];
+  const used = new Array(items.length).fill(false);
+  const current: T[] = [];
+  const backtrack = (): void => {
+    if (current.length === k) {
+      results.push([...current]);
+      return;
+    }
+    for (let i = 0; i < items.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;
+      current.push(items[i]!);
+      backtrack();
+      current.pop();
+      used[i] = false;
+    }
+  };
+  backtrack();
+  return results;
+}
+
+/**
+ * n頭(昇順)から順序付きの全3つ組を列挙し、一律のオッズ値を割り当てたRecordを作る
+ * (三連単専用。Issue #139)。`buildAllocationBetComboKey("trifecta", triple)`でキー化する。
+ */
+function fullOrderedTripleOddsRecord(umabans: readonly number[], odds: number): Record<string, number> {
+  const record: Record<string, number> = {};
+  for (const triple of permutations(umabans, 3)) {
+    record[buildAllocationBetComboKey("trifecta", triple)] = odds;
+  }
+  return record;
+}
+
+/**
+ * 8頭・複勝オッズに加えて三連単のオッズも一律高値(EVプラス確実)で持つフェイクレースデータ
+ * (Issue #139・#25-E3b・AC-10)。`fakeRaceDataWithExacta`と同じレシピで、三連単の候補だけを
+ * 単独で確認できるよう、他の組合せ券種のオッズは含めない。
+ */
+function fakeRaceDataWithTrifecta(raceId: string): RaceData {
+  const base = fakeRaceData(raceId);
+  const umabans = base.horses.map((h) => h.shutuba.umaban);
+  return {
+    ...base,
+    odds: {
+      ...base.odds,
+      trifectaCombo: fullOrderedTripleOddsRecord(umabans, 100000),
+    },
+  };
+}
+
+/**
+ * `fakeRaceDataWithAllCombos`(ワイド・3連複・馬連・馬単)に三連単のオッズも足した、
+ * 5券種すべてを持つフェイクレースデータ(Issue #139・AC-10の対照テスト専用)。
+ * includeTrifectaInAllocation=OFFのときに他の組合せ券種の存在によって混在経路
+ * (kind='mixed')に留まったまま「三連単だけが現れない」ことを確認するために使う。
+ */
+function fakeRaceDataWithAllCombosIncludingTrifecta(raceId: string): RaceData {
+  const base = fakeRaceDataWithAllCombos(raceId);
+  const umabans = base.horses.map((h) => h.shutuba.umaban);
+  return {
+    ...base,
+    odds: {
+      ...base.odds,
+      trifectaCombo: fullOrderedTripleOddsRecord(umabans, 100000),
+    },
+  };
+}
+
 const RACE_ID = "202605020811";
 const KAISAI = "20260709";
 const FIXED_NOW = new Date("2026-07-09T12:34:56.000Z");
@@ -493,18 +563,20 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
   });
 
   /**
-   * Issue #137(AC-2): 三連単(trifecta)の`includeTrifectaInAllocation`設定・
-   * `resolveMixedBetTypes`への接続は#138のスコープであり、本Issueの時点では
-   * `raceForAllocation.trifectaCombo`がproductionの配分結果(保存される`analysis_bets`)に
-   * 影響することはない(`ALL_MIXED_CANDIDATE_BET_TYPES`が`"trifecta"`を含まないため、
-   * Issue #122以前のexactaComboと同じ状態)。そのため「保存された配分にtrifecta由来の
-   * 買い目が入ること」を直接確認するAC-10型のテストは書けない。代わりに、本ファイル冒頭で
-   * `buildMixedRaceAllocationWithOutcome`をラップしている
+   * Issue #137(AC-2): `raceForAllocation`に`trifectaCombo`・`comboOdds.trifecta`が実際に
+   * 渡っていることを、本ファイル冒頭で`buildMixedRaceAllocationWithOutcome`をラップしている
    * `buildMixedRaceAllocationWithOutcomeMock`(実装へフォールスルーする。#59導入時点からの
-   * 既存の仕組み)の呼び出し引数を直接捕捉し、`analysis-pipeline.ts`が組み立てる
-   * `raceForAllocation`に`trifectaCombo`・`comboOdds.trifecta`が実際に渡っていることを
-   * 確認する(殺す変異: `raceForAllocation`のtrifectaComboの条件付きspreadを落とす。
-   * 設定に依存しないため#138を待たずに固定できる)。dd01ee8(#122)の同型テストと対応する。
+   * 既存の仕組み)の呼び出し引数を直接捕捉して確認する(殺す変異:
+   * `raceForAllocation`のtrifectaComboの条件付きspreadを落とす)。dd01ee8(#122)の同型テストと
+   * 対応する。
+   *
+   * **【Issue #139で更新】** #137時点では`ALL_MIXED_CANDIDATE_BET_TYPES`が`"trifecta"`を
+   * 含まなかったため、本itが使う`includeTrifectaInAllocation: false`設定の下では
+   * trifectaBetsが空であることは「未接続だから」だった。Issue #139(#25-E3b)で
+   * `resolveMixedBetTypes`への接続が完了した現在は、本itの`includeTrifectaInAllocation`が
+   * 明示的に`false`のままであることが理由になる(接続後も三連単がOFFなら配分に現れないという、
+   * 意図した挙動の確認に意味が変わった)。「渡っている値が実際に消費されること」の直接確認は
+   * 下記の新設AC-10テスト2本(ON/OFF対照)が担う。
    */
   it("Issue #137(AC-2): raceForAllocationにtrifectaCombo・comboOdds.trifectaが渡っていること(raceForAllocationのtrifectaComboのspreadを落とす変異を検知)", async () => {
     const saved: AnalysisRecord[] = [];
@@ -561,10 +633,75 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     expect(raceForAllocation.trifectaCombo).toEqual({ "010203": 50000, "030201": 60000 });
     expect(raceForAllocation.comboOdds?.trifecta).toEqual(trifectaOutcome);
 
-    // #138未着手のため、trifectaは実際にはどの配分にも影響しないこと(既定挙動が不変で
-    // あることの確認。AC-6の趣旨と同じ)。
+    // includeTrifectaInAllocation=falseのため、trifectaは配分に影響しないこと
+    // (本itはあくまで「値が渡っていること」の確認が主眼。OFFなら現れないという契約自体は
+    // 下記の対照テストが直接確認する)。
     const allocation = saved[0]!.allocation;
     expect(allocation).not.toBeUndefined();
+    const trifectaBets = allocation!.bets.filter((b) => b.betType === "trifecta");
+    expect(trifectaBets).toEqual([]);
+  });
+
+  // 【Issue #139(#25-E3b)で新設】quinella(Issue #117)・exacta(Issue #125)と同型のAC-10テスト。
+  // `resolveMixedBetTypes`への接続により、三連単オッズが実際に消費され、保存される配分記録
+  // (analysis_bets)にbet_type='trifecta'の行が入ることを直接確認する。
+  it("Issue #139(AC-10): raceForAllocationのtrifectaCombo/comboOddsが実際に消費され、三連単オッズあり・includeTrifectaInAllocation=ONのとき保存される配分記録(analysis_bets)にbet_type='trifecta'の行が入ること", async () => {
+    const saved: AnalysisRecord[] = [];
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceDataWithTrifecta(RACE_ID)),
+      saveAnalysis: (rec) => {
+        saved.push(rec);
+        return 1;
+      },
+      allocationSettings: {
+        bankroll: 300000,
+        perRaceCap: 20000,
+        kellyFraction: 0.5,
+        includeComboOdds: true,
+        includeWideInAllocation: false,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: false,
+        includeExactaInAllocation: false,
+        includeTrifectaInAllocation: true,
+      },
+    };
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+    expect(saved).toHaveLength(1); // 前提固定。
+    const allocation = saved[0]!.allocation;
+    expect(allocation).not.toBeUndefined();
+    // 前提固定(空振り防止): 実際に混在配分が計算されたこと(route='invalid'/'unset'等ではないこと)。
+    expect(allocation!.meta.route).toBe("mixed");
+    const trifectaBets = allocation!.bets.filter((b) => b.betType === "trifecta");
+    expect(trifectaBets.length).toBeGreaterThan(0);
+  });
+
+  it("Issue #139(AC-10): includeTrifectaInAllocation=OFFなら、三連単オッズがあっても保存される配分記録にbet_type='trifecta'の行が入らないこと(対照)", async () => {
+    const saved: AnalysisRecord[] = [];
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => fakeRaceDataWithAllCombosIncludingTrifecta(RACE_ID)),
+      saveAnalysis: (rec) => {
+        saved.push(rec);
+        return 1;
+      },
+      allocationSettings: {
+        bankroll: 3000000,
+        perRaceCap: 3000000,
+        kellyFraction: 0.5,
+        includeComboOdds: true,
+        includeWideInAllocation: true,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
+        includeTrifectaInAllocation: false,
+      },
+    };
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+    expect(saved).toHaveLength(1); // 前提固定。
+    const allocation = saved[0]!.allocation;
+    expect(allocation).not.toBeUndefined();
+    expect(allocation!.meta.route).toBe("mixed");
     const trifectaBets = allocation!.bets.filter((b) => b.betType === "trifecta");
     expect(trifectaBets).toEqual([]);
   });

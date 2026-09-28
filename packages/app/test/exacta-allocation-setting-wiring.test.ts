@@ -213,10 +213,14 @@ describe("resolveMixedBetTypes配線: includeExactaInAllocationの値でbetType=
 describe("isComboBetTypesOff配線: includeExactaInAllocationの値でfallbackReasonが変わること(Issue #125)", () => {
   it("ワイド・3連複・馬連OFFのまま馬単だけtrue/falseを切り替えると、combo-bet-types-offになるかどうかが切り替わること", () => {
     const race = mixedRaceWithExacta(8);
+    // Issue #139で三連単(includeTrifectaInAllocation)がisComboBetTypesOffの判定に
+    // 加わったため、既定ON(settings()の既定値)のままだと条件②が常に不成立になり、
+    // 本itの前提(馬単だけを変えれば条件②の成否が切り替わる)が崩れる。三連単もOFFに固定する。
     const base = settings({
       includeWideInAllocation: false,
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
+      includeTrifectaInAllocation: false,
     });
 
     const withExactaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeExactaInAllocation: true });
@@ -235,10 +239,14 @@ describe("isComboBetTypesOff配線: includeExactaInAllocationの値でfallbackRe
     // trueなら③no-combo-candidates、falseなら②combo-bet-types-offと異なる値になる
     // (「接続後も一律に無視される」という意味ではないことに注意)。
     const race = raceInput({ rows: allCandidateRows(8) });
+    // Issue #139で三連単(includeTrifectaInAllocation)がisComboBetTypesOffの判定に
+    // 加わったため、既定ON(settings()の既定値)のままだと条件②が常に不成立になり、
+    // 本itの前提(falseのとき②へ落ちる)が崩れる。三連単もOFFに固定する。
     const base = settings({
       includeWideInAllocation: false,
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
+      includeTrifectaInAllocation: false,
     });
     const withExactaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeExactaInAllocation: true });
     const withExactaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeExactaInAllocation: false });

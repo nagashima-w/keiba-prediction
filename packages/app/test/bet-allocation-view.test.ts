@@ -256,14 +256,20 @@ describe("formatBetLabel(買い目ラベルの純関数生成。umabanをJSXに�
  * 既存の`formatBetLabel`と同じ表記のままにする(呼び出し元〈BatchAnalysisView.tsx・
  * allocation-proposal-view.ts〉を書き換えても、馬単以外の券種の見た目は変えない)。
  */
-describe("formatComboBetLabel(券種を見て表記を切り替える。Issue #125・#24-E3b・AC-6)", () => {
+describe("formatComboBetLabel(券種を見て表記を切り替える。Issue #125・#24-E3b・AC-6、Issue #139・#25-E3bで三連単を追加)", () => {
   it("馬単(exacta)は『N→M』形式になり、並びをそのまま保つこと(13→8と8→13は別の表記になる。殺す変異: 並べ替える/ハイフンにする)", () => {
     expect(formatComboBetLabel("exacta", [13, 8])).toBe("13→8");
     expect(formatComboBetLabel("exacta", [8, 13])).toBe("8→13");
     expect(formatComboBetLabel("exacta", [13, 8])).not.toBe(formatComboBetLabel("exacta", [8, 13]));
   });
 
-  it("ワイド・馬連・3連複は従来どおり『N-M』『N-M-L』形式(ハイフン区切り)のままであること(馬単だけの例外にする)", () => {
+  it("三連単(trifecta)も馬単と同じ『N→M→L』形式になり、着順の並びをそのまま保つこと(13→8→5と5→8→13は別の表記になる。殺す変異: 並べ替える/ハイフンにする)", () => {
+    expect(formatComboBetLabel("trifecta", [13, 8, 5])).toBe("13→8→5");
+    expect(formatComboBetLabel("trifecta", [5, 8, 13])).toBe("5→8→13");
+    expect(formatComboBetLabel("trifecta", [13, 8, 5])).not.toBe(formatComboBetLabel("trifecta", [5, 8, 13]));
+  });
+
+  it("ワイド・馬連・3連複は従来どおり『N-M』『N-M-L』形式(ハイフン区切り)のままであること(馬単・三連単だけの例外にする)", () => {
     expect(formatComboBetLabel("wide", [4, 7])).toBe("4-7");
     expect(formatComboBetLabel("quinella", [4, 7])).toBe("4-7");
     expect(formatComboBetLabel("trio", [3, 4, 7])).toBe("3-4-7");
@@ -274,7 +280,7 @@ describe("formatComboBetLabel(券種を見て表記を切り替える。Issue #1
     expect(formatComboBetLabel("win", [4])).toBe("4番");
   });
 
-  it("exacta以外はformatBetLabelと同じ結果を返すこと(formatBetLabel自体は変更していないことの直接確認)", () => {
+  it("exacta・trifecta以外はformatBetLabelと同じ結果を返すこと(formatBetLabel自体は変更していないことの直接確認)", () => {
     expect(formatComboBetLabel("wide", [4, 7])).toBe(formatBetLabel([4, 7]));
     expect(formatComboBetLabel("trio", [3, 4, 7])).toBe(formatBetLabel([3, 4, 7]));
   });

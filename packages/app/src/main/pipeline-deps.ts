@@ -141,11 +141,9 @@ export interface PipelineWiringConfig {
    * 書かない(馬連は#59が固定した列一覧の凍結をIssue #118で解除したが、馬単は#24-E3a時点では
    * 解除しない。`allocation-record.ts`冒頭のJSDoc参照)。
    *
-   * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は7→8項目化した追加分。馬単(#24-E3a)と
-   * 同じ経緯を辿る: この型に持たせる目的は`AnalysisAllocationSettings`(8→9項目)まで値を運ぶ
-   * 配管の一部としてのみで、`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は
-   * #25-E3b(Issue #139)のスコープ、メタ行への書き込みは#25-E3c(Issue #140)のスコープ
-   * (`allocation-record.ts`冒頭のJSDoc参照)。
+   * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は7→8項目化した追加分。
+   * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #139(#25-E3b)で完了した。
+   * メタ行への書き込みは#25-E3c(Issue #140)のスコープ(`allocation-record.ts`冒頭のJSDoc参照)。
    */
   readonly allocationSettings?: {
     readonly bankroll: number;

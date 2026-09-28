@@ -776,8 +776,16 @@ describe("yoso×組合せ(候補ゼロの理由が「未取得」か「yoso」�
 // ============================================================================
 
 describe("券種フィルタ(options.betTypes)", () => {
-  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/win/wide/quinella/exacta/trio。Issue #117で馬連、Issue #125で馬単を追加)が対象になること", () => {
-    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual(["place", "win", "wide", "quinella", "exacta", "trio"]);
+  it("省略時はALL_MIXED_CANDIDATE_BET_TYPES(place/win/wide/quinella/exacta/trio/trifecta。Issue #117で馬連、Issue #125で馬単、Issue #139で三連単を追加)が対象になること", () => {
+    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toEqual([
+      "place",
+      "win",
+      "wide",
+      "quinella",
+      "exacta",
+      "trio",
+      "trifecta",
+    ]);
     const rows = allCandidateRows(8);
     const umabans = umabansOf(8);
     const result = buildMixedCandidates(
@@ -852,23 +860,27 @@ describe("券種フィルタ(options.betTypes)", () => {
    * **Issue #128(#25-B)で`AllocationBetType`に`trifecta`(三連単)が加わったが、
    * `mixed-candidates.ts`から三連単の候補を作る経路はまだ無かった(オッズ配線・候補ビルダーは
    * #137、配分接続は#139のスコープ)ため、`quinella`・`exacta`のときと同じ理由で`trifecta`が
-   * 一時的に除外へ加わった。** **Issue #137(#25-E2)で`buildTrifectaCandidatesForBetType`
-   * (オッズ配線・候補ビルダー)は完了したが、`resolveMixedBetTypes`への接続(#139)がまだの
-   * ため、除外は引き続き維持する(`quinella`・`exacta`が#116→#117・#122→#125の間で
-   * 除外されていたのと同じ状態)。**
+   * 一時的に除外へ加わった。** Issue #137(#25-E2)で`buildTrifectaCandidatesForBetType`
+   * (オッズ配線・候補ビルダー)は完了したが、`resolveMixedBetTypes`への接続はまだだったため、
+   * 除外はそのまま維持されていた(`quinella`・`exacta`が#116→#117・#122→#125の間で
+   * 除外されていたのと同じ状態)。**Issue #139(#25-E3b)で`resolveMixedBetTypes`が実際に
+   * `"trifecta"`を渡すよう接続し、`ALL_MIXED_CANDIDATE_BET_TYPES`にも`trifecta`を加えたため、
+   * 除外集合は再び空になった。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
-   * 除外集合を`["trifecta"]`と直接固定することで、`trifecta`以外の券種が誤って除外に
-   * 混ざったり、`trifecta`の除外が誤って解除されたり(#139より前に解除すると
-   * 「三連単 ¥0 0点」の再発になる)すれば、このテストが赤くなり
-   * 「足すかどうかの判断」を人間に強制する。
+   * 除外集合を`[]`と直接固定することで、いずれかの券種が誤って除外に混ざれば、このテストが
+   * 赤くなり「足すかどうかの判断」を人間に強制する。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['trifecta']だけであること(Issue #128・#137: 三連単のオッズ配線・候補ビルダー〈#137〉は完了したが、配分接続〈#139〉が終わるまで除外する)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が無いこと(Issue #139: 三連単の配分接続が完了し、AllocationBetTypeの全メンバーと再び一致する)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual(["trifecta"]);
+    expect(excluded).toEqual([]);
+  });
+
+  it("ALL_MIXED_CANDIDATE_BET_TYPESにtrifecta(三連単)が含まれること(Issue #139)", () => {
+    expect(ALL_MIXED_CANDIDATE_BET_TYPES).toContain("trifecta");
   });
 });
 
@@ -1448,26 +1460,32 @@ describe("馬単(exacta)候補(#122・#24-E2。Issue #125で既定でも対象�
  * `buildTrifectaCandidatesForBetType`を通した配線を検証する(`buildExactaCandidatesForBetType`と
  * 同型の骨格)。
  *
- * **`ALL_MIXED_CANDIDATE_BET_TYPES`には三連単をまだ加えない**(#139〈#25-E3b〉のスコープ。
- * 「ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['trifecta']だけであること」
- * describeがこれを固定している)。したがって以下の1本目は既定(betTypes省略)呼び出しで
- * kind='not-requested'・候補0件のままであることを確認する(#122時点のexactaの1本目と
- * 同型。#125のような反転はまだ起きない)。
+ * **`ALL_MIXED_CANDIDATE_BET_TYPES`はIssue #139(#25-E3b)で三連単を加えた**
+ * (「ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が無いこと」describeが
+ * これを固定している)。したがって以下の1本目は既定(betTypes省略)呼び出しでも
+ * kind='built'・候補が実際に構築されることを確認する(#125でのexactaの反転と同型)。
  *
  * オッズ値の実測(4頭・adjustedProb=0.5均等・topFinishCount=3): 各順序付きトリプルの的中確率は
  * 1/24(P(4,3)=24通りに均等分配される。均等重みのPlackett-Luceでは全順列が等確率になるため、
  * 馬単のP(4,2)=12通りで1/12だったのと同じ理屈)。odds=999 → ev=41.625(EVプラス)、
  * odds=5 → ev=0.2083(EV非プラス、閾値1.0未満)。
  */
-describe("三連単(trifecta)候補(#137・#25-E2)", () => {
-  it("既定(betTypes省略)では三連単は対象外(kind='not-requested')のままであること(#139で配分・既定に接続するまでの暫定状態)", () => {
+describe("三連単(trifecta)候補(#137・#25-E2→#139・#25-E3bで既定に接続)", () => {
+  // 【Issue #139で改訂】旧版(#137時点)は既定(betTypes省略)呼び出しでkind='not-requested'・
+  // 候補0件のままであることを固定していた(ALL_MIXED_CANDIDATE_BET_TYPESが三連単を
+  // 含んでいなかったため)。#139でALL_MIXED_CANDIDATE_BET_TYPESに三連単を加えたため、
+  // 何を保証していたか(新旧対応表):
+  //   旧: 既定呼び出しでkind='not-requested'・候補0件のまま(未接続の証明)
+  //   新: 既定呼び出しでkind='built'・候補が実際に構築される(接続されたことの確認)
+  it("既定(betTypes省略)でも三連単が対象になり、候補が構築されること(kind='built'。P(4,3)=24件。Issue #139でALL_MIXED_CANDIDATE_BET_TYPESに三連単を追加)", () => {
     const rows = allCandidateRows(4);
     const umabans = umabansOf(4);
     const result = buildMixedCandidates(
       raceInput({ rows, trifectaCombo: fullOrderedTripleOddsRecord(umabans, 999) }),
     );
-    expect(result.diagnostics.trifecta).toEqual({ kind: "not-requested" });
-    expect(result.candidates.filter((c) => c.betType === "trifecta")).toHaveLength(0);
+    expect(result.diagnostics.trifecta.kind).toBe("built");
+    const trifectaCandidates = result.candidates.filter((c) => c.betType === "trifecta");
+    expect(trifectaCandidates).toHaveLength(24); // P(4,3)
   });
 
   it("betTypesに明示的にtrifectaを含めれば候補が構築されること(kind='built'。P(4,3)=24件)", () => {

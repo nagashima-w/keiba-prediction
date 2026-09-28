@@ -43,20 +43,24 @@
  *    総額・点数・券種別構成比(複勝/ワイド/三連複)を表示する。
  * 2. 1レースあたりの所要時間(`buildMixedAllocationDisplay` を実運用と同じ既定設定で
  *    複数回実行した平均。ウォームアップ1回を除く)。
- * 3. 馬連(quinella)・馬単(exacta)を候補ビルダーに追加したときの性能・構成の実測
- *    (Issue #116 AC-7・Issue #117で追記・Issue #122 AC-7で馬単の構成を追加)。
- *    `fixtures/odds_quinella_202603020211.json`・`fixtures/odds_exacta_202603020211.json`
+ * 3. 馬連(quinella)・馬単(exacta)・三連単(trifecta)を候補ビルダーに追加したときの性能・
+ *    構成の実測(Issue #116 AC-7・Issue #117で追記・Issue #122 AC-7で馬単の構成を追加・
+ *    Issue #137 AC-6で三連単のDBサイズ実測を追加・Issue #139〈#25-E3b〉AC7で三連単を
+ *    含めたときの構成比較を追加)。`fixtures/odds_quinella_202603020211.json`・
+ *    `fixtures/odds_exacta_202603020211.json`・`fixtures/odds_trifecta_202603020211.json`
  *    (いずれも同レース・同16頭)を`parseComboOdds`経由でパースしてそれぞれ`quinellaCombo`・
- *    `exactaCombo`を作り、`[place,win,wide,trio]`(馬連・馬単なし)・
+ *    `exactaCombo`・`trifectaCombo`を作り、`[place,win,wide,trio]`(馬連・馬単・三連単なし)・
  *    `[place,win,wide,trio,quinella]`(馬連あり)・`[place,win,wide,trio,quinella,exacta]`
- *    (馬単も追加)の3条件で`buildMixedCandidates`+`allocateGeneralBets`の1レースあたりの
- *    所要時間(平均・ウォームアップ除く)・券種別候補数・点数・券種別構成比を並べて出す。
+ *    (馬単も追加)・`[place,win,wide,trio,quinella,exacta,trifecta]`(三連単も追加)の4条件で
+ *    `buildMixedCandidates`+`allocateGeneralBets`の1レースあたりの所要時間(平均・ウォームアップ
+ *    除く)・券種別候補数・点数・券種別構成比を並べて出す。
  *    **Issue #117で`resolveMixedBetTypes`(`includeQuinellaInAllocation`設定)、
- *    Issue #125で`resolveMixedBetTypes`(`includeExactaInAllocation`設定)がそれぞれ実際に
- *    接続された**が、本節は依然として`buildMixedCandidates`の`options.betTypes`へ明示的に
- *    条件を渡す実測であり、設定のON/OFFを経由しない(#1の`greedySteps`感度表が使う
- *    `central-on.json`フィクスチャには`quinellaCombo`/`exactaCombo`が無いため、そちらは
- *    本節と無関係に馬連・馬単の候補が常に0件になる。両者を混同しないこと。AC-11参照)。
+ *    Issue #125で`resolveMixedBetTypes`(`includeExactaInAllocation`設定)、Issue #139で
+ *    `resolveMixedBetTypes`(`includeTrifectaInAllocation`設定)がそれぞれ実際に接続された**が、
+ *    本節は依然として`buildMixedCandidates`の`options.betTypes`へ明示的に条件を渡す実測であり、
+ *    設定のON/OFFを経由しない(#1の`greedySteps`感度表が使う`central-on.json`フィクスチャには
+ *    `quinellaCombo`/`exactaCombo`/`trifectaCombo`が無いため、そちらは本節と無関係に
+ *    馬連・馬単・三連単の候補が常に0件になる。両者を混同しないこと。AC-11参照)。
  */
 
 import { readFileSync } from "node:fs";
@@ -433,10 +437,10 @@ async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise
       "Issue #116 AC-7・Issue #122 AC-7・Issue #137 AC-6) ===",
   );
   console.log(
-    "    (三連単なしの最初の3シナリオはIssue #137で数値が変わらないこと自体を確認する回帰観点。" +
-      "buildMixedCandidatesのALL_MIXED_CANDIDATE_BET_TYPESにtrifectaを追加していないため" +
-      "〈#139まで〉、betTypesを明示していないこの3シナリオの計算経路自体はIssue #137による" +
-      "変更を一切受けない)",
+    "    (本関数は4シナリオともbetTypesを明示的に指定するため、Issue #139で" +
+      "ALL_MIXED_CANDIDATE_BET_TYPESに三連単が加わった後も、三連単なしの最初の3シナリオの" +
+      "数値自体は変わらない〈既定値〈betTypes省略〉に依存する下記『greedySteps感度表』〈#1〉" +
+      "とは異なる経路であることに注意〉)",
   );
 
   for (const scenario of scenarios) {

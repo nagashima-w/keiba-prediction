@@ -5,12 +5,17 @@
  *
  * `scripts/bench-mixed-allocation.ts`(D-2c・#28。券種横断の候補構築+配分の1レース所要時間)、
  * `scripts/bench-run-greedy-allocation.ts`(#107・#24-C。`runGreedyAllocation`単体の内訳)の
- * どちらも三連単(`trifecta`)を測っていない。三連単は `AllocationBetType` に既に存在するが
- * (`combo-bet-allocation.ts`。Issue #128)、`buildMixedCandidates`(`mixed-candidates.ts`)は
- * まだ三連単を配線していない(Issue #132のスコープ)。したがって本スクリプトは
+ * どちらも三連単(`trifecta`)を測っていない。三連単は `AllocationBetType` に既に存在し
+ * (`combo-bet-allocation.ts`。Issue #128)、**Issue #139(#25-E3b)で`buildMixedCandidates`
+ * (`mixed-candidates.ts`)の既定呼び出し〈`ALL_MIXED_CANDIDATE_BET_TYPES`〉にも三連単の配線が
+ * 完了した。** 本スクリプトは着手当時(#129・#25-C。#139より前)の設計をそのまま維持し、
  * `buildTrifectaCandidates`(core)を直接呼び、`buildMixedCandidates`が作った既存6券種
  * (複勝・単勝・ワイド・3連複・馬連・馬単)の候補にその場で連結してから`allocateGeneralBets`へ
- * 渡す(coreの型・門番は一切変更しない。`packages`配下の各パッケージの`src`は不変という制約)。
+ * 渡す(coreの型・門番は一切変更しない。`packages`配下の各パッケージの`src`は不変という制約。
+ * #139着手前ゲート裁定2026-09-27〜28: 本番経路〈`buildMixedCandidates`の既定呼び出し〉を
+ * 使うよう書き直さず、#129・#136当時の記録としてそのまま残す。AC7の実測値は
+ * `scripts/bench-mixed-allocation.ts`〈16頭・本番経路〉と本スクリプトのAC-18〈18頭〉の
+ * 両方を使って報告する)。
  *
  * ## 着手前ゲート合意事項(メイン裁定。2026-09-26)
  *

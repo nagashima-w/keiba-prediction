@@ -406,9 +406,8 @@ export interface AnalysisResult {
    * しないため。地方では`scrapeRace`が調教と同じ`if (!isNar)`ガードで取得自体を試みない
    * 〈`comboOdds.trifecta`もあわせて`undefined`のまま〉。中央では他の4券種と同じ挙動)。
    *
-   * **配分・画面への配線はまだ無い**(このフィールドを保持・伝播するだけ。#25-E2〈#137〉の
-   * スコープ。配分の券種選択〈`resolveMixedBetTypes`〉への接続は#138〈`includeTrifectaInAllocation`
-   * の配管〉・#139〈実際の接続〉)。
+   * 配分の券種選択(`resolveMixedBetTypes`)への接続はIssue #138(#25-E3a・
+   * `includeTrifectaInAllocation`の配管)・Issue #139(#25-E3b・実際の接続)で完了した。
    */
   readonly trifectaCombo?: Record<string, number | null>;
   /**

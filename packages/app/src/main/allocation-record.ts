@@ -34,10 +34,11 @@
  *   〈記録なし〉のまま読める。`includeQuinella`と同型)。
  *
  *   **#25-E3a(Issue #138)で`MixedAllocationSettings`は10項目(`includeTrifectaInAllocation`追加)に
- *   なったが、この設定エコーは9列のまま据え置く**(`settingsColumnsOf`が10項目目を読まない。
- *   馬連〈#115〉・馬単〈#124〉と同じ切り方: 券種の選択・D-2フォールバック規則・画面表示は
- *   #25-E3b(Issue #139)のスコープ、このメタ行のスキーマ解除(列を読む人〈過去分析再表示の
- *   「三連単: ON/OFF/記録なし」〉が実在するに至った時点)は#25-E3c(Issue #140)のスコープ)。
+ *   なった。券種の選択・D-2フォールバック規則・画面表示は#25-E3b(Issue #139)で接続済みだが、
+ *   この設定エコーは9列のまま据え置く**(`settingsColumnsOf`が10項目目を読まない。
+ *   馬連〈#115→#118〉・馬単〈#124→#126〉と同じ切り方: このメタ行のスキーマ解除(列を読む人
+ *   〈過去分析再表示の「三連単: ON/OFF/記録なし」〉が実在するに至った時点)は
+ *   #25-E3c(Issue #140)のスコープ)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
  * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
@@ -130,14 +131,13 @@ import type {
  * 一部としてのみだった(`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #125
  * 〈#24-E3b〉で完了。`shared/mixed-race-allocation.ts`のJSDoc参照)。
  *
- * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は8→9項目化した追加分。**メタ行への
- * 書き込みは接続しない**: `settingsColumnsOf`(上記「## 列の由来」参照)は9列
- * (`include_wide`/`include_trio`/`include_quinella`/`include_exacta`)のままこのフィールドを
- * 読まない(#59が固定した「列一覧は固定・増減は停止条件」を#25-E3aでは解除しない。列を読む人が
- * 実在するに至るタスク=Issue #140〈#25-E3c〉で解除する見込み)。この型に持たせる目的は
- * `MixedAllocationSettings`(9→10項目)まで値を運ぶ配管の一部としてのみであり、
- * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は#25-E3a時点では行わない
- * (Issue #139〈#25-E3b〉のスコープ。`shared/mixed-race-allocation.ts`のJSDoc参照)。
+ * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は8→9項目化した追加分。
+ * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #139(#25-E3b)で完了した
+ * (`shared/mixed-race-allocation.ts`のJSDoc参照)。**メタ行への書き込みはまだ接続しない**:
+ * `settingsColumnsOf`(上記「## 列の由来」参照)は9列(`include_wide`/`include_trio`/
+ * `include_quinella`/`include_exacta`)のままこのフィールドを読まない(#59が固定した
+ * 「列一覧は固定・増減は停止条件」をまだ解除しない。列を読む人が実在するに至るタスク=
+ * Issue #140〈#25-E3c〉で解除する見込み。馬連〈#115→#118〉・馬単〈#124→#126〉と同じ切り方)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;
