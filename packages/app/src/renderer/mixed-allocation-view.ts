@@ -311,22 +311,22 @@ export function buildHiddenAllocationsBlocks(
  * throwするため、ここに到達しない)。
  *
  * `allocation-proposal-view.ts`の`betTypeLabel`(DB由来の開いた文字列を扱う、統合しない
- * 別実装)とplace/win/wide/quinella/exacta/trioの6つの日本語ラベルが同一であることは
+ * 別実装)とplace/win/wide/quinella/exacta/trio/trifectaの7つの日本語ラベルが同一であることは
  * `allocation-proposal-view.test.ts`「betTypeLabelとmixedBetTypeLabel…」でリテラル固定する。
  *
- * **かつては`"win"`・`"quinella"`・`"exacta"`が例外だった(#91・#23-B1a、#112・#24-D1、
- * #120・#24-E1)。** 当時`betTypeLabel`はこれらのcaseを持たず(`default`分岐でDB由来の
- * 生文字列をそのまま返す)、本関数との戻り値が一致しない非対称があった。`"win"`は#90
- * (#23-B2)、`"quinella"`はIssue #117(#24-D3b-2)、`"exacta"`はIssue #125(#24-E3b)で
- * それぞれ`betTypeLabel`側にもcaseを追加し、この非対称は解消済み(現在は6値すべてで
- * 両関数の戻り値が一致する)。
+ * **かつては`"win"`・`"quinella"`・`"exacta"`・`"trifecta"`が例外だった(#91・#23-B1a、
+ * #112・#24-D1、#120・#24-E1、#128・#25-B)。** 当時`betTypeLabel`はこれらのcaseを持たず
+ * (`default`分岐でDB由来の生文字列をそのまま返す)、本関数との戻り値が一致しない非対称が
+ * あった。`"win"`は#90(#23-B2)、`"quinella"`はIssue #117(#24-D3b-2)、`"exacta"`はIssue #125
+ * (#24-E3b)、`"trifecta"`はIssue #139(#25-E3b)でそれぞれ`betTypeLabel`側にもcaseを追加し、
+ * この非対称は解消済み(現在は7値すべてで両関数の戻り値が一致する)。
  *
- * **`"trifecta"`(三連単)はIssue #128(#25-B)で`AllocationBetType`に加わったが、
- * 本caseの追加はコンパイルを通すための最小限であり(`betType`は閉じたユニオンのため
- * 網羅的switchが要求する)、`betTypeLabel`側へのcase追加・
- * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加は行わない**
- * (app はまだ三連単の候補を一切作らない。オッズ配線・配分接続は#132〈#25-E〉のスコープ。
- * `win`/`quinella`/`exacta`が最初にそうだったのと同じ経緯)。
+ * **`"trifecta"`(三連単)はIssue #128(#25-B)で`AllocationBetType`に加わり、当初は本caseの
+ * 追加をコンパイルを通すための最小限にとどめ、`betTypeLabel`側へのcase追加・
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加は行わなかった**(app はまだ三連単の
+ * 候補を一切作らなかったため。`win`/`quinella`/`exacta`が最初にそうだったのと同じ経緯)。
+ * **Issue #139(#25-E3b)で配分接続が完了したため、`betTypeLabel`側のcase追加・
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加のどちらも完了した。**
  */
 export function mixedBetTypeLabel(
   betType: AllocationBetType,
@@ -356,49 +356,81 @@ export interface MixedUnjudgedCounts {
   readonly oddsMalformedCount: number;
 }
 
+/** `aggregateUnjudgedCounts`が1券種ぶんの判定不能件数を表すのに使う共通の形(0埋め済み)。 */
+interface UnjudgedFields {
+  readonly oddsMissingCount: number;
+  readonly oddsUnfetchedCount: number;
+  readonly oddsMalformedCount: number;
+}
+
+/** 判定不能0件(対象外〈not-requested`/`unavailable`〉、またはそもそも判定不能を持たない区分の既定値)。 */
+const ZERO_UNJUDGED: UnjudgedFields = { oddsMissingCount: 0, oddsUnfetchedCount: 0, oddsMalformedCount: 0 };
+
 /**
- * 券種横断(複勝・単勝・ワイド・馬連・馬単・3連複)で判定不能だった件数を合算する(AC15・
- * Issue #90でwinを追加・Issue #117で馬連〈quinella〉を追加・Issue #125で馬単〈exacta〉を
- * 追加)。`kind!=="built"/"judged"`(`not-requested`・`unavailable`。ユーザーが対象外にした
- * 券種、またはwinのyosoガード)は判定不能ではなく「対象外」なので0として扱う
- * (判定不能〈unjudged〉と対象外〈not-requested`/`unavailable`〉を混同しない)。
- * **`oddsMalformedCount`はワイド・3連複固有の概念ではない**(旧記述は誤り。#90でwinも
- * `oddsMalformedCount`を持つようになったため加算対象に加えた。この記述の誤りは
- * 「加算漏れを誘発する」〈D-3・boss裁定〉ため実装と併せて直す)。複勝は
- * `unjudged.oddsMissingCount`のみ持つ・winは`oddsMissingCount`/`oddsMalformedCount`を持つが
- * `oddsUnfetchedCount`は持たない(`winOdds`はAnalysisRowのフィールドであり「キーが無い」
- * 未取得状態が構造的に存在しないため。`WinCandidateDiagnosticsView`のJSDoc参照)。
- * 馬連(quinella)・馬単(exacta)はワイド・3連複と同型の`ComboCandidateDiagnosticsView`
- * (`kind:"built"`のとき`oddsMissingCount`/`oddsUnfetchedCount`/`oddsMalformedCount`を
- * すべて持つ)を共有するため、wide/trioと同じ形で加算する。
+ * 1券種(`betType`)ぶんの判定不能件数を、その券種が実際に持つ診断値の形(複勝・単勝・
+ * 組合せ券種でそれぞれ異なる)から取り出す(`aggregateUnjudgedCounts`の内部ヘルパー)。
+ *
+ * `betType`は`AllocationBetType`(coreの唯一の定義)を引数に取る**網羅的switch**にしてある
+ * ため、`AllocationBetType`に新しい券種が増えると本関数がコンパイルエラーになり、
+ * 「合算対象に加えるかどうか」の判断を人間に強制する(Issue #139の着手前確認で発覚した
+ * 欠陥——`AllocationBetType`にtrifectaが加わった後も本関数〈旧実装〉がtrifectaを一切
+ * 参照しなかったため、三連単のoddsMissingCount/oddsUnfetchedCount/oddsMalformedCountが
+ * 常に合算から漏れていた——の再発防止)。
+ */
+function unjudgedOf(betType: AllocationBetType, diagnostics: MixedCandidateDiagnostics): UnjudgedFields {
+  switch (betType) {
+    case "place": {
+      // 複勝は`unjudged.oddsMissingCount`のみ持つ(oddsUnfetchedCount/oddsMalformedCountは無い)。
+      const d = diagnostics.place;
+      return d.kind === "judged" ? { ...ZERO_UNJUDGED, oddsMissingCount: d.unjudged.oddsMissingCount } : ZERO_UNJUDGED;
+    }
+    case "win": {
+      // 単勝はoddsMissingCount/oddsMalformedCountを持つが、oddsUnfetchedCountは持たない
+      // (`winOdds`はAnalysisRowのフィールドであり「キーが無い」未取得状態が構造的に存在しないため。
+      // `WinCandidateDiagnosticsView`のJSDoc参照)。
+      const d = diagnostics.win;
+      return d.kind === "judged"
+        ? { ...ZERO_UNJUDGED, oddsMissingCount: d.unjudged.oddsMissingCount, oddsMalformedCount: d.unjudged.oddsMalformedCount }
+        : ZERO_UNJUDGED;
+    }
+    case "wide":
+    case "trio":
+    case "quinella":
+    case "exacta":
+    case "trifecta": {
+      // ワイド・3連複・馬連・馬単・三連単は同型の`ComboCandidateDiagnosticsView`を共有し、
+      // `kind:"built"`のとき3区分すべてを持つ。
+      const d = diagnostics[betType];
+      return d.kind === "built" ? d.build.unjudged : ZERO_UNJUDGED;
+    }
+  }
+}
+
+/**
+ * 券種横断(複勝・単勝・ワイド・馬連・馬単・3連複・三連単)で判定不能だった件数を合算する
+ * (AC15・Issue #90でwinを追加・Issue #117で馬連〈quinella〉を追加・Issue #125で馬単
+ * 〈exacta〉を追加・Issue #139で三連単〈trifecta〉を追加)。`kind!=="built"/"judged"`
+ * (`not-requested`・`unavailable`。ユーザーが対象外にした券種、またはwinのyosoガード)は
+ * 判定不能ではなく「対象外」なので0として扱う(判定不能〈unjudged〉と対象外
+ * 〈not-requested`/`unavailable`〉を混同しない)。
+ *
+ * **Issue #139(#25-E3b)で券種を1つずつ手で足す実装から、`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`
+ * (全7券種を持つ唯一の定義)を`.reduce`する実装へ変更した。** 旧実装は券種ごとに変数束縛
+ * (`wideUnjudged`等)を手書きし、3つの合計式それぞれに手で足し込む形だったため、三連単
+ * (`AllocationBetType`に既に存在した)を`AllocationBetType`に加えた後もこの関数への追加を
+ * 忘れる欠陥が実際に発生した(#139着手前確認で発覚。三連単のunjudgedが常に0扱いになり、
+ * 三連単しか判定不能が無いレースでは注記自体が出ない利用者から見える欠陥だった)。本実装は
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`を回して`unjudgedOf`(`AllocationBetType`の
+ * 網羅的switch)で1券種ずつ取り出すため、次に券種が増えたときは
+ * (a) `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加、(b) `unjudgedOf`のswitchケース追加
+ * (追加しないとコンパイルエラー)の2点さえ行えば、本関数自体への追加作業は不要になる。
  */
 export function aggregateUnjudgedCounts(diagnostics: MixedCandidateDiagnostics): MixedUnjudgedCounts {
-  const placeMissing =
-    diagnostics.place.kind === "judged" ? diagnostics.place.unjudged.oddsMissingCount : 0;
-  const winUnjudged = diagnostics.win.kind === "judged" ? diagnostics.win.unjudged : null;
-  const wideUnjudged = diagnostics.wide.kind === "built" ? diagnostics.wide.build.unjudged : null;
-  const trioUnjudged = diagnostics.trio.kind === "built" ? diagnostics.trio.build.unjudged : null;
-  const quinellaUnjudged = diagnostics.quinella.kind === "built" ? diagnostics.quinella.build.unjudged : null;
-  const exactaUnjudged = diagnostics.exacta.kind === "built" ? diagnostics.exacta.build.unjudged : null;
+  const perType = MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.map((betType) => unjudgedOf(betType, diagnostics));
   return {
-    oddsMissingCount:
-      placeMissing +
-      (winUnjudged?.oddsMissingCount ?? 0) +
-      (wideUnjudged?.oddsMissingCount ?? 0) +
-      (trioUnjudged?.oddsMissingCount ?? 0) +
-      (quinellaUnjudged?.oddsMissingCount ?? 0) +
-      (exactaUnjudged?.oddsMissingCount ?? 0),
-    oddsUnfetchedCount:
-      (wideUnjudged?.oddsUnfetchedCount ?? 0) +
-      (trioUnjudged?.oddsUnfetchedCount ?? 0) +
-      (quinellaUnjudged?.oddsUnfetchedCount ?? 0) +
-      (exactaUnjudged?.oddsUnfetchedCount ?? 0),
-    oddsMalformedCount:
-      (winUnjudged?.oddsMalformedCount ?? 0) +
-      (wideUnjudged?.oddsMalformedCount ?? 0) +
-      (trioUnjudged?.oddsMalformedCount ?? 0) +
-      (quinellaUnjudged?.oddsMalformedCount ?? 0) +
-      (exactaUnjudged?.oddsMalformedCount ?? 0),
+    oddsMissingCount: perType.reduce((sum, u) => sum + u.oddsMissingCount, 0),
+    oddsUnfetchedCount: perType.reduce((sum, u) => sum + u.oddsUnfetchedCount, 0),
+    oddsMalformedCount: perType.reduce((sum, u) => sum + u.oddsMalformedCount, 0),
   };
 }
 
@@ -604,10 +636,10 @@ export function resolvePlaceOnlyStake(
  * #35の較正注記(AC14)。組合せ券種のEVが過大評価であること・較正未実施であることを明記する。
  * Issue #117: 例示にワイド・3連複に加えて馬連も含めた(馬連も同じ「複数頭の組み合わせによる
  * 確率誤差の増幅」を受ける組合せ券種であり、ワイド・3連複だけを挙げる旧文言はこれを言い落として
- * いた)。Issue #125: 同じ理由で馬単も例示に加えた。
+ * いた)。Issue #125: 同じ理由で馬単も例示に加えた。Issue #139: 同じ理由で三連単も例示に加えた。
  */
 export const COMBO_EV_CALIBRATION_NOTE =
-  "ワイド・馬連・馬単・三連複など組合せ券種のEVは、推定確率の誤差が組み合わせ人数ぶん増幅されるため過大評価になりやすいことが実測でわかっています(較正は未実施・Issue #35)。表示額を鵜呑みにせず、資金管理は慎重に行ってください。";
+  "ワイド・馬連・馬単・三連複・三連単など組合せ券種のEVは、推定確率の誤差が組み合わせ人数ぶん増幅されるため過大評価になりやすいことが実測でわかっています(較正は未実施・Issue #35)。表示額を鵜呑みにせず、資金管理は慎重に行ってください。";
 
 /**
  * `kind:"invalid"`のユーザー向け表示文言(AC17)。`MixedRaceAllocationInvalid.message`は

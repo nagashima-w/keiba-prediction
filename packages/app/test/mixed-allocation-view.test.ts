@@ -1069,6 +1069,78 @@ describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)
     void umabans;
   });
 
+  it("【地方限定・unavailable】地方(NAR)のレースでも、三連単が発売されていない(comboOddsState='unavailable')ときは地方の特例文言(NAR_TRIFECTA_NOTE)ではなく通常のcomboBetTypeNoteの文言になること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
+    const race = raceWithPositiveCombos(8, {
+      raceId: "202654071210",
+      trifectaCombo: {},
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        trifecta: comboOddsOutcome("trifecta", "unavailable"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定(空振り防止): 実際にkind='built'・comboOddsState='unavailable'に到達していること。
+    if (view.diagnostics.trifecta.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    expect(view.diagnostics.trifecta.comboOddsState).toBe("unavailable");
+    expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
+    expect(view.display.trifectaNote).not.toBe(NAR_TRIFECTA_NOTE);
+  });
+
+  it("【地方限定・failed】地方(NAR)のレースでも、三連単の取得に失敗した(comboOddsState='failed')ときは地方の特例文言(NAR_TRIFECTA_NOTE)ではなく通常のcomboBetTypeNoteの文言になること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
+    const race = raceWithPositiveCombos(8, {
+      raceId: "202654071210",
+      trifectaCombo: {},
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        trifecta: comboOddsOutcome("trifecta", "failed"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    // 前提固定(空振り防止): 実際にkind='built'・comboOddsState='failed'に到達していること。
+    if (view.diagnostics.trifecta.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    expect(view.diagnostics.trifecta.comboOddsState).toBe("failed");
+    expect(view.display.trifectaNote).toBe(comboBetTypeNote(view.diagnostics.trifecta));
+    expect(view.display.trifectaNote).not.toBe(NAR_TRIFECTA_NOTE);
+  });
+
+  it("【地方限定・EVプラス】地方(NAR)のレースでも、三連単にEVプラスの候補があるときはnull(注記なし)であること(殺す変異: 分岐条件を'unknown以外'に広げる)", () => {
+    const umabans = umabansOf(8);
+    const race = raceWithPositiveCombos(8, {
+      raceId: "202654071210",
+      trifectaCombo: fullOrderedTripleOddsRecord(umabans, 100000),
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        trifecta: comboOddsOutcome("trifecta", "available"),
+      },
+    });
+    const view = buildMixedAllocationDisplay(race, settings());
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    if (view.diagnostics.trifecta.kind !== "built") {
+      throw new Error("kind='built'のはず");
+    }
+    // 前提固定(空振り防止): 実際にEVプラスの候補が1件以上あること。
+    expect(view.diagnostics.trifecta.build.judged.positiveCount).toBeGreaterThan(0);
+    expect(view.display.trifectaNote).toBeNull();
+  });
+
   it("三連単にEVプラスの候補があるときはnull(注記なし)であること", () => {
     const umabans = umabansOf(8);
     const race = raceWithPositiveCombos(8, {
@@ -1745,6 +1817,55 @@ describe("AC15: aggregateUnjudgedCounts/totalUnjudgedCount — 券種横断の�
     expect(notRequested.oddsUnfetchedCount).toBe(0);
     expect(notRequested.oddsMalformedCount).toBe(0);
   });
+
+  it("Issue #139(AC15core再発防止): 三連単(trifecta)のoddsMissingCount/oddsUnfetchedCount/oddsMalformedCountも合算されること(wide/trio/quinella/exactaと同型のComboCandidateDiagnosticsViewを共有するため)", () => {
+    const diagnostics = mixedDiagnostics({
+      place: { kind: "judged", judged: { positiveCount: 1, notPositiveCount: 0 }, unjudged: { oddsMissingCount: 2 } },
+      wide: builtComboDiag({ oddsMissingCount: 3, oddsUnfetchedCount: 5, oddsMalformedCount: 1 }),
+      trio: builtComboDiag({ oddsMissingCount: 1, oddsUnfetchedCount: 0, oddsMalformedCount: 2 }),
+      trifecta: builtComboDiag({ oddsMissingCount: 999, oddsUnfetchedCount: 888, oddsMalformedCount: 777 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    // place(2)+wide(3)+trio(1)+trifecta(999)=1005、oddsUnfetchedCountはwide(5)+trio(0)+trifecta(888)=893、
+    // oddsMalformedCountはwide(1)+trio(2)+trifecta(777)=780。
+    // レビュー指摘の再現値(999/888/777)をそのまま使い、実装漏れなら0/0/0のまま検知できない
+    // (合算されていれば必ず999/888/777が最終値に反映される)ことを固定する。
+    expect(counts).toEqual({ oddsMissingCount: 1005, oddsUnfetchedCount: 893, oddsMalformedCount: 780 });
+  });
+
+  it("Issue #139(AC15core再発防止): 三連単がnot-requestedのときは0として扱われること(対象外と判定不能を混同しない)", () => {
+    const notRequested = aggregateUnjudgedCounts(mixedDiagnostics({ trifecta: { kind: "not-requested" } }));
+    expect(notRequested.oddsMissingCount).toBe(0);
+    expect(notRequested.oddsUnfetchedCount).toBe(0);
+    expect(notRequested.oddsMalformedCount).toBe(0);
+  });
+
+  it("【再発防止・全7券種】place/win/wide/quinella/exacta/trio/trifectaのすべてのunjudgedが1本のテストで合算されること(次に券種を足したときの合算漏れを検出する土台)", () => {
+    // 前提固定(空振り防止): MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDERが7券種すべてを
+    // 含むこと(この配列を回して合算する実装であれば、この配列にひとたび券種を足せば
+    // 自動的にここでも合算対象になる。逆に言えば、この配列に足し忘れた新券種はここでも
+    // 検知されない——それは別のテスト〈MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER自体の
+    // 「意図的に除外している券種が無いこと」〉が担う)。
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toHaveLength(7);
+    const diagnostics = mixedDiagnostics({
+      place: { kind: "judged", judged: { positiveCount: 1, notPositiveCount: 0 }, unjudged: { oddsMissingCount: 10 } },
+      win: {
+        kind: "judged",
+        judged: { positiveCount: 1, notPositiveCount: 0 },
+        unjudged: { oddsMissingCount: 20, oddsMalformedCount: 21 },
+      },
+      wide: builtComboDiag({ oddsMissingCount: 30, oddsUnfetchedCount: 31, oddsMalformedCount: 32 }),
+      quinella: builtComboDiag({ oddsMissingCount: 40, oddsUnfetchedCount: 41, oddsMalformedCount: 42 }),
+      exacta: builtComboDiag({ oddsMissingCount: 50, oddsUnfetchedCount: 51, oddsMalformedCount: 52 }),
+      trio: builtComboDiag({ oddsMissingCount: 60, oddsUnfetchedCount: 61, oddsMalformedCount: 62 }),
+      trifecta: builtComboDiag({ oddsMissingCount: 70, oddsUnfetchedCount: 71, oddsMalformedCount: 72 }),
+    });
+    const counts = aggregateUnjudgedCounts(diagnostics);
+    // oddsMissingCount: place(10)+win(20)+wide(30)+quinella(40)+exacta(50)+trio(60)+trifecta(70)=280
+    // oddsUnfetchedCount(place/winは持たない): wide(31)+quinella(41)+exacta(51)+trio(61)+trifecta(71)=255
+    // oddsMalformedCount(placeは持たない): win(21)+wide(32)+quinella(42)+exacta(52)+trio(62)+trifecta(72)=281
+    expect(counts).toEqual({ oddsMissingCount: 280, oddsUnfetchedCount: 255, oddsMalformedCount: 281 });
+  });
 });
 
 describe("formatUnjudgedNote — 判定不能件数の注記文言(0件の区分は文言に含めない)", () => {
@@ -1860,6 +1981,10 @@ describe("AC14: COMBO_EV_CALIBRATION_NOTE — 組合せ券種のEV過大評価�
 
   it("Issue #125: 組合せ券種の例示に馬単(exacta)も含むこと(ワイド・馬連・3連複だけを挙げる旧文言は、馬単も同じ較正未実施の対象であることを言い落とす)", () => {
     expect(COMBO_EV_CALIBRATION_NOTE).toContain("馬単");
+  });
+
+  it("Issue #139: 組合せ券種の例示に三連単(trifecta)も含むこと(ワイド・馬連・馬単・3連複だけを挙げる旧文言は、三連単も同じ較正未実施の対象であることを言い落とす)", () => {
+    expect(COMBO_EV_CALIBRATION_NOTE).toContain("三連単");
   });
 });
 

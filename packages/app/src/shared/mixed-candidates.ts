@@ -359,9 +359,8 @@ export interface MixedCandidateDiagnostics {
   /**
    * 三連単の候補ビルド診断値(Issue #137・#25-E2)。`wide`/`trio`/`quinella`/`exacta`と同じ
    * `ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
-   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"trifecta"`を含まない(#139まで)ため、
-   * `options.betTypes`省略時の既定呼び出しでは常に`kind:"not-requested"`になる
-   * (`options.betTypes`に明示的に`"trifecta"`を含めたときのみ`"built"`/`"yoso"`になりうる)。
+   * Issue #139(#25-E3b)で`ALL_MIXED_CANDIDATE_BET_TYPES`が`"trifecta"`を含むようになったため、
+   * `options.betTypes`省略時の既定呼び出しでも実際に`kind:"built"`/`"yoso"`になりうる。
    */
   readonly trifecta: ComboCandidateDiagnosticsView;
 }
@@ -573,9 +572,9 @@ function buildExactaCandidatesForBetType(
  * 空間から着順どおりの的中確率を求める〉へ直接委譲する)。反証B相当: 頭数門前払いはしない
  * (`buildTrifectaCandidates`自身の判定不能〈固定馬2頭以上等〉に委ねる)。
  *
- * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"trifecta"`を含まない(#139まで)ため、`requested`は
- * `options.betTypes`に明示的に`"trifecta"`を渡した場合のみtrueになる(既定呼び出しでは
- * 常に`false`=`kind:"not-requested"`)。
+ * Issue #139(#25-E3b)で`ALL_MIXED_CANDIDATE_BET_TYPES`が`"trifecta"`を含むようになったため、
+ * `requested`は既定呼び出し(`options.betTypes`省略時)でも実際に`true`になる
+ * (`options.betTypes`で明示的に`"trifecta"`を除いた場合のみ`false`=`kind:"not-requested"`)。
  */
 function buildTrifectaCandidatesForBetType(
   requested: boolean,
