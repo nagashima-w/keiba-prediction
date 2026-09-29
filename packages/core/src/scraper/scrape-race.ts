@@ -284,6 +284,8 @@ function comboBetTypeLabel(betType: ComboBetType): string {
       return "馬連";
     case "trifecta":
       return "三連単";
+    case "bracketQuinella":
+      return "枠連";
     default: {
       const exhaustiveCheck: never = betType;
       throw new Error(`未知の券種です: ${String(exhaustiveCheck)}`);

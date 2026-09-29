@@ -10,6 +10,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
+import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
+import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
 import {
   ComboOddsParseError,
   parseComboOdds,
@@ -505,5 +507,125 @@ describe("parseComboOdds(上限キャップ値'999,999.9'のnull化。Issue #130
     for (const cell of [...wideOdds.values(), ...trioOdds.values()]) {
       expect(cell.oddsMin).not.toBe(999999.9);
     }
+  });
+});
+
+/**
+ * 枠連(bracketQuinella。api_get_jra_odds type=3)。Issue #143・#26-D。
+ *
+ * 期待キー集合は**枠の構成**(出馬表〈`parseShutuba`〉・確定払戻ページ〈`parseRaceResult`〉の
+ * `wakuban`)から計算する。オッズ側のキーから頭数を逆算しない(集合一致が自己参照に
+ * ならないようにするため。`wakuren-odds-fixtures.test.ts`と同じ流儀。ヘルパは意図的に複製)。
+ * 式は C(相異なる枠の数,2) + (2頭以上いる枠の数)(`docs/wakuren-odds-investigation.md` §2.2)。
+ */
+describe("parseComboOdds(枠連 type=3。Issue #143・#26-D)", () => {
+  function pad2(n: number): string {
+    return String(n).padStart(2, "0");
+  }
+
+  /** 枠番の並び(馬ごと)から期待キー集合(AABB。A<=B)を作る。 */
+  function expectedKeys(wakubans: readonly (number | null)[]): Set<string> {
+    const counts = new Map<number, number>();
+    for (const w of wakubans) {
+      expect(w).not.toBeNull(); // 前提を無条件で固定(空振り防止)
+      counts.set(w!, (counts.get(w!) ?? 0) + 1);
+    }
+    const ids = [...counts.keys()].sort((a, b) => a - b);
+    const keys = new Set<string>();
+    for (let i = 0; i < ids.length; i += 1) {
+      if (counts.get(ids[i]!)! >= 2) keys.add(pad2(ids[i]!) + pad2(ids[i]!));
+      for (let j = i + 1; j < ids.length; j += 1) keys.add(pad2(ids[i]!) + pad2(ids[j]!));
+    }
+    return keys;
+  }
+
+  const cases: ReadonlyArray<{
+    readonly name: string;
+    readonly odds: string;
+    readonly wakubans: () => readonly (number | null)[];
+    readonly size: number;
+    readonly sameFrame: number;
+  }> = [
+    {
+      name: "16頭(8枠すべて2頭)",
+      odds: "odds_wakuren_202603020211.json",
+      wakubans: () => parseShutuba(loadFixture("shutuba_202603020211.html")).horses.map((h) => h.wakuban),
+      size: 36,
+      sameFrame: 8,
+    },
+    {
+      name: "10頭(7・8枠のみ2頭)",
+      odds: "odds_wakuren_202602010607.json",
+      wakubans: () => parseShutuba(loadFixture("shutuba_202602010607.html")).horses.map((h) => h.wakuban),
+      size: 30,
+      sameFrame: 2,
+    },
+    {
+      name: "9頭(8枠のみ2頭。枠は確定払戻ページの結果テーブルから)",
+      odds: "odds_wakuren_202607020501.json",
+      wakubans: () => parseRaceResult(loadFixture("result_202607020501.html")).horses.map((h) => h.wakuban),
+      size: 29,
+      sameFrame: 1,
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name}: キー集合が枠の構成から計算した期待集合と完全一致し、同枠キーを含むこと`, () => {
+      const odds = expectAvailable(parseComboOdds(loadFixture(c.odds), "bracketQuinella"));
+      const expected = expectedKeys(c.wakubans());
+      // 前提固定: 期待集合の大きさと同枠キー数(式が退化していないこと)。
+      expect(expected.size).toBe(c.size);
+      expect([...expected].filter((k) => k.slice(0, 2) === k.slice(2, 4)).length).toBe(c.sameFrame);
+      expect(new Set(odds.keys())).toEqual(expected);
+    });
+
+    it(`${c.name}: 全セルが単一値(oddsMax=null)で、oddsMinが数値・人気が付くこと`, () => {
+      const odds = expectAvailable(parseComboOdds(loadFixture(c.odds), "bracketQuinella"));
+      expect(odds.size).toBe(c.size);
+      for (const cell of odds.values()) {
+        expect(cell.oddsMax).toBeNull();
+        expect(cell.oddsMin).not.toBeNull();
+        expect(cell.ninki).not.toBeNull();
+      }
+    });
+  }
+
+  it("確定払戻との突合(値と人気): 0407=31.5・人気15(16頭)、0204=19.2・人気10(10頭)、0108=5.5・人気2(9頭)", () => {
+    const o16 = expectAvailable(parseComboOdds(loadFixture("odds_wakuren_202603020211.json"), "bracketQuinella"));
+    const o10 = expectAvailable(parseComboOdds(loadFixture("odds_wakuren_202602010607.json"), "bracketQuinella"));
+    const o9 = expectAvailable(parseComboOdds(loadFixture("odds_wakuren_202607020501.json"), "bracketQuinella"));
+    expect(o16.get("0407")).toEqual({ oddsMin: 31.5, oddsMax: null, ninki: 15 });
+    expect(o10.get("0204")).toEqual({ oddsMin: 19.2, oddsMax: null, ninki: 10 });
+    expect(o9.get("0108")).toEqual({ oddsMin: 5.5, oddsMax: null, ninki: 2 });
+    // 昇順に正規化されたキーだけが存在する(逆順は実在しない)。
+    expect(o16.has("0704")).toBe(false);
+  });
+
+  it("10頭で1頭しかいない枠の同枠キー(0101)は存在しないこと(同枠は2頭以上の枠に限る)", () => {
+    const odds = expectAvailable(parseComboOdds(loadFixture("odds_wakuren_202602010607.json"), "bracketQuinella"));
+    expect(odds.has("0101")).toBe(false);
+    expect(odds.has("0707")).toBe(true);
+  });
+
+  it("頭数不足(7頭・8頭)の応答は presale と同じ封筒で、unavailable(missingKey=\"data\")になること(throwしない)", () => {
+    for (const f of ["odds_wakuren_unsold_202607020502.json", "odds_wakuren_unsold_202607020505.json"]) {
+      const result = parseComboOdds(loadFixture(f), "bracketQuinella");
+      expect(result.state).toBe("unavailable");
+      if (result.state !== "unavailable") throw new Error("unreachable");
+      expect(result.reason).toEqual({
+        rawStatus: "NG",
+        rawReason: "empty free odds schedule",
+        missingKey: "data",
+      });
+    }
+  });
+
+  it("枠番として不正なキー(9を含む・降順)は構造異常としてthrowすること", () => {
+    const make = (key: string) =>
+      JSON.stringify({ status: "result", data: { odds: { "3": { [key]: ["5.5", "0.0", "2"] } } } });
+    expect(() => parseComboOdds(make("0109"), "bracketQuinella")).toThrow(ComboOddsParseError);
+    expect(() => parseComboOdds(make("0801"), "bracketQuinella")).toThrow(ComboOddsParseError);
+    // 対照: 同じ入力形でも正しいキーは受理される(前提固定)。
+    expect(parseComboOdds(make("0101"), "bracketQuinella").state).toBe("available");
   });
 });

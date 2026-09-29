@@ -17,6 +17,7 @@ import {
   buildComboOddsKey,
   buildComboOddsKeyFor,
   buildOrderedComboOddsKey,
+  COMBO_ELEMENT_KIND,
   COMBO_KEY_ORDER,
   COMBO_SIZE,
   ComboOddsKeyError,
@@ -533,5 +534,101 @@ describe("buildComboOddsCellMapFor(betType別の順序方針でMap化。Issue #1
     const map = buildComboOddsCellMapFor("wide", entries);
     expect(map.size).toBe(1);
     expect(map.get("0102")).toEqual({ oddsMin: 3.0, oddsMax: 5.0, ninki: 1 });
+  });
+});
+
+/**
+ * 枠連(bracketQuinella)。Issue #143・#26-D。
+ *
+ * 枠連のキーの要素は**馬番ではなく枠番(1〜8)**で、同枠(`0101`等)の買い目が実在する
+ * (`docs/wakuren-odds-investigation.md` §2.2・§12)。並べ方(昇順ソート)は順不同の券種と
+ * 同じなので`COMBO_KEY_ORDER`は"unordered"のまま、要素の種類だけを`COMBO_ELEMENT_KIND`
+ * (新設)で区別し、`validateComboUmabansFor`が枠番のときだけ「値域1〜8・重複を許す非減少」
+ * で検証する。既存券種の検証・キー生成は変えない(下の回帰ケースで固定)。
+ */
+describe("枠連(bracketQuinella)。Issue #143・#26-D", () => {
+  it("COMBO_SIZE.bracketQuinella=2・COMBO_KEY_ORDER.bracketQuinella=\"unordered\"であること(順序方針は順不同のまま)", () => {
+    expect(COMBO_SIZE.bracketQuinella).toBe(2);
+    expect(COMBO_KEY_ORDER.bracketQuinella).toBe("unordered");
+  });
+
+  it("COMBO_ELEMENT_KIND: 枠連だけが\"wakuban\"で、既存5券種はすべて\"umaban\"であること", () => {
+    expect(COMBO_ELEMENT_KIND.bracketQuinella).toBe("wakuban");
+    for (const betType of ["wide", "trio", "exacta", "quinella", "trifecta"] as const) {
+      expect(COMBO_ELEMENT_KIND[betType]).toBe("umaban");
+    }
+  });
+
+  it("buildComboOddsKeyFor: 順不同として昇順ソート・2桁ゼロ埋めで連結されること(同枠も含む)", () => {
+    expect(buildComboOddsKeyFor("bracketQuinella", [7, 4])).toBe("0407");
+    expect(buildComboOddsKeyFor("bracketQuinella", [4, 7])).toBe("0407");
+    expect(buildComboOddsKeyFor("bracketQuinella", [1, 1])).toBe("0101");
+  });
+
+  describe("validateComboUmabansFor(枠番の検証: 値域1〜8・重複を許す非減少)", () => {
+    const accepted: ReadonlyArray<readonly [string, readonly number[]]> = [
+      ["別枠の昇順(4,7)", [4, 7]],
+      ["同枠(1,1)", [1, 1]],
+      ["同枠の上限(8,8)", [8, 8]],
+      ["下限と上限(1,8)", [1, 8]],
+    ];
+    for (const [name, values] of accepted) {
+      it(`受理する: ${name}`, () => {
+        expect(() => validateComboUmabansFor("bracketQuinella", values, 2)).not.toThrow();
+      });
+    }
+
+    const rejected: ReadonlyArray<readonly [string, readonly number[]]> = [
+      ["降順(7,4)", [7, 4]],
+      ["枠番の上限超過(8,9)。馬番なら妥当だが枠番では不正", [8, 9]],
+      ["枠番の上限超過(9,9)", [9, 9]],
+      ["0を含む(0,1)", [0, 1]],
+      ["小数(1.5,2)", [1.5, 2]],
+      ["NaN(NaN,2)", [Number.NaN, 2]],
+      ["要素数不足(3)", [3]],
+      ["要素数過多(1,2,3)", [1, 2, 3]],
+    ];
+    for (const [name, values] of rejected) {
+      it(`拒否する: ${name}`, () => {
+        expect(() => validateComboUmabansFor("bracketQuinella", values, 2)).toThrow(
+          ComboOddsKeyError,
+        );
+      });
+    }
+  });
+
+  describe("既存券種の検証は変わらない(回帰。同値の重複は従来どおり拒否・馬番は1〜18)", () => {
+    it("馬連・ワイドは同値(1,1)を拒否し、馬番9〜18は受理すること(枠番の上限8が漏れていない)", () => {
+      for (const betType of ["quinella", "wide"] as const) {
+        expect(() => validateComboUmabansFor(betType, [1, 1], 2)).toThrow(ComboOddsKeyError);
+        expect(() => validateComboUmabansFor(betType, [9, 18], 2)).not.toThrow();
+      }
+    });
+
+    it("馬単は同値(1,1)を拒否し降順(13,8)を受理すること", () => {
+      expect(() => validateComboUmabansFor("exacta", [1, 1], 2)).toThrow(ComboOddsKeyError);
+      expect(() => validateComboUmabansFor("exacta", [13, 8], 2)).not.toThrow();
+    });
+  });
+
+  describe("buildComboOddsCellMapFor(枠連は枠番の値域1〜8で自己防御する)", () => {
+    const cell = { oddsMin: 5.5, oddsMax: null, ninki: 2 };
+
+    it("同枠と別枠を別キーで保持し、順序違いの同じ組は1件に集約すること", () => {
+      const map = buildComboOddsCellMapFor("bracketQuinella", [
+        { umabans: [1, 1], cell },
+        { umabans: [8, 1], cell },
+        { umabans: [1, 8], cell },
+      ]);
+      expect([...map.keys()].sort()).toEqual(["0101", "0108"]);
+    });
+
+    it("枠番の上限超過(9)はthrowすること(馬連なら同じ入力でも受理される。前提を対で固定)", () => {
+      const entries = [{ umabans: [1, 9], cell }];
+      expect(() => buildComboOddsCellMapFor("bracketQuinella", entries)).toThrow(
+        ComboOddsKeyError,
+      );
+      expect(buildComboOddsCellMapFor("quinella", entries).size).toBe(1);
+    });
   });
 });

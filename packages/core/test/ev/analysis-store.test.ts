@@ -1755,6 +1755,54 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  /**
+   * 枠連の払戻(Issue #143・#26-D)。
+   *
+   * `RaceComboPayoutsSaveInput`に`bracketQuinella?`フィールドを追加する(#106・#113・#130と
+   * 同じ「型を壊さないための最小追加」。`combo?.[betType]`が`ComboBetType`の全メンバーを
+   * 添字に取るため、無いと`pnpm typecheck`がTS7053で落ちる)。払戻の取込の配線
+   * (`result-import.ts`が渡すこと・`tr.Wakuren`の解析)は#145のスコープ。
+   *
+   * ★地雷の確認: `COMBO_SIZE`に`bracketQuinella`が加わって`COMBO_BET_TYPES`ループが枠連も
+   * 回るようになっても、`comboPayouts`に`bracketQuinella`キーが無ければDBには一切書かれない
+   * (既存の取込を壊さない)。
+   */
+  describe("枠連の払戻(Issue #143・#26-D)", () => {
+    it("枠連を明示的に渡すと保存・復元できること(順不同の昇順キー。同枠[1,1]は\"0101\")", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        bracketQuinella: {
+          state: "parsed",
+          payouts: [
+            { umabans: [7, 4], payout: 3150 },
+            { umabans: [1, 1], payout: 640 },
+          ],
+        },
+      });
+      expect(store.getComboPayouts("R1", "bracketQuinella")).toEqual({
+        state: "imported",
+        payouts: [
+          { comboKey: "0101", payout: 640 },
+          { comboKey: "0407", payout: 3150 },
+        ],
+      });
+      store.close();
+    });
+
+    it("comboPayoutsに{wide, trio}のみを渡し枠連キーを省略した場合、枠連はnot_importedのままであること(枠連の払戻行は書かれず、既存の取込は壊れない)", () => {
+      const store = new AnalysisStore();
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }], null, {
+        wide: { state: "parsed", payouts: [{ umabans: [1, 2], payout: 120 }] },
+        trio: { state: "parsed", payouts: [{ umabans: [1, 2, 5], payout: 240 }] },
+      });
+      // 前提固定(空振り防止): wide/trioは従来どおり書かれること。
+      expect(store.getComboPayouts("R1", "wide").state).toBe("imported");
+      expect(store.getComboPayouts("R1", "trio").state).toBe("imported");
+      expect(store.getComboPayouts("R1", "bracketQuinella")).toEqual({ state: "not_imported" });
+      store.close();
+    });
+  });
+
   describe("getComboPayouts(組合せ払戻の読み出し契約。Issue #52 AC9・boss裁定R-4〜R-6)", () => {
     it("一度も取り込んでいないレースは not_imported を返すこと", () => {
       const store = new AnalysisStore();

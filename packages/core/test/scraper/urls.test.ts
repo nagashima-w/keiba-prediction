@@ -5,6 +5,7 @@ import {
   parseRaceId,
 } from "../../src/scraper/ids.js";
 import {
+  bracketQuinellaOddsApiUrl,
   commentUrl,
   exactaOddsApiUrl,
   gradeWinnerApiUrl,
@@ -12,6 +13,7 @@ import {
   gradeWinnerRefererUrl,
   horseResultsApiUrl,
   horseUrl,
+  narBracketQuinellaOddsPageUrl,
   narExactaOddsPageUrl,
   narOddsPageUrl,
   NarUnsupportedError,
@@ -406,5 +408,33 @@ describe("公開API(index.tsからの再エクスポート)", () => {
   it("不採用となったnewspaperUrlは公開されないこと", async () => {
     const mod = await import("../../src/index.js");
     expect("newspaperUrl" in mod).toBe(false);
+  });
+});
+
+/**
+ * 枠連のURL(Issue #143・#26-D。実測は#141・`docs/wakuren-odds-investigation.md` §2.1・§3)。
+ *
+ * 中央: 同一エンドポイント`api_get_jra_odds.html`のtype=3(`odds_get_form.html?type=b3`
+ * フラグメント内`oddsType:'3'`で独立観測。fixtures/odds_get_form_b3_202603020211.html)。
+ * 地方: `odds/index.html?type=b3`(静的HTML。1リクエストで全組合せ。軸馬別取得は不要)。
+ * 既存関数と同じ形のリテラル`toBe`で固定する(type値の変異を検出するため)。
+ */
+describe("bracketQuinellaOddsApiUrl(中央 枠連オッズJSON API。Issue #143・#26-D)", () => {
+  it("中央race_idで枠連オッズJSON APIのURL(type=3)を返すこと", () => {
+    expect(bracketQuinellaOddsApiUrl(raceId)).toBe(
+      "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202605020811&type=3&action=init",
+    );
+  });
+
+  it("地方race_idを渡すとNarUnsupportedErrorになること(中央用JSON APIはNARに存在しない)", () => {
+    expect(() => bracketQuinellaOddsApiUrl(narRaceId)).toThrow(NarUnsupportedError);
+  });
+});
+
+describe("narBracketQuinellaOddsPageUrl(地方 枠連オッズページ。Issue #143・#26-D)", () => {
+  it("type=b3固定のクエリ付き地方枠連オッズページURLを返すこと", () => {
+    expect(narBracketQuinellaOddsPageUrl(narRaceId)).toBe(
+      "https://nar.netkeiba.com/odds/index.html?type=b3&race_id=202654071210",
+    );
   });
 });

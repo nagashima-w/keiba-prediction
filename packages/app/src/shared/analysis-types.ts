@@ -154,9 +154,12 @@ export interface ComboOddsCellConflictView {
  */
 export interface ComboOddsFetchDiagnosticsView {
   /**
-   * 券種("wide" | "trio" | "exacta" | "quinella" | "trifecta")。core `ComboBetType` に
-   * 馬単(exacta)・馬連(quinella)・三連単(trifecta)が追加されたことに伴うプレーン写し
-   * (Issue #106・#24-B、馬連はIssue #113・#24-D2、三連単はIssue #130・#25-D)。
+   * 券種("wide" | "trio" | "exacta" | "quinella" | "trifecta" | "bracketQuinella")。core
+   * `ComboBetType` に馬単(exacta)・馬連(quinella)・三連単(trifecta)・枠連(bracketQuinella)が
+   * 追加されたことに伴うプレーン写し(Issue #106・#24-B、馬連はIssue #113・#24-D2、三連単は
+   * Issue #130・#25-D、枠連はIssue #143・#26-D。枠連は`ComboOddsScrapeOutcomeView`にまだ
+   * フィールドを持たない〈scrape-race.tsへの配線は#146〉が、この型は`ComboBetType`と完全一致
+   * させる必要がある)。
    * `ComboOddsScrapeOutcomeView`自体は`wide?`/`trio?`/`quinella?`/`exacta?`/`trifecta?`を
    * 持つ(馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・
    * #25-E2でscrape-race.tsに配線した時点でそれぞれ追加)。
@@ -164,7 +167,7 @@ export interface ComboOddsFetchDiagnosticsView {
    * 共有フィールドのため、この型だけはcore型と完全一致させる必要がある
    * (analysis-types-combo-odds-pin.test.tsが検知する)。
    */
-  readonly betType: "wide" | "trio" | "exacta" | "quinella" | "trifecta";
+  readonly betType: "wide" | "trio" | "exacta" | "quinella" | "trifecta" | "bracketQuinella";
   /** 発行したHTTPリクエスト数。 */
   readonly requestCount: number;
   /** 出走馬番から導出した期待組合せ数。 */

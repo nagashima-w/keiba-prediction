@@ -66,7 +66,7 @@ import { toOddsNumber } from "./odds-number.js";
 export type { ComboBetType, ComboOddsCell };
 export { buildComboOddsKey };
 
-/** ワイド・3連複・馬単・馬連・三連単オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
+/** ワイド・3連複・馬単・馬連・三連単・枠連オッズのパース失敗(JSON構文エラー・構造不一致)を表す例外。 */
 export class ComboOddsParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -75,13 +75,16 @@ export class ComboOddsParseError extends Error {
 }
 
 /**
- * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単、"4"=馬連、"8"=三連単)。
+ * 券種→JSON応答上のoddsキー("5"=ワイド、"7"=3連複、"6"=馬単、"4"=馬連、"8"=三連単、"3"=枠連)。
  * 馬単の値は#24-A(#103)の実測で確定(`docs/quinella-exacta-odds-investigation.md` §3.1・
  * `fixtures/odds_exacta_202603020211.json`の `data.odds["6"]` で再現可能)。馬連の値も同じ
  * #24-A(#103)の実測で確定(同docs §3.1、`fixtures/odds_quinella_202603020211.json`の
  * `data.odds["4"]` で再現可能。Issue #113・#24-D2)。三連単の値は#127の実測で確定
  * (`docs/trifecta-odds-investigation.md` §2.1、`fixtures/odds_trifecta_202603020211.json`の
- * `data.odds["8"]` で再現可能。Issue #130・#25-D)。
+ * `data.odds["8"]` で再現可能。Issue #130・#25-D)。枠連の値は#141の実測で確定
+ * (`docs/wakuren-odds-investigation.md` §2.1・`fixtures/odds_wakuren_202603020211.json`の
+ * `data.odds["3"]` で再現可能。Issue #143・#26-D)。枠連のキーは馬番ではなく**枠番**
+ * (2桁×2・昇順・同枠あり)。
  */
 const JSON_ODDS_KEY: Record<ComboBetType, string> = {
   wide: "5",
@@ -89,6 +92,7 @@ const JSON_ODDS_KEY: Record<ComboBetType, string> = {
   exacta: "6",
   quinella: "4",
   trifecta: "8",
+  bracketQuinella: "3",
 };
 
 /**
@@ -146,7 +150,11 @@ function cellAt(value: unknown, index: number): unknown {
   return Array.isArray(value) ? value[index] : undefined;
 }
 
-/** 生のオッズキー(例: "0102")を検証し馬番配列に分解する(構造throw側)。 */
+/**
+ * 生のオッズキー(例: "0102")を検証し馬番配列に分解する(構造throw側)。
+ * 枠連(`bracketQuinella`)では馬番ではなく枠番(1〜8・同枠可)に分解する(検証は
+ * `validateComboUmabansFor`が振り分ける)。
+ */
 function decodeRawKey(rawKey: string, betType: ComboBetType): number[] {
   const comboSize = COMBO_SIZE[betType];
   if (rawKey.length !== comboSize * 2) {
@@ -186,7 +194,7 @@ function unavailable(
 }
 
 /**
- * 中央のワイド・3連複・馬単・馬連・三連単オッズAPI応答(api_get_jra_odds、type=5/7/6/4/8)をパースする。
+ * 中央のワイド・3連複・馬単・馬連・三連単・枠連オッズAPI応答(api_get_jra_odds、type=5/7/6/4/8/3)をパースする。
  *
  * 「構造は throw / 値は null」の線引き(受け入れ条件7)に加え、「封筒異常は unavailable」
  * という第3の扱いを持つ(モジュール冒頭JSDoc参照)。throwするのは **JSON.parse に失敗した
@@ -198,7 +206,8 @@ function unavailable(
  * @param json api_get_jra_odds のJSON文字列
  * @param betType "wide"(type=5)・"trio"(type=7)・"exacta"(type=6。着順が意味を持つため
  *   `decodeRawKey`/`buildComboOddsCellMapFor`は昇順を要求せずソートもしない。Issue #106・#24-B)・
- *   "quinella"(type=4。ワイド・3連複と同じ順不同の組。Issue #113・#24-D2)
+ *   "quinella"(type=4。ワイド・3連複と同じ順不同の組。Issue #113・#24-D2)・
+ *   "trifecta"(type=8)・"bracketQuinella"(type=3。要素は枠番で同枠あり。Issue #143・#26-D)
  */
 export function parseComboOdds(json: string, betType: ComboBetType): ComboOddsParseResult {
   let parsed: unknown;

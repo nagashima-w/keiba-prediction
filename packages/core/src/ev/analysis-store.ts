@@ -529,6 +529,20 @@ export interface RaceComboPayoutsSaveInput {
    * `analysis-store.test.ts`「三連単の払戻」AC-6相当のテストで直接固定済み)。
    */
   readonly trifecta?: RaceComboPayoutResult;
+  /**
+   * 枠連の確定払戻(Issue #143・#26-D)。umabansは**馬番ではなく枠番**(順不同・昇順に正規化。
+   * 同枠〈[1,1]→"0101"〉あり)。
+   *
+   * **本追加も#106・#113・#130と同型の理由(型を壊さないための最小追加)**: `saveResult`内の
+   * ループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`由来)を走査して`combo?.[betType]`を
+   * 読むため、`ComboBetType`に`bracketQuinella`が追加されると、このフィールドが無いままでは
+   * `pnpm typecheck`がTS7053で落ちる。**払戻の取込の配線(`tr.Wakuren`の解析と
+   * `result-import.ts`が渡すこと)は#145のスコープであり、本Issue(#143)の時点では
+   * このフィールドを追加しても枠連の払戻行は実際には書かれない**(`combo?.bracketQuinella`が
+   * 常に`undefined`のため該当反復は`continue`するだけ。`analysis-store.test.ts`
+   * 「枠連の払戻」で直接固定済み)。
+   */
+  readonly bracketQuinella?: RaceComboPayoutResult;
 }
 
 /** `race_combo_payouts` の1行(読み出し専用の軽量表現。Issue #52・boss裁定R-6)。 */

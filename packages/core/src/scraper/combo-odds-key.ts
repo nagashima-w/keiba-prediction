@@ -24,7 +24,14 @@
 const MAX_UMABAN = 18;
 
 /**
- * 券種(ワイド・3連複・馬単・馬連・三連単)。買い目を構成する頭数(comboSize)が一意に決まる。
+ * 枠番の上限(1〜8)。`parse-shutuba.ts`のローカル定数`MAX_WAKUBAN`と同じ値
+ * (あちらは非exportのため共有せず、値だけ揃えている)。枠連(`bracketQuinella`)の要素
+ * 検証に使う(Issue #143・#26-D)。
+ */
+export const MAX_WAKUBAN = 8;
+
+/**
+ * 券種(ワイド・3連複・馬単・馬連・三連単・枠連)。買い目を構成する要素数(comboSize)が一意に決まる。
  *
  * **順序方針は券種で異なる**(Issue #106・#24-B裁定): ワイド・3連複・馬連は着順を問わない
  * 「組」(馬番の集合)だが、馬単・三連単は着順(馬単は1着・2着、三連単は1着・2着・3着)が
@@ -33,22 +40,35 @@ const MAX_UMABAN = 18;
  * 使うべきかを`buildComboOddsKeyFor`が振り分ける。馬連(quinella)はワイド・3連複と同じ
  * 「順不同」であり、新しい順序方針の追加は不要だった(Issue #113・#24-D2)。三連単(trifecta)は
  * 馬単と同じ「順序付き」であり、既存の"ordered"経路にcomboSize=3のままそのまま乗る
- * (Issue #130・#25-D)。
+ * (Issue #130・#25-D)。枠連(bracketQuinella)は**要素が馬番ではなく枠番(1〜8)**で、同枠
+ * (`0101`等)の買い目が実在するが、キーの並べ方(昇順ソート)は順不同の券種と同じなので
+ * `COMBO_KEY_ORDER`は"unordered"のままとし、要素の種類だけを`COMBO_ELEMENT_KIND`で区別する
+ * (Issue #143・#26-D)。
  */
-export type ComboBetType = "wide" | "trio" | "exacta" | "quinella" | "trifecta";
+export type ComboBetType =
+  | "wide"
+  | "trio"
+  | "exacta"
+  | "quinella"
+  | "trifecta"
+  | "bracketQuinella";
 
-/** 券種ごとの買い目構成頭数(ワイド=2、3連複=3、馬単=2、馬連=2、三連単=3)。中央・地方の両パーサが共有する。 */
+/**
+ * 券種ごとの買い目構成要素数(ワイド=2、3連複=3、馬単=2、馬連=2、三連単=3、枠連=2)。
+ * 中央・地方の両パーサが共有する。
+ */
 export const COMBO_SIZE: Record<ComboBetType, number> = {
   wide: 2,
   trio: 3,
   exacta: 2,
   quinella: 2,
   trifecta: 3,
+  bracketQuinella: 2,
 };
 
 /**
  * キー生成・検証における順序方針(Issue #106・#24-B)。
- * - "unordered": 馬番の組(順不同)。ワイド・3連複・馬連。
+ * - "unordered": 馬番の組(順不同)。ワイド・3連複・馬連・枠連(要素は枠番。`COMBO_ELEMENT_KIND`参照)。
  * - "ordered": 馬番の並び(着順が意味を持つ)。馬単。
  *
  * `buildComboOddsKeyFor`・`validateComboUmabansFor`・`buildComboOddsCellMapFor`が
@@ -68,6 +88,29 @@ export const COMBO_KEY_ORDER: Record<ComboBetType, ComboKeyOrder> = {
   exacta: "ordered",
   quinella: "unordered",
   trifecta: "ordered",
+  bracketQuinella: "unordered",
+};
+
+/**
+ * 買い目の要素の種類(Issue #143・#26-D)。
+ * - "umaban": 馬番(1〜18)。ワイド・3連複・馬単・馬連・三連単。
+ * - "wakuban": 枠番(1〜8)。枠連。**同枠(`0101`等)の買い目が実在する**ため、順不同の検証でも
+ *   重複を許す(非減少)。
+ *
+ * 順序方針(`ComboKeyOrder`)とは独立の軸: `ComboKeyOrder`に第3の値を足すと`=== "ordered"`/
+ * `=== "unordered"`の比較箇所の意味が黙って変わるため、別の写像として持つ。
+ * `Record<ComboBetType, ...>`の型制約により、新しい券種の追加時に埋め忘れるとコンパイルエラーになる。
+ */
+export type ComboElementKind = "umaban" | "wakuban";
+
+/** 券種ごとの要素の種類(`COMBO_KEY_ORDER`の隣。Issue #143・#26-D)。枠連のみ"wakuban"。 */
+export const COMBO_ELEMENT_KIND: Record<ComboBetType, ComboElementKind> = {
+  wide: "umaban",
+  trio: "umaban",
+  exacta: "umaban",
+  quinella: "umaban",
+  trifecta: "umaban",
+  bracketQuinella: "wakuban",
 };
 
 /**
@@ -80,7 +123,7 @@ function encodeUmabans(umabans: readonly number[]): string {
 
 /**
  * 組合せオッズキー生成の正規化関数(#14からの移設。仕様・挙動は不変)。**順不同の組
- * (ワイド・3連複・馬連)専用**(Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には
+ * (ワイド・3連複・馬連・枠連〈要素は枠番。Issue #143〉)専用**(Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には
  * `buildOrderedComboOddsKey`を使うこと。券種を持っている呼び出し元は`buildComboOddsKeyFor`
  * を使えば振り分けを気にせず済む)。
  * netkeibaの実キー形式(ワイド"0102"・3連複"010203")に一致させる: 馬番昇順ソート後、
@@ -183,7 +226,10 @@ export interface ComboOddsCell {
 
 /** 組合せ(馬番の組)とその値のペア。パーサがMap化する前の中間表現。 */
 export interface ComboOddsEntry {
-  /** 買い目を構成する馬番(順不同で良い。buildComboOddsCellMap内部でキー化時に正規化する)。 */
+  /**
+   * 買い目を構成する馬番(順不同で良い。buildComboOddsCellMap内部でキー化時に正規化する)。
+   * **枠連(`bracketQuinella`)では馬番ではなく枠番**(1〜8。同枠の重複を許す)が入る。
+   */
   readonly umabans: readonly number[];
   readonly cell: ComboOddsCell;
 }
@@ -227,6 +273,21 @@ function validateComboUmabanRange(umabans: readonly number[]): void {
 }
 
 /**
+ * 各枠番の値そのものを検証する(1〜{@link MAX_WAKUBAN}の整数範囲であること。順序・重複・
+ * 要素数は問わない)。`validateComboUmabanRange`の枠番版(Issue #143・#26-D)。
+ * 整数性を先に見る理由は`validateComboUmabanRange`のJSDocと同じ(NaNとの比較は常にfalse)。
+ */
+function validateWakubanRange(wakubans: readonly number[]): void {
+  for (const w of wakubans) {
+    if (!Number.isInteger(w) || w < 1 || w > MAX_WAKUBAN) {
+      throw new ComboOddsKeyError(
+        `枠番は1〜${MAX_WAKUBAN}の範囲である必要があります(wakubans=${wakubans.join(",")}, 不正な値=${w})`,
+      );
+    }
+  }
+}
+
+/**
  * 要素数・範囲の検証(順不同・順序付き両方に共通する構造チェック。Issue #106・#24-B)。
  * `validateComboUmabans`/`validateOrderedComboUmabans`の共有実装(重複禁止・昇順の
  * 要否だけが両者で異なるため、それ以外をここに1箇所へ集約する)。
@@ -244,7 +305,8 @@ function validateComboUmabansStructure(
 }
 
 /**
- * 馬番の組を検証する(構造の最低条件。throw側)。**順不同の組(ワイド・3連複・馬連)専用**
+ * 馬番の組を検証する(構造の最低条件。throw側)。**順不同の馬番の組(ワイド・3連複・馬連)専用**
+ * (枠連は要素が枠番で同枠を許すため`validateWakubanCombo`。Issue #143・#26-D)
  * (Issue #106・#24-B: 着順が意味を持つ券種〈馬単〉には`validateOrderedComboUmabans`を
  * 使うこと。券種を持っている呼び出し元は`validateComboUmabansFor`を使えば振り分けを
  * 気にせず済む)。
@@ -291,16 +353,48 @@ export function validateOrderedComboUmabans(
 }
 
 /**
- * betTypeから順序方針を引いて`validateComboUmabans`/`validateOrderedComboUmabans`を
- * 振り分ける唯一のゲートウェイ(Issue #106・#24-B)。betTypeを持っている呼び出し元
- * (各パーサの`decodeRawKey`/`decodeCellId`)は必ずこちらを使うこと。
+ * 枠番の組を検証する(構造の最低条件。throw側)。**枠連(要素が枠番の順不同の組)専用**
+ * (Issue #143・#26-D)。
+ * - 要素数が comboSize と一致すること
+ * - 各値が1〜{@link MAX_WAKUBAN}の整数であること(NaN/Infinity/小数を弾く)
+ * - **非減少**(昇順。同値は許す)であること。同枠(`0101`等)の買い目が実在するため、
+ *   `validateComboUmabans`のような「重複なし」は要求しない
+ *   (`docs/wakuren-odds-investigation.md` §2.2)。
+ */
+export function validateWakubanCombo(
+  wakubans: readonly number[],
+  comboSize: number,
+): void {
+  if (wakubans.length !== comboSize) {
+    throw new ComboOddsKeyError(
+      `組の要素数が券種と一致しません(期待: ${comboSize}, 実際: ${wakubans.length}, wakubans=${wakubans.join(",")})`,
+    );
+  }
+  validateWakubanRange(wakubans);
+  for (let i = 1; i < wakubans.length; i++) {
+    if (wakubans[i]! < wakubans[i - 1]!) {
+      throw new ComboOddsKeyError(
+        `枠番の組は昇順(同枠は可)である必要があります(wakubans=${wakubans.join(",")})`,
+      );
+    }
+  }
+}
+
+/**
+ * betTypeから要素の種類・順序方針を引いて`validateWakubanCombo`/`validateComboUmabans`/
+ * `validateOrderedComboUmabans`を振り分ける唯一のゲートウェイ(Issue #106・#24-B、
+ * 枠番の振り分けはIssue #143・#26-D)。betTypeを持っている呼び出し元
+ * (各パーサの`decodeRawKey`/`decodeCellId`・払戻行の解析)は必ずこちらを使うこと。
+ * 要素が枠番の券種(枠連)は順序方針より先に判定する。それ以外は従来の挙動から変えない。
  */
 export function validateComboUmabansFor(
   betType: ComboBetType,
   umabans: readonly number[],
   comboSize: number,
 ): void {
-  if (COMBO_KEY_ORDER[betType] === "ordered") {
+  if (COMBO_ELEMENT_KIND[betType] === "wakuban") {
+    validateWakubanCombo(umabans, comboSize);
+  } else if (COMBO_KEY_ORDER[betType] === "ordered") {
     validateOrderedComboUmabans(umabans, comboSize);
   } else {
     validateComboUmabans(umabans, comboSize);
@@ -353,7 +447,7 @@ function cellsEqual(a: ComboOddsCell, b: ComboOddsCell): boolean {
 export function buildComboOddsCellMap(
   entries: readonly ComboOddsEntry[],
 ): Map<string, ComboOddsCell> {
-  return buildComboOddsCellMapWithKeyFn(entries, buildComboOddsKey);
+  return buildComboOddsCellMapWithKeyFn(entries, buildComboOddsKey, validateComboUmabanRange);
 }
 
 /**
@@ -363,10 +457,11 @@ export function buildComboOddsCellMap(
 function buildComboOddsCellMapWithKeyFn(
   entries: readonly ComboOddsEntry[],
   keyFn: (umabans: readonly number[]) => string,
+  rangeFn: (umabans: readonly number[]) => void,
 ): Map<string, ComboOddsCell> {
   const map = new Map<string, ComboOddsCell>();
   for (const { umabans, cell } of entries) {
-    validateComboUmabanRange(umabans);
+    rangeFn(umabans);
     const key = keyFn(umabans);
     const existing = map.get(key);
     if (existing !== undefined) {
@@ -395,8 +490,13 @@ export function buildComboOddsCellMapFor(
   betType: ComboBetType,
   entries: readonly ComboOddsEntry[],
 ): Map<string, ComboOddsCell> {
-  return buildComboOddsCellMapWithKeyFn(entries, (umabans) =>
-    buildComboOddsKeyFor(betType, umabans),
+  // 要素が枠番の券種(枠連)は値域を1〜8で自己防御する(Issue #143・#26-D)。それ以外は従来どおり1〜18。
+  const rangeFn =
+    COMBO_ELEMENT_KIND[betType] === "wakuban" ? validateWakubanRange : validateComboUmabanRange;
+  return buildComboOddsCellMapWithKeyFn(
+    entries,
+    (umabans) => buildComboOddsKeyFor(betType, umabans),
+    rangeFn,
   );
 }
 

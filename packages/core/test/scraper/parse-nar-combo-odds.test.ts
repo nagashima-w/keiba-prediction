@@ -19,6 +19,8 @@ import {
   parseNarComboOdds,
   type NarComboOddsParseResult,
 } from "../../src/scraper/parse-nar-combo-odds.js";
+import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
+import { parseShutuba } from "../../src/scraper/parse-shutuba.js";
 
 /** fixtures/ 配下のファイルをUTF-8テキストとして読み込む(既存テストと同じ解決方法)。 */
 function loadFixture(name: string): string {
@@ -571,5 +573,155 @@ describe("parseNarComboOdds(三連単。Issue #130・#25-D)", () => {
     expect(html).toContain('id="odds_view_form"');
     const result = parseNarComboOdds(html, "trifecta");
     expect(result.state).toBe("unavailable");
+  });
+});
+
+/**
+ * 地方枠連(bracketQuinella。odds/index.html?type=b3)。Issue #143・#26-D。
+ *
+ * セルidは`chk_..._b3_c0_{枠}_{枠}`(枠番は1桁表記・昇順)。期待キー集合は枠の構成
+ * (`parseShutuba`/`parseRaceResult`の`wakuban`)から計算する(オッズ側から逆算しない)。
+ *
+ * ## `0.0`の扱い(ルールC。オーケストレーター合意2026-09-29)
+ * 頭数不足(7・8頭)の枠連ページは**通常の発売ページ構造のまま全28セルが`0.0`**になる
+ * (`docs/wakuren-odds-investigation.md` §6.2)。`0.0`は実在しないオッズなので、単一値分岐
+ * (セル形式で分岐。券種では分岐しない。レンジ形式のワイドは対象外)で
+ * (1) セル値0は`oddsMin=null`にし、(2) セルが1件以上あり**全セルが0**なら`unavailable`にする。
+ * 「全セルがnull」を条件にしないのは、取消・空セルが`available`のままnullで残る既存契約
+ * (既存テスト7件)を壊さないため。
+ */
+describe("parseNarComboOdds(枠連 type=b3。Issue #143・#26-D)", () => {
+  function pad2(n: number): string {
+    return String(n).padStart(2, "0");
+  }
+
+  function expectedKeys(wakubans: readonly (number | null)[]): Set<string> {
+    const counts = new Map<number, number>();
+    for (const w of wakubans) {
+      expect(w).not.toBeNull(); // 前提を無条件で固定(空振り防止)
+      counts.set(w!, (counts.get(w!) ?? 0) + 1);
+    }
+    const ids = [...counts.keys()].sort((a, b) => a - b);
+    const keys = new Set<string>();
+    for (let i = 0; i < ids.length; i += 1) {
+      if (counts.get(ids[i]!)! >= 2) keys.add(pad2(ids[i]!) + pad2(ids[i]!));
+      for (let j = i + 1; j < ids.length; j += 1) keys.add(pad2(ids[i]!) + pad2(ids[j]!));
+    }
+    return keys;
+  }
+
+  const cases = [
+    {
+      name: "12頭(同枠5_5〜8_8の4件を含む)",
+      odds: "nar_odds_b3_202654071210.html",
+      wakubans: () =>
+        parseShutuba(loadFixture("nar_shutuba_202654071210.html")).horses.map((h) => h.wakuban),
+      size: 32,
+      sameFrame: 4,
+    },
+    {
+      name: "9頭(同枠8_8の1件)",
+      odds: "nar_odds_b3_202654092706.html",
+      wakubans: () =>
+        parseRaceResult(loadFixture("nar_result_202654092706.html")).horses.map((h) => h.wakuban),
+      size: 29,
+      sameFrame: 1,
+    },
+  ] as const;
+
+  for (const c of cases) {
+    it(`${c.name}: キー集合が枠の構成から計算した期待集合と完全一致すること`, () => {
+      const odds = expectAvailable(parseNarComboOdds(loadFixture(c.odds), "bracketQuinella"));
+      const expected = expectedKeys(c.wakubans());
+      expect(expected.size).toBe(c.size);
+      expect([...expected].filter((k) => k.slice(0, 2) === k.slice(2, 4)).length).toBe(c.sameFrame);
+      expect(new Set(odds.keys())).toEqual(expected);
+    });
+
+    it(`${c.name}: 全セルが単一値(oddsMax=null・ninki=null)で、oddsMinが正の数値であること`, () => {
+      const odds = expectAvailable(parseNarComboOdds(loadFixture(c.odds), "bracketQuinella"));
+      expect(odds.size).toBe(c.size);
+      for (const cell of odds.values()) {
+        expect(cell.oddsMax).toBeNull();
+        expect(cell.ninki).toBeNull();
+        expect(cell.oddsMin).not.toBeNull();
+        expect(cell.oddsMin!).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  it("確定払戻との突合: 5_6=10.7(12頭)、3_8=7.6(9頭)。昇順に正規化されたキーだけが存在すること", () => {
+    const o12 = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b3_202654071210.html"), "bracketQuinella"));
+    const o9 = expectAvailable(parseNarComboOdds(loadFixture("nar_odds_b3_202654092706.html"), "bracketQuinella"));
+    expect(o12.get("0506")?.oddsMin).toBe(10.7);
+    expect(o9.get("0308")?.oddsMin).toBe(7.6);
+    expect(o12.has("0605")).toBe(false);
+  });
+
+  it("頭数不足(7頭・8頭)のページは、通常構造のまま全28セルが0.0でも unavailable になること(available で28組の全null を返さない)", () => {
+    for (const f of ["nar_odds_b3_unsold_202630062407.html", "nar_odds_b3_unsold_202654092711.html"]) {
+      const html = loadFixture(f);
+      // 前提固定: 28セルが実在し、それらがすべて0.0であること(構造は通常の発売ページのまま)。
+      const zeroCells = html.match(/<td class="Odds"[^>]*_b3_c0_\d+_\d+"[^>]*>\s*0\.0\s/g) ?? [];
+      expect(zeroCells.length).toBe(28);
+      const result = parseNarComboOdds(html, "bracketQuinella");
+      expect(result.state).toBe("unavailable");
+    }
+  });
+
+  describe("0.0の扱い(合成データ。単一値分岐。ルールC)", () => {
+    const wrap = (cells: string) =>
+      `<div id="odds_view_form"><table class="Odds_Table"><tr>${cells}</tr></table></div>`;
+    const td = (marker: string, tail: string, text: string) =>
+      `<td class="Odds" id="chk_x_${marker}_c0_${tail}">${text}</td>`;
+
+    it("全セルが0.0なら、券種によらず単一値分岐(枠連・馬連・3連複)で unavailable になること", () => {
+      const cases: ReadonlyArray<readonly ["bracketQuinella" | "quinella" | "trio", string, string]> = [
+        ["bracketQuinella", "b3", "1_2"],
+        ["quinella", "b4", "1_2"],
+        ["trio", "b7", "1_2_3"],
+      ];
+      for (const [betType, marker, tail] of cases) {
+        const result = parseNarComboOdds(wrap(td(marker, tail, "0.0")), betType);
+        expect(result.state).toBe("unavailable");
+      }
+    });
+
+    it("★一部だけ0.0(推測。実物では未観測): 0.0のセルはoddsMin=nullにし、0でないセルは数値のまま available になること", () => {
+      // この挙動は「0.0は実在しないオッズ」という前提からの推測であり、一部だけ0.0の実ページは
+      // 観測していない(観測したのは全28セルが0.0の頭数不足ページのみ)。
+      const html = wrap(td("b3", "1_2", "0.0") + td("b3", "1_3", "10.7"));
+      const odds = expectAvailable(parseNarComboOdds(html, "bracketQuinella"));
+      expect(odds.get("0102")).toEqual({ oddsMin: null, oddsMax: null, ninki: null });
+      expect(odds.get("0103")?.oddsMin).toBe(10.7);
+    });
+
+    it("全セルが0.0以外の欠損表現(取消・空)のときは従来どおり available のままnullで残ること(ルールBを採らない理由の固定)", () => {
+      const html = wrap(td("b3", "1_2", "取消") + td("b3", "1_3", ""));
+      const odds = expectAvailable(parseNarComboOdds(html, "bracketQuinella"));
+      expect(odds.size).toBe(2);
+      for (const cell of odds.values()) expect(cell.oddsMin).toBeNull();
+    });
+
+    it("0.0と欠損表現(取消)が混在して数値が1件も無い場合は available のまま(「全セルが0」ではない)", () => {
+      const html = wrap(td("b3", "1_2", "0.0") + td("b3", "1_3", "取消"));
+      const odds = expectAvailable(parseNarComboOdds(html, "bracketQuinella"));
+      expect(odds.size).toBe(2);
+    });
+
+    it("ワイド(レンジ形式)は対象外: \"0.0 - 0.0\"は従来どおり数値0として読まれること(未観測領域の現状維持の明示)", () => {
+      const odds = expectAvailable(
+        parseNarComboOdds(wrap(td("b5", "1_2", "0.0 - 0.0")), "wide"),
+      );
+      expect(odds.get("0102")).toEqual({ oddsMin: 0, oddsMax: 0, ninki: null });
+    });
+  });
+
+  it("枠番として不正なセルid(_1_9・降順_2_1)は構造異常としてthrowすること", () => {
+    const wrap = (id: string) =>
+      `<div id="odds_view_form"><table><tr><td class="Odds" id="chk_x_b3_c0_${id}">5.5</td></tr></table></div>`;
+    expect(() => parseNarComboOdds(wrap("1_9"), "bracketQuinella")).toThrow(NarComboOddsParseError);
+    expect(() => parseNarComboOdds(wrap("2_1"), "bracketQuinella")).toThrow(NarComboOddsParseError);
+    expect(parseNarComboOdds(wrap("2_2"), "bracketQuinella").state).toBe("available");
   });
 });

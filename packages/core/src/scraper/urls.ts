@@ -283,6 +283,26 @@ export function trifectaOddsApiUrl(raceId: RaceId): string {
 }
 
 /**
+ * 枠連オッズを返す内部API(JSON、中央のみ、Issue #143・#26-D)。
+ *
+ * `data.odds["3"]` に**枠番**の組(4桁。枠2桁×2・昇順。例 "0407")をキーとした
+ * [値,0.0(ダミー),人気] が入る。馬連・馬単・3連複と同様、下限・上限を持たない単一値の券種
+ * (2要素目は常に"0.0"のダミー)。**キーは馬番ではなく枠番**で、同枠(例 "0101")の買い目が
+ * 実在する(2頭以上が入る枠に限る)。実測(#141、race_id=202603020211・16頭)で1リクエストに
+ * 36件(=C(8,2)+8)全組合せが返ることを確認済み(`fixtures/odds_wakuren_202603020211.json`。
+ * `docs/wakuren-odds-investigation.md` §2参照)。type値の観測方法は wideOddsApiUrl と同じ
+ * (odds_get_form.html?type=b3 フラグメント内 `oddsType:'3'`。
+ * `fixtures/odds_get_form_b3_202603020211.html`で再現可能)。
+ *
+ * 地方(NAR)には同等のJSON APIが存在しない(wideOddsApiUrlと同じ理由)ため、
+ * 地方race_idを渡すと NarUnsupportedError を投げる(地方は narBracketQuinellaOddsPageUrl を使うこと)。
+ */
+export function bracketQuinellaOddsApiUrl(raceId: RaceId): string {
+  assertCentral(raceId, "枠連オッズJSON API(api_get_jra_odds、type=3)");
+  return `${RACE_BASE}/api/api_get_jra_odds.html?race_id=${raceId}&type=3&action=init`;
+}
+
+/**
  * ワイドオッズページのURL(地方のみ、機能D-1)。
  *
  * 中央と異なりJSON APIが存在しないため、静的HTML(odds/index.html?type=b5)をパースする
@@ -318,6 +338,21 @@ export function narExactaOddsPageUrl(raceId: RaceId): string {
  */
 export function narQuinellaOddsPageUrl(raceId: RaceId): string {
   return `${NAR_BASE}/odds/index.html?type=b4&race_id=${raceId}`;
+}
+
+/**
+ * 枠連オッズページのURL(地方のみ、Issue #143・#26-D)。
+ *
+ * 馬連(`narQuinellaOddsPageUrl`)と同じく、軸馬別の制限を受けず1リクエストで全組合せが
+ * 取得できる(3連複〈`narTrioOddsPageUrl`〉とは異なる)。実測(#141、race_id=202654071210・
+ * 12頭)で、静的HTML(odds/index.html?type=b3)に32件(=C(8,2)+4)全組合せが含まれ、
+ * 軸馬選択の`<select>`も存在しないことを確認済み(`fixtures/nar_odds_b3_202654071210.html`。
+ * `docs/wakuren-odds-investigation.md` §3参照)。セルidの末尾は枠番(1桁表記・昇順)。
+ * **頭数不足(7・8頭)のページは通常構造のまま全セルが`0.0`になる**(同docs §6.2。
+ * 扱いは`parse-nar-combo-odds.ts`の「`0.0`の扱い」参照)。
+ */
+export function narBracketQuinellaOddsPageUrl(raceId: RaceId): string {
+  return `${NAR_BASE}/odds/index.html?type=b3&race_id=${raceId}`;
 }
 
 /**
