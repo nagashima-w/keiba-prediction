@@ -536,11 +536,14 @@ export interface RaceComboPayoutsSaveInput {
    * **本追加も#106・#113・#130と同型の理由(型を壊さないための最小追加)**: `saveResult`内の
    * ループは`COMBO_BET_TYPES`(`Object.keys(COMBO_SIZE)`由来)を走査して`combo?.[betType]`を
    * 読むため、`ComboBetType`に`bracketQuinella`が追加されると、このフィールドが無いままでは
-   * `pnpm typecheck`がTS7053で落ちる。**払戻の取込の配線(`tr.Wakuren`の解析と
-   * `result-import.ts`が渡すこと)は#145のスコープであり、本Issue(#143)の時点では
-   * このフィールドを追加しても枠連の払戻行は実際には書かれない**(`combo?.bracketQuinella`が
-   * 常に`undefined`のため該当反復は`continue`するだけ。`analysis-store.test.ts`
-   * 「枠連の払戻」で直接固定済み)。
+   * `pnpm typecheck`がTS7053で落ちる。#143の時点では、このフィールドを追加しても枠連の
+   * 払戻行は実際には書かれなかった(`combo?.bracketQuinella`が常に`undefined`のため
+   * 該当反復は`continue`するだけ。`analysis-store.test.ts`「枠連の払戻」で直接固定済み)。
+   *
+   * ★**Issue #145・#26-Fで`parseRaceResult`が`tr.Wakuren`を解析し(`bracketQuinellaPayouts`)、
+   * `result-import.ts`が`bracketQuinella: result.bracketQuinellaPayouts`を渡すようになり、
+   * 上記は過去の状態になった。現在は枠連の払戻行が実際に書かれる**
+   * (`result-import.test.ts`「組合せ払戻(枠連、Issue #145・#26-F)の取込」参照)。
    */
   readonly bracketQuinella?: RaceComboPayoutResult;
 }

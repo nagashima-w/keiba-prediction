@@ -360,10 +360,10 @@ export interface ProposedBetPopulation {
 }
 
 /**
- * 保存されている券種コードが place/win/wide/trio/quinella/exacta/trifecta のいずれでもなかった
- * 買い目行(Issue #76。winはIssue #100・#23-Cで、馬連〈quinella〉はIssue #114・#24-F1で、
- * 馬単〈exacta〉はIssue #121・#24-F2で、三連単〈trifecta〉はIssue #131・#25-Fで既知の券種に
- * 追加された)。
+ * 保存されている券種コードが place/win/wide/trio/quinella/exacta/trifecta/bracketQuinella の
+ * いずれでもなかった買い目行(Issue #76。winはIssue #100・#23-Cで、馬連〈quinella〉はIssue
+ * #114・#24-F1で、馬単〈exacta〉はIssue #121・#24-F2で、三連単〈trifecta〉はIssue #131・
+ * #25-Fで、枠連〈bracketQuinella〉はIssue #145・#26-Fで既知の券種に追加された)。
  * 規則U(判定不能。原因は払戻の取込状態)とは原因が違うため `unjudgedCount` には混ぜない。
  * この行は betCount/totalStake/totalReturn/unjudgedCount のいずれにも計上されない。
  *
@@ -390,10 +390,11 @@ export interface ProposedBetUnknownBetType {
  * 賭け金とする(Q-C)。既存 `VerifyReport.bet`(複勝・一律stakePerBet円、Q-B)とは仮定が異なるため、
  * 両者を合算した値はどこにも作らない(AC-B5)。
  *
- * `overall` は place/win/wide/trio/quinella/exacta/trifecta の7券種の合算(winはIssue #100・
- * #23-Cで追加、馬連〈quinella〉はIssue #114・#24-F1で、馬単〈exacta〉はIssue #121・#24-F2で、
- * 三連単〈trifecta〉はIssue #131・#25-Fで追加)——**これは AC-B5が禁じる「賭け金の仮定が違う
- * 2つの合算」には当たらない**。7券種はいずれも同一の仮定(分析時点で実際に提案した配分額)を
+ * `overall` は place/win/wide/trio/quinella/exacta/trifecta/bracketQuinella の8券種の合算
+ * (winはIssue #100・#23-Cで追加、馬連〈quinella〉はIssue #114・#24-F1で、馬単〈exacta〉は
+ * Issue #121・#24-F2で、三連単〈trifecta〉はIssue #131・#25-Fで、枠連〈bracketQuinella〉は
+ * Issue #145・#26-Fで追加)——**これは AC-B5が禁じる「賭け金の仮定が違う
+ * 2つの合算」には当たらない**。8券種はいずれも同一の仮定(分析時点で実際に提案した配分額)を
  * 共有しており、ケリー配分はそもそも複数券種にまたがるポートフォリオとして計算されているため、
  * 券種を横断した合計はその仮定の中で意味を持つ(AC-B5がこの合算を明示的に許容している判断理由を
  * ここに残す)。
@@ -416,12 +417,20 @@ export interface ProposedBetUnknownBetType {
  * 買い目をまだ作らないため`betCount`は現時点で構造的に常に0になる(exactaと同じ経緯)。
  * `VerifyView.tsx`への表示追加は#132へ申し送る(`trifecta`フィールド自体はここ・
  * `computeProposedBetReport`・`overall`合算には既に含める。表示だけを見送る)。
+ *
+ * ★枠連(bracketQuinella)はIssue #145・#26-Fで確定払戻の取込・回収率判定に対応した。配分が枠連の
+ * 買い目をまだ作らない(app側の候補・設定は#146)ため`betCount`は現時点で構造的に常に0になる
+ * (exacta・trifectaと同じ経緯)。`VerifyView.tsx`への表示追加は#146のスコープであり、
+ * `bracketQuinella`フィールド自体はここ・`computeProposedBetReport`・`overall`合算には既に含める。
+ * **買い目の`comboKey`は枠番の組(`buildAllocationBetComboKey("bracketQuinella", [4,7])`→"0407"。
+ * 同枠は"0101")、払戻側のキーも同じ枠番の組で、的中判定は他の組合せ券種と同じ文字列の完全一致**
+ * (馬番からの変換はここでは一切行わない)。
  */
 export interface ProposedBetReport {
   /** 母集団4分類の件数。 */
   readonly population: ProposedBetPopulation;
   /**
-   * 複勝・単勝・ワイド・3連複・馬連・馬単・三連単の合算(同一の賭け金仮定を共有する
+   * 複勝・単勝・ワイド・3連複・馬連・馬単・三連単・枠連の合算(同一の賭け金仮定を共有する
    * ポートフォリオとしての合計)。
    */
   readonly overall: ProposedBetTypeSummary;
@@ -450,9 +459,14 @@ export interface ProposedBetReport {
    */
   readonly trifecta: ProposedBetTypeSummary;
   /**
-   * 保存されている券種コードが place/win/wide/trio/quinella/exacta/trifecta のいずれでもなかった
-   * 買い目行(Issue #76。馬連はIssue #114・#24-F1、馬単はIssue #121・#24-F2、三連単はIssue
-   * #131・#25-Fで既知化)。
+   * 枠連の内訳(Issue #145・#26-F)。配分が枠連の買い目をまだ作らないため`betCount`は現時点で
+   * 常に0(このJSDoc冒頭の注意参照)。画面(`VerifyView.tsx`)への表示は#146で行う。
+   */
+  readonly bracketQuinella: ProposedBetTypeSummary;
+  /**
+   * 保存されている券種コードが place/win/wide/trio/quinella/exacta/trifecta/bracketQuinella の
+   * いずれでもなかった買い目行(Issue #76。馬連はIssue #114・#24-F1、馬単はIssue #121・
+   * #24-F2、三連単はIssue #131・#25-F、枠連はIssue #145・#26-Fで既知化)。
    * `overall` には合算しない(`ProposedBetUnknownBetType` のJSDoc参照)。未知券種行が1件も
    * 無い通常時は `{ count: 0, totalStake: 0, betTypes: [] }`。このフィールド自体が省略される
    * ことはない(#71で`unjudgedCount`が core→shared View 型までは配線されながら
@@ -1245,9 +1259,10 @@ function finalizeProposedBetSummary(acc: ProposedBetAccumulator): ProposedBetTyp
 }
 
 /**
- * 7券種の可変カウンタを合算した確定値を作る(overall。JSDoc「ProposedBetReport」参照)。
+ * 8券種の可変カウンタを合算した確定値を作る(overall。JSDoc「ProposedBetReport」参照)。
  * Issue #100・#23-Cで単勝(win)を、Issue #114・#24-F1で馬連(quinella)を、
- * Issue #121・#24-F2で馬単(exacta)を、Issue #131・#25-Fで三連単(trifecta)を追加。
+ * Issue #121・#24-F2で馬単(exacta)を、Issue #131・#25-Fで三連単(trifecta)を、
+ * Issue #145・#26-Fで枠連(bracketQuinella)を追加。
  */
 function finalizeProposedBetOverall(
   place: ProposedBetAccumulator,
@@ -1257,6 +1272,7 @@ function finalizeProposedBetOverall(
   quinella: ProposedBetAccumulator,
   exacta: ProposedBetAccumulator,
   trifecta: ProposedBetAccumulator,
+  bracketQuinella: ProposedBetAccumulator,
 ): ProposedBetTypeSummary {
   return finalizeProposedBetSummary({
     betCount:
@@ -1266,7 +1282,8 @@ function finalizeProposedBetOverall(
       trio.betCount +
       quinella.betCount +
       exacta.betCount +
-      trifecta.betCount,
+      trifecta.betCount +
+      bracketQuinella.betCount,
     totalStake:
       place.totalStake +
       win.totalStake +
@@ -1274,7 +1291,8 @@ function finalizeProposedBetOverall(
       trio.totalStake +
       quinella.totalStake +
       exacta.totalStake +
-      trifecta.totalStake,
+      trifecta.totalStake +
+      bracketQuinella.totalStake,
     totalReturn:
       place.totalReturn +
       win.totalReturn +
@@ -1282,7 +1300,8 @@ function finalizeProposedBetOverall(
       trio.totalReturn +
       quinella.totalReturn +
       exacta.totalReturn +
-      trifecta.totalReturn,
+      trifecta.totalReturn +
+      bracketQuinella.totalReturn,
     unjudgedCount:
       place.unjudgedCount +
       win.unjudgedCount +
@@ -1290,7 +1309,8 @@ function finalizeProposedBetOverall(
       trio.unjudgedCount +
       quinella.unjudgedCount +
       exacta.unjudgedCount +
-      trifecta.unjudgedCount,
+      trifecta.unjudgedCount +
+      bracketQuinella.unjudgedCount,
   });
 }
 
@@ -1344,6 +1364,17 @@ function computeProposedBetReport(
   const quinella = emptyProposedBetAccumulator();
   const exacta = emptyProposedBetAccumulator();
   const trifecta = emptyProposedBetAccumulator();
+  const bracketQuinella = emptyProposedBetAccumulator();
+  const accumulatorByBetType = {
+    place,
+    win,
+    wide,
+    trio,
+    quinella,
+    exacta,
+    trifecta,
+    bracketQuinella,
+  } satisfies Record<string, ProposedBetAccumulator>;
   const unknown = emptyUnknownBetTypeAccumulator();
 
   // レース×券種ごとにgetComboPayoutsの呼び出しを1回に抑えるキャッシュ(同一レース内に
@@ -1412,32 +1443,25 @@ function computeProposedBetReport(
         bet.betType !== "trio" &&
         bet.betType !== "quinella" &&
         bet.betType !== "exacta" &&
-        bet.betType !== "trifecta"
+        bet.betType !== "trifecta" &&
+        bet.betType !== "bracketQuinella"
       ) {
-        // Issue #76: #59の保存経路はplace/win/wide/trio/quinella/exacta/trifecta(馬連はIssue
-        // #114・#24-F1、馬単はIssue #121・#24-F2、三連単はIssue #131・#25-Fで追加)のみを書く
-        // 契約のため通常到達しないが、到達した場合に無言でcontinueして投資額を静かに過小計上する
-        // (=回収率が偽って良く見える)欠陥があった。規則Uとは原因が異なるためunjudgedCountには
-        // 混ぜず、専用の内訳(unknownBetType)へ計上する(ProposedBetUnknownBetTypeのJSDoc参照)。
+        // Issue #76: #59の保存経路はplace/win/wide/trio/quinella/exacta/trifecta/bracketQuinella
+        // (馬連はIssue #114・#24-F1、馬単はIssue #121・#24-F2、三連単はIssue #131・#25-F、
+        // 枠連はIssue #145・#26-Fで追加)のみを書く契約のため通常到達しないが、到達した場合に
+        // 無言でcontinueして投資額を静かに過小計上する(=回収率が偽って良く見える)欠陥があった。
+        // 規則Uとは原因が異なるためunjudgedCountには混ぜず、専用の内訳(unknownBetType)へ
+        // 計上する(ProposedBetUnknownBetTypeのJSDoc参照)。
         unknown.count += 1;
         unknown.totalStake += bet.stake;
         unknown.betTypes.add(bet.betType);
         continue;
       }
-      const accumulator =
-        bet.betType === "place"
-          ? place
-          : bet.betType === "win"
-            ? win
-            : bet.betType === "wide"
-              ? wide
-              : bet.betType === "trio"
-                ? trio
-                : bet.betType === "quinella"
-                  ? quinella
-                  : bet.betType === "exacta"
-                    ? exacta
-                    : trifecta;
+      // 券種→カウンタの対応は券種名で引く(Issue #145・#26-Fで、末尾を`: trifecta`で受ける
+      // 三項演算子の連鎖から置き換えた。連鎖だと、許可リストへ券種を足して分岐を足し忘れた
+      // とき、その券種の買い目が黙って末尾のカウンタ〈三連単〉に混入する)。上の許可リストで
+      // 既知の券種に絞り込まれているため、ここでの添字は必ず存在する。
+      const accumulator = accumulatorByBetType[bet.betType];
 
       if (bet.betType === "place") {
         if (!racePayoutAvailable) {
@@ -1469,9 +1493,10 @@ function computeProposedBetReport(
         continue;
       }
 
-      // ワイド・3連複・馬連・馬単・三連単(Issue #114・#24-F1で馬連を、Issue #121・#24-F2で
-      // 馬単を、Issue #131・#25-Fで三連単を追加。5者とも同じ組合せ判定。的中判定はcomboKeyの
-      // 文字列完全一致のみで、券種別の順序方針〈昇順化するか否か〉はここでは一切扱わない——
+      // ワイド・3連複・馬連・馬単・三連単・枠連(Issue #114・#24-F1で馬連を、Issue #121・
+      // #24-F2で馬単を、Issue #131・#25-Fで三連単を、Issue #145・#26-Fで枠連を追加。6者とも
+      // 同じ組合せ判定。的中判定はcomboKeyの文字列完全一致のみで、券種別の順序方針
+      // 〈昇順化するか否か〉はここでは一切扱わない——
       // 買い目側のcomboKeyは配分計算・払戻側のcomboKeyはparseComboPayoutRow/analysis-store.tsが
       // 既にbuildComboOddsKeyForで正規化済みのものをそのまま比較するため、逆順の買い目
       // 〈例: 馬単0813〉が正順の払戻〈1308〉と誤って一致することはない)。
@@ -1495,7 +1520,16 @@ function computeProposedBetReport(
 
   return {
     population: { allocated, skipped, unreached, noRecord },
-    overall: finalizeProposedBetOverall(place, win, wide, trio, quinella, exacta, trifecta),
+    overall: finalizeProposedBetOverall(
+      place,
+      win,
+      wide,
+      trio,
+      quinella,
+      exacta,
+      trifecta,
+      bracketQuinella,
+    ),
     place: finalizeProposedBetSummary(place),
     win: finalizeProposedBetSummary(win),
     wide: finalizeProposedBetSummary(wide),
@@ -1503,6 +1537,7 @@ function computeProposedBetReport(
     quinella: finalizeProposedBetSummary(quinella),
     exacta: finalizeProposedBetSummary(exacta),
     trifecta: finalizeProposedBetSummary(trifecta),
+    bracketQuinella: finalizeProposedBetSummary(bracketQuinella),
     unknownBetType: finalizeUnknownBetType(unknown),
   };
 }

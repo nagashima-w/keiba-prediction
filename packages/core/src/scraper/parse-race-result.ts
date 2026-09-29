@@ -601,6 +601,13 @@ export function parseRaceResult(html: string): RaceResult {
       "三連単",
       payoutTablePresent,
     ),
+    bracketQuinellaPayouts: parseComboPayoutRow(
+      $,
+      SEL.bracketQuinellaRow,
+      "bracketQuinella",
+      "枠連",
+      payoutTablePresent,
+    ),
     courseType: parseCourseType($),
   };
 }

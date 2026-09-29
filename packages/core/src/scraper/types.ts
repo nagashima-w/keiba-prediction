@@ -309,6 +309,11 @@ export interface RaceComboPayoutEntry {
    * (`scraper/combo-odds-key.ts`の`COMBO_KEY_ORDER`参照。馬単は「1着13・2着8」と
    * 「1着8・2着13」が別の買い目であり、昇順に正規化すると区別できなくなるため。
    * 三連単も同じ理由)。
+   *
+   * **枠連(bracketQuinella、Issue #145・#26-F)だけは中身が馬番ではなく枠番(1〜8)**で、
+   * 昇順(非減少)に正規化され、**同枠(`[2,2]`)が入りうる**(`COMBO_ELEMENT_KIND`参照)。
+   * フィールド名が`umabans`のままなのは、`RaceComboPayoutsSaveInput`・`buildComboOddsKeyFor`など
+   * 既存の共有経路(`{umabans, payout}`)にそのまま乗せるためで、命名の不整合は承知のうえである。
    */
   readonly umabans: readonly number[];
   /** 100円あたりの払戻額(円)。 */
@@ -441,6 +446,18 @@ export interface RaceResult {
    * JSDoc参照)。
    */
   readonly trifectaPayouts?: RaceComboPayoutResult;
+  /**
+   * 枠連の確定払戻(Issue #145・#26-F)。`widePayouts` と同じ契約・同じ非対称
+   * (払戻テーブル自体が無い場合は `state:"undetermined"` になり、空配列にはならない)。
+   * 馬連と同じ払戻テーブル内の行(`tr.Wakuren`)から読む。
+   *
+   * **8頭以下のレースには`tr.Wakuren`行が無く、その場合は`state:"parsed"`・`payouts:[]`
+   * (発売なし)になる**(`docs/wakuren-odds-investigation.md` §5)。
+   *
+   * **`payouts[].umabans`は馬番ではなく枠番(1〜8。昇順・同枠あり)**
+   * (`RaceComboPayoutEntry.umabans`のJSDoc参照)。
+   */
+  readonly bracketQuinellaPayouts?: RaceComboPayoutResult;
 }
 
 /** 単勝オッズ(1頭分)。未確定・非数値は null。 */

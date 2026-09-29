@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
@@ -350,6 +352,50 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         // 三連単(Issue #131・#25-F): この合成HTMLにはtr.Tan3行が無いため、quinella/exactaと
         // 同じ理由で「発売なし」の空配列になる。
         trifecta: { state: "parsed", payouts: [] },
+        // 枠連(Issue #145・#26-F): この合成HTMLにはtr.Wakuren行が無いため、上と同じ理由で
+        // 「発売なし」の空配列になる。
+        bracketQuinella: { state: "parsed", payouts: [] },
+      });
+    });
+
+    /**
+     * Issue #145・#26-F: 枠連の配線落ち検出(上のテストと同型)。こちらは合成HTMLではなく
+     * **実フィクスチャ**(中央16頭。枠連4-7=3,150円)をfetchのレスポンスにし、
+     * createPipelineDeps → importResult → store.saveResult の第4引数まで枠連が実際に届くことを固定する。
+     * 上のテストは枠連の行が無い文書(空配列が届く)しか扱わないため、行のある文書で
+     * 枠連の中身(枠番の組と払戻額)が届くことは別に固定する必要がある。
+     */
+    it("実フィクスチャ(枠連4-7=3,150円)を取り込むと、bracketQuinellaが枠番の組[4,7]としてstore.saveResultの第4引数まで届くこと(Issue #145・#26-F)", async () => {
+      const saveResultSpy = vi.spyOn(AnalysisStore.prototype, "saveResult");
+      const html = readFileSync(
+        fileURLToPath(new URL("../../../fixtures/result_202603020211.html", import.meta.url)),
+        "utf-8",
+      );
+      const response: FetchResponse = {
+        status: 200,
+        ok: true,
+        headers: {
+          get: (name: string): string | null =>
+            name.toLowerCase() === "content-type"
+              ? "text/html; charset=utf-8"
+              : null,
+        },
+        arrayBuffer: async (): Promise<ArrayBuffer> =>
+          new TextEncoder().encode(html).buffer,
+      };
+      const fetch = vi.fn<FetchLike>(async () => response);
+
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+
+      const outcome = await r.importResult(parseRaceId("202603020211"));
+
+      expect(outcome.status).toBe("imported");
+      expect(saveResultSpy).toHaveBeenCalledTimes(1);
+      const [, , , comboPayouts] = saveResultSpy.mock.calls[0]!;
+      expect(comboPayouts?.bracketQuinella).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [4, 7], payout: 3150 }],
       });
     });
   });

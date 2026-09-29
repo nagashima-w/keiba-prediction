@@ -135,16 +135,18 @@ export async function importRaceResult(
     throw e;
   }
   // boss裁定R-7: result.widePayouts/result.trioPayouts/result.quinellaPayouts/
-  // result.exactaPayouts/result.trifectaPayouts(いずれもparseRaceResultが返す判別共用体)を
-  // そのまま第4引数へ渡すだけで、ここでは一切の判断(undeterminedを[]に変換する・握りつぶす等)
-  // をしない。判断の余地を無くすことがR-7の要点(馬連はIssue #114・#24-F1、馬単はIssue #121・
-  // #24-F2、三連単はIssue #131・#25-Fでwide/trioと同型のまま追加)。
+  // result.exactaPayouts/result.trifectaPayouts/result.bracketQuinellaPayouts(いずれも
+  // parseRaceResultが返す判別共用体)をそのまま第4引数へ渡すだけで、ここでは一切の判断
+  // (undeterminedを[]に変換する・握りつぶす等)をしない。判断の余地を無くすことがR-7の要点
+  // (馬連はIssue #114・#24-F1、馬単はIssue #121・#24-F2、三連単はIssue #131・#25-F、
+  // 枠連はIssue #145・#26-Fでwide/trioと同型のまま追加。枠連の`umabans`は馬番ではなく枠番)。
   deps.saveResult(raceId, toResultEntries(result), result.courseType, {
     wide: result.widePayouts,
     trio: result.trioPayouts,
     quinella: result.quinellaPayouts,
     exacta: result.exactaPayouts,
     trifecta: result.trifectaPayouts,
+    bracketQuinella: result.bracketQuinellaPayouts,
   });
   return summarizeImport(raceId, result);
 }

@@ -212,6 +212,16 @@ export const RACE_RESULT_SELECTORS = {
    */
   trifectaRow: "tr.Tan3",
   /**
+   * 枠連の払戻行(Issue #145・#26-F)。quinellaRow/trifectaRow と同じ理由で行セレクタを直指定する。
+   * 馬連〈`tr.Umaren`〉と同じ払戻テーブルに入る(実測: `fixtures/result_202603020211.html`・
+   * `fixtures/nar_result_202654071210.html` ほか。`class="Wakuren"`は文書中に0回か1回)。
+   * **8頭以下のレースには行が無い**(`docs/wakuren-odds-investigation.md` §5。発売なし)。
+   * **構造(td.Result内のul/li・単一値のtd.Payout)は馬連と同型だが、`td.Result`の各`<span>`は
+   * 馬番ではなく枠番(1〜8)であり、同枠(`2-2`)が的中しうる。**`parseComboPayoutRow`は
+   * `COMBO_ELEMENT_KIND`を見て枠番用の検証(非減少・同枠可)に振り分ける。
+   */
+  bracketQuinellaRow: "tr.Wakuren",
+  /**
    * ワイド・三連複の払戻行内で1組を表す `<ul>`(Issue #52)。組内の的中馬番は
    * 各 `<li>` のテキスト(空の `<li></li>` は区切り用でワイドの末尾に付く)。
    */

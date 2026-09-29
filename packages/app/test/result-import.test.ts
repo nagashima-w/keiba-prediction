@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
+  AnalysisStore,
   parseRaceId,
+  parseRaceResult,
   RaceResultNotConfirmedError,
   RaceResultParseError,
   type RaceResult,
@@ -10,6 +14,14 @@ import {
   summarizeImport,
   toResultEntries,
 } from "../src/main/result-import.js";
+
+/** 実フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
+function loadFixture(name: string): string {
+  return readFileSync(
+    fileURLToPath(new URL(`../../../fixtures/${name}`, import.meta.url)),
+    "utf-8",
+  );
+}
 
 /** テスト用のレース結果を最小構成で組み立てる。 */
 function buildRaceResult(overrides: Partial<RaceResult> = {}): RaceResult {
@@ -615,5 +627,129 @@ describe("importRaceResult(取込フロー: 取得→パース→保存)", () =>
     );
     expect(saveResult).toHaveBeenCalledTimes(1);
     expect(outcome.raceId).toBe("202654071210");
+  });
+});
+
+/**
+ * 枠連の確定払戻の取込(Issue #145・#26-F)。#52のR-7(判断を挟まず素通し)・R-10を
+ * `bracketQuinella`にも適用する。**枠連の`umabans`は馬番ではなく枠番**。
+ */
+describe("組合せ払戻(枠連、Issue #145・#26-F)の取込", () => {
+  const raceId = parseRaceId("202602010607");
+
+  it("パース結果のbracketQuinellaPayoutsを、他の5券種と同時にsaveResultの第4引数へそのまま(判断を挟まず)渡すこと(AC-3)", async () => {
+    const saveResult = vi.fn();
+    const bracketQuinella: RaceResult["bracketQuinellaPayouts"] = {
+      state: "parsed",
+      payouts: [{ umabans: [4, 7], payout: 3150 }],
+    };
+    const trifecta: RaceResult["trifectaPayouts"] = {
+      state: "parsed",
+      payouts: [{ umabans: [13, 8, 5], payout: 52690 }],
+    };
+    await importRaceResult(raceId, {
+      fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+      parse: () => buildRaceResult({ bracketQuinellaPayouts: bracketQuinella, trifectaPayouts: trifecta }),
+      saveResult,
+    });
+    expect(saveResult).toHaveBeenCalledTimes(1);
+    const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+    // ★枠連が渡っていること(渡し忘れの変異はここで赤くなる)。toEqualはundefined値を無視するため、
+    // フィールド単位でも直接固定する。
+    expect(comboPayouts.bracketQuinella).toBe(bracketQuinella);
+    expect(comboPayouts.bracketQuinella).not.toBeUndefined();
+    // 他券種は従来どおり(三連単は素通しのまま。枠連の追加で置き換わっていない)。
+    expect(comboPayouts.trifecta).toBe(trifecta);
+    expect(Object.keys(comboPayouts).sort()).toEqual(
+      ["bracketQuinella", "exacta", "quinella", "trifecta", "trio", "wide"],
+    );
+  });
+
+  it("枠連がstate:'undetermined'(構造異常)のときも、判断を挟まずそのままsaveResultの第4引数へ渡り、着順は通常どおり保存されること", async () => {
+    const saveResult = vi.fn();
+    const undetermined: RaceResult["bracketQuinellaPayouts"] = {
+      state: "undetermined",
+      reason: {
+        kind: "comboSizeMismatch",
+        message: "テスト用",
+        observedGroupCount: 1,
+        observedPayoutCount: 1,
+        rawHtml: null,
+      },
+    };
+    await importRaceResult(raceId, {
+      fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+      parse: () => buildRaceResult({ bracketQuinellaPayouts: undetermined }),
+      saveResult,
+    });
+    const [savedRaceId, entries, , comboPayouts] = saveResult.mock.calls[0]!;
+    expect(savedRaceId).toBe(raceId);
+    expect(entries).toEqual(toResultEntries(buildRaceResult()));
+    expect(comboPayouts.bracketQuinella).toBe(undetermined);
+  });
+
+  it("パース結果にbracketQuinellaPayoutsが無い(未設定)場合は、saveResultの第4引数のbracketQuinellaもundefinedのままになること", async () => {
+    const saveResult = vi.fn();
+    await importRaceResult(raceId, {
+      fetchText: vi.fn().mockResolvedValue("<html>ok</html>"),
+      parse: () => buildRaceResult(),
+      saveResult,
+    });
+    const [, , , comboPayouts] = saveResult.mock.calls[0]!;
+    expect(comboPayouts.bracketQuinella).toBeUndefined();
+  });
+
+  describe("実フィクスチャ → importRaceResult → AnalysisStore.saveResult → getComboPayouts の結線(製品コード経由)", () => {
+    /** 実フィクスチャを本物のパーサと本物のストアに通して取り込む。 */
+    async function importFixture(fixture: string, id: string): Promise<AnalysisStore> {
+      const store = new AnalysisStore();
+      await importRaceResult(parseRaceId(id), {
+        fetchText: vi.fn().mockResolvedValue(loadFixture(fixture)),
+        parse: parseRaceResult,
+        saveResult: (rid, entries, courseType, comboPayouts) =>
+          store.saveResult(rid, entries, courseType, comboPayouts),
+      });
+      return store;
+    }
+
+    it("中央16頭(4-7=3,150円)は bet_type='bracketQuinella'・キー'0407'で保存され、他券種(馬連・三連単)の取込は不変であること(AC-3)", async () => {
+      const store = await importFixture("result_202603020211.html", "202603020211");
+      expect(store.getComboPayouts("202603020211", "bracketQuinella")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0407", payout: 3150 }],
+      });
+      // 既存券種は不変(枠連の追加で他の券種の行が消えたり混ざったりしていない)。
+      expect(store.getComboPayouts("202603020211", "trifecta")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "130805", payout: 52690 }],
+      });
+      const quinella = store.getComboPayouts("202603020211", "quinella");
+      expect(quinella.state).toBe("imported");
+      if (quinella.state === "imported") {
+        expect(quinella.payouts).toHaveLength(1);
+        // 馬連は馬番のキー(13-8)であり、枠連のキー'0407'とは別。
+        expect(quinella.payouts[0]!.comboKey).toBe("0813");
+        expect(quinella.payouts[0]!.comboKey).not.toBe("0407");
+      }
+      store.close();
+    });
+
+    it("同枠の実物(2-2=18,390円)は キー'0202' で保存されること(同枠が落ちたり別の組に化けたりしない)", async () => {
+      const store = await importFixture("result_202606040810.html", "202606040810");
+      expect(store.getComboPayouts("202606040810", "bracketQuinella")).toEqual({
+        state: "imported",
+        payouts: [{ comboKey: "0202", payout: 18390 }],
+      });
+      store.close();
+    });
+
+    it("8頭以下(tr.Wakuren無し)は『取込済み・0件』(imported・payouts:[])として保存され、not_importedにはならないこと", async () => {
+      const store = await importFixture("result_202607020505.html", "202607020505");
+      expect(store.getComboPayouts("202607020505", "bracketQuinella")).toEqual({
+        state: "imported",
+        payouts: [],
+      });
+      store.close();
+    });
   });
 });

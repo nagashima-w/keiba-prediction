@@ -66,6 +66,7 @@ function verifyReport(over: Partial<VerifyReportView> = {}): VerifyReportView {
       quinella: emptyProposedBetTypeSummary(),
       exacta: emptyProposedBetTypeSummary(),
       trifecta: emptyProposedBetTypeSummary(),
+      bracketQuinella: emptyProposedBetTypeSummary(),
       unknownBetType: { count: 0, totalStake: 0, betTypes: [] },
     },
     ...over,

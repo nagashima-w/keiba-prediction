@@ -165,7 +165,7 @@ function buildFullResultHtml(headerRow: string, rows: string[]): string {
  * (「円」を含めて呼び出し側が指定する)。
  */
 function buildComboRow(
-  rowClass: "Wide" | "Fuku3" | "Umatan" | "Tan3",
+  rowClass: "Wide" | "Fuku3" | "Umatan" | "Tan3" | "Umaren" | "Wakuren",
   label: string,
   groups: readonly (readonly string[])[],
   payoutTexts: readonly string[],
@@ -1285,5 +1285,222 @@ describe("組合せ払戻(三連単、Issue #131・#25-F)", () => {
     if (result.trioPayouts!.state === "undetermined") {
       expect(result.trioPayouts!.reason.kind).toBe("invalidUmaban");
     }
+  });
+});
+
+/**
+ * 組合せ払戻(枠連、Issue #145・#26-F)。
+ *
+ * 枠連の払戻行は `tr.Wakuren`(構造は馬連 `tr.Umaren` と同型: td.Result の ul/li/span に枠番2つ、
+ * td.Payout に単一値)。**要素が馬番ではなく枠番(1〜8。同枠可)**である点だけが違い、
+ * `COMBO_ELEMENT_KIND.bracketQuinella="wakuban"`(Issue #143・#26-D)により `parseComboPayoutRow` の
+ * 検証が枠番用に振り分けられる(関数本体の変更は不要。呼び出し追加のみ)。
+ *
+ * ★期待値の独立性: 払戻の枠組は、同じ文書の**結果テーブルの1着・2着の枠番**(`horses[].wakuban`)から
+ * 別経路で導いた組と突き合わせる(パーサ自身の出力だけを期待値にしない)。
+ *
+ * 実測値(HTML実物で確認済み。行はいずれも `class="Wakuren"` の1行):
+ * - 中央 16頭 `fixtures/result_202603020211.html`: 4-7 = 3,150円・15人気
+ * - 中央 10頭 `fixtures/result_202602010607.html`: 2-4 = 1,920円・10人気
+ * - 中央 9頭 `fixtures/result_202607020501.html`: 1-8 = 550円・2人気
+ * - 地方 12頭 `fixtures/nar_result_202654071210.html`: 5-6 = 1,070円・2人気
+ * - 地方 9頭 `fixtures/nar_result_202654092706.html`: 3-8 = 760円・2人気
+ * - 地方 10頭 `fixtures/nar_result_202654071201.html`: 3-4 = 140円・1人気
+ * - **同枠(2-2)** 中央 16頭 `fixtures/result_202606040810.html`: 2-2 = 18,390円・32人気
+ *   (2026-09-29取得。1着=馬番4〈枠2〉・2着=馬番3〈枠2〉。馬連は馬番3-4=17,680円で別行)
+ */
+describe("組合せ払戻(枠連、Issue #145・#26-F)", () => {
+  /** 着順が確定順位(kind:"順位")で、その値がrankである馬。 */
+  function horsesFinishedAt(result: RaceResult, rank: number) {
+    return result.horses.filter(
+      (h) => h.finishPosition?.kind === "順位" && h.finishPosition.value === rank,
+    );
+  }
+
+  /** 1着・2着の枠番から導いた枠連の組(昇順。1着・2着が各1頭であることも無条件に固定する)。 */
+  function frameGroupOfTopTwo(result: RaceResult): number[] {
+    const firsts = horsesFinishedAt(result, 1);
+    const seconds = horsesFinishedAt(result, 2);
+    // 前提固定(空振り防止): 同着なし(1着・2着が各1頭)であること。同着があると組が増え、この導出が成り立たない。
+    expect(firsts).toHaveLength(1);
+    expect(seconds).toHaveLength(1);
+    return [firsts[0]!.wakuban!, seconds[0]!.wakuban!].sort((a, b) => a - b);
+  }
+
+  const REAL_CASES: readonly {
+    readonly name: string;
+    readonly fixture: string;
+    readonly group: readonly number[];
+    readonly payout: number;
+  }[] = [
+    { name: "中央16頭", fixture: "result_202603020211.html", group: [4, 7], payout: 3150 },
+    { name: "中央10頭", fixture: "result_202602010607.html", group: [2, 4], payout: 1920 },
+    { name: "中央9頭", fixture: "result_202607020501.html", group: [1, 8], payout: 550 },
+    { name: "地方12頭", fixture: "nar_result_202654071210.html", group: [5, 6], payout: 1070 },
+    { name: "地方9頭", fixture: "nar_result_202654092706.html", group: [3, 8], payout: 760 },
+    { name: "地方10頭", fixture: "nar_result_202654071201.html", group: [3, 4], payout: 140 },
+  ];
+
+  it.each(REAL_CASES)(
+    "実フィクスチャ($name: $fixture)の枠連 $group = $payout 円を、枠番のままパースでき、結果テーブルの1着・2着の枠番から導いた組と一致すること(AC-1)",
+    ({ fixture, group, payout }) => {
+      const result = parseRaceResult(loadFixture(fixture));
+      // 前提固定(空振り防止): 払戻テーブル自体は取れており、期待値が空でないこと。
+      expect(result.widePayouts!.state).toBe("parsed");
+      expect(group).toHaveLength(2);
+      expect(result.bracketQuinellaPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: group, payout }],
+      });
+      // 独立した突合: 払戻の組 = 1着・2着の枠番の組(パーサ出力を期待値の唯一の根拠にしない)。
+      expect(frameGroupOfTopTwo(result)).toEqual(group);
+    },
+  );
+
+  it("★同枠の実物(fixtures/result_202606040810.html。2026-09-29取得): 枠連2-2=18,390円が[2,2]としてそのまま(同枠を落とさず・1つに潰さず)パースされ、1着(馬番4・枠2)・2着(馬番3・枠2)から独立に導いた組と一致すること(AC-2)", () => {
+    const result = parseRaceResult(loadFixture("result_202606040810.html"));
+    expect(result.bracketQuinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [2, 2], payout: 18390 }],
+    });
+    // 独立した突合(1): 1着・2着の枠が同じである(=同枠が的中した)こと。
+    const group = frameGroupOfTopTwo(result);
+    expect(group).toEqual([2, 2]);
+    expect(horsesFinishedAt(result, 1).map((h) => [h.umaban, h.wakuban])).toEqual([[4, 2]]);
+    expect(horsesFinishedAt(result, 2).map((h) => [h.umaban, h.wakuban])).toEqual([[3, 2]]);
+    // 独立した突合(2): 同じ文書の馬連は「馬番」3-4(別行・別の値)であり、枠連の組とは混ざらない。
+    expect(result.quinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [3, 4], payout: 17680 }],
+    });
+  });
+
+  it.each([
+    { name: "中央8頭", fixture: "result_202607020505.html" },
+    { name: "中央7頭", fixture: "result_202607020502.html" },
+    { name: "地方8頭", fixture: "nar_result_202654092711.html" },
+  ])(
+    "8頭以下($name: $fixture)は tr.Wakuren が無く、発売なしの空配列(state:parsed・payouts:[])になること。払戻テーブル自体はあるのでundeterminedにはならない(AC-1)",
+    ({ fixture }) => {
+      const html = loadFixture(fixture);
+      // 前提固定(空振り防止): 枠連の行が実際に無く、他券種(馬連)の払戻行は有ること。
+      expect(html).not.toContain('class="Wakuren"');
+      const result = parseRaceResult(html);
+      expect(result.quinellaPayouts!.state).toBe("parsed");
+      if (result.quinellaPayouts!.state === "parsed") {
+        expect(result.quinellaPayouts!.payouts.length).toBeGreaterThan(0);
+      }
+      expect(result.bracketQuinellaPayouts).toEqual({ state: "parsed", payouts: [] });
+    },
+  );
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、他の組合せ券種と同じくstate:undetermined(payoutTableAbsent)になること(空配列にはならない非対称)", () => {
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.bracketQuinellaPayouts!.state).toBe("undetermined");
+    if (result.bracketQuinellaPayouts!.state === "undetermined") {
+      expect(result.bracketQuinellaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+  });
+
+  describe("同枠の表記の不確実性に対するfail-safe(以下はすべて合成HTMLであり、netkeibaの実際の表記ではない)", () => {
+    function parseWakuren(groups: readonly (readonly string[])[], payouts: readonly string[]) {
+      const row = buildComboRow("Wakuren", "枠連", groups, payouts);
+      const html = buildResultHtml([buildResultRow({ umaban: "1" })], buildPayoutTables([row]));
+      return parseRaceResult(html).bracketQuinellaPayouts!;
+    }
+
+    it("同枠が2つのspanで並ぶ形(実物と同じ構造の合成)は[1,1]としてparsedになること", () => {
+      expect(parseWakuren([["1", "1", ""]], ["640円"])).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 1], payout: 640 }],
+      });
+    });
+
+    it("同枠がspan1つだけで表記された場合(要素数1)は、黙って誤った組にせずundetermined(comboSizeMismatch)になること", () => {
+      const r = parseWakuren([["1", ""]], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("comboSizeMismatch");
+      }
+    });
+
+    it("同枠が「1-1」のような1つのspanの文字列で表記された場合は、要素数が合わずundetermined(comboSizeMismatch)になること", () => {
+      const r = parseWakuren([["1-1", ""]], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("comboSizeMismatch");
+      }
+    });
+
+    it("2要素だが片方が数値でない表記(\"1\"と\"1-1\")は、undetermined(invalidUmaban)になること", () => {
+      const r = parseWakuren([["1", "1-1"]], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it.each([
+      { name: "降順", group: ["7", "4"] },
+      { name: "枠番0", group: ["0", "4"] },
+      { name: "枠番9(範囲外)", group: ["4", "9"] },
+    ])("$name の組($group)は、undetermined(invalidUmaban)になること", ({ group }) => {
+      const r = parseWakuren([group], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it("同じ枠の組が同一行に2回現れた場合は、undetermined(duplicateCombo)になること(同枠を許すことと、同じ組の重複を許すことは別)", () => {
+      const r = parseWakuren(
+        [
+          ["2", "2"],
+          ["2", "2"],
+        ],
+        ["100円<br />200円"],
+      );
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("duplicateCombo");
+      }
+    });
+
+    it("1着同着で枠連の的中組が2組になる形(同枠と別枠の混在)は、両方が並びのままparsedになること", () => {
+      const r = parseWakuren(
+        [
+          ["2", "2"],
+          ["2", "5"],
+        ],
+        ["500円<br />620円"],
+      );
+      expect(r).toEqual({
+        state: "parsed",
+        payouts: [
+          { umabans: [2, 2], payout: 500 },
+          { umabans: [2, 5], payout: 620 },
+        ],
+      });
+      if (r.state === "parsed") {
+        expect(r.payouts).toHaveLength(2);
+      }
+    });
+  });
+
+  it("★非退行: 馬連(順不同の馬番)は同値の組([3,3])を従来どおりinvalidUmabanで弾くこと(同枠を許すのは枠連だけ。枠連対応が他券種の検証を緩めていないことの固定。合成HTML)", () => {
+    const umarenRow = buildComboRow("Umaren", "馬連", [["3", "3"]], ["640円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([umarenRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+    if (result.quinellaPayouts!.state === "undetermined") {
+      expect(result.quinellaPayouts!.reason.kind).toBe("invalidUmaban");
+    }
+    // 枠連の行が無い文書なので、枠連は「発売なし」の空配列(馬連の異常に巻き込まれない)。
+    expect(result.bracketQuinellaPayouts).toEqual({ state: "parsed", payouts: [] });
   });
 });

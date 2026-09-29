@@ -1761,7 +1761,9 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
    * `RaceComboPayoutsSaveInput`に`bracketQuinella?`フィールドを追加する(#106・#113・#130と
    * 同じ「型を壊さないための最小追加」。`combo?.[betType]`が`ComboBetType`の全メンバーを
    * 添字に取るため、無いと`pnpm typecheck`がTS7053で落ちる)。払戻の取込の配線
-   * (`result-import.ts`が渡すこと・`tr.Wakuren`の解析)は#145のスコープ。
+   * (`result-import.ts`が渡すこと・`tr.Wakuren`の解析)はIssue #145・#26-Fで行った
+   * (`result-import.test.ts`「組合せ払戻(枠連、Issue #145・#26-F)の取込」参照。
+   * このdescribeが固定するのはストア単体の契約であり、その後も有効)。
    *
    * ★地雷の確認: `COMBO_SIZE`に`bracketQuinella`が加わって`COMBO_BET_TYPES`ループが枠連も
    * 回るようになっても、`comboPayouts`に`bracketQuinella`キーが無ければDBには一切書かれない

@@ -634,9 +634,10 @@ export interface ProposedBetPopulationView {
 
 /**
  * 検証画面: 配分ベースの回収率(表示用。Issue #71 #54-B。core `ProposedBetReport` のプレーン写し)。
- * `overall` は複勝・単勝・ワイド・3連複・馬連・馬単・三連単の7券種の合算(同一の賭け金仮定を
+ * `overall` は複勝・単勝・ワイド・3連複・馬連・馬単・三連単・枠連の8券種の合算(同一の賭け金仮定を
  * 共有するポートフォリオとしての合計。core側JSDoc参照)。単勝はIssue #100・#23-Cで、馬連は
- * Issue #114・#24-F1で、馬単はIssue #121・#24-F2で、三連単はIssue #131・#25-Fで追加。
+ * Issue #114・#24-F1で、馬単はIssue #121・#24-F2で、三連単はIssue #131・#25-Fで、枠連は
+ * Issue #145・#26-Fで追加。
  *
  * ★`quinella`フィールドはIssue #117(#24-D3b-2)でapp側の配分提案への組み込みが完了し
  * 買い目が実際に発生するようになったため、`VerifyView.tsx`も画面に馬連の行を出す
@@ -652,11 +653,15 @@ export interface ProposedBetPopulationView {
  * かかわらず core `ProposedBetReport` に追加されたフィールドは即座に写す(#121〈exacta〉と
  * 同じ扱い)。`VerifyView.tsx`への表示は#132へ申し送る(exactaと同じ理由。配分が三連単の
  * 買い目をまだ作らないため`betCount`は構造的に常に0)。
+ *
+ * ★`bracketQuinella`フィールドはIssue #145・#26-Fで追加した(trifectaと同じ扱い。上記の
+ * 「プレーン写し」の原則により即座に写す)。`VerifyView.tsx`への表示は#146へ申し送る
+ * (配分が枠連の買い目をまだ作らないため`betCount`は構造的に常に0)。
  */
 export interface ProposedBetReportView {
   /** 母集団4分類の件数。 */
   readonly population: ProposedBetPopulationView;
-  /** 複勝・単勝・ワイド・3連複・馬連・馬単・三連単の合算。 */
+  /** 複勝・単勝・ワイド・3連複・馬連・馬単・三連単・枠連の合算。 */
   readonly overall: ProposedBetTypeSummaryView;
   /** 複勝の内訳。 */
   readonly place: ProposedBetTypeSummaryView;
@@ -681,6 +686,11 @@ export interface ProposedBetReportView {
    * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#132で行う。
    */
   readonly trifecta: ProposedBetTypeSummaryView;
+  /**
+   * 枠連の内訳(Issue #145・#26-F)。配分が枠連の買い目をまだ作らないため`betCount`は
+   * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#146で行う。
+   */
+  readonly bracketQuinella: ProposedBetTypeSummaryView;
   /** 未知の券種コードの内訳(Issue #76。`overall`には合算しない)。 */
   readonly unknownBetType: ProposedBetUnknownBetTypeView;
 }

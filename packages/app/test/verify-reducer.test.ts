@@ -43,6 +43,7 @@ const sampleReport: VerifyReportView = {
     quinella: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     exacta: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     trifecta: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
+    bracketQuinella: { betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedCount: 0 },
     unknownBetType: { count: 0, totalStake: 0, betTypes: [] },
   },
 };

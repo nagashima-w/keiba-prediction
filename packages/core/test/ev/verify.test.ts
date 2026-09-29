@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AnalysisStore,
@@ -6,6 +8,8 @@ import {
 } from "../../src/ev/analysis-store.js";
 import type { PredictionMark } from "../../src/analyzer/parse-response.js";
 import { buildComboOddsKey, buildOrderedComboOddsKey } from "../../src/scraper/combo-odds-key.js";
+import { buildAllocationBetComboKey } from "../../src/ev/combo-bet-allocation.js";
+import { parseRaceResult } from "../../src/scraper/parse-race-result.js";
 import {
   computeRaceLedger,
   computeVerifyReport,
@@ -2852,6 +2856,233 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       expect(trifecta.betCount).toBe(0);
       expect(trifecta.totalStake).toBe(0);
       expect(trifecta.totalReturn).toBe(0);
+      store.close();
+    });
+  });
+
+  describe("枠連(bracketQuinella)の回収率集計(Issue #145・#26-F)", () => {
+    /** 実フィクスチャHTMLを読み込む(実ネットワークは使わない)。 */
+    function loadFixture(name: string): string {
+      return readFileSync(
+        fileURLToPath(new URL(`../../../../fixtures/${name}`, import.meta.url)),
+        "utf-8",
+      );
+    }
+
+    /**
+     * 実フィクスチャを本物のパーサ(parseRaceResult)に通し、その結果を本物のストア
+     * (saveResult)へ保存する。買い目側のキーは本物のキー生成(buildAllocationBetComboKey)で作る
+     * ——テスト内で期待キーを自作しない(#131の「期待キーを別経路で作れていない」を避ける)。
+     */
+    function saveFixtureResult(store: AnalysisStore, raceId: string, fixture: string): void {
+      const parsed = parseRaceResult(loadFixture(fixture));
+      const entries = parsed.horses.map((h) => {
+        if (h.finishPosition?.kind !== "順位") {
+          throw new Error("テストの前提: 全馬が順位確定であること");
+        }
+        return { umaban: h.umaban, finishPosition: h.finishPosition.value };
+      });
+      store.saveResult(raceId, entries, parsed.courseType, {
+        bracketQuinella: parsed.bracketQuinellaPayouts,
+        trifecta: parsed.trifectaPayouts,
+      });
+    }
+
+    function analyzeWithBets(
+      store: AnalysisStore,
+      raceId: string,
+      bets: readonly { betType: string; comboKey: string; stake: number }[],
+    ): void {
+      store.saveAnalysis({
+        raceId,
+        analyzedAt: "t",
+        horses: [horse(1, 0.5, null, 1.2, true)],
+        allocation: {
+          meta: allocationMeta({ route: "mixed", skipReasonCode: null }),
+          bets: bets.map((b) => ({ ...b, odds: 10, ev: 1.2 })),
+        },
+      });
+    }
+
+    it("AC-4(★判定): 中央16頭(枠連4-7=3,150円)で、枠[4,7]の買い目だけが的中し、同枠[4,4]・[7,7]・馬番由来の組は不的中になり、保存→読み出し→判定が製品コード経由で通ること", () => {
+      const store = new AnalysisStore();
+      // 買い目のキーは製品のキー生成から得る。[7,4]は昇順化されて[4,7]と同じ'0407'になる。
+      const hitKey = buildAllocationBetComboKey("bracketQuinella", [7, 4]);
+      const sameFrame4 = buildAllocationBetComboKey("bracketQuinella", [4, 4]);
+      const sameFrame7 = buildAllocationBetComboKey("bracketQuinella", [7, 7]);
+      // 1着13・2着8の「馬番」をそのまま枠連のキーにした場合('0813')。枠番と馬番を取り違えると
+      // こうなる。verifyは文字列の完全一致で判定するので不的中になる。
+      const umabanKey = "0813";
+      expect(hitKey).toBe("0407");
+      expect(new Set([hitKey, sameFrame4, sameFrame7, umabanKey]).size).toBe(4);
+      analyzeWithBets(store, "PB_BRACKET", [
+        { betType: "bracketQuinella", comboKey: hitKey, stake: 200 },
+        { betType: "bracketQuinella", comboKey: sameFrame4, stake: 100 },
+        { betType: "bracketQuinella", comboKey: sameFrame7, stake: 100 },
+        { betType: "bracketQuinella", comboKey: umabanKey, stake: 100 },
+      ]);
+      saveFixtureResult(store, "PB_BRACKET", "result_202603020211.html");
+
+      const { bracketQuinella, overall, trifecta, quinella, exacta, wide, trio, place, win, unknownBetType } =
+        computeVerifyReport(store).proposedBet;
+
+      // 200円×31.5倍=6,300円が的中。残り3点(300円)は不的中で回収0。
+      expect(bracketQuinella).toEqual({
+        betCount: 4,
+        totalStake: 500,
+        totalReturn: 6300,
+        recoveryRate: 6300 / 500,
+        unjudgedCount: 0,
+      });
+      // ★他券種に混入していない(枠連が三連単の集計に落ちる変異を殺す)。
+      expect(trifecta.betCount).toBe(0);
+      expect(quinella.betCount).toBe(0);
+      expect(exacta.betCount).toBe(0);
+      expect(wide.betCount).toBe(0);
+      expect(trio.betCount).toBe(0);
+      expect(place.betCount).toBe(0);
+      expect(win.betCount).toBe(0);
+      expect(unknownBetType).toEqual({ count: 0, totalStake: 0, betTypes: [] });
+      // ★overallに合算されている(足し忘れの変異を殺す。絶対値で固定)。
+      expect(overall).toEqual({
+        betCount: 4,
+        totalStake: 500,
+        totalReturn: 6300,
+        recoveryRate: 6300 / 500,
+        unjudgedCount: 0,
+      });
+      store.close();
+    });
+
+    it("★同枠の実物(中央16頭 fixtures/result_202606040810.html。枠連2-2=18,390円)で、同枠[2,2]の買い目が的中し、隣接する別枠[2,3]・[1,2]は不的中になること(同枠を落とすと払戻が保存されず判定不能になる)", () => {
+      const store = new AnalysisStore();
+      const hitKey = buildAllocationBetComboKey("bracketQuinella", [2, 2]);
+      expect(hitKey).toBe("0202");
+      analyzeWithBets(store, "PB_BRACKET_SAME", [
+        { betType: "bracketQuinella", comboKey: hitKey, stake: 100 },
+        { betType: "bracketQuinella", comboKey: buildAllocationBetComboKey("bracketQuinella", [2, 3]), stake: 100 },
+        { betType: "bracketQuinella", comboKey: buildAllocationBetComboKey("bracketQuinella", [1, 2]), stake: 100 },
+      ]);
+      saveFixtureResult(store, "PB_BRACKET_SAME", "result_202606040810.html");
+
+      const { bracketQuinella, overall } = computeVerifyReport(store).proposedBet;
+      expect(bracketQuinella).toEqual({
+        betCount: 3,
+        totalStake: 300,
+        totalReturn: 18390,
+        recoveryRate: 18390 / 300,
+        unjudgedCount: 0,
+      });
+      expect(overall.totalReturn).toBe(18390);
+      store.close();
+    });
+
+    it("★枠連と三連単の買い目が同じレースに混在しても、それぞれの集計に入り、overallは両者の合算になること(実フィクスチャ result_202603020211: 枠連4-7=3,150円・三連単13→8→5=52,690円)", () => {
+      const store = new AnalysisStore();
+      analyzeWithBets(store, "PB_BRACKET_MIX", [
+        {
+          betType: "bracketQuinella",
+          comboKey: buildAllocationBetComboKey("bracketQuinella", [4, 7]),
+          stake: 100,
+        },
+        {
+          betType: "trifecta",
+          comboKey: buildAllocationBetComboKey("trifecta", [13, 8, 5]),
+          stake: 100,
+        },
+      ]);
+      saveFixtureResult(store, "PB_BRACKET_MIX", "result_202603020211.html");
+
+      const { bracketQuinella, trifecta, overall } = computeVerifyReport(store).proposedBet;
+      expect(bracketQuinella).toEqual({
+        betCount: 1,
+        totalStake: 100,
+        totalReturn: 3150,
+        recoveryRate: 31.5,
+        unjudgedCount: 0,
+      });
+      expect(trifecta).toEqual({
+        betCount: 1,
+        totalStake: 100,
+        totalReturn: 52690,
+        recoveryRate: 526.9,
+        unjudgedCount: 0,
+      });
+      expect(overall).toEqual({
+        betCount: 2,
+        totalStake: 200,
+        totalReturn: 55840,
+        recoveryRate: 279.2,
+        unjudgedCount: 0,
+      });
+      store.close();
+    });
+
+    it("8頭以下(tr.Wakuren無し=発売なし。取込済み・0件)では、他の組合せ券種と同じ規則(払戻が0件なら判定不能)で、枠連の買い目はunjudgedCountに計上され、不的中(betCount+1)にはならないこと(実フィクスチャ result_202607020505。発売のないレースに買い目は生成されないため実害は無いが、規則が他券種と一致していることを固定する)", () => {
+      const store = new AnalysisStore();
+      analyzeWithBets(store, "PB_BRACKET_UNSOLD", [
+        { betType: "bracketQuinella", comboKey: "0101", stake: 100 },
+      ]);
+      saveFixtureResult(store, "PB_BRACKET_UNSOLD", "result_202607020505.html");
+      // 前提固定(空振り防止): 枠連は「取込済み・0件」であって「未取込」ではないこと。
+      expect(store.getComboPayouts("PB_BRACKET_UNSOLD", "bracketQuinella")).toEqual({
+        state: "imported",
+        payouts: [],
+      });
+
+      const { bracketQuinella } = computeVerifyReport(store).proposedBet;
+      expect(bracketQuinella).toEqual({
+        betCount: 0,
+        totalStake: 0,
+        totalReturn: 0,
+        recoveryRate: null,
+        unjudgedCount: 1,
+      });
+      store.close();
+    });
+
+    it("枠連の払戻が未取込(旧DB相当)のレースでは、枠連の買い目がunjudgedCountに計上され、betCount/totalStake/totalReturnのいずれにも計上されないこと(0円の不的中にしてはならない)", () => {
+      const store = new AnalysisStore();
+      analyzeWithBets(store, "PB_BRACKET_UNIMPORTED", [
+        { betType: "bracketQuinella", comboKey: "0407", stake: 500 },
+      ]);
+      // 枠連を渡さない(旧DB相当)。
+      store.saveResult("PB_BRACKET_UNIMPORTED", [{ umaban: 1, finishPosition: 1, placePayout: 250 }]);
+
+      const { bracketQuinella, overall } = computeVerifyReport(store).proposedBet;
+      expect(bracketQuinella).toEqual({
+        betCount: 0,
+        totalStake: 0,
+        totalReturn: 0,
+        recoveryRate: null,
+        unjudgedCount: 1,
+      });
+      expect(overall.unjudgedCount).toBe(1);
+      expect(overall.betCount).toBe(0);
+      store.close();
+    });
+
+    it("枠連の払戻がundetermined(構造異常)で保存されなかったレースでも、枠連の買い目はunjudgedCountに計上されること(誤った組に化けて判定されない)", () => {
+      const store = new AnalysisStore();
+      analyzeWithBets(store, "PB_BRACKET_UNDETERMINED", [
+        { betType: "bracketQuinella", comboKey: "0407", stake: 100 },
+      ]);
+      store.saveResult("PB_BRACKET_UNDETERMINED", [{ umaban: 1, finishPosition: 1 }], null, {
+        bracketQuinella: {
+          state: "undetermined",
+          reason: {
+            kind: "comboSizeMismatch",
+            message: "テスト用",
+            observedGroupCount: 1,
+            observedPayoutCount: 1,
+            rawHtml: null,
+          },
+        },
+      });
+      const { bracketQuinella } = computeVerifyReport(store).proposedBet;
+      expect(bracketQuinella.unjudgedCount).toBe(1);
+      expect(bracketQuinella.betCount).toBe(0);
+      expect(bracketQuinella.totalReturn).toBe(0);
       store.close();
     });
   });
