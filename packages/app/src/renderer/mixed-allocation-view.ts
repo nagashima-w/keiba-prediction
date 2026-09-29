@@ -327,10 +327,17 @@ export function buildHiddenAllocationsBlocks(
  * 候補を一切作らなかったため。`win`/`quinella`/`exacta`が最初にそうだったのと同じ経緯)。
  * **Issue #139(#25-E3b)で配分接続が完了したため、`betTypeLabel`側のcase追加・
  * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加のどちらも完了した。**
+ *
+ * **`"bracketQuinella"`(枠連)はIssue #144(#26-B)で`AllocationBetType`に加わり、本caseの
+ * 追加はコンパイルを通すための最小限である**(`betTypeLabel`側へのcase追加・
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`・`ALL_MIXED_CANDIDATE_BET_TYPES`への追加は行わない。
+ * appはまだ枠連の候補を一切作らない。取得・配分接続・表示は#146のスコープ)。したがって
+ * 上記「7値すべてで両関数の戻り値が一致する」は枠連を除く7値の話であり、枠連は
+ * `betTypeLabel`側にまだcaseが無い(`quinella`等が最初にそうだったのと同じ経緯の非対称)。
  */
 export function mixedBetTypeLabel(
   betType: AllocationBetType,
-): "複勝" | "単勝" | "ワイド" | "馬連" | "三連複" | "馬単" | "三連単" {
+): "複勝" | "単勝" | "ワイド" | "馬連" | "三連複" | "馬単" | "三連単" | "枠連" {
   switch (betType) {
     case "place":
       return "複勝";
@@ -346,6 +353,8 @@ export function mixedBetTypeLabel(
       return "馬単";
     case "trifecta":
       return "三連単";
+    case "bracketQuinella":
+      return "枠連";
   }
 }
 
@@ -403,6 +412,13 @@ function unjudgedOf(betType: AllocationBetType, diagnostics: MixedCandidateDiagn
       const d = diagnostics[betType];
       return d.kind === "built" ? d.build.unjudged : ZERO_UNJUDGED;
     }
+    case "bracketQuinella":
+      // 枠連(Issue #144・#26-B)はcoreの型が追加されただけで、appにはまだ枠連の候補ビルダー・
+      // オッズ配線・診断値(`MixedCandidateDiagnostics.bracketQuinella`)が無い(#146のスコープ)。
+      // 判定不能の合算(`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`を回す)にも枠連は含まれない
+      // ため、この分岐に実行時に到達する経路は無い(網羅的switchのコンパイルを通すための最小限。
+      // 診断値を接続するときは、ここを他のコンボ券種と同じ`diagnostics[betType]`経由に置き換える)。
+      return ZERO_UNJUDGED;
   }
 }
 

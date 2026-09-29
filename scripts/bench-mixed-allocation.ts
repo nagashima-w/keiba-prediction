@@ -35,6 +35,14 @@
  *   計測ではないため、ここでは意図的にリーク遮断を追加していない
  * - ケリー係数 λ=0.5、EV閾値1.0(既定)
  *
+ * 4. 枠連(bracketQuinella)を7券種に追加したときの署名畳み込み後のoutcome数・所要時間の
+ *    実測(Issue #144〈#26-B〉。appにはまだ枠連の配線が無い〈#146〉ため、`buildMixedCandidates`が
+ *    作る7券種の候補に、coreの`buildBracketQuinellaCandidates`が作る枠連候補を足して
+ *    `allocateGeneralBets`へ渡す)。枠連は`fixtures/odds_wakuren_202603020211.json`
+ *    (同レース・同16頭)を`parseComboOdds`経由でパースして使う。**畳み込み後のoutcome数は
+ *    `allocateGeneralBets`の内部値なので、本スクリプトが同じ的中判定を再実装して数え、
+ *    製品の`hitProb`と全候補で一致することを毎回検査する**(一致しなければ例外)。
+ *
  * ## 使い方
  *   pnpm tsx scripts/bench-mixed-allocation.ts
  *
@@ -79,11 +87,16 @@ import {
 } from "../packages/app/src/shared/mixed-candidates.js";
 import {
   allocateGeneralBets,
+  buildBracketQuinellaCandidates,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
   type AllocationBetType,
+  type AllocationCandidate,
+  type BracketJointModelHorse,
   type GeneralBetAllocationConfig,
   type JointModelHorse,
 } from "../packages/core/src/ev/combo-bet-allocation.js";
+import { foldOutcomeIndexSetsBySignature } from "../packages/core/src/ev/allocation-primitives.js";
+import { PLACKETT_LUCE_MODEL } from "../packages/core/src/ev/plackett-luce-model.js";
 import { buildMixedAllocationDisplay } from "../packages/app/src/renderer/mixed-allocation-view.js";
 import type { MixedAllocationSettings } from "../packages/app/src/shared/mixed-race-allocation.js";
 import { parseComboOdds } from "../packages/core/src/scraper/parse-combo-odds.js";
@@ -492,12 +505,153 @@ async function runQuinellaPerformanceComparison(result: AnalysisResult): Promise
   }
 }
 
+/**
+ * 枠連フィクスチャ(Issue #144 AC-性能)。`central-on.json`と同じレース(202603020211・16頭。
+ * 全8枠が2頭ずつ=枠連36件)。
+ */
+const WAKUREN_FIXTURE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "odds_wakuren_202603020211.json",
+);
+
+/** 枠連フィクスチャをパースしてオッズMap(キー: 枠番4桁)を作る(規則を再実装しない)。 */
+function loadWakurenOddsMap(): Map<string, number | null> {
+  const json = readFileSync(WAKUREN_FIXTURE_PATH, "utf-8");
+  const parsed = parseComboOdds(json, "bracketQuinella");
+  if (parsed.state !== "available") {
+    throw new Error(`枠連フィクスチャが available ではありません(state=${parsed.state})`);
+  }
+  return toComboOddsScalarMap(parsed.odds);
+}
+
+/**
+ * 署名畳み込み後のoutcome数(=`allocateGeneralBets`が`runGreedyAllocation`へ渡すoutcome件数)を
+ * 数える。`allocateGeneralBets`の内部値で公開されていないため、ここで的中判定を**再実装**する
+ * (順序付きoutcome空間から`indices`を作り`foldOutcomeIndexSetsBySignature`で畳む。
+ * 製品と同じ手順)。再実装のずれを検出するため、呼び出し側は製品の`hitProb`との一致を検査する。
+ */
+function countFoldedOutcomes(
+  horses: readonly BracketJointModelHorse[],
+  topFinishCount: number,
+  candidates: readonly AllocationCandidate[],
+): { readonly foldedCount: number; readonly rawCount: number; readonly hitProbs: readonly number[] } {
+  const ordered = PLACKETT_LUCE_MODEL.buildOrderedDistribution(horses, topFinishCount);
+  if (ordered === null) {
+    throw new Error("順序付きoutcome空間が判定不能です");
+  }
+  const wakubanOf = new Map(horses.map((h) => [h.umaban, h.wakuban] as const));
+  const raw = ordered.map((outcome) => {
+    const orderSet = new Set(outcome.order);
+    const f0 = wakubanOf.get(outcome.order[0]!);
+    const f1 = wakubanOf.get(outcome.order[1]!);
+    const indices: number[] = [];
+    candidates.forEach((c, i) => {
+      const u = c.umabans;
+      const hit =
+        c.betType === "win"
+          ? outcome.order[0] === u[0]
+          : c.betType === "quinella"
+            ? (outcome.order[0] === u[0] && outcome.order[1] === u[1]) ||
+              (outcome.order[0] === u[1] && outcome.order[1] === u[0])
+            : c.betType === "exacta"
+              ? outcome.order[0] === u[0] && outcome.order[1] === u[1]
+              : c.betType === "trifecta"
+                ? outcome.order[0] === u[0] && outcome.order[1] === u[1] && outcome.order[2] === u[2]
+                : c.betType === "bracketQuinella"
+                  ? (f0 === u[0] && f1 === u[1]) || (f0 === u[1] && f1 === u[0])
+                  : u.every((x) => orderSet.has(x));
+      if (hit) indices.push(i);
+    });
+    return { indices, probability: outcome.probability };
+  });
+  const folded = foldOutcomeIndexSetsBySignature(raw);
+  const hitProbs = new Array<number>(candidates.length).fill(0);
+  for (const o of folded) {
+    for (const idx of o.indices) hitProbs[idx] = hitProbs[idx]! + o.probability;
+  }
+  return { foldedCount: folded.length, rawCount: raw.length, hitProbs };
+}
+
+/**
+ * 枠連(bracketQuinella)を7券種に足したときの署名畳み込み後のoutcome数・所要時間を実測する
+ * (Issue #144〈#26-B〉)。枠連の候補は最大36件(C(8,2)+同枠8)で件数は小さいが、枠連の的中は
+ * (枠(1着),枠(2着))の関数であり、同じ署名だったoutcomeが枠の組で分かれて畳み込みの粒度が
+ * 細かくなりうるため、実測して悪化の有無を見る。
+ */
+async function runBracketQuinellaPerformanceComparison(result: AnalysisResult): Promise<void> {
+  const baseRace = toMixedCandidateInput(result);
+  const raceAll: MixedCandidateBuildInput = {
+    ...baseRace,
+    quinellaCombo: loadQuinellaCombo(),
+    exactaCombo: loadExactaCombo(),
+    trifectaCombo: loadTrifectaCombo(),
+  };
+  const allBetTypes: readonly AllocationBetType[] = ["place", "win", "wide", "trio", "quinella", "exacta", "trifecta"];
+  const mixed = buildMixedCandidates(raceAll, { evConfig: { threshold: 1.0 }, betTypes: allBetTypes });
+  const horses: BracketJointModelHorse[] = result.rows.map((r) => ({
+    umaban: r.umaban,
+    wakuban: r.wakuban,
+    placeProb: r.adjustedProb,
+  }));
+  const wakurenOdds = loadWakurenOddsMap();
+  const realEv = buildBracketQuinellaCandidates(horses, mixed.topFinishCount, wakurenOdds, { threshold: 1.0 });
+  // 最悪ケース: 全36件をEVプラス扱いにする(threshold=0。ev>0なら候補。署名への影響の上界を見る)。
+  const allBracket = buildBracketQuinellaCandidates(horses, mixed.topFinishCount, wakurenOdds, { threshold: 0 });
+
+  const config: GeneralBetAllocationConfig = {
+    bankroll: 1_000_000,
+    perRaceCap: 100_000,
+    kellyFraction: 0.5,
+    betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
+    greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
+    candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
+  };
+  const scenarios: readonly { readonly label: string; readonly candidates: readonly AllocationCandidate[] }[] = [
+    { label: "枠連なし(7券種)", candidates: mixed.candidates },
+    { label: "枠連あり(EVプラスのみ)", candidates: [...mixed.candidates, ...realEv.candidates] },
+    { label: "枠連あり(全36件をEVプラス扱い。最悪ケース)", candidates: [...mixed.candidates, ...allBracket.candidates] },
+  ];
+
+  console.log("");
+  console.log("=== 枠連(bracketQuinella)追加時の署名畳み込み後outcome数・所要時間(中央16頭・実オッズ。Issue #144) ===");
+  for (const scenario of scenarios) {
+    const counted = countFoldedOutcomes(horses, mixed.topFinishCount, scenario.candidates);
+    const alloc = allocateGeneralBets(horses, mixed.topFinishCount, scenario.candidates, config);
+    // 再実装した的中判定と製品のhitProbが全候補で一致すること(ずれていれば計測が無意味)。
+    const productHit = new Map(alloc.allocations.map((a) => [`${a.betType}:${a.umabans.join(",")}`, a.hitProb] as const));
+    scenario.candidates.forEach((c, i) => {
+      const ph = productHit.get(`${c.betType}:${c.umabans.join(",")}`);
+      if (ph === undefined || Math.abs(ph - counted.hitProbs[i]!) > 1e-9) {
+        throw new Error(`bench内の的中判定が製品とずれています(${c.betType}:${c.umabans.join(",")}, 製品=${ph}, bench=${counted.hitProbs[i]})`);
+      }
+    });
+    const iterations = 30;
+    const samples: number[] = [];
+    allocateGeneralBets(horses, mixed.topFinishCount, scenario.candidates, config); // ウォームアップ
+    for (let i = 0; i < iterations; i++) {
+      const t0 = performance.now();
+      allocateGeneralBets(horses, mixed.topFinishCount, scenario.candidates, config);
+      samples.push(performance.now() - t0);
+    }
+    const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+    const bracketCount = scenario.candidates.filter((c) => c.betType === "bracketQuinella").length;
+    console.log(
+      `  ${scenario.label}: 候補${scenario.candidates.length}件(うち枠連${bracketCount}件) / ` +
+        `順序付きoutcome${counted.rawCount}件 → 畳み込み後${counted.foldedCount}件 / ` +
+        `allocateGeneralBets平均${avg.toFixed(1)}ms(n=${iterations}回) / 点数${alloc.betCount}`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const result = await loadAnalysisResult();
   console.log(`raceId=${result.raceId} rows=${result.rows.length}頭 oddsStatus=${result.oddsStatus}`);
   await runGreedyStepsSensitivity(result);
   await runPerRaceTiming(result);
   await runQuinellaPerformanceComparison(result);
+  await runBracketQuinellaPerformanceComparison(result);
 }
 
 // このファイルを直接実行したとき(`pnpm tsx scripts/bench-mixed-allocation.ts`)だけ計測一式を

@@ -866,17 +866,24 @@ describe("券種フィルタ(options.betTypes)", () => {
    * 除外されていたのと同じ状態)。**Issue #139(#25-E3b)で`resolveMixedBetTypes`が実際に
    * `"trifecta"`を渡すよう接続し、`ALL_MIXED_CANDIDATE_BET_TYPES`にも`trifecta`を加えたため、
    * 除外集合は再び空になった。**
+   * **Issue #144(#26-B)で`AllocationBetType`に`bracketQuinella`(枠連)が加わったが、
+   * `mixed-candidates.ts`から枠連の候補を作る経路(オッズ配線・候補ビルダーの接続・配分接続)は
+   * まだ無い(#146のスコープ)ため、`trifecta`のときと同じ理由で`bracketQuinella`が
+   * 一時的に除外へ加わった。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
-   * 除外集合を`[]`と直接固定することで、いずれかの券種が誤って除外に混ざれば、このテストが
-   * 赤くなり「足すかどうかの判断」を人間に強制する。
+   * 除外集合を`["bracketQuinella"]`と直接固定することで、枠連以外の券種が誤って除外に混ざったり、
+   * 枠連の除外が誤って解除されたり(#146より前に解除すると「枠連 ¥0 0点」の再発になる)すれば、
+   * このテストが赤くなり「足すかどうかの判断」を人間に強制する。
+   * 【Issue #144で改訂】旧版(#139時点)は除外集合が`[]`であることを固定していた
+   * (新旧対応表: 旧=除外0件、新=除外が`["bracketQuinella"]`の1件だけ。他券種の混入検出は弱めていない)。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が無いこと(Issue #139: 三連単の配分接続が完了し、AllocationBetTypeの全メンバーと再び一致する)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['bracketQuinella']だけであること(Issue #144: 枠連のオッズ配線・配分接続〈#146〉が終わるまで除外する)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
-    expect(excluded).toEqual([]);
+    expect(excluded).toEqual(["bracketQuinella"]);
   });
 
   it("ALL_MIXED_CANDIDATE_BET_TYPESにtrifecta(三連単)が含まれること(Issue #139)", () => {

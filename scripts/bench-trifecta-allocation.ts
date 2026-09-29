@@ -875,6 +875,7 @@ function runAc18Real(result: AnalysisResult): { readonly withTrifectaAvgMs: numb
         quinella: "馬連",
         exacta: "馬単",
         trifecta: "三連単",
+        bracketQuinella: "枠連",
       };
       console.log(`  candidateCap切り詰めの券種別内訳(cap前→cap後、[切り捨て件数]):`);
       for (const t of types) {
@@ -1110,6 +1111,7 @@ function runAc1(
         quinella: "馬連",
         exacta: "馬単",
         trifecta: "三連単",
+        bracketQuinella: "枠連",
       };
       console.log(`  candidateCap切り詰めの券種別内訳(cap前→cap後、[切り捨て件数]):`);
       for (const t of types) {

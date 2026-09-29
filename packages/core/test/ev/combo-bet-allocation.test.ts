@@ -191,6 +191,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         wide: 2,
         quinella: 2,
         exacta: 2,
+        bracketQuinella: 2,
         trio: 3,
         trifecta: 3,
       });
@@ -214,7 +215,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
 
     it("umabanCountOf: 未知の券種はthrowし、有効な券種の列挙はALLOCATION_BET_TYPE_UMABAN_COUNTから導出されること(Record添字アクセスがundefinedを返す危険の直接防御。#91: winは既に有効な券種になったため代表値をUNKNOWN_BET_TYPEに差し替え)", () => {
       expect(() => umabanCountOf(UNKNOWN_BET_TYPE as AllocationBetType)).toThrow(
-        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
+        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/bracketQuinella\/trio\/trifectaのいずれかである必要があります/,
       );
     });
 
@@ -240,6 +241,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
         quinella: true,
         trio: false,
         exacta: true,
+        bracketQuinella: true,
         trifecta: true,
       });
     });
@@ -371,7 +373,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(/馬番の組が空です/);
         } else if (expectKind === "unknown") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
-            /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
+            /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/bracketQuinella\/trio\/trifectaのいずれかである必要があります/,
           );
         } else if (expectKind === "mismatch") {
           expect(() => allocateGeneralBets(horses, 3, [candidate])).toThrow(
@@ -405,7 +407,7 @@ describe("combo-bet-allocation(券種一般の配分最適化・機能D-2a)", ()
       const horses = evenHorses(18, 3);
       const oddsMap = new Map<string, number | null>();
       expect(() => buildComboCandidates(horses, 3, UNKNOWN_BET_TYPE as AllocationBetType, oddsMap)).toThrow(
-        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
+        /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/bracketQuinella\/trio\/trifectaのいずれかである必要があります/,
       );
     });
 
@@ -3706,7 +3708,7 @@ describe("umabanCountOf/ALLOCATION_BET_TYPE_UMABAN_COUNT: trifecta追加(Issue #
   it("未知の券種のエラーメッセージにtrifectaが含まれること(Object.keysからの自動導出。#128で列挙が1件増える)", () => {
     const UNKNOWN_BET_TYPE = "__unknown_trifecta_test__";
     expect(() => umabanCountOf(UNKNOWN_BET_TYPE as AllocationBetType)).toThrow(
-      /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/trio\/trifectaのいずれかである必要があります/,
+      /不正な券種です: betTypeはplace\/win\/wide\/quinella\/exacta\/bracketQuinella\/trio\/trifectaのいずれかである必要があります/,
     );
   });
 });
