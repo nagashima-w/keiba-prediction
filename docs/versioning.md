@@ -1960,6 +1960,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - 設定・DB スキーマ・エクスポート JSON・IPC は無変更(app の診断値の `betType` の文字列 union に
   `"bracketQuinella"` を足したのは型の追随で、実際にその値が流れる経路はまだ無い)
 
+## 次の正式版が 1.12.4 である根拠(Issue #144・#26-B での変更)
+
+**patch**(枠連の core。app の配分・画面への接続をしていない)。
+
+### 変更内容
+
+`AllocationBetType` に枠連(`bracketQuinella`。構成2・順序付き outcome 空間を要する)を追加した。候補の `umabans` には
+枠番を入れ、馬が `wakuban` を持つ形で1着・2着の馬番を枠番に引き直して的中を判定する(同枠可)。候補ビルダー
+`buildBracketQuinellaCandidates` を新設し、`buildComboCandidates` に専用門番を足した。
+
+### patch である根拠
+
+- 利用者から見てできることは増えず、分析結果の数値も変わらない(app には枠連の候補を作る経路が無く、
+  `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`・`ALL_MIXED_CANDIDATE_BET_TYPES` にも入れていない)
+- 既存7券種の検証・的中判定は不変(枠番の検査は枠連の候補があるときだけ走る)
+
+### major / minor ではない根拠
+
+- 設定・DB スキーマ・エクスポート JSON・IPC は無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

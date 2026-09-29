@@ -134,9 +134,12 @@ import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-al
 export type MixedCandidateBetType = AllocationBetType;
 
 /**
- * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーと
- * 再び一致する(Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、Issue #125〈#24-E3b〉で
- * `exacta`〈馬単〉を追加したため)。**
+ * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーではない
+ * (Issue #144〈#26-B〉で`bracketQuinella`〈枠連〉が`AllocationBetType`に加わったが、
+ * appにはまだ枠連の候補ビルダー・オッズ配線・配分接続が無いため、#146〈#26-E〉まで
+ * 意図的に本配列から除外している)。** それ以前は、Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、
+ * Issue #125〈#24-E3b〉で`exacta`〈馬単〉、Issue #139〈#25-E3b〉で`trifecta`〈三連単〉を
+ * 追加したことで全メンバーと一致していた。
  *
  * #91で`AllocationBetType`に`win`(単勝)が加わった時点では、coreに単勝候補ビルダーが
  * 存在せず`buildMixedCandidates`も`win`を一切参照していなかったため、本配列は意図的に
@@ -174,7 +177,8 @@ export type MixedCandidateBetType = AllocationBetType;
  * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いつき、#112でいったん
  * 「全メンバーではない」状態に戻ったが#117で再び全メンバーと一致し、#120で三たび
  * 「全メンバーではない」状態に戻ったが#125で再び全メンバーと一致し、#128で四たび
- * 「全メンバーではない」状態に戻ったが#139で再び全メンバーと一致した。** 改名はしない
+ * 「全メンバーではない」状態に戻ったが#139で再び全メンバーと一致し、#144で五たび
+ * 「全メンバーではない」状態に戻った(枠連の接続は#146)。** 改名はしない
  * (#91当時のboss裁定を維持: 定数名は「意図的な対象集合」を表す既存の名として扱い、
  * メンバー数の増減のたびに改名しない)。
  *
