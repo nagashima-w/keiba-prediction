@@ -51,6 +51,7 @@ function allocation(overrides: Partial<StoredAllocationView> = {}): StoredAlloca
     includeTrio: true,
     includeQuinella: true,
     includeExacta: true,
+    includeTrifecta: true,
     betUnit: 100,
     oddsStatus: "result",
     bets: [],
@@ -647,8 +648,8 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
   });
 });
 
-describe("実効設定(AC5): 10項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目、Issue #126〈#24-E3c〉で「馬単」を追加し9→10項目)", () => {
-  it("1組目の値ベクトルで10行すべてが期待どおりであること", () => {
+describe("実効設定(AC5): 11項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目、Issue #126〈#24-E3c〉で「馬単」を追加し9→10項目、Issue #140〈#25-E3c〉で「三連単」を追加し10→11項目)", () => {
+  it("1組目の値ベクトルで11行すべてが期待どおりであること", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -661,6 +662,7 @@ describe("実効設定(AC5): 10項目がラベル+値の文字列配列として
         includeTrio: false,
         includeQuinella: false,
         includeExacta: true,
+        includeTrifecta: false,
         includeComboOdds: true,
         oddsStatus: "middle",
         bets: [],
@@ -674,13 +676,14 @@ describe("実効設定(AC5): 10項目がラベル+値の文字列配列として
       `ワイド: ON`,
       `馬連: OFF`,
       `馬単: ON`,
+      `三連単: OFF`,
       `三連複: OFF`,
       `組合せオッズ取得: ON`,
       `オッズ状態: 中間(発売中)`,
     ]);
   });
 
-  it("2組目の異なる値ベクトルでも10行すべてが期待どおりであること(取り違え検出)", () => {
+  it("2組目の異なる値ベクトルでも11行すべてが期待どおりであること(取り違え検出)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "unset",
@@ -692,6 +695,7 @@ describe("実効設定(AC5): 10項目がラベル+値の文字列配列として
         includeTrio: true,
         includeQuinella: true,
         includeExacta: false,
+        includeTrifecta: true,
         includeComboOdds: false,
         oddsStatus: "yoso",
       }),
@@ -704,6 +708,7 @@ describe("実効設定(AC5): 10項目がラベル+値の文字列配列として
       `ワイド: OFF`,
       `馬連: ON`,
       `馬単: OFF`,
+      `三連単: ON`,
       `三連複: ON`,
       `組合せオッズ取得: OFF`,
       `オッズ状態: 発売前`,
@@ -750,6 +755,27 @@ describe("実効設定(AC5): 10項目がラベル+値の文字列配列として
     expect(view.settingsRows).not.toContain("馬単: OFF");
   });
 
+  // Issue #140(#25-E3c)着手前ゲート裁定: includeTrifectaもincludeQuinella/includeExactaと
+  // 同じくON/OFF/記録なしの3値をそれぞれ確かめる(nullをOFFと表示する変異を殺す。上記2組で
+  // ON/OFFは既に固定済みなので、ここでは「三連単」の行だけを対象に3値目〈記録なし=null〉を
+  // 追加で固定する)。
+  it("三連単: includeTrifecta=trueのとき『三連単: ON』になること", () => {
+    const view = buildAllocationProposalView(allocation({ includeTrifecta: true }));
+    expect(view.settingsRows).toContain("三連単: ON");
+  });
+
+  it("三連単: includeTrifecta=falseのとき『三連単: OFF』になること", () => {
+    const view = buildAllocationProposalView(allocation({ includeTrifecta: false }));
+    expect(view.settingsRows).toContain("三連単: OFF");
+  });
+
+  it("三連単: includeTrifecta=null(Issue #140より前の記録)のとき『三連単: 記録なし』になること(OFFと断定しない。#31)", () => {
+    const view = buildAllocationProposalView(allocation({ includeTrifecta: null }));
+    expect(view.settingsRows).toContain("三連単: 記録なし");
+    // 前提固定の裏返し: 「三連単: OFF」ではないこと(nullをOFFへ丸める変異を殺す)。
+    expect(view.settingsRows).not.toContain("三連単: OFF");
+  });
+
   it("oddsStatus='result'は『確定』になること", () => {
     const view = buildAllocationProposalView(allocation({ oddsStatus: "result" }));
     expect(view.settingsRows.at(-1)).toBe("オッズ状態: 確定");
@@ -765,23 +791,23 @@ describe("実効設定(AC5): 10項目がラベル+値の文字列配列として
   });
 
   it.each(["unset", "yoso", "invalid"] as const)(
-    "route=%s(記録はある状態)でも実効設定10項目が出ること",
+    "route=%s(記録はある状態)でも実効設定11項目が出ること",
     (route) => {
-      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(10);
+      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(11);
     },
   );
 
-  it("route='unavailable'でも実効設定10項目が出ること", () => {
+  it("route='unavailable'でも実効設定11項目が出ること", () => {
     expect(
       buildAllocationProposalView(
         allocation({ route: "unavailable", unavailableReason: "not-sold" }),
       ).settingsRows,
-    ).toHaveLength(10);
+    ).toHaveLength(11);
   });
 
-  it("判定不能(未知route)でも実効設定10項目が出ること(実効設定自体は正常な値のため)", () => {
+  it("判定不能(未知route)でも実効設定11項目が出ること(実効設定自体は正常な値のため)", () => {
     expect(buildAllocationProposalView(allocation({ route: "SOMETHING_UNKNOWN" })).settingsRows).toHaveLength(
-      10,
+      11,
     );
   });
 });

@@ -312,7 +312,10 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
   // メタ行に漏れない(#59スキーマ固定を#24-E3aでは解除しない)」ことも保証していた。Issue #126で
   // この凍結も解除したため、includeExactaInAllocationがメタ行のincludeExactaへ反映されることも
   // あわせて保証する。
-  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定9項目(evThresholdはevConfig由来・includeQuinellaはIssue #118・includeExactaはIssue #126で追加)が反映されること(route=unsetで確認)", async () => {
+  // さらにIssue #140(#25-E3c)で契約反転: 同じテストがIssue #139まで「includeTrifectaInAllocationは
+  // メタ行に漏れない」ことも保証していた。Issue #140でこの凍結も解除したため、
+  // includeTrifectaInAllocationがメタ行のincludeTrifectaへ反映されることもあわせて保証する。
+  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定10項目(evThresholdはevConfig由来・includeQuinellaはIssue #118・includeExactaはIssue #126・includeTrifectaはIssue #140で追加)が反映されること(route=unsetで確認)", async () => {
     const saved: AnalysisRecord[] = [];
     const deps: AnalysisPipelineDeps = {
       ...baseDeps(),
@@ -355,6 +358,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeTrio: false,
       includeQuinella: true,
       includeExacta: true,
+      includeTrifecta: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -410,6 +414,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeTrio: true,
       includeQuinella: true,
       includeExacta: true,
+      includeTrifecta: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,

@@ -217,9 +217,12 @@ export type MixedRaceAllocationView =
  *
  * **三連単(`includeTrifectaInAllocation`。#25-E3a・Issue #138)も同じ経緯を辿り、Issue #139
  * (#25-E3b)で本関数へ接続した。** `MixedAllocationSettings`の項目は10項目のままで、#139時点
- * でも`allocation-record.ts`の設定エコーは9列(メタ行スキーマ)のまま据え置く(DB列
- * `include_trifecta`の追加・設定エコーの10列への解除は#25-E3c〈Issue #140〉のスコープ。
- * 馬連〈#115→#117→#118〉・馬単〈#124→#125→#126〉と同じ切り方)。
+ * では`allocation-record.ts`の設定エコーは9列(メタ行スキーマ)のまま据え置いていた(呼び出し側が
+ * 渡した10項目のうち9項目だけをメタ行へ写し、全項目を機械的にエコーする契約ではなかった)。
+ * その後**Issue #140(#25-E3c)でDB列`include_trifecta`を追加し、設定エコーも10列へ解除した**
+ * (`allocation-record.ts`の「## 列の由来」JSDoc参照。列を読む人〈過去分析再表示の
+ * 「三連単: ON/OFF/記録なし」〉が実在するに至ったための解除で、馬連〈`include_quinella`〉・
+ * 馬単〈`include_exacta`〉と同型の経緯)。
  *
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。
