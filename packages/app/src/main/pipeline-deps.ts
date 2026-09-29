@@ -137,13 +137,13 @@ export interface PipelineWiringConfig {
    * `includeQuinellaInAllocation`(#24-D3a・Issue #115)は5→6項目化した追加分。
    * `includeExactaInAllocation`(#24-E3a・Issue #124)は6→7項目化した追加分。ここで
    * 受け取り、下でincludeComboOddsと合成した`AnalysisAllocationSettings`(main/allocation-record.ts)
-   * までそのまま運ぶが、`allocation-record.ts`のメタ行(`analysis_allocation_meta`)へは
-   * 書かない(馬連は#59が固定した列一覧の凍結をIssue #118で解除したが、馬単は#24-E3a時点では
-   * 解除しない。`allocation-record.ts`冒頭のJSDoc参照)。
+   * までそのまま運ぶ。`allocation-record.ts`のメタ行(`analysis_allocation_meta`)への書き込みは、
+   * 馬連はIssue #118、馬単はIssue #126(#24-E3c)で列一覧の凍結を解除して接続した
+   * (`allocation-record.ts`冒頭のJSDoc参照)。
    *
    * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は7→8項目化した追加分。
    * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #139(#25-E3b)で完了した。
-   * メタ行への書き込みは#25-E3c(Issue #140)のスコープ(`allocation-record.ts`冒頭のJSDoc参照)。
+   * メタ行への書き込み(`include_trifecta`列)はIssue #140(#25-E3c)で接続した(`allocation-record.ts`冒頭のJSDoc参照)。
    */
   readonly allocationSettings?: {
     readonly bankroll: number;
