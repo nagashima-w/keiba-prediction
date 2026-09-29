@@ -37,10 +37,10 @@
  *
  * | 入力 | 経路 | 防御 | 方式 | 理由・テスト所在 |
  * |---|---|---|---|---|
- * | オッズ文字列(下限・単一値。td.Oddsの直接テキストノード) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull) | 実測(地方3連複55件中5件がカンマ入り)。`parse-nar-combo-odds.test.ts`「桁区切りカンマ」「値の解釈」describe。`toOddsNumber` は `parse-odds.ts`・`parse-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts` と共有しており、契約は5モジュール・呼び出し箇所13で統一済み(Issue #73で是正。内訳・再現コマンドは `parse-combo-odds.ts` 冒頭JSDoc参照) |
+ * | オッズ文字列(下限・単一値。td.Oddsの直接テキストノード) | 共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber` | あり | null化(桁区切りカンマを除去してから数値判定。非数値・"---.-"・"取消"・空文字はnull。**単一値セルの`0.0`もnull、単一値セルが1件以上あり全セルが0なら`unavailable`**〈Issue #143。レンジ形式のワイドは対象外。下記「`0.0`の扱い」〉) | 実測(地方3連複55件中5件がカンマ入り)。`parse-nar-combo-odds.test.ts`「桁区切りカンマ」「値の解釈」「枠連 type=b3」describe(`0.0`の扱いは後者)。`toOddsNumber` は `parse-odds.ts`・`parse-combo-odds.ts`・`parse-nar-odds.ts`・`parse-horse-results.ts` と共有しており、契約は5モジュール・呼び出し箇所13で統一済み(Issue #73で是正。内訳・再現コマンドは `parse-combo-odds.ts` 冒頭JSDoc参照) |
  * | オッズ文字列(上限。"下限 - 上限"レンジのハイフン以降。ワイドのみ) | `parseNarComboOdds`(レンジ分割+同上`toOddsNumber`) | あり | null化(レンジとして分割できない場合は下限・上限とも null) | 同上 |
  * | 人気(このドキュメント種別に列自体が存在しない) | `parseNarComboOdds` | あり | 対象外(常にnull固定。実測でこの表示種別に人気列が無いことを確認済みのため防御ではなく仕様) | `parse-nar-combo-odds.test.ts`「値の解釈」describe |
- * | 馬番(td.Oddsのid属性由来) | `decodeCellId`(`validateComboUmabans`経由) | あり | throw(1〜18範囲外・昇順違反〈重複含む〉を検出) | `parse-nar-combo-odds.test.ts`「構造の検証」describe |
+ * | 馬番(td.Oddsのid属性由来。枠連は枠番) | `decodeCellId`(`validateComboUmabansFor`経由。券種の要素の種類・順序方針で検証を振り分ける) | あり | throw(馬番の券種は1〜18範囲外・昇順違反〈重複含む。馬単・三連単は昇順を要求しないが重複は拒否〉を検出。**枠連は枠番1〜8の範囲外・降順を検出し、同枠〈`5_5`等〉は許す**〈Issue #143〉) | `parse-nar-combo-odds.test.ts`「構造の検証」「枠連 type=b3」describe |
  * | 組の要素数(セルidの数値グループ数が券種〈comboSize〉と不一致。code-reviewer指摘5・#14の教訓「表を作る過程で穴が見つかる」を踏まえた全数走査で発見) | `decodeCellId`(comboSizeで2/3グループ固定の正規表現を選択) | あり | throw(anchoredな正規表現が一致しない。例: `_b5_c0_1_2_3`〈3グループ〉をwideパーサ〈2グループ想定〉に渡すと不一致) | `parse-nar-combo-odds.test.ts`「構造の検証」describe「セルidの数値グループ数が券種と不一致」it |
  * | td.Oddsの直接テキスト(隠しinput/labelの文字混入防止) | `directText` | あり | 除外(cheerioのcontents()でテキストノードのみを対象にし、子要素〈input/label〉のテキストを合成しない) | `parse-nar-combo-odds.test.ts`「隠しinput/labelの文字が混入しないこと」describe(合成データ。防御的不変条件) |
  * | ドキュメント正当性判定(`#odds_select`・`#odds_view_form`の有無) | `documentSignals` | あり | throw(いずれも見つからない場合のみ) | `parse-nar-combo-odds.test.ts`「構造の検証」「オッズ文書として正当かの判定」describe |
@@ -130,8 +130,14 @@ const ID_MARKER: Record<ComboBetType, string> = {
  * `state==="unavailable"` かつ `reason.oddsCellCount > 0` は「オッズ文書でセルも在るのに
  * 券種idが1件も一致しない」状態であり、#33で`ScrapeWarning`を上げる候補にすること。
  * ただし上記の注意のとおり、この条件は実測済みの「本当の未発売」ケースでも成立するため、
- * 単純な「型の取り違え検出フラグ」としては使えない(誤検知を許容する早期警戒シグナルとして
- * 位置づけること。取りこぼしよりも過検知の方が安全という判断はAC7bの趣旨〈全レース
+ * 単純な「型の取り違え検出フラグ」としては使えない。**さらに、単一値セルが全件`0.0`のページ
+ * (頭数不足の枠連。Issue #143・`docs/wakuren-odds-investigation.md` §6.2)を`unavailable`に
+ * 分類した場合もこの状態になる**(セルは実在し`oddsCellCount>0`だが、券種idは一致している)。
+ * つまり`reason`の3つの生信号だけでは、「券種idが1件も一致しない」場合と「セルは一致したが
+ * 全件`0.0`だった」場合を**区別できない**(この節の解釈は`reason`単独では確定しない。
+ * 区別が必要なら`reason`に信号を足すこと。現状の呼び出し側の警告判定は`attempts`単位で
+ * `reason`の中身を見ないため、実害は無い)。誤検知を許容する早期警戒シグナルとして
+ * 位置づけること(取りこぼしよりも過検知の方が安全という判断はAC7bの趣旨〈全レース
  * unavailableへの静かな劣化を見逃さない〉に沿う)。
  */
 export interface NarComboOddsUnavailableReason {
