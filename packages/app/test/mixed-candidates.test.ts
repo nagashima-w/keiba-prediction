@@ -92,7 +92,7 @@ function fullOddsRecord(umabans: readonly number[], comboSize: number, odds: num
 
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身自体はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio" | "quinella" | "exacta" | "trifecta",
+  betType: "wide" | "trio" | "quinella" | "exacta" | "trifecta" | "bracketQuinella",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -868,18 +868,21 @@ describe("券種フィルタ(options.betTypes)", () => {
    * 除外集合は再び空になった。**
    * **Issue #144(#26-B)で`AllocationBetType`に`bracketQuinella`(枠連)が加わったが、
    * `mixed-candidates.ts`から枠連の候補を作る経路(オッズ配線・候補ビルダーの接続・配分接続)は
-   * まだ無い(#146のスコープ)ため、`trifecta`のときと同じ理由で`bracketQuinella`が
-   * 一時的に除外へ加わった。**
+   * まだ無かった(#146のスコープ)ため、`trifecta`のときと同じ理由で`bracketQuinella`が
+   * 一時的に除外へ加わった。** **Issue #148(#26-E2)でオッズ配線・
+   * `buildBracketQuinellaCandidatesForBetType`(候補ビルダー)は完了したが、
+   * `resolveMixedBetTypes`への接続(#149・#150)がまだのため、除外は引き続き維持する
+   * (`trifecta`が#137→#139の間で除外されていたのと同じ状態)。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。
    * 除外集合を`["bracketQuinella"]`と直接固定することで、枠連以外の券種が誤って除外に混ざったり、
-   * 枠連の除外が誤って解除されたり(#146より前に解除すると「枠連 ¥0 0点」の再発になる)すれば、
+   * 枠連の除外が誤って解除されたり(#150より前に解除すると「枠連 ¥0 0点」の再発になる)すれば、
    * このテストが赤くなり「足すかどうかの判断」を人間に強制する。
    * 【Issue #144で改訂】旧版(#139時点)は除外集合が`[]`であることを固定していた
    * (新旧対応表: 旧=除外0件、新=除外が`["bracketQuinella"]`の1件だけ。他券種の混入検出は弱めていない)。
    */
-  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['bracketQuinella']だけであること(Issue #144: 枠連のオッズ配線・配分接続〈#146〉が終わるまで除外する)", () => {
+  it("ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['bracketQuinella']だけであること(Issue #144・#148: 枠連のオッズ配線・候補ビルダー〈#148〉は完了したが、配分接続〈#150〉が終わるまで除外する)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !ALL_MIXED_CANDIDATE_BET_TYPES.includes(t as MixedCandidateBetType),
     );
@@ -1600,5 +1603,180 @@ describe("三連単(trifecta)候補(#137・#25-E2→#139・#25-E3bで既定に�
     expect(ascending).toBeDefined();
     // 両方が別々の候補として存在する(昇順ソートで片方に潰されていない)。
     expect(trifectaCandidates.length).toBe(24);
+  });
+});
+
+// ============================================================================
+// 枠連(bracketQuinella)候補(Issue #148・#26-E2)
+// ============================================================================
+
+/**
+ * 枠連(bracketQuinella)候補(Issue #148・#26-E2)。core自体の的中確率・候補ビルダー・配分の門番は
+ * Issue #144・#26-Bで先行済み(`buildBracketQuinellaCandidates`)。本ブロックは
+ * `mixed-candidates.ts`の`buildBracketQuinellaCandidatesForBetType`を通した配線を検証する
+ * (`buildTrifectaCandidatesForBetType`と同型の骨格)。
+ *
+ * **`ALL_MIXED_CANDIDATE_BET_TYPES`には枠連をまだ加えない**(#150〈#26-E3b〉のスコープ。
+ * 「ALL_MIXED_CANDIDATE_BET_TYPESが意図的に除外している券種が['bracketQuinella']だけであること」
+ * describeがこれを固定している)。したがって既定(betTypes省略)呼び出しではkind='not-requested'・
+ * 候補0件のままである(#137時点の三連単と同型)。
+ *
+ * 配置(4頭。`row()`の既定wakuban=90は範囲外なので必ず明示する): 馬番1→枠1、馬番2・3→枠2、
+ * 馬番4→枠3。馬のいる枠は{1,2,3}、同枠(2頭以上の枠)は枠2だけなので、買い目は
+ * C(3,2)+1=4件("0102"・"0103"・"0203"・"0202"。キーは枠番4桁)。馬番≠枠番(馬番=枠番と取り違える
+ * 実装では6件・キーが異なるものになる)。
+ */
+describe("枠連(bracketQuinella)候補(#148・#26-E2)", () => {
+  /** 馬番1..4を枠[1,2,2,3]に割り当てた行(adjustedProbは既定0.5の均等)。 */
+  function bracketRows(): AnalysisRow[] {
+    const wakubans = [1, 2, 2, 3];
+    return umabansOf(4).map((umaban, i) => row({ umaban, wakuban: wakubans[i]! }));
+  }
+  /** 4件の買い目すべてに同じオッズを与えたRecord(キーは枠番4桁・昇順・同枠あり)。 */
+  function bracketOddsRecord(odds: number): Record<string, number> {
+    return { "0102": odds, "0103": odds, "0203": odds, "0202": odds };
+  }
+
+  it("既定(betTypes省略)では枠連は対象外(kind='not-requested')のままで、枠連オッズを渡しても候補0件であること(#150で配分・既定に接続するまでの暫定状態)", () => {
+    const result = buildMixedCandidates(
+      raceInput({ rows: bracketRows(), bracketQuinellaCombo: bracketOddsRecord(999) }),
+    );
+    expect(result.diagnostics.bracketQuinella).toEqual({ kind: "not-requested" });
+    expect(result.candidates.filter((c) => c.betType === "bracketQuinella")).toHaveLength(0);
+  });
+
+  it("betTypesに明示的にbracketQuinellaを含めれば候補が構築されること(kind='built'。4件。umabansは枠番の組で、馬番ではない)", () => {
+    const result = buildMixedCandidates(
+      raceInput({ rows: bracketRows(), bracketQuinellaCombo: bracketOddsRecord(999) }),
+      { betTypes: ["bracketQuinella"] },
+    );
+    expect(result.diagnostics.bracketQuinella.kind).toBe("built");
+    const candidates = result.candidates.filter((c) => c.betType === "bracketQuinella");
+    expect(candidates).toHaveLength(4); // C(3,2)+同枠1
+    expect(candidates.every((c) => c.odds === 999)).toBe(true);
+    // umabansは枠番の組(昇順・同枠可)。馬番(1〜4)から作った組("0104"等)ではない。
+    const keys = candidates.map((c) => c.umabans.join("-")).sort();
+    expect(keys).toEqual(["1-2", "1-3", "2-2", "2-3"]);
+    // 診断値: 列挙4件・すべて判定済み(オッズ取得済みで全件EVプラス)。
+    if (result.diagnostics.bracketQuinella.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.bracketQuinella.build.enumeratedCount).toBe(4);
+    expect(result.diagnostics.bracketQuinella.build.judged.positiveCount).toBe(4);
+  });
+
+  it("馬の枠番は行(AnalysisRow.wakuban)から載ること: 枠番の割り当てを変えると候補の枠の組が変わる(馬番=枠番の取り違え・wakuban未搭載の検知)", () => {
+    // 割り当てを[1,1,2,2]に変える。馬のいる枠は{1,2}、同枠は両方 → 買い目は"0102"・"0101"・"0202"の3件。
+    const rows = umabansOf(4).map((umaban, i) => row({ umaban, wakuban: [1, 1, 2, 2][i]! }));
+    const result = buildMixedCandidates(
+      raceInput({
+        rows,
+        bracketQuinellaCombo: { "0102": 999, "0101": 999, "0202": 999 },
+      }),
+      { betTypes: ["bracketQuinella"] },
+    );
+    const keys = result.candidates
+      .filter((c) => c.betType === "bracketQuinella")
+      .map((c) => c.umabans.join("-"))
+      .sort();
+    expect(keys).toEqual(["1-1", "1-2", "2-2"]);
+    // 前提固定: 上の[1,2,2,3]配置とは別の結果になる(割り当てが結果に効いている)。
+    expect(keys).not.toEqual(["1-2", "1-3", "2-2", "2-3"]);
+  });
+
+  it("Worker経路の相当: structuredClone(メインスレッド→Workerの直列化と同じ複製)したレース入力でも同じ枠連候補が作られること(wakuban・bracketQuinellaComboが直列化で落ちない)", () => {
+    const input = raceInput({
+      rows: bracketRows(),
+      bracketQuinellaCombo: bracketOddsRecord(999),
+      comboOdds: { bracketQuinella: comboOddsOutcome("bracketQuinella", "available") },
+    });
+    const direct = buildMixedCandidates(input, { betTypes: ["bracketQuinella"] });
+    const cloned = buildMixedCandidates(structuredClone(input), { betTypes: ["bracketQuinella"] });
+    // 前提固定(空振り防止): 複製前で候補が実際に作られていること。
+    expect(direct.candidates.filter((c) => c.betType === "bracketQuinella")).toHaveLength(4);
+    expect(cloned.candidates).toEqual(direct.candidates);
+    expect(cloned.diagnostics.bracketQuinella).toEqual(direct.diagnostics.bracketQuinella);
+  });
+
+  it("yosoガード: oddsStatus='yoso'のときbracketQuinellaComboが供給されていてもkind='yoso'で候補0件", () => {
+    const result = buildMixedCandidates(
+      raceInput({
+        rows: bracketRows(),
+        oddsStatus: "yoso",
+        bracketQuinellaCombo: bracketOddsRecord(999),
+      }),
+      { betTypes: ["bracketQuinella"] },
+    );
+    expect(result.diagnostics.bracketQuinella).toEqual({ kind: "yoso" });
+    expect(result.candidates.filter((c) => c.betType === "bracketQuinella")).toHaveLength(0);
+  });
+
+  it("fieldPresence・comboOddsStateが他の組合せ券種と同じ形で反映されること(キー不在=absent・comboOdds未設定=unknown。オッズ未取得なので候補は0件)", () => {
+    const result = buildMixedCandidates(raceInput({ rows: bracketRows() }), {
+      betTypes: ["bracketQuinella"],
+    });
+    if (result.diagnostics.bracketQuinella.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.bracketQuinella.fieldPresence).toBe("absent");
+    expect(result.diagnostics.bracketQuinella.comboOddsState).toBe("unknown");
+    expect(result.diagnostics.bracketQuinella.build.enumeratedCount).toBe(4); // 前提固定(列挙は行われる)
+    expect(result.diagnostics.bracketQuinella.build.unjudged.oddsUnfetchedCount).toBe(4);
+    expect(result.candidates.filter((c) => c.betType === "bracketQuinella")).toHaveLength(0);
+  });
+
+  it("comboOdds.bracketQuinella.stateが反映されること(他の券種と独立)", () => {
+    const result = buildMixedCandidates(
+      raceInput({
+        rows: bracketRows(),
+        bracketQuinellaCombo: bracketOddsRecord(999),
+        comboOdds: { bracketQuinella: comboOddsOutcome("bracketQuinella", "available") },
+      }),
+      { betTypes: ["bracketQuinella"] },
+    );
+    if (result.diagnostics.bracketQuinella.kind !== "built") {
+      throw new Error("診断値はkind='built'のはず");
+    }
+    expect(result.diagnostics.bracketQuinella.fieldPresence).toBe("present");
+    expect(result.diagnostics.bracketQuinella.comboOddsState).toBe("available");
+  });
+
+  /**
+   * 殺すべき変異: 「枠連の候補に馬連(quinellaCombo)のオッズを使う」。馬連は馬番の組・枠連は枠番の組で
+   * キーの意味が違う("0102"は馬連では馬1-2、枠連では枠1-2)。quinellaComboとbracketQuinellaComboに
+   * 同じキーで異なる値を与え、枠連候補のoddsが枠連側の値であることを固定する。
+   */
+  it("枠連候補のオッズはbracketQuinellaComboの値であり、quinellaComboの値と混同されないこと(殺すべき変異の直接検知)", () => {
+    const result = buildMixedCandidates(
+      raceInput({
+        rows: bracketRows(),
+        quinellaCombo: { "0102": 5, "0103": 5, "0203": 5, "0202": 5 }, // ev非プラスになる値
+        bracketQuinellaCombo: bracketOddsRecord(999), // EVプラスになる値
+      }),
+      { betTypes: ["bracketQuinella"] },
+    );
+    const candidates = result.candidates.filter((c) => c.betType === "bracketQuinella");
+    expect(candidates).toHaveLength(4); // 空振り防止(馬連の値が混入すると0件になる)
+    for (const c of candidates) {
+      expect(c.odds).toBe(999);
+      expect(c.odds).not.toBe(5);
+    }
+  });
+
+  it("枠連を含めても、他券種の候補は変わらないこと(betTypes=['wide']と['wide','bracketQuinella']で、ワイド候補が完全に一致する)", () => {
+    const umabans = umabansOf(4);
+    const wide = fullOddsRecord(umabans, 2, 999);
+    const onlyWide = buildMixedCandidates(
+      raceInput({ rows: bracketRows(), wideCombo: wide, bracketQuinellaCombo: bracketOddsRecord(999) }),
+      { betTypes: ["wide"] },
+    );
+    const both = buildMixedCandidates(
+      raceInput({ rows: bracketRows(), wideCombo: wide, bracketQuinellaCombo: bracketOddsRecord(999) }),
+      { betTypes: ["wide", "bracketQuinella"] },
+    );
+    const wideOf = (r: typeof both) => r.candidates.filter((c) => c.betType === "wide");
+    expect(wideOf(onlyWide).length).toBeGreaterThan(0); // 空振り防止
+    expect(wideOf(both)).toEqual(wideOf(onlyWide));
+    expect(both.candidates.filter((c) => c.betType === "bracketQuinella")).toHaveLength(4);
   });
 });

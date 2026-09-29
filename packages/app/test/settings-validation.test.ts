@@ -267,6 +267,38 @@ describe("設定フォームの入力検証(純関数)", () => {
     it("『地方競馬では取得しません』旨は引き続き明示すること(Issue #139・AC6: 配分利用と取得可否は別の事実であり、配分に使うようになっても地方非対応の事実は変わらない)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("地方競馬では取得しません");
     });
+
+    /**
+     * Issue #148(#26-E2): 馬連(#116)・馬単(#122)・三連単(#137)と同じ欠陥(取得を先に始めてから、
+     * ラベルの更新が1リリース遅れる)を枠連でも繰り返さない。#148の時点でscrape-race.tsは枠連
+     * オッズも取得し始める(includeComboOdds:trueのとき、他の券種の後に枠連を**中央・地方とも**
+     * 1レースあたり常に1リクエスト追加で取得する)ため、チェックボックス・補助文とも
+     * 「何を取得するか」「その費用」の事実を更新する。枠連を配分に使う設定は#149(配管)・#150
+     * (画面)まで存在しないため、配分利用の列挙(5項目)には加えず、「取得のみ」の一文を添える。
+     */
+    it("チェックボックス・補助文がどちらも枠連(bracketQuinella)の取得に言及すること(Issue #148。#148から枠連も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("枠連");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("枠連");
+    });
+
+    it("補助文の費用説明が枠連も1レースあたり常に1リクエスト追加であることに言及すること(Issue #148)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/枠連[^。]*1レースあたり[^。]*1リクエスト追加/);
+    });
+
+    // 三連単と異なり枠連は中央・地方とも取得する。「地方では取得しません」が枠連に対して
+    // 言われていない(三連単の文の中にだけある)ことを、文の切れ目(。)を跨がない形で固定する。
+    it("補助文が枠連は中央・地方とも取得する旨を明示し、枠連について『地方競馬では取得しません』と言っていないこと(Issue #148)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/枠連[^。]*中央・地方/);
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toMatch(/枠連[^。]*地方競馬では取得しません/);
+    });
+
+    it("補助文の列挙は枠連を配分に使う設定への言及を含まないこと(Issue #148: 設定自体が#149まで無い。列挙に足すと嘘になる)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("枠連を配分に使う");
+    });
+
+    it("補助文が『枠連は現在は取得のみで配分には使わない』旨を明示すること(Issue #148: 取得と配分利用の状態を混同させないため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/枠連[^。]*配分には使いません/);
+    });
   });
 
   describe("INCLUDE_COMBO_ODDS_BATCH_NOTE(一括分析画面の固定注記。機能D-2c第3段・Issue #28)", () => {
@@ -320,6 +352,24 @@ describe("設定フォームの入力検証(純関数)", () => {
     it("『三連単は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #139: 配分に使うようになったため、この断定は事実と食い違う)", () => {
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toMatch(/三連単[^。]*配分には使いません/);
     });
+
+    // Issue #148(#26-E2): INCLUDE_COMBO_ODDS_LABELSと同じ理由で、一括分析画面の注記も
+    // 「何を取得しているか」の事実を更新する。配分利用の列挙(5項目)は変えない。
+    it("枠連(bracketQuinella)の取得にも言及すること(Issue #148。取得の事実を更新)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("枠連");
+    });
+
+    it("枠連を配分に使う設定への言及を含まないこと(Issue #148: 設定自体が#149まで無い)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("枠連を配分に使う");
+    });
+
+    it("『枠連は現在は取得のみで配分には使わない』旨を明示すること(Issue #148)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toMatch(/枠連[^。]*配分には使いません/);
+    });
+
+    it("枠連について『地方競馬では取得しません』と言っていないこと(三連単と異なり枠連は中央・地方とも取得する。Issue #148)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toMatch(/枠連[^。]*地方競馬では取得しません/);
+    });
   });
 
   // 券種横断の馬券配分対象チェックボックス文言(機能D-2c第4段・Issue #28。
@@ -344,9 +394,13 @@ describe("設定フォームの入力検証(純関数)", () => {
         // 一致しない参照になる)。Issue #122でさらに「ワイド・馬連・馬単・三連複」に変わった
         // ため、引用文言も再度合わせる(同じ理由の繰り返し)。Issue #137でさらに
         // 「ワイド・馬連・馬単・三連複・三連単」に変わったため、引用文言も再度合わせる。
-        expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(
-          "ワイド・馬連・馬単・三連複・三連単のオッズも取得する",
-        );
+        // Issue #148でさらに「ワイド・馬連・馬単・三連複・三連単・枠連」に変わったため、引用文言も
+        // 再度合わせる。あわせて、引用が実際のチェックボックスラベルの部分文字列であることも固定する
+        // (引用と本体がまた食い違う欠陥の再発防止。旧版が保証していた「引用にOFFの間は効果が無い旨が
+        // 添えられていること」は下の2行で変えていない)。
+        const quoted = "ワイド・馬連・馬単・三連複・三連単・枠連のオッズも取得する";
+        expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain(quoted);
+        expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(quoted);
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("OFFの間は効果がありません");
       },
     );

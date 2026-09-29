@@ -295,12 +295,14 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       quinellaCombo?: Record<string, number | null>;
       exactaCombo?: Record<string, number | null>;
       trifectaCombo?: Record<string, number | null>;
+      bracketQuinellaCombo?: Record<string, number | null>;
       comboOdds?: {
         wide?: ReturnType<typeof makeComboOddsFetchOutcome>;
         trio?: ReturnType<typeof makeComboOddsFetchOutcome>;
         quinella?: ReturnType<typeof makeComboOddsFetchOutcome>;
         exacta?: ReturnType<typeof makeComboOddsFetchOutcome>;
         trifecta?: ReturnType<typeof makeComboOddsFetchOutcome>;
+        bracketQuinella?: ReturnType<typeof makeComboOddsFetchOutcome>;
       };
     }): RaceData {
       return makeRaceData({
@@ -322,6 +324,9 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
             : {}),
           ...(overrides.trifectaCombo !== undefined
             ? { trifectaCombo: overrides.trifectaCombo }
+            : {}),
+          ...(overrides.bracketQuinellaCombo !== undefined
+            ? { bracketQuinellaCombo: overrides.bracketQuinellaCombo }
             : {}),
         },
         meta: {
@@ -442,6 +447,55 @@ describe("buildRaceSnapshot(取得したレース情報のスナップショッ�
       expect(hasOwn(snapshot, "exactaCombo")).toBe(false);
       expect(snapshot.comboOdds).toBeUndefined();
       expect(hasOwn(snapshot, "comboOdds")).toBe(false);
+    });
+
+    describe("枠連(bracketQuinellaCombo。Issue #148・#26-E2)", () => {
+      it("未設定ならスナップショットにキー自体が無いこと({}に化けない)", () => {
+        const snapshot = buildRaceSnapshot(makeComboRaceData({ wideCombo: { "0102": 3.4 } }));
+        expect(snapshot.wideCombo).toEqual({ "0102": 3.4 }); // 前提固定
+        expect(snapshot.bracketQuinellaCombo).toBeUndefined();
+        expect(hasOwn(snapshot, "bracketQuinellaCombo")).toBe(false);
+      });
+
+      it("設定されていれば枠番4桁キーのままスナップショットに載り、comboOdds.bracketQuinellaも写されること", () => {
+        const race = makeComboRaceData({
+          bracketQuinellaCombo: { "0407": 31.5, "0101": 63.5 },
+          comboOdds: {
+            bracketQuinella: makeComboOddsFetchOutcome("available"),
+          },
+        });
+
+        const snapshot = buildRaceSnapshot(race);
+        expect(snapshot.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+        expect(hasOwn(snapshot, "bracketQuinellaCombo")).toBe(true);
+        expect(snapshot.comboOdds?.bracketQuinella).toEqual(makeComboOddsFetchOutcome("available"));
+        // JSON往復(analyses.race_snapshot_jsonへの保存相当)でも消えない。
+        const roundTripped = JSON.parse(JSON.stringify(snapshot)) as {
+          bracketQuinellaCombo: Record<string, number | null>;
+        };
+        expect(roundTripped.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+      });
+
+      it("空オブジェクトなら空のまま載ること(undefinedへ化けない)", () => {
+        const snapshot = buildRaceSnapshot(makeComboRaceData({ bracketQuinellaCombo: {} }));
+        expect(snapshot.bracketQuinellaCombo).toEqual({});
+        expect(hasOwn(snapshot, "bracketQuinellaCombo")).toBe(true);
+      });
+
+      it("bracketQuinellaComboのみ設定・他の5券種は未設定のとき、独立して伝播すること(非対称ケース)", () => {
+        const snapshot = buildRaceSnapshot(makeComboRaceData({ bracketQuinellaCombo: { "0101": 63.5 } }));
+        expect(snapshot.bracketQuinellaCombo).toEqual({ "0101": 63.5 });
+        for (const key of [
+          "wideCombo",
+          "trioCombo",
+          "quinellaCombo",
+          "exactaCombo",
+          "trifectaCombo",
+          "comboOdds",
+        ]) {
+          expect(hasOwn(snapshot, key)).toBe(false);
+        }
+      });
     });
 
     /**
@@ -977,6 +1031,35 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
       expect("trioCombo" in doc.race).toBe(false);
       expect("comboOdds" in doc.race).toBe(false);
     });
+  });
+
+  it("枠連(bracketQuinellaCombo。Issue #148)を持つ新形式のraceSnapshotを渡しても例外を投げず、他の項目は復元でき、エクスポートJSONへは漏れないこと(旧形式=枠連キー無しでも同じ)", () => {
+    const baseOdds = {
+      officialDatetime: "2026-07-24 09:00:00",
+      oddsStatus: "result" as const,
+      win: { 1: { odds: 2.5, ninki: 1 } },
+      place: { 1: { oddsMin: 1.2, oddsMax: 1.4, ninki: 1 } },
+    };
+    const withBracket = buildRaceSnapshot(
+      makeRaceData({ odds: { ...baseOdds, bracketQuinellaCombo: { "0407": 31.5 } } }),
+    );
+    // 前提固定: このraceSnapshotには実際に枠連が載っていること。
+    expect(withBracket.bracketQuinellaCombo).toEqual({ "0407": 31.5 });
+    // 枠連以外は同一のオッズで、枠連キーだけ無い旧形式相当(キー無し)。
+    const withoutBracket = buildRaceSnapshot(makeRaceData({ odds: baseOdds }));
+    expect(withoutBracket.bracketQuinellaCombo).toBeUndefined();
+
+    const docWith = buildAnalysisExportDocument(
+      makeInput({ analysis: makeStoredAnalysis({ raceSnapshot: withBracket }) }),
+    );
+    const docWithout = buildAnalysisExportDocument(
+      makeInput({ analysis: makeStoredAnalysis({ raceSnapshot: withoutBracket }) }),
+    );
+    expect(docWith.race.raceName).toBe("テストステークス");
+    expect("bracketQuinellaCombo" in docWith.race).toBe(false);
+    // 枠連の有無でエクスポートされるレース・馬の内容が変わらないこと。
+    expect(docWith.race).toEqual(docWithout.race);
+    expect(docWith.horses).toEqual(docWithout.horses);
   });
 
   it("結果未取込(results/resultDetailともにundefined)ならresultsは空配列になること", () => {

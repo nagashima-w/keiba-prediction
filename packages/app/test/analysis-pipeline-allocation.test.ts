@@ -710,4 +710,133 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     const trifectaBets = allocation!.bets.filter((b) => b.betType === "trifecta");
     expect(trifectaBets).toEqual([]);
   });
+  /**
+   * Issue #148(#26-E2・AC-2): 枠連(bracketQuinella)の`includeBracketQuinellaInAllocation`設定と
+   * `resolveMixedBetTypes`への接続は#149・#150のスコープであり、本Issueの時点では
+   * `raceForAllocation.bracketQuinellaCombo`がproductionの配分結果に影響することはない
+   * (`ALL_MIXED_CANDIDATE_BET_TYPES`が`"bracketQuinella"`を含まないため。#137の三連単と同じ状態)。
+   * そこで#137と同じく、`buildMixedRaceAllocationWithOutcomeMock`の呼び出し引数を捕捉して
+   * `analysis-pipeline.ts`が組み立てる`raceForAllocation`に`bracketQuinellaCombo`・
+   * `comboOdds.bracketQuinella`が実際に渡っていることを確認する(殺す変異: `raceForAllocation`の
+   * bracketQuinellaComboの条件付きspreadを落とす)。
+   */
+  it("Issue #148(AC-2): raceForAllocationにbracketQuinellaCombo・comboOdds.bracketQuinellaが渡っていること(条件付きspreadを落とす変異を検知)", async () => {
+    const saved: AnalysisRecord[] = [];
+    const base = fakeRaceData(RACE_ID);
+    const bracketOutcome = {
+      state: "available" as const,
+      diagnostics: {
+        betType: "bracketQuinella" as const,
+        requestCount: 1,
+        expectedComboCount: 3,
+        obtainedComboCount: 3,
+        missingComboCount: 0,
+        axisUmabans: [],
+        attempts: [],
+        numericConflictCount: 0,
+        nullWinConflictCount: 0,
+        conflictSamples: [],
+      },
+    };
+    const race: RaceData = {
+      ...base,
+      odds: { ...base.odds, bracketQuinellaCombo: { "0102": 50, "0101": 60 } },
+      meta: { ...base.meta, comboOdds: { bracketQuinella: bracketOutcome } },
+    };
+    const deps: AnalysisPipelineDeps = {
+      ...baseDeps(),
+      scrape: vi.fn(async () => race),
+      saveAnalysis: (rec) => {
+        saved.push(rec);
+        return 1;
+      },
+      allocationSettings: {
+        bankroll: 300000,
+        perRaceCap: 20000,
+        kellyFraction: 0.5,
+        includeComboOdds: true,
+        includeWideInAllocation: false,
+        includeTrioInAllocation: false,
+        includeQuinellaInAllocation: false,
+        includeExactaInAllocation: false,
+        includeTrifectaInAllocation: false,
+      },
+    };
+    await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+    expect(saved).toHaveLength(1); // 前提固定。
+
+    expect(buildMixedRaceAllocationWithOutcomeMock).toHaveBeenCalledTimes(1);
+    const raceForAllocation = buildMixedRaceAllocationWithOutcomeMock.mock.calls[0]![0] as {
+      readonly bracketQuinellaCombo?: Record<string, number | null>;
+      readonly comboOdds?: { readonly bracketQuinella?: unknown };
+    };
+    expect(raceForAllocation.bracketQuinellaCombo).toEqual({ "0102": 50, "0101": 60 });
+    expect(raceForAllocation.comboOdds?.bracketQuinella).toEqual(bracketOutcome);
+
+    // #149・#150未着手のため、枠連は実際にはどの配分にも入らないこと。
+    const allocation = saved[0]!.allocation;
+    expect(allocation).not.toBeUndefined();
+    expect(allocation!.bets.filter((b) => b.betType === "bracketQuinella")).toEqual([]);
+  });
+
+  it("Issue #148(AC-4): 枠連オッズ(ワイドより桁違いに有利な高値)を持つレースと持たないレースで、保存される配分記録の買い目が完全に一致し、枠連の行が入らないこと(利用者から見える配分が変わらない)", async () => {
+    async function allocationFor(race: RaceData): Promise<NonNullable<AnalysisRecord["allocation"]>> {
+      const saved: AnalysisRecord[] = [];
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => race),
+        saveAnalysis: (rec) => {
+          saved.push(rec);
+          return 1;
+        },
+        // ワイドだけを配分対象にする(他の組合せ券種がオッズを持たない)。枠連が配分に混入すれば、
+        // 桁違いに有利な枠連オッズ(下記)へ配分が動き、買い目の一致が崩れる(混入の検知力を持たせるため、
+        // 全券種を有効にして三連単に配分が支配される構成にはしない)。
+        allocationSettings: {
+          bankroll: 3000000,
+          perRaceCap: 3000000,
+          kellyFraction: 0.5,
+          includeComboOdds: true,
+          includeWideInAllocation: true,
+          includeTrioInAllocation: false,
+          includeQuinellaInAllocation: false,
+          includeExactaInAllocation: false,
+          includeTrifectaInAllocation: false,
+        },
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
+      expect(saved).toHaveLength(1); // 前提固定。
+      expect(saved[0]!.allocation).not.toBeUndefined();
+      return saved[0]!.allocation!;
+    }
+
+    const base = fakeRaceData(RACE_ID);
+    const umabans = base.horses.map((h) => h.shutuba.umaban);
+    const without: RaceData = {
+      ...base,
+      odds: { ...base.odds, wideCombo: fullOddsRecord(umabans, 2, 100000) },
+    };
+    // 8頭・wakuban=umaban(fakeHorse)。馬のいる枠は1〜8の8枠(同枠なし)なので買い目はC(8,2)=28件。
+    const bracketRecord: Record<string, number> = {};
+    for (let a = 1; a <= 8; a++) {
+      for (let b = a + 1; b <= 8; b++) {
+        bracketRecord[buildComboOddsKey([a, b])] = 1e9;
+      }
+    }
+    const withBracket: RaceData = {
+      ...without,
+      odds: { ...without.odds, bracketQuinellaCombo: bracketRecord },
+    };
+
+    const allocWithout = await allocationFor(without);
+    const allocWith = await allocationFor(withBracket);
+
+    // 前提固定(空振り防止): 混在配分が実際に計算され、ワイドの買い目が1件以上あること。
+    expect(allocWithout.meta.route).toBe("mixed");
+    expect(allocWithout.bets.filter((b) => b.betType === "wide").length).toBeGreaterThan(0);
+    expect(Object.keys(bracketRecord)).toHaveLength(28); // C(8,2)
+    // 枠連オッズの有無で買い目(券種・キー・金額)が完全に一致し、枠連の行は入らない。
+    expect(allocWith.bets).toEqual(allocWithout.bets);
+    expect(allocWith.bets.filter((b) => b.betType === "bracketQuinella")).toEqual([]);
+  });
 });

@@ -3284,5 +3284,134 @@ describe("runAnalysis(NAR: 地方レースの分析)", () => {
       expect(result.comboOdds).toEqual(comboOdds);
       expect(hasOwn(result, "comboOdds")).toBe(true);
     });
+    describe("枠連(bracketQuinellaCombo。Issue #148・#26-E2)の伝播", () => {
+      /** 枠連の診断値(core ComboOddsFetchOutcome 相当。betTypeは"bracketQuinella")。 */
+      function fakeBracketOutcome() {
+        return {
+          state: "available",
+          diagnostics: {
+            betType: "bracketQuinella",
+            requestCount: 1,
+            expectedComboCount: 36,
+            obtainedComboCount: 36,
+            missingComboCount: 0,
+            axisUmabans: [],
+            attempts: [{ axis: null, state: "available", comboCount: 36 }],
+            numericConflictCount: 0,
+            nullWinConflictCount: 0,
+            conflictSamples: [],
+          },
+        } as const;
+      }
+
+      it("未設定(未取得)なら結果のbracketQuinellaComboもキー自体が無いままであること({}に化けない)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          baseDeps(),
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toBeUndefined();
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(false);
+      });
+
+      it("設定されていれば結果にそのまま(枠番4桁キーのまま)伝播し、JSON往復(IPC相当)でも消えず、comboOdds.bracketQuinellaも届くこと", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const outcome = fakeBracketOutcome();
+        const race: RaceData = {
+          ...base,
+          odds: { ...base.odds, bracketQuinellaCombo: { "0407": 31.5, "0101": 63.5 } },
+          meta: { ...base.meta, comboOdds: { bracketQuinella: outcome } },
+        };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(true);
+        expect(result.bracketQuinellaCombo instanceof Map).toBe(false);
+        expect(result.comboOdds?.bracketQuinella).toEqual(outcome);
+        const roundTripped = JSON.parse(JSON.stringify(result)) as {
+          bracketQuinellaCombo: Record<string, number | null>;
+        };
+        expect(roundTripped.bracketQuinellaCombo).toEqual({ "0407": 31.5, "0101": 63.5 });
+      });
+
+      it("空オブジェクト(発売なし等で1件も取れなかった)なら結果も空オブジェクトのまま(undefinedへ化けない)であること", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const race: RaceData = { ...base, odds: { ...base.odds, bracketQuinellaCombo: {} } };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toEqual({});
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(true);
+      });
+
+      it("bracketQuinellaComboのみ設定・他の5券種は未設定(キー自体無し)のとき、互いに影響し合わず独立して伝播すること(非対称ケース)", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const race: RaceData = {
+          ...base,
+          odds: { ...base.odds, bracketQuinellaCombo: { "0101": 63.5 } },
+        };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.bracketQuinellaCombo).toEqual({ "0101": 63.5 });
+        for (const key of [
+          "wideCombo",
+          "trioCombo",
+          "quinellaCombo",
+          "exactaCombo",
+          "trifectaCombo",
+          "comboOdds",
+        ]) {
+          expect(hasOwn(result, key)).toBe(false);
+        }
+      });
+
+      it("他の5券種のみ設定・bracketQuinellaComboは未設定のとき、結果にbracketQuinellaComboのキーが現れないこと(fail-open変異の検知)", async () => {
+        const base = fakeRaceData(RACE_ID);
+        const race: RaceData = {
+          ...base,
+          odds: {
+            ...base.odds,
+            wideCombo: { "0102": 1.5 },
+            trioCombo: { "010203": 2.3 },
+            quinellaCombo: { "0102": 3.0 },
+            exactaCombo: { "0102": 4.0 },
+            trifectaCombo: { "010203": 5.0 },
+          },
+        };
+        const deps: AnalysisPipelineDeps = { ...baseDeps(), scrape: vi.fn(async () => race) };
+
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          deps,
+          onProgress,
+        );
+
+        expect(result.trifectaCombo).toEqual({ "010203": 5.0 }); // 前提固定
+        expect(hasOwn(result, "bracketQuinellaCombo")).toBe(false);
+      });
+    });
   });
 });

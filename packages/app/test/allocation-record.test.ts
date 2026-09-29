@@ -1110,6 +1110,7 @@ function mixedOutcomeFor(allocations: readonly GeneralBetAllocation[]): MixedRac
         quinella: { kind: "not-requested" },
         exacta: { kind: "not-requested" },
         trifecta: { kind: "not-requested" },
+        bracketQuinella: { kind: "not-requested" },
       },
     },
     outcome: {

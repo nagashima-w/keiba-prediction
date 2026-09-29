@@ -608,7 +608,8 @@ export async function fetchComboOdds(
  *
  * **契約違反はHTTP発行前にthrowする**: `startingWakubans`に1〜8の整数でない値があるのは
  * 外部データの異常ではなくこちら側のバグ(`parseShutuba`が枠番を1〜8で検証済み)。
- * **`scrapeRace`・appからの呼び出しは本Issueでは配線しない(#146のスコープ)。**
+ * **`scrapeRace`からの呼び出しはIssue #148(#26-E2)で配線した**(`scrape-race.ts`の
+ * `fetchBracketQuinellaOutcome`。他の組合せ券種の後、中央・地方とも1レースあたり1リクエスト)。
  *
  * @param raceId 対象レースID(中央/地方は`venueKindOfRaceId`で自動判定)
  * @param startingWakubans 出走馬ごとの枠番(1頭につき1要素。順不同・重複あり。

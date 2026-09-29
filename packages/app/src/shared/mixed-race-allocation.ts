@@ -12,10 +12,10 @@
 import {
   allocateGeneralBets,
   DEFAULT_GENERAL_BET_ALLOCATION_CONFIG,
+  type BracketJointModelHorse,
   type EvConfig,
   type GeneralBetAllocationConfig,
   type GeneralBetAllocationResult,
-  type JointModelHorse,
   type SkipReasonCode,
 } from "@keiba/core/ev/combo-bet-allocation";
 
@@ -502,9 +502,14 @@ function buildMixedRaceAllocationCore(
   }
 
   // 5. 混在配分を実際に計算する。
-  const horses: JointModelHorse[] = race.rows.map((r) => ({
+  // 枠番(wakuban)を載せる(Issue #148・#26-E2)。`allocateGeneralBets`は枠連候補が1件でもある
+  // ときだけ全馬の`wakuban`を検査して的中判定に使う(枠連候補が無ければ一切見ない)。#148の時点では
+  // `resolveMixedBetTypes`が枠連を返さないため枠連候補は届かないが、#150で接続したときに枠番の
+  // 欠落で静かに誤らないよう、候補構築(`buildMixedCandidates`)と同じ行から載せておく。
+  const horses: BracketJointModelHorse[] = race.rows.map((r) => ({
     umaban: r.umaban,
     placeProb: r.adjustedProb,
+    wakuban: r.wakuban,
   }));
   const config: GeneralBetAllocationConfig = {
     bankroll: settings.bankroll,

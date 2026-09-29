@@ -557,6 +557,19 @@ export interface OddsSnapshot {
    * optional・`Record`である理由は`exactaCombo`と同じ。
    */
   readonly trifectaCombo?: Record<string, number | null>;
+  /**
+   * 枠連オッズ(**枠番**の組の正規化キー〈`buildComboOddsKey`と同じ2桁ゼロ埋め連結で、枠は昇順・同枠可。
+   * 例"0407"・"0101"〉→オッズ。馬番ではなく枠番であり、順不同〈1着・2着の区別なし〉。単一値。
+   * `oddsMax`という概念を持たない券種のため`quinellaCombo`と同じ扱い。Issue #148・#26-E2で
+   * `scrapeRace`に配線した(データ層〈キー表現・パーサ・取得関数〉はIssue #143・#26-D、core自体の
+   * 的中確率・候補ビルダー・配分の門番はIssue #144・#26-B、確定払戻の取込はIssue #145・#26-Fで
+   * 先行済み)。
+   *
+   * **中央・地方とも取得する**(三連単と異なり地方も対象。1レースあたり常に1リクエスト)。
+   * 9頭以上のレースでのみ発売されるが、頭数で取得を省かない(8頭以下は`unavailable`・空Record
+   * になる)。optional・`Record`である理由は`wideCombo`と同じ。
+   */
+  readonly bracketQuinellaCombo?: Record<string, number | null>;
 }
 
 /**

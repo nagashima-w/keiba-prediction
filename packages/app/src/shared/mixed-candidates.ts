@@ -93,6 +93,7 @@
  */
 
 import {
+  buildBracketQuinellaCandidates,
   buildComboCandidates,
   buildExactaCandidates,
   buildQuinellaCandidates,
@@ -101,6 +102,7 @@ import {
   DEFAULT_EV_CONFIG,
   type AllocationBetType,
   type AllocationCandidate,
+  type BracketJointModelHorse,
   type ComboCandidateDiagnostics,
   type EvConfig,
   type JointModelHorse,
@@ -135,9 +137,10 @@ export type MixedCandidateBetType = AllocationBetType;
 
 /**
  * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーではない
- * (Issue #144〈#26-B〉で`bracketQuinella`〈枠連〉が`AllocationBetType`に加わったが、
- * appにはまだ枠連の候補ビルダー・オッズ配線・配分接続が無いため、#146〈#26-E〉まで
- * 意図的に本配列から除外している)。** それ以前は、Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、
+ * (Issue #144〈#26-B〉で`bracketQuinella`〈枠連〉が`AllocationBetType`に加わった。
+ * Issue #148〈#26-E2〉でオッズ配線と候補ビルダー〈`buildBracketQuinellaCandidatesForBetType`〉は
+ * 完了したが、配分接続〈設定の配管は#149・`resolveMixedBetTypes`への接続は#150〉がまだのため、
+ * #150まで意図的に本配列から除外している)。** それ以前は、Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、
  * Issue #125〈#24-E3b〉で`exacta`〈馬単〉、Issue #139〈#25-E3b〉で`trifecta`〈三連単〉を
  * 追加したことで全メンバーと一致していた。
  *
@@ -178,7 +181,7 @@ export type MixedCandidateBetType = AllocationBetType;
  * 「全メンバーではない」状態に戻ったが#117で再び全メンバーと一致し、#120で三たび
  * 「全メンバーではない」状態に戻ったが#125で再び全メンバーと一致し、#128で四たび
  * 「全メンバーではない」状態に戻ったが#139で再び全メンバーと一致し、#144で五たび
- * 「全メンバーではない」状態に戻った(枠連の接続は#146)。** 改名はしない
+ * 「全メンバーではない」状態に戻った(枠連の接続は#150)。** 改名はしない
  * (#91当時のboss裁定を維持: 定数名は「意図的な対象集合」を表す既存の名として扱い、
  * メンバー数の増減のたびに改名しない)。
  *
@@ -236,6 +239,14 @@ export interface MixedCandidateBuildInput {
    * (ユーザー判断2026-09-27により地方の三連単は当面取得しないため)。
    */
   readonly trifectaCombo?: Record<string, number | null>;
+  /**
+   * 枠連オッズ(Issue #148・#26-E2)。キーは**枠番**の組(2桁ゼロ埋め連結・昇順・同枠可。
+   * 例"0407"・"0101")で、馬番ではない。`options.betTypes`に`"bracketQuinella"`があるときのみ
+   * 参照される。`ALL_MIXED_CANDIDATE_BET_TYPES`は`"bracketQuinella"`を含まない(#150まで)ため、
+   * 既定呼び出しでは参照されない(`options.betTypes`へ明示的に`"bracketQuinella"`を渡した場合
+   * のみ到達する)。三連単と異なり中央・地方とも取得する。
+   */
+  readonly bracketQuinellaCombo?: Record<string, number | null>;
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
   /**
    * レースID(Issue #139・#25-E3b・AC4)。本ファイル自体は参照しない(候補構築は中央/地方を
@@ -367,6 +378,14 @@ export interface MixedCandidateDiagnostics {
    * `options.betTypes`省略時の既定呼び出しでも実際に`kind:"built"`/`"yoso"`になりうる。
    */
   readonly trifecta: ComboCandidateDiagnosticsView;
+  /**
+   * 枠連の候補ビルド診断値(Issue #148・#26-E2)。`wide`/`trio`/`quinella`/`exacta`/`trifecta`と
+   * 同じ`ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
+   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"bracketQuinella"`を含まない(#150まで)ため、
+   * `options.betTypes`省略時の既定呼び出しでは常に`kind:"not-requested"`になる
+   * (`options.betTypes`に明示的に`"bracketQuinella"`を含めたときのみ`"built"`/`"yoso"`になりうる)。
+   */
+  readonly bracketQuinella: ComboCandidateDiagnosticsView;
 }
 
 /** `buildMixedCandidates` の結果。 */
@@ -606,6 +625,48 @@ function buildTrifectaCandidatesForBetType(
 }
 
 /**
+ * 枠連候補を構築する(Issue #148・#26-E2)。`buildTrifectaCandidatesForBetType`と同型の骨格
+ * (別関数にする理由も同じ: core `buildComboCandidates`は`betType==="bracketQuinella"`を専用に
+ * throwする安全装置を持つため、枠連は`buildBracketQuinellaCandidates`〈core。順序付きoutcome
+ * 空間の1着・2着の馬番を枠番へ引き直して的中確率を求める〉へ直接委譲する)。反証B相当:
+ * 頭数門前払いはしない(発売の頭数条件〈9頭以上〉はオッズ取得層が`unavailable`で表すため、
+ * ここでは判定しない)。
+ *
+ * **`horses`は枠番(`wakuban`)を持つ必要がある**(`BracketJointModelHorse`。全馬が1〜8の整数を
+ * 持たないとcoreがthrowする)。呼び出し元(`buildMixedCandidates`)が`race.rows[].wakuban`から
+ * 載せる。`AnalysisRow.wakuban`は`parseShutuba`が1〜8で検証した値なので、productionでは
+ * 必ず有効(契約違反のthrowは`buildMixedRaceAllocationWithOutcome`の外側try/catchが受ける)。
+ *
+ * 返す候補の`umabans`は**枠番の組**(昇順・同枠可)であり馬番ではない。`ALL_MIXED_CANDIDATE_BET_TYPES`
+ * は`"bracketQuinella"`を含まない(#150まで)ため、`requested`は`options.betTypes`に明示的に
+ * `"bracketQuinella"`を渡した場合のみtrueになる(既定呼び出しでは常に`false`=`kind:"not-requested"`)。
+ */
+function buildBracketQuinellaCandidatesForBetType(
+  requested: boolean,
+  race: MixedCandidateBuildInput,
+  horses: readonly BracketJointModelHorse[],
+  evConfig: EvConfig,
+): { candidates: readonly AllocationCandidate[]; diagnostics: ComboCandidateDiagnosticsView } {
+  if (!requested) {
+    return { candidates: [], diagnostics: { kind: "not-requested" } };
+  }
+  // yosoガード: 発売前は組合せオッズが存在しない(他の組合せ券種と同じ理由。誤ラベル禁止)。
+  if (race.oddsStatus === "yoso") {
+    return { candidates: [], diagnostics: { kind: "yoso" } };
+  }
+  const record = race.bracketQuinellaCombo;
+  const fieldPresence = resolveFieldPresence(record);
+  const comboOddsState = race.comboOdds?.bracketQuinella?.state ?? "unknown";
+  const oddsByKey = new Map<string, number | null>(Object.entries(record ?? {}));
+  // D-4: evConfigを渡し、他の券種と同じ閾値・同じ厳密不等号で判定させる。
+  const result = buildBracketQuinellaCandidates(horses, COMBO_TOP_FINISH_COUNT, oddsByKey, evConfig);
+  return {
+    candidates: result.candidates,
+    diagnostics: { kind: "built", fieldPresence, comboOddsState, build: result.diagnostics },
+  };
+}
+
+/**
  * 券種横断(複勝・ワイド・3連複。馬連は候補ビルダーとして実装済みだが既定の対象には含まれない
  * 〈`ALL_MIXED_CANDIDATE_BET_TYPES`のJSDoc参照〉)の買い目候補を構築する。
  *
@@ -619,7 +680,14 @@ export function buildMixedCandidates(
 ): MixedCandidateBuildResult {
   const betTypes = options.betTypes ?? ALL_MIXED_CANDIDATE_BET_TYPES;
   const evConfig = options.evConfig ?? DEFAULT_EV_CONFIG;
-  const horses: JointModelHorse[] = race.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
+  // 枠連(Issue #148)の的中判定が読む枠番を載せる。枠連候補が無い券種のビルダーは`wakuban`を
+  // 一切見ない(coreの契約。既存券種の結果は不変)。`AnalysisRow.wakuban`は必須フィールドなので
+  // Web Workerへの直列化(structured clone)でも落ちない。
+  const horses: BracketJointModelHorse[] = race.rows.map((r) => ({
+    umaban: r.umaban,
+    placeProb: r.adjustedProb,
+    wakuban: r.wakuban,
+  }));
 
   const place = betTypes.includes("place")
     ? buildPlaceCandidates(race)
@@ -630,6 +698,12 @@ export function buildMixedCandidates(
   const quinella = buildQuinellaCandidatesForBetType(betTypes.includes("quinella"), race, horses, evConfig);
   const exacta = buildExactaCandidatesForBetType(betTypes.includes("exacta"), race, horses, evConfig);
   const trifecta = buildTrifectaCandidatesForBetType(betTypes.includes("trifecta"), race, horses, evConfig);
+  const bracketQuinella = buildBracketQuinellaCandidatesForBetType(
+    betTypes.includes("bracketQuinella"),
+    race,
+    horses,
+    evConfig,
+  );
 
   return {
     candidates: [
@@ -640,6 +714,7 @@ export function buildMixedCandidates(
       ...quinella.candidates,
       ...exacta.candidates,
       ...trifecta.candidates,
+      ...bracketQuinella.candidates,
     ],
     topFinishCount: COMBO_TOP_FINISH_COUNT,
     diagnostics: {
@@ -650,6 +725,7 @@ export function buildMixedCandidates(
       quinella: quinella.diagnostics,
       exacta: exacta.diagnostics,
       trifecta: trifecta.diagnostics,
+      bracketQuinella: bracketQuinella.diagnostics,
     },
   };
 }

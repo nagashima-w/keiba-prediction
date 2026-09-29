@@ -21,6 +21,7 @@
 import type { CachedFetchTextOptions } from "./cache.js";
 import { toComboOddsScalarMap, type ComboBetType } from "./combo-odds-key.js";
 import {
+  fetchBracketQuinellaOdds,
   fetchComboOdds,
   type ComboOddsFetchDiagnostics,
   type ComboOddsFetchResult,
@@ -173,9 +174,9 @@ export interface ComboOddsFetchOutcome {
 }
 
 /**
- * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉)取得結果のペア。
+ * 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉・枠連)取得結果のペア。
  * `options.includeComboOdds`がtrueのときのみ設定される(馬連はIssue #116・#24-D3b-1、
- * 馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2で追加)。
+ * 馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で追加)。
  */
 export interface ComboOddsScrapeOutcome {
   readonly wide?: ComboOddsFetchOutcome;
@@ -188,6 +189,14 @@ export interface ComboOddsScrapeOutcome {
    * JSDoc参照)。中央では他の4券種と同じく`options.includeComboOdds`がtrueのとき設定される。
    */
   readonly trifecta?: ComboOddsFetchOutcome;
+  /**
+   * 枠連の取得結果(Issue #148・#26-E2)。三連単と異なり**中央・地方とも**
+   * `options.includeComboOdds`がtrueのとき設定される(1レースあたり常に1リクエスト。
+   * `OddsSnapshot.bracketQuinellaCombo`のJSDoc参照)。ただし枠連の取得中に想定外の例外が
+   * 起きた場合(出馬表の枠番が不正な場合等。`parseShutuba`が枠番を検証するため
+   * productionからは到達しない)は、他の券種と同じく警告に落とし、本フィールドは`undefined`になる。
+   */
+  readonly bracketQuinella?: ComboOddsFetchOutcome;
 }
 
 /** 1頭分の統合データ(出馬表情報+全戦績+調教評価)。 */
@@ -264,7 +273,9 @@ function errorMessage(error: unknown): string {
  * 出さずに馬単を誤って「3連複」と表示する状態になっていた(**現在は本ファイルの
  * `fetchComboBetTypeOdds`呼び出しがwide・trio・quinella〈Issue #116・#24-D3b-1〉・
  * exacta〈Issue #122・#24-E2〉・trifecta〈Issue #137・#25-E2。ただし中央のみ〉の
- * 5券種すべてを取得しており、5つともproductionから到達する**)。`default`のnever
+ * 5券種すべてを取得しており、5つともproductionから到達する。枠連〈Issue #148・#26-E2〉は
+ * `fetchComboBetTypeOdds`ではなく専用の`fetchBracketQuinellaOutcome`が取得するが、警告文言の
+ * 券種名は本関数を共有するため`bracketQuinella`のcaseも到達する**)。`default`のnever
  * 到達チェックにより、次に券種を追加する際〈#26等〉は必ずコンパイルエラーで
  * 気づける形にしておく。
  *
@@ -371,9 +382,60 @@ async function fetchComboBetTypeOdds(
   fetcher: RaceFetcher,
   fetchOptions: CachedFetchTextOptions,
   warnings: ScrapeWarning[],
-): Promise<{ readonly record: Record<string, number | null>; readonly outcome: ComboOddsFetchOutcome } | undefined> {
+): Promise<ComboOddsBetTypeResult | undefined> {
+  return runComboBetTypeFetch(
+    betType,
+    () => fetchComboOdds(raceId, betType, startingUmabans, fetcher, fetchOptions),
+    warnings,
+  );
+}
+
+/**
+ * 枠連の組合せオッズを取得し、`fetchComboBetTypeOdds`と同じ形(Record変換・警告判定・想定外の
+ * 例外の警告化)で返す(Issue #148・#26-E2)。
+ *
+ * `fetchComboBetTypeOdds`(内部で`fetchComboOdds`を呼ぶ)は枠連を渡すとthrowする(#143)ため、
+ * 枠連は出走馬番ではなく**出走馬の枠番**を受け取る`fetchBracketQuinellaOdds`へ委譲する専用の
+ * 関数にした。後半(警告の要否・メッセージ・Record変換・catch)は`runComboBetTypeFetch`で共有する。
+ *
+ * `fetchBracketQuinellaOdds`は枠番が1〜8の整数でない馬がいるとHTTP発行前にthrowする(こちら側の
+ * バグの検出)が、`parseShutuba`が枠番を1〜8で検証してレース全体を落とすため、production から
+ * この throw に到達する経路は無い。それでも、枠連は調教と同じ任意データであり、レース全体を
+ * 落とさず枠連だけを諦める契約を型と同じ場所で明示するため、他の券種と同じくcatchして警告に落とす。
+ */
+async function fetchBracketQuinellaOutcome(
+  raceId: RaceId,
+  startingWakubans: readonly number[],
+  fetcher: RaceFetcher,
+  fetchOptions: CachedFetchTextOptions,
+  warnings: ScrapeWarning[],
+): Promise<ComboOddsBetTypeResult | undefined> {
+  return runComboBetTypeFetch(
+    "bracketQuinella",
+    () => fetchBracketQuinellaOdds(raceId, startingWakubans, fetcher, fetchOptions),
+    warnings,
+  );
+}
+
+/** 組合せオッズ1券種分の取得結果(`OddsSnapshot`用のRecordと、診断値の要約)。 */
+interface ComboOddsBetTypeResult {
+  readonly record: Record<string, number | null>;
+  readonly outcome: ComboOddsFetchOutcome;
+}
+
+/**
+ * 組合せオッズの取得を実行し、警告判定・`OddsSnapshot`用Recordへの変換・想定外の例外の
+ * 警告化まで行う共通本体(`fetchComboBetTypeOdds`・`fetchBracketQuinellaOutcome`が共有する)。
+ * `fetch`が想定外にthrowした場合は警告(`kind:"組合せオッズ"`)に落とし`undefined`を返す
+ * (当該券種のRecordは未設定のまま)。
+ */
+async function runComboBetTypeFetch(
+  betType: ComboBetType,
+  fetch: () => Promise<ComboOddsFetchResult>,
+  warnings: ScrapeWarning[],
+): Promise<ComboOddsBetTypeResult | undefined> {
   try {
-    const result = await fetchComboOdds(raceId, betType, startingUmabans, fetcher, fetchOptions);
+    const result = await fetch();
     if (comboOddsNeedsWarning(result)) {
       warnings.push({ kind: "組合せオッズ", message: comboOddsWarningMessage(betType, result) });
     }
@@ -477,13 +539,19 @@ export async function scrapeRace(
   // (5)自体が実行されないため、この行の位置に関わらず既存の挙動と完全に一致する)。
   const oddsFetchedAt = now().toISOString();
 
-  // (5) 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉。オプトイン。既定OFF。
+  // (5) 組合せオッズ(ワイド・3連複・馬連・馬単・三連単〈中央のみ〉・枠連。オプトイン。既定OFF。
   // 機能D-2b-B・Issue #33第4段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、
-  // 三連単はIssue #137・#25-E2で追加):
+  // 三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で追加):
   // options.includeComboOddsがtrueの場合のみ実行する。既定呼び出しでは本ステップは一切実行
-  // されず、発行URL列・リクエスト数は現行と完全に一致する(AC4)。馬連・馬単・三連単は
+  // されず、発行URL列・リクエスト数は現行と完全に一致する(AC4)。馬連・馬単・三連単・枠連は
   // ワイド・3連複の**後**に取得する(既存URL列の先頭部分を変えないため。Issue #116 AC-1・
-  // Issue #122 AC-1・Issue #137 AC-1)。
+  // Issue #122 AC-1・Issue #137 AC-1・Issue #148 AC-1)。枠連は最後(三連単の後)に取得する。
+  //
+  // **枠連は中央・地方とも取得し、頭数(8頭以下=発売なし)で省かない(Issue #148)**: 発売の
+  // 境界(9頭以上)は各頭数1レースの観測でしかなく、閾値をコードに持たせると観測の外側で静かに
+  // 誤る。8頭以下の応答は`fetchBracketQuinellaOdds`が`unavailable`に分類し警告も出さない
+  // (追加コストは小頭数レースの1リクエストだけ)。取得には出走馬の**枠番**を渡す
+  // (期待組合せ数は枠の構成で決まる。`shutuba.horses[].wakuban`は`parseShutuba`が1〜8で検証済み)。
   //
   // **三連単は中央のみ取得する(ユーザー判断2026-09-27)**: 地方三連単は軸馬別取得
   // (1着固定・頭数分のリクエストが必要。`docs/trifecta-odds-investigation.md` §3.3)だが、
@@ -498,11 +566,13 @@ export async function scrapeRace(
   // |---|---|---|---|---|
   // | fetchComboOddsの結果(ComboOddsCellのMap) | Object.fromEntries(toComboOddsScalarMap(...)) | あり | 変換(MapをRecordに詰め替え。#32のtoComboOddsScalarMapで下限採用ルールを1箇所に閉じる。ここで規則を再実装しない) | `scrape-race.test.ts`「JSON.stringifyを通しても値が消えないこと」it(Map化していないことのJSON往復回帰テスト) |
   // | narTrioOddsAxisUrlの契約違反throw(AC-6のfail fast経由) | fetchComboBetTypeOddsのcatch | あり | 分類(警告に落とす。他の任意データ〈調教〉と同じ扱い。レース全体は落とさない) | 本ファイル内コメント参照。専用の合成テストは今回未追加(発生させるにはshutuba由来の出走馬番自体が破損している必要があり、既存parse-shutubaの馬番検証〈1〜18範囲・throw〉が既に上流で防いでいるため実質到達不能経路。到達可能にする改変〈shutuba側の検証を弱める等〉があれば別途テストを追加すること) |
+  // | fetchBracketQuinellaOddsの契約違反throw(Issue #148。出走馬の枠番が1〜8の整数でない) | fetchBracketQuinellaOutcomeのcatch | あり | 分類(警告に落とし枠連だけ諦める。上と同じ扱い) | 専用の合成テストは未追加(上と同じ理由: `parseShutuba`の枠番検証〈1〜8・throw〉が上流でレース全体を落とすため、fetcherの入力からは発生させられない実質到達不能経路。Issue #148着手前ゲートで合意した【記録】区分) |
   let wideCombo: Record<string, number | null> | undefined;
   let trioCombo: Record<string, number | null> | undefined;
   let quinellaCombo: Record<string, number | null> | undefined;
   let exactaCombo: Record<string, number | null> | undefined;
   let trifectaCombo: Record<string, number | null> | undefined;
+  let bracketQuinellaCombo: Record<string, number | null> | undefined;
   let comboOdds: ComboOddsScrapeOutcome | undefined;
   if (options.includeComboOdds) {
     const startingUmabans = shutuba.horses.map((h) => h.umaban);
@@ -552,17 +622,27 @@ export async function scrapeRace(
           oddsFetchOptions,
           warnings,
         );
+    // 枠連(Issue #148・#26-E2): 中央・地方とも取得する。最後(三連単の後)に発行する。
+    const bracketQuinellaOutcome = await fetchBracketQuinellaOutcome(
+      raceId,
+      shutuba.horses.map((h) => h.wakuban),
+      deps.fetcher,
+      oddsFetchOptions,
+      warnings,
+    );
     wideCombo = wideOutcome?.record;
     trioCombo = trioOutcome?.record;
     quinellaCombo = quinellaOutcome?.record;
     exactaCombo = exactaOutcome?.record;
     trifectaCombo = trifectaOutcome?.record;
+    bracketQuinellaCombo = bracketQuinellaOutcome?.record;
     comboOdds = {
       wide: wideOutcome?.outcome,
       trio: trioOutcome?.outcome,
       quinella: quinellaOutcome?.outcome,
       exacta: exactaOutcome?.outcome,
       trifecta: trifectaOutcome?.outcome,
+      bracketQuinella: bracketQuinellaOutcome?.outcome,
     };
   }
 
@@ -573,6 +653,7 @@ export async function scrapeRace(
     ...(quinellaCombo !== undefined ? { quinellaCombo } : {}),
     ...(exactaCombo !== undefined ? { exactaCombo } : {}),
     ...(trifectaCombo !== undefined ? { trifectaCombo } : {}),
+    ...(bracketQuinellaCombo !== undefined ? { bracketQuinellaCombo } : {}),
   };
 
   const horses: RaceHorseData[] = shutuba.horses.map((shutubaHorse) => ({

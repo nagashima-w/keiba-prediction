@@ -127,9 +127,18 @@ export interface RaceSnapshot {
    */
   readonly trifectaCombo?: Record<string, number | null>;
   /**
+   * 枠連オッズ(Issue #148・#26-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは**枠番**の組(2桁ゼロ埋め連結・昇順・同枠可。例"0407"・"0101")で、馬番ではない。
+   * 三連単と異なり中央・地方とも取得する。配分・画面への配線はまだ無い(このスナップショットに
+   * 保持するだけ。#149・#150のスコープ)。枠番4桁キーは最大でも36件規模なので、三連単のような
+   * DBサイズの懸念はない。
+   */
+  readonly bracketQuinellaCombo?: Record<string, number | null>;
+  /**
    * 組合せオッズの取得診断値(機能D-2c第3段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・
-   * #24-E2、三連単はIssue #137・#25-E2で追加)。`wideCombo`/`trioCombo`/`quinellaCombo`/
-   * `exactaCombo`/`trifectaCombo`が空({})になった原因(発売なし/未発売なのか、取得失敗
+   * #24-E2、三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で追加)。`wideCombo`/
+   * `trioCombo`/`quinellaCombo`/`exactaCombo`/`trifectaCombo`/`bracketQuinellaCombo`が空({})に
+   * なった原因(発売なし/未発売なのか、取得失敗
    * なのか)を判別する唯一の手段(`comboOdds.<betType>.state`)。core
    * `RaceDataMeta.comboOdds`のプレーン写し。
    */
@@ -173,9 +182,10 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         oikiriRank: h.oikiri?.rank ?? null,
       };
     }),
-    // 組合せオッズ(ワイド・三連複・馬連・馬単・三連単〈中央のみ〉、機能D-2c第3段・Issue #28。
-    // 馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2で
-    // 追加): race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/trifectaCombo・
+    // 組合せオッズ(ワイド・三連複・馬連・馬単・三連単〈中央のみ〉・枠連、機能D-2c第3段・Issue #28。
+    // 馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、
+    // 枠連はIssue #148・#26-E2で追加): race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/
+    // trifectaCombo/bracketQuinellaCombo・
     // race.meta.comboOdds はいずれも scrapeRace の
     // options.includeComboOdds が true のときだけ設定される optional フィールド。
     // ここでは「写すだけ」で新たな解釈・変換は行わない(analysis-pipeline.ts の
@@ -186,6 +196,9 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
     ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
     ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
     ...(race.odds.trifectaCombo !== undefined ? { trifectaCombo: race.odds.trifectaCombo } : {}),
+    ...(race.odds.bracketQuinellaCombo !== undefined
+      ? { bracketQuinellaCombo: race.odds.bracketQuinellaCombo }
+      : {}),
     ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }

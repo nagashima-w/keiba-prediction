@@ -746,6 +746,7 @@ function mixedDiagnostics(overrides: {
   quinella?: ComboCandidateDiagnosticsView;
   exacta?: ComboCandidateDiagnosticsView;
   trifecta?: ComboCandidateDiagnosticsView;
+  bracketQuinella?: ComboCandidateDiagnosticsView;
 } = {}): MixedCandidateDiagnostics {
   return {
     place: overrides.place ?? {
@@ -763,6 +764,7 @@ function mixedDiagnostics(overrides: {
     quinella: overrides.quinella ?? { kind: "not-requested" },
     exacta: overrides.exacta ?? { kind: "not-requested" },
     trifecta: overrides.trifecta ?? { kind: "not-requested" },
+    bracketQuinella: overrides.bracketQuinella ?? { kind: "not-requested" },
   };
 }
 
@@ -855,13 +857,14 @@ describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬�
   });
 
   // 【Issue #144で改訂】旧版(#139時点)は「除外している券種が無いこと」(=[])を固定していた。
-  // #144で枠連(bracketQuinella)が`AllocationBetType`に加わったが、appにはまだ枠連の候補・
-  // オッズ配線・表示が無い(#146のスコープ)ため、#128の三連単・#112の馬連と同じ理由で
+  // #144で枠連(bracketQuinella)が`AllocationBetType`に加わったが、appにはまだ枠連の配分接続・
+  // 表示が無い(オッズ配線・候補ビルダーは#148で完了。配分接続・表示は#149・#150のスコープ)ため、
+  // #128の三連単・#112の馬連と同じ理由で
   // 枠連だけが一時的に除外へ加わる。何を保証していたか(新旧対応表):
   //   旧: ALLOCATION_BET_TYPE_UMABAN_COUNTのキーのうち内訳表の表示順に無いものが0件(=[])
   //   新: 同じ集合が['bracketQuinella']の1件だけ(他の券種が誤って除外に混ざれば赤。
-  //       #146より前に枠連を表示順へ加えると「枠連 ¥0 0点」が出るため、それも赤にする)
-  it("意図的に除外している券種が['bracketQuinella']だけであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し#117で解除、#120で馬単を除外し#125で解除、#128で三連単を除外し#139で解除、#144で枠連を新たに除外に加えた。枠連の接続は#146)", () => {
+  //       #150より前に枠連を表示順へ加えると「枠連 ¥0 0点」が出るため、それも赤にする)
+  it("意図的に除外している券種が['bracketQuinella']だけであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し#117で解除、#120で馬単を除外し#125で解除、#128で三連単を除外し#139で解除、#144で枠連を新たに除外に加えた。枠連の接続は#150)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
     );

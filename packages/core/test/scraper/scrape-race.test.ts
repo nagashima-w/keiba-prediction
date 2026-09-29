@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { load } from "cheerio";
 import { describe, expect, it } from "vitest";
 import type { CachedFetchTextOptions } from "../../src/scraper/cache.js";
 import { parseRaceId, parseKaisaiDate } from "../../src/scraper/ids.js";
@@ -314,6 +315,9 @@ function narHandler(url: string): string {
   if (url.includes("shutuba.html")) return NAR_FIXTURES.shutuba;
   if (url.includes("ajax_horse_results")) return NAR_FIXTURES.results;
   if (url.includes("type=b4")) return NAR_COMBO_ODDS_UNAVAILABLE_HTML;
+  // 枠連(`type=b3`。Issue #148・#26-E2)も馬連と同じ理由で汎用一致より先に判定する
+  // (先に判定しないとb1フィクスチャが枠連として解釈される)。
+  if (url.includes("type=b3")) return NAR_COMBO_ODDS_UNAVAILABLE_HTML;
   if (url.includes("odds/index.html")) return NAR_FIXTURES.odds;
   if (url.includes("race_list_sub")) return NAR_FIXTURES.raceList;
   throw new Error(`未知のURL(NARテスト): ${url}`);
@@ -377,6 +381,7 @@ describe("scrapeRace(地方(NAR)対応)", () => {
     expect(
       fetcher.calls.some(
         (c) =>
+          c.url.includes("type=b3") ||
           c.url.includes("type=b4") ||
           c.url.includes("type=b5") ||
           c.url.includes("type=b6") ||
@@ -424,11 +429,13 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
     expect(data.odds.exactaCombo).toBeUndefined();
     expect(data.odds.trifectaCombo).toBeUndefined();
     expect(data.meta.comboOdds).toBeUndefined();
-    // 組合せオッズ関連のURL(type=4〈馬連〉/type=5/type=6〈馬単。Issue #122 AC-2〉/type=7/
-    // type=8〈三連単。Issue #137 AC-2〉/odds_get_form.html)への発行が1件も無いこと。
+    // 組合せオッズ関連のURL(type=3〈枠連。Issue #148〉/type=4〈馬連〉/type=5/type=6〈馬単。
+    // Issue #122 AC-2〉/type=7/type=8〈三連単。Issue #137 AC-2〉/odds_get_form.html)への
+    // 発行が1件も無いこと。
     expect(
       fetcher.calls.some(
         (c) =>
+          c.url.includes("type=3") ||
           c.url.includes("type=4") ||
           c.url.includes("type=5") ||
           c.url.includes("type=6") ||
@@ -473,6 +480,9 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       if (url.includes("type=4")) return loadFixture("odds_quinella_202603020211.json");
       if (url.includes("type=6")) return loadFixture("odds_exacta_202603020211.json");
       if (url.includes("type=8")) return loadFixture("odds_trifecta_202603020211.json");
+      // 枠連(`type=3`。Issue #148・#26-E2)も同じ理由で明示判定する(無いとtan/fukuの
+      // フィクスチャが枠連の応答として解釈される)。
+      if (url.includes("type=3")) return loadFixture("odds_wakuren_202603020211.json");
       return defaultHandler(url);
     }
 
@@ -533,6 +543,9 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(data.meta.comboOdds?.quinella?.state).toBe("available");
       expect(data.meta.comboOdds?.exacta?.state).toBe("available");
       expect(data.meta.comboOdds?.trifecta?.state).toBe("available");
+      // 枠連(Issue #148)は専用describeで詳しく検証する。ここでは「全件取得できて警告0件」の
+      // 前提に枠連が加わっても成立していること(comboAwareCentralHandlerが枠連を解決する)だけ固定する。
+      expect(data.meta.comboOdds?.bracketQuinella?.state).toBe("available");
       expect(data.meta.comboOdds?.wide?.diagnostics.requestCount).toBe(1);
       expect(data.meta.comboOdds?.trio?.diagnostics.requestCount).toBe(1);
       expect(data.meta.comboOdds?.quinella?.diagnostics.requestCount).toBe(1); // Issue #116 AC-1
@@ -568,6 +581,10 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
           // 三連単専用の未発売フィクスチャも無いが、上記と同じ理由で流用できる。
           return loadFixture("odds_wide_presale_202604020511_20260806.json");
         }
+        if (url.includes("type=3")) {
+          // 枠連(Issue #148)は専用の発売なしフィクスチャ(封筒NG)がある。
+          return loadFixture("odds_wakuren_unsold_202607020502.json");
+        }
         return defaultHandler(url);
       });
       const data = await scrapeRace(
@@ -581,6 +598,8 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
       expect(data.meta.comboOdds?.quinella?.state).toBe("unavailable");
       expect(data.meta.comboOdds?.exacta?.state).toBe("unavailable");
       expect(data.meta.comboOdds?.trifecta?.state).toBe("unavailable");
+      expect(data.meta.comboOdds?.bracketQuinella?.state).toBe("unavailable"); // Issue #148
+      expect(data.odds.bracketQuinellaCombo).toEqual({}); // Issue #148
       expect(data.odds.wideCombo).toEqual({});
       expect(data.odds.trioCombo).toEqual({});
       expect(data.odds.quinellaCombo).toEqual({});
@@ -777,6 +796,176 @@ describe("scrapeRace(組合せオッズのオプトイン配線。機能D-2b-B�
           (w) => w.kind === "組合せオッズ" && w.message.includes("三連単"),
         ),
       ).toEqual([]);
+    });
+  });
+
+  describe("枠連(bracketQuinella)の取得(includeComboOdds:true。Issue #148・#26-E2)", () => {
+    /** 枠連(中央type=3)の実フィクスチャを返す中央ハンドラ(他券種はcomboAwareCentralHandler相当)。 */
+    function centralWithWakurenHandler(url: string): string {
+      if (url.includes("type=3")) return loadFixture("odds_wakuren_202603020211.json");
+      if (url.includes("type=5")) return loadFixture("odds_wide_202603020211.json");
+      if (url.includes("type=7")) return loadFixture("odds_trio_202603020211.json");
+      if (url.includes("type=4")) return loadFixture("odds_quinella_202603020211.json");
+      if (url.includes("type=6")) return loadFixture("odds_exacta_202603020211.json");
+      if (url.includes("type=8")) return loadFixture("odds_trifecta_202603020211.json");
+      return defaultHandler(url);
+    }
+
+    /** 地方(type=b3)の実フィクスチャを返す地方ハンドラ。 */
+    function narWithWakurenHandler(url: string): string {
+      if (url.includes("type=b3")) return loadFixture("nar_odds_b3_202654071210.html");
+      if (url.includes("type=b4")) return loadFixture("nar_odds_b4_202654071210.html");
+      if (url.includes("type=b6")) return loadFixture("nar_odds_b6_202654071210.html");
+      return narHandler(url);
+    }
+
+    it("中央16頭: bracketQuinellaComboが枠番4桁キーのRecordとして載り、JSON往復でも消えず、診断値が取れること(期待組合せ数36=出馬表の枠構成から)", async () => {
+      const fetcher = new RecordingFetcher(centralWithWakurenHandler);
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定: 出馬表は16頭。
+      expect(data.horses).toHaveLength(16);
+      const record = data.odds.bracketQuinellaCombo;
+      expect(record).toBeDefined();
+      expect(record instanceof Map).toBe(false);
+      expect(Object.keys(record!)).toHaveLength(36); // odds_wakuren_202603020211.jsonのdata.odds["3"]のキー数(python3で実測)
+      // キーは枠番4桁(昇順・同枠あり)。馬番2桁×2(例"1308")ではない。
+      for (const key of Object.keys(record!)) {
+        expect(key).toMatch(/^0[1-8]0[1-8]$/);
+        expect(Number(key.slice(0, 2))).toBeLessThanOrEqual(Number(key.slice(2)));
+      }
+      // 同枠の買い目(0101等)が実在する(16頭・8枠で各枠2頭のため8件)。
+      const sameFrameKeys = Object.keys(record!).filter((k) => k.slice(0, 2) === k.slice(2));
+      expect(sameFrameKeys).toHaveLength(8);
+      // 実測: フィクスチャの"0101"=63.5、"0407"=31.5(いずれも[オッズ,"0.0",人気]の先頭)。
+      expect(record!["0101"]).toBe(63.5);
+      expect(record!["0407"]).toBe(31.5);
+      expect(record!["0101"]).not.toBe(record!["0407"]);
+
+      const roundTripped = JSON.parse(JSON.stringify(data.odds)) as {
+        bracketQuinellaCombo: Record<string, number | null>;
+      };
+      expect(Object.keys(roundTripped.bracketQuinellaCombo)).toHaveLength(36);
+
+      const outcome = data.meta.comboOdds?.bracketQuinella;
+      expect(outcome?.state).toBe("available");
+      expect(outcome?.diagnostics.betType).toBe("bracketQuinella");
+      expect(outcome?.diagnostics.requestCount).toBe(1);
+      expect(outcome?.diagnostics.expectedComboCount).toBe(36);
+      expect(outcome?.diagnostics.obtainedComboCount).toBe(36);
+      expect(data.meta.warnings.filter((w) => w.kind === "組合せオッズ")).toEqual([]);
+    });
+
+    it("中央: 枠連は他の組合せ券種の後、URL列の最後に1リクエストだけ発行されること(既存URL列の先頭部分を変えない)", async () => {
+      const fetcher = new RecordingFetcher(centralWithWakurenHandler);
+      await scrapeRace(RACE_ID, { fetcher, now: FIXED_NOW }, { includeComboOdds: true });
+
+      const wakurenCalls = fetcher.calls.filter((c) => c.url.includes("type=3"));
+      expect(wakurenCalls).toHaveLength(1);
+      // 最後のリクエストが枠連(三連単type=8の直後)であること。
+      const lastUrl = fetcher.calls[fetcher.calls.length - 1]!.url;
+      expect(lastUrl).toContain("type=3");
+      const trifectaIndex = fetcher.calls.findIndex((c) => c.url.includes("type=8"));
+      expect(trifectaIndex).toBeGreaterThanOrEqual(0);
+      expect(fetcher.calls.findIndex((c) => c.url.includes("type=3"))).toBeGreaterThan(trifectaIndex);
+    });
+
+    it("地方12頭: 中央と同じく取得でき(期待組合せ数32)、地方の枠連URL(type=b3)へ1リクエスト発行されること", async () => {
+      const fetcher = new RecordingFetcher(narWithWakurenHandler);
+      const data = await scrapeRace(
+        NAR_RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      expect(data.horses).toHaveLength(12); // 前提固定
+      const record = data.odds.bracketQuinellaCombo;
+      expect(record).toBeDefined();
+      expect(Object.keys(record!)).toHaveLength(32); // nar_odds_b3_202654071210.htmlのセル数(12頭・8枠のうち4枠が2頭→C(8,2)+4)
+      for (const key of Object.keys(record!)) {
+        expect(key).toMatch(/^0[1-8]0[1-8]$/);
+      }
+      // 実測: フィクスチャの1-2=132.8、1-3=69.9(セルid `..._b3_c0_1_2`のテキスト)。
+      expect(record!["0102"]).toBe(132.8);
+      expect(record!["0103"]).toBe(69.9);
+      const outcome = data.meta.comboOdds?.bracketQuinella;
+      expect(outcome?.state).toBe("available");
+      expect(outcome?.diagnostics.requestCount).toBe(1);
+      expect(outcome?.diagnostics.expectedComboCount).toBe(32);
+      expect(outcome?.diagnostics.obtainedComboCount).toBe(32);
+      expect(fetcher.calls.filter((c) => c.url.includes("type=b3"))).toHaveLength(1);
+      // 地方では三連単は取得しない(#137)ので、枠連が最後のリクエストになる。
+      expect(fetcher.calls[fetcher.calls.length - 1]!.url).toContain("type=b3");
+      expect(
+        data.meta.warnings.filter((w) => w.kind === "組合せオッズ" && w.message.includes("枠連")),
+      ).toEqual([]);
+    });
+
+    it("8頭以下(発売なし)でも枠連のリクエストは省かれず、unavailable・警告0件・空Recordになること(頭数の閾値をコードに持たせない)", async () => {
+      // 出馬表フィクスチャ(16頭)を先頭8頭だけに切り詰めた合成の8頭立て。
+      const $ = load(FIXTURES.shutuba);
+      $("tr.HorseList").slice(8).remove();
+      const eightHorseShutuba = $.html();
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("shutuba.html")) return eightHorseShutuba;
+        if (url.includes("type=3")) return loadFixture("odds_wakuren_unsold_202607020502.json");
+        return centralWithWakurenHandler(url);
+      });
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      // 前提固定(空振り防止): 8頭立てになっていること。
+      expect(data.horses).toHaveLength(8);
+      expect(fetcher.calls.filter((c) => c.url.includes("type=3"))).toHaveLength(1);
+      expect(data.meta.comboOdds?.bracketQuinella?.state).toBe("unavailable");
+      expect(data.odds.bracketQuinellaCombo).toEqual({});
+      expect(
+        data.meta.warnings.filter((w) => w.kind === "組合せオッズ" && w.message.includes("枠連")),
+      ).toEqual([]);
+    });
+
+    it("枠連の取得だけが失敗してもレースは落ちず、他5券種は不変で、警告に「枠連」が出ること", async () => {
+      const fetcher = new RecordingFetcher((url) => {
+        if (url.includes("type=3")) throw new Error("枠連オッズのHTTP取得に失敗した(模擬)");
+        return centralWithWakurenHandler(url);
+      });
+      const data = await scrapeRace(
+        RACE_ID,
+        { fetcher, now: FIXED_NOW },
+        { includeComboOdds: true },
+      );
+
+      expect(Object.keys(data.odds.wideCombo!)).toHaveLength(120);
+      expect(Object.keys(data.odds.trioCombo!)).toHaveLength(560);
+      expect(Object.keys(data.odds.quinellaCombo!)).toHaveLength(120);
+      expect(Object.keys(data.odds.exactaCombo!)).toHaveLength(240);
+      expect(Object.keys(data.odds.trifectaCombo!)).toHaveLength(3360);
+      expect(data.odds.bracketQuinellaCombo).toEqual({});
+      expect(data.meta.comboOdds?.bracketQuinella?.state).toBe("failed");
+      const warning = data.meta.warnings.find(
+        (w) => w.kind === "組合せオッズ" && w.message.includes("枠連"),
+      );
+      expect(warning).toBeDefined();
+    });
+
+    it("includeComboOdds省略時は枠連のURL(中央type=3・地方type=b3)への発行が1件も無く、bracketQuinellaCombo・comboOdds.bracketQuinellaも設定されないこと", async () => {
+      const central = new RecordingFetcher(defaultHandler);
+      const centralData = await scrapeRace(RACE_ID, { fetcher: central, now: FIXED_NOW });
+      expect(central.calls.some((c) => c.url.includes("type=3"))).toBe(false);
+      expect(centralData.odds.bracketQuinellaCombo).toBeUndefined();
+      expect(centralData.meta.comboOdds).toBeUndefined();
+
+      const nar = new RecordingFetcher(narHandler);
+      const narData = await scrapeRace(NAR_RACE_ID, { fetcher: nar, now: FIXED_NOW });
+      expect(nar.calls.some((c) => c.url.includes("type=b3"))).toBe(false);
+      expect(narData.odds.bracketQuinellaCombo).toBeUndefined();
     });
   });
 
