@@ -356,7 +356,7 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               </p>
             )}
             {/*
-             * Issue #76: 未対応の券種コード(place/win/wide/quinella/exacta/trio/trifecta以外)の
+             * Issue #76: 未対応の券種コード(place/win/wide/quinella/exacta/trio/trifecta/bracketQuinella以外)の
              * 買い目がある旨の注記。馬連(quinella)はIssue #114・#24-F1で確定払戻の既知券種に
              * なり、Issue #117(#24-D3b-2)で配分提案にも組み込まれたため、上の「内訳」「判定
              * 不能」の2行に既知券種として表示するようになった(#24-D3まで買い目が構造的に0件
@@ -365,6 +365,8 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
              * 組み込まれたため、上の2行に既知券種として表示するようになった。三連単(trifecta)も
              * 同じ経緯を辿り、Issue #131・#25-Fで確定払戻の既知券種になり、Issue #139(#25-E3b)で
              * 配分提案にも組み込まれたため、上の2行に既知券種として表示するようになった。
+             * 枠連(bracketQuinella)はIssue #145・#26-Fで確定払戻の既知券種になったが、内訳・
+             * 判定不能の2行への表示はIssue #146で行う(配分が枠連の買い目をまだ作らないため)。
              * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す。
              * 文言の組み立て(count===0ならnull)はformatUnknownBetTypeNotice(純関数)の責務で、
              * ここは`unknownBetTypeNotice`(コンポーネント冒頭で1回だけ呼んだ結果)のnull判定
