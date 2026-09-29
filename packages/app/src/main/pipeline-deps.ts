@@ -126,9 +126,9 @@ export interface PipelineWiringConfig {
    */
   readonly includeComboOdds?: boolean;
   /**
-   * 配分提案(Issue #59)の設定8項目(`bankroll`/`perRaceCap`/`kellyFraction`/
+   * 配分提案(Issue #59)の設定9項目(`bankroll`/`perRaceCap`/`kellyFraction`/
    * `includeWideInAllocation`/`includeTrioInAllocation`/`includeQuinellaInAllocation`/
-   * `includeExactaInAllocation`/`includeTrifectaInAllocation`)。`includeComboOdds`は含めない
+   * `includeExactaInAllocation`/`includeTrifectaInAllocation`/`includeBracketQuinellaInAllocation`)。`includeComboOdds`は含めない
    * (上記の`includeComboOdds`が単一ソース。ここへ二重に持たせない。#59 4節)。省略時は
    * `AnalysisPipelineDeps.allocationSettings` が null になり、この呼び出しでは配分計算を行わない
    * (既存呼び出し元・`pipeline-deps.test.ts`の20箇所超との後方互換のためこのフィールド自体は
@@ -144,6 +144,12 @@ export interface PipelineWiringConfig {
    * `includeTrifectaInAllocation`(#25-E3a・Issue #138)は7→8項目化した追加分。
    * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #139(#25-E3b)で完了した。
    * メタ行への書き込み(`include_trifecta`列)はIssue #140(#25-E3c)で接続した(`allocation-record.ts`冒頭のJSDoc参照)。
+   *
+   * `includeBracketQuinellaInAllocation`(#26-E3a・Issue #149)は8→9項目化した追加分。三連単(#25-E3a)と
+   * 同じ経緯を辿る: この型に持たせる目的は`AnalysisAllocationSettings`(9→10項目)まで値を運ぶ
+   * 配管の一部としてのみで、`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は
+   * #26-E3b(Issue #150)のスコープ、メタ行への書き込みは#26-E3c(Issue #151)のスコープ
+   * (`allocation-record.ts`冒頭のJSDoc参照)。
    */
   readonly allocationSettings?: {
     readonly bankroll: number;
@@ -154,6 +160,7 @@ export interface PipelineWiringConfig {
     readonly includeQuinellaInAllocation: boolean;
     readonly includeExactaInAllocation: boolean;
     readonly includeTrifectaInAllocation: boolean;
+    readonly includeBracketQuinellaInAllocation: boolean;
   };
   /**
    * better-sqlite3 のネイティブバインディング(.node)の絶対パス(Issue #60-B)。
@@ -294,8 +301,8 @@ export function createPipelineDeps(
     // 設定画面の重み・EV閾値を分析へ反映する(未指定なら runAnalysis 側の既定)。
     scorerConfig: config.scorerConfig,
     evConfig: config.evConfig,
-    // 配分提案(Issue #59)。config.allocationSettings(8項目)にincludeComboOdds(上で1回だけ
-    // 解決した値。scrape束縛と同じ値)を合成して9項目にする。config.allocationSettingsが
+    // 配分提案(Issue #59)。config.allocationSettings(9項目)にincludeComboOdds(上で1回だけ
+    // 解決した値。scrape束縛と同じ値)を合成して10項目にする。config.allocationSettingsが
     // 省略時はnull(この呼び出しでは配分計算を行わない。required-nullableの契約は
     // analysis-pipeline.ts AnalysisPipelineDeps.allocationSettings参照)。
     allocationSettings:

@@ -53,6 +53,7 @@ async function main(): Promise<void> {
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
   };
   const expected = buildMixedAllocationDisplay(race, settings);
 

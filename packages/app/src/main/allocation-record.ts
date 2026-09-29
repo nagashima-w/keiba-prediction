@@ -11,8 +11,9 @@
  *
  * - 設定エコー10列(bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/
  *   include_wide/include_trio/include_quinella/include_exacta/include_trifecta): 呼び出し時に
- *   渡した `MixedAllocationSettings`(#25-E3a・Issue #138で10項目になった。下記参照)の全10項目を
- *   そのまま写す。route に関わらず常に非null(実行時に確定している値のため)。
+ *   渡した `MixedAllocationSettings`(#26-E3a・Issue #149で11項目になった。下記参照)のうち
+ *   10項目をそのまま写す(枠連の`includeBracketQuinellaInAllocation`は写さない。下記参照)。
+ *   route に関わらず常に非null(実行時に確定している値のため)。
  *
  *   **#24-D3a(Issue #115)で`MixedAllocationSettings`は8項目(`includeQuinellaInAllocation`追加)に
  *   なったが、当初(Issue #117まで)はこの設定エコーを7列のまま据え置いていた**
@@ -41,6 +42,12 @@
  *   (#25-E3c)で9→10列へ解除した**。DB列`include_trifecta`はNULLを許す〈`AnalysisStore`の該当
  *   CREATE TABLEコメント参照〉ため、Issue #140より前に保存された行は`includeTrifecta: null`
  *   〈記録なし〉のまま読める。`includeQuinella`/`includeExacta`と同型)。
+ *
+ *   **#26-E3a(Issue #149)で`MixedAllocationSettings`は11項目(`includeBracketQuinellaInAllocation`追加)に
+ *   なったが、この設定エコーは10列のまま据え置く**(`settingsColumnsOf`が11項目目を読まない。
+ *   馬連〈#115〉・馬単〈#124〉・三連単〈#138〉と同じ切り方: 券種の選択・D-2フォールバック規則・
+ *   画面表示は#26-E3b〈Issue #150〉、メタ行のDB列と過去分析再表示の「枠連: ON/OFF/記録なし」は
+ *   #26-E3c〈Issue #151〉のスコープ)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。
  * - 実効値4列(bet_unit/greedy_steps/candidate_cap/model_id・model_approximate):
@@ -110,7 +117,7 @@ import type {
 } from "../shared/mixed-race-allocation.js";
 
 /**
- * `AnalysisPipelineDeps.allocationSettings` が持つ8項目(`evThreshold` を含まない)。
+ * `AnalysisPipelineDeps.allocationSettings` が持つ10項目(`evThreshold` を含まない)。
  * `evThreshold` は `deps.evConfig ?? DEFAULT_EV_CONFIG` から別途導出し、二重ソースを
  * 作らない(analysis-pipeline.ts 側の責務。#59 3節)。
  *
@@ -141,6 +148,12 @@ import type {
  * `include_trifecta`の5列になった(#59が固定した「列一覧は固定・増減は停止条件」を、列を読む人
  * 〈過去分析再表示の「三連単: ON/OFF/記録なし」〉が実在するに至ったIssue #140で解除した。
  * 馬連〈#115→#118〉・馬単〈#124→#126〉と同じ切り方)。
+ *
+ * `includeBracketQuinellaInAllocation`(#26-E3a・Issue #149)は9→10項目化した追加分。
+ * この型に持たせる目的は`MixedAllocationSettings`(10→11項目)まで値を運ぶ配管の一部としてのみで、
+ * `resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続はIssue #150(#26-E3b)、
+ * メタ行への書き込みはIssue #151(#26-E3c)のスコープ(`settingsColumnsOf`はこのフィールドを
+ * まだ読まない。馬単〈#124→#125・#126〉・三連単〈#138→#139・#140〉と同じ切り方)。
  */
 export interface AnalysisAllocationSettings {
   readonly bankroll: number;
@@ -152,11 +165,12 @@ export interface AnalysisAllocationSettings {
   readonly includeQuinellaInAllocation: boolean;
   readonly includeExactaInAllocation: boolean;
   readonly includeTrifectaInAllocation: boolean;
+  readonly includeBracketQuinellaInAllocation: boolean;
 }
 
 /**
- * 9項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
- * `buildMixedRaceAllocationWithOutcome` が要求する10項目の `MixedAllocationSettings` を作る。
+ * 10項目の `AnalysisAllocationSettings` に、別途解決した `evThreshold` を合成して
+ * `buildMixedRaceAllocationWithOutcome` が要求する11項目の `MixedAllocationSettings` を作る。
  */
 export function toMixedAllocationSettings(
   settings: AnalysisAllocationSettings,
@@ -183,9 +197,10 @@ function codesColumnsOf(
 }
 
 /**
- * `MixedAllocationSettings`(#25-E3aで10項目になった)を、メタ行の設定エコー10列へ写す
+ * `MixedAllocationSettings`(#26-E3aで11項目になった)のうち10項目を、メタ行の設定エコー10列へ写す
  * (Issue #118でincludeQuinella・Issue #126でincludeExacta・Issue #140でincludeTrifectaを
- * 追加し、全10項目を機械的にエコーする形にした)。
+ * 追加した。#26-E3a〈Issue #149〉で加わった枠連の項目は、メタ行の列が#26-E3c〈Issue #151〉で
+ * 追加されるまで写さない)。
  */
 function settingsColumnsOf(
   settings: MixedAllocationSettings,

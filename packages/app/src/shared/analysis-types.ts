@@ -426,7 +426,7 @@ export interface AnalysisResult {
    * 三連単と異なり**中央・地方とも**取得する(9頭以上で発売。8頭以下は空Recordになる)。
    *
    * **配分・画面への配線はまだ無い**(このフィールドを保持・伝播するだけ。#148のスコープ。
-   * 配分の設定は#149、配分への接続・画面は#150)。
+   * 配分の設定の配管は#149で完了、配分への接続・画面は#150)。
    */
   readonly bracketQuinellaCombo?: Record<string, number | null>;
   /**

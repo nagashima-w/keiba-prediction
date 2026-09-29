@@ -101,6 +101,14 @@ export interface SettingsFormState {
    * チェックボックスを追加した(馬単〈#24-E3a→#24-E3b〉と同じ切り方)。
    */
   readonly includeTrifectaInAllocation: boolean;
+  /**
+   * 枠連を馬券配分の対象に含めるか(#26-E3a・Issue #149)。既定true。
+   * #26-E3a時点では対応する切替アクション(SettingsAction)を持たない
+   * (SettingsView.tsxにトグルを出さないため。#26-E3b〈Issue #150〉で「枠連配分対象切替」
+   * アクションを追加する見込み。三連単〈#25-E3a→#25-E3b〉と同じ切り方)。それでも読込・保存の
+   * 往復・isDirty判定の対象には含める(将来トグルを追加したときの配線をこの時点で通しておく)。
+   */
+  readonly includeBracketQuinellaInAllocation: boolean;
   /** 保存操作の状態。 */
   readonly status: SettingsStatus;
   /** エラー・通知メッセージ(無ければ null)。 */
@@ -231,6 +239,8 @@ export interface SettingsSnapshot {
   readonly includeExactaInAllocation: boolean;
   /** 三連単を馬券配分の対象に含めるか(#25-E3a・Issue #138)。 */
   readonly includeTrifectaInAllocation: boolean;
+  /** 枠連を馬券配分の対象に含めるか(#26-E3a・Issue #149)。 */
+  readonly includeBracketQuinellaInAllocation: boolean;
 }
 
 /** 空文字ベースの初期スナップショットを作る。 */
@@ -254,6 +264,7 @@ function emptySnapshot(): SettingsSnapshot {
     includeQuinellaInAllocation: false,
     includeExactaInAllocation: false,
     includeTrifectaInAllocation: false,
+    includeBracketQuinellaInAllocation: false,
   };
 }
 
@@ -280,6 +291,7 @@ export function createInitialSettingsState(): SettingsFormState {
     includeQuinellaInAllocation: false,
     includeExactaInAllocation: false,
     includeTrifectaInAllocation: false,
+    includeBracketQuinellaInAllocation: false,
     status: "idle",
     message: null,
     logFolderStatus: "idle",
@@ -322,6 +334,7 @@ function applyMasked(
   const includeQuinellaInAllocation = settings.includeQuinellaInAllocation;
   const includeExactaInAllocation = settings.includeExactaInAllocation;
   const includeTrifectaInAllocation = settings.includeTrifectaInAllocation;
+  const includeBracketQuinellaInAllocation = settings.includeBracketQuinellaInAllocation;
   return {
     ...state,
     loaded: true,
@@ -345,6 +358,7 @@ function applyMasked(
     includeQuinellaInAllocation,
     includeExactaInAllocation,
     includeTrifectaInAllocation,
+    includeBracketQuinellaInAllocation,
     savedSnapshot: {
       discordWebhookUrl,
       evThreshold,
@@ -362,6 +376,7 @@ function applyMasked(
       includeQuinellaInAllocation,
       includeExactaInAllocation,
       includeTrifectaInAllocation,
+      includeBracketQuinellaInAllocation,
     },
   };
 }
@@ -523,6 +538,7 @@ export function buildUpdate(state: SettingsFormState): SettingsUpdate {
     includeQuinellaInAllocation: state.includeQuinellaInAllocation,
     includeExactaInAllocation: state.includeExactaInAllocation,
     includeTrifectaInAllocation: state.includeTrifectaInAllocation,
+    includeBracketQuinellaInAllocation: state.includeBracketQuinellaInAllocation,
   };
   return state.apiKeyInput !== ""
     ? { ...update, apiKey: state.apiKeyInput }
@@ -581,6 +597,9 @@ export function isDirty(state: SettingsFormState): boolean {
     return true;
   }
   if (state.includeTrifectaInAllocation !== snap.includeTrifectaInAllocation) {
+    return true;
+  }
+  if (state.includeBracketQuinellaInAllocation !== snap.includeBracketQuinellaInAllocation) {
     return true;
   }
   for (const key of BIAS_WEIGHT_KEYS) {

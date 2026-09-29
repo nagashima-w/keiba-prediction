@@ -336,6 +336,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         // メタ行のincludeExactaへ反映される(下のtoEqualで固定)。
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: true,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -390,6 +391,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: true,
       },
     };
     // runAnalysis自体が例外を投げず正常終了すること(分析本体を失わない)。
@@ -449,6 +451,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -480,6 +483,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -525,6 +529,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -556,6 +561,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: false,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -623,6 +629,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: false,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -669,6 +676,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -700,6 +708,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: false,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -712,7 +721,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
   });
   /**
    * Issue #148(#26-E2・AC-2): 枠連(bracketQuinella)の`includeBracketQuinellaInAllocation`設定と
-   * `resolveMixedBetTypes`への接続は#149・#150のスコープであり、本Issueの時点では
+   * `resolveMixedBetTypes`への接続は#150のスコープ(設定の配管は#149)であり、#148の時点では
    * `raceForAllocation.bracketQuinellaCombo`がproductionの配分結果に影響することはない
    * (`ALL_MIXED_CANDIDATE_BET_TYPES`が`"bracketQuinella"`を含まないため。#137の三連単と同じ状態)。
    * そこで#137と同じく、`buildMixedRaceAllocationWithOutcomeMock`の呼び出し引数を捕捉して
@@ -760,6 +769,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: false,
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -773,7 +783,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
     expect(raceForAllocation.bracketQuinellaCombo).toEqual({ "0102": 50, "0101": 60 });
     expect(raceForAllocation.comboOdds?.bracketQuinella).toEqual(bracketOutcome);
 
-    // #149・#150未着手のため、枠連は実際にはどの配分にも入らないこと。
+    // #150(配分への接続)が未着手のため、枠連は実際にはどの配分にも入らないこと。
     const allocation = saved[0]!.allocation;
     expect(allocation).not.toBeUndefined();
     expect(allocation!.bets.filter((b) => b.betType === "bracketQuinella")).toEqual([]);
@@ -802,6 +812,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
           includeQuinellaInAllocation: false,
           includeExactaInAllocation: false,
           includeTrifectaInAllocation: false,
+          includeBracketQuinellaInAllocation: false,
         },
       };
       await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);

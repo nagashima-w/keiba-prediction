@@ -66,6 +66,7 @@ function makeUpdate(
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
     ...overrides,
   };
 }

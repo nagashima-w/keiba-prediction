@@ -104,6 +104,7 @@ describe("ipc: 設定のクリップ幅版(clipVariant)をcreatePipelineDepsへ�
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
       includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: true,
     };
     await saveHandler(fakeEvent, update);
 

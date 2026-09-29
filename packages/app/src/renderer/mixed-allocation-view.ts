@@ -332,7 +332,7 @@ export function buildHiddenAllocationsBlocks(
  * 追加はコンパイルを通すための最小限である**(`betTypeLabel`側へのcase追加・
  * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`・`ALL_MIXED_CANDIDATE_BET_TYPES`への追加は行わない。
  * 既定の配分ではappはまだ枠連の候補を作らない。オッズ取得・候補ビルダーはIssue #148〈#26-E2〉で
- * 完了したが、配分接続は#149・#150、表示は#150のスコープ)。したがって
+ * 完了し、設定の配管も#149で完了したが、配分接続・表示は#150のスコープ)。したがって
  * 上記「7値すべてで両関数の戻り値が一致する」は枠連を除く7値の話であり、枠連は
  * `betTypeLabel`側にまだcaseが無い(`quinella`等が最初にそうだったのと同じ経緯の非対称)。
  */
@@ -415,7 +415,7 @@ function unjudgedOf(betType: AllocationBetType, diagnostics: MixedCandidateDiagn
     }
     case "bracketQuinella":
       // 枠連(Issue #144・#26-B)。診断値(`MixedCandidateDiagnostics.bracketQuinella`)は
-      // Issue #148(#26-E2)で追加されたが、配分への接続は#149・#150のスコープで、判定不能の合算
+      // Issue #148(#26-E2)で追加されたが、設定の配管は#149で完了したが、配分への接続は#150のスコープで、判定不能の合算
       // (`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`を回す)にはまだ枠連が含まれない。
       // このためこの分岐に実行時に到達する経路は無い(網羅的switchのコンパイルを通すための最小限。
       // 表示順へ加えるとき〈#150〉に、ここを他のコンボ券種と同じ`diagnostics[betType]`経由に

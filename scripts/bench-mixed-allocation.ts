@@ -313,6 +313,7 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     // #25-E3a(Issue #138)で追加。候補ビルダーはまだ三連単の候補を作らないため
     // (resolveMixedBetTypes未接続)、この値は感度表の出力に一切影響しない。
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
   };
 
   // ウォームアップ1回(JITの影響を減らす)を除いた上で、実運用の1レース分の呼び出し

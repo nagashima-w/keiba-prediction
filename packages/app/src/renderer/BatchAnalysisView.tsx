@@ -111,9 +111,9 @@ export interface BatchAnalysisViewProps {
    */
   readonly onExportAnalysis: (raceId: string) => void;
   /**
-   * 馬券配分(機能C-2)の設定3項目+EV閾値+券種取得/選択の6項目(機能D-2c第4段・Issue #28。
-   * 取得可否1項目+ワイド・三連複・馬連・馬単・三連単の配分対象5項目。以前から3項目のまま
-   * 更新漏れしていたのを#25-E3a〈Issue #138〉で是正)。
+   * 馬券配分(機能C-2)の設定3項目+EV閾値+券種取得/選択の7項目(機能D-2c第4段・Issue #28。
+   * 取得可否1項目+ワイド・三連複・馬連・馬単・三連単・枠連の配分対象6項目。以前から3項目のまま
+   * 更新漏れしていたのを#25-E3a〈Issue #138〉で是正し、#26-E3a〈Issue #149〉で枠連を加えた)。
    * App.tsxがgetSettingsから流用して渡す(IPC追加なし)。bankroll/perRaceCapが未設定
    * (0以下)のときは配分ブロックを一切出さず、画面全体でBET_ALLOCATION_UNSET_NOTEを
    * 1点だけ表示する(仕様「未設定時は…注記は画面全体で1点だけ」)。
@@ -134,7 +134,7 @@ export interface BatchAnalysisViewProps {
    * 設定を変えていなくても全レースを再計算してしまう。Appは分析タブへ切り替わっても
    * アンマウントされないため、Appが`useRef`で保持し、propsとして受け取ることで
    * 「戻ったときにそのまま当たる」を実現する(AC-5)。
-   * キーの定義(12項目の全数列挙表)は`mixed-allocation-cache.ts`のJSDocが唯一の正であり、
+   * キーの定義(13項目の全数列挙表)は`mixed-allocation-cache.ts`のJSDocが唯一の正であり、
    * 本コンポーネントはこれを組み立てて`peek`/`step`(`mixed-allocation-queue.ts`)に渡すだけ。
    */
   readonly mixedAllocationCache: MixedAllocationCache<AllocationOutcome<MixedRaceAllocationDisplayView>>;
@@ -666,6 +666,7 @@ export function BatchAnalysisView(
       includeQuinellaInAllocation: s.includeQuinellaInAllocation,
       includeExactaInAllocation: s.includeExactaInAllocation,
       includeTrifectaInAllocation: s.includeTrifectaInAllocation,
+      includeBracketQuinellaInAllocation: s.includeBracketQuinellaInAllocation,
     };
   };
   // 実際の計算(逐次フォールバック用)。既存の同期経路(#110時点の実装)と全く同じ関数・

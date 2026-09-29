@@ -34,7 +34,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
     }
   });
 
-  it("config.allocationSettings(8項目)を渡すと、includeComboOddsを合成した9項目がdeps.allocationSettingsへ届くこと(includeComboOdds=true)", async () => {
+  it("config.allocationSettings(9項目)を渡すと、includeComboOddsを合成した10項目がdeps.allocationSettingsへ届くこと(includeComboOdds=true)", async () => {
     const r = createPipelineDeps({
       dbPath: ":memory:",
       includeComboOdds: true,
@@ -47,6 +47,7 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       },
     });
     try {
@@ -60,7 +61,10 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       });
+      // 枠連(#26-E3a・Issue #149)だけfalse(他の配分対象は三連複以外true)にして、定数true直書きを検知する
+      // (件2は枠連trueで、定数false直書きを検知する)。
       // 同じincludeComboOdds(true)がscrapeRaceの第3引数にも届いていること(単一解決の実証)。
       await r.deps.scrape(parseRaceId("202605020811"));
       const [, , optionsArg] = scrapeRaceMock.mock.calls[0]!;
@@ -82,10 +86,14 @@ describe("createPipelineDeps: deps.allocationSettings の配線(Issue #59・AC1)
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: true,
       },
     });
     try {
-      expect(r.deps.allocationSettings).toMatchObject({ includeComboOdds: false });
+      expect(r.deps.allocationSettings).toMatchObject({
+        includeComboOdds: false,
+        includeBracketQuinellaInAllocation: true,
+      });
       await r.deps.scrape(parseRaceId("202605020811"));
       const [, , optionsArg] = scrapeRaceMock.mock.calls[0]!;
       expect(optionsArg).toEqual({ includeComboOdds: false });

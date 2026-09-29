@@ -71,6 +71,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -250,6 +251,7 @@ describe("D-2フォールバック規則(AC2・Issue #139): 条件②・条件�
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       }),
     );
     expect(outcome.outcome.route).toBe("mixed");
@@ -271,6 +273,7 @@ describe("D-2フォールバック規則(AC2・Issue #139): 条件②・条件�
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: false,
+        includeBracketQuinellaInAllocation: false,
       }),
     );
     expect(outcome.outcome.route).toBe("place-only");
@@ -291,6 +294,7 @@ describe("D-2フォールバック規則(AC2・Issue #139): 条件②・条件�
         includeQuinellaInAllocation: false,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: false,
       }),
     );
     expect(outcome.outcome.route).toBe("place-only");

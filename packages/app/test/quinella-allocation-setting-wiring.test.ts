@@ -167,6 +167,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -199,6 +200,7 @@ describe("isComboBetTypesOff配線: includeQuinellaInAllocationの値でfallback
       includeTrioInAllocation: false,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
     });
 
     const withQuinellaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeQuinellaInAllocation: true });
@@ -222,6 +224,7 @@ describe("isComboBetTypesOff配線: includeQuinellaInAllocationの値でfallback
       includeTrioInAllocation: false,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
     });
     const withQuinellaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeQuinellaInAllocation: true });
     const withQuinellaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeQuinellaInAllocation: false });

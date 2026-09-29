@@ -122,7 +122,7 @@ import {
 
 /**
  * 混在配分の合成に必要な設定(既存の複勝配分3項目 `BetAllocationSettings` に、
- * EV閾値統一〈D-4〉・券種選択〈D-1・#24-D3a/b・#24-E3a/b・#25-E3a〉の7項目を加えた形)。
+ * EV閾値統一〈D-4〉・券種選択〈D-1・#24-D3a/b・#24-E3a/b・#25-E3a/b・#26-E3a〉の8項目を加えた形)。
  */
 export interface MixedAllocationSettings extends BetAllocationSettings {
   /** EVプラス判定の閾値(`AppSettings.evThreshold`)。ワイド・馬連・三連複にも同じ値を適用する(D-4)。 */
@@ -151,6 +151,13 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
    * (D-2フォールバック規則の条件②③)へ実際に接続した)。
    */
   readonly includeTrifectaInAllocation: boolean;
+  /**
+   * 枠連を配分対象に含めるか(`AppSettings.includeBracketQuinellaInAllocation`。#26-E3a・Issue #149で
+   * 設定項目を新設した)。**#26-E3a時点では`resolveMixedBetTypes`・`isComboBetTypesOff`
+   * (D-2フォールバック規則の条件②③)へは未接続**で、値を変えても配分結果・理由コードは変わらない
+   * (接続はIssue #150〈#26-E3b〉。三連単〈#138→#139〉と同じ切り方)。
+   */
+  readonly includeBracketQuinellaInAllocation: boolean;
 }
 
 /**

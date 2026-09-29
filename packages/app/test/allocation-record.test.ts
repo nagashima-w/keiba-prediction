@@ -69,6 +69,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -275,12 +276,12 @@ describe("テストヘルパー自己テスト", () => {
 });
 
 // ============================================================================
-// toMixedAllocationSettings(9項目+evThreshold合成)
+// toMixedAllocationSettings(10項目+evThreshold合成)
 // ============================================================================
 
 describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを避けるための合成)", () => {
-  it("9項目のAnalysisAllocationSettingsにevThresholdを合成し、10項目のMixedAllocationSettingsになること", () => {
-    const nine: AnalysisAllocationSettings = {
+  it("10項目のAnalysisAllocationSettingsにevThresholdを合成し、11項目のMixedAllocationSettingsになること", () => {
+    const ten: AnalysisAllocationSettings = {
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
@@ -290,8 +291,9 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: true,
     };
-    expect(toMixedAllocationSettings(nine, 1.2)).toEqual({
+    expect(toMixedAllocationSettings(ten, 1.2)).toEqual({
       bankroll: 100000,
       perRaceCap: 10000,
       kellyFraction: 0.5,
@@ -301,6 +303,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: true,
       evThreshold: 1.2,
     });
   });
@@ -311,7 +314,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
     // (false,true)にして異ならせ、実装が {...settings, evThreshold} のスプレッドから
     // フィールド個別列挙(例: includeComboOdds: settings.includeTrioInAllocationのような取り違え)
     // へ退行しても検出できるようにする。
-    const nine: AnalysisAllocationSettings = {
+    const ten: AnalysisAllocationSettings = {
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
@@ -321,8 +324,9 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
     };
-    expect(toMixedAllocationSettings(nine, 2.5)).toEqual({
+    expect(toMixedAllocationSettings(ten, 2.5)).toEqual({
       bankroll: 999999,
       perRaceCap: 1,
       kellyFraction: 0.9,
@@ -332,6 +336,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
       evThreshold: 2.5,
     });
   });
@@ -347,7 +352,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
     // exacta=(F,F,T)・trifecta=(T,F,F)とし、6項目とも非定数かつ互いに異なる列にする
     // (#24-D3aでquinella列、#24-E3aでexacta列、#25-E3aでtrifecta列を追加。3ビットパターン
     // 8通りのうち非定数6通り全てを使い切る)。
-    const nine: AnalysisAllocationSettings = {
+    const ten: AnalysisAllocationSettings = {
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
@@ -357,8 +362,9 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: true,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: true,
     };
-    expect(toMixedAllocationSettings(nine, 3.7)).toEqual({
+    expect(toMixedAllocationSettings(ten, 3.7)).toEqual({
       bankroll: 55555,
       perRaceCap: 222,
       kellyFraction: 0.15,
@@ -368,8 +374,32 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: true,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: true,
       evThreshold: 3.7,
     });
+  });
+
+  it("4件目: includeBracketQuinellaInAllocation(#26-E3a・Issue #149)を、同じ3ビットパターンを持つincludeComboOddsと異なる値にし、取り違えを検出できること", () => {
+    // 件1〜件3の3ビットパターンは既存6列(comboOdds/wide/trio/quinella/exacta/trifecta)で非定数6通りを
+    // 使い切っている。枠連列は件1〜件3でcomboOddsと同じ(T,F,T)にし、件4で(comboOdds=false,
+    // 枠連=true)にして、7列が互いに異なる4ビット列になるようにする。
+    // 前提: 件4でincludeComboOddsと枠連が異なること。
+    const ten: AnalysisAllocationSettings = {
+      bankroll: 31000,
+      perRaceCap: 700,
+      kellyFraction: 0.25,
+      includeComboOdds: false,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: true,
+    };
+    expect(ten.includeComboOdds).not.toBe(ten.includeBracketQuinellaInAllocation);
+    expect(toMixedAllocationSettings(ten, 1.5)).toEqual({ ...ten, evThreshold: 1.5 });
+    expect(toMixedAllocationSettings(ten, 1.5).includeBracketQuinellaInAllocation).toBe(true);
+    expect(toMixedAllocationSettings(ten, 1.5).includeComboOdds).toBe(false);
   });
 });
 
@@ -783,6 +813,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
     });
     const outcome = buildMixedRaceAllocationWithOutcome(race, s);
     expect(outcome.view.kind).toBe("unavailable"); // 前提固定(空振り防止)。

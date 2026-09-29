@@ -247,7 +247,7 @@ const resourceManager = new ResourceManager<PipelineResources>({
       // (未設定は pipeline-deps.ts 側の `??` が既定false〈組合せオッズを取得しない〉へ
       // フォールバックする)。
       includeComboOdds: settings.includeComboOdds,
-      // 配分提案(Issue #59・#24-D3a・#24-E3a・#25-E3a)の設定8項目。includeComboOddsは上で渡し済み
+      // 配分提案(Issue #59・#24-D3a・#24-E3a・#25-E3a・#26-E3a)の設定9項目。includeComboOddsは上で渡し済み
       // のため含めない(pipeline-deps.ts が1箇所で解決し、scrape束縛とここへ同じ値を使う。#59 4節)。
       allocationSettings: {
         bankroll: settings.bankroll,
@@ -258,6 +258,7 @@ const resourceManager = new ResourceManager<PipelineResources>({
         includeQuinellaInAllocation: settings.includeQuinellaInAllocation,
         includeExactaInAllocation: settings.includeExactaInAllocation,
         includeTrifectaInAllocation: settings.includeTrifectaInAllocation,
+        includeBracketQuinellaInAllocation: settings.includeBracketQuinellaInAllocation,
       },
       // Electron の net.fetch を注入し、undici(Electron 内蔵 Node 20 では非互換)を通さない。
       fetch: netFetchAdapter,

@@ -59,7 +59,7 @@ function handlerFor(channel: string): (...args: unknown[]) => unknown {
   return call[1] as (...args: unknown[]) => unknown;
 }
 
-/** 有効な設定更新ペイロード(配分8項目・includeComboOdds以外は固定値)を組み立てる。 */
+/** 有効な設定更新ペイロード(配分9項目・includeComboOdds以外は固定値)を組み立てる。 */
 function makeUpdate(overrides: Partial<SettingsUpdate> = {}): SettingsUpdate {
   return {
     discordWebhookUrl: "",
@@ -78,6 +78,7 @@ function makeUpdate(overrides: Partial<SettingsUpdate> = {}): SettingsUpdate {
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -137,8 +138,8 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(Issue #59・AC1・#24-D3a・#24-E3a・#25-E3a)", () => {
-  it("設定の配分8項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=true)", async () => {
+describe("ipc: 配分提案の設定9項目をcreatePipelineDepsへ配線する(Issue #59・AC1・#24-D3a・#24-E3a・#25-E3a・#26-E3a)", () => {
+  it("設定の配分9項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=true)", async () => {
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -157,6 +158,11 @@ describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(
         // TFFのパターンにする(既存5列TFT・TTF・FTF・FTT・FFTのいずれとも異なる残り1つの6列目。
         // 3ビットパターン8通りのうち非定数6通りから既存5列を引いた残りが一意に定まる)。
         includeTrifectaInAllocation: true,
+        // includeBracketQuinellaInAllocation(#26-E3a・Issue #149)は件1〜件3をすべてtrue(TTT)にする。
+        // 3ビットの非定数6通りは既存6列(comboOdds/wide/trio/quinella/exacta/trifecta)で使い切っており、
+        // 7列目は定数パターン(TTT)を使うほかない。既存6列のどれとも異なるので、他列との取り違えは
+        // 検知できる。一方「定数trueの直書き」は件1〜件3では区別できないため、件4(下記。枠連だけfalse)が担う。
+        includeBracketQuinellaInAllocation: true,
       }),
     );
     verifyHandler(fakeEvent);
@@ -176,12 +182,13 @@ describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: true,
     });
     // includeComboOddsはallocationSettingsに含めない(既存フィールドが単一ソース。#59 4節)。
     expect(config.includeComboOdds).toBe(true);
   });
 
-  it("設定の配分8項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=false)", async () => {
+  it("設定の配分9項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(includeComboOdds=false)", async () => {
     const { registerIpcHandlers } = await import("../src/main/ipc.js");
     registerIpcHandlers();
 
@@ -212,6 +219,7 @@ describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: false,
         includeTrifectaInAllocation: false,
+        includeBracketQuinellaInAllocation: true,
       }),
     );
     verifyHandler(fakeEvent);
@@ -231,11 +239,12 @@ describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: false,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: true,
     });
     expect(config.includeComboOdds).toBe(false);
   });
 
-  it("設定の配分8項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(3件目: includeComboOdds/includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation/includeExactaInAllocation/includeTrifectaInAllocationの6値パターンを互いに識別できるようにする)", async () => {
+  it("設定の配分9項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(3件目: includeComboOdds/includeWideInAllocation/includeTrioInAllocation/includeQuinellaInAllocation/includeExactaInAllocation/includeTrifectaInAllocationの6値パターンを互いに識別できるようにする)", async () => {
     // code-reviewer水平展開レビュー(finding3の残滓): 2件だけだとboolean項目は非定数化のため
     // 必ずT/Fの2値を両方使う必要があり、3項目(includeComboOdds/includeWideInAllocation/
     // includeTrioInAllocation)を2値×2件で非定数にすると鳩の巣原理でどれか2項目が
@@ -264,6 +273,7 @@ describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(
         includeQuinellaInAllocation: true,
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: false,
+        includeBracketQuinellaInAllocation: true,
       }),
     );
     verifyHandler(fakeEvent);
@@ -283,6 +293,57 @@ describe("ipc: 配分提案の設定8項目をcreatePipelineDepsへ配線する(
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
       includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: true,
+    });
+    expect(config.includeComboOdds).toBe(true);
+  });
+
+  it("設定の配分9項目 + includeComboOdds が createPipelineDeps の config.allocationSettings へ届くこと(4件目: includeBracketQuinellaInAllocationだけがfalseで、他の配分対象5項目はtrue。#26-E3a・Issue #149)", async () => {
+    // 件1〜件3はincludeBracketQuinellaInAllocationがすべてtrue(定数)のため、この項目を定数trueに
+    // 直書きする変異を検知できない(3ビットの非定数パターンは既存6列で使い切っている)。
+    // 件4で「枠連だけfalse・他の配分対象はtrue」にすると、(a)定数true直書きは枠連がtrueで返り、
+    // (b)他列からの読み取り(取り違え)は枠連がtrueで返り、(c)定数false直書きは件1〜件3で検知される。
+    // 前提: 件4の枠連(false)が、同じ呼び出しの他の配分対象5項目(すべてtrue)と異なること。
+    const update = makeUpdate({
+      includeComboOdds: true,
+      bankroll: 88888,
+      kellyFraction: 0.7,
+      perRaceCap: 3000,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: false,
+    });
+    expect(update.includeBracketQuinellaInAllocation).toBe(false);
+    expect(update.includeTrifectaInAllocation).toBe(true);
+
+    const { registerIpcHandlers } = await import("../src/main/ipc.js");
+    registerIpcHandlers();
+
+    const saveHandler = handlerFor(IPC_CHANNELS.saveSettings);
+    const verifyHandler = handlerFor(IPC_CHANNELS.getVerifyReport);
+
+    await saveHandler(fakeEvent, update);
+    verifyHandler(fakeEvent);
+
+    const lastCall =
+      createPipelineDepsMock.mock.calls[createPipelineDepsMock.mock.calls.length - 1]!;
+    const config = lastCall[0] as {
+      allocationSettings?: unknown;
+      includeComboOdds?: unknown;
+    };
+    expect(config.allocationSettings).toEqual({
+      bankroll: 88888,
+      perRaceCap: 3000,
+      kellyFraction: 0.7,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: false,
     });
     expect(config.includeComboOdds).toBe(true);
   });

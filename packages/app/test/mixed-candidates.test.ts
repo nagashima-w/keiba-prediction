@@ -871,7 +871,7 @@ describe("券種フィルタ(options.betTypes)", () => {
    * まだ無かった(#146のスコープ)ため、`trifecta`のときと同じ理由で`bracketQuinella`が
    * 一時的に除外へ加わった。** **Issue #148(#26-E2)でオッズ配線・
    * `buildBracketQuinellaCandidatesForBetType`(候補ビルダー)は完了したが、
-   * `resolveMixedBetTypes`への接続(#149・#150)がまだのため、除外は引き続き維持する
+   * `resolveMixedBetTypes`への接続(#150。設定の配管は#149で完了)がまだのため、除外は引き続き維持する
    * (`trifecta`が#137→#139の間で除外されていたのと同じ状態)。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、

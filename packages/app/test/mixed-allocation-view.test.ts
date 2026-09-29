@@ -105,6 +105,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
     ...overrides,
   };
 }
@@ -858,7 +859,7 @@ describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬�
 
   // 【Issue #144で改訂】旧版(#139時点)は「除外している券種が無いこと」(=[])を固定していた。
   // #144で枠連(bracketQuinella)が`AllocationBetType`に加わったが、appにはまだ枠連の配分接続・
-  // 表示が無い(オッズ配線・候補ビルダーは#148で完了。配分接続・表示は#149・#150のスコープ)ため、
+  // 表示が無い(オッズ配線・候補ビルダーは#148で完了。設定の配管は#149で完了。配分接続・表示は#150のスコープ)ため、
   // #128の三連単・#112の馬連と同じ理由で
   // 枠連だけが一時的に除外へ加わる。何を保証していたか(新旧対応表):
   //   旧: ALLOCATION_BET_TYPE_UMABAN_COUNTのキーのうち内訳表の表示順に無いものが0件(=[])

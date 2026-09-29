@@ -121,6 +121,7 @@ describe("ipc: net.fetch アダプタの注入", () => {
       includeQuinellaInAllocation: true,
       includeExactaInAllocation: true,
       includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: true,
     };
     handlerFor(IPC_CHANNELS.saveSettings)(fakeEvent, update);
 

@@ -67,6 +67,7 @@ const validUpdate: SettingsUpdate = {
   includeQuinellaInAllocation: true,
   includeExactaInAllocation: true,
   includeTrifectaInAllocation: true,
+  includeBracketQuinellaInAllocation: true,
 };
 
 /** 登録済みハンドラを取得する。 */

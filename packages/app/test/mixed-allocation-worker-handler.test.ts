@@ -85,6 +85,7 @@ function settings(overrides: Partial<MixedAllocationSettings> = {}): MixedAlloca
     includeQuinellaInAllocation: true,
     includeExactaInAllocation: true,
     includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
     ...overrides,
   };
 }

@@ -48,8 +48,9 @@
     値付け(`ev/combo-bet-allocation.ts`の`buildWinCandidates`が同時分布モデルの順序付き
     outcome空間から導出した1着確率×単勝オッズでEVを算出する。複勝〈3着内〉確率では値付けしない)
   - **馬連・馬単・三連単ともに配分提案・画面表示まで含めて対応済み**(#24-D3シリーズ・
-    #24-Eシリーズ・#25-E3bシリーズ)。枠連は取得・分析結果への搭載まで(Issue #148。配分・画面は
-    #149・#150)、枠単は引き続き未対応
+    #24-Eシリーズ・#25-E3bシリーズ)。枠連は取得・分析結果への搭載までで、配分に含めるかの設定
+    `includeBracketQuinellaInAllocation`もIssue #149(#26-E3a。既定ON)で先行配管したが、配分・画面
+    への接続はまだ(#150)、枠単は引き続き未対応
     (拡張のロードマップと技術的な依存関係はGitHub Issue #22)。馬連対応の経緯:
     core の確率・候補ビルダー・配分(Issue #112・v1.9.5。`buildQuinellaCandidates` が順序付き
     outcome 空間から1着・2着の集合を周辺化して的中確率を求める。上位3着の集合から求めると
@@ -510,8 +511,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   〈発売の頭数条件は各頭数1レースの観測でしかないため、閾値をコードに持たせない。応答は
   `unavailable`になり警告は出ない。URL列の最後に発行する〉。**枠連は現時点では取得・分析結果・
   保存スナップショット〈`bracketQuinellaCombo`。枠番4桁キー〉への搭載・候補ビルダー
-  〈`buildBracketQuinellaCandidatesForBetType`〉までで、配分には使わない**〈設定は#149、配分接続と
-  画面表示は#150〉。配分に渡す馬には行の`wakuban`を載せている)と、取得したオッズを
+  〈`buildBracketQuinellaCandidatesForBetType`〉までで、配分には使わない**〈配分に含めるかの設定
+  `includeBracketQuinellaInAllocation`(既定ON)はIssue #149・#26-E3aで保存・受け渡し・キャッシュキー
+  まで配管したが、**現時点では券種の選択〈`resolveMixedBetTypes`〉はこの値を読まず、設定画面にも
+  出ない**。配分接続と画面表示は#150〉。配分に渡す馬には行の`wakuban`を載せている)と、取得したオッズを
   実際に配分へ使うか(`includeWideInAllocation`/`includeQuinellaInAllocation`/
   `includeExactaInAllocation`/`includeTrioInAllocation`/`includeTrifectaInAllocation`・
   それぞれ既定ON)は別設定に分けている(取得と採用の分離)。

@@ -139,7 +139,7 @@ export type MixedCandidateBetType = AllocationBetType;
  * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーではない
  * (Issue #144〈#26-B〉で`bracketQuinella`〈枠連〉が`AllocationBetType`に加わった。
  * Issue #148〈#26-E2〉でオッズ配線と候補ビルダー〈`buildBracketQuinellaCandidatesForBetType`〉は
- * 完了したが、配分接続〈設定の配管は#149・`resolveMixedBetTypes`への接続は#150〉がまだのため、
+ * 完了したが、配分接続〈設定の配管は#149で完了したが、`resolveMixedBetTypes`への接続は#150〉がまだのため、
  * #150まで意図的に本配列から除外している)。** それ以前は、Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、
  * Issue #125〈#24-E3b〉で`exacta`〈馬単〉、Issue #139〈#25-E3b〉で`trifecta`〈三連単〉を
  * 追加したことで全メンバーと一致していた。
