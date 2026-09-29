@@ -1919,6 +1919,25 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
   3列(馬連・馬単・三連単)すべてが無い旧い DB からの後付けもテストで固定した
 - 設定・エクスポート JSON・IPC は無変更
 
+## 次の正式版が 1.12.2 である根拠(Issue #141・#26-A での変更)
+
+**patch**(調査タスク。`packages/*/src` を1行も変更していない)。
+
+### 変更内容
+
+枠連のオッズ取得経路・発売条件を実測し、一次データを `fixtures/` に保存して `docs/wakuren-odds-investigation.md` に記録し、
+`packages/core/test/scraper/wakuren-odds-fixtures.test.ts` に集合一致テストを追加した。#26(残りの券種)の第1子。
+枠単はユーザー判断(2026-09-29)で後回し。
+
+### patch である根拠
+
+- 利用者から見てできることは増えず、分析結果の数値も変わらない
+- production のコードパスに到達する変更が無い(`git diff --stat -- packages/core/src packages/app/src` が空)
+
+### major / minor ではない根拠
+
+- 設定・DB・エクスポート JSON・IPC はすべて無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
