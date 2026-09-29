@@ -461,7 +461,7 @@ function buildPlaceOnlyFallbackOutcome(
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
- * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の6項目)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の7項目)
  */
 function buildMixedRaceAllocationCore(
   race: MixedCandidateBuildInput,
@@ -582,7 +582,7 @@ function buildMixedRaceAllocationCore(
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
- * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の6項目)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の7項目)
  */
 export function buildMixedRaceAllocationWithOutcome(
   race: MixedCandidateBuildInput,
@@ -610,7 +610,7 @@ export function buildMixedRaceAllocationWithOutcome(
  *
  * @param race レース情報(`AnalysisResult` をそのまま渡せる。`MixedCandidateBuildInput` と
  *   同じ構造的最小型)
- * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の6項目)
+ * @param settings 配分設定(複勝3項目 + EV閾値 + 券種取得/選択の7項目)
  */
 export function buildMixedRaceAllocation(
   race: MixedCandidateBuildInput,

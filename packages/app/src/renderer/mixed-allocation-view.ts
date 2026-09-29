@@ -415,8 +415,9 @@ function unjudgedOf(betType: AllocationBetType, diagnostics: MixedCandidateDiagn
     }
     case "bracketQuinella":
       // 枠連(Issue #144・#26-B)。診断値(`MixedCandidateDiagnostics.bracketQuinella`)は
-      // Issue #148(#26-E2)で追加されたが、設定の配管は#149で完了したが、配分への接続は#150のスコープで、判定不能の合算
-      // (`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`を回す)にはまだ枠連が含まれない。
+      // Issue #148(#26-E2)で追加された。設定の配管は#149で完了しているが、配分への接続は#150の
+      // スコープであり、判定不能の合算(`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`を回す)には
+      // まだ枠連が含まれない。
       // このためこの分岐に実行時に到達する経路は無い(網羅的switchのコンパイルを通すための最小限。
       // 表示順へ加えるとき〈#150〉に、ここを他のコンボ券種と同じ`diagnostics[betType]`経由に
       // 置き換える)。
