@@ -58,7 +58,7 @@
  * ## 計測条件
  * - `docs/investigations/combo-odds-real-fetch/central-on.json`(中央16頭・確定オッズ・
  *   実レース日2026/06/28)を使う。ネットワークには一切出ない。詳細な計測条件
- *   (kaisaiDate明示・LLM未使用・先読みリーク遮断なし等)は`scripts/bench-mixed-allocation.ts`
+ *   (kaisaiDate明示・LLM未使用・先読みリークは#39以降`runAnalysis`が遮断する、等)は`scripts/bench-mixed-allocation.ts`
  *   のJSDocと同じなので繰り返さない。
  * - 数値は再現コマンド(`pnpm tsx scripts/bench-run-greedy-allocation.ts`)で都度確認すること。
  *   固定の数値をここにもJSDoc等にも書き込まない(既存方針・AC-5)。

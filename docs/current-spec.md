@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.13.1)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.14.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.13.1`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.14.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -338,7 +338,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     10→11列。この4列は他の設定エコー列と異なりNULLを許す〈NOT NULL・DEFAULTいずれも付けない〉列で、
     列追加前(それぞれIssue #118・#126・#140・#151より前)に保存された行はNULL=
     「馬連/馬単/三連単/枠連の設定を記録していない」であり、0(OFF)に丸めない〈#31〉。
-    **v1.13.1〈#150〉で保存された記録は枠連の買い目行を持ちうるが、`include_bracket_quinella`は
+    **v1.14.0〈#150〉で保存された記録は枠連の買い目行を持ちうるが、`include_bracket_quinella`は
     NULLのままで、過去分析の再表示では「枠連: 記録なし」と出る。買い目行からONと推定する
     バックフィルはしない〈#31〉**)、経路ごとに実際に使われた既定値4列
     (`bet_unit`/`greedy_steps`/`candidate_cap`/`model_id`+`model_approximate`。複勝のみ経路には
@@ -427,7 +427,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     注記として添える。馬連・枠連・馬単・三連単はいずれも他と異なりON/OFFに加え「記録なし」(それぞれ
     Issue #118・#151・#126・#140より前の記録で`includeQuinella=null`/`includeBracketQuinella=null`/
     `includeExacta=null`/`includeTrifecta=null`)を表示する(#31: OFFと断定しない。
-    v1.13.1で保存された枠連の買い目を持つ記録も「枠連: 記録なし」と出す〈ONと推定しない〉)。
+    v1.14.0で保存された枠連の買い目を持つ記録も「枠連: 記録なし」と出す〈ONと推定しない〉)。
     `VerifyView.tsx`には本機能の`route`/`skip_reason_code`分岐と文言リテラルを置かず、
     `allocation-proposal-view.ts`が返す配列を`.map`するだけにしている。
 

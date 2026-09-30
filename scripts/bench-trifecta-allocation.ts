@@ -184,7 +184,8 @@ function toMixedCandidateInput(result: AnalysisResult): MixedCandidateBuildInput
  * 18頭・実オッズのスナップショット(`CENTRAL18_ON_PATH`)を読み、`runAnalysis`をLLM未使用
  * (`deps.analyze:null`)で実行してAnalysisResultを得る(Issue #136。`bench-mixed-allocation.ts`の
  * `loadAnalysisResult`と同じ経路・同じ計測条件。オーケストレーター着手前ゲートQ2でA案
- * 〈戦績→scorer〉採用。先読みリークは遮断していない。詳細は
+ * 〈戦績→scorer〉採用。先読みリークは、#39以降は`runAnalysis`自身が遮断する
+ * 〈#39より前はリーク込みの値だった〉。詳細は
  * `docs/trifecta-odds-investigation.md`§10.2参照)。
  */
 async function loadAnalysisResult18(): Promise<AnalysisResult> {
@@ -801,8 +802,8 @@ function runAc18Real(result: AnalysisResult): { readonly withTrifectaAvgMs: numb
   console.log("");
   console.log("=== AC-18(Issue #136): 18頭・実オッズ(現行6券種 vs +三連単。race_id=202604020511) ===");
   console.log(
-    "  ⚠️ prior: A案(戦績→scorerの実prior。LLM未使用)。先読みリークは遮断していない" +
-      "(#129の16頭ベンチと同条件。詳細はdocs/trifecta-odds-investigation.md §10.2参照)。",
+    "  ⚠️ prior: A案(戦績→scorerの実prior。LLM未使用)。先読みリークは遮断済み" +
+      "(#39以降は runAnalysis が自レース・施行日以降の戦績を除く。詳細はdocs/trifecta-odds-investigation.md §10.2参照)。",
   );
 
   const horses: JointModelHorse[] = result.rows.map((r) => ({ umaban: r.umaban, placeProb: r.adjustedProb }));
