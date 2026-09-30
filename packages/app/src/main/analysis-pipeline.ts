@@ -691,11 +691,11 @@ export async function runAnalysis(
     // 配管し、Issue #139(#25-E3b)で`resolveMixedBetTypes`への実際の接続を行ったため、
     // このフィールドは production の配分結果に実際に影響する(quinellaCombo・exactaComboが
     // #117・#125で接続されたのと同じ経緯。`analysis-pipeline-allocation.test.ts`のAC-10参照)。
-    // bracketQuinellaComboはIssue #148・#26-E2で追加した。**#149で`includeBracketQuinellaInAllocation`の
-    // 配管は完了したが、#150(`resolveMixedBetTypes`への実際の接続)がまだのため、現時点では
-    // このフィールドは production の配分結果に一切影響しない**(`ALL_MIXED_CANDIDATE_BET_TYPES`が
-    // `"bracketQuinella"`を含まないため。quinellaCombo・exactaCombo・trifectaComboが接続される前と
-    // 同じ状態。`analysis-pipeline-allocation.test.ts`のIssue #148(AC-2・AC-4)テスト参照)。
+    // bracketQuinellaComboはIssue #148・#26-E2で追加した。#149で`includeBracketQuinellaInAllocation`の
+    // 配管を完了し、Issue #150(#26-E3b)で`resolveMixedBetTypes`への実際の接続を行ったため、
+    // このフィールドは production の配分結果に実際に影響する(quinellaCombo・exactaCombo・
+    // trifectaComboが接続されたのと同じ経緯。`analysis-pipeline-allocation.test.ts`のIssue #148
+    // (AC-2・AC-4)テスト参照)。
     // raceIdはIssue #139(#25-E3b・AC4)で追加した。三連単の状態注記
     // (`renderer/mixed-allocation-view.ts`の`trifectaBetTypeNote`)が中央/地方を判別するために
     // 使う値で、本ファイル(main)自身は参照しない。

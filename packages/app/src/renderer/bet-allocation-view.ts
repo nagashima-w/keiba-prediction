@@ -67,12 +67,24 @@ export function formatBetLabel(umaban: number | readonly number[]): string {
  * `formatBetLabel`にそのまま委譲する(表記を変えない。呼び出し元は`BatchAnalysisView.tsx`の
  * 混在配分一覧・`allocation-proposal-view.ts`の`comboLabelOf`)。
  *
+ * **Issue #150(#26-E3b・AC-2)で枠連(bracketQuinella)を追加した。** 枠連の`umabans`は**枠番**の組であり
+ * 馬番ではない(`AllocationCandidate.umabans`のJSDoc参照)ため、`"枠4-7"`(同枠は`"枠2-2"`)と表記して
+ * 馬番の馬連・ワイド(`"4-7"`)と区別する。買い目の表記を出す経路(`BatchAnalysisView.tsx`の常時表示・
+ * 折りたたみの2箇所と、`allocation-proposal-view.ts`の`comboLabelOf`〈過去分析。`comboKey`を
+ * `parseComboOddsKey`で戻した値〉)は、すべて本関数を経由する。
+ *
  * `formatBetLabel`自体はここでは変更しない(単勝・複勝の単一馬番表示など、betTypeを
  * 持たない既存呼び出し元〈`BatchAnalysisView.tsx`の単勝候補一覧〉に影響させないため)。
  */
 export function formatComboBetLabel(betType: AllocationBetType, umabans: readonly number[]): string {
   if (betType === "exacta" || betType === "trifecta") {
     return umabans.join("→");
+  }
+  if (betType === "bracketQuinella") {
+    // 枠連(Issue #150・#26-E3b・AC-2)。候補の`umabans`は馬番ではなく**枠番の組**(昇順・同枠可)なので、
+    // `formatBetLabel`のハイフン区切り("4-7")では馬番の馬連・ワイドと見分けがつかない。先頭に「枠」を
+    // 付けて枠番であることを示す(「枠4-7」。同枠は「枠2-2」)。
+    return `枠${umabans.join("-")}`;
   }
   return formatBetLabel(umabans);
 }

@@ -77,7 +77,9 @@ describe("SettingsView.tsxがincludeTrifectaInAllocationを参照すること(Is
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
   return {
     umaban: overrides.umaban,
-    wakuban: overrides.wakuban ?? 90,
+    // 枠番は1〜8を循環させた有効値にする(枠連が既定ONになった#150以降、枠番が不正だと枠連の候補構築が契約違反で
+    // throwし、混在配分が`kind:"invalid"`になるため。productionの`AnalysisRow.wakuban`は`parseShutuba`が1〜8で検証済み)。
+    wakuban: overrides.wakuban ?? ((overrides.umaban - 1) % 8) + 1,
     horseName: `${overrides.umaban}番`,
     prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,
@@ -218,6 +220,9 @@ describe("isComboBetTypesOff配線: includeTrifectaInAllocationの値でfallback
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
+      // 枠連(#26-E3b・Issue #150で`isComboBetTypesOff`が枠連も見るようになったため、条件②の判定を三連単だけに
+      // 委ねるには枠連もOFFにする。#149のレビューからの申し送り)。
+      includeBracketQuinellaInAllocation: false,
     });
 
     const withTrifectaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeTrifectaInAllocation: true });
@@ -240,6 +245,9 @@ describe("isComboBetTypesOff配線: includeTrifectaInAllocationの値でfallback
       includeTrioInAllocation: false,
       includeQuinellaInAllocation: false,
       includeExactaInAllocation: false,
+      // 枠連(#26-E3b・Issue #150で`isComboBetTypesOff`が枠連も見るようになったため、条件②の判定を三連単だけに
+      // 委ねるには枠連もOFFにする。#149のレビューからの申し送り)。
+      includeBracketQuinellaInAllocation: false,
     });
     const withTrifectaOn = buildMixedRaceAllocationWithOutcome(race, { ...base, includeTrifectaInAllocation: true });
     const withTrifectaOff = buildMixedRaceAllocationWithOutcome(race, { ...base, includeTrifectaInAllocation: false });

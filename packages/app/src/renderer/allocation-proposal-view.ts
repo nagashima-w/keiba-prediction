@@ -252,6 +252,11 @@ export const FALLBACK_REASON_UNKNOWN_NOTE =
  * そのまま返していた。#139で`resolveMixedBetTypes`が実際に三連単を配分対象に含めるように
  * なり`allocation-record.ts`が`bet_type="trifecta"`行を保存するようになったため、
  * exactaのときと同じ理由で本caseを追加した)。
+ *
+ * `"bracketQuinella"`(枠連)はIssue #150(#26-E3b)でcaseを追加した(#144時点では`AllocationBetType`に
+ * 加わっていたが配分が枠連を作らなかったため、`default`分岐が生文字列を返す状態だった。#150で配分に
+ * 接続され`allocation-record.ts`が`bet_type="bracketQuinella"`行を保存するようになったため、
+ * 過去分析の再表示で生の"bracketQuinella"が利用者に見えないよう、trifectaのときと同じ理由で追加した)。
  */
 function betTypeLabel(betType: string): string {
   switch (betType) {
@@ -263,6 +268,8 @@ function betTypeLabel(betType: string): string {
       return "ワイド";
     case "quinella":
       return "馬連";
+    case "bracketQuinella":
+      return "枠連";
     case "exacta":
       return "馬単";
     case "trio":
@@ -344,6 +351,10 @@ function buildSettingsRows(a: StoredAllocationView): readonly string[] {
  * 引数型と合わないが、`formatComboBetLabel`は`betType==="exacta"`の等値比較しかしないため、
  * 未知の文字列を渡しても`formatBetLabel`と同じ結果(ハイフン区切り)にフォールバックする
  * (実行時に例外にはならない)。
+ *
+ * **Issue #150(#26-E3b・AC-2): 枠連(bracketQuinella)の`comboKey`は枠番の組(`"0407"`)であり、
+ * `parseComboOddsKey`は馬番と同じく2桁ずつ`[4,7]`へ戻す。** `formatComboBetLabel`が
+ * 枠連を「枠4-7」と表記するため、馬番に見える「4-7」は出ない(同枠`"0202"`は「枠2-2」)。
  */
 function comboLabelOf(comboKey: string, betType: string): string {
   const umabans = parseComboOddsKey(comboKey);
@@ -353,15 +364,16 @@ function comboLabelOf(comboKey: string, betType: string): string {
   return formatComboBetLabel(betType as AllocationBetType, umabans);
 }
 
-/** 券種の表示順(複勝→単勝→ワイド→馬連→馬単→3連複→三連単。Issue #90でwin、Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉を追加)。未知の券種は末尾へ(値99)。 */
+/** 券種の表示順(複勝→単勝→ワイド→馬連→枠連→馬単→3連複→三連単。Issue #90でwin、Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉、Issue #150で枠連〈bracketQuinella。馬連の直後・馬単の前〉を追加)。未知の券種は末尾へ(値99)。 */
 const BET_TYPE_ORDER: Record<string, number> = {
   place: 0,
   win: 1,
   wide: 2,
   quinella: 3,
-  exacta: 4,
-  trio: 5,
-  trifecta: 6,
+  bracketQuinella: 4,
+  exacta: 5,
+  trio: 6,
+  trifecta: 7,
 };
 
 function betTypeRank(betType: string): number {

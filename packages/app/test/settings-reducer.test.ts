@@ -641,6 +641,41 @@ describe("buildUpdate(フォーム→更新ペイロード)", () => {
     expect(buildUpdate(s).includeTrifectaInAllocation).toBe(true);
   });
 
+  // 【Issue #150(#26-E3b)】旧版(#149時点)は切替アクションが無く、読込値の往復でだけ配管を確認していた
+  // (下のテストは維持する。何を保証していたかは変えていない)。#150で「枠連配分対象切替」アクションを追加した。
+  it("枠連配分対象切替(Issue #150)がincludeBracketQuinellaInAllocationだけを切り替え、buildUpdateへ反映されること(OFF/ON両方向。他の5つの配分対象は変わらない)", () => {
+    let s = loadedState(
+      fakeMasked({
+        includeWideInAllocation: true,
+        includeTrioInAllocation: true,
+        includeQuinellaInAllocation: true,
+        includeExactaInAllocation: true,
+        includeTrifectaInAllocation: true,
+        includeBracketQuinellaInAllocation: true,
+      }),
+    );
+    s = settingsReducer(s, { type: "枠連配分対象切替", value: false });
+    const off = buildUpdate(s);
+    expect(off.includeBracketQuinellaInAllocation).toBe(false);
+    expect(off.includeWideInAllocation).toBe(true);
+    expect(off.includeTrioInAllocation).toBe(true);
+    expect(off.includeQuinellaInAllocation).toBe(true);
+    expect(off.includeExactaInAllocation).toBe(true);
+    expect(off.includeTrifectaInAllocation).toBe(true);
+
+    s = settingsReducer(s, { type: "枠連配分対象切替", value: true });
+    expect(buildUpdate(s).includeBracketQuinellaInAllocation).toBe(true);
+  });
+
+  it("枠連配分対象切替で未保存(dirty)になり、元の値へ戻すと未保存でなくなること(Issue #150)", () => {
+    const loaded = loadedState(fakeMasked({ includeBracketQuinellaInAllocation: true }));
+    expect(isDirty(loaded)).toBe(false);
+    const toggled = settingsReducer(loaded, { type: "枠連配分対象切替", value: false });
+    expect(isDirty(toggled)).toBe(true);
+    const restored = settingsReducer(toggled, { type: "枠連配分対象切替", value: true });
+    expect(isDirty(restored)).toBe(false);
+  });
+
   it("includeBracketQuinellaInAllocation(#26-E3a・Issue #149)を含めること(読込値どおり、OFF/ON両方向。切替アクションは無いので読込値の往復で確認する)", () => {
     const off = buildUpdate(
       loadedState(fakeMasked({ includeBracketQuinellaInAllocation: false })),

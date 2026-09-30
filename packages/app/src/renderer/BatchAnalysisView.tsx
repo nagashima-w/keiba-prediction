@@ -20,6 +20,7 @@ import { type AllocationOutcome } from "./mixed-allocation-queue.js";
 import {
   type MixedAllocationCache,
   type MixedAllocationCacheKey,
+  toMixedAllocationCacheKey,
 } from "./mixed-allocation-cache.js";
 import {
   createAllocationRunner,
@@ -652,22 +653,9 @@ export function BatchAnalysisView(
   // ものを使い回さない。AC-3'の要)。
   const keyForAllocation = (raceId: string): MixedAllocationCacheKey => {
     const fullResult = analysisResultByRaceId.get(raceId)!;
-    const s = props.betAllocationSettings;
-    return {
-      raceId,
-      race: fullResult,
-      bankroll: s.bankroll,
-      perRaceCap: s.perRaceCap,
-      kellyFraction: s.kellyFraction,
-      evThreshold: s.evThreshold,
-      includeComboOdds: s.includeComboOdds,
-      includeWideInAllocation: s.includeWideInAllocation,
-      includeTrioInAllocation: s.includeTrioInAllocation,
-      includeQuinellaInAllocation: s.includeQuinellaInAllocation,
-      includeExactaInAllocation: s.includeExactaInAllocation,
-      includeTrifectaInAllocation: s.includeTrifectaInAllocation,
-      includeBracketQuinellaInAllocation: s.includeBracketQuinellaInAllocation,
-    };
+    // 設定の全項目は`toMixedAllocationCacheKey`が丸ごと写す(手書きの項目列挙だと、1項目を`true`固定に
+    // 書き換える変異がテストで検出できないため。Issue #150・AC-5(b))。
+    return toMixedAllocationCacheKey(raceId, fullResult, props.betAllocationSettings);
   };
   // 実際の計算(逐次フォールバック用)。既存の同期経路(#110時点の実装)と全く同じ関数・
   // 同じ引数で呼ぶ(AC-6: 答えを変えない。AC-1: Worker側〈mixed-allocation-worker-handler.ts〉

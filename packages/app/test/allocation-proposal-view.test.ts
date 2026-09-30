@@ -562,7 +562,7 @@ describe("買い目行(AC4)", () => {
     expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["複勝", "単勝", "ワイド", "三連複"]);
   });
 
-  it("並び順(Issue #125→#139): 馬連・馬単・三連単を混ぜても入力順を崩して券種順(複勝→単勝→ワイド→馬連→馬単→三連複→三連単)に並ぶこと(三連単がBET_TYPE_ORDERの末尾に正しく挿入されていることの直接確認)", () => {
+  it("並び順(Issue #125→#139→#150): 馬連・枠連・馬単・三連単を混ぜても入力順を崩して券種順(複勝→単勝→ワイド→馬連→枠連→馬単→三連複→三連単)に並ぶこと(枠連が馬連の直後・馬単の前に挿入されていることの直接確認)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -573,6 +573,7 @@ describe("買い目行(AC4)", () => {
           bet({ betType: "exacta", comboKey: "0407", stake: 250, odds: 20, ev: 1.4 }),
           bet({ betType: "wide", comboKey: "0407", stake: 200, odds: 3, ev: 1.2 }),
           bet({ betType: "quinella", comboKey: "0407", stake: 150, odds: 6, ev: 1.5 }),
+          bet({ betType: "bracketQuinella", comboKey: "0407", stake: 120, odds: 9, ev: 1.7 }),
           bet({ betType: "win", comboKey: "04", stake: 50, odds: 8, ev: 1.6 }),
           bet({ betType: "place", comboKey: "04", stake: 100, odds: 2, ev: 1.1 }),
         ],
@@ -583,10 +584,28 @@ describe("買い目行(AC4)", () => {
       "単勝",
       "ワイド",
       "馬連",
+      "枠連",
       "馬単",
       "三連複",
       "三連単",
     ]);
+  });
+
+  it("枠連(Issue #150・AC-2): comboKeyは枠番なので、買い目ラベルは『枠4-7』・同枠は『枠2-2』になり、券種ラベルは『枠連』になること(生の『bracketQuinella』や馬番に見える『4-7』を出さない)", () => {
+    const view = buildAllocationProposalView(
+      allocation({
+        route: "mixed",
+        skipReasonCode: null,
+        bets: [
+          bet({ betType: "bracketQuinella", comboKey: "0407", stake: 200, odds: 9, ev: 1.7 }),
+          bet({ betType: "bracketQuinella", comboKey: "0202", stake: 100, odds: 30, ev: 1.4 }),
+        ],
+      }),
+    );
+    expect(view.bets).toHaveLength(2);
+    // comboKey昇順("0202" < "0407")で並ぶ。
+    expect(view.bets.map((b) => b.comboLabel)).toEqual(["枠2-2", "枠4-7"]);
+    expect(view.bets.map((b) => b.betTypeLabel)).toEqual(["枠連", "枠連"]);
   });
 
   it("comboKeyが復号不能(parseComboOddsKeyがnull)なら生キーをそのまま表示すること(bet_typeとの長さ不一致は検査しない)", () => {
@@ -609,9 +628,11 @@ describe("買い目行(AC4)", () => {
 // 何を保証していたか(新旧対応表):
 //   #122版: 「place/win/wide/quinella/trioの5ラベルが一致」
 //   #125版: 「place/win/wide/quinella/exacta/trioの6ラベルが一致」
-//   #139版(本版): 「place/win/wide/quinella/exacta/trio/trifectaの7ラベルが一致」
-describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の7ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応。Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉を追加し4→7ラベルに拡張)", () => {
-  it("place/win/wide/quinella/exacta/trio/trifectaそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
+//   #139版: 「place/win/wide/quinella/exacta/trio/trifectaの7ラベルが一致」
+//   #150版(本版): 「place/win/wide/quinella/exacta/trio/trifecta/bracketQuinellaの8ラベルが一致」
+//     (7ラベルの保証は弱めていない。枠連の1ラベルを追加しただけで、既存の7ラベルは同じリテラルで固定したまま)
+describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-allocation-view.ts)の8ラベルが同一文字列であること(Issue #76・D-5〈#90〉: 統合はしないが値は一致させる。相互参照JSDoc対応。Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉、Issue #150で枠連〈bracketQuinella〉を追加し4→8ラベルに拡張)", () => {
+  it("place/win/wide/quinella/exacta/trio/trifecta/bracketQuinellaそれぞれで同じ日本語ラベルを返すこと(日本語リテラルに対してassert。#90本体: 両関数が一緒にずれても検知できるよう、mixedBetTypeLabelへの委譲ではなく固定文字列で固定する)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -621,6 +642,7 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
           bet({ betType: "win", comboKey: "05" }),
           bet({ betType: "wide", comboKey: "0407" }),
           bet({ betType: "quinella", comboKey: "0407" }),
+          bet({ betType: "bracketQuinella", comboKey: "0407" }),
           bet({ betType: "exacta", comboKey: "0407" }),
           bet({ betType: "trio", comboKey: "040709" }),
           bet({ betType: "trifecta", comboKey: "040709" }),
@@ -632,6 +654,7 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
       "単勝",
       "ワイド",
       "馬連",
+      "枠連",
       "馬単",
       "三連複",
       "三連単",
@@ -645,6 +668,7 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
     expect(mixedBetTypeLabel("exacta")).toBe("馬単");
     expect(mixedBetTypeLabel("trio")).toBe("三連複");
     expect(mixedBetTypeLabel("trifecta")).toBe("三連単");
+    expect(mixedBetTypeLabel("bracketQuinella")).toBe("枠連");
   });
 });
 

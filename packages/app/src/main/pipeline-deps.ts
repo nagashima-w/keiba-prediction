@@ -147,8 +147,8 @@ export interface PipelineWiringConfig {
    *
    * `includeBracketQuinellaInAllocation`(#26-E3a・Issue #149)は8→9項目化した追加分。三連単(#25-E3a)と
    * 同じ経緯を辿る: この型に持たせる目的は`AnalysisAllocationSettings`(9→10項目)まで値を運ぶ
-   * 配管の一部としてのみで、`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は
-   * #26-E3b(Issue #150)のスコープ、メタ行への書き込みは#26-E3c(Issue #151)のスコープ
+   * 配管の一部として始まり、`resolveMixedBetTypes`・`isComboBetTypesOff`への実際の接続は
+   * #26-E3b(Issue #150)で完了した。メタ行への書き込みは#26-E3c(Issue #151)のスコープ
    * (`allocation-record.ts`冒頭のJSDoc参照)。
    */
   readonly allocationSettings?: {

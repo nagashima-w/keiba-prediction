@@ -27,7 +27,9 @@ import {
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
   return {
     umaban: overrides.umaban,
-    wakuban: overrides.wakuban ?? 90,
+    // 枠番は1〜8を循環させた有効値にする(枠連が既定ONになった#150以降、枠番が不正だと枠連の候補構築が契約違反で
+    // throwし、混在配分が`kind:"invalid"`になるため。productionの`AnalysisRow.wakuban`は`parseShutuba`が1〜8で検証済み)。
+    wakuban: overrides.wakuban ?? ((overrides.umaban - 1) % 8) + 1,
     horseName: `${overrides.umaban}番`,
     prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,

@@ -24,6 +24,7 @@ import {
   type MixedAllocationCache,
 } from "./mixed-allocation-cache.js";
 import type { AllocationOutcome } from "./mixed-allocation-queue.js";
+import { mixedAllocationSettingsFromAppSettings } from "./mixed-allocation-settings.js";
 import type { MixedRaceAllocationDisplayView } from "./mixed-allocation-view.js";
 import { PeriodBatchView } from "./PeriodBatchView.js";
 import type { RaceLedgerFilter } from "./race-ledger-filter.js";
@@ -200,19 +201,9 @@ export function App(): React.JSX.Element {
           webhookConfigured: s.discordWebhookUrl.trim() !== "",
           autoSend: s.autoSendDiscord,
         });
-        setBetAllocationSettings({
-          bankroll: s.bankroll,
-          perRaceCap: s.perRaceCap,
-          kellyFraction: s.kellyFraction,
-          evThreshold: s.evThreshold,
-          includeComboOdds: s.includeComboOdds,
-          includeWideInAllocation: s.includeWideInAllocation,
-          includeTrioInAllocation: s.includeTrioInAllocation,
-          includeQuinellaInAllocation: s.includeQuinellaInAllocation,
-          includeExactaInAllocation: s.includeExactaInAllocation,
-          includeTrifectaInAllocation: s.includeTrifectaInAllocation,
-          includeBracketQuinellaInAllocation: s.includeBracketQuinellaInAllocation,
-        });
+        // 配分の設定11項目の写しは純関数へ切り出してある(手書きの項目列挙だと、1項目を`true`固定に
+        // 書き換える変異がテストで検出できないため。`mixed-allocation-settings.ts`のJSDoc・Issue #150)。
+        setBetAllocationSettings(mixedAllocationSettingsFromAppSettings(s));
       })
       .catch(() => {
         setNotify({ webhookConfigured: false, autoSend: false });

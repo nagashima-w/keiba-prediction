@@ -320,7 +320,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
               {report.proposedBet.wide.betCount}点/
               {formatRate(report.proposedBet.wide.recoveryRate)} / 馬連{" "}
               {report.proposedBet.quinella.betCount}点/
-              {formatRate(report.proposedBet.quinella.recoveryRate)} / 馬単{" "}
+              {formatRate(report.proposedBet.quinella.recoveryRate)} / 枠連{" "}
+              {report.proposedBet.bracketQuinella.betCount}点/
+              {formatRate(report.proposedBet.bracketQuinella.recoveryRate)} / 馬単{" "}
               {report.proposedBet.exacta.betCount}点/
               {formatRate(report.proposedBet.exacta.recoveryRate)} / 3連複{" "}
               {report.proposedBet.trio.betCount}点/
@@ -336,7 +338,9 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
              * 出さない→接続後に表示する」経緯と同じ、#112「馬連 ¥0 0点」の事故と同型を避ける
              * ための順番)。三連単(trifecta)も同じ経緯を辿り、Issue #131・#25-Fで確定払戻の
              * 既知券種になり、Issue #139(#25-E3b)で配分提案にも組み込まれたため、この内訳・
-             * 判定不能の行に3連複の直後(表示順の末尾)で表示するようになった。
+             * 判定不能の行に3連複の直後で表示するようになった。枠連(bracketQuinella)も同じ経緯を辿り、
+             * Issue #145・#26-Fで確定払戻の既知券種になり、Issue #150(#26-E3b)で配分提案にも組み込まれた
+             * ため、この内訳・判定不能の行に馬連の直後・馬単の前(表示順)で表示するようになった。
              */}
             {/*
              * bossメタレビュー要修正2: unjudgedCount(規則Uで判定不能とした点数)が画面に一切
@@ -349,7 +353,8 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
                 判定不能(集計対象外): 複勝{report.proposedBet.place.unjudgedCount}点 / 単勝
                 {report.proposedBet.win.unjudgedCount}点 / ワイド
                 {report.proposedBet.wide.unjudgedCount}点 / 馬連
-                {report.proposedBet.quinella.unjudgedCount}点 / 馬単
+                {report.proposedBet.quinella.unjudgedCount}点 / 枠連
+                {report.proposedBet.bracketQuinella.unjudgedCount}点 / 馬単
                 {report.proposedBet.exacta.unjudgedCount}点 / 3連複
                 {report.proposedBet.trio.unjudgedCount}点 / 三連単
                 {report.proposedBet.trifecta.unjudgedCount}点
@@ -365,8 +370,8 @@ export function VerifyView(props: VerifyViewProps): React.JSX.Element {
              * 組み込まれたため、上の2行に既知券種として表示するようになった。三連単(trifecta)も
              * 同じ経緯を辿り、Issue #131・#25-Fで確定払戻の既知券種になり、Issue #139(#25-E3b)で
              * 配分提案にも組み込まれたため、上の2行に既知券種として表示するようになった。
-             * 枠連(bracketQuinella)はIssue #145・#26-Fで確定払戻の既知券種になったが、内訳・
-             * 判定不能の2行への表示はIssue #146で行う(配分が枠連の買い目をまだ作らないため)。
+             * 枠連(bracketQuinella)も同じ経緯を辿り、Issue #145・#26-Fで確定払戻の既知券種になり、
+             * Issue #150(#26-E3b)で配分提案にも組み込まれたため、上の2行に既知券種として表示するようになった。
              * 規則U(判定不能)とは原因が異なるため上のunjudgedCountの行とは別に出す。
              * 文言の組み立て(count===0ならnull)はformatUnknownBetTypeNotice(純関数)の責務で、
              * ここは`unknownBetTypeNotice`(コンポーネント冒頭で1回だけ呼んだ結果)のnull判定

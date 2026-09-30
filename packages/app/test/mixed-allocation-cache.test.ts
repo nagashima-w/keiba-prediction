@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   cacheKeyEquals,
   createMixedAllocationCache,
+  toMixedAllocationCacheKey,
   type MixedAllocationCacheKey,
 } from "../src/renderer/mixed-allocation-cache.js";
+import type { MixedAllocationSettings } from "../src/shared/mixed-race-allocation.js";
 
 // `race`はキャッシュキーの中で唯一「参照(===)」で比較されるフィールドのため、既定値は
 // 1つの安定したオブジェクト参照を使い回す(key()を呼ぶたびに新しいリテラルを作ると、
@@ -243,6 +245,108 @@ describe("cacheKeyEquals(get/peekと同じキー等価判定をexportして再�
       // 前提固定: 実際に値が変わっていること。
       expect(mutated).not.toEqual(base);
       expect(cacheKeyEquals(base, mutated)).toBe(false);
+    },
+  );
+});
+
+// ============================================================================
+// toMixedAllocationCacheKey(Issue #150・AC-5(b)): 設定→キャッシュキーの組み立て
+// ============================================================================
+// 旧`BatchAnalysisView.tsx`は設定11項目を1つずつ手書きでキーへ写していたため、1項目を`true`固定に
+// 書き換えても(設定を切り替えても古い配分がキャッシュから出続けるだけで)テストが全緑のまま通る
+// 変異が生存していた(三連単から続く穴)。設定を丸ごと展開する本関数へ切り出し、項目ごとの値の
+// 取り違え・固定を、ここで全項目について検知する(11項目のうち1つでも固定・脱落すれば赤)。
+
+/** 11項目すべてが互いに区別できる値を持つ設定(数値4項目は相異なる値、boolean7項目は全てtrue)。 */
+function allSettings(overrides: Partial<MixedAllocationSettings> = {}): MixedAllocationSettings {
+  return {
+    bankroll: 300000,
+    perRaceCap: 20000,
+    kellyFraction: 0.5,
+    evThreshold: 1.0,
+    includeComboOdds: true,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
+    ...overrides,
+  };
+}
+
+/** 各項目を「元と異なる値」に変えた設定(項目名→変更後)。boolean=反転、number=別の値。 */
+function changedSettings(field: keyof MixedAllocationSettings): MixedAllocationSettings {
+  const base = allSettings();
+  const value = base[field];
+  return { ...base, [field]: typeof value === "boolean" ? !value : value + 12345 };
+}
+
+describe("toMixedAllocationCacheKey(設定→キャッシュキー。Issue #150・AC-5(b))", () => {
+  const race = { marker: "race-B" };
+
+  it("raceIdとraceの参照(===)をそのまま持ち、設定の全項目を値どおりキーへ写すこと", () => {
+    const settings = allSettings({
+      bankroll: 111111,
+      perRaceCap: 22222,
+      kellyFraction: 0.33,
+      evThreshold: 1.25,
+      includeComboOdds: false,
+      includeWideInAllocation: false,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: false,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
+    });
+    const k = toMixedAllocationCacheKey("202601010202", race, settings);
+    expect(k.raceId).toBe("202601010202");
+    expect(k.race).toBe(race);
+    // 期待値はリテラルで固定する(実装と同じ写し方の再実装にしない)。
+    expect({ ...k, race: undefined }).toEqual({
+      raceId: "202601010202",
+      race: undefined,
+      bankroll: 111111,
+      perRaceCap: 22222,
+      kellyFraction: 0.33,
+      evThreshold: 1.25,
+      includeComboOdds: false,
+      includeWideInAllocation: false,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: false,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: false,
+      includeBracketQuinellaInAllocation: false,
+    });
+  });
+
+  it("前提固定(空振り防止): 設定の項目数が11で、cacheKeyEqualsが比較する項目(raceId・raceを除く)と同じ集合であること", () => {
+    const settingsKeys = Object.keys(allSettings()).sort();
+    expect(settingsKeys).toHaveLength(11);
+    const cacheKeyOnly = Object.keys(key())
+      .filter((k) => k !== "raceId" && k !== "race")
+      .sort();
+    expect(cacheKeyOnly).toEqual(settingsKeys);
+  });
+
+  it.each(Object.keys(allSettings()) as (keyof MixedAllocationSettings)[])(
+    "設定項目%sを変えると別のキーになり、キャッシュが再計算されること(同じ設定なら再利用される。値の固定・脱落を検知する)",
+    (field) => {
+      const cache = createMixedAllocationCache<string>();
+      const compute = vi.fn(() => "v");
+      const base = toMixedAllocationCacheKey("R1", race, allSettings());
+      const same = toMixedAllocationCacheKey("R1", race, allSettings());
+      const changed = toMixedAllocationCacheKey("R1", race, changedSettings(field));
+      // 前提固定: 変更後の設定は本当にこの項目だけが異なる。
+      expect(changedSettings(field)[field]).not.toBe(allSettings()[field]);
+
+      cache.get(base, compute);
+      cache.get(same, compute);
+      expect(compute).toHaveBeenCalledTimes(1); // 同じ設定なら再利用(ヒット)
+      expect(cacheKeyEquals(base, same)).toBe(true);
+      expect(cacheKeyEquals(base, changed)).toBe(false);
+      cache.get(changed, compute);
+      expect(compute).toHaveBeenCalledTimes(2); // 設定を切り替えたら再計算(ミス)
     },
   );
 });

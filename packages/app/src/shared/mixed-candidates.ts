@@ -136,13 +136,14 @@ import { resolvePlaceBetTarget, type PlaceBetUnavailableReason } from "./race-al
 export type MixedCandidateBetType = AllocationBetType;
 
 /**
- * 既定の対象券種。**`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーではない
- * (Issue #144〈#26-B〉で`bracketQuinella`〈枠連〉が`AllocationBetType`に加わった。
- * Issue #148〈#26-E2〉でオッズ配線と候補ビルダー〈`buildBracketQuinellaCandidatesForBetType`〉は
- * 完了し、設定の配管も#149で完了したが、`resolveMixedBetTypes`への接続〈#150〉がまだのため、
- * #150まで意図的に本配列から除外している)。** それ以前は、Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、
- * Issue #125〈#24-E3b〉で`exacta`〈馬単〉、Issue #139〈#25-E3b〉で`trifecta`〈三連単〉を
- * 追加したことで全メンバーと一致していた。
+ * 既定の対象券種。**現在は`MixedCandidateBetType`(=`AllocationBetType`)の全メンバーと一致する
+ * (Issue #150〈#26-E3b〉で`bracketQuinella`〈枠連〉を加えた。Issue #144〈#26-B〉で枠連が
+ * `AllocationBetType`に加わってから#149までは、Issue #148〈#26-E2〉でオッズ配線と候補ビルダー
+ * 〈`buildBracketQuinellaCandidatesForBetType`〉が、#149で設定の配管が完了しても、
+ * `resolveMixedBetTypes`への接続がまだのため意図的に本配列から除外していた)。**
+ * Issue #117〈#24-D3b-2〉で`quinella`〈馬連〉、Issue #125〈#24-E3b〉で`exacta`〈馬単〉、
+ * Issue #139〈#25-E3b〉で`trifecta`〈三連単〉、Issue #150で`bracketQuinella`〈枠連〉を
+ * 追加したことで全メンバーと一致している。
  *
  * #91で`AllocationBetType`に`win`(単勝)が加わった時点では、coreに単勝候補ビルダーが
  * 存在せず`buildMixedCandidates`も`win`を一切参照していなかったため、本配列は意図的に
@@ -177,11 +178,19 @@ export type MixedCandidateBetType = AllocationBetType;
  * (「対象にする」宣言と実体〈`buildTrifectaCandidatesForBetType`・`resolveMixedBetTypes`〉が
  * 揃った状態)。
  *
+ * **Issue #144(#26-B)で`bracketQuinella`(枠連)が`AllocationBetType`に加わったが、
+ * `trifecta`と同じ理由で当初は本配列に含めていなかった。** Issue #148(#26-E2)で
+ * `buildBracketQuinellaCandidatesForBetType`(本ファイル)を新設し、オッズ取得の配線
+ * (`scrapeRace`・中央・地方とも)・分析結果/スナップショットへの搭載も完了し、設定
+ * `includeBracketQuinellaInAllocation`の配管も#149で完了したが、`resolveMixedBetTypes`への
+ * 接続はまだだった。**Issue #150(#26-E3b)でその接続を行い、本配列にも`bracketQuinella`を
+ * 加えた**(表示順に合わせ、馬連の直後に置く)。
+ *
  * **定数名の`ALL_`は#90時点で実態(全メンバー)に一時的に追いつき、#112でいったん
  * 「全メンバーではない」状態に戻ったが#117で再び全メンバーと一致し、#120で三たび
  * 「全メンバーではない」状態に戻ったが#125で再び全メンバーと一致し、#128で四たび
  * 「全メンバーではない」状態に戻ったが#139で再び全メンバーと一致し、#144で五たび
- * 「全メンバーではない」状態に戻った(枠連の接続は#150)。** 改名はしない
+ * 「全メンバーではない」状態に戻ったが#150で再び全メンバーと一致した。** 改名はしない
  * (#91当時のboss裁定を維持: 定数名は「意図的な対象集合」を表す既存の名として扱い、
  * メンバー数の増減のたびに改名しない)。
  *
@@ -193,6 +202,7 @@ export const ALL_MIXED_CANDIDATE_BET_TYPES: readonly MixedCandidateBetType[] = [
   "win",
   "wide",
   "quinella",
+  "bracketQuinella",
   "exacta",
   "trio",
   "trifecta",
@@ -242,9 +252,9 @@ export interface MixedCandidateBuildInput {
   /**
    * 枠連オッズ(Issue #148・#26-E2)。キーは**枠番**の組(2桁ゼロ埋め連結・昇順・同枠可。
    * 例"0407"・"0101")で、馬番ではない。`options.betTypes`に`"bracketQuinella"`があるときのみ
-   * 参照される。`ALL_MIXED_CANDIDATE_BET_TYPES`は`"bracketQuinella"`を含まない(#150まで)ため、
-   * 既定呼び出しでは参照されない(`options.betTypes`へ明示的に`"bracketQuinella"`を渡した場合
-   * のみ到達する)。三連単と異なり中央・地方とも取得する。
+   * 参照される。Issue #150(#26-E3b)で`ALL_MIXED_CANDIDATE_BET_TYPES`が`"bracketQuinella"`を
+   * 含むようになったため、既定呼び出しでも実際に参照される(`options.betTypes`から除いた場合のみ
+   * 参照されない)。三連単と異なり中央・地方とも取得する。
    */
   readonly bracketQuinellaCombo?: Record<string, number | null>;
   readonly comboOdds?: ComboOddsScrapeOutcomeView;
@@ -381,9 +391,9 @@ export interface MixedCandidateDiagnostics {
   /**
    * 枠連の候補ビルド診断値(Issue #148・#26-E2)。`wide`/`trio`/`quinella`/`exacta`/`trifecta`と
    * 同じ`ComboCandidateDiagnosticsView`(not-requested/yoso/built)を共有する。
-   * `ALL_MIXED_CANDIDATE_BET_TYPES`は`"bracketQuinella"`を含まない(#150まで)ため、
-   * `options.betTypes`省略時の既定呼び出しでは常に`kind:"not-requested"`になる
-   * (`options.betTypes`に明示的に`"bracketQuinella"`を含めたときのみ`"built"`/`"yoso"`になりうる)。
+   * Issue #150(#26-E3b)で`ALL_MIXED_CANDIDATE_BET_TYPES`が`"bracketQuinella"`を含むように
+   * なったため、`options.betTypes`省略時の既定呼び出しでも実際に`kind:"built"`/`"yoso"`になりうる
+   * (`options.betTypes`で明示的に`"bracketQuinella"`を除いた場合のみ`"not-requested"`)。
    */
   readonly bracketQuinella: ComboCandidateDiagnosticsView;
 }
@@ -637,9 +647,10 @@ function buildTrifectaCandidatesForBetType(
  * 載せる。`AnalysisRow.wakuban`は`parseShutuba`が1〜8で検証した値なので、productionでは
  * 必ず有効(契約違反のthrowは`buildMixedRaceAllocationWithOutcome`の外側try/catchが受ける)。
  *
- * 返す候補の`umabans`は**枠番の組**(昇順・同枠可)であり馬番ではない。`ALL_MIXED_CANDIDATE_BET_TYPES`
- * は`"bracketQuinella"`を含まない(#150まで)ため、`requested`は`options.betTypes`に明示的に
- * `"bracketQuinella"`を渡した場合のみtrueになる(既定呼び出しでは常に`false`=`kind:"not-requested"`)。
+ * 返す候補の`umabans`は**枠番の組**(昇順・同枠可)であり馬番ではない。Issue #150(#26-E3b)で
+ * `ALL_MIXED_CANDIDATE_BET_TYPES`が`"bracketQuinella"`を含むようになったため、`requested`は
+ * `options.betTypes`省略時にもtrueになる(`options.betTypes`から除いた場合のみ
+ * `false`=`kind:"not-requested"`)。
  */
 function buildBracketQuinellaCandidatesForBetType(
   requested: boolean,

@@ -56,6 +56,9 @@
  * 新しい経路〈`mixed-allocation-queue.ts`〉が独自のキー定義を持つことはない)。**
  */
 
+import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+
+
 /** キャッシュキー(表の13項目をそのまま構造体にしたもの)。 */
 export interface MixedAllocationCacheKey {
   readonly raceId: string;
@@ -72,6 +75,23 @@ export interface MixedAllocationCacheKey {
   readonly includeExactaInAllocation: boolean;
   readonly includeTrifectaInAllocation: boolean;
   readonly includeBracketQuinellaInAllocation: boolean;
+}
+
+/**
+ * レースと配分の設定から、キャッシュキーを組み立てる(Issue #150・#26-E3b・AC-5(b))。
+ *
+ * 旧`BatchAnalysisView.tsx`は設定11項目を1つずつ手書きでキーへ写しており、レンダリングテスト基盤が
+ * 無いため、1項目を`true`固定に書き換えても(設定を切り替えても古い配分がキャッシュから出続けるだけで)
+ * テストが全緑のまま通る変異が生存していた。設定を丸ごと展開する本関数へ切り出し、項目ごとの値の
+ * 固定・脱落を`mixed-allocation-cache.test.ts`で全項目について検知する。`raceId`・`race`は
+ * 設定の後ろに置き、設定側に同名の項目が増えても上書きされない。
+ */
+export function toMixedAllocationCacheKey(
+  raceId: string,
+  race: object,
+  settings: MixedAllocationSettings,
+): MixedAllocationCacheKey {
+  return { ...settings, raceId, race };
 }
 
 /** レース単位でメモ化するキャッシュ(値の型`T`は呼び出し側が決める。表示データを想定)。 */

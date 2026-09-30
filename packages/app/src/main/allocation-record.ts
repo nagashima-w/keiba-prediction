@@ -46,7 +46,7 @@
  *   **#26-E3a(Issue #149)で`MixedAllocationSettings`は11項目(`includeBracketQuinellaInAllocation`追加)に
  *   なったが、この設定エコーは10列のまま据え置く**(`settingsColumnsOf`が11項目目を読まない。
  *   馬連〈#115〉・馬単〈#124〉・三連単〈#138〉と同じ切り方: 券種の選択・D-2フォールバック規則・
- *   画面表示は#26-E3b〈Issue #150〉、メタ行のDB列と過去分析再表示の「枠連: ON/OFF/記録なし」は
+ *   画面表示は#26-E3b〈Issue #150〉で接続済み、メタ行のDB列と過去分析再表示の「枠連: ON/OFF/記録なし」は
  *   #26-E3c〈Issue #151〉のスコープ)。
  * - コード5列(route/unavailable_reason/fallback_reason/skip_reason_code/combo_odds_wide/
  *   combo_odds_trio): `AllocationOutcomeCodes` をそのまま6列へ分解する(comboOddsはwide/trioの2列)。

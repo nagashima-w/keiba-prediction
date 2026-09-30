@@ -69,7 +69,9 @@ import { formatYen } from "../src/renderer/verify-format.js";
 function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow {
   return {
     umaban: overrides.umaban,
-    wakuban: overrides.wakuban ?? 90,
+    // 枠番は既定で1〜8を循環させる(枠連が既定ONになった#150以降、枠番が不正だと枠連の候補構築が契約違反でthrowし
+    // 全レースが`kind:"invalid"`になるため。productionの`AnalysisRow.wakuban`は`parseShutuba`が1〜8で検証済み)。
+    wakuban: overrides.wakuban ?? ((overrides.umaban - 1) % 8) + 1,
     horseName: `${overrides.umaban}番`,
     prior: overrides.prior === undefined ? 0.3 : overrides.prior,
     adjustedProb: overrides.adjustedProb ?? 0.5,
@@ -204,7 +206,7 @@ function fullOrderedTripleOddsRecord(umabans: readonly number[], odds: number): 
 
 /** ComboOddsFetchOutcomeViewを組み立てる補助関数(診断値の中身はテストの関心事ではないため最小構成)。 */
 function comboOddsOutcome(
-  betType: "wide" | "trio" | "quinella" | "exacta" | "trifecta",
+  betType: "wide" | "trio" | "quinella" | "exacta" | "trifecta" | "bracketQuinella",
   state: ComboOddsFetchOutcomeView["state"],
 ): ComboOddsFetchOutcomeView {
   const diagnostics: ComboOddsFetchDiagnosticsView = {
@@ -839,7 +841,7 @@ describe("表示データ導出のテストヘルパー自己テスト", () => {
  *       → 接続後は#112当時のような原理的評価不能ではなく、既存のワイド・馬連・3連複と
  *         同じ「ユーザーがOFFにした」到達可能な理由になったため
  */
-describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #125で馬単の除外を解除・Issue #139で三連単の除外を解除)", () => {
+describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬連の除外を解除・Issue #125で馬単の除外を解除・Issue #139で三連単の除外を解除・Issue #150で枠連の除外を解除)", () => {
   it("内訳表に描画される券種にquinella(馬連)が含まれること(Issue #117でワイド・3連複と対称になったため)", () => {
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("quinella");
   });
@@ -857,27 +859,31 @@ describe("MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER(D-2・#90・Issue #117で馬�
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("trifecta");
   });
 
-  // 【Issue #144で改訂】旧版(#139時点)は「除外している券種が無いこと」(=[])を固定していた。
-  // #144で枠連(bracketQuinella)が`AllocationBetType`に加わったが、appにはまだ枠連の配分接続・
-  // 表示が無い(オッズ配線・候補ビルダーは#148で完了。設定の配管は#149で完了。配分接続・表示は#150のスコープ)ため、
-  // #128の三連単・#112の馬連と同じ理由で
-  // 枠連だけが一時的に除外へ加わる。何を保証していたか(新旧対応表):
-  //   旧: ALLOCATION_BET_TYPE_UMABAN_COUNTのキーのうち内訳表の表示順に無いものが0件(=[])
-  //   新: 同じ集合が['bracketQuinella']の1件だけ(他の券種が誤って除外に混ざれば赤。
-  //       #150より前に枠連を表示順へ加えると「枠連 ¥0 0点」が出るため、それも赤にする)
-  it("意図的に除外している券種が['bracketQuinella']だけであること(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分。#112時点は馬連を除外し#117で解除、#120で馬単を除外し#125で解除、#128で三連単を除外し#139で解除、#144で枠連を新たに除外に加えた。枠連の接続は#150)", () => {
+  it("内訳表に描画される券種にbracketQuinella(枠連)が含まれること(Issue #150で他の組合せ券種と対称になったため。#144〜#149は除外していたが反転した)", () => {
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("bracketQuinella");
+  });
+
+  // 【Issue #150で再改訂】旧版(#144時点)は「除外している券種が['bracketQuinella']だけ」を固定していた
+  // (appにまだ枠連の配分接続・表示が無かったため)。#150で接続が完了したため、除外は再び0件になる。
+  // 何を保証していたか(新旧対応表):
+  //   #139版: ALLOCATION_BET_TYPE_UMABAN_COUNTのキーのうち内訳表の表示順に無いものが0件(=[])
+  //   #144版: 同じ集合が['bracketQuinella']の1件だけ(他の券種が誤って除外に混ざれば赤)
+  //   #150版(本版): 同じ集合が0件(=[])。枠連を含めどの券種が除外に混ざっても赤になる
+  //     (#144版の「他の券種が誤って除外に混ざれば赤」は弱めていない。許容する除外が1件→0件に減っただけ)
+  it("意図的に除外している券種が無いこと(ALLOCATION_BET_TYPE_UMABAN_COUNTとの差分が0件。#112時点は馬連を除外し#117で解除、#120で馬単を除外し#125で解除、#128で三連単を除外し#139で解除、#144で枠連を除外し#150で解除)", () => {
     const excluded = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT).filter(
       (t) => !MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER.includes(t as AllocationBetType),
     );
-    expect(excluded).toEqual(["bracketQuinella"]);
+    expect(excluded).toEqual([]);
   });
 
-  it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複→三連単)であること", () => {
+  it("表示順が頭数の昇順(複勝→単勝→ワイド→馬連→枠連→馬単→3連複→三連単。枠連は順序なしの2要素なので馬連の直後・順序ありの馬単の前)であること", () => {
     expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toEqual([
       "place",
       "win",
       "wide",
       "quinella",
+      "bracketQuinella",
       "exacta",
       "trio",
       "trifecta",
@@ -1216,17 +1222,101 @@ describe("buildMixedAllocationDisplay — display.trifectaNote(Issue #139・AC4)
 });
 
 // ============================================================================
+// AC-4(Issue #150): display.bracketQuinellaNote — wide/trio/quinella/exactaと同じcomboBetTypeNoteを
+// 枠連にも適用する。**頭数で出し分けない**(発売境界「9頭以上」は各頭数1レースの観測であり、
+// 断定的な文言を作らない。取得結果〈comboOddsState〉だけを根拠にした既存文言のまま)。
+// 三連単と異なり枠連は中央・地方とも取得するので、地方の特例文言も無い。
+// ============================================================================
+
+describe("buildMixedAllocationDisplay — display.bracketQuinellaNote(Issue #150・AC-4)", () => {
+  /** 8頭(枠=馬番)で枠連の取得結果を差し替えられるレース。ワイド・3連複は全組そろえて混在経路へ入れる。 */
+  function raceWithBracketState(
+    state: ComboOddsFetchOutcomeView["state"] | undefined,
+    raceId: string,
+    bracketQuinellaCombo: Record<string, number | null> | undefined,
+  ): MixedCandidateBuildInput {
+    const umabans = umabansOf(8);
+    return raceInput({
+      raceId,
+      rows: [1, 2, 3, 4, 5, 6, 7, 8].map((u) => row({ umaban: u, wakuban: u })),
+      wideCombo: fullOddsRecord(umabans, 2, 100000),
+      trioCombo: fullOddsRecord(umabans, 3, 100000),
+      ...(bracketQuinellaCombo !== undefined ? { bracketQuinellaCombo } : {}),
+      comboOdds: {
+        wide: comboOddsOutcome("wide", "available"),
+        trio: comboOddsOutcome("trio", "available"),
+        ...(state !== undefined ? { bracketQuinella: comboOddsOutcome("bracketQuinella", state) } : {}),
+      },
+    });
+  }
+
+  it("枠連が対象外(includeBracketQuinellaInAllocation=false)のときはnullであること(not-requestedはnull)", () => {
+    const view = buildMixedAllocationDisplay(
+      raceWithBracketState("unavailable", "202603020211", {}),
+      settings({ includeBracketQuinellaInAllocation: false }),
+    );
+    expect(view.kind).toBe("mixed");
+    if (view.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(view.diagnostics.bracketQuinella.kind).toBe("not-requested");
+    expect(view.display.bracketQuinellaNote).toBeNull();
+  });
+
+  it("発売されていない(comboOddsState='unavailable')ときは、comboBetTypeNoteと同じ文言(『発売されていません』)になること。中央でも地方でも同じ(枠連に地方の特例は無い)", () => {
+    for (const raceId of ["202603020211", "202654071210"]) {
+      const view = buildMixedAllocationDisplay(raceWithBracketState("unavailable", raceId, {}), settings());
+      expect(view.kind).toBe("mixed");
+      if (view.kind !== "mixed") {
+        throw new Error("kind='mixed'のはず");
+      }
+      // 前提固定(空振り防止): 実際にkind='built'・comboOddsState='unavailable'に到達していること。
+      expect(view.diagnostics.bracketQuinella.kind).toBe("built");
+      expect(view.diagnostics.bracketQuinella.kind === "built" && view.diagnostics.bracketQuinella.comboOddsState).toBe(
+        "unavailable",
+      );
+      expect(view.display.bracketQuinellaNote).toBe(comboBetTypeNote(view.diagnostics.bracketQuinella));
+      expect(view.display.bracketQuinellaNote).toContain("発売されていません");
+      // 頭数(8頭)や「9頭」という発売境界の数字は文言に含めない(観測が各頭数1レースのため断定しない)。
+      expect(view.display.bracketQuinellaNote).not.toMatch(/[0-9０-９]頭/);
+    }
+  });
+
+  it("取得失敗(failed)・未取得(unknown)のときも、comboBetTypeNoteと同じ文言になること(unknownは地方でも『設定変更後に再分析』のまま=三連単のような地方特例を持たない)", () => {
+    const failed = buildMixedAllocationDisplay(raceWithBracketState("failed", "202603020211", {}), settings());
+    const unknownNar = buildMixedAllocationDisplay(raceWithBracketState(undefined, "202654071210", undefined), settings());
+    for (const view of [failed, unknownNar]) {
+      expect(view.kind).toBe("mixed");
+      if (view.kind !== "mixed") {
+        throw new Error("kind='mixed'のはず");
+      }
+      expect(view.diagnostics.bracketQuinella.kind).toBe("built");
+      expect(view.display.bracketQuinellaNote).toBe(comboBetTypeNote(view.diagnostics.bracketQuinella));
+      expect(view.display.bracketQuinellaNote).not.toBeNull();
+    }
+    if (unknownNar.kind !== "mixed") {
+      throw new Error("kind='mixed'のはず");
+    }
+    expect(unknownNar.diagnostics.bracketQuinella.kind === "built" && unknownNar.diagnostics.bracketQuinella.comboOddsState).toBe(
+      "unknown",
+    );
+    expect(unknownNar.display.bracketQuinellaNote).toContain("再分析");
+  });
+});
+
+// ============================================================================
 // Q1(Issue #139): buildComboBetTypeNotices — 券種別の状態注記(ワイド・馬連・馬単・3連複・
 // 三連単)を表示順に並べ、nullの券種を省いた配列にする純関数。BatchAnalysisView.tsxは
 // 個々の<p>を直書きせず、この配列をmapで描画するだけにする(#125でexactaNoteの<p>を
 // 追加し忘れた欠落=利用者から見える欠落の再発防止)。
 // ============================================================================
 
-describe("buildComboBetTypeNotices(Issue #139): 表示順の全券種を含み、nullの券種を省くこと", () => {
-  it("5券種すべてに注記があるとき、表示順(ワイド→馬連→馬単→3連複→三連単)どおり5件返すこと", () => {
+describe("buildComboBetTypeNotices(Issue #139・#150): 表示順の全券種を含み、nullの券種を省くこと", () => {
+  it("6券種すべてに注記があるとき、表示順(ワイド→馬連→枠連→馬単→3連複→三連単)どおり6件返すこと", () => {
     const notices = buildComboBetTypeNotices({
       wideNote: "ワイドの注記",
       quinellaNote: "馬連の注記",
+      bracketQuinellaNote: "枠連の注記",
       exactaNote: "馬単の注記",
       trioNote: "3連複の注記",
       trifectaNote: "三連単の注記",
@@ -1234,6 +1324,7 @@ describe("buildComboBetTypeNotices(Issue #139): 表示順の全券種を含み�
     const expected: readonly ComboBetTypeNoticeItem[] = [
       { label: "ワイド", note: "ワイドの注記" },
       { label: "馬連", note: "馬連の注記" },
+      { label: "枠連", note: "枠連の注記" },
       { label: "馬単", note: "馬単の注記" },
       { label: "三連複", note: "3連複の注記" },
       { label: "三連単", note: "三連単の注記" },
@@ -1245,17 +1336,19 @@ describe("buildComboBetTypeNotices(Issue #139): 表示順の全券種を含み�
     const notices = buildComboBetTypeNotices({
       wideNote: "ワイドの注記",
       quinellaNote: "馬連の注記",
+      bracketQuinellaNote: "枠連の注記",
       exactaNote: null,
       trioNote: "3連複の注記",
       trifectaNote: "三連単の注記",
     });
-    expect(notices.map((n) => n.label)).toEqual(["ワイド", "馬連", "三連複", "三連単"]);
+    expect(notices.map((n) => n.label)).toEqual(["ワイド", "馬連", "枠連", "三連複", "三連単"]);
   });
 
   it("全券種がnullなら空配列を返すこと", () => {
     const notices = buildComboBetTypeNotices({
       wideNote: null,
       quinellaNote: null,
+      bracketQuinellaNote: null,
       exactaNote: null,
       trioNote: null,
       trifectaNote: null,
@@ -1267,6 +1360,7 @@ describe("buildComboBetTypeNotices(Issue #139): 表示順の全券種を含み�
     const notices = buildComboBetTypeNotices({
       wideNote: null,
       quinellaNote: null,
+      bracketQuinellaNote: null,
       exactaNote: null,
       trioNote: null,
       trifectaNote: "三連単だけの注記",
@@ -1274,14 +1368,28 @@ describe("buildComboBetTypeNotices(Issue #139): 表示順の全券種を含み�
     expect(notices).toEqual([{ label: "三連単", note: "三連単だけの注記" }]);
   });
 
-  it("buildMixedAllocationDisplayが返すdisplayを実際にそのまま渡しても、5フィールドすべてから正しく組み立てられること(統合確認)", () => {
+  it("枠連のみ非nullなら1件だけ(枠連)を返すこと(枠連の注記の描画漏れを検出する。殺す変異: buildComboBetTypeNoticesのエントリから枠連を外す)", () => {
+    const notices = buildComboBetTypeNotices({
+      wideNote: null,
+      quinellaNote: null,
+      bracketQuinellaNote: "枠連だけの注記",
+      exactaNote: null,
+      trioNote: null,
+      trifectaNote: null,
+    });
+    expect(notices).toEqual([{ label: "枠連", note: "枠連だけの注記" }]);
+  });
+
+  it("buildMixedAllocationDisplayが返すdisplayを実際にそのまま渡しても、6フィールドすべてから正しく組み立てられること(統合確認)", () => {
     const race = raceWithPositiveCombos(8, {
       raceId: "202603020211",
       trifectaCombo: {},
+      bracketQuinellaCombo: {},
       comboOdds: {
         wide: comboOddsOutcome("wide", "available"),
         trio: comboOddsOutcome("trio", "available"),
         trifecta: comboOddsOutcome("trifecta", "unavailable"),
+        bracketQuinella: comboOddsOutcome("bracketQuinella", "unavailable"),
       },
     });
     const view = buildMixedAllocationDisplay(race, settings());
@@ -1289,9 +1397,10 @@ describe("buildComboBetTypeNotices(Issue #139): 表示順の全券種を含み�
       throw new Error("kind='mixed'のはず");
     }
     const notices = buildComboBetTypeNotices(view.display);
-    // 前提固定(空振り防止): 三連単の注記が実際に含まれていること(#125のexactaNote欠落と
+    // 前提固定(空振り防止): 三連単・枠連の注記が実際に含まれていること(#125のexactaNote欠落と
     // 同型の欠落を、この統合テストで検出できることの確認)。
     expect(notices.some((n) => n.label === "三連単")).toBe(true);
+    expect(notices.some((n) => n.label === "枠連")).toBe(true);
   });
 });
 
@@ -1851,13 +1960,14 @@ describe("AC15: aggregateUnjudgedCounts/totalUnjudgedCount — 券種横断の�
     expect(notRequested.oddsMalformedCount).toBe(0);
   });
 
-  it("【再発防止・全7券種】place/win/wide/quinella/exacta/trio/trifectaのすべてのunjudgedが1本のテストで合算されること(次に券種を足したときの合算漏れを検出する土台)", () => {
-    // 前提固定(空振り防止): MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDERが7券種すべてを
+  it("【再発防止・全8券種】place/win/wide/quinella/bracketQuinella/exacta/trio/trifectaのすべてのunjudgedが1本のテストで合算されること(次に券種を足したときの合算漏れを検出する土台。Issue #150で枠連を追加し7→8券種)", () => {
+    // 前提固定(空振り防止): MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDERが8券種すべてを
     // 含むこと(この配列を回して合算する実装であれば、この配列にひとたび券種を足せば
     // 自動的にここでも合算対象になる。逆に言えば、この配列に足し忘れた新券種はここでも
     // 検知されない——それは別のテスト〈MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER自体の
     // 「意図的に除外している券種が無いこと」〉が担う)。
-    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toHaveLength(7);
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toHaveLength(8);
+    expect(MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER).toContain("bracketQuinella");
     const diagnostics = mixedDiagnostics({
       place: { kind: "judged", judged: { positiveCount: 1, notPositiveCount: 0 }, unjudged: { oddsMissingCount: 10 } },
       win: {
@@ -1870,12 +1980,133 @@ describe("AC15: aggregateUnjudgedCounts/totalUnjudgedCount — 券種横断の�
       exacta: builtComboDiag({ oddsMissingCount: 50, oddsUnfetchedCount: 51, oddsMalformedCount: 52 }),
       trio: builtComboDiag({ oddsMissingCount: 60, oddsUnfetchedCount: 61, oddsMalformedCount: 62 }),
       trifecta: builtComboDiag({ oddsMissingCount: 70, oddsUnfetchedCount: 71, oddsMalformedCount: 72 }),
+      bracketQuinella: builtComboDiag({ oddsMissingCount: 80, oddsUnfetchedCount: 81, oddsMalformedCount: 82 }),
     });
     const counts = aggregateUnjudgedCounts(diagnostics);
-    // oddsMissingCount: place(10)+win(20)+wide(30)+quinella(40)+exacta(50)+trio(60)+trifecta(70)=280
-    // oddsUnfetchedCount(place/winは持たない): wide(31)+quinella(41)+exacta(51)+trio(61)+trifecta(71)=255
-    // oddsMalformedCount(placeは持たない): win(21)+wide(32)+quinella(42)+exacta(52)+trio(62)+trifecta(72)=281
-    expect(counts).toEqual({ oddsMissingCount: 280, oddsUnfetchedCount: 255, oddsMalformedCount: 281 });
+    // oddsMissingCount: place(10)+win(20)+wide(30)+quinella(40)+exacta(50)+trio(60)+trifecta(70)+bracketQuinella(80)=360
+    // oddsUnfetchedCount(place/winは持たない): wide(31)+quinella(41)+exacta(51)+trio(61)+trifecta(71)+bracketQuinella(81)=336
+    // oddsMalformedCount(placeは持たない): win(21)+wide(32)+quinella(42)+exacta(52)+trio(62)+trifecta(72)+bracketQuinella(82)=363
+    // (#139版は枠連を持たず 280/255/281 だった。枠連の 80/81/82 を足した値が現在の期待値。既存7券種の項は変えていない)
+    expect(counts).toEqual({ oddsMissingCount: 360, oddsUnfetchedCount: 336, oddsMalformedCount: 363 });
+  });
+
+  it("Issue #150(AC-1): 枠連(bracketQuinella)のoddsMissingCount/oddsUnfetchedCount/oddsMalformedCountも合算されること(comboOddsState='available'。殺す変異: unjudgedOfの枠連caseをZERO_UNJUDGED固定に戻す)", () => {
+    const counts = aggregateUnjudgedCounts(
+      mixedDiagnostics({
+        bracketQuinella: builtComboDiag({
+          comboOddsState: "available",
+          oddsMissingCount: 111,
+          oddsUnfetchedCount: 222,
+          oddsMalformedCount: 333,
+        }),
+        wide: { kind: "not-requested" },
+        trio: { kind: "not-requested" },
+        place: { kind: "not-requested" },
+        win: { kind: "not-requested" },
+      }),
+    );
+    expect(counts).toEqual({ oddsMissingCount: 111, oddsUnfetchedCount: 222, oddsMalformedCount: 333 });
+  });
+
+  it("Issue #150(AC-1): 枠連がnot-requestedのときは0として扱われること(対象外と判定不能を混同しない)", () => {
+    const notRequested = aggregateUnjudgedCounts(mixedDiagnostics({ bracketQuinella: { kind: "not-requested" } }));
+    expect(totalUnjudgedCount(notRequested)).toBe(0);
+  });
+
+  // 発売のないレース(8頭以下等。取得結果が'unavailable')では、coreの枠連ビルダーは全組をoddsUnfetchedCountに数える
+  // (オッズMapが空のため。comboOddsStateを見ない)。これを判定不能に合算すると、発売のないレースで
+  // 「判定できなかった買い目があります(未取得N件)」と表示する利用者から見える誤りになる。
+  describe("Issue #150(着手前確認で発見・AC-4): 枠連が発売されていない(comboOddsState='unavailable')ときは判定不能に合算しないこと", () => {
+    it("前提固定(空振り防止): 8頭・枠連のオッズが空・state='unavailable'で、coreは実際に28組すべてを未取得に数えること", () => {
+      const race = raceInput({
+        rows: [1, 2, 3, 4, 5, 6, 7, 8].map((u) => row({ umaban: u, wakuban: u })),
+        bracketQuinellaCombo: {},
+        comboOdds: { bracketQuinella: comboOddsOutcome("bracketQuinella", "unavailable") },
+      });
+      const built = buildMixedCandidates(race, { betTypes: ["bracketQuinella"] });
+      const diag = built.diagnostics.bracketQuinella;
+      expect(diag.kind).toBe("built");
+      if (diag.kind !== "built") {
+        throw new Error("前提が崩れた: kind='built'であること");
+      }
+      expect(diag.comboOddsState).toBe("unavailable");
+      expect(diag.build.enumeratedCount).toBe(28);
+      expect(diag.build.unjudged.oddsUnfetchedCount).toBe(28);
+      // この診断値をそのまま合算すると28件になる(=除外しないと誤った注記が出る)ことの確認は、
+      // 下のテスト(unavailableは0)とfailed/unknownの対比(28件が計上される)で行う。
+      expect(built.candidates).toHaveLength(0);
+    });
+
+    it("unavailableのとき、aggregateUnjudgedCountsの合計が0になること(殺す変異: unavailableの除外を消す→28件が未取得として合算される)", () => {
+      const diagnostics = mixedDiagnostics({
+        bracketQuinella: builtComboDiag({ comboOddsState: "unavailable", fieldPresence: "empty", oddsUnfetchedCount: 28 }),
+      });
+      // 前提固定: 診断値自体は28件の未取得を持っている(除外しなければ28になる)。
+      const raw = diagnostics.bracketQuinella;
+      if (raw.kind !== "built") {
+        throw new Error("前提が崩れた: kind='built'であること");
+      }
+      expect(raw.build.unjudged.oddsUnfetchedCount).toBe(28);
+      const counts = aggregateUnjudgedCounts(diagnostics);
+      expect(counts).toEqual({ oddsMissingCount: 0, oddsUnfetchedCount: 0, oddsMalformedCount: 0 });
+      expect(totalUnjudgedCount(counts)).toBe(0);
+    });
+
+    it("failed(取得失敗)・unknown(未取得)のときは、28件が未取得として合算されること(unavailableだけを除外する。「未取得」が事実なので除外しない)", () => {
+      for (const comboOddsState of ["failed", "unknown"] as const) {
+        const counts = aggregateUnjudgedCounts(
+          mixedDiagnostics({
+            bracketQuinella: builtComboDiag({ comboOddsState, fieldPresence: "empty", oddsUnfetchedCount: 28 }),
+          }),
+        );
+        expect(counts.oddsUnfetchedCount, comboOddsState).toBe(28);
+      }
+    });
+
+    it("他券種(ワイド)は今回の変更の対象外で、unavailableでも従来どおり合算されること(既存5券種の一般化は行わない。挙動を変えていないことの固定)", () => {
+      const counts = aggregateUnjudgedCounts(
+        mixedDiagnostics({
+          wide: builtComboDiag({ comboOddsState: "unavailable", oddsUnfetchedCount: 6 }),
+        }),
+      );
+      expect(counts.oddsUnfetchedCount).toBe(6);
+    });
+
+    it("統合: 8頭・枠連unavailable・ワイド等は判定不能なしのレースで、buildMixedAllocationDisplayのdisplay.unjudgedが0件、枠連の注記は『発売されていません』になること", () => {
+      const umabans = umabansOf(8);
+      const race = raceInput({
+        rows: [1, 2, 3, 4, 5, 6, 7, 8].map((u) => row({ umaban: u, wakuban: u })),
+        wideCombo: fullOddsRecord(umabans, 2, 100000),
+        trioCombo: fullOddsRecord(umabans, 3, 100000),
+        bracketQuinellaCombo: {},
+        comboOdds: {
+          wide: comboOddsOutcome("wide", "available"),
+          trio: comboOddsOutcome("trio", "available"),
+          bracketQuinella: comboOddsOutcome("bracketQuinella", "unavailable"),
+        },
+      });
+      // 馬連・馬単・三連単はオッズを渡していないので対象外にする(渡さずに対象にすると、それぞれが
+      // 全組を未取得に数えて判定不能が枠連由来だけではなくなる)。
+      const view = buildMixedAllocationDisplay(
+        race,
+        settings({
+          includeQuinellaInAllocation: false,
+          includeExactaInAllocation: false,
+          includeTrifectaInAllocation: false,
+        }),
+      );
+      expect(view.kind).toBe("mixed");
+      if (view.kind !== "mixed") {
+        throw new Error("前提が崩れた: kind='mixed'であること");
+      }
+      // 前提固定: 枠連の診断値は28件を未取得に数えている(除外がなければ合算に現れる)。
+      const diag = view.diagnostics.bracketQuinella;
+      expect(diag.kind === "built" && diag.build.unjudged.oddsUnfetchedCount).toBe(28);
+      // ワイド・3連複のオッズは全組そろっているので、判定不能は枠連由来しか有り得ない。
+      expect(totalUnjudgedCount(view.display.unjudged)).toBe(0);
+      expect(view.display.bracketQuinellaNote).toBe(comboBetTypeNote(diag));
+      expect(view.display.bracketQuinellaNote).toContain("発売されていません");
+    });
   });
 });
 
@@ -1981,6 +2212,10 @@ describe("placeUnavailableNoteForMixed — 頭数不可のとき既存placeBetUn
 // ============================================================================
 
 describe("AC14: COMBO_EV_CALIBRATION_NOTE — 組合せ券種のEV過大評価・較正未実施を明記すること", () => {
+  it("Issue #150: 例示に枠連が含まれること(枠連も同じ組合せ券種のEV増幅を受ける。#117・#125・#139と同じ理由)", () => {
+    expect(COMBO_EV_CALIBRATION_NOTE).toContain("枠連");
+  });
+
   it("『過大評価』『較正』の両方の趣旨を含むこと", () => {
     expect(COMBO_EV_CALIBRATION_NOTE).toContain("過大評価");
     expect(COMBO_EV_CALIBRATION_NOTE).toMatch(/較正/);
@@ -2241,6 +2476,7 @@ function mixedDisplay(overrides: Partial<MixedAllocationDisplay> = {}): MixedAll
     quinellaNote: null,
     exactaNote: null,
     trifectaNote: null,
+    bracketQuinellaNote: null,
     placeUnavailableNote: null,
     placeOnlyStake: null,
     probabilitySumWarning: null,

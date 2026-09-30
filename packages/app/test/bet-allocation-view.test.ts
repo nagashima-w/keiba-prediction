@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  ALLOCATION_BET_TYPE_UMABAN_COUNT,
+  type AllocationBetType,
+} from "@keiba/core/ev/combo-bet-allocation";
+
 import type { AnalysisResult, AnalysisRow } from "../src/shared/analysis-types.js";
 import {
   BET_ALLOCATION_UNSET_NOTE,
@@ -283,6 +288,29 @@ describe("formatComboBetLabel(券種を見て表記を切り替える。Issue #1
   it("exacta・trifecta以外はformatBetLabelと同じ結果を返すこと(formatBetLabel自体は変更していないことの直接確認)", () => {
     expect(formatComboBetLabel("wide", [4, 7])).toBe(formatBetLabel([4, 7]));
     expect(formatComboBetLabel("trio", [3, 4, 7])).toBe(formatBetLabel([3, 4, 7]));
+  });
+});
+
+describe("formatComboBetLabel: 枠連(bracketQuinella)は枠番であることが分かる『枠N-M』表記になること(Issue #150・#26-E3b・AC-2)", () => {
+  it("枠連の候補のumabansは馬番ではなく枠番なので、『枠4-7』と表記し、同枠は『枠2-2』と表記すること(殺す変異: 枠連分岐を消す〈馬番に見える『4-7』になる〉)", () => {
+    expect(formatComboBetLabel("bracketQuinella", [4, 7])).toBe("枠4-7");
+    expect(formatComboBetLabel("bracketQuinella", [2, 2])).toBe("枠2-2");
+    // 馬番の馬連と同じ入力でも、表記は区別される(枠番と馬番を取り違えて読ませない)。
+    expect(formatComboBetLabel("bracketQuinella", [4, 7])).not.toBe(formatComboBetLabel("quinella", [4, 7]));
+    expect(formatComboBetLabel("bracketQuinella", [4, 7])).not.toBe(formatComboBetLabel("wide", [4, 7]));
+  });
+
+  it("AllocationBetTypeの全値に対して、『枠』で始まるのは枠連だけであること(他券種の既存表記は変えていない。券種の網羅はcoreの定義から取る)", () => {
+    const betTypes = Object.keys(ALLOCATION_BET_TYPE_UMABAN_COUNT) as AllocationBetType[];
+    // 前提固定(空振り防止): 枠連を含む全券種を走査していること。
+    expect(betTypes).toContain("bracketQuinella");
+    expect(betTypes.length).toBeGreaterThanOrEqual(8);
+    for (const betType of betTypes) {
+      const count = ALLOCATION_BET_TYPE_UMABAN_COUNT[betType];
+      const umabans = Array.from({ length: count }, (_, i) => i + 3);
+      const label = formatComboBetLabel(betType, umabans);
+      expect(label.startsWith("枠"), `${betType}: ${label}`).toBe(betType === "bracketQuinella");
+    }
   });
 });
 

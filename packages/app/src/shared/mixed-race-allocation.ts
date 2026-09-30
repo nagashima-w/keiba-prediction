@@ -51,12 +51,13 @@ import {
  *    そのまま使って1行を追加する(新しい文言を作らない)。
  * 4. D-2 フォールバック規則(単一定義の原則。3条件のいずれかで既存 `buildRaceAllocation` の
  *    結果をそのまま返す。Issue #117(#24-D3b-2)で馬連〈quinella〉を、Issue #125(#24-E3b)で
- *    馬単〈exacta〉を、Issue #139(#25-E3b)で三連単〈trifecta〉を条件②③に加えた):
+ *    馬単〈exacta〉を、Issue #139(#25-E3b)で三連単〈trifecta〉を、Issue #150(#26-E3b)で
+ *    枠連〈bracketQuinella〉を条件②③に加えた):
  *    - `includeComboOdds` が OFF
- *    - ワイド・三連複・馬連・馬単・三連単がすべて配分対象OFF(`includeWideInAllocation`/
+ *    - ワイド・三連複・馬連・馬単・三連単・枠連がすべて配分対象OFF(`includeWideInAllocation`/
  *      `includeTrioInAllocation`/`includeQuinellaInAllocation`/`includeExactaInAllocation`/
- *      `includeTrifectaInAllocation`)
- *    - **ワイド・三連複・馬連・馬単・三連単の候補合計が0件**(boss訂正2: 複勝候補の件数は
+ *      `includeTrifectaInAllocation`/`includeBracketQuinellaInAllocation`)
+ *    - **ワイド・三連複・馬連・馬単・三連単・枠連の候補合計が0件**(boss訂正2: 複勝候補の件数は
  *      含めない。複勝が0件でも組合せ候補が1件以上あれば混在経路に入る)
  * 5. 非該当なら `buildMixedCandidates` + `allocateGeneralBets` で実際に混在配分を計算する
  *    (`kind:"mixed"`)。
@@ -153,9 +154,8 @@ export interface MixedAllocationSettings extends BetAllocationSettings {
   readonly includeTrifectaInAllocation: boolean;
   /**
    * 枠連を配分対象に含めるか(`AppSettings.includeBracketQuinellaInAllocation`。#26-E3a・Issue #149で
-   * 設定項目を新設した)。**#26-E3a時点では`resolveMixedBetTypes`・`isComboBetTypesOff`
-   * (D-2フォールバック規則の条件②③)へは未接続**で、値を変えても配分結果・理由コードは変わらない
-   * (接続はIssue #150〈#26-E3b〉。三連単〈#138→#139〉と同じ切り方)。
+   * 設定項目を新設し、Issue #150(#26-E3b)で`resolveMixedBetTypes`・`isComboBetTypesOff`
+   * (D-2フォールバック規則の条件②③)へ実際に接続した。三連単〈#138→#139〉と同じ切り方)。
    */
   readonly includeBracketQuinellaInAllocation: boolean;
 }
@@ -200,7 +200,7 @@ export type MixedRaceAllocationView =
   | MixedRaceAllocationInvalid;
 
 /**
- * D-1: 設定(4つのboolean)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
+ * D-1: 設定(配分対象のboolean。ワイド・3連複・馬連・馬単・三連単・枠連の6項目)から `MixedCandidateBuildOptions.betTypes` を組み立てる。
  * 複勝・単勝は常に含める(A-2是正・Issue #90・#23-B2)。単勝には`includeWinInAllocation`の
  * ような専用トグルを作らない(D-10・boss裁定): 作ると`MixedAllocationSettings`の項目が増え、
  * メタ行の設定エコーがスキーマ変更になるため。単勝は混在経路が実際に計算される限り常に対象であり、
@@ -231,6 +231,11 @@ export type MixedRaceAllocationView =
  * 「三連単: ON/OFF/記録なし」〉が実在するに至ったための解除で、馬連〈`include_quinella`〉・
  * 馬単〈`include_exacta`〉と同型の経緯)。
  *
+ * **枠連(`includeBracketQuinellaInAllocation`。#26-E3a・Issue #149)も同じ経緯を辿り、Issue #150
+ * (#26-E3b)で本関数へ接続した。** `MixedAllocationSettings`の項目は11項目のままで、#150時点では
+ * `allocation-record.ts`の設定エコーは10列(メタ行スキーマ)のまま据え置く(枠連の列とその再表示は
+ * #26-E3c〈Issue #151〉)。
+ *
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。
  */
@@ -251,6 +256,9 @@ function resolveMixedBetTypes(settings: MixedAllocationSettings): MixedCandidate
   if (settings.includeTrifectaInAllocation) {
     betTypes.push("trifecta");
   }
+  if (settings.includeBracketQuinellaInAllocation) {
+    betTypes.push("bracketQuinella");
+  }
   return betTypes;
 }
 
@@ -264,11 +272,11 @@ function isComboOddsNotRequested(settings: MixedAllocationSettings): boolean {
 
 /**
  * D-2フォールバック規則の条件②(候補構築より前に判定できる)。
- * ワイド・3連複・馬連・馬単・三連単のすべてが配分対象からOFF(オッズは取得していても配分には
- * 使わない設定。#117で馬連、#125で馬単、#139で三連単を条件に加えた。#115時点はワイド・3連複の
- * 2項目のみだった)。**5項目のうち1つでもtrueなら成立しない**(#124が見つけた罠: 新券種を
+ * ワイド・3連複・馬連・馬単・三連単・枠連のすべてが配分対象からOFF(オッズは取得していても配分には
+ * 使わない設定。#117で馬連、#125で馬単、#139で三連単、#150で枠連を条件に加えた。#115時点はワイド・
+ * 3連複の2項目のみだった)。**6項目のうち1つでもtrueなら成立しない**(#124が見つけた罠: 新券種を
  * 既定ONのまま追加すると、既存の「残りをOFFにする」テストが黙って条件③〈no-combo-candidates〉
- * 側へ流れてしまう。本関数の呼び出し元テストは5項目とも明示的にOFFにすること)。
+ * 側へ流れてしまう。本関数の呼び出し元テストは6項目とも明示的にOFFにすること)。
  */
 function isComboBetTypesOff(settings: MixedAllocationSettings): boolean {
   return (
@@ -276,7 +284,8 @@ function isComboBetTypesOff(settings: MixedAllocationSettings): boolean {
     !settings.includeTrioInAllocation &&
     !settings.includeQuinellaInAllocation &&
     !settings.includeExactaInAllocation &&
-    !settings.includeTrifectaInAllocation
+    !settings.includeTrifectaInAllocation &&
+    !settings.includeBracketQuinellaInAllocation
   );
 }
 
@@ -493,8 +502,9 @@ function buildMixedRaceAllocationCore(
     trio: comboOddsAvailabilityFromDiagnostics(mixed.diagnostics.trio),
   };
 
-  // 4. D-2条件③(訂正2: ワイド・三連複・馬連・馬単・三連単の候補合計のみを見る。複勝候補の
-  // 件数は含めない。#117で馬連、#125で馬単、#139で三連単を数える対象に加えた)。
+  // 4. D-2条件③(訂正2: ワイド・三連複・馬連・馬単・三連単・枠連の候補合計のみを見る。複勝候補の
+  // 件数は含めない。#117で馬連、#125で馬単、#139で三連単、#150で枠連を数える対象に加えた。
+  // 枠連を数えないと、枠連候補だけがあってワイド等が非プラスのレースが`no-combo-candidates`になる)。
   // Issue #76: umabans.length>=2からの逆算ではなくbetTypeで判定する(値として運ぶ)。
   const comboCandidateCount = mixed.candidates.filter(
     (c) =>
@@ -502,7 +512,8 @@ function buildMixedRaceAllocationCore(
       c.betType === "trio" ||
       c.betType === "quinella" ||
       c.betType === "exacta" ||
-      c.betType === "trifecta",
+      c.betType === "trifecta" ||
+      c.betType === "bracketQuinella",
   ).length;
   if (comboCandidateCount === 0) {
     return buildPlaceOnlyFallbackOutcome(race, settings, "no-combo-candidates", comboOdds);
@@ -511,8 +522,9 @@ function buildMixedRaceAllocationCore(
   // 5. 混在配分を実際に計算する。
   // 枠番(wakuban)を載せる(Issue #148・#26-E2)。`allocateGeneralBets`は枠連候補が1件でもある
   // ときだけ全馬の`wakuban`を検査して的中判定に使う(枠連候補が無ければ一切見ない)。#148の時点では
-  // `resolveMixedBetTypes`が枠連を返さないため枠連候補は届かないが、#150で接続したときに枠番の
-  // 欠落で静かに誤らないよう、候補構築(`buildMixedCandidates`)と同じ行から載せておく。
+  // `resolveMixedBetTypes`が枠連を返さないため枠連候補は届かなかったが、Issue #150(#26-E3b)で
+  // 接続した今は実際に届く。枠番の欠落で静かに誤らないよう、候補構築(`buildMixedCandidates`)と
+  // 同じ行から載せている。
   const horses: BracketJointModelHorse[] = race.rows.map((r) => ({
     umaban: r.umaban,
     placeProb: r.adjustedProb,

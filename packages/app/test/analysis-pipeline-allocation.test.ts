@@ -722,8 +722,10 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
   /**
    * Issue #148(#26-E2・AC-2): 枠連(bracketQuinella)の`includeBracketQuinellaInAllocation`設定と
    * `resolveMixedBetTypes`への接続は#150のスコープ(設定の配管は#149)であり、#148の時点では
-   * `raceForAllocation.bracketQuinellaCombo`がproductionの配分結果に影響することはない
-   * (`ALL_MIXED_CANDIDATE_BET_TYPES`が`"bracketQuinella"`を含まないため。#137の三連単と同じ状態)。
+   * `raceForAllocation.bracketQuinellaCombo`がproductionの配分結果に影響することはなかった
+   * (`ALL_MIXED_CANDIDATE_BET_TYPES`が`"bracketQuinella"`を含まなかったため。#137の三連単と同じ状態)。
+   * (Issue #150で接続した現在は影響する。本テストは配分計算をモックして受け渡しだけを見るため、接続の
+   * 有無に依らず成立する。配分結果への影響は`bracket-quinella-allocation-setting-wiring.test.ts`が固定する。)
    * そこで#137と同じく、`buildMixedRaceAllocationWithOutcomeMock`の呼び出し引数を捕捉して
    * `analysis-pipeline.ts`が組み立てる`raceForAllocation`に`bracketQuinellaCombo`・
    * `comboOdds.bracketQuinella`が実際に渡っていることを確認する(殺す変異: `raceForAllocation`の

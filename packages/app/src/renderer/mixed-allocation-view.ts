@@ -127,12 +127,21 @@ export type MixedAllocationBreakdown = Record<AllocationBetType, { readonly stak
  * 実際に参照するようになり、#125での馬単と全く同じ理由で三連単の除外も解除した。**
  * 表示順は頭数の昇順(複勝→単勝→ワイド→馬連→馬単→3連複→三連単。三連単は3連複と同じ頭数
  * 〈3〉のため3連複の直後に置く)。
+ *
+ * **Issue #144(#26-B)で`AllocationBetType`に`bracketQuinella`(枠連)が加わったが、当時appは
+ * まだ枠連の候補を一切作らなかった(オッズ配線は#148・設定の配管は#149・配分接続は#150のスコープ)。**
+ * #112当時の馬連・#128当時の三連単と全く同じ理由で、`bracketQuinella`は当初この配列に含めて
+ * いなかった。**Issue #150(#26-E3b)で`resolveMixedBetTypes`が`includeBracketQuinellaInAllocation`
+ * 設定を実際に参照するようになり、#139での三連単と全く同じ理由で枠連の除外も解除した。**
+ * 枠連は2要素で順序なしの券種なので、頭数の昇順(2)の中では順序なしのワイド・馬連に続けて
+ * 馬連の直後・順序ありの馬単の前に置く(複勝→単勝→ワイド→馬連→枠連→馬単→3連複→三連単)。
  */
 export const MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER: readonly AllocationBetType[] = [
   "place",
   "win",
   "wide",
   "quinella",
+  "bracketQuinella",
   "exacta",
   "trio",
   "trifecta",
@@ -311,7 +320,7 @@ export function buildHiddenAllocationsBlocks(
  * throwするため、ここに到達しない)。
  *
  * `allocation-proposal-view.ts`の`betTypeLabel`(DB由来の開いた文字列を扱う、統合しない
- * 別実装)とplace/win/wide/quinella/exacta/trio/trifectaの7つの日本語ラベルが同一であることは
+ * 別実装)とplace/win/wide/quinella/exacta/trio/trifecta/bracketQuinellaの8つの日本語ラベルが同一であることは
  * `allocation-proposal-view.test.ts`「betTypeLabelとmixedBetTypeLabel…」でリテラル固定する。
  *
  * **かつては`"win"`・`"quinella"`・`"exacta"`・`"trifecta"`が例外だった(#91・#23-B1a、
@@ -319,7 +328,7 @@ export function buildHiddenAllocationsBlocks(
  * (`default`分岐でDB由来の生文字列をそのまま返す)、本関数との戻り値が一致しない非対称が
  * あった。`"win"`は#90(#23-B2)、`"quinella"`はIssue #117(#24-D3b-2)、`"exacta"`はIssue #125
  * (#24-E3b)、`"trifecta"`はIssue #139(#25-E3b)でそれぞれ`betTypeLabel`側にもcaseを追加し、
- * この非対称は解消済み(現在は7値すべてで両関数の戻り値が一致する)。
+ * この非対称は解消済み(現在は8値すべてで両関数の戻り値が一致する)。
  *
  * **`"trifecta"`(三連単)はIssue #128(#25-B)で`AllocationBetType`に加わり、当初は本caseの
  * 追加をコンパイルを通すための最小限にとどめ、`betTypeLabel`側へのcase追加・
@@ -329,12 +338,12 @@ export function buildHiddenAllocationsBlocks(
  * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`への追加のどちらも完了した。**
  *
  * **`"bracketQuinella"`(枠連)はIssue #144(#26-B)で`AllocationBetType`に加わり、本caseの
- * 追加はコンパイルを通すための最小限である**(`betTypeLabel`側へのcase追加・
- * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`・`ALL_MIXED_CANDIDATE_BET_TYPES`への追加は行わない。
- * 既定の配分ではappはまだ枠連の候補を作らない。オッズ取得・候補ビルダーはIssue #148〈#26-E2〉で
- * 完了し、設定の配管も#149で完了したが、配分接続・表示は#150のスコープ)。したがって
- * 上記「7値すべてで両関数の戻り値が一致する」は枠連を除く7値の話であり、枠連は
- * `betTypeLabel`側にまだcaseが無い(`quinella`等が最初にそうだったのと同じ経緯の非対称)。
+ * 追加はコンパイルを通すための最小限だった**(`betTypeLabel`側へのcase追加・
+ * `MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`・`ALL_MIXED_CANDIDATE_BET_TYPES`への追加は行わなかった。
+ * 当時appはまだ枠連の候補を作らなかったため)。オッズ取得・候補ビルダーはIssue #148〈#26-E2〉で、
+ * 設定の配管は#149で完了し、**Issue #150(#26-E3b)で配分接続が完了したため、`betTypeLabel`側の
+ * case追加・`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`・`ALL_MIXED_CANDIDATE_BET_TYPES`への追加の
+ * すべてを行った**(枠連を含む8値すべてで両関数の戻り値が一致する)。
  */
 export function mixedBetTypeLabel(
   betType: AllocationBetType,
@@ -413,28 +422,34 @@ function unjudgedOf(betType: AllocationBetType, diagnostics: MixedCandidateDiagn
       const d = diagnostics[betType];
       return d.kind === "built" ? d.build.unjudged : ZERO_UNJUDGED;
     }
-    case "bracketQuinella":
-      // 枠連(Issue #144・#26-B)。診断値(`MixedCandidateDiagnostics.bracketQuinella`)は
-      // Issue #148(#26-E2)で追加された。設定の配管は#149で完了しているが、配分への接続は#150の
-      // スコープであり、判定不能の合算(`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`を回す)には
-      // まだ枠連が含まれない。
-      // このためこの分岐に実行時に到達する経路は無い(網羅的switchのコンパイルを通すための最小限。
-      // 表示順へ加えるとき〈#150〉に、ここを他のコンボ券種と同じ`diagnostics[betType]`経由に
-      // 置き換える)。
-      return ZERO_UNJUDGED;
+    case "bracketQuinella": {
+      // 枠連(Issue #144・#26-B。診断値は#148で追加、配分への接続は#150)。他のコンボ券種と同型の
+      // `ComboCandidateDiagnosticsView`を共有し、`kind:"built"`のとき3区分すべてを持つ。
+      //
+      // **ただし取得結果が`unavailable`(発売されていない。8頭以下等)のときは判定不能に数えない**
+      // (Issue #150の着手前確認で発見)。coreの`buildBracketQuinellaCandidates`はオッズMapが空だと
+      // 全組を`oddsUnfetchedCount`に数える(`comboOddsState`を見ない)ため、そのまま合算すると
+      // 発売のないレースで「判定できなかった買い目があります(未取得N件)」と表示してしまう。
+      // 発売なしは判定不能ではなく対象外(#31: 判定不能と判定結果を混ぜない)であり、枠連の状態注記
+      // (`comboBetTypeNote`)が「発売されていません」と伝える。`failed`(取得失敗)・`unknown`
+      // (未取得)は「未取得」が事実なので、従来どおり判定不能に数える。
+      // 既存5券種(wide/trio/quinella/exacta/trifecta)の同型の挙動は今回は変えない(Issueに【記録】)。
+      const d = diagnostics.bracketQuinella;
+      return d.kind === "built" && d.comboOddsState !== "unavailable" ? d.build.unjudged : ZERO_UNJUDGED;
+    }
   }
 }
 
 /**
- * 券種横断(複勝・単勝・ワイド・馬連・馬単・3連複・三連単)で判定不能だった件数を合算する
+ * 券種横断(複勝・単勝・ワイド・馬連・枠連・馬単・3連複・三連単)で判定不能だった件数を合算する
  * (AC15・Issue #90でwinを追加・Issue #117で馬連〈quinella〉を追加・Issue #125で馬単
- * 〈exacta〉を追加・Issue #139で三連単〈trifecta〉を追加)。`kind!=="built"/"judged"`
+ * 〈exacta〉を追加・Issue #139で三連単〈trifecta〉を追加・Issue #150で枠連〈bracketQuinella〉を追加)。`kind!=="built"/"judged"`
  * (`not-requested`・`unavailable`。ユーザーが対象外にした券種、またはwinのyosoガード)は
  * 判定不能ではなく「対象外」なので0として扱う(判定不能〈unjudged〉と対象外
  * 〈not-requested`/`unavailable`〉を混同しない)。
  *
  * **Issue #139(#25-E3b)で券種を1つずつ手で足す実装から、`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`
- * (全7券種を持つ唯一の定義)を`.reduce`する実装へ変更した。** 旧実装は券種ごとに変数束縛
+ * (全券種を持つ唯一の定義。現在は8券種)を`.reduce`する実装へ変更した。** 旧実装は券種ごとに変数束縛
  * (`wideUnjudged`等)を手書きし、3つの合計式それぞれに手で足し込む形だったため、三連単
  * (`AllocationBetType`に既に存在した)を`AllocationBetType`に加えた後もこの関数への追加を
  * 忘れる欠陥が実際に発生した(#139着手前確認で発覚。三連単のunjudgedが常に0扱いになり、
@@ -569,9 +584,9 @@ export interface ComboBetTypeNoticeItem {
 }
 
 /**
- * 組合せ券種(ワイド・馬連・馬単・3連複・三連単)の状態注記を、表示順
- * (ワイド→馬連→馬単→3連複→三連単。`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`と同じ並び)に
- * 並べ、`null`(注記なし)の券種を省いた配列にする純関数(Issue #139・#25-E3b・Q1)。
+ * 組合せ券種(ワイド・馬連・枠連・馬単・3連複・三連単)の状態注記を、表示順
+ * (ワイド→馬連→枠連→馬単→3連複→三連単。`MIXED_ALLOCATION_BREAKDOWN_DISPLAY_ORDER`と同じ並び。
+ * Issue #150で枠連を馬連の直後に追加)に並べ、`null`(注記なし)の券種を省いた配列にする純関数(Issue #139・#25-E3b・Q1)。
  *
  * ## 経緯(#125のexactaNote欠落の再発防止)
  * Issue #125(#24-E3b)で`display.exactaNote`を新設したが、`BatchAnalysisView.tsx`側に
@@ -587,11 +602,15 @@ export interface ComboBetTypeNoticeItem {
  * ラベル文言の複製を作らずに保証する)。
  */
 export function buildComboBetTypeNotices(
-  display: Pick<MixedAllocationDisplay, "wideNote" | "quinellaNote" | "exactaNote" | "trioNote" | "trifectaNote">,
+  display: Pick<
+    MixedAllocationDisplay,
+    "wideNote" | "quinellaNote" | "bracketQuinellaNote" | "exactaNote" | "trioNote" | "trifectaNote"
+  >,
 ): readonly ComboBetTypeNoticeItem[] {
   const entries: ReadonlyArray<{ readonly betType: AllocationBetType; readonly note: string | null }> = [
     { betType: "wide", note: display.wideNote },
     { betType: "quinella", note: display.quinellaNote },
+    { betType: "bracketQuinella", note: display.bracketQuinellaNote },
     { betType: "exacta", note: display.exactaNote },
     { betType: "trio", note: display.trioNote },
     { betType: "trifecta", note: display.trifectaNote },
@@ -656,9 +675,10 @@ export function resolvePlaceOnlyStake(
  * Issue #117: 例示にワイド・3連複に加えて馬連も含めた(馬連も同じ「複数頭の組み合わせによる
  * 確率誤差の増幅」を受ける組合せ券種であり、ワイド・3連複だけを挙げる旧文言はこれを言い落として
  * いた)。Issue #125: 同じ理由で馬単も例示に加えた。Issue #139: 同じ理由で三連単も例示に加えた。
+ * Issue #150: 同じ理由で枠連も例示に加えた。
  */
 export const COMBO_EV_CALIBRATION_NOTE =
-  "ワイド・馬連・馬単・三連複・三連単など組合せ券種のEVは、推定確率の誤差が組み合わせ人数ぶん増幅されるため過大評価になりやすいことが実測でわかっています(較正は未実施・Issue #35)。表示額を鵜呑みにせず、資金管理は慎重に行ってください。";
+  "ワイド・馬連・枠連・馬単・三連複・三連単など組合せ券種のEVは、推定確率の誤差が組み合わせ人数ぶん増幅されるため過大評価になりやすいことが実測でわかっています(較正は未実施・Issue #35)。表示額を鵜呑みにせず、資金管理は慎重に行ってください。";
 
 /**
  * `kind:"invalid"`のユーザー向け表示文言(AC17)。`MixedRaceAllocationInvalid.message`は
@@ -721,6 +741,13 @@ export interface MixedAllocationDisplay {
   readonly quinellaNote: string | null;
   /** 馬単の状態注記(Issue #125・AC-4。wide/trio/quinellaと同じcomboBetTypeNoteを使う。無ければnull)。 */
   readonly exactaNote: string | null;
+  /**
+   * 枠連の状態注記(Issue #150・AC-4。wide/trio/quinella/exactaと同じcomboBetTypeNoteを使う。無ければnull)。
+   * **頭数では出し分けない**(発売の境界〈9頭以上〉は各頭数1レースの観測であり、断定的な文言を作らない。
+   * 発売のないレース〈8頭以下等〉は取得結果が`unavailable`になり、既存の「このレースでは発売されて
+   * いません(取得結果より判定)」になる)。三連単と異なり枠連は中央・地方とも取得するため、地方の特例文言は無い。
+   */
+  readonly bracketQuinellaNote: string | null;
   /**
    * 三連単の状態注記(Issue #139・AC4。`trifectaBetTypeNote`を使う。無ければnull)。
    * 地方(NAR)では`comboOddsState==='unknown'`のとき`comboBetTypeNote`の中央向け文言
@@ -844,6 +871,7 @@ export function buildMixedAllocationDisplay(
     trioNote: comboBetTypeNote(view.diagnostics.trio),
     quinellaNote: comboBetTypeNote(view.diagnostics.quinella),
     exactaNote: comboBetTypeNote(view.diagnostics.exacta),
+    bracketQuinellaNote: comboBetTypeNote(view.diagnostics.bracketQuinella),
     trifectaNote: trifectaBetTypeNote(view.diagnostics.trifecta, race.raceId),
     placeUnavailableNote: placeUnavailableNoteForMixed(view.diagnostics.place),
     placeOnlyStake: resolvePlaceOnlyStake(race, settings),
