@@ -100,9 +100,10 @@ describe("App.tsxがmixedAllocationSettingsFromAppSettingsを経由して設定�
 });
 
 describe("BatchAnalysisView.tsxがtoMixedAllocationCacheKeyを経由してキャッシュキーを作ること(ソース走査。Issue #150・AC-5(b))", () => {
-  it("keyForAllocationが設定の項目を手書きで写さず、toMixedAllocationCacheKey(raceId, fullResult, props.betAllocationSettings)で組み立てていること(殺す変異: 項目の手書きに戻して枠連をtrue固定にする)", () => {
+  it("keyForAllocationが設定の項目を手書きで写さず、return toMixedAllocationCacheKey(raceId, fullResult, props.betAllocationSettings);でそのまま返していること(殺す変異: 項目の手書きに戻して枠連をtrue固定にする)", () => {
     const source = readFileSync(path.join(rendererDir, "BatchAnalysisView.tsx"), "utf8");
-    expect(source).toContain("toMixedAllocationCacheKey(raceId, fullResult, props.betAllocationSettings)");
+    // `return`直後にそのまま返していること(結果を`{ ...key, 項目: true }`のように上書きする変異を許さない)。
+    expect(source).toContain("return toMixedAllocationCacheKey(raceId, fullResult, props.betAllocationSettings);");
     // 前提固定(空振り防止): keyForAllocationが実在し、手書きの写しが残っていないこと。
     expect(source).toContain("const keyForAllocation");
     expect(source).not.toMatch(/includeBracketQuinellaInAllocation:\s*s\./);

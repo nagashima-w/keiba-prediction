@@ -43,6 +43,17 @@
  *    `allocateGeneralBets`の内部値なので、本スクリプトが同じ的中判定を再実装して数え、
  *    製品の`hitProb`と全候補で一致することを毎回検査する**(一致しなければ例外)。
  *
+ * 5. 枠連(bracketQuinella)を配分に接続したとき(Issue #150〈#26-E3b〉。`includeBracketQuinellaInAllocation`)の
+ *    実際の配分結果。`buildMixedAllocationDisplay`(画面が呼ぶ経路)を、他6券種をすべてONにした設定で
+ *    枠連ON/OFFの2通り実行し、総額・点数・券種別構成比・枠連の候補件数(EVプラス件数)を並べる。
+ *    - 「枠連が入るレース」: 中央16頭(`202603020211`。全8枠に馬がいる。実オッズ・実prior)。
+ *      同じレースを枠連OFFにしたものが「入らない」比較対象(設定で入らない)。
+ *    - 「発売のないレース」(**合成**): 同レースの先頭8頭(馬番1〜8)を馬番=枠番として並べ、
+ *      ワイド・3連複は16頭の実オッズを馬番1〜8の組に絞った値、枠連は実フィクスチャ
+ *      `fixtures/odds_wakuren_unsold_202607020505.json`(中央8頭の未発売の応答。`unavailable`)を使う。
+ *      8頭の出馬表フィクスチャは無いため出走馬は合成であり、**この数値は「発売のないレースで枠連が入らず、
+ *      判定不能にも数えられない」ことの確認であって、配分額の実測ではない**。
+ *
  * ## 使い方
  *   pnpm tsx scripts/bench-mixed-allocation.ts
  *
@@ -80,7 +91,7 @@ import {
   runAnalysis,
   type AnalysisPipelineDeps,
 } from "../packages/app/src/main/analysis-pipeline.js";
-import type { AnalysisResult } from "../packages/app/src/shared/analysis-types.js";
+import type { AnalysisResult, ComboOddsScrapeOutcomeView } from "../packages/app/src/shared/analysis-types.js";
 import {
   buildMixedCandidates,
   type MixedCandidateBuildInput,
@@ -313,6 +324,10 @@ async function runPerRaceTiming(result: AnalysisResult): Promise<void> {
     // #25-E3a(Issue #138)で追加。候補ビルダーはまだ三連単の候補を作らないため
     // (resolveMixedBetTypes未接続)、この値は感度表の出力に一切影響しない。
     includeTrifectaInAllocation: true,
+    // #26-E3a(Issue #149)で追加。Issue #150(#26-E3b)で`resolveMixedBetTypes`が接続されたため、
+    // trueにすると候補ビルダーは実際に枠連を評価しにいく。ただし`toMixedCandidateInput`(このファイル)は
+    // `bracketQuinellaCombo`をraceへ渡さないため、枠連の候補は常に0件(unfetched)になり、配分額・構成比の
+    // 出力は変わらない(馬連・馬単と同じ理由)。枠連を実オッズで評価した結果は下の5.節を参照。
     includeBracketQuinellaInAllocation: true,
   };
 
@@ -646,6 +661,132 @@ async function runBracketQuinellaPerformanceComparison(result: AnalysisResult): 
   }
 }
 
+/** 未発売(8頭)の枠連フィクスチャ(Issue #150 AC-7の「入らないレース」用。中央・発売なしの応答)。 */
+const WAKUREN_UNSOLD_FIXTURE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "odds_wakuren_unsold_202607020505.json",
+);
+
+/** 枠連の取得結果(ComboOddsFetchOutcomeView)を最小構成で作る(診断値の中身はこの計測の関心事ではない)。 */
+function bracketOutcome(state: "available" | "unavailable"): NonNullable<ComboOddsScrapeOutcomeView["bracketQuinella"]> {
+  return {
+    state,
+    diagnostics: {
+      betType: "bracketQuinella",
+      requestCount: 1,
+      expectedComboCount: 0,
+      obtainedComboCount: 0,
+      missingComboCount: 0,
+      axisUmabans: [],
+      attempts: [],
+      numericConflictCount: 0,
+      nullWinConflictCount: 0,
+      conflictSamples: [],
+    },
+  };
+}
+
+/**
+ * 枠連を配分に接続したときの実際の配分結果を実測する(Issue #150〈#26-E3b〉)。冒頭JSDocの5.を参照。
+ * 経路は画面と同じ`buildMixedAllocationDisplay`(`buildMixedRaceAllocation`+表示データ導出)。
+ */
+async function runBracketQuinellaAllocationComparison(result: AnalysisResult): Promise<void> {
+  const base = toMixedCandidateInput(result);
+  const wakuren = parseComboOdds(readFileSync(WAKUREN_FIXTURE_PATH, "utf-8"), "bracketQuinella");
+  if (wakuren.state !== "available") {
+    throw new Error(`枠連フィクスチャが available ではありません(state=${wakuren.state})`);
+  }
+  const race16: MixedCandidateBuildInput = {
+    ...base,
+    quinellaCombo: loadQuinellaCombo(),
+    exactaCombo: loadExactaCombo(),
+    trifectaCombo: loadTrifectaCombo(),
+    bracketQuinellaCombo: Object.fromEntries(toComboOddsScalarMap(wakuren.odds)),
+    comboOdds: { ...base.comboOdds, bracketQuinella: bracketOutcome("available") },
+  };
+  const settingsOn: MixedAllocationSettings = {
+    bankroll: 1_000_000,
+    perRaceCap: 100_000,
+    kellyFraction: 0.5,
+    evThreshold: 1.0,
+    includeComboOdds: true,
+    includeWideInAllocation: true,
+    includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
+  };
+  const settingsOff: MixedAllocationSettings = { ...settingsOn, includeBracketQuinellaInAllocation: false };
+
+  // 「発売のないレース」(合成8頭)。ワイド・3連複は16頭の実オッズを馬番1〜8の組に絞る。
+  const keepFirst8 = (record: Record<string, number | null> | undefined): Record<string, number | null> =>
+    Object.fromEntries(
+      Object.entries(record ?? {}).filter(([key]) => {
+        const nums = key.match(/../g)!.map(Number);
+        return nums.every((n) => n >= 1 && n <= 8);
+      }),
+    );
+  const unsold = parseComboOdds(readFileSync(WAKUREN_UNSOLD_FIXTURE_PATH, "utf-8"), "bracketQuinella");
+  const race8: MixedCandidateBuildInput = {
+    oddsStatus: base.oddsStatus,
+    rows: result.rows.filter((r) => r.umaban <= 8).map((r) => ({ ...r, wakuban: r.umaban })),
+    wideCombo: keepFirst8(base.wideCombo),
+    trioCombo: keepFirst8(base.trioCombo),
+    bracketQuinellaCombo: {},
+    comboOdds: { wide: base.comboOdds?.wide, trio: base.comboOdds?.trio, bracketQuinella: bracketOutcome("unavailable") },
+  };
+  const settings8: MixedAllocationSettings = {
+    ...settingsOn,
+    includeQuinellaInAllocation: false,
+    includeExactaInAllocation: false,
+    includeTrifectaInAllocation: false,
+  };
+
+  console.log("");
+  console.log("=== 枠連(bracketQuinella)を配分に接続したときの配分結果(Issue #150・buildMixedAllocationDisplay・実運用と同じ経路) ===");
+  console.log(`  (未発売フィクスチャのパース結果: state=${unsold.state}。8頭の例は出走馬を合成している。冒頭JSDoc 5.参照)`);
+  const cases: readonly {
+    readonly label: string;
+    readonly race: MixedCandidateBuildInput;
+    readonly settings: MixedAllocationSettings;
+  }[] = [
+    { label: "中央16頭・枠連ON(枠連が入るレース)", race: race16, settings: settingsOn },
+    { label: "中央16頭・枠連OFF(同じレース。設定で入らない)", race: race16, settings: settingsOff },
+    { label: "合成8頭・枠連ON(発売なし=unavailable。入らない)", race: race8, settings: settings8 },
+  ];
+  for (const c of cases) {
+    const view = buildMixedAllocationDisplay(c.race, c.settings);
+    if (view.kind !== "mixed") {
+      console.log(`  ${c.label}: kind=${view.kind}(混在経路に入らなかった)`);
+      continue;
+    }
+    const total = view.result.totalStake;
+    const bracket = view.display.breakdown.bracketQuinella;
+    const diag = view.diagnostics.bracketQuinella;
+    const positive = diag.kind === "built" ? diag.build.judged.positiveCount : null;
+    const pct = (n: number): string => (total > 0 ? `${((n / total) * 100).toFixed(1)}%` : "0.0%");
+    const iterations = 10;
+    buildMixedAllocationDisplay(c.race, c.settings); // ウォームアップ
+    const samples: number[] = [];
+    for (let i = 0; i < iterations; i++) {
+      const t0 = performance.now();
+      buildMixedAllocationDisplay(c.race, c.settings);
+      samples.push(performance.now() - t0);
+    }
+    const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+    console.log(
+      `  ${c.label}: 総額${total.toLocaleString()}円 / ${view.result.betCount}点 / ` +
+        `枠連 ${bracket.stake.toLocaleString()}円(${pct(bracket.stake)}) ${bracket.count}点 / ` +
+        `枠連の候補(EVプラス)${positive === null ? "なし(対象外)" : `${positive}件`} / ` +
+        `判定不能の合計${view.display.unjudged.oddsMissingCount + view.display.unjudged.oddsUnfetchedCount + view.display.unjudged.oddsMalformedCount}件 / ` +
+        `枠連の注記=${view.display.bracketQuinellaNote ?? "なし"} / 平均${avg.toFixed(1)}ms(n=${iterations})`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const result = await loadAnalysisResult();
   console.log(`raceId=${result.raceId} rows=${result.rows.length}頭 oddsStatus=${result.oddsStatus}`);
@@ -653,6 +794,7 @@ async function main(): Promise<void> {
   await runPerRaceTiming(result);
   await runQuinellaPerformanceComparison(result);
   await runBracketQuinellaPerformanceComparison(result);
+  await runBracketQuinellaAllocationComparison(result);
 }
 
 // このファイルを直接実行したとき(`pnpm tsx scripts/bench-mixed-allocation.ts`)だけ計測一式を
