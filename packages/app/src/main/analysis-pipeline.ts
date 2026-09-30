@@ -2,7 +2,8 @@
  * 分析パイプライン(main プロセス)。
  *
  * 1レース分の分析を次の順で実行し、途中経過を進捗コールバックで通知する:
- *   スクレイピング(scrapeRace) → スコアリング(buildPriorInput × 全頭 → computeFieldPriors)
+ *   スクレイピング(scrapeRace) → 戦績の先読みリーク遮断(Issue #39。自レース・施行日以降の走を除く)
+ *   → スコアリング(buildPriorInput × 全頭 → computeFieldPriors)
  *   → LLM分析(analyzeRace。未設定ならスキップし prior を採用) → EV計算(computeRaceEv)
  *   → 保存(AnalysisStore.saveAnalysis) → 結果を返す
  *
@@ -91,6 +92,10 @@ import {
   toMixedAllocationSettings,
   type AnalysisAllocationSettings,
 } from "./allocation-record.js";
+import {
+  excludeOwnRaceResults,
+  filterRaceDataBefore,
+} from "@keiba/core/scorer/snapshot-filter";
 import { buildRaceSnapshot } from "./analysis-export.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
 
@@ -345,8 +350,8 @@ export async function runAnalysis(
     total: null,
     message: "レースデータを取得しています…",
   });
-  const race = await deps.scrape(raceId);
-  const horseCount = race.horses.length;
+  const scrapedRace = await deps.scrape(raceId);
+  const horseCount = scrapedRace.horses.length;
   notify({
     stage: "スクレイピング",
     current: horseCount,
@@ -359,6 +364,26 @@ export async function runAnalysis(
   const venueKind = venueKindOfRaceId(raceId);
   const { date: analysisDate, approximate: dateApproximate } =
     resolveAnalysisDate(kaisaiDate, now);
+  // (1b) 先読みリークの遮断(Issue #39)。netkeiba の馬ページの戦績は日付で絞られておらず、過去の
+  // レースを分析すると、そのレース自身の走と施行日以降の走が戦績に含まれる(実測: 中央16頭で
+  // 全114走のうち自レース16走・施行日より後5走。prior 上位3頭が実着順上位3頭と一致した)。
+  // これらを prior・LLMプロンプト入力・結果行の材料から取り除くため、**ここで1回だけ**絞り、以降の
+  // 戦績の消費箇所(buildPriorInput・runs・条件替わり・馬体重推移・人気着順乖離・乗り替わり・
+  // 着差傾向・休養間隔・careerRunCount・条件替わりタグ)はすべて絞った `race` を使う。
+  //  - 当該 raceId の走は日付に依らず除外する(`raceIdRaw` 比較。中央・地方とも効く)。開催日が渡らず
+  //    実行日で近似(dateApproximate=true)した過去レースでも、自レースの走は日付だけでは残るため。
+  //  - 基準日(analysisDate)と同日以降の走・日付欠損の走を除外する(未来の走を混ぜない保守側)。
+  //    近似日のとき基準日は実行日になるため、施行日より後・実行日より前の走は残る(既知の限界。
+  //    近似日はUIから到達しない。画面には「近似」と表示される)。
+  //  - 当日の未施行レースでは自レース・施行日以降の走がそもそも存在せず、何も変わらない。
+  // scraper では絞らない(scrapeRace は分析日を知らず、生の戦績を必要とする用途があるため)。
+  const race = filterRaceDataBefore(
+    excludeOwnRaceResults(scrapedRace, raceId).raceData,
+    analysisDate,
+  ).raceData;
+  // 絞りに使った基準日(YYYYMMDD)。保存レコードの history_cutoff_date に書き、是正前の分析
+  // (この列が NULL)と区別できるようにする(dateApproximate=true でも使った基準日を書く)。
+  const historyCutoffDate = analysisDate.replaceAll("/", "");
   const isWet =
     classifyTrackWetness(race.race.trackCondition ?? null, race.race.courseType)
       ?.isWet ?? false;
@@ -752,6 +777,9 @@ export async function runAnalysis(
     // resolveAnalysisDate が当日日付で近似するが、その近似値は不確かなため保存しない
     // (analysisDate は季節分類等のスコアリングにのみ使い、DB保存は生の kaisaiDate 引数のみ参照する)。
     kaisaiDate,
+    // 戦績の絞り込みに使った基準日(Issue #39)。kaisaiDate と異なり、近似日のときも使った基準日
+    // (実行日)を書く。NULL の行は先読みリーク遮断より前に作られた分析(是正前)を意味する。
+    historyCutoffDate,
     // 使用したLLMモデル名(Issue#10)。LLMを実際に使った分析のみ記録する(promptVersionと同じ方針。
     // LLMスキップ時は deps.modelName が設定されていても null にし、偽値を混入させない)。
     model: llmUsed ? (deps.modelName ?? null) : null,

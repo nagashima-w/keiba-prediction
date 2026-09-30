@@ -673,6 +673,102 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("history_cutoff_date列(戦績の絞り込み基準日の記録。Issue #39)", () => {
+    /** 生SQLで history_cutoff_date を読む(StoredAnalysis には出さない。読み出し・表示は #152 のスコープ)。 */
+    function readCutoff(db: InstanceType<typeof Database>, analysisId: number): string | null {
+      const row = db
+        .prepare(`SELECT history_cutoff_date AS v FROM analyses WHERE id = ?`)
+        .get(analysisId) as { v: string | null };
+      return row.v;
+    }
+
+    it("historyCutoffDate を指定して保存すると、列にその基準日(YYYYMMDD)が書かれること", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(makeRecord({ raceId: "基準日あり", historyCutoffDate: "20260628" }));
+      expect(readCutoff(db, id)).toBe("20260628");
+      store.close();
+    });
+
+    it("historyCutoffDate を省略した保存(=是正前の呼び出し元)は NULL(記録なし)になり、0や空文字にならないこと", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(makeRecord({ raceId: "基準日省略" }));
+      expect(readCutoff(db, id)).toBeNull();
+      store.close();
+    });
+
+    it("historyCutoffDate に null を明示しても NULL として保存されること", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(makeRecord({ raceId: "基準日null", historyCutoffDate: null }));
+      expect(readCutoff(db, id)).toBeNull();
+      store.close();
+    });
+
+    it("history_cutoff_date列だけが無い旧スキーマのDBを開くと列が後付けされ、既存行は NULL(是正前)のまま、新規保存は基準日付きで保存できること(冪等)", () => {
+      const db = new Database(":memory:");
+      // 現行の analyses / analysis_horses から history_cutoff_date だけを除いた旧スキーマ(#39より前)。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL,
+          ev_estimated INTEGER,
+          prompt_version TEXT,
+          additional_instruction TEXT,
+          kaisai_date TEXT,
+          model TEXT,
+          raw_response TEXT,
+          race_snapshot_json TEXT
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          reason TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      const info = db
+        .prepare(
+          `INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date) VALUES (?, ?, ?, ?)`,
+        )
+        .run("是正前レース", "2026-07-01T00:00:00.000Z", 0, "20260628");
+      const oldId = Number(info.lastInsertRowid);
+      // 前提: 旧スキーマには新列が無い。
+      const before = db.prepare(`PRAGMA table_info(analyses)`).all() as Array<{ name: string }>;
+      expect(before.some((c) => c.name === "history_cutoff_date")).toBe(false);
+
+      const store = new AnalysisStore({ database: db });
+      const after = db.prepare(`PRAGMA table_info(analyses)`).all() as Array<{ name: string }>;
+      expect(after.filter((c) => c.name === "history_cutoff_date")).toHaveLength(1);
+      // 既存行は NULL(記録なし=是正前)。0や空文字で「是正済み」と誤読させない。
+      expect(readCutoff(db, oldId)).toBeNull();
+
+      const newId = store.saveAnalysis(
+        makeRecord({ raceId: "是正後レース", kaisaiDate: "20260628", historyCutoffDate: "20260628" }),
+      );
+      expect(readCutoff(db, newId)).toBe("20260628");
+      expect(readCutoff(db, oldId)).toBeNull();
+
+      // 同じDBをもう一度開いても(初期化の再実行)列が二重に追加されず、値が保たれる(冪等)。
+      // 接続を共有するため、1つ目の store は閉じずに残す(閉じると db 自体が閉じる)。
+      const store2 = new AnalysisStore({ database: db });
+      const again = db.prepare(`PRAGMA table_info(analyses)`).all() as Array<{ name: string }>;
+      expect(again.filter((c) => c.name === "history_cutoff_date")).toHaveLength(1);
+      expect(readCutoff(db, newId)).toBe("20260628");
+      store2.close();
+    });
+  });
+
   describe("エクスポート用列(model/rawResponse/raceSnapshot/reason)の保存・復元(Issue#10)", () => {
     it("model・rawResponse・raceSnapshot・各馬reasonを指定して保存すると、そのまま復元できること", () => {
       const store = new AnalysisStore();

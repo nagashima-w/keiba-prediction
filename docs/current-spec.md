@@ -192,6 +192,24 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   競馬場適性(`bias-venue.ts`、出走歴が無い場は `course-traits.ts` の類似度で代替評価)/ 季節適性
   (`bias-season.ts`)/ 枠順適性(馬個別、`bias-frame.ts`)/ 夏負けフラグ / 輸送・滞在バイアス
   (`bias-transport.ts`)/ ローテーション適性(鉄砲・叩き良化・使い込み下降、`bias-rotation.ts`)。
+- **戦績の扱い(先読みリークの遮断。Issue #39)**: netkeiba の馬ページの戦績は日付で絞られていないため、
+  過去のレースを分析すると、そのレース自身の走と施行日以降の走が含まれる(実測: 中央16頭で全114走のうち
+  自レース16走・施行日より後5走)。`runAnalysis`(`analysis-pipeline.ts`)は **scrape 直後の1点**で
+  戦績を絞り、以降の消費箇所(prior・LLMプロンプト入力〈runs・条件替わり・馬体重推移・人気着順乖離・
+  乗り替わり・着差傾向・休養間隔〉・結果行の `careerRunCount`・条件替わりタグ)はすべて絞った戦績を使う。
+  scraper では絞らない(生の戦績が必要な用途があるため)。絞り方は次の2つ(`scorer/snapshot-filter.ts`)。
+  - `excludeOwnRaceResults`: **当該 raceId の走を日付に依らず除外**する。比較は `HorseRaceResult.raceIdRaw`
+    (中央・地方とも12桁の生値)で行う。`raceId` フィールドは地方では常に null のため使わない。
+  - `filterRaceDataBefore`: 基準日(`analysisDate`)**と同日以降**の走と、**日付欠損・不正形式の走**を
+    除外する(未来の走を混ぜない保守側。手元フィクスチャ〔中央16頭・18頭・地方12頭〕の全走で日付欠損は0件で、
+    通常運用の結果は変わらない)。
+  当日の未施行レースでは自レースの走も施行日以降の走も存在せず、何も変わらない。`kaisaiDate` が渡らず
+  実行日で近似(`dateApproximate=true`)した場合、自レースの走は raceId で除かれるが、施行日より後・
+  実行日より前の走は残る(既知の限界。近似日は UI から到達しない)。`results=null`(戦績取得失敗)は
+  null のまま、0走(新馬)は `[]` で、区別を保つ。絞りに使った基準日は保存レコードの
+  `historyCutoffDate`(DB の `analyses.history_cutoff_date`。5節・後述の「先読みリーク遮断の記録」参照)
+  に書く。LLM プロンプトのうち、戦績以外の先読みリーク(同日傾向への後続レース混入・地方の同レース
+  過去10年結果への当該回の混入)は本項では遮断しておらず #153 で扱う。
 - **共通ルール**: 各バイアスは「対象条件の複勝率 − 全体複勝率 × 重み」の差分ベース(`aggregate.ts`)。
   サンプル 2 走未満は補正なし(`minSampleForBias=2`)。各バイアスの寄与度は内訳(`BiasContribution`)として
   ログ可能。
@@ -296,6 +314,14 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **中央/地方別**: `VerifyVenueFilter`(all / central / nar)で絞り込み集計。
 - **版別**: `computeVerifyReportByPromptVersion` が `PROMPT_VERSION` でグループ化し版別に集計・比較。
   推定 EV(evEstimated)は集計から除外して区別。既定は latest モード(レースごと最新分析のみ)。
+- **先読みリーク遮断の記録(Issue #39)**: `analyses.history_cutoff_date`(TEXT・NULL 許容、
+  `YYYYMMDD`)に、戦績の絞り込みに**実際に使った基準日**を書く(`AnalysisRecord.historyCutoffDate`)。
+  `dateApproximate=true`(開催日が渡らず実行日で近似)の分析でも、使った基準日(=実行日)を書く
+  (`kaisai_date` は近似のとき NULL のままで、別の値)。**NULL は「遮断の記録なし=#39 より前に作られた
+  分析(是正前)」を意味する**(0や空文字で「是正済み」と読ませない。#31の原則・`include_*` 列と同じ流儀)。
+  既存 DB は開くときに `PRAGMA table_info` → `ALTER TABLE ADD COLUMN` で後付けする(冪等)。
+  この値の**読み出し・表示・verify での扱い(「リーク疑い」の注記/除外)は #152 のスコープ**で、
+  `StoredAnalysis` にはまだ含めない。
 - **配分提案の永続化(Issue #59)**: `saveAnalysis` は分析本体(`analyses`/`analysis_horses`)と
   同一トランザクションで、5節の配分提案を新テーブル2本へ書く(`AnalysisRecord.allocation`が
   渡されたときのみ。呼び出し側〈main〉が渡さない旧来の呼び出しでは書かない=「未到達」)。
@@ -737,7 +763,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 `place-joint-model.ts`・`combo-bet-allocation.ts`・`expected-value.ts`)の挙動は一切変更しない。
 
 - **Issue #35 の分割**: #40(本節。計測基盤の健全化と指標の実装)/ #39(本番側
-  `analysis-pipeline.ts` の先読みリーク是正・未着手)/ #41(30レース規模のサンプル拡大・LLM実行・
+  `analysis-pipeline.ts` の先読みリーク是正。完了)/ #41(30レース規模のサンプル拡大・LLM実行・
   未着手)/ #42(較正 calibration 方式の要否検討・未着手)。同時分布モデルの厳密化(#20)は #41/#42 の
   技術的前提であり、#77(#20-A。θ推定器と`PLACKETT_LUCE_MODEL`の追加・既定は不変。完了)→
   #78(#20-B。既定モデルの切替。着手前ゲートで【No-Go】と判定され #80〈#78-A〉/ #81〈#78-B〉に
@@ -751,11 +777,12 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
      動く(`dateApproximate=true`)。計測・回帰テストでは必ず実レース日の `kaisaiDate` を明示する
      こと。`scripts/bench-mixed-allocation.ts` もこの理由で `kaisaiDate` を明示するよう是正済み
      (#40。それ以前は明示していなかった)。
-  2. **先読みリーク**: `analysis-pipeline.ts:344` 付近が戦績を日付でフィルタせず `buildPriorInput`
-     に渡すため、当該レース自身の着順が prior の材料に混入しうる(実測: 中央16頭フィクスチャで
+  2. **先読みリーク**: (#40 時点)`analysis-pipeline.ts` が戦績を日付でフィルタせず `buildPriorInput`
+     に渡していたため、当該レース自身の着順が prior の材料に混入していた(実測: 中央16頭フィクスチャで
      出走16頭全頭・21走が該当。うち16走が当該レース自身、5走は基準日より後の日付)。
-     **本番側(`analysis-pipeline.ts`)の是正は #39 の担当**(#40はそこに一切手を入れない)。
-     計測用には `filterRaceDataBefore`(後述)で遮断してから測る。
+     **#39 で本番側(`runAnalysis`)が scrape 直後に遮断するようになった**(2節「戦績の扱い」参照)。
+     #40 の時点の計測値(中央 ρ=0.2104 等)はリークありの値で、#39 以降の `runAnalysis` の出力は
+     遮断後の値(中央 ρ=-0.0059 等)になる。
 - **`scorer/snapshot-filter.ts`**: `filterRaceDataBefore(raceData, cutoffDate)` — 各馬の
   `results` を `date < cutoffDate` で絞る純関数(`cutoffDate`/`HorseRaceResult.date` はいずれも
   `YYYY/MM/DD`。非ゼロ埋め表記も含め `daysBetweenDates` で比較し、辞書順比較はしない)。
@@ -782,7 +809,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **回帰テスト**: `packages/core/test/` に低レベル指標の単体テスト(合成データ・境界値、
   `packages/app` に非依存)。`scripts/test/probability-quality-regression.test.ts` に
   実フィクスチャ(中央16頭・地方12頭)を `runAnalysis` で駆動する回帰テストと、リーク遮断の
-  前後比較(#40で実測: 中央16頭で ρ 0.2104→-0.0059、正規化KL 0.0156→0.0236)。
+  前後比較(#40で実測: 中央16頭で ρ 0.2104→-0.0059、正規化KL 0.0156→0.0236)。#39 以降は
+  `runAnalysis` 自身が遮断するため、「リークあり」の値は core の公開関数(`buildPriorInput`+
+  `computeFieldPriors`)を生の戦績で直接呼ぶ参照実装から得る(生入力と遮断済み入力の `runAnalysis`
+  出力は同値であることを固定している)。
 
 ## 主な当初仕様との差異(記録)
 

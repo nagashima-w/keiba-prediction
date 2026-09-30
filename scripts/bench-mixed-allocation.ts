@@ -25,14 +25,11 @@
  *   `docs/current-spec.md`「9. 確率の質の計測基盤」・Issue #40 参照)
  * - `runAnalysis` を `deps.analyze: null`(LLM未使用)で実行し、scorer が出す **実 prior**
  *   (LLM補正なし=adjustedProb===prior)をそのまま使う
- * - **戦績の先読みリークは遮断していない**: `deps.scrape` に渡すフィクスチャの
- *   `horses[].results` は日付フィルタをかけていない生データであり、当該レース自身の着順が
- *   prior の材料に混入したまま計測している(本番の `analysis-pipeline.ts` と同じ状態。
- *   是正は #39)。したがって本スクリプトが出す prior・EV・配分の絶対値は、確率の質の指標として
- *   額面通りに読んではならない(リーク遮断込みの計測は `ev/probability-quality.ts` +
- *   `scripts/test/probability-quality-regression.test.ts` を参照すること。#40「#35-1a」)。
- *   本スクリプトの目的は `greedySteps` 感度・所要時間の計測であり、prior の質そのものの
- *   計測ではないため、ここでは意図的にリーク遮断を追加していない
+ * - **戦績の先読みリークは、#39 以降は `runAnalysis` 自身が遮断する**: `deps.scrape` に渡す
+ *   フィクスチャの `horses[].results` は日付フィルタをかけていない生データだが、`runAnalysis` が
+ *   scrape 直後に自レースの走・施行日以降の走を取り除く。したがって本スクリプトが出す prior・EV・
+ *   配分は遮断後の値である(#39 より前はリーク込みの値だった。#39 前後で本スクリプトの
+ *   candidateCap 以降の数値を比較するときは、この違いを考慮すること)
  * - ケリー係数 λ=0.5、EV閾値1.0(既定)
  *
  * 4. 枠連(bracketQuinella)を7券種に追加したときの署名畳み込み後のoutcome数・所要時間の

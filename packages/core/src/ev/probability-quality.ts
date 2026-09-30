@@ -37,6 +37,10 @@
  *   `filterRaceDataBefore` を実行した**実際の戻り値**(`SnapshotFilterDiagnostics`)を渡した
  *   場合のみ非nullになる。「適用した」という自己申告のbooleanを受け取るのではなく、実際の
  *   診断値オブジェクトの有無・中身から導出する(申告と実測を取り違えない設計)。
+ *   **#39 以降の注意**: production(`runAnalysis`)が先読みリークを自分で遮断するようになった
+ *   ため、`runAnalysis` の出力を測る限り、値は診断値の有無に関わらず遮断済みである。
+ *   `leakFilterApplied=false` は「診断値が渡されなかった」の意味であり、「値がリークありである」
+ *   ことは意味しない(リークありの値は `runAnalysis` からは作れない)。
  * - `placeOddsKind` / `trioComboOddsKind`: 固定値(下記AC6'参照)。
  *
  * ## 複勝オッズは「幅」である(受け入れ条件6')

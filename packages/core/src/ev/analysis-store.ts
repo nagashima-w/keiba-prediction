@@ -162,6 +162,16 @@ export interface AnalysisRecord {
    */
   readonly kaisaiDate?: string | null;
   /**
+   * 戦績を絞るのに使った基準日(YYYYMMDD。`kaisaiDate` と同じ形式。Issue #39)。
+   * app 側の分析パイプラインが、先読みリーク遮断(基準日と同日以降・当該レース自身の走を
+   * 材料から除く)に**実際に使った基準日**をそのまま渡す。`dateApproximate=true`(開催日が
+   * 渡らず実行日で近似した)の分析でも、使った基準日(=実行日)を書く。
+   * 省略・null は「遮断の記録なし=是正前の呼び出し元/旧行」で、DBには NULL として保存する。
+   * この値の読み出し・表示(verify での注記/除外)は #152 のスコープで、`StoredAnalysis` には
+   * まだ含めない。
+   */
+  readonly historyCutoffDate?: string | null;
+  /**
    * 使用したLLMモデル名(Issue#10 分析データのエクスポート、例: "claude-sonnet-4-6")。
    * LLMを使わず prior をそのまま採用した分析(LLMスキップ)は null を渡す想定(偽値を混入させない)。
    * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
@@ -692,7 +702,8 @@ export class AnalysisStore {
         kaisai_date TEXT,
         model TEXT,
         raw_response TEXT,
-        race_snapshot_json TEXT
+        race_snapshot_json TEXT,
+        history_cutoff_date TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -821,6 +832,22 @@ export class AnalysisStore {
     this.migrateAllocationExactaColumn();
     this.migrateAllocationTrifectaColumn();
     this.migrateAllocationBracketQuinellaColumn();
+    this.migrateHistoryCutoffDateColumn();
+  }
+
+  /**
+   * 戦績の絞り込み基準日(history_cutoff_date)列を後付けするマイグレーション(Issue #39)。
+   * #39より前に作成済みの analyses にはこの列が無いため、存在しなければ追加する。既存行は
+   * ALTER TABLE で NULL が入る=「先読みリーク遮断の記録なし=是正前」として読める(0や空文字で
+   * 「是正済み」と誤読させない。#31の原則・include_*列の後付けと同じ流儀)。冪等。
+   */
+  private migrateHistoryCutoffDateColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "history_cutoff_date")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN history_cutoff_date TEXT`);
+    }
   }
 
   /**
@@ -1055,8 +1082,8 @@ export class AnalysisStore {
     const insertAnalysis = this.db.prepare(
       `INSERT INTO ${ANALYSES_TABLE}
          (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date,
-          model, raw_response, race_snapshot_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          model, raw_response, race_snapshot_json, history_cutoff_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
@@ -1092,6 +1119,7 @@ export class AnalysisStore {
         rec.raceSnapshot === undefined || rec.raceSnapshot === null
           ? null
           : JSON.stringify(rec.raceSnapshot),
+        rec.historyCutoffDate ?? null,
       );
       const analysisId = Number(info.lastInsertRowid);
       for (const h of rec.horses) {

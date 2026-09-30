@@ -3,12 +3,21 @@
  * 計測基盤の健全化と指標の実装」)。
  *
  * ## 背景(このモジュールが存在する理由)
- * `packages/app/src/main/analysis-pipeline.ts` は `raceResults: horseData.results ?? []` と
- * 戦績を日付でフィルタせず `buildPriorInput` に渡している。そのレース自身の着順(=このレースの
- * 結果を知った上での「予測」)がpriorの材料に混入しうる(実測: 中央フィクスチャで出走16頭全頭が
- * 該当)。**本番側(analysis-pipeline.ts)の是正は #39 の担当であり、本モジュールはそこには
- * 一切手を入れない。** 本モジュールは「確率の質を測る計測」のために、計測の入力データだけを
- * 独立に基準日で絞り込む純関数を提供する(#40のスコープ)。
+ * 戦績を日付でフィルタせず `buildPriorInput` に渡すと、そのレース自身の着順(=このレースの
+ * 結果を知った上での「予測」)がpriorの材料に混入する(実測: 中央フィクスチャで出走16頭全頭が
+ * 該当)。#40 はこの純関数を「確率の質を測る計測」の入力データ遮断のために作った。
+ * **#39 でこの2関数(`filterRaceDataBefore`・`excludeOwnRaceResults`)を production の
+ * `analysis-pipeline.ts`(`runAnalysis` の scrape 直後の1点)でも使うようになった。**
+ * したがって計測の「遮断あり」と production は構造的に同じ関数を通る。
+ *
+ * ## 2関数の役割分担(#39 是正方式B)
+ * - `filterRaceDataBefore`: 基準日で絞る(基準日と同日以降・日付欠損は除外)。
+ * - `excludeOwnRaceResults`: 当該 raceId の走を**日付に依らず**除外する。基準日が実行日で近似される
+ *   (`dateApproximate=true`)過去レースでは、日付だけでは自走が「実行日より前」として残るため。
+ *   比較は `HorseRaceResult.raceIdRaw` で行う(`raceId` は地方では常に null。実測: 地方12頭
+ *   フィクスチャで raceId 一致 0 件・raceIdRaw 一致 12 件)。
+ * 両者は独立に呼べる。`filterRaceDataBefore` の診断値の恒等式(#40)を保つため、raceId 除外は
+ * そちらに混ぜず別関数にしている。
  *
  * ## AC9: 値インポート境界
  * `RaceData`/`RaceHorseData` は重い実行時依存(cheerio・undici等)を持つ
@@ -27,7 +36,9 @@
  * 辞書順比較だと1桁月日を含む日付で誤判定する。そこで `daysBetweenDates(r.date, cutoffDate)`
  * (= cutoffDate − r.date の日数差)を使い、次のセマンティクスに固定する:
  * - `null`(日付欠損 or パース不能)→ **除外**。判定不能を「残す」に倒すとリークを見逃すため、
- *   安全側(除外)に倒す。除去件数は `removedByInvalidDateCount` に計上する。
+ *   安全側(除外)に倒す(未来の走を混ぜない保守側。production でも同じ扱い。実測フィクスチャ
+ *   〔中央16頭・18頭・地方12頭の全走、`fixtures/horse_results_*.json`〕では欠損は0件で、
+ *   通常運用の結果は変わらない)。除去件数は `removedByInvalidDateCount` に計上する。
  * - `<= 0`(基準日と同日を含む。同日 = 当該レース自身の可能性が高い)→ **除外**。
  *   `removedByCutoffCount` に計上する。
  * - `> 0`(基準日より前の走)→ **残す**。
@@ -37,6 +48,7 @@
  * 新しいオブジェクト・配列を組み立てて返す(スプレッド構文のみ使用)。
  */
 
+import type { RaceId } from "../scraper/ids.js";
 import type { HorseRaceResult } from "../scraper/types.js";
 import type { RaceData, RaceHorseData } from "../scraper/scrape-race.js";
 import { daysBetweenDates } from "./derive-features.js";
@@ -151,4 +163,39 @@ export function filterRaceDataBefore(
       perHorse,
     },
   };
+}
+
+/** excludeOwnRaceResults の戻り値。 */
+export interface ExcludeOwnRaceResultsResult {
+  /** 当該レース自身の走を除いた新しい RaceData(元オブジェクトは変更しない)。 */
+  readonly raceData: RaceData;
+  /** 全馬合計の除去数(診断値。0なら当該レースの走は含まれていなかった)。 */
+  readonly removedCount: number;
+}
+
+/**
+ * `raceData.horses[].results` から、対象 `raceId` 自身の走を日付に依らず除外する(#39 是正方式B)。
+ *
+ * 比較は `HorseRaceResult.raceIdRaw`(中央・地方とも12桁の生値)で行う。`raceIdRaw` が null の走
+ * (海外・リンク欠損)は除外しない。`results===null`(戦績取得失敗)は null のまま通す
+ * (0走の `[]` と区別する。`careerRunCount` が null と 0 を区別するため)。
+ * 入力は破壊せず、新しいオブジェクト・配列を返す。
+ *
+ * @param raceData 対象の RaceData。
+ * @param raceId 分析対象レースのID(`raceData.raceId` と同じ値を渡す想定)。
+ */
+export function excludeOwnRaceResults(
+  raceData: RaceData,
+  raceId: RaceId,
+): ExcludeOwnRaceResultsResult {
+  let removedCount = 0;
+  const horses: RaceHorseData[] = raceData.horses.map((horse) => {
+    if (horse.results === null) {
+      return { ...horse, results: null };
+    }
+    const kept = horse.results.filter((r) => r.raceIdRaw !== raceId);
+    removedCount += horse.results.length - kept.length;
+    return { ...horse, results: kept };
+  });
+  return { raceData: { ...raceData, horses }, removedCount };
 }
