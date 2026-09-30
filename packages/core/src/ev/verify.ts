@@ -418,10 +418,11 @@ export interface ProposedBetUnknownBetType {
  * `VerifyView.tsx`への表示追加は#132へ申し送る(`trifecta`フィールド自体はここ・
  * `computeProposedBetReport`・`overall`合算には既に含める。表示だけを見送る)。
  *
- * ★枠連(bracketQuinella)はIssue #145・#26-Fで確定払戻の取込・回収率判定に対応した。配分が枠連の
- * 買い目をまだ作らない(app側の候補・設定は#146)ため`betCount`は現時点で構造的に常に0になる
- * (exacta・trifectaと同じ経緯)。`VerifyView.tsx`への表示追加は#146のスコープであり、
- * `bracketQuinella`フィールド自体はここ・`computeProposedBetReport`・`overall`合算には既に含める。
+ * ★枠連(bracketQuinella)はIssue #145・#26-Fで確定払戻の取込・回収率判定に対応した。#145の時点では
+ * 配分が枠連の買い目をまだ作らず(app側の候補・設定は#146以降に分割)`betCount`は構造的に常に0だった
+ * (exacta・trifectaと同じ経緯)。**Issue #150(#26-E3b)で配分が枠連の買い目を作るようになり、
+ * `VerifyView.tsx`の内訳・判定不能の行にも表示している。** `bracketQuinella`フィールド自体は
+ * ここ・`computeProposedBetReport`・`overall`合算には#145から含めている。
  * **買い目の`comboKey`は枠番の組(`buildAllocationBetComboKey("bracketQuinella", [4,7])`→"0407"。
  * 同枠は"0101")、払戻側のキーも同じ枠番の組で、的中判定は他の組合せ券種と同じ文字列の完全一致**
  * (馬番からの変換はここでは一切行わない)。
@@ -459,8 +460,9 @@ export interface ProposedBetReport {
    */
   readonly trifecta: ProposedBetTypeSummary;
   /**
-   * 枠連の内訳(Issue #145・#26-F)。配分が枠連の買い目をまだ作らないため`betCount`は現時点で
-   * 常に0(このJSDoc冒頭の注意参照)。画面(`VerifyView.tsx`)への表示は#146で行う。
+   * 枠連の内訳(Issue #145・#26-F)。#145の時点では配分が枠連の買い目をまだ作らず`betCount`は
+   * 常に0だったが、Issue #150(#26-E3b)で配分が枠連の買い目を作るようになり、`betCount`は実際の
+   * 買い目の数になった。画面(`VerifyView.tsx`)の内訳・判定不能の行にも表示している(#150)。
    */
   readonly bracketQuinella: ProposedBetTypeSummary;
   /**

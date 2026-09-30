@@ -266,10 +266,11 @@ describe("settingsReducer(設定フォームの状態遷移)", () => {
     expect(flipped.includeTrifectaInAllocation).toBe(false);
   });
 
-  // 枠連(#26-E3a・Issue #149)。#25-E3a・Issue #138の三連単と同じ切り方で、対応する切替アクション
-  // (SettingsAction)・画面のトグルはまだ無い(#26-E3b・Issue #150で追加する見込み)。それでも
-  // 読込・保存の往復・dirty判定の対象には含める。アクションが無いため、値は読込値の往復か
-  // 状態のspreadで与える。
+  // 枠連(#26-E3a・Issue #149)。#25-E3a・Issue #138の三連単と同じ切り方で、#149の時点では対応する
+  // 切替アクション(SettingsAction)・画面のトグルは無かった(#26-E3b・Issue #150で追加した)。それでも
+  // 読込・保存の往復・dirty判定の対象には含めていた。このテストは当時からの「読込値の往復」の保証を
+  // 変えずに残している(切替アクション経由の保証は下の「枠連配分対象切替」のテストが担う。
+  // テスト名の「UIトグルはまだ無い」は#149当時の記述で、名前は変えていない)。
   it("読込成功でincludeBracketQuinellaInAllocation(#26-E3a・Issue #149)を反映すること(OFF/ON両方向)。対応するUIトグルはまだ無いが、フォーム状態としては保持・往復させる", () => {
     expect(
       loadedState(fakeMasked({ includeBracketQuinellaInAllocation: false }))

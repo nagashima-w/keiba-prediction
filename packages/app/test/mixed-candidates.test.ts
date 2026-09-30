@@ -872,11 +872,11 @@ describe("券種フィルタ(options.betTypes)", () => {
    * 除外集合は再び空になった。**
    * **Issue #144(#26-B)で`AllocationBetType`に`bracketQuinella`(枠連)が加わったが、
    * `mixed-candidates.ts`から枠連の候補を作る経路(オッズ配線・候補ビルダーの接続・配分接続)は
-   * まだ無かった(#146のスコープ)ため、`trifecta`のときと同じ理由で`bracketQuinella`が
+   * まだ無かった(#146以降のスコープだった)ため、`trifecta`のときと同じ理由で`bracketQuinella`が
    * 一時的に除外へ加わった。** **Issue #148(#26-E2)でオッズ配線・
    * `buildBracketQuinellaCandidatesForBetType`(候補ビルダー)は完了したが、
-   * `resolveMixedBetTypes`への接続(#150。設定の配管は#149で完了)がまだのため、除外は引き続き維持する
-   * (`trifecta`が#137→#139の間で除外されていたのと同じ状態)。**
+   * `resolveMixedBetTypes`への接続(#150。設定の配管は#149で完了)がまだだったため、除外は#150まで維持していた
+   * (`trifecta`が#137→#139の間で除外されていたのと同じ状態。#150で接続して除外を解いた)。**
    * `AllocationBetType`に新しいメンバーが増えたとき、この配列に足すべきかどうかの判断を
    * 人間が必ず一度は行うようにする(#91で「散文だけが古いまま残る」事故〈配列は3値のまま、
    * JSDocは「全券種」と言い続けた〉が起きたため、次に同じ事故が起きないよう機械的に検出する)。

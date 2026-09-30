@@ -630,7 +630,7 @@ describe("fetchComboOdds(maxAgeMs/bypassCacheが全リクエストに一様伝�
  * (2頭以上いる枠の数)(`docs/wakuren-odds-investigation.md` §2.2)。そのため`fetchComboOdds`
  * (出走馬番を受け取る)とは別の関数`fetchBracketQuinellaOdds`(出走馬の枠番を受け取る)にした。
  * 枠の構成は既存テストと同じく`parseShutuba`/`parseRaceResult`の`wakuban`から作る
- * (オッズ側から逆算しない)。**配線(scrapeRace・app)は#146のスコープで、ここでは呼ばない。**
+ * (オッズ側から逆算しない)。**配線(scrapeRace・app)は#143の時点ではスコープ外で、ここでは呼ばない(配線はIssue #148・#26-E2で完了した)。**
  */
 describe("expectedBracketQuinellaComboCount(枠の構成からの期待組合せ数。Issue #143・#26-D)", () => {
   const table: ReadonlyArray<readonly [string, readonly number[], number]> = [

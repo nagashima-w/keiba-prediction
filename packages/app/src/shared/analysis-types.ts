@@ -425,8 +425,9 @@ export interface AnalysisResult {
    *
    * 三連単と異なり**中央・地方とも**取得する(9頭以上で発売。8頭以下は空Recordになる)。
    *
-   * **配分・画面への配線はまだ無い**(このフィールドを保持・伝播するだけ。#148のスコープ。
-   * 配分の設定の配管は#149で完了、配分への接続・画面は#150)。
+   * **#148の時点では、配分・画面への配線は無かった**(このフィールドを保持・伝播するだけだった)。
+   * 配分の設定の配管は#149で完了し、Issue #150(#26-E3b)で配分に接続され(`resolveMixedBetTypes`)、
+   * 画面(一括分析の配分内訳・検証画面・設定画面)にも表示されるようになった。
    */
   readonly bracketQuinellaCombo?: Record<string, number | null>;
   /**
@@ -672,8 +673,9 @@ export interface ProposedBetPopulationView {
  * 買い目をまだ作らないため`betCount`は構造的に常に0)。
  *
  * ★`bracketQuinella`フィールドはIssue #145・#26-Fで追加した(trifectaと同じ扱い。上記の
- * 「プレーン写し」の原則により即座に写す)。`VerifyView.tsx`への表示は#146へ申し送る
- * (配分が枠連の買い目をまだ作らないため`betCount`は構造的に常に0)。
+ * 「プレーン写し」の原則により即座に写す)。#145の時点では`VerifyView.tsx`への表示を#146へ申し送り、
+ * 配分が枠連の買い目をまだ作らないため`betCount`は構造的に常に0だった。**Issue #150(#26-E3b)で配分が
+ * 枠連の買い目を作るようになり、`VerifyView.tsx`の内訳・判定不能の行にも表示している。**
  */
 export interface ProposedBetReportView {
   /** 母集団4分類の件数。 */
@@ -704,8 +706,9 @@ export interface ProposedBetReportView {
    */
   readonly trifecta: ProposedBetTypeSummaryView;
   /**
-   * 枠連の内訳(Issue #145・#26-F)。配分が枠連の買い目をまだ作らないため`betCount`は
-   * 現時点で常に0(このJSDoc冒頭の注意参照)。`VerifyView.tsx`への表示は#146で行う。
+   * 枠連の内訳(Issue #145・#26-F)。#145の時点では配分が枠連の買い目をまだ作らず`betCount`は
+   * 常に0だったが、Issue #150(#26-E3b)で配分が枠連の買い目を作るようになり、`betCount`は実際の
+   * 買い目の数になった。`VerifyView.tsx`の内訳・判定不能の行にも表示している(#150)。
    */
   readonly bracketQuinella: ProposedBetTypeSummaryView;
   /** 未知の券種コードの内訳(Issue #76。`overall`には合算しない)。 */

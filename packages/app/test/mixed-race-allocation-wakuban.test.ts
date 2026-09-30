@@ -4,9 +4,10 @@
  *
  * 枠連(bracketQuinella)の候補が1件でもあると、core `allocateGeneralBets` は全馬の`wakuban`を
  * 検査して的中判定に使う(`combo-bet-allocation.ts`の`resolveWakubanByUmaban`)。ところが#148の
- * 時点では`resolveMixedBetTypes`が枠連を返さない(配分接続は#150のスコープ。設定の配管は#149で完了)ため、
- * production で枠連候補が`allocateGeneralBets`に届く経路がまだ無く、「wakuban が渡っている」ことを
- * 実挙動(枠連の買い目が配分に出る)で確認できない。そこで`allocateGeneralBets`を素通しの
+ * 時点では`resolveMixedBetTypes`が枠連を返さなかった(配分接続は#150のスコープだった。設定の配管は#149で完了)ため、
+ * production で枠連候補が`allocateGeneralBets`に届く経路が無く、「wakuban が渡っている」ことを
+ * 実挙動(枠連の買い目が配分に出る)で確認できなかった(#150で接続した現在は、
+ * `bracket-quinella-allocation-setting-wiring.test.ts`が実挙動で確認する)。そこで`allocateGeneralBets`を素通しの
  * スパイに差し替え、`mixed-race-allocation.ts`が組み立てる`horses`に、行(`AnalysisRow`)の
  * 枠番が載っていることを直接確認する(殺す変異: `horses`の組み立てから`wakuban`を落とす)。
  * #150で枠連が配分に入れば、実挙動のテストが同じ配線を覆う(本ファイルは#148の間の固定)。
