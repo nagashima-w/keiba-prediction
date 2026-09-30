@@ -410,7 +410,7 @@ describe("toMixedAllocationSettings(#59 3節: evThresholdの二重ソースを�
 // ============================================================================
 
 describe("buildAllocationRecord(経路ごとのメタ行)", () => {
-  it("route=unset: coreの配分計算に未到達のため、設定エコー10項目以外はすべてnull(#118でincludeQuinella・#126でincludeExacta・#140でincludeTrifectaを追加)", () => {
+  it("route=unset: coreの配分計算に未到達のため、設定エコー11項目以外はすべてnull(#118でincludeQuinella・#126でincludeExacta・#140でincludeTrifecta・#151でincludeBracketQuinellaを追加)", () => {
     const outcome = buildMixedRaceAllocationWithOutcome(raceWithPositiveCombos(8), settings({ bankroll: 0 }));
     expect(outcome.view.kind).toBe("unset"); // 前提固定(空振り防止)。
     const rec = buildAllocationRecord(outcome, settings({ bankroll: 0 }), "result");
@@ -431,6 +431,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -441,7 +442,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     expect(rec.bets).toEqual([]);
   });
 
-  it("route=yoso: coreの配分計算に未到達のため、設定エコー10項目以外はすべてnull(#118でincludeQuinella・#126でincludeExacta・#140でincludeTrifectaを追加)", () => {
+  it("route=yoso: coreの配分計算に未到達のため、設定エコー11項目以外はすべてnull(#118でincludeQuinella・#126でincludeExacta・#140でincludeTrifecta・#151でincludeBracketQuinellaを追加)", () => {
     const race = raceWithPositiveCombos(8, { oddsStatus: "yoso" });
     const s = settings();
     const outcome = buildMixedRaceAllocationWithOutcome(race, s);
@@ -464,6 +465,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -497,6 +499,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -537,6 +540,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       // #59追加指定: place-only経路はDEFAULT_BET_ALLOCATION_CONFIG(mixed用の
       // DEFAULT_GENERAL_BET_ALLOCATION_CONFIGとは別オブジェクト)を参照すること。
       betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
@@ -608,6 +612,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -695,6 +700,36 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
     expect(recOff.bets).toEqual(recOn.bets);
   });
 
+  // Issue #151(#26-E3c)で契約が変わった: #150時点は「枠連の設定を写すメタ列が無い(`settingsColumnsOf`が
+  // 11項目目を読まない)」ためメタ行は`includeBracketQuinellaInAllocation`の値に依らず一致していた
+  // (`bracket-quinella-allocation-setting-wiring.test.ts`の対応表参照)。#151でメタ行に枠連の列を
+  // 加えたため、新契約(includeBracketQuinellaInAllocationのtrue/falseがメタ行の
+  // includeBracketQuinellaへ反映され、それ以外のメタ列は変わらないこと)を保証する。
+  // このファイルのレースは枠連オッズを持たない(=枠連の買い目が入らない)ので、買い目は両者で一致する
+  // (枠連オッズがあるときの買い目の差は、上記wiringテストが固定する)。
+  it("route=mixed: includeBracketQuinellaInAllocation(#26-E3a・Issue #149)のtrue/falseがメタ行のincludeBracketQuinellaへ反映され、それ以外のメタ列は変わらないこと(Issue #151〈#26-E3c〉)", () => {
+    const race = raceWithPositiveCombos(8, { trioCombo: undefined });
+    const sOn = settings({ includeBracketQuinellaInAllocation: true });
+    const sOff = settings({ includeBracketQuinellaInAllocation: false });
+    // 前提: 2つの設定は枠連の項目だけが異なる。
+    expect(sOn.includeBracketQuinellaInAllocation).not.toBe(sOff.includeBracketQuinellaInAllocation);
+    const outcomeOn = buildMixedRaceAllocationWithOutcome(race, sOn);
+    const outcomeOff = buildMixedRaceAllocationWithOutcome(race, sOff);
+    if (outcomeOn.view.kind !== "mixed" || outcomeOff.view.kind !== "mixed") {
+      throw new Error("前提が崩れている(mixedに到達しなかった)");
+    }
+    const recOn = buildAllocationRecord(outcomeOn, sOn, "result");
+    const recOff = buildAllocationRecord(outcomeOff, sOff, "result");
+    // 本題: includeBracketQuinellaがtrue/falseそれぞれの入力どおりに反映されること。
+    expect(recOn.meta.includeBracketQuinella).toBe(true);
+    expect(recOff.meta.includeBracketQuinella).toBe(false);
+    // 対象フィールド以外は変化しないこと(includeBracketQuinellaだけを揃えれば完全一致するはず)。
+    expect({ ...recOff.meta, includeBracketQuinella: recOn.meta.includeBracketQuinella }).toEqual(recOn.meta);
+    // 前提: このレースは枠連オッズを持たないため、どちらも枠連の買い目は無く、買い目全体が一致する。
+    expect(recOn.bets.filter((b) => b.betType === "bracketQuinella")).toHaveLength(0);
+    expect(recOff.bets).toEqual(recOn.bets);
+  });
+
   it("AC3: mixed経路でSUM(stake)===totalStake・COUNT(*)===betCountが成り立ち、bet_typeが複勝/ワイド/3連複それぞれ正しく振り分けられること", () => {
     const s = settings();
     const outcome = buildMixedRaceAllocationWithOutcome(raceWithDiverseCombos(), s);
@@ -779,6 +814,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -842,6 +878,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: false,
       includeExacta: false,
       includeTrifecta: false,
+      includeBracketQuinella: false,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -890,6 +927,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -932,6 +970,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -1003,6 +1042,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       // skipでも配分計算自体には到達しているため、実効値4列はplace-onlyの通常ケースと同じ。
       betUnit: DEFAULT_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_BET_ALLOCATION_CONFIG.greedySteps,
@@ -1046,6 +1086,7 @@ describe("buildAllocationRecord(経路ごとのメタ行)", () => {
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,
@@ -1083,6 +1124,7 @@ describe("buildInvalidAllocationRecordForException(AC6: buildMixedRaceAllocation
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,

@@ -1829,6 +1829,7 @@ describe("proposedBet系(配分ベースの回収率。Issue #71 #54-B)", () => 
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: 100,
       greedySteps: 1000,
       candidateCap: 2000,

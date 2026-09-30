@@ -233,8 +233,12 @@ export type MixedRaceAllocationView =
  *
  * **枠連(`includeBracketQuinellaInAllocation`。#26-E3a・Issue #149)も同じ経緯を辿り、Issue #150
  * (#26-E3b)で本関数へ接続した。** `MixedAllocationSettings`の項目は11項目のままで、#150時点では
- * `allocation-record.ts`の設定エコーは10列(メタ行スキーマ)のまま据え置く(枠連の列とその再表示は
- * #26-E3c〈Issue #151〉)。
+ * `allocation-record.ts`の設定エコーは10列(メタ行スキーマ)のまま据え置いていた(呼び出し側が渡した
+ * 11項目のうち10項目だけをメタ行へ写し、全項目を機械的にエコーする契約ではなかった)。
+ * その後**Issue #151(#26-E3c)でDB列`include_bracket_quinella`を追加し、設定エコーも11列へ解除した**
+ * (`allocation-record.ts`の「## 列の由来」JSDoc参照。列を読む人〈過去分析再表示の
+ * 「枠連: ON/OFF/記録なし」〉が実在するに至ったための解除で、馬連〈`include_quinella`〉・
+ * 馬単〈`include_exacta`〉・三連単〈`include_trifecta`〉と同型の経緯)。
  *
  * 券種ユニオンは`MixedCandidateBetType`(=core`AllocationBetType`)をそのまま使い、
  * インラインで再定義しない(Issue #76。券種ユニオンの3重定義を防ぐ)。

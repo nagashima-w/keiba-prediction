@@ -52,6 +52,7 @@ function allocation(overrides: Partial<StoredAllocationView> = {}): StoredAlloca
     includeQuinella: true,
     includeExacta: true,
     includeTrifecta: true,
+    includeBracketQuinella: true,
     betUnit: 100,
     oddsStatus: "result",
     bets: [],
@@ -672,8 +673,8 @@ describe("betTypeLabel(allocation-proposal-view.ts)とmixedBetTypeLabel(mixed-al
   });
 });
 
-describe("実効設定(AC5): 11項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目、Issue #126〈#24-E3c〉で「馬単」を追加し9→10項目、Issue #140〈#25-E3c〉で「三連単」を追加し10→11項目)", () => {
-  it("1組目の値ベクトルで11行すべてが期待どおりであること", () => {
+describe("実効設定(AC5): 12項目がラベル+値の文字列配列として、列とラベルが取り違えなく対応すること(Issue #118〈#24-D3b-3〉で「馬連」を追加し8→9項目、Issue #126〈#24-E3c〉で「馬単」を追加し9→10項目、Issue #140〈#25-E3c〉で「三連単」を追加し10→11項目、Issue #151〈#26-E3c〉で「枠連」を馬連と馬単の間に追加し11→12項目)", () => {
+  it("1組目の値ベクトルで12行すべてが期待どおりであること(枠連=true)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "mixed",
@@ -687,6 +688,7 @@ describe("実効設定(AC5): 11項目がラベル+値の文字列配列として
         includeQuinella: false,
         includeExacta: true,
         includeTrifecta: false,
+        includeBracketQuinella: true,
         includeComboOdds: true,
         oddsStatus: "middle",
         bets: [],
@@ -699,6 +701,7 @@ describe("実効設定(AC5): 11項目がラベル+値の文字列配列として
       `EV閾値: 1.08`,
       `ワイド: ON`,
       `馬連: OFF`,
+      `枠連: ON`,
       `馬単: ON`,
       `三連単: OFF`,
       `三連複: OFF`,
@@ -707,7 +710,10 @@ describe("実効設定(AC5): 11項目がラベル+値の文字列配列として
     ]);
   });
 
-  it("2組目の異なる値ベクトルでも11行すべてが期待どおりであること(取り違え検出)", () => {
+  // 2組目は枠連=null(記録なし)にする。1組目のtrueと合わせ、枠連の値がワイド(T,F)・馬連(F,T)・
+  // 馬単(T,F)・三連単(F,T)のいずれの行とも「少なくとも1組で異なる文字列」になり、
+  // 隣接行(馬連・馬単)およびその他の行との取り違えを検出できる。
+  it("2組目の異なる値ベクトルでも12行すべてが期待どおりであること(取り違え検出。枠連=null=記録なし)", () => {
     const view = buildAllocationProposalView(
       allocation({
         route: "unset",
@@ -720,6 +726,7 @@ describe("実効設定(AC5): 11項目がラベル+値の文字列配列として
         includeQuinella: true,
         includeExacta: false,
         includeTrifecta: true,
+        includeBracketQuinella: null,
         includeComboOdds: false,
         oddsStatus: "yoso",
       }),
@@ -731,6 +738,7 @@ describe("実効設定(AC5): 11項目がラベル+値の文字列配列として
       `EV閾値: 2.5`,
       `ワイド: OFF`,
       `馬連: ON`,
+      `枠連: 記録なし`,
       `馬単: OFF`,
       `三連単: ON`,
       `三連複: ON`,
@@ -800,6 +808,45 @@ describe("実効設定(AC5): 11項目がラベル+値の文字列配列として
     expect(view.settingsRows).not.toContain("三連単: OFF");
   });
 
+  // Issue #151(#26-E3c): includeBracketQuinellaもON/OFF/記録なしの3値をそれぞれ確かめる
+  // (nullをOFFと表示する変異を殺す。「枠連」の行だけを対象に3値を固定する)。
+  it("枠連: includeBracketQuinella=trueのとき『枠連: ON』になること", () => {
+    const view = buildAllocationProposalView(allocation({ includeBracketQuinella: true }));
+    expect(view.settingsRows).toContain("枠連: ON");
+  });
+
+  it("枠連: includeBracketQuinella=falseのとき『枠連: OFF』になること", () => {
+    const view = buildAllocationProposalView(allocation({ includeBracketQuinella: false }));
+    expect(view.settingsRows).toContain("枠連: OFF");
+  });
+
+  it("枠連: includeBracketQuinella=null(Issue #151より前の記録。v1.13.0までに保存された枠連の買い目を含む記録も同様)のとき『枠連: 記録なし』になること(OFFと断定しない。#31)", () => {
+    const view = buildAllocationProposalView(allocation({ includeBracketQuinella: null }));
+    expect(view.settingsRows).toContain("枠連: 記録なし");
+    // 前提固定の裏返し: 「枠連: OFF」ではないこと(nullをOFFへ丸める変異を殺す)。
+    expect(view.settingsRows).not.toContain("枠連: OFF");
+    // 買い目に枠連があっても(v1.13.0までの記録)、ONと推定しないこと。
+    const withBets = buildAllocationProposalView(
+      allocation({
+        includeBracketQuinella: null,
+        bets: [{ betType: "bracketQuinella", comboKey: "0407", stake: 300, odds: 12.3, ev: 1.2 }],
+      }),
+    );
+    expect(withBets.bets).toHaveLength(1);
+    expect(withBets.settingsRows).toContain("枠連: 記録なし");
+    expect(withBets.settingsRows).not.toContain("枠連: ON");
+  });
+
+  it("実効設定の表示順は 馬連→枠連→馬単→三連単→三連複 であること(Issue #151・既存の相対順を動かさない)", () => {
+    const rows = buildAllocationProposalView(allocation()).settingsRows;
+    const idx = ["ワイド", "馬連", "枠連", "馬単", "三連単", "三連複"].map((label) =>
+      rows.findIndex((r) => r.startsWith(`${label}: `)),
+    );
+    // 前提: 6行すべてが存在すること。
+    expect(idx.every((i) => i >= 0)).toBe(true);
+    expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+  });
+
   it("oddsStatus='result'は『確定』になること", () => {
     const view = buildAllocationProposalView(allocation({ oddsStatus: "result" }));
     expect(view.settingsRows.at(-1)).toBe("オッズ状態: 確定");
@@ -815,23 +862,23 @@ describe("実効設定(AC5): 11項目がラベル+値の文字列配列として
   });
 
   it.each(["unset", "yoso", "invalid"] as const)(
-    "route=%s(記録はある状態)でも実効設定11項目が出ること",
+    "route=%s(記録はある状態)でも実効設定12項目が出ること",
     (route) => {
-      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(11);
+      expect(buildAllocationProposalView(allocation({ route })).settingsRows).toHaveLength(12);
     },
   );
 
-  it("route='unavailable'でも実効設定11項目が出ること", () => {
+  it("route='unavailable'でも実効設定12項目が出ること", () => {
     expect(
       buildAllocationProposalView(
         allocation({ route: "unavailable", unavailableReason: "not-sold" }),
       ).settingsRows,
-    ).toHaveLength(11);
+    ).toHaveLength(12);
   });
 
-  it("判定不能(未知route)でも実効設定11項目が出ること(実効設定自体は正常な値のため)", () => {
+  it("判定不能(未知route)でも実効設定12項目が出ること(実効設定自体は正常な値のため)", () => {
     expect(buildAllocationProposalView(allocation({ route: "SOMETHING_UNKNOWN" })).settingsRows).toHaveLength(
-      11,
+      12,
     );
   });
 });

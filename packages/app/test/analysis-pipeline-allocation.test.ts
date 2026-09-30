@@ -315,7 +315,12 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
   // さらにIssue #140(#25-E3c)で契約反転: 同じテストがIssue #139まで「includeTrifectaInAllocationは
   // メタ行に漏れない」ことも保証していた。Issue #140でこの凍結も解除したため、
   // includeTrifectaInAllocationがメタ行のincludeTrifectaへ反映されることもあわせて保証する。
-  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定10項目(evThresholdはevConfig由来・includeQuinellaはIssue #118・includeExactaはIssue #126・includeTrifectaはIssue #140で追加)が反映されること(route=unsetで確認)", async () => {
+  // さらにIssue #151(#26-E3c)で契約反転: 同じテストがIssue #150まで「includeBracketQuinellaInAllocationは
+  // メタ行に漏れない」ことも保証していた(旧テストの期待値にincludeBracketQuinellaキーが無く、toEqualで
+  // キーの不在を固定していた)。Issue #151でこの凍結も解除したため、falseのincludeBracketQuinellaInAllocation
+  // がメタ行のincludeBracketQuinellaへそのまま反映されることをあわせて保証する(旧テストが固定していた
+  // 他の10列の期待値は同じリテラルのまま。弱めていない)。
+  it("deps.allocationSettings が非nullなら、record.allocation.meta に設定11項目(evThresholdはevConfig由来・includeQuinellaはIssue #118・includeExactaはIssue #126・includeTrifectaはIssue #140・includeBracketQuinellaはIssue #151で追加)が反映されること(route=unsetで確認)", async () => {
     const saved: AnalysisRecord[] = [];
     const deps: AnalysisPipelineDeps = {
       ...baseDeps(),
@@ -336,7 +341,10 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
         // メタ行のincludeExactaへ反映される(下のtoEqualで固定)。
         includeExactaInAllocation: true,
         includeTrifectaInAllocation: true,
-        includeBracketQuinellaInAllocation: true,
+        // 他の設定エコー列(comboOdds・wide・quinella・exacta・trifectaはtrue)と異なるfalseにして、
+        // 枠連の値が別列へ取り違えられる変異を検出できるようにする(includeTrioと同値だが、
+        // 隣接するtrifectaとは異なる)。
+        includeBracketQuinellaInAllocation: false,
       },
     };
     await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps);
@@ -360,6 +368,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: false,
       betUnit: null,
       greedySteps: null,
       candidateCap: null,
@@ -417,6 +426,7 @@ describe("runAnalysis → AnalysisRecord.allocation の配線(Issue #59)", () =>
       includeQuinella: true,
       includeExacta: true,
       includeTrifecta: true,
+      includeBracketQuinella: true,
       betUnit: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.betUnit,
       greedySteps: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.greedySteps,
       candidateCap: DEFAULT_GENERAL_BET_ALLOCATION_CONFIG.candidateCap,

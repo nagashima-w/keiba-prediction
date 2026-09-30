@@ -92,7 +92,7 @@ export interface AllocationProposalView {
   readonly notices: readonly string[];
   /** 買い目行(配分ありのときのみ非空)。 */
   readonly bets: readonly AllocationBetRowView[];
-  /** 実効設定11項目(「ラベル: 値」の文字列配列。Issue #118で馬連を追加し8→9項目、Issue #126で馬単を追加し9→10項目、Issue #140で三連単を追加し10→11項目)。記録が無ければ空配列。 */
+  /** 実効設定12項目(「ラベル: 値」の文字列配列。Issue #118で馬連を追加し8→9項目、Issue #126で馬単を追加し9→10項目、Issue #140で三連単を追加し10→11項目、Issue #151で枠連を追加し11→12項目)。記録が無ければ空配列。 */
   readonly settingsRows: readonly string[];
 }
 
@@ -319,9 +319,10 @@ function onOffOrUnrecorded(value: boolean | null): string {
 }
 
 /**
- * 実効設定11項目(AC5。Issue #118〈#24-D3b-3〉で「馬連」をワイドと三連複の間に追加し8→9項目、
+ * 実効設定12項目(AC5。Issue #118〈#24-D3b-3〉で「馬連」をワイドと三連複の間に追加し8→9項目、
  * Issue #126〈#24-E3c〉で「馬単」を馬連と三連複の間に追加し9→10項目、Issue #140〈#25-E3c〉で
- * 「三連単」を馬単と三連複の間に追加し10→11項目)を「ラベル: 値」の文字列配列にする。
+ * 「三連単」を馬単と三連複の間に追加し10→11項目、Issue #151〈#26-E3c〉で「枠連」を馬連と馬単の間に
+ * 追加し11→12項目)を「ラベル: 値」の文字列配列にする。
  */
 function buildSettingsRows(a: StoredAllocationView): readonly string[] {
   return [
@@ -331,6 +332,7 @@ function buildSettingsRows(a: StoredAllocationView): readonly string[] {
     `EV閾値: ${a.evThreshold}`,
     `ワイド: ${onOff(a.includeWide)}`,
     `馬連: ${onOffOrUnrecorded(a.includeQuinella)}`,
+    `枠連: ${onOffOrUnrecorded(a.includeBracketQuinella)}`,
     `馬単: ${onOffOrUnrecorded(a.includeExacta)}`,
     `三連単: ${onOffOrUnrecorded(a.includeTrifecta)}`,
     `三連複: ${onOff(a.includeTrio)}`,

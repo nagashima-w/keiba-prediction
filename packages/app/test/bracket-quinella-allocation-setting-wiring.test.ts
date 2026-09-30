@@ -14,6 +14,10 @@
  * **Issue #150(#26-E3b)でその3点を接続した**ため、本ファイルは「値を変えると結果が変わる」形に
  * 反転した(三連単の#138→#139と同じ)。
  *
+ * **Issue #151(#26-E3c)で「配分記録」のテストを再度反転した**(メタ行に`include_bracket_quinella`列を
+ * 加え、`settingsColumnsOf`が枠連の項目を写すようになったため。三連単の#139→#140と同じ)。
+ * 旧→新の対応表は下の表の最終行(Issue #150版→Issue #151版)を参照。
+ *
  * ## 旧テスト→新テストの対応表(何を保証していたか)
  *
  * | 旧テスト(#149時点) | 何を保証していたか | 新テスト(#150) | 何を保証するようになったか |
@@ -22,6 +26,7 @@
  * | 「isComboBetTypesOff配線(条件②)経路で値を変えても結果・理由コードが変わらないこと」 | 条件②の判定式が枠連を見ない(値によらず`combo-bet-types-off`) | 「他5券種OFFのまま枠連だけ切り替えると、`combo-bet-types-off`になるかどうかが切り替わること」 | 条件②が枠連を見る(ONなら`mixed`へ入り、OFFなら`combo-bet-types-off`) |
  * | (#149時点に無し) | — | 「条件③: 他券種の候補が0件で枠連候補だけあるとき、ONなら`mixed`、OFFなら`no-combo-candidates`」 | 条件③(`comboCandidateCount`)が枠連を数える(#148の申し送り: 数えないと枠連候補だけのレースが`no-combo-candidates`になる) |
  * | 「配分記録(メタ行・買い目)も、値を変えて一致すること」 | 記録全体が一致(=枠連の買い目が記録に入らない)/メタ行の列は据え置き | 「配分記録: 買い目に枠連が入り(comboKeyは枠番4桁)、メタ行は値に依らず一致すること」 | 買い目の記録に枠連が入る/メタ行(枠連の列は#151まで無い)は変わらない(**弱めていない**: メタ行の据え置きは引き続きtoEqualで固定) |
+ * | 「配分記録: 買い目に枠連が入り(comboKeyは枠番4桁)、メタ行は値に依らず一致すること」(#150) | 買い目の記録に枠連が入る(枠番4桁の昇順・stake>0)/OFFでは入らない/OFF側の買い目も空でない/メタ行がONとOFFで完全一致 | 「配分記録: 買い目に枠連が入り、メタ行はincludeBracketQuinellaだけがON/OFFを反映すること」(#151) | 買い目についての4点(枠連が入る・枠番4桁昇順・stake>0・OFFでは入らない・OFF側も空でない)は**同じアサーションのまま** ／ メタ行は「完全一致」から「`includeBracketQuinella`がON側true・OFF側falseで、それ以外のメタ列は`{...off, includeBracketQuinella: on側の値}`のtoEqualで完全一致」へ(**弱めていない**: 枠連以外のメタ列の不変は引き続きtoEqualで固定し、加えて枠連の列の値そのものも固定した) |
  *
  * ## 空振り(vacuous pass)の防止
  * 枠連オッズが実在し、`betTypes`に枠連を明示すれば枠連候補が実際に作られる(=接続すれば配分が
@@ -278,8 +283,8 @@ describe("D-2フォールバック規則の条件③(comboCandidateCount): 枠�
   });
 });
 
-describe("配分記録: 枠連の買い目が記録に入り、メタ行は値に依らず一致すること(#26-E3b。メタ行の枠連列は#26-E3c〈Issue #151〉まで無い)", () => {
-  it("買い目にbet_type='bracketQuinella'(comboKeyは枠番4桁の昇順)が入り、OFFでは入らない。メタ行はONとOFFで完全一致する", () => {
+describe("配分記録: 枠連の買い目が記録に入り、メタ行はincludeBracketQuinellaだけがON/OFFを反映すること(#26-E3b・#26-E3c〈Issue #151〉)", () => {
+  it("買い目にbet_type='bracketQuinella'(comboKeyは枠番4桁の昇順)が入り、OFFでは入らない。メタ行はincludeBracketQuinella以外がONとOFFで完全一致し、includeBracketQuinellaはON側true・OFF側false", () => {
     const race = raceWithBracket();
     expectBracketCandidatesExist(race);
     const onSettings = settings({ includeBracketQuinellaInAllocation: true });
@@ -305,8 +310,13 @@ describe("配分記録: 枠連の買い目が記録に入り、メタ行は値�
     expect(offRecord.bets.filter((b) => b.betType === "bracketQuinella")).toHaveLength(0);
     // 前提: OFF側の買い目も空ではない(空との比較ではないこと)。
     expect(offRecord.bets.length).toBeGreaterThan(0);
-    // メタ行は不変(枠連の設定を写す列は#151まで存在しない)。
-    expect(offRecord.meta).toEqual(onRecord.meta);
+    // メタ行: 枠連の列(Issue #151)はON側true・OFF側falseで設定を反映する。
+    expect(onRecord.meta.includeBracketQuinella).toBe(true);
+    expect(offRecord.meta.includeBracketQuinella).toBe(false);
+    // それ以外のメタ列は不変(枠連の列だけを揃えれば完全一致する)。
+    expect({ ...offRecord.meta, includeBracketQuinella: onRecord.meta.includeBracketQuinella }).toEqual(
+      onRecord.meta,
+    );
   });
 });
 

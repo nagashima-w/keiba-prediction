@@ -2098,7 +2098,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
   });
 
   describe("配分提案の永続化(analysis_allocation_meta / analysis_bets、Issue #59)", () => {
-    /** テスト用のメタ行(#59スキーマ23列。Issue #118でinclude_quinella・#126でinclude_exacta・#140でinclude_trifectaを追加し20→21→22→23列)を最小上書きで組み立てる。 */
+    /** テスト用のメタ行(#59スキーマ24列。Issue #118でinclude_quinella・#126でinclude_exacta・#140でinclude_trifecta・#151でinclude_bracket_quinellaを追加し20→21→22→23→24列)を最小上書きで組み立てる。 */
     function makeMeta(
       overrides: Partial<AnalysisAllocationMetaRecord> = {},
     ): AnalysisAllocationMetaRecord {
@@ -2119,6 +2119,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         includeQuinella: true,
         includeExacta: true,
         includeTrifecta: true,
+        includeBracketQuinella: true,
         betUnit: 100,
         greedySteps: 1000,
         candidateCap: 2000,
@@ -2136,7 +2137,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         .get(analysisId);
     }
 
-    it("AC2: route=unset のメタ行が全23列で固定どおりに保存されること(coreの配分計算に未到達=設定エコー以外は全null。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列)", () => {
+    it("AC2: route=unset のメタ行が全24列で固定どおりに保存されること(coreの配分計算に未到達=設定エコー以外は全null。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列・Issue #151でinclude_bracket_quinella列を追加し23→24列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -2170,6 +2171,12 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // 入れ替え変異〈include_exacta⇔include_trifecta〉をこの経路単体でも検出できる
               // ようにする。
               includeTrifecta: true,
+              // Issue #151(#26-E3c): include_bracket_quinella列のパターンは4経路[unset,place-only,
+              // unavailable,mixed]=[F,F,T,T]。include_quinella[F,T,T,F]・include_exacta[T,F,T,F]・
+              // include_trifecta[T,T,F,T]・include_combo_odds[F,F,F,T]のいずれとも一致しないため、
+              // 隣接列との入れ替え・定数化・include_combo_odds(直前の設定エコー)との取り違えを
+              // 4経路の合計で検出できる。
+              includeBracketQuinella: false,
               betUnit: null,
               greedySteps: null,
               candidateCap: null,
@@ -2199,6 +2206,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_quinella: 0,
         include_exacta: 1,
         include_trifecta: 1,
+        include_bracket_quinella: 0,
         bet_unit: null,
         greedy_steps: null,
         candidate_cap: null,
@@ -2209,7 +2217,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
-    it("AC2: route=place-only(includeComboOdds=false)のメタ行が全23列で固定どおりに保存されること(candidate_capはplace-only経路に存在しないためnull。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列)", () => {
+    it("AC2: route=place-only(includeComboOdds=false)のメタ行が全24列で固定どおりに保存されること(candidate_capはplace-only経路に存在しないためnull。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列・Issue #151でinclude_bracket_quinella列を追加し23→24列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -2238,6 +2246,8 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // (include_quinella=trueと同値の組み合わせも1経路は作り、「隣接列が常に逆の値」
               // という別の交絡を避ける。パターン設計は上記unsetテストのコメント参照)。
               includeTrifecta: true,
+              // Issue #151(#26-E3c): この経路はfalse(パターンは上記unsetテストのコメント参照)。
+              includeBracketQuinella: false,
               betUnit: 100,
               greedySteps: 1000,
               candidateCap: null,
@@ -2270,6 +2280,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_quinella: 1,
         include_exacta: 0,
         include_trifecta: 1,
+        include_bracket_quinella: 0,
         bet_unit: 100,
         greedy_steps: 1000,
         candidate_cap: null,
@@ -2280,7 +2291,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
-    it("AC2: route=unavailable のメタ行が全23列で固定どおりに保存されること(unavailable_reasonが非nullになる唯一の経路。boss差し戻しM1の再発防止。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列)", () => {
+    it("AC2: route=unavailable のメタ行が全24列で固定どおりに保存されること(unavailable_reasonが非nullになる唯一の経路。boss差し戻しM1の再発防止。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列・Issue #151でinclude_bracket_quinella列を追加し23→24列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -2312,6 +2323,8 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // Issue #140(#25-E3c): unset・place-onlyでtrueを踏んだので、この経路ではfalseにする
               // (4経路全体でtrue/falseの両方を踏む。パターン設計は上記unsetテストのコメント参照)。
               includeTrifecta: false,
+              // Issue #151(#26-E3c): この経路はtrue(パターンは上記unsetテストのコメント参照)。
+              includeBracketQuinella: true,
               // coreの配分計算に未到達(unset/yoso/unavailableと同じ扱い)。
               betUnit: null,
               greedySteps: null,
@@ -2342,6 +2355,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_quinella: 1,
         include_exacta: 1,
         include_trifecta: 0,
+        include_bracket_quinella: 1,
         bet_unit: null,
         greedy_steps: null,
         candidate_cap: null,
@@ -2352,7 +2366,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       store.close();
     });
 
-    it("AC2: route=mixed のメタ行が全23列で固定どおりに保存されること(candidate_cap・comboOdds診断値とも非null。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列)", () => {
+    it("AC2: route=mixed のメタ行が全24列で固定どおりに保存されること(candidate_cap・comboOdds診断値とも非null。Issue #118でinclude_quinella列を追加し20→21列・Issue #126でinclude_exacta列を追加し21→22列・Issue #140でinclude_trifecta列を追加し22→23列・Issue #151でinclude_bracket_quinella列を追加し23→24列)", () => {
       const store = new AnalysisStore();
       const id = store.saveAnalysis(
         makeRecord({
@@ -2386,6 +2400,8 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
               // include_quinella[F,T,T,F]・include_exacta[T,F,T,F]のいずれとも2箇所以上で
               // 異なり、3列間どうしの入れ替え変異〈include_exacta⇔include_trifecta等〉を検出できる)。
               includeTrifecta: true,
+              // Issue #151(#26-E3c): この経路はtrue(パターンは上記unsetテストのコメント参照)。
+              includeBracketQuinella: true,
             }),
             bets: [],
           },
@@ -2409,6 +2425,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         include_quinella: 0,
         include_exacta: 0,
         include_trifecta: 1,
+        include_bracket_quinella: 1,
         bet_unit: 100,
         greedy_steps: 1000,
         candidate_cap: 2000,
@@ -2665,6 +2682,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeQuinella: null,
           includeExacta: true,
           includeTrifecta: true,
+          includeBracketQuinella: null,
           betUnit: 100,
           oddsStatus: "result",
           bets: [],
@@ -2818,6 +2836,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeQuinella: true,
           includeExacta: null,
           includeTrifecta: true,
+          includeBracketQuinella: null,
           betUnit: 100,
           oddsStatus: "result",
           bets: [],
@@ -2970,6 +2989,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeQuinella: true,
           includeExacta: true,
           includeTrifecta: null,
+          includeBracketQuinella: null,
           betUnit: 100,
           oddsStatus: "result",
           bets: [],
@@ -3012,19 +3032,177 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
       });
     });
 
-    // Issue #140(#25-E3c)着手前確認AC4・#123の【記録】回収: include_quinella・include_exacta・
-    // include_trifectaの3列すべてが無い旧スキーマ(#118より前相当)を開いても、3列とも正しく
-    // 後付けされ、既存行は3列ともNULL(記録なし)で読め、2回開いても冪等であることを確認する
-    // (上記3つのdescribeはそれぞれ「1列だけ欠けている」場合を見るが、この3列は
-    // migrateAllocationQuinellaColumn→migrateAllocationExactaColumn→
-    // migrateAllocationTrifectaColumnの順に直列実行されるため、複数列が同時に欠けた状態からの
-    // 復旧が正しく機能することは別途確認する価値がある)。
-    describe("include_quinella・include_exacta・include_trifecta列がすべて無い旧スキーマの後方互換マイグレーション(#123の【記録】回収・Issue #140)", () => {
-      it("3列すべてが無い旧スキーマのDBを開くと3列とも後付けされ、既存行は3列ともNULL(記録なし)で読め、2回開いても例外なく冪等であること", () => {
+    describe("include_bracket_quinella列の後方互換マイグレーション(Issue #151・#26-E3c)", () => {
+      it("include_bracket_quinella列が無い旧スキーマのDBを開いても、既存の配分メタ行はincludeBracketQuinella=null(記録なし)で読め、新規保存はtrue/false付きで保存・復元できること", () => {
+        const db = new Database(":memory:");
+        // Issue #151より前のバージョン(v1.13.0まで)相当のスキーマ(analysis_allocation_metaに
+        // include_bracket_quinella列が無い)を直接作る。列一覧は現行のCREATE TABLE文(initSchema)から
+        // include_bracket_quinellaだけを除いたもの(#118の裁定(C)と同じ理由: 別の列の有無による
+        // 交絡を避けるため。include_quinella・include_exacta・include_trifecta列は現行スキーマに
+        // 含まれるため、このフィクスチャにも含める。`include_trifecta列の後方互換マイグレーション`
+        // describeと同型)。
+        db.exec(`
+          CREATE TABLE analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            race_id TEXT NOT NULL,
+            analyzed_at TEXT NOT NULL,
+            ev_estimated INTEGER,
+            prompt_version TEXT,
+            additional_instruction TEXT,
+            kaisai_date TEXT,
+            model TEXT,
+            raw_response TEXT,
+            race_snapshot_json TEXT
+          );
+          CREATE TABLE analysis_horses (
+            analysis_id INTEGER NOT NULL,
+            umaban INTEGER NOT NULL,
+            prior REAL NOT NULL,
+            adjusted_prob REAL NOT NULL,
+            place_odds_min REAL,
+            ev REAL,
+            is_positive INTEGER NOT NULL,
+            contributions_json TEXT,
+            mark TEXT,
+            reason TEXT,
+            PRIMARY KEY (analysis_id, umaban),
+            FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+          );
+          CREATE TABLE analysis_allocation_meta (
+            analysis_id INTEGER PRIMARY KEY,
+            route TEXT NOT NULL,
+            unavailable_reason TEXT,
+            fallback_reason TEXT,
+            skip_reason_code TEXT,
+            combo_odds_wide TEXT,
+            combo_odds_trio TEXT,
+            bankroll REAL NOT NULL,
+            per_race_cap REAL NOT NULL,
+            kelly_fraction REAL NOT NULL,
+            ev_threshold REAL NOT NULL,
+            include_combo_odds INTEGER NOT NULL,
+            include_wide INTEGER NOT NULL,
+            include_trio INTEGER NOT NULL,
+            include_quinella INTEGER,
+            include_exacta INTEGER,
+            include_trifecta INTEGER,
+            bet_unit INTEGER,
+            greedy_steps INTEGER,
+            candidate_cap INTEGER,
+            model_id TEXT,
+            model_approximate INTEGER,
+            odds_status TEXT NOT NULL,
+            FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+          );
+          CREATE TABLE analysis_bets (
+            analysis_id INTEGER NOT NULL,
+            bet_type TEXT NOT NULL,
+            combo_key TEXT NOT NULL,
+            stake INTEGER NOT NULL,
+            odds REAL,
+            ev REAL,
+            PRIMARY KEY (analysis_id, bet_type, combo_key),
+            FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+          );
+          INSERT INTO analyses (id, race_id, analyzed_at) VALUES (1, '旧配分レース(枠連未対応。v1.13.0までの記録)', '2026-01-01T00:00:00.000Z');
+          INSERT INTO analysis_allocation_meta (
+            analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code,
+            combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
+            include_combo_odds, include_wide, include_trio, include_quinella, include_exacta,
+            include_trifecta, bet_unit, greedy_steps, candidate_cap, model_id, model_approximate, odds_status
+          ) VALUES (
+            1, 'mixed', NULL, NULL, NULL,
+            NULL, NULL, 100000, 10000, 0.5, 1.0,
+            1, 1, 1, 1, 1, 1, 100, 1000, 2000,
+            'conditional-bernoulli', 0, 'result'
+          );
+        `);
+
+        // 新バージョンの AnalysisStore で開く(include_bracket_quinella列が無ければ ALTER TABLE で
+        // 追加されるはず)。
+        const store = new AnalysisStore({ database: db });
+
+        // 旧配分メタ行はinclude_bracket_quinella列を後付けしても、既存行はincludeBracketQuinella=null
+        // (#151より前の記録=判定不能。裁定「NULLを許す・OFFと断定しない」。v1.13.0で保存された
+        // 記録は枠連の買い目行を持ちうるが、買い目行からONと推定はしない〈#31〉)として読める。
+        const oldAllocation = store.getStoredAllocation(1)!;
+        expect(oldAllocation.includeBracketQuinella).toBeNull();
+        // 他の16列(include_quinella・include_exacta・include_trifectaを含む。Issue #151で
+        // include_bracket_quinella列が読む列に加わった分、16→17列のうち本テストが見る
+        // includeBracketQuinella自身を除いた数)は
+        // 列追加の影響を受けず、そのまま読めること(交絡が無いことの確認)。
+        expect(oldAllocation).toEqual({
+          route: "mixed",
+          unavailableReason: null,
+          fallbackReason: null,
+          skipReasonCode: null,
+          bankroll: 100000,
+          perRaceCap: 10000,
+          kellyFraction: 0.5,
+          evThreshold: 1.0,
+          includeComboOdds: true,
+          includeWide: true,
+          includeTrio: true,
+          includeQuinella: true,
+          includeExacta: true,
+          includeTrifecta: true,
+          includeBracketQuinella: null,
+          betUnit: 100,
+          oddsStatus: "result",
+          bets: [],
+        });
+
+        // 新規保存(include_bracket_quinella付き)はtrue/falseそれぞれで保存・復元できる(後方互換を確認)。
+        const idTrue = store.saveAnalysis(
+          makeRecord({
+            raceId: "新配分レースtrue(枠連)",
+            allocation: { meta: makeMeta({ includeBracketQuinella: true }), bets: [] },
+          }),
+        );
+        expect(store.getStoredAllocation(idTrue)!.includeBracketQuinella).toBe(true);
+
+        const idFalse = store.saveAnalysis(
+          makeRecord({
+            raceId: "新配分レースfalse(枠連)",
+            allocation: { meta: makeMeta({ includeBracketQuinella: false }), bets: [] },
+          }),
+        );
+        expect(store.getStoredAllocation(idFalse)!.includeBracketQuinella).toBe(false);
+
+        store.close();
+      });
+
+      it("同一DBで2回目のAnalysisStore構築(再オープン相当)でもALTER TABLEが再実行されず、既存データを保持すること(冪等性)", () => {
+        const db = new Database(":memory:");
+        const store1 = new AnalysisStore({ database: db });
+        const id = store1.saveAnalysis(
+          makeRecord({
+            raceId: "冪等性レース(枠連)",
+            allocation: { meta: makeMeta({ includeBracketQuinella: true }), bets: [] },
+          }),
+        );
+        // 同じDBで再度AnalysisStoreを構築(再オープン相当)してもエラーにならない。
+        expect(() => new AnalysisStore({ database: db })).not.toThrow();
+        const store2 = new AnalysisStore({ database: db });
+        expect(store2.getStoredAllocation(id)!.includeBracketQuinella).toBe(true);
+        db.close();
+      });
+    });
+
+    // Issue #140(#25-E3c)着手前確認AC4・#123の【記録】回収(Issue #151で3列→4列へ拡張):
+    // include_quinella・include_exacta・include_trifecta・include_bracket_quinellaの4列すべてが
+    // 無い旧スキーマ(#118より前相当)を開いても、4列とも正しく後付けされ、既存行は4列ともNULL
+    // (記録なし)で読め、2回開いても冪等であることを確認する(上記4つのdescribeはそれぞれ
+    // 「1列だけ欠けている」場合を見るが、この4列は migrateAllocationQuinellaColumn→
+    // migrateAllocationExactaColumn→migrateAllocationTrifectaColumn→
+    // migrateAllocationBracketQuinellaColumnの順に直列実行されるため、複数列が同時に欠けた状態
+    // からの復旧が正しく機能することは別途確認する価値がある)。
+    describe("include_quinella・include_exacta・include_trifecta・include_bracket_quinella列がすべて無い旧スキーマの後方互換マイグレーション(#123の【記録】回収・Issue #140・Issue #151)", () => {
+      it("4列すべてが無い旧スキーマのDBを開くと4列とも後付けされ、既存行は4列ともNULL(記録なし)で読め、2回開いても例外なく冪等であること", () => {
         const db = new Database(":memory:");
         // Issue #118より前のバージョン相当のスキーマ(analysis_allocation_metaにinclude_quinella/
-        // include_exacta/include_trifectaのいずれも無い)を直接作る。列一覧は現行のCREATE TABLE文
-        // (initSchema)からこの3列を除いたもの。
+        // include_exacta/include_trifecta/include_bracket_quinellaのいずれも無い)を直接作る。
+        // 列一覧は現行のCREATE TABLE文(initSchema)からこの4列を除いたもの。
         db.exec(`
           CREATE TABLE analyses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3085,7 +3263,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
             PRIMARY KEY (analysis_id, bet_type, combo_key),
             FOREIGN KEY (analysis_id) REFERENCES analyses (id)
           );
-          INSERT INTO analyses (id, race_id, analyzed_at) VALUES (1, '旧配分レース(馬連/馬単/三連単いずれも未対応)', '2026-01-01T00:00:00.000Z');
+          INSERT INTO analyses (id, race_id, analyzed_at) VALUES (1, '旧配分レース(馬連/馬単/三連単/枠連いずれも未対応)', '2026-01-01T00:00:00.000Z');
           INSERT INTO analysis_allocation_meta (
             analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code,
             combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
@@ -3099,17 +3277,19 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           );
         `);
 
-        // 新バージョンの AnalysisStore で開く。3列とも無ければ、
+        // 新バージョンの AnalysisStore で開く。4列とも無ければ、
         // migrateAllocationQuinellaColumn→migrateAllocationExactaColumn→
-        // migrateAllocationTrifectaColumn の順に直列実行され、3列とも追加されるはず。
+        // migrateAllocationTrifectaColumn→migrateAllocationBracketQuinellaColumn の順に直列実行され、
+        // 4列とも追加されるはず。
         const store = new AnalysisStore({ database: db });
 
-        // 旧配分メタ行は3列とも後付けしても、既存行は3列ともNULL(#118より前の記録=判定不能。
+        // 旧配分メタ行は4列とも後付けしても、既存行は4列ともNULL(#118より前の記録=判定不能。
         // 裁定「NULLを許す・OFFと断定しない」)として読める。
         const oldAllocation = store.getStoredAllocation(1)!;
         expect(oldAllocation.includeQuinella).toBeNull();
         expect(oldAllocation.includeExacta).toBeNull();
         expect(oldAllocation.includeTrifecta).toBeNull();
+        expect(oldAllocation.includeBracketQuinella).toBeNull();
         // 他の13列は列追加の影響を受けず、そのまま読めること(交絡が無いことの確認)。
         expect(oldAllocation).toEqual({
           route: "mixed",
@@ -3126,20 +3306,22 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeQuinella: null,
           includeExacta: null,
           includeTrifecta: null,
+          includeBracketQuinella: null,
           betUnit: 100,
           oddsStatus: "result",
           bets: [],
         });
 
-        // 新規保存(3列とも付き)は3列ともtrue/falseそれぞれで保存・復元できる(後方互換を確認)。
+        // 新規保存(4列とも付き)は4列ともtrue/falseそれぞれで保存・復元できる(後方互換を確認)。
         const idAllTrue = store.saveAnalysis(
           makeRecord({
-            raceId: "新配分レース3列ともtrue",
+            raceId: "新配分レース4列ともtrue",
             allocation: {
               meta: makeMeta({
                 includeQuinella: true,
                 includeExacta: true,
                 includeTrifecta: true,
+                includeBracketQuinella: true,
               }),
               bets: [],
             },
@@ -3149,15 +3331,17 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         expect(restoredAllTrue.includeQuinella).toBe(true);
         expect(restoredAllTrue.includeExacta).toBe(true);
         expect(restoredAllTrue.includeTrifecta).toBe(true);
+        expect(restoredAllTrue.includeBracketQuinella).toBe(true);
 
         const idAllFalse = store.saveAnalysis(
           makeRecord({
-            raceId: "新配分レース3列ともfalse",
+            raceId: "新配分レース4列ともfalse",
             allocation: {
               meta: makeMeta({
                 includeQuinella: false,
                 includeExacta: false,
                 includeTrifecta: false,
+                includeBracketQuinella: false,
               }),
               bets: [],
             },
@@ -3167,30 +3351,37 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         expect(restoredAllFalse.includeQuinella).toBe(false);
         expect(restoredAllFalse.includeExacta).toBe(false);
         expect(restoredAllFalse.includeTrifecta).toBe(false);
+        expect(restoredAllFalse.includeBracketQuinella).toBe(false);
 
         store.close();
       });
 
-      it("同一DBで2回目のAnalysisStore構築(再オープン相当)でも3列分のALTER TABLEが再実行されず、既存データを保持すること(冪等性)", () => {
+      it("同一DBで2回目のAnalysisStore構築(再オープン相当)でも4列分のALTER TABLEが再実行されず、既存データを保持すること(冪等性)", () => {
         const db = new Database(":memory:");
         const store1 = new AnalysisStore({ database: db });
         const id = store1.saveAnalysis(
           makeRecord({
-            raceId: "冪等性レース(3列)",
+            raceId: "冪等性レース(4列)",
             allocation: {
-              meta: makeMeta({ includeQuinella: true, includeExacta: true, includeTrifecta: true }),
+              meta: makeMeta({
+                includeQuinella: true,
+                includeExacta: true,
+                includeTrifecta: true,
+                includeBracketQuinella: true,
+              }),
               bets: [],
             },
           }),
         );
         // 同じDBで再度AnalysisStoreを構築(再オープン相当)してもエラーにならない
-        // (3列分のALTER TABLEがそれぞれ冪等であること)。
+        // (4列分のALTER TABLEがそれぞれ冪等であること)。
         expect(() => new AnalysisStore({ database: db })).not.toThrow();
         const store2 = new AnalysisStore({ database: db });
         const restored = store2.getStoredAllocation(id)!;
         expect(restored.includeQuinella).toBe(true);
         expect(restored.includeExacta).toBe(true);
         expect(restored.includeTrifecta).toBe(true);
+        expect(restored.includeBracketQuinella).toBe(true);
         db.close();
       });
     });
@@ -3316,10 +3507,12 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
 
     describe("getStoredAllocation(配分提案の読み出し。Issue #55)", () => {
       /**
-       * 読む16列の基準値(boss裁定2026-09-02: combo_odds_wide/combo_odds_trioを除いた13列。
+       * 読む17列の基準値(boss裁定2026-09-02: combo_odds_wide/combo_odds_trioを除いた13列。
        * Issue #118(#24-D3b-3)でinclude_quinellaを追加し13→14列、Issue #126(#24-E3c)で
        * include_exactaを追加し14→15列、Issue #140(#25-E3c)でinclude_trifectaを追加し
-       * 15→16列)。
+       * 15→16列、Issue #151(#26-E3c)でinclude_bracket_quinellaを追加し16→17列。
+       * include_bracket_quinellaはfalseにして、SELECT文で隣接するinclude_trifecta(true)との
+       * 入れ替え変異を検出できるようにする)。
        * 全列が互いに異なる値を持つよう選び、束縛箇所の取り違え(条件B)を機械的に検出できるようにする
        * (includeQuinella=true・includeExacta=falseと値を逆にし、includeTrifecta=trueで
        * includeQuinellaと揃えることで、SELECT文で隣接する2組〈include_quinella⇔include_exacta・
@@ -3343,6 +3536,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeQuinella: true,
           includeExacta: false,
           includeTrifecta: true,
+          includeBracketQuinella: false,
           betUnit: 150,
           oddsStatus: "middle",
           ...overrides,
@@ -3370,7 +3564,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         store.close();
       });
 
-      it("読む16列 + bets(betType/comboKey/stake/odds/ev)がすべて値として往復し、読まない列を戻り値に含まないこと(Issue #118でinclude_quinellaを追加し13→14列・Issue #126でinclude_exactaを追加し14→15列・Issue #140でinclude_trifectaを追加し15→16列)", () => {
+      it("読む17列 + bets(betType/comboKey/stake/odds/ev)がすべて値として往復し、読まない列を戻り値に含まないこと(Issue #118でinclude_quinellaを追加し13→14列・Issue #126でinclude_exactaを追加し14→15列・Issue #140でinclude_trifectaを追加し15→16列・Issue #151でinclude_bracket_quinellaを追加し16→17列)", () => {
         const store = new AnalysisStore();
         const id = store.saveAnalysis(
           makeRecord({
@@ -3401,6 +3595,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           includeQuinella: true,
           includeExacta: false,
           includeTrifecta: true,
+          includeBracketQuinella: false,
           betUnit: 150,
           oddsStatus: "middle",
           bets: [
@@ -3659,6 +3854,36 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
           field: "includeTrifecta",
           expectedValue: null,
         },
+        // Issue #151(#26-E3c): include_bracket_quinella列の追加(16→17列)。include_trifectaと同じく
+        // NULLを許容する列のため、真偽の入れ替えに加えて非null⇔nullの往復も観測する(下記3ケース)。
+        // 「null→非null」方向は`AnalysisAllocationMetaRecord.includeBracketQuinella`がboolean
+        // (非null)型のため、このテーブル駆動の枠組みでは作れない(型上NULLを書けない)。その方向は
+        // 本テーブルの外に単独テストとして置く(「include_bracket_quinella(null→非null、#151より前の
+        // 記録を模す)」参照)。
+        {
+          label: "include_bracket_quinella(true→false)",
+          metaOverride: { includeBracketQuinella: true },
+          column: "include_bracket_quinella",
+          sentinelDbValue: 0,
+          field: "includeBracketQuinella",
+          expectedValue: false,
+        },
+        {
+          label: "include_bracket_quinella(false→true)",
+          metaOverride: { includeBracketQuinella: false },
+          column: "include_bracket_quinella",
+          sentinelDbValue: 1,
+          field: "includeBracketQuinella",
+          expectedValue: true,
+        },
+        {
+          label: "include_bracket_quinella(非null→null)",
+          metaOverride: { includeBracketQuinella: true },
+          column: "include_bracket_quinella",
+          sentinelDbValue: null,
+          field: "includeBracketQuinella",
+          expectedValue: null,
+        },
         {
           label: "bet_unit(非null→null)",
           metaOverride: {},
@@ -3789,6 +4014,34 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         // 本題: null→非null(true)に変わり、他フィールドは基準値から一切変化していないこと。
         expect(updated.includeTrifecta).toBe(true);
         expect({ ...updated, includeTrifecta: baseline.includeTrifecta }).toEqual(baseline);
+        store.close();
+      });
+
+      it("include_bracket_quinella(null→非null、Issue #151より前の記録を模す): 列が既にNULLの行をUPDATEすると、includeBracketQuinellaだけがtrue/falseに変わり他フィールドは変化しないこと", () => {
+        // metaColumnCasesのコメントの通り、`AnalysisAllocationMetaRecord.includeBracketQuinella`は
+        // boolean(非null)型のため、この型経由の保存ではNULLの初期値を作れない。
+        // #151より前に保存された記録(列追加前=NULL)を模すため、通常保存の直後に
+        // 生SQLでinclude_bracket_quinellaだけをNULLへ書き戻す。
+        const store = new AnalysisStore();
+        const id = store.saveAnalysis(
+          makeRecord({
+            raceId: "AC1メタ列-include_bracket_quinella-null-to-nonnull",
+            allocation: { meta: baselineMeta(), bets: [BASELINE_BET] },
+          }),
+        );
+        store.rawDatabase
+          .prepare(`UPDATE analysis_allocation_meta SET include_bracket_quinella = NULL WHERE analysis_id = ?`)
+          .run(id);
+        const baseline = store.getStoredAllocation(id)!;
+        // 前提固定: NULLへの書き戻しが効いていること(includeBracketQuinella=記録なし)。
+        expect(baseline.includeBracketQuinella).toBeNull();
+        store.rawDatabase
+          .prepare(`UPDATE analysis_allocation_meta SET include_bracket_quinella = ? WHERE analysis_id = ?`)
+          .run(1, id);
+        const updated = store.getStoredAllocation(id)!;
+        // 本題: null→非null(true)に変わり、他フィールドは基準値から一切変化していないこと。
+        expect(updated.includeBracketQuinella).toBe(true);
+        expect({ ...updated, includeBracketQuinella: baseline.includeBracketQuinella }).toEqual(baseline);
         store.close();
       });
 

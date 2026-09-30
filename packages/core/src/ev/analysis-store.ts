@@ -246,6 +246,13 @@ export interface AnalysisAllocationMetaRecord {
    * 同型)。
    */
   readonly includeTrifecta: boolean;
+  /**
+   * 枠連を配分に使うか(Issue #151・#26-E3cで追加)。DB列(`include_bracket_quinella`)はNULLを許す
+   * ため、書き込み型としては非nullable(新規保存は常に値ありとして扱う。呼び出し側
+   * `allocation-record.ts`の`settingsColumnsOf`が必ず値を渡す。`includeQuinella`/`includeExacta`/
+   * `includeTrifecta`と同型)。
+   */
+  readonly includeBracketQuinella: boolean;
   /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
   readonly betUnit: number | null;
   /** 貪欲逐次配分の分割数。betUnit と同じ到達条件。 */
@@ -296,20 +303,22 @@ export interface StoredAllocationBetDetail {
 /**
  * `getStoredAllocation` が返す配分提案(Issue #55: 過去分析の再表示で配分提案を出す)。
  *
- * メタ行23列(主キー`analysis_id`を含む物理列数。AC2テスト等で使う数え方と同じ。
+ * メタ行24列(主キー`analysis_id`を含む物理列数。AC2テスト等で使う数え方と同じ。
  * Issue #118〈#24-D3b-3〉でinclude_quinella列を追加し20→21列、Issue #126〈#24-E3c〉で
  * include_exacta列を追加し21→22列、Issue #140〈#25-E3c〉でinclude_trifecta列を追加し
- * 22→23列)のうち、boss裁定(2026-09-02)により以下の16列だけを読む(include_quinellaはIssue #118で、
- * include_exactaはIssue #126で、include_trifectaはIssue #140で、それぞれ読む列に追加した)。
+ * 22→23列、Issue #151〈#26-E3c〉でinclude_bracket_quinella列を追加し23→24列)のうち、
+ * boss裁定(2026-09-02)により以下の17列だけを読む(include_quinellaはIssue #118で、
+ * include_exactaはIssue #126で、include_trifectaはIssue #140で、include_bracket_quinellaは
+ * Issue #151で、それぞれ読む列に追加した)。
  * 残り7列のうち`analysis_id`は返り値のデータ列ではなく引数(検索キー)そのものであり、
  * 列挙の対象外とする。したがって実質的に「読まない列」として列挙するのは
  * 次の6列〈combo_odds_wide/combo_odds_trio/greedy_steps/candidate_cap/model_id/
  * model_approximate〉(利用者に意味の無い内部パラメータ、または表示予定が無いため意図的に
  * 読まない。#71の原則「誰も読まない列にコストを払わない」を踏襲する。AC2の対象もこの6列。
- * Issue #126・#140で列が増えても読まない6列自体は変わらない):
+ * Issue #126・#140・#151で列が増えても読まない6列自体は変わらない):
  * route/unavailable_reason/fallback_reason/skip_reason_code/bankroll/per_race_cap/
  * kelly_fraction/ev_threshold/include_combo_odds/include_wide/include_trio/
- * include_quinella/include_exacta/include_trifecta/bet_unit/odds_status。
+ * include_quinella/include_exacta/include_trifecta/include_bracket_quinella/bet_unit/odds_status。
  *
  * `getAllocationForVerify`(#71。route/skip_reason_codeとbets 3列のみ)とは読む列の範囲が
  * 異なる**別のクエリ**であり、互いに変更の影響を与えない(#71 AC-B4の論拠を壊さないための
@@ -354,6 +363,13 @@ export interface StoredAllocation {
    * `includeQuinella`/`includeExacta`と同型)。
    */
   readonly includeTrifecta: boolean | null;
+  /**
+   * 枠連を配分に使うか(Issue #151・#26-E3cで追加)。列追加前(Issue #151より前=v1.13.0まで)に
+   * 保存された記録は null(「記録なし」。#31: OFFと断定しない。買い目に枠連が入っている
+   * 記録〈v1.13.0以降に保存されたもの〉でもONと推定しない。読み出し側の表示は「枠連: 記録なし」。
+   * `includeQuinella`/`includeExacta`/`includeTrifecta`と同型)。
+   */
+  readonly includeBracketQuinella: boolean | null;
   /** 賭け金の最小単位(円)。coreの配分計算に到達していない経路(unset/yoso/unavailable)は null。 */
   readonly betUnit: number | null;
   /** オッズ発売状態(発売前/中間/確定)。app 側 OddsStatus の値をそのまま受け取る。 */
@@ -364,10 +380,11 @@ export interface StoredAllocation {
 
 /**
  * `getAllocationForVerify` が返す配分提案の最小表現(Issue #71・#54-B)。
- * メタ行23列(Issue #118でinclude_quinella列を追加し20→21列、Issue #126でinclude_exacta列を
- * 追加し21→22列、Issue #140でinclude_trifecta列を追加し22→23列)のうち
- * `route`/`skip_reason_code` の2列だけを持つ(残り21列は#71のスコープ外。
- * `getAllocationForVerify`自体はIssue #118・#126・#140のいずれでも変更していない〈SELECT文が
+ * メタ行24列(Issue #118でinclude_quinella列を追加し20→21列、Issue #126でinclude_exacta列を
+ * 追加し21→22列、Issue #140でinclude_trifecta列を追加し22→23列、Issue #151で
+ * include_bracket_quinella列を追加し23→24列)のうち
+ * `route`/`skip_reason_code` の2列だけを持つ(残り22列は#71のスコープ外。
+ * `getAllocationForVerify`自体はIssue #118・#126・#140・#151のいずれでも変更していない〈SELECT文が
  * route/skip_reason_codeしか読まないため無関係〉。下記`getAllocationForVerify` のJSDoc参照)。
  */
 export interface StoredAllocationSummary {
@@ -737,15 +754,17 @@ export class AnalysisStore {
       -- mixed/invalid)で必ず1行書く契約(#31: 判定不能と判定結果を混ぜない)。列一覧は
       -- boss着手前ゲート・#59で固定(Issue #118〈#24-D3b-3〉で include_quinella 列を追加し
       -- 20→21列、Issue #126〈#24-E3c〉で include_exacta 列を追加し21→22列、Issue #140〈#25-E3c〉で
-      -- include_trifecta 列を追加し22→23列。列を読む人〈過去分析の再表示
-      -- 「馬連/馬単/三連単: ON/OFF/記録なし」〉が実在するに至ったため #59 の凍結を
-      -- 部分的に解除した3つの例外)。race_combo_payouts と同じ理由・同じ流儀で
+      -- include_trifecta 列を追加し22→23列、Issue #151〈#26-E3c〉で include_bracket_quinella 列を
+      -- 追加し23→24列。列を読む人〈過去分析の再表示「馬連/馬単/三連単/枠連: ON/OFF/記録なし」〉が
+      -- 実在するに至ったため #59 の凍結を部分的に解除した4つの例外)。race_combo_payouts と同じ理由・同じ流儀で
       -- CREATE TABLE IF NOT EXISTS を使う(新規テーブル追加であり既存データには触れない)。
-      -- include_quinella・include_exacta・include_trifecta はいずれも NULL を許す(NOT NULL に
-      -- しない・DEFAULT も付けない): 列追加前(それぞれIssue #118・#126・#140より前)に保存された
-      -- 行は「馬連/馬単/三連単の設定を記録していない」のであって「馬連/馬単/三連単を配分に
-      -- 使わなかった」のではないため、0で埋めるとOFFと断定する誤りになる(#31の原則。
-      -- 着手前ゲート裁定)。
+      -- include_quinella・include_exacta・include_trifecta・include_bracket_quinella はいずれも
+      -- NULL を許す(NOT NULL にしない・DEFAULT も付けない): 列追加前(それぞれIssue #118・#126・
+      -- #140・#151より前)に保存された行は「馬連/馬単/三連単/枠連の設定を記録していない」のであって
+      -- 「馬連/馬単/三連単/枠連を配分に使わなかった」のではないため、0で埋めるとOFFと断定する
+      -- 誤りになる(#31の原則。着手前ゲート裁定)。枠連は v1.13.0(#150)から買い目行が保存されて
+      -- いるため、v1.13.0で保存された行は「枠連の買い目はあるが設定列は NULL」になりうるが、
+      -- 買い目行から ON と推定はしない。
       CREATE TABLE IF NOT EXISTS ${ANALYSIS_ALLOCATION_META_TABLE} (
         analysis_id INTEGER PRIMARY KEY,
         route TEXT NOT NULL,
@@ -764,6 +783,7 @@ export class AnalysisStore {
         include_quinella INTEGER,
         include_exacta INTEGER,
         include_trifecta INTEGER,
+        include_bracket_quinella INTEGER,
         bet_unit INTEGER,
         greedy_steps INTEGER,
         candidate_cap INTEGER,
@@ -800,6 +820,7 @@ export class AnalysisStore {
     this.migrateAllocationQuinellaColumn();
     this.migrateAllocationExactaColumn();
     this.migrateAllocationTrifectaColumn();
+    this.migrateAllocationBracketQuinellaColumn();
   }
 
   /**
@@ -845,6 +866,22 @@ export class AnalysisStore {
       .all() as Array<{ name: string }>;
     if (!columns.some((c) => c.name === "include_trifecta")) {
       this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_trifecta INTEGER`);
+    }
+  }
+
+  /**
+   * 配分提案メタ行のinclude_bracket_quinella列を後付けするマイグレーション(Issue #151・#26-E3c)。
+   * Issue #151より前(v1.13.0まで)に作成済みの analysis_allocation_meta にはこの列が無いため、
+   * 存在しなければ追加する(既存行はALTER TABLEでNULLが入る=「枠連の設定を記録していない」として
+   * 読める。#31: OFFと断定しない。上記CREATE TABLEのコメント参照。`migrateAllocationQuinellaColumn`/
+   * `migrateAllocationExactaColumn`/`migrateAllocationTrifectaColumn`と同型)。
+   */
+  private migrateAllocationBracketQuinellaColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_ALLOCATION_META_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "include_bracket_quinella")) {
+      this.db.exec(`ALTER TABLE ${ANALYSIS_ALLOCATION_META_TABLE} ADD COLUMN include_bracket_quinella INTEGER`);
     }
   }
 
@@ -1032,9 +1069,9 @@ export class AnalysisStore {
          (analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code,
           combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold,
           include_combo_odds, include_wide, include_trio, include_quinella, include_exacta,
-          include_trifecta, bet_unit, greedy_steps, candidate_cap, model_id, model_approximate,
-          odds_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          include_trifecta, include_bracket_quinella, bet_unit, greedy_steps, candidate_cap,
+          model_id, model_approximate, odds_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertAllocationBet = this.db.prepare(
       `INSERT INTO ${ANALYSIS_BETS_TABLE}
@@ -1093,6 +1130,7 @@ export class AnalysisStore {
           m.includeQuinella ? 1 : 0,
           m.includeExacta ? 1 : 0,
           m.includeTrifecta ? 1 : 0,
+          m.includeBracketQuinella ? 1 : 0,
           m.betUnit,
           m.greedySteps,
           m.candidateCap,
@@ -1274,19 +1312,21 @@ export class AnalysisStore {
    * undefined を返す(#59 より前に保存された旧分析=「記録なし」。`AnalysisRecord.allocation`
    * が渡されなかった保存はメタ行を作らない)。
    *
-   * **意図的に読まない列(#71 着手前ゲート決定)**: メタ行の残り21列(`analysis_id`を含む。
-   * Issue #118でinclude_quinella・#126でinclude_exacta・#140でinclude_trifectaがそれぞれ実効設定の
-   * 一員として加わり、物理列数の増加分〈20→21→22→23〉だけこの残り列数も増えている。実測: 物理23列
-   * のうち本メソッドが読むのは`route`/`skip_reason_code`の2列だけなので、残りは23-2=21列)
-   * (`unavailable_reason`/`fallback_reason`/`combo_odds_wide`/`combo_odds_trio`/実効設定10列
+   * **意図的に読まない列(#71 着手前ゲート決定)**: メタ行の残り22列(`analysis_id`を含む。
+   * Issue #118でinclude_quinella・#126でinclude_exacta・#140でinclude_trifecta・#151で
+   * include_bracket_quinellaがそれぞれ実効設定の一員として加わり、物理列数の増加分
+   * 〈20→21→22→23→24〉だけこの残り列数も増えている。実測: 物理24列のうち本メソッドが読むのは
+   * `route`/`skip_reason_code`の2列だけなので、残りは24-2=22列)
+   * (`unavailable_reason`/`fallback_reason`/`combo_odds_wide`/`combo_odds_trio`の4列、実効設定11列
    * 〈bankroll/per_race_cap/kelly_fraction/ev_threshold/include_combo_odds/include_wide/
-   * include_trio/include_quinella/include_exacta/include_trifecta〉/実効値4列/`odds_status`/
-   * `analysis_id`)と、明細の `odds`/`ev` の2列は返さない。#71 が実際に使うのは
+   * include_trio/include_quinella/include_exacta/include_trifecta/include_bracket_quinella〉、
+   * 実効値5列〈bet_unit/greedy_steps/candidate_cap/model_id/model_approximate〉、`odds_status`、
+   * `analysis_id`。4+11+5+1+1=22)と、明細の `odds`/`ev` の2列は返さない。#71 が実際に使うのは
    * `route`・`skip_reason_code`(母集団の4分類)と `bet_type`/`combo_key`/`stake`
    * (実際の配分額そのものを賭け金とする。Q-C)の5列のみで、`odds`/`ev` を読むと
    * 「回収率」ではなく「提案時点の期待値の再計算」になってしまう(Q-Cに反する)。
    * 誰も読まない列にまで #59 の条件B(非衝突)のコストを払わない判断は #59 で8巡した
-   * 失敗の再現を避けるため(#71 Issue本文)。#55(過去分析の再表示UI)で残り21列/odds/evが
+   * 失敗の再現を避けるため(#71 Issue本文)。#55(過去分析の再表示UI)で残り22列/odds/evが
    * 必要になった時点で別途追加する。
    *
    * **`odds`/`ev`を返り値の型に持たせないこと自体は「将来この関数が改修されても読まれない」
@@ -1318,22 +1358,24 @@ export class AnalysisStore {
 
   /**
    * 配分提案(analysis_allocation_meta / analysis_bets、Issue #59)のうち、#55(過去分析の
-   * 再表示で配分提案を出す)が読む16列 + bets(betType/comboKey/stake/odds/ev)を取得する
+   * 再表示で配分提案を出す)が読む17列 + bets(betType/comboKey/stake/odds/ev)を取得する
    * (include_quinellaはIssue #118〈#24-D3b-3〉で13→14列、include_exactaはIssue #126〈#24-E3c〉で
-   * 14→15列、include_trifectaはIssue #140〈#25-E3c〉で15→16列、それぞれ読む列に追加した)。
+   * 14→15列、include_trifectaはIssue #140〈#25-E3c〉で15→16列、include_bracket_quinellaは
+   * Issue #151〈#26-E3c〉で16→17列、それぞれ読む列に追加した)。
    * メタ行が無ければ undefined を返す(#59より前の旧分析=「記録なし」)。
    *
    * **読まない6列(boss裁定2026-09-02)**: `combo_odds_wide`/`combo_odds_trio`/`greedy_steps`/
-   * `candidate_cap`/`model_id`/`model_approximate`(メタ行の物理列数23から読む16列と
+   * `candidate_cap`/`model_id`/`model_approximate`(メタ行の物理列数24から読む17列と
    * `analysis_id`〈検索キーであり返り値のデータ列ではないため列挙に含めない〉を除いた数。
-   * Issue #118・#126・#140で列が20→21→22→23列に増えても、読まない6列自体は変わらない)。
+   * Issue #118・#126・#140・#151で列が20→21→22→23→24列に増えても、読まない6列自体は変わらない)。
    * 前者2つは表示予定が無く(#55のスコープ外。必要になれば#16で追加)、後者4つは利用者に
    * 意味の無い内部パラメータ(`getAllocationForVerify`のJSDocと同じ判断)。詳細は
    * {@link StoredAllocation} のJSDoc参照。
    *
-   * `include_quinella`/`include_exacta`/`include_trifecta`は他14列と異なりNULLを許す列のため、
-   * DB値が`null`のときはそれぞれ`includeQuinella: null`/`includeExacta: null`/
-   * `includeTrifecta: null`(記録なし)としてそのまま返す(0/1のときのみ`!== 0`でboolean化する。
+   * `include_quinella`/`include_exacta`/`include_trifecta`/`include_bracket_quinella`は他13列と
+   * 異なりNULLを許す列のため、DB値が`null`のときはそれぞれ`includeQuinella: null`/
+   * `includeExacta: null`/`includeTrifecta: null`/`includeBracketQuinella: null`(記録なし)として
+   * そのまま返す(0/1のときのみ`!== 0`でboolean化する。
    * #31: 記録なしをfalseに丸めない)。
    * @param analysisId 分析ID
    */
@@ -1346,6 +1388,7 @@ export class AnalysisStore {
                 include_combo_odds AS includeComboOdds, include_wide AS includeWide,
                 include_trio AS includeTrio, include_quinella AS includeQuinella,
                 include_exacta AS includeExacta, include_trifecta AS includeTrifecta,
+                include_bracket_quinella AS includeBracketQuinella,
                 bet_unit AS betUnit, odds_status AS oddsStatus
            FROM ${ANALYSIS_ALLOCATION_META_TABLE} WHERE analysis_id = ?`,
       )
@@ -1365,6 +1408,7 @@ export class AnalysisStore {
           includeQuinella: number | null;
           includeExacta: number | null;
           includeTrifecta: number | null;
+          includeBracketQuinella: number | null;
           betUnit: number | null;
           oddsStatus: string;
         }
@@ -1393,6 +1437,8 @@ export class AnalysisStore {
       includeQuinella: metaRow.includeQuinella === null ? null : metaRow.includeQuinella !== 0,
       includeExacta: metaRow.includeExacta === null ? null : metaRow.includeExacta !== 0,
       includeTrifecta: metaRow.includeTrifecta === null ? null : metaRow.includeTrifecta !== 0,
+      includeBracketQuinella:
+        metaRow.includeBracketQuinella === null ? null : metaRow.includeBracketQuinella !== 0,
       betUnit: metaRow.betUnit,
       oddsStatus: metaRow.oddsStatus,
       bets,
