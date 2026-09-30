@@ -284,7 +284,7 @@ function betTypeLabel(betType: string): string {
 /** オッズ発売状態(odds_status)→日本語ラベル。
  *
  * 既存の `oddsStatusNote`(format.ts)は流用しない: (i) `"result"`(確定)で `null` を返す設計
- * (実効設定は11項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
+ * (実効設定は12項目すべてに値が要るため使えない)、(ii) 文言が実行中のラン向け(「発売後に
  * 再分析推奨」)で過去分析の再表示には不適切、という用途の違いによる(`oddsStatusNote` 自体は
  * 改変しない。`BatchAnalysisView.tsx` が依存しているため)。
  */
