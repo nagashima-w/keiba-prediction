@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040809",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 9,
+  "raceName": "芙蓉S",
+  "listedEntryCount": 8,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 2000,
+  "runnerCount": 8,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ニシノリリックス",
+      "prior": 0.38726461899638237,
+      "placeOddsMin": 5.2,
+      "placeOddsMax": 19.2,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 2,
+      "horseName": "ジョドレルバンク",
+      "prior": 0.3655970259607526,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.1,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 3,
+      "horseName": "エイシンウルトラン",
+      "prior": 0.3876955326140425,
+      "placeOddsMin": 2.2,
+      "placeOddsMax": 7.4,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 4,
+      "horseName": "コスモプルー",
+      "prior": 0.4845556002476004,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 4.2,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 5,
+      "horseName": "タイヴァス",
+      "prior": 0.355131462240502,
+      "placeOddsMin": 2.9,
+      "placeOddsMax": 10.2,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 6,
+      "horseName": "レオンティウス",
+      "prior": 0.43920482412651474,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 3.3,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 7,
+      "horseName": "モーモーゼロ",
+      "prior": 0.2568161647344543,
+      "placeOddsMin": 19.5,
+      "placeOddsMax": 74.5,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    },
+    {
+      "umaban": 8,
+      "horseName": "スタースポット",
+      "prior": 0.32373477107975035,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 3.1,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 26,
+      "removedCount": 8,
+      "removedByCutoffCount": 8,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:22:45.830Z"
+}

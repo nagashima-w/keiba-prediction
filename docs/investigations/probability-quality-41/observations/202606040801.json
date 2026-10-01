@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040801",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 1,
+  "raceName": "2歳未勝利",
+  "listedEntryCount": 13,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1200,
+  "runnerCount": 13,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "アルビオンライズ",
+      "prior": 0.38476923076923075,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.1,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 2,
+      "horseName": "トパーズヘッド",
+      "prior": 0.22476923076923078,
+      "placeOddsMin": 29.3,
+      "placeOddsMax": 75.4,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 3,
+      "horseName": "アンミツ",
+      "prior": 0.18676923076923077,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 4.6,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 4,
+      "horseName": "リコルディオーロ",
+      "prior": 0.2220470085470086,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 3.2,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 5,
+      "horseName": "コウソクレムリア",
+      "prior": 0.3397692307692307,
+      "placeOddsMin": 3.3,
+      "placeOddsMax": 7.8,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 6,
+      "horseName": "クリアマインド",
+      "prior": 0.16876923076923078,
+      "placeOddsMin": 20.5,
+      "placeOddsMax": 52.3,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 7,
+      "horseName": "ヴァンデエス",
+      "prior": 0.1608803418803419,
+      "placeOddsMin": 40,
+      "placeOddsMax": 103,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 8,
+      "horseName": "スヴァラ",
+      "prior": 0.13276923076923078,
+      "placeOddsMin": 27.9,
+      "placeOddsMax": 71.5,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 9,
+      "horseName": "アイビーカイロス",
+      "prior": 0.3247692307692308,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 3.9,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 10,
+      "horseName": "ハイトラクション",
+      "prior": 0.17510256410256408,
+      "placeOddsMin": 3.3,
+      "placeOddsMax": 7.7,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 11,
+      "horseName": "ハクタカ",
+      "prior": 0.12976923076923078,
+      "placeOddsMin": 13.5,
+      "placeOddsMax": 34.3,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 12,
+      "horseName": "アーバーバイティ",
+      "prior": 0.3447692307692308,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.7,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 13,
+      "horseName": "ファイアリーボルト",
+      "prior": 0.22476923076923075,
+      "placeOddsMin": 2.6,
+      "placeOddsMax": 6,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 30,
+      "removedCount": 13,
+      "removedByCutoffCount": 13,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:09:16.175Z"
+}

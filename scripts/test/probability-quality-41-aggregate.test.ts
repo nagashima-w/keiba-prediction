@@ -4,10 +4,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   aggregateObservations,
+  summarizeFetchRuns,
   AGGREGATE_BOOTSTRAP,
   AGGREGATE_PERMUTATION,
   loadObservations,
 } from "../probability-quality-41/aggregate.js";
+import type { RunManifest } from "../probability-quality-41/run.js";
 import {
   OBSERVATION_SCHEMA_VERSION,
   type HorseObservation,
@@ -349,5 +351,75 @@ describe("loadObservations", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("summarizeFetchRuns: manifest の実行記録から、保存しなかったレースと要求数を拾う", () => {
+  function run(over: Partial<RunManifest>): RunManifest {
+    return {
+      gitCommit: "abc",
+      plan: { central: ["20260926"], nar: [] },
+      minIntervalMs: 2000,
+      startedAt: "2026-10-01T00:00:00.000Z",
+      finishedAt: "2026-10-01T00:10:00.000Z",
+      days: [],
+      processed: [],
+      skippedExisting: [],
+      halted: false,
+      haltReason: null,
+      requestCount: 100,
+      urlsBlocked: [],
+      ...over,
+    };
+  }
+
+  it("not-saved のレースを、理由・文言・回数つきで返す", () => {
+    const runs = [
+      run({
+        processed: [
+          { raceId: "202606050101", status: "not-saved", reason: "scrape-error", detail: "boom" },
+          { raceId: "202606050102", status: "ok" },
+        ],
+      }),
+    ];
+    const r = summarizeFetchRuns(runs, [okRace("202606050102", "central", [])]);
+    expect(r.notSavedRaces).toEqual([
+      { raceId: "202606050101", reason: "scrape-error", detail: "boom", attempts: 1 },
+    ]);
+  });
+
+  it("再実行で観測が保存されたレースは、保存しなかったレースに数えない(最終状態で判断する)", () => {
+    const runs = [
+      run({ processed: [{ raceId: "202606050101", status: "not-saved", reason: "scrape-error", detail: "x" }] }),
+      run({ processed: [{ raceId: "202606050101", status: "ok" }] }),
+    ];
+    const r = summarizeFetchRuns(runs, [race8("202606050101", "central", "same")]);
+    expect(r.notSavedRaces).toEqual([]);
+  });
+
+  it("再実行でも保存されなかったレースは、最後の理由と試行回数(not-saved の回数)を返す", () => {
+    const runs = [
+      run({ processed: [{ raceId: "202606050101", status: "not-saved", reason: "scrape-error", detail: "a" }] }),
+      run({ processed: [{ raceId: "202606050101", status: "not-saved", reason: "unclassified-finish", detail: "b" }] }),
+    ];
+    const r = summarizeFetchRuns(runs, []);
+    expect(r.notSavedRaces).toEqual([
+      { raceId: "202606050101", reason: "unclassified-finish", detail: "b", attempts: 2 },
+    ]);
+  });
+
+  it("実行の要約(要求数の合計・停止の有無・コミット・開催日)を返す", () => {
+    const runs = [
+      run({ requestCount: 120, days: [{ region: "central", requestedDate: "20260926", usedDate: "20260926", attemptedDates: ["20260926"], raceIds: ["a", "b"] }] }),
+      run({ requestCount: 30, halted: true, haltReason: "停止" }),
+    ];
+    const r = summarizeFetchRuns(runs, []);
+    expect(r.runCount).toBe(2);
+    expect(r.requestCountTotal).toBe(150);
+    expect(r.anyHalted).toBe(true);
+    expect(r.gitCommits).toEqual(["abc"]);
+    expect(r.days).toEqual([
+      { region: "central", requestedDate: "20260926", usedDate: "20260926", attemptedDates: ["20260926"], raceIds: ["a", "b"] },
+    ]);
   });
 });

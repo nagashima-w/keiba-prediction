@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093007",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 7,
+  "raceName": "サロマ大収穫祭賞(C4)",
+  "listedEntryCount": 11,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1000,
+  "runnerCount": 11,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "チョゴリザ",
+      "prior": 0.30697133112049696,
+      "placeOddsMin": 3,
+      "placeOddsMax": 5.1,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 2,
+      "horseName": "ダイメイイースター",
+      "prior": 0.3054757340884552,
+      "placeOddsMin": 3.3,
+      "placeOddsMax": 5.6,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 60
+    },
+    {
+      "umaban": 3,
+      "horseName": "スマイリングスカイ",
+      "prior": 0.2089735629146687,
+      "placeOddsMin": 4.7,
+      "placeOddsMax": 8.3,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 4,
+      "horseName": "ヤマトノカゼ",
+      "prior": 0.30687986097286585,
+      "placeOddsMin": 2.4,
+      "placeOddsMax": 4.1,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 5,
+      "horseName": "エンジェルロール",
+      "prior": 0.30726267417154246,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 1.8,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 6,
+      "horseName": "モーモーブルー",
+      "prior": 0.23588912796980613,
+      "placeOddsMin": 20.3,
+      "placeOddsMax": 36.1,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 38
+    },
+    {
+      "umaban": 7,
+      "horseName": "アクアノート",
+      "prior": 0.20294480738921533,
+      "placeOddsMin": 6.3,
+      "placeOddsMax": 11.2,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 30
+    },
+    {
+      "umaban": 8,
+      "horseName": "ウナトライオン",
+      "prior": 0.34592089235156287,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.6,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 49
+    },
+    {
+      "umaban": 9,
+      "horseName": "ブルーハーツ",
+      "prior": 0.289943621864484,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 2.1,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 10
+    },
+    {
+      "umaban": 10,
+      "horseName": "ルーチェコメット",
+      "prior": 0.29628702799545464,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 11,
+      "horseName": "ブライトソール",
+      "prior": 0.19345135916144732,
+      "placeOddsMin": 65,
+      "placeOddsMax": 99.9,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 49
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 287,
+      "removedCount": 11,
+      "removedByCutoffCount": 11,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:44:44.989Z"
+}

@@ -223,6 +223,18 @@ describe("runMeasurement", () => {
     expect(h.manifests).toHaveLength(1); // 異常終了でもマニフェストは書く
   });
 
+  it("停止中に measure が想定外の例外を投げても、停止と誤分類せず例外として伝える(バグを隠さない)", async () => {
+    const h = harness({
+      measure: async () => {
+        h.guard.tripped = true;
+        throw new Error("想定外のバグ");
+      },
+    });
+    await expect(runMeasurement(h.deps, DEFAULT_PLAN)).rejects.toThrow("想定外のバグ");
+    expect(h.manifests).toHaveLength(1);
+    expect((h.manifests[0] as { halted: boolean }).halted).toBe(false);
+  });
+
   it("開催が見つからなければ NoRacesFoundError で止まる", async () => {
     // 要求日と4週前までのどの日も空にする(既定の一覧が返らないよう、全日付で空配列を返す)。
     const empty = new Proxy({}, { get: () => [] }) as Record<string, RaceListEntry[]>;

@@ -1,0 +1,2402 @@
+{
+  "conditions": {
+    "priorSource": "prior-only",
+    "minFieldSizeForMarket": 8,
+    "bootstrap": {
+      "iterations": 10000,
+      "seed": 20261001
+    },
+    "permutation": {
+      "iterations": 1000,
+      "seed": 20261001
+    },
+    "note": "prior の質であって、ツール全体の確率の質ではない(LLM 未使用)。市場は確定オッズの複勝下限を Σ=3 に正規化した近似。"
+  },
+  "central": {
+    "region": "central",
+    "okRaceCount": 24,
+    "excludedRaceCount": 0,
+    "excludedByReason": {},
+    "excludedRaces": [],
+    "observationCount": 321,
+    "scratchedHorseCount": 1,
+    "eightPlusRaceCount": 21,
+    "runnerCount": {
+      "n": 24,
+      "nullCount": 0,
+      "median": 15,
+      "min": 6,
+      "max": 18
+    },
+    "oddsStatusCounts": {
+      "result": 24
+    },
+    "marketOddsNotFinalRaces": [],
+    "resultsFailedRaces": [],
+    "leakFilter": {
+      "totalResultCount": 3409,
+      "removedCount": 321,
+      "removedByCutoffCount": 321,
+      "removedByInvalidDateCount": 0
+    },
+    "brier": {
+      "conditions": {
+        "priorSource": "prior-only",
+        "minFieldSizeForMarket": 8,
+        "marketKinds": {
+          "lowerBound": "placeOddsMinLowerBound",
+          "midpoint": "placeOddsMidpoint"
+        },
+        "bootstrap": {
+          "iterations": 10000,
+          "seed": 20261001
+        },
+        "permutation": {
+          "iterations": 1000,
+          "seed": 20261001
+        }
+      },
+      "raceCount": 24,
+      "observationCount": 321,
+      "model": {
+        "brier": {
+          "value": 0.16207695556524288,
+          "reason": null
+        },
+        "decomposition": {
+          "decomposition": {
+            "n": 321,
+            "brier": 0.16207695556524288,
+            "baseRate": 0.22429906542056074,
+            "reliability": 0.0017092551930133488,
+            "resolution": 0.012879494972952484,
+            "uncertainty": 0.17398899467202375,
+            "withinBinVariance": 0.0006951859673095549,
+            "withinBinCovariance": 0.000718492647075686,
+            "withinBinResidual": -0.0007417993268418172,
+            "bins": [
+              {
+                "lowerBound": 0,
+                "upperBound": 0.1,
+                "count": 30,
+                "meanForecast": 0.06445208490689815,
+                "observedRate": 0.1
+              },
+              {
+                "lowerBound": 0.1,
+                "upperBound": 0.2,
+                "count": 130,
+                "meanForecast": 0.16172875502600495,
+                "observedRate": 0.13846153846153847
+              },
+              {
+                "lowerBound": 0.2,
+                "upperBound": 0.3,
+                "count": 101,
+                "meanForecast": 0.24792635555287956,
+                "observedRate": 0.27722772277227725
+              },
+              {
+                "lowerBound": 0.3,
+                "upperBound": 0.4,
+                "count": 39,
+                "meanForecast": 0.3410205725498214,
+                "observedRate": 0.3333333333333333
+              },
+              {
+                "lowerBound": 0.4,
+                "upperBound": 0.5,
+                "count": 16,
+                "meanForecast": 0.43820483693323287,
+                "observedRate": 0.4375
+              },
+              {
+                "lowerBound": 0.5,
+                "upperBound": 0.6,
+                "count": 3,
+                "meanForecast": 0.541558239669495,
+                "observedRate": 0.3333333333333333
+              },
+              {
+                "lowerBound": 0.6,
+                "upperBound": 0.7,
+                "count": 2,
+                "meanForecast": 0.6673718042224785,
+                "observedRate": 1
+              },
+              {
+                "lowerBound": 0.7,
+                "upperBound": 0.8,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.8,
+                "upperBound": 0.9,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.9,
+                "upperBound": 1,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              }
+            ]
+          },
+          "reason": null
+        },
+        "brierSkillVsClimatology": {
+          "value": 0.06846432516743683,
+          "reason": null
+        },
+        "resolutionNull": {
+          "mean": 0.006377411941141026,
+          "p95": 0.01077101669162327,
+          "iterations": 1000,
+          "seed": 20261001,
+          "raceCount": 24,
+          "reason": null
+        }
+      },
+      "marketComparison": {
+        "lowerBound": {
+          "marketKind": "placeOddsMinLowerBound",
+          "eligibleRaceCount": 21,
+          "eligibleObservationCount": 301,
+          "excludedRaces": {
+            "smallField": [
+              "202606040804",
+              "202606040806",
+              "202606040909"
+            ],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": []
+          },
+          "modelBrier": {
+            "value": 0.15807964814323908,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.13338711188618554,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.18511935604485386,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 301,
+              "brier": 0.15807964814323908,
+              "baseRate": 0.20930232558139536,
+              "reliability": 0.0012886060867210469,
+              "resolution": 0.007484996245034604,
+              "uncertainty": 0.16549486208761494,
+              "withinBinVariance": 0.0006820501240277058,
+              "withinBinCovariance": 0.0009504369550450418,
+              "withinBinResidual": -0.001218823786062378,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 30,
+                  "meanForecast": 0.06445208490689815,
+                  "observedRate": 0.1
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 130,
+                  "meanForecast": 0.16172875502600495,
+                  "observedRate": 0.13846153846153847
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 100,
+                  "meanForecast": 0.2474612307876442,
+                  "observedRate": 0.28
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 34,
+                  "meanForecast": 0.33785523814261637,
+                  "observedRate": 0.35294117647058826
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 7,
+                  "meanForecast": 0.4396941118650948,
+                  "observedRate": 0.2857142857142857
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 301,
+              "brier": 0.13338711188618554,
+              "baseRate": 0.20930232558139536,
+              "reliability": 0.002718658113724535,
+              "resolution": 0.0337230752998101,
+              "uncertainty": 0.16549486208761494,
+              "withinBinVariance": 0.0007993744990374268,
+              "withinBinCovariance": 0.0009513537571906091,
+              "withinBinResidual": -0.0011033330153437915,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 105,
+                  "meanForecast": 0.0459032535520761,
+                  "observedRate": 0.0380952380952381
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 66,
+                  "meanForecast": 0.14258353611636562,
+                  "observedRate": 0.16666666666666666
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 49,
+                  "meanForecast": 0.2456840654883907,
+                  "observedRate": 0.1836734693877551
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 24,
+                  "meanForecast": 0.3500690780006943,
+                  "observedRate": 0.4166666666666667
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 32,
+                  "meanForecast": 0.45186632750919653,
+                  "observedRate": 0.46875
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 22,
+                  "meanForecast": 0.545366580077753,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 3,
+                  "meanForecast": 0.6238935567997439,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.024692536257053418,
+            "lower": 0.01126065775255937,
+            "upper": 0.038270647077623954,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 21,
+            "reason": null
+          }
+        },
+        "midpoint": {
+          "marketKind": "placeOddsMidpoint",
+          "eligibleRaceCount": 19,
+          "eligibleObservationCount": 284,
+          "excludedRaces": {
+            "smallField": [
+              "202606040804",
+              "202606040806",
+              "202606040909"
+            ],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": [
+              "202606040809",
+              "202606040903"
+            ]
+          },
+          "modelBrier": {
+            "value": 0.1546657125059756,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.1309026293442581,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.18153251222497202,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 284,
+              "brier": 0.1546657125059756,
+              "baseRate": 0.2007042253521127,
+              "reliability": 0.0036465556710600457,
+              "resolution": 0.00817224241984954,
+              "uncertainty": 0.16042203927792104,
+              "withinBinVariance": 0.0006576785905659691,
+              "withinBinCovariance": 0.0009441593068609654,
+              "withinBinResidual": -0.0012306400231559618,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 30,
+                  "meanForecast": 0.06445208490689815,
+                  "observedRate": 0.1
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 130,
+                  "meanForecast": 0.16172875502600495,
+                  "observedRate": 0.13846153846153847
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 96,
+                  "meanForecast": 0.2466419068095281,
+                  "observedRate": 0.28125
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 24,
+                  "meanForecast": 0.3287014780600748,
+                  "observedRate": 0.375
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 4,
+                  "meanForecast": 0.4361503578781379,
+                  "observedRate": 0
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 284,
+              "brier": 0.1309026293442581,
+              "baseRate": 0.2007042253521127,
+              "reliability": 0.0021233267740308702,
+              "resolution": 0.03171459962125801,
+              "uncertainty": 0.16042203927792104,
+              "withinBinVariance": 0.000793327140113832,
+              "withinBinCovariance": 0.0003607321132748451,
+              "withinBinResidual": 0.00007186291356414177,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 107,
+                  "meanForecast": 0.044939667515750334,
+                  "observedRate": 0.028037383177570093
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 63,
+                  "meanForecast": 0.14055310882802707,
+                  "observedRate": 0.19047619047619047
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 44,
+                  "meanForecast": 0.2409353942179883,
+                  "observedRate": 0.20454545454545456
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 21,
+                  "meanForecast": 0.3500636722848224,
+                  "observedRate": 0.42857142857142855
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 27,
+                  "meanForecast": 0.4493272238784695,
+                  "observedRate": 0.4074074074074074
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 11,
+                  "meanForecast": 0.550450897849448,
+                  "observedRate": 0.5454545454545454
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 8,
+                  "meanForecast": 0.6081625761399402,
+                  "observedRate": 0.625
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 2,
+                  "meanForecast": 0.763974163465989,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 1,
+                  "meanForecast": 0.8040713989621533,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.02376308316171754,
+            "lower": 0.0077154398960007555,
+            "upper": 0.03927852483720258,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 19,
+            "reason": null
+          }
+        }
+      }
+    },
+    "brierExcludingResultsFailed": {
+      "conditions": {
+        "priorSource": "prior-only",
+        "minFieldSizeForMarket": 8,
+        "marketKinds": {
+          "lowerBound": "placeOddsMinLowerBound",
+          "midpoint": "placeOddsMidpoint"
+        },
+        "bootstrap": {
+          "iterations": 10000,
+          "seed": 20261001
+        },
+        "permutation": {
+          "iterations": 1000,
+          "seed": 20261001
+        }
+      },
+      "raceCount": 24,
+      "observationCount": 321,
+      "model": {
+        "brier": {
+          "value": 0.16207695556524288,
+          "reason": null
+        },
+        "decomposition": {
+          "decomposition": {
+            "n": 321,
+            "brier": 0.16207695556524288,
+            "baseRate": 0.22429906542056074,
+            "reliability": 0.0017092551930133488,
+            "resolution": 0.012879494972952484,
+            "uncertainty": 0.17398899467202375,
+            "withinBinVariance": 0.0006951859673095549,
+            "withinBinCovariance": 0.000718492647075686,
+            "withinBinResidual": -0.0007417993268418172,
+            "bins": [
+              {
+                "lowerBound": 0,
+                "upperBound": 0.1,
+                "count": 30,
+                "meanForecast": 0.06445208490689815,
+                "observedRate": 0.1
+              },
+              {
+                "lowerBound": 0.1,
+                "upperBound": 0.2,
+                "count": 130,
+                "meanForecast": 0.16172875502600495,
+                "observedRate": 0.13846153846153847
+              },
+              {
+                "lowerBound": 0.2,
+                "upperBound": 0.3,
+                "count": 101,
+                "meanForecast": 0.24792635555287956,
+                "observedRate": 0.27722772277227725
+              },
+              {
+                "lowerBound": 0.3,
+                "upperBound": 0.4,
+                "count": 39,
+                "meanForecast": 0.3410205725498214,
+                "observedRate": 0.3333333333333333
+              },
+              {
+                "lowerBound": 0.4,
+                "upperBound": 0.5,
+                "count": 16,
+                "meanForecast": 0.43820483693323287,
+                "observedRate": 0.4375
+              },
+              {
+                "lowerBound": 0.5,
+                "upperBound": 0.6,
+                "count": 3,
+                "meanForecast": 0.541558239669495,
+                "observedRate": 0.3333333333333333
+              },
+              {
+                "lowerBound": 0.6,
+                "upperBound": 0.7,
+                "count": 2,
+                "meanForecast": 0.6673718042224785,
+                "observedRate": 1
+              },
+              {
+                "lowerBound": 0.7,
+                "upperBound": 0.8,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.8,
+                "upperBound": 0.9,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.9,
+                "upperBound": 1,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              }
+            ]
+          },
+          "reason": null
+        },
+        "brierSkillVsClimatology": {
+          "value": 0.06846432516743683,
+          "reason": null
+        },
+        "resolutionNull": {
+          "mean": 0.006377411941141026,
+          "p95": 0.01077101669162327,
+          "iterations": 1000,
+          "seed": 20261001,
+          "raceCount": 24,
+          "reason": null
+        }
+      },
+      "marketComparison": {
+        "lowerBound": {
+          "marketKind": "placeOddsMinLowerBound",
+          "eligibleRaceCount": 21,
+          "eligibleObservationCount": 301,
+          "excludedRaces": {
+            "smallField": [
+              "202606040804",
+              "202606040806",
+              "202606040909"
+            ],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": []
+          },
+          "modelBrier": {
+            "value": 0.15807964814323908,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.13338711188618554,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.18511935604485386,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 301,
+              "brier": 0.15807964814323908,
+              "baseRate": 0.20930232558139536,
+              "reliability": 0.0012886060867210469,
+              "resolution": 0.007484996245034604,
+              "uncertainty": 0.16549486208761494,
+              "withinBinVariance": 0.0006820501240277058,
+              "withinBinCovariance": 0.0009504369550450418,
+              "withinBinResidual": -0.001218823786062378,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 30,
+                  "meanForecast": 0.06445208490689815,
+                  "observedRate": 0.1
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 130,
+                  "meanForecast": 0.16172875502600495,
+                  "observedRate": 0.13846153846153847
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 100,
+                  "meanForecast": 0.2474612307876442,
+                  "observedRate": 0.28
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 34,
+                  "meanForecast": 0.33785523814261637,
+                  "observedRate": 0.35294117647058826
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 7,
+                  "meanForecast": 0.4396941118650948,
+                  "observedRate": 0.2857142857142857
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 301,
+              "brier": 0.13338711188618554,
+              "baseRate": 0.20930232558139536,
+              "reliability": 0.002718658113724535,
+              "resolution": 0.0337230752998101,
+              "uncertainty": 0.16549486208761494,
+              "withinBinVariance": 0.0007993744990374268,
+              "withinBinCovariance": 0.0009513537571906091,
+              "withinBinResidual": -0.0011033330153437915,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 105,
+                  "meanForecast": 0.0459032535520761,
+                  "observedRate": 0.0380952380952381
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 66,
+                  "meanForecast": 0.14258353611636562,
+                  "observedRate": 0.16666666666666666
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 49,
+                  "meanForecast": 0.2456840654883907,
+                  "observedRate": 0.1836734693877551
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 24,
+                  "meanForecast": 0.3500690780006943,
+                  "observedRate": 0.4166666666666667
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 32,
+                  "meanForecast": 0.45186632750919653,
+                  "observedRate": 0.46875
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 22,
+                  "meanForecast": 0.545366580077753,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 3,
+                  "meanForecast": 0.6238935567997439,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.024692536257053418,
+            "lower": 0.01126065775255937,
+            "upper": 0.038270647077623954,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 21,
+            "reason": null
+          }
+        },
+        "midpoint": {
+          "marketKind": "placeOddsMidpoint",
+          "eligibleRaceCount": 19,
+          "eligibleObservationCount": 284,
+          "excludedRaces": {
+            "smallField": [
+              "202606040804",
+              "202606040806",
+              "202606040909"
+            ],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": [
+              "202606040809",
+              "202606040903"
+            ]
+          },
+          "modelBrier": {
+            "value": 0.1546657125059756,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.1309026293442581,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.18153251222497202,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 284,
+              "brier": 0.1546657125059756,
+              "baseRate": 0.2007042253521127,
+              "reliability": 0.0036465556710600457,
+              "resolution": 0.00817224241984954,
+              "uncertainty": 0.16042203927792104,
+              "withinBinVariance": 0.0006576785905659691,
+              "withinBinCovariance": 0.0009441593068609654,
+              "withinBinResidual": -0.0012306400231559618,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 30,
+                  "meanForecast": 0.06445208490689815,
+                  "observedRate": 0.1
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 130,
+                  "meanForecast": 0.16172875502600495,
+                  "observedRate": 0.13846153846153847
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 96,
+                  "meanForecast": 0.2466419068095281,
+                  "observedRate": 0.28125
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 24,
+                  "meanForecast": 0.3287014780600748,
+                  "observedRate": 0.375
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 4,
+                  "meanForecast": 0.4361503578781379,
+                  "observedRate": 0
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 284,
+              "brier": 0.1309026293442581,
+              "baseRate": 0.2007042253521127,
+              "reliability": 0.0021233267740308702,
+              "resolution": 0.03171459962125801,
+              "uncertainty": 0.16042203927792104,
+              "withinBinVariance": 0.000793327140113832,
+              "withinBinCovariance": 0.0003607321132748451,
+              "withinBinResidual": 0.00007186291356414177,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 107,
+                  "meanForecast": 0.044939667515750334,
+                  "observedRate": 0.028037383177570093
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 63,
+                  "meanForecast": 0.14055310882802707,
+                  "observedRate": 0.19047619047619047
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 44,
+                  "meanForecast": 0.2409353942179883,
+                  "observedRate": 0.20454545454545456
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 21,
+                  "meanForecast": 0.3500636722848224,
+                  "observedRate": 0.42857142857142855
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 27,
+                  "meanForecast": 0.4493272238784695,
+                  "observedRate": 0.4074074074074074
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 11,
+                  "meanForecast": 0.550450897849448,
+                  "observedRate": 0.5454545454545454
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 8,
+                  "meanForecast": 0.6081625761399402,
+                  "observedRate": 0.625
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 2,
+                  "meanForecast": 0.763974163465989,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 1,
+                  "meanForecast": 0.8040713989621533,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.02376308316171754,
+            "lower": 0.0077154398960007555,
+            "upper": 0.03927852483720258,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 19,
+            "reason": null
+          }
+        }
+      }
+    },
+    "metrics40": {
+      "spearmanRho": {
+        "n": 21,
+        "nullCount": 3,
+        "median": 0.6359888306543495,
+        "min": -0.28190459144096375,
+        "max": 0.8531468531468531
+      },
+      "sdRatio": {
+        "n": 21,
+        "nullCount": 3,
+        "median": 0.4451217554612943,
+        "min": 0.10079564485368732,
+        "max": 0.8233907164903926
+      },
+      "maxMinRatioModel": {
+        "n": 24,
+        "nullCount": 0,
+        "median": 3.214180003951788,
+        "min": 1.2352941176470589,
+        "max": 24.19180457270476
+      },
+      "maxMinRatioMarket": {
+        "n": 21,
+        "nullCount": 3,
+        "median": 25.923076923076923,
+        "min": 10.4375,
+        "max": 59.83333333333333
+      },
+      "normalizedJointKlModel": {
+        "n": 24,
+        "nullCount": 0,
+        "median": 0.04265200729036911,
+        "min": 0.002415603999060112,
+        "max": 0.1187693481616294
+      },
+      "normalizedJointKlMarket": {
+        "n": 21,
+        "nullCount": 3,
+        "median": 0.21632142594642517,
+        "min": 0.10972004982615861,
+        "max": 0.3087588467765707
+      },
+      "trioAllPointEvOverPayoutRate": {
+        "measured": false,
+        "reason": "三連複の全点EV÷払戻率は組合せオッズの追加取得が必要で、今回は取得していないため測定しない"
+      }
+    }
+  },
+  "nar": {
+    "region": "nar",
+    "okRaceCount": 12,
+    "excludedRaceCount": 0,
+    "excludedByReason": {},
+    "excludedRaces": [],
+    "observationCount": 128,
+    "scratchedHorseCount": 0,
+    "eightPlusRaceCount": 12,
+    "runnerCount": {
+      "n": 12,
+      "nullCount": 0,
+      "median": 11.5,
+      "min": 8,
+      "max": 12
+    },
+    "oddsStatusCounts": {
+      "middle": 12
+    },
+    "marketOddsNotFinalRaces": [],
+    "resultsFailedRaces": [],
+    "leakFilter": {
+      "totalResultCount": 2938,
+      "removedCount": 128,
+      "removedByCutoffCount": 128,
+      "removedByInvalidDateCount": 0
+    },
+    "brier": {
+      "conditions": {
+        "priorSource": "prior-only",
+        "minFieldSizeForMarket": 8,
+        "marketKinds": {
+          "lowerBound": "placeOddsMinLowerBound",
+          "midpoint": "placeOddsMidpoint"
+        },
+        "bootstrap": {
+          "iterations": 10000,
+          "seed": 20261001
+        },
+        "permutation": {
+          "iterations": 1000,
+          "seed": 20261001
+        }
+      },
+      "raceCount": 12,
+      "observationCount": 128,
+      "model": {
+        "brier": {
+          "value": 0.1855282068151271,
+          "reason": null
+        },
+        "decomposition": {
+          "decomposition": {
+            "n": 128,
+            "brier": 0.1855282068151271,
+            "baseRate": 0.28125,
+            "reliability": 0.011171504911969228,
+            "resolution": 0.02459765866573902,
+            "uncertainty": 0.2021484375,
+            "withinBinVariance": 0.0007862437759947076,
+            "withinBinCovariance": 0.001990160353548887,
+            "withinBinResidual": -0.0031940769311030667,
+            "bins": [
+              {
+                "lowerBound": 0,
+                "upperBound": 0.1,
+                "count": 2,
+                "meanForecast": 0.07907264395801283,
+                "observedRate": 0.5
+              },
+              {
+                "lowerBound": 0.1,
+                "upperBound": 0.2,
+                "count": 21,
+                "meanForecast": 0.16130865024485766,
+                "observedRate": 0.14285714285714285
+              },
+              {
+                "lowerBound": 0.2,
+                "upperBound": 0.3,
+                "count": 44,
+                "meanForecast": 0.25371247641591677,
+                "observedRate": 0.1590909090909091
+              },
+              {
+                "lowerBound": 0.3,
+                "upperBound": 0.4,
+                "count": 49,
+                "meanForecast": 0.33916366578183427,
+                "observedRate": 0.3469387755102041
+              },
+              {
+                "lowerBound": 0.4,
+                "upperBound": 0.5,
+                "count": 12,
+                "meanForecast": 0.43010473650642206,
+                "observedRate": 0.6666666666666666
+              },
+              {
+                "lowerBound": 0.5,
+                "upperBound": 0.6,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.6,
+                "upperBound": 0.7,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.7,
+                "upperBound": 0.8,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.8,
+                "upperBound": 0.9,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.9,
+                "upperBound": 1,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              }
+            ]
+          },
+          "reason": null
+        },
+        "brierSkillVsClimatology": {
+          "value": 0.08221795275995092,
+          "reason": null
+        },
+        "resolutionNull": {
+          "mean": 0.0062504891871521286,
+          "p95": 0.01368334976035869,
+          "iterations": 1000,
+          "seed": 20261001,
+          "raceCount": 12,
+          "reason": null
+        }
+      },
+      "marketComparison": {
+        "lowerBound": {
+          "marketKind": "placeOddsMinLowerBound",
+          "eligibleRaceCount": 12,
+          "eligibleObservationCount": 128,
+          "excludedRaces": {
+            "smallField": [],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": []
+          },
+          "modelBrier": {
+            "value": 0.1855282068151271,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.13626473274448755,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.3615276900958253,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.1855282068151271,
+              "baseRate": 0.28125,
+              "reliability": 0.011171504911969228,
+              "resolution": 0.02459765866573902,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0007862437759947076,
+              "withinBinCovariance": 0.001990160353548887,
+              "withinBinResidual": -0.0031940769311030667,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 2,
+                  "meanForecast": 0.07907264395801283,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 21,
+                  "meanForecast": 0.16130865024485766,
+                  "observedRate": 0.14285714285714285
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 44,
+                  "meanForecast": 0.25371247641591677,
+                  "observedRate": 0.1590909090909091
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 49,
+                  "meanForecast": 0.33916366578183427,
+                  "observedRate": 0.3469387755102041
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 12,
+                  "meanForecast": 0.43010473650642206,
+                  "observedRate": 0.6666666666666666
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.13626473274448755,
+              "baseRate": 0.28125,
+              "reliability": 0.011282024641865143,
+              "resolution": 0.07421066516884531,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0008623480104326606,
+              "withinBinCovariance": 0.0019087061194824684,
+              "withinBinResidual": -0.0029550642285322763,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 31,
+                  "meanForecast": 0.046022912770836116,
+                  "observedRate": 0
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 27,
+                  "meanForecast": 0.1535972231462512,
+                  "observedRate": 0.07407407407407407
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 12,
+                  "meanForecast": 0.24527134439990228,
+                  "observedRate": 0.16666666666666666
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 17,
+                  "meanForecast": 0.3398796683761791,
+                  "observedRate": 0.4117647058823529
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 17,
+                  "meanForecast": 0.44792426234270183,
+                  "observedRate": 0.5882352941176471
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 15,
+                  "meanForecast": 0.558811264855205,
+                  "observedRate": 0.4666666666666667
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 9,
+                  "meanForecast": 0.6342303057008243,
+                  "observedRate": 0.8888888888888888
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.04926347407063959,
+            "lower": 0.0317814746653969,
+            "upper": 0.06592876924326363,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 12,
+            "reason": null
+          }
+        },
+        "midpoint": {
+          "marketKind": "placeOddsMidpoint",
+          "eligibleRaceCount": 12,
+          "eligibleObservationCount": 128,
+          "excludedRaces": {
+            "smallField": [],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": []
+          },
+          "modelBrier": {
+            "value": 0.1855282068151271,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.1336208336034937,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.3884676648977008,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.1855282068151271,
+              "baseRate": 0.28125,
+              "reliability": 0.011171504911969228,
+              "resolution": 0.02459765866573902,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0007862437759947076,
+              "withinBinCovariance": 0.001990160353548887,
+              "withinBinResidual": -0.0031940769311030667,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 2,
+                  "meanForecast": 0.07907264395801283,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 21,
+                  "meanForecast": 0.16130865024485766,
+                  "observedRate": 0.14285714285714285
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 44,
+                  "meanForecast": 0.25371247641591677,
+                  "observedRate": 0.1590909090909091
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 49,
+                  "meanForecast": 0.33916366578183427,
+                  "observedRate": 0.3469387755102041
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 12,
+                  "meanForecast": 0.43010473650642206,
+                  "observedRate": 0.6666666666666666
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.1336208336034937,
+              "baseRate": 0.28125,
+              "reliability": 0.01816366559952368,
+              "resolution": 0.08527031562187812,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0008114699907731136,
+              "withinBinCovariance": 0.0011162119324624798,
+              "withinBinResidual": -0.001420953874151846,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 35,
+                  "meanForecast": 0.04691460702525426,
+                  "observedRate": 0.02857142857142857
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 25,
+                  "meanForecast": 0.15173048972977068,
+                  "observedRate": 0.04
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 14,
+                  "meanForecast": 0.25183714536290047,
+                  "observedRate": 0.14285714285714285
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 16,
+                  "meanForecast": 0.3427118319209643,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 13,
+                  "meanForecast": 0.45114764631659177,
+                  "observedRate": 0.6923076923076923
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 9,
+                  "meanForecast": 0.543177961040909,
+                  "observedRate": 0.3333333333333333
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 11,
+                  "meanForecast": 0.6351913819257183,
+                  "observedRate": 0.6363636363636364
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 4,
+                  "meanForecast": 0.7460563135196281,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 1,
+                  "meanForecast": 0.830765658310506,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.05190737321163344,
+            "lower": 0.031844220632194366,
+            "upper": 0.07055129925193425,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 12,
+            "reason": null
+          }
+        }
+      }
+    },
+    "brierExcludingResultsFailed": {
+      "conditions": {
+        "priorSource": "prior-only",
+        "minFieldSizeForMarket": 8,
+        "marketKinds": {
+          "lowerBound": "placeOddsMinLowerBound",
+          "midpoint": "placeOddsMidpoint"
+        },
+        "bootstrap": {
+          "iterations": 10000,
+          "seed": 20261001
+        },
+        "permutation": {
+          "iterations": 1000,
+          "seed": 20261001
+        }
+      },
+      "raceCount": 12,
+      "observationCount": 128,
+      "model": {
+        "brier": {
+          "value": 0.1855282068151271,
+          "reason": null
+        },
+        "decomposition": {
+          "decomposition": {
+            "n": 128,
+            "brier": 0.1855282068151271,
+            "baseRate": 0.28125,
+            "reliability": 0.011171504911969228,
+            "resolution": 0.02459765866573902,
+            "uncertainty": 0.2021484375,
+            "withinBinVariance": 0.0007862437759947076,
+            "withinBinCovariance": 0.001990160353548887,
+            "withinBinResidual": -0.0031940769311030667,
+            "bins": [
+              {
+                "lowerBound": 0,
+                "upperBound": 0.1,
+                "count": 2,
+                "meanForecast": 0.07907264395801283,
+                "observedRate": 0.5
+              },
+              {
+                "lowerBound": 0.1,
+                "upperBound": 0.2,
+                "count": 21,
+                "meanForecast": 0.16130865024485766,
+                "observedRate": 0.14285714285714285
+              },
+              {
+                "lowerBound": 0.2,
+                "upperBound": 0.3,
+                "count": 44,
+                "meanForecast": 0.25371247641591677,
+                "observedRate": 0.1590909090909091
+              },
+              {
+                "lowerBound": 0.3,
+                "upperBound": 0.4,
+                "count": 49,
+                "meanForecast": 0.33916366578183427,
+                "observedRate": 0.3469387755102041
+              },
+              {
+                "lowerBound": 0.4,
+                "upperBound": 0.5,
+                "count": 12,
+                "meanForecast": 0.43010473650642206,
+                "observedRate": 0.6666666666666666
+              },
+              {
+                "lowerBound": 0.5,
+                "upperBound": 0.6,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.6,
+                "upperBound": 0.7,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.7,
+                "upperBound": 0.8,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.8,
+                "upperBound": 0.9,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              },
+              {
+                "lowerBound": 0.9,
+                "upperBound": 1,
+                "count": 0,
+                "meanForecast": null,
+                "observedRate": null
+              }
+            ]
+          },
+          "reason": null
+        },
+        "brierSkillVsClimatology": {
+          "value": 0.08221795275995092,
+          "reason": null
+        },
+        "resolutionNull": {
+          "mean": 0.0062504891871521286,
+          "p95": 0.01368334976035869,
+          "iterations": 1000,
+          "seed": 20261001,
+          "raceCount": 12,
+          "reason": null
+        }
+      },
+      "marketComparison": {
+        "lowerBound": {
+          "marketKind": "placeOddsMinLowerBound",
+          "eligibleRaceCount": 12,
+          "eligibleObservationCount": 128,
+          "excludedRaces": {
+            "smallField": [],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": []
+          },
+          "modelBrier": {
+            "value": 0.1855282068151271,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.13626473274448755,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.3615276900958253,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.1855282068151271,
+              "baseRate": 0.28125,
+              "reliability": 0.011171504911969228,
+              "resolution": 0.02459765866573902,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0007862437759947076,
+              "withinBinCovariance": 0.001990160353548887,
+              "withinBinResidual": -0.0031940769311030667,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 2,
+                  "meanForecast": 0.07907264395801283,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 21,
+                  "meanForecast": 0.16130865024485766,
+                  "observedRate": 0.14285714285714285
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 44,
+                  "meanForecast": 0.25371247641591677,
+                  "observedRate": 0.1590909090909091
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 49,
+                  "meanForecast": 0.33916366578183427,
+                  "observedRate": 0.3469387755102041
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 12,
+                  "meanForecast": 0.43010473650642206,
+                  "observedRate": 0.6666666666666666
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.13626473274448755,
+              "baseRate": 0.28125,
+              "reliability": 0.011282024641865143,
+              "resolution": 0.07421066516884531,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0008623480104326606,
+              "withinBinCovariance": 0.0019087061194824684,
+              "withinBinResidual": -0.0029550642285322763,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 31,
+                  "meanForecast": 0.046022912770836116,
+                  "observedRate": 0
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 27,
+                  "meanForecast": 0.1535972231462512,
+                  "observedRate": 0.07407407407407407
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 12,
+                  "meanForecast": 0.24527134439990228,
+                  "observedRate": 0.16666666666666666
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 17,
+                  "meanForecast": 0.3398796683761791,
+                  "observedRate": 0.4117647058823529
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 17,
+                  "meanForecast": 0.44792426234270183,
+                  "observedRate": 0.5882352941176471
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 15,
+                  "meanForecast": 0.558811264855205,
+                  "observedRate": 0.4666666666666667
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 9,
+                  "meanForecast": 0.6342303057008243,
+                  "observedRate": 0.8888888888888888
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.04926347407063959,
+            "lower": 0.0317814746653969,
+            "upper": 0.06592876924326363,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 12,
+            "reason": null
+          }
+        },
+        "midpoint": {
+          "marketKind": "placeOddsMidpoint",
+          "eligibleRaceCount": 12,
+          "eligibleObservationCount": 128,
+          "excludedRaces": {
+            "smallField": [],
+            "oddsNotFinal": [],
+            "marketUnavailable": [],
+            "marketOutOfRange": []
+          },
+          "modelBrier": {
+            "value": 0.1855282068151271,
+            "reason": null
+          },
+          "marketBrier": {
+            "value": 0.1336208336034937,
+            "reason": null
+          },
+          "brierSkillVsMarket": {
+            "value": -0.3884676648977008,
+            "reason": null
+          },
+          "modelDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.1855282068151271,
+              "baseRate": 0.28125,
+              "reliability": 0.011171504911969228,
+              "resolution": 0.02459765866573902,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0007862437759947076,
+              "withinBinCovariance": 0.001990160353548887,
+              "withinBinResidual": -0.0031940769311030667,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 2,
+                  "meanForecast": 0.07907264395801283,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 21,
+                  "meanForecast": 0.16130865024485766,
+                  "observedRate": 0.14285714285714285
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 44,
+                  "meanForecast": 0.25371247641591677,
+                  "observedRate": 0.1590909090909091
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 49,
+                  "meanForecast": 0.33916366578183427,
+                  "observedRate": 0.3469387755102041
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 12,
+                  "meanForecast": 0.43010473650642206,
+                  "observedRate": 0.6666666666666666
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "marketDecomposition": {
+            "decomposition": {
+              "n": 128,
+              "brier": 0.1336208336034937,
+              "baseRate": 0.28125,
+              "reliability": 0.01816366559952368,
+              "resolution": 0.08527031562187812,
+              "uncertainty": 0.2021484375,
+              "withinBinVariance": 0.0008114699907731136,
+              "withinBinCovariance": 0.0011162119324624798,
+              "withinBinResidual": -0.001420953874151846,
+              "bins": [
+                {
+                  "lowerBound": 0,
+                  "upperBound": 0.1,
+                  "count": 35,
+                  "meanForecast": 0.04691460702525426,
+                  "observedRate": 0.02857142857142857
+                },
+                {
+                  "lowerBound": 0.1,
+                  "upperBound": 0.2,
+                  "count": 25,
+                  "meanForecast": 0.15173048972977068,
+                  "observedRate": 0.04
+                },
+                {
+                  "lowerBound": 0.2,
+                  "upperBound": 0.3,
+                  "count": 14,
+                  "meanForecast": 0.25183714536290047,
+                  "observedRate": 0.14285714285714285
+                },
+                {
+                  "lowerBound": 0.3,
+                  "upperBound": 0.4,
+                  "count": 16,
+                  "meanForecast": 0.3427118319209643,
+                  "observedRate": 0.5
+                },
+                {
+                  "lowerBound": 0.4,
+                  "upperBound": 0.5,
+                  "count": 13,
+                  "meanForecast": 0.45114764631659177,
+                  "observedRate": 0.6923076923076923
+                },
+                {
+                  "lowerBound": 0.5,
+                  "upperBound": 0.6,
+                  "count": 9,
+                  "meanForecast": 0.543177961040909,
+                  "observedRate": 0.3333333333333333
+                },
+                {
+                  "lowerBound": 0.6,
+                  "upperBound": 0.7,
+                  "count": 11,
+                  "meanForecast": 0.6351913819257183,
+                  "observedRate": 0.6363636363636364
+                },
+                {
+                  "lowerBound": 0.7,
+                  "upperBound": 0.8,
+                  "count": 4,
+                  "meanForecast": 0.7460563135196281,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.8,
+                  "upperBound": 0.9,
+                  "count": 1,
+                  "meanForecast": 0.830765658310506,
+                  "observedRate": 1
+                },
+                {
+                  "lowerBound": 0.9,
+                  "upperBound": 1,
+                  "count": 0,
+                  "meanForecast": null,
+                  "observedRate": null
+                }
+              ]
+            },
+            "reason": null
+          },
+          "brierDifference": {
+            "value": 0.05190737321163344,
+            "lower": 0.031844220632194366,
+            "upper": 0.07055129925193425,
+            "iterations": 10000,
+            "seed": 20261001,
+            "raceCount": 12,
+            "reason": null
+          }
+        }
+      }
+    },
+    "metrics40": {
+      "spearmanRho": {
+        "n": 12,
+        "nullCount": 0,
+        "median": 0.5370636086718876,
+        "min": -0.29940656547831473,
+        "max": 0.7979021271386156
+      },
+      "sdRatio": {
+        "n": 12,
+        "nullCount": 0,
+        "median": 0.3815144163881805,
+        "min": 0.1466934684663909,
+        "max": 0.48669291306426504
+      },
+      "maxMinRatioModel": {
+        "n": 12,
+        "nullCount": 0,
+        "median": 2.3277301406912523,
+        "min": 1.2136049806249507,
+        "max": 5.329649379520736
+      },
+      "maxMinRatioMarket": {
+        "n": 12,
+        "nullCount": 0,
+        "median": 26.85,
+        "min": 4.545454545454545,
+        "max": 64.2
+      },
+      "normalizedJointKlModel": {
+        "n": 12,
+        "nullCount": 0,
+        "median": 0.0259487352248487,
+        "min": 0.0031399463735690167,
+        "max": 0.05747230891922804
+      },
+      "normalizedJointKlMarket": {
+        "n": 12,
+        "nullCount": 0,
+        "median": 0.21548179254309419,
+        "min": 0.1482576655589688,
+        "max": 0.3671517869852577
+      },
+      "trioAllPointEvOverPayoutRate": {
+        "measured": false,
+        "reason": "三連複の全点EV÷払戻率は組合せオッズの追加取得が必要で、今回は取得していないため測定しない"
+      }
+    }
+  },
+  "fetch": {
+    "runCount": 1,
+    "gitCommits": [
+      "3c734496ee0714d17905b1917f7ffd141263bdcf"
+    ],
+    "anyHalted": false,
+    "requestCountTotal": 585,
+    "days": [
+      {
+        "region": "central",
+        "requestedDate": "20260926",
+        "usedDate": "20260926",
+        "attemptedDates": [
+          "20260926"
+        ],
+        "raceIds": [
+          "202606040801",
+          "202606040802",
+          "202606040803",
+          "202606040804",
+          "202606040805",
+          "202606040806",
+          "202606040807",
+          "202606040808",
+          "202606040809",
+          "202606040810",
+          "202606040811",
+          "202606040812"
+        ]
+      },
+      {
+        "region": "central",
+        "requestedDate": "20260927",
+        "usedDate": "20260927",
+        "attemptedDates": [
+          "20260927"
+        ],
+        "raceIds": [
+          "202606040901",
+          "202606040902",
+          "202606040903",
+          "202606040904",
+          "202606040905",
+          "202606040906",
+          "202606040907",
+          "202606040908",
+          "202606040909",
+          "202606040910",
+          "202606040911",
+          "202606040912"
+        ]
+      },
+      {
+        "region": "nar",
+        "requestedDate": "20260930",
+        "usedDate": "20260930",
+        "attemptedDates": [
+          "20260930"
+        ],
+        "raceIds": [
+          "202630093001",
+          "202630093002",
+          "202630093003",
+          "202630093004",
+          "202630093005",
+          "202630093006",
+          "202630093007",
+          "202630093008",
+          "202630093009",
+          "202630093010",
+          "202630093011",
+          "202630093012"
+        ]
+      }
+    ],
+    "notSavedRaces": []
+  }
+}

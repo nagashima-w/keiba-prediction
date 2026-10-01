@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040912",
+  "region": "central",
+  "requestedDate": "20260927",
+  "kaisaiDate": "20260927",
+  "venueCode": "06",
+  "raceNumber": 12,
+  "raceName": "外房S",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1200,
+  "runnerCount": 16,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "アイアムユウシュン",
+      "prior": 0.10229890862080852,
+      "placeOddsMin": 7,
+      "placeOddsMax": 9.8,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 2,
+      "horseName": "ローズカリス",
+      "prior": 0.2625837840316605,
+      "placeOddsMin": 1.9,
+      "placeOddsMax": 2.4,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 9
+    },
+    {
+      "umaban": 3,
+      "horseName": "ソウルオンファイア",
+      "prior": 0.23869438471972013,
+      "placeOddsMin": 3.3,
+      "placeOddsMax": 4.5,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 4,
+      "horseName": "イノセントキャット",
+      "prior": 0.25374351769982706,
+      "placeOddsMin": 5.8,
+      "placeOddsMax": 8.1,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 5,
+      "horseName": "コパノヴィンセント",
+      "prior": 0.1614326242772762,
+      "placeOddsMin": 6.7,
+      "placeOddsMax": 9.3,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 12
+    },
+    {
+      "umaban": 6,
+      "horseName": "キタノソワレ",
+      "prior": 0.1651587418418698,
+      "placeOddsMin": 3.5,
+      "placeOddsMax": 4.8,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 7,
+      "horseName": "マーゴットゲイン",
+      "prior": 0.23242275297212983,
+      "placeOddsMin": 2.7,
+      "placeOddsMax": 3.6,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 12
+    },
+    {
+      "umaban": 8,
+      "horseName": "スプランドゥール",
+      "prior": 0.10937955900579578,
+      "placeOddsMin": 12.4,
+      "placeOddsMax": 17.3,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 29
+    },
+    {
+      "umaban": 9,
+      "horseName": "ワンダラー",
+      "prior": 0.32256996596835924,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 14
+    },
+    {
+      "umaban": 10,
+      "horseName": "カネショウレジェン",
+      "prior": 0.17542123657838052,
+      "placeOddsMin": 2.9,
+      "placeOddsMax": 3.9,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 11,
+      "horseName": "ホワイトガーベラ",
+      "prior": 0.14121339434851624,
+      "placeOddsMin": 40.4,
+      "placeOddsMax": 56.1,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 12,
+      "horseName": "ボディブロー",
+      "prior": 0.07649085548448817,
+      "placeOddsMin": 7,
+      "placeOddsMax": 9.7,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 13,
+      "horseName": "ライトニングゼウス",
+      "prior": 0.25903983582862117,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 2.3,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 19
+    },
+    {
+      "umaban": 14,
+      "horseName": "クリノオリーブ",
+      "prior": 0.17951027824948362,
+      "placeOddsMin": 3.4,
+      "placeOddsMax": 4.7,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 27
+    },
+    {
+      "umaban": 15,
+      "horseName": "ランウインディ",
+      "prior": 0.19363093826794286,
+      "placeOddsMin": 7.5,
+      "placeOddsMax": 10.4,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 20
+    },
+    {
+      "umaban": 16,
+      "horseName": "ポッドソル",
+      "prior": 0.12640922210512018,
+      "placeOddsMin": 5.1,
+      "placeOddsMax": 7,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 14
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/27",
+      "totalResultCount": 287,
+      "removedCount": 16,
+      "removedByCutoffCount": 16,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:41:44.252Z"
+}

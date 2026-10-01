@@ -13,7 +13,7 @@
  * 集計結果は同ディレクトリの親に `aggregate.json` として書く。
  */
 
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -24,6 +24,7 @@ import {
   type BrierQualityInputHorse,
   type NullableMetric,
 } from "../../packages/core/src/ev/probability-quality.js";
+import type { RunManifest } from "./run.js";
 import {
   OBSERVATION_SCHEMA_VERSION,
   type RaceObservation,
@@ -263,6 +264,65 @@ export function loadObservations(dir: string): RaceObservation[] {
   });
 }
 
+/** 取得の実行記録(manifest の runs)の要約。 */
+export interface FetchRunsSummary {
+  readonly runCount: number;
+  readonly gitCommits: readonly string[];
+  readonly anyHalted: boolean;
+  /** フェッチャへ渡した要求数の合計(キャッシュ命中も含む上限)。 */
+  readonly requestCountTotal: number;
+  /** 選定した開催日・会場・レース(再実行では同じ開催日の記録を後の実行で置き換える)。 */
+  readonly days: RunManifest["days"];
+  /**
+   * 観測 JSON を保存しなかったまま残っているレース(最終状態。再実行で保存されたものは含まない)。
+   * 理由と文言は最後の実行のもの。`attempts` は not-saved になった回数。
+   */
+  readonly notSavedRaces: ReadonlyArray<{
+    readonly raceId: string;
+    readonly reason: string;
+    readonly detail: string;
+    readonly attempts: number;
+  }>;
+}
+
+/** manifest の実行記録を要約する。保存済み(観測がある)のレースは、保存しなかったレースに数えない。 */
+export function summarizeFetchRuns(
+  runs: readonly RunManifest[],
+  observations: readonly RaceObservation[],
+): FetchRunsSummary {
+  const saved = new Set(observations.map((o) => o.raceId));
+  const notSaved = new Map<string, { reason: string; detail: string; attempts: number }>();
+  for (const run of runs) {
+    for (const p of run.processed) {
+      if (p.status === "not-saved") {
+        const prev = notSaved.get(p.raceId);
+        notSaved.set(p.raceId, {
+          reason: p.reason ?? "",
+          detail: p.detail ?? "",
+          attempts: (prev?.attempts ?? 0) + 1,
+        });
+      }
+    }
+  }
+  const days = new Map<string, RunManifest["days"][number]>();
+  for (const run of runs) {
+    for (const d of run.days) {
+      days.set(`${d.region}:${d.requestedDate}`, d);
+    }
+  }
+  return {
+    runCount: runs.length,
+    gitCommits: [...new Set(runs.map((r) => r.gitCommit))],
+    anyHalted: runs.some((r) => r.halted),
+    requestCountTotal: runs.reduce((s, r) => s + r.requestCount, 0),
+    days: [...days.values()],
+    notSavedRaces: [...notSaved]
+      .filter(([raceId]) => !saved.has(raceId))
+      .map(([raceId, v]) => ({ raceId, ...v }))
+      .sort((a, b) => (a.raceId < b.raceId ? -1 : 1)),
+  };
+}
+
 const DEFAULT_OBSERVATIONS_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -277,8 +337,13 @@ function main(): void {
   const dir = process.argv[2] ?? DEFAULT_OBSERVATIONS_DIR;
   const observations = loadObservations(dir);
   const aggregate = aggregateObservations(observations);
+  const manifestPath = path.join(dir, "..", "manifest.json");
+  const runs: RunManifest[] = existsSync(manifestPath)
+    ? (JSON.parse(readFileSync(manifestPath, "utf-8")) as { runs: RunManifest[] }).runs
+    : [];
+  const fetch = summarizeFetchRuns(runs, observations);
   const outPath = path.join(dir, "..", "aggregate.json");
-  writeFileSync(outPath, JSON.stringify(aggregate, null, 2), "utf-8");
+  writeFileSync(outPath, JSON.stringify({ ...aggregate, fetch }, null, 2), "utf-8");
   console.error(`観測 ${observations.length} 件から集計しました: ${outPath}`);
   for (const r of [aggregate.central, aggregate.nar]) {
     console.error(

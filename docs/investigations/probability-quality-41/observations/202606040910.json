@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040910",
+  "region": "central",
+  "requestedDate": "20260927",
+  "kaisaiDate": "20260927",
+  "venueCode": "06",
+  "raceNumber": 10,
+  "raceName": "茨城新聞杯",
+  "listedEntryCount": 18,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 2000,
+  "runnerCount": 18,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "スイートオレンジ",
+      "prior": 0.245097527863291,
+      "placeOddsMin": 2.3,
+      "placeOddsMax": 3.4,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 2,
+      "horseName": "プリズマジコ",
+      "prior": 0.33695186979596947,
+      "placeOddsMin": 6.8,
+      "placeOddsMax": 10.8,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 20
+    },
+    {
+      "umaban": 3,
+      "horseName": "フナデ",
+      "prior": 0.1726198936264,
+      "placeOddsMin": 14,
+      "placeOddsMax": 22.4,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 15
+    },
+    {
+      "umaban": 4,
+      "horseName": "コスモイシュタル",
+      "prior": 0.1782728489081084,
+      "placeOddsMin": 2,
+      "placeOddsMax": 3,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 5,
+      "horseName": "ハニードレス",
+      "prior": 0.13831604905623837,
+      "placeOddsMin": 2.9,
+      "placeOddsMax": 4.4,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 6,
+      "horseName": "ミツカネベネラ",
+      "prior": 0.1399958737838617,
+      "placeOddsMin": 4.7,
+      "placeOddsMax": 7.2,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 7,
+      "horseName": "ドナルンバ",
+      "prior": 0.29646188090219133,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 1.6,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 8,
+      "horseName": "ベネスピラ",
+      "prior": 0.13976704912972931,
+      "placeOddsMin": 7.9,
+      "placeOddsMax": 12.4,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 13
+    },
+    {
+      "umaban": 9,
+      "horseName": "ルージュボヤージュ",
+      "prior": 0.23546176628818147,
+      "placeOddsMin": 2.2,
+      "placeOddsMax": 3.3,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 10,
+      "horseName": "サンライズバブル",
+      "prior": 0.2273400865280078,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.1,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 12
+    },
+    {
+      "umaban": 11,
+      "horseName": "アイキャンドウイッ",
+      "prior": 0.10562491511731929,
+      "placeOddsMin": 14.5,
+      "placeOddsMax": 23.2,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 20
+    },
+    {
+      "umaban": 12,
+      "horseName": "ダノンカゼルタ",
+      "prior": 0.1656826865888076,
+      "placeOddsMin": 3.7,
+      "placeOddsMax": 5.6,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 14
+    },
+    {
+      "umaban": 13,
+      "horseName": "ジェットブレード",
+      "prior": 0.10609902323118678,
+      "placeOddsMin": 6,
+      "placeOddsMax": 9.4,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 14,
+      "horseName": "レイヤードレッド",
+      "prior": 0.06542371244065831,
+      "placeOddsMin": 7.5,
+      "placeOddsMax": 11.8,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 15,
+      "horseName": "マイネルバーテクス",
+      "prior": 0.07375357796232225,
+      "placeOddsMin": 26.5,
+      "placeOddsMax": 42.4,
+      "finish": {
+        "kind": "順位",
+        "value": 18
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 16,
+      "horseName": "トレミニョン",
+      "prior": 0.062358456051810486,
+      "placeOddsMin": 15.8,
+      "placeOddsMax": 25.2,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 17,
+      "horseName": "マテンロウギフト",
+      "prior": 0.18889077599348925,
+      "placeOddsMin": 8.8,
+      "placeOddsMax": 14,
+      "finish": {
+        "kind": "順位",
+        "value": 17
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 10
+    },
+    {
+      "umaban": 18,
+      "horseName": "ジャンビ",
+      "prior": 0.12188200673242751,
+      "placeOddsMin": 38.9,
+      "placeOddsMax": 62.2,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 19
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/27",
+      "totalResultCount": 287,
+      "removedCount": 18,
+      "removedByCutoffCount": 18,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:40:23.277Z"
+}

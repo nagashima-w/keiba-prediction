@@ -184,7 +184,9 @@ export async function runMeasurement(
             kaisaiDate: day.usedDate,
           });
         } catch (error) {
-          if (error instanceof FetchHaltedError || deps.guard.tripped) {
+          // 測定側の例外は、FetchHaltedError だけを停止として扱う(想定外のバグを停止と誤分類しない)。
+          // 引き金の呼び出しが除外に変換されて返る場合は、下の `guard.tripped` の判定で保存を止める。
+          if (error instanceof FetchHaltedError) {
             halt(HTTP_400_HALT);
             break;
           }

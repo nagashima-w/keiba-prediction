@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040803",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 3,
+  "raceName": "2歳新馬",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1800,
+  "runnerCount": 16,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ロイヤルグルーヴ",
+      "prior": 0.1925,
+      "placeOddsMin": 6.5,
+      "placeOddsMax": 11.2,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 2,
+      "horseName": "ドナミモザ",
+      "prior": 0.1925,
+      "placeOddsMin": 10.7,
+      "placeOddsMax": 18.6,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 3,
+      "horseName": "モルスリール",
+      "prior": 0.1925,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 4,
+      "horseName": "コパノキラキラ",
+      "prior": 0.1925,
+      "placeOddsMin": 6.3,
+      "placeOddsMax": 10.9,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 5,
+      "horseName": "プラチナリーフ",
+      "prior": 0.1925,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 1.9,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 6,
+      "horseName": "ブリッド",
+      "prior": 0.1925,
+      "placeOddsMin": 30.8,
+      "placeOddsMax": 54.2,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 7,
+      "horseName": "スパーキー",
+      "prior": 0.1725,
+      "placeOddsMin": 6.4,
+      "placeOddsMax": 10.9,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 8,
+      "horseName": "ブルーサンタ",
+      "prior": 0.1725,
+      "placeOddsMin": 2.4,
+      "placeOddsMax": 4,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 9,
+      "horseName": "ツイストマインド",
+      "prior": 0.1725,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 2.8,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 10,
+      "horseName": "セイトゥゴールド",
+      "prior": 0.1725,
+      "placeOddsMin": 30.7,
+      "placeOddsMax": 54,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 11,
+      "horseName": "オレガイチバンイイ",
+      "prior": 0.1725,
+      "placeOddsMin": 17.4,
+      "placeOddsMax": 30.6,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 12,
+      "horseName": "ゼットターム",
+      "prior": 0.1725,
+      "placeOddsMin": 3.4,
+      "placeOddsMax": 5.6,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 13,
+      "horseName": "ボスヒッツ",
+      "prior": 0.1525,
+      "placeOddsMin": 1.9,
+      "placeOddsMax": 3.1,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 14,
+      "horseName": "アイビーナツユメ",
+      "prior": 0.1525,
+      "placeOddsMin": 7.4,
+      "placeOddsMax": 12.8,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 15,
+      "horseName": "ジェイエルバージ",
+      "prior": 0.1525,
+      "placeOddsMin": 3.8,
+      "placeOddsMax": 6.4,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    },
+    {
+      "umaban": 16,
+      "horseName": "ココル",
+      "prior": 0.1525,
+      "placeOddsMin": 4.3,
+      "placeOddsMax": 7.3,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 0
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 16,
+      "removedCount": 16,
+      "removedByCutoffCount": 16,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:13:18.901Z"
+}

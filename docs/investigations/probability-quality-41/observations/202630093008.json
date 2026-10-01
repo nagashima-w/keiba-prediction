@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202630093008",
+  "region": "nar",
+  "requestedDate": "20260930",
+  "kaisaiDate": "20260930",
+  "venueCode": "30",
+  "raceNumber": 8,
+  "raceName": "ニセコ産地酒造蔵人...(B4)",
+  "listedEntryCount": 12,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1200,
+  "runnerCount": 12,
+  "placedCount": 3,
+  "oddsStatus": "middle",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ベラジオヒダカボシ",
+      "prior": 0.27076747955387614,
+      "placeOddsMin": 11.4,
+      "placeOddsMax": 22.2,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 16
+    },
+    {
+      "umaban": 2,
+      "horseName": "デュアルアップ",
+      "prior": 0.14611009199057728,
+      "placeOddsMin": 4.8,
+      "placeOddsMax": 9.1,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 3,
+      "horseName": "リュウノマジシャン",
+      "prior": 0.21102497666559747,
+      "placeOddsMin": 14,
+      "placeOddsMax": 27.3,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 41
+    },
+    {
+      "umaban": 4,
+      "horseName": "ピエールテネシー",
+      "prior": 0.3241509597327166,
+      "placeOddsMin": 3.1,
+      "placeOddsMax": 5.7,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 54
+    },
+    {
+      "umaban": 5,
+      "horseName": "リオンセーラス",
+      "prior": 0.22750134157727572,
+      "placeOddsMin": 2.1,
+      "placeOddsMax": 3.8,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 6,
+      "horseName": "スキーサンダー",
+      "prior": 0.18668002049843166,
+      "placeOddsMin": 31.8,
+      "placeOddsMax": 62.5,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 7,
+      "horseName": "ユニバーサルラヴ",
+      "prior": 0.33071651214176295,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 8,
+      "horseName": "フロンテアブライト",
+      "prior": 0.23504033296716892,
+      "placeOddsMin": 7.1,
+      "placeOddsMax": 13.7,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 41
+    },
+    {
+      "umaban": 9,
+      "horseName": "ピエナクレスコ",
+      "prior": 0.3140693194303141,
+      "placeOddsMin": 1.7,
+      "placeOddsMax": 2.9,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 24
+    },
+    {
+      "umaban": 10,
+      "horseName": "ライトニングジャブ",
+      "prior": 0.3347445830664896,
+      "placeOddsMin": 3.2,
+      "placeOddsMax": 5.9,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 27
+    },
+    {
+      "umaban": 11,
+      "horseName": "タイセイシャルト",
+      "prior": 0.06622710947182506,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.5,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 15
+    },
+    {
+      "umaban": 12,
+      "horseName": "サイアミーズ",
+      "prior": 0.35296727290396424,
+      "placeOddsMin": 1.1,
+      "placeOddsMax": 1.6,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/30",
+      "totalResultCount": 300,
+      "removedCount": 12,
+      "removedByCutoffCount": 12,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:45:14.964Z"
+}

@@ -821,8 +821,8 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 `place-joint-model.ts`・`combo-bet-allocation.ts`・`expected-value.ts`)の挙動は一切変更しない。
 
 - **Issue #35 の分割**: #40(本節。計測基盤の健全化と指標の実装)/ #39(本番側
-  `analysis-pipeline.ts` の先読みリーク是正。完了)/ #41(30レース規模のサンプル拡大。LLM は使わない。測定基盤とスクリプトは実装済みで、
-  実取得は未実施)/ #42(較正 calibration 方式の要否検討・未着手)。同時分布モデルの厳密化(#20)は #41/#42 の
+  `analysis-pipeline.ts` の先読みリーク是正。完了)/ #41(30レース規模のサンプル拡大。LLM は使わない。測定基盤・スクリプト・実取得は完了。結果は
+  `docs/investigations/probability-quality-41/report.md`)/ #42(較正 calibration 方式の要否検討・未着手)。同時分布モデルの厳密化(#20)は #41/#42 の
   技術的前提であり、#77(#20-A。θ推定器と`PLACKETT_LUCE_MODEL`の追加・既定は不変。完了)→
   #78(#20-B。既定モデルの切替。着手前ゲートで【No-Go】と判定され #80〈#78-A〉/ #81〈#78-B〉に
   分割。分割の親として open のまま残る)→ #80(#78-A。モデル例外の受け皿を invalid 経路へ一本化し

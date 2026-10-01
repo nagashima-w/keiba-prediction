@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040812",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 12,
+  "raceName": "3歳以上2勝クラス",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1200,
+  "runnerCount": 16,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ライヴレッドアイ",
+      "prior": 0.21861151943979948,
+      "placeOddsMin": 2.7,
+      "placeOddsMax": 3.9,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 2,
+      "horseName": "ホーリーブライト",
+      "prior": 0.19590406372126215,
+      "placeOddsMin": 52.3,
+      "placeOddsMax": 78,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 23
+    },
+    {
+      "umaban": 3,
+      "horseName": "キボウノホシ",
+      "prior": 0.16550658077182268,
+      "placeOddsMin": 21.1,
+      "placeOddsMax": 31.3,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 35
+    },
+    {
+      "umaban": 4,
+      "horseName": "グラスブランシュ",
+      "prior": 0.15511979823061794,
+      "placeOddsMin": 38.5,
+      "placeOddsMax": 57.4,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 5,
+      "horseName": "ロッカバイベイビー",
+      "prior": 0.11712494337437886,
+      "placeOddsMin": 42.3,
+      "placeOddsMax": 63,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 6,
+      "horseName": "モーゲンセン",
+      "prior": 0.35169228907387856,
+      "placeOddsMin": 2.7,
+      "placeOddsMax": 3.8,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 10
+    },
+    {
+      "umaban": 7,
+      "horseName": "トヨサカエ",
+      "prior": 0.22653876061467423,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 8,
+      "horseName": "マサノピンクレディ",
+      "prior": 0.232185780473142,
+      "placeOddsMin": 1.6,
+      "placeOddsMax": 2.1,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 9,
+      "horseName": "サマースイートピー",
+      "prior": 0.2369672775194489,
+      "placeOddsMin": 3.4,
+      "placeOddsMax": 4.8,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 10
+    },
+    {
+      "umaban": 10,
+      "horseName": "エリカマユーリ",
+      "prior": 0.2195832360394167,
+      "placeOddsMin": 1.8,
+      "placeOddsMax": 2.4,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 11,
+      "horseName": "ルーフオブヘヴン",
+      "prior": 0.1347791753199816,
+      "placeOddsMin": 2.3,
+      "placeOddsMax": 3.2,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 12,
+      "horseName": "ホウオウプレミア",
+      "prior": 0.12798961748309398,
+      "placeOddsMin": 4.1,
+      "placeOddsMax": 6,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 33
+    },
+    {
+      "umaban": 13,
+      "horseName": "クインズポラリス",
+      "prior": 0.15099879717523365,
+      "placeOddsMin": 3.6,
+      "placeOddsMax": 5.1,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 21
+    },
+    {
+      "umaban": 14,
+      "horseName": "ショウナンタハティ",
+      "prior": 0.278211457180343,
+      "placeOddsMin": 3.4,
+      "placeOddsMax": 4.8,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 22
+    },
+    {
+      "umaban": 15,
+      "horseName": "バシレイア",
+      "prior": 0.10341009042786943,
+      "placeOddsMin": 11.7,
+      "placeOddsMax": 17.3,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 7
+    },
+    {
+      "umaban": 16,
+      "horseName": "ホウオウフロイト",
+      "prior": 0.08537661315503593,
+      "placeOddsMin": 35.6,
+      "placeOddsMax": 53.1,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 26
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 279,
+      "removedCount": 16,
+      "removedByCutoffCount": 16,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:29:11.933Z"
+}
