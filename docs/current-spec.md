@@ -177,6 +177,22 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   複数日・複数レースをまとめて取得する(`packages/app` 側の一括分析と連動)。
 - **エラー方針**: 必須データ(出馬表・オッズ)の失敗は throw。optional データ(調教)の失敗はその項目を
   null にして警告(`ScrapeWarning`、kind: 調教/戦績)を積む。戦績は馬単位で握り、1 頭の失敗で全体を落とさない。
+- **取消・除外の馬は出走馬から除く(Issue #154)**: 発走前に取消になった馬は出馬表に残ることがある
+  (中央 202606040901 で観測。一覧16頭・出走15頭)。印は行の `<tr class="HorseList Cancel">` と
+  `<td class="Cancel_Txt">取消</td>`(`SHUTUBA_SELECTORS.cancelledRow`・`cancelText`)。
+  `parseShutuba` は取消馬も `horses` に残して `ShutubaHorse.scratch`(取消/除外/不明)と原文
+  `scratchText` を付け(出走馬にはキー自体が無い)、`scrapeRace` が**戦績取得の前に**出走馬から除く。
+  これで頭数・prior の Σ 目標 `min(3,頭数)`・LLM プロンプト・EV・同時分布・配分の候補・複勝の発売条件
+  (`resolvePlaceBetTarget`)・戦績取得・組合せオッズの期待組合せ数と地方3連複の軸馬・枠連の枠構成が、
+  実際に走る馬だけから作られる(`runAnalysis` 側に除去は無い。production の経路は `scrapeRace` だけ)。
+  除いた馬は `RaceData.meta.scratched`(いなければキー自体が無い)と警告(kind=出走取消、1頭1件。
+  `AnalysisResult.warnings` に載り画面の警告欄に出る)に残る。`odds.win`/`odds.place` の取消馬の欄
+  (オッズ null・人気 9999)は触らない。全馬が取消扱いなら `ShutubaParseError`(構造変更の兆候)。
+  未知の文言(「取消」「除外」以外・文言が空で `Cancel` クラスだけ)は「不明」とし**出走しない側に倒す**。
+  **未観測の前提**: 実物の観測は中央 202606040901 の「取消」(発走後の取得)の1本だけ。**発走前の
+  時点の印・地方(nar.netkeiba.com)の出馬表の印・「除外」の文言は未観測**で、同じ雛形・同じ印と見込んでいる
+  (地方・除外のテストは既存フィクスチャを改変した「合成」)。出馬表のキャッシュ TTL(6時間)の間に取消が
+  発表された場合、キャッシュ上の出馬表に印が無ければ除かれない(従来どおりで悪化はしない。別 Issue で扱う)。
 - **開発補助 CLI**: `scripts/dump-race.ts`(`--race` / `--date` / `--fresh-odds` / `--out` / `--db`)で
   1 レース分または開催日一覧を JSON ダンプできる(通常利用はアプリで行う。README「CLI」参照)。
 

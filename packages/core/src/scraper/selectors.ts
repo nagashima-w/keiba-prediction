@@ -93,6 +93,18 @@ export const SHUTUBA_SELECTORS = {
   trainerLink: "td.Trainer a",
   /** 馬体重(増減)(例: 464<small>(-8)</small>)。 */
   weight: "td.Weight",
+  /**
+   * 取消・除外の行(Issue #154)。実測: 中央 202606040901(2026-09-27 中山1R・発走後に取得)の
+   * 取消馬の行は `<tr class="HorseList Cancel" id="tr_">`。**完全一致のクラス `Cancel` で取る**
+   * (メモ欄のボタン `Cancel_Btn01`・取消行のセルの `Cancel_NoData` など、`Cancel` を前方に持つ
+   * 別クラスを巻き込まないため。前方一致の属性セレクタは使わない)。
+   *
+   * **未観測**: 発走前の時点・地方(nar.netkeiba.com)の出馬表・「除外」の文言。
+   * いずれも中央の取消と同じ雛形・同じ印と見込んでいる(実物は無い。docs/current-spec.md 参照)。
+   */
+  cancelledRow: "tr.Cancel",
+  /** 取消・除外の印(行内の `<td class="Cancel_Txt">取消</td>`。Issue #154。未観測の前提は上記)。 */
+  cancelText: "td.Cancel_Txt",
 } as const;
 
 /** 馬プロフィール(db.netkeiba.com/horse/{id}/)のセレクタ。 */

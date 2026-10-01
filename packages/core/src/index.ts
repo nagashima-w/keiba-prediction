@@ -483,6 +483,8 @@ export type {
   RaceResult,
   RaceResultHorse,
   RaceVenue,
+  ScratchedHorse,
+  ScratchStatus,
   Shutuba,
   ShutubaHorse,
   ShutubaRaceInfo,

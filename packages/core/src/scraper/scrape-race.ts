@@ -42,6 +42,7 @@ import type {
   RaceListEntry,
   ShutubaHorse,
   ShutubaRaceInfo,
+  ScratchedHorse,
 } from "./types.js";
 import {
   horseResultsApiUrl,
@@ -144,7 +145,7 @@ export interface ScrapeRaceOptions {
 }
 
 /** 取得中に発生した非致命的な問題の種別。 */
-export type ScrapeWarningKind = "戦績" | "調教" | "組合せオッズ";
+export type ScrapeWarningKind = "戦績" | "調教" | "組合せオッズ" | "出走取消";
 
 /** 取得中に発生した非致命的な問題(結果には含めるが失敗はさせない)。 */
 export interface ScrapeWarning {
@@ -243,6 +244,17 @@ export interface RaceDataMeta {
    * 逐次表示は #49 へ分離した。`onProgress`コールバックは現状持たない。
    */
   readonly comboOdds?: ComboOddsScrapeOutcome;
+  /**
+   * 出馬表に取消・除外の印が付いていたため、出走馬(`RaceData.horses`)から除いた馬
+   * (Issue #154)。**除いた馬がいるときだけ設定される**(いなければキー自体が無い。取消の
+   * 無いレースの出力は従来と変わらない)。除くのは出馬表(`horses`)だけで、
+   * `odds.win` / `odds.place` の取消馬の欄(オッズ null・人気 9999)はそのまま残る。
+   * 同じ内容が `warnings`(kind=出走取消)にも1頭1件で入り、画面の警告欄に出る。
+   *
+   * 観測は中央 202606040901(発走後の取得)の「取消」のみ。発走前の印・地方の印・
+   * 「除外」の文言は未観測で、同じ雛形・同じ印と見込んでいる。
+   */
+  readonly scratched?: readonly ScratchedHorse[];
 }
 
 /** 1レース分の完全データ。 */
@@ -453,6 +465,19 @@ async function runComboBetTypeFetch(
 }
 
 /**
+ * 取消・除外の馬を出走馬から除いたことの警告文(画面の警告欄に出る。Issue #154)。
+ * 「不明」(未知の文言)は出走しない側に倒したことと、原文を添える。
+ */
+function scratchWarningMessage(horse: ShutubaHorse): string {
+  const label = `${horse.umaban}番 ${horse.name}`;
+  if (horse.scratch === "不明") {
+    const text = horse.scratchText ?? "";
+    return `出走取消: ${label}は出馬表に未知の印(「${text}」)が付いているため、出走しない馬として分析から除きました`;
+  }
+  return `出走取消: ${label}は出馬表で${horse.scratch}の印が付いているため、分析から除きました`;
+}
+
+/**
  * 1レースの完全データを取得する。
  *
  * 取得順序は spec に従い 出馬表 → 各馬戦績 → 調教 → オッズ。
@@ -479,7 +504,39 @@ export async function scrapeRace(
   const shutubaText = await deps.fetcher.fetchText(shutubaUrl(raceId), {
     maxAgeMs: ttl.shutubaMs,
   });
-  const shutuba = parseShutuba(shutubaText);
+  const parsedShutuba = parseShutuba(shutubaText);
+
+  // (1b) 取消・除外の馬を出走馬から除く(Issue #154)。出馬表には発走前に取消になった馬が
+  // 残ることがある(中央 202606040901 で観測。印は行の `Cancel` クラスと `td.Cancel_Txt`)。
+  // **戦績取得より前に**除く理由: 取消は分析日に依らない事実で、ここで除けば、以降の
+  // 頭数(prior の中立確率・Σ 目標 min(3,頭数)・複勝の発売条件)・戦績の取得・組合せオッズの
+  // 期待組合せ数と地方3連複の軸馬・枠連の枠構成が、すべて実際に走る馬だけから作られる
+  // (いずれも下の `shutuba.horses` から導出される)。#39 の戦績の絞り込みを scraper で行わない
+  // のは分析日(scraper は知らない)に依存するからで、取消にはその理由が当たらない。
+  // 除いた馬は meta.scratched と警告(画面の警告欄)に残す。全馬が取消扱いなら
+  // parseShutuba が失敗させるので、ここで horses が空になることはない。
+  const scratchedHorses: ScratchedHorse[] = [];
+  const runnerHorses: ShutubaHorse[] = [];
+  for (const horse of parsedShutuba.horses) {
+    if (horse.scratch === undefined) {
+      runnerHorses.push(horse);
+      continue;
+    }
+    scratchedHorses.push({
+      umaban: horse.umaban,
+      wakuban: horse.wakuban,
+      name: horse.name,
+      horseId: horse.horseId,
+      status: horse.scratch,
+      text: horse.scratchText ?? "",
+    });
+    warnings.push({
+      kind: "出走取消",
+      horseId: horse.horseId,
+      message: scratchWarningMessage(horse),
+    });
+  }
+  const shutuba = { ...parsedShutuba, horses: runnerHorses };
 
   // (2) 各馬の全戦績: 馬単位で握る(1頭の失敗で全体を落とさない)。
   // horseResultsApiUrl は db.netkeiba.com 共通で中央・地方の区別が無い(常に同じ呼び出し)。
@@ -667,7 +724,13 @@ export async function scrapeRace(
     race: shutuba.race,
     horses,
     odds,
-    meta: { fetchedAt, oddsFetchedAt, warnings, comboOdds },
+    meta: {
+      fetchedAt,
+      oddsFetchedAt,
+      warnings,
+      comboOdds,
+      ...(scratchedHorses.length > 0 ? { scratched: scratchedHorses } : {}),
+    },
   };
 }
 

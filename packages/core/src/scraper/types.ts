@@ -82,6 +82,40 @@ export interface ShutubaHorse {
   readonly trainerId: string | null;
   /** 馬体重(増減)。未発表の場合は null。 */
   readonly bodyWeight: BodyWeight | null;
+  /**
+   * 出馬表に取消・除外の印が付いている場合の区分(Issue #154)。**出走する馬には付かない
+   * (キー自体が無い)**。`parseShutuba` は取消馬も `horses` に残して返し、出走馬から除くのは
+   * `scrapeRace` の責務(除いた馬は `RaceDataMeta.scratched` に残る)。したがって `RaceData.horses`
+   * の `shutuba` がこのフィールドを持つことはない。
+   *
+   * 「取消」「除外」以外の文言(または文言が空で `Cancel` クラスだけが付いた行)は「不明」とし、
+   * **出走しない側に倒す**(原文は `scratchText`)。
+   *
+   * 観測は中央 202606040901(発走後の取得)の「取消」のみ。発走前の印・地方の印・「除外」の
+   * 文言は未観測で、同じ雛形・同じ印と見込んでいる。
+   */
+  readonly scratch?: ScratchStatus;
+  /** 取消・除外の印の原文(`td.Cancel_Txt` のテキスト。空のこともある)。`scratch` と同時に付く。 */
+  readonly scratchText?: string;
+}
+
+/** 取消・除外の区分(Issue #154)。「不明」は未知の文言で、出走しない側に倒して扱う。 */
+export type ScratchStatus = "取消" | "除外" | "不明";
+
+/** 出馬表に残っていたため出走馬から除いた馬(Issue #154。`RaceDataMeta.scratched`)。 */
+export interface ScratchedHorse {
+  /** 馬番。 */
+  readonly umaban: number;
+  /** 枠番。 */
+  readonly wakuban: number;
+  /** 馬名。 */
+  readonly name: string;
+  /** 馬ID。 */
+  readonly horseId: HorseId;
+  /** 区分。 */
+  readonly status: ScratchStatus;
+  /** 出馬表の印の原文(空のこともある)。 */
+  readonly text: string;
 }
 
 /** 出馬表ページ上部のレース情報。 */
