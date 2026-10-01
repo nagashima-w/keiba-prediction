@@ -14,6 +14,7 @@ import type {
   RaceBreakdownHorseView,
   RaceLedgerView,
   VerifyBetView,
+  VerifyReportView,
   VerifyVenueFilter,
 } from "../shared/analysis-types.js";
 
@@ -63,6 +64,31 @@ export function formatUnknownBetTypeNotice(unknownBetType: ProposedBetUnknownBet
     `未対応の券種コード(${unknownBetType.betTypes.join("、")})の買い目が${unknownBetType.count}点 ` +
     `(賭け金合計${formatYen(unknownBetType.totalStake)})あり、回収率の集計から除外しています。`
   );
+}
+
+/**
+ * 検証画面の集計の内訳(集計件数と、除外した件数の理由別内訳)の1行表示(Issue #152 B)。
+ * 除外が0件の項目も出す(フィルタが有効であることが画面から分かるように)。
+ * 「判定不能」という語は使わない(配分ベースの回収率の「判定不能」と混同させないため)。
+ */
+export function formatExclusionSummary(report: VerifyReportView): string {
+  return (
+    `集計${report.includedAnalysisCount}件 / 結果未取込で除外${report.excludedAnalysisCount}件 / ` +
+    `旧分析除外${report.supersededAnalysisCount}件 / 発売前推定のため除外${report.excludedEstimatedCount}件 / ` +
+    `リーク疑い(発走後に分析・先読み未遮断)のため除外${report.excludedLookaheadSuspectCount}件 / ` +
+    `発走前後を判定できず除外${report.excludedLookaheadUnknownCount}件`
+  );
+}
+
+/**
+ * 集計の除外内訳の補足(Issue #152 B)。リーク疑い・発走前後判定不可の除外が1件でもあるときだけ返し、
+ * 0件なら null(呼び出し側は `!== null` で描画する。`formatUnknownBetTypeNotice` と同じ流儀)。
+ */
+export function formatExclusionNote(report: VerifyReportView): string | null {
+  if (report.excludedLookaheadSuspectCount + report.excludedLookaheadUnknownCount === 0) {
+    return null;
+  }
+  return "単日分析で再分析すると集計に戻ります";
 }
 
 /**
@@ -174,10 +200,12 @@ export function hasUnknownPromptVersionGroup(
  * 削除確認ダイアログに表示する「版不明の分析N件」の N を、追加のIPC往復無しで
  * 既に読み込み済みの版別レポートから求める。
  *
- * VerifyReportView の4つの内訳(集計対象・結果未取込で除外・旧分析除外・推定EVのため除外)は
- * その版グループの分析集合を余さず分割する(selectIncludedAnalyses、core/ev/verify.ts)ため、
- * 4つの合計がその版(=prompt_version IS NULL)の analyses 総数と一致する
- * (AnalysisStore.deleteAnalysesWithUnknownPromptVersion が実際に削除する件数と同じ母集団)。
+ * VerifyReportView の6つの内訳(集計対象・結果未取込で除外・旧分析除外・推定EVのため除外・
+ * リーク疑いのため除外・発走前後を判定できず除外)はその版グループの分析集合を余さず分割する
+ * (selectIncludedAnalyses、core/ev/verify.ts)ため、6つの合計がその版(=prompt_version IS NULL)の
+ * analyses 総数と一致する(AnalysisStore.deleteAnalysesWithUnknownPromptVersion が実際に削除する
+ * 件数と同じ母集団)。リーク疑いの除外(Issue #152)は表示上の集計から外すだけで、保存された行は
+ * 削除対象のままなので、除外した件数も含めなければ確認ダイアログの件数が実際より少なくなる。
  * 版不明グループが無ければ0(削除対象なし)。
  */
 export function unknownPromptVersionAnalysisCount(
@@ -192,7 +220,9 @@ export function unknownPromptVersionAnalysisCount(
     report.includedAnalysisCount +
     report.excludedAnalysisCount +
     report.supersededAnalysisCount +
-    report.excludedEstimatedCount
+    report.excludedEstimatedCount +
+    report.excludedLookaheadSuspectCount +
+    report.excludedLookaheadUnknownCount
   );
 }
 

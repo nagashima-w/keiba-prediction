@@ -19,6 +19,8 @@ const sampleReport: VerifyReportView = {
   excludedAnalysisCount: 0,
   supersededAnalysisCount: 0,
   excludedEstimatedCount: 0,
+  excludedLookaheadSuspectCount: 0,
+  excludedLookaheadUnknownCount: 0,
   bet: {
     betCount: 2,
     totalStake: 200,

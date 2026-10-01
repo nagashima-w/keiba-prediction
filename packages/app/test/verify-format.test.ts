@@ -15,6 +15,8 @@ import {
   directionLabel,
   formatAdjustment,
   formatBinRange,
+  formatExclusionNote,
+  formatExclusionSummary,
   formatFinishPosition,
   formatKaisaiDate,
   formatPayoutBreakdown,
@@ -46,6 +48,8 @@ function verifyReport(over: Partial<VerifyReportView> = {}): VerifyReportView {
     excludedAnalysisCount: 0,
     supersededAnalysisCount: 0,
     excludedEstimatedCount: 0,
+    excludedLookaheadSuspectCount: 0,
+    excludedLookaheadUnknownCount: 0,
     bet: {
       betCount: 0,
       totalStake: 0,
@@ -494,6 +498,49 @@ describe("verify画面の表示整形(純関数)", () => {
     });
   });
 
+  describe("formatExclusionSummary / formatExclusionNote(集計の除外内訳、Issue #152 B)", () => {
+    const report = verifyReport({
+      includedAnalysisCount: 11,
+      excludedAnalysisCount: 12,
+      supersededAnalysisCount: 13,
+      excludedEstimatedCount: 14,
+      excludedLookaheadSuspectCount: 15,
+      excludedLookaheadUnknownCount: 16,
+    });
+
+    it("6つの内訳を、それぞれ自分のラベルで出すこと(件数は全部異なる値で、ラベルの取り違えを検出する)", () => {
+      expect(formatExclusionSummary(report)).toBe(
+        "集計11件 / 結果未取込で除外12件 / 旧分析除外13件 / 発売前推定のため除外14件" +
+          " / リーク疑い(発走後に分析・先読み未遮断)のため除外15件 / 発走前後を判定できず除外16件",
+      );
+    });
+
+    it("リーク疑いと発走前後判定不可は別のラベル・別の件数であること(入れ替えると別の文になる)", () => {
+      const swapped = verifyReport({ excludedLookaheadSuspectCount: 16, excludedLookaheadUnknownCount: 15 });
+      expect(formatExclusionSummary(swapped)).toContain("リーク疑い(発走後に分析・先読み未遮断)のため除外16件");
+      expect(formatExclusionSummary(swapped)).toContain("発走前後を判定できず除外15件");
+      expect(formatExclusionSummary(report)).not.toBe(formatExclusionSummary(swapped));
+    });
+
+    it("「判定不能」という語を使わないこと(proposedBet の「判定不能」と混同させない)", () => {
+      expect(formatExclusionSummary(report)).not.toContain("判定不能");
+      expect(formatExclusionNote(report) ?? "").not.toContain("判定不能");
+    });
+
+    it("除外が0件でも2項目を出すこと(フィルタが有効であることが分かる)", () => {
+      const text = formatExclusionSummary(verifyReport());
+      expect(text).toContain("リーク疑い(発走後に分析・先読み未遮断)のため除外0件");
+      expect(text).toContain("発走前後を判定できず除外0件");
+    });
+
+    it("補足は、リーク疑いか判定不可の除外が1件でもあるときだけ出し、0件なら null にすること", () => {
+      const note = "単日分析で再分析すると集計に戻ります";
+      expect(formatExclusionNote(verifyReport({ excludedLookaheadSuspectCount: 1 }))).toBe(note);
+      expect(formatExclusionNote(verifyReport({ excludedLookaheadUnknownCount: 1 }))).toBe(note);
+      expect(formatExclusionNote(verifyReport())).toBeNull();
+    });
+  });
+
   describe("unknownPromptVersionAnalysisCount(版不明グループの分析件数、Task#33)", () => {
     it("版不明グループの4つの内訳(集計・結果未取込除外・旧分析除外・推定EV除外)の合計を返すこと", () => {
       const reports = [
@@ -508,6 +555,34 @@ describe("verify画面の表示整形(純関数)", () => {
         }),
       ];
       // 3+2+1+4=10件がprompt_version=nullのanalyses総数(削除対象件数)と一致する。
+      expect(unknownPromptVersionAnalysisCount(reports)).toBe(10);
+    });
+
+    it("リーク疑い・発走前後判定不可の除外件数も合計に含めること(6カウンタの和が分析総数。Issue #152 B)", () => {
+      const reports = [
+        promptVersionReport({
+          promptVersion: null,
+          report: verifyReport({
+            includedAnalysisCount: 1,
+            excludedAnalysisCount: 2,
+            supersededAnalysisCount: 4,
+            excludedEstimatedCount: 8,
+            excludedLookaheadSuspectCount: 16,
+            excludedLookaheadUnknownCount: 32,
+          }),
+        }),
+      ];
+      // 各カウンタを2の冪にしてあるので、どれか1つを落とすと和が一意に食い違う(1+2+4+8+16+32=63)。
+      expect(unknownPromptVersionAnalysisCount(reports)).toBe(63);
+    });
+
+    it("リーク疑いだけが多い版不明グループでも、削除確認の件数が0にならないこと(除外が効いていても削除対象は減らない)", () => {
+      const reports = [
+        promptVersionReport({
+          promptVersion: null,
+          report: verifyReport({ excludedLookaheadSuspectCount: 7, excludedLookaheadUnknownCount: 3 }),
+        }),
+      ];
       expect(unknownPromptVersionAnalysisCount(reports)).toBe(10);
     });
 

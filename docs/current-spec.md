@@ -338,9 +338,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   分析(是正前)」を意味する**(0や空文字で「是正済み」と読ませない。#31の原則・`include_*` 列と同じ流儀)。
   既存 DB は開くときに `PRAGMA table_info` → `ALTER TABLE ADD COLUMN` で後付けする(冪等)。
   この値は `StoredAnalysis.historyCutoffDate`(NULL は null)として読み出せる(Issue #152 A)。
-  **verify での扱い(「リーク疑い」の除外・画面表示)は #152 のスコープ**(core の分類
-  `classifyLookaheadSuspicion` と `VerifyConfig.excludeLookaheadSuspects`〈既定 false〉は #152 A で実装済み、
-  app への配線と画面表示は #152 B)。
+  verify での扱い(「リーク疑い」の除外と画面表示)は下の「先読みリーク疑いの除外(Issue #152)」参照。
 - **LLM プロンプト側の遮断を通った印(Issue #153)**: `analyses.prompt_lookahead_guarded`(INTEGER・NULL 許容。
   `AnalysisRecord.promptLookaheadGuarded`: true→1、false→0、省略/null→NULL)。`runAnalysis` は**新規の分析で
   常に true を書く**(LLM 未使用の分析でも true)。`history_cutoff_date` は戦績を絞った印にすぎず、
@@ -348,7 +346,37 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   この列で区別する。**NULL は「v1.14.x 以前に保存された分析(プロンプト側が未遮断)」**。
   既存 DB は `history_cutoff_date` と同じ作法(`PRAGMA table_info` → `ALTER TABLE ADD COLUMN`、冪等)で後付けし、
   既存行は NULL のまま。`StoredAnalysis.promptLookaheadGuarded`(1→true・0→false・NULL→null)として読み出せる
-  (Issue #152 A)。表示は #152 B のスコープ。
+  (Issue #152 A)。verify での扱いは下の「先読みリーク疑いの除外(Issue #152)」参照。
+- **先読みリーク疑いの除外(Issue #152。core は A、app への配線と画面は B)**: 過去レースを後から分析すると、
+  結果が出たあとの情報が戦績・プロンプトに混ざり、検証の回収率・キャリブレーションが過大になる。
+  遮断の印(上の2項目)が無い行を、検証画面の集計から**既定で除外**し、件数を表示する
+  (画面に「含める」トグルは設けない。ユーザー判断)。分類は `classifyLookaheadSuspicion`
+  (`ev/lookahead-suspicion.ts`)が次の順で行う(clean / suspect / unknown):
+  1. **遮断の印**: `historyCutoffDate` が非 NULL かつ(`promptVersion` が NULL〈LLM 未使用〉または
+     `promptLookaheadGuarded === true`)なら、発走の前後にかかわらず **clean**。`false`〈明示的に未遮断〉と
+     NULL〈記録なし〉はどちらも遮断済みとは扱わない。
+  2. **発走時刻**(印で clean にならなかった行): 開催日 = `kaisaiDate`、無ければ地方の raceId の月日
+     (`kaisaiDateFromNarRaceId`)。発走時刻 = 保存したスナップショットの `race.startTime`(`HH:MM`・JST)。
+     `analyzedAt` が発走より前なら clean、発走ちょうど以降なら **suspect**(発走ちょうども suspect)。
+     比較は JST を UTC に直した ms の数値で行う(地方ナイターで日付がずれても取り違えない)。
+  3. **開催日**(発走時刻が無い行): 開催日の 00:00 JST より前に分析 → clean、翌日 00:00 JST 以降 → suspect、
+     開催日当日 → **unknown**。開催日が決まらない・`analyzedAt` が読めない行も unknown。
+  - **画面の表示**: 集計の除外内訳に「リーク疑い(発走後に分析・先読み未遮断)のため除外N件」と
+    「発走前後を判定できず除外N件」を別のラベル・別の件数で出す(`verify-format.ts` の
+    `formatExclusionSummary`。配分ベースの「判定不能」と混同しないよう「判定不能」の語は使わない)。
+    どちらかが1件でもあれば「単日分析で再分析すると集計に戻ります」を添える(`formatExclusionNote`)。
+    判定の順は 結果未取込 → リーク疑い/発走前後判定不可 → 旧分析 → 推定EV で、各分析はちょうど
+    1つの件数に入る(6件数の和が分析総数。`unknownPromptVersionAnalysisCount` もこの6件数の和)。
+    分類は最新選択より前に行うので、同一レースの「発走前の clean」と「発走後の suspect」では clean が残る。
+  - **除外が効く集計**: `getVerifyReport`(全体・中央のみ・地方のみ)と `getVerifyReportByPromptVersion`
+    (版別)。いずれも `pipeline-deps.ts` が `excludeLookaheadSuspects: true` で呼ぶ
+    (`VerifyReport` の回収率・キャリブレーション・補正傾向・配分ベースの回収率が同じ母集団に追随する)。
+  - **除外が効かない集計**: レース一覧(`computeRaceLedger`。過去分析の再表示のため全件を残す)と、
+    分析データのエクスポート。保存された分析行は削除されず、版不明の削除確認の件数にも除外分を含める。
+  - **既知の限界**: 遅延発走は反映されない(スナップショットの予定時刻を使う)。LLM が失敗して prior を
+    採用した行は `promptVersion` が非 NULL のまま保存されうるため、遮断マーカーが無ければ suspect 側に倒れる。
+    旧行は `kaisaiDate`・発走時刻を持たないものがあり、その場合は unknown になりうる。
+    `PROMPT_VERSION` は上げていない(ユーザー判断)。
 - **配分提案の永続化(Issue #59)**: `saveAnalysis` は分析本体(`analyses`/`analysis_horses`)と
   同一トランザクションで、5節の配分提案を新テーブル2本へ書く(`AnalysisRecord.allocation`が
   渡されたときのみ。呼び出し側〈main〉が渡さない旧来の呼び出しでは書かない=「未到達」)。

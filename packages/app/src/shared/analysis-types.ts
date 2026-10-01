@@ -728,6 +728,18 @@ export interface VerifyReportView {
   readonly supersededAnalysisCount: number;
   /** 推定EV(発売前の概算)のため集計から除外した分析件数(Task#25)。 */
   readonly excludedEstimatedCount: number;
+  /**
+   * 先読みリーク疑い(発走以降に分析され、遮断の印が無い行)のため集計から除外した分析件数
+   * (Issue #152)。検証画面の集計(全体・版別)では常に除外が有効。
+   */
+  readonly excludedLookaheadSuspectCount: number;
+  /**
+   * 発走の前後を判定できず(同日分析で発走時刻が無い・開催日が決まらない等)集計から除外した
+   * 分析件数(Issue #152)。「リーク疑い」とは別の件数として扱う。
+   *
+   * 不変条件: 集計・結果未取込・旧分析・推定EV・リーク疑い・発走前後判定不可の6件数の和が分析総数。
+   */
+  readonly excludedLookaheadUnknownCount: number;
   /** 累積回収率サマリ。 */
   readonly bet: VerifyBetView;
   /** 推定確率帯ごとのキャリブレーション表。 */
