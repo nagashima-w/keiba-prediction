@@ -207,9 +207,26 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   実行日で近似(`dateApproximate=true`)した場合、自レースの走は raceId で除かれるが、施行日より後・
   実行日より前の走は残る(既知の限界。近似日は UI から到達しない)。`results=null`(戦績取得失敗)は
   null のまま、0走(新馬)は `[]` で、区別を保つ。絞りに使った基準日は保存レコードの
-  `historyCutoffDate`(DB の `analyses.history_cutoff_date`。5節・後述の「先読みリーク遮断の記録」参照)
-  に書く。LLM プロンプトのうち、戦績以外の先読みリーク(同日傾向への後続レース混入・地方の同レース
-  過去10年結果への当該回の混入)は本項では遮断しておらず #153 で扱う。
+  `historyCutoffDate`(DB の `analyses.history_cutoff_date`。4節・後述の「先読みリーク遮断の記録」参照)
+  に書く。LLM プロンプト側の先読みリーク(同日傾向への後続レース混入・地方の同レース過去10年結果への
+  当該回/後の回の混入)の遮断は次項(Issue #153)。
+- **LLM プロンプト側の先読みリークの遮断(Issue #153)**:
+  - **当日傾向**(`collectSameDayTrend`): 集計対象は**自レースより前のレース番号**(01〜自番号-1。
+    `scraper/ids.ts` の `precedingRaceIdsSameDay`)だけ。以前は自番号以外の01〜12
+    (`siblingRaceIdsSameDay`)を見ており、過去レースを後から分析すると取込済みの後続レースの結果
+    (自レースの発走時点では存在しない)が当日傾向に混ざった。`siblingRaceIdsSameDay` は変更せず、
+    `precedingRaceIdsSameDay` がその結果から自番号より小さいものだけを残す(`collectSameDayTrend` は
+    後者だけを呼ぶ)。当日運用では後続レースは未取込のため結果は変わらない。
+  - **同レース過去10年結果傾向**(`collectGradeWinnerTrend`): 集計の前に `excludeLookaheadEntries`
+    (`grade-winner-trend.ts`)で、①`raceId` が対象レースと一致する回、②`raceDate` が基準日(`analysisDate`、
+    戦績の絞り込みと同じ値)と同日以降の回、③`raceDate` が null・不正の回を除く(日付は数字だけにそろえて
+    比較)。`対象回数`(プロンプトの「対象N回中」)は**除いた後の件数**。実測
+    (`docs/grade-winner-lookahead-investigation.md`)で、地方の応答は要求した race_id に依らず最新10年
+    (当該年を含む)を返し、中央は要求した回の年より前の10年を返す(中央では何も除かれない)。
+    `kaisaiDate` が渡らず近似日(実行日)になった過去分析では、当該回は raceId で除かれるが当該回より後で
+    実行日より前の回は残る(既知の限界。近似日は UI から到達しない)。
+  - `PROMPT_VERSION` は据え置き(遮断済みかどうかは版ではなく `analyses.prompt_lookahead_guarded` で区別する。
+    4節「先読みリーク遮断の記録」参照)。
 - **共通ルール**: 各バイアスは「対象条件の複勝率 − 全体複勝率 × 重み」の差分ベース(`aggregate.ts`)。
   サンプル 2 走未満は補正なし(`minSampleForBias=2`)。各バイアスの寄与度は内訳(`BiasContribution`)として
   ログ可能。
@@ -322,6 +339,13 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   既存 DB は開くときに `PRAGMA table_info` → `ALTER TABLE ADD COLUMN` で後付けする(冪等)。
   この値の**読み出し・表示・verify での扱い(「リーク疑い」の注記/除外)は #152 のスコープ**で、
   `StoredAnalysis` にはまだ含めない。
+- **LLM プロンプト側の遮断を通った印(Issue #153)**: `analyses.prompt_lookahead_guarded`(INTEGER・NULL 許容。
+  `AnalysisRecord.promptLookaheadGuarded`: true→1、false→0、省略/null→NULL)。`runAnalysis` は**新規の分析で
+  常に true を書く**(LLM 未使用の分析でも true)。`history_cutoff_date` は戦績を絞った印にすぎず、
+  v1.14.x で保存された LLM 使用の分析はプロンプト側のリーク(当日傾向・同レース過去傾向)を含みうるため、
+  この列で区別する。**NULL は「v1.14.x 以前に保存された分析(プロンプト側が未遮断)」**。
+  既存 DB は `history_cutoff_date` と同じ作法(`PRAGMA table_info` → `ALTER TABLE ADD COLUMN`、冪等)で後付けし、
+  既存行は NULL のまま。読み出し・表示は #152 のスコープで、`StoredAnalysis` にはまだ含めない。
 - **配分提案の永続化(Issue #59)**: `saveAnalysis` は分析本体(`analyses`/`analysis_horses`)と
   同一トランザクションで、5節の配分提案を新テーブル2本へ書く(`AnalysisRecord.allocation`が
   渡されたときのみ。呼び出し側〈main〉が渡さない旧来の呼び出しでは書かない=「未到達」)。
@@ -781,6 +805,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
      に渡していたため、当該レース自身の着順が prior の材料に混入していた(実測: 中央16頭フィクスチャで
      出走16頭全頭・21走が該当。うち16走が当該レース自身、5走は基準日より後の日付)。
      **#39 で本番側(`runAnalysis`)が scrape 直後に遮断するようになった**(2節「戦績の扱い」参照)。
+     LLM プロンプト側(当日傾向・同レース過去傾向)の遮断は #153(同節)。
      #40 の時点の計測値(中央 ρ=0.2104 等)はリークありの値で、#39 以降の `runAnalysis` の出力は
      遮断後の値(中央 ρ=-0.0059 等)になる。
 - **`scorer/snapshot-filter.ts`**: `filterRaceDataBefore(raceData, cutoffDate)` — 各馬の

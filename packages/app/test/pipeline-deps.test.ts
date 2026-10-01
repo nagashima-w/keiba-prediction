@@ -485,9 +485,9 @@ describe("createPipelineDeps(本番依存の配線)", () => {
 
     it("deps.getGradeWinnerTrendが関数として組み立てられ、注入したfetch(Electron net.fetch相当の注入経路)経由でPOSTし、集計結果を返すこと", async () => {
       const rawEntries = [
-        { race_id: "202503020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 14, result: [{ umaban: 1, kakutei: 1, ninki: 3 }], payback: null },
-        { race_id: "202403020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 12, result: [], payback: null },
-        { race_id: "202303020211", jyo: "福島", kyori: 1800, track: "芝", tosu: 16, result: [], payback: null },
+        { race_id: "202503020211", race_date: "2025-06-29", jyo: "福島", kyori: 1800, track: "芝", tosu: 14, result: [{ umaban: 1, kakutei: 1, ninki: 3 }], payback: null },
+        { race_id: "202403020211", race_date: "2024-06-30", jyo: "福島", kyori: 1800, track: "芝", tosu: 12, result: [], payback: null },
+        { race_id: "202303020211", race_date: "2023-07-02", jyo: "福島", kyori: 1800, track: "芝", tosu: 16, result: [], payback: null },
       ];
       const fetch = vi.fn<FetchLike>(async () =>
         makeFetchResponse(makeOkRawResponse(rawEntries)),
@@ -501,7 +501,7 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         trackCode: "03",
         track: "芝",
         kyori: 1800,
-      });
+      }, "2026/06/28");
 
       expect(summary).not.toBeNull();
       expect(summary!.条件一致回数).toBe(3);
@@ -533,7 +533,7 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         trackCode: "03",
         track: "芝",
         kyori: 1800,
-      });
+      }, "2026/07/01");
 
       expect(summary).toBeNull();
     });
@@ -547,11 +547,29 @@ describe("createPipelineDeps(本番依存の配線)", () => {
         trackCode: "44",
         track: "ダ",
         kyori: 2000,
-      });
+      }, "2026/07/01");
 
       expect(fetch).toHaveBeenCalledTimes(1);
       const [calledUrl] = fetch.mock.calls[0]!;
       expect(calledUrl).toBe("https://nar.netkeiba.com/race_api/");
+    });
+
+    it("第3引数の基準日が collectGradeWinnerTrend へそのまま渡り、先読みになる回の除外に使われること(Issue #153。実フィクスチャ=2023年の回を要求した応答)", async () => {
+      const raw = readFileSync(
+        fileURLToPath(new URL("../../../fixtures/grade_winner_nar_202344062811.json", import.meta.url)),
+        "utf-8",
+      );
+      const fetch = vi.fn<FetchLike>(async () => makeFetchResponse(raw));
+      const r = createPipelineDeps({ dbPath: ":memory:", fetch });
+      resources.push(r);
+      const conditions = { trackCode: "44", track: "ダ" as const, kyori: 2000 };
+
+      // 基準日=当該回の開催日(2023/06/28): 当該回(2023年)・後の回(2024〜2026年)が除かれ 6回。
+      const atRaceDay = await r.deps.getGradeWinnerTrend!(parseRaceId("202344062811"), conditions, "2023/06/28");
+      expect(atRaceDay!.対象回数).toBe(6);
+      // 基準日を十分に未来にすると、残るのは raceId 一致で除かれる当該回を除いた 9回(基準日が効いている証拠)。
+      const farFuture = await r.deps.getGradeWinnerTrend!(parseRaceId("202344062811"), conditions, "2099/12/31");
+      expect(farFuture!.対象回数).toBe(9);
     });
 
     it("config.onWarnを渡すと、deps.onGradeWinnerTrendErrorがraceId・messageを含む文言でonWarnへ届くこと(要修正10: 構造破壊/API仕様変更の警告配線)", () => {

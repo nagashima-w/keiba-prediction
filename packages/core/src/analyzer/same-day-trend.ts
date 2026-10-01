@@ -25,13 +25,18 @@
  * だけの構造的最小インターフェース SameDayTrendRace へ広げてある(RaceResult[] はこの上位型に
  * 構造的に代入可能なため、#27-Bの既存テストは本widening後も無改変で緑になる)。
  * さらに、当日・同一場・同一面の確定済みレース結果からこの入力を組み立てる収集ヘルパー
- * collectSameDayTrend をこのファイルに併設する(兄弟レースID列挙は scraper/ids.ts の
- * siblingRaceIdsSameDay に委譲)。呼び出し側(app/analysis-pipeline.ts)は、注入した
+ * collectSameDayTrend をこのファイルに併設する(先行レースID列挙は scraper/ids.ts の
+ * precedingRaceIdsSameDay に委譲)。呼び出し側(app/analysis-pipeline.ts)は、注入した
  * getRaceResultDetail をそのまま collectSameDayTrend の lookup として渡すだけでよい。
+ *
+ * Issue #153(先読みリークの遮断): 集計対象は**自レースより前のレース番号**(01〜自番号-1)に限る。
+ * 当初は自番号以外の01〜12(siblingRaceIdsSameDay)を見ていたため、過去のレースを後から分析すると、
+ * 取込済みの後続レース(自レースの発走時点では結果が存在しない)の結果が当日傾向に混ざり、
+ * LLMプロンプトに入っていた。
  */
 
 import { isPlaced } from "../scorer/derive-features.js";
-import { siblingRaceIdsSameDay, type RaceId } from "../scraper/ids.js";
+import { precedingRaceIdsSameDay, type RaceId } from "../scraper/ids.js";
 import type { CourseType, FinishPosition } from "../scraper/types.js";
 import { classifyRunLegStyleFull } from "./leg-style.js";
 
@@ -266,8 +271,9 @@ export interface SameDayTrendRaceDetailHorseLike {
 /**
  * 当日・同一場・同一面の確定済みレース結果から当日傾向を集計する(タスク#27-C)。
  *
- * targetRaceId の先頭10桁+レース番号01〜12(自番号を除く)を兄弟レースIDとして列挙し
- * (scraper/ids.ts の siblingRaceIdsSameDay)、lookup で取得できた(=取込済み・確定済みの)
+ * targetRaceId の先頭10桁+レース番号(自番号より小さい01〜自番号-1。Issue #153: 後続レースは
+ * 自レースの発走時点で結果が存在しないため見ない)を先行レースIDとして列挙し
+ * (scraper/ids.ts の precedingRaceIdsSameDay)、lookup で取得できた(=取込済み・確定済みの)
  * ものだけを対象にする。さらに courseType が targetCourseType と一致する(かつ非null)
  * レースのみを集計に使う(面不一致・面不明〈null〉は除外)。
  *
@@ -293,8 +299,8 @@ export function collectSameDayTrend(
 ): SameDayTrendSummary | null {
   const races: SameDayTrendRace[] = [];
 
-  for (const siblingId of siblingRaceIdsSameDay(targetRaceId)) {
-    const detail = lookup(siblingId);
+  for (const precedingId of precedingRaceIdsSameDay(targetRaceId)) {
+    const detail = lookup(precedingId);
     if (detail === undefined) {
       continue; // 未取込・未確定はスキップ(新規取得・DB書き込みは行わない)。
     }

@@ -1764,6 +1764,7 @@ describe("runAnalysis(分析パイプライン)", () => {
         async (
           _raceId: RaceId,
           _conditions: GradeWinnerConditions,
+          _cutoffDate: string,
         ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
       );
       const deps: AnalysisPipelineDeps = {
@@ -1774,10 +1775,12 @@ describe("runAnalysis(分析パイプライン)", () => {
       await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
 
       expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
-      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      const [calledRaceId, calledConditions, calledCutoff] = getGradeWinnerTrend.mock.calls[0]!;
       expect(calledRaceId).toBe(RACE_ID);
       // RACE_ID(場コード05)→東京、fakeRaceDataの既定はcourseType="芝"・distance=1600。
       expect(calledConditions).toEqual({ trackCode: "05", track: "芝", kyori: 1600 });
+      // 先読みリークの遮断(Issue #153): 基準日は戦績の絞り込み(#39)と同じ分析日(開催日 YYYY/MM/DD)。
+      expect(calledCutoff).toBe("2026/07/09");
 
       expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
       const promptText = buildPrompt(captured.value!);
@@ -1804,6 +1807,7 @@ describe("runAnalysis(分析パイプライン)", () => {
         async (
           _raceId: RaceId,
           _conditions: GradeWinnerConditions,
+          _cutoffDate: string,
         ): Promise<GradeWinnerTrendSummary | null> => fakeGradeWinnerTrend(),
       );
       const deps: AnalysisPipelineDeps = {
@@ -1820,10 +1824,11 @@ describe("runAnalysis(分析パイプライン)", () => {
       );
 
       expect(getGradeWinnerTrend).toHaveBeenCalledTimes(1);
-      const [calledRaceId, calledConditions] = getGradeWinnerTrend.mock.calls[0]!;
+      const [calledRaceId, calledConditions, calledCutoff] = getGradeWinnerTrend.mock.calls[0]!;
       expect(calledRaceId).toBe(NAR_RACE_ID);
       // NAR_RACE_ID(場コード54)→高知、fakeRaceDataの既定はcourseType="芝"・distance=1600。
       expect(calledConditions).toEqual({ trackCode: "54", track: "芝", kyori: 1600 });
+      expect(calledCutoff).toBe("2026/07/09");
       expect(captured.value!.race.gradeWinnerTrend).toEqual(fakeGradeWinnerTrend());
     });
 

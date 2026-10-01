@@ -31,6 +31,7 @@ export {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  precedingRaceIdsSameDay,
   siblingRaceIdsSameDay,
   venueKindOfRaceId,
   type CentralVenueInfo,
@@ -347,8 +348,10 @@ export {
 export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
 export {
   collectGradeWinnerTrend,
+  excludeLookaheadEntries,
   summarizeGradeWinnerTrend,
   type GradeWinnerConditions,
+  type LookaheadGuard,
   type GradeWinnerRange,
   type GradeWinnerTrendSummary,
   type GradeWinnerValueCount,

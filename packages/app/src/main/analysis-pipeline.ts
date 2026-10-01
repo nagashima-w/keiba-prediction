@@ -185,10 +185,16 @@ export interface AnalysisPipelineDeps {
    * 応答構造の異常等)してもLLM本体の分析結果には一切影響させず、null にフォールバックして
    * 分析全体を完了させる(呼び出し側のrunAnalysisが try/catch でこれを保証する)。ただし
    * 例外送出時は onGradeWinnerTrendError で警告として残す(要修正10。詳細は同フィールド参照)。
+   *
+   * 第3引数 `cutoffDate`(Issue #153: 先読みリークの遮断)は分析日(`analysisDate`。戦績の絞り込み
+   * 〈#39〉の基準日と同じ値。YYYY/MM/DD)。取得した過去回のうち、当該回自身・基準日と同日以降の回は
+   * 集計から除かれる(core の excludeLookaheadEntries)。過去のレースを後から分析すると、地方の応答は
+   * race_id に依らず最新10年で、当該回と後の回を含むため。当日運用では何も除かれない。
    */
   readonly getGradeWinnerTrend?: (
     raceId: RaceId,
     conditions: GradeWinnerConditions,
+    cutoffDate: string,
   ) => Promise<GradeWinnerTrendSummary | null>;
   /**
    * getGradeWinnerTrend が例外を投げたときに呼ばれる診断ログ用フック(要修正10・2026-07-28
@@ -457,6 +463,9 @@ export async function runAnalysis(
     });
     // 当日の同一場・同一面傾向(タスク#27-C)。getRaceResultDetail が注入されているときだけ算出する
     // (未注入・prior採用のLLMスキップ経路では算出しない=無駄なDB読み出しを増やさない)。
+    // 集計対象は自レースより前のレース番号だけ(Issue #153。collectSameDayTrend が
+    // precedingRaceIdsSameDay で列挙する。過去のレースを後から分析しても、取込済みの後続レースの
+    // 結果〈自レースの発走時点では存在しない〉は混ざらない。当日運用では後続は未取込のため不変)。
     const sameDayTrend = deps.getRaceResultDetail
       ? collectSameDayTrend(raceId, race.race.courseType, deps.getRaceResultDetail)
       : null;
@@ -477,11 +486,17 @@ export async function runAnalysis(
     let gradeWinnerTrend: GradeWinnerTrendSummary | null = null;
     if (deps.getGradeWinnerTrend && race.race.hasGradeBadge !== false) {
       try {
-        gradeWinnerTrend = await deps.getGradeWinnerTrend(raceId, {
-          trackCode: raceId.slice(4, 6),
-          track: race.race.courseType,
-          kyori: race.race.distance,
-        });
+        gradeWinnerTrend = await deps.getGradeWinnerTrend(
+          raceId,
+          {
+            trackCode: raceId.slice(4, 6),
+            track: race.race.courseType,
+            kyori: race.race.distance,
+          },
+          // 先読みリークの遮断(Issue #153): 戦績の絞り込み(#39)と同じ基準日(analysisDate)を渡す。
+          // 取得した過去回のうち、当該回自身・基準日と同日以降の回は集計から除かれる。
+          analysisDate,
+        );
       } catch (error) {
         gradeWinnerTrend = null;
         deps.onGradeWinnerTrendError?.({
@@ -780,6 +795,11 @@ export async function runAnalysis(
     // 戦績の絞り込みに使った基準日(Issue #39)。kaisaiDate と異なり、近似日のときも使った基準日
     // (実行日)を書く。NULL の行は先読みリーク遮断より前に作られた分析(是正前)を意味する。
     historyCutoffDate,
+    // LLMプロンプト側の先読みリーク遮断を通った印(Issue #153)。新規の分析は必ず true を書く
+    // (LLM未使用でも true。当日傾向は自レースより前のレース番号だけ、同レース過去傾向は当該回自身と
+    // 基準日以降の回を除く経路で作られたことを示す)。NULL の行は v1.14.x 以前に保存された分析で、
+    // LLM使用の分析はプロンプト側のリークを含みうる。読み出し・表示は #152 のスコープ。
+    promptLookaheadGuarded: true,
     // 使用したLLMモデル名(Issue#10)。LLMを実際に使った分析のみ記録する(promptVersionと同じ方針。
     // LLMスキップ時は deps.modelName が設定されていても null にし、偽値を混入させない)。
     model: llmUsed ? (deps.modelName ?? null) : null,

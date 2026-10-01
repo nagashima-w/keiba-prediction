@@ -172,6 +172,18 @@ export interface AnalysisRecord {
    */
   readonly historyCutoffDate?: string | null;
   /**
+   * LLMプロンプト側の先読みリーク遮断(Issue #153: 当日傾向〈sameDayTrend〉は自レースより前のレース
+   * 番号だけ・同レース過去10年結果傾向〈gradeWinnerTrend〉は当該回自身と基準日以降の回を除く)を
+   * 通った分析であることの印。app 側の分析パイプラインが**新規の分析で常に true を渡す**
+   * (LLM未使用の分析でも true。遮断を通る経路で作られたことを示す)。
+   * `historyCutoffDate`(戦績の絞り込み〈#39〉の印)とは別の独立した印で、v1.14.x で保存された
+   * LLM使用の分析は戦績は絞られているがプロンプト側のリークを含みうるため、この列で区別する。
+   * DBには true→1・false→0 で保存する。省略・null は「遮断の記録なし=是正前の呼び出し元/旧行」で
+   * NULL として保存する(0 にしない。「是正前」と「明示的に未遮断」を区別する)。
+   * この値の読み出し・表示は #152 のスコープで、`StoredAnalysis` にはまだ含めない。
+   */
+  readonly promptLookaheadGuarded?: boolean | null;
+  /**
    * 使用したLLMモデル名(Issue#10 分析データのエクスポート、例: "claude-sonnet-4-6")。
    * LLMを使わず prior をそのまま採用した分析(LLMスキップ)は null を渡す想定(偽値を混入させない)。
    * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
@@ -703,7 +715,8 @@ export class AnalysisStore {
         model TEXT,
         raw_response TEXT,
         race_snapshot_json TEXT,
-        history_cutoff_date TEXT
+        history_cutoff_date TEXT,
+        prompt_lookahead_guarded INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_${ANALYSES_TABLE}_race
         ON ${ANALYSES_TABLE} (race_id);
@@ -833,6 +846,21 @@ export class AnalysisStore {
     this.migrateAllocationTrifectaColumn();
     this.migrateAllocationBracketQuinellaColumn();
     this.migrateHistoryCutoffDateColumn();
+    this.migratePromptLookaheadGuardedColumn();
+  }
+
+  /**
+   * LLMプロンプト側の先読みリーク遮断の印(prompt_lookahead_guarded)列を後付けするマイグレーション
+   * (Issue #153)。この列が無い analyses(v1.14.x 以前)には追加する。既存行は ALTER TABLE で NULL が入る
+   * =「遮断の記録なし=是正前」として読める(0や1で誤読させない。history_cutoff_date の後付けと同じ流儀)。冪等。
+   */
+  private migratePromptLookaheadGuardedColumn(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "prompt_lookahead_guarded")) {
+      this.db.exec(`ALTER TABLE ${ANALYSES_TABLE} ADD COLUMN prompt_lookahead_guarded INTEGER`);
+    }
   }
 
   /**
@@ -1082,8 +1110,8 @@ export class AnalysisStore {
     const insertAnalysis = this.db.prepare(
       `INSERT INTO ${ANALYSES_TABLE}
          (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date,
-          model, raw_response, race_snapshot_json, history_cutoff_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          model, raw_response, race_snapshot_json, history_cutoff_date, prompt_lookahead_guarded)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertHorse = this.db.prepare(
       `INSERT INTO ${ANALYSIS_HORSES_TABLE}
@@ -1120,6 +1148,11 @@ export class AnalysisStore {
           ? null
           : JSON.stringify(rec.raceSnapshot),
         rec.historyCutoffDate ?? null,
+        rec.promptLookaheadGuarded === undefined || rec.promptLookaheadGuarded === null
+          ? null
+          : rec.promptLookaheadGuarded
+            ? 1
+            : 0,
       );
       const analysisId = Number(info.lastInsertRowid);
       for (const h of rec.horses) {

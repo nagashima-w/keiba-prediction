@@ -1,22 +1,32 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  AnalysisStore,
+  buildPrompt,
   buildPriorInput,
   classifyTrackWetness,
+  collectGradeWinnerTrend,
   computeFieldPriors,
+  parseGradeWinnerResponse,
   parseKaisaiDate,
+  parseRaceId,
+  parseRaceResult,
+  summarizeGradeWinnerTrend,
+  summarizeSameDayTrend,
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type HorseRaceResult,
   type RaceData,
+  type RaceResult,
 } from "@keiba/core";
 import type { AnalysisRecord } from "@keiba/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   runAnalysis,
   type AnalysisPipelineDeps,
 } from "../src/main/analysis-pipeline.js";
+import { importRaceResult } from "../src/main/result-import.js";
 import type { AnalysisResult } from "../src/shared/analysis-types.js";
 
 /**
@@ -110,10 +120,15 @@ interface RunOutput {
 const FIXED_NOW = new Date(2026, 8, 30, 12, 0, 0);
 
 /** LLMをフェイクにして(prior をそのまま返す)、プロンプト入力・結果・保存レコードを捕捉する。 */
-async function run(raceData: RaceData, kaisaiDate: string | null): Promise<RunOutput> {
+async function run(
+  raceData: RaceData,
+  kaisaiDate: string | null,
+  extraDeps: Partial<AnalysisPipelineDeps> = {},
+): Promise<RunOutput> {
   let prompt: BuildPromptInput | null = null;
   const records: AnalysisRecord[] = [];
   const deps: AnalysisPipelineDeps = {
+    ...extraDeps,
     scrape: async () => raceData,
     analyze: async (input): Promise<AnalyzeRaceResult> => {
       prompt = input;
@@ -440,5 +455,281 @@ describe("保存レコードの基準日マーカー(historyCutoffDate)", () => 
     expect(approx.records[0]!.historyCutoffDate).not.toBeNull();
     const exact = await run(raw, "20260628");
     expect(exact.records[0]!.kaisaiDate).toBe("20260628");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// マーカー(analyses.prompt_lookahead_guarded。LLMプロンプト側の遮断を通った印。Issue #153)
+// ---------------------------------------------------------------------------
+
+describe("保存レコードの遮断済みマーカー(promptLookaheadGuarded)", () => {
+  const raw = loadFixture("central-on.json");
+
+  it("LLM使用時の保存レコードに true を書く", async () => {
+    const { records } = await run(raw, "20260628");
+    expect(records).toHaveLength(1);
+    expect(records[0]!.promptLookaheadGuarded).toBe(true);
+  });
+
+  it("LLM未使用(prior採用)の保存レコードにも true を書く(遮断を通る経路で作られたことの印)", async () => {
+    const records = await runWithoutLlm(raw, "20260628");
+    expect(records).toHaveLength(1);
+    expect(records[0]!.promptLookaheadGuarded).toBe(true);
+  });
+
+  it("開催日が渡らず実行日で近似した分析にも true を書く", async () => {
+    const { records, result } = await run(raw, null);
+    expect(result.dateApproximate).toBe(true);
+    expect(records[0]!.promptLookaheadGuarded).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sameDayTrend: 自レースより後のレース番号の結果は材料にしない(Issue #153)
+// ---------------------------------------------------------------------------
+
+describe("LLMプロンプトの当日傾向(sameDayTrend)は自レースより前のレース番号だけを材料にする", () => {
+  // 同一開催日(2026/08/08 中京)の実物の結果 R1・R2・R5(いずれも芝)。
+  const SAME_DAY_HEAD = "2026070205";
+  const SAME_DAY_NUMBERS = ["01", "02", "05"] as const;
+  const KAISAI = "20260808";
+
+  function loadResultHtml(raceNumber: string): string {
+    const url = new URL(`../../../fixtures/result_${SAME_DAY_HEAD}${raceNumber}.html`, import.meta.url);
+    return readFileSync(fileURLToPath(url), "utf-8");
+  }
+
+  /** 実物の結果を、本番と同じ経路(importRaceResult → AnalysisStore.saveResult)で DB に取り込む。 */
+  async function importedStore(): Promise<AnalysisStore> {
+    const store = new AnalysisStore();
+    for (const n of SAME_DAY_NUMBERS) {
+      await importRaceResult(parseRaceId(`${SAME_DAY_HEAD}${n}`), {
+        fetchText: async () => loadResultHtml(n),
+        parse: parseRaceResult,
+        saveResult: (rid, entries, courseType, comboPayouts) =>
+          store.saveResult(rid, entries, courseType, comboPayouts),
+      });
+    }
+    return store;
+  }
+
+  /** 独立オラクル用: 実物の結果を直接パースした RaceResult(DB を通さない)。 */
+  function parsedResult(raceNumber: string): RaceResult {
+    return parseRaceResult(loadResultHtml(raceNumber));
+  }
+
+  /** 出馬表は central-on.json(芝)の raceId だけを差し替えた合成(結果は上の実物)。 */
+  function targetRaceData(raceNumber: string): RaceData {
+    return { ...loadFixture("central-on.json"), raceId: `${SAME_DAY_HEAD}${raceNumber}` as RaceData["raceId"] };
+  }
+
+  it("前提: 取り込んだ3本はすべて芝で、出走表(合成)の面も芝である(面が一致するため、面フィルタで落ちない)", async () => {
+    const store = await importedStore();
+    for (const n of SAME_DAY_NUMBERS) {
+      const detail = store.getRaceResultDetail(`${SAME_DAY_HEAD}${n}`);
+      expect(detail).toBeDefined();
+      expect(detail!.courseType).toBe("芝");
+      expect(detail!.horses.length).toBeGreaterThan(0);
+    }
+    expect(targetRaceData("03").race.courseType).toBe("芝");
+    store.close();
+  });
+
+  it("自番号03のレース: 先行の R1・R2 の2本だけを集計し、後続の R5 の結果は混ざらない(オラクルと一致・リテラルで固定)", async () => {
+    const store = await importedStore();
+    const { prompt } = await run(targetRaceData("03"), KAISAI, {
+      getRaceResultDetail: (id) => store.getRaceResultDetail(id),
+    });
+    const trend = prompt.race.sameDayTrend;
+    expect(trend).not.toBeNull();
+    expect(trend!.サンプル数.レース数).toBe(2);
+    // 独立オラクル: R1・R2 を直接集計した結果と全項目で一致する。
+    expect(trend).toEqual(summarizeSameDayTrend([parsedResult("01"), parsedResult("02")]));
+    // 非空振り: 後続の R5 まで含めた集計(従来の挙動)とは異なる(レース数3で、結果が一致しない)。
+    const leaky = summarizeSameDayTrend([parsedResult("01"), parsedResult("02"), parsedResult("05")]);
+    expect(leaky.サンプル数.レース数).toBe(3);
+    expect(trend).not.toEqual(leaky);
+    store.close();
+  });
+
+  it("自番号03のレース: getRaceResultDetail は先行の01・02だけを引き、自番号・後続は一度も引かない", async () => {
+    const store = await importedStore();
+    const lookup = vi.fn((id: string) => store.getRaceResultDetail(id));
+    await run(targetRaceData("03"), KAISAI, { getRaceResultDetail: lookup });
+    expect(lookup.mock.calls.map((c) => c[0])).toEqual(["202607020501", "202607020502"]);
+    store.close();
+  });
+
+  it("自番号02のレース: 先行は R1 の1本だけでデータ不足になり、sameDayTrend は null(後続の R5 が取込済みでも補われない)", async () => {
+    const store = await importedStore();
+    const { prompt } = await run(targetRaceData("02"), KAISAI, {
+      getRaceResultDetail: (id) => store.getRaceResultDetail(id),
+    });
+    expect(prompt.race.sameDayTrend ?? null).toBeNull();
+    // 非空振り: 後続の R5 を含めれば(従来の挙動)データ不足にならない。
+    expect(summarizeSameDayTrend([parsedResult("01"), parsedResult("05")]).脚質傾向).not.toBe("データ不足");
+    store.close();
+  });
+
+  it("当日運用相当(自番号06・先行の R1・R2・R5 がすべて取込済みで後続は未取込): 先行3本を全て集計し、従来と同じ結果になる", async () => {
+    const store = await importedStore();
+    const { prompt } = await run(targetRaceData("06"), KAISAI, {
+      getRaceResultDetail: (id) => store.getRaceResultDetail(id),
+    });
+    const trend = prompt.race.sameDayTrend;
+    expect(trend).not.toBeNull();
+    expect(trend!.サンプル数.レース数).toBe(3);
+    expect(trend).toEqual(summarizeSameDayTrend([parsedResult("01"), parsedResult("02"), parsedResult("05")]));
+    store.close();
+  });
+
+  it("プロンプト文面にも、後続のレースを含めた集計は出ない(自番号03: 当日の同場・同面傾向の行が「確定2R」で、「確定3R」にならない)", async () => {
+    const store = await importedStore();
+    const { prompt } = await run(targetRaceData("03"), KAISAI, {
+      getRaceResultDetail: (id) => store.getRaceResultDetail(id),
+    });
+    const text = buildPrompt(prompt);
+    expect(text).toContain("当日の同場・同面傾向(芝、確定2R)");
+    expect(text).not.toContain("確定3R");
+    store.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gradeWinnerTrend: 当該回自身と基準日以降の回は材料にしない(Issue #153)
+// ---------------------------------------------------------------------------
+
+describe("LLMプロンプトの同レース過去傾向(gradeWinnerTrend)は先読みになる回を材料にしない", () => {
+  function loadGradeWinnerRaw(name: string): string {
+    return readFileSync(fileURLToPath(new URL(`../../../fixtures/${name}`, import.meta.url)), "utf-8");
+  }
+
+  function rawEntries(name: string) {
+    const parsed = parseGradeWinnerResponse(loadGradeWinnerRaw(name));
+    expect(parsed).not.toBeNull();
+    return parsed!;
+  }
+
+  /** 本番の core 関数(collectGradeWinnerTrend)を、固定のレスポンスを返すフェッチャで束縛した deps。呼び出し引数も捕捉する。 */
+  function gradeWinnerDeps(fixtureName: string) {
+    const calls: Array<{ raceId: string; cutoffDate: string }> = [];
+    const fetcher = { fetchText: async () => loadGradeWinnerRaw(fixtureName) };
+    const getGradeWinnerTrend: NonNullable<AnalysisPipelineDeps["getGradeWinnerTrend"]> = (
+      raceId,
+      conditions,
+      cutoffDate,
+    ) => {
+      calls.push({ raceId, cutoffDate });
+      return collectGradeWinnerTrend(raceId, conditions, cutoffDate, { fetcher });
+    };
+    return { calls, getGradeWinnerTrend };
+  }
+
+  /** 地方(大井 ダ2000)の出馬表(合成): nar-on.json の raceId・面・距離・重賞バッジを差し替えたもの。 */
+  function narRaceData(raceId: string): RaceData {
+    const base = loadFixture("nar-on.json");
+    return {
+      ...base,
+      raceId: raceId as RaceData["raceId"],
+      race: { ...base.race, courseType: "ダ", distance: 2000, hasGradeBadge: true },
+    };
+  }
+
+  const NAR_CONDITIONS = { trackCode: "44", track: "ダ" as const, kyori: 2000 };
+  const CENTRAL_CONDITIONS = { trackCode: "03", track: "芝" as const, kyori: 1800 };
+
+  it("地方・当該回自身が応答に含まれる実物(2026年の回): 当該回を除いた9回で集計し、プロンプトの「対象」も9回になる(オラクル+リテラル)", async () => {
+    const name = "grade_winner_nar_202644070111.json";
+    const raw = rawEntries(name);
+    // 前提: 先頭が当該回自身(raceId 一致)。
+    expect(raw[0]!.raceId).toBe("202644070111");
+    const { calls, getGradeWinnerTrend } = gradeWinnerDeps(name);
+
+    const { prompt } = await run(narRaceData("202644070111"), "20260701", { getGradeWinnerTrend });
+
+    expect(calls).toEqual([{ raceId: "202644070111", cutoffDate: "2026/07/01" }]);
+    const trend = prompt.race.gradeWinnerTrend;
+    expect(trend).not.toBeNull();
+    expect(trend!.対象回数).toBe(9);
+    expect(trend!.複勝圏内馬数).toBe(27);
+    expect(trend!.複勝配当中央値).toBe(160);
+    expect(trend).toEqual(summarizeGradeWinnerTrend(raw.slice(1), NAR_CONDITIONS));
+    // 非空振り: 絞らない集計(従来の挙動)とは異なる。
+    const leaky = summarizeGradeWinnerTrend(raw, NAR_CONDITIONS)!;
+    expect(leaky.対象回数).toBe(10);
+    expect(trend).not.toEqual(leaky);
+    // 利用者から見える文面(LLMプロンプト)。
+    const text = buildPrompt(prompt);
+    expect(text).toContain("対象9回中");
+    expect(text).not.toContain("対象10回中");
+  });
+
+  it("地方・過去の回を後から分析(2023年の回。応答は2026〜2024年の回と当該回を含む実物): 基準日 2023/06/28 で2022年以前の6回に絞る", async () => {
+    const name = "grade_winner_nar_202344062811.json";
+    const raw = rawEntries(name);
+    // 前提: 応答は2026〜2017年の10回で、当該回(2023年)はその4番目。
+    expect(raw).toHaveLength(10);
+    expect(raw[3]!.raceId).toBe("202344062811");
+    const { calls, getGradeWinnerTrend } = gradeWinnerDeps(name);
+
+    const { prompt } = await run(narRaceData("202344062811"), "20230628", { getGradeWinnerTrend });
+
+    expect(calls).toEqual([{ raceId: "202344062811", cutoffDate: "2023/06/28" }]);
+    const trend = prompt.race.gradeWinnerTrend;
+    expect(trend).not.toBeNull();
+    expect(trend!.対象回数).toBe(6);
+    expect(trend!.複勝配当中央値).toBe(165);
+    expect(trend).toEqual(summarizeGradeWinnerTrend(raw.slice(4), NAR_CONDITIONS));
+    expect(trend).not.toEqual(summarizeGradeWinnerTrend(raw, NAR_CONDITIONS));
+    const text = buildPrompt(prompt);
+    expect(text).toContain("対象6回中");
+  });
+
+  it("地方・開催日が渡らず実行日(2026/09/30)で近似した過去分析: 当該回は raceId で除かれるが、実行日より前の後の回(2024〜2026年)は残る(近似日の既知の限界)", async () => {
+    const name = "grade_winner_nar_202344062811.json";
+    const raw = rawEntries(name);
+    const { calls, getGradeWinnerTrend } = gradeWinnerDeps(name);
+
+    const { prompt, result } = await run(narRaceData("202344062811"), null, { getGradeWinnerTrend });
+
+    expect(result.dateApproximate).toBe(true);
+    expect(calls).toEqual([{ raceId: "202344062811", cutoffDate: "2026/09/30" }]);
+    // 当該回(2023年)だけが除かれ9回。2024〜2026年は残る(日付だけでは落とせないため)。
+    expect(prompt.race.gradeWinnerTrend!.対象回数).toBe(9);
+    expect(prompt.race.gradeWinnerTrend).toEqual(
+      summarizeGradeWinnerTrend(raw.filter((e) => e.raceId !== "202344062811"), NAR_CONDITIONS),
+    );
+  });
+
+  it("中央・当日運用(応答に当該回を含まず、全て施行日より前の実物): 何も除かれず、絞らない集計と全項目で一致する(no-op)", async () => {
+    const name = "grade_winner_202603020211.json";
+    const raw = rawEntries(name);
+    const { calls, getGradeWinnerTrend } = gradeWinnerDeps(name);
+
+    const { prompt } = await run(loadFixture("central-on.json"), "20260628", { getGradeWinnerTrend });
+
+    expect(calls).toEqual([{ raceId: "202603020211", cutoffDate: "2026/06/28" }]);
+    expect(prompt.race.gradeWinnerTrend).toEqual(summarizeGradeWinnerTrend(raw, CENTRAL_CONDITIONS));
+    expect(prompt.race.gradeWinnerTrend!.対象回数).toBe(10);
+    expect(buildPrompt(prompt)).toContain("対象10回中");
+  });
+
+  it("中央の日付分岐の疑似ケース(合成: 2026年の応答を開催日 2023/07/02 の分析に当てる): 同日の2023年と後の2024・2025年が除かれ2022年以前の7回になる", async () => {
+    const name = "grade_winner_202603020211.json";
+    const raw = rawEntries(name);
+    const { getGradeWinnerTrend } = gradeWinnerDeps(name);
+
+    const { prompt } = await run(loadFixture("central-on.json"), "20230702", { getGradeWinnerTrend });
+
+    expect(raw[3]!.raceDate).toBe("2022-07-03");
+    expect(prompt.race.gradeWinnerTrend!.対象回数).toBe(7);
+    expect(prompt.race.gradeWinnerTrend).toEqual(summarizeGradeWinnerTrend(raw.slice(3), CENTRAL_CONDITIONS));
+  });
+
+  it("基準日(cutoffDate)は戦績の絞り込み(#39)と同じ分析日(analysisDate)で、保存レコードの基準日マーカーと同じ日付である", async () => {
+    const { getGradeWinnerTrend, calls } = gradeWinnerDeps("grade_winner_202603020211.json");
+    const { records } = await run(loadFixture("central-on.json"), "20260628", { getGradeWinnerTrend });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.cutoffDate.replaceAll("/", "")).toBe(records[0]!.historyCutoffDate);
   });
 });

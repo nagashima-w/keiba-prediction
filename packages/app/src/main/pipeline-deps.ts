@@ -321,8 +321,13 @@ export function createPipelineDeps(
     getRaceResultDetail: (raceId: RaceId) => store.getRaceResultDetail(raceId),
     // 同レース(重賞)の過去10年結果傾向(タスク機能B)。fetcher(既存のCachedFetcher。中央・地方
     // いずれもホスト自動選択で取得できる)で束縛した collectGradeWinnerTrend をそのまま渡す。
-    getGradeWinnerTrend: (raceId: RaceId, conditions: GradeWinnerConditions) =>
-      collectGradeWinnerTrend(raceId, conditions, { fetcher }),
+    // 第3引数の基準日(分析日。Issue #153)は先読みリーク(当該回自身・基準日以降の回)の除外に使うため、
+    // 落とさず collectGradeWinnerTrend へ素通しする(必須引数。落とすと型エラーになる)。
+    getGradeWinnerTrend: (
+      raceId: RaceId,
+      conditions: GradeWinnerConditions,
+      cutoffDate: string,
+    ) => collectGradeWinnerTrend(raceId, conditions, cutoffDate, { fetcher }),
     // 要修正10: getGradeWinnerTrendが例外を投げた(構造破壊・API仕様変更等の本物の異常)ときの
     // 診断ログを、HttpClientの警告と同じ既存チャンネル(config.onWarn→ipc.tsのlogWarn)へ流す。
     // 非重賞NG(status:NG)・条件一致3回未満のような正常系のnull返却は例外を投げないため、

@@ -6,6 +6,7 @@ import {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  precedingRaceIdsSameDay,
   siblingRaceIdsSameDay,
   venueKindOfRaceId,
 } from "../../src/scraper/ids.js";
@@ -207,6 +208,80 @@ describe("siblingRaceIdsSameDay(同一場・同一開催日の兄弟レースID�
   });
 });
 
+describe("precedingRaceIdsSameDay(同一場・同一開催日の自番号より前のレースID列挙、Issue #153)", () => {
+  it("中央: 先頭10桁を保ったまま、自レース番号(11)より小さい01〜10だけを昇順で返すこと(後続の12は含まない)", () => {
+    const preceding = precedingRaceIdsSameDay(parseRaceId("202605020811"));
+    expect(preceding).toEqual([
+      "202605020801",
+      "202605020802",
+      "202605020803",
+      "202605020804",
+      "202605020805",
+      "202605020806",
+      "202605020807",
+      "202605020808",
+      "202605020809",
+      "202605020810",
+    ]);
+    expect(preceding).not.toContain("202605020811");
+    expect(preceding).not.toContain("202605020812");
+  });
+
+  it("地方: 先頭10桁(場コード+月日)を保ったまま、自レース番号(10)より小さい01〜09だけを返すこと", () => {
+    const preceding = precedingRaceIdsSameDay(parseRaceId("202654071210"));
+    expect(preceding).toEqual([
+      "202654071201",
+      "202654071202",
+      "202654071203",
+      "202654071204",
+      "202654071205",
+      "202654071206",
+      "202654071207",
+      "202654071208",
+      "202654071209",
+    ]);
+  });
+
+  it("自レース番号が01(先頭)のときは空配列を返すこと(境界値。自分より前のレースが無い)", () => {
+    expect(precedingRaceIdsSameDay(parseRaceId("202605020801"))).toEqual([]);
+    expect(precedingRaceIdsSameDay(parseRaceId("202654071201"))).toEqual([]);
+  });
+
+  it("自レース番号が02のときは01だけを返すこと(境界値)", () => {
+    expect(precedingRaceIdsSameDay(parseRaceId("202605020802"))).toEqual(["202605020801"]);
+  });
+
+  it("自レース番号が12(末尾)のときは01〜11の11件を返し、12は含まないこと(境界値)", () => {
+    const preceding = precedingRaceIdsSameDay(parseRaceId("202605020812"));
+    expect(preceding).toHaveLength(11);
+    expect(preceding[0]).toBe("202605020801");
+    expect(preceding[preceding.length - 1]).toBe("202605020811");
+    expect(preceding).not.toContain("202605020812");
+  });
+
+  it("全レース番号(01〜12)で、件数が n-1 で、要素のレース番号がすべて自番号より小さく昇順であり、siblingRaceIdsSameDay の部分集合であること", () => {
+    for (let n = 1; n <= 12; n++) {
+      const own = parseRaceId(`2026050208${String(n).padStart(2, "0")}`);
+      const preceding = precedingRaceIdsSameDay(own);
+      // 前提: 件数は n-1(0件のまま全称が空振りしないよう、件数を無条件に固定する)。
+      expect(preceding).toHaveLength(n - 1);
+      const numbers = preceding.map((id) => Number(id.slice(10, 12)));
+      expect(numbers.every((x) => x < n)).toBe(true);
+      expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+      const siblings = siblingRaceIdsSameDay(own);
+      expect(preceding.every((id) => siblings.includes(id))).toBe(true);
+    }
+  });
+
+  it("戻り値の各要素が parseRaceId を通過済みの妥当なレースIDであること", () => {
+    const preceding = precedingRaceIdsSameDay(parseRaceId("202654071210"));
+    expect(preceding).toHaveLength(9);
+    for (const id of preceding) {
+      expect(() => parseRaceId(id)).not.toThrow();
+    }
+  });
+});
+
 describe("kaisaiDateFromNarRaceId(地方レースIDから開催日を導出)", () => {
   it("地方(場コード30〜64)のレースIDから開催日(YYYYMMDD)を導出すること", () => {
     // 場コード54 → 高知。7〜10桁目 0712 → 7月12日。
@@ -386,5 +461,6 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.venueKindOfRaceId).toBe(venueKindOfRaceId);
     expect(mod.centralVenueInfoFromRaceId).toBe(centralVenueInfoFromRaceId);
     expect(mod.siblingRaceIdsSameDay).toBe(siblingRaceIdsSameDay);
+    expect(mod.precedingRaceIdsSameDay).toBe(precedingRaceIdsSameDay);
   });
 });

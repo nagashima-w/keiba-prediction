@@ -769,6 +769,135 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("prompt_lookahead_guarded列(LLMプロンプト側の先読みリーク遮断を通った印。Issue #153)", () => {
+    /** 生SQLで prompt_lookahead_guarded を読む(StoredAnalysis には出さない。読み出し・表示は #152 のスコープ)。 */
+    function readGuarded(db: InstanceType<typeof Database>, analysisId: number): number | null {
+      const row = db
+        .prepare(`SELECT prompt_lookahead_guarded AS v FROM analyses WHERE id = ?`)
+        .get(analysisId) as { v: number | null };
+      return row.v;
+    }
+
+    function columnCount(db: InstanceType<typeof Database>, name: string): number {
+      const cols = db.prepare(`PRAGMA table_info(analyses)`).all() as Array<{ name: string }>;
+      return cols.filter((c) => c.name === name).length;
+    }
+
+    it("promptLookaheadGuarded: true で保存すると、列に 1 が書かれること", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(makeRecord({ raceId: "遮断あり", promptLookaheadGuarded: true }));
+      expect(readGuarded(db, id)).toBe(1);
+      store.close();
+    });
+
+    it("promptLookaheadGuarded を省略した保存(=遮断より前の呼び出し元)は NULL(記録なし)になり、0 にならないこと", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(makeRecord({ raceId: "遮断省略" }));
+      expect(readGuarded(db, id)).toBeNull();
+      store.close();
+    });
+
+    it("promptLookaheadGuarded に null を明示しても NULL として保存されること", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(makeRecord({ raceId: "遮断null", promptLookaheadGuarded: null }));
+      expect(readGuarded(db, id)).toBeNull();
+      store.close();
+    });
+
+    it("promptLookaheadGuarded: false は 0 として保存され、NULL(記録なし)と区別できること", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(makeRecord({ raceId: "遮断false", promptLookaheadGuarded: false }));
+      expect(readGuarded(db, id)).toBe(0);
+      store.close();
+    });
+
+    it("history_cutoff_date と独立に書かれる(一方だけ指定しても、もう一方の列に影響しない)", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const a = store.saveAnalysis(makeRecord({ raceId: "基準日のみ", historyCutoffDate: "20260628" }));
+      const b = store.saveAnalysis(makeRecord({ raceId: "遮断のみ", promptLookaheadGuarded: true }));
+      const cutoff = (id: number): string | null =>
+        (db.prepare(`SELECT history_cutoff_date AS v FROM analyses WHERE id = ?`).get(id) as { v: string | null }).v;
+      expect(cutoff(a)).toBe("20260628");
+      expect(readGuarded(db, a)).toBeNull();
+      expect(cutoff(b)).toBeNull();
+      expect(readGuarded(db, b)).toBe(1);
+      store.close();
+    });
+
+    /** 旧スキーマ(analyses のみ。#153 より前)。history_cutoff_date の有無だけを切り替える。 */
+    function createLegacySchema(db: InstanceType<typeof Database>, withHistoryCutoffDate: boolean): void {
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL,
+          ev_estimated INTEGER,
+          prompt_version TEXT,
+          additional_instruction TEXT,
+          kaisai_date TEXT,
+          model TEXT,
+          raw_response TEXT,
+          race_snapshot_json TEXT${withHistoryCutoffDate ? ",\n          history_cutoff_date TEXT" : ""}
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          reason TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+    }
+
+    it.each([
+      ["v1.14.0(history_cutoff_date 列あり・prompt_lookahead_guarded 列なし)", true],
+      ["#39 より前(どちらの列も無い)", false],
+    ])(
+      "旧スキーマ[%s]のDBを開くと prompt_lookahead_guarded 列が後付けされ、既存行は NULL(遮断の記録なし)のまま、新規保存は 1 で保存できること(冪等)",
+      (_label, withHistoryCutoffDate) => {
+        const db = new Database(":memory:");
+        createLegacySchema(db, withHistoryCutoffDate);
+        const info = db
+          .prepare(`INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date) VALUES (?, ?, ?, ?)`)
+          .run("遮断前レース", "2026-07-01T00:00:00.000Z", 0, "20260628");
+        const oldId = Number(info.lastInsertRowid);
+        // 前提: 旧スキーマには新列が無い。
+        expect(columnCount(db, "prompt_lookahead_guarded")).toBe(0);
+
+        const store = new AnalysisStore({ database: db });
+        expect(columnCount(db, "prompt_lookahead_guarded")).toBe(1);
+        expect(columnCount(db, "history_cutoff_date")).toBe(1);
+        // 既存行は NULL(遮断の記録なし)。0 や 1 で「遮断済み/未遮断」と誤読させない。
+        expect(readGuarded(db, oldId)).toBeNull();
+
+        const newId = store.saveAnalysis(
+          makeRecord({ raceId: "遮断後レース", kaisaiDate: "20260628", promptLookaheadGuarded: true }),
+        );
+        expect(readGuarded(db, newId)).toBe(1);
+        expect(readGuarded(db, oldId)).toBeNull();
+
+        // 同じDBをもう一度開いても(初期化の再実行)列が二重に追加されず、値が保たれる(冪等)。
+        const store2 = new AnalysisStore({ database: db });
+        expect(columnCount(db, "prompt_lookahead_guarded")).toBe(1);
+        expect(readGuarded(db, newId)).toBe(1);
+        expect(readGuarded(db, oldId)).toBeNull();
+        store2.close();
+      },
+    );
+  });
+
   describe("エクスポート用列(model/rawResponse/raceSnapshot/reason)の保存・復元(Issue#10)", () => {
     it("model・rawResponse・raceSnapshot・各馬reasonを指定して保存すると、そのまま復元できること", () => {
       const store = new AnalysisStore();
