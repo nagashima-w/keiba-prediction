@@ -2127,6 +2127,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB は NULL 許容の列を1つ足すだけで、既存の DB はそのまま開ける。設定・エクスポート JSON・IPC は無変更。`PROMPT_VERSION` は据え置き(ユーザー判断)
 
+## 次の正式版が 1.15.1 である根拠(Issue #152 の A〈core〉での変更)
+
+**patch**(リーク疑いの保存済み分析を分類する core の仕組み。既定 OFF で、利用者から見える変化は無い)。
+
+### 変更内容
+
+保存済みの分析を「clean / リーク疑い(suspect)/ 発走前後を判定できない(unknown)」に分類する純関数 `classifyLookaheadSuspicion` と、
+検証の集計からそれらを除外する `VerifyConfig.excludeLookaheadSuspects`(既定 false)、除外件数のカウンタ2つを追加した。分類は
+遮断済みの印(#39・#153)→ 発走時刻(JST を UTC に直した数値比較)→ 開催日の順に行い、同一レースの最新選択より前に行う。
+
+### patch である根拠
+
+- 既定 OFF のため、検証画面の数値は変わらない(既存の検証テストが無改変で緑)。production での有効化と画面表示は #152 の B(minor の見込み)
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC は無変更(保存済みの列を読み出すだけ)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
