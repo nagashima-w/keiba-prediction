@@ -821,8 +821,8 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 `place-joint-model.ts`・`combo-bet-allocation.ts`・`expected-value.ts`)の挙動は一切変更しない。
 
 - **Issue #35 の分割**: #40(本節。計測基盤の健全化と指標の実装)/ #39(本番側
-  `analysis-pipeline.ts` の先読みリーク是正。完了)/ #41(30レース規模のサンプル拡大・LLM実行・
-  未着手)/ #42(較正 calibration 方式の要否検討・未着手)。同時分布モデルの厳密化(#20)は #41/#42 の
+  `analysis-pipeline.ts` の先読みリーク是正。完了)/ #41(30レース規模のサンプル拡大。LLM は使わない。測定基盤とスクリプトは実装済みで、
+  実取得は未実施)/ #42(較正 calibration 方式の要否検討・未着手)。同時分布モデルの厳密化(#20)は #41/#42 の
   技術的前提であり、#77(#20-A。θ推定器と`PLACKETT_LUCE_MODEL`の追加・既定は不変。完了)→
   #78(#20-B。既定モデルの切替。着手前ゲートで【No-Go】と判定され #80〈#78-A〉/ #81〈#78-B〉に
   分割。分割の親として open のまま残る)→ #80(#78-A。モデル例外の受け皿を invalid 経路へ一本化し
@@ -872,6 +872,15 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   `runAnalysis` 自身が遮断するため、「リークあり」の値は core の公開関数(`buildPriorInput`+
   `computeFieldPriors`)を生の戦績で直接呼ぶ参照実装から得る(生入力と遮断済み入力の `runAnalysis`
   出力は同値であることを固定している)。
+
+- **確率の質の測定(#41「#35-1b」。着順が必要な指標)**: `ev/probability-quality.ts` の
+  `buildBrierQualityReport`(二値事象〈3着以内〉の Brier・Murphy 分解〈REL/RES/UNC と、帯内分散−2×帯内共分散の
+  残差〉・気候値/市場に対する skill・レース単位ブートストラップ・レース内ラベル並べ替えによる resolution の参照値)。
+  帯は検証画面と共有する `ev/calibration-bins.ts`(`binIndexFor`)。市場比較は出走8頭以上・確定オッズ・
+  市場含意確率が1以下のレースの同じ集合の対に限る。低レベル関数は `probability-quality-metrics.ts`(内部)。
+- **#41 の測定スクリプト**: `scripts/probability-quality-41/`(`fetch.ts`=ネットワーク・観測 JSON を保存、
+  `aggregate.ts`=オフライン集計)。選定ルール・指標・読み方は
+  `docs/investigations/probability-quality-41/measurement-plan.md` に取得前に固定した。
 
 ## 主な当初仕様との差異(記録)
 

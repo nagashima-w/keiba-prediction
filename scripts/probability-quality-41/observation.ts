@@ -6,7 +6,8 @@
  * 再計算できる。純関数・型だけを持つ(I/O なし)。
  */
 
-import type { FinishPosition, OddsStatus, RaceResult } from "../../packages/core/src/index.js";
+import type { FinishPosition, RaceResult } from "../../packages/core/src/index.js";
+import type { OddsStatus } from "../../packages/core/src/scraper/types.js";
 
 /** 観測 JSON のスキーマ版。 */
 export const OBSERVATION_SCHEMA_VERSION = 1;
