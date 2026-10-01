@@ -282,6 +282,11 @@ export {
   type StoredComboPayout,
 } from "./ev/analysis-store.js";
 export {
+  classifyLookaheadSuspicion,
+  type LookaheadSuspicion,
+  type LookaheadSuspicionInput,
+} from "./ev/lookahead-suspicion.js";
+export {
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,

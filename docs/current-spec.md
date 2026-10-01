@@ -337,15 +337,18 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   (`kaisai_date` は近似のとき NULL のままで、別の値)。**NULL は「遮断の記録なし=#39 より前に作られた
   分析(是正前)」を意味する**(0や空文字で「是正済み」と読ませない。#31の原則・`include_*` 列と同じ流儀)。
   既存 DB は開くときに `PRAGMA table_info` → `ALTER TABLE ADD COLUMN` で後付けする(冪等)。
-  この値の**読み出し・表示・verify での扱い(「リーク疑い」の注記/除外)は #152 のスコープ**で、
-  `StoredAnalysis` にはまだ含めない。
+  この値は `StoredAnalysis.historyCutoffDate`(NULL は null)として読み出せる(Issue #152 A)。
+  **verify での扱い(「リーク疑い」の除外・画面表示)は #152 のスコープ**(core の分類
+  `classifyLookaheadSuspicion` と `VerifyConfig.excludeLookaheadSuspects`〈既定 false〉は #152 A で実装済み、
+  app への配線と画面表示は #152 B)。
 - **LLM プロンプト側の遮断を通った印(Issue #153)**: `analyses.prompt_lookahead_guarded`(INTEGER・NULL 許容。
   `AnalysisRecord.promptLookaheadGuarded`: true→1、false→0、省略/null→NULL)。`runAnalysis` は**新規の分析で
   常に true を書く**(LLM 未使用の分析でも true)。`history_cutoff_date` は戦績を絞った印にすぎず、
   v1.14.x で保存された LLM 使用の分析はプロンプト側のリーク(当日傾向・同レース過去傾向)を含みうるため、
   この列で区別する。**NULL は「v1.14.x 以前に保存された分析(プロンプト側が未遮断)」**。
   既存 DB は `history_cutoff_date` と同じ作法(`PRAGMA table_info` → `ALTER TABLE ADD COLUMN`、冪等)で後付けし、
-  既存行は NULL のまま。読み出し・表示は #152 のスコープで、`StoredAnalysis` にはまだ含めない。
+  既存行は NULL のまま。`StoredAnalysis.promptLookaheadGuarded`(1→true・0→false・NULL→null)として読み出せる
+  (Issue #152 A)。表示は #152 B のスコープ。
 - **配分提案の永続化(Issue #59)**: `saveAnalysis` は分析本体(`analyses`/`analysis_horses`)と
   同一トランザクションで、5節の配分提案を新テーブル2本へ書く(`AnalysisRecord.allocation`が
   渡されたときのみ。呼び出し側〈main〉が渡さない旧来の呼び出しでは書かない=「未到達」)。

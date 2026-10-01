@@ -674,7 +674,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
   });
 
   describe("history_cutoff_date列(戦績の絞り込み基準日の記録。Issue #39)", () => {
-    /** 生SQLで history_cutoff_date を読む(StoredAnalysis には出さない。読み出し・表示は #152 のスコープ)。 */
+    /** 生SQLで history_cutoff_date を読む(StoredAnalysis への読み出しは別の describe〈Issue #152 A〉で検証する)。 */
     function readCutoff(db: InstanceType<typeof Database>, analysisId: number): string | null {
       const row = db
         .prepare(`SELECT history_cutoff_date AS v FROM analyses WHERE id = ?`)
@@ -770,7 +770,7 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
   });
 
   describe("prompt_lookahead_guarded列(LLMプロンプト側の先読みリーク遮断を通った印。Issue #153)", () => {
-    /** 生SQLで prompt_lookahead_guarded を読む(StoredAnalysis には出さない。読み出し・表示は #152 のスコープ)。 */
+    /** 生SQLで prompt_lookahead_guarded を読む(StoredAnalysis への読み出しは別の describe〈Issue #152 A〉で検証する)。 */
     function readGuarded(db: InstanceType<typeof Database>, analysisId: number): number | null {
       const row = db
         .prepare(`SELECT prompt_lookahead_guarded AS v FROM analyses WHERE id = ?`)
@@ -896,6 +896,95 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
         store2.close();
       },
     );
+  });
+
+  describe("遮断マーカーの読み出し(historyCutoffDate・promptLookaheadGuarded。Issue #152 A)", () => {
+    it("保存した値が listAnalyses で復元される(基準日はそのまま、guarded は 1→true・0→false)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({ raceId: "R-true", historyCutoffDate: "20260628", promptLookaheadGuarded: true }),
+      );
+      store.saveAnalysis(
+        makeRecord({ raceId: "R-false", historyCutoffDate: "20260629", promptLookaheadGuarded: false }),
+      );
+      const all = store.listAnalyses();
+      expect(all).toHaveLength(2);
+      expect(all[0]!.historyCutoffDate).toBe("20260628");
+      expect(all[0]!.promptLookaheadGuarded).toBe(true);
+      expect(all[1]!.historyCutoffDate).toBe("20260629");
+      expect(all[1]!.promptLookaheadGuarded).toBe(false);
+      store.close();
+    });
+
+    it("未指定(NULL)は null のまま復元され、false や空文字に化けない(『記録なし』と『明示的に未遮断』を区別する)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(makeRecord({ raceId: "R-null" }));
+      const [a] = store.listAnalyses();
+      expect(a!.historyCutoffDate).toBeNull();
+      expect(a!.promptLookaheadGuarded).toBeNull();
+      store.close();
+    });
+
+    it("raceId を指定した listAnalyses(SELECT がもう1本ある経路)でも同じ値が復元される", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis(
+        makeRecord({ raceId: "R-A", historyCutoffDate: "20260628", promptLookaheadGuarded: true }),
+      );
+      store.saveAnalysis(makeRecord({ raceId: "R-B" }));
+      const [a] = store.listAnalyses({ raceId: "R-A" });
+      expect(a!.historyCutoffDate).toBe("20260628");
+      expect(a!.promptLookaheadGuarded).toBe(true);
+      const [b] = store.listAnalyses({ raceId: "R-B" });
+      expect(b!.historyCutoffDate).toBeNull();
+      expect(b!.promptLookaheadGuarded).toBeNull();
+      store.close();
+    });
+
+    it("2列が無い旧スキーマのDBを開いても listAnalyses が throw せず、既存行は両方 null で読める", () => {
+      const db = new Database(":memory:");
+      // #39 より前の analyses(history_cutoff_date も prompt_lookahead_guarded も無い)。
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL,
+          ev_estimated INTEGER,
+          prompt_version TEXT,
+          additional_instruction TEXT,
+          kaisai_date TEXT,
+          model TEXT,
+          raw_response TEXT,
+          race_snapshot_json TEXT
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          reason TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      db.prepare(
+        `INSERT INTO analyses (race_id, analyzed_at, ev_estimated, prompt_version, kaisai_date, race_snapshot_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("旧スキーマ", "2026-07-01T00:00:00.000Z", 0, "v1", "20260628", JSON.stringify({ race: { startTime: "15:45" } }));
+
+      const store = new AnalysisStore({ database: db });
+      const all = store.listAnalyses();
+      expect(all).toHaveLength(1);
+      expect(all[0]!.historyCutoffDate).toBeNull();
+      expect(all[0]!.promptLookaheadGuarded).toBeNull();
+      // 既存の読み出しは変わらない(スナップショットの JSON も復元される)。
+      expect(all[0]!.raceSnapshot).toEqual({ race: { startTime: "15:45" } });
+      store.close();
+    });
   });
 
   describe("エクスポート用列(model/rawResponse/raceSnapshot/reason)の保存・復元(Issue#10)", () => {

@@ -167,8 +167,8 @@ export interface AnalysisRecord {
    * 材料から除く)に**実際に使った基準日**をそのまま渡す。`dateApproximate=true`(開催日が
    * 渡らず実行日で近似した)の分析でも、使った基準日(=実行日)を書く。
    * 省略・null は「遮断の記録なし=是正前の呼び出し元/旧行」で、DBには NULL として保存する。
-   * この値の読み出し・表示(verify での注記/除外)は #152 のスコープで、`StoredAnalysis` には
-   * まだ含めない。
+   * 読み出しは `StoredAnalysis.historyCutoffDate`。verify での除外(`classifyLookaheadSuspicion`)は
+   * Issue #152 で行う。
    */
   readonly historyCutoffDate?: string | null;
   /**
@@ -180,7 +180,7 @@ export interface AnalysisRecord {
    * LLM使用の分析は戦績は絞られているがプロンプト側のリークを含みうるため、この列で区別する。
    * DBには true→1・false→0 で保存する。省略・null は「遮断の記録なし=是正前の呼び出し元/旧行」で
    * NULL として保存する(0 にしない。「是正前」と「明示的に未遮断」を区別する)。
-   * この値の読み出し・表示は #152 のスコープで、`StoredAnalysis` にはまだ含めない。
+   * 読み出しは `StoredAnalysis.promptLookaheadGuarded`(1→true・0→false・NULL→null)。
    */
   readonly promptLookaheadGuarded?: boolean | null;
   /**
@@ -486,6 +486,18 @@ export interface StoredAnalysis {
    * 旧レコード(列追加前の保存)・破損JSONは null(防御的復元。getRaceResultDetailと同方針)。
    */
   readonly raceSnapshot: unknown;
+  /**
+   * 戦績を絞るのに使った基準日(YYYYMMDD。Issue #39 / #152)。旧レコード(列追加前の保存)・
+   * 是正前の呼び出し元は null(遮断の記録なし)。`kaisaiDate` とは別物(開催日ではなく、遮断に
+   * 実際に使った基準日)。
+   */
+  readonly historyCutoffDate: string | null;
+  /**
+   * LLMプロンプト側の先読みリーク遮断(Issue #153)を通った分析か(Issue #152)。DBの 1 は true、
+   * 0 は false(明示的に未遮断)。NULL(列追加前の保存・是正前の呼び出し元)は null のまま返し、
+   * false にしない(「記録なし」と「明示的に未遮断」を区別する)。
+   */
+  readonly promptLookaheadGuarded: boolean | null;
 }
 
 /** レース結果の1頭分。 */
@@ -1589,7 +1601,9 @@ export class AnalysisStore {
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
                       prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
                       kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
-                      race_snapshot_json AS raceSnapshotJson
+                      race_snapshot_json AS raceSnapshotJson,
+                      history_cutoff_date AS historyCutoffDate,
+                      prompt_lookahead_guarded AS promptLookaheadGuarded
                  FROM ${ANALYSES_TABLE} ORDER BY id`,
             )
             .all()
@@ -1598,7 +1612,9 @@ export class AnalysisStore {
               `SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
                       prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
                       kaisai_date AS kaisaiDate, model, raw_response AS rawResponse,
-                      race_snapshot_json AS raceSnapshotJson
+                      race_snapshot_json AS raceSnapshotJson,
+                      history_cutoff_date AS historyCutoffDate,
+                      prompt_lookahead_guarded AS promptLookaheadGuarded
                  FROM ${ANALYSES_TABLE} WHERE race_id = ? ORDER BY id`,
             )
             .all(filter.raceId)
@@ -1613,6 +1629,8 @@ export class AnalysisStore {
       model: string | null;
       rawResponse: string | null;
       raceSnapshotJson: string | null;
+      historyCutoffDate: string | null;
+      promptLookaheadGuarded: number | null;
     }>;
 
     const horseStmt = this.db.prepare(
@@ -1642,6 +1660,11 @@ export class AnalysisStore {
         // NULL・破損JSON(旧レコード・未保存)はスナップショットなしとしてnullで復元する(Issue#10。
         // 防御的復元。getRaceResultDetailと同方針)。
         raceSnapshot: toStoredRaceSnapshot(a.raceSnapshotJson),
+        // NULL(旧レコード・列追加前の保存・是正前の呼び出し元)は遮断の記録なしとしてnullのまま復元する(Issue #152)。
+        historyCutoffDate: a.historyCutoffDate,
+        // NULL は null のまま、1 は true、0 は false(明示的に未遮断)。NULL を false に潰さない(Issue #152)。
+        promptLookaheadGuarded:
+          a.promptLookaheadGuarded === null ? null : a.promptLookaheadGuarded === 1,
       };
     });
   }

@@ -96,6 +96,17 @@
  *   確定EVへの再分析が行われないまま結果だけが記録された場合にのみ、推定EV分析自体が
  *   「最新」として選ばれ、excludedEstimatedCount に計上される。
  *
+ * 先読みリーク疑いの除外(Issue #152 A。`VerifyConfig.excludeLookaheadSuspects`、既定 false):
+ * - 過去レースの分析では、結果が出たあとの情報が戦績・プロンプトに混ざり、回収率・キャリブレーションが
+ *   過大になる(#39 が戦績側、#153 がプロンプト側を遮断し、遮断した行にはそれぞれ印を残す)。
+ *   印の無い旧行のうち発走以降に分析されたものを `classifyLookaheadSuspicion`(lookahead-suspicion.ts)が
+ *   suspect、発走の前後を判定できないものを unknown と分類する。
+ * - true のとき suspect は excludedLookaheadSuspectCount、unknown は excludedLookaheadUnknownCount に
+ *   計上して集計から除く(別カウンタ・別ラベル。ユーザー判断)。**最新選択より前**に分類し、clean だけを
+ *   最新選択の対象にする。判定の順は 結果未保存 → リーク疑い/判別不能 → 旧分析 → 推定EV。
+ * - false(既定)では分類を呼ばず、既存の集計は1ビットも変わらない(両カウンタは常に0)。
+ *   各分析はちょうど1つのカウンタに入る(VerifyReport.excludedLookaheadUnknownCount の不変条件)。
+ *
  * 補正傾向サマリ(VerifyTrendReport、Task#26 プロンプト改善B):
  * - 回収率・キャリブレーションと同じ母集団(latest選択・推定EV除外・着順不明除外・結果未保存除外)
  *   を対象に、「補正がどう外れているか」を機械可読な構造体で算出する(将来Task#26案Dで
@@ -188,6 +199,7 @@ import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-respons
 import { buildComboOddsKey, type ComboBetType } from "../scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
 import { isUsableOdds } from "./allocation-primitives.js";
+import { classifyLookaheadSuspicion } from "./lookahead-suspicion.js";
 
 /**
  * verifyレポートの母集団を開催区分で絞り込むフィルタ(Task#32)。
@@ -215,6 +227,16 @@ export interface VerifyConfig {
    * それ以外(|diff|<=ε、境界含む)は「据え置き」に分類する。既定0.005。
    */
   readonly directionEpsilon: number;
+  /**
+   * true のとき、先読みリークの疑いがある分析(`classifyLookaheadSuspicion` が suspect)と、
+   * 発走の前後を判定できない分析(unknown)を集計から除外する(Issue #152)。除外は**最新選択
+   * (`chooseLatestPerRace`)より前**に行う(同一レースの「発走前の clean」と「発走後の suspect」で
+   * clean が最新選択に負けて捨てられないように。clean だけを最新選択の対象にする)。
+   * 除外した件数は `excludedLookaheadSuspectCount` / `excludedLookaheadUnknownCount` に計上する。
+   * 既定 false(既存の集計を1ビットも変えない)。production(`computeVerifyReport`・
+   * `computeVerifyReportByPromptVersion` の呼び出し側)で ON にするのは Issue #152 B(app の配線)。
+   */
+  readonly excludeLookaheadSuspects: boolean;
 }
 
 /** 既定のverify設定(latestモード: レースごとに最新分析のみ集計)。 */
@@ -224,6 +246,7 @@ export const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
   calibrationBins: 10,
   includeAllAnalyses: false,
   directionEpsilon: 0.005,
+  excludeLookaheadSuspects: false,
 };
 
 /** キャリブレーション表の1帯。 */
@@ -496,6 +519,24 @@ export interface VerifyReport {
    * 該当しないが、推定EVという理由だけで除外された件数。
    */
   readonly excludedEstimatedCount: number;
+  /**
+   * 先読みリークの疑い(遮断の記録が無く、発走以降に分析された)のため集計から除外した分析件数
+   * (Issue #152。`VerifyConfig.excludeLookaheadSuspects=true` のときだけ 0 を超える)。
+   * 結果未保存(excludedAnalysisCount)には該当しないものだけを数える(結果未保存が先に判定される)。
+   * 旧分析(supersededAnalysisCount)・推定EV(excludedEstimatedCount)より先に判定されるため、
+   * それらにも該当する行はこちらに数える。
+   */
+  readonly excludedLookaheadSuspectCount: number;
+  /**
+   * 遮断の記録が無く、発走の前後を判定できない(主に開催日の記録が無い Task #34 より前の中央の旧行)
+   * ため集計から除外した分析件数(Issue #152)。「リーク疑い」とは別のカウンタ・別ラベルで数える
+   * (ユーザー判断)。判定順は `excludedLookaheadSuspectCount` と同じ。flag OFF では常に 0。
+   *
+   * 不変条件: includedAnalysisCount + excludedAnalysisCount + supersededAnalysisCount +
+   * excludedEstimatedCount + excludedLookaheadSuspectCount + excludedLookaheadUnknownCount
+   * = 集計対象にした分析の総数(各分析はちょうど1つのカウンタに入る)。
+   */
+  readonly excludedLookaheadUnknownCount: number;
   /** 累積回収率サマリ。 */
   readonly bet: VerifyBetSummary;
   /** 推定確率帯ごとのキャリブレーション表。 */
@@ -781,10 +822,16 @@ export function computeVerifyReportByPromptVersion(
 /**
  * 分析集合から集計対象を選び、除外件数の内訳とともに返す(Task#34)。
  * computeVerifyReportForAnalyses(全体集計・版別集計)から呼ばれる母集団選定ロジック
- * (結果未保存除外→latestモードの二重計上防止→推定EV除外)。
+ * (結果未保存除外→先読みリーク疑い/判別不能の除外→latestモードの二重計上防止→推定EV除外)。
  * 旧公開関数 computeRaceBreakdown もかつてこのロジックを共有していたが、検証画面UI統合で
  * computeRaceBreakdown は廃止された。computeRaceLedger は結果未保存・推定EVも母集団に含める
  * 設計のため、この selectIncludedAnalyses は使わず chooseLatestPerRace のみを共有する(下記参照)。
+ *
+ * 先読みリーク疑いの除外(Issue #152): `config.excludeLookaheadSuspects` が true のとき、
+ * `classifyLookaheadSuspicion` が clean 以外の分析を除き、**clean だけを最新選択の対象にする**。
+ * 最新選択の後に分類すると、同一レースの「発走前の clean」が「発走後の suspect」に最新の座を
+ * 奪われて旧分析扱いになり、clean の行まで集計から消える。false のときは分類を一切呼ばず、
+ * 最新選択の対象も従来どおり全分析(既存の集計を変えない)。
  */
 function selectIncludedAnalyses(
   store: AnalysisStore,
@@ -798,13 +845,27 @@ function selectIncludedAnalyses(
   excludedAnalysisCount: number;
   supersededAnalysisCount: number;
   excludedEstimatedCount: number;
+  excludedLookaheadSuspectCount: number;
+  excludedLookaheadUnknownCount: number;
 } {
+  // 分析id → 先読みリーク疑いの分類。flag OFF のときは null(分類を呼ばない)。
+  const suspicionById = config.excludeLookaheadSuspects
+    ? new Map(analyses.map((a) => [a.id, classifyLookaheadSuspicion(a)] as const))
+    : null;
+  // 最新選択の対象。flag ON のときは clean だけ(suspect/unknown は最新の座を奪えない)。
+  const latestCandidates =
+    suspicionById === null
+      ? analyses
+      : analyses.filter((a) => suspicionById.get(a.id) === "clean");
+
   // latestモードでは「レースごとに最新1件」の分析idを選ぶ。全件モードでは null(全採用)。
-  const chosenIds = config.includeAllAnalyses ? null : chooseLatestPerRace(analyses);
+  const chosenIds = config.includeAllAnalyses ? null : chooseLatestPerRace(latestCandidates);
 
   let excludedAnalysisCount = 0;
   let supersededAnalysisCount = 0;
   let excludedEstimatedCount = 0;
+  let excludedLookaheadSuspectCount = 0;
+  let excludedLookaheadUnknownCount = 0;
   const included: Array<{
     analysis: StoredAnalysis;
     results: readonly RaceResultEntry[];
@@ -815,6 +876,16 @@ function selectIncludedAnalyses(
     if (results === undefined) {
       // 実結果が未保存の分析はレポートから除外(件数のみ計上)。
       excludedAnalysisCount += 1;
+      continue;
+    }
+    // 先読みリーク疑い / 発走の前後を判定できない行(Issue #152)。別々のカウンタに数える。
+    const suspicion = suspicionById?.get(analysis.id);
+    if (suspicion === "suspect") {
+      excludedLookaheadSuspectCount += 1;
+      continue;
+    }
+    if (suspicion === "unknown") {
+      excludedLookaheadUnknownCount += 1;
       continue;
     }
     // latestモードで最新に取って代わられた同一レースの旧分析(結果はあるが集計しない)。
@@ -830,7 +901,14 @@ function selectIncludedAnalyses(
     included.push({ analysis, results });
   }
 
-  return { included, excludedAnalysisCount, supersededAnalysisCount, excludedEstimatedCount };
+  return {
+    included,
+    excludedAnalysisCount,
+    supersededAnalysisCount,
+    excludedEstimatedCount,
+    excludedLookaheadSuspectCount,
+    excludedLookaheadUnknownCount,
+  };
 }
 
 /**
@@ -1084,7 +1162,7 @@ function computeVerifyReportForAnalyses(
   // 印なし群のカウンタ(未知mark文字列のフォールバック先として使い回す。Task#26 boss観察1対応)。
   const noMarkCounter = markCounters.get(null)!;
 
-  // 集計対象の選定(結果未保存除外・latestモードの二重計上防止・推定EV除外)は
+  // 集計対象の選定(結果未保存除外・先読みリーク疑いの除外・latestモードの二重計上防止・推定EV除外)は
   // selectIncludedAnalyses に集約する(Task#34)。
   const selected = selectIncludedAnalyses(store, analyses, config);
 
@@ -1188,6 +1266,8 @@ function computeVerifyReportForAnalyses(
     excludedAnalysisCount: selected.excludedAnalysisCount,
     supersededAnalysisCount: selected.supersededAnalysisCount,
     excludedEstimatedCount: selected.excludedEstimatedCount,
+    excludedLookaheadSuspectCount: selected.excludedLookaheadSuspectCount,
+    excludedLookaheadUnknownCount: selected.excludedLookaheadUnknownCount,
     bet: {
       betCount,
       totalStake,

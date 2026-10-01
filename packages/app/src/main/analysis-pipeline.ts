@@ -798,7 +798,7 @@ export async function runAnalysis(
     // LLMプロンプト側の先読みリーク遮断を通った印(Issue #153)。新規の分析は必ず true を書く
     // (LLM未使用でも true。当日傾向は自レースより前のレース番号だけ、同レース過去傾向は当該回自身と
     // 基準日以降の回を除く経路で作られたことを示す)。NULL の行は v1.14.x 以前に保存された分析で、
-    // LLM使用の分析はプロンプト側のリークを含みうる。読み出し・表示は #152 のスコープ。
+    // LLM使用の分析はプロンプト側のリークを含みうる。読み出しは StoredAnalysis に追加済み(#152 A)、画面表示は #152 B のスコープ。
     promptLookaheadGuarded: true,
     // 使用したLLMモデル名(Issue#10)。LLMを実際に使った分析のみ記録する(promptVersionと同じ方針。
     // LLMスキップ時は deps.modelName が設定されていても null にし、偽値を混入させない)。
