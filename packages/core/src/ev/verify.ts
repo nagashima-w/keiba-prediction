@@ -198,6 +198,11 @@ import type {
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
 import { buildComboOddsKey, type ComboBetType } from "../scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
+import {
+  binIndexFor,
+  calibrationBinBounds,
+  DEFAULT_CALIBRATION_BIN_COUNT,
+} from "./calibration-bins.js";
 import { isUsableOdds } from "./allocation-primitives.js";
 import { classifyLookaheadSuspicion } from "./lookahead-suspicion.js";
 
@@ -244,7 +249,7 @@ export interface VerifyConfig {
 export const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
   stakePerBet: 100,
   placeMaxRank: 3,
-  calibrationBins: 10,
+  calibrationBins: DEFAULT_CALIBRATION_BIN_COUNT,
   includeAllAnalyses: false,
   directionEpsilon: 0.005,
   excludeLookaheadSuspects: false,
@@ -1703,24 +1708,16 @@ function isNewer(a: StoredAnalysis, b: StoredAnalysis): boolean {
   return a.id > b.id;
 }
 
-/**
- * 推定確率を確率帯インデックスに写す。帯は下限を含み上限を含まない。
- * 確率1.0(および>1のはみ出し)は最終帯に丸める。負値は先頭帯に丸める。
- */
-function binIndexFor(prob: number, binCount: number): number {
-  const raw = Math.floor(prob * binCount);
-  return Math.min(Math.max(raw, 0), binCount - 1);
-}
-
 /** カウンタを CalibrationBin(境界と複勝率付き)へ確定する。 */
 function finalizeBin(
   counter: BinCounter,
   index: number,
   binCount: number,
 ): CalibrationBin {
+  const { lowerBound, upperBound } = calibrationBinBounds(index, binCount);
   return {
-    lowerBound: index / binCount,
-    upperBound: (index + 1) / binCount,
+    lowerBound,
+    upperBound,
     predictedCount: counter.predicted,
     placedCount: counter.placed,
     actualPlaceRate:
