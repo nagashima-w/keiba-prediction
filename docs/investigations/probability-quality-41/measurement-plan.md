@@ -210,7 +210,9 @@ pnpm tsx scripts/probability-quality-41/aggregate.ts                            
 
 - 2026-10-01(Issue #154): `scrapeRace` が出馬表の取消・除外の馬を出走馬から除くようになった(v1.17.0)。
   これにより、本計画の `saveRaw` が保存する `race-data`(「取消除外前」の `RaceData`)は、**今後の取得では
-  取消馬を含まない**(取消馬は `meta.scratched` と警告に残る)。測定の取得は d04a0ea(実取得の観測)で
-  済んでおり、その時点の `race-data`(例: 202606040901 の取消馬6番を含む16頭)と観測 JSON は
-  変わらない。観測は結果ページで取消を判別して `runAnalysis` の前に除いた出走馬(同レースは15頭)で
-  作られているため、**測定の結果にも影響しない**。
+  取消馬を含まない**(取消馬は `meta.scratched` と警告に残る)。測定の取得に使ったコードは
+  `manifest.json` の `runs[0].gitCommit` の 3c73449(この変更を含まない)で、d04a0ea はその取得結果
+  (observations・manifest・aggregate・report)をリポジトリに追加したコミットである。観測は結果ページで
+  取消を判別して `runAnalysis` の前に除いた出走馬で作られているため、**測定の結果にも影響しない**
+  (リポジトリにある根拠: `observations/202606040901.json` の `runnerCount: 15`・`listedEntryCount: 16`。
+  取消馬6番を含む16頭の生の `race-data` はリポジトリの外〈スクラッチ〉にあり、リポジトリからは確かめられない)。
