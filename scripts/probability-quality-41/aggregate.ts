@@ -84,6 +84,22 @@ export interface Metrics40Summary {
   readonly trioAllPointEvOverPayoutRate: { readonly measured: false; readonly reason: string };
 }
 
+/** レース別の記述(取得後に追加。#35-2 の材料)。 */
+export interface PerRaceSummary {
+  readonly raceId: string;
+  readonly runnerCount: number;
+  /** prior の合計。 */
+  readonly priorSum: number;
+  /** 期待される合計 `min(3, 頭数)`(`computeFieldPriors` の目標)。 */
+  readonly expectedPriorSum: number;
+  /** 全馬の戦績が0走(遮断後に使った走数が0)。新馬戦に相当。 */
+  readonly allHorsesZeroRuns: boolean;
+  /** Spearman ρ(出走8頭以上かつ確定オッズのレースだけ。算出不能は null)。 */
+  readonly spearmanRho: number | null;
+  /** sd 比(同上)。 */
+  readonly sdRatio: number | null;
+}
+
 /** 1地域分の集計。 */
 export interface RegionAggregate {
   readonly region: "central" | "nar";
@@ -113,6 +129,15 @@ export interface RegionAggregate {
   readonly brier: BrierQualityReport;
   /** 感度: 戦績取得失敗の馬を含むレースを除いた集計。 */
   readonly brierExcludingResultsFailed: BrierQualityReport;
+  /** 全馬の戦績が0走のレース(新馬戦に相当)。 */
+  readonly allZeroRunRaces: readonly string[];
+  /**
+   * 感度: **全馬の戦績が0走のレースを除いた集計。計画に無い、取得後に追加した感度(post-hoc)**。
+   * 主表(`brier`)は変えない。
+   */
+  readonly brierExcludingAllZeroRunRaces: BrierQualityReport;
+  /** レース別の記述(Σprior・戦績0走・ρ・sd比)。 */
+  readonly perRace: readonly PerRaceSummary[];
   readonly metrics40: Metrics40Summary;
 }
 
@@ -124,6 +149,8 @@ export interface AggregateResult {
     readonly bootstrap: typeof AGGREGATE_BOOTSTRAP;
     readonly permutation: typeof AGGREGATE_PERMUTATION;
     readonly note: string;
+    /** 計画に無い、取得後に追加した感度(post-hoc)の項目名。 */
+    readonly posthocSensitivities: readonly string[];
   };
   readonly central: RegionAggregate;
   readonly nar: RegionAggregate;
@@ -157,9 +184,9 @@ function brierReport(races: readonly RaceObservationOk[]): BrierQualityReport {
   });
 }
 
-function metrics40(races: readonly RaceObservationOk[]): Metrics40Summary {
-  const reports = races.map((r) => {
-    // 市場側が関わる指標は、出走8頭以上かつ確定オッズのレースだけ(§5.2)。
+/** レース別の `buildProbabilityQualityReport`。市場側は出走8頭以上かつ確定オッズのレースだけ(§5.2)。 */
+function perRaceReports(races: readonly RaceObservationOk[]) {
+  return races.map((r) => {
     const marketEligible =
       r.horses.length >= MIN_FIELD_SIZE_FOR_PLACE_MARKET && isFinalOdds(r.region, r.oddsStatus);
     return buildProbabilityQualityReport({
@@ -174,6 +201,9 @@ function metrics40(races: readonly RaceObservationOk[]): Metrics40Summary {
       leakFilter: { ...r.conditions.leakFilter, perHorse: [] },
     });
   });
+}
+
+function metrics40(reports: ReturnType<typeof perRaceReports>): Metrics40Summary {
   return {
     spearmanRho: summarize(reports.map((x) => x.spearmanRho)),
     sdRatio: summarize(reports.map((x) => x.sdRatio)),
@@ -203,6 +233,10 @@ function aggregateRegion(region: "central" | "nar", all: readonly RaceObservatio
   const failedRaceIds = ok.filter((r) => r.resultsFailedHorseCount > 0).map((r) => r.raceId);
   const failedSet = new Set(failedRaceIds);
   const sum = (f: (r: RaceObservationOk) => number) => ok.reduce((s, r) => s + f(r), 0);
+  const reports = perRaceReports(ok);
+  const isAllZeroRun = (r: RaceObservationOk) => r.horses.every((h) => h.usedRunCount === 0);
+  const allZeroRunIds = ok.filter(isAllZeroRun).map((r) => r.raceId);
+  const allZeroSet = new Set(allZeroRunIds);
 
   return {
     region,
@@ -225,7 +259,18 @@ function aggregateRegion(region: "central" | "nar", all: readonly RaceObservatio
     },
     brier: brierReport(ok),
     brierExcludingResultsFailed: brierReport(ok.filter((r) => !failedSet.has(r.raceId))),
-    metrics40: metrics40(ok),
+    allZeroRunRaces: allZeroRunIds,
+    brierExcludingAllZeroRunRaces: brierReport(ok.filter((r) => !allZeroSet.has(r.raceId))),
+    perRace: ok.map((r, i) => ({
+      raceId: r.raceId,
+      runnerCount: r.horses.length,
+      priorSum: r.horses.reduce((s, h) => s + h.prior, 0),
+      expectedPriorSum: Math.min(3, r.horses.length),
+      allHorsesZeroRuns: isAllZeroRun(r),
+      spearmanRho: reports[i]!.spearmanRho.value,
+      sdRatio: reports[i]!.sdRatio.value,
+    })),
+    metrics40: metrics40(reports),
   };
 }
 
@@ -242,6 +287,7 @@ export function aggregateObservations(observations: readonly RaceObservation[]):
       bootstrap: AGGREGATE_BOOTSTRAP,
       permutation: AGGREGATE_PERMUTATION,
       note: NOTE,
+      posthocSensitivities: ["brierExcludingAllZeroRunRaces"],
     },
     central: aggregateRegion("central", sorted),
     nar: aggregateRegion("nar", sorted),

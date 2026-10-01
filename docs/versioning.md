@@ -2167,6 +2167,28 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC は無変更(保存済みの列を読み出すだけ)
 
+## 次の正式版が 1.16.1 である根拠(Issue #41 での変更)
+
+**patch**(確率の質を測る仕組みと測定結果の追加。利用者から見える変化は無い)。
+
+### 変更内容
+
+- core: 検証画面のキャリブレーション帯を `ev/calibration-bins.ts` に切り出して共有した(`verify.ts` の挙動は不変)。
+  Brier スコア・Murphy 分解・レース単位のブートストラップ・レース内ラベル並べ替えの参照値を
+  `ev/probability-quality-metrics.ts`(内部)に、公開エントリ `buildBrierQualityReport` を `ev/probability-quality.ts` に追加した
+- scripts: `scripts/probability-quality-41/`(選定・取得・オフライン集計)。netkeiba から中央24R・地方12Rを取得した
+- docs: `docs/investigations/probability-quality-41/`(取得前に固定した計画・観測・集計・レポート)
+
+### patch である根拠
+
+- 追加した core の関数は計測スクリプトからだけ呼ばれ、app の経路(分析・配分・検証画面)からは呼ばれない。
+  `verify.ts` の変更は帯の関数の移設だけで、既存の検証テストは無改変で緑
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC は無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

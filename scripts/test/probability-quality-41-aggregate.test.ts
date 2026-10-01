@@ -354,6 +354,84 @@ describe("loadObservations", () => {
   });
 });
 
+/** 全馬の戦績が0走(usedRunCount=0)のレースを作る(新馬戦に相当)。 */
+function zeroRunRace(raceId: string, region: "central" | "nar", prior = 0.375): RaceObservationOk {
+  const hs = ODDS8.map((o, i) => ({ ...horse(i + 1, prior, i < 3 ? 1 : 0, o), usedRunCount: 0 }));
+  return okRace(raceId, region, hs);
+}
+
+describe("aggregateObservations: レース別の Σprior(取得後に追加した記述)", () => {
+  it("レースごとの Σprior・期待値 min(3,頭数)・頭数・ρ・sd比を返す", () => {
+    const r = race8("202606050101", "central", "same");
+    const seven = okRace(
+      "202606050105",
+      "central",
+      ODDS8.slice(0, 7).map((o, i) => horse(i + 1, 0.4, i < 3 ? 1 : 0, o)),
+    );
+    const c = aggregateObservations([seven, r]).central;
+    expect(c.perRace.map((p) => p.raceId)).toEqual(["202606050101", "202606050105"]);
+    const p8 = c.perRace[0]!;
+    expect(p8.priorSum).toBeCloseTo(r.horses.reduce((s, h) => s + h.prior, 0), 12); // 手計算: 0.8+0.6+0.5+0.4+0.3+0.2+0.15+0.1=3.05
+    expect(p8.priorSum).toBeCloseTo(3.05, 12);
+    expect(p8.expectedPriorSum).toBe(3);
+    expect(p8.runnerCount).toBe(8);
+    expect(p8.spearmanRho).toBeCloseTo(1, 12);
+    expect(c.perRace[1]!.priorSum).toBeCloseTo(2.8, 12); // 0.4×7
+    expect(c.perRace[1]!.expectedPriorSum).toBe(3);
+    expect(c.perRace[1]!.spearmanRho).toBeNull(); // 7頭は市場側が算出不能
+  });
+
+  it("期待値は min(3,頭数): 2頭なら2、3頭なら3", () => {
+    const two = okRace("202606050106", "central", [horse(1, 1, 1, null), horse(2, 1, 1, null)]);
+    const three = okRace("202606050107", "central", [horse(1, 1, 1, null), horse(2, 1, 1, null), horse(3, 1, 1, null)]);
+    const c = aggregateObservations([two, three]).central;
+    expect(c.perRace.map((p) => p.expectedPriorSum)).toEqual([2, 3]);
+  });
+});
+
+describe("aggregateObservations: 全馬が戦績0走のレースを除いた感度(取得後に追加。計画に無い post-hoc)", () => {
+  const obs = [
+    race8("202606050101", "central", "same"),
+    zeroRunRace("202606050102", "central"),
+    race8("202606050103", "central", "reverse"),
+  ];
+
+  it("全馬の usedRunCount が0のレースを列挙する(一部の馬だけ0走のレースは含まない)", () => {
+    const partial = race8("202606050104", "central", "same");
+    const partialRace: RaceObservationOk = {
+      ...partial,
+      horses: partial.horses.map((h, i) => (i === 0 ? { ...h, usedRunCount: 0 } : h)),
+    };
+    const c = aggregateObservations([...obs, partialRace]).central;
+    expect(c.allZeroRunRaces).toEqual(["202606050102"]);
+    expect(c.perRace.find((p) => p.raceId === "202606050104")!.allHorsesZeroRuns).toBe(false);
+    expect(c.perRace.find((p) => p.raceId === "202606050102")!.allHorsesZeroRuns).toBe(true);
+  });
+
+  it("感度の集計はそのレースを除き、主表(brier)は全レースのまま変わらない", () => {
+    const c = aggregateObservations(obs).central;
+    expect(c.brier.raceCount).toBe(3);
+    expect(c.brierExcludingAllZeroRunRaces.raceCount).toBe(2);
+    expect(c.brierExcludingAllZeroRunRaces.observationCount).toBe(16);
+    expect(c.brierExcludingAllZeroRunRaces.marketComparison.lowerBound.eligibleRaceCount).toBe(2);
+    // 主表は、感度を追加する前と同じ値(全レースの Brier)。
+    const all = c.brier.model.brier.value!;
+    const without = c.brierExcludingAllZeroRunRaces.model.brier.value!;
+    expect(all).not.toBeCloseTo(without, 6); // 前提: 除いたレースが値に効いている
+  });
+
+  it("該当レースが無ければ感度は主表と同じ件数", () => {
+    const c = aggregateObservations([race8("202606050101", "central", "same")]).central;
+    expect(c.allZeroRunRaces).toEqual([]);
+    expect(c.brierExcludingAllZeroRunRaces.raceCount).toBe(1);
+  });
+
+  it("計画に無い取得後の感度であることを、集計の条件に明記する", () => {
+    const agg = aggregateObservations(obs);
+    expect(agg.conditions.posthocSensitivities).toEqual(["brierExcludingAllZeroRunRaces"]);
+  });
+});
+
 describe("summarizeFetchRuns: manifest の実行記録から、保存しなかったレースと要求数を拾う", () => {
   function run(over: Partial<RunManifest>): RunManifest {
     return {
