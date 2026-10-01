@@ -1619,7 +1619,7 @@ describe("runAnalysis(分析パイプライン)", () => {
 
     it("getRaceResultDetailが2本以上の確定済み同面兄弟レースを返すとき、プロンプトに当日傾向行が出ること", async () => {
       const captured: { value: BuildPromptInput | null } = { value: null };
-      // RACE_ID(場コード05・東京・回次02・日次08・11R)の兄弟は先頭10桁+01〜12(11番を除く)。
+      // RACE_ID(場コード05・東京・回次02・日次08・11R)の lookup 対象は、先頭10桁+自番号より小さい01〜10だけ(Issue #153)。
       const map: Record<string, RaceResultDetail> = {
         "202605020801": frontLeaningDetail("芝"),
         "202605020802": frontLeaningDetail("芝"),

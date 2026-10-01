@@ -189,7 +189,7 @@ export interface AnalysisPipelineDeps {
    * 第3引数 `cutoffDate`(Issue #153: 先読みリークの遮断)は分析日(`analysisDate`。戦績の絞り込み
    * 〈#39〉の基準日と同じ値。YYYY/MM/DD)。取得した過去回のうち、当該回自身・基準日と同日以降の回は
    * 集計から除かれる(core の excludeLookaheadEntries)。過去のレースを後から分析すると、地方の応答は
-   * race_id に依らず最新10年で、当該回と後の回を含むため。当日運用では何も除かれない。
+   * (実測した大井のシリーズでは)race_id に依らない同じ応答で、当該回と後の回を含むため。当日運用では何も除かれない。
    */
   readonly getGradeWinnerTrend?: (
     raceId: RaceId,
