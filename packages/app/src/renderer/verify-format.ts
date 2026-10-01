@@ -88,7 +88,7 @@ export function formatExclusionNote(report: VerifyReportView): string | null {
   if (report.excludedLookaheadSuspectCount + report.excludedLookaheadUnknownCount === 0) {
     return null;
   }
-  return "単日分析で再分析すると集計に戻ります";
+  return "一括分析(日付を選んで分析)で該当レースを分析し直すと集計に戻ります";
 }
 
 /**

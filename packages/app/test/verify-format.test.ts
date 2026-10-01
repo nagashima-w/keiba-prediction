@@ -534,7 +534,7 @@ describe("verify画面の表示整形(純関数)", () => {
     });
 
     it("補足は、リーク疑いか判定不可の除外が1件でもあるときだけ出し、0件なら null にすること", () => {
-      const note = "単日分析で再分析すると集計に戻ります";
+      const note = "一括分析(日付を選んで分析)で該当レースを分析し直すと集計に戻ります";
       expect(formatExclusionNote(verifyReport({ excludedLookaheadSuspectCount: 1 }))).toBe(note);
       expect(formatExclusionNote(verifyReport({ excludedLookaheadUnknownCount: 1 }))).toBe(note);
       expect(formatExclusionNote(verifyReport())).toBeNull();
@@ -542,7 +542,7 @@ describe("verify画面の表示整形(純関数)", () => {
   });
 
   describe("unknownPromptVersionAnalysisCount(版不明グループの分析件数、Task#33)", () => {
-    it("版不明グループの4つの内訳(集計・結果未取込除外・旧分析除外・推定EV除外)の合計を返すこと", () => {
+    it("版不明グループの旧来の4カウンタ(集計・結果未取込除外・旧分析除外・推定EV除外。除外2カウンタは0)の合計を返すこと", () => {
       const reports = [
         promptVersionReport({
           promptVersion: null,

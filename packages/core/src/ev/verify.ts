@@ -233,8 +233,9 @@ export interface VerifyConfig {
    * (`chooseLatestPerRace`)より前**に行う(同一レースの「発走前の clean」と「発走後の suspect」で
    * clean が最新選択に負けて捨てられないように。clean だけを最新選択の対象にする)。
    * 除外した件数は `excludedLookaheadSuspectCount` / `excludedLookaheadUnknownCount` に計上する。
-   * 既定 false(既存の集計を1ビットも変えない)。production(`computeVerifyReport`・
-   * `computeVerifyReportByPromptVersion` の呼び出し側)で ON にするのは Issue #152 B(app の配線)。
+   * 既定 false(既存の集計を1ビットも変えない)。production では app の `pipeline-deps.ts` の
+   * `PRODUCTION_VERIFY_CONFIG` が true にしており、検証画面の集計(`computeVerifyReport`・
+   * `computeVerifyReportByPromptVersion`)に効く(Issue #152 B)。
    */
   readonly excludeLookaheadSuspects: boolean;
 }

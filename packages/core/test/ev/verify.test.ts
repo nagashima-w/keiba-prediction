@@ -1247,14 +1247,18 @@ describe("computeVerifyReportByPromptVersion(プロンプト版別のverify集�
     "版不明分析削除の不変条件: 版別レポートの4指標合計=実削除件数(Task#33 code-reviewer提案対応)",
     () => {
       // 検証画面の削除確認ダイアログは、版別レポート(computeVerifyReportByPromptVersion)の
-      // 版不明グループが持つ4つの内訳(集計対象included・結果未取込excluded・旧分析superseded・
-      // 推定EV除外excludedEstimated)の合計を「削除件数」として表示する
+      // 版不明グループが持つ内訳の合計を「削除件数」として表示する
       // (packages/app/src/renderer/verify-format.ts の unknownPromptVersionAnalysisCount)。
-      // この合計が AnalysisStore.deleteAnalysesWithUnknownPromptVersion の実削除件数と
-      // 常に一致する(=selectIncludedAnalyses が版不明グループの分析集合を余さず4分割している)
+      // その内訳は6つ(集計対象included・結果未取込excluded・旧分析superseded・推定EV除外
+      // excludedEstimated・リーク疑い除外excludedLookaheadSuspect・発走前後判定不可除外
+      // excludedLookaheadUnknown。Issue #152 B)で、その6つの合計が
+      // AnalysisStore.deleteAnalysesWithUnknownPromptVersion の実削除件数と
+      // 常に一致する(=selectIncludedAnalyses が版不明グループの分析集合を余さず分割している)
       // ことを、同一レース複数回分析(superseded)・推定EV除外・結果未取込が混在する現実的な
       // シナリオで直接検証する。将来 selectIncludedAnalyses の分岐が変わって内訳の総数が
       // ずれた場合(合計が減って一部の分析が計上漏れになる等)に検知するのが目的。
+      // このテストは既定(excludeLookaheadSuspects=false)で走るため、リーク疑い・発走前後判定不可の
+      // 2カウンタは常に0で、アサーションは残り4カウンタの和で成り立つ(6カウンタの和と同じ値)。
       it("超・旧分析(superseded)・推定EV除外・結果未取込が混在しても、4指標合計と実削除件数が一致すること", () => {
         const store = new AnalysisStore();
 
