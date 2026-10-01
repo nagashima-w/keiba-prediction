@@ -132,17 +132,16 @@ const NOTE =
   "prior の質であって、ツール全体の確率の質ではない(LLM 未使用)。市場は確定オッズの複勝下限を Σ=3 に正規化した近似。";
 
 function toBrierHorses(races: readonly RaceObservationOk[]): BrierQualityInputHorse[] {
-  return races.flatMap((r) => {
-    const final = isFinalOdds(r.region, r.oddsStatus);
-    return r.horses.map((h) => ({
+  return races.flatMap((r) =>
+    r.horses.map((h) => ({
       raceId: r.raceId,
       umaban: h.umaban,
       modelProb: h.prior,
       occurred: h.outcome === 1,
-      placeOddsMin: final ? h.placeOddsMin : null,
-      placeOddsMax: final ? h.placeOddsMax : null,
-    }));
-  });
+      placeOddsMin: h.placeOddsMin,
+      placeOddsMax: h.placeOddsMax,
+    })),
+  );
 }
 
 function brierReport(races: readonly RaceObservationOk[]): BrierQualityReport {
@@ -151,6 +150,9 @@ function brierReport(races: readonly RaceObservationOk[]): BrierQualityReport {
     priorSource: "prior-only",
     bootstrap: AGGREGATE_BOOTSTRAP,
     permutation: AGGREGATE_PERMUTATION,
+    // 確定オッズでないレースは、複勝オッズの値を使わず「確定でない」として市場比較から外す
+    // (core の『複勝オッズの欠損・不正』に二重計上させない)。
+    oddsNotFinalRaceIds: races.filter((r) => !isFinalOdds(r.region, r.oddsStatus)).map((r) => r.raceId),
   });
 }
 

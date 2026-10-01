@@ -502,3 +502,41 @@ describe("withinRacePermutationResolution: レース内ラベル並べ替えに�
     expect(typeof r.reason).toBe("string");
   });
 });
+
+describe("乱数の固定(シードを変えたら値が変わる)", () => {
+  // 固定シードの再現性を値で固定する。閉形式の期待値が無いため、**コミット済みの実装
+  // (mulberry32・200回/500回の再標本)を実行して得た値**を回帰値として置く(手計算ではない)。
+  // 乱数の列が変わる変更(シードの加算・別の乱数への差し替え)は、ここで検出される。
+  const races = [
+    [obs(0.7, true), obs(0.5, true), obs(0.3, false), obs(0.2, false), obs(0.1, false)],
+    [obs(0.6, false), obs(0.4, true), obs(0.35, true), obs(0.15, false), obs(0.1, false), obs(0.05, false)],
+    [obs(0.55, true), obs(0.45, false), obs(0.25, false), obs(0.12, true)],
+  ];
+
+  it("resolution の参照値: シード 20261001 の平均は実行値 0.12725、シード 20261002 では 0.12375(別の値)", () => {
+    const a = withinRacePermutationResolution(races, { iterations: 200, seed: 20261001 });
+    const b = withinRacePermutationResolution(races, { iterations: 200, seed: 20261002 });
+    expect(a.mean).toBeCloseTo(0.12725, 10);
+    expect(b.mean).toBeCloseTo(0.12375, 10);
+    expect(a.mean).not.toBe(b.mean);
+  });
+
+  const pairs: RaceSquaredErrorPair[] = [
+    { count: 8, modelSse: 1.9, marketSse: 1.7 },
+    { count: 10, modelSse: 2.1, marketSse: 2.4 },
+    { count: 9, modelSse: 1.6, marketSse: 1.5 },
+    { count: 12, modelSse: 2.8, marketSse: 2.2 },
+    { count: 8, modelSse: 1.4, marketSse: 1.6 },
+  ];
+
+  it("ブートストラップ: シード 20261001 の区間は実行値 [-0.0195652…, 0.0362069…]、シード 20261002 では別の区間", () => {
+    const a = bootstrapBrierDifferenceByRace(pairs, { iterations: 500, seed: 20261001 });
+    const b = bootstrapBrierDifferenceByRace(pairs, { iterations: 500, seed: 20261002 });
+    expect(a.lower).toBeCloseTo(-0.019565217391304342, 12);
+    expect(a.upper).toBeCloseTo(0.03620689655172411, 12);
+    expect(b.lower).toBeCloseTo(-0.02127659574468084, 12);
+    expect(b.upper).toBeCloseTo(0.03703703703703702, 12);
+    expect(a.value).toBe(b.value); // 点推定はシードに依らない
+    expect(a.lower).not.toBe(b.lower);
+  });
+});

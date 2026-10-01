@@ -265,6 +265,12 @@ export interface BrierQualityReportInput {
   readonly bootstrap: BootstrapOptions;
   /** resolution の参照値(レース内ラベル並べ替え)の反復回数とシード。 */
   readonly permutation: BootstrapOptions;
+  /**
+   * 市場比較に使えない(オッズが確定でない)レースの ID。呼び出し側(取得したオッズの状態を知っている側)が
+   * 渡す。これらは市場比較から外し、`excludedRaces.oddsNotFinal` に数える(「複勝オッズの欠損・不正」には
+   * 数えない)。頭数が8未満のレースは `smallField` が優先。モデル単独の集計には入る。
+   */
+  readonly oddsNotFinalRaceIds?: readonly string[];
 }
 
 /** 市場確率の作り方。 */
@@ -288,6 +294,8 @@ export interface BrierQualityConditions {
 export interface BrierMarketExclusions {
   /** 出走頭数が最小頭数(8)未満。 */
   readonly smallField: readonly string[];
+  /** オッズが確定でない(呼び出し側の申告。`oddsNotFinalRaceIds`)。頭数が8未満ならそちらが優先。 */
+  readonly oddsNotFinal: readonly string[];
   /** 複勝オッズ(下限、中点版では下限と上限)が1頭でも欠損・不正で、市場含意確率を作れない。 */
   readonly marketUnavailable: readonly string[];
   /** 市場含意確率が1を超える馬がいる(黙ってクリップせず、レースごと比較から外す)。 */
@@ -368,8 +376,10 @@ function compareWithMarket(
   kind: BrierMarketKind,
   races: ReturnType<typeof groupByRace>,
   bootstrap: BootstrapOptions,
+  oddsNotFinal: ReadonlySet<string>,
 ): BrierMarketComparison {
   const smallField: string[] = [];
+  const oddsNotFinalExcluded: string[] = [];
   const marketUnavailable: string[] = [];
   const marketOutOfRange: string[] = [];
   const modelObservations: BrierObservation[] = [];
@@ -379,6 +389,10 @@ function compareWithMarket(
   for (const r of races) {
     if (r.horses.length < MIN_FIELD_SIZE_FOR_PLACE_MARKET) {
       smallField.push(r.raceId);
+      continue;
+    }
+    if (oddsNotFinal.has(r.raceId)) {
+      oddsNotFinalExcluded.push(r.raceId);
       continue;
     }
     const market = computeMarketImpliedPlaceProbabilities(
@@ -419,7 +433,7 @@ function compareWithMarket(
     marketKind: kind,
     eligibleRaceCount: pairs.length,
     eligibleObservationCount: modelObservations.length,
-    excludedRaces: { smallField, marketUnavailable, marketOutOfRange },
+    excludedRaces: { smallField, oddsNotFinal: oddsNotFinalExcluded, marketUnavailable, marketOutOfRange },
     modelBrier,
     marketBrier,
     brierSkillVsMarket,
@@ -441,6 +455,7 @@ function compareWithMarket(
  */
 export function buildBrierQualityReport(input: BrierQualityReportInput): BrierQualityReport {
   const races = groupByRace(input.horses);
+  const notFinal = new Set(input.oddsNotFinalRaceIds ?? []);
   const modelObservations: BrierObservation[] = input.horses.map((h) => ({
     probability: h.modelProb,
     occurred: h.occurred,
@@ -471,8 +486,8 @@ export function buildBrierQualityReport(input: BrierQualityReportInput): BrierQu
       ),
     },
     marketComparison: {
-      lowerBound: compareWithMarket("placeOddsMinLowerBound", races, input.bootstrap),
-      midpoint: compareWithMarket("placeOddsMidpoint", races, input.bootstrap),
+      lowerBound: compareWithMarket("placeOddsMinLowerBound", races, input.bootstrap, notFinal),
+      midpoint: compareWithMarket("placeOddsMidpoint", races, input.bootstrap, notFinal),
     },
   };
 }

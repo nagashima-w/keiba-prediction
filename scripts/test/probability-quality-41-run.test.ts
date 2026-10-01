@@ -4,6 +4,8 @@ import { FetchHaltedError } from "../probability-quality-41/guarded-fetcher.js";
 import {
   assertPlanCommitted,
   assertPathsClean,
+  CODE_PATHS_MUST_BE_CLEAN,
+  exitCodeFor,
   DEFAULT_PLAN,
   MIN_INTERVAL_MS,
   runMeasurement,
@@ -115,12 +117,13 @@ function harness(over: {
           store.add(obs.raceId);
         },
       },
+      gitCommit: "abc123",
       guard: {
         get tripped() {
           return guard.tripped;
         },
         requestCount: 0,
-        urlsWith400: [],
+        urlsBlocked: [],
       },
       writeManifest: (m) => void h.manifests.push(m),
       now: () => new Date("2026-10-01T00:00:00.000Z"),
@@ -192,6 +195,7 @@ describe("runMeasurement", () => {
     const h = harness({ tripAfter: 2 });
     const m = await runMeasurement(h.deps, DEFAULT_PLAN);
     expect(h.measured).toHaveLength(2);
+    expect(h.written).toHaveLength(1); // 停止の引き金になった2本目は保存しない
     expect(m.halted).toBe(true);
     expect(m.haltReason).toContain("HTTP 400");
     expect(h.manifests).toHaveLength(1); // 停止時もマニフェストを書く
@@ -253,6 +257,16 @@ describe("assertPlanCommitted: 計画の文書がコミット済みでなけれ�
   });
 });
 
+describe("CODE_PATHS_MUST_BE_CLEAN", () => {
+  it("測定の本体である runAnalysis(packages/app/src)も未コミット検査の対象に含む", () => {
+    expect(CODE_PATHS_MUST_BE_CLEAN).toEqual([
+      "scripts/probability-quality-41",
+      "packages/core/src",
+      "packages/app/src",
+    ]);
+  });
+});
+
 describe("assertPathsClean: 取得に使うコードに未コミットの変更があれば取得しない", () => {
   it("変更が無ければ通る", () => {
     expect(() => assertPathsClean(() => "", ["scripts/probability-quality-41", "packages/core/src"])).not.toThrow();
@@ -268,5 +282,46 @@ describe("assertPathsClean: 取得に使うコードに未コミットの変更�
 
   it("未追跡のファイル(??)も未コミットとして扱う", () => {
     expect(() => assertPathsClean(() => "?? scripts/probability-quality-41/new.ts", ["scripts/probability-quality-41"])).toThrow();
+  });
+});
+
+describe("一時的な失敗・未知の着順文言は保存しない(§3.3 追記)", () => {
+  const cases: ReadonlyArray<{ readonly reason: string; readonly saved: boolean }> = [
+    { reason: "result-fetch-error", saved: false },
+    { reason: "scrape-error", saved: false },
+    { reason: "unclassified-finish", saved: false },
+    { reason: "result-not-confirmed", saved: true },
+    { reason: "result-parse-error", saved: true },
+    { reason: "horse-mismatch", saved: true },
+    { reason: "too-few-runners", saved: true },
+    { reason: "no-placed-horse", saved: true },
+    { reason: "analysis-error", saved: true },
+    { reason: "date-approximate", saved: true },
+  ];
+  it.each(cases)("$reason は 保存=$saved", async ({ reason, saved }) => {
+    const h = harness({
+      measure: async (t) => ({ ...okObs(t), reason: reason as "scrape-error", detail: "文言「X」" }) as RaceObservation,
+    });
+    const m = await runMeasurement(h.deps, { central: ["20260926"], nar: [] });
+    expect(h.written.length > 0).toBe(saved);
+    if (!saved) {
+      expect(m.processed[0]).toMatchObject({ status: "not-saved", reason, detail: "文言「X」" });
+      expect(h.store.size).toBe(0); // 再実行で取り直される
+    } else {
+      expect(m.processed[0]).toMatchObject({ status: "excluded", reason });
+    }
+  });
+});
+
+describe("実行の記録と終了コード", () => {
+  it("マニフェストに git の commit hash を残す", async () => {
+    const h = harness();
+    const m = await runMeasurement(h.deps, { central: ["20260926"], nar: [] });
+    expect(m.gitCommit).toBe("abc123");
+  });
+
+  it("停止で終わった実行は非0の終了コード、正常終了は0", () => {
+    expect(exitCodeFor({ halted: true } as never)).toBe(2);
+    expect(exitCodeFor({ halted: false } as never)).toBe(0);
   });
 });

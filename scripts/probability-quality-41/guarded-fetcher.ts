@@ -1,10 +1,10 @@
 /**
  * 取得の安全装置(`docs/investigations/probability-quality-41/measurement-plan.md` §4)。
- * HTTP 400 が**連続2回**で取得を止める(成功を返したら連続回数を0に戻す)。止めた後は内側の
+ * HTTP 400・403・429(ブロックの兆候)が**連続2回**で取得を止める(成功を返したら連続回数を0に戻す)。止めた後は内側の
  * フェッチャ(=ネットワーク)を叩かず、即座に `FetchHaltedError` を投げる。
  *
  * `scrapeRace` は馬ごとの戦績の例外を警告に握りつぶして次の馬へ進むため、`scrapeRace` の外側で
- * 例外を待つだけでは止められない。フェッチャを包んで数える。400 以外の失敗(5xx・ネットワーク)は
+ * 例外を待つだけでは止められない。フェッチャを包んで数える。ブロックの兆候以外の失敗(404・5xx・ネットワーク)は
  * 数えないが、成功が無い限り連続回数も戻さない(400→500→400 は連続とみなす。止める側に倒す)。
  * `CachedFetcher` の外側に置くため、キャッシュ命中も「成功」に数えられる(本測定ではキャッシュ命中は
  * ほぼ起きない)。
@@ -25,12 +25,12 @@ export interface TextFetcherLike {
   fetchText(url: string, options?: CachedFetchTextOptions): Promise<string>;
 }
 
-/** HTTP 400 が連続 `maxConsecutive` 回で止まるフェッチャ。 */
-export class HaltOnConsecutive400Fetcher implements TextFetcherLike {
+/** HTTP 400・403・429 が連続 `maxConsecutive` 回で止まるフェッチャ。 */
+export class HaltOnConsecutiveBlockFetcher implements TextFetcherLike {
   private consecutive = 0;
   private halted = false;
   private requests = 0;
-  private readonly urls400: string[] = [];
+  private readonly urlsBlockedList: string[] = [];
 
   constructor(
     private readonly inner: TextFetcherLike,
@@ -42,8 +42,8 @@ export class HaltOnConsecutive400Fetcher implements TextFetcherLike {
     return this.halted;
   }
 
-  /** 現在の400の連続回数。 */
-  get consecutive400(): number {
+  /** 現在のブロックの兆候の連続回数。 */
+  get consecutiveBlocked(): number {
     return this.consecutive;
   }
 
@@ -52,15 +52,15 @@ export class HaltOnConsecutive400Fetcher implements TextFetcherLike {
     return this.requests;
   }
 
-  /** 400 を受けたURL(受けた順)。 */
-  get urlsWith400(): readonly string[] {
-    return this.urls400;
+  /** ブロックの兆候(400・403・429)を受けたURL(受けた順)。 */
+  get urlsBlocked(): readonly string[] {
+    return this.urlsBlockedList;
   }
 
   async fetchText(url: string, options?: CachedFetchTextOptions): Promise<string> {
     if (this.halted) {
       throw new FetchHaltedError(
-        `HTTP 400 が連続${this.maxConsecutive}回に達したため取得を停止しています(${url} は要求していません)`,
+        `HTTP 400・403・429 が連続${this.maxConsecutive}回に達したため取得を停止しています(${url} は要求していません)`,
       );
     }
     this.requests += 1;
@@ -69,9 +69,9 @@ export class HaltOnConsecutive400Fetcher implements TextFetcherLike {
       this.consecutive = 0;
       return text;
     } catch (error) {
-      if (isHttp400(error)) {
+      if (isBlockSignal(error)) {
         this.consecutive += 1;
-        this.urls400.push(url);
+        this.urlsBlockedList.push(url);
         if (this.consecutive >= this.maxConsecutive) {
           this.halted = true;
         }
@@ -81,10 +81,13 @@ export class HaltOnConsecutive400Fetcher implements TextFetcherLike {
   }
 }
 
-function isHttp400(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { status?: unknown }).status === 400
-  );
+/** ブロックの兆候として数える HTTP ステータス(netkeiba への負荷を抑えるため 403・429 も数える)。 */
+export const BLOCK_SIGNAL_STATUSES: readonly number[] = [400, 403, 429];
+
+function isBlockSignal(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" && BLOCK_SIGNAL_STATUSES.includes(status);
 }

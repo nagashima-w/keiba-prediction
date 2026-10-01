@@ -191,6 +191,10 @@ describe("aggregateObservations: 市場比較の対象条件", () => {
     const c = aggregateObservations(obs).central;
     expect(c.marketOddsNotFinalRaces).toEqual(["202606050102"]);
     expect(c.brier.marketComparison.lowerBound.eligibleRaceCount).toBe(1);
+    // 確定でないレースは「確定でない」として数え、「複勝オッズの欠損・不正」には二重計上しない。
+    expect(c.brier.marketComparison.lowerBound.excludedRaces.oddsNotFinal).toEqual(["202606050102"]);
+    expect(c.brier.marketComparison.lowerBound.excludedRaces.marketUnavailable).toEqual([]);
+    expect(c.brier.marketComparison.midpoint.excludedRaces.marketUnavailable).toEqual([]);
     expect(c.brier.model.decomposition.decomposition!.n).toBe(16); // モデル単独には入る
     expect(c.oddsStatusCounts).toEqual({ result: 1, middle: 1 });
   });
@@ -205,6 +209,8 @@ describe("aggregateObservations: 市場比較の対象条件", () => {
     const c = aggregateObservations([race8("202654071201", "nar", "same", { oddsStatus: "yoso" })]).nar;
     expect(c.marketOddsNotFinalRaces).toEqual(["202654071201"]);
     expect(c.brier.marketComparison.lowerBound.eligibleRaceCount).toBe(0);
+    expect(c.brier.marketComparison.lowerBound.excludedRaces.oddsNotFinal).toEqual(["202654071201"]);
+    expect(c.brier.marketComparison.lowerBound.excludedRaces.marketUnavailable).toEqual([]);
   });
 
   it("出走7頭のレースは市場比較に入らない(モデル単独には入る)", () => {

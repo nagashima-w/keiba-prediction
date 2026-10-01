@@ -9,7 +9,7 @@
  *
  * - 取得間隔は `HttpClient.minIntervalMs = 2000`(2秒以上)。自前の sleep は持たない。
  *   `HttpClient` はこのスクリプト全体で1個だけ使う。
- * - HTTP 400 が連続2回で止まる(`guarded-fetcher.ts`)。
+ * - HTTP 400・403・429 が連続2回で止まる(停止したら終了コード 2)(`guarded-fetcher.ts`)。
  * - 保存済みのレースは飛ばす(再実行しても同じレースを取り直さない)。
  * - raw(結果 HTML・`RaceData`)は `--raw-dir` に保存する。リポジトリの外に置くこと
  *   (コンテナが消えれば失われる。コミットするのは観測 JSON だけ)。
@@ -29,13 +29,15 @@ import {
   scrapeRace,
   ScrapeCache,
 } from "../../packages/core/src/index.js";
-import { FetchHaltedError, HaltOnConsecutive400Fetcher } from "./guarded-fetcher.js";
+import { FetchHaltedError, HaltOnConsecutiveBlockFetcher } from "./guarded-fetcher.js";
 import { measureRace, type RawKind } from "./measure.js";
 import type { RaceObservation } from "./observation.js";
 import {
   assertPathsClean,
   assertPlanCommitted,
+  CODE_PATHS_MUST_BE_CLEAN,
   DEFAULT_PLAN,
+  exitCodeFor,
   MIN_INTERVAL_MS,
   runMeasurement,
   type RunManifest,
@@ -69,8 +71,9 @@ async function main(): Promise<void> {
   // 取得に使うコード(測定スクリプトと core)も未コミットなら取得しない(使った版を履歴に残す)。
   assertPathsClean(
     (args) => execFileSync("git", [...args], { cwd: REPO_ROOT, encoding: "utf-8" }),
-    ["scripts/probability-quality-41", "packages/core/src"],
+    CODE_PATHS_MUST_BE_CLEAN,
   );
+  const gitCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
 
   const obsDir = path.join(OUT_ROOT, "observations");
   mkdirSync(obsDir, { recursive: true });
@@ -79,7 +82,7 @@ async function main(): Promise<void> {
   // HttpClient はスクリプト全体で1個だけ(レート制限の直列保証はインスタンス内部の状態に依存する)。
   const client = new HttpClient({ minIntervalMs: MIN_INTERVAL_MS });
   const cache = new ScrapeCache();
-  const guard = new HaltOnConsecutive400Fetcher(new CachedFetcher({ fetcher: client, cache }));
+  const guard = new HaltOnConsecutiveBlockFetcher(new CachedFetcher({ fetcher: client, cache }));
 
   const saveRaw = (kind: RawKind, raceId: string, content: string): void => {
     const ext = kind === "result-html" ? "html" : "json";
@@ -92,7 +95,7 @@ async function main(): Promise<void> {
   const manifestPath = path.join(OUT_ROOT, "manifest.json");
 
   try {
-    await runMeasurement(
+    const manifest = await runMeasurement(
       {
         fetchCentralList: (d) => listRaces(parseKaisaiDate(d), { fetcher: guard }),
         fetchNarList: (d) => listNarRaces(parseKaisaiDate(d), { fetcher: guard }),
@@ -104,7 +107,7 @@ async function main(): Promise<void> {
               // scrapeRace は馬ごとの戦績の例外を警告に握りつぶす。停止していたら、途中までの
               // データで観測を作らず、取得全体の停止として伝える。
               if (guard.tripped) {
-                throw new FetchHaltedError("取得の途中で HTTP 400 の連続により停止した");
+                throw new FetchHaltedError("取得の途中で HTTP 400・403・429 の連続により停止した");
               }
               return race;
             },
@@ -121,6 +124,7 @@ async function main(): Promise<void> {
           },
         },
         guard,
+        gitCommit,
         writeManifest: (manifest: RunManifest) => {
           const previous: RunManifest[] = existsSync(manifestPath)
             ? (JSON.parse(readFileSync(manifestPath, "utf-8")) as { runs: RunManifest[] }).runs
@@ -131,6 +135,10 @@ async function main(): Promise<void> {
       },
       DEFAULT_PLAN,
     );
+    if (manifest.halted) {
+      console.error(`取得を停止しました: ${manifest.haltReason ?? ""}(保存済みの観測は残っています。再実行で続きから取れます)`);
+    }
+    process.exitCode = exitCodeFor(manifest);
   } finally {
     cache.close();
   }

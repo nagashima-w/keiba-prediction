@@ -279,3 +279,40 @@ describe("buildBrierQualityReport: 市場との比較(中点版の感度)", () =
     expect(r.marketComparison.midpoint.excludedRaces.marketUnavailable).toEqual(["A"]);
   });
 });
+
+describe("buildBrierQualityReport: 確定オッズでないレース(oddsNotFinalRaceIds)", () => {
+  const modelA = [0.6, 0.5, 0.4, 0.3, 0.3, 0.3, 0.3, 0.3];
+
+  it("確定でないレースは市場比較から外し、『複勝オッズの欠損・不正』(marketUnavailable)には数えない(二重計上しない)", () => {
+    // 複勝オッズ自体は揃っている(欠損ではない)ので、欠損として数えられてはならない。
+    const horses = [...race("A", modelA, OCC8, ODDS8), ...race("N", modelA, OCC8, ODDS8)];
+    const r = buildBrierQualityReport({ ...input(horses), oddsNotFinalRaceIds: ["N"] });
+    for (const cmp of [r.marketComparison.lowerBound, r.marketComparison.midpoint]) {
+      expect(cmp.excludedRaces.oddsNotFinal).toEqual(["N"]);
+      expect(cmp.excludedRaces.marketUnavailable).toEqual([]);
+      expect(cmp.eligibleRaceCount).toBe(1);
+    }
+    // モデル単独には入る。
+    expect(r.model.decomposition.decomposition!.n).toBe(16);
+  });
+
+  it("指定しなければ従来どおり(oddsNotFinal は空)", () => {
+    const r = buildBrierQualityReport(input(race("A", modelA, OCC8, ODDS8)));
+    expect(r.marketComparison.lowerBound.excludedRaces.oddsNotFinal).toEqual([]);
+    expect(r.marketComparison.lowerBound.eligibleRaceCount).toBe(1);
+  });
+
+  it("頭数が8未満なら smallField が優先(頭数は定義上の条件。同じレースを2つの理由で数えない)", () => {
+    const seven = race("S", modelA.slice(0, 7), OCC8.slice(0, 7), ODDS8.slice(0, 7));
+    const cmp = buildBrierQualityReport({ ...input(seven), oddsNotFinalRaceIds: ["S"] }).marketComparison.lowerBound;
+    expect(cmp.excludedRaces.smallField).toEqual(["S"]);
+    expect(cmp.excludedRaces.oddsNotFinal).toEqual([]);
+  });
+
+  it("確定でないレースの複勝オッズが欠けていても、理由は oddsNotFinal(オッズの中身を見ない)", () => {
+    const horses = race("N", modelA, OCC8, [1.5, null, 3, 4, 6, 8, 10, 15]);
+    const cmp = buildBrierQualityReport({ ...input(horses), oddsNotFinalRaceIds: ["N"] }).marketComparison.lowerBound;
+    expect(cmp.excludedRaces.oddsNotFinal).toEqual(["N"]);
+    expect(cmp.excludedRaces.marketUnavailable).toEqual([]);
+  });
+});

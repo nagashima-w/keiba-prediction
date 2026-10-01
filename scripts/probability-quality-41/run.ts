@@ -4,7 +4,9 @@
  *
  * - 計画の開催日(中央 2026-09-26・09-27、地方 2026-09-30)は取得前に固定した値。
  * - 保存済みのレースは飛ばす(中断・再実行で同じレースを取り直さない)。
- * - HTTP 400 の連続で取得が止まったら、以後のレースを取らずにマニフェストを書いて止める。
+ * - HTTP 400・403・429 の連続で取得が止まったら、以後のレースを取らずにマニフェストを書いて止める。
+ *   **停止の引き金になった呼び出しのレースは保存しない**(除外ではなく、取り直す対象)。
+ * - 一時的な失敗(取得の失敗)と、許可リストに無い着順文言は**保存せず**、再実行で取り直す。
  */
 
 import type { RaceListEntry } from "../../packages/core/src/index.js";
@@ -28,17 +30,35 @@ export interface MeasurementPlan {
   readonly nar: readonly string[];
 }
 
+/**
+ * 観測 JSON として**保存しない**除外理由(§3.3 追記)。取得の失敗は一時的でありうる。許可リストに無い
+ * 着順文言は、実際の表記がリポジトリ内に根拠が無く、表記の違いで取消馬のいるレースが全部除外され
+ * 二度と取り直せなくなるのを避けるため、保存せず再実行で取り直す(manifest に理由と文言を残す)。
+ */
+export const NOT_SAVED_REASONS: readonly string[] = [
+  "result-fetch-error",
+  "scrape-error",
+  "unclassified-finish",
+];
+
+/** 取得に使うコードのうち、未コミットなら取得を拒否するパス(`runAnalysis` が測定の本体のため app も含む)。 */
+export const CODE_PATHS_MUST_BE_CLEAN: readonly string[] = [
+  "scripts/probability-quality-41",
+  "packages/core/src",
+  "packages/app/src",
+];
+
 /** 観測の保存先(レース単位。再実行で飛ばす判定に使う)。 */
 export interface ObservationStore {
   exists(raceId: string): boolean;
   write(observation: RaceObservation): void;
 }
 
-/** 取得の安全装置の状態(`HaltOnConsecutive400Fetcher` が満たす)。 */
+/** 取得の安全装置の状態(`HaltOnConsecutiveBlockFetcher` が満たす)。 */
 export interface GuardState {
   readonly tripped: boolean;
   readonly requestCount: number;
-  readonly urlsWith400: readonly string[];
+  readonly urlsBlocked: readonly string[];
 }
 
 /** 注入する依存。 */
@@ -49,11 +69,15 @@ export interface RunDeps {
   readonly store: ObservationStore;
   readonly guard: GuardState;
   readonly writeManifest: (manifest: RunManifest) => void;
+  /** 実行時のコミット(`git rev-parse HEAD`)。再現性のため実行記録に残す。 */
+  readonly gitCommit: string;
   readonly now?: () => Date;
 }
 
 /** 実行の記録(`manifest.json`)。 */
 export interface RunManifest {
+  /** 実行時のコミット(`git rev-parse HEAD`)。 */
+  readonly gitCommit: string;
   readonly plan: MeasurementPlan;
   readonly minIntervalMs: number;
   readonly startedAt: string;
@@ -66,8 +90,10 @@ export interface RunManifest {
   >;
   readonly processed: ReadonlyArray<{
     readonly raceId: string;
-    readonly status: "ok" | "excluded";
+    /** `not-saved` は保存せず再実行で取り直す対象(取得の失敗・未知の着順文言・停止の引き金)。 */
+    readonly status: "ok" | "excluded" | "not-saved";
     readonly reason?: string;
+    readonly detail?: string;
   }>;
   /** 保存済みのため飛ばしたレース。 */
   readonly skippedExisting: readonly string[];
@@ -75,7 +101,7 @@ export interface RunManifest {
   readonly haltReason: string | null;
   /** フェッチャへ渡した要求の数(止まった後の拒否は数えない)。キャッシュ命中も含む上限。 */
   readonly requestCount: number;
-  readonly urlsWith400: readonly string[];
+  readonly urlsBlocked: readonly string[];
 }
 
 /** 計画を実行する。異常終了でも、書けた範囲のマニフェストを書く。 */
@@ -92,6 +118,7 @@ export async function runMeasurement(
   let haltReason: string | null = null;
 
   const manifest = (): RunManifest => ({
+    gitCommit: deps.gitCommit,
     plan,
     minIntervalMs: MIN_INTERVAL_MS,
     startedAt,
@@ -102,14 +129,14 @@ export async function runMeasurement(
     halted,
     haltReason,
     requestCount: deps.guard.requestCount,
-    urlsWith400: deps.guard.urlsWith400,
+    urlsBlocked: deps.guard.urlsBlocked,
   });
 
   const halt = (reason: string) => {
     halted = true;
     haltReason = reason;
   };
-  const HTTP_400_HALT = "HTTP 400 が連続して返ったため取得を停止した";
+  const HTTP_400_HALT = "HTTP 400・403・429 が連続して返ったため取得を停止した";
 
   const schedule: Array<{ region: "central" | "nar"; date: string }> = [
     ...plan.central.map((date) => ({ region: "central" as const, date })),
@@ -128,7 +155,8 @@ export async function runMeasurement(
             ? await resolveCentralDay(date, deps.fetchCentralList)
             : await resolveNarDay(date, deps.fetchNarList);
       } catch (error) {
-        if (error instanceof FetchHaltedError) {
+        // 停止の引き金になった呼び出しは元の HttpError を投げる。ガードが止まっていれば停止として扱う。
+        if (error instanceof FetchHaltedError || deps.guard.tripped) {
           halt(HTTP_400_HALT);
           break;
         }
@@ -156,11 +184,34 @@ export async function runMeasurement(
             kaisaiDate: day.usedDate,
           });
         } catch (error) {
-          if (error instanceof FetchHaltedError) {
+          if (error instanceof FetchHaltedError || deps.guard.tripped) {
             halt(HTTP_400_HALT);
             break;
           }
           throw error;
+        }
+        // 停止の引き金になった呼び出しのレースは保存しない(除外に変換されていても、取り直す対象)。
+        if (deps.guard.tripped) {
+          processed.push({
+            raceId: observation.raceId,
+            status: "not-saved",
+            reason: "halted-in-flight",
+            ...(observation.status === "excluded"
+              ? { detail: `${observation.reason}: ${observation.detail}` }
+              : {}),
+          });
+          halt(HTTP_400_HALT);
+          break;
+        }
+        // 一時的な失敗・未知の着順文言は保存せず、理由と文言を実行記録に残す(再実行で取り直される)。
+        if (observation.status === "excluded" && NOT_SAVED_REASONS.includes(observation.reason)) {
+          processed.push({
+            raceId: observation.raceId,
+            status: "not-saved",
+            reason: observation.reason,
+            detail: observation.detail,
+          });
+          continue;
         }
         deps.store.write(observation);
         processed.push({
@@ -168,10 +219,6 @@ export async function runMeasurement(
           status: observation.status,
           ...(observation.status === "excluded" ? { reason: observation.reason } : {}),
         });
-        if (deps.guard.tripped) {
-          halt(HTTP_400_HALT);
-          break;
-        }
       }
     }
   } finally {
@@ -219,4 +266,9 @@ export function assertPathsClean(
       throw new Error(`${p} に未コミットの変更があります。コミットしてから取得してください(${dirty})`);
     }
   }
+}
+
+/** 実行の終了コード。停止で終わった実行は非0(2)にする。 */
+export function exitCodeFor(manifest: Pick<RunManifest, "halted">): number {
+  return manifest.halted ? 2 : 0;
 }
