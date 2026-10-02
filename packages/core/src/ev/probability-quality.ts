@@ -491,3 +491,139 @@ export function buildBrierQualityReport(input: BrierQualityReportInput): BrierQu
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// buildPairedBrierComparison(同じ馬集合の2つの確率列の比較。#156「#41-B」)
+// ---------------------------------------------------------------------------
+
+/** buildPairedBrierComparison の1頭分の入力(同じ馬に対する2つの確率。出走した馬のみ)。 */
+export interface PairedBrierInputHorse {
+  readonly raceId: string;
+  readonly umaban: number;
+  /** 比べる側の確率(例: LLM 補正後確率)。 */
+  readonly modelProb: number;
+  /** 基準側の確率(例: prior)。 */
+  readonly referenceProb: number;
+  /** 実際に3着以内に入ったか(同着で4頭以上になる場合は全員 true)。 */
+  readonly occurred: boolean;
+}
+
+/** buildPairedBrierComparison の入力。 */
+export interface PairedBrierComparisonInput {
+  readonly horses: readonly PairedBrierInputHorse[];
+  /** 申告項目: model 側の確率の出所(本モジュールからは判別できない)。 */
+  readonly modelSource: PriorSource;
+  /** 申告項目: reference 側の確率の出所。 */
+  readonly referenceSource: PriorSource;
+  /** レース単位ブートストラップの反復回数とシード(取得前の分析計画で固定した値を渡す)。 */
+  readonly bootstrap: BootstrapOptions;
+}
+
+/** 2系列比較の条件。数値と必ず同梱される。 */
+export interface PairedBrierComparisonConditions {
+  readonly modelSource: PriorSource;
+  readonly referenceSource: PriorSource;
+  readonly bootstrap: BootstrapOptions;
+}
+
+/** buildPairedBrierComparison の結果。 */
+export interface PairedBrierComparison {
+  readonly conditions: PairedBrierComparisonConditions;
+  readonly raceCount: number;
+  readonly observationCount: number;
+  /** model の Brier(全観測)。 */
+  readonly modelBrier: NullableMetric;
+  /** reference の Brier(同じ観測)。 */
+  readonly referenceBrier: NullableMetric;
+  /** `1 − BS_model / BS_reference`。正なら model が reference より良い。 */
+  readonly brierSkillVsReference: NullableMetric;
+  readonly modelDecomposition: BrierDecompositionResult;
+  readonly referenceDecomposition: BrierDecompositionResult;
+  /** Brier 差(model − reference。**正なら model が悪い**)のレース単位ブートストラップ。 */
+  readonly brierDifference: BrierDifferenceBootstrapResult;
+}
+
+/**
+ * 同じ馬集合に対する2つの確率列(model と reference)を、Brier・Murphy 分解・Brier 差の
+ * レース単位ブートストラップで比べる(#156: 「LLM 補正後」対「prior」を同じレース集合の対で比べる)。
+ *
+ * - **向きと実装は対市場の比較と同じ**: 差は `model − reference`(正なら model が悪い)で、
+ *   ブートストラップは `buildBrierQualityReport` の対市場の Brier 差と同じ実装
+ *   (`bootstrapBrierDifferenceByRace`)を呼ぶ。reference に市場含意確率を入れれば同じ値になる。
+ * - **レースを再標本単位にする**(同一レースの馬は Σ=3 の制約で独立でないため)。
+ * - 範囲外・非有限の確率はクリップせず、該当する系列の指標と差を `reason` 付き null にする。
+ * - 計測条件(どの2系列か・ブートストラップ条件)は必ず同梱する。
+ */
+export function buildPairedBrierComparison(input: PairedBrierComparisonInput): PairedBrierComparison {
+  const byRace = new Map<string, PairedBrierInputHorse[]>();
+  for (const h of input.horses) {
+    const list = byRace.get(h.raceId);
+    if (list === undefined) {
+      byRace.set(h.raceId, [h]);
+    } else {
+      list.push(h);
+    }
+  }
+
+  const modelObservations: BrierObservation[] = input.horses.map((h) => ({
+    probability: h.modelProb,
+    occurred: h.occurred,
+  }));
+  const referenceObservations: BrierObservation[] = input.horses.map((h) => ({
+    probability: h.referenceProb,
+    occurred: h.occurred,
+  }));
+  const modelBrier = computeBrierScore(modelObservations);
+  const referenceBrier = computeBrierScore(referenceObservations);
+  const brierSkillVsReference: NullableMetric =
+    modelBrier.value === null
+      ? modelBrier
+      : referenceBrier.value === null
+        ? referenceBrier
+        : brierSkillScore(modelBrier.value, referenceBrier.value);
+
+  const raceCount = byRace.size;
+  let brierDifference: BrierDifferenceBootstrapResult;
+  if (modelBrier.value === null || referenceBrier.value === null) {
+    // どちらかの系列に範囲外・非有限の確率がある(または観測が0件)。クリップして続行せず、差も出さない。
+    brierDifference = {
+      value: null,
+      lower: null,
+      upper: null,
+      iterations: input.bootstrap.iterations,
+      seed: input.bootstrap.seed,
+      raceCount,
+      reason: modelBrier.value === null ? `model 側: ${modelBrier.reason}` : `reference 側: ${referenceBrier.reason}`,
+    };
+  } else {
+    const pairs: RaceSquaredErrorPair[] = [];
+    for (const horses of byRace.values()) {
+      let modelSse = 0;
+      let referenceSse = 0;
+      for (const h of horses) {
+        const outcome = h.occurred ? 1 : 0;
+        modelSse += (h.modelProb - outcome) ** 2;
+        referenceSse += (h.referenceProb - outcome) ** 2;
+      }
+      // RaceSquaredErrorPair の marketSse は「比べる相手の二乗誤差」(ここでは reference)。
+      pairs.push({ count: horses.length, modelSse, marketSse: referenceSse });
+    }
+    brierDifference = bootstrapBrierDifferenceByRace(pairs, input.bootstrap);
+  }
+
+  return {
+    conditions: {
+      modelSource: input.modelSource,
+      referenceSource: input.referenceSource,
+      bootstrap: input.bootstrap,
+    },
+    raceCount,
+    observationCount: input.horses.length,
+    modelBrier,
+    referenceBrier,
+    brierSkillVsReference,
+    modelDecomposition: computeBrierDecomposition(modelObservations),
+    referenceDecomposition: computeBrierDecomposition(referenceObservations),
+    brierDifference,
+  };
+}
