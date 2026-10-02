@@ -197,7 +197,10 @@ export interface LlmRegionAggregate {
   };
   readonly sensitivityExcludingFallback: FallbackSensitivity;
   readonly llmRun: LlmRunSummary;
+  /** 補正量の記述統計(全レース。**fallback したレースの馬〈補正 0・prior 採用〉を含む**)。 */
   readonly adjustment: AdjustmentSummary;
+  /** 同上を fallback したレースを除いて出したもの(補正量・prior 採用の馬数を読むときはこちらも見る)。 */
+  readonly adjustmentExcludingFallback: AdjustmentSummary;
   readonly towardMarket: TowardMarketSummary;
 }
 
@@ -383,6 +386,7 @@ function aggregateRegion(region: "central" | "nar", races: readonly JoinedRace[]
       truncatedRaceIds: mine.filter((r) => r.rec.truncated).map((r) => r.obs.raceId),
     },
     adjustment: adjustmentSummary(mine),
+    adjustmentExcludingFallback: adjustmentSummary(kept),
     towardMarket: towardMarketSummary(eligible),
   };
 }

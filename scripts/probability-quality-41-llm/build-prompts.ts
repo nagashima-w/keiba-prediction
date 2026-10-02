@@ -5,7 +5,7 @@
  * (記録フェッチャ。記録済みなら出ない)。
  *
  * ## 実行(計画の文書と対象コードをコミットしてから。未コミットなら起動時に失敗する)
- *   pnpm tsx scripts/probability-quality-41-llm/build-prompts.ts --raw-dir <#41 の raw> --work-dir <リポジトリ外>
+ *   pnpm tsx scripts/probability-quality-41-llm/build-prompts.ts --raw-dir <#41 の raw> --work-dir <リポジトリ外・raw と入れ子にしない。例: scratchpad/pq156-work>
  * - リポジトリ側(`docs/investigations/probability-quality-41-llm/`)に `prompts/<raceId>.txt`・
  *   `grade-winner/<raceId>.json`・`index.json` を書く(**コミットしてから応答を作らせる**)。
  * - 作業ディレクトリ側に、サブエージェントに見せる `subagent/case-NN.txt` を書く(匿名のケース ID。
@@ -169,6 +169,19 @@ function argValue(argv: readonly string[], name: string): string {
   return path.resolve(v);
 }
 
+/**
+ * サブエージェントに読ませるプロンプトの置き場(作業ディレクトリ)を、#41 の raw(着順・払戻を含む結果ページ)と
+ * 同一・入れ子にしない。`ls`・Glob で raw が見える場所にプロンプトを置かないため。
+ */
+export function assertWorkDirApartFromRaw(workDir: string, rawDir: string): void {
+  const w = path.resolve(workDir);
+  const r = path.resolve(rawDir);
+  const inside = (child: string, parent: string): boolean => child === parent || child.startsWith(parent + path.sep);
+  if (inside(w, r) || inside(r, w)) {
+    throw new Error(`--work-dir は #41 の raw(--raw-dir)と同一・入れ子にしないでください(work: ${w} / raw: ${r})`);
+  }
+}
+
 function outsideRepo(dir: string, name: string): string {
   if (dir === REPO_ROOT || dir.startsWith(REPO_ROOT + path.sep)) {
     throw new Error(`${name} はリポジトリの外を指定してください(指定: ${dir})`);
@@ -180,6 +193,7 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const rawDir = outsideRepo(argValue(argv, "--raw-dir"), "--raw-dir");
   const workDir = outsideRepo(argValue(argv, "--work-dir"), "--work-dir");
+  assertWorkDirApartFromRaw(workDir, rawDir);
 
   const git = (args: readonly string[]) => execFileSync("git", [...args], { cwd: REPO_ROOT, encoding: "utf-8" });
   assertPlanCommitted(git, PLAN_PATH);

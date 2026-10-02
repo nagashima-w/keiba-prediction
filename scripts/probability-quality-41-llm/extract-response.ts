@@ -4,13 +4,19 @@
  *
  * ## 実行
  *   pnpm tsx scripts/probability-quality-41-llm/extract-response.ts \
- *       --work-dir <作業ディレクトリ> --case case-07 --attempt 1 --transcript <トランスクリプトの JSONL>
- * 終了コード: 保存したら 0、無効(許していないツール使用・全文を読んでいない等)なら 4(何も書かない)。
+ *       --work-dir <作業ディレクトリ> --case case-07 --attempt 1 --transcript <トランスクリプトの JSONL> \
+ *       [--index <index.json。既定: docs/investigations/probability-quality-41-llm/index.json>]
+ * 終了コード: 保存したら 0、無効(許していないツール使用・全文を読んでいない等)なら 4(応答ファイルは書かない)。
+ * 有効・無効を問わず、検証した結果(モデル ID は message.model から機械的に拾う)を
+ * `<作業ディレクトリ>/subagent-runs.json` に追記する。
  */
 
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { saveExtractedResponse } from "./transcript.js";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const DEFAULT_INDEX = path.join(REPO_ROOT, "docs", "investigations", "probability-quality-41-llm", "index.json");
 
 function value(argv: readonly string[], name: string): string {
   const i = argv.indexOf(name);
@@ -28,6 +34,7 @@ function main(): void {
     caseId: value(argv, "--case"),
     attempt: Number(value(argv, "--attempt")),
     transcriptPath: path.resolve(value(argv, "--transcript")),
+    indexPath: argv.includes("--index") ? path.resolve(value(argv, "--index")) : DEFAULT_INDEX,
   });
   if (result.ok) {
     console.error(`保存しました: ${result.savedPath}(${result.chars}文字)`);

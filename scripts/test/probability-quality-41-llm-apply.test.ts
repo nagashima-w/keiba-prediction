@@ -242,14 +242,15 @@ describe("createRecordedGradeFetcher: 記録と再生", () => {
   it("記録が無ければネットワークから取得して生の応答を保存し、2回目はネットワークを使わず保存分を返す", async () => {
     const dir = tmp();
     let calls = 0;
-    const network: GradeWinnerFetcher = { fetchText: async () => { calls += 1; return '{"status":"OK"}'; } };
+    const okBody = loadFixture("grade_winner_202603020211.json");
+    const network: GradeWinnerFetcher = { fetchText: async () => { calls += 1; return okBody; } };
     const f1 = createRecordedGradeFetcher({ dir, raceId: "202603020211", network });
-    expect(await f1.fetchText("https://example/api", { method: "POST" })).toBe('{"status":"OK"}');
+    expect(await f1.fetchText("https://example/api", { method: "POST" })).toBe(okBody);
     expect(calls).toBe(1);
-    expect(readFileSync(path.join(dir, "202603020211.json"), "utf-8")).toBe('{"status":"OK"}');
+    expect(readFileSync(path.join(dir, "202603020211.json"), "utf-8")).toBe(okBody);
 
     const f2 = createRecordedGradeFetcher({ dir, raceId: "202603020211", network });
-    expect(await f2.fetchText("https://example/api")).toBe('{"status":"OK"}');
+    expect(await f2.fetchText("https://example/api")).toBe(okBody);
     expect(calls).toBe(1);
   });
 
@@ -257,6 +258,25 @@ describe("createRecordedGradeFetcher: 記録と再生", () => {
     const dir = tmp();
     const f = createRecordedGradeFetcher({ dir, raceId: "202603020211", network: null });
     await expect(f.fetchText("https://example/api")).rejects.toThrow(/記録がありません/);
+  });
+
+  it("非重賞の応答(status: NG)は正常な応答として保存する(null になるだけで、取り直す必要はない)", async () => {
+    const dir = tmp();
+    const ng = loadFixture("grade_winner_ng_202602010607.json");
+    const network: GradeWinnerFetcher = { fetchText: async () => ng };
+    const f = createRecordedGradeFetcher({ dir, raceId: "202602010607", network });
+    expect(await f.fetchText("https://example/api")).toBe(ng);
+    expect(readFileSync(path.join(dir, "202602010607.json"), "utf-8")).toBe(ng);
+  });
+
+  it("応答がパースできない(HTML・構造の壊れた応答)ときは、保存せずに失敗する(壊れた応答を記録しない)", async () => {
+    for (const broken of ["<html>メンテナンス中</html>", '{"status":"OK"}', ""]) {
+      const dir = tmp();
+      const network: GradeWinnerFetcher = { fetchText: async () => broken };
+      const f = createRecordedGradeFetcher({ dir, raceId: "202603020211", network });
+      await expect(f.fetchText("https://example/api")).rejects.toThrow();
+      expect(existsSync(path.join(dir, "202603020211.json"))).toBe(false);
+    }
   });
 
   it("ネットワーク取得が失敗したときは何も保存しない(壊れた記録を残さない)", async () => {

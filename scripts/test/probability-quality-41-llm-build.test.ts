@@ -11,7 +11,7 @@ import {
 } from "../../packages/core/src/index.js";
 import { driveRunAnalysis } from "../probability-quality-41-llm/drive.js";
 import { CASE_ID_SEED } from "../probability-quality-41-llm/case-ids.js";
-import { buildPromptArtifacts, type PromptTarget } from "../probability-quality-41-llm/build-prompts.js";
+import { assertWorkDirApartFromRaw, buildPromptArtifacts, type PromptTarget } from "../probability-quality-41-llm/build-prompts.js";
 import { sha256Hex } from "../probability-quality-41-llm/records.js";
 
 /**
@@ -144,5 +144,21 @@ describe("buildPromptArtifacts: 失敗は黙らせない", () => {
   it("対象が重複していれば失敗する", async () => {
     const s = setup();
     await expect(buildPromptArtifacts([...TARGETS, TARGETS[0]!], s.deps, { gitCommit: "x" })).rejects.toThrow(/重複/);
+  });
+});
+
+describe("assertWorkDirApartFromRaw: サブエージェントに読ませる作業ディレクトリを、#41 の raw(着順・払戻を含む)と入れ子にしない", () => {
+  it("別々のディレクトリなら通る(兄弟でもよい)", () => {
+    expect(() => assertWorkDirApartFromRaw("/scratch/pq156-work", "/scratch/pq41-raw")).not.toThrow();
+  });
+
+  it("同じディレクトリ・raw の中・raw を含む場所は失敗する", () => {
+    expect(() => assertWorkDirApartFromRaw("/scratch/pq41-raw", "/scratch/pq41-raw")).toThrow(/raw/);
+    expect(() => assertWorkDirApartFromRaw("/scratch/pq41-raw/work", "/scratch/pq41-raw")).toThrow(/raw/);
+    expect(() => assertWorkDirApartFromRaw("/scratch", "/scratch/pq41-raw")).toThrow(/raw/);
+  });
+
+  it("名前が前方一致するだけの別ディレクトリは入れ子とみなさない", () => {
+    expect(() => assertWorkDirApartFromRaw("/scratch/pq41-raw2", "/scratch/pq41-raw")).not.toThrow();
   });
 });

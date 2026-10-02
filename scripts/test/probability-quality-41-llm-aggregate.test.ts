@@ -225,6 +225,15 @@ describe("aggregateLlm: fallback したレースの感度(主表は production �
     expect(r.central.sensitivityExcludingFallback.paired.raceCount).toBe(2);
     expect(r.central.sensitivityExcludingFallback.llm.raceCount).toBe(2);
     expect(r.central.sensitivityExcludingFallback.prior.raceCount).toBe(2);
+    // 補正量の統計: 主表には fallback レースの馬(補正 0・prior 採用)が入り、fallback を除いた値を併記する。
+    const adj = r.central.adjustment;
+    const adjKept = r.central.adjustmentExcludingFallback;
+    expect(adj.horseCount).toBe(22);
+    expect(adjKept.horseCount).toBe(14);
+    expect(adj.usedPriorHorseCount).toBe(8);
+    expect(adjKept.usedPriorHorseCount).toBe(0);
+    // 前提: 除く前後で |δ| の平均が違う(fallback の馬の δ=0 が平均を下げている)。
+    expect(adjKept.meanAbsDelta!).toBeGreaterThan(adj.meanAbsDelta! + 1e-4);
     // 主表: fallback のレースは LLM = prior なので、そのレースだけの差は 0。
     const priorSseR2 = OBS_C2.horses.reduce((t, h) => t + (h.prior - h.outcome) ** 2, 0);
     expect(priorSseR2).toBeGreaterThan(0);

@@ -43,6 +43,7 @@
 | モデル | `claude-sonnet-4-6` | サブエージェントのモデル(**最新の Sonnet**。起動時に確定したモデル ID を実行記録に残す) |
 | 温度 | 0 | **サブエージェントの既定(0 ではない)**。同じプロンプトでも答えが揺れうる |
 | システムプロンプト | なし | **サブエージェント(Claude Code)のシステムプロンプトと、それが提供するツール定義がある** |
+| 文脈 | プロンプトだけ | **サブエージェントの文脈にはプロジェクトの `CLAUDE.md`(プロジェクト指示。計画作成時点で 31,514 バイト。再現: `wc -c CLAUDE.md`)が入り、今日の日付も見える。** プロンプトのペルソナ(複勝圏内確率を評価するアナリスト)と Claude Code の文脈が混ざる。応答の書式(JSON のみ)への影響は測らない |
 | `max_tokens` | 8192(超えると切り詰め→パース失敗→リトライ→prior に fallback) | **上限なし**。切り詰めの経路は測れない(`truncated` は 0 の見込み) |
 | オッズ | 発走前の時点の値 | **確定オッズ**(過去レースのため。市場の情報を、発走前より多く含む) |
 | 馬場状態・天候・馬体重 | 発走前の値 | **取得時点(発走後)の値**(#41 §6 と同じ限界) |
@@ -76,7 +77,9 @@
   `packages/core/src`・`packages/app/src`)が未コミットなら、起動時に失敗する。**
 - 出力: リポジトリ側 `prompts/<raceId>.txt`・`grade-winner/<raceId>.json`・`index.json`(ケース ID とレース ID の
   対応表・プロンプトの SHA-256・文字数・版・コミット)。作業ディレクトリ(リポジトリ外)側 `subagent/case-NN.txt`
-  (サブエージェントに見せる。**匿名のケース ID**。対応表は置かない)。
+  (サブエージェントに見せる。**匿名のケース ID**。対応表は置かない)。**作業ディレクトリは #41 の raw(着順・払戻を含む結果ページ)と同一・入れ子にしない**
+  (例: `scratchpad/pq156-work/`。`build-prompts.ts` が起動時に検査する)。サブエージェントが `ls`・Glob で
+  raw に行き着かない場所に置く。
   ケース ID は、レース ID を昇順に並べてからシード **20261002** の Fisher–Yates で並べ替えて割り当てる。
 - **プロンプトと対応表をコミットしてから、応答を作らせる**(応答を見てからプロンプトを変えない)。
 
@@ -86,25 +89,47 @@
 
 - **1 レース 1 体**。他レースのプロンプトを見せない。コンテキストを使い回さない(1 体 1 レース 1 応答)。
 - 汎用のサブエージェント、**モデルは最新の Sonnet**。専用のエージェント定義は作らない。
-- **許すツールは「自分のプロンプトファイルの Read 1 回」だけ。** 応答はファイルに書かせず、**最終メッセージ
-  (応答本文そのもの)**として返させる。メインがトランスクリプト(JSONL)から
-  `scripts/probability-quality-41-llm/extract-response.ts` で最終メッセージを取り出し、
-  作業ディレクトリの `responses/case-NN.attemptN.txt` に保存する(Write を許さないので、任意のパスへの
-  書き込みは起きない。結果ファイル・Web・他のプロンプトを見る経路も、ツールを使わない限り無い)。
-- **検証(いずれかに反すれば、その応答は無効)**: トランスクリプトの tool_use が、
-  (a) 自分の `case-NN.txt`(絶対パス一致)の Read がちょうど 1 回、引数は `file_path` のみ、(b) それ以外が 0 回、
-  (c) Read の結果がエラーでなくプロンプトの全文を含む、(d) 依頼文の定型がある、(e) 最終メッセージが空でなく
-  tool_use を含まない。実装は `transcript.ts` の `extractFinalResponse`(テストあり)。
+- **許すツールは「自分のプロンプトファイルの Read ちょうど 1 回」と「`SubagentHandback` 0〜1 回(Read より後)」
+  だけ。** それ以外のツールは無効。応答はファイルに書かせない。メインがトランスクリプト(JSONL)から
+  `scripts/probability-quality-41-llm/extract-response.ts` で応答本文を取り出し、作業ディレクトリの
+  `responses/case-NN.attemptN.txt` に保存する(Write を許さないので、任意のパスへの書き込みは起きない。
+  結果ファイル・Web・他のプロンプトを見る経路も、ツールを使わない限り無い)。
+- **応答の取り方(実行前の改訂。応答を見てから規則を変えないよう、受理する 2 つの形を今ここで固定する)**:
+  harness は、サブエージェントに「最終報告は `SubagentHandback` ツールで送る(最後に書く平文は届かない)」という
+  リマインダ(`isMeta` の user メッセージ)を入れ、実際に最終出力が `SubagentHandback` の呼び出しになる
+  (このセッションのサブエージェントのトランスクリプトを集計した結果、`ls *.jsonl | wc -l` の 100 件すべてに
+  リマインダが入り、`SubagentHandback` の呼び出しを含むのも 100 件だった。再現: トランスクリプトの置き場所
+  `~/.claude/projects/<プロジェクト>/<セッション>/subagents/` の各 JSONL を読み、`isMeta` の user メッセージと
+  assistant の `tool_use`〈`name === "SubagentHandback"`〉の有無を数える。件数は実行のたびに増える)。したがって:
+  - **(a) `SubagentHandback` がちょうど 1 回呼ばれた場合**: 応答は**その `input.message`**(文字列。空白だけなら無効)。
+    handback より後の平文テキストは応答に数えない。`message` 以外のフィールドは**無視**する。
+    handback が 2 回以上なら無効。handback が自分のプロンプトの Read より前にあれば無効。
+  - **(b) `SubagentHandback` が呼ばれない場合**: 最後の tool_result より後の assistant のテキスト(連結。空白だけなら無効。
+    tool_use を含めば無効)。
+  - **どちらも整形しない**。前置きの散文・コードフェンスがあっても、そのまま production の `parseAnalyzerResponse` に渡す
+    (production の LLM の散文と同じ扱い。パースに失敗すれば production どおりリトライ/フォールバック)。
+- **検証(いずれかに反すれば、その応答は無効)**: トランスクリプトが
+  (a) 自分の `case-NN.txt`(絶対パス一致)の Read がちょうど 1 回、引数は `file_path` のみ、
+  (b) 上の 2 つ以外のツールが 0 回、(c) Read の結果がエラーでなくプロンプトの全文を含む、
+  (d) **依頼文の定型が、最初の(`isMeta` でない)user メッセージと完全一致**(harness のリマインダは無視する)、
+  (e) 応答本文が空でない(上の (a)/(b) の取り方で)。実装は `transcript.ts` の `extractFinalResponse`(テストあり)。
+  あわせて、保存の前に **`subagent/case-NN.txt` の SHA-256 を `index.json` と照合する**(段階 1 の後でプロンプトが
+  書き換わっていないこと)。
+- **実物の形式の確認**: `build-prompts` の後、まず 1 体だけ起動し、そのトランスクリプトで抽出・検証が通ることを確かめる。
+  形式(フィールド名など)が想定と違えば、その時点で合わせる。**応答の内容を見て規則を変えることはしない。**
 - **無効な応答は破棄して、同じ手順で取り直す**(新しい 1 体・同じ依頼文)。無効だった件数・理由・どのレースかを
   全件レポートに載せる。取り直しは「production のリトライ」(§6)とは別物(無効な応答は試行に数えない)。
   **複数の応答から良い方を選ばない**(有効な最初の応答を採る)。
-- 実行記録 `subagent-runs.json`(メインが作る): ケース ID・attempt・サブエージェントのエージェント ID・
-  モデル ID・起動時刻・検証結果(tool_use の一覧)・破棄した応答の件数と理由。
+- 実行記録 `subagent-runs.json`(**抽出スクリプトが、有効・無効を問わず追記する**。作業ディレクトリに作られるので、
+  リポジトリにコピーしてコミットする): ケース ID・attempt・有効か・応答の取り方(`handback`/`final-message`)・
+  **モデル ID(トランスクリプトの assistant エントリの `message.model` から機械的に拾う。手書きしない)**・
+  エージェント ID・開始/終了時刻・tool_use の一覧・無効の理由・応答本文の SHA-256。破棄した応答の件数と理由は、
+  `valid: false` の記録から数える。
 
 ### 5.2 サブエージェントへの依頼文(定型。ファイルのパスだけが変わる)
 
 `transcript.ts` の `renderSubagentTaskText(<case-NN.txt の絶対パス>)` の戻り値と**一字一句同じ**もの
-(トランスクリプトに無ければ検証で無効になる):
+(最初の `isMeta` でない user メッセージと完全一致しなければ、検証で無効になる):
 
 ```
 次のファイルを Read ツールで1回だけ読んでください: <case-NN.txt の絶対パス>
@@ -112,6 +137,8 @@
 このファイルの Read 以外のツールは使わないでください。
 ```
 
+最終メッセージを返す、という依頼文の文言と、harness の「`SubagentHandback` で最終報告を送る」という指示が
+並ぶ。どちらの形で返しても §5.1 の (a)/(b) で受理する(依頼文の文言は変えない)。
 production との差: ユーザーメッセージがプロンプト単体ではなく、この依頼文の経由になる(§3)。
 
 ## 6. リトライ(production と同じ条件で再現する)
@@ -171,7 +198,9 @@ production の `analyzeRace` がリトライ後も失敗して prior に fallbac
 
 ### 8.4 記述統計(補正量)
 
-- 各馬の補正量 δ = 補正後 − prior の平均(符号つき)・|δ| の平均・|δ| の最大。
+- 各馬の補正量 δ = 補正後 − prior の平均(符号つき)・|δ| の平均・|δ| の最大。**fallback したレースの馬
+  (補正 0・prior 採用)が主表の値に含まれる**ため、**fallback を除いた値を併記する**(`adjustment` と
+  `adjustmentExcludingFallback`)。
 - クリップされた馬の数(`ParsedHorseResult.clipped`)・LLM の値が使えず prior を採用した馬の数(`usedPrior`)。
 - **3 着以内に入った馬と入らなかった馬での平均 δ**(補正の向きが結果と合ったか)。
 - レースごとの `Σ補正後確率 − min(3, 頭数)` の中央値とレンジ(production は再正規化しない)。
@@ -217,10 +246,10 @@ y = 補正後 − prior として:
 
 ```
 # 計画と対象コードをコミットしてから(未コミットなら起動時に失敗する)
-pnpm tsx scripts/probability-quality-41-llm/build-prompts.ts --raw-dir <#41 の raw> --work-dir <リポジトリ外>   # 重賞過去結果だけネットワーク(最小 9 回)
+pnpm tsx scripts/probability-quality-41-llm/build-prompts.ts --raw-dir <#41 の raw> --work-dir <リポジトリ外・raw と入れ子にしない。例: scratchpad/pq156-work>   # 重賞過去結果だけネットワーク(最小 9 回)
 #   → docs/investigations/probability-quality-41-llm/{prompts,grade-winner,index.json} をコミット
 # メインがサブエージェントを 1 レース 1 体起動(§5)。各トランスクリプトから:
-pnpm tsx scripts/probability-quality-41-llm/extract-response.ts --work-dir <作業ディレクトリ> --case case-NN --attempt 1 --transcript <JSONL>
+pnpm tsx scripts/probability-quality-41-llm/extract-response.ts --work-dir <作業ディレクトリ(例: scratchpad/pq156-work)> --case case-NN --attempt 1 --transcript <JSONL>   # subagent-runs.json にも追記
 pnpm tsx scripts/probability-quality-41-llm/apply-all.ts --raw-dir <#41 の raw> --work-dir <作業ディレクトリ>        # オフライン。pending があれば終了コード 3
 #   → pending のケースに新しい 1 体で attempt 2 を作らせ、再実行。responses/ をリポジトリにコピーしてコミット
 pnpm tsx scripts/probability-quality-41-llm/aggregate.ts                                                            # オフライン
