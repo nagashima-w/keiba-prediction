@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040808",
+  "caseId": "case-34",
+  "promptVersion": "2026-07-28.2",
+  "maxAdjust": 0.1,
+  "promptSha256": "9de0485adefde056f6594389d38eb805ed2c0f02412ab5caaf4ae20487041c9b",
+  "responseSha256": [
+    "044b07c50ea8afde5ab2300d27879494efb06f2e8470fc2d0f9b7fd1ac955071"
+  ],
+  "attempts": 1,
+  "retryCount": 0,
+  "fallback": false,
+  "fallbackReason": null,
+  "marksDropped": false,
+  "truncated": false,
+  "horses": [
+    {
+      "umaban": 1,
+      "prior": 0.27492868131329995,
+      "adjustedProb": 0.35,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": "▲"
+    },
+    {
+      "umaban": 2,
+      "prior": 0.13443600676853812,
+      "adjustedProb": 0.08,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 3,
+      "prior": 0.23078565807699714,
+      "adjustedProb": 0.18,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 4,
+      "prior": 0.3503646199240045,
+      "adjustedProb": 0.42,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": "◎"
+    },
+    {
+      "umaban": 5,
+      "prior": 0.16110408830284187,
+      "adjustedProb": 0.08,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 6,
+      "prior": 0.022671551759992675,
+      "adjustedProb": 0.01,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 7,
+      "prior": 0.24115245808476804,
+      "adjustedProb": 0.19,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": "△"
+    },
+    {
+      "umaban": 8,
+      "prior": 0.07767428631520637,
+      "adjustedProb": 0.11,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": "注"
+    },
+    {
+      "umaban": 9,
+      "prior": 0.048140222962716375,
+      "adjustedProb": 0.03,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 10,
+      "prior": 0.20142237378182704,
+      "adjustedProb": 0.15,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 11,
+      "prior": 0.2086913953210301,
+      "adjustedProb": 0.17,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 12,
+      "prior": 0.28089110644650533,
+      "adjustedProb": 0.36,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": "〇"
+    },
+    {
+      "umaban": 13,
+      "prior": 0.42886667254728295,
+      "adjustedProb": 0.38,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": "☆"
+    },
+    {
+      "umaban": 14,
+      "prior": 0.17571347978393997,
+      "adjustedProb": 0.13,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 15,
+      "prior": 0.08004660804052395,
+      "adjustedProb": 0.04,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    },
+    {
+      "umaban": 16,
+      "prior": 0.08311079057052605,
+      "adjustedProb": 0.06,
+      "clipped": false,
+      "usedPrior": false,
+      "mark": null
+    }
+  ]
+}
