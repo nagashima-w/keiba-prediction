@@ -899,6 +899,13 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **#41 の測定スクリプト**: `scripts/probability-quality-41/`(`fetch.ts`=ネットワーク・観測 JSON を保存、
   `aggregate.ts`=オフライン集計)。選定ルール・指標・読み方は
   `docs/investigations/probability-quality-41/measurement-plan.md` に取得前に固定した。
+- **LLM 補正込みの確率の質(#156「#41-B」)**: 実 Claude API を使わず、production のプロンプト(`runAnalysis` を駆動して
+  `buildPrompt` の文字列を捕まえる)をサブエージェントに答えさせ、応答を production の `analyzeRace` に通して、#41 と同じ
+  36 レースで prior と LLM 補正後を同じレース集合の対で比べた。比較用に core へ `buildPairedBrierComparison`
+  (`ev/probability-quality.ts`。同じ馬集合の2つの確率列の Brier 差・分解・レース単位ブートストラップ)を追加。
+  production の LLM と同一でない近似(モデル・温度・文脈・確定オッズ等)で、区間は LLM のサンプリングのばらつきを含まない。
+  スクリプト `scripts/probability-quality-41-llm/`、計画 `docs/investigations/probability-quality-41-llm/measurement-plan.md`、
+  結果 `docs/investigations/probability-quality-41-llm/report.md`(Go/No-Go は書かない)。
 
 ## 主な当初仕様との差異(記録)
 
