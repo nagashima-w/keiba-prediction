@@ -21,6 +21,8 @@ import {
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
+  createModelSelector,
+  createSdkModelLister,
   DEFAULT_ANALYZER_CONFIG,
   DEFAULT_VERIFY_CONFIG,
   HttpClient,
@@ -37,6 +39,7 @@ import {
   type GradeWinnerConditions,
   type KaisaiDate,
   type MessageSender,
+  type ModelLister,
   type RaceId,
   type RaceListEntry,
   type ScorerConfig,
@@ -104,6 +107,13 @@ export interface PipelineWiringConfig {
    * 通すだけで、AnthropicLlmClient 自体・本番の既定挙動には一切手を入れない)。
    */
   readonly llmSender?: MessageSender;
+  /**
+   * テスト専用: モデル一覧取得関数の差し替え(Issue #157)。
+   * 最新 Sonnet の自動選択(Models API)は、**この lister を注入したとき**または**llmSender を
+   * 注入していない本番**のときだけ有効になる。llmSender だけを注入して modelLister を注入していない
+   * 場合は自動選択をスキップして固定モデルを使う(テストが実 Models API を呼ぶ事故を防ぐ)。
+   */
+  readonly modelLister?: ModelLister;
   /**
    * HTTP取得に使う fetch(注入)。
    *
@@ -283,6 +293,21 @@ export function createPipelineDeps(
   // deps.clipVariant(analysis-pipeline.ts が promptInput.clipVariant・promptVersion の解決に使う)の
   // 両方に同じ変数を使う(単一ソース。文面とクリップ幅が別々の値を参照して食い違う余地を無くす)。
   const clipVariant = resolveClipVariant(config.clipVariant);
+  // モデルの自動選択(Issue #157)。AnthropicLlmClient は1レースごとに new されるため、一覧の取得結果
+  // (遅延・メモ化・失敗もメモ化)と降格の記憶は、deps 単位で1つ持つ selector に置く。
+  // lister は、テスト注入(config.modelLister)か、sender 未注入の本番(実 Models API)のときだけ使う。
+  // sender だけ注入されている場合は null(自動選択スキップ=固定モデル)。
+  const modelLister =
+    config.modelLister ??
+    (config.llmSender === undefined ? createSdkModelLister({ apiKey: config.apiKey }) : null);
+  const modelSelector =
+    useLlm && modelLister !== null
+      ? createModelSelector({
+          lister: modelLister,
+          fixedModel: DEFAULT_ANALYZER_CONFIG.model,
+          onWarn: config.onWarn,
+        })
+      : undefined;
   const analyze = useLlm
     ? (input: BuildPromptInput) =>
         analyzeRace(input, {
@@ -290,7 +315,11 @@ export function createPipelineDeps(
           // AnthropicLlmClient の既定sender=実SDK呼び出しのまま。本番挙動は不変)。
           llm: new AnthropicLlmClient(
             { apiKey: config.apiKey },
-            config.llmSender ? { sender: config.llmSender } : {},
+            {
+              ...(config.llmSender ? { sender: config.llmSender } : {}),
+              ...(modelSelector !== undefined ? { modelSelector } : {}),
+              ...(config.onWarn !== undefined ? { onWarn: config.onWarn } : {}),
+            },
           ),
           maxAdjust: clipVariant.maxAdjust,
         })
@@ -324,8 +353,11 @@ export function createPipelineDeps(
         : null,
     additionalInstruction: config.additionalInstruction,
     clipVariant: clipVariant.id,
-    // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定モデル名(anthropic-client.tsの
-    // DEFAULT_ANALYZER_CONFIG.model)を注入する。LLM未使用時はundefinedのまま
+    // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定(固定)モデル名(anthropic-client.tsの
+    // DEFAULT_ANALYZER_CONFIG.model)を注入する。Issue #157 以降、実際に使ったモデルは自動選択の結果で
+    // 変わるため、保存・表示には analyzeRace の modelUsed(応答の model)を優先し、この値は
+    // modelUsed が得られなかった場合(LLM呼び出しが毎回失敗した等)の代用にだけ使う。
+    // LLM未使用時はundefinedのまま
     // (analysis-pipeline.ts側でllmUsed===falseのため、設定されていても保存レコードには使われない。
     // 二重の安全策として、そもそも注入自体もLLM使用時に限定する)。
     modelName: useLlm ? DEFAULT_ANALYZER_CONFIG.model : undefined,

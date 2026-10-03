@@ -605,6 +605,79 @@ describe("runAnalysis(分析パイプライン)", () => {
       expect(saved[0]!.rawResponse).toBe("LLMの生応答テキスト");
     });
 
+    /** 全馬 prior 採用の最小 analyze(modelUsed を差し替えられる)。 */
+    function analyzeWith(modelUsed?: string) {
+      return vi.fn(
+        async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+          rawResponse: "LLMの生応答テキスト",
+          ...(modelUsed !== undefined ? { modelUsed } : {}),
+        }),
+      );
+    }
+
+    describe("使ったモデルの記録(Issue #157。analyzeRace の modelUsed を最優先する)", () => {
+      it("modelUsed が静的な deps.modelName と異なるとき、保存レコードの model と AnalysisResult.model の両方が modelUsed になること", async () => {
+        // 前提: 自動選択モデルは固定モデル(deps.modelName)と異なる(でなければ優先順位を検出できない)
+        const auto = "claude-sonnet-9-9";
+        const fixed = "claude-sonnet-5-5";
+        expect(auto).not.toBe(fixed);
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(auto), modelName: fixed },
+          onProgress,
+        );
+        expect(saved[0]!.model).toBe(auto);
+        expect(result.model).toBe(auto);
+      });
+
+      it("modelUsed が無ければ deps.modelName を使うこと(analyzeRace が応答を得られなかった場合・旧モック)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(undefined), modelName: "claude-sonnet-5-5" },
+          onProgress,
+        );
+        expect(saved[0]!.model).toBe("claude-sonnet-5-5");
+        expect(result.model).toBe("claude-sonnet-5-5");
+      });
+
+      it("modelUsed も modelName も無ければ null であること", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(undefined) },
+          onProgress,
+        );
+        expect(saved[0]!.model).toBeNull();
+        expect(result.model).toBeNull();
+      });
+
+      it("LLMスキップ時は AnalysisResult.model が null であること(modelName が設定されていても偽値混入なし)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), modelName: "claude-sonnet-5-5" },
+          onProgress,
+        );
+        expect(result.llmUsed).toBe(false);
+        expect(result.model).toBeNull();
+        expect(saved[0]!.model).toBeNull();
+      });
+    });
+
     it("LLMスキップ時は保存レコードのmodel/rawResponseがnullになること(deps.modelNameが設定されていても偽値混入なし)", async () => {
       await runAnalysis(
         parseRaceId(RACE_ID),

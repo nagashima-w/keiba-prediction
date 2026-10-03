@@ -264,8 +264,29 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
 
 scorer の prior と多数のテキスト材料をプロンプト化し、Claude が補正後確率・予想印・根拠を返す。
 
-- **モデル/呼び出し**(`anthropic-client.ts`): 既定 `claude-sonnet-4-6`、`maxTokens=8192`、`temperature=0`。
-  18 頭級の応答が 2048 トークンで切り詰められ全馬 prior に落ちる事故を受けて 8192 に引き上げた経緯あり。
+- **モデル/呼び出し**(`anthropic-client.ts`・`model-selection.ts`。Issue #157 で `claude-sonnet-4-6` から移行):
+  - **固定モデル**は `claude-sonnet-5-5`(`DEFAULT_ANALYZER_CONFIG.model`)。**最新の Sonnet を自動選択**する:
+    Models API(`client.models.list()`)の ID を `^claude-sonnet-(\d{1,2})(-\d{1,2})?$` で絞り(日付付き
+    スナップショット・preview 等は除外。minor を1〜2桁に限るのは `claude-sonnet-4-20250514` が minor=20250514
+    の最新版として選ばれるのを防ぐため)、(major, minor) の降順、同順位は `created_at` の新しい順で選ぶ。
+    一覧は**分析の初回に遅延取得**し、`createPipelineDeps` 単位でメモ化する(失敗もメモ化・TTL なし)。
+    取得失敗・Sonnet 0件のときは固定モデル。自動選択モデルが **HTTP 400/403/404** を返したら固定モデルで
+    1回やり直し(以降その deps の間は固定モデル。切り替えは `onWarn` に記録)、401・429・5xx・
+    ネットワーク・refusal・max_tokens では切り替えない。`analyzeRace` のリトライ構造は変えない。
+  - **リクエスト**: `max_tokens=16000`(thinking を含む。非ストリーミングのまま。SDK 0.70.1 は 21333 超で
+    例外)、`output_config: { effort: "low" }`(SDK 0.70.1 の型に無いため型の外で送る。設定可能な値として
+    `AnalyzerConfig.effort` を持つ)。**`temperature` は送らない**(Sonnet 5.5 は既定値以外を拒否する)。
+    thinking は指定しない(既定の adaptive)。応答は `type==="text"` のブロックだけを連結する。
+  - **停止理由**: `max_tokens` は `AnalyzerTruncationError`、`refusal` は `AnalyzerRefusalError`
+    (固定文言 `FALLBACK_REASON_REFUSED`、`stopReason="refusal"`)として扱い、どちらも1回リトライしたうえで
+    全馬 prior にフォールバックする。
+  - **使ったモデルの記録**: `LlmClient.completeDetailed`(任意実装)が `{text, model}` を返し、
+    `AnalyzeRaceResult.modelUsed`(応答の `model` を優先、無ければリクエストした ID)→
+    `analyses.model` 列と `AnalysisResult.model` に記録する(LLM 呼び出しが毎回失敗して応答が無いときは静的な
+    固定モデル名で代用)。分析結果の画面に「分析モデル: …」を1行出す。`PROMPT_VERSION` は上げない
+    (文面が同一のため。検証画面の版別集計にはモデルが混ざる)。
+  - 経緯: 旧設定は `maxTokens=8192`・`temperature=0`。18 頭級の応答が 2048 トークンで切り詰められ
+    全馬 prior に落ちる事故を受けて 8192 にしていたが、thinking の出力も数える Sonnet 5.5 では 16000 にした。
 - **プロンプト材料**(`build-prompt.ts` が組み立て、各材料は決定論的な純関数):
   展開想定(脚質分布・主導権候補・想定ペース・恵まれる/損する脚質、`leg-style.ts`。地方の前残り・馬場不良に
   対応)/ 芝の傷み目安(`turf-wear.ts`)/ 当日傾向(同一場・同一面の当日結果集計、`same-day-trend.ts`)/

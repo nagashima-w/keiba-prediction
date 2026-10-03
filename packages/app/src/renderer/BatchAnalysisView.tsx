@@ -56,6 +56,7 @@ import {
   summarizeBatch,
 } from "./batch-summary.js";
 import {
+  analysisModelText,
   formatConditionChangeTags,
   formatEstimatedEvSuffix,
   formatEv,
@@ -203,6 +204,11 @@ function ResultTable(props: {
           分析データをエクスポート
         </button>
       </p>
+      {analysisModelText(result) !== null && (
+        <p style={{ margin: "0.25rem 0", color: "#555", fontSize: "0.85rem" }}>
+          {analysisModelText(result)}
+        </p>
+      )}
       {oddsStatusNote(result.oddsStatus) !== null && (
         <p style={{ margin: "0.25rem 0", color: "#a60", fontSize: "0.85rem" }}>
           ※{oddsStatusNote(result.oddsStatus)}

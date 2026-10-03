@@ -333,6 +333,15 @@ export interface AnalysisResult {
   /** marksDropped:true の場合の理由説明(通常時・非印失敗時は null)。 */
   readonly marksDroppedReason?: string | null;
   /**
+   * 分析に使ったLLMモデルID(Issue #157。保存レコードの `analyses.model` と同じ値)。
+   * analyzeRace が応答を得たモデル(自動選択の結果。固定モデルへ切り替わればそちら)を優先し、
+   * 得られなければ静的な既定モデル名。LLMスキップ時は null。
+   * optional なのは既存の AnalysisResult リテラルを使うテスト・旧データを無改変で通すため
+   * (runAnalysis 自身は必ず string/null のいずれかを明示的に返す)。
+   * 分析結果の画面に「分析モデル: …」として出す(renderer/format.ts の analysisModelText)。
+   */
+  readonly model?: string | null;
+  /**
    * オッズの発売状態(確定/発売中/予想)。
    * "yoso" は複勝未発売のため全馬のEVが null になる(UIで注記表示)。
    */

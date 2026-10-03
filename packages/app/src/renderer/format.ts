@@ -138,6 +138,20 @@ export function llmCorrectionStatusText(result: {
 }
 
 /**
+ * 分析結果の「分析モデル: …」行の文言(Issue #157)。LLM を実行し、モデルIDが分かるときだけ返す。
+ * LLMスキップ時は(model が入っていても)null: スキップした分析にモデル名を出すと偽の表示になる。
+ * モデル不明(null・未設定・空文字)も null(行自体を出さない)。
+ */
+export function analysisModelText(result: {
+  readonly llmUsed: boolean;
+  readonly model?: string | null;
+}): string | null {
+  if (!result.llmUsed) return null;
+  if (typeof result.model !== "string" || result.model === "") return null;
+  return `分析モデル: ${result.model}`;
+}
+
+/**
  * 「LLM補正:」行のtooltip(title属性)に表示する理由文言(論点C: fallbackReasonのUI伝播、
  * 2026-07-19合意)。llmCorrectionStatusText と同じ優先順位で、fallback:true(確率補正自体が
  * 無効・より重大)を marksDropped:true(印だけ非表示・確率補正は有効)より優先する。

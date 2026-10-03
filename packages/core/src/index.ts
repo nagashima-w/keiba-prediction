@@ -414,6 +414,7 @@ export {
 } from "./analyzer/build-prompt.js";
 export {
   AnalyzerMarkViolationError,
+  AnalyzerRefusalError,
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
   extractJsonObject,
@@ -430,22 +431,37 @@ export {
   analyzeRace,
   FALLBACK_REASON_INVOCATION_ERROR,
   FALLBACK_REASON_PARSE_ERROR,
+  FALLBACK_REASON_REFUSED,
   FALLBACK_REASON_TRUNCATED,
   type AnalyzeRaceDeps,
   type AnalyzeRaceResult,
   type LlmClient,
+  type LlmCompletion,
 } from "./analyzer/analyze-race.js";
 export {
   AnthropicLlmClient,
   buildRequestParams,
+  createSdkMessageSender,
   DEFAULT_ANALYZER_CONFIG,
   extractText,
   type AnalyzerConfig,
+  type AnalyzerEffort,
   type AnthropicLlmClientDeps,
   type AnthropicMessageResponse,
   type AnthropicRequestParams,
   type MessageSender,
+  type SdkMessageSenderOptions,
 } from "./analyzer/anthropic-client.js";
+export {
+  createModelSelector,
+  createSdkModelLister,
+  pickLatestSonnet,
+  type ModelInfoLite,
+  type ModelLister,
+  type ModelSelector,
+  type ModelSelectorOptions,
+  type SdkModelListerOptions,
+} from "./analyzer/model-selection.js";
 export {
   buildAnalysisEmbed,
   DEFAULT_DISCORD_TIMEOUT_MS,

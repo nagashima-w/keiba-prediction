@@ -17,7 +17,7 @@ netkeibaのデータをスクレイピングし、Claude APIで各馬の複勝�
   - 理由: スクレイピング(cheerio + undici)、デスクトップUI(Electron)、Discord bot(discord.js)がすべて同一言語・同一コアロジックで書ける
 - **コア**: `packages/core` — scraper / scorer / analyzer / ev をUIから独立したライブラリとして実装(monorepo構成、pnpm workspace)
 - **UI**: Electron + React。コアを直接importして使う
-- **LLM**: Anthropic API(claude-sonnet-4-6)
+- **LLM**: Anthropic API(最新の Sonnet を Models API で自動選択。固定モデルは claude-sonnet-5-5。Issue #157 で claude-sonnet-4-6 から移行。詳細は `docs/current-spec.md` §3)
 - **通知**: Discord Webhook(分析結果のプッシュ用)
 - **データ保存**: SQLite(better-sqlite3)。スクレイピングキャッシュ・分析履歴・検証結果を保存
 - **配布**: GitHub ActionsでWindows向けにelectron-builderでビルド

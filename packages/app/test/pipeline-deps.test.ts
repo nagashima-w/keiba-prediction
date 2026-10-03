@@ -979,4 +979,169 @@ describe("createPipelineDeps(本番依存の配線)", () => {
     expect(onWarn).toHaveBeenCalledTimes(1);
     expect(onWarn.mock.calls[0]![0]).toContain("shift_jis");
   });
+
+  describe("LLMモデルの自動選択とリクエストの形(Issue #157)", () => {
+    const FIXED = DEFAULT_ANALYZER_CONFIG.model;
+    const AUTO = "claude-sonnet-9-9";
+    const MODELS = [
+      { id: "claude-sonnet-4-6", created_at: "2026-02-01T00:00:00Z" },
+      { id: AUTO, created_at: "2027-01-01T00:00:00Z" },
+      { id: FIXED, created_at: "2026-09-01T00:00:00Z" },
+    ];
+
+    const okText = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎" },
+        { number: 2, place_prob: 0.3, reason: "x", mark: "〇" },
+        { number: 3, place_prob: 0.3, reason: "x", mark: "▲" },
+        { number: 4, place_prob: 0.3, reason: "x", mark: "△" },
+      ],
+    });
+
+    function samplePromptInput(): BuildPromptInput {
+      return {
+        race: { courseType: "芝", distance: 1600 },
+        horses: [
+          { umaban: 1, horseName: "対象馬", prior: 0.4, runs: [] },
+          { umaban: 2, horseName: "馬2", prior: 0.3, runs: [] },
+          { umaban: 3, horseName: "馬3", prior: 0.3, runs: [] },
+          { umaban: 4, horseName: "馬4", prior: 0.3, runs: [] },
+        ],
+      };
+    }
+
+    function okSender() {
+      return vi.fn<MessageSender>(async (params) => ({
+        content: [{ type: "text", text: okText }],
+        model: params.model,
+      }));
+    }
+
+    it("前提: 自動選択されるモデルは固定モデルと異なること", () => {
+      expect(AUTO).not.toBe(FIXED);
+      expect(FIXED).toBe("claude-sonnet-5-5");
+    });
+
+    it("lister(modelLister)を注入すると、最新 Sonnet で送り、使ったモデルを modelUsed に返すこと", async () => {
+      const sender = okSender();
+      const lister = vi.fn(async () => MODELS);
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: lister,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(result.fallback).toBe(false);
+      expect(sender.mock.calls[0]![0].model).toBe(AUTO);
+      expect(result.modelUsed).toBe(AUTO);
+    });
+
+    it("lister の取得は analyze の初回に遅延実行され、複数レース(クライアントは都度 new)でも deps 単位で1回だけであること", async () => {
+      const sender = okSender();
+      const lister = vi.fn(async () => MODELS);
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: lister,
+      });
+      resources.push(r);
+      expect(lister).not.toHaveBeenCalled();
+      await r.deps.analyze!(samplePromptInput());
+      await r.deps.analyze!(samplePromptInput());
+      await r.deps.analyze!(samplePromptInput());
+      expect(lister).toHaveBeenCalledTimes(1);
+      expect(sender).toHaveBeenCalledTimes(3);
+    });
+
+    it("sender だけを注入して lister を注入しない場合は、自動選択をスキップして固定モデルで送ること(テストが実 API を呼ぶ事故の防止)", async () => {
+      const sender = okSender();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(sender).toHaveBeenCalledTimes(1);
+      expect(sender.mock.calls[0]![0].model).toBe(FIXED);
+      expect(result.modelUsed).toBe(FIXED);
+    });
+
+    it("一覧取得が失敗したら固定モデルで送り、警告を onWarn に残すこと", async () => {
+      const sender = okSender();
+      const onWarn = vi.fn<(m: string) => void>();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: async () => {
+          throw new Error("一覧取得失敗");
+        },
+        onWarn,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(sender.mock.calls[0]![0].model).toBe(FIXED);
+      expect(result.modelUsed).toBe(FIXED);
+      expect(onWarn).toHaveBeenCalled();
+    });
+
+    it("自動選択モデルが 400 を返したら固定モデルでやり直し、modelUsed は固定モデル・以降のレースも固定モデルで送ること", async () => {
+      const sender = vi.fn<MessageSender>(async (params) => {
+        if (params.model === AUTO) {
+          throw Object.assign(new Error("invalid_request_error"), { status: 400 });
+        }
+        return { content: [{ type: "text", text: okText }], model: params.model };
+      });
+      const onWarn = vi.fn<(m: string) => void>();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+        modelLister: async () => MODELS,
+        onWarn,
+      });
+      resources.push(r);
+      const first = await r.deps.analyze!(samplePromptInput());
+      expect(first.fallback).toBe(false);
+      expect(first.modelUsed).toBe(FIXED);
+      expect(sender.mock.calls.map((c) => c[0].model)).toEqual([AUTO, FIXED]);
+      const second = await r.deps.analyze!(samplePromptInput());
+      expect(second.modelUsed).toBe(FIXED);
+      expect(sender.mock.calls.map((c) => c[0].model)).toEqual([AUTO, FIXED, FIXED]);
+      expect(onWarn.mock.calls.some((c) => c[0].includes(AUTO))).toBe(true);
+    });
+
+    it("リクエストに temperature を載せず、output_config.effort='low'・max_tokens=16000 を載せること", async () => {
+      const sender = okSender();
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+      });
+      resources.push(r);
+      await r.deps.analyze!(samplePromptInput());
+      const params = sender.mock.calls[0]![0];
+      expect("temperature" in params).toBe(false);
+      expect(params.output_config).toEqual({ effort: "low" });
+      expect(params.max_tokens).toBe(16000);
+    });
+
+    it("refusal 応答は2回とも拒否なら prior へフォールバックし、固定文言と stopReason='refusal' を返すこと", async () => {
+      const sender = vi.fn<MessageSender>(async () => ({ content: [], stop_reason: "refusal" }));
+      const r = createPipelineDeps({
+        dbPath: ":memory:",
+        apiKey: "sk-ant-fake-test-key-not-real",
+        llmSender: sender,
+      });
+      resources.push(r);
+      const result = await r.deps.analyze!(samplePromptInput());
+      expect(result.fallback).toBe(true);
+      expect(result.stopReason).toBe("refusal");
+      expect(sender).toHaveBeenCalledTimes(2);
+    });
+  });
 });

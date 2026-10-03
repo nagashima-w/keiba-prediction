@@ -184,7 +184,7 @@ export interface AnalysisRecord {
    */
   readonly promptLookaheadGuarded?: boolean | null;
   /**
-   * 使用したLLMモデル名(Issue#10 分析データのエクスポート、例: "claude-sonnet-4-6")。
+   * 使用したLLMモデル名(Issue#10 分析データのエクスポート、例: "claude-sonnet-5-5")。
    * LLMを使わず prior をそのまま採用した分析(LLMスキップ)は null を渡す想定(偽値を混入させない)。
    * 省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
    */

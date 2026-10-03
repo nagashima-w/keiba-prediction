@@ -99,6 +99,27 @@ export class AnalyzerTruncationError extends AnalyzerResponseParseError {
 }
 
 /**
+ * LLM応答が安全分類器により拒否されたこと(stop_reason==="refusal")を表すエラー(Issue #157。
+ * Claude Sonnet 5.5 以降は HTTP 200 のまま content が空で返ることがあり、そのままでは
+ * 「JSON解析失敗」に埋もれて原因が分からなくなる)。
+ * AnthropicLlmClient.complete()(anthropic-client.ts)が検出した際に投げる。
+ * AnalyzerTruncationError と同型で、AnalyzerResponseParseError のサブクラスなので
+ * 既存の `instanceof AnalyzerResponseParseError` 判定・リトライ意味論(1回だけ同一プロンプトで
+ * リトライ)を壊さない。analyze-race 側は専用の固定文言(FALLBACK_REASON_REFUSED)と
+ * stopReason を返す。
+ */
+export class AnalyzerRefusalError extends AnalyzerResponseParseError {
+  /** 検出した生の stop_reason(現状は常に "refusal")。診断用に保持する。 */
+  readonly stopReason: string;
+
+  constructor(message: string, stopReason: string) {
+    super(message);
+    this.name = "AnalyzerRefusalError";
+    this.stopReason = stopReason;
+  }
+}
+
+/**
  * 予想印関連の違反(頭数制約・優先順位・未知の印文字の3種)を表すエラー(A: フォールバック分離)。
  * AnalyzerResponseParseError のサブクラスなので既存の `toThrow(AnalyzerResponseParseError)` は
  * 引き続き成立する。印以外は正常に計算できた確率補正(adjustedProb/clipped/reason/usedPrior)を

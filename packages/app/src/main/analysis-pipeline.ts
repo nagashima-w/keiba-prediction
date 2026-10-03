@@ -135,7 +135,9 @@ export interface AnalysisPipelineDeps {
   /** LLMスキップ理由(analyze=null のとき結果メタに載せる文言)。 */
   readonly llmSkipReason?: string;
   /**
-   * 使用するLLMモデル名(Issue#10 分析データのエクスポート。例: "claude-sonnet-4-6")。
+   * 使用するLLMモデル名(Issue#10 分析データのエクスポート。例: "claude-sonnet-5-5")。
+   * Issue #157 以降は、analyzeRace の modelUsed(実際に応答したモデル。自動選択の結果)を優先し、
+   * この値は modelUsed が無いとき(応答を得られなかった場合・旧モック)の代用にだけ使う。
    * LLM使用時(deps.analyze!==null)のみ保存レコードの model 列に記録する。LLMスキップ時は
    * この値が設定されていても保存レコードの model は null にする(偽値混入を避けるため。
    * 呼び出し側〈pipeline-deps.ts〉は useLlm===true のときだけこの値を注入する想定)。
@@ -437,6 +439,9 @@ export async function runAnalysis(
   // (record組み立て時に llmUsed で判定して null にする。偽値混入を避けるため、この変数自体は
   // LLM使用時のみ analyzeRace の結果で上書きする)。
   let rawResponse: string | null = null;
+  // 実際に使ったLLMモデル(Issue #157)。analyzeRace の modelUsed(応答の model。自動選択の結果)を
+  // 優先し、無ければ静的な deps.modelName。LLMスキップ時は null のまま(偽値を混入させない)。
+  let modelUsed: string | null = null;
   const adjustedByUmaban = new Map<number, AdjustedHorse>();
 
   if (deps.analyze === null) {
@@ -621,6 +626,8 @@ export async function runAnalysis(
     // LLMの生応答テキスト(Issue#10)。core AnalyzeRaceResult.rawResponse は既存呼び出し元との
     // 互換のため optional(未設定時はtext未取得の失敗)なので、明示的にnullへ正規化する。
     rawResponse = analysis.rawResponse ?? null;
+    // 使ったモデル(Issue #157)。応答の model を優先し、無ければ静的な modelName で代用する。
+    modelUsed = analysis.modelUsed ?? deps.modelName ?? null;
     // フォールバック発生時のみ診断ログ用フックを呼ぶ(論点E)。生の診断詳細
     // (diagnosticMessage)はUI/DBへは渡さず、このフック経由でのみログ基盤へ渡す。
     if (fallback) {
@@ -802,7 +809,7 @@ export async function runAnalysis(
     promptLookaheadGuarded: true,
     // 使用したLLMモデル名(Issue#10)。LLMを実際に使った分析のみ記録する(promptVersionと同じ方針。
     // LLMスキップ時は deps.modelName が設定されていても null にし、偽値を混入させない)。
-    model: llmUsed ? (deps.modelName ?? null) : null,
+    model: llmUsed ? modelUsed : null,
     // LLMの生応答テキスト(Issue#10)。LLMスキップ時は null(rawResponse変数はLLM使用時のみ
     // analyzeRaceの結果で上書きされる。上記(3)参照)。
     rawResponse: llmUsed ? rawResponse : null,
@@ -848,6 +855,8 @@ export async function runAnalysis(
     fallbackReason,
     marksDropped,
     marksDroppedReason,
+    // 分析に使ったLLMモデル(Issue #157)。保存レコードの model と同じ値(LLMスキップ時は null)。
+    model: llmUsed ? modelUsed : null,
     oddsStatus: race.odds.oddsStatus,
     rows,
     warnings: race.meta.warnings.map((w) => w.message),
