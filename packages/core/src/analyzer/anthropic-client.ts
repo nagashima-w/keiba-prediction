@@ -229,10 +229,15 @@ export class AnthropicLlmClient implements LlmClient {
       throw new AnalyzerTruncationError(
         "LLM応答が長さ上限(max_tokens)で切り詰められました",
         res.stop_reason,
+        res.model ?? model,
       );
     }
     if (res.stop_reason === "refusal") {
-      throw new AnalyzerRefusalError("LLMが応答を拒否しました(stop_reason: refusal)", res.stop_reason);
+      throw new AnalyzerRefusalError(
+        "LLMが応答を拒否しました(stop_reason: refusal)",
+        res.stop_reason,
+        res.model ?? model,
+      );
     }
     return { text: extractText(res), model: res.model ?? model };
   }

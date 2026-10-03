@@ -1130,6 +1130,29 @@ describe("createPipelineDeps(本番依存の配線)", () => {
       expect(params.max_tokens).toBe(16000);
     });
 
+    it.each(["refusal", "max_tokens"])(
+      "自動選択モデルが2回とも stop_reason='%s' で終わっても、modelUsed は実際に応答した自動選択モデルであること(固定モデル名で代用しない)",
+      async (stop) => {
+        expect(AUTO).not.toBe(FIXED);
+        const sender = vi.fn<MessageSender>(async (params) => ({
+          content: [],
+          stop_reason: stop,
+          model: params.model,
+        }));
+        const r = createPipelineDeps({
+          dbPath: ":memory:",
+          apiKey: "sk-ant-fake-test-key-not-real",
+          llmSender: sender,
+          modelLister: async () => MODELS,
+        });
+        resources.push(r);
+        const result = await r.deps.analyze!(samplePromptInput());
+        expect(result.fallback).toBe(true);
+        expect(sender.mock.calls.map((c) => c[0].model)).toEqual([AUTO, AUTO]);
+        expect(result.modelUsed).toBe(AUTO);
+      },
+    );
+
     it("refusal 応答は2回とも拒否なら prior へフォールバックし、固定文言と stopReason='refusal' を返すこと", async () => {
       const sender = vi.fn<MessageSender>(async () => ({ content: [], stop_reason: "refusal" }));
       const r = createPipelineDeps({

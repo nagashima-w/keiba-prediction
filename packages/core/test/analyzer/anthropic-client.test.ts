@@ -200,6 +200,33 @@ describe("AnthropicLlmClient(モデル自動選択なし)", () => {
     }
   });
 
+  it.each([
+    { stop: "refusal", cls: AnalyzerRefusalError },
+    { stop: "max_tokens", cls: AnalyzerTruncationError },
+  ] as const)(
+    "complete: stop_reason='$stop' で投げるエラーが、応答したモデル(レスポンスの model 優先・無ければリクエストしたID)を保持すること",
+    async ({ stop, cls }) => {
+      // 前提: 応答したモデルとリクエストしたモデルが異なる(でなければ優先順位を検出できない)
+      const requested = "claude-requested";
+      const served = "claude-sonnet-9-9";
+      expect(served).not.toBe(requested);
+
+      const withModel = vi.fn<SenderFn>(async () => ({
+        content: [],
+        stop_reason: stop,
+        model: served,
+      }));
+      await expect(
+        new AnthropicLlmClient({ model: requested }, { sender: withModel }).complete("p"),
+      ).rejects.toSatisfy((e: unknown) => e instanceof cls && e.model === served);
+
+      const noModel = vi.fn<SenderFn>(async () => ({ content: [], stop_reason: stop }));
+      await expect(
+        new AnthropicLlmClient({ model: requested }, { sender: noModel }).complete("p"),
+      ).rejects.toSatisfy((e: unknown) => e instanceof cls && e.model === requested);
+    },
+  );
+
   it.each(["end_turn", "tool_use", "stop_sequence", undefined, null] as const)(
     "complete: stop_reason=%s では切り詰め・拒否扱いにせずテキストを返すこと",
     async (stopReason) => {

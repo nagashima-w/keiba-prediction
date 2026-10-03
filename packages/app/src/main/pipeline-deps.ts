@@ -356,7 +356,7 @@ export function createPipelineDeps(
     // 使用するLLMモデル名(Issue#10)。LLM使用時のみ既定(固定)モデル名(anthropic-client.tsの
     // DEFAULT_ANALYZER_CONFIG.model)を注入する。Issue #157 以降、実際に使ったモデルは自動選択の結果で
     // 変わるため、保存・表示には analyzeRace の modelUsed(応答の model)を優先し、この値は
-    // modelUsed が得られなかった場合(LLM呼び出しが毎回失敗した等)の代用にだけ使う。
+    // modelUsed が得られなかった場合(HTTPエラー・ネットワーク断等で応答自体が毎回得られなかった等)の代用にだけ使う。
     // LLM未使用時はundefinedのまま
     // (analysis-pipeline.ts側でllmUsed===falseのため、設定されていても保存レコードには使われない。
     // 二重の安全策として、そもそも注入自体もLLM使用時に限定する)。

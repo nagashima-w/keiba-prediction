@@ -561,6 +561,42 @@ describe("analyzeRace(使ったモデルの記録 modelUsed・Issue #157)", () =
     expect("modelUsed" in r).toBe(false);
   });
 
+  it.each([
+    { name: "拒否", make: (model: string) => new AnalyzerRefusalError("拒否", "refusal", model) },
+    {
+      name: "切り詰め",
+      make: (model: string) => new AnalyzerTruncationError("切り詰め", "max_tokens", model),
+    },
+  ])(
+    "2回とも$nameで終わっても、エラーが運ぶ応答モデルを modelUsed に載せること(固定モデル名での代用に落とさない)",
+    async ({ make }) => {
+      const served = "claude-sonnet-9-9";
+      const llm = detailedLlm(make(served), make(served));
+      const r = await analyzeRace(input(), { llm });
+      expect(r.fallback).toBe(true);
+      expect(r.modelUsed).toBe(served);
+    },
+  );
+
+  it("拒否のあと呼び出し例外で終わった場合も、拒否で分かった応答モデルを modelUsed に残すこと", async () => {
+    const llm = detailedLlm(
+      new AnalyzerRefusalError("拒否", "refusal", "claude-sonnet-9-9"),
+      new Error("ネットワーク断"),
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.modelUsed).toBe("claude-sonnet-9-9");
+  });
+
+  it("model を持たない(旧形式の)拒否・切り詰めエラーでは modelUsed を載せないこと", async () => {
+    const llm = detailedLlm(
+      new AnalyzerRefusalError("拒否", "refusal"),
+      new AnalyzerTruncationError("切り詰め", "max_tokens"),
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect("modelUsed" in r).toBe(false);
+  });
+
   it("completeDetailed が無い LlmClient(旧実装・既存モック)では modelUsed を載せず、complete で動くこと(後方互換)", async () => {
     const llm = fixedLlm(okBody);
     const r = await analyzeRace(input(), { llm });

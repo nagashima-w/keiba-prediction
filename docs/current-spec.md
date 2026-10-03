@@ -282,8 +282,8 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     全馬 prior にフォールバックする。
   - **使ったモデルの記録**: `LlmClient.completeDetailed`(任意実装)が `{text, model}` を返し、
     `AnalyzeRaceResult.modelUsed`(応答の `model` を優先、無ければリクエストした ID)→
-    `analyses.model` 列と `AnalysisResult.model` に記録する(LLM 呼び出しが毎回失敗して応答が無いときは静的な
-    固定モデル名で代用)。分析結果の画面に「分析モデル: …」を1行出す。`PROMPT_VERSION` は上げない
+    `analyses.model` 列と `AnalysisResult.model` に記録する(拒否・切り詰めで終わった場合も、例外が運ぶ応答モデルで
+    記録する。HTTP エラー・ネットワーク断などで応答自体を得られなかったときだけ、静的な固定モデル名で代用)。分析結果の画面に「分析モデル: …」を1行出す。`PROMPT_VERSION` は上げない
     (文面が同一のため。検証画面の版別集計にはモデルが混ざる)。
   - 経緯: 旧設定は `maxTokens=8192`・`temperature=0`。18 頭級の応答が 2048 トークンで切り詰められ
     全馬 prior に落ちる事故を受けて 8192 にしていたが、thinking の出力も数える Sonnet 5.5 では 16000 にした。

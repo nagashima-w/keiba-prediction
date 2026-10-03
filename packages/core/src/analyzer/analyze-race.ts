@@ -161,7 +161,9 @@ export interface AnalyzeRaceResult {
   /**
    * 実際に応答したモデルID(Issue #157)。LlmClient.completeDetailed を持つ実装のときだけ載り、
    * 応答を得られた最後の試行のモデルが入る(リトライで切り替わった場合は採用した試行のもの)。
-   * LLM呼び出しが毎回例外で応答を得られなかった場合・completeDetailed を持たない LlmClient では
+   * 拒否(refusal)・切り詰め(max_tokens)は応答自体は得ているため、例外が運ぶ model で埋める。
+   * 応答を得られなかった(HTTPエラー・ネットワーク断等の)呼び出しが毎回の場合・
+   * completeDetailed を持たない LlmClient では
    * キー自体を持たない(呼び出し側は静的なモデル名で代用する)。
    */
   readonly modelUsed?: string;
@@ -229,6 +231,14 @@ export async function analyzeRace(
       // LLM呼び出し自体の例外(認証エラー・レート制限・ネットワーク断等)。テキスト自体を
       // 取得できていないため、rawResponse は次の試行に持ち越さず null のままにする。
       lastError = e;
+      // 拒否・切り詰めは応答したモデルを例外に載せて返す(応答は得ているため、使ったモデルとして残す。
+      // 残さないと、呼び出し側が静的な固定モデル名で代用して実際と違う値を記録してしまう)。
+      if (
+        (e instanceof AnalyzerRefusalError || e instanceof AnalyzerTruncationError) &&
+        e.model !== undefined
+      ) {
+        modelUsed = e.model;
+      }
       continue;
     }
     try {

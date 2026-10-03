@@ -90,11 +90,18 @@ export class AnalyzerResponseParseError extends Error {
 export class AnalyzerTruncationError extends AnalyzerResponseParseError {
   /** 検出した生の stop_reason(現状は常に "max_tokens")。診断用に保持する。 */
   readonly stopReason: string;
+  /**
+   * 応答したモデルID(Issue #157。AnthropicLlmClient が渡す。レスポンスの model 優先、無ければ
+   * リクエストしたID)。例外で終わっても「実際に使ったモデル」の記録を失わないために運ぶ。
+   * 旧形式で作られたエラーでは undefined。
+   */
+  readonly model: string | undefined;
 
-  constructor(message: string, stopReason: string) {
+  constructor(message: string, stopReason: string, model?: string) {
     super(message);
     this.name = "AnalyzerTruncationError";
     this.stopReason = stopReason;
+    this.model = model;
   }
 }
 
@@ -111,11 +118,18 @@ export class AnalyzerTruncationError extends AnalyzerResponseParseError {
 export class AnalyzerRefusalError extends AnalyzerResponseParseError {
   /** 検出した生の stop_reason(現状は常に "refusal")。診断用に保持する。 */
   readonly stopReason: string;
+  /**
+   * 応答したモデルID(Issue #157。AnthropicLlmClient が渡す。レスポンスの model 優先、無ければ
+   * リクエストしたID)。例外で終わっても「実際に使ったモデル」の記録を失わないために運ぶ。
+   * 旧形式で作られたエラーでは undefined。
+   */
+  readonly model: string | undefined;
 
-  constructor(message: string, stopReason: string) {
+  constructor(message: string, stopReason: string, model?: string) {
     super(message);
     this.name = "AnalyzerRefusalError";
     this.stopReason = stopReason;
+    this.model = model;
   }
 }
 
