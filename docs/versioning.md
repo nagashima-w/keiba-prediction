@@ -2228,6 +2228,27 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC は無変更(読み取り側 TTL のため保存済みのキャッシュの移行も不要)
 
+## 次の正式版が 1.18.1 である根拠(Issue #156 での変更)
+
+**patch**(LLM 補正込みの確率の質を測る仕組みと測定結果の追加。利用者から見える変化は無い)。
+
+### 変更内容
+
+- core: `buildPairedBrierComparison`(同じ馬集合の2つの確率列の Brier 差・分解・レース単位ブートストラップ)を
+  `ev/probability-quality.ts` に追加した(既存の公開関数・`verify.ts` は無変更)
+- scripts: `scripts/probability-quality-41-llm/`(production の `runAnalysis` を駆動してプロンプトを作り、サブエージェントの応答を
+  トランスクリプトから抽出・検証し、production の `analyzeRace` に通して集計する)
+- docs: `docs/investigations/probability-quality-41-llm/`(実行前に固定した計画・プロンプト・応答・観測・集計・レポート)
+
+### patch である根拠
+
+- 追加した core の関数は計測スクリプトからだけ呼ばれ、app の経路(分析・配分・検証画面)からは呼ばれない
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC は無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
