@@ -146,7 +146,8 @@ export function venueKindOfRaceId(raceId: RaceId): RaceIdVenueKind {
 
 /**
  * 同一場・同一開催日の兄弟レースID(自身のレース番号を除く01〜12)を列挙する
- * (タスク#27-C: 当日の同一場・同一面傾向の集計対象探索に使う)。
+ * (タスク#27-C: 当日の同一場・同一面傾向の集計対象探索に使っていた。production では
+ * `precedingRaceIdsSameDay` 経由でのみ使われる)。
  *
  * レースIDの先頭10桁(中央: 場コード+回次+日次、地方: 場コード+月+日)が同一なら
  * 同一場・同一開催日であることを利用し、11〜12桁目(レース番号)だけを01〜12へ
@@ -175,6 +176,31 @@ export function siblingRaceIdsSameDay(raceId: RaceId): RaceId[] {
     }
   }
   return siblings;
+}
+
+/**
+ * 同一場・同一開催日のレースのうち、自レースより**前**のレースID(自番号より小さい01〜N-1)を
+ * 昇順で列挙する(Issue #153: 当日傾向〈sameDayTrend〉の先読みリーク遮断)。
+ *
+ * 当日傾向は「このレースが発走する時点で結果が出ている同日のレース」だけを材料にすべきで、
+ * レース番号が自レースより大きいレースは(過去のレースを後から分析する場合、結果が取り込まれて
+ * いても)発走時点では結果が存在しない。そのため自番号より小さい番号だけを返す。
+ * 自番号が01なら空配列を返す。実際にそのレースが開催されたか・結果が取り込まれているかは
+ * 検証しない(`siblingRaceIdsSameDay` と同じく、呼び出し側が結果取得〈lookup〉で
+ * 「該当データなし」として自然にスキップする前提)。
+ *
+ * 候補の列挙は `siblingRaceIdsSameDay`(自番号以外の01〜12。変更しない)に委ね、その結果から自番号より
+ * 小さいものだけを残す。`collectSameDayTrend` はこの関数だけを呼び、`siblingRaceIdsSameDay` を
+ * 直接は呼ばない。
+ *
+ * @param raceId 検証済みのレースID(基準となる自レース)
+ * @returns 自番号より小さいレース番号の同日レースID(レース番号昇順。自番号は含まない)
+ */
+export function precedingRaceIdsSameDay(raceId: RaceId): RaceId[] {
+  const ownRaceNumber = Number(raceId.slice(10, 12));
+  return siblingRaceIdsSameDay(raceId).filter(
+    (id) => Number(id.slice(10, 12)) < ownRaceNumber,
+  );
 }
 
 /**

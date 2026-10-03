@@ -90,11 +90,46 @@ export class AnalyzerResponseParseError extends Error {
 export class AnalyzerTruncationError extends AnalyzerResponseParseError {
   /** 検出した生の stop_reason(現状は常に "max_tokens")。診断用に保持する。 */
   readonly stopReason: string;
+  /**
+   * 応答したモデルID(Issue #157。AnthropicLlmClient が渡す。レスポンスの model 優先、無ければ
+   * リクエストしたID)。例外で終わっても「実際に使ったモデル」の記録を失わないために運ぶ。
+   * 旧形式で作られたエラーでは undefined。
+   */
+  readonly model: string | undefined;
 
-  constructor(message: string, stopReason: string) {
+  constructor(message: string, stopReason: string, model?: string) {
     super(message);
     this.name = "AnalyzerTruncationError";
     this.stopReason = stopReason;
+    this.model = model;
+  }
+}
+
+/**
+ * LLM応答が安全分類器により拒否されたこと(stop_reason==="refusal")を表すエラー(Issue #157。
+ * Claude Sonnet 5.5 以降は HTTP 200 のまま content が空で返ることがあり、そのままでは
+ * 「JSON解析失敗」に埋もれて原因が分からなくなる)。
+ * AnthropicLlmClient.complete()(anthropic-client.ts)が検出した際に投げる。
+ * AnalyzerTruncationError と同型で、AnalyzerResponseParseError のサブクラスなので
+ * 既存の `instanceof AnalyzerResponseParseError` 判定・リトライ意味論(1回だけ同一プロンプトで
+ * リトライ)を壊さない。analyze-race 側は専用の固定文言(FALLBACK_REASON_REFUSED)と
+ * stopReason を返す。
+ */
+export class AnalyzerRefusalError extends AnalyzerResponseParseError {
+  /** 検出した生の stop_reason(現状は常に "refusal")。診断用に保持する。 */
+  readonly stopReason: string;
+  /**
+   * 応答したモデルID(Issue #157。AnthropicLlmClient が渡す。レスポンスの model 優先、無ければ
+   * リクエストしたID)。例外で終わっても「実際に使ったモデル」の記録を失わないために運ぶ。
+   * 旧形式で作られたエラーでは undefined。
+   */
+  readonly model: string | undefined;
+
+  constructor(message: string, stopReason: string, model?: string) {
+    super(message);
+    this.name = "AnalyzerRefusalError";
+    this.stopReason = stopReason;
+    this.model = model;
   }
 }
 

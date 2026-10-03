@@ -87,17 +87,61 @@ export interface RaceSnapshot {
    * **この値自体は「JSON永続化用のスナップショット」であり、馬券配分の計算には使われない**
    * (この記述は今も正しい)。第4段(Issue #28)で券種横断の配分が実際に使うのは、
    * このスナップショットではなく**別の生きた経路**(`AnalysisResult.wideCombo` →
-   * `renderer/mixed-allocation-view.ts`。DB保存を経ずに分析結果からその場で計算する)である。
-   * 混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・DB保存専用の写しに
-   * すぎず、配分計算の入力としては一切参照されない。
+   * `shared/mixed-race-allocation.ts` の `buildMixedRaceAllocation`。Issue #57で
+   * `renderer/mixed-allocation-view.ts` から分離した。DB保存を経ずに分析結果からその場で
+   * 計算する)である。混同を避けるための補足: この`RaceSnapshot.wideCombo`はエクスポート・
+   * DB保存専用の写しにすぎず、配分計算の入力としては一切参照されない。
+   * **さらなる追記予定(#56-3)**: main が実際にこの経路を配線したら、「DB保存を経ずに
+   * 分析結果からその場で計算する」という記述は main 起点の呼び出しが生まれた分だけ
+   * 古くなる可能性があるため、#56-3 着手時にこの段落を再確認・再更新すること。
    */
   readonly wideCombo?: Record<string, number | null>;
   /** 三連複オッズ(機能D-2c第3段)。`wideCombo`と同じ条件・同じ理由でoptional。 */
   readonly trioCombo?: Record<string, number | null>;
   /**
-   * 組合せオッズの取得診断値(機能D-2c第3段)。`wideCombo`/`trioCombo`が空({})になった原因
-   * (発売なし/未発売なのか、取得失敗なのか)を判別する唯一の手段(`comboOdds.<betType>.state`)。
-   * core `RaceDataMeta.comboOdds`のプレーン写し。
+   * 馬連オッズ(Issue #116・#24-D3b-1)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * 配分・画面への配線はまだ無い(このスナップショットに保持するだけ)。
+   */
+  readonly quinellaCombo?: Record<string, number | null>;
+  /**
+   * 馬単オッズ(Issue #122・#24-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは順序付き(1着・2着の順序が意味を持つ)。配分・画面への配線はまだ無い
+   * (このスナップショットに保持するだけ。#123のスコープ)。
+   */
+  readonly exactaCombo?: Record<string, number | null>;
+  /**
+   * 三連単オッズ(Issue #137・#25-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは順序付き(1着・2着・3着の順序が意味を持つ。馬単`exactaCombo`と同じ性質)。
+   *
+   * **地方(NAR)では常に`undefined`**(ユーザー判断2026-09-27により地方の三連単は当面
+   * 取得しないため)。このスナップショット自体は保持・エクスポート専用の写しであり、
+   * 配分計算の入力としては一切参照されない(このファイル冒頭JSDocの`wideCombo`と同じ設計。
+   * 実際の配分接続〈Issue #139・#25-E3b〉は`AnalysisResult.trifectaCombo`
+   * 〈`shared/analysis-types.ts`〉側で完結している)。
+   *
+   * **サイズについての注記(2026-09-27実測。`docs/current-spec.md`参照)**: 出走頭数nに対し
+   * P(n,3)通りのキーを持ち(16頭なら3360キー・18頭なら4896キー)、`wideCombo`/`trioCombo`/
+   * `quinellaCombo`/`exactaCombo`より1桁多い。`analyses.race_snapshot_json`(SQLite TEXT列)
+   * へそのまま保存されるため、`includeComboOdds:true`の分析を保存するたびにこのぶんだけ
+   * DBサイズが増える(圧縮・保存方針の見直しは#53の範疇。本フィールド追加自体を妨げない)。
+   */
+  readonly trifectaCombo?: Record<string, number | null>;
+  /**
+   * 枠連オッズ(Issue #148・#26-E2)。`wideCombo`と同じ条件・同じ理由でoptional。
+   * キーは**枠番**の組(2桁ゼロ埋め連結・昇順・同枠可。例"0407"・"0101")で、馬番ではない。
+   * 三連単と異なり中央・地方とも取得する。#148の時点では配分・画面への配線は無く(このスナップショットに
+   * 保持するだけだった)、設定の配管は#149で完了し、Issue #150(#26-E3b)で配分への接続・画面への
+   * 表示が完了した。枠番4桁キーは最大でも36件規模なので、三連単のような
+   * DBサイズの懸念はない。
+   */
+  readonly bracketQuinellaCombo?: Record<string, number | null>;
+  /**
+   * 組合せオッズの取得診断値(機能D-2c第3段。馬連はIssue #116・#24-D3b-1、馬単はIssue #122・
+   * #24-E2、三連単はIssue #137・#25-E2、枠連はIssue #148・#26-E2で追加)。`wideCombo`/
+   * `trioCombo`/`quinellaCombo`/`exactaCombo`/`trifectaCombo`/`bracketQuinellaCombo`が空({})に
+   * なった原因(発売なし/未発売なのか、取得失敗
+   * なのか)を判別する唯一の手段(`comboOdds.<betType>.state`)。core
+   * `RaceDataMeta.comboOdds`のプレーン写し。
    */
   readonly comboOdds?: ComboOddsScrapeOutcome;
 }
@@ -139,13 +183,23 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
         oikiriRank: h.oikiri?.rank ?? null,
       };
     }),
-    // 組合せオッズ(ワイド・三連複、機能D-2c第3段・Issue #28): race.odds.wideCombo/trioCombo・
-    // race.meta.comboOdds はいずれも scrapeRace の options.includeComboOdds が true のときだけ
-    // 設定される optional フィールド。ここでは「写すだけ」で新たな解釈・変換は行わない
-    // (analysis-pipeline.ts の AnalysisResult 組み立て〈同じ写し方〉と同じ流儀。条件付きspreadで、
-    // 未設定〈undefined〉のときはキー自体を持たせない)。
+    // 組合せオッズ(ワイド・三連複・馬連・馬単・三連単〈中央のみ〉・枠連、機能D-2c第3段・Issue #28。
+    // 馬連はIssue #116・#24-D3b-1、馬単はIssue #122・#24-E2、三連単はIssue #137・#25-E2、
+    // 枠連はIssue #148・#26-E2で追加): race.odds.wideCombo/trioCombo/quinellaCombo/exactaCombo/
+    // trifectaCombo/bracketQuinellaCombo・
+    // race.meta.comboOdds はいずれも scrapeRace の
+    // options.includeComboOdds が true のときだけ設定される optional フィールド。
+    // ここでは「写すだけ」で新たな解釈・変換は行わない(analysis-pipeline.ts の
+    // AnalysisResult 組み立て〈同じ写し方〉と同じ流儀。条件付きspreadで、未設定
+    // 〈undefined〉のときはキー自体を持たせない)。
     ...(race.odds.wideCombo !== undefined ? { wideCombo: race.odds.wideCombo } : {}),
     ...(race.odds.trioCombo !== undefined ? { trioCombo: race.odds.trioCombo } : {}),
+    ...(race.odds.quinellaCombo !== undefined ? { quinellaCombo: race.odds.quinellaCombo } : {}),
+    ...(race.odds.exactaCombo !== undefined ? { exactaCombo: race.odds.exactaCombo } : {}),
+    ...(race.odds.trifectaCombo !== undefined ? { trifectaCombo: race.odds.trifectaCombo } : {}),
+    ...(race.odds.bracketQuinellaCombo !== undefined
+      ? { bracketQuinellaCombo: race.odds.bracketQuinellaCombo }
+      : {}),
     ...(race.meta.comboOdds !== undefined ? { comboOdds: race.meta.comboOdds } : {}),
   };
 }

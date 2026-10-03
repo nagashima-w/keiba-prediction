@@ -21,6 +21,7 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   prior: 0.3,
   adjustedProb: 0.3,
   placeOddsMin: 2.0,
+  winOdds: 10,
   ev: 0.6,
   isPositive: false,
   reason: null,

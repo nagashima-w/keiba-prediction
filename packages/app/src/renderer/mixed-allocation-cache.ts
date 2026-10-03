@@ -12,8 +12,8 @@
  * 約93ms・12レースで約1.1秒/レンダー」という記述に対しリポジトリ内に再現手段が無かった。
  * `performance.now()`/`Date.now()`の計測コードが0件で、実行環境が変われば数値も変わる)。
  * **再現可能な計測: `pnpm tsx scripts/bench-mixed-allocation.ts`**(ネットワークに出ない。
- * `mixed-allocation-view.ts`の「greedySteps が構成比を左右する事実」と同じスクリプトが
- * 1レースあたりの所要時間も出力する)。
+ * `shared/mixed-race-allocation.ts`(Issue #57で`mixed-allocation-view.ts`から分離)の
+ * 「greedySteps が構成比を左右する事実」と同じスクリプトが1レースあたりの所要時間も出力する)。
  *
  * **しかし性能そのものより危険なのは、キャッシュキーに含める入力を1つでも
  * 漏らすと「設定を変えたのに前回の金額が表示され続ける」という静かな誤りが起きること**。
@@ -33,13 +33,33 @@
  * | `includeComboOdds` | D-2フォールバック規則の条件①に直結(ONOFFで混在経路に入るか自体が変わる) |
  * | `includeWideInAllocation` | D-1の`betTypes`組み立てに直結 |
  * | `includeTrioInAllocation` | 同上 |
+ * | `includeQuinellaInAllocation` | #24-D3a(Issue #115)で追加。D3a時点では`resolveMixedBetTypes`に
+ *   未接続で表示データを一切左右しないが、D3bで接続されたときに漏れが起きないよう先に
+ *   キー材料へ含める(表全体の唯一の定義元として、この表を更新してから型・比較関数・
+ *   `BatchAnalysisView.tsx`のキー組み立てを直す、という導入手順を踏む) |
+ * | `includeExactaInAllocation` | #24-E3a(Issue #124)で追加。馬連〈`includeQuinellaInAllocation`〉と
+ *   同じ理由・同じ導入手順(E3a時点では`resolveMixedBetTypes`に未接続で表示データを一切
+ *   左右しないが、E3bで接続されたときに漏れが起きないよう先にキー材料へ含める) |
+ * | `includeTrifectaInAllocation` | #25-E3a(Issue #138)で追加。馬単〈`includeExactaInAllocation`〉と
+ *   同じ理由・同じ導入手順(E3a時点では`resolveMixedBetTypes`に未接続で表示データを一切
+ *   左右しないが、E3bで接続されたときに漏れが起きないよう先にキー材料へ含める) |
+ * | `includeBracketQuinellaInAllocation` | #26-E3a(Issue #149)で追加。三連単〈`includeTrifectaInAllocation`〉と
+ *   同じ理由・同じ導入手順(E3a時点では`resolveMixedBetTypes`に未接続で表示データを一切
+ *   左右しないが、E3bで接続されたときに漏れが起きないよう先にキー材料へ含める) |
  *
- * 上記9項目のいずれか1つでも比較から漏れると、その項目だけを変えた操作でキャッシュが
+ * 上記13項目のいずれか1つでも比較から漏れると、その項目だけを変えた操作でキャッシュが
  * 誤ってヒットし続ける(`mixed-allocation-cache.test.ts`のテーブル駆動テストが、
  * 1項目ずつ変えたときに必ずミスすることを固定している)。
+ *
+ * **この表はキー材料の唯一の定義であり、`get`・`peek`のどちらでも同じ`cacheKeyEquals`を
+ * 使う(Issue #110で`peek`を追加した際も、この表・この比較関数はどちらも変更していない。
+ * 新しい経路〈`mixed-allocation-queue.ts`〉が独自のキー定義を持つことはない)。**
  */
 
-/** キャッシュキー(表の9項目をそのまま構造体にしたもの)。 */
+import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+
+
+/** キャッシュキー(表の13項目をそのまま構造体にしたもの)。 */
 export interface MixedAllocationCacheKey {
   readonly raceId: string;
   /** `AnalysisResult`への参照。内容比較ではなく参照(`===`)で同一性を判定する。 */
@@ -51,6 +71,27 @@ export interface MixedAllocationCacheKey {
   readonly includeComboOdds: boolean;
   readonly includeWideInAllocation: boolean;
   readonly includeTrioInAllocation: boolean;
+  readonly includeQuinellaInAllocation: boolean;
+  readonly includeExactaInAllocation: boolean;
+  readonly includeTrifectaInAllocation: boolean;
+  readonly includeBracketQuinellaInAllocation: boolean;
+}
+
+/**
+ * レースと配分の設定から、キャッシュキーを組み立てる(Issue #150・#26-E3b・AC-5(b))。
+ *
+ * 旧`BatchAnalysisView.tsx`は設定11項目を1つずつ手書きでキーへ写しており、レンダリングテスト基盤が
+ * 無いため、1項目を`true`固定に書き換えても(設定を切り替えても古い配分がキャッシュから出続けるだけで)
+ * テストが全緑のまま通る変異が生存していた。設定を丸ごと展開する本関数へ切り出し、項目ごとの値の
+ * 固定・脱落を`mixed-allocation-cache.test.ts`で全項目について検知する。`raceId`・`race`は
+ * 設定の後ろに置き、設定側に同名の項目が増えても上書きされない。
+ */
+export function toMixedAllocationCacheKey(
+  raceId: string,
+  race: object,
+  settings: MixedAllocationSettings,
+): MixedAllocationCacheKey {
+  return { ...settings, raceId, race };
 }
 
 /** レース単位でメモ化するキャッシュ(値の型`T`は呼び出し側が決める。表示データを想定)。 */
@@ -61,10 +102,33 @@ export interface MixedAllocationCache<T> {
    * 保存してから返す。
    */
   get(key: MixedAllocationCacheKey, compute: () => T): T;
+  /**
+   * `compute`を一切呼ばずに照会する(副作用なし)。`key`の13項目すべてが前回`get`/`step`で
+   * 書き込んだときのキーと一致すればその値を返し、一致しなければ(未計算、または別の設定で
+   * 書かれていれば)`undefined`を返す。`get`と同じ`cacheKeyEquals`を使う(比較ロジックを
+   * 二重に持たない)。
+   *
+   * Issue #110(#24-C2): 配分計算をレース単位に分割して進める仕組み
+   * (`mixed-allocation-queue.ts`)が、「まだ計算していないレースか」を`compute`を誘発せずに
+   * 判定するために使う。表示側(`BatchAnalysisView.tsx`)もこれを直接使い、「今の設定の
+   * キーでヒットするか」だけを見て描画する(ヒットしなければ古い値を出さず「計算中」を表示する。
+   * AC-3'(a)の要)。
+   */
+  peek(key: MixedAllocationCacheKey): T | undefined;
 }
 
-/** キー9項目すべてが一致するかを判定する(表の全項目を漏れなく比較する唯一の場所)。 */
-function cacheKeyEquals(a: MixedAllocationCacheKey, b: MixedAllocationCacheKey): boolean {
+/**
+ * キー13項目すべてが一致するかを判定する(表の全項目を漏れなく比較する唯一の場所)。
+ *
+ * **Issue #119(#24-C3)でexportした**: 配分計算をWorkerプールへ移す際、Worker完了時に
+ * 「送信時のキー」と「その時点の最新キー」を比較し、不一致なら結果を破棄する
+ * (設定変更・再分析後に届いた古い結果が新しいキャッシュを上書きしないようにする)ために、
+ * `mixed-allocation-worker-pool.ts`がこの関数をそのまま再利用する。本ファイル冒頭JSDoc
+ * 「この表はキー材料の唯一の定義であり…新しい経路が独自のキー定義を持つことはない」を
+ * 維持するため、比較ロジックを再実装せずexportする(`get`/`peek`の挙動・このexport追加
+ * 自体は非破壊。既存の呼び出し元・既存テストは変更していない)。
+ */
+export function cacheKeyEquals(a: MixedAllocationCacheKey, b: MixedAllocationCacheKey): boolean {
   return (
     a.raceId === b.raceId &&
     a.race === b.race &&
@@ -74,7 +138,11 @@ function cacheKeyEquals(a: MixedAllocationCacheKey, b: MixedAllocationCacheKey):
     a.evThreshold === b.evThreshold &&
     a.includeComboOdds === b.includeComboOdds &&
     a.includeWideInAllocation === b.includeWideInAllocation &&
-    a.includeTrioInAllocation === b.includeTrioInAllocation
+    a.includeTrioInAllocation === b.includeTrioInAllocation &&
+    a.includeQuinellaInAllocation === b.includeQuinellaInAllocation &&
+    a.includeExactaInAllocation === b.includeExactaInAllocation &&
+    a.includeTrifectaInAllocation === b.includeTrifectaInAllocation &&
+    a.includeBracketQuinellaInAllocation === b.includeBracketQuinellaInAllocation
   );
 }
 
@@ -94,6 +162,13 @@ export function createMixedAllocationCache<T>(): MixedAllocationCache<T> {
       const value = compute();
       store.set(key.raceId, { key, value });
       return value;
+    },
+    peek(key) {
+      const cached = store.get(key.raceId);
+      if (cached !== undefined && cacheKeyEquals(cached.key, key)) {
+        return cached.value;
+      }
+      return undefined;
     },
   };
 }

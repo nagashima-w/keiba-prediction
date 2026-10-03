@@ -7,6 +7,8 @@
  *
  * 出走頭数は最大18頭(上限であり、少頭数のレースも普通にある)。
  * 頭数は固定値と仮定せず、実データ行の数だけ動的にパースする。
+ * 取消・除外の印(`tr.Cancel` / `td.Cancel_Txt`。Issue #154)が付いた馬も `horses` に残し、
+ * `ShutubaHorse.scratch` で区別する(出走馬から除くのは `scrapeRace` の責務)。
  * 枠番(1〜8)・馬番(1〜18)の範囲外は構造変更や誤パースの兆候として
  * ShutubaParseError で失敗させる(データの取りこぼしを silent に隠さない方針)。
  */
@@ -18,6 +20,7 @@ import { PATTERNS, SHUTUBA_SELECTORS as SEL } from "./selectors.js";
 import type {
   BodyWeight,
   CourseType,
+  ScratchStatus,
   Shutuba,
   ShutubaHorse,
   ShutubaRaceInfo,
@@ -126,6 +129,32 @@ function toStableLocation(raw: string): string {
 /** cheerio の選択結果(1要素をラップした Cheerio オブジェクト)の型。 */
 type CheerioSelection = ReturnType<CheerioAPI>;
 
+/**
+ * 行の取消・除外の印を読み取る(Issue #154)。出走する馬は `undefined`。
+ *
+ * 印の判定は「行に `Cancel` クラスがある」または「`td.Cancel_Txt` に文言がある」のどちらか
+ * (実測は両方が揃っていたが、片方だけが変わった場合に取消馬を出走馬として通さないため)。
+ * 空の `Cancel_Txt` セルだけでは取消にしない。区分は文言が「取消」を含めば取消、「除外」を含めば
+ * 除外、それ以外(文言が空を含む)は「不明」で、**出走しない側に倒す**(例外にしない)。
+ *
+ * 観測は中央 202606040901(発走後の取得)の「取消」のみ。発走前の印・地方の印・「除外」の文言は
+ * 未観測で、同じ雛形・同じ印と見込んでいる(詳細は SHUTUBA_SELECTORS.cancelledRow)。
+ */
+function parseScratch(
+  $r: CheerioSelection,
+): { scratch: ScratchStatus; scratchText: string } | undefined {
+  const text = $r.find(SEL.cancelText).first().text().trim();
+  if (!$r.is(SEL.cancelledRow) && text === "") {
+    return undefined;
+  }
+  const scratch: ScratchStatus = text.includes("取消")
+    ? "取消"
+    : text.includes("除外")
+      ? "除外"
+      : "不明";
+  return { scratch, scratchText: text };
+}
+
 /** 1行(tr.HorseList)をラップした Cheerio から1頭分のデータを抽出する。 */
 function parseHorseRow($r: CheerioSelection): ShutubaHorse {
   const wakubanText = $r.find(SEL.waku).first().text().trim();
@@ -189,6 +218,9 @@ function parseHorseRow($r: CheerioSelection): ShutubaHorse {
   // 馬体重(増減)。未発表は null。
   const bodyWeight = parseBodyWeight($r.find(SEL.weight).first().text());
 
+  // 取消・除外の印(Issue #154)。出走する馬にはキー自体を付けない。
+  const scratch = parseScratch($r);
+
   return {
     wakuban,
     umaban,
@@ -203,6 +235,7 @@ function parseHorseRow($r: CheerioSelection): ShutubaHorse {
     trainerName,
     trainerId,
     bodyWeight,
+    ...(scratch !== undefined ? scratch : {}),
   };
 }
 
@@ -233,6 +266,14 @@ export function parseShutuba(html: string): Shutuba {
   if (horses.length === 0) {
     throw new ShutubaParseError(
       "出走馬(td.HorseInfoを持つtr.HorseList)を1件も抽出できませんでした",
+    );
+  }
+
+  // 全馬が取消・除外扱いなのも構造変更の兆候(雛形が変わって全行に印が付いた等)。空のレースを
+  // 静かに通さず失敗させる(Issue #154。出走馬0頭と同じ方針)。
+  if (horses.every((h) => h.scratch !== undefined)) {
+    throw new ShutubaParseError(
+      "全馬に取消・除外の印が付いています(出走馬が1頭も無いのは構造変更の兆候です)",
     );
   }
 

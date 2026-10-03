@@ -232,6 +232,11 @@ race_idから自動判定)で再取得できる経路(実際に202603020211でCL
 `packages/app/src/renderer/bet-allocation-view.ts` の `resolvePlaceBetTarget` は変更していない
 (AC9)。実測結果を再検討材料として記録する:
 
+> **追記(#57・2026-08-26)**: `resolvePlaceBetTarget` はその後 #57 で
+> `packages/app/src/shared/race-allocation.ts` へ移設された(挙動不変)。上の
+> 「`renderer/bet-allocation-view.ts` にあった」は本調査(#13)時点の事実であり、
+> 現在の所在はこの追記が正となる。
+
 - **ワイド・3連複は5頭・6頭・7頭のレースでも発売されていた**(§6)。複勝が「2着まで」に
   変わる7頭以下の帯でも、ワイド・3連複自体は(複勝と独立に)発売されている
 - **複勝の払戻点数(`resolvePlaceBetTarget`の"two-place-only"閾値の直接証拠。0追加リクエストで

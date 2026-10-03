@@ -1,6 +1,6 @@
 # 競馬期待値分析ツール 実装仕様書 v2
 
-> **本書は当初の設計・計画(Phase 1→6)の記録です。** 実装は v1.2.0 に到達しており、実際に実装済みの
+> **本書は当初の設計・計画(Phase 1→6)の記録です。** 実装は v1.19.0 に到達しており、実際に実装済みの
 > 現状仕様は [`docs/current-spec.md`](./docs/current-spec.md) を参照してください(本書と乖離する箇所が
 > あります)。本書は当初計画の記録として残します。
 
@@ -17,7 +17,7 @@ netkeibaのデータをスクレイピングし、Claude APIで各馬の複勝�
   - 理由: スクレイピング(cheerio + undici)、デスクトップUI(Electron)、Discord bot(discord.js)がすべて同一言語・同一コアロジックで書ける
 - **コア**: `packages/core` — scraper / scorer / analyzer / ev をUIから独立したライブラリとして実装(monorepo構成、pnpm workspace)
 - **UI**: Electron + React。コアを直接importして使う
-- **LLM**: Anthropic API(claude-sonnet-4-6)
+- **LLM**: Anthropic API(最新の Sonnet を Models API で自動選択。固定モデルは claude-sonnet-5-5。Issue #157 で claude-sonnet-4-6 から移行。詳細は `docs/current-spec.md` §3)
 - **通知**: Discord Webhook(分析結果のプッシュ用)
 - **データ保存**: SQLite(better-sqlite3)。スクレイピングキャッシュ・分析履歴・検証結果を保存
 - **配布**: GitHub ActionsでWindows向けにelectron-builderでビルド

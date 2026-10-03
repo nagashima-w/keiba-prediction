@@ -23,11 +23,15 @@ import {
   analyzeRace,
   FALLBACK_REASON_INVOCATION_ERROR,
   FALLBACK_REASON_PARSE_ERROR,
+  FALLBACK_REASON_REFUSED,
   FALLBACK_REASON_TRUNCATED,
 } from "../../src/analyzer/analyze-race.js";
 import type { LlmClient } from "../../src/analyzer/analyze-race.js";
 import type { BuildPromptInput } from "../../src/analyzer/build-prompt.js";
-import { AnalyzerTruncationError } from "../../src/analyzer/parse-response.js";
+import {
+  AnalyzerRefusalError,
+  AnalyzerTruncationError,
+} from "../../src/analyzer/parse-response.js";
 
 function input(): BuildPromptInput {
   return {
@@ -451,5 +455,153 @@ describe("analyzeRace(A: 印関連違反時のフォールバック分離・確�
     expect(r.marksDropped).toBe(false);
     expect(r.retryCount).toBe(1);
     expect(r.horses.find((h) => h.umaban === 3)!.mark).toBe("◎");
+  });
+});
+
+describe("analyzeRace(拒否 stop_reason='refusal'・Issue #157)", () => {
+  it("拒否(AnalyzerRefusalError)2回: fallback:true・拒否用の固定文言・truncated:false・stopReason='refusal' で prior を採用すること", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new AnalyzerRefusalError("LLMが応答を拒否しました", "refusal");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(llm.complete).toHaveBeenCalledTimes(2);
+    expect(r.retryCount).toBe(1);
+    expect(r.fallbackReason).toBe(FALLBACK_REASON_REFUSED);
+    expect(r.truncated).toBe(false);
+    expect(r.stopReason).toBe("refusal");
+    expect(r.marksDropped).toBe(false);
+    expect(r.rawResponse).toBeNull();
+    expect(r.horses.every((h) => h.usedPrior)).toBe(true);
+    expect(r.horses.every((h) => h.mark === null)).toBe(true);
+  });
+
+  it("拒否の固定文言は切り詰め・汎用パース失敗・呼び出し失敗のいずれとも異なること(振り分けの取り違え防止)", () => {
+    expect(FALLBACK_REASON_REFUSED).not.toBe(FALLBACK_REASON_TRUNCATED);
+    expect(FALLBACK_REASON_REFUSED).not.toBe(FALLBACK_REASON_PARSE_ERROR);
+    expect(FALLBACK_REASON_REFUSED).not.toBe(FALLBACK_REASON_INVOCATION_ERROR);
+  });
+
+  it("診断メッセージ(diagnosticMessage)にも拒否の固定文言を入れること(生の例外内容を混ぜない)", async () => {
+    const llm: LlmClient = {
+      complete: vi.fn(async () => {
+        throw new AnalyzerRefusalError("秘密っぽい生メッセージ sk-ant-xxxx", "refusal");
+      }),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.diagnosticMessage).toBe(FALLBACK_REASON_REFUSED);
+  });
+
+  it("拒否後のリトライで成功すれば通常成功として扱うこと(fallback:false)", async () => {
+    const llm: LlmClient = {
+      complete: vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce(new AnalyzerRefusalError("拒否", "refusal"))
+        .mockResolvedValueOnce(okBody),
+    };
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.retryCount).toBe(1);
+    expect(r.fallbackReason).toBeNull();
+  });
+});
+
+describe("analyzeRace(使ったモデルの記録 modelUsed・Issue #157)", () => {
+  /** completeDetailed を持つ LLM。応答ごとに {text, model} を返す。 */
+  function detailedLlm(...responses: ({ text: string; model: string } | Error)[]): LlmClient {
+    const queue = [...responses];
+    const next = async () => {
+      const r = queue.shift();
+      if (r === undefined) throw new Error("応答が尽きた");
+      if (r instanceof Error) throw r;
+      return r;
+    };
+    return {
+      complete: vi.fn(async () => (await next()).text),
+      completeDetailed: vi.fn(next),
+    };
+  }
+
+  it("completeDetailed があればそれを使い、成功時の model を modelUsed に載せること", async () => {
+    const llm = detailedLlm({ text: okBody, model: "claude-sonnet-9-9" });
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.modelUsed).toBe("claude-sonnet-9-9");
+    expect(llm.completeDetailed).toHaveBeenCalledTimes(1);
+    expect(llm.complete).not.toHaveBeenCalled();
+  });
+
+  it("リトライで成功した場合は、実際に採用した試行の model を載せること(切り替えで1回目と2回目のモデルが違う)", async () => {
+    const llm = detailedLlm(
+      { text: "壊れたJSON", model: "claude-sonnet-9-9" },
+      { text: okBody, model: "claude-sonnet-5-5" },
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect(r.retryCount).toBe(1);
+    expect(r.modelUsed).toBe("claude-sonnet-5-5");
+  });
+
+  it("パース失敗でフォールバックした場合も、最後に応答したモデルを modelUsed に載せること", async () => {
+    const llm = detailedLlm(
+      { text: "壊れた1", model: "claude-sonnet-9-9" },
+      { text: "壊れた2", model: "claude-sonnet-9-9" },
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.modelUsed).toBe("claude-sonnet-9-9");
+  });
+
+  it("LLM呼び出しが毎回例外なら modelUsed は載せないこと(応答したモデルが無い。キー自体を持たない)", async () => {
+    const llm = detailedLlm(new Error("失敗1"), new Error("失敗2"));
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect("modelUsed" in r).toBe(false);
+  });
+
+  it.each([
+    { name: "拒否", make: (model: string) => new AnalyzerRefusalError("拒否", "refusal", model) },
+    {
+      name: "切り詰め",
+      make: (model: string) => new AnalyzerTruncationError("切り詰め", "max_tokens", model),
+    },
+  ])(
+    "2回とも$nameで終わっても、エラーが運ぶ応答モデルを modelUsed に載せること(固定モデル名での代用に落とさない)",
+    async ({ make }) => {
+      const served = "claude-sonnet-9-9";
+      const llm = detailedLlm(make(served), make(served));
+      const r = await analyzeRace(input(), { llm });
+      expect(r.fallback).toBe(true);
+      expect(r.modelUsed).toBe(served);
+    },
+  );
+
+  it("拒否のあと呼び出し例外で終わった場合も、拒否で分かった応答モデルを modelUsed に残すこと", async () => {
+    const llm = detailedLlm(
+      new AnalyzerRefusalError("拒否", "refusal", "claude-sonnet-9-9"),
+      new Error("ネットワーク断"),
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(true);
+    expect(r.modelUsed).toBe("claude-sonnet-9-9");
+  });
+
+  it("model を持たない(旧形式の)拒否・切り詰めエラーでは modelUsed を載せないこと", async () => {
+    const llm = detailedLlm(
+      new AnalyzerRefusalError("拒否", "refusal"),
+      new AnalyzerTruncationError("切り詰め", "max_tokens"),
+    );
+    const r = await analyzeRace(input(), { llm });
+    expect("modelUsed" in r).toBe(false);
+  });
+
+  it("completeDetailed が無い LlmClient(旧実装・既存モック)では modelUsed を載せず、complete で動くこと(後方互換)", async () => {
+    const llm = fixedLlm(okBody);
+    const r = await analyzeRace(input(), { llm });
+    expect(r.fallback).toBe(false);
+    expect("modelUsed" in r).toBe(false);
+    expect(llm.complete).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040901",
+  "region": "central",
+  "requestedDate": "20260927",
+  "kaisaiDate": "20260927",
+  "venueCode": "06",
+  "raceNumber": 1,
+  "raceName": "2歳未勝利",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1200,
+  "runnerCount": 15,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ドナチャージ",
+      "prior": 0.2600106184652698,
+      "placeOddsMin": 4.5,
+      "placeOddsMax": 7.7,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 2,
+      "horseName": "エコロブラン",
+      "prior": 0.2600106184652698,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 3,
+      "horseName": "リングスター",
+      "prior": 0.1507067915945194,
+      "placeOddsMin": 49.5,
+      "placeOddsMax": 88.8,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 4,
+      "horseName": "ノーブルミント",
+      "prior": 0.19422590784861446,
+      "placeOddsMin": 3.7,
+      "placeOddsMax": 6.3,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 5,
+      "horseName": "プリンセスロッティ",
+      "prior": 0.17352442548672992,
+      "placeOddsMin": 6.6,
+      "placeOddsMax": 11.6,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 7,
+      "horseName": "マリノエスプレッソ",
+      "prior": 0.27790589988476555,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.4,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 8,
+      "horseName": "ベアベルヴォワ",
+      "prior": 0.16561185889507626,
+      "placeOddsMin": 51.7,
+      "placeOddsMax": 92.8,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 9,
+      "horseName": "ノヴァフォルス",
+      "prior": 0.14822261371109327,
+      "placeOddsMin": 58.5,
+      "placeOddsMax": 104.9,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 10,
+      "horseName": "アオイスミレ",
+      "prior": 0.14408231723871637,
+      "placeOddsMin": 6,
+      "placeOddsMax": 10.5,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 11,
+      "horseName": "ジェミニディウ",
+      "prior": 0.27657180435477735,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.8,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 12,
+      "horseName": "ノーブルパラス",
+      "prior": 0.20204646785199307,
+      "placeOddsMin": 7.9,
+      "placeOddsMax": 13.8,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 13,
+      "horseName": "ワレモコウ",
+      "prior": 0.24758972904813903,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.6,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 14,
+      "horseName": "ウマッター",
+      "prior": 0.21032706079674687,
+      "placeOddsMin": 16.4,
+      "placeOddsMax": 29.1,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 15,
+      "horseName": "シュネルアステリア",
+      "prior": 0.10428946780976056,
+      "placeOddsMin": 8.6,
+      "placeOddsMax": 15.2,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 16,
+      "horseName": "パルセノスミハ",
+      "prior": 0.18487441854852815,
+      "placeOddsMin": 3.6,
+      "placeOddsMax": 6.2,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    }
+  ],
+  "scratched": [
+    {
+      "umaban": 6,
+      "text": "取消",
+      "inShutuba": true
+    }
+  ],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/27",
+      "totalResultCount": 37,
+      "removedCount": 15,
+      "removedByCutoffCount": 15,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:31:53.939Z"
+}

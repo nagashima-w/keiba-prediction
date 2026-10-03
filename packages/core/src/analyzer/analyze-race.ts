@@ -30,6 +30,7 @@
 import { buildPrompt, type BuildPromptInput } from "./build-prompt.js";
 import {
   AnalyzerMarkViolationError,
+  AnalyzerRefusalError,
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
   parseAnalyzerResponse,
@@ -59,12 +60,34 @@ export const FALLBACK_REASON_INVOCATION_ERROR =
   "LLM呼び出しに失敗したため、3着内率をそのまま採用しました";
 
 /**
+ * 拒否(stop_reason==="refusal")時の固定分類文言(Issue #157)。
+ * 切り詰め・汎用パース失敗とは別の原因なので、別の文言で区別する(汎用の「JSON解析失敗」に埋もれると
+ * 拒否されたことが分からなくなる)。
+ */
+export const FALLBACK_REASON_REFUSED =
+  "LLMが応答を拒否(refusal)したため、3着内率をそのまま採用しました";
+
+/** completeDetailed の戻り値: 生出力テキストと実際に使ったモデルID。 */
+export interface LlmCompletion {
+  /** LLMの生出力テキスト。 */
+  readonly text: string;
+  /** 実際に使ったモデルID(レスポンスの model を優先し、無ければリクエストしたID)。 */
+  readonly model: string;
+}
+
+/**
  * analyzer が使う LLM クライアントの最小インターフェース。
  * プロンプト文字列を渡すと、LLMの生出力テキストを返す。実装は anthropic-client.ts。
  */
 export interface LlmClient {
   /** プロンプトを送り、LLMの生出力テキストを返す。 */
   complete(prompt: string): Promise<string>;
+  /**
+   * プロンプトを送り、生出力テキストと実際に使ったモデルを返す(Issue #157。後方互換の追加で、
+   * 実装しない LlmClient〈既存のモック等〉は complete だけで動く)。あれば analyzeRace はこちらを使い、
+   * AnalyzeRaceResult.modelUsed に載せる。
+   */
+  completeDetailed?(prompt: string): Promise<LlmCompletion>;
 }
 
 /** analyzeRace の依存(注入)。 */
@@ -135,6 +158,15 @@ export interface AnalyzeRaceResult {
    * (analyzeRace 自身は必ずこのフィールドを明示的に設定して返す)。
    */
   readonly rawResponse?: string | null;
+  /**
+   * 実際に応答したモデルID(Issue #157)。LlmClient.completeDetailed を持つ実装のときだけ載り、
+   * 応答を得られた最後の試行のモデルが入る(リトライで切り替わった場合は採用した試行のもの)。
+   * 拒否(refusal)・切り詰め(max_tokens)は応答自体は得ているため、例外が運ぶ model で埋める。
+   * 応答を得られなかった(HTTPエラー・ネットワーク断等の)呼び出しが毎回の場合・
+   * completeDetailed を持たない LlmClient では
+   * キー自体を持たない(呼び出し側は静的なモデル名で代用する)。
+   */
+  readonly modelUsed?: string;
 }
 
 /**
@@ -179,15 +211,34 @@ export async function analyzeRace(
   // LLM呼び出しとパースを別tryに分け、パース例外(印違反含む)のcatch節でも呼び出し済みの
   // テキストを参照できるようにする(tryブロック内のconstはcatch節から見えないため)。
   let lastMarkViolationText: string | null = null;
+  // 応答を得られた最後の試行のモデル(Issue #157)。completeDetailed を持たない LlmClient や、
+  // 毎回例外で応答が無い場合は undefined のまま(結果にキー自体を載せない)。
+  let modelUsed: string | undefined;
+  const withModel = (): { modelUsed?: string } =>
+    modelUsed === undefined ? {} : { modelUsed };
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let text: string;
     try {
-      text = await deps.llm.complete(prompt);
+      if (deps.llm.completeDetailed !== undefined) {
+        const completion = await deps.llm.completeDetailed(prompt);
+        text = completion.text;
+        modelUsed = completion.model;
+      } else {
+        text = await deps.llm.complete(prompt);
+      }
     } catch (e) {
       // LLM呼び出し自体の例外(認証エラー・レート制限・ネットワーク断等)。テキスト自体を
       // 取得できていないため、rawResponse は次の試行に持ち越さず null のままにする。
       lastError = e;
+      // 拒否・切り詰めは応答したモデルを例外に載せて返す(応答は得ているため、使ったモデルとして残す。
+      // 残さないと、呼び出し側が静的な固定モデル名で代用して実際と違う値を記録してしまう)。
+      if (
+        (e instanceof AnalyzerRefusalError || e instanceof AnalyzerTruncationError) &&
+        e.model !== undefined
+      ) {
+        modelUsed = e.model;
+      }
       continue;
     }
     try {
@@ -202,6 +253,7 @@ export async function analyzeRace(
         marksDropped: false,
         marksDroppedReason: null,
         rawResponse: text,
+        ...withModel(),
       };
     } catch (e) {
       // パース失敗(印関連違反を含む)。残り試行があればリトライ。
@@ -225,6 +277,7 @@ export async function analyzeRace(
       marksDropped: true,
       marksDroppedReason: `印関連の制約違反のため2回目応答でも印を採用できず、確率補正のみ採用して印は全馬nullにしました: ${lastError.message}`,
       rawResponse: lastMarkViolationText,
+      ...withModel(),
     };
   }
 
@@ -245,6 +298,26 @@ export async function analyzeRace(
       diagnosticMessage: FALLBACK_REASON_TRUNCATED,
       // 切り詰め検出はLLM呼び出し自体の例外(text未取得)のため rawResponse は null(Issue#10)。
       rawResponse: null,
+      ...withModel(),
+    };
+  }
+
+  // 拒否(stop_reason==="refusal"。Issue #157)。切り詰めと同じく、汎用のJSON解析失敗より先に判定し、
+  // 専用の固定文言・stopReason を返す(content が空のため汎用文言では原因が分からなくなる)。
+  // truncated は「切り詰めが原因か」なので、拒否では false。
+  if (lastError instanceof AnalyzerRefusalError) {
+    return {
+      horses: priorFallbackHorses(priors),
+      fallback: true,
+      retryCount: maxAttempts - 1,
+      fallbackReason: FALLBACK_REASON_REFUSED,
+      marksDropped: false,
+      marksDroppedReason: null,
+      truncated: false,
+      stopReason: lastError.stopReason,
+      diagnosticMessage: FALLBACK_REASON_REFUSED,
+      rawResponse: null,
+      ...withModel(),
     };
   }
 
@@ -273,6 +346,7 @@ export async function analyzeRace(
     // テキストを取得できていても(パース失敗の場合)UI/DB向けrawResponseには載せない
     // (欠損は明示null。Issue#10「text未取得の失敗時はnull」と同じ扱いに統一する)。
     rawResponse: null,
+    ...withModel(),
   };
 }
 

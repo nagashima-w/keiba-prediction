@@ -23,12 +23,31 @@
  *   `false` であることをテストで固定する(受け入れ条件3)。
  * - リーク遮断の前後比較(受け入れ条件4)は、同一 `kaisaiDate` を渡したまま
  *   `filterRaceDataBefore` の適用有無だけを変える(変数を1つだけ変える)。
+ *
+ * ## #39 での改訂(production が先読みリークを自分で遮断するようになった)
+ * #39 で `runAnalysis` が scrape 直後に戦績を絞る(自レースの走・施行日以降の走を除く)ようになった。
+ * このため本ファイルの3テストは次のとおり書き換えた。旧版が保証していたことと新版の対応:
+ *
+ * | 旧版の保証(#40) | 新版 |
+ * |---|---|
+ * | [固定値] 中央16頭・地方12頭の指標値(ρ・sd比・KL)を実行して得た値で固定。**その値はリークありの値**(中央 ρ=0.2104・klModel=0.0156、地方 ρ=0.6095・sd比=0.9050・klModel=0.0408) | 同じテストで、**遮断後(production の現在の値)**へ更新して固定(中央 ρ=-0.0059・klModel=0.0236、地方 ρ=0.5464)。klMarket は市場側でリークと無関係のため値が不変であることも同じ固定値で確認している。他の assert(dateApproximate=false・oddsStatus・conditions の導出・KL算出可・三連複EVの診断値0)は無改変 |
+ * | [前後比較・前提] フィクスチャに実際にリークが混入(除去21走=自走16+施行日より後5、全頭が該当)を数えて固定 | **無改変**(生フィクスチャの事実であり、production の遮断後も変わらない) |
+ * | [前後比較・主張] `runAnalysis` に生を渡した値と、`filterRaceDataBefore` 済みを渡した値が**異なる**(ρ・klModel。空振り防止に両方 null でないことも固定) | **反転**して「**同値**」(=production が既に遮断している)。空振り防止として、リークありの参照値(core の `buildPriorInput`+`computeFieldPriors` を生の戦績で直接呼んで作った prior。**コミット済みコードから再現できる**)が遮断後と**異なる**こと、かつ旧版の固定値(ρ=0.2104489…・klModel=0.0155563…)に一致することを固定。旧版が `runAnalysis` の生入力から得ていた「リークあり」の値は、`runAnalysis` からは作れなくなったため参照実装に置き換えた |
+ * | [前後比較・固定値] リークあり(ρ=0.2104489…・klModel=0.0155563…)・遮断後(ρ=-0.0058866…・klModel=0.0235949…)の値を固定 | **無改変**の値を固定(リークあり側は上の参照実装から、遮断後は `runAnalysis` の生入力・絞り済み入力の両方から) |
+ * | [前後比較・conditions] 遮断側で `leakFilterApplied=true`・`removedResultCount` が診断値と一致、生側で false | **無改変**(`leakFilter` は計測側が渡す診断値であり、production の遮断とは独立。#39 以降 production は常に遮断するので、生入力側の false は「診断値を渡していない」の意味) |
+ * | [戦績0走] 全走を除外した馬でも完走・Σprior≈3 | 無改変 |
  */
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseKaisaiDate, type RaceData } from "../../packages/core/src/index.js";
+import {
+  buildPriorInput,
+  classifyTrackWetness,
+  computeFieldPriors,
+  parseKaisaiDate,
+  type RaceData,
+} from "../../packages/core/src/index.js";
 import { filterRaceDataBefore } from "../../packages/core/src/scorer/snapshot-filter.js";
 import {
   buildProbabilityQualityReport,
@@ -50,6 +69,8 @@ interface FixtureCase {
    * 固定する期待値(受け入れ条件8: boss着手前ゲートの数値をコピーせず、本テストを実際に
    * 実行して得た値)。着手前ゲートの数値(中央 sd比0.38・ρ0.129等)とは一致しない
    * (計測条件が異なるため: ゲートは kaisaiDate=null で dateApproximate=true だった)。
+   * **#39 で更新した値**: production が先読みリークを遮断するようになったため、遮断後の値
+   * (以前はリークありの値だった。詳細は冒頭の対応表)。
    */
   readonly expected: {
     readonly spearmanRho: number;
@@ -64,13 +85,13 @@ const FIXTURES: readonly FixtureCase[] = [
     label: "中央16頭",
     fixtureFileName: "central-on.json",
     kaisaiDate: "20260628",
-    expected: { spearmanRho: 0.21044891642963054, sdRatio: 0.3951025495418664, klModel: 0.015556379406077249, klMarket: 0.10397453475016975 },
+    expected: { spearmanRho: -0.005886682977052603, sdRatio: 0.45869693887677404, klModel: 0.023594955525432157, klMarket: 0.10397453475016975 },
   },
   {
     label: "地方12頭",
     fixtureFileName: "nar-on.json",
     kaisaiDate: "20260712",
-    expected: { spearmanRho: 0.6094580274543612, sdRatio: 0.9049975491693671, klModel: 0.04075294702889696, klMarket: 0.053251532406149917 },
+    expected: { spearmanRho: 0.54641064530391, sdRatio: 1.0976534997240799, klModel: 0.06545167891448544, klMarket: 0.053251532406149917 },
   },
 ];
 
@@ -95,13 +116,17 @@ async function runWithFixture(raceData: RaceData, kaisaiDate: string): Promise<A
     scrape: async () => raceData,
     analyze: null,
     saveAnalysis: () => 0,
+    // Issue #59: この回帰テストでは配分提案を検証しない(この呼び出しでは配分計算を行わない)。
+    allocationSettings: null,
   };
   return runAnalysis(raceData.raceId, parseKaisaiDate(kaisaiDate), deps);
 }
 
 /** AnalysisResult + 生のRaceData(市場含意確率用)から ProbabilityQualityReportInput を組み立てる。 */
 function toReportInput(
-  result: AnalysisResult,
+  result: Pick<AnalysisResult, "oddsStatus"> & {
+    readonly rows: readonly { readonly umaban: number; readonly prior: number }[];
+  },
   rawRaceData: RaceData,
   leakFilter: ProbabilityQualityReportInput["leakFilter"],
 ): ProbabilityQualityReportInput {
@@ -120,6 +145,38 @@ function toReportInput(
     priorSource: "prior-only",
     leakFilter,
   };
+}
+
+/**
+ * リークありの参照 prior(#39)。production は先読みリークを遮断するため、`runAnalysis` からは
+ * リークありの値を作れない。そこで core の公開関数(`buildPriorInput`+`computeFieldPriors`)を
+ * **生の戦績のまま**直接呼んで作る(コミット済みコードから再現できる参照実装)。
+ * 中央16頭(福島・芝・単勝確定)専用: 会場名・開催区分はフィクスチャの raceId=202603020211
+ * (場コード03=福島・中央)から固定値で与える。
+ */
+function leakyPriorRows(
+  rawRaceData: RaceData,
+  kaisaiDate: string,
+): { umaban: number; prior: number }[] {
+  const inputs = rawRaceData.horses.map((h) =>
+    buildPriorInput({
+      horse: h.shutuba,
+      raceResults: h.results ?? [],
+      race: {
+        courseType: rawRaceData.race.courseType,
+        distance: rawRaceData.race.distance,
+        venueName: "福島",
+        isWet:
+          classifyTrackWetness(rawRaceData.race.trackCondition ?? null, rawRaceData.race.courseType)?.isWet ??
+          false,
+        date: kaisaiDateToSlash(kaisaiDate),
+        venueKind: "central",
+      },
+      fieldSize: rawRaceData.horses.length,
+    }),
+  );
+  const priors = computeFieldPriors(inputs);
+  return rawRaceData.horses.map((h, i) => ({ umaban: h.shutuba.umaban, prior: priors[i]!.prior }));
 }
 
 describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
@@ -172,7 +229,7 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     });
   }
 
-  it("中央16頭: リーク遮断の前後で指標値が変わる(受け入れ条件4。変数はリーク遮断の有無1つだけ)", async () => {
+  it("中央16頭: 生の戦績を渡しても遮断済みを渡しても同値になる(production が先読みリークを遮断している。リークありの参照値とは異なる。#39で旧版「前後で値が変わる」から反転)", async () => {
     const fixtureCase = FIXTURES[0]!;
     const rawRaceData = loadFixtureRaceData(fixtureCase.fixtureFileName);
     const cutoffDate = kaisaiDateToSlash(fixtureCase.kaisaiDate);
@@ -206,7 +263,8 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     expect(afterCutoffCount).toBe(5);
     expect(sameDayCount + afterCutoffCount).toBe(diagnostics.removedByCutoffCount);
 
-    // 同一kaisaiDateで2回実行し、変数をリーク遮断の有無1つだけに保つ。
+    // 同一kaisaiDateで2回実行する(生の戦績を渡す場合と、filterRaceDataBefore 済みを渡す場合)。
+    // #39 以降 production が自分で遮断するため、この2つは同値になる(旧版は「異なる」だった)。
     const rawResult = await runWithFixture(rawRaceData, fixtureCase.kaisaiDate);
     const filteredResult = await runWithFixture(filteredRaceData, fixtureCase.kaisaiDate);
     expect(rawResult.dateApproximate).toBe(false);
@@ -219,34 +277,52 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
       toReportInput(filteredResult, rawRaceData, diagnostics),
     );
 
-    // 前提固定: 両方とも比較対象の指標が算出できていること(nullだと差の主張が空振りになる)。
+    // 前提固定: 比較対象の指標が算出できていること(nullだと同値の主張が空振りになる)。
     expect(rawReport.spearmanRho.value).not.toBeNull();
     expect(filteredReport.spearmanRho.value).not.toBeNull();
     expect(rawReport.normalizedJointKlModel.value).not.toBeNull();
     expect(filteredReport.normalizedJointKlModel.value).not.toBeNull();
 
-    // 受け入れ条件4: リーク遮断の前後で値が変わること。
-    expect(filteredReport.spearmanRho.value).not.toBeCloseTo(rawReport.spearmanRho.value!, 6);
-    expect(filteredReport.normalizedJointKlModel.value).not.toBeCloseTo(
+    // 反転した主張(#39): 生の戦績を渡しても、遮断済みを渡した場合と全馬で完全に同じ prior になる
+    // (production が既に遮断している)。指標だけでなく prior そのものを馬ごとに比較する。
+    expect(rawResult.rows.map((r) => r.prior)).toEqual(filteredResult.rows.map((r) => r.prior));
+    expect(rawReport.spearmanRho.value).toBe(filteredReport.spearmanRho.value);
+    expect(rawReport.normalizedJointKlModel.value).toBe(filteredReport.normalizedJointKlModel.value);
+
+    // 空振り防止: リークありの参照値(生の戦績を core 公開関数で直接処理した prior)が、遮断後と
+    // 実際に異なる(差が0でない)こと。旧版の固定値(リークあり側)もここで再現される。
+    const leakyRows = leakyPriorRows(rawRaceData, fixtureCase.kaisaiDate);
+    expect(leakyRows).toHaveLength(16);
+    const cleanByUmaban = new Map(rawResult.rows.map((r) => [r.umaban, r.prior]));
+    expect(leakyRows.filter((r) => r.prior !== cleanByUmaban.get(r.umaban))).toHaveLength(16);
+    const leakyReport = buildProbabilityQualityReport(
+      toReportInput({ rows: leakyRows, oddsStatus: rawResult.oddsStatus }, rawRaceData, null),
+    );
+    expect(leakyReport.spearmanRho.value).not.toBeNull();
+    expect(leakyReport.normalizedJointKlModel.value).not.toBeNull();
+    expect(leakyReport.spearmanRho.value).not.toBeCloseTo(rawReport.spearmanRho.value!, 6);
+    expect(leakyReport.normalizedJointKlModel.value).not.toBeCloseTo(
       rawReport.normalizedJointKlModel.value!,
       6,
     );
 
-    // 回帰: 自分で実行して得た値を固定する(受け入れ条件8)。
-    expect(rawReport.spearmanRho.value).toBeCloseTo(0.21044891642963054, 9);
+    // 回帰: 自分で実行して得た値を固定する(受け入れ条件8。旧版と同じ値。リークあり側は参照実装から)。
+    expect(leakyReport.spearmanRho.value).toBeCloseTo(0.21044891642963054, 9);
     expect(filteredReport.spearmanRho.value).toBeCloseTo(-0.005886682977052603, 9);
-    expect(rawReport.normalizedJointKlModel.value).toBeCloseTo(0.015556379406077249, 9);
+    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.015556379406077249, 9);
     expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.023594955525432157, 9);
 
     // conditionsにリーク遮断の実際の診断値が反映されていること。
+    // (leakFilter は計測側が渡す診断値。#39 以降 production は常に遮断するので、diagnostics を
+    // 渡さない生入力側の false は「診断値を渡していない」の意味で、値が遮断済みでないことではない)
     expect(filteredReport.conditions.leakFilterApplied).toBe(true);
     expect(filteredReport.conditions.removedResultCount).toBe(diagnostics.removedCount);
     expect(rawReport.conditions.leakFilterApplied).toBe(false);
 
     // eslint-disable-next-line no-console
     console.log(
-      `[リーク遮断前後比較] raw: spearmanRho=${rawReport.spearmanRho.value} klModel=${rawReport.normalizedJointKlModel.value} / ` +
-        `filtered(removed=${diagnostics.removedCount}): spearmanRho=${filteredReport.spearmanRho.value} klModel=${filteredReport.normalizedJointKlModel.value}`,
+      `[リーク遮断前後比較] leaky参照: spearmanRho=${leakyReport.spearmanRho.value} klModel=${leakyReport.normalizedJointKlModel.value} / ` +
+        `production(生入力・遮断済み入力とも同値, removed=${diagnostics.removedCount}): spearmanRho=${filteredReport.spearmanRho.value} klModel=${filteredReport.normalizedJointKlModel.value}`,
     );
   });
 

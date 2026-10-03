@@ -31,6 +31,7 @@ export {
   parseHorseId,
   parseKaisaiDate,
   parseRaceId,
+  precedingRaceIdsSameDay,
   siblingRaceIdsSameDay,
   venueKindOfRaceId,
   type CentralVenueInfo,
@@ -262,16 +263,29 @@ export {
 } from "./ev/race-opportunity.js";
 export {
   AnalysisStore,
+  type AnalysisAllocationMetaRecord,
+  type AnalysisAllocationRecord,
+  type AnalysisBetRecord,
   type AnalysisFilter,
   type AnalysisHorseRecord,
   type AnalysisRecord,
   type AnalysisStoreOptions,
+  type RaceComboPayoutsReadResult,
+  type RaceComboPayoutsSaveInput,
   type RaceResultDetail,
   type RaceResultDetailHorse,
   type RaceResultEntry,
+  type StoredAllocation,
+  type StoredAllocationBetDetail,
   type StoredAnalysis,
   type StoredAnalysisHorse,
+  type StoredComboPayout,
 } from "./ev/analysis-store.js";
+export {
+  classifyLookaheadSuspicion,
+  type LookaheadSuspicion,
+  type LookaheadSuspicionInput,
+} from "./ev/lookahead-suspicion.js";
 export {
   computeRaceLedger,
   computeVerifyReport,
@@ -339,8 +353,10 @@ export {
 export { assessTurfWear, type TurfWearHint } from "./analyzer/turf-wear.js";
 export {
   collectGradeWinnerTrend,
+  excludeLookaheadEntries,
   summarizeGradeWinnerTrend,
   type GradeWinnerConditions,
+  type LookaheadGuard,
   type GradeWinnerRange,
   type GradeWinnerTrendSummary,
   type GradeWinnerValueCount,
@@ -398,6 +414,7 @@ export {
 } from "./analyzer/build-prompt.js";
 export {
   AnalyzerMarkViolationError,
+  AnalyzerRefusalError,
   AnalyzerResponseParseError,
   AnalyzerTruncationError,
   extractJsonObject,
@@ -414,22 +431,37 @@ export {
   analyzeRace,
   FALLBACK_REASON_INVOCATION_ERROR,
   FALLBACK_REASON_PARSE_ERROR,
+  FALLBACK_REASON_REFUSED,
   FALLBACK_REASON_TRUNCATED,
   type AnalyzeRaceDeps,
   type AnalyzeRaceResult,
   type LlmClient,
+  type LlmCompletion,
 } from "./analyzer/analyze-race.js";
 export {
   AnthropicLlmClient,
   buildRequestParams,
+  createSdkMessageSender,
   DEFAULT_ANALYZER_CONFIG,
   extractText,
   type AnalyzerConfig,
+  type AnalyzerEffort,
   type AnthropicLlmClientDeps,
   type AnthropicMessageResponse,
   type AnthropicRequestParams,
   type MessageSender,
+  type SdkMessageSenderOptions,
 } from "./analyzer/anthropic-client.js";
+export {
+  createModelSelector,
+  createSdkModelLister,
+  pickLatestSonnet,
+  type ModelInfoLite,
+  type ModelLister,
+  type ModelSelector,
+  type ModelSelectorOptions,
+  type SdkModelListerOptions,
+} from "./analyzer/model-selection.js";
 export {
   buildAnalysisEmbed,
   DEFAULT_DISCORD_TIMEOUT_MS,
@@ -459,11 +491,16 @@ export type {
   OikiriResult,
   OikiriSkippedRow,
   PlaceOdds,
+  RaceComboPayoutAnomaly,
+  RaceComboPayoutEntry,
+  RaceComboPayoutResult,
   RaceListEntry,
   RacePayoutEntry,
   RaceResult,
   RaceResultHorse,
   RaceVenue,
+  ScratchedHorse,
+  ScratchStatus,
   Shutuba,
   ShutubaHorse,
   ShutubaRaceInfo,

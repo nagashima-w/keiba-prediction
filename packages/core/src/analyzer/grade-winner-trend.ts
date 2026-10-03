@@ -38,6 +38,14 @@
  * 表示に使う場合は、出馬表側(build-prompt.ts の race.raceName。ユーザーが見ている画面と
  * 一致する)を正とし、API側の名称とは混在させないこと。
  *
+ * 先読みリークの除外(Issue #153): 過去のレースを後から分析するとき、APIの応答には当該回自身と
+ * 当該回より後の回が含まれうる(実測: 地方は、実測した2本〈同じ大井の同一重賞シリーズ〉では race_id に
+ * 依らず同じ応答を返した。2023年の回を要求しても2026〜2017年が返る。別シリーズの地方重賞は未確認。
+ * 中央は当該年より前の10年を返し、含まれない。詳細は
+ * docs/grade-winner-lookahead-investigation.md)。集計の前に excludeLookaheadEntries で
+ * それらを除く(collectGradeWinnerTrend が呼ぶ)。summarizeGradeWinnerTrend 自体は除外を行わない
+ * (渡された配列をそのまま集計する純関数のまま)。
+ *
  * 標本数の食い違いについて(2026-07-28 小改善・プロンプト誤読解消): 複勝圏内馬数(延べ頭数)は
  * 人気サンプル数・複勝配当サンプル数と必ずしも一致しない。食い違いが実在する条件:
  * (a) 7頭以下等でfuku_pay3が欠損する回、(b) 複勝非発売でfuku_pay1〜3が全欠の回、
@@ -102,7 +110,11 @@ export interface GradeWinnerRange {
 
 /** summarizeGradeWinnerTrend の出力。常に同じキー構成の構造化オブジェクトに固定する。 */
 export interface GradeWinnerTrendSummary {
-  /** APIから取得できた過去回の総数(条件一致・除外を問わない。10とは限らない)。 */
+  /**
+   * 集計に渡された過去回の総数(条件一致・条件除外を問わない。10とは限らない)。
+   * Issue #153 以降、`collectGradeWinnerTrend` 経由では先読みリークで除いた回
+   * (当該回自身・基準日以降・日付不明)を**数えない**(除いた後の件数)。
+   */
   readonly 対象回数: number;
   /** jyo+track+kyoriが一致した回数。 */
   readonly 条件一致回数: number;
@@ -336,26 +348,105 @@ export function summarizeGradeWinnerTrend(
 // same-day-trend.ts の collectSameDayTrend(収集+集計をまとめた関数)と同じ役割分担の考え方。
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 先読みリークの除外(Issue #153)
+// ---------------------------------------------------------------------------
+
+/** excludeLookaheadEntries に渡す、分析対象レースの識別と基準日。 */
+export interface LookaheadGuard {
+  /** 分析対象のレースID。これと一致する raceId の回(=当該回自身)は日付に依らず除外する。 */
+  readonly raceId: RaceId;
+  /**
+   * 基準日。この日と同日以降の回を除外する。`YYYY/MM/DD`・`YYYYMMDD`・`YYYY-MM-DD` のいずれでもよく、
+   * 数字だけを取り出して(ゼロ埋め8桁を要求する)比較する。形式が不正なら例外を投げる(契約違反)。
+   */
+  readonly cutoffDate: string;
+}
+
+/** 日付文字列から数字だけを取り出し、実在しうる月日のゼロ埋め8桁(YYYYMMDD)だけを返す。それ以外は null。 */
+function digitsOfDate(raw: string | null): string | null {
+  if (raw === null) {
+    return null;
+  }
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length !== 8) {
+    return null;
+  }
+  const month = Number(digits.slice(4, 6));
+  const day = Number(digits.slice(6, 8));
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+  return digits;
+}
+
 /**
- * 指定レースの過去10年結果を取得し、分析対象レース自身の条件で集計する(タスク機能B)。
+ * 過去回配列から、分析対象レースの時点では存在しなかった(先読みになる)回を除く(Issue #153)。
+ *
+ * 過去のレースを後から分析すると、APIの応答(地方は、実測した大井のシリーズでは race_id に依らず同じ応答)に、当該回自身と
+ * 当該回より後の回が含まれ、LLMプロンプトの「同レース過去10年結果傾向」に混入する。
+ * 次のいずれかの回を除外する(#39 の戦績の遮断と同じ保守側の方針):
+ * - `raceId` が対象レースと一致する回(日付に依らず。基準日が実行日で近似される過去分析でも
+ *   当該回は日付だけでは残るため)。
+ * - `raceDate` が基準日と**同日以降**の回(同日は当該回の可能性が高い)。
+ * - `raceDate` が null・不正(ゼロ埋め8桁の実在しうる日付でない)の回(判定不能。未来の回を混ぜない側に倒す)。
+ *
+ * 日付は数字だけにそろえて(`2026-07-01` → `20260701`)比較する。入力は破壊せず、新しい配列を返す
+ * (何も除外されないときも同じ内容の新しい配列)。
+ *
+ * @throws Error 基準日がゼロ埋め8桁の日付として解釈できない場合(呼び出し側の契約違反)
+ */
+export function excludeLookaheadEntries(
+  entries: readonly GradeWinnerEntry[],
+  guard: LookaheadGuard,
+): GradeWinnerEntry[] {
+  const cutoff = digitsOfDate(guard.cutoffDate);
+  if (cutoff === null) {
+    throw new Error(
+      `基準日をYYYYMMDD(ゼロ埋め8桁)として解釈できません(入力: "${guard.cutoffDate}")`,
+    );
+  }
+  return entries.filter((e) => {
+    if (e.raceId === guard.raceId) {
+      return false;
+    }
+    const entryDate = digitsOfDate(e.raceDate);
+    return entryDate !== null && entryDate < cutoff;
+  });
+}
+
+/**
+ * 指定レースの過去10年結果を取得し、先読みになる回を除いたうえで、分析対象レース自身の条件で
+ * 集計する(タスク機能B。Issue #153 で先読みリークの除外を追加)。
+ *
+ * 取得した過去回配列から、`excludeLookaheadEntries` で当該回自身・基準日以降の回・日付不明の回を
+ * 除いてから集計する。したがって `対象回数` は**除外した後の件数**で、リークで除いた回を数えない。
+ * 当日運用(基準日が分析対象の開催日で、過去回がすべてそれより前)では何も除かれず、従来と同じ結果になる。
  *
  * @param raceId 分析対象のレースID(検証済み)
  * @param conditions 分析対象レース自身の条件(trackCode/track/kyori)。summarizeGradeWinnerTrend の
  *   フィルタにそのまま使われる
+ * @param cutoffDate 基準日(分析日。analysis-pipeline.ts の `analysisDate`。`YYYY/MM/DD` 等、
+ *   `excludeLookaheadEntries` が解釈できる形式)。この日と同日以降の回は集計に使わない
  * @param deps 注入依存(fetcher。通常は CachedFetcher)
- * @returns 非重賞・対象データなし(fetchGradeWinnerEntriesがnullを返す)、または条件一致が
+ * @returns 非重賞・対象データなし(fetchGradeWinnerEntriesがnullを返す)、または(除外後の)条件一致が
  *   3回未満なら null(呼び出し側はこれを異常とみなさず静かにスキップすること)。中央・地方
  *   (NAR)いずれのraceIdでも動作する(fetchGradeWinnerEntriesがホストを自動選択する)。
  * @throws GradeWinnerParseError status:OKであるにもかかわらず応答構造が壊れている場合
+ * @throws Error 基準日が解釈できない場合(excludeLookaheadEntries の契約違反)
  */
 export async function collectGradeWinnerTrend(
   raceId: RaceId,
   conditions: GradeWinnerConditions,
+  cutoffDate: string,
   deps: FetchGradeWinnerDeps,
 ): Promise<GradeWinnerTrendSummary | null> {
   const entries = await fetchGradeWinnerEntries(raceId, deps);
   if (entries === null) {
     return null;
   }
-  return summarizeGradeWinnerTrend(entries, conditions);
+  return summarizeGradeWinnerTrend(
+    excludeLookaheadEntries(entries, { raceId, cutoffDate }),
+    conditions,
+  );
 }

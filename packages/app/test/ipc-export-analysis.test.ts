@@ -86,6 +86,9 @@ function makeSource(overrides: Partial<AnalysisExportSource> = {}): AnalysisExpo
       model: "claude-sonnet-4-6",
       rawResponse: "raw",
       raceSnapshot: { race: { raceName: "テストS" }, horses: [] },
+      // 先読みリーク遮断の印(Issue #152)。エクスポートでは使わないので記録なし(null)にしておく。
+      historyCutoffDate: null,
+      promptLookaheadGuarded: null,
       horses: [
         {
           umaban: 1,

@@ -158,6 +158,45 @@ function buildFullResultHtml(headerRow: string, rows: string[]): string {
   </body></html>`;
 }
 
+/**
+ * 組合せ払戻(ワイド・三連複、Issue #52)の払戻行を組み立てる。
+ * groups は組ごとの馬番テキスト配列(文字列のまま渡せるので、非数値・要素数不足など
+ * 異常系もそのまま表現できる)。payoutTexts は td.Payout の<br>区切りテキスト列
+ * (「円」を含めて呼び出し側が指定する)。
+ */
+function buildComboRow(
+  rowClass: "Wide" | "Fuku3" | "Umatan" | "Tan3" | "Umaren" | "Wakuren",
+  label: string,
+  groups: readonly (readonly string[])[],
+  payoutTexts: readonly string[],
+): string {
+  const ulHtml = groups
+    .map((slots) => {
+      const lis = slots
+        .map((s) => (s === "" ? "<li></li>" : `<li><span>${s}</span></li>`))
+        .join("");
+      return `<ul>${lis}</ul>`;
+    })
+    .join("");
+  return `<tr class="${rowClass}"><th>${label}</th><td class="Result">${ulHtml}</td><td class="Payout"><span>${payoutTexts.join("<br />")}</span></td></tr>`;
+}
+
+/** 単勝の払戻行(組合せ払戻の巻き添え防止テストで、着順以外の他券種が無事なことを見るために使う)。 */
+function buildTanshoRow(umaban: number, payout: number): string {
+  return `<tr class="Tansho"><th>単勝</th><td class="Result"><div><span>${umaban}</span></div></td><td class="Payout"><span>${payout}円</span></td></tr>`;
+}
+
+/** 複勝の払戻行(単勝と同じ用途)。1頭〜複数頭に対応。 */
+function buildFukushoRow(umabans: readonly number[], payouts: readonly number[]): string {
+  const spans = umabans.map((u) => `<div><span>${u}</span></div>`).join("");
+  return `<tr class="Fukusho"><th>複勝</th><td class="Result">${spans}</td><td class="Payout"><span>${payouts.map((p) => `${p}円`).join("<br />")}</span></td></tr>`;
+}
+
+/** 払戻行の配列を1つの table.Payout_Detail_Table にまとめる。 */
+function buildPayoutTables(rows: readonly string[]): string {
+  return `<table class="Payout_Detail_Table"><tbody>${rows.join("")}</tbody></table>`;
+}
+
 describe("parseRaceResult(レース結果パーサー)", () => {
   describe("フィクスチャ(函館7R・10頭)の実データ検証", () => {
     let result: RaceResult;
@@ -583,5 +622,885 @@ describe("公開API(index.tsからの再エクスポート)", () => {
     expect(mod.parseRaceResult).toBe(parseRaceResult);
     expect(mod.RaceResultParseError).toBe(RaceResultParseError);
     expect(mod.RaceResultNotConfirmedError).toBe(RaceResultNotConfirmedError);
+  });
+});
+
+describe("組合せ払戻(ワイド・三連複、Issue #52)", () => {
+  describe("実データ: 頭数(複勝の対象人数)とワイド・三連複の的中基準(常に上位3着)は別概念であること(AC2)", () => {
+    it.each([
+      [
+        "result_202603020203.html",
+        5,
+        [
+          { umabans: [1, 5], payout: 130 },
+          { umabans: [2, 5], payout: 130 },
+          { umabans: [1, 2], payout: 180 },
+        ],
+        [{ umabans: [1, 2, 5], payout: 240 }],
+      ],
+      [
+        "result_202602010605.html",
+        6,
+        [
+          { umabans: [1, 2], payout: 110 },
+          { umabans: [2, 3], payout: 140 },
+          { umabans: [1, 3], payout: 210 },
+        ],
+        [{ umabans: [1, 2, 3], payout: 270 }],
+      ],
+      [
+        "nar_result_202630062407.html",
+        7,
+        [
+          { umabans: [2, 4], payout: 190 },
+          { umabans: [1, 2], payout: 1990 },
+          { umabans: [1, 4], payout: 1550 },
+        ],
+        [{ umabans: [1, 2, 4], payout: 2210 }],
+      ],
+      [
+        "result_202602010607.html",
+        10,
+        [
+          { umabans: [2, 4], payout: 620 },
+          { umabans: [4, 9], payout: 6940 },
+          { umabans: [2, 9], payout: 4930 },
+        ],
+        [{ umabans: [2, 4, 9], payout: 32520 }],
+      ],
+    ] as const)(
+      "%s(%d頭)はワイド3組・3連複1組が的中すること(複勝の点数とは独立=別概念)",
+      (fixture, runnerCount, expectedWide, expectedTrio) => {
+        const result = parseRaceResult(loadFixture(fixture));
+        // 前提: 頭数が期待どおりであることをまず無条件に固定する(空振り防止)。
+        expect(result.horses).toHaveLength(runnerCount);
+        expect(result.widePayouts).toEqual({ state: "parsed", payouts: expectedWide });
+        expect(result.trioPayouts).toEqual({ state: "parsed", payouts: expectedTrio });
+      },
+    );
+
+    it("複勝の払戻点数は頭数に応じて2点/3点と変わるが、ワイド・3連複の組数はそれと無関係に一定であること(別概念であることの直接証明。#54への申し送りを兼ねる)", () => {
+      const five = parseRaceResult(loadFixture("result_202603020203.html"));
+      const six = parseRaceResult(loadFixture("result_202602010605.html"));
+      const seven = parseRaceResult(loadFixture("nar_result_202630062407.html"));
+      const ten = parseRaceResult(loadFixture("result_202602010607.html"));
+      // 複勝の点数は頭数で変わる(5/6/7頭は2点、10頭は3点)。
+      expect(five.placePayouts).toHaveLength(2);
+      expect(six.placePayouts).toHaveLength(2);
+      expect(seven.placePayouts).toHaveLength(2);
+      expect(ten.placePayouts).toHaveLength(3);
+      // 一方でワイド・3連複の組数は複勝の点数と無関係に、どの頭数でも3組・1組で一定。
+      for (const r of [five, six, seven, ten]) {
+        expect(r.widePayouts!.state).toBe("parsed");
+        expect(r.trioPayouts!.state).toBe("parsed");
+        if (r.widePayouts!.state === "parsed") {
+          expect(r.widePayouts!.payouts).toHaveLength(3);
+        }
+        if (r.trioPayouts!.state === "parsed") {
+          expect(r.trioPayouts!.payouts).toHaveLength(1);
+        }
+      }
+    });
+
+    it("NAR(地方)はtd.Resultのclass属性直前に空白が2つ入る実測構造(<td  class=\"Result\">)でも取れること(AC3)", () => {
+      const result = parseRaceResult(loadFixture("nar_result_202630062407.html"));
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [
+          { umabans: [2, 4], payout: 190 },
+          { umabans: [1, 2], payout: 1990 },
+          { umabans: [1, 4], payout: 1550 },
+        ],
+      });
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 4], payout: 2210 }],
+      });
+    });
+  });
+
+  describe("3着同着でワイドの的中組が増えるケース(以下は合成HTMLである。実測由来のデータではない)", () => {
+    it("1着1・2着2・3着(3・4が同着)という想定で、上位3着に4頭が入りワイドの的中組がC(4,2)=6組になること(組数を3固定で検証していないことの直接証明。AC4・boss裁定R-3)", () => {
+      // 合成データ: 実在のレースではなく、3着同着によりワイドの的中組が定数(3)を超える
+      // ケースを人工的に構築したものである。
+      const wideRow = buildComboRow(
+        "Wide",
+        "ワイド",
+        [
+          ["1", "2"],
+          ["1", "3"],
+          ["1", "4"],
+          ["2", "3"],
+          ["2", "4"],
+          ["3", "4"],
+        ],
+        ["120円", "150円", "150円", "300円", "300円", "400円"],
+      );
+      const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+      const html = buildResultHtml(
+        [buildResultRow({ umaban: "1" })],
+        buildPayoutTables([wideRow, trioRow]),
+      );
+      const result = parseRaceResult(html);
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [
+          { umabans: [1, 2], payout: 120 },
+          { umabans: [1, 3], payout: 150 },
+          { umabans: [1, 4], payout: 150 },
+          { umabans: [2, 3], payout: 300 },
+          { umabans: [2, 4], payout: 300 },
+          { umabans: [3, 4], payout: 400 },
+        ],
+      });
+      // 組数が3(通常時の定数)ではなく6であることを直接固定する。
+      if (result.widePayouts!.state === "parsed") {
+        expect(result.widePayouts!.payouts).toHaveLength(6);
+        expect(result.widePayouts!.payouts.length).not.toBe(3);
+      }
+    });
+  });
+
+  describe("払戻テーブル自体が1つも無い場合(AC5-b・boss裁定R-2)", () => {
+    it("ワイド・3連複はstate:'undetermined'(kind:'payoutTableAbsent')になり、複勝・単勝は従来どおり空配列のままであること(非対称は意図的)", () => {
+      const result = parseRaceResult(
+        buildResultHtml([buildResultRow({ umaban: "1" })]), // payoutTables省略=テーブル自体が無い
+      );
+      expect(result.placePayouts).toEqual([]);
+      expect(result.winPayouts).toEqual([]);
+      expect(result.widePayouts).toEqual({
+        state: "undetermined",
+        reason: expect.objectContaining({ kind: "payoutTableAbsent" }),
+      });
+      expect(result.trioPayouts).toEqual({
+        state: "undetermined",
+        reason: expect.objectContaining({ kind: "payoutTableAbsent" }),
+      });
+    });
+  });
+
+  describe("払戻テーブルはあるが当該券種の行が無い場合(AC5-a)", () => {
+    it("複勝・単勝の行はあるがワイド・3連複の行が無い場合、state:'parsed'かつpayouts:[]になること(発売なし等)", () => {
+      const payoutTables = buildPayoutTables([
+        buildTanshoRow(1, 150),
+        buildFukushoRow([1], [110]),
+      ]);
+      const result = parseRaceResult(
+        buildResultHtml([buildResultRow({ umaban: "1" })], payoutTables),
+      );
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.widePayouts).toEqual({ state: "parsed", payouts: [] });
+      expect(result.trioPayouts).toEqual({ state: "parsed", payouts: [] });
+    });
+  });
+
+  describe("未確定レース(発走前・確定前)はワイド・三連複の追加後も払戻パースに到達しないこと(AC5-c)", () => {
+    it("実データ(発走前NARレース・#All_Result_Table あり/tbody空/払戻テーブルなし)でワイド・三連複の追加後もRaceResultNotConfirmedErrorを投げること(非回帰)", () => {
+      expect(() =>
+        parseRaceResult(loadFixture("nar_result_presale_202642071612.html")),
+      ).toThrow(RaceResultNotConfirmedError);
+    });
+  });
+
+  describe("払戻テーブルが2つある文書でも取りこぼさないこと(R-11)", () => {
+    it("1つ目のテーブルに単勝・複勝、2つ目のテーブルにワイド・3連複がある実物同型の構造でも正しく取れること", () => {
+      const table1 = buildPayoutTables([
+        buildTanshoRow(1, 150),
+        buildFukushoRow([1, 2], [110, 120]),
+      ]);
+      const wideRow = buildComboRow("Wide", "ワイド", [["1", "2"]], ["100円"]);
+      const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+      const table2 = buildPayoutTables([wideRow, trioRow]);
+      const result = parseRaceResult(
+        buildResultHtml([buildResultRow({ umaban: "1" })], `${table1}${table2}`),
+      );
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2], payout: 100 }],
+      });
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+      });
+    });
+  });
+
+  describe("組の探索は td.Result にスコープすること(boss メタレビュー要修正3)", () => {
+    it("td.Ninki(人気表示)側に<ul>が紛れ込んでいても組として数えないこと(以下は合成HTMLであり実測由来ではない。将来netkeibaがtd.Ninkiを<ul>で描画するように変わっても、組数だけが静かに増えてgroupCountMismatchへ倒れ、全レース・全券種が恒久的にundetermined→not_importedへ落ちる欠陥を防ぐ)", () => {
+      const wideRow = `<tr class="Wide"><th>ワイド</th>
+        <td class="Result"><ul><li><span>1</span></li><li><span>2</span></li><li></li></ul></td>
+        <td class="Payout"><span>100円</span></td>
+        <td class="Ninki"><ul><li><span>2</span></li><li><span>3</span></li></ul></td>
+      </tr>`;
+      const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+      const html = buildResultHtml(
+        [buildResultRow({ umaban: "1" })],
+        buildPayoutTables([wideRow, trioRow]),
+      );
+      const result = parseRaceResult(html);
+      // td.Result内の1組(1,2)だけが数えられ、td.Ninki側の<ul>は無視されること
+      // (組数=1、払戻件数=1が一致し、groupCountMismatchへ倒れないこと)。
+      expect(result.widePayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2], payout: 100 }],
+      });
+    });
+  });
+
+  describe("構造異常は分類して診断値に残し、着順・複勝・単勝の取込を巻き添えにしないこと(AC6・R-12)", () => {
+    /** 複勝・単勝は正常な行、ワイドだけ異常な行にした払戻テーブルを持つ結果HTMLを組み立てる。 */
+    function buildHtmlWithWideRow(wideRow: string): string {
+      const payoutTables = buildPayoutTables([
+        buildTanshoRow(1, 150),
+        buildFukushoRow([1], [110]),
+        wideRow,
+        buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]),
+      ]);
+      return buildResultHtml([buildResultRow({ umaban: "1", rank: "1" })], payoutTables);
+    }
+
+    it("組数(<ul>数)と払戻件数が食い違う場合、kind:'groupCountMismatch'になり、着順・複勝・単勝は通常どおり保存されること", () => {
+      const wideRow = buildComboRow(
+        "Wide",
+        "ワイド",
+        [
+          ["1", "2"],
+          ["1", "3"],
+        ], // 組は2つ
+        ["100円"], // だが払戻は1件
+      );
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      // 巻き添え無し: 着順・複勝・単勝・3連複は通常どおり保存される。
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+      });
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("groupCountMismatch");
+        expect(result.widePayouts!.reason.observedGroupCount).toBe(2);
+        expect(result.widePayouts!.reason.observedPayoutCount).toBe(1);
+      }
+    });
+
+    it("組の要素数が券種の構成頭数(COMBO_SIZE)と一致しない場合、kind:'comboSizeMismatch'になり、着順・複勝・単勝は通常どおり保存されること", () => {
+      const wideRow = buildComboRow("Wide", "ワイド", [["1"]], ["100円"]); // ワイドなのに1頭だけの組
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("comboSizeMismatch");
+      }
+    });
+
+    it("馬番が範囲外(19)の場合、kind:'invalidUmaban'になり、着順・複勝・単勝は通常どおり保存されること", () => {
+      const wideRow = buildComboRow("Wide", "ワイド", [["1", "19"]], ["100円"]);
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it("馬番が非数値(取消等)の場合も、kind:'invalidUmaban'になり巻き添えにしないこと", () => {
+      const wideRow = buildComboRow("Wide", "ワイド", [["1", "取消"]], ["100円"]);
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it("同一組(1-2)が2回出現する場合、kind:'duplicateCombo'になり、着順・複勝・単勝は通常どおり保存されること(永続化層のPRIMARY KEY違反によるトランザクション巻き添えを未然に防ぐ。R-12)", () => {
+      const wideRow = buildComboRow(
+        "Wide",
+        "ワイド",
+        [
+          ["1", "2"],
+          ["1", "2"],
+        ], // 同じ組が2回
+        ["100円", "100円"],
+      );
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.horses).toHaveLength(1);
+      expect(result.winPayouts).toEqual([{ umaban: 1, payout: 150 }]);
+      expect(result.placePayouts).toEqual([{ umaban: 1, payout: 110 }]);
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.kind).toBe("duplicateCombo");
+      }
+      // code-reviewer一次レビュー指摘(boss裁定: 対応不要・任意。要修正3で同ファイルを
+      // 触るついでに追加): 隣接するtrioPayoutsもワイドの異常に巻き添えにならず
+      // parsedのまま残ることを明示する(同型の券種間独立性はgroupCountMismatchの
+      // テストで既に固定済みだが、duplicateComboでも同様であることをここでも確認する)。
+      expect(result.trioPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+      });
+    });
+
+    it("診断値のrawHtmlは上限を超えると切り詰められること(ログ・IPCを経由しうるため)", () => {
+      const longText = "9".repeat(1000);
+      const wideRow = buildComboRow("Wide", "ワイド", [[longText]], ["100円"]);
+      const result = parseRaceResult(buildHtmlWithWideRow(wideRow));
+      expect(result.widePayouts!.state).toBe("undetermined");
+      if (result.widePayouts!.state === "undetermined") {
+        expect(result.widePayouts!.reason.rawHtml).not.toBeNull();
+        expect(result.widePayouts!.reason.rawHtml!.length).toBeLessThanOrEqual(520);
+        expect(result.widePayouts!.reason.rawHtml!.endsWith("…(truncated)")).toBe(true);
+      }
+    });
+  });
+});
+
+/**
+ * 組合せ払戻(馬連、Issue #114・#24-F1)。
+ *
+ * AC-1: 実データ(中央・地方それぞれ1レース)の馬連の確定払戻をリテラルで固定する。
+ * 馬連はワイド・三連複と異なり、単勝・複勝と同じ1つ目の払戻テーブル
+ * (`tr.Umaren`)に入る(`SEL.quinellaRow`のJSDoc参照)。
+ *
+ * 実測値(オーケストレーターが払戻テーブルのテキストを確認済み。着手前ゲートコメント参照):
+ * - 中央 `fixtures/result_202603020211.html`: 馬連 8-13 = 4,550円・19人気
+ * - 地方 `fixtures/nar_result_202654071210.html`: 馬連 5-7 = 5,230円・25人気
+ */
+describe("組合せ払戻(馬連、Issue #114・#24-F1)", () => {
+  it("中央(fixtures/result_202603020211.html)の馬連8-13=4,550円をパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("result_202603020211.html"));
+    // 前提固定(空振り防止): 払戻テーブル自体は取れていること。
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.quinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [8, 13], payout: 4550 }],
+    });
+  });
+
+  it("地方(fixtures/nar_result_202654071210.html)の馬連5-7=5,230円をパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("nar_result_202654071210.html"));
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.quinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [5, 7], payout: 5230 }],
+    });
+  });
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、widePayouts/trioPayoutsと同じくstate:undeterminedになること(payoutTableAbsent。ワイド・三連複と同じ非対称)", () => {
+    // 既存ヘルパー(buildHtmlWithWideRowと兄弟)が無いため、払戻テーブルを含まない
+    // 最小HTMLを直接組み立てる(courseType系テストと同じ流儀)。
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+    if (result.quinellaPayouts!.state === "undetermined") {
+      expect(result.quinellaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    // 巻き添え無し(widePayouts/trioPayoutsも同じ理由で同じくundeterminedであること)。
+    expect(result.widePayouts!.state).toBe("undetermined");
+    expect(result.trioPayouts!.state).toBe("undetermined");
+  });
+});
+
+/**
+ * 組合せ払戻(馬単、Issue #121・#24-F2)。
+ *
+ * 馬単はワイド・三連複・馬連と異なり「1着→2着」の並びが意味を持つ(#106・#24-Bで
+ * `COMBO_KEY_ORDER.exacta = "ordered"`が既に確定済み)。`parseComboPayoutRow`が
+ * 常に`validateComboUmabans`(昇順必須)・`buildComboOddsKey`(常にソート)を使っていると、
+ * 1着13・2着8の払戻が「不正な馬番」として undetermined に落ちるか、キーが昇順化されて
+ * 逆順の買い目と区別できなくなる(着手前ゲート申し送り。Issue #121コメント参照)。
+ * この describe は betType別の順序方針(`validateComboUmabansFor`/`buildComboOddsKeyFor`)へ
+ * 切り替えたことを固定する。
+ *
+ * 実測値(HTML実物で確認済み):
+ * - 中央 `fixtures/result_202603020211.html:1967`: 馬単 13→8 = 8,360円・32人気
+ * - 地方 `fixtures/nar_result_202654071210.html:1730`: 馬単 5→7 = 12,970円・66人気
+ */
+describe("組合せ払戻(馬単、Issue #121・#24-F2)", () => {
+  it("中央(fixtures/result_202603020211.html)の馬単13→8=8,360円を、着順どおりの並び([13, 8])のままソートせずにパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("result_202603020211.html"));
+    // 前提固定(空振り防止): 払戻テーブル自体は取れていること。
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [13, 8], payout: 8360 }],
+    });
+  });
+
+  it("地方(fixtures/nar_result_202654071210.html)の馬単5→7=12,970円を、着順どおりの並び([5, 7])のままパースできること(AC-1)", () => {
+    const result = parseRaceResult(loadFixture("nar_result_202654071210.html"));
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [5, 7], payout: 12970 }],
+    });
+  });
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、wide/trio/quinellaと同じくstate:undeterminedになること(payoutTableAbsent。同じ非対称)", () => {
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.exactaPayouts!.state).toBe("undetermined");
+    if (result.exactaPayouts!.state === "undetermined") {
+      expect(result.exactaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    // 巻き添え無し(wide/trio/quinellaも同じ理由で同じくundeterminedであること)。
+    expect(result.widePayouts!.state).toBe("undetermined");
+    expect(result.trioPayouts!.state).toBe("undetermined");
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+  });
+
+  it("1着同着(合成HTML: 1着1・1着2〈同着〉・2着3)で馬単の的中組が1着側の頭数だけ増えること(AC-6。以下は合成HTMLであり実測由来ではない)", () => {
+    // 1着が同着で2頭(1・2)、2着が3のケース: 馬単は「1着→2着」なので
+    // (1着1→2着3)と(1着2→2着3)の2組が的中する想定(3連複のC(4,2)同着テストと同型の考え方)。
+    const exactaRow = buildComboRow(
+      "Umatan",
+      "馬単",
+      [
+        ["1", "3"],
+        ["2", "3"],
+      ],
+      ["500円", "620円"],
+    );
+    const trioRow = buildComboRow("Fuku3", "3連複", [["1", "2", "3"]], ["500円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([exactaRow, trioRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [1, 3], payout: 500 },
+        { umabans: [2, 3], payout: 620 },
+      ],
+    });
+    // 前提固定(空振り防止): 通常時(同着なし)は1組のみであるのに対し、ここは2組であること。
+    if (result.exactaPayouts!.state === "parsed") {
+      expect(result.exactaPayouts!.payouts).toHaveLength(2);
+      expect(result.exactaPayouts!.payouts.length).not.toBe(1);
+    }
+    // 巻き添え無し: 3連複は通常どおりparsed。
+    expect(result.trioPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [1, 2, 3], payout: 500 }],
+    });
+  });
+
+  it("★重複検出も順序を見ること: 逆順の2組([13,8]と[8,13])が同じ行に現れても、duplicateComboとして誤って弾かれないこと(以下は合成HTMLであり実測由来ではない。買い目の並びを保持する専用キーで重複判定していることの直接固定)", () => {
+    const exactaRow = buildComboRow(
+      "Umatan",
+      "馬単",
+      [
+        ["13", "8"],
+        ["8", "13"],
+      ],
+      ["8,360円", "11,880円"],
+    );
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([exactaRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.exactaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [13, 8], payout: 8360 },
+        { umabans: [8, 13], payout: 11880 },
+      ],
+    });
+  });
+
+  /**
+   * ★非退行の直接固定(AC-2。着手前ゲート・コーディネーター指定): 馬単対応で
+   * `parseComboPayoutRow`をbetType別の順序方針(`validateComboUmabansFor`/`buildComboOddsKeyFor`)へ
+   * 切り替えたことで、ワイド・3連複・馬連(順不同の券種)が誤って"ordered"方針(昇順要求なし・
+   * ソートなし)になっていないことを固定する。
+   *
+   * 実測により確認した前提(このテストが意味を持つための土台): 既存のワイド・3連複の
+   * テスト(実フィクスチャ・合成HTMLとも)はいずれも`<li>`の生の並びが最初から昇順
+   * (netkeibaが常に昇順で表示するため)であり、「ソートするかどうか」を区別できない
+   * (`grep -n 'buildComboRow(' parse-race-result.test.ts`で全呼び出しを確認済み、
+   * いずれも昇順ペア)。したがって「全券種を"ordered"にする変異」を検出するには、
+   * ここで意図的に**降順の生入力**を与える必要がある。
+   */
+  it("★非退行: ワイドの降順入力([3, 1])は、馬単対応後も従来どおりkind:'invalidUmaban'でundeterminedになること(以下は合成HTMLであり実測由来ではない)", () => {
+    const wideRow = buildComboRow("Wide", "ワイド", [["3", "1"]], ["100円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([wideRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.widePayouts!.state).toBe("undetermined");
+    if (result.widePayouts!.state === "undetermined") {
+      expect(result.widePayouts!.reason.kind).toBe("invalidUmaban");
+    }
+  });
+});
+
+/**
+ * 組合せ払戻(三連単、Issue #131・#25-F)。
+ *
+ * 三連単は馬単と同じく「着順どおりの並び」が意味を持つ券種であり、`COMBO_KEY_ORDER.trifecta =
+ * "ordered"`(Issue #130・#25-D)が既に確定済みのため、`parseComboPayoutRow`は
+ * betType別の順序方針にそのまま乗る(関数本体の変更は不要。呼び出し追加のみ)。
+ *
+ * 実測値(HTML実物で確認済み):
+ * - 中央 `fixtures/result_202603020211.html:1995`: 三連単 13→8→5 = 52,690円・113人気
+ * - 地方 `fixtures/nar_result_202654071210.html:1758`: 三連単 5→7→1 = 260,090円・947人気
+ */
+describe("組合せ払戻(三連単、Issue #131・#25-F)", () => {
+  it("中央(fixtures/result_202603020211.html)の三連単13→8→5=52,690円を、着順どおりの並び([13, 8, 5])のままソートせずにパースできること(AC-1・AC-2)", () => {
+    const result = parseRaceResult(loadFixture("result_202603020211.html"));
+    // 前提固定(空振り防止): 払戻テーブル自体は取れていること。
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [13, 8, 5], payout: 52690 }],
+    });
+  });
+
+  it("地方(fixtures/nar_result_202654071210.html)の三連単5→7→1=260,090円を、着順どおりの並び([5, 7, 1])のままパースできること(AC-1・AC-2。この並びは昇順でも降順でもない〈5<7だが7>1〉非単調な実データ)", () => {
+    const result = parseRaceResult(loadFixture("nar_result_202654071210.html"));
+    expect(result.widePayouts!.state).toBe("parsed");
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [5, 7, 1], payout: 260090 }],
+    });
+  });
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、wide/trio/quinella/exactaと同じくstate:undeterminedになること(payoutTableAbsent。同じ非対称)", () => {
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts!.state).toBe("undetermined");
+    if (result.trifectaPayouts!.state === "undetermined") {
+      expect(result.trifectaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    // 巻き添え無し(wide/trio/quinella/exactaも同じ理由で同じくundeterminedであること)。
+    expect(result.widePayouts!.state).toBe("undetermined");
+    expect(result.trioPayouts!.state).toBe("undetermined");
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+    expect(result.exactaPayouts!.state).toBe("undetermined");
+  });
+
+  it("1着同着(合成HTML: 1着1・1着2〈同着〉・2着3・3着4)で三連単の的中組が1着側の頭数だけ増えること(AC-6。以下は合成HTMLであり実測由来ではない)", () => {
+    // 1着が同着で2頭(1・2)、2着3・3着4は固定のケース: 三連単は「1着→2着→3着」なので
+    // (1着1→2着3→3着4)と(1着2→2着3→3着4)の2組が的中する想定(馬単の1着同着テストと同型)。
+    const trifectaRow = buildComboRow(
+      "Tan3",
+      "3連単",
+      [
+        ["1", "3", "4"],
+        ["2", "3", "4"],
+      ],
+      ["500円", "620円"],
+    );
+    const trioRow = buildComboRow("Fuku3", "3連複", [["1", "3", "4"]], ["500円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trifectaRow, trioRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [1, 3, 4], payout: 500 },
+        { umabans: [2, 3, 4], payout: 620 },
+      ],
+    });
+    // 前提固定(空振り防止): 通常時(同着なし)は1組のみであるのに対し、ここは2組であること。
+    if (result.trifectaPayouts!.state === "parsed") {
+      expect(result.trifectaPayouts!.payouts).toHaveLength(2);
+      expect(result.trifectaPayouts!.payouts.length).not.toBe(1);
+    }
+    // 巻き添え無し: 3連複は通常どおりparsed(三連単とcomboSize=3を共有する兄弟券種)。
+    expect(result.trioPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [1, 3, 4], payout: 500 }],
+    });
+  });
+
+  it("★重複検出も順序を見ること: 逆順の2組([13,8,5]と[5,8,13])が同じ行に現れても、duplicateComboとして誤って弾かれないこと(以下は合成HTMLであり実測由来ではない。買い目の並びを保持する専用キーで重複判定していることの直接固定)", () => {
+    const trifectaRow = buildComboRow(
+      "Tan3",
+      "3連単",
+      [
+        ["13", "8", "5"],
+        ["5", "8", "13"],
+      ],
+      ["52,690円", "61,200円"],
+    );
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trifectaRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [
+        { umabans: [13, 8, 5], payout: 52690 },
+        { umabans: [5, 8, 13], payout: 61200 },
+      ],
+    });
+  });
+
+  it("★非昇順の並びを直接固定すること: 合成HTMLの[8, 13, 5](昇順でも降順でもない)がソートされず、そのままの並びでパースされること(AC-2・着手前ゲート指定Q2)", () => {
+    const trifectaRow = buildComboRow("Tan3", "3連単", [["8", "13", "5"]], ["1,000円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trifectaRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trifectaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [8, 13, 5], payout: 1000 }],
+    });
+    // ★空振り防止: 昇順([5, 8, 13])に化けていないことを直接固定する。
+    if (result.trifectaPayouts!.state === "parsed") {
+      expect(result.trifectaPayouts!.payouts[0]!.umabans).not.toEqual([5, 8, 13]);
+    }
+  });
+
+  /**
+   * ★非退行の直接固定(三連単対応で`parseComboPayoutRow`の呼び出しを追加したことが、
+   * comboSize=3を共有する兄弟券種(3連複、順不同)を誤って"ordered"方針(昇順要求なし・
+   * ソートなし)にしていないことを固定する。馬単対応時にワイドで行った非退行テストと同型だが、
+   * 三連単はワイド(comboSize=2)ではなく3連複(comboSize=3)と構成頭数を共有するため、
+   * より紛れやすい兄弟としてこちらを対象にする)。
+   */
+  it("★非退行: 3連複の降順入力([3, 2, 1])は、三連単対応後も従来どおりkind:'invalidUmaban'でundeterminedになること(以下は合成HTMLであり実測由来ではない)", () => {
+    const trioRow = buildComboRow("Fuku3", "3連複", [["3", "2", "1"]], ["500円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([trioRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.trioPayouts!.state).toBe("undetermined");
+    if (result.trioPayouts!.state === "undetermined") {
+      expect(result.trioPayouts!.reason.kind).toBe("invalidUmaban");
+    }
+  });
+});
+
+/**
+ * 組合せ払戻(枠連、Issue #145・#26-F)。
+ *
+ * 枠連の払戻行は `tr.Wakuren`(構造は馬連 `tr.Umaren` と同型: td.Result の ul/li/span に枠番2つ、
+ * td.Payout に単一値)。**要素が馬番ではなく枠番(1〜8。同枠可)**である点だけが違い、
+ * `COMBO_ELEMENT_KIND.bracketQuinella="wakuban"`(Issue #143・#26-D)により `parseComboPayoutRow` の
+ * 検証が枠番用に振り分けられる(関数本体の変更は不要。呼び出し追加のみ)。
+ *
+ * ★期待値の独立性: 払戻の枠組は、同じ文書の**結果テーブルの1着・2着の枠番**(`horses[].wakuban`)から
+ * 別経路で導いた組と突き合わせる(パーサ自身の出力だけを期待値にしない)。
+ *
+ * 実測値(HTML実物で確認済み。行はいずれも `class="Wakuren"` の1行):
+ * - 中央 16頭 `fixtures/result_202603020211.html`: 4-7 = 3,150円・15人気
+ * - 中央 10頭 `fixtures/result_202602010607.html`: 2-4 = 1,920円・10人気
+ * - 中央 9頭 `fixtures/result_202607020501.html`: 1-8 = 550円・2人気
+ * - 地方 12頭 `fixtures/nar_result_202654071210.html`: 5-6 = 1,070円・2人気
+ * - 地方 9頭 `fixtures/nar_result_202654092706.html`: 3-8 = 760円・2人気
+ * - 地方 10頭 `fixtures/nar_result_202654071201.html`: 3-4 = 140円・1人気
+ * - **同枠(2-2)** 中央 16頭 `fixtures/result_202606040810.html`: 2-2 = 18,390円・32人気
+ *   (2026-09-29取得。1着=馬番4〈枠2〉・2着=馬番3〈枠2〉。馬連は馬番3-4=17,680円で別行)
+ */
+describe("組合せ払戻(枠連、Issue #145・#26-F)", () => {
+  /** 着順が確定順位(kind:"順位")で、その値がrankである馬。 */
+  function horsesFinishedAt(result: RaceResult, rank: number) {
+    return result.horses.filter(
+      (h) => h.finishPosition?.kind === "順位" && h.finishPosition.value === rank,
+    );
+  }
+
+  /** 1着・2着の枠番から導いた枠連の組(昇順。1着・2着が各1頭であることも無条件に固定する)。 */
+  function frameGroupOfTopTwo(result: RaceResult): number[] {
+    const firsts = horsesFinishedAt(result, 1);
+    const seconds = horsesFinishedAt(result, 2);
+    // 前提固定(空振り防止): 同着なし(1着・2着が各1頭)であること。同着があると組が増え、この導出が成り立たない。
+    expect(firsts).toHaveLength(1);
+    expect(seconds).toHaveLength(1);
+    return [firsts[0]!.wakuban!, seconds[0]!.wakuban!].sort((a, b) => a - b);
+  }
+
+  const REAL_CASES: readonly {
+    readonly name: string;
+    readonly fixture: string;
+    readonly group: readonly number[];
+    readonly payout: number;
+  }[] = [
+    { name: "中央16頭", fixture: "result_202603020211.html", group: [4, 7], payout: 3150 },
+    { name: "中央10頭", fixture: "result_202602010607.html", group: [2, 4], payout: 1920 },
+    { name: "中央9頭", fixture: "result_202607020501.html", group: [1, 8], payout: 550 },
+    { name: "地方12頭", fixture: "nar_result_202654071210.html", group: [5, 6], payout: 1070 },
+    { name: "地方9頭", fixture: "nar_result_202654092706.html", group: [3, 8], payout: 760 },
+    { name: "地方10頭", fixture: "nar_result_202654071201.html", group: [3, 4], payout: 140 },
+  ];
+
+  it.each(REAL_CASES)(
+    "実フィクスチャ($name: $fixture)の枠連 $group = $payout 円を、枠番のままパースでき、結果テーブルの1着・2着の枠番から導いた組と一致すること(AC-1)",
+    ({ fixture, group, payout }) => {
+      const result = parseRaceResult(loadFixture(fixture));
+      // 前提固定(空振り防止): 払戻テーブル自体は取れており、期待値が空でないこと。
+      expect(result.widePayouts!.state).toBe("parsed");
+      expect(group).toHaveLength(2);
+      expect(result.bracketQuinellaPayouts).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: group, payout }],
+      });
+      // 独立した突合: 払戻の組 = 1着・2着の枠番の組(パーサ出力を期待値の唯一の根拠にしない)。
+      expect(frameGroupOfTopTwo(result)).toEqual(group);
+    },
+  );
+
+  it("★同枠の実物(fixtures/result_202606040810.html。2026-09-29取得): 枠連2-2=18,390円が[2,2]としてそのまま(同枠を落とさず・1つに潰さず)パースされ、1着(馬番4・枠2)・2着(馬番3・枠2)から独立に導いた組と一致すること(AC-2)", () => {
+    const result = parseRaceResult(loadFixture("result_202606040810.html"));
+    expect(result.bracketQuinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [2, 2], payout: 18390 }],
+    });
+    // 独立した突合(1): 1着・2着の枠が同じである(=同枠が的中した)こと。
+    const group = frameGroupOfTopTwo(result);
+    expect(group).toEqual([2, 2]);
+    expect(horsesFinishedAt(result, 1).map((h) => [h.umaban, h.wakuban])).toEqual([[4, 2]]);
+    expect(horsesFinishedAt(result, 2).map((h) => [h.umaban, h.wakuban])).toEqual([[3, 2]]);
+    // 独立した突合(2): 同じ文書の馬連は「馬番」3-4(別行・別の値)であり、枠連の組とは混ざらない。
+    expect(result.quinellaPayouts).toEqual({
+      state: "parsed",
+      payouts: [{ umabans: [3, 4], payout: 17680 }],
+    });
+  });
+
+  it.each([
+    { name: "中央8頭", fixture: "result_202607020505.html" },
+    { name: "中央7頭", fixture: "result_202607020502.html" },
+    { name: "地方8頭", fixture: "nar_result_202654092711.html" },
+  ])(
+    "8頭以下($name: $fixture)は tr.Wakuren が無く、発売なしの空配列(state:parsed・payouts:[])になること。払戻テーブル自体はあるのでundeterminedにはならない(AC-1)",
+    ({ fixture }) => {
+      const html = loadFixture(fixture);
+      // 前提固定(空振り防止): 枠連の行が実際に無く、他券種(馬連)の払戻行は有ること。
+      expect(html).not.toContain('class="Wakuren"');
+      const result = parseRaceResult(html);
+      expect(result.quinellaPayouts!.state).toBe("parsed");
+      if (result.quinellaPayouts!.state === "parsed") {
+        expect(result.quinellaPayouts!.payouts.length).toBeGreaterThan(0);
+      }
+      expect(result.bracketQuinellaPayouts).toEqual({ state: "parsed", payouts: [] });
+    },
+  );
+
+  it("payoutTablePresent=falseのとき(払戻テーブル自体が無い)、他の組合せ券種と同じくstate:undetermined(payoutTableAbsent)になること(空配列にはならない非対称)", () => {
+    const html = buildResultHtmlWithRaceData(null, [buildResultRow({ umaban: "1" })]);
+    const result = parseRaceResult(html);
+    expect(result.bracketQuinellaPayouts!.state).toBe("undetermined");
+    if (result.bracketQuinellaPayouts!.state === "undetermined") {
+      expect(result.bracketQuinellaPayouts!.reason.kind).toBe("payoutTableAbsent");
+    }
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+  });
+
+  describe("同枠の表記の不確実性に対するfail-safe(以下はすべて合成HTMLであり、netkeibaの実際の表記ではない)", () => {
+    function parseWakuren(groups: readonly (readonly string[])[], payouts: readonly string[]) {
+      const row = buildComboRow("Wakuren", "枠連", groups, payouts);
+      const html = buildResultHtml([buildResultRow({ umaban: "1" })], buildPayoutTables([row]));
+      return parseRaceResult(html).bracketQuinellaPayouts!;
+    }
+
+    it("同枠が2つのspanで並ぶ形(実物と同じ構造の合成)は[1,1]としてparsedになること", () => {
+      expect(parseWakuren([["1", "1", ""]], ["640円"])).toEqual({
+        state: "parsed",
+        payouts: [{ umabans: [1, 1], payout: 640 }],
+      });
+    });
+
+    it("同枠がspan1つだけで表記された場合(要素数1)は、黙って誤った組にせずundetermined(comboSizeMismatch)になること", () => {
+      const r = parseWakuren([["1", ""]], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("comboSizeMismatch");
+      }
+    });
+
+    it("同枠が「1-1」のような1つのspanの文字列で表記された場合は、要素数が合わずundetermined(comboSizeMismatch)になること", () => {
+      const r = parseWakuren([["1-1", ""]], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("comboSizeMismatch");
+      }
+    });
+
+    it("2要素だが片方が数値でない表記(\"1\"と\"1-1\")は、undetermined(invalidUmaban)になること", () => {
+      const r = parseWakuren([["1", "1-1"]], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it.each([
+      { name: "降順", group: ["7", "4"] },
+      { name: "枠番0", group: ["0", "4"] },
+      { name: "枠番9(範囲外)", group: ["4", "9"] },
+    ])("$name の組($group)は、undetermined(invalidUmaban)になること", ({ group }) => {
+      const r = parseWakuren([group], ["640円"]);
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("invalidUmaban");
+      }
+    });
+
+    it("同じ枠の組が同一行に2回現れた場合は、undetermined(duplicateCombo)になること(同枠を許すことと、同じ組の重複を許すことは別)", () => {
+      const r = parseWakuren(
+        [
+          ["2", "2"],
+          ["2", "2"],
+        ],
+        ["100円<br />200円"],
+      );
+      expect(r.state).toBe("undetermined");
+      if (r.state === "undetermined") {
+        expect(r.reason.kind).toBe("duplicateCombo");
+      }
+    });
+
+    it("1着同着で枠連の的中組が2組になる形(同枠と別枠の混在)は、両方が並びのままparsedになること", () => {
+      const r = parseWakuren(
+        [
+          ["2", "2"],
+          ["2", "5"],
+        ],
+        ["500円<br />620円"],
+      );
+      expect(r).toEqual({
+        state: "parsed",
+        payouts: [
+          { umabans: [2, 2], payout: 500 },
+          { umabans: [2, 5], payout: 620 },
+        ],
+      });
+      if (r.state === "parsed") {
+        expect(r.payouts).toHaveLength(2);
+      }
+    });
+  });
+
+  it("★非退行: 馬連(順不同の馬番)は同値の組([3,3])を従来どおりinvalidUmabanで弾くこと(同枠を許すのは枠連だけ。枠連対応が他券種の検証を緩めていないことの固定。合成HTML)", () => {
+    const umarenRow = buildComboRow("Umaren", "馬連", [["3", "3"]], ["640円"]);
+    const html = buildResultHtml(
+      [buildResultRow({ umaban: "1" })],
+      buildPayoutTables([umarenRow]),
+    );
+    const result = parseRaceResult(html);
+    expect(result.quinellaPayouts!.state).toBe("undetermined");
+    if (result.quinellaPayouts!.state === "undetermined") {
+      expect(result.quinellaPayouts!.reason.kind).toBe("invalidUmaban");
+    }
+    // 枠連の行が無い文書なので、枠連は「発売なし」の空配列(馬連の異常に巻き込まれない)。
+    expect(result.bracketQuinellaPayouts).toEqual({ state: "parsed", payouts: [] });
   });
 });

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040806",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 6,
+  "raceName": "3歳以上1勝クラス",
+  "listedEntryCount": 7,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1800,
+  "runnerCount": 7,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ミアルーチェ",
+      "prior": 0.473978156066544,
+      "placeOddsMin": 2.3,
+      "placeOddsMax": 3.2,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 2,
+      "horseName": "ストーリーオブラブ",
+      "prior": 0.6382353870852074,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.5,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 3,
+      "horseName": "ノーブルクラウド",
+      "prior": 0.4070964041175967,
+      "placeOddsMin": 4.3,
+      "placeOddsMax": 6.2,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 4,
+      "horseName": "サラサチャチャチャ",
+      "prior": 0.4868771177098443,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 1.7,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 9
+    },
+    {
+      "umaban": 5,
+      "horseName": "キューティリップ",
+      "prior": 0.29443883207641947,
+      "placeOddsMin": 4.1,
+      "placeOddsMax": 5.9,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 18
+    },
+    {
+      "umaban": 6,
+      "horseName": "ベルフィーヌ",
+      "prior": 0.35457417680442277,
+      "placeOddsMin": 11.1,
+      "placeOddsMax": 15.5,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 25
+    },
+    {
+      "umaban": 7,
+      "horseName": "リュミナーズ",
+      "prior": 0.344799926139965,
+      "placeOddsMin": 3.7,
+      "placeOddsMax": 5.3,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 16
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 92,
+      "removedCount": 7,
+      "removedByCutoffCount": 7,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:18:06.962Z"
+}

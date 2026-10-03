@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040802",
+  "region": "central",
+  "requestedDate": "20260926",
+  "kaisaiDate": "20260926",
+  "venueCode": "06",
+  "raceNumber": 2,
+  "raceName": "2歳未勝利",
+  "listedEntryCount": 12,
+  "status": "ok",
+  "courseType": "芝",
+  "distance": 1600,
+  "runnerCount": 12,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "ブラックナザレ",
+      "prior": 0.2221827557556667,
+      "placeOddsMin": 14.5,
+      "placeOddsMax": 24.4,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 2,
+      "horseName": "マルスフィス",
+      "prior": 0.15130725302357234,
+      "placeOddsMin": 5.8,
+      "placeOddsMax": 9.6,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 3,
+      "horseName": "ニーナラルゴ",
+      "prior": 0.33110817583421054,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.7,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 4,
+      "horseName": "タッカーヴィーチェ",
+      "prior": 0.26757493166273844,
+      "placeOddsMin": 4.1,
+      "placeOddsMax": 6.6,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 5,
+      "horseName": "オシゴリ",
+      "prior": 0.15608537680326406,
+      "placeOddsMin": 38.5,
+      "placeOddsMax": 64.9,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 6,
+      "horseName": "リオンパリス",
+      "prior": 0.19431036704079815,
+      "placeOddsMin": 45.3,
+      "placeOddsMax": 76.3,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 7,
+      "horseName": "サムワンユーラヴド",
+      "prior": 0.3057999219002725,
+      "placeOddsMin": 2.4,
+      "placeOddsMax": 3.8,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 8,
+      "horseName": "ウィルステート",
+      "prior": 0.2898728426346333,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.2,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 9,
+      "horseName": "エコロテラ",
+      "prior": 0.2697870260051883,
+      "placeOddsMin": 3.2,
+      "placeOddsMax": 5.1,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 10,
+      "horseName": "ヴェントリナ",
+      "prior": 0.3628277140486306,
+      "placeOddsMin": 1.4,
+      "placeOddsMax": 2,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 11,
+      "horseName": "ハンサム",
+      "prior": 0.26279680788304666,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 1.8,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    },
+    {
+      "umaban": 12,
+      "horseName": "リキマル",
+      "prior": 0.18634682740797853,
+      "placeOddsMin": 6.4,
+      "placeOddsMax": 10.6,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 1
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/26",
+      "totalResultCount": 27,
+      "removedCount": 12,
+      "removedByCutoffCount": 12,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:10:08.897Z"
+}

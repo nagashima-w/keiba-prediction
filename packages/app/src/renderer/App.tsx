@@ -18,7 +18,14 @@ import { deriveBatchAvailability } from "./batch-availability.js";
 import { canCollectPeriodBatch } from "./period-batch-gate.js";
 import { collectEvPlusSummary } from "./batch-summary.js";
 import { BatchAnalysisView } from "./BatchAnalysisView.js";
-import type { MixedAllocationSettings } from "./mixed-allocation-view.js";
+import type { MixedAllocationSettings } from "../shared/mixed-race-allocation.js";
+import {
+  createMixedAllocationCache,
+  type MixedAllocationCache,
+} from "./mixed-allocation-cache.js";
+import type { AllocationOutcome } from "./mixed-allocation-queue.js";
+import { mixedAllocationSettingsFromAppSettings } from "./mixed-allocation-settings.js";
+import type { MixedRaceAllocationDisplayView } from "./mixed-allocation-view.js";
 import { PeriodBatchView } from "./PeriodBatchView.js";
 import type { RaceLedgerFilter } from "./race-ledger-filter.js";
 import {
@@ -115,7 +122,24 @@ export function App(): React.JSX.Element {
     includeComboOdds: false,
     includeWideInAllocation: true,
     includeTrioInAllocation: true,
+    includeQuinellaInAllocation: true,
+    includeExactaInAllocation: true,
+    includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true,
   });
+
+  // 券種横断の馬券配分の表示データキャッシュ(機能D-2c第4段・Issue #28・AC21)。
+  // Issue #110(#24-C2)でBatchAnalysisView.tsxからここへ寿命を移した: 分析タブから離れて
+  // 戻ると`BatchAnalysisView`自体が再マウントされる(下の`{verify.activeTab === "分析" && ...}`)
+  // ため、キャッシュをそちら側のuseRefで持つと消えてしまう。Appは分析タブへ切り替わっても
+  // アンマウントされないため、ここで1つだけ持ち、BatchAnalysisViewへpropsで渡す
+  // (`useRef`の遅延初期化。毎レンダー新しいキャッシュを作らない)。
+  const mixedAllocationCacheRef = useRef<MixedAllocationCache<
+    AllocationOutcome<MixedRaceAllocationDisplayView>
+  > | null>(null);
+  if (mixedAllocationCacheRef.current === null) {
+    mixedAllocationCacheRef.current = createMixedAllocationCache();
+  }
 
   // 実行中バッチの世代ID。一括分析開始時に固定し、完了で null に戻す。
   // 進捗イベントにはこの「開始時に固定した runId」を添えるため、完了後に遅れて届いた
@@ -177,15 +201,9 @@ export function App(): React.JSX.Element {
           webhookConfigured: s.discordWebhookUrl.trim() !== "",
           autoSend: s.autoSendDiscord,
         });
-        setBetAllocationSettings({
-          bankroll: s.bankroll,
-          perRaceCap: s.perRaceCap,
-          kellyFraction: s.kellyFraction,
-          evThreshold: s.evThreshold,
-          includeComboOdds: s.includeComboOdds,
-          includeWideInAllocation: s.includeWideInAllocation,
-          includeTrioInAllocation: s.includeTrioInAllocation,
-        });
+        // 配分の設定11項目の写しは純関数へ切り出してある(手書きの項目列挙だと、1項目を`true`固定に
+        // 書き換える変異がテストで検出できないため。`mixed-allocation-settings.ts`のJSDoc・Issue #150)。
+        setBetAllocationSettings(mixedAllocationSettingsFromAppSettings(s));
       })
       .catch(() => {
         setNotify({ webhookConfigured: false, autoSend: false });
@@ -670,6 +688,7 @@ export function App(): React.JSX.Element {
             onSendDiscord={() => handleSendDiscord(completedOutcomes)}
             onExportAnalysis={handleExportAnalysis}
             betAllocationSettings={betAllocationSettings}
+            mixedAllocationCache={mixedAllocationCacheRef.current}
           />
 
           <PeriodBatchView

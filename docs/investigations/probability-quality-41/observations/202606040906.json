@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "raceId": "202606040906",
+  "region": "central",
+  "requestedDate": "20260927",
+  "kaisaiDate": "20260927",
+  "venueCode": "06",
+  "raceNumber": 6,
+  "raceName": "3歳以上1勝クラス",
+  "listedEntryCount": 16,
+  "status": "ok",
+  "courseType": "ダ",
+  "distance": 1800,
+  "runnerCount": 16,
+  "placedCount": 3,
+  "oddsStatus": "result",
+  "horses": [
+    {
+      "umaban": 1,
+      "horseName": "アルデラックス",
+      "prior": 0.23765888333984234,
+      "placeOddsMin": 4.5,
+      "placeOddsMax": 7.8,
+      "finish": {
+        "kind": "順位",
+        "value": 8
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    },
+    {
+      "umaban": 2,
+      "horseName": "ソロモン",
+      "prior": 0.1359289607752621,
+      "placeOddsMin": 9.3,
+      "placeOddsMax": 16.3,
+      "finish": {
+        "kind": "順位",
+        "value": 16
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    },
+    {
+      "umaban": 3,
+      "horseName": "タルタロス",
+      "prior": 0.23760172173409352,
+      "placeOddsMin": 5.8,
+      "placeOddsMax": 10,
+      "finish": {
+        "kind": "順位",
+        "value": 3
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 23
+    },
+    {
+      "umaban": 4,
+      "horseName": "ベンメリア",
+      "prior": 0.14944721328862895,
+      "placeOddsMin": 39.1,
+      "placeOddsMax": 69.4,
+      "finish": {
+        "kind": "順位",
+        "value": 5
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 17
+    },
+    {
+      "umaban": 5,
+      "horseName": "グランドスウェル",
+      "prior": 0.22367374517545616,
+      "placeOddsMin": 1.5,
+      "placeOddsMax": 2.3,
+      "finish": {
+        "kind": "順位",
+        "value": 2
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 8
+    },
+    {
+      "umaban": 6,
+      "horseName": "スターツトゥデイ",
+      "prior": 0.220709598544032,
+      "placeOddsMin": 5.8,
+      "placeOddsMax": 10,
+      "finish": {
+        "kind": "順位",
+        "value": 7
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    },
+    {
+      "umaban": 7,
+      "horseName": "ダンツティアラ",
+      "prior": 0.29659618349405825,
+      "placeOddsMin": 2.5,
+      "placeOddsMax": 4.1,
+      "finish": {
+        "kind": "順位",
+        "value": 4
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 11
+    },
+    {
+      "umaban": 8,
+      "horseName": "ホウオウライセンス",
+      "prior": 0.18511610047283023,
+      "placeOddsMin": 5.8,
+      "placeOddsMax": 10,
+      "finish": {
+        "kind": "順位",
+        "value": 10
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 3
+    },
+    {
+      "umaban": 9,
+      "horseName": "ユーウェイン",
+      "prior": 0.1014611724530379,
+      "placeOddsMin": 40.1,
+      "placeOddsMax": 71.1,
+      "finish": {
+        "kind": "順位",
+        "value": 15
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 14
+    },
+    {
+      "umaban": 10,
+      "horseName": "ディースプレマシー",
+      "prior": 0.07995950997599584,
+      "placeOddsMin": 7.7,
+      "placeOddsMax": 13.5,
+      "finish": {
+        "kind": "順位",
+        "value": 12
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 16
+    },
+    {
+      "umaban": 11,
+      "horseName": "ミスターキャンベラ",
+      "prior": 0.27857829719775384,
+      "placeOddsMin": 1.2,
+      "placeOddsMax": 1.6,
+      "finish": {
+        "kind": "順位",
+        "value": 1
+      },
+      "outcome": 1,
+      "resultsFetched": true,
+      "usedRunCount": 6
+    },
+    {
+      "umaban": 12,
+      "horseName": "ロードインフェルノ",
+      "prior": 0.17416782329506886,
+      "placeOddsMin": 10.3,
+      "placeOddsMax": 18.2,
+      "finish": {
+        "kind": "順位",
+        "value": 6
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 28
+    },
+    {
+      "umaban": 13,
+      "horseName": "ガンハンマー",
+      "prior": 0.02,
+      "placeOddsMin": 11.8,
+      "placeOddsMax": 20.9,
+      "finish": {
+        "kind": "順位",
+        "value": 9
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 11
+    },
+    {
+      "umaban": 14,
+      "horseName": "シーギリヤロック",
+      "prior": 0.22830409670858612,
+      "placeOddsMin": 2.4,
+      "placeOddsMax": 4,
+      "finish": {
+        "kind": "順位",
+        "value": 13
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 4
+    },
+    {
+      "umaban": 15,
+      "horseName": "アトラステソーロ",
+      "prior": 0.191103739970958,
+      "placeOddsMin": 2.6,
+      "placeOddsMax": 4.3,
+      "finish": {
+        "kind": "順位",
+        "value": 11
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 2
+    },
+    {
+      "umaban": 16,
+      "horseName": "ワンダーブリッツ",
+      "prior": 0.2475293491915202,
+      "placeOddsMin": 1.3,
+      "placeOddsMax": 1.7,
+      "finish": {
+        "kind": "順位",
+        "value": 14
+      },
+      "outcome": 0,
+      "resultsFetched": true,
+      "usedRunCount": 5
+    }
+  ],
+  "scratched": [],
+  "conditions": {
+    "priorSource": "prior-only",
+    "dateApproximate": false,
+    "leakFilter": {
+      "cutoffDate": "2026/09/27",
+      "totalResultCount": 175,
+      "removedCount": 16,
+      "removedByCutoffCount": 16,
+      "removedByInvalidDateCount": 0
+    },
+    "placeOddsKind": "placeOddsMinLowerBound"
+  },
+  "warnings": [],
+  "resultsFailedHorseCount": 0,
+  "fetchedAt": "2026-10-01T11:37:58.661Z"
+}

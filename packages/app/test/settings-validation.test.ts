@@ -162,6 +162,152 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("記録のみ");
       expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("配分提案には使いません");
     });
+
+    // Issue #117(AC-9): v1.9.9(#116)からincludeComboOddsは馬連オッズも取得している
+    // (scrape-race.tsがワイド・3連複の後に馬連を1リクエスト追加で取得する)。
+    // 「ワイド・三連複のオッズも取得する」という2券種だけの文言は事実と食い違う。
+    it("チェックボックス・補助文がどちらも馬連(quinella)の取得に言及すること(Issue #117。v1.9.9から馬連も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("馬連");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("馬連");
+    });
+
+    /**
+     * Issue #122(#24-E2・オーケストレーター指定2026-09-25): #116で「取得しているのに
+     * チェックボックスのラベルが古いまま1リリース残った」という同じ誤りを、馬単でも
+     * 繰り返さない。#122の時点でscrape-race.tsは馬単オッズも取得し始める
+     * (includeComboOdds:trueのとき、ワイド・3連複・馬連の後に馬単を1リクエスト追加で
+     * 取得する)ため、チェックボックス・補助文とも「何を取得するか」「その費用」の事実を
+     * 更新する。ただし「配分に使うかどうかは下記の設定に従います」という列挙(ワイド・
+     * 馬連・三連複の3項目)には馬単を加えない(`includeExactaInAllocation`という設定自体は
+     * #24-E3a・Issue #124で新設したが、この画面のチェックボックスを追加するのは
+     * #24-E3b・Issue #125であり、実際には配分〈`resolveMixedBetTypes`〉に一切使っていない
+     * ため、列挙に足すと事実と食い違う。#125でこの画面のチェックボックスが追加された時点で
+     * 初めて4項目に直す。#24-E3a・Issue #124着手前ゲートでの是正: 旧「#123で追加予定」は
+     * E3a/E3b/E3cへの分割〈2026-09-26〉より前の記述で、実際にチェックボックスを追加するのは
+     * #123自体ではなく#125)。
+     */
+    it("チェックボックス・補助文がどちらも馬単(exacta)の取得に言及すること(Issue #122。#122から馬単も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("馬単");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("馬単");
+    });
+
+    it("補助文の費用説明が馬単も1レースあたり1リクエスト追加であることに言及すること(Issue #122)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/馬単[^。]*1レースあたり[^。]*1リクエスト追加/);
+    });
+
+    // 【Issue #125(#24-E3b)で改訂】旧版(#122時点)は「配分に使うかどうかは下記の設定に従う」
+    // という列挙が3項目(ワイド・馬連・三連複)のままで、馬単を配分に使う設定への言及を
+    // 意図的に含めていなかった(#125でこの画面のチェックボックス自体を追加するまでは、
+    // 列挙に足すと存在しないチェックボックスを指す嘘になるため)。#125でチェックボックスを
+    // 追加したので、ここで初めて列挙に馬単を加えることが事実になる。
+    // 何を保証していたか(新旧対応表):
+    //   旧: 「馬単を配分に使う」という言及を含まないこと(列挙が3項目のまま。含めると嘘になる時期)
+    //   新: 「馬単を配分に使う」という言及を含むこと(列挙が4項目になった。含めないと事実の
+    //       更新漏れ〈#116/#122と同種の欠陥〉になる)
+    it("補助文の『配分に使うかどうかは下記の設定に従う』という列挙が4項目(ワイド・馬連・馬単・三連複)になり、馬単を配分に使う設定へも言及すること(Issue #125: この画面にチェックボックスを追加したため、列挙に加えることが初めて事実になる)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("馬単を配分に使う");
+    });
+
+    // 【Issue #125で改訂】旧版は「馬単は現在は取得のみで配分には使わない」という状態を
+    // 明示していたが、#125で配分に使うようになったため、この断定は事実と食い違う。
+    // 何を保証していたか(新旧対応表):
+    //   旧: 「馬単は…配分には使いません」という断定を含むこと → 事実と食い違うため削除
+    //   新: その断定を含まないこと(古い断定文言が再混入する退行を検知するため)
+    it("補助文が『馬単は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #125: 配分に使うようになったため、この断定は事実と食い違う)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toMatch(/馬単[^。]*配分には使いません/);
+    });
+
+    /**
+     * Issue #137(#25-E2・オーケストレーター指定2026-09-27): 馬単(#122)・馬連(#116)と
+     * 同じ欠陥(取得を先に始めてから、ラベルの更新が1リリース遅れる)を三連単でも
+     * 繰り返さない。#137の時点でscrape-race.tsは三連単オッズも取得し始める
+     * (includeComboOdds:trueのとき、ワイド・3連複・馬連・馬単の後に三連単を1レースあたり
+     * 1リクエスト追加で取得する。ただし**中央競馬のみ**。地方は当面取得しない
+     * 〈ユーザー判断2026-09-27〉)ため、チェックボックス・補助文とも「何を取得するか」
+     * 「その費用」「地方では取得しないこと」の事実を更新する。
+     */
+    it("チェックボックス・補助文がどちらも三連単(trifecta)の取得に言及すること(Issue #137。#137から三連単も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("三連単");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("三連単");
+    });
+
+    it("補助文の費用説明が三連単も1レースあたり1リクエスト追加であることに言及すること(Issue #137)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/三連単[^。]*1レースあたり[^。]*1リクエスト追加/);
+    });
+
+    // ユーザー判断(2026-09-27)「地方は当面取らない」を必ず明示する(オーケストレーター指定)。
+    it("補助文が『三連単は地方競馬では取得しません』旨を明示すること(Issue #137・ユーザー判断2026-09-27)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("地方競馬では取得しません");
+    });
+
+    // 【Issue #139(#25-E3b)で改訂】旧版(#137時点)は「配分に使うかどうかは下記の設定に従う」
+    // という列挙が4項目(ワイド・馬連・馬単・三連複)のままで、三連単を配分に使う設定への
+    // 言及を意図的に含めていなかった(#139でこの画面のチェックボックス自体を追加するまでは、
+    // 列挙に足すと存在しないチェックボックスを指す嘘になるため)。#139でチェックボックスを
+    // 追加したので、ここで初めて列挙に三連単を加えることが事実になる。
+    // 何を保証していたか(新旧対応表):
+    //   旧: 「三連単を配分に使う」という言及を含まないこと(列挙が4項目のまま。含めると嘘になる時期)
+    //   新: 「三連単を配分に使う」という言及を含むこと(列挙が5項目になった。含めないと事実の
+    //       更新漏れ〈#116/#122/#137と同種の欠陥〉になる)
+    it("補助文の『配分に使うかどうかは下記の設定に従う』という列挙が5項目(ワイド・馬連・馬単・三連複・三連単)になり、三連単を配分に使う設定へも言及すること(Issue #139: この画面にチェックボックスを追加したため、列挙に加えることが初めて事実になる)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("三連単を配分に使う");
+    });
+
+    // 【Issue #139で改訂】旧版は「三連単は現在は取得のみで配分には使わない」という状態を
+    // 明示していたが、#139で配分に使うようになったため、この断定は事実と食い違う。
+    // 何を保証していたか(新旧対応表):
+    //   旧: 「三連単は…配分には使いません」という断定を含むこと → 事実と食い違うため削除
+    //   新: その断定を含まないこと(古い断定文言が再混入する退行を検知するため)。
+    //   ただし「地方競馬では取得しません」(取得自体の非対称性)は別の事実であり引き続き明示する
+    //   (上の「地方競馬では取得しません」テストが別途固定する。AC6)。
+    it("補助文が『三連単は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #139: 配分に使うようになったため、この断定は事実と食い違う)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toMatch(/三連単[^。]*配分には使いません/);
+    });
+
+    it("『地方競馬では取得しません』旨は引き続き明示すること(Issue #139・AC6: 配分利用と取得可否は別の事実であり、配分に使うようになっても地方非対応の事実は変わらない)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("地方競馬では取得しません");
+    });
+
+    /**
+     * Issue #148(#26-E2): 馬連(#116)・馬単(#122)・三連単(#137)と同じ欠陥(取得を先に始めてから、
+     * ラベルの更新が1リリース遅れる)を枠連でも繰り返さない。#148の時点でscrape-race.tsは枠連
+     * オッズも取得し始める(includeComboOdds:trueのとき、他の券種の後に枠連を**中央・地方とも**
+     * 1レースあたり常に1リクエスト追加で取得する)ため、チェックボックス・補助文とも
+     * 「何を取得するか」「その費用」の事実を更新する。枠連を配分に使う設定は#149(配管のみ。チェックボックスは出さない)で新設し、
+     * チェックボックスは#150(画面)まで存在しないため、配分利用の列挙(5項目)には加えず、「取得のみ」の一文を添える。
+     */
+    it("チェックボックス・補助文がどちらも枠連(bracketQuinella)の取得に言及すること(Issue #148。#148から枠連も取得しているため)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain("枠連");
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("枠連");
+    });
+
+    it("補助文の費用説明が枠連も1レースあたり常に1リクエスト追加であることに言及すること(Issue #148)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/枠連[^。]*1レースあたり[^。]*1リクエスト追加/);
+    });
+
+    // 三連単と異なり枠連は中央・地方とも取得する。「地方では取得しません」が枠連に対して
+    // 言われていない(三連単の文の中にだけある)ことを、文の切れ目(。)を跨がない形で固定する。
+    it("補助文が枠連は中央・地方とも取得する旨を明示し、枠連について『地方競馬では取得しません』と言っていないこと(Issue #148)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toMatch(/枠連[^。]*中央・地方/);
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toMatch(/枠連[^。]*地方競馬では取得しません/);
+    });
+
+    // 【Issue #150(#26-E3b)で改訂】旧版(#148時点)は「枠連を配分に使う設定への言及を含まないこと」と
+    // 「枠連は現在は取得のみで配分には使わない旨を明示すること」を固定していた(この画面に枠連の
+    // チェックボックス自体がまだ無く、配分にも使われていなかったため)。#150で両方とも解消した。
+    // 何を保証していたか(新旧対応表):
+    //   旧1: 列挙に「枠連を配分に使う」が無い(存在しないチェックボックスを指さない)
+    //        → 新1: 列挙に「枠連を配分に使う」がある(チェックボックスが実在し、列挙が6項目になった)
+    //   旧2: 「枠連は…配分には使いません」を含む(取得と配分利用の状態を混同させない)
+    //        → 新2: その断定を含まない(配分に使うようになったため、断定は事実と食い違う。再混入を検知)
+    it("補助文の『配分に使うかどうかは下記の設定に従う』という列挙が6項目(ワイド・馬連・馬単・三連複・三連単・枠連)になり、枠連を配分に使う設定へも言及すること(Issue #150: チェックボックスを追加したため、列挙に加えることが初めて事実になる)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).toContain("枠連を配分に使う");
+    });
+
+    it("補助文が『枠連は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #150: 配分に使うようになったため、この断定は事実と食い違う)", () => {
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toMatch(/枠連[^。]*配分には使いません/);
+      expect(INCLUDE_COMBO_ODDS_LABELS.help).not.toContain("取得のみ");
+    });
   });
 
   describe("INCLUDE_COMBO_ODDS_BATCH_NOTE(一括分析画面の固定注記。機能D-2c第3段・Issue #28)", () => {
@@ -175,41 +321,112 @@ describe("設定フォームの入力検証(純関数)", () => {
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("配分に使う");
       expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("記録のみ");
     });
+
+    it("馬連(quinella)の配分利用にも言及すること(Issue #117)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("馬連");
+    });
+
+    // Issue #122(#24-E2): INCLUDE_COMBO_ODDS_LABELSと同じ理由(#116の同種の誤りの再発防止)で、
+    // 一括分析画面の注記も「何を取得しているか」の事実を更新する。配分利用の列挙(3項目)は
+    // 変えない(INCLUDE_COMBO_ODDS_LABELS.helpと同じ判断)。
+    it("馬単(exacta)の取得にも言及すること(Issue #122。取得の事実を更新)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("馬単");
+    });
+
+    // 【Issue #125で改訂】INCLUDE_COMBO_ODDS_LABELS.helpのテストと同じ新旧対応表。
+    it("馬単を配分に使う設定への言及を含むこと(Issue #125: この画面にチェックボックスを追加したため、列挙に加えることが初めて事実になる)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("馬単を配分に使う");
+    });
+
+    it("『馬単は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #125: 配分に使うようになったため、この断定は事実と食い違う)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toMatch(/馬単[^。]*配分には使いません/);
+    });
+
+    // Issue #137(#25-E2): INCLUDE_COMBO_ODDS_LABELSと同じ理由で、一括分析画面の注記も
+    // 「何を取得しているか」「地方では取得しないこと」の事実を更新する。配分利用の列挙
+    // (4項目)は変えない(INCLUDE_COMBO_ODDS_LABELS.helpと同じ判断)。
+    it("三連単(trifecta)の取得にも言及すること(Issue #137。取得の事実を更新)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("三連単");
+    });
+
+    it("『三連単は地方競馬では取得しません』旨を明示すること(Issue #137・ユーザー判断2026-09-27)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("地方競馬では取得しません");
+    });
+
+    // 【Issue #139で改訂】INCLUDE_COMBO_ODDS_LABELS.helpのテストと同じ新旧対応表。
+    it("三連単を配分に使う設定への言及を含むこと(Issue #139: この画面にチェックボックスを追加したため、列挙に加えることが初めて事実になる)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("三連単を配分に使う");
+    });
+
+    it("『三連単は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #139: 配分に使うようになったため、この断定は事実と食い違う)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toMatch(/三連単[^。]*配分には使いません/);
+    });
+
+    // Issue #148(#26-E2): INCLUDE_COMBO_ODDS_LABELSと同じ理由で、一括分析画面の注記も
+    // 「何を取得しているか」の事実を更新する。配分利用の列挙(5項目)は変えない。
+    it("枠連(bracketQuinella)の取得にも言及すること(Issue #148。取得の事実を更新)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("枠連");
+    });
+
+    // 【Issue #150で改訂】INCLUDE_COMBO_ODDS_LABELS.helpのテストと同じ新旧対応表。
+    it("枠連を配分に使う設定への言及を含むこと(Issue #150: この画面にチェックボックスを追加したため、列挙に加えることが初めて事実になる)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).toContain("枠連を配分に使う");
+    });
+
+    it("『枠連は現在は取得のみで配分には使わない』旨をもう含まないこと(Issue #150: 配分に使うようになったため、この断定は事実と食い違う)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toMatch(/枠連[^。]*配分には使いません/);
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toContain("取得のみ");
+    });
+
+    it("枠連について『地方競馬では取得しません』と言っていないこと(三連単と異なり枠連は中央・地方とも取得する。Issue #148)", () => {
+      expect(INCLUDE_COMBO_ODDS_BATCH_NOTE).not.toMatch(/枠連[^。]*地方競馬では取得しません/);
+    });
   });
 
-  // 券種横断の馬券配分対象チェックボックス文言(機能D-2c第4段・Issue #28)。
-  // AC24必須要件3点をwide/trioそれぞれで個別に固定する(片方だけ直して他方が古い文言のまま
-  // 残る欠陥を防ぐため、必ず2券種とも同じアサーションを通す)。
-  describe("ALLOCATION_BET_TYPE_LABELS(券種横断の配分対象チェックボックス文言。機能D-2c第4段・Issue #28・AC24)", () => {
-    it.each(["wide", "trio"] as const)(
+  // 券種横断の馬券配分対象チェックボックス文言(機能D-2c第4段・Issue #28。
+  // Issue #117で馬連〈quinella〉、Issue #125で馬単〈exacta〉、Issue #139で三連単〈trifecta〉を追加)。
+  // AC24必須要件3点をwide/quinella/exacta/trio/trifectaそれぞれで個別に固定する(1つだけ直して
+  // 他が古い文言のまま残る欠陥を防ぐため、必ず5券種とも同じアサーションを通す)。
+  describe("ALLOCATION_BET_TYPE_LABELS(券種横断の配分対象チェックボックス文言。機能D-2c第4段・Issue #28・AC24。Issue #117で馬連、Issue #125で馬単、Issue #139で三連単を追加)", () => {
+    it.each(["wide", "quinella", "exacta", "trio", "trifecta", "bracketQuinella"] as const)(
       "%sのチェックボックスラベルが空でない",
       (betType) => {
         expect(ALLOCATION_BET_TYPE_LABELS[betType].checkbox).toBeTruthy();
       },
     );
 
-    it.each(["wide", "trio"] as const)(
+    it.each(["wide", "quinella", "exacta", "trio", "trifecta", "bracketQuinella"] as const)(
       "%sの補助文がincludeComboOdds(オッズ取得)への依存を明示する(AC24必須要件1)",
       (betType) => {
         // 「オッズ取得がOFFの間は効果がない」ことを書かないと、「ONにしたのに何も変わらない」を
         // 未実装と誤認させる(第3段のINCLUDE_COMBO_ODDS_LABELS.helpと対になる必須記述)。
-        expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(
-          "ワイド・三連複のオッズも取得する",
-        );
+        // Issue #117: INCLUDE_COMBO_ODDS_LABELS.checkboxが「ワイド・馬連・三連複」に変わったため、
+        // ここでの引用文言もそれに合わせる(古い引用のままだと実際のチェックボックス名と
+        // 一致しない参照になる)。Issue #122でさらに「ワイド・馬連・馬単・三連複」に変わった
+        // ため、引用文言も再度合わせる(同じ理由の繰り返し)。Issue #137でさらに
+        // 「ワイド・馬連・馬単・三連複・三連単」に変わったため、引用文言も再度合わせる。
+        // Issue #148でさらに「ワイド・馬連・馬単・三連複・三連単・枠連」に変わったため、引用文言も
+        // 再度合わせる。あわせて、引用が実際のチェックボックスラベルの部分文字列であることも固定する
+        // (引用と本体がまた食い違う欠陥の再発防止。旧版が保証していた「引用にOFFの間は効果が無い旨が
+        // 添えられていること」は下の2行で変えていない)。
+        const quoted = "ワイド・馬連・馬単・三連複・三連単・枠連のオッズも取得する";
+        expect(INCLUDE_COMBO_ODDS_LABELS.checkbox).toContain(quoted);
+        expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain(quoted);
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("OFFの間は効果がありません");
       },
     );
 
-    it.each(["wide", "trio"] as const)(
+    it.each(["wide", "quinella", "exacta", "trio", "trifecta", "bracketQuinella"] as const)(
       "%sの補助文が既定ONであることを明示する(AC24必須要件3)",
       (betType) => {
-        // includeComboOdds自体は既定OFF(オプトイン)だが、この2項目は逆に既定ON(D-1裁定)。
+        // includeComboOdds自体は既定OFF(オプトイン)だが、この5項目は逆に既定ON(D-1裁定。
+        // 馬連はユーザー指定によりIssue #115以降の新券種すべてに適用)。
         // 逆向きの既定値であることを書かないと誤解を招く。
         expect(ALLOCATION_BET_TYPE_LABELS[betType].help).toContain("既定でON");
       },
     );
 
-    it.each(["wide", "trio"] as const)(
+    it.each(["wide", "quinella", "exacta", "trio", "trifecta", "bracketQuinella"] as const)(
       "%sの補助文が寄り先の券種を断定する表現を含まないこと(AC24必須要件2・AC12と同じ理由)",
       (betType) => {
         // 資金規模・1レース上限・greedySteps(#36)で寄り先が変わるため、断定した瞬間に
@@ -218,5 +435,28 @@ describe("設定フォームの入力検証(純関数)", () => {
         expect(help).not.toMatch(/集中|寄る|偏る/);
       },
     );
+
+    it("quinellaのチェックボックスラベルが『馬連を馬券配分に使う』であること(wide/trioと同じ命名規則)", () => {
+      expect(ALLOCATION_BET_TYPE_LABELS.quinella.checkbox).toBe("馬連を馬券配分に使う");
+    });
+
+    it("exactaのチェックボックスラベルが『馬単を馬券配分に使う』であること(wide/quinella/trioと同じ命名規則。Issue #125)", () => {
+      expect(ALLOCATION_BET_TYPE_LABELS.exacta.checkbox).toBe("馬単を馬券配分に使う");
+    });
+
+    it("trifectaのチェックボックスラベルが『三連単を馬券配分に使う』であること(wide/quinella/exacta/trioと同じ命名規則。Issue #139)", () => {
+      expect(ALLOCATION_BET_TYPE_LABELS.trifecta.checkbox).toBe("三連単を馬券配分に使う");
+    });
+
+    it("bracketQuinellaのチェックボックスラベルが『枠連を馬券配分に使う』であること(wide/quinella/exacta/trio/trifectaと同じ命名規則。Issue #150)", () => {
+      expect(ALLOCATION_BET_TYPE_LABELS.bracketQuinella.checkbox).toBe("枠連を馬券配分に使う");
+    });
+
+    it("bracketQuinellaの補助文が『発売されていないレースでは対象になりません』旨を、頭数の数字を含めずに添えること(Issue #150。発売境界は各頭数1レースの観測で断定しない)", () => {
+      const help = ALLOCATION_BET_TYPE_LABELS.bracketQuinella.help;
+      expect(help).toContain("発売されていないレース");
+      expect(help).toContain("対象になりません");
+      expect(help).not.toMatch(/[0-9０-９]頭|[〇一二三四五六七八九]頭/);
+    });
   });
 });

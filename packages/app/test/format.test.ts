@@ -12,6 +12,7 @@ import {
   isHighlightRow,
   LABEL_ADJUSTED_PROB,
   LABEL_PRIOR,
+  analysisModelText,
   llmCorrectionStatusText,
   llmCorrectionTooltip,
   MARK_LEGEND,
@@ -79,6 +80,7 @@ describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
     prior: 0.4,
     adjustedProb: 0.4,
     placeOddsMin: 3,
+    winOdds: 10,
     ev: isPositive ? 1.2 : 0.8,
     isPositive,
     reason: null,
@@ -329,5 +331,48 @@ describe("formatConditionChangeTags(条件替わり〈妙味材料〉タグの�
         { kind: "venue", label: "地方→中央" },
       ]),
     ).toBe("ダ替わり(前走芝)・距離延長(平均比+400m)・地方→中央");
+  });
+});
+
+describe("analysisModelText(分析結果の「分析モデル」表示文言・Issue #157)", () => {
+  const cases: ReadonlyArray<{
+    label: string;
+    input: { llmUsed: boolean; model?: string | null };
+    expected: string | null;
+  }> = [
+    {
+      label: "LLM実行・モデルあり: 「分析モデル: <ID>」を返すこと",
+      input: { llmUsed: true, model: "claude-sonnet-5-5" },
+      expected: "分析モデル: claude-sonnet-5-5",
+    },
+    {
+      label: "自動選択された別モデルもそのまま表示すること",
+      input: { llmUsed: true, model: "claude-sonnet-9-9" },
+      expected: "分析モデル: claude-sonnet-9-9",
+    },
+    {
+      label: "LLM実行でもモデル不明(null)なら行を出さないこと",
+      input: { llmUsed: true, model: null },
+      expected: null,
+    },
+    {
+      label: "LLM実行でも model 未設定(旧データ・リテラル)なら行を出さないこと",
+      input: { llmUsed: true },
+      expected: null,
+    },
+    {
+      label: "LLMスキップ時はモデルが入っていても行を出さないこと(偽値表示の防止)",
+      input: { llmUsed: false, model: "claude-sonnet-5-5" },
+      expected: null,
+    },
+    {
+      label: "空文字のモデルは行を出さないこと",
+      input: { llmUsed: true, model: "" },
+      expected: null,
+    },
+  ];
+
+  it.each(cases)("$label", ({ input, expected }) => {
+    expect(analysisModelText(input)).toBe(expected);
   });
 });
