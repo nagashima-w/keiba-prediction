@@ -2249,6 +2249,27 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC は無変更
 
+## 次の正式版が 1.19.0 である根拠(Issue #157 での変更)
+
+**minor**(**LLM 分析のモデルと設定が変わり、分析結果が変わる**)。
+
+### 変更内容
+
+- LLM 分析のモデルを `claude-sonnet-4-6` から、Models API で選んだ最新の Sonnet に変えた(ID `claude-sonnet-<major>(-<minor>)` の版数で降順。
+  一覧の取得に失敗したとき・Sonnet が無いときは固定モデル `claude-sonnet-5-5`)。自動選択モデルが HTTP 400/403/404 を返したときは固定モデルで1回やり直す
+- リクエストは `temperature` を送らず(Claude Sonnet 5.5 は既定以外を拒否する)、`max_tokens` 16000・`output_config.effort` `"low"`(ユーザー判断)
+- 拒否(`stop_reason: "refusal"`)を専用の固定文言で prior にフォールバックする
+- 実際に応答したモデルを `analyses.model` に記録し、分析結果の画面に「分析モデル: …」を出す
+
+### minor である根拠
+
+- LLM のモデル・推論設定・決定性(temperature 0 → 既定)が変わり、補正後の確率・EV・配分が変わる(本リポジトリでは数値の変化を minor とする)
+- `PROMPT_VERSION` は上げていない(文面は同一。検証画面の版別集計にモデルが混ざってよい、とユーザー判断)
+
+### major ではない根拠
+
+- DB スキーマ・設定ファイル・エクスポート JSON・IPC は後方互換(`AnalysisResult.model` は任意フィールドの追加、`analyses.model` は既存の列)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
