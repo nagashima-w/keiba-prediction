@@ -90,10 +90,28 @@ describe("judgeReachability", () => {
     expect(j.verdict).toBe("challenge");
   });
 
-  it.each([404, 500, 502, 301])("%i は http-error で、理由にステータスを含める", (status) => {
+  it.each([404, 500, 502])("%i は http-error で、理由にステータスを含める", (status) => {
     const j = judgeReachability(rec({ status, parsedCount: null }));
     expect(j.verdict).toBe("http-error");
     expect(j.reason).toContain(String(status));
+  });
+
+  it.each([301, 302, 307])(
+    "%i は redirect(到達したが転送された)で、理由に転送先(location)を含める。http-error とは区別する",
+    (status) => {
+      const j = judgeReachability(
+        rec({ status, parsedCount: null, headers: { location: "https://example.com/moved" } }),
+      );
+      expect(j.verdict).toBe("redirect");
+      expect(j.reason).toContain(String(status));
+      expect(j.reason).toContain("https://example.com/moved");
+    },
+  );
+
+  it("location ヘッダが無い 3xx でも redirect(理由に『不明』と書く)", () => {
+    const j = judgeReachability(rec({ status: 302, parsedCount: null, headers: {} }));
+    expect(j.verdict).toBe("redirect");
+    expect(j.reason).toContain("不明");
   });
 
   it("status が null(fetch が例外)なら network-error で、理由に例外メッセージを含める", () => {
@@ -118,6 +136,7 @@ describe("summarizeReachability", () => {
       "reachable-but-unparsed": 0,
       blocked: 1,
       challenge: 0,
+      redirect: 0,
       "http-error": 1,
       "network-error": 0,
     });
@@ -189,6 +208,8 @@ describe("buildTargets / isAllowedUrl", () => {
     "https://evil.example/?u=https://race.netkeiba.com/",
     "https://user@race.netkeiba.com@evil.example/",
     "https://netkeiba.com/",
+    "https://race.netkeiba.com:8443/race/shutuba.html",
+    "https://race.netkeiba.com:443@evil.example/",
     "ftp://race.netkeiba.com/",
     "not a url",
     "",

@@ -14,7 +14,7 @@ export type CpuProbeKind = "ok" | "cpu-exceeded" | "other-error";
 
 /** `CPU 超過を示す` 応答本文のパターン(Workers の 1102 / Durable Object の CPU 超過など)。 */
 const CPU_EXCEEDED_PATTERN =
-  /error code:?\s*1102|exceeded (?:its |the )?(?:cpu|resource)|cpu (?:time )?limit|exceeded resource limits/i;
+  /error code:?\s*1102|exceeded (?:its |the )?(?:cpu|resource)|cpu (?:time )?limit/i;
 
 /**
  * 応答(ステータスと本文)を分類する。200 は ok、CPU 超過と読める失敗は cpu-exceeded、
@@ -29,6 +29,31 @@ export function classifyCpuProbe(status: number | null, body: string): CpuProbeK
     return "cpu-exceeded";
   }
   return "other-error";
+}
+
+/** parse / score が読むはずの出馬表・出走馬の頭数(同梱のフィクスチャ。中央16頭)。 */
+export const EXPECTED_HORSE_COUNT = 16;
+
+/**
+ * Worker / DO が返した `check`(処理の健全性を示す数)が妥当かを判定する。
+ * parse・score は同梱フィクスチャの頭数(16)、alloc 系は買い目の点数(1以上。-1 は「混在配分にならなかった」
+ * =早期 return で空振りしたことを表す)。**空振りした計算を「通過」と記録しない**ための検査で、不正なら
+ * 呼び出し側は other-error として扱い、探索を止める(誤った実測結論の防止)。
+ */
+export function isValidCpuCheck(work: string, check: unknown): boolean {
+  if (typeof check !== "number" || !Number.isInteger(check)) {
+    return false;
+  }
+  switch (work) {
+    case "parse":
+    case "score":
+      return check === EXPECTED_HORSE_COUNT;
+    case "alloc":
+    case "allocFull":
+      return check >= 1;
+    default:
+      return false;
+  }
 }
 
 export interface ProbeOutcome {
@@ -48,6 +73,11 @@ export interface SearchOptions {
   readonly tolerance?: number;
   /** プローブ回数の予算(全点の試行数の合計)。既定は無制限。 */
   readonly maxProbes?: number;
+  /**
+   * 各プローブの前に呼ばれ、true なら探索を打ち切る(壁時計の上限など、外部の事情による中断)。
+   * 打ち切るまでに観測した結果は返す(stopReason = "deadline")。
+   */
+  readonly shouldStop?: () => boolean;
 }
 
 export interface SearchPoint {
@@ -58,10 +88,15 @@ export interface SearchPoint {
   readonly otherError: number;
   /** 全試行が ok(= trialsRun === trials)。 */
   readonly passed: boolean;
+  /**
+   * 予算切れ・外部からの打ち切りで試行の途中で中断され、**失敗は一度も観測していない**点。
+   * 通過とも失敗とも言えないので、探索の下限にも上限にも反映しない(passed は false)。
+   */
+  readonly interrupted: boolean;
   readonly elapsedMs: readonly number[];
 }
 
-export type SearchStopReason = "converged" | "max-reps" | "other-error" | "probe-budget";
+export type SearchStopReason = "converged" | "max-reps" | "other-error" | "probe-budget" | "deadline";
 
 export interface SearchResult {
   readonly points: readonly SearchPoint[];
@@ -101,6 +136,10 @@ export async function searchLimit(
     const elapsedMs: number[] = [];
     let trialsRun = 0;
     for (let t = 0; t < options.trials; t += 1) {
+      if (options.shouldStop?.() === true) {
+        stopReason = "deadline";
+        break;
+      }
       if (totalProbes >= maxProbes) {
         stopReason = "probe-budget";
         break;
@@ -130,6 +169,7 @@ export async function searchLimit(
       cpuExceeded,
       otherError,
       passed: ok === options.trials,
+      interrupted: trialsRun < options.trials && cpuExceeded === 0 && otherError === 0,
       elapsedMs,
     };
     points.push(point);
@@ -144,14 +184,13 @@ export async function searchLimit(
   let reachedMax = false;
   for (;;) {
     const point = await evaluate(reps);
+    // 中断された点(interrupted)は passed でも cpuExceeded>0 でもないので、下の分岐で lo にも hi にも
+    // 反映されずに break する(同じ扱いになるので、ここで個別には見ない)。
     if (point === null || point.otherError > 0) {
       break;
     }
     if (point.passed) {
       lo = reps;
-      if (stopReason === "probe-budget") {
-        break;
-      }
       if (reps >= options.maxReps) {
         reachedMax = true;
         stopReason = "max-reps";
@@ -177,7 +216,8 @@ export async function searchLimit(
       if (point === null) {
         break;
       }
-      if (point.otherError > 0) {
+      // 中断された点(失敗を観測していない)は、下限にも上限にも反映しない。
+      if (point.otherError > 0 || point.interrupted) {
         break;
       }
       if (point.passed) {

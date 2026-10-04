@@ -33,6 +33,7 @@ export type ReachabilityVerdict =
   | "reachable-but-unparsed"
   | "blocked"
   | "challenge"
+  | "redirect"
   | "http-error"
   | "network-error";
 
@@ -67,6 +68,13 @@ export function judgeReachability(record: NetkeibaProbeRecord): ReachabilityJudg
   }
   if (status === 400 || status === 403 || status === 429) {
     return { verdict: "blocked", reason: `拒否されました(HTTP ${status})` };
+  }
+  if (status >= 300 && status < 400) {
+    // Worker はリダイレクトに従わない(redirect: "manual")ので、転送は到達したが先へは進んでいない状態として区別する。
+    return {
+      verdict: "redirect",
+      reason: `到達しましたが転送されました(HTTP ${status}、転送先: ${record.headers["location"] ?? "不明"})。追従はしていません`,
+    };
   }
   if (status >= 200 && status < 300) {
     if (record.parseError !== null) {
@@ -107,6 +115,7 @@ export function summarizeReachability(
     "reachable-but-unparsed": 0,
     blocked: 0,
     challenge: 0,
+    redirect: 0,
     "http-error": 0,
     "network-error": 0,
   };

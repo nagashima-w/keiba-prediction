@@ -7,9 +7,15 @@
 # (メインが読めるのはジョブログ本文だけのため)。詳細: spikes/cloudflare/ と scripts/cloudflare-spike/。
 #
 # ★起動条件(印のない push では何もしない):
-#   - push は作業ブランチだけで、先端コミットのメッセージに [CF-SPIKE] を含むときだけ実行する
+#   - push は作業ブランチだけで、先端コミットのメッセージが [CF-SPIKE] で**始まる**ときだけ実行する
+#     (startsWith。印は件名の先頭に置いたときだけ有効)
 #   - workflow_dispatch(手動実行)は常に実行する
 #   ワークフロー自体を追加・変更するコミットには印を付けない(印を付けた別のコミットで起動する)。
+#   **部分一致(contains)にしない理由**: 以前は contains だったため、コミットメッセージの本文に
+#   「このコミットには [CF-SPIKE] を付けていない」と書いただけで文字列が一致し、意図しない実測が
+#   起動した(0c47222)。説明文・引用に印を書いても起動しないよう、先頭一致にしている。
+#   残存リスク: Actions の式の文字列比較(startsWith を含む)は大文字小文字を区別しないため、
+#   `[cf-spike]` で始まるメッセージでも起動する。
 #
 # ★公開 URL の悪用防止: スパイクの Worker は「netkeiba へリクエストを出す公開 URL」になるため、
 #   実行ごとにランダムな共有秘密を生成して Worker に渡し、一致しないリクエストは 403 にする。
@@ -37,8 +43,8 @@ concurrency:
 jobs:
   spike:
     # 印のない push では、このジョブは実行されない(スキップされる)。
-    # 注意: Actions の式の文字列比較は大文字小文字を区別しない(contains も同様)。
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[CF-SPIKE]')) }}
+    # 注意: Actions の式の文字列比較は大文字小文字を区別しない(startsWith も同様)。
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, '[CF-SPIKE]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -128,10 +134,15 @@ jobs:
           rm -f "$SECRETS_FILE"
           exit "$rc"
 
+      # ステップに timeout を付ける(ジョブの 60 分に達するとキャンセル扱いになり、always() の後片付けに
+      # 使える猶予が限られるため)。ドライバ自身も、これより短い壁時計の上限(DRIVER_WALL_MS)で探索を打ち切り、
+      # それまでの結果を書き出す。
+      # Worker の URL(workers.dev のサブドメインを含む)は、ステップの env に展開しない(リポジトリは public で、
+      # ジョブログは誰でも読める)。ドライバが SPIKE_WORKER_NAME と CF_SUBDOMAIN(GITHUB_ENV。マスク済み)から組み立てる。
       - name: 測定を実行
+        timeout-minutes: 45
         working-directory: spikes/cloudflare
         env:
-          SPIKE_URL: https://${{ env.SPIKE_WORKER_NAME }}.${{ env.CF_SUBDOMAIN }}.workers.dev
           RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         run: pnpm exec tsx driver.ts
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyCpuProbe,
+  isValidCpuCheck,
   searchLimit,
   type ProbeOutcome,
 } from "../cloudflare-spike/cpu-search.js";
@@ -179,5 +180,123 @@ describe("searchLimit: 倍々 → 二分探索", () => {
     const r = await searchLimit(probe, { maxReps: 256, trials: 2 });
     expect(r.totalProbes).toBe(calls.length);
     expect(r.points.reduce((s, p) => s + p.trialsRun, 0)).toBe(calls.length);
+  });
+});
+
+describe("searchLimit: 予算切れで中断された点を、失敗として扱わない", () => {
+  it("真の上限100・trials=3・maxReps=4096・maxProbes=24 でも、minFailReps は実際に失敗を観測した点だけから決まる", async () => {
+    const { probe } = thresholdProbe(100);
+    const r = await searchLimit(probe, { maxReps: 4096, trials: 3, maxProbes: 24 });
+
+    // 前提を無条件に固定する(予算切れで二分探索の途中の点が中断されていること)
+    expect(r.stopReason).toBe("probe-budget");
+    expect(r.totalProbes).toBe(24);
+    const interrupted = r.points.filter((p) => p.interrupted);
+    expect(interrupted.length).toBeGreaterThan(0);
+    for (const p of interrupted) {
+      expect(p.trialsRun).toBeLessThan(3);
+      expect(p.cpuExceeded + p.otherError).toBe(0);
+      expect(p.passed).toBe(false);
+    }
+
+    // 中断された点(reps=96。1〜2回しか試しておらず、失敗は一度も観測していない)は、上限にも下限にも反映しない
+    const failedReps = r.points.filter((p) => p.cpuExceeded > 0).map((p) => p.reps);
+    expect(failedReps.length).toBeGreaterThan(0);
+    expect(r.minFailReps).toBe(Math.min(...failedReps));
+    expect(r.minFailReps).toBeGreaterThan(100); // 真の閾値(100)より大きい。観測した失敗点だけ
+    const passedReps = r.points.filter((p) => p.passed).map((p) => p.reps);
+    expect(r.maxPassReps).toBe(Math.max(...passedReps));
+  });
+
+  it("中断された点が1つも失敗していなければ、minFailReps に含めない(予算でちょうど倍々の途中で止まる場合)", async () => {
+    const { probe } = thresholdProbe(10_000);
+    const r = await searchLimit(probe, { maxReps: 4096, trials: 3, maxProbes: 7 });
+    // 1,2 で 6 回、4 の 1 回目で予算切れ
+    expect(r.points.map((p) => p.reps)).toEqual([1, 2, 4]);
+    expect(r.points[2]).toMatchObject({ trialsRun: 1, interrupted: true, passed: false });
+    expect(r.maxPassReps).toBe(2);
+    expect(r.minFailReps).toBeNull();
+    expect(r.reachedMax).toBe(false);
+  });
+
+  it("全試行を終えた点は interrupted=false(通った点も、落ちた点も)", async () => {
+    const { probe } = thresholdProbe(2);
+    const r = await searchLimit(probe, { maxReps: 8, trials: 2, tolerance: 0 });
+    expect(r.points.length).toBeGreaterThan(2);
+    for (const p of r.points) {
+      expect(p.interrupted).toBe(false);
+    }
+  });
+});
+
+describe("searchLimit: 外部から打ち切る(shouldStop。壁時計の上限)", () => {
+  it("最初から true なら、1回もプローブせず stopReason=deadline で返す", async () => {
+    const { probe, calls } = thresholdProbe(100);
+    const r = await searchLimit(probe, { maxReps: 1024, trials: 2, shouldStop: () => true });
+    expect(calls).toEqual([]);
+    expect(r.totalProbes).toBe(0);
+    expect(r.points).toEqual([]);
+    expect(r.stopReason).toBe("deadline");
+    expect(r.maxPassReps).toBeNull();
+    expect(r.minFailReps).toBeNull();
+  });
+
+  it("途中から true になれば、それ以降は呼ばず、それまでの結果を返す。通過点は maxPassReps に反映する", async () => {
+    const { probe, calls } = thresholdProbe(10_000);
+    let n = 0;
+    const r = await searchLimit(probe, {
+      maxReps: 4096,
+      trials: 1,
+      shouldStop: () => {
+        n += 1;
+        return n > 4; // 5 回目の判定で停止
+      },
+    });
+    expect(calls).toEqual([1, 2, 4, 8]);
+    expect(r.stopReason).toBe("deadline");
+    expect(r.maxPassReps).toBe(8);
+    expect(r.minFailReps).toBeNull();
+    expect(r.reachedMax).toBe(false);
+  });
+
+  it("二分探索の途中で止まっても、観測した失敗点を minFailReps に残す", async () => {
+    const { probe, calls } = thresholdProbe(100);
+    let stop = false;
+    const r = await searchLimit(
+      async (reps) => {
+        const o = await probe(reps);
+        if (reps === 128) {
+          stop = true; // 128 で初めて失敗を観測した直後に打ち切る
+        }
+        return o;
+      },
+      { maxReps: 4096, trials: 1, shouldStop: () => stop },
+    );
+    expect(calls[calls.length - 1]).toBe(128);
+    expect(r.stopReason).toBe("deadline");
+    expect(r.maxPassReps).toBe(64);
+    expect(r.minFailReps).toBe(128);
+  });
+});
+
+describe("isValidCpuCheck(空振りした計算を『通過』と記録しない)", () => {
+  it.each([
+    { work: "parse", check: 16, valid: true },
+    { work: "score", check: 16, valid: true },
+    { work: "alloc", check: 245, valid: true },
+    { work: "alloc", check: 1, valid: true },
+    { work: "allocFull", check: 311, valid: true },
+    { work: "alloc", check: -1, valid: false },
+    { work: "allocFull", check: -1, valid: false },
+    { work: "alloc", check: 0, valid: false },
+    { work: "parse", check: 0, valid: false },
+    { work: "parse", check: 15, valid: false },
+    { work: "score", check: 17, valid: false },
+    { work: "parse", check: undefined, valid: false },
+    { work: "alloc", check: "245", valid: false },
+    { work: "alloc", check: Number.NaN, valid: false },
+    { work: "unknown", check: 16, valid: false },
+  ])("$work の check=$check は valid=$valid", ({ work, check, valid }) => {
+    expect(isValidCpuCheck(work, check)).toBe(valid);
   });
 });

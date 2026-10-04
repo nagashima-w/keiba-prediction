@@ -91,8 +91,8 @@ describe("extractResultBlock", () => {
 describe("renderMarkdown", () => {
   const searchOk: SearchResult = {
     points: [
-      { reps: 1, trialsRun: 2, ok: 2, cpuExceeded: 0, otherError: 0, passed: true, elapsedMs: [10, 11] },
-      { reps: 2, trialsRun: 1, ok: 0, cpuExceeded: 1, otherError: 0, passed: false, elapsedMs: [12] },
+      { reps: 1, trialsRun: 2, ok: 2, cpuExceeded: 0, otherError: 0, passed: true, interrupted: false, elapsedMs: [10, 11] },
+      { reps: 2, trialsRun: 1, ok: 0, cpuExceeded: 1, otherError: 0, passed: false, interrupted: false, elapsedMs: [12] },
     ],
     maxPassReps: 1,
     minFailReps: 2,
@@ -128,6 +128,12 @@ describe("renderMarkdown", () => {
     for (const work of ["parse", "score", "alloc", "allocFull"]) {
       expect(unrun.filter((l) => l.includes(`| ${work} |`))).toHaveLength(2);
     }
+  });
+
+  it("Worker の行のラベルは『Worker』(プランを確かめていないので『Free』と書かない)", () => {
+    const md = renderMarkdown(emptyResult("x"));
+    expect(md).toContain("| Worker | parse |");
+    expect(md).not.toContain("Free");
   });
 
   it("探索で見つからなかった上限(minFailReps=null)と、maxPassReps=null(1回目から失敗)を区別して書く", () => {

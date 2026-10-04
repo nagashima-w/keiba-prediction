@@ -6,6 +6,7 @@
  * - `HttpClient.fetchBuffer` は非 2xx で応答ヘッダと本文を捨てて例外にするため、注入する fetch を
  *   記録ラッパで包み、ステータス・選んだヘッダ・本文の先頭を控える(403 が netkeiba の拒否か
  *   Cloudflare のチャレンジかを切り分けるのに必要)。
+ * - `redirect: "manual"`: リダイレクトに従わない(許可ホスト外への転送や本数の上限の素通りを防ぐ)。
  * - `maxRetries: 0` / `minIntervalMs: 0`: 5xx の再試行で netkeiba への本数が増えないようにする
  *   (本数と 2 秒間隔の管理はドライバ側の `RequestGuard` が担う)。
  *
@@ -25,7 +26,12 @@ import type { TargetKind } from "../../../scripts/cloudflare-spike/targets.js";
 /** 注入する fetch(グローバル fetch と同じ形。応答は `clone()` できる Response)。 */
 export type ProbeFetch = (
   url: string,
-  init: { method?: string; headers?: Record<string, string>; signal?: AbortSignal },
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    redirect?: "manual" | "follow" | "error";
+  },
 ) => Promise<Response>;
 
 export interface ProbeRequest {
@@ -36,7 +42,7 @@ export interface ProbeRequest {
 }
 
 /** 診断用に残す応答ヘッダ。 */
-const PICKED_HEADERS = ["server", "cf-ray", "cf-mitigated", "content-type", "content-length", "content-encoding", "via", "x-cache"];
+const PICKED_HEADERS = ["server", "cf-ray", "cf-mitigated", "content-type", "content-length", "content-encoding", "via", "x-cache", "location"];
 
 /** 非 2xx のときに残す本文の先頭のバイト数。 */
 const ERROR_BODY_HEAD_BYTES = 400;
@@ -89,6 +95,9 @@ export async function probeNetkeiba(
 
   const recordingFetch: FetchLike = async (url, init) => {
     const response = await fetchImpl(url, {
+      // リダイレクトには従わない: 許可ホスト外への転送や、1回の呼び出しで netkeiba へ出す本数(1本)の上限の
+      // 素通りを防ぐ。3xx はステータスと location を記録するだけにする。
+      redirect: "manual",
       ...(init?.method !== undefined ? { method: init.method } : {}),
       ...(init?.headers !== undefined ? { headers: init.headers } : {}),
       ...(init?.signal !== undefined ? { signal: init.signal } : {}),

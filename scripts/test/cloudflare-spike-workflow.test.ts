@@ -53,15 +53,18 @@ describe("起動条件(印のない push では何もしない)", () => {
     expect(yml).toContain("workflow_dispatch:");
   });
 
-  it("ジョブの if は『workflow_dispatch』または『push かつ先端コミットメッセージに [CF-SPIKE]』だけを通す", () => {
+  it("ジョブの if は『workflow_dispatch』または『push かつ先端コミットメッセージが [CF-SPIKE] で始まる』だけを通す", () => {
     const m = /\n    if: (.+)\n/.exec(yml);
     expect(m).not.toBeNull();
     const cond = m![1]!;
     expect(cond).toContain("github.event_name == 'workflow_dispatch'");
     expect(cond).toContain("github.event_name == 'push'");
-    expect(cond).toContain("contains(github.event.head_commit.message, '[CF-SPIKE]')");
-    // 条件式の構造: A || (B && C)。印のない push を通す形(印の否定だけ・印の contains が無い等)になっていない
-    expect(cond).toMatch(/^\$\{\{ github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'push' && contains\(github\.event\.head_commit\.message, '\[CF-SPIKE\]'\)\) \}\}$/);
+    expect(cond).toContain("startsWith(github.event.head_commit.message, '[CF-SPIKE]')");
+    // 部分一致(contains)は使わない: コミットメッセージの本文に印の文字列が書かれただけ(「[CF-SPIKE] を付けていない」
+    // という説明を含む)で実測が起動してしまった事故(0c47222)の再発防止。印は件名の先頭に置いたときだけ有効。
+    expect(cond).not.toContain("contains(");
+    // 条件式の構造: A || (B && C)。印のない push を通す形(印の否定だけ・印の判定が無い等)になっていない
+    expect(cond).toMatch(/^\$\{\{ github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'push' && startsWith\(github\.event\.head_commit\.message, '\[CF-SPIKE\]'\)\) \}\}$/);
   });
 
   it("同時実行は1本に絞り、実行中の run を途中で打ち切らない(打ち切ると Worker が残る)", () => {
@@ -157,5 +160,35 @@ describe("後片付け(失敗時も Worker を消す)と結果の出力", () => 
 
   it("ジョブにタイムアウトがある(Durable Object の探索が暴走しても止まる)", () => {
     expect(yml).toMatch(/timeout-minutes: \d+/);
+  });
+
+  it("『測定を実行』のステップはジョブより短い timeout-minutes を持つ(ジョブの時間切れで、後続の削除と確認の猶予が無くなるのを防ぐ)", () => {
+    const job = /\n    timeout-minutes: (\d+)\n/.exec(yml);
+    const step = /timeout-minutes: (\d+)/.exec(stepBody("測定を実行"));
+    expect(job).not.toBeNull();
+    expect(step).not.toBeNull();
+    const jobMinutes = Number(job![1]);
+    const stepMinutes = Number(step![1]);
+    expect(stepMinutes).toBeGreaterThan(0);
+    // 削除・確認・artifact に十分な時間(10分以上)が残る
+    expect(jobMinutes - stepMinutes).toBeGreaterThanOrEqual(10);
+  });
+
+  it("ドライバは壁時計の上限を持ち、ステップの timeout より前に打ち切って、それまでの結果を書き出す", () => {
+    const src = readTextLf("spikes", "cloudflare", "driver.ts");
+    const wall = /DRIVER_WALL_MS = (\d+) \* 60_000/.exec(src);
+    expect(wall).not.toBeNull();
+    const step = /timeout-minutes: (\d+)/.exec(stepBody("測定を実行"));
+    expect(Number(wall![1])).toBeLessThan(Number(step![1]));
+    expect(src).toContain("shouldStop");
+  });
+});
+
+describe("ジョブログに workers.dev のサブドメインを出さない(リポジトリは public)", () => {
+  it("ステップの env に URL を展開しない(SPIKE_URL を使わない。ドライバが Worker 名とサブドメインから組み立てる)", () => {
+    expect(yml).not.toMatch(/SPIKE_URL/);
+    const code = yml.split("\n").filter((l) => !l.trim().startsWith("#"));
+    expect(code.filter((l) => l.includes("workers.dev"))).toEqual([]);
+    expect(code.filter((l) => /echo .*CF_SUBDOMAIN/.test(l))).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@
 
 import { appendFileSync } from "node:fs";
 import {
+  formatPreflightSuccess,
   judgePreflight,
   type HttpProbe,
   type PreflightInput,
@@ -108,7 +109,10 @@ async function main(): Promise<void> {
     }
     process.exit(1);
   }
-  console.log(`プリフライト OK: トークン有効・Worker の作成と削除が可能・workers.dev のサブドメイン=${judgement.subdomain}`);
+  // サブドメインは、マスクを登録したうえで、値を表示しない(リポジトリは public)。
+  for (const line of formatPreflightSuccess(judgement.subdomain)) {
+    console.log(line);
+  }
   const githubEnv = process.env["GITHUB_ENV"];
   if (githubEnv !== undefined && judgement.subdomain !== null) {
     appendFileSync(githubEnv, `CF_SUBDOMAIN=${judgement.subdomain}\n`);

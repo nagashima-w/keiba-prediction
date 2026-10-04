@@ -204,3 +204,26 @@ describe("probeNetkeiba: 送るリクエスト", () => {
     expect(init.headers?.["User-Agent"]).toContain("keiba-ev-tool");
   });
 });
+
+describe("probeNetkeiba: リダイレクトに従わない(許可ホスト外への転送や、本数の上限の素通りを防ぐ)", () => {
+  const target = { targetId: "central-shutuba", url: "https://race.netkeiba.com/race/shutuba.html?race_id=1", kind: "shutuba", encoding: "utf-8" } as const;
+
+  it("fetch には redirect: 'manual' を渡す", async () => {
+    const { fetch, calls } = fakeFetch(200, readFixture("shutuba_202603020211.html"), HTML_UTF8);
+    await probeNetkeiba(target, fetch);
+    expect(calls).toHaveLength(1);
+    expect((calls[0]!.init as { redirect?: string }).redirect).toBe("manual");
+  });
+
+  it("302 は追わずに、ステータスと location を記録して redirect と判定する。fetch は1回だけ", async () => {
+    const { fetch, calls } = fakeFetch(302, "", { location: "https://evil.example/x", server: "cloudflare" });
+    const rec = await probeNetkeiba(target, fetch);
+    expect(calls).toHaveLength(1);
+    expect(rec.status).toBe(302);
+    expect(rec.headers["location"]).toBe("https://evil.example/x");
+    expect(rec.parsedCount).toBeNull();
+    const j = judgeReachability(rec);
+    expect(j.verdict).toBe("redirect");
+    expect(j.reason).toContain("https://evil.example/x");
+  });
+});

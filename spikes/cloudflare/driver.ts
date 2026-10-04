@@ -12,9 +12,10 @@
  *     コード内の時刻差では測れない)。各リクエストの時刻差(insideMs / afterIoMs)も補助として記録する。
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   classifyCpuProbe,
+  isValidCpuCheck,
   searchLimit,
   type ProbeOutcome,
 } from "../../scripts/cloudflare-spike/cpu-search.js";
@@ -29,12 +30,29 @@ import {
   type SpikeResult,
 } from "../../scripts/cloudflare-spike/result.js";
 import { buildTargets } from "../../scripts/cloudflare-spike/targets.js";
+import { writeJsonAtomic } from "./atomic-write.js";
 import { requireEnv } from "./cf-api.js";
 
-const BASE_URL = requireEnv("SPIKE_URL").replace(/\/$/, "");
+/**
+ * Worker のベース URL。ワークフローでは SPIKE_WORKER_NAME と CF_SUBDOMAIN(GITHUB_ENV。マスク済み)から組み立てる
+ * (ステップの env に URL を展開すると、public なジョブログに workers.dev のサブドメインが出るため)。
+ * SPIKE_URL は、ローカルの `wrangler dev` に向ける配線確認用の上書き。URL はログに出さない。
+ */
+const BASE_URL = (
+  process.env["SPIKE_URL"] ??
+  `https://${requireEnv("SPIKE_WORKER_NAME")}.${requireEnv("CF_SUBDOMAIN")}.workers.dev`
+).replace(/\/$/, "");
 const SECRET = requireEnv("SPIKE_SECRET");
 const RESULT_PATH = process.env["RESULT_PATH"] ?? "spike-result.json";
 const LOCAL_CALIBRATION_PATH = process.env["LOCAL_CALIBRATION_PATH"] ?? "local-calibration.json";
+
+/**
+ * ドライバ全体の壁時計の上限(分)。ワークフローの「測定を実行」ステップの timeout(45 分)より短くし、
+ * 超えたら探索を打ち切って、それまでの結果を書き出す(ステップの時間切れで結果が残らないのを防ぐ)。
+ */
+const DRIVER_WALL_MS = 40 * 60_000;
+const DEADLINE = Date.now() + DRIVER_WALL_MS;
+const shouldStop = (): boolean => Date.now() > DEADLINE;
 
 /** 1リクエストのタイムアウト(Durable Object の 30 秒を超える余裕を持たせる)。 */
 const REQUEST_TIMEOUT_MS = 150_000;
@@ -89,8 +107,9 @@ async function call(method: "GET" | "POST", path: string, body?: unknown): Promi
   }
 }
 
+/** 結果ファイルは原子的に書く(書き込み中に切れても、後片付けが壊れた JSON を読まないように)。 */
 function save(result: SpikeResult): void {
-  writeFileSync(RESULT_PATH, JSON.stringify(result, null, 2));
+  writeJsonAtomic(RESULT_PATH, result);
 }
 
 /** デプロイ直後は workers.dev への反映に時間がかかることがあるので、/ping が通るまで待つ(netkeiba へは出ない)。 */
@@ -177,7 +196,13 @@ async function measureSelftest(result: SpikeResult): Promise<void> {
 
 async function measureCpu(result: SpikeResult, runtime: CpuRuntime): Promise<void> {
   const prefix = runtime === "worker" ? "" : "/do";
-  for (const work of CPU_WORKS) {
+  // Durable Object は、実運用と同じ負荷(allocFull)を最優先で測る(壁時計の上限で後ろが切れても、最重要の問いに答えが出る)。
+  const order = runtime === "durableObject" ? [...CPU_WORKS].reverse() : CPU_WORKS;
+  for (const work of order) {
+    if (shouldStop()) {
+      result.notes.push(`壁時計の上限(${DRIVER_WALL_MS / 60_000} 分)に達したため ${runtime}/${work} 以降の探索を行っていない`);
+      break;
+    }
     // コールドスタート(初回のモジュール評価)の影響を探索に混ぜないよう、1回捨てる。
     await call("POST", `${prefix}/cpu/${work}?reps=1`);
 
@@ -186,13 +211,21 @@ async function measureCpu(result: SpikeResult, runtime: CpuRuntime): Promise<voi
       const kind = classifyCpuProbe(r.status, r.text);
       let insideMs: number | null = null;
       let afterIoMs: number | null = null;
+      let finalKind: typeof kind = kind;
+      let invalidCheck: string | null = null;
       if (kind === "ok") {
         try {
-          const parsed = JSON.parse(r.text) as { insideMs?: number; afterIoMs?: number };
+          const parsed = JSON.parse(r.text) as { insideMs?: number; afterIoMs?: number; check?: unknown };
           insideMs = parsed.insideMs ?? null;
           afterIoMs = parsed.afterIoMs ?? null;
+          // 空振りした計算(早期 return で何も計算していない等)を「通過」と記録しない。
+          if (!isValidCpuCheck(work, parsed.check)) {
+            finalKind = "other-error";
+            invalidCheck = `check=${String(parsed.check)} は ${work} の妥当な値ではない(空振りの疑い)`;
+          }
         } catch {
-          // 補助の値なので、読めなくても探索は続ける。
+          finalKind = "other-error";
+          invalidCheck = "200 だが応答が JSON として読めない";
         }
       }
       result.cpu.samples.push({
@@ -200,19 +233,24 @@ async function measureCpu(result: SpikeResult, runtime: CpuRuntime): Promise<voi
         work,
         reps,
         status: r.status,
-        kind,
+        kind: finalKind,
         wallMs: r.wallMs,
         insideMs,
         afterIoMs,
-        bodyHead: kind === "ok" ? null : r.text.slice(0, 300),
+        bodyHead: finalKind === "ok" ? null : (invalidCheck ?? r.text.slice(0, 300)),
       });
-      return { kind, elapsedMs: r.wallMs, ...(kind === "ok" ? {} : { detail: `HTTP ${r.status}: ${r.text.slice(0, 120)}` }) };
+      return {
+        kind: finalKind,
+        elapsedMs: r.wallMs,
+        ...(finalKind === "ok" ? {} : { detail: invalidCheck ?? `HTTP ${r.status}: ${r.text.slice(0, 120)}` }),
+      };
     };
 
     const search = await searchLimit(probe, {
       maxReps: MAX_REPS[work],
       trials: TRIALS[runtime],
       maxProbes: MAX_PROBES_PER_SEARCH,
+      shouldStop,
     });
     result.cpu[runtime][work] = search;
     save(result);

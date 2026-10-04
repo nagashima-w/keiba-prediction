@@ -225,7 +225,7 @@ export function renderMarkdown(result: SpikeResult): string {
   out.push("| 実行環境 | 処理 | maxPassReps | minFailReps | 停止理由 | 試行数 |");
   out.push("|---|---|---|---|---|---|");
   for (const work of CPU_WORKS) {
-    out.push(searchRow("Worker(Free)", work, result.cpu.worker[work]));
+    out.push(searchRow("Worker", work, result.cpu.worker[work]));
   }
   for (const work of CPU_WORKS) {
     out.push(searchRow("Durable Object(SQLite)", work, result.cpu.durableObject[work]));

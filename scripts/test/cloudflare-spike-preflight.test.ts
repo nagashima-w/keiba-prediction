@@ -3,6 +3,7 @@ import {
   SPIKE_WORKER_PREFIX,
   extractDurableObjectScriptNames,
   extractScriptNames,
+  formatPreflightSuccess,
   judgeCleanup,
   judgePreflight,
   type PreflightInput,
@@ -264,5 +265,17 @@ describe("judgeCleanup", () => {
     const j = judgeCleanup({ scriptNames: [], doScriptNames: ["keiba-cf-spike-1"] });
     expect(j.ok).toBe(true);
     expect(j.durableObjectNamespaces).toBe("remaining");
+  });
+});
+
+describe("formatPreflightSuccess(サブドメインをジョブログに出さない)", () => {
+  it("最初の行でサブドメインをマスクし、どの行にもサブドメインの文字列を含めない", () => {
+    const lines = formatPreflightSuccess("my-secret-sub");
+    expect(lines[0]).toBe("::add-mask::my-secret-sub");
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines.slice(1)) {
+      expect(line).not.toContain("my-secret-sub");
+    }
+    expect(lines.slice(1).join("\n")).toContain("プリフライト OK");
   });
 });

@@ -10,7 +10,7 @@
  *     (メインが読めるのはジョブログ本文だけのため。ログは末尾から読まれるので、出力の最後に置く)。
  */
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import {
   extractDurableObjectScriptNames,
   extractScriptNames,
@@ -23,6 +23,7 @@ import {
   renderMarkdown,
   type SpikeResult,
 } from "../../scripts/cloudflare-spike/result.js";
+import { writeJsonAtomic } from "./atomic-write.js";
 import { cfApi, requireEnv } from "./cf-api.js";
 
 const RESULT_PATH = process.env["RESULT_PATH"] ?? "spike-result.json";
@@ -40,11 +41,22 @@ async function main(): Promise<void> {
   const token = requireEnv("CLOUDFLARE_API_TOKEN");
   const accountId = requireEnv("CLOUDFLARE_ACCOUNT_ID");
 
-  const result: SpikeResult = existsSync(RESULT_PATH)
-    ? (JSON.parse(readFileSync(RESULT_PATH, "utf-8")) as SpikeResult)
-    : emptyResult(process.env["GITHUB_RUN_ID"] ?? "unknown");
+  // 結果ファイルが無い・壊れていても、後片付けの確認と診断の出力は止めない。
+  let result: SpikeResult;
+  let loadNote: string | null = null;
   if (!existsSync(RESULT_PATH)) {
-    result.notes.push("測定結果のファイルが無かった(測定の前で失敗した)ため、後片付けの結果だけを出力する");
+    result = emptyResult(process.env["GITHUB_RUN_ID"] ?? "unknown");
+    loadNote = "測定結果のファイルが無かった(測定の前で失敗した)ため、後片付けの結果だけを出力する";
+  } else {
+    try {
+      result = JSON.parse(readFileSync(RESULT_PATH, "utf-8")) as SpikeResult;
+    } catch (error) {
+      result = emptyResult(process.env["GITHUB_RUN_ID"] ?? "unknown");
+      loadNote = `測定結果のファイルを JSON として読めなかった(${error instanceof Error ? error.message : String(error)})ため、後片付けの結果だけを出力する`;
+    }
+  }
+  if (loadNote !== null) {
+    result.notes.push(loadNote);
   }
 
   // 1. wrangler delete の直後の状態。
@@ -79,7 +91,7 @@ async function main(): Promise<void> {
     listUnavailable: first.listUnavailable,
   };
   result.finishedAt = new Date().toISOString();
-  writeFileSync(RESULT_PATH, JSON.stringify(result, null, 2));
+  writeJsonAtomic(RESULT_PATH, result);
 
   const summaryPath = process.env["GITHUB_STEP_SUMMARY"];
   if (summaryPath !== undefined) {

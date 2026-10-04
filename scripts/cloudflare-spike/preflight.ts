@@ -171,6 +171,20 @@ export function judgePreflight(input: PreflightInput): PreflightJudgement {
   return { ok: problems.length === 0, problems, subdomain };
 }
 
+/**
+ * プリフライト成功時にジョブログへ出す行。**リポジトリは public で、ジョブログは誰でも読める**ため、
+ * workers.dev のサブドメイン(アカウントを特定できる)は、最初にマスクを登録し(`::add-mask::`)、
+ * メッセージ本文には含めない。
+ */
+export function formatPreflightSuccess(subdomain: string | null): string[] {
+  const lines: string[] = [];
+  if (subdomain !== null && subdomain !== "") {
+    lines.push(`::add-mask::${subdomain}`);
+  }
+  lines.push("プリフライト OK: トークン有効・Worker の作成と削除が可能・workers.dev のサブドメインを取得済み(値は表示しません)");
+  return lines;
+}
+
 /** Cloudflare API の Worker 一覧応答(result[].id)から名前を取り出す。壊れていれば null。 */
 export function extractScriptNames(json: string): string[] | null {
   return extractStrings(json, "id");
