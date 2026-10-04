@@ -310,3 +310,73 @@ describe("compareSources(対照実験の読み)", () => {
     expect(c.conclusion).toBe("worker-only-blocked");
   });
 });
+
+describe("compareSources: 『判定できなかった』を『拒否された』と読まない", () => {
+  const blocked = (targetId: string, source: "worker" | "runner") => rec({ targetId, source, status: 403, parsedCount: null });
+  const good = (targetId: string, source: "worker" | "runner") => rec({ targetId, source });
+  const netErr = (targetId: string, source: "worker" | "runner") =>
+    rec({ targetId, source, status: null, bodyLength: null, parsedCount: null, error: "boom" });
+  const unparsed = (targetId: string, source: "worker" | "runner") => rec({ targetId, source, status: 200, parsedCount: 0 });
+  const http502 = (targetId: string, source: "worker" | "runner") => rec({ targetId, source, status: 502, parsedCount: null });
+  const redirected = (targetId: string, source: "worker" | "runner") =>
+    rec({ targetId, source, status: 302, parsedCount: null, headers: { location: "https://x/" } });
+  const challenge = (targetId: string, source: "worker" | "runner") =>
+    rec({ targetId, source, status: 403, parsedCount: null, headers: { "cf-mitigated": "challenge" } });
+
+  it("Worker が network-error(netkeiba に届いていない)でランナーが ok でも、worker-only-blocked にしない(inconclusive)", () => {
+    const c = compareSources([netErr("a", "worker"), good("a", "runner")]);
+    expect(c.conclusion).toBe("inconclusive");
+    expect(c.conclusion).not.toBe("worker-only-blocked");
+  });
+
+  it("Worker が reachable-but-unparsed(200 で0件)でランナーが blocked(403)でも、both-blocked にしない", () => {
+    const c = compareSources([unparsed("a", "worker"), blocked("a", "runner")]);
+    expect(c.conclusion).toBe("inconclusive");
+    expect(c.conclusion).not.toBe("both-blocked");
+  });
+
+  it("両方とも http-error(502)でも、both-blocked にしない", () => {
+    const c = compareSources([http502("a", "worker"), http502("a", "runner")]);
+    expect(c.conclusion).toBe("inconclusive");
+    expect(c.conclusion).not.toBe("both-blocked");
+  });
+
+  it.each([
+    { label: "network-error", make: netErr },
+    { label: "http-error", make: http502 },
+    { label: "reachable-but-unparsed", make: unparsed },
+    { label: "redirect", make: redirected },
+  ])("$label は判定不能: ランナーが ok の対と組んでも inconclusive", ({ make }) => {
+    expect(compareSources([make("a", "worker"), good("a", "runner")]).conclusion).toBe("inconclusive");
+    expect(compareSources([good("a", "worker"), make("a", "runner")]).conclusion).toBe("inconclusive");
+  });
+
+  it("拒否として数えるのは blocked(400/403/429)と challenge だけ: challenge の Worker と ok のランナーは worker-only-blocked", () => {
+    expect(compareSources([challenge("a", "worker"), good("a", "runner")]).conclusion).toBe("worker-only-blocked");
+    expect(compareSources([blocked("a", "worker"), good("a", "runner")]).conclusion).toBe("worker-only-blocked");
+    expect(compareSources([challenge("a", "worker"), blocked("a", "runner")]).conclusion).toBe("both-blocked");
+  });
+
+  it("判定不能の対は結論の集計から外し、除外した件数を返す(判定できた対だけで結論を出す)", () => {
+    const c = compareSources([
+      blocked("a", "worker"), good("a", "runner"), // 判定できた(worker-only)
+      netErr("b", "worker"), good("b", "runner"), // 判定不能
+      http502("c", "worker"), http502("c", "runner"), // 判定不能
+    ]);
+    expect(c.conclusion).toBe("worker-only-blocked");
+    expect(c.indeterminatePairs).toBe(2);
+    expect(c.pairs).toHaveLength(3);
+  });
+
+  it("判定できた対が1つも無ければ inconclusive。除外件数は対の数と一致する", () => {
+    const c = compareSources([netErr("a", "worker"), good("a", "runner"), http502("b", "worker"), good("b", "runner")]);
+    expect(c.conclusion).toBe("inconclusive");
+    expect(c.indeterminatePairs).toBe(2);
+  });
+
+  it("対がない(片方の送信元だけ)は、これまでどおり no-pairs で、除外件数は 0", () => {
+    const c = compareSources([netErr("a", "worker")]);
+    expect(c.conclusion).toBe("no-pairs");
+    expect(c.indeterminatePairs).toBe(0);
+  });
+});

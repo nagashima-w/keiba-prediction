@@ -13,10 +13,14 @@
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import {
+  decideCleanup,
   extractDurableObjectScriptNames,
   extractScriptNames,
   judgeCleanup,
+  judgeDeleteStatus,
+  planCleanupDeletes,
   SPIKE_WORKER_PREFIX,
+  type DeleteJudgement,
 } from "../../scripts/cloudflare-spike/preflight.js";
 import {
   emptyResult,
@@ -68,25 +72,34 @@ async function main(): Promise<void> {
       ` / 一覧の取得=${first.listUnavailable ? "失敗" : "成功"} / Durable Object の名前空間=${first.durableObjectNamespaces}`,
   );
 
-  // 残っていれば API でもう一度消しにいく。
-  const deletedByFallback: string[] = [];
-  for (const name of first.leftoverWorkers) {
+  // 一覧に残っていた Worker と、この run の Worker(SPIKE_WORKER_NAME)を、API の DELETE で消しにいく。
+  // **一覧の成否にかかわらず**、名前が分かっていれば試みる(一覧を取得できなくても、アカウントに Worker を
+  // 残さないため。すでに消えていれば 404 で、成功扱い)。接頭辞で始まらない名前は対象にしない。
+  const targets = planCleanupDeletes(first.leftoverWorkers, process.env["SPIKE_WORKER_NAME"]);
+  const deletes: { name: string; judgement: DeleteJudgement }[] = [];
+  for (const name of targets) {
     const del = await cfApi(token, `/accounts/${accountId}/workers/scripts/${name}?force=true`, { method: "DELETE" });
-    console.log(`::warning::削除ステップの後も残っていた ${name} を API で削除しました(HTTP ${del.status ?? "例外"})`);
-    if (del.status === 200) {
-      deletedByFallback.push(name);
+    const judgement = judgeDeleteStatus(del.status);
+    deletes.push({ name, judgement });
+    if (judgement === "deleted") {
+      console.log(`::warning::削除ステップの後も残っていた ${name} を API で削除しました(HTTP ${del.status})`);
+    } else if (judgement === "failed") {
+      console.log(`::warning::${name} の削除(API の DELETE)に失敗しました(HTTP ${del.status ?? "例外"})`);
     }
   }
-  const final = first.leftoverWorkers.length > 0 ? judgeCleanup(await listState(token, accountId)) : first;
-  if (first.leftoverWorkers.length > 0) {
-    console.log(`再確認: 残り=${final.leftoverWorkers.length}件${final.leftoverWorkers.length > 0 ? `(${final.leftoverWorkers.join(", ")})` : ""}`);
+  // 削除を試みたら、一覧を取り直す。最終判定はこの再削除のあとの一覧で決める(DELETE の応答では決めない)。
+  const final = targets.length > 0 ? judgeCleanup(await listState(token, accountId)) : null;
+  if (final !== null) {
+    console.log(
+      `再確認: 残り=${final.leftoverWorkers.length}件${final.leftoverWorkers.length > 0 ? `(${final.leftoverWorkers.join(", ")})` : ""} / 一覧の取得=${final.listUnavailable ? "失敗" : "成功"}`,
+    );
   }
-
-  // 最終的に(再削除のあとの一覧で)残っていなければ ok。削除ステップの失敗そのものは、そのステップのログに残る。
-  const ok = final.ok;
+  const outcome = decideCleanup(first, deletes, final);
+  const ok = outcome.ok;
+  const last = final ?? first;
   result.cleanup = {
     leftoverWorkers: first.leftoverWorkers,
-    deletedByFallback,
+    deletedByFallback: [...outcome.deletedByFallback],
     // 「DO は Worker と一緒に消えるか」への答えは、削除ステップの直後(再削除の前)の状態。
     durableObjectNamespaces: first.durableObjectNamespaces,
     ok,
@@ -103,7 +116,7 @@ async function main(): Promise<void> {
   // 失敗の通知は、結果の全文より前に出す(結果の全文を出力の最後=ログの末尾に置くため)。
   if (!ok) {
     console.log(
-      `::error title=後片付けに失敗::${first.listUnavailable ? "Worker の一覧を取得できず、残っていないことを確認できません" : `Worker が残っていました: ${first.leftoverWorkers.join(", ")}`}`,
+      `::error title=後片付けに失敗::${last.listUnavailable ? "Worker の一覧を取得できず、残っていないことを確認できません" : `Worker が残っていました: ${last.leftoverWorkers.join(", ")}`}`,
     );
   }
 

@@ -269,3 +269,49 @@ export function judgeDeleteStatus(status: number | null): DeleteJudgement {
   }
   return "failed";
 }
+
+/**
+ * 後片付けで削除を試みる Worker の名前。一覧に残っていた(接頭辞付きの)Worker と、名前が分かっている
+ * この run の Worker の和集合。**一覧の成否にかかわらず**、名前が分かっていれば削除を試みる
+ * (一覧を取得できなくても、ユーザーのアカウントに Worker を残さないため。404 は成功扱い)。
+ * 接頭辞で始まらない名前は、環境変数の誤りでも対象にしない(他の Worker を消さない)。
+ */
+export function planCleanupDeletes(
+  leftoverWorkers: readonly string[],
+  knownName: string | null | undefined,
+): string[] {
+  const names: string[] = [];
+  for (const name of [...leftoverWorkers, knownName ?? ""]) {
+    if (name.startsWith(SPIKE_WORKER_PREFIX) && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+export interface CleanupOutcome {
+  /** 最終的に、接頭辞付きの Worker が残っていないと一覧で確認できた。 */
+  readonly ok: boolean;
+  /** この後片付けの DELETE で実際に消した Worker(404 の「すでに無い」は含めない)。 */
+  readonly deletedByFallback: readonly string[];
+  /** DELETE が失敗した Worker(最終的に消えていれば ok でも残る)。 */
+  readonly failedDeletes: readonly string[];
+}
+
+/**
+ * 後片付けの最終判定。**再削除のあとの一覧で決める**: DELETE の応答(成功・失敗)ではなく、
+ * 削除を試みたあとに取り直した一覧(final)に、接頭辞付きの Worker が残っていないかで ok を決める。
+ * 削除を試みなかった(final が null)ときは、最初の一覧の判定がそのまま結果になる。
+ * 一覧を取得できなければ(どちらの場合も)ok=false。
+ */
+export function decideCleanup(
+  first: CleanupJudgement,
+  deletes: readonly { readonly name: string; readonly judgement: DeleteJudgement }[],
+  final: CleanupJudgement | null,
+): CleanupOutcome {
+  return {
+    ok: (final ?? first).ok,
+    deletedByFallback: deletes.filter((d) => d.judgement === "deleted").map((d) => d.name),
+    failedDeletes: deletes.filter((d) => d.judgement === "failed").map((d) => d.name),
+  };
+}

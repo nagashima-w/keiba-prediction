@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   SPIKE_WORKER_PREFIX,
+  decideCleanup,
   extractDurableObjectScriptNames,
   extractScriptNames,
   formatPreflightSuccess,
   judgeCleanup,
   judgeDeleteStatus,
   judgePreflight,
+  planCleanupDeletes,
   type PreflightInput,
 } from "../cloudflare-spike/preflight.js";
 
@@ -291,5 +293,72 @@ describe("judgeDeleteStatus(API の DELETE の結果)", () => {
     { status: null, expected: "failed" },
   ])("HTTP $status は $expected", ({ status, expected }) => {
     expect(judgeDeleteStatus(status)).toBe(expected);
+  });
+});
+
+describe("planCleanupDeletes(一覧の成否にかかわらず、名前が分かっている Worker は消しにいく)", () => {
+  it("一覧に残っていた Worker と、名前が分かっている Worker の和集合(重複なし)", () => {
+    expect(planCleanupDeletes(["keiba-cf-spike-1-1", "keiba-cf-spike-preflight-1"], "keiba-cf-spike-2-1")).toEqual([
+      "keiba-cf-spike-1-1",
+      "keiba-cf-spike-preflight-1",
+      "keiba-cf-spike-2-1",
+    ]);
+    expect(planCleanupDeletes(["keiba-cf-spike-2-1"], "keiba-cf-spike-2-1")).toEqual(["keiba-cf-spike-2-1"]);
+  });
+
+  it("一覧が取れず残りが空でも、名前が分かっていれば、その Worker を消しにいく", () => {
+    expect(planCleanupDeletes([], "keiba-cf-spike-2-1")).toEqual(["keiba-cf-spike-2-1"]);
+  });
+
+  it.each([undefined, null, ""])("名前が %j なら、一覧に残っていたものだけ", (name) => {
+    expect(planCleanupDeletes(["keiba-cf-spike-1-1"], name)).toEqual(["keiba-cf-spike-1-1"]);
+    expect(planCleanupDeletes([], name)).toEqual([]);
+  });
+
+  it("接頭辞(keiba-cf-spike-)で始まらない名前は、環境変数の誤りでも削除対象にしない(他の Worker を消さない)", () => {
+    expect(planCleanupDeletes([], "my-production-app")).toEqual([]);
+    expect(planCleanupDeletes(["other", "keiba-cf-spike-1"], "my-production-app")).toEqual(["keiba-cf-spike-1"]);
+  });
+});
+
+describe("decideCleanup(再削除のあとの一覧で決める)", () => {
+  const judged = (scriptNames: string[] | null, doScriptNames: string[] | null = []) =>
+    judgeCleanup({ scriptNames, doScriptNames });
+
+  it("削除を試みなかった(final=null)なら、最初の一覧の判定がそのまま結果", () => {
+    expect(decideCleanup(judged(["other"]), [], null).ok).toBe(true);
+    expect(decideCleanup(judged(["keiba-cf-spike-1"]), [], null).ok).toBe(false);
+    expect(decideCleanup(judged(null), [], null).ok).toBe(false);
+  });
+
+  it("最初の一覧が取れなくても、名前で削除し、再削除のあとの一覧で残りが無ければ ok", () => {
+    const o = decideCleanup(judged(null), [{ name: "keiba-cf-spike-2", judgement: "deleted" }], judged(["other"]));
+    expect(o.ok).toBe(true);
+    expect(o.deletedByFallback).toEqual(["keiba-cf-spike-2"]);
+    expect(o.failedDeletes).toEqual([]);
+  });
+
+  it("再削除のあとの一覧も取れなければ ok=false(残っていないと確認できない)", () => {
+    const o = decideCleanup(judged(null), [{ name: "keiba-cf-spike-2", judgement: "deleted" }], judged(null));
+    expect(o.ok).toBe(false);
+  });
+
+  it("DELETE が失敗しても、再削除のあとの一覧に残りが無ければ ok(失敗は failedDeletes に残す)", () => {
+    const o = decideCleanup(judged(["keiba-cf-spike-2"]), [{ name: "keiba-cf-spike-2", judgement: "failed" }], judged([]));
+    expect(o.ok).toBe(true);
+    expect(o.failedDeletes).toEqual(["keiba-cf-spike-2"]);
+    expect(o.deletedByFallback).toEqual([]);
+  });
+
+  it("DELETE が成功を返しても、再削除のあとの一覧に残っていれば ok=false(一覧で確かめる)", () => {
+    const o = decideCleanup(judged(["keiba-cf-spike-2"]), [{ name: "keiba-cf-spike-2", judgement: "deleted" }], judged(["keiba-cf-spike-2"]));
+    expect(o.ok).toBe(false);
+  });
+
+  it("404(すでに無い)は、削除した Worker には数えない(deletedByFallback に入れない)が、失敗でもない", () => {
+    const o = decideCleanup(judged([]), [{ name: "keiba-cf-spike-2", judgement: "already-gone" }], judged([]));
+    expect(o.ok).toBe(true);
+    expect(o.deletedByFallback).toEqual([]);
+    expect(o.failedDeletes).toEqual([]);
   });
 });

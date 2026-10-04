@@ -122,14 +122,17 @@ export function emptyResult(runId: string): SpikeResult {
   };
 }
 
+/** 「拒否」と数えるのは blocked(400/403/429)と challenge だけ。それ以外の失敗は判定不能として集計から外す。 */
 const CONTROL_READING: Record<ReturnType<typeof compareSources>["conclusion"], string> = {
   "both-ok": "both-ok: Worker からもランナーからも読めた。",
   "both-blocked":
-    "both-blocked: Worker からもランナーからも拒否された。Cloudflare 固有ではない(データセンター IP 全般、またはリクエストの内容による可能性)。",
+    "both-blocked: Worker からもランナーからも拒否(400/403/429 または challenge)された。Cloudflare 固有ではない(データセンター IP 全般、またはリクエストの内容による可能性)。",
   "worker-only-blocked":
-    "worker-only-blocked: Worker だけが拒否された。Cloudflare(Workers)からのアクセスに固有の疑いがある。",
-  "runner-only-blocked": "runner-only-blocked: ランナーだけが拒否された。",
+    "worker-only-blocked: Worker だけが拒否(400/403/429 または challenge)された。Cloudflare(Workers)からのアクセスに固有の疑いがある。",
+  "runner-only-blocked": "runner-only-blocked: ランナーだけが拒否(400/403/429 または challenge)された。",
   mixed: "mixed: 対象によって結果が違う(表を参照)。",
+  inconclusive:
+    "inconclusive: 判定できた対が1つも無い(通信エラー・想定外のステータス・パース失敗・転送などは、拒否とは数えない)。",
   "no-pairs": "no-pairs: Worker とランナーの両方を測れた対象がない。",
 };
 
@@ -257,6 +260,11 @@ export function renderMarkdown(result: SpikeResult): string {
       }
       out.push("");
       out.push(`- 暫定の読み: ${CONTROL_READING[control.conclusion]}`);
+      if (control.indeterminatePairs > 0) {
+        out.push(
+          `- 判定不能の対象 ${control.indeterminatePairs} 件(どちらかが blocked / challenge / ok のいずれでもない)は、結論の集計から除外した。`,
+        );
+      }
     }
   }
   out.push("");
@@ -286,8 +294,13 @@ export function renderMarkdown(result: SpikeResult): string {
   for (const work of CPU_WORKS) {
     const e = estimateCpuPerRepMs(result.cpu.durableObject[work], DOCUMENTED_DO_CPU_LIMIT_MS);
     if (e !== null) {
-      const low = e.lowMs === null ? "不明" : `${e.lowMs.toFixed(0)}`;
-      const high = e.highMs === null ? "不明" : `${e.highMs.toFixed(0)}`;
+      // 探索が単調でない(通過した最大 reps が、超過した最小 reps より大きい)と low > high になるので、
+      // 両方あるときは小さい方から並べて表示する。
+      const both = e.lowMs !== null && e.highMs !== null;
+      const lowValue = both ? Math.min(e.lowMs!, e.highMs!) : e.lowMs;
+      const highValue = both ? Math.max(e.lowMs!, e.highMs!) : e.highMs;
+      const low = lowValue === null ? "不明" : `${lowValue.toFixed(0)}`;
+      const high = highValue === null ? "不明" : `${highValue.toFixed(0)}`;
       estimateRows.push(`| ${work} | ${low} 〜 ${high} |`);
     }
   }

@@ -141,6 +141,42 @@ describe("renderMarkdown: 対照実験・推定・独立性", () => {
     expect(md).toContain("runner: なし");
   });
 
+  it("判定不能(network-error など)の対は『拒否』『Cloudflare 固有』と書かず、inconclusive と除外件数を出す", () => {
+    const r = emptyResult("x");
+    r.netkeiba.records.push(
+      { ...rec("a", "worker", 200), status: null, bodyLength: null, parsedCount: null, error: "boom" },
+      rec("a", "runner", 200),
+    );
+    const md = renderMarkdown(r);
+    expect(md).toContain("inconclusive");
+    expect(md).toMatch(/判定不能の対象 ?1 ?件/);
+    expect(md).not.toContain("Cloudflare 固有の疑い");
+    expect(md).not.toContain("worker-only-blocked");
+  });
+
+  it("対照の読みの文言は、拒否と数える判定(400/403/429・challenge)を明記する", () => {
+    const r = emptyResult("x");
+    r.netkeiba.records.push(rec("a", "worker", 400), rec("a", "runner", 400));
+    const md = renderMarkdown(r);
+    expect(md).toMatch(/400\/403\/429/);
+    expect(md).toContain("challenge");
+  });
+
+  it("推定が単調でない結果(通過 40・超過 34)でも、小さい方から並べて表示する(low > high に見せない)", () => {
+    const r = emptyResult("x");
+    r.cpu.durableObject.alloc = {
+      points: [],
+      maxPassReps: 40,
+      minFailReps: 34,
+      reachedMax: false,
+      stopReason: "converged",
+      inconclusive: false,
+      totalProbes: 10,
+    };
+    const md = renderMarkdown(r);
+    expect(md).toContain("| alloc | 750 〜 882 |");
+  });
+
   const searchDo: SearchResult = {
     points: [],
     maxPassReps: 32,

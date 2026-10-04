@@ -164,12 +164,15 @@ export interface ControlPair {
 }
 
 /**
- * 対照実験の暫定の読み。
+ * 対照実験の暫定の読み。**「拒否された」と数えるのは blocked(400/403/429)と challenge だけ**。
+ * network-error・http-error・reachable-but-unparsed・redirect は「判定不能」(netkeiba に届いていない、
+ * 想定外のステータス、パース失敗、転送など。拒否かどうかを言えない)で、結論の集計から外す。
  *  - both-ok: どちらでも読めた
  *  - both-blocked: どちらでも拒否された(Cloudflare 固有ではない)
- *  - worker-only-blocked: Worker だけ読めない(Cloudflare からのアクセスに固有の疑い)
- *  - runner-only-blocked: ランナーだけ読めない
+ *  - worker-only-blocked: Worker だけ拒否された(Cloudflare からのアクセスに固有の疑い)
+ *  - runner-only-blocked: ランナーだけ拒否された
  *  - mixed: 対象によって結果が違う
+ *  - inconclusive: 両方を測れた対象はあるが、判定できた対が1つも無い
  *  - no-pairs: Worker とランナーの両方を測れた対象がない
  */
 export type ControlConclusion =
@@ -178,17 +181,32 @@ export type ControlConclusion =
   | "worker-only-blocked"
   | "runner-only-blocked"
   | "mixed"
+  | "inconclusive"
   | "no-pairs";
 
 export interface ControlComparison {
   readonly pairs: readonly ControlPair[];
   readonly conclusion: ControlConclusion;
+  /** 両方を測れたが、どちらかが判定不能のため結論の集計から外した対の数。 */
+  readonly indeterminatePairs: number;
+}
+
+type Refusal = "good" | "bad" | "unknown";
+
+function refusalOf(verdict: ReachabilityVerdict): Refusal {
+  if (verdict === "ok") {
+    return "good";
+  }
+  if (verdict === "blocked" || verdict === "challenge") {
+    return "bad";
+  }
+  return "unknown";
 }
 
 /**
- * 同じ対象(targetId)の Worker とランナーの判定を並べる。結論は、**両方を測れた対象だけ**で出す
- * (ok 以外はすべて「読めない」として数える)。変えたのは送信元だけ(同じ URL・同じヘッダ・同じ記録の形)
- * という前提の対照であり、読みは暫定である(UA など別の変数の実験は、この結果を見てから行う)。
+ * 同じ対象(targetId)の Worker とランナーの判定を並べる。結論は、**両方を測れて、どちらも判定できた対象
+ * だけ**で出す。変えたのは送信元だけ(同じ URL・同じヘッダ・同じ記録の形)という前提の対照であり、読みは
+ * 暫定である(UA など別の変数の実験は、この結果を見てから行う)。
  */
 export function compareSources(records: readonly NetkeibaProbeRecord[]): ControlComparison {
   const order: string[] = [];
@@ -214,25 +232,34 @@ export function compareSources(records: readonly NetkeibaProbeRecord[]): Control
   });
   const comparable = pairs.filter((p) => p.worker !== null && p.runner !== null);
   if (comparable.length === 0) {
-    return { pairs, conclusion: "no-pairs" };
+    return { pairs, conclusion: "no-pairs", indeterminatePairs: 0 };
   }
   let bothGood = 0;
   let bothBad = 0;
   let workerBad = 0;
   let runnerBad = 0;
+  let indeterminatePairs = 0;
   for (const p of comparable) {
-    const w = p.worker === "ok";
-    const r = p.runner === "ok";
-    if (w && r) bothGood += 1;
-    else if (!w && !r) bothBad += 1;
-    else if (!w) workerBad += 1;
-    else runnerBad += 1;
+    const w = refusalOf(p.worker!);
+    const r = refusalOf(p.runner!);
+    if (w === "unknown" || r === "unknown") {
+      indeterminatePairs += 1;
+    } else if (w === "good" && r === "good") {
+      bothGood += 1;
+    } else if (w === "bad" && r === "bad") {
+      bothBad += 1;
+    } else if (w === "bad") {
+      workerBad += 1;
+    } else {
+      runnerBad += 1;
+    }
   }
-  const total = comparable.length;
+  const determinate = comparable.length - indeterminatePairs;
   let conclusion: ControlConclusion = "mixed";
-  if (bothGood === total) conclusion = "both-ok";
-  else if (bothBad === total) conclusion = "both-blocked";
+  if (determinate === 0) conclusion = "inconclusive";
+  else if (bothGood === determinate) conclusion = "both-ok";
+  else if (bothBad === determinate) conclusion = "both-blocked";
   else if (bothBad === 0 && runnerBad === 0) conclusion = "worker-only-blocked";
   else if (bothBad === 0 && workerBad === 0) conclusion = "runner-only-blocked";
-  return { pairs, conclusion };
+  return { pairs, conclusion, indeterminatePairs };
 }
