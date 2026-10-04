@@ -1,0 +1,17 @@
+{
+  // Node で動くスクリプト(ドライバ・スモークテスト・プリフライト・後片付け)の型検査。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["*.ts", "../../scripts/cloudflare-spike/*.ts"],
+  "exclude": ["../../scripts/cloudflare-spike/gen-alloc-input.ts"]
+}

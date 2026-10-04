@@ -1,0 +1,25 @@
+{
+  // Worker / Durable Object(src/)の型検査。core・app の共有コードは相対パスで取り込む。
+  // core の依存(cheerio / iconv-lite)は packages/core/node_modules が CI に無いため、paths でこのディレクトリの
+  // node_modules へ向ける(wrangler.toml の [alias] と同じ対応)。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types", "node"],
+    "paths": {
+      "undici": ["./src/undici-stub.ts"],
+      "iconv-lite": ["./node_modules/iconv-lite"],
+      "cheerio": ["./node_modules/cheerio"],
+      "@keiba/core/ev/combo-bet-allocation": ["../../packages/core/src/ev/combo-bet-allocation.ts"],
+      "@keiba/core/ev/bet-allocation": ["../../packages/core/src/ev/bet-allocation.ts"]
+    }
+  },
+  "include": ["src"]
+}
