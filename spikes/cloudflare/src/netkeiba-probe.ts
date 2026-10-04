@@ -41,6 +41,22 @@ export interface ProbeRequest {
   readonly encoding: "utf-8" | "euc-jp";
 }
 
+/**
+ * `HttpClient` が渡す init を、実際の fetch へ渡す形にする。
+ *
+ * リダイレクトには従わない(`redirect: "manual"`): 許可ホスト外への転送や、1回の呼び出しで netkeiba へ出す
+ * 本数(1本)の上限の素通りを防ぐ。3xx はステータスと location を記録するだけにする。
+ * エコー(`echo-fetch.ts`)も同じ関数を通す: netkeiba へ出すのと**同じ init** になることを、構造で保証する。
+ */
+export function forwardInit(init: Parameters<FetchLike>[1]): Parameters<ProbeFetch>[1] {
+  return {
+    redirect: "manual",
+    ...(init?.method !== undefined ? { method: init.method } : {}),
+    ...(init?.headers !== undefined ? { headers: init.headers } : {}),
+    ...(init?.signal !== undefined ? { signal: init.signal } : {}),
+  };
+}
+
 /** 診断用に残す応答ヘッダ。 */
 const PICKED_HEADERS = ["server", "cf-ray", "cf-mitigated", "content-type", "content-length", "content-encoding", "via", "x-cache", "location"];
 
@@ -94,14 +110,7 @@ export async function probeNetkeiba(
   let captured: Captured | null = null;
 
   const recordingFetch: FetchLike = async (url, init) => {
-    const response = await fetchImpl(url, {
-      // リダイレクトには従わない: 許可ホスト外への転送や、1回の呼び出しで netkeiba へ出す本数(1本)の上限の
-      // 素通りを防ぐ。3xx はステータスと location を記録するだけにする。
-      redirect: "manual",
-      ...(init?.method !== undefined ? { method: init.method } : {}),
-      ...(init?.headers !== undefined ? { headers: init.headers } : {}),
-      ...(init?.signal !== undefined ? { signal: init.signal } : {}),
-    });
+    const response = await fetchImpl(url, forwardInit(init));
     // 本文は HttpClient が arrayBuffer() で読むため、記録用には clone() から読む。
     const buffer = await response.clone().arrayBuffer();
     const headers: Record<string, string> = {};

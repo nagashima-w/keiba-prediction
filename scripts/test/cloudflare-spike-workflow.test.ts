@@ -199,3 +199,46 @@ describe("ジョブログに workers.dev のサブドメインを出さない(�
     expect(code.filter((l) => /echo .*CF_SUBDOMAIN/.test(l))).toEqual([]);
   });
 });
+
+describe("実験の選択(#160。SPIKE_EXPERIMENTS)", () => {
+  it("workflow_dispatch に experiments の入力があり、既定は origin(文字列)", () => {
+    const m = /\n  workflow_dispatch:\n    inputs:\n      experiments:\n((?:        .+\n)+)/.exec(yml);
+    expect(m).not.toBeNull();
+    const block = m![1]!;
+    expect(block).toMatch(/default: ['"]?origin['"]?\n/);
+    expect(block).toMatch(/type: string/);
+  });
+
+  it("『測定を実行』の env の SPIKE_EXPERIMENTS は、入力が空(push で起動したとき)でも origin になる", () => {
+    const body = stepBody("測定を実行");
+    // push のとき `inputs` は空なので、`inputs.experiments` は null になる。`|| 'origin'` で origin に落とす。
+    expect(body).toContain("SPIKE_EXPERIMENTS: ${{ inputs.experiments || 'origin' }}");
+  });
+
+  it("入力(inputs)は env 経由でだけ使い、run のシェルには直接展開しない(スクリプト注入の防止)", () => {
+    const uses = yml.split("\n").filter((l) => l.includes("inputs.") && !l.trim().startsWith("#"));
+    expect(uses.length).toBeGreaterThan(0);
+    for (const line of uses) {
+      expect(line.trim()).toMatch(/^SPIKE_EXPERIMENTS: \$\{\{ inputs\.experiments \|\| 'origin' \}\}$/);
+    }
+  });
+
+  it("ドライバは SPIKE_EXPERIMENTS を parseExperiments で解釈する(未設定・未知はエラー)", () => {
+    const src = readTextLf("spikes", "cloudflare", "driver.ts");
+    expect(src).toContain('parseExperiments(process.env["SPIKE_EXPERIMENTS"])');
+  });
+
+  it("ドライバは、選んだ実験だけを実行する(reachability・origin・cpu をそれぞれ includes で分岐する)", () => {
+    const src = readTextLf("spikes", "cloudflare", "driver.ts");
+    expect(src).toMatch(/experiments\.includes\("reachability"\)/);
+    expect(src).toMatch(/experiments\.includes\("origin"\)/);
+    expect(src).toMatch(/experiments\.includes\("cpu"\)/);
+  });
+
+  it("起動条件の if と、共有秘密・削除・残存確認のステップは、#159 のまま維持されている", () => {
+    expect(yml).toContain("startsWith(github.event.head_commit.message, '[CF-SPIKE]')");
+    expect(stepBody("Worker を削除")).toContain("delete-run.ts");
+    expect(stepBody("削除の確認")).toContain("cleanup-run.ts");
+    expect(stepBody("Worker をデプロイ")).toContain("::add-mask::$SECRET");
+  });
+});

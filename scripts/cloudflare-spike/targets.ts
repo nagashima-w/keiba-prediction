@@ -19,6 +19,9 @@ import {
 
 export type TargetKind = "shutuba" | "odds-json" | "horse-page" | "horse-results";
 
+/** 取得対象の種類の一覧(Worker の入力検査が使う)。 */
+export const TARGET_KINDS: readonly TargetKind[] = ["shutuba", "odds-json", "horse-page", "horse-results"];
+
 export interface NetkeibaTarget {
   readonly id: string;
   readonly url: string;

@@ -35,7 +35,7 @@ async function req(
   const response = await fetch(`${BASE}${path}`, {
     method,
     headers: { ...headers, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body !== undefined ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(120_000),
   });
   const text = await response.text();
@@ -89,6 +89,11 @@ async function main(): Promise<void> {
     check("誤った秘密は 403", (await req("GET", "/ping", { "x-spike-secret": "wrong" })).status === 403);
     check("ヘッダなしでは netkeiba 取得も 403", (await req("POST", "/netkeiba", {}, {})).status === 403);
     check("ヘッダなしでは DO も 403", (await req("GET", "/do/ping", {})).status === 403);
+    // Issue #160 の新しいエンドポイントも、共有秘密なしでは 403(入力の検査より前に弾く)。
+    check("ヘッダなしでは /echo も 403", (await req("POST", "/echo", {}, { service: "peet" })).status === 403);
+    check("誤った秘密では /echo も 403", (await req("POST", "/echo", { "x-spike-secret": "wrong" }, { service: "peet" })).status === 403);
+    check("ヘッダなしでは /netkeiba-socket も 403", (await req("POST", "/netkeiba-socket", {}, {})).status === 403);
+    check("誤った秘密では /netkeiba-socket も 403", (await req("POST", "/netkeiba-socket", { "x-spike-secret": "wrong" }, {})).status === 403);
     const ping = await req("GET", "/ping");
     check("正しい秘密で /ping が 200", ping.status === 200 && ping.json?.["runtime"] === "worker");
 
@@ -117,6 +122,19 @@ async function main(): Promise<void> {
     // 入力の検証(外へ出ない・不正は弾く)。
     check("許可されていない URL は 400(netkeiba 以外へは出ない)", (await req("POST", "/netkeiba", undefined, { targetId: "x", url: "https://example.com/", kind: "shutuba", encoding: "utf-8" })).status === 400);
     check("不正な kind は 400", (await req("POST", "/netkeiba", undefined, { targetId: "x", url: "https://race.netkeiba.com/", kind: "evil", encoding: "utf-8" })).status === 400);
+    // Issue #160: /echo と /netkeiba-socket の入力検査。**いずれも外へ出る前(エコー・netkeiba への取得の前)に 400 になる**。
+    const validSocket = { targetId: "x", url: "https://race.netkeiba.com/race/shutuba.html?race_id=202603020211", kind: "shutuba", encoding: "utf-8", headers: [{ name: "User-Agent", value: "ua" }] };
+    check("/echo: 固定表以外のサービスは 400", (await req("POST", "/echo", undefined, { service: "postman" })).status === 400);
+    check("/echo: url で任意の宛先を指定したら 400(url を受け付けない)", (await req("POST", "/echo", undefined, { service: "peet", url: "https://example.com/" })).status === 400);
+    check("/echo: JSON でない本文は 400", (await req("POST", "/echo", undefined, "not json" as unknown)).status === 400);
+    check("/echo: POST 以外は 404", (await req("GET", "/echo")).status === 404);
+    check("/netkeiba-socket: 許可ホスト以外は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, url: "https://example.com/" })).status === 400);
+    check("/netkeiba-socket: 許可ホストの偽装は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, url: "https://race.netkeiba.com.evil.example/" })).status === 400);
+    check("/netkeiba-socket: http は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, url: "http://race.netkeiba.com/" })).status === 400);
+    check("/netkeiba-socket: 禁止ヘッダ(Host)は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, headers: [{ name: "Host", value: "evil.example" }] })).status === 400);
+    check("/netkeiba-socket: 禁止ヘッダ(Accept-Encoding)は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, headers: [{ name: "Accept-Encoding", value: "gzip" }] })).status === 400);
+    check("/netkeiba-socket: ヘッダ値の CRLF は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, headers: [{ name: "x-a", value: "1\r\nHost: evil" }] })).status === 400);
+    check("/netkeiba-socket: POST 以外は 404", (await req("GET", "/netkeiba-socket")).status === 404);
     check("reps=0 は 400", (await req("POST", "/cpu/parse?reps=0")).status === 400);
     check("未知の処理は 404", (await req("POST", "/cpu/nope?reps=1")).status === 404);
     check("POST 以外の /cpu は 404", (await req("GET", "/cpu/parse?reps=1")).status === 404);

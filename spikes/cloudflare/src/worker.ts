@@ -1,14 +1,16 @@
 /**
- * Cloudflare 移行スパイク(Issue #159〈#21-A〉)の Worker。実測のためだけの使い捨てで、
+ * Cloudflare 移行スパイク(Issue #159〈#21-A〉・#160〈#21-B〉)の Worker。実測のためだけの使い捨てで、
  * 実行ごとに GitHub Actions がデプロイし、終了時に削除する(本番コードではない)。
  *
  * **公開 URL になるため、すべてのリクエストに共有秘密(`x-spike-secret`)を要求する。** 一致しなければ
  * 何もせず 403 を返す。秘密は実行ごとにランダムに生成し、`wrangler deploy --secrets-file` で渡す。
  */
 
+import { connect } from "cloudflare:sockets";
 import iconv from "iconv-lite";
 import { HttpClient } from "../../../packages/core/src/scraper/http-client.js";
 import { isAuthorized } from "../../../scripts/cloudflare-spike/auth.js";
+import { handleEcho, handleNetkeibaSocket } from "./origin-handlers.js";
 import { handleCpu, handleNetkeiba, json } from "./router.js";
 
 export { SpikeDO } from "./do.js";
@@ -52,6 +54,14 @@ export default {
       }
       if (url.pathname === "/netkeiba" && request.method === "POST") {
         return await handleNetkeiba(request);
+      }
+      // Issue #160: 400 の原因の切り分け。/echo はヘッダの観測(netkeiba へは出ない。宛先は固定表)、
+      // /netkeiba-socket は TCP ソケットでの取得(E3)。
+      if (url.pathname === "/echo" && request.method === "POST") {
+        return await handleEcho(request);
+      }
+      if (url.pathname === "/netkeiba-socket" && request.method === "POST") {
+        return await handleNetkeibaSocket(request, connect);
       }
       const cpu = /^\/cpu\/([^/]+)$/.exec(url.pathname);
       if (cpu && request.method === "POST") {

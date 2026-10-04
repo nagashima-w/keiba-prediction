@@ -2,9 +2,16 @@
  * 実測のドライバ(Issue #159〈#21-A〉)。GitHub Actions 上で、デプロイ済みの Worker を呼んで測り、
  * 結果 JSON を書き出す。判定の核は `scripts/cloudflare-spike/` の純ロジック(単体テスト済み)。
  *
- * 環境変数: SPIKE_URL(Worker のベース URL)/ SPIKE_SECRET(共有秘密)/ RUN_ID / RESULT_PATH。
+ * 環境変数: SPIKE_EXPERIMENTS(選ぶ実験。必須。origin / reachability / cpu のカンマ区切り)/
+ * SPIKE_URL(Worker のベース URL)/ SPIKE_SECRET(共有秘密)/ RUN_ID / RESULT_PATH。
+ * 未設定・空・未知のトークンはエラー(誤って全実験を走らせない)。reachability と origin は同時に選べない
+ * (netkeiba への合計 10 本以内の守り)。
  *
- * 測るもの:
+ * 測るもの(Issue #160 で、実験を選べるようにした):
+ *  0. origin(#160): Workers からだけ HTTP 400 になる原因の切り分け。E0 基準の再確認 / E1 ヘッダの観測(エコー。
+ *     netkeiba へは出ない)/ E2 ランナー + Workers 風のヘッダ / E3 Worker の TCP ソケット。netkeiba へ 6 本。
+ *     判定の核は `scripts/cloudflare-spike/origin-*.ts`(単体テスト済み)。
+ *  以下の 1〜3 のうち、1 は reachability、3 は cpu を選んだときだけ行う(2 は常に行う):
  *  1. 到達性: netkeiba へ、Worker とランナー(この Node。対照実験)から同じ5対象を1本ずつ。合計10本以内・
  *     2秒間隔(送信元をまたいで直列)。400/403/429 の2回連続の打ち切りは送信元ごと(Worker が止まっても
  *     ランナーの対照は続ける)。ランナーは Worker と同じ `probeNetkeiba`(同じ URL・同じヘッダ・同じ記録の形)で
@@ -22,6 +29,12 @@ import {
   searchLimit,
   type ProbeOutcome,
 } from "../../scripts/cloudflare-spike/cpu-search.js";
+import type { EchoFetchResult } from "../../scripts/cloudflare-spike/echo.js";
+import type { EchoService } from "../../scripts/cloudflare-spike/echo-targets.js";
+import { parseExperiments } from "../../scripts/cloudflare-spike/experiments.js";
+import type { HeaderEntry } from "../../scripts/cloudflare-spike/http1.js";
+import type { OriginPlace, OriginStep } from "../../scripts/cloudflare-spike/origin-plan.js";
+import { runOrigin } from "../../scripts/cloudflare-spike/origin-run.js";
 import { runReachability } from "../../scripts/cloudflare-spike/reachability-run.js";
 import type { NetkeibaProbeRecord, ProbeSource } from "../../scripts/cloudflare-spike/reachability.js";
 import {
@@ -35,6 +48,7 @@ import {
 import { buildRequestPlan, type NetkeibaTarget } from "../../scripts/cloudflare-spike/targets.js";
 import { writeJsonAtomic } from "./atomic-write.js";
 import { requireEnv } from "./cf-api.js";
+import { fetchEcho } from "./src/echo-fetch.js";
 import { probeNetkeiba } from "./src/netkeiba-probe.js";
 
 /**
@@ -130,13 +144,21 @@ async function waitUntilReady(result: SpikeResult): Promise<boolean> {
   return false;
 }
 
-/** Worker に1本を取得させ、記録を受け取る。Worker の応答が想定外なら、status=null の記録にして理由を残す。 */
-async function sendViaWorker(target: NetkeibaTarget): Promise<NetkeibaProbeRecord> {
-  const r = await call("POST", "/netkeiba", {
+/**
+ * Worker に1本を取得させ、記録を受け取る。Worker の応答が想定外なら、status=null の記録にして理由を残す。
+ * path は `/netkeiba`(Worker の fetch)か `/netkeiba-socket`(Worker の TCP ソケット。extra に headers を渡す)。
+ */
+async function sendViaWorker(
+  target: NetkeibaTarget,
+  path = "/netkeiba",
+  extra: Record<string, unknown> = {},
+): Promise<NetkeibaProbeRecord> {
+  const r = await call("POST", path, {
     targetId: target.id,
     url: target.url,
     kind: target.kind,
     encoding: target.encoding,
+    ...extra,
   });
   try {
     const parsed = JSON.parse(r.text) as { ok?: boolean; record?: NetkeibaProbeRecord };
@@ -187,6 +209,70 @@ async function measureReachability(result: SpikeResult): Promise<void> {
   result.netkeiba.stoppedReason = state.stoppedReason;
   result.netkeiba.stoppedBySource = { ...state.stoppedBySource };
   save(result);
+}
+
+/** E1: Worker の `/echo` にエコーを取りに行かせる(ランナー側は `fetchEcho` を直接使う。同じ関数)。 */
+async function echoViaWorker(service: EchoService): Promise<EchoFetchResult> {
+  const r = await call("POST", "/echo", { service });
+  try {
+    const parsed = JSON.parse(r.text) as { ok?: boolean; result?: EchoFetchResult };
+    if (r.status === 200 && parsed.ok === true && parsed.result !== undefined) {
+      return parsed.result;
+    }
+    throw new Error(`Worker の /echo の応答が想定外です(HTTP ${r.status}): ${r.text.slice(0, 200)}`);
+  } catch (error) {
+    return { status: null, bodyText: null, responseHeaders: {}, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Issue #160: Workers からだけ HTTP 400 になる原因の切り分け(E0〜E3)。進行・守り・マスク・結論は
+ * `runOrigin`(単体テスト済みの純ロジック)が担い、ここは実際の送信(Worker の呼び出し・ランナーの fetch)を注入する。
+ * **ここからログに出すのは結論の名前だけ**(エコーで観測した IP・サブドメイン等の生の値は、結果にもログにも出さない)。
+ */
+async function measureOrigin(result: SpikeResult): Promise<void> {
+  const send = async (step: OriginStep, headers: readonly HeaderEntry[]): Promise<NetkeibaProbeRecord> => {
+    const request = { targetId: step.target.id, url: step.target.url, kind: step.target.kind, encoding: step.target.encoding };
+    switch (step.via) {
+      case "fetch":
+        // E0: 追加のヘッダなし。Worker の fetch か、ランナーのグローバル fetch(どちらも `probeNetkeiba`)。
+        return step.place === "worker" ? sendViaWorker(step.target) : probeNetkeiba(request);
+      case "socket":
+        // E3: Worker の TCP ソケット。ヘッダはドライバが渡す(ランナーの観測から導出した集合)。
+        return sendViaWorker(step.target, "/netkeiba-socket", {
+          headers: headers.map((h) => ({ name: h.name, value: h.value })),
+        });
+      case "fetch+worker-headers": {
+        // E2: ランナーの fetch に、Worker にだけ現れたヘッダ(生の値。メモリ上のみ)を足す。送信元はランナーのまま。
+        const extra = Object.fromEntries(headers.map((h) => [h.name, h.value]));
+        return probeNetkeiba(request, (url, init) => fetch(url, { ...init, headers: { ...init.headers, ...extra } }));
+      }
+    }
+  };
+  const origin = await runOrigin(
+    {
+      now: () => Date.now(),
+      sleep,
+      echo: (place: OriginPlace, service: EchoService) => (place === "worker" ? echoViaWorker(service) : fetchEcho(service)),
+      send,
+      mask: {
+        ...(process.env["CF_SUBDOMAIN"] !== undefined ? { subdomain: process.env["CF_SUBDOMAIN"] } : {}),
+        ...(process.env["SPIKE_WORKER_NAME"] !== undefined ? { workerName: process.env["SPIKE_WORKER_NAME"] } : {}),
+      },
+    },
+    {
+      onUpdate: (o) => {
+        result.origin = o;
+        save(result);
+      },
+    },
+  );
+  result.origin = origin;
+  save(result);
+  console.log(
+    `切り分け(origin): 結論=${origin.conclusion} 基準の再現=${origin.baselineReproduced} E2=${origin.outcomes.e2} E3=${origin.outcomes.e3} ` +
+      `netkeiba=${origin.netkeibaRequestCount}本 エコー=${origin.echo.requestCount}回`,
+  );
 }
 
 async function measureSelftest(result: SpikeResult): Promise<void> {
@@ -281,6 +367,18 @@ async function main(): Promise<void> {
   const result = emptyResult(process.env["RUN_ID"] ?? process.env["GITHUB_RUN_ID"] ?? "local");
   result.startedAt = new Date().toISOString();
   try {
+    // 実験の選択(フェイルクローズ)。解釈できなければ何も測らずに、理由を残して失敗にする。
+    const selection = parseExperiments(process.env["SPIKE_EXPERIMENTS"]);
+    if (!selection.ok) {
+      result.notes.push(selection.error);
+      console.log(`::error title=実験の選択が不正::${selection.error}`);
+      process.exitCode = 1;
+      return;
+    }
+    const experiments = selection.experiments;
+    result.experiments = [...experiments];
+    save(result);
+
     if (existsSync(LOCAL_CALIBRATION_PATH)) {
       result.local = { entries: JSON.parse(readFileSync(LOCAL_CALIBRATION_PATH, "utf-8")).entries as LocalCalibrationEntry[] };
     }
@@ -288,13 +386,24 @@ async function main(): Promise<void> {
       return;
     }
     await measureSelftest(result);
-    if (LOCAL_DRYRUN) {
-      result.notes.push("SPIKE_LOCAL_DRYRUN=1: netkeiba への到達性の測定を行っていない(ローカルの配線確認)");
-    } else {
-      await measureReachability(result);
+    if (experiments.includes("reachability")) {
+      if (LOCAL_DRYRUN) {
+        result.notes.push("SPIKE_LOCAL_DRYRUN=1: netkeiba への到達性の測定を行っていない(ローカルの配線確認)");
+      } else {
+        await measureReachability(result);
+      }
     }
-    await measureCpu(result, "worker");
-    await measureCpu(result, "durableObject");
+    if (experiments.includes("origin")) {
+      if (LOCAL_DRYRUN) {
+        result.notes.push("SPIKE_LOCAL_DRYRUN=1: 400 の原因の切り分け(origin)を行っていない(netkeiba・エコーへは出ない。ローカルの配線確認)");
+      } else {
+        await measureOrigin(result);
+      }
+    }
+    if (experiments.includes("cpu")) {
+      await measureCpu(result, "worker");
+      await measureCpu(result, "durableObject");
+    }
   } catch (error) {
     result.notes.push(`ドライバが例外で中断: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;

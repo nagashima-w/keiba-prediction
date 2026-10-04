@@ -1,9 +1,12 @@
-# Cloudflare 移行(#21)の実測スパイク(Issue #159〈#21-A〉)。
+# Cloudflare 移行(#21)の実測スパイク(Issue #159〈#21-A〉・#160〈#21-B〉)。
 #
 # 実行ごとに、使い捨ての Worker(+ SQLite バックエンドの Durable Object)をデプロイし、
-#  1. Workers から netkeiba へ届くか(到達性)
-#  2. Free プランの CPU 制約の中で処理が成り立つか(普通の Worker と Durable Object の両方)
-# を測り、最後に必ず Worker を削除する。結果の全文は、前後を印で挟んだ1行としてジョブログに出す
+#  - reachability: Workers とランナーから netkeiba へ届くか(#159 の到達性。netkeiba へ 10 本)
+#  - origin: Workers からだけ HTTP 400 になる原因の切り分け(#160。E0〜E3。netkeiba へ 6 本)
+#  - cpu: Free プランの CPU 制約の中で処理が成り立つか(普通の Worker と Durable Object の両方)
+# のうち、**選んだ実験だけ**を測り(SPIKE_EXPERIMENTS)、最後に必ず Worker を削除する。
+# 選び方: workflow_dispatch の入力 experiments(カンマ区切り。既定は origin)。push で起動したとき(入力は空)も origin。
+# reachability と origin は、netkeiba への合計 10 本以内の守りのため、同時には選べない(ドライバが拒否する)。結果の全文は、前後を印で挟んだ1行としてジョブログに出す
 # (メインが読めるのはジョブログ本文だけのため)。詳細: spikes/cloudflare/ と scripts/cloudflare-spike/。
 #
 # ★起動条件(印のない push では何もしない):
@@ -30,6 +33,12 @@ on:
     branches:
       - claude/issue-order-processing-wjgpdd
   workflow_dispatch:
+    inputs:
+      experiments:
+        description: "実行する実験(カンマ区切り): origin / reachability / cpu。reachability と origin は同時に選べない"
+        required: false
+        default: origin
+        type: string
 
 # リポジトリへは何も書き戻さない。
 permissions:
@@ -144,6 +153,9 @@ jobs:
         working-directory: spikes/cloudflare
         env:
           RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          # 選ぶ実験。push で起動したときは inputs が空なので、`|| 'origin'` で origin になる。
+          # 入力は env 経由でだけ使い、run のシェルには直接展開しない(スクリプト注入の防止)。
+          SPIKE_EXPERIMENTS: ${{ inputs.experiments || 'origin' }}
         run: pnpm exec tsx --tsconfig tsconfig.run.json driver.ts
 
       # 失敗しても・キャンセルされても、必ず Worker を消す。**API の DELETE を主にする**: `wrangler delete` は

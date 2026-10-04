@@ -12,6 +12,8 @@ import {
   summarizeIndependence,
   type SearchResult,
 } from "./cpu-search.js";
+import { renderOriginMarkdown } from "./origin-report.js";
+import type { OriginResult } from "./origin-run.js";
 import {
   compareSources,
   judgeReachability,
@@ -97,6 +99,10 @@ export interface SpikeResult {
   local: { entries: LocalCalibrationEntry[] } | null;
   cleanup: CleanupInfo | null;
   notes: string[];
+  /** この実行で選んだ実験(`SPIKE_EXPERIMENTS`)。#159 の結果には無い。 */
+  experiments?: string[];
+  /** 400 の原因の切り分け(Issue #160〈#21-B〉)の結果。選ばなかった実行・#159 の結果には無い。 */
+  origin?: OriginResult;
 }
 
 /** 測る処理の一覧(表示順)。 */
@@ -213,13 +219,18 @@ export function renderMarkdown(result: SpikeResult): string {
   out.push(`# Cloudflare 移行スパイク結果(run ${result.runId})`);
   out.push("");
   out.push(`- 開始: ${result.startedAt ?? "未実施"} / 終了: ${result.finishedAt ?? "未実施"}`);
+  if (result.experiments !== undefined) {
+    out.push(`- 実行した実験: ${result.experiments.join(", ")}`);
+  }
   out.push("");
+  /** 実験を選ぶ仕組みを持つ実行(experiments あり)で、その実験を選んでいたか。旧形式(experiments なし)は常に true。 */
+  const selected = (name: string): boolean => result.experiments === undefined || result.experiments.includes(name);
 
   out.push("## 到達性(netkeiba への取得。Worker とランナーの対照)");
   out.push("");
   const records = result.netkeiba.records;
   if (records.length === 0) {
-    out.push("未実施");
+    out.push(selected("reachability") ? "未実施" : "未実施(この実行では選んでいない)");
   } else {
     const summary = summarizeReachability(records);
     const stopped = result.netkeiba.stoppedBySource;
@@ -279,6 +290,10 @@ export function renderMarkdown(result: SpikeResult): string {
   }
   out.push("");
 
+  if (result.origin !== undefined) {
+    out.push(...renderOriginMarkdown(result.origin));
+  }
+
   out.push("## EUC-JP のデコード(Worker 内の往復)");
   out.push("");
   out.push(
@@ -290,13 +305,17 @@ export function renderMarkdown(result: SpikeResult): string {
 
   out.push("## CPU(反復回数を増やして上限超過になる点を探索)");
   out.push("");
-  out.push("| 実行環境 | 処理 | maxPassReps | minFailReps | 停止理由 | 試行数 |");
-  out.push("|---|---|---|---|---|---|");
-  for (const work of CPU_WORKS) {
-    out.push(searchRow("Worker", work, result.cpu.worker[work]));
-  }
-  for (const work of CPU_WORKS) {
-    out.push(searchRow("Durable Object(SQLite)", work, result.cpu.durableObject[work]));
+  if (selected("cpu")) {
+    out.push("| 実行環境 | 処理 | maxPassReps | minFailReps | 停止理由 | 試行数 |");
+    out.push("|---|---|---|---|---|---|");
+    for (const work of CPU_WORKS) {
+      out.push(searchRow("Worker", work, result.cpu.worker[work]));
+    }
+    for (const work of CPU_WORKS) {
+      out.push(searchRow("Durable Object(SQLite)", work, result.cpu.durableObject[work]));
+    }
+  } else {
+    out.push("未実施(この実行では選んでいない)");
   }
   out.push("");
 

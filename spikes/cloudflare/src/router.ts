@@ -3,19 +3,13 @@
  * 認可(共有秘密)は前面の Worker だけが行い、DO は Worker のバインディング経由でしか呼ばれない。
  */
 
-import { isAllowedUrl, type TargetKind } from "../../../scripts/cloudflare-spike/targets.js";
+import { isAllowedUrl, TARGET_KINDS, type TargetKind } from "../../../scripts/cloudflare-spike/targets.js";
 import type { CpuRuntime } from "../../../scripts/cloudflare-spike/result.js";
 import { isCpuWork, MAX_REPS, runCpu } from "./handlers.js";
+import { json } from "./json.js";
 import { probeNetkeiba } from "./netkeiba-probe.js";
 
-const KINDS: readonly TargetKind[] = ["shutuba", "odds-json", "horse-page", "horse-results"];
-
-export function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" },
-  });
-}
+export { json };
 
 /** `/cpu/<work>?reps=N` を処理する(runtime ごとの I/O を注入)。 */
 export async function handleCpu(
@@ -52,7 +46,7 @@ export async function handleNetkeiba(request: Request): Promise<Response> {
     typeof url !== "string" ||
     !isAllowedUrl(url) ||
     typeof kind !== "string" ||
-    !(KINDS as readonly string[]).includes(kind) ||
+    !(TARGET_KINDS as readonly string[]).includes(kind) ||
     (encoding !== "utf-8" && encoding !== "euc-jp")
   ) {
     return json({ ok: false, error: "リクエストが不正、または許可されていない URL です" }, 400);
