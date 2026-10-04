@@ -177,6 +177,49 @@ describe("renderMarkdown: 対照実験・推定・独立性", () => {
     expect(md).toContain("| alloc | 750 〜 882 |");
   });
 
+  it("逆転だけがあり、超過の直後の /ping はすべて 200 のときは、『軽い処理も落ちている』と書かない(境界付近の揺らぎと読む)", () => {
+    const r = emptyResult("x");
+    r.cpu.samples.push(
+      { runtime: "worker", work: "alloc", reps: 1, status: 200, kind: "ok", wallMs: 337, insideMs: 1, afterIoMs: 1, bodyHead: null },
+      { runtime: "worker", work: "alloc", reps: 1, status: 503, kind: "cpu-exceeded", wallMs: 20, insideMs: null, afterIoMs: null, bodyHead: null, pingAfter: 200 },
+    );
+    const md = renderMarkdown(r);
+    expect(md).toMatch(/1 ?件中 ?0 ?件/);
+    expect(md).toContain("逆転(以前に通過した reps 以下の reps が失敗): 1 件");
+    expect(md).not.toContain("軽い処理でも失敗している");
+    expect(md).toContain("通過と超過が混在");
+  });
+
+  it("maxPassReps=null でも、最初の点で一部の試行が通過していたら『通過なし』だけで済ませず、内訳(通過・超過の回数)を書く", () => {
+    const r = emptyResult("x");
+    r.cpu.worker.alloc = {
+      points: [{ reps: 1, trialsRun: 2, ok: 1, cpuExceeded: 1, otherError: 0, passed: false, interrupted: false, elapsedMs: [337, 20] }],
+      maxPassReps: null,
+      minFailReps: 1,
+      reachedMax: false,
+      stopReason: "converged",
+      inconclusive: false,
+      totalProbes: 2,
+    };
+    const md = renderMarkdown(r);
+    expect(md).toContain("通過なし(reps=1 は 1 回通過・1 回超過)");
+  });
+
+  it("maxPassReps=null で、最初の点が1回も通過していなければ、これまでどおり『通過なし』だけ", () => {
+    const r = emptyResult("x");
+    r.cpu.worker.alloc = {
+      points: [{ reps: 1, trialsRun: 1, ok: 0, cpuExceeded: 1, otherError: 0, passed: false, interrupted: false, elapsedMs: [20] }],
+      maxPassReps: null,
+      minFailReps: 1,
+      reachedMax: false,
+      stopReason: "converged",
+      inconclusive: false,
+      totalProbes: 1,
+    };
+    const md = renderMarkdown(r);
+    expect(md).toContain("| Worker | alloc | 通過なし | 1 |");
+  });
+
   const searchDo: SearchResult = {
     points: [],
     maxPassReps: 32,

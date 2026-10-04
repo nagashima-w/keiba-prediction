@@ -2270,6 +2270,30 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定ファイル・エクスポート JSON・IPC は後方互換(`AnalysisResult.model` は任意フィールドの追加、`analyses.model` は既存の列)
 
+## 次の正式版が 1.19.1 である根拠(Issue #159 での変更)
+
+**patch**(Cloudflare 移行〈#21〉の実測スパイクの追加と、その結果の記録。利用者から見える変化は無い)。
+
+### 変更内容
+
+- scripts: `scripts/cloudflare-spike/`(実測の判定・記録の純ロジック。リクエストの守り・到達性の判定と対照・CPU 上限の探索・
+  結果の記録と report の生成・プリフライトと後片付けの判定)
+- `spikes/cloudflare/`: pnpm workspace の外の独立した package(Worker・Durable Object・実測のドライバ。wrangler / workerd の依存を
+  既存の `pnpm install --frozen-lockfile` に持ち込まないため)
+- `.github/workflows/cloudflare-spike.yml`: 実測を行うワークフロー(件名の先頭に印がある push か手動実行のときだけ動く。
+  既存の `build-windows.yml` は無変更)
+- docs: `docs/investigations/cloudflare-spike/`(実測の記録・結果 JSON・report)
+
+### patch である根拠
+
+- アプリ(`packages/app`)・core(`packages/core`)は無変更。追加したコードはすべて `scripts/`・`spikes/`・ワークフロー・docs で、
+  exe に入らない
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

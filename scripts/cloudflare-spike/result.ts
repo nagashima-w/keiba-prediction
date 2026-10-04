@@ -175,7 +175,17 @@ function describeSearch(search: SearchResult): {
   maxPass: string;
   minFail: string;
 } {
-  const maxPass = search.maxPassReps === null ? "通過なし" : String(search.maxPassReps);
+  let maxPass: string;
+  if (search.maxPassReps !== null) {
+    maxPass = String(search.maxPassReps);
+  } else {
+    // 「通過」は全試行が通った点。最初の点で一部の試行が通っていたら、内訳を添える(全部失敗と区別するため)。
+    const first = search.points[0];
+    maxPass =
+      first !== undefined && first.ok > 0
+        ? `通過なし(reps=${first.reps} は ${first.ok} 回通過・${first.cpuExceeded} 回超過)`
+        : "通過なし";
+  }
   let minFail: string;
   if (search.minFailReps !== null) {
     minFail = String(search.minFailReps);
@@ -327,11 +337,17 @@ export function renderMarkdown(result: SpikeResult): string {
       `- 超過の直後の /ping(処理なし): ${independence.pingChecks} 件中 ${independence.pingFailures} 件が 200 以外`,
     );
     out.push(`- 逆転(以前に通過した reps 以下の reps が失敗): ${independence.inversions.length} 件`);
-    out.push(
-      independence.pingFailures > 0 || independence.inversions.length > 0
-        ? "- 読み: Worker の最初の超過の後の測定は独立していない可能性がある(超過の後は、軽い処理でも失敗している)。Worker の上限の値としては扱わない。"
-        : "- 読み: 超過の直後の /ping はすべて 200 で、逆転もなく、独立でない証拠は見つからなかった。",
-    );
+    if (independence.pingFailures > 0) {
+      out.push(
+        "- 読み: Worker の最初の超過の後の測定は独立していない可能性がある(超過の後は、軽い処理でも失敗している)。Worker の上限の値としては扱わない。",
+      );
+    } else if (independence.inversions.length > 0) {
+      out.push(
+        "- 読み: 超過の直後の /ping はすべて 200(軽い処理は落ちていない)。逆転は、同じ reps で通過と超過が混在している(上限付近の揺らぎ)ことを示す。超過の後に軽い処理まで落ちる、という意味で測定が独立でない証拠は無い。",
+      );
+    } else {
+      out.push("- 読み: 超過の直後の /ping はすべて 200 で、逆転もなく、独立でない証拠は見つからなかった。");
+    }
     out.push("");
   }
 
