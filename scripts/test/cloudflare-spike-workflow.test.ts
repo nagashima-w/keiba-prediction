@@ -134,10 +134,12 @@ describe("共有秘密をログに出さない", () => {
 });
 
 describe("後片付け(失敗時も Worker を消す)と結果の出力", () => {
-  it("wrangler delete のステップは always() で実行される", () => {
+  it("削除のステップは always() で実行され、API の DELETE(delete-run.ts)を主にする。wrangler delete には頼らない", () => {
     const body = stepBody("Worker を削除");
     expect(body).toMatch(/if: \$\{\{ always\(\) \}\}/);
-    expect(body).toContain("wrangler delete");
+    expect(body).toContain("delete-run.ts");
+    // wrangler delete は、Worker を消した後に KV の確認で認証エラー(code 10000)になって赤くなるため使わない
+    expect(yml.split("\n").filter((l) => !l.trim().startsWith("#") && l.includes("wrangler delete"))).toEqual([]);
   });
 
   it("削除の確認(残存 Worker の一覧検査と結果ブロックの出力)も always() で、削除より後ろにある", () => {
@@ -185,6 +187,11 @@ describe("後片付け(失敗時も Worker を消す)と結果の出力", () => 
 });
 
 describe("ジョブログに workers.dev のサブドメインを出さない(リポジトリは public)", () => {
+  it("測定とスモークの実行(tsx)は、core の依存をこのディレクトリの node_modules から解決する tsconfig を使う", () => {
+    const body = stepBody("測定を実行");
+    expect(body).toMatch(/tsx --tsconfig tsconfig\.run\.json driver\.ts/);
+  });
+
   it("ステップの env に URL を展開しない(SPIKE_URL を使わない。ドライバが Worker 名とサブドメインから組み立てる)", () => {
     expect(yml).not.toMatch(/SPIKE_URL/);
     const code = yml.split("\n").filter((l) => !l.trim().startsWith("#"));

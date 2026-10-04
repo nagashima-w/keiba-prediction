@@ -247,3 +247,100 @@ export async function searchLimit(
     totalProbes,
   };
 }
+
+/**
+ * Durable Object(SQLite バックエンド)の CPU 時間の上限として**ドキュメントに書かれている値**(30 秒)。
+ * 実測した値ではない。1回あたりの CPU の推定({@link estimateCpuPerRepMs})の仮定として使う。
+ */
+export const DOCUMENTED_DO_CPU_LIMIT_MS = 30_000;
+
+export interface CpuPerRepEstimate {
+  /** 1回あたりの CPU の下限(ms)。超過した最小 reps から。上限が見つかっていなければ null。 */
+  readonly lowMs: number | null;
+  /** 1回あたりの CPU の上限(ms)。通過した最大 reps から。1回目から超過なら null。 */
+  readonly highMs: number | null;
+}
+
+/**
+ * 探索結果から、1回あたりの CPU の推定(区間)を出す。**上限を `limitMs` と仮定したときの値**であり、
+ * `limitMs` がドキュメントの値(実測ではない)である限り、これも実測ではなく目安である。
+ *  - reps 回が上限内に収まった → 1回あたり ≦ limitMs / maxPassReps(highMs)
+ *  - reps 回で上限を超えた   → 1回あたり > limitMs / minFailReps(lowMs)
+ * 判定不能(other-error)や、通過も超過も観測していない探索は null。
+ */
+export function estimateCpuPerRepMs(
+  search: SearchResult | null,
+  limitMs: number,
+): CpuPerRepEstimate | null {
+  if (search === null || search.inconclusive) {
+    return null;
+  }
+  if (search.maxPassReps === null && search.minFailReps === null) {
+    return null;
+  }
+  return {
+    lowMs: search.minFailReps === null ? null : limitMs / search.minFailReps,
+    highMs: search.maxPassReps === null ? null : limitMs / search.maxPassReps,
+  };
+}
+
+export interface IndependenceSample {
+  readonly runtime: string;
+  readonly work: string;
+  readonly reps: number;
+  readonly kind: string;
+  /** CPU 超過の直後に投げた、処理を伴わない /ping の HTTP ステータス(通信失敗は null。未実施は undefined)。 */
+  readonly pingAfter?: number | null;
+}
+
+export interface Inversion {
+  readonly runtime: string;
+  readonly work: string;
+  readonly failedReps: number;
+  readonly earlierPassedReps: number;
+  readonly sampleIndex: number;
+}
+
+export interface IndependenceSummary {
+  /** 同じ処理で、以前に通過した reps 以下の reps が失敗した記録(非単調。測定が独立でない疑い)。 */
+  readonly inversions: readonly Inversion[];
+  /** 超過の直後の /ping を投げた回数。 */
+  readonly pingChecks: number;
+  /** そのうち 200 でなかった回数(超過の後は、処理の無いリクエストさえ落ちる=測定が独立でない証拠)。 */
+  readonly pingFailures: number;
+}
+
+/**
+ * 「最初の超過の後の測定は独立しているか」を、記録から確かめる。Worker では、超過の後に軽い処理でも
+ * 即座に 503 になっている疑いがあり、その場合、超過の後の測定は上限の測定になっていない。
+ */
+export function summarizeIndependence(samples: readonly IndependenceSample[]): IndependenceSummary {
+  const maxPassed = new Map<string, number>();
+  const inversions: Inversion[] = [];
+  let pingChecks = 0;
+  let pingFailures = 0;
+  samples.forEach((sample, sampleIndex) => {
+    const key = `${sample.runtime}/${sample.work}`;
+    if (sample.kind === "ok") {
+      maxPassed.set(key, Math.max(maxPassed.get(key) ?? 0, sample.reps));
+    } else if (sample.kind === "cpu-exceeded") {
+      const earlier = maxPassed.get(key);
+      if (earlier !== undefined && sample.reps <= earlier) {
+        inversions.push({
+          runtime: sample.runtime,
+          work: sample.work,
+          failedReps: sample.reps,
+          earlierPassedReps: earlier,
+          sampleIndex,
+        });
+      }
+    }
+    if (sample.pingAfter !== undefined) {
+      pingChecks += 1;
+      if (sample.pingAfter !== 200) {
+        pingFailures += 1;
+      }
+    }
+  });
+  return { inversions, pingChecks, pingFailures };
+}

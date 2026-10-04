@@ -5,6 +5,7 @@ import {
   extractScriptNames,
   formatPreflightSuccess,
   judgeCleanup,
+  judgeDeleteStatus,
   judgePreflight,
   type PreflightInput,
 } from "../cloudflare-spike/preflight.js";
@@ -277,5 +278,18 @@ describe("formatPreflightSuccess(サブドメインをジョブログに出さ�
       expect(line).not.toContain("my-secret-sub");
     }
     expect(lines.slice(1).join("\n")).toContain("プリフライト OK");
+  });
+});
+
+describe("judgeDeleteStatus(API の DELETE の結果)", () => {
+  it.each([
+    { status: 200, expected: "deleted" },
+    { status: 404, expected: "already-gone" },
+    { status: 403, expected: "failed" },
+    { status: 401, expected: "failed" },
+    { status: 500, expected: "failed" },
+    { status: null, expected: "failed" },
+  ])("HTTP $status は $expected", ({ status, expected }) => {
+    expect(judgeDeleteStatus(status)).toBe(expected);
   });
 });

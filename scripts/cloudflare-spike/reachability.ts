@@ -3,8 +3,13 @@
  * 判定と集計(Issue #159〈#21-A〉)。Worker が返した記録を入力にする純ロジック。
  */
 
+/** 送信元。worker = Cloudflare Workers、runner = GitHub Actions のランナー(対照実験)。 */
+export type ProbeSource = "worker" | "runner";
+
 /** Worker が1本の取得について返す記録。 */
 export interface NetkeibaProbeRecord {
+  /** 送信元。省略時は worker(第1ラウンドの結果は送信元を持たない)。 */
+  readonly source?: ProbeSource;
   readonly targetId: string;
   readonly url: string;
   /** HTTP ステータス。fetch が例外のときは null。 */
@@ -102,6 +107,7 @@ export function judgeReachability(record: NetkeibaProbeRecord): ReachabilityJudg
 
 export interface ReachabilitySummary {
   readonly total: number;
+  readonly bySource: Readonly<Record<ProbeSource, { readonly ok: number; readonly total: number }>>;
   readonly counts: Readonly<Record<ReachabilityVerdict, number>>;
   readonly byHost: Readonly<Record<string, { readonly ok: number; readonly total: number }>>;
 }
@@ -120,9 +126,18 @@ export function summarizeReachability(
     "network-error": 0,
   };
   const byHost: Record<string, { ok: number; total: number }> = {};
+  const bySource: Record<ProbeSource, { ok: number; total: number }> = {
+    worker: { ok: 0, total: 0 },
+    runner: { ok: 0, total: 0 },
+  };
   for (const record of records) {
     const { verdict } = judgeReachability(record);
     counts[verdict] += 1;
+    const source = bySource[record.source ?? "worker"];
+    source.total += 1;
+    if (verdict === "ok") {
+      source.ok += 1;
+    }
     let host = "(不明)";
     try {
       host = new URL(record.url).hostname;
@@ -135,5 +150,89 @@ export function summarizeReachability(
       entry.ok += 1;
     }
   }
-  return { total: records.length, counts, byHost };
+  return { total: records.length, bySource, counts, byHost };
+}
+
+export interface ControlPair {
+  readonly targetId: string;
+  /** Worker の判定(未測定なら null)。 */
+  readonly worker: ReachabilityVerdict | null;
+  /** ランナーの判定(未測定なら null)。 */
+  readonly runner: ReachabilityVerdict | null;
+  readonly workerStatus: number | null;
+  readonly runnerStatus: number | null;
+}
+
+/**
+ * 対照実験の暫定の読み。
+ *  - both-ok: どちらでも読めた
+ *  - both-blocked: どちらでも拒否された(Cloudflare 固有ではない)
+ *  - worker-only-blocked: Worker だけ読めない(Cloudflare からのアクセスに固有の疑い)
+ *  - runner-only-blocked: ランナーだけ読めない
+ *  - mixed: 対象によって結果が違う
+ *  - no-pairs: Worker とランナーの両方を測れた対象がない
+ */
+export type ControlConclusion =
+  | "both-ok"
+  | "both-blocked"
+  | "worker-only-blocked"
+  | "runner-only-blocked"
+  | "mixed"
+  | "no-pairs";
+
+export interface ControlComparison {
+  readonly pairs: readonly ControlPair[];
+  readonly conclusion: ControlConclusion;
+}
+
+/**
+ * 同じ対象(targetId)の Worker とランナーの判定を並べる。結論は、**両方を測れた対象だけ**で出す
+ * (ok 以外はすべて「読めない」として数える)。変えたのは送信元だけ(同じ URL・同じヘッダ・同じ記録の形)
+ * という前提の対照であり、読みは暫定である(UA など別の変数の実験は、この結果を見てから行う)。
+ */
+export function compareSources(records: readonly NetkeibaProbeRecord[]): ControlComparison {
+  const order: string[] = [];
+  const byTarget = new Map<string, { worker?: NetkeibaProbeRecord; runner?: NetkeibaProbeRecord }>();
+  for (const record of records) {
+    let entry = byTarget.get(record.targetId);
+    if (entry === undefined) {
+      entry = {};
+      byTarget.set(record.targetId, entry);
+      order.push(record.targetId);
+    }
+    entry[record.source ?? "worker"] = record;
+  }
+  const pairs: ControlPair[] = order.map((targetId) => {
+    const e = byTarget.get(targetId)!;
+    return {
+      targetId,
+      worker: e.worker ? judgeReachability(e.worker).verdict : null,
+      runner: e.runner ? judgeReachability(e.runner).verdict : null,
+      workerStatus: e.worker?.status ?? null,
+      runnerStatus: e.runner?.status ?? null,
+    };
+  });
+  const comparable = pairs.filter((p) => p.worker !== null && p.runner !== null);
+  if (comparable.length === 0) {
+    return { pairs, conclusion: "no-pairs" };
+  }
+  let bothGood = 0;
+  let bothBad = 0;
+  let workerBad = 0;
+  let runnerBad = 0;
+  for (const p of comparable) {
+    const w = p.worker === "ok";
+    const r = p.runner === "ok";
+    if (w && r) bothGood += 1;
+    else if (!w && !r) bothBad += 1;
+    else if (!w) workerBad += 1;
+    else runnerBad += 1;
+  }
+  const total = comparable.length;
+  let conclusion: ControlConclusion = "mixed";
+  if (bothGood === total) conclusion = "both-ok";
+  else if (bothBad === total) conclusion = "both-blocked";
+  else if (bothBad === 0 && runnerBad === 0) conclusion = "worker-only-blocked";
+  else if (bothBad === 0 && workerBad === 0) conclusion = "runner-only-blocked";
+  return { pairs, conclusion };
 }

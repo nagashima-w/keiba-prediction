@@ -144,22 +144,19 @@ jobs:
         working-directory: spikes/cloudflare
         env:
           RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-        run: pnpm exec tsx driver.ts
+        run: pnpm exec tsx --tsconfig tsconfig.run.json driver.ts
 
-      # 失敗しても・キャンセルされても、必ず Worker を消す。確認プロンプトで止まらないよう --force。
-      - name: Worker を削除
+      # 失敗しても・キャンセルされても、必ず Worker を消す。**API の DELETE を主にする**: `wrangler delete` は
+      # Worker を消した後に KV 名前空間の確認で認証エラー(code 10000。このトークンは KV の権限を持たない)になって
+      # exit 1 となり、手順が赤くなった(第1ラウンド)。消えたかどうかは、次のステップが Worker の一覧で確かめる。
+      - name: Worker を削除(API の DELETE)
         if: ${{ always() }}
         continue-on-error: true
         working-directory: spikes/cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if [ -z "$SPIKE_WORKER_NAME" ]; then
-            echo "デプロイの前に失敗したため、この run の削除対象はありません"
-            exit 0
-          fi
-          pnpm exec wrangler delete --name "$SPIKE_WORKER_NAME" --force
+        run: pnpm exec tsx delete-run.ts
 
       # 削除の確認(接頭辞付きの Worker が残っていないこと・DO の名前空間の状態)と、結果の出力
       # (step summary と、結果の全文を印で挟んだ1行のジョブログ)。残っていればジョブを失敗させる。

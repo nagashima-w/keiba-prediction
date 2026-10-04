@@ -88,3 +88,68 @@ export class RequestGuard {
     }
   }
 }
+
+/**
+ * 送信元(Worker とランナーなど)が複数あるときの守り(Issue #159 第2ラウンド)。
+ *
+ *  - **本数の上限と送信間隔は、送信元をまたいだ全体で数える**(Worker とランナーの合計で 10 本以内、
+ *    Worker の直後にランナーを送るときも 2 秒空ける。netkeiba から見れば同じ人が撃っているのと同じ)
+ *  - **400/403/429 の連続は送信元ごとに数える**(Worker が拒否で止まっても、対照のランナーは実施できる。
+ *    他方の送信元の成功・拒否は、自分の連続に影響しない)
+ */
+export class SourcedRequestGuard {
+  private readonly global: RequestGuard;
+  private readonly perSource = new Map<string, RequestGuard>();
+  private readonly maxConsecutiveBlocks: number | undefined;
+
+  constructor(options: RequestGuardOptions = {}) {
+    // 全体の守りは本数と間隔だけを見る(連続拒否は送信元ごとの守りが見る)。
+    this.global = new RequestGuard({
+      ...(options.maxRequests !== undefined ? { maxRequests: options.maxRequests } : {}),
+      ...(options.minIntervalMs !== undefined ? { minIntervalMs: options.minIntervalMs } : {}),
+      maxConsecutiveBlocks: Number.POSITIVE_INFINITY,
+    });
+    this.maxConsecutiveBlocks = options.maxConsecutiveBlocks;
+  }
+
+  private forSource(source: string): RequestGuard {
+    let guard = this.perSource.get(source);
+    if (guard === undefined) {
+      guard = new RequestGuard({
+        maxRequests: Number.POSITIVE_INFINITY,
+        minIntervalMs: 0,
+        ...(this.maxConsecutiveBlocks !== undefined ? { maxConsecutiveBlocks: this.maxConsecutiveBlocks } : {}),
+      });
+      this.perSource.set(source, guard);
+    }
+    return guard;
+  }
+
+  /** 全体で送った本数。 */
+  get sentCount(): number {
+    return this.global.sentCount;
+  }
+
+  /** その送信元で送った本数。 */
+  sentCountBy(source: string): number {
+    return this.forSource(source).sentCount;
+  }
+
+  /** 次を送ってよいか(状態は変えない)。その送信元の連続拒否を先に見る。 */
+  next(source: string, nowMs: number): GuardDecision {
+    const own = this.forSource(source).next(nowMs);
+    if (!own.allow) {
+      return own;
+    }
+    return this.global.next(nowMs);
+  }
+
+  markSent(source: string, nowMs: number): void {
+    this.global.markSent(nowMs);
+    this.forSource(source).markSent(nowMs);
+  }
+
+  recordStatus(source: string, status: number | null): void {
+    this.forSource(source).recordStatus(status);
+  }
+}

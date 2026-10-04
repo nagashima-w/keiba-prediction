@@ -1,5 +1,8 @@
 {
   // Node で動くスクリプト(ドライバ・スモークテスト・プリフライト・後片付け)の型検査。
+  // ドライバは、ランナーからの対照取得のために Worker と同じ src/netkeiba-probe.ts(core の HttpClient と
+  // パーサ)を使う。core の依存は packages/core/node_modules が CI に無いので、paths でこのディレクトリの
+  // node_modules へ向ける(tsconfig.worker.json / tsconfig.run.json / wrangler.toml の [alias] と同じ対応)。
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -10,7 +13,12 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "lib": ["ES2022"],
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "undici": ["./src/undici-stub.ts"],
+      "iconv-lite": ["./node_modules/iconv-lite"],
+      "cheerio": ["./node_modules/cheerio"]
+    }
   },
   "include": ["*.ts", "../../scripts/cloudflare-spike/*.ts"],
   "exclude": ["../../scripts/cloudflare-spike/gen-alloc-input.ts"]

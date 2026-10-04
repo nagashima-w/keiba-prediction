@@ -6,11 +6,18 @@
  * ジョブログに出す({@link formatResultBlock})。ログは末尾から取得されるため、出力はジョブの後半に置く。
  */
 
-import type { SearchResult } from "./cpu-search.js";
 import {
+  DOCUMENTED_DO_CPU_LIMIT_MS,
+  estimateCpuPerRepMs,
+  summarizeIndependence,
+  type SearchResult,
+} from "./cpu-search.js";
+import {
+  compareSources,
   judgeReachability,
   summarizeReachability,
   type NetkeibaProbeRecord,
+  type ProbeSource,
 } from "./reachability.js";
 
 export const RESULT_BEGIN_MARKER = "===CF-SPIKE-RESULT-BEGIN===";
@@ -37,6 +44,11 @@ export interface CpuSample {
   /** 処理のあとに I/O を1つ挟んだ後の時刻差(補助の測定)。 */
   readonly afterIoMs: number | null;
   readonly bodyHead: string | null;
+  /**
+   * Worker で CPU 超過になった直後に投げた、処理を伴わない /ping の HTTP ステータス(通信失敗は null)。
+   * 超過の後の測定が独立かを確かめるため(未実施は undefined)。
+   */
+  readonly pingAfter?: number | null;
 }
 
 /** ローカル(workerd)での1回あたりの計測。ローカルは時計が進むので ms が読める(本番とは CPU が違う)。 */
@@ -51,7 +63,7 @@ export interface LocalCalibrationEntry {
 }
 
 export interface CleanupInfo {
-  /** `wrangler delete` の後も残っていた、接頭辞付きの Worker。 */
+  /** 削除ステップの後も残っていた、接頭辞付きの Worker(最終的に消えたかは ok と deletedByFallback を見る)。 */
   readonly leftoverWorkers: readonly string[];
   /** 残っていたため API の DELETE で消した Worker。 */
   readonly deletedByFallback: readonly string[];
@@ -75,7 +87,10 @@ export interface SpikeResult {
   netkeiba: {
     records: NetkeibaProbeRecord[];
     requestCount: number;
+    /** 全体の打ち切り理由(本数の上限)。 */
     stoppedReason: string | null;
+    /** 送信元ごとの打ち切り理由(連続拒否)。第1ラウンドの結果には無い。 */
+    stoppedBySource?: Record<ProbeSource, string | null>;
   };
   selftest: { eucJpRoundTrip: boolean | null; detail: string | null };
   cpu: { worker: CpuSearches; durableObject: CpuSearches; samples: CpuSample[] };
@@ -94,7 +109,7 @@ export function emptyResult(runId: string): SpikeResult {
     runId,
     startedAt: null,
     finishedAt: null,
-    netkeiba: { records: [], requestCount: 0, stoppedReason: null },
+    netkeiba: { records: [], requestCount: 0, stoppedReason: null, stoppedBySource: { worker: null, runner: null } },
     selftest: { eucJpRoundTrip: null, detail: null },
     cpu: {
       worker: { parse: null, score: null, alloc: null, allocFull: null },
@@ -106,6 +121,17 @@ export function emptyResult(runId: string): SpikeResult {
     notes: [],
   };
 }
+
+const CONTROL_READING: Record<ReturnType<typeof compareSources>["conclusion"], string> = {
+  "both-ok": "both-ok: Worker からもランナーからも読めた。",
+  "both-blocked":
+    "both-blocked: Worker からもランナーからも拒否された。Cloudflare 固有ではない(データセンター IP 全般、またはリクエストの内容による可能性)。",
+  "worker-only-blocked":
+    "worker-only-blocked: Worker だけが拒否された。Cloudflare(Workers)からのアクセスに固有の疑いがある。",
+  "runner-only-blocked": "runner-only-blocked: ランナーだけが拒否された。",
+  mixed: "mixed: 対象によって結果が違う(表を参照)。",
+  "no-pairs": "no-pairs: Worker とランナーの両方を測れた対象がない。",
+};
 
 /** 結果を、開始印・JSON1行・終了印のちょうど3行にして返す。 */
 export function formatResultBlock(result: SpikeResult): string {
@@ -176,20 +202,29 @@ export function renderMarkdown(result: SpikeResult): string {
   out.push(`- 開始: ${result.startedAt ?? "未実施"} / 終了: ${result.finishedAt ?? "未実施"}`);
   out.push("");
 
-  out.push("## 到達性(Workers → netkeiba)");
+  out.push("## 到達性(netkeiba への取得。Worker とランナーの対照)");
   out.push("");
   const records = result.netkeiba.records;
   if (records.length === 0) {
     out.push("未実施");
   } else {
     const summary = summarizeReachability(records);
+    const stopped = result.netkeiba.stoppedBySource;
     out.push(
-      `- 出したリクエスト: ${result.netkeiba.requestCount} 本 / 打ち切り理由: ${result.netkeiba.stoppedReason ?? "なし"}`,
+      `- 出したリクエスト(Worker とランナーの合計): ${result.netkeiba.requestCount} 本 / 全体の打ち切り理由: ${result.netkeiba.stoppedReason ?? "なし"}`,
     );
+    if (stopped !== undefined) {
+      out.push(
+        `- 送信元ごとの打ち切り: worker: ${stopped.worker ?? "なし"} / runner: ${stopped.runner ?? "なし"}`,
+      );
+    }
     out.push(
       `- 判定の件数: ${Object.entries(summary.counts)
         .map(([k, v]) => `${k}: ${v}`)
         .join(" / ")}`,
+    );
+    out.push(
+      `- 送信元ごとの ok / 総数: worker ${summary.bySource.worker.ok} / ${summary.bySource.worker.total}、runner ${summary.bySource.runner.ok} / ${summary.bySource.runner.total}`,
     );
     out.push("");
     out.push("| ホスト | ok / 総数 |");
@@ -198,15 +233,30 @@ export function renderMarkdown(result: SpikeResult): string {
       out.push(`| ${host} | ${h.ok} / ${h.total} |`);
     }
     out.push("");
-    out.push("| 対象 | ステータス | 本文バイト | charset | パース | 判定 | 理由 |");
-    out.push("|---|---|---|---|---|---|---|");
+    out.push("| 対象 | 送信元 | ステータス | 本文バイト | charset | パース | 判定 | 理由 |");
+    out.push("|---|---|---|---|---|---|---|---|");
     for (const r of records) {
       const j = judgeReachability(r);
       const parsed =
         r.parsedCount === null ? (r.parseError ?? "未実施") : `${r.parsedKind ?? ""} ${r.parsedCount} 件`;
       out.push(
-        `| ${r.targetId} | ${r.status ?? "例外"} | ${r.bodyLength ?? "-"} | ${r.charset ?? "-"} | ${parsed} | ${j.verdict} | ${j.reason} |`,
+        `| ${r.targetId} | ${r.source ?? "worker"} | ${r.status ?? "例外"} | ${r.bodyLength ?? "-"} | ${r.charset ?? "-"} | ${parsed} | ${j.verdict} | ${j.reason} |`,
       );
+    }
+    if (records.some((r) => r.source === "runner")) {
+      const control = compareSources(records);
+      out.push("");
+      out.push("### 対照(同じ対象を Worker とランナーから。変えたのは送信元だけ)");
+      out.push("");
+      out.push("| 対象 | Worker | ランナー |");
+      out.push("|---|---|---|");
+      const cell = (verdict: string | null, status: number | null): string =>
+        verdict === null ? "未測定" : `${verdict}(${status ?? "例外"})`;
+      for (const p of control.pairs) {
+        out.push(`| ${p.targetId} | ${cell(p.worker, p.workerStatus)} | ${cell(p.runner, p.runnerStatus)} |`);
+      }
+      out.push("");
+      out.push(`- 暫定の読み: ${CONTROL_READING[control.conclusion]}`);
     }
   }
   out.push("");
@@ -232,6 +282,46 @@ export function renderMarkdown(result: SpikeResult): string {
   }
   out.push("");
 
+  const estimateRows: string[] = [];
+  for (const work of CPU_WORKS) {
+    const e = estimateCpuPerRepMs(result.cpu.durableObject[work], DOCUMENTED_DO_CPU_LIMIT_MS);
+    if (e !== null) {
+      const low = e.lowMs === null ? "不明" : `${e.lowMs.toFixed(0)}`;
+      const high = e.highMs === null ? "不明" : `${e.highMs.toFixed(0)}`;
+      estimateRows.push(`| ${work} | ${low} 〜 ${high} |`);
+    }
+  }
+  if (estimateRows.length > 0) {
+    out.push("### Durable Object: 1回あたりの CPU の推定");
+    out.push("");
+    out.push(
+      `**注意**: ${DOCUMENTED_DO_CPU_LIMIT_MS / 1000} 秒はドキュメントに書かれている上限の値であり、実測ではない。` +
+        "実測したのは「通過した最大の反復回数」と「超過した最小の反復回数」だけで、以下は上限を 30 秒と仮定したときの目安である" +
+        "(30 秒 ÷ 超過した最小 reps 〜 30 秒 ÷ 通過した最大 reps)。",
+    );
+    out.push("");
+    out.push("| 処理 | 1回あたりの CPU(ms) |");
+    out.push("|---|---|");
+    out.push(...estimateRows);
+    out.push("");
+  }
+
+  const independence = summarizeIndependence(result.cpu.samples.filter((s) => s.runtime === "worker"));
+  if (independence.pingChecks > 0 || independence.inversions.length > 0) {
+    out.push("### Worker: 超過の後の測定は独立か");
+    out.push("");
+    out.push(
+      `- 超過の直後の /ping(処理なし): ${independence.pingChecks} 件中 ${independence.pingFailures} 件が 200 以外`,
+    );
+    out.push(`- 逆転(以前に通過した reps 以下の reps が失敗): ${independence.inversions.length} 件`);
+    out.push(
+      independence.pingFailures > 0 || independence.inversions.length > 0
+        ? "- 読み: Worker の最初の超過の後の測定は独立していない可能性がある(超過の後は、軽い処理でも失敗している)。Worker の上限の値としては扱わない。"
+        : "- 読み: 超過の直後の /ping はすべて 200 で、逆転もなく、独立でない証拠は見つからなかった。",
+    );
+    out.push("");
+  }
+
   if (result.local !== null && result.local.entries.length > 0) {
     out.push("## ローカル(workerd)での 1 reps あたり ms(本番の CPU とは異なる目安)");
     out.push("");
@@ -253,7 +343,7 @@ export function renderMarkdown(result: SpikeResult): string {
     const c = result.cleanup;
     out.push(`- 結果: ${c.ok ? "OK(接頭辞付きの Worker は残っていない)" : "NG"}`);
     if (c.leftoverWorkers.length > 0) {
-      out.push(`- wrangler delete の後も残っていた Worker: ${c.leftoverWorkers.join(", ")}`);
+      out.push(`- 削除ステップの後も残っていた Worker: ${c.leftoverWorkers.join(", ")}`);
     }
     if (c.deletedByFallback.length > 0) {
       out.push(`- API の DELETE で消した Worker: ${c.deletedByFallback.join(", ")}`);

@@ -5,6 +5,7 @@
   "//": "Issue #159(#21-A)の Cloudflare 移行スパイク専用。pnpm workspace の外(ルートの pnpm-workspace.yaml は packages/* のみ)に置き、`pnpm install --ignore-workspace` で独立にインストールする。既存 CI(windows-latest の pnpm install --frozen-lockfile)に wrangler / workerd の巨大な依存を持ち込まないため。",
   "scripts": {
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.node.json",
+    "driver": "tsx --tsconfig tsconfig.run.json driver.ts",
     "deploy:dry": "wrangler deploy --dry-run --outdir dist-dry",
     "smoke": "tsx smoke.ts"
   },

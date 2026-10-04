@@ -5,7 +5,10 @@
  * 環境変数: SPIKE_URL(Worker のベース URL)/ SPIKE_SECRET(共有秘密)/ RUN_ID / RESULT_PATH。
  *
  * 測るもの:
- *  1. 到達性: netkeiba へ Worker から5本(2秒間隔、合計10本以内、400/403/429 が2回連続で打ち切り)
+ *  1. 到達性: netkeiba へ、Worker とランナー(この Node。対照実験)から同じ5対象を1本ずつ。合計10本以内・
+ *     2秒間隔(送信元をまたいで直列)。400/403/429 の2回連続の打ち切りは送信元ごと(Worker が止まっても
+ *     ランナーの対照は続ける)。ランナーは Worker と同じ `probeNetkeiba`(同じ URL・同じヘッダ・同じ記録の形)で
+ *     送るので、変わるのは送信元だけ
  *  2. EUC-JP のデコード(Worker 内の往復。ネットワーク不使用)
  *  3. CPU: 普通の Worker と Durable Object で、parse / score / alloc / allocFull を、反復回数を倍々 →
  *     二分探索で増やして、上限超過で落ちる点を探す(Workers では実行中に I/O が無いと時計が進まないため、
@@ -19,8 +22,8 @@ import {
   searchLimit,
   type ProbeOutcome,
 } from "../../scripts/cloudflare-spike/cpu-search.js";
-import { RequestGuard } from "../../scripts/cloudflare-spike/request-guard.js";
-import type { NetkeibaProbeRecord } from "../../scripts/cloudflare-spike/reachability.js";
+import { runReachability } from "../../scripts/cloudflare-spike/reachability-run.js";
+import type { NetkeibaProbeRecord, ProbeSource } from "../../scripts/cloudflare-spike/reachability.js";
 import {
   CPU_WORKS,
   emptyResult,
@@ -29,9 +32,10 @@ import {
   type LocalCalibrationEntry,
   type SpikeResult,
 } from "../../scripts/cloudflare-spike/result.js";
-import { buildTargets } from "../../scripts/cloudflare-spike/targets.js";
+import { buildRequestPlan, type NetkeibaTarget } from "../../scripts/cloudflare-spike/targets.js";
 import { writeJsonAtomic } from "./atomic-write.js";
 import { requireEnv } from "./cf-api.js";
+import { probeNetkeiba } from "./src/netkeiba-probe.js";
 
 /**
  * Worker のベース URL。ワークフローでは SPIKE_WORKER_NAME と CF_SUBDOMAIN(GITHUB_ENV。マスク済み)から組み立てる
@@ -126,57 +130,63 @@ async function waitUntilReady(result: SpikeResult): Promise<boolean> {
   return false;
 }
 
-async function measureReachability(result: SpikeResult): Promise<void> {
-  const guard = new RequestGuard();
-  for (const target of buildTargets()) {
-    const decision = guard.next(Date.now());
-    if (!decision.allow) {
-      result.netkeiba.stoppedReason = decision.reason;
-      break;
+/** Worker に1本を取得させ、記録を受け取る。Worker の応答が想定外なら、status=null の記録にして理由を残す。 */
+async function sendViaWorker(target: NetkeibaTarget): Promise<NetkeibaProbeRecord> {
+  const r = await call("POST", "/netkeiba", {
+    targetId: target.id,
+    url: target.url,
+    kind: target.kind,
+    encoding: target.encoding,
+  });
+  try {
+    const parsed = JSON.parse(r.text) as { ok?: boolean; record?: NetkeibaProbeRecord };
+    if (r.status === 200 && parsed.ok === true && parsed.record !== undefined) {
+      return parsed.record;
     }
-    if (decision.waitMs > 0) {
-      await sleep(decision.waitMs);
-    }
-    guard.markSent(Date.now());
-    const r = await call("POST", "/netkeiba", {
+    throw new Error(`Worker の応答が想定外です(HTTP ${r.status}): ${r.text.slice(0, 200)}`);
+  } catch (error) {
+    return {
       targetId: target.id,
       url: target.url,
-      kind: target.kind,
-      encoding: target.encoding,
-    });
-    let record: NetkeibaProbeRecord;
-    try {
-      const parsed = JSON.parse(r.text) as { ok?: boolean; record?: NetkeibaProbeRecord };
-      if (r.status === 200 && parsed.ok === true && parsed.record !== undefined) {
-        record = parsed.record;
-      } else {
-        throw new Error(`Worker の応答が想定外です(HTTP ${r.status}): ${r.text.slice(0, 200)}`);
-      }
-    } catch (error) {
-      record = {
-        targetId: target.id,
-        url: target.url,
-        status: null,
-        bodyLength: null,
-        charset: null,
-        parsedKind: target.kind,
-        parsedCount: null,
-        parseError: null,
-        replacementChars: null,
-        headers: {},
-        bodyHead: null,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-    guard.recordStatus(record.status);
-    result.netkeiba.records.push(record);
-    result.netkeiba.requestCount = guard.sentCount;
-    save(result);
+      status: null,
+      bodyLength: null,
+      charset: null,
+      parsedKind: target.kind,
+      parsedCount: null,
+      parseError: null,
+      replacementChars: null,
+      headers: {},
+      bodyHead: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
-  const after = guard.next(Date.now());
-  if (!after.allow && result.netkeiba.stoppedReason === null) {
-    result.netkeiba.stoppedReason = after.reason;
-  }
+}
+
+async function measureReachability(result: SpikeResult): Promise<void> {
+  const state = await runReachability(
+    buildRequestPlan(),
+    {
+      now: () => Date.now(),
+      sleep,
+      send: (source: ProbeSource, target: NetkeibaTarget) =>
+        source === "worker"
+          ? sendViaWorker(target)
+          : // ランナー(この Node。グローバル fetch)から、Worker と同じ処理で取得する(対照)。
+            probeNetkeiba({ targetId: target.id, url: target.url, kind: target.kind, encoding: target.encoding }),
+    },
+    {
+      onRecord: (s) => {
+        result.netkeiba.records = [...s.records];
+        result.netkeiba.requestCount = s.requestCount;
+        save(result);
+      },
+    },
+  );
+  result.netkeiba.records = [...state.records];
+  result.netkeiba.requestCount = state.requestCount;
+  result.netkeiba.stoppedReason = state.stoppedReason;
+  result.netkeiba.stoppedBySource = { ...state.stoppedBySource };
+  save(result);
 }
 
 async function measureSelftest(result: SpikeResult): Promise<void> {
@@ -228,6 +238,12 @@ async function measureCpu(result: SpikeResult, runtime: CpuRuntime): Promise<voi
           invalidCheck = "200 だが応答が JSON として読めない";
         }
       }
+      // Worker で CPU 超過になった直後に、処理を伴わない /ping を投げて記録する。超過の後は軽い処理さえ
+      // 失敗する疑いがあり(第1ラウンドで観測)、その場合、超過の後の測定は独立していないため。
+      let pingAfter: number | null | undefined;
+      if (runtime === "worker" && finalKind === "cpu-exceeded") {
+        pingAfter = (await call("GET", "/ping")).status;
+      }
       result.cpu.samples.push({
         runtime,
         work,
@@ -238,6 +254,7 @@ async function measureCpu(result: SpikeResult, runtime: CpuRuntime): Promise<voi
         insideMs,
         afterIoMs,
         bodyHead: finalKind === "ok" ? null : (invalidCheck ?? r.text.slice(0, 300)),
+        ...(pingAfter !== undefined ? { pingAfter } : {}),
       });
       return {
         kind: finalKind,

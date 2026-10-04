@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  DOCUMENTED_DO_CPU_LIMIT_MS,
   classifyCpuProbe,
+  estimateCpuPerRepMs,
   isValidCpuCheck,
   searchLimit,
+  summarizeIndependence,
+  type IndependenceSample,
   type ProbeOutcome,
+  type SearchResult,
 } from "../cloudflare-spike/cpu-search.js";
 
 /**
@@ -298,5 +303,110 @@ describe("isValidCpuCheck(空振りした計算を『通過』と記録しない
     { work: "unknown", check: 16, valid: false },
   ])("$work の check=$check は valid=$valid", ({ work, check, valid }) => {
     expect(isValidCpuCheck(work, check)).toBe(valid);
+  });
+});
+
+describe("estimateCpuPerRepMs(1回あたりの CPU の推定。上限はドキュメントの値であり実測ではない)", () => {
+  const base: SearchResult = {
+    points: [],
+    maxPassReps: 32,
+    minFailReps: 34,
+    reachedMax: false,
+    stopReason: "converged",
+    inconclusive: false,
+    totalProbes: 10,
+  };
+
+  it("ドキュメントの上限は 30 秒", () => {
+    expect(DOCUMENTED_DO_CPU_LIMIT_MS).toBe(30_000);
+  });
+
+  it("通過した最大 reps=32・超過した最小 reps=34 なら、1回あたり 30000/34 〜 30000/32 ms", () => {
+    const e = estimateCpuPerRepMs(base, 30_000);
+    expect(e).not.toBeNull();
+    expect(e!.lowMs).toBeCloseTo(30_000 / 34, 6);
+    expect(e!.highMs).toBeCloseTo(30_000 / 32, 6);
+    expect(e!.lowMs).toBeLessThan(e!.highMs!); // 区間が潰れていない
+    expect(e!.lowMs).toBeCloseTo(882.35, 1);
+    expect(e!.highMs).toBeCloseTo(937.5, 1);
+  });
+
+  it("上限を引数で変えられる(10ms を仮定すれば 10/34 〜 10/32)", () => {
+    const e = estimateCpuPerRepMs(base, 10);
+    expect(e!.lowMs).toBeCloseTo(10 / 34, 6);
+    expect(e!.highMs).toBeCloseTo(10 / 32, 6);
+  });
+
+  it("上限が見つからなかった(minFailReps=null)なら、下限だけは言えないので lowMs=null、highMs は 30000/maxPass", () => {
+    const e = estimateCpuPerRepMs({ ...base, minFailReps: null, reachedMax: true }, 30_000);
+    expect(e).toEqual({ lowMs: null, highMs: 30_000 / 32 });
+  });
+
+  it("1回目から超過(maxPassReps=null)なら、highMs=null、lowMs は 30000/minFail", () => {
+    const e = estimateCpuPerRepMs({ ...base, maxPassReps: null, minFailReps: 1 }, 30_000);
+    expect(e).toEqual({ lowMs: 30_000, highMs: null });
+  });
+
+  it("判定不能(inconclusive)や、通過も超過も無い探索は null(推定しない)", () => {
+    expect(estimateCpuPerRepMs({ ...base, inconclusive: true, minFailReps: null }, 30_000)).toBeNull();
+    expect(estimateCpuPerRepMs({ ...base, maxPassReps: null, minFailReps: null }, 30_000)).toBeNull();
+    expect(estimateCpuPerRepMs(null, 30_000)).toBeNull();
+  });
+});
+
+describe("summarizeIndependence(超過の後の測定が独立かの確認)", () => {
+  const s = (partial: Partial<IndependenceSample> & Pick<IndependenceSample, "reps" | "kind">): IndependenceSample => ({
+    runtime: "worker",
+    work: "parse",
+    ...partial,
+  });
+
+  it("失敗した reps が、同じ処理で以前に通過した reps 以下なら、逆転(非単調)として数える", () => {
+    const r = summarizeIndependence([
+      s({ reps: 4, kind: "ok" }),
+      s({ reps: 8, kind: "cpu-exceeded" }),
+      s({ reps: 6, kind: "ok" }),
+      s({ reps: 5, kind: "cpu-exceeded" }), // 6 が通ったのに 5 が落ちた
+      s({ reps: 6, kind: "cpu-exceeded" }), // 6 が通ったのに 6 が落ちた
+    ]);
+    expect(r.inversions).toEqual([
+      { runtime: "worker", work: "parse", failedReps: 5, earlierPassedReps: 6, sampleIndex: 3 },
+      { runtime: "worker", work: "parse", failedReps: 6, earlierPassedReps: 6, sampleIndex: 4 },
+    ]);
+  });
+
+  it("単調な探索(通過の後は、より大きい reps だけが失敗)なら逆転は 0", () => {
+    const r = summarizeIndependence([
+      s({ reps: 1, kind: "ok" }),
+      s({ reps: 2, kind: "ok" }),
+      s({ reps: 4, kind: "ok" }),
+      s({ reps: 8, kind: "cpu-exceeded" }),
+      s({ reps: 6, kind: "cpu-exceeded" }),
+    ]);
+    expect(r.inversions).toEqual([]);
+  });
+
+  it("処理(work)・実行環境(runtime)が違えば別々に数える", () => {
+    const r = summarizeIndependence([
+      s({ reps: 64, kind: "ok", work: "score" }),
+      s({ reps: 1, kind: "cpu-exceeded", work: "parse" }),
+      s({ reps: 1, kind: "cpu-exceeded", runtime: "durableObject", work: "score" }),
+    ]);
+    expect(r.inversions).toEqual([]);
+  });
+
+  it("超過の直後の /ping(処理なし)の結果を数える: 非 200 は『超過の後に軽い処理も落ちる』証拠", () => {
+    const r = summarizeIndependence([
+      s({ reps: 8, kind: "cpu-exceeded", pingAfter: 503 }),
+      s({ reps: 1, kind: "cpu-exceeded", work: "score", pingAfter: 200 }),
+      s({ reps: 2, kind: "cpu-exceeded", work: "alloc", pingAfter: null }),
+      s({ reps: 4, kind: "ok" }), // 超過ではないので ping は無い
+    ]);
+    expect(r.pingChecks).toBe(3);
+    expect(r.pingFailures).toBe(2); // 503 と null(通信失敗)
+  });
+
+  it("ping の記録が1件も無ければ pingChecks=0", () => {
+    expect(summarizeIndependence([s({ reps: 1, kind: "ok" })]).pingChecks).toBe(0);
   });
 });

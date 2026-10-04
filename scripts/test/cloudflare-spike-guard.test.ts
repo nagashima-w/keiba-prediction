@@ -3,6 +3,7 @@ import {
   MAX_NETKEIBA_REQUESTS,
   MIN_INTERVAL_MS,
   RequestGuard,
+  SourcedRequestGuard,
 } from "../cloudflare-spike/request-guard.js";
 import { isAuthorized } from "../cloudflare-spike/auth.js";
 
@@ -167,4 +168,91 @@ describe("isAuthorized(共有秘密の照合)", () => {
       expect(isAuthorized(provided, expected)).toBe(false);
     },
   );
+});
+
+describe("SourcedRequestGuard(Worker とランナーの合計で本数・間隔、拒否の連続は送信元ごと)", () => {
+  it("本数の上限は送信元をまたいだ合計(10本)。Worker 5本 + ランナー5本で使い切り、11本目は max-requests", () => {
+    const guard = new SourcedRequestGuard();
+    for (let i = 0; i < 5; i += 1) {
+      guard.markSent("worker", i * 4000);
+      guard.recordStatus("worker", 200);
+      guard.markSent("runner", i * 4000 + 2000);
+      guard.recordStatus("runner", 200);
+    }
+    expect(guard.sentCount).toBe(10);
+    expect(guard.next("worker", 100_000)).toEqual({ allow: false, reason: "max-requests" });
+    expect(guard.next("runner", 100_000)).toEqual({ allow: false, reason: "max-requests" });
+  });
+
+  it("9本目までは、どちらの送信元でも送れる", () => {
+    const guard = new SourcedRequestGuard();
+    for (let i = 0; i < 9; i += 1) {
+      guard.markSent(i % 2 === 0 ? "worker" : "runner", i * 2000);
+      guard.recordStatus(i % 2 === 0 ? "worker" : "runner", 200);
+    }
+    expect(guard.sentCount).toBe(9);
+    expect(guard.next("worker", 100_000).allow).toBe(true);
+    expect(guard.next("runner", 100_000).allow).toBe(true);
+  });
+
+  it("2秒の間隔は送信元をまたいで守る(Worker の直後にランナーを送るときも待たせる)", () => {
+    const guard = new SourcedRequestGuard();
+    guard.markSent("worker", 10_000);
+    expect(guard.next("runner", 10_500)).toEqual({ allow: true, waitMs: 1500 });
+    expect(guard.next("worker", 10_500)).toEqual({ allow: true, waitMs: 1500 });
+    expect(guard.next("runner", 12_000)).toEqual({ allow: true, waitMs: 0 });
+  });
+
+  it("連続する拒否は送信元ごとに数える: Worker が2回連続で拒否されても、ランナーは送れる", () => {
+    const guard = new SourcedRequestGuard();
+    guard.markSent("worker", 0);
+    guard.recordStatus("worker", 400);
+    guard.markSent("runner", 2000);
+    guard.recordStatus("runner", 200);
+    guard.markSent("worker", 4000);
+    guard.recordStatus("worker", 400);
+    expect(guard.next("worker", 10_000)).toEqual({ allow: false, reason: "consecutive-blocks" });
+    expect(guard.next("runner", 10_000).allow).toBe(true);
+  });
+
+  it("他方の送信元の拒否は、自分の連続を増やさない(Worker 400 → ランナー 400 は『それぞれ1回』で、どちらも止まらない)", () => {
+    const guard = new SourcedRequestGuard();
+    guard.markSent("worker", 0);
+    guard.recordStatus("worker", 400);
+    guard.markSent("runner", 2000);
+    guard.recordStatus("runner", 400);
+    expect(guard.next("worker", 10_000).allow).toBe(true);
+    expect(guard.next("runner", 10_000).allow).toBe(true);
+  });
+
+  it("他方の送信元の成功は、自分の連続を途切れさせない(Worker 400, ランナー 200, Worker 400 で Worker は止まる)", () => {
+    const guard = new SourcedRequestGuard();
+    guard.markSent("worker", 0);
+    guard.recordStatus("worker", 400);
+    guard.markSent("runner", 2000);
+    guard.recordStatus("runner", 200);
+    guard.markSent("worker", 4000);
+    guard.recordStatus("worker", 400);
+    expect(guard.next("worker", 10_000)).toEqual({ allow: false, reason: "consecutive-blocks" });
+  });
+
+  it("送信元ごとの本数も数える", () => {
+    const guard = new SourcedRequestGuard();
+    guard.markSent("worker", 0);
+    guard.markSent("worker", 2000);
+    guard.markSent("runner", 4000);
+    expect(guard.sentCountBy("worker")).toBe(2);
+    expect(guard.sentCountBy("runner")).toBe(1);
+    expect(guard.sentCount).toBe(3);
+  });
+
+  it("合計の上限と、その送信元の連続拒否が同時なら consecutive-blocks を返す", () => {
+    const guard = new SourcedRequestGuard({ maxRequests: 2 });
+    guard.markSent("worker", 0);
+    guard.recordStatus("worker", 403);
+    guard.markSent("worker", 2000);
+    guard.recordStatus("worker", 429);
+    expect(guard.next("worker", 9000)).toEqual({ allow: false, reason: "consecutive-blocks" });
+    expect(guard.next("runner", 9000)).toEqual({ allow: false, reason: "max-requests" });
+  });
 });

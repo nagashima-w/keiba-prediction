@@ -237,7 +237,7 @@ export interface CleanupJudgement {
   readonly listUnavailable: boolean;
 }
 
-/** `wrangler delete` の後の状態から、後片付けが済んだかを判定する。 */
+/** 削除の後の状態から、後片付けが済んだかを判定する。 */
 export function judgeCleanup(input: CleanupInput): CleanupJudgement {
   const listUnavailable = input.scriptNames === null;
   const leftoverWorkers = (input.scriptNames ?? []).filter((n) => n.startsWith(SPIKE_WORKER_PREFIX));
@@ -255,4 +255,17 @@ export function judgeCleanup(input: CleanupInput): CleanupJudgement {
     ok: !listUnavailable && leftoverWorkers.length === 0,
     listUnavailable,
   };
+}
+
+export type DeleteJudgement = "deleted" | "already-gone" | "failed";
+
+/** Worker の削除(API の DELETE)の結果。404 は「すでに無い」(成功扱い)。通信失敗(null)は失敗。 */
+export function judgeDeleteStatus(status: number | null): DeleteJudgement {
+  if (status === 200) {
+    return "deleted";
+  }
+  if (status === 404) {
+    return "already-gone";
+  }
+  return "failed";
 }

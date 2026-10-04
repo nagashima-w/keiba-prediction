@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareSources,
   judgeReachability,
   summarizeReachability,
   type NetkeibaProbeRecord,
 } from "../cloudflare-spike/reachability.js";
 import {
   ALLOWED_HOSTS,
+  buildRequestPlan,
   buildTargets,
   isAllowedUrl,
 } from "../cloudflare-spike/targets.js";
@@ -215,5 +217,96 @@ describe("buildTargets / isAllowedUrl", () => {
     "",
   ])("拒否: %s", (url) => {
     expect(isAllowedUrl(url)).toBe(false);
+  });
+});
+
+describe("buildTargets の順序(ホストが交互)", () => {
+  it("race → db → nar → race → db の順で、隣り合う対象のホストは必ず違う", () => {
+    const hosts = buildTargets().map((t) => new URL(t.url).hostname);
+    expect(hosts).toEqual([
+      "race.netkeiba.com",
+      "db.netkeiba.com",
+      "nar.netkeiba.com",
+      "race.netkeiba.com",
+      "db.netkeiba.com",
+    ]);
+    for (let i = 1; i < hosts.length; i += 1) {
+      expect(hosts[i]).not.toBe(hosts[i - 1]);
+    }
+  });
+
+  it("先頭の3本で3ホストが一巡する(2回連続の拒否で打ち切られても、別ホストの結果が残る)", () => {
+    const firstThree = buildTargets().slice(0, 3).map((t) => new URL(t.url).hostname);
+    expect(new Set(firstThree).size).toBe(3);
+  });
+});
+
+describe("buildRequestPlan(Worker とランナーの対照)", () => {
+  const plan = buildRequestPlan();
+  const targets = buildTargets();
+
+  it("対象ごとに『Worker → ランナー』の順で、同じ対象を連続して送る(合計10本)", () => {
+    expect(plan).toHaveLength(10);
+    expect(plan).toHaveLength(targets.length * 2);
+    for (let i = 0; i < targets.length; i += 1) {
+      expect(plan[i * 2]!.source).toBe("worker");
+      expect(plan[i * 2 + 1]!.source).toBe("runner");
+      expect(plan[i * 2]!.target).toEqual(targets[i]);
+      expect(plan[i * 2 + 1]!.target).toEqual(targets[i]); // 同じ URL・同じ設定。変えるのは送信元だけ
+    }
+  });
+
+  it("合計は1回の実行の上限(10本)ちょうどで、上限を超えない", () => {
+    expect(plan.length).toBe(MAX_NETKEIBA_REQUESTS);
+  });
+
+  it("送信元ごとに5本ずつ", () => {
+    expect(plan.filter((p) => p.source === "worker")).toHaveLength(5);
+    expect(plan.filter((p) => p.source === "runner")).toHaveLength(5);
+  });
+});
+
+describe("source と bySource", () => {
+  it("source を持たない記録は worker として数える。bySource に送信元ごとの ok 数/総数を出す", () => {
+    const s = summarizeReachability([
+      rec({ targetId: "a" }),
+      rec({ targetId: "a", source: "runner" }),
+      rec({ targetId: "b", source: "runner", status: 400, parsedCount: null }),
+      rec({ targetId: "b", source: "worker", status: 400, parsedCount: null }),
+    ]);
+    expect(s.bySource).toEqual({ worker: { ok: 1, total: 2 }, runner: { ok: 1, total: 2 } });
+  });
+});
+
+describe("compareSources(対照実験の読み)", () => {
+  const bad = (targetId: string, source: "worker" | "runner") =>
+    rec({ targetId, source, status: 400, parsedCount: null });
+  const good = (targetId: string, source: "worker" | "runner") => rec({ targetId, source });
+
+  it("同じ対象の Worker とランナーの判定を並べる", () => {
+    const c = compareSources([good("a", "worker"), bad("a", "runner"), bad("b", "worker")]);
+    expect(c.pairs).toEqual([
+      { targetId: "a", worker: "ok", runner: "blocked", workerStatus: 200, runnerStatus: 400 },
+      { targetId: "b", worker: "blocked", runner: null, workerStatus: 400, runnerStatus: null },
+    ]);
+  });
+
+  it.each([
+    { label: "どちらでも読めた", records: [good("a", "worker"), good("a", "runner")], expected: "both-ok" },
+    { label: "どちらでも拒否された(Cloudflare 固有ではない)", records: [bad("a", "worker"), bad("a", "runner")], expected: "both-blocked" },
+    { label: "Worker だけ拒否された(Cloudflare 固有の疑い)", records: [bad("a", "worker"), good("a", "runner")], expected: "worker-only-blocked" },
+    { label: "ランナーだけ拒否された", records: [good("a", "worker"), bad("a", "runner")], expected: "runner-only-blocked" },
+    { label: "対象によって違う", records: [bad("a", "worker"), good("a", "runner"), good("b", "worker"), bad("b", "runner")], expected: "mixed" },
+    { label: "ホストによって Worker だけの拒否と両方拒否が混在", records: [bad("a", "worker"), good("a", "runner"), bad("b", "worker"), bad("b", "runner")], expected: "mixed" },
+    { label: "片方の送信元しか測れていない(対がない)", records: [bad("a", "worker")], expected: "no-pairs" },
+    { label: "記録が空", records: [], expected: "no-pairs" },
+  ])("$label → $expected", ({ records, expected }) => {
+    expect(compareSources(records).conclusion).toBe(expected);
+  });
+
+  it("対がある対象だけで結論を出す(対のない対象は結論に影響しない)", () => {
+    const c = compareSources([bad("a", "worker"), good("a", "runner"), bad("z", "worker")]);
+    expect(c.pairs).toHaveLength(2);
+    expect(c.conclusion).toBe("worker-only-blocked");
   });
 });

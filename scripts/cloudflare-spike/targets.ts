@@ -8,6 +8,7 @@
 
 // バレル(@keiba/core)ではなく個別ファイルを import する: このファイルは Worker にもバンドルされ、
 // バレルは better-sqlite3 等のネイティブ依存を巻き込むため。
+import type { ProbeSource } from "./reachability.js";
 import { parseHorseId, parseRaceId } from "../../packages/core/src/scraper/ids.js";
 import {
   horseResultsApiUrl,
@@ -50,17 +51,39 @@ export function isAllowedUrl(url: string): boolean {
   );
 }
 
-/** 到達性の測定対象を返す。 */
+/**
+ * 到達性の測定対象を返す。**ホストが交互になる順(race → db → nar → race → db)**にしてある:
+ * 400/403/429 が2回連続して打ち切りになっても、別のホストの結果が少なくとも1本は残るようにするため。
+ */
 export function buildTargets(): NetkeibaTarget[] {
   const centralRace = parseRaceId("202603020211");
   const narRace = parseRaceId("202654071210");
   const horse = parseHorseId("2021105857");
   return [
     { id: "central-shutuba", url: shutubaUrl(centralRace), kind: "shutuba", encoding: "utf-8" },
-    { id: "central-odds", url: oddsApiUrl(centralRace), kind: "odds-json", encoding: "utf-8" },
     // db.netkeiba.com の馬ページは EUC-JP(fixture-plan.ts も encoding を明示している)。
     { id: "db-horse-page", url: horseUrl(horse), kind: "horse-page", encoding: "euc-jp" },
-    { id: "db-horse-results", url: horseResultsApiUrl(horse), kind: "horse-results", encoding: "utf-8" },
     { id: "nar-shutuba", url: shutubaUrl(narRace), kind: "shutuba", encoding: "utf-8" },
+    { id: "central-odds", url: oddsApiUrl(centralRace), kind: "odds-json", encoding: "utf-8" },
+    { id: "db-horse-results", url: horseResultsApiUrl(horse), kind: "horse-results", encoding: "utf-8" },
   ];
+
+}
+
+export interface PlannedRequest {
+  readonly source: ProbeSource;
+  readonly target: NetkeibaTarget;
+}
+
+/**
+ * 実際に送る順序(Issue #159 第2ラウンド。Worker とランナーの対照)。対象ごとに「Worker → ランナー」の
+ * 順で、**同じ対象(同じ URL・同じ設定)を連続して**送る。変えるのは送信元だけ。合計は対象数の2倍=
+ * 1回の実行の上限(10本)ちょうど。
+ */
+export function buildRequestPlan(): PlannedRequest[] {
+  const plan: PlannedRequest[] = [];
+  for (const target of buildTargets()) {
+    plan.push({ source: "worker", target }, { source: "runner", target });
+  }
+  return plan;
 }

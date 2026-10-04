@@ -88,6 +88,98 @@ describe("extractResultBlock", () => {
   });
 });
 
+describe("renderMarkdown: 対照実験・推定・独立性", () => {
+  const rec = (targetId: string, source: "worker" | "runner", status: number, parsed = status === 200 ? 16 : null) => ({
+    targetId,
+    url: `https://race.netkeiba.com/${targetId}`,
+    status,
+    bodyLength: 0,
+    charset: null,
+    parsedKind: "shutuba",
+    parsedCount: parsed,
+    parseError: null,
+    replacementChars: null,
+    headers: {},
+    bodyHead: null,
+    error: null,
+    source,
+  });
+
+  it("到達性の表に送信元の列を出し、Worker とランナーの行を区別する", () => {
+    const r = emptyResult("x");
+    r.netkeiba.records.push(rec("central-shutuba", "worker", 400), rec("central-shutuba", "runner", 200));
+    r.netkeiba.requestCount = 2;
+    const md = renderMarkdown(r);
+    expect(md).toContain("| 送信元 |");
+    expect(md).toMatch(/\| central-shutuba \| worker \| 400 \|/);
+    expect(md).toMatch(/\| central-shutuba \| runner \| 200 \|/);
+  });
+
+  it("対照の表(同じ対象の Worker とランナー)と、暫定の読みを出す", () => {
+    const r = emptyResult("x");
+    r.netkeiba.records.push(rec("a", "worker", 400), rec("a", "runner", 200));
+    const md = renderMarkdown(r);
+    expect(md).toContain("対照");
+    expect(md).toContain("worker-only-blocked");
+    expect(md).toContain("Cloudflare");
+  });
+
+  it("両方拒否された場合の読みは『Cloudflare 固有ではない』", () => {
+    const r = emptyResult("x");
+    r.netkeiba.records.push(rec("a", "worker", 400), rec("a", "runner", 400));
+    const md = renderMarkdown(r);
+    expect(md).toContain("both-blocked");
+    expect(md).toContain("Cloudflare 固有ではない");
+  });
+
+  it("送信元ごとの打ち切り理由を出す", () => {
+    const r = emptyResult("x");
+    r.netkeiba.records.push(rec("a", "worker", 400));
+    r.netkeiba.stoppedBySource = { worker: "consecutive-blocks", runner: null };
+    const md = renderMarkdown(r);
+    expect(md).toContain("worker: consecutive-blocks");
+    expect(md).toContain("runner: なし");
+  });
+
+  const searchDo: SearchResult = {
+    points: [],
+    maxPassReps: 32,
+    minFailReps: 34,
+    reachedMax: false,
+    stopReason: "converged",
+    inconclusive: false,
+    totalProbes: 10,
+  };
+
+  it("Durable Object の結果に、1回あたりの CPU の推定(30000/34 〜 30000/32 ms)を併記し、30 秒はドキュメントの値で実測ではないと明記する", () => {
+    const r = emptyResult("x");
+    r.cpu.durableObject.allocFull = searchDo;
+    const md = renderMarkdown(r);
+    expect(md).toContain("882");
+    expect(md).toContain("938");
+    expect(md).toMatch(/30 ?秒.*ドキュメント/);
+    expect(md).toContain("実測ではない");
+  });
+
+  it("推定は Durable Object だけに出す(Worker の行には出さない)", () => {
+    const r = emptyResult("x");
+    r.cpu.worker.parse = searchDo;
+    const md = renderMarkdown(r);
+    expect(md).not.toContain("882");
+  });
+
+  it("Worker の超過後の /ping が落ちた件数と、逆転の件数を出し、独立でない可能性を注記する", () => {
+    const r = emptyResult("x");
+    r.cpu.samples.push(
+      { runtime: "worker", work: "parse", reps: 8, status: 503, kind: "cpu-exceeded", wallMs: 30, insideMs: null, afterIoMs: null, bodyHead: null, pingAfter: 503 },
+      { runtime: "worker", work: "score", reps: 1, status: 503, kind: "cpu-exceeded", wallMs: 20, insideMs: null, afterIoMs: null, bodyHead: null, pingAfter: 503 },
+    );
+    const md = renderMarkdown(r);
+    expect(md).toContain("独立");
+    expect(md).toMatch(/2 ?件中 ?2 ?件/);
+  });
+});
+
 describe("renderMarkdown", () => {
   const searchOk: SearchResult = {
     points: [

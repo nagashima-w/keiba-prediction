@@ -1,10 +1,11 @@
 /**
- * `wrangler delete` の後の確認と、結果の出力(Issue #159〈#21-A〉)。ワークフローの最後(always)で動く。
+ * 削除の後の確認と、結果の出力(Issue #159〈#21-A〉)。ワークフローの最後(always)で動く。
  *
  *  1. Worker の一覧を取り、`keiba-cf-spike-` で始まる Worker が残っていないことを検査してログに出す
- *     (preflight で作った最小 Worker も対象)。残っていれば API の DELETE で消しにいくが、
- *     wrangler delete で消えていなかった事実は変わらないので、ジョブは失敗させる。
- *  2. Durable Object の名前空間が Worker と一緒に消えたかを記録する(wrangler delete の直後の状態)。
+ *     (preflight で作った最小 Worker も対象)。削除ステップ(delete-run.ts。API の DELETE)の後に残って
+ *     いれば、もう一度 API の DELETE で消しにいき、再度一覧で確認する。**それでも残っていれば
+ *     (一覧を取得できない場合も)ジョブを失敗させる。**
+ *  2. Durable Object の名前空間が Worker と一緒に消えたかを記録する(削除ステップの直後の状態)。
  *  3. 結果 JSON に後片付けの結果を足し、step summary に Markdown を書き、結果の全文を
  *     `===CF-SPIKE-RESULT-BEGIN===` / `===CF-SPIKE-RESULT-END===` で挟んだ1行でログに出す
  *     (メインが読めるのはジョブログ本文だけのため。ログは末尾から読まれるので、出力の最後に置く)。
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
     result.notes.push(loadNote);
   }
 
-  // 1. wrangler delete の直後の状態。
+  // 1. 削除ステップの直後の状態。
   const first = judgeCleanup(await listState(token, accountId));
   console.log(
     `削除の確認: 接頭辞 ${SPIKE_WORKER_PREFIX} の Worker の残り=${first.leftoverWorkers.length}件` +
@@ -67,11 +68,11 @@ async function main(): Promise<void> {
       ` / 一覧の取得=${first.listUnavailable ? "失敗" : "成功"} / Durable Object の名前空間=${first.durableObjectNamespaces}`,
   );
 
-  // 残っていれば API で消しにいく(消えていなかった事実は ok=false に残す)。
+  // 残っていれば API でもう一度消しにいく。
   const deletedByFallback: string[] = [];
   for (const name of first.leftoverWorkers) {
     const del = await cfApi(token, `/accounts/${accountId}/workers/scripts/${name}?force=true`, { method: "DELETE" });
-    console.log(`::warning::wrangler delete で消えていなかった ${name} を API で削除しました(HTTP ${del.status ?? "例外"})`);
+    console.log(`::warning::削除ステップの後も残っていた ${name} を API で削除しました(HTTP ${del.status ?? "例外"})`);
     if (del.status === 200) {
       deletedByFallback.push(name);
     }
@@ -81,11 +82,12 @@ async function main(): Promise<void> {
     console.log(`再確認: 残り=${final.leftoverWorkers.length}件${final.leftoverWorkers.length > 0 ? `(${final.leftoverWorkers.join(", ")})` : ""}`);
   }
 
-  const ok = first.ok && final.ok;
+  // 最終的に(再削除のあとの一覧で)残っていなければ ok。削除ステップの失敗そのものは、そのステップのログに残る。
+  const ok = final.ok;
   result.cleanup = {
     leftoverWorkers: first.leftoverWorkers,
     deletedByFallback,
-    // 「DO は Worker と一緒に消えるか」への答えは、wrangler delete の直後(フォールバック前)の状態。
+    // 「DO は Worker と一緒に消えるか」への答えは、削除ステップの直後(再削除の前)の状態。
     durableObjectNamespaces: first.durableObjectNamespaces,
     ok,
     listUnavailable: first.listUnavailable,
