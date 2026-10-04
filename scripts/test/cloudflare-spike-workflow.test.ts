@@ -13,7 +13,16 @@ import { describe, expect, it } from "vitest";
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const yml = readFileSync(path.join(ROOT, ".github", "workflows", "cloudflare-spike.yml"), "utf-8");
+/**
+ * ファイルを読み、改行を LF に正規化する。Windows のチェックアウト(core.autocrlf)では改行が CRLF に
+ * なり、`\n` 前提の正規表現が一致しなくなる(Windows CI で実際に失敗した)。既存の
+ * `release-workflow-gate.test.ts` / `version-policy.test.ts` と同じ対処。
+ */
+function readTextLf(...segments: string[]): string {
+  return readFileSync(path.join(ROOT, ...segments), "utf-8").replace(/\r\n/g, "\n");
+}
+
+const yml = readTextLf(".github", "workflows", "cloudflare-spike.yml");
 
 /** `- name: <名前>` で始まるステップの本文(次のステップ直前まで)を返す。 */
 function stepBody(nameFragment: string): string {
@@ -139,7 +148,7 @@ describe("後片付け(失敗時も Worker を消す)と結果の出力", () => 
     expect(stepBody("削除の確認")).toContain("cleanup-run.ts");
     expect(yml).toContain("actions/upload-artifact");
     // 出力の実体は cleanup-run.ts(配線は fake の Cloudflare API サーバに向けて実行して確認済み。ここは静的な固定)
-    const src = readFileSync(path.join(ROOT, "spikes", "cloudflare", "cleanup-run.ts"), "utf-8");
+    const src = readTextLf("spikes", "cloudflare", "cleanup-run.ts");
     expect(src).toContain("GITHUB_STEP_SUMMARY");
     expect(src).toContain("console.log(formatResultBlock(result))");
     expect(src.indexOf("::error")).toBeGreaterThan(-1);
