@@ -177,7 +177,7 @@ describe("renderMarkdown: 対照実験・推定・独立性", () => {
     expect(md).toContain("| alloc | 750 〜 882 |");
   });
 
-  it("逆転だけがあり、超過の直後の /ping はすべて 200 のときは、『軽い処理も落ちている』と書かない(境界付近の揺らぎと読む)", () => {
+  it("逆転だけがあり、超過の直後の /ping はすべて 200 のときは、『軽い処理も落ちている』とも『上限付近の揺らぎ』とも書かず、原因は未調査とする", () => {
     const r = emptyResult("x");
     r.cpu.samples.push(
       { runtime: "worker", work: "alloc", reps: 1, status: 200, kind: "ok", wallMs: 337, insideMs: 1, afterIoMs: 1, bodyHead: null },
@@ -187,7 +187,23 @@ describe("renderMarkdown: 対照実験・推定・独立性", () => {
     expect(md).toMatch(/1 ?件中 ?0 ?件/);
     expect(md).toContain("逆転(以前に通過した reps 以下の reps が失敗): 1 件");
     expect(md).not.toContain("軽い処理でも失敗している");
+    expect(md).not.toContain("揺らぎ");
+    expect(md).not.toContain("上限付近");
     expect(md).toContain("通過と超過が混在");
+    expect(md).toContain("原因は未調査");
+  });
+
+  it("逆転の内訳(実行環境・処理・失敗した reps・以前に通過した最大 reps)を事実として列挙する", () => {
+    const r = emptyResult("x");
+    r.cpu.samples.push(
+      { runtime: "worker", work: "alloc", reps: 1, status: 200, kind: "ok", wallMs: 337, insideMs: 0, afterIoMs: 17, bodyHead: null },
+      { runtime: "worker", work: "alloc", reps: 1, status: 503, kind: "cpu-exceeded", wallMs: 20, insideMs: null, afterIoMs: null, bodyHead: null, pingAfter: 200 },
+      { runtime: "worker", work: "allocFull", reps: 1, status: 200, kind: "ok", wallMs: 899, insideMs: 0, afterIoMs: 36, bodyHead: null },
+      { runtime: "worker", work: "allocFull", reps: 1, status: 503, kind: "cpu-exceeded", wallMs: 21, insideMs: null, afterIoMs: null, bodyHead: null, pingAfter: 200 },
+    );
+    const md = renderMarkdown(r);
+    expect(md).toContain("- 逆転の内訳: worker/alloc: reps=1 で超過(以前に reps=1 が通過)");
+    expect(md).toContain("worker/allocFull: reps=1 で超過(以前に reps=1 が通過)");
   });
 
   it("maxPassReps=null でも、最初の点で一部の試行が通過していたら『通過なし』だけで済ませず、内訳(通過・超過の回数)を書く", () => {

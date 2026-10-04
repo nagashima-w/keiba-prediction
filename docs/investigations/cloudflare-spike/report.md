@@ -13,17 +13,18 @@
 
 ### 事実(結果 JSON に記録されていること)
 
-- **Workers → netkeiba**: Worker から取得した race.netkeiba.com(出馬表)と db.netkeiba.com(馬ページ)は、どちらも
-  **HTTP 400・本文0バイト**だった(応答ヘッダは `server: cloudflare`、`x-cache: Error from cloudfront`)。2回連続の拒否で Worker は
-  打ち切ったため、nar.netkeiba.com・race のオッズ API・db の戦績 API は **Worker からは未測定**
+- **Workers → netkeiba**: 第2ラウンドで Worker から取得した race.netkeiba.com(出馬表)と db.netkeiba.com(馬ページ)は、どちらも
+  **HTTP 400・本文0バイト**だった(応答ヘッダは `server: cloudflare`、`x-cache: Error from cloudfront`)。第1ラウンドでは
+  race のオッズ API も同じ 400 だった。2回連続の拒否で Worker は打ち切ったため、nar.netkeiba.com・db の戦績 API は
+  **Worker からは未測定**(第2ラウンドの race のオッズ API も未測定)
 - **ランナー(GitHub Actions)→ netkeiba**: 同じ URL・同じヘッダ(User-Agent を含む)・同じ取得コード・同じ記録の形で、
   ランナーの Node から5対象とも **HTTP 200 で、既存パーサが読めた**(応答ヘッダは `server: Apache`、`x-cache: Miss from cloudfront`)。
   EUC-JP の馬ページも文字化けなし。**変えたのは送信元だけ**(Worker か ランナーか)
 - **EUC-JP のデコード**: 本番の Worker 内で、`HttpClient`(iconv-lite、`nodejs_compat`)による往復が一致した
-- **Durable Object(Free プラン)**: CPU 超過は HTTP 500
+- **Durable Object(Free プランと推定。§6)**: CPU 超過は HTTP 500
   `Durable Object exceeded its CPU time limit and was reset.`(`cpu.samples` の超過 10 件すべて)。**重い計算(全券種の配分 = allocFull)が、
   1 リクエストの中で数十回分(下の表の maxPassReps)収まった**。allocFull を1回だけ動かした壁時計は約1秒(`cpu.samples` の DO・allocFull・reps=1。2回とも 1 秒前後)
-- **普通の Worker(Free プラン)**: 通過する量は DO よりずっと小さい(下の表)。Worker の超過は HTTP 503
+- **普通の Worker(Free プランと推定。§6)**: 通過する量は DO よりずっと小さい(下の表)。Worker の超過は HTTP 503
 - **後片付け**: 接頭辞付きの Worker は残り0件。DO の名前空間も Worker と一緒に消えた(`durableObjectNamespaces: removed`)
 - **この実行から取れなかった測定**: 補助に入れた時計(Worker 内の `performance.now()` の差)は、DO では常に 0、普通の Worker でも
   処理の直後(`insideMs`)は常に 0 だった(本番では実行中に I/O が無いと時計が進まない、というドキュメントのとおり)。I/O を挟んだ
@@ -42,8 +43,11 @@
   同じ条件の直後の試行は超過した(`cpu.samples[45]`)。再現性が無いので、**Worker で重い計算を動かす根拠にはならない**。
   機序は調べていない
 - 第1ラウンド(`round1.md`)の Worker の測定は、超過の直後に軽い処理まで落ちていた疑いがあり、汚染されていた可能性が高い。
-  第2ラウンドでは超過の直後の `/ping` がすべて 200 で、**汚染の証拠は見つからなかった**(生成した節の「超過の後の測定は独立か」)。
-  逆転(同じ reps で通過と超過が混在)は、上限付近の揺らぎと読む
+  第2ラウンドでは、超過の直後の `/ping` が(Worker で超過した 11 件すべて)200 だった。**第1ラウンドの現象(超過の後に軽い処理まで落ちる)は
+  見られなかった**。ただし、**測定が独立だったとまでは言えない**: 第2ラウンドの Worker には、同じ reps で通過と超過が混在した
+  「逆転」が2件ある。これは **`cpu.samples[43]`(alloc・reps=1)と `[45]`(allocFull・reps=1)で、どちらも探索の最小点**であり、
+  直前の `[42]`(200・壁時計 337 ms)と `[44]`(200・壁時計 899 ms)では、数百 ms 相当の計算が 10 ms の上限を超えて完了している。
+  **この混在の原因は調べていない**(上限付近のばらつきとは読めない)
 
 ## 2. 実行の概要
 
@@ -134,7 +138,8 @@
 
 - 超過の直後の /ping(処理なし): 11 件中 0 件が 200 以外
 - 逆転(以前に通過した reps 以下の reps が失敗): 2 件
-- 読み: 超過の直後の /ping はすべて 200(軽い処理は落ちていない)。逆転は、同じ reps で通過と超過が混在している(上限付近の揺らぎ)ことを示す。超過の後に軽い処理まで落ちる、という意味で測定が独立でない証拠は無い。
+- 逆転の内訳: worker/alloc: reps=1 で超過(以前に reps=1 が通過)、worker/allocFull: reps=1 で超過(以前に reps=1 が通過)
+- 読み: 超過の直後の /ping はすべて 200(軽い処理は落ちていない)。逆転は、同じ reps で通過と超過が混在していることを示す(原因は未調査)。超過の後に軽い処理まで落ちる、という意味では独立でない証拠は無いが、測定が独立だったとまでは言えない。
 
 #### ローカル(workerd)での 1 reps あたり ms(本番の CPU とは異なる目安)
 
@@ -164,9 +169,10 @@
 
 ### 到達性
 
-**事実**: Worker からは race と db が 400 で、ランナーからは5対象とも 200。つまり、現行のスクレイピング(`scrapeRace`)を
-**Cloudflare Workers の上でそのまま動かすと、少なくとも race.netkeiba.com と db.netkeiba.com は取得できない。**
-nar.netkeiba.com は Worker からは測れていない(race・db の拒否で打ち切ったため。ランナーからは取れる)。
+**事実**: Worker から測った対象のうち、race の出馬表・race のオッズ API(第1ラウンド)・db の馬ページは 400 で、ランナーからは5対象とも 200。
+**測った範囲では**、現行のスクレイピング(`scrapeRace`)を Cloudflare Workers の上でそのまま動かしても、race.netkeiba.com と
+db.netkeiba.com の馬ページは取得できなかった。db の戦績 API と nar.netkeiba.com は Worker からは測れていない
+(race・db の拒否で打ち切ったため。ランナーからは取れる)。
 
 **推測・未確認**:
 
@@ -182,15 +188,15 @@ nar.netkeiba.com は Worker からは測れていない(race・db の拒否で�
 
 **事実**:
 
-- DO(Free プラン)は、1 リクエストの中で、全券種の配分計算(allocFull)を数十回分(表の maxPassReps)動かせる。**実運用の1レース分は、
-  DO の 1 リクエストに十分収まっている**
-- 普通の Worker(Free プラン)は、配分計算(alloc / allocFull)を、安定して1回も通せなかった(表のとおり、reps=1 で通過と超過が混在)
+- DO(Free プランと推定。§6)は、1 リクエストの中で、全券種の配分計算(allocFull)を数十回分(表の maxPassReps)動かせる。**中央16頭・実オッズの
+  1レース分(測った入力)は、DO の 1 リクエストに十分収まっている。18頭など、ほかの入力は未測定**
+- 普通の Worker(Free プランと推定。§6)は、配分計算(alloc / allocFull)を、安定して1回も通せなかった(表のとおり、reps=1 で通過と超過が混在)
 - 配分計算を「閲覧側のブラウザの Web Worker で行う」案(#21 の本文にある。#119 で Web Worker 化済み)は、今回の測定の対象外
 
 **推測・未確認**:
 
 - 「30 秒」はドキュメントの値。**DO の上限が Free でも 30 秒であることは、今回の結果と矛盾しないが、30 秒そのものは測っていない**
-- DO を使えば、Free のままでも、1 レース分の配分は収まる見込み。ただし、複数レースを1つの DO で順に処理するか、レースごとに分けるか、
+- DO を使えば、Free と推定されるアカウントのままでも、1 レース分(中央16頭)の配分は収まる見込み。ただし、複数レースを1つの DO で順に処理するか、レースごとに分けるか、
   DO の日次の制限(リクエスト数・GB-s)をどれだけ使うかは、未測定
 - スクレイピングを Workers の中で行う場合は、別の制約もある(Free の subrequest は 50/呼び出し。`scrapeRace` は 16 頭で戦績 API だけで
   16 本 + 出馬表・オッズなどが要る。机上の見積もりで、今回は測っていない)
@@ -242,7 +248,7 @@ pnpm run smoke                                           # wrangler dev(ロー�
 
 ## 6. この結果の限界
 
-- 測ったのは1アカウント(Free プラン)・1回の実行(第2ラウンド)。Worker の通過量は、第1ラウンドと第2ラウンドで違う(例: parse の
+- 測ったのは1アカウント・1回の実行(第2ラウンド)。**プランはスパイクで確認していない**(結果の表の「Free」は、ユーザーの申告と、観測された傾向〈Worker は小さい量で超過し、DO は1リクエストで数十秒規模の計算が通る〉からの推定)。Worker の通過量は、第1ラウンドと第2ラウンドで違う(例: parse の
   通過した最大 reps)。**実行間のばらつきがあり、表の下位の桁に意味は無い**
 - ローカル(workerd)の値は、本番の CPU とは別物の目安
 - ランナー側の取得は Node の fetch(undici)で、Worker の fetch とは、TLS・HTTP のバージョンなど、送信元以外の差がありうる。

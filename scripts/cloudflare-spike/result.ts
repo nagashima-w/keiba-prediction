@@ -337,13 +337,20 @@ export function renderMarkdown(result: SpikeResult): string {
       `- 超過の直後の /ping(処理なし): ${independence.pingChecks} 件中 ${independence.pingFailures} 件が 200 以外`,
     );
     out.push(`- 逆転(以前に通過した reps 以下の reps が失敗): ${independence.inversions.length} 件`);
+    if (independence.inversions.length > 0) {
+      out.push(
+        `- 逆転の内訳: ${independence.inversions
+          .map((i) => `${i.runtime}/${i.work}: reps=${i.failedReps} で超過(以前に reps=${i.earlierPassedReps} が通過)`)
+          .join("、")}`,
+      );
+    }
     if (independence.pingFailures > 0) {
       out.push(
         "- 読み: Worker の最初の超過の後の測定は独立していない可能性がある(超過の後は、軽い処理でも失敗している)。Worker の上限の値としては扱わない。",
       );
     } else if (independence.inversions.length > 0) {
       out.push(
-        "- 読み: 超過の直後の /ping はすべて 200(軽い処理は落ちていない)。逆転は、同じ reps で通過と超過が混在している(上限付近の揺らぎ)ことを示す。超過の後に軽い処理まで落ちる、という意味で測定が独立でない証拠は無い。",
+        "- 読み: 超過の直後の /ping はすべて 200(軽い処理は落ちていない)。逆転は、同じ reps で通過と超過が混在していることを示す(原因は未調査)。超過の後に軽い処理まで落ちる、という意味では独立でない証拠は無いが、測定が独立だったとまでは言えない。",
       );
     } else {
       out.push("- 読み: 超過の直後の /ping はすべて 200 で、逆転もなく、独立でない証拠は見つからなかった。");
