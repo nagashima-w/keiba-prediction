@@ -46,7 +46,7 @@ export interface OriginRecord extends NetkeibaProbeRecord {
   readonly sourceKey: OriginSourceKey;
 }
 
-/** E2 / E3 が測る対象(race の出馬表と db の馬ページ。EUC-JP)。 */
+/** E2 / E3 が測る対象(race の出馬表は utf-8、db の馬ページだけ euc-jp)。 */
 const E2_E3_TARGET_IDS = ["central-shutuba", "db-horse-page"] as const;
 
 /** 実験ごとの計画の本数。 */
@@ -233,13 +233,22 @@ export function describeConclusion(conclusion: OriginConclusion, e1: E1Compariso
     limitations.push(...transportLines(e1));
   } else if (conclusion === "header-suspected") {
     limitations.push(
-      "E2 は送信元(ランナー)を変えずに、Worker にだけ現れたヘッダをまとめて足した実験で、拒否された。どのヘッダが効いたかは絞っていない。",
+      "E2 は送信元(ランナー)を変えずに、Worker にだけ現れたヘッダをまとめて足した実験で、拒否された。どのヘッダ(CF-Worker・CF-Connecting-IP・CDN-Loop など)が効いたかは分離できない。",
     );
   } else if (conclusion === "ip-suspected") {
     limitations.push(
-      "ソケットで自前に組んだリクエストの不備(ヘッダの欠落・順序・TLS)でも拒否されうるので、疑いにとどまる。",
+      "E3 の拒否は、送信元の IP と、ソケットで自前に組んだリクエストの実装(ヘッダの欠落・順序・TLS)の不備とを分離できない。疑いにとどまる。",
     );
     limitations.push(...transportLines(e1));
+  } else if (conclusion === "both-suspected") {
+    limitations.push(
+      "E2 と E3 がどちらも拒否されたので、ヘッダと送信元(IP)のどちらが、あるいは両方が効いているのかは分離できない。",
+    );
+  } else {
+    // inconclusive / baseline-not-reproduced
+    limitations.push(
+      "ヘッダ・TLS・HTTP バージョン・送信元(IP)のどれが原因かは、この実行では分離できない(何も絞れていない)。",
+    );
   }
   limitations.push("各実験の対象は2対象(race の出馬表と db の馬ページ。E0 は race の1対象)で、標本が小さい。");
   limitations.push(

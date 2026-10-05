@@ -180,9 +180,31 @@ describe("parseHttp1Response(応答のパース)", () => {
     expect(dec.decode(r.body)).toBe("hello");
   });
 
-  it("Transfer-Encoding の大文字小文字・複数コーディングの末尾 chunked を認める", () => {
+  it("Transfer-Encoding の値は大文字小文字を区別しない(Chunked)", () => {
     const r = parseHttp1Response(bytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n"));
+    expect(r.framing).toBe("chunked");
     expect(dec.decode(r.body)).toBe("hi");
+  });
+
+  it("複数コーディングで末尾が chunked(gzip, chunked)なら、chunked として解く", () => {
+    const r = parseHttp1Response(bytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n"));
+    expect(r.framing).toBe("chunked");
+    expect(dec.decode(r.body)).toBe("hi");
+  });
+
+  it("複数コーディングが複数のヘッダ行に分かれていても、全体の末尾が chunked なら chunked として解く", () => {
+    const r = parseHttp1Response(
+      bytes("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n"),
+    );
+    expect(r.framing).toBe("chunked");
+    expect(dec.decode(r.body)).toBe("hi");
+  });
+
+  it("末尾が chunked でない(chunked, gzip)なら、chunked とはみなさない(EOF までを本文とする)", () => {
+    const raw = "2\r\nhi\r\n0\r\n\r\n";
+    const r = parseHttp1Response(bytes(`HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\n${raw}`));
+    expect(r.framing).toBe("until-close");
+    expect(dec.decode(r.body)).toBe(raw);
   });
 
   it("Content-Length も chunked も無ければ、EOF までを本文とする(Connection: close)", () => {

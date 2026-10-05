@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EchoFetchResult } from "../cloudflare-spike/echo.js";
+import { maskText, type EchoFetchResult } from "../cloudflare-spike/echo.js";
 import type { EchoService } from "../cloudflare-spike/echo-targets.js";
 import type { HeaderEntry } from "../cloudflare-spike/http1.js";
 import { runOrigin, type OriginResult, type OriginRunDeps } from "../cloudflare-spike/origin-run.js";
@@ -496,6 +496,136 @@ describe("runOrigin: 公開される結果に生の値を載せない(マスク)
     await runOrigin(h.deps);
     const e2 = h.sent.find((s) => s.step.experiment === "E2")!;
     expect(e2.headers.find((x) => x.name === "cf-connecting-ip")!.value).toBe(RAW_IP);
+  });
+});
+
+describe("runOrigin: 送信は生の値、記録はマスク済みの値(マスク対象を含む値で固定する)", () => {
+  // 既定の UA("UA")にはマスク対象が無く、マスクの有無で値が変わらないため、送信値とマスク済みの値の取り違えを
+  // 検出できない。E3 のヘッダ(ランナーの観測から導出)・値だけ違うヘッダ・E2 のヘッダのすべてに、マスク対象を入れる。
+  const OTHER_IP = "203.0.113.7";
+  const SENSITIVE_UA = `ua/${RAW_IP}-${RAW_SUB}`;
+  const sensitiveEcho = (place: OriginPlace): EchoFetchResult =>
+    ok(
+      peet(
+        place === "worker"
+          ? [
+              `User-Agent: ${SENSITIVE_UA}`,
+              `x-client: worker ${RAW_IP}`,
+              `cf-connecting-ip: ${RAW_IP}`,
+              `cf-worker: ${RAW_SUB}.workers.dev`,
+              `cf-ray: ${RAW_RAY}-IAD`,
+            ]
+          : [
+              "Host: tls.peet.ws",
+              "Connection: keep-alive",
+              `User-Agent: ${SENSITIVE_UA}`,
+              `x-runner-tag: ${RAW_WORKER}`,
+              "accept: */*",
+              `x-client: runner ${OTHER_IP}`,
+              "accept-encoding: gzip, deflate",
+            ],
+      ),
+    );
+
+  it("前提: マスクすると値が変わる(マスクの有無で結果が分かれる入力になっている)", () => {
+    expect(maskText(SENSITIVE_UA, MASK)).not.toBe(SENSITIVE_UA);
+    expect(maskText(SENSITIVE_UA, MASK)).toBe("ua/<ip>-<subdomain>");
+  });
+
+  it("E3 に渡すヘッダは、ランナーが観測した生の値のまま(マスクした値を送らない)", async () => {
+    const h = harness({ echo: sensitiveEcho });
+    await runOrigin(h.deps);
+    const e3 = h.sent.filter((s) => s.step.experiment === "E3");
+    expect(e3).toHaveLength(2);
+    for (const s of e3) {
+      expect(s.headers).toEqual([
+        { name: "User-Agent", value: SENSITIVE_UA },
+        { name: "x-runner-tag", value: RAW_WORKER },
+        { name: "accept", value: "*/*" },
+        { name: "x-client", value: `runner ${OTHER_IP}` },
+      ]);
+    }
+  });
+
+  it("E2 に渡すヘッダは、Worker が実際に付けた生の値のまま(マスクした値を送らない)", async () => {
+    const h = harness({ echo: sensitiveEcho });
+    await runOrigin(h.deps);
+    const e2 = h.sent.filter((s) => s.step.experiment === "E2");
+    expect(e2).toHaveLength(2);
+    for (const s of e2) {
+      expect(s.headers).toEqual([
+        { name: "cf-connecting-ip", value: RAW_IP },
+        { name: "cf-worker", value: `${RAW_SUB}.workers.dev` },
+        { name: "cf-ray", value: `${RAW_RAY}-IAD` },
+      ]);
+    }
+  });
+
+  it("結果の e3.headers は、マスク済みの値だけ(名前は送ったもの、値は置換後)", async () => {
+    const r = await runOrigin(harness({ echo: sensitiveEcho }).deps);
+    expect(r.e3.headers).toEqual([
+      { name: "User-Agent", value: "ua/<ip>-<subdomain>" },
+      { name: "x-runner-tag", value: "<worker>" },
+      { name: "accept", value: "*/*" },
+      { name: "x-client", value: "runner <ip>" },
+    ]);
+  });
+
+  it("結果の e2.sent は、マスク済みの値だけ", async () => {
+    const r = await runOrigin(harness({ echo: sensitiveEcho }).deps);
+    expect(r.e2.sent).toEqual([
+      { name: "cf-connecting-ip", value: "<ip>" },
+      { name: "cf-worker", value: "<subdomain>.workers.dev" },
+      { name: "cf-ray", value: "<ray>-IAD" },
+    ]);
+  });
+
+  it("名前は同じで値が違うヘッダ(valueDiffers)は、Worker 側・ランナー側の両方がマスク済み", async () => {
+    const r = await runOrigin(harness({ echo: sensitiveEcho }).deps);
+    expect(r.echo.diff!.valueDiffers).toEqual([{ name: "x-client", workerValue: "worker <ip>", runnerValue: "runner <ip>" }]);
+  });
+
+  it("両側の観測ヘッダ(echo.worker / echo.runner)と、差分の workerOnly もマスク済み", async () => {
+    const r = await runOrigin(harness({ echo: sensitiveEcho }).deps);
+    expect(r.echo.worker!.headers).toContainEqual({ name: "User-Agent", value: "ua/<ip>-<subdomain>" });
+    expect(r.echo.worker!.headers).toContainEqual({ name: "cf-connecting-ip", value: "<ip>" });
+    expect(r.echo.runner!.headers).toContainEqual({ name: "x-runner-tag", value: "<worker>" });
+    expect(r.echo.diff!.workerOnly).toContainEqual({ name: "cf-connecting-ip", value: "<ip>" });
+  });
+
+  it("結果の JSON のどこにも、生の値(IP 2 種・サブドメイン・Worker 名・cf-ray の一意の部分)が出ない", async () => {
+    const r = await runOrigin(harness({ echo: sensitiveEcho }).deps);
+    const json = JSON.stringify(r);
+    for (const raw of [RAW_IP, OTHER_IP, RAW_SUB, RAW_WORKER, RAW_RAY]) {
+      expect(json).not.toContain(raw);
+    }
+  });
+
+  it("httpbin にフォールバックした場合も、E3 に X-Amzn-Trace-Id を渡さない(エコー側の中継が足したヘッダ)", async () => {
+    const asMap = (lines: string[]): Record<string, string> => Object.fromEntries(lines.map((l) => l.split(": ") as [string, string]));
+    const h = harness({
+      echo: (place, service) => {
+        if (service === "peet") {
+          return fail(503);
+        }
+        const lines =
+          place === "worker"
+            ? ["User-Agent: UA", `cf-connecting-ip: ${RAW_IP}`, "X-Amzn-Trace-Id: Root=1-w"]
+            : ["User-Agent: UA", "Accept: */*", "X-Amzn-Trace-Id: Root=1-r"];
+        return { status: 200, bodyText: JSON.stringify({ headers: asMap(lines) }), responseHeaders: {}, error: null };
+      },
+    });
+    const r = await runOrigin(h.deps);
+    expect(r.echo.serviceUsed).toBe("httpbin");
+    for (const s of h.sent.filter((x) => x.step.experiment === "E3")) {
+      expect(s.headers).toEqual([
+        { name: "User-Agent", value: "UA" },
+        { name: "Accept", value: "*/*" },
+      ]);
+    }
+    expect(r.e3.headers.map((x) => x.name)).not.toContain("X-Amzn-Trace-Id");
+    // E2 側(差分の経由)にも入らない(従来どおり)
+    expect(h.sent.find((x) => x.step.experiment === "E2")!.headers.map((x) => x.name)).toEqual(["cf-connecting-ip"]);
   });
 });
 

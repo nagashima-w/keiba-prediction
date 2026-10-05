@@ -257,6 +257,25 @@ describe("describeConclusion(結果の読み。分離できないものの併記
   });
 
   it.each(["fetch-specific", "header-suspected", "ip-suspected", "both-suspected", "inconclusive", "baseline-not-reproduced"] as const)(
+    "%s の限界にも、『分離できないもの』を併記する",
+    (c) => {
+      expect(describeConclusion(c, same).limitations.join("\n")).toMatch(/分離できない/);
+    },
+  );
+
+  it.each([
+    ["header-suspected", /どのヘッダ/],
+    ["ip-suspected", /ソケット.*(実装|不備)/],
+    ["both-suspected", /ヘッダ.*送信元/],
+    ["inconclusive", /ヘッダ.*TLS.*IP|IP.*ヘッダ/],
+    ["baseline-not-reproduced", /ヘッダ.*TLS.*IP|IP.*ヘッダ/],
+  ] as const)("%s の『分離できないもの』は、その結論に固有の内容(定型文の流用ではない)", (c, pattern) => {
+    const line = describeConclusion(c, same).limitations.find((l) => /分離できない/.test(l));
+    expect(line).toBeDefined();
+    expect(line!).toMatch(pattern);
+  });
+
+  it.each(["fetch-specific", "header-suspected", "ip-suspected", "both-suspected", "inconclusive", "baseline-not-reproduced"] as const)(
     "%s にも、標本が小さい(各実験は2対象)ことと、エコー宛ての観測である限界を併記する",
     (c) => {
       const text = describeConclusion(c, same).limitations.join("\n");

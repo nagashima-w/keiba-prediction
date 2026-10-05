@@ -6,8 +6,17 @@
  * 公開される記録(コミットされる JSON・ジョブログ)に載せる値をマスクする。
  *
  * **生の値の扱い**: エコーの応答には、送信元の IP(ランナー・Cloudflare)や、CF-Worker のように workers.dev の
- * サブドメインを含みうる値が入る。生の値は E2 の送信にだけ使い(メモリ上のみ)、記録に載せる値は
+ * サブドメインを含みうる値が入る。生の値は E2・E3 の送信にだけ使い(メモリ上のみ)、記録に載せる値は
  * {@link maskHeaderValue} を通したものだけにする。
+ *
+ * **何がどこへ送られるか**(第三者と netkeiba に出るもの):
+ *  - E1: Worker とランナーの fetch が、第三者のエコー(tls.peet.ws・httpbin.org)へ、`HttpClient` の User-Agent と、
+ *    fetch の実装が付けるヘッダを送る(共有秘密などは送らない)。**Worker の subrequest には Cloudflare が
+ *    `CF-Worker`(Worker を所有するゾーン名。workers.dev のサブドメインを含みうる)などを付けるので、それがエコーを
+ *    運営する第三者に届く**。ランナー側は、ランナーの IP が届く(エコーは送信元として必ず見る)。
+ *  - E2: Worker にだけ現れたヘッダ(`CF-Worker`・`CF-Connecting-IP` など。Worker が付けた生の値)を、**ランナーから
+ *    netkeiba へ送る**。これは Worker が netkeiba に送るものと同じ内容で、実験として意図したもの。
+ *  - E3: ランナーの観測から導出したヘッダ(生の値)を、Worker のソケットから netkeiba へ送る。
  */
 
 import { DEFAULT_USER_AGENT } from "../../packages/core/src/scraper/http-client.js";
@@ -172,10 +181,11 @@ export function parseEchoObservation(service: EchoService, f: EchoFetchResult): 
 }
 
 /**
- * 差に数えないヘッダ(小文字)。`host` は HTTP/2 では `:authority` になるため両側で比べられず、
- * `x-amzn-trace-id` は httpbin(AWS)が受信のたびに足す揮発の値で、送信側の差ではない。
+ * 送信側の差にも、E3 のヘッダ集合にも数えないヘッダ(小文字)。**エコー側の中継・サーバが足すもの**で、
+ * Worker もランナーも送っていない。`host` は HTTP/2 では `:authority` になるため両側で比べられず、
+ * `x-amzn-trace-id` は httpbin(AWS の ALB)が受信のたびに足す揮発の値。
  */
-const DIFF_IGNORED_HEADERS: ReadonlySet<string> = new Set(["host", "x-amzn-trace-id"]);
+export const ECHO_INFRA_HEADERS: ReadonlySet<string> = new Set(["host", "x-amzn-trace-id"]);
 
 export interface HeaderValueDiff {
   readonly name: string;
@@ -196,7 +206,7 @@ function groupByName(headers: readonly HeaderEntry[]): Map<string, { first: Head
   const out = new Map<string, { first: HeaderEntry; value: string }>();
   for (const h of headers) {
     const key = h.name.toLowerCase();
-    if (DIFF_IGNORED_HEADERS.has(key)) {
+    if (ECHO_INFRA_HEADERS.has(key)) {
       continue;
     }
     const existing = out.get(key);
@@ -295,13 +305,16 @@ export interface SocketHeaderSet {
   readonly source: "runner-echo" | "static-fallback";
 }
 
-/** E3 のソケットで送るヘッダを、ランナーの観測から導出する(取れなければ静的フォールバック)。 */
+/**
+ * E3 のソケットで送るヘッダを、ランナーの観測から導出する(取れなければ静的フォールバック)。
+ * エコー側の中継が足したヘッダ({@link ECHO_INFRA_HEADERS})は、ランナーが送ったものではないので入れない。
+ */
 export function deriveSocketHeaders(runner: EchoObservation | null): SocketHeaderSet {
   if (runner !== null && runner.ok) {
     const headers = runner.headers.filter(
       (h) =>
         isValidHeaderName(h.name) &&
-        h.name.toLowerCase() !== "host" &&
+        !ECHO_INFRA_HEADERS.has(h.name.toLowerCase()) &&
         !isForbiddenRequestHeader(h.name) &&
         isValidHeaderValue(h.value),
     );

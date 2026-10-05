@@ -285,6 +285,38 @@ describe("deriveSocketHeaders(E3 のヘッダ集合)", () => {
     expect(r.headers).toEqual(STATIC_SOCKET_HEADERS);
   });
 
+  it("httpbin にフォールバックしたときも、エコー側の中継(ALB)が足した X-Amzn-Trace-Id は E3 のヘッダに入れない(ランナーの fetch は送っていない)", () => {
+    const runner = parseEchoObservation(
+      "httpbin",
+      fetched(JSON.stringify({ headers: { Accept: "*/*", Host: "httpbin.org", "User-Agent": "ua-x", "X-Amzn-Trace-Id": "Root=1-6ac20693-0063337c495ff4803d1b30e7" } })),
+    );
+    // 前提: 観測には X-Amzn-Trace-Id が入っている(除外されるのは導出の段階)
+    expect(runner.headers.map((h) => h.name)).toContain("X-Amzn-Trace-Id");
+    const r = deriveSocketHeaders(runner);
+    expect(r.source).toBe("runner-echo");
+    expect(r.headers).toEqual([
+      { name: "Accept", value: "*/*" },
+      { name: "User-Agent", value: "ua-x" },
+    ]);
+  });
+
+  it("実際の httpbin 応答(フィクスチャ)から導出しても X-Amzn-Trace-Id は入らない", () => {
+    const runner = parseEchoObservation("httpbin", fetched(fixture("echo-httpbin.json")));
+    expect(runner.headers.map((h) => h.name.toLowerCase())).toContain("x-amzn-trace-id");
+    expect(deriveSocketHeaders(runner).headers.map((h) => h.name.toLowerCase())).not.toContain("x-amzn-trace-id");
+  });
+
+  it("エコー側の中継が足すヘッダだけを除く(それ以外の未知のヘッダは、ランナーが送ったものとして残す)", () => {
+    const runner = obs({
+      headers: [
+        { name: "User-Agent", value: "ua" },
+        { name: "x-custom", value: "1" },
+        { name: "X-Amzn-Trace-Id", value: "Root=1-a" },
+      ],
+    });
+    expect(deriveSocketHeaders(runner).headers.map((h) => h.name)).toEqual(["User-Agent", "x-custom"]);
+  });
+
   it("静的フォールバックは Node 22 の fetch が実測で出した4つ(User-Agent は core の既定)", () => {
     expect(STATIC_SOCKET_HEADERS).toEqual([
       { name: "User-Agent", value: DEFAULT_USER_AGENT },

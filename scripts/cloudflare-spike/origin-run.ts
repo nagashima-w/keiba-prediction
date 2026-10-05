@@ -8,7 +8,14 @@
  *  - エコーは netkeiba の本数に含めない(最大4回: peet を両側 → だめなら httpbin を両側)
  *
  * **公開される結果にはマスク済みの値だけを載せる**(IP・workers.dev のサブドメイン・Worker 名・cf-ray の一意の部分)。
- * E2 の送信に使う生の値は、この関数の中のメモリ上でだけ扱い、結果にもログにも出さない。
+ * E2・E3 の送信に使う生の値は、この関数の中のメモリ上でだけ扱い、結果にもログにも出さない。
+ *
+ * **何がどこへ送られるか**(第三者と netkeiba に出るもの。詳細は `echo.ts`):
+ *  - E1(エコー): Worker の subrequest には Cloudflare が `CF-Worker`(workers.dev のサブドメインを含みうる)などを付け、
+ *    それが第三者のエコー(tls.peet.ws・httpbin.org)に届く。ランナー側も、ランナーの IP がエコーに届く。
+ *  - E2: Worker にだけ現れたヘッダ(`CF-Worker`・`CF-Connecting-IP` など)を、ランナーから netkeiba へ送る。
+ *    Worker が netkeiba に送るものと同じ内容で、実験として意図したもの。
+ *  - E3: ランナーの観測から導出したヘッダを、Worker のソケットから netkeiba へ送る。
  */
 
 import {
