@@ -88,16 +88,26 @@ function loadResponses(): string[] {
 }
 const reasonsOf = (text: string): string[] => [...text.matchAll(/"reason":\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]!);
 
-function measureColumns(responses: readonly string[]): void {
-  console.log("## (1) 大きな列の大きさ(フィクスチャ 202603020211 〔中央16頭〕)");
+/** 大きな列の材料(フィクスチャ 202603020211。中央16頭)。`measureColumns`(大きさの表示)と `buildDetailText`(CPU 測定の入力。Issue #174)が共有する。 */
+interface DetailColumns {
+  readonly comboSizes: ReadonlyArray<{ readonly betType: string; readonly keys: number; readonly bytes: number }>;
+  readonly horseCount: number;
+  readonly withoutCombos: string;
+  readonly snapshot: string;
+  readonly contributions: ReadonlyArray<{ readonly umaban: number; readonly contributions: unknown }>;
+  readonly perHorseBytes: readonly number[];
+}
+
+function buildDetailColumns(): DetailColumns {
   const combos: Record<string, Record<string, number | null>> = {};
+  const comboSizes: Array<{ betType: string; keys: number; bytes: number }> = [];
   for (const [betType, file] of COMBO_FIXTURES) {
     const parsed = parseComboOdds(fixture(file), betType);
     if (parsed.state !== "available") {
       throw new Error(`${file} が available でない`);
     }
     combos[betType] = Object.fromEntries(toComboOddsScalarMap(parsed.odds));
-    console.log(`  ${betType}: ${parsed.odds.size} キー, ${bytes(JSON.stringify(combos[betType]))} バイト`);
+    comboSizes.push({ betType, keys: parsed.odds.size, bytes: bytes(JSON.stringify(combos[betType])) });
   }
   const shutuba = parseShutuba(fixture("shutuba_202603020211.html"));
   const horses = shutuba.horses.map((h) => ({
@@ -111,37 +121,55 @@ function measureColumns(responses: readonly string[]): void {
     ...base, wideCombo: combos["wide"], trioCombo: combos["trio"], quinellaCombo: combos["quinella"],
     exactaCombo: combos["exacta"], trifectaCombo: combos["trifecta"], bracketQuinellaCombo: combos["bracketQuinella"],
   });
-  console.log(`  頭数 ${horses.length}; race_snapshot_json(組合せなし) ${bytes(withoutCombos)} バイト`);
-  console.log(`  race_snapshot_json(組合せ全部入り) ${bytes(snapshot)} バイト, gzip ${gzipSync(snapshot).length} バイト`);
 
-  const contributions = Array.from({ length: horses.length }, (_, i) => {
-    const file = HORSE_RESULT_FIXTURES[i % HORSE_RESULT_FIXTURES.length]!;
-    const input = buildPriorInput({
-      horse: { wakuban: 3, umaban: i + 1, name: "x", horseId: "1" as never, sex: "牡", age: 4, kinryo: 56, jockeyName: "j", jockeyId: null, stableLocation: "栗東", trainerName: "t", trainerId: null, bodyWeight: { weight: 480, diff: 2 } },
-      raceResults: parseHorseResults(fixture(file)),
-      race: { courseType: "芝", distance: 2000, venueName: "東京", isWet: false, date: "2026/06/28", venueKind: "central" },
-      fieldSize: horses.length,
-    });
-    return { umaban: i + 1, contributions: computePrior(input).contributions };
-  });
-  const perHorse = HORSE_RESULT_FIXTURES.map((file) => {
-    const input = buildPriorInput({
-      horse: { wakuban: 3, umaban: 5, name: "x", horseId: "1" as never, sex: "牡", age: 4, kinryo: 56, jockeyName: "j", jockeyId: null, stableLocation: "栗東", trainerName: "t", trainerId: null, bodyWeight: { weight: 480, diff: 2 } },
-      raceResults: parseHorseResults(fixture(file)),
-      race: { courseType: "芝", distance: 2000, venueName: "東京", isWet: false, date: "2026/06/28", venueKind: "central" },
-      fieldSize: horses.length,
-    });
-    return bytes(JSON.stringify(computePrior(input).contributions));
-  });
-  console.log(`  contributions_json(1頭): ${Math.min(...perHorse)}〜${Math.max(...perHorse)} バイト(戦績の異なる ${perHorse.length} 頭), 平均 ${(perHorse.reduce((a, b) => a + b, 0) / perHorse.length).toFixed(0)} バイト; ${horses.length}頭分 ${bytes(JSON.stringify(contributions))} バイト`);
+  const priorOf = (file: string, umaban: number): unknown =>
+    computePrior(
+      buildPriorInput({
+        horse: { wakuban: 3, umaban, name: "x", horseId: "1" as never, sex: "牡", age: 4, kinryo: 56, jockeyName: "j", jockeyId: null, stableLocation: "栗東", trainerName: "t", trainerId: null, bodyWeight: { weight: 480, diff: 2 } },
+        raceResults: parseHorseResults(fixture(file)),
+        race: { courseType: "芝", distance: 2000, venueName: "東京", isWet: false, date: "2026/06/28", venueKind: "central" },
+        fieldSize: horses.length,
+      }),
+    ).contributions;
+  const contributions = Array.from({ length: horses.length }, (_, i) => ({
+    umaban: i + 1,
+    contributions: priorOf(HORSE_RESULT_FIXTURES[i % HORSE_RESULT_FIXTURES.length]!, i + 1),
+  }));
+  const perHorseBytes = HORSE_RESULT_FIXTURES.map((file) => bytes(JSON.stringify(priorOf(file, 5))));
+  return { comboSizes, horseCount: horses.length, withoutCombos, snapshot, contributions, perHorseBytes };
+}
+
+/** R2 に置く詳細オブジェクト(snapshot 全部入り + raw + contributions 16頭)の JSON 文字列。`responses` は実 LLM 応答。 */
+function detailTextOf(columns: DetailColumns, responses: readonly string[]): string {
+  return JSON.stringify({ raceSnapshot: JSON.parse(columns.snapshot), rawResponse: responses[2] ?? responses[0], contributions: columns.contributions });
+}
+
+/**
+ * R2 に置く詳細オブジェクトの JSON 文字列(Issue #174。Worker の CPU 測定〈scripts/measure-worker-cpu.ts〉の入力)。
+ * `pnpm tsx scripts/measure-d1-size.ts` の「R2 に置く詳細オブジェクト」の行と同じ入力(フィクスチャ・実 LLM 応答 36 本の3番目)から作る。
+ */
+export function buildDetailText(): string {
+  return detailTextOf(buildDetailColumns(), loadResponses());
+}
+
+function measureColumns(responses: readonly string[]): void {
+  console.log("## (1) 大きな列の大きさ(フィクスチャ 202603020211 〔中央16頭〕)");
+  const columns = buildDetailColumns();
+  for (const c of columns.comboSizes) {
+    console.log(`  ${c.betType}: ${c.keys} キー, ${c.bytes} バイト`);
+  }
+  console.log(`  頭数 ${columns.horseCount}; race_snapshot_json(組合せなし) ${bytes(columns.withoutCombos)} バイト`);
+  console.log(`  race_snapshot_json(組合せ全部入り) ${bytes(columns.snapshot)} バイト, gzip ${gzipSync(columns.snapshot).length} バイト`);
+  const perHorse = columns.perHorseBytes;
+  console.log(`  contributions_json(1頭): ${Math.min(...perHorse)}〜${Math.max(...perHorse)} バイト(戦績の異なる ${perHorse.length} 頭), 平均 ${(perHorse.reduce((a, b) => a + b, 0) / perHorse.length).toFixed(0)} バイト; ${columns.horseCount}頭分 ${bytes(JSON.stringify(columns.contributions))} バイト`);
 
   const rawSizes = responses.map(bytes);
   console.log(`  raw_response: 平均 ${(rawSizes.reduce((a, b) => a + b, 0) / rawSizes.length).toFixed(0)} バイト(最小 ${Math.min(...rawSizes)}・最大 ${Math.max(...rawSizes)}), n=${rawSizes.length}`);
   const reasonBytes = responses.map((r) => reasonsOf(r).reduce((a, x) => a + bytes(x), 0));
   console.log(`  reason(1分析の合計): 平均 ${(reasonBytes.reduce((a, b) => a + b, 0) / reasonBytes.length).toFixed(0)} バイト, n=${reasonBytes.length}`);
 
-  const detail = JSON.stringify({ raceSnapshot: JSON.parse(snapshot), rawResponse: responses[2] ?? responses[0], contributions });
-  console.log(`  R2 に置く詳細オブジェクト(snapshot 全部入り + raw + contributions ${horses.length}頭): 平文 ${bytes(detail)} バイト, gzip ${gzipSync(detail).length} バイト`);
+  const detail = detailTextOf(columns, responses);
+  console.log(`  R2 に置く詳細オブジェクト(snapshot 全部入り + raw + contributions ${columns.horseCount}頭): 平文 ${bytes(detail)} バイト, gzip ${gzipSync(detail).length} バイト`);
 }
 
 function makeRecord(i: number, full: boolean, nHorses: number, responses: readonly string[], rand: () => number): AnalysisRecord {

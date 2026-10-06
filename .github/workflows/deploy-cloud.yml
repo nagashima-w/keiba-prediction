@@ -188,7 +188,7 @@ jobs:
 
       # Issue #171: D1 の権限確認。API トークンが D1 を読めるか(権限不足・未作成を、デプロイの前にはっきり知らせる)を、
       # D1 の取得 API のステータスコードだけで判定する。**応答の本文は出力しない**(-o /dev/null)・トークンもアカウント ID も出さない。
-      # 200 のとき以外は失敗にする。R2 の権限確認は、R2 を使う #172 で足す。
+      # 200 のとき以外は失敗にする。R2 の権限確認は、次のステップ(Issue #174)。
       # このスクリプトは cloud/test/deploy-steps.test.ts が、偽の curl で実際に実行して固定している。
       - name: D1 の権限を確認(ステータスコードだけを出す)
         env:
@@ -213,6 +213,43 @@ jobs:
               ;;
             *)
               echo "::error title=D1 を確認できません::D1 の取得が HTTP $status でした"
+              exit 1
+              ;;
+          esac
+
+      # Issue #174: R2 の権限確認。API トークンが R2 のバケットを読めるか(権限不足・R2 の未有効化・バケット名の誤りを、デプロイの前に
+      # はっきり知らせる)を、R2 のバケット取得 API のステータスコードだけで判定する。**応答の本文は出力しない**(-o /dev/null)・
+      # トークンもアカウント ID も出さない。200 のとき以外は失敗にする。D1 の migration(本番への取り消せない変更)より前に置く。
+      # バケット名は cloud/wrangler.toml の `[[r2_buckets]]` の bucket_name から読む(コメント行は見ない。R2 の命名規則に合わない値なら、API を呼ばずに失敗する)。
+      # ★公式ドキュメントに、この API に必要なトークン権限・存在しないバケットのステータスの記載は無い(未確認)。最初の本番の実行の結果で確かめる(cloud/README.md)。
+      # このスクリプトは cloud/test/deploy-steps.test.ts が、偽の curl で実際に実行して固定している。
+      - name: R2 の権限を確認(ステータスコードだけを出す)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          bucket=$(grep -E '^bucket_name[[:space:]]*=' cloud/wrangler.toml | grep -oE '"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]"' | head -n 1 | tr -d '"' || true)
+          if [ -z "$bucket" ]; then
+            echo "::error title=bucket_name を確認できません::cloud/wrangler.toml の bucket_name が、R2 のバケット名の形(小文字・数字・ハイフンの 3〜63 文字)で見つかりません"
+            exit 1
+          fi
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$bucket" || true)
+          case "$status" in
+            200)
+              echo "R2 のバケットにアクセスできます(HTTP 200)"
+              ;;
+            401|403)
+              echo "::error title=R2 の権限がありません::R2 のバケットの取得が HTTP $status でした。API トークンに R2 の権限があるか、アカウントで R2 が有効化されているかを確認してください(ステータスコードだけでは区別できません)"
+              exit 1
+              ;;
+            404)
+              echo "::error title=R2 のバケットが見つかりません::R2 のバケットの取得が HTTP 404 でした。cloud/wrangler.toml の bucket_name と、ダッシュボードで作成したバケットの名前を確認してください。バケットに管轄(jurisdiction)の指定がある場合も、この確認では見つかりません"
+              exit 1
+              ;;
+            *)
+              echo "::error title=R2 を確認できません::R2 のバケットの取得が HTTP $status でした"
               exit 1
               ;;
           esac

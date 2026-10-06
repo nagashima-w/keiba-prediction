@@ -209,12 +209,13 @@ describe("deploy ジョブの条件(許可ブランチの上で、承認印付�
 describe("deploy ジョブのステップ(秘密・サブドメインの扱いと、デプロイの順序)", () => {
   const deploy = jobBody("deploy");
 
-  it("Secrets の存在確認 → database_id の確認 → サブドメインのマスク → D1 の権限確認 → D1 の migration(本番)→ wrangler deploy → 事後確認 の順で、wrangler deploy は1回だけ", () => {
+  it("Secrets の存在確認 → database_id の確認 → サブドメインのマスク → D1 の権限確認 → R2 の権限確認(#174)→ D1 の migration(本番)→ wrangler deploy → 事後確認 の順で、wrangler deploy は1回だけ", () => {
     const names = [
       "Secrets の存在を確認",
       "database_id が仮の値でないことを確認",
       "サブドメインを取得してマスク",
       "D1 の権限を確認",
+      "R2 の権限を確認",
       "D1 の migration を本番に適用",
       "Worker をデプロイ",
       "事後確認",
@@ -230,7 +231,11 @@ describe("deploy ジョブのステップ(秘密・サブドメインの扱い�
     // wrangler を使うステップ(migration・deploy)は、依存のインストールの後
     const install = stepIndex(deploy, "依存をインストール");
     expect(install).toBeGreaterThanOrEqual(0);
-    expect(install).toBeLessThan(idx[4]!);
+    expect(install).toBeLessThan(idx[5]!);
+    // R2 の権限確認は、本番の D1 への migration(取り消せない変更)よりも前: バケットを使えないまま migration だけが進まない
+    expect(idx[4]!).toBeLessThan(idx[5]!);
+    // wrangler deploy より前(権限不足を、デプロイの失敗より先に、はっきり知らせる)
+    expect(idx[4]!).toBeLessThan(idx[6]!);
     const occurrences = withoutComments(deploy).split("\n").filter((l) => /wrangler deploy/.test(l));
     expect(occurrences).toHaveLength(1);
     expect(occurrences[0]).not.toContain("--dry-run");
@@ -268,6 +273,21 @@ describe("deploy ジョブのステップ(秘密・サブドメインの扱い�
     expect(raw).toContain("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}");
     // database_id の確認は秘密を使わない(リポジトリの値を見るだけ)
     expect(stepBody(deploy, "database_id が仮の値でないことを確認")).not.toContain("secrets.");
+  });
+
+  it("Issue #174: R2 の権限確認ステップは、API の応答本文を出力しない(ステータスコードだけ)。秘密はこのステップの env にだけ渡す", () => {
+    const raw = stepBody(deploy, "R2 の権限を確認");
+    const step = withoutComments(raw);
+    expect(step).toContain("%{http_code}");
+    expect(step).toContain("-o /dev/null");
+    expect(step).toContain("/r2/buckets/");
+    expect(step).not.toMatch(/\bcat\b/);
+    expect(step).not.toMatch(/curl[^\n]* (-v|--verbose|-i|--include|-D|--dump-header|--trace|--trace-ascii)\b/);
+    expect(step).not.toMatch(/\b(echo|printf)\b[^\n]*(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID)/);
+    expect(raw).toContain("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}");
+    expect(raw).toContain("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}");
+    // 検出の確認(空振りでない): 本文を表示する形は拾える
+    expect('curl -o "$out" ...\ncat "$out"').toMatch(/\bcat\b/);
   });
 
   it("マスクは、wrangler deploy(URL をログに出す)より前にサブドメインに対して登録される", () => {

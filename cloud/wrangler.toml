@@ -40,6 +40,15 @@ database_name = "keiba-cloud-db"
 database_id = "c52e97fc-d495-4395-8141-80d20ef57a16"
 migrations_dir = "migrations"
 
+# R2(分析の詳細オブジェクト。Issue #174〈#172-a〉)。大きな列(race_snapshot_json・raw_response・馬ごとの contributions)の置き場(方式 A。#169)。
+# バケットはユーザーがダッシュボードで作成した(ロケーションは アジア太平洋。管轄〈jurisdiction〉の指定は無い=既定)。
+# ★この Issue は binding だけ(使うコードは #172-b 以降)。デプロイ(deploy-cloud.yml)は、wrangler deploy の前に R2 の権限を確認する。
+# ★`remote = true`・`preview_bucket_name`・`jurisdiction` は付けない(ローカルのテスト・開発が本番のバケットに繋がってしまう。
+#   管轄付きのバケットは binding に jurisdiction が要る〈公式ドキュメントの記述。未確認〉が、このバケットは指定なしで作られた)。
+[[r2_buckets]]
+binding = "ANALYSIS_DETAIL"
+bucket_name = "keiba-cloud-r2"
+
 # core(workspace の外。相対 import で取り込む)をバンドルするための解決。CI では packages/core/node_modules が無いので、
 # 依存はこのディレクトリの node_modules から解決させる。undici はスタブに差し替える(src/undici-stub.ts)。
 # tsconfig.json の paths・vitest.config.ts の alias と同じ対応。

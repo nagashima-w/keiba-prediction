@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { D1_FREE_DB_BYTES, seededRandom, yearsUntilFull } from "../measure-d1-size.js";
+import { D1_FREE_DB_BYTES, buildDetailText, seededRandom, yearsUntilFull } from "../measure-d1-size.js";
 
 /**
  * Issue #171(#169-a): 容量の測定スクリプト(scripts/measure-d1-size.ts)の純関数の検査。
@@ -35,5 +35,28 @@ describe("seededRandom(固定の種の乱数)", () => {
       expect(v).toBeLessThan(1);
     }
     expect(new Set(seqA).size).toBe(5);
+  });
+});
+
+describe("buildDetailText(R2 の詳細オブジェクトの JSON。Issue #174 の CPU 測定の入力)", () => {
+  it("raceSnapshot・rawResponse・contributions(16頭。馬番 1〜16)を持つ JSON で、組合せ入りの大きさ(100KB 超)である", () => {
+    const text = buildDetailText();
+    const detail = JSON.parse(text) as { raceSnapshot: { horses: unknown[]; trifectaCombo: Record<string, unknown> }; rawResponse: unknown; contributions: Array<{ umaban: number; contributions: unknown }> };
+    expect(Object.keys(detail).sort()).toEqual(["contributions", "raceSnapshot", "rawResponse"]);
+    expect(Buffer.byteLength(text, "utf-8")).toBeGreaterThan(100_000);
+    // 前提: 組合せが実際に入っている(三連単 3,360 キーが最大の部分。入っていないと大きさの見積もりが小さく出る)
+    expect(Object.keys(detail.raceSnapshot.trifectaCombo).length).toBeGreaterThan(1000);
+    expect(detail.raceSnapshot.horses).toHaveLength(16);
+    expect(typeof detail.rawResponse).toBe("string");
+    expect((detail.rawResponse as string).length).toBeGreaterThan(1000);
+    expect(detail.contributions.map((c) => c.umaban)).toEqual(Array.from({ length: 16 }, (_, i) => i + 1));
+    for (const c of detail.contributions) {
+      expect(Array.isArray(c.contributions)).toBe(true);
+      expect((c.contributions as unknown[]).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("同じ入力から同じ文字列を返す(乱数を使わない。CPU 測定の入力が実行ごとに変わらない)", () => {
+    expect(buildDetailText()).toBe(buildDetailText());
   });
 });

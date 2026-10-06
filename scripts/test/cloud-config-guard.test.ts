@@ -94,6 +94,39 @@ describe("D1(Issue #171。AC-a7: wrangler.toml の設定)", () => {
   });
 });
 
+/** `[[r2_buckets]]` テーブルの本文(次のテーブルの直前まで。コメント除去済みの tomlCode から)。 */
+function r2Block(): string {
+  const m = /^\[\[r2_buckets\]\]\n((?:(?!\[)[^\n]*\n?)*)/m.exec(tomlCode);
+  return m?.[1] ?? "";
+}
+
+describe("R2(Issue #174〈#172-a〉: wrangler.toml の設定)", () => {
+  it("[[r2_buckets]] はちょうど1つで、binding は ANALYSIS_DETAIL・bucket_name は keiba-cloud-r2", () => {
+    expect((tomlCode.match(/^\[\[r2_buckets\]\]$/gm) ?? []).length).toBe(1);
+    const block = r2Block();
+    // 前提: ブロックを実際に読めている(空振りでない)
+    expect(block).not.toBe("");
+    expect(block).toMatch(/^binding = "ANALYSIS_DETAIL"$/m);
+    expect(block).toMatch(/^bucket_name = "keiba-cloud-r2"$/m);
+  });
+
+  it("bucket_name は R2 のバケット名の規則(小文字・数字・ハイフンの 3〜63 文字)に合う(CI の権限確認が URL に使う値なので、記号を許さない)", () => {
+    const name = /^bucket_name = "([^"]*)"$/m.exec(r2Block())?.[1];
+    expect(name).toMatch(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/);
+  });
+
+  it("remote = true・preview_bucket_name・jurisdiction を使わない(ローカルのテスト・開発が本番のバケットに繋がらない。管轄の指定は無い前提=既定)", () => {
+    // 前提: ブロックを実際に読めている(読めていないと、下の「無い」が自明に成立する)
+    expect(r2Block()).not.toBe("");
+    expect(tomlCode).not.toMatch(/^\s*remote\s*=/m);
+    expect(tomlCode).not.toMatch(/preview_bucket_name/);
+    expect(r2Block()).not.toMatch(/jurisdiction/);
+    // 検出の確認(空振りでない): 書かれていれば拾える形
+    expect('[[r2_buckets]]\njurisdiction = "eu"\n').toMatch(/jurisdiction/);
+    expect('[[r2_buckets]]\npreview_bucket_name = "x"\n').toMatch(/preview_bucket_name/);
+  });
+});
+
 /** コメント(`--` から行末)を除いた SQL。 */
 function stripSqlComments(sql: string): string {
   return sql.replace(/--[^\n]*/g, "");

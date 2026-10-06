@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
  * 動かして**確かめるステップの検査。
  *   1. database_id が仮の値(ゼロ UUID)でないことの確認 … 仮の値なら失敗する。実際の wrangler.toml の値では通る
  *   2. D1 の権限確認 … API の応答本文を出力せず、ステータスコードだけで判定する(curl は偽物に差し替える。ネットワークへは出ない)
+ *   3. (Issue #174)R2 の権限確認 … 2 と同じ作法。バケット名は cloud/wrangler.toml の bucket_name から読む
  *
  * yml の `run: |` の本文を取り出して `bash -e` で実行する(GitHub Actions の既定のシェルと同じ `bash -e`)。
  * yml のテキスト検査(ステップの順序・env など)は scripts/test/cloud-deploy-workflow.test.ts が担う。
@@ -98,6 +99,33 @@ function repoWithToml(tomlBody: string): string {
 
 const d1Block = (id: string): string => `name = "x"\n\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "keiba-cloud-db"\ndatabase_id = "${id}"\nmigrations_dir = "migrations"\n`;
 
+  /** 偽の curl: -o の出力先に本文(目印)を書き、-w の出力として STUB_STATUS を出す。呼ばれた引数を ARGS_FILE に残す。 */
+  function stubBin(): { dir: string; argsFile: string } {
+    const dir = tempDir();
+    const bin = path.join(dir, "bin");
+    mkdirSync(bin);
+    const argsFile = path.join(dir, "args.txt");
+    const curl = `#!/bin/bash
+printf '%s\\n' "$@" > "${argsFile}"
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -w) shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$out" ]; then printf '%s' "${BODY_CANARY}" > "$out"; fi
+# 本物の curl は、接続できなかったときも -w の http_code として 000 を出力して、終了コード 7 などで終わる。
+printf '%s' "$STUB_STATUS"
+if [ "$STUB_STATUS" = "000" ]; then exit 7; fi
+`;
+    writeFileSync(path.join(bin, "curl"), curl);
+    chmodSync(path.join(bin, "curl"), 0o755);
+    return { dir: bin, argsFile };
+  }
+
+
 describe.skipIf(!bashAvailable)("AC-a5: database_id が仮の値でないことの確認(deploy ジョブのステップを実際に実行する)", () => {
   const script = (): string => runScript("database_id が仮の値でないことを確認");
 
@@ -138,32 +166,6 @@ describe.skipIf(!bashAvailable)("AC-a5: database_id が仮の値でないこと�
 
 describe.skipIf(!bashAvailable)("AC-a5: D1 の権限確認(偽の curl で、ステータスコードだけを出力することを確かめる)", () => {
   const script = (): string => runScript("D1 の権限を確認");
-
-  /** 偽の curl: -o の出力先に本文(目印)を書き、-w の出力として STUB_STATUS を出す。呼ばれた引数を ARGS_FILE に残す。 */
-  function stubBin(): { dir: string; argsFile: string } {
-    const dir = tempDir();
-    const bin = path.join(dir, "bin");
-    mkdirSync(bin);
-    const argsFile = path.join(dir, "args.txt");
-    const curl = `#!/bin/bash
-printf '%s\\n' "$@" > "${argsFile}"
-out=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -o) out="$2"; shift 2 ;;
-    -w) shift 2 ;;
-    *) shift ;;
-  esac
-done
-if [ -n "$out" ]; then printf '%s' "${BODY_CANARY}" > "$out"; fi
-# 本物の curl は、接続できなかったときも -w の http_code として 000 を出力して、終了コード 7 などで終わる。
-printf '%s' "$STUB_STATUS"
-if [ "$STUB_STATUS" = "000" ]; then exit 7; fi
-`;
-    writeFileSync(path.join(bin, "curl"), curl);
-    chmodSync(path.join(bin, "curl"), 0o755);
-    return { dir: bin, argsFile };
-  }
 
   function run(status: string): Result & { args: string } {
     const { dir, argsFile } = stubBin();
@@ -214,5 +216,105 @@ if [ "$STUB_STATUS" = "000" ]; then exit 7; fi
 
   it("前提: bash と偽の curl の組(実行環境)が動いている", () => {
     expect(execFileSync("bash", ["-c", "echo ok"], { encoding: "utf-8" }).trim()).toBe("ok");
+  });
+});
+
+const r2Block = (name: string): string => `name = "x"\n\n[[r2_buckets]]\nbinding = "ANALYSIS_DETAIL"\nbucket_name = "${name}"\n`;
+const R2_TEST_BUCKET = "test-bucket-for-steps";
+
+describe.skipIf(!bashAvailable)("Issue #174: R2 の権限確認(偽の curl で、ステータスコードだけを出力することを確かめる)", () => {
+  const script = (): string => runScript("R2 の権限を確認");
+
+  function run(status: string, toml: string = r2Block(R2_TEST_BUCKET)): Result & { args: string; called: boolean } {
+    const { dir, argsFile } = stubBin();
+    const r = runBash(script(), repoWithToml(toml), { STUB_STATUS: status, CLOUDFLARE_API_TOKEN: FAKE_TOKEN, CLOUDFLARE_ACCOUNT_ID: FAKE_ACCOUNT }, dir);
+    let args = "";
+    let called = true;
+    try {
+      args = readFileSync(argsFile, "utf-8");
+    } catch {
+      args = "";
+      called = false;
+    }
+    return { ...r, args, called };
+  }
+
+  it("前提: ステップのスクリプトを取り出せている(空振りでない)", () => {
+    expect(script()).toContain("cloud/wrangler.toml");
+    expect(script()).toContain("/r2/buckets/");
+    expect(script().length).toBeGreaterThan(100);
+  });
+
+  it("200 なら通る。R2 の取得 API(アカウント・wrangler.toml の bucket_name)へ、トークン付きで問い合わせる。本文は /dev/null へ", () => {
+    const r = run("200");
+    expect(r.status, r.output).toBe(0);
+    expect(r.called).toBe(true);
+    expect(r.args).toContain(`/accounts/${FAKE_ACCOUNT}/r2/buckets/${R2_TEST_BUCKET}`);
+    expect(r.args).toContain(`Authorization: Bearer ${FAKE_TOKEN}`);
+    expect(r.args).toMatch(/-o\n\/dev\/null\n/);
+    expect(r.output).not.toContain(BODY_CANARY);
+  });
+
+  it("バケット名は wrangler.toml から読む(別の名前にすると、問い合わせ先も変わる)。コメント行の bucket_name は見ない", () => {
+    const other = run("200", r2Block("another-bucket-name"));
+    expect(other.args).toContain("/r2/buckets/another-bucket-name");
+    expect(other.args).not.toContain(R2_TEST_BUCKET);
+    const withComment = run("200", `# bucket_name = "commented-out-bucket"\n${r2Block(R2_TEST_BUCKET)}`);
+    expect(withComment.args).toContain(`/r2/buckets/${R2_TEST_BUCKET}`);
+    expect(withComment.args).not.toContain("commented-out-bucket");
+  });
+
+  it("リポジトリの実際の cloud/wrangler.toml の bucket_name(keiba-cloud-r2)を読んで問い合わせる", () => {
+    const { dir, argsFile } = stubBin();
+    const r = runBash(script(), REPO, { STUB_STATUS: "200", CLOUDFLARE_API_TOKEN: FAKE_TOKEN, CLOUDFLARE_ACCOUNT_ID: FAKE_ACCOUNT }, dir);
+    expect(r.status, r.output).toBe(0);
+    expect(readFileSync(argsFile, "utf-8")).toContain(`/accounts/${FAKE_ACCOUNT}/r2/buckets/keiba-cloud-r2`);
+  });
+
+  it("bucket_name の行が無い・バケット名の形でない(記号・大文字・短すぎ・長すぎ)なら、API を呼ばずに失敗する(URL に不正な値を渡さない)", () => {
+    for (const toml of [
+      'name = "x"\n',
+      r2Block(""),
+      r2Block("ab"),
+      r2Block("UPPER-case-bucket"),
+      r2Block("bad/slash/bucket"),
+      r2Block("bad bucket name"),
+      r2Block("a".repeat(64)),
+    ]) {
+      const r = run("200", toml);
+      expect(r.status, `${toml}`).not.toBe(0);
+      expect(r.called, `${toml} では curl を呼ばない`).toBe(false);
+      expect(r.output).toContain("bucket_name");
+    }
+  });
+
+  it.each([
+    ["401", "権限"],
+    ["403", "権限"],
+    ["404", "見つかりません"],
+    ["500", "HTTP 500"],
+    ["000", "HTTP 000"],
+  ])("HTTP %s なら失敗し(終了コード 0 でない)、ステータスコードを含む案内を日本語で出す。本文・トークン・アカウント ID は出さない", (status, hint) => {
+    const r = run(status);
+    expect(r.status).not.toBe(0);
+    expect(r.output).toContain(hint);
+    expect(r.output).toContain(status);
+    expect(r.output).not.toContain(BODY_CANARY);
+    expect(r.output).not.toContain(FAKE_TOKEN);
+    expect(r.output).not.toContain(FAKE_ACCOUNT);
+  });
+
+  it("403 の案内は、原因を権限不足と断定せず、R2 の未有効化の可能性も挙げる(ステータスコードだけでは区別できない)。404 の案内は管轄(jurisdiction)にも触れる", () => {
+    expect(run("403").output).toContain("有効化");
+    expect(run("404").output).toContain("jurisdiction");
+  });
+
+  it("対照: 本文を表示する変異(出力先をファイルにして cat する)では、目印が出力に出る(検査が空振りでないことの確認)", () => {
+    const mutated = script().replace("-o /dev/null", '-o "$RUNNER_TEMP_OUT"').replace(/(\n\s*)case /, '$1cat "$RUNNER_TEMP_OUT"; case ');
+    expect(mutated).not.toBe(script());
+    const { dir } = stubBin();
+    const out = path.join(tempDir(), "body.json");
+    const r = runBash(mutated, repoWithToml(r2Block(R2_TEST_BUCKET)), { STUB_STATUS: "200", RUNNER_TEMP_OUT: out, CLOUDFLARE_API_TOKEN: FAKE_TOKEN, CLOUDFLARE_ACCOUNT_ID: FAKE_ACCOUNT }, dir);
+    expect(r.output).toContain(BODY_CANARY);
   });
 });

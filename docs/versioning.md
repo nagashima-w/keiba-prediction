@@ -2432,6 +2432,27 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の表は exe のスキーマのコピーで、exe 側は変えていない)
 
+## 次の正式版が 1.19.8 である根拠(Issue #174〈#172-a〉での変更)
+
+**patch**(クラウド版の R2〈分析の詳細オブジェクトの置き場〉の土台。**変更は `cloud/`・`scripts/`・`.github/workflows/`・docs だけで、exe のアプリコード〈`packages/app`〉・core〈`packages/core`〉は無変更**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- `cloud/wrangler.toml` の `[[r2_buckets]]`(binding `ANALYSIS_DETAIL`・bucket_name `keiba-cloud-r2`。使うコードはまだ無い)
+- `.github/workflows/deploy-cloud.yml`: deploy ジョブに「R2 の権限を確認」(D1 の権限確認と同じ作法。ステータスコードだけを出力。D1 の migration・`wrangler deploy` より前)
+- テスト: binding の静的ガード(`scripts/test/cloud-config-guard.test.ts`)、ワークフローの順序・本文を出さないこと(`scripts/test/cloud-deploy-workflow.test.ts`)、
+  ステップの実行(`cloud/test/deploy-steps.test.ts`)、ローカルの R2 の動作と `deploy --dry-run` の認識(`cloud/test/r2-binding.test.ts`)
+- Worker の CPU 時間の測定スクリプト `scripts/measure-worker-cpu.ts`(と、その入力を作る `scripts/measure-d1-size.ts` の `buildDetailText` の切り出し。出力は切り出しの前後で同一)、docs(`cloud/README.md`・`docs/current-spec.md`・`docs/issue-order.md`)
+
+### patch である根拠
+
+- exe(`packages/app`)・core(`packages/core`)のコードは無変更。exe に入る成果物は変わらない
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(R2 はクラウド版だけの保存先で、exe は使わない)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
