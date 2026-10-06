@@ -2339,6 +2339,28 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
 
+## 次の正式版が 1.19.4 である根拠(Issue #162 段階1 での変更)
+
+**patch**(DO の中のソケットでの取得の実測〈#21-D 段階1〉の追加と、その結果の記録。利用者から見える変化は無い)。
+
+### 変更内容
+
+- scripts: `scripts/cloudflare-spike/`(`accept-encoding: gzip` の opt-in と gzip の展開〈サイズ上限つき〉・実験 `socket-matrix` の計画と進行と
+  集計と読みと Markdown 化・取得対象の種類の追加〈三連複の JSON・地方のオッズページ〉・実験の選択の一般化)
+- `spikes/cloudflare/`: DO の中のソケットでの取得(`/do/netkeiba-socket`)と、Worker から DO を繰り返し呼ぶ試験(`/subrequest-probe`)、ドライバの `socket-matrix`
+- `.github/workflows/cloudflare-spike.yml`: 既定の実験を origin から socket-matrix に変更。既存の `build-windows.yml` は無変更
+- docs: `docs/investigations/cloudflare-spike/`(第4ラウンドの結果 JSON と、report の第4ラウンドの節)
+
+### patch である根拠
+
+- アプリ(`packages/app`)・core(`packages/core`)は無変更。追加・変更したコードはすべて `scripts/`・`spikes/`・ワークフロー・docs で、
+  exe に入らない
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

@@ -11,6 +11,7 @@ import {
   replaceGeneratedBlock,
 } from "../cloudflare-spike/report-doc.js";
 import { extractResultBlock, formatResultBlock, renderMarkdown, type SpikeResult } from "../cloudflare-spike/result.js";
+import { REFERENCE_E3_SHUTUBA_BYTES } from "../cloudflare-spike/socket-matrix-plan.js";
 
 /**
  * #159 report.md の数値は、結果 JSON から renderMarkdown で生成し、手で書き写さない。
@@ -279,5 +280,109 @@ describe("report.md の手書き本文(第3ラウンド)が、結果 JSON と食
     }
     // 起動条件(件名の先頭の印)は #159 のまま
     expect(section).toContain("[CF-SPIKE]");
+  });
+});
+
+describe("第4ラウンド(Issue #162 段階1)の結果 JSON と report.md の一致", () => {
+  const json = read("docs", "investigations", "cloudflare-spike", "round4-result.json");
+  const result = JSON.parse(json) as SpikeResult;
+
+  it("round4-result.json は結果ブロックの往復で壊れずに読める。socketMatrix の結果(9 本)を持ち、後片付けが済んでいる", () => {
+    expect(extractResultBlock(formatResultBlock(result))).toEqual(result);
+    expect(result.schemaVersion).toBe(1);
+    expect(result.experiments).toEqual(["socket-matrix"]);
+    expect(result.socketMatrix).toBeDefined();
+    expect(result.socketMatrix!.records).toHaveLength(9);
+    expect(result.cleanup?.ok).toBe(true);
+    expect(result.cleanup?.leftoverWorkers).toEqual([]);
+  });
+
+  it("結果 JSON に、マスク前の値(IPv4・workers.dev のサブドメイン・Worker 名)が入っていない(公開される JSON)", () => {
+    expect(json).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
+    expect(json).not.toMatch(/[A-Za-z0-9-]+\.[A-Za-z0-9-]+\.workers\.dev/);
+    expect(json).not.toMatch(/keiba-cf-spike-\d+-\d+/);
+  });
+
+  it("report.md の第4ラウンドの生成節は、round4-result.json から今の renderMarkdown で作った内容と完全に一致する", () => {
+    const report = read("docs", "investigations", "cloudflare-spike", "report.md");
+    const expected = demoteHeadings(renderMarkdown(result), 3).trim();
+    expect(extractGeneratedBlock(report, "round4")).toBe(expected);
+    expect(expected.length).toBeGreaterThan(500);
+    expect(expected).toContain("DO の中のソケットでの取得");
+  });
+
+  it("第2・第3ラウンドの生成節は、第4ラウンドの節を足しても、従来どおりの結果 JSON と一致する", () => {
+    const report = read("docs", "investigations", "cloudflare-spike", "report.md");
+    const r2 = JSON.parse(read("docs", "investigations", "cloudflare-spike", "round2-result.json")) as SpikeResult;
+    const r3 = JSON.parse(read("docs", "investigations", "cloudflare-spike", "round3-result.json")) as SpikeResult;
+    expect(extractGeneratedBlock(report)).toBe(demoteHeadings(renderMarkdown(r2), 2).trim());
+    expect(extractGeneratedBlock(report, "round3")).toBe(demoteHeadings(renderMarkdown(r3), 3).trim());
+  });
+});
+
+describe("report.md の手書き本文(第4ラウンド)が、結果 JSON と食い違っていない", () => {
+  const report = read("docs", "investigations", "cloudflare-spike", "report.md");
+  const result = JSON.parse(read("docs", "investigations", "cloudflare-spike", "round4-result.json")) as SpikeResult;
+  const m = result.socketMatrix!;
+  /** 手書きの節(§8)の、生成節の外の本文。 */
+  const handwritten = (): string => {
+    const marker = generatedMarkers("round4");
+    const start = report.indexOf("## 8. 第4ラウンド");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const section = report.slice(start);
+    const a = section.indexOf(marker.begin);
+    const b = section.indexOf(marker.end) + marker.end.length;
+    expect(a).toBeGreaterThanOrEqual(0);
+    return section.slice(0, a) + section.slice(b);
+  };
+  const byId = (id: string) => m.records.find((r) => r.stepId === id)!;
+
+  it("手書きの断定の前提が、結果 JSON で成り立っている(9本すべて 200・打ち切りなし・gzip は2本とも圧縮されなかった・再現は一致・60 回成功)", () => {
+    expect(m.records).toHaveLength(9);
+    expect(m.records.every((r) => r.status === 200)).toBe(true);
+    expect(m.summary.coverage.every((c) => c.verdict === "ok")).toBe(true);
+    expect(m.stoppedReason).toBeNull();
+    expect(m.skippedStepIds).toEqual([]);
+    expect(m.summary.compression.map((c) => c.compressed)).toEqual([false, false]);
+    expect(m.summary.compression.every((c) => c.bodyHashEqual === true)).toBe(true);
+    expect(m.summary.repeat[0]).toMatchObject({ hashEqual: true, bytesEqual: true, sameInstance: true });
+    expect(m.subrequestProbe).toMatchObject({ ran: true, requested: 60, succeeded: 60, firstFailureAt: null });
+    expect(m.summary.instances.distinctIds).toBe(1);
+  });
+
+  it("出馬表の本文のバイト数(今回と #160 E3)と run の ID が、手書き本文に結果 JSON のとおり書かれている。違いは『別の日の取得』で拒否の証拠と読まない", () => {
+    const text = handwritten();
+    const s1 = byId("S1").meta!.decodedBytes;
+    expect(s1).not.toBe(REFERENCE_E3_SHUTUBA_BYTES);
+    expect(text).toContain(String(s1));
+    expect(text).toContain(String(REFERENCE_E3_SHUTUBA_BYTES));
+    expect(text).toContain(result.runId.replace(/-\d+$/, ""));
+    expect(text).toMatch(/別の日/);
+    expect(text).toMatch(/拒否の証拠とは読まない/);
+  });
+
+  it("n=1 であること・gzip を『netkeiba は gzip を返さない』と一般化しないこと・段階2は identity で取る判断材料であることが書かれている", () => {
+    const text = handwritten();
+    expect(text).toContain("n=1");
+    expect(text).toMatch(/一般化しない/);
+    expect(text).toMatch(/identity/);
+    expect(text).toMatch(/Accept-Encoding を送らない/);
+  });
+
+  it("DO の呼び出し 60 回の成功は、subrequest の数え方が未確定のままであることを添えて書かれている(ソケットが数えられるかは測っていない)", () => {
+    const text = handwritten();
+    expect(text).toMatch(/60 回/);
+    expect(text).toMatch(/未確定/);
+    expect(text).toMatch(/ソケット.*数えられるか.*測っていない/);
+  });
+
+  it("結論の節: 事実・推測・測っていないこと・段階2への含意が分けて書かれ、段階2の根拠(race・db・nar・オッズ API・地方オッズページ)が挙がっている", () => {
+    const text = handwritten();
+    for (const heading of ["### 8.3 事実", "### 8.4 推測・未確認", "### 8.5 測っていないこと", "### 8.6 段階2への含意"]) {
+      expect(text, heading).toContain(heading);
+    }
+    for (const word of ["race", "db", "nar", "オッズ API", "地方オッズページ"]) {
+      expect(text, word).toContain(word);
+    }
   });
 });
