@@ -29,7 +29,7 @@
  */
 import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper/cached-fetcher";
 import { HttpError } from "../../packages/core/src/scraper/http-client";
-import { DEFAULT_RESULTS_TTL_MS, scrapeRace, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
+import { DEFAULT_RESULTS_TTL_MS, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
 import { checkRaceDate } from "./race-date";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
@@ -168,6 +168,17 @@ export function serializeGate(gate: GateLike): GateLike {
   };
 }
 
+/** オッズ・組合せオッズの取得先(中央の `api_get_jra_odds`・地方の `odds/index.html`)。発走前の計算ステップは、これらだけ、取得ステップの開始以降のキャッシュに限る。 */
+const ODDS_URL_PATTERN = /api_get_jra_odds|\/odds\/index\.html/;
+
+/** 計算ステップで、オッズのキャッシュが今回の取得より古い(前回の実行の残り)ときに投げる。 */
+class StaleOddsError extends Error {
+  constructor(url: string) {
+    super(`オッズのキャッシュが今回の取得より前のものです(使いません): ${url}`);
+    this.name = "StaleOddsError";
+  }
+}
+
 /** 計算ステップで、キャッシュに無いものをネットワークに取りに行かないための取得器(呼ばれたら投げる)。 */
 class CacheMissError extends Error {
   constructor(url: string) {
@@ -207,6 +218,7 @@ interface TaskRow {
   updated_at: number;
   error: string | null;
   analyzed_at: number | null;
+  fetch_started_at: number | null;
   settings_json: string | null;
   analysis_id: number | null;
   detail: "stored" | "failed" | "skipped" | null;
@@ -239,7 +251,7 @@ export class RaceDayCore {
       `CREATE TABLE IF NOT EXISTS race_day_tasks (
          race_id TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'morning', status TEXT NOT NULL, attempts INTEGER NOT NULL,
          compute_attempts INTEGER NOT NULL DEFAULT 0, queued_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, error TEXT,
-         analyzed_at INTEGER, settings_json TEXT, analysis_id INTEGER, detail TEXT, children_ok INTEGER,
+         analyzed_at INTEGER, fetch_started_at INTEGER, settings_json TEXT, analysis_id INTEGER, detail TEXT, children_ok INTEGER,
          PRIMARY KEY (race_id, mode))`,
     );
     this.sql.exec(
@@ -277,7 +289,7 @@ export class RaceDayCore {
   }
 
   /** タスクの追加の列(発走前の分析の状態)を更新する。列名は固定の集合だけ(呼び出し側のコードで決まる値)。 */
-  private setTaskFields(task: Pick<TaskRow, "race_id" | "mode">, fields: Partial<Pick<TaskRow, "compute_attempts" | "analyzed_at" | "settings_json" | "analysis_id" | "detail" | "children_ok">>): void {
+  private setTaskFields(task: Pick<TaskRow, "race_id" | "mode">, fields: Partial<Pick<TaskRow, "compute_attempts" | "analyzed_at" | "fetch_started_at" | "settings_json" | "analysis_id" | "detail" | "children_ok">>): void {
     for (const [column, value] of Object.entries(fields)) {
       this.sql.exec(`UPDATE race_day_tasks SET ${column} = ?, updated_at = ? WHERE race_id = ? AND mode = ?`, value ?? null, this.now(), task.race_id, task.mode);
     }
@@ -324,10 +336,10 @@ export class RaceDayCore {
     const now = this.now();
     // 新しい実行: 発走前の分析の状態(分析時刻・設定のスナップショット・保存結果)も作り直す(前の実行の保存結果を、新しい実行の結果として扱わない)。
     this.sql.exec(
-      `INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, error, analyzed_at, settings_json, analysis_id, detail, children_ok)
-       VALUES (?, ?, 'queued', 0, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL)
+      `INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, error, analyzed_at, fetch_started_at, settings_json, analysis_id, detail, children_ok)
+       VALUES (?, ?, 'queued', 0, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
        ON CONFLICT(race_id, mode) DO UPDATE SET status = 'queued', attempts = 0, compute_attempts = 0, queued_at = excluded.queued_at, updated_at = excluded.updated_at,
-         error = NULL, analyzed_at = NULL, settings_json = NULL, analysis_id = NULL, detail = NULL, children_ok = NULL`,
+         error = NULL, analyzed_at = NULL, fetch_started_at = NULL, settings_json = NULL, analysis_id = NULL, detail = NULL, children_ok = NULL`,
       raceId,
       mode,
       now,
@@ -525,11 +537,31 @@ export class RaceDayCore {
     }
   }
 
-  /** キャッシュだけから `scrapeRace` する(ネットワークに出ない。鮮度は実質無期限)。戦績が1頭でも無ければ投げる(戦績なしの分析を黙って作らない)。 */
-  private async scrapeFromCache(raceId: Parameters<typeof scrapeRace>[0], includeComboOdds: boolean) {
+  /**
+   * キャッシュだけから `scrapeRace` する(ネットワークに出ない。鮮度は実質無期限)。戦績が1頭でも無ければ投げる(戦績なしの分析を黙って作らない)。
+   * `oddsSince`(発走前の分析の取得ステップの開始時刻)を渡すと、**オッズ・組合せオッズは、その時刻以降に取得したキャッシュだけ**を使う
+   * (それより古いもの〈前回の発走前の実行で残った、保持 26 時間のキャッシュ〉は、無いものとして扱う)。古い組合せが「今のオッズ」として配分に使われるのを防ぐ。
+   * 無い組合せは、exe で組合せの取得が失敗したときと同じく、`scrapeRace` が警告にして、その券種を除く。単勝・複勝のオッズが古い(無い)ときは投げる(必須のデータ)。
+   */
+  private async scrapeFromCache(raceId: Parameters<typeof scrapeRace>[0], includeComboOdds: boolean, oddsSince?: number) {
+    const fetcher: RaceFetcher =
+      oddsSince === undefined
+        ? this.cacheOnly
+        : {
+            fetchText: async (url, options) => {
+              if (ODDS_URL_PATTERN.test(url)) {
+                const entry = this.cache.get(url);
+                if (entry === undefined || entry.fetchedAt < oddsSince) {
+                  throw new StaleOddsError(url);
+                }
+                return entry.value;
+              }
+              return this.cacheOnly.fetchText(url, options);
+            },
+          };
     const race = await scrapeRace(
       raceId,
-      { fetcher: this.cacheOnly, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
+      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
       { includeComboOdds },
     );
     const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
@@ -548,6 +580,11 @@ export class RaceDayCore {
   private async runPreRaceFetch(task: TaskRow): Promise<StepOutcome> {
     const attempts = task.attempts + 1;
     this.updateTask(task, "queued", attempts, task.error);
+    // 取得ステップの開始時刻は、最初の試行のときに1回だけ永続化する(再試行では進めない)。計算ステップは、オッズ・組合せを、この時刻以降に取得したものだけ使う。
+    // 再試行(2・3回目)でも最初の試行の時刻のままなので、最初の試行で取れた組合せを、再試行で取れなくても捨てない。
+    if (task.fetch_started_at === null) {
+      this.setTaskFields(task, { fetch_started_at: this.now() });
+    }
     try {
       let settings: CloudSettings;
       if (task.settings_json !== null) {
@@ -596,13 +633,22 @@ export class RaceDayCore {
       if (kaisaiDate === null || task.settings_json === null) {
         throw new Error("開催日または設定のスナップショットが未確定です");
       }
+      if (task.fetch_started_at === null) {
+        throw new Error("取得ステップの開始時刻が未確定です");
+      }
+      const oddsSince = task.fetch_started_at;
       const settings = coerceCloudSettings(JSON.parse(task.settings_json));
       let analysisId = task.analysis_id;
       let expected: { horses: number; bets: number } | null = null;
+      let scrapeWarnings: readonly { readonly kind: string; readonly message: string }[] = [];
       if (analysisId === null) {
         const raceId = parseRaceId(task.race_id);
         await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
-          scrape: (id) => this.scrapeFromCache(id, settings.includeComboOdds),
+          scrape: async (id) => {
+            const race = await this.scrapeFromCache(id, settings.includeComboOdds, oddsSince);
+            scrapeWarnings = race.meta.warnings;
+            return race;
+          },
           analyze: null,
           saveAnalysis: async (record) => {
             expected = { horses: record.horses.length, bets: record.allocation?.bets.length ?? 0 };
@@ -635,6 +681,10 @@ export class RaceDayCore {
           getRaceResultDetails: async () => new Map(),
           llmSkipReason: "LLM は未対応(#179)",
         });
+        // 取得時の警告(取消馬・組合せオッズの取得失敗〈その券種は配分に入っていない〉など)を、警告として残す。
+        for (const warning of scrapeWarnings) {
+          this.onWarn(`発走前の分析(${task.race_id}): ${warning.kind}: ${warning.message}`);
+        }
         // 保存した子の行(馬・買い目)が、正しい親 id に、保存したレコードの件数だけ紐づいたかを確かめる(最初の実保存で、max(id) の前提を確かめる)。
         if (analysisId !== null && expected !== null) {
           const exp: { horses: number; bets: number } = expected;

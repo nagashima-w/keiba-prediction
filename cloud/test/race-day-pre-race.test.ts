@@ -512,6 +512,112 @@ describe("発走前の分析: 取消馬(AC-c3)", () => {
   });
 });
 
+describe("前回の組合せオッズがキャッシュに残っていても、今回の分析には使わない(レビュー指摘。Issue #178)", () => {
+  const COMBO_TYPES = [3, 4, 5, 6, 7, 8];
+  const isComboUrl = (url: string, types: number[] = COMBO_TYPES): boolean => url.includes("api_get_jra_odds") && types.some((t) => url.includes(`type=${t}&`));
+  const comboBetTypes = (record: AnalysisRecord): string[] => [...new Set(record.allocation!.bets.map((b) => b.betType))].filter((t) => t !== "win" && t !== "place").sort();
+
+  async function firstRunThenSecondScheduled(h: Harness): Promise<void> {
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await h.core.runNextStep();
+    await h.core.runNextStep();
+    expect(h.sink.saved).toHaveLength(1);
+    expect(comboBetTypes(h.sink.saved[0]!).length).toBeGreaterThan(2); // 前提: 1回目は組合せの券種が入っている(空振りでない)
+    h.clock.now += 60 * 60_000; // 1 時間後に、あらためて発走前の分析(キャッシュには前回の組合せオッズが 26 時間残る)
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+  }
+
+  it("今回の組合せオッズの取得がすべて失敗しても、前回のオッズ(キャッシュに残っている)は使わない: 組合せの券種は買い目に入らず、警告が出る。分析は単勝・複勝だけで保存・done", async () => {
+    const h = harness();
+    await firstRunThenSecondScheduled(h);
+    h.gate.body = (url) => (isComboUrl(url) ? null : fixtureForUrl(url)); // 今回は組合せが 404
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" }); // 組合せの失敗は取得ステップの失敗にしない(未発売の券種で永久に失敗し続けるため)
+    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    expect(h.sink.saved).toHaveLength(2);
+    expect(comboBetTypes(h.sink.saved[1]!)).toEqual([]);
+    expect(h.sink.saved[1]!.allocation!.bets.length).toBeGreaterThan(0); // 単勝・複勝の買い目は残る
+    expect(h.warnings.some((w) => w.includes("組合せ"))).toBe(true);
+    expect(h.core.getBoard().races.find((r) => r.mode === "pre_race")).toMatchObject({ status: "done" });
+  });
+
+  it("券種ごとに判断する: 三連単だけが今回失敗なら、三連単の買い目だけが入らず、今回取れたほかの組合せの券種は入る", async () => {
+    const h = harness();
+    await firstRunThenSecondScheduled(h);
+    const firstTypes = comboBetTypes(h.sink.saved[0]!);
+    expect(firstTypes).toContain("trifecta");
+    h.gate.body = (url) => (isComboUrl(url, [8]) ? null : fixtureForUrl(url));
+    await h.core.runNextStep();
+    await h.core.runNextStep();
+    const types = comboBetTypes(h.sink.saved[1]!);
+    expect(types).not.toContain("trifecta");
+    expect(types.length).toBeGreaterThan(1);
+    expect(types).toEqual(firstTypes.filter((t) => t !== "trifecta"));
+    expect(h.warnings.some((w) => w.includes("組合せ"))).toBe(true);
+  });
+
+  it("対照: 今回の組合せの取得が成功すれば、前回と同じ券種がすべて入り、組合せの警告は出ない", async () => {
+    const h = harness();
+    await firstRunThenSecondScheduled(h);
+    await h.core.runNextStep();
+    await h.core.runNextStep();
+    expect(comboBetTypes(h.sink.saved[1]!)).toEqual(comboBetTypes(h.sink.saved[0]!));
+    expect(h.warnings.filter((w) => w.includes("組合せ"))).toEqual([]);
+  });
+
+  it("取得の再試行(2回目)でも基準は最初の試行の開始時刻: 1回目で取れた組合せは、2回目の組合せ取得が失敗しても捨てずに使う", async () => {
+    const h = harness();
+    h.settings = ALL_ON;
+    let resultFailures = 0;
+    h.gate.body = (url) => {
+      if (url.includes("ajax_horse_results") && resultFailures < 2) {
+        resultFailures += 1;
+        return null; // 1回目は戦績が2頭ぶん取れず、取得ステップは再試行になる(組合せは1回目に取れている)
+      }
+      return fixtureForUrl(url);
+    };
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "retry" });
+    h.clock.now += 61_000; // 再試行のアラーム(遅らせる)
+    h.gate.body = (url) => (isComboUrl(url) ? null : fixtureForUrl(url)); // 2回目は組合せの取得が全部失敗
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" });
+    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    expect(comboBetTypes(h.sink.saved[0]!).length).toBeGreaterThan(2); // 1回目の組合せ(基準時刻より後に取得)を使っている
+  });
+
+  it("単勝・複勝のオッズ(必須のデータ)が基準時刻より古いときは、古いオッズで分析せず、計算ステップを失敗(再試行)にする。保存しない", async () => {
+    const h = harness();
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    await h.core.runNextStep();
+    // キャッシュのオッズより後に、基準の開始時刻があった状況(取得ステップのオッズの取得が、実際には今回のものではなかった)
+    h.sql.exec("UPDATE race_day_tasks SET fetch_started_at = ? WHERE mode = 'pre_race'", h.clock.now + 1000);
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ step: "compute", result: "retry" });
+    expect(h.sink.saved).toHaveLength(0);
+    expect(h.core.getBoard().races.find((r) => r.mode === "pre_race")!.error).toMatch(/オッズ/);
+  });
+
+  it("取得の再試行でも、基準の開始時刻は最初の試行のまま(再試行のたびに進めない)", async () => {
+    const h = harness();
+    h.gate.body = (url) => (url.includes("shutuba.html") && h.gate.urls.filter((u) => u.includes("shutuba.html")).length <= 1 ? null : fixtureForUrl(url));
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    const startedAt = h.clock.now;
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "retry" });
+    h.clock.now += 61_000;
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" });
+    const row = h.sql.exec("SELECT fetch_started_at FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { fetch_started_at: number }[];
+    expect(row[0]!.fetch_started_at).toBe(startedAt);
+  });
+
+  it("あらためて予約した別の実行では、基準の開始時刻も新しくなる(前の実行の取得を、今回の取得として扱わない)", async () => {
+    const h = harness();
+    await firstRunThenSecondScheduled(h);
+    const row = (): number | null => (h.sql.exec("SELECT fetch_started_at FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { fetch_started_at: number | null }[])[0]!.fetch_started_at;
+    expect(row()).toBeNull(); // 再予約で消えている
+    await h.core.runNextStep();
+    expect(row()).toBe(h.clock.now);
+  });
+});
+
 describe("朝と発走前の共存・入口(Issue #178)", () => {
   it("朝(morning)と発走前(pre_race)は別のタスク。同じレースで、片方が実行中でももう片方を予約でき、同じ種類の二重の予約だけが拒否される", async () => {
     const h = harness();
