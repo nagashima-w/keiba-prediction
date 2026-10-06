@@ -73,7 +73,7 @@ function concat(parts: readonly Uint8Array[], total: number): Uint8Array {
 
 /**
  * fetch の init のヘッダ(`HttpClient` が付ける User-Agent など)を足す。**同名(大文字小文字を区別しない)なら
- * `options.headers` の値を優先する**(ドライバが「ランナーと同じ」として渡した集合が正で、init はそれに無い名前を
+ * `options.headers` の値を優先する**(ドライバが、ランナーの観測から導出して渡した集合(`accept-encoding`・`connection` は除く)が正で、init はそれに無い名前を
  * 末尾に足すだけ)。
  */
 function mergeHeaders(base: readonly HeaderEntry[], extra: Record<string, string> | undefined): HeaderEntry[] {

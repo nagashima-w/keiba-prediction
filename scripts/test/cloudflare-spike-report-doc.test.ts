@@ -214,6 +214,57 @@ describe("report.md の手書き本文(第3ラウンド)が、結果 JSON と食
     expect(text).toContain("分離できない");
   });
 
+  it("E3 で実際に送ったヘッダ(origin.e3.headers)が、手書き本文に完全な列挙として書かれている(§7 の冒頭と §7.7 の2か所)", () => {
+    const names = result.origin!.e3.headers.map((h) => h.name);
+    expect(names).toEqual(["User-Agent", "accept", "accept-language", "sec-fetch-mode"]);
+    const listing = `(${names.map((n) => `\`${n}\``).join("・")})`;
+    const text = handwritten();
+    expect(text.split(listing).length - 1, `列挙 ${listing}`).toBeGreaterThanOrEqual(2);
+  });
+
+  it("E3 のヘッダを『ランナーの fetch と同じ集合』と書いていない(accept-encoding と connection は送っていない)", () => {
+    const text = handwritten();
+    expect(text).not.toMatch(/ランナーの `fetch` と同じ集合/);
+    // 送らなかったヘッダの名前を、除外として明記している(E1 のランナー側の観測にはあるが、E3 の送信には無い)
+    const runnerNames = result.origin!.echo.runner!.headers.map((h) => h.name.toLowerCase());
+    const sentNames = result.origin!.e3.headers.map((h) => h.name.toLowerCase());
+    expect(runnerNames).toContain("accept-encoding");
+    expect(sentNames).not.toContain("accept-encoding");
+    expect(text).toMatch(/accept-encoding[^\n]*(除|送って|送らず|付けて)/);
+  });
+
+  it("§7.5 の E3 の項に、accept-encoding を送らず圧縮なしで取ったことが、fetch との差分の一つとして書かれている", () => {
+    const text = handwritten();
+    const start = text.indexOf("### 7.5");
+    const end = text.indexOf("### 7.6");
+    const section = text.slice(start, end);
+    expect(section).toContain("accept-encoding");
+    expect(section).toContain("圧縮");
+  });
+
+  it("§7.7 の『本番の取得で守ること』に、accept-encoding を付けた場合に通るかが未測定であることが書かれている", () => {
+    const text = handwritten();
+    const section = text.slice(text.indexOf("### 7.7"));
+    expect(section).toMatch(/accept-encoding`? を付けた場合[^\n]*未測定/);
+  });
+
+  it("出典のない断定に、参照したドキュメントの URL が添えられている(同時接続 6 本・cf-connecting-ip・ソケットの Free の記載)", () => {
+    const text = handwritten();
+    for (const url of [
+      "https://developers.cloudflare.com/workers/platform/limits/",
+      "https://developers.cloudflare.com/fundamentals/reference/http-headers/",
+      "https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/",
+    ]) {
+      expect(text, url).toContain(url);
+    }
+  });
+
+  it("tls.peet.ws の応答の確認は、再現コマンドと再実行した日付が添えられ、一次データが無いことが明記されている", () => {
+    const text = handwritten();
+    expect(text).toContain("curl -sS -D - -o /dev/null https://tls.peet.ws/api/all");
+    expect(text).toMatch(/一次データ[^\n]*(保存していない|無い)/);
+  });
+
   it("#159 の時点の『400 の原因は未切り分け』という断定が、現在の結論として残っていない(第3ラウンドの更新を反映している)", () => {
     expect(report).not.toMatch(/\*\*400 の原因は未切り分け。\*\*/);
     expect(report).toContain("第3ラウンド(§7)で切り分けを行い");

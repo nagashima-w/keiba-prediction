@@ -292,7 +292,9 @@ pnpm run smoke                                           # wrangler dev(ロー�
 - **E2 ランナー + Workers 風のヘッダ → netkeiba**: 送信元はランナーのまま、E1 で **Worker にだけ現れたヘッダ**を足して取得する
   (race と db の馬ページ)。変えるのはヘッダだけ
 - **E3 Worker の TCP ソケット → netkeiba**: 送信元は Cloudflare のまま、`cloudflare:sockets` の `connect()`(TLS)で HTTP/1.1 の GET を
-  自前で組み立てて送る(race と db の馬ページ)。ヘッダはランナーの `fetch` と同じ集合(E1 のランナー側の観測から導出)。
+  自前で組み立てて送る(race と db の馬ページ)。ヘッダは**ランナーの `fetch` の観測から導出したもの**
+  (`User-Agent`・`accept`・`accept-language`・`sec-fetch-mode`)。ランナーの観測にある `accept-encoding` と `connection` は**送っていない**
+  (`Accept-Encoding` は送らず**圧縮なしで取り**、`Connection: close` で EOF まで読む。`Host` は自前で付ける)。
   再試行・リダイレクトの追従はしない
 
 結論の型(組合せ表と、E0 の再現を前提ゲートにする規則)は `scripts/cloudflare-spike/origin-plan.ts` の `concludeOrigin`
@@ -418,8 +420,9 @@ pnpm run smoke                                           # wrangler dev(ロー�
   - **Worker にだけ現れたヘッダは7つ**: `x-forwarded-for`・`cf-ray`・`cf-ew-via`・`cdn-loop`・`cf-worker`・`cf-visitor`・`x-forwarded-proto`
     (値は生成節の「Worker にだけ現れたヘッダ」。IP・サブドメインはマスク済み)
   - ランナーにだけ現れたヘッダは `connection`・`accept`・`accept-language`・`sec-fetch-mode`。名前は同じで値が違うのは `accept-encoding`
-  - **`cf-connecting-ip` と `x-real-ip` は、Worker 側の観測に無かった**(Cloudflare のドキュメントには、非 Cloudflare 宛ての subrequest に
-    付くとあるが、エコーに届いたヘッダには無かった。エコー宛ての観測であり、netkeiba 宛てでの有無は未確認)
+  - **`cf-connecting-ip` と `x-real-ip` は、Worker 側の観測に無かった**(Cloudflare のドキュメント
+    〈<https://developers.cloudflare.com/fundamentals/reference/http-headers/>。2026-10-04 に参照。要約で読んだもので、原文の引用は保存していない〉
+    には、非 Cloudflare 宛ての subrequest に付くとあるが、エコーに届いたヘッダには無かった。エコー宛ての観測であり、netkeiba 宛てでの有無は未確認)
   - **HTTP バージョンと TLS の指紋は、両側で違った**(Worker は HTTP/2、ランナーは HTTP/1.1。JA4 も違う。生成節の表のとおり)
 - **E2(ランナー + Worker にだけ現れたヘッダ7つ)は、race・db の馬ページとも HTTP 400・本文0バイト**(`x-cache: Error from cloudfront`)だった。
   E2 の送信元はランナーのままで、E0 のランナー(ヘッダを足さない)は 200 だった
@@ -440,7 +443,8 @@ pnpm run smoke                                           # wrangler dev(ロー�
   応答に `cf-ray`(または `server: cloudflare`)があったため。ランナー側の同じエコーの応答には無かった。**エコーが Cloudflare 上にあるのではなく、
   Worker の `fetch` の応答に Cloudflare が付けたヘッダを拾った可能性が高い、と推測している**(E0 の Worker の 400 の応答にも、
   `server: cloudflare` と `cf-ray` があり、ランナーとソケットの応答は `server: Apache` だった)。**確認はしていない**。
-  2026-10-04 に、ローカルの `curl`(Cloudflare を経由しない場所)で見た tls.peet.ws の応答は、`server: TrackMe.peet.ws` で cf-ray は無かった
+  ローカル(Cloudflare を経由しない場所)の `curl -sS -D - -o /dev/null https://tls.peet.ws/api/all` の応答ヘッダは、`server: TrackMe.peet.ws` で
+  `cf-ray` は無かった(2026-10-04 に見たときの**一次データは保存していない**。2026-10-06 に同じコマンドを再実行して、同じだった)
 - E2 の 400 の応答の `server` は `Apache`(ランナーの 200 と同じ)で、E0 の Worker の 400 の `server: cloudflare` とは違う。
   この違いの意味は調べていない
 - E3 が通った機序(「Worker の `fetch` の経路に入る Cloudflare 側の仕組み〈`cdn-loop: cloudflare; loops=1`・`cf-ew-via` が示唆する〉を
@@ -452,8 +456,10 @@ pnpm run smoke                                           # wrangler dev(ロー�
 - **E2 は7つのヘッダをまとめて足した**。どれが効いたか、組合せが必要か(1つでは足りないか)は**分離できない**
 - **E2 で付けた値は、Worker が(エコー宛てに)送った値の再利用**である(`x-forwarded-for` はそのときの IP、`cf-ray` は別の接続の ID)。
   拒否の原因が「ヘッダがあること」か「値が実際の接続と食い違うこと」かは**分離できない**
-- **E3 は、ヘッダ・TLS の特徴・HTTP バージョンを同時に変えている**(Worker の `fetch` が付ける7つのヘッダが無い・`fetch` の TLS ではない・
-  HTTP/1.1 を自前で話す)。E3 が通った理由が、このうちどれかは**分離できない**。E2 が「ヘッダの追加だけで拒否される」ことを示すので
+- **E3 は、ヘッダ・TLS の特徴・HTTP バージョン・圧縮の有無を同時に変えている**(Worker の `fetch` が付ける7つのヘッダが無い・`fetch` の TLS ではない・
+  HTTP/1.1 を自前で話す・**`accept-encoding` を送らず圧縮なしで取っている**〈`fetch` は圧縮を要求する。ランナーの観測にも `accept-encoding` はあるが、
+  E3 では送っていない〉・`connection` は `keep-alive` ではなく `close`)。**これらも `fetch` との差分の一つ**で、E3 が通った理由が、
+  このうちどれかは**分離できない**。E2 が「ヘッダの追加だけで拒否される」ことを示すので
   ヘッダが原因という読みになるが、E3 単独ではヘッダと TLS・HTTP バージョンを区別できない。**E3 のソケットの TLS の指紋は観測していない**
   (エコーは `fetch` でしか叩いていない)
 - **E1 は、エコー(第三者のサーバ)宛ての観測**で、Worker が netkeiba へ実際に送るヘッダを見たものではない。**エコーに届いたヘッダを、
@@ -464,12 +470,13 @@ pnpm run smoke                                           # wrangler dev(ロー�
 - 測ったのは1アカウント・1回の実行。E0 は race の1対象、E2・E3 は race と db の馬ページの2対象で、標本が小さい
 - ソケットで測ったのは、race の出馬表と db の馬ページ(EUC-JP)だけ。**db の戦績 API・nar.netkeiba.com・race のオッズ API はソケットでは未測定**
 - E3 は**普通の Worker のハンドラから**のソケット。**DO の中からの `connect()` は未測定**
-- プランは確認していない(§6 と同じ Secrets のアカウントで、§6 では「Free と推定」した)。Cloudflare のドキュメントには、Free でソケットが
+- プランは確認していない(§6 と同じ Secrets のアカウントで、§6 では「Free と推定」した)。Cloudflare のドキュメント
+  (<https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/>。2026-10-04 に参照)には、Free でソケットが
   使えるかの記載が見当たらなかったので、今回の E3 の成功は、**Free と推定されるアカウントでソケットが使えた**ことを示す(プランそのものは未確認)
 - ソケットで取る HTTP/1.1 のクライアント(`scripts/cloudflare-spike/http1.ts`・`spikes/cloudflare/src/socket-probe.ts`)は、スパイクの実装で、
   本番コードではない。chunked・Content-Length・EOF の扱いは単体テストで固定してあるが、**長時間・多数の取得での挙動は未測定**
-- ドキュメント(2026-10-04 に参照)では、ソケットは「同時に応答ヘッダを待つ接続 6 本」の上限に数えられる。subrequest 数(Free は 50/呼び出し)に
-  数えられるかは確認していない
+- ドキュメント(<https://developers.cloudflare.com/workers/platform/limits/>。2026-10-04 に参照。要約で読んだもので、原文の引用は保存していない)
+  では、ソケットは「同時に応答ヘッダを待つ接続 6 本」の上限に数えられる。subrequest 数(Free は 50/呼び出し)に数えられるかは確認していない
 
 ### 7.7 #21 への含意
 
@@ -482,5 +489,7 @@ db の馬ページ(EUC-JP)を取得でき、既存パーサ(`parseShutuba`・馬
 (db の戦績 API・nar・オッズ API)、繰り返し取得したときの再現性、subrequest・接続数の制約。
 
 **本番の取得で守ること**(スパイクの実装から引き継ぐ前提): 再試行しない・リダイレクトに従わない・サイズ上限とタイムアウトを設ける・
-ヘッダは明示した集合だけを送る(ランナーの `fetch` と同じ集合を送ったときに通った)。どのヘッダが拒否の原因かは分かっていないので、
-Worker の `fetch` で取得する経路は、本番に持ち込まない。
+ヘッダは明示した集合だけを送る(ランナーの `fetch` の観測から導出した集合
+(`User-Agent`・`accept`・`accept-language`・`sec-fetch-mode`)を、`accept-encoding` なし・`Connection: close` で送ったときに通った)。
+**`accept-encoding` を付けた場合に通るかは未測定**(圧縮を要求した応答の解凍も、スパイクの実装は扱っていない)。
+どのヘッダが拒否の原因かは分かっていないので、Worker の `fetch` で取得する経路は、本番に持ち込まない。
