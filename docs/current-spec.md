@@ -1003,7 +1003,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **読み出し**: `detail_key` が NULL なら `none`(R2 に触れない)。R2 に無い・壊れている・別のレースの詳細(raceId の不一致)・get の失敗は `missing`(クラッシュしない)。
   **`missing`・`none` のとき、大きな列(`rawResponse`・`raceSnapshot`・馬の `contributions`)は null で、「LLM 未使用」とは区別できない**ので、`detail` の状態で区別する。
 - **`(SELECT max(id) FROM analyses)` に依存する理由**: 確認済みの事実(ローカルの workerd): 20 件の並行保存で子の行の取り違えは 0 件、対照(batch を使わない逐次実行)では失敗か取り違えが起きる。
-  推論(公式ドキュメントでの確認は未了・本番では未検証): D1 の batch は 1 つのトランザクションで、SQLite は書き込みを直列に処理するので、batch の途中に他の保存は割り込めない。崩れたら、保存ごとの一意のトークンで子の行を引く設計(`detail_key` の索引が要る。migration 0003)へ切り替える。
+  推論(公式ドキュメントでの確認は未了・本番では未検証): D1 の batch は 1 つのトランザクションで、SQLite は書き込みを直列に処理するので、batch の途中に他の保存は割り込めない。崩れたら、保存ごとの一意のトークンで子の行を引く設計(`detail_key` の索引が要る。次の空き番号の migration〈0004 以降〉)へ切り替える。
 - **`GET /api/analyses?race_id=&kaisai_date=&limit=`**(認証の関門の後ろ。GET だけ): `{ ok: true, analyses: [...] }`。パラメータはすべて任意で、未知・重複・不正な値は 400(D1 に触れない)。D1 の失敗は 503 `{ ok: false, error: { type: "d1-error" } }`(例外の文面・SQL は返さない)。`race_id` は core の `parseRaceId` で検証する。
 - **既知の差分(exe の SQLite との違い。【記録】。テストで固定)**: Infinity・NaN は NULL・-0 は 0 になる(D1 の bind も同じ。NOT NULL の列に NaN を渡すと保存全体が失敗する)。孤立サロゲートは U+FFFD に置き換わる(json_each 経由。D1 の bind でも別の形で壊れる)。
   有限の double は、ローカルの workerd の D1 ではビット一致で往復する(確率型・広い指数・特殊な有限値の N=3,010 で不一致 0。**本番の SQLite のビルドで同じとは限らない**ので、最初の本番の実保存で確かめる)。
