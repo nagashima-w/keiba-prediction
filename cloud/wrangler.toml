@@ -8,6 +8,8 @@
 name = "keiba-cloud"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"
+# nodejs_compat: core の HttpClient(Buffer)と iconv-lite(Buffer)が使う。
+compatibility_flags = ["nodejs_compat"]
 
 # workers.dev に出す(Cloudflare Access を workers.dev に掛けるため)。独自ドメイン・routes は使わない。
 workers_dev = true
@@ -18,7 +20,8 @@ preview_urls = false
 enabled = true
 
 # SQLite バックエンドの Durable Object(Free プランで使えるのは SQLite バックエンドだけ)。
-# #162 で netkeiba への取得と間隔制御に使う予定の雛形。クラス名は migration に固定されるため、変えるときは migration が要る。
+# #162 で netkeiba への取得(TCP ソケット)と間隔制御・サーキットブレーカーを担う。クラス名は migration に固定されるため、変えるときは migration が要る。
+# メソッドや保存する値を足すだけなら migration は要らない(v1 のまま)。
 [[durable_objects.bindings]]
 name = "NETKEIBA_GATE"
 class_name = "NetkeibaGate"
@@ -26,3 +29,11 @@ class_name = "NetkeibaGate"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
+
+# core(workspace の外。相対 import で取り込む)をバンドルするための解決。CI では packages/core/node_modules が無いので、
+# 依存はこのディレクトリの node_modules から解決させる。undici はスタブに差し替える(src/undici-stub.ts)。
+# tsconfig.json の paths・vitest.config.ts の alias と同じ対応。
+[alias]
+undici = "./src/undici-stub.ts"
+iconv-lite = "./node_modules/iconv-lite"
+cheerio = "./node_modules/cheerio"

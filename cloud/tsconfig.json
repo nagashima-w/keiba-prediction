@@ -9,7 +9,14 @@
     "skipLibCheck": true,
     "noEmit": true,
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": ["@cloudflare/workers-types", "node"],
+    // core(workspace の外。相対 import で取り込む)の依存は packages/core/node_modules が CI に無いため、このディレクトリの
+    // node_modules へ向ける(wrangler.toml の [alias]・vitest.config.ts の alias と同じ対応)。undici はスタブに差し替える。
+    "paths": {
+      "undici": ["./src/undici-stub.ts"],
+      "iconv-lite": ["./node_modules/iconv-lite"],
+      "cheerio": ["./node_modules/cheerio"]
+    }
   },
   "include": ["src", "test", "smoke.ts", "vitest.config.ts"]
 }

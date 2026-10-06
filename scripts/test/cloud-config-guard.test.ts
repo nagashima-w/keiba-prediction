@@ -49,6 +49,56 @@ describe("wrangler.toml", () => {
   });
 });
 
+describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)", () => {
+  const ALIAS_KEYS = ["undici", "iconv-lite", "cheerio"];
+
+  it("nodejs_compat を有効にしている(core の HttpClient・iconv-lite が Buffer を使う)", () => {
+    expect(tomlCode).toMatch(/^compatibility_flags = \["nodejs_compat"\]$/m);
+  });
+
+  it("wrangler.toml の [alias]・tsconfig.json の paths・vitest.config.ts の alias が、同じ3つの依存を同じ行き先へ向ける(CI にだけ効く設定の書き忘れを防ぐ)", () => {
+    const aliasBlock = /^\[alias\]\n((?:[^\n[]+\n?)+)/m.exec(tomlCode)?.[1] ?? "";
+    // 前提: [alias] を実際に読めている(空振りではない)
+    expect(aliasBlock).not.toBe("");
+    const tsconfig = readTextLf("cloud", "tsconfig.json");
+    const vitestConfig = readTextLf("cloud", "vitest.config.ts");
+    const target: Record<string, string> = {
+      undici: "./src/undici-stub.ts",
+      "iconv-lite": "./node_modules/iconv-lite",
+      cheerio: "./node_modules/cheerio",
+    };
+    for (const key of ALIAS_KEYS) {
+      expect(aliasBlock, `[alias] に ${key}`).toContain(`${key} = "${target[key]}"`);
+      expect(tsconfig, `tsconfig の paths に ${key}`).toContain(`"${key}": ["${target[key]}"]`);
+      expect(vitestConfig, `vitest の alias に ${key}`).toMatch(new RegExp(`"?${key}"?: here\\("${target[key]!.replace(/[./]/g, "\\$&")}"\\)`));
+    }
+    // [alias] に余計な行き先が無い(3つだけ)
+    expect(aliasBlock.trim().split("\n")).toHaveLength(ALIAS_KEYS.length);
+  });
+
+  it("alias の行き先は cloud/ の中の相対パス(`..` で外へ出ない。packages/core/node_modules は CI に無い)で、スタブは実在する", () => {
+    const aliasBlock = /^\[alias\]\n((?:[^\n[]+\n?)+)/m.exec(tomlCode)?.[1] ?? "";
+    const targets = [...aliasBlock.matchAll(/= "([^"]+)"/g)].map((m) => m[1]!);
+    // 前提: 行き先を実際に読めている(空振りではない)
+    expect(targets).toHaveLength(ALIAS_KEYS.length);
+    for (const target of targets) {
+      expect(target, `行き先 ${target}`).toMatch(/^\.\/(?!.*\.\.)/);
+    }
+    expect(existsSync(path.join(ROOT, "cloud", "src", "undici-stub.ts"))).toBe(true);
+  });
+
+  it("cheerio・iconv-lite は固定版で、追加理由が //deps にある", () => {
+    const pkg = JSON.parse(readTextLf("cloud", "package.json")) as {
+      dependencies: Record<string, string>;
+      "//deps": Record<string, string>;
+    };
+    for (const name of ["cheerio", "iconv-lite"]) {
+      expect(pkg.dependencies[name], `${name} の版`).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(pkg["//deps"][name], `${name} の理由`).toBeTruthy();
+    }
+  });
+});
+
 describe("cloud/ はワークスペースの外(既存の CI のインストールを重くしない)", () => {
   it("pnpm-workspace.yaml は packages/* だけで、cloud を含まない", () => {
     const workspace = readTextLf("pnpm-workspace.yaml");

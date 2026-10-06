@@ -10,6 +10,8 @@
     "smoke": "tsx smoke.ts"
   },
   "dependencies": {
+    "cheerio": "1.2.0",
+    "iconv-lite": "0.6.3",
     "jose": "6.2.12"
   },
   "devDependencies": {
@@ -26,7 +28,9 @@
     "@cloudflare/workers-types": "Worker / Durable Object の型検査(ctx.access の型を含む)。バージョン固定",
     "vitest": "JWT 検証・ハンドラの単体テスト(Node の WebCrypto で動く)",
     "tsx": "ローカルのスモークテスト(smoke.ts)の実行",
-    "@types/node": "テスト・スモークテスト(Node で動く)の型検査"
+    "@types/node": "テスト・スモークテスト(Node で動く)の型検査",
+    "cheerio": "core の出馬表などのパーサ(parseShutuba 等)が使う(Issue #162 段階2。確認用エンドポイントと、後続の分析で使う)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる。バージョンは spikes/cloudflare と packages/core/package.json の範囲に揃えて固定",
+    "iconv-lite": "core の HttpClient が EUC-JP(db.netkeiba.com の馬ページ等)のデコードに使う。cheerio と同じく alias でここから解決させる。バージョン固定"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
