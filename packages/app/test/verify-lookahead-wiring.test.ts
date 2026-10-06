@@ -9,7 +9,7 @@ import {
   type AnalysisRecord,
   type RaceData,
 } from "@keiba/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runAnalysis, type AnalysisPipelineDeps } from "../src/main/analysis-pipeline.js";
 import {
@@ -135,6 +135,10 @@ function counterSum(v: VerifyReportView): number {
     v.excludedLookaheadUnknownCount
   );
 }
+
+// Windows の CI でファイルの SQLite の作成・seed が既定の 5 秒を超えたことがある(9c1e00d の run。実測 6.2〜6.9 秒、
+// 前回の run は 0.6 秒)。このファイルに限って 30 秒にする(テストの内容は変えない。全体の testTimeout は変えない)。
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let tempDir: string;
 let dbPath: string;
