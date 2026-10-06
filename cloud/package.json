@@ -1,0 +1,37 @@
+{
+  "name": "keiba-cloud",
+  "private": true,
+  "type": "module",
+  "//": "Issue #161(#21-C)のクラウド版(Cloudflare Worker)の土台。pnpm workspace の外(ルートの pnpm-workspace.yaml は packages/* のみ)に置き、`pnpm install --ignore-workspace` で独立にインストールする。既存 CI(windows-latest の pnpm install --frozen-lockfile)に wrangler / workerd の巨大な依存(約 190MB)を持ち込まないため。型検査・テスト・デプロイの確認は .github/workflows/deploy-cloud.yml が行う。",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "deploy:dry": "wrangler deploy --dry-run --outdir dist-dry",
+    "smoke": "tsx smoke.ts"
+  },
+  "dependencies": {
+    "jose": "6.2.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261004.1",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9",
+    "wrangler": "4.147.0"
+  },
+  "//deps": {
+    "jose": "Cloudflare Access の JWT(RS256)の署名・iss・aud・exp の検証に使う。署名検証を自前で書かず、検証済みの実装(Cloudflare 公式の例も同じ)に任せるため。依存ゼロで WebCrypto だけで動く。バージョン固定。",
+    "wrangler": "デプロイ・ローカル検証(wrangler dev)。バージョン固定(スパイク #159 で確認した版)",
+    "@cloudflare/workers-types": "Worker / Durable Object の型検査(ctx.access の型を含む)。バージョン固定",
+    "vitest": "JWT 検証・ハンドラの単体テスト(Node の WebCrypto で動く)",
+    "tsx": "ローカルのスモークテスト(smoke.ts)の実行",
+    "@types/node": "テスト・スモークテスト(Node で動く)の型検査"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  }
+}

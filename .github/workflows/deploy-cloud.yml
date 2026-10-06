@@ -1,0 +1,191 @@
+# クラウド版(Cloudflare Worker。cloud/)の型検査・テスト・本番デプロイ(Issue #161〈#21-C〉)。
+#
+# ★2つのジョブ:
+#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・テスト・デプロイの dry-run・ローカルスモーク)。
+#            Secrets を持たない。
+#   - deploy: check が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
+#
+# ★デプロイの条件(deploy ジョブの if:。ここ1箇所にだけ書く。build-windows.yml の公開ゲートと同じ形):
+#   許可した作業ブランチ(下の1本)の上で、
+#     - 先端コミットのメッセージに承認印 `[PUBLISH-APPROVED]` を含み、かつ「レビュー継続中」を含まない push、または
+#     - 手動実行(workflow_dispatch。付け忘れからの回復レバー)。
+#   手動実行も許可ブランチの上でしか deploy が動かない(承認印のない任意のブランチから本番に出せる抜け道を作らない)。
+#   残存リスク: Actions の式の文字列比較(contains を含む)は大文字小文字を区別しないため、`[publish-approved]` でも一致する。
+#   1回の push に複数コミットが含まれる場合の判定は先端コミット(head_commit)のみで行う。
+#   許可ブランチを変えるときは、on.push.branches・deploy の if:・scripts/test/cloud-deploy-workflow.test.ts を揃えて直す。
+#
+# ★paths フィルタを付けない理由: 承認印付きの最終コミットは版数・文書だけのことが多く、cloud/ を含まない。
+#   フィルタを付けると、その最終コミットで deploy が走らず、cloud/ の変更が本番に出なくなる。
+#
+# ★公開リポジトリ: ジョブログは誰でも読める。workers.dev のサブドメイン(アカウントを特定できる)は、wrangler deploy が
+#   URL をログに出すより前に ::add-mask:: で隠す。メールアドレス・Access のチーム名・AUD は Worker の secret にあり、
+#   ここには一切現れない。
+#
+# ★既存の exe 公開(build-windows.yml)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd などの依存は
+#   cloud/(pnpm workspace の外)にだけ入れる。承認印付き push は両方のワークフローを起動する。
+name: クラウド版の検査と本番デプロイ
+
+on:
+  push:
+    branches:
+      - claude/issue-order-processing-wjgpdd
+  workflow_dispatch:
+
+# リポジトリへは何も書き戻さない。
+permissions:
+  contents: read
+
+# 同時実行は1本に絞る。実行中のデプロイを途中で打ち切らない。
+concurrency:
+  group: deploy-cloud
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      # pnpm はバージョン未指定にして、ルートの package.json の packageManager フィールドに従わせる。
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      # cloud/ は pnpm workspace の外。ロックファイルで固定し、独立にインストールする。
+      - name: 依存をインストール(cloud)
+        working-directory: cloud
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: 型検査
+        working-directory: cloud
+        run: pnpm run typecheck
+
+      - name: テスト
+        working-directory: cloud
+        run: pnpm test
+
+      # デプロイせずに、バンドルと設定(DO の migration を含む)を確かめる。認証情報は要らない。
+      - name: デプロイの dry-run
+        working-directory: cloud
+        run: pnpm run deploy:dry
+
+      # ローカル(workerd)での配線のスモーク: 認証の関門(403)・DO の SQLite・/api/health。外部へは出ない。
+      - name: ローカルスモークテスト
+        working-directory: cloud
+        run: pnpm run smoke
+
+  deploy:
+    needs: check
+    # ★デプロイの条件(上のヘッダ参照)。条件式をほかの場所に複製しない。
+    if: ${{ github.ref == 'refs/heads/claude/issue-order-processing-wjgpdd' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[PUBLISH-APPROVED]') && !contains(github.event.head_commit.message, 'レビュー継続中'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      # cloud/wrangler.toml の name と一致させる(scripts/test/cloud-deploy-workflow.test.ts が固定)。
+      WORKER_NAME: keiba-cloud
+    steps:
+      # 最初の関門: Secrets の存在。未登録の Secret は Actions では空文字になる。値は出力しない。
+      - name: Secrets の存在を確認
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=0
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error title=Secret が未登録::リポジトリの Secrets に CLOUDFLARE_API_TOKEN が登録されていません"
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error title=Secret が未登録::リポジトリの Secrets に CLOUDFLARE_ACCOUNT_ID が登録されていません"
+            missing=1
+          fi
+          if [ "$missing" != "0" ]; then
+            exit 1
+          fi
+          echo "Secrets は2つとも登録されています(値は表示しません)"
+
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: pnpm をセットアップ
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: cloud/pnpm-lock.yaml
+
+      - name: 依存をインストール(cloud)
+        working-directory: cloud
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      # wrangler deploy は Worker の URL(workers.dev のサブドメインを含む)をログに出すので、その前にサブドメインを
+      # 取得して ::add-mask:: で隠す。API の応答はファイルに書き、ログに出さない。取得できなければデプロイしない
+      # (隠せないまま URL がログに出るのを避ける)。マスクを登録してから GITHUB_ENV に書く。
+      - name: サブドメインを取得してマスク
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          out="$RUNNER_TEMP/subdomain.json"
+          status=$(curl -s -o "$out" -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" || true)
+          sub=""
+          if [ "$status" = "200" ]; then
+            sub=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf-8")); process.stdout.write(typeof r.result?.subdomain==="string"?r.result.subdomain:"")' "$out" || true)
+          fi
+          rm -f "$out"
+          if [ -z "$sub" ]; then
+            echo "::error title=サブドメインを取得できません::workers.dev のサブドメインを API から取得できなかったためデプロイしません(HTTP $status。トークンの権限か、workers.dev のサブドメインの登録を確認してください)"
+            exit 1
+          fi
+          echo "::add-mask::$sub"
+          echo "CF_SUBDOMAIN=$sub" >> "$GITHUB_ENV"
+          echo "サブドメインを取得し、マスクしました(値は表示しません)"
+
+      # 秘密(ACCESS_TEAM_NAME / ACCESS_AUD / ACCESS_ALLOWED_EMAIL)は Worker の secret にあり、wrangler deploy では消えない。
+      - name: Worker をデプロイ
+        working-directory: cloud
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+
+      # 事後確認: 認証なしの GET が 2xx にならないこと(Access のログインへのリダイレクト 302、401、または Worker 自身の
+      # 403 のいずれか)。Access を掛ける前の初回デプロイ(secret 未設定)では Worker の 403 で通る。
+      # 反映の遅れに備えて数回やり直す。URL・サブドメインは出力しない(ステータスコードだけを出す)。
+      - name: 事後確認(認証なしで 2xx にならない)
+        run: |
+          url="https://${WORKER_NAME}.${CF_SUBDOMAIN}.workers.dev/"
+          code="000"
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url" || true)
+            case "$code" in
+              302|401|403)
+                echo "認証なしの GET は HTTP $code でした(2xx ではありません)"
+                exit 0
+                ;;
+              2??)
+                echo "::error title=認証なしで 2xx が返りました::認証なしの GET が HTTP $code でした。Access と Worker の認証の関門を確認してください"
+                exit 1
+                ;;
+            esac
+            echo "試行 $attempt: HTTP $code(反映待ち。5秒後に再試行します)"
+            sleep 5
+          done
+          echo "::error title=事後確認できません::認証なしの GET が想定した応答(302/401/403)になりませんでした(最後の HTTP $code)"
+          exit 1
