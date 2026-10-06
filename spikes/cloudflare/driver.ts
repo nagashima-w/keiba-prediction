@@ -41,7 +41,7 @@ import type { OriginPlace, OriginStep } from "../../scripts/cloudflare-spike/ori
 import { runOrigin } from "../../scripts/cloudflare-spike/origin-run.js";
 import { runReachability } from "../../scripts/cloudflare-spike/reachability-run.js";
 import { runSocketMatrix, type MatrixSendOutcome, type SubrequestProbeResult } from "../../scripts/cloudflare-spike/socket-matrix-run.js";
-import type { MatrixStep } from "../../scripts/cloudflare-spike/socket-matrix-plan.js";
+import { buildMatrixSocketBody, type MatrixStep } from "../../scripts/cloudflare-spike/socket-matrix-plan.js";
 import type { NetkeibaProbeRecord, ProbeSource } from "../../scripts/cloudflare-spike/reachability.js";
 import {
   CPU_WORKS,
@@ -283,15 +283,8 @@ async function measureOrigin(result: SpikeResult): Promise<void> {
 
 /** Worker の `/do/netkeiba-socket`(DO の中のソケット)に、計画の1本を取得させる。想定外の応答は例外にする(runner が記録にする)。 */
 async function sendViaDoSocket(step: MatrixStep): Promise<MatrixSendOutcome> {
-  const r = await call("POST", "/do/netkeiba-socket", {
-    targetId: step.target.id,
-    url: step.target.url,
-    kind: step.target.kind,
-    encoding: step.target.encoding,
-    // E3 と同じヘッダ集合。gzip の opt-in は、計画のステップの方式から決める(ここでは付け足さない)。
-    headers: STATIC_SOCKET_HEADERS.map((h) => ({ name: h.name, value: h.value })),
-    ...(step.variant === "gzip" ? { acceptEncoding: "gzip" } : {}),
-  });
+  // E3 と同じヘッダ集合。gzip の opt-in は、計画のステップの方式から buildMatrixSocketBody が決める(ここでは付け足さない)。
+  const r = await call("POST", "/do/netkeiba-socket", buildMatrixSocketBody(step, STATIC_SOCKET_HEADERS));
   const parsed = ((): Partial<MatrixSendOutcome> & { ok?: boolean } => {
     try {
       return JSON.parse(r.text) as Partial<MatrixSendOutcome> & { ok?: boolean };

@@ -13,6 +13,7 @@ import {
   SOCKET_MAX_BYTES,
   SOCKET_TIMEOUT_MS,
   SOCKET_MAX_DECODED_BYTES,
+  SocketResponseError,
   type ConnectFn,
   type SocketFetchMeta,
   type SocketLike,
@@ -600,5 +601,61 @@ describe("createSocketFetch: 計測用のメタ情報 onMeta(#162)", () => {
     const c = connector(() => ({ chunks: [] }));
     await expect(createSocketFetch(c.connect, { headers: HEADERS, onMeta: (m) => metas.push(m) })(URL_RACE, {})).rejects.toThrow();
     expect(metas).toHaveLength(0);
+  });
+});
+
+/**
+ * レビュー指摘 R1(#162 段階1): 未要求・未対応の content-encoding(圧縮された 403/429 など)で例外になっても、受信済みの
+ * ステータスを記録に残す。残さないと status=null(通信エラー扱い)になり、連続拒否の判定(400/403/429 の2回連続の打ち切り)に
+ * 数えられず、netkeiba へ撃ち続ける(負荷の守りの穴)。例外のメッセージ(理由)は従来どおり残す。
+ */
+describe("圧縮された拒否の応答でも、受信済みのステータスを記録に残す(R1)", () => {
+  const raceRequest = { targetId: "central-shutuba", url: URL_RACE, kind: "shutuba" as const, encoding: "utf-8" as const };
+  const compressedAs = (status: number, encoding: string, body: Uint8Array = bytes("abc")): Uint8Array =>
+    response(`HTTP/1.1 ${status} X\nContent-Encoding: ${encoding}\nContent-Length: ${body.length}`, body);
+
+  it("createSocketFetch の例外は、受信済みのステータスを持つ(SocketResponseError。メッセージは従来どおり)", async () => {
+    const c = connector(() => ({ chunks: [compressedAs(403, "gzip", gz("denied"))] }));
+    const error = await createSocketFetch(c.connect, { headers: HEADERS })(URL_RACE, {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SocketResponseError);
+    expect((error as SocketResponseError).status).toBe(403);
+    expect((error as Error).message).toMatch(/content-encoding: gzip/i);
+  });
+
+  it.each([
+    ["opt-in なしで gzip の 403", undefined, 403, "gzip"],
+    ["opt-in なしで gzip の 429", undefined, 429, "gzip"],
+    ["gzip を要求して br の 400", "gzip" as const, 400, "br"],
+    ["gzip を要求して br の 429", "gzip" as const, 429, "br"],
+  ])("probeNetkeiba の記録: %s は status を残し、blocked と判定される(通信エラー扱いにしない)", async (_name, acceptEncoding, status, encoding) => {
+    const c = connector(() => ({ chunks: [compressedAs(status, encoding)] }));
+    const rec = await probeNetkeiba(raceRequest, createSocketFetch(c.connect, { headers: HEADERS, ...(acceptEncoding !== undefined ? { acceptEncoding } : {}) }));
+    expect(rec.status).toBe(status);
+    expect(rec.error).toMatch(/content-encoding/i);
+    expect(judgeReachability(rec).verdict).toBe("blocked");
+    expect(c.calls).toHaveLength(1);
+  });
+
+  it("gzip を要求して、gzip として壊れた 403 の本文でも、status を残す", async () => {
+    const c = connector(() => ({ chunks: [compressedAs(403, "gzip", bytes("nope"))] }));
+    const rec = await probeNetkeiba(raceRequest, createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" }));
+    expect(rec.status).toBe(403);
+    expect(rec.error).toMatch(/gzip として展開できません/);
+    expect(judgeReachability(rec).verdict).toBe("blocked");
+  });
+
+  it("展開後のサイズ上限を超えた 200 でも、status は 200 のまま残す(拒否とは数えず、判定は reachable-but-unparsed)", async () => {
+    const bomb = gz(new Uint8Array(100_000).fill(65));
+    const c = connector(() => ({ chunks: [response(`HTTP/1.1 200 OK\nContent-Encoding: gzip\nContent-Length: ${bomb.length}`, bomb)] }));
+    const rec = await probeNetkeiba(raceRequest, createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip", maxDecodedBytes: 1000 }));
+    expect(rec.status).toBe(200);
+    expect(rec.error).toMatch(/展開後.*上限/);
+    expect(judgeReachability(rec).verdict).toBe("reachable-but-unparsed");
+  });
+
+  it("ステータスが読めない失敗(読み取り中の切断)は、従来どおり status=null", async () => {
+    const c = connector(() => ({ chunks: [bytes("HTTP/1.1 200 OK\r\nContent")], readError: new Error("connection reset") }));
+    const rec = await probeNetkeiba(raceRequest, createSocketFetch(c.connect, { headers: HEADERS }));
+    expect(rec.status).toBeNull();
   });
 });

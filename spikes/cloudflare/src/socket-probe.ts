@@ -48,6 +48,20 @@ export const SOCKET_MAX_DECODED_BYTES = 4 * 1024 * 1024;
 /** 打ち切りの記録に添えるステータスを読むために保持する先頭のバイト数。 */
 const STATUS_PEEK_BYTES = 256;
 
+/**
+ * 応答のステータス行・ヘッダまでは読めたが、本文の扱い(未対応の content-encoding・gzip の展開失敗など)で失敗した例外。
+ * **受信済みのステータスを持つ**: 記録(`NetkeibaProbeRecord.status`)に残し、圧縮された 403/429 も連続拒否の判定に数えるため
+ * (status=null の通信エラー扱いにすると、拒否が数えられず netkeiba へ撃ち続ける)。メッセージは理由を表す。
+ */
+export class SocketResponseError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "SocketResponseError";
+    this.status = status;
+  }
+}
+
 /** `cloudflare:sockets` の `Socket` のうち、ここで使う部分(偽ソケットを作れる最小限)。 */
 export interface SocketLike {
   readonly readable: ReadableStream<Uint8Array>;
@@ -266,10 +280,14 @@ export function createSocketFetch(connect: ConnectFn, options: SocketFetchOption
     try {
       const bytes = await Promise.race([work, aborted]);
       const parsed = parseHttp1Response(bytes);
-      const { response, decoded, contentEncoding } = await toResponse(parsed, {
-        acceptGzip: options.acceptEncoding === "gzip",
-        maxDecodedBytes,
-      });
+      let built: Awaited<ReturnType<typeof toResponse>>;
+      try {
+        built = await toResponse(parsed, { acceptGzip: options.acceptEncoding === "gzip", maxDecodedBytes });
+      } catch (error) {
+        // ステータスは受信済み。理由(メッセージ)はそのままに、ステータスを添えて投げ直す。
+        throw new SocketResponseError(error instanceof Error ? error.message : String(error), parsed.status);
+      }
+      const { response, decoded, contentEncoding } = built;
       if (options.onMeta !== undefined) {
         options.onMeta({
           status: parsed.status,

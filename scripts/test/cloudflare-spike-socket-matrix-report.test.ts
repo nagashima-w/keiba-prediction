@@ -14,7 +14,7 @@ import { demoteHeadings, extractGeneratedBlock, generatedMarkers, replaceGenerat
 const RAW_SUB = "my-sub";
 const RAW_IP = "198.51.100.9";
 
-async function sample(over: { gzipBlocked?: boolean } = {}): Promise<SocketMatrixResult> {
+async function sample(over: { gzipBlocked?: boolean; gzipUncompressed?: boolean } = {}): Promise<SocketMatrixResult> {
   let now = 1_000_000;
   const deps: SocketMatrixDeps = {
     now: () => now,
@@ -43,7 +43,7 @@ async function sample(over: { gzipBlocked?: boolean } = {}): Promise<SocketMatri
         meta: {
           status,
           framing: "chunked",
-          contentEncoding: gzip && status === 200 ? "gzip" : null,
+          contentEncoding: gzip && status === 200 && over.gzipUncompressed !== true ? "gzip" : null,
           receivedBytes: 6000,
           wireBodyBytes: status !== 200 ? 0 : gzip ? 1000 : 5000,
           decodedBytes: status === 200 ? 5000 : 0,
@@ -87,6 +87,20 @@ describe("renderSocketMatrixMarkdown", () => {
     expect(md).toContain("### gzip の比較(identity との対)");
     expect(md).toMatch(/\| S1g \| S1 \| 200 \/ 200 \| 5000 \/ 1000 \| 5000 \| 0\.2 \|/);
     expect(md).toContain("一致");
+  });
+
+  it("gzip の比較の表に、gzip で返ったか(content-encoding)の列がある: gzip で返れば gzip、返らなければ『圧縮されなかった』、拒否なら -", async () => {
+    const header = renderSocketMatrixMarkdown(await sample()).join("\n");
+    expect(header).toContain("圧縮(content-encoding)");
+    const rowOf = (md: string, id: string): string => md.split("\n").find((l) => l.startsWith(`| ${id} | S1 |`) || l.startsWith(`| ${id} | T1 |`)) ?? "";
+    expect(rowOf(header, "S1g")).toMatch(/\| gzip \|$/);
+    const uncompressed = renderSocketMatrixMarkdown(await sample({ gzipUncompressed: true })).join("\n");
+    expect(rowOf(uncompressed, "S1g")).toMatch(/\| 圧縮されなかった \|$/);
+    const blocked = renderSocketMatrixMarkdown(await sample({ gzipBlocked: true })).join("\n");
+    expect(rowOf(blocked, "S1g")).toMatch(/\| - \|$/);
+    // 圧縮されなかった事実の欄に、gzip の線上の本文とは書かない。
+    expect(uncompressed).not.toMatch(/S1g: gzip の線上の本文/);
+    expect(uncompressed).toMatch(/S1g.*圧縮されなかった/);
   });
 
   it("再現性の表と、DO の呼び出し試験の結果", async () => {

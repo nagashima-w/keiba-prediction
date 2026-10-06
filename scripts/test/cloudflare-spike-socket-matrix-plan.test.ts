@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 import { STATIC_SOCKET_HEADERS } from "../cloudflare-spike/echo.js";
 import { MIN_INTERVAL_MS, MAX_NETKEIBA_REQUESTS } from "../cloudflare-spike/request-guard.js";
 import {
+  buildMatrixSocketBody,
   buildSocketMatrixPlan,
   REFERENCE_E3_SHUTUBA_BYTES,
   SOCKET_MATRIX_SUBREQUEST_PROBE_COUNT,
 } from "../cloudflare-spike/socket-matrix-plan.js";
 import { isAllowedUrl } from "../cloudflare-spike/targets.js";
+import { validateSocketRequest } from "../cloudflare-spike/worker-input.js";
 import { parseRaceId } from "../../packages/core/src/scraper/ids.js";
 import { narOddsPageUrl, oddsApiUrl, shutubaUrl, trioOddsApiUrl } from "../../packages/core/src/scraper/urls.js";
 
@@ -127,5 +129,51 @@ describe("定数", () => {
 
   it("送るヘッダは E3 と同じ集合(User-Agent・accept・accept-language・sec-fetch-mode の4つ。この順)", () => {
     expect(STATIC_SOCKET_HEADERS.map((h) => h.name)).toEqual(["User-Agent", "accept", "accept-language", "sec-fetch-mode"]);
+  });
+});
+
+/**
+ * ドライバが DO の `/do/netkeiba-socket` へ送る本文の組み立て(#162 段階1のレビュー指摘)。ドライバのソースを正規表現で
+ * 走査するのではなく、組み立てを関数にして、**Worker が実際に使う入力検査(validateSocketRequest)を通した結果**で、
+ * gzip の opt-in が確かに渡ることを固定する(キー名を誤ると、検査を通った値に acceptEncoding が現れず、赤になる)。
+ */
+describe("buildMatrixSocketBody", () => {
+  const headers = STATIC_SOCKET_HEADERS.map((h) => ({ name: h.name, value: h.value }));
+
+  it("gzip のステップ(S1g・T1g)は、検査を通した結果に acceptEncoding: gzip が入る", () => {
+    for (const step of plan.filter((s) => s.variant === "gzip")) {
+      const v = validateSocketRequest(buildMatrixSocketBody(step, headers));
+      expect(v.ok).toBe(true);
+      if (v.ok) {
+        expect(v.value.acceptEncoding).toBe("gzip");
+      }
+    }
+    expect(plan.filter((s) => s.variant === "gzip").map((s) => s.id)).toEqual(["S1g", "T1g"]);
+  });
+
+  it("identity のステップ(7 本)は、acceptEncoding のキー自体を持たず、検査を通した結果にも入らない", () => {
+    const identity = plan.filter((s) => s.variant === "identity");
+    expect(identity).toHaveLength(7);
+    for (const step of identity) {
+      const body = buildMatrixSocketBody(step, headers);
+      expect("acceptEncoding" in body).toBe(false);
+      const v = validateSocketRequest(body);
+      expect(v.ok).toBe(true);
+      if (v.ok) {
+        expect(v.value.acceptEncoding).toBeUndefined();
+      }
+    }
+  });
+
+  it("対象(targetId・url・kind・encoding)とヘッダ(名前と値の順序)を、そのまま渡す。Accept-Encoding をヘッダには入れない", () => {
+    for (const step of plan) {
+      const v = validateSocketRequest(buildMatrixSocketBody(step, headers));
+      expect(v.ok).toBe(true);
+      if (v.ok) {
+        expect(v.value).toMatchObject({ targetId: step.target.id, url: step.target.url, kind: step.target.kind, encoding: step.target.encoding });
+        expect(v.value.headers).toEqual(headers);
+        expect(v.value.headers.some((h) => h.name.toLowerCase() === "accept-encoding")).toBe(false);
+      }
+    }
   });
 });

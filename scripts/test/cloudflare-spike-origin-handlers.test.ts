@@ -259,6 +259,16 @@ describe("handleNetkeibaSocket: gzip の opt-in・メタ情報・インスタン
     expect(json.record.status).toBeNull();
   });
 
+  it("圧縮された 429(opt-in なしで gzip が返った)でも、記録の status は 429 で残る(連続拒否の判定に数えられる。R1)", async () => {
+    const body = new Uint8Array(gzipSync(Buffer.from("slow down")));
+    const raw = new Uint8Array([...enc.encode(`HTTP/1.1 429 Too Many Requests\r\nContent-Encoding: gzip\r\nContent-Length: ${body.length}\r\n\r\n`), ...body]);
+    const res = await handleNetkeibaSocket(post(socketBody()), socketReturning(raw).connect);
+    const json = (await res.json()) as { record: { status: number | null; error: string }; meta: unknown };
+    expect(json.record.status).toBe(429);
+    expect(json.record.error).toMatch(/content-encoding: gzip/i);
+    expect(json.meta).toBeNull();
+  });
+
   it.each([
     ["acceptEncoding が identity", gzipBody({ acceptEncoding: "identity" })],
     ["acceptEncoding が br", gzipBody({ acceptEncoding: "br" })],

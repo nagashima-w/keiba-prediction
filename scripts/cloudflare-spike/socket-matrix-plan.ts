@@ -14,6 +14,7 @@
 
 import { parseRaceId } from "../../packages/core/src/scraper/ids.js";
 import { trioOddsApiUrl, narOddsPageUrl } from "../../packages/core/src/scraper/urls.js";
+import type { HeaderEntry } from "./http1.js";
 import { buildTargets, type NetkeibaTarget } from "./targets.js";
 
 export type MatrixVariant = "identity" | "gzip";
@@ -83,4 +84,19 @@ export function buildSocketMatrixPlan(): MatrixStep[] {
     { id: "S1g", variant: "gzip", role: "compression", pairWith: "S1", target: shutuba },
     { id: "T1g", variant: "gzip", role: "compression", pairWith: "T1", target: trio },
   ];
+}
+
+/**
+ * ドライバが DO の `/do/netkeiba-socket` へ送る本文を組み立てる。**gzip の opt-in は、ステップの方式(variant)からここで決める**
+ * (identity のステップには `acceptEncoding` のキー自体を付けない)。ヘッダには Accept-Encoding を入れない(Worker の入力検査が拒否する)。
+ */
+export function buildMatrixSocketBody(step: MatrixStep, headers: readonly HeaderEntry[]): Record<string, unknown> {
+  return {
+    targetId: step.target.id,
+    url: step.target.url,
+    kind: step.target.kind,
+    encoding: step.target.encoding,
+    headers: headers.map((h) => ({ name: h.name, value: h.value })),
+    ...(step.variant === "gzip" ? { acceptEncoding: "gzip" } : {}),
+  };
 }

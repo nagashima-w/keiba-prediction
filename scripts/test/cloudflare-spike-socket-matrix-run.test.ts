@@ -202,6 +202,20 @@ describe("runSocketMatrix: 進行・本数・間隔", () => {
     expect(r.subrequestProbe!.error).not.toContain("mysub");
   });
 
+  it("parseError にも、生の値が残らないようにマスクする", async () => {
+    const h = harness(() => ({
+      record: rec({ status: 200, parsedCount: null, parseError: "keiba-cf-spike-77-1.mysub.workers.dev から 203.0.113.7 のパースに失敗" }),
+      meta: meta(),
+      instance: null,
+    }));
+    const r = await runSocketMatrix(h.deps, { plan: buildSocketMatrixPlan().slice(0, 1) });
+    const json = JSON.stringify(r);
+    expect(r.records[0]!.parseError).toMatch(/パースに失敗/);
+    expect(json).not.toContain("mysub");
+    expect(json).not.toContain("203.0.113.7");
+    expect(json).not.toContain("keiba-cf-spike-77-1");
+  });
+
   it("DO の呼び出し試験が成功扱いで返した error(HTTP の失敗の本文など)にも、生の値が残らないようにマスクする", async () => {
     const h = harness(() => ok(), async () => ({
       ran: false,
@@ -495,5 +509,145 @@ describe("describeSocketMatrix: 事実・推測・限界", () => {
 
   it("DO のインスタンスが全記録で同じなら、その事実を載せる(同じインスタンスでの再取得か)", () => {
     expect(read(allOk()).facts.join("\n")).toMatch(/DO のインスタンス.*1/);
+  });
+});
+
+/**
+ * レビュー指摘の修正(#162 段階1)。実測の結果を誤読させる記録・文面を出さない:
+ *  1. 本文の比較(バイト数・ハッシュ・「サーバ側の更新」の推測)は、両方が 2xx のときだけ行う。
+ *  2. gzip 拒否の推測(Accept-Encoding の引き金)は、直前の identity の取得が拒否されていないときだけ出す。
+ *  3. gzip で返ったか(content-encoding)を事実・表に出す。圧縮されなかったら「gzip の線上の本文」とは書かない。
+ */
+const blockedMeta = (over: Partial<SocketFetchMeta> = {}): SocketFetchMeta =>
+  meta({ status: 403, wireBodyBytes: 150, decodedBytes: 150, bodySha256: "ffffffffffffffff", ...over });
+const refused = (stepId: string, status = 403, over: Partial<MatrixRecord> = {}): MatrixRecord =>
+  mr(stepId, { status, bodyLength: 150, parsedCount: null, meta: blockedMeta({ status }), ...over });
+const readAll = (records: MatrixRecord[], probe: SubrequestProbeResult | null = okProbe(60)) =>
+  describeSocketMatrix(records, summarizeSocketMatrix(records), probe, null);
+
+describe("指摘1: 本文の比較は、両方が 2xx のときだけ行う", () => {
+  it("再現性: 2本目(S1r)が 403(本文あり・ハッシュが違う)でも、本文の比較は null で、『本文が違った』の推測を出さない", () => {
+    const records = [mr("S1", { meta: meta({ bodySha256: "aaaaaaaaaaaaaaaa", decodedBytes: 500 }) }), refused("S1r", 403)];
+    const row = summarizeSocketMatrix(records).repeat[0]!;
+    expect(row).toMatchObject({ firstStatus: 200, secondStatus: 403, bytesEqual: null, hashEqual: null });
+    const r = readAll(records);
+    expect(r.inferences.join("\n")).not.toMatch(/本文が違った|サーバ側の更新|拒否や不具合とは読まない/);
+    expect(r.facts.join("\n")).toMatch(/S1r.*比較しない.*2xx/);
+    // 比較しなくても、ステータスの事実は載せる。
+    expect(r.facts.join("\n")).toMatch(/S1r.*200 → 403/);
+  });
+
+  it("再現性: 1本目が 403 でも、2本目が 200 でも、比較しない(片方でも非 2xx なら null)", () => {
+    const records = [refused("S1", 403), mr("S1r", { meta: meta({ bodySha256: "aaaaaaaaaaaaaaaa" }) })];
+    expect(summarizeSocketMatrix(records).repeat[0]).toMatchObject({ bytesEqual: null, hashEqual: null });
+  });
+
+  it("再現性: 両方が 2xx なら、従来どおり比較する(ハッシュが違えば false と、正当な更新の推測)", () => {
+    const records = [mr("S1", { meta: meta({ bodySha256: "aaaaaaaaaaaaaaaa", decodedBytes: 500 }) }), mr("S1r", { meta: meta({ bodySha256: "bbbbbbbbbbbbbbbb", decodedBytes: 510 }) })];
+    expect(summarizeSocketMatrix(records).repeat[0]).toMatchObject({ bytesEqual: false, hashEqual: false });
+    expect(readAll(records).inferences.join("\n")).toMatch(/正当な違いの可能性/);
+  });
+
+  it("圧縮: gzip が 403(本文 150 バイトのエラー応答)でも、比率・本文のハッシュは出さない(null)。ステータスは載る", () => {
+    const records = [mr("S1", { meta: meta({ wireBodyBytes: 1000 }) }), refused("S1g", 403, { variant: "gzip" })];
+    const row = summarizeSocketMatrix(records).compression[0]!;
+    expect(row).toMatchObject({ identityStatus: 200, gzipStatus: 403, wireRatio: null, bodyHashEqual: null });
+    expect(row.gzipWireBytes).toBe(150);
+  });
+
+  it("圧縮: identity が 403 でも、gzip が 200 でも、比率・ハッシュは null(片方でも非 2xx なら比較しない)", () => {
+    const records = [refused("S1", 403), mr("S1g", { meta: meta({ contentEncoding: "gzip", wireBodyBytes: 200 }) })];
+    expect(summarizeSocketMatrix(records).compression[0]).toMatchObject({ identityStatus: 403, gzipStatus: 200, wireRatio: null, bodyHashEqual: null });
+  });
+
+  it("圧縮: gzip が 403 のとき、事実の欄に『倍』の比率や『ハッシュ不一致』を載せない(比較しないと書く)", () => {
+    const records = [mr("S1", { meta: meta({ wireBodyBytes: 1000 }) }), refused("S1g", 403, { variant: "gzip" })];
+    const facts = readAll(records).facts.join("\n");
+    expect(facts).not.toMatch(/S1g: gzip の線上/);
+    expect(facts).not.toMatch(/不一致/);
+    expect(facts).toMatch(/S1g.*比較しない/);
+  });
+});
+
+describe("指摘2: gzip 拒否の推測は、直前の identity が拒否されていないときだけ", () => {
+  it("S1=200・S1r=403・S1g=403 では、Accept-Encoding の引き金とは言わず、時間経過による拒否と区別できないと書く", () => {
+    const records = [mr("S1"), refused("S1r", 403), refused("S1g", 403, { variant: "gzip" })];
+    const inf = readAll(records).inferences.join("\n");
+    expect(inf).not.toMatch(/引き金/);
+    expect(inf).toMatch(/区別できない/);
+    expect(inf).toMatch(/S1g/);
+  });
+
+  it("S1=200・S1r=200・S1g=403 では、(従来どおり)引き金の疑いを推測として出す", () => {
+    const records = [mr("S1"), mr("S1r"), refused("S1g", 403, { variant: "gzip" })];
+    const inf = readAll(records).inferences.join("\n");
+    expect(inf).toMatch(/S1g.*引き金/);
+    expect(inf).not.toMatch(/区別できない/);
+  });
+
+  it("『直前』は、そのステップより前で最後の identity の記録(T1g の直前の identity は S1r。間に gzip の S1g があっても)", () => {
+    // S1r=403 の後に S1g(gzip)=403、T1g(gzip)=403。T1 は 200。T1g の直前の identity は S1r で拒否されている。
+    const records = [mr("S1"), mr("T1"), refused("S1r", 403), refused("S1g", 403, { variant: "gzip" }), refused("T1g", 403, { variant: "gzip" })];
+    const inf = readAll(records).inferences.join("\n");
+    expect(inf).not.toMatch(/T1g.*引き金/);
+    expect(inf).toMatch(/T1g.*区別できない/);
+  });
+
+  it("T1g の直前の identity(S1r)が通っていれば、S1g が拒否されていても T1g には引き金の疑いを出す", () => {
+    const records = [mr("S1"), mr("T1"), mr("S1r"), refused("S1g", 403, { variant: "gzip" }), refused("T1g", 403, { variant: "gzip" })];
+    const inf = readAll(records).inferences.join("\n");
+    expect(inf).toMatch(/T1g.*引き金/);
+  });
+
+  it.each([[400], [403], [429]])("gzip が %i で拒否されたときも、引き金の疑いを推測として出す(400・403・429 はいずれも拒否)", (status) => {
+    const records = [mr("S1"), mr("S1r"), refused("S1g", status, { variant: "gzip" })];
+    expect(readAll(records).inferences.join("\n")).toMatch(/S1g.*引き金/);
+  });
+
+  it("直前の identity が通信エラー(status=null)のときも、引き金とは言わない(通ったとは言えない)", () => {
+    const records = [mr("S1"), mr("S1r", { status: null, meta: null, error: "x" }), refused("S1g", 403, { variant: "gzip" })];
+    const inf = readAll(records).inferences.join("\n");
+    expect(inf).not.toMatch(/引き金/);
+    expect(inf).toMatch(/区別できない/);
+  });
+
+  it("対の identity(S1)自体が拒否されているときも、引き金とは言わない", () => {
+    const records = [refused("S1", 403), mr("S1r"), refused("S1g", 403, { variant: "gzip" })];
+    expect(readAll(records).inferences.join("\n")).not.toMatch(/引き金/);
+  });
+});
+
+describe("指摘3: gzip で返ったか(content-encoding)を事実・表に出す", () => {
+  it("gzip で返った: 事実に content-encoding: gzip を載せ、行の compressed は true", () => {
+    const records = [mr("S1", { meta: meta({ wireBodyBytes: 1000 }) }), mr("S1g", { meta: meta({ contentEncoding: "gzip", wireBodyBytes: 200 }) })];
+    expect(summarizeSocketMatrix(records).compression[0]).toMatchObject({ contentEncoding: "gzip", compressed: true });
+    expect(readAll(records).facts.join("\n")).toMatch(/S1g.*content-encoding: gzip/);
+  });
+
+  it("gzip を要求したのに圧縮されずに返った(content-encoding なし): 『圧縮されなかった』と書き、『gzip の線上の本文』とは書かない。compressed は false", () => {
+    const records = [mr("S1", { meta: meta({ wireBodyBytes: 1000 }) }), mr("S1g", { meta: meta({ contentEncoding: null, wireBodyBytes: 1000 }) })];
+    const row = summarizeSocketMatrix(records).compression[0]!;
+    expect(row).toMatchObject({ contentEncoding: null, compressed: false });
+    const facts = readAll(records).facts.join("\n");
+    expect(facts).toMatch(/S1g.*圧縮されなかった/);
+    expect(facts).not.toMatch(/S1g: gzip の線上の本文/);
+    // 推測は『gzip を足しても拒否されなかった』と、圧縮されなかった事実を、混同しない。
+    const inf = readAll(records).inferences.join("\n");
+    expect(inf).toMatch(/S1g.*圧縮(され|で返さ)なかった/);
+  });
+
+  it("identity で返った(content-encoding: identity)ときも、圧縮されなかったとして扱う", () => {
+    const records = [mr("S1"), mr("S1g", { meta: meta({ contentEncoding: "identity" }) })];
+    expect(summarizeSocketMatrix(records).compression[0]).toMatchObject({ compressed: false });
+  });
+
+  it("gzip の取得が拒否されたとき(メタに content-encoding なし)、compressed は null(圧縮の有無を判断しない)", () => {
+    const records = [mr("S1"), refused("S1g", 403, { variant: "gzip" })];
+    expect(summarizeSocketMatrix(records).compression[0]).toMatchObject({ compressed: null });
+  });
+
+  it("メタが無い(通信エラー)とき、compressed は null", () => {
+    const records = [mr("S1"), mr("S1g", { status: null, meta: null, error: "x" })];
+    expect(summarizeSocketMatrix(records).compression[0]).toMatchObject({ compressed: null });
   });
 });

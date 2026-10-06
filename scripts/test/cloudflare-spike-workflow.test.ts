@@ -272,8 +272,9 @@ describe("socket-matrix の配線(#162 段階1)", () => {
     expect(driver).toContain("STATIC_SOCKET_HEADERS");
   });
 
-  it("gzip の opt-in は、計画のステップの方式(variant)から決める(ドライバが勝手に付けない)", () => {
-    expect(driver).toMatch(/step\.variant === "gzip"/);
+  it("DO への送信の本文は buildMatrixSocketBody で組み立てる(gzip の opt-in を決めるのは、単体テスト済みのこの関数だけ。ドライバは自前で acceptEncoding を足さない)", () => {
+    expect(driver).toContain('buildMatrixSocketBody(step, STATIC_SOCKET_HEADERS)');
+    expect(driver).not.toMatch(/acceptEncoding/);
   });
 
   it("公開される出力(コンソール)には、結論の件数だけを出す(IP・サブドメインなどの生の値を出さない)", () => {

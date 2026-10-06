@@ -13,7 +13,7 @@
 import { maskHeaderValue, maskText, type MaskContext } from "./echo.js";
 import type { SocketFetchMeta } from "./http1.js";
 import { judgeReachability, type NetkeibaProbeRecord, type ReachabilityVerdict } from "./reachability.js";
-import { RequestGuard, type RequestGuardOptions } from "./request-guard.js";
+import { BLOCK_STATUSES, RequestGuard, type RequestGuardOptions } from "./request-guard.js";
 import {
   buildSocketMatrixPlan,
   REFERENCE_E3_SHUTUBA_BYTES,
@@ -124,7 +124,12 @@ export interface CompressionRow {
   readonly identityFirstByteMs: number | null;
   readonly gzipFirstByteMs: number | null;
   readonly contentEncoding: string | null;
-  /** 展開後の本文のハッシュが一致したか(どちらかが無い・本文が空なら null)。 */
+  /**
+   * gzip で返ったか(gzip の応答が 2xx でメタがあるときだけ。content-encoding が gzip なら true、付いていない・identity なら
+   * false。拒否・通信エラーなど判断できないときは null)。false は「gzip を要求したが圧縮されなかった」。
+   */
+  readonly compressed: boolean | null;
+  /** 展開後の本文のハッシュが一致したか(両方が 2xx で、メタが両方あるときだけ。それ以外は null)。 */
   readonly bodyHashEqual: boolean | null;
 }
 
@@ -134,7 +139,9 @@ export interface RepeatRow {
   readonly targetId: string;
   readonly firstStatus: number | null;
   readonly secondStatus: number | null;
+  /** 本文のバイト数が同じか(両方が 2xx で、メタが両方あるときだけ。それ以外は null)。 */
   readonly bytesEqual: boolean | null;
+  /** 展開後の本文のハッシュが同じか(両方が 2xx で、メタが両方あるときだけ。それ以外は null)。 */
   readonly hashEqual: boolean | null;
   /** 1本目の送信から2本目の送信までの間隔(ms)。 */
   readonly gapMs: number;
@@ -180,6 +187,16 @@ function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
+/** 2xx か(本文の比較は、両方が 2xx のときだけ行う。拒否のエラー応答の本文どうしを比べて、違いを読まないため)。 */
+function is2xx(status: number | null): boolean {
+  return status !== null && status >= 200 && status < 300;
+}
+
+/** 拒否と数えるステータス(request-guard.ts の BLOCK_STATUSES と同じ 400・403・429)。 */
+function isRefused(status: number | null): boolean {
+  return status !== null && BLOCK_STATUSES.includes(status);
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).hostname;
@@ -214,7 +231,9 @@ export function summarizeSocketMatrix(records: readonly MatrixRecord[]): SocketM
       const gzMeta = g.meta ?? null;
       const idWire = idMeta?.wireBodyBytes ?? null;
       const gzWire = gzMeta?.wireBodyBytes ?? null;
-      const comparable = idWire !== null && gzWire !== null && idWire > 0 && gzWire > 0;
+      // 比較は、両方が 2xx で、メタが両方あるときだけ(拒否のエラー応答の本文で、比率やハッシュの違いを作らない)。
+      const comparable = idMeta !== null && gzMeta !== null && is2xx(id?.status ?? null) && is2xx(g.status);
+      const ratioable = comparable && idWire !== null && gzWire !== null && idWire > 0;
       return {
         stepId: g.stepId,
         pairWith: g.pairWith!,
@@ -225,13 +244,14 @@ export function summarizeSocketMatrix(records: readonly MatrixRecord[]): SocketM
         gzipWireBytes: gzWire,
         identityDecodedBytes: idMeta?.decodedBytes ?? null,
         gzipDecodedBytes: gzMeta?.decodedBytes ?? null,
-        wireRatio: comparable ? round3(gzWire / idWire) : null,
+        wireRatio: ratioable ? round3(gzWire! / idWire!) : null,
         identityTotalMs: idMeta?.totalMs ?? null,
         gzipTotalMs: gzMeta?.totalMs ?? null,
         identityFirstByteMs: idMeta?.firstByteMs ?? null,
         gzipFirstByteMs: gzMeta?.firstByteMs ?? null,
         contentEncoding: gzMeta?.contentEncoding ?? null,
-        bodyHashEqual: comparable && idMeta !== null && gzMeta !== null ? idMeta.bodySha256 === gzMeta.bodySha256 : null,
+        compressed: gzMeta !== null && is2xx(g.status) ? gzMeta.contentEncoding === "gzip" : null,
+        bodyHashEqual: comparable ? idMeta!.bodySha256 === gzMeta!.bodySha256 : null,
       };
     });
 
@@ -244,6 +264,8 @@ export function summarizeSocketMatrix(records: readonly MatrixRecord[]): SocketM
       }
       const a = first.meta;
       const b = second.meta;
+      // 本文の比較は、両方が 2xx で、メタが両方あるときだけ。2本目が拒否(403 など)のとき、エラー応答の本文との違いを読まない。
+      const comparable = a !== null && b !== null && is2xx(first.status) && is2xx(second.status);
       return [
         {
           stepId: second.stepId,
@@ -251,8 +273,8 @@ export function summarizeSocketMatrix(records: readonly MatrixRecord[]): SocketM
           targetId: second.targetId,
           firstStatus: first.status,
           secondStatus: second.status,
-          bytesEqual: a !== null && b !== null ? a.decodedBytes === b.decodedBytes : null,
-          hashEqual: a !== null && b !== null ? a.bodySha256 === b.bodySha256 : null,
+          bytesEqual: comparable ? a.decodedBytes === b.decodedBytes : null,
+          hashEqual: comparable ? a.bodySha256 === b.bodySha256 : null,
           gapMs: second.sentAtMs - first.sentAtMs,
           sameInstance: first.instance !== null && second.instance !== null ? first.instance.id === second.instance.id : null,
           firstTotalMs: a?.totalMs ?? null,
@@ -314,21 +336,43 @@ export function describeSocketMatrix(
   }
 
   for (const row of summary.compression) {
-    if (row.gzipStatus === 200 && row.wireRatio !== null) {
+    if (row.gzipStatus === null || row.identityStatus === null) {
+      continue;
+    }
+    if (row.bodyHashEqual === null) {
+      // 比較できない(片方でも 2xx でない、またはメタが無い)とき、本文・所要時間・ハッシュは比較しない(ステータスだけが事実)。
+      // bodyHashEqual は、両方が 2xx でメタが両方あるときだけ値を持つ。
       facts.push(
-        `${row.stepId}: gzip の線上の本文は ${row.gzipWireBytes} バイトで、identity(${row.pairWith}。${row.identityWireBytes} バイト)の ${row.wireRatio} 倍。` +
-          `展開後は ${row.gzipDecodedBytes} バイト。所要時間(全体)は gzip ${row.gzipTotalMs ?? "-"} ms / identity ${row.identityTotalMs ?? "-"} ms、` +
-          `展開後の本文のハッシュは${row.bodyHashEqual === true ? "一致" : row.bodyHashEqual === false ? "不一致" : "比較できない"}`,
+        `${row.stepId}: gzip の取得(HTTP ${row.gzipStatus})と identity(${row.pairWith}。HTTP ${row.identityStatus})は、両方が 2xx ではないので、本文・所要時間は比較しない`,
+      );
+      continue;
+    }
+    const hash = row.bodyHashEqual ? "一致" : "不一致";
+    const times = `所要時間(全体)は gzip ${row.gzipTotalMs ?? "-"} ms / identity ${row.identityTotalMs ?? "-"} ms`;
+    if (row.compressed) {
+      facts.push(
+        `${row.stepId}: content-encoding: gzip で返った。gzip の線上の本文は ${row.gzipWireBytes} バイトで、identity(${row.pairWith}。${row.identityWireBytes} バイト)の ${row.wireRatio ?? "-"} 倍。` +
+          `展開後は ${row.gzipDecodedBytes} バイト。${times}、展開後の本文のハッシュは${hash}`,
+      );
+    } else {
+      facts.push(
+        `${row.stepId}: gzip を要求したが圧縮されなかった(content-encoding: ${row.contentEncoding ?? "なし"})。本文は ${row.gzipWireBytes} バイトで、identity(${row.pairWith}。${row.identityWireBytes} バイト)と${
+          row.gzipWireBytes === row.identityWireBytes ? "同じ" : "違う"
+        }。${times}、本文のハッシュは${hash}`,
       );
     }
   }
   for (const row of summary.repeat) {
-    facts.push(
-      `${row.stepId}: ${row.pairWith} と同じ URL の2回目(${row.gapMs} ms 後)。ステータスは ${row.firstStatus ?? "例外"} → ${row.secondStatus ?? "例外"}、` +
-        `本文のバイト数は${row.bytesEqual === null ? "比較できない" : row.bytesEqual ? "同じ" : "違う"}、` +
-        `本文のハッシュは${row.hashEqual === null ? "比較できない" : row.hashEqual ? "一致" : "不一致"}、` +
-        `DO のインスタンスは${row.sameInstance === null ? "比較できない" : row.sameInstance ? "同じ" : "別"}`,
-    );
+    const head = `${row.stepId}: ${row.pairWith} と同じ URL の2回目(${row.gapMs} ms 後)。ステータスは ${row.firstStatus ?? "例外"} → ${row.secondStatus ?? "例外"}`;
+    const instance = `DO のインスタンスは${row.sameInstance === null ? "比較できない" : row.sameInstance ? "同じ" : "別"}`;
+    if (row.bytesEqual === null && row.hashEqual === null) {
+      facts.push(`${head}、本文は比較しない(両方が 2xx のときだけ比較する)、${instance}`);
+    } else {
+      facts.push(
+        `${head}、本文のバイト数は${row.bytesEqual === null ? "比較できない" : row.bytesEqual ? "同じ" : "違う"}、` +
+          `本文のハッシュは${row.hashEqual === null ? "比較できない" : row.hashEqual ? "一致" : "不一致"}、${instance}`,
+      );
+    }
   }
   facts.push(
     `DO のインスタンス: 記録全体で異なる ID は ${summary.instances.distinctIds} 個(呼び出し通番の最大は ${summary.instances.maxCall ?? "なし"})`,
@@ -367,13 +411,30 @@ export function describeSocketMatrix(
     );
   }
   for (const row of summary.compression) {
-    const idOk = row.identityStatus !== null && row.identityStatus >= 200 && row.identityStatus < 300;
-    if (row.gzipStatus !== null && [400, 403, 429].includes(row.gzipStatus) && idOk) {
+    const idOk = is2xx(row.identityStatus);
+    if (isRefused(row.gzipStatus)) {
+      // gzip の拒否を Accept-Encoding の引き金と読むのは、対の identity と、**直前に送った identity** がどちらも拒否されて
+      // いないときだけ(直前の identity も拒否されていたら、時間経過・連続した取得による拒否と区別できない)。
+      const at = records.findIndex((r) => r.stepId === row.stepId);
+      const prior = at < 0 ? undefined : records.slice(0, at).reverse().find((r) => r.variant === "identity");
+      const priorPassed = prior !== undefined && prior.status !== null && !isRefused(prior.status);
+      if (idOk && priorPassed) {
+        inferences.push(
+          `${row.stepId}: identity(${row.pairWith}。直前の identity は ${prior.stepId})は通り、Accept-Encoding: gzip を足した版が拒否された。Accept-Encoding の追加が拒否の引き金になった疑いがある(変えたのはこのヘッダ1つだけ。ただし2本の標本)。`,
+        );
+      } else {
+        inferences.push(
+          `${row.stepId}: gzip の取得が拒否されたが、Accept-Encoding の追加が原因かは区別できない(対の identity ${row.pairWith} が通っていない、または直前の identity の取得(${
+            prior?.stepId ?? "なし"
+          })が拒否・未取得で、時間経過や連続した取得による拒否と区別できない)。`,
+        );
+      }
+    } else if (is2xx(row.gzipStatus)) {
       inferences.push(
-        `${row.stepId}: identity(${row.pairWith})は通り、Accept-Encoding: gzip を足した版が拒否された。Accept-Encoding の追加が拒否の引き金になった疑いがある(変えたのはこのヘッダ1つだけ。ただし2本の標本)。`,
+        row.compressed === false
+          ? `${row.stepId}: Accept-Encoding: gzip を足しても拒否されなかったが、サーバは圧縮せずに返した(圧縮されなかった。この取得先の1本の観測)。`
+          : `${row.stepId}: Accept-Encoding: gzip を足しても拒否されなかった(この取得先の1本の観測)。`,
       );
-    } else if (row.gzipStatus !== null && row.gzipStatus >= 200 && row.gzipStatus < 300) {
-      inferences.push(`${row.stepId}: Accept-Encoding: gzip を足しても拒否されなかった(この取得先の1本の観測)。`);
     }
   }
   for (const row of summary.repeat) {
@@ -407,6 +468,7 @@ function maskRecord(record: NetkeibaProbeRecord, mask: MaskContext): NetkeibaPro
     ...record,
     headers: Object.fromEntries(Object.entries(record.headers).map(([k, v]) => [k, maskHeaderValue(k, v, mask)])),
     bodyHead: record.bodyHead === null ? null : maskText(record.bodyHead, mask),
+    parseError: record.parseError === null ? null : maskText(record.parseError, mask),
     error: record.error === null ? null : maskText(record.error, mask),
   };
 }

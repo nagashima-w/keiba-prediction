@@ -18,6 +18,14 @@ function hashLabel(value: boolean | null): string {
   return value === null ? "-" : value ? "一致" : "不一致";
 }
 
+/** gzip で返ったか。gzip で返れば content-encoding、返らなければ『圧縮されなかった』、判断できなければ -。 */
+function compressedLabel(compressed: boolean | null, contentEncoding: string | null): string {
+  if (compressed === null) {
+    return "-";
+  }
+  return compressed ? cell(contentEncoding) : "圧縮されなかった";
+}
+
 /** 結果を Markdown の行にして返す(`renderMarkdown` に組み込まれる。見出しは `##` から)。 */
 export function renderSocketMatrixMarkdown(result: SocketMatrixResult): string[] {
   const out: string[] = [];
@@ -50,11 +58,11 @@ export function renderSocketMatrixMarkdown(result: SocketMatrixResult): string[]
   if (result.summary.compression.length === 0) {
     out.push("gzip の取得は行っていない(打ち切りなどで送らなかった)");
   } else {
-    out.push("| ステップ | 対 | ステータス(identity / gzip) | 線上の本文バイト(identity / gzip) | 展開後バイト(gzip) | 比率(gzip / identity) | 全体 ms(identity / gzip) | 最初のバイト ms(identity / gzip) | 本文のハッシュ |");
-    out.push("|---|---|---|---|---|---|---|---|---|");
+    out.push("| ステップ | 対 | ステータス(identity / gzip) | 線上の本文バイト(identity / gzip) | 展開後バイト(gzip) | 比率(gzip / identity) | 全体 ms(identity / gzip) | 最初のバイト ms(identity / gzip) | 本文のハッシュ | 圧縮(content-encoding) |");
+    out.push("|---|---|---|---|---|---|---|---|---|---|");
     for (const c of result.summary.compression) {
       out.push(
-        `| ${c.stepId} | ${c.pairWith} | ${pair(c.identityStatus, c.gzipStatus)} | ${pair(c.identityWireBytes, c.gzipWireBytes)} | ${cell(c.gzipDecodedBytes)} | ${cell(c.wireRatio)} | ${pair(c.identityTotalMs, c.gzipTotalMs)} | ${pair(c.identityFirstByteMs, c.gzipFirstByteMs)} | ${hashLabel(c.bodyHashEqual)} |`,
+        `| ${c.stepId} | ${c.pairWith} | ${pair(c.identityStatus, c.gzipStatus)} | ${pair(c.identityWireBytes, c.gzipWireBytes)} | ${cell(c.gzipDecodedBytes)} | ${cell(c.wireRatio)} | ${pair(c.identityTotalMs, c.gzipTotalMs)} | ${pair(c.identityFirstByteMs, c.gzipFirstByteMs)} | ${hashLabel(c.bodyHashEqual)} | ${compressedLabel(c.compressed, c.contentEncoding)} |`,
       );
     }
   }

@@ -117,9 +117,19 @@ export async function probeNetkeiba(
   fetchImpl: ProbeFetch = (url, init) => fetch(url, init),
 ): Promise<NetkeibaProbeRecord> {
   let captured: Captured | null = null;
+  /** fetch が(本文の扱いなどで)例外になったとき、例外が持っていた受信済みのステータス(なければ null)。 */
+  let thrownStatus: number | null = null;
 
   const recordingFetch: FetchLike = async (url, init) => {
-    const response = await fetchImpl(url, forwardInit(init));
+    let response: Response;
+    try {
+      response = await fetchImpl(url, forwardInit(init));
+    } catch (error) {
+      // 受信済みのステータス(例: 圧縮された 403)を持つ例外なら、記録に残す(status=null にすると拒否が数えられない)。
+      const status = (error as { status?: unknown } | null)?.status;
+      thrownStatus = typeof status === "number" ? status : null;
+      throw error;
+    }
     // 本文は HttpClient が arrayBuffer() で読むため、記録用には clone() から読む。
     const buffer = await response.clone().arrayBuffer();
     const headers: Record<string, string> = {};
@@ -177,7 +187,7 @@ export async function probeNetkeiba(
   return {
     targetId: request.targetId,
     url: request.url,
-    status: cap?.status ?? null,
+    status: cap?.status ?? thrownStatus,
     bodyLength: cap?.bytes ?? null,
     charset: charsetOf(cap?.contentType ?? null),
     parsedKind: request.kind,
