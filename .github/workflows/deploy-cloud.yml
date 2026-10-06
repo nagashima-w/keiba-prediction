@@ -1,7 +1,7 @@
 # クラウド版(Cloudflare Worker。cloud/)の型検査・テスト・本番デプロイ(Issue #161〈#21-C〉)。
 #
 # ★2つのジョブ:
-#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・テスト・デプロイの dry-run・ローカルスモーク)。
+#   - check: 作業ブランチへの push と手動実行のたびに毎回走る(型検査・テスト・デプロイの dry-run・D1 の migration のローカル適用・ローカルスモーク)。
 #            Secrets を持たない。
 #   - deploy: check が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
 #
@@ -219,8 +219,9 @@ jobs:
 
       # Issue #171: D1 の migration を本番に適用する。**wrangler deploy より前**(新しいコードは新しい表・列を前提にするため)。
       # 失敗したら、後続のデプロイには進まない。migration は追加のみ(適用からデプロイまでの間は旧 Worker が新スキーマで動く)。
-      # 適用済みの migration は d1_migrations 表で記録され、再実行しても何も起きない。適用の前に、wrangler が D1 のバックアップを取る
-      # (公式ドキュメントの記述。CI など非対話の環境では確認の入力を省いて適用する)。
+      # 適用済みの migration は d1_migrations 表で記録され、再実行しても何も起きない。
+      # 復旧手段は D1 の Time Travel(自動の時点復元)。wrangler の適用処理はバックアップを取らない(4.147.0 の実装を確認)。
+      # CI など非対話の環境では、確認の入力を省いて適用する。
       - name: D1 の migration を本番に適用
         working-directory: cloud
         env:
