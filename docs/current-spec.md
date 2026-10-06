@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.2)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.3)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.3`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -927,6 +927,14 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   production の LLM と同一でない近似(モデル・温度・文脈・確定オッズ等)で、区間は LLM のサンプリングのばらつきを含まない。
   スクリプト `scripts/probability-quality-41-llm/`、計画 `docs/investigations/probability-quality-41-llm/measurement-plan.md`、
   結果 `docs/investigations/probability-quality-41-llm/report.md`(Go/No-Go は書かない)。
+
+## 10. クラウド版の土台(`cloud/`。Issue #161〈#21-C〉)
+
+Cloudflare Worker による**クラウド版の土台**が加わった(`cloud/`。pnpm workspace の外。詳細・手順・secret 名は
+[`cloud/README.md`](../cloud/README.md))。**まだ機能は無い**: 今あるのは、Cloudflare Access(Google ログイン)の JWT を Worker 自身も
+検証する認証の関門(許可したメール1件以外・設定が欠けているときは理由を含まない 403)、ログイン中のメールを表示するだけの `GET /`、
+`GET /api/health`、Durable Object(SQLite)の雛形、承認印付き push のときだけ本番に出す `.github/workflows/deploy-cloud.yml` だけである。
+取得・分析・保存・画面は後続(#162〜)。exe(Windows アプリ)とは独立で、既存の動作は変わらない。
 
 ## 主な当初仕様との差異(記録)
 

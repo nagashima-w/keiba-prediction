@@ -2316,6 +2316,29 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
 
+## 次の正式版が 1.19.3 である根拠(Issue #161 での変更)
+
+**patch**(クラウド版〈`cloud/`。Cloudflare Worker〉の土台とデプロイのワークフローの追加〈#21-C〉。利用者から見える変化は無い)。
+
+### 変更内容
+
+- `cloud/`: pnpm workspace の外の独立した package(Worker・Cloudflare Access の JWT 検証・Durable Object の雛形・ローカルスモーク。
+  詳細は `cloud/README.md`)。取得・分析・保存・画面はまだ無い
+- `.github/workflows/deploy-cloud.yml`: 型検査・テスト・dry-run・スモークと、承認印付き push のときだけの本番デプロイ。
+  既存の `build-windows.yml` は無変更
+- scripts: `scripts/test/cloud-deploy-workflow.test.ts`・`scripts/test/cloud-config-guard.test.ts`(ワークフローと設定の静的検査)
+- docs: `docs/current-spec.md` に「クラウド版の土台」を追記
+
+### patch である根拠
+
+- exe のアプリコード(`packages/app`)・core(`packages/core`)は無変更。追加したコードはすべて `cloud/`・`scripts/`・ワークフロー・docs で、
+  exe に入らない(クラウド版とワークフローの追加)
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
