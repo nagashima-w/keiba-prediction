@@ -1,6 +1,8 @@
 /**
- * リクエストの認証(Issue #161〈#21-C〉)。JWT の取得元を、ヘッダ → クッキー → `ctx.access` の順に試し、
- * **どれか1つが通れば通る**。どの経路でも、許可した1件のメールとの一致(`ctx.access` は aud の一致も)を確かめる。
+ * リクエストの認証(Issue #161〈#21-C〉)。JWT の取得元は、ヘッダ → クッキーの順に試し、どちらかが通れば通る。
+ * **`ctx.access` を使うのは、ヘッダにもクッキーにも JWT が無いときだけ**(ゲートの確定)。JWT が付いていて不正なら、
+ * 改ざんの疑いがあるので `ctx.access` では救わず、拒否する(`ctx.access` は参照もしない)。
+ * どの経路でも、許可した1件のメールとの一致(`ctx.access` は aud の一致も)を確かめる。
  * 設定(secret)が欠けていれば、どの取得元が有効でも通さない。
  */
 import type { JWTVerifyGetKey } from "jose";
@@ -60,7 +62,8 @@ export async function authenticate(
   const { config } = parsed;
   const failures: string[] = [];
 
-  for (const { source, token } of extractTokens(request)) {
+  const tokens = extractTokens(request);
+  for (const { source, token } of tokens) {
     let result;
     try {
       result = await verifyAccessJwt(token, config, deps.keys(config.teamName), deps.now);
@@ -73,8 +76,10 @@ export async function authenticate(
     failures.push(`${source}:${result.reason}`);
   }
 
-  if (ctx.access !== undefined) {
-    const result = await viaCtxAccess(ctx.access, config);
+  // JWT が1つでも付いていたら、ここへは進まない(上の失敗で拒否する)。
+  const ctxAccess = tokens.length === 0 ? ctx.access : undefined;
+  if (ctxAccess !== undefined) {
+    const result = await viaCtxAccess(ctxAccess, config);
     if (result.ok) {
       return { ok: true, email: result.email, via: "ctx-access" };
     }

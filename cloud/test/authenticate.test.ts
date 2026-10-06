@@ -75,12 +75,58 @@ describe("authenticate(取得元の順: ヘッダ → クッキー → ctx.acces
     expect(await authenticate(new Request(URL_), GOOD_ENV, {}, { keys, now: NOW })).toEqual({ ok: false, reason: "no-credentials" });
   });
 
-  it("ヘッダ・クッキー・ctx.access のすべてが不正なとき、経路ごとの理由が並ぶ(値は含まない)", async () => {
+  it("ヘッダとクッキーの JWT がともに不正なとき、経路ごとの理由が並ぶ(値は含まない)", async () => {
     const { key, keys } = await setup();
     const expired = await signToken(key, { exp: 1 });
     const request = new Request(URL_, { headers: { "Cf-Access-Jwt-Assertion": expired, cookie: "CF_Authorization=a.b.c" } });
-    const result = await authenticate(request, GOOD_ENV, { access: access({ email: "stranger@example.com" }) }, { keys, now: NOW });
-    expect(result).toEqual({ ok: false, reason: "header:expired,cookie:malformed,ctx-access:email-mismatch" });
+    const result = await authenticate(request, GOOD_ENV, {}, { keys, now: NOW });
+    expect(result).toEqual({ ok: false, reason: "header:expired,cookie:malformed" });
+  });
+
+  // ゲートの確定: ctx.access を使うのは、ヘッダにもクッキーにも JWT が無いときだけ。
+  // 不正な JWT が付いているリクエストは改ざんの疑いがあるので、別の経路(ctx.access)で救わない。
+  it("JWT があって不正なら、ctx.access が正しくても拒否する(ctx.access には進まない。理由に ctx-access が出ない)", async () => {
+    const { key, keys } = await setup();
+    const validCtx = { access: access({ email: EMAIL }) };
+    // 前提: JWT が無ければ、この ctx.access で通る(拒否が ctx.access の不備ではなく JWT の存在による確認)
+    expect(await authenticate(new Request(URL_), GOOD_ENV, validCtx, { keys, now: NOW })).toMatchObject({ ok: true, via: "ctx-access" });
+    const expired = await signToken(key, { exp: 1 });
+    const viaHeader = new Request(URL_, { headers: { "Cf-Access-Jwt-Assertion": expired } });
+    expect(await authenticate(viaHeader, GOOD_ENV, validCtx, { keys, now: NOW })).toEqual({ ok: false, reason: "header:expired" });
+    const viaCookie = new Request(URL_, { headers: { cookie: "CF_Authorization=a.b.c" } });
+    expect(await authenticate(viaCookie, GOOD_ENV, validCtx, { keys, now: NOW })).toEqual({ ok: false, reason: "cookie:malformed" });
+  });
+
+  it("JWT があるときは ctx.access を参照すらしない(getIdentity も aud も呼ばれない)", async () => {
+    const { keys } = await setup();
+    let touched = 0;
+    const spy = {
+      get access(): AccessContextLike {
+        touched += 1;
+        return access({ email: EMAIL });
+      },
+    };
+    const request = new Request(URL_, { headers: { "Cf-Access-Jwt-Assertion": "a.b.c" } });
+    expect((await authenticate(request, GOOD_ENV, spy, { keys, now: NOW })).ok).toBe(false);
+    expect(touched).toBe(0);
+    // 前提: JWT が無ければ参照される(スパイが働いている確認)
+    await authenticate(new Request(URL_), GOOD_ENV, spy, { keys, now: NOW });
+    expect(touched).toBe(1);
+  });
+
+  // 部分一致するだけのメールは、ctx.access の経路でも拒否する(前提: 完全一致は通る)
+  it.each([
+    ["先頭に文字が付く", "xowner@example.com"],
+    ["末尾にドメインが付く", "owner@example.com.evil"],
+    ["ドメインが短い", "owner@example.co"],
+    ["カンマ区切りに許可メールを含む", "stranger@example.com,owner@example.com"],
+    ["ケルビン記号(Unicode の大文字)が k に化ける形", "\u212Aowner@example.com"],
+  ])("ctx.access のメールが部分一致するだけ(%s)なら拒否する", async (_name, email) => {
+    const { keys } = await setup();
+    expect(await authenticate(new Request(URL_), GOOD_ENV, { access: access({ email: EMAIL }) }, { keys, now: NOW })).toMatchObject({ ok: true });
+    const config = { ...GOOD_ENV, ACCESS_ALLOWED_EMAIL: email === "\u212Aowner@example.com" ? "kowner@example.com" : EMAIL };
+    const result = await authenticate(new Request(URL_), config, { access: access({ email }) }, { keys, now: NOW });
+    expect(result).toEqual({ ok: false, reason: "ctx-access:email-mismatch" });
   });
 
   // 設定の欠落は、どの取得元が有効でも通さない(JWT も ctx.access も検証しない)

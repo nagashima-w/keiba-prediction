@@ -64,6 +64,29 @@ function withoutComments(text: string): string {
     .join("\n");
 }
 
+/** 実行トレース(set -x など)を有効にする記述があるか。 */
+function tracesCommands(code: string): boolean {
+  return /\bset\s+-[a-zA-Z]*x|\b(ba)?sh\s+-[a-zA-Z]*x|xtrace/.test(code);
+}
+
+/** URL・サブドメインの変数を、ログに出る形で echo/printf している行。マスク命令と GITHUB_ENV への追記は除く。 */
+function leakedLines(code: string): string[] {
+  return code.split("\n").filter((line) => {
+    if (!/\b(echo|printf)\b/.test(line)) {
+      return false;
+    }
+    if (line.includes("::add-mask::") || /GITHUB_ENV/.test(line)) {
+      return false;
+    }
+    return /\$\{?(url|sub|CF_SUBDOMAIN)\b/i.test(line) || /[a-z0-9}-]\.workers\.dev/i.test(line);
+  });
+}
+
+/** マスクより前の行のうち、サブドメインの変数($sub / CF_SUBDOMAIN)を出力するもの。 */
+function beforeMaskLeaks(code: string): string[] {
+  return code.split("\n").filter((line) => /\b(echo|printf)\b/.test(line) && /\$\{?(sub|CF_SUBDOMAIN)\b/i.test(line));
+}
+
 describe("起動条件", () => {
   it("push の対象ブランチは許可した1本だけで、タグやワイルドカードは含まない。workflow_dispatch を併設する", () => {
     const m = /\n  push:\n    branches:\n((?:      - .+\n)+)/.exec(yml);
@@ -209,9 +232,8 @@ describe("deploy ジョブのステップ(秘密・サブドメインの扱い�
     expect(stepBody(deploy, "Worker をデプロイ")).toContain("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}");
   });
 
-  it("事後確認は、認証なしの GET が 302/401/403 のいずれかであることを確かめ、2xx は失敗にする。URL・サブドメインを出力しない", () => {
-    const step = stepBody(deploy, "事後確認");
-    const code = withoutComments(step);
+  it("事後確認は、認証なしの GET が 302/401/403 のいずれかであることを確かめ、2xx は失敗にする", () => {
+    const code = withoutComments(stepBody(deploy, "事後確認"));
     expect(code).toContain("%{http_code}");
     expect(code).toContain("-o /dev/null");
     // case の腕(ラベルと本体)を固定する: 302|401|403 は成功(exit 0)、2xx は失敗(exit 1)。ほかの腕を足せない
@@ -221,12 +243,42 @@ describe("deploy ジョブのステップ(秘密・サブドメインの扱い�
     expect(arms[1]!.body).toContain("exit 1");
     // 認証用のヘッダ・クッキー・トークンを付けない(認証なしの確認)
     expect(code).not.toMatch(/-H |--header|--cookie|-b |Authorization|CF_Authorization/);
-    // 詳細出力・トレース・リダイレクト追従をしない(リダイレクト先の URL が出る)
+    // 詳細出力・リダイレクト追従をしない(リダイレクト先の URL が出る)
     expect(code).not.toMatch(/curl[^\n]* (-v|--verbose|-i|--include|-L|--location)\b/);
-    expect(code).not.toContain("set -x");
-    expect(code).not.toContain("GITHUB_STEP_SUMMARY");
-    // URL の変数を echo / printf しない
-    expect(code).not.toMatch(/(echo|printf)[^\n]*(\$URL|\$\{URL\}|workers\.dev|\$SUBDOMAIN|\$\{CF_SUBDOMAIN\}|\$CF_SUBDOMAIN)/);
+  });
+
+  it("どのステップにも set -x(実行トレース)が無い。トレースは変数展開後の URL・サブドメインをログに出す", () => {
+    expect(tracesCommands("set -x\ncurl x")).toBe(true);
+    expect(tracesCommands("set -euxo pipefail")).toBe(true);
+    expect(tracesCommands("bash -x script.sh")).toBe(true);
+    expect(tracesCommands("set -o xtrace")).toBe(true);
+    expect(tracesCommands("set -e\ncurl -sS x")).toBe(false);
+    expect(tracesCommands(withoutComments(yml))).toBe(false);
+  });
+
+  it("URL・サブドメインの変数(url / sub / CF_SUBDOMAIN。大文字小文字を問わない)を、ログに出す形で echo / printf しない", () => {
+    // 検出器の確認(空振りしていない): ログに出る形は検出し、マスク命令と GITHUB_ENV への追記は許す
+    expect(leakedLines('echo "$url"')).toHaveLength(1);
+    expect(leakedLines("echo ${url}")).toHaveLength(1);
+    expect(leakedLines('echo "$URL"')).toHaveLength(1);
+    expect(leakedLines('echo "sub=$sub"')).toHaveLength(1);
+    expect(leakedLines("printf '%s' \"$sub\"")).toHaveLength(1);
+    expect(leakedLines('echo "host: $CF_SUBDOMAIN"')).toHaveLength(1);
+    expect(leakedLines('echo "https://x.workers.dev"')).toHaveLength(1);
+    expect(leakedLines('echo "::add-mask::$sub"')).toEqual([]);
+    expect(leakedLines('echo "CF_SUBDOMAIN=$sub" >> "$GITHUB_ENV"')).toEqual([]);
+    // 実物
+    expect(leakedLines(withoutComments(yml))).toEqual([]);
+  });
+
+  it("マスクの登録(::add-mask::$sub)より前に、サブドメインの変数を出力する行が無い", () => {
+    const mask = withoutComments(stepBody(deploy, "サブドメインを取得してマスク")).split("\n");
+    const maskLine = mask.findIndex((l) => l.includes("::add-mask::$sub"));
+    expect(maskLine).toBeGreaterThan(0);
+    const before = mask.slice(0, maskLine).join("\n");
+    expect(beforeMaskLeaks('echo "$sub"')).toHaveLength(1);
+    expect(beforeMaskLeaks("echo ok")).toEqual([]);
+    expect(beforeMaskLeaks(before)).toEqual([]);
   });
 
   it("サブドメインを ${{ }} で env に展開しない(ログに出る形で渡さない)", () => {

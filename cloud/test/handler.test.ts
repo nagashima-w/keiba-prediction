@@ -82,6 +82,40 @@ describe("認証の関門(すべてのルートの前。認証できなければ
     }
   });
 
+  // 前提(正しい JWT で / は 200)は上のテストで固定済み。未認証なら、メソッド・パスの正規化の癖に関わらず同一の 403
+  it.each([
+    ["HEAD", "/", "HEAD /"],
+    ["OPTIONS", "/", "OPTIONS /"],
+    ["GET", "//api/health", "二重スラッシュ"],
+    ["GET", "/api/health/", "末尾スラッシュ"],
+    ["GET", "/%61pi/health", "パーセントエンコードされた api"],
+    ["GET", "/api/health?x=1", "クエリ付き"],
+    ["DELETE", "/api/health", "DELETE"],
+  ])("JWT なしの %s %s(%s)は、ルートの有無によらず他の拒否と同一の 403(本文とヘッダ)", async (method, path) => {
+    const { deps, token } = await setup();
+    expect((await handle(req("/", { token }), envOf(), {}, deps)).status).toBe(200);
+    const reference = await snapshot(await handle(req("/"), envOf(), {}, deps));
+    expect(reference.status).toBe(403);
+    expect(reference.body).toBe("forbidden");
+    const actual = await snapshot(await handle(req(path, { method }), envOf(), {}, deps));
+    expect(actual).toEqual(reference);
+  });
+
+  it("handler の catch を通る経路(ctx.access の参照が例外)でも、同一の 403 を返し、ログは reason=error だけ", async () => {
+    const { deps, lines } = await setup();
+    const reference = await snapshot(await handle(req("/"), envOf(), {}, deps));
+    lines.length = 0;
+    const exploding = {
+      get access(): never {
+        throw new Error("boom with secret detail");
+      },
+    };
+    const response = await handle(req("/"), envOf(), exploding, deps);
+    expect(await snapshot(response)).toEqual(reference);
+    expect(lines).toEqual(["access: denied reason=error"]);
+    expect(lines.join("\n")).not.toContain("boom");
+  });
+
   it("鍵の取得が例外になっても 403(例外を外へ出さない)", async () => {
     const { deps, token } = await setup();
     const failing = {
@@ -110,6 +144,15 @@ describe("認証の関門(すべてのルートの前。認証できなければ
     const { deps, token } = await setup();
     const request = req("/", { headers: { cookie: `CF_Authorization=${token}` } });
     expect((await handle(request, envOf(), {}, deps)).status).toBe(200);
+  });
+
+  it("不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", async () => {
+    const { deps, lines } = await setup();
+    const good = { access: { aud: AUD, getIdentity: async () => ({ email: EMAIL }) } };
+    expect((await handle(req("/"), envOf(), good, deps)).status).toBe(200);
+    const response = await handle(req("/", { token: "a.b.c" }), envOf(), good, deps);
+    expect(response.status).toBe(403);
+    expect(lines.at(-1)).toBe("access: denied reason=header:malformed");
   });
 
   it("JWT が無くても、ctx.access が aud・メールとも一致すれば通る。一致しなければ 403", async () => {

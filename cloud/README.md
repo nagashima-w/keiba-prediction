@@ -5,7 +5,7 @@ Issue #161(#21-C)の土台。取得・分析・保存・画面は後続の Issue
 
 ## 構成
 - `src/handler.ts` — リクエスト処理の本体。**すべてのルートの前に認証**を掛ける(`GET /`、`GET /api/health`)
-- `src/access-jwt.ts` / `src/authenticate.ts` — Access の JWT の検証(署名・iss・aud・exp・許可メール1件)。取得元はヘッダ → クッキー → `ctx.access`
+- `src/access-jwt.ts` / `src/authenticate.ts` — Access の JWT の検証(署名・iss・aud・exp・許可メール1件)。取得元はヘッダ → クッキー、**JWT がどちらにも無いときだけ** `ctx.access`(JWT が付いていて不正なら `ctx.access` では救わず拒否)
 - `src/netkeiba-gate-do.ts` — SQLite バックエンドの Durable Object の雛形(#162 で取得と間隔制御に使う)
 - 認証に失敗したとき、設定が欠けているときは、理由を含まない固定の 403(`forbidden`)を返す(フェイルクローズ)。理由コードと経路名だけをログに出す
 

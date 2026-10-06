@@ -6,7 +6,7 @@
  *
  * 4つの構成で wrangler dev を起動して確かめる(起動のたびに、終了時に必ずプロセスを止める)。
  *  A. 設定なし(secret が無い本番の初回デプロイ直後と同じ)→ すべて 403(JWT が付いていても)
- *  B. `[access.dev]` で ctx.access を注入し、secret 相当を --var で渡す(正しい構成)→ 200
+ *  B. `[access.dev]` で ctx.access を注入し、secret 相当を --var で渡す(正しい構成)→ 200。ただし不正な JWT が付けば 403
  *  C. B からメールだけを変える → 403
  *  D. B から AUD だけを変える → 403
  * ローカルでは Access の JWT(本物の鍵での署名)は作れないため、200 になる経路は ctx.access だけである。
@@ -125,6 +125,8 @@ async function main(): Promise<void> {
       check("B: GET / に viewport(スマホ幅)がある", page.text.includes('name="viewport"'));
       const health = await req(port, "GET", "/api/health");
       check("B: GET /api/health が 200 で DO の SQLite が動いている", health.status === 200 && health.text === JSON.stringify({ ok: true, durableObject: { sqlite: true } }), `${health.status} ${health.text.slice(0, 120)}`);
+      const tampered = await req(port, "GET", "/", { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" });
+      check("B: 不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", tampered.status === 403 && tampered.text === "forbidden", `${tampered.status}`);
       check("B: 未知のパスは 404", (await req(port, "GET", "/no-such-path")).status === 404);
       check("B: POST / は 405", (await req(port, "POST", "/")).status === 405);
     });

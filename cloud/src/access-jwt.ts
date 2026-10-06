@@ -33,12 +33,16 @@ export type ConfigResult =
 /** チーム名の形式。URL や別ホストを混ぜられないよう、英小文字・数字・ハイフンだけを許す。 */
 const TEAM_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-/** メールを照合用に正規化する(小文字化・前後の空白除去)。文字列でない・空なら null。 */
+/**
+ * メールを照合用に正規化する(前後の空白除去と、**ASCII だけ**の小文字化)。文字列でない・空なら null。
+ * `toLowerCase()` は Unicode も変える(U+212A KELVIN SIGN → k など)ため、別の文字が許可メールの文字に化けて
+ * 一致してしまう余地を残さないよう、A-Z だけを小文字にする。
+ */
 export function normalizeEmail(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
-  const normalized = value.trim().toLowerCase();
+  const normalized = value.trim().replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
   return normalized === "" ? null : normalized;
 }
 
@@ -201,19 +205,19 @@ export async function verifyAccessJwt(
   return { ok: true, email: normalized };
 }
 
-const keyCache = new Map<string, JWTVerifyGetKey>();
-
 /**
- * チームの鍵(`<team>.cloudflareaccess.com/cdn-cgi/access/certs`)の取得関数。チームごとにキャッシュする。
- * 鍵は6週間ごとに回り旧鍵は7日間有効なので、固定の鍵を持たず、JWT の kid で引く(jose の既定の動作:
- * 未知の kid のときは再取得する)。
+ * チームの鍵(`<team>.cloudflareaccess.com/cdn-cgi/access/certs`)の取得関数。**リクエストごとに新しく作る**
+ * (module スコープに保持しない)。Cloudflare 公式の Workers 向けの例もリクエストの中で作っている。
+ *
+ * 理由: jose の取得関数は、取得中の Promise(内部の pendingFetch)をクロージャに保持する。Workers では、
+ * あるリクエストが作った I/O(Promise・ストリーム)を別のリクエストが待つと失敗しうる(jose は Workers を判定して
+ * 保持中の Promise を捨てる実装だが、それに頼らない)。module スコープで共有して全リクエストが 403 になると、
+ * 初回の実機確認を不安定にする。代償は、リクエストごとに鍵を1回取得すること(個人用途のため許容)。
+ * キャッシュが要るようになったら、取得済みの鍵データ(JWK の JSON)だけを保持し、リクエストごとに
+ * `createLocalJWKSet` で包む(I/O を共有しない)。
+ *
+ * 鍵は6週間ごとに回り旧鍵は7日間有効なので、固定の鍵を持たず、JWT の kid で引く。
  */
 export function remoteKeys(teamName: string): JWTVerifyGetKey {
-  const cached = keyCache.get(teamName);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const created = createRemoteJWKSet(new URL(certsUrlOf(teamName)), { timeoutDuration: 5000 });
-  keyCache.set(teamName, created);
-  return created;
+  return createRemoteJWKSet(new URL(certsUrlOf(teamName)), { timeoutDuration: 5000 });
 }

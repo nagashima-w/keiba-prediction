@@ -54,6 +54,9 @@ describe("issuerOf / certsUrlOf(チーム名から組み立てる。URL を設�
 describe("normalizeEmail", () => {
   it("小文字化と前後の空白除去。文字列でなければ null", () => {
     expect(normalizeEmail("  A@Example.Com ")).toBe("a@example.com");
+    // ASCII だけを小文字化する(toLowerCase は Unicode も変える: U+212A KELVIN SIGN → k、U+0130 → i̇)
+    expect(normalizeEmail("\u212Aowner@example.com")).toBe("\u212aowner@example.com");
+    expect(normalizeEmail("\u0130owner@example.com")).toBe("\u0130owner@example.com");
     expect(normalizeEmail(undefined)).toBeNull();
     expect(normalizeEmail(42)).toBeNull();
     expect(normalizeEmail("")).toBeNull();
@@ -194,6 +197,43 @@ describe("verifyAccessJwt(署名・iss・aud・exp・nbf・メールの一致)",
     expect(await verifyAccessJwt(hs, CONFIG, localKeys(key), NOW)).toEqual({ ok: false, reason: "alg-not-allowed" });
   });
 
+  // 前提: RS256 の正常系は上で通っている。RS256 以外の非対称アルゴリズム(鍵も、その alg の正しい鍵)は、署名が正しくても拒否する
+  it.each([["RS384"], ["RS512"], ["PS256"], ["ES256"], ["ES384"]])(
+    "%s で正しく署名された JWT も alg-not-allowed(RS256 に固定)",
+    async (alg) => {
+      const rs256 = await makeKey("k-rs256");
+      expect(await verifyAccessJwt(await signToken(rs256), CONFIG, localKeys(rs256), NOW)).toMatchObject({ ok: true });
+      const key = await makeKey("k-other", alg);
+      const token = await signToken(key);
+      expect(await verifyAccessJwt(token, CONFIG, localKeys(key), NOW)).toEqual({ ok: false, reason: "alg-not-allowed" });
+    },
+  );
+
+  // 前提: 完全一致のメールは通る(上の正常系)。部分一致・連結・別ドメインは拒否する
+  it.each([
+    ["先頭に文字が付く", "xowner@example.com"],
+    ["末尾にドメインが付く", "owner@example.com.evil"],
+    ["ドメインが短い", "owner@example.co"],
+    ["ローカル部が短い", "wner@example.com"],
+    ["許可メールを含むカンマ区切り(後ろ)", "stranger@example.com,owner@example.com"],
+    ["許可メールを含むカンマ区切り(前)", "owner@example.com,stranger@example.com"],
+    ["@ が重なる", "owner@@example.com"],
+    ["ゼロ幅スペースが混ざる", "owner\u200b@example.com"],
+  ])("JWT の email が許可メールと部分一致するだけ(%s)なら email-mismatch", async (_name, email) => {
+    const key = await makeKey("k1");
+    expect(await verifyAccessJwt(await signToken(key), CONFIG, localKeys(key), NOW)).toMatchObject({ ok: true });
+    const token = await signToken(key, { email });
+    expect(await verifyAccessJwt(token, CONFIG, localKeys(key), NOW)).toEqual({ ok: false, reason: "email-mismatch" });
+  });
+
+  it("メールの小文字化は ASCII だけ: Unicode の大文字(ケルビン記号 U+212A)が k に化けて一致しない", async () => {
+    const key = await makeKey("k1");
+    const config: AccessConfig = { teamName: TEAM, aud: AUD, allowedEmail: "kowner@example.com" };
+    expect(await verifyAccessJwt(await signToken(key, { email: "kowner@example.com" }), config, localKeys(key), NOW)).toMatchObject({ ok: true });
+    const token = await signToken(key, { email: "\u212Aowner@example.com" });
+    expect(await verifyAccessJwt(token, config, localKeys(key), NOW)).toEqual({ ok: false, reason: "email-mismatch" });
+  });
+
   it.each([["空文字", ""], ["ドットなし", "abc"], ["3部だが壊れている", "a.b.c"]])(
     "壊れたトークン(%s)は malformed",
     async (_name, token) => {
@@ -212,7 +252,7 @@ describe("verifyAccessJwt(署名・iss・aud・exp・nbf・メールの一致)",
   });
 });
 
-describe("remoteKeys(Access の鍵 URL からの取得。チームごとにキャッシュ)", () => {
+describe("remoteKeys(Access の鍵 URL からの取得。リクエストごとに作る)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -241,8 +281,20 @@ describe("remoteKeys(Access の鍵 URL からの取得。チームごとにキ�
     expect(await verifyAccessJwt(token, config, remoteKeys(team), NOW)).toEqual({ ok: false, reason: "keys-unavailable" });
   });
 
-  it("同じチーム名には同じ取得関数を返し(キャッシュを共有)、別のチーム名には別の関数を返す", () => {
-    expect(remoteKeys("cache-team-a")).toBe(remoteKeys("cache-team-a"));
-    expect(remoteKeys("cache-team-a")).not.toBe(remoteKeys("cache-team-b"));
+  it("取得関数はリクエストごとに新しく作る(module スコープで共有しない)。呼ぶたびに別の関数で、鍵の取得もそれぞれ行う", async () => {
+    // Workers では、あるリクエストが作った取得中の Promise などの I/O を別のリクエストが待つと失敗しうる。
+    expect(remoteKeys("fresh-team-a")).not.toBe(remoteKeys("fresh-team-a"));
+    const key = await makeKey("remote-k");
+    const team = "remote-twice-team";
+    let fetches = 0;
+    vi.stubGlobal("fetch", async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ keys: [key.jwk] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const token = await signToken(key, { iss: issuerOf(team) });
+    const config: AccessConfig = { teamName: team, aud: AUD, allowedEmail: EMAIL };
+    expect(await verifyAccessJwt(token, config, remoteKeys(team), NOW)).toMatchObject({ ok: true });
+    expect(await verifyAccessJwt(token, config, remoteKeys(team), NOW)).toMatchObject({ ok: true });
+    expect(fetches).toBe(2);
   });
 });

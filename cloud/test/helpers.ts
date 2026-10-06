@@ -14,14 +14,16 @@ export const NOW_SEC = Math.floor(NOW.getTime() / 1000);
 
 export interface TestKey {
   readonly kid: string;
+  readonly alg: string;
   readonly privateKey: CryptoKey;
   readonly jwk: JWK;
 }
 
-export async function makeKey(kid: string): Promise<TestKey> {
-  const { privateKey, publicKey } = await generateKeyPair("RS256", { extractable: true });
-  const jwk = { ...(await exportJWK(publicKey)), kid, alg: "RS256", use: "sig" };
-  return { kid, privateKey, jwk };
+/** 既定は RS256(Access の署名アルゴリズム)。RS256 以外の拒否のテストでは別の alg を指定する。 */
+export async function makeKey(kid: string, alg = "RS256"): Promise<TestKey> {
+  const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
+  const jwk = { ...(await exportJWK(publicKey)), kid, alg, use: "sig" };
+  return { kid, alg, privateKey, jwk };
 }
 
 export function localKeys(...keys: TestKey[]): JWTVerifyGetKey {
@@ -35,7 +37,6 @@ export interface TokenOptions {
   readonly exp?: number | null;
   readonly nbf?: number;
   readonly kid?: string;
-  readonly alg?: string;
 }
 
 /** 既定は「正常な JWT」(iss・aud・email が正しく、1時間有効)。 */
@@ -46,7 +47,7 @@ export async function signToken(key: TestKey, options: TokenOptions = {}): Promi
     claims["email"] = email;
   }
   let jwt = new SignJWT(claims)
-    .setProtectedHeader({ alg: options.alg ?? "RS256", kid: options.kid ?? key.kid })
+    .setProtectedHeader({ alg: key.alg, kid: options.kid ?? key.kid })
     .setIssuer(options.iss ?? ISSUER)
     .setAudience(options.aud ?? [AUD])
     .setIssuedAt(NOW_SEC - 60);

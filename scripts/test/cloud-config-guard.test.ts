@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -77,48 +77,107 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
   });
 });
 
-describe("公開リポジトリへの値の混入(実在のメール・チーム名・AUD をコード・テスト・ワークフローに書かない)", () => {
-  const files = [
-    ["cloud", "wrangler.toml"],
-    ["cloud", "smoke.ts"],
-    [".github", "workflows", "deploy-cloud.yml"],
-    ["cloud", "src", "access-jwt.ts"],
-    ["cloud", "src", "authenticate.ts"],
-    ["cloud", "src", "handler.ts"],
-    ["cloud", "src", "page.ts"],
-    ["cloud", "src", "worker.ts"],
-    ["cloud", "src", "netkeiba-gate-do.ts"],
-    ["cloud", "test", "helpers.ts"],
-    ["cloud", "test", "access-jwt.test.ts"],
-    ["cloud", "test", "authenticate.test.ts"],
-    ["cloud", "test", "handler.test.ts"],
-  ];
-
-  it("メールアドレスの形は example.com のものだけ", () => {
-    const found: string[] = [];
-    for (const segments of files) {
-      const text = readTextLf(...segments);
-      for (const m of text.matchAll(/[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g)) {
-        found.push(`${segments.join("/")}: ${m[0]}`);
+/**
+ * 検査対象のファイル: cloud/ 配下の全ファイル(cloud/.gitignore が除外するもの、すなわち node_modules などの
+ * 生成物は除く)と、デプロイのワークフロー。固定の一覧にしない(新しいファイル・README も自動で対象になる)。
+ * 戻り値は ROOT からの相対パス(/ 区切り)。
+ */
+function scanTargets(): string[] {
+  const ignored = readTextLf("cloud", ".gitignore")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "" && !l.startsWith("#"));
+  const ignoredDirs = new Set(ignored.filter((l) => l.endsWith("/")).map((l) => l.slice(0, -1)));
+  const ignoredFiles = new Set(ignored.filter((l) => !l.endsWith("/")));
+  const out: string[] = [];
+  const walk = (rel: string): void => {
+    for (const entry of readdirSync(path.join(ROOT, rel), { withFileTypes: true })) {
+      const next = `${rel}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (!ignoredDirs.has(entry.name)) {
+          walk(next);
+        }
+      } else if (!ignoredFiles.has(entry.name)) {
+        out.push(next);
       }
     }
-    // 前提: 検査が空振りしていない(テストのフィクスチャのメールを拾えている)
+  };
+  walk("cloud");
+  out.push(".github/workflows/deploy-cloud.yml");
+  return out.sort();
+}
+
+const EMAIL_RE = /[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+const TEAM_HOST_RE = /[A-Za-z0-9-]+\.cloudflareaccess\.com/g;
+/** Access の AUD タグは 64 桁の 16 進。 */
+const AUD_LIKE_RE = /\b[0-9a-f]{64}\b/gi;
+
+describe("公開リポジトリへの値の混入(実在のメール・チーム名・AUD を cloud/ 配下の全ファイルとワークフローに書かない)", () => {
+  const targets = scanTargets();
+  /** pnpm-lock.yaml は生成物で `名前@版数` がメールの形に見えるため、メールの検査からだけ除く。 */
+  const emailTargets = targets.filter((t) => t !== "cloud/pnpm-lock.yaml");
+
+  it("検査が空振りしていない: 対象に期待するファイル(README・ソース・テスト・設定・ワークフロー)が含まれ、生成物は含まれない", () => {
+    for (const expected of [
+      "cloud/README.md",
+      "cloud/wrangler.toml",
+      "cloud/package.json",
+      "cloud/smoke.ts",
+      "cloud/src/access-jwt.ts",
+      "cloud/src/authenticate.ts",
+      "cloud/src/handler.ts",
+      "cloud/src/worker.ts",
+      "cloud/test/helpers.ts",
+      "cloud/test/handler.test.ts",
+      ".github/workflows/deploy-cloud.yml",
+    ]) {
+      expect(targets, `対象に ${expected} がある`).toContain(expected);
+    }
+    expect(targets.length).toBeGreaterThanOrEqual(19);
+    expect(targets.filter((t) => t.includes("node_modules") || t.includes("dist-dry") || t.includes(".wrangler"))).toEqual([]);
+  });
+
+  it("メールアドレスの形は example.com のものだけ(全ファイル。README を含む)", () => {
+    const found: string[] = [];
+    for (const rel of emailTargets) {
+      for (const m of readTextLf(...rel.split("/")).matchAll(EMAIL_RE)) {
+        found.push(`${rel}: ${m[0]}`);
+      }
+    }
+    // 前提: 検査が空振りしていない(テストのフィクスチャのメールを拾えている。検出の正規表現が実際にメールを拾う)
     expect(found.length).toBeGreaterThan(0);
-    const bad = found.filter((f) => !/@example\.com$/i.test(f));
+    expect("someone@gmail.com".match(EMAIL_RE)).not.toBeNull();
+    // 許可するドメイン: example.com と、部分一致の拒否テストが使う文書用のダミー2つ(example.com.evil / example.co)だけ
+    const bad = found.filter((f) => !/@example\.(com|com\.evil|co)$/i.test(f));
     expect(bad).toEqual([]);
   });
 
-  it("<リテラル>.cloudflareaccess.com の形は、ソース・設定・ワークフローに無い(チーム名を書かない。テストのダミーのみ)", () => {
-    const nonTest = files.filter((s) => s[1] !== "test");
+  it("<リテラル>.cloudflareaccess.com の形は、テスト以外のファイルに無い(チーム名を書かない。README・ワークフローを含む)", () => {
     const bad: string[] = [];
-    for (const segments of nonTest) {
-      for (const m of readTextLf(...segments).matchAll(/[A-Za-z0-9-]+\.cloudflareaccess\.com/g)) {
-        bad.push(`${segments.join("/")}: ${m[0]}`);
+    for (const rel of targets.filter((t) => !t.startsWith("cloud/test/") && t !== "cloud/pnpm-lock.yaml")) {
+      for (const m of readTextLf(...rel.split("/")).matchAll(TEAM_HOST_RE)) {
+        bad.push(`${rel}: ${m[0]}`);
       }
     }
     expect(bad).toEqual([]);
-    // 前提: 検査の正規表現が、リテラルのチーム名を実際に拾える(テストのダミーで確認)
-    const dummy = readTextLf("cloud", "test", "access-jwt.test.ts");
-    expect(/[A-Za-z0-9-]+\.cloudflareaccess\.com/.test(dummy)).toBe(true);
+    // 前提: 検出の正規表現が、リテラルのチーム名を実際に拾える(テストのダミーで確認)
+    expect(TEAM_HOST_RE.test("https://real-team.cloudflareaccess.com")).toBe(true);
+    TEAM_HOST_RE.lastIndex = 0;
+    expect(readTextLf("cloud", "test", "access-jwt.test.ts").match(TEAM_HOST_RE)).not.toBeNull();
+  });
+
+  it("AUD らしい 64 桁の 16 進の文字列が、どのファイルにも無い(ロックファイルを含む)", () => {
+    const bad: string[] = [];
+    for (const rel of targets) {
+      for (const m of readTextLf(...rel.split("/")).matchAll(AUD_LIKE_RE)) {
+        bad.push(`${rel}: ${m[0].slice(0, 8)}…`);
+      }
+    }
+    expect(bad).toEqual([]);
+    // 前提: 検出の正規表現が、64 桁の 16 進を拾い、63 桁・65 桁は拾わない
+    const sample = "a".repeat(64);
+    expect(`x ${sample} y`.match(AUD_LIKE_RE)).toEqual([sample]);
+    expect(`x ${"a".repeat(63)} y`.match(AUD_LIKE_RE)).toBeNull();
+    expect(`x ${"a".repeat(65)} y`.match(AUD_LIKE_RE)).toBeNull();
   });
 });

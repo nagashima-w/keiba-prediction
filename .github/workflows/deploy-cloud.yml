@@ -14,6 +14,12 @@
 #   1回の push に複数コミットが含まれる場合の判定は先端コミット(head_commit)のみで行う。
 #   許可ブランチを変えるときは、on.push.branches・deploy の if:・scripts/test/cloud-deploy-workflow.test.ts を揃えて直す。
 #
+# ★concurrency の注意(承認印付きの run が取り消されうる): cancel-in-progress: false でも、同じ group で実行中の run があると、
+#   待機できる run は最新の1本だけで、待機中の古い run は後続の push に取り消される。承認印付きの push の直後に別の push
+#   (印の有無を問わない)が来ると、待機中だった承認印付きの run が取り消され、deploy が走らないことがある
+#   (先端が印のないコミットに移ると、後続の run は deploy の条件を満たさない)。回復は、許可ブランチでの
+#   workflow_dispatch(手動実行。deploy の条件を満たす)。承認印付きの push 後は、deploy ジョブが実際に走ったことを確かめる。
+#
 # ★paths フィルタを付けない理由: 承認印付きの最終コミットは版数・文書だけのことが多く、cloud/ を含まない。
 #   フィルタを付けると、その最終コミットで deploy が走らず、cloud/ の変更が本番に出なくなる。
 #
