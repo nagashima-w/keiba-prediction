@@ -41,14 +41,18 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 2. **Google の OAuth クライアントを作る**(Google Cloud): プロジェクト作成 → APIs & Services > Credentials > 同意画面(External)→ OAuth クライアント(Web application)。
    承認済みの JavaScript 生成元に `https://<チーム名>.cloudflareaccess.com`、リダイレクト URI に `https://<チーム名>.cloudflareaccess.com/cdn-cgi/access/callback`。同意画面がテスト状態のときのテストユーザー登録の要否は未確認。
 3. **Google の IdP を登録する**: Zero Trust > Integrations > Identity providers > Add new identity provider > Google。Client ID と Client secret を入れて保存し、Test で確かめる。
-4. **初回デプロイの後に、Worker に Access を掛ける**: Workers & Pages > 対象の Worker > Access タブ > Protect this Worker behind Access > **All traffic**。
-   ポリシーの選択肢は公式には Cloudflare account と Email domain の2種類(メール1件の指定は未確認)。作成後に Zero Trust > Access controls > Applications で編集し、
-   Include = Emails(許可する1件)、Require = Login Methods(Google)にし、Accepted identity providers から Google 以外(One-time PIN 等)を外す。
-   Worker レベルのアプリがその一覧に出るか、編集できるかは未確認。AUD タグも同じ画面で控える(画面上の位置は未確認)。
-5. **secret を登録する**(上の表)。
-6. API トークンの権限の追加は不要(Access の設定はユーザー本人のダッシュボード操作)。
+4. **先に、許可するメール1件のポリシーを作る**: Zero Trust(Cloudflare One)> Access コントロール > ポリシー > ポリシーを追加。
+   アクション = Allow、含める = Emails(許可する1件)、要求 = Login Method(Google)。
+5. **初回デプロイの後に、Worker に Access を掛ける**: Workers & Pages > 対象の Worker > Access タブ > Protect this Worker behind Access > **All traffic**。
+   ポリシーは「Cloudflare account」「Email domain」ではなく、**既存のポリシー**(4. で作ったもの)を選ぶ(公式ドキュメントに「select an existing policy」とある)。
+   **★アプリのログイン方法は、既定で「利用可能なすべての IdP を許可」になる**(2026-10-06 に実機で確認)。このままだとログイン画面に「Cloudflare」
+   (Cloudflare アカウントでのログイン)も出るので、Zero Trust > Access コントロール > アプリケーション > 対象のアプリ > ログイン方法 で **Google だけ**にする。
+   AUD タグは同じアプリの画面で控える。
+6. **secret を登録する**(上の表)。Workers & Pages > 対象の Worker > 設定 > 変数とシークレット > 追加 で、環境は「プロダクション」、3つとも「シークレット」にチェックを入れる。
+7. API トークンの権限の追加は不要(Access の設定はユーザー本人のダッシュボード操作)。
 
 ## 初回の実機確認で見ること
 Workers Logs(`observability` を有効にしてある)に、認証の経路が `access: ok via=header` / `via=cookie` / `via=ctx-access` で出る。
 どれで通ったかで、Worker レベルの Access が JWT ヘッダ・クッキーを渡すかが分かる(公式ドキュメントには明記がない)。
+**2026-10-06 の初回確認では `via=header`** だった(Worker 単位の Access は JWT を `Cf-Access-Jwt-Assertion` ヘッダで渡す。#161)。
 拒否は `access: denied reason=<経路:理由コード>` で出る(トークン・メール・チーム名・AUD は出ない)。
