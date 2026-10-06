@@ -94,7 +94,8 @@ const FULL_RECORD: AnalysisRecord = {
       perRaceCap: 3000,
       kellyFraction: 0.25,
       evThreshold: 1,
-      includeComboOdds: true,
+      // 7つの真偽値フラグは、FLAG_CODES の番号の bit0(0,1,0,1,0,1,0)。bit1・bit2 は別の2入力で保存する(下の describe)。
+      includeComboOdds: false,
       includeWide: true,
       includeTrio: false,
       includeQuinella: true,
@@ -142,6 +143,10 @@ const INSERT_BET =
   "INSERT INTO analysis_bets (analysis_id, bet_type, combo_key, stake, odds, ev) VALUES";
 const SELECT_ANALYSES_HEAD =
   "SELECT id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated, prompt_version AS promptVersion, additional_instruction AS additionalInstruction, kaisai_date AS kaisaiDate, model, raw_response AS rawResponse, race_snapshot_json AS raceSnapshotJson, history_cutoff_date AS historyCutoffDate, prompt_lookahead_guarded AS promptLookaheadGuarded FROM analyses";
+const SELECT_ALLOCATION_META_HEAD =
+  "SELECT route, unavailable_reason AS unavailableReason, fallback_reason AS fallbackReason, skip_reason_code AS skipReasonCode, bankroll, per_race_cap AS perRaceCap, kelly_fraction AS kellyFraction, ev_threshold AS evThreshold, include_combo_odds AS includeComboOdds, include_wide AS includeWide, include_trio AS includeTrio, include_quinella AS includeQuinella, include_exacta AS includeExacta, include_trifecta AS includeTrifecta, include_bracket_quinella AS includeBracketQuinella, bet_unit AS betUnit, odds_status AS oddsStatus FROM analysis_allocation_meta";
+const SELECT_ALLOCATION_BETS_HEAD =
+  "SELECT bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets";
 const SELECT_HORSES_HEAD =
   "SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason FROM analysis_horses";
 
@@ -155,7 +160,7 @@ describe("AnalysisStore が発行する SQL 文の列(#168 AC-a7。切り出し�
       `${INSERT_ANALYSES} ('202603020211', '2026-10-06T09:00:00.000Z', 0.0, NULL, NULL, NULL, NULL, NULL, '{"x":1}', NULL, NULL)`,
       `${INSERT_HORSE} (1.0, 1.0, 0.1234567890123, 0.2, 1.5, 1.1, 1.0, '{"a":1}', '◎', '根拠')`,
       `${INSERT_HORSE} (1.0, 2.0, 0.3, 0.3, NULL, NULL, 0.0, NULL, NULL, NULL)`,
-      `${INSERT_META} (1.0, 'mixed', NULL, NULL, NULL, NULL, NULL, 10000.0, 3000.0, 0.25, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 100.0, 5.0, 50.0, 'm', NULL, 'kakutei')`,
+      `${INSERT_META} (1.0, 'mixed', NULL, NULL, NULL, NULL, NULL, 10000.0, 3000.0, 0.25, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 100.0, 5.0, 50.0, 'm', NULL, 'kakutei')`,
       `${INSERT_BET} (1.0, 'place', '01', 300.0, 1.5, 1.1)`,
       `${INSERT_BET} (1.0, 'wide', '0102', 100.0, NULL, NULL)`,
       "COMMIT",
@@ -231,6 +236,87 @@ describe("AnalysisStore が発行する SQL 文の列(#168 AC-a7。切り出し�
     expect(takePrepares()).toEqual([
       expect.stringContaining(SELECT_ANALYSES_HEAD),
       expect.stringContaining(SELECT_HORSES_HEAD),
+    ]);
+  });
+
+  it("getStoredAllocation(配分あり): メタの SELECT → 買い目の SELECT の2文で、prepare も2回(余分な文・順序の入れ替えが無い)", () => {
+    const { store, take, takePrepares } = createRecordingStore();
+    const id = store.saveAnalysis(FULL_RECORD);
+    take();
+    takePrepares();
+
+    const allocation = store.getStoredAllocation(id);
+
+    // 前提: 配分が返っており、買い目が2件ある(退化していない)。
+    expect(allocation).toBeDefined();
+    expect(allocation!.bets).toHaveLength(2);
+    expect(take()).toEqual([
+      `${SELECT_ALLOCATION_META_HEAD} WHERE analysis_id = 1.0`,
+      `${SELECT_ALLOCATION_BETS_HEAD} WHERE analysis_id = 1.0 ORDER BY bet_type, combo_key`,
+    ]);
+    expect(takePrepares()).toEqual([
+      expect.stringContaining(SELECT_ALLOCATION_META_HEAD),
+      expect.stringContaining(SELECT_ALLOCATION_BETS_HEAD),
+    ]);
+  });
+
+  it("getStoredAllocation(配分なし): メタの SELECT 1文だけ(存在確認より先に買い目を引かない)で、prepare も1回", () => {
+    const { store, take, takePrepares } = createRecordingStore();
+    const id = store.saveAnalysis(MINIMAL_RECORD);
+    take();
+    takePrepares();
+
+    expect(store.getStoredAllocation(id)).toBeUndefined();
+
+    expect(take()).toEqual([`${SELECT_ALLOCATION_META_HEAD} WHERE analysis_id = 1.0`]);
+    expect(takePrepares()).toEqual([expect.stringContaining(SELECT_ALLOCATION_META_HEAD)]);
+  });
+});
+
+/**
+ * 配分メタの真偽値フラグ7つ(INSERT の列順)。番号 0〜6 を2進数で表した3ビットを、3つの入力(bit0・bit1・bit2)に
+ * 1ビットずつ割り当てる。**7つの番号がすべて異なる**ので、どの2つのフラグも少なくとも1つの入力で値が違い、
+ * 「フラグの束縛位置の入れ替え」のどれもが、この表だけで(別のテストに頼らず)実行 SQL の違いとして現れる
+ * (真偽値は2値なので、1つの入力だけでは7つを互いに区別できない)。
+ */
+const FLAG_FIELDS = [
+  "includeComboOdds",
+  "includeWide",
+  "includeTrio",
+  "includeQuinella",
+  "includeExacta",
+  "includeTrifecta",
+  "includeBracketQuinella",
+] as const;
+
+function recordWithFlagBit(bit: 0 | 1 | 2): AnalysisRecord {
+  const flags = Object.fromEntries(
+    FLAG_FIELDS.map((field, code) => [field, ((code >> bit) & 1) === 1]),
+  ) as Record<(typeof FLAG_FIELDS)[number], boolean>;
+  return {
+    ...FULL_RECORD,
+    allocation: { ...FULL_RECORD.allocation!, meta: { ...FULL_RECORD.allocation!.meta, ...flags } },
+  };
+}
+
+describe("配分メタの真偽値フラグ7つの束縛位置(#168 AC-a7。切り出し前後で不変)", () => {
+  it("前提: 3つの入力で、7つのフラグの(bit0, bit1, bit2)の組が互いにすべて異なる", () => {
+    const codes = FLAG_FIELDS.map((field) =>
+      [0, 1, 2].map((bit) => (recordWithFlagBit(bit as 0 | 1 | 2).allocation!.meta[field] ? "1" : "0")).join(""),
+    );
+    expect(new Set(codes).size).toBe(FLAG_FIELDS.length);
+  });
+
+  it.each([
+    [0, "0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0"],
+    [1, "0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0"],
+    [2, "0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0"],
+  ] as const)("bit%i の入力: include_* 7列(combo_odds, wide, trio, quinella, exacta, trifecta, bracket_quinella)の値が `%s`", (bit, flags) => {
+    const { store, take } = createRecordingStore();
+    store.saveAnalysis(recordWithFlagBit(bit));
+    const metaInsert = take().filter((sql) => sql.startsWith(INSERT_META));
+    expect(metaInsert).toEqual([
+      `${INSERT_META} (1.0, 'mixed', NULL, NULL, NULL, NULL, NULL, 10000.0, 3000.0, 0.25, 1.0, ${flags}, 100.0, 5.0, 50.0, 'm', NULL, 'kakutei')`,
     ]);
   });
 });

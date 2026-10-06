@@ -25,6 +25,7 @@ import {
  *  - get の await を落とす → async ストアで Promise が常に「ヒット」扱いになり、hit.value が undefined になる
  *  - set の await を落とす → async ストアで、fetchText が返った直後にはまだ保存されていない
  *  - 保存キーに cacheKey でなく url を使う / maxAgeMs を get に渡さない / bypassCache を無視する
+ *  - ヒットの判定を `hit && hit.value`(値の真偽)にする → 空文字の本文をキャッシュしていても、毎回フェッチし直す
  */
 
 interface Harness {
@@ -118,7 +119,7 @@ const HARNESSES: ReadonlyArray<readonly [string, () => Harness]> = [
 ];
 
 /** 呼び出しを記録する偽のフェッチャ。n回目の呼び出しは `body-n` を返す。 */
-function createFakeFetcher(): {
+function createFakeFetcher(bodyFor: (n: number) => string = (n) => `body-${n}`): {
   fetcher: TextFetcher;
   calls: Array<{ url: string; options: unknown }>;
   failNext: () => void;
@@ -137,7 +138,7 @@ function createFakeFetcher(): {
           fail = false;
           throw new Error("取得失敗");
         }
-        return `body-${calls.length}`;
+        return bodyFor(calls.length);
       },
     },
   };
@@ -230,6 +231,22 @@ describe.each(HARNESSES)("CachedFetcher × %s", (_label, makeHarness) => {
     expect(await h.peek(apiUrl)).toBeUndefined();
     expect((await h.peek("race_api#AplGradeWinner#R1"))?.value).toBe("body-1");
     expect((await h.peek("race_api#AplGradeWinner#R2"))?.value).toBe("body-2");
+  });
+
+  it("空文字の本文もキャッシュされ、次回はヒットする(ヒットは値の真偽でなく、エントリの有無で判定する)", async () => {
+    const h = makeHarness();
+    const { fetcher, calls } = createFakeFetcher(() => "");
+    const cached = new CachedFetcher({ fetcher, cache: h.store });
+
+    const first = await cached.fetchText(URL_A);
+    // 前提: 空文字が保存されている(エントリ自体は存在する)。
+    expect(first).toBe("");
+    expect(await h.peek(URL_A)).toEqual({ value: "", fetchedAt: 1_000_000 });
+
+    const second = await cached.fetchText(URL_A, { maxAgeMs: 600_000 });
+
+    expect(second).toBe("");
+    expect(calls).toHaveLength(1);
   });
 
   it("フェッチが失敗したら例外が伝わり、何も保存しない(次回は再取得する)", async () => {

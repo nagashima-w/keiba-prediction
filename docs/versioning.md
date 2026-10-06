@@ -2385,6 +2385,31 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
 
+## 次の正式版が 1.19.6 である根拠(Issue #168〈#163-a〉での変更)
+
+**patch**(core の保存層の切り出し〈#21-E の第1段。cached-fetcher・analysis-store の型と codec〉。**core〈`packages/core`〉の変更だが、exe の挙動・性能は変わらず、
+利用者から見える変化は無い**)。
+
+### 変更内容
+
+- `packages/core/src/scraper/cached-fetcher.ts`(新規): 保存先の抽象 `CacheStore`(同期・非同期どちらでもよい)と、`CachedFetcher`・`TextFetcher` ほかの型。
+  better-sqlite3 に依存しない。`cache.ts` は `ScrapeCache`(SQLite 実装。`CacheStore` を満たす)を残し、`CachedFetcher` などを再 export する
+- `packages/core/src/ev/analysis-store-types.ts`(新規。型のみ)と `analysis-store-codec.ts`(新規。SQL 文・束縛値の組み立て・行の復元の純関数)。
+  `analysis-store.ts` はこれらを使い、型を再 export する。シグネチャは変えていない
+- テスト: 発行される SQL 文・prepare の列の固定(切り出し前の実装でも緑の特性化テスト)、共有フィクスチャ(保存→取得の契約)、codec の単体テスト、
+  新ファイルが better-sqlite3 に依存しないことの機械検査、`CachedFetcher` を同期・非同期のストアで同じ表に通すテスト
+- docs: `docs/current-spec.md`(core の保存層の構成)、`docs/issue-order.md`
+
+### patch である根拠
+
+- exe(`packages/app`)のコードは無変更。core の変更は、型・変換ロジックの別ファイルへの移動と、`CachedFetcher` の `await` 化に限る。
+  exe の保存・取得が発行する SQL 文・prepare は、切り出し前と同じ文を同じ回数・同じ順序で発行する(上の特性化テストが固定。切り出し前の実装でも緑)
+- 分析結果の数値・画面・保存データは変わらない。利用者から見える変化は無い
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`@keiba/core` は版数運用の対象外・据え置き)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

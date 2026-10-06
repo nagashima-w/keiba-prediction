@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.5)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.6)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.5`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.6`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -155,6 +155,17 @@ fixtures       … テスト用の保存済み HTML/JSON(テストは実サイ�
   ことがビルドで保証される。**新しく renderer から core を使うときは必ずサブパスを追加すること。**
 - 主要モジュール(core、`packages/core/src/index.ts` が公開 API): `scraper/`(取得)、`scorer/`(数値
   スコアリング)、`analyzer/`(LLM 分析と材料生成)、`ev/`(期待値・検証・分析履歴ストア)、`notify/`(Discord)。
+- **core の保存層の構成(#168〈#163-a〉。v1.19.6)**: クラウド版〈`cloud/`。Cloudflare Workers〉が、ネイティブ依存の better-sqlite3 を
+  巻き込まずに core を使えるよう、保存層を次のファイルに分けた。**exe の挙動・性能は変わらない**(exe が発行する SQL 文・prepare は切り出し前と同じ)。
+  - `scraper/cached-fetcher.ts`: 取得結果の保存先の抽象 `CacheStore`(`get`・`set` の戻り値は値でも Promise でもよい。鮮度は経過が `maxAgeMs` を**超えたら**ミス)、
+    `CachedFetcher`、`TextFetcher`。better-sqlite3 に依存しない。
+  - `scraper/cache.ts`: SQLite 実装の `ScrapeCache`(`CacheStore` を満たす)。`CachedFetcher` などは上のファイルから再 export し、既存の import 元を保つ。
+  - `ev/analysis-store-types.ts`: 分析履歴の入出力の型(型のみ。`import type` だけ)。`ev/analysis-store.ts` が再 export する。
+  - `ev/analysis-store-codec.ts`: 表名・INSERT/SELECT の SQL 文・`AnalysisRecord` から各表の束縛値への変換(NULL/0/1、`undefined` → `null`、JSON 化。配分が無ければ
+    配分メタ行を出さない)・DB 行から `StoredAnalysis`/`StoredAllocation` への復元の純関数。exe の `AnalysisStore`(better-sqlite3。同期)と、後続の D1 実装(非同期)が共有する。
+  - `AnalysisStore` は従来どおり同期の具象クラスのまま(verify・app の呼び出しは無変更)。新ファイルが better-sqlite3 に依存しないことは
+    `packages/core/test/ev/native-free-modules.test.ts` が機械的に固定している。**cloud は core のバレル(`index.ts`)を import してはいけない**(`cache.ts`・`analysis-store.ts` を巻き込む)。
+  - 保存→取得の契約は共有フィクスチャ `packages/core/test/fixtures/analysis-store-contract.json` で固定し、クラウドの D1 実装(#169)も同じ期待値で検査する。
 
 ## 1. 取得(scraper)
 
@@ -954,7 +965,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **確認用エンドポイント**: `GET /api/netkeiba/check?race_id=...`(Access の関門のあと。GET のみ)。race_id を core の検証(中央 01〜10・地方 30〜64・帯広 65 は対象外)で確かめ、
   出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/` にフォーム(初期値 202603020211)がある。
   **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
-- **未実装**: 保存(D1。#163)・分析の実行(#164)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
+- **未実装**: 保存(D1。#169〈分析履歴〉・#170〈取得キャッシュ〉。#168 で core の切り出しは完了)・分析の実行(#164)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
 
 ## 主な当初仕様との差異(記録)
 
