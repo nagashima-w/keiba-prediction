@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.8)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.9)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.8`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.9`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -965,7 +965,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **確認用エンドポイント**: `GET /api/netkeiba/check?race_id=...`(Access の関門のあと。GET のみ)。race_id を core の検証(中央 01〜10・地方 30〜64・帯広 65 は対象外)で確かめ、
   出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/` にフォーム(初期値 202603020211)がある。
   **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
-- **未実装**: 保存(D1。分析履歴は #175〈ストアと R2。旧 #172 の後半〉・#173〈安全柵〉、取得キャッシュは #170。#168 で core の切り出し、#171 で D1 の土台、#174 で R2 の土台は完了。ストア本体は #175)・分析の実行(#164)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
+- **未実装**: 保存の**呼び出し元**(#164。分析履歴のストア本体〈`D1AnalysisStore`〉は #175 で実装済み)・分析の実行(#164)・R2 の操作回数の安全柵(#173)・取得キャッシュ(#170)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
 
 ### D1(分析履歴)の土台(#171〈#169-a〉。v1.19.7)
 クラウド版の分析履歴の保存先 D1 の**土台だけ**(migration・binding・CI・health)。保存・読み取りのロジック(`D1AnalysisStore`)と R2 は #172、R2 の操作回数の安全柵は #173
@@ -988,6 +988,26 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   本文・トークン・アカウント ID は出さない。200 以外は失敗。**この API に必要なトークン権限・存在しないバケットのステータス・`wrangler deploy` が R2 の binding に要る権限は、公式ドキュメントで確認できていない(未確認)。**
   最初の本番の実行の結果で確定する(403 ならトークンに R2 の権限を足す)。`cloud/README.md` に 401・403・404 の案内(推測は推測と明記)。
 - health には R2 の疎通確認を足さない(足すと R2 の操作回数が増える。安全柵は #173)。
+
+### 分析履歴ストア(#175〈#172-b〉。v1.19.9)
+クラウド版の分析履歴のストア `D1AnalysisStore`(`cloud/src/analysis-repository.ts`・`analysis-detail.ts`)。**要約は D1、大きな列(`race_snapshot_json`・`raw_response`・馬ごとの `contributions`)は R2**(方式 A)。
+保存の**呼び出し元はまだ無い**(#164)。本番の入口は読み取り専用の `GET /api/analyses` だけ。exe のアプリコードは無変更。
+- **`AnalysisRepository`(5メソッド。コンストラクタは `{ db, bucket }` だけで、Worker からでも DO からでも使える)**
+  - `saveAnalysis(record)` → `{ id, detail: "stored" | "failed" }`(#173 で `"skipped"` を足す)
+  - `listAnalysisSummaries({ raceId?, kaisaiDate?, limit? })`: D1 だけ。**2 文の batch**(分析・馬)で、N+1 にしない。大きな列は読まない。新しい順(id の降順)に limit 件(既定 50・上限 200。範囲外は RangeError)
+  - `getAnalysisDetail(id)` → `{ analysis, detail: "present" | "missing" | "none" }`(存在しない id は undefined)
+  - `getStoredAllocation(id)`(配分なしは undefined)・`listAnalyzedRaceIdsByPromptVersion(version)`(`idx_analyses_prompt_version_race` のカバリング索引を使う)
+- **保存**: ① 詳細を JSON → gzip(`node:zlib` の **level 1**)にする(D1 に書く前)② D1 に **1 回の batch** で書く(配分ありで 5 文・なしで 3 文。馬・買い目の数によらず一定。bind 変数は 1 文あたり 23 個が最大で、100 個以下)
+  — analyses の INSERT(core の codec の文と束縛値。大きな列は NULL)・`detail_key` の UPDATE・馬(`json_each`)・配分メタ・買い目(`json_each`)。子の行は `(SELECT max(id) FROM analyses)` で採番された id に紐づける。
+  ③ R2 に `analyses/{id}.json.gz` を put(**D1 が先、R2 が後**。LIST・HEAD は使わない)。失敗したら最大 2 回まで同じキーに再試行し、それでも失敗したら `detail_key` を NULL に戻して **throw せず** `detail: "failed"` を返す(要約は残る)。
+- **読み出し**: `detail_key` が NULL なら `none`(R2 に触れない)。R2 に無い・壊れている・別のレースの詳細(raceId の不一致)・get の失敗は `missing`(クラッシュしない)。
+  **`missing`・`none` のとき、大きな列(`rawResponse`・`raceSnapshot`・馬の `contributions`)は null で、「LLM 未使用」とは区別できない**ので、`detail` の状態で区別する。
+- **`(SELECT max(id) FROM analyses)` に依存する理由**: 確認済みの事実(ローカルの workerd): 20 件の並行保存で子の行の取り違えは 0 件、対照(batch を使わない逐次実行)では失敗か取り違えが起きる。
+  推論(公式ドキュメントでの確認は未了・本番では未検証): D1 の batch は 1 つのトランザクションで、SQLite は書き込みを直列に処理するので、batch の途中に他の保存は割り込めない。崩れたら、保存ごとの一意のトークンで子の行を引く設計(`detail_key` の索引が要る。migration 0003)へ切り替える。
+- **`GET /api/analyses?race_id=&kaisai_date=&limit=`**(認証の関門の後ろ。GET だけ): `{ ok: true, analyses: [...] }`。パラメータはすべて任意で、未知・重複・不正な値は 400(D1 に触れない)。D1 の失敗は 503 `{ ok: false, error: { type: "d1-error" } }`(例外の文面・SQL は返さない)。`race_id` は core の `parseRaceId` で検証する。
+- **既知の差分(exe の SQLite との違い。【記録】。テストで固定)**: Infinity・NaN は NULL・-0 は 0 になる(D1 の bind も同じ。NOT NULL の列に NaN を渡すと保存全体が失敗する)。孤立サロゲートは U+FFFD に置き換わる(json_each 経由。D1 の bind でも別の形で壊れる)。
+  有限の double は、ローカルの workerd の D1 ではビット一致で往復する(確率型・広い指数・特殊な有限値の N=3,010 で不一致 0。**本番の SQLite のビルドで同じとは限らない**ので、最初の本番の実保存で確かめる)。
+- **ローカルの限界**: ローカルの D1 は「1回の呼び出しで 50 クエリ」を強制しない(bind 100 個は強制する)ため、文の数は記録した値で直接 assert している。R2 の本番での権限・存在は #174 の CI の確認ステップ。
 
 ### クラウド版の D1 の容量の見積もり(#171。再現: `pnpm tsx scripts/measure-d1-size.ts`)
 Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 500 MB〈Free〉)。見積もりの手順を残す(#147 の「再現手段がない」への対応)。
@@ -1029,8 +1049,10 @@ Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 
   zlib のバージョンで多少変わりうる。年間件数 3,500 は「中央の発走前だけ」の仮定(**私の記憶ベースの概算で未検証**)、10,000・20,000 は地方の手動分析を含む仮定。
 - **結論**: 大きな列を D1 に置くと 1分析約 145KB で、年間 3,500 件でも約 1.0 年で 500MB が埋まる。**contributions を含む大きな列を R2 に出せば 1分析約 6.6KB で、年間 3,500 件なら約 21 年もつ**
   (contributions だけを D1 に残す案は 1分析約 58KB〈A の 6,644 + 16頭分の contributions 51,289〉で約 2.5 年)。R2 の詳細オブジェクトは 1分析約 29KB(gzip)で、年間 3,500 件でも約 100MB/年(Free の 10GB に対して余裕)。
-- **D1 の書き込み行数**: 1回の保存は約 60 行(analyses 5〈表 + 索引 3 + sqlite_sequence〉・detail_key の UPDATE 1・馬 32〈16頭 × 2。複合主キーの自動索引で2倍〉・配分メタ 1・買い目 20・カウンタ 1)。
-  ローカルの D1 の `meta.rows_written` を調査時に一度だけ計測した値で、**リポジトリに再現手段がない**(測定コードは #172 でコミットして確定する。現時点の数値は暫定)。Free の 10 万行/日に対して 36 件/日なら約 2%。公式ドキュメントにも「索引は書き込み行を追加する」とある。
+- **D1 の書き込み行数**(#175 で確定): 16頭・買い目 10 件・配分ありの1回の保存は **59 行**(文ごとに analyses 5〈表 + 索引 3 + sqlite_sequence〉・detail_key の UPDATE 1・馬 32〈16頭 × 2。複合主キーの自動索引で2倍〉・配分メタ 1・買い目 20)。
+  一般式は 5 + 1 + 2H + (配分ありなら 1 + 2B)(H = 馬の数、B = 買い目の数)。#173 のカウンタ(1 行)が加わると 60。
+  再現: `cd cloud && pnpm exec vitest run test/rows-written.test.ts`(ローカルの workerd の D1 が報告する `meta.rows_written`。**本番の D1 が数える行数と同じとは限らない**ので、最初の本番の実保存で確かめる)。
+  Free の 10 万行/日に対して 36 件/日なら 59 × 36 ≒ 2,100 行で約 2%。公式ドキュメントにも「索引は書き込み行を追加する」とある。
 
 ### R2 の詳細オブジェクトの圧縮(#174。決定: `node:zlib` の level 1。再現: `pnpm tsx scripts/measure-worker-cpu.ts`)
 - **決定(2026-10-06)**: 詳細オブジェクトは `node:zlib` の `gzipSync(..., { level: 1 })` で圧縮して R2 に置く(実装は #175)。

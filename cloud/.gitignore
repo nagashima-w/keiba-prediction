@@ -8,3 +8,6 @@ wrangler.bundle-guard.generated.toml
 # バンドルのガードの対照(better-sqlite3 を巻き込む入口)が生成する一時ファイル
 native-probe.generated.ts
 wrangler.native-probe.generated.toml
+# バンドルのガードの対照(保存側のコードを巻き込まない入口)が生成する一時ファイル
+store-absent-probe.generated.ts
+wrangler.store-absent-probe.generated.toml

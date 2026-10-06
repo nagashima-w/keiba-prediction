@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { GateResult, GateStatus } from "../src/gate-core";
-import { D1_HEALTH_SQL, type D1HealthDb } from "../src/d1-health";
+import { D1_HEALTH_SQL } from "../src/d1-health";
 import { handle, type Env, type GateNamespaceLike, type GateStubLike } from "../src/handler";
 import { validateRaceId } from "../src/netkeiba-check";
 import { CHECK_DEFAULT_RACE_ID, renderPage } from "../src/page";
@@ -25,7 +25,7 @@ function gate(ping: () => Promise<{ sqlite: boolean }>, extra: Partial<GateStubL
 const HEALTHY = gate(async () => ({ sqlite: true }));
 
 /** D1 の疎通確認(`SELECT detail_key FROM analyses LIMIT 1`)の偽物。発行された文を記録する。 */
-function d1(first: () => Promise<unknown>, prepared: string[] = [], binds: unknown[][] = []): D1HealthDb {
+function d1(first: () => Promise<unknown>, prepared: string[] = [], binds: unknown[][] = []): Env["DB"] {
   return {
     prepare: (sql: string) => {
       prepared.push(sql);
@@ -37,13 +37,23 @@ function d1(first: () => Promise<unknown>, prepared: string[] = [], binds: unkno
         first,
       };
     },
-  } as unknown as D1HealthDb;
+  } as unknown as Env["DB"];
 }
 
 const HEALTHY_D1 = d1(async () => null);
 
+/** R2 の偽物: 呼ばれたら失敗する(health・一覧など、R2 に触れないルートが R2 を呼ばないことの確認に使う)。 */
+const R2_NOT_CALLED = {
+  get: async () => {
+    throw new Error("R2 の get は呼ばれない想定");
+  },
+  put: async () => {
+    throw new Error("R2 の put は呼ばれない想定");
+  },
+} as unknown as Env["ANALYSIS_DETAIL"];
+
 function envOf(overrides: Partial<Env> = {}): Env {
-  return { ...GOOD_ENV, NETKEIBA_GATE: HEALTHY, DB: HEALTHY_D1, ...overrides };
+  return { ...GOOD_ENV, NETKEIBA_GATE: HEALTHY, DB: HEALTHY_D1, ANALYSIS_DETAIL: R2_NOT_CALLED, ...overrides };
 }
 
 async function setup() {
@@ -264,7 +274,7 @@ describe("ルート(認証後)", () => {
 
   it("D1 の binding が無い(設定漏れ)でも例外を外へ投げず、503 の d1.ok:false で返す", async () => {
     const { deps, token } = await setup();
-    const response = await handle(req("/api/health", { token }), envOf({ DB: undefined as unknown as D1HealthDb }), {}, deps);
+    const response = await handle(req("/api/health", { token }), envOf({ DB: undefined as unknown as Env["DB"] }), {}, deps);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false } });
   });
@@ -558,5 +568,154 @@ describe("GET / の確認フォーム(Issue #162 段階2b)", () => {
     const html = await (await handle(req("/", { token }), envOf(), {}, deps)).text();
     expect(html).toContain("実在");
     expect(html).toContain("30 分");
+  });
+});
+
+/**
+ * Issue #175: 読み取り専用の `GET /api/analyses`(分析の要約の一覧。D1 だけ。R2 には触れない)。
+ * 認証の関門の後ろ(JWT なしは 403)。保存の経路は本番にまだ無い(#164 が呼び出し元になる)。
+ */
+describe("GET /api/analyses(Issue #175)", () => {
+  interface FakeD1 {
+    readonly db: Env["DB"];
+    readonly prepared: string[];
+    readonly binds: unknown[][];
+    readonly batches: number[];
+  }
+  /** batch が [分析の行, 馬の行] を返す偽の D1。発行された文・束縛値・batch の文の数を記録する。 */
+  function listDb(analysisRows: unknown[], horseRows: unknown[], failure?: Error): FakeD1 {
+    const prepared: string[] = [];
+    const binds: unknown[][] = [];
+    const batches: number[] = [];
+    const db = {
+      prepare(sql: string) {
+        prepared.push(sql);
+        return {
+          bind(...values: unknown[]) {
+            binds.push(values);
+            return this;
+          },
+        };
+      },
+      async batch(statements: unknown[]) {
+        batches.push(statements.length);
+        if (failure !== undefined) {
+          throw failure;
+        }
+        return [{ results: analysisRows }, { results: horseRows }];
+      },
+    } as unknown as Env["DB"];
+    return { db, prepared, binds, batches };
+  }
+
+  const ROW = { id: 7, raceId: "202603020211", analyzedAt: "2026-10-06T09:00:00.000Z", evEstimated: 0, promptVersion: "v1", additionalInstruction: null, kaisaiDate: "20261006", model: "m", rawResponse: null, raceSnapshotJson: null, historyCutoffDate: null, promptLookaheadGuarded: 1, hasDetail: 1 };
+  const HORSE = { analysisId: 7, umaban: 1, prior: 0.3, adjusted_prob: 0.25, place_odds_min: 1.5, ev: 1.1, is_positive: 1, contributions_json: null, mark: "◎", reason: "根拠" };
+
+  it("認証できなければ 403 で、D1 にも R2 にも触れない(関門の前に何もしない)", async () => {
+    const { deps } = await setup();
+    const fake = listDb([], []);
+    const response = await handle(req("/api/analyses"), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(fake.prepared).toEqual([]);
+    expect(fake.batches).toEqual([]);
+  });
+
+  it("200 で { ok: true, analyses: [...] } を返す。要約(大きな列なし・hasDetail あり)を、D1 の batch 1 回(2 文)だけで取り、R2 には触れない", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([ROW], [HORSE]);
+    const response = await handle(req("/api/analyses", { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as { ok: boolean; analyses: Array<Record<string, unknown>> };
+    expect(body.ok).toBe(true);
+    expect(body.analyses).toHaveLength(1);
+    const a = body.analyses[0]!;
+    expect(a["id"]).toBe(7);
+    expect(a["hasDetail"]).toBe(true);
+    expect(a["promptLookaheadGuarded"]).toBe(true);
+    expect("rawResponse" in a).toBe(false);
+    expect("raceSnapshot" in a).toBe(false);
+    expect((a["horses"] as Array<Record<string, unknown>>)[0]).toEqual({ umaban: 1, prior: 0.3, adjustedProb: 0.25, placeOddsMin: 1.5, ev: 1.1, isPositive: true, mark: "◎", reason: "根拠" });
+    expect(fake.batches).toEqual([2]);
+    // R2_NOT_CALLED は呼ばれれば例外になる。200 で返ったことが、R2 に触れていないことの証拠
+  });
+
+  it("絞り込みの値は SQL に埋め込まず bind で渡す(race_id・kaisai_date・limit)。limit を省くと既定の 50", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([], []);
+    await handle(req("/api/analyses?race_id=202603020211&kaisai_date=20261006&limit=7", { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(fake.binds).toEqual([
+      ["202603020211", "20261006", 7],
+      ["202603020211", "20261006", 7],
+    ]);
+    for (const sql of fake.prepared) {
+      expect(sql).not.toContain("202603020211");
+      expect(sql).not.toContain("20261006");
+    }
+    const none = listDb([], []);
+    await handle(req("/api/analyses", { token }), envOf({ DB: none.db }), {}, deps);
+    expect(none.binds).toEqual([[50], [50]]);
+  });
+
+  it.each([
+    ["race_id が不正", "?race_id=abc"],
+    ["race_id が空", "?race_id="],
+    ["kaisai_date が 8 桁でない", "?kaisai_date=2026-10-06"],
+    ["kaisai_date が空", "?kaisai_date="],
+    ["limit が 0", "?limit=0"],
+    ["limit が 201(上限を超える)", "?limit=201"],
+    ["limit が数でない", "?limit=abc"],
+    ["limit が小数", "?limit=1.5"],
+    ["limit が負", "?limit=-1"],
+    ["未知のパラメータ", "?foo=1"],
+    ["同じパラメータの重複", "?limit=1&limit=2"],
+  ])("400(%s): D1 に触れない", async (_name, query) => {
+    const { deps, token } = await setup();
+    const fake = listDb([], []);
+    const response = await handle(req(`/api/analyses${query}`, { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { ok: boolean; error: { type: string; message: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.type).toBe("bad-request");
+    expect(fake.prepared).toEqual([]);
+    expect(fake.batches).toEqual([]);
+  });
+
+  it("limit は 1 と 200 を受け付ける(境界)", async () => {
+    const { deps, token } = await setup();
+    for (const limit of ["1", "200"]) {
+      const fake = listDb([], []);
+      const response = await handle(req(`/api/analyses?limit=${limit}`, { token }), envOf({ DB: fake.db }), {}, deps);
+      expect(response.status, `limit=${limit}`).toBe(200);
+      expect(fake.binds[0]).toEqual([Number(limit)]);
+    }
+  });
+
+  it("D1 が失敗したら 503({ ok: false, error: { type: d1-error } })。例外の文面・SQL は返さない", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([], [], new Error("D1_ERROR: no such table: analyses SECRET-DETAIL"));
+    const response = await handle(req("/api/analyses", { token }), envOf({ DB: fake.db }), {}, deps);
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ ok: false, error: { type: "d1-error" } });
+    expect(text).not.toContain("SECRET-DETAIL");
+    expect(text).not.toContain("no such table");
+  });
+
+  it("GET だけ(HEAD・POST は 405・Allow: GET)。パスは厳密(末尾スラッシュ・下位パスは 404)", async () => {
+    const { deps, token } = await setup();
+    const fake = listDb([], []);
+    // POST は共通の関門(GET・HEAD 以外は 405・Allow: GET, HEAD)。HEAD はこの経路が拒否する(D1 を引かない)
+    const post = await handle(req("/api/analyses", { token, method: "POST" }), envOf({ DB: fake.db }), {}, deps);
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD");
+    const head = await handle(req("/api/analyses", { token, method: "HEAD" }), envOf({ DB: fake.db }), {}, deps);
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET");
+    for (const path of ["/api/analyses/", "/api/analyses/1", "/api/analysesx"]) {
+      expect((await handle(req(path, { token }), envOf({ DB: fake.db }), {}, deps)).status, path).toBe(404);
+    }
+    expect(fake.batches).toEqual([]);
   });
 });

@@ -131,7 +131,7 @@ function vars(email: string, aud: string): string[] {
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/api/health"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -160,6 +160,14 @@ async function main(): Promise<void> {
       check("B: GET / に viewport(スマホ幅)がある", page.text.includes('name="viewport"'));
       const health = await req(port, "GET", "/api/health");
       check("B: GET /api/health が 200 で DO の SQLite と D1(migration 適用済みの表・列)が動いている", health.status === 200 && health.text === JSON.stringify({ ok: true, durableObject: { sqlite: true }, d1: { ok: true } }), `${health.status} ${health.text.slice(0, 120)}`);
+      // Issue #175: 読み取り専用の一覧(D1 だけ)。migration 適用済みの空の D1 では、空の配列が返る。
+      const analyses = await req(port, "GET", "/api/analyses");
+      check("B: GET /api/analyses が 200 で、空の D1 では { ok: true, analyses: [] }", analyses.status === 200 && analyses.text === JSON.stringify({ ok: true, analyses: [] }), `${analyses.status} ${analyses.text.slice(0, 120)}`);
+      const filtered = await req(port, "GET", "/api/analyses?race_id=202603020211&kaisai_date=20261006&limit=5");
+      check("B: GET /api/analyses は絞り込み(race_id・kaisai_date・limit)でも 200(空の配列)", filtered.status === 200 && filtered.text === JSON.stringify({ ok: true, analyses: [] }), `${filtered.status} ${filtered.text.slice(0, 120)}`);
+      const badLimit = await req(port, "GET", "/api/analyses?limit=0");
+      check("B: GET /api/analyses?limit=0 は 400", badLimit.status === 400 && parseJson(badLimit.text)["ok"] === false, `${badLimit.status}`);
+      check("B: HEAD /api/analyses は 405(D1 を引かない)", (await req(port, "HEAD", "/api/analyses")).status === 405);
       const tampered = await req(port, "GET", "/", { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" });
       check("B: 不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", tampered.status === 403 && tampered.text === "forbidden", `${tampered.status}`);
       check("B: 未知のパスは 404", (await req(port, "GET", "/no-such-path")).status === 404);

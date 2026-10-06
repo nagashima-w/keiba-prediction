@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.19.8";
+const EXPECTED_APP_VERSION = "1.19.9";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,7 +234,7 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.19.8(Issue #174〈#172-a〉: クラウド版の R2 の土台〈binding・CI の権限確認・README・CPU の測定スクリプト〉。変更は cloud/・scripts/・docs だけで、exe のアプリコードは無変更。利用者から見える変化なし)である", () => {
+  it("root と app の version が 1.19.9(Issue #175〈#172-b〉: クラウド版の分析履歴ストア〈D1AnalysisStore。D1 の batch・R2 の詳細オブジェクト・読み取り専用の GET /api/analyses〉。変更は cloud/・scripts/・docs だけで、exe のアプリコードは無変更。利用者から見える変化なし)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
     // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5、
     // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2、

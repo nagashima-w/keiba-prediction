@@ -2453,6 +2453,27 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(R2 はクラウド版だけの保存先で、exe は使わない)
 
+## 次の正式版が 1.19.9 である根拠(Issue #175〈#172-b〉での変更)
+
+**patch**(クラウド版の分析履歴ストア〈D1 の要約 + R2 の詳細〉。**変更は `cloud/`・`scripts/`・docs だけで、exe のアプリコード〈`packages/app`〉・core〈`packages/core`〉は無変更**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- `cloud/src/analysis-repository.ts`(`AnalysisRepository`・`D1AnalysisStore`。保存は D1 の 1 回の `batch`〈配分ありで 5 文・なしで 3 文〉+ R2 への `put`。一覧・詳細・配分・版別の読み出し)と
+  `cloud/src/analysis-detail.ts`(R2 の詳細オブジェクトの符号化。`node:zlib` の level 1)
+- `cloud/src/handler.ts` の読み取り専用 `GET /api/analyses`(D1 だけ。認証の関門の後ろ)と `Env` の `ANALYSIS_DETAIL`
+- テスト: ストア(`cloud/test/analysis-repository.test.ts`・`analysis-detail.test.ts`・`rows-written.test.ts`)、ルート(`handler.test.ts`)、バンドル(`bundle-guard.test.ts`)、core のバレルを巻き込まない静的ガード(`import-guard.test.ts`)、スモーク(`smoke.ts`)
+- docs(`cloud/README.md`・`docs/current-spec.md`・`docs/issue-order.md`)
+
+### patch である根拠
+
+- exe(`packages/app`)・core(`packages/core`)のコードは無変更。exe に入る成果物は変わらない
+- 分析結果の数値・画面・保存データは変わらない(クラウド版にはまだ保存の呼び出し元が無く、一覧は空)
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1・R2 はクラウド版だけの保存先)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

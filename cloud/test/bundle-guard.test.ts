@@ -21,6 +21,9 @@ const TEMP_CONFIG = path.join(CLOUD, "wrangler.bundle-guard.generated.toml");
 /** 対照用(better-sqlite3 を巻き込む入口)の一時ファイル。.gitignore が除外する。 */
 const NATIVE_PROBE_ENTRY = path.join(CLOUD, "native-probe.generated.ts");
 const NATIVE_PROBE_CONFIG = path.join(CLOUD, "wrangler.native-probe.generated.toml");
+/** 対照用(保存側のコード(D1AnalysisStore)を巻き込まない入口)の一時ファイル。.gitignore が除外する。 */
+const STORE_ABSENT_ENTRY = path.join(CLOUD, "store-absent-probe.generated.ts");
+const STORE_ABSENT_CONFIG = path.join(CLOUD, "wrangler.store-absent-probe.generated.toml");
 const workDirs: string[] = [];
 
 /** 偽ソケットの印(smoke-worker.ts が持つ文字列)。 */
@@ -42,6 +45,8 @@ afterAll(() => {
   rmSync(TEMP_CONFIG, { force: true });
   rmSync(NATIVE_PROBE_ENTRY, { force: true });
   rmSync(NATIVE_PROBE_CONFIG, { force: true });
+  rmSync(STORE_ABSENT_ENTRY, { force: true });
+  rmSync(STORE_ABSENT_CONFIG, { force: true });
   for (const dir of workDirs) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -137,6 +142,56 @@ describe("本番のバンドルと D1(Issue #171)", () => {
         seen = `${String(e.stdout ?? "")}${String(e.stderr ?? "")}${e.message ?? ""}`;
       }
       expect(seen.includes("better-sqlite3")).toBe(true);
+    },
+    120_000,
+  );
+});
+
+/**
+ * Issue #175(#172-b): 保存側のコード(`D1AnalysisStore`。D1 の batch・`json_each`・R2 の詳細・gzip)が、本番のバンドルに入っていること。
+ * 本番の呼び出し元は、まだ読み取り専用の `GET /api/analyses`(一覧)だけ(保存の呼び出し元は #164)。**クラスの参照が残れば、メソッド(保存を含む)もバンドルに残る**
+ * ので、ここで「保存側のコードがバンドルにある」を固定する(無いと、better-sqlite3 が無いという検査が自明に成立する)。
+ * 前提(空振り防止): 検出する文字列が、ソースに実際にある。対照: ストアを参照しない入口でバンドルすると、同じ文字列が見つからない。
+ */
+const STORE_MARKERS = ["FROM json_each(?)", "UPDATE analyses SET detail_key = ", "'analyses/' || id", "node:zlib", "application/gzip"];
+
+describe("本番のバンドルと保存側のコード(Issue #175)", () => {
+  it("前提: 検出する文字列は、ソース(analysis-repository.ts・analysis-detail.ts)に実際にある", () => {
+    const source = readFileSync(path.join(CLOUD, "src", "analysis-repository.ts"), "utf-8") + readFileSync(path.join(CLOUD, "src", "analysis-detail.ts"), "utf-8");
+    for (const marker of STORE_MARKERS) {
+      expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
+    }
+    // 本番の入口は、ストアを直接 import しない(handler.ts 経由)。worker.ts が smoke 用の入口でないことは上で確認済み
+    expect(readFileSync(path.join(CLOUD, "src", "handler.ts"), "utf-8")).toContain("D1AnalysisStore");
+  });
+
+  it(
+    "本番のバンドルに、保存側のコード(json_each の INSERT・detail_key の UPDATE・R2 のキー・node:zlib・gzip の型)が入っていて、better-sqlite3 は入っていない",
+    () => {
+      const code = bundle(null, "worker.js");
+      for (const marker of STORE_MARKERS) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+      expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);
+      expect(code.includes("sqlite3"), "バンドルにネイティブの sqlite3 の痕跡が無い").toBe(false);
+      // core の codec(SQL 文の定数)が入っている。バレル(index)を巻き込むと値で better-sqlite3 が入る(上の検査が落ちる)
+      expect(code.includes("INSERT INTO ${ANALYSES_TABLE}"), "codec の SQL 文(テンプレートのまま)がバンドルにある").toBe(true);
+    },
+    120_000,
+  );
+
+  it(
+    "対照: ストアを参照しない入口でバンドルすると、保存側の文字列は見つからない(検出が、実際に入っているときだけ拾えることの確認)",
+    () => {
+      writeFileSync(STORE_ABSENT_ENTRY, 'export { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response("probe"); } };\n');
+      const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
+      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "store-absent-probe.generated.ts"');
+      expect(probeConfig).not.toBe(base);
+      writeFileSync(STORE_ABSENT_CONFIG, probeConfig);
+      const code = bundle(STORE_ABSENT_CONFIG, "store-absent-probe.generated.js");
+      expect(code.includes("FROM json_each(?)")).toBe(false);
+      expect(code.includes("UPDATE analyses SET detail_key = ")).toBe(false);
+      expect(code.includes("application/gzip")).toBe(false);
     },
     120_000,
   );

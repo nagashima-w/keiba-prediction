@@ -5,7 +5,8 @@
  * 存在を一切含まない 403 を返す。理由コードはログにだけ出す(トークン・メール・チーム名・AUD は出さない)。
  */
 import type { AccessEnv } from "./access-jwt";
-import { checkD1, type D1HealthDb } from "./d1-health";
+import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
+import { checkD1 } from "./d1-health";
 import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
 import type { GateResult, GateStatus } from "./gate-core";
@@ -32,7 +33,9 @@ const GATE_NAME = "gate";
 export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
-  DB: D1HealthDb;
+  DB: AnalysisDb;
+  /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
+  ANALYSIS_DETAIL: AnalysisBucket;
 }
 
 export interface HandlerDeps {
@@ -131,7 +134,62 @@ export async function handle(
     return handleCheck(new URL(request.url), env);
   }
 
+  if (pathname === "/api/analyses") {
+    // 読み取り専用の一覧(D1 だけ。R2 には触れない)。GET だけ(HEAD で D1 を引かない)。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleAnalyses(new URL(request.url), env);
+  }
+
   return json({ ok: false, error: "not found" }, 404);
+}
+
+const ANALYSES_PARAMS = new Set(["race_id", "kaisai_date", "limit"]);
+
+/**
+ * `GET /api/analyses?race_id=&kaisai_date=&limit=`: 分析の要約の一覧(新しい順。Issue #175)。パラメータはすべて任意で、
+ * 未知のパラメータ・重複・不正な値は 400(D1 に触れない)。limit は 1〜{@link LIST_MAX_LIMIT} の整数(既定 {@link LIST_DEFAULT_LIMIT})。
+ */
+async function handleAnalyses(url: URL, env: Env): Promise<Response> {
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => !ANALYSES_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは race_id・kaisai_date・limit だけを、それぞれ1つまで指定できます");
+  }
+  const filter: { raceId?: string; kaisaiDate?: string; limit?: number } = {};
+  const raceId = url.searchParams.get("race_id");
+  if (raceId !== null) {
+    const checked = validateRaceId(raceId);
+    if (!checked.ok) {
+      return badRequest(checked.message);
+    }
+    filter.raceId = checked.raceId;
+  }
+  const kaisaiDate = url.searchParams.get("kaisai_date");
+  if (kaisaiDate !== null) {
+    if (!/^[0-9]{8}$/.test(kaisaiDate)) {
+      return badRequest("kaisai_date は YYYYMMDD の 8 桁で指定してください");
+    }
+    filter.kaisaiDate = kaisaiDate;
+  }
+  const limit = url.searchParams.get("limit");
+  if (limit !== null) {
+    const n = /^[0-9]{1,3}$/.test(limit) ? Number(limit) : Number.NaN;
+    if (!Number.isInteger(n) || n < 1 || n > LIST_MAX_LIMIT) {
+      return badRequest(`limit は 1〜${LIST_MAX_LIMIT} の整数で指定してください(省略すると ${LIST_DEFAULT_LIMIT})`);
+    }
+    filter.limit = n;
+  }
+  try {
+    const analyses = await new D1AnalysisStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL }).listAnalysisSummaries(filter);
+    return json({ ok: true, analyses });
+  } catch {
+    // 例外の文面・SQL は返さない。
+    return json({ ok: false, error: { type: "d1-error" } }, 503);
+  }
 }
 
 function badRequest(message: string): Response {
