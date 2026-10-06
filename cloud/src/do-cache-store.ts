@@ -10,7 +10,8 @@
  *  - **2 MiB(UTF-8 のバイト数)を超える本文は保存しない**(例外にもしない。呼び出し側の取得は成功のまま)。DO の SQLite は1行の大きさに上限が
  *    ある(約 2 MB。公式ドキュメントの値で、行の大きさの内訳〈キーなどの分〉までは確認していない)ので、それを超えて INSERT が失敗し、取得ごと
  *    失敗になるのを避ける。同じキーに古い本文があれば、それも消す(古い本文を新しいものとして返さない)。
- *  - 期限切れの掃除 {@link DoSqlCacheStore.purgeOlderThan}(呼び出し側が、日の終わり・アラームのたびなどに呼ぶ)。
+ *  - 期限切れの掃除 {@link DoSqlCacheStore.purgeOlderThan}(呼び出し側が、掃除専用のアラームで呼ぶ。`race-day-core.ts` 参照)。
+ *  - 保存(INSERT)が例外で失敗しても、**取得は失敗にしない**(`CachedFetcher` は `set` の例外をそのまま投げるので、ここで握る)。警告だけ出し、同じキーの古い本文は消す。
  *
  * 時計は注入する(テストで固定できる)。DO の SQLite の `exec` は同期なので、`get`・`set` も同期(`CachedFetcher` は await で受ける)。
  */
@@ -26,15 +27,19 @@ export interface DoSqlCacheStoreOptions {
   readonly sql: SqlLike;
   /** 現在時刻(エポックミリ秒)。 */
   readonly now: () => number;
+  /** 保存に失敗したときの警告の出し先(省略時は黙る)。本文は渡さない。 */
+  readonly onWarn?: (message: string) => void;
 }
 
 export class DoSqlCacheStore implements CacheStore {
   private readonly sql: SqlLike;
   private readonly now: () => number;
+  private readonly onWarn: (message: string) => void;
 
   constructor(options: DoSqlCacheStoreOptions) {
     this.sql = options.sql;
     this.now = options.now;
+    this.onWarn = options.onWarn ?? (() => {});
     this.sql.exec(
       `CREATE TABLE IF NOT EXISTS ${TABLE} (key TEXT PRIMARY KEY, value TEXT NOT NULL, fetched_at INTEGER NOT NULL)`,
     );
@@ -61,13 +66,24 @@ export class DoSqlCacheStore implements CacheStore {
       this.sql.exec(`DELETE FROM ${TABLE} WHERE key = ?`, key);
       return;
     }
-    this.sql.exec(
-      `INSERT INTO ${TABLE} (key, value, fetched_at) VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
-      key,
-      value,
-      this.now(),
-    );
+    try {
+      this.sql.exec(
+        `INSERT INTO ${TABLE} (key, value, fetched_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, fetched_at = excluded.fetched_at`,
+        key,
+        value,
+        this.now(),
+      );
+    } catch (error) {
+      // 保存の失敗(DO の SQLite の1行の大きさの上限を超えた等。本番の上限は公式ドキュメントで確認できていない)で、取得そのものを失敗にしない
+      // (CachedFetcher は set の例外をそのまま投げるので、ここで握る)。警告だけ出す(本文は出さない)。古い本文があれば、新しい結果として返さないよう消す。
+      this.onWarn(`取得キャッシュへの保存に失敗しました(キー: ${key.slice(0, 120)}): ${error instanceof Error ? error.message : String(error)}`);
+      try {
+        this.sql.exec(`DELETE FROM ${TABLE} WHERE key = ?`, key);
+      } catch {
+        // 消せなくても、取得は失敗にしない。
+      }
+    }
   }
 
   /**

@@ -36,15 +36,24 @@ import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fe
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
 import type { SqlLike } from "./sql-like";
 
+/** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
+const PURGE_DUE_KEY = "purge_due_at";
+
 /** 取得ステップの試行回数の上限。 */
 export const MAX_ATTEMPTS = 3;
 /** 取得ステップの再試行までの間隔(ミリ秒)。 */
 export const RETRY_DELAY_MS = 60_000;
 /**
  * キャッシュ行の保持期間(ミリ秒)。使う鮮度の最長(戦績 24 時間)より長くする(短いと、まだヒットしうる行を消す)。
- * 仕事が無くなったときに、これを超えた行だけを掃除する。
+ * 仕事が無くなったら、`now + CACHE_RETENTION_MS + PURGE_MARGIN_MS` に**掃除専用のアラーム**を1回だけ設定し、そのアラームで、これを超えた行だけを消す。
  */
 export const CACHE_RETENTION_MS = DEFAULT_RESULTS_TTL_MS + 2 * 60 * 60 * 1000;
+
+/**
+ * 掃除専用のアラームを、保持期間より少し後ろに置く余裕(ミリ秒)。最後のステップで入った行も、掃除の時刻には保持期間を**超えて**いる
+ * (掃除は「経過が保持期間を超えた行」だけを消す。ちょうどは残るので、余裕が無いと最後の行が残る)。
+ */
+export const PURGE_MARGIN_MS = 60_000;
 
 /** 計算ステップが、取得済みのキャッシュを鮮度に関係なく読むための TTL(実質無期限)。 */
 const FOREVER_MS = Number.MAX_SAFE_INTEGER;
@@ -78,7 +87,8 @@ export type ScheduleResult =
   | { readonly accepted: false; readonly raceId: string; readonly status: TaskStatus };
 
 export type StepOutcome =
-  | { readonly kind: "idle" }
+  /** 実行する仕事が無かった。`purged` は、掃除専用のアラームで消したキャッシュの行数(掃除をしたときだけ)。 */
+  | { readonly kind: "idle"; readonly purged?: number }
   | {
       readonly kind: "ran";
       readonly raceId: string;
@@ -180,7 +190,7 @@ export class RaceDayCore {
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS race_day_morning_prior (race_id TEXT PRIMARY KEY, computed_at INTEGER NOT NULL, result_json TEXT NOT NULL)",
     );
-    this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now });
+    this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     const httpClient = createGateHttpClient(serializeGate(deps.gate), { onWarn: deps.onWarn });
     this.networkFetcher = new CachedFetcher({ fetcher: httpClient, cache: this.cache });
@@ -285,13 +295,31 @@ export class RaceDayCore {
   async runNextStep(): Promise<StepOutcome> {
     const next = this.pickNext();
     if (next === null) {
-      this.purgeCache();
-      return { kind: "idle" };
+      return this.wakeWithoutWork();
     }
     const outcome =
       next.status === "fetched" ? await this.runCompute(next) : await this.runFetch(next);
     await this.armAlarm();
     return outcome;
+  }
+
+  /**
+   * 実行する仕事が無いときに起きた(= 掃除専用のアラーム。または早く起きた)。
+   * 掃除の時刻になっていれば、保持期間を超えたキャッシュの行だけを消し、**アラームは再設定しない**(以後は新しい予約が来るまで何も起きない)。
+   * まだ掃除の時刻前なら、何も消さず、同じ時刻にアラームを設定し直す(早く起きても掃除を取りこぼさない)。掃除の予約が無ければ何もしない。
+   */
+  private async wakeWithoutWork(): Promise<StepOutcome> {
+    const dueText = this.metaGet(PURGE_DUE_KEY);
+    if (dueText === null) {
+      return { kind: "idle" };
+    }
+    const due = Number(dueText);
+    if (this.now() < due) {
+      await this.setAlarm(due);
+      return { kind: "idle" };
+    }
+    this.sql.exec("DELETE FROM race_day_meta WHERE key = ?", PURGE_DUE_KEY);
+    return { kind: "idle", purged: this.purgeCache() };
   }
 
   private pickNext(): TaskRow | null {
@@ -307,24 +335,37 @@ export class RaceDayCore {
     return queued[0] ?? null;
   }
 
-  /** 続きの仕事があればアラームを設定する(再試行待ちだけなら遅らせる)。無ければ設定せず、キャッシュを掃除する。 */
+  /**
+   * 続きの仕事があればアラームを設定する(再試行待ちだけなら遅らせる)。
+   * **仕事が無くなったら、掃除専用のアラームを、保持期間 + 余裕の後に設定する**(掃除の時刻を永続化する。前の掃除の予約は上書きされる)。
+   * 取得キャッシュは、仕事が無くなった時点ではどの行も新しい(保持期間の内側)ので、その場では何も消えない。アラームを設定しないと、
+   * その日の DO は二度と起きず、期限切れの行が永久に残る(レビュー指摘)。
+   */
   private async armAlarm(): Promise<void> {
     const rows = this.sql
       .exec("SELECT status, attempts FROM race_day_tasks WHERE status IN ('queued', 'fetched')")
       .toArray() as { status: TaskStatus; attempts: number }[];
     if (rows.length === 0) {
-      this.purgeCache();
+      const due = this.now() + CACHE_RETENTION_MS + PURGE_MARGIN_MS;
+      this.sql.exec(
+        "INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        PURGE_DUE_KEY,
+        String(due),
+      );
+      await this.setAlarm(due);
       return;
     }
     const immediate = rows.some((r) => r.status === "fetched" || r.attempts === 0);
     await this.setAlarm(this.now() + (immediate ? 0 : RETRY_DELAY_MS));
   }
 
-  private purgeCache(): void {
+  /** 保持期間を超えたキャッシュの行を消し、消した件数を返す(失敗したら警告だけ出して 0)。 */
+  private purgeCache(): number {
     try {
-      this.cache.purgeOlderThan(CACHE_RETENTION_MS);
+      return this.cache.purgeOlderThan(CACHE_RETENTION_MS);
     } catch (error) {
       this.onWarn(`取得キャッシュの掃除に失敗しました: ${errorMessage(error)}`);
+      return 0;
     }
   }
 

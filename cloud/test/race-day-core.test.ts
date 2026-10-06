@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { HttpError } from "../../packages/core/src/scraper/http-client";
 import type { GateResult } from "../src/gate-core";
 import { GateRefusedError, type GateLike } from "../src/gate-fetch";
-import { RaceDayCore, serializeGate, type RaceDayDeps } from "../src/race-day-core";
+import { CACHE_RETENTION_MS, PURGE_MARGIN_MS, RaceDayCore, serializeGate, type RaceDayDeps } from "../src/race-day-core";
 import { fixtureForUrl } from "./pipeline-fixtures";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
@@ -69,6 +69,8 @@ interface Harness {
   readonly gate: FakeGate;
   readonly clock: { now: number };
   readonly alarms: number[];
+  /** 今設定されているアラーム(DO のアラームは1つだけ。設定は上書き、鳴ったら空になる)。 */
+  readonly alarm: { at: number | null };
   readonly warnings: string[];
 }
 
@@ -84,6 +86,7 @@ function harness(overrides: Partial<RaceDayDeps> = {}, gate: FakeGate = fakeGate
   opened.push(sql);
   const clock = { now: Date.parse("2026-06-28T00:00:00Z") };
   const alarms: number[] = [];
+  const alarm: { at: number | null } = { at: null };
   const warnings: string[] = [];
   const core = new RaceDayCore({
     sql,
@@ -91,11 +94,34 @@ function harness(overrides: Partial<RaceDayDeps> = {}, gate: FakeGate = fakeGate
     gate,
     setAlarm: (at) => {
       alarms.push(at);
+      alarm.at = at;
     },
     onWarn: (message) => warnings.push(message),
     ...overrides,
   });
-  return { core, sql, gate, clock, alarms, warnings };
+  return { core, sql, gate, clock, alarms, alarm, warnings };
+}
+
+/**
+ * 偽の時計で「アラームだけで進む」ことを確かめる(手動で idle まで回さない)。DO と同じく、アラームは1つだけで、鳴った時刻に時計を進め、
+ * 鳴ったアラームは空にしてから `runNextStep` を呼ぶ(中で設定されたものだけが残る)。上限つき。
+ */
+async function driveByAlarms(h: Harness, max = 50, options: { readonly stopAtMax?: boolean } = {}): Promise<string[]> {
+  const outcomes: string[] = [];
+  for (let i = 0; i < max; i++) {
+    const at = h.alarm.at;
+    if (at === null) {
+      return outcomes;
+    }
+    h.clock.now = Math.max(h.clock.now, at);
+    h.alarm.at = null;
+    const outcome = await h.core.runNextStep();
+    outcomes.push(outcome.kind === "idle" ? "idle" : `${outcome.raceId}:${outcome.step}:${outcome.result}`);
+  }
+  if (options.stopAtMax === true) {
+    return outcomes;
+  }
+  throw new Error("アラームが止まらない(上限超過)");
 }
 
 async function runAll(h: Harness, max = 20): Promise<string[]> {
@@ -262,15 +288,16 @@ describe("予約・状態・アラーム(Issue #177)", () => {
     expect(h.alarms).toHaveLength(2); // ステップ1のあとの「続きのアラーム」だけ
   });
 
-  it("ステップごとにアラームを分ける: 取得 → (アラーム)→ 計算 → (最後は次のアラームなし)", async () => {
+  it("ステップごとにアラームを分ける: 取得 → (アラーム now)→ 計算 → (最後は掃除専用のアラーム。次の仕事のアラームではない)", async () => {
     const h = harness();
     await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
     expect(h.alarms).toHaveLength(1);
     await h.core.runNextStep(); // fetch
-    expect(h.alarms).toHaveLength(2); // 計算ステップのためのアラーム
+    expect(h.alarms).toHaveLength(2);
+    expect(h.alarms[1]).toBe(h.clock.now); // 計算ステップのためのアラーム(すぐ)
     await h.core.runNextStep(); // compute
-    expect(h.alarms).toHaveLength(2); // もう仕事は無いので、アラームを足さない
-    expect(await h.core.runNextStep()).toEqual({ kind: "idle" });
+    expect(h.alarms).toHaveLength(3);
+    expect(h.alarms[2]).toBe(h.clock.now + CACHE_RETENTION_MS + PURGE_MARGIN_MS); // もう仕事は無いので、掃除専用のアラームだけ
   });
 
   it("複数のレースは直列に、1レースずつ(取得 → 計算)を終えてから次のレースへ進む", async () => {
@@ -329,9 +356,11 @@ describe("失敗と再試行(Issue #177)", () => {
     const race = h.core.getBoard().races[0]!;
     expect(race).toMatchObject({ status: "failed", attempts: 3 });
     expect(race.error).toBeTruthy();
-    const alarmsAfterFailure = h.alarms.length;
-    expect(await h.core.runNextStep()).toEqual({ kind: "idle" });
-    expect(h.alarms).toHaveLength(alarmsAfterFailure);
+    // 仕事は無くなった: 掃除専用のアラームだけが残る(再試行のアラームは残らない)
+    expect(h.alarm.at).toBe(h.clock.now + CACHE_RETENTION_MS + PURGE_MARGIN_MS);
+    const purgeAlarm = h.alarm.at;
+    expect(await h.core.runNextStep()).toEqual({ kind: "idle" }); // 早く起きても何もしない
+    expect(h.alarm.at).toBe(purgeAlarm);
   });
 
   it("ブレーカーが開いている(blocked)ときは、再試行せず直ちに failed(30 分のブレーカーの間に撃ち直さない)", async () => {
@@ -397,16 +426,164 @@ describe("朝の prior は DO にだけ置く(AC-b4)と、キャッシュの掃�
     expect(tables).toEqual(["fetch_cache", "race_day_meta", "race_day_tasks", "race_day_morning_prior"].sort());
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_morning_prior").toArray() as { n: number }[])[0]!.n).toBe(1);
   });
+});
 
-  it("仕事が無くなったら、保持期間(26 時間)を超えた古いキャッシュ行だけを掃除する。新しい行は残る", async () => {
-    const h = harness();
-    h.sql.exec("CREATE TABLE IF NOT EXISTS fetch_cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, fetched_at INTEGER NOT NULL)");
-    h.sql.exec("INSERT INTO fetch_cache VALUES (?, ?, ?)", "old", "x", h.clock.now - 27 * 3600_000);
-    h.sql.exec("INSERT INTO fetch_cache VALUES (?, ?, ?)", "fresh", "y", h.clock.now - 25 * 3600_000);
+describe("取得キャッシュの掃除はアラームで行う(レビュー指摘。Issue #177)", () => {
+  const PURGE_AT = (h: Harness): number => h.clock.now + CACHE_RETENTION_MS + PURGE_MARGIN_MS;
+
+  async function finishOneRace(h: Harness): Promise<void> {
     await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
-    await runAll(h);
-    expect(h.sql.exec("SELECT key FROM fetch_cache WHERE key IN ('old','fresh')").toArray().map((r: { key: string }) => r.key)).toEqual(["fresh"]);
-    expect((h.sql.exec("SELECT COUNT(*) AS n FROM fetch_cache").toArray() as { n: number }[])[0]!.n).toBeGreaterThan(19);
+    await h.core.runNextStep();
+    await h.core.runNextStep();
+  }
+
+  const cacheRows = (h: Harness): number => (h.sql.exec("SELECT COUNT(*) AS n FROM fetch_cache").toArray() as { n: number }[])[0]!.n;
+
+  it("最後のステップのあと、掃除専用のアラームを(保持期間 + 余裕)後に1回だけ設定する。その時点では、キャッシュの行はまだ消えない", async () => {
+    const h = harness();
+    await finishOneRace(h);
+    expect(h.alarm.at).toBe(PURGE_AT(h));
+    expect(h.alarms.filter((at) => at > h.clock.now)).toEqual([PURGE_AT(h)]); // 未来のアラームはこれだけ
+    expect(cacheRows(h)).toBe(19);
+    expect(h.core.getBoard().races[0]).toMatchObject({ status: "done" });
+  });
+
+  it("その時刻にアラームで起きると、期限切れの行(最後のステップで入った行を含む)が消え、アラームは再設定されない", async () => {
+    const h = harness();
+    await finishOneRace(h);
+    const due = h.alarm.at!;
+    const alarmsBefore = h.alarms.length;
+    h.clock.now = due;
+    h.alarm.at = null;
+    expect(await h.core.runNextStep()).toMatchObject({ kind: "idle", purged: 19 });
+    expect(cacheRows(h)).toBe(0);
+    expect(h.alarms).toHaveLength(alarmsBefore); // 再設定しない
+    expect(h.alarm.at).toBeNull();
+    // 鳴らされなければ、以後も何も起きない(もう一度呼んでも、アラームを足さない)
+    expect(await h.core.runNextStep()).toEqual({ kind: "idle" });
+    expect(h.alarms).toHaveLength(alarmsBefore);
+    // 朝の prior と状態は消えない(掃除の対象は取得キャッシュだけ)
+    expect(h.core.getMorningPrior(RACE_A)).not.toBeNull();
+  });
+
+  it("保持期間より前に起きた場合は、何も消さず、同じ時刻に掃除のアラームを設定し直す(早く起きても掃除を取りこぼさない)", async () => {
+    const h = harness();
+    await finishOneRace(h);
+    const due = h.alarm.at!;
+    h.clock.now = due - 60_000; // 余裕の分だけ早い(行はまだ保持期間の内側か、ちょうど)
+    h.alarm.at = null;
+    expect(await h.core.runNextStep()).toEqual({ kind: "idle" });
+    expect(cacheRows(h)).toBe(19);
+    expect(h.alarm.at).toBe(due);
+    h.clock.now = due - 1;
+    h.alarm.at = null;
+    await h.core.runNextStep();
+    expect(cacheRows(h)).toBe(19);
+    expect(h.alarm.at).toBe(due);
+  });
+
+  it("偽の時計で「アラームだけで進む」: 予約 → 取得 → 計算 → 26 時間後の掃除 までを、手動で回さずに到達し、最後はアラームが空になる", async () => {
+    const h = harness();
+    const start = h.clock.now;
+    await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
+    const outcomes = await driveByAlarms(h);
+    expect(outcomes).toEqual([`${RACE_A}:fetch:ok`, `${RACE_A}:compute:ok`, "idle"]);
+    expect(h.clock.now).toBeGreaterThanOrEqual(start + CACHE_RETENTION_MS);
+    expect(cacheRows(h)).toBe(0);
+    expect(h.alarm.at).toBeNull();
+    expect(h.core.getBoard().races[0]).toMatchObject({ status: "done" });
+  });
+
+  it("掃除を待っている間に新しい予約が入ったら、通常のアラームを優先して処理し、掃除は最後にあらためて予約し直す(古い掃除の時刻では消さない)", async () => {
+    const h = harness();
+    await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
+    await driveByAlarms(h, 2, { stopAtMax: true }); // 取得・計算まで(掃除のアラームを残す)
+    const firstDue = h.alarm.at!;
+    h.clock.now += 3600_000; // 1 時間後に、別のレースの予約
+    await h.core.schedule({ raceId: RACE_B, kaisaiDate: DATE });
+    expect(h.alarm.at).toBe(h.clock.now); // 通常のアラーム(すぐ)が掃除のアラームを上書きする
+    await h.core.runNextStep();
+    await h.core.runNextStep();
+    const secondDue = h.alarm.at!;
+    expect(secondDue).toBe(PURGE_AT(h));
+    expect(secondDue).toBeGreaterThan(firstDue); // 掃除は後ろへ。B が入れた行が、古い時刻で消されない
+    // 古い時刻(firstDue)に起きても、B の行は保持期間の内側にあるので消えず、掃除は新しい時刻のまま
+    h.clock.now = firstDue;
+    h.alarm.at = null;
+    await h.core.runNextStep();
+    expect(cacheRows(h)).toBeGreaterThan(0);
+    expect(h.alarm.at).toBe(secondDue);
+    // 新しい時刻で、全部消える
+    h.clock.now = secondDue;
+    h.alarm.at = null;
+    await h.core.runNextStep();
+    expect(cacheRows(h)).toBe(0);
+    expect(h.alarm.at).toBeNull();
+  });
+
+  it("掃除の対象は保持期間を超えた行だけ: 古い行は消え、新しい行は残る(掃除のアラームでも)", async () => {
+    const h = harness();
+    await finishOneRace(h);
+    h.sql.exec("INSERT INTO fetch_cache VALUES (?, ?, ?)", "old", "x", h.clock.now - 1);
+    const due = h.alarm.at!;
+    h.clock.now = due;
+    // 掃除の時刻の直前に入った行(保持期間の内側)は残る
+    h.sql.exec("INSERT INTO fetch_cache VALUES (?, ?, ?)", "recent", "y", due - 1000);
+    h.alarm.at = null;
+    await h.core.runNextStep();
+    const keys = (h.sql.exec("SELECT key FROM fetch_cache").toArray() as { key: string }[]).map((r) => r.key);
+    expect(keys).toEqual(["recent"]);
+  });
+
+  it("失敗で終わった(failed)ときも、掃除のアラームを設定する(done のときだけではない)", async () => {
+    const gate = fakeGate();
+    gate.failWhen = () => ({ kind: "refused", reason: "blocked", message: "止めています" });
+    const h = harness({}, gate);
+    await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
+    await h.core.runNextStep();
+    expect(h.core.getBoard().races[0]).toMatchObject({ status: "failed" });
+    expect(h.alarm.at).toBe(PURGE_AT(h));
+  });
+
+  it("掃除に失敗したら警告だけ出し、投げない(アラームも再設定しない)", async () => {
+    const h = harness();
+    await finishOneRace(h);
+    const due = h.alarm.at!;
+    h.sql.exec("DROP TABLE fetch_cache");
+    h.clock.now = due;
+    h.alarm.at = null;
+    await expect(h.core.runNextStep()).resolves.toMatchObject({ kind: "idle" });
+    expect(h.warnings.some((w) => w.includes("掃除"))).toBe(true);
+    expect(h.alarm.at).toBeNull();
+  });
+});
+
+describe("取得の前に試行回数を永続化する(レビュー指摘。Issue #177)", () => {
+  it("gate を呼んでいる最中(取得の途中)に、すでに attempts = 1 が書かれている(クラッシュしても再実行が無限に続かない)", async () => {
+    const gate = fakeGate();
+    const h = harness({}, gate);
+    const seen: number[] = [];
+    const original = gate.fetchRaw.bind(gate);
+    gate.fetchRaw = async (url) => {
+      seen.push((h.sql.exec("SELECT attempts FROM race_day_tasks WHERE race_id = ?", RACE_A).toArray() as { attempts: number }[])[0]!.attempts);
+      return original(url);
+    };
+    await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
+    await h.core.runNextStep();
+    expect(seen).toHaveLength(19);
+    expect(new Set(seen)).toEqual(new Set([1])); // 全部の取得で、書かれていた試行回数は 1
+  });
+
+  it("途中でクラッシュ(gate が最初の呼び出しで投げ続けて回復しない)を繰り返しても、試行は上限(3)で止まる", async () => {
+    const gate = fakeGate();
+    gate.fetchRaw = async () => {
+      throw new Error("クラッシュの模擬");
+    };
+    const h = harness({}, gate);
+    await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
+    const outcomes = await driveByAlarms(h);
+    expect(outcomes.filter((o) => o.endsWith(":fetch:retry") || o.endsWith(":fetch:failed"))).toHaveLength(3);
+    expect(h.core.getBoard().races[0]).toMatchObject({ status: "failed", attempts: 3 });
   });
 });
 

@@ -175,3 +175,70 @@ describe("大きな本文は保存しない(AC-b1・#170 AC-c5)", () => {
     expect(smallFetches).toBe(1);
   });
 });
+
+describe("保存に失敗しても取得は失敗にしない(レビュー指摘。AC-c5 の趣旨。Issue #177)", () => {
+  /** INSERT だけが失敗する SQL(本番の DO の SQLite の1行の上限を超えた、などの模擬)。 */
+  function failingInsertSql(base: NodeSql): NodeSql {
+    return {
+      ...base,
+      exec(query: string, ...bindings: unknown[]) {
+        if (/^\s*INSERT INTO fetch_cache/i.test(query)) {
+          throw new Error("SQLITE_TOOBIG: string or blob too big");
+        }
+        return base.exec(query, ...bindings);
+      },
+    };
+  }
+
+  it("INSERT が例外で失敗しても、set は投げず、警告を1回出す。何も保存されない", () => {
+    const warnings: string[] = [];
+    const base = openNodeSql();
+    opened.push(base);
+    const store = new DoSqlCacheStore({ sql: failingInsertSql(base), now: () => 1000, onWarn: (m) => warnings.push(m) });
+    expect(() => store.set("k", "本文")).not.toThrow();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("保存に失敗");
+    expect(warnings[0]).toContain("TOOBIG");
+    expect(warnings[0]).not.toContain("本文"); // 本文は警告に入れない
+    expect(store.get("k")).toBeUndefined();
+  });
+
+  it("同じキーに古い本文があるとき、保存に失敗したら古い本文も消す(古い本文を新しい取得の結果として返さない)", () => {
+    const base = openNodeSql();
+    opened.push(base);
+    new DoSqlCacheStore({ sql: base, now: () => 1000 }).set("k", "古い");
+    const store = new DoSqlCacheStore({ sql: failingInsertSql(base), now: () => 2000, onWarn: () => {} });
+    store.set("k", "新しい");
+    expect(store.get("k")).toBeUndefined();
+  });
+
+  it("CachedFetcher 経由: 保存に失敗しても、取得した本文が返る(取得の失敗にならない)。次回もキャッシュに無いので取り直す", async () => {
+    const base = openNodeSql();
+    opened.push(base);
+    const store = new DoSqlCacheStore({ sql: failingInsertSql(base), now: () => 1000, onWarn: () => {} });
+    let fetches = 0;
+    const fetcher = new CachedFetcher({
+      fetcher: {
+        fetchText: async () => {
+          fetches += 1;
+          return "取得した本文";
+        },
+      },
+      cache: store,
+    });
+    expect(await fetcher.fetchText("https://race.netkeiba.com/x")).toBe("取得した本文");
+    expect(await fetcher.fetchText("https://race.netkeiba.com/x")).toBe("取得した本文");
+    expect(fetches).toBe(2);
+  });
+
+  it("onWarn を渡さなくても投げない。保存に成功したときは警告を出さない", () => {
+    const base = openNodeSql();
+    opened.push(base);
+    expect(() => new DoSqlCacheStore({ sql: failingInsertSql(base), now: () => 1000 }).set("k", "v")).not.toThrow();
+    const warnings: string[] = [];
+    const ok = new DoSqlCacheStore({ sql: base, now: () => 1000, onWarn: (m) => warnings.push(m) });
+    ok.set("k2", "v");
+    expect(warnings).toEqual([]);
+    expect(ok.get("k2")?.value).toBe("v");
+  });
+});

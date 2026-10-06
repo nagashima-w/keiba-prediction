@@ -2528,6 +2528,7 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
   `src/sql-like.ts`、`wrangler.toml` の DO binding `RACE_DAY` と migration v2(`new_sqlite_classes = ["RaceDay"]`。v1 の NetkeibaGate には触れない)、`worker.ts` が `RaceDay` を export
 - app: `runAnalysis` の任意の dep `onSameDayTrendError`(クラウド版のバッチ `getRaceResultDetails` が失敗したとき、当日傾向なし〈null〉で分析を続け、警告フックに理由を渡す)。
   exe の束縛〈単発の `getRaceResultDetail`〉は無変更で、throw したときは従来どおり runAnalysis が reject する
+- 取得キャッシュの掃除は、掃除専用のアラーム(仕事が無くなってから保持期間 + 余裕の後に1回)で行う。保存の失敗は取得を失敗にしない
 - テスト: core の `cache-store-contract.test.ts`(`ScrapeCache` に契約を当てる)・共有の契約 `fixtures/cache-store-contract.json`、cloud の `do-cache-store.test.ts`・`race-day-core.test.ts`・`bundle-guard.test.ts`・smoke(workerd で RaceDay を通す)、
   scripts の `cloud-config-guard.test.ts`、docs(`docs/current-spec.md`・`docs/issue-order.md`)
 
