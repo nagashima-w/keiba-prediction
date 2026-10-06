@@ -1080,7 +1080,7 @@ Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 
 ### runAnalysis のクラウドへの取り込み(#176〈#164-a〉。v1.19.10)
 exe の分析パイプライン(`packages/app/src/main/analysis-pipeline.ts` の `runAnalysis`)を、**組み直さずに** cloud が相対 import で取り込む(`cloud/src/pipeline.ts` の `runCloudAnalysis`。呼び出し元は #177 以降で、本番のエントリはまだ呼ばない)。
 exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` を変更前のコミット b821c97 で生成して固定。生成手順 `scripts/gen-pipeline-golden.ts`)。
-- **core の狭い入口 `@keiba/core/pipeline`**(`packages/core/src/pipeline.ts`。値19個・型のみ): バレルは `cache.ts`・`analysis-store.ts`(better-sqlite3)を巻き込み、cloud のバンドルも型検査も(CI のように各 package の node_modules が無い配置では)失敗する(実測)。
+- **core の狭い入口 `@keiba/core/pipeline`**(`packages/core/src/pipeline.ts`。値 20 個と型だけを再 export する): バレルは `cache.ts`・`analysis-store.ts`(better-sqlite3)を巻き込み、cloud のバンドルも型検査も(CI のように各 package の node_modules が無い配置では)失敗する(実測)。
   この入口は型だけの import も含めて better-sqlite3 に依存するモジュールを経由しない(型は `ev/analysis-store-types.ts` から。`scrape-race.ts` ほか3ファイルの `CachedFetchTextOptions` も `cached-fetcher.ts` から取る)。app の `analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts` がこれを使う(`pipeline-deps.ts` ほか exe の他の部分は従来どおりバレル)。
 - **deps は非同期でもよい**: `saveAnalysis` の戻り値は `unknown`(Promise なら await。reject は runAnalysis の reject)。当日傾向は、`getRaceResultDetails`(任意。`precedingRaceIdsSameDay` の ID をまとめて1回で引く。D1 の1呼び出しあたりのクエリ数の上限〈Free は 50〉を避ける)を渡せる。
   同期の単発 `getRaceResultDetail`(exe の束縛)は従来どおり ID ごとに1回・昇順。両方あればバッチを使う。
