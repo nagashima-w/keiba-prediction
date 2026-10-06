@@ -299,12 +299,14 @@ describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
  * ソースにあり、バンドルにある。対照: RaceDay を export しない入口(store-absent の対照)のバンドルには、これらが無い。
  * テスト専用の `node:sqlite` はバンドルに入らない。
  */
-const RACE_DAY_MARKERS = ["race_day_morning_prior", "race_day_tasks", "fetch_cache", "serializeGate", "CacheMissError", "RaceDayCore"];
+const RACE_DAY_MARKERS = ["race_day_morning_prior", "race_day_tasks", "fetch_cache", "serializeGate", "CacheMissError", "RaceDayCore", "cloud_settings", "findByAnalyzedAt", "countChildren"];
 
 describe("本番のバンドルと日単位の DO(Issue #177)", () => {
-  it("前提: 検出する文字列は、race-day-core.ts・do-cache-store.ts に実際にある。worker.ts は RaceDay を export する", () => {
+  it("前提: 検出する文字列は、race-day-core.ts・do-cache-store.ts・settings.ts に実際にある。worker.ts は RaceDay を export する", () => {
     const source =
-      readFileSync(path.join(CLOUD, "src", "race-day-core.ts"), "utf-8") + readFileSync(path.join(CLOUD, "src", "do-cache-store.ts"), "utf-8");
+      readFileSync(path.join(CLOUD, "src", "race-day-core.ts"), "utf-8") +
+      readFileSync(path.join(CLOUD, "src", "do-cache-store.ts"), "utf-8") +
+      readFileSync(path.join(CLOUD, "src", "settings.ts"), "utf-8");
     for (const marker of RACE_DAY_MARKERS) {
       expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
     }

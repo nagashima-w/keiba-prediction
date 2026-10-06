@@ -445,12 +445,14 @@ describe("失敗と再試行(Issue #177)", () => {
 });
 
 describe("朝の prior は DO にだけ置く(AC-b4)と、キャッシュの掃除", () => {
-  it("race-day-core.ts・race-day-do.ts は D1・R2 に触れない(binding・ストア・リポジトリを参照しない)", () => {
+  it("race-day-core.ts は D1・R2 の実体に触れない(binding・リポジトリを参照しない。保存先は AnalysisSink の注入)", () => {
     const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
-    for (const file of ["race-day-core.ts", "race-day-do.ts"]) {
+    // Issue #178: 発走前の分析(pre_race)の保存先は、DO のラッパ(race-day-do.ts)が `AnalysisSink` として配線する。core(race-day-core.ts)は
+    // 保存先の実体(binding・リポジトリ)を知らず、朝のタスクでは保存先を一切呼ばない(race-day-pre-race.test.ts が、呼べば投げる保存先で固定)。
+    for (const file of ["race-day-core.ts"]) {
       const source = readFileSync(path.join(dir, file), "utf-8");
       expect(source.length, file).toBeGreaterThan(1000); // 前提: 実際に読めている
-      for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", "analysis-repository", "D1AnalysisStore", "prepare(", "bucket"]) {
+      for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", "analysis-repository", "prepare(", "bucket"]) {
         expect(source.includes(forbidden), `${file} に ${forbidden}`).toBe(false);
       }
     }

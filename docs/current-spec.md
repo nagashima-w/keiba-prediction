@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.13)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.14)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.13`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.14`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1136,6 +1136,23 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **`GET /api/analyses/status?kaisai_date=YYYYMMDD[&race_id=...]`**: 各レースの `status`・`attempts`・`error`(200 文字まで)・`queued_at`・`updated_at`・`prior`(朝の prior の有無)。`race_id` を指定すると `prior` に、レース名・場名・日付・`computed_at`・`rows`(`rank`・`umaban`・`horse_name`・`prior`。prior の高い順)の最小限。パラメータは1つずつまで(不正は 400。DO を呼ばない)。GET だけ(HEAD は 405)。
 - **DO 側の守り**: `RaceDayCore.schedule` も同じ整合検査(`race-date.ts`)を行い、1日(1つの DO)に受け付けるレース数の上限は 100(`MAX_TASKS_PER_DAY`。すでにあるレースの再予約は数えない)。
 - 本番への反映は R2 の権限が付いてから(#174)。
+
+### 発走前の分析・設定・保存(#178〈#164-c〉。v1.19.14。LLM は #179)
+日単位の DO の `mode: "pre_race"`(手動の `POST /api/analyses/run` の本文 `mode: "pre_race"`。定時の起動は #166)。朝(`morning`)とは別のタスク((レースID, mode) ごと)で、**朝のタスクは D1・R2・設定に触れない**(朝の prior は DO にだけ置く)。
+- **取得ステップ**: 設定(D1 の `cloud_settings` の1行)を**1回だけ**読み、スナップショットをタスクに保存する(途中で設定が変わっても、取得と計算は同じ設定)。`scrapeRace` で、出馬表(取消・天候・馬場を反映。TTL 10 分)・オッズ(**キャッシュを常に迂回**)・
+  組合せオッズ(`includeComboOdds` が ON のときだけ。同じく迂回)を取り直す。戦績・調教は朝のキャッシュがあればそれを使う。朝のキャッシュがあるとき、取得は出馬表 1 + 単勝複勝 1(+ 組合せ ON で 6)= 2〜8 本。冷えた状態は 19 本(組合せ ON で 25 本)。
+- **計算・保存ステップ**: **ネットワークに出ず**(gate は0回)、キャッシュだけで prior → EV → 配分を作り、`AnalysisSink`(`D1AnalysisStore`)で D1(要約)・R2(詳細)に保存する。LLM なし(`promptVersion`・`model` は null)。取消馬は出走馬から除かれる(#154)。
+  当日傾向の読み出し(`getRaceResultDetails`)は空(結果の取込は #182。LLM を使う #179 から効く)。
+- **冪等**(アラームは at-least-once): **分析時刻**(`analyzed_at`)を最初の実行でタスクに永続化し、保存の前に「同じレース・同じ分析時刻の分析が D1 にあるか」を確かめる。保存の直後に結果(id・R2 の状態)をタスクへ書く。
+  すでに id があれば計算も保存もしない。**同じ実行の再実行は1件**。あらためて予約した別の実行は、新しい分析として保存する。
+- **保存先の失敗**: 計算ステップを最大 3 回、60 秒間隔で再試行する(失敗が続けば `failed`)。R2 だけの失敗は、分析は保存され `detail: "failed"`(要約だけ。`done` のまま。再試行しない)。
+  R2 の put には 15 秒の上限時間を掛ける(`withPutTimeout`)。買い目の JSON は 1.5MB までで、超えたら D1 に何も書かずに拒否する(通常の最大は中央16頭・全券種 ON で 265 件・約 23KB)。
+- **子の行の確認**(#175 の申し送り): 保存後に、子の行(馬・買い目)の件数が保存したレコードと一致するかを確かめ、`children_ok` に記録する(不一致は警告。分析は保存済みなので `done`)。
+  子の行は `(SELECT max(id) FROM analyses)` で親に紐づけているので、**最初の本番の実保存で `GET /api/analyses/status` の `children_ok` が true であること**を確かめる(ローカルの D1 では true。本番は未確認)。崩れた場合の代替は #175 の JSDoc(migration 0003 案)。
+- **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant。**既定値は exe の既定値と同じ**
+  (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集する API は無い**(#165)。値は D1 への UPDATE か migration で入れる。
+- **発走時刻の換算**(`cloud/src/pre-race-time.ts`): 出馬表の `startTime`(JST の HH:MM)から、UTC のエポックミリ秒と「発走の30分前」を求める(JST 0:00〜8:59 は UTC の前日)。アラームの予約に使うのは #166。
+- **状態**: `GET /api/analyses/status` の各レースに `mode`・`analysis_id`・`detail`・`children_ok`。
 
 ## 主な当初仕様との差異(記録)
 

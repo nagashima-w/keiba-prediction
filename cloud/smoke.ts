@@ -312,6 +312,29 @@ async function main(): Promise<void> {
       // D1 に何も書かれていない(朝の prior は DO にだけ置く)
       const analyses = await req(port, "GET", "/api/analyses");
       check(`${label}: D1 には何も書かれない(GET /api/analyses が空のまま)`, analyses.status === 200 && analyses.text === JSON.stringify({ ok: true, analyses: [] }), `${analyses.status} ${analyses.text.slice(0, 120)}`);
+
+      // Issue #178: 発走前の分析(mode: "pre_race"。LLM なし)。朝のキャッシュがあるので、取得は(出馬表は TTL 内・戦績・調教はキャッシュ)オッズだけを取り直す。
+      //   D1(本物のローカルの D1・R2)に1件保存され、子の行が正しい親 id に紐づく(childrenOk)。設定の行は無いので、既定値(資金 0 = 配分なし・組合せ取得なし)。
+      const preBody = { ...goodBody, mode: "pre_race" };
+      const preStarted = Date.now();
+      const pre = await run(preBody);
+      check(`${label}: 発走前の分析の POST は 202(mode: pre_race)`, pre.status === 202 && parseJson(pre.text)["mode"] === "pre_race", `${pre.status} ${pre.text.slice(0, 160)}`);
+      const preDuplicate = await run(preBody);
+      check(`${label}: 実行中の発走前の分析の二重の起動は 409`, preDuplicate.status === 409, `${preDuplicate.status}`);
+      let preRow: Record<string, unknown> | undefined;
+      for (let i = 0; i < 90; i++) {
+        const b = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}`)).text);
+        preRow = (b["races"] as Record<string, unknown>[] | undefined)?.find((r) => r["mode"] === "pre_race");
+        if (preRow?.["status"] === "done" || preRow?.["status"] === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      const preMs = Date.now() - preStarted;
+      check(`${label}: 発走前の分析が done になる(約 ${Math.round(preMs / 1000)} 秒。朝のキャッシュで取得は少ない)`, preRow?.["status"] === "done" && preRow["error"] === null && typeof preRow["analysis_id"] === "number", JSON.stringify(preRow).slice(0, 300));
+      check(`${label}: 保存した子の行(馬・買い目)の件数が一致し(children_ok)、R2 の詳細が置かれた(detail: stored)`, preRow?.["children_ok"] === true && preRow["detail"] === "stored", JSON.stringify(preRow).slice(0, 300));
+      check(`${label}: 発走前の取得は、朝の 19 本よりずっと速い(キャッシュ。gate の間隔 2 秒 × 19 本の約 36 秒を待たない)`, preMs < 20_000, `${preMs}ms`);
+      const saved = parseJson((await req(port, "GET", `/api/analyses?race_id=${raceId}`)).text);
+      const savedList = (saved["analyses"] as { id: number; raceId: string; kaisaiDate: string | null; horses: unknown[]; hasDetail: boolean }[] | undefined) ?? [];
+      check(`${label}: D1 に分析が1件だけ保存された(GET /api/analyses。16頭・開催日・R2 の詳細あり)`, savedList.length === 1 && savedList[0]!.raceId === raceId && savedList[0]!.kaisaiDate === date && savedList[0]!.horses.length === 16 && savedList[0]!.hasDetail === true && savedList[0]!.id === preRow?.["analysis_id"], JSON.stringify(saved).slice(0, 300));
     });
   } finally {
     rmSync(CONFIG_PATH, { force: true });

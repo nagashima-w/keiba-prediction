@@ -287,6 +287,18 @@ export class D1AnalysisStore implements AnalysisRepository {
     return row ?? { classA: 0, classB: 0 };
   }
 
+  /**
+   * 保存した分析の子の行(馬・買い目)の件数(1クエリ)。子の行は `(SELECT max(id) FROM analyses)` で親に紐づけているので、最初の実保存で、
+   * 正しい親 id に紐づいたかを確かめるために使う(Issue #178。#175 の申し送り)。
+   */
+  async countChildren(analysisId: number): Promise<{ readonly horses: number; readonly bets: number }> {
+    const row = await this.db
+      .prepare("SELECT (SELECT COUNT(*) FROM analysis_horses WHERE analysis_id = ?) AS horses, (SELECT COUNT(*) FROM analysis_bets WHERE analysis_id = ?) AS bets")
+      .bind(analysisId, analysisId)
+      .first<{ horses: number; bets: number }>();
+    return { horses: row?.horses ?? 0, bets: row?.bets ?? 0 };
+  }
+
   async saveAnalysis(record: AnalysisRecord): Promise<SaveResult> {
     // D1 に書く前に、詳細を符号化する(JSON にできない値はここで例外になり、何も書かれない)。
     const body = encodeDetail(record);

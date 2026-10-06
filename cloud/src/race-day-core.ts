@@ -32,9 +32,11 @@ import { HttpError } from "../../packages/core/src/scraper/http-client";
 import { DEFAULT_RESULTS_TTL_MS, scrapeRace, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
 import { checkRaceDate } from "./race-date";
+import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { DoSqlCacheStore } from "./do-cache-store";
 import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fetch";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
+import { coerceCloudSettings, type CloudSettings } from "./settings";
 import type { SqlLike } from "./sql-like";
 
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
@@ -74,6 +76,22 @@ const CACHE_ONLY_TTL: ScrapeTtlConfig = {
 
 export type TaskStatus = "queued" | "fetched" | "done" | "failed";
 
+/** 朝の取得と prior(`morning`。D1・R2 には書かない)・発走前の分析(`pre_race`。LLM なし。D1・R2 に保存する。Issue #178)。 */
+export type TaskMode = "morning" | "pre_race";
+
+/**
+ * 発走前の分析の保存先(D1・R2。DO のラッパが `D1AnalysisStore` で実装する)。**朝(morning)のタスクでは呼ばない。**
+ *  - `findByAnalyzedAt`: 同じレース・同じ分析時刻の分析が保存済みなら、その id(無ければ null)。計算ステップの再実行(アラームは at-least-once)で、
+ *    保存したあとにクラッシュした場合に、2件目を保存しないための確認(分析時刻はタスクに永続化した固定の値)。
+ *  - `save`: 保存して、採番 id と R2 の詳細の状態を返す。
+ *  - `countChildren`: 保存した分析の子の行(馬・買い目)の件数。子の行が正しい親 id に紐づいたかを、最初の実保存から確かめるため(#175 の `max(id)` の前提)。
+ */
+export interface AnalysisSink {
+  save(record: AnalysisRecord): Promise<{ readonly id: number; readonly detail: "stored" | "failed" | "skipped" }>;
+  findByAnalyzedAt(raceId: string, analyzedAt: string): Promise<number | null>;
+  countChildren(analysisId: number): Promise<{ readonly horses: number; readonly bets: number }>;
+}
+
 export interface RaceDayDeps {
   readonly sql: SqlLike;
   readonly now: () => number;
@@ -82,16 +100,22 @@ export interface RaceDayDeps {
   /** 次のアラームの時刻(エポックミリ秒)を設定する。単一のアラームなので、設定は上書き。 */
   readonly setAlarm: (at: number) => void | Promise<void>;
   readonly onWarn: (message: string) => void;
+  /** 発走前の分析の保存先(D1・R2)。無ければ、発走前の予約を拒否する。朝のタスクでは呼ばない。 */
+  readonly sink?: AnalysisSink;
+  /** 設定(D1 の1行)の読み出し。発走前の取得ステップで1回だけ呼び、スナップショットをタスクに保存する。 */
+  readonly loadSettings?: () => Promise<CloudSettings>;
 }
 
 export interface ScheduleInput {
   readonly raceId: string;
   readonly kaisaiDate: string;
+  /** 省略時は `morning`。 */
+  readonly mode?: TaskMode;
 }
 
 export type ScheduleResult =
-  | { readonly accepted: true; readonly raceId: string; readonly status: "queued" }
-  | { readonly accepted: false; readonly raceId: string; readonly status: TaskStatus };
+  | { readonly accepted: true; readonly raceId: string; readonly mode: TaskMode; readonly status: "queued" }
+  | { readonly accepted: false; readonly raceId: string; readonly mode: TaskMode; readonly status: TaskStatus };
 
 export type StepOutcome =
   /** 実行する仕事が無かった。`purged` は、掃除専用のアラームで消したキャッシュの行数(掃除をしたときだけ)。 */
@@ -99,19 +123,27 @@ export type StepOutcome =
   | {
       readonly kind: "ran";
       readonly raceId: string;
+      readonly mode: TaskMode;
       readonly step: "fetch" | "compute";
       readonly result: "ok" | "retry" | "failed";
     };
 
 export interface BoardRace {
   readonly raceId: string;
+  readonly mode: TaskMode;
   readonly status: TaskStatus;
   readonly attempts: number;
   readonly error: string | null;
   readonly queuedAt: number;
   readonly updatedAt: number;
-  /** 朝の prior を計算した時刻(無ければ null)。 */
+  /** 朝の prior を計算した時刻(無ければ null。発走前のタスクは常に null)。 */
   readonly computedAt: number | null;
+  /** 発走前の分析で保存した D1 の分析 id(未保存・朝のタスクは null)。 */
+  readonly analysisId: number | null;
+  /** R2 の詳細の状態(`stored`・`failed`・`skipped`。未保存・朝のタスクは null)。 */
+  readonly detail: "stored" | "failed" | "skipped" | null;
+  /** 保存した子の行(馬・買い目)の件数が、保存したレコードと一致したか(確認していなければ null)。 */
+  readonly childrenOk: boolean | null;
 }
 
 export interface Board {
@@ -167,18 +199,29 @@ function isFatalFetchError(error: unknown): boolean {
 
 interface TaskRow {
   race_id: string;
+  mode: TaskMode;
   status: TaskStatus;
   attempts: number;
+  compute_attempts: number;
   queued_at: number;
   updated_at: number;
   error: string | null;
+  analyzed_at: number | null;
+  settings_json: string | null;
+  analysis_id: number | null;
+  detail: "stored" | "failed" | "skipped" | null;
+  children_ok: number | null;
 }
+
+const TASK_MODES: readonly TaskMode[] = ["morning", "pre_race"];
 
 export class RaceDayCore {
   private readonly sql: SqlLike;
   private readonly now: () => number;
   private readonly setAlarm: (at: number) => void | Promise<void>;
   private readonly onWarn: (message: string) => void;
+  private readonly sink: AnalysisSink | undefined;
+  private readonly loadSettings: (() => Promise<CloudSettings>) | undefined;
   private readonly cache: DoSqlCacheStore;
   private readonly networkFetcher: CachedFetcher;
   private readonly cacheOnly: CachedFetcher;
@@ -188,11 +231,16 @@ export class RaceDayCore {
     this.now = deps.now;
     this.setAlarm = deps.setAlarm;
     this.onWarn = deps.onWarn;
+    this.sink = deps.sink;
+    this.loadSettings = deps.loadSettings;
     this.sql.exec("CREATE TABLE IF NOT EXISTS race_day_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    // タスクは (race_id, mode) ごと。mode: morning(朝の取得と prior)・pre_race(発走前の分析。Issue #178)。
     this.sql.exec(
       `CREATE TABLE IF NOT EXISTS race_day_tasks (
-         race_id TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL,
-         queued_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, error TEXT)`,
+         race_id TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'morning', status TEXT NOT NULL, attempts INTEGER NOT NULL,
+         compute_attempts INTEGER NOT NULL DEFAULT 0, queued_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, error TEXT,
+         analyzed_at INTEGER, settings_json TEXT, analysis_id INTEGER, detail TEXT, children_ok INTEGER,
+         PRIMARY KEY (race_id, mode))`,
     );
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS race_day_morning_prior (race_id TEXT PRIMARY KEY, computed_at INTEGER NOT NULL, result_json TEXT NOT NULL)",
@@ -211,29 +259,41 @@ export class RaceDayCore {
     return rows[0]?.value ?? null;
   }
 
-  private task(raceId: string): TaskRow | null {
-    const rows = this.sql.exec("SELECT * FROM race_day_tasks WHERE race_id = ?", raceId).toArray() as TaskRow[];
+  private task(raceId: string, mode: TaskMode): TaskRow | null {
+    const rows = this.sql.exec("SELECT * FROM race_day_tasks WHERE race_id = ? AND mode = ?", raceId, mode).toArray() as TaskRow[];
     return rows[0] ?? null;
   }
 
-  private updateTask(raceId: string, status: TaskStatus, attempts: number, error: string | null): void {
+  private updateTask(task: Pick<TaskRow, "race_id" | "mode">, status: TaskStatus, attempts: number, error: string | null): void {
     this.sql.exec(
-      "UPDATE race_day_tasks SET status = ?, attempts = ?, error = ?, updated_at = ? WHERE race_id = ?",
+      "UPDATE race_day_tasks SET status = ?, attempts = ?, error = ?, updated_at = ? WHERE race_id = ? AND mode = ?",
       status,
       attempts,
       error,
       this.now(),
-      raceId,
+      task.race_id,
+      task.mode,
     );
+  }
+
+  /** タスクの追加の列(発走前の分析の状態)を更新する。列名は固定の集合だけ(呼び出し側のコードで決まる値)。 */
+  private setTaskFields(task: Pick<TaskRow, "race_id" | "mode">, fields: Partial<Pick<TaskRow, "compute_attempts" | "analyzed_at" | "settings_json" | "analysis_id" | "detail" | "children_ok">>): void {
+    for (const [column, value] of Object.entries(fields)) {
+      this.sql.exec(`UPDATE race_day_tasks SET ${column} = ?, updated_at = ? WHERE race_id = ? AND mode = ?`, value ?? null, this.now(), task.race_id, task.mode);
+    }
   }
 
   // ---- 公開(RPC)----
 
   /**
-   * レースの朝の準備を予約する。予約だけをして戻る(取得はしない)。
-   * @throws 無効な raceId・開催日、DO の開催日と違う日、raceId の年と開催日の年が違う
+   * レースの朝の準備(`morning`。既定)または発走前の分析(`pre_race`)を予約する。予約だけをして戻る(取得はしない)。
+   * @throws 無効な raceId・開催日・mode、DO の開催日と違う日、raceId の年と開催日の年が違う(地方は月日も)、1日の上限、発走前の分析の保存先が無い構成
    */
   async schedule(input: ScheduleInput): Promise<ScheduleResult> {
+    const mode = input.mode ?? "morning";
+    if (!TASK_MODES.includes(mode)) {
+      throw new Error(`mode は morning か pre_race です(渡された値: ${String(mode).slice(0, 32)})`);
+    }
     const raceId = parseRaceId(input.raceId);
     const kaisaiDate = parseKaisaiDate(input.kaisaiDate);
     const pinned = this.metaGet("kaisai_date");
@@ -245,12 +305,15 @@ export class RaceDayCore {
     if (!consistent.ok) {
       throw new Error(consistent.message);
     }
+    if (mode === "pre_race" && (this.sink === undefined || this.loadSettings === undefined)) {
+      throw new Error("発走前の分析の保存先(D1・R2)・設定が、この構成にはありません");
+    }
     if (pinned === null) {
       this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('kaisai_date', ?)", kaisaiDate);
     }
-    const existing = this.task(raceId);
+    const existing = this.task(raceId, mode);
     if (existing !== null && (existing.status === "queued" || existing.status === "fetched")) {
-      return { accepted: false, raceId, status: existing.status };
+      return { accepted: false, raceId, mode, status: existing.status };
     }
     if (existing === null) {
       const count = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks").toArray() as { n: number }[])[0]?.n ?? 0;
@@ -259,35 +322,43 @@ export class RaceDayCore {
       }
     }
     const now = this.now();
+    // 新しい実行: 発走前の分析の状態(分析時刻・設定のスナップショット・保存結果)も作り直す(前の実行の保存結果を、新しい実行の結果として扱わない)。
     this.sql.exec(
-      `INSERT INTO race_day_tasks (race_id, status, attempts, queued_at, updated_at, error) VALUES (?, 'queued', 0, ?, ?, NULL)
-       ON CONFLICT(race_id) DO UPDATE SET status = 'queued', attempts = 0, queued_at = excluded.queued_at, updated_at = excluded.updated_at, error = NULL`,
+      `INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, error, analyzed_at, settings_json, analysis_id, detail, children_ok)
+       VALUES (?, ?, 'queued', 0, 0, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL)
+       ON CONFLICT(race_id, mode) DO UPDATE SET status = 'queued', attempts = 0, compute_attempts = 0, queued_at = excluded.queued_at, updated_at = excluded.updated_at,
+         error = NULL, analyzed_at = NULL, settings_json = NULL, analysis_id = NULL, detail = NULL, children_ok = NULL`,
       raceId,
+      mode,
       now,
       now,
     );
     await this.setAlarm(now);
-    return { accepted: true, raceId, status: "queued" };
+    return { accepted: true, raceId, mode, status: "queued" };
   }
 
-  /** その日のレースの状態の一覧(レースID 昇順)。 */
+  /** その日のレースの状態の一覧(レースID 昇順、同じレースは morning → pre_race)。 */
   getBoard(): Board {
     const rows = this.sql
       .exec(
-        `SELECT t.race_id, t.status, t.attempts, t.queued_at, t.updated_at, t.error, p.computed_at
-           FROM race_day_tasks t LEFT JOIN race_day_morning_prior p ON p.race_id = t.race_id ORDER BY t.race_id`,
+        `SELECT t.*, p.computed_at
+           FROM race_day_tasks t LEFT JOIN race_day_morning_prior p ON p.race_id = t.race_id AND t.mode = 'morning' ORDER BY t.race_id, t.mode`,
       )
       .toArray() as (TaskRow & { computed_at: number | null })[];
     return {
       kaisaiDate: this.metaGet("kaisai_date"),
       races: rows.map((r) => ({
         raceId: r.race_id,
+        mode: r.mode,
         status: r.status,
         attempts: r.attempts,
         error: r.error,
         queuedAt: r.queued_at,
         updatedAt: r.updated_at,
         computedAt: r.computed_at,
+        analysisId: r.analysis_id,
+        detail: r.detail,
+        childrenOk: r.children_ok === null ? null : r.children_ok === 1,
       })),
     };
   }
@@ -305,17 +376,23 @@ export class RaceDayCore {
 
   /**
    * 次のステップを1つだけ実行する(1レースの取得 or 計算)。続きの仕事があれば、アラームを設定してから戻る。
-   * 実行するのは、(1)取得済みで計算待ちのレース、なければ (2)取得待ちのレース(試行回数の少ない順、予約の古い順、レースID 順)。
+   * 実行するのは、(1)取得済みで計算待ちのタスク、なければ (2)取得待ちのタスク(試行回数の少ない順、予約の古い順、レースID 順)。
    */
   async runNextStep(): Promise<StepOutcome> {
     const next = this.pickNext();
     if (next === null) {
       return this.wakeWithoutWork();
     }
-    const outcome =
-      next.status === "fetched" ? await this.runCompute(next) : await this.runFetch(next);
+    const outcome = await this.runStep(next);
     await this.armAlarm();
     return outcome;
+  }
+
+  private runStep(task: TaskRow): Promise<StepOutcome> {
+    if (task.mode === "pre_race") {
+      return task.status === "fetched" ? this.runPreRaceCompute(task) : this.runPreRaceFetch(task);
+    }
+    return task.status === "fetched" ? this.runCompute(task) : this.runFetch(task);
   }
 
   /**
@@ -339,13 +416,13 @@ export class RaceDayCore {
 
   private pickNext(): TaskRow | null {
     const fetched = this.sql
-      .exec("SELECT * FROM race_day_tasks WHERE status = 'fetched' ORDER BY queued_at, race_id LIMIT 1")
+      .exec("SELECT * FROM race_day_tasks WHERE status = 'fetched' ORDER BY compute_attempts, queued_at, race_id, mode LIMIT 1")
       .toArray() as TaskRow[];
     if (fetched[0] !== undefined) {
       return fetched[0];
     }
     const queued = this.sql
-      .exec("SELECT * FROM race_day_tasks WHERE status = 'queued' ORDER BY attempts, queued_at, race_id LIMIT 1")
+      .exec("SELECT * FROM race_day_tasks WHERE status = 'queued' ORDER BY attempts, queued_at, race_id, mode LIMIT 1")
       .toArray() as TaskRow[];
     return queued[0] ?? null;
   }
@@ -358,8 +435,8 @@ export class RaceDayCore {
    */
   private async armAlarm(): Promise<void> {
     const rows = this.sql
-      .exec("SELECT status, attempts FROM race_day_tasks WHERE status IN ('queued', 'fetched')")
-      .toArray() as { status: TaskStatus; attempts: number }[];
+      .exec("SELECT status, attempts, compute_attempts FROM race_day_tasks WHERE status IN ('queued', 'fetched')")
+      .toArray() as { status: TaskStatus; attempts: number; compute_attempts: number }[];
     if (rows.length === 0) {
       const due = this.now() + CACHE_RETENTION_MS + PURGE_MARGIN_MS;
       this.sql.exec(
@@ -370,7 +447,8 @@ export class RaceDayCore {
       await this.setAlarm(due);
       return;
     }
-    const immediate = rows.some((r) => r.status === "fetched" || r.attempts === 0);
+    // すぐ動かせる仕事(初回の取得・初回の計算)があれば now。再試行待ちだけなら遅らせる。
+    const immediate = rows.some((r) => (r.status === "fetched" ? r.compute_attempts === 0 : r.attempts === 0));
     await this.setAlarm(this.now() + (immediate ? 0 : RETRY_DELAY_MS));
   }
 
@@ -384,10 +462,12 @@ export class RaceDayCore {
     }
   }
 
+  // ---- 朝(morning) ----
+
   private async runFetch(task: TaskRow): Promise<StepOutcome> {
     const attempts = task.attempts + 1;
     // 試行回数は取得の前に永続化する(取得の途中でクラッシュしても、再実行が無限に続かない)。
-    this.updateTask(task.race_id, "queued", attempts, task.error);
+    this.updateTask(task, "queued", attempts, task.error);
     try {
       const race = await scrapeRace(
         parseRaceId(task.race_id),
@@ -398,17 +478,17 @@ export class RaceDayCore {
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
-      this.updateTask(task.race_id, "fetched", attempts, null);
-      return { kind: "ran", raceId: task.race_id, step: "fetch", result: "ok" };
+      this.updateTask(task, "fetched", attempts, null);
+      return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "ok" };
     } catch (error) {
       const message = errorMessage(error);
       if (isFatalFetchError(error) || attempts >= MAX_ATTEMPTS) {
-        this.updateTask(task.race_id, "failed", attempts, message);
+        this.updateTask(task, "failed", attempts, message);
         this.onWarn(`朝の取得に失敗しました(${task.race_id}。試行 ${attempts} 回): ${message}`);
-        return { kind: "ran", raceId: task.race_id, step: "fetch", result: "failed" };
+        return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "failed" };
       }
-      this.updateTask(task.race_id, "queued", attempts, message);
-      return { kind: "ran", raceId: task.race_id, step: "fetch", result: "retry" };
+      this.updateTask(task, "queued", attempts, message);
+      return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "retry" };
     }
   }
 
@@ -420,18 +500,7 @@ export class RaceDayCore {
       }
       const raceId = parseRaceId(task.race_id);
       const result = await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
-        scrape: async (id) => {
-          const race = await scrapeRace(
-            id,
-            { fetcher: this.cacheOnly, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
-            { includeComboOdds: false },
-          );
-          const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
-          if (missing.length > 0) {
-            throw new Error(`キャッシュに戦績がありません(${missing.length} 頭分)。取得をやり直してください`);
-          }
-          return race;
-        },
+        scrape: (id) => this.scrapeFromCache(id, false),
         analyze: null,
         // 朝の prior は D1・R2 に保存しない(DO のストレージにだけ置く)。ここは何も書かない。
         saveAnalysis: () => undefined,
@@ -446,13 +515,150 @@ export class RaceDayCore {
         this.now(),
         JSON.stringify(result),
       );
-      this.updateTask(task.race_id, "done", task.attempts, null);
-      return { kind: "ran", raceId: task.race_id, step: "compute", result: "ok" };
+      this.updateTask(task, "done", task.attempts, null);
+      return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "ok" };
     } catch (error) {
       const message = errorMessage(error);
-      this.updateTask(task.race_id, "failed", task.attempts, message);
+      this.updateTask(task, "failed", task.attempts, message);
       this.onWarn(`朝の prior の計算に失敗しました(${task.race_id}): ${message}`);
-      return { kind: "ran", raceId: task.race_id, step: "compute", result: "failed" };
+      return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "failed" };
+    }
+  }
+
+  /** キャッシュだけから `scrapeRace` する(ネットワークに出ない。鮮度は実質無期限)。戦績が1頭でも無ければ投げる(戦績なしの分析を黙って作らない)。 */
+  private async scrapeFromCache(raceId: Parameters<typeof scrapeRace>[0], includeComboOdds: boolean) {
+    const race = await scrapeRace(
+      raceId,
+      { fetcher: this.cacheOnly, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
+      { includeComboOdds },
+    );
+    const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
+    if (missing.length > 0) {
+      throw new Error(`キャッシュに戦績がありません(${missing.length} 頭分)。取得をやり直してください`);
+    }
+    return race;
+  }
+
+  // ---- 発走前(pre_race。Issue #178)----
+
+  /**
+   * 発走前の取得ステップ: 設定を1回だけ読んでタスクに保存し(スナップショット)、出馬表(取消・天候・馬場を反映。TTL 10 分)・オッズ(**常にキャッシュを迂回**)・
+   * 組合せオッズ(設定が ON のときだけ。同じくキャッシュを迂回)を取り直す。戦績・調教は朝のキャッシュがあればそれを使う(無ければ取る)。
+   */
+  private async runPreRaceFetch(task: TaskRow): Promise<StepOutcome> {
+    const attempts = task.attempts + 1;
+    this.updateTask(task, "queued", attempts, task.error);
+    try {
+      let settings: CloudSettings;
+      if (task.settings_json !== null) {
+        settings = coerceCloudSettings(JSON.parse(task.settings_json));
+      } else {
+        settings = await this.loadSettings!();
+        this.setTaskFields(task, { settings_json: JSON.stringify(settings) });
+      }
+      const race = await scrapeRace(
+        parseRaceId(task.race_id),
+        { fetcher: this.networkFetcher, now: () => new Date(this.now()) },
+        { includeComboOdds: settings.includeComboOdds, bypassOddsCache: true },
+      );
+      const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
+      if (missing.length > 0) {
+        throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
+      }
+      this.updateTask(task, "fetched", attempts, null);
+      return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
+    } catch (error) {
+      const message = errorMessage(error);
+      if (isFatalFetchError(error) || attempts >= MAX_ATTEMPTS) {
+        this.updateTask(task, "failed", attempts, message);
+        this.onWarn(`発走前の取得に失敗しました(${task.race_id}。試行 ${attempts} 回): ${message}`);
+        return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "failed" };
+      }
+      this.updateTask(task, "queued", attempts, message);
+      return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "retry" };
+    }
+  }
+
+  /**
+   * 発走前の計算・保存ステップ: **ネットワークに出ず**(gate は0回)、キャッシュだけで prior → EV → 配分を作り、`AnalysisSink` で D1・R2 に保存する。LLM なし(#179)。
+   * 冪等(アラームは少なくとも1回は実行される): 分析時刻(`analyzed_at`)を最初の実行でタスクに永続化し、保存の前に「同じレース・同じ分析時刻の分析が
+   * 保存済みか」を確かめる。保存結果(id・R2 の状態)は保存の直後にタスクへ書く。すでに id があれば、計算も保存もしない。
+   * 保存先の失敗は、試行回数の上限(3)まで遅らせて再試行する(保存済みなら、再試行で2件目を作らない)。
+   */
+  private async runPreRaceCompute(task: TaskRow): Promise<StepOutcome> {
+    const sink = this.sink!;
+    const computeAttempts = task.compute_attempts + 1;
+    // 試行回数・分析時刻は、計算の前に永続化する(再実行が無限に続かない・再実行でも同じ分析時刻)。
+    const analyzedAtMs = task.analyzed_at ?? this.now();
+    this.setTaskFields(task, { compute_attempts: computeAttempts, analyzed_at: analyzedAtMs });
+    try {
+      const kaisaiDate = this.metaGet("kaisai_date");
+      if (kaisaiDate === null || task.settings_json === null) {
+        throw new Error("開催日または設定のスナップショットが未確定です");
+      }
+      const settings = coerceCloudSettings(JSON.parse(task.settings_json));
+      let analysisId = task.analysis_id;
+      let expected: { horses: number; bets: number } | null = null;
+      if (analysisId === null) {
+        const raceId = parseRaceId(task.race_id);
+        await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
+          scrape: (id) => this.scrapeFromCache(id, settings.includeComboOdds),
+          analyze: null,
+          saveAnalysis: async (record) => {
+            expected = { horses: record.horses.length, bets: record.allocation?.bets.length ?? 0 };
+            const existing = await sink.findByAnalyzedAt(record.raceId, record.analyzedAt);
+            if (existing !== null) {
+              analysisId = existing;
+              this.setTaskFields(task, { analysis_id: existing });
+              return;
+            }
+            const saved = await sink.save(record);
+            analysisId = saved.id;
+            // 保存の直後に結果を書く(以降の再実行は、保存も計算もしない)。
+            this.setTaskFields(task, { analysis_id: saved.id, detail: saved.detail });
+          },
+          allocationSettings: {
+            bankroll: settings.bankroll,
+            perRaceCap: settings.perRaceCap,
+            kellyFraction: settings.kellyFraction,
+            includeComboOdds: settings.includeComboOdds,
+            includeWideInAllocation: settings.includeWideInAllocation,
+            includeTrioInAllocation: settings.includeTrioInAllocation,
+            includeQuinellaInAllocation: settings.includeQuinellaInAllocation,
+            includeExactaInAllocation: settings.includeExactaInAllocation,
+            includeTrifectaInAllocation: settings.includeTrifectaInAllocation,
+            includeBracketQuinellaInAllocation: settings.includeBracketQuinellaInAllocation,
+          },
+          evConfig: { threshold: settings.evThreshold },
+          now: () => new Date(analyzedAtMs),
+          // 当日傾向の読み出し(D1)は、結果の取込(#182)ができるまで空。LLM なしの経路では呼ばれない(#179 で LLM を使うときに効く)。
+          getRaceResultDetails: async () => new Map(),
+          llmSkipReason: "LLM は未対応(#179)",
+        });
+        // 保存した子の行(馬・買い目)が、正しい親 id に、保存したレコードの件数だけ紐づいたかを確かめる(最初の実保存で、max(id) の前提を確かめる)。
+        if (analysisId !== null && expected !== null) {
+          const exp: { horses: number; bets: number } = expected;
+          const kids = await sink.countChildren(analysisId);
+          const ok = kids.horses === exp.horses && kids.bets === exp.bets;
+          this.setTaskFields(task, { children_ok: ok ? 1 : 0 });
+          if (!ok) {
+            this.onWarn(
+              `保存した分析(id ${analysisId})の子の行の件数が一致しません(馬 ${kids.horses}/${exp.horses}・買い目 ${kids.bets}/${exp.bets})。max(id) の前提を確かめてください`,
+            );
+          }
+        }
+      }
+      this.updateTask(task, "done", task.attempts, null);
+      return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "ok" };
+    } catch (error) {
+      const message = errorMessage(error);
+      if (computeAttempts >= MAX_ATTEMPTS) {
+        this.updateTask(task, "failed", task.attempts, message);
+        this.onWarn(`発走前の計算・保存に失敗しました(${task.race_id}。試行 ${computeAttempts} 回): ${message}`);
+        return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "failed" };
+      }
+      this.updateTask(task, "fetched", task.attempts, message);
+      return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "retry" };
     }
   }
 }

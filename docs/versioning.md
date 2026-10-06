@@ -2561,6 +2561,25 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
 
+## 次の正式版が 1.19.14 である根拠(Issue #178〈#164-c〉での変更)
+
+**patch**(クラウド版の発走前の分析〈LLM なし〉と D1・R2 への保存・設定。**変更は `cloud/`・`scripts/`・docs だけで、exe のアプリコード〈`packages/app/src`〉・core は無変更**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- cloud: `race-day-core.ts` に発走前(`pre_race`)のタスク(取得 → 計算・保存の2段。冪等・再試行・子の行の確認)、`analysis-sink.ts`(`AnalysisSink` の D1・R2 実装。買い目の上限)、`bucket-timeout.ts`(R2 の put の上限時間)、
+  `settings.ts`(設定の既定値は exe と同じ)、`pre-race-time.ts`(JST → UTC)、migration `0004_settings.sql`(`cloud_settings` 表。追加のみ)、`race-day-do.ts` の配線、`handler.ts` の `mode: "pre_race"`・状態の応答の拡張
+- テスト: `race-day-pre-race.test.ts`・`analysis-sink.test.ts`(本物のローカルの D1・R2)・`bucket-timeout.test.ts`・`pre-race-time.test.ts`・`settings.test.ts`・`handler-run.test.ts`、
+  scripts の `cloud-settings-defaults.test.ts`(exe の既定値との一致)・`cloud-d1-schema.test.ts`・`cloud-config-guard.test.ts`、smoke(workerd で、予約 → 保存 → D1 に1件)、docs
+
+### patch である根拠
+
+- exe(`packages/app/src`)・core のコードは無変更。exe に入る成果物は変わらない。分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`cloud_settings` は D1 だけの表)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

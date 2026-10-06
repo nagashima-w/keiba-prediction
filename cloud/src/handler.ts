@@ -296,7 +296,7 @@ async function readLimitedText(request: Request, maxBytes: number): Promise<stri
 }
 
 /**
- * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`(mode は省略時と "morning" のみ。発走前は #178)。
+ * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior(`morning`。省略時)または発走前の分析(`pre_race`。LLM なし。D1・R2 に保存。Issue #178)を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`。
  * 日単位の DO(RaceDay。名前は開催日)の `schedule` に予約を入れて **202** を返す(取得はアラームの中で始まる)。実行中の同じレースなら **409**(already-running)。
  * 順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413)→ JSON・入力の検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503。文面は返さない)。
  * **netkeiba への取得の起点は、この手動の POST だけ**(Cron・scheduled は無い。定時は #166)。
@@ -332,8 +332,8 @@ async function handleRun(request: Request, env: Env): Promise<Response> {
     return badRequest("race_id と kaisai_date は文字列で指定してください");
   }
   const mode = record["mode"] ?? "morning";
-  if (mode !== "morning") {
-    return badRequest('mode は "morning"(朝の取得と prior)だけです(発走前の分析は未対応)');
+  if (mode !== "morning" && mode !== "pre_race") {
+    return badRequest('mode は "morning"(朝の取得と prior)か "pre_race"(発走前の分析。LLM なし)です');
   }
   // 検証のメッセージに入力を写すので、長い入力は先頭だけにする(切っても、無効なままであることは変わらない)。
   const checkedRace = validateRaceId(raceId.slice(0, 32));
@@ -345,11 +345,11 @@ async function handleRun(request: Request, env: Env): Promise<Response> {
     return badRequest(consistent.message);
   }
   try {
-    const result = await raceDayStub(env, kaisaiDate).schedule({ raceId: checkedRace.raceId, kaisaiDate });
+    const result = await raceDayStub(env, kaisaiDate).schedule({ raceId: checkedRace.raceId, kaisaiDate, mode });
     if (!result.accepted) {
       return json({ ok: false, error: { type: "already-running", status: result.status } }, 409);
     }
-    return json({ ok: true, accepted: true, race_id: result.raceId, kaisai_date: kaisaiDate, mode: "morning", status: result.status }, 202);
+    return json({ ok: true, accepted: true, race_id: result.raceId, kaisai_date: kaisaiDate, mode: result.mode, status: result.status }, 202);
   } catch {
     return raceDayError();
   }
@@ -392,12 +392,16 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
     const board = await stub.getBoard();
     const races = board.races.map((r) => ({
       race_id: r.raceId,
+      mode: r.mode,
       status: r.status,
       attempts: r.attempts,
       error: r.error === null ? null : r.error.slice(0, STATUS_ERROR_MAX),
       queued_at: r.queuedAt,
       updated_at: r.updatedAt,
       prior: r.computedAt !== null,
+      analysis_id: r.analysisId,
+      detail: r.detail,
+      children_ok: r.childrenOk,
     }));
     if (raceId === null) {
       return json({ ok: true, kaisai_date: kaisaiDate, races });

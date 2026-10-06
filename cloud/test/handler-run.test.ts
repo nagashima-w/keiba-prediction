@@ -32,7 +32,7 @@ function fakeRaceDay(): FakeRaceDay {
     schedules: [],
     boards: [],
     priors: [],
-    scheduleImpl: async (input) => ({ accepted: true, raceId: input.raceId, status: "queued" }),
+    scheduleImpl: async (input) => ({ accepted: true, raceId: input.raceId, mode: input.mode ?? "morning", status: "queued" }),
     boardImpl: async () => ({ kaisaiDate: DATE, races: [] }),
     priorImpl: async () => null,
     namespace: undefined as never,
@@ -110,7 +110,7 @@ describe("POST /api/analyses/run(Issue #180)", () => {
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ ok: true, accepted: true, race_id: RACE, kaisai_date: DATE, mode: "morning", status: "queued" });
     expect(raceDay.names).toEqual([DATE]);
-    expect(raceDay.schedules).toEqual([{ raceId: RACE, kaisaiDate: DATE }]);
+    expect(raceDay.schedules).toEqual([{ raceId: RACE, kaisaiDate: DATE, mode: "morning" }]);
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
@@ -123,6 +123,21 @@ describe("POST /api/analyses/run(Issue #180)", () => {
     const b = await handle(post({ race_id: "202654071210", kaisai_date: "20260712" }, { token }), envOf(raceDay), {}, deps);
     expect(b.status).toBe(202);
     expect(raceDay.schedules).toHaveLength(2);
+  });
+
+  it("Issue #178: mode: \"pre_race\"(発走前の分析)も 202 で、DO には mode つきで予約する。応答に mode を返す。実行中なら 409(朝の実行とは別のタスクなので、DO が種類ごとに判断する)", async () => {
+    const { deps, token } = await setup();
+    const raceDay = fakeRaceDay();
+    const response = await handle(post({ ...GOOD_BODY, mode: "pre_race" }, { token }), envOf(raceDay), {}, deps);
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: true, accepted: true, race_id: RACE, kaisai_date: DATE, mode: "pre_race", status: "queued" });
+    expect(raceDay.schedules).toEqual([{ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" }]);
+    // 朝は mode を明示して DO に渡す(既定の取り違えを避ける)
+    const morning = fakeRaceDay();
+    await handle(post(GOOD_BODY, { token }), envOf(morning), {}, deps);
+    expect(morning.schedules).toEqual([{ raceId: RACE, kaisaiDate: DATE, mode: "morning" }]);
+    raceDay.scheduleImpl = async (input) => ({ accepted: false, raceId: input.raceId, mode: "pre_race", status: "fetched" });
+    expect((await handle(post({ ...GOOD_BODY, mode: "pre_race" }, { token }), envOf(raceDay), {}, deps)).status).toBe(409);
   });
 
   describe("e2: 認証(Access の関門の後ろ)", () => {
@@ -199,7 +214,8 @@ describe("POST /api/analyses/run(Issue #180)", () => {
       ["年が違う", { race_id: RACE, kaisai_date: "20250628" }],
       ["地方のレースIDの月日が開催日と違う", { race_id: "202654071210", kaisai_date: "20260713" }],
       ["mode が未知", { ...GOOD_BODY, mode: "evening" }],
-      ["mode が発走前(#178 まで未対応)", { ...GOOD_BODY, mode: "pre_race" }],
+      ["mode が文字列でない", { ...GOOD_BODY, mode: 1 }],
+      ["mode が空文字", { ...GOOD_BODY, mode: "" }],
       ["未知のキー", { ...GOOD_BODY, extra: 1 }],
       ["本文が配列", [RACE, DATE]],
       ["本文が null", null],
@@ -250,7 +266,7 @@ describe("POST /api/analyses/run(Issue #180)", () => {
     it("DO が accepted: false(実行中)を返したら 409(already-running。いまの状態つき)。202 にしない", async () => {
       const { deps, token } = await setup();
       const raceDay = fakeRaceDay();
-      raceDay.scheduleImpl = async (input) => ({ accepted: false, raceId: input.raceId, status: "fetched" });
+      raceDay.scheduleImpl = async (input) => ({ accepted: false, raceId: input.raceId, mode: input.mode ?? "morning", status: "fetched" });
       const response = await handle(post(GOOD_BODY, { token }), envOf(raceDay), {}, deps);
       expect(response.status).toBe(409);
       expect(await response.json()).toEqual({ ok: false, error: { type: "already-running", status: "fetched" } });
@@ -262,9 +278,9 @@ describe("POST /api/analyses/run(Issue #180)", () => {
       const raceDay = fakeRaceDay();
       let active = false;
       raceDay.scheduleImpl = async (input) => {
-        if (active) return { accepted: false, raceId: input.raceId, status: "queued" };
+        if (active) return { accepted: false, raceId: input.raceId, mode: input.mode ?? "morning", status: "queued" };
         active = true;
-        return { accepted: true, raceId: input.raceId, status: "queued" };
+        return { accepted: true, raceId: input.raceId, mode: input.mode ?? "morning", status: "queued" };
       };
       expect((await handle(post(GOOD_BODY, { token }), envOf(raceDay), {}, deps)).status).toBe(202);
       expect((await handle(post(GOOD_BODY, { token }), envOf(raceDay), {}, deps)).status).toBe(409);
@@ -314,8 +330,9 @@ describe("GET /api/analyses/status(Issue #180)", () => {
   const board: Board = {
     kaisaiDate: DATE,
     races: [
-      { raceId: "202603020210", status: "done", attempts: 1, error: null, queuedAt: 1000, updatedAt: 2000, computedAt: 2000 },
-      { raceId: RACE, status: "failed", attempts: 3, error: "x".repeat(500), queuedAt: 1500, updatedAt: 2500, computedAt: null },
+      { raceId: "202603020210", mode: "morning", status: "done", attempts: 1, error: null, queuedAt: 1000, updatedAt: 2000, computedAt: 2000, analysisId: null, detail: null, childrenOk: null },
+      { raceId: "202603020210", mode: "pre_race", status: "done", attempts: 1, error: null, queuedAt: 3000, updatedAt: 4000, computedAt: null, analysisId: 7, detail: "stored", childrenOk: true },
+      { raceId: RACE, mode: "pre_race", status: "failed", attempts: 3, error: "x".repeat(500), queuedAt: 1500, updatedAt: 2500, computedAt: null, analysisId: null, detail: null, childrenOk: null },
     ],
   };
 
@@ -341,8 +358,9 @@ describe("GET /api/analyses/status(Issue #180)", () => {
     expect(json.ok).toBe(true);
     expect(json.kaisai_date).toBe(DATE);
     expect(json.races).toEqual([
-      { race_id: "202603020210", status: "done", attempts: 1, error: null, queued_at: 1000, updated_at: 2000, prior: true },
-      { race_id: RACE, status: "failed", attempts: 3, error: "x".repeat(200), queued_at: 1500, updated_at: 2500, prior: false },
+      { race_id: "202603020210", mode: "morning", status: "done", attempts: 1, error: null, queued_at: 1000, updated_at: 2000, prior: true, analysis_id: null, detail: null, children_ok: null },
+      { race_id: "202603020210", mode: "pre_race", status: "done", attempts: 1, error: null, queued_at: 3000, updated_at: 4000, prior: false, analysis_id: 7, detail: "stored", children_ok: true },
+      { race_id: RACE, mode: "pre_race", status: "failed", attempts: 3, error: "x".repeat(200), queued_at: 1500, updated_at: 2500, prior: false, analysis_id: null, detail: null, children_ok: null },
     ]);
     expect(raceDay.priors).toEqual([]); // race_id を指定しなければ、朝の prior の中身は引かない
   });
