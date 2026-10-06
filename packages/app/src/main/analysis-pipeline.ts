@@ -216,6 +216,14 @@ export interface AnalysisPipelineDeps {
     cutoffDate: string,
   ) => Promise<GradeWinnerTrendSummary | null>;
   /**
+   * `getRaceResultDetails`(バッチ)が失敗したときに呼ばれる警告用フック(Issue #177)。失敗しても分析は止めず、当日傾向なし(null)で続ける。
+   * 省略時は黙って null にする。単発の `getRaceResultDetail` の失敗にはこのフックは使わない(従来どおり runAnalysis が reject する)。
+   */
+  readonly onSameDayTrendError?: (info: {
+    readonly raceId: RaceId;
+    readonly message: string;
+  }) => void;
+  /**
    * getGradeWinnerTrend が例外を投げたときに呼ばれる診断ログ用フック(要修正10・2026-07-28
    * boss裁定)。事前にグレードバッジ判定で呼び出しをゲートしているため、それでも呼び出しが
    * 例外を投げるのは「重賞と判定したのに取得・パースが失敗した」という本物の異常
@@ -495,9 +503,20 @@ export async function runAnalysis(
     let sameDayTrend: ReturnType<typeof collectSameDayTrend> = null;
     if (deps.getRaceResultDetails || deps.getRaceResultDetail) {
       const precedingIds = precedingRaceIdsSameDay(raceId);
-      let detailsById: ReadonlyMap<string, RaceResultDetail | undefined>;
+      let detailsById: ReadonlyMap<string, RaceResultDetail | undefined> | null;
       if (deps.getRaceResultDetails) {
-        detailsById = await deps.getRaceResultDetails(precedingIds);
+        // バッチの読み出しの失敗(クラウド版は D1)は、当日傾向なし(null)として分析を続ける(Issue #177 の決定)。当日傾向は補助情報で、
+        // これが無いだけで LLM 分析全体(実課金を伴う)を止めない。警告フックに理由を渡す。単発の getRaceResultDetail(exe の同期の束縛)が
+        // throw したときは、従来どおり runAnalysis が reject する(exe の挙動は変えない)。
+        try {
+          detailsById = await deps.getRaceResultDetails(precedingIds);
+        } catch (error) {
+          detailsById = null;
+          deps.onSameDayTrendError?.({
+            raceId,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       } else {
         const single = deps.getRaceResultDetail!;
         const loaded = new Map<string, RaceResultDetail | undefined>();
@@ -506,7 +525,10 @@ export async function runAnalysis(
         }
         detailsById = loaded;
       }
-      sameDayTrend = collectSameDayTrend(raceId, race.race.courseType, (id) => detailsById.get(id));
+      if (detailsById !== null) {
+        const loadedDetails = detailsById;
+        sameDayTrend = collectSameDayTrend(raceId, race.race.courseType, (id) => loadedDetails.get(id));
+      }
     }
 
     // 同レース(重賞)の過去10年結果傾向(タスク機能B)。getGradeWinnerTrend が注入され、かつ

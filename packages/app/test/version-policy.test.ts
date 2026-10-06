@@ -215,7 +215,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // ---------------------------------------------------------------------------
 
 /** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
-const EXPECTED_APP_VERSION = "1.19.11";
+const EXPECTED_APP_VERSION = "1.19.12";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
 
@@ -234,7 +234,7 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.19.11(Issue #173〈#169-c〉: クラウド版の R2 の操作回数の安全柵〈migration 0003 の r2_ops・保存の batch でのカウント・無料枠の 10% の柵・getR2Usage〉。変更は cloud/・scripts/・docs だけで、exe のアプリコードは無変更。利用者から見える変化なし)である", () => {
+  it("root と app の version が 1.19.12(Issue #177〈#164-b〉: クラウド版の日単位の DO〈RaceDay〉・取得キャッシュ〈DoSqlCacheStore〉・朝の取得と prior。変更は cloud/・scripts/・docs と、runAnalysis の当日傾向のバッチ失敗の扱い〈クラウド版だけが渡す任意の dep〉で、exe の出力は無変更〈golden で固定〉。利用者から見える変化なし)である", () => {
     // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
     // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5、
     // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2、

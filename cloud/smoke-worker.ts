@@ -30,6 +30,7 @@ import { NetkeibaGate as RealGate } from "./src/netkeiba-gate-do";
 import type { ConnectFn, SocketLike } from "./src/socket-fetch";
 import type { Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
+import { RaceDay } from "./src/race-day-do";
 import worker from "./src/worker";
 
 /** 偽ソケットの印(本番のバンドルに入っていないことの検査に使う)。メインモジュールの export は Worker・DO のクラスだけにできるので、export しない。 */
@@ -45,6 +46,16 @@ function route(host: string, path: string): { status: number; body: string } {
   }
   if (host === "nar.netkeiba.com" && path.startsWith("/race/shutuba.html") && raceId === "202654071210") {
     return { status: 200, body: narHtml };
+  }
+  // Issue #177: RaceDay(朝の取得)の確認用。出馬表のほかに、戦績 API(db ホスト)・調教・単勝複勝のオッズ(type=1)を fixture で返す。
+  if (host === "db.netkeiba.com" && path.startsWith("/horse/ajax_horse_results.html")) {
+    return { status: 200, body: fixtureText(`https://db.netkeiba.com${path}`) };
+  }
+  if (host === "race.netkeiba.com" && path.startsWith("/race/oikiri.html") && raceId === "202603020211") {
+    return { status: 200, body: oikiriHtml };
+  }
+  if (host === "race.netkeiba.com" && path.startsWith("/api/api_get_jra_odds.html") && raceId === "202603020211" && /[?&]type=1(&|$)/.test(path)) {
+    return { status: 200, body: JSON.stringify(oddsJson) };
   }
   // ブレーカーの確認用: この race_id は、netkeiba に拒否された(403)ことにする。
   if (host === "race.netkeiba.com" && raceId === "202605010101") {
@@ -179,8 +190,54 @@ async function smokeAnalysis(): Promise<Response> {
   });
 }
 
+/** 日単位の DO(Issue #177)。本番の入口(#180)はまだ無いので、smoke だけが RPC を呼ぶ。 */
+export { RaceDay };
+
+type SmokeEnv = Env & { RACE_DAY: DurableObjectNamespace<RaceDay> };
+
+/**
+ * Issue #177: 日単位の DO `RaceDay` を、workerd の実環境(本物の DO の SQLite・アラーム・NetkeibaGate への RPC・偽ソケット)で通す。
+ *  - `/smoke/race-day/schedule?date=...&race_id=...`: 予約(RPC。予約だけをして戻る)
+ *  - `/smoke/race-day/board?date=...`: 状態(RPC)
+ *  - `/smoke/race-day/prior?date=...&race_id=...`: 朝の prior の要約(RPC。頭数・LLM の使用・組合せオッズの有無・prior の値)
+ * smoke 専用(認証の関門の前に置く。netkeiba にも Anthropic にも出ない)。
+ */
+async function smokeRaceDay(url: URL, env: SmokeEnv): Promise<Response> {
+  const date = url.searchParams.get("date") ?? "";
+  const stub = env.RACE_DAY.get(env.RACE_DAY.idFromName(date));
+  if (url.pathname === "/smoke/race-day/schedule") {
+    return Response.json(await stub.schedule({ raceId: url.searchParams.get("race_id") ?? "", kaisaiDate: date }));
+  }
+  if (url.pathname === "/smoke/race-day/board") {
+    return Response.json(await stub.getBoard());
+  }
+  const prior = await stub.getMorningPrior(url.searchParams.get("race_id") ?? "");
+  return Response.json(
+    prior === null
+      ? { ok: true, prior: null }
+      : {
+          ok: true,
+          prior: {
+            rows: prior.result.rows.length,
+            llmUsed: prior.result.llmUsed,
+            dateApproximate: prior.result.dateApproximate,
+            hasWideCombo: "wideCombo" in prior.result,
+            priors: prior.result.rows.map((r) => [r.umaban, r.prior]),
+          },
+        },
+  );
+}
+
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: SmokeEnv, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/smoke/race-day/")) {
+      try {
+        return await smokeRaceDay(url, env);
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
     if (new URL(request.url).pathname === "/smoke/analysis") {
       try {
         return await smokeAnalysis();
@@ -190,4 +247,4 @@ export default {
     }
     return worker.fetch(request, env, ctx);
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<SmokeEnv>;

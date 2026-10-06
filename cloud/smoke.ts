@@ -239,6 +239,61 @@ async function main(): Promise<void> {
         check(`${label}: 応答に ${secret === EMAIL ? "メール" : secret === AUD ? "AUD" : "チーム名"} が含まれない`, !all.includes(secret));
       }
     });
+
+    // F. (Issue #177)日単位の DO `RaceDay` を、workerd の実環境で通す: 予約(RPC は予約だけ)→ アラーム(取得 → 計算の2ステップ)→ 朝の prior が DO に残る。
+    //    取得は NetkeibaGate の偽ソケット経由(中央16頭の 19 本。gate の間隔 2 秒で、約 40 秒かかる)。2回目はキャッシュで、gate の間隔の待ちが無く速い。
+    //    D1 には何も書かれない(GET /api/analyses が空のまま)。E とは別の起動(E はブレーカーを開くので、その前の別の状態で動かす)。
+    await withWorker(BASE_PORT + 5, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+      const port = BASE_PORT + 5;
+      const label = "F(RaceDay)";
+      const date = "20260628";
+      const raceId = "202603020211";
+      const golden = JSON.parse(readFileSync(path.join("..", "packages", "app", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
+        noLlmNoAllocationNoDate: { result: { rows: { umaban: number; prior: number }[] } };
+      };
+
+      const scheduled = await req(port, "GET", `/smoke/race-day/schedule?date=${date}&race_id=${raceId}`);
+      const scheduledJson = parseJson(scheduled.text);
+      check(`${label}: 予約は予約だけをして戻る(accepted・status queued)`, scheduled.status === 200 && scheduledJson["accepted"] === true && scheduledJson["status"] === "queued", `${scheduled.status} ${scheduled.text.slice(0, 200)}`);
+      const duplicate = await req(port, "GET", `/smoke/race-day/schedule?date=${date}&race_id=${raceId}`);
+      check(`${label}: 実行中の同じレースの二重の予約は受け付けない`, parseJson(duplicate.text)["accepted"] === false, duplicate.text.slice(0, 200));
+
+      // アラームが動いて done になるまで待つ(上限つき: 1 秒間隔で最大 150 回 = 150 秒)
+      const waitDone = async (): Promise<Record<string, unknown>> => {
+        let board: Record<string, unknown> = {};
+        for (let i = 0; i < 150; i++) {
+          board = parseJson((await req(port, "GET", `/smoke/race-day/board?date=${date}`)).text);
+          const races = board["races"] as { status: string }[] | undefined;
+          if (races?.[0]?.status === "done" || races?.[0]?.status === "failed") {
+            return board;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        return board;
+      };
+      const started = Date.now();
+      const board = await waitDone();
+      const firstMs = Date.now() - started;
+      const race = (board["races"] as Record<string, unknown>[] | undefined)?.[0];
+      check(`${label}: アラームで取得 → 計算が進み、done になる(約 ${Math.round(firstMs / 1000)} 秒)`, race?.["status"] === "done" && race["error"] === null && board["kaisaiDate"] === date, JSON.stringify(board).slice(0, 300));
+      check(`${label}: 取得は gate の間隔(2 秒 × 19 本)を守っている(冷えた状態で 30 秒以上かかる)`, firstMs >= 30_000, `${firstMs}ms`);
+
+      const prior = parseJson((await req(port, "GET", `/smoke/race-day/prior?date=${date}&race_id=${raceId}`)).text)["prior"] as Record<string, unknown> | null;
+      check(`${label}: 朝の prior が DO に残る(16頭・LLM なし・組合せオッズなし・近似の日付ではない)`, prior !== null && prior["rows"] === 16 && prior["llmUsed"] === false && prior["hasWideCombo"] === false && prior["dateApproximate"] === false, JSON.stringify(prior).slice(0, 200));
+      check(`${label}: 朝の prior の値が、exe 側の golden(LLM なし)の prior と一致する(workerd でも同じ計算)`, JSON.stringify(prior?.["priors"]) === JSON.stringify(golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior])), "");
+
+      // 2回目: キャッシュ(出馬表 10 分・戦績 24 時間・調教 6 時間・オッズ 60 秒の内側)で、gate への取得が0本 = 間隔の待ちが無く速い
+      const second = await req(port, "GET", `/smoke/race-day/schedule?date=${date}&race_id=${raceId}`);
+      check(`${label}: 完了済みのレースは再予約できる`, parseJson(second.text)["accepted"] === true, second.text.slice(0, 200));
+      const secondStarted = Date.now();
+      const secondBoard = await waitDone();
+      const secondMs = Date.now() - secondStarted;
+      check(`${label}: 2回目はキャッシュに当たり、gate の取得が無い(10 秒以内に done)`, (secondBoard["races"] as { status: string }[])[0]?.status === "done" && secondMs < 10_000, `${secondMs}ms`);
+
+      // D1 に何も書かれていない(朝の prior は DO にだけ置く)
+      const analyses = await req(port, "GET", "/api/analyses");
+      check(`${label}: D1 には何も書かれない(GET /api/analyses が空のまま)`, analyses.status === 200 && analyses.text === JSON.stringify({ ok: true, analyses: [] }), `${analyses.status} ${analyses.text.slice(0, 120)}`);
+    });
   } finally {
     rmSync(CONFIG_PATH, { force: true });
     rmSync(FAKE_CONFIG_PATH, { force: true });

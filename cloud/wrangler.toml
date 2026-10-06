@@ -26,9 +26,20 @@ enabled = true
 name = "NETKEIBA_GATE"
 class_name = "NetkeibaGate"
 
+# 日単位の Durable Object(Issue #177〈#164-b〉)。`idFromName(kaisaiDate)` で、その日の全レースの朝の準備(取得 → prior)を直列に処理し、
+# 取得キャッシュ・朝の prior・状態を自分の SQLite に置く。クラス名は migration に固定される。呼び出す入口は #180(本番)・smoke(ローカル)。
+[[durable_objects.bindings]]
+name = "RACE_DAY"
+class_name = "RaceDay"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
+
+# 追加だけ(v1 の NetkeibaGate には触れない)。
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RaceDay"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

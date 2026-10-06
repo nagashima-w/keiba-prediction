@@ -36,6 +36,19 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
+  it("Issue #177: 日単位の DO(RACE_DAY・RaceDay)は migration v2 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+    const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
+    expect(migrations).toEqual([
+      ["v1", '"NetkeibaGate"'],
+      ["v2", '"RaceDay"'],
+    ]);
+    expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
+    expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
+    expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
+    // DO のバインディングはちょうど2つ(NETKEIBA_GATE・RACE_DAY)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(2);
+  });
+
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {
     expect(tomlCode).not.toMatch(/^\[vars\]/m);
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);

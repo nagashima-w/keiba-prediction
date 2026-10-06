@@ -40,7 +40,7 @@ const RESULTS_BY_HORSE: Record<string, string> = {
   "2023101569": "horse_results_2024104976.json",
 };
 
-function fixtureForUrl(url: string): string {
+export function fixtureForUrl(url: string): string {
   if (url.includes("shutuba.html")) return loadFixture("shutuba_202603020211.html");
   if (url.includes("ajax_horse_results")) {
     const horseId = /[?&]id=([^&]+)/.exec(url)?.[1] ?? "";

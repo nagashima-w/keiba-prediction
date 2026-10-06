@@ -35,6 +35,19 @@ const workDirs: string[] = [];
 /** 偽ソケットの印(smoke-worker.ts が持つ文字列)。 */
 const FAKE_SOCKET_MARKERS = ["keiba-smoke-fake-socket", "by fake socket"];
 
+/**
+ * 対照・probe 用の一時設定から、日単位の DO(RACE_DAY・RaceDay。Issue #177)の binding と migration v2 を除く。
+ * wrangler は binding のクラスが入口から export されていることを要求するが、probe の入口は RaceDay を export しない(RaceDay を巻き込まない対照のため)。
+ */
+function withoutRaceDay(toml: string): string {
+  const stripped = toml
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_DAY"\nclass_name = "RaceDay"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v2"\nnew_sqlite_classes = \["RaceDay"\]\n/, "");
+  expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
+  expect(stripped).not.toContain("RaceDay");
+  return stripped;
+}
+
 function bundle(configPath: string | null, outputName: string): string {
   const outDir = mkdtempSync(path.join(tmpdir(), "keiba-bundle-guard-"));
   workDirs.push(outDir);
@@ -140,7 +153,7 @@ describe("本番のバンドルと D1(Issue #171)", () => {
         'import { AnalysisStore } from "../packages/core/src/ev/analysis-store";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(AnalysisStore)); } };\n',
       );
       const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
-      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "native-probe.generated.ts"');
+      const probeConfig = withoutRaceDay(base).replace('main = "src/worker.ts"', 'main = "native-probe.generated.ts"');
       expect(probeConfig).not.toBe(base);
       writeFileSync(NATIVE_PROBE_CONFIG, probeConfig);
       let seen: string;
@@ -195,7 +208,7 @@ describe("本番のバンドルと保存側のコード(Issue #175)", () => {
     () => {
       writeFileSync(STORE_ABSENT_ENTRY, 'export { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response("probe"); } };\n');
       const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
-      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "store-absent-probe.generated.ts"');
+      const probeConfig = withoutRaceDay(base).replace('main = "src/worker.ts"', 'main = "store-absent-probe.generated.ts"');
       expect(probeConfig).not.toBe(base);
       writeFileSync(STORE_ABSENT_CONFIG, probeConfig);
       const code = bundle(STORE_ABSENT_CONFIG, "store-absent-probe.generated.js");
@@ -237,7 +250,7 @@ describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
         'import { runCloudAnalysis } from "./src/pipeline";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(runCloudAnalysis)); } };\n',
       );
       const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
-      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "pipeline-probe.generated.ts"');
+      const probeConfig = withoutRaceDay(base).replace('main = "src/worker.ts"', 'main = "pipeline-probe.generated.ts"');
       expect(probeConfig).not.toBe(base);
       writeFileSync(PIPELINE_PROBE_CONFIG, probeConfig);
       const code = bundle(PIPELINE_PROBE_CONFIG, "pipeline-probe.generated.js");
@@ -263,7 +276,7 @@ describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
         'import { ScrapeCache } from "../packages/core/src/index";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(ScrapeCache)); } };\n',
       );
       const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
-      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "barrel-probe.generated.ts"');
+      const probeConfig = withoutRaceDay(base).replace('main = "src/worker.ts"', 'main = "barrel-probe.generated.ts"');
       expect(probeConfig).not.toBe(base);
       writeFileSync(BARREL_PROBE_CONFIG, probeConfig);
       let seen: string;
@@ -274,6 +287,59 @@ describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
         seen = `${String(e.stdout ?? "")}${String(e.stderr ?? "")}${e.message ?? ""}`;
       }
       expect(seen.includes("better-sqlite3")).toBe(true);
+    },
+    120_000,
+  );
+});
+
+/**
+ * Issue #177(#164-b): 日単位の DO `RaceDay` と、それが使う runAnalysis・取得キャッシュが、**本番のバンドル**(`src/worker.ts`)に入ること。
+ * `worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)ので、runCloudAnalysis も本番のバンドルに入る。
+ * **前提(空振り防止)**: RaceDay・取得キャッシュ・runAnalysis 固有の ASCII 識別子(wrangler のバンドルは日本語を \uXXXX に直すので、日本語では見つからない)が
+ * ソースにあり、バンドルにある。対照: RaceDay を export しない入口(store-absent の対照)のバンドルには、これらが無い。
+ * テスト専用の `node:sqlite` はバンドルに入らない。
+ */
+const RACE_DAY_MARKERS = ["race_day_morning_prior", "race_day_tasks", "fetch_cache", "serializeGate", "CacheMissError", "RaceDayCore"];
+
+describe("本番のバンドルと日単位の DO(Issue #177)", () => {
+  it("前提: 検出する文字列は、race-day-core.ts・do-cache-store.ts に実際にある。worker.ts は RaceDay を export する", () => {
+    const source =
+      readFileSync(path.join(CLOUD, "src", "race-day-core.ts"), "utf-8") + readFileSync(path.join(CLOUD, "src", "do-cache-store.ts"), "utf-8");
+    for (const marker of RACE_DAY_MARKERS) {
+      expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
+    }
+    expect(readFileSync(path.join(CLOUD, "src", "worker.ts"), "utf-8")).toMatch(/export \{ RaceDay \} from "\.\/race-day-do"/);
+  });
+
+  it(
+    "本番のバンドルに、RaceDay・取得キャッシュ・runAnalysis の識別子が入っていて、better-sqlite3・node:sqlite・偽ソケットは入っていない。圧縮後 3 MB 以内",
+    () => {
+      const code = bundle(null, "worker.js");
+      for (const marker of [...RACE_DAY_MARKERS, ...PIPELINE_MARKERS]) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+      expect(code.includes("better-sqlite3"), "better-sqlite3 が無い").toBe(false);
+      expect(code.includes("node:sqlite"), "テスト専用の node:sqlite が無い").toBe(false);
+      for (const marker of FAKE_SOCKET_MARKERS) {
+        expect(code.includes(marker), `偽ソケットの印 ${marker} が無い`).toBe(false);
+      }
+      expect(gzipSync(code).length).toBeLessThan(3 * 1024 * 1024);
+    },
+    120_000,
+  );
+
+  it(
+    "対照: RaceDay を参照しない入口でバンドルすると、RaceDay の識別子は見つからない(検出が、実際に入っているときだけ拾えることの確認)",
+    () => {
+      writeFileSync(STORE_ABSENT_ENTRY, 'export { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response("probe"); } };\n');
+      const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
+      const probeConfig = withoutRaceDay(base).replace('main = "src/worker.ts"', 'main = "store-absent-probe.generated.ts"');
+      expect(probeConfig).not.toBe(base);
+      writeFileSync(STORE_ABSENT_CONFIG, probeConfig);
+      const code = bundle(STORE_ABSENT_CONFIG, "store-absent-probe.generated.js");
+      for (const marker of ["race_day_morning_prior", "fetch_cache", "RaceDayCore"]) {
+        expect(code.includes(marker), `対照のバンドルに ${marker} が無い`).toBe(false);
+      }
     },
     120_000,
   );

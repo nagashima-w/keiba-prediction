@@ -2518,6 +2518,28 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`r2_ops` はクラウド版の D1 だけの表で、exe は使わない)
 
+## 次の正式版が 1.19.12 である根拠(Issue #177〈#164-b〉での変更)
+
+**patch**(クラウド版の日単位の Durable Object `RaceDay`・取得キャッシュ・朝の取得と prior。**exe の出力は変わらない**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- cloud: `src/race-day-core.ts`(`RaceDayCore`。予約・取得ステップ・計算ステップ・状態・再試行・`serializeGate`)・`src/race-day-do.ts`(`RaceDay`。薄いラッパ)・`src/do-cache-store.ts`(`DoSqlCacheStore`。`CacheStore` の DO の SQLite 実装)・
+  `src/sql-like.ts`、`wrangler.toml` の DO binding `RACE_DAY` と migration v2(`new_sqlite_classes = ["RaceDay"]`。v1 の NetkeibaGate には触れない)、`worker.ts` が `RaceDay` を export
+- app: `runAnalysis` の任意の dep `onSameDayTrendError`(クラウド版のバッチ `getRaceResultDetails` が失敗したとき、当日傾向なし〈null〉で分析を続け、警告フックに理由を渡す)。
+  exe の束縛〈単発の `getRaceResultDetail`〉は無変更で、throw したときは従来どおり runAnalysis が reject する
+- テスト: core の `cache-store-contract.test.ts`(`ScrapeCache` に契約を当てる)・共有の契約 `fixtures/cache-store-contract.json`、cloud の `do-cache-store.test.ts`・`race-day-core.test.ts`・`bundle-guard.test.ts`・smoke(workerd で RaceDay を通す)、
+  scripts の `cloud-config-guard.test.ts`、docs(`docs/current-spec.md`・`docs/issue-order.md`)
+
+### patch である根拠
+
+- exe の保存レコード・画面に返す結果・LLM に渡る入力は変わらない(`analysis-pipeline-golden.test.ts` が緑のまま)。変更した runAnalysis の経路は、exe が渡さないバッチの dep の失敗時だけ
+- 本番から呼び出す入口は無い(入口は #180)。クラウド版の利用者に見える変化も無い
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値も変わらない
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

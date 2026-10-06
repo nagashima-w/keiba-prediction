@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.11)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.12)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.11`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.12`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1107,6 +1107,25 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **検査**: `packages/app/test/analysis-pipeline-golden.test.ts`(exe の出力)・`analysis-pipeline-async-deps.test.ts`(非同期 deps・バッチ)、core の `native-free-modules.test.ts`、cloud の `import-guard.test.ts`(型を含む閉包・alias の一致)・`bundle-guard.test.ts`(runAnalysis がバンドルに入り better-sqlite3 が入らない)・
   `pipeline-run.test.ts`(golden との一致)、smoke(workerd で `runAnalysis` が最後まで通り、golden と SHA-256 まで一致)。
 - **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST のため、gate が GET だけの間はクラウドでは取れない(#181)。
+
+### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
+**本番から呼び出す入口はまだ無い**(入口は #180。定時の起動は #166)。`worker.ts` が `RaceDay` を export し(wrangler が binding のクラスを要求する)、ローカルの smoke だけが RPC を呼んで通す。
+- **DO `RaceDay`**(`cloud/src/race-day-do.ts`。薄いラッパ。ロジックは `race-day-core.ts` の `RaceDayCore`〈純ロジック〉): `idFromName(kaisaiDate)` で、その日の全レースの朝の準備を直列に処理する。
+  wrangler.toml は binding `RACE_DAY` と migration **v2**(`new_sqlite_classes = ["RaceDay"]`。v1 の NetkeibaGate には触れない)。DO は最初の予約の開催日に固定し、別の日・レースIDの年と違う日は拒否する。
+- **予約は予約だけ**(`schedule`: `setAlarm(now)` して戻る)。本処理はアラーム(`runNextStep`)で、**1回に1レースの1ステップ**。実行中(queued・fetched)の同じレースの二重の予約は受け付けない。
+  - **ステップ1(取得)**: `scrapeRace`(変更なし。組合せオッズは取らない)でキャッシュを埋める。**冷えた状態の中央16頭で gate への取得は 19 本**(出馬表 1・戦績 16・調教 1・単勝複勝 1。フィクスチャで計数)。
+    gate への呼び出しは `serializeGate` で直列(同時に1本)。戦績の取りこぼし(`scrapeRace` は警告にして続ける)は成功にせず再試行する。
+  - **ステップ2(計算)**: **ネットワークに出ず**キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)`(鮮度は実質無期限で読む)。結果(`AnalysisResult`)を `race_day_morning_prior` に置く。**D1・R2 には書かない**(ユーザー判断)。
+    キャッシュに戦績が無ければ失敗にする(戦績なしの prior を黙って作らない)。
+  - 再試行: 取得ステップは最大 3 回・60 秒間隔(取れたぶんはキャッシュにあるので、取れなかったぶんだけ取り直す)。ブレーカーが開いている(blocked)・許可リスト外は直ちに失敗。計算ステップの失敗は再試行しない。
+- **取得キャッシュ**(`do-cache-store.ts`の `DoSqlCacheStore`。`CacheStore` の DO の SQLite 実装。表 `fetch_cache`): 鮮度は読み取り側で判定(経過が `maxAgeMs` を**超えたら**ミス。ちょうどはヒット)、同じキーは上書き、
+  **2 MiB(UTF-8 のバイト数)を超える本文は保存しない**(例外にもしない。同じキーの古い本文は消す)、期限切れの掃除 `purgeOlderThan`(仕事が無くなったとき、保持期間 26 時間を超えた行だけ)。
+  契約は `packages/core/test/fixtures/cache-store-contract.json`(exe の `ScrapeCache` と DO 版の両方のテストが読む)。DO の SQLite の1行の大きさの上限(約 2 MB)に対する余裕は、公式ドキュメントの値で確認していない。
+- **runAnalysis**: バッチの `getRaceResultDetails` が失敗したときは、当日傾向なし(null)で分析を続け、任意の `onSameDayTrendError` に理由を渡す(決定: 当日傾向は補助情報で、これが無いだけで分析全体〈実課金を伴いうる〉を止めない)。
+  exe の同期の単発 `getRaceResultDetail` が throw したときは従来どおり runAnalysis が reject する。
+- **検査**: core `cache-store-contract.test.ts`、cloud `do-cache-store.test.ts`・`race-day-core.test.ts`(本物の SQLite〈`node:sqlite`〉・偽の gate)・`bundle-guard.test.ts`(本番のバンドルに RaceDay・取得キャッシュ・runAnalysis が入り、better-sqlite3・`node:sqlite` は入らない)、
+  scripts `cloud-config-guard.test.ts`(migration は v2 の追加だけ)、smoke(workerd で、予約 → アラーム → 取得 → 計算 → 朝の prior が golden と一致・2回目はキャッシュで速い・D1 は空のまま)。
+- **限界**: Free の「1呼び出しあたりのサブリクエスト 50」に DO の中のソケット・DO への RPC が数えられるかは未確定のまま(ステップを分け、1ステップの gate への呼び出しを 19 本に抑えている)。本番の DO・アラームは未確認。
 
 ## 主な当初仕様との差異(記録)
 

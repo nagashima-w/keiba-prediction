@@ -212,4 +212,75 @@ describe("当日傾向の読み出し(Issue #176 AC-a3・AC-a4)", () => {
     );
     expect(calls).toBe(0);
   });
+
+  it("バッチの getRaceResultDetails が reject しても、分析は止めない: 当日傾向なし(null)で最後まで通り、警告フックに理由が渡る(補助情報なので。Issue #177 の決定)", async () => {
+    const captured: Parameters<NonNullable<AnalysisPipelineDeps["analyze"]>>[0][] = [];
+    const warnings: { raceId: string; message: string }[] = [];
+    const saved: AnalysisRecord[] = [];
+    const result = await runAnalysis(
+      RACE_ID,
+      KAISAI_DATE,
+      await baseDeps({
+        analyze: stubAnalyze(captured),
+        saveAnalysis: (record) => {
+          saved.push(record);
+          return saved.length;
+        },
+        getRaceResultDetails: async () => {
+          await later(null, 2);
+          throw new Error("D1 の読み出しに失敗");
+        },
+        onSameDayTrendError: (info) => warnings.push({ raceId: info.raceId, message: info.message }),
+      }),
+    );
+    expect(captured).toHaveLength(1); // LLM は呼ばれている(分析は続いた)
+    expect(captured[0]!.race.sameDayTrend).toBeNull();
+    expect(saved).toHaveLength(1);
+    expect(result.llmUsed).toBe(true);
+    expect(warnings).toEqual([{ raceId: RACE_ID, message: "D1 の読み出しに失敗" }]);
+  });
+
+  it("警告フックが無くても、バッチの reject で分析は止まらない。同期に throw する束縛でも同じ", async () => {
+    const captured: Parameters<NonNullable<AnalysisPipelineDeps["analyze"]>>[0][] = [];
+    await runAnalysis(
+      RACE_ID,
+      KAISAI_DATE,
+      await baseDeps({
+        analyze: stubAnalyze(captured),
+        getRaceResultDetails: () => {
+          throw new Error("同期の失敗");
+        },
+      }),
+    );
+    expect(captured[0]!.race.sameDayTrend).toBeNull();
+  });
+
+  it("対照: 単発の getRaceResultDetail(exe の同期の束縛)が throw したら、従来どおり runAnalysis が reject する(exe の挙動は変えない)", async () => {
+    await expect(
+      runAnalysis(
+        RACE_ID,
+        KAISAI_DATE,
+        await baseDeps({
+          analyze: stubAnalyze([]),
+          getRaceResultDetail: () => {
+            throw new Error("exe の読み出し失敗");
+          },
+        }),
+      ),
+    ).rejects.toThrow("exe の読み出し失敗");
+  });
+
+  it("バッチが成功したときは警告フックを呼ばない", async () => {
+    const warnings: unknown[] = [];
+    await runAnalysis(
+      RACE_ID,
+      KAISAI_DATE,
+      await baseDeps({
+        analyze: stubAnalyze([]),
+        getRaceResultDetails: (ids) => new Map(ids.map((id) => [id, sameDayDetailOf(id)])),
+        onSameDayTrendError: (info) => warnings.push(info),
+      }),
+    );
+    expect(warnings).toEqual([]);
+  });
 });
