@@ -14,8 +14,11 @@
  *    fetch の実装が付けるヘッダを送る(共有秘密などは送らない)。**Worker の subrequest には Cloudflare が
  *    `CF-Worker`(Worker を所有するゾーン名。workers.dev のサブドメインを含みうる)などを付けるので、それがエコーを
  *    運営する第三者に届く**。ランナー側は、ランナーの IP が届く(エコーは送信元として必ず見る)。
- *  - E2: Worker にだけ現れたヘッダ(`CF-Worker`・`CF-Connecting-IP` など。Worker が付けた生の値)を、**ランナーから
- *    netkeiba へ送る**。これは Worker が netkeiba に送るものと同じ内容で、実験として意図したもの。
+ *  - **エコー宛てで観測したものを、netkeiba 宛ての代理として使う**: Worker が netkeiba へ実際に送るヘッダは、
+ *    netkeiba 側では観測できない。E1 でエコーに届いたヘッダ(Worker が非 Cloudflare の宛先へ送ったもの)を、
+ *    netkeiba 宛てでも同じと仮定している。この仮定は E1 の範囲では確かめられない(結論の限界に書く)。
+ *  - E2: その仮定のもとで、Worker にだけ現れたヘッダ(`CF-Worker`・`CF-Connecting-IP` など。**エコーで観測した生の値**)を、
+ *    **ランナーから netkeiba へ送る**。実験として意図したもの。
  *  - E3: ランナーの観測から導出したヘッダ(生の値)を、Worker のソケットから netkeiba へ送る。
  */
 

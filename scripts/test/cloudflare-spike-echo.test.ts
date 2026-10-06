@@ -173,6 +173,53 @@ describe("computeHeaderDiff(Worker とランナーのヘッダ差)", () => {
     ]);
   });
 
+  describe("同名のヘッダが複数回現れたとき(', ' で連結して1つの値にする)", () => {
+    it("Worker 側に同名が2回あれば、出現順に ', ' で連結した値で workerOnly に入る(名前は最初の出現のもの)", () => {
+      const d = computeHeaderDiff(
+        [
+          { name: "X-Dup", value: "1" },
+          { name: "x-dup", value: "2" },
+        ],
+        [],
+      );
+      expect(d.workerOnly).toEqual([{ name: "X-Dup", value: "1, 2" }]);
+    });
+
+    it("両側が同じ連結値なら、値の差に数えない(Worker は2行・ランナーは1行 'a, b' でも同じ)", () => {
+      const d = computeHeaderDiff(
+        [
+          { name: "x-a", value: "a" },
+          { name: "x-a", value: "b" },
+        ],
+        [{ name: "x-a", value: "a, b" }],
+      );
+      expect(d.valueDiffers).toEqual([]);
+      expect(d.workerOnly).toEqual([]);
+    });
+
+    it("連結値が違えば、連結した値のまま値の差に入る(区切りは ', ' で、',' だけにはしない)", () => {
+      const d = computeHeaderDiff(
+        [
+          { name: "x-a", value: "a" },
+          { name: "x-a", value: "b" },
+        ],
+        [{ name: "x-a", value: "a" }],
+      );
+      expect(d.valueDiffers).toEqual([{ name: "x-a", workerValue: "a, b", runnerValue: "a" }]);
+    });
+
+    it("ランナー側の同名の連結も同じ規則(値の差の runnerValue に連結値が入る)", () => {
+      const d = computeHeaderDiff(
+        [{ name: "x-a", value: "z" }],
+        [
+          { name: "X-A", value: "p" },
+          { name: "x-a", value: "q" },
+        ],
+      );
+      expect(d.valueDiffers).toEqual([{ name: "x-a", workerValue: "z", runnerValue: "p, q" }]);
+    });
+  });
+
   it("エコー側のインフラが足す揮発のヘッダ(x-amzn-trace-id)は、値が違っても差に数えない", () => {
     const d = computeHeaderDiff([{ name: "X-Amzn-Trace-Id", value: "Root=1-a" }], [{ name: "X-Amzn-Trace-Id", value: "Root=1-b" }]);
     expect(d.valueDiffers).toEqual([]);

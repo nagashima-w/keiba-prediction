@@ -1,13 +1,16 @@
-# Cloudflare 移行スパイク(Issue #159〈#21-A〉)の結果
+# Cloudflare 移行スパイク(Issue #159〈#21-A〉・#160〈#21-B〉)の結果
 
-#21(分析全体とスマホの画面を Cloudflare へ移す)の前提だった2点を、実際に Cloudflare に Worker をデプロイして測った。
+#21(分析全体とスマホの画面を Cloudflare へ移す)の前提だった2点を、実際に Cloudflare に Worker をデプロイして測った(#159)。
 
 1. netkeiba は、Cloudflare Workers からのアクセスを受け付けるか
 2. 無料(Free)プランの範囲で、処理を組めるか(普通の Worker と、SQLite バックエンドの Durable Object〈以下 DO〉の両方)
 
-**このファイルの数値は、第2ラウンドの結果 JSON(`round2-result.json`)から `scripts/cloudflare-spike/render-report.ts` で
-生成した節(「第2ラウンドの結果」)にある。手で書き写していない。** 生成の節の外にある本文は手で書いたもので、数値を
-繰り返さず、表を指す。例外として、JSON の個別のサンプルを指して引用した数値には出所(`cpu.samples[n]`)を添えた。
+1 の答えは「Worker の fetch からは HTTP 400 で取れない」だったので、その原因の切り分けを #160 で行った(**第3ラウンド。§7**)。
+
+**このファイルの数値は、結果 JSON(第2ラウンドは `round2-result.json`、第3ラウンドは `round3-result.json`)から
+`scripts/cloudflare-spike/render-report.ts` で生成した節(「第2ラウンドの結果」「7.2 第3ラウンドの結果」)にある。手で書き写していない。**
+生成の節の外にある本文は手で書いたもので、数値を繰り返さず、表を指す。例外として、JSON の個別のサンプルを指して引用した数値には
+出所(`cpu.samples[n]`)を添えた。
 
 ## 1. 結論(事実と推測を分ける)
 
@@ -32,9 +35,10 @@
 
 ### 推測・未確認(事実ではない)
 
-- **400 の原因は未切り分け。** 「Cloudflare の送信元 IP の範囲」なのか、「Workers が subrequest に付ける要素(ヘッダ・TLS の特徴など)」
-  なのかは分からない。**データセンター IP 全般ではない**(ランナーもデータセンターの IP で、通った)。ただし、ランナーの IP 範囲
-  だけが通る可能性は残る。UA を変える実験は、変数を1つずつ動かす原則により、この対照の結果を見てから決める(今回は行っていない)
+- **400 の原因は、第2ラウンドの時点では未切り分けだった**(「Cloudflare の送信元 IP の範囲」か、「Workers が subrequest に付ける要素」か)。
+  **第3ラウンド(§7)で切り分けを行い、「ヘッダが原因の疑いが強い」という結果になった**(ランナーに、Worker にだけ現れたヘッダを足すと
+  拒否され、Cloudflare の送信元から TCP ソケットで取ると通った)。ただし**どのヘッダが効いたかは分離できていない**。
+  **データセンター IP 全般ではない**(ランナーもデータセンターの IP で、通った)
 - **「30 秒」はドキュメントの値であり、実測ではない。** 測ったのは「通過した最大の反復回数」と「超過した最小の反復回数」だけで、
   上限を 30 秒と仮定すると 1 回あたりの CPU の目安が出る(生成した節の「1回あたりの CPU の推定」。**30 秒を仮定した目安**)
 - **普通の Worker の「10 ms」は、この測定では、CPU 時間の単純な打ち切りとしては説明できない。** ローカルの 1 reps あたりの値(生成した節の
@@ -60,7 +64,8 @@
 | 日時(UTC) | 2026-10-04 06:12〜06:28 | 上の JSON の `startedAt` / `finishedAt` |
 
 第1ラウンドの結果(Worker から race が 400 など)は `round1.md` を参照。第2ラウンドの Worker の拒否は第1ラウンドと同じ形で、
-ランナーとの対照で「送信元の違い」に絞れた。
+ランナーとの対照で「送信元の違い」に絞れた。**第3ラウンド(#160。400 の原因の切り分け)は §7**(結果 JSON は
+[`round3-result.json`](./round3-result.json))。
 
 ## 3. 第2ラウンドの結果(自動生成)
 
@@ -174,15 +179,20 @@
 db.netkeiba.com の馬ページは取得できなかった。db の戦績 API と nar.netkeiba.com は Worker からは測れていない
 (race・db の拒否で打ち切ったため。ランナーからは取れる)。
 
+**第3ラウンド(#160)の結果を踏まえた更新**: 原因の切り分けの結果(§7)は「ヘッダが原因の疑いが強い」で、**Worker の TCP ソケット
+(`cloudflare:sockets`)からは、race の出馬表と db の馬ページ(EUC-JP)を取れた**。つまり、**測った範囲では**、Workers の `fetch` ではなく
+ソケットで取れば、Cloudflare の上で netkeiba を取得できる(詳細・限界は §7)。
+
 **推測・未確認**:
 
-- 原因が「送信元の IP 範囲」か「Workers の subrequest の特徴」かで、取れる手が変わる。前者なら Workers からの取得は(ヘッダを
-  いじっても)難しく、後者ならヘッダ等の調整で通る可能性がある。**未切り分け**
-- 構成の選択肢(**決定ではない。#21 の子 Issue で判断する**):
-  - 切り分けの追加実験(変数を1つずつ。UA、ヘッダ、取得先ホストごと)
-  - netkeiba の取得を Workers の外(ユーザーの PC、GitHub Actions のようなランナー、別の実行環境)で行い、取得結果を Cloudflare に渡す構成。
-    今回の結果で「ランナーからは取れる」ことは確認できたが、定時・手動の起動から結果の受け渡しまでの設計は未検討
-  - Cloudflare のほかの実行環境は未調査
+- 第2ラウンドの時点では「送信元の IP 範囲」か「Workers の subrequest の特徴」か未切り分けだったが、第3ラウンドで、**送信元(Cloudflare の IP)
+  だけでは拒否されない**(ソケットなら通った)ことと、**ランナーでも Worker にだけ現れたヘッダを足すと拒否される**ことが分かった。
+  ただし、どのヘッダが効くか、`fetch` の TLS・HTTP バージョンが関与するかは**分離できていない**(§7.5)
+- 構成(**ユーザーの決定。2026-10-05**): 取得・計算・保存・画面まで全部 Cloudflare で進める。取得は **DO の中から TCP ソケット**で行う。
+  この決定に使う根拠のうち、**測っていないもの**: DO の中からの `connect()`(今回の E3 は普通の Worker のハンドラからのソケット)、
+  db の戦績 API・nar.netkeiba.com・race のオッズ API のソケットでの取得、繰り返し・長時間使ったときの再現性(1回の実行のみ)
+- 以前の選択肢のうち、「netkeiba の取得を Workers の外(ユーザーの PC、GitHub Actions のようなランナー)で行う構成」は、上の決定では採っていない。
+  「Cloudflare のほかの実行環境」は未調査のまま
 
 ### CPU
 
@@ -211,13 +221,22 @@ db.netkeiba.com の馬ページは取得できなかった。db の戦績 API �
 - トークンの Workers の権限が **Admin(スコープ: Workers product)**。Editor では Worker を作成・削除できない(プリフライトが検出して止まる)
 - Cloudflare アカウントの workers.dev のサブドメインが登録済み
 
-起動:
+起動(**実験の選び方は #160 で変わった**。既定は `origin`):
 
-- **作業ブランチへの push で、先端コミットのメッセージの先頭(件名の先頭)を `[CF-SPIKE]` にする。** 本文に書いても、先頭以外に書いても起動しない
-  (部分一致にしていた第1ラウンドで、本文の説明に印が含まれて意図せず起動したため、先頭一致にした)。
-  または、GitHub の Actions 画面から `Cloudflare 移行スパイク` を `workflow_dispatch` で実行する
-- ワークフロー: `.github/workflows/cloudflare-spike.yml`。所要は第2ラウンドで 20 分弱(`startedAt` から `finishedAt` まで。JSON のとおり)。
-  実行ごとに Worker を作成し、終了時に必ず削除する。netkeiba へは合計 10 本以内・2 秒間隔
+- ワークフロー: `.github/workflows/cloudflare-spike.yml`。測定ステップの環境変数 `SPIKE_EXPERIMENTS` で、実行する実験を選ぶ:
+  - `origin`(#160。400 の原因の切り分け E0〜E3。netkeiba へ 6 本。ほかに netkeiba へ出ないエコーが最大 4 回)
+  - `reachability`(#159 第2ラウンドの到達性。5対象 × Worker・ランナー。netkeiba へ 10 本)
+  - `cpu`(CPU 上限の探索。netkeiba へは出ない)
+  - カンマ区切りで複数を選べる(例: `reachability,cpu`、`origin,cpu`)。**`reachability` と `origin` は同時に選べない**
+    (netkeiba への合計 10 本以内の守りのため、ドライバが拒否する)。未設定・空・未知の名前もエラーで、何も測らずに失敗する
+- **作業ブランチへの push**(先端コミットのメッセージの先頭〈件名の先頭〉が `[CF-SPIKE]`)で起動すると、**入力が空なので `origin` になる**
+  (`${{ inputs.experiments || 'origin' }}`)。本文に書いても、先頭以外に書いても起動しない
+  (部分一致にしていた第1ラウンドで、本文の説明に印が含まれて意図せず起動したため、先頭一致にした)
+- **`workflow_dispatch`(Actions 画面から `Cloudflare 移行スパイク` を手動実行)**では、入力 `experiments`(既定 `origin`)で選ぶ。
+  #159 の第2ラウンドと同じ測定をやり直すには、`reachability`(CPU も測るなら `reachability,cpu`)を指定する。
+  入力は env 経由でだけ使い、シェルには直接展開しない(スクリプト注入の防止。静的テストで固定している)
+- 所要は、`origin` だけなら短い(ドライバの `startedAt` から `finishedAt` まで。第3ラウンドの JSON のとおり)。第2ラウンドは、CPU の探索を
+  含めて 20 分弱(JSON のとおり)。実行ごとに Worker を作成し、終了時に必ず削除する。netkeiba へは合計 10 本以内・2 秒間隔
 
 ### 結果の取り出しと report の生成(いずれもリポジトリのルートで)
 
@@ -231,10 +250,15 @@ pnpm tsx scripts/cloudflare-spike/render-report.ts markdown docs/investigations/
 # 3. この report.md の「第2ラウンドの結果(自動生成)」節を、結果 JSON から作り直して上書き
 pnpm tsx scripts/cloudflare-spike/render-report.ts update \
   docs/investigations/cloudflare-spike/round2-result.json docs/investigations/cloudflare-spike/report.md
+
+# 4. 第3ラウンド(#160)の節は、末尾に節の名前 round3 を付ける(見出しは1段深く置くので3段下げる)
+pnpm tsx scripts/cloudflare-spike/render-report.ts update \
+  docs/investigations/cloudflare-spike/round3-result.json docs/investigations/cloudflare-spike/report.md round3
 ```
 
-`pnpm test` には、「`report.md` の生成節が、`round2-result.json` から今の `renderMarkdown` で作った内容と完全に一致する」検査がある
-(`scripts/test/cloudflare-spike-report-doc.test.ts`)。結果 JSON か生成器を変えて report を直し忘れると、ここで落ちる。
+`pnpm test` には、「`report.md` の生成節が、結果 JSON(第2ラウンドは `round2-result.json`、第3ラウンドは `round3-result.json`)から
+今の `renderMarkdown` で作った内容と完全に一致する」検査がある(`scripts/test/cloudflare-spike-report-doc.test.ts`)。
+結果 JSON か生成器を変えて report を直し忘れると、ここで落ちる。
 
 ### ローカルでの確認(Cloudflare・netkeiba に接続しない)
 
@@ -254,3 +278,209 @@ pnpm run smoke                                           # wrangler dev(ロー�
 - ランナー側の取得は Node の fetch(undici)で、Worker の fetch とは、TLS・HTTP のバージョンなど、送信元以外の差がありうる。
   「変えたのは送信元だけ」と言えるのは、URL・ヘッダ・パース・記録の形の範囲
 - netkeiba へのリクエストは、第1ラウンドと第2ラウンドを合わせて最小限に留めた(第2ラウンドは Worker 2 本・ランナー 5 本)
+- 第3ラウンド(#160)の限界は §7.5 と §7.6。測ったのは1回の実行で、E0・E2・E3 の標本は小さい(各実験の対象は1〜2対象)
+
+## 7. 第3ラウンド(Issue #160〈#21-B〉): Worker からの 400 の原因の切り分け
+
+§1 のとおり、Worker の `fetch` からは race・db が HTTP 400 になり、ランナーからは同じ URL・同じヘッダで取れた。この差の原因が
+(a) Workers の fetch がサブリクエストに付けるヘッダ、(b) 送信元の IP(Cloudflare の範囲)、(c) User-Agent などリクエストの
+中身との組み合わせ、のどれかを、変数を1つずつ動かして調べた。
+
+- **E0 基準の再確認**: race の出馬表を、Worker の `fetch` とランナーの `fetch` から1本ずつ(第2ラウンドと同じ 400 / 200 の再現)
+- **E1 ヘッダの観測(netkeiba へは出ない)**: Worker とランナーの `fetch` から、受け取ったヘッダをそのまま返すエコー
+  (tls.peet.ws。失敗したら httpbin.org)を叩き、届いたヘッダの差を記録する
+- **E2 ランナー + Workers 風のヘッダ → netkeiba**: 送信元はランナーのまま、E1 で **Worker にだけ現れたヘッダ**を足して取得する
+  (race と db の馬ページ)。変えるのはヘッダだけ
+- **E3 Worker の TCP ソケット → netkeiba**: 送信元は Cloudflare のまま、`cloudflare:sockets` の `connect()`(TLS)で HTTP/1.1 の GET を
+  自前で組み立てて送る(race と db の馬ページ)。ヘッダはランナーの `fetch` と同じ集合(E1 のランナー側の観測から導出)。
+  再試行・リダイレクトの追従はしない
+
+結論の型(組合せ表と、E0 の再現を前提ゲートにする規則)は `scripts/cloudflare-spike/origin-plan.ts` の `concludeOrigin`
+(単体テストで固定)。守りは #159 と同じ(netkeiba へ合計 10 本以内・2 秒間隔・送信元〈場所:手段〉ごとの2回連続拒否で打ち切り)。
+
+### 7.1 実行の概要
+
+| | 第3ラウンド |
+|---|---|
+| 記録 | [`round3-result.json`](./round3-result.json)(結果ブロックをジョブログからプログラムで切り出したもの。値は変えていない) |
+| run | GitHub Actions run 37349098565(結果 JSON の `runId` は `37349098565-1`) |
+| コード | 83ad5dd(実測を起動したコミットは 7ae15a3。起動の印は件名の先頭) |
+| 選んだ実験 | `origin`(結果 JSON の `experiments`) |
+| 日時(UTC) | 上の JSON の `startedAt` / `finishedAt` |
+
+### 7.2 第3ラウンドの結果(自動生成)
+
+以下は `round3-result.json` から生成した節。再生成のコマンドは「5. 再現手順」。
+
+<!-- GENERATED:BEGIN round3(render-report.ts が生成。手で編集しない) -->
+#### Cloudflare 移行スパイク結果(run 37349098565-1)
+
+- 開始: 2026-10-05T17:32:24.174Z / 終了: 2026-10-05T17:32:39.918Z
+- 実行した実験: origin
+
+##### 到達性(netkeiba への取得。Worker とランナーの対照)
+
+未実施(この実行では選んでいない)
+
+##### 400 の原因の切り分け(Issue #160。E0〜E3)
+
+- netkeiba へ出した本数: 6 本 / 全体の打ち切り理由: なし
+- 送信元(場所:手段)ごとの打ち切り: worker:fetch: なし / runner:fetch: なし / runner:fetch+worker-headers: consecutive-blocks / worker:socket: なし
+- エコーへ出した回数(netkeiba の本数には含めない): 2 回
+
+###### E1 ヘッダの観測(netkeiba へは出ない)
+
+- 両側で取れたエコー: peet
+- 警告: エコー(peet)の応答に Cloudflare 上にある疑い(cf-ray または server: cloudflare)があった(worker 側)。Workers の振る舞いが CloudFront 宛てと変わりうる
+
+| 試行 | 場所 | エコー | 結果 | ステータス | 理由 |
+|---|---|---|---|---|---|
+| 1 | worker | peet | 成功 | 200 | - |
+| 2 | runner | peet | 成功 | 200 | - |
+
+| 場所 | エコー | HTTP バージョン | TLS の JA4 | HTTP/2 の Akamai 指紋 |
+|---|---|---|---|---|
+| worker | peet | h2 | t13d1312h2_a44d0ee8b3cc_e381dae6da6b | 175a6d4585f5a5c52b0f6fcca2977cd0 |
+| runner | peet | HTTP/1.1 | t13d5212h1_b262b3658495_8e6e362c5eac | - |
+
+- Worker にだけ現れたヘッダ: x-forwarded-for: <ip> / cf-ray: <ray>-ATL / cf-ew-via: 15 / cdn-loop: cloudflare; loops=1 / cf-worker: <subdomain>.workers.dev / cf-visitor: {"scheme":"https"} / x-forwarded-proto: https
+- ランナーにだけ現れたヘッダ: connection, accept, accept-language, sec-fetch-mode
+- 名前は同じで値が違うヘッダ: accept-encoding(worker: gzip, br / runner: br, gzip, deflate)
+
+###### E0・E2・E3 の記録
+
+| 実験 | 場所 | 手段 | 対象 | ステータス | 本文バイト | パース | 判定 | 理由 |
+|---|---|---|---|---|---|---|---|---|
+| E0 | worker | fetch | central-shutuba | 400 | 0 | 未実施 | blocked | HTTPエラー(400)が発生しました: https://race.netkeiba.com/race/shutuba.html?race_id=202603020211 |
+| E0 | runner | fetch | central-shutuba | 200 | 276708 | shutuba 16 件 | ok | HTTP 200、既存パーサで 16 件を読めました |
+| E3 | worker | socket | central-shutuba | 200 | 276708 | shutuba 16 件 | ok | HTTP 200、既存パーサで 16 件を読めました |
+| E3 | worker | socket | db-horse-page | 200 | 83984 | horse-page 1 件 | ok | HTTP 200、既存パーサで 1 件を読めました |
+| E2 | runner | fetch+worker-headers | central-shutuba | 400 | 0 | 未実施 | blocked | HTTPエラー(400)が発生しました: https://race.netkeiba.com/race/shutuba.html?race_id=202603020211 |
+| E2 | runner | fetch+worker-headers | db-horse-page | 400 | 0 | 未実施 | blocked | HTTPエラー(400)が発生しました: https://db.netkeiba.com/horse/2021105857/ |
+
+###### E2 ランナー + Workers 風のヘッダ → netkeiba
+
+- 付けたヘッダ(Worker が実際に付けた名前。値はマスク済み): x-forwarded-for: <ip> / cf-ray: <ray>-ATL / cf-ew-via: 15 / cdn-loop: cloudflare; loops=1 / cf-worker: <subdomain>.workers.dev / cf-visitor: {"scheme":"https"} / x-forwarded-proto: https
+
+###### E3 Worker の TCP ソケット → netkeiba
+
+- 送ったヘッダ(Host と Connection: close に加えて): User-Agent, accept, accept-language, sec-fetch-mode / 導出元: ランナーの観測から導出(E1)
+
+###### 結論
+
+- 基準(E0)の再現: はい(Worker の fetch は拒否、ランナーの fetch は ok)
+- E2(ランナー + Workers 風のヘッダ): 拒否された(bad)
+- E3(Worker のソケット): 通った(good)
+- 結論: **ヘッダが原因の疑いが強い**
+- 読み: ヘッダが原因の疑いが強い(送信元をランナーのまま、Workers 風のヘッダを付けただけで拒否された)。
+- 限界:
+  - E2 は送信元(ランナー)を変えずに、Worker にだけ現れたヘッダをまとめて足した実験で、拒否された。どのヘッダ(CF-Worker・CF-Connecting-IP・CDN-Loop など)が効いたかは分離できない。
+  - 各実験の対象は2対象(race の出馬表と db の馬ページ。E0 は race の1対象)で、標本が小さい。
+  - E1 はエコーサービス宛ての Worker の fetch が見せるヘッダ・TLS であり、CloudFront 宛てでも同じとは限らない。
+
+##### EUC-JP のデコード(Worker 内の往復)
+
+成功(往復一致)
+
+##### CPU(反復回数を増やして上限超過になる点を探索)
+
+未実施(この実行では選んでいない)
+
+##### ローカル(workerd)での 1 reps あたり ms(本番の CPU とは異なる目安)
+
+| 実行環境 | 処理 | reps | 試行 | 1 reps あたり ms(小さい順) |
+|---|---|---|---|---|
+| worker | parse | 10 | 3 | 16.20, 17.40, 18.80 |
+| worker | score | 10 | 3 | 0.20, 0.20, 0.30 |
+| worker | alloc | 3 | 3 | 68.00, 68.33, 68.33 |
+| worker | allocFull | 2 | 3 | 257.50, 258.00, 259.50 |
+| durableObject | parse | 10 | 3 | 16.50, 16.80, 17.20 |
+| durableObject | score | 10 | 3 | 0.20, 0.20, 0.20 |
+| durableObject | alloc | 3 | 3 | 67.33, 67.33, 67.33 |
+| durableObject | allocFull | 2 | 3 | 258.00, 262.50, 267.50 |
+
+##### 後片付け
+
+- 結果: OK(接頭辞付きの Worker は残っていない)
+- Durable Object の名前空間: removed
+
+##### 注記
+
+- Worker が応答するまで 2 回の /ping を要した
+- Durable Object の /do/ping: HTTP 200 {"ok":true,"runtime":"durableObject","sqliteOk":true}
+<!-- GENERATED:END round3 -->
+
+### 7.3 事実(結果 JSON に記録されていること)
+
+- **E0 は再現した**: 同じ実行の中で、Worker の `fetch` は race の出馬表が HTTP 400・本文0バイト(`x-cache: Error from cloudfront`)、
+  ランナーの `fetch` は 200 で既存パーサが読めた
+- **E1(エコーは tls.peet.ws。Worker・ランナーの両側で取れ、httpbin へのフォールバックは使っていない)**:
+  - **Worker にだけ現れたヘッダは7つ**: `x-forwarded-for`・`cf-ray`・`cf-ew-via`・`cdn-loop`・`cf-worker`・`cf-visitor`・`x-forwarded-proto`
+    (値は生成節の「Worker にだけ現れたヘッダ」。IP・サブドメインはマスク済み)
+  - ランナーにだけ現れたヘッダは `connection`・`accept`・`accept-language`・`sec-fetch-mode`。名前は同じで値が違うのは `accept-encoding`
+  - **`cf-connecting-ip` と `x-real-ip` は、Worker 側の観測に無かった**(Cloudflare のドキュメントには、非 Cloudflare 宛ての subrequest に
+    付くとあるが、エコーに届いたヘッダには無かった。エコー宛ての観測であり、netkeiba 宛てでの有無は未確認)
+  - **HTTP バージョンと TLS の指紋は、両側で違った**(Worker は HTTP/2、ランナーは HTTP/1.1。JA4 も違う。生成節の表のとおり)
+- **E2(ランナー + Worker にだけ現れたヘッダ7つ)は、race・db の馬ページとも HTTP 400・本文0バイト**(`x-cache: Error from cloudfront`)だった。
+  E2 の送信元はランナーのままで、E0 のランナー(ヘッダを足さない)は 200 だった
+- **E3(Worker の TCP ソケット)は、race の出馬表・db の馬ページ(EUC-JP)とも HTTP 200 で、既存パーサが読めた**(出馬表は16頭、
+  馬ページは1件。文字化けなし)。出馬表の本文バイト数は、E0 のランナーの `fetch` と同じだった。ヘッダの導出元はランナーの観測(`runner-echo`)で、
+  静的フォールバックは使っていない
+- 守り: netkeiba へ出したのは6本(上限 10 本以内)、エコーは2回。E2 の2本がどちらも 400 だったので、送信元
+  `runner:fetch+worker-headers` は連続拒否として記録された(2本で終わる計画なので、止められた送信は無い)
+- 後片付け: 接頭辞付きの Worker は残り0件、DO の名前空間も removed(生成節のとおり)
+
+### 7.4 推測・未確認(事実ではない)
+
+- **結論の読み(`header-suspected`:「ヘッダが原因の疑いが強い」)は推測を含む。** E2 が拒否されたことは、「Worker にだけ現れたヘッダの追加が、
+  ランナー(拒否されない送信元・手段)からでも拒否を起こすのに十分だった」ことを示す。E3 が通ったことは、「送信元(Cloudflare の IP)だけでは
+  拒否されない」ことを示す。これらを合わせて「ヘッダが原因」と読んでいるが、**どのヘッダが効いたかは分かっていない**。`cdn-loop` や
+  `cf-worker` などが関与する、という見方もできるが、**これは仮説であり、検証していない**
+- **E1 の `warnings`(「エコー(peet)の応答に Cloudflare 上にある疑い」。Worker 側のみ)について**: 警告が出たのは、Worker の `fetch` の
+  応答に `cf-ray`(または `server: cloudflare`)があったため。ランナー側の同じエコーの応答には無かった。**エコーが Cloudflare 上にあるのではなく、
+  Worker の `fetch` の応答に Cloudflare が付けたヘッダを拾った可能性が高い、と推測している**(E0 の Worker の 400 の応答にも、
+  `server: cloudflare` と `cf-ray` があり、ランナーとソケットの応答は `server: Apache` だった)。**確認はしていない**。
+  2026-10-04 に、ローカルの `curl`(Cloudflare を経由しない場所)で見た tls.peet.ws の応答は、`server: TrackMe.peet.ws` で cf-ray は無かった
+- E2 の 400 の応答の `server` は `Apache`(ランナーの 200 と同じ)で、E0 の Worker の 400 の `server: cloudflare` とは違う。
+  この違いの意味は調べていない
+- E3 が通った機序(「Worker の `fetch` の経路に入る Cloudflare 側の仕組み〈`cdn-loop: cloudflare; loops=1`・`cf-ew-via` が示唆する〉を
+  ソケットは通らない」など)は、**推測であり、検証していない**
+- netkeiba(CloudFront)の拒否規則が今後も同じかどうかは未確認(1回の実行のみ)
+
+### 7.5 分離できないもの(結論を読むときの注意)
+
+- **E2 は7つのヘッダをまとめて足した**。どれが効いたか、組合せが必要か(1つでは足りないか)は**分離できない**
+- **E2 で付けた値は、Worker が(エコー宛てに)送った値の再利用**である(`x-forwarded-for` はそのときの IP、`cf-ray` は別の接続の ID)。
+  拒否の原因が「ヘッダがあること」か「値が実際の接続と食い違うこと」かは**分離できない**
+- **E3 は、ヘッダ・TLS の特徴・HTTP バージョンを同時に変えている**(Worker の `fetch` が付ける7つのヘッダが無い・`fetch` の TLS ではない・
+  HTTP/1.1 を自前で話す)。E3 が通った理由が、このうちどれかは**分離できない**。E2 が「ヘッダの追加だけで拒否される」ことを示すので
+  ヘッダが原因という読みになるが、E3 単独ではヘッダと TLS・HTTP バージョンを区別できない。**E3 のソケットの TLS の指紋は観測していない**
+  (エコーは `fetch` でしか叩いていない)
+- **E1 は、エコー(第三者のサーバ)宛ての観測**で、Worker が netkeiba へ実際に送るヘッダを見たものではない。**エコーに届いたヘッダを、
+  netkeiba 宛ての代理として使っている**(CloudFront 宛てでも同じとは限らない)。E2 で足したヘッダも、この代理の観測に基づく
+
+### 7.6 この結果の限界
+
+- 測ったのは1アカウント・1回の実行。E0 は race の1対象、E2・E3 は race と db の馬ページの2対象で、標本が小さい
+- ソケットで測ったのは、race の出馬表と db の馬ページ(EUC-JP)だけ。**db の戦績 API・nar.netkeiba.com・race のオッズ API はソケットでは未測定**
+- E3 は**普通の Worker のハンドラから**のソケット。**DO の中からの `connect()` は未測定**
+- プランは確認していない(§6 と同じ Secrets のアカウントで、§6 では「Free と推定」した)。Cloudflare のドキュメントには、Free でソケットが
+  使えるかの記載が見当たらなかったので、今回の E3 の成功は、**Free と推定されるアカウントでソケットが使えた**ことを示す(プランそのものは未確認)
+- ソケットで取る HTTP/1.1 のクライアント(`scripts/cloudflare-spike/http1.ts`・`spikes/cloudflare/src/socket-probe.ts`)は、スパイクの実装で、
+  本番コードではない。chunked・Content-Length・EOF の扱いは単体テストで固定してあるが、**長時間・多数の取得での挙動は未測定**
+- ドキュメント(2026-10-04 に参照)では、ソケットは「同時に応答ヘッダを待つ接続 6 本」の上限に数えられる。subrequest 数(Free は 50/呼び出し)に
+  数えられるかは確認していない
+
+### 7.7 #21 への含意
+
+**事実**: **測った範囲では**、Workers の `fetch` ではなく TCP ソケット(`cloudflare:sockets`)で取得すれば、Cloudflare の上で race の出馬表と
+db の馬ページ(EUC-JP)を取得でき、既存パーサ(`parseShutuba`・馬ページのパーサ)で読めた。
+
+**ユーザーの決定(2026-10-05)**: 取得・計算・保存・画面まで全部 Cloudflare で進める。取得は DO の中から TCP ソケットで行う。
+
+**この決定に残る未測定**(子 Issue の仕様を詰めるときに、実測が要る): 上の「この結果の限界」のうち、DO の中からのソケット、ほかの取得先
+(db の戦績 API・nar・オッズ API)、繰り返し取得したときの再現性、subrequest・接続数の制約。
+
+**本番の取得で守ること**(スパイクの実装から引き継ぐ前提): 再試行しない・リダイレクトに従わない・サイズ上限とタイムアウトを設ける・
+ヘッダは明示した集合だけを送る(ランナーの `fetch` と同じ集合を送ったときに通った)。どのヘッダが拒否の原因かは分かっていないので、
+Worker の `fetch` で取得する経路は、本番に持ち込まない。

@@ -266,13 +266,19 @@ describe("describeConclusion(結果の読み。分離できないものの併記
   it.each([
     ["header-suspected", /どのヘッダ/],
     ["ip-suspected", /ソケット.*(実装|不備)/],
-    ["both-suspected", /ヘッダ.*送信元/],
+    ["both-suspected", /E2 と E3 がどちらも拒否/],
     ["inconclusive", /ヘッダ.*TLS.*IP|IP.*ヘッダ/],
     ["baseline-not-reproduced", /ヘッダ.*TLS.*IP|IP.*ヘッダ/],
   ] as const)("%s の『分離できないもの』は、その結論に固有の内容(定型文の流用ではない)", (c, pattern) => {
     const line = describeConclusion(c, same).limitations.find((l) => /分離できない/.test(l));
     expect(line).toBeDefined();
     expect(line!).toMatch(pattern);
+  });
+
+  it("both-suspected 専用の言い回しは、ほかの分岐(特にフォールバック文)には現れない(フォールバックにも一致する緩い検査で通らないようにする)", () => {
+    for (const c of ["fetch-specific", "header-suspected", "ip-suspected", "inconclusive", "baseline-not-reproduced"] as const) {
+      expect(describeConclusion(c, same).limitations.join("\n")).not.toMatch(/E2 と E3 がどちらも拒否/);
+    }
   });
 
   it.each(["fetch-specific", "header-suspected", "ip-suspected", "both-suspected", "inconclusive", "baseline-not-reproduced"] as const)(

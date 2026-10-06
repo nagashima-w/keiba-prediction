@@ -2294,6 +2294,28 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
 
+## 次の正式版が 1.19.2 である根拠(Issue #160 での変更)
+
+**patch**(Workers からの netkeiba 取得が HTTP 400 になる原因の切り分け〈#21-B〉の追加と、その結果の記録。利用者から見える変化は無い)。
+
+### 変更内容
+
+- scripts: `scripts/cloudflare-spike/`(ソケット用 HTTP/1.1 クライアントの純ロジック・エコーの観測とマスク・実験の選択・E0〜E3 の計画と
+  進行と結論・結果の Markdown 化・Worker の公開エンドポイントの入力検査・report の名前つき生成節)
+- `spikes/cloudflare/`: Worker の `/echo`・`/netkeiba-socket`(TCP ソケット)と、ドライバの実験の選択(`SPIKE_EXPERIMENTS`)
+- `.github/workflows/cloudflare-spike.yml`: 実験を選ぶ入力(既定は origin)。既存の `build-windows.yml` は無変更
+- docs: `docs/investigations/cloudflare-spike/`(第3ラウンドの結果 JSON と report の更新)
+
+### patch である根拠
+
+- アプリ(`packages/app`)・core(`packages/core`)は無変更。追加・変更したコードはすべて `scripts/`・`spikes/`・ワークフロー・docs で、
+  exe に入らない
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

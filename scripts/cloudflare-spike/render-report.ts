@@ -7,7 +7,8 @@
  *   # 結果 JSON を Markdown にして標準出力へ
  *   pnpm tsx scripts/cloudflare-spike/render-report.ts markdown <result.json>
  *   # report.md の生成節(印の間)を、結果 JSON から作り直して上書きする
- *   pnpm tsx scripts/cloudflare-spike/render-report.ts update <result.json> <report.md>
+ *   #   第2ラウンド(#159): 名前なしの節。第3ラウンド(#160): round3 の節(見出しは3段下げる)
+ *   pnpm tsx scripts/cloudflare-spike/render-report.ts update <result.json> <report.md> [round3]
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -30,10 +31,12 @@ if (command === "extract" && a !== undefined) {
 } else if (command === "markdown" && a !== undefined) {
   process.stdout.write(`${renderMarkdown(readJson(a))}\n`);
 } else if (command === "update" && a !== undefined && b !== undefined) {
-  const generated = demoteHeadings(renderMarkdown(readJson(a)), 2);
-  writeFileSync(b, replaceGeneratedBlock(readFileSync(b, "utf-8"), generated));
-  console.log(`更新しました: ${b}`);
+  // 名前つきの節(第3ラウンド以降)は、report.md の中で1段深い節に置くので、見出しを3段下げる。
+  const name = process.argv[5];
+  const generated = demoteHeadings(renderMarkdown(readJson(a)), name === undefined ? 2 : 3);
+  writeFileSync(b, replaceGeneratedBlock(readFileSync(b, "utf-8"), generated, name));
+  console.log(`更新しました: ${b}${name === undefined ? "" : `(${name})`}`);
 } else {
-  console.error("使い方: render-report.ts extract <log> | markdown <json> | update <json> <report.md>");
+  console.error("使い方: render-report.ts extract <log> | markdown <json> | update <json> <report.md> [名前]");
   process.exit(2);
 }

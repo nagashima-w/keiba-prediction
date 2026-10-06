@@ -13,8 +13,9 @@
  * **何がどこへ送られるか**(第三者と netkeiba に出るもの。詳細は `echo.ts`):
  *  - E1(エコー): Worker の subrequest には Cloudflare が `CF-Worker`(workers.dev のサブドメインを含みうる)などを付け、
  *    それが第三者のエコー(tls.peet.ws・httpbin.org)に届く。ランナー側も、ランナーの IP がエコーに届く。
- *  - E2: Worker にだけ現れたヘッダ(`CF-Worker`・`CF-Connecting-IP` など)を、ランナーから netkeiba へ送る。
- *    Worker が netkeiba に送るものと同じ内容で、実験として意図したもの。
+ *  - **エコー宛てで観測したものを、netkeiba 宛ての代理として使う**(Worker が netkeiba へ実際に送るヘッダは観測できない。
+ *    エコーに届いたものと同じと仮定している)。
+ *  - E2: その仮定のもとで、Worker にだけ現れたヘッダ(エコーで観測した生の値)を、ランナーから netkeiba へ送る。
  *  - E3: ランナーの観測から導出したヘッダを、Worker のソケットから netkeiba へ送る。
  */
 
