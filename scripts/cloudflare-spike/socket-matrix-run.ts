@@ -197,6 +197,31 @@ function isRefused(status: number | null): boolean {
   return status !== null && BLOCK_STATUSES.includes(status);
 }
 
+/** 事実の文に載せる error の最大文字数(結果を肥大化させない)。 */
+const FACT_ERROR_MAX_CHARS = 160;
+
+/**
+ * 本文を比較できない理由を、実際の理由で書く(2種類を言い分ける)。
+ *  (i) どちらかが 2xx でない(拒否・エラー応答。本文どうしを比べても意味がない)
+ *  (ii) 2xx だが本文を扱えなかった(status=2xx・error あり・meta=null。未対応の content-encoding・gzip の展開失敗など。
+ *       どのステップか、その記録の error を併記する)
+ * 両方が当てはまるときは両方書く。
+ */
+function describeNotCompared(pair: readonly (MatrixRecord | undefined)[]): string {
+  const present = pair.filter((r): r is MatrixRecord => r !== undefined);
+  const reasons: string[] = [];
+  if (present.some((r) => !is2xx(r.status))) {
+    reasons.push(`どちらかが 2xx ではない(${present.map((r) => `${r.stepId}: ${r.status ?? "例外"}`).join("、")})`);
+  }
+  const unhandled = present.filter((r) => is2xx(r.status) && r.meta === null);
+  if (unhandled.length > 0) {
+    reasons.push(
+      `2xx だが本文を扱えなかった: ${unhandled.map((r) => `${r.stepId}(error: ${(r.error ?? "不明").slice(0, FACT_ERROR_MAX_CHARS)})`).join("、")}`,
+    );
+  }
+  return reasons.join("。");
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).hostname;
@@ -340,10 +365,13 @@ export function describeSocketMatrix(
       continue;
     }
     if (row.bodyHashEqual === null) {
-      // 比較できない(片方でも 2xx でない、またはメタが無い)とき、本文・所要時間・ハッシュは比較しない(ステータスだけが事実)。
-      // bodyHashEqual は、両方が 2xx でメタが両方あるときだけ値を持つ。
+      // 比較できない(どちらかが 2xx でない、または 2xx だが本文を扱えなかった)とき、本文・所要時間・ハッシュは比較しない。
+      // bodyHashEqual は、両方が 2xx でメタが両方あるときだけ値を持つ。理由は実際のものを書く(describeNotCompared)。
       facts.push(
-        `${row.stepId}: gzip の取得(HTTP ${row.gzipStatus})と identity(${row.pairWith}。HTTP ${row.identityStatus})は、両方が 2xx ではないので、本文・所要時間は比較しない`,
+        `${row.stepId}: gzip の取得(HTTP ${row.gzipStatus})と identity(${row.pairWith}。HTTP ${row.identityStatus})は、本文・所要時間を比較しない(${describeNotCompared([
+          records.find((r) => r.stepId === row.pairWith),
+          records.find((r) => r.stepId === row.stepId),
+        ])})`,
       );
       continue;
     }
@@ -366,7 +394,11 @@ export function describeSocketMatrix(
     const head = `${row.stepId}: ${row.pairWith} と同じ URL の2回目(${row.gapMs} ms 後)。ステータスは ${row.firstStatus ?? "例外"} → ${row.secondStatus ?? "例外"}`;
     const instance = `DO のインスタンスは${row.sameInstance === null ? "比較できない" : row.sameInstance ? "同じ" : "別"}`;
     if (row.bytesEqual === null && row.hashEqual === null) {
-      facts.push(`${head}、本文は比較しない(両方が 2xx のときだけ比較する)、${instance}`);
+      const reason = describeNotCompared([
+        records.find((r) => r.stepId === row.pairWith),
+        records.find((r) => r.stepId === row.stepId),
+      ]);
+      facts.push(`${head}、本文は比較しない(両方が 2xx のときだけ比較する。${reason})、${instance}`);
     } else {
       facts.push(
         `${head}、本文のバイト数は${row.bytesEqual === null ? "比較できない" : row.bytesEqual ? "同じ" : "違う"}、` +
@@ -430,6 +462,14 @@ export function describeSocketMatrix(
         );
       }
     } else if (is2xx(row.gzipStatus)) {
+      const gz = records.find((r) => r.stepId === row.stepId);
+      if (gz !== undefined && gz.meta === null) {
+        // 2xx だが本文を扱えなかった(未対応の content-encoding・gzip の展開失敗など)。圧縮の有無も本文も読めていない。
+        inferences.push(
+          `${row.stepId}: Accept-Encoding: gzip を足して、拒否はされなかったが、本文を扱えなかった(error: ${(gz.error ?? "不明").slice(0, FACT_ERROR_MAX_CHARS)})。圧縮されたかどうか・本文は読めていない。`,
+        );
+        continue;
+      }
       inferences.push(
         row.compressed === false
           ? `${row.stepId}: Accept-Encoding: gzip を足しても拒否されなかったが、サーバは圧縮せずに返した(圧縮されなかった。この取得先の1本の観測)。`

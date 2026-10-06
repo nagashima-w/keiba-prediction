@@ -651,3 +651,72 @@ describe("指摘3: gzip で返ったか(content-encoding)を事実・表に出�
     expect(summarizeSocketMatrix(records).compression[0]).toMatchObject({ compressed: null });
   });
 });
+
+/**
+ * 再レビュー指摘(#162 段階1): 「2xx だが本文を扱えなかった」(status=200・error あり・meta=null。未対応の content-encoding・
+ * gzip の展開失敗)と「片方が 2xx でない」は、比較できない理由が別。事実文は、実際の理由を書く(前者を『2xx ではない』と書かない)。
+ */
+const handled = (stepId: string, error: string, over: Partial<MatrixRecord> = {}): MatrixRecord =>
+  mr(stepId, { status: 200, bodyLength: null, parsedCount: null, meta: null, error, ...over });
+const BR = "未対応の content-encoding: br(gzip と identity だけ対応している)";
+
+describe("再レビュー指摘: 2xx だが本文を扱えなかったときの事実・推測", () => {
+  it("compression: gzip が 200・meta なし・error あり(identity は正常)。事実は『本文を扱えなかった』と error を載せ、『2xx ではない』とは書かない", () => {
+    const records = [mr("S1"), handled("S1g", BR, { variant: "gzip" })];
+    const facts = readAll(records).facts.join("\n");
+    expect(facts).toMatch(/S1g.*比較しない/);
+    expect(facts).toMatch(/S1g.*2xx だが本文を扱えなかった.*未対応の content-encoding: br/);
+    expect(facts).not.toMatch(/2xx ではない/);
+    // 比率・ハッシュは出さない(比較できていない)。
+    const row = summarizeSocketMatrix(records).compression[0]!;
+    expect(row).toMatchObject({ gzipStatus: 200, wireRatio: null, bodyHashEqual: null, compressed: null });
+  });
+
+  it("compression の推測: gzip が 200・meta なしのとき、『拒否はされなかったが、本文を扱えなかった』と error を書き、『拒否されなかった』だけで終えない", () => {
+    const records = [mr("S1"), handled("S1g", BR, { variant: "gzip" })];
+    const inf = readAll(records).inferences.join("\n");
+    expect(inf).toMatch(/S1g.*拒否はされなかったが、本文を扱えなかった.*未対応の content-encoding: br/);
+    expect(inf).not.toMatch(/S1g: Accept-Encoding: gzip を足しても拒否されなかった(?!が)/);
+  });
+
+  it("compression: identity(S1)が 200・meta なし・error ありで、gzip は正常。事実は S1 が本文を扱えなかったと書き、『2xx ではない』とは書かない", () => {
+    const records = [handled("S1", "gzip として展開できません: x"), mr("S1g", { meta: meta({ contentEncoding: "gzip", wireBodyBytes: 200 }) })];
+    const facts = readAll(records).facts.join("\n");
+    expect(facts).toMatch(/S1g.*比較しない/);
+    expect(facts).toMatch(/S1\(error: gzip として展開できません/);
+    expect(facts).not.toMatch(/2xx ではない/);
+  });
+
+  it("compression: 片方が 403 でもう片方が 200・meta なしのとき、両方の理由(2xx ではない・本文を扱えなかった)を書く", () => {
+    const records = [handled("S1", "壊れた応答"), refused("S1g", 403, { variant: "gzip" })];
+    const facts = readAll(records).facts.join("\n");
+    expect(facts).toMatch(/2xx ではない/);
+    expect(facts).toMatch(/2xx だが本文を扱えなかった.*壊れた応答/);
+  });
+
+  it("repeat: 200 → 200 で2本目が meta なし。事実は『両方 2xx だが本文を扱えなかった』理由を書き、『両方が 2xx のときだけ比較する』の理由づけにしない", () => {
+    const records = [mr("S1"), handled("S1r", "gzip として展開できません: y")];
+    const facts = readAll(records).facts.join("\n");
+    expect(facts).toMatch(/S1r.*200 → 200/);
+    expect(facts).toMatch(/S1r.*比較しない.*2xx だが本文を扱えなかった.*S1r\(error: gzip として展開できません: y/);
+    expect(facts).not.toMatch(/2xx ではない/);
+    expect(summarizeSocketMatrix(records).repeat[0]).toMatchObject({ bytesEqual: null, hashEqual: null });
+  });
+
+  it("repeat: 1本目(S1)が meta なしでも、同じ(S1 の error を書く)", () => {
+    const records = [handled("S1", "未対応"), mr("S1r")];
+    expect(readAll(records).facts.join("\n")).toMatch(/S1r.*比較しない.*S1\(error: 未対応/);
+  });
+
+  it("repeat: 2本目が 403 のときは、従来どおり『どちらかが 2xx ではない』と書く(理由の言い分けで退行しない)", () => {
+    const records = [mr("S1"), refused("S1r", 403)];
+    expect(readAll(records).facts.join("\n")).toMatch(/S1r.*比較しない.*両方が 2xx のときだけ.*2xx ではない/);
+  });
+
+  it("error が長くても、事実の文では切り詰める(結果を肥大化させない)", () => {
+    const records = [mr("S1"), handled("S1g", "x".repeat(1000), { variant: "gzip" })];
+    const facts = readAll(records).facts.join("\n");
+    expect(facts).toContain("x".repeat(50));
+    expect(facts).not.toContain("x".repeat(400));
+  });
+});
