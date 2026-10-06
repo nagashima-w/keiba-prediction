@@ -18,6 +18,9 @@ import { afterAll, describe, expect, it } from "vitest";
 const CLOUD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WRANGLER = path.join(CLOUD, "node_modules", ".bin", "wrangler");
 const TEMP_CONFIG = path.join(CLOUD, "wrangler.bundle-guard.generated.toml");
+/** 対照用(better-sqlite3 を巻き込む入口)の一時ファイル。.gitignore が除外する。 */
+const NATIVE_PROBE_ENTRY = path.join(CLOUD, "native-probe.generated.ts");
+const NATIVE_PROBE_CONFIG = path.join(CLOUD, "wrangler.native-probe.generated.toml");
 const workDirs: string[] = [];
 
 /** 偽ソケットの印(smoke-worker.ts が持つ文字列)。 */
@@ -37,6 +40,8 @@ function bundle(configPath: string | null, outputName: string): string {
 
 afterAll(() => {
   rmSync(TEMP_CONFIG, { force: true });
+  rmSync(NATIVE_PROBE_ENTRY, { force: true });
+  rmSync(NATIVE_PROBE_CONFIG, { force: true });
   for (const dir of workDirs) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -85,6 +90,53 @@ describe("本番のバンドル(deploy --dry-run)", () => {
       for (const marker of FAKE_SOCKET_MARKERS) {
         expect(code.includes(marker), `smoke のバンドルに ${marker} がある`).toBe(true);
       }
+    },
+    120_000,
+  );
+});
+
+/**
+ * Issue #171(#169-a)AC-a6: 本番のバンドルに better-sqlite3(ネイティブ依存。Workers では動かない)が入らないこと。
+ * **前提(空振り防止)**: D1 を呼ぶコード(`/api/health` の疎通確認)が、実際にバンドルされていること。
+ * バンドルに D1 のコードが無ければ「better-sqlite3 が無い」は自明に成立するため、先に固定する。
+ * 対照: core の better-sqlite3 を使うモジュール(`analysis-store.ts`)を巻き込む入口では、バンドル(または解決の失敗)に
+ * better-sqlite3 が現れる。検出が、実際に巻き込まれたときに拾えることの確認。
+ */
+describe("本番のバンドルと D1(Issue #171)", () => {
+  it(
+    "D1 の疎通確認のコード(SQL 文と binding 名の参照)がバンドルに入っていて、better-sqlite3 は入っていない",
+    () => {
+      const code = bundle(null, "worker.js");
+      // 前提: D1 を呼ぶコードが入っている(空振りでない)
+      expect(code.includes("SELECT detail_key FROM analyses LIMIT 1"), "D1 の疎通確認の文がバンドルにある").toBe(true);
+      expect(code.includes("env.DB"), "D1 の binding(env.DB)を参照するコードがバンドルにある").toBe(true);
+      // 本題
+      expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);
+      expect(code.includes("sqlite3"), "バンドルにネイティブの sqlite3 の痕跡が無い").toBe(false);
+    },
+    120_000,
+  );
+
+  it(
+    "対照: better-sqlite3 を使う core のモジュールを import する入口をバンドルすると、better-sqlite3 が現れる(バンドルに入るか、解決に失敗してエラーに出る)",
+    () => {
+      writeFileSync(
+        NATIVE_PROBE_ENTRY,
+        'import { AnalysisStore } from "../packages/core/src/ev/analysis-store";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(AnalysisStore)); } };\n',
+      );
+      const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
+      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "native-probe.generated.ts"');
+      expect(probeConfig).not.toBe(base);
+      writeFileSync(NATIVE_PROBE_CONFIG, probeConfig);
+      let seen: string;
+      try {
+        seen = bundle(NATIVE_PROBE_CONFIG, "native-probe.generated.js");
+      } catch (error) {
+        // packages/core/node_modules が無い配置(CI)では、better-sqlite3 を解決できずにエラーになる。メッセージに名前が出る。
+        const e = error as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
+        seen = `${String(e.stdout ?? "")}${String(e.stderr ?? "")}${e.message ?? ""}`;
+      }
+      expect(seen.includes("better-sqlite3")).toBe(true);
     },
     120_000,
   );

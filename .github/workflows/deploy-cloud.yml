@@ -85,6 +85,13 @@ jobs:
         working-directory: cloud
         run: pnpm run deploy:dry
 
+      # D1 の migration を、ローカル(workerd)の D1 に適用する(Issue #171)。SQL がエンジンで通ること・ファイル名の番号の取り違えを
+      # デプロイの前に検出する。--local だけで、本番の D1 には触れない(check は秘密を持たない)。スモークは自分の一時の保存先に
+      # 同じ migration を適用してから起動する(smoke.ts)。
+      - name: D1 の migration をローカルに適用
+        working-directory: cloud
+        run: pnpm exec wrangler d1 migrations apply DB --local
+
       # ローカル(workerd)での配線のスモーク: 認証の関門(403)・DO の SQLite・/api/health。外部へは出ない。
       - name: ローカルスモークテスト
         working-directory: cloud
@@ -124,6 +131,22 @@ jobs:
       - name: リポジトリを取得
         uses: actions/checkout@v4
 
+      # Issue #171: D1 の database_id が仮の値(ゼロ UUID。D1 を作る前の置き場所)のままなら、デプロイしない(早く落ちる。
+      # 依存のインストールの前に確認する)。秘密は使わず、リポジトリの cloud/wrangler.toml の値だけを見る。コメント行は見ない。
+      # このスクリプトは cloud/test/deploy-steps.test.ts が実際に実行して固定している(仮の値で失敗・実際の値で成功)。
+      - name: database_id が仮の値でないことを確認
+        run: |
+          db_id=$(grep -E '^database_id[[:space:]]*=' cloud/wrangler.toml | grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -n 1 || true)
+          if [ -z "$db_id" ]; then
+            echo "::error title=database_id を確認できません::cloud/wrangler.toml の database_id が UUID の形で見つかりません"
+            exit 1
+          fi
+          if [ "$db_id" = "00000000-0000-0000-0000-000000000000" ]; then
+            echo "::error title=database_id が仮の値です::cloud/wrangler.toml の database_id が仮の値(ゼロ UUID)のままです。ダッシュボードで作成した D1 の ID に置き換えてからデプロイしてください"
+            exit 1
+          fi
+          echo "database_id は仮の値ではありません"
+
       - name: pnpm をセットアップ
         uses: pnpm/action-setup@v4
 
@@ -162,6 +185,48 @@ jobs:
           echo "::add-mask::$sub"
           echo "CF_SUBDOMAIN=$sub" >> "$GITHUB_ENV"
           echo "サブドメインを取得し、マスクしました(値は表示しません)"
+
+      # Issue #171: D1 の権限確認。API トークンが D1 を読めるか(権限不足・未作成を、デプロイの前にはっきり知らせる)を、
+      # D1 の取得 API のステータスコードだけで判定する。**応答の本文は出力しない**(-o /dev/null)・トークンもアカウント ID も出さない。
+      # 200 のとき以外は失敗にする。R2 の権限確認は、R2 を使う #172 で足す。
+      # このスクリプトは cloud/test/deploy-steps.test.ts が、偽の curl で実際に実行して固定している。
+      - name: D1 の権限を確認(ステータスコードだけを出す)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          db_id=$(grep -E '^database_id[[:space:]]*=' cloud/wrangler.toml | grep -oE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' | head -n 1 || true)
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$db_id" || true)
+          case "$status" in
+            200)
+              echo "D1 にアクセスできます(HTTP 200)"
+              ;;
+            401|403)
+              echo "::error title=D1 の権限がありません::D1 の取得が HTTP $status でした。API トークンに D1 の編集権限があるか確認してください"
+              exit 1
+              ;;
+            404)
+              echo "::error title=D1 が見つかりません::D1 の取得が HTTP 404 でした。cloud/wrangler.toml の database_id と、ダッシュボードで作成した D1 を確認してください"
+              exit 1
+              ;;
+            *)
+              echo "::error title=D1 を確認できません::D1 の取得が HTTP $status でした"
+              exit 1
+              ;;
+          esac
+
+      # Issue #171: D1 の migration を本番に適用する。**wrangler deploy より前**(新しいコードは新しい表・列を前提にするため)。
+      # 失敗したら、後続のデプロイには進まない。migration は追加のみ(適用からデプロイまでの間は旧 Worker が新スキーマで動く)。
+      # 適用済みの migration は d1_migrations 表で記録され、再実行しても何も起きない。適用の前に、wrangler が D1 のバックアップを取る
+      # (公式ドキュメントの記述。CI など非対話の環境では確認の入力を省いて適用する)。
+      - name: D1 の migration を本番に適用
+        working-directory: cloud
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler d1 migrations apply DB --remote
 
       # 秘密(ACCESS_TEAM_NAME / ACCESS_AUD / ACCESS_ALLOWED_EMAIL)は Worker の secret にあり、wrangler deploy では消えない。
       - name: Worker をデプロイ

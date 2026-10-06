@@ -2410,6 +2410,28 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`@keiba/core` は版数運用の対象外・据え置き)
 
+## 次の正式版が 1.19.7 である根拠(Issue #171〈#169-a〉での変更)
+
+**patch**(クラウド版の D1〈分析履歴〉の土台。**変更は `cloud/`・`scripts/`・docs だけで、exe のアプリコード〈`packages/app`〉・core〈`packages/core`〉は無変更**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- `cloud/migrations/0001_init.sql`(exe の最終スキーマのダンプ。生成スクリプト `scripts/gen-cloud-d1-migration.ts`)・`0002_d1.sql`(D1 専用の追加分)、`cloud/wrangler.toml` の `[[d1_databases]]`、
+  `cloud/src/d1-health.ts` と `GET /api/health` の D1 の疎通確認、`cloud/smoke.ts` の migration の適用
+- `.github/workflows/deploy-cloud.yml`: check ジョブの D1 の migration(ローカル)、deploy ジョブの database_id の確認・D1 の権限確認・migration(本番)
+- テスト: スキーマ同値(`scripts/test/cloud-d1-schema.test.ts`)、外部キー・索引(`cloud/test/d1-schema.test.ts`。ローカルの D1)、ワークフローのステップの実行(`cloud/test/deploy-steps.test.ts`)、
+  バンドルに better-sqlite3 が入らないこと(`cloud/test/bundle-guard.test.ts`)、wrangler.toml と migration の静的ガード
+- 容量の測定スクリプト `scripts/measure-d1-size.ts`、docs(`cloud/README.md`・`docs/current-spec.md`・`docs/issue-order.md`)
+
+### patch である根拠
+
+- exe(`packages/app`)・core(`packages/core`)のコードは無変更。exe に入る成果物は変わらない
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の表は exe のスキーマのコピーで、exe 側は変えていない)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

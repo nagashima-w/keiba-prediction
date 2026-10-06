@@ -5,6 +5,7 @@
  * 存在を一切含まない 403 を返す。理由コードはログにだけ出す(トークン・メール・チーム名・AUD は出さない)。
  */
 import type { AccessEnv } from "./access-jwt";
+import { checkD1, type D1HealthDb } from "./d1-health";
 import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
 import type { GateResult, GateStatus } from "./gate-core";
@@ -30,6 +31,8 @@ const GATE_NAME = "gate";
 
 export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
+  /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
+  DB: D1HealthDb;
 }
 
 export interface HandlerDeps {
@@ -104,13 +107,17 @@ export async function handle(
   }
 
   if (pathname === "/api/health") {
+    // DO と D1 は独立に確認し、どちらかが駄目でももう一方の結果を報告する(原因の切り分けのため)。理由は返さない。
+    let sqlite = false;
     try {
       const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
-      const { sqlite } = await gate.ping();
-      return json({ ok: sqlite, durableObject: { sqlite } }, sqlite ? 200 : 503);
+      sqlite = (await gate.ping()).sqlite;
     } catch {
-      return json({ ok: false, durableObject: { sqlite: false } }, 503);
+      sqlite = false;
     }
+    const d1 = await checkD1(env.DB);
+    const ok = sqlite && d1.ok;
+    return json({ ok, durableObject: { sqlite }, d1: { ok: d1.ok } }, ok ? 200 : 503);
   }
 
   if (pathname === "/api/netkeiba/check") {

@@ -120,10 +120,10 @@ describe("check ジョブ(毎回走る。秘密を持たない)", () => {
     expect(check).not.toContain("CLOUDFLARE_API_TOKEN");
   });
 
-  it("cloud/ で、frozen-lockfile のインストール → 型検査 → テスト → デプロイの dry-run → スモークの順に実行する", () => {
+  it("cloud/ で、frozen-lockfile のインストール → 型検査 → テスト → デプロイの dry-run → D1 の migration(ローカル)→ スモークの順に実行する", () => {
     expect(check).toContain("working-directory: cloud");
     const install = stepIndex(check, "依存をインストール");
-    const order = ["型検査", "テスト", "dry-run", "スモーク"].map((n) => stepIndex(check, n));
+    const order = ["型検査", "テスト", "dry-run", "D1 の migration をローカルに適用", "スモーク"].map((n) => stepIndex(check, n));
     expect(install).toBeGreaterThanOrEqual(0);
     for (const i of order) {
       expect(i).toBeGreaterThan(install);
@@ -135,6 +135,16 @@ describe("check ジョブ(毎回走る。秘密を持たない)", () => {
     expect(stepBody(check, "テスト")).toContain("pnpm test");
     expect(stepBody(check, "dry-run")).toContain("pnpm run deploy:dry");
     expect(stepBody(check, "スモーク")).toContain("pnpm run smoke");
+  });
+
+  it("AC-a4: D1 の migration は --local だけで適用する(check は秘密を持たず、本番の D1 に触れない)。--remote は check に無い", () => {
+    const step = stepBody(check, "D1 の migration をローカルに適用");
+    expect(step).toContain("working-directory: cloud");
+    const commands = withoutComments(step).split("\n").filter((l) => /wrangler d1 migrations apply/.test(l));
+    expect(commands.map((l) => l.trim())).toEqual(["run: pnpm exec wrangler d1 migrations apply DB --local"]);
+    expect(withoutComments(check)).not.toContain("--remote");
+    // 適用先は binding 名 DB(wrangler.toml の [[d1_databases]] と同じ)
+    expect(readTextLf("cloud", "wrangler.toml")).toMatch(/^binding = "DB"$/m);
   });
 });
 
@@ -199,19 +209,65 @@ describe("deploy ジョブの条件(許可ブランチの上で、承認印付�
 describe("deploy ジョブのステップ(秘密・サブドメインの扱いと、デプロイの順序)", () => {
   const deploy = jobBody("deploy");
 
-  it("Secrets の存在確認 → サブドメインのマスク → wrangler deploy → 事後確認 の順で、wrangler deploy は1回だけ", () => {
-    const names = ["Secrets の存在を確認", "サブドメインを取得してマスク", "Worker をデプロイ", "事後確認"];
+  it("Secrets の存在確認 → database_id の確認 → サブドメインのマスク → D1 の権限確認 → D1 の migration(本番)→ wrangler deploy → 事後確認 の順で、wrangler deploy は1回だけ", () => {
+    const names = [
+      "Secrets の存在を確認",
+      "database_id が仮の値でないことを確認",
+      "サブドメインを取得してマスク",
+      "D1 の権限を確認",
+      "D1 の migration を本番に適用",
+      "Worker をデプロイ",
+      "事後確認",
+    ];
     const idx = names.map((n) => stepIndex(deploy, n));
     for (const i of idx) {
       expect(i).toBeGreaterThanOrEqual(0);
     }
     expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+    // 仮の ID のガードは、リポジトリの取得の後(wrangler.toml を読むため)で、依存のインストールよりも前(早く落ちる)
+    expect(idx[1]!).toBeGreaterThan(stepIndex(deploy, "リポジトリを取得"));
+    expect(idx[1]!).toBeLessThan(stepIndex(deploy, "依存をインストール"));
+    // wrangler を使うステップ(migration・deploy)は、依存のインストールの後
     const install = stepIndex(deploy, "依存をインストール");
     expect(install).toBeGreaterThanOrEqual(0);
-    expect(install).toBeLessThan(idx[2]!);
+    expect(install).toBeLessThan(idx[4]!);
     const occurrences = withoutComments(deploy).split("\n").filter((l) => /wrangler deploy/.test(l));
     expect(occurrences).toHaveLength(1);
     expect(occurrences[0]).not.toContain("--dry-run");
+  });
+
+  it("AC-a4: 本番への migration の適用(--remote)は、deploy ジョブに1回だけあり、wrangler deploy より前。--local は deploy ジョブに無い", () => {
+    const code = withoutComments(yml);
+    const remote = code.split("\n").filter((l) => /wrangler d1 migrations apply/.test(l) && l.includes("--remote"));
+    expect(remote.map((l) => l.trim())).toEqual(["run: pnpm exec wrangler d1 migrations apply DB --remote"]);
+    expect(withoutComments(deploy)).not.toContain("--local");
+    // yml 全体で、migrations apply は --local(check)と --remote(deploy)の2回だけ
+    expect(code.split("\n").filter((l) => /wrangler d1 migrations apply/.test(l))).toHaveLength(2);
+    const step = stepBody(deploy, "D1 の migration を本番に適用");
+    expect(step).toContain("working-directory: cloud");
+    expect(step).toContain("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}");
+    expect(step).toContain("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}");
+    // migration の適用が失敗したら、後続の deploy には進まない(continue-on-error を付けない。ジョブ内のどのステップにも付けない)
+    expect(withoutComments(deploy)).not.toMatch(/continue-on-error/);
+    expect(stepIndex(deploy, "D1 の migration を本番に適用")).toBeLessThan(stepIndex(deploy, "Worker をデプロイ"));
+  });
+
+  it("AC-a5: database_id の確認ステップと D1 の権限確認ステップは、API の応答本文を出力しない(ステータスコードだけ)", () => {
+    const permission = withoutComments(stepBody(deploy, "D1 の権限を確認"));
+    expect(permission).toContain("%{http_code}");
+    expect(permission).toContain("-o /dev/null");
+    expect(permission).toContain("/d1/database/");
+    // 応答をファイルに書いて表示する・詳細出力・ヘッダ出力をしない
+    expect(permission).not.toMatch(/\bcat\b/);
+    expect(permission).not.toMatch(/curl[^\n]* (-v|--verbose|-i|--include|-D|--dump-header|--trace|--trace-ascii)\b/);
+    // トークンは env から Authorization ヘッダに渡すだけで、echo/printf に出さない
+    expect(permission).not.toMatch(/\b(echo|printf)\b[^\n]*(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID)/);
+    // 秘密は、このステップの env にだけ渡す
+    const raw = stepBody(deploy, "D1 の権限を確認");
+    expect(raw).toContain("CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}");
+    expect(raw).toContain("CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}");
+    // database_id の確認は秘密を使わない(リポジトリの値を見るだけ)
+    expect(stepBody(deploy, "database_id が仮の値でないことを確認")).not.toContain("secrets.");
   });
 
   it("マスクは、wrangler deploy(URL をログに出す)より前にサブドメインに対して登録される", () => {

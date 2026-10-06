@@ -30,6 +30,16 @@ class_name = "NetkeibaGate"
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
 
+# D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
+# ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。
+# migration(migrations/)は、CI がデプロイの前に `wrangler d1 migrations apply DB --remote` で適用する。追加のみ(反映までの間は旧 Worker が動くため)。
+# ★`remote = true` は付けない(ローカルのテスト・開発が本番の D1 に繋がってしまう)。
+[[d1_databases]]
+binding = "DB"
+database_name = "keiba-cloud-db"
+database_id = "c52e97fc-d495-4395-8141-80d20ef57a16"
+migrations_dir = "migrations"
+
 # core(workspace の外。相対 import で取り込む)をバンドルするための解決。CI では packages/core/node_modules が無いので、
 # 依存はこのディレクトリの node_modules から解決させる。undici はスタブに差し替える(src/undici-stub.ts)。
 # tsconfig.json の paths・vitest.config.ts の alias と同じ対応。

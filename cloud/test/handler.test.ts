@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { GateResult, GateStatus } from "../src/gate-core";
+import { D1_HEALTH_SQL, type D1HealthDb } from "../src/d1-health";
 import { handle, type Env, type GateNamespaceLike, type GateStubLike } from "../src/handler";
 import { validateRaceId } from "../src/netkeiba-check";
 import { CHECK_DEFAULT_RACE_ID, renderPage } from "../src/page";
@@ -23,8 +24,26 @@ function gate(ping: () => Promise<{ sqlite: boolean }>, extra: Partial<GateStubL
 
 const HEALTHY = gate(async () => ({ sqlite: true }));
 
+/** D1 の疎通確認(`SELECT detail_key FROM analyses LIMIT 1`)の偽物。発行された文を記録する。 */
+function d1(first: () => Promise<unknown>, prepared: string[] = [], binds: unknown[][] = []): D1HealthDb {
+  return {
+    prepare: (sql: string) => {
+      prepared.push(sql);
+      return {
+        bind: (...values: unknown[]) => {
+          binds.push(values);
+          return { first };
+        },
+        first,
+      };
+    },
+  } as unknown as D1HealthDb;
+}
+
+const HEALTHY_D1 = d1(async () => null);
+
 function envOf(overrides: Partial<Env> = {}): Env {
-  return { ...GOOD_ENV, NETKEIBA_GATE: HEALTHY, ...overrides };
+  return { ...GOOD_ENV, NETKEIBA_GATE: HEALTHY, DB: HEALTHY_D1, ...overrides };
 }
 
 async function setup() {
@@ -205,26 +224,67 @@ describe("ルート(認証後)", () => {
     expect(await response.text()).toBe("");
   });
 
-  it("GET /api/health は DO の SQLite が動いていることを返す", async () => {
+  it("GET /api/health は DO の SQLite と D1 の疎通を返す", async () => {
     const { deps, token } = await setup();
     const response = await handle(req("/api/health", { token }), envOf(), {}, deps);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true } });
+    expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true } });
   });
 
-  it("DO が sqlite=false を返したら 503(ok:false)。DO が例外でも 503 で、例外の中身は返さない", async () => {
+  it("DO が sqlite=false を返したら 503(ok:false)。DO が例外でも 503 で、例外の中身は返さない。D1 の結果は独立に報告する", async () => {
     const { deps, token } = await setup();
     const down = await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
     expect(down.status).toBe(503);
-    expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false } });
+    expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true } });
     const throwing = gate(async () => {
       throw new Error("internal detail");
     });
     const failed = await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: throwing }), {}, deps);
     expect(failed.status).toBe(503);
     expect(await failed.text()).not.toContain("internal detail");
+  });
+
+  it("D1 の確認が失敗したら 503(ok:false)で、例外の中身は返さない。DO の結果は独立に報告する", async () => {
+    const { deps, token } = await setup();
+    const broken = d1(async () => {
+      throw new Error("D1_ERROR: no such table: analyses");
+    });
+    const response = await handle(req("/api/health", { token }), envOf({ DB: broken }), {}, deps);
+    expect(response.status).toBe(503);
+    const text = await response.text();
+    expect(JSON.parse(text)).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false } });
+    expect(text).not.toContain("no such table");
+    // DO も D1 も駄目なら、両方 false
+    const both = await handle(req("/api/health", { token }), envOf({ DB: broken, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+    expect(both.status).toBe(503);
+    expect(await both.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: false } });
+  });
+
+  it("D1 の binding が無い(設定漏れ)でも例外を外へ投げず、503 の d1.ok:false で返す", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/api/health", { token }), envOf({ DB: undefined as unknown as D1HealthDb }), {}, deps);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false } });
+  });
+
+  it("D1 の疎通確認は、読み取り専用の1文(bind なし)を1回だけ発行する(health のたびに書き込み行を増やさない)", async () => {
+    const { deps, token } = await setup();
+    const prepared: string[] = [];
+    const binds: unknown[][] = [];
+    await handle(req("/api/health", { token }), envOf({ DB: d1(async () => null, prepared, binds) }), {}, deps);
+    expect(prepared).toEqual([D1_HEALTH_SQL]);
+    expect(D1_HEALTH_SQL).toBe("SELECT detail_key FROM analyses LIMIT 1");
+    expect(binds).toEqual([]);
+  });
+
+  it("認証に失敗したときは、D1 に触れない(関門の前に何もしない)", async () => {
+    const prepared: string[] = [];
+    const { deps } = await setup();
+    const response = await handle(req("/api/health"), envOf({ DB: d1(async () => null, prepared) }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(prepared).toEqual([]);
   });
 
   it("未知のパスは 404、GET/HEAD 以外は 405(Allow 付き)", async () => {

@@ -5,6 +5,7 @@
  * 使い方(cloud/ で): `pnpm run smoke`
  *
  * 4つの構成で wrangler dev を起動して確かめる(起動のたびに、終了時に必ずプロセスを止める)。
+ *  (どの構成も、起動の前に D1 の migration を一時の保存先へ適用する〈wrangler d1 migrations apply DB --local〉。Issue #171)
  *  A. 設定なし(secret が無い本番の初回デプロイ直後と同じ)→ すべて 403(JWT が付いていても)
  *  B. `[access.dev]` で ctx.access を注入し、secret 相当を --var で渡す(正しい構成)→ 200。ただし不正な JWT が付けば 403
  *  C. B からメールだけを変える → 403
@@ -16,7 +17,7 @@
  * ローカルでは Access の JWT(本物の鍵での署名)は作れないため、200 になる経路は ctx.access だけである。
  * JWT の検証そのものは単体テスト(test/)が担う。値はすべて文書用のダミー。
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -83,6 +84,15 @@ async function withWorker(
   // DO の保存(kv)は、wrangler dev の既定では .wrangler/state に残り、次回の起動に引き継がれる(前回のブレーカーが開いたままになる)。
   // 毎回、新しい一時ディレクトリに保存して、終了時に消す(起動のたびに空の状態から始める)。
   const stateDir = mkdtempSync(path.join(tmpdir(), "keiba-smoke-state-"));
+  // D1(分析履歴。#171)の migration を、同じ保存先(--persist-to)に適用してから起動する(/api/health が D1 の表・列を確かめる)。
+  // wrangler dev と同じ設定ファイル(--config)・同じ保存先で、ローカルの D1 にだけ適用する(本番には触れない)。
+  const configIndex = args.indexOf("--config");
+  const configArgs = configIndex >= 0 ? ["--config", args[configIndex + 1]!] : [];
+  execFileSync("node_modules/.bin/wrangler", ["d1", "migrations", "apply", "DB", "--local", "--persist-to", stateDir, ...configArgs], {
+    stdio: "pipe",
+    env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
+    timeout: 120_000,
+  });
   const child = spawn(
     "node_modules/.bin/wrangler",
     ["dev", "--local", "--port", String(port), "--ip", "127.0.0.1", "--persist-to", stateDir, ...args],
@@ -149,7 +159,7 @@ async function main(): Promise<void> {
       check("B: GET / が 200 でメールを表示する", page.status === 200 && page.text.includes(EMAIL), `${page.status}`);
       check("B: GET / に viewport(スマホ幅)がある", page.text.includes('name="viewport"'));
       const health = await req(port, "GET", "/api/health");
-      check("B: GET /api/health が 200 で DO の SQLite が動いている", health.status === 200 && health.text === JSON.stringify({ ok: true, durableObject: { sqlite: true } }), `${health.status} ${health.text.slice(0, 120)}`);
+      check("B: GET /api/health が 200 で DO の SQLite と D1(migration 適用済みの表・列)が動いている", health.status === 200 && health.text === JSON.stringify({ ok: true, durableObject: { sqlite: true }, d1: { ok: true } }), `${health.status} ${health.text.slice(0, 120)}`);
       const tampered = await req(port, "GET", "/", { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" });
       check("B: 不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", tampered.status === 403 && tampered.text === "forbidden", `${tampered.status}`);
       check("B: 未知のパスは 404", (await req(port, "GET", "/no-such-path")).status === 404);

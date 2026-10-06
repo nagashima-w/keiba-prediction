@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.6)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.7)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.6`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.7`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -965,7 +965,64 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **確認用エンドポイント**: `GET /api/netkeiba/check?race_id=...`(Access の関門のあと。GET のみ)。race_id を core の検証(中央 01〜10・地方 30〜64・帯広 65 は対象外)で確かめ、
   出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/` にフォーム(初期値 202603020211)がある。
   **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
-- **未実装**: 保存(D1。#169〈分析履歴〉・#170〈取得キャッシュ〉。#168 で core の切り出しは完了)・分析の実行(#164)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
+- **未実装**: 保存(D1。分析履歴は #172〈ストアと R2〉・#173〈安全柵〉、取得キャッシュは #170。#168 で core の切り出し、#171 で D1 の土台は完了)・分析の実行(#164)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
+
+### D1(分析履歴)の土台(#171〈#169-a〉。v1.19.7)
+クラウド版の分析履歴の保存先 D1 の**土台だけ**(migration・binding・CI・health)。保存・読み取りのロジック(`D1AnalysisStore`)と R2 は #172、R2 の操作回数の安全柵は #173
+(#169 を #171・#172・#173 に3分割。exe のアプリコードは無変更)。
+- **migration**(`cloud/migrations/`): `0001_init.sql` は exe の `new AnalysisStore()` 後の `sqlite_master` のダンプ(8表と `idx_analyses_race`。生成スクリプト
+  `scripts/gen-cloud-d1-migration.ts`)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key TEXT`〈R2 のキー〉・索引 `analyses(kaisai_date)`・`analyses(prompt_version, race_id)`)。
+  **追加のみ**(静的ガード)。スキーマ同値(0001+0002 = exe の最終スキーマ + 宣言した追加分)は `scripts/test/cloud-d1-schema.test.ts` が固定する。
+- **binding**: `[[d1_databases]]`(binding `DB`・database_name `keiba-cloud-db`・`database_id` は公開してよい値でリポジトリに書いてある。`remote = true` は使わない)。
+- **CI**(`deploy-cloud.yml`): check ジョブは `wrangler d1 migrations apply DB --local`。deploy ジョブは `wrangler deploy` の前に、database_id が仮の値でないことの確認 →
+  D1 の権限確認(ステータスコードだけを出力)→ `migrations apply DB --remote`。
+- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok } }`(D1 は `SELECT detail_key FROM analyses LIMIT 1` で、migration の適用と binding を確かめる)。
+- **後続の設計(合意済み。2026-10-06 の着手前ゲート)**: 大きな列(`race_snapshot_json`・`raw_response`・馬ごとの `contributions_json`)は R2(分析ごとに1オブジェクトの JSON)に置き、
+  D1 には要約と R2 のキー(`detail_key`)だけを置く。書く順序は D1 → R2(R2 が失敗した行は `detail_key` を NULL にして要約だけを残す)。安全柵(R2 の月ごとの操作回数が無料枠の 10% を超えたら R2 に書かず D1 の要約だけ)は #173。
+  発走前の分析だけを保存し、朝の prior は D1 に保存しない。
+
+### クラウド版の D1 の容量の見積もり(#171。再現: `pnpm tsx scripts/measure-d1-size.ts`)
+Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 500 MB〈Free〉)。見積もりの手順を残す(#147 の「再現手段がない」への対応)。
+**入力はすべてリポジトリ内**(中央16頭の 202603020211 のフィクスチャ・LLM の実応答 36 本・戦績フィクスチャ5頭)。**乱数は固定の種で、同じ N なら出力は完全に同じ**
+(2回実行して diff が空なことを確認済み)。以下は 2026-10-06 の実行の出力そのまま(Node 22・Linux)。
+
+```
+## (1) 大きな列の大きさ(フィクスチャ 202603020211 〔中央16頭〕)
+  wide: 120 キー, 1437 バイト
+  trio: 560 キー, 8526 バイト
+  quinella: 120 キー, 1499 バイト
+  exacta: 240 キー, 3081 バイト
+  trifecta: 3360 キー, 53785 バイト
+  bracketQuinella: 36 キー, 421 バイト
+  頭数 16; race_snapshot_json(組合せなし) 4232 バイト
+  race_snapshot_json(組合せ全部入り) 73080 バイト, gzip 25043 バイト
+  contributions_json(1頭): 3071〜3360 バイト(戦績の異なる 5 頭), 平均 3174 バイト; 16頭分 51289 バイト
+  raw_response: 平均 4081 バイト(最小 2398・最大 5759), n=36
+  reason(1分析の合計): 平均 3272 バイト, n=36
+  R2 に置く詳細オブジェクト(snapshot 全部入り + raw + contributions 16頭): 平文 129171 バイト, gzip 28882 バイト
+
+## (2) 1分析あたりの D1(SQLite)の大きさ(16頭・買い目 10 件・索引込み・固定の種)
+  A(大きな列は NULL): N=1000, page_size=4096, 合計 6.6MB, 1分析あたり 6644 バイト
+    内訳(バイト/分析・上位): analysis_horses=5423 analysis_bets=434 sqlite_autoindex_analysis_bets_1=270 sqlite_autoindex_analysis_horses_1=221 analyses=98 analysis_allocation_meta=66 idx_analyses_prompt_version_race=37 idx_analyses_race=29
+  全部 D1(大きな列も入れる): N=300, page_size=4096, 合計 43.5MB, 1分析あたり 144957 バイト
+    内訳(バイト/分析・上位): analyses=77961 analysis_horses=65700 analysis_bets=451 sqlite_autoindex_analysis_bets_1=273 sqlite_autoindex_analysis_horses_1=218 analysis_allocation_meta=82 idx_analyses_race=41 idx_analyses_prompt_version_race=41
+
+## (3) 500MB が埋まる年数(年間件数ごと)
+  A(6644 バイト/分析): 3500件/年 → 21.5年, 10000件/年 → 7.5年, 20000件/年 → 3.8年
+  全部 D1(144957 バイト/分析): 3500件/年 → 1.0年, 10000件/年 → 0.3年, 20000件/年 → 0.2年
+```
+
+読み方と限界:
+- **N**: 組合せ・contributions はフィクスチャ1レース(16頭)・戦績の違う5頭(contributions は 3071〜3360 バイトの幅。16頭は5頭を巡回)・raw_response と reason は実応答 n=36。
+  SQLite の大きさは A が N=1000、全部 D1 が N=300 の1回ずつ(**実行間のばらつきは測っていない**が、乱数の種が固定なので同じ入力なら同じ値)。
+- **1分析あたり**は、`analyses`・`analysis_horses`(16頭)・配分メタ(1行)・買い目(**10件は仮定**。実際の件数は未測定。60件なら約 +3.5KB)・索引込み。全部 D1 の `race_snapshot_json` は
+  **73,080 バイトのダミー文字列**(実測した組合せ入りの大きさに合わせた合成。中身は実データでない)。contributions は実際の計算結果ではなく同じ13項目の形の合成(1頭 約 3.2KB。実測の平均 3,174 バイトに近づけた)。
+- **18頭立て**(三連単 4896 キーで snapshot は約 76KB に増える見込み。比例外挿で実測ではない)・**地方**(三連単なし)では大きさが変わる。R2 の詳細オブジェクトの gzip 後の大きさは
+  zlib のバージョンで多少変わりうる。年間件数 3,500 は「中央の発走前だけ」の仮定(**私の記憶ベースの概算で未検証**)、10,000・20,000 は地方の手動分析を含む仮定。
+- **結論**: 大きな列を D1 に置くと 1分析約 145KB で、年間 3,500 件でも約 1.0 年で 500MB が埋まる。**contributions を含む大きな列を R2 に出せば 1分析約 6.6KB で、年間 3,500 件なら約 21 年もつ**
+  (contributions だけを D1 に残す案は 1分析約 58KB〈A の 6,644 + 16頭分の contributions 51,289〉で約 2.5 年)。R2 の詳細オブジェクトは 1分析約 29KB(gzip)で、年間 3,500 件でも約 100MB/年(Free の 10GB に対して余裕)。
+- **D1 の書き込み行数**: 1回の保存は約 60 行(analyses 5〈表 + 索引 3 + sqlite_sequence〉・detail_key の UPDATE 1・馬 32〈16頭 × 2。複合主キーの自動索引で2倍〉・配分メタ 1・買い目 20・カウンタ 1)。
+  ローカルの D1 の `meta.rows_written` で実測した値(一度の計測)で、Free の 10 万行/日に対して 36 件/日なら約 2%。公式ドキュメントにも「索引は書き込み行を追加する」とある。
 
 ## 主な当初仕様との差異(記録)
 

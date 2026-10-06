@@ -57,6 +57,105 @@ describe("wrangler.toml", () => {
   });
 });
 
+/** `[[d1_databases]]` テーブルの本文(次のテーブルの直前まで。コメント除去済みの tomlCode から)。 */
+function d1Block(): string {
+  const m = /^\[\[d1_databases\]\]\n((?:(?!\[)[^\n]*\n?)*)/m.exec(tomlCode);
+  return m?.[1] ?? "";
+}
+
+const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
+
+describe("D1(Issue #171。AC-a7: wrangler.toml の設定)", () => {
+  it("[[d1_databases]] はちょうど1つで、binding は DB・database_name は keiba-cloud-db・migrations_dir は migrations", () => {
+    expect((tomlCode.match(/^\[\[d1_databases\]\]$/gm) ?? []).length).toBe(1);
+    const block = d1Block();
+    // 前提: ブロックを実際に読めている(空振りでない)
+    expect(block).not.toBe("");
+    expect(block).toMatch(/^binding = "DB"$/m);
+    expect(block).toMatch(/^database_name = "keiba-cloud-db"$/m);
+    expect(block).toMatch(/^migrations_dir = "migrations"$/m);
+  });
+
+  it("database_id は UUID の形で、仮の値(ゼロ UUID)ではない(ダッシュボードで作成した実際の D1。公開してよい値)", () => {
+    const id = /^database_id = "([^"]*)"$/m.exec(d1Block())?.[1];
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(id).not.toBe(PLACEHOLDER_D1_ID);
+  });
+
+  it("remote = true を使わない(ローカルのテスト・開発が本番の D1 に繋がってしまう)。preview_database_id も使わない", () => {
+    expect(tomlCode).not.toMatch(/^\s*remote\s*=/m);
+    expect(tomlCode).not.toMatch(/preview_database_id/);
+    // 検出の確認(空振りでない): 書かれていれば拾える形
+    expect('[[d1_databases]]\nremote = true\n').toMatch(/^\s*remote\s*=/m);
+  });
+
+  it("migrations_dir が指すディレクトリがあり、migration が入っている", () => {
+    expect(readdirSync(path.join(ROOT, "cloud", "migrations")).filter((f) => f.endsWith(".sql")).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/** コメント(`--` から行末)を除いた SQL。 */
+function stripSqlComments(sql: string): string {
+  return sql.replace(/--[^\n]*/g, "");
+}
+
+/** 破壊的な文(データ・列・表を壊す)の検出。文の先頭(`;` の直後か先頭)にあるものだけを見る(外部キーの `ON DELETE` 句は見ない)。 */
+function destructiveStatements(sql: string): string[] {
+  const code = stripSqlComments(sql);
+  const found: string[] = [];
+  for (const stmt of code.split(";")) {
+    const text = stmt.trim();
+    if (/^(DROP|DELETE|UPDATE|TRUNCATE|REPLACE)\b/i.test(text) || /^INSERT\s+OR\s+REPLACE\b/i.test(text) || /^ALTER\s+TABLE\s+\S+\s+(DROP|RENAME)\b/i.test(text)) {
+      found.push(text.split("\n")[0]!);
+    }
+  }
+  return found;
+}
+
+describe("D1 の migration は追加のみ(Issue #171。AC-a7: 静的ガード)", () => {
+  const dir = path.join(ROOT, "cloud", "migrations");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+
+  it("ファイル名は NNNN_名前.sql(小文字・数字・アンダースコア)で、番号は 0001 から欠番なく連続している", () => {
+    expect(files.length).toBeGreaterThan(0);
+    files.forEach((f, i) => {
+      expect(f, `${f} の名前`).toMatch(/^\d{4}_[a-z0-9_]+\.sql$/);
+      expect(Number(f.slice(0, 4)), `${f} の番号`).toBe(i + 1);
+    });
+  });
+
+  it("破壊的な文(DROP・DELETE・UPDATE・TRUNCATE・REPLACE・ALTER TABLE の DROP/RENAME)が1つも無い", () => {
+    for (const f of files) {
+      expect(destructiveStatements(readTextLf("cloud", "migrations", f)), `${f}`).toEqual([]);
+    }
+  });
+
+  it("検出の確認(空振りでない): 破壊的な文は拾い、追加の文・外部キーの句・コメントの中の語は拾わない", () => {
+    for (const bad of [
+      "DROP TABLE analyses;",
+      "drop index idx_x;",
+      "DELETE FROM analyses;",
+      "UPDATE analyses SET model = 'x';",
+      "TRUNCATE TABLE analyses;",
+      "REPLACE INTO analyses VALUES (1);",
+      "INSERT OR REPLACE INTO analyses VALUES (1);",
+      "ALTER TABLE analyses DROP COLUMN model;",
+      "ALTER TABLE analyses RENAME TO x;",
+      "CREATE TABLE t (a INTEGER);\nDROP TABLE t;",
+    ]) {
+      expect(destructiveStatements(bad), bad).toHaveLength(1);
+    }
+    for (const ok of [
+      "CREATE TABLE t (a INTEGER, FOREIGN KEY (a) REFERENCES u (id) ON DELETE CASCADE ON UPDATE CASCADE);",
+      "ALTER TABLE analyses ADD COLUMN detail_key TEXT;",
+      "CREATE INDEX i ON analyses (race_id);",
+      "-- DROP TABLE analyses;\nCREATE TABLE t (a INTEGER);",
+    ]) {
+      expect(destructiveStatements(ok), ok).toEqual([]);
+    }
+  });
+});
+
 describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)", () => {
   const ALIAS_KEYS = ["undici", "iconv-lite", "cheerio"];
 
@@ -129,7 +228,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
 
   it(".gitignore が node_modules・.wrangler・スモークの一時設定を除外する", () => {
     const gi = readTextLf("cloud", ".gitignore");
-    for (const entry of ["node_modules/", ".wrangler/", "dist-dry/", "wrangler.smoke.generated.toml", "wrangler.smoke-fake.generated.toml", "wrangler.bundle-guard.generated.toml"]) {
+    for (const entry of ["node_modules/", ".wrangler/", "dist-dry/", "wrangler.smoke.generated.toml", "wrangler.smoke-fake.generated.toml", "wrangler.bundle-guard.generated.toml", "native-probe.generated.ts", "wrangler.native-probe.generated.toml"]) {
       expect(gi.split("\n")).toContain(entry);
     }
   });
@@ -186,6 +285,9 @@ describe("公開リポジトリへの値の混入(実在のメール・チーム
       "cloud/src/authenticate.ts",
       "cloud/src/handler.ts",
       "cloud/src/worker.ts",
+      "cloud/src/d1-health.ts",
+      "cloud/migrations/0001_init.sql",
+      "cloud/migrations/0002_d1.sql",
       "cloud/test/helpers.ts",
       "cloud/test/handler.test.ts",
       ".github/workflows/deploy-cloud.yml",

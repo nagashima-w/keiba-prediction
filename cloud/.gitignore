@@ -5,3 +5,6 @@ dist-dry/
 wrangler.smoke.generated.toml
 wrangler.smoke-fake.generated.toml
 wrangler.bundle-guard.generated.toml
+# バンドルのガードの対照(better-sqlite3 を巻き込む入口)が生成する一時ファイル
+native-probe.generated.ts
+wrangler.native-probe.generated.toml
