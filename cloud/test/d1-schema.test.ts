@@ -53,7 +53,7 @@ async function rows(sql: string, ...binds: unknown[]): Promise<Array<Record<stri
 }
 
 describe("migration の適用(ローカルの D1)", () => {
-  it("前提: 8 表と detail_key 列と、索引3つが作られている(以降の検査が空振りでない)", async () => {
+  it("前提: 8 表と r2_ops 表(#173)と detail_key 列と、索引3つが作られている(以降の検査が空振りでない)", async () => {
     const tables = (await rows("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name <> 'd1_migrations' ORDER BY name")).map((r) => r["name"]);
     expect(tables).toEqual([
       "analyses",
@@ -64,14 +64,15 @@ describe("migration の適用(ローカルの D1)", () => {
       "race_combo_payouts",
       "race_result_meta",
       "race_results",
-    ]);
+      "r2_ops",
+    ].sort());
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("detail_key");
     const indexes = (await rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx\\_%' ESCAPE '\\' ORDER BY name")).map((r) => r["name"]);
     expect(indexes).toEqual(["idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race"]);
   });
 
-  it("migration は2本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql"]);
+  it("migration は3本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql"]);
   });
 });
 

@@ -343,6 +343,7 @@ describe("公開リポジトリへの値の混入(実在のメール・チーム
       "cloud/src/d1-health.ts",
       "cloud/migrations/0001_init.sql",
       "cloud/migrations/0002_d1.sql",
+      "cloud/migrations/0003_r2_ops.sql",
       "cloud/test/helpers.ts",
       "cloud/test/handler.test.ts",
       ".github/workflows/deploy-cloud.yml",

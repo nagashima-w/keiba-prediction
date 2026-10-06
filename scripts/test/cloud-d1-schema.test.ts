@@ -141,9 +141,25 @@ const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {
   ],
 };
 
-/** exe のスキーマに、宣言した D1 専用の追加分を足した「期待する D1 の構造」。 */
+/**
+ * D1 専用の、宣言した追加の表(0003 の中身。Issue #173)。R2 の操作回数のカウンタ(月ごと)。exe の SQLite には無い。
+ * `ym INTEGER PRIMARY KEY` は rowid の別名なので、索引(自動索引)は作られない。
+ */
+const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
+  r2_ops: {
+    columns: [
+      { name: "class_a", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "class_b", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "ym", type: "INTEGER", notnull: 0, dflt_value: null, pk: 1 },
+    ],
+    foreignKeys: [],
+    indexes: [],
+  },
+};
+
+/** exe のスキーマに、宣言した D1 専用の追加分(列・索引・表)を足した「期待する D1 の構造」。 */
 function expectedD1Schema(exe: Schema): Schema {
-  const out: Record<string, TableSchema> = {};
+  const out: Record<string, TableSchema> = { ...D1_EXTRA_TABLES };
   for (const [table, schema] of Object.entries(exe)) {
     const extraColumns = D1_EXTRA_COLUMNS[table] ?? [];
     const extraIndexes = D1_EXTRA_INDEXES[table] ?? [];
@@ -180,8 +196,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql と 0002_d1.sql の2本だけで、番号は 0001 から連続している(後から足すときは 0003 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql の3本だけで、番号は 0001 から連続している(後から足すときは 0004 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -214,10 +230,10 @@ describe("0001_init.sql は exe の sqlite_master のダンプそのもの(手�
   });
 });
 
-describe("AC-a1: 0001+0002 を流した構造が、exe の最終スキーマ + 宣言した追加分と一致する", () => {
+describe("AC-a1: 0001+0002+0003 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
   const sqls = FILES.map(readMigration);
 
-  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key と索引2つだけ)", () => {
+  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・索引2つ・r2_ops 表だけ)", () => {
     const actual = schemaAfter(sqls);
     expect(diffSchemas(expectedD1Schema(exe), actual)).toEqual([]);
   });
@@ -232,6 +248,13 @@ describe("AC-a1: 0001+0002 を流した構造が、exe の最終スキーマ + �
     expect(indexNames).toHaveLength(3);
   });
 
+  it("Issue #173: r2_ops 表が実際に入っている(ym が主キー・class_a と class_b は NOT NULL。宣言だけして 0003 に書き忘れても気づける)", () => {
+    const actual = schemaAfter(sqls);
+    expect(Object.keys(actual)).toContain("r2_ops");
+    expect(Object.keys(exe)).not.toContain("r2_ops");
+    expect(actual["r2_ops"]!.columns).toEqual(D1_EXTRA_TABLES["r2_ops"]!.columns);
+  });
+
   it("0002 の索引の列の順は (prompt_version, race_id)。逆順では dedup の文が索引を使えない", () => {
     const actual = schemaAfter(sqls);
     const pv = actual["analyses"]!.indexes.find((i) => i.name === "idx_analyses_prompt_version_race");
@@ -242,21 +265,26 @@ describe("AC-a1: 0001+0002 を流した構造が、exe の最終スキーマ + �
    * 対照(検出が空振りでないこと): 次の「壊れた migration」は、いずれも差分を検出する。
    * それぞれが、実際に起こりうる変異(0001 の写し間違い・0002 への無断の追加)に当たる。
    */
-  const [init, d1] = sqls as [string, string];
-  const mutants: ReadonlyArray<readonly [string, string, string]> = [
-    ["列の型を変える", init.replace("umaban INTEGER NOT NULL,\n        prior REAL NOT NULL", "umaban TEXT NOT NULL,\n        prior REAL NOT NULL"), d1],
-    ["NOT NULL を外す", init.replace("race_id TEXT NOT NULL,\n        analyzed_at TEXT NOT NULL", "race_id TEXT,\n        analyzed_at TEXT NOT NULL"), d1],
-    ["列を落とす", init.replace("        prompt_lookahead_guarded INTEGER\n", "        history_cutoff_date_dummy INTEGER\n"), d1],
-    ["外部キーを落とす", init.replace(/,\n\s+FOREIGN KEY \(analysis_id\) REFERENCES analyses \(id\)\n\s+\);\n\nCREATE TABLE analysis_horses/, "\n      );\n\nCREATE TABLE analysis_horses"), d1],
-    ["宣言していない列を 0002 に足す", init, `${d1}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`],
-    ["宣言していない索引を 0002 に足す", init, `${d1}\nCREATE INDEX idx_undeclared ON analyses (model);\n`],
-    ["索引の列の順を逆にする", init, d1.replace("ON analyses (prompt_version, race_id);", "ON analyses (race_id, prompt_version);")],
-    ["detail_key を落とす", init, d1.replace(/ALTER TABLE analyses ADD COLUMN detail_key TEXT;?/, "")],
+  const [init, d1, ops] = sqls as [string, string, string];
+  const mutants: ReadonlyArray<readonly [string, string, string, string]> = [
+    ["列の型を変える", init.replace("umaban INTEGER NOT NULL,\n        prior REAL NOT NULL", "umaban TEXT NOT NULL,\n        prior REAL NOT NULL"), d1, ops],
+    ["NOT NULL を外す", init.replace("race_id TEXT NOT NULL,\n        analyzed_at TEXT NOT NULL", "race_id TEXT,\n        analyzed_at TEXT NOT NULL"), d1, ops],
+    ["列を落とす", init.replace("        prompt_lookahead_guarded INTEGER\n", "        history_cutoff_date_dummy INTEGER\n"), d1, ops],
+    ["外部キーを落とす", init.replace(/,\n\s+FOREIGN KEY \(analysis_id\) REFERENCES analyses \(id\)\n\s+\);\n\nCREATE TABLE analysis_horses/, "\n      );\n\nCREATE TABLE analysis_horses"), d1, ops],
+    ["宣言していない列を 0002 に足す", init, `${d1}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`, ops],
+    ["宣言していない索引を 0002 に足す", init, `${d1}\nCREATE INDEX idx_undeclared ON analyses (model);\n`, ops],
+    ["索引の列の順を逆にする", init, d1.replace("ON analyses (prompt_version, race_id);", "ON analyses (race_id, prompt_version);"), ops],
+    ["detail_key を落とす", init, d1.replace(/ALTER TABLE analyses ADD COLUMN detail_key TEXT;?/, ""), ops],
+    ["r2_ops の class_a の NOT NULL を外す(Issue #173)", init, d1, ops.replace("class_a INTEGER NOT NULL", "class_a INTEGER")],
+    ["r2_ops の class_b の型を変える(Issue #173)", init, d1, ops.replace("class_b INTEGER NOT NULL", "class_b TEXT NOT NULL")],
+    ["r2_ops の主キーを落とす(Issue #173)", init, d1, ops.replace("ym INTEGER PRIMARY KEY", "ym INTEGER")],
+    ["r2_ops に宣言していない列を足す(Issue #173)", init, d1, ops.replace("class_b INTEGER NOT NULL", "class_b INTEGER NOT NULL, undeclared INTEGER")],
+    ["0003 を丸ごと落とす(Issue #173)", init, d1, ""],
   ];
-  it.each(mutants)("対照: %s と、差分として検出される(置換が実際に効いていることも確かめる)", (_name, mutatedInit, mutatedD1) => {
+  it.each(mutants)("対照: %s と、差分として検出される(置換が実際に効いていることも確かめる)", (_name, mutatedInit, mutatedD1, mutatedOps) => {
     // 置換が空振りしていない(元のファイルから変わっている)
-    expect(mutatedInit === init && mutatedD1 === d1).toBe(false);
-    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([mutatedInit, mutatedD1])).length).toBeGreaterThan(0);
+    expect(mutatedInit === init && mutatedD1 === d1 && mutatedOps === ops).toBe(false);
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([mutatedInit, mutatedD1, mutatedOps])).length).toBeGreaterThan(0);
   });
 });
 

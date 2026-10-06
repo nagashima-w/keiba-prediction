@@ -7,11 +7,20 @@
  *
  * ## 書き込み(saveAnalysis)
  * 1. 詳細(大きな列 3 つ)を JSON → gzip(level 1)にする(**D1 に書く前**。JSON にできない値はここで例外になり、何も書かれない)
- * 2. D1 に **1 回の `batch`** で書く(配分ありなら 5 文、配分なしなら 3 文。馬・買い目の数によらず一定):
- *    ① analyses の INSERT(core の codec の文と束縛値。大きな列は NULL) ② `detail_key` の UPDATE ③ 馬(`json_each`) ④ 配分メタ ⑤ 買い目(`json_each`)
- *    子の行は `(SELECT max(id) FROM analyses)` で、①で採番された id に紐づける。
- * 3. R2 に `analyses/{id}.json.gz` を put(**D1 が先、R2 が後**)。失敗したら最大 2 回まで同じキーに再試行する(冪等)。
+ * 2. **R2 の操作回数の柵を確かめる**(Issue #173): 今月の回数を D1 の `r2_ops` から 1 回読む。Class A(PUT)が柵(無料枠の 10%)に達していたら、
+ *    R2 に書かず、D1 に**要約だけ**を保存して `detail: "skipped"` を返す(PUT 0 回・カウンタは増やさない・`detail_key` は NULL)。
+ * 3. D1 に **1 回の `batch`** で書く(配分ありなら 6 文、配分なしなら 4 文。馬・買い目の数によらず一定):
+ *    ⓪ `r2_ops` の Class A を +1(**最初の文**。batch が失敗したらカウンタも増えない) ① analyses の INSERT(core の codec の文と束縛値。大きな列は NULL)
+ *    ② `detail_key` の UPDATE ③ 馬(`json_each`) ④ 配分メタ ⑤ 買い目(`json_each`)
+ *    子の行は `(SELECT max(id) FROM analyses)` で、①で採番された id に紐づける。柵でスキップするときは ⓪② を除く(配分ありで 4 文・なしで 2 文)。
+ * 4. R2 に `analyses/{id}.json.gz` を put(**D1 が先、R2 が後**)。失敗したら最大 2 回まで同じキーに再試行する(冪等)。
  *    それでも失敗したら `detail_key` を NULL に戻し、**throw せず** `detail: "failed"` を返す(要約は残る)。
+ *    カウンタは batch と一緒にコミット済みなので +1 のまま(再試行は数えない。1 回の保存を 1 回と数える)。
+ *
+ * ### 柵の限界
+ * - 回数の確認(②)と +1(③)は別の呼び出しなので、同時に保存が走ると、柵を同時実行数ぶんだけ超えうる(柵は無料枠の 10% で、100 倍以上の余裕がある)。
+ * - PUT の再試行を数えないので、最大 3 倍の過少申告になりうる(それでも柵の 3 倍 = 無料枠の 30%)。
+ * - 月は UTC の yyyymm(`r2-fence.ts` の `monthKey`)。時計は `now` で注入できる。
  *
  * ### `(SELECT max(id) FROM analyses)` に依存してよい理由(事実と推論を分ける)
  * - **確認済みの事実**(ローカルの workerd。`test/analysis-repository.test.ts` の AC-b3b): 20 件の保存を `Promise.all` で同時に走らせても、
@@ -21,11 +30,13 @@
  *   (`detail_key` の索引が要る。migration 0003)へ切り替える。**最初の本番の実保存で確かめる。**
  *
  * ## 読み出し
- * - `getAnalysisDetail`: D1(2 文の batch)+ R2 の get 1 回。R2 に無い・壊れている・別のレースのものなら `detail: "missing"`(クラッシュしない)。
+ * - `getAnalysisDetail`: D1(3 文の batch。分析・馬・今月の R2 の回数)+ R2 の get 1 回。R2 に無い・壊れている・別のレースのものなら `detail: "missing"`(クラッシュしない)。
  *   `detail_key` が NULL なら `detail: "none"`(R2 に触れない)。**大きな列が null なのは「詳細が無い」のであって「LLM 未使用」とは限らない**
- *   (戻り値の `detail` で区別する)。
+ *   (戻り値の `detail` で区別する)。**Class B(GET)が柵に達していたら、R2 を引かず `missing`**(詳細の表示だけを拒否する。要約は出す)。
+ *   読み出しの試行は Class B に +1 する(**best-effort**: 失敗しても読み出しを妨げない。R2 への要求が発生した試行は、get が失敗しても数える)。
  * - `listAnalysisSummaries`: D1 だけ。**2 文の batch**(分析・馬)で、N+1 にしない。大きな列は読まない。新しい順(id の降順)に limit 件(既定 50・上限 200)。
  *   Free の D1 は読み取り 500 万行/日なので、**全件読みの口は作らない**。
+ * - `getR2Usage`: 今月の Class A・B の回数と、柵の上限・許可の状態(画面〈#165〉と通知〈#166〉への接続は、それぞれの Issue)。
  *
  * ## 既知の差分(exe の SQLite との違い。【記録】。`test/analysis-repository.test.ts` が固定している)
  * - Infinity・NaN は NULL、-0 は 0 になる(D1 の bind も同じ)。NOT NULL の列(prior など)に NaN を渡すと、制約違反で保存全体が失敗する。
@@ -58,6 +69,7 @@ import type {
   StoredAnalysisHorse,
 } from "../../packages/core/src/ev/analysis-store-types.js";
 import { contributionsOf, decodeDetail, DETAIL_KEY_SQL, detailKeyOf, encodeDetail } from "./analysis-detail";
+import { isReadAllowed, isWriteAllowed, monthKey, R2_FENCE_LIMITS, type R2Usage } from "./r2-fence";
 
 /** D1 のうち、ストアが使う部分だけ(テストで記録つきの転送・偽物を渡せる)。 */
 export type AnalysisDb = Pick<D1Database, "prepare" | "batch">;
@@ -72,8 +84,11 @@ export const DETAIL_PUT_RETRIES = 2;
 
 export interface SaveResult {
   readonly id: number;
-  /** `stored`: R2 に詳細を書いた。`failed`: R2 への書き込みに失敗した(要約だけが残り、`detail_key` は NULL)。#173 で `skipped` を足す。 */
-  readonly detail: "stored" | "failed";
+  /**
+   * `stored`: R2 に詳細を書いた。`failed`: R2 への書き込みに失敗した(要約だけが残り、`detail_key` は NULL)。
+   * `skipped`: R2 の操作回数の柵(Class A が無料枠の 10%)に達していたので、R2 に書かなかった(D1 に要約だけを保存。`detail_key` は NULL。Issue #173)。
+   */
+  readonly detail: "stored" | "failed" | "skipped";
 }
 
 export type DetailStatus = "present" | "missing" | "none";
@@ -101,12 +116,24 @@ export interface AnalysisListFilter {
   readonly limit?: number;
 }
 
+/** `getR2Usage` の戻り値。 */
+export interface R2UsageReport extends R2Usage {
+  /** 月(UTC の yyyymm)。 */
+  readonly ym: number;
+  /** 柵の上限(この回数に達したら止める)。 */
+  readonly limits: { readonly classA: number; readonly classB: number };
+  readonly writeAllowed: boolean;
+  readonly readAllowed: boolean;
+}
+
 export interface AnalysisRepository {
   saveAnalysis(record: AnalysisRecord): Promise<SaveResult>;
   listAnalysisSummaries(filter?: AnalysisListFilter): Promise<AnalysisSummary[]>;
   getAnalysisDetail(analysisId: number): Promise<AnalysisDetailResult | undefined>;
   getStoredAllocation(analysisId: number): Promise<StoredAllocation | undefined>;
   listAnalyzedRaceIdsByPromptVersion(version: string): Promise<string[]>;
+  /** 今月の R2 の操作回数(Class A・B)と、柵の状態(Issue #173)。 */
+  getR2Usage(): Promise<R2UsageReport>;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +173,13 @@ const INSERT_META_SQL = withNewIdSql(INSERT_ALLOCATION_META_SQL);
 const UPDATE_DETAIL_KEY_SQL = `UPDATE analyses SET detail_key = ${DETAIL_KEY_SQL} WHERE id = ${NEW_ID}`;
 const CLEAR_DETAIL_KEY_SQL = "UPDATE analyses SET detail_key = NULL WHERE id = ?";
 
+/** 今月の R2 の操作回数(柵の判定のための読み取り。書き込み行を増やさない)。 */
+const SELECT_R2_USAGE_SQL = "SELECT class_a AS classA, class_b AS classB FROM r2_ops WHERE ym = ?";
+/** Class A(書き込み)の +1。保存の batch の最初の文(月の行が無ければ作る)。 */
+const COUNT_WRITE_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, 0) ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1";
+/** Class B(読み出し)の +1。best-effort で単独に実行する。 */
+const COUNT_READ_SQL = "INSERT INTO r2_ops (ym, class_a, class_b) VALUES (?, 0, 1) ON CONFLICT(ym) DO UPDATE SET class_b = class_b + 1";
+
 /** 要約の列(大きな列は読まず、NULL で埋めて `AnalysisRow` の形にする)。 */
 const SUMMARY_COLUMNS = `id, race_id AS raceId, analyzed_at AS analyzedAt, ev_estimated AS evEstimated,
        prompt_version AS promptVersion, additional_instruction AS additionalInstruction,
@@ -183,22 +217,36 @@ function listStatements(db: AnalysisDb, filter: AnalysisListFilter, limit: numbe
 }
 
 /**
- * 1 件の分析を書く D1 の文(1 回の batch に渡す)。配分ありなら 5 文、なしなら 3 文(馬・買い目の数によらず一定)。
+ * 1 件の分析を書く D1 の文(1 回の batch に渡す)。馬・買い目の数によらず一定の文数。
  * 大きな列(raw_response・race_snapshot_json・馬の contributions_json)は NULL で書く(R2 へ)。
+ *
+ * - `ym` が数(UTC の yyyymm): 通常の保存。**最初の文が `r2_ops` の Class A の +1**(batch が失敗したらカウンタも増えない)で、続けて
+ *   analyses の INSERT・`detail_key` の UPDATE・馬・[配分メタ・買い目]。配分ありなら 6 文、なしなら 4 文。analyses の INSERT は `[1]`({@link analysesInsertIndex})。
+ * - `ym` が null: R2 の柵を超えたときの保存(R2 に書かない)。カウンタも `detail_key` の UPDATE も無い。配分ありなら 4 文、なしなら 2 文。analyses の INSERT は `[0]`。
+ *
  * テストが「batch を使わず逐次実行したときの対照」にも使うため export している。
  */
-export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord): D1PreparedStatement[] {
-  const statements: D1PreparedStatement[] = [
-    db.prepare(INSERT_ANALYSIS_SQL).bind(...analysisParams({ ...rec, rawResponse: null, raceSnapshot: null })),
-    db.prepare(UPDATE_DETAIL_KEY_SQL),
-    // 馬: 1 文・bind 1 個(JSON の配列)。analysis_id(先頭)を除いた束縛値の並びは codec のもの。contributions は R2 なので null。
-    db.prepare(INSERT_HORSES_SQL).bind(JSON.stringify(rec.horses.map((h) => horseParams(0, { ...h, contributions: null }).slice(1)))),
-  ];
+export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: number | null): D1PreparedStatement[] {
+  const statements: D1PreparedStatement[] = [];
+  if (ym !== null) {
+    statements.push(db.prepare(COUNT_WRITE_SQL).bind(ym));
+  }
+  statements.push(db.prepare(INSERT_ANALYSIS_SQL).bind(...analysisParams({ ...rec, rawResponse: null, raceSnapshot: null })));
+  if (ym !== null) {
+    statements.push(db.prepare(UPDATE_DETAIL_KEY_SQL));
+  }
+  // 馬: 1 文・bind 1 個(JSON の配列)。analysis_id(先頭)を除いた束縛値の並びは codec のもの。contributions は R2 なので null。
+  statements.push(db.prepare(INSERT_HORSES_SQL).bind(JSON.stringify(rec.horses.map((h) => horseParams(0, { ...h, contributions: null }).slice(1)))));
   if (rec.allocation !== undefined) {
     statements.push(db.prepare(INSERT_META_SQL).bind(...allocationMetaParams(0, rec.allocation.meta).slice(1)));
     statements.push(db.prepare(INSERT_BETS_SQL).bind(JSON.stringify(rec.allocation.bets.map((b) => allocationBetParams(0, b).slice(1)))));
   }
   return statements;
+}
+
+/** {@link buildSaveStatements} の結果の中で、analyses の INSERT(採番された id を返す文)の位置。 */
+export function analysesInsertIndex(ym: number | null): number {
+  return ym === null ? 0 : 1;
 }
 
 function validateLimit(limit: number | undefined): number {
@@ -218,24 +266,40 @@ function validateLimit(limit: number | undefined): number {
 export interface D1AnalysisStoreOptions {
   readonly db: AnalysisDb;
   readonly bucket: AnalysisBucket;
+  /** 時計(R2 の操作回数の月の区切り〈UTC の yyyymm〉に使う)。既定は現在時刻。テストで注入する。 */
+  readonly now?: () => Date;
 }
 
 export class D1AnalysisStore implements AnalysisRepository {
   private readonly db: AnalysisDb;
   private readonly bucket: AnalysisBucket;
+  private readonly now: () => Date;
 
   constructor(options: D1AnalysisStoreOptions) {
     this.db = options.db;
     this.bucket = options.bucket;
+    this.now = options.now ?? (() => new Date());
+  }
+
+  /** 今月の R2 の操作回数(行が無ければ 0)。 */
+  private async readUsage(ym: number): Promise<R2Usage> {
+    const row = await this.db.prepare(SELECT_R2_USAGE_SQL).bind(ym).first<R2Usage>();
+    return row ?? { classA: 0, classB: 0 };
   }
 
   async saveAnalysis(record: AnalysisRecord): Promise<SaveResult> {
     // D1 に書く前に、詳細を符号化する(JSON にできない値はここで例外になり、何も書かれない)。
     const body = encodeDetail(record);
-    const results = await this.db.batch(buildSaveStatements(this.db, record));
-    const id = results[0]?.meta.last_row_id;
+    // R2 の操作回数の柵(Class A)。達していたら、R2 に書かず D1 に要約だけを保存する(カウンタは増やさない)。
+    const ym = monthKey(this.now());
+    const writeYm = isWriteAllowed(await this.readUsage(ym)) ? ym : null;
+    const results = await this.db.batch(buildSaveStatements(this.db, record, writeYm));
+    const id = results[analysesInsertIndex(writeYm)]?.meta.last_row_id;
     if (typeof id !== "number" || !(id > 0)) {
       throw new Error("analyses の採番 id を取得できませんでした");
+    }
+    if (writeYm === null) {
+      return { id, detail: "skipped" };
     }
     const key = detailKeyOf(id);
     for (let attempt = 0; attempt <= DETAIL_PUT_RETRIES; attempt += 1) {
@@ -273,9 +337,11 @@ export class D1AnalysisStore implements AnalysisRepository {
   }
 
   async getAnalysisDetail(analysisId: number): Promise<AnalysisDetailResult | undefined> {
-    const [analyses, horses] = await this.db.batch<unknown>([
+    const ym = monthKey(this.now());
+    const [analyses, horses, usageRows] = await this.db.batch<unknown>([
       this.db.prepare(SELECT_ONE_SQL).bind(analysisId),
       this.db.prepare(SELECT_ANALYSIS_HORSES_SQL).bind(analysisId),
+      this.db.prepare(SELECT_R2_USAGE_SQL).bind(ym),
     ]);
     const row = analyses?.results[0] as (AnalysisRow & { detailKey: string | null }) | undefined;
     if (row === undefined) {
@@ -285,7 +351,13 @@ export class D1AnalysisStore implements AnalysisRepository {
     if (row.detailKey === null) {
       return { analysis: toStoredAnalysis(row, horseRows), detail: "none" };
     }
+    // R2 の操作回数の柵(Class B)。達していたら R2 を引かず、詳細の表示だけを拒否する(要約は出す。カウンタは増やさない)。
+    const usage = (usageRows?.results[0] as R2Usage | undefined) ?? { classA: 0, classB: 0 };
+    if (!isReadAllowed(usage)) {
+      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing" };
+    }
     const payload = await this.readDetail(row.detailKey, row.raceId);
+    await this.countRead(ym);
     if (payload === null) {
       return { analysis: toStoredAnalysis(row, horseRows), detail: "missing" };
     }
@@ -299,6 +371,15 @@ export class D1AnalysisStore implements AnalysisRepository {
       return { ...h, contributions_json: c === null ? null : JSON.stringify(c) };
     });
     return { analysis: toStoredAnalysis(merged, mergedHorses), detail: "present" };
+  }
+
+  /** Class B(読み出し)を +1 する。**best-effort**: 失敗しても読み出しを妨げない(例外を握りつぶす)。 */
+  private async countRead(ym: number): Promise<void> {
+    try {
+      await this.db.prepare(COUNT_READ_SQL).bind(ym).run();
+    } catch {
+      // カウントできなくても、詳細は返す。
+    }
   }
 
   /** R2 から詳細を読む。無い・壊れている・別のレースのもの・get の失敗は、すべて null(例外を投げない)。 */
@@ -330,5 +411,11 @@ export class D1AnalysisStore implements AnalysisRepository {
   async listAnalyzedRaceIdsByPromptVersion(version: string): Promise<string[]> {
     const { results } = await this.db.prepare(SELECT_RACE_IDS_BY_VERSION_SQL).bind(version).all<{ raceId: string }>();
     return results.map((r) => r.raceId);
+  }
+
+  async getR2Usage(): Promise<R2UsageReport> {
+    const ym = monthKey(this.now());
+    const usage = await this.readUsage(ym);
+    return { ym, ...usage, limits: R2_FENCE_LIMITS, writeAllowed: isWriteAllowed(usage), readAllowed: isReadAllowed(usage) };
   }
 }

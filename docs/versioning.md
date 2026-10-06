@@ -2498,6 +2498,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値も変わらない
 
+## 次の正式版が 1.19.11 である根拠(Issue #173〈#169-c〉での変更)
+
+**patch**(クラウド版の R2 の操作回数の安全柵。**変更は `cloud/`・`scripts/`・docs だけで、exe のアプリコード〈`packages/app`〉・core〈`packages/core`〉は無変更**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- `cloud/migrations/0003_r2_ops.sql`(月ごとの R2 の操作回数のカウンタ。追加のみ)、`cloud/src/r2-fence.ts`(柵の判定の純関数と定数。無料枠の 10%)
+- `cloud/src/analysis-repository.ts`: 保存の batch の最初の文でカウンタ +1・柵を超えたら R2 に書かず要約だけを保存(`detail: "skipped"`)・詳細の読み出しの柵(`missing`)・best-effort のカウント・`getR2Usage()`
+- テスト: 柵の純関数(`cloud/test/r2-fence.test.ts`)、カウンタ・月の境界・閾値の境界・読み出しの柵(`cloud/test/analysis-fence.test.ts`)、文の数の更新(`analysis-repository.test.ts`)、書き込み行数の更新(`rows-written.test.ts`)、スキーマ同値(`scripts/test/cloud-d1-schema.test.ts`)
+- docs(`cloud/README.md`・`docs/current-spec.md`・`docs/issue-order.md`)
+
+### patch である根拠
+
+- exe(`packages/app`)・core(`packages/core`)のコードは無変更。exe に入る成果物は変わらない
+- 分析結果の数値・画面・保存データは変わらない(クラウド版にはまだ保存の呼び出し元が無い)
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`r2_ops` はクラウド版の D1 だけの表で、exe は使わない)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

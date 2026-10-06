@@ -71,6 +71,9 @@ function mkRecord(i: number, nHorses: number, nBets: number | null, extra: Parti
 
 const store = (): D1AnalysisStore => new D1AnalysisStore({ db: local.db, bucket: local.r2 });
 
+/** 保存の batch に渡す月(UTC の yyyymm。buildSaveStatements の第3引数)。 */
+const YM = 202610;
+
 describe("AC-b4: 共有フィクスチャ(#168)の期待値と一致する", () => {
   it("前提(空振り防止): フィクスチャの先頭ケースは、3 つの大きな列(raceSnapshot・rawResponse・馬の contributions)がすべて非 null", () => {
     const rec = contractCases[0]!.record;
@@ -259,7 +262,7 @@ describe("AC-b2: batch の原子性(途中で失敗したら、全 8 表の行�
     const before = await counts();
     await expect(
       (async () => {
-        for (const statement of buildSaveStatements(local.db, duplicateBets())) {
+        for (const statement of buildSaveStatements(local.db, duplicateBets(), YM)) {
           await statement.run();
         }
       })(),
@@ -316,34 +319,67 @@ describe("AC-b3: 発行する文の数は馬・買い目の数によらず一定
     [100, 500],
   ];
 
-  it.each(shapes.map(([h, b]) => [h, b] as const))("馬 %i 頭・買い目 %i 件: 配分ありは 5 文(#173 のカウンタが 1 文足す余地がある)", (nHorses, nBets) => {
+  it.each(shapes.map(([h, b]) => [h, b] as const))("馬 %i 頭・買い目 %i 件: 配分ありは 6 文(#175 の 5 文 + #173 のカウンタ 1 文)", (nHorses, nBets) => {
     const { db, statements } = fake();
-    const built = buildSaveStatements(db, mkRecord(1, nHorses, nBets));
-    expect(built).toHaveLength(5);
-    expect(statements).toHaveLength(5);
+    const built = buildSaveStatements(db, mkRecord(1, nHorses, nBets), YM);
+    expect(built).toHaveLength(6);
+    expect(statements).toHaveLength(6);
     for (const s of statements) {
       expect(s.binds.length, s.sql.slice(0, 40)).toBeLessThanOrEqual(100);
     }
   });
 
-  it.each([1, 16, 18, 100])("配分なしは馬 %i 頭でも 3 文", (nHorses) => {
+  it.each([1, 16, 18, 100])("配分なしは馬 %i 頭でも 4 文(#175 の 3 文 + カウンタ 1 文)", (nHorses) => {
     const { db, statements } = fake();
-    expect(buildSaveStatements(db, mkRecord(1, nHorses, null))).toHaveLength(3);
-    expect(statements).toHaveLength(3);
+    expect(buildSaveStatements(db, mkRecord(1, nHorses, null), YM)).toHaveLength(4);
+    expect(statements).toHaveLength(4);
   });
 
-  it("bind 変数の内訳(手計算): analyses 11 + detail_key の UPDATE 0 + 馬 1(JSON) + 配分メタ 23 + 買い目 1(JSON) = 36", () => {
+  it("Issue #173: 5→6 文・3→4 文の増分は『カウンタの 1 文』だけ。カウンタ以外の文は #175 のまま(順序・束縛値の数も同じ)", () => {
+    const withAllocation = fake();
+    buildSaveStatements(withAllocation.db, mkRecord(1, 16, 10), YM);
+    const [counter, ...rest] = withAllocation.statements;
+    // カウンタ: r2_ops への upsert(Class A を +1)。束縛値は月(ym)だけ
+    expect(counter!.sql).toMatch(/^INSERT INTO r2_ops \(ym, class_a, class_b\) VALUES \(\?, 1, 0\) ON CONFLICT\(ym\) DO UPDATE SET class_a = class_a \+ 1$/);
+    expect(counter!.binds).toEqual([YM]);
+    expect(withAllocation.statements.filter((st) => /r2_ops/.test(st.sql))).toHaveLength(1);
+    // 残りは #175 の 5 文(analyses の INSERT・detail_key の UPDATE・馬・配分メタ・買い目)で、束縛値の数も [11, 0, 1, 23, 1]
+    expect(rest).toHaveLength(5);
+    expect(rest[0]!.sql).toMatch(/^INSERT INTO analyses\b/);
+    expect(rest[1]!.sql).toMatch(/^UPDATE analyses SET detail_key = 'analyses\/' \|\| id/);
+    expect(rest[2]!.sql).toMatch(/INTO analysis_horses[\s\S]*FROM json_each\(\?\)/);
+    expect(rest[3]!.sql).toMatch(/INTO analysis_allocation_meta/);
+    expect(rest[4]!.sql).toMatch(/INTO analysis_bets[\s\S]*FROM json_each\(\?\)/);
+    expect(rest.map((st) => st.binds.length)).toEqual([11, 0, 1, 23, 1]);
+    // 配分なし: カウンタ + #175 の 3 文
+    const noAllocation = fake();
+    buildSaveStatements(noAllocation.db, mkRecord(1, 16, null), YM);
+    expect(noAllocation.statements).toHaveLength(4);
+    expect(noAllocation.statements.map((st) => [/INTO r2_ops/, /^INSERT INTO analyses\b/, /^UPDATE analyses SET detail_key/, /INTO analysis_horses/].findIndex((re) => re.test(st.sql)))).toEqual([0, 1, 2, 3]);
+    expect(noAllocation.statements.filter((st) => /r2_ops/.test(st.sql))).toHaveLength(1);
+  });
+
+  it("カウンタを足さない保存(柵を超えたとき。ym = null)は、カウンタも detail_key の UPDATE も無い: 配分ありで 4 文・なしで 2 文", () => {
+    const withAllocation = fake();
+    expect(buildSaveStatements(withAllocation.db, mkRecord(1, 16, 10), null)).toHaveLength(4);
+    expect(withAllocation.statements.some((st) => /r2_ops|detail_key/.test(st.sql))).toBe(false);
+    const noAllocation = fake();
+    expect(buildSaveStatements(noAllocation.db, mkRecord(1, 16, null), null)).toHaveLength(2);
+    expect(noAllocation.statements.some((st) => /r2_ops|detail_key/.test(st.sql))).toBe(false);
+  });
+
+  it("bind 変数の内訳(手計算): カウンタ 1 + analyses 11 + detail_key の UPDATE 0 + 馬 1(JSON) + 配分メタ 23 + 買い目 1(JSON) = 37", () => {
     const { db, statements } = fake();
-    buildSaveStatements(db, mkRecord(1, 16, 10));
-    expect(statements.map((s) => s.binds.length)).toEqual([11, 0, 1, 23, 1]);
-    expect(statements.reduce((n, s) => n + s.binds.length, 0)).toBe(36);
+    buildSaveStatements(db, mkRecord(1, 16, 10), YM);
+    expect(statements.map((s) => s.binds.length)).toEqual([1, 11, 0, 1, 23, 1]);
+    expect(statements.reduce((n, s) => n + s.binds.length, 0)).toBe(37);
   });
 
   it("馬・買い目の行は JSON の 1 つの文字列で渡す(馬の数だけ bind が増えない)", () => {
     const { db, statements } = fake();
-    buildSaveStatements(db, mkRecord(1, 18, 60));
-    const horses = JSON.parse(statements[2]!.binds[0] as string) as unknown[][];
-    const bets = JSON.parse(statements[4]!.binds[0] as string) as unknown[][];
+    buildSaveStatements(db, mkRecord(1, 18, 60), YM);
+    const horses = JSON.parse(statements[3]!.binds[0] as string) as unknown[][];
+    const bets = JSON.parse(statements[5]!.binds[0] as string) as unknown[][];
     expect(horses).toHaveLength(18);
     expect(bets).toHaveLength(60);
     // 大きな列(contributions)は D1 に渡さない: 馬の行の contributions の位置は null
@@ -352,8 +388,8 @@ describe("AC-b3: 発行する文の数は馬・買い目の数によらず一定
 
   it("D1 に渡す analyses の束縛値に、大きな列(raw_response・race_snapshot_json)は入らない", () => {
     const { db, statements } = fake();
-    buildSaveStatements(db, contractCases[0]!.record);
-    const binds = statements[0]!.binds;
+    buildSaveStatements(db, contractCases[0]!.record, YM);
+    const binds = statements[1]!.binds;
     expect(binds).toHaveLength(11);
     // 前提: 入力は 3 つの大きな列を持つ
     expect(contractCases[0]!.record.rawResponse).toBeTruthy();
@@ -416,7 +452,7 @@ describe("AC-b3b: 同時に保存しても、子の行が取り違えられな�
     await Promise.all(
       Array.from({ length: N }, async (_, i) => {
         try {
-          for (const statement of buildSaveStatements(local.db, mkRecord(i, shapeOf(i).horses, shapeOf(i).bets))) {
+          for (const statement of buildSaveStatements(local.db, mkRecord(i, shapeOf(i).horses, shapeOf(i).bets), YM)) {
             await statement.run();
           }
         } catch {

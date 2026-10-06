@@ -163,11 +163,11 @@ describe("本番のバンドルと D1(Issue #171)", () => {
  * ので、ここで「保存側のコードがバンドルにある」を固定する(無いと、better-sqlite3 が無いという検査が自明に成立する)。
  * 前提(空振り防止): 検出する文字列が、ソースに実際にある。対照: ストアを参照しない入口でバンドルすると、同じ文字列が見つからない。
  */
-const STORE_MARKERS = ["FROM json_each(?)", "UPDATE analyses SET detail_key = ", "'analyses/' || id", "node:zlib", "application/gzip"];
+const STORE_MARKERS = ["FROM json_each(?)", "UPDATE analyses SET detail_key = ", "'analyses/' || id", "node:zlib", "application/gzip", "ON CONFLICT(ym) DO UPDATE SET class_a = class_a + 1", "getUTCFullYear"];
 
 describe("本番のバンドルと保存側のコード(Issue #175)", () => {
-  it("前提: 検出する文字列は、ソース(analysis-repository.ts・analysis-detail.ts)に実際にある", () => {
-    const source = readFileSync(path.join(CLOUD, "src", "analysis-repository.ts"), "utf-8") + readFileSync(path.join(CLOUD, "src", "analysis-detail.ts"), "utf-8");
+  it("前提: 検出する文字列は、ソース(analysis-repository.ts・analysis-detail.ts・r2-fence.ts)に実際にある", () => {
+    const source = ["analysis-repository.ts", "analysis-detail.ts", "r2-fence.ts"].map((f) => readFileSync(path.join(CLOUD, "src", f), "utf-8")).join("\n");
     for (const marker of STORE_MARKERS) {
       expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
     }
@@ -176,7 +176,7 @@ describe("本番のバンドルと保存側のコード(Issue #175)", () => {
   });
 
   it(
-    "本番のバンドルに、保存側のコード(json_each の INSERT・detail_key の UPDATE・R2 のキー・node:zlib・gzip の型)が入っていて、better-sqlite3 は入っていない",
+    "本番のバンドルに、保存側のコード(json_each の INSERT・detail_key の UPDATE・R2 のキー・node:zlib・gzip の型・#173 のカウンタと UTC の月の区切り)が入っていて、better-sqlite3 は入っていない",
     () => {
       const code = bundle(null, "worker.js");
       for (const marker of STORE_MARKERS) {
@@ -202,6 +202,7 @@ describe("本番のバンドルと保存側のコード(Issue #175)", () => {
       expect(code.includes("FROM json_each(?)")).toBe(false);
       expect(code.includes("UPDATE analyses SET detail_key = ")).toBe(false);
       expect(code.includes("application/gzip")).toBe(false);
+      expect(code.includes("ON CONFLICT(ym)")).toBe(false);
     },
     120_000,
   );
