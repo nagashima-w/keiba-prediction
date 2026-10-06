@@ -1,10 +1,24 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { handle, type Env, type GateNamespaceLike } from "../src/handler";
-import { renderPage } from "../src/page";
+import type { GateResult, GateStatus } from "../src/gate-core";
+import { handle, type Env, type GateNamespaceLike, type GateStubLike } from "../src/handler";
+import { validateRaceId } from "../src/netkeiba-check";
+import { CHECK_DEFAULT_RACE_ID, renderPage } from "../src/page";
 import { AUD, EMAIL, GOOD_ENV, localKeys, makeKey, NOW, signToken, TEAM } from "./helpers";
 
-function gate(ping: () => Promise<{ sqlite: boolean }>): GateNamespaceLike {
-  return { idFromName: (name: string) => name, get: () => ({ ping }) };
+const EMPTY_STATUS: GateStatus = { consecutiveRefusals: 0, blockedUntil: null, lastStartAt: null, pending: 0 };
+
+function gate(ping: () => Promise<{ sqlite: boolean }>, extra: Partial<GateStubLike> = {}): GateNamespaceLike {
+  const stub: GateStubLike = {
+    ping,
+    fetchRaw: async () => {
+      throw new Error("fetchRaw は呼ばれない想定");
+    },
+    status: async () => EMPTY_STATUS,
+    ...extra,
+  };
+  return { idFromName: (name: string) => name, get: () => stub };
 }
 
 const HEALTHY = gate(async () => ({ sqlite: true }));
@@ -257,5 +271,232 @@ describe("ログ(経路名と理由コードだけ。値は出さない)", () =>
     for (const secret of [token, stranger, EMAIL, "stranger@example.com", TEAM, AUD]) {
       expect(all).not.toContain(secret);
     }
+  });
+});
+
+
+const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
+const fixtureBytes = (name: string): Uint8Array => new Uint8Array(readFileSync(`${FIXTURES}${name}`));
+
+function responseOf(body: Uint8Array, init: { status?: number; queuedMs?: number; elapsedMs?: number } = {}): GateResult {
+  const copy = new Uint8Array(body.length);
+  copy.set(body);
+  return {
+    kind: "response",
+    status: init.status ?? 200,
+    contentType: "text/html; charset=UTF-8",
+    body: copy.buffer,
+    queuedMs: init.queuedMs ?? 0,
+    elapsedMs: init.elapsedMs ?? 1,
+  };
+}
+
+/** 取得の呼び出しを控える偽のゲート。 */
+function checkGate(handler: (url: string) => GateResult | Promise<GateResult>, status: () => Promise<GateStatus> = async () => EMPTY_STATUS) {
+  const urls: string[] = [];
+  let statusCalls = 0;
+  const namespace = gate(async () => ({ sqlite: true }), {
+    fetchRaw: async (url) => {
+      urls.push(url);
+      return handler(url);
+    },
+    status: async () => {
+      statusCalls += 1;
+      return status();
+    },
+  });
+  return { namespace, urls, statusCalls: () => statusCalls };
+}
+
+const CENTRAL_ID = "202603020211";
+const NAR_ID = "202654071210";
+const CHECK = (raceId: string): string => `/api/netkeiba/check?race_id=${raceId}`;
+
+describe("GET /api/netkeiba/check(Issue #162 段階2b。AC-14)", () => {
+  it("認証の関門のあとに置く: JWT なしは 403(本文は forbidden)で、ゲートを 1 回も呼ばない(HEAD・POST も同じ)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    // 前提: 正しい JWT なら同じ要求が通る(拒否が認証によるものだという確認)
+    expect((await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(200);
+    expect(g.urls).toHaveLength(1);
+    const before = g.urls.length;
+    for (const method of ["GET", "HEAD", "POST"]) {
+      const response = await handle(req(CHECK(CENTRAL_ID), { method }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    }
+    expect(g.urls).toHaveLength(before);
+  });
+
+  it("中央: 出馬表を 1 回取得し、ok・status・頭数(16)・kind・queuedMs・elapsedMs・ゲートの状態を JSON で返す", async () => {
+    const { deps, token } = await setup();
+    const status: GateStatus = { consecutiveRefusals: 0, blockedUntil: null, lastStartAt: 1234, pending: 0 };
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html"), { queuedMs: 2000, elapsedMs: 431 }), async () => status);
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(g.urls).toEqual(["https://race.netkeiba.com/race/shutuba.html?race_id=202603020211"]);
+    expect(await response.json()).toEqual({
+      ok: true,
+      kind: "central",
+      raceId: CENTRAL_ID,
+      status: 200,
+      horses: 16,
+      queuedMs: 2000,
+      elapsedMs: 431,
+      gate: status,
+    });
+    expect(g.statusCalls()).toBe(1);
+  });
+
+  it("地方: nar のホストで取得し、kind=nar・頭数(12)を返す", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("nar_shutuba_202654071210.html")));
+    const response = await handle(req(CHECK(NAR_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(g.urls).toEqual(["https://nar.netkeiba.com/race/shutuba.html?race_id=202654071210"]);
+    expect(await response.json()).toMatchObject({ ok: true, kind: "nar", horses: 12 });
+  });
+
+  it.each([
+    ["race_id が無い", "/api/netkeiba/check"],
+    ["race_id が空", "/api/netkeiba/check?race_id="],
+    ["11 桁", CHECK("20260302021")],
+    ["13 桁", CHECK("2026030202111")],
+    ["英字", CHECK("abcdefghijkl")],
+    ["帯広(場コード 65)", CHECK("202665010101")],
+    ["地方で実在しない日付", CHECK("202642023001")],
+    ["クエリの注入(エンコードした &)", "/api/netkeiba/check?race_id=202603020211%26x%3D1"],
+    ["別名のパラメータだけ", `/api/netkeiba/check?raceid=${CENTRAL_ID}`],
+    ["パラメータ名の大文字小文字違い", `/api/netkeiba/check?RACE_ID=${CENTRAL_ID}`],
+    ["race_id が 2 つ", `/api/netkeiba/check?race_id=${CENTRAL_ID}&race_id=${CENTRAL_ID}`],
+    ["余計なパラメータつき", `/api/netkeiba/check?race_id=${CENTRAL_ID}&url=https://example.com/`],
+  ])("無効な入力は 400 で、ゲートを呼ばない: %s", async (_label, path) => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const response = await handle(req(path, { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    const body = (await response.json()) as { ok: boolean; error: { type: string; message: string } };
+    expect(body.ok).toBe(false);
+    expect(body.error.type).toBe("bad-request");
+    expect(body.error.message).toBeTruthy();
+    expect(g.urls).toHaveLength(0);
+    expect(g.statusCalls()).toBe(0);
+  });
+
+  it("パスは厳密(末尾スラッシュ・接頭辞つきは 404。ゲートを呼ばない)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    for (const path of [`/api/netkeiba/check/?race_id=${CENTRAL_ID}`, `/api/netkeiba/checkx?race_id=${CENTRAL_ID}`, `/api/netkeiba?race_id=${CENTRAL_ID}`]) {
+      expect((await handle(req(path, { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps)).status).toBe(404);
+    }
+    expect(g.urls).toHaveLength(0);
+  });
+
+  it("HEAD は取得を起こさない(405・Allow: GET)。netkeiba へ出る経路は GET だけ", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    const response = await handle(req(CHECK(CENTRAL_ID), { token, method: "HEAD" }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET");
+    expect(g.urls).toHaveLength(0);
+  });
+
+  it("ゲートがブレーカーで拒否したら 503(ok:false・gate-refused・reason)で、ゲートの状態も添える", async () => {
+    const { deps, token } = await setup();
+    const status: GateStatus = { consecutiveRefusals: 2, blockedUntil: 999, lastStartAt: 1, pending: 0 };
+    const g = checkGate(() => ({ kind: "refused", reason: "blocked", message: "止めています", blockedUntil: 999, retryAfterMs: 5 }), async () => status);
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ ok: false, kind: "central", error: { type: "gate-refused", reason: "blocked" }, gate: status });
+  });
+
+  it("netkeiba が 403 を返したら 502(ok:false・http-error・status 403)", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(new Uint8Array(), { status: 403 }));
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, status: 403, error: { type: "http-error" } });
+    expect(g.urls).toHaveLength(1); // 再試行しない
+  });
+
+  it("ゲートの status() が失敗しても、確認の結果は返す(gate を省く)。例外の中身は返さない", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(
+      () => responseOf(fixtureBytes("shutuba_202603020211.html")),
+      async () => {
+        throw new Error("internal detail");
+      },
+    );
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ ok: true, horses: 16 });
+    expect(JSON.parse(text).gate).toBeUndefined();
+    expect(text).not.toContain("internal detail");
+  });
+
+  it("ゲートの取得そのものが例外になっても、502 の JSON で返し、例外を外へ投げない", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => {
+      throw new Error("DO が落ちた");
+    });
+    const response = await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ ok: false, error: { type: "fetch-failed" } });
+  });
+
+  it("全取得は DO の単一インスタンス(固定名 gate)を通る: health と check が同じ名前でスタブを取る", async () => {
+    const { deps, token } = await setup();
+    const names: string[] = [];
+    const stub = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html"))).namespace.get(null);
+    const namespace: GateNamespaceLike = {
+      idFromName: (name: string) => {
+        names.push(name);
+        return name;
+      },
+      get: () => stub,
+    };
+    await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: namespace }), {}, deps);
+    await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: namespace }), {}, deps);
+    expect(names).toEqual(["gate", "gate"]);
+  });
+
+  it("1 回の確認でゲートへ出す取得は 1 回だけ", async () => {
+    const { deps, token } = await setup();
+    const g = checkGate(() => responseOf(fixtureBytes("shutuba_202603020211.html")));
+    await handle(req(CHECK(CENTRAL_ID), { token }), envOf({ NETKEIBA_GATE: g.namespace }), {}, deps);
+    expect(g.urls).toHaveLength(1);
+  });
+});
+
+describe("GET / の確認フォーム(Issue #162 段階2b)", () => {
+  it("race_id を入れて GET で /api/netkeiba/check へ送るフォームがあり、初期値は 202603020211", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/", { token }), envOf(), {}, deps);
+    const html = await response.text();
+    expect(html).toContain('<form method="get" action="/api/netkeiba/check">');
+    expect(html).toContain('name="race_id"');
+    expect(html).toContain(`value="${CHECK_DEFAULT_RACE_ID}"`);
+    expect(CHECK_DEFAULT_RACE_ID).toBe("202603020211");
+    expect(html).toContain('type="submit"');
+  });
+
+  it("フォームの初期値は、チェックの検証を通る(中央の実在の race_id)", () => {
+    expect(validateRaceId(CHECK_DEFAULT_RACE_ID)).toMatchObject({ ok: true, kind: "central" });
+  });
+
+  it("CSP に form-action 'self' が加わる(ほかの指令は変えない)", async () => {
+    const { deps, token } = await setup();
+    const csp = (await handle(req("/", { token }), envOf(), {}, deps)).headers.get("content-security-policy");
+    expect(csp).toBe("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  });
+
+  it("確認の使い方(初回は実在の ID で。実在しない ID はブレーカーを開きうる)の注意書きがある", async () => {
+    const { deps, token } = await setup();
+    const html = await (await handle(req("/", { token }), envOf(), {}, deps)).text();
+    expect(html).toContain("実在");
+    expect(html).toContain("30 分");
   });
 });

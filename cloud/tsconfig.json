@@ -18,5 +18,5 @@
       "cheerio": ["./node_modules/cheerio"]
     }
   },
-  "include": ["src", "test", "smoke.ts", "vitest.config.ts"]
+  "include": ["src", "test", "smoke.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts"]
 }

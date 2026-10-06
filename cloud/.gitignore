@@ -3,3 +3,5 @@ dist-dry/
 .wrangler/
 # ローカルのスモークテストが生成する一時設定(再生成できる)
 wrangler.smoke.generated.toml
+wrangler.smoke-fake.generated.toml
+wrangler.bundle-guard.generated.toml

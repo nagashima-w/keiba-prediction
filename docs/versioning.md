@@ -2361,6 +2361,30 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
 
+## 次の正式版が 1.19.5 である根拠(Issue #162 段階2 での変更)
+
+**patch**(クラウド版〈`cloud/`〉の netkeiba 取得の出口〈#21-D 段階2。ソケット取得クライアント・NetkeibaGate の直列化と間隔制御とサーキットブレーカー・
+確認用エンドポイントとフォーム〉の追加。exe のアプリコードは無変更で、利用者〈デスクトップアプリの利用者〉から見える変化は無い)。
+
+### 変更内容
+
+- `cloud/`: ソケットで HTTP/1.1 を話す取得クライアント(`src/http1.ts`・`src/socket-fetch.ts`)、NetkeibaGate の中身(`src/gate-core.ts`。許可リスト・直列化・
+  最小間隔 2 秒・サーキットブレーカー 30 分・待ち行列の上限)、core の `HttpClient` へ繋ぐアダプタ(`src/gate-fetch.ts`)、確認用のチェック処理
+  (`src/netkeiba-check.ts`)、`GET /api/netkeiba/check?race_id=...` とフォーム、偽ソケットのローカル smoke(`smoke-worker.ts`)、本番のバンドルの検査
+  (`test/bundle-guard.test.ts`)。依存に cheerio・iconv-lite を追加(core の取り込みに必要)
+- `scripts/test/cloud-config-guard.test.ts`: nodejs_compat と alias の3か所の対応・smoke 専用エントリが本番の `main` でないことの静的検査
+- docs: `cloud/README.md`(確認ページの使い方)、`docs/current-spec.md` §10(クラウド版の取得の現状)、`docs/issue-order.md`
+
+### patch である根拠
+
+- exe のアプリコード(`packages/app`)・core(`packages/core`)は無変更。追加・変更したコードはすべて `cloud/`・`scripts/`・docs で、exe に入らない
+  (`cloud/` は pnpm workspace の外で、core は `cloud/` から読むだけ)
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

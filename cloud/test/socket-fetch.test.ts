@@ -4,6 +4,7 @@ import {
   createSocketFetcher,
   NETKEIBA_REQUEST_HEADERS,
   NETKEIBA_USER_AGENT,
+  SOCKET_CLEANUP_TIMEOUT_MS,
   SOCKET_MAX_BYTES,
   SOCKET_TIMEOUT_MS,
   SocketFetchError,
@@ -344,5 +345,147 @@ describe("圧縮された応答(AC-5)", () => {
       const c = connector(() => ({ chunks: [response(`HTTP/1.1 200 OK\nContent-Encoding: ${value}\nContent-Length: 2`, bytes("ok"))] }));
       expect((await createSocketFetcher(c.connect)(URL_RACE)).status).toBe(200);
     }
+  });
+});
+
+describe("後始末が決着しなくても詰まらない(段階2b 記録1)", () => {
+  /** close()・reader.cancel() が決着しない偽ソケット。 */
+  function hangingCleanup(chunks: Uint8Array[], neverEnd = false): Connected {
+    return connector(() => ({ chunks, neverEnd }));
+  }
+
+  it("socket.close() が決着しなくても、成功した取得の結果は有限時間で返る(直列区間を塞がない)", async () => {
+    const c = hangingCleanup([OK_BODY]);
+    const original = c.connect;
+    const wrapped: ConnectFn = (address, options) => {
+      const socket = original(address, options);
+      return { ...socket, close: () => new Promise<void>(() => {}) };
+    };
+    const started = Date.now();
+    const r = await createSocketFetcher(wrapped, { cleanupTimeoutMs: 50 })(URL_RACE);
+    expect(r.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("reader.cancel() が決着しなくても、失敗(タイムアウト)は有限時間で返り、種類は timeout のまま", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Length: 100", bytes("part"))], neverEnd: true }));
+    const original = c.connect;
+    const wrapped: ConnectFn = (address, options) => {
+      const socket = original(address, options);
+      const stuck = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(response("HTTP/1.1 200 OK\nContent-Length: 100", bytes("part")));
+          return new Promise<void>(() => {});
+        },
+        cancel: () => new Promise<void>(() => {}),
+      });
+      return { ...socket, readable: stuck, close: () => new Promise<void>(() => {}) };
+    };
+    const started = Date.now();
+    const error = await rejection(createSocketFetcher(wrapped, { timeoutMs: 30, cleanupTimeoutMs: 50 })(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe("timeout");
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("後始末の上限の既定は数秒(3 秒)", () => {
+    expect(SOCKET_CLEANUP_TIMEOUT_MS).toBe(3000);
+  });
+
+  it("後始末が失敗(拒否)しても、取得の結果を隠さない", async () => {
+    const c = connector(() => ({ chunks: [OK_BODY] }));
+    const original = c.connect;
+    const wrapped: ConnectFn = (address, options) => ({ ...original(address, options), close: () => Promise.reject(new Error("close 失敗")) });
+    expect((await createSocketFetcher(wrapped)(URL_RACE)).status).toBe(200);
+  });
+});
+
+describe("複数・複合の圧縮指定(段階2b 記録2)", () => {
+  it.each([
+    ["Content-Encoding が 2 行(identity の後に gzip)", "Content-Encoding: identity\nContent-Encoding: gzip"],
+    ["Content-Encoding が 2 行(gzip の後に identity)", "Content-Encoding: gzip\nContent-Encoding: identity"],
+    ["Content-Encoding がカンマ区切り(identity, gzip)", "Content-Encoding: identity, gzip"],
+    ["Content-Encoding がカンマ区切り(gzip, identity)", "Content-Encoding: gzip, identity"],
+  ])("identity 以外が 1 つでもあれば unsupported-encoding(受信済みの status を持つ): %s", async (_label, headers) => {
+    const c = connector(() => ({ chunks: [response(`HTTP/1.1 403 X\n${headers}\nContent-Length: 2`, bytes("ok"))] }));
+    const error = await rejection(createSocketFetcher(c.connect)(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe("unsupported-encoding");
+    expect((error as SocketFetchError).status).toBe(403);
+  });
+
+  it("Content-Encoding が identity だけなら、複数行・カンマ区切りでも通る", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Encoding: identity\nContent-Encoding: identity, identity\nContent-Length: 2", bytes("ok"))] }));
+    expect((await createSocketFetcher(c.connect)(URL_RACE)).status).toBe(200);
+  });
+
+  it.each([
+    ["gzip, chunked(chunked は解けるが gzip は解けない)", "gzip, chunked", "2\r\nok\r\n0\r\n\r\n"],
+    ["Transfer-Encoding が 2 行(gzip の後に chunked)", "gzip\nTransfer-Encoding: chunked", "2\r\nok\r\n0\r\n\r\n"],
+    ["gzip だけ(Content-Length で切り出される)", "gzip", "ok"],
+    ["deflate, chunked", "deflate, chunked", "2\r\nok\r\n0\r\n\r\n"],
+  ])("Transfer-Encoding に chunked 以外のコーディングがあれば、受信済みの status 付きの unsupported-encoding: %s", async (_label, value, body) => {
+    const head = value.includes("\n") ? `HTTP/1.1 429 X\nTransfer-Encoding: ${value}` : `HTTP/1.1 429 X\nTransfer-Encoding: ${value}\nContent-Length: 2`;
+    const c = connector(() => ({ chunks: [response(head, bytes(body))] }));
+    const error = await rejection(createSocketFetcher(c.connect)(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe("unsupported-encoding");
+    expect((error as SocketFetchError).status).toBe(429);
+  });
+
+  it("Transfer-Encoding: chunked だけなら通る(対照)", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nTransfer-Encoding: chunked", bytes("2\r\nok\r\n0\r\n\r\n"))] }));
+    expect((await createSocketFetcher(c.connect)(URL_RACE)).status).toBe(200);
+  });
+});
+
+describe("本文の扱いで失敗しても、読めたステータスを持たせる(段階2b 記録3)", () => {
+  it.each([
+    ["Content-Length に足りない(途中で切断)", [response("HTTP/1.1 403 X\nContent-Length: 10", bytes("hello"))], "malformed"],
+    ["chunked が途中", [response("HTTP/1.1 403 X\nTransfer-Encoding: chunked", bytes("5\r\nhel"))], "malformed"],
+  ])("%s → malformed でも status 403 を持つ", async (_label, chunks, kind) => {
+    const c = connector(() => ({ chunks }));
+    const error = await rejection(createSocketFetcher(c.connect)(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe(kind);
+    expect((error as SocketFetchError).status).toBe(403);
+  });
+
+  it("サイズ上限の超過(ステータス行は受信済み)→ too-large でも status を持つ", async () => {
+    const head = response("HTTP/1.1 429 X\nContent-Length: 100");
+    const c = connector(() => ({ chunks: [head, new Uint8Array(200)], neverEnd: true }));
+    const error = await rejection(createSocketFetcher(c.connect, { maxBytes: head.length + 100 })(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe("too-large");
+    expect((error as SocketFetchError).status).toBe(429);
+  });
+
+  it("本文の途中でタイムアウトしても、読めた status を持つ", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 503 X\nContent-Length: 100", bytes("part"))], neverEnd: true }));
+    const error = await rejection(createSocketFetcher(c.connect, { timeoutMs: 30 })(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe("timeout");
+    expect((error as SocketFetchError).status).toBe(503);
+  });
+
+  it("本文の途中で読み取りが失敗しても、読めた status を持つ", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Length: 100", bytes("part"))], readError: new Error("切れた") }));
+    const error = await rejection(createSocketFetcher(c.connect)(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe("network");
+    expect((error as SocketFetchError).status).toBe(200);
+  });
+
+  it("ステータス行が読めるところまで受信していなければ、status は持たない(前提: 上の status は受信から読んだもの)", async () => {
+    for (const chunks of [[], [bytes("HTTP/1.1 40")], [bytes("garbage without crlf")]]) {
+      const c = connector(() => ({ chunks }));
+      const error = await rejection(createSocketFetcher(c.connect)(URL_RACE));
+      expect((error as SocketFetchError).status).toBeUndefined();
+    }
+  });
+
+  it("ステータス行が 1xx・不正な値なら、status は持たない", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 100 Continue\nContent-Length: 0")] }));
+    const error = await rejection(createSocketFetcher(c.connect)(URL_RACE));
+    expect((error as SocketFetchError).kind).toBe("malformed");
+    expect((error as SocketFetchError).status).toBeUndefined();
+  });
+
+  it("接続の失敗(受信なし)は status を持たない", async () => {
+    const c = connector(() => ({ opened: Promise.reject(new Error("接続できない")) }));
+    expect(((await rejection(createSocketFetcher(c.connect)(URL_RACE))) as SocketFetchError).status).toBeUndefined();
   });
 });

@@ -43,6 +43,14 @@ describe("wrangler.toml", () => {
     expect(tomlCode).not.toMatch(/keep_vars/);
   });
 
+  it("本番の main は src/worker.ts で、smoke 専用エントリ(偽ソケット。smoke.ts が一時設定でだけ指す)を指さない", () => {
+    expect(tomlCode).toMatch(/^main = "src\/worker\.ts"$/m);
+    expect(tomlCode).not.toMatch(/smoke/i);
+    const smoke = readTextLf("cloud", "smoke.ts");
+    expect(smoke).toContain('main = "smoke-worker.ts"');
+    expect(existsSync(path.join(ROOT, "cloud", "smoke-worker.ts"))).toBe(true);
+  });
+
   it("本番の設定に [access.dev](ローカルの ctx.access 注入)を置かない。注入はスモークが一時ファイルで行う", () => {
     expect(tomlCode).not.toMatch(/^\[access/m);
     expect(readTextLf("cloud", "smoke.ts")).toContain("[access.dev]");
@@ -121,7 +129,7 @@ describe("cloud/ はワークスペースの外(既存の CI のインストー�
 
   it(".gitignore が node_modules・.wrangler・スモークの一時設定を除外する", () => {
     const gi = readTextLf("cloud", ".gitignore");
-    for (const entry of ["node_modules/", ".wrangler/", "dist-dry/", "wrangler.smoke.generated.toml"]) {
+    for (const entry of ["node_modules/", ".wrangler/", "dist-dry/", "wrangler.smoke.generated.toml", "wrangler.smoke-fake.generated.toml", "wrangler.bundle-guard.generated.toml"]) {
       expect(gi.split("\n")).toContain(entry);
     }
   });
@@ -173,6 +181,7 @@ describe("公開リポジトリへの値の混入(実在のメール・チーム
       "cloud/wrangler.toml",
       "cloud/package.json",
       "cloud/smoke.ts",
+      "cloud/smoke-worker.ts",
       "cloud/src/access-jwt.ts",
       "cloud/src/authenticate.ts",
       "cloud/src/handler.ts",

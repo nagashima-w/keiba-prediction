@@ -314,6 +314,10 @@ describe("サーキットブレーカー(AC-10)", () => {
     ["拒否・応答が壊れている・拒否", R([403, new SocketFetchError("malformed", "壊れ"), 403]), true],
     ["圧縮された 403 が 2 連続(status を持つ例外)", R([new SocketFetchError("unsupported-encoding", "圧縮", 403), new SocketFetchError("unsupported-encoding", "圧縮", 403)]), true],
     ["圧縮された 403 と通常の 429", R([new SocketFetchError("unsupported-encoding", "圧縮", 403), 429]), true],
+    ["本文の途中で切れた 403(malformed + status)が 2 連続", R([new SocketFetchError("malformed", "途中切れ", 403), new SocketFetchError("malformed", "途中切れ", 403)]), true],
+    ["サイズ超過の 429(too-large + status)が 2 連続", R([new SocketFetchError("too-large", "大きい", 429), new SocketFetchError("too-large", "大きい", 429)]), true],
+    ["本文の途中でタイムアウトした 400(timeout + status)が 2 連続", R([new SocketFetchError("timeout", "遅い", 400), new SocketFetchError("timeout", "遅い", 400)]), true],
+    ["拒否・本文の途中で切れた 200(status あり)・拒否(サーバは普通に応答した)", R([403, new SocketFetchError("malformed", "途中切れ", 200), 403]), false],
     ["拒否・圧縮された 200(サーバは普通に応答した)・拒否", R([403, new SocketFetchError("unsupported-encoding", "圧縮", 200), 403]), false],
     ["3xx は数えない", R([302, 302, 302]), false],
   ])("%s", async (_label, sequence, shouldBlock) => {

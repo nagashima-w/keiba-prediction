@@ -255,3 +255,21 @@ export function parseHttp1Response(bytes: Uint8Array): ParsedHttp1Response {
 
   return { status, reason, headers, body: rest, framing: "until-close" };
 }
+
+/**
+ * 途中までのバイト列から、ステータス行が(CRLF まで)揃っていて 2xx〜5xx のステータスならそのコードを返す(読めなければ undefined)。
+ * 本文の扱いで失敗した取得に、**受信済みのステータス**を持たせるために使う(サーバが応答したことは分かっているので、
+ * サーキットブレーカーが 400/403/429 を数えられるように)。1xx(暫定応答)と範囲外の値は、応答として扱わない。
+ */
+export function peekHttp1Status(bytes: Uint8Array): number | undefined {
+  const lineEnd = indexOfCrlf(bytes, 0);
+  if (lineEnd < 0) {
+    return undefined;
+  }
+  const match = STATUS_LINE.exec(latin1(bytes, 0, lineEnd));
+  if (match === null) {
+    return undefined;
+  }
+  const status = Number(match[1]);
+  return status >= 200 && status <= 599 ? status : undefined;
+}

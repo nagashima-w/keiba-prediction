@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.4)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.5)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.4`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.5`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -928,13 +928,33 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   スクリプト `scripts/probability-quality-41-llm/`、計画 `docs/investigations/probability-quality-41-llm/measurement-plan.md`、
   結果 `docs/investigations/probability-quality-41-llm/report.md`(Go/No-Go は書かない)。
 
-## 10. クラウド版の土台(`cloud/`。Issue #161〈#21-C〉)
+## 10. クラウド版(`cloud/`。Issue #161〈#21-C〉・#162〈#21-D〉段階2)
 
-Cloudflare Worker による**クラウド版の土台**が加わった(`cloud/`。pnpm workspace の外。詳細・手順・secret 名は
-[`cloud/README.md`](../cloud/README.md))。**まだ機能は無い**: 今あるのは、Cloudflare Access(Google ログイン)の JWT を Worker 自身も
-検証する認証の関門(許可したメール1件以外・設定が欠けているときは理由を含まない 403)、ログイン中のメールを表示するだけの `GET /`、
-`GET /api/health`、Durable Object(SQLite)の雛形、承認印付き push のときだけ本番に出す `.github/workflows/deploy-cloud.yml` だけである。
-取得・分析・保存・画面は後続(#162〜)。exe(Windows アプリ)とは独立で、既存の動作は変わらない。
+Cloudflare Worker による**クラウド版**(`cloud/`。pnpm workspace の外。詳細・手順・secret 名・確認ページの使い方は
+[`cloud/README.md`](../cloud/README.md))。exe(Windows アプリ)とは独立で、既存の動作は変わらない。
+
+### 土台(#161)
+Cloudflare Access(Google ログイン)の JWT を Worker 自身も検証する認証の関門(許可したメール1件以外・設定が欠けているときは理由を含まない 403)、
+ログイン中のメールを表示する `GET /`、`GET /api/health`、承認印付き push のときだけ本番に出す `.github/workflows/deploy-cloud.yml`。
+
+### netkeiba の取得の現状(#162 段階2。v1.19.5)
+**netkeiba への全取得は、Durable Object `NetkeibaGate`(SQLite バックエンド)の単一インスタンスを経由する。** Workers の `fetch` は CloudFront から
+HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:sockets`)で HTTP/1.1 の GET を自前で組み立てて取得する。
+- **取得クライアント**(`cloud/src/socket-fetch.ts`・`http1.ts`): 送るのは固定の4ヘッダ(User-Agent・accept・accept-language・sec-fetch-mode)+ Host +
+  `Connection: close` だけ(**圧縮は要求しない**。段階1で gzip を要求しても圧縮されなかったため)。再試行しない・リダイレクトに従わない・サイズ上限 2 MiB・
+  全体のタイムアウト 20 秒・後始末(close)は 3 秒で待つのをやめる。`content-encoding`・`transfer-encoding` に identity・chunked 以外があれば未対応として受信済みの
+  ステータス付きで失敗にする(本文の途中で失敗しても、ステータス行まで読めていればそのステータスを持たせる)。
+- **ゲート**(`cloud/src/gate-core.ts`。純ロジック。DO は `ctx.storage.kv` と `connect` を配線する薄いラッパ): 取得先は **https の race / db / nar.netkeiba.com だけ**
+  (それ以外は接続せずに拒否)。**同時に1本**(プロミスの連鎖)で、**開始間隔は 2 秒以上**(最後の開始時刻を取得の前に永続化。DO が作り直されても守る)。
+  **サーキットブレーカー**: 400/403/429 が **2 回連続**したら **30 分間**、すべての取得を接続せずに拒否する(手動リセットなし。解除後は1回通し、拒否されたら即座にまた開く)。
+  ほかのステータス(404・5xx)は連続を途切れさせ、通信エラー・タイムアウトは数えず途切れさせもしない。待ち行列の上限は 8。
+  永続化の限界: ストレージの書き込みの出力ゲートがソケットの送信まで保護するかは未確認(クラッシュの瞬間に間隔が1回だけ破れうる)。
+- **core の取得処理への接続**(`cloud/src/gate-fetch.ts`): ゲートの `fetchRaw`(RPC)を core の `HttpClient` の fetch 注入口へ繋ぐ(`createGateHttpClient`: 間隔 0・再試行 0。間隔制御はゲートだけ)。
+  core は `cloud/` から相対 import で取り込み、依存(cheerio・iconv-lite)は `wrangler.toml` の `[alias]`・`tsconfig.json` の `paths` で `cloud/node_modules` へ向ける。
+- **確認用エンドポイント**: `GET /api/netkeiba/check?race_id=...`(Access の関門のあと。GET のみ)。race_id を core の検証(中央 01〜10・地方 30〜64・帯広 65 は対象外)で確かめ、
+  出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/` にフォーム(初期値 202603020211)がある。
+  **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
+- **未実装**: 保存(D1。#163)・分析の実行(#164)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、**本番での実機確認がまだ**(段階1は実測済み)。
 
 ## 主な当初仕様との差異(記録)
 

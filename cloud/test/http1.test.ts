@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHttp1Request, decodeChunked, Http1Error, parseHttp1Response } from "../src/http1";
+import { buildHttp1Request, decodeChunked, Http1Error, parseHttp1Response, peekHttp1Status } from "../src/http1";
 
 /**
  * Issue #162 段階2a: ソケットで HTTP/1.1 を話すための純ロジック(リクエストの組立・応答の解釈・chunked の解除)。
@@ -146,5 +146,30 @@ describe("parseHttp1Response", () => {
   it("本文はバイトのまま返す(EUC-JP などのデコードは呼び出し側)", () => {
     const raw = new Uint8Array([...bytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"), 0xa4, 0xa2]);
     expect([...parseHttp1Response(raw).body]).toEqual([0xa4, 0xa2]);
+  });
+});
+
+describe("peekHttp1Status(受信が途中でも、ステータス行が揃っていれば読む)", () => {
+  it.each([
+    ["200", "HTTP/1.1 200 OK\r\nContent-Le", 200],
+    ["403(理由句なし)", "HTTP/1.1 403\r\n", 403],
+    ["HTTP/1.0", "HTTP/1.0 429 Too Many Requests\r\nX: y", 429],
+    ["境界: 200", "HTTP/1.1 200 OK\r\n", 200],
+    ["境界: 599", "HTTP/1.1 599 X\r\n", 599],
+  ])("読める: %s", (_label, raw, expected) => {
+    expect(peekHttp1Status(bytes(raw))).toBe(expected);
+  });
+
+  it.each([
+    ["CRLF が届いていない(ステータス行の途中)", "HTTP/1.1 40"],
+    ["CRLF が届いていない(行は完結しているように見える)", "HTTP/1.1 403 Forbidden"],
+    ["空", ""],
+    ["HTTP/1.x でない", "ICY 200 OK\r\n"],
+    ["1xx(暫定応答は応答として扱わない)", "HTTP/1.1 100 Continue\r\n"],
+    ["境界: 199", "HTTP/1.1 199 X\r\n"],
+    ["境界: 600", "HTTP/1.1 600 X\r\n"],
+    ["ステータスが 3 桁でない", "HTTP/1.1 20 OK\r\n"],
+  ])("読めない(undefined): %s", (_label, raw) => {
+    expect(peekHttp1Status(bytes(raw))).toBeUndefined();
   });
 });

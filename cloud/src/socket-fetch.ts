@@ -22,7 +22,7 @@
  * gzip の展開・計測用のメタ情報・ProbeFetch への適合は持ち込まない。
  */
 
-import { buildHttp1Request, Http1Error, parseHttp1Response, type HeaderEntry } from "./http1";
+import { buildHttp1Request, Http1Error, parseHttp1Response, peekHttp1Status, type HeaderEntry } from "./http1";
 
 /**
  * User-Agent。core の `DEFAULT_USER_AGENT`(`packages/core/src/scraper/http-client.ts`)と同じ文字列。
@@ -46,6 +46,12 @@ export const SOCKET_MAX_BYTES = 2 * 1024 * 1024;
 
 /** 1回の取得(接続・送信・受信)全体のタイムアウト(ミリ秒)。 */
 export const SOCKET_TIMEOUT_MS = 20_000;
+
+/**
+ * 後始末(`reader.cancel()`・`socket.close()`)を待つ時間の上限(ミリ秒)。決着しなくても、ゲートの直列区間(次の取得を
+ * 待たせている区間)を塞がない。超えたら待つのをやめて、取得の結果(成功・失敗)をそのまま返す。
+ */
+export const SOCKET_CLEANUP_TIMEOUT_MS = 3000;
 
 /** `cloudflare:sockets` の `Socket` のうち、ここで使う部分(偽ソケットを作れる最小限)。 */
 export interface SocketLike {
@@ -104,6 +110,8 @@ export type SocketFetcher = (url: string) => Promise<SocketResponse>;
 export interface SocketFetchOptions {
   readonly maxBytes?: number;
   readonly timeoutMs?: number;
+  /** 後始末を待つ時間の上限。省略時は {@link SOCKET_CLEANUP_TIMEOUT_MS}。 */
+  readonly cleanupTimeoutMs?: number;
 }
 
 function concat(parts: readonly Uint8Array[], total: number): Uint8Array {
@@ -120,10 +128,47 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** 先頭のバイト(ステータス行が入る範囲)だけをつなぐ。 */
+function headBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const head: Uint8Array[] = [];
+  let length = 0;
+  for (const part of parts) {
+    head.push(part);
+    length += part.length;
+    if (length >= 256) {
+      break;
+    }
+  }
+  return concat(head, length);
+}
+
+/** ヘッダ(同名が複数行あってもよい)の値を、カンマで区切った要素(小文字・前後の空白なし・空は除く)に分ける。 */
+function tokensOf(headers: readonly HeaderEntry[], name: string): string[] {
+  return headers
+    .filter((h) => h.name === name)
+    .flatMap((h) => h.value.split(","))
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token !== "");
+}
+
+/** 後始末を、上限つきで待つ(決着しない・失敗しても、呼び出し側を塞がず、例外にもしない)。 */
+async function settleWithin(work: () => Promise<unknown>, limitMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, limitMs);
+  });
+  try {
+    await Promise.race([Promise.resolve().then(work).catch(() => {}), limit]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** ソケットで取得する関数を作る。 */
 export function createSocketFetcher(connect: ConnectFn, options: SocketFetchOptions = {}): SocketFetcher {
   const maxBytes = options.maxBytes ?? SOCKET_MAX_BYTES;
   const timeoutMs = options.timeoutMs ?? SOCKET_TIMEOUT_MS;
+  const cleanupTimeoutMs = options.cleanupTimeoutMs ?? SOCKET_CLEANUP_TIMEOUT_MS;
 
   return async (url) => {
     let parsedUrl: URL;
@@ -201,46 +246,55 @@ export function createSocketFetcher(connect: ConnectFn, options: SocketFetchOpti
     work.catch(() => {});
 
     try {
-      const bytes = await Promise.race([work, aborted]);
-      let parsed;
       try {
-        parsed = parseHttp1Response(bytes);
+        const bytes = await Promise.race([work, aborted]);
+        let parsed;
+        try {
+          parsed = parseHttp1Response(bytes);
+        } catch (error) {
+          throw new SocketFetchError("malformed", error instanceof Http1Error ? error.message : messageOf(error));
+        }
+        if (parsed.status > 599) {
+          throw new SocketFetchError("malformed", `Response にできないステータスです(HTTP ${parsed.status})`);
+        }
+        // 圧縮の指定は、同名のヘッダが複数行あっても・カンマ区切りでも、identity 以外が1つでもあれば未対応にする。
+        // Transfer-Encoding も、chunked(と identity)以外のコーディングがあれば未対応(chunked は解けても、その中身の圧縮は解けない)。
+        const contentCodings = tokensOf(parsed.headers, "content-encoding").filter((c) => c !== "identity");
+        const transferCodings = tokensOf(parsed.headers, "transfer-encoding").filter((c) => c !== "chunked" && c !== "identity");
+        const unsupported = [...contentCodings, ...transferCodings];
+        if (unsupported.length > 0) {
+          throw new SocketFetchError(
+            "unsupported-encoding",
+            `未対応の content-encoding / transfer-encoding: ${unsupported.join(",").slice(0, 40)}(Accept-Encoding を送っていないのに圧縮された。デコードしない)`,
+            parsed.status,
+          );
+        }
+        return {
+          status: parsed.status,
+          contentType: parsed.headers.find((h) => h.name === "content-type")?.value ?? null,
+          body: parsed.body,
+        };
       } catch (error) {
-        throw new SocketFetchError("malformed", error instanceof Http1Error ? error.message : messageOf(error));
+        // 本文の扱いで失敗(途中切れ・上限超過・タイムアウト・読み取りの失敗)しても、ステータス行まで読めていれば、サーバは
+        // 応答している。そのステータスを持たせる(サーキットブレーカーが、圧縮された 403 と同じように 400/403/429 を数えられる)。
+        if (error instanceof SocketFetchError && error.status === undefined) {
+          const status = peekHttp1Status(headBytes(received));
+          if (status !== undefined) {
+            throw new SocketFetchError(error.kind, error.message, status);
+          }
+        }
+        throw error;
       }
-      if (parsed.status > 599) {
-        throw new SocketFetchError("malformed", `Response にできないステータスです(HTTP ${parsed.status})`);
-      }
-      const encoding = parsed.headers.find((h) => h.name === "content-encoding")?.value.trim().toLowerCase();
-      if (encoding !== undefined && encoding !== "" && encoding !== "identity") {
-        throw new SocketFetchError(
-          "unsupported-encoding",
-          `未対応の content-encoding: ${encoding.slice(0, 40)}(Accept-Encoding を送っていないのに圧縮された。デコードしない)`,
-          parsed.status,
-        );
-      }
-      return {
-        status: parsed.status,
-        contentType: parsed.headers.find((h) => h.name === "content-type")?.value ?? null,
-        body: parsed.body,
-      };
     } finally {
       clearTimeout(timer);
+      // 後始末は、決着しなくても取得の結果を返せるよう、上限つきで待つ(失敗しても、取得の結果を隠さない)。
       const r = reader as ReadableStreamDefaultReader<Uint8Array> | null;
       if (r !== null) {
-        try {
-          await r.cancel();
-        } catch {
-          // すでに閉じている。
-        }
+        await settleWithin(() => r.cancel(), cleanupTimeoutMs);
       }
-      const s = socket as SocketLike | null;
-      if (s !== null) {
-        try {
-          await s.close();
-        } catch {
-          // 閉じる操作の失敗で、取得の結果(成功・失敗)を隠さない。
-        }
+      const sock = socket as SocketLike | null;
+      if (sock !== null) {
+        await settleWithin(() => sock.close(), cleanupTimeoutMs);
       }
     }
   };

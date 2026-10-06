@@ -24,8 +24,18 @@ export class NetkeibaGate extends DurableObject {
       kv: ctx.storage.kv,
       now: () => Date.now(),
       sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
-      fetcher: createSocketFetcher(connect as ConnectFn),
+      fetcher: createSocketFetcher((address, options) => this.connectFn()(address, options)),
     });
+  }
+
+  /**
+   * ソケットの接続関数。本番は `cloudflare:sockets` の `connect`。
+   * **ローカルの smoke(`smoke-worker.ts`。netkeiba へ出さない)だけが、サブクラスでこれを偽ソケットに差し替える。**
+   * 本番のエントリ(`worker.ts`)はそのサブクラスを import しないので、偽ソケットは本番のバンドルに入らない
+   * (`test/bundle-guard.test.ts` が、本番の dry-run のバンドルに入らないことを固定している)。
+   */
+  protected connectFn(): ConnectFn {
+    return connect as ConnectFn;
   }
 
   /** SQLite が使えることの確認(RPC)。sqlite_version() 等の関数は DO の SQLite では許可されていない。 */
