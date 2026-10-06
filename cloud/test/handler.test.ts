@@ -52,8 +52,18 @@ const R2_NOT_CALLED = {
   },
 } as unknown as Env["ANALYSIS_DETAIL"];
 
+/** 日単位の DO の偽物: 呼ばれたら失敗する(このファイルのルートは RaceDay に触れない。RaceDay のルートは handler-run.test.ts)。 */
+const RACE_DAY_NOT_CALLED: Env["RACE_DAY"] = {
+  idFromName: () => {
+    throw new Error("RACE_DAY は呼ばれない想定");
+  },
+  get: () => {
+    throw new Error("RACE_DAY は呼ばれない想定");
+  },
+};
+
 function envOf(overrides: Partial<Env> = {}): Env {
-  return { ...GOOD_ENV, NETKEIBA_GATE: HEALTHY, DB: HEALTHY_D1, ANALYSIS_DETAIL: R2_NOT_CALLED, ...overrides };
+  return { ...GOOD_ENV, NETKEIBA_GATE: HEALTHY, DB: HEALTHY_D1, ANALYSIS_DETAIL: R2_NOT_CALLED, RACE_DAY: RACE_DAY_NOT_CALLED, ...overrides };
 }
 
 async function setup() {

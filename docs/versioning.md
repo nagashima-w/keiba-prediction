@@ -2541,6 +2541,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値も変わらない
 
+## 次の正式版が 1.19.13 である根拠(Issue #180〈#164-e〉での変更)
+
+**patch**(クラウド版の手動起動の入口。**変更は `cloud/`・`scripts/`・docs だけで、exe のアプリコード〈`packages/app/src`〉・core は無変更**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- `cloud/src/handler.ts`: `POST /api/analyses/run`(認証の後。Origin の確認・Content-Type・本文の大きさ・入力の検証 → 日単位の DO の `schedule` → 202。実行中の同じレースは 409。DO の失敗は 503 で文面を返さない)と、
+  `GET /api/analyses/status`(DO の状態。`race_id` 指定で朝の prior の最小限)。`Env` に `RACE_DAY`
+- `cloud/src/race-date.ts`(レースIDと開催日の整合: 年、地方は月日も)。`RaceDayCore.schedule` も同じ検査を使い、1日に受け付けるレース数の上限(100)を持つ
+- テスト: `handler-run.test.ts`・`race-date.test.ts`・`race-day-core.test.ts`(上限・地方の月日)、`cloud-config-guard.test.ts`(Cron・scheduled が無い)、smoke(workerd で、Origin・予約・重複・状態・朝の prior)、docs
+
+### patch である根拠
+
+- exe(`packages/app/src`)・core のコードは無変更。exe に入る成果物は変わらない
+- 分析結果の数値・画面・保存データは変わらない
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

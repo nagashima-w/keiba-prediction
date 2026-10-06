@@ -49,6 +49,20 @@ describe("wrangler.toml", () => {
     expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(2);
   });
 
+  it("Issue #180: netkeiba への取得の起点は手動の操作だけ(Cron Trigger・scheduled ハンドラ・キューの consumer が無い。定時の起動は #166)", () => {
+    expect(tomlCode).not.toMatch(/^\[triggers\]/m);
+    expect(tomlCode).not.toMatch(/^\s*crons\s*=/m);
+    expect(tomlCode).not.toMatch(/^\[\[queues\./m);
+    const worker = readTextLf("cloud", "src", "worker.ts");
+    expect(worker.length).toBeGreaterThan(100); // 前提: 読めている
+    expect(worker).not.toMatch(/\bscheduled\b/);
+    expect(worker).not.toMatch(/\bqueue\b\s*\(/);
+    // 手動の入口は、認証の後ろの POST /api/analyses/run だけ(handler.ts)。ここから日単位の DO の schedule を呼ぶ
+    const handler = readTextLf("cloud", "src", "handler.ts");
+    expect(handler).toContain('"/api/analyses/run"');
+    expect(handler).toContain("originAllowed(request)");
+  });
+
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {
     expect(tomlCode).not.toMatch(/^\[vars\]/m);
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);

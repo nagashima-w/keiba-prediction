@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { HttpError } from "../../packages/core/src/scraper/http-client";
 import type { GateResult } from "../src/gate-core";
 import { GateRefusedError, type GateLike } from "../src/gate-fetch";
-import { CACHE_RETENTION_MS, PURGE_MARGIN_MS, RaceDayCore, serializeGate, type RaceDayDeps } from "../src/race-day-core";
+import { CACHE_RETENTION_MS, MAX_TASKS_PER_DAY, PURGE_MARGIN_MS, RaceDayCore, serializeGate, type RaceDayDeps } from "../src/race-day-core";
 import { fixtureForUrl } from "./pipeline-fixtures";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
@@ -337,6 +337,44 @@ describe("予約・状態・アラーム(Issue #177)", () => {
     expect(h.core.getBoard().kaisaiDate).toBeNull();
     await h.core.schedule({ raceId: RACE_A, kaisaiDate: "20260628" });
     expect(h.core.getBoard().kaisaiDate).toBe("20260628");
+  });
+});
+
+describe("入口の検証の最後の守り(Issue #180)", () => {
+  it("地方のレースIDの月日が開催日と違う予約は、DO でも拒否する(入口の検証をすり抜けた RPC でも、netkeiba に撃たない)", async () => {
+    const h = harness();
+    await expect(h.core.schedule({ raceId: "202654071210", kaisaiDate: "20260713" })).rejects.toThrow(/月日/);
+    expect(h.alarms).toEqual([]);
+    expect(h.gate.urls).toEqual([]);
+    expect(h.core.getBoard().kaisaiDate).toBeNull();
+  });
+
+  it("1日(1つの DO)に受け付けるレースの数に上限がある(中央 36・地方を含めても余裕のある値)。上限を超えた予約は拒否し、すでにあるレースの再予約は受け付ける", async () => {
+    expect(MAX_TASKS_PER_DAY).toBeGreaterThanOrEqual(60);
+    const h = harness();
+    const ids: string[] = [];
+    for (let venue = 1; venue <= 10 && ids.length < MAX_TASKS_PER_DAY + 1; venue++) {
+      for (let race = 1; race <= 12 && ids.length < MAX_TASKS_PER_DAY + 1; race++) {
+        ids.push(`2026${String(venue).padStart(2, "0")}0101${String(race).padStart(2, "0")}`);
+      }
+    }
+    // 中央の ID は 10 場 × 12 = 120 通り(上限 + 1 以上ある)
+    expect(ids.length).toBe(Math.min(MAX_TASKS_PER_DAY + 1, 120));
+    if (MAX_TASKS_PER_DAY + 1 > 120) {
+      throw new Error("テストの ID の生成が足りない(上限を下げるか、ID の生成を増やす)");
+    }
+    for (const id of ids.slice(0, MAX_TASKS_PER_DAY)) {
+      expect((await h.core.schedule({ raceId: id, kaisaiDate: DATE })).accepted).toBe(true);
+    }
+    expect(h.core.getBoard().races).toHaveLength(MAX_TASKS_PER_DAY);
+    await expect(h.core.schedule({ raceId: ids[MAX_TASKS_PER_DAY]!, kaisaiDate: DATE })).rejects.toThrow(/上限/);
+    expect(h.core.getBoard().races).toHaveLength(MAX_TASKS_PER_DAY);
+    // すでにあるレース(実行中)は、上限に達していても「受け付けない(accepted: false)」の通常の応答
+    expect(await h.core.schedule({ raceId: ids[0]!, kaisaiDate: DATE })).toMatchObject({ accepted: false });
+    // 完了済み(done)・失敗(failed)のレースの再予約は、上限に達していても受け付ける(新しいレースを増やさない)
+    h.sql.exec("UPDATE race_day_tasks SET status = 'done' WHERE race_id = ?", ids[1]);
+    expect(await h.core.schedule({ raceId: ids[1]!, kaisaiDate: DATE })).toMatchObject({ accepted: true, status: "queued" });
+    expect(h.core.getBoard().races).toHaveLength(MAX_TASKS_PER_DAY);
   });
 });
 

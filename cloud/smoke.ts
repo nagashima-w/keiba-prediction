@@ -132,7 +132,7 @@ function vars(email: string, aud: string): string[] {
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -252,17 +252,33 @@ async function main(): Promise<void> {
         noLlmNoAllocationNoDate: { result: { rows: { umaban: number; prior: number }[] } };
       };
 
-      const scheduled = await req(port, "GET", `/smoke/race-day/schedule?date=${date}&race_id=${raceId}`);
-      const scheduledJson = parseJson(scheduled.text);
-      check(`${label}: 予約は予約だけをして戻る(accepted・status queued)`, scheduled.status === 200 && scheduledJson["accepted"] === true && scheduledJson["status"] === "queued", `${scheduled.status} ${scheduled.text.slice(0, 200)}`);
-      const duplicate = await req(port, "GET", `/smoke/race-day/schedule?date=${date}&race_id=${raceId}`);
-      check(`${label}: 実行中の同じレースの二重の予約は受け付けない`, parseJson(duplicate.text)["accepted"] === false, duplicate.text.slice(0, 200));
+      // Issue #180: 手動起動の入口(POST /api/analyses/run)。Origin・Content-Type・入力の検証 → 予約(202)→ 重複は 409。
+      const origin = `http://127.0.0.1:${port}`;
+      const run = (body: unknown, headers: Record<string, string> = { Origin: origin, "Content-Type": "application/json" }) =>
+        fetch(`http://127.0.0.1:${port}/api/analyses/run`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+      const goodBody = { race_id: raceId, kaisai_date: date };
+      const noOrigin = await run(goodBody, { "Content-Type": "application/json" });
+      check(`${label}: POST は Origin が無いと 403(origin-mismatch)`, noOrigin.status === 403 && noOrigin.text.includes("origin-mismatch"), `${noOrigin.status} ${noOrigin.text.slice(0, 120)}`);
+      const evil = await run(goodBody, { Origin: "https://evil.example", "Content-Type": "application/json" });
+      check(`${label}: 他サイトの Origin の POST は 403`, evil.status === 403, `${evil.status}`);
+      const wrongType = await run(goodBody, { Origin: origin, "Content-Type": "text/plain" });
+      check(`${label}: Content-Type が application/json でない POST は 415`, wrongType.status === 415, `${wrongType.status}`);
+      const badInput = await run({ race_id: "202654071210", kaisai_date: "20260713" });
+      check(`${label}: 地方のレースIDの月日が開催日と違う POST は 400(DO を呼ばない)`, badInput.status === 400, `${badInput.status} ${badInput.text.slice(0, 160)}`);
+      const idleBoard = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}`)).text);
+      check(`${label}: ここまでの拒否では、何も予約されていない(状態は空)`, Array.isArray(idleBoard["races"]) && (idleBoard["races"] as unknown[]).length === 0, JSON.stringify(idleBoard).slice(0, 160));
 
-      // アラームが動いて done になるまで待つ(上限つき: 1 秒間隔で最大 150 回 = 150 秒)
+      const scheduled = await run(goodBody);
+      const scheduledJson = parseJson(scheduled.text);
+      check(`${label}: 正しい POST は 202 で、予約だけをして戻る(accepted・status queued)`, scheduled.status === 202 && scheduledJson["accepted"] === true && scheduledJson["status"] === "queued", `${scheduled.status} ${scheduled.text.slice(0, 200)}`);
+      const duplicate = await run(goodBody);
+      check(`${label}: 実行中の同じレースの二重の起動は 409(already-running)`, duplicate.status === 409 && duplicate.text.includes("already-running"), `${duplicate.status} ${duplicate.text.slice(0, 200)}`);
+
+      // アラームが動いて done になるまで、GET /api/analyses/status で待つ(上限つき: 1 秒間隔で最大 150 回 = 150 秒)
       const waitDone = async (): Promise<Record<string, unknown>> => {
         let board: Record<string, unknown> = {};
         for (let i = 0; i < 150; i++) {
-          board = parseJson((await req(port, "GET", `/smoke/race-day/board?date=${date}`)).text);
+          board = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}`)).text);
           const races = board["races"] as { status: string }[] | undefined;
           if (races?.[0]?.status === "done" || races?.[0]?.status === "failed") {
             return board;
@@ -275,16 +291,19 @@ async function main(): Promise<void> {
       const board = await waitDone();
       const firstMs = Date.now() - started;
       const race = (board["races"] as Record<string, unknown>[] | undefined)?.[0];
-      check(`${label}: アラームで取得 → 計算が進み、done になる(約 ${Math.round(firstMs / 1000)} 秒)`, race?.["status"] === "done" && race["error"] === null && board["kaisaiDate"] === date, JSON.stringify(board).slice(0, 300));
+      check(`${label}: アラームで取得 → 計算が進み、状態が done になる(約 ${Math.round(firstMs / 1000)} 秒)`, race?.["status"] === "done" && race["error"] === null && race["prior"] === true && board["kaisai_date"] === date, JSON.stringify(board).slice(0, 300));
       check(`${label}: 取得は gate の間隔(2 秒 × 19 本)を守っている(冷えた状態で 30 秒以上かかる)`, firstMs >= 30_000, `${firstMs}ms`);
+      const withPrior = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}&race_id=${raceId}`)).text);
+      const priorRows = (withPrior["prior"] as { rows: { prior: number }[] } | null)?.rows ?? [];
+      check(`${label}: GET /api/analyses/status?race_id= が朝の prior の最小限(16頭・prior の高い順)を返す`, priorRows.length === 16 && priorRows.every((r, i) => i === 0 || priorRows[i - 1]!.prior >= r.prior), JSON.stringify(withPrior).slice(0, 200));
 
       const prior = parseJson((await req(port, "GET", `/smoke/race-day/prior?date=${date}&race_id=${raceId}`)).text)["prior"] as Record<string, unknown> | null;
       check(`${label}: 朝の prior が DO に残る(16頭・LLM なし・組合せオッズなし・近似の日付ではない)`, prior !== null && prior["rows"] === 16 && prior["llmUsed"] === false && prior["hasWideCombo"] === false && prior["dateApproximate"] === false, JSON.stringify(prior).slice(0, 200));
       check(`${label}: 朝の prior の値が、exe 側の golden(LLM なし)の prior と一致する(workerd でも同じ計算)`, JSON.stringify(prior?.["priors"]) === JSON.stringify(golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior])), "");
 
       // 2回目: キャッシュ(出馬表 10 分・戦績 24 時間・調教 6 時間・オッズ 60 秒の内側)で、gate への取得が0本 = 間隔の待ちが無く速い
-      const second = await req(port, "GET", `/smoke/race-day/schedule?date=${date}&race_id=${raceId}`);
-      check(`${label}: 完了済みのレースは再予約できる`, parseJson(second.text)["accepted"] === true, second.text.slice(0, 200));
+      const second = await run(goodBody);
+      check(`${label}: 完了済みのレースは再び起動できる(202)`, second.status === 202, `${second.status} ${second.text.slice(0, 200)}`);
       const secondStarted = Date.now();
       const secondBoard = await waitDone();
       const secondMs = Date.now() - secondStarted;

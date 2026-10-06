@@ -31,6 +31,7 @@ import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper
 import { HttpError } from "../../packages/core/src/scraper/http-client";
 import { DEFAULT_RESULTS_TTL_MS, scrapeRace, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
+import { checkRaceDate } from "./race-date";
 import { DoSqlCacheStore } from "./do-cache-store";
 import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fetch";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
@@ -38,6 +39,12 @@ import type { SqlLike } from "./sql-like";
 
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
 const PURGE_DUE_KEY = "purge_due_at";
+
+/**
+ * 1日(1つの DO)に受け付けるレースの数の上限。中央は 1日 最大 36 レース(3場 × 12R)。地方を手動で足しても余裕のある値。
+ * 手動起動の入口(#180)から、netkeiba への取得が際限なく積まれないための歯止め(すでにあるレースの再予約は数えない)。
+ */
+export const MAX_TASKS_PER_DAY = 100;
 
 /** 取得ステップの試行回数の上限。 */
 export const MAX_ATTEMPTS = 3;
@@ -233,8 +240,10 @@ export class RaceDayCore {
     if (pinned !== null && pinned !== kaisaiDate) {
       throw new Error(`この DO は開催日 ${pinned} 専用です(渡された開催日: ${kaisaiDate})`);
     }
-    if (raceId.slice(0, 4) !== kaisaiDate.slice(0, 4)) {
-      throw new Error(`レースID(${raceId})の年と開催日(${kaisaiDate})の年が一致しません`);
+    // 年(どのレースでも)・月日(地方のレースID。中央は日付を含まない)の整合。入口(handler.ts)でも確かめているが、RPC を直接呼ばれても守る。
+    const consistent = checkRaceDate(raceId, kaisaiDate);
+    if (!consistent.ok) {
+      throw new Error(consistent.message);
     }
     if (pinned === null) {
       this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('kaisai_date', ?)", kaisaiDate);
@@ -242,6 +251,12 @@ export class RaceDayCore {
     const existing = this.task(raceId);
     if (existing !== null && (existing.status === "queued" || existing.status === "fetched")) {
       return { accepted: false, raceId, status: existing.status };
+    }
+    if (existing === null) {
+      const count = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks").toArray() as { n: number }[])[0]?.n ?? 0;
+      if (count >= MAX_TASKS_PER_DAY) {
+        throw new Error(`この開催日に受け付けられるレース数の上限(${MAX_TASKS_PER_DAY})に達しています`);
+      }
     }
     const now = this.now();
     this.sql.exec(

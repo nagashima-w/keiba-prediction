@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.12)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.13)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.12`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.13`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1126,6 +1126,16 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **検査**: core `cache-store-contract.test.ts`、cloud `do-cache-store.test.ts`・`race-day-core.test.ts`(本物の SQLite〈`node:sqlite`〉・偽の gate)・`bundle-guard.test.ts`(本番のバンドルに RaceDay・取得キャッシュ・runAnalysis が入り、better-sqlite3・`node:sqlite` は入らない)、
   scripts `cloud-config-guard.test.ts`(migration は v2 の追加だけ)、smoke(workerd で、予約 → アラーム → 取得 → 計算 → 朝の prior が golden と一致・2回目はキャッシュで速い・D1 は空のまま)。
 - **限界**: Free の「1呼び出しあたりのサブリクエスト 50」に DO の中のソケット・DO への RPC が数えられるかは未確定のまま(ステップを分け、1ステップの gate への呼び出しを 19 本に抑えている)。本番の DO・アラームは未確認。
+
+### 手動起動の入口(#180〈#164-e〉。v1.19.13)
+Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を置いた(`cloud/src/handler.ts`)。**netkeiba への取得の起点は、この手動の POST だけ**(Cron・scheduled・キューは無い。`cloud-config-guard.test.ts` が固定。定時の起動は #166)。
+- **`POST /api/analyses/run`**: 本文は JSON `{ "race_id": "...", "kaisai_date": "YYYYMMDD", "mode": "morning" }`(`mode` は省略時と `morning`〈朝の取得と prior〉のみ。発走前の分析は #178)。
+  順序: 認証(403・固定の本文)→ **Origin**(`Origin` ヘッダが**あって**、リクエストの origin と完全一致。無い・`null`・スキーム/ポート/サブドメインが違う・末尾にパスがあるものは 403〈origin-mismatch〉。`Sec-Fetch-Site` があれば `same-origin`)→
+  Content-Type が `application/json`(415)→ 本文 1 KiB 以内(413)→ JSON・入力の検証(400。未知のキー・型・mode・race_id の検証〈中央 01〜10・地方 30〜64・帯広は対象外〉・開催日の形と実在・**レースIDと開催日の整合**: 年は全レース、**地方は月日も**〈中央の7〜10桁目は回次・日次〉)。ここまでで DO は呼ばない。
+  → 日単位の DO(名前は開催日)の `schedule`(予約だけ)→ **202**(`{ok, accepted, race_id, kaisai_date, mode, status: "queued"}`)。実行中(queued・fetched)の同じレースは **409**(`already-running` と、いまの状態)。DO が投げたら **503**(`race-day-error`。例外の文面・SQL は返さない)。
+- **`GET /api/analyses/status?kaisai_date=YYYYMMDD[&race_id=...]`**: 各レースの `status`・`attempts`・`error`(200 文字まで)・`queued_at`・`updated_at`・`prior`(朝の prior の有無)。`race_id` を指定すると `prior` に、レース名・場名・日付・`computed_at`・`rows`(`rank`・`umaban`・`horse_name`・`prior`。prior の高い順)の最小限。パラメータは1つずつまで(不正は 400。DO を呼ばない)。GET だけ(HEAD は 405)。
+- **DO 側の守り**: `RaceDayCore.schedule` も同じ整合検査(`race-date.ts`)を行い、1日(1つの DO)に受け付けるレース数の上限は 100(`MAX_TASKS_PER_DAY`。すでにあるレースの再予約は数えない)。
+- 本番への反映は R2 の権限が付いてから(#174)。
 
 ## 主な当初仕様との差異(記録)
 

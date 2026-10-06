@@ -193,7 +193,7 @@ async function smokeAnalysis(): Promise<Response> {
 /** 日単位の DO(Issue #177)。本番の入口(#180)はまだ無いので、smoke だけが RPC を呼ぶ。 */
 export { RaceDay };
 
-type SmokeEnv = Env & { RACE_DAY: DurableObjectNamespace<RaceDay> };
+type SmokeEnv = Env;
 
 /**
  * Issue #177: 日単位の DO `RaceDay` を、workerd の実環境(本物の DO の SQLite・アラーム・NetkeibaGate への RPC・偽ソケット)で通す。
