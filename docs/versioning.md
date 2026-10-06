@@ -2474,6 +2474,30 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1・R2 はクラウド版だけの保存先)
 
+## 次の正式版が 1.19.10 である根拠(Issue #176〈#164-a〉での変更)
+
+**patch**(runAnalysis をクラウド版〈`cloud/`。Cloudflare Worker〉に載せるための準備。**exe の出力は変わらない**。利用者から見える変化は無い)。
+
+### 変更内容
+
+- core: 狭い入口 `@keiba/core/pipeline`(`packages/core/src/pipeline.ts`。`package.json` の `exports` に追加。better-sqlite3 に依存するモジュールを型でも経由しない)。
+  型だけの import の経路を整理するため、`scrape-race.ts`・`fetch-combo-odds.ts`・`fetch-grade-winner.ts` の `CachedFetchTextOptions` の import 元を `cache.ts`(better-sqlite3)から `cached-fetcher.ts` に変更(型のみ・実行時は無変更)、
+  `parse-grade-winner.ts` の `inflateSync(...).toString` を `Buffer.from(...)` で包んだ(型の解決のため。実行時の結果は同じ)
+- app: `analysis-pipeline.ts`・`allocation-record.ts`・`analysis-export.ts` の `@keiba/core`(バレル)の import を `@keiba/core/pipeline` に差し替え。
+  `runAnalysis` の deps: `saveAnalysis` の戻り値を `unknown`(Promise なら `await`)、当日傾向のバッチ読み出し `getRaceResultDetails`(任意。単発の `getRaceResultDetail` は従来どおり)
+- cloud: `src/pipeline.ts`(`runCloudAnalysis`。`kaisaiDate` 必須)・`wrangler.toml` の `[alias]`・`tsconfig.json` の `paths`・`vitest.config.ts` の `alias`・smoke
+- テスト・golden: `packages/app/test/golden/`(変更前のコミット b821c97 で生成。生成手順 `scripts/gen-pipeline-golden.ts`)・`analysis-pipeline-golden.test.ts`・`analysis-pipeline-async-deps.test.ts`、
+  core の `native-free-modules.test.ts`(狭い入口)、cloud の `import-guard.test.ts`・`bundle-guard.test.ts`・`pipeline-run.test.ts`
+
+### patch である根拠
+
+- exe の保存レコード(`AnalysisRecord`)・画面に返す結果(`AnalysisResult`)・LLM に渡る入力とプロンプト本文は、変更前と**完全に一致する**(golden 3シナリオで固定。変更前のコミットで生成)
+- exe の束縛(`pipeline-deps.ts`)は無変更(`getRaceResultDetail` は従来どおり同期・ID ごとに1回)
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値も変わらない
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

@@ -1,6 +1,5 @@
 import { DEFAULT_SCORER_CONFIG } from "@keiba/core/scorer/config";
 import {
-  buildPriorInput,
   buildPrompt,
   CLIP_VARIANTS,
   parseHorseId,
@@ -25,6 +24,7 @@ import {
   type ShutubaHorse,
 } from "@keiba/core";
 import type { AnalysisRecord } from "@keiba/core";
+import { buildPriorInput } from "@keiba/core/pipeline";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import {
@@ -35,8 +35,10 @@ import {
 import type { AnalysisProgress } from "../src/shared/analysis-types.js";
 
 // buildPriorInput を実挙動そのままのスパイに差し替え、渡された race.date を検証できるようにする。
-vi.mock("@keiba/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@keiba/core")>();
+// Issue #176: runAnalysis の core の import 先がバレル(@keiba/core)から狭い入口(@keiba/core/pipeline)に変わったので、
+// スパイもその入口に掛ける(上の import の buildPriorInput も同じ入口から取る。検証する内容は変えていない)。
+vi.mock("@keiba/core/pipeline", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@keiba/core/pipeline")>();
   return { ...actual, buildPriorInput: vi.fn(actual.buildPriorInput) };
 });
 

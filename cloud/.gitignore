@@ -11,3 +11,8 @@ wrangler.native-probe.generated.toml
 # バンドルのガードの対照(保存側のコードを巻き込まない入口)が生成する一時ファイル
 store-absent-probe.generated.ts
 wrangler.store-absent-probe.generated.toml
+# バンドルのガードの検査用(runAnalysis を巻き込む入口・core のバレルを巻き込む入口。Issue #176)が生成する一時ファイル
+pipeline-probe.generated.ts
+wrangler.pipeline-probe.generated.toml
+barrel-probe.generated.ts
+wrangler.barrel-probe.generated.toml

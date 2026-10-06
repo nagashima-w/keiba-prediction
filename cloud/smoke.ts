@@ -18,6 +18,7 @@
  * JWT の検証そのものは単体テスト(test/)が担う。値はすべて文書用のダミー。
  */
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -195,6 +196,17 @@ async function main(): Promise<void> {
       const label = "E(偽ソケット)";
       const page = await req(port, "GET", "/");
       check(`${label}: GET / に確認フォーム(GET で /api/netkeiba/check へ。初期値 202603020211)がある`, page.status === 200 && page.text.includes('<form method="get" action="/api/netkeiba/check">') && page.text.includes('value="202603020211"'), `${page.status}`);
+
+      // Issue #176: runAnalysis(クラウド版の入口)が workerd で、フィクスチャから最後まで通り、exe 側の golden と同じ出力になる。
+      const analysis = await req(port, "GET", "/smoke/analysis");
+      const analysisJson = parseJson(analysis.text);
+      const golden = JSON.parse(readFileSync(path.join("..", "packages", "app", "test", "golden", "pipeline-golden.json"), "utf-8")) as {
+        noLlmAllBets: { result: unknown; record: { allocation: { bets: unknown[] } } };
+      };
+      const sha = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+      check(`${label}: runAnalysis が workerd で最後まで通る(保存1件・16頭・配分は多点)`, analysis.status === 200 && analysisJson["ok"] === true && analysisJson["saved"] === 1 && analysisJson["rows"] === 16 && typeof analysisJson["bets"] === "number" && (analysisJson["bets"] as number) > 1, `${analysis.status} ${analysis.text.slice(0, 300)}`);
+      check(`${label}: workerd の runAnalysis の結果(AnalysisResult)・保存レコード(AnalysisRecord)が、exe 側の golden と SHA-256 まで一致する`, analysisJson["resultSha256"] === sha(golden.noLlmAllBets.result) && analysisJson["recordSha256"] === sha(golden.noLlmAllBets.record) && analysisJson["bets"] === golden.noLlmAllBets.record.allocation.bets.length, `${String(analysisJson["resultSha256"])} / ${String(analysisJson["recordSha256"])}`);
+      // (上の runAnalysis の確認は、ゲートの間隔(2 秒)の確認に影響しないよう、取得の確認の前に置く)
 
       const central = await req(port, "GET", "/api/netkeiba/check?race_id=202603020211");
       const centralJson = parseJson(central.text);

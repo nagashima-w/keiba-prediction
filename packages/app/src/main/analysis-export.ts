@@ -40,7 +40,7 @@ import type {
   RaceResultDetail,
   RaceResultEntry,
   StoredAnalysis,
-} from "@keiba/core";
+} from "@keiba/core/pipeline";
 
 /** schemaVersion の現行値(第一版)。 */
 export const ANALYSIS_EXPORT_SCHEMA_VERSION = 1 as const;

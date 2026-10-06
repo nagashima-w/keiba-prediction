@@ -19,7 +19,7 @@
  *   配線のみを担う(取得ロジック自体の再実装はしない)。
  */
 
-import type { CachedFetchTextOptions } from "./cache.js";
+import type { CachedFetchTextOptions } from "./cached-fetcher.js";
 import { toComboOddsScalarMap, type ComboBetType } from "./combo-odds-key.js";
 import {
   fetchBracketQuinellaOdds,

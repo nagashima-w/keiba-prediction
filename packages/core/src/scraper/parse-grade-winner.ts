@@ -248,7 +248,9 @@ export function parseGradeWinnerResponse(
 
   let decodedText: string;
   try {
-    decodedText = inflateSync(Buffer.from(encoded, "base64")).toString("utf-8");
+    // Buffer.from(...) で包むのは、型の解決のため(Issue #176: cloud の型検査は @cloudflare/workers-types と @types/node を併用し、
+    // 前者の inflateSync の戻り値の型では toString("utf-8") が通らない。実行時は inflateSync が返す Buffer のコピーで、結果は同じ)。
+    decodedText = Buffer.from(inflateSync(Buffer.from(encoded, "base64"))).toString("utf-8");
   } catch (error) {
     throw new GradeWinnerParseError(
       `同レース過去10年結果APIの応答の復号(base64/zlib)に失敗しました: ${String(error)}`,

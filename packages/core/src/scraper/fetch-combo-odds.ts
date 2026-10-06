@@ -77,7 +77,7 @@
  * | 軸間の同一キーの値(**衝突**) | `mergeAxisComboOddsMaps`(`combo-odds-key.ts`) | あり | 分類+保守側採用(`null`<小<大。throwしない) | #14の下限採用と同じ保守方針。合成データでテスト(`combo-odds-key.test.ts`) |
  */
 
-import type { CachedFetchTextOptions } from "./cache.js";
+import type { CachedFetchTextOptions } from "./cached-fetcher.js";
 import {
   COMBO_KEY_ORDER,
   COMBO_SIZE,

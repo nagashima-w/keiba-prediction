@@ -56,6 +56,7 @@ import {
   summarizeJockeyChange,
   summarizeMarginTrend,
   summarizeMarketGap,
+  precedingRaceIdsSameDay,
   venueKindOfRaceId,
   type AnalysisAllocationRecord,
   type AnalysisRecord,
@@ -77,7 +78,7 @@ import {
   type RaceId,
   type RaceResultDetail,
   type ScorerConfig,
-} from "@keiba/core";
+} from "@keiba/core/pipeline";
 
 import type {
   AnalysisProgress,
@@ -110,8 +111,12 @@ export interface AnalysisPipelineDeps {
   readonly analyze:
     | ((input: BuildPromptInput) => Promise<AnalyzeRaceResult>)
     | null;
-  /** 分析結果の保存(通常は AnalysisStore.saveAnalysis)。採番IDを返す。 */
-  readonly saveAnalysis: (record: AnalysisRecord) => number;
+  /**
+   * 分析結果の保存(exe は AnalysisStore.saveAnalysis〈同期。採番IDを返す〉、クラウド版は D1 への保存〈非同期〉)。
+   * 戻り値は runAnalysis では使わないので `unknown`。Promise が返れば `await` して完了を待ち、reject は runAnalysis の
+   * reject として伝える(Issue #176。同期の throw は従来どおり)。
+   */
+  readonly saveAnalysis: (record: AnalysisRecord) => unknown;
   /**
    * 配分提案(Issue #59)を計算するための設定(10項目。`evThreshold`を含まない——EV閾値は
    * `evConfig ?? DEFAULT_EV_CONFIG`から導出し二重ソースを作らない。#59 3節)。
@@ -168,6 +173,18 @@ export interface AnalysisPipelineDeps {
    * この依存が注入されていても当日傾向を算出しない(prior採用経路で無駄なDB読み出しを増やさないため)。
    */
   readonly getRaceResultDetail?: (raceId: RaceId) => RaceResultDetail | undefined;
+  /**
+   * 確定済みレース結果詳細のバッチ読み出し(Issue #176〈#164-a〉。クラウド版は D1 が非同期で、1呼び出しあたりのクエリ数に
+   * 上限があるため、前のレース分をまとめて1回で引く)。**`getRaceResultDetail` と両方が渡されたらこちらを使い、
+   * 単発の方は呼ばない。** 渡る ID は `precedingRaceIdsSameDay(raceId)`(自レースより前のレース番号だけ。#153)で、
+   * 呼び出しは1回。返す Map に無い ID は結果なし(undefined)として扱う。
+   * `getRaceResultDetail` と同じく、LLM をスキップする経路(`analyze === null`)では呼ばない。
+   */
+  readonly getRaceResultDetails?: (
+    raceIds: readonly RaceId[],
+  ) =>
+    | ReadonlyMap<string, RaceResultDetail | undefined>
+    | Promise<ReadonlyMap<string, RaceResultDetail | undefined>>;
   /**
    * 同レース(重賞)の過去10年結果傾向の取得+集計(タスク機能B。通常は core
    * collectGradeWinnerTrend を CachedFetcher で束縛したもの。pipeline-deps.ts が束縛する)。
@@ -471,9 +488,26 @@ export async function runAnalysis(
     // 集計対象は自レースより前のレース番号だけ(Issue #153。collectSameDayTrend が
     // precedingRaceIdsSameDay で列挙する。過去のレースを後から分析しても、取込済みの後続レースの
     // 結果〈自レースの発走時点では存在しない〉は混ざらない。当日運用では後続は未取込のため不変)。
-    const sameDayTrend = deps.getRaceResultDetail
-      ? collectSameDayTrend(raceId, race.race.courseType, deps.getRaceResultDetail)
-      : null;
+    // Issue #176: collectSameDayTrend の lookup は同期なので、前のレース分(precedingRaceIdsSameDay。collectSameDayTrend が
+    // 引くのと同じ ID 列)を先に(非同期でも)読んで Map にし、それを同期の lookup として渡す。
+    // 単発の getRaceResultDetail(同期。exe の束縛)は従来どおり ID ごとに1回ずつ(同じ順序で)呼ぶ。非同期にしたい呼び出し側(クラウド版)は
+    // バッチの getRaceResultDetails を使う。両方あればバッチを優先する。
+    let sameDayTrend: ReturnType<typeof collectSameDayTrend> = null;
+    if (deps.getRaceResultDetails || deps.getRaceResultDetail) {
+      const precedingIds = precedingRaceIdsSameDay(raceId);
+      let detailsById: ReadonlyMap<string, RaceResultDetail | undefined>;
+      if (deps.getRaceResultDetails) {
+        detailsById = await deps.getRaceResultDetails(precedingIds);
+      } else {
+        const single = deps.getRaceResultDetail!;
+        const loaded = new Map<string, RaceResultDetail | undefined>();
+        for (const id of precedingIds) {
+          loaded.set(id, single(id));
+        }
+        detailsById = loaded;
+      }
+      sameDayTrend = collectSameDayTrend(raceId, race.race.courseType, (id) => detailsById.get(id));
+    }
 
     // 同レース(重賞)の過去10年結果傾向(タスク機能B)。getGradeWinnerTrend が注入され、かつ
     // 出馬表に重賞グレードバッジが無いと判定できなかったとき(hasGradeBadge!==false。true/未定義
@@ -839,7 +873,7 @@ export async function runAnalysis(
     // (`allocation: undefined`という明示的な代入はしない。手順(6)のwideCombo等と同じ流儀)。
     ...(allocation !== undefined ? { allocation } : {}),
   };
-  deps.saveAnalysis(record);
+  await deps.saveAnalysis(record);
 
   return {
     raceId,

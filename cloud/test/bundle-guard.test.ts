@@ -21,6 +21,12 @@ const TEMP_CONFIG = path.join(CLOUD, "wrangler.bundle-guard.generated.toml");
 /** 対照用(better-sqlite3 を巻き込む入口)の一時ファイル。.gitignore が除外する。 */
 const NATIVE_PROBE_ENTRY = path.join(CLOUD, "native-probe.generated.ts");
 const NATIVE_PROBE_CONFIG = path.join(CLOUD, "wrangler.native-probe.generated.toml");
+/** runAnalysis(src/pipeline.ts)を巻き込む入口の一時ファイル(Issue #176)。.gitignore が除外する。 */
+const PIPELINE_PROBE_ENTRY = path.join(CLOUD, "pipeline-probe.generated.ts");
+const PIPELINE_PROBE_CONFIG = path.join(CLOUD, "wrangler.pipeline-probe.generated.toml");
+/** core のバレルを巻き込む入口の一時ファイル(Issue #176。解決の失敗・better-sqlite3 の混入を検出できることの対照)。.gitignore が除外する。 */
+const BARREL_PROBE_ENTRY = path.join(CLOUD, "barrel-probe.generated.ts");
+const BARREL_PROBE_CONFIG = path.join(CLOUD, "wrangler.barrel-probe.generated.toml");
 /** 対照用(保存側のコード(D1AnalysisStore)を巻き込まない入口)の一時ファイル。.gitignore が除外する。 */
 const STORE_ABSENT_ENTRY = path.join(CLOUD, "store-absent-probe.generated.ts");
 const STORE_ABSENT_CONFIG = path.join(CLOUD, "wrangler.store-absent-probe.generated.toml");
@@ -47,6 +53,10 @@ afterAll(() => {
   rmSync(NATIVE_PROBE_CONFIG, { force: true });
   rmSync(STORE_ABSENT_ENTRY, { force: true });
   rmSync(STORE_ABSENT_CONFIG, { force: true });
+  rmSync(PIPELINE_PROBE_ENTRY, { force: true });
+  rmSync(PIPELINE_PROBE_CONFIG, { force: true });
+  rmSync(BARREL_PROBE_ENTRY, { force: true });
+  rmSync(BARREL_PROBE_CONFIG, { force: true });
   for (const dir of workDirs) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -192,6 +202,77 @@ describe("本番のバンドルと保存側のコード(Issue #175)", () => {
       expect(code.includes("FROM json_each(?)")).toBe(false);
       expect(code.includes("UPDATE analyses SET detail_key = ")).toBe(false);
       expect(code.includes("application/gzip")).toBe(false);
+    },
+    120_000,
+  );
+});
+
+/**
+ * Issue #176(#164-a)AC-a2: runAnalysis(exe の分析パイプライン)が、cloud のバンドルに入ること。better-sqlite3 は入らないこと。
+ * 本番のエントリ(worker.ts)はまだ runAnalysis を呼ばない(呼び出し元は #177 以降)ので、`src/pipeline.ts` を参照する入口(一時ファイル)を
+ * 本番と同じ wrangler.toml([alias] を含む)でバンドルして検査する。
+ * **前提(空振り防止)**: runAnalysis 固有の文字列(進捗メッセージ・LLM スキップの文言・scorer の文言)がバンドルに実際にあること。
+ * 無ければ「better-sqlite3 が無い」は自明に成立してしまう。対照: core のバレルを import する入口では、解決の失敗か better-sqlite3 が現れる。
+ */
+// ASCII の識別子を使う(wrangler のバンドルは日本語の文字列を \uXXXX に直すので、日本語の文言では見つからない)。いずれも runAnalysis・runCloudAnalysis にだけある名前。
+const PIPELINE_MARKERS = ["runCloudAnalysis", "promptLookaheadGuarded", "historyCutoffDate", "careerRunCount", "dateApproximate"];
+
+describe("本番相当のバンドルと runAnalysis(Issue #176)", () => {
+  it("前提: 検出する文字列は、runAnalysis のソースに実際にある。cloud/src/pipeline.ts は narrow な入口だけを使う", () => {
+    const pipelineSource = readFileSync(path.join(CLOUD, "..", "packages", "app", "src", "main", "analysis-pipeline.ts"), "utf-8");
+    const source = pipelineSource + readFileSync(path.join(CLOUD, "src", "pipeline.ts"), "utf-8");
+    for (const marker of PIPELINE_MARKERS) {
+      expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
+    }
+    expect(pipelineSource).toContain('from "@keiba/core/pipeline"');
+    expect(pipelineSource).not.toMatch(/from "@keiba\/core";/);
+  });
+
+  it(
+    "runAnalysis を参照する入口をバンドルすると、runAnalysis 固有の文字列・core の scorer・配分の文字列が入っていて、better-sqlite3・Electron は入っていない",
+    () => {
+      writeFileSync(
+        PIPELINE_PROBE_ENTRY,
+        'import { runCloudAnalysis } from "./src/pipeline";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(runCloudAnalysis)); } };\n',
+      );
+      const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
+      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "pipeline-probe.generated.ts"');
+      expect(probeConfig).not.toBe(base);
+      writeFileSync(PIPELINE_PROBE_CONFIG, probeConfig);
+      const code = bundle(PIPELINE_PROBE_CONFIG, "pipeline-probe.generated.js");
+      // 前提(空振り防止): runAnalysis が実際にバンドルされている
+      for (const marker of PIPELINE_MARKERS) {
+        expect(code.includes(marker), `バンドルに ${marker} がある`).toBe(true);
+      }
+      // 本題
+      expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);
+      expect(code.includes("sqlite3"), "バンドルにネイティブの sqlite3 の痕跡が無い").toBe(false);
+      expect(/from\s*["']electron["']|require\(["']electron["']\)/.test(code), "バンドルに electron が無い").toBe(false);
+      // 圧縮後の大きさが Free の上限(3 MB)に収まる(runAnalysis を載せた分を含めて)
+      expect(gzipSync(code).length).toBeLessThan(3 * 1024 * 1024);
+    },
+    120_000,
+  );
+
+  it(
+    "対照: core のバレルから better-sqlite3 に依存するクラス(ScrapeCache)を参照する入口をバンドルすると、better-sqlite3 が現れる(runAnalysis の import をバレルに戻す退行を、この検査が検出できることの確認)",
+    () => {
+      writeFileSync(
+        BARREL_PROBE_ENTRY,
+        'import { ScrapeCache } from "../packages/core/src/index";\nexport { NetkeibaGate } from "./src/netkeiba-gate-do";\nexport default { fetch() { return new Response(String(ScrapeCache)); } };\n',
+      );
+      const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
+      const probeConfig = base.replace('main = "src/worker.ts"', 'main = "barrel-probe.generated.ts"');
+      expect(probeConfig).not.toBe(base);
+      writeFileSync(BARREL_PROBE_CONFIG, probeConfig);
+      let seen: string;
+      try {
+        seen = bundle(BARREL_PROBE_CONFIG, "barrel-probe.generated.js");
+      } catch (error) {
+        const e = error as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
+        seen = `${String(e.stdout ?? "")}${String(e.stderr ?? "")}${e.message ?? ""}`;
+      }
+      expect(seen.includes("better-sqlite3")).toBe(true);
     },
     120_000,
   );

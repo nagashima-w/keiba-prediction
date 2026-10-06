@@ -49,6 +49,12 @@ migrations_dir = "migrations"
 binding = "ANALYSIS_DETAIL"
 bucket_name = "keiba-cloud-r2"
 
+# Issue #176: 末尾の `"@keiba/core/..."` の4行は、runAnalysis(packages/app の main/analysis-pipeline.ts。相対 import で取り込む)が import する
+# core のサブパスを packages/core/src の実ファイルに向ける。★wrangler の alias は完全一致なので**サブパスごとに1行**要る(前方一致は無い。
+# CI のように各 package の node_modules が無い配置では、ここが無いと Could not resolve で失敗する)。runAnalysis の閉包が新しいサブパスを
+# import したら、ここに1行足す(tsconfig.json の paths は `@keiba/core/*` で前方一致、vitest.config.ts の alias も前方一致。
+# test/import-guard.test.ts が、閉包のサブパスとここの行の一致を検査する)。★バレル(`@keiba/core` そのもの)は向けない
+# (better-sqlite3 を巻き込む。型だけの import でも CI で解決に失敗する)。
 # core(workspace の外。相対 import で取り込む)をバンドルするための解決。CI では packages/core/node_modules が無いので、
 # 依存はこのディレクトリの node_modules から解決させる。undici はスタブに差し替える(src/undici-stub.ts)。
 # tsconfig.json の paths・vitest.config.ts の alias と同じ対応。
@@ -56,3 +62,7 @@ bucket_name = "keiba-cloud-r2"
 undici = "./src/undici-stub.ts"
 iconv-lite = "./node_modules/iconv-lite"
 cheerio = "./node_modules/cheerio"
+"@keiba/core/pipeline" = "../packages/core/src/pipeline.ts"
+"@keiba/core/scorer/snapshot-filter" = "../packages/core/src/scorer/snapshot-filter.ts"
+"@keiba/core/ev/bet-allocation" = "../packages/core/src/ev/bet-allocation.ts"
+"@keiba/core/ev/combo-bet-allocation" = "../packages/core/src/ev/combo-bet-allocation.ts"

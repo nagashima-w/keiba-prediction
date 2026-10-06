@@ -191,6 +191,12 @@ describe("D1 の migration は追加のみ(Issue #171。AC-a7: 静的ガード)"
 
 describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)", () => {
   const ALIAS_KEYS = ["undici", "iconv-lite", "cheerio"];
+  /**
+   * Issue #176(#164-a): runAnalysis(app)が import する core のサブパス。wrangler の alias は完全一致なので1行ずつ要る。
+   * 行き先は packages/core/src の実ファイル(依存の行き先〈cloud/node_modules・スタブ〉とは違い、リポジトリに入っているソース。CI にも在る)。
+   * tsconfig.json の paths は `@keiba/core/*` の前方一致、vitest.config.ts の alias は `@keiba/core` の前方一致。
+   */
+  const CORE_SUBPATHS = ["pipeline", "scorer/snapshot-filter", "ev/bet-allocation", "ev/combo-bet-allocation"];
 
   it("nodejs_compat を有効にしている(core の HttpClient・iconv-lite が Buffer を使う)", () => {
     expect(tomlCode).toMatch(/^compatibility_flags = \["nodejs_compat"\]$/m);
@@ -212,17 +218,33 @@ describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)",
       expect(tsconfig, `tsconfig の paths に ${key}`).toContain(`"${key}": ["${target[key]}"]`);
       expect(vitestConfig, `vitest の alias に ${key}`).toMatch(new RegExp(`"?${key}"?: here\\("${target[key]!.replace(/[./]/g, "\\$&")}"\\)`));
     }
-    // [alias] に余計な行き先が無い(3つだけ)
-    expect(aliasBlock.trim().split("\n")).toHaveLength(ALIAS_KEYS.length);
+    // Issue #176: core のサブパス(完全一致の1行ずつ)。tsconfig の paths・vitest の alias は前方一致で、同じ行き先(packages/core/src)を向く
+    for (const sub of CORE_SUBPATHS) {
+      expect(aliasBlock, `[alias] に @keiba/core/${sub}`).toContain(`"@keiba/core/${sub}" = "../packages/core/src/${sub}.ts"`);
+    }
+    expect(tsconfig, "tsconfig の paths に @keiba/core/*").toContain('"@keiba/core/*": ["../packages/core/src/*"]');
+    expect(vitestConfig, "vitest の alias に @keiba/core").toMatch(/"@keiba\/core": here\("\.\.\/packages\/core\/src"\)/);
+    // バレル(`@keiba/core` そのもの)は、どこにも向けていない(better-sqlite3 を巻き込む)
+    expect(aliasBlock).not.toMatch(/^"@keiba\/core"\s*=/m);
+    expect(tsconfig).not.toContain('"@keiba/core":');
+    // [alias] に余計な行き先が無い(依存3つ + core のサブパス)
+    expect(aliasBlock.trim().split("\n")).toHaveLength(ALIAS_KEYS.length + CORE_SUBPATHS.length);
   });
 
   it("alias の行き先は cloud/ の中の相対パス(`..` で外へ出ない。packages/core/node_modules は CI に無い)で、スタブは実在する", () => {
     const aliasBlock = /^\[alias\]\n((?:[^\n[]+\n?)+)/m.exec(tomlCode)?.[1] ?? "";
-    const targets = [...aliasBlock.matchAll(/= "([^"]+)"/g)].map((m) => m[1]!);
+    const targets = [...aliasBlock.matchAll(/^(?!"@keiba\/core\/)[^\n=]+= "([^"]+)"/gm)].map((m) => m[1]!);
     // 前提: 行き先を実際に読めている(空振りではない)
     expect(targets).toHaveLength(ALIAS_KEYS.length);
     for (const target of targets) {
       expect(target, `行き先 ${target}`).toMatch(/^\.\/(?!.*\.\.)/);
+    }
+    // Issue #176: core のサブパスの行き先は packages/core/src の実在するファイルだけ(cloud/ の外へ出るのは、この4行だけ)
+    const coreTargets = [...aliasBlock.matchAll(/^"@keiba\/core\/[^"]+" = "([^"]+)"/gm)].map((m) => m[1]!);
+    expect(coreTargets).toHaveLength(CORE_SUBPATHS.length);
+    for (const target of coreTargets) {
+      expect(target, `行き先 ${target}`).toMatch(/^\.\.\/packages\/core\/src\/[a-z/-]+\.ts$/);
+      expect(existsSync(path.join(ROOT, "cloud", target)), `実在 ${target}`).toBe(true);
     }
     expect(existsSync(path.join(ROOT, "cloud", "src", "undici-stub.ts"))).toBe(true);
   });

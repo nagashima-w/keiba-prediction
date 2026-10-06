@@ -10,9 +10,26 @@
  * 本番の dry-run のバンドルに無いことを `test/bundle-guard.test.ts` が固定している。
  */
 import centralHtml from "../fixtures/shutuba_202603020211.html";
+import oikiriHtml from "../fixtures/oikiri_202603020211.html";
+import oddsJson from "../fixtures/odds_202603020211.json";
+import oddsWideJson from "../fixtures/odds_wide_202603020211.json";
+import oddsTrioJson from "../fixtures/odds_trio_202603020211.json";
+import oddsQuinellaJson from "../fixtures/odds_quinella_202603020211.json";
+import oddsExactaJson from "../fixtures/odds_exacta_202603020211.json";
+import oddsTrifectaJson from "../fixtures/odds_trifecta_202603020211.json";
+import oddsWakurenJson from "../fixtures/odds_wakuren_202603020211.json";
+import results2023103386 from "../fixtures/horse_results_2023103386.json";
+import results2021105857 from "../fixtures/horse_results_2021105857.json";
+import results2021105727 from "../fixtures/horse_results_2021105727.json";
+import results2024104976 from "../fixtures/horse_results_2024104976.json";
+import { parseKaisaiDate, parseRaceId } from "../packages/core/src/scraper/ids";
+import { scrapeRace } from "../packages/core/src/scraper/scrape-race";
+import type { AnalysisRecord } from "../packages/core/src/ev/analysis-store-types";
 import narHtml from "../fixtures/nar_shutuba_202654071210.html";
 import { NetkeibaGate as RealGate } from "./src/netkeiba-gate-do";
 import type { ConnectFn, SocketLike } from "./src/socket-fetch";
+import type { Env } from "./src/handler";
+import { runCloudAnalysis } from "./src/pipeline";
 import worker from "./src/worker";
 
 /** 偽ソケットの印(本番のバンドルに入っていないことの検査に使う)。メインモジュールの export は Worker・DO のクラスだけにできるので、export しない。 */
@@ -84,4 +101,93 @@ export class NetkeibaGate extends RealGate {
   }
 }
 
-export default worker;
+/**
+ * Issue #176: runAnalysis(クラウド版の入口 runCloudAnalysis)を、workerd と nodejs_compat の実環境で、フィクスチャ(中央16頭 202603020211・
+ * 全券種の組合せオッズ・LLM なし)から最後まで走らせる。結果(AnalysisResult)と保存レコード(AnalysisRecord)の SHA-256 を返す。
+ * smoke.ts が、exe 側の golden(`packages/app/test/golden/pipeline-golden.json` の noLlmAllBets。変更前のコミットで生成)の
+ * 同じ SHA-256 と照合する(Node で走る cloud の単体テストに加えて、workerd でも同じ出力になることの確認)。
+ * **この経路は smoke 専用で、本番のエントリ(worker.ts)には無い**(認証の関門の前に置いている。netkeiba にも Anthropic にも出ない)。
+ */
+const RESULTS_BY_HORSE: Record<string, unknown> = {
+  "2023103386": results2023103386,
+  "2023105684": results2021105857,
+  "2023104885": results2021105727,
+  "2023101569": results2024104976,
+};
+
+function fixtureText(url: string): string {
+  if (url.includes("shutuba.html")) return centralHtml;
+  if (url.includes("ajax_horse_results")) {
+    const horseId = /[?&]id=([^&]+)/.exec(url)?.[1] ?? "";
+    return JSON.stringify(RESULTS_BY_HORSE[horseId] ?? results2021105857);
+  }
+  if (url.includes("oikiri.html")) return oikiriHtml;
+  if (url.includes("type=5")) return JSON.stringify(oddsWideJson);
+  if (url.includes("type=7")) return JSON.stringify(oddsTrioJson);
+  if (url.includes("type=4")) return JSON.stringify(oddsQuinellaJson);
+  if (url.includes("type=6")) return JSON.stringify(oddsExactaJson);
+  if (url.includes("type=8")) return JSON.stringify(oddsTrifectaJson);
+  if (url.includes("type=3")) return JSON.stringify(oddsWakurenJson);
+  if (url.includes("api_get_jra_odds")) return JSON.stringify(oddsJson);
+  throw new Error(`未知のURL: ${url}`);
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function smokeAnalysis(): Promise<Response> {
+  const fixedNow = (): Date => new Date("2026-06-28T12:00:00.000Z");
+  const raceId = parseRaceId("202603020211");
+  const race = await scrapeRace(
+    raceId,
+    { fetcher: { fetchText: async (url) => fixtureText(url) }, now: fixedNow },
+    { includeComboOdds: true },
+  );
+  const saved: AnalysisRecord[] = [];
+  const result = await runCloudAnalysis(raceId, parseKaisaiDate("20260628"), {
+    scrape: async () => race,
+    analyze: null,
+    saveAnalysis: async (record) => {
+      saved.push(record);
+      return { id: saved.length, detail: "stored" };
+    },
+    allocationSettings: {
+      bankroll: 1_000_000,
+      perRaceCap: 100_000,
+      kellyFraction: 0.5,
+      includeComboOdds: true,
+      includeWideInAllocation: true,
+      includeTrioInAllocation: true,
+      includeQuinellaInAllocation: true,
+      includeExactaInAllocation: true,
+      includeTrifectaInAllocation: true,
+      includeBracketQuinellaInAllocation: true,
+    },
+    llmSkipReason: "golden: LLM なし",
+    now: fixedNow,
+  });
+  const record = saved[0];
+  return Response.json({
+    ok: true,
+    saved: saved.length,
+    rows: result.rows.length,
+    bets: record?.allocation?.bets.length ?? 0,
+    resultSha256: await sha256Hex(JSON.stringify(result)),
+    recordSha256: await sha256Hex(JSON.stringify(record)),
+  });
+}
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    if (new URL(request.url).pathname === "/smoke/analysis") {
+      try {
+        return await smokeAnalysis();
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
+    return worker.fetch(request, env, ctx);
+  },
+} satisfies ExportedHandler<Env>;

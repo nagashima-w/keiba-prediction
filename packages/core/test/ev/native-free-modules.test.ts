@@ -65,8 +65,14 @@ function resolveRelative(fromFile: string, specifier: string): string | null {
   return null;
 }
 
-/** 起点から、値の相対 import の閉包を辿る(`import type` は辿らない)。native を持つファイルを返す。 */
-export function closureOf(entry: string): { visited: string[]; offenders: string[] } {
+/**
+ * 起点から、値の相対 import の閉包を辿る(既定では `import type` は辿らない)。native を持つファイルを返す。
+ * `followTypes: true` のときは型だけの import(`import type`・`export type`)も辿る(型検査が better-sqlite3 の型を解決しに行く経路まで検査する)。
+ */
+export function closureOf(
+  entry: string,
+  options: { readonly followTypes?: boolean } = {},
+): { visited: string[]; offenders: string[] } {
   const visited: string[] = [];
   const offenders: string[] = [];
   const queue = [entry];
@@ -81,7 +87,7 @@ export function closureOf(entry: string): { visited: string[]; offenders: string
       offenders.push(path.relative(SRC, file));
     }
     for (const ref of importRefs(source)) {
-      if (ref.typeOnly) {
+      if (ref.typeOnly && options.followTypes !== true) {
         continue;
       }
       const resolved = resolveRelative(file, ref.specifier);
@@ -159,5 +165,42 @@ describe("切り出した新モジュールは better-sqlite3 に依存しない
       expect(names, relative).not.toContain(path.join("scraper", "cache.ts"));
       expect(names, relative).not.toContain(path.join("ev", "analysis-store.ts"));
     }
+  });
+});
+
+/**
+ * Issue #176(#164-a): runAnalysis をクラウドに載せるための狭い入口 `@keiba/core/pipeline`(`src/pipeline.ts`)。
+ * バレル(index.ts)は cache.ts・analysis-store.ts を巻き込む。この入口は、**型だけの import も含めて**
+ * better-sqlite3 に依存するモジュールを経由しない(cloud の型検査は CI で packages/core/node_modules が無く、型でも
+ * better-sqlite3 を解決しに行くと失敗するため)。
+ */
+describe("狭い入口 @keiba/core/pipeline(Issue #176)", () => {
+  const entry = path.join(SRC, "pipeline.ts");
+
+  it("src/pipeline.ts が実在し、閉包(型だけの import も辿る)に better-sqlite3 が無い。バレル・cache.ts・analysis-store.ts も経由しない", () => {
+    expect(existsSync(entry), "src/pipeline.ts が存在する").toBe(true);
+    const { visited, offenders } = closureOf(entry, { followTypes: true });
+    expect(visited.length).toBeGreaterThan(10); // 前提: 閉包を実際に辿れている(空振りでない)
+    expect(offenders).toEqual([]);
+    const names = visited.map((f) => path.relative(SRC, f));
+    for (const forbidden of ["index.ts", path.join("scraper", "cache.ts"), path.join("ev", "analysis-store.ts")]) {
+      expect(names, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("package.json の exports に ./pipeline があり、src/pipeline.ts を指す", () => {
+    const pkg = JSON.parse(readFileSync(path.join(SRC, "..", "package.json"), "utf-8")) as {
+      exports: Record<string, string>;
+    };
+    expect(pkg.exports["./pipeline"]).toBe("./src/pipeline.ts");
+  });
+
+  it("対照: 型だけの import を辿る設定では、バレル(index.ts)・analysis-store.ts を経由する入口で better-sqlite3 が現れる(followTypes が実物で効く)", () => {
+    expect(closureOf(path.join(SRC, "index.ts"), { followTypes: true }).offenders.length).toBeGreaterThan(0);
+    // `import type` だけで analysis-store.ts を指す verify.ts は、既定では NG にならないが、followTypes では NG になる
+    expect(closureOf(path.join(SRC, "ev", "verify.ts")).offenders).toEqual([]);
+    expect(closureOf(path.join(SRC, "ev", "verify.ts"), { followTypes: true }).offenders).toContain(
+      path.join("ev", "analysis-store.ts"),
+    );
   });
 });

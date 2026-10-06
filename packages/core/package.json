@@ -17,6 +17,7 @@
     "./ev/probability-quality": "./src/ev/probability-quality.ts",
     "./scorer/snapshot-filter": "./src/scorer/snapshot-filter.ts",
     "./analyzer/build-prompt": "./src/analyzer/build-prompt.ts",
+    "./pipeline": "./src/pipeline.ts",
     "./scraper/validate-period-input": "./src/scraper/validate-period-input.ts"
   },
   "scripts": {

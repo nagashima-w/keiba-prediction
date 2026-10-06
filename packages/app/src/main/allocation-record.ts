@@ -112,7 +112,7 @@ import type {
   AnalysisAllocationMetaRecord,
   AnalysisAllocationRecord,
   AnalysisBetRecord,
-} from "@keiba/core";
+} from "@keiba/core/pipeline";
 
 import type { OddsStatus } from "../shared/analysis-types.js";
 import type {

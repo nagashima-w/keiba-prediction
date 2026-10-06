@@ -15,6 +15,8 @@ export default defineConfig({
       undici: here("./src/undici-stub.ts"),
       "iconv-lite": here("./node_modules/iconv-lite"),
       cheerio: here("./node_modules/cheerio"),
+      // Issue #176: runAnalysis(app)が import する core のサブパス(@keiba/core/pipeline ほか)。tsconfig の paths・wrangler.toml の [alias] と同じ対応。
+      "@keiba/core": here("../packages/core/src"),
     },
   },
   test: {
