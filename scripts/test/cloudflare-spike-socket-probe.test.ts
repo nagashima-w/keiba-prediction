@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { buildHttp1Request } from "../cloudflare-spike/http1.js";
 import { judgeReachability } from "../cloudflare-spike/reachability.js";
@@ -10,7 +12,9 @@ import {
   createSocketFetch,
   SOCKET_MAX_BYTES,
   SOCKET_TIMEOUT_MS,
+  SOCKET_MAX_DECODED_BYTES,
   type ConnectFn,
+  type SocketFetchMeta,
   type SocketLike,
 } from "../../spikes/cloudflare/src/socket-probe.js";
 
@@ -416,5 +420,185 @@ describe("probeNetkeiba に差し込んだときの記録(既存の記録の形�
     expect(rec.status).toBeNull();
     expect(rec.error).toMatch(/サイズ上限/);
     expect(judgeReachability(rec).verdict).toBe("network-error");
+  });
+});
+
+/**
+ * #162 段階1: `accept-encoding: gzip` の opt-in(gzip の展開)と、計測用のメタ情報(onMeta)。
+ * 既定(opt-in しない)の挙動は、上の既存テストが固定している(Accept-Encoding を送らない・圧縮されたら例外)。
+ */
+const gz = (data: Uint8Array | string): Uint8Array => new Uint8Array(gzipSync(typeof data === "string" ? Buffer.from(data, "utf-8") : Buffer.from(data)));
+const sha16 = (data: Uint8Array): string => createHash("sha256").update(data).digest("hex").slice(0, 16);
+
+describe("createSocketFetch: gzip の opt-in(#162)", () => {
+  it('acceptEncoding: "gzip" を指定すると、組み立てたリクエストに Accept-Encoding: gzip が入る(Connection: close の前)', async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Length: 2", bytes("ok"))] }));
+    await createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" })(URL_RACE, {});
+    const text = writtenText(c.sockets[0]!.state);
+    expect(text).toBe(
+      buildHttp1Request({ host: "race.netkeiba.com", path: "/race/shutuba.html?race_id=202603020211", headers: HEADERS, acceptEncoding: "gzip" }),
+    );
+    expect(text.indexOf("Accept-Encoding: gzip")).toBeGreaterThan(text.indexOf("accept: */*"));
+    expect(text.indexOf("Accept-Encoding: gzip")).toBeLessThan(text.indexOf("Connection: close"));
+  });
+
+  it("指定しなければ、これまでどおり Accept-Encoding を送らない", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Length: 2", bytes("ok"))] }));
+    await createSocketFetch(c.connect, { headers: HEADERS })(URL_RACE, {});
+    expect(writtenText(c.sockets[0]!.state).toLowerCase()).not.toContain("accept-encoding");
+  });
+
+  it.each(["gzip", "GZIP"])("content-encoding: %s の本文(Content-Length)を展開した Response を返す。content-encoding と content-length は外す", async (value) => {
+    const body = gz("競馬 出馬表 abc");
+    const c = connector(() => ({ chunks: [response(`HTTP/1.1 200 OK\nContent-Type: text/html\nContent-Encoding: ${value}\nContent-Length: ${body.length}`, body)] }));
+    const r = await createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" })(URL_RACE, {});
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe("競馬 出馬表 abc");
+    expect(r.headers.get("content-encoding")).toBeNull();
+    expect(r.headers.get("content-length")).toBeNull();
+    expect(r.headers.get("content-type")).toBe("text/html");
+  });
+
+  it("chunked で届いた gzip 本文も、(chunk を解いてから)展開する。1バイトずつ届いても同じ", async () => {
+    const body = gz("a".repeat(3000) + "競馬");
+    const full = response("HTTP/1.1 200 OK\nContent-Encoding: gzip\nTransfer-Encoding: chunked", chunkedBody(body, 64));
+    const c = connector(() => ({ chunks: split(full, 1) }));
+    const r = await createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" })(URL_RACE, {});
+    expect(await r.text()).toBe("a".repeat(3000) + "競馬");
+  });
+
+  it("gzip を要求しても、サーバが圧縮せずに返したら(content-encoding なし)そのまま返す", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Length: 5", bytes("plain"))] }));
+    const r = await createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" })(URL_RACE, {});
+    expect(await r.text()).toBe("plain");
+  });
+
+  it("gzip を要求したのに gzip 以外の content-encoding(br など)が返ったら、展開せず未対応として例外にする", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Encoding: br\nContent-Length: 3", bytes("abc"))] }));
+    await expect(createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" })(URL_RACE, {})).rejects.toThrow(/content-encoding: br/i);
+    expect(c.sockets[0]!.state.closeCalls).toBe(1);
+  });
+
+  it("opt-in しないときは、gzip の応答を従来どおり例外にする(opt-in の追加で既定の挙動を変えていない)", async () => {
+    const body = gz("abc");
+    const c = connector(() => ({ chunks: [response(`HTTP/1.1 200 OK\nContent-Encoding: gzip\nContent-Length: ${body.length}`, body)] }));
+    await expect(createSocketFetch(c.connect, { headers: HEADERS })(URL_RACE, {})).rejects.toThrow(/content-encoding: gzip/i);
+  });
+
+  it("本文0バイトで content-encoding: gzip(拒否の応答など)は、展開を試みず空の本文のまま返す", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 400 Bad Request\nContent-Encoding: gzip\nContent-Length: 0")] }));
+    const r = await createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" })(URL_RACE, {});
+    expect(r.status).toBe(400);
+    expect((await r.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  it("展開後のサイズが上限を超えたら例外にし、ソケットを閉じる。上限の既定は 4 MiB", async () => {
+    expect(SOCKET_MAX_DECODED_BYTES).toBe(4 * 1024 * 1024);
+    const bomb = gz(new Uint8Array(200_000).fill(65));
+    // 受信上限(maxBytes)には収まり、展開後だけが上限を超える入力であることを固定する。
+    expect(bomb.length).toBeLessThan(5000);
+    const c = connector(() => ({ chunks: [response(`HTTP/1.1 200 OK\nContent-Encoding: gzip\nContent-Length: ${bomb.length}`, bomb)] }));
+    const f = createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip", maxDecodedBytes: 1000 });
+    await expect(f(URL_RACE, {})).rejects.toThrow(/展開後.*上限.*1000/);
+    expect(c.sockets[0]!.state.closeCalls).toBe(1);
+  });
+
+  it("壊れた gzip は、理由つきの例外にする(判定不能。拒否とは数えない)", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Encoding: gzip\nContent-Length: 4", bytes("nope"))] }));
+    await expect(createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" })(URL_RACE, {})).rejects.toThrow(/gzip として展開できません/);
+  });
+
+  it("probeNetkeiba に差し込むと、出馬表(gzip)は展開後の本文でパースされ、bodyLength は展開後のバイト数になる", async () => {
+    const html = new Uint8Array(readFixture("shutuba_202603020211.html"));
+    const body = gz(html);
+    expect(body.length).toBeLessThan(html.length);
+    const c = connector(() => ({ chunks: split(response(`HTTP/1.1 200 OK\nContent-Type: text/html; charset=UTF-8\nContent-Encoding: gzip\nContent-Length: ${body.length}`, body), 4096) }));
+    const rec = await probeNetkeiba(
+      { targetId: "central-shutuba", url: URL_RACE, kind: "shutuba", encoding: "utf-8" },
+      createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip" }),
+    );
+    expect(rec.status).toBe(200);
+    expect(rec.bodyLength).toBe(html.length);
+    expect(rec.parsedCount).toBe(16);
+    expect(rec.replacementChars).toBe(0);
+    expect(judgeReachability(rec).verdict).toBe("ok");
+  });
+});
+
+describe("createSocketFetch: 計測用のメタ情報 onMeta(#162)", () => {
+  /** 呼ぶたびに 10 ずつ進む時計(最初の呼び出しは 0)。 */
+  const makeClock = (): (() => number) => {
+    let t = -10;
+    return () => (t += 10);
+  };
+
+  it("時計は、開始・opened・最初のバイト・終了の4点で1回ずつ読み、開いた・最初のバイト・全体の ms にする", async () => {
+    const metas: SocketFetchMeta[] = [];
+    const c = connector(() => ({ chunks: split(response("HTTP/1.1 200 OK\nContent-Length: 6", bytes("abcdef")), 5) }));
+    await createSocketFetch(c.connect, { headers: HEADERS, now: makeClock(), onMeta: (m) => metas.push(m) })(URL_RACE, {});
+    expect(metas).toHaveLength(1);
+    expect(metas[0]!.openedMs).toBe(10);
+    expect(metas[0]!.firstByteMs).toBe(20);
+    expect(metas[0]!.totalMs).toBe(30);
+  });
+
+  it("identity の応答: 受信バイト数(ヘッダ込み)・本文のバイト数・展開後のバイト数・方式・本文のハッシュを残す", async () => {
+    const metas: SocketFetchMeta[] = [];
+    const body = bytes("競馬 abc");
+    const raw = response(`HTTP/1.1 200 OK\nContent-Length: ${body.length}`, body);
+    const c = connector(() => ({ chunks: [raw] }));
+    await createSocketFetch(c.connect, { headers: HEADERS, onMeta: (m) => metas.push(m) })(URL_RACE, {});
+    expect(metas[0]).toMatchObject({
+      status: 200,
+      framing: "content-length",
+      contentEncoding: null,
+      receivedBytes: raw.length,
+      wireBodyBytes: body.length,
+      decodedBytes: body.length,
+      bodySha256: sha16(body),
+    });
+    // 受信全体はヘッダの分だけ本文より大きい(両者を取り違えていないことの固定)。
+    expect(metas[0]!.receivedBytes).toBeGreaterThan(metas[0]!.wireBodyBytes);
+  });
+
+  it("gzip の応答: 本文のバイト数は圧縮後、展開後のバイト数と本文のハッシュは展開後。chunked の枠(サイズ行)は本文に数えない", async () => {
+    const metas: SocketFetchMeta[] = [];
+    const plain = bytes("a".repeat(5000) + "競馬");
+    const body = gz(plain);
+    const raw = response("HTTP/1.1 200 OK\nContent-Encoding: gzip\nTransfer-Encoding: chunked", chunkedBody(body, 100));
+    const c = connector(() => ({ chunks: split(raw, 700) }));
+    await createSocketFetch(c.connect, { headers: HEADERS, acceptEncoding: "gzip", onMeta: (m) => metas.push(m) })(URL_RACE, {});
+    expect(metas[0]).toMatchObject({
+      framing: "chunked",
+      contentEncoding: "gzip",
+      receivedBytes: raw.length,
+      wireBodyBytes: body.length,
+      decodedBytes: plain.length,
+      bodySha256: sha16(plain),
+    });
+    // 圧縮が効いていて(展開後のほうが大きい)、chunked の枠の分だけ受信全体が圧縮後の本文より大きい。
+    expect(metas[0]!.decodedBytes).toBeGreaterThan(metas[0]!.wireBodyBytes);
+    expect(metas[0]!.receivedBytes).toBeGreaterThan(metas[0]!.wireBodyBytes);
+  });
+
+  it("拒否の応答(本文0バイトの 400)でもメタ情報は出る(ステータスと本文0バイトを残す)", async () => {
+    const metas: SocketFetchMeta[] = [];
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 400 Bad Request\nContent-Length: 0")] }));
+    await createSocketFetch(c.connect, { headers: HEADERS, onMeta: (m) => metas.push(m) })(URL_RACE, {});
+    expect(metas[0]).toMatchObject({ status: 400, wireBodyBytes: 0, decodedBytes: 0, bodySha256: sha16(new Uint8Array(0)) });
+  });
+
+  it("失敗(途中で切断・サイズ超過)ではメタ情報を出さない(部分的な数値を成功の記録に混ぜない)", async () => {
+    const metas: SocketFetchMeta[] = [];
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Length: 10", bytes("abc"))] }));
+    await expect(createSocketFetch(c.connect, { headers: HEADERS, onMeta: (m) => metas.push(m) })(URL_RACE, {})).rejects.toThrow();
+    expect(metas).toHaveLength(0);
+  });
+
+  it("何も受信しないまま EOF のときは、最初のバイトまでの ms は null(例外になるのでメタは出ない)", async () => {
+    const metas: SocketFetchMeta[] = [];
+    const c = connector(() => ({ chunks: [] }));
+    await expect(createSocketFetch(c.connect, { headers: HEADERS, onMeta: (m) => metas.push(m) })(URL_RACE, {})).rejects.toThrow();
+    expect(metas).toHaveLength(0);
   });
 });

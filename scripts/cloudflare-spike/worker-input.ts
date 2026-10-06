@@ -41,9 +41,11 @@ export interface SocketRequest {
   readonly kind: TargetKind;
   readonly encoding: "utf-8" | "euc-jp";
   readonly headers: readonly HeaderEntry[];
+  /** `Accept-Encoding: gzip` を送る opt-in(#162)。省略時は送らない(このプロパティ自体を持たない)。 */
+  readonly acceptEncoding?: "gzip";
 }
 
-/** `/netkeiba-socket` の入力: `{targetId, url, kind, encoding, headers}`。 */
+/** `/netkeiba-socket` の入力: `{targetId, url, kind, encoding, headers, acceptEncoding?}`。 */
 export function validateSocketRequest(body: unknown): ValidationResult<SocketRequest> {
   if (!isRecord(body)) {
     return { ok: false, error: "本文が JSON のオブジェクトではありません" };
@@ -51,6 +53,10 @@ export function validateSocketRequest(body: unknown): ValidationResult<SocketReq
   const { targetId, url, kind, encoding, headers } = body;
   if (typeof targetId !== "string" || typeof url !== "string") {
     return { ok: false, error: "targetId と url は文字列である必要があります" };
+  }
+  // acceptEncoding は省略(undefined)か "gzip" だけ。null・identity・br などは、意図が読めないので拒否する。
+  if ("acceptEncoding" in body && body["acceptEncoding"] !== undefined && body["acceptEncoding"] !== "gzip") {
+    return { ok: false, error: 'acceptEncoding は省略するか "gzip" だけです' };
   }
   if (!isAllowedUrl(url)) {
     return { ok: false, error: "許可されていない URL です(https の race / db / nar の netkeiba.com だけ)" };
@@ -85,5 +91,15 @@ export function validateSocketRequest(body: unknown): ValidationResult<SocketReq
     }
     entries.push({ name, value });
   }
-  return { ok: true, value: { targetId, url, kind: kind as TargetKind, encoding, headers: entries } };
+  return {
+    ok: true,
+    value: {
+      targetId,
+      url,
+      kind: kind as TargetKind,
+      encoding,
+      headers: entries,
+      ...(body["acceptEncoding"] === "gzip" ? { acceptEncoding: "gzip" as const } : {}),
+    },
+  };
 }

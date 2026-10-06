@@ -17,10 +17,27 @@ import {
   shutubaUrl,
 } from "../../packages/core/src/scraper/urls.js";
 
-export type TargetKind = "shutuba" | "odds-json" | "horse-page" | "horse-results";
+/**
+ * 取得対象の種類(どのパーサで読むか)。`combo-trio-json`(三連複のオッズ JSON)と `nar-odds-page`(地方の単勝・
+ * 複勝オッズのページ)は、#162 段階1(socket-matrix)で足した。
+ */
+export type TargetKind =
+  | "shutuba"
+  | "odds-json"
+  | "horse-page"
+  | "horse-results"
+  | "combo-trio-json"
+  | "nar-odds-page";
 
 /** 取得対象の種類の一覧(Worker の入力検査が使う)。 */
-export const TARGET_KINDS: readonly TargetKind[] = ["shutuba", "odds-json", "horse-page", "horse-results"];
+export const TARGET_KINDS: readonly TargetKind[] = [
+  "shutuba",
+  "odds-json",
+  "horse-page",
+  "horse-results",
+  "combo-trio-json",
+  "nar-odds-page",
+];
 
 export interface NetkeibaTarget {
   readonly id: string;

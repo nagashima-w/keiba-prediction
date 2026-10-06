@@ -14,6 +14,8 @@ import {
 } from "./cpu-search.js";
 import { renderOriginMarkdown } from "./origin-report.js";
 import type { OriginResult } from "./origin-run.js";
+import { renderSocketMatrixMarkdown } from "./socket-matrix-report.js";
+import type { SocketMatrixResult } from "./socket-matrix-run.js";
 import {
   compareSources,
   judgeReachability,
@@ -103,6 +105,8 @@ export interface SpikeResult {
   experiments?: string[];
   /** 400 の原因の切り分け(Issue #160〈#21-B〉)の結果。選ばなかった実行・#159 の結果には無い。 */
   origin?: OriginResult;
+  /** DO の中のソケットでの取得(Issue #162 段階1)の結果。選ばなかった実行・過去の結果には無い。 */
+  socketMatrix?: SocketMatrixResult;
 }
 
 /** 測る処理の一覧(表示順)。 */
@@ -292,6 +296,10 @@ export function renderMarkdown(result: SpikeResult): string {
 
   if (result.origin !== undefined) {
     out.push(...renderOriginMarkdown(result.origin));
+  }
+
+  if (result.socketMatrix !== undefined) {
+    out.push(...renderSocketMatrixMarkdown(result.socketMatrix));
   }
 
   out.push("## EUC-JP のデコード(Worker 内の往復)");

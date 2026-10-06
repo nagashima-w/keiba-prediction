@@ -2,15 +2,19 @@
  * 実測のドライバ(Issue #159〈#21-A〉)。GitHub Actions 上で、デプロイ済みの Worker を呼んで測り、
  * 結果 JSON を書き出す。判定の核は `scripts/cloudflare-spike/` の純ロジック(単体テスト済み)。
  *
- * 環境変数: SPIKE_EXPERIMENTS(選ぶ実験。必須。origin / reachability / cpu のカンマ区切り)/
+ * 環境変数: SPIKE_EXPERIMENTS(選ぶ実験。必須。origin / reachability / socket-matrix / cpu のカンマ区切り)/
  * SPIKE_URL(Worker のベース URL)/ SPIKE_SECRET(共有秘密)/ RUN_ID / RESULT_PATH。
- * 未設定・空・未知のトークンはエラー(誤って全実験を走らせない)。reachability と origin は同時に選べない
- * (netkeiba への合計 10 本以内の守り)。
+ * 未設定・空・未知のトークンはエラー(誤って全実験を走らせない)。netkeiba へ出る実験(reachability・origin・
+ * socket-matrix)は、どの2つも同時に選べない(netkeiba への合計 10 本以内の守り)。
  *
  * 測るもの(Issue #160 で、実験を選べるようにした):
  *  0. origin(#160): Workers からだけ HTTP 400 になる原因の切り分け。E0 基準の再確認 / E1 ヘッダの観測(エコー。
  *     netkeiba へは出ない)/ E2 ランナー + Workers 風のヘッダ / E3 Worker の TCP ソケット。netkeiba へ 6 本。
  *     判定の核は `scripts/cloudflare-spike/origin-*.ts`(単体テスト済み)。
+ *  0'. socket-matrix(#162 段階1): DO の中のソケットでの取得。取得先の網羅・`Accept-Encoding: gzip`・再現性を、netkeiba へ 9 本
+ *     (2 秒間隔・2 回連続の 400/403/429 で全体を打ち切り)。送るヘッダは #160 E3 と同じ集合(`STATIC_SOCKET_HEADERS`)で、
+ *     gzip は計画の最後の2本にだけ付ける。このほかに netkeiba へ出ない、Worker から DO を繰り返し呼ぶ試験
+ *     (subrequest の数え方)を行う。判定・進行の核は `scripts/cloudflare-spike/socket-matrix-*.ts`(単体テスト済み)。
  *  以下の 1〜3 のうち、1 は reachability、3 は cpu を選んだときだけ行う(2 は常に行う):
  *  1. 到達性: netkeiba へ、Worker とランナー(この Node。対照実験)から同じ5対象を1本ずつ。合計10本以内・
  *     2秒間隔(送信元をまたいで直列)。400/403/429 の2回連続の打ち切りは送信元ごと(Worker が止まっても
@@ -29,13 +33,15 @@ import {
   searchLimit,
   type ProbeOutcome,
 } from "../../scripts/cloudflare-spike/cpu-search.js";
-import type { EchoFetchResult } from "../../scripts/cloudflare-spike/echo.js";
+import { STATIC_SOCKET_HEADERS, type EchoFetchResult } from "../../scripts/cloudflare-spike/echo.js";
 import type { EchoService } from "../../scripts/cloudflare-spike/echo-targets.js";
 import { parseExperiments } from "../../scripts/cloudflare-spike/experiments.js";
 import type { HeaderEntry } from "../../scripts/cloudflare-spike/http1.js";
 import type { OriginPlace, OriginStep } from "../../scripts/cloudflare-spike/origin-plan.js";
 import { runOrigin } from "../../scripts/cloudflare-spike/origin-run.js";
 import { runReachability } from "../../scripts/cloudflare-spike/reachability-run.js";
+import { runSocketMatrix, type MatrixSendOutcome, type SubrequestProbeResult } from "../../scripts/cloudflare-spike/socket-matrix-run.js";
+import type { MatrixStep } from "../../scripts/cloudflare-spike/socket-matrix-plan.js";
 import type { NetkeibaProbeRecord, ProbeSource } from "../../scripts/cloudflare-spike/reachability.js";
 import {
   CPU_WORKS,
@@ -275,6 +281,78 @@ async function measureOrigin(result: SpikeResult): Promise<void> {
   );
 }
 
+/** Worker の `/do/netkeiba-socket`(DO の中のソケット)に、計画の1本を取得させる。想定外の応答は例外にする(runner が記録にする)。 */
+async function sendViaDoSocket(step: MatrixStep): Promise<MatrixSendOutcome> {
+  const r = await call("POST", "/do/netkeiba-socket", {
+    targetId: step.target.id,
+    url: step.target.url,
+    kind: step.target.kind,
+    encoding: step.target.encoding,
+    // E3 と同じヘッダ集合。gzip の opt-in は、計画のステップの方式から決める(ここでは付け足さない)。
+    headers: STATIC_SOCKET_HEADERS.map((h) => ({ name: h.name, value: h.value })),
+    ...(step.variant === "gzip" ? { acceptEncoding: "gzip" } : {}),
+  });
+  const parsed = ((): Partial<MatrixSendOutcome> & { ok?: boolean } => {
+    try {
+      return JSON.parse(r.text) as Partial<MatrixSendOutcome> & { ok?: boolean };
+    } catch {
+      return {};
+    }
+  })();
+  if (r.status === 200 && parsed.ok === true && parsed.record !== undefined) {
+    return { record: parsed.record, meta: parsed.meta ?? null, instance: parsed.instance ?? null };
+  }
+  throw new Error(`Worker の /do/netkeiba-socket の応答が想定外です(HTTP ${r.status}): ${r.text.slice(0, 200)}`);
+}
+
+/** Worker に、DO を繰り返し呼ぶ試験(netkeiba へは出ない)をさせる。 */
+async function subrequestProbeViaWorker(count: number): Promise<SubrequestProbeResult> {
+  const r = await call("POST", `/subrequest-probe?n=${count}`);
+  try {
+    const parsed = JSON.parse(r.text) as { ok?: boolean; result?: SubrequestProbeResult };
+    if (r.status === 200 && parsed.ok === true && parsed.result !== undefined) {
+      return parsed.result;
+    }
+  } catch {
+    // 下で、想定外の応答として扱う。
+  }
+  // Worker 自体が失敗した(CPU 超過など)。本文の先頭を理由に残す(マスクは runSocketMatrix が行う)。
+  return { ran: false, requested: count, attempted: null, succeeded: null, firstFailureAt: null, errorKind: null, error: `HTTP ${r.status}: ${r.text.slice(0, 200)}`, httpStatus: r.status };
+}
+
+/**
+ * Issue #162 段階1: DO の中のソケットでの取得(socket-matrix)。進行・守り・マスク・要約・読みは `runSocketMatrix`
+ * (単体テスト済みの純ロジック)が担い、ここは実際の送信(Worker の呼び出し)を注入する。
+ * **ここからログに出すのは件数だけ**(IP・サブドメインなどの生の値は、結果にもログにも出さない)。
+ */
+async function measureSocketMatrix(result: SpikeResult): Promise<void> {
+  const matrix = await runSocketMatrix(
+    {
+      now: () => Date.now(),
+      sleep,
+      send: sendViaDoSocket,
+      subrequestProbe: subrequestProbeViaWorker,
+      mask: {
+        ...(process.env["CF_SUBDOMAIN"] !== undefined ? { subdomain: process.env["CF_SUBDOMAIN"] } : {}),
+        ...(process.env["SPIKE_WORKER_NAME"] !== undefined ? { workerName: process.env["SPIKE_WORKER_NAME"] } : {}),
+      },
+    },
+    {
+      onUpdate: (m) => {
+        result.socketMatrix = m;
+        save(result);
+      },
+    },
+  );
+  result.socketMatrix = matrix;
+  save(result);
+  console.log(
+    `socket-matrix: netkeiba=${matrix.netkeibaRequestCount}本/${matrix.plannedCount}本 打ち切り=${matrix.stoppedReason ?? "なし"} ` +
+      `ok=${matrix.summary.coverage.filter((c) => c.verdict === "ok").length}/${matrix.summary.coverage.length} ` +
+      `DO呼び出し試験=${matrix.subrequestProbe === null ? "なし" : matrix.subrequestProbe.ran ? `失敗${matrix.subrequestProbe.firstFailureAt ?? "なし"}` : "実行できず"}`,
+  );
+}
+
 async function measureSelftest(result: SpikeResult): Promise<void> {
   const r = await call("GET", "/selftest/euc-jp");
   try {
@@ -398,6 +476,13 @@ async function main(): Promise<void> {
         result.notes.push("SPIKE_LOCAL_DRYRUN=1: 400 の原因の切り分け(origin)を行っていない(netkeiba・エコーへは出ない。ローカルの配線確認)");
       } else {
         await measureOrigin(result);
+      }
+    }
+    if (experiments.includes("socket-matrix")) {
+      if (LOCAL_DRYRUN) {
+        result.notes.push("SPIKE_LOCAL_DRYRUN=1: DO の中のソケットでの取得(socket-matrix)を行っていない(netkeiba へは出ない。ローカルの配線確認)");
+      } else {
+        await measureSocketMatrix(result);
       }
     }
     if (experiments.includes("cpu")) {

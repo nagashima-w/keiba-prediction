@@ -156,3 +156,47 @@ describe("validateSocketRequest(/netkeiba-socket)", () => {
     expect(validateSocketRequest(body).ok).toBe(false);
   });
 });
+
+/**
+ * #162 段階1: `acceptEncoding`(gzip の opt-in)と、新しい取得対象の種類(三連複の JSON・地方オッズのページ)。
+ * `headers` から Accept-Encoding を足す経路は、これまでどおり禁止のまま(上のテストが固定している)。
+ */
+describe("validateSocketRequest: acceptEncoding(#162)", () => {
+  it("省略すると、結果にも acceptEncoding は入らない(従来の入力はそのまま通る)", () => {
+    const r = validateSocketRequest(validSocketBody());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.acceptEncoding).toBeUndefined();
+      expect("acceptEncoding" in r.value).toBe(false);
+    }
+  });
+
+  it('"gzip" は通り、結果に入る', () => {
+    const r = validateSocketRequest(validSocketBody({ acceptEncoding: "gzip" }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.acceptEncoding).toBe("gzip");
+    }
+  });
+
+  it.each([["identity"], ["br"], ["gzip, br"], ["GZIP"], [""], [null], [1], [true], [["gzip"]]])("gzip 以外の値 %j は拒否する", (value) => {
+    const r = validateSocketRequest(validSocketBody({ acceptEncoding: value }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/acceptEncoding/);
+    }
+  });
+
+  it("acceptEncoding を指定しても、headers 側の Accept-Encoding は拒否する(経路は1つだけ)", () => {
+    expect(validateSocketRequest(validSocketBody({ acceptEncoding: "gzip", headers: [{ name: "Accept-Encoding", value: "gzip" }] })).ok).toBe(false);
+  });
+});
+
+describe("validateSocketRequest: 新しい取得対象の種類(#162)", () => {
+  it.each([
+    ["三連複の JSON", "combo-trio-json", "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=7&action=init"],
+    ["地方のオッズページ", "nar-odds-page", "https://nar.netkeiba.com/odds/index.html?type=b1&race_id=202654071210"],
+  ])("%s(kind=%s)は通る", (_name, kind, url) => {
+    expect(validateSocketRequest(validSocketBody({ kind, url })).ok).toBe(true);
+  });
+});

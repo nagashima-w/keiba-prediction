@@ -18,6 +18,8 @@ import { HttpClient, type FetchLike } from "../../../packages/core/src/scraper/h
 import { parseHorseId } from "../../../packages/core/src/scraper/ids.js";
 import { parseHorseProfile } from "../../../packages/core/src/scraper/parse-horse-profile.js";
 import { parseHorseResults } from "../../../packages/core/src/scraper/parse-horse-results.js";
+import { parseComboOdds } from "../../../packages/core/src/scraper/parse-combo-odds.js";
+import { parseNarOdds } from "../../../packages/core/src/scraper/parse-nar-odds.js";
 import { parseOdds } from "../../../packages/core/src/scraper/parse-odds.js";
 import { parseShutuba } from "../../../packages/core/src/scraper/parse-shutuba.js";
 import type { NetkeibaProbeRecord } from "../../../scripts/cloudflare-spike/reachability.js";
@@ -82,6 +84,13 @@ function parseCount(kind: TargetKind, url: string, text: string): number {
       return Object.keys(parseOdds(text).win).length;
     case "horse-results":
       return parseHorseResults(text).length;
+    case "combo-trio-json": {
+      // 発売なし(unavailable)は 0 件(到達したがパーサで読めなかった扱い。拒否とは区別される)。
+      const parsed = parseComboOdds(text, "trio");
+      return parsed.state === "available" ? parsed.odds.size : 0;
+    }
+    case "nar-odds-page":
+      return Object.keys(parseNarOdds(text).win).length;
     case "horse-page": {
       const match = /\/horse\/(\d+)\//.exec(url);
       const horseId = parseHorseId(match?.[1] ?? "");

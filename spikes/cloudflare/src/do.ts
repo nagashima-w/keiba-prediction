@@ -6,12 +6,28 @@
  * 動かして比べる(本スパイクの最重要の問い)。`limits.cpu_ms` は設定せず、既定の上限を測る。
  */
 
+import { connect } from "cloudflare:sockets";
 import { DurableObject } from "cloudflare:workers";
+import { handleNetkeibaSocket } from "./origin-handlers.js";
 import { handleCpu, json } from "./router.js";
 
 export class SpikeDO extends DurableObject {
+  /** このインスタンスの識別子(コンストラクタで作る乱数)。同じインスタンスで再取得したかを事実として残すため。 */
+  private readonly instanceId = crypto.randomUUID();
+  /** このインスタンスが受けた `/do/netkeiba-socket` の呼び出し回数。 */
+  private socketCalls = 0;
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/do/noop") {
+      // Worker から DO を繰り返し呼ぶ試験(subrequest の数え方。netkeiba へは出ない)用の、何もしない応答。
+      return new Response("ok");
+    }
+    if (url.pathname === "/do/netkeiba-socket" && request.method === "POST") {
+      // Issue #162 段階1: DO の中から、ソケットで netkeiba を1本取得する(入力検査は handleNetkeibaSocket が行う)。
+      this.socketCalls += 1;
+      return handleNetkeibaSocket(request, connect, { id: this.instanceId, call: this.socketCalls });
+    }
     if (url.pathname === "/do/ping") {
       // SQLite バックエンドで動いていることの確認(ctx.storage.sql が使える)。
       // sqlite_version() 等の関数は DO の SQLite では許可されていない(スモークテストで判明)。

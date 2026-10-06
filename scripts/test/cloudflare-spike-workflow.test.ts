@@ -201,25 +201,30 @@ describe("ジョブログに workers.dev のサブドメインを出さない(�
 });
 
 describe("実験の選択(#160。SPIKE_EXPERIMENTS)", () => {
-  it("workflow_dispatch に experiments の入力があり、既定は origin(文字列)", () => {
+  it("workflow_dispatch に experiments の入力があり、既定は socket-matrix(文字列。#162 で origin から変更)", () => {
     const m = /\n  workflow_dispatch:\n    inputs:\n      experiments:\n((?:        .+\n)+)/.exec(yml);
     expect(m).not.toBeNull();
     const block = m![1]!;
-    expect(block).toMatch(/default: ['"]?origin['"]?\n/);
+    expect(block).toMatch(/default: ['"]?socket-matrix['"]?\n/);
+    // 入力の説明に、選べる実験の名前がそろっている(socket-matrix を含む)。
+    for (const name of ["origin", "reachability", "socket-matrix", "cpu"]) {
+      expect(block).toContain(name);
+    }
     expect(block).toMatch(/type: string/);
   });
 
-  it("『測定を実行』の env の SPIKE_EXPERIMENTS は、入力が空(push で起動したとき)でも origin になる", () => {
+  it("『測定を実行』の env の SPIKE_EXPERIMENTS は、入力が空(push で起動したとき)でも socket-matrix になる(origin の 6 本を再実行しない)", () => {
     const body = stepBody("測定を実行");
-    // push のとき `inputs` は空なので、`inputs.experiments` は null になる。`|| 'origin'` で origin に落とす。
-    expect(body).toContain("SPIKE_EXPERIMENTS: ${{ inputs.experiments || 'origin' }}");
+    // push のとき `inputs` は空なので、`inputs.experiments` は null になる。`|| 'socket-matrix'` で socket-matrix に落とす。
+    expect(body).toContain("SPIKE_EXPERIMENTS: ${{ inputs.experiments || 'socket-matrix' }}");
+    expect(body).not.toContain("|| 'origin'");
   });
 
   it("入力(inputs)は env 経由でだけ使い、run のシェルには直接展開しない(スクリプト注入の防止)", () => {
     const uses = yml.split("\n").filter((l) => l.includes("inputs.") && !l.trim().startsWith("#"));
     expect(uses.length).toBeGreaterThan(0);
     for (const line of uses) {
-      expect(line.trim()).toMatch(/^SPIKE_EXPERIMENTS: \$\{\{ inputs\.experiments \|\| 'origin' \}\}$/);
+      expect(line.trim()).toMatch(/^SPIKE_EXPERIMENTS: \$\{\{ inputs\.experiments \|\| 'socket-matrix' \}\}$/);
     }
   });
 
@@ -228,10 +233,11 @@ describe("実験の選択(#160。SPIKE_EXPERIMENTS)", () => {
     expect(src).toContain('parseExperiments(process.env["SPIKE_EXPERIMENTS"])');
   });
 
-  it("ドライバは、選んだ実験だけを実行する(reachability・origin・cpu をそれぞれ includes で分岐する)", () => {
+  it("ドライバは、選んだ実験だけを実行する(reachability・origin・socket-matrix・cpu をそれぞれ includes で分岐する)", () => {
     const src = readTextLf("spikes", "cloudflare", "driver.ts");
     expect(src).toMatch(/experiments\.includes\("reachability"\)/);
     expect(src).toMatch(/experiments\.includes\("origin"\)/);
+    expect(src).toMatch(/experiments\.includes\("socket-matrix"\)/);
     expect(src).toMatch(/experiments\.includes\("cpu"\)/);
   });
 
@@ -240,5 +246,38 @@ describe("実験の選択(#160。SPIKE_EXPERIMENTS)", () => {
     expect(stepBody("Worker を削除")).toContain("delete-run.ts");
     expect(stepBody("削除の確認")).toContain("cleanup-run.ts");
     expect(stepBody("Worker をデプロイ")).toContain("::add-mask::$SECRET");
+  });
+});
+
+describe("socket-matrix の配線(#162 段階1)", () => {
+  const driver = readTextLf("spikes", "cloudflare", "driver.ts");
+
+  it("ドライバは、DO の中のソケットの取得(/do/netkeiba-socket)と、DO を繰り返し呼ぶ試験(/subrequest-probe)を呼ぶ", () => {
+    expect(driver).toContain('"/do/netkeiba-socket"');
+    expect(driver).toContain("/subrequest-probe");
+  });
+
+  it("ローカルの配線確認(SPIKE_LOCAL_DRYRUN=1)では、netkeiba へ出る socket-matrix の送信を行わない", () => {
+    const m = /if \(experiments\.includes\("socket-matrix"\)\) \{([\s\S]*?)\n    \}\n    if \(experiments\.includes\("cpu"\)\)/.exec(driver);
+    expect(m).not.toBeNull();
+    expect(m![1]).toContain("LOCAL_DRYRUN");
+  });
+
+  it("結果は SpikeResult.socketMatrix に保存する(途中経過も保存する)", () => {
+    expect(driver).toMatch(/result\.socketMatrix = /);
+    expect(driver).toContain("onUpdate");
+  });
+
+  it("送るヘッダは #160 E3 と同じ集合(STATIC_SOCKET_HEADERS)を使う", () => {
+    expect(driver).toContain("STATIC_SOCKET_HEADERS");
+  });
+
+  it("gzip の opt-in は、計画のステップの方式(variant)から決める(ドライバが勝手に付けない)", () => {
+    expect(driver).toMatch(/step\.variant === "gzip"/);
+  });
+
+  it("公開される出力(コンソール)には、結論の件数だけを出す(IP・サブドメインなどの生の値を出さない)", () => {
+    const m = /console\.log\(\s*`socket-matrix:[^`]*`/.exec(driver);
+    expect(m).not.toBeNull();
   });
 });

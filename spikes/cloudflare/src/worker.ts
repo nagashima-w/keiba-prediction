@@ -12,6 +12,7 @@ import { HttpClient } from "../../../packages/core/src/scraper/http-client.js";
 import { isAuthorized } from "../../../scripts/cloudflare-spike/auth.js";
 import { handleEcho, handleNetkeibaSocket } from "./origin-handlers.js";
 import { handleCpu, handleNetkeiba, json } from "./router.js";
+import { handleSubrequestProbe } from "./socket-matrix-handlers.js";
 
 export { SpikeDO } from "./do.js";
 
@@ -63,16 +64,28 @@ export default {
       if (url.pathname === "/netkeiba-socket" && request.method === "POST") {
         return await handleNetkeibaSocket(request, connect);
       }
+      // Issue #162 段階1: Worker から DO を繰り返し呼ぶ試験(subrequest の数え方。netkeiba へは出ない)。
+      if (url.pathname === "/subrequest-probe" && request.method === "POST") {
+        const stub = env.SPIKE_DO.get(env.SPIKE_DO.idFromName("spike"));
+        return await handleSubrequestProbe(request, () => stub.fetch(new Request("https://do.invalid/do/noop")));
+      }
       const cpu = /^\/cpu\/([^/]+)$/.exec(url.pathname);
       if (cpu && request.method === "POST") {
         // 処理のあとに挟む I/O: Cache API の参照(外部へは出ない。時計が進む契機になる)。
         return await handleCpu("worker", cpu[1]!, url, () => caches.default.match("https://spike.invalid/io"));
       }
-      if (url.pathname === "/do/ping" || /^\/do\/cpu\/[^/]+$/.test(url.pathname)) {
+      const isDoSocket = url.pathname === "/do/netkeiba-socket" && request.method === "POST";
+      if (url.pathname === "/do/ping" || /^\/do\/cpu\/[^/]+$/.test(url.pathname) || isDoSocket) {
         const stub = env.SPIKE_DO.get(env.SPIKE_DO.idFromName("spike"));
         try {
           // 前面の Worker は薄く保つ。DO 側の CPU 超過などの例外はここで捕まえ、本文に載せて返す。
-          return await stub.fetch(new Request(request.url, { method: request.method }));
+          // /do/netkeiba-socket は POST の本文(取得の入力。検査は DO 側)を、そのまま渡す。
+          return await stub.fetch(
+            new Request(request.url, {
+              method: request.method,
+              ...(isDoSocket ? { headers: { "content-type": "application/json" }, body: await request.text() } : {}),
+            }),
+          );
         } catch (error) {
           return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
         }

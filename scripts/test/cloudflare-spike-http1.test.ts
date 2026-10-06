@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { gzipSync } from "node:zlib";
 import {
   buildHttp1Request,
   decodeChunked,
+  gunzipLimited,
   Http1Error,
   isValidHeaderName,
   isValidHeaderValue,
@@ -296,5 +298,84 @@ describe("peekHttp1Status(途中までのバイトからステータスだけを
   });
   it.each([[""], ["HTTP/1.1 20"], ["garbage\r\n"]])("ステータス行が揃っていない・読めない入力(%j)は null", (raw) => {
     expect(peekHttp1Status(bytes(raw))).toBeNull();
+  });
+});
+
+/**
+ * #162 段階1: `accept-encoding: gzip` を送る opt-in と、gzip の展開(サイズ上限つき)。
+ * 既定(opt-in しない)の挙動は、上の既存テストが固定している(Accept-Encoding を送らない・禁止ヘッダのまま)。
+ */
+describe("buildHttp1Request: acceptEncoding の opt-in(#162)", () => {
+  const base = {
+    host: "race.netkeiba.com",
+    path: "/race/shutuba.html?race_id=202603020211",
+    headers: [
+      { name: "User-Agent", value: "ua" },
+      { name: "accept", value: "*/*" },
+    ],
+  };
+
+  it('acceptEncoding: "gzip" を指定すると、指定ヘッダの後ろ・Connection: close の前に `Accept-Encoding: gzip` を1つだけ足す', () => {
+    const text = buildHttp1Request({ ...base, acceptEncoding: "gzip" });
+    expect(text).toBe(
+      "GET /race/shutuba.html?race_id=202603020211 HTTP/1.1\r\n" +
+        "Host: race.netkeiba.com\r\n" +
+        "User-Agent: ua\r\n" +
+        "accept: */*\r\n" +
+        "Accept-Encoding: gzip\r\n" +
+        "Connection: close\r\n" +
+        "\r\n",
+    );
+  });
+
+  it("指定しなければ、これまでとバイト単位で同じ(Accept-Encoding を含まない)", () => {
+    const without = buildHttp1Request(base);
+    expect(without).not.toMatch(/accept-encoding/i);
+    // gzip を足した版から Accept-Encoding の行だけを除くと、指定なしの版と一致する(変えたのは1つの行だけ)。
+    const withGzip = buildHttp1Request({ ...base, acceptEncoding: "gzip" });
+    expect(withGzip).not.toBe(without);
+    expect(withGzip.replace("Accept-Encoding: gzip\r\n", "")).toBe(without);
+  });
+
+  it("headers の側から Accept-Encoding を足すことは、opt-in の指定があっても拒否する(経路は acceptEncoding だけ)", () => {
+    expect(() =>
+      buildHttp1Request({ ...base, headers: [...base.headers, { name: "Accept-Encoding", value: "gzip" }], acceptEncoding: "gzip" }),
+    ).toThrow(Http1Error);
+  });
+
+  it.each(["br", "deflate", "gzip, br", "identity", ""])("gzip 以外の値(%j)は受け付けない", (value) => {
+    expect(() => buildHttp1Request({ ...base, acceptEncoding: value as "gzip" })).toThrow(Http1Error);
+  });
+});
+
+describe("gunzipLimited(gzip の展開。上限つき)", () => {
+  const gz = (text: string): Uint8Array => new Uint8Array(gzipSync(Buffer.from(text, "utf-8")));
+
+  it("gzip を展開して元のバイト列を返す(日本語を含む)", async () => {
+    const out = await gunzipLimited(gz("競馬 出馬表 abc"), 1000);
+    expect(dec.decode(out)).toBe("競馬 出馬表 abc");
+  });
+
+  it("展開後のサイズが上限ちょうどなら受け入れ、1バイトでも超えたら例外にする(『超えたら』打ち切り)", async () => {
+    const text = "a".repeat(500);
+    expect((await gunzipLimited(gz(text), 500)).length).toBe(500);
+    await expect(gunzipLimited(gz(text), 499)).rejects.toThrow(Http1Error);
+    await expect(gunzipLimited(gz(text), 499)).rejects.toThrow(/展開後.*上限.*499/);
+  });
+
+  it("高圧縮の入力(小さい圧縮データが巨大に展開される)は、上限で打ち切る(圧縮爆弾の防止)", async () => {
+    const bomb = new Uint8Array(gzipSync(Buffer.alloc(5_000_000, 0x41)));
+    // 圧縮後は小さい(上限 1000 より十分小さい圧縮データ)ことを前提として固定する。
+    expect(bomb.length).toBeLessThan(10_000);
+    await expect(gunzipLimited(bomb, 1000)).rejects.toThrow(/展開後.*上限/);
+  });
+
+  it("gzip として壊れた入力は、Http1Error にする(TypeError のまま漏らさない)", async () => {
+    await expect(gunzipLimited(bytes("これは gzip ではない"), 1000)).rejects.toThrow(Http1Error);
+  });
+
+  it("途中で切れた gzip も、Http1Error にする(途中までを成功として扱わない)", async () => {
+    const full = gz("x".repeat(2000) + "y");
+    await expect(gunzipLimited(full.subarray(0, full.length - 8), 10_000)).rejects.toThrow(Http1Error);
   });
 });

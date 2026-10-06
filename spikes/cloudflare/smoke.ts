@@ -94,6 +94,11 @@ async function main(): Promise<void> {
     check("誤った秘密では /echo も 403", (await req("POST", "/echo", { "x-spike-secret": "wrong" }, { service: "peet" })).status === 403);
     check("ヘッダなしでは /netkeiba-socket も 403", (await req("POST", "/netkeiba-socket", {}, {})).status === 403);
     check("誤った秘密では /netkeiba-socket も 403", (await req("POST", "/netkeiba-socket", { "x-spike-secret": "wrong" }, {})).status === 403);
+    // Issue #162 段階1: DO の中のソケット(/do/netkeiba-socket)と、DO を繰り返し呼ぶ試験(/subrequest-probe)。
+    check("ヘッダなしでは /do/netkeiba-socket も 403", (await req("POST", "/do/netkeiba-socket", {}, {})).status === 403);
+    check("誤った秘密では /do/netkeiba-socket も 403", (await req("POST", "/do/netkeiba-socket", { "x-spike-secret": "wrong" }, {})).status === 403);
+    check("ヘッダなしでは /subrequest-probe も 403", (await req("POST", "/subrequest-probe", {})).status === 403);
+    check("誤った秘密では /subrequest-probe も 403", (await req("POST", "/subrequest-probe", { "x-spike-secret": "wrong" })).status === 403);
     const ping = await req("GET", "/ping");
     check("正しい秘密で /ping が 200", ping.status === 200 && ping.json?.["runtime"] === "worker");
 
@@ -135,6 +140,30 @@ async function main(): Promise<void> {
     check("/netkeiba-socket: 禁止ヘッダ(Accept-Encoding)は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, headers: [{ name: "Accept-Encoding", value: "gzip" }] })).status === 400);
     check("/netkeiba-socket: ヘッダ値の CRLF は 400", (await req("POST", "/netkeiba-socket", undefined, { ...validSocket, headers: [{ name: "x-a", value: "1\r\nHost: evil" }] })).status === 400);
     check("/netkeiba-socket: POST 以外は 404", (await req("GET", "/netkeiba-socket")).status === 404);
+    // Issue #162: /do/netkeiba-socket の入力検査。**DO の中でも、外へ出る前(netkeiba への取得の前)に 400 になる**。
+    // 本文が前面の Worker から DO まで届いていること(JSON として読めたうえで URL の検査で弾かれた = エラーが URL の理由)を、理由の文面で確かめる。
+    const notAllowed = await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, url: "https://example.com/" });
+    check("/do/netkeiba-socket: 許可ホスト以外は 400(本文が DO に届き、URL の検査で弾かれる)", notAllowed.status === 400 && String(notAllowed.json?.["error"]).includes("許可されていない URL"), notAllowed.text.slice(0, 200));
+    check("/do/netkeiba-socket: 許可ホストの偽装は 400", (await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, url: "https://race.netkeiba.com.evil.example/" })).status === 400);
+    check("/do/netkeiba-socket: http は 400", (await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, url: "http://race.netkeiba.com/" })).status === 400);
+    check("/do/netkeiba-socket: headers の Accept-Encoding は 400(経路は acceptEncoding だけ)", (await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, headers: [{ name: "Accept-Encoding", value: "gzip" }] })).status === 400);
+    check("/do/netkeiba-socket: acceptEncoding が gzip 以外(br)は 400", (await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, acceptEncoding: "br" })).status === 400);
+    check("/do/netkeiba-socket: acceptEncoding が identity は 400", (await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, acceptEncoding: "identity" })).status === 400);
+    check("/do/netkeiba-socket: 禁止ヘッダ(Host)は 400", (await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, headers: [{ name: "Host", value: "evil.example" }] })).status === 400);
+    check("/do/netkeiba-socket: 未知の kind は 400", (await req("POST", "/do/netkeiba-socket", undefined, { ...validSocket, kind: "evil" })).status === 400);
+    check("/do/netkeiba-socket: JSON でない本文は 400", (await req("POST", "/do/netkeiba-socket", undefined, "not json" as unknown)).status === 400);
+    check("/do/netkeiba-socket: POST 以外は 404", (await req("GET", "/do/netkeiba-socket")).status === 404);
+    // /subrequest-probe: DO の軽い呼び出し(netkeiba へも第三者へも出ない)なので、ローカルでも実際に動かせる。
+    check("/subrequest-probe: n=0 は 400", (await req("POST", "/subrequest-probe?n=0")).status === 400);
+    check("/subrequest-probe: n が大きすぎる(101)は 400", (await req("POST", "/subrequest-probe?n=101")).status === 400);
+    check("/subrequest-probe: POST 以外は 404", (await req("GET", "/subrequest-probe")).status === 404);
+    const probe = await req("POST", "/subrequest-probe?n=5");
+    const probeResult = (probe.json?.["result"] ?? {}) as { ran?: boolean; requested?: number; succeeded?: number; firstFailureAt?: number | null };
+    check(
+      "/subrequest-probe?n=5: DO を5回呼び、5回成功する(ローカルには subrequest の上限がない)",
+      probe.status === 200 && probeResult.ran === true && probeResult.requested === 5 && probeResult.succeeded === 5 && probeResult.firstFailureAt === null,
+      probe.text.slice(0, 200),
+    );
     check("reps=0 は 400", (await req("POST", "/cpu/parse?reps=0")).status === 400);
     check("未知の処理は 404", (await req("POST", "/cpu/nope?reps=1")).status === 404);
     check("POST 以外の /cpu は 404", (await req("GET", "/cpu/parse?reps=1")).status === 404);

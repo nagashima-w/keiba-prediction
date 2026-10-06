@@ -3,8 +3,10 @@
  * (Issue #160〈#21-B〉)。リクエストの組み立て・応答のパース・chunked の解除だけを持ち、
  * ネットワークにも Workers のランタイムにも依存しない(単体テストできる)。
  *
- * 範囲を絞っている: GET だけ、`Connection: close` で EOF まで読む前提、`Accept-Encoding` は送らない
+ * 範囲を絞っている: GET だけ、`Connection: close` で EOF まで読む前提、`Accept-Encoding` は既定では送らない
  * (圧縮を解かない)、1xx の暫定応答・Upgrade・パイプラインは扱わない(不正な入力は例外にする)。
+ * **#162 段階1 で、`acceptEncoding: "gzip"` の opt-in を足した**(送るのは gzip だけ。展開は {@link gunzipLimited}。
+ * opt-in しなければ、従来とバイト単位で同じリクエストになる)。
  * 例外は {@link Http1Error}。メッセージは記録(`NetkeibaProbeRecord.error`)にそのまま載る。
  */
 
@@ -63,11 +65,18 @@ export interface BuildRequestInput {
   readonly path: string;
   /** 付けるヘッダ(この順序で送る)。 */
   readonly headers: readonly HeaderEntry[];
+  /**
+   * `Accept-Encoding` を送る opt-in(#162)。指定できるのは `"gzip"` だけ。省略時は `Accept-Encoding` を送らない
+   * (E3 と同じ)。`headers` の側から `Accept-Encoding` を足すことは、この指定の有無にかかわらず拒否する
+   * (経路を1つに絞り、「付けた変数は1つ」を構造で保証する)。
+   */
+  readonly acceptEncoding?: "gzip";
 }
 
 /**
  * GET リクエストを組み立てる(ASCII の文字列)。順序は、リクエスト行 → `Host` → 指定ヘッダ(指定順)→
- * `Connection: close` → 空行。禁止ヘッダ・CR/LF などの不正な入力は例外にする。
+ * (opt-in したときだけ `Accept-Encoding: gzip`)→ `Connection: close` → 空行。
+ * 禁止ヘッダ・CR/LF などの不正な入力は例外にする。
  */
 export function buildHttp1Request(input: BuildRequestInput): string {
   if (!/^[A-Za-z0-9.-]+$/.test(input.host)) {
@@ -88,6 +97,12 @@ export function buildHttp1Request(input: BuildRequestInput): string {
       throw new Http1Error(`ヘッダ ${name} の値が不正です(制御文字・非 ASCII・長すぎる値)`);
     }
     lines.push(`${name}: ${value}`);
+  }
+  if (input.acceptEncoding !== undefined) {
+    if (input.acceptEncoding !== "gzip") {
+      throw new Http1Error(`acceptEncoding に指定できるのは gzip だけです: ${JSON.stringify(String(input.acceptEncoding).slice(0, 40))}`);
+    }
+    lines.push("Accept-Encoding: gzip");
   }
   lines.push("Connection: close");
   return `${lines.join("\r\n")}\r\n\r\n`;
@@ -257,6 +272,32 @@ export function parseHttp1Response(bytes: Uint8Array): ParsedHttp1Response {
   return { status, reason, headers, body: rest, framing: "until-close" };
 }
 
+/**
+ * 1回の取得の計測用メタ情報(#162)。**成功した取得(拒否の応答を含む)についてだけ**出る。
+ * 時間は `now()` の差(Workers では I/O の後にしか時計が進まないので、I/O をまたぐ区間の壁時計として読む)。
+ */
+export interface SocketFetchMeta {
+  readonly status: number;
+  /** 本文の切り出し方式(chunked / content-length / until-close / none)。 */
+  readonly framing: ParsedHttp1Response["framing"];
+  /** 応答の `content-encoding`(小文字。付いていなければ null)。 */
+  readonly contentEncoding: string | null;
+  /** 受信した全バイト数(ステータス行・ヘッダ・chunked の枠を含む)。 */
+  readonly receivedBytes: number;
+  /** 枠(chunked のサイズ行など)を除いた、線上の本文のバイト数(gzip なら圧縮後)。 */
+  readonly wireBodyBytes: number;
+  /** 展開後の本文のバイト数(圧縮なしなら wireBodyBytes と同じ)。 */
+  readonly decodedBytes: number;
+  /** 展開後の本文の SHA-256 の先頭 16 桁(16進)。本文が同じかの比較用。 */
+  readonly bodySha256: string;
+  /** 開始から `opened` まで(ms)。 */
+  readonly openedMs: number;
+  /** 開始から最初のバイトを受け取るまで(ms)。何も受け取らなければ null。 */
+  readonly firstByteMs: number | null;
+  /** 開始から受信完了まで(ms)。 */
+  readonly totalMs: number;
+}
+
 /** 途中までのバイト列から、ステータス行が揃っていればステータスコードだけを返す(打ち切りの記録用)。 */
 export function peekHttp1Status(bytes: Uint8Array): number | null {
   const lineEnd = indexOfCrlf(bytes, 0);
@@ -265,4 +306,48 @@ export function peekHttp1Status(bytes: Uint8Array): number | null {
   }
   const match = STATUS_LINE.exec(latin1(bytes, 0, lineEnd));
   return match === null ? null : Number(match[1]);
+}
+
+/**
+ * gzip の本文を展開する(#162)。Workers の `DecompressionStream("gzip")`(Node 18 以降にもある)を使い、展開後の
+ * サイズが `maxBytes` を**超えたら**読むのをやめて例外にする(圧縮爆弾の防止。ちょうど `maxBytes` は受け入れる)。
+ * gzip として壊れている・途中で切れている入力も {@link Http1Error} にする(TypeError のまま漏らさない・
+ * 途中までを成功として扱わない)。
+ */
+export async function gunzipLimited(compressed: Uint8Array, maxBytes: number): Promise<Uint8Array> {
+  const stream = new DecompressionStream("gzip");
+  const writer = stream.writable.getWriter();
+  // 書き込みの拒否(壊れた入力)は、読む側の拒否として表に出るので、ここでは握りつぶす(未処理の拒否にしない)。
+  // 新しい ArrayBuffer にコピーして渡す(受信バッファ全体の一部を指す view や SharedArrayBuffer を BufferSource に渡さない)。
+  writer.write(new Uint8Array(compressed)).catch(() => {});
+  writer.close().catch(() => {});
+  const reader = stream.readable.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.length;
+      if (total > maxBytes) {
+        throw new Http1Error(`gzip の展開後のサイズが上限(${maxBytes} バイト)を超えたため打ち切りました`);
+      }
+      parts.push(value);
+    }
+  } catch (error) {
+    if (error instanceof Http1Error) {
+      await reader.cancel().catch(() => {});
+      throw error;
+    }
+    throw new Http1Error(`gzip として展開できません: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
 }

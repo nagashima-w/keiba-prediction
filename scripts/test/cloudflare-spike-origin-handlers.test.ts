@@ -1,3 +1,4 @@
+import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { fetchEcho } from "../../spikes/cloudflare/src/echo-fetch.js";
 import { handleEcho, handleNetkeibaSocket } from "../../spikes/cloudflare/src/origin-handlers.js";
@@ -189,5 +190,83 @@ describe("handleNetkeibaSocket(POST /netkeiba-socket)", () => {
     expect(res.status).toBe(400);
     expect(s.calls).toHaveLength(0);
     expect(s.written).toHaveLength(0);
+  });
+});
+
+/**
+ * #162 段階1: `/netkeiba-socket`(と DO の `/do/netkeiba-socket`)の gzip の opt-in・メタ情報・DO のインスタンス情報。
+ * 既存の挙動(上のテスト)は変えない。opt-in しなければ Accept-Encoding を送らない。
+ */
+describe("handleNetkeibaSocket: gzip の opt-in・メタ情報・インスタンス(#162)", () => {
+  const plain = enc.encode("<html>" + "競馬".repeat(200) + "</html>");
+  const gz = new Uint8Array(gzipSync(Buffer.from(plain)));
+  const gzipResponse = (): Uint8Array =>
+    new Uint8Array([
+      ...enc.encode(`HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Encoding: gzip\r\nContent-Length: ${gz.length}\r\n\r\n`),
+      ...gz,
+    ]);
+  const gzipBody = (over: Record<string, unknown> = {}): Record<string, unknown> => ({ ...socketBody(), acceptEncoding: "gzip", ...over });
+
+  it("acceptEncoding: gzip を渡すと、Accept-Encoding: gzip を送り、展開した本文でパースした記録とメタ情報を返す", async () => {
+    const s = socketReturning(gzipResponse());
+    const res = await handleNetkeibaSocket(post(gzipBody()), s.connect);
+    expect(res.status).toBe(200);
+    expect(new TextDecoder().decode(s.written[0]!)).toContain("Accept-Encoding: gzip\r\n");
+    const json = (await res.json()) as {
+      ok: boolean;
+      record: { status: number; bodyLength: number };
+      meta: { contentEncoding: string; wireBodyBytes: number; decodedBytes: number; framing: string; bodySha256: string };
+    };
+    expect(json.record.status).toBe(200);
+    expect(json.record.bodyLength).toBe(plain.length);
+    expect(json.meta).toMatchObject({ contentEncoding: "gzip", wireBodyBytes: gz.length, decodedBytes: plain.length, framing: "content-length" });
+    expect(json.meta.bodySha256).toMatch(/^[0-9a-f]{16}$/);
+    expect(json.meta.wireBodyBytes).toBeLessThan(json.meta.decodedBytes);
+  });
+
+  it("acceptEncoding を渡さなければ、Accept-Encoding を送らない(メタ情報は identity で返る)", async () => {
+    const body = enc.encode("ok");
+    const s = socketReturning(new Uint8Array([...enc.encode("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n"), ...body]));
+    const res = await handleNetkeibaSocket(post(socketBody()), s.connect);
+    expect(new TextDecoder().decode(s.written[0]!).toLowerCase()).not.toContain("accept-encoding");
+    const json = (await res.json()) as { meta: { contentEncoding: string | null; wireBodyBytes: number; decodedBytes: number } };
+    expect(json.meta).toMatchObject({ contentEncoding: null, wireBodyBytes: 2, decodedBytes: 2 });
+  });
+
+  it("DO のインスタンス情報を渡すと、そのまま応答に載る(渡さなければ載らない)", async () => {
+    const rejected = enc.encode("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+    const withInstance = await handleNetkeibaSocket(post(socketBody()), socketReturning(rejected).connect, { id: "inst-1", call: 3 });
+    expect(((await withInstance.json()) as { instance: unknown }).instance).toEqual({ id: "inst-1", call: 3 });
+    const without = await handleNetkeibaSocket(post(socketBody()), socketReturning(rejected).connect);
+    expect("instance" in ((await without.json()) as object)).toBe(false);
+  });
+
+  it("拒否(400)の応答でも、メタ情報は返る(本文0バイト)", async () => {
+    const rejected = enc.encode("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+    const res = await handleNetkeibaSocket(post(socketBody()), socketReturning(rejected).connect);
+    const json = (await res.json()) as { record: { status: number }; meta: { status: number; wireBodyBytes: number } };
+    expect(json.record.status).toBe(400);
+    expect(json.meta).toMatchObject({ status: 400, wireBodyBytes: 0 });
+  });
+
+  it("ソケットを開けないときは、メタ情報は null(利用不可の事実は記録の status=null と理由に残る)", async () => {
+    const connect: ConnectFn = () => {
+      throw new Error("TCP sockets unavailable");
+    };
+    const res = await handleNetkeibaSocket(post(socketBody()), connect);
+    const json = (await res.json()) as { meta: unknown; record: { status: number | null } };
+    expect(json.meta).toBeNull();
+    expect(json.record.status).toBeNull();
+  });
+
+  it.each([
+    ["acceptEncoding が identity", gzipBody({ acceptEncoding: "identity" })],
+    ["acceptEncoding が br", gzipBody({ acceptEncoding: "br" })],
+    ["acceptEncoding と headers の Accept-Encoding の併用", gzipBody({ headers: [{ name: "Accept-Encoding", value: "gzip" }] })],
+  ])("%s は 400 で、connect は1回も呼ばれない(外へ出ない)", async (_name, body) => {
+    const s = socketReturning(gzipResponse());
+    const res = await handleNetkeibaSocket(post(body), s.connect);
+    expect(res.status).toBe(400);
+    expect(s.calls).toHaveLength(0);
   });
 });

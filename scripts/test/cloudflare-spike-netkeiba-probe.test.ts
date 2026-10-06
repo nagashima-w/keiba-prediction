@@ -8,6 +8,8 @@ import { judgeReachability } from "../cloudflare-spike/reachability.js";
 import { parseShutuba } from "../../packages/core/src/scraper/parse-shutuba.js";
 import { parseHorseResults } from "../../packages/core/src/scraper/parse-horse-results.js";
 import { parseOdds } from "../../packages/core/src/scraper/parse-odds.js";
+import { parseComboOdds } from "../../packages/core/src/scraper/parse-combo-odds.js";
+import { parseNarOdds } from "../../packages/core/src/scraper/parse-nar-odds.js";
 
 /**
  * #159 Worker が netkeiba の1本を取得して記録を作る処理(`spikes/cloudflare/src/netkeiba-probe.ts`)。
@@ -225,5 +227,48 @@ describe("probeNetkeiba: リダイレクトに従わない(許可ホスト外へ
     const j = judgeReachability(rec);
     expect(j.verdict).toBe("redirect");
     expect(j.reason).toContain("https://evil.example/x");
+  });
+});
+
+describe("probeNetkeiba: 三連複の JSON・地方のオッズページ(#162)", () => {
+  it("三連複の JSON(combo-trio-json)は、組合せの件数(560)を parsedCount にする", async () => {
+    const json = readFixture("odds_trio_202603020211.json");
+    const parsed = parseComboOdds(json.toString("utf-8"), "trio");
+    // 期待値はパーサから取り直す(16頭の C(16,3)=560 組が読めている前提を固定する)。
+    expect(parsed.state).toBe("available");
+    const expected = parsed.state === "available" ? parsed.odds.size : 0;
+    expect(expected).toBe(560);
+    const rec = await probeNetkeiba(
+      { targetId: "central-trio-odds", url: "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=202603020211&type=7&action=init", kind: "combo-trio-json", encoding: "utf-8" },
+      fakeFetch(200, json, { "content-type": "application/json" }).fetch,
+    );
+    expect(rec.parsedKind).toBe("combo-trio-json");
+    expect(rec.parsedCount).toBe(expected);
+    expect(rec.parseError).toBeNull();
+    expect(judgeReachability(rec).verdict).toBe("ok");
+  });
+
+  it("三連複の JSON が発売なし(unavailable)のときは、件数 0(到達したがパーサで読めなかった扱い)", async () => {
+    const rec = await probeNetkeiba(
+      { targetId: "t", url: "https://race.netkeiba.com/api/api_get_jra_odds.html?race_id=1&type=7&action=init", kind: "combo-trio-json", encoding: "utf-8" },
+      fakeFetch(200, JSON.stringify({ status: "NG", data: "" }), { "content-type": "application/json" }).fetch,
+    );
+    expect(rec.status).toBe(200);
+    expect(rec.parsedCount).toBe(0);
+    expect(judgeReachability(rec).verdict).toBe("reachable-but-unparsed");
+  });
+
+  it("地方のオッズページ(nar-odds-page)は、parseNarOdds で読んだ単勝の頭数を parsedCount にする", async () => {
+    const html = readFixture("nar_odds_b1_202654071210.html");
+    const expected = Object.keys(parseNarOdds(html.toString("utf-8")).win).length;
+    expect(expected).toBeGreaterThan(0);
+    const rec = await probeNetkeiba(
+      { targetId: "nar-odds-page", url: "https://nar.netkeiba.com/odds/index.html?type=b1&race_id=202654071210", kind: "nar-odds-page", encoding: "utf-8" },
+      fakeFetch(200, html, { "content-type": "text/html; charset=UTF-8" }).fetch,
+    );
+    expect(rec.parsedKind).toBe("nar-odds-page");
+    expect(rec.parsedCount).toBe(expected);
+    expect(rec.replacementChars).toBe(0);
+    expect(judgeReachability(rec).verdict).toBe("ok");
   });
 });

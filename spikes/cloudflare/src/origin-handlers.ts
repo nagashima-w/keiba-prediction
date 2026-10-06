@@ -10,7 +10,7 @@ import { validateEchoRequest, validateSocketRequest } from "../../../scripts/clo
 import { fetchEcho } from "./echo-fetch.js";
 import { probeNetkeiba, type ProbeFetch } from "./netkeiba-probe.js";
 import { json } from "./json.js";
-import { createSocketFetch, type ConnectFn } from "./socket-probe.js";
+import { createSocketFetch, type ConnectFn, type SocketFetchMeta } from "./socket-probe.js";
 
 async function readJson(request: Request): Promise<{ ok: true; body: unknown } | { ok: false }> {
   try {
@@ -38,11 +38,19 @@ export async function handleEcho(request: Request, fetchImpl?: ProbeFetch): Prom
 }
 
 /**
- * `POST /netkeiba-socket`(本文: `{targetId, url, kind, encoding, headers}`)。ソケットで1本だけ取得し、
- * 記録を `{ok: true, record}` で返す。**再試行もリダイレクトの追従もしない**(1回の呼び出しで接続は1回)。
- * ソケットを開けない場合も 200 で、記録(status=null と理由)として返す(利用不可の事実を結果に残すため)。
+ * `POST /netkeiba-socket`(本文: `{targetId, url, kind, encoding, headers, acceptEncoding?}`)。ソケットで1本だけ取得し、
+ * 記録を `{ok: true, record, meta}` で返す。**再試行もリダイレクトの追従もしない**(1回の呼び出しで接続は1回)。
+ * ソケットを開けない場合も 200 で、記録(status=null と理由)・`meta: null` として返す(利用不可の事実を結果に残すため)。
+ *
+ * #162: `acceptEncoding: "gzip"` で `Accept-Encoding: gzip` を送り、gzip の応答を展開する(opt-in。省略時は送らない)。
+ * `meta` は計測用(受信・本文・展開後のバイト数、方式、本文のハッシュ、時間)。`instance` を渡すと(DO から呼ぶとき)、
+ * そのまま応答に載せる(同じ DO インスタンスで取得したかを事実として残すため)。
  */
-export async function handleNetkeibaSocket(request: Request, connect: ConnectFn): Promise<Response> {
+export async function handleNetkeibaSocket(
+  request: Request,
+  connect: ConnectFn,
+  instance?: { readonly id: string; readonly call: number },
+): Promise<Response> {
   const parsed = await readJson(request);
   if (!parsed.ok) {
     return json({ ok: false, error: "JSON ではありません" }, 400);
@@ -51,7 +59,17 @@ export async function handleNetkeibaSocket(request: Request, connect: ConnectFn)
   if (!v.ok) {
     return json({ ok: false, error: v.error }, 400);
   }
-  const { targetId, url, kind, encoding, headers } = v.value;
-  const record = await probeNetkeiba({ targetId, url, kind, encoding }, createSocketFetch(connect, { headers }));
-  return json({ ok: true, record });
+  const { targetId, url, kind, encoding, headers, acceptEncoding } = v.value;
+  let meta: SocketFetchMeta | null = null;
+  const record = await probeNetkeiba(
+    { targetId, url, kind, encoding },
+    createSocketFetch(connect, {
+      headers,
+      ...(acceptEncoding !== undefined ? { acceptEncoding } : {}),
+      onMeta: (m) => {
+        meta = m;
+      },
+    }),
+  );
+  return json({ ok: true, record, meta, ...(instance !== undefined ? { instance } : {}) });
 }
