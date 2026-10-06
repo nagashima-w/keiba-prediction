@@ -15,6 +15,8 @@
 
 ## 1. 結論(事実と推測を分ける)
 
+**第4ラウンド(#162 段階1。DO の中のソケットでの取得)の結果は §8。** 以下は第2ラウンドの時点の結論で、「測っていない」とした項目の一部は、そこで測った。
+
 ### 事実(結果 JSON に記録されていること)
 
 - **Workers → netkeiba**: 第2ラウンドで Worker から取得した race.netkeiba.com(出馬表)と db.netkeiba.com(馬ページ)は、どちらも
@@ -192,7 +194,9 @@ db.netkeiba.com の馬ページは取得できなかった。db の戦績 API �
   ただし、どのヘッダが効くか、`fetch` の TLS・HTTP バージョンが関与するかは**分離できていない**(§7.5)
 - 構成(**ユーザーの決定。2026-10-05**): 取得・計算・保存・画面まで全部 Cloudflare で進める。取得は **DO の中から TCP ソケット**で行う。
   この決定に使う根拠のうち、**測っていないもの**: DO の中からの `connect()`(今回の E3 は普通の Worker のハンドラからのソケット)、
-  db の戦績 API・nar.netkeiba.com・race のオッズ API のソケットでの取得、繰り返し・長時間使ったときの再現性(1回の実行のみ)
+  db の戦績 API・nar.netkeiba.com・race のオッズ API のソケットでの取得、繰り返し・長時間使ったときの再現性(1回の実行のみ)。
+  (**第4ラウンド〈§8。#162 段階1〉で、DO の中からのソケット・db の戦績 API・nar・race のオッズ API・繰り返し取得〈再現性〉を測った。
+  なお測っていないものは §8.5**)
 - 以前の選択肢のうち、「netkeiba の取得を Workers の外(ユーザーの PC、GitHub Actions のようなランナー)で行う構成」は、上の決定では採っていない。
   「Cloudflare のほかの実行環境」は未調査のまま
 
@@ -223,22 +227,25 @@ db.netkeiba.com の馬ページは取得できなかった。db の戦績 API �
 - トークンの Workers の権限が **Admin(スコープ: Workers product)**。Editor では Worker を作成・削除できない(プリフライトが検出して止まる)
 - Cloudflare アカウントの workers.dev のサブドメインが登録済み
 
-起動(**実験の選び方は #160 で変わった**。既定は `origin`):
+起動(**実験の選び方は #160 で変わり、既定は #162 で `origin` から `socket-matrix` に変わった**。既定は `socket-matrix`):
 
 - ワークフロー: `.github/workflows/cloudflare-spike.yml`。測定ステップの環境変数 `SPIKE_EXPERIMENTS` で、実行する実験を選ぶ:
+  - `socket-matrix`(#162 段階1。DO の中のソケットでの取得。取得先の網羅・gzip・再現性。netkeiba へ 9 本。ほかに netkeiba へ出ない、
+    Worker から DO を繰り返し呼ぶ試験がある)
   - `origin`(#160。400 の原因の切り分け E0〜E3。netkeiba へ 6 本。ほかに netkeiba へ出ないエコーが最大 4 回)
   - `reachability`(#159 第2ラウンドの到達性。5対象 × Worker・ランナー。netkeiba へ 10 本)
   - `cpu`(CPU 上限の探索。netkeiba へは出ない)
-  - カンマ区切りで複数を選べる(例: `reachability,cpu`、`origin,cpu`)。**`reachability` と `origin` は同時に選べない**
-    (netkeiba への合計 10 本以内の守りのため、ドライバが拒否する)。未設定・空・未知の名前もエラーで、何も測らずに失敗する
-- **作業ブランチへの push**(先端コミットのメッセージの先頭〈件名の先頭〉が `[CF-SPIKE]`)で起動すると、**入力が空なので `origin` になる**
-  (`${{ inputs.experiments || 'origin' }}`)。本文に書いても、先頭以外に書いても起動しない
+  - カンマ区切りで複数を選べる(例: `socket-matrix,cpu`、`reachability,cpu`、`origin,cpu`)。**netkeiba へ出る3実験(`socket-matrix`・`origin`・`reachability`)は、どの2つも同時に選べない**(netkeiba への合計 10 本以内の守りのため、ドライバが拒否する。本数の定義は `scripts/cloudflare-spike/experiments.ts`)。
+    未設定・空・未知の名前もエラーで、何も測らずに失敗する
+- **作業ブランチへの push**(先端コミットのメッセージの先頭〈件名の先頭〉が `[CF-SPIKE]`)で起動すると、**入力が空なので `socket-matrix` になる**
+  (`${{ inputs.experiments || 'socket-matrix' }}`。#162 で `origin` から変更した。完了済みの `origin` の6本を、印付きの push で再実行しないため)。
+  本文に書いても、先頭以外に書いても起動しない
   (部分一致にしていた第1ラウンドで、本文の説明に印が含まれて意図せず起動したため、先頭一致にした)
-- **`workflow_dispatch`(Actions 画面から `Cloudflare 移行スパイク` を手動実行)**では、入力 `experiments`(既定 `origin`)で選ぶ。
+- **`workflow_dispatch`(Actions 画面から `Cloudflare 移行スパイク` を手動実行)**では、入力 `experiments`(既定 `socket-matrix`)で選ぶ。
   #159 の第2ラウンドと同じ測定をやり直すには、`reachability`(CPU も測るなら `reachability,cpu`)を指定する。
   入力は env 経由でだけ使い、シェルには直接展開しない(スクリプト注入の防止。静的テストで固定している)
-- 所要は、`origin` だけなら短い(ドライバの `startedAt` から `finishedAt` まで。第3ラウンドの JSON のとおり)。第2ラウンドは、CPU の探索を
-  含めて 20 分弱(JSON のとおり)。実行ごとに Worker を作成し、終了時に必ず削除する。netkeiba へは合計 10 本以内・2 秒間隔
+- 所要は、`socket-matrix` は約 19 秒(第4ラウンドの JSON の `startedAt` から `finishedAt` まで)、`origin` は短い(第3ラウンドの JSON のとおり)。
+  第2ラウンドは、CPU の探索を含めて 20 分弱(JSON のとおり)。実行ごとに Worker を作成し、終了時に必ず削除する。netkeiba へは合計 10 本以内・2 秒間隔
 
 ### 結果の取り出しと report の生成(いずれもリポジトリのルートで)
 
@@ -664,7 +671,8 @@ db の馬ページ(EUC-JP)を取得でき、既存パーサ(`parseShutuba`・馬
   (同じ実行の中の2本〈S1・S1r〉は一致している)。違いの原因は調べていない
 - **gzip を要求したのに圧縮されなかった件**: 事実は「この2つの取得先で、このヘッダを足して要求したとき、圧縮されずに返った」だけで、
   「netkeiba は gzip を返さない」とは**一般化しない**(ほかの取得先・ほかのヘッダでは未測定。なぜ圧縮されなかったかも調べていない)。
-  所要時間の差(gzip 版と identity 版)は n=1 で、読み取れるのは大まかな桁だけ(8.2 の限界のとおり)
+  所要時間の差(gzip 版と identity 版)は n=1 で、読み取れるのは大まかな桁だけ(8.2 の限界のとおり)。
+  要求ヘッダの送信は単体テストで固定している。実測では送信したバイト列を観測していない
 - **DO の呼び出し 60 回が成功した件**: 8.2 の推測のとおり、DO の呼び出し(stub.fetch)は、Free の subrequest 上限(50)に数えられていないか、
   上限がこのアカウントでは違う可能性がある。**Free の上限の数え方は未確定のまま**(プランは未確認)。
   また、**DO の中のソケットが subrequest に数えられるかは測っていない**(この試験は、呼び出し側が DO を呼ぶ回数だけを見た)

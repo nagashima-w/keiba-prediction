@@ -11,6 +11,7 @@ import {
   replaceGeneratedBlock,
 } from "../cloudflare-spike/report-doc.js";
 import { extractResultBlock, formatResultBlock, renderMarkdown, type SpikeResult } from "../cloudflare-spike/result.js";
+import { NETKEIBA_REQUESTS_BY_EXPERIMENT } from "../cloudflare-spike/experiments.js";
 import { REFERENCE_E3_SHUTUBA_BYTES } from "../cloudflare-spike/socket-matrix-plan.js";
 
 /**
@@ -271,15 +272,65 @@ describe("report.md の手書き本文(第3ラウンド)が、結果 JSON と食
     expect(report).toContain("第3ラウンド(§7)で切り分けを行い");
   });
 
-  it("『ワークフローの起動』の節が、今の既定(origin)と実験の選び方を説明している", () => {
+  it("『ワークフローの起動』の節が、ワークフロー yml の既定(socket-matrix)と実験の選び方を説明している(既定値を yml と照合する)", () => {
     const start = report.indexOf("### ワークフローの起動");
     const end = report.indexOf("### 結果の取り出しと report の生成");
     const section = report.slice(start, end);
-    for (const word of ["SPIKE_EXPERIMENTS", "experiments", "origin", "reachability", "cpu", "同時に選べない"]) {
+    for (const word of ["SPIKE_EXPERIMENTS", "experiments", "socket-matrix", "origin", "reachability", "cpu", "同時に選べない"]) {
       expect(section, word).toContain(word);
     }
     // 起動条件(件名の先頭の印)は #159 のまま
     expect(section).toContain("[CF-SPIKE]");
+
+    // 文書の既定値が、ワークフロー yml の既定値(dispatch の default と、env の `|| '…'`)と一致している。
+    const yml = read(".github", "workflows", "cloudflare-spike.yml");
+    const dispatchDefault = /\n      experiments:\n(?:        .+\n)*?        default: ['"]?([a-z-]+)['"]?\n/.exec(yml)?.[1];
+    const envDefault = /SPIKE_EXPERIMENTS: \$\{\{ inputs\.experiments \|\| '([a-z-]+)' \}\}/.exec(yml)?.[1];
+    expect(dispatchDefault).toBe("socket-matrix");
+    expect(envDefault).toBe(dispatchDefault);
+    expect(section).toContain(`\${{ inputs.experiments || '${envDefault}' }}`);
+    expect(section).toContain(`既定 \`${dispatchDefault}\``);
+    // 旧い既定(origin)を、現在の既定として書いていない。
+    expect(section).not.toContain("|| 'origin'");
+    expect(section).not.toMatch(/既定(は|も)? ?`origin`/);
+    expect(section).not.toMatch(/入力が空なので `origin`/);
+  });
+
+  it("『ワークフローの起動』の節の実験の列挙に、netkeiba へ出す本数が、ドライバの選択(experiments.ts)の本数と一致して書かれている", () => {
+    const start = report.indexOf("### ワークフローの起動");
+    const section = report.slice(start, report.indexOf("### 結果の取り出しと report の生成"));
+    for (const [name, count] of Object.entries(NETKEIBA_REQUESTS_BY_EXPERIMENT)) {
+      expect(section, name).toMatch(new RegExp(`\`${name}\`[^\\n]*netkeiba へ ${count} 本`));
+    }
+    // 同時に選べないのは、netkeiba へ出る3実験のうちどの2つも(reachability と origin の組だけではない)。
+    expect(section).toMatch(/netkeiba へ出る3実験[^\n]*どの2つも/);
+    expect(section).toContain("socket-matrix");
+  });
+
+  it("『ワークフローの起動』の節の所要時間に、socket-matrix の実測(第4ラウンドの JSON の startedAt から finishedAt)が反映されている", () => {
+    const start = report.indexOf("### ワークフローの起動");
+    const section = report.slice(start, report.indexOf("### 結果の取り出しと report の生成"));
+    const r4 = JSON.parse(read("docs", "investigations", "cloudflare-spike", "round4-result.json")) as SpikeResult;
+    const seconds = Math.round((Date.parse(r4.finishedAt!) - Date.parse(r4.startedAt!)) / 1000);
+    expect(seconds).toBeGreaterThan(0);
+    expect(section).toMatch(new RegExp(`socket-matrix[^\\n]*約 ${seconds} 秒`));
+  });
+
+  it("§4『#21 への含意』の『測っていないもの』に、第4ラウンド(§8)で測った旨と、なお測っていないものは §8.5 である旨が書かれている", () => {
+    const section = report.slice(report.indexOf("## 4. #21 への含意"), report.indexOf("## 5. 再現手順"));
+    expect(section).toContain("測っていないもの");
+    expect(section).toMatch(/第4ラウンド(\(§8\)|〈§8)/);
+    expect(section).toContain("§8.5");
+    // 第4ラウンドで測った項目の名前が、その旨の文の中に挙がっている。
+    const note = section.slice(section.search(/第4ラウンド(\(§8\)|〈§8)/));
+    for (const word of ["DO の中", "戦績 API", "nar", "オッズ API", "再現性"]) {
+      expect(note, word).toContain(word);
+    }
+  });
+
+  it("§1『結論』に、第4ラウンド(§8)への導線がある", () => {
+    const section = report.slice(report.indexOf("## 1. 結論"), report.indexOf("## 2. 実行の概要"));
+    expect(section).toMatch(/第4ラウンド[^\n]*§8/);
   });
 });
 
@@ -367,6 +418,10 @@ describe("report.md の手書き本文(第4ラウンド)が、結果 JSON と食
     expect(text).toMatch(/一般化しない/);
     expect(text).toMatch(/identity/);
     expect(text).toMatch(/Accept-Encoding を送らない/);
+  });
+
+  it("gzip の記述に、要求ヘッダの送信は単体テストで固定しており、実測では送信したバイト列を観測していないことが添えられている", () => {
+    expect(handwritten()).toContain("要求ヘッダの送信は単体テストで固定している。実測では送信したバイト列を観測していない");
   });
 
   it("DO の呼び出し 60 回の成功は、subrequest の数え方が未確定のままであることを添えて書かれている(ソケットが数えられるかは測っていない)", () => {
