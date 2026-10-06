@@ -168,8 +168,8 @@ export function serializeGate(gate: GateLike): GateLike {
   };
 }
 
-/** オッズ・組合せオッズの取得先(中央の `api_get_jra_odds`・地方の `odds/index.html`)。発走前の計算ステップは、これらだけ、取得ステップの開始以降のキャッシュに限る。 */
-const ODDS_URL_PATTERN = /api_get_jra_odds|\/odds\/index\.html/;
+/** オッズ・組合せオッズの取得先(中央の `api_get_jra_odds`・地方の `nar.netkeiba.com/odds/` 配下: `index.html`〈単勝複勝・馬連・ワイドほか〉と `odds_get_form.html`〈3連複・3連単の軸馬別〉)。発走前の計算ステップは、これらだけ、取得ステップの開始以降のキャッシュに限る。 */
+export const ODDS_URL_PATTERN = /api_get_jra_odds|\/odds\//;
 
 /** 計算ステップで、オッズのキャッシュが今回の取得より古い(前回の実行の残り)ときに投げる。 */
 class StaleOddsError extends Error {
@@ -245,6 +245,9 @@ export class RaceDayCore {
     this.onWarn = deps.onWarn;
     this.sink = deps.sink;
     this.loadSettings = deps.loadSettings;
+    // ⚠️ スキーマ変更の仕組みは無い: DO の SQLite の表は `CREATE TABLE IF NOT EXISTS` だけで作る(既存の表に列を足す処理は無い)。
+    // 本番の RaceDay は未デプロイなので、今は列を足してよい。**最初の本番デプロイのあとに列を足すときは、`ALTER TABLE ... ADD COLUMN` を
+    // ここに足すこと**(足さないと、既に作られた表に列が無いまま INSERT/SELECT が落ちる)。
     this.sql.exec("CREATE TABLE IF NOT EXISTS race_day_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     // タスクは (race_id, mode) ごと。mode: morning(朝の取得と prior)・pre_race(発走前の分析。Issue #178)。
     this.sql.exec(

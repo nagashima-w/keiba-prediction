@@ -618,6 +618,92 @@ describe("前回の組合せオッズがキャッシュに残っていても、�
   });
 });
 
+describe("地方(NAR)でも、前回の組合せオッズがキャッシュに残っていても今回の分析には使わない(再レビュー指摘。Issue #178)", () => {
+  const NAR_RACE = "202654071210";
+  const NAR_UNAVAILABLE = `<div id="odds_view_form"></div>`;
+  const narFixture = (name: string): string => readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures", name), "utf-8");
+  /** 軸馬別(`odds_get_form.html?type=b7&...&jiku=N`)の最小限の合成オッズ。軸 N と、軸にならない 11・12 番の組(オッズは大きく、期待値が閾値を超えて買い目に入る値)。 */
+  const narAxisHtml = (axis: number): string =>
+    `<div id="odds_view_form"><table class="Odds_Table"><tr><td class="Odds" id="chk_x_b7_c0_${axis}_11_12">900.0</td></tr></table></div>`;
+  /** 地方の組合せ: 馬連 b4・ワイド b5・馬単 b6 は `odds/index.html`(単発)、3連複 b7 は軸馬別の `odds/odds_get_form.html`。 */
+  const isNarAxisUrl = (url: string): boolean => url.includes("odds_get_form.html");
+  const isNarIndexComboUrl = (url: string): boolean => /odds\/index\.html\?type=b[3-8]&/.test(url);
+  const narBody = (url: string): string => {
+    if (url.includes("shutuba.html")) return narFixture("nar_shutuba_202654071210.html");
+    if (url.includes("ajax_horse_results")) return narFixture("horse_results_2021104387.json");
+    if (isNarAxisUrl(url)) return narAxisHtml(Number(/[?&]jiku=(\d+)/.exec(url)![1]));
+    if (url.includes("type=b1&")) return narFixture("nar_odds_b1_202654071210.html");
+    if (url.includes("type=b4&")) return narFixture("nar_odds_b4_202654071210.html");
+    if (url.includes("type=b5&")) return narFixture("nar_odds_b5_202654071210.html");
+    if (url.includes("type=b6&")) return narFixture("nar_odds_b6_202654071210.html");
+    if (url.includes("type=b7&")) return narFixture("nar_odds_b7_202654071210.html");
+    if (url.includes("type=b3&")) return NAR_UNAVAILABLE;
+    throw new Error(`未知のURL(NAR): ${url}`);
+  };
+  const betTypes = (record: AnalysisRecord): string[] => [...new Set(record.allocation!.bets.map((b) => b.betType))].sort();
+
+  async function narFirstRunThenSecondScheduled(h: Harness): Promise<void> {
+    h.gate.body = narBody;
+    await h.core.schedule({ raceId: NAR_RACE, kaisaiDate: "20260712", mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" });
+    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    expect(h.sink.saved).toHaveLength(1);
+    h.clock.now += 60 * 60_000;
+    await h.core.schedule({ raceId: NAR_RACE, kaisaiDate: "20260712", mode: "pre_race" });
+  }
+
+  it("前提: 1回目の取得で、軸馬別のURL(odds_get_form)も index.html 系の組合せのURLも取っていて、3連複・ワイド・馬連などが買い目に入る(空振りでない)", async () => {
+    const h = harness();
+    await narFirstRunThenSecondScheduled(h);
+    expect(h.gate.urls.filter(isNarAxisUrl).length).toBeGreaterThan(5);
+    expect(h.gate.urls.filter(isNarIndexComboUrl).length).toBeGreaterThan(2);
+    const types = betTypes(h.sink.saved[0]!);
+    expect(types).toContain("trio");
+    expect(types).toContain("wide");
+    expect(types).toContain("quinella");
+  });
+
+  it("今回、軸馬別のURLがすべて404のとき: 前回のキャッシュの3連複は使わず、3連複の買い目は入らない。index.html 系(ワイド・馬連ほか)は今回取れたぶんが入る", async () => {
+    const h = harness();
+    await narFirstRunThenSecondScheduled(h);
+    const firstTypes = betTypes(h.sink.saved[0]!);
+    h.gate.body = (url) => (isNarAxisUrl(url) ? null : narBody(url));
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" });
+    expect(await h.core.runNextStep()).toMatchObject({ step: "compute", result: "ok" });
+    expect(h.sink.saved).toHaveLength(2);
+    const types = betTypes(h.sink.saved[1]!);
+    expect(firstTypes).toContain("trio"); // 前提: 1回目には入っていた
+    expect(types).not.toContain("trio");
+    expect(types).toEqual(expect.arrayContaining(["wide", "quinella", "exacta"])); // index.html 系は今回取れている
+    expect(h.warnings.some((w) => w.includes("組合せ") && w.includes("3連複"))).toBe(true);
+  });
+
+  it("今回、index.html 系の組合せ(ワイド・馬連・馬単)がすべて404のとき: 前回のキャッシュは使わず、それらの買い目は入らない。軸馬別の3連複は今回取れたぶんが入る", async () => {
+    const h = harness();
+    await narFirstRunThenSecondScheduled(h);
+    const firstTypes = betTypes(h.sink.saved[0]!);
+    h.gate.body = (url) => (isNarIndexComboUrl(url) && !url.includes("type=b7&") ? null : narBody(url));
+    await h.core.runNextStep();
+    await h.core.runNextStep();
+    expect(h.sink.saved).toHaveLength(2);
+    const types = betTypes(h.sink.saved[1]!);
+    expect(types).not.toContain("wide");
+    expect(types).not.toContain("quinella");
+    expect(types).not.toContain("exacta");
+    expect(types).toContain("trio"); // 軸馬別は今回取れているので入る(買い目の配分は券種が減ると変わるので、単勝・複勝の有無までは比べない)
+    expect(firstTypes).toEqual(expect.arrayContaining(["wide", "quinella", "exacta"])); // 前提: 1回目には入っていた券種
+  });
+
+  it("対照: 今回もすべて取れれば、前回と同じ券種が入り、組合せの警告は出ない", async () => {
+    const h = harness();
+    await narFirstRunThenSecondScheduled(h);
+    await h.core.runNextStep();
+    await h.core.runNextStep();
+    expect(betTypes(h.sink.saved[1]!)).toEqual(betTypes(h.sink.saved[0]!));
+    expect(h.warnings.filter((w) => w.includes("組合せ"))).toEqual([]);
+  });
+});
+
 describe("朝と発走前の共存・入口(Issue #178)", () => {
   it("朝(morning)と発走前(pre_race)は別のタスク。同じレースで、片方が実行中でももう片方を予約でき、同じ種類の二重の予約だけが拒否される", async () => {
     const h = harness();
