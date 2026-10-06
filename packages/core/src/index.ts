@@ -19,6 +19,7 @@ export {
   type CacheEntry,
   type CachedFetcherOptions,
   type CachedFetchTextOptions,
+  type CacheStore,
   type NowFn,
   type ScrapeCacheGetOptions,
   type ScrapeCacheOptions,
