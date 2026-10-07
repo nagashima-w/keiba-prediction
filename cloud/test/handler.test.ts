@@ -25,7 +25,7 @@ function gate(ping: () => Promise<{ sqlite: boolean }>, extra: Partial<GateStubL
 
 const HEALTHY = gate(async () => ({ sqlite: true }));
 
-/** D1 の疎通確認(`SELECT detail_key FROM analyses LIMIT 1`)の偽物。発行された文を記録する。 */
+/** D1 の疎通確認(`SELECT detail_key, llm_note FROM analyses LIMIT 1`)の偽物。発行された文を記録する。 */
 function d1(first: () => Promise<unknown>, prepared: string[] = [], binds: unknown[][] = []): Env["DB"] {
   return {
     prepare: (sql: string) => {
@@ -251,14 +251,52 @@ describe("ルート(認証後)", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true } });
+    expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false } });
+  });
+
+  describe("Issue #194: secrets.anthropic(API キーが登録されているか。存在だけを返し、値は返さない。ok の判定には含めない)", () => {
+    const KEY = "sk-ant-api03-THIS-IS-A-FAKE-KEY-VALUE";
+
+    it.each([[undefined], [""], ["   "], ["\n"]])("キーが %j(未登録・空)なら anthropic:false。ok は true のまま(キーが無くても分析は LLM なしで動く)", async (key) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: key }), {}, deps);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false } });
+    });
+
+    it("キーが登録されていれば anthropic:true。応答のどこにもキーの値(の一部も)が出ない。ok は DO・D1 だけで決まる", async () => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: KEY }), {}, deps);
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: true } });
+      expect(text).not.toContain("sk-ant");
+      expect(text).not.toContain("FAKE-KEY");
+      // 対照: DO が落ちていれば、キーがあっても 503(ok にキーの有無は効かない)。キーがあるだけでは ok にならない
+      const down = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: KEY, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+      expect(down.status).toBe(503);
+      expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: true } });
+    });
+
+    it("キーが文字列でない(設定の取り違えで object など)ときは、false(値の型を信用しない)", async () => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: { toString: () => KEY } as unknown as string }), {}, deps);
+      expect(await response.json()).toMatchObject({ secrets: { anthropic: false } });
+    });
+
+    it("認証できなければ、secrets の有無も含めて何も返さない(これまでどおり 403・本文は固定)", async () => {
+      const { deps } = await setup();
+      const response = await handle(req("/api/health"), envOf({ ANTHROPIC_API_KEY: KEY }), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    });
   });
 
   it("DO が sqlite=false を返したら 503(ok:false)。DO が例外でも 503 で、例外の中身は返さない。D1 の結果は独立に報告する", async () => {
     const { deps, token } = await setup();
     const down = await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
     expect(down.status).toBe(503);
-    expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true } });
+    expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: false } });
     const throwing = gate(async () => {
       throw new Error("internal detail");
     });
@@ -275,19 +313,19 @@ describe("ルート(認証後)", () => {
     const response = await handle(req("/api/health", { token }), envOf({ DB: broken }), {}, deps);
     expect(response.status).toBe(503);
     const text = await response.text();
-    expect(JSON.parse(text)).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false } });
+    expect(JSON.parse(text)).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false } });
     expect(text).not.toContain("no such table");
     // DO も D1 も駄目なら、両方 false
     const both = await handle(req("/api/health", { token }), envOf({ DB: broken, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
     expect(both.status).toBe(503);
-    expect(await both.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: false } });
+    expect(await both.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: false }, secrets: { anthropic: false } });
   });
 
   it("D1 の binding が無い(設定漏れ)でも例外を外へ投げず、503 の d1.ok:false で返す", async () => {
     const { deps, token } = await setup();
     const response = await handle(req("/api/health", { token }), envOf({ DB: undefined as unknown as Env["DB"] }), {}, deps);
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false } });
+    expect(await response.json()).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false } });
   });
 
   it("D1 の疎通確認は、読み取り専用の1文(bind なし)を1回だけ発行する(health のたびに書き込み行を増やさない)", async () => {
@@ -296,7 +334,7 @@ describe("ルート(認証後)", () => {
     const binds: unknown[][] = [];
     await handle(req("/api/health", { token }), envOf({ DB: d1(async () => null, prepared, binds) }), {}, deps);
     expect(prepared).toEqual([D1_HEALTH_SQL]);
-    expect(D1_HEALTH_SQL).toBe("SELECT detail_key FROM analyses LIMIT 1");
+    expect(D1_HEALTH_SQL).toBe("SELECT detail_key, llm_note FROM analyses LIMIT 1"); // migration 0002(detail_key)と 0005(llm_note)の適用済みを確かめる(Issue #194)
     expect(binds).toEqual([]);
   });
 

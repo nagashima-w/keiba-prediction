@@ -106,6 +106,8 @@ describe("AC-b4: 共有フィクスチャ(#168)の期待値と一致する", () 
       id: saved.id,
       horses: horses.map(({ contributions: _c, ...h }) => h),
       hasDetail: true,
+      // Issue #194: 一覧の要約に、理由(固定文言。D1 の llm_note)が載る。フィクスチャの保存は理由なしなので null(理由ありの往復は analysis-llm-note.test.ts)。
+      llmNote: null,
     };
     expect(list[0]).toStrictEqual(expected);
     // 大きな列のキーそのものが無い(null で持たない)

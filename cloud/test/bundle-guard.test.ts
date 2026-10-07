@@ -145,7 +145,7 @@ describe("本番のバンドルと D1(Issue #171)", () => {
     () => {
       const code = bundle(null, "worker.js");
       // 前提: D1 を呼ぶコードが入っている(空振りでない)
-      expect(code.includes("SELECT detail_key FROM analyses LIMIT 1"), "D1 の疎通確認の文がバンドルにある").toBe(true);
+      expect(code.includes("SELECT detail_key, llm_note FROM analyses LIMIT 1"), "D1 の疎通確認の文(migration 0002・0005 の列を読む。Issue #194)がバンドルにある").toBe(true);
       expect(code.includes("env.DB"), "D1 の binding(env.DB)を参照するコードがバンドルにある").toBe(true);
       // 本題
       expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);

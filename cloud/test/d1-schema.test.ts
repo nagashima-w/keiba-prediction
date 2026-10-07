@@ -68,12 +68,13 @@ describe("migration の適用(ローカルの D1)", () => {
       "cloud_settings",
     ].sort());
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("detail_key");
+    expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("llm_note"); // Issue #194(0005)
     const indexes = (await rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx\\_%' ESCAPE '\\' ORDER BY name")).map((r) => r["name"]);
     expect(indexes).toEqual(["idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race"]);
   });
 
-  it("migration は4本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql"]);
+  it("migration は5本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql"]);
   });
 });
 

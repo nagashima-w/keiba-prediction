@@ -2774,6 +2774,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1 の migration も追加しない。
 
+## 次の正式版が 1.19.25 である根拠(Issue #194 での変更)
+
+**patch**(クラウド版の発走前の分析で LLM を使う。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud: 発走前の分析で LLM を呼ぶ(`src/llm-run.ts`・`src/llm-response-store.ts`・`src/race-day-core.ts`・`src/race-day-do.ts`)。成功した応答を DO の表 `race_day_llm_responses` に記録して再生する(冪等)。追加指示を 2,000 UTF-16 単位に切る。理由(固定文言)を作る。ログは status と種別だけ。
+- cloud: D1 の `analyses` に `llm_note` 列を追加(migration `0005_llm_note.sql`。追加のみ)。`GET /api/analyses`・`GET /api/analyses/{id}` の応答に `llmNote` が載る。`GET /api/health` に `secrets.anthropic`(boolean)。
+- 文書: `cloud/README.md`(`ANTHROPIC_API_KEY` の登録手順)・`docs/current-spec.md`。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い(クラウド版だけの変更)。前例: #177〜#193 のクラウド版の変更も patch で運用してきた(ゲート決定 2026-10-07)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1 の変更は追加のみ(`ALTER TABLE ... ADD COLUMN`。旧い行は NULL)。core の `AnalysisRecord`(exe と共有)も変えていない。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

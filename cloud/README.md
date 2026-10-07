@@ -11,8 +11,8 @@ Issue #161(#21-C)の土台と、#162(#21-D)段階2の netkeiba 取得の出口(�
 - `src/socket-fetch.ts` / `src/http1.ts` — ソケットで HTTP/1.1 を話す取得クライアント(`connect` を注入。送るヘッダは固定の4つ + `Host` + `Connection: close`、圧縮は要求しない、再試行・リダイレクト追従なし、サイズ上限 2 MiB・タイムアウト 20 秒)。調査(`spikes/cloudflare/`・`scripts/cloudflare-spike/`)の実装を本番用に作り直したもので、調査のコードは参照しない
 - `src/gate-fetch.ts` — ゲートの `fetchRaw`(RPC)を core の `HttpClient` の fetch 注入口へ繋ぐ(`createGateHttpClient`: 間隔 0・再試行 0。間隔制御はゲートだけが行う)。**Worker の `fetch` で netkeiba を取る経路は持ち込まない**(#160。CloudFront から HTTP 400 になる)
 - `src/netkeiba-check.ts` / `src/page.ts` — 確認用エンドポイント `GET /api/netkeiba/check` の処理(race_id の検証・出馬表の取得とパース)と、`/check` の確認フォーム(Issue #184 で `/` から移した。使い方は下の「確認ページの使い方」)
-- `migrations/` — D1 の migration(#171)。`0001_init.sql` は exe の最終スキーマのダンプ(**生成物。手で編集しない**。`pnpm tsx scripts/gen-cloud-d1-migration.ts` で再生成)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key`・索引2つ)、`0003_r2_ops.sql` は R2 の操作回数のカウンタの表(#173)。詳細は下の「D1(分析履歴)」・「分析履歴ストア」
-- `src/d1-health.ts` — `GET /api/health` の D1 の疎通確認(`SELECT detail_key FROM analyses LIMIT 1`。migration の適用と binding を1回の読み取りで確かめる)
+- `migrations/` — D1 の migration(#171)。`0001_init.sql` は exe の最終スキーマのダンプ(**生成物。手で編集しない**。`pnpm tsx scripts/gen-cloud-d1-migration.ts` で再生成)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key`・索引2つ)、`0003_r2_ops.sql` は R2 の操作回数のカウンタの表(#173)、`0004_settings.sql` は設定の表(#178)、`0005_llm_note.sql` は `analyses.llm_note`(LLM が使われなかった・一部しか使われなかった理由の固定文言。Issue #194)。詳細は下の「D1(分析履歴)」・「分析履歴ストア」
+- `src/d1-health.ts` — `GET /api/health` の D1 の疎通確認(`SELECT detail_key, llm_note FROM analyses LIMIT 1`。migration 0002・0005 の適用と binding を1回の読み取りで確かめる)
 - `smoke-worker.ts` / `smoke-modules.d.ts` — **ローカル smoke 専用**のエントリ(偽ソケット。本番の `main` ではない)
 - `src/undici-stub.ts` — core の `http-client.ts` が動的に import する `undici` の差し替え(バンドルに巨大な undici を入れない)
 - **core(`packages/core`)は相対 import で取り込む**(workspace の外のため `@keiba/core` は解決できない。バレルは使わず `scraper/*.js` を個別に import する)。core の依存(cheerio・iconv-lite・`@anthropic-ai/sdk`〈Issue #193〉)は `packages/core/node_modules` が CI に無いので、**`wrangler.toml` の `[alias]`・`tsconfig.json` の `paths`・`vitest.config.ts` の `alias` の3か所**でこのディレクトリの `node_modules` へ向ける(`scripts/test/cloud-config-guard.test.ts` が3か所の対応を固定)。**core のサブパス(`@keiba/core/pipeline`・`@keiba/core/llm` など)は `[alias]` に1行ずつ**(wrangler の alias は完全一致)。
@@ -47,7 +47,7 @@ pnpm exec wrangler d1 migrations apply DB --local   # D1 の migration をロー
 - **テスト**(`test/d1-schema.test.ts`): 実コマンドで migration を適用したローカル(workerd)の D1 を `getPlatformProxy` で開き、外部キーと索引(`EXPLAIN QUERY PLAN`)を確かめる。
   ★**同じ SQL の文字列で `EXPLAIN QUERY PLAN` を繰り返すと、索引を DROP した後も古い実行計画が返る**(ローカルの D1 で実測)ので、テストは毎回文字列を変えている。
   ローカルの D1 は「1回の呼び出しで 50 クエリ」の制限を**強制しない**(bind 変数 100 個の制限は強制する)。本番の D1 とは別ビルドの SQLite でありうるので、`/api/health`(下)と最初の本番の実保存(#164 以降)で本番の挙動を確かめる。
-- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok } }`。DO と D1 は独立に確認し、どちらかが駄目なら 503(理由・例外の文面は返さない)。**デプロイ後の実機確認**: Access でログインしたブラウザで `/api/health` を開き、`d1.ok` が `true` であること
+- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic } }`。DO と D1 は独立に確認し、どちらかが駄目なら 503(理由・例外の文面は返さない)。`secrets.anthropic` は、Worker の secret `ANTHROPIC_API_KEY` が**登録されているか**(空白だけは未登録)の boolean だけで、**値・長さ・一部は返さない**。`ok` の判定には含めない(キーが無くても、分析は LLM なしで動く)。**デプロイ後の実機確認**: Access でログインしたブラウザで `/api/health` を開き、`d1.ok` が `true` であること(キーを登録したあとは `secrets.anthropic` も `true`)
   (`false` なら、migration が本番の D1 に適用されていないか、binding が繋がっていない。ワークフローのログの「D1 の migration を本番に適用」を見る)。
 - **容量の見積もり**: `pnpm tsx scripts/measure-d1-size.ts`(結果と N は `docs/current-spec.md` の「クラウド版の D1 の容量の見積もり」)。
 
@@ -124,10 +124,19 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 | `ACCESS_TEAM_NAME` | Zero Trust のチーム名(`<チーム名>.cloudflareaccess.com` の左側。小文字・数字・ハイフンのみ) |
 | `ACCESS_AUD` | Access アプリケーションの AUD タグ |
 | `ACCESS_ALLOWED_EMAIL` | 許可するメールアドレス(1件) |
-| `ANTHROPIC_API_KEY` | 発走前の分析の LLM の API キー(Issue #194〈#179-b〉)。**登録は任意**: 未登録なら、LLM を使わず統計のみで保存し、理由「LLM の API キーが未登録…」を残す(分析は止まらない)。キーの値は**ユーザーが自分で**登録する(ダッシュボード、または `wrangler secret put ANTHROPIC_API_KEY` の対話入力)。リポジトリ・チャットには貼らない。費用の上限は Claude Console のワークスペースの spend limit に任せる(キーが、その上限を設定したワークスペースのものか確かめる) |
+| `ANTHROPIC_API_KEY` | 発走前の分析の LLM の API キー(Issue #194〈#179-b〉)。**登録は任意**: 未登録なら、LLM を使わず統計のみで保存し、理由「LLM の API キーが未登録のため…」を画面用に D1(`analyses.llm_note`)へ残す(分析は止まらない)。登録の手順は、この表の下の「`ANTHROPIC_API_KEY` の登録」 |
 | `DISCORD_WEBHOOK_URL` | (#166 で使う。今は登録しない) |
 
 未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作)。
+
+### `ANTHROPIC_API_KEY` の登録(発走前の分析の LLM。ユーザーが自分で行う)
+- **キーの値は、チャット・Issue・コミット・リポジトリのどこにも貼らない**(貼らせる手順は無い。下の2つの方法は、どちらもキーをユーザー自身の画面・端末で入力する)。Claude や CI に渡す必要は無い。
+- **使うキー**: Claude Console で、**費用の上限(spend limit)を設定したワークスペースのキー**を使う。アプリ側には費用の上限も ON/OFF の設定も無く、上限はワークスペースの spend limit だけが担う(上限に達して API がエラーを返しても、分析は止まらず、LLM なし〈prior のまま〉で保存して理由を残す)。**キーがどのワークスペースのものかは、Console で確かめる**(こちらからは確認できない)。
+- **方法1: ダッシュボード**: Workers & Pages > 対象の Worker(`keiba-cloud`)> 設定 > 変数とシークレット > 追加。**名前は `ANTHROPIC_API_KEY`**、**種類は「シークレット」**(「テキスト」にすると次のデプロイで上書きされる)、値の欄にキーを入力して保存・デプロイする。
+- **方法2: wrangler**: ユーザーが自分の端末で、`cloud/` に移って `pnpm exec wrangler secret put ANTHROPIC_API_KEY` を実行し、**対話の入力欄**にキーを入力する(コマンドの引数や環境変数にキーを書かない)。
+- **確認**: Access でログインしたブラウザで `/api/health` を開き、`secrets.anthropic` が `true` になっていること(値は表示されない)。**secret は `wrangler deploy` で消えない**。登録・更新・削除すると、Worker に新しいデプロイが作られ、次に DO が起きたとき(次の分析)から反映される。
+- **GitHub Actions の「Secrets の存在を確認」とは別物**: ワークフローが確認するのは GitHub の Secrets(`CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID`)だけで、Worker の secret は CI から見えない・触らない。
+- **削除**(LLM を止めたいとき): ダッシュボードで `ANTHROPIC_API_KEY` を削除する(または `wrangler secret delete ANTHROPIC_API_KEY`)。以後の発走前の分析は、LLM なしで保存される(理由は「API キーが未登録」)。
 
 ## 初回セットアップ(ユーザー作業)
 公式ドキュメントで確認できなかった箇所は「未確認」と書いている。
@@ -253,10 +262,10 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **バンドルの実測**(`wrangler deploy --dry-run`): SDK + `analyzeRace` 一式の入口(NetkeibaGate の export を含む probe)で 309.94 KiB・gzip 63.10 KiB(本番の現状は 1952.76 KiB・gzip 512.63 KiB)(`test/bundle-guard.test.ts` が、本番との和が 3 MB に収まることと、単体 512 KiB 以内を検査)。
 - **Workers での実行**: 偽 fetch を注入した workerd(`wrangler dev --local`)で、Models API の取得 → メッセージ送信が通ること、`timeout` が効くこと、429 で `maxRetries` の既定が 3 本・0 が 1 本であることを確かめた。**実 API には出ていない。**
 
-## 発走前の分析の LLM(Issue #194〈#179-b〉。b1: 実行・記録と再生・追加指示の切り詰め・理由・ログ)
+## 発走前の分析の LLM(Issue #194〈#179-b〉。b1: 実行・記録と再生・追加指示の切り詰め・理由・ログ / b2: 理由の永続化・health)
 発走前(`pre_race`)の分析は、**常に LLM を使う**(費用の上限・ON/OFF の設定は無い)。朝(`morning`)の準備は使わない。LLM の呼び出しは**計算ステップの中**(`analyze`)。計算ステップの前提「ネットワークに出ない」が守っているのは **netkeiba(gate)**で、gate は0回のまま。LLM は別の注入口(sender)から Anthropic に出る。
 - **キー**: Worker の secret `ANTHROPIC_API_KEY`(上の「Worker の secret」)。未登録・空白だけなら、`RaceDay` に LLM の依存を渡さず、LLM なしで保存する(理由は固定文言)。
-- **失敗しても止めない**: API のエラー(spend limit・認証・過負荷・タイムアウト)・切り詰め・拒否・応答の解析失敗でも、**prior のまま**保存する。モデル欄は null(LLM が実際に効いたときだけモデル名を残す)。理由は固定文言(core の `FALLBACK_REASON_*`・キー未登録・印の救済)で、保存先(D1)への永続化は b2。
+- **失敗しても止めない**: API のエラー(spend limit・認証・過負荷・タイムアウト)・切り詰め・拒否・応答の解析失敗でも、**prior のまま**保存する。モデル欄は null(LLM が実際に効いたときだけモデル名を残す)。理由は固定文言(core の `FALLBACK_REASON_*`・キー未登録・印の救済)で、**D1 の `analyses.llm_note` に保存する**(b2。migration 0005。理由があるときだけ UPDATE を1文足す〈配分ありで 7 文・なしで 5 文。理由なしは 6・4 のまま〉)。`GET /api/analyses`(一覧)と `GET /api/analyses/{id}`(詳細)の応答に `llmNote` が載る(画面での表示は #195)。
   **API のエラーの本文・診断メッセージは、画面・D1・タスク行・ログのどこにも出さない**(SDK の例外のメッセージにはレスポンスの本文が入る)。ログには `status=429` か `種別=timeout|connection|other` だけを出し、`sk-ant-` で始まる文字列は伏せる(`src/llm-run.ts`)。
 - **送信回数**: 1レースの sender の呼び出しは**最大3回**(`analyzeRace` の2試行 + モデルの降格1回)。SDK の内部再試行は0(`llm-sender.ts`)。
 - **冪等(アラームは少なくとも1回実行される)**: 成功した応答を、保存の**前**に DO の表 `race_day_llm_responses` に記録し(`src/llm-response-store.ts`)、計算ステップの再試行・再実行では**それを再生して送り直さない**。失敗(例外)は記録しない。記録は、done・failed・再予約(`schedule`)・掃除のときに消す。

@@ -72,6 +72,11 @@ export interface AnalysisView {
   readonly evEstimated: boolean;
   readonly model: string | null;
   readonly promptVersion: string | null;
+  /**
+   * LLM が使われなかった・一部しか使われなかった理由(**固定文言**。D1 の `llm_note`。Issue #194)。問題なく効いたとき・旧い分析は null。
+   * 画面(#195)が、モデル欄(`model` が null のとき)の近くに出す。API のエラーの本文は、そもそも保存していない。
+   */
+  readonly llmNote: string | null;
   readonly race: AnalysisViewRace;
   readonly horses: readonly AnalysisViewHorse[];
   /** 配分(D1 の配分の行が無ければ null)。 */
@@ -107,6 +112,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
     evEstimated: analysis.evEstimated,
     model: analysis.model,
     promptVersion: analysis.promptVersion,
+    llmNote: result.llmNote,
     race: {
       venueName: venueNameOf(analysis.raceId),
       raceNumber: raceNumberOf(analysis.raceId),

@@ -42,6 +42,8 @@ import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-t
 import { DoSqlCacheStore } from "./do-cache-store";
 import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fetch";
 import { resolveClipVariant } from "@keiba/core/pipeline";
+import type { AnalysisSaveExtra } from "./analysis-save-extra";
+export type { AnalysisSaveExtra };
 import type { ModelSelector } from "@keiba/core/llm";
 import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelector, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets } from "./llm-run";
 import { SqlLlmResponseStore } from "./llm-response-store";
@@ -90,11 +92,6 @@ export type TaskStatus = "queued" | "fetched" | "done" | "failed";
 /** 朝の取得と prior(`morning`。D1・R2 には書かない)・発走前の分析(`pre_race`。LLM なし。D1・R2 に保存する。Issue #178)。 */
 export type TaskMode = "morning" | "pre_race";
 
-/** 保存のときに、分析のレコード(core の `AnalysisRecord`)とは別に渡す情報(Issue #194)。 */
-export interface AnalysisSaveExtra {
-  readonly llmNote: string | null;
-}
-
 /**
  * 発走前の分析の保存先(D1・R2。DO のラッパが `D1AnalysisStore` で実装する)。**朝(morning)のタスクでは呼ばない。**
  *  - `findByAnalyzedAt`: 同じレース・同じ分析時刻の分析が保存済みなら、その id(無ければ null)。計算ステップの再実行(アラームは at-least-once)で、
@@ -103,7 +100,7 @@ export interface AnalysisSaveExtra {
  *  - `countChildren`: 保存した分析の子の行(馬・買い目)の件数。子の行が正しい親 id に紐づいたかを、最初の実保存から確かめるため(#175 の `max(id)` の前提)。
  */
 export interface AnalysisSink {
-  /** `extra.llmNote`(発走前の計算ステップは常に渡す): LLM が使われなかった・一部しか使われなかった理由(固定文言。問題なく効いたときは null)。保存先(D1)への永続化は #194 の b2。 */
+  /** `extra.llmNote`(発走前の計算ステップは常に渡す): LLM が使われなかった・一部しか使われなかった理由(固定文言。問題なく効いたときは null)。D1 の `analyses.llm_note` に保存される(Issue #194 b2)。 */
   save(record: AnalysisRecord, extra?: AnalysisSaveExtra): Promise<{ readonly id: number; readonly detail: "stored" | "failed" | "skipped" }>;
   findByAnalyzedAt(raceId: string, analyzedAt: string): Promise<number | null>;
   countChildren(analysisId: number): Promise<{ readonly horses: number; readonly bets: number }>;

@@ -59,6 +59,8 @@ export interface Env extends AccessEnv {
   DB: AnalysisDb;
   /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
   ANALYSIS_DETAIL: AnalysisBucket;
+  /** 発走前の分析の LLM の API キー(Worker の secret。ユーザーが登録する。Issue #194)。ここでは「登録されているか」だけを `/api/health` に返す(値は読まない・返さない)。 */
+  ANTHROPIC_API_KEY?: string;
 }
 
 export interface HandlerDeps {
@@ -174,7 +176,9 @@ export async function handle(
     }
     const d1 = await checkD1(env.DB);
     const ok = sqlite && d1.ok;
-    return json({ ok, durableObject: { sqlite }, d1: { ok: d1.ok } }, ok ? 200 : 503);
+    // Issue #194: API キー(Worker の secret ANTHROPIC_API_KEY)が**登録されているか**だけを返す(値・長さ・一部は返さない)。ok には含めない(キーが無くても、分析は LLM なしで動く)。
+    const anthropic = typeof env.ANTHROPIC_API_KEY === "string" && env.ANTHROPIC_API_KEY.trim() !== "";
+    return json({ ok, durableObject: { sqlite }, d1: { ok: d1.ok }, secrets: { anthropic } }, ok ? 200 : 503);
   }
 
   if (pathname === "/api/netkeiba/check") {

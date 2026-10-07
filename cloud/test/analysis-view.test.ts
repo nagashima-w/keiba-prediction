@@ -70,11 +70,27 @@ const ALLOCATION: StoredAllocation = {
   ],
 };
 
-function detail(a: StoredAnalysis, status: DetailStatus): AnalysisDetailResult {
-  return { analysis: a, detail: status };
+function detail(a: StoredAnalysis, status: DetailStatus, note: string | null = null): AnalysisDetailResult {
+  return { analysis: a, detail: status, llmNote: note };
 }
 
 const sorted = (o: object): string[] => Object.keys(o).sort();
+
+describe("buildAnalysisView の llmNote(Issue #194)", () => {
+  const NOTE = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
+
+  it("D1 の理由(固定文言)をそのまま載せる。理由なしは null(キーは常にある)", () => {
+    expect(buildAnalysisView(detail(analysis(), "present", NOTE), ALLOCATION).llmNote).toBe(NOTE);
+    expect(buildAnalysisView(detail(analysis(), "present"), ALLOCATION).llmNote).toBeNull();
+    expect("llmNote" in buildAnalysisView(detail(analysis(), "none"), undefined)).toBe(true);
+  });
+
+  it("詳細が present でないとき(none・missing)も、理由は載せる(詳細の状態に依らない)", () => {
+    for (const status of ["none", "missing"] as const) {
+      expect(buildAnalysisView(detail(analysis(), status, NOTE), undefined).llmNote, status).toBe(NOTE);
+    }
+  });
+});
 
 describe("buildAnalysisView(Issue #183)", () => {
   it("present: 馬名・レース情報を raceSnapshot から結合し、場名・R は raceId から導く", () => {
@@ -101,7 +117,7 @@ describe("buildAnalysisView(Issue #183)", () => {
 
   it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
-    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "model", "promptVersion", "race", "raceId"]);
+    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "llmNote", "model", "promptVersion", "race", "raceId"]);
     expect(sorted(view.race)).toEqual(["courseType", "distance", "raceName", "raceNumber", "startTime", "trackCondition", "venueName", "weather"]);
     for (const h of view.horses) {
       expect(sorted(h)).toEqual(["adjustedProb", "ev", "isPositive", "mark", "name", "placeOddsMin", "prior", "reason", "umaban"]);

@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.24)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.25)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.24`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.25`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -976,7 +976,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **binding**: `[[d1_databases]]`(binding `DB`・database_name `keiba-cloud-db`・`database_id` は公開してよい値でリポジトリに書いてある。`remote = true` は使わない)。
 - **CI**(`deploy-cloud.yml`): check ジョブは `wrangler d1 migrations apply DB --local`。deploy ジョブは `wrangler deploy` の前に、database_id が仮の値でないことの確認 →
   D1 の権限確認(ステータスコードだけを出力)→ `migrations apply DB --remote`。
-- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok } }`(D1 は `SELECT detail_key FROM analyses LIMIT 1` で、migration の適用と binding を確かめる)。
+- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic } }`(D1 は `SELECT detail_key, llm_note FROM analyses LIMIT 1` で、migration の適用と binding を確かめる。`secrets.anthropic` は Worker の secret `ANTHROPIC_API_KEY` が登録されているかの boolean だけで、値は返さず、`ok` には含めない。#194)。
 - **後続の設計(合意済み。2026-10-06 の着手前ゲート)**: 大きな列(`race_snapshot_json`・`raw_response`・馬ごとの `contributions_json`)は R2(分析ごとに1オブジェクトの JSON)に置き、
   D1 には要約と R2 のキー(`detail_key`)だけを置く。書く順序は D1 → R2(R2 が失敗した行は `detail_key` を NULL にして要約だけを残す)。安全柵(R2 の月ごとの操作回数が無料枠の 10% を超えたら R2 に書かず D1 の要約だけ)は #173。
   発走前の分析だけを保存し、朝の prior は D1 に保存しない。
@@ -1217,6 +1217,14 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **「結果を見る」のリンクを廃止**。結果画面(`#analysis=<id>`)は、過去の分析の一覧のリンク用に残す。
 - **【記録】**: 板で `done` なのに `analysis_id` が無い(サーバ側では到達しない)ときは何も出さない/取得した分析の `raceId` が画面のレースと違う場合の検査はしない/ページを再読込するとキャッシュが消え、完了済みのレースを開くたびに id ごとに 1 回ずつ R2 を読む。
 - **検査**: `test/client-race.test.ts`・`client-view.test.ts`・`client-app.test.ts`・`client-app-run.test.ts`。**実機(スマホ)でのレイアウト・タップ・スクロール位置は自動検査できない**(デプロイ後にユーザーが確認する)。
+
+### クラウド版の発走前の分析で LLM を使う(#194〈#179-b〉。v1.19.25)
+変更は `cloud/` のみ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「発走前の分析の LLM」「`ANTHROPIC_API_KEY` の登録」。画面は #195〈#179-c〉。
+- **常に LLM を使う**(発走前だけ。朝は使わない。費用の上限・ON/OFF の設定は無く、費用は Claude Console のワークスペースの spend limit に任せる)。Worker の secret `ANTHROPIC_API_KEY`(ユーザーがダッシュボードまたは `wrangler secret put` で登録)が無ければ、LLM なしで保存し、理由を残す。
+- **止めない**: API のエラー・切り詰め・拒否・解析失敗でも、prior のまま保存する。モデル欄は、LLM が実際に効いたときだけモデル名(それ以外は null)。**理由は固定文言**で `analyses.llm_note`(migration `0005`。追加のみ)に保存し、`GET /api/analyses`・`GET /api/analyses/{id}` の応答の `llmNote` に載る。API のエラーの本文は、画面・D1・タスク行・ログのどこにも出さない。
+- **冪等**: 成功した応答を DO の表 `race_day_llm_responses` に記録し、保存の失敗の再試行・再実行では再生して送り直さない。1レースの送信は最大3回(`analyzeRace` の2試行 + モデルの降格1回)。
+- **`GET /api/health` の `secrets.anthropic`**: キーが登録されているかの boolean(値は返さない。`ok` に含めない)。
+- **検査**: `cloud/test/race-day-llm.test.ts`・`race-day-llm-note.test.ts`・`analysis-llm-note.test.ts`・`llm-run.test.ts`・`llm-response-store.test.ts`・`handler.test.ts`・`analysis-view.test.ts`、`scripts/test/cloud-d1-schema.test.ts`。
 
 ### クラウド版の LLM の土台(#193〈#179-a〉。v1.19.24。**挙動は変えない**)
 変更は `cloud/` と core の依存の口だけ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「LLM の土台」。**#193 の時点では、本番の入口は LLM を呼ばなかった**(実行本体は #194〈#179-b〉、画面は #195〈#179-c〉。#194 の b1 で、発走前の分析が LLM を使うようになった。詳細は `cloud/README.md` の「発走前の分析の LLM」。公開は b2 の完了後)。
