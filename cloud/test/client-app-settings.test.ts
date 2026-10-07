@@ -3,7 +3,8 @@ import type { FetchLike } from "../client/api";
 import { createApp, type App } from "../client/app";
 import type { VNode } from "../client/vnode";
 import { DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
-import { deferred } from "./client-fakes";
+import { createMounter, type DomDocument } from "../client/dom";
+import { createFakeTimers, deferred } from "./client-fakes";
 
 /**
  * Issue #189(段階2): 設定画面(`#settings`)の制御。偽の fetch・偽のハッシュ・描画の記録(描画した回数と force の印)。
@@ -381,5 +382,138 @@ describe("画面を離れる(下書きの破棄と、遅れて届いた応答)",
     expect(h.renders.length).toBe(rendersBefore); // 古い保存の応答は、描画を起こさない
     expect(h.field("bankroll").attrs?.["value"]).toBe("500000");
     expect(textOf(h.tree())).not.toContain("保存しました");
+  });
+});
+
+/**
+ * 追跡(ポーリング)が動いている間も、設定画面で打っている欄を壊さない(Issue #189。`input` でも下書きを書くようにしたことの副作用の是正)。
+ * 追跡の周期・完了の検知などが呼ぶ**強制なしの `render()`** は、設定画面では「最後に強制描画したときの内容(画面に出ている内容)」から木を作る
+ * =下書きの最新値は、次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に反映しない。木が同じなら `createMounter` は DOM を置き換えない(フォーカス・キーボードが保たれる)。
+ */
+describe("追跡のポーリング中も、打っている欄を壊さない", () => {
+  class FakeNode {
+    readonly children: FakeNode[] = [];
+    value = "";
+    checked = false;
+    constructor(readonly tag: string) {}
+    setAttribute(): void {}
+    appendChild(child: FakeNode): void {
+      this.children.push(child);
+    }
+    addEventListener(): void {}
+  }
+  const doc: DomDocument = { createElement: (tag) => new FakeNode(tag), createTextNode: () => new FakeNode("#text") };
+
+  async function trackedHarness() {
+    const timers = createFakeTimers();
+    const calls: string[] = [];
+    const posts: Record<string, unknown>[] = [];
+    const root = { replaced: 0, replaceChildren(): void { this.replaced += 1; } };
+    const mount = createMounter(doc, root);
+    let latest: VNode | null = null;
+    let renderCalls = 0;
+    let hash = "";
+    const board = { ok: true, kaisai_date: "20260628", races: [{ race_id: "202603020211", mode: "morning", status: "queued", attempts: 0, error: null, queued_at: 1, updated_at: 2, prior: false, analysis_id: null, detail: null, children_ok: null }] };
+    const app = createApp({
+      fetch: async (url, init) => {
+        calls.push(`${init.method} ${url}`);
+        if (url.startsWith("/api/races")) return ok({ ok: true, kaisai_date: "20260628", venue: "central", races: [] });
+        if (url.startsWith("/api/analyses/status")) return ok(board); // いつまでも実行中(追跡が続く)
+        if (url === "/api/settings" && init.method === "GET") return ok({ ok: true, settings: SERVER, source: "d1" });
+        if (url === "/api/settings" && init.method === "POST") {
+          const body = JSON.parse(init.body!) as Record<string, unknown>;
+          posts.push(body);
+          return ok({ ok: true, settings: body });
+        }
+        throw new Error(`想定外の取得: ${url}`);
+      },
+      now: () => new Date("2026-06-28T00:00:00Z"),
+      render: (tree, force) => {
+        renderCalls += 1;
+        latest = tree;
+        mount(tree, force === true);
+      },
+      getHash: () => hash,
+      setHash: () => {},
+      timers: { set: (fn, ms) => timers.set(fn, ms), clear: (handle) => timers.clear(handle) },
+      isVisible: () => true,
+    });
+    app.start();
+    await app.whenIdle();
+    return {
+      app,
+      timers,
+      calls,
+      posts,
+      root,
+      tree: () => latest!,
+      renderCalls: () => renderCalls,
+      go: (next: string) => {
+        hash = next;
+        app.onHashChange();
+      },
+    };
+  }
+
+  it("一覧で追跡が動いている状態で #settings に移り、input で打っても、ポーリングの周期の再描画は DOM を置き換えない(木が変わらない)。その後に保存すると、打った値が POST に入る", async () => {
+    const t = await trackedHarness();
+    expect(t.timers.pending(), "前提: 追跡のタイマーが張られている").toBe(1);
+    t.go("#settings");
+    await t.app.whenIdle();
+    const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
+    expect(field("bankroll").attrs?.["value"]).toBe("500000"); // 前提: 設定画面が出ている
+    const polls = (): number => t.calls.filter((c) => c === "GET /api/analyses/status?kaisai_date=20260628").length;
+    const pollsBefore = polls();
+    const treeBefore = JSON.stringify(t.tree());
+    const replacedBefore = t.root.replaced;
+    const rendersBefore = t.renderCalls();
+
+    field("bankroll").on!.input!("999000");
+    field("additionalInstruction").on!.input!("打っている途中");
+    await t.timers.advance(20_000); // ポーリングの周期を何度か進める(3 秒 × 10 回の最初の数回)
+
+    expect(polls(), "前提: ポーリングが実際に走った").toBeGreaterThanOrEqual(pollsBefore + 3);
+    expect(t.renderCalls(), "前提: 強制なしの再描画が実際に呼ばれた(空振りでない)").toBeGreaterThan(rendersBefore);
+    expect(JSON.stringify(t.tree()), "画面に出ている内容(最後の強制描画時の下書き)から作るので、木は変わらない").toBe(treeBefore);
+    expect(t.root.replaced, "DOM を置き換えない(打っている欄がフォーカスを失わない)").toBe(replacedBefore);
+
+    findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "settings-save")[0]!.on!.click!();
+    expect(t.posts).toHaveLength(1);
+    expect(t.posts[0]).toMatchObject({ bankroll: 999_000, additionalInstruction: "打っている途中" }); // 木に反映しなくても、下書きは最新
+    await t.app.whenIdle();
+  });
+
+  it("画面に入った直後の描画・取得完了の強制描画では、画面に出す内容が正しく作られる(読み込み中 → 取得した設定の値)。再読込のあとは、下書きを捨てた内容", async () => {
+    const t = await trackedHarness();
+    t.go("#settings");
+    // 入った直後(取得中)の描画は「読み込み中…」
+    await t.app.whenIdle();
+    expect(findAll(t.tree(), (n) => n.attrs?.["data-field"] === "bankroll")[0]!.attrs?.["value"]).toBe("500000");
+    const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
+    field("bankroll").on!.input!("1");
+    await t.timers.advance(10_000); // 追跡の再描画では、画面は変わらない
+    expect(field("bankroll").attrs?.["value"]).toBe("500000");
+    findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("refresh"))[0]!.on!.click!(); // 再読込: 下書きを捨てて取り直す(強制描画)
+    await t.app.whenIdle();
+    expect(field("bankroll").attrs?.["value"]).toBe("500000");
+    // 離れて戻ると、入った直後は取得中の表示
+    t.go("#date=20260628&venue=central");
+    t.go("#settings");
+    expect(JSON.stringify(t.tree())).toContain("読み込み中…");
+    await t.app.whenIdle();
+    expect(field("bankroll").attrs?.["value"]).toBe("500000");
+  });
+
+  it("検証エラー・保存の失敗の直後は強制描画なので、そのとき初めて最新の下書きが木に出る(エラーのある入力が画面に残る)", async () => {
+    const t = await trackedHarness();
+    t.go("#settings");
+    await t.app.whenIdle();
+    const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
+    field("bankroll").on!.input!("abc");
+    expect(field("bankroll").attrs?.["value"]).toBe("500000"); // 打っている途中は木に出さない
+    findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "settings-save")[0]!.on!.click!();
+    expect(t.posts).toEqual([]);
+    expect(field("bankroll").attrs?.["value"]).toBe("abc"); // 検証エラーの強制描画で、最新の下書きが出る
+    expect(field("bankroll").attrs?.["aria-invalid"]).toBe("true");
   });
 });

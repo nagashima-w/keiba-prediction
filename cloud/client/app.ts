@@ -26,6 +26,7 @@
  *  - **入力(数値欄・追加指示は `input`〈打つたび〉と `change`、チェックボックス・選択は `change`)は下書きを書くだけで、再描画しない**(入力中の欄・フォーカスを壊さない。保存中の入力は無視。
  *    `input` でも書くのは、`change` が blur で発火し、フォーカスがあるまま「保存」を押して click が先に届くと、直前の入力を取りこぼすため)。保存・再読込・取得・失敗の直後は **`render(true)`**
  *    (木が前回と同じでも DOM を置き換える。change では描画しないので、DOM が下書きと食い違ったまま残るのを、強制の再描画で直す)。
+ *  - **強制なしの描画(追跡のポーリングなど、設定画面の外の原因)は、画面に出ている内容の写し(`settingsShown`)から木を作る**。`input` で下書きが変わっても木は変わらず、`createMounter` が DOM を置き換えない(打っている欄・キーボードを壊さない)。
  *  - 保存の押下: 検証(項目ごと。保存の押下時に1回)→ NG なら POST せず項目ごとのエラー / OK なら全 14 項目を POST。保存中は二重に送らない。失敗しても入力は残る。成功したらサーバが返した設定で下書きを戻す。
  *  - 世代(`settingsGen`): 離れる・取り直すたびに増やし、**古い世代の応答(離れる前に出した取得・保存)は今の画面に反映しない**。
  *
@@ -212,6 +213,13 @@ export function createApp(deps: AppDeps): App {
   let settingsSave: SettingsSaveState = { kind: "idle" };
   /** 世代。離れる・取り直すたびに増やし、古い世代の応答を捨てる。 */
   let settingsGen = 0;
+  /**
+   * 画面に出ている内容(最後に**強制描画**したとき、または画面に入ったときの、取得の状態・下書き・エラー・保存の状態の写し)。
+   * **強制なしの描画(追跡のポーリング・他の取得の完了など、設定画面の外の原因)は、この写しから木を作る**=打っている途中の下書きは、
+   * 次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に出さない。木が同じなら `createMounter` は DOM を置き換えない(打っている欄がフォーカスを失わない・スマホのキーボードが閉じない)。
+   * 下書き(`settingsDraft`)自体は最新のまま(保存はそれを読む)。null は「まだ写していない(画面に入った直後)」。
+   */
+  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState } | null = null;
   const settingsInflight = new Set<Promise<unknown>>();
 
   const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack, onSettingsInput, onSettingsSave };
@@ -248,7 +256,11 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "settings": {
-        deps.render(renderScreen(buildSettingsModel({ load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave }), actions), force);
+        // 強制描画のとき、または画面に入った直後(まだ写していない)は、今の状態を写す。それ以外(強制なし)は、画面に出ている内容の写しから作る。
+        if (force || settingsShown === null) {
+          settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave };
+        }
+        deps.render(renderScreen(buildSettingsModel(settingsShown), actions), force);
         return;
       }
       case "list": {
@@ -458,6 +470,7 @@ export function createApp(deps: AppDeps): App {
   /** 設定画面を離れる: 下書き・エラー・保存の状態を捨て、世代を進める(遅れて届く応答を捨てる)。戻ると取り直す。 */
   function leaveSettings(): void {
     settingsGen += 1;
+    settingsShown = null;
     settingsLoad = null;
     settingsDraft = null;
     settingsErrors = {};
