@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.21.1)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.21.2)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.21.1`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.21.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1184,6 +1184,14 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **定時の自動実行の純関数**(`cloud/src/auto-run-plan.ts`。Issue #202〈#166-A〉。**まだ production から呼ばれない**。呼ぶのは #203〜#206): `jstKaisaiDate(scheduledTimeMs)`(cron の `scheduledTime` から **JST の開催日**。UTC の日付をそのまま使うと UTC 15:00〜23:59 で1日ずれる)・
   `selectAutoRunTargets({ central, nar })`(**中央は全件、地方は Jpn1/2/3 だけ**。中央 → 地方の順・`venue` の印つき)・`planPreRaceDue({ kaisaiDate, startTime, offsetMinutes, nowMs })`
   (期限 = 発走 − offset 分。判定の順: `now ≥ start` → skip〈`started`〉/ `due ≥ now` → scheduled / 期限を過ぎていて発走まで 10 分(`MIN_AUTO_RUN_LEAD_MS`)以上 → immediate・未満 → skip〈`too-late`〉。発走時刻が無い・壊れているときは skip〈`no-start-time`〉)。
+- **朝の計画**(Issue #203 段階2。`cloud/src/race-day-core.ts`・`cloud/src/race-day-plan.ts`。**まだ呼ぶ入口が無い**: cron・`scheduled` は #206): `requestPlan({ kaisaiDate })`(RPC。依頼だけをして戻る。**2回目以降は `already-planned`で何も変えない**=cron の重複配信に強い)→
+  アラームの中で、**計画の段階**(会場ごとに 1 ステップ = gate 1 本。中央 → 地方の一覧。失敗は 60 秒おきに最大 3 回、`blocked` は再試行しない。再試行の待ちは時刻 `next_try_at` で持つ)→ **確定**
+  (offset を設定から決める。読めなければ 3 回再試行して**既定の 45 分**で確定し、`plan_offset_source = default-fallback` を残す。対象 = 中央の全件 + 地方の Jpn。各対象に `planPreRaceDue` で期限を計算して `race_day_plan` に書き、
+  pre_race を走らせる行(planned)にだけ morning を積む。skip〈`no-start-time`・`started`・`too-late`・`cap`〉には積まない。**既にある morning は状態に関係なく積み直さない**。1日の上限(100)は、対象1件につき morning と pre_race の2行ぶん)。
+  期限が来た planned の行は、起床のたびに pre_race を積んで promoted にする(同じレースの pre_race が実行中なら、積み直さず行だけ promoted。上限なら skipped〈cap〉)。**アラームの候補になる行は、起きたときに必ず状態が変わる**(ループの防止)。
+  確定は**原子性に頼らない冪等**(確定の印は最後。計画の行は `ON CONFLICT DO NOTHING`・morning は無いときだけ・offset は最初の決定を残す。途中で落ちても再実行で足りない分だけが足される)。
+  DO の表: `race_day_plan_venue`(会場の状態・取得した一覧の本体〈確定したら捨てる〉)・`race_day_plan`(期限と状態)・meta の `plan_*`。**掃除は、キャッシュの行と孤立した LLM の応答の記録だけを消す**(従来どおり。タスク・prior・計画の行は消さない)。
+  `getPlanProgress()` は、朝のまとめ(#205)のための読み取り(`stage`・会場の状態と件数・各行の期限と morning の状態・`morningAllTerminal`〈確定済みで、積んだ morning がすべて done か failed。一部が failed でも true〉・`offsetSource`)。
 - **アラームの合成と処理の順**(Issue #203 段階1。`cloud/src/race-day-core.ts`): DO のアラームは1つだけなので、`setAlarm` を呼ぶのは `rearm()` の1箇所だけにし、純関数 `nextAlarmAt` が
   「今すぐの仕事(now)・再試行待ち(now + 60 秒)・計画の次の試行/期限(段階2。`max(それ, now)`)・掃除の期限」のうち**最も早い時刻**を選ぶ(掃除の期限は、仕事〈即時・再試行待ち〉があるあいだは候補にしない)。
   予約が無いときの `setAlarm` の回数・値は従来と同じ。`pickNext` は **発走前(pre_race)を朝(morning)より先**に処理する(計算待ち → 取得待ちの順は従来どおり。取得待ちのうち**再試行待ち〈試行済み〉は最後**にして、再試行の間隔を保つ)。

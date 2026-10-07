@@ -83,12 +83,15 @@ export interface PlanPreRaceDueInput {
  *  2. `due ≥ now`(期限ちょうどを含む)→ scheduled(期限に実行)
  *  3. 期限は過ぎている: 発走まで {@link MIN_AUTO_RUN_LEAD_MS} 以上 → immediate / 未満 → skip(`too-late`)
  * 発走時刻だけが壊れているときは例外にせず skip(`no-start-time`。1レースの欠損で計画全体を落とさない)。
- * @throws RangeError offset・開催日が不正(呼び出し側のバグ。黙って通さない)
+ * @throws RangeError offset・開催日・現在時刻(有限でない)が不正(呼び出し側のバグ。黙って通さない)
  */
 export function planPreRaceDue(input: PlanPreRaceDueInput): DuePlan {
   const { kaisaiDate, startTime, offsetMinutes, nowMs } = input;
-  // 契約違反(offset・開催日)は、発走時刻の欠損より先に投げる。
+  // 契約違反(offset・開催日・現在時刻)は、発走時刻の欠損より先に投げる。nowMs が NaN だと、比較がすべて false になって `too-late` を返してしまう(#202 レビューの記録 R3)。
   preRaceAlarmAt(kaisaiDate, "00:00", offsetMinutes);
+  if (!Number.isFinite(nowMs)) {
+    throw new RangeError(`現在時刻は有限のエポックミリ秒で指定してください(渡された値: ${String(nowMs).slice(0, 32)})`);
+  }
   if (startTime === undefined) {
     return { kind: "skip", reason: "no-start-time" };
   }

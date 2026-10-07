@@ -1,0 +1,305 @@
+/**
+ * 朝の計画の保存層(Issue #203 段階2。親 #166)。日単位の DO(`RaceDayCore`)の SQLite に、**新しい表だけ**を足す(既存の表には ALTER しない。`CREATE TABLE IF NOT EXISTS`)。
+ * 純ロジック: `cloudflare:workers` を import しない。時計・gate・アラームは持たない(呼び出し側の `RaceDayCore` が持つ)。ここは SQL の読み書きだけ。
+ *
+ *  - `race_day_plan_venue`: 計画の段階。会場(中央 `central`・地方 `nar`)ごとの一覧の取得の状態(pending → ok / failed)。再試行の待ちは時刻(`next_try_at`)で持つ。
+ *    取得した一覧の本体(`entries_json`。`RaceListEntry` の配列の JSON)は、確定(finalize)まで持ち、確定したら捨てる。
+ *  - `race_day_plan`: 対象レースごとの期限(計画時点の offset で固定)。state: `planned`(期限を待つ)→ `promoted`(pre_race を投入した)/ `skipped`(理由は `skip_reason`)。
+ *  - meta(`race_day_meta`)のキー: `plan_requested_at`・`plan_finalized_at`・`plan_offset`・`plan_offset_source`・`plan_finalize_attempts`・`plan_finalize_next_try_at`。
+ *
+ * **起きたときに必ず状態が変わる**(アラームの候補になる行は、起きた処理が必ず状態を変える。変わらないと、期限が過去のまま即時に起き続ける): pending の会場 → 試行回数・状態、
+ * 確定待ち → 試行回数・確定、planned の期限 → promoted か skipped。
+ */
+import type { SqlLike } from "./sql-like";
+
+export type PlanVenue = "central" | "nar";
+/** 取得の順(中央 → 地方)。 */
+export const PLAN_VENUES: readonly PlanVenue[] = ["central", "nar"];
+
+export type VenueState = "pending" | "ok" | "failed";
+export type PlanRowState = "planned" | "promoted" | "skipped";
+export type PlanDisposition = "scheduled" | "immediate" | "skip";
+/** `cap` = 1日のタスクの上限(`MAX_TASKS_PER_DAY`)のため。ほかは `planPreRaceDue` の理由(`auto-run-plan.ts`)。 */
+export type PlanSkipReason = "no-start-time" | "started" | "too-late" | "cap";
+
+export interface VenueRow {
+  readonly venue: PlanVenue;
+  readonly state: VenueState;
+  readonly attempts: number;
+  readonly next_try_at: number;
+  /** 直近の失敗の理由(`blocked`・`busy`・`failed`)。ok のときは null。 */
+  readonly reason: string | null;
+  readonly listed: number | null;
+  readonly targeted: number | null;
+  readonly entries_json: string | null;
+  readonly updated_at: number;
+}
+
+export interface PlanRowRecord {
+  readonly race_id: string;
+  readonly venue: PlanVenue;
+  readonly venue_name: string | null;
+  readonly race_number: number | null;
+  readonly race_name: string | null;
+  readonly grade: string | null;
+  readonly start_time: string | null;
+  readonly start_ms: number | null;
+  readonly due_ms: number | null;
+  readonly offset_minutes: number;
+  readonly disposition: PlanDisposition;
+  readonly skip_reason: PlanSkipReason | null;
+  readonly state: PlanRowState;
+  readonly planned_at: number;
+  readonly promoted_at: number | null;
+}
+
+const META_REQUESTED = "plan_requested_at";
+const META_FINALIZED = "plan_finalized_at";
+const META_OFFSET = "plan_offset";
+const META_OFFSET_SOURCE = "plan_offset_source";
+const META_FINALIZE_ATTEMPTS = "plan_finalize_attempts";
+const META_FINALIZE_NEXT_TRY = "plan_finalize_next_try_at";
+
+export class PlanStore {
+  constructor(private readonly sql: SqlLike) {
+    this.sql.exec(
+      `CREATE TABLE IF NOT EXISTS race_day_plan_venue (
+         venue TEXT PRIMARY KEY, state TEXT NOT NULL, attempts INTEGER NOT NULL, next_try_at INTEGER NOT NULL, reason TEXT,
+         listed INTEGER, targeted INTEGER, entries_json TEXT, updated_at INTEGER NOT NULL)`,
+    );
+    this.sql.exec(
+      `CREATE TABLE IF NOT EXISTS race_day_plan (
+         race_id TEXT PRIMARY KEY, venue TEXT NOT NULL, venue_name TEXT, race_number INTEGER, race_name TEXT, grade TEXT,
+         start_time TEXT, start_ms INTEGER, due_ms INTEGER, offset_minutes INTEGER NOT NULL, disposition TEXT NOT NULL, skip_reason TEXT,
+         state TEXT NOT NULL, planned_at INTEGER NOT NULL, promoted_at INTEGER)`,
+    );
+  }
+
+  // ---- meta ----
+
+  metaGet(key: string): string | null {
+    const rows = this.sql.exec("SELECT value FROM race_day_meta WHERE key = ?", key).toArray() as { value: string }[];
+    return rows[0]?.value ?? null;
+  }
+
+  metaSet(key: string, value: string): void {
+    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+  }
+
+  /** 既にあれば書かない(確定の再実行で、最初に決めた offset を変えない)。 */
+  private metaSetIfAbsent(key: string, value: string): void {
+    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING", key, value);
+  }
+
+  requestedAt(): number | null {
+    const text = this.metaGet(META_REQUESTED);
+    return text === null ? null : Number(text);
+  }
+
+  finalizedAt(): number | null {
+    const text = this.metaGet(META_FINALIZED);
+    return text === null ? null : Number(text);
+  }
+
+  offset(): { readonly minutes: number; readonly source: "settings" | "default-fallback" } | null {
+    const minutes = this.metaGet(META_OFFSET);
+    const source = this.metaGet(META_OFFSET_SOURCE);
+    if (minutes === null || (source !== "settings" && source !== "default-fallback")) {
+      return null;
+    }
+    return { minutes: Number(minutes), source };
+  }
+
+  /** offset を決める(最初の決定だけが残る)。 */
+  decideOffset(minutes: number, source: "settings" | "default-fallback"): void {
+    this.metaSetIfAbsent(META_OFFSET, String(minutes));
+    this.metaSetIfAbsent(META_OFFSET_SOURCE, source);
+  }
+
+  finalizeAttempts(): number {
+    return Number(this.metaGet(META_FINALIZE_ATTEMPTS) ?? 0);
+  }
+
+  setFinalizeAttempts(attempts: number): void {
+    this.metaSet(META_FINALIZE_ATTEMPTS, String(attempts));
+  }
+
+  setFinalizeNextTryAt(at: number): void {
+    this.metaSet(META_FINALIZE_NEXT_TRY, String(at));
+  }
+
+  markFinalized(now: number): void {
+    this.metaSet(META_FINALIZED, String(now));
+  }
+
+  // ---- 依頼 ----
+
+  /** 依頼済み(会場の行がある)か。 */
+  requested(): boolean {
+    return this.venueRows().length > 0;
+  }
+
+  /** 会場2つを pending で作り、依頼の時刻を残す。 */
+  request(now: number): void {
+    for (const venue of PLAN_VENUES) {
+      this.sql.exec(
+        "INSERT INTO race_day_plan_venue (venue, state, attempts, next_try_at, reason, listed, targeted, entries_json, updated_at) VALUES (?, 'pending', 0, ?, NULL, NULL, NULL, NULL, ?) ON CONFLICT(venue) DO NOTHING",
+        venue,
+        now,
+        now,
+      );
+    }
+    this.metaSetIfAbsent(META_REQUESTED, String(now));
+  }
+
+  // ---- 会場(計画の段階)----
+
+  venueRows(): VenueRow[] {
+    return this.sql.exec("SELECT * FROM race_day_plan_venue ORDER BY venue").toArray() as unknown as VenueRow[];
+  }
+
+  venueRow(venue: PlanVenue): VenueRow | null {
+    const rows = this.sql.exec("SELECT * FROM race_day_plan_venue WHERE venue = ?", venue).toArray() as unknown as VenueRow[];
+    return rows[0] ?? null;
+  }
+
+  /** 次に一覧を取りに行く会場(pending で、次の試行の時刻が来ているもの。中央 → 地方)。 */
+  nextListVenue(now: number): PlanVenue | null {
+    const rows = this.sql
+      .exec("SELECT venue FROM race_day_plan_venue WHERE state = 'pending' AND next_try_at <= ? ORDER BY venue LIMIT 1", now)
+      .toArray() as { venue: PlanVenue }[];
+    return rows[0]?.venue ?? null;
+  }
+
+  /** 取得の前に、試行回数を永続化する(取得の途中でクラッシュしても、再実行が無限に続かない)。 */
+  markListAttempt(venue: PlanVenue, attempts: number, now: number): void {
+    this.sql.exec("UPDATE race_day_plan_venue SET attempts = ?, updated_at = ? WHERE venue = ?", attempts, now, venue);
+  }
+
+  markListOk(venue: PlanVenue, listed: number, entriesJson: string, now: number): void {
+    this.sql.exec("UPDATE race_day_plan_venue SET state = 'ok', reason = NULL, listed = ?, entries_json = ?, updated_at = ? WHERE venue = ?", listed, entriesJson, now, venue);
+  }
+
+  markListRetry(venue: PlanVenue, nextTryAt: number, reason: string, now: number): void {
+    this.sql.exec("UPDATE race_day_plan_venue SET state = 'pending', next_try_at = ?, reason = ?, updated_at = ? WHERE venue = ?", nextTryAt, reason, now, venue);
+  }
+
+  markListFailed(venue: PlanVenue, reason: string, now: number): void {
+    this.sql.exec("UPDATE race_day_plan_venue SET state = 'failed', reason = ?, updated_at = ? WHERE venue = ?", reason, now, venue);
+  }
+
+  setTargeted(venue: PlanVenue, targeted: number): void {
+    this.sql.exec("UPDATE race_day_plan_venue SET targeted = ? WHERE venue = ?", targeted, venue);
+  }
+
+  /** 一覧の本体を捨てる(確定のあと。DO の保存を膨らませない)。 */
+  clearEntries(): void {
+    this.sql.exec("UPDATE race_day_plan_venue SET entries_json = NULL");
+  }
+
+  /** すべての会場が終端(ok か failed)か(会場の行が無いときは false)。 */
+  allVenuesTerminal(): boolean {
+    const rows = this.venueRows();
+    return rows.length > 0 && rows.every((r) => r.state !== "pending");
+  }
+
+  /** 確定待ち(全会場が終端で、確定の印が無い)か。 */
+  finalizePending(): boolean {
+    return this.allVenuesTerminal() && this.finalizedAt() === null;
+  }
+
+  /** 確定の試行の時刻が来ているか(時刻が無ければ来ているとみなす)。 */
+  finalizeDue(now: number): boolean {
+    if (!this.finalizePending()) {
+      return false;
+    }
+    const text = this.metaGet(META_FINALIZE_NEXT_TRY);
+    return text === null || Number(text) <= now;
+  }
+
+  // ---- アラームの候補 ----
+
+  /** 計画の段階の次の試行の時刻(pending の会場の next_try_at の最小・確定待ちの試行の時刻)。無ければ null。 */
+  nextTryAtMs(): number | null {
+    const candidates: number[] = [];
+    const venues = this.sql.exec("SELECT MIN(next_try_at) AS at FROM race_day_plan_venue WHERE state = 'pending'").toArray() as { at: number | null }[];
+    if (venues[0]?.at !== null && venues[0]?.at !== undefined) {
+      candidates.push(venues[0].at);
+    }
+    if (this.finalizePending()) {
+      candidates.push(Number(this.metaGet(META_FINALIZE_NEXT_TRY) ?? 0));
+    }
+    return candidates.length === 0 ? null : Math.min(...candidates);
+  }
+
+  /** 次に期限が来る planned の行の時刻。無ければ null。 */
+  nextDueMs(): number | null {
+    const rows = this.sql.exec("SELECT MIN(due_ms) AS at FROM race_day_plan WHERE state = 'planned'").toArray() as { at: number | null }[];
+    return rows[0]?.at ?? null;
+  }
+
+  /** 計画の仕事が残っているか(依頼済みで、会場が pending・確定待ち・planned の行がある)。掃除のアラームや一覧の掃除の予約の判定に使う。 */
+  hasPlanWork(): boolean {
+    if (!this.requested()) {
+      return false;
+    }
+    return this.venueRows().some((r) => r.state === "pending") || this.finalizedAt() === null || this.plannedCount() > 0;
+  }
+
+  // ---- 計画の行 ----
+
+  planRow(raceId: string): PlanRowRecord | null {
+    const rows = this.sql.exec("SELECT * FROM race_day_plan WHERE race_id = ?", raceId).toArray() as unknown as PlanRowRecord[];
+    return rows[0] ?? null;
+  }
+
+  /** 行を足す(既にあれば何もしない。確定の再実行で、最初の計画を変えない)。 */
+  insertPlanRow(row: PlanRowRecord): void {
+    this.sql.exec(
+      `INSERT INTO race_day_plan (race_id, venue, venue_name, race_number, race_name, grade, start_time, start_ms, due_ms, offset_minutes, disposition, skip_reason, state, planned_at, promoted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(race_id) DO NOTHING`,
+      row.race_id,
+      row.venue,
+      row.venue_name,
+      row.race_number,
+      row.race_name,
+      row.grade,
+      row.start_time,
+      row.start_ms,
+      row.due_ms,
+      row.offset_minutes,
+      row.disposition,
+      row.skip_reason,
+      row.state,
+      row.planned_at,
+      row.promoted_at,
+    );
+  }
+
+  plannedCount(): number {
+    return (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan WHERE state = 'planned'").toArray() as { n: number }[])[0]?.n ?? 0;
+  }
+
+  /** 期限が来た planned の行(期限の古い順 → レースID 順)。 */
+  dueRows(now: number): PlanRowRecord[] {
+    return this.sql.exec("SELECT * FROM race_day_plan WHERE state = 'planned' AND due_ms <= ? ORDER BY due_ms, race_id", now).toArray() as unknown as PlanRowRecord[];
+  }
+
+  markPromoted(raceId: string, now: number): void {
+    this.sql.exec("UPDATE race_day_plan SET state = 'promoted', promoted_at = ? WHERE race_id = ? AND state = 'planned'", now, raceId);
+  }
+
+  markSkipped(raceId: string, reason: PlanSkipReason): void {
+    this.sql.exec("UPDATE race_day_plan SET state = 'skipped', disposition = 'skip', skip_reason = ? WHERE race_id = ? AND state = 'planned'", reason, raceId);
+  }
+
+  /** 計画の行と、同じレースの morning タスクの状態(無ければ null)。レースID 順。 */
+  rowsWithMorning(): (PlanRowRecord & { readonly morning: string | null })[] {
+    return this.sql
+      .exec(
+        `SELECT p.*, t.status AS morning FROM race_day_plan p
+           LEFT JOIN race_day_tasks t ON t.race_id = p.race_id AND t.mode = 'morning' ORDER BY p.race_id`,
+      )
+      .toArray() as unknown as (PlanRowRecord & { readonly morning: string | null })[];
+  }
+}

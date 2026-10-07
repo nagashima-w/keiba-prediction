@@ -2904,6 +2904,29 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値・プロンプトも変わらない。
 
+## 次の正式版が 1.21.2 である根拠(Issue #203〈#166-B〉での変更)
+
+**patch**(定時の自動実行〈#166〉の DO の朝の計画。まだ cron が無いので本番では動かない。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud(段階1): DO のアラームの合成(`nextAlarmAt`・唯一の `setAlarm` の口 `rearm`)と、`pickNext` で発走前(pre_race)を朝(morning)より先に処理する(再試行待ちは最後)。
+- cloud(段階2): 朝の計画。`RaceDayCore.requestPlan`(依頼。2回目以降は `already-planned`)・計画の段階(中央・地方の一覧の取得。失敗は 60 秒おきに最大 3 回。`blocked` は再試行しない)・
+  確定(offset を設定から決める。読めなければ 3 回再試行して既定の 45 分、`plan_offset_source = default-fallback`)・計画の表(`race_day_plan_venue`・`race_day_plan`。新しい表だけ)・
+  対象のレースへの morning の投入(既にあれば積み直さない。1日の上限は1対象2行ぶん)・期限が来た行の pre_race の投入(骨組み。ガードは #204)・`getPlanProgress`(朝のまとめ #205 のための読み取り)。
+  `RaceDay` の RPC に `requestPlan` を足した(呼ぶ入口は #206 の cron)。
+- cloud(`auto-run-plan.ts`): `planPreRaceDue` が `nowMs` に有限でない値を渡されると RangeError(#202 のレビューの記録 R3)。
+- テストの更新: `race-day-core.test.ts` の「保存の dep は何も書かない」が DO の表の一覧を固定していたので、新しい2つの表を足した(手動の朝のタスクが計画の表に書かないことを、件数 0 で固定)。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い。cron・`scheduled` ハンドラが無いので、**本番から計画を依頼する入口が無い**(#206 まで)。既存の手動の起動の挙動は、アラームの合成と `pickNext` の優先を除いて同じ(既存のテストが無改変で緑)。
+  前例: #177〜#202 のクラウド版の変更も patch で運用してきた(ゲート決定 2026-10-07)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。DO の SQLite には新しい表を足しただけ(既存の表・列は変えていない)。分析結果の数値・プロンプトも変わらない。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

@@ -233,6 +233,28 @@ describe("planPreRaceDue(期限 = 発走 − offset 分と、期限を過ぎた�
     });
   });
 
+  describe("nowMs が有限でないときは投げる(Issue #202 レビューの記録 R3。NaN を渡すと、すべての比較が false になり、`too-late` を返してしまう)", () => {
+    it.each([[Number.NaN], [Number.POSITIVE_INFINITY], [Number.NEGATIVE_INFINITY]])("nowMs=%s は RangeError", (nowMs) => {
+      expect(() => planPreRaceDue({ ...base, nowMs })).toThrow(RangeError);
+    });
+    it("対照: 有限の nowMs なら投げない(0 も有限)", () => {
+      expect(() => planPreRaceDue({ ...base, nowMs: 0 })).not.toThrow();
+    });
+  });
+
+  describe("契約違反と発走時刻の欠損が同時に起きたときの順序(Issue #202 レビューの記録 R1)", () => {
+    it("offset が不正で、発走時刻も無いとき: skip(no-start-time)ではなく RangeError(契約違反が先)", () => {
+      expect(() => planPreRaceDue({ kaisaiDate: DATE, startTime: undefined, offsetMinutes: -1, nowMs: jst(DATE, "09:00") })).toThrow(RangeError);
+      expect(() => planPreRaceDue({ kaisaiDate: DATE, startTime: "25:00", offsetMinutes: 1.5, nowMs: jst(DATE, "09:00") })).toThrow(RangeError);
+    });
+    it("開催日が不正で、発走時刻も無いとき: RangeError(契約違反が先)", () => {
+      expect(() => planPreRaceDue({ kaisaiDate: "20260230", startTime: undefined, offsetMinutes: 45, nowMs: jst(DATE, "09:00") })).toThrow(RangeError);
+    });
+    it("対照: offset・開催日が正しく、発走時刻だけ無ければ skip(no-start-time)(上の RangeError が、発走時刻の欠損そのものを投げているのではない)", () => {
+      expect(planPreRaceDue({ kaisaiDate: DATE, startTime: undefined, offsetMinutes: 45, nowMs: jst(DATE, "09:00") })).toEqual({ kind: "skip", reason: "no-start-time" });
+    });
+  });
+
   describe("入力の契約違反は投げる(呼び出し側のバグ。黙って通さない)", () => {
     it.each([[-1], [1.5], [Number.NaN]])("offsetMinutes=%s は RangeError", (offsetMinutes) => {
       expect(() => planPreRaceDue({ ...base, offsetMinutes, nowMs: jst(DATE, "09:00") })).toThrow(RangeError);

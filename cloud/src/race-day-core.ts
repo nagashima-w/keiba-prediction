@@ -22,6 +22,9 @@
  * DO のアラームは1つだけ。**`setAlarm` を呼ぶのは {@link RaceDayCore.rearm} の1箇所だけ**で、起こしたい理由(今すぐの仕事・再試行待ち・計画・掃除)の最も早い時刻に張る({@link nextAlarmAt})。
  * 計画(段階2)の候補が入っても、掃除や一覧の取得が未来の予約を潰さない。`pickNext` は**発走前(pre_race)を朝(morning)より先**に処理する(再試行待ちは最後)。
  *
+ * ## 朝の計画(Issue #203 段階2)
+ * `requestPlan` → 計画の段階(会場の一覧)→ 確定(計画の表と morning の投入)→ 期限が来たら pre_race の投入。仕組みと冪等性の規則は {@link RaceDayCore.requestPlan}・`runPlanFinalize`・`promoteDuePlans`、表は `race-day-plan.ts`。
+ *
  * ## 失敗と再試行
  * 取得ステップは、失敗(gate の拒否・通信の失敗・戦績の取りこぼし)なら試行回数 {@link MAX_ATTEMPTS} まで、{@link RETRY_DELAY_MS} 後に再試行する
  * (取れたぶんはキャッシュにあるので、取れなかったぶんだけを取り直す)。**ブレーカーが開いている(blocked)・許可リスト外**は再試行せず直ちに失敗にする
@@ -42,6 +45,9 @@ import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/id
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { checkRaceDate } from "./race-date";
+import { planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
+import { DEFAULT_PRE_RACE_OFFSET_MINUTES, startTimeEpochMs } from "./pre-race-time";
+import { PLAN_VENUES, PlanStore, type PlanRowRecord, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { DoSqlCacheStore } from "./do-cache-store";
 import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fetch";
@@ -196,7 +202,12 @@ export type StepOutcome =
       readonly mode: TaskMode;
       readonly step: "fetch" | "compute";
       readonly result: "ok" | "retry" | "failed";
-    };
+    }
+  /**
+   * 朝の計画の段階の1ステップ(Issue #203。`mode: "plan"`)。`step: "list"` は1会場の一覧の取得(`raceId` は会場 `central`・`nar`)、`step: "finalize"` は確定(`raceId` は `plan`)。
+   * 既存の `ran` と同じ形にしてあるのは、結果を `${raceId}:${mode}:${step}:${result}` のように読む呼び出し側を壊さないため。
+   */
+  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "plan"; readonly step: "list" | "finalize"; readonly result: "ok" | "retry" | "failed" };
 
 /** 一覧を取る対象: 中央(race.netkeiba.com)・地方(nar.netkeiba.com)。 */
 export type RaceListVenue = "central" | "nar";
@@ -237,6 +248,51 @@ export interface Board {
 export interface MorningPrior {
   readonly computedAt: number;
   readonly result: CloudAnalysisResult;
+}
+
+/** 計画の依頼の結果。受理(`accepted: true`)か、すでに依頼済み(`already-planned`。cron の重複配信など)。 */
+export type RequestPlanResult = { readonly accepted: true } | { readonly accepted: false; readonly reason: "already-planned" };
+
+/** 朝のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */
+export interface PlanProgress {
+  /** `none`: 依頼の前 / `pending`: 依頼後〜確定の前 / `done`: 確定済み。 */
+  readonly stage: "none" | "pending" | "done";
+  readonly requestedAt: number | null;
+  readonly finalizedAt: number | null;
+  /** 計画時点で決めた offset(分)。確定の前は null。 */
+  readonly offsetMinutes: number | null;
+  /** `default-fallback` は、設定を読めず既定値で計画したことを表す(朝のまとめに「既定値で計画した」と出すため)。 */
+  readonly offsetSource: "settings" | "default-fallback" | null;
+  readonly venues: readonly {
+    readonly venue: PlanVenue;
+    readonly state: "pending" | "ok" | "failed";
+    readonly attempts: number;
+    readonly reason: string | null;
+    /** 一覧の件数(取れていなければ null)。 */
+    readonly listed: number | null;
+    /** 自動実行の対象になった件数(確定の前は null)。 */
+    readonly targeted: number | null;
+  }[];
+  readonly rows: readonly {
+    readonly raceId: string;
+    readonly venue: PlanVenue;
+    readonly venueName: string | null;
+    readonly raceNumber: number | null;
+    readonly raceName: string | null;
+    readonly grade: string | null;
+    readonly startTime: string | null;
+    readonly dueMs: number | null;
+    readonly disposition: "scheduled" | "immediate" | "skip";
+    readonly skipReason: PlanSkipReason | null;
+    readonly state: "planned" | "promoted" | "skipped";
+    /** 同じレースの morning タスクの状態(積んでいなければ null)。 */
+    readonly morning: TaskStatus | null;
+  }[];
+  /**
+   * 朝の準備がすべて終わったか: 確定済みで、計画の行に対する morning がすべて終端(done・failed)。**一部が failed でも true**。morning を積んでいない行(skipped)は数えない。
+   * 確定の前は false。
+   */
+  readonly morningAllTerminal: boolean;
 }
 
 /** gate への呼び出しを直列にする(FIFO。前の呼び出しが失敗しても次は進む)。 */
@@ -333,6 +389,7 @@ export class RaceDayCore {
   private readonly llm: CloudLlm | undefined;
   /** モデルの自動選択(取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined)。 */
   private readonly modelSelector: ModelSelector | undefined;
+  private readonly plan: PlanStore;
   private readonly cache: DoSqlCacheStore;
   private readonly networkFetcher: CachedFetcher;
   private readonly cacheOnly: CachedFetcher;
@@ -365,6 +422,8 @@ export class RaceDayCore {
     );
     // 発走前の分析の LLM の応答の記録(Issue #194。新しい表なので ALTER は不要)。
     SqlLlmResponseStore.ensureTable(this.sql);
+    // 朝の計画の表(Issue #203。新しい表だけ。既存の表には ALTER しない)。
+    this.plan = new PlanStore(this.sql);
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     const httpClient = createGateHttpClient(serializeGate(deps.gate), { onWarn: deps.onWarn });
@@ -441,7 +500,15 @@ export class RaceDayCore {
         throw new Error(`この開催日に受け付けられるレース数の上限(${MAX_TASKS_PER_DAY})に達しています`);
       }
     }
-    const now = this.now();
+    this.enqueueTask(raceId, mode, this.now());
+    await this.rearm();
+    return { accepted: true, raceId, mode, status: "queued" };
+  }
+
+  /**
+   * タスクを queued で積む(新しい実行として作り直す)。**検証・上限・実行中の確認は呼び出し側**(`schedule`・計画の確定・期限の昇格)。アラームは張らない(呼び出し側が `rearm` する)。
+   */
+  private enqueueTask(raceId: string, mode: TaskMode, now: number): void {
     // 新しい実行: 前の実行の LLM の応答の記録も消す(新しい分析は、あらためて LLM に送る。前の記録を再生しない)。
     SqlLlmResponseStore.clear(this.sql, raceId, mode);
     // 新しい実行: 発走前の分析の状態(分析時刻・設定のスナップショット・保存結果)も作り直す(前の実行の保存結果を、新しい実行の結果として扱わない)。
@@ -455,8 +522,68 @@ export class RaceDayCore {
       now,
       now,
     );
+  }
+
+  private taskCount(): number {
+    return (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks").toArray() as { n: number }[])[0]?.n ?? 0;
+  }
+
+  /**
+   * 朝の計画を依頼する(Issue #203 段階2。cron〈#206〉から呼ぶ入口)。**依頼だけをして戻る**(一覧の取得・確定はアラームの中)。
+   * 会場2つ(中央・地方)を pending で作り、アラームを張る。**2回目以降(cron の重複配信)は受理せず、何も変えない**(`already-planned`)。
+   * @throws 無効な開催日、DO の開催日と違う日、発走前の分析の保存先・設定が無い構成(pre_race を予約できない計画は作らない)
+   */
+  async requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult> {
+    const kaisaiDate = parseKaisaiDate(input.kaisaiDate);
+    const pinned = this.metaGet("kaisai_date");
+    if (pinned !== null && pinned !== kaisaiDate) {
+      throw new Error(`この DO は開催日 ${pinned} 専用です(渡された開催日: ${kaisaiDate})`);
+    }
+    if (this.sink === undefined || this.loadSettings === undefined) {
+      throw new Error("発走前の分析の保存先(D1・R2)・設定が、この構成にはありません");
+    }
+    if (this.plan.requested()) {
+      return { accepted: false, reason: "already-planned" };
+    }
+    if (pinned === null) {
+      this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('kaisai_date', ?)", kaisaiDate);
+    }
+    this.plan.request(this.now());
     await this.rearm();
-    return { accepted: true, raceId, mode, status: "queued" };
+    return { accepted: true };
+  }
+
+  /** 朝のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */
+  getPlanProgress(): PlanProgress {
+    const requestedAt = this.plan.requestedAt();
+    const finalizedAt = this.plan.finalizedAt();
+    const offset = this.plan.offset();
+    const rows = this.plan.rowsWithMorning().map((r) => ({
+      raceId: r.race_id,
+      venue: r.venue,
+      venueName: r.venue_name,
+      raceNumber: r.race_number,
+      raceName: r.race_name,
+      grade: r.grade,
+      startTime: r.start_time,
+      dueMs: r.due_ms,
+      disposition: r.disposition,
+      skipReason: r.skip_reason,
+      state: r.state,
+      morning: r.morning as TaskStatus | null,
+    }));
+    const morningAllTerminal =
+      finalizedAt !== null && rows.every((r) => (r.morning === null ? r.state === "skipped" : r.morning === "done" || r.morning === "failed"));
+    return {
+      stage: requestedAt === null ? "none" : finalizedAt === null ? "pending" : "done",
+      requestedAt,
+      finalizedAt,
+      offsetMinutes: offset === null ? null : offset.minutes,
+      offsetSource: offset === null ? null : offset.source,
+      venues: this.plan.venueRows().map((v) => ({ venue: v.venue, state: v.state, attempts: v.attempts, reason: v.reason, listed: v.listed, targeted: v.targeted })),
+      rows,
+      morningAllTerminal,
+    };
   }
 
   /** その日のレースの状態の一覧(レースID 昇順、同じレースは morning → pre_race)。 */
@@ -548,7 +675,8 @@ export class RaceDayCore {
       return;
     }
     const pending = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks WHERE status IN ('queued', 'fetched')").toArray() as { n: number }[])[0]?.n ?? 0;
-    if (pending > 0) {
+    // 計画の仕事(会場の一覧が未完・確定待ち・期限を待つ行)も「仕事あり」(未来の発走前の予約を、掃除の予約で押しのけない。Issue #203)。
+    if (pending > 0 || this.plan.hasPlanWork()) {
       return;
     }
     const needed = entry.fetchedAt + CACHE_RETENTION_MS + PURGE_MARGIN_MS;
@@ -577,9 +705,24 @@ export class RaceDayCore {
 
   /**
    * 次のステップを1つだけ実行する(1レースの取得 or 計算)。続きの仕事があれば、アラームを設定してから戻る。
-   * 実行するのは、(1)取得済みで計算待ちのタスク、なければ (2)取得待ちのタスク(試行回数の少ない順、予約の古い順、レースID 順)。
+   * 順序: (0)期限が来た計画の行を昇格(同期)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)。
+   * 仕事が無ければ {@link wakeWithoutWork}。
    */
   async runNextStep(): Promise<StepOutcome> {
+    // 期限が来た計画の行を昇格する(同期。pre_race を積む)。続けて、同じ起床の中で、積んだ pre_race を処理できる。
+    this.promoteDuePlans();
+    // 朝の計画の段階(会場の一覧の取得・確定)。次の試行の時刻が来ているものだけ(再試行の待ちは、時刻で守る)。
+    const venue = this.plan.nextListVenue(this.now());
+    if (venue !== null) {
+      const outcome = await this.runPlanList(venue);
+      await this.armAlarm();
+      return outcome;
+    }
+    if (this.plan.finalizeDue(this.now())) {
+      const outcome = await this.runPlanFinalize();
+      await this.armAlarm();
+      return outcome;
+    }
     const next = this.pickNext();
     if (next === null) {
       return this.wakeWithoutWork();
@@ -587,6 +730,176 @@ export class RaceDayCore {
     const outcome = await this.runStep(next);
     await this.armAlarm();
     return outcome;
+  }
+
+  // ---- 朝の計画(Issue #203 段階2)----
+
+  /**
+   * 期限が来た計画の行(planned で `due_ms ≤ now`)を昇格する(同期。await なし)。pre_race を queued で積み、行を promoted にする(**起きたときに必ず状態が変わる**: 積めなくても skipped にする)。
+   *  - 同じレースの pre_race が実行中(queued・fetched。手動の予約)なら、積み直さず、行だけ promoted にする。
+   *  - 積むタスク行が無く、1日の上限(`MAX_TASKS_PER_DAY`)に達していれば、行を skipped(cap)にする(投げない)。
+   * 積んだあと、行を promoted にするまでの間に落ちても、再実行では「実行中の pre_race がある」ので行だけ promoted になる(積み直さない)。
+   * (手動の分析との重複・発走済みの再確認のガードは #204。)
+   */
+  private promoteDuePlans(): void {
+    const now = this.now();
+    for (const row of this.plan.dueRows(now)) {
+      const existing = this.task(row.race_id, "pre_race");
+      if (existing !== null && (existing.status === "queued" || existing.status === "fetched")) {
+        this.plan.markPromoted(row.race_id, now);
+        continue;
+      }
+      if (existing === null && this.taskCount() >= MAX_TASKS_PER_DAY) {
+        this.plan.markSkipped(row.race_id, "cap");
+        continue;
+      }
+      this.enqueueTask(row.race_id, "pre_race", now);
+      this.plan.markPromoted(row.race_id, now);
+    }
+  }
+
+  /**
+   * 計画の段階: 1会場の一覧を取る(1ステップ = gate への取得 1 本)。試行回数は取得の**前**に永続化する(クラッシュしても再実行が無限に続かない)。
+   * 成功(空の一覧も)→ ok。失敗は、`blocked`(ブレーカー・許可リスト外)なら再試行せず failed、それ以外(busy・failed)は上限 {@link MAX_ATTEMPTS} まで {@link RETRY_DELAY_MS} 後に再試行して、尽きたら failed。
+   * 全会場が終端(ok・failed)になったら、確定の試行を now に予約する(次のステップが確定)。
+   */
+  private async runPlanList(venue: PlanVenue): Promise<StepOutcome> {
+    const row = this.plan.venueRow(venue)!;
+    const attempts = row.attempts + 1;
+    this.plan.markListAttempt(venue, attempts, this.now());
+    const kaisaiDate = this.metaGet("kaisai_date");
+    let result: RaceListResult;
+    try {
+      if (kaisaiDate === null) {
+        throw new Error("開催日が未確定です");
+      }
+      result = await this.getRaceList(kaisaiDate, venue);
+    } catch (error) {
+      this.onWarn(`朝の計画: ${venue} の一覧の取得で想定外の失敗(${errorMessage(error)})`);
+      result = { ok: false, reason: "failed" };
+    }
+    const now = this.now();
+    if (result.ok) {
+      this.plan.markListOk(venue, result.races.length, JSON.stringify(result.races), now);
+      this.afterPlanVenueSettled(now);
+      return { kind: "ran", raceId: venue, mode: "plan", step: "list", result: "ok" };
+    }
+    if (result.reason === "blocked" || attempts >= MAX_ATTEMPTS) {
+      this.plan.markListFailed(venue, result.reason, now);
+      this.onWarn(`朝の計画: ${venue} の一覧を取得できませんでした(試行 ${attempts} 回。理由: ${result.reason})`);
+      this.afterPlanVenueSettled(now);
+      return { kind: "ran", raceId: venue, mode: "plan", step: "list", result: "failed" };
+    }
+    this.plan.markListRetry(venue, now + RETRY_DELAY_MS, result.reason, now);
+    return { kind: "ran", raceId: venue, mode: "plan", step: "list", result: "retry" };
+  }
+
+  /** 会場が終端になったとき、全会場が終端なら、確定の試行を今に予約する(確定は別のステップ)。 */
+  private afterPlanVenueSettled(now: number): void {
+    if (this.plan.allVenuesTerminal() && this.plan.finalizedAt() === null) {
+      this.plan.setFinalizeNextTryAt(now);
+    }
+  }
+
+  /**
+   * 計画の確定: offset を決め(設定を読む。読めなければ {@link MAX_ATTEMPTS} 回まで {@link RETRY_DELAY_MS} 後に再試行し、尽きたら**既定の 45 分で確定して `plan_offset_source` に `default-fallback` を残す**)、
+   * 対象(中央は全件・地方は Jpn だけ。取得できなかった会場は 0 件)ごとに、期限を計算して計画の行を書き、pre_race を走らせる行には morning を積む。
+   *
+   * **原子性に頼らない冪等性**(確定の途中で落ちても、再実行で正しく続く): 確定の印(`plan_finalized_at`)は最後に書く。計画の行は `ON CONFLICT DO NOTHING`(最初の計画を変えない)、
+   * morning は**行がまだ無いときだけ**積む(状態に関係なく、既にあれば積み直さない)、offset は最初に決めた値を残す。再実行は、既にある行を飛ばして、足りない行・morning だけを足す。
+   * skip の行には morning を積まない(pre_race が走らないので、取得のための 19 本を無駄にしない)。
+   * 上限: 対象1件は morning と pre_race の2行を使うので、`既存のタスク行 + 計画済み(planned)の行 + 今回の行ぶん(2、または morning が既にあれば 1)> MAX_TASKS_PER_DAY` なら skipped(cap)。
+   */
+  private async runPlanFinalize(): Promise<StepOutcome> {
+    const attempts = this.plan.finalizeAttempts() + 1;
+    this.plan.setFinalizeAttempts(attempts);
+    if (this.plan.offset() === null) {
+      try {
+        const settings = await this.loadSettings!();
+        this.plan.decideOffset(settings.preRaceOffsetMinutes, "settings");
+      } catch (error) {
+        if (attempts < MAX_ATTEMPTS) {
+          this.plan.setFinalizeNextTryAt(this.now() + RETRY_DELAY_MS);
+          this.onWarn(`朝の計画: 設定を読めませんでした(試行 ${attempts} 回。再試行します): ${errorMessage(error)}`);
+          return { kind: "ran", raceId: "plan", mode: "plan", step: "finalize", result: "retry" };
+        }
+        this.plan.decideOffset(DEFAULT_PRE_RACE_OFFSET_MINUTES, "default-fallback");
+        this.onWarn(`朝の計画: 設定を読めなかったため、既定の ${DEFAULT_PRE_RACE_OFFSET_MINUTES} 分で計画しました(試行 ${attempts} 回): ${errorMessage(error)}`);
+      }
+    }
+    // ここから await なし(同期の区間)。
+    const kaisaiDate = this.metaGet("kaisai_date");
+    const offset = this.plan.offset();
+    if (kaisaiDate === null || offset === null) {
+      throw new Error("開催日または offset が未確定です"); // 到達しない(依頼で開催日を固定し、上で offset を決めている)
+    }
+    const nowMs = this.now();
+    const entriesOf = (venue: PlanVenue): RaceListEntry[] => {
+      const row = this.plan.venueRow(venue);
+      return row !== null && row.state === "ok" && row.entries_json !== null ? (JSON.parse(row.entries_json) as RaceListEntry[]) : [];
+    };
+    const targets = selectAutoRunTargets({ central: entriesOf("central"), nar: entriesOf("nar") });
+    for (const target of targets) {
+      const entry = target.entry;
+      let row = this.plan.planRow(entry.raceId);
+      if (row === null) {
+        row = this.buildPlanRow(target.venue, entry, kaisaiDate, offset.minutes, nowMs);
+        this.plan.insertPlanRow(row);
+      }
+      if (row.state === "planned" && this.task(entry.raceId, "morning") === null) {
+        this.enqueueTask(entry.raceId, "morning", nowMs);
+      }
+    }
+    for (const venue of PLAN_VENUES) {
+      // 取得できた会場だけ(取得できなかった会場の「0 件」は、対象が無かったのか取れなかったのかが区別できない)。
+      if (this.plan.venueRow(venue)?.state === "ok") {
+        this.plan.setTargeted(venue, targets.filter((t) => t.venue === venue).length);
+      }
+    }
+    this.plan.markFinalized(nowMs);
+    this.plan.clearEntries();
+    return { kind: "ran", raceId: "plan", mode: "plan", step: "finalize", result: "ok" };
+  }
+
+  /** 1対象の計画の行を作る(期限・すぐ実行・スキップの判定と、上限)。 */
+  private buildPlanRow(venue: PlanVenue, entry: RaceListEntry, kaisaiDate: string, offsetMinutes: number, nowMs: number): PlanRowRecord {
+    const due = planPreRaceDue({ kaisaiDate, startTime: entry.startTime, offsetMinutes, nowMs });
+    let startMs: number | null = null;
+    if (entry.startTime !== undefined) {
+      try {
+        startMs = startTimeEpochMs(kaisaiDate, entry.startTime);
+      } catch {
+        startMs = null; // 読めない時刻は no-start-time(due.kind === "skip")になっている
+      }
+    }
+    let disposition: PlanRowRecord["disposition"] = due.kind === "skip" ? "skip" : due.kind;
+    let skipReason: PlanSkipReason | null = due.kind === "skip" ? due.reason : null;
+    let state: PlanRowRecord["state"] = due.kind === "skip" ? "skipped" : "planned";
+    if (state === "planned") {
+      const need = this.task(entry.raceId, "morning") === null ? 2 : 1; // morning(まだ無ければ)と pre_race の行
+      if (this.taskCount() + this.plan.plannedCount() + need > MAX_TASKS_PER_DAY) {
+        disposition = "skip";
+        skipReason = "cap";
+        state = "skipped";
+      }
+    }
+    return {
+      race_id: entry.raceId,
+      venue,
+      venue_name: entry.venue ?? null,
+      race_number: entry.raceNumber,
+      race_name: entry.name,
+      grade: entry.grade ?? null,
+      start_time: entry.startTime ?? null,
+      start_ms: startMs,
+      due_ms: state === "planned" && due.kind !== "skip" ? due.dueMs : null,
+      offset_minutes: offsetMinutes,
+      disposition,
+      skip_reason: skipReason,
+      state,
+      planned_at: nowMs,
+      promoted_at: null,
+    };
   }
 
   private runStep(task: TaskRow): Promise<StepOutcome> {
@@ -675,8 +988,8 @@ export class RaceDayCore {
       retryDelayMs: RETRY_DELAY_MS,
       immediateWork,
       retryWork: rows.length > 0 && !immediateWork,
-      planNextTryAtMs: null,
-      planNextDueMs: null,
+      planNextTryAtMs: this.plan.nextTryAtMs(),
+      planNextDueMs: this.plan.nextDueMs(),
       purgeDueMs: purgeText === null ? null : Number(purgeText),
     });
     if (at !== null) {
