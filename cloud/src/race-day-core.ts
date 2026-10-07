@@ -24,13 +24,19 @@
  * (30 分のブレーカーの間に撃ち直さない)。計算ステップの失敗は決定的なので、再試行しない。
  * アラームは少なくとも1回は実行される(失敗時は再実行される)ので、状態(status・attempts)は各ステップの前後に永続化する。
  *
+ * ## 一覧(getRaceList。Issue #183〈#165-a〉)
+ * 開催日のレース一覧(中央・地方)を、同じ gate 経由のキャッシュ(TTL 6 時間)で返す(`GET /api/races`)。タスクではなく、予約・アラームの仕事を持たない読み取り。
+ * ただし取得した一覧の行を掃除するために、**掃除専用のアラームを、タスクのアラームを潰さずに共有する**(規則は {@link RaceDayCore.getRaceList})。開催日は pin しない。
+ *
  * ## gate は同時に1本
  * {@link serializeGate} で、RaceDay から gate への呼び出しを直列にする(gate 自身も直列化するが、待ち行列の上限 8 に当たらないよう、呼び出し側でも1本にする)。
  */
 import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper/cached-fetcher";
 import { HttpError } from "../../packages/core/src/scraper/http-client";
-import { DEFAULT_RESULTS_TTL_MS, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
+import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
+import type { RaceListEntry } from "../../packages/core/src/scraper/types";
+import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { checkRaceDate } from "./race-date";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { DoSqlCacheStore } from "./do-cache-store";
@@ -128,6 +134,19 @@ export type StepOutcome =
       readonly result: "ok" | "retry" | "failed";
     };
 
+/** 一覧を取る対象: 中央(race.netkeiba.com)・地方(nar.netkeiba.com)。 */
+export type RaceListVenue = "central" | "nar";
+
+/**
+ * 一覧の取得の失敗の理由(gate の文面は載せない。Issue #183)。`blocked`: ブレーカーが開いている・許可リスト外(待つしかない)/
+ * `busy`: gate の待ち行列が上限(少し待って再読み込み)/ `failed`: それ以外(通信の失敗・netkeiba のエラー応答・タイムアウト)。
+ */
+export type RaceListFailureReason = "blocked" | "busy" | "failed";
+
+export type RaceListResult =
+  | { readonly ok: true; readonly races: readonly RaceListEntry[] }
+  | { readonly ok: false; readonly reason: RaceListFailureReason };
+
 export interface BoardRace {
   readonly raceId: string;
   readonly mode: TaskMode;
@@ -208,6 +227,19 @@ function isFatalFetchError(error: unknown): boolean {
   return false;
 }
 
+/** 一覧の取得の失敗(`HttpError`)を、返す理由にまとめる(gate の文面は使わない)。 */
+function raceListFailureReason(error: HttpError): RaceListFailureReason {
+  if (error.cause instanceof GateRefusedError) {
+    if (error.cause.reason === "blocked" || error.cause.reason === "disallowed-url") {
+      return "blocked";
+    }
+    if (error.cause.reason === "queue-full") {
+      return "busy";
+    }
+  }
+  return "failed";
+}
+
 interface TaskRow {
   race_id: string;
   mode: TaskMode;
@@ -237,6 +269,8 @@ export class RaceDayCore {
   private readonly cache: DoSqlCacheStore;
   private readonly networkFetcher: CachedFetcher;
   private readonly cacheOnly: CachedFetcher;
+  /** 取得中の一覧(キーは venue と開催日)。同じ一覧の同時の呼び出しを1本の取得にまとめる(終わったら消す。失敗も保持しない)。 */
+  private readonly listInFlight = new Map<string, Promise<readonly RaceListEntry[]>>();
 
   constructor(deps: RaceDayDeps) {
     this.sql = deps.sql;
@@ -376,6 +410,85 @@ export class RaceDayCore {
         childrenOk: r.children_ok === null ? null : r.children_ok === 1,
       })),
     };
+  }
+
+  /**
+   * 開催日のレース一覧(Issue #183〈#165-a〉)。取得は朝の取得と同じ gate 経由のキャッシュ(TTL は core の既定 6 時間)で、**同じ一覧の同時の呼び出しは1本にまとめる**。
+   * 想定内の失敗(gate の拒否・通信の失敗・HTTP エラー)は例外にせず `{ ok: false, reason }` で返す(gate の文面は載せない。リトライしない)。
+   * **開催日は pin しない**(一覧だけ見た日に、掃除で消えない行を残さない)。pin 済みで開催日が違えば throw する。
+   *
+   * **空の一覧はキャッシュしない**(まだ公開前・開催なしの日の空の結果を 6 時間持つと、公開されても見えないため。見るたびに取りに行くが、gate が間隔・ブレーカーで守る)。
+   *
+   * ## 掃除のアラーム(単一アラームの共有)
+   * 取得した一覧の行は、掃除しないと永久に残る(一覧だけ見た日の DO は、他に起きる理由が無い)。**取得に成功したあと**(await の後)に、**同期的に**判定する:
+   *  - `queued`・`fetched` のタスクがあれば何もしない(タスクのアラームを潰さない。タスクが終わるときの {@link armAlarm} が、より後ろの期限を設定する)
+   *  - なければ、`purge_due_at` が無いか `一覧の行の fetchedAt + 保持期間 + 余裕` より前のときだけ、その時刻に設定する(前へは戻さない)。
+   * 判定から `setAlarm` の呼び出しまでの間に `await` を挟まない(挟むと、その間に入った `schedule` のアラームを潰しうる)。
+   * 判定を取得の**前**に置かないのは、取得中(gate の待ちで最大 60 秒)に `schedule` が入りうるため。
+   * @throws 無効な開催日・venue、pin 済みの開催日と違う日
+   */
+  async getRaceList(kaisaiDateInput: string, venue: RaceListVenue): Promise<RaceListResult> {
+    if (venue !== "central" && venue !== "nar") {
+      throw new Error(`venue は central か nar です(渡された値: ${String(venue).slice(0, 32)})`);
+    }
+    const kaisaiDate = parseKaisaiDate(kaisaiDateInput);
+    const pinned = this.metaGet("kaisai_date");
+    if (pinned !== null && pinned !== kaisaiDate) {
+      throw new Error(`この DO は開催日 ${pinned} 専用です(渡された開催日: ${kaisaiDate})`);
+    }
+    const url = venue === "central" ? raceListSubUrl(kaisaiDate) : narRaceListSubUrl(kaisaiDate);
+    const flightKey = `${venue}:${kaisaiDate}`;
+    let flight = this.listInFlight.get(flightKey);
+    if (flight === undefined) {
+      const started = this.fetchRaceList(venue, kaisaiDate, url).finally(() => {
+        this.listInFlight.delete(flightKey);
+      });
+      this.listInFlight.set(flightKey, started);
+      flight = started;
+    }
+    let races: readonly RaceListEntry[];
+    try {
+      races = await flight;
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return { ok: false, reason: raceListFailureReason(error) };
+      }
+      throw error;
+    }
+    await this.armPurgeForList(url);
+    return { ok: true, races };
+  }
+
+  private async fetchRaceList(venue: RaceListVenue, kaisaiDate: ReturnType<typeof parseKaisaiDate>, url: string): Promise<readonly RaceListEntry[]> {
+    const deps = { fetcher: this.networkFetcher, now: () => new Date(this.now()) };
+    const races = venue === "central" ? await listRaces(kaisaiDate, deps) : await listNarRaces(kaisaiDate, deps);
+    if (races.length === 0) {
+      this.cache.delete(url);
+    }
+    return races;
+  }
+
+  /** 一覧の行の掃除を、掃除専用のアラームに載せる(規則は {@link getRaceList} の「掃除のアラーム」)。行が無ければ(空の一覧)何もしない。 */
+  private async armPurgeForList(url: string): Promise<void> {
+    const entry = this.cache.get(url);
+    if (entry === undefined) {
+      return;
+    }
+    const pending = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks WHERE status IN ('queued', 'fetched')").toArray() as { n: number }[])[0]?.n ?? 0;
+    if (pending > 0) {
+      return;
+    }
+    const needed = entry.fetchedAt + CACHE_RETENTION_MS + PURGE_MARGIN_MS;
+    const existing = this.metaGet(PURGE_DUE_KEY);
+    if (existing !== null && Number(existing) >= needed) {
+      return;
+    }
+    this.sql.exec(
+      "INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      PURGE_DUE_KEY,
+      String(needed),
+    );
+    await this.setAlarm(needed);
   }
 
   /** 朝の prior(無ければ null)。 */

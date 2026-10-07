@@ -222,8 +222,11 @@ const EMPTY_SNAPSHOT_RACE: RaceSnapshotRace = {
  * 解釈する。null・オブジェクトでない・想定した形と異なる場合は例外を投げず、
  * 「レース情報スナップショット全体が無い」ものとして扱う(防御的復元)。
  * horses は配列であれば要素ごとに umaban→馬情報のMapとして使えるようにする(不正な要素はスキップ)。
+ *
+ * Issue #183(#165-a)で export した(クラウド版の `GET /api/analyses/{id}` が、馬名・レース名を読むのに使う。関数の中身は無変更)。
+ * **値の型までは検証しない**(`name` が文字列とは限らない)ので、呼び出し側が必要な型へ絞ること。
  */
-function toSafeRaceSnapshot(raw: unknown): {
+export function toSafeRaceSnapshot(raw: unknown): {
   readonly race: RaceSnapshotRace;
   readonly horsesByUmaban: ReadonlyMap<number, RaceSnapshotHorse>;
 } {

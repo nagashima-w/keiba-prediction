@@ -49,7 +49,7 @@ describe("wrangler.toml", () => {
     expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(2);
   });
 
-  it("Issue #180: netkeiba への取得の起点は手動の操作だけ(Cron Trigger・scheduled ハンドラ・キューの consumer が無い。定時の起動は #166)", () => {
+  it("Issue #180・#183: netkeiba への取得の起点は、認証の後ろの手動の操作だけ(POST の起動・GET の一覧・GET の確認)。Cron Trigger・scheduled ハンドラ・キューの consumer が無い。定時の起動は #166", () => {
     expect(tomlCode).not.toMatch(/^\[triggers\]/m);
     expect(tomlCode).not.toMatch(/^\s*crons\s*=/m);
     expect(tomlCode).not.toMatch(/^\[\[queues\./m);
@@ -61,6 +61,20 @@ describe("wrangler.toml", () => {
     const handler = readTextLf("cloud", "src", "handler.ts");
     expect(handler).toContain('"/api/analyses/run"');
     expect(handler).toContain("originAllowed(request)");
+    // Issue #183: GET の一覧(`/api/races`)も netkeiba に出うる。handler.ts から netkeiba に届く呼び出し(DO の予約・一覧・gate の取得)は、
+    // **呼び出し箇所の数で固定する**(コメント除去後。新しい取得口を足すと、この数が変わってここで落ちる)。
+    const code = handler.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+    expect(code.length).toBeGreaterThan(1000); // 前提: コメント除去で本文を消していない
+    const count = (pattern: RegExp): number => (code.match(pattern) ?? []).length;
+    expect(count(/\.schedule\(/g)).toBe(1); // handleRun(POST)
+    expect(count(/\.getRaceList\(/g)).toBe(1); // handleRaces(GET。Sec-Fetch-Site・検証の後)
+    expect(count(/\.fetchRaw\(/g)).toBe(1); // handleCheck(GET /api/netkeiba/check)
+    expect(handler).toContain('"/api/races"');
+    // 一覧の入口は、DO を呼ぶ前に Sec-Fetch-Site を見る
+    expect(code.indexOf("sec-fetch-site")).toBeGreaterThan(-1);
+    expect(code.indexOf("sec-fetch-site")).toBeLessThan(code.indexOf(".getRaceList("));
+    // 対照(検出の確認。空振りでない): 取得口を1つ足した本文では、数が変わる
+    expect(((code + "\ngate.fetchRaw(x);").match(/\.fetchRaw\(/g) ?? []).length).toBe(2);
   });
 
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {

@@ -2580,6 +2580,25 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(`cloud_settings` は D1 だけの表)
 
+## 次の正式版が 1.19.15 である根拠(Issue #183〈#165-a〉での変更)
+
+**patch**(クラウド版のスマホ画面〈#165-b〉のための読み取り API を2つ追加。**変更は `cloud/`・`scripts/`・docs と、exe のアプリコードは `packages/app/src/main/analysis-export.ts` の `toSafeRaceSnapshot` に `export` を付けただけ〈関数の中身は無変更。exe の動作・出力は変わらない〉**。利用者(exe)から見える変化は無い)。
+
+### 変更内容
+
+- cloud: `GET /api/races`(開催日のレース一覧。`handler.ts`・`race-list.ts`・`race-day-core.ts` の `getRaceList`・`race-day-do.ts` の RPC。掃除専用アラームの共有・同時取得の共有・空の一覧の非キャッシュ・`do-cache-store.ts` の `delete`)、
+  `GET /api/analyses/{id}`(分析1件。`analysis-view.ts`)
+- テスト: `race-day-list.test.ts`・`handler-races.test.ts`・`analysis-view.test.ts`・`handler-analysis-detail.test.ts`(本物のローカルの D1・R2)、`handler.test.ts`・`handler-run.test.ts` の調整、
+  scripts の `cloud-config-guard.test.ts`(取得口の数の固定)、smoke(workerd で、一覧と分析1件)、docs
+
+### patch である根拠
+
+- exe に入る成果物・分析結果の数値・画面・保存データは変わらない(exe 側の変更は `export` の付与だけ)
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

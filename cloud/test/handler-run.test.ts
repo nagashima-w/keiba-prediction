@@ -56,6 +56,10 @@ function fakeRaceDay(): FakeRaceDay {
         f.priors.push(raceId);
         return f.priorImpl(raceId);
       },
+      // この偽物のファイルは一覧の入口を検査しない(handler-races.test.ts)。呼ばれたら失敗する。
+      getRaceList: () => {
+        throw new Error("getRaceList は呼ばれない想定");
+      },
     }),
   };
   return f;

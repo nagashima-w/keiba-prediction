@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.14)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.15)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.14`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.15`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1128,7 +1128,7 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **限界**: Free の「1呼び出しあたりのサブリクエスト 50」に DO の中のソケット・DO への RPC が数えられるかは未確定のまま(ステップを分け、1ステップの gate への呼び出しを 19 本に抑えている)。本番の DO・アラームは未確認。
 
 ### 手動起動の入口(#180〈#164-e〉。v1.19.13)
-Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を置いた(`cloud/src/handler.ts`)。**netkeiba への取得の起点は、この手動の POST だけ**(Cron・scheduled・キューは無い。`cloud-config-guard.test.ts` が固定。定時の起動は #166)。
+Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を置いた(`cloud/src/handler.ts`)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races`〈#183〉・`GET /api/netkeiba/check`。Cron・scheduled・キューは無い。`cloud-config-guard.test.ts` が固定し、#183 から呼び出し箇所の数〈`.schedule(`・`.getRaceList(`・`.fetchRaw(` が handler.ts に1つずつ〉も固定する。定時の起動は #166)。
 - **`POST /api/analyses/run`**: 本文は JSON `{ "race_id": "...", "kaisai_date": "YYYYMMDD", "mode": "morning" }`(`mode` は省略時と `morning`〈朝の取得と prior〉のみ。発走前の分析は #178)。
   順序: 認証(403・固定の本文)→ **Origin**(`Origin` ヘッダが**あって**、リクエストの origin と完全一致。無い・`null`・スキーム/ポート/サブドメインが違う・末尾にパスがあるものは 403〈origin-mismatch〉。`Sec-Fetch-Site` があれば `same-origin`)→
   Content-Type が `application/json`(415)→ 本文 1 KiB 以内(413)→ JSON・入力の検証(400。未知のキー・型・mode・race_id の検証〈中央 01〜10・地方 30〜64・帯広は対象外〉・開催日の形と実在・**レースIDと開催日の整合**: 年は全レース、**地方は月日も**〈中央の7〜10桁目は回次・日次〉)。ここまでで DO は呼ばない。
@@ -1157,6 +1157,28 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集する API は無い**(#165)。値は D1 への UPDATE か migration で入れる。
 - **発走時刻の換算**(`cloud/src/pre-race-time.ts`): 出馬表の `startTime`(JST の HH:MM)から、UTC のエポックミリ秒と「発走の30分前」を求める(JST 0:00〜8:59 は UTC の前日)。アラームの予約に使うのは #166。
 - **状態**: `GET /api/analyses/status` の各レースに `mode`・`analysis_id`・`detail`・`children_ok`。
+
+### スマホ画面のための読み取り API(#183〈#165-a〉。v1.19.15)
+画面(#184)が「開催日を選ぶ → レース一覧 → 起動(`POST /api/analyses/run`)→ 結果を見る」を行うための、読み取りの API を2つ(`cloud/src/handler.ts`)。**exe のアプリコードは無変更**(`toSafeRaceSnapshot` に `export` を付けただけ)。
+
+- **`GET /api/races?kaisai_date=YYYYMMDD&venue=central|nar`**(`venue` は必須): その日のレース一覧。`{ ok, kaisai_date, venue, races: [...] }`。各行は固定の形 `{ race_id, venue_name, race_number, race_name, course_type, distance, entry_count, grade }`(snake_case。`venue_name`・`grade` は取れなければ `null`。レースIDから補わない。**中央のグレードは常に `null`**〈core の一覧が画像アイコン方式のため〉。地方は `Jpn1`・`重賞` などの生テキスト)。並びは **`race_id` の昇順**(= 場 → R。HTML の並びに依存せず、明示的にソートする)。**開催なしの日は 200 で `races: []`**。
+  - 順序: 認証(403)→ GET だけ(HEAD・POST は 405。HEAD で取得を起こさない)→ **`Sec-Fetch-Site`**(あって、`same-origin`・`none` のどちらでもなければ 403〈origin-mismatch〉。別サイトのページから、日付を変えて netkeiba への取得を起こされるのを拒否する。ヘッダの無い非ブラウザのクライアントは通す)→ 入力の検証(400。**ここまでで DO を呼ばない**。未知・重複のクエリ・日付の形と実在・venue)→ 開催日の DO の `getRaceList`。
+  - 取得は、朝の取得と同じ **gate 経由の DO のキャッシュ**(TTL は core の既定 6 時間。`RaceDayCore.getRaceList`)。同じ日・同じ venue の**同時の呼び出しは1本の取得にまとめる**(終わったら記録を消す。失敗も保持しない)。**空の一覧(開催なし・まだ公開前)はキャッシュ行を残さない**(公開された後に、空の結果を 6 時間持たないため。見るたびに取りに行くが、gate が間隔・ブレーカーで守る)。
+  - **DO の開催日(`kaisai_date`)は pin しない**(一覧だけ見た日に、掃除で消えない行を残さない)。pin 済みの DO に別の日が来たら throw(`schedule` と同じ考え方)。
+  - **失敗**: gate の拒否・通信の失敗・netkeiba のエラー応答は **503** `{ ok: false, error: { type: "netkeiba-unavailable", reason } }`(`reason`: `blocked`〈ブレーカーが開いている・許可リスト外〉・`busy`〈gate の待ち行列が上限〉・`failed`〈それ以外〉。gate の文面は載せない。リトライ・`Retry-After` は無い)。DO の例外は 503 `race-day-error`(文面なし)。
+  - **掃除のアラーム(単一アラームの共有)**: 取得した一覧の行は、掃除しないと永久に残る。取得の**成功後**に**同期的に**判定する: `queued`・`fetched` のタスクがあれば何もしない(タスクのアラームを潰さない。タスクが終わるときの `armAlarm` が、より後ろの期限を設定する)/なければ、`purge_due_at` が無いか `一覧の行の fetchedAt + 保持期間 + 余裕` より前のときだけ、その時刻に設定する(前へは戻さない)。キャッシュヒットでは何も書かない。判定を取得の前に置かない(取得中に `schedule` が入りうる)。
+  - 取得の失敗の直後に呼んでも、もう一度取りに行く。公開前の日・遠い未来・過去の日付で netkeiba が何を返すか(200 の空 HTML か別のステータスか)は**実測していない**(別のステータスなら 503 になり、「開催なし」と区別できる)。**本番での確認項目**。
+  - 一覧の取得が、同じ日に走っている分析の取得(gate への呼び出しを RaceDay の中で直列にしている)の後ろに並ぶことがある(中央16頭の冷えた状態で約 40 秒。gate の呼び出しは 60 秒で諦める)。超えれば 503 `failed` で、再読み込みで回復する。
+- **`GET /api/analyses/{id}`**: 分析1件。`{ ok: true, analysis: {...} }`(**camelCase**。`GET /api/analyses` の形に揃えた。`/api/races`・`/status`・`/run` は snake_case で、API のキー名は**不統一のまま**)。
+  - 返す項目: `id`・`raceId`・`analyzedAt`・`kaisaiDate`・`evEstimated`・`model`・`promptVersion`・`detail`(`present`・`missing`・`none`)/ `race`(`venueName`〈raceId の場コードから〉・`raceNumber`〈raceId の末尾2桁から〉・`raceName`・`startTime`・`courseType`・`distance`・`weather`・`trackCondition`〈raceSnapshot から。取れなければ `null`〉)/ `horses`(`umaban`・**`name`**〈raceSnapshot から〉・`prior`・`adjustedProb`・`placeOddsMin`・`ev`・`isPositive`・`mark`・`reason`)/ `allocation`(`route`・`skipReasonCode`・`unavailableReason`・設定の要約〈`bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`include*`〉・`oddsStatus`・`bets`〈`betType`・`comboKey`・`stake`・`odds`・`ev`〉。配分の行が無ければ `null`。合計額は返さない)。
+  - **返さないもの**: `rawResponse`・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日・配分の `fallbackReason`・`betUnit`。許可したキーを明示的に組み立てる(`analysis-view.ts`。キーの集合をテストが固定する)。
+  - **`detail` が `present` でない**(R2 の操作回数の柵に達した・R2 に無い・壊れている・`detail_key` が無い)ときは、**スナップショットを使わず**、馬名なし(`name: null`)・レース情報は `venueName`・`raceNumber` だけ、で**同じキーの形**を返す。D1 の値(prior・印・配分)は残る。
+  - id は 1〜2,147,483,647 の整数(先頭の 0 は 400)。不正・クエリつきは 400(D1・R2 に触れない)。無ければ 404 `{ ok: false, error: { type: "not-found" } }`。D1 の失敗は 503 `d1-error`(文面なし)。**配分の読み出しだけが失敗したときも全体を 503 にする**(配分だけ欠けた 200 は「買い目なし」と誤読される)。GET だけ(HEAD は 405)。`/api/analyses/status`・`/run` とは衝突しない(完全一致を先に処理する)。
+  - ⚠️ **無害な読み取りではない**: `detail` が present のとき、R2 の GET(Class B)に加えて D1 の `r2_ops` を +1 する(書き込み1行)。**画面から自動で繰り返し(ポーリング)呼ばないこと**。
+- **静的ガード**(`scripts/test/cloud-config-guard.test.ts`): 取得の起点は「認証の後ろの手動の操作」(上の2つと `POST /api/analyses/run`・`GET /api/netkeiba/check`)だけ。handler.ts の `.schedule(`・`.getRaceList(`・`.fetchRaw(` の呼び出し箇所を1つずつに固定し、新しい取得口を足すと落ちる。
+  - **`/api/netkeiba/check` にも `Sec-Fetch-Site` の検査を入れるか**は未決(【記録】。一覧と同じく GET で netkeiba に出る)。
+- **検査**: `race-day-list.test.ts`(一覧の取得・キャッシュ・アラームの共有・失敗・空・同時取得。本物の SQLite)・`handler-races.test.ts`・`analysis-view.test.ts`(漏洩・書き込み側との drift)・`handler-analysis-detail.test.ts`(本物のローカルの D1・R2。柵・R2 欠落・配分の失敗)、smoke(workerd で、一覧と保存済みの分析1件)。
+- 本番での動作確認は #174 の R2 権限の追加後。
 
 ## 主な当初仕様との差異(記録)
 

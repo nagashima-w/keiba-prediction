@@ -101,6 +101,11 @@ export class DoSqlCacheStore implements CacheStore {
     return before - this.count();
   }
 
+  /** キーの行を消す(無ければ何もしない)。空の一覧など、「持ち越したくない取得結果」を捨てるために使う(Issue #183)。 */
+  delete(key: string): void {
+    this.sql.exec(`DELETE FROM ${TABLE} WHERE key = ?`, key);
+  }
+
   /** 保存されている行数。 */
   count(): number {
     const rows = this.sql.exec(`SELECT COUNT(*) AS n FROM ${TABLE}`).toArray() as { n: number }[];

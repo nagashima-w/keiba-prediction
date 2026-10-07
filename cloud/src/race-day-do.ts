@@ -16,7 +16,7 @@ import { createAnalysisSink } from "./analysis-sink";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
-import { RaceDayCore, type Board, type MorningPrior, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { RaceDayCore, type Board, type MorningPrior, type RaceListResult, type RaceListVenue, type ScheduleInput, type ScheduleResult } from "./race-day-core";
 import { loadSettings } from "./settings";
 
 /** netkeiba への取得の出口(NetkeibaGate)の固定名。handler.ts の GATE_NAME と同じ(全取得をこの1つのインスタンスに通す)。 */
@@ -75,6 +75,11 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
   /** 朝の prior(RPC。無ければ null)。 */
   getMorningPrior(raceId: string): MorningPrior | null {
     return this.core.getMorningPrior(raceId);
+  }
+
+  /** 開催日のレース一覧(RPC。Issue #183。想定内の失敗は例外にせず `{ ok: false, reason }`)。 */
+  getRaceList(kaisaiDate: string, venue: RaceListVenue): Promise<RaceListResult> {
+    return this.core.getRaceList(kaisaiDate, venue);
   }
 
   /** アラーム: 次のステップを1つ実行する(例外は握らずに投げ直さない: 失敗は状態に記録される。インフラ例外のときだけ DO のアラームが再実行される)。 */

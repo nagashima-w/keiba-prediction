@@ -11,9 +11,11 @@ import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
 import type { GateResult, GateStatus } from "./gate-core";
 import { runShutubaCheck, validateRaceId } from "./netkeiba-check";
+import { buildAnalysisView } from "./analysis-view";
 import { renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
-import type { Board, MorningPrior, ScheduleInput, ScheduleResult } from "./race-day-core";
+import type { Board, MorningPrior, RaceListResult, RaceListVenue, ScheduleInput, ScheduleResult } from "./race-day-core";
+import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
 /** Durable Object(NetkeibaGate)のスタブの、使う部分だけの型(RPC なので、同期のメソッドも Promise になる)。 */
@@ -37,6 +39,8 @@ export interface RaceDayStubLike {
   schedule(input: ScheduleInput): Promise<ScheduleResult>;
   getBoard(): Promise<Board>;
   getMorningPrior(raceId: string): Promise<MorningPrior | null>;
+  /** 開催日のレース一覧(Issue #183)。 */
+  getRaceList(kaisaiDate: string, venue: RaceListVenue): Promise<RaceListResult>;
 }
 
 /** 日単位の DO(RaceDay)の名前空間の、使う部分だけの型。名前は開催日(YYYYMMDD)。 */
@@ -166,6 +170,17 @@ export async function handle(
     return handleStatus(new URL(request.url), env);
   }
 
+  if (pathname === "/api/races") {
+    // netkeiba へ出る経路は GET だけ(HEAD で取得を起こさない)。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleRaces(request, env);
+  }
+
   if (pathname === "/api/analyses/run") {
     // POST だけ(上で処理済み)。GET・HEAD などは 405。
     return new Response("method not allowed", {
@@ -183,6 +198,19 @@ export async function handle(
       });
     }
     return handleAnalyses(new URL(request.url), env);
+  }
+
+  // `/api/analyses/{id}`(Issue #183)。`status`・`run` は上で完全一致で処理済み(ここに来るのは、それ以外の1階層下だけ)。末尾スラッシュ・さらに下位は 404。
+  const detailMatch = /^\/api\/analyses\/([^/]+)$/.exec(pathname);
+  if (detailMatch !== null) {
+    // 読み取り専用(D1 + R2 の GET)。GET だけ(HEAD で D1・R2 を引かない)。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleAnalysisDetail(new URL(request.url), detailMatch[1]!, env);
   }
 
   return json({ ok: false, error: "not found" }, 404);
@@ -229,6 +257,85 @@ async function handleAnalyses(url: URL, env: Env): Promise<Response> {
   } catch {
     // 例外の文面・SQL は返さない。
     return json({ ok: false, error: { type: "d1-error" } }, 503);
+  }
+}
+
+/** 分析 id の上限(D1 の INTEGER は 64 ビットだが、数値の bind で正確に扱える範囲に収める。実際の id は連番で、この値には届かない)。 */
+const ANALYSIS_ID_MAX = 2_147_483_647;
+
+/**
+ * `GET /api/analyses/{id}`(Issue #183〈#165-a〉): 分析1件を、馬名つき・配分つきで返す(整形は `analysis-view.ts`。`rawResponse`・`contributions`・raceSnapshot の全体は返さない)。
+ * id は正の整数(先頭の 0 なし・{@link ANALYSIS_ID_MAX} 以下)で、クエリは受け付けない(不正は 400。D1・R2 に触れない)。無ければ 404、D1 の失敗は 503(文面なし)。
+ * **R2 の詳細は、操作回数の柵の内側で読む**(`getAnalysisDetail`。柵に達した・R2 に無い・壊れているときは `detail: "missing"` で馬名なし。`detail_key` が無ければ `none`)。
+ * ⚠️ 詳細が present のときは、R2 の GET に加えて D1 の `r2_ops` を +1 する(書き込み1行)。**無害な読み取りではない**ので、画面から自動で繰り返し呼ばないこと。
+ * 配分(D1)の読み出しが失敗したら、配分だけ欠けた 200 にせず、全体を 503 にする(「買い目なし」と誤読されないため)。
+ */
+async function handleAnalysisDetail(url: URL, idText: string, env: Env): Promise<Response> {
+  if ([...url.searchParams.keys()].length > 0) {
+    return badRequest("このパスにクエリは指定できません");
+  }
+  const id = /^[1-9][0-9]{0,9}$/.test(idText) ? Number(idText) : Number.NaN;
+  if (!Number.isInteger(id) || id > ANALYSIS_ID_MAX) {
+    return badRequest(`分析 id は 1〜${ANALYSIS_ID_MAX} の整数(先頭に 0 を付けない)で指定してください`);
+  }
+  try {
+    const store = new D1AnalysisStore({ db: env.DB, bucket: env.ANALYSIS_DETAIL });
+    const result = await store.getAnalysisDetail(id);
+    if (result === undefined) {
+      return json({ ok: false, error: { type: "not-found" } }, 404);
+    }
+    const allocation = await store.getStoredAllocation(id);
+    return json({ ok: true, analysis: buildAnalysisView(result, allocation) });
+  } catch {
+    // 例外の文面・SQL は返さない。
+    return json({ ok: false, error: { type: "d1-error" } }, 503);
+  }
+}
+
+const RACES_PARAMS = new Set(["kaisai_date", "venue"]);
+
+/**
+ * `GET /api/races?kaisai_date=YYYYMMDD&venue=central|nar`(Issue #183〈#165-a〉): 開催日のレース一覧(場 → R の順。整形は `race-list.ts`)。
+ * 開催日の DO(RaceDay)の `getRaceList` が、gate 経由のキャッシュ(TTL 6 時間)で取る。**この GET は netkeiba に出うる**(キャッシュが無ければ1本取る)ので、
+ * 順序は: `Sec-Fetch-Site`(別サイトからなら 403)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO。
+ * 取得の失敗は 503 `netkeiba-unavailable`(`reason`: blocked・busy・failed。gate の文面は載せない。リトライ・Retry-After は無い)、DO の失敗は 503 `race-day-error`。
+ * 開催なしの日は 200 で `races: []`。
+ */
+async function handleRaces(request: Request, env: Env): Promise<Response> {
+  // 別サイトのページから(ログイン中の利用者のブラウザで)呼ばれて、日付を変えて netkeiba への取得を起こされるのを拒否する。
+  // ブラウザは Sec-Fetch-Site を付ける(アドレスバー・ブックマークは none、同じオリジンの fetch は same-origin)。付かない非ブラウザのクライアントは通す。
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => !RACES_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは kaisai_date(必須)と venue(必須)だけを、それぞれ1つまで指定できます");
+  }
+  const kaisaiDate = url.searchParams.get("kaisai_date");
+  if (kaisaiDate === null) {
+    return badRequest("kaisai_date を YYYYMMDD の 8 桁で指定してください");
+  }
+  // 検証のメッセージに入力を写すので、長い入力は先頭だけにする(切っても、無効なままであることは変わらない)。
+  const dateCheck = checkKaisaiDate(kaisaiDate.slice(0, 32));
+  if (!dateCheck.ok) {
+    return badRequest(dateCheck.message);
+  }
+  const venue = url.searchParams.get("venue");
+  if (venue !== "central" && venue !== "nar") {
+    return badRequest("venue は central(中央)か nar(地方)で指定してください");
+  }
+  try {
+    const result = await raceDayStub(env, kaisaiDate).getRaceList(kaisaiDate, venue);
+    if (!result.ok) {
+      // reason は固定の3値だけを写す(DO から別の値・文面が来ても、そのまま返さない)。
+      const reason = result.reason === "blocked" || result.reason === "busy" ? result.reason : "failed";
+      return json({ ok: false, error: { type: "netkeiba-unavailable", reason } }, 503);
+    }
+    return json({ ok: true, kaisai_date: kaisaiDate, venue, races: toRaceListRows(result.races) });
+  } catch {
+    return raceDayError();
   }
 }
 
@@ -299,7 +406,7 @@ async function readLimitedText(request: Request, maxBytes: number): Promise<stri
  * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior(`morning`。省略時)または発走前の分析(`pre_race`。LLM なし。D1・R2 に保存。Issue #178)を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`。
  * 日単位の DO(RaceDay。名前は開催日)の `schedule` に予約を入れて **202** を返す(取得はアラームの中で始まる)。実行中の同じレースなら **409**(already-running)。
  * 順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413)→ JSON・入力の検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503。文面は返さない)。
- * **netkeiba への取得の起点は、この手動の POST だけ**(Cron・scheduled は無い。定時は #166)。
+ * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。Cron・scheduled は無い。定時は #166。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
  */
 async function handleRun(request: Request, env: Env): Promise<Response> {
   if (!originAllowed(request)) {

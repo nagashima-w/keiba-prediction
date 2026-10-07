@@ -132,7 +132,7 @@ function vars(email: string, aud: string): string[] {
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["POST", "/api/analyses/run"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -335,6 +335,40 @@ async function main(): Promise<void> {
       const saved = parseJson((await req(port, "GET", `/api/analyses?race_id=${raceId}`)).text);
       const savedList = (saved["analyses"] as { id: number; raceId: string; kaisaiDate: string | null; horses: unknown[]; hasDetail: boolean }[] | undefined) ?? [];
       check(`${label}: D1 に分析が1件だけ保存された(GET /api/analyses。16頭・開催日・R2 の詳細あり)`, savedList.length === 1 && savedList[0]!.raceId === raceId && savedList[0]!.kaisaiDate === date && savedList[0]!.horses.length === 16 && savedList[0]!.hasDetail === true && savedList[0]!.id === preRow?.["analysis_id"], JSON.stringify(saved).slice(0, 300));
+
+      // Issue #183(#165-a): 読み取りの API を2つ。取得は gate 経由の偽ソケット(一覧は実フィクスチャ)・D1・R2 はローカルの本物。
+      //   (a) GET /api/races: 件数・並び・キャッシュ(2回目は gate を待たない)・空の日・検証・HEAD・Sec-Fetch-Site
+      const listFixture = (name: string): string => readFileSync(path.join("..", "fixtures", name), "utf-8");
+      // 期待する件数は、フィクスチャの HTML から race_id(12桁)の重複を除いて数える(帯広〈場コード65〉は除く)。smoke.ts は Node(tsx)で動き、core のパーサは
+      // cheerio を解決できない配置(CI)があるので import しない。数え方が実装のパーサと食い違えば、件数の確認が落ちる(フィクスチャでは一致を確認済み)。
+      const countRaceIds = (html: string): number => new Set([...html.matchAll(/race_id=(\d{12})/g)].map((m) => m[1]!).filter((id) => id.slice(4, 6) !== "65")).size;
+      const expectedCentral = countRaceIds(listFixture("race_list_sub_20260628.html"));
+      const expectedNar = countRaceIds(listFixture("nar_race_list_sub_20260927.html"));
+      const racesCentral = await req(port, "GET", `/api/races?kaisai_date=${date}&venue=central`);
+      const centralBody = parseJson(racesCentral.text);
+      const centralRows = (centralBody["races"] as { race_id: string; race_number: number; race_name: string; grade: string | null }[] | undefined) ?? [];
+      check(`${label}: GET /api/races(中央)が 200 で、フィクスチャと同じ件数(${expectedCentral})を、race_id の昇順(場 → R)で返す`, racesCentral.status === 200 && expectedCentral > 0 && centralRows.length === expectedCentral && centralRows.every((r, i) => i === 0 || centralRows[i - 1]!.race_id < r.race_id), `${racesCentral.status} ${racesCentral.text.slice(0, 200)}`);
+      check(`${label}: 一覧の各行は固定のキー(race_id・venue_name・race_number・race_name・course_type・distance・entry_count・grade)だけ`, centralRows.length > 0 && Object.keys(centralRows[0]!).sort().join(",") === "course_type,distance,entry_count,grade,race_id,race_name,race_number,venue_name", JSON.stringify(centralRows[0]));
+      const cachedStarted = Date.now();
+      const racesCentral2 = await req(port, "GET", `/api/races?kaisai_date=${date}&venue=central`);
+      const cachedMs = Date.now() - cachedStarted;
+      check(`${label}: 2回目の一覧はキャッシュに当たり、gate の間隔(2 秒)を待たない(同じ内容・1 秒未満)`, racesCentral2.status === 200 && racesCentral2.text === racesCentral.text && cachedMs < 1000, `${cachedMs}ms`);
+      const racesNar = await req(port, "GET", "/api/races?kaisai_date=20260927&venue=nar");
+      const narRows = (parseJson(racesNar.text)["races"] as { race_id: string }[] | undefined) ?? [];
+      check(`${label}: GET /api/races(地方。nar のホスト)が 200 で、フィクスチャと同じ件数(${expectedNar})。帯広(場コード65)を含まない`, racesNar.status === 200 && expectedNar > 0 && narRows.length === expectedNar && narRows.every((r) => r.race_id.slice(4, 6) !== "65"), `${racesNar.status} ${racesNar.text.slice(0, 200)}`);
+      const racesEmpty = await req(port, "GET", "/api/races?kaisai_date=20260101&venue=central");
+      check(`${label}: 開催なしの日は 200 で races: []`, racesEmpty.status === 200 && racesEmpty.text === JSON.stringify({ ok: true, kaisai_date: "20260101", venue: "central", races: [] }), `${racesEmpty.status} ${racesEmpty.text.slice(0, 160)}`);
+      check(`${label}: GET /api/races の venue が無い・未知は 400`, (await req(port, "GET", `/api/races?kaisai_date=${date}`)).status === 400 && (await req(port, "GET", `/api/races?kaisai_date=${date}&venue=foo`)).status === 400);
+      check(`${label}: HEAD /api/races は 405(取得を起こさない)`, (await req(port, "HEAD", `/api/races?kaisai_date=${date}&venue=central`)).status === 405);
+      const crossSite = await req(port, "GET", `/api/races?kaisai_date=${date}&venue=central`, { "Sec-Fetch-Site": "cross-site" });
+      check(`${label}: Sec-Fetch-Site: cross-site の GET /api/races は 403(origin-mismatch)`, crossSite.status === 403 && crossSite.text.includes("origin-mismatch"), `${crossSite.status} ${crossSite.text.slice(0, 120)}`);
+      //   (b) GET /api/analyses/{id}: 上で保存した発走前の分析を、馬名つき・R2 の柵の内側で読む
+      const detailId = preRow?.["analysis_id"];
+      const detailRes = await req(port, "GET", `/api/analyses/${String(detailId)}`);
+      const view = (parseJson(detailRes.text)["analysis"] as { id: number; raceId: string; detail: string; race: Record<string, unknown>; horses: { umaban: number; name: unknown }[]; allocation: unknown } | undefined);
+      check(`${label}: GET /api/analyses/{id} が 200 で、16 頭すべてに馬名があり、レース名・場名(福島)・R(11)が付く(detail: present)`, detailRes.status === 200 && view?.id === detailId && view?.raceId === raceId && view?.detail === "present" && view.horses.length === 16 && view.horses.every((h) => typeof h.name === "string" && h.name.length > 0) && typeof view.race["raceName"] === "string" && view.race["venueName"] === "福島" && view.race["raceNumber"] === 11 && "allocation" in view, `${detailRes.status} ${detailRes.text.slice(0, 300)}`);
+      check(`${label}: 応答に rawResponse・contributions・raceSnapshot の全体(騎手など)が含まれない`, !detailRes.text.includes("rawResponse") && !detailRes.text.includes("contributions") && !detailRes.text.includes("jockeyName") && !detailRes.text.includes("raceSnapshot"), detailRes.text.slice(0, 120));
+      check(`${label}: 無い id は 404・不正な id は 400・HEAD は 405・クエリつきは 400`, (await req(port, "GET", "/api/analyses/999999")).status === 404 && (await req(port, "GET", "/api/analyses/abc")).status === 400 && (await req(port, "HEAD", `/api/analyses/${String(detailId)}`)).status === 405 && (await req(port, "GET", `/api/analyses/${String(detailId)}?x=1`)).status === 400);
     });
   } finally {
     rmSync(CONFIG_PATH, { force: true });

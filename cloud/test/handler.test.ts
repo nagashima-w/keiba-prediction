@@ -723,7 +723,8 @@ describe("GET /api/analyses(Issue #175)", () => {
     const head = await handle(req("/api/analyses", { token, method: "HEAD" }), envOf({ DB: fake.db }), {}, deps);
     expect(head.status).toBe(405);
     expect(head.headers.get("allow")).toBe("GET");
-    for (const path of ["/api/analyses/", "/api/analyses/1", "/api/analysesx"]) {
+    // `/api/analyses/1` は Issue #183 で有効なパス(分析1件。handler-analysis-detail.test.ts)になったので、ここからは外した
+    for (const path of ["/api/analyses/", "/api/analyses/1/", "/api/analysesx"]) {
       expect((await handle(req(path, { token }), envOf({ DB: fake.db }), {}, deps)).status, path).toBe(404);
     }
     expect(fake.batches).toEqual([]);

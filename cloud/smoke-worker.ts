@@ -26,6 +26,8 @@ import { parseKaisaiDate, parseRaceId } from "../packages/core/src/scraper/ids";
 import { scrapeRace } from "../packages/core/src/scraper/scrape-race";
 import type { AnalysisRecord } from "../packages/core/src/ev/analysis-store-types";
 import narHtml from "../fixtures/nar_shutuba_202654071210.html";
+import centralListHtml from "../fixtures/race_list_sub_20260628.html";
+import narListHtml from "../fixtures/nar_race_list_sub_20260927.html";
 import { NetkeibaGate as RealGate } from "./src/netkeiba-gate-do";
 import type { ConnectFn, SocketLike } from "./src/socket-fetch";
 import type { Env } from "./src/handler";
@@ -46,6 +48,17 @@ function route(host: string, path: string): { status: number; body: string } {
   }
   if (host === "nar.netkeiba.com" && path.startsWith("/race/shutuba.html") && raceId === "202654071210") {
     return { status: 200, body: narHtml };
+  }
+  // Issue #183: 開催日のレース一覧(race_list_sub)。中央は 20260628・地方は 20260927 だけ実フィクスチャ。それ以外の日は、開催なしの空の HTML(200)。
+  if (path.startsWith("/top/race_list_sub.html") && (host === "race.netkeiba.com" || host === "nar.netkeiba.com")) {
+    const date = /[?&]kaisai_date=(\d{8})(?:&|$)/.exec(path)?.[1] ?? "";
+    if (host === "race.netkeiba.com" && date === "20260628") {
+      return { status: 200, body: centralListHtml };
+    }
+    if (host === "nar.netkeiba.com" && date === "20260927") {
+      return { status: 200, body: narListHtml };
+    }
+    return { status: 200, body: "<html><body></body></html>" };
   }
   // Issue #177: RaceDay(朝の取得)の確認用。出馬表のほかに、戦績 API(db ホスト)・調教・単勝複勝のオッズ(type=1)を fixture で返す。
   if (host === "db.netkeiba.com" && path.startsWith("/horse/ajax_horse_results.html")) {
