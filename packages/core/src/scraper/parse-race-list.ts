@@ -24,6 +24,23 @@ function toCourseType(raw: string): CourseType {
 }
 
 /**
+ * 一覧のデータ枠のテキストから、発走時刻を `HH:MM`(ゼロ詰め)で取り出す。無い・範囲外(0〜23 時・0〜59 分の外)は undefined。
+ * 範囲外を落とすのは、cloud の `startTimeEpochMs` が `00:00〜23:59` 以外で投げるため(壊れた表記で定時の予約を落とさない)。
+ */
+function toStartTime(dataText: string): string | undefined {
+  const match = PATTERNS.raceListStartTime.exec(dataText);
+  if (match === null) {
+    return undefined;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) {
+    return undefined;
+  }
+  return `${String(hour).padStart(2, "0")}:${match[2]}`;
+}
+
+/**
  * レース一覧サブHTMLをパースして、当日の各レース要約の配列を返す。
  *
  * - 会場ごとの `dl` グループを走査し、その見出しから会場名を取り出す
@@ -86,6 +103,9 @@ export function parseRaceList(html: string): RaceListEntry[] {
         PATTERNS.raceNumber.exec($item.find(SEL.raceNumber).text())?.[1] ?? "0",
       );
 
+      // 発走時刻(Issue #202)。中央・地方とも、データ枠のテキストに含まれる `H:MM`/`HH:MM`。空の行(発走後に取得した中央の一覧)・範囲外の値は undefined(キーを持たない)。
+      const startTime = toStartTime(dataText);
+
       // レース名(切り詰められている場合あり)。
       const name = $item.find(SEL.itemTitle).text().trim();
 
@@ -101,6 +121,7 @@ export function parseRaceList(html: string): RaceListEntry[] {
         entryCount,
         venue,
         raceNumber,
+        ...(startTime !== undefined ? { startTime } : {}),
         grade,
       });
     });

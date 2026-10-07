@@ -33,6 +33,11 @@ export interface RaceListEntry {
   /** レース番号(1〜12)。 */
   readonly raceNumber: number;
   /**
+   * 発走時刻(JST の `HH:MM`。ゼロ詰め2桁:2桁。Issue #202)。一覧のデータ枠(中央 `span.RaceList_Itemtime`・地方は先頭の `<span>`)から取る。
+   * **時刻が空の行(発走後に取得した中央の一覧に出る)・範囲外の値の行は、キー自体を持たない**(空文字を入れない。`JSON.stringify` で消える)。
+   */
+  readonly startTime?: string;
+  /**
    * グレードラベル(生テキストのまま)。交流重賞(例: Jpn1)・地方重賞(例: 重賞)・OP等。
    * 実測(2026-06-24 浦和さきたま杯): アラビア数字の "Jpn1"(ローマ数字ではない)。
    * 中央は画像アイコン方式で内テキストが常に空のため、常に undefined になる

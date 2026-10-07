@@ -2886,6 +2886,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - エクスポート JSON は**キーを足すだけ**(既存キーの名前・型・値は無変更。schemaVersion は 1 のまま)で、既存の読み手には後方互換。CSV は既存列の位置を変えず末尾に足すだけ。DB スキーマ・設定・IPC は無変更(保存は #197 で済み)。
 
+## 次の正式版が 1.21.1 である根拠(Issue #202〈#166-A〉での変更)
+
+**patch**(定時の自動実行〈#166〉の下ごしらえ。一覧の発走時刻と、対象・期限の純関数。利用者から見える変化は無い)。
+
+### 変更内容
+
+- core: `RaceListEntry` に任意の `startTime`(JST の `HH:MM`。ゼロ詰め)を足し、`parseRaceList` が一覧のデータ枠(中央 `span.RaceList_Itemtime`・地方は先頭の `<span>`)から取り出す。時刻が空の行(発走後に取得した中央の一覧)・範囲外の値の行は、キー自体を持たない。既存フィールドの値は変えない。
+- cloud: `src/auto-run-plan.ts`(純関数。まだ production から呼ばれない): `jstKaisaiDate`(cron の `scheduledTime` から JST の開催日)・`selectAutoRunTargets`(中央は全件・地方は Jpn1/2/3 だけ)・`planPreRaceDue`(期限 = 発走 − offset 分と、期限を過ぎたときの判定〈すぐ実行・スキップ〉)。
+- フィクスチャ: `fixtures/synthetic_nar_race_list_sub_20260927_jpn3.html`(**合成**。実測の 20260927 の地方一覧に、水沢 10R へ Jpn3 を1件足したもの)。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い。`startTime` を足しても `RaceListEntry` の既存フィールド・exe の画面・エクスポート・保存データは変わらない(exe のテストが無改変で緑)。cloud の純関数は、どこからも呼ばれていない。前例: #177〜#201 のクラウド版の変更も patch で運用してきた(ゲート決定 2026-10-07)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値・プロンプトも変わらない。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
