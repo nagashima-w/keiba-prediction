@@ -15,6 +15,7 @@ import { buildAnalysisView } from "./analysis-view";
 import { CLIENT_JS } from "./client-bundle.generated";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
+import { loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
 import type { Board, MorningPrior, RaceListResult, RaceListVenue, ScheduleInput, ScheduleResult } from "./race-day-core";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
@@ -112,7 +113,20 @@ export async function handle(
   log(`access: ok via=${auth.via}`);
 
   const method = request.method;
-  // 手動起動の入口(Issue #180)。**POST を受けるのはここだけ**。認証(上)の後で、Origin の確認・入力の検証を行う。
+  // 設定の入口(Issue #189)。GET(読む)と POST(全項目の置き換え)だけ。他のメソッドは 405(Allow: GET, POST)。D1 を引かない。
+  if (new URL(request.url).pathname === "/api/settings") {
+    if (method === "GET") {
+      return handleSettingsGet(env);
+    }
+    if (method === "POST") {
+      return handleSettingsSave(request, env, deps.now ?? (() => new Date()));
+    }
+    return new Response("method not allowed", {
+      status: 405,
+      headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+  // 手動起動の入口(Issue #180)。**POST を受けるのはここと `/api/settings` だけ**。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
   }
@@ -418,33 +432,48 @@ async function readLimitedText(request: Request, maxBytes: number): Promise<stri
 }
 
 /**
- * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior(`morning`。省略時)または発走前の分析(`pre_race`。LLM なし。D1・R2 に保存。Issue #178)を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`。
- * 日単位の DO(RaceDay。名前は開催日)の `schedule` に予約を入れて **202** を返す(取得はアラームの中で始まる)。実行中の同じレースなら **409**(already-running)。
- * 順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413)→ JSON・入力の検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503。文面は返さない)。
- * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。Cron・scheduled は無い。定時は #166。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
+ * JSON のオブジェクトを受ける POST の守り(Issue #189。run と settings で共有する。`handleRun` から抜き出した)。
+ * 順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413。`maxBytes` はルートごと)→ JSON として読める(400)→ JSON のオブジェクト(400)。
+ * 失敗は、そのまま返せる `response`(本文は固定の文言。入力を写さない)。**裏側(DO・D1)に触れる前に呼ぶ**。
  */
-async function handleRun(request: Request, env: Env): Promise<Response> {
+type JsonObjectBody = { readonly ok: true; readonly body: Record<string, unknown> } | { readonly ok: false; readonly response: Response };
+
+async function readJsonObjectBody(request: Request, maxBytes: number): Promise<JsonObjectBody> {
   if (!originAllowed(request)) {
-    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+    return { ok: false, response: json({ ok: false, error: { type: "origin-mismatch" } }, 403) };
   }
   const contentType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   if (contentType !== "application/json") {
-    return json({ ok: false, error: { type: "unsupported-media-type", message: "Content-Type は application/json にしてください" } }, 415);
+    return { ok: false, response: json({ ok: false, error: { type: "unsupported-media-type", message: "Content-Type は application/json にしてください" } }, 415) };
   }
-  const text = await readLimitedText(request, RUN_BODY_MAX_BYTES);
+  const text = await readLimitedText(request, maxBytes);
   if (text === null) {
-    return json({ ok: false, error: { type: "payload-too-large", message: `本文は ${RUN_BODY_MAX_BYTES} バイトまでです` } }, 413);
+    return { ok: false, response: json({ ok: false, error: { type: "payload-too-large", message: `本文は ${maxBytes} バイトまでです` } }, 413) };
   }
   let body: unknown;
   try {
     body = JSON.parse(text);
   } catch {
-    return badRequest("本文が JSON として読めません");
+    return { ok: false, response: badRequest("本文が JSON として読めません") };
   }
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return badRequest("本文は JSON のオブジェクトにしてください");
+    return { ok: false, response: badRequest("本文は JSON のオブジェクトにしてください") };
   }
-  const record = body as Record<string, unknown>;
+  return { ok: true, body: body as Record<string, unknown> };
+}
+
+/**
+ * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior(`morning`。省略時)または発走前の分析(`pre_race`。LLM なし。D1・R2 に保存。Issue #178)を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`。
+ * 日単位の DO(RaceDay。名前は開催日)の `schedule` に予約を入れて **202** を返す(取得はアラームの中で始まる)。実行中の同じレースなら **409**(already-running)。
+ * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503。文面は返さない)。
+ * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。Cron・scheduled は無い。定時は #166。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
+ */
+async function handleRun(request: Request, env: Env): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, RUN_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const record = guarded.body;
   if (Object.keys(record).some((k) => !RUN_KEYS.has(k))) {
     return badRequest("本文のキーは race_id・kaisai_date・mode だけです");
   }
@@ -474,6 +503,47 @@ async function handleRun(request: Request, env: Env): Promise<Response> {
     return json({ ok: true, accepted: true, race_id: result.raceId, kaisai_date: kaisaiDate, mode: result.mode, status: result.status }, 202);
   } catch {
     return raceDayError();
+  }
+}
+
+/** 設定の POST の本文の上限(バイト)。追加指示 2,000 文字が JSON のエスケープ(最大で1文字 6 バイト = 12,000 バイト)になっても、他の 13 項目と合わせて収まる大きさ。run の上限とは別。 */
+const SETTINGS_BODY_MAX_BYTES = 16 * 1024;
+
+/**
+ * `GET /api/settings`(Issue #189): 現在の設定を返す(D1 の `cloud_settings` の1行。`loadSettings`)。
+ * 応答は `{ ok, settings, source }`。`source` は `default`(行が無い)・`d1`(行を読んだ)・`invalid`(行はあるが JSON として読めない。既定値で続けている)。
+ * 読む側の範囲(`coerceCloudSettings`)なので、手で入れた不正な項目は既定値になって返る。D1 の失敗は 503(文面なし)。GET だけ(HEAD で D1 を引かない)。
+ */
+async function handleSettingsGet(env: Env): Promise<Response> {
+  try {
+    const loaded = await loadSettings(env.DB);
+    return json({ ok: true, settings: loaded.settings, source: loaded.source });
+  } catch {
+    // 例外の文面・SQL は返さない。
+    return json({ ok: false, error: { type: "d1-error" } }, 503);
+  }
+}
+
+/**
+ * `POST /api/settings`(Issue #189): 設定を D1 に保存する。**全項目の置き換え**(キーが欠けている・未知のキーがある・範囲外は 400。黙って既定値に戻さない)。
+ * 順序: 守り(`readJsonObjectBody`。上限は 16 KiB)→ 検証(書く側の範囲。400。ここまでで D1 に書かない)→ UPSERT(失敗は 503。文面なし)。
+ * 成功は 200 で、保存した設定を返す(`{ ok: true, settings }`)。400 の本文は固定の message と、欠けた・範囲外の**既知の項目名**(`fields`。入力の値・未知のキー名は写さない)。
+ */
+async function handleSettingsSave(request: Request, env: Env, now: () => Date): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, SETTINGS_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const checked = validateCloudSettingsForSave(guarded.body);
+  if (!checked.ok) {
+    return json({ ok: false, error: { type: "bad-request", message: "設定の項目が足りない・未知の項目がある・範囲外の値があります", fields: checked.fields } }, 400);
+  }
+  try {
+    await saveSettings(env.DB, checked.settings, now().toISOString());
+    return json({ ok: true, settings: checked.settings });
+  } catch {
+    // 例外の文面・SQL は返さない。
+    return json({ ok: false, error: { type: "d1-error" } }, 503);
   }
 }
 

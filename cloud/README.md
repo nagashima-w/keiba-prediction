@@ -242,4 +242,12 @@ Access の後ろの GET が2つ(仕様の詳細は `docs/current-spec.md` の「
 
 ## 設定(Issue #178)
 発走前の分析の設定(資金・1レース上限・ケリー係数・組合せオッズの取得・各券種の配分など)は D1 の `cloud_settings` の1行(`id = 1`)。**行が無ければ全項目が exe の既定値**(資金・1レース上限は 0 = 配分提案なし、組合せオッズの取得は OFF)。
-編集する画面・API は #165。値を決めたら、`wrangler d1 execute DB --remote --command "INSERT INTO cloud_settings (id, settings_json, updated_at) VALUES (1, '{\"bankroll\":1000000,\"perRaceCap\":100000}', datetime('now')) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at"` のように入れる(項目と検証は `cloud/src/settings.ts`)。
+**編集の API は Issue #189**(下の「設定の API」)。画面は同じ Issue の段階2で足す。直接 D1 に入れてもよい: `wrangler d1 execute DB --remote --command "INSERT INTO cloud_settings (id, settings_json, updated_at) VALUES (1, '{\"bankroll\":1000000,\"perRaceCap\":100000}', datetime('now')) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at"` のように入れる(項目と検証は `cloud/src/settings.ts`)。
+
+### 設定の API(Issue #189)
+- `GET /api/settings` — `{ "ok": true, "settings": {…14項目。camelCase}, "source": "default"|"d1"|"invalid" }`。`default` は行が無い、`invalid` は行があるが JSON として読めない(どちらも既定値を返している)。**読む側**の範囲なので、D1 に手で入れた不正な項目は、その項目だけ既定値になって返る。D1 の失敗は 503(`d1-error`。文面なし)。GET だけ(HEAD・PUT 等は 405。`Allow: GET, POST`)。
+- `POST /api/settings` — 本文は **14項目すべて**の JSON(全項目の置き換え。部分更新は受けない)。成功は 200 で `{ "ok": true, "settings": {…保存した設定} }`。**同じオリジンのページから**(`Origin` が必要。`POST /api/analyses/run` と同じ守りで、`readJsonObjectBody` を共有する)。順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413。上限は **16 KiB**。run は 1 KiB)→ JSON のオブジェクト(400)→ 項目の検証(400)→ 保存(D1 の失敗は 503)。
+  - 項目が欠けている・未知のキーがある・範囲外の値があるときは 400(黙って既定値に戻さない)。本文は固定の message と、欠けた・範囲外の**既知の項目名**(`fields`)。入力の値・未知のキー名は返さない。
+  - **範囲(書く側)**: bankroll 整数 0〜1億 / perRaceCap 整数 0〜1000万 / evThreshold > 0 / kellyFraction **0.05〜1**(読む側は 0〜1。exe の画面と同じ下限) / clipVariant `default`・`wide15` / include 系は真偽値 / **preRaceOffsetMinutes 整数 10〜180(既定 45。cloud 専用。定時の自動実行〈#166〉を入れるまで効かない)** / additionalInstruction **2,000 文字まで**(UTF-16 コード単位。読む側には上限が無い。#179 のプロンプトの組み立ては自分でも切り詰めること)。
+  - 書く側は読む側の部分集合(書ける値は必ず読める)。述語は `cloud/src/settings.ts` の `CLOUD_SETTINGS_RULES` に項目ごとに1か所。
+  - 検査: `test/settings.test.ts`(境界値の表・保存 → 読み戻し)・`test/handler-settings.test.ts`・`test/handler-json-guard.test.ts`(守りの順序を run と同じ表で)。

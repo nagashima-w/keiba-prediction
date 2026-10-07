@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { coerceCloudSettings, DEFAULT_CLOUD_SETTINGS, loadSettings, SELECT_SETTINGS_SQL } from "../src/settings";
+import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "../src/pre-race-time";
+import {
+  ADDITIONAL_INSTRUCTION_MAX_LENGTH,
+  CLOUD_SETTINGS_KEYS,
+  CLOUD_SETTINGS_RULES,
+  coerceCloudSettings,
+  DEFAULT_CLOUD_SETTINGS,
+  loadSettings,
+  saveSettings,
+  SELECT_SETTINGS_SQL,
+  UPSERT_SETTINGS_SQL,
+  validateCloudSettingsForSave,
+  type CloudSettings,
+} from "../src/settings";
 
 /**
  * Issue #178(#164-c): クラウド版の設定(D1 の1行)。既定値は exe の現在の既定値(`scripts/test/cloud-settings-defaults.test.ts` が exe の値との一致を固定)。
@@ -21,7 +34,13 @@ describe("既定値", () => {
       includeExactaInAllocation: true,
       includeTrifectaInAllocation: true,
       includeBracketQuinellaInAllocation: true,
+      preRaceOffsetMinutes: 45,
     });
+  });
+
+  it("Issue #189: 発走何分前の既定(preRaceOffsetMinutes)は 45 で、pre-race-time.ts の定数と同じ値(定義は1か所)", () => {
+    expect(DEFAULT_PRE_RACE_OFFSET_MINUTES).toBe(45);
+    expect(DEFAULT_CLOUD_SETTINGS.preRaceOffsetMinutes).toBe(DEFAULT_PRE_RACE_OFFSET_MINUTES);
   });
 });
 
@@ -50,6 +69,10 @@ describe("coerceCloudSettings", () => {
     ["clipVariant が未知", { clipVariant: "wide99" }, "clipVariant", "default"],
     ["include が真偽値でない", { includeComboOdds: "true" }, "includeComboOdds", false],
     ["include が真偽値でない(ワイド)", { includeWideInAllocation: 1 }, "includeWideInAllocation", true],
+    ["preRaceOffsetMinutes が 10 未満", { preRaceOffsetMinutes: 9 }, "preRaceOffsetMinutes", 45],
+    ["preRaceOffsetMinutes が 180 超え", { preRaceOffsetMinutes: 181 }, "preRaceOffsetMinutes", 45],
+    ["preRaceOffsetMinutes が小数", { preRaceOffsetMinutes: 30.5 }, "preRaceOffsetMinutes", 45],
+    ["preRaceOffsetMinutes が文字列", { preRaceOffsetMinutes: "30" }, "preRaceOffsetMinutes", 45],
   ])("%s は、その項目だけ既定値に戻す", (_name, raw, key, expected) => {
     expect((coerceCloudSettings(raw) as unknown as Record<string, unknown>)[key]).toBe(expected);
   });
@@ -59,6 +82,13 @@ describe("coerceCloudSettings", () => {
     expect(coerceCloudSettings({ perRaceCap: 10_000_000 }).perRaceCap).toBe(10_000_000);
     expect(coerceCloudSettings({ kellyFraction: 0 }).kellyFraction).toBe(0);
     expect(coerceCloudSettings({ kellyFraction: 1 }).kellyFraction).toBe(1);
+    expect(coerceCloudSettings({ preRaceOffsetMinutes: 10 }).preRaceOffsetMinutes).toBe(10);
+    expect(coerceCloudSettings({ preRaceOffsetMinutes: 180 }).preRaceOffsetMinutes).toBe(180);
+  });
+
+  it("Issue #189: 追加指示は、読む側では長さの上限を持たない(D1 に直接入れた長い行を、黙って空に戻さない)", () => {
+    const long = "あ".repeat(ADDITIONAL_INSTRUCTION_MAX_LENGTH + 500);
+    expect(coerceCloudSettings({ additionalInstruction: long }).additionalInstruction).toBe(long);
   });
 
   it("オブジェクトでない入力(null・配列・文字列)は全部既定値。未知のキーは捨てる", () => {
@@ -108,5 +138,193 @@ describe("loadSettings(D1 の1行)", () => {
       }),
     } as never;
     await expect(loadSettings(failing)).rejects.toThrow("D1 失敗");
+  });
+});
+
+/** 全項目が有効な設定(既定値とは別の値。書き込みの検証が全項目を通ることの確認に使う)。 */
+const FULL: CloudSettings = {
+  evThreshold: 1.2,
+  additionalInstruction: "人気薄は慎重に",
+  clipVariant: "wide15",
+  bankroll: 500_000,
+  perRaceCap: 50_000,
+  kellyFraction: 0.25,
+  includeComboOdds: true,
+  includeWideInAllocation: false,
+  includeTrioInAllocation: false,
+  includeQuinellaInAllocation: true,
+  includeExactaInAllocation: false,
+  includeTrifectaInAllocation: true,
+  includeBracketQuinellaInAllocation: false,
+  preRaceOffsetMinutes: 60,
+};
+
+/**
+ * 項目ごとの境界値の表(Issue #189)。`read`・`write` は、その値を読む側・書く側が受け入れるか。
+ * 書く側は読む側の部分集合(write なら必ず read)。読めるが書けない値(kelly の 0〜0.05 未満)だけが、部分集合が真の部分集合である箇所。
+ */
+const BOUNDARIES: ReadonlyArray<{ key: keyof CloudSettings; raw: unknown; read: boolean; write: boolean }> = [
+  ...[0, 1, 50_000, 100_000_000].map((raw) => ({ key: "bankroll" as const, raw, read: true, write: true })),
+  ...[-1, 100_000_001, 1000.5, "1000", null, Number.NaN].map((raw) => ({ key: "bankroll" as const, raw, read: false, write: false })),
+  ...[0, 1, 10_000_000].map((raw) => ({ key: "perRaceCap" as const, raw, read: true, write: true })),
+  ...[-1, 10_000_001, 0.5, "1"].map((raw) => ({ key: "perRaceCap" as const, raw, read: false, write: false })),
+  ...[Number.MIN_VALUE, 0.01, 1, 1.5, 100].map((raw) => ({ key: "evThreshold" as const, raw, read: true, write: true })),
+  ...[0, -0.1, "1", Number.NaN].map((raw) => ({ key: "evThreshold" as const, raw, read: false, write: false })),
+  ...[0.05, 0.5, 1].map((raw) => ({ key: "kellyFraction" as const, raw, read: true, write: true })),
+  ...[0, 0.01, 0.04999].map((raw) => ({ key: "kellyFraction" as const, raw, read: true, write: false })),
+  ...[-0.01, 1.0001, "0.5", Number.NaN].map((raw) => ({ key: "kellyFraction" as const, raw, read: false, write: false })),
+  ...[10, 11, 45, 179, 180].map((raw) => ({ key: "preRaceOffsetMinutes" as const, raw, read: true, write: true })),
+  ...[0, 9, 181, 10.5, "45", Number.NaN].map((raw) => ({ key: "preRaceOffsetMinutes" as const, raw, read: false, write: false })),
+  ...["default", "wide15"].map((raw) => ({ key: "clipVariant" as const, raw, read: true, write: true })),
+  ...["wide99", "", 1, null].map((raw) => ({ key: "clipVariant" as const, raw, read: false, write: false })),
+  ...["", "x", "あ".repeat(ADDITIONAL_INSTRUCTION_MAX_LENGTH)].map((raw) => ({ key: "additionalInstruction" as const, raw, read: true, write: true })),
+  ...["あ".repeat(ADDITIONAL_INSTRUCTION_MAX_LENGTH + 1)].map((raw) => ({ key: "additionalInstruction" as const, raw, read: true, write: false })),
+  ...[1, null].map((raw) => ({ key: "additionalInstruction" as const, raw, read: false, write: false })),
+  ...(
+    [
+      "includeComboOdds",
+      "includeWideInAllocation",
+      "includeTrioInAllocation",
+      "includeQuinellaInAllocation",
+      "includeExactaInAllocation",
+      "includeTrifectaInAllocation",
+      "includeBracketQuinellaInAllocation",
+    ] as const
+  ).flatMap((key) => [
+    { key, raw: true, read: true, write: true },
+    { key, raw: false, read: true, write: true },
+    { key, raw: "true", read: false, write: false },
+    { key, raw: 1, read: false, write: false },
+    { key, raw: null, read: false, write: false },
+  ]),
+];
+
+describe("範囲の述語(項目ごとに1か所。読む側 coerce と書く側 validate が同じ表を使う。Issue #189)", () => {
+  it("表のキー集合は、既定値のキー集合(= CloudSettings の全項目)と一致する。境界値の表も全項目を覆う", () => {
+    expect([...CLOUD_SETTINGS_KEYS].sort()).toEqual(Object.keys(DEFAULT_CLOUD_SETTINGS).sort());
+    expect(Object.keys(CLOUD_SETTINGS_RULES).sort()).toEqual(Object.keys(DEFAULT_CLOUD_SETTINGS).sort());
+    expect([...new Set(BOUNDARIES.map((b) => b.key))].sort()).toEqual(Object.keys(DEFAULT_CLOUD_SETTINGS).sort());
+  });
+
+  it("各項目の fallback は、その項目の既定値と同じ(読む側の既定値の戻し先が1か所)", () => {
+    for (const key of CLOUD_SETTINGS_KEYS) {
+      expect(CLOUD_SETTINGS_RULES[key].fallback, key).toEqual(DEFAULT_CLOUD_SETTINGS[key]);
+    }
+  });
+
+  it.each(BOUNDARIES.map((b) => [`${b.key} = ${typeof b.raw === "string" && b.raw.length > 20 ? `(${b.raw.length}文字)` : JSON.stringify(b.raw)}`, b] as const))("%s", (_name, b) => {
+    const rule = CLOUD_SETTINGS_RULES[b.key] as { isReadable(raw: unknown): boolean; isWritable(raw: unknown): boolean };
+    expect(rule.isReadable(b.raw)).toBe(b.read);
+    expect(rule.isWritable(b.raw)).toBe(b.write);
+    // 読む側(coerce)は isReadable に従う: 読めるなら採用、読めないなら既定値
+    const coerced = coerceCloudSettings({ [b.key]: b.raw })[b.key];
+    if (b.read) expect(coerced).toBe(b.raw);
+    else expect(coerced).toBe(DEFAULT_CLOUD_SETTINGS[b.key]);
+  });
+
+  it("部分集合: 書く側が受け入れる値は、必ず読む側も受け入れる。かつ、読めるが書けない値が実際にある(部分集合が真の部分集合になっている箇所を固定: kelly の 0〜0.05 未満と、2,001 文字の追加指示だけ)", () => {
+    const writable = BOUNDARIES.filter((b) => b.write);
+    expect(writable.length).toBeGreaterThan(0);
+    expect(writable.every((b) => b.read)).toBe(true);
+    const readOnly = BOUNDARIES.filter((b) => b.read && !b.write);
+    expect(readOnly.length).toBe(4);
+    expect([...new Set(readOnly.map((b) => b.key))].sort()).toEqual(["additionalInstruction", "kellyFraction"]);
+  });
+
+  it("全境界値で「保存 → 読み戻し」が一致する: 書ける値を JSON にして validate → JSON.stringify → JSON.parse → coerce しても、値が変わらない", () => {
+    const writable = BOUNDARIES.filter((b) => b.write);
+    for (const b of writable) {
+      const body = JSON.parse(JSON.stringify({ ...FULL, [b.key]: b.raw })) as unknown;
+      const checked = validateCloudSettingsForSave(body);
+      expect(checked.ok, `${b.key}=${JSON.stringify(b.raw)?.slice(0, 30)}`).toBe(true);
+      if (!checked.ok) continue;
+      const roundTripped = coerceCloudSettings(JSON.parse(JSON.stringify(checked.settings)));
+      expect(roundTripped).toEqual(checked.settings);
+      expect(roundTripped[b.key]).toBe(b.raw);
+    }
+  });
+});
+
+describe("validateCloudSettingsForSave(全項目の置き換え。キーの欠け・未知のキー・範囲外は不可)", () => {
+  it("全項目が有効なら ok で、同じ内容の設定を返す(余計なキーを足さない)", () => {
+    const checked = validateCloudSettingsForSave({ ...FULL });
+    expect(checked).toEqual({ ok: true, settings: FULL });
+  });
+
+  it("既定値そのもの(14項目)も通る", () => {
+    expect(validateCloudSettingsForSave({ ...DEFAULT_CLOUD_SETTINGS })).toEqual({ ok: true, settings: DEFAULT_CLOUD_SETTINGS });
+  });
+
+  it.each(CLOUD_SETTINGS_KEYS.map((key) => [key] as const))("キー %s が欠けていたら不可(fields にその項目名だけ)", (key) => {
+    const body: Record<string, unknown> = { ...FULL };
+    delete body[key];
+    expect(validateCloudSettingsForSave(body)).toEqual({ ok: false, fields: [key] });
+  });
+
+  it("範囲外の項目は fields に出る(複数あれば全部。順序は CloudSettings の項目順)", () => {
+    const checked = validateCloudSettingsForSave({ ...FULL, bankroll: -1, kellyFraction: 0.01, preRaceOffsetMinutes: 5 });
+    expect(checked).toEqual({ ok: false, fields: ["bankroll", "kellyFraction", "preRaceOffsetMinutes"] });
+  });
+
+  it("未知のキーは不可。未知のキー名は結果に写さない(fields は既知の項目名だけ)", () => {
+    const checked = validateCloudSettingsForSave({ ...FULL, secretKey: "x" });
+    expect(checked.ok).toBe(false);
+    expect(JSON.stringify(checked)).not.toContain("secretKey");
+    expect(checked).toEqual({ ok: false, fields: [] });
+  });
+
+  it("__proto__ という名前の own キー(JSON.parse が作る)も未知のキーとして不可", () => {
+    const body = JSON.parse(`{"__proto__":{"bankroll":1},${JSON.stringify(FULL).slice(1)}`) as unknown;
+    expect(Object.keys(body as object)).toContain("__proto__");
+    expect(validateCloudSettingsForSave(body).ok).toBe(false);
+  });
+
+  it("オブジェクトでない入力(null・配列・文字列・数値)は不可", () => {
+    for (const raw of [null, undefined, [], "x", 5]) {
+      expect(validateCloudSettingsForSave(raw).ok, String(raw)).toBe(false);
+    }
+  });
+
+  it("追加指示は 2,000 文字(UTF-16 コード単位。`.length`)まで: 2,000 は可、2,001 は不可", () => {
+    expect(ADDITIONAL_INSTRUCTION_MAX_LENGTH).toBe(2000);
+    expect(validateCloudSettingsForSave({ ...FULL, additionalInstruction: "a".repeat(2000) }).ok).toBe(true);
+    expect(validateCloudSettingsForSave({ ...FULL, additionalInstruction: "a".repeat(2001) })).toEqual({ ok: false, fields: ["additionalInstruction"] });
+  });
+});
+
+describe("saveSettings(D1 の1行に UPSERT)", () => {
+  function writeDb(record: Array<{ sql: string; args: unknown[] }>, fail = false): Parameters<typeof saveSettings>[0] {
+    return {
+      prepare: (sql: string) => ({
+        bind: (...args: unknown[]) => ({
+          run: async () => {
+            record.push({ sql, args });
+            if (fail) throw new Error("D1 失敗");
+            return {};
+          },
+        }),
+      }),
+    } as never;
+  }
+
+  it("UPSERT の1文を、(設定の JSON, 更新時刻)で1回だけ実行する。JSON は全項目で、読み戻すと同じ", async () => {
+    const record: Array<{ sql: string; args: unknown[] }> = [];
+    await saveSettings(writeDb(record), FULL, "2026-10-07T01:02:03.000Z");
+    expect(record.length).toBe(1);
+    expect(record[0]!.sql).toBe(UPSERT_SETTINGS_SQL);
+    expect(record[0]!.args.length).toBe(2);
+    expect(record[0]!.args[1]).toBe("2026-10-07T01:02:03.000Z");
+    expect(JSON.parse(record[0]!.args[0] as string)).toEqual(FULL);
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(14);
+  });
+
+  it("UPSERT の文は id = 1 の1行だけを対象にする(CHECK 制約と同じ。id を引数にしない)", () => {
+    expect(UPSERT_SETTINGS_SQL).toContain("cloud_settings");
+    expect(UPSERT_SETTINGS_SQL).toContain("VALUES (1, ?, ?)");
+    expect(UPSERT_SETTINGS_SQL).toContain("ON CONFLICT(id) DO UPDATE");
+  });
+
+  it("D1 の書き込みが失敗したら投げる", async () => {
+    await expect(saveSettings(writeDb([], true), FULL, "2026-10-07T00:00:00.000Z")).rejects.toThrow("D1 失敗");
   });
 });

@@ -39,14 +39,22 @@ describe("startTimeEpochMs(JST → UTC)", () => {
 });
 
 describe("preRaceAlarmAt(発走の何分前か)", () => {
-  it("既定は 30 分前(ユーザー判断 2026-10-06。設定で変えられるようにするのは #166)", () => {
-    expect(DEFAULT_PRE_RACE_OFFSET_MINUTES).toBe(30);
-    expect(iso(preRaceAlarmAt("20260628", "15:25"))).toBe("2026-06-28T05:55:00.000Z");
+  it("既定は 45 分前(Issue #189 で 30 → 45。ユーザー判断 2026-10-07。設定 `preRaceOffsetMinutes` の既定値と同じ定数。定時の自動実行は #166)", () => {
+    expect(DEFAULT_PRE_RACE_OFFSET_MINUTES).toBe(45);
+    // JST 15:25 = UTC 06:25 の 45 分前
+    expect(iso(preRaceAlarmAt("20260628", "15:25"))).toBe("2026-06-28T05:40:00.000Z");
+    expect(preRaceAlarmAt("20260628", "15:25")).toBe(preRaceAlarmAt("20260628", "15:25", DEFAULT_PRE_RACE_OFFSET_MINUTES));
+    expect(preRaceAlarmAt("20260628", "15:25")).toBe(startTimeEpochMs("20260628", "15:25") - 45 * 60_000);
   });
 
-  it("日付をまたぐ: JST 9:00 の発走の 30 分前は UTC の前日 23:30。JST 0:10 の 30 分前は UTC の前日 14:40", () => {
-    expect(iso(preRaceAlarmAt("20260628", "09:00"))).toBe("2026-06-27T23:30:00.000Z");
-    expect(iso(preRaceAlarmAt("20260628", "00:10"))).toBe("2026-06-27T14:40:00.000Z");
+  it("日付をまたぐ: JST 9:00 の発走の 30 分前は UTC の前日 23:30。JST 0:10 の 30 分前は UTC の前日 14:40(旧版の既定 30 分の値を、明示の 30 で保つ)", () => {
+    expect(iso(preRaceAlarmAt("20260628", "09:00", 30))).toBe("2026-06-27T23:30:00.000Z");
+    expect(iso(preRaceAlarmAt("20260628", "00:10", 30))).toBe("2026-06-27T14:40:00.000Z");
+  });
+
+  it("日付をまたぐ(既定の 45 分前): JST 9:00 の 45 分前は UTC の前日 23:15。JST 0:10 の 45 分前は UTC の前日 14:25", () => {
+    expect(iso(preRaceAlarmAt("20260628", "09:00"))).toBe("2026-06-27T23:15:00.000Z");
+    expect(iso(preRaceAlarmAt("20260628", "00:10"))).toBe("2026-06-27T14:25:00.000Z");
   });
 
   it("分前の指定を変えられる(0 分前 = 発走時刻。60 分前)。負・小数・非有限は拒否する", () => {

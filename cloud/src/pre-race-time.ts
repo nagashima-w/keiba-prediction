@@ -7,8 +7,11 @@
 /** JST は UTC+9(夏時間なし)。 */
 const JST_OFFSET_MS = 9 * 3600_000;
 
-/** 発走の何分前に分析するか(既定。ユーザー判断 2026-10-06。設定で変えられるようにするのは #166)。 */
-export const DEFAULT_PRE_RACE_OFFSET_MINUTES = 30;
+/**
+ * 発走の何分前に分析するか(既定)。**設定 `preRaceOffsetMinutes`(`settings.ts`)の既定値と同じ定数**(定義は1か所)。
+ * Issue #189(ユーザー判断 2026-10-07)で 30 → 45。この関数を実際に呼ぶのは定時の自動実行(#166)で、それまでは production から呼ばれない。
+ */
+export const DEFAULT_PRE_RACE_OFFSET_MINUTES = 45;
 
 /**
  * 開催日(YYYYMMDD。JST の暦日)と発走時刻(JST の HH:MM)から、発走の瞬間(UTC のエポックミリ秒)を求める。

@@ -1153,9 +1153,9 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   R2 の put には 15 秒の上限時間を掛ける(`withPutTimeout`)。買い目の JSON は 1.5MB までで、超えたら D1 に何も書かずに拒否する(通常の最大は中央16頭・全券種 ON で 265 件・約 23KB)。
 - **子の行の確認**(#175 の申し送り): 保存後に、子の行(馬・買い目)の件数が保存したレコードと一致するかを確かめ、`children_ok` に記録する(不一致は警告。分析は保存済みなので `done`)。
   子の行は `(SELECT max(id) FROM analyses)` で親に紐づけているので、**最初の本番の実保存で `GET /api/analyses/status` の `children_ok` が true であること**を確かめる(ローカルの D1 では true。本番は未確認)。崩れた場合の代替は #175 の JSDoc(migration 0003 案)。
-- **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant。**既定値は exe の既定値と同じ**
-  (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集する API は無い**(#165)。値は D1 への UPDATE か migration で入れる。
-- **発走時刻の換算**(`cloud/src/pre-race-time.ts`): 出馬表の `startTime`(JST の HH:MM)から、UTC のエポックミリ秒と「発走の30分前」を求める(JST 0:00〜8:59 は UTC の前日)。アラームの予約に使うのは #166。
+- **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant、および cloud 専用の preRaceOffsetMinutes(発走何分前に評価するか。整数 10〜180・既定 45。定時の自動実行〈#166〉で使う。それまでは効かない)。**exe と共有する13項目の既定値は exe の既定値と同じ**
+  (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集は `GET`/`POST /api/settings`(Issue #189)**: POST は全項目の置き換えで、欠け・未知のキー・範囲外は 400。範囲の述語は項目ごとに1か所(`CLOUD_SETTINGS_RULES`)で、書く側は読む側の部分集合(kellyFraction は書く側 0.05〜1・読む側 0〜1、追加指示は書く側 2,000 文字まで・読む側は上限なし)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有し、上限は run 1 KiB・settings 16 KiB。画面は段階2で追加。
+- **発走時刻の換算**(`cloud/src/pre-race-time.ts`): 出馬表の `startTime`(JST の HH:MM)から、UTC のエポックミリ秒と「発走の45分前」(既定。Issue #189 で 30 → 45。設定 `preRaceOffsetMinutes` の既定値と同じ定数)を求める(JST 0:00〜8:59 は UTC の前日)。アラームの予約に使うのは #166。
 - **状態**: `GET /api/analyses/status` の各レースに `mode`・`analysis_id`・`detail`・`children_ok`。
 
 ### スマホ画面のための読み取り API(#183〈#165-a〉。v1.19.15)
