@@ -21,5 +21,10 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.ts"],
+    // タイムアウト(テスト・フックとも 30 秒): cloud のテストは、パイプライン全体や本物の workerd(ローカルの D1・R2)を走らせるため、1 本 1〜4 秒かかる
+    // (手元で、race-day-pre-race.test.ts の「失敗が続けば…」が約 4 秒)。CI では並列で遅くなり、6b6de58 の run で既定の 5 秒を超えた(Test timed out in 5000ms)。
+    // テストの内容・期待値は変えない。特定のテストだけでなく、cloud の設定全体で扱う(テストが増えるたびに並列の負荷が上がるため)。
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
