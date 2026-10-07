@@ -96,6 +96,14 @@
   offset の最小値 10 分は、too-late の閾値 10 分と一致する。そのため、**アラームが 1ms 遅れるだけで
   全レースがスキップになる**構造だった(code-reviewer が【要修正】として検出)。
   「同じ定義で揃う」という利点だけで採らない
+- **検証要件には、CI の check ジョブが実行するコマンドを全部入れる。** #205 では、ゲートの
+  検証要件が `typecheck`・`test`・`deploy:dry` だけだった。そのため、`pnpm run smoke`(workerd を
+  起動して health などを完全一致で確かめる)が漏れ、health にキーを足した変更が CI で初めて落ちた。
+  `deploy-cloud.yml` の check ジョブは、typecheck・test・deploy:dry・
+  `wrangler d1 migrations apply DB --local`・smoke を実行する。ブリーフを書く前に
+  ワークフローの `run:` を列挙する。**smoke は固定のポートと同じレースIDを使うので、2つの
+  作業ツリーで同時に動かすと互いに干渉する**(#205 で、実装担当とレビュアーの smoke がぶつかった)。
+  実行の前に `ps` で、ほかの wrangler・workerd が動いていないことを確かめる
 
 ### ★数値を出したら「再現欄」を必ず埋める(#81 で boss がこの禁止条項を読んだ直後に破った)
 **上の禁止事項を文言として知っているだけでは足りない。手続きにする。**
