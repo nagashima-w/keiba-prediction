@@ -18,6 +18,10 @@
  * 予約だけをして戻る(`setAlarm(now)`)。本処理はアラームの中(`runNextStep`)。同じレースが実行中(queued・fetched)なら受け付けない。
  * DO は1つの開催日だけを扱う(最初の予約の開催日に固定し、別の日・raceId の年と違う日は拒否する)。
  *
+ * ## アラームの合成(Issue #203 段階1)
+ * DO のアラームは1つだけ。**`setAlarm` を呼ぶのは {@link RaceDayCore.rearm} の1箇所だけ**で、起こしたい理由(今すぐの仕事・再試行待ち・計画・掃除)の最も早い時刻に張る({@link nextAlarmAt})。
+ * 計画(段階2)の候補が入っても、掃除や一覧の取得が未来の予約を潰さない。`pickNext` は**発走前(pre_race)を朝(morning)より先**に処理する(再試行待ちは最後)。
+ *
  * ## 失敗と再試行
  * 取得ステップは、失敗(gate の拒否・通信の失敗・戦績の取りこぼし)なら試行回数 {@link MAX_ATTEMPTS} まで、{@link RETRY_DELAY_MS} 後に再試行する
  * (取れたぶんはキャッシュにあるので、取れなかったぶんだけを取り直す)。**ブレーカーが開いている(blocked)・許可リスト外**は再試行せず直ちに失敗にする
@@ -76,6 +80,53 @@ export const CACHE_RETENTION_MS = DEFAULT_RESULTS_TTL_MS + 2 * 60 * 60 * 1000;
  * (掃除は「経過が保持期間を超えた行」だけを消す。ちょうどは残るので、余裕が無いと最後の行が残る)。
  */
 export const PURGE_MARGIN_MS = 60_000;
+
+/**
+ * アラームの合成の入力(Issue #203 段階1)。DO のアラームは**1つだけ**で、設定は上書き。だから、起こしたい理由(今すぐの仕事・再試行待ち・計画・掃除)の
+ * **最も早い時刻**に1回だけ張る({@link nextAlarmAt})。理由ごとに別々に `setAlarm` すると、後から呼んだものが先の予約を潰す(#166 の調査で見つけた事故)。
+ */
+export interface AlarmInputs {
+  readonly nowMs: number;
+  /** 再試行の間隔(ミリ秒。{@link RETRY_DELAY_MS})。 */
+  readonly retryDelayMs: number;
+  /** 初回の取得・初回の計算の queued・fetched がある(すぐ動かす)。 */
+  readonly immediateWork: boolean;
+  /** queued・fetched はあるが、すべて再試行待ち(間隔を空ける)。 */
+  readonly retryWork: boolean;
+  /** 計画の段階で、次に一覧を取りに行く時刻の最小(未完の会場。段階2で入る)。 */
+  readonly planNextTryAtMs: number | null;
+  /** 計画の表で、次に期限が来る行の時刻の最小(state が planned の行。段階2で入る)。 */
+  readonly planNextDueMs: number | null;
+  /** 掃除専用のアラームの時刻(`purge_due_at`)。 */
+  readonly purgeDueMs: number | null;
+}
+
+/**
+ * 次にアラームを張る時刻(UTC のエポックミリ秒)。候補のうち**最も早いもの**。候補が1つも無ければ null(アラームを設定しない)。
+ *  - 即時の仕事 → now / 再試行待ちだけ → now + 間隔
+ *  - 計画の次の試行・期限 → `max(それ, now)`(過去の時刻は now。仕事の有無によらず候補)
+ *  - 掃除の期限 → `max(それ, now)`。**ただし、仕事(即時・再試行待ち)があるあいだは候補にしない**: 仕事が終われば `armAlarm` が掃除の期限を延ばして張り直す。
+ *    古い掃除の期限を候補に入れると、再試行待ちの間隔を無効にして、すぐ起こしてしまう(今の `armAlarm` もそうしている)。
+ */
+export function nextAlarmAt(i: AlarmInputs): number | null {
+  const candidates: number[] = [];
+  if (i.immediateWork) {
+    candidates.push(i.nowMs);
+  }
+  if (i.retryWork) {
+    candidates.push(i.nowMs + i.retryDelayMs);
+  }
+  if (i.planNextTryAtMs !== null) {
+    candidates.push(Math.max(i.planNextTryAtMs, i.nowMs));
+  }
+  if (i.planNextDueMs !== null) {
+    candidates.push(Math.max(i.planNextDueMs, i.nowMs));
+  }
+  if (i.purgeDueMs !== null && !i.immediateWork && !i.retryWork) {
+    candidates.push(Math.max(i.purgeDueMs, i.nowMs));
+  }
+  return candidates.length === 0 ? null : Math.min(...candidates);
+}
 
 /** 計算ステップが、取得済みのキャッシュを鮮度に関係なく読むための TTL(実質無期限)。 */
 const FOREVER_MS = Number.MAX_SAFE_INTEGER;
@@ -404,7 +455,7 @@ export class RaceDayCore {
       now,
       now,
     );
-    await this.setAlarm(now);
+    await this.rearm();
     return { accepted: true, raceId, mode, status: "queued" };
   }
 
@@ -510,7 +561,7 @@ export class RaceDayCore {
       PURGE_DUE_KEY,
       String(needed),
     );
-    await this.setAlarm(needed);
+    await this.rearm();
   }
 
   /** 朝の prior(無ければ null)。 */
@@ -553,55 +604,84 @@ export class RaceDayCore {
   private async wakeWithoutWork(): Promise<StepOutcome> {
     const dueText = this.metaGet(PURGE_DUE_KEY);
     if (dueText === null) {
+      await this.rearm();
       return { kind: "idle" };
     }
     const due = Number(dueText);
     if (this.now() < due) {
-      await this.setAlarm(due);
+      await this.rearm();
       return { kind: "idle" };
     }
     this.sql.exec("DELETE FROM race_day_meta WHERE key = ?", PURGE_DUE_KEY);
     // 進行中のタスクが無いので、残っている LLM の応答の記録は孤立している(消し損ねた分)。
     SqlLlmResponseStore.clearOrphans(this.sql);
-    return { kind: "idle", purged: this.purgeCache() };
+    const purged = this.purgeCache();
+    await this.rearm();
+    return { kind: "idle", purged };
   }
 
+  /**
+   * 次に実行するタスク。**発走前(pre_race)は朝(morning)より先**(発走の時刻に締め切りがある。朝の36件の取得を待たせない。Issue #203)。
+   *  1. 計算待ち(fetched): 発走前 → 朝、そのなかで計算の試行回数の少ない順 → 予約の古い順 → レースID 順
+   *  2. 取得待ち(queued): **再試行待ち(試行済み)は最後**(間隔を空けて撃ち直す再試行を、モードの優先で即時の撃ち直しにしない)→ 発走前 → 朝 →
+   *     試行回数の少ない順 → 予約の古い順 → レースID 順
+   * 同じモードどうしの並びは従来のまま(`(attempts > 0)` は `attempts` の単調な関数なので、同じモードの中では `attempts` の昇順と同じ)。
+   */
   private pickNext(): TaskRow | null {
     const fetched = this.sql
-      .exec("SELECT * FROM race_day_tasks WHERE status = 'fetched' ORDER BY compute_attempts, queued_at, race_id, mode LIMIT 1")
+      .exec("SELECT * FROM race_day_tasks WHERE status = 'fetched' ORDER BY (mode = 'pre_race') DESC, compute_attempts, queued_at, race_id, mode LIMIT 1")
       .toArray() as TaskRow[];
     if (fetched[0] !== undefined) {
       return fetched[0];
     }
     const queued = this.sql
-      .exec("SELECT * FROM race_day_tasks WHERE status = 'queued' ORDER BY attempts, queued_at, race_id, mode LIMIT 1")
+      .exec("SELECT * FROM race_day_tasks WHERE status = 'queued' ORDER BY (attempts > 0), (mode = 'pre_race') DESC, attempts, queued_at, race_id, mode LIMIT 1")
       .toArray() as TaskRow[];
     return queued[0] ?? null;
   }
 
   /**
-   * 続きの仕事があればアラームを設定する(再試行待ちだけなら遅らせる)。
-   * **仕事が無くなったら、掃除専用のアラームを、保持期間 + 余裕の後に設定する**(掃除の時刻を永続化する。前の掃除の予約は上書きされる)。
+   * ステップのあとの張り直し。続きの仕事があればアラームを設定する(再試行待ちだけなら遅らせる)。アラームを張るのは {@link rearm}(最も早い候補に1回だけ)。
+   * **仕事が無くなったら、掃除の時刻(保持期間 + 余裕の後)を永続化する**(前の掃除の予約は上書きされる)。{@link rearm} がそれを候補に入れて張る。
    * 取得キャッシュは、仕事が無くなった時点ではどの行も新しい(保持期間の内側)ので、その場では何も消えない。アラームを設定しないと、
    * その日の DO は二度と起きず、期限切れの行が永久に残る(レビュー指摘)。
    */
   private async armAlarm(): Promise<void> {
-    const rows = this.sql
-      .exec("SELECT status, attempts, compute_attempts FROM race_day_tasks WHERE status IN ('queued', 'fetched')")
-      .toArray() as { status: TaskStatus; attempts: number; compute_attempts: number }[];
-    if (rows.length === 0) {
+    const pending = this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks WHERE status IN ('queued', 'fetched')").toArray() as { n: number }[];
+    if ((pending[0]?.n ?? 0) === 0) {
       const due = this.now() + CACHE_RETENTION_MS + PURGE_MARGIN_MS;
       this.sql.exec(
         "INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         PURGE_DUE_KEY,
         String(due),
       );
-      await this.setAlarm(due);
-      return;
     }
+    await this.rearm();
+  }
+
+  /**
+   * **`setAlarm` を呼ぶ唯一の口**(Issue #203 段階1)。今の状態から {@link nextAlarmAt} の入力を作り、最も早い時刻に1回だけ張る(候補が無ければ呼ばない)。
+   * 状態を読んでから `setAlarm` を呼ぶまでに `await` を挟まない(挟むと、その間に入った `schedule` のアラームを潰しうる。`getRaceList` の掃除の規則と同じ)。
+   */
+  private async rearm(): Promise<void> {
+    const rows = this.sql
+      .exec("SELECT status, attempts, compute_attempts FROM race_day_tasks WHERE status IN ('queued', 'fetched')")
+      .toArray() as { status: TaskStatus; attempts: number; compute_attempts: number }[];
     // すぐ動かせる仕事(初回の取得・初回の計算)があれば now。再試行待ちだけなら遅らせる。
-    const immediate = rows.some((r) => (r.status === "fetched" ? r.compute_attempts === 0 : r.attempts === 0));
-    await this.setAlarm(this.now() + (immediate ? 0 : RETRY_DELAY_MS));
+    const immediateWork = rows.some((r) => (r.status === "fetched" ? r.compute_attempts === 0 : r.attempts === 0));
+    const purgeText = this.metaGet(PURGE_DUE_KEY);
+    const at = nextAlarmAt({
+      nowMs: this.now(),
+      retryDelayMs: RETRY_DELAY_MS,
+      immediateWork,
+      retryWork: rows.length > 0 && !immediateWork,
+      planNextTryAtMs: null,
+      planNextDueMs: null,
+      purgeDueMs: purgeText === null ? null : Number(purgeText),
+    });
+    if (at !== null) {
+      await this.setAlarm(at);
+    }
   }
 
   /** 保持期間を超えたキャッシュの行を消し、消した件数を返す(失敗したら警告だけ出して 0)。 */

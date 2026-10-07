@@ -1184,6 +1184,9 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **定時の自動実行の純関数**(`cloud/src/auto-run-plan.ts`。Issue #202〈#166-A〉。**まだ production から呼ばれない**。呼ぶのは #203〜#206): `jstKaisaiDate(scheduledTimeMs)`(cron の `scheduledTime` から **JST の開催日**。UTC の日付をそのまま使うと UTC 15:00〜23:59 で1日ずれる)・
   `selectAutoRunTargets({ central, nar })`(**中央は全件、地方は Jpn1/2/3 だけ**。中央 → 地方の順・`venue` の印つき)・`planPreRaceDue({ kaisaiDate, startTime, offsetMinutes, nowMs })`
   (期限 = 発走 − offset 分。判定の順: `now ≥ start` → skip〈`started`〉/ `due ≥ now` → scheduled / 期限を過ぎていて発走まで 10 分(`MIN_AUTO_RUN_LEAD_MS`)以上 → immediate・未満 → skip〈`too-late`〉。発走時刻が無い・壊れているときは skip〈`no-start-time`〉)。
+- **アラームの合成と処理の順**(Issue #203 段階1。`cloud/src/race-day-core.ts`): DO のアラームは1つだけなので、`setAlarm` を呼ぶのは `rearm()` の1箇所だけにし、純関数 `nextAlarmAt` が
+  「今すぐの仕事(now)・再試行待ち(now + 60 秒)・計画の次の試行/期限(段階2。`max(それ, now)`)・掃除の期限」のうち**最も早い時刻**を選ぶ(掃除の期限は、仕事〈即時・再試行待ち〉があるあいだは候補にしない)。
+  予約が無いときの `setAlarm` の回数・値は従来と同じ。`pickNext` は **発走前(pre_race)を朝(morning)より先**に処理する(計算待ち → 取得待ちの順は従来どおり。取得待ちのうち**再試行待ち〈試行済み〉は最後**にして、再試行の間隔を保つ)。
 - **状態**: `GET /api/analyses/status` の各レースに `mode`・`analysis_id`・`detail`・`children_ok`。
 
 ### スマホ画面のための読み取り API(#183〈#165-a〉。v1.19.15)
