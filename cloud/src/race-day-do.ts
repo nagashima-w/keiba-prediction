@@ -14,10 +14,11 @@ import { DurableObject } from "cloudflare:workers";
 import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { createAnalysisSink } from "./analysis-sink";
 import { createCloudLlm } from "./llm-sender";
+import { createDiscordNotifier, webhookStatus } from "./notify-send";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
-import { RaceDayCore, type AutoRunResults, type Board, type MorningPrior, type RaceListResult, type RaceListVenue, type RequestPlanResult, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type RaceListResult, type RaceListVenue, type RequestPlanResult, type ScheduleInput, type ScheduleResult } from "./race-day-core";
 import { loadSettings } from "./settings";
 
 /** netkeiba への取得の出口(NetkeibaGate)の固定名。handler.ts の GATE_NAME と同じ(全取得をこの1つのインスタンスに通す)。 */
@@ -38,6 +39,11 @@ export interface RaceDayEnv {
    * 未登録・空白だけなら、LLM を使わず統計のみで保存し、理由を残す(Issue #194)。
    */
   ANTHROPIC_API_KEY?: string;
+  /**
+   * 通知(Discord。Issue #205)の Webhook URL(Worker の secret。**ユーザーがダッシュボードまたは wrangler で登録する**。値はリポジトリ・チャットに書かない)。
+   * 未登録・形式不正なら通知の仕組み全体を無効にする(材料も行も積まず、通知のためのアラームも張らない)。URL は `createDiscordNotifier` のクロージャの中にだけあり、`RaceDayCore` には渡らない。
+   */
+  DISCORD_WEBHOOK_URL?: string;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
     get(id: any): GateLike & { status(): Promise<GateStatus> };
@@ -50,6 +56,9 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
   constructor(ctx: DurableObjectState, env: RaceDayEnv) {
     super(ctx, env);
     const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
+    if (webhookStatus(env.DISCORD_WEBHOOK_URL) === "invalid") {
+      console.warn("DISCORD_WEBHOOK_URL の形式が Discord の Webhook ではないため、通知は送りません(値は出しません)");
+    }
     this.core = new RaceDayCore({
       sql: ctx.storage.sql,
       now: () => Date.now(),
@@ -60,6 +69,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       sink: createAnalysisSink(new D1AnalysisStore({ db: env.DB, bucket: withPutTimeout(env.ANALYSIS_DETAIL, R2_PUT_TIMEOUT_MS) })),
       // 発走前の分析の LLM(Issue #194)。キーが未登録なら undefined(LLM なしで保存し、理由を残す)。朝のタスクでは使わない。
       llm: createCloudLlm(env.ANTHROPIC_API_KEY),
+      // 通知(Issue #205)。Webhook が未登録・形式不正なら undefined(通知は無効)。
+      notifier: createDiscordNotifier(env.DISCORD_WEBHOOK_URL),
       loadSettings: async () => {
         const loaded = await loadSettings(env.DB);
         if (loaded.source === "invalid") {
@@ -86,6 +97,11 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
   /** 自動実行の各レースの結果(RPC。Issue #204。#205 の通知が状態から作るための読み取り。状態は変えない)。 */
   getAutoRunResults(): AutoRunResults {
     return this.core.getAutoRunResults();
+  }
+
+  /** 通知の一覧(RPC。Issue #205。送信の失敗が状態から読める。URL・例外の文面は含まない。状態は変えない)。 */
+  getNotifications(): NotificationRecord[] {
+    return this.core.getNotifications();
   }
 
   /** その日のレースの状態(RPC)。 */

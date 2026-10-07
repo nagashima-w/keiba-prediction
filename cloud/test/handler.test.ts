@@ -251,7 +251,7 @@ describe("ルート(認証後)", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false } });
+    expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false } });
   });
 
   describe("Issue #194: secrets.anthropic(API キーが登録されているか。存在だけを返し、値は返さない。ok の判定には含めない)", () => {
@@ -261,7 +261,7 @@ describe("ルート(認証後)", () => {
       const { deps, token } = await setup();
       const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: key }), {}, deps);
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false } });
+      expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false } });
     });
 
     it("キーが登録されていれば anthropic:true。応答のどこにもキーの値(の一部も)が出ない。ok は DO・D1 だけで決まる", async () => {
@@ -269,19 +269,19 @@ describe("ルート(認証後)", () => {
       const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: KEY }), {}, deps);
       expect(response.status).toBe(200);
       const text = await response.text();
-      expect(JSON.parse(text)).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: true } });
+      expect(JSON.parse(text)).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: true, discord: false } });
       expect(text).not.toContain("sk-ant");
       expect(text).not.toContain("FAKE-KEY");
       // 対照: DO が落ちていれば、キーがあっても 503(ok にキーの有無は効かない)。キーがあるだけでは ok にならない
       const down = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: KEY, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
       expect(down.status).toBe(503);
-      expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: true } });
+      expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: true, discord: false } });
     });
 
     it("キーが文字列でない(設定の取り違えで object など)ときは、false(値の型を信用しない)", async () => {
       const { deps, token } = await setup();
       const response = await handle(req("/api/health", { token }), envOf({ ANTHROPIC_API_KEY: { toString: () => KEY } as unknown as string }), {}, deps);
-      expect(await response.json()).toMatchObject({ secrets: { anthropic: false } });
+      expect(await response.json()).toMatchObject({ secrets: { anthropic: false, discord: false } });
     });
 
     it("認証できなければ、secrets の有無も含めて何も返さない(これまでどおり 403・本文は固定)", async () => {
@@ -292,11 +292,57 @@ describe("ルート(認証後)", () => {
     });
   });
 
+  describe("Issue #205: secrets.discord(Webhook が通知に使える形で登録されているか。真偽だけを返し、値・長さ・一部は返さない。ok の判定には含めない)", () => {
+    const URL_OK = "https://discord.com/api/webhooks/123456789012345678/dummy-token-for-tests_ABC";
+
+    it.each([[undefined], [""], ["   "], ["\n"]])("未登録・空(%j)なら discord:false。ok は true のまま(通知が無くても分析は動く)", async (value) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: value }), {}, deps);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false } });
+    });
+
+    it.each([["https://discord.com/api/webhooks/1/abc"], ["https://discordapp.com/api/webhooks/1/abc"], [`  ${URL_OK}\n`]])("通知に使える形(%j)なら discord:true。応答のどこにも値(の一部も)が出ない", async (value) => {
+      const { deps, token } = await setup();
+      const response = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: value }), {}, deps);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: true } });
+      expect(text).not.toContain("webhooks");
+      expect(text).not.toContain("dummy-token");
+      expect(text).not.toContain("discord.com");
+    });
+
+    it.each([["http://discord.com/api/webhooks/1/abc"], ["https://example.com/api/webhooks/1/abc"], ["not a url"], ["xhttps://discord.com/api/webhooks/1/abc"]])(
+      "登録されていても、形式が Discord の Webhook でない(%j)なら discord:false(通知は送られないので、使えないものを true にしない)",
+      async (value) => {
+        const { deps, token } = await setup();
+        const response = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: value }), {}, deps);
+        expect(await response.json()).toMatchObject({ secrets: { discord: false } });
+      },
+    );
+
+    it("文字列でない値(設定の取り違え)は false。DO が落ちていれば、Webhook があっても 503(ok に影響しない)", async () => {
+      const { deps, token } = await setup();
+      const odd = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: { toString: () => URL_OK } as unknown as string }), {}, deps);
+      expect(await odd.json()).toMatchObject({ secrets: { discord: false } });
+      const down = await handle(req("/api/health", { token }), envOf({ DISCORD_WEBHOOK_URL: URL_OK, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
+      expect(down.status).toBe(503);
+      expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: false, discord: true } });
+    });
+
+    it("認証できなければ、Webhook の有無も含めて何も返さない(403・本文は固定)", async () => {
+      const { deps } = await setup();
+      const response = await handle(req("/api/health"), envOf({ DISCORD_WEBHOOK_URL: URL_OK }), {}, deps);
+      expect(response.status).toBe(403);
+      expect(await response.text()).toBe("forbidden");
+    });
+  });
+
   it("DO が sqlite=false を返したら 503(ok:false)。DO が例外でも 503 で、例外の中身は返さない。D1 の結果は独立に報告する", async () => {
     const { deps, token } = await setup();
     const down = await handle(req("/api/health", { token }), envOf({ NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
     expect(down.status).toBe(503);
-    expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: false } });
+    expect(await down.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: true }, secrets: { anthropic: false, discord: false } });
     const throwing = gate(async () => {
       throw new Error("internal detail");
     });
@@ -313,19 +359,19 @@ describe("ルート(認証後)", () => {
     const response = await handle(req("/api/health", { token }), envOf({ DB: broken }), {}, deps);
     expect(response.status).toBe(503);
     const text = await response.text();
-    expect(JSON.parse(text)).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false } });
+    expect(JSON.parse(text)).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false, discord: false } });
     expect(text).not.toContain("no such table");
     // DO も D1 も駄目なら、両方 false
     const both = await handle(req("/api/health", { token }), envOf({ DB: broken, NETKEIBA_GATE: gate(async () => ({ sqlite: false })) }), {}, deps);
     expect(both.status).toBe(503);
-    expect(await both.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: false }, secrets: { anthropic: false } });
+    expect(await both.json()).toEqual({ ok: false, durableObject: { sqlite: false }, d1: { ok: false }, secrets: { anthropic: false, discord: false } });
   });
 
   it("D1 の binding が無い(設定漏れ)でも例外を外へ投げず、503 の d1.ok:false で返す", async () => {
     const { deps, token } = await setup();
     const response = await handle(req("/api/health", { token }), envOf({ DB: undefined as unknown as Env["DB"] }), {}, deps);
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false } });
+    expect(await response.json()).toEqual({ ok: false, durableObject: { sqlite: true }, d1: { ok: false }, secrets: { anthropic: false, discord: false } });
   });
 
   it("D1 の疎通確認は、読み取り専用の1文(bind なし)を1回だけ発行する(health のたびに書き込み行を増やさない)", async () => {

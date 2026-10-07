@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.21.3)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.21.4)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.21.3`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.21.4`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -995,7 +995,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **binding**: `[[d1_databases]]`(binding `DB`・database_name `keiba-cloud-db`・`database_id` は公開してよい値でリポジトリに書いてある。`remote = true` は使わない)。
 - **CI**(`deploy-cloud.yml`): check ジョブは `wrangler d1 migrations apply DB --local`。deploy ジョブは `wrangler deploy` の前に、database_id が仮の値でないことの確認 →
   D1 の権限確認(ステータスコードだけを出力)→ `migrations apply DB --remote`。
-- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic } }`(D1 は `D1_HEALTH_SQL`〈`analyses` の `detail_key`・`llm_note`・`llm_calls_json` と、馬の `highlights_json`・`concerns_json` を読む〉で、migration 0002・0005・0006・0007 の適用と binding を確かめる。`secrets.anthropic` は Worker の secret `ANTHROPIC_API_KEY` が登録されているかの boolean だけで、値は返さず、`ok` には含めない。#194)。
+- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic } }`(D1 は `D1_HEALTH_SQL`〈`analyses` の `detail_key`・`llm_note`・`llm_calls_json` と、馬の `highlights_json`・`concerns_json` を読む〉で、migration 0002・0005・0006・0007 の適用と binding を確かめる。`secrets.anthropic` は Worker の secret `ANTHROPIC_API_KEY` が登録されているかの boolean だけで、値は返さず、`ok` には含めない。#194)。`secrets.discord`(#205)は Worker の secret `DISCORD_WEBHOOK_URL` が**通知に使える形(`https://discord.com/api/webhooks/` か `https://discordapp.com/api/webhooks/` で始まる)で登録されているか**の boolean だけ(値・長さ・一部は返さず、`ok` には含めない。**false は「未登録」か「形式が不正」**)。
 - **後続の設計(合意済み。2026-10-06 の着手前ゲート)**: 大きな列(`race_snapshot_json`・`raw_response`・馬ごとの `contributions_json`)は R2(分析ごとに1オブジェクトの JSON)に置き、
   D1 には要約と R2 のキー(`detail_key`)だけを置く。書く順序は D1 → R2(R2 が失敗した行は `detail_key` を NULL にして要約だけを残す)。安全柵(R2 の月ごとの操作回数が無料枠の 10% を超えたら R2 に書かず D1 の要約だけ)は #173。
   発走前の分析だけを保存し、朝の prior は D1 に保存しない。
@@ -1202,6 +1202,30 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - **自動の印**(`race_day_auto_pre_race`。新しい表): 昇格が pre_race を積んだ同じ同期区間で書く。**手動の `schedule()` が pre_race を積み直すときに消す**(印が有る ⇔ 今の pre_race のインスタンスは自動。**削除が主で、読む側の `queued_at` との等値照合は多層防御**)。失敗の理由(`fail_reason`)は、自動の pre_race が failed になる箇所が書く。
   - **ステップの直前のガード**: 自動の pre_race は、取得・計算の各ステップの直前に `now ≥ 発走` なら、netkeiba にも LLM にも出ずに failed にする(固定のエラー文 `発走済みのため、自動実行しませんでした`・理由 `started`・試行回数は据え置き)。キューや再試行の待ちで発走を過ぎることがあるため。計算ステップは、分析が保存済み(`analysis_id` あり)なら failed にしない。**手動の pre_race は変えない**。
   - **結果の読み取り**(`getAutoRunResults()`。RPC あり。状態は変えない。#205 の通知が状態から作るため): 確定済みの日(`stage: "done"`)の各行について、`waiting`(期限待ち)・`running`・`completed`(`analysisId`・`detail`)・`failed`(理由は `started`〈ステップで発走済み〉・`blocked`〈ブレーカー・許可リスト外〉・`fetch-exhausted`・`compute-exhausted`)・`skipped`(理由は `no-start-time`・`started`・`too-late`・`cap`・`manual`)・`superseded`(昇格したが、その後に手動が pre_race を上書きした)を返す。分類は純関数 `classifyAutoRun`。通知に出すか・「送った印」は #205 の持ち分。
+- **通知(Discord)**(Issue #205〈#166-D〉。`cloud/src/notify-*.ts`・`race-day-core.ts`。**まだ呼ぶ入口が無い**: cron は #206。**実際の Discord への送信は、#206 の公開のあと、ユーザーが secret を登録して最初の自動実行の日に確かめる**。#205 の検証は偽の送信まで):
+  - **通知は状態から作る**(コールバックにしない)。`planNotifications`(純関数)が、`getAutoRunResults`・`getPlanProgress`・通知の表から、「いま送るもの(`sendNow`)」と「次にアラームを張る時刻(`nextAtMs`)」を**同じ関数が同じ状態から**返す。`rearm` は `nextAtMs` を(`AlarmInputs.notifyAtMs`)、送信のステップは `sendNow` を読む。
+    不変条件: `nextAtMs ≤ now` なら `sendNow` がある(即時ループなし)/ webhook が無効なら両方 null / 送り終えたものは候補にならない / `sendNow` を実行すると必ず状態が変わる。fuzz(`race-day-notify.test.ts`)が、実際の実行で固定している。
+  - **処理の順**: 昇格 → 計画(一覧・確定)→ **通知** → タスク(`pickNext`)。通知をタスクの前に置くのは、immediate の行が多い日に、pre_race の連続が時間に追われる通知を押しのけないため。送信の間隔(成功のあと 1 秒)・失敗のクールダウン(失敗のあと 60 秒。メタ `notify_pace_until`)があるので、通知がタスクを押しのけ続けることもない。
+  - **送るもの(レースごと)**: `completed` → 分析の embed(core の `buildAnalysisEmbed`。狙い目あり=緑・なし=灰色。LLM が効かなかった・一部だけのときは、固定の理由文を `LLM補正の注記:` の行で足す)/ `failed`(started・blocked・fetch-exhausted・compute-exhausted・unknown)→ 赤 / 昇格の時点の `skipped`(started・cap・no-start-time)→ 赤 / 昇格の時点の `skipped(manual)` → 灰色。
+    **送らない**: 計画の時点の `skipped`(まとめにだけ載る)・`superseded`(利用者が自分で再実行している)・`waiting`・`running`・手動の pre_race の結果。スキップが計画の時点か昇格の時点かは、行の期限(`dueMs`)で読む(`skipStage`。計画の時点のスキップは `due_ms: null` で書かれ、`markSkipped` は `due_ms` を更新しない。`disposition` は両方 `skip` なので判別に使えない)。
+    本文は理由ごとの**固定文だけ**(タスクのエラー文の生の値は載せない)。
+  - **completed の embed の材料**: 計算ステップの `saveAnalysis` コールバックの中で、保存する `record`(`record.raceSnapshot` に馬名・コース・距離・オッズ状態、`record.horses` に確率・EV・印)から**完成した embed を作り**、`analysis_id` を永続化する**より前**に、通知の表へ `ready` で積む(同じ同期区間)。
+    D1 の要約には馬名もコースも距離も無く、R2 は使えないことがある(Class A の柵・失敗)ので、D1・R2 から読む方式は採らなかった。再実行の3経路(初回・保存済みだが `analysis_id` が未永続〈`findByAnalyzedAt` が当たる〉・永続済み)のどれでも材料が欠けない(「`analysis_id` があるのに材料が無い」状態は一瞬も現れない)。
+    材料の構築に失敗しても分析は止めず、最小の embed(「画面で確認してください」)に代える。
+  - **朝のまとめ**(1日に1回): 中央は場ごとの field・「地方 交流重賞」の field・一覧の取得に失敗した会場・計画の時点のスキップの内訳・上限超過(失敗として数える)・未完了 N 件。送る時点は、確定済みで `morningAllTerminal` が真のとき、または**確定 + 60 分**(保険。すぐ実行の行は期限が確定と同時なので、「最初の期限」にはできない)。
+    **対象が 0 件で、全会場の一覧が取れた日は送らない**(ユーザー判断。`morningAllTerminal` は rows が 0 件でも真になるので、明示の規則にしている)。一覧の取得に失敗した会場がある日は、0 件でも送る。`listed=0`(一覧が空)・`listed>0 かつ targeted=0`(交流重賞なし)・`failed` は別の文言。
+  - **embed の上限**: `fitEmbed` が、title 256・description 4096・field の name 256・value 1024・field 25 個・embed 全体 6000 を保証する(長さは UTF-16 の `.length`)。value は行単位で落として「…ほか N 件」、全体の超過は末尾の field から縮める。境界値の表は `notify-embeds.test.ts`。
+  - **送信は多くとも1回**(`race_day_notify`。新しい表): `ready`(材料)→ **`sending`(送る前に書く)** → `sent`/`failed`(応答のあと)。`sending` のまま落ちたものは再送しない(二重送信より欠落を選ぶ)。`failed` も自動では再送しない。キーは `race:<raceId>`・`summary`(自動の実行インスタンスは1日に1つなのでレースID で一意。AC-D1 の「analysis_id をキーにする」は、failed・skipped が analysis_id を持たないので読み替えた。`analysis_id` は列に残す)。
+  - **送信**(`notify-send.ts`): core の `sendDiscordNotification` を、グローバルの `fetch`(Worker。core の既定の undici はスタブ)・タイムアウト 5 秒・429 の `Retry-After` は 5 秒まで待って1回だけ再送し、それを超えるなら待たずに `rate-limited` の失敗にする(再送しない)。アラームの中の1ステップなので、長い待ちは他の仕事を止める(最悪でも 1 件で約 15 秒)。
+  - **URL を出さない**: `RaceDayCore` が受け取るのは `{ send(payload) }` だけで、URL そのものを持たない。失敗は分類(`http-<status>`・`timeout`・`rate-limited`・`network`・`other`・送る前の `build`)だけを状態に残し、例外のメッセージ・応答の本文は保存しない。失敗は `getNotifications()`(RPC)で読める。
+  - **webhook が未登録・形式不正**: 通知の仕組み全体が無効(`notifier` を渡さない)。行も材料も積まず、通知のためのアラームも張らない。形式不正のときは DO の起動時に警告を1行(値は出さない)。
+  - **【記録】**:
+    - `sending` のまま落ちたものは再送しない(at-most-once)。「送る前に `sending` を書く」ことが、外向きの `fetch` より先に確定する、という Cloudflare の出力ゲートの挙動は、公式ドキュメントで確認していない(外れていても、起きるのは「落ちたときの二重送信」だけ)。
+    - webhook を後から登録した場合、登録前に完了したレースは通知しない(材料を積んでいないため)。
+    - 一覧が 0 件で ok の日(開催のない日と、一覧がまだ公開されていない・構造が変わって 0 件に見える日が区別できない)は、まとめを送らない。
+    - offset が大きく、すぐ実行(immediate)の行が多い日は、pre_race が morning より先に処理される(`pickNext`)ので、まとめが「未完了 N 件」で、レースごとの通知より後に届くことがある。immediate の行の morning は無駄になりうる(#206 以降で扱う)。
+    - 発走後に completed になった場合でも、通知は送る(`failIfStarted` は各ステップの入口でしか止めない)。
+    - Discord が Cloudflare の共有 IP からの Webhook を受け付けるかは、実送信するまで確かめられない(未検証)。
 - **アラームの合成と処理の順**(Issue #203 段階1。`cloud/src/race-day-core.ts`): DO のアラームは1つだけなので、`setAlarm` を呼ぶのは `rearm()` の1箇所だけにし、純関数 `nextAlarmAt` が
   「今すぐの仕事(now)・再試行待ち(now + 60 秒)・計画の次の試行/期限(段階2。`max(それ, now)`)・掃除の期限」のうち**最も早い時刻**を選ぶ(掃除の期限は、仕事〈即時・再試行待ち〉があるあいだは候補にしない)。
   予約が無いときの `setAlarm` の回数・値は従来と同じ。`pickNext` は **発走前(pre_race)を朝(morning)より先**に処理する(計算待ち → 取得待ちの順は従来どおり。取得待ちのうち**再試行待ち〈試行済み〉は最後**にして、再試行の間隔を保つ)。

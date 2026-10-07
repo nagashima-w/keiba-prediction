@@ -28,6 +28,12 @@
  * 昇格は**確定済みの日だけ**。昇格の判定は {@link RaceDayCore.promoteRow}(実行中の手動・時刻・手動の分析との重複・上限)、自動で積んだ pre_race は印(`race_day_auto_pre_race`)で手動と区別し、
  * 各ステップの直前に発走済みなら netkeiba にも LLM にも出ずに failed にする({@link RaceDayCore.failIfStarted})。結果は {@link RaceDayCore.getAutoRunResults} が状態から読む(`auto-run-result.ts`)。
  *
+ * ## 通知(Issue #205 段階D)
+ * Discord への通知は、コールバックではなく**状態から作る**(`planNotifications`〈`notify-plan.ts`。純関数〉が、`getAutoRunResults`・`getPlanProgress`・通知の表〈`race_day_notify`。`notify-store.ts`〉から、
+ * 「いま送るもの」と「次にアラームを張る時刻」を同じ関数で返す)。送信は {@link RaceDayCore.runNotifyStep}(**多くとも1回**: 送る前に `sending` の行を書く。落ちたものは再送しない)。処理の順は
+ * 昇格 → 計画 → **通知** → タスク。completed の embed は、計算ステップの `saveAnalysis` コールバックの中で、保存する `record` から作って `analysis_id` の永続化より前に積む({@link RaceDayCore.putAnalysisMaterial})。
+ * **webhook が無効なら(`notifier` なし)、行も材料も積まず、通知のためのアラームも張らない。** URL は `notifier` のクロージャの中だけにあり、ここには渡らない。
+ *
  * ## 失敗と再試行
  * 取得ステップは、失敗(gate の拒否・通信の失敗・戦績の取りこぼし)なら試行回数 {@link MAX_ATTEMPTS} まで、{@link RETRY_DELAY_MS} 後に再試行する
  * (取れたぶんはキャッシュにあるので、取れなかったぶんだけを取り直す)。**ブレーカーが開いている(blocked)・許可リスト外**は再試行せず直ちに失敗にする
@@ -50,6 +56,10 @@ import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scrap
 import { checkRaceDate } from "./race-date";
 import { planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
+import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
+import { FAILURE_COOLDOWN_MS, planNotifications, SEND_SPACING_MS, type NotificationPlan, type NotifyItem, type NotifyKind, type NotifyState } from "./notify-plan";
+import { classifyNotifyError, type DiscordNotifier } from "./notify-send";
+import { NotifyStore } from "./notify-store";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES, startTimeEpochMs } from "./pre-race-time";
 import { PLAN_VENUES, PlanStore, type PlanRowRecord, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
@@ -59,7 +69,7 @@ import { resolveClipVariant } from "@keiba/core/pipeline";
 import type { AnalysisSaveExtra, RecentAnalysis } from "./analysis-save-extra";
 export type { AnalysisSaveExtra, RecentAnalysis };
 import type { ModelSelector } from "@keiba/core/llm";
-import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelector, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets } from "./llm-run";
+import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelector, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets, type LlmOutcome } from "./llm-run";
 import { SqlLlmResponseStore } from "./llm-response-store";
 import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
@@ -114,6 +124,11 @@ export interface AlarmInputs {
   readonly planNextDueMs: number | null;
   /** 掃除専用のアラームの時刻(`purge_due_at`)。 */
   readonly purgeDueMs: number | null;
+  /**
+   * 通知(Discord。Issue #205)の次の時刻: 送るものがあれば送れる時刻(送信の間隔・失敗のクールダウンの時刻)、まとめの保険の時刻だけが残っていればその時刻({@link planNotifications} の `nextAtMs`)。
+   * 計画の候補と同じ扱い(仕事の有無によらず候補。過去は now)。省略・null は候補なし(webhook が無効なとき・既存の呼び出し)。
+   */
+  readonly notifyAtMs?: number | null;
 }
 
 /**
@@ -136,6 +151,9 @@ export function nextAlarmAt(i: AlarmInputs): number | null {
   }
   if (i.planNextDueMs !== null) {
     candidates.push(Math.max(i.planNextDueMs, i.nowMs));
+  }
+  if (i.notifyAtMs !== undefined && i.notifyAtMs !== null) {
+    candidates.push(Math.max(i.notifyAtMs, i.nowMs));
   }
   if (i.purgeDueMs !== null && !i.immediateWork && !i.retryWork) {
     candidates.push(Math.max(i.purgeDueMs, i.nowMs));
@@ -194,6 +212,11 @@ export interface RaceDayDeps {
    * 理由(固定文言)を残す。朝のタスクでは使わない。`lister` が無ければ、モデルの自動選択をせず、固定モデルで送る。
    */
   readonly llm?: CloudLlm;
+  /**
+   * Discord への送信(Issue #205〈#166-D〉。DO のラッパが、Worker の secret `DISCORD_WEBHOOK_URL` から作る)。**URL そのものは持たない**(`send(payload)` だけ。URL が状態・ログに入る経路を作らない)。
+   * **webhook が未登録・形式不正なら渡さない**: 通知の行も材料も積まず、通知のためのアラームも張らない。
+   */
+  readonly notifier?: DiscordNotifier;
 }
 
 export interface ScheduleInput {
@@ -221,7 +244,22 @@ export type StepOutcome =
    * 朝の計画の段階の1ステップ(Issue #203。`mode: "plan"`)。`step: "list"` は1会場の一覧の取得(`raceId` は会場 `central`・`nar`)、`step: "finalize"` は確定(`raceId` は `plan`)。
    * 既存の `ran` と同じ形にしてあるのは、結果を `${raceId}:${mode}:${step}:${result}` のように読む呼び出し側を壊さないため。
    */
-  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "plan"; readonly step: "list" | "finalize"; readonly result: "ok" | "retry" | "failed" };
+  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "plan"; readonly step: "list" | "finalize"; readonly result: "ok" | "retry" | "failed" }
+  /** 通知の送信(Issue #205。`mode: "notify"`)。`raceId` は、レースごとの通知ではそのレース、朝のまとめでは `summary`。`failed` は送信の失敗(再送しない)。 */
+  | { readonly kind: "ran"; readonly raceId: string; readonly mode: "notify"; readonly step: "send"; readonly result: "ok" | "failed" };
+
+/** 通知の1件の状態(状態から読める。失敗の分類だけで、URL・メッセージ・本文は持たない。`getNotifications`)。 */
+export interface NotificationRecord {
+  /** `race:<raceId>` か `summary`。 */
+  readonly key: string;
+  readonly kind: NotifyKind;
+  readonly state: NotifyState;
+  /** completed の通知の分析 id(それ以外は null)。 */
+  readonly analysisId: number | null;
+  /** 失敗の分類(`http-<status>`・`timeout`・`rate-limited`・`network`・`other`・`build`)。失敗でなければ null。 */
+  readonly errorClass: string | null;
+  readonly updatedAt: number;
+}
 
 /** 一覧を取る対象: 中央(race.netkeiba.com)・地方(nar.netkeiba.com)。 */
 export type RaceListVenue = "central" | "nar";
@@ -424,6 +462,10 @@ export class RaceDayCore {
   /** モデルの自動選択(取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined)。 */
   private readonly modelSelector: ModelSelector | undefined;
   private readonly plan: PlanStore;
+  /** 通知の表(Issue #205。新しい表だけ)。 */
+  private readonly notifyStore: NotifyStore;
+  /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
+  private readonly notifier: DiscordNotifier | undefined;
   private readonly cache: DoSqlCacheStore;
   private readonly networkFetcher: CachedFetcher;
   private readonly cacheOnly: CachedFetcher;
@@ -458,6 +500,9 @@ export class RaceDayCore {
     SqlLlmResponseStore.ensureTable(this.sql);
     // 朝の計画の表(Issue #203。新しい表だけ。既存の表には ALTER しない)。
     this.plan = new PlanStore(this.sql);
+    // 通知の表(Issue #205。新しい表だけ。既存の表には ALTER しない)。
+    this.notifyStore = new NotifyStore(this.sql);
+    this.notifier = deps.notifier;
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     const httpClient = createGateHttpClient(serializeGate(deps.gate), { onWarn: deps.onWarn });
@@ -657,6 +702,16 @@ export class RaceDayCore {
     };
   }
 
+  /** 通知の一覧(Issue #205 AC-D2: 送信の失敗が状態から読める。状態は変えない。材料の embed・URL・例外の文面は返さない)。 */
+  getNotifications(): NotificationRecord[] {
+    return this.notifyStore.rows().map((r) => ({ key: r.key, kind: r.kind, state: r.state, analysisId: r.analysis_id, errorClass: r.error_class, updatedAt: r.updated_at }));
+  }
+
+  /** いま送る通知と、次にアラームを張る時刻(状態を変えない読み取り。`rearm` と送信のステップが読むものと同じ)。webhook が無効なら両方 null。 */
+  peekNotifyPlan(): NotificationPlan {
+    return this.notifyPlan();
+  }
+
   /** その日のレースの状態の一覧(レースID 昇順、同じレースは morning → pre_race)。 */
   getBoard(): Board {
     const rows = this.sql
@@ -776,7 +831,7 @@ export class RaceDayCore {
 
   /**
    * 次のステップを1つだけ実行する(1レースの取得 or 計算)。続きの仕事があれば、アラームを設定してから戻る。
-   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)。
+   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (1.5)**通知**(時刻が来ていれば1件。Issue #205)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)。
    * 仕事が無ければ {@link wakeWithoutWork}。
    */
   async runNextStep(): Promise<StepOutcome> {
@@ -794,6 +849,14 @@ export class RaceDayCore {
       await this.armAlarm();
       return outcome;
     }
+    // 通知(Issue #205)。**タスクより前**: 発走前の通知は時間に追われる(immediate の行が多い日に、pre_race の連続が通知を押しのけない)。
+    // 送信の間隔(1 秒)と失敗のクールダウン(60 秒)があるので、通知がタスクを押しのけ続けることもない。
+    const notice = this.notifyPlan().sendNow;
+    if (notice !== null) {
+      const outcome = await this.runNotifyStep(notice);
+      await this.armAlarm();
+      return outcome;
+    }
     const next = this.pickNext();
     if (next === null) {
       return this.wakeWithoutWork();
@@ -801,6 +864,112 @@ export class RaceDayCore {
     const outcome = await this.runStep(next);
     await this.armAlarm();
     return outcome;
+  }
+
+  // ---- 通知(Issue #205 段階D)----
+
+  /** 通知の計画。webhook が無効(`notifier` なし)なら何もしない(行も材料も積まず、アラームの候補も出さない)。 */
+  private notifyPlan(): NotificationPlan {
+    if (this.notifier === undefined) {
+      return { sendNow: null, nextAtMs: null };
+    }
+    return planNotifications({
+      enabled: true,
+      nowMs: this.now(),
+      auto: this.getAutoRunResults(),
+      progress: this.getPlanProgress(),
+      rows: this.notifyStore.stateMap(),
+      paceUntilMs: this.notifyStore.paceUntil(),
+    });
+  }
+
+  /**
+   * 通知を1件送る(**多くとも1回**)。順序: (1)送る内容を作る(同期)→ (2)**送る前に `sending` の行を書く**(同期)→ (3)`await` で送る → (4)`sent`・`failed` を書き、次の送信の時刻(間隔・クールダウン)を置く(同期)。
+   * 落ちて `sending` のまま残った行は、計画({@link planNotifications})が二度と候補にしない(再送しない)。送信の失敗は分析の状態に影響しない(例外は握り、分類だけを残す)。
+   * **URL・例外のメッセージ・応答の本文は、状態にもログにも出さない**(`classifyNotifyError` の分類だけ)。
+   */
+  private async runNotifyStep(item: NotifyItem): Promise<StepOutcome> {
+    const raceId = item.kind === "summary" ? "summary" : item.raceId;
+    const outcomeOf_ = (result: "ok" | "failed"): StepOutcome => ({ kind: "ran", raceId, mode: "notify", step: "send", result });
+    let payloadJson: string;
+    let analysisId: number | null = null;
+    try {
+      if (item.kind === "analysis") {
+        const row = this.notifyStore.row(item.key);
+        if (row === null || row.payload_json === null) {
+          throw new Error("通知の材料がありません");
+        }
+        payloadJson = row.payload_json;
+        analysisId = row.analysis_id;
+      } else if (item.kind === "summary") {
+        const kaisaiDate = this.metaGet("kaisai_date");
+        if (kaisaiDate === null) {
+          throw new Error("開催日が未確定です");
+        }
+        payloadJson = JSON.stringify(buildSummaryEmbed({ kaisaiDate, progress: this.getPlanProgress() }));
+      } else {
+        const result = this.getAutoRunResults().results.find((r) => r.raceId === item.raceId);
+        if (result === undefined) {
+          throw new Error("結果が見つかりません");
+        }
+        const label: RaceLabel = { raceId: result.raceId, venueName: result.venueName, raceNumber: result.raceNumber, raceName: result.raceName, startTime: result.startTime };
+        const embed = item.kind === "skipped-manual" ? buildManualSkipEmbed(label) : buildFailureEmbed(label, notificationText(result.outcome));
+        payloadJson = JSON.stringify(embed);
+      }
+    } catch (error) {
+      // 送る内容を作れなかった: 送らず、failed(分類 build)にして終える(同じ項目を、毎回の起床で作り直し続けない)。
+      const now = this.now();
+      this.notifyStore.begin(item.key, item.kind, null, analysisId, now);
+      this.notifyStore.finish(item.key, "failed", "build", now);
+      this.notifyStore.setPaceUntil(now + SEND_SPACING_MS);
+      this.onWarn(`Discord の通知の内容を作れませんでした(${item.key}): ${errorMessage(error)}`);
+      return outcomeOf_("failed");
+    }
+    // 送る前に sending を書く(ここまで同期。落ちても再送しない)。
+    if (!this.notifyStore.begin(item.key, item.kind, payloadJson, analysisId, this.now())) {
+      return outcomeOf_("failed"); // 到達しない(計画は ready か行なしだけを返す)。二重に送らない。
+    }
+    let errorClass: string | null = null;
+    try {
+      await this.notifier!.send({ embeds: [JSON.parse(payloadJson) as CloudEmbed] });
+    } catch (error) {
+      errorClass = classifyNotifyError(error);
+    }
+    const end = this.now();
+    this.notifyStore.finish(item.key, errorClass === null ? "sent" : "failed", errorClass, end);
+    this.notifyStore.setPaceUntil(end + (errorClass === null ? SEND_SPACING_MS : FAILURE_COOLDOWN_MS));
+    if (errorClass !== null) {
+      this.onWarn(`Discord への通知に失敗しました(${item.key}。分類: ${errorClass}。再送しません)`);
+    }
+    return outcomeOf_(errorClass === null ? "ok" : "failed");
+  }
+
+  /**
+   * 発走前の分析が保存された直後に、通知の材料(完成した embed)を積む。**保存した `record` から作る**(馬名・コース・距離は `record.raceSnapshot` にある。D1 の要約には無く、R2 は使えないことがある)。
+   * 呼び出しは、`analysis_id` を永続化する**より前**(同じ同期区間)。ここで例外になれば `analysis_id` は永続されず、再試行が保存済みを検出して、もう一度ここを通る
+   * (`analysis_id` があるのに材料が無い状態が、一瞬も現れない)。**webhook が無効・手動の pre_race(自動の印が無い)なら何もしない。**
+   * embed の構築の失敗は握り、最小の embed(画面で確認)に代える(通知の失敗が分析を止めない)。材料の書き込みの SQL の例外は握らない(上の理由)。
+   */
+  private putAnalysisMaterial(task: TaskRow, record: AnalysisRecord, outcome: LlmOutcome, analysisId: number): void {
+    if (this.notifier === undefined || !this.isAutoTask(task)) {
+      return;
+    }
+    const row = this.plan.planRow(task.race_id);
+    const label: RaceLabel = {
+      raceId: task.race_id,
+      venueName: row?.venue_name ?? null,
+      raceNumber: row?.race_number ?? null,
+      raceName: row?.race_name ?? null,
+      startTime: row?.start_time ?? null,
+    };
+    let embed: CloudEmbed;
+    try {
+      embed = buildAnalysisNotificationEmbed(record, outcome, label);
+    } catch (error) {
+      this.onWarn(`発走前の分析(${task.race_id}): 通知の材料を組み立てられませんでした(最小の通知に代えます): ${errorMessage(error)}`);
+      embed = buildMinimalAnalysisEmbed(label);
+    }
+    this.notifyStore.putReady(`race:${task.race_id}`, JSON.stringify(embed), analysisId, this.now());
   }
 
   // ---- 朝の計画(Issue #203 段階2)----
@@ -1143,6 +1312,7 @@ export class RaceDayCore {
       planNextTryAtMs: this.plan.nextTryAtMs(),
       planNextDueMs: this.plan.nextDueMs(),
       purgeDueMs: purgeText === null ? null : Number(purgeText),
+      notifyAtMs: this.notifyPlan().nextAtMs,
     });
     if (at !== null) {
       await this.setAlarm(at);
@@ -1416,12 +1586,15 @@ export class RaceDayCore {
             const existing = await sink.findByAnalyzedAt(record.raceId, record.analyzedAt);
             if (existing !== null) {
               analysisId = existing;
+              this.putAnalysisMaterial(task, record, outcome, existing); // analysis_id より前(同じ同期区間。Issue #205)
               this.setTaskFields(task, { analysis_id: existing });
               return;
             }
             // LLM を呼んだ1回ごとの記録(所要時間・usage・stop_reason。Issue #197 段2)。キー未登録(cloudAnalyze なし)は null(NULL で保存)。
             const saved = await sink.save(toSave, { llmNote: outcome.note, llmCalls: cloudAnalyze === null ? null : cloudAnalyze.calls() });
             analysisId = saved.id;
+            // 通知の材料を、analysis_id の永続化より前に積む(Issue #205。同じ同期区間。以降の再実行が、材料の無い done にならない)。
+            this.putAnalysisMaterial(task, record, outcome, saved.id);
             // 保存の直後に結果を書く(以降の再実行は、保存も計算もしない)。
             this.setTaskFields(task, { analysis_id: saved.id, detail: saved.detail });
           },

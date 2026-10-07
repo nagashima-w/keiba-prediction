@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type ClassifyInput } from "../src/auto-run-result";
+import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, skipStage, type ClassifyInput } from "../src/auto-run-result";
 
 /**
  * Issue #204(#166-C): 自動実行の各レースの結果を、状態(計画の行・pre_race のタスク・自動の印)から一意に読み取る分類器(純関数)。
@@ -54,5 +54,13 @@ describe("classifyAutoRun(状態 → 結果)", () => {
 
   it("発走済みの固定のエラー文は、日本語の固定文(板に出す)", () => {
     expect(AUTO_RUN_STARTED_ERROR).toBe("発走済みのため、自動実行しませんでした");
+  });
+});
+
+describe("skipStage(Issue #205 G-D3: スキップが計画の時点か昇格の時点かを、計画の行の期限から読む)", () => {
+  it("期限(dueMs)が無い行は計画の時点のスキップ(buildPlanRow は、スキップの行の due_ms を null で書く)。期限が残っている行は昇格の時点のスキップ(markSkipped は due_ms を触らない)", () => {
+    expect(skipStage(null)).toBe("plan");
+    expect(skipStage(1_000)).toBe("promotion");
+    expect(skipStage(0)).toBe("promotion"); // 0 は「期限なし」ではない(null との区別)
   });
 });

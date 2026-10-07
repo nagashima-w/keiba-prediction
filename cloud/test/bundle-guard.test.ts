@@ -454,3 +454,30 @@ describe("LLM の入口と SDK のバンドル(Issue #193)", () => {
     120_000,
   );
 });
+
+/**
+ * Issue #205(#166-D): 通知(Discord)の配線。本番のバンドル(worker.ts)に、RaceDay の通知の配線(`notifier: createDiscordNotifier(env.DISCORD_WEBHOOK_URL)` の行そのもの)・通知の表・core の Discord クライアントが入っていて、
+ * better-sqlite3 と本物の undici は入っていない(undici はスタブ。Worker では必ずグローバルの fetch を注入する)。
+ * 文字列 "DISCORD_WEBHOOK_URL" だけの検査では、handler.ts の health の参照に当たるので、配線が外れても気づけない。配線の行そのものを検査する。
+ */
+describe("通知(Discord)のバンドル(Issue #205)", () => {
+  const NOTIFIER_WIRING_LINE = "notifier: createDiscordNotifier(env.DISCORD_WEBHOOK_URL)";
+
+  it(
+    "本番のバンドルに、RaceDay の通知の配線の行・通知の表・core の Discord クライアントがあり、better-sqlite3 は無い。圧縮後 3 MB 以内",
+    () => {
+      const doSource = readFileSync(path.join(CLOUD, "src", "race-day-do.ts"), "utf-8");
+      const handlerSource = readFileSync(path.join(CLOUD, "src", "handler.ts"), "utf-8");
+      expect(doSource.includes(NOTIFIER_WIRING_LINE), "race-day-do.ts に配線の行がある").toBe(true);
+      expect(handlerSource.includes(NOTIFIER_WIRING_LINE), "handler.ts には配線の行が無い(health の参照とは別の文字列)").toBe(false);
+      const code = bundle(null, "worker.js");
+      // 前提(空振り防止): 配線・表・core の Discord クライアント(ASCII の識別子。日本語の文字列は wrangler が \\uXXXX に直すので、検査に使えない)が実際に本番のバンドルにある
+      for (const marker of [NOTIFIER_WIRING_LINE, "race_day_notify", "https://discord.com/api/webhooks/", "DiscordNotifyError"]) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+      expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);
+      expect(gzipSync(code).length).toBeLessThan(3 * 1024 * 1024);
+    },
+    120_000,
+  );
+});

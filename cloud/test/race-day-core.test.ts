@@ -466,10 +466,12 @@ describe("朝の prior は DO にだけ置く(AC-b4)と、キャッシュの掃�
     // Issue #194: `race_day_llm_responses`(発走前の LLM の応答の記録)が増えた。分析の保存先(analyses 系)の表は、引き続き無い。朝のタスクは、これにも書かない。
     // Issue #203: `race_day_plan_venue`・`race_day_plan`(朝の計画の表)が増えた。これも分析の保存先ではない(手動の朝のタスクは、どちらにも書かない: 下で件数 0 を固定する)。
     // Issue #204: `race_day_auto_pre_race`(自動で積んだ pre_race の印)が増えた。同じく分析の保存先ではなく、手動の朝のタスクは書かない(下で件数 0 を固定する)。
-    expect(tables).toEqual(["fetch_cache", "race_day_meta", "race_day_tasks", "race_day_morning_prior", "race_day_llm_responses", "race_day_plan_venue", "race_day_plan", "race_day_auto_pre_race"].sort());
+    expect(tables).toEqual(["fetch_cache", "race_day_meta", "race_day_tasks", "race_day_morning_prior", "race_day_llm_responses", "race_day_plan_venue", "race_day_plan", "race_day_auto_pre_race", "race_day_notify"].sort());
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan").toArray() as { n: number }[])[0]!.n).toBe(0);
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_plan_venue").toArray() as { n: number }[])[0]!.n).toBe(0);
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_auto_pre_race").toArray() as { n: number }[])[0]!.n).toBe(0);
+    // Issue #205: `race_day_notify`(通知の表)が増えた。これも分析の保存先ではなく、手動の朝のタスクは書かない。
+    expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_notify").toArray() as { n: number }[])[0]!.n).toBe(0);
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_morning_prior").toArray() as { n: number }[])[0]!.n).toBe(1);
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_llm_responses").toArray() as { n: number }[])[0]!.n).toBe(0);
   });

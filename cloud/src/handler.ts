@@ -7,6 +7,7 @@
 import type { AccessEnv } from "./access-jwt";
 import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { checkD1 } from "./d1-health";
+import { webhookStatus } from "./notify-send";
 import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
 import type { GateResult, GateStatus } from "./gate-core";
@@ -61,6 +62,8 @@ export interface Env extends AccessEnv {
   ANALYSIS_DETAIL: AnalysisBucket;
   /** 発走前の分析の LLM の API キー(Worker の secret。ユーザーが登録する。Issue #194)。ここでは「登録されているか」だけを `/api/health` に返す(値は読まない・返さない)。 */
   ANTHROPIC_API_KEY?: string;
+  /** 通知(Discord。Issue #205)の Webhook URL(Worker の secret。ユーザーが登録する)。ここでは「通知に使える形で登録されているか」だけを `/api/health` に返す(値は返さない)。 */
+  DISCORD_WEBHOOK_URL?: string;
 }
 
 export interface HandlerDeps {
@@ -178,7 +181,10 @@ export async function handle(
     const ok = sqlite && d1.ok;
     // Issue #194: API キー(Worker の secret ANTHROPIC_API_KEY)が**登録されているか**だけを返す(値・長さ・一部は返さない)。ok には含めない(キーが無くても、分析は LLM なしで動く)。
     const anthropic = typeof env.ANTHROPIC_API_KEY === "string" && env.ANTHROPIC_API_KEY.trim() !== "";
-    return json({ ok, durableObject: { sqlite }, d1: { ok: d1.ok }, secrets: { anthropic } }, ok ? 200 : 503);
+    // Issue #205: Webhook(Worker の secret DISCORD_WEBHOOK_URL)が**通知に使える形で登録されているか**だけを返す(値・長さ・一部は返さない)。形式が Discord の Webhook でないものは false
+    // (通知が送られないものを true にしない。false は「未登録」か「形式が不正」)。ok には含めない(通知が無くても、分析は動く)。
+    const discord = webhookStatus(env.DISCORD_WEBHOOK_URL) === "valid";
+    return json({ ok, durableObject: { sqlite }, d1: { ok: d1.ok }, secrets: { anthropic, discord } }, ok ? 200 : 503);
   }
 
   if (pathname === "/api/netkeiba/check") {
