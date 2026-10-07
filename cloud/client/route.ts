@@ -60,3 +60,17 @@ export function buildHash(route: { readonly date: string; readonly venue: Venue;
   }
   return `#${parts.join("&")}`;
 }
+
+/** 今の画面(Issue #191)。 */
+export type Screen = "list" | "race" | "result";
+
+/**
+ * 「今どの画面か」の判定の**唯一の場所**(Issue #191。#188 の申し送り)。`app.ts` は、画面ごとの分岐をすべてこの関数の `switch` で行う
+ * (`route.analysis !== null` のような直接の比較を散らさない。画面を足すときは、ここと、各 `switch` の `never` による網羅チェックが漏れを教える)。
+ * 優先順位: analysis(結果画面)> race(レース画面)> 一覧。`race` と `analysis` が両方あれば結果画面。
+ */
+export function screenOf(route: Route): Screen {
+  if (route.analysis !== null) return "result";
+  if (route.race !== null) return "race";
+  return "list";
+}

@@ -313,7 +313,7 @@ async function main(): Promise<void> {
       check(`${label}: 朝の prior が DO に残る(16頭・LLM なし・組合せオッズなし・近似の日付ではない)`, prior !== null && prior["rows"] === 16 && prior["llmUsed"] === false && prior["hasWideCombo"] === false && prior["dateApproximate"] === false, JSON.stringify(prior).slice(0, 200));
       check(`${label}: 朝の prior の値が、exe 側の golden(LLM なし)の prior と一致する(workerd でも同じ計算)`, JSON.stringify(prior?.["priors"]) === JSON.stringify(golden.noLlmNoAllocationNoDate.result.rows.map((r) => [r.umaban, r.prior])), "");
 
-      // 2回目: キャッシュ(出馬表 10 分・戦績 24 時間・調教 6 時間・オッズ 60 秒の内側)で、gate への取得が0本 = 間隔の待ちが無く速い
+      // 2回目: キャッシュ(出馬表 10 分・戦績・調教 24 時間・オッズ 60 秒の内側)で、gate への取得が0本 = 間隔の待ちが無く速い
       const second = await run(goodBody);
       check(`${label}: 完了済みのレースは再び起動できる(202)`, second.status === 202, `${second.status} ${second.text.slice(0, 200)}`);
       const secondStarted = Date.now();

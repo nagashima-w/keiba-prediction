@@ -390,3 +390,41 @@ describe("起動の失敗・すでに実行中・prior の注記・追跡の注�
     expect(buildRaceModel(input()).tracking).toBeNull();
   });
 });
+
+/**
+ * Issue #191: 各カードに、何をするかの説明(1〜2行)を出す。文言は実際の挙動に合わせてある(#189 の着手前確認 §6)が、**ここでは文言を固定しない**(構造だけを見る)。
+ * 説明は定数で、板の状態・prior・結果に依らず、カードがあれば必ずある。Issue 番号は画面に出さない。
+ */
+describe("カードの説明(Issue #191)", () => {
+  const states: readonly [string, BoardRow[]][] = [
+    ["未実行(板に行が無い)", []],
+    ["実行中", [row(RACE_ID, "morning", "queued"), row(RACE_ID, "pre_race", "fetched")]],
+    ["完了(朝の prior・発走前の分析あり)", [row(RACE_ID, "morning", "done", { prior: true }), row(RACE_ID, "pre_race", "done", { analysisId: 3 })]],
+    ["失敗", [row(RACE_ID, "morning", "failed", { error: "x" }), row(RACE_ID, "pre_race", "failed", { error: "y" })]],
+  ];
+
+  for (const [name, rows] of states) {
+    it(`${name}でも、朝の準備・発走前の両方のカードに、空でない説明がある。2枚の説明は違う文`, () => {
+      const [morning, preRace] = cards(buildRaceModel(input({ status: { kind: "ready", rows, prior: PRIOR } })));
+      expect(morning!.mode).toBe("morning");
+      expect(preRace!.mode).toBe("pre_race");
+      expect(morning!.description.trim().length).toBeGreaterThan(0);
+      expect(preRace!.description.trim().length).toBeGreaterThan(0);
+      expect(morning!.description).not.toBe(preRace!.description);
+    });
+  }
+
+  it("説明は1〜2行の短い文(各 20〜200 文字)で、Issue 番号(#数字)・改行を含まない", () => {
+    const [morning, preRace] = cards(buildRaceModel(input()));
+    for (const card of [morning!, preRace!]) {
+      expect(card.description.length).toBeGreaterThanOrEqual(20);
+      expect(card.description.length).toBeLessThanOrEqual(200);
+      expect(card.description).not.toMatch(/#\d/);
+      expect(card.description).not.toContain("\n");
+    }
+  });
+
+  it("状態を取得できていない(cards が null)ときは、説明も出ない(カードが無いので)", () => {
+    expect(buildRaceModel(input({ status: { kind: "loading" } })).cards).toBeNull();
+  });
+});

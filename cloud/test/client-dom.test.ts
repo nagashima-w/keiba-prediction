@@ -5,6 +5,7 @@ import { buildListModel } from "../client/list";
 import type { RaceRow } from "../client/api";
 import { renderScreen } from "../client/view";
 import { h, type VNode } from "../client/vnode";
+import { noopActions } from "./client-fakes";
 
 /**
  * Issue #184: VNode → DOM のアダプタ(偽の document)と、画面の VNode。
@@ -296,7 +297,6 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
 });
 
 const RACE: RaceRow = { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
-const noop = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onToggleResult: () => {}, onRun: () => {}, onRetrack: () => {} };
 
 describe("renderScreen(一覧の VNode)", () => {
   const route = { date: "20260628", venue: "central", race: null, analysis: null } as const;
@@ -304,7 +304,7 @@ describe("renderScreen(一覧の VNode)", () => {
   it("外から来た文字列(レース名・会場名・エラー文)を含んでいても、描画した結果に script・img などの要素ができない(実際のアダプタを通す)", () => {
     const evil = `<img src=x onerror=alert(1)>`;
     const model = buildListModel({ route, list: { kind: "ready", races: [{ ...RACE, raceName: evil, venueName: evil, courseType: evil }] }, board: { kind: "error", message: evil } });
-    const el = mounted(renderScreen(model, noop));
+    const el = mounted(renderScreen(model, noopActions));
     const tags = new Set(allElements(el).map((e) => e.tag));
     expect([...tags].filter((t) => ["img", "script", "svg", "iframe"].includes(t))).toEqual([]);
     expect(allElements(el).flatMap((e) => [...e.attrs.keys()]).filter((n) => n.startsWith("on"))).toEqual([]);
@@ -314,7 +314,7 @@ describe("renderScreen(一覧の VNode)", () => {
 
   it("日付の入力(type=date・value は YYYY-MM-DD)・区分のタブ(現在のものに aria-current)・レースへのリンク(# から始まる)・更新ボタン", () => {
     const model = buildListModel({ route, list: { kind: "ready", races: [RACE] }, board: { kind: "none" } });
-    const el = mounted(renderScreen(model, noop));
+    const el = mounted(renderScreen(model, noopActions));
     const input = allElements(el).find((e) => e.tag === "input")!;
     expect(input.attrs.get("type")).toBe("date");
     expect(input.value).toBe("2026-06-28");
@@ -333,7 +333,7 @@ describe("renderScreen(一覧の VNode)", () => {
   it("場の見出しのボタンには、実際のアダプタを通しても data-key が付く(値は場のキー。外から来た会場名を含んでも属性値の文字列でしかない)", () => {
     const evil = `"><img src=x onerror=alert(1)>`;
     const model = buildListModel({ route, list: { kind: "ready", races: [{ ...RACE, venueName: evil }, { ...RACE, raceId: "202602010101", venueName: "函館" }] }, board: { kind: "none" } });
-    const el = mounted(renderScreen(model, noop));
+    const el = mounted(renderScreen(model, noopActions));
     const toggles = allElements(el).filter((e) => e.attrs.get("class") === "venue-toggle");
     expect(toggles).toHaveLength(2); // 前提: 2 つの場
     expect(toggles.map((t) => t.attrs.get("data-key"))).toEqual(model.groups.map((g) => g.key));
@@ -350,13 +350,13 @@ describe("renderScreen(一覧の VNode)", () => {
   });
 
   it("エラーは role=alert の要素に出す。読み込み中は更新ボタンが disabled。開催なしは文言を出す", () => {
-    const err = mounted(renderScreen(buildListModel({ route, list: { kind: "error", message: "失敗した" }, board: { kind: "none" } }), noop));
+    const err = mounted(renderScreen(buildListModel({ route, list: { kind: "error", message: "失敗した" }, board: { kind: "none" } }), noopActions));
     const alert = allElements(err).filter((e) => e.attrs.get("role") === "alert");
     expect(alert).toHaveLength(1);
     expect(textNodes(alert[0]!)).toEqual(["失敗した"]);
-    const loading = mounted(renderScreen(buildListModel({ route, list: { kind: "loading" }, board: { kind: "none" } }), noop));
+    const loading = mounted(renderScreen(buildListModel({ route, list: { kind: "loading" }, board: { kind: "none" } }), noopActions));
     expect(allElements(loading).find((e) => e.tag === "button")!.attrs.has("disabled")).toBe(true);
-    const empty = mounted(renderScreen(buildListModel({ route, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noop));
+    const empty = mounted(renderScreen(buildListModel({ route, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noopActions));
     expect(textNodes(empty).join(" ")).toContain("開催はありません");
   });
 });

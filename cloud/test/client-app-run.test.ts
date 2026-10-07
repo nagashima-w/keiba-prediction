@@ -199,7 +199,13 @@ const runButton = (h: Harness, mode: "morning" | "pre_race"): VNode => {
   return found[0]!;
 };
 const click = (node: VNode): void => node.on!.click!();
-const cardText = (h: Harness, title: string): string => textOf(byClass(h.tree(), "card").find((c) => textOf(c).includes(title))!);
+// カードは、見出し(h2)の文字で引く(Issue #191: カードに説明が入り、朝の説明に「発走前」という語が出るので、本文に含まれる語で引くと取り違える)。
+const cardByTitle = (h: Harness, title: string): VNode => {
+  const card = byClass(h.tree(), "card").find((c) => (c.children ?? []).some((k) => typeof k !== "string" && k.tag === "h2" && textOf(k) === title));
+  expect(card, `前提: 見出し「${title}」のカードがある`).toBeDefined();
+  return card!;
+};
+const cardText = (h: Harness, title: string): string => textOf(cardByTitle(h, title));
 const trackingBox = (h: Harness): VNode[] => byClass(h.tree(), "tracking");
 const refreshButton = (h: Harness): VNode => byClass(h.tree(), "refresh")[0]!;
 
@@ -761,7 +767,7 @@ describe("日付の入力(段階1【記録】1)", () => {
  * 画面を開いたときの取得・結果画面とのキャッシュ共有・「更新」・開閉は client-app.test.ts。
  */
 describe("発走前の結果の取得(Issue #188): ポーリング・完了への遷移・再実行", () => {
-  const horsesIn = (h: Harness): VNode[] => byClass(byClass(h.tree(), "card").find((c) => textOf(c).includes("発走前"))!, "horse");
+  const horsesIn = (h: Harness): VNode[] => byClass(cardByTitle(h, "発走前"), "horse");
   const DETAIL = (id: number): string => `/api/analyses/${id}`;
 
   it("ポーリングの周期では取らない: 完了済みの発走前(id 5)を開いて、別の行(朝)の追跡が続く間、ポーリングを何周しても 1 回のまま。朝の完了(prior の取り直し)でも増えない", async () => {
@@ -864,4 +870,4 @@ describe("発走前の結果の取得(Issue #188): ポーリング・完了へ�
   });
 });
 
-const cardTextOf = (h: Harness): string => textOf(byClass(h.tree(), "card").find((c) => textOf(c).includes("発走前"))!);
+const cardTextOf = (h: Harness): string => cardText(h, "発走前");

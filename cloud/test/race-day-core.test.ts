@@ -195,7 +195,7 @@ describe("朝の取得(ステップ1)と計算(ステップ2)(Issue #177 AC-b5�
     await runAll(h);
     expect(h.gate.urls).toHaveLength(19);
 
-    // さらに 11 分後: 出馬表(10 分)・オッズ(60 秒)は期限切れ、戦績(24 時間)・調教(6 時間)はヒット
+    // さらに 11 分後: 出馬表(10 分)・オッズ(60 秒)は期限切れ、戦績・調教(24 時間)はヒット
     h.clock.now += 11 * 60_000;
     await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
     await runAll(h);

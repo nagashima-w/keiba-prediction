@@ -73,9 +73,10 @@ describe("出馬表キャッシュ TTL(Issue #155)", () => {
     expect(DEFAULT_SHUTUBA_TTL_MS).toBe(TEN_MINUTES_MS);
   });
 
-  it("戦績・調教の既定TTLは変えないこと(出馬表だけを短縮する)", () => {
+  it("戦績の既定TTLは24時間のまま(出馬表だけを短縮した)。調教は Issue #191 で戦績と同じ24時間に延ばした(リテラルで固定する)", () => {
     expect(DEFAULT_RESULTS_TTL_MS).toBe(24 * 60 * 60 * 1000);
-    expect(DEFAULT_OIKIRI_TTL_MS).toBe(6 * 60 * 60 * 1000);
+    expect(DEFAULT_OIKIRI_TTL_MS).toBe(24 * 60 * 60 * 1000);
+    expect(DEFAULT_OIKIRI_TTL_MS).toBe(86_400_000);
   });
 
   it("10分ちょうど経過後の再取得は出馬表をキャッシュから返し、フェッチを増やさないこと(境界: ヒット)", async () => {
@@ -106,5 +107,37 @@ describe("出馬表キャッシュ TTL(Issue #155)", () => {
     expect(count("shutuba.html")).toBe(2);
     expect(count("ajax_horse_results")).toBe(resultsAfterFirst);
     expect(count("oikiri.html")).toBe(1);
+  });
+
+  // Issue #191: 調教(追い切り)のキャッシュ許容鮮度を、旧 6 時間から戦績と同じ 24 時間に延ばした(調教は当日の朝に取れていれば、その後に更新されない)。
+  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+  const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+  it("調教: 旧TTL(6時間)を1ms 超えても、キャッシュから返し取り直さない(旧版ならここで取り直す)", async () => {
+    const { fetcher, advance, count } = setup();
+    await scrapeRace(RACE_ID, { fetcher });
+    expect(count("oikiri.html")).toBe(1); // 前提: 1回目で調教を取得している
+
+    advance(SIX_HOURS_MS + 1);
+    await scrapeRace(RACE_ID, { fetcher });
+
+    expect(count("shutuba.html")).toBe(2); // 前提: 時間が実際に進んでいる(出馬表の10分は過ぎて取り直す)
+    expect(count("oikiri.html")).toBe(1);
+  });
+
+  it("調教: 24時間ちょうどはヒット(境界)、24時間+1ms はミス(取り直す)", async () => {
+    const hit = setup();
+    await scrapeRace(RACE_ID, { fetcher: hit.fetcher });
+    expect(hit.count("oikiri.html")).toBe(1);
+    hit.advance(TWENTY_FOUR_HOURS_MS);
+    await scrapeRace(RACE_ID, { fetcher: hit.fetcher });
+    expect(hit.count("oikiri.html")).toBe(1);
+
+    const miss = setup();
+    await scrapeRace(RACE_ID, { fetcher: miss.fetcher });
+    expect(miss.count("oikiri.html")).toBe(1);
+    miss.advance(TWENTY_FOUR_HOURS_MS + 1);
+    await scrapeRace(RACE_ID, { fetcher: miss.fetcher });
+    expect(miss.count("oikiri.html")).toBe(2);
   });
 });

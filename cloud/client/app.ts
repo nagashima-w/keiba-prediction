@@ -37,7 +37,7 @@ import { inputToYmd, todayJst } from "./date";
 import { buildListModel, type BoardSource, type ListSource } from "./list";
 import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource, type RunUi } from "./race";
 import { buildResultModel, type ResultSource } from "./result";
-import { buildHash, parseHash, type Route, type Venue } from "./route";
+import { buildHash, parseHash, screenOf, type Route, type Venue } from "./route";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
 import { renderScreen } from "./view";
 import type { VNode } from "./vnode";
@@ -73,6 +73,11 @@ interface RaceStatusEntry {
 }
 
 const runKey = (date: string, raceId: string, mode: TaskMode): string => `${date}:${raceId}:${mode}`;
+
+/** 画面の `switch` の網羅チェック(Issue #191)。`Screen` に画面を足して `case` を足し忘れると、ここで型エラーになる。 */
+function assertNever(screen: never): never {
+  throw new Error(`未対応の画面です: ${String(screen)}`);
+}
 
 /** prior の取り直しに失敗したときの注記の前置き(カードは残す)。 */
 const PRIOR_NOTICE_PREFIX = "順位を取得できませんでした。";
@@ -192,37 +197,48 @@ export function createApp(deps: AppDeps): App {
   const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack };
 
   function render(force = false): void {
-    if (route.analysis !== null) {
-      deps.render(renderScreen(buildResultModel({ route, source: analysisSource(route.analysis) }), actions), force);
-    } else if (route.race !== null) {
-      const key = raceKey(route.date, route.race);
-      const listRow = races.get(listKey(route.date, route.venue))?.find((r) => r.raceId === route.race);
-      const status = raceStatusSource(key, route.date);
-      const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, route.race) : null;
-      deps.render(
-        renderScreen(
-          buildRaceModel({
-            route,
-            status,
-            past: pastSource(key),
-            listRow,
-            runs: runsFor(route.date, route.race),
-            tracking: trackingNotice(),
-            ...(latestId === null ? {} : { result: analysisSource(latestId) }),
-            resultOpen: resultOpenChoices.get(key) ?? true,
-          }),
-          actions,
-        ),
-        force,
-      );
-    } else {
-      deps.render(
-        renderScreen(
-          buildListModel({ route, list: listSource(), board: boardSource(), boardLoading: boardInflight.has(route.date), tracking: trackingNotice(), choices: openChoices.get(listKey(route.date, route.venue)) }),
-          actions,
-        ),
-        force,
-      );
+    const screen = screenOf(route);
+    switch (screen) {
+      case "result": {
+        deps.render(renderScreen(buildResultModel({ route, source: analysisSource(route.analysis!) }), actions), force);
+        return;
+      }
+      case "race": {
+        const raceId = route.race!;
+        const key = raceKey(route.date, raceId);
+        const listRow = races.get(listKey(route.date, route.venue))?.find((r) => r.raceId === raceId);
+        const status = raceStatusSource(key, route.date);
+        const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, raceId) : null;
+        deps.render(
+          renderScreen(
+            buildRaceModel({
+              route,
+              status,
+              past: pastSource(key),
+              listRow,
+              runs: runsFor(route.date, raceId),
+              tracking: trackingNotice(),
+              ...(latestId === null ? {} : { result: analysisSource(latestId) }),
+              resultOpen: resultOpenChoices.get(key) ?? true,
+            }),
+            actions,
+          ),
+          force,
+        );
+        return;
+      }
+      case "list": {
+        deps.render(
+          renderScreen(
+            buildListModel({ route, list: listSource(), board: boardSource(), boardLoading: boardInflight.has(route.date), tracking: trackingNotice(), choices: openChoices.get(listKey(route.date, route.venue)) }),
+            actions,
+          ),
+          force,
+        );
+        return;
+      }
+      default:
+        return assertNever(screen);
     }
   }
 
@@ -242,7 +258,7 @@ export function createApp(deps: AppDeps): App {
 
   function onCompleted(c: BoardCompletion): void {
     const key = raceKey(c.date, c.raceId);
-    const onThisRace = route.analysis === null && route.race === c.raceId && route.date === c.date;
+    const onThisRace = screenOf(route) === "race" && route.race === c.raceId && route.date === c.date;
     if (c.mode === "morning") {
       if (raceStatusInflight.has(key)) statusRefetchPending.add(key);
       else if (onThisRace) startStatusFetch(c.date, c.raceId, "refresh");
@@ -357,24 +373,34 @@ export function createApp(deps: AppDeps): App {
    * 呼ぶのは `ensureLoaded` と `applyBoard` だけ(`render()` からは呼ばない)。
    */
   function syncLatestAnalysis(): void {
-    if (route.analysis !== null || route.race === null) return;
-    const status = raceStatusSource(raceKey(route.date, route.race), route.date);
+    if (screenOf(route) !== "race") return;
+    const raceId = route.race!;
+    const status = raceStatusSource(raceKey(route.date, raceId), route.date);
     if (status.kind !== "ready") return;
-    const id = latestAnalysisIdOf(status.rows, route.race);
+    const id = latestAnalysisIdOf(status.rows, raceId);
     if (id !== null) loadAnalysis(id);
   }
 
   /** 今の画面に必要なものを、無ければ取りに行く。結果画面は分析 1 本だけ・レース画面は状態と過去の分析だけ(一覧・板は取らない)。 */
   function ensureLoaded(): void {
-    if (route.analysis !== null) {
-      loadAnalysis(route.analysis);
-    } else if (route.race !== null) {
-      loadRaceStatus(route.date, route.race);
-      loadPast(route.date, route.race);
-      syncLatestAnalysis();
-    } else {
-      loadRaces(route.date, route.venue);
-      loadBoard(route.date);
+    const screen = screenOf(route);
+    switch (screen) {
+      case "result":
+        loadAnalysis(route.analysis!);
+        return;
+      case "race": {
+        const raceId = route.race!;
+        loadRaceStatus(route.date, raceId);
+        loadPast(route.date, raceId);
+        syncLatestAnalysis();
+        return;
+      }
+      case "list":
+        loadRaces(route.date, route.venue);
+        loadBoard(route.date);
+        return;
+      default:
+        return assertNever(screen);
     }
   }
 
@@ -487,42 +513,51 @@ export function createApp(deps: AppDeps): App {
   }
 
   function onRefresh(): void {
-    if (route.analysis !== null) {
-      // 失敗した分析だけを取り直す(成功した分析は再取得しない=R2 の操作回数を使わない)。取得中は何もしない。
-      const id = route.analysis;
-      if (!analysisErrors.has(id) || analysisInflight.has(id)) return;
-      analysisErrors.delete(id);
-      ensureLoaded();
-      render();
-      return;
+    const screen = screenOf(route);
+    switch (screen) {
+      case "result": {
+        // 失敗した分析だけを取り直す(成功した分析は再取得しない=R2 の操作回数を使わない)。取得中は何もしない。
+        const id = route.analysis!;
+        if (!analysisErrors.has(id) || analysisInflight.has(id)) return;
+        analysisErrors.delete(id);
+        ensureLoaded();
+        render();
+        return;
+      }
+      case "race": {
+        const raceId = route.race!;
+        const key = raceKey(route.date, raceId);
+        const status = raceStatusSource(key, route.date);
+        const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, raceId) : null;
+        if (raceStatusInflight.has(key) || pastInflight.has(key) || (latestId !== null && analysisInflight.has(latestId))) return;
+        // 失敗した最新の分析だけを取り直す(成功した分析は再取得しない=R2 の操作回数を使わない)。状態の取り直しが済むと `applyBoard` が取る。
+        if (latestId !== null) analysisErrors.delete(latestId);
+        raceStatuses.delete(key);
+        raceStatusErrors.delete(key);
+        priorNotices.delete(key);
+        pasts.delete(key);
+        pastErrors.delete(key);
+        ensureLoaded();
+        render();
+        return;
+      }
+      case "list": {
+        // 取得中は何もしない(同じものを同時に 2 本取らない。ボタンも disabled)。
+        if (raceInflight.has(listKey(route.date, route.venue)) || boardInflight.has(route.date)) return;
+        const key = listKey(route.date, route.venue);
+        races.delete(key);
+        raceErrors.delete(key);
+        // 板を捨てると、取得が届くまで「実行中の日」が見えなくなり、追跡が「全部終わった」と誤って止まる。実行中だった日は、取得が成功するまで追跡の対象に残す。
+        if (store.activeDates().includes(route.date)) forceDates.set(route.date, store.nextSeq());
+        store.clear(route.date);
+        boardErrors.delete(route.date);
+        ensureLoaded();
+        render();
+        return;
+      }
+      default:
+        return assertNever(screen);
     }
-    if (route.race !== null) {
-      const key = raceKey(route.date, route.race);
-      const status = raceStatusSource(key, route.date);
-      const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, route.race) : null;
-      if (raceStatusInflight.has(key) || pastInflight.has(key) || (latestId !== null && analysisInflight.has(latestId))) return;
-      // 失敗した最新の分析だけを取り直す(成功した分析は再取得しない=R2 の操作回数を使わない)。状態の取り直しが済むと `applyBoard` が取る。
-      if (latestId !== null) analysisErrors.delete(latestId);
-      raceStatuses.delete(key);
-      raceStatusErrors.delete(key);
-      priorNotices.delete(key);
-      pasts.delete(key);
-      pastErrors.delete(key);
-      ensureLoaded();
-      render();
-      return;
-    }
-    // 取得中は何もしない(同じものを同時に 2 本取らない。ボタンも disabled)。
-    if (raceInflight.has(listKey(route.date, route.venue)) || boardInflight.has(route.date)) return;
-    const key = listKey(route.date, route.venue);
-    races.delete(key);
-    raceErrors.delete(key);
-    // 板を捨てると、取得が届くまで「実行中の日」が見えなくなり、追跡が「全部終わった」と誤って止まる。実行中だった日は、取得が成功するまで追跡の対象に残す。
-    if (store.activeDates().includes(route.date)) forceDates.set(route.date, store.nextSeq());
-    store.clear(route.date);
-    boardErrors.delete(route.date);
-    ensureLoaded();
-    render();
   }
 
   return {

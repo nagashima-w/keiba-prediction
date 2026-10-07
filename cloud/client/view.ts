@@ -152,6 +152,7 @@ function taskCard(card: TaskCard, actions: ViewActions): VNode {
   return h("section", { class: "card" }, [
     h("h2", {}, [card.title]),
     h("span", { class: `badge ${card.badge.tone}` }, [card.badge.label]),
+    h("p", { class: "card-desc" }, [card.description]),
     ...(card.error === null ? [] : [h("p", { class: "card-error" }, [card.error])]),
     ...(card.runError === null ? [] : [h("p", { class: "card-error", role: "alert" }, [card.runError])]),
     ...(card.runInfo === null ? [] : [h("p", { class: "card-note" }, [card.runInfo])]),
@@ -250,7 +251,8 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
       body.push(h("p", { class: "notice" }, [content.detailNote]));
     }
     body.push(...resultSections(content, "h2"));
-  }  return h("div", { class: "screen" }, [controls, ...body]);
+  }
+  return h("div", { class: "screen" }, [controls, ...body]);
 }
 
 export function renderScreen(model: ListModel | RaceModel | ResultModel, actions: ViewActions): VNode {

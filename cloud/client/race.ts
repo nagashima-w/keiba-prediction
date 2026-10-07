@@ -81,6 +81,8 @@ export interface RunButton {
 
 export interface TaskCard {
   readonly mode: TaskMode;
+  /** そのカードが何をするかの説明(1〜2行。定数。板の状態に依らず出す。Issue #191)。 */
+  readonly description: string;
   readonly button: RunButton;
   /** 起動の失敗の固定の文言(そのカードだけ)。 */
   readonly runError: string | null;
@@ -119,6 +121,21 @@ export interface RaceModel {
 }
 
 const ERROR_MAX = 200;
+
+/**
+ * カードの説明(Issue #191)。**実際の挙動に合わせた文言**(根拠は #189 の着手前確認 §6。**画面に出す文には、Issue 番号を書かない**):
+ *  - 朝の準備: 取得するのは出馬表・オッズ・各馬の戦績・調教(`race-day-core.ts` の `runFetch`。組合せオッズは取らない)。所要時間は gate の最小間隔(`GATE_MIN_INTERVAL_MS`)×
+ *    取得の本数(頭数 N なら N+3 本。中央16頭で19本)なので、頭数により1分弱(実測はしていない)。発走前で使い回されるのは戦績・調教
+ *    (キャッシュの鮮度は戦績・調教とも 24 時間〈調教は #191 で 6 時間から延ばした〉。出馬表 10 分・オッズは取り直す)。朝の prior は DO にだけ置き、D1・R2 の分析の履歴には残さない。
+ *  - 発走前: 出馬表・オッズを取り直す(オッズはキャッシュを迂回。組合せオッズは設定 `includeComboOdds` が ON のときだけ)。3着内率・EV(複勝 EV = 3着内率 × 複勝オッズの下限)・配分を作り、D1・R2 に保存する。
+ *    LLM は未対応(`analyze: null`)。**LLM を使うようになったら、この文を直す**(#179 の受け入れ条件)。
+ */
+export const CARD_DESCRIPTIONS: Readonly<Record<TaskMode, string>> = {
+  morning:
+    "netkeiba から出馬表・オッズ・各馬の戦績・調教を取得し、統計で3着内率の順位を出します。頭数によりますが1分弱かかります。戦績・調教は発走前に使い回します。分析の履歴には残しません。",
+  pre_race:
+    "出馬表と最新のオッズ(組合せオッズは設定が ON のとき)を取り直し、3着内率・EV(3着内率×複勝オッズの下限)・配分を出して記録に残します。現在は LLM を使いません。",
+};
 
 function titleOf(route: Route, listRow: RaceRow | undefined, prior: MorningPriorView | null): string {
   const raceId = route.race!;
@@ -185,6 +202,7 @@ function card(
   const sending = run?.kind === "sending";
   return {
     mode,
+    description: CARD_DESCRIPTIONS[mode],
     button: { label: runButtonLabel(mode, found?.status, sending), disabled: sending || isRunning(found?.status), date: route.date, raceId, mode },
     runError: run?.kind === "error" ? run.message : null,
     runInfo: run?.kind === "already" && isRunning(found?.status) ? "すでに実行中です。状態を追跡します。" : null,

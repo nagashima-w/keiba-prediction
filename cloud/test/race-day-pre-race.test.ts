@@ -176,7 +176,7 @@ const urlsOf = (gate: FakeGate, from: number): string[] => gate.urls.slice(from)
 const count = (urls: string[], fragment: string): number => urls.filter((u) => u.includes(fragment)).length;
 
 describe("発走前の分析: 取得ステップ(AC-c2)", () => {
-  it("朝のキャッシュがあるとき(出馬表の TTL 10 分は過ぎ、調教 6 時間・戦績 24 時間の内側)、発走前の取得は 8 本: 出馬表 1 + 単勝複勝 1 + 組合せ 6。戦績は取り直さない", async () => {
+  it("朝のキャッシュがあるとき(出馬表の TTL 10 分は過ぎ、調教・戦績 24 時間の内側)、発走前の取得は 8 本: 出馬表 1 + 単勝複勝 1 + 組合せ 6。戦績は取り直さない", async () => {
     const h = harness();
     await runMorning(h); // 朝(mode 省略 = morning)
     expect(h.gate.urls).toHaveLength(19);

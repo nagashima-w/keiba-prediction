@@ -1,7 +1,7 @@
 /**
  * ページの HTML(Issue #161〈#21-C〉・#184〈#165-b〉)。
- *  - `renderPage`(`GET /`): スマホ画面。描画先の `#app` と、`<script src="/app.js" defer>` だけ(**インラインスクリプトは使わない**。CSP は `script-src 'self'`)。
- *  - `renderCheckPage`(`GET /check`): 旧 `/` の確認フォーム(#162 の本番実機確認用。Issue #184 で `/` から移した。内容も CSP も旧 `/` のまま)。
+ *  - `renderPage`(`GET /`): スマホ画面(web の名前は「Uma Driller」。Issue #191。見出しはトップへのリンク)。描画先の `#app` と、`<script src="/app.js" defer>` だけ(**インラインスクリプトは使わない**。CSP は `script-src 'self'`)。
+ *  - `renderCheckPage`(`GET /check`): 旧 `/` の確認フォーム(#162 の本番実機確認用。Issue #184 で `/` から移した。CSP は旧 `/` のまま。見出しは Issue #191 で「Uma Driller(確認ページ)」)。
  */
 
 export function escapeHtml(text: string): string {
@@ -22,7 +22,7 @@ export function renderCheckPage(email: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>競馬期待値ツール(クラウド版)</title>
+<title>Uma Driller(確認ページ)</title>
 <style>
   body { font-family: system-ui, sans-serif; margin: 0; padding: 24px 16px; line-height: 1.6; }
   main { max-width: 32rem; margin: 0 auto; }
@@ -37,7 +37,7 @@ export function renderCheckPage(email: string): string {
 </head>
 <body>
 <main>
-<h1>競馬期待値ツール(クラウド版)</h1>
+<h1>Uma Driller(確認ページ)</h1>
 <p>ログイン中のアカウント</p>
 <p class="email">${escapeHtml(email)}</p>
 <h2>netkeiba の取得の確認</h2>
@@ -68,7 +68,7 @@ export function renderPage(email: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>競馬期待値ツール</title>
+<title>Uma Driller</title>
 <style>
   :root { --fg: #1c1c1e; --bg: #ffffff; --muted: #6b6b70; --line: #d8d8dc; --card: #f5f5f7; --accent: #0a58ca; --ok: #146c2e; --wait: #8a5a00; --fail: #b3261e; }
   @media (prefers-color-scheme: dark) { :root { --fg: #f2f2f5; --bg: #151517; --muted: #a0a0a8; --line: #3a3a3f; --card: #212125; --accent: #7cacf8; --ok: #6fcf8a; --wait: #e0b24a; --fail: #ff8a80; } }
@@ -77,6 +77,8 @@ export function renderPage(email: string): string {
   main { max-width: 40rem; margin: 0 auto; min-width: 0; }
   h1 { font-size: 1.25rem; margin: 0 0 4px; }
   h2 { font-size: 1.05rem; margin: 20px 0 8px; }
+  /* Issue #191: 見出しのリンク(押すとトップ=一覧の画面。見出しの見た目のまま・タップしやすい高さ) */
+  .home { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-decoration: none; }
   .who { margin: 0 0 12px; font-size: 0.85rem; color: var(--muted); }
   .email { font-weight: bold; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
@@ -130,6 +132,8 @@ export function renderPage(email: string): string {
   .tracking { margin: 8px 0; }
   .tracking .notice { margin-bottom: 8px; }
   .card-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--muted); }
+  /* Issue #191: カードの説明(何をするか。1〜2行) */
+  .card-desc { margin: 6px 0 0; font-size: 0.85rem; color: var(--muted); }
   /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
   .card-result { margin-top: 8px; }
   .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }
@@ -138,7 +142,7 @@ export function renderPage(email: string): string {
 </head>
 <body>
 <main>
-<h1>競馬期待値ツール</h1>
+<h1><a class="home" href="#">Uma Driller</a></h1>
 <p class="who">ログイン中: <span class="email">${escapeHtml(email)}</span></p>
 <div id="app" aria-live="polite">読み込み中…</div>
 <noscript><p>この画面には JavaScript が必要です。JavaScript を有効にしてください。</p></noscript>

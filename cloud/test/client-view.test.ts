@@ -6,6 +6,7 @@ import { buildRaceModel, type RaceModelInput, type RunUi } from "../client/race"
 import { buildResultModel, type ResultSource } from "../client/result";
 import { renderScreen, type ViewActions } from "../client/view";
 import { h, type VNode } from "../client/vnode";
+import { noopActions } from "./client-fakes";
 
 /**
  * Issue #185: レース画面・結果画面の VNode。モデル(純関数。race.test・result.test が検証)→ VNode の写し間違い(出し忘れ・出しすぎ)と、XSS の守り(外から来た文字列はテキストノードだけ。
@@ -15,7 +16,6 @@ import { h, type VNode } from "../client/vnode";
  */
 
 const RACE_ID = "202603020211";
-const noop: ViewActions = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onToggleResult: () => {}, onRun: () => {}, onRetrack: () => {} };
 
 function textOf(node: VNode | string): string {
   if (typeof node === "string") return node;
@@ -60,7 +60,7 @@ const row = (mode: "morning" | "pre_race", status: "queued" | "fetched" | "done"
 
 describe("レース画面の VNode", () => {
   it("見出し・戻るリンク・2 枚のカード(朝の準備・発走前)・過去の分析。ボタンは「更新」と、各カードの起動のボタン(Issue #186。旧版は「更新」だけ)", () => {
-    const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "done", { prior: true })], prior: null } })), noop);
+    const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "done", { prior: true })], prior: null } })), noopActions);
     expect(textOf(tree)).toContain(`レース ${RACE_ID}`);
     expect(hrefs(tree)).toContain("#date=20260628&venue=central");
     const cards = byClass(tree, "card");
@@ -86,7 +86,7 @@ describe("レース画面の VNode", () => {
           },
         }),
       ),
-      noop,
+      noopActions,
     );
     const items = byClass(tree, "prior-row");
     expect(items).toHaveLength(2);
@@ -100,7 +100,7 @@ describe("レース画面の VNode", () => {
 
   it("「結果を見る」のリンクはどの状態でも出ない(Issue #188 で廃止。旧版は発走前の完了で a を出していた)。analysis= のリンクは過去の分析の一覧だけにある", () => {
     const past = { kind: "ready", analyses: [{ id: 12, analyzedAt: "2026-06-28T05:00:00.000Z", evEstimated: false, model: null }] } as const;
-    const done = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 12 })], prior: null }, past, result: { kind: "ready", analysis: analysis({ id: 12 }) } })), noop);
+    const done = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 12 })], prior: null }, past, result: { kind: "ready", analysis: analysis({ id: 12 }) } })), noopActions);
     expect(textOf(done)).not.toContain("結果を見る");
     expect(byClass(done, "result-link")).toHaveLength(0);
     // 前提: 完了した発走前のカードには結果が出ている(リンクを消しただけでなく、中身に置き換わっている)
@@ -112,7 +112,7 @@ describe("レース画面の VNode", () => {
   });
 
   it("失敗したカードは、エラー文(板の error)を出す。状態が失敗でなければ出さない", () => {
-    const failed = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "failed", { error: "ソケット接続に失敗しました" })], prior: null } })), noop);
+    const failed = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "failed", { error: "ソケット接続に失敗しました" })], prior: null } })), noopActions);
     expect(textOf(byClass(failed, "card")[1]!)).toContain("ソケット接続に失敗しました");
     expect(textOf(byClass(failed, "card")[0]!)).not.toContain("ソケット");
   });
@@ -120,7 +120,7 @@ describe("レース画面の VNode", () => {
   it("状態の取得に失敗したら、カードを出さず(「未実行」と誤読させない)、注記(role=alert)を出す。過去の分析は出る", () => {
     const tree = renderScreen(
       buildRaceModel(raceInput({ status: { kind: "error", message: "状態を取得できません" }, past: { kind: "ready", analyses: [{ id: 5, analyzedAt: "2026-06-28T05:00:00.000Z", evEstimated: false, model: null }] } })),
-      noop,
+      noopActions,
     );
     expect(byClass(tree, "card")).toHaveLength(0);
     const alerts = findAll(tree, (n) => n.attrs?.["role"] === "alert");
@@ -130,10 +130,10 @@ describe("レース画面の VNode", () => {
   });
 
   it("過去の分析の取得に失敗しても、カードは出る。取得中は「更新」が disabled", () => {
-    const failed = renderScreen(buildRaceModel(raceInput({ past: { kind: "error", message: "一覧を取得できません" } })), noop);
+    const failed = renderScreen(buildRaceModel(raceInput({ past: { kind: "error", message: "一覧を取得できません" } })), noopActions);
     expect(byClass(failed, "card")).toHaveLength(2);
     expect(textOf(failed)).toContain("一覧を取得できません");
-    const loading = renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noop);
+    const loading = renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noopActions);
     const refresh = findAll(loading, (n) => n.tag === "button")[0]!;
     expect(refresh.attrs?.["disabled"]).toBe(true);
     expect(textOf(refresh)).toContain("読み込み中");
@@ -141,7 +141,7 @@ describe("レース画面の VNode", () => {
 
   it("「更新」のクリックは onRefresh に繋がる", () => {
     let count = 0;
-    const tree = renderScreen(buildRaceModel(raceInput()), { ...noop, onRefresh: () => (count += 1) });
+    const tree = renderScreen(buildRaceModel(raceInput()), { ...noopActions, onRefresh: () => (count += 1) });
     findAll(tree, (n) => n.tag === "button")[0]!.on!.click!();
     expect(count).toBe(1);
   });
@@ -152,7 +152,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
   const runButtons = (tree: VNode) => byClass(tree, "run");
 
   it("各カードに起動のボタン(class=run)。文言・disabled はモデルのとおり。開催日・レース・モードを data-* に持つ", () => {
-    const tree = renderScreen(buildRaceModel(readyInput({ status: { kind: "ready", rows: [row("pre_race", "queued")], prior: null } })), noop);
+    const tree = renderScreen(buildRaceModel(readyInput({ status: { kind: "ready", rows: [row("pre_race", "queued")], prior: null } })), noopActions);
     const buttons = runButtons(tree);
     expect(buttons).toHaveLength(2);
     expect(buttons.every((b) => b.tag === "button")).toBe(true);
@@ -170,7 +170,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
 
   it("クリックは onRun(開催日, レース, モード)に繋がる(data-* と同じ値)", () => {
     const calls: [string, string, string][] = [];
-    const actions: ViewActions = { ...noop, onRun: (date, raceId, mode) => void calls.push([date, raceId, mode]) };
+    const actions: ViewActions = { ...noopActions, onRun: (date, raceId, mode) => void calls.push([date, raceId, mode]) };
     const buttons = runButtons(renderScreen(buildRaceModel(readyInput({ route: { date: "20260629", venue: "nar", race: "202654062801", analysis: null } })), actions));
     expect(buttons).toHaveLength(2);
     for (const b of buttons) b.on!.click!();
@@ -183,8 +183,8 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
   });
 
   it("状態を取得できていないレース画面(読み込み中・失敗)には、起動のボタンが出ない", () => {
-    expect(runButtons(renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noop))).toHaveLength(0);
-    expect(runButtons(renderScreen(buildRaceModel(raceInput({ status: { kind: "error", message: "x" } })), noop))).toHaveLength(0);
+    expect(runButtons(renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noopActions))).toHaveLength(0);
+    expect(runButtons(renderScreen(buildRaceModel(raceInput({ status: { kind: "error", message: "x" } })), noopActions))).toHaveLength(0);
   });
 
   it("起動の失敗は role=alert の段落、すでに実行中・prior の注記は通常の段落で、そのカードの中に出る。外から来た文字列はテキストノード", () => {
@@ -195,7 +195,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
     ]);
     const tree = renderScreen(
       buildRaceModel(readyInput({ status: { kind: "ready", rows: [row("morning", "queued")], prior: PRIOR_VIEW, priorNotice: "順位を取得できませんでした" }, runs })),
-      noop,
+      noopActions,
     );
     const [morning, preRace] = byClass(tree, "card");
     const alerts = findAll(preRace!, (n) => n.attrs?.["role"] === "alert");
@@ -213,7 +213,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
 
   it("追跡の停止の注記: 文言と「状態を更新」ボタン(クリックは onRetrack)。一覧・レースの両方に出る。無ければ出ない", () => {
     let count = 0;
-    const actions: ViewActions = { ...noop, onRetrack: () => (count += 1) };
+    const actions: ViewActions = { ...noopActions, onRetrack: () => (count += 1) };
     const list = renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null }, list: { kind: "ready", races: [] }, board: { kind: "none" }, tracking: "自動更新を止めました" }), actions);
     const race = renderScreen(buildRaceModel(readyInput({ tracking: "自動更新を止めました" })), actions);
     for (const tree of [list, race]) {
@@ -226,8 +226,8 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
       button[0]!.on!.click!();
     }
     expect(count).toBe(2);
-    expect(byClass(renderScreen(buildRaceModel(readyInput()), noop), "tracking")).toHaveLength(0);
-    expect(byClass(renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null }, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noop), "tracking")).toHaveLength(0);
+    expect(byClass(renderScreen(buildRaceModel(readyInput()), noopActions), "tracking")).toHaveLength(0);
+    expect(byClass(renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null }, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noopActions), "tracking")).toHaveLength(0);
   });
 });
 
@@ -245,10 +245,10 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
   const rr = (raceId: string, venueName: string) => ({ raceId, venueName, raceNumber: 1, raceName: "r", courseType: "芝", distance: 1800, entryCount: 16, grade: null }) as const;
   const route = { date: "20260628", venue: "central", race: null, analysis: null } as const;
   const trees = (): { name: string; tree: VNode }[] => [
-    { name: "一覧(場が 2 つ・閉)", tree: renderScreen(buildListModel({ route, list: { kind: "ready", races: [rr("202602010101", "函館"), rr("202603020211", "福島")] }, board: { kind: "none" }, tracking: "止めました" }), noop) },
-    { name: "レース画面(カード 2 枚・失敗の注記・追跡の注記つき)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "failed")], prior: null }, tracking: "止めました", runs: new Map([["morning", { kind: "error", message: "x" }]]) })), noop) },
-    { name: "レース画面(発走前の結果が ready。開閉の見出し)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 5 })], prior: null }, result: { kind: "ready", analysis: analysis({ id: 5 }) } })), noop) },
-    { name: "結果画面(失敗の「更新」)", tree: renderScreen(buildResultModel({ route: { ...route, analysis: 5 }, source: { kind: "error", message: "失敗" } }), noop) },
+    { name: "一覧(場が 2 つ・閉)", tree: renderScreen(buildListModel({ route, list: { kind: "ready", races: [rr("202602010101", "函館"), rr("202603020211", "福島")] }, board: { kind: "none" }, tracking: "止めました" }), noopActions) },
+    { name: "レース画面(カード 2 枚・失敗の注記・追跡の注記つき)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "failed")], prior: null }, tracking: "止めました", runs: new Map([["morning", { kind: "error", message: "x" }]]) })), noopActions) },
+    { name: "レース画面(発走前の結果が ready。開閉の見出し)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 5 })], prior: null }, result: { kind: "ready", analysis: analysis({ id: 5 }) } })), noopActions) },
+    { name: "結果画面(失敗の「更新」)", tree: renderScreen(buildResultModel({ route: { ...route, analysis: 5 }, source: { kind: "error", message: "失敗" } }), noopActions) },
   ];
 
   it("クリック・変更の処理を持つ要素は、data-* を持つか、引数を取らない許可リスト(更新・状態を更新・日付の入力)のどれか", () => {
@@ -296,7 +296,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
   };
 }
 const route = { date: "20260628", venue: "central" as const, race: null, analysis: 7 };
-const resultTree = (a: AnalysisDetail) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a } }), noop);
+const resultTree = (a: AnalysisDetail) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a } }), noopActions);
 
 describe("結果画面の VNode", () => {
   it("見出し・分析時刻・分析モデル・戻るリンクを出す。モデルが null なら「LLM 未使用(統計のみ)」", () => {
@@ -360,11 +360,11 @@ describe("結果画面の VNode", () => {
   });
 
   it("読み込み中は文言、失敗は role=alert と「更新」ボタン(再取得の手段)。内容がある(成功の)画面には「更新」を出さない(R2 の操作回数を無駄に使わない)", () => {
-    const loading = renderScreen(buildResultModel({ route, source: { kind: "loading" } }), noop);
+    const loading = renderScreen(buildResultModel({ route, source: { kind: "loading" } }), noopActions);
     expect(textOf(loading)).toContain("読み込み中");
     expect(findAll(loading, (n) => n.tag === "button")).toHaveLength(0);
     let count = 0;
-    const failed = renderScreen(buildResultModel({ route, source: { kind: "error", message: "取得できません" } }), { ...noop, onRefresh: () => (count += 1) });
+    const failed = renderScreen(buildResultModel({ route, source: { kind: "error", message: "取得できません" } }), { ...noopActions, onRefresh: () => (count += 1) });
     expect(findAll(failed, (n) => n.attrs?.["role"] === "alert").map(textOf)).toEqual(["取得できません"]);
     const buttons = findAll(failed, (n) => n.tag === "button");
     expect(buttons.map(textOf)).toEqual(["更新"]);
@@ -382,7 +382,7 @@ describe("発走前のカードの結果(Issue #188)", () => {
     bets: [{ betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 }],
   };
   const doneRows = { kind: "ready", rows: [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })], prior: null } as const;
-  const raceTree = (result: ResultSource | undefined, extra: Partial<RaceModelInput> = {}, actions: ViewActions = noop) =>
+  const raceTree = (result: ResultSource | undefined, extra: Partial<RaceModelInput> = {}, actions: ViewActions = noopActions) =>
     renderScreen(buildRaceModel(raceInput({ status: doneRows, ...(result === undefined ? {} : { result }), ...extra })), actions);
   const preRaceCard = (tree: VNode): VNode => byClass(tree, "card")[1]!;
   const ready = (a: AnalysisDetail): ResultSource => ({ kind: "ready", analysis: a });
@@ -462,7 +462,7 @@ describe("発走前のカードの結果(Issue #188)", () => {
 
   it("開閉のクリックは onToggleResult(開催日, レース, 押したあとの状態)に繋がる。開いているときは false、畳んでいるときは true(引数は data-* と同じ値)", () => {
     const calls: [string, string, boolean][] = [];
-    const actions: ViewActions = { ...noop, onToggleResult: (date, raceId, open) => void calls.push([date, raceId, open]) };
+    const actions: ViewActions = { ...noopActions, onToggleResult: (date, raceId, open) => void calls.push([date, raceId, open]) };
     for (const resultOpen of [true, false]) {
       const toggle = byClass(raceTree(ready(analysis({ id: 7 })), { resultOpen }, actions), "result-toggle")[0]!;
       toggle.on!.click!();
@@ -477,10 +477,10 @@ describe("発走前のカードの結果(Issue #188)", () => {
   it("同じ見出し・別のレース(または別の日)は、data-* が違うので木が違う(同じ木なら DOM を触らない描画で、開閉の取り違えを隠さない)", () => {
     const a = JSON.stringify(raceTree(ready(analysis({ id: 7 }))));
     const otherRace = JSON.stringify(
-      renderScreen(buildRaceModel({ ...raceInput({ status: { kind: "ready", rows: [{ ...row("pre_race", "done", { analysisId: 7 }), raceId: "202603020212" }], prior: null }, result: ready(analysis({ id: 7 })) }), route: { date: "20260628", venue: "central", race: "202603020212", analysis: null } }), noop),
+      renderScreen(buildRaceModel({ ...raceInput({ status: { kind: "ready", rows: [{ ...row("pre_race", "done", { analysisId: 7 }), raceId: "202603020212" }], prior: null }, result: ready(analysis({ id: 7 })) }), route: { date: "20260628", venue: "central", race: "202603020212", analysis: null } }), noopActions),
     );
     const otherDate = JSON.stringify(
-      renderScreen(buildRaceModel({ ...raceInput({ status: doneRows, result: ready(analysis({ id: 7 })) }), route: { date: "20260629", venue: "central", race: RACE_ID, analysis: null } }), noop),
+      renderScreen(buildRaceModel({ ...raceInput({ status: doneRows, result: ready(analysis({ id: 7 })) }), route: { date: "20260629", venue: "central", race: RACE_ID, analysis: null } }), noopActions),
     );
     expect(a).not.toBe(otherRace);
     expect(a).not.toBe(otherDate);
@@ -534,7 +534,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
           },
         }),
       ),
-      noop,
+      noopActions,
     );
     const { tags, texts } = mountAll(tree);
     expect(tags.filter((t) => ["img", "script", "svg", "iframe", "style"].includes(t))).toEqual([]);
@@ -547,7 +547,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
       model: PAYLOAD,
       horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD }],
     });
-    const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 7 })], prior: null }, result: { kind: "ready", analysis: a } })), noop);
+    const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 7 })], prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
     expect(byClass(tree, "horse")).toHaveLength(1); // 前提: カードの中に馬が出ている
     const { tags, texts } = mountAll(tree);
     expect(tags.filter((t) => ["img", "script", "svg", "iframe", "style"].includes(t))).toEqual([]);
@@ -566,7 +566,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
   });
 
   it("href は # で始まるハッシュだけ(レース画面・結果画面のすべてのリンクが、許可リストを通る)", () => {
-    const race = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 3 })], prior: null }, past: { kind: "ready", analyses: [{ id: 1, analyzedAt: "2026-06-28T05:00:00Z", evEstimated: false, model: null }] } })), noop);
+    const race = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 3 })], prior: null }, past: { kind: "ready", analyses: [{ id: 1, analyzedAt: "2026-06-28T05:00:00Z", evEstimated: false, model: null }] } })), noopActions);
     for (const href of [...hrefs(race), ...hrefs(resultTree(analysis()))]) {
       expect(href.startsWith("#"), href).toBe(true);
     }
@@ -596,7 +596,7 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
 
   it("見出しは h2 の中のボタン。aria-expanded は開閉の実際の状態と一致し、開閉が文字(▾/▸)でも分かる", () => {
     const keysAll = buildListModel(listInput()).groups.map((g) => g.key);
-    const tree = renderScreen(buildListModel(listInput({ choices: new Map([[keysAll[1]!, true]]) })), noop);
+    const tree = renderScreen(buildListModel(listInput({ choices: new Map([[keysAll[1]!, true]]) })), noopActions);
     const buttons = toggles(tree);
     expect(buttons).toHaveLength(2);
     expect(buttons.every((b) => b.tag === "button")).toBe(true);
@@ -613,10 +613,10 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
 
   it("閉じた場のレースの行(a.race と ul.races)は描画しない。開いた場の行だけが出る", () => {
     const keys = buildListModel(listInput()).groups.map((g) => g.key);
-    const allClosed = renderScreen(buildListModel(listInput()), noop);
+    const allClosed = renderScreen(buildListModel(listInput()), noopActions);
     expect(raceLinks(allClosed)).toHaveLength(0);
     expect(byClass(allClosed, "races")).toHaveLength(0);
-    const oneOpen = renderScreen(buildListModel(listInput({ choices: new Map([[keys[1]!, true]]) })), noop);
+    const oneOpen = renderScreen(buildListModel(listInput({ choices: new Map([[keys[1]!, true]]) })), noopActions);
     expect(raceLinks(oneOpen)).toHaveLength(2);
     expect(raceLinks(oneOpen).map((a) => a.attrs?.["href"])).toEqual(["#date=20260628&venue=central&race=202603020211", "#date=20260628&venue=central&race=202603020212"]);
     expect(byClass(oneOpen, "races")).toHaveLength(1);
@@ -624,12 +624,12 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
 
   // Issue #186(ユーザーの依頼 2026-10-07): 見出しからレース数(`12R`)を外した。旧版の「場名・レース数が出る」(`toContain("2R")`)は意図して置き換える。
   it("見出しの文字は「▸/▾ 場名」だけ(板が無いとき)。レース数(数字+R)は出さない。閉じていても場名は出る", () => {
-    const tree = renderScreen(buildListModel(listInput()), noop);
+    const tree = renderScreen(buildListModel(listInput()), noopActions);
     // 前提: 函館・福島の 2 つの見出し(どちらもレースが 2 つある=旧版ならどちらも「2R」が付いた)
     expect(toggles(tree)).toHaveLength(2);
     expect(toggles(tree).map(textOf)).toEqual(["▸ 函館", "▸ 福島"]);
     const keys = buildListModel(listInput()).groups.map((g) => g.key);
-    const open = renderScreen(buildListModel(listInput({ choices: new Map([[keys[1]!, true]]) })), noop);
+    const open = renderScreen(buildListModel(listInput({ choices: new Map([[keys[1]!, true]]) })), noopActions);
     expect(toggles(open).map(textOf)).toEqual(["▸ 函館", "▾ 福島"]);
     for (const text of [...toggles(tree), ...toggles(open)].map(textOf)) {
       expect(text).not.toMatch(/[0-9]+R/);
@@ -638,9 +638,9 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
 
   it("要約があっても、見出しは「▸ 場名・実行中 n・失敗 m」(数字+R を挟まない。0 の項目は出さない)", () => {
     const board = [brow("202603020211", "morning", "queued"), brow("202603020212", "pre_race", "fetched"), brow("202603020212", "morning", "failed"), brow("202602010101", "morning", "done")];
-    const closed = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: board } })), noop)).map(textOf);
+    const closed = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: board } })), noopActions)).map(textOf);
     expect(closed).toEqual(["▸ 函館", "▸ 福島・実行中 2・失敗 1"]);
-    const only = (rows: ReturnType<typeof brow>[]) => toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows } })), noop)).map(textOf)[1];
+    const only = (rows: ReturnType<typeof brow>[]) => toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows } })), noopActions)).map(textOf)[1];
     expect(only([brow("202603020211", "morning", "failed")])).toBe("▸ 福島・失敗 1");
     expect(only([brow("202603020211", "morning", "queued")])).toBe("▸ 福島・実行中 1");
     for (const text of closed) {
@@ -650,7 +650,7 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
 
   it("要約: 実行中・失敗の数を見出しに出す。0 の項目は出さない。板が無ければ要約を出さない", () => {
     const board = [brow("202603020211", "morning", "queued"), brow("202603020212", "pre_race", "fetched"), brow("202603020212", "morning", "failed"), brow("202602010101", "morning", "done")];
-    const tree = renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: board } })), noop);
+    const tree = renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: board } })), noopActions);
     const [hako, fuku] = toggles(tree).map(textOf);
     // 函館: 完了だけ → 実行中・失敗とも 0 で、どちらの語も出ない
     expect(hako).not.toContain("実行中");
@@ -658,16 +658,16 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
     // 福島: 2 レースとも実行中(1 つは失敗も)。失敗 1
     expect(fuku).toContain("実行中 2");
     expect(fuku).toContain("失敗 1");
-    const noBoard = toggles(renderScreen(buildListModel(listInput()), noop)).map(textOf);
+    const noBoard = toggles(renderScreen(buildListModel(listInput()), noopActions)).map(textOf);
     expect(noBoard.join(" ")).not.toContain("実行中");
     expect(noBoard.join(" ")).not.toContain("失敗");
   });
 
   it("失敗だけ・実行中だけのとき、出すのはその語だけ", () => {
-    const failedOnly = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [brow("202603020211", "morning", "failed")] } })), noop)).map(textOf);
+    const failedOnly = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [brow("202603020211", "morning", "failed")] } })), noopActions)).map(textOf);
     expect(failedOnly[1]).toContain("失敗 1");
     expect(failedOnly[1]).not.toContain("実行中");
-    const runningOnly = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [brow("202603020211", "morning", "queued")] } })), noop)).map(textOf);
+    const runningOnly = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [brow("202603020211", "morning", "queued")] } })), noopActions)).map(textOf);
     expect(runningOnly[1]).toContain("実行中 1");
     expect(runningOnly[1]).not.toContain("失敗");
   });
@@ -676,7 +676,7 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
   // そこで、クリック処理に渡す引数は必ず data-* にも出す(= 引数が違えば木が違う)。
   it("見出しのボタンは、クリックで onToggleGroup に渡すキーと同じ値を data-key に持つ(同じ木なら DOM を触らない描画で、古い処理が残らないため)", () => {
     const calls: string[] = [];
-    const actions: ViewActions = { ...noop, onToggleGroup: (key) => void calls.push(key) };
+    const actions: ViewActions = { ...noopActions, onToggleGroup: (key) => void calls.push(key) };
     const model = buildListModel(listInput());
     const buttons = toggles(renderScreen(model, actions));
     expect(buttons).toHaveLength(2); // 前提: 2 つの見出し
@@ -692,7 +692,7 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
     const rows = [rr("202601010101", "福島"), rr("202602010101", "函館"), rr("202603010101", "福島")];
     const model = buildListModel(listInput({ list: { kind: "ready", races: rows } }));
     expect(model.groups.map((g) => g.name)).toEqual(["福島", "函館", "福島"]); // 前提: 離れた同名が 2 組
-    const tree = renderScreen(model, noop);
+    const tree = renderScreen(model, noopActions);
     const texts = toggles(tree).map(textOf);
     expect(texts[0]).toBe(texts[2]); // 前提: 見出しの文字は同じ
     const dataKeys = toggles(tree).map((b) => b.attrs?.["data-key"]);
@@ -705,29 +705,29 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
   // Issue #186 段階1(#184 の【記録】1・3): 板の取得中は「更新」を押せない/板だけが失敗したら、そのことが分かる注記を出す。
   it("板だけを取得中(一覧は取得済み)でも「更新」は disabled で「読み込み中…」。取得中でなければ押せる", () => {
     const refresh = (tree: VNode) => findAll(tree, (n) => n.tag === "button" && n.attrs?.["class"] === "refresh")[0]!;
-    const idle = refresh(renderScreen(buildListModel(listInput()), noop));
+    const idle = refresh(renderScreen(buildListModel(listInput()), noopActions));
     expect(textOf(idle)).toBe("更新"); // 前提: 取得中でなければ「更新」で押せる
     expect(idle.attrs?.["disabled"]).toBe(false);
-    const boardLoading = refresh(renderScreen(buildListModel(listInput({ boardLoading: true })), noop));
+    const boardLoading = refresh(renderScreen(buildListModel(listInput({ boardLoading: true })), noopActions));
     expect(textOf(boardLoading)).toBe("読み込み中…");
     expect(boardLoading.attrs?.["disabled"]).toBe(true);
   });
 
   it("板の取得に失敗したときは、「実行状態(バッジ)を取得できない」ことを示す注記が出る。一覧のレースは出たまま。板が取れているときは出ない", () => {
     const notices = (tree: VNode) => byClass(tree, "notice").map(textOf);
-    const failed = renderScreen(buildListModel(listInput({ board: { kind: "error", message: "通信に失敗しました。" } })), noop);
+    const failed = renderScreen(buildListModel(listInput({ board: { kind: "error", message: "通信に失敗しました。" } })), noopActions);
     expect(raceLinks(failed)).toHaveLength(0); // 既定は全部閉(前提: 一覧は描画されている=見出しが 2 つある)
     expect(toggles(failed)).toHaveLength(2);
     expect(notices(failed)).toHaveLength(1);
     expect(notices(failed)[0]).toContain("実行状態");
     expect(notices(failed)[0]).toContain("通信に失敗しました。");
-    expect(notices(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [] } })), noop))).toEqual([]);
-    expect(notices(renderScreen(buildListModel(listInput()), noop))).toEqual([]);
+    expect(notices(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [] } })), noopActions))).toEqual([]);
+    expect(notices(renderScreen(buildListModel(listInput()), noopActions))).toEqual([]);
   });
 
   it("タップは onToggleGroup(その場のキー, 反転した次の値)に繋がる(閉→開・開→閉)", () => {
     const calls: [string, boolean][] = [];
-    const actions: ViewActions = { ...noop, onToggleGroup: (key, open) => void calls.push([key, open]) };
+    const actions: ViewActions = { ...noopActions, onToggleGroup: (key, open) => void calls.push([key, open]) };
     const model = buildListModel(listInput());
     const closed = renderScreen(model, actions);
     toggles(closed)[1]!.on!.click!();
@@ -739,10 +739,59 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
 
   it("外から来た会場名は、見出しのボタンの中でもテキストノードだけ(許可リストの要素・属性で組み立てられる)", () => {
     const evil = `<img src=x onerror=alert(1)>`;
-    const tree = renderScreen(buildListModel(listInput({ list: { kind: "ready", races: [rr("202603020211", evil), rr("202602010101", "函館")] } })), noop);
+    const tree = renderScreen(buildListModel(listInput({ list: { kind: "ready", races: [rr("202603020211", evil), rr("202602010101", "函館")] } })), noopActions);
     const { tags, texts } = mountAll(tree);
     expect(tags.filter((t) => ["img", "script", "iframe", "style", "details", "summary"].includes(t))).toEqual([]);
     expect(texts.some((t) => t.includes(evil))).toBe(true);
     expect(tags).toContain("button");
+  });
+});
+
+/**
+ * Issue #191: カードの説明の VNode。各カードに `p.card-desc` が1つ。子は文字列1つ(アダプタがテキストノードにする=HTML として解釈されない)。
+ */
+describe("カードの説明の VNode(Issue #191)", () => {
+  const sections = (tree: VNode): VNode[] => findAll(tree, (n) => n.tag === "section" && String(n.attrs?.["class"]) === "card");
+
+  const cases: readonly [string, Parameters<typeof raceInput>[0]][] = [
+    ["未実行", {}],
+    ["実行中・失敗の注記つき", { status: { kind: "ready", rows: [row("morning", "failed", { error: "取得失敗" }), row("pre_race", "queued")], prior: null }, runs: new Map([["morning", { kind: "error", message: "x" }]]) }],
+    ["発走前の結果つき", { status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 5 })], prior: null }, result: { kind: "ready", analysis: analysis({ id: 5 }) } }],
+  ];
+  for (const [name, over] of cases) {
+    it(`${name}: カードごとに p.card-desc が1つあり、子はテキスト(文字列)1つだけ`, () => {
+      const tree = renderScreen(buildRaceModel(raceInput(over)), noopActions);
+      const cardNodes = sections(tree);
+      expect(cardNodes, "前提: カードが 2 枚").toHaveLength(2);
+      for (const card of cardNodes) {
+        const descs = byClass(card, "card-desc");
+        expect(descs).toHaveLength(1);
+        expect(descs[0]!.tag).toBe("p");
+        expect(descs[0]!.children).toHaveLength(1);
+        expect(typeof descs[0]!.children![0]).toBe("string");
+        expect((descs[0]!.children![0] as string).length).toBeGreaterThan(0);
+      }
+      // 朝のカードと発走前のカードで、説明が違う(取り違えない)
+      const texts = cardNodes.map((c) => textOf(byClass(c, "card-desc")[0]!));
+      expect(texts[0]).not.toBe(texts[1]);
+    });
+  }
+
+  it("説明は見出し(h2)の後・起動のボタンの前に出る(カードの中の並び)", () => {
+    const tree = renderScreen(buildRaceModel(raceInput()), noopActions);
+    for (const card of sections(tree)) {
+      const kids = card.children ?? [];
+      const at = (pred: (n: VNode) => boolean) => kids.findIndex((k) => typeof k !== "string" && pred(k));
+      const h2 = at((n) => n.tag === "h2");
+      const desc = at((n) => String(n.attrs?.["class"]) === "card-desc");
+      const button = at((n) => n.tag === "button");
+      expect(h2).toBeGreaterThanOrEqual(0);
+      expect(desc).toBeGreaterThan(h2);
+      expect(button).toBeGreaterThan(desc);
+    }
+  });
+
+  it("状態を取得できていないときは、カードも説明も出ない", () => {
+    expect(byClass(renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noopActions), "card-desc")).toHaveLength(0);
   });
 });

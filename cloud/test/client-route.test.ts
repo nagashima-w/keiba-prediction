@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildHash, parseHash, type Route } from "../client/route";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { buildHash, parseHash, screenOf, type Route } from "../client/route";
 
 /**
  * Issue #184(#165-b): スマホ画面の状態(URL のハッシュ)の解析と組み立て。純関数。
@@ -99,5 +101,59 @@ describe("buildHash", () => {
       expect(route.date).not.toBe(TODAY); // 前提: 既定の日付に頼って通っていない
       expect(parseHash(buildHash(route), TODAY)).toEqual(route);
     }
+  });
+});
+
+/**
+ * Issue #191(#188 の申し送り): 「今どの画面か」の判定を `screenOf(route)` の1か所にまとめる。
+ * 優先順位は既存のとおり analysis(結果画面)> race(レース画面)> 一覧。
+ */
+describe("screenOf(今どの画面か)", () => {
+  const cases: readonly [string, Route, "list" | "race" | "result"][] = [
+    ["race も analysis も無ければ一覧", { date: TODAY, venue: "central", race: null, analysis: null }, "list"],
+    ["race があればレース画面", { date: TODAY, venue: "central", race: NAR_RACE, analysis: null }, "race"],
+    ["analysis があれば結果画面", { date: TODAY, venue: "central", race: null, analysis: 7 }, "result"],
+    ["race と analysis の両方があれば結果画面(analysis が優先)", { date: TODAY, venue: "nar", race: NAR_RACE, analysis: 7 }, "result"],
+  ];
+  for (const [name, route, expected] of cases) {
+    it(name, () => {
+      expect(screenOf(route)).toBe(expected);
+    });
+  }
+
+  it("ハッシュから導いた route でも同じ(日付だけ・race つき・analysis つき・両方)", () => {
+    expect(screenOf(parseHash("#date=20261003&venue=nar", TODAY))).toBe("list");
+    expect(screenOf(parseHash(`#date=20261003&venue=nar&race=${NAR_RACE}`, TODAY))).toBe("race");
+    expect(screenOf(parseHash("#analysis=5", TODAY))).toBe("result");
+    expect(screenOf(parseHash(`#date=20261003&race=${NAR_RACE}&analysis=5`, TODAY))).toBe("result");
+    // 日付の無い race は捨てられる(別の日のレースと取り違えない)ので一覧
+    expect(screenOf(parseHash(`#race=${NAR_RACE}`, TODAY))).toBe("list");
+  });
+});
+
+describe("app.ts は、画面の判定を screenOf だけに任せる(Issue #191)", () => {
+  const code = readFileSync(path.join(__dirname, "..", "client", "app.ts"), "utf-8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+  it("前提: コメントを除いた本文が読めている", () => {
+    expect(code.length).toBeGreaterThan(5000);
+  });
+
+  it("route.analysis・route.race を null と直接比べない(分岐は screenOf の switch・比較は route.race の値の取り出しだけ)", () => {
+    expect(code.match(/route\.(analysis|race)\s*[!=]==\s*null/g) ?? []).toEqual([]);
+  });
+
+  it("screenOf(route) を呼ぶ箇所が、画面を判定する 5 つの関数(render・onCompleted・syncLatestAnalysis・ensureLoaded・onRefresh)にある", () => {
+    for (const fn of ["render", "onCompleted", "syncLatestAnalysis", "ensureLoaded", "onRefresh"]) {
+      const body = new RegExp(`function ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n  \\}\\n`).exec(code)?.[1];
+      expect(body, `前提: ${fn} の本体を取り出せる`).toBeDefined();
+      expect(body, `${fn} が screenOf(route) を使う`).toContain("screenOf(route)");
+    }
+    expect((code.match(/screenOf\(route\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("対照: 検出は、旧い直接比較を拾える(空振りでない)", () => {
+    expect("if (route.analysis !== null) {".match(/route\.(analysis|race)\s*[!=]==\s*null/g)).toHaveLength(1);
   });
 });
