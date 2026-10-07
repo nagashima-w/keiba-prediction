@@ -114,7 +114,7 @@ export function renderPage(email: string): string {
   .card-error { margin: 6px 0 0; font-size: 0.8rem; color: var(--fail); }
   .prior, .past, .horse-list, .bets, .settings { list-style: none; margin: 8px 0 0; padding: 0; }
   .prior-row, .bet { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--line); }
-  .result-link, .past-link { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--accent); }
+  .past-link { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--accent); }
   .past li { margin: 0; }
   .past-link { margin-top: 0; }
   .meta { margin: 0 0 4px; font-size: 0.9rem; color: var(--muted); }
@@ -130,6 +130,10 @@ export function renderPage(email: string): string {
   .tracking { margin: 8px 0; }
   .tracking .notice { margin-bottom: 8px; }
   .card-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--muted); }
+  /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
+  .card-result { margin-top: 8px; }
+  .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }
+  .result-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
 </style>
 </head>
 <body>

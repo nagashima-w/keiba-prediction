@@ -3,18 +3,19 @@ import type { AnalysisDetail } from "../client/api-analysis";
 import { mount, type DomDocument } from "../client/dom";
 import { buildListModel, type ListModelInput } from "../client/list";
 import { buildRaceModel, type RaceModelInput, type RunUi } from "../client/race";
-import { buildResultModel } from "../client/result";
+import { buildResultModel, type ResultSource } from "../client/result";
 import { renderScreen, type ViewActions } from "../client/view";
 import { h, type VNode } from "../client/vnode";
 
 /**
  * Issue #185: レース画面・結果画面の VNode。モデル(純関数。race.test・result.test が検証)→ VNode の写し間違い(出し忘れ・出しすぎ)と、XSS の守り(外から来た文字列はテキストノードだけ。
  * 要素・属性は #184 の許可リストのまま=偽の document に mount して、許可リストに投げられないことを確かめる)。
+ * Issue #188: 発走前のカードの中の最新の分析の結果(読み込み中・失敗・開閉の見出し・馬ごとの表示・配分)。旧「結果を見る」のリンクは出さない。
  * Issue #186: 起動のボタン・起動の失敗の注記・追跡の停止の注記(「状態を更新」)・クリック処理の引数が data-* に出ていること(`createMounter` が同じ木の DOM を触らないため)。
  */
 
 const RACE_ID = "202603020211";
-const noop: ViewActions = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onRun: () => {}, onRetrack: () => {} };
+const noop: ViewActions = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onToggleResult: () => {}, onRun: () => {}, onRetrack: () => {} };
 
 function textOf(node: VNode | string): string {
   if (typeof node === "string") return node;
@@ -97,13 +98,17 @@ describe("レース画面の VNode", () => {
     expect(textOf(items[1]!)).toContain("30.0%");
   });
 
-  it("「結果を見る」は発走前が完了したときだけ、リンク(a)で出る(ボタン・自動遷移ではない)。リンク先は分析のハッシュ", () => {
-    const done = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 12 })], prior: null } })), noop);
-    const links = findAll(done, (n) => n.tag === "a" && textOf(n).includes("結果を見る"));
-    expect(links).toHaveLength(1);
-    expect(links[0]!.attrs?.["href"]).toBe("#date=20260628&venue=central&analysis=12");
-    const queued = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "queued")], prior: null } })), noop);
-    expect(textOf(queued)).not.toContain("結果を見る");
+  it("「結果を見る」のリンクはどの状態でも出ない(Issue #188 で廃止。旧版は発走前の完了で a を出していた)。analysis= のリンクは過去の分析の一覧だけにある", () => {
+    const past = { kind: "ready", analyses: [{ id: 12, analyzedAt: "2026-06-28T05:00:00.000Z", evEstimated: false, model: null }] } as const;
+    const done = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 12 })], prior: null }, past, result: { kind: "ready", analysis: analysis({ id: 12 }) } })), noop);
+    expect(textOf(done)).not.toContain("結果を見る");
+    expect(byClass(done, "result-link")).toHaveLength(0);
+    // 前提: 完了した発走前のカードには結果が出ている(リンクを消しただけでなく、中身に置き換わっている)
+    expect(byClass(byClass(done, "card")[1]!, "horse").length).toBeGreaterThan(0);
+    const analysisLinks = hrefs(done).filter((x) => x.includes("analysis="));
+    expect(analysisLinks).toEqual(["#date=20260628&venue=central&analysis=12"]);
+    expect(byClass(done, "past-link")).toHaveLength(1);
+    expect(byClass(byClass(done, "card")[1]!, "past-link")).toHaveLength(0);
   });
 
   it("失敗したカードは、エラー文(板の error)を出す。状態が失敗でなければ出さない", () => {
@@ -242,6 +247,7 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
   const trees = (): { name: string; tree: VNode }[] => [
     { name: "一覧(場が 2 つ・閉)", tree: renderScreen(buildListModel({ route, list: { kind: "ready", races: [rr("202602010101", "函館"), rr("202603020211", "福島")] }, board: { kind: "none" }, tracking: "止めました" }), noop) },
     { name: "レース画面(カード 2 枚・失敗の注記・追跡の注記つき)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "failed")], prior: null }, tracking: "止めました", runs: new Map([["morning", { kind: "error", message: "x" }]]) })), noop) },
+    { name: "レース画面(発走前の結果が ready。開閉の見出し)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 5 })], prior: null }, result: { kind: "ready", analysis: analysis({ id: 5 }) } })), noop) },
     { name: "結果画面(失敗の「更新」)", tree: renderScreen(buildResultModel({ route: { ...route, analysis: 5 }, source: { kind: "error", message: "失敗" } }), noop) },
   ];
 
@@ -259,8 +265,8 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
         withData += 1;
       }
     }
-    // 空振り防止: 場の見出し(2)・起動のボタン(2)が data-* の対象として数えられ、除外も使われている
-    expect(withData).toBe(4);
+    // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)が data-* の対象として数えられ、除外も使われている
+    expect(withData).toBe(7);
     expect(exemptCount).toBeGreaterThanOrEqual(4);
   });
 
@@ -368,6 +374,152 @@ describe("結果画面の VNode", () => {
   });
 });
 
+/** Issue #188: 発走前のカードの中の結果。馬ごと・配分の表示は結果画面と共通(`resultSections`)。読み込み中・失敗は開閉に関係なく常に出す。 */
+describe("発走前のカードの結果(Issue #188)", () => {
+  const ALLOCATION = {
+    route: "mixed", unavailableReason: null, fallbackReason: null, skipReasonCode: null, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.1,
+    includeComboOdds: true, includeWide: true, includeTrio: false, includeQuinella: null, includeExacta: true, includeTrifecta: false, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result",
+    bets: [{ betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 }],
+  };
+  const doneRows = { kind: "ready", rows: [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })], prior: null } as const;
+  const raceTree = (result: ResultSource | undefined, extra: Partial<RaceModelInput> = {}, actions: ViewActions = noop) =>
+    renderScreen(buildRaceModel(raceInput({ status: doneRows, ...(result === undefined ? {} : { result }), ...extra })), actions);
+  const preRaceCard = (tree: VNode): VNode => byClass(tree, "card")[1]!;
+  const ready = (a: AnalysisDetail): ResultSource => ({ kind: "ready", analysis: a });
+
+  it("読み込み中は発走前のカードに「読み込み中…」。馬のカードも開閉の見出しも出さない。朝のカードには何も出ない", () => {
+    const tree = raceTree({ kind: "loading" });
+    expect(textOf(preRaceCard(tree))).toContain("読み込み中…");
+    expect(byClass(preRaceCard(tree), "horse")).toHaveLength(0);
+    expect(byClass(tree, "result-toggle")).toHaveLength(0);
+    expect(byClass(byClass(tree, "card")[0]!, "card-result")).toHaveLength(0);
+    expect(textOf(byClass(tree, "card")[0]!)).not.toContain("読み込み中");
+  });
+
+  it("失敗は、固定の文言(role=alert)と「更新」での再取得の案内。馬のカードは出さない。開閉の見出しも出さない(失敗を畳みで隠さない)", () => {
+    const tree = raceTree({ kind: "error", message: "分析の結果を取得できませんでした" });
+    const alerts = findAll(preRaceCard(tree), (n) => n.attrs?.["role"] === "alert");
+    expect(alerts).toHaveLength(1);
+    expect(textOf(alerts[0]!)).toContain("分析の結果を取得できませんでした");
+    expect(textOf(alerts[0]!)).toContain("更新");
+    expect(byClass(preRaceCard(tree), "horse")).toHaveLength(0);
+    expect(byClass(tree, "result-toggle")).toHaveLength(0);
+  });
+
+  it("取得できたら、開閉の見出し(h3 の中のボタン。aria-expanded=true・▾・data-date・data-race)の下に、分析時刻・分析モデル・馬のカード・配分を出す", () => {
+    const tree = raceTree(ready(analysis({ id: 7, allocation: ALLOCATION })));
+    const card = preRaceCard(tree);
+    const toggles = byClass(card, "result-toggle");
+    expect(toggles).toHaveLength(1);
+    expect(toggles[0]!.tag).toBe("button");
+    expect(toggles[0]!.attrs?.["aria-expanded"]).toBe("true");
+    expect(toggles[0]!.attrs?.["data-date"]).toBe("20260628");
+    expect(toggles[0]!.attrs?.["data-race"]).toBe(RACE_ID);
+    expect(textOf(toggles[0]!)).toContain("▾");
+    expect(findAll(card, (n) => n.tag === "h3" && byClass(n, "result-toggle").length === 1)).toHaveLength(1);
+    expect(textOf(card)).toContain("分析時刻: 2026-06-28 14:00");
+    expect(textOf(card)).toContain("分析モデル: LLM 未使用(統計のみ)");
+    const horses = byClass(card, "horse");
+    expect(horses).toHaveLength(2);
+    expect(textOf(horses[0]!)).toContain("アルファ");
+    expect(textOf(horses[0]!)).toContain("3着内率 20.0%");
+    expect(textOf(horses[0]!)).toContain("複勝オッズ下限 1.8");
+    expect(textOf(horses[0]!)).toContain("EV 1.25");
+    expect(textOf(horses[0]!)).toContain("EVプラス");
+    expect(byClass(card, "positive")).toHaveLength(1);
+    expect(byClass(card, "mark").map(textOf)).toEqual(["◎"]);
+    expect(textOf(card)).not.toContain("AI補正後");
+    expect(byClass(card, "bet")).toHaveLength(1);
+    expect(textOf(card)).toContain("配分の提案");
+    // 朝のカードには出ない
+    expect(byClass(byClass(tree, "card")[0]!, "horse")).toHaveLength(0);
+  });
+
+  it("結果は起動のボタンの前(朝のカードの prior と同じ並び)。結果の画面へのリンクは無い", () => {
+    const card = preRaceCard(raceTree(ready(analysis({ id: 7 }))));
+    const kids = card.children ?? [];
+    const indexOf = (cls: string) => kids.findIndex((k) => typeof k !== "string" && (k.attrs?.["class"] ?? "").toString().split(" ").includes(cls));
+    expect(indexOf("card-result")).toBeGreaterThan(-1);
+    expect(indexOf("run")).toBeGreaterThan(-1);
+    expect(indexOf("card-result")).toBeLessThan(indexOf("run"));
+    expect(byClass(card, "result-link")).toHaveLength(0);
+    expect(findAll(card, (n) => n.tag === "a")).toHaveLength(0);
+  });
+
+  it("畳んだとき(resultOpen: false): 見出しは残り aria-expanded=false・▸。馬のカード・配分・分析時刻は描画しない(描画と状態が一致する)", () => {
+    const tree = raceTree(ready(analysis({ id: 7, allocation: ALLOCATION })), { resultOpen: false });
+    const card = preRaceCard(tree);
+    const toggles = byClass(card, "result-toggle");
+    expect(toggles).toHaveLength(1);
+    expect(toggles[0]!.attrs?.["aria-expanded"]).toBe("false");
+    expect(textOf(toggles[0]!)).toContain("▸");
+    expect(textOf(toggles[0]!)).not.toContain("▾");
+    expect(byClass(card, "horse")).toHaveLength(0);
+    expect(byClass(card, "bet")).toHaveLength(0);
+    expect(textOf(card)).not.toContain("分析時刻");
+    expect(textOf(card)).not.toContain("配分の提案");
+  });
+
+  it("開閉のクリックは onToggleResult(開催日, レース, 押したあとの状態)に繋がる。開いているときは false、畳んでいるときは true(引数は data-* と同じ値)", () => {
+    const calls: [string, string, boolean][] = [];
+    const actions: ViewActions = { ...noop, onToggleResult: (date, raceId, open) => void calls.push([date, raceId, open]) };
+    for (const resultOpen of [true, false]) {
+      const toggle = byClass(raceTree(ready(analysis({ id: 7 })), { resultOpen }, actions), "result-toggle")[0]!;
+      toggle.on!.click!();
+      expect([toggle.attrs?.["data-date"], toggle.attrs?.["data-race"]]).toEqual(["20260628", RACE_ID]);
+    }
+    expect(calls).toEqual([
+      ["20260628", RACE_ID, false],
+      ["20260628", RACE_ID, true],
+    ]);
+  });
+
+  it("同じ見出し・別のレース(または別の日)は、data-* が違うので木が違う(同じ木なら DOM を触らない描画で、開閉の取り違えを隠さない)", () => {
+    const a = JSON.stringify(raceTree(ready(analysis({ id: 7 }))));
+    const otherRace = JSON.stringify(
+      renderScreen(buildRaceModel({ ...raceInput({ status: { kind: "ready", rows: [{ ...row("pre_race", "done", { analysisId: 7 }), raceId: "202603020212" }], prior: null }, result: ready(analysis({ id: 7 })) }), route: { date: "20260628", venue: "central", race: "202603020212", analysis: null } }), noop),
+    );
+    const otherDate = JSON.stringify(
+      renderScreen(buildRaceModel({ ...raceInput({ status: doneRows, result: ready(analysis({ id: 7 })) }), route: { date: "20260629", venue: "central", race: RACE_ID, analysis: null } }), noop),
+    );
+    expect(a).not.toBe(otherRace);
+    expect(a).not.toBe(otherDate);
+    expect(otherRace).toContain('"data-race":"202603020212"');
+    expect(otherDate).toContain('"data-date":"20260629"');
+  });
+
+  it("馬のカード・配分の部分は結果画面と同じ木(共通の `resultSections`。見出しの h2/h3 の違いだけ)。detail の注記・配分なしの注記も同じ", () => {
+    const strip = (n: VNode | string): unknown => (typeof n === "string" ? n : { ...n, tag: n.tag === "h2" || n.tag === "h3" ? "h" : n.tag, children: (n.children ?? []).map(strip), on: undefined });
+    for (const a of [analysis({ id: 7, allocation: ALLOCATION }), analysis({ id: 7, allocation: null, detail: "missing" }), analysis({ id: 7, evEstimated: true, detail: "none" })]) {
+      const screen = resultTree(a);
+      const card = preRaceCard(raceTree(ready(a)));
+      for (const cls of ["horses", "allocation"]) {
+        const inScreen = byClass(screen, cls);
+        const inCard = byClass(card, cls);
+        expect(inScreen, `前提: 結果画面に ${cls}`).toHaveLength(1);
+        expect(inCard, `前提: カードに ${cls}`).toHaveLength(1);
+        expect(strip(inCard[0]!)).toEqual(strip(inScreen[0]!));
+      }
+      // 注記(detail)もカードに出る(結果画面と同じ文)
+      const screenNotices = byClass(screen, "notice").map(textOf);
+      for (const n of screenNotices) {
+        expect(textOf(card)).toContain(n);
+      }
+    }
+    // 対照: detail の注記が実際に出る分析が、上の分析の中にある(空振りでない)
+    expect(textOf(preRaceCard(raceTree(ready(analysis({ id: 7, detail: "missing" })))))).toContain("取得できませんでした");
+    expect(textOf(preRaceCard(raceTree(ready(analysis({ id: 7, detail: "none" })))))).toContain("保存されていません");
+  });
+
+  it("カードの結果の見出し(h3)は、カードの見出し(h2)の下。結果画面の見出し(h2)の階層は変えない", () => {
+    const card = preRaceCard(raceTree(ready(analysis({ id: 7 }))));
+    expect(findAll(card, (n) => n.tag === "h2").map(textOf)).toEqual(["発走前"]);
+    expect(findAll(card, (n) => n.tag === "h3").length).toBeGreaterThanOrEqual(3); // 開閉・馬ごとの評価・配分の提案
+    const screen = resultTree(analysis());
+    expect(findAll(screen, (n) => n.tag === "h2").map(textOf)).toEqual(["馬ごとの評価", "配分の提案(分析時点)"]);
+  });
+});
+
 describe("XSS: 馬名・レース名・エラー文・モデル名・注記の悪意のある文字列は、テキストノードだけになる(許可リストのアダプタを通る)", () => {
   const PAYLOAD = `<img src=x onerror=alert(1)>"><script>alert(2)</script>`;
 
@@ -389,6 +541,19 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
     expect(texts.filter((t) => t.includes("<img")).length).toBeGreaterThanOrEqual(3); // 悪意の文字列は、そのまま(解釈されず)テキストに入っている
   });
 
+  it("レース画面の発走前のカードの結果(馬名・印・モデル名)", () => {
+    const a = analysis({
+      id: 7,
+      model: PAYLOAD,
+      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD }],
+    });
+    const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 7 })], prior: null }, result: { kind: "ready", analysis: a } })), noop);
+    expect(byClass(tree, "horse")).toHaveLength(1); // 前提: カードの中に馬が出ている
+    const { tags, texts } = mountAll(tree);
+    expect(tags.filter((t) => ["img", "script", "svg", "iframe", "style"].includes(t))).toEqual([]);
+    expect(texts.filter((t) => t.includes("<img")).length).toBeGreaterThanOrEqual(3); // 馬名・印・モデル名
+  });
+
   it("結果画面(馬名・レース名・モデル名・印)", () => {
     const a = analysis({
       model: PAYLOAD,
@@ -405,7 +570,8 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
     for (const href of [...hrefs(race), ...hrefs(resultTree(analysis()))]) {
       expect(href.startsWith("#"), href).toBe(true);
     }
-    expect(hrefs(race).length).toBeGreaterThanOrEqual(3);
+    // 戻る・過去の分析(Issue #188 で、発走前の完了のリンク「結果を見る」を廃止したぶん 1 つ減った)
+    expect(hrefs(race).length).toBeGreaterThanOrEqual(2);
     expect(() => mountAll(race)).not.toThrow();
     expect(() => mountAll(resultTree(analysis()))).not.toThrow();
   });

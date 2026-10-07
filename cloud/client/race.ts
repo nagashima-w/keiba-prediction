@@ -1,7 +1,9 @@
 /**
  * レース画面の表示用データ(Issue #185。純関数)。`view.ts` がこれを VNode にする。
  *
- * 見出しの下に「朝の準備」「発走前」の 2 枚のカード(状態・失敗時のエラー文・起動のボタン〈Issue #186〉)。朝が完了していれば prior の順位、発走前が完了していれば「結果を見る」(**リンク=利用者の明示の操作で開く。自動では開かない**)。
+ * 見出しの下に「朝の準備」「発走前」の 2 枚のカード(状態・失敗時のエラー文・起動のボタン〈Issue #186〉)。朝が完了していれば prior の順位、発走前が完了していれば**最新の分析の結果を最初からカードの中に出す**
+ * (Issue #188。旧「結果を見る」のリンクは廃止。結果の画面〈`#analysis=<id>`〉は過去の分析の一覧のリンク用に残る)。
+ * **最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id**(`latestAnalysisIdOf`。取得するかどうか〈`app.ts`〉と表示するかどうかの唯一の判定)。実行中・失敗・未実行のときは出さない(再実行で前の結果を見せない)。
  * その下に過去の分析の一覧(結果の画面へのリンク)。
  * **カードの行は「最新の板」(ポーリング・起動のオーバーレイを反映したもの)から導く**(Issue #186。`app.ts` が `status.rows` に渡す。`status?race_id=` は prior と板の初期値)。
  * 状態(`status?race_id=`)と過去の分析(`GET /api/analyses`)の取得は互いに独立(片方の失敗で、もう片方を隠さない)。
@@ -11,6 +13,7 @@ import type { BoardRow, MorningPriorView, RaceRow, TaskMode, TaskStatus } from "
 import type { PastAnalysis } from "./api-analysis";
 import { formatJstDateTime } from "./date";
 import { badgeOf, pick, type Badge } from "./list";
+import { contentOf, type ResultContent, type ResultSource } from "./result";
 import { buildHash, type Route } from "./route";
 
 export type RaceStatusSource =
@@ -43,7 +46,20 @@ export interface RaceModelInput {
   readonly past: PastSource;
   /** 一覧のキャッシュにあれば、そのレースの行(見出し用。無くても一覧は取りに行かない)。 */
   readonly listRow: RaceRow | undefined;
+  /** 最新の分析(`latestAnalysisIdOf`)の結果のソース(Issue #188)。最新の分析があるのに省略・loading のときは「読み込み中」。最新の分析が無いときは使わない。 */
+  readonly result?: ResultSource;
+  /** 発走前のカードの結果が開いているか(Issue #188)。省略は開(既定)。 */
+  readonly resultOpen?: boolean;
 }
+
+/**
+ * 発走前のカードの中の結果(Issue #188)。読み込み中・失敗は開閉に関係なく出す(失敗を畳みで隠さない)ので、開閉(`open`)は ready だけが持つ。
+ * `date`・`raceId` は開閉のクリック処理に渡す値(`view.ts` が `data-*` にも出す)。
+ */
+export type CardResult =
+  | { readonly kind: "loading" }
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "ready"; readonly content: ResultContent; readonly open: boolean; readonly date: string; readonly raceId: string };
 
 export interface PriorItem {
   readonly rank: number;
@@ -76,8 +92,8 @@ export interface TaskCard {
   readonly badge: Badge;
   /** 失敗のときだけ、板の `error`(サーバが 200 文字に切った診断。テキストノードで描く)。 */
   readonly error: string | null;
-  /** 発走前が完了していて分析 id があるときの、結果の画面へのハッシュ。 */
-  readonly resultHref: string | null;
+  /** 発走前のカードだけ: 最新の分析の結果(最新の分析が無いときは null)。 */
+  readonly result: CardResult | null;
   /** 朝が完了していて prior があるときの順位。 */
   readonly prior: readonly PriorItem[] | null;
 }
@@ -135,14 +151,36 @@ export function runButtonLabel(mode: TaskMode, status: TaskStatus | undefined, s
   }
 }
 
-function card(route: Route, rows: readonly BoardRow[], prior: MorningPriorView | null, mode: TaskMode, run: RunUi | undefined, priorNotice: string | null): TaskCard {
+/**
+ * そのレースの最新の分析 id(板の発走前の行が `done` で `analysisId` があるときだけ。無ければ null)。
+ * `app.ts` が「`GET /api/analyses/{id}` を取るかどうか」に、`buildRaceModel` が「カードに結果を出すかどうか」に、**同じこの関数**を使う(二重に持たない)。
+ */
+export function latestAnalysisIdOf(rows: readonly BoardRow[], raceId: string): number | null {
+  const found = pick(rows, raceId, "pre_race");
+  return found !== undefined && found.status === "done" ? found.analysisId : null;
+}
+
+function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean): CardResult | null {
+  const raceId = route.race!;
+  if (latestAnalysisIdOf(rows, raceId) === null) return null;
+  if (result === undefined || result.kind === "loading") return { kind: "loading" };
+  if (result.kind === "error") return { kind: "error", message: result.message };
+  return { kind: "ready", content: contentOf(result.analysis), open, date: route.date, raceId };
+}
+
+function card(
+  route: Route,
+  rows: readonly BoardRow[],
+  prior: MorningPriorView | null,
+  mode: TaskMode,
+  run: RunUi | undefined,
+  priorNotice: string | null,
+  result: ResultSource | undefined,
+  resultOpen: boolean,
+): TaskCard {
   const raceId = route.race!;
   const found = pick(rows, raceId, mode);
   const failedError = found !== undefined && found.status === "failed" && found.error !== null && found.error !== "" ? found.error.slice(0, ERROR_MAX) : null;
-  const resultHref =
-    mode === "pre_race" && found !== undefined && found.status === "done" && found.analysisId !== null
-      ? buildHash({ date: route.date, venue: route.venue, analysis: found.analysisId })
-      : null;
   const showPrior = mode === "morning" && found !== undefined && found.status === "done" && found.prior && prior !== null;
   const sending = run?.kind === "sending";
   return {
@@ -154,7 +192,7 @@ function card(route: Route, rows: readonly BoardRow[], prior: MorningPriorView |
     title: mode === "morning" ? "朝の準備" : "発走前",
     badge: badgeOf(found),
     error: failedError,
-    resultHref,
+    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen) : null,
     prior: showPrior ? prior.rows.map((r) => ({ rank: r.rank, umaban: r.umaban, name: r.horseName, value: formatPercent(r.prior) })) : null,
   };
 }
@@ -162,13 +200,18 @@ function card(route: Route, rows: readonly BoardRow[], prior: MorningPriorView |
 export function buildRaceModel(input: RaceModelInput): RaceModel {
   const { route, status, past, listRow } = input;
   const prior = status.kind === "ready" ? status.prior : null;
+  const cards =
+    status.kind === "ready"
+      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true))
+      : null;
   return {
     kind: "race",
     title: titleOf(route, listRow, prior),
     backHref: buildHash({ date: route.date, venue: route.venue }),
-    loading: status.kind === "loading" || past.kind === "loading",
+    // 結果の取得中も「更新」を無効にする(取得中の連打で、同じものを同時に 2 本取らない)。
+    loading: status.kind === "loading" || past.kind === "loading" || (cards ?? []).some((c) => c.result?.kind === "loading"),
     statusNotice: status.kind === "error" ? status.message : null,
-    cards: status.kind === "ready" ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null)) : null,
+    cards,
     tracking: input.tracking ?? null,
     past:
       past.kind === "ready"

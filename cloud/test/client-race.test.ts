@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { BoardRow, MorningPriorView, RaceRow } from "../client/api";
-import { buildRaceModel, runButtonLabel, type RaceModelInput, type RunUi } from "../client/race";
+import type { AnalysisDetail } from "../client/api-analysis";
+import { buildRaceModel, latestAnalysisIdOf, runButtonLabel, type RaceModelInput, type RunUi } from "../client/race";
+import { buildResultModel, NO_ALLOCATION_NOTE } from "../client/result";
 import type { Route } from "../client/route";
 
 /**
- * Issue #185: レース画面の表示用データ(純関数)。朝の準備・発走前の 2 枚のカード(状態・失敗時のエラー文・「結果を見る」)・朝の prior の順位・過去の分析のリンク。
- * **「結果を見る」は明示の操作(リンク)で、自動で開かない**。起動のボタン・失敗の注記は Issue #186(下の describe)。
+ * Issue #185: レース画面の表示用データ(純関数)。朝の準備・発走前の 2 枚のカード(状態・失敗時のエラー文)・朝の prior の順位・過去の分析のリンク。
+ * Issue #188: 発走前のカードに、最新の分析の結果(`card.result`)を最初から出す(旧「結果を見る」のリンクは廃止)。起動のボタン・失敗の注記は Issue #186(下の describe)。
  */
 
 const RACE_ID = "202603020211";
@@ -58,7 +60,7 @@ describe("カード(朝の準備・発走前)の状態: (race_id, mode) で板�
     expect(morning!.error).toBeNull();
     expect(preRace!.title).toBe("発走前");
     expect(preRace!.badge).toEqual({ label: "待ち", tone: "wait" });
-    expect(preRace!.resultHref).toBeNull(); // queued なので結果は無い。別レースの analysis_id(99)を拾わない
+    expect(preRace!.result).toBeNull(); // queued なので結果は無い。別レースの analysis_id(99)を拾わない
   });
 
   it("行が無ければ「未実行」。2 枚のカードは常に morning → pre_race の順", () => {
@@ -96,21 +98,107 @@ describe("カード(朝の準備・発走前)の状態: (race_id, mode) で板�
   });
 });
 
-describe("「結果を見る」(発走前が完了し、分析 id があるときだけ。リンクの href は buildHash の結果)", () => {
-  it("発走前が done で analysisId があれば、結果の画面へのハッシュ(日付・区分を保つ)", () => {
-    const [, preRace] = cards(buildRaceModel(input({ route: { ...ROUTE, venue: "nar" }, status: { kind: "ready", rows: [row(RACE_ID, "pre_race", "done", { analysisId: 12 })], prior: null } })));
-    expect(preRace!.resultHref).toBe("#date=20260628&venue=nar&analysis=12");
+const ANALYSIS: AnalysisDetail = {
+  id: 12,
+  raceId: RACE_ID,
+  analyzedAt: "2026-06-28T05:00:00.000Z",
+  kaisaiDate: "20260628",
+  evEstimated: false,
+  model: null,
+  race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
+  horses: [
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null },
+    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.1, placeOddsMin: null, ev: null, isPositive: false, mark: "◎", reason: null },
+  ],
+  allocation: null,
+  detail: "present",
+};
+
+describe("最新の分析 id(`latestAnalysisIdOf`。取得するかどうか・カードに出すかどうかの唯一の判定。旧「結果を見る」の出す条件を引き継ぐ)", () => {
+  it("そのレースの発走前が done で analysisId があれば、その id", () => {
+    expect(latestAnalysisIdOf([row(RACE_ID, "pre_race", "done", { analysisId: 12 })], RACE_ID)).toBe(12);
   });
 
-  it("完了でも analysisId が null なら出さない。完了以外(待ち・取得済み・失敗)で analysisId が残っていても出さない。朝のカードには出さない", () => {
-    const done = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "pre_race", "done", { analysisId: null })], prior: null } })))[1]!;
-    expect(done.resultHref).toBeNull();
+  it("完了でも analysisId が null なら null。完了以外(待ち・取得済み・失敗)で analysisId が残っていても null。朝の行の id は使わない。行が無ければ null", () => {
+    expect(latestAnalysisIdOf([row(RACE_ID, "pre_race", "done", { analysisId: null })], RACE_ID)).toBeNull();
     for (const status of ["queued", "fetched", "failed"] as const) {
-      const card = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "pre_race", status, { analysisId: 5 })], prior: null } })))[1]!;
-      expect(card.resultHref, status).toBeNull();
+      expect(latestAnalysisIdOf([row(RACE_ID, "pre_race", status, { analysisId: 5 })], RACE_ID), status).toBeNull();
     }
-    const morning = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", "done", { analysisId: 5, prior: true })], prior: null } })))[0]!;
-    expect(morning.resultHref).toBeNull();
+    expect(latestAnalysisIdOf([row(RACE_ID, "morning", "done", { analysisId: 5, prior: true })], RACE_ID)).toBeNull();
+    expect(latestAnalysisIdOf([], RACE_ID)).toBeNull();
+  });
+
+  it("別のレースの行の id を拾わない(2 レースが混ざる板で、自分のレースの id だけ)", () => {
+    const rows = [row(OTHER_RACE_ID, "pre_race", "done", { analysisId: 99 }), row(RACE_ID, "pre_race", "done", { analysisId: 12 }), row(RACE_ID, "morning", "done", { analysisId: 77 })];
+    expect(latestAnalysisIdOf(rows, RACE_ID)).toBe(12);
+    expect(latestAnalysisIdOf(rows, OTHER_RACE_ID)).toBe(99);
+    expect(latestAnalysisIdOf([row(OTHER_RACE_ID, "pre_race", "done", { analysisId: 99 })], RACE_ID)).toBeNull();
+  });
+});
+
+describe("カードの結果(`card.result`。発走前のカードだけ。最新の分析があるときだけ)", () => {
+  const doneRows = (id: number | null = 12): { kind: "ready"; rows: BoardRow[]; prior: null } => ({ kind: "ready", rows: [row(RACE_ID, "morning", "done", { prior: true, analysisId: 3 }), row(RACE_ID, "pre_race", "done", { analysisId: id })], prior: null });
+
+  it("最新の分析が無ければ(未実行・実行中・失敗・id なし)null。朝のカードは常に null(朝の行に analysisId があっても)", () => {
+    for (const status of ["queued", "fetched", "failed"] as const) {
+      const [morning, preRace] = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", "done", { prior: true, analysisId: 3 }), row(RACE_ID, "pre_race", status, { analysisId: 12 })], prior: null }, result: { kind: "ready", analysis: ANALYSIS } })));
+      expect(morning!.result, status).toBeNull();
+      expect(preRace!.result, status).toBeNull();
+    }
+    const [morning, preRace] = cards(buildRaceModel(input({ status: doneRows(null), result: { kind: "ready", analysis: ANALYSIS } })));
+    expect(morning!.result).toBeNull();
+    expect(preRace!.result).toBeNull();
+  });
+
+  it("最新の分析があり、結果のソースがまだ無い・取得中なら loading。このとき画面は「読み込み中」(更新を無効にする)", () => {
+    for (const result of [undefined, { kind: "loading" } as const]) {
+      const model = buildRaceModel(input({ status: doneRows(), ...(result === undefined ? {} : { result }) }));
+      expect(cards(model)[1]!.result).toEqual({ kind: "loading" });
+      expect(model.loading).toBe(true);
+    }
+  });
+
+  it("結果の取得に失敗したら、固定の文言(error)。サーバの文面は持たない。更新は押せる(loading でない)", () => {
+    const model = buildRaceModel(input({ status: doneRows(), result: { kind: "error", message: "分析を取得できません" } }));
+    expect(cards(model)[1]!.result).toEqual({ kind: "error", message: "分析を取得できません" });
+    expect(model.loading).toBe(false);
+  });
+
+  it("取得できたら ready。内容は結果画面と同じ変換(`buildResultModel` の content)。既定は開(open: true)。date・raceId を持つ(開閉の引数)", () => {
+    const model = buildRaceModel(input({ status: doneRows(), result: { kind: "ready", analysis: ANALYSIS } }));
+    const result = cards(model)[1]!.result;
+    expect(result?.kind).toBe("ready");
+    if (result?.kind !== "ready") return;
+    expect(result.open).toBe(true);
+    expect([result.date, result.raceId]).toEqual(["20260628", RACE_ID]);
+    const same = buildResultModel({ route: ROUTE, source: { kind: "ready", analysis: ANALYSIS } }).content;
+    expect(same, "前提: 結果画面の内容が出る").not.toBeNull();
+    expect(result.content).toEqual(same);
+    expect(result.content.horses.map((x) => x.umaban)).toEqual([1, 2]);
+    expect(result.content.horses[1]!.mark).toBe("◎");
+    expect(result.content.allocation.notices).toEqual([NO_ALLOCATION_NOTE]);
+    expect(model.loading).toBe(false);
+  });
+
+  it("resultOpen: false なら open: false(内容は持つ)。開閉は取得を伴わない(content は同じ)", () => {
+    const open = cards(buildRaceModel(input({ status: doneRows(), result: { kind: "ready", analysis: ANALYSIS } })))[1]!.result;
+    const closed = cards(buildRaceModel(input({ status: doneRows(), result: { kind: "ready", analysis: ANALYSIS }, resultOpen: false })))[1]!.result;
+    expect(open?.kind === "ready" && open.open).toBe(true);
+    expect(closed?.kind).toBe("ready");
+    if (closed?.kind !== "ready" || open?.kind !== "ready") return;
+    expect(closed.open).toBe(false);
+    expect(closed.content).toEqual(open.content);
+  });
+
+  it("状態の取得中・失敗(cards が null)なら、結果を取得中でも model.loading は状態の取得に従う(結果のカードは出ない)", () => {
+    const model = buildRaceModel(input({ status: { kind: "error", message: "x" }, result: { kind: "loading" } }));
+    expect(model.cards).toBeNull();
+    expect(model.loading).toBe(false);
+  });
+
+  it("レース画面のモデルに「結果を見る」のリンク(resultHref)は無い", () => {
+    const [, preRace] = cards(buildRaceModel(input({ status: doneRows(), result: { kind: "ready", analysis: ANALYSIS } })));
+    expect(Object.keys(preRace!)).not.toContain("resultHref");
   });
 });
 

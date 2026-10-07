@@ -19,7 +19,15 @@
  *    追跡の開始: 起動の 202・409、画面を開いたとき(初めて取った板)に queued・fetched がある、手動の「更新」・「状態を更新」(停止中なら再開)。ポーリングの結果は追跡を再開しない。
  *  - 板は `board-state.ts`(開催日ごとの行・通し番号・オーバーレイ・完了の検知)に持つ。レース画面のカードの行は最新の板から導く(`status?race_id=` は prior と板の初期値)。
  *  - 完了への遷移(同じ完了は 1 回): 朝は prior(`status?race_id=`)、発走前は過去の分析を取り直す(そのレースの画面にいれば取り直し、いなければキャッシュを捨てて、開いたときに取る)。
- *  - `/api/analyses/{id}`・`/api/races`・`status?race_id=`(完了時の取り直しを除く)は、ポーリングで呼ばない。
+ *  - `/api/analyses/{id}`・`/api/races`・`status?race_id=`(完了時の取り直しを除く)は、ポーリングの周期では呼ばない(`/api/analyses/{id}` は、レース画面で発走前の完了を検知したとき、新しい id を 1 回だけ。下の Issue #188)。
+ *
+ * **Issue #188(発走前の結果をレース画面のカードの中に出す)**:
+ *  - 最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id(`race.ts` の `latestAnalysisIdOf`。取る・出すの判定は同じ関数)。
+ *  - 取得は `loadAnalysis`(id ごとに 1 回。結果画面と**同じキャッシュ・同じ 3 つの門**〈`analyses`・`analysisErrors`・`analysisInflight`〉)。再描画・ポーリング・hashchange の連打では増えない。失敗は自動で再試行しない。
+ *  - 取るのは `syncLatestAnalysis`(冪等)を呼ぶ 2 箇所だけ: ① `ensureLoaded`(画面を開いたとき・戻ったとき=状態がキャッシュ済みで、他の画面にいる間に完了していた場合を含む)
+ *    ② `applyBoard`(状態の取得の成功・ポーリング・板の取得。完了への遷移もここ)。**`render()` からは取らない**(描画が取得を起こす構造にしない)。
+ *  - レース画面の「更新」は、**失敗した最新の分析だけ**を取り直す(成功した分析は取り直さない=R2 の操作回数)。取得中の「更新」は無視する。
+ *  - 結果の開閉(`resultOpen`)は (開催日, race_id) ごとにメモリに持つ(#187 と同じ。既定は開・ハッシュ/localStorage には持たない・「更新」で消さない)。
  */
 import { failureMessage, fetchBoard, fetchRaces, fetchRaceStatus, type BoardRow, type FetchLike, type MorningPriorView, type RaceRow, type TaskMode } from "./api";
 import { fetchAnalysis, fetchPastAnalyses, type AnalysisDetail, type PastAnalysis } from "./api-analysis";
@@ -27,7 +35,7 @@ import { postRun, runFailureMessage, type RunOutcome } from "./api-run";
 import { createBoardStore, type BoardCompletion } from "./board-state";
 import { inputToYmd, todayJst } from "./date";
 import { buildListModel, type BoardSource, type ListSource } from "./list";
-import { buildRaceModel, type PastSource, type RaceStatusSource, type RunUi } from "./race";
+import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource, type RunUi } from "./race";
 import { buildResultModel, type ResultSource } from "./result";
 import { buildHash, parseHash, type Route, type Venue } from "./route";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
@@ -102,6 +110,8 @@ export function createApp(deps: AppDeps): App {
   const pastErrors = new Map<string, string>();
   const pastInflight = new Map<string, Promise<void>>();
   const pastRefetchPending = new Set<string>();
+  /** 発走前のカードの結果の開閉(Issue #188)。(開催日, race_id) ごとに、利用者が押した値だけを持つ(既定は開)。 */
+  const resultOpenChoices = new Map<string, boolean>();
   const analyses = new Map<number, AnalysisDetail>();
   const analysisErrors = new Map<number, string>();
   const analysisInflight = new Map<number, Promise<void>>();
@@ -179,7 +189,7 @@ export function createApp(deps: AppDeps): App {
     return runs;
   }
 
-  const actions = { onDateChange, onRefresh, onToggleGroup, onRun, onRetrack };
+  const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack };
 
   function render(force = false): void {
     if (route.analysis !== null) {
@@ -187,8 +197,22 @@ export function createApp(deps: AppDeps): App {
     } else if (route.race !== null) {
       const key = raceKey(route.date, route.race);
       const listRow = races.get(listKey(route.date, route.venue))?.find((r) => r.raceId === route.race);
+      const status = raceStatusSource(key, route.date);
+      const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, route.race) : null;
       deps.render(
-        renderScreen(buildRaceModel({ route, status: raceStatusSource(key, route.date), past: pastSource(key), listRow, runs: runsFor(route.date, route.race), tracking: trackingNotice() }), actions),
+        renderScreen(
+          buildRaceModel({
+            route,
+            status,
+            past: pastSource(key),
+            listRow,
+            runs: runsFor(route.date, route.race),
+            tracking: trackingNotice(),
+            ...(latestId === null ? {} : { result: analysisSource(latestId) }),
+            resultOpen: resultOpenChoices.get(key) ?? true,
+          }),
+          actions,
+        ),
         force,
       );
     } else {
@@ -213,6 +237,7 @@ export function createApp(deps: AppDeps): App {
       if (completion.mode === "morning" && completion.raceId === priorFreshFor) continue;
       onCompleted(completion);
     }
+    syncLatestAnalysis();
   }
 
   function onCompleted(c: BoardCompletion): void {
@@ -327,6 +352,18 @@ export function createApp(deps: AppDeps): App {
     analysisInflight.set(id, promise);
   }
 
+  /**
+   * レース画面の最新の分析(Issue #188)を、無ければ取りに行く。冪等(`loadAnalysis` の 3 つの門)。状態が取れていない・最新の分析が無い(未実行・実行中・失敗・id なし)ときは何もしない。
+   * 呼ぶのは `ensureLoaded` と `applyBoard` だけ(`render()` からは呼ばない)。
+   */
+  function syncLatestAnalysis(): void {
+    if (route.analysis !== null || route.race === null) return;
+    const status = raceStatusSource(raceKey(route.date, route.race), route.date);
+    if (status.kind !== "ready") return;
+    const id = latestAnalysisIdOf(status.rows, route.race);
+    if (id !== null) loadAnalysis(id);
+  }
+
   /** 今の画面に必要なものを、無ければ取りに行く。結果画面は分析 1 本だけ・レース画面は状態と過去の分析だけ(一覧・板は取らない)。 */
   function ensureLoaded(): void {
     if (route.analysis !== null) {
@@ -334,6 +371,7 @@ export function createApp(deps: AppDeps): App {
     } else if (route.race !== null) {
       loadRaceStatus(route.date, route.race);
       loadPast(route.date, route.race);
+      syncLatestAnalysis();
     } else {
       loadRaces(route.date, route.venue);
       loadBoard(route.date);
@@ -442,6 +480,12 @@ export function createApp(deps: AppDeps): App {
     render();
   }
 
+  function onToggleResult(date: string, raceId: string, open: boolean): void {
+    // 取得は起こさず、描画だけ。
+    resultOpenChoices.set(raceKey(date, raceId), open);
+    render();
+  }
+
   function onRefresh(): void {
     if (route.analysis !== null) {
       // 失敗した分析だけを取り直す(成功した分析は再取得しない=R2 の操作回数を使わない)。取得中は何もしない。
@@ -454,7 +498,11 @@ export function createApp(deps: AppDeps): App {
     }
     if (route.race !== null) {
       const key = raceKey(route.date, route.race);
-      if (raceStatusInflight.has(key) || pastInflight.has(key)) return;
+      const status = raceStatusSource(key, route.date);
+      const latestId = status.kind === "ready" ? latestAnalysisIdOf(status.rows, route.race) : null;
+      if (raceStatusInflight.has(key) || pastInflight.has(key) || (latestId !== null && analysisInflight.has(latestId))) return;
+      // 失敗した最新の分析だけを取り直す(成功した分析は再取得しない=R2 の操作回数を使わない)。状態の取り直しが済むと `applyBoard` が取る。
+      if (latestId !== null) analysisErrors.delete(latestId);
       raceStatuses.delete(key);
       raceStatusErrors.delete(key);
       priorNotices.delete(key);

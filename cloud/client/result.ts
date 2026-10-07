@@ -97,7 +97,8 @@ function allocationOf(a: AnalysisDetail): AllocationSection {
   return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows };
 }
 
-function contentOf(a: AnalysisDetail): ResultContent {
+/** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。 */
+export function contentOf(a: AnalysisDetail): ResultContent {
   return {
     title: titleOf(a),
     analyzedAt: formatJstDateTime(a.analyzedAt),

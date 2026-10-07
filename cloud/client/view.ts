@@ -1,12 +1,13 @@
 /**
  * 画面の VNode(Issue #184。純関数)。表示用データ(`list.ts`・`race.ts`〈#185〉・`result.ts`〈#185〉)を、DOM に依存しない木にする。
  * 文字列の子は、アダプタ(`dom.ts`)がテキストノードにする(外から来た文字列が HTML として解釈されない)。
+ * Issue #188: 発走前のカードの中に最新の分析の結果を出す。馬ごと・配分の部分は結果画面と共通の `resultSections`(見出しの階層だけ違う)。
  * #185 で足した画面は、#184 の要素・属性の許可リスト(`dom.ts`)の範囲だけで組む(新しい要素・属性は足していない。一覧は `ul`、強調は class と文字)。
  */
 import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
-import type { RaceModel, TaskCard } from "./race";
-import type { HorseCard, ResultModel } from "./result";
+import type { CardResult, RaceModel, TaskCard } from "./race";
+import type { HorseCard, ResultContent, ResultModel } from "./result";
 import { h, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -15,6 +16,8 @@ export interface ViewActions {
   readonly onRefresh: () => void;
   /** 場の見出しのタップ(Issue #187)。`open` は押したあとの状態(今の逆)。 */
   readonly onToggleGroup: (key: string, open: boolean) => void;
+  /** 発走前のカードの結果の見出しのタップ(Issue #188)。引数は見出しの `data-date`・`data-race` と同じ値。`open` は押したあとの状態(今の逆)。 */
+  readonly onToggleResult: (date: string, raceId: string, open: boolean) => void;
   /** 起動のボタン(Issue #186)。引数(開催日・レース・モード)は、ボタンの `data-*` と同じ値。 */
   readonly onRun: (date: string, raceId: string, mode: TaskMode) => void;
   /** 追跡の停止の注記の「状態を更新」(Issue #186)。 */
@@ -111,6 +114,40 @@ function runButton(button: TaskCard["button"], actions: ViewActions): VNode {
   );
 }
 
+/** 見出しの文字(開閉が色だけに頼らず分かるよう ▾/▸ を付ける)。 */
+const resultHeadingText = (open: boolean): string => `${open ? "▾" : "▸"} 分析の結果`;
+
+/**
+ * 発走前のカードの結果(Issue #188)。読み込み中・失敗は開閉に関係なく出す。開閉の見出しは ready のときだけ(`h3` の中のボタン。`<details>` は使わない=#187 と同じ理由)。
+ * **クリック処理に渡す値は `data-date`・`data-race` にも出す**(`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されない)。
+ */
+function cardResult(result: CardResult, actions: ViewActions): VNode {
+  if (result.kind === "loading") {
+    return h("p", { class: "card-note" }, ["結果を読み込み中…"]);
+  }
+  if (result.kind === "error") {
+    return h("p", { class: "card-error", role: "alert" }, [`${result.message}(「更新」で再取得できます)`]);
+  }
+  const { content, open, date, raceId } = result;
+  const toggle = h(
+    "button",
+    { class: "result-toggle", "aria-expanded": open ? "true" : "false", "data-date": date, "data-race": raceId },
+    [resultHeadingText(open)],
+    { click: () => actions.onToggleResult(date, raceId, !open) },
+  );
+  return h("section", { class: "card-result" }, [
+    h("h3", {}, [toggle]),
+    ...(open
+      ? [
+          h("p", { class: "meta" }, [`分析時刻: ${content.analyzedAt}`]),
+          h("p", { class: "meta" }, [`分析モデル: ${content.model}`]),
+          ...(content.detailNote === null ? [] : [h("p", { class: "notice" }, [content.detailNote])]),
+          ...resultSections(content, "h3"),
+        ]
+      : []),
+  ]);
+}
+
 function taskCard(card: TaskCard, actions: ViewActions): VNode {
   return h("section", { class: "card" }, [
     h("h2", {}, [card.title]),
@@ -120,7 +157,7 @@ function taskCard(card: TaskCard, actions: ViewActions): VNode {
     ...(card.runInfo === null ? [] : [h("p", { class: "card-note" }, [card.runInfo])]),
     ...(card.priorNotice === null ? [] : [h("p", { class: "card-note" }, [card.priorNotice])]),
     ...(card.prior === null ? [] : [h("ul", { class: "prior" }, card.prior.map(priorRow))]),
-    ...(card.resultHref === null ? [] : [h("a", { class: "result-link", href: card.resultHref }, ["結果を見る"])]),
+    ...(card.result === null ? [] : [cardResult(card.result, actions)]),
     runButton(card.button, actions),
   ]);
 }
@@ -165,6 +202,33 @@ function horseCard(horse: HorseCard): VNode {
   ]);
 }
 
+/**
+ * 結果の「馬ごとの評価」と「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
+ * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
+ */
+function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
+  const allocation = content.allocation;
+  return [
+    h("section", { class: "horses" }, [h(heading, {}, ["馬ごとの評価"]), h("ul", { class: "horse-list" }, content.horses.map(horseCard))]),
+    h("section", { class: "allocation" }, [
+      h(heading, {}, ["配分の提案(分析時点)"]),
+      ...allocation.notices.map((n) => h("p", { class: "notice" }, [n])),
+      ...(allocation.bets.length === 0
+        ? []
+        : [
+            h(
+              "ul",
+              { class: "bets" },
+              allocation.bets.map((b) =>
+                h("li", { class: "bet" }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]),
+              ),
+            ),
+          ]),
+      ...(allocation.settingsRows.length === 0 ? [] : [h("ul", { class: "settings" }, allocation.settingsRows.map((r) => h("li", {}, [h("small", {}, [r])])))]),
+    ]),
+  ];
+}
+
 function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["戻る"]),
@@ -185,28 +249,8 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
     if (content.detailNote !== null) {
       body.push(h("p", { class: "notice" }, [content.detailNote]));
     }
-    body.push(h("section", { class: "horses" }, [h("h2", {}, ["馬ごとの評価"]), h("ul", { class: "horse-list" }, content.horses.map(horseCard))]));
-    const allocation = content.allocation;
-    body.push(
-      h("section", { class: "allocation" }, [
-        h("h2", {}, ["配分の提案(分析時点)"]),
-        ...allocation.notices.map((n) => h("p", { class: "notice" }, [n])),
-        ...(allocation.bets.length === 0
-          ? []
-          : [
-              h(
-                "ul",
-                { class: "bets" },
-                allocation.bets.map((b) =>
-                  h("li", { class: "bet" }, [h("strong", {}, [b.betTypeLabel]), h("span", {}, [b.comboLabel]), h("span", {}, [b.stake]), h("small", {}, [`オッズ ${b.odds}・EV ${b.ev}`])]),
-                ),
-              ),
-            ]),
-        ...(allocation.settingsRows.length === 0 ? [] : [h("ul", { class: "settings" }, allocation.settingsRows.map((r) => h("li", {}, [h("small", {}, [r])])))]),
-      ]),
-    );
-  }
-  return h("div", { class: "screen" }, [controls, ...body]);
+    body.push(...resultSections(content, "h2"));
+  }  return h("div", { class: "screen" }, [controls, ...body]);
 }
 
 export function renderScreen(model: ListModel | RaceModel | ResultModel, actions: ViewActions): VNode {

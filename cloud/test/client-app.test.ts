@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../client/api";
 import { createApp, type App } from "../client/app";
 import type { VNode } from "../client/vnode";
+import { deferred } from "./client-fakes";
 
 /**
  * Issue #184: 一覧の画面の制御(取得・メモリキャッシュ・遷移)。偽の fetch・偽のハッシュ・描画の記録。
@@ -55,6 +56,13 @@ const analysisBody = (over: Record<string, unknown> = {}) => ({
     ...over,
   },
 });
+
+/** 実時間の待ちを使わず、保留中の非同期の後始末だけを流す(有限回)。 */
+async function timersFlush(): Promise<void> {
+  for (let i = 0; i < 3; i += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
 
 function textOf(node: VNode | string): string {
   if (typeof node === "string") return node;
@@ -197,37 +205,40 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     expect(h.text()).toContain("開催はありません");
   });
 
-  it("一覧からレースの行へ進むと、レース画面の取得(状態・過去の分析)だけが増える。一覧へ戻っても取り直さない。レース画面は一覧のキャッシュから見出しを作る", async () => {
+  it("一覧からレースの行へ進むと、レース画面の取得(状態・過去の分析・最新の分析〈Issue #188〉)だけが増える。一覧へ戻っても取り直さない。レース画面は一覧のキャッシュから見出しを作る", async () => {
     const h = harness(`#date=${DATE}&venue=central`);
     h.app.start();
     await h.app.whenIdle();
     const before = h.calls.length;
     h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     await h.app.whenIdle();
-    expect(h.calls.slice(before).sort()).toEqual([PAST, RACE_STATUS].sort());
+    expect(h.calls.slice(before).sort()).toEqual([ANALYSIS_5, PAST, RACE_STATUS].sort());
     expect(h.text()).toContain("福島民報杯");
     expect(h.text()).toContain("朝の準備");
     h.go(`#date=${DATE}&venue=central`);
     await h.app.whenIdle();
-    expect(h.calls).toHaveLength(before + 2);
+    expect(h.calls).toHaveLength(before + 3);
     expect(h.text()).toContain("福島12R");
     h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     await h.app.whenIdle();
-    expect(h.calls).toHaveLength(before + 2); // レース画面に戻っても取り直さない
+    expect(h.calls).toHaveLength(before + 3); // レース画面に戻っても取り直さない(最新の分析も)
   });
 
-  it("race 付きのハッシュで直接開くと、状態(race_id つき)と過去の分析の 2 本だけを取る。一覧(netkeiba に出る)・板(race_id なし)・分析の詳細・POST は呼ばない", async () => {
+  it("race 付きのハッシュで直接開くと、状態(race_id つき)・過去の分析・最新の分析(発走前が完了している行の id。Issue #188)の 3 本だけを取る。一覧(netkeiba に出る)・板(race_id なし)・POST は呼ばない", async () => {
     const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     h.app.start();
     await h.app.whenIdle();
-    expect(h.calls.sort()).toEqual([PAST, RACE_STATUS].sort());
+    expect(h.calls.sort()).toEqual([ANALYSIS_5, PAST, RACE_STATUS].sort());
     expect(h.text()).toContain("朝の準備");
     expect(h.text()).toContain("発走前");
     expect(h.text()).toContain("1位"); // 朝が完了・prior あり → 順位
-    expect(findAll(h.tree(), (n) => n.tag === "a" && textOf(n).includes("結果を見る"))[0]!.attrs?.["href"]).toBe(`#date=${DATE}&venue=central&analysis=5`);
+    // 結果は最初からカードの中に出る(「結果を見る」のリンクは無い)。結果画面(analysis=)へのリンクは過去の分析の一覧だけ
+    expect(findAll(h.tree(), (n) => n.tag === "a" && textOf(n).includes("結果を見る"))).toHaveLength(0);
+    expect(h.text()).toContain("アルファ");
     expect(findAll(h.tree(), (n) => n.tag === "a" && n.attrs?.["class"] === "past-link").map((n) => n.attrs?.["href"])).toEqual([`#date=${DATE}&venue=central&analysis=5`]);
-    // 「結果を見る」は明示の操作(リンク)で、自動で結果画面を開かない
-    expect(h.calls.filter((u) => /^\/api\/analyses\/\d/.test(u))).toEqual([]);
+    expect(findAll(h.tree(), (n) => n.tag === "a" && String(n.attrs?.["href"]).includes("analysis=")).map((n) => n.attrs?.["class"])).toEqual(["past-link"]);
+    // 最新の分析は 1 回だけ。自動で結果画面(ハッシュ)へ移らない
+    expect(h.calls.filter((u) => /^\/api\/analyses\/\d/.test(u))).toEqual([ANALYSIS_5]);
     expect(h.hashes).toEqual([]);
   });
 
@@ -353,7 +364,9 @@ describe("レース画面の失敗・更新", () => {
     await h.app.whenIdle();
     h.go(`#date=${OTHER}&venue=central&race=${RACE_ID}`);
     await h.app.whenIdle();
-    expect(h.calls).toHaveLength(4);
+    // 1 つ目の日: 状態・過去の分析・最新の分析(Issue #188。発走前が完了)。2 つ目の日: 状態・過去の分析(発走前の行が無いので、分析は取らない)
+    expect(h.calls).toHaveLength(5);
+    expect(h.calls.filter((u) => u === ANALYSIS_5)).toHaveLength(1);
     expect(h.text()).toContain("失敗");
     expect(h.text()).not.toContain("1位");
   });
@@ -668,5 +681,256 @@ describe("場ごとの開閉(#187)", () => {
     expect(toggles(h).map(textOf).join(" ")).not.toContain("失敗");
     // Issue #186(ユーザーの依頼): 見出しにレース数(旧版は `2R`)は出さない。要約が無ければ「▸ 場名」だけ
     expect(toggles(h).map(textOf)).toEqual(["▸ 函館", "▸ 福島"]);
+  });
+});
+
+/**
+ * Issue #188: 発走前の結果をレース画面のカードの中に最初から出す。
+ * 守ること: 取得は `GET /api/analyses/{id}`(R2 の Class B +1)を、最新の分析 id(板の発走前の行が done で analysis_id あり)ごとに 1 回。
+ * 再描画・hashchange の連打・往復・開閉・取得中の再要求で増えない/失敗は自動で再試行しない/「更新」は失敗した分析だけ取り直す/結果画面とキャッシュを共有する。
+ * (ポーリング・完了への遷移の検査は client-app-run.test.ts)
+ */
+describe("発走前の結果をカードの中に出す(Issue #188)", () => {
+  const RACE_HASH = `#date=${DATE}&venue=central&race=${RACE_ID}`;
+  const analysisGets = (h: Harness): string[] => h.calls.filter((u) => /^\/api\/analyses\/\d+$/.test(u));
+  const preRaceCard = (h: Harness): VNode => findAll(h.tree(), (n) => n.attrs?.["class"] === "card")[1]!;
+  const horsesIn = (node: VNode): VNode[] => findAll(node, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes("horse"));
+  const refreshButton = (h: Harness): VNode => findAll(h.tree(), (n) => n.tag === "button" && String(n.attrs?.["class"]) === "refresh")[0]!;
+  const toggleButton = (h: Harness): VNode => findAll(h.tree(), (n) => String(n.attrs?.["class"]) === "result-toggle")[0]!;
+  const failResp = { status: 503, json: async () => ({ ok: false, error: { type: "d1-error", message: "秘密の文面" } }) };
+
+  it("開いたとき最新の分析を 1 回だけ取り、カードの中に最初から出す(タップで展開する方式ではない)。分析時刻・モデル・馬ごとの表示・配分の注記つき", async () => {
+    const h = harness(RACE_HASH);
+    h.app.start();
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toEqual([ANALYSIS_5]);
+    const card = preRaceCard(h);
+    expect(horsesIn(card)).toHaveLength(1);
+    expect(textOf(card)).toContain("アルファ");
+    expect(textOf(card)).toContain("3着内率 20.0%");
+    expect(textOf(card)).toContain("EVプラス");
+    expect(textOf(card)).toContain("分析時刻: 2026-06-28 14:00");
+    expect(textOf(card)).toContain("配分の記録がありません");
+    expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("true"); // 既定は開
+    expect(horsesIn(findAll(h.tree(), (n) => n.attrs?.["class"] === "card")[0]!)).toHaveLength(0); // 朝のカードには出ない
+  });
+
+  it("取得中は「読み込み中」と更新の無効化。届いたら馬が出て、更新が押せる", async () => {
+    const h = harness(RACE_HASH);
+    const gate = deferred<Resp>();
+    h.responders.set(ANALYSIS_5, () => gate.promise);
+    h.app.start();
+    await timersFlush();
+    expect(textOf(preRaceCard(h))).toContain("読み込み中");
+    expect(horsesIn(preRaceCard(h))).toHaveLength(0);
+    expect(refreshButton(h).attrs?.["disabled"]).toBe(true);
+    gate.resolve(ok(analysisBody()));
+    await h.app.whenIdle();
+    expect(horsesIn(preRaceCard(h))).toHaveLength(1);
+    expect(refreshButton(h).attrs?.["disabled"]).toBe(false);
+  });
+
+  it("再描画・同じ hashchange の連打・往復・他のレースとの往復・開閉では、取り直さない(1 回のまま)", async () => {
+    const h = harness(RACE_HASH);
+    h.app.start();
+    await h.app.whenIdle();
+    for (let i = 0; i < 5; i += 1) h.go(RACE_HASH);
+    await h.app.whenIdle();
+    h.go(`#date=${DATE}&venue=central`);
+    await h.app.whenIdle();
+    h.go(`#analysis=5`);
+    await h.app.whenIdle();
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    toggleButton(h).on!.click!();
+    toggleButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toEqual([ANALYSIS_5]);
+    expect(horsesIn(preRaceCard(h))).toHaveLength(1); // 往復のあとも出ている(キャッシュから)
+  });
+
+  it("取得中に hashchange・描画を重ねても、取得は 1 本", async () => {
+    const h = harness(RACE_HASH);
+    const gate = deferred<Resp>();
+    h.responders.set(ANALYSIS_5, () => gate.promise);
+    h.app.start();
+    await timersFlush();
+    for (let i = 0; i < 4; i += 1) h.go(RACE_HASH);
+    await timersFlush();
+    expect(analysisGets(h)).toEqual([ANALYSIS_5]);
+    gate.resolve(ok(analysisBody()));
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toEqual([ANALYSIS_5]);
+  });
+
+  it("結果画面(#analysis=5)とキャッシュを共有する: 結果画面で取ったあとのレース画面は取らない。逆も同じ", async () => {
+    const a = harness(`#analysis=5`);
+    a.app.start();
+    await a.app.whenIdle();
+    a.go(RACE_HASH);
+    await a.app.whenIdle();
+    expect(analysisGets(a)).toEqual([ANALYSIS_5]);
+    expect(horsesIn(preRaceCard(a))).toHaveLength(1);
+
+    const b = harness(RACE_HASH);
+    b.app.start();
+    await b.app.whenIdle();
+    b.go(`#analysis=5`);
+    await b.app.whenIdle();
+    expect(analysisGets(b)).toEqual([ANALYSIS_5]);
+    expect(b.text()).toContain("福島11R テストステークス");
+  });
+
+  const notLatest: readonly [string, Record<string, unknown>[]][] = [
+    ["未実行(発走前の行が無い)", [boardRow(RACE_ID, "morning", "done", { prior: true, analysis_id: 3 })]],
+    ["待ち(queued。analysis_id が残っていても)", [boardRow(RACE_ID, "pre_race", "queued", { analysis_id: 5 })]],
+    ["取得済み(fetched)", [boardRow(RACE_ID, "pre_race", "fetched", { analysis_id: 5 })]],
+    ["失敗(failed)", [boardRow(RACE_ID, "pre_race", "failed", { analysis_id: 5, error: "x" })]],
+    ["完了だが analysis_id が無い", [boardRow(RACE_ID, "pre_race", "done", { analysis_id: null })]],
+    ["別のレースの発走前だけが完了", [boardRow("202603020212", "pre_race", "done", { analysis_id: 5 })]],
+  ];
+  for (const [name, rows] of notLatest) {
+    it(`最新の分析が無い状態(${name})では、取得しない。カードに結果は出ない`, async () => {
+      const h = harness(RACE_HASH);
+      h.responders.set(RACE_STATUS, async () => ok(raceStatusBody(rows as ReturnType<typeof boardRow>[])));
+      h.app.start();
+      await h.app.whenIdle();
+      expect(h.calls.sort()).toEqual([PAST, RACE_STATUS].sort()); // 前提: 状態は取れて(カードが出て)いる
+      expect(findAll(h.tree(), (n) => n.attrs?.["class"] === "card")).toHaveLength(2);
+      expect(horsesIn(h.tree())).toHaveLength(0);
+      expect(findAll(h.tree(), (n) => String(n.attrs?.["class"]) === "result-toggle")).toHaveLength(0);
+    });
+  }
+
+  it("結果の取得に失敗したら、固定の文言(サーバの文面でない)と「更新」の案内がカードに出る。自動では再試行しない(往復・再描画・hashchange の連打でも 1 回)", async () => {
+    const h = harness(RACE_HASH);
+    h.responders.set(ANALYSIS_5, async () => failResp);
+    h.app.start();
+    await h.app.whenIdle();
+    expect(textOf(preRaceCard(h))).toContain("サーバでエラー");
+    expect(textOf(preRaceCard(h))).toContain("更新");
+    expect(h.text()).not.toContain("秘密の文面");
+    expect(horsesIn(h.tree())).toHaveLength(0);
+    // 状態・過去の分析は出ている(失敗は結果だけ)
+    expect(findAll(h.tree(), (n) => n.attrs?.["class"] === "card")).toHaveLength(2);
+    expect(h.text()).toContain("1位");
+    for (let i = 0; i < 3; i += 1) h.go(RACE_HASH);
+    h.go(`#date=${DATE}&venue=central`);
+    await h.app.whenIdle();
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toEqual([ANALYSIS_5]);
+    expect(refreshButton(h).attrs?.["disabled"]).toBe(false); // 失敗のあとは更新が押せる
+  });
+
+  it("失敗のあと「更新」: 状態・過去の分析・失敗した分析を 1 回ずつ取り直す(取得中の連打は 1 本)。成功すれば馬が出る", async () => {
+    const h = harness(RACE_HASH);
+    let failing = true;
+    h.responders.set(ANALYSIS_5, async () => (failing ? failResp : ok(analysisBody())));
+    h.app.start();
+    await h.app.whenIdle();
+    failing = false;
+    const before = h.calls.length;
+    refreshButton(h).on!.click!();
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(h.calls.slice(before).sort()).toEqual([ANALYSIS_5, PAST, RACE_STATUS].sort());
+    expect(horsesIn(preRaceCard(h))).toHaveLength(1);
+    expect(textOf(preRaceCard(h))).not.toContain("サーバでエラー");
+  });
+
+  it("失敗のあと「更新」でも失敗したら、また注記が出て、そこで止まる(自動の再試行なし。もう一度「更新」で 1 回)", async () => {
+    const h = harness(RACE_HASH);
+    h.responders.set(ANALYSIS_5, async () => failResp);
+    h.app.start();
+    await h.app.whenIdle();
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toHaveLength(2);
+    expect(textOf(preRaceCard(h))).toContain("サーバでエラー");
+    h.go(RACE_HASH);
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toHaveLength(2);
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toHaveLength(3);
+  });
+
+  it("成功したあとの「更新」は、状態・過去の分析だけを取り直し、分析は取り直さない(R2 の操作回数を使わない)。馬は出たまま", async () => {
+    const h = harness(RACE_HASH);
+    h.app.start();
+    await h.app.whenIdle();
+    const before = h.calls.length;
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(h.calls.slice(before).sort()).toEqual([PAST, RACE_STATUS].sort());
+    expect(analysisGets(h)).toEqual([ANALYSIS_5]);
+    expect(horsesIn(preRaceCard(h))).toHaveLength(1);
+  });
+
+  it("結果の取得中に「更新」が押されても何も取らない(更新は無効。押されても 1 本のまま)", async () => {
+    const h = harness(RACE_HASH);
+    const gate = deferred<Resp>();
+    h.responders.set(ANALYSIS_5, () => gate.promise);
+    h.app.start();
+    await timersFlush();
+    const before = h.calls.length;
+    refreshButton(h).on!.click!();
+    refreshButton(h).on!.click!();
+    await timersFlush();
+    expect(h.calls).toHaveLength(before);
+    gate.resolve(ok(analysisBody()));
+    await h.app.whenIdle();
+    expect(analysisGets(h)).toEqual([ANALYSIS_5]);
+  });
+
+  describe("開閉(メモリ。(開催日, race_id) ごと。既定は開)", () => {
+    it("見出しのタップで畳む(馬のカードが消え、aria-expanded=false)。もう一度で開く。取得は増えない", async () => {
+      const h = harness(RACE_HASH);
+      h.app.start();
+      await h.app.whenIdle();
+      const before = h.calls.length;
+      expect(horsesIn(preRaceCard(h))).toHaveLength(1); // 前提: 最初は開
+      toggleButton(h).on!.click!();
+      expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("false");
+      expect(horsesIn(preRaceCard(h))).toHaveLength(0);
+      expect(textOf(preRaceCard(h))).toContain("分析の結果"); // 見出しは残る
+      toggleButton(h).on!.click!();
+      expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("true");
+      expect(horsesIn(preRaceCard(h))).toHaveLength(1);
+      expect(h.calls).toHaveLength(before);
+    });
+
+    it("畳んだ状態は、「更新」・一覧への往復で保たれる。別のレース・別の日は別の状態(既定の開)", async () => {
+      const h = harness(RACE_HASH);
+      const OTHER_DATE = "20260627";
+      const OTHER_RACE = "202603020212";
+      const otherStatus = (date: string, raceId: string) => `/api/analyses/status?kaisai_date=${date}&race_id=${raceId}`;
+      h.responders.set(otherStatus(DATE, OTHER_RACE), async () => ok(raceStatusBody([boardRow(OTHER_RACE, "pre_race", "done", { analysis_id: 6 })])));
+      h.responders.set(`/api/analyses?race_id=${OTHER_RACE}&kaisai_date=${DATE}&limit=20`, async () => ok(pastBody([6])));
+      h.responders.set("/api/analyses/6", async () => ok(analysisBody({ id: 6, raceId: OTHER_RACE })));
+      h.responders.set(otherStatus(OTHER_DATE, RACE_ID), async () => ok(raceStatusBody([boardRow(RACE_ID, "pre_race", "done", { analysis_id: 5 })])));
+      h.responders.set(`/api/analyses?race_id=${RACE_ID}&kaisai_date=${OTHER_DATE}&limit=20`, async () => ok(pastBody([5])));
+      h.app.start();
+      await h.app.whenIdle();
+      toggleButton(h).on!.click!(); // このレース(DATE, RACE_ID)を畳む
+      refreshButton(h).on!.click!();
+      await h.app.whenIdle();
+      expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("false"); // 「更新」で保たれる
+      h.go(`#date=${DATE}&venue=central`);
+      await h.app.whenIdle();
+      h.go(RACE_HASH);
+      await h.app.whenIdle();
+      expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("false"); // 往復で保たれる
+      h.go(`#date=${DATE}&venue=central&race=${OTHER_RACE}`);
+      await h.app.whenIdle();
+      expect(horsesIn(h.tree()).length, "前提: 別のレースの結果が出ている").toBeGreaterThan(0);
+      expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("true"); // 別のレースは既定の開
+      h.go(`#date=${OTHER_DATE}&venue=central&race=${RACE_ID}`);
+      await h.app.whenIdle();
+      expect(horsesIn(h.tree()).length, "前提: 別の日の結果が出ている(同じ分析 id はキャッシュから)").toBeGreaterThan(0);
+      expect(toggleButton(h).attrs?.["aria-expanded"]).toBe("true"); // 同じ race_id でも日付が違えば別
+      expect(toggleButton(h).attrs?.["data-date"]).toBe(OTHER_DATE);
+    });
   });
 });
