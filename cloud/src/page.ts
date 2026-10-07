@@ -154,6 +154,13 @@ export function renderPage(email: string): string {
   .field-help { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
   .field-error { margin: 4px 0 0; font-size: 0.85rem; font-weight: bold; color: var(--fail); }
   .settings-save { display: block; width: 100%; margin: 8px 0 12px; font-weight: bold; }
+  /* Issue #201: 設定画面のプロンプトのプレビュー(開閉の見出しは h3 の中のボタン。文面は div。改行・折り返しは CSS。内側のスクロールは付けない=スマホで操作しづらいため、ページのスクロールに任せる) */
+  .preview { margin: 16px 0; }
+  .preview h3 { margin: 8px 0 4px; font-size: 1rem; }
+  .preview-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-weight: bold; }
+  .preview-note { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); }
+  .preview-refresh { display: block; width: 100%; min-height: 44px; margin: 12px 0 8px; font-weight: bold; }
+  .prompt-preview { padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
   /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
   .card-result { margin-top: 8px; }
   .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }

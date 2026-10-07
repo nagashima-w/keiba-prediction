@@ -10,6 +10,7 @@ import {
   type ModelInfoLite,
 } from "@keiba/core/llm";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
+import { buildPreviewText } from "../client/prompt-preview";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
 import type { LlmCallRecord } from "../src/llm-calls";
@@ -440,6 +441,52 @@ describe("e7: 追加指示は 2,000 UTF-16 単位で切る(組み立て側。サ
   it("追加指示が空なら、プロンプトに追加指示のブロックが入らず、保存も null", async () => {
     const { record } = await runWithInstruction("");
     expect(record.additionalInstruction).toBeNull();
+  });
+});
+
+describe("e10: 設定画面のプレビューの文面は、実際に LLM へ渡った prompt と一致する(Issue #201)", () => {
+  /** 【予想印】から末尾まで(追加指示のブロック・出力スキーマ)。レースの値に依らない部分なので、プレビュー(サンプルレース)と実送信(実レース)で同じになるはず。 */
+  const fromMarks = (prompt: string): string => prompt.slice(prompt.indexOf("【予想印】"));
+  /** 【指示】の許容幅の行(クリップ幅の版でだけ変わる)。 */
+  const clipLineOf = (prompt: string): string | undefined => prompt.split("\n").find((line) => line.startsWith("補正は各馬の 3着内率"));
+
+  const cases: { name: string; instruction: string; clipVariant: "default" | "wide15" }[] = [
+    { name: "2,100 単位の追加指示(D1 へ直接入れた長い値)・wide15", instruction: "あ".repeat(2100), clipVariant: "wide15" },
+    { name: "前後に空白・改行を含む追加指示・default", instruction: "  前後に空白  \n二行目  ", clipVariant: "default" },
+    { name: "追加指示が空・wide15", instruction: "", clipVariant: "wide15" },
+    { name: "2,000 単位目がサロゲートペアの途中・default", instruction: `${"あ".repeat(1999)}😀`, clipVariant: "default" },
+  ];
+
+  it.each(cases)("$name", async ({ instruction, clipVariant }) => {
+    const llm = fakeLlm(() => ok(llmJson(0.3)));
+    const h = harness(llm, { ...ALL_ON, additionalInstruction: instruction, clipVariant });
+    await runPreRace(h);
+    expect(llm.calls).toHaveLength(1); // 前提: 実際に LLM へ送られた
+    const sent = promptOf(llm);
+    const preview = buildPreviewText({ additionalInstruction: instruction, clipVariant }).text;
+    expect(sent.indexOf("【予想印】"), "前提(送信側)").toBeGreaterThan(0);
+    expect(preview.indexOf("【予想印】"), "前提(プレビュー側)").toBeGreaterThan(0);
+    expect(fromMarks(preview)).toBe(fromMarks(sent));
+    expect(clipLineOf(sent), "前提: 許容幅の行を拾えている").toBeDefined();
+    expect(clipLineOf(preview)).toBe(clipLineOf(sent));
+    expect(clipLineOf(preview)).toContain(clipVariant === "wide15" ? "±15%" : "±10%");
+  });
+
+  it("前提(空振り防止): 長い追加指示では、送信もプレビューも 2,000 単位に切っている(切らない文面とは違う)。空なら両方とも追加指示のブロックが無い", async () => {
+    const long = "あ".repeat(2100);
+    const llm = fakeLlm(() => ok(llmJson(0.3)));
+    const h = harness(llm, { ...ALL_ON, additionalInstruction: long });
+    await runPreRace(h);
+    const preview = buildPreviewText({ additionalInstruction: long, clipVariant: "default" });
+    expect(preview.clamped).toBe(true);
+    for (const text of [promptOf(llm), preview.text]) {
+      expect(text).toContain("あ".repeat(2000));
+      expect(text).not.toContain("あ".repeat(2001));
+    }
+    const llm2 = fakeLlm(() => ok(llmJson(0.3)));
+    await runPreRace(harness(llm2, { ...ALL_ON, additionalInstruction: "" }));
+    expect(promptOf(llm2)).not.toContain("【追加指示");
+    expect(buildPreviewText({ additionalInstruction: "", clipVariant: "default" }).text).not.toContain("【追加指示");
   });
 });
 

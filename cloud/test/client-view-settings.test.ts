@@ -195,3 +195,112 @@ describe("トップ(一覧)の設定への入口", () => {
     }
   });
 });
+
+describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
+  const toggle = (t: VNode): VNode[] => byClass(t, "preview-toggle");
+  const refresh = (t: VNode): VNode[] => byClass(t, "preview-refresh");
+  const body = (t: VNode): VNode[] => byClass(t, "prompt-preview");
+
+  it("閉じているとき: 開閉ボタン(aria-expanded=false)だけ。注記・文面・反映ボタンは無い", () => {
+    const t = tree();
+    expect(toggle(t).length).toBe(1);
+    expect(toggle(t)[0]!.tag).toBe("button");
+    expect(toggle(t)[0]!.attrs?.["aria-expanded"]).toBe("false");
+    expect(textOf(toggle(t)[0]!)).toBe("LLMへ送るプロンプトのプレビューを開く");
+    expect(refresh(t)).toEqual([]);
+    expect(body(t)).toEqual([]);
+    expect(byClass(t, "preview-note")).toEqual([]);
+  });
+
+  it("開いているとき: 開閉ボタン(aria-expanded=true・「閉じる」)・反映ボタン・注記・文面が出る", () => {
+    const t = tree({ previewOpen: true });
+    expect(toggle(t)[0]!.attrs?.["aria-expanded"]).toBe("true");
+    expect(textOf(toggle(t)[0]!)).toBe("LLMへ送るプロンプトのプレビューを閉じる");
+    expect(refresh(t).length).toBe(1);
+    expect(textOf(refresh(t)[0]!)).toBe("入力中の内容を反映");
+    expect(byClass(t, "preview-note").length).toBeGreaterThan(2);
+    expect(body(t).length).toBe(1);
+  });
+
+  it("文面は、改行を含むそのままの文字列 1 つをテキストノードとして入れる(div。許可リストに pre は無い)。モデルの文面と一致する", () => {
+    const t = tree({ previewOpen: true });
+    const model = buildSettingsModel(input({ previewOpen: true }));
+    const node = body(t)[0]!;
+    expect(node.tag).toBe("div");
+    expect(node.children).toEqual([model.preview!.text!]);
+    expect(model.preview!.text!).toContain("\n");
+    expect(model.preview!.text!).toContain("1行目\n2行目"); // CUSTOM の追加指示が文面に入っている
+  });
+
+  it("外から来た文字列(追加指示)は、文面の中でもテキストノードのまま。HTML として解釈される要素を作らない", () => {
+    const evil = `</div><script>alert(1)</script>`;
+    const t = tree({ previewOpen: true, draft: setDraftValue(draftFromSettings(CUSTOM), "additionalInstruction", evil) });
+    expect(findAll(t, (n) => n.tag === "script")).toEqual([]);
+    expect(body(t)[0]!.children).toHaveLength(1);
+    expect(String(body(t)[0]!.children![0])).toContain(evil);
+  });
+
+  it("開閉ボタンのクリックは onSettingsPreviewToggle(押したあとの状態=今の逆)。閉じているなら true、開いているなら false", () => {
+    const calls: boolean[] = [];
+    const actions: ViewActions = { ...noopActions, onSettingsPreviewToggle: (open) => void calls.push(open) };
+    toggle(tree({}, actions))[0]!.on!.click!();
+    toggle(tree({ previewOpen: true }, actions))[0]!.on!.click!();
+    expect(calls).toEqual([true, false]);
+  });
+
+  it("開閉ボタンは、クリック処理に渡す値(押したあとの状態)を data-open-after にも出す(同じ木の DOM は触られないので、引数が木に出ていること)。値はクリックで渡す値と一致する", () => {
+    const calls: boolean[] = [];
+    const actions: ViewActions = { ...noopActions, onSettingsPreviewToggle: (open) => void calls.push(open) };
+    const closed = toggle(tree({}, actions))[0]!;
+    const opened = toggle(tree({ previewOpen: true }, actions))[0]!;
+    expect([closed.attrs?.["data-open-after"], opened.attrs?.["data-open-after"]]).toEqual(["true", "false"]);
+    closed.on!.click!();
+    opened.on!.click!();
+    expect(calls.map(String)).toEqual([closed.attrs?.["data-open-after"], opened.attrs?.["data-open-after"]]);
+  });
+
+  it("反映ボタンのクリックは onSettingsPreviewRefresh", () => {
+    let n = 0;
+    const actions: ViewActions = { ...noopActions, onSettingsPreviewRefresh: () => void (n += 1) };
+    refresh(tree({ previewOpen: true }, actions))[0]!.on!.click!();
+    expect(n).toBe(1);
+  });
+
+  it("保存中は開閉・反映のボタンも disabled。通常は disabled でない", () => {
+    const saving = tree({ previewOpen: true, save: { kind: "saving" } });
+    expect(toggle(saving)[0]!.attrs?.["disabled"]).toBe(true);
+    expect(refresh(saving)[0]!.attrs?.["disabled"]).toBe(true);
+    const normal = tree({ previewOpen: true });
+    expect(toggle(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
+    expect(refresh(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
+  });
+
+  it("プレビューは保存ボタンより後ろ(画面の末尾)にある。入力欄(data-field)は増えない(14 個のまま)", () => {
+    const t = tree({ previewOpen: true });
+    const top = t.children as VNode[];
+    const saveIndex = top.findIndex((c) => typeof c !== "string" && (c.attrs?.["class"] === "settings-save"));
+    const previewIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "preview-toggle").length > 0);
+    expect(saveIndex).toBeGreaterThan(0);
+    expect(previewIndex).toBeGreaterThan(saveIndex);
+    expect(inputs(t).length).toBe(14);
+  });
+
+  it("読み込み中・取得の失敗では、プレビューのボタンも出ない", () => {
+    for (const load of [{ kind: "loading" }, { kind: "error", message: "失敗" }] as const) {
+      const t = renderScreen(buildSettingsModel({ load, draft: null, errors: {}, save: { kind: "idle" }, previewOpen: true }), noopActions);
+      expect(toggle(t), load.kind).toEqual([]);
+    }
+  });
+
+  it("許可リスト(dom.ts)の範囲で組める(開いているとき・閉じているとき)", () => {
+    expect(() => mountAll(tree({ previewOpen: true }))).not.toThrow();
+    expect(() => mountAll(tree({ previewOpen: false }))).not.toThrow();
+  });
+
+  it("開閉・文面の違いは木の JSON に出る(同じ木は DOM を触らないので、違いが木に出ていること)", () => {
+    const closed = JSON.stringify(tree());
+    const opened = JSON.stringify(tree({ previewOpen: true }));
+    const other = JSON.stringify(tree({ previewOpen: true, draft: setDraftValue(draftFromSettings(CUSTOM), "additionalInstruction", "別の指示") }));
+    expect(new Set([closed, opened, other]).size).toBe(3);
+  });
+});

@@ -241,7 +241,8 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
  */
 describe("data-* の契約: 引数を渡すクリック処理は、引数を data-* に出している", () => {
   // Issue #189: 設定の「保存」ボタン(settings-save)も、引数を取らない処理。設定の入力欄は引数(項目名)を data-field に出すので、除外しない。
-  const NO_ARGUMENT_CLASSES = new Set(["refresh", "retrack", "settings-save"]);
+  // Issue #201: プレビューの「入力中の内容を反映」(preview-refresh)も、引数を取らない処理。開閉のボタン(preview-toggle)は引数(押したあとの状態)を data-open-after に出すので、除外しない。
+  const NO_ARGUMENT_CLASSES = new Set(["refresh", "retrack", "settings-save", "preview-refresh"]);
   const hasDataAttr = (n: VNode): boolean => Object.keys(n.attrs ?? {}).some((k) => k.startsWith("data-"));
   const handlers = (tree: VNode): VNode[] => findAll(tree, (n) => n.on?.click !== undefined || n.on?.change !== undefined || n.on?.input !== undefined);
   const exempt = (n: VNode): boolean => String(n.attrs?.["class"] ?? "").split(" ").some((c) => NO_ARGUMENT_CLASSES.has(c)) || (n.tag === "input" && n.attrs?.["type"] === "date");
@@ -254,8 +255,8 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
     { name: "レース画面(発走前の結果が ready。開閉の見出し)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 5 })], prior: null }, result: { kind: "ready", analysis: analysis({ id: 5 }) } })), noopActions) },
     { name: "結果画面(失敗の「更新」)", tree: renderScreen(buildResultModel({ route: { ...route, analysis: 5 }, source: { kind: "error", message: "失敗" } }), noopActions) },
     {
-      name: "設定画面(取得済み。入力欄 14 個・保存・再読込)",
-      tree: renderScreen(buildSettingsModel({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS), errors: {}, save: { kind: "idle" } }), noopActions),
+      name: "設定画面(取得済み。入力欄 14 個・保存・再読込・プレビューを開いた状態の開閉と反映)",
+      tree: renderScreen(buildSettingsModel({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS), errors: {}, save: { kind: "idle" }, previewOpen: true }), noopActions),
     },
   ];
 
@@ -273,9 +274,9 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
         withData += 1;
       }
     }
-    // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)・設定の入力欄(14)が data-* の対象として数えられ、除外も使われている(保存・再読込を含む)
-    expect(withData).toBe(7 + 14);
-    expect(exemptCount).toBeGreaterThanOrEqual(4 + 2);
+    // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)・設定の入力欄(14)・プレビューの開閉(1)が data-* の対象として数えられ、除外も使われている(保存・再読込・プレビューの反映を含む)
+    expect(withData).toBe(7 + 14 + 1);
+    expect(exemptCount).toBeGreaterThanOrEqual(4 + 2 + 1);
   });
 
   it("対照: 検査は、data-* の無いクリック処理(許可リスト外)を拾える(空振りでない)。data-field の無い設定の入力欄も拾う", () => {

@@ -8,7 +8,7 @@ import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type ResultContent, type ResultModel } from "./result";
-import type { FieldModel, SettingsModel } from "./settings-form";
+import type { FieldModel, PreviewModel, SettingsModel } from "./settings-form";
 import { h, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -27,6 +27,10 @@ export interface ViewActions {
   readonly onSettingsInput: (key: string, value: string) => void;
   /** 設定の「保存」ボタン(Issue #189)。引数なし(入力は下書きから読む)。 */
   readonly onSettingsSave: () => void;
+  /** プロンプトのプレビューの開閉のボタン(Issue #201)。`open` は押したあとの状態(今の逆)。 */
+  readonly onSettingsPreviewToggle: (open: boolean) => void;
+  /** プロンプトのプレビューの「入力中の内容を反映」ボタン(Issue #201。開いているときだけ出る)。引数なし。 */
+  readonly onSettingsPreviewRefresh: () => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -322,6 +326,29 @@ function settingsField(field: FieldModel, actions: ViewActions): VNode {
   ]);
 }
 
+/**
+ * プロンプトのプレビュー(Issue #201)。開閉は `h3` の中のボタン(`<details>` は使わない=#187・#188 と同じ理由)。文面は `div`(許可リストに `pre` は無い)に、改行を含む文字列を
+ * 1 つのテキストノードとして入れる(改行・折り返しは CSS の `white-space: pre-wrap`。外から来た追加指示も HTML として解釈されない)。内側のスクロールは付けない(スマホで操作しづらいため。ページのスクロールに任せる)。
+ */
+function previewSection(preview: PreviewModel, saving: boolean, actions: ViewActions): VNode {
+  const toggle = h(
+    "button",
+    // クリック処理に渡す値(押したあとの状態)は `data-open-after` にも出す(`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されないので、引数を木に出す。`result-toggle` と同じ)。
+    { class: "preview-toggle", "aria-expanded": preview.open ? "true" : "false", "data-open-after": preview.open ? "false" : "true", disabled: saving },
+    [preview.toggleLabel],
+    { click: () => actions.onSettingsPreviewToggle(!preview.open) },
+  );
+  const opened =
+    preview.open && preview.text !== null
+      ? [
+          ...preview.notes.map((note) => h("p", { class: "preview-note" }, [note])),
+          ...(preview.refreshLabel === null ? [] : [h("button", { class: "preview-refresh", disabled: saving }, [preview.refreshLabel], { click: actions.onSettingsPreviewRefresh })]),
+          h("div", { class: "prompt-preview" }, [preview.text]),
+        ]
+      : [];
+  return h("section", { class: "preview" }, [h("h3", {}, [toggle]), ...opened]);
+}
+
 function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
@@ -347,6 +374,9 @@ function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
           ? h("p", { class: "notice error", role: "alert" }, [model.saveNotice.text])
           : h("p", { class: "notice" }, [model.saveNotice.text]),
       );
+    }
+    if (model.preview !== null) {
+      body.push(previewSection(model.preview, model.saving, actions));
     }
   }
   return h("div", { class: "screen" }, [controls, h("h1", { class: "title" }, ["設定"]), ...body]);

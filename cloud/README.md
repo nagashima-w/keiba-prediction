@@ -306,6 +306,23 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **取得関数**(`api-analysis.ts`): `AnalysisHorse` に `highlights`・`concerns`(文字列の配列。**キー欠落・配列でない・文字列でない要素が1つでもあれば想定外の応答**)、`AnalysisDetail` に `llmCalls`(`null` か、要素を検査した配列。キー欠落・要素のキーの型違いは想定外。空配列は受け付ける)。`test/client-api-analysis-contract.test.ts` が、本物の `handle()` の応答(項目あり・旧い分析)を通す。
 - **R1**(`test/analysis-llm-calls.test.ts`): `getAnalysisDetail` が `detail: "missing"` を返す経路(Class B の柵・R2 のオブジェクトが無い・壊れている・get が例外)でも、`llmNote`・`llmCalls`・馬の `highlights`・`concerns` は D1 の値のまま返る。
 
+## 設定画面にプロンプトのプレビューを出す(Issue #201。v1.20.2)
+サーバ・D1・exe は無変更。`cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。`llm-run.ts` から再 export)だけ。core のプロンプト文面は変えていない。
+- **何を出すか**: 設定画面の末尾(保存ボタンの後ろ)に「LLMへ送るプロンプトのプレビューを開く」ボタン。開くと、exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレースを `buildPrompt` に通した文面)を出す。**クライアントで呼ぶ**(サーバの API は作っていない。ネットワークには出ない)。
+- **送信と同じ文面にする**(`client/prompt-preview.ts`): 追加指示を `clampAdditionalInstruction`(2,000 UTF-16 単位。サロゲートペアを割らない)で切り、クリップ幅は `resolveClipVariant` で解決した版の `id` を渡す(`race-day-core.ts` の送信と同じ手順)。
+  D1 へ直接入れた長い追加指示は切った文面になり、その旨を注記する。**実際に LLM へ渡った prompt との一致は `test/race-day-llm.test.ts` の e10 が固定する**(【予想印】以降〈追加指示のブロックと出力スキーマ〉と【指示】の許容幅の行を、4 通りの入力〈長い・前後に空白・空・サロゲートペアの途中〉で突き合わせる)。
+- **下書きの反映のタイミング**(#189 の設計と矛盾しない): 文面は**画面に出ている写し(`settingsShown`)の下書き**から作る。入力のたびには更新しない。**開閉のボタンと「入力中の内容を反映」ボタンは `render(true)`**
+  (写しを現在の下書きへ更新してから描く。強制なしで描くと、古い写しで入力欄が作り直され、打った文字が消える)。追跡のポーリングなどの強制なしの再描画では、文面も DOM も変わらない。保存の成功・再読込・検証エラーの強制描画でも、開いたままの文面が下書きに追いつく。
+  開閉の状態はメモリだけ(既定は閉じている。画面を離れたら破棄。「再読込」では変えない)。保存中・下書きなし(取得前・失敗)の操作は無視する。
+- **注記**(画面の文。Issue 番号は書かない): サンプルレースで作った例であること・実分析で置き換わるセクション・馬場悪化シナリオの条件付き追加・追加指示とクリップ幅は「入力中の内容を反映」を押した時点の内容で作り、実分析に使われるのは保存済みの内容であること・**現在のクラウド版は同日の傾向・重賞の傾向を実際の分析でも送らないこと**
+  (`race-day-core.ts` が当日傾向の読み出しを空にしている。#181・#182 が入ったらこの注記は更新・削除する)・プロンプト版。
+- **見せ方(スマホ)**: `<details>` は使わず、`h3` の中のボタンで開閉する(`aria-expanded`。44px 以上)。文面は `div`(許可リストに `pre` は無い)に、改行を含む文字列を1つのテキストノードで入れ、CSS(`.prompt-preview`)で等幅・`white-space: pre-wrap`・`overflow-wrap: anywhere`。**内側のスクロールは付けない**(ページのスクロールに任せる)。`dom.ts` の許可リストは変更なし。
+- **ビルド**: クライアントが core を直接 import する**唯一の例外**として、許可リストに `@keiba/core/analyzer/build-prompt` を足した(exe と同じ関数を直接呼んで文面を一致させるため)。閉包に増えるのは build-prompt・clip-variants・condition-change・leg-style・derive-features の 5 ファイルで、`node:`・`node_modules`・バレルは入らない
+  (`test/client-bundle.test.ts` の閉包の検査と生成物の静的ガードが固定。拒否側の「対照」は維持)。**生成物は 81,269 バイト(3d8a0b1)→ 111,705 バイト**(`pnpm run build:client` の出力)に増え、サイズの上限を 100,000 → 125,000 バイトに引き上げた(理由と実測値はそのテストのコメント。`charset` は変えていない)。
+  **core のプロンプト文面(`build-prompt.ts` ほか)を変えると、cloud のドリフトの検査が落ちる**(`pnpm run build:client` で再生成する。プレビューが送信の文面とずれないための仕組み)。
+- **検査**: `test/client-prompt-preview.test.ts`・`client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`・`page.test.ts`・`race-day-llm.test.ts`(e10)・`client-bundle.test.ts`(許可リスト・閉包・実行スモーク)。
+- **実機(スマホ)で確かめること(自動検査できない)**: プレビューを開いたときの長文の読みやすさ(等幅・折り返し・ページのスクロール)・「入力中の内容を反映」を押したときのスクロール位置(DOM の全置換で位置が飛ばないか)・開閉ボタンのタップのしやすさ。
+
 ## 手動起動の入口(Issue #180)
 Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。定時の Cron は無い。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
 - `POST /api/analyses/run` — 本文 JSON `{"race_id": "202603020211", "kaisai_date": "20260628", "mode": "morning"}`。`mode` は `morning`(省略時。朝の取得と prior。D1・R2 には書かない)か `pre_race`(発走前の分析。LLM を使う〈API キーが未登録なら LLM なしで保存〉。D1・R2 に保存)。**同じオリジンのページから**(`Origin` が必要。curl で試すときは `-H "Origin: https://<自分の Worker のホスト>"` と `-H "Content-Type: application/json"` を付ける)。202 で予約され、取得 → 計算はアラームの中で進む(中央16頭で約 40 秒)。

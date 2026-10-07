@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.20.1)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.20.2)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.20.1`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.20.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1216,7 +1216,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - `GET /api/analyses/{id}` は**開いたとき id ごとに 1 回だけ**(メモリにキャッシュ。往復で取り直さない。⚠️ サーバは R2 の詳細を読み Class B を +1 する)。失敗は固定の文言(404 は「見つかりません」)で、自動では再試行せず、**失敗したときだけ**「更新」で取り直せる(成功した画面に「更新」は無い)。結果画面は一覧・板・状態を取らない。「戻る」は、分析の `kaisaiDate`(無い・不正ならハッシュの日付)のそのレースの画面。
 - **API の変更**: `GET /api/analyses/{id}` の `allocation` に `fallbackReason`・`betUnit` を足した(exe の表示関数に渡さないと、フォールバックの注記が消え、`cap-too-small` が「単位額が記録されていません」と誤って表示される)。
 - **応答の検証**: クライアントのパーサは、型違い・キーの欠落(配分のキーが 1 つ欠けても)を「想定外の応答」にし、`undefined` を表示関数に渡さない。未知の `route` 文字列は通す(表示関数が「判定不能」にする)。
-- **ビルド(exe の renderer の取り込み)**: クライアントが import してよいのは `client/` の中と、exe の `renderer/allocation-proposal-view`・`renderer/format`・`shared/analysis-types`(型のみ)だけ(許可リスト。`test/client-bundle.test.ts`)。renderer が import する core のサブパス(`@keiba/core/ev/bet-allocation`・`@keiba/core/ev/combo-bet-allocation`)は、CI(各 package の node_modules が無い配置)でも解決できるよう、`tsconfig.client.json` の paths で実ファイルへ向ける(esbuild もこの paths を読むので、型検査とバンドルの解決が 1 か所で揃う。バレルは向けない)。バンドルの閉包は metafile で検査し(`node_modules`・バレル・better-sqlite3 に依存するモジュール・exe の main が無いこと)、生成物を Node の組込みの無い環境(`node:vm`)で実行して、配分の表示が動くことも確かめている。**exe の renderer・core の ev を変えると、cloud のドリフトの検査が落ちる**(`pnpm run build:client` で再生成する)。
+- **ビルド(exe の renderer の取り込み)**: クライアントが import してよいのは `client/` の中と、exe の `renderer/allocation-proposal-view`・`renderer/format`・`shared/analysis-types`(型のみ)だけ(許可リスト。`test/client-bundle.test.ts`。**#201 で、core を直接 import する唯一の例外として `@keiba/core/analyzer/build-prompt` を足した**)。renderer が import する core のサブパス(`@keiba/core/ev/bet-allocation`・`@keiba/core/ev/combo-bet-allocation`)は、CI(各 package の node_modules が無い配置)でも解決できるよう、`tsconfig.client.json` の paths で実ファイルへ向ける(esbuild もこの paths を読むので、型検査とバンドルの解決が 1 か所で揃う。バレルは向けない)。バンドルの閉包は metafile で検査し(`node_modules`・バレル・better-sqlite3 に依存するモジュール・exe の main が無いこと)、生成物を Node の組込みの無い環境(`node:vm`)で実行して、配分の表示が動くことも確かめている。**exe の renderer・core の ev を変えると、cloud のドリフトの検査が落ちる**(`pnpm run build:client` で再生成する)。
 - **XSS・CSP**: #184 のまま(外から来た文字列はテキストノードだけ。要素・属性の許可リストは**変更なし**=一覧は `ul`、強調は class と文字で組む)。
 - **検査**: `test/client-api-analysis.test.ts`(パーサ)・`client-api-analysis-contract.test.ts`(実際の `handle()` の応答。分析はローカルの D1・R2 に保存して読み、exe の表示関数まで通す)・`client-race.test.ts`・`client-result.test.ts`・`client-view.test.ts`(VNode・XSS)・`client-app.test.ts`・`client-bundle.test.ts`・`analysis-view.test.ts`。**実機(スマホ)でのレイアウト・タップは自動検査できない**(デプロイ後にユーザーが確認する)。
 
@@ -1247,6 +1247,14 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **取得関数**: `AnalysisDetail.llmNote`(`string | null`。欠けたら想定外の応答。過去の分析は null で通る)。
 - **文言**: カードの説明(発走前)は「API キーがあれば LLM が3着内率を補正して印と根拠を付け(EV は補正後の値で計算)、キーが無い間は統計のみ」(116 文字)。設定の追加指示・クリップ幅の補助文は「発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません」。**画面に Issue 番号は出さない。**
 - **検査**: `cloud/test/client-result.test.ts`・`client-view.test.ts`(結果画面とカードの両方)・`client-api-analysis.test.ts`・`client-api-analysis-contract.test.ts`・`client-race.test.ts`・`client-settings-form.test.ts`。
+
+### 設定画面にプロンプトのプレビュー(#201。v1.20.2)
+変更は `cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。再 export)だけ(サーバ・D1・exe・core のプロンプト文面は無変更)。詳細は `cloud/README.md` の「設定画面にプロンプトのプレビューを出す」。
+- **何を出すか**: 設定画面の末尾のボタンで開閉する、LLM へ送るプロンプトのプレビュー。exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレース)を**クライアントで**呼ぶ(API は作らない。ネットワークには出ない)。
+- **送信と同じ文面**: 追加指示は 2,000 UTF-16 単位に切り(`clampAdditionalInstruction`)、クリップ幅は `resolveClipVariant` で解決する(送信と同じ手順)。`race-day-llm.test.ts` の e10 が、実際に LLM へ渡った prompt との一致を固定している。
+- **反映のタイミング**: 入力のたびには更新しない。開閉と「入力中の内容を反映」のボタンが強制描画(`render(true)`)で、写しを現在の下書きへ更新してから描く(#189 の設計と矛盾しない)。exe は入力の即時反映。
+- **注記**: 現在のクラウド版は同日の傾向・重賞の傾向を実際の分析でも送らない旨(#181・#182 が入ったら更新・削除する)。
+- **ビルド**: クライアントが core を直接 import する唯一の例外として `@keiba/core/analyzer/build-prompt` を許可。生成物 81,269 → 111,705 バイト、サイズの上限は 125,000 バイト。core のプロンプト文面を変えるとドリフトの検査が落ちる(`pnpm run build:client`)。
 
 ### クラウド版の画面に強調材料・懸念事項と LLM の usage を出す(#198〈#196-c〉。v1.20.1)
 変更は `cloud/` のクライアントと `page.ts` の CSS だけ(サーバ・D1・core・exe は無変更)。詳細は `cloud/README.md` の「スマホ画面に強調材料・懸念事項と LLM の usage を出す」。

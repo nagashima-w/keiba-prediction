@@ -29,6 +29,9 @@
  *  - **強制なしの描画(追跡のポーリングなど、設定画面の外の原因)は、画面に出ている内容の写し(`settingsShown`)から木を作る**。`input` で下書きが変わっても木は変わらず、`createMounter` が DOM を置き換えない(打っている欄・キーボードを壊さない)。
  *  - 保存の押下: 検証(項目ごと。保存の押下時に1回)→ NG なら POST せず項目ごとのエラー / OK なら全 14 項目を POST。保存中は二重に送らない。失敗しても入力は残る。成功したらサーバが返した設定で下書きを戻す。
  *  - 世代(`settingsGen`): 離れる・取り直すたびに増やし、**古い世代の応答(離れる前に出した取得・保存)は今の画面に反映しない**。
+ *  - **Issue #201(プロンプトのプレビュー)**: 画面の末尾のボタンで開閉する(既定は閉じている。メモリだけ・画面を離れたら破棄)。文面は **画面に出ている写し(`settingsShown`)の下書き**から作る
+ *    (`buildPreviewText`。送信と同じ手順)。**入力のたびには更新しない**(#189 の設計どおり)。開閉と「入力中の内容を反映」は `render(true)` で、写しを現在の下書きへ更新してから描く
+ *    (強制なしだと古い写しで入力欄が作り直され、打った文字が消える)。ネットワークには出ない。保存中・下書きなしは無視。
  *
  * **Issue #188(発走前の結果をレース画面のカードの中に出す)**:
  *  - 最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id(`race.ts` の `latestAnalysisIdOf`。取る・出すの判定は同じ関数)。
@@ -219,10 +222,12 @@ export function createApp(deps: AppDeps): App {
    * 次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に出さない。木が同じなら `createMounter` は DOM を置き換えない(打っている欄がフォーカスを失わない・スマホのキーボードが閉じない)。
    * 下書き(`settingsDraft`)自体は最新のまま(保存はそれを読む)。null は「まだ写していない(画面に入った直後)」。
    */
-  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState } | null = null;
+  let settingsShown: { load: SettingsLoadState; draft: SettingsDraft | null; errors: FieldErrors; save: SettingsSaveState; previewOpen: boolean } | null = null;
+  /** プロンプトのプレビューを開いているか(Issue #201)。メモリだけ(既定は閉じている。画面を離れたら破棄。「再読込」では変えない)。 */
+  let settingsPreviewOpen = false;
   const settingsInflight = new Set<Promise<unknown>>();
 
-  const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack, onSettingsInput, onSettingsSave };
+  const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack, onSettingsInput, onSettingsSave, onSettingsPreviewToggle, onSettingsPreviewRefresh };
 
   function render(force = false): void {
     const screen = screenOf(route);
@@ -258,7 +263,7 @@ export function createApp(deps: AppDeps): App {
       case "settings": {
         // 強制描画のとき、または画面に入った直後(まだ写していない)は、今の状態を写す。それ以外(強制なし)は、画面に出ている内容の写しから作る。
         if (force || settingsShown === null) {
-          settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave };
+          settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen };
         }
         deps.render(renderScreen(buildSettingsModel(settingsShown), actions), force);
         return;
@@ -471,6 +476,7 @@ export function createApp(deps: AppDeps): App {
   function leaveSettings(): void {
     settingsGen += 1;
     settingsShown = null;
+    settingsPreviewOpen = false;
     settingsLoad = null;
     settingsDraft = null;
     settingsErrors = {};
@@ -483,6 +489,23 @@ export function createApp(deps: AppDeps): App {
     settingsDraft = setDraftValue(settingsDraft, key as FieldKey, value);
     // 「保存しました」の通知は、未保存の入力が生まれた時点で状態から外す(描画はしない。次の描画から出さない)。
     if (settingsSave.kind === "saved") settingsSave = { kind: "idle" };
+  }
+
+  /**
+   * プロンプトのプレビューの開閉(Issue #201)。ネットワークには出ない。**`render(true)`**: 強制なしの描画は古い写し(`settingsShown`)から木を作るので、そのままだと
+   * 入力欄が古い下書きで作り直され、打った文字が消える。強制描画は、写しを現在の下書きへ更新してから描く(保存・検証エラーと同じ)。
+   * 下書きが無い(取得前・失敗)・保存中は無視する(入力を無視するのと同じ)。
+   */
+  function onSettingsPreviewToggle(open: boolean): void {
+    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
+    settingsPreviewOpen = open;
+    render(true);
+  }
+
+  /** 「入力中の内容を反映」(Issue #201): 開いているときだけ。強制描画で写しを現在の下書きへ更新し、プレビューの文面を入力に追いつかせる。 */
+  function onSettingsPreviewRefresh(): void {
+    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving" || !settingsPreviewOpen) return;
+    render(true);
   }
 
   function onSettingsSave(): void {

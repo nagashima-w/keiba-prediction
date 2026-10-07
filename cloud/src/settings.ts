@@ -76,6 +76,24 @@ export const PRE_RACE_OFFSET_MAX = 180;
 /** ケリー係数の書く側の下限(exe の `isValidKellyFraction` と同じ。読む側の下限は 0)。 */
 export const KELLY_FRACTION_WRITE_MIN = 0.05;
 
+/**
+ * 追加指示を `max` UTF-16 コード単位(既定 2,000。`String#length` と同じ単位)までに切る。上位サロゲートで終わってしまうとき(ペアの途中)は、そのペアごと落とす。
+ * 先頭から切るだけで、途中は書き換えない。`clamped` は、実際に切ったか。
+ * 読む側(`coerceCloudSettings`)には上限が無いので、LLM へ送る側(`race-day-core.ts`)が使う。**設定画面のプレビュー(Issue #201)も同じ関数で切る**(送信と同じ文面にするため。
+ * 定義がこのファイルにあるのは、クライアントのバンドルに入れられる依存なしの純モジュールだから。`llm-run.ts` から再 export している)。
+ */
+export function clampAdditionalInstruction(text: string, max: number = ADDITIONAL_INSTRUCTION_MAX_LENGTH): { readonly text: string; readonly clamped: boolean } {
+  if (text.length <= max) {
+    return { text, clamped: false };
+  }
+  let end = max;
+  const last = end > 0 ? text.charCodeAt(end - 1) : 0;
+  if (last >= 0xd800 && last <= 0xdbff) {
+    end -= 1; // 上位サロゲートだけが残る(対の下位サロゲートを切った)ので、ペアごと落とす
+  }
+  return { text: text.slice(0, end), clamped: true };
+}
+
 /** 1項目の範囲の述語(Issue #189)。`isWritable` ⊂ `isReadable`(テストが境界値の表で固定する)。 */
 export interface FieldRule<T> {
   /** 読む側が不正な値を戻す先(= その項目の既定値)。 */

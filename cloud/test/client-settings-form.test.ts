@@ -12,6 +12,7 @@ import {
   type FieldKind,
   type SettingsModelInput,
 } from "../client/settings-form";
+import { buildPreviewText } from "../client/prompt-preview";
 import { CLOUD_SETTINGS_KEYS, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 
 /**
@@ -337,5 +338,80 @@ describe("buildSettingsModel", () => {
   it("検証エラーがあるとき、保存の通知は出さない(項目ごとのエラーだけ)。保存済みの通知と検証エラーが同時に出ない", () => {
     const m = buildSettingsModel(READY_INPUT({ errors: { bankroll: "エラー" }, save: { kind: "idle" } }));
     expect(m.saveNotice).toBeNull();
+  });
+});
+
+describe("Issue #201: プロンプトのプレビューの表示用データ(buildSettingsModel の preview)", () => {
+  const open = (over: Partial<SettingsModelInput> = {}) => buildSettingsModel(READY_INPUT({ previewOpen: true, ...over })).preview!;
+  const notesOf = (p: { notes: readonly string[] }): string => p.notes.join("\n");
+
+  it("下書きを取得できていないとき(読み込み中・取得の失敗)は、プレビューの項目自体を出さない(previewOpen が true でも)", () => {
+    for (const load of [{ kind: "loading" }, { kind: "error", message: "失敗" }] as const) {
+      const m = buildSettingsModel({ load, draft: null, errors: {}, save: { kind: "idle" }, previewOpen: true });
+      expect(m.preview, load.kind).toBeNull();
+    }
+    expect(buildSettingsModel(READY_INPUT()).preview, "前提: 取得済みなら出る").not.toBeNull();
+  });
+
+  it("閉じているとき: 開くボタンの文言だけ。注記・文面は無い(文面は開いたときだけ組み立てる)。previewOpen を渡さなければ閉じている", () => {
+    for (const m of [buildSettingsModel(READY_INPUT()), buildSettingsModel(READY_INPUT({ previewOpen: false }))]) {
+      expect(m.preview).toEqual({ open: false, toggleLabel: "LLMへ送るプロンプトのプレビューを開く", refreshLabel: null, notes: [], text: null });
+    }
+  });
+
+  it("開いているとき: 閉じるボタンの文言・反映ボタンの文言・注記・文面が出る", () => {
+    const p = open();
+    expect(p.open).toBe(true);
+    expect(p.toggleLabel).toBe("LLMへ送るプロンプトのプレビューを閉じる");
+    expect(p.refreshLabel).toBe("入力中の内容を反映");
+    expect(p.notes.length).toBeGreaterThan(0);
+    expect(p.text).not.toBeNull();
+  });
+
+  it("文面は下書きの追加指示とクリップ幅から作る(FULL: 追加指示「人気薄は慎重に」・wide15)。送信と同じ手順の buildPreviewText と一致する", () => {
+    const p = open();
+    expect(p.text).toBe(buildPreviewText({ additionalInstruction: "人気薄は慎重に", clipVariant: "wide15" }).text);
+    expect(p.text).toContain("人気薄は慎重に");
+    expect(p.text).toContain("±15%(絶対値0.15)");
+    // 下書きを変えると文面が変わる(前提: 変わらないなら、上は下書きを使った証明にならない)
+    const draft = setDraftValue(setDraftValue(draftFromSettings(FULL), "additionalInstruction", "別の指示"), "clipVariant", "default");
+    const changed = open({ draft });
+    expect(changed.text).not.toBe(p.text);
+    expect(changed.text).toContain("別の指示");
+    expect(changed.text).toContain("±10%(絶対値0.10)");
+  });
+
+  it("注記: サンプルで作った例・実分析で置き換わるセクション・保存後の次回から反映・「入力中の内容を反映」で更新・同日の傾向と重賞の傾向を現在は送らない・プロンプト版", () => {
+    const p = open();
+    const notes = notesOf(p);
+    expect(notes).toContain("サンプルレース");
+    expect(notes).toContain("【レース情報】【展開想定】【出走馬】");
+    expect(notes).toContain("【予想印】【出力スキーマ】");
+    expect(notes).toContain("馬場悪化シナリオ");
+    expect(notes).toContain("入力中の内容を反映");
+    expect(notes).toContain("保存後");
+    expect(notes).toContain("同日の傾向・重賞の傾向");
+    expect(notes).toContain("実際の分析でも送りません");
+    expect(notes).toContain(`プロンプト版: ${CLIP_VARIANTS.wide15.promptVersion}`);
+    const d = open({ draft: setDraftValue(draftFromSettings(FULL), "clipVariant", "default") });
+    expect(notesOf(d)).toContain(`プロンプト版: ${CLIP_VARIANTS.default.promptVersion}`);
+    expect(notesOf(d)).not.toContain(CLIP_VARIANTS.wide15.promptVersion);
+  });
+
+  it("追加指示が 2,000 単位を超えるとき(D1 へ直接入れた長い値)だけ、切って送られる旨の注記を出す", () => {
+    const long = open({ draft: setDraftValue(draftFromSettings(FULL), "additionalInstruction", "あ".repeat(2500)) });
+    expect(notesOf(long)).toContain("2,000 文字");
+    expect(notesOf(long)).toContain("切った");
+    const exact = open({ draft: setDraftValue(draftFromSettings(FULL), "additionalInstruction", "あ".repeat(2000)) });
+    expect(notesOf(exact)).not.toContain("切った");
+    expect(notesOf(open())).not.toContain("切った");
+  });
+
+  it("画面に出る文(ボタンの文言・注記)に、Issue 番号(#数字)を書かない", () => {
+    const p = open({ draft: setDraftValue(draftFromSettings(FULL), "additionalInstruction", "あ".repeat(2500)) });
+    expect(p.notes.length, "前提: 注記が出ている(0 だと検査が空振り)").toBeGreaterThan(3);
+    for (const s of [p.toggleLabel, p.refreshLabel ?? "", ...p.notes]) {
+      expect(s).not.toMatch(/#\d/);
+    }
   });
 });

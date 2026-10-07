@@ -2849,6 +2849,25 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。`GET /api/analyses/{id}` の応答は #197 から変わらない。
 
+## 次の正式版が 1.20.2 である根拠(Issue #201 での変更)
+
+**patch**(web 版の設定画面に、LLM へ送るプロンプトのプレビューを出す。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud: 設定画面の末尾に、プロンプトのプレビュー(開閉のボタン・「入力中の内容を反映」のボタン・注記・文面)を出す。exe と同じ `buildPromptPreview` をクライアントで呼ぶ(API は作らない)。追加指示は送信と同じ `clampAdditionalInstruction`(2,000 UTF-16 単位)で切り、クリップ幅は `resolveClipVariant` で解決する。
+- cloud: `clampAdditionalInstruction` を `settings.ts`(依存なしの純モジュール)へ移し、`llm-run.ts` から再 export(定義は1か所)。
+- cloud(ビルド): クライアントの許可リストに `@keiba/core/analyzer/build-prompt` を足し(唯一の例外)、バンドルのサイズの上限を 100,000 → 125,000 バイトに引き上げた(生成物は 81,269 → 111,705 バイト)。
+- テスト: 送信との契約テスト(`race-day-llm.test.ts` の e10)ほか。文書: `cloud/README.md`・`docs/current-spec.md`。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い(web 版の設定画面だけ。サーバ・D1・core・exe のコードは変えていない)。分析結果の数値・プロンプトの文面・保存データも変わらない。前例: #177〜#198 のクラウド版の変更も patch で運用してきた(ゲート決定 2026-10-07。cloud の機能追加は patch で通す)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。API(`/api/settings` ほか)も変えていない。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

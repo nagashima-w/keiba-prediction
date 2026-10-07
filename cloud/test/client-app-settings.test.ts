@@ -504,6 +504,29 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     expect(field("bankroll").attrs?.["value"]).toBe("500000");
   });
 
+  it("Issue #201: プレビューを開いたまま追跡のポーリングが動いても、文面は変わらず、DOM を置き換えない(打った追加指示は「入力中の内容を反映」を押すまで文面に出ない)", async () => {
+    const t = await trackedHarness();
+    t.go("#settings");
+    await t.app.whenIdle();
+    const field = (key: string): VNode => findAll(t.tree(), (n) => n.attrs?.["data-field"] === key)[0]!;
+    const previewOf = (): string => String(findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "prompt-preview")[0]!.children![0]);
+    findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "preview-toggle")[0]!.on!.click!();
+    const opened = previewOf();
+    expect(opened, "前提: 開いている").toContain("サンプルレース");
+    const treeBefore = JSON.stringify(t.tree());
+    const replacedBefore = t.root.replaced;
+    const rendersBefore = t.renderCalls();
+    field("additionalInstruction").on!.input!("ポーリング中に打った指示");
+    await t.timers.advance(20_000);
+    expect(t.renderCalls(), "前提: 強制なしの再描画が実際に呼ばれた(空振りでない)").toBeGreaterThan(rendersBefore);
+    expect(previewOf()).toBe(opened);
+    expect(previewOf()).not.toContain("ポーリング中に打った指示");
+    expect(JSON.stringify(t.tree())).toBe(treeBefore);
+    expect(t.root.replaced, "DOM を置き換えない").toBe(replacedBefore);
+    findAll(t.tree(), (n) => String(n.attrs?.["class"] ?? "") === "preview-refresh")[0]!.on!.click!();
+    expect(previewOf()).toContain("ポーリング中に打った指示");
+  });
+
   it("検証エラー・保存の失敗の直後は強制描画なので、そのとき初めて最新の下書きが木に出る(エラーのある入力が画面に残る)", async () => {
     const t = await trackedHarness();
     t.go("#settings");
@@ -515,5 +538,139 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     expect(t.posts).toEqual([]);
     expect(field("bankroll").attrs?.["value"]).toBe("abc"); // 検証エラーの強制描画で、最新の下書きが出る
     expect(field("bankroll").attrs?.["aria-invalid"]).toBe("true");
+  });
+});
+
+/**
+ * Issue #201: プロンプトのプレビュー。開閉・反映は**ネットワークに出ない**(`GET /api/settings` 以外の取得を起こさない。偽の fetch は想定外の取得で投げる)。
+ * 入力のたびには再描画しない(#189 の設計)ので、プレビューの文面が入力に追いつくのは「入力中の内容を反映」(と、保存・再読込などの強制描画)を押した時点。
+ * **押したときは `render(true)` で、写し(`settingsShown`)を現在の下書きへ更新してから描く**(強制なしで描くと、古い写しで入力欄が作り直され、打った文字が消える)。
+ */
+describe("Issue #201: プロンプトのプレビュー(開閉・入力の反映)", () => {
+  const toggleOf = (h: Harness): VNode => byClass(h.tree(), "preview-toggle")[0]!;
+  const refreshOf = (h: Harness): VNode | undefined => byClass(h.tree(), "preview-refresh")[0];
+  const previewText = (h: Harness): string | null => {
+    const node = byClass(h.tree(), "prompt-preview")[0];
+    return node === undefined ? null : String(node.children![0]);
+  };
+
+  it("画面に入った直後は閉じている(文面なし)。開くと強制描画で文面が出る。取得は増えない。閉じると文面は消える", async () => {
+    const h = await started();
+    expect(previewText(h)).toBeNull();
+    expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("false");
+    const calls = [...h.calls];
+    const before = h.renders.length;
+    toggleOf(h).on!.click!();
+    expect(h.renders.length).toBe(before + 1);
+    expect(h.renders[before]!.force).toBe(true);
+    expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("true");
+    expect(previewText(h)).toContain("サンプルレース");
+    expect(h.calls).toEqual(calls); // ネットワークに出ない
+    toggleOf(h).on!.click!();
+    expect(h.renders[h.renders.length - 1]!.force).toBe(true);
+    expect(previewText(h)).toBeNull();
+    expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("false");
+    expect(h.calls).toEqual(calls);
+  });
+
+  it("開いた文面は、保存済み(サーバ)の追加指示・クリップ幅ではなく、その時点の下書きから作る", async () => {
+    const h = await started();
+    h.type("additionalInstruction", "未保存の指示");
+    h.type("clipVariant", "wide15");
+    toggleOf(h).on!.click!();
+    expect(previewText(h)).toContain("未保存の指示");
+    expect(previewText(h)).toContain("±15%(絶対値0.15)");
+    expect(h.field("additionalInstruction").attrs?.["value"]).toBe("未保存の指示"); // 入力欄の打った文字は消えない
+    expect(h.field("clipVariant").attrs?.["value"]).toBe("wide15");
+  });
+
+  it("開いたあとの入力は、再描画もプレビューの更新もしない。「入力中の内容を反映」で、強制描画して文面が入力に追いつく(入力欄は下書きのまま)", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    const opened = previewText(h)!;
+    expect(opened).not.toContain("あとから打った指示");
+    const before = h.renders.length;
+    h.typeInput("additionalInstruction", "あとから打った指示");
+    h.type("clipVariant", "wide15");
+    expect(h.renders.length).toBe(before); // 再描画しない
+    expect(previewText(h)).toBe(opened); // 文面もそのまま
+    expect(refreshOf(h)).toBeDefined();
+    refreshOf(h)!.on!.click!();
+    expect(h.renders.length).toBe(before + 1);
+    expect(h.renders[before]!.force).toBe(true);
+    expect(previewText(h)).not.toBe(opened); // 前提: 変わった
+    expect(previewText(h)).toContain("あとから打った指示");
+    expect(previewText(h)).toContain("±15%(絶対値0.15)");
+    expect(h.field("additionalInstruction").attrs?.["value"]).toBe("あとから打った指示");
+    expect(h.field("clipVariant").attrs?.["value"]).toBe("wide15");
+    expect(h.calls.filter((c) => c !== "GET /api/settings")).toEqual([]);
+  });
+
+  it("反映ボタンは開いているときだけ。閉じているときの反映の呼び出し(古いボタンの click など)は何もしない", async () => {
+    const h = await started();
+    expect(refreshOf(h)).toBeUndefined();
+    const before = h.renders.length;
+    toggleOf(h).on!.click!();
+    const refresh = refreshOf(h)!.on!.click!;
+    toggleOf(h).on!.click!(); // 閉じる
+    const afterClose = h.renders.length;
+    expect(afterClose).toBe(before + 2);
+    refresh(); // 閉じたあとに届いた反映
+    expect(h.renders.length).toBe(afterClose);
+  });
+
+  it("保存の成功: 開いたまま、サーバが返した設定で文面が更新される(保存した追加指示が文面に出る)", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    h.type("additionalInstruction", "保存する指示");
+    h.clickSave();
+    await h.app.whenIdle();
+    expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("true"); // 開いたまま
+    expect(previewText(h)).toContain("保存する指示");
+  });
+
+  it("保存中の開閉・反映は無視する(描画は増えない)。入力を無視するのと同じ", async () => {
+    const gate = deferred<Resp>();
+    const h = await started({ postResponder: () => gate.promise });
+    h.clickSave();
+    const before = h.renders.length;
+    toggleOf(h).on!.click!();
+    expect(h.renders.length).toBe(before);
+    expect(previewText(h)).toBeNull();
+    gate.resolve(ok({ ok: true, settings: SERVER }));
+    await h.app.whenIdle();
+  });
+
+  it("画面を離れて戻ると、閉じた状態に戻る(開閉はメモリだけ。戻ると設定を取り直す)", async () => {
+    const h = await started();
+    toggleOf(h).on!.click!();
+    expect(previewText(h)).not.toBeNull();
+    h.go("#date=20260628&venue=central");
+    h.go("#settings");
+    await h.app.whenIdle();
+    expect(previewText(h)).toBeNull();
+    expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("false");
+  });
+
+  it("「再読込」は未保存の入力を捨てるので、開いたままの文面もサーバの値に戻る", async () => {
+    const h = await started();
+    h.type("additionalInstruction", "捨てられる指示");
+    toggleOf(h).on!.click!();
+    expect(previewText(h)).toContain("捨てられる指示");
+    h.clickRefresh();
+    await h.app.whenIdle();
+    expect(toggleOf(h).attrs?.["aria-expanded"]).toBe("true");
+    expect(previewText(h)).not.toContain("捨てられる指示");
+  });
+
+  it("取得前(読み込み中)は、プレビューのボタンが無い。取得できると出る", async () => {
+    const h = harness("#settings");
+    const gate = deferred<Resp>();
+    h.getResponder = () => gate.promise;
+    h.app.start();
+    expect(byClass(h.tree(), "preview-toggle")).toEqual([]);
+    gate.resolve(ok({ ok: true, settings: SERVER, source: "d1" }));
+    await h.app.whenIdle();
+    expect(toggleOf(h)).toBeDefined();
   });
 });

@@ -19,6 +19,7 @@ import {
   type CloudSettings,
 } from "../src/settings";
 import type { SettingsSource } from "./api-settings";
+import { buildPreviewText } from "./prompt-preview";
 
 export type FieldKey = keyof CloudSettings;
 export type DraftValue = string | boolean;
@@ -124,6 +125,20 @@ export interface SettingsModelInput {
   readonly draft: SettingsDraft | null;
   readonly errors: FieldErrors;
   readonly save: SettingsSaveState;
+  /** プロンプトのプレビューを開いているか(Issue #201。省略は閉じている)。 */
+  readonly previewOpen?: boolean;
+}
+
+/** プロンプトのプレビューの表示用データ(Issue #201)。閉じているときは文面・注記・反映ボタンを持たない(文面は開いたときだけ組み立てる)。 */
+export interface PreviewModel {
+  readonly open: boolean;
+  readonly toggleLabel: string;
+  /** 「入力中の内容を反映」ボタンの文言(開いているときだけ)。 */
+  readonly refreshLabel: string | null;
+  /** 注記(開いているときだけ)。 */
+  readonly notes: readonly string[];
+  /** プレビューの文面(開いているときだけ。改行を含む)。 */
+  readonly text: string | null;
 }
 
 export interface FieldModel {
@@ -152,6 +167,8 @@ export interface SettingsModel {
   readonly saving: boolean;
   readonly saveNotice: { readonly tone: "ok" | "error"; readonly text: string } | null;
   readonly fields: readonly FieldModel[];
+  /** プロンプトのプレビュー(Issue #201)。下書きを取得できていないとき(項目が出ないとき)は null。 */
+  readonly preview: PreviewModel | null;
 }
 
 const COMBO_NAME = "ワイド・馬連・馬単・三連複・三連単・枠連";
@@ -207,6 +224,41 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   },
 };
 
+const PREVIEW_TOGGLE_OPEN = "LLMへ送るプロンプトのプレビューを開く";
+const PREVIEW_TOGGLE_CLOSE = "LLMへ送るプロンプトのプレビューを閉じる";
+const PREVIEW_REFRESH = "入力中の内容を反映";
+
+/**
+ * プレビューの注記(画面に出る文なので、Issue 番号は書かない)。exe の設定画面(`SettingsView.tsx`)の注記を踏襲し、cloud の実際の挙動に合わせた:
+ *  - 追加指示・クリップ幅は、exe のように入力の即時反映ではなく、「入力中の内容を反映」を押した時点の入力欄の内容で作る(入力のたびには再描画しない設計。`app.ts`)
+ *  - 実際の分析に使われるのは保存済みの内容(保存後、次に実行する発走前の分析から)
+ *  - **現在のクラウド版は、同日の傾向・重賞の傾向を実際の分析でも送らない**(`race-day-core.ts` が当日傾向の読み出しを空にし、重賞の過去の傾向も注入していない)。
+ *    これらが送られるようになったら、この注記は更新・削除する。サンプルには、もともと含まれない。
+ */
+const PREVIEW_NOTES: readonly string[] = [
+  "※このプレビューはサンプルレースで作った例です。実際の分析では【レース情報】【展開想定】【出走馬】は分析対象レースの実データに置き換わります。【予想印】【出力スキーマ】は実際の分析でもこのままLLMへ送られます。【指示】も基本的にこのまま送られますが、天候・馬場が悪化条件(雨・稍重以下など)のレースでは「馬場悪化シナリオ」の指示が1文追加されます(このサンプルは晴・良のため出ていません)。",
+  "【追加指示】とクリップ幅(許容幅の表記)は、「入力中の内容を反映」を押した時点の入力欄の内容で作ります(入力しただけでは変わりません)。実際の分析に使われるのは保存済みの内容で、保存後、次に実行する発走前の分析から反映されます。",
+  "現在のクラウド版は、同日の傾向・重賞の傾向を実際の分析でも送りません(今後追加予定)。このサンプルにも含まれません。",
+];
+
+function buildPreviewModel(draft: SettingsDraft, open: boolean): PreviewModel {
+  if (!open) {
+    return { open: false, toggleLabel: PREVIEW_TOGGLE_OPEN, refreshLabel: null, notes: [], text: null };
+  }
+  const preview = buildPreviewText({ additionalInstruction: String(draft.additionalInstruction), clipVariant: String(draft.clipVariant) });
+  return {
+    open: true,
+    toggleLabel: PREVIEW_TOGGLE_CLOSE,
+    refreshLabel: PREVIEW_REFRESH,
+    notes: [
+      ...PREVIEW_NOTES,
+      ...(preview.clamped ? [`追加指示が ${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字(UTF-16 の単位)を超えているため、先頭から切った文面が送られます(このプレビューも切った後の文面です)。`] : []),
+      `プロンプト版: ${preview.promptVersion}`,
+    ],
+    text: preview.text,
+  };
+}
+
 export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
   const { load, draft, errors, save } = input;
   const ready = load.kind === "ready" && draft !== null;
@@ -237,5 +289,6 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
     saving,
     saveNotice: save.kind === "saved" ? { tone: "ok", text: SAVED_NOTICE } : save.kind === "error" ? { tone: "error", text: save.message } : null,
     fields,
+    preview: ready ? buildPreviewModel(draft, input.previewOpen === true) : null,
   };
 }

@@ -48,8 +48,13 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 100KB)", () => {
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(100_000);
+  it("生成物は小さい(肥大の検知。上限は 125,000 バイト)", () => {
+    // Issue #201: 上限を 100,000 から 125,000 へ引き上げた。設定画面のプレビューが exe と同じ `buildPromptPreview`(`@keiba/core/analyzer/build-prompt` の閉包。
+    // build-prompt・clip-variants・condition-change・leg-style・derive-features の 5 ファイル)を取り込むため。プロンプトの文面は日本語が大半で、esbuild の既定の `\u` エスケープ
+    // (1 文字 6 バイト。`charset` は変えない)で出力されるので、大きく増える。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): 3d8a0b1(#198。プレビューなし)は 81,269、
+    // プレビューを入れた #201 の実装後は 111,705(+30,436)。上限 125,000 は実装後の約 12% 増(取り込み前の「81,269 / 100,000」の余裕は約 23%)。
+    // **さらに上げるときは、増える理由と実測値をここに書く。**
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(125_000);
   });
 });
 
@@ -63,6 +68,10 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   // Issue #189(設定画面): ラベルと版 ID は exe の共有定数(import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
   "../../packages/app/src/shared/settings",
   "../src/settings",
+  // Issue #201(設定画面のプロンプトのプレビュー): **core を直接 import する唯一の例外**。exe の設定画面と同じ関数(`buildPromptPreview`)を直接呼んで、プレビューの文面を exe と
+  // 一致させるため(renderer に再 export の薄いモジュールを置くと、exe 側を触ることになる)。この入口は core の `exports` の宣言済みサブパスで、閉包に `node:`・`node_modules`・バレルは入らない
+  // (下の閉包の検査と生成物の検査が固定する)。ほかの core のサブパス・バレルは引き続き拒否する(下の「対照」)。
+  "@keiba/core/analyzer/build-prompt",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -144,10 +153,10 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
   });
 
   it("対照: import の許可判定は、バレル・core の直接 import・bare specifier・許可外の renderer を拒否する(上の検査が空振りでない)", () => {
-    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/app/src/main/analysis-export"]) {
+    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/app/src/main/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types", "../../packages/app/src/shared/settings", "../src/settings"]) {
+    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types", "../../packages/app/src/shared/settings", "../src/settings", "@keiba/core/analyzer/build-prompt"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
@@ -156,6 +165,9 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     const inputs = await listBundledInputs();
     expect(inputs.some((f) => f.endsWith("packages/app/src/renderer/allocation-proposal-view.ts")), "前提: renderer の流用が閉包に入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("packages/core/src/ev/combo-bet-allocation.ts")), "前提: core のサブパスが tsconfig の paths で解決されている").toBe(true);
+    // Issue #201: プレビューが呼ぶ exe と同じ関数(`buildPromptPreview`)の閉包が入っている(入っていなければ、下の禁止の検査は何も見ていない)
+    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/build-prompt.ts")), "前提: build-prompt が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/clip-variants.ts")), "前提: clip-variants が閉包に入っている").toBe(true);
     expect(forbiddenInputs(inputs)).toEqual([]);
   }, 60_000);
 
@@ -424,6 +436,29 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(post.init.referrerPolicy).toBe("same-origin");
     expect(JSON.parse(post.init.body!)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true });
     await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
+  });
+
+  it("Issue #201: 設定画面のプロンプトのプレビュー(生成物の実行): 開くと、exe と同じ関数の文面(【予想印】・サンプルレース)が、打った追加指示つきで出る。ネットワークには出ない(GET /api/settings だけ)。閉じると消える", async () => {
+    const { root, calls } = run("#settings");
+    const elements = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement);
+    await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
+    const toggleOf = () => elements().find((n) => n.attrs.get("class") === "preview-toggle")!;
+    expect(toggleOf().attrs.get("aria-expanded")).toBe("false");
+    expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false); // 前提: 開くまで文面は無い
+    const area = elements().find((n) => n.attrs.get("data-field") === "additionalInstruction")!;
+    area.listeners.get("input")![0]!({ target: { value: "スモークの追加指示" } });
+    toggleOf().listeners.get("click")![0]!(undefined);
+    const body = elements().find((n) => n.attrs.get("class") === "prompt-preview");
+    expect(body, "開くと文面が出る").toBeDefined();
+    const text = textOf(body!);
+    expect(text).toContain("サンプルレース(プレビュー用)");
+    expect(text).toContain("【予想印】");
+    expect(text).toContain("±10%(絶対値0.10)");
+    expect(text).toContain("スモークの追加指示");
+    expect(toggleOf().attrs.get("aria-expanded")).toBe("true");
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+    toggleOf().listeners.get("click")![0]!(undefined);
+    expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false);
   });
 
   it("レース画面(#…&race=): 状態(race_id つき)と過去の分析の 2 本だけを取り、カードと朝の prior を描画する。一覧・板・分析の詳細・POST は呼ばない", async () => {

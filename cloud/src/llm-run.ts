@@ -28,25 +28,12 @@ import {
 import type { BuildPromptInput } from "@keiba/core/pipeline";
 import type { LlmCallRecord } from "./llm-calls";
 import type { CloudLlm } from "./llm-sender";
-import { ADDITIONAL_INSTRUCTION_MAX_LENGTH } from "./settings";
 
 // ---- 追加指示の切り詰め ----
 
-/**
- * 追加指示を `max` UTF-16 コード単位(既定 2,000。`String#length` と同じ単位)までに切る。上位サロゲートで終わってしまうとき(ペアの途中)は、そのペアごと落とす。
- * 先頭から切るだけで、途中は書き換えない。`clamped` は、実際に切ったか。
- */
-export function clampAdditionalInstruction(text: string, max: number = ADDITIONAL_INSTRUCTION_MAX_LENGTH): { readonly text: string; readonly clamped: boolean } {
-  if (text.length <= max) {
-    return { text, clamped: false };
-  }
-  let end = max;
-  const last = end > 0 ? text.charCodeAt(end - 1) : 0;
-  if (last >= 0xd800 && last <= 0xdbff) {
-    end -= 1; // 上位サロゲートだけが残る(対の下位サロゲートを切った)ので、ペアごと落とす
-  }
-  return { text: text.slice(0, end), clamped: true };
-}
+// 定義は `settings.ts`(依存を持たない純モジュール)に移した(Issue #201: 設定画面のプレビューが、送信と同じ切り方をするためにクライアントから import する。
+// このファイルは SDK を巻き込むのでクライアントのバンドルに入れられない)。既存の import(`race-day-core.ts`・テスト)のため、ここから再 export する。
+export { clampAdditionalInstruction } from "./settings";
 
 // ---- 秘密 ----
 

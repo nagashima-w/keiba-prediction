@@ -38,6 +38,17 @@ describe("スマホ画面(renderPage)の名前と見出しのリンク", () => {
     expect(html).toMatch(/\.settings-save\s*\{[^}]*width:\s*100%/);
   });
 
+  it("Issue #201: プロンプトのプレビューは、開閉・反映のボタンが 44px 以上。文面は等幅・改行を保つ・折り返す。内側のスクロール(max-height・overflow)は付けない", () => {
+    expect(html).toMatch(/\.preview-toggle\s*\{[^}]*min-height:\s*44px/);
+    expect(html).toMatch(/\.preview-refresh\s*\{[^}]*min-height:\s*44px/);
+    const rule = /\.prompt-preview\s*\{([^}]*)\}/.exec(html);
+    expect(rule, "前提: .prompt-preview の規則がある").not.toBeNull();
+    expect(rule![1]).toMatch(/font-family:[^;]*monospace/);
+    expect(rule![1]).toMatch(/white-space:\s*pre-wrap/);
+    expect(rule![1]).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(rule![1]).not.toMatch(/max-height|overflow:|overflow-y/);
+  });
+
   it("CSP の対象になるものを足していない: インラインのスクリプトとイベント属性が無い。スクリプトは /app.js の1本だけ", () => {
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
     expect(html).not.toMatch(/\son[a-z]+\s*=/i);
