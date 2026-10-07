@@ -8,10 +8,12 @@
  *  - EV プラスの強調はサーバの `isPositive` に従う(クライアントで EV から再計算しない)。推定 EV(`evEstimated`)は接尾辞「(推定)」で区別する
  *  - 配分は exe の `buildAllocationProposalView` を流用する(文言・券種ラベル・実効設定を exe と揃える)。**配分の行が無い(null)ときは、exe の関数を呼ばず cloud 専用の文言**
  *    (exe の「記録なし」は「Issue #59より前の分析です」と言い、cloud では事実と違うため)
- *  - 配分が `unset`(未設定)のときも注記だけ cloud 専用にする(exe は「設定画面で入力」と言うが、cloud に設定画面は無い)。判定は exe の関数が返す `kind` で行う
+ *  - 配分が `unset` で**両方(総資金・1レース上限)が未設定**のときも、注記だけ cloud 専用にする(exe の `BET_ALLOCATION_UNSET_NOTE` は「設定画面で入力」と言うが、cloud に設定画面は無い)。
+ *    片方だけ・判定不能の注記(設定画面に触れていない)は exe のまま。差し替えは、exe から import した定数との一致で行う(文言を変えても追従する。exe の判定の二重持ちを避ける)
  * ⚠️ このファイルが exe の renderer を import する唯一の層(`format.ts`・`allocation-proposal-view.ts`)。許可リストは `test/client-bundle.test.ts`。
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/app/src/renderer/allocation-proposal-view";
+import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-allocation-view";
 import { formatEstimatedEvSuffix, formatEv, formatOdds, formatPercent } from "../../packages/app/src/renderer/format";
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
@@ -24,8 +26,8 @@ export type ResultSource =
 
 export const NO_ALLOCATION_NOTE = "この分析には配分の記録がありません。";
 /**
- * 配分が `unset`(総資金・1レース上限が未設定)のときの cloud 専用の注記。exe の `BET_ALLOCATION_UNSET_NOTE` は「設定画面で…入力してください」と言うが、
- * cloud には設定画面が無い(D1 の `cloud_settings` に直接入れる)うえ、既定値は 0 なので cloud の分析はほぼ全件が `unset` になり、存在しない画面へ誘導してしまう。
+ * exe の `BET_ALLOCATION_UNSET_NOTE`(両方が未設定のときの注記。「設定画面で…入力してください」)の cloud 専用の代わり。cloud には設定画面が無い(D1 の `cloud_settings` に直接入れる)うえ、
+ * 既定値は 0 なので cloud の分析はほぼ全件がこの状態になり、存在しない画面へ誘導してしまう。**両方が未設定のときの文**なので、片方だけ・判定不能には使わない。
  */
 export const UNSET_ALLOCATION_NOTE =
   "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(設定画面は今後追加します。現在は D1 の cloud_settings に入れます)。";
@@ -90,11 +92,9 @@ function allocationOf(a: AnalysisDetail): AllocationSection {
     return { kind: "none", notices: [NO_ALLOCATION_NOTE], bets: [], settingsRows: [] };
   }
   const view = buildAllocationProposalView(a.allocation);
-  // 判定は exe の関数が返す kind(構造)で行う(文言の文字列比較はしない)。unset だけを差し替え、他の種類は exe の文言のまま。
-  if (view.kind === "unset") {
-    return { kind: view.kind, notices: [UNSET_ALLOCATION_NOTE], bets: view.bets, settingsRows: view.settingsRows };
-  }
-  return { kind: view.kind, notices: view.notices, bets: view.bets, settingsRows: view.settingsRows };
+  // exe の「両方未設定」の注記(import した定数と一致するもの)だけを差し替える。片方だけ・判定不能・フォールバックなどの他の注記と、注記の並び・件数は変えない。
+  const notices = view.notices.map((n) => (n === BET_ALLOCATION_UNSET_NOTE ? UNSET_ALLOCATION_NOTE : n));
+  return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows };
 }
 
 function contentOf(a: AnalysisDetail): ResultContent {

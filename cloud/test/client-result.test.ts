@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { buildResultModel, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
-import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-allocation-view";
+import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
+import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/app/src/renderer/bet-allocation-view";
 import type { Route } from "../client/route";
 
 /**
@@ -168,27 +169,49 @@ describe("配分(exe の buildAllocationProposalView を流用)", () => {
   describe("配分が unset(総資金・1レース上限が未設定。cloud の既定値は 0 なので、ほぼ全件がこの状態)", () => {
     const unset = (over: Record<string, unknown> = {}) => ({ ...ALLOCATION, bets: [], route: "unset", fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, ...over });
 
-    it("exe の「設定画面で…入力してください」(cloud には設定画面が無い)ではなく、cloud 専用の文言を出す。実効設定の行は残る", () => {
-      for (const over of [{}, { bankroll: 0, perRaceCap: 3000 }, { bankroll: 10000, perRaceCap: 0 }]) {
-        const allocation = content(analysis({ allocation: unset(over) })).allocation;
-        expect(allocation.kind).toBe("unset");
-        expect(allocation.notices).toEqual([UNSET_ALLOCATION_NOTE]);
-        expect(JSON.stringify(allocation.notices)).not.toContain("設定画面で");
-        expect(allocation.bets).toEqual([]);
-        expect(allocation.settingsRows).toContain("総資金: " + (over.bankroll === undefined ? "0円" : `${(over.bankroll as number).toLocaleString("en-US")}円`));
+    it("cloud 専用の文言をリテラルで 1 回固定する(文言を変えるときは、意図してここを直す)", () => {
+      expect(UNSET_ALLOCATION_NOTE).toBe(
+        "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(設定画面は今後追加します。現在は D1 の cloud_settings に入れます)。",
+      );
+    });
+
+    it("両方が未設定(0)のときだけ、exe の「設定画面で…入力してください」を cloud 専用の文言に差し替える。「設定画面で」を含まない。実効設定の行は残る", () => {
+      const allocation = content(analysis({ allocation: unset() })).allocation;
+      expect(allocation.kind).toBe("unset");
+      expect(allocation.notices).toEqual([UNSET_ALLOCATION_NOTE]);
+      expect(JSON.stringify(allocation.notices)).not.toContain("設定画面で");
+      expect(allocation.bets).toEqual([]);
+      expect(allocation.settingsRows).toContain("総資金: 0円");
+      expect(allocation.settingsRows).toContain("1レース上限: 0円");
+    });
+
+    it("片方だけ未設定・判定不能は、exe の対応する注記のまま(cloud の文言は入らない。直下の実効設定の行と矛盾しない)", () => {
+      const cases: readonly [string, Record<string, unknown>, string][] = [
+        ["総資金だけ 0", unset({ bankroll: 0, perRaceCap: 3000 }), UNSET_BANKROLL_ONLY_NOTE],
+        ["1レース上限だけ 0", unset({ bankroll: 1_000_000, perRaceCap: 0 }), UNSET_PER_RACE_CAP_ONLY_NOTE],
+        ["unset なのに両方が正(判定不能)", unset({ bankroll: 10000, perRaceCap: 3000 }), UNSET_INDETERMINATE_NOTE],
+      ];
+      for (const [name, allocation, exeNote] of cases) {
+        const section = content(analysis({ allocation: allocation as never })).allocation;
+        expect(section.kind, name).toBe("unset");
+        expect(section.notices, name).toEqual([exeNote]);
+        expect(section.notices, name).not.toContain(UNSET_ALLOCATION_NOTE);
       }
     });
 
-    it("対照: exe の関数そのものは、同じ入力で「設定画面で」の文言を返す(差し替えが実際に何かを置き換えている=空振りでない)", () => {
+    it("対照: 差し替える対象(exe の両方未設定の注記)は「設定画面で」を含み、他の 3 つの unset の注記は含まない(差し替えの条件が、設定画面に触れる 1 つだけ)", () => {
       expect(BET_ALLOCATION_UNSET_NOTE).toContain("設定画面で");
+      for (const note of [UNSET_BANKROLL_ONLY_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE, UNSET_INDETERMINATE_NOTE]) {
+        expect(note).not.toContain("設定画面");
+      }
       expect(UNSET_ALLOCATION_NOTE).not.toBe(BET_ALLOCATION_UNSET_NOTE);
-      expect(UNSET_ALLOCATION_NOTE).toContain("cloud_settings");
     });
 
-    it("unset 以外(見送り・複勝対象外・配分あり・判定不能・yoso・invalid)は exe の文言のまま(差し替えない)", () => {
+    it("unset 以外(見送り・複勝対象外・配分あり・判定不能・yoso・invalid)は exe の文言のまま(差し替えない)。複勝対象外は exe の定数とも一致する", () => {
+      expect(placeBetUnavailableMessage("not-sold")).toBe("複勝が発売されないため対象外です");
       const cases: readonly [string, Record<string, unknown>, string][] = [
         ["skip", { ...ALLOCATION, bets: [], route: "place-only", skipReasonCode: "cap-too-small", betUnit: 100, fallbackReason: null }, "1レースの上限が100円未満のため配分できません"],
-        ["unavailable", { ...ALLOCATION, bets: [], route: "unavailable", unavailableReason: "not-sold", fallbackReason: null }, ""],
+        ["unavailable", { ...ALLOCATION, bets: [], route: "unavailable", unavailableReason: "not-sold", fallbackReason: null }, "複勝が発売されないため対象外です"],
         ["yoso", { ...ALLOCATION, bets: [], route: "yoso", fallbackReason: null }, "分析時点でオッズが未発売だったため、配分提案を行っていません。"],
         ["invalid", { ...ALLOCATION, bets: [], route: "invalid", fallbackReason: null }, "配分計算中にエラーが発生したため、配分を提案していません。"],
         ["indeterminate", { ...ALLOCATION, bets: [], route: "future-route", fallbackReason: null }, "配分提案の状態を判定できません(記録された種別が不明です)。"],
@@ -199,7 +222,7 @@ describe("配分(exe の buildAllocationProposalView を流用)", () => {
         expect(section.kind, kind).toBe(kind);
         expect(section.notices, kind).not.toContain(UNSET_ALLOCATION_NOTE);
         expect(section.notices.length, kind).toBeGreaterThan(0);
-        if (expectedNotice !== "") expect(section.notices[0], kind).toBe(expectedNotice);
+        expect(section.notices[0], kind).toBe(expectedNotice);
       }
     });
   });

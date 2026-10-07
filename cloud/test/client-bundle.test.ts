@@ -57,6 +57,7 @@ describe("生成物のドリフトと決定性", () => {
 /** クライアントが取り込んでよい exe 側のモジュール(相対 import の指定子。拡張子なし)。exe の renderer・shared の純関数だけ。#185 で配分の表示(`buildAllocationProposalView`)を流用するため。 */
 const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../../packages/app/src/renderer/allocation-proposal-view",
+  "../../packages/app/src/renderer/bet-allocation-view",
   "../../packages/app/src/renderer/format",
   "../../packages/app/src/shared/analysis-types",
 ]);
@@ -143,7 +144,7 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/app/src/main/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types"]) {
+    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
