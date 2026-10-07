@@ -105,6 +105,7 @@ const ANALYSIS: AnalysisDetail = {
   kaisaiDate: "20260628",
   evEstimated: false,
   model: null,
+  llmNote: null,
   race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
   horses: [
     { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null },
@@ -425,7 +426,7 @@ describe("カードの説明(Issue #191)", () => {
   });
 
   // 文言そのものは固定しない。ただし、次の「事実の印」は、モードごとに固有の語として固定する(取り違え・事実の削除で赤になる)。
-  it("朝の準備の説明は、戦績・調教を取得すること(調教は中央のみ)に触れ、LLM には触れない。発走前の説明は、現在は LLM を使わないこと(#179 で直す)と、配分の条件(資金・上限)に触れ、戦績には触れない", () => {
+  it("朝の準備の説明は、戦績・調教を取得すること(調教は中央のみ)に触れ、LLM には触れない。発走前の説明は、LLM(キーの有無での違い・補正・印と根拠・EV)と配分の条件(資金・上限)に触れ、戦績には触れない。「現在は LLM を使いません」とは言わない", () => {
     const [morning, preRace] = cards(buildRaceModel(input()));
     expect(morning!.mode).toBe("morning");
     expect(preRace!.mode).toBe("pre_race");
@@ -433,12 +434,19 @@ describe("カードの説明(Issue #191)", () => {
       expect(morning!.description, `朝の説明に「${word}」`).toContain(word);
     }
     expect(morning!.description).not.toContain("LLM");
-    expect(preRace!.description).toContain("LLM");
-    expect(preRace!.description).toMatch(/LLM を使いません|LLM は使いません/);
-    for (const word of ["資金", "上限"]) {
+    for (const word of ["LLM", "キー", "補正", "印", "根拠", "統計のみ", "EV", "資金", "上限"]) {
       expect(preRace!.description, `発走前の説明に「${word}」`).toContain(word);
     }
+    expect(preRace!.description).not.toMatch(/LLM を使いません|LLM は使いません|LLM は未対応|現在は/); // キーが登録されていれば LLM を使う(嘘にならない書き方)
     expect(preRace!.description).not.toContain("戦績");
+    // cloud のプロンプトに何が入っているか(調教・コメント・展開・同日の傾向・重賞の傾向)は、この文で約束しない
+    for (const word of ["調教", "コメント", "展開", "傾向"]) {
+      expect(preRace!.description, `発走前の説明に「${word}」を書かない`).not.toContain(word);
+    }
+  });
+
+  it("発走前の説明は短い(スマホで1〜2行。150 文字以下)", () => {
+    expect([...cards(buildRaceModel(input()))[1]!.description].length).toBeLessThanOrEqual(150);
   });
 
   it("状態を取得できていない(cards が null)ときは、説明も出ない(カードが無いので)", () => {

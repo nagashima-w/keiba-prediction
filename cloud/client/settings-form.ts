@@ -5,7 +5,8 @@
  * 検証の範囲は、サーバが 400 にする**書く側の述語**(`cloud/src/settings.ts` の `CLOUD_SETTINGS_RULES[key].isWritable`)をそのまま使う(範囲の定義は1か所)。
  * 並びとラベルは exe の設定画面(`packages/app/src/renderer/SettingsView.tsx`)に合わせる(ラベルは exe の共有定数を流用)。**補助文は cloud の実際の挙動に合わせて書き直した**:
  *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
- *  - 効かない(現在は): 追加指示・クリップ幅(LLM を使う分析〈#179〉で使う。現在は LLM を使わない)/ 発走何分前(定時の自動実行〈#166〉で使う)
+ *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
+ *  - 効かない(現在は): 発走何分前(定時の自動実行〈Issue #166〉で使う)
  */
 import { ALLOCATION_BET_TYPE_LABELS, BET_ALLOCATION_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
 import {
@@ -155,7 +156,11 @@ export interface SettingsModel {
 
 const COMBO_NAME = "ワイド・馬連・馬単・三連複・三連単・枠連";
 const ALLOCATION_HELP = "既定は ON です。上の「オッズも取得する」が OFF の間は効果がありません(取得したオッズが無いため)。";
-const LLM_NOT_USED = "LLM を使う分析(#179)で使います。現在は LLM を使わないので、変更しても分析の結果は変わりません。";
+/**
+ * 追加指示・クリップ幅の補助文。LLM は Worker の secret `ANTHROPIC_API_KEY` があるときだけ使う(Issue #194)ので、**キーの有無のどちらでも嘘にならない書き方**にする
+ * (画面からキーの有無は分からない)。画面に出す文なので、Issue 番号は書かない。
+ */
+const LLM_ONLY_HELP = "発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません。";
 
 /** クリップ幅の選択肢のラベル。幅(%)は core の `CLIP_VARIANTS` の値(`client-settings-form.test.ts` が一致を固定)。 */
 const CLIP_LABELS: Readonly<Record<(typeof CLIP_VARIANT_IDS)[number], string>> = {
@@ -190,14 +195,14 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   additionalInstruction: {
     kind: "textarea",
     label: "プロンプト追加指示(任意)",
-    help: `${LLM_NOT_USED}${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字まで。市場オッズ(人気)に近づける方向の指示は、妙味検出を損なうため避けてください。`,
+    help: `${LLM_ONLY_HELP}${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字まで。市場オッズ(人気)に近づける方向の指示は、妙味検出を損なうため避けてください。`,
     maxlength: String(ADDITIONAL_INSTRUCTION_MAX_LENGTH),
   },
-  clipVariant: { kind: "select", label: "LLM補正の許容幅(クリップ幅の版。A/B比較用)", help: LLM_NOT_USED },
+  clipVariant: { kind: "select", label: "LLM補正の許容幅(クリップ幅の版。A/B比較用)", help: LLM_ONLY_HELP },
   preRaceOffsetMinutes: {
     kind: "text",
     label: "発走の何分前に評価するか",
-    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。定時の自動実行を入れるまで効きません(#166)。`,
+    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。定時の自動実行を入れるまで効きません。`,
     inputmode: "numeric",
   },
 };

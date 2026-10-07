@@ -5,6 +5,7 @@ import { buildListModel, type ListModelInput } from "../client/list";
 import { buildRaceModel, type RaceModelInput, type RunUi } from "../client/race";
 import { buildResultModel, type ResultSource } from "../client/result";
 import { buildSettingsModel, draftFromSettings } from "../client/settings-form";
+import { MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { renderScreen, type ViewActions } from "../client/view";
 import { h, type VNode } from "../client/vnode";
@@ -294,6 +295,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     kaisaiDate: "20260628",
     evEstimated: false,
     model: null,
+    llmNote: null,
     race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
     horses: [
       { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.25, isPositive: true, mark: "◎", reason: null },
@@ -334,12 +336,12 @@ describe("結果画面の VNode", () => {
     expect(textOf(cards[1]!)).toContain("複勝オッズ下限 -");
   });
 
-  it("印は mark があるときだけ要素を出す(null の馬に印の要素を出さない)。「AI補正後」は画面のどこにも出ない", () => {
-    const tree = resultTree(analysis({ model: "claude-x" }));
+  it("印は mark があるときだけ要素を出す(null の馬に印の要素を出さない)。LLM なし(モデル null)なら「AI補正後」は画面のどこにも出ない", () => {
+    const tree = resultTree(analysis({ model: null }));
     const marks = byClass(tree, "mark");
     expect(marks.map(textOf)).toEqual(["◎"]);
     expect(textOf(tree)).not.toContain("AI補正後");
-    expect(textOf(tree)).not.toContain("18.0%"); // adjustedProb(0.18)は出さない
+    expect(textOf(tree)).not.toContain("18.0%"); // adjustedProb(0.18。prior の 0.2 と違う値)は、LLM なしでは出さない
   });
 
   it("detail の注記: present では出さず、missing・none では注記を出す", () => {
@@ -814,4 +816,89 @@ describe("カードの説明の VNode(Issue #191)", () => {
   it("状態を取得できていないときは、カードも説明も出ない", () => {
     expect(byClass(renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noopActions), "card-desc")).toHaveLength(0);
   });
+});
+
+/**
+ * Issue #195: LLM の結果の表示。結果画面(`#analysis=<id>`)と発走前のカードの中(`resultSections` を共有)の**両方**で同じ表示になること。
+ * 補正後の3着内率・根拠は LLM が効いたとき(モデル ID があるとき)だけ。理由(`llmNote`)はモデルの有無に関係なく、null でなければ出す。
+ */
+describe("LLM の結果の表示(Issue #195。結果画面とカードの中の両方)", () => {
+  const NO_KEY = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
+  const MARKS = "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)";
+  const llmHorses: AnalysisDetail["horses"] = [
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い" },
+    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: null },
+  ];
+  const noLlmHorses: AnalysisDetail["horses"] = [
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 0.36, isPositive: false, mark: null, reason: null },
+  ];
+  const cardTree = (a: AnalysisDetail): VNode => {
+    const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
+    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
+  };
+  const screens: readonly [string, (a: AnalysisDetail) => VNode][] = [
+    ["結果画面", resultTree],
+    ["発走前のカードの中", cardTree],
+  ];
+
+  for (const [name, tree] of screens) {
+    describe(name, () => {
+      it("LLM が効いたとき: 馬のカードに「3着内率」と「AI補正後」の両方と、根拠の行(根拠のある馬だけ)。モデル ID を出す", () => {
+        const t = tree(analysis({ model: "claude-sonnet-x", horses: llmHorses }));
+        const cards = byClass(t, "horse");
+        expect(cards).toHaveLength(2);
+        expect(textOf(cards[0]!)).toContain("3着内率 20.0%");
+        expect(textOf(cards[0]!)).toContain("AI補正後 25.0%");
+        expect(byClass(cards[0]!, "horse-reason").map(textOf)).toEqual(["根拠 調教の動きが良い"]);
+        expect(textOf(cards[1]!)).toContain("3着内率 10.0%");
+        expect(textOf(cards[1]!)).toContain("AI補正後 9.0%");
+        expect(byClass(cards[1]!, "horse-reason")).toHaveLength(0); // 根拠が null の馬は、根拠の行を出さない
+        expect(textOf(t)).toContain("分析モデル: claude-sonnet-x");
+        expect(textOf(t)).not.toContain("LLM 未使用");
+      });
+
+      it("LLM なし(モデル null): 「AI補正後」の行・根拠の行は、データに値があっても出ない。3着内率とモデル欄「LLM 未使用(統計のみ)」は出る", () => {
+        const t = tree(analysis({ model: null, horses: [{ ...llmHorses[0]!, isPositive: false }, llmHorses[1]!] }));
+        expect(llmHorses[0]!.adjustedProb, "前提: 補正後が prior と違う").not.toBe(llmHorses[0]!.prior);
+        expect(byClass(t, "horse")).toHaveLength(2);
+        expect(textOf(t)).not.toContain("AI補正後");
+        expect(textOf(t)).not.toContain("25.0%");
+        expect(byClass(t, "horse-reason")).toHaveLength(0);
+        expect(textOf(t)).not.toContain("調教の動きが良い");
+        expect(textOf(t)).toContain("3着内率 20.0%");
+        expect(textOf(t)).toContain("分析モデル: LLM 未使用(統計のみ)");
+      });
+
+      it("理由(llmNote): LLM なし+理由、LLM あり+理由(印の制約違反)のどちらでも出る。理由なし(過去の分析・問題なく効いた)では注記の要素が出ない", () => {
+        const noKey = byClass(tree(analysis({ model: null, llmNote: NO_KEY, horses: noLlmHorses })), "llm-note");
+        expect(noKey.map(textOf)).toEqual([NO_KEY]);
+        const marks = byClass(tree(analysis({ model: "claude-x", llmNote: MARKS, horses: llmHorses })), "llm-note");
+        expect(marks.map(textOf)).toEqual([MARKS]);
+        expect(byClass(tree(analysis({ model: null, llmNote: null, horses: noLlmHorses })), "llm-note")).toHaveLength(0);
+        expect(byClass(tree(analysis({ model: "claude-x", llmNote: null, horses: llmHorses })), "llm-note")).toHaveLength(0);
+      });
+
+      it("理由の注記は「分析モデル」の行のあと、馬一覧の前にある(モデル欄の近く)", () => {
+        const t = tree(analysis({ model: null, llmNote: NO_KEY, horses: noLlmHorses }));
+        const all = textOf(t);
+        expect(all.indexOf("分析モデル")).toBeGreaterThan(-1);
+        expect(all.indexOf(NO_KEY)).toBeGreaterThan(all.indexOf("分析モデル"));
+        expect(all.indexOf(NO_KEY)).toBeLessThan(all.indexOf("馬ごとの評価"));
+      });
+
+      it("印の凡例: 印が1頭でもあるときだけ、馬ごとの評価に exe の凡例(MARK_LEGEND)を1行出す。印が無ければ出さない", () => {
+        const withMark = byClass(tree(analysis({ model: "claude-x", horses: llmHorses })), "mark-legend");
+        expect(withMark.map(textOf)).toEqual([MARK_LEGEND]);
+        expect(byClass(tree(analysis({ model: "claude-x", horses: [llmHorses[1]!] })), "mark-legend")).toHaveLength(0);
+      });
+
+      it("悪意のある文字列(根拠・理由)は、解釈されずテキストになる(script・img などの要素を作らない)", () => {
+        const PAYLOAD = "<img src=x onerror=alert(1)>";
+        const a = analysis({ model: "claude-x", llmNote: PAYLOAD, horses: [{ ...llmHorses[0]!, reason: PAYLOAD }] });
+        const { tags, texts } = mountAll(tree(a));
+        expect(tags.filter((t) => ["img", "script", "svg", "iframe", "style"].includes(t))).toEqual([]);
+        expect(texts.filter((t) => t.includes("<img")).length).toBeGreaterThanOrEqual(2); // 根拠・理由(モデル名なし。馬名は通常の文字)
+      });
+    });
+  }
 });

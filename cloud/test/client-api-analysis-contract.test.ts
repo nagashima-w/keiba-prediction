@@ -172,6 +172,23 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(model.content!.allocation.notices).toEqual(["1レースの上限が100円未満のため配分できません", "組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。"]);
   });
 
+  it("llmNote(Issue #195): 理由つきで保存した分析は固定文言が読め、理由なし(過去の分析・問題なく効いた)は null で読める(null でも unexpected にならない)。モデルは理由と独立", async () => {
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const note = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
+    const withNote = await store.saveAnalysis(await record({}, []), { llmNote: note });
+    const partial = await store.saveAnalysis({ ...(await record({}, [])), analyzedAt: "2026-06-28T06:00:00.000Z", model: "claude-x" } as AnalysisRecord, { llmNote: "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)" });
+    const legacy = await store.saveAnalysis({ ...(await record({}, [])), analyzedAt: "2026-06-28T07:00:00.000Z" });
+    const { fetch } = await connect(realEnv());
+    const read = async (id: number) => {
+      const result = await fetchAnalysis(fetch, id);
+      expect(result.ok, "前提: 読める(llmNote が null でも想定外にならない)").toBe(true);
+      return result.ok ? [result.analysis.model, result.analysis.llmNote] : [];
+    };
+    expect(await read(withNote.id)).toEqual([null, note]);
+    expect(await read(partial.id)).toEqual(["claude-x", "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)"]);
+    expect(await read(legacy.id)).toEqual([null, null]);
+  });
+
   it("配分あり(買い目)と、記録が無い分析(allocation: null)", async () => {
     const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
     const withBets = await store.saveAnalysis(

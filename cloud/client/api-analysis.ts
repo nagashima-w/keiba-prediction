@@ -40,6 +40,11 @@ export interface AnalysisDetail {
   readonly kaisaiDate: string | null;
   readonly evEstimated: boolean;
   readonly model: string | null;
+  /**
+   * LLM が使われなかった・一部しか使われなかった理由(サーバの固定文言。Issue #194 → #195)。問題なく効いたとき・過去の分析は null。
+   * `model` とは独立(印の制約違反は、モデルがあって理由もある)。
+   */
+  readonly llmNote: string | null;
   readonly race: { readonly venueName: string | null; readonly raceNumber: number | null; readonly raceName: string | null };
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
@@ -149,8 +154,8 @@ function parseAllocation(value: unknown): StoredAllocationView | null {
 
 function parseDetail(value: unknown): AnalysisDetail | null {
   if (!isRecord(value)) return null;
-  const { id, raceId, analyzedAt, kaisaiDate, evEstimated, model, race, horses, allocation, detail } = value;
-  if (!isNum(id) || !isStr(raceId) || !isStr(analyzedAt) || !strOrNull(kaisaiDate) || !isBool(evEstimated) || !strOrNull(model)) return null;
+  const { id, raceId, analyzedAt, kaisaiDate, evEstimated, model, llmNote, race, horses, allocation, detail } = value;
+  if (!isNum(id) || !isStr(raceId) || !isStr(analyzedAt) || !strOrNull(kaisaiDate) || !isBool(evEstimated) || !strOrNull(model) || !strOrNull(llmNote)) return null;
   if (detail !== "present" && detail !== "missing" && detail !== "none") return null;
   if (!isRecord(race) || !strOrNull(race["venueName"]) || !numOrNull(race["raceNumber"]) || !strOrNull(race["raceName"])) return null;
   if (!Array.isArray(horses)) return null;
@@ -172,6 +177,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     kaisaiDate,
     evEstimated,
     model,
+    llmNote,
     race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"] },
     horses: parsedHorses,
     allocation: parsedAllocation,

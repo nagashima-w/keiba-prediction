@@ -2792,6 +2792,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1 の変更は追加のみ(`ALTER TABLE ... ADD COLUMN`。旧い行は NULL)。core の `AnalysisRecord`(exe と共有)も変えていない。
 
+## 次の正式版が 1.19.26 である根拠(Issue #195 での変更)
+
+**patch**(クラウド版の画面を LLM に合わせる。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud: 結果の表示(結果画面と発走前のカードの中)に、LLM が効いたときだけ補正後の3着内率・根拠、印が1頭でもあれば exe の凡例、`llmNote`(使わなかった・一部しか使わなかった理由)の注記を出す。`api-analysis.ts` の `AnalysisDetail` に `llmNote`。
+- cloud: カードの説明(発走前)・設定の補助文(追加指示・クリップ幅)を、API キーの有無のどちらでも嘘にならない書き方に直す。画面から Issue 番号(「#179」「#166」)を除く。
+- 文書: `cloud/README.md`・`docs/current-spec.md`。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い(クラウド版の画面だけ)。前例: #177〜#194 のクラウド版の変更も patch で運用してきた(ゲート決定 2026-10-07。cloud の機能追加は patch で通す)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。サーバ・D1・core も変えていない(`GET /api/analyses/{id}` の応答は #194 から変わらない)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

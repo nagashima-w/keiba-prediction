@@ -260,16 +260,29 @@ describe("buildSettingsModel", () => {
     expect(select.options!.find((o) => o.value === "default")!.label).toContain("既定");
   });
 
-  it("補助文: 効かない項目(LLM を使う追加指示・クリップ幅、定時実行の発走何分前)は、現在は効かないことを書く。発走何分前は「定時の自動実行を入れるまで効きません」", () => {
+  it("補助文: 追加指示・クリップ幅は、LLM を使うときに効き、API キーが未登録の間は変更しても結果が変わらないことを書く(キーの有無のどちらでも嘘にならない)。発走何分前は「定時の自動実行を入れるまで効きません」", () => {
     const byKey = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.help ?? ""]));
     expect(byKey["preRaceOffsetMinutes"]).toContain("定時の自動実行を入れるまで効きません");
-    expect(byKey["additionalInstruction"]).toContain("現在は LLM を使わない");
+    for (const key of ["additionalInstruction", "clipVariant"]) {
+      expect(byKey[key], key).toContain("LLM を使うときに効きます");
+      expect(byKey[key], key).toContain("API キーが未登録の間は LLM を使わない");
+      expect(byKey[key], key).toContain("変更しても分析の結果は変わりません");
+      expect(byKey[key], key).not.toContain("現在は LLM を使わない"); // キーを登録すれば LLM を使うので、「現在は」と言い切らない
+    }
     expect(byKey["additionalInstruction"]).toContain("2,000 文字");
-    expect(byKey["clipVariant"]).toContain("現在は LLM を使わない");
     // 効いている項目には「効きません」を書かない(事実と食い違う注記を付けない)
     for (const key of ["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "includeComboOdds", "includeWideInAllocation"]) {
       expect(byKey[key], key).not.toContain("効きません");
-      expect(byKey[key], key).not.toContain("現在は LLM を使わない");
+      expect(byKey[key], key).not.toContain("LLM を使わない");
+    }
+  });
+
+  it("画面に出る文(ラベル・補助文)に、Issue 番号(#数字)を書かない", () => {
+    const fields = buildSettingsModel(READY_INPUT()).fields;
+    expect(fields.length, "前提: 項目が出ている(0 だと検査が空振り)").toBeGreaterThan(10);
+    for (const f of fields) {
+      expect(f.label, `${f.key} のラベル`).not.toMatch(/#\d/);
+      expect(f.help ?? "", `${f.key} の補助文`).not.toMatch(/#\d/);
     }
   });
 

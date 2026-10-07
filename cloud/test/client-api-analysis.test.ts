@@ -174,7 +174,7 @@ const ALLOCATION = {
 };
 const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠" };
 const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良" };
-const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
+const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
 
 describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
@@ -189,11 +189,25 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       kaisaiDate: "20260628",
       evEstimated: false,
       model: null,
+      llmNote: null,
       detail: "present",
       race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
     });
     expect(result.analysis.horses).toEqual([HORSE]);
     expect(result.analysis.allocation).toEqual(ALLOCATION);
+  });
+
+  it("llmNote(Issue #195): 固定文言はそのまま読む。null(問題なく効いた・LLM を使わない旧い分析)も読める。モデルの有無とは独立に保つ", () => {
+    const note = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
+    const read = (over: Record<string, unknown>) => {
+      const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, ...over }));
+      expect(result.ok, "前提: 読める").toBe(true);
+      return result.ok ? [result.analysis.model, result.analysis.llmNote] : [];
+    };
+    expect(read({ model: null, llmNote: note })).toEqual([null, note]);
+    expect(read({ model: "claude-x", llmNote: note })).toEqual(["claude-x", note]);
+    expect(read({ model: null, llmNote: null })).toEqual([null, null]);
+    expect(read({ model: "claude-x", llmNote: null })).toEqual(["claude-x", null]);
   });
 
   it("配分なし(null)・馬の null(名前・オッズ・EV・印)・detail の 3 値を保つ", () => {
@@ -227,6 +241,8 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
     ["detail が未知", wrap({ ...ANALYSIS, detail: "stored" })],
     ["evEstimated が無い", wrap({ ...ANALYSIS, evEstimated: undefined })],
     ["model が数値", wrap({ ...ANALYSIS, model: 5 })],
+    ["llmNote が無い(サーバがキーを足し忘れた・名前を変えた)", wrap({ ...ANALYSIS, llmNote: undefined })],
+    ["llmNote が数値", wrap({ ...ANALYSIS, llmNote: 5 })],
     ["horses が配列でない", wrap({ ...ANALYSIS, horses: {} })],
     ["馬の umaban が文字列", wrap({ ...ANALYSIS, horses: [{ ...HORSE, umaban: "1" }] })],
     ["馬の prior が null", wrap({ ...ANALYSIS, horses: [{ ...HORSE, prior: null }] })],

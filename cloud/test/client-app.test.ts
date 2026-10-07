@@ -48,6 +48,7 @@ const analysisBody = (over: Record<string, unknown> = {}) => ({
     kaisaiDate: DATE,
     evEstimated: false,
     model: null,
+    llmNote: null,
     promptVersion: null,
     race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: null, courseType: null, distance: null, weather: null, trackCondition: null },
     horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null }],

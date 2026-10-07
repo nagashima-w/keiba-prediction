@@ -125,6 +125,7 @@ export function renderPage(email: string): string {
   .horse-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .mark { font-weight: bold; }
   .horse-line { font-size: 0.9rem; }
+  .horse-reason { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
   .ev-plus { margin-left: 8px; color: var(--ok); }
   .settings small { color: var(--muted); }
   /* Issue #186: 起動のボタン・追跡の停止の注記(「状態を更新」)・カードの補足 */

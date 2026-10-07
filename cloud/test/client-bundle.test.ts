@@ -184,6 +184,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     kaisaiDate: DATE,
     evEstimated: false,
     model: null,
+    llmNote: null,
     race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
     horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null }],
     allocation: {

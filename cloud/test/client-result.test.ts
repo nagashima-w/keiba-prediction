@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
 import { buildResultModel, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
+import { MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/app/src/renderer/bet-allocation-view";
 import type { Route } from "../client/route";
 
 /**
  * Issue #185: 結果画面の表示用データ(純関数)。見出し・分析時刻・分析モデル・馬ごとのカード(3着内率・複勝オッズ下限・EV)・配分(exe の `buildAllocationProposalView` を流用)。
- * 表示の決定: 印は `mark` が non-null のときだけ・「AI補正後」は出さない(LLM なしでは 3着内率と同じ値のため)・モデルが null なら「LLM 未使用(統計のみ)」。
+ * 表示の決定: 印は `mark` が non-null のときだけ・モデルが null なら「LLM 未使用(統計のみ)」。
+ * **Issue #195**: 補正後の3着内率・根拠は、**LLM が効いたとき(モデル ID があるとき)だけ**出す(LLM なしでは補正後が 3着内率と同じ値になり、同じ値が2行並ぶだけのため)。
+ * 理由(`llmNote`)は、モデルの有無に関係なく、null でなければ出す(印の制約違反は、モデルがあって理由もある)。
  */
 
 const RACE_ID = "202603020211";
@@ -49,6 +52,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     kaisaiDate: "20260628",
     evEstimated: false,
     model: null,
+    llmNote: null,
     race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
     horses: [horse(1), horse(2)],
     allocation: { ...ALLOCATION, bets: [...ALLOCATION.bets] },
@@ -92,15 +96,40 @@ describe("馬のカード", () => {
     expect(horses[1]!.name).toBeNull();
   });
 
-  it("3着内率は prior を出す(LLM 補正後の adjustedProb ではない)。「AI補正後」の語・adjustedProb の値は、モデルがあっても画面のデータのどこにも出ない", () => {
-    const a = analysis({ model: "claude-sonnet-x", horses: [horse(1, { prior: 0.2, adjustedProb: 0.18 }), horse(2, { prior: 0.3, adjustedProb: 0.373 })] });
+  it("3着内率は常に prior。LLM なし(モデルが null)では、補正後・根拠はデータに値があっても出さない(補正後の値・「AI補正後」の語が画面のデータのどこにも無い)", () => {
+    const a = analysis({ model: null, horses: [horse(1, { prior: 0.2, adjustedProb: 0.18, reason: "秘密の根拠その1" }), horse(2, { prior: 0.3, adjustedProb: 0.373, reason: "秘密の根拠その2" })] });
+    expect(a.horses.every((h) => h.prior !== h.adjustedProb), "前提: 補正後が prior と違う(同じ値だと、出ていないことを検出できない)").toBe(true);
     const model = buildResultModel({ route: ROUTE, source: ready(a) });
+    expect(model.content!.horses.map((h) => [h.prior, h.adjusted, h.reason])).toEqual([
+      ["20.0%", null, null],
+      ["30.0%", null, null],
+    ]);
     const text = JSON.stringify(model);
-    expect(text).toContain("20.0%");
-    expect(text).toContain("30.0%");
     expect(text).not.toContain("18.0%");
     expect(text).not.toContain("37.3%");
     expect(text).not.toContain("AI補正後");
+    expect(text).not.toContain("秘密の根拠");
+  });
+
+  it("LLM が効いたとき(モデル ID がある)は、3着内率(prior)に加えて補正後の3着内率と根拠を出す。補正後は exe の表記(小数第1位のパーセント)、ラベルは exe の共有定数", () => {
+    const a = analysis({ model: "claude-sonnet-x", horses: [horse(1, { prior: 0.2, adjustedProb: 0.25, reason: "調教の動きが良い" }), horse(2, { prior: 0.3, adjustedProb: 0.373, reason: null })] });
+    const horses = content(a).horses;
+    expect(horses.map((h) => [h.prior, h.adjusted, h.reason])).toEqual([
+      ["20.0%", "25.0%", "調教の動きが良い"],
+      ["30.0%", "37.3%", null], // 根拠が null の馬は、根拠の行を出さない(null)
+    ]);
+  });
+
+  it("モデルが空文字・null のときは LLM なし(exe の analysisModelText と同じ扱い)。空文字のモデル名を「LLM が効いた」と読まない", () => {
+    for (const model of [null, ""]) {
+      const c = content(analysis({ model, horses: [horse(1, { prior: 0.2, adjustedProb: 0.25, reason: "根拠" })] }));
+      expect(c.model, `model=${JSON.stringify(model)}`).toBe("LLM 未使用(統計のみ)");
+      expect(c.horses[0]).toMatchObject({ adjusted: null, reason: null });
+    }
+  });
+
+  it("根拠が空文字の馬は、根拠の行を出さない(null)", () => {
+    expect(content(analysis({ model: "claude-x", horses: [horse(1, { reason: "" })] })).horses[0]!.reason).toBeNull();
   });
 
   it("オッズ・EV が null なら「-」(EV が null のときは推定の接尾辞も付けない)", () => {
@@ -122,6 +151,32 @@ describe("馬のカード", () => {
   it("印は mark が non-null のときだけ(null・空文字でない文字列)。null なら印のキーが null", () => {
     const horses = content(analysis({ horses: [horse(1, { mark: "◎" }), horse(2, { mark: null }), horse(3, { mark: "▲" })] })).horses;
     expect(horses.map((h) => h.mark)).toEqual(["◎", null, "▲"]);
+  });
+});
+
+describe("印の凡例(exe の MARK_LEGEND)", () => {
+  it("印が1頭でもあるときだけ凡例を出す(exe の共有定数。全馬 null なら null)", () => {
+    expect(content(analysis({ model: "claude-x", horses: [horse(1, { mark: null }), horse(2, { mark: "◎" })] })).markLegend).toBe(MARK_LEGEND);
+    expect(content(analysis({ model: "claude-x", horses: [horse(1, { mark: null }), horse(2, { mark: null })] })).markLegend).toBeNull();
+    expect(content(analysis({ model: null, horses: [horse(1)] })).markLegend).toBeNull();
+  });
+});
+
+describe("LLM を使わなかった・一部しか使わなかった理由(llmNote。Issue #195)", () => {
+  const NO_KEY = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
+  const MARKS = "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)";
+
+  it("理由は、モデルの有無に関係なく、null でなければそのまま出す(LLM なし+理由 / LLM あり+理由〈印の制約違反〉 / 理由なし)", () => {
+    expect(content(analysis({ model: null, llmNote: NO_KEY })).llmNote).toBe(NO_KEY);
+    expect(content(analysis({ model: "claude-x", llmNote: MARKS })).llmNote).toBe(MARKS);
+    expect(content(analysis({ model: "claude-x", llmNote: null })).llmNote).toBeNull();
+    expect(content(analysis({ model: null, llmNote: null })).llmNote).toBeNull(); // 過去の分析
+  });
+
+  it("印の制約違反(モデルあり・理由あり・印なし): 補正後は出し、印は出ない。モデル名は理由と独立に出る", () => {
+    const c = content(analysis({ model: "claude-x", llmNote: MARKS, horses: [horse(1, { adjustedProb: 0.25, mark: null })] }));
+    expect(c.model).toBe("claude-x");
+    expect(c.horses[0]).toMatchObject({ adjusted: "25.0%", mark: null });
   });
 });
 

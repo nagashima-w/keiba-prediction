@@ -7,7 +7,7 @@
 import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
-import type { HorseCard, ResultContent, ResultModel } from "./result";
+import { LABEL_ADJUSTED_PROB, LABEL_PRIOR, type HorseCard, type ResultContent, type ResultModel } from "./result";
 import type { FieldModel, SettingsModel } from "./settings-form";
 import { h, type VNode } from "./vnode";
 
@@ -145,9 +145,7 @@ function cardResult(result: CardResult, actions: ViewActions): VNode {
     h("h3", {}, [toggle]),
     ...(open
       ? [
-          h("p", { class: "meta" }, [`分析時刻: ${content.analyzedAt}`]),
-          h("p", { class: "meta" }, [`分析モデル: ${content.model}`]),
-          ...(content.detailNote === null ? [] : [h("p", { class: "notice" }, [content.detailNote])]),
+          ...resultMeta(content),
           ...resultSections(content, "h3"),
         ]
       : []),
@@ -196,6 +194,19 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   return h("div", { class: "screen" }, [controls, ...trackingNotice(model.tracking, actions), h("h1", { class: "title" }, [model.title]), ...body, h("section", { class: "past-section" }, [h("h2", {}, ["過去の分析"]), ...pastBody])]);
 }
 
+/**
+ * 結果の見出しの下(結果画面と、発走前のカードの中で共通。Issue #195): 分析時刻・分析モデル・LLM を使わなかった理由(`llmNote`。モデルの有無に関係なく、null でなければ)・詳細の注記。
+ * 理由は「分析モデル」の行のすぐ下(モデル欄の近く)に置く。
+ */
+function resultMeta(content: ResultContent): VNode[] {
+  return [
+    h("p", { class: "meta" }, [`分析時刻: ${content.analyzedAt}`]),
+    h("p", { class: "meta" }, [`分析モデル: ${content.model}`]),
+    ...(content.llmNote === null ? [] : [h("p", { class: "notice llm-note" }, [content.llmNote])]),
+    ...(content.detailNote === null ? [] : [h("p", { class: "notice" }, [content.detailNote])]),
+  ];
+}
+
 function horseCard(horse: HorseCard): VNode {
   return h("li", { class: horse.positive ? "horse positive" : "horse" }, [
     h("span", { class: "horse-head" }, [
@@ -203,9 +214,12 @@ function horseCard(horse: HorseCard): VNode {
       ...(horse.name === null ? [] : [h("span", { class: "horse-name" }, [horse.name])]),
       ...(horse.mark === null ? [] : [h("span", { class: "mark" }, [horse.mark])]),
     ]),
-    h("span", { class: "horse-line" }, [`3着内率 ${horse.prior}`]),
+    h("span", { class: "horse-line" }, [`${LABEL_PRIOR} ${horse.prior}`]),
+    // 補正後の3着内率は LLM が効いたときだけ(LLM なしでは 3着内率と同じ値になるので出さない。EV は LLM が効いたとき補正後の確率から計算される)。
+    ...(horse.adjusted === null ? [] : [h("span", { class: "horse-line" }, [`${LABEL_ADJUSTED_PROB} ${horse.adjusted}`])]),
     h("span", { class: "horse-line" }, [`複勝オッズ下限 ${horse.odds}`]),
     h("span", { class: "horse-line" }, [`EV ${horse.ev}`, ...(horse.positive ? [h("strong", { class: "ev-plus" }, ["EVプラス"])] : [])]),
+    ...(horse.reason === null ? [] : [h("span", { class: "horse-reason" }, [`根拠 ${horse.reason}`])]),
   ]);
 }
 
@@ -216,7 +230,11 @@ function horseCard(horse: HorseCard): VNode {
 function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
   const allocation = content.allocation;
   return [
-    h("section", { class: "horses" }, [h(heading, {}, ["馬ごとの評価"]), h("ul", { class: "horse-list" }, content.horses.map(horseCard))]),
+    h("section", { class: "horses" }, [
+      h(heading, {}, ["馬ごとの評価"]),
+      ...(content.markLegend === null ? [] : [h("p", { class: "meta mark-legend" }, [content.markLegend])]),
+      h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
+    ]),
     h("section", { class: "allocation" }, [
       h(heading, {}, ["配分の提案(分析時点)"]),
       ...allocation.notices.map((n) => h("p", { class: "notice" }, [n])),
@@ -251,11 +269,7 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   const content = model.content;
   if (content !== null) {
     body.push(h("h1", { class: "title" }, [content.title]));
-    body.push(h("p", { class: "meta" }, [`分析時刻: ${content.analyzedAt}`]));
-    body.push(h("p", { class: "meta" }, [`分析モデル: ${content.model}`]));
-    if (content.detailNote !== null) {
-      body.push(h("p", { class: "notice" }, [content.detailNote]));
-    }
+    body.push(...resultMeta(content));
     body.push(...resultSections(content, "h2"));
   }
   return h("div", { class: "screen" }, [controls, ...body]);
