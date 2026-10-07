@@ -6,7 +6,7 @@
  *    取得した一覧の本体(`entries_json`。`RaceListEntry` の配列の JSON)は、確定(finalize)まで持ち、確定したら捨てる。
  *  - `race_day_plan`: 対象レースごとの期限(計画時点の offset で固定)。state: `planned`(期限を待つ)→ `promoted`(pre_race を投入した)/ `skipped`(理由は `skip_reason`)。
  *  - `race_day_auto_pre_race`(Issue #204): **自動で積んだ pre_race の印**。昇格が pre_race を積んだ同じ同期区間で書き、手動の `schedule()` が pre_race を積み直すときに消す
- *    (印が有る ⇔ 今の pre_race のインスタンスは自動)。`enqueued_at` はそのタスクの `queued_at` と同じ値(落ちて再実行したときの照合にも使う)。`fail_reason` は、自動の pre_race が failed になる箇所が書く。
+ *    (印が有る ⇔ 今の pre_race のインスタンスは自動。**削除が主**で、到達できる経路では削除だけで足りる)。`enqueued_at` はそのタスクの `queued_at` と同じ値で、読む側が `queued_at` との等値も確かめる(**多層防御**。削除が漏れても、別の実行のタスクを自動と読まない)。`fail_reason` は、自動の pre_race が failed になる箇所が書く。
  *  - meta(`race_day_meta`)のキー: `plan_requested_at`・`plan_finalized_at`・`plan_offset`・`plan_offset_source`・`plan_finalize_attempts`・`plan_finalize_next_try_at`。
  *
  * **起きたときに必ず状態が変わる**(アラームの候補になる行は、起きた処理が必ず状態を変える。変わらないと、期限が過去のまま即時に起き続ける): pending の会場 → 試行回数・状態、

@@ -1149,13 +1149,14 @@ describe("AC-C2: 中央の昼と地方のナイターが混ざった計画で、
   });
 });
 
-describe("G-C1(昇格の時点): 発走済み・直前すぎは、pre_race を積まず、netkeiba にも出ずに skipped にする(planPreRaceDue を再利用)", () => {
+describe("G-C1(昇格の時点): 発走済み(now ≥ 発走)だけをスキップにする。発走前なら、何分前でも昇格する(too-late は計画の時点の判定にだけ残る)", () => {
   // レースは 10:30 発走(期限 9:45)。8:00 に計画し、起きる時刻を変える。
   const cases = [
     { name: "起きた時刻 = 発走(10:30:00.000)→ skipped(started)", at: "10:30", delta: 0, expected: { state: "skipped", skip_reason: "started" } },
-    { name: "発走の 1ms 前(10:29:59.999)→ skipped(too-late。発走まで 10 分未満)", at: "10:30", delta: -1, expected: { state: "skipped", skip_reason: "too-late" } },
-    { name: "発走まで 10 分 + 1ms 足りない(10:20:00.001)→ skipped(too-late)", at: "10:20", delta: 1, expected: { state: "skipped", skip_reason: "too-late" } },
-    { name: "発走までちょうど 10 分(10:20:00.000。最低余裕)→ 昇格(immediate)", at: "10:20", delta: 0, expected: { state: "promoted", skip_reason: null } },
+    { name: "発走の 1 秒後 → skipped(started)", at: "10:30", delta: 1000, expected: { state: "skipped", skip_reason: "started" } },
+    { name: "発走の 1ms 前(10:29:59.999)→ 昇格(発走まで 10 分未満でも走らせる。発走を過ぎたらステップの直前のガードが止める)", at: "10:30", delta: -1, expected: { state: "promoted", skip_reason: null } },
+    { name: "発走まで 10 分 + 1ms 足りない(10:20:00.001)→ 昇格", at: "10:20", delta: 1, expected: { state: "promoted", skip_reason: null } },
+    { name: "発走までちょうど 10 分(10:20:00.000)→ 昇格", at: "10:20", delta: 0, expected: { state: "promoted", skip_reason: null } },
   ] as const;
   it.each(cases)("$name", async ({ at, delta, expected }) => {
     const h = harness(listHtml([central(1, "10:30")]), EMPTY_HTML);
@@ -1169,8 +1170,36 @@ describe("G-C1(昇格の時点): 発走済み・直前すぎは、pre_race を�
       expect(label_).toBe("idle");
     } else {
       expect(taskRows(h).filter((t) => t.mode === "pre_race")).toHaveLength(1);
-      expect(label_).toBe(`${R1}:pre_race:fetch:failed`);
+      expect(label_).toBe(`${R1}:pre_race:fetch:failed`); // 取得まで進む(gate は blocked で即失敗)
     }
+  });
+
+  // 設定の最小値 offset = 10 分: 期限は 発走 − 10 分。アラームが期限から 1ms でも遅れると、発走まで 10 分未満になる(レビュー指摘: 全レースが too-late になる)。
+  describe("offset = 10 分(設定の最小値)で、アラームが期限より遅れて起きる", () => {
+    const MIN10 = 10 * MIN;
+    const delays = [
+      { name: "遅れ 0ms", delay: 0, promoted: true },
+      { name: "遅れ 1ms", delay: 1, promoted: true },
+      { name: "遅れ 1000ms", delay: 1000, promoted: true },
+      { name: "遅れ 5 分", delay: 5 * MIN, promoted: true },
+      { name: "遅れ 10 分 - 1ms(発走の 1ms 前)", delay: MIN10 - 1, promoted: true },
+      { name: "遅れ 10 分(発走ちょうど)→ skipped(started)", delay: MIN10, promoted: false },
+      { name: "遅れ 11 分(発走後)→ skipped(started)", delay: 11 * MIN, promoted: false },
+    ];
+    it.each(delays)("$name", async ({ delay, promoted }) => {
+      const h = harness(listHtml([central(1, "10:30")]), EMPTY_HTML);
+      h.settings = { ...DEFAULT_CLOUD_SETTINGS, preRaceOffsetMinutes: 10 };
+      await plannedAt8(h);
+      expect(planRows(h)[0]).toMatchObject({ offset_minutes: 10, due_ms: jst("10:20"), state: "planned" }); // 前提: 期限は発走の 10 分前
+      const label_ = await wakeAt(h, jst("10:20") + delay);
+      if (promoted) {
+        expect(planRows(h)[0]).toMatchObject({ state: "promoted", skip_reason: null });
+        expect(label_).toBe(`${R1}:pre_race:fetch:failed`); // 取得まで進む
+      } else {
+        expect(planRows(h)[0]).toMatchObject({ state: "skipped", skip_reason: "started" });
+        expect(label_).toBe("idle");
+      }
+    });
   });
 });
 
@@ -1239,7 +1268,7 @@ describe("G-C1(ステップの直前): 自動で積んだ pre_race は、各ス�
     await plannedAt8(h); // others は blocked
     expect(await wakeAt(h, jst("09:15"))).toBe(`${R1}:pre_race:fetch:failed`);
     expect(resultOf(h, R1)).toMatchObject({ kind: "failed", reason: "blocked" }); // 前提: 自動の結果が読めている
-    // 手動の再実行を、自動の予約と**同じミリ秒**に入れる(queued_at が自動の印の enqueued_at と一致する。印を消さなければ、自動と見分けがつかなくなる)
+    // 手動の再実行を、自動の予約と**同じミリ秒**に入れる(queued_at が自動の印の enqueued_at と一致する。印の削除が無ければ、等値照合だけでは自動と見分けがつかない。削除が主で、等値照合は多層防御)
     await h.core.schedule({ raceId: R1, kaisaiDate: DATE, mode: "pre_race" });
     expect(preRaceRow(h)[0]!.queued_at).toBe(jst("09:15")); // 前提: 同じミリ秒
     expect(resultOf(h, R1)).toEqual({ kind: "superseded" });
@@ -1392,7 +1421,7 @@ describe("AC-C4: 手動の分析との重複(同じレース・現行の prompt_
     expect(resultOf(h, R1)).toEqual({ kind: "skipped", reason: "manual" });
   });
 
-  it("時刻の判定(発走済み・直前すぎ)でスキップになる行は、D1 に出ない", async () => {
+  it("時刻の判定(発走済み)でスキップになる行は、D1 に出ない", async () => {
     const sink = recentSink();
     const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML, { sink });
     await plannedAt8(h);

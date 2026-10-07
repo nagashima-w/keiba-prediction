@@ -827,13 +827,17 @@ export class RaceDayCore {
     }
   }
 
-  /** 昇格の時点の時刻の判定(`planPreRaceDue` を計画の時点と同じ定義で再利用: 発走済み〈started〉・発走まで 10 分未満〈too-late〉はスキップ)。 */
-  private promotionTiming(row: PlanRowRecord): ReturnType<typeof planPreRaceDue> {
-    const kaisaiDate = this.metaGet("kaisai_date");
-    if (kaisaiDate === null) {
-      throw new Error("開催日が未確定です"); // 到達しない(依頼で開催日を固定している)
+  /**
+   * 昇格の時点の時刻の判定: **発走済み(`now ≥ start_ms`)だけ**をスキップ(`started`)にする。発走前なら、何分前でも昇格する。
+   * 「発走まで 10 分未満〈too-late〉」は**計画の時点の判定にだけ**残す(`planPreRaceDue`)。昇格の時点でも判定すると、offset = 10 分(設定の最小値)では、アラームが期限から 1ms 遅れただけで
+   * 全レースが too-late になる(期限 = 発走 − 10 分のため)。昇格が遅れて発走が近いときは走らせ、発走を過ぎたら取得・計算の各ステップの直前のガード({@link failIfStarted})が止める。
+   * `start_ms` が null の行は計画の時点で `no-start-time` のスキップになっていて planned には来ない(到達しない分岐。来たらスキップにする)。
+   */
+  private promotionTiming(row: PlanRowRecord): { readonly kind: "ok" } | { readonly kind: "skip"; readonly reason: "started" | "no-start-time" } {
+    if (row.start_ms === null) {
+      return { kind: "skip", reason: "no-start-time" };
     }
-    return planPreRaceDue({ kaisaiDate, startTime: row.start_time ?? undefined, offsetMinutes: row.offset_minutes, nowMs: this.now() });
+    return this.now() >= row.start_ms ? { kind: "skip", reason: "started" } : { kind: "ok" };
   }
 
   /**
@@ -867,7 +871,7 @@ export class RaceDayCore {
    *  1. 行が planned でなければ何もしない
    *  2. 同じレースの pre_race が実行中(queued・fetched): 自動の印が今のタスクを指していれば(昇格で積んだあと、promoted にする前に落ちた再実行)promoted にするだけ。
    *     そうでなければ手動の実行中なので、積み直さず skipped(manual)
-   *  3. 時刻の判定(発走済み〈started〉・直前すぎ〈too-late〉・時刻なし)でスキップ
+   *  3. 時刻の判定(発走済み〈started〉。時刻なしは到達しない)でスキップ(too-late は昇格の時点では判定しない: {@link promotionTiming})
    *  4. 手動の分析との重複 → skipped(manual)
    *  5. 上限に達していれば skipped(cap)
    *  6. pre_race を積み、自動の印を書き、promoted にする(同じ `now`)
