@@ -8,6 +8,7 @@
  *  - EV プラスの強調はサーバの `isPositive` に従う(クライアントで EV から再計算しない)。推定 EV(`evEstimated`)は接尾辞「(推定)」で区別する
  *  - 配分は exe の `buildAllocationProposalView` を流用する(文言・券種ラベル・実効設定を exe と揃える)。**配分の行が無い(null)ときは、exe の関数を呼ばず cloud 専用の文言**
  *    (exe の「記録なし」は「Issue #59より前の分析です」と言い、cloud では事実と違うため)
+ *  - 配分が `unset`(未設定)のときも注記だけ cloud 専用にする(exe は「設定画面で入力」と言うが、cloud に設定画面は無い)。判定は exe の関数が返す `kind` で行う
  * ⚠️ このファイルが exe の renderer を import する唯一の層(`format.ts`・`allocation-proposal-view.ts`)。許可リストは `test/client-bundle.test.ts`。
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/app/src/renderer/allocation-proposal-view";
@@ -22,6 +23,12 @@ export type ResultSource =
   | { readonly kind: "ready"; readonly analysis: AnalysisDetail };
 
 export const NO_ALLOCATION_NOTE = "この分析には配分の記録がありません。";
+/**
+ * 配分が `unset`(総資金・1レース上限が未設定)のときの cloud 専用の注記。exe の `BET_ALLOCATION_UNSET_NOTE` は「設定画面で…入力してください」と言うが、
+ * cloud には設定画面が無い(D1 の `cloud_settings` に直接入れる)うえ、既定値は 0 なので cloud の分析はほぼ全件が `unset` になり、存在しない画面へ誘導してしまう。
+ */
+export const UNSET_ALLOCATION_NOTE =
+  "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(設定画面は今後追加します。現在は D1 の cloud_settings に入れます)。";
 export const MODEL_NONE_TEXT = "LLM 未使用(統計のみ)";
 export const DETAIL_MISSING_NOTE = "馬名などの詳細を取得できませんでした(取得の上限に達したか、保存された詳細が見つかりません)。";
 export const DETAIL_NONE_NOTE = "この分析には詳細が保存されていません(馬名は表示されません)。";
@@ -83,6 +90,10 @@ function allocationOf(a: AnalysisDetail): AllocationSection {
     return { kind: "none", notices: [NO_ALLOCATION_NOTE], bets: [], settingsRows: [] };
   }
   const view = buildAllocationProposalView(a.allocation);
+  // 判定は exe の関数が返す kind(構造)で行う(文言の文字列比較はしない)。unset だけを差し替え、他の種類は exe の文言のまま。
+  if (view.kind === "unset") {
+    return { kind: view.kind, notices: [UNSET_ALLOCATION_NOTE], bets: view.bets, settingsRows: view.settingsRows };
+  }
   return { kind: view.kind, notices: view.notices, bets: view.bets, settingsRows: view.settingsRows };
 }
 

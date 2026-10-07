@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
-import { buildResultModel, NO_ALLOCATION_NOTE, type ResultSource } from "../client/result";
+import { buildResultModel, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
+import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-allocation-view";
 import type { Route } from "../client/route";
 
 /**
@@ -162,6 +163,45 @@ describe("配分(exe の buildAllocationProposalView を流用)", () => {
     expect(withUnit.notices[0]).toBe("1レースの上限が100円未満のため配分できません");
     const withoutUnit = content(analysis({ allocation: { ...skip, betUnit: null, fallbackReason: null } })).allocation;
     expect(withoutUnit.notices).toEqual(["1レースの上限が最小賭け金単位を下回るため配分できません(単位額が記録されていません)"]);
+  });
+
+  describe("配分が unset(総資金・1レース上限が未設定。cloud の既定値は 0 なので、ほぼ全件がこの状態)", () => {
+    const unset = (over: Record<string, unknown> = {}) => ({ ...ALLOCATION, bets: [], route: "unset", fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, ...over });
+
+    it("exe の「設定画面で…入力してください」(cloud には設定画面が無い)ではなく、cloud 専用の文言を出す。実効設定の行は残る", () => {
+      for (const over of [{}, { bankroll: 0, perRaceCap: 3000 }, { bankroll: 10000, perRaceCap: 0 }]) {
+        const allocation = content(analysis({ allocation: unset(over) })).allocation;
+        expect(allocation.kind).toBe("unset");
+        expect(allocation.notices).toEqual([UNSET_ALLOCATION_NOTE]);
+        expect(JSON.stringify(allocation.notices)).not.toContain("設定画面で");
+        expect(allocation.bets).toEqual([]);
+        expect(allocation.settingsRows).toContain("総資金: " + (over.bankroll === undefined ? "0円" : `${(over.bankroll as number).toLocaleString("en-US")}円`));
+      }
+    });
+
+    it("対照: exe の関数そのものは、同じ入力で「設定画面で」の文言を返す(差し替えが実際に何かを置き換えている=空振りでない)", () => {
+      expect(BET_ALLOCATION_UNSET_NOTE).toContain("設定画面で");
+      expect(UNSET_ALLOCATION_NOTE).not.toBe(BET_ALLOCATION_UNSET_NOTE);
+      expect(UNSET_ALLOCATION_NOTE).toContain("cloud_settings");
+    });
+
+    it("unset 以外(見送り・複勝対象外・配分あり・判定不能・yoso・invalid)は exe の文言のまま(差し替えない)", () => {
+      const cases: readonly [string, Record<string, unknown>, string][] = [
+        ["skip", { ...ALLOCATION, bets: [], route: "place-only", skipReasonCode: "cap-too-small", betUnit: 100, fallbackReason: null }, "1レースの上限が100円未満のため配分できません"],
+        ["unavailable", { ...ALLOCATION, bets: [], route: "unavailable", unavailableReason: "not-sold", fallbackReason: null }, ""],
+        ["yoso", { ...ALLOCATION, bets: [], route: "yoso", fallbackReason: null }, "分析時点でオッズが未発売だったため、配分提案を行っていません。"],
+        ["invalid", { ...ALLOCATION, bets: [], route: "invalid", fallbackReason: null }, "配分計算中にエラーが発生したため、配分を提案していません。"],
+        ["indeterminate", { ...ALLOCATION, bets: [], route: "future-route", fallbackReason: null }, "配分提案の状態を判定できません(記録された種別が不明です)。"],
+        ["allocated", { ...ALLOCATION, bets: [...ALLOCATION.bets] }, "組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。"],
+      ];
+      for (const [kind, allocation, expectedNotice] of cases) {
+        const section = content(analysis({ allocation: allocation as never })).allocation;
+        expect(section.kind, kind).toBe(kind);
+        expect(section.notices, kind).not.toContain(UNSET_ALLOCATION_NOTE);
+        expect(section.notices.length, kind).toBeGreaterThan(0);
+        if (expectedNotice !== "") expect(section.notices[0], kind).toBe(expectedNotice);
+      }
+    });
   });
 
   it("配分の記録が無い(null)ときは cloud 専用の文言(exe の「Issue #59より前の分析です」を出さない)", () => {
