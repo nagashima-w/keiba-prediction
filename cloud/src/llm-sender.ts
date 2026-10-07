@@ -38,20 +38,23 @@ export interface CloudLlm {
   readonly lister?: ModelLister;
 }
 
-/** メッセージ送信の関数を作る。 */
+/**
+ * メッセージ送信の関数を作る。キーは**前後の空白(改行を含む)を除いて**渡す: ダッシュボードにキーを貼ると末尾に改行が付くことがあり、そのまま x-api-key ヘッダに入れると、
+ * 毎回「LLM 呼び出しに失敗」になる(原因が利用者から見えない)。
+ */
 export function createCloudLlmSender(apiKey: string, options: CloudLlmOptions = {}): MessageSender {
   return createSdkMessageSender({
-    apiKey,
+    apiKey: apiKey.trim(),
     timeout: options.timeoutMs ?? LLM_REQUEST_TIMEOUT_MS,
     maxRetries: LLM_SDK_MAX_RETRIES,
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
 }
 
-/** モデル一覧の取得関数を作る。 */
+/** モデル一覧の取得関数を作る。キーは前後の空白を除いて渡す(理由は {@link createCloudLlmSender})。 */
 export function createCloudModelLister(apiKey: string, options: CloudLlmOptions = {}): ModelLister {
   return createSdkModelLister({
-    apiKey,
+    apiKey: apiKey.trim(),
     timeout: options.timeoutMs ?? LLM_LIST_TIMEOUT_MS,
     maxRetries: LLM_SDK_MAX_RETRIES,
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
@@ -66,5 +69,6 @@ export function createCloudLlm(apiKey: string | undefined, options: CloudLlmOpti
   if (typeof apiKey !== "string" || apiKey.trim() === "") {
     return undefined;
   }
-  return { sender: createCloudLlmSender(apiKey, options), lister: createCloudModelLister(apiKey, options) };
+  const key = apiKey.trim();
+  return { sender: createCloudLlmSender(key, options), lister: createCloudModelLister(key, options) };
 }

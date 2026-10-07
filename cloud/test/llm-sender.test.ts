@@ -146,3 +146,49 @@ describe("createCloudLlm(API キーから LLM の依存を作る。キーが無�
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * Issue #194(メタレビュー R5): API キーの前後の空白(改行を含む)。ダッシュボードにキーを貼ると末尾に改行が付くことがあり、そのまま x-api-key ヘッダに入れると、
+ * 毎回「LLM 呼び出しに失敗」になる(原因が利用者から見えない)ことを懸念して、trim して渡す。SDK に送るヘッダが空白なしであることを、偽の fetch で固定する。実 API には出ない。
+ * **実測(2026-10-07。Node と workerd〈wrangler dev --local〉)**: SDK のヘッダは `Headers` を通るので、末尾の改行・前後の空白は、trim しなくても正規化されて**送られるヘッダは同じ**になる
+ * (懸念した「毎回失敗」は再現しなかった)。したがって、このテストはヘッダだけでは trim の有無を区別できない。SDK に**渡すキーそのもの**が trim 済みであることは、
+ * `llm-sender-key.test.ts`(`createSdkMessageSender` を差し替えて、渡された `apiKey` を見る)が固定する。
+ */
+describe("API キーの前後の空白は取り除いて送る(Issue #194 R5)", () => {
+  const BARE = "sk-ant-fake-test-key-not-real";
+
+  /** x-api-key ヘッダを記録し、送信・一覧のどちらにも成功を返す fetch。 */
+  function recordingFetch() {
+    const keys: (string | null)[] = [];
+    const fetchImpl = vi.fn(async (url: unknown, init?: { headers?: HeadersInit }) => {
+      keys.push(new Headers(init?.headers).get("x-api-key"));
+      const body = String(url).includes("/v1/models")
+        ? { data: [], has_more: false, first_id: null, last_id: null }
+        : { id: "msg_test", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [{ type: "text", text: "x" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    return { keys, fetchImpl: fetchImpl as unknown as typeof fetch };
+  }
+
+  it.each([[`${BARE}\n`], [`  ${BARE}  `], [`\t${BARE}\r\n`], [BARE]])("キーが %j でも、sender のヘッダは空白のないキー", async (raw) => {
+    const { keys, fetchImpl } = recordingFetch();
+    await createCloudLlmSender(raw, { fetch: fetchImpl })(REQUEST);
+    expect(keys).toEqual([BARE]);
+  });
+
+  it("モデル一覧の取得(lister)のヘッダも、空白のないキー", async () => {
+    const { keys, fetchImpl } = recordingFetch();
+    await createCloudModelLister(`${BARE}\n`, { fetch: fetchImpl })();
+    expect(keys).toEqual([BARE]);
+  });
+
+  it("createCloudLlm(RaceDay が使う入口)も、sender・lister の両方で空白のないキーを送る", async () => {
+    const { keys, fetchImpl } = recordingFetch();
+    const llm = createCloudLlm(`\n${BARE}\n`, { fetch: fetchImpl });
+    await llm!.sender(REQUEST);
+    await llm!.lister!();
+    expect(keys).toEqual([BARE, BARE]);
+    // 前提(空振り防止): 偽 fetch は実際にヘッダを受け取っている(null でない)
+    expect(keys.every((k) => k !== null)).toBe(true);
+  });
+});

@@ -134,6 +134,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 - **使うキー**: Claude Console で、**費用の上限(spend limit)を設定したワークスペースのキー**を使う。アプリ側には費用の上限も ON/OFF の設定も無く、上限はワークスペースの spend limit だけが担う(上限に達して API がエラーを返しても、分析は止まらず、LLM なし〈prior のまま〉で保存して理由を残す)。**キーがどのワークスペースのものかは、Console で確かめる**(こちらからは確認できない)。
 - **方法1: ダッシュボード**: Workers & Pages > 対象の Worker(`keiba-cloud`)> 設定 > 変数とシークレット > 追加。**名前は `ANTHROPIC_API_KEY`**、**種類は「シークレット」**(「テキスト」にすると次のデプロイで上書きされる)、値の欄にキーを入力して保存・デプロイする。
 - **方法2: wrangler**: ユーザーが自分の端末で、`cloud/` に移って `pnpm exec wrangler secret put ANTHROPIC_API_KEY` を実行し、**対話の入力欄**にキーを入力する(コマンドの引数や環境変数にキーを書かない)。
+- **前後の空白・末尾の改行**: 貼り付けで付いても、Worker が取り除いて使う(SDK の `Headers` も空白を正規化するので、送られるヘッダは同じ。workerd〈`wrangler dev --local`〉で実測)。空白だけの値は「未登録」と同じ扱い。
 - **確認**: Access でログインしたブラウザで `/api/health` を開き、`secrets.anthropic` が `true` になっていること(値は表示されない)。**secret は `wrangler deploy` で消えない**。登録・更新・削除すると、Worker に新しいデプロイが作られ、次に DO が起きたとき(次の分析)から反映される。
 - **GitHub Actions の「Secrets の存在を確認」とは別物**: ワークフローが確認するのは GitHub の Secrets(`CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID`)だけで、Worker の secret は CI から見えない・触らない。
 - **削除**(LLM を止めたいとき): ダッシュボードで `ANTHROPIC_API_KEY` を削除する(または `wrangler secret delete ANTHROPIC_API_KEY`)。以後の発走前の分析は、LLM なしで保存される(理由は「API キーが未登録」)。
@@ -275,7 +276,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 
 ## 手動起動の入口(Issue #180)
 Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。定時の Cron は無い。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
-- `POST /api/analyses/run` — 本文 JSON `{"race_id": "202603020211", "kaisai_date": "20260628", "mode": "morning"}`。`mode` は `morning`(省略時。朝の取得と prior。D1・R2 には書かない)か `pre_race`(発走前の分析。LLM なし。D1・R2 に保存)。**同じオリジンのページから**(`Origin` が必要。curl で試すときは `-H "Origin: https://<自分の Worker のホスト>"` と `-H "Content-Type: application/json"` を付ける)。202 で予約され、取得 → 計算はアラームの中で進む(中央16頭で約 40 秒)。
+- `POST /api/analyses/run` — 本文 JSON `{"race_id": "202603020211", "kaisai_date": "20260628", "mode": "morning"}`。`mode` は `morning`(省略時。朝の取得と prior。D1・R2 には書かない)か `pre_race`(発走前の分析。LLM を使う〈API キーが未登録なら LLM なしで保存〉。D1・R2 に保存)。**同じオリジンのページから**(`Origin` が必要。curl で試すときは `-H "Origin: https://<自分の Worker のホスト>"` と `-H "Content-Type: application/json"` を付ける)。202 で予約され、取得 → 計算はアラームの中で進む(中央16頭で約 40 秒)。
 - `GET /api/analyses/status?kaisai_date=20260628[&race_id=202603020211]` — 状態と、朝の prior の最小限。
 
 ## 読み取りの API(Issue #183)

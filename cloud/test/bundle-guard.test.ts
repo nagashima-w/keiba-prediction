@@ -366,6 +366,8 @@ describe("本番のバンドルと日単位の DO(Issue #177)", () => {
  *    probe 単体にも上限(512 KiB)を置く(SDK を足した分が、想定外に膨らんだら気づくため。実測は SDK + analyzeRace の一式〈NetkeibaGate の export を含む〉で gzip 63.10 KiB)。
  */
 const SDK_MARKERS = ["AnthropicError", "api.anthropic.com", "anthropic-version"];
+/** `race-day-do.ts` の、RaceDay に LLM の依存を渡す行(Issue #194)。バンドルでも同じ文字列で残る(wrangler は識別子を変えない)。 */
+const WIRING_LINE = "llm: createCloudLlm(env.ANTHROPIC_API_KEY)";
 const LLM_CORE_MARKERS = ["pickLatestSonnet", "createSdkMessageSender"];
 
 describe("LLM の入口と SDK のバンドル(Issue #193)", () => {
@@ -412,11 +414,18 @@ describe("LLM の入口と SDK のバンドル(Issue #193)", () => {
   );
 
   it(
-    "Issue #194: 本番のバンドル(worker.ts)に、LLM の配線(記録の表・キーの secret の名前)と SDK が入っていて、better-sqlite3 は入っていない。圧縮後 3 MB 以内(SDK を含めた実測値)",
+    "Issue #194: 本番のバンドル(worker.ts)に、RaceDay の LLM の配線(`llm: createCloudLlm(env.ANTHROPIC_API_KEY)` の行そのもの)・記録の表・SDK が入っていて、better-sqlite3 は入っていない。圧縮後 3 MB 以内(SDK を含めた実測値)",
     () => {
+      // 前提(空振り防止): 配線の行は DO のラッパのソースにあり、SDK 自身の ANTHROPIC_API_KEY の参照(`readEnv`)とは別の文字列。
+      // 文字列 "ANTHROPIC_API_KEY" だけを検査すると SDK 自身の参照に当たるので、配線が外れても気づけない(この行が外れると、キーを登録しても「未登録」で保存され続ける)。
+      const doSource = readFileSync(path.join(CLOUD, "src", "race-day-do.ts"), "utf-8");
+      const sdkSource = readFileSync(path.join(CLOUD, "node_modules", "@anthropic-ai", "sdk", "client.mjs"), "utf-8");
+      expect(doSource.includes(WIRING_LINE), "race-day-do.ts に配線の行がある").toBe(true);
+      expect(sdkSource.includes(WIRING_LINE), "SDK には配線の行が無い(区別できる)").toBe(false);
+      expect(sdkSource.includes("ANTHROPIC_API_KEY"), "SDK 自身も ANTHROPIC_API_KEY を参照する(だから名前だけでは検査にならない)").toBe(true);
       const code = bundle(null, "worker.js");
       // 前提(空振り防止): LLM の配線が、実際に本番のバンドルにある(RaceDay が llm を使う)
-      for (const marker of ["race_day_llm_responses", "ANTHROPIC_API_KEY", ...SDK_MARKERS, ...LLM_CORE_MARKERS]) {
+      for (const marker of [WIRING_LINE, "race_day_llm_responses", ...SDK_MARKERS, ...LLM_CORE_MARKERS]) {
         expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
       }
       expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);

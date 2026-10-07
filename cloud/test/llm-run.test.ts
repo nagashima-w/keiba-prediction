@@ -319,6 +319,17 @@ describe("outcomeOf(analyzeRace の結果から、LLM が効いたか・画面�
     expect(outcomeOf({ ...base, fallback: true, fallbackReason: null })).toEqual({ effective: false, note: LLM_NOTE_UNKNOWN_FALLBACK });
   });
 
+  it("固定文言のリテラル(利用者に見える文。変えるときは、画面〈#195〉・README・このテストを一緒に直す)", () => {
+    expect(LLM_NOTE_NO_KEY).toBe("LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました");
+    expect(LLM_NOTE_MARKS_DROPPED).toBe("印の制約違反のため、印は付けていません(3着内率の補正は反映しています)");
+    expect(LLM_NOTE_UNKNOWN_FALLBACK).toBe("LLM を使えなかったため、3着内率をそのまま採用しました");
+    // core 由来の4つも、cloud の画面に出る(D1 の llm_note に保存される)ので、文面をここで固定する
+    expect(FALLBACK_REASON_TRUNCATED).toBe("応答が長さ上限(max_tokens)で切り詰められたため、3着内率をそのまま採用しました");
+    expect(FALLBACK_REASON_PARSE_ERROR).toBe("LLM応答のJSON解析に失敗したため、3着内率をそのまま採用しました");
+    expect(FALLBACK_REASON_INVOCATION_ERROR).toBe("LLM呼び出しに失敗したため、3着内率をそのまま採用しました");
+    expect(FALLBACK_REASON_REFUSED).toBe("LLMが応答を拒否(refusal)したため、3着内率をそのまま採用しました");
+  });
+
   it("固定文言は、互いに違う(画面で区別できる)", () => {
     const notes = [LLM_NOTE_NO_KEY, LLM_NOTE_MARKS_DROPPED, LLM_NOTE_UNKNOWN_FALLBACK, FALLBACK_REASON_TRUNCATED, FALLBACK_REASON_PARSE_ERROR, FALLBACK_REASON_INVOCATION_ERROR, FALLBACK_REASON_REFUSED];
     expect(new Set(notes).size).toBe(notes.length);

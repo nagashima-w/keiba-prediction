@@ -129,6 +129,19 @@ describe("POST /api/analyses/run(Issue #180)", () => {
     expect(raceDay.schedules).toHaveLength(2);
   });
 
+  it("Issue #194: 未知の mode の 400 は、発走前の分析が LLM を使うことを説明する(API の応答に出る文。『LLM なし』という古い説明を残さない)。DO は呼ばない", async () => {
+    const { deps, token } = await setup();
+    const raceDay = fakeRaceDay();
+    const response = await handle(post({ ...GOOD_BODY, mode: "evening" }, { token }), envOf(raceDay), {}, deps);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: { message?: string } | string };
+    const text = JSON.stringify(body);
+    expect(text).toContain("pre_race");
+    expect(text).toContain("発走前の分析。LLM を使う");
+    expect(text).not.toContain("LLM なし");
+    expect(raceDay.calls()).toBe(0);
+  });
+
   it("Issue #178: mode: \"pre_race\"(発走前の分析)も 202 で、DO には mode つきで予約する。応答に mode を返す。実行中なら 409(朝の実行とは別のタスクなので、DO が種類ごとに判断する)", async () => {
     const { deps, token } = await setup();
     const raceDay = fakeRaceDay();

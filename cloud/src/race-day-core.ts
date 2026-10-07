@@ -89,7 +89,7 @@ const CACHE_ONLY_TTL: ScrapeTtlConfig = {
 
 export type TaskStatus = "queued" | "fetched" | "done" | "failed";
 
-/** 朝の取得と prior(`morning`。D1・R2 には書かない)・発走前の分析(`pre_race`。LLM なし。D1・R2 に保存する。Issue #178)。 */
+/** 朝の取得と prior(`morning`。D1・R2 には書かない)・発走前の分析(`pre_race`。LLM を使う〈Issue #194。キー未登録なら LLM なしで保存〉。D1・R2 に保存する。Issue #178)。 */
 export type TaskMode = "morning" | "pre_race";
 
 /**
