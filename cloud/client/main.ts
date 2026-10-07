@@ -5,6 +5,7 @@
  */
 import { createApp } from "./app";
 import { createMounter } from "./dom";
+import { applyDisplayName, fetchDisplayName, WHO_NAME_SELECTOR } from "./identity";
 
 const root = document.getElementById("app");
 if (root !== null) {
@@ -26,3 +27,7 @@ if (root !== null) {
   document.addEventListener("visibilitychange", () => app.onVisibilityChange());
   app.start();
 }
+
+// Issue #192: 「ログイン中: …」の行のメールアドレスを、Google のユーザー名にする。ページの読み込み後に 1 回だけ(ハッシュの遷移・「更新」では呼ばない)。
+// 取れない・形が違う・空のときは、メールアドレスのまま(失敗を画面に出さず、再試行もしない)。書き込みは textContent だけ。#app とは独立(app が無くても動く)。
+void fetchDisplayName((url, init) => fetch(url, init)).then((name) => applyDisplayName(document.querySelector(WHO_NAME_SELECTOR), name));

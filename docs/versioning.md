@@ -2738,6 +2738,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない。`cloud_settings` の SQL は不変で、`settings_json` の中の項目が1つ増えるだけ。旧い行は、その項目だけ既定値になる)。
 
+## 次の正式版が 1.19.23 である根拠(Issue #192 での変更)
+
+**patch**(クラウド版の「ログイン中」の表示を Google のユーザー名にする。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud(クライアント): 新しい純モジュール `cloud/client/identity.ts`(`GET /cdn-cgi/access/get-identity` の取得・`name` の整形・書き込み)と、`main.ts` の配線(ページの読み込み後に 1 回だけ)。生成物 `cloud/src/client-bundle.generated.ts` を再生成。
+- サーバ(`cloud/src/*`)・CSP(`connect-src 'self'` のまま)・`page.ts`・`dom.ts` は無変更。
+- exe(`packages/app`)のアプリコード・画面・保存データ・分析結果は無変更(版数・テストの版数 literal だけ)。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い(クラウド版だけの変更)。前例: #184〜#189・#191 の画面の変更も patch で運用してきた。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。名前は表示だけに使い、認可・保存には使わない(D1 の migration も追加しない)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

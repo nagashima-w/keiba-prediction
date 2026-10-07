@@ -237,11 +237,18 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     }
   }
 
-  function run(initialHash = "") {
+  /** Issue #192: get-identity の応答(偽)。既定は 404(HTML が返った場合と同じく json() が失敗する)=メールアドレスのまま。 */
+  type IdentityReply = { status: number; json: () => Promise<unknown> } | "network-error";
+  const NOT_FOUND: IdentityReply = { status: 404, json: async () => { throw new SyntaxError("Unexpected token <"); } };
+
+  function run(initialHash = "", identityReply: IdentityReply = NOT_FOUND) {
     const root = { children: [] as (FakeElement | FakeText)[], replaced: 0, replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; } };
     const listeners = new Map<string, (() => void)[]>();
     const calls: { url: string; init: { method?: string; credentials?: string; referrerPolicy?: string; body?: string } }[] = [];
     const location = { hash: initialHash };
+    // Issue #192: get-identity の呼び出しは calls と別に数える(既存のテストが数える取得の本数に混ぜない)。表示の行は `.who .email`(偽の要素。textContent を持つ)。
+    const identityCalls: { url: string; init: { method?: string; credentials?: string } }[] = [];
+    const who = { textContent: "taro@example.com" as string | null };
     // 追跡のタイマー(偽。時間は進めない=張られた数だけを見る)と、可視状態(偽の document)。
     const timers = new Map<number, () => void>();
     let timerId = 0;
@@ -249,11 +256,17 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const doc = {
       visibilityState: "visible",
       getElementById: (id: string) => (id === "app" ? root : null),
+      querySelector: (selector: string) => (selector === ".who .email" ? who : null),
       createElement: (tag: string) => new FakeElement(tag),
       createTextNode: (t: string) => new FakeText(t),
       addEventListener: (type: string, fn: () => void) => void documentListeners.set(type, [...(documentListeners.get(type) ?? []), fn]),
     };
     const fetchStub = async (url: string, init: { method?: string; credentials?: string; referrerPolicy?: string; body?: string }) => {
+      if (url === "/cdn-cgi/access/get-identity") {
+        identityCalls.push({ url, init });
+        if (identityReply === "network-error") throw new TypeError("Failed to fetch");
+        return identityReply;
+      }
       calls.push({ url, init });
       if (init.method === "POST" && url === "/api/analyses/run") {
         const body = JSON.parse(init.body!) as { race_id: string; kaisai_date: string; mode: string };
@@ -303,8 +316,45 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       console,
     };
     vm.runInNewContext(CLIENT_JS, context);
-    return { root, listeners, calls, location, timers, doc, documentListeners };
+    return { root, listeners, calls, location, timers, doc, documentListeners, identityCalls, who };
   }
+
+  it("Issue #192: ロード時に get-identity を 1 回だけ呼び(GET・同じオリジンの資格情報)、name を「ログイン中」の行(`.who .email`)の textContent に入れる。メールアドレスはどこにも残らない", async () => {
+    const { who, identityCalls } = run("", { status: 200, json: async () => ({ name: "テスト 太郎", email: "taro@example.com" }) });
+    await until(() => who.textContent !== "taro@example.com");
+    expect(who.textContent).toBe("テスト 太郎");
+    expect(identityCalls).toHaveLength(1);
+    expect(identityCalls[0]!.init.method).toBe("GET");
+    expect(identityCalls[0]!.init.credentials).toBe("same-origin");
+  });
+
+  it.each([
+    ["404(HTML が返る)", NOT_FOUND],
+    ["ネットワークエラー", "network-error" as const],
+    ["name が空", { status: 200, json: async () => ({ name: "" }) }],
+    ["name が無い", { status: 200, json: async () => ({ email: "taro@example.com" }) }],
+  ] as [string, IdentityReply][])("Issue #192: get-identity が %s のときは、メールアドレスのまま(例外にならず、画面の描画も続く)", async (_label, reply) => {
+    const { who, identityCalls, root, calls } = run("", reply);
+    await until(() => identityCalls.length >= 1 && calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    await settle();
+    expect(identityCalls).toHaveLength(1); // 前提: 呼ばれた(呼ばれていなければ、メールのままは自明)
+    expect(who.textContent).toBe("taro@example.com");
+    expect(root.children.some((c) => textOf(c).includes("福島民報杯"))).toBe(true);
+  });
+
+  it("Issue #192: ハッシュの遷移・「更新」・設定画面への遷移でも、get-identity は呼ばれない(1 回だけ)", async () => {
+    const { listeners, location, identityCalls, calls, root } = run("", { status: 200, json: async () => ({ name: "テスト 太郎" }) });
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    await settle();
+    expect(identityCalls).toHaveLength(1);
+    location.hash = "#settings";
+    listeners.get("hashchange")![0]!();
+    await settle();
+    location.hash = "";
+    listeners.get("hashchange")![0]!();
+    await settle();
+    expect(identityCalls).toHaveLength(1);
+  });
 
   it("ロードで例外にならず、今日(JST)の一覧と板を 1 回ずつ取り(GET・同じオリジンの資格情報)、描画する。hashchange を購読する。ハッシュを書き換えない", async () => {
     const { root, listeners, calls, location } = run();
