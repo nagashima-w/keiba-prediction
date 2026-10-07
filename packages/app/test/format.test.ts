@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildReasonCellView,
   formatConditionChangeTags,
   formatEstimatedEvSuffix,
   formatEv,
@@ -11,6 +12,8 @@ import {
   formatReason,
   isHighlightRow,
   LABEL_ADJUSTED_PROB,
+  LABEL_CONCERNS,
+  LABEL_HIGHLIGHTS,
   LABEL_PRIOR,
   analysisModelText,
   llmCorrectionStatusText,
@@ -376,5 +379,59 @@ describe("analysisModelText(分析結果の「分析モデル」表示文言・I
 
   it.each(cases)("$label", ({ input, expected }) => {
     expect(analysisModelText(input)).toBe(expected);
+  });
+});
+
+describe("強調材料・懸念事項のラベル(Issue #199。cloud と共有する定数)", () => {
+  it("強調材料・懸念事項の文言は、cloud の画面と同じ「強調材料」「懸念事項」", () => {
+    expect(LABEL_HIGHLIGHTS).toBe("強調材料");
+    expect(LABEL_CONCERNS).toBe("懸念事項");
+  });
+});
+
+describe("buildReasonCellView(LLM根拠セルの表示。Issue #199)", () => {
+  const input = (reason: string | null, highlights: readonly string[], concerns: readonly string[]) => ({ reason, highlights, concerns });
+
+  // 「2つとも空なら今と同じ表示」の保証: reason の文字列は formatReason と一致し、sections は空。
+  it.each([
+    { name: "reason のみ", reason: "調教良化", expected: "調教良化" },
+    { name: "reason が null なら「-」", reason: null, expected: "-" },
+    { name: "reason が空文字ならそのまま空文字(今の formatReason と同じ)", reason: "", expected: "" },
+  ])("項目なし: $name(sections は空で、formatReason と同じ表示)", ({ reason, expected }) => {
+    const view = buildReasonCellView(input(reason, [], []));
+    expect(view.reason).toBe(expected);
+    expect(view.reason).toBe(formatReason(reason));
+    expect(view.sections).toEqual([]);
+  });
+
+  it("強調材料のみ: sections は強調材料の1つだけ(ラベルは文字で出す)", () => {
+    const view = buildReasonCellView(input("調教良化", ["中間の併せ馬で先着", "距離短縮が合う"], []));
+    expect(view.sections).toEqual([{ kind: "highlights", label: "強調材料", items: ["中間の併せ馬で先着", "距離短縮が合う"] }]);
+  });
+
+  it("懸念事項のみ: sections は懸念事項の1つだけ", () => {
+    const view = buildReasonCellView(input("調教良化", [], ["外枠で距離ロス"]));
+    expect(view.sections).toEqual([{ kind: "concerns", label: "懸念事項", items: ["外枠で距離ロス"] }]);
+  });
+
+  it("両方あるとき: 順番は reason → 強調材料 → 懸念事項(各3項目はそのまま、順序も保つ)", () => {
+    const view = buildReasonCellView(input("総合は上位", ["A1", "A2", "A3"], ["B1", "B2", "B3"]));
+    expect(view.reason).toBe("総合は上位");
+    expect(view.sections.map((s) => s.kind)).toEqual(["highlights", "concerns"]);
+    expect(view.sections[0]!.items).toEqual(["A1", "A2", "A3"]);
+    expect(view.sections[1]!.items).toEqual(["B1", "B2", "B3"]);
+    expect(view.sections[0]!.label).toBe(LABEL_HIGHLIGHTS);
+    expect(view.sections[1]!.label).toBe(LABEL_CONCERNS);
+  });
+
+  it("空文字・空白だけの項目は捨てる(残りの文字列は加工しない)。全部捨てられたら、その塊ごと出さない", () => {
+    const view = buildReasonCellView(input("x", ["", "  ", " 先行力 "], ["", "\u3000"]));
+    expect(view.sections).toEqual([{ kind: "highlights", label: "強調材料", items: [" 先行力 "] }]);
+  });
+
+  it("reason が null でも、項目があれば「-」のあとに sections を続ける", () => {
+    const view = buildReasonCellView(input(null, ["A"], ["B"]));
+    expect(view.reason).toBe("-");
+    expect(view.sections.map((s) => s.kind)).toEqual(["highlights", "concerns"]);
   });
 });

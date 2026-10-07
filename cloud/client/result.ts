@@ -19,17 +19,14 @@
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/app/src/renderer/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-allocation-view";
-import { formatEstimatedEvSuffix, formatEv, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_PRIOR, MARK_LEGEND } from "../../packages/app/src/renderer/format";
+import { formatEstimatedEvSuffix, formatEv, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
 import { buildHash, type Route } from "./route";
 
 /** 画面のラベル(exe の共有定数。`view.ts` は renderer を import しない=ここを通す)。 */
-export { LABEL_ADJUSTED_PROB, LABEL_PRIOR };
-/** 強調材料・懸念事項のラベル(Issue #198。exe の表示〈#199〉と揃えたくなったら、そのとき共有定数へ移す)。 */
-export const LABEL_HIGHLIGHTS = "強調材料";
-export const LABEL_CONCERNS = "懸念事項";
+export { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR };
 
 export type ResultSource =
   | { readonly kind: "loading" }

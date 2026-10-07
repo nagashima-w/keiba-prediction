@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
-import { buildResultModel, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
-import { MARK_LEGEND } from "../../packages/app/src/renderer/format";
+import { buildResultModel, LABEL_CONCERNS, LABEL_HIGHLIGHTS, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
+import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/app/src/renderer/bet-allocation-view";
 import type { Route } from "../client/route";
@@ -388,5 +388,14 @@ describe("取得の状態(読み込み中・失敗)と戻るリンク", () => {
     expect(buildResultModel({ route, source: ready(analysis({ kaisaiDate: null })) }).backHref).toBe(`#date=20261007&venue=nar&race=${RACE_ID}`);
     expect(buildResultModel({ route, source: ready(analysis({ kaisaiDate: "20260230" })) }).backHref).toBe(`#date=20261007&venue=nar&race=${RACE_ID}`);
     expect(buildResultModel({ route, source: ready(analysis({ raceId: "短い" })) }).backHref).toBe("#date=20260628&venue=nar"); // 日付は分析の開催日、レースは付けない
+  });
+});
+
+describe("強調材料・懸念事項のラベル(Issue #199。exe の結果表と共有する定数)", () => {
+  it("cloud の画面が使うラベルは、exe の `format.ts` の共有定数と同じ値で、文言は「強調材料」「懸念事項」", () => {
+    expect(EXE_LABEL_HIGHLIGHTS).toBe("強調材料");
+    expect(EXE_LABEL_CONCERNS).toBe("懸念事項");
+    expect(LABEL_HIGHLIGHTS).toBe(EXE_LABEL_HIGHLIGHTS);
+    expect(LABEL_CONCERNS).toBe(EXE_LABEL_CONCERNS);
   });
 });

@@ -6,7 +6,7 @@
  * 実ファイル書き込み(dialog.showSaveDialog → writeFileSync)は呼び出し側(main/ipc.ts)が担う。
  *
  * データの出どころ:
- * - meta/horses(prior・adjustedProb・ev・isPositive・mark・reason・placeOddsMin)は
+ * - meta/horses(prior・adjustedProb・ev・isPositive・mark・reason・highlights・concerns・placeOddsMin)は
  *   AnalysisStore.listAnalyses が返す StoredAnalysis(analyses・analysis_horses)から。
  *   placeOddsMinはスナップショットの生オッズではなく、実際にEV計算へ使った値(ev/isPositiveと対)を
  *   採用する。
@@ -23,7 +23,7 @@
  * AnalysisStore側で既に null にフォールバック済み(analysis-store.ts toStoredRaceSnapshot)。
  * ここではさらに「null」「スキーマに一致しないunknown値」のいずれでも例外を投げず、
  * スナップショット由来の項目だけを null にフォールバックする(analysis_horses由来の
- * prior/adjustedProb/ev/isPositive/mark/reason は StoredAnalysisHorse から独立して取得できるため
+ * prior/adjustedProb/ev/isPositive/mark/reason/highlights/concerns は StoredAnalysisHorse から独立して取得できるため
  * 影響を受けない)。
  *
  * 秘密安全性: 入力(BuildAnalysisExportInput)は StoredAnalysis・レース結果・会場名・ツール情報のみで
@@ -325,6 +325,13 @@ export interface AnalysisExportHorse {
   readonly isPositive: boolean;
   readonly mark: string | null;
   readonly reason: string | null;
+  /**
+   * LLM が挙げた強調材料(Issue #199・#196-b。各最大3項目。LLM 未使用・項目なし・旧レコードは `[]`)。
+   * schemaVersion は 1 のまま(キーを足すだけなので、既存の読み手には後方互換)。
+   */
+  readonly highlights: readonly string[];
+  /** LLM が挙げた懸念事項(Issue #199。仕様は highlights と同じ)。 */
+  readonly concerns: readonly string[];
 }
 
 /** エクスポートJSONの実結果1頭分(schemaVersion=1)。 */
@@ -449,6 +456,8 @@ export function buildAnalysisExportDocument(
       isPositive: h.isPositive,
       mark: h.mark,
       reason: h.reason,
+      highlights: h.highlights,
+      concerns: h.concerns,
     };
   });
 
@@ -491,7 +500,7 @@ export function serializeAnalysisExportJson(doc: AnalysisExportDocument): string
 }
 
 /**
- * CSVのヘッダ順(AnalysisExportHorse + 結果4列)。
+ * CSVのヘッダ順(AnalysisExportHorse + 結果4列 + 強調材料・懸念事項の2列)。
  * code-reviewer提案対応: 相互運用の完全性のため、JSON側に既にある結果の passing・last3f も
  * CSVへ追加する(finishPosition・placePayoutと同じ「結果があれば結合」列)。
  */
@@ -520,6 +529,9 @@ const CSV_COLUMNS = [
   "placePayout",
   "last3f",
   "passing",
+  // Issue #199(#196-b): 既存列の位置を変えないため、末尾(passing の後)に足す。
+  "highlights",
+  "concerns",
 ] as const;
 
 /**
@@ -544,6 +556,19 @@ function csvEscape(value: string | number | boolean | null): string {
  */
 function formatPassingForCsv(passing: readonly number[]): string {
   return passing.length === 0 ? "" : passing.join("-");
+}
+
+/** CSV1セル内で強調材料・懸念事項の項目をつなぐ区切り(Issue #199)。 */
+export const CSV_LIST_SEPARATOR = " / ";
+
+/**
+ * 強調材料・懸念事項の配列をCSV1セル向けの文字列にする(例: ["A","B"] → "A / B")。空配列は空セルにする。
+ * ⚠️ 可逆ではない: 項目の文字列そのものに ` / ` が含まれると、セルから項目を厳密には復元できない
+ * (LLM が書く短い句に `/` が混じりうるため)。項目を正確に取り出したい読み手は JSON を使うこと。
+ * カンマ・引用符・改行を含む項目は、既存の csvEscape が引用符で囲むので列はずれない。
+ */
+function formatPointsForCsv(items: readonly string[]): string | null {
+  return items.length === 0 ? null : items.join(CSV_LIST_SEPARATOR);
 }
 
 /**
@@ -584,6 +609,8 @@ export function serializeAnalysisExportCsv(doc: AnalysisExportDocument): string 
       placePayout: result?.placePayout ?? null,
       last3f: result?.last3f ?? null,
       passing: result === undefined ? null : formatPassingForCsv(result.passing),
+      highlights: formatPointsForCsv(h.highlights),
+      concerns: formatPointsForCsv(h.concerns),
     };
     return CSV_COLUMNS.map((col) => csvEscape(record[col])).join(",");
   });

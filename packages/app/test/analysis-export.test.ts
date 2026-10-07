@@ -880,6 +880,9 @@ describe("buildAnalysisExportDocument(schemaVersion=1 のエクスポートJSON�
       isPositive: false,
       mark: "◎",
       reason: "調教良化",
+      // Issue #199: 強調材料・懸念事項のキーが馬ごとに出る(このフィクスチャは項目なし = [])。既存キーの値は変わらない。
+      highlights: [],
+      concerns: [],
     });
     expect(doc.results).toEqual([
       { umaban: 1, finishPosition: 1, placePayout: 120, passing: [2, 1, 1, 1], last3f: 34.5 },
@@ -1391,3 +1394,85 @@ function parseCsvRecords(text: string): string[][] {
   }
   return records.filter((r) => !(r.length === 1 && r[0] === ""));
 }
+
+/**
+ * Issue #199(#196-b): 強調材料・懸念事項(highlights・concerns)のエクスポート。
+ * JSON は馬ごとに配列を足す(schemaVersion は 1 のまま)。CSV は既存列の位置を変えず末尾に2列を足し、
+ * セルの中は ` / ` で連結する(`passing` が `-` 連結なのと同じ、1セル内の連結)。
+ */
+describe("強調材料・懸念事項のエクスポート(Issue #199)", () => {
+  /** 旧版(#199 より前)の CSV ヘッダ。この並びと位置が変わらないことを固定する(位置が変わる変異を殺す)。 */
+  const LEGACY_CSV_COLUMNS = [
+    "umaban", "wakuban", "name", "sex", "age", "kinryo", "jockeyName", "trainerName", "bodyWeight", "winOdds",
+    "popularity", "placeOddsMin", "oikiriCritic", "oikiriRank", "prior", "adjustedProb", "ev", "isPositive", "mark", "reason",
+    "finishPosition", "placePayout", "last3f", "passing",
+  ];
+
+  const horseWith = (umaban: number, highlights: readonly string[], concerns: readonly string[]): StoredAnalysis["horses"][number] => ({
+    umaban,
+    prior: 0.3,
+    adjustedProb: 0.3,
+    placeOddsMin: 2,
+    ev: 0.6,
+    isPositive: false,
+    contributions: null,
+    mark: null,
+    reason: "根拠",
+    highlights,
+    concerns,
+  });
+
+  const docOf = (horses: StoredAnalysis["horses"]) => buildAnalysisExportDocument(makeInput({ analysis: makeStoredAnalysis({ horses }) }));
+
+  it("JSON: 馬ごとに highlights・concerns の配列が出る(空は [])。schemaVersion は 1 のまま", () => {
+    const doc = docOf([horseWith(1, ["A", "B", "C"], ["D"]), horseWith(2, [], [])]);
+    expect(doc.schemaVersion).toBe(1);
+    expect(doc.horses[0]!.highlights).toEqual(["A", "B", "C"]);
+    expect(doc.horses[0]!.concerns).toEqual(["D"]);
+    expect(doc.horses[1]!.highlights).toEqual([]);
+    expect(doc.horses[1]!.concerns).toEqual([]);
+    // 文字列化しても配列のまま(JSON 往復で形が変わらない)。
+    const parsed = JSON.parse(serializeAnalysisExportJson(doc)) as { schemaVersion: number; horses: { highlights: string[]; concerns: string[] }[] };
+    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.horses[0]!.highlights).toEqual(["A", "B", "C"]);
+    expect(parsed.horses[1]!.concerns).toEqual([]);
+  });
+
+  it("CSV: 既存24列の位置は変わらず、末尾に highlights・concerns の2列が付く", () => {
+    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, ["A"], ["B"])]));
+    const header = csv.split("\r\n")[0]!.split(",");
+    expect(LEGACY_CSV_COLUMNS).toHaveLength(24);
+    expect(header.slice(0, 24)).toEqual(LEGACY_CSV_COLUMNS);
+    expect(header.slice(24)).toEqual(["highlights", "concerns"]);
+    expect(header).toHaveLength(26);
+  });
+
+  it("CSV: 複数項目は ` / ` で連結し、空配列は空セルになる", () => {
+    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, ["A", "B", "C"], ["D", "E"]), horseWith(2, [], [])]));
+    const rows = parseCsvRecords(csv);
+    const header = rows[0]!;
+    const hi = header.indexOf("highlights");
+    const co = header.indexOf("concerns");
+    expect(hi).toBe(24);
+    expect(co).toBe(25);
+    expect(rows[1]![hi]).toBe("A / B / C");
+    expect(rows[1]![co]).toBe("D / E");
+    expect(rows[2]![hi]).toBe("");
+    expect(rows[2]![co]).toBe("");
+    // 全行が同じ列数(列がずれない)。
+    expect(rows[1]).toHaveLength(26);
+    expect(rows[2]).toHaveLength(26);
+  });
+
+  it("CSV: 項目にカンマ・引用符・改行・区切り(` / `)を含んでも、列数がずれず往復で同じ文字列に戻る", () => {
+    const tricky = ['脚質,先行"逃げ"', "改行\n入り", "前走1着 / 好タイム"];
+    const csv = serializeAnalysisExportCsv(docOf([horseWith(1, tricky, ["懸念,あり"])]));
+    const rows = parseCsvRecords(csv);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toHaveLength(26);
+    expect(rows[1]![24]).toBe(tricky.join(" / "));
+    expect(rows[1]![25]).toBe("懸念,あり");
+    // 引用符で囲まれて出力されている(素のカンマで列が割れていない)。
+    expect(csv).toContain('"脚質,先行""逃げ""');
+  });
+});

@@ -50,6 +50,43 @@ export function formatReason(reason: string | null): string {
 }
 
 /**
+ * 強調材料・懸念事項のラベル(Issue #199・#196-b)。クラウド版の画面(`cloud/client/result.ts` が再 export)と
+ * 文言を揃えるための共有定数。色だけで区別しないため、箇条書きの見出しとして文字で出す。
+ */
+export const LABEL_HIGHLIGHTS = "強調材料";
+export const LABEL_CONCERNS = "懸念事項";
+
+/** LLM根拠セルの箇条書き1塊(強調材料・懸念事項)。 */
+export interface ReasonCellSection {
+  readonly kind: "highlights" | "concerns";
+  readonly label: string;
+  readonly items: readonly string[];
+}
+
+/** LLM根拠セルの表示内容(Issue #199)。 */
+export interface ReasonCellView {
+  /** 総合の根拠(`formatReason` と同じ。null は「-」)。 */
+  readonly reason: string;
+  /** 項目が1つ以上ある塊だけ。順番は強調材料 → 懸念事項。2つとも空なら `[]`(= 従来どおり reason だけの表示)。 */
+  readonly sections: readonly ReasonCellSection[];
+}
+
+/**
+ * LLM根拠セル(結果表の「LLM根拠」列)の表示内容を組み立てる(Issue #199)。
+ * 順番は reason → 強調材料 → 懸念事項。空文字・空白だけの項目は捨てる(残りの文字列は加工しない。
+ * クラウド版の `pointsOf` と同じ)。項目がすべて捨てられた塊は出さない。
+ * reason が null でも、項目があれば「-」のあとに続ける(LLM が効かなかった馬は配列も `[]` なので、通常この組合せは起きない)。
+ */
+export function buildReasonCellView(row: Pick<AnalysisRow, "reason" | "highlights" | "concerns">): ReasonCellView {
+  const keep = (items: readonly string[]): readonly string[] => items.filter((item) => item.trim() !== "");
+  const candidates: readonly ReasonCellSection[] = [
+    { kind: "highlights", label: LABEL_HIGHLIGHTS, items: keep(row.highlights) },
+    { kind: "concerns", label: LABEL_CONCERNS, items: keep(row.concerns) },
+  ];
+  return { reason: formatReason(row.reason), sections: candidates.filter((section) => section.items.length > 0) };
+}
+
+/**
  * 予想印(Task#23)を表示する。印があればそのまま、無い(null)場合は空欄。
  * 「-」ではなく空欄にするのは、印は「無いのが普通」の列であり、他列の「値が取れなかった」
  * ダッシュ表示と混同させないため。

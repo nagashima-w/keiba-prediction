@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.20.2)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.21.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.20.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.21.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -329,7 +329,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   各最大3項目・1項目は全角30字以内の短い句・該当が無ければ `[]`。`reason` の言い換えにはさせず、**単勝オッズ・人気・参考 EV を材料にさせない**(印の判断材料としての既存の指示は変えない)。出力例は `mark` の後ろに置く。
   解析(`parse-response.ts` の `coerceItemList`): 欠落・配列でない値は `[]`、文字列でない要素と空(trim 後)は捨てて trim した値を残し、**空を除いたあとに**先頭3つに切る(1項目の長さは切らない)。
   `place_prob` が欠落・不正で prior 採用になった馬(`usedPrior`)は `[]`。**分析は止めない**(`clipped`・`missing`・フォールバックの判定に影響しない)。印の制約違反の救済でも保持する。
-  保存: exe の `analysis_horses.highlights_json`・`concerns_json`(JSON 配列の文字列。**項目なし〈空配列・省略〉は NULL**、読むと NULL・壊れた値は `[]`)、D1 は migration `0006`。`AnalysisRow`・保存レコードに載る(exe の画面・エクスポートは #199、クラウド版の画面は #198)。
+  保存: exe の `analysis_horses.highlights_json`・`concerns_json`(JSON 配列の文字列。**項目なし〈空配列・省略〉は NULL**、読むと NULL・壊れた値は `[]`)、D1 は migration `0006`。`AnalysisRow`・保存レコードに載る。画面への表示は、クラウド版が #198、exe の結果表とエクスポートが #199(§6)。
   出力量は増える(推測で約 2〜2.3 倍。**実測は公開後**)。
 - **フェイルセーフ**(`analyze-race.ts` / `parse-response.ts`): JSON 破損・切り詰め(`AnalyzerTruncationError`、
   stop_reason=max_tokens)・呼び出し失敗は 1 回リトライ後に**全馬 prior 採用**(`fallback:true`、理由を
@@ -755,6 +755,14 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   (モデル出力テキストのみ)。
 - **秘密安全性**: 入力に apiKey・Webhook URL・プロンプト本文を受け取る経路が無く、出力へ混入しない構造。
   CSV は RFC4180 準拠(BOM なし)。
+- **強調材料・懸念事項(#199)**: JSON は馬ごとに `highlights`・`concerns`(各最大3項目の文字列配列。LLM 未使用・
+  項目なし・旧レコードは `[]`)を持つ。schemaVersion は 1 のまま(キーを足すだけ)。CSV は既存列の位置を変えず、
+  末尾(`passing` の後)に `highlights`・`concerns` の2列を足し、セルの中は ` / ` で連結する(空配列は空セル)。
+  **CSV のセルは可逆ではない**: 項目の文字列自体に ` / ` が含まれると項目を厳密には復元できない。
+  正確に取り出したいときは JSON を使う(カンマ・引用符・改行を含む項目は RFC4180 のエスケープで列がずれない)。
+- 画面(一括分析の結果表): 「LLM根拠」列のセルに reason → 強調材料 → 懸念事項(ラベルは「強調材料」「懸念事項」。
+  cloud と共有の定数 `LABEL_HIGHLIGHTS`・`LABEL_CONCERNS`)の順で出す。項目の無い塊は出さない。
+  ハイライト表(EV プラスの馬の要約表)には出さない。
 
 ## 7. Discord 通知(notify/discord)
 

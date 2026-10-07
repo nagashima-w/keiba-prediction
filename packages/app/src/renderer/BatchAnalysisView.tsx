@@ -57,6 +57,7 @@ import {
 } from "./batch-summary.js";
 import {
   analysisModelText,
+  buildReasonCellView,
   formatConditionChangeTags,
   formatEstimatedEvSuffix,
   formatEv,
@@ -64,7 +65,6 @@ import {
   formatOdds,
   formatOpportunityScore,
   formatPercent,
-  formatReason,
   isHighlightRow,
   LABEL_ADJUSTED_PROB,
   LABEL_PRIOR,
@@ -174,6 +174,30 @@ function batchProgressText(progress: BatchProgress): string {
   return `${head}${race}${stagePart}`;
 }
 
+/**
+ * 「LLM根拠」列のセル(Issue #199)。reason → 強調材料 → 懸念事項の順。表示内容は純関数
+ * `buildReasonCellView` が決める(項目が無い塊は出ない)。色だけで区別せず、ラベルの文字を出す。
+ * 文字列は子要素として入れるだけ(HTML としては解釈しない)。
+ */
+function ReasonCell(props: { row: AnalysisResult["rows"][number] }): React.JSX.Element {
+  const view = buildReasonCellView(props.row);
+  return (
+    <>
+      <div>{view.reason}</div>
+      {view.sections.map((section) => (
+        <div key={section.kind} style={{ marginTop: "0.25rem" }}>
+          <strong>{section.label}</strong>
+          <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+            {section.items.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
+}
+
 /** 1レース分の結果テーブル(成功時の詳細)。 */
 function ResultTable(props: {
   result: AnalysisResult;
@@ -267,7 +291,9 @@ function ResultTable(props: {
                   </span>
                 )}
               </td>
-              <td style={tdStyle}>{formatReason(row.reason)}</td>
+              <td style={tdStyle}>
+                <ReasonCell row={row} />
+              </td>
             </tr>
           ))}
         </tbody>
