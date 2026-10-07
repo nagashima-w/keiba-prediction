@@ -4,6 +4,7 @@
  *    2,000,000 バイト〈公式の制限表。要約ツールで読んだ値で、一次確認は未了〉)。通常の最大は、中央16頭・全券種 ON で 265 件(約 23KB)で上限の 1/60 以下。
  *    上限は {@link MAX_BETS_JSON_BYTES}(1.5MB)。超えたら D1 に何も書かずに拒否する(保存の失敗として再試行され、上限で failed になる)。
  *  - `findByAnalyzedAt`: 同じレース・同じ分析時刻の分析の id(重複の確認。DO の計算ステップの再実行で、2件目を保存しないため)。D1 の読み出しは一覧の2文。
+ *  - `findRecentByRace`: 同じレースの、分析時刻が `[fromIso, toIso]` の分析(id・分析時刻・prompt_version・model だけ)。発走前の自動実行が、手動の分析との重複を確かめる(Issue #204)。D1 の読み出しは1文。
  *  - `countChildren`: 保存した分析の子の行(馬・買い目)の件数(最初の実保存で、子の行が正しい親 id に紐づいたかを確かめる)。
  */
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
@@ -29,6 +30,9 @@ export function createAnalysisSink(store: D1AnalysisStore): AnalysisSink {
     async findByAnalyzedAt(raceId: string, analyzedAt: string) {
       const summaries = await store.listAnalysisSummaries({ raceId, limit: LIST_MAX_LIMIT });
       return summaries.find((s) => s.analyzedAt === analyzedAt)?.id ?? null;
+    },
+    findRecentByRace(raceId: string, fromIso: string, toIso: string) {
+      return store.listRecentForRace(raceId, fromIso, toIso);
     },
     countChildren(analysisId: number) {
       return store.countChildren(analysisId);

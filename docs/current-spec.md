@@ -1188,10 +1188,20 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   アラームの中で、**計画の段階**(会場ごとに 1 ステップ = gate 1 本。中央 → 地方の一覧。失敗は 60 秒おきに最大 3 回、`blocked` は再試行しない。再試行の待ちは時刻 `next_try_at` で持つ)→ **確定**
   (offset を設定から決める。読めなければ 3 回再試行して**既定の 45 分**で確定し、`plan_offset_source = default-fallback` を残す。対象 = 中央の全件 + 地方の Jpn。各対象に `planPreRaceDue` で期限を計算して `race_day_plan` に書き、
   pre_race を走らせる行(planned)にだけ morning を積む。skip〈`no-start-time`・`started`・`too-late`・`cap`〉には積まない。**既にある morning は状態に関係なく積み直さない**。1日の上限(100)は、対象1件につき morning と pre_race の2行ぶん)。
-  期限が来た planned の行は、起床のたびに pre_race を積んで promoted にする(同じレースの pre_race が実行中なら、積み直さず行だけ promoted。上限なら skipped〈cap〉)。**アラームの候補になる行は、起きたときに必ず状態が変わる**(ループの防止)。
-  確定は**原子性に頼らない冪等**を目指している(確定の印は最後。計画の行は `ON CONFLICT DO NOTHING`・morning は無いときだけ・offset は最初の決定を残す)。**ただし既知の穴が1つある**: 計画の行を書いたあと morning を積む前に落ちると、再実行の先頭の昇格で期限切れの行が先に promoted になり、その行には morning が積まれず、`morningAllTerminal` が偽のまま残る(DO の同期区間の途中の SQL 例外でだけ起きる。#204 で直す)。
+  期限が来た planned の行は、**確定済みの日だけ**、起床のたびに pre_race を積んで promoted にする(Issue #204 のガードは下の「発走前の予約のガード」)。**アラームの候補になる行は、起きたときに必ず状態が変わる**(ループの防止)。
+  確定は**原子性に頼らない冪等**を目指している(確定の印は最後。計画の行は `ON CONFLICT DO NOTHING`・morning は無いときだけ・offset は最初の決定を残す)。#203 の時点では既知の穴が1つあった(計画の行を書いたあと morning を積む前に落ちると、再実行の先頭の昇格で期限切れの行が先に promoted になり、その行に morning が積まれず `morningAllTerminal` が偽のまま残る)が、**Issue #204 で塞いだ**: 昇格は確定済みの日だけ動き、確定の前の期限はアラームの候補にもしない(`PlanStore.nextDueMs` が確定前は null)。
   DO の表: `race_day_plan_venue`(会場の状態・取得した一覧の本体〈確定したら捨てる〉)・`race_day_plan`(期限と状態)・meta の `plan_*`。**掃除は、キャッシュの行と孤立した LLM の応答の記録だけを消す**(従来どおり。タスク・prior・計画の行は消さない)。
   `getPlanProgress()` は、朝のまとめ(#205)のための読み取り(`stage`・会場の状態と件数・各行の期限と morning の状態・`morningAllTerminal`〈確定済みで、積んだ morning がすべて done か failed。一部が failed でも true〉・`offsetSource`)。
+- **発走前の予約のガード**(Issue #204〈#166-C〉。`cloud/src/race-day-core.ts`・`race-day-plan.ts`・`auto-run-result.ts`。**まだ呼ぶ入口が無い**: cron は #206):
+  - **昇格の判定**(期限が来た planned の行。順に): 同じレースの pre_race が実行中なら、自動の印が今のタスクを指していれば(昇格で積んだあと promoted にする前に落ちた再実行)promoted にするだけ、そうでなければ手動なので積み直さず **skipped〈`manual`〉**
+    → **時刻の判定**(計画の時点と同じ `planPreRaceDue` を再利用: 発走済み〈`started`〉・発走まで 10 分未満〈`too-late`〉は skipped。pre_race も netkeiba も出ない)→ **手動の分析との重複**(下記)→ 上限なら skipped〈`cap`〉→ pre_race を積み、自動の印を書き、promoted。
+  - **手動の分析との重複**(ユーザー判断 2026-10-07): 同じレースの分析時刻が **[期限 − 15 分, 今]**(両端を含む)の分析のうち、**現行の prompt_version〈`resolveClipVariant(設定の clipVariant).promptVersion`〉で、LLM が実際に効いた〈`model` あり〉**ものがあれば、自動はスキップする(skipped〈`manual`〉)。
+    それより前の手動は無視して自動で分析する。LLM が効かなかった手動の分析(fallback は `prompt_version` が入って `model` が null、API キー未登録は両方 null)は、数えない(数えると、そのレースには prior のままの分析しか残らない。ユーザーの文言より厳しい解釈。ゲート判断 2026-10-07)。
+    **D1 に聞くのは、DO にそのレースの pre_race の行〈done・failed〉があるときだけ**(D1 の `analyses` を書くのは pre_race の計算だけで、起動するのは手動の予約と昇格だけ。行が無ければ手動の分析は存在しえない)。聞くのは `AnalysisSink.findRecentByRace`(1 文)で、設定は候補があるときだけ読む。
+    **読み取り(D1・設定)の失敗は、走らせる側に倒す**(警告を出す。スキップに倒すとそのレースの分析と通知が無くなる)。確認の await の間に手動の予約が入りうるので、**判定は状態を読み直してから同期で行う**。
+  - **自動の印**(`race_day_auto_pre_race`。新しい表): 昇格が pre_race を積んだ同じ同期区間で書く。**手動の `schedule()` が pre_race を積み直すときに消す**(印が有る ⇔ 今の pre_race のインスタンスは自動)。失敗の理由(`fail_reason`)は、自動の pre_race が failed になる箇所が書く。
+  - **ステップの直前のガード**: 自動の pre_race は、取得・計算の各ステップの直前に `now ≥ 発走` なら、netkeiba にも LLM にも出ずに failed にする(固定のエラー文 `発走済みのため、自動実行しませんでした`・理由 `started`・試行回数は据え置き)。キューや再試行の待ちで発走を過ぎることがあるため。計算ステップは、分析が保存済み(`analysis_id` あり)なら failed にしない。**手動の pre_race は変えない**。
+  - **結果の読み取り**(`getAutoRunResults()`。RPC あり。状態は変えない。#205 の通知が状態から作るため): 確定済みの日(`stage: "done"`)の各行について、`waiting`(期限待ち)・`running`・`completed`(`analysisId`・`detail`)・`failed`(理由は `started`〈ステップで発走済み〉・`blocked`〈ブレーカー・許可リスト外〉・`fetch-exhausted`・`compute-exhausted`)・`skipped`(理由は `no-start-time`・`started`・`too-late`・`cap`・`manual`)・`superseded`(昇格したが、その後に手動が pre_race を上書きした)を返す。分類は純関数 `classifyAutoRun`。通知に出すか・「送った印」は #205 の持ち分。
 - **アラームの合成と処理の順**(Issue #203 段階1。`cloud/src/race-day-core.ts`): DO のアラームは1つだけなので、`setAlarm` を呼ぶのは `rearm()` の1箇所だけにし、純関数 `nextAlarmAt` が
   「今すぐの仕事(now)・再試行待ち(now + 60 秒)・計画の次の試行/期限(段階2。`max(それ, now)`)・掃除の期限」のうち**最も早い時刻**を選ぶ(掃除の期限は、仕事〈即時・再試行待ち〉があるあいだは候補にしない)。
   予約が無いときの `setAlarm` の回数・値は従来と同じ。`pickNext` は **発走前(pre_race)を朝(morning)より先**に処理する(計算待ち → 取得待ちの順は従来どおり。取得待ちのうち**再試行待ち〈試行済み〉は最後**にして、再試行の間隔を保つ)。

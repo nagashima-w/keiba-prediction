@@ -5,11 +5,14 @@
  *  - `race_day_plan_venue`: 計画の段階。会場(中央 `central`・地方 `nar`)ごとの一覧の取得の状態(pending → ok / failed)。再試行の待ちは時刻(`next_try_at`)で持つ。
  *    取得した一覧の本体(`entries_json`。`RaceListEntry` の配列の JSON)は、確定(finalize)まで持ち、確定したら捨てる。
  *  - `race_day_plan`: 対象レースごとの期限(計画時点の offset で固定)。state: `planned`(期限を待つ)→ `promoted`(pre_race を投入した)/ `skipped`(理由は `skip_reason`)。
+ *  - `race_day_auto_pre_race`(Issue #204): **自動で積んだ pre_race の印**。昇格が pre_race を積んだ同じ同期区間で書き、手動の `schedule()` が pre_race を積み直すときに消す
+ *    (印が有る ⇔ 今の pre_race のインスタンスは自動)。`enqueued_at` はそのタスクの `queued_at` と同じ値(落ちて再実行したときの照合にも使う)。`fail_reason` は、自動の pre_race が failed になる箇所が書く。
  *  - meta(`race_day_meta`)のキー: `plan_requested_at`・`plan_finalized_at`・`plan_offset`・`plan_offset_source`・`plan_finalize_attempts`・`plan_finalize_next_try_at`。
  *
  * **起きたときに必ず状態が変わる**(アラームの候補になる行は、起きた処理が必ず状態を変える。変わらないと、期限が過去のまま即時に起き続ける): pending の会場 → 試行回数・状態、
  * 確定待ち → 試行回数・確定、planned の期限 → promoted か skipped。
  */
+import type { AutoFailReason } from "./auto-run-result";
 import type { SqlLike } from "./sql-like";
 
 export type PlanVenue = "central" | "nar";
@@ -19,8 +22,11 @@ export const PLAN_VENUES: readonly PlanVenue[] = ["central", "nar"];
 export type VenueState = "pending" | "ok" | "failed";
 export type PlanRowState = "planned" | "promoted" | "skipped";
 export type PlanDisposition = "scheduled" | "immediate" | "skip";
-/** `cap` = 1日のタスクの上限(`MAX_TASKS_PER_DAY`)のため。ほかは `planPreRaceDue` の理由(`auto-run-plan.ts`)。 */
-export type PlanSkipReason = "no-start-time" | "started" | "too-late" | "cap";
+/**
+ * `cap` = 1日のタスクの上限(`MAX_TASKS_PER_DAY`)のため。`manual` = 手動の分析が直前にある(期限の 15 分前〜今に、現行の prompt_version で LLM が効いた分析がある)か、
+ * 手動の pre_race が実行中(Issue #204)。ほかは `planPreRaceDue` の理由(`auto-run-plan.ts`)。
+ */
+export type PlanSkipReason = "no-start-time" | "started" | "too-late" | "cap" | "manual";
 
 export interface VenueRow {
   readonly venue: PlanVenue;
@@ -72,6 +78,10 @@ export class PlanStore {
          race_id TEXT PRIMARY KEY, venue TEXT NOT NULL, venue_name TEXT, race_number INTEGER, race_name TEXT, grade TEXT,
          start_time TEXT, start_ms INTEGER, due_ms INTEGER, offset_minutes INTEGER NOT NULL, disposition TEXT NOT NULL, skip_reason TEXT,
          state TEXT NOT NULL, planned_at INTEGER NOT NULL, promoted_at INTEGER)`,
+    );
+    this.sql.exec(
+      `CREATE TABLE IF NOT EXISTS race_day_auto_pre_race (
+         race_id TEXT PRIMARY KEY, enqueued_at INTEGER NOT NULL, fail_reason TEXT)`,
     );
   }
 
@@ -232,8 +242,14 @@ export class PlanStore {
     return candidates.length === 0 ? null : Math.min(...candidates);
   }
 
-  /** 次に期限が来る planned の行の時刻。無ければ null。 */
+  /**
+   * 次に期限が来る planned の行の時刻。無ければ null。**確定済みの日だけ**(確定の前は null): 昇格は確定済みの日だけ動くので、確定の前に期限切れの行が候補になると、
+   * 起きても状態が変わらないまま即時に起き続ける(確定待ちの再試行の待ちが未来のとき。Issue #204 G-C3)。
+   */
   nextDueMs(): number | null {
+    if (this.finalizedAt() === null) {
+      return null;
+    }
     const rows = this.sql.exec("SELECT MIN(due_ms) AS at FROM race_day_plan WHERE state = 'planned'").toArray() as { at: number | null }[];
     return rows[0]?.at ?? null;
   }
@@ -291,6 +307,54 @@ export class PlanStore {
 
   markSkipped(raceId: string, reason: PlanSkipReason): void {
     this.sql.exec("UPDATE race_day_plan SET state = 'skipped', disposition = 'skip', skip_reason = ? WHERE race_id = ? AND state = 'planned'", reason, raceId);
+  }
+
+  // ---- 自動で積んだ pre_race の印(Issue #204)----
+
+  /** 自動で積んだ印を書く(既にあれば作り直す。失敗の理由は消える)。pre_race を積んだのと同じ同期区間で呼ぶ。 */
+  markAuto(raceId: string, enqueuedAt: number): void {
+    this.sql.exec(
+      "INSERT INTO race_day_auto_pre_race (race_id, enqueued_at, fail_reason) VALUES (?, ?, NULL) ON CONFLICT(race_id) DO UPDATE SET enqueued_at = excluded.enqueued_at, fail_reason = NULL",
+      raceId,
+      enqueuedAt,
+    );
+  }
+
+  autoMarker(raceId: string): { readonly enqueuedAt: number; readonly failReason: AutoFailReason | null } | null {
+    const rows = this.sql.exec("SELECT enqueued_at, fail_reason FROM race_day_auto_pre_race WHERE race_id = ?", raceId).toArray() as { enqueued_at: number; fail_reason: AutoFailReason | null }[];
+    const row = rows[0];
+    return row === undefined ? null : { enqueuedAt: row.enqueued_at, failReason: row.fail_reason };
+  }
+
+  /** 手動が pre_race を積み直すとき、自動の印を消す(手動が所有権を取る)。 */
+  clearAuto(raceId: string): void {
+    this.sql.exec("DELETE FROM race_day_auto_pre_race WHERE race_id = ?", raceId);
+  }
+
+  setAutoFailReason(raceId: string, reason: AutoFailReason): void {
+    this.sql.exec("UPDATE race_day_auto_pre_race SET fail_reason = ? WHERE race_id = ?", reason, raceId);
+  }
+
+  /** 結果の読み取り用: 計画の行・同じレースの pre_race のタスク・自動の印(レースID 順)。確定の前でも返す(分類する側が stage で絞る)。 */
+  rowsWithPreRace(): (PlanRowRecord & {
+    readonly pre_status: "queued" | "fetched" | "done" | "failed" | null;
+    readonly pre_queued_at: number | null;
+    readonly pre_analysis_id: number | null;
+    readonly pre_detail: "stored" | "failed" | "skipped" | null;
+    readonly pre_error: string | null;
+    readonly auto_enqueued_at: number | null;
+    readonly auto_fail_reason: AutoFailReason | null;
+  })[] {
+    return this.sql
+      .exec(
+        `SELECT p.*, t.status AS pre_status, t.queued_at AS pre_queued_at, t.analysis_id AS pre_analysis_id, t.detail AS pre_detail, t.error AS pre_error,
+                a.enqueued_at AS auto_enqueued_at, a.fail_reason AS auto_fail_reason
+           FROM race_day_plan p
+           LEFT JOIN race_day_tasks t ON t.race_id = p.race_id AND t.mode = 'pre_race'
+           LEFT JOIN race_day_auto_pre_race a ON a.race_id = p.race_id
+          ORDER BY p.race_id`,
+      )
+      .toArray() as never;
   }
 
   /** 計画の行と、同じレースの morning タスクの状態(無ければ null)。レースID 順。 */

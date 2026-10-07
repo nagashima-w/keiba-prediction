@@ -92,6 +92,47 @@ describe("重複の確認(findByAnalyzedAt)", () => {
   });
 });
 
+describe("直近の分析の読み取り(findRecentByRace。Issue #204: 発走前の自動実行が、手動の分析との重複を確かめる)", () => {
+  const T = (sec: string): string => `2026-10-07T09:00:${sec}.000Z`;
+
+  it("同じレースの、分析時刻が [from, to](両端を含む)の分析だけを、分析時刻の順に返す。1ms 外・別のレースは含まない", async () => {
+    const s = sink();
+    const at = async (raceIndex: number, analyzedAt: string) => (await s.save(mkRecord(raceIndex, 2, null, { analyzedAt, raceId: `R${String(raceIndex).padStart(4, "0")}` }))).id;
+    const justBefore = await at(1, "2026-10-07T08:59:59.999Z");
+    const atFrom = await at(1, "2026-10-07T09:00:00.000Z");
+    const inside = await at(1, "2026-10-07T09:10:00.000Z");
+    const atTo = await at(1, "2026-10-07T09:15:00.000Z");
+    const justAfter = await at(1, "2026-10-07T09:15:00.001Z");
+    const otherRace = await at(2, "2026-10-07T09:10:00.000Z");
+    const found = await s.findRecentByRace("R0001", "2026-10-07T09:00:00.000Z", "2026-10-07T09:15:00.000Z");
+    // 前提: 候補は 6 件あり、そのうち範囲内は 3 件(自明に通らないよう、外の 3 件の id が別であることも固定する)
+    expect(new Set([justBefore, atFrom, inside, atTo, justAfter, otherRace]).size).toBe(6);
+    expect(found.map((r) => r.id)).toEqual([atFrom, inside, atTo]);
+  });
+
+  it("prompt_version と model を、保存した値のまま返す(LLM が効いた分析は両方あり、キー未登録は両方 null、fallback は prompt_version だけ)", async () => {
+    const s = sink();
+    await s.save(mkRecord(1, 2, null, { analyzedAt: T("01"), promptVersion: "2026-10-07.1", model: "claude-sonnet-x" }));
+    await s.save(mkRecord(1, 2, null, { analyzedAt: T("02"), promptVersion: null, model: null }));
+    await s.save(mkRecord(1, 2, null, { analyzedAt: T("03"), promptVersion: "2026-10-07.1-clip015", model: null }));
+    const found = await s.findRecentByRace("R0001", T("00"), T("59"));
+    expect(found.map((r) => [r.analyzedAt, r.promptVersion, r.model])).toEqual([
+      [T("01"), "2026-10-07.1", "claude-sonnet-x"],
+      [T("02"), null, null],
+      [T("03"), "2026-10-07.1-clip015", null],
+    ]);
+  });
+
+  it("D1 の読み出しは 1 文(馬・買い目・大きな列は読まない)", async () => {
+    const spied = spyDb(local.db);
+    const s = createAnalysisSink(new D1AnalysisStore({ db: spied.db, bucket: local.r2 }));
+    await s.findRecentByRace("R0001", T("00"), T("59"));
+    expect(spied.prepared).toHaveLength(1);
+    expect(spied.batches).toEqual([]);
+    expect(spied.prepared[0]).not.toMatch(/analysis_horses|analysis_bets|raw_response|race_snapshot/);
+  });
+});
+
 describe("買い目の大きさの上限(#175 の申し送り)", () => {
   /** 買い目の JSON が約 `bytes` バイトになる記録(1件の comboKey を長くする)。 */
   const bigBets = (bytes: number): AnalysisRecord => {

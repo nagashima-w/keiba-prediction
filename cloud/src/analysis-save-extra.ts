@@ -16,3 +16,17 @@ export interface AnalysisSaveExtra {
    */
   readonly llmCalls?: readonly LlmCallRecord[] | null;
 }
+
+/**
+ * 保存済みの分析の要約のうち、手動の分析との重複の確認(Issue #204)に要る列だけ。`AnalysisSink.findRecentByRace` の戻り値(D1 の `listRecentForRace` が作る)。
+ * ここに置くのは `AnalysisSaveExtra` と同じ理由(`RaceDayCore` は保存先の実体を知らないので、型だけを小さなモジュールで共有する)。
+ */
+export interface RecentAnalysis {
+  readonly id: number;
+  /** 分析時刻(ISO 8601 の UTC)。 */
+  readonly analyzedAt: string;
+  /** LLM を呼んだ分析だけ入る(キー未登録は null)。 */
+  readonly promptVersion: string | null;
+  /** LLM の補正が実際に採用された分析だけ入る(fallback・キー未登録は null)。 */
+  readonly model: string | null;
+}

@@ -70,9 +70,9 @@ import type {
   StoredAnalysis,
   StoredAnalysisHorse,
 } from "../../packages/core/src/ev/analysis-store-types.js";
-import type { AnalysisSaveExtra } from "./analysis-save-extra";
+import type { AnalysisSaveExtra, RecentAnalysis } from "./analysis-save-extra";
 import { parseLlmCalls, serializeLlmCalls, type LlmCallRecord } from "./llm-calls";
-export type { AnalysisSaveExtra };
+export type { AnalysisSaveExtra, RecentAnalysis };
 import { contributionsOf, decodeDetail, DETAIL_KEY_SQL, detailKeyOf, encodeDetail } from "./analysis-detail";
 import { isReadAllowed, isWriteAllowed, monthKey, R2_FENCE_LIMITS, type R2Usage } from "./r2-fence";
 
@@ -144,6 +144,7 @@ export interface AnalysisRepository {
   getAnalysisDetail(analysisId: number): Promise<AnalysisDetailResult | undefined>;
   getStoredAllocation(analysisId: number): Promise<StoredAllocation | undefined>;
   listAnalyzedRaceIdsByPromptVersion(version: string): Promise<string[]>;
+  listRecentForRace(raceId: string, fromIso: string, toIso: string): Promise<RecentAnalysis[]>;
   /** 今月の R2 の操作回数(Class A・B)と、柵の状態(Issue #173)。 */
   getR2Usage(): Promise<R2UsageReport>;
 }
@@ -205,6 +206,15 @@ const SUMMARY_COLUMNS = `id, race_id AS raceId, analyzed_at AS analyzedAt, ev_es
        detail_key IS NOT NULL AS hasDetail, llm_note AS llmNote`;
 
 const SELECT_ONE_SQL = `SELECT ${SUMMARY_COLUMNS}, detail_key AS detailKey, llm_calls_json AS llmCallsJson FROM analyses WHERE id = ?`;
+
+/**
+ * 同じレースの、分析時刻が `[from, to]`(両端を含む。ISO 8601 の UTC 文字列。`analyzed_at` は `toISOString()` の固定長 24 文字なので、文字列の大小が時刻の大小と一致する)の分析。
+ * 発走前の自動実行が、手動の分析との重複を確かめる(Issue #204)ための軽い読み取り(`idx_analyses_race`。馬・買い目・大きな列は読まない)。
+ */
+const SELECT_RECENT_FOR_RACE_SQL = `SELECT id, analyzed_at AS analyzedAt, prompt_version AS promptVersion, model
+           FROM analyses
+           WHERE race_id = ? AND analyzed_at >= ? AND analyzed_at <= ?
+           ORDER BY analyzed_at, id`;
 
 const SELECT_RACE_IDS_BY_VERSION_SQL = `SELECT DISTINCT race_id AS raceId
            FROM analyses
@@ -448,6 +458,12 @@ export class D1AnalysisStore implements AnalysisRepository {
       return undefined;
     }
     return toStoredAllocation(metaRow, (bets?.results ?? []) as StoredAllocationBetDetail[]);
+  }
+
+  /** 同じレースの、分析時刻が `[fromIso, toIso]`(両端を含む)の分析の要約(id・分析時刻・prompt_version・model だけ)。 */
+  async listRecentForRace(raceId: string, fromIso: string, toIso: string): Promise<RecentAnalysis[]> {
+    const { results } = await this.db.prepare(SELECT_RECENT_FOR_RACE_SQL).bind(raceId, fromIso, toIso).all<RecentAnalysis>();
+    return results.map((r) => ({ id: r.id, analyzedAt: r.analyzedAt, promptVersion: r.promptVersion ?? null, model: r.model ?? null }));
   }
 
   async listAnalyzedRaceIdsByPromptVersion(version: string): Promise<string[]> {

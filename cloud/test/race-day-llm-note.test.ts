@@ -133,6 +133,7 @@ describe("DO → 保存先 → D1 → API の応答: llmNote", () => {
         return createAnalysisSink(base).save(record, extra);
       },
       findByAnalyzedAt: createAnalysisSink(base).findByAnalyzedAt,
+      findRecentByRace: createAnalysisSink(base).findRecentByRace,
       countChildren: createAnalysisSink(base).countChildren,
     };
     const sql = openNodeSql();

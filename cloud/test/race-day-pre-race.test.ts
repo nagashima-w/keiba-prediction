@@ -87,6 +87,9 @@ function fakeSink(): FakeSink {
       const index = sink.saved.findIndex((r) => r.raceId === raceId && r.analyzedAt === analyzedAt);
       return index < 0 ? null : index + 1;
     },
+    async findRecentByRace() {
+      return [];
+    },
     async countChildren(id) {
       sink.calls.push("count");
       if (sink.childrenOverride !== null) return sink.childrenOverride;
@@ -720,6 +723,9 @@ describe("朝と発走前の共存・入口(Issue #178)", () => {
         throw new Error("朝に保存先が呼ばれた");
       },
       findByAnalyzedAt: async () => {
+        throw new Error("朝に保存先が呼ばれた");
+      },
+      findRecentByRace: async () => {
         throw new Error("朝に保存先が呼ばれた");
       },
       countChildren: async () => {

@@ -100,6 +100,9 @@ function fakeSink(): FakeSink {
       const index = sink.saved.findIndex((r) => r.raceId === raceId && r.analyzedAt === analyzedAt);
       return index < 0 ? null : index + 1;
     },
+    async findRecentByRace() {
+      return [];
+    },
     async countChildren(id) {
       sink.calls.push("count");
       const rec = sink.saved[id - 1]!;

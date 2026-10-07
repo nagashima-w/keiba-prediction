@@ -17,7 +17,7 @@ import { createCloudLlm } from "./llm-sender";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
-import { RaceDayCore, type Board, type MorningPrior, type RaceListResult, type RaceListVenue, type RequestPlanResult, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { RaceDayCore, type AutoRunResults, type Board, type MorningPrior, type RaceListResult, type RaceListVenue, type RequestPlanResult, type ScheduleInput, type ScheduleResult } from "./race-day-core";
 import { loadSettings } from "./settings";
 
 /** netkeiba への取得の出口(NetkeibaGate)の固定名。handler.ts の GATE_NAME と同じ(全取得をこの1つのインスタンスに通す)。 */
@@ -81,6 +81,11 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
    */
   requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult> {
     return this.core.requestPlan(input);
+  }
+
+  /** 自動実行の各レースの結果(RPC。Issue #204。#205 の通知が状態から作るための読み取り。状態は変えない)。 */
+  getAutoRunResults(): AutoRunResults {
+    return this.core.getAutoRunResults();
   }
 
   /** その日のレースの状態(RPC)。 */

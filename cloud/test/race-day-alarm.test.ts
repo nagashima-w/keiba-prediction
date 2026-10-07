@@ -147,6 +147,9 @@ const unusedSink: AnalysisSink = {
   findByAnalyzedAt: async () => {
     throw new Error("保存先は使わない");
   },
+  findRecentByRace: async () => {
+    throw new Error("保存先は使わない");
+  },
   countChildren: async () => {
     throw new Error("保存先は使わない");
   },
