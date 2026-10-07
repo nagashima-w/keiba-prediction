@@ -141,7 +141,7 @@ describe("mount(イベントと置き換え)", () => {
 });
 
 const RACE: RaceRow = { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
-const noop = { onDateChange: () => {}, onRefresh: () => {} };
+const noop = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {} };
 
 describe("renderScreen(一覧の VNode)", () => {
   const route = { date: "20260628", venue: "central", race: null, analysis: null } as const;
@@ -178,7 +178,7 @@ describe("renderScreen(一覧の VNode)", () => {
   it("入力・更新のハンドラは、actions に繋がる", () => {
     const seen: string[] = [];
     const model = buildListModel({ route, list: { kind: "ready", races: [] }, board: { kind: "none" } });
-    const el = mounted(renderScreen(model, { onDateChange: (v) => void seen.push(`date:${v}`), onRefresh: () => void seen.push("refresh") }));
+    const el = mounted(renderScreen(model, { onDateChange: (v) => void seen.push(`date:${v}`), onRefresh: () => void seen.push("refresh"), onToggleGroup: () => {} }));
     allElements(el).find((e) => e.tag === "input")!.listeners.get("change")![0]!({ target: { value: "2026-06-27" } });
     allElements(el).find((e) => e.tag === "button")!.listeners.get("click")![0]!({ target: { value: "" } });
     expect(seen).toEqual(["date:2026-06-27", "refresh"]);

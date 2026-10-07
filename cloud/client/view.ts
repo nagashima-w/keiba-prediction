@@ -3,7 +3,7 @@
  * 文字列の子は、アダプタ(`dom.ts`)がテキストノードにする(外から来た文字列が HTML として解釈されない)。
  * #185 で足した画面は、#184 の要素・属性の許可リスト(`dom.ts`)の範囲だけで組む(新しい要素・属性は足していない。一覧は `ul`、強調は class と文字)。
  */
-import type { Badge, ListModel, RaceItem } from "./list";
+import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { RaceModel, TaskCard } from "./race";
 import type { HorseCard, ResultModel } from "./result";
 import { h, type VNode } from "./vnode";
@@ -12,6 +12,8 @@ export interface ViewActions {
   /** 日付の入力欄の値(YYYY-MM-DD。空・不正なこともある)。 */
   readonly onDateChange: (value: string) => void;
   readonly onRefresh: () => void;
+  /** 場の見出しのタップ(Issue #187)。`open` は押したあとの状態(今の逆)。 */
+  readonly onToggleGroup: (key: string, open: boolean) => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -23,6 +25,22 @@ function raceRow(item: RaceItem): VNode {
   const detail = h("span", { class: "race-detail" }, [item.detail]);
   const badges = item.badges === null ? [] : [h("span", { class: "badges" }, [badge("朝", item.badges.morning), badge("発走前", item.badges.preRace)])];
   return h("li", {}, [h("a", { class: "race", href: item.href }, [head, detail, ...badges])]);
+}
+
+/** 見出しの文字(開閉が色だけに頼らず分かるよう ▾/▸ を付ける)。例: 「▸ 大井 12R・実行中 3・失敗 1」。0 の項目と、板が無いときの要約は出さない。 */
+function groupHeadingText(group: RaceGroupItem): string {
+  const parts = [`${group.open ? "▾" : "▸"} ${group.name} ${group.races.length}R`];
+  if (group.summary !== null) {
+    if (group.summary.running > 0) parts.push(`実行中 ${group.summary.running}`);
+    if (group.summary.failed > 0) parts.push(`失敗 ${group.summary.failed}`);
+  }
+  return parts.join("・");
+}
+
+/** 場のまとまり。見出しは h2 の中のボタン(`<details>` は使わない=描画のたびに DOM を作り直すので、開閉の状態を DOM に持てない)。閉じた場のレースの行は作らない。 */
+function venueSection(group: RaceGroupItem, actions: ViewActions): VNode {
+  const toggle = h("button", { class: "venue-toggle", "aria-expanded": group.open ? "true" : "false" }, [groupHeadingText(group)], { click: () => actions.onToggleGroup(group.key, !group.open) });
+  return h("section", { class: "venue" }, [h("h2", {}, [toggle]), ...(group.open ? [h("ul", { class: "races" }, group.races.map(raceRow))] : [])]);
 }
 
 function listScreen(model: ListModel, actions: ViewActions): VNode {
@@ -47,7 +65,7 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
     body.push(h("p", { class: "empty" }, ["この日・この区分の開催はありません。"]));
   }
   for (const group of model.groups) {
-    body.push(h("section", { class: "venue" }, [h("h2", {}, [group.name]), h("ul", { class: "races" }, group.races.map(raceRow))]));
+    body.push(venueSection(group, actions));
   }
   return h("div", { class: "screen" }, [controls, ...notices, ...body]);
 }

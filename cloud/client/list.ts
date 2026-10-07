@@ -54,6 +54,49 @@ export function groupRaces(rows: readonly RaceRow[]): RaceGroup[] {
   return groups;
 }
 
+/**
+ * 場のまとまりの識別キー(Issue #187。開閉の状態を覚えるため)。「場名 + 同名の何組目か」。
+ * 名前だけだと、`groupRaces` が離れた同名の行を別の組に分けたとき(同じ会場名が race_id の順で離れる)、2 組の開閉が連動してしまう。
+ * 更新(取り直し)で内容が変わっても、同じ場は同じキーになる(race_id は使わない=先頭のレースが消えても変わらない)。
+ */
+function keysOf(groups: readonly RaceGroup[]): string[] {
+  const seen = new Map<string, number>();
+  return groups.map((g) => {
+    const n = seen.get(g.name) ?? 0;
+    seen.set(g.name, n + 1);
+    return `${g.name}#${n}`;
+  });
+}
+
+export function groupKeys(rows: readonly RaceRow[]): string[] {
+  return keysOf(groupRaces(rows));
+}
+
+/** 見出しの要約(レース単位の数え方)。 */
+export interface GroupSummary {
+  /** 朝・発走前のどちらかが待ち(queued)・取得済み(fetched)のレースの数。 */
+  readonly running: number;
+  /** 朝・発走前のどちらかが失敗(failed)のレースの数。 */
+  readonly failed: number;
+}
+
+/**
+ * 板から、この場のレースのうち実行中・失敗のものの数を数える(Issue #187。閉じていても状態が分かるように)。
+ * **行ではなくレースで数える**(同じレースの 2 モードがどちらも実行中でも 1)。朝が失敗・発走前が待ちのレースは、両方に 1 つずつ入る。
+ * 板が取れていなければ null(件数だけを出す)。
+ */
+export function summarizeGroup(races: readonly RaceRow[], board: BoardSource): GroupSummary | null {
+  if (board.kind !== "ready") return null;
+  let running = 0;
+  let failed = 0;
+  for (const race of races) {
+    const statuses = (["morning", "pre_race"] as const).map((mode) => pick(board.rows, race.raceId, mode)?.status);
+    if (statuses.some((s) => s === "queued" || s === "fetched")) running += 1;
+    if (statuses.some((s) => s === "failed")) failed += 1;
+  }
+  return { running, failed };
+}
+
 export type ListSource = { readonly kind: "loading" } | { readonly kind: "error"; readonly message: string } | { readonly kind: "ready"; readonly races: readonly RaceRow[] };
 export type BoardSource = { readonly kind: "none" } | { readonly kind: "error"; readonly message: string } | { readonly kind: "ready"; readonly rows: readonly BoardRow[] };
 
@@ -61,6 +104,8 @@ export interface ListModelInput {
   readonly route: Route;
   readonly list: ListSource;
   readonly board: BoardSource;
+  /** 利用者が押した場の開閉(キーは `groupKeys`)。無い場は既定(場が 2 つ以上なら閉・1 つなら開)。省略は「何も押していない」。 */
+  readonly choices?: ReadonlyMap<string, boolean>;
 }
 
 export interface RaceItem {
@@ -76,6 +121,17 @@ export interface RaceItem {
   readonly badges: { readonly morning: Badge; readonly preRace: Badge } | null;
 }
 
+export interface RaceGroupItem {
+  /** 開閉の状態のキー(`groupKeys`)。 */
+  readonly key: string;
+  readonly name: string;
+  readonly open: boolean;
+  /** 板が取れていないときは null。 */
+  readonly summary: GroupSummary | null;
+  /** 閉じていても持つ(隠すのは描画の側)。 */
+  readonly races: readonly RaceItem[];
+}
+
 export interface ListModel {
   readonly kind: "list";
   readonly date: string;
@@ -87,12 +143,16 @@ export interface ListModel {
   readonly boardNotice: string | null;
   /** 成功で、開催が 0 件。 */
   readonly empty: boolean;
-  readonly groups: readonly { readonly name: string; readonly races: readonly RaceItem[] }[];
+  readonly groups: readonly RaceGroupItem[];
 }
 
 export function buildListModel(input: ListModelInput): ListModel {
   const { route, list, board } = input;
   const races = list.kind === "ready" ? list.races : [];
+  const rawGroups = groupRaces(races);
+  const keys = keysOf(rawGroups);
+  // 既定: 場が 2 つ以上なら全部閉じる(畳む意味がある)・1 つなら開く。利用者が押した値だけが上書きする。
+  const defaultOpen = rawGroups.length < 2;
   return {
     kind: "list",
     date: route.date,
@@ -108,8 +168,11 @@ export function buildListModel(input: ListModelInput): ListModel {
     error: list.kind === "error" ? list.message : null,
     boardNotice: board.kind === "error" ? board.message : null,
     empty: list.kind === "ready" && list.races.length === 0,
-    groups: groupRaces(races).map((g) => ({
+    groups: rawGroups.map((g, i) => ({
+      key: keys[i]!,
       name: g.name,
+      open: input.choices?.get(keys[i]!) ?? defaultOpen,
+      summary: summarizeGroup(g.races, board),
       races: g.races.map(
         (r): RaceItem => ({
           raceId: r.raceId,

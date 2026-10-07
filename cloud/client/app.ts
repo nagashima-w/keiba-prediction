@@ -55,6 +55,9 @@ export function createApp(deps: AppDeps): App {
   const boardErrors = new Map<string, string>();
   const boardInflight = new Map<string, Promise<void>>();
 
+  // 場ごとの開閉(Issue #187)。(開催日, 区分) ごとに、利用者が押した値だけを持つ(既定は描画のたびに導く)。「更新」では消さない。ハッシュ・localStorage には持たない。
+  const openChoices = new Map<string, Map<string, boolean>>();
+
   const raceStatuses = new Map<string, RaceStatusEntry>();
   const raceStatusErrors = new Map<string, string>();
   const raceStatusInflight = new Map<string, Promise<void>>();
@@ -106,7 +109,7 @@ export function createApp(deps: AppDeps): App {
     return { kind: "loading" };
   }
 
-  const actions = { onDateChange, onRefresh };
+  const actions = { onDateChange, onRefresh, onToggleGroup };
 
   function render(): void {
     if (route.analysis !== null) {
@@ -116,7 +119,7 @@ export function createApp(deps: AppDeps): App {
       const listRow = races.get(listKey(route.date, route.venue))?.find((r) => r.raceId === route.race);
       deps.render(renderScreen(buildRaceModel({ route, status: raceStatusSource(key), past: pastSource(key), listRow }), actions));
     } else {
-      deps.render(renderScreen(buildListModel({ route, list: listSource(), board: boardSource() }), actions));
+      deps.render(renderScreen(buildListModel({ route, list: listSource(), board: boardSource(), choices: openChoices.get(listKey(route.date, route.venue)) }), actions));
     }
   }
 
@@ -201,6 +204,15 @@ export function createApp(deps: AppDeps): App {
     const ymd = inputToYmd(value);
     if (ymd === null) return;
     deps.setHash(buildHash({ date: ymd, venue: route.venue }));
+  }
+
+  function onToggleGroup(key: string, open: boolean): void {
+    // 取得は起こさず、描画だけ。
+    const k = listKey(route.date, route.venue);
+    const choices = openChoices.get(k) ?? new Map<string, boolean>();
+    choices.set(key, open);
+    openChoices.set(k, choices);
+    render();
   }
 
   function onRefresh(): void {

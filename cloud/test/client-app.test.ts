@@ -479,3 +479,137 @@ describe("日付の入力", () => {
     expect(h.hashes).toHaveLength(1);
   });
 });
+
+/** Issue #187: 場ごとの開閉。状態はアプリのメモリに (開催日, 区分) ごと・場ごとに持ち、利用者が押した値だけを保存する(既定は描画のたびに導く)。 */
+describe("場ごとの開閉(#187)", () => {
+  const rowAt = (raceId: string, venueName: string, name: string) => ({ ...raceRow(raceId, name), venue_name: venueName });
+  const TWO_VENUES = [rowAt("202602010101", "函館", "函館1"), rowAt("202602010102", "函館", "函館2"), rowAt("202603020211", "福島", "福島11")];
+  const NAR_TWO = [rowAt("202654062801", "大井", "大井1"), rowAt("202655062801", "川崎", "川崎1")];
+
+  const toggles = (h: Harness) => findAll(h.tree(), (n) => n.attrs?.["class"] === "venue-toggle");
+  const raceLinks = (h: Harness) => findAll(h.tree(), (n) => n.attrs?.["class"] === "race");
+  const expanded = (h: Harness) => toggles(h).map((t) => t.attrs?.["aria-expanded"]);
+  const nameOf = (t: VNode) => textOf(t);
+  const refreshButton = (h: Harness) => findAll(h.tree(), (n) => n.tag === "button" && n.attrs?.["class"] === "refresh")[0]!;
+
+  async function started(hash: string, central: ReturnType<typeof rowAt>[] | null = TWO_VENUES, nar: ReturnType<typeof rowAt>[] = NAR_TWO): Promise<Harness> {
+    const h = harness(hash);
+    if (central !== null) h.responders.set(RACES_CENTRAL, async () => ok(racesBody("central", central)));
+    h.responders.set(RACES_NAR, async () => ok(racesBody("nar", nar)));
+    h.app.start();
+    await h.app.whenIdle();
+    return h;
+  }
+
+  it("既定: 場が 2 つ以上なら全部閉じる(レースの行は描画されない)。1 つなら開く", async () => {
+    const two = await started(`#date=${DATE}&venue=central`);
+    expect(toggles(two)).toHaveLength(2);
+    expect(expanded(two)).toEqual(["false", "false"]);
+    expect(raceLinks(two)).toHaveLength(0);
+    const one = await started(`#date=${DATE}&venue=central`, [rowAt("202603020211", "福島", "福島11"), rowAt("202603020212", "福島", "福島12")]);
+    expect(toggles(one)).toHaveLength(1);
+    expect(expanded(one)).toEqual(["true"]);
+    expect(raceLinks(one)).toHaveLength(2);
+  });
+
+  it("見出しのタップで、その場だけが開閉する。aria-expanded と行の描画が実際の状態と一致する。取得は増えない", async () => {
+    const h = await started(`#date=${DATE}&venue=central`);
+    const calls = h.calls.length;
+    expect(nameOf(toggles(h)[0]!)).toContain("函館");
+    toggles(h)[0]!.on!.click!();
+    expect(expanded(h)).toEqual(["true", "false"]);
+    expect(raceLinks(h).map(textOf).join("|")).toContain("函館1");
+    expect(raceLinks(h)).toHaveLength(2); // 函館の 2 レースだけ(福島は閉じたまま)
+    expect(raceLinks(h).map(textOf).join("|")).not.toContain("福島11");
+    toggles(h)[1]!.on!.click!();
+    expect(expanded(h)).toEqual(["true", "true"]);
+    expect(raceLinks(h)).toHaveLength(3);
+    toggles(h)[0]!.on!.click!();
+    expect(expanded(h)).toEqual(["false", "true"]);
+    expect(raceLinks(h)).toHaveLength(1);
+    expect(h.calls).toHaveLength(calls); // 開閉で何も取らない
+  });
+
+  it("1 場の一覧(既定で開)も、タップで閉じられる", async () => {
+    const h = await started(`#date=${DATE}&venue=central`, [rowAt("202603020211", "福島", "福島11")]);
+    expect(expanded(h)).toEqual(["true"]);
+    toggles(h)[0]!.on!.click!();
+    expect(expanded(h)).toEqual(["false"]);
+    expect(raceLinks(h)).toHaveLength(0);
+  });
+
+  it("別の (開催日, 区分) は別の状態。戻ると、押した状態が残っている", async () => {
+    const h = await started(`#date=${DATE}&venue=central`);
+    h.responders.set("/api/races?kaisai_date=20260627&venue=central", async () => ok(racesBody("central", TWO_VENUES)));
+    h.responders.set("/api/analyses/status?kaisai_date=20260627", async () => ok({ ok: true, kaisai_date: "20260627", races: [] }));
+    toggles(h)[0]!.on!.click!(); // 中央・今日の函館を開く
+    expect(expanded(h)).toEqual(["true", "false"]);
+    h.go(`#date=${DATE}&venue=nar`);
+    await h.app.whenIdle();
+    expect(toggles(h)).toHaveLength(2);
+    expect(expanded(h)).toEqual(["false", "false"]); // 区分が違う → 別の状態(中央の選択が漏れない)
+    toggles(h)[1]!.on!.click!();
+    expect(expanded(h)).toEqual(["false", "true"]);
+    h.go("#date=20260627&venue=central");
+    await h.app.whenIdle();
+    expect(expanded(h)).toEqual(["false", "false"]); // 日付が違う → 別の状態
+    h.go(`#date=${DATE}&venue=central`);
+    expect(expanded(h)).toEqual(["true", "false"]); // 戻ると中央・今日の選択が残っている
+    h.go(`#date=${DATE}&venue=nar`);
+    expect(expanded(h)).toEqual(["false", "true"]);
+  });
+
+  it("「更新」(一覧と板の取り直し)で、開閉の状態が保たれる(取り直しの間も、取り直したあとも)", async () => {
+    const h = await started(`#date=${DATE}&venue=central`);
+    toggles(h)[1]!.on!.click!(); // 福島を開く
+    expect(expanded(h)).toEqual(["false", "true"]);
+    const before = h.calls.length;
+    refreshButton(h).on!.click!();
+    expect(h.calls.length).toBeGreaterThan(before); // 前提: 取り直しが実際に走った
+    expect(toggles(h)).toHaveLength(0); // 取り直しの間は一覧が空(読み込み中)
+    await h.app.whenIdle();
+    expect(toggles(h)).toHaveLength(2);
+    expect(expanded(h)).toEqual(["false", "true"]);
+    expect(raceLinks(h)).toHaveLength(1);
+  });
+
+  it("レース画面へ進んで一覧へ戻っても、開閉の状態が保たれる", async () => {
+    const h = await started(`#date=${DATE}&venue=central`);
+    toggles(h)[0]!.on!.click!();
+    h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await h.app.whenIdle();
+    h.go(`#date=${DATE}&venue=central`);
+    expect(expanded(h)).toEqual(["true", "false"]);
+  });
+
+  it("更新で場の数が変わったとき、押していない場は既定に追従し、押した場は保たれる(1 場 → 2 場)", async () => {
+    const h = await started(`#date=${DATE}&venue=central`, [rowAt("202603020211", "福島", "福島11")]);
+    expect(expanded(h)).toEqual(["true"]); // 1 場 = 開(押していない)
+    h.responders.set(RACES_CENTRAL, async () => ok(racesBody("central", TWO_VENUES)));
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(toggles(h)).toHaveLength(2);
+    expect(expanded(h)).toEqual(["false", "false"]); // 2 場になったので、押していない福島は既定(閉)に追従
+  });
+
+  it("見出しの要約は板から出す(取得済み・待ち=実行中、失敗)。板の取得に失敗したときは件数だけ", async () => {
+    const h = await started(`#date=${DATE}&venue=central`);
+    h.responders.set(BOARD, async () =>
+      ok({ ok: true, kaisai_date: DATE, races: [boardRow("202602010101", "morning", "queued"), boardRow("202602010102", "pre_race", "failed"), boardRow("202603020211", "morning", "done")] }),
+    );
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    const [hako, fuku] = toggles(h).map(textOf);
+    expect(hako).toContain("実行中 1");
+    expect(hako).toContain("失敗 1");
+    expect(fuku).not.toContain("実行中");
+    expect(fuku).not.toContain("失敗");
+
+    h.responders.set(BOARD, async () => ({ status: 503, json: async () => ({ ok: false, error: { type: "race-day-error" } }) }));
+    refreshButton(h).on!.click!();
+    await h.app.whenIdle();
+    expect(toggles(h).map(textOf).join(" ")).not.toContain("実行中");
+    expect(toggles(h).map(textOf).join(" ")).not.toContain("失敗");
+    expect(toggles(h).map(textOf)[0]).toContain("2R");
+  });
+});

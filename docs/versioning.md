@@ -2635,6 +2635,23 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない)
 
+## 次の正式版が 1.19.18 である根拠(Issue #187〈#165-e〉での変更)
+
+**patch**(クラウド版のスマホ画面の**一覧を場ごとに畳む**。**変更は `cloud/`・docs・版数だけ**。exe のアプリコード・`@keiba/core` は無変更)。
+
+### 変更内容
+
+- cloud(クライアント): 一覧の場の見出しを `h2` の中の `button`(`aria-expanded`・▾/▸・場名・レース数・実行中/失敗の要約)にし、タップでその場の開閉。状態はアプリのメモリに (開催日, 区分) ごと・場ごとに、利用者が押した値だけを持つ(既定: 場が 2 つ以上なら全部閉・1 つなら開)。「更新」では状態を消さない。閉じた場のレースの行は描画しない。CSS を足した。生成物 `cloud/src/client-bundle.generated.ts` を再生成
+- テスト: `cloud/test/client-list.test.ts`・`client-view.test.ts`・`client-app.test.ts`(・`client-dom.test.ts` は `ViewActions` の型に合わせた最小の変更)、docs
+
+### patch である根拠
+
+- exe に入る成果物・分析結果の数値・画面・保存データは変わらない(exe のアプリコードは無変更)
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない。要素・属性の許可リストも変更なし)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

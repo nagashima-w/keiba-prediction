@@ -90,6 +90,9 @@ export function renderPage(email: string): string {
   .notice { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); font-size: 0.9rem; }
   .notice.error { border-color: var(--fail); color: var(--fail); }
   .empty { color: var(--muted); }
+  /* Issue #187: 場ごとの見出し(開閉のボタン。h2 の中。文字の ▾/▸ でも開閉が分かる) */
+  .venue h2 { margin: 12px 0 8px; font-size: 1.05rem; }
+  .venue-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-size: 1.05rem; font-weight: bold; }
   .races { list-style: none; margin: 0; padding: 0; }
   .races li { margin: 0 0 8px; }
   .race { display: block; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); text-decoration: none; }
