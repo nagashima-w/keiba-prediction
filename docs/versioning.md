@@ -2617,6 +2617,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない)
 
+## 次の正式版が 1.19.17 である根拠(Issue #185〈#165-c〉での変更)
+
+**patch**(クラウド版のスマホ画面〈#165-c〉の**レース画面・結果画面〈読み取りのみ。起動・ポーリングは #186〉**。**変更は `cloud/`・`scripts`・docs だけ**。exe のアプリコード・`@keiba/core` は無変更で、exe の renderer の純関数〈`buildAllocationProposalView` ほか〉を cloud のバンドルに取り込むだけ)。
+
+### 変更内容
+
+- cloud: `GET /api/analyses/{id}` の配分に `fallbackReason`・`betUnit` を追加。クライアント(`cloud/client/`)にレース画面(状態・朝の prior・過去の分析)・結果画面(馬ごとのカード・配分)を追加(`#…&race=`・`#analysis=`。#184 では「準備中」だった)
+- ビルド: `cloud/tsconfig.client.json` の paths を追加(exe の renderer が import する core のサブパスを、CI でも解決するため。esbuild もこの paths を読む)。生成物 `cloud/src/client-bundle.generated.ts` を再生成
+- テスト: `cloud/test/client-*.test.ts`・`analysis-view.test.ts`、docs
+
+### patch である根拠
+
+- exe に入る成果物・分析結果の数値・画面・保存データは変わらない(exe のアプリコードは無変更)
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

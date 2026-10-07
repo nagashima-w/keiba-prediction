@@ -152,8 +152,8 @@ Workers Logs(`observability` を有効にしてある)に、認証の経路が `
 拒否は `access: denied reason=<経路:理由コード>` で出る(トークン・メール・チーム名・AUD は出ない)。
 
 ## スマホ画面(Issue #184〈#165-b〉。配信の基盤と一覧の画面)
-`GET /` がスマホ向けの画面(Access でログイン後)。**この Issue は配信の基盤と一覧の画面だけ**で、レース画面・分析の起動・状態の更新(ポーリング)・結果の画面は #185。
-- **使い方**: スマホのブラウザで Worker の URL を開く → 開催日(日付の入力。既定は今日〈JST〉)と「中央」「地方」を選ぶ → 場ごとにレースの一覧が出る。各レースの右に、朝の準備・発走前それぞれの状態(未実行・待ち・取得済み・完了・失敗)が出る。「更新」で一覧と状態を取り直す。レースをタップすると `#date=…&venue=…&race=…` に移る(**今回は「準備中」の表示**。#185 でレース画面になる)。戻るボタンで一覧に戻れる(画面の状態は URL のハッシュ `#date=YYYYMMDD&venue=central|nar` に持つ)。
+`GET /` がスマホ向けの画面(Access でログイン後)。**この Issue は配信の基盤と一覧の画面だけ**(レース画面・結果画面は #185〈下の節〉、分析の起動・状態の更新〈ポーリング〉は #186)。
+- **使い方**: スマホのブラウザで Worker の URL を開く → 開催日(日付の入力。既定は今日〈JST〉)と「中央」「地方」を選ぶ → 場ごとにレースの一覧が出る。各レースの右に、朝の準備・発走前それぞれの状態(未実行・待ち・取得済み・完了・失敗)が出る。「更新」で一覧と状態を取り直す。レースをタップすると `#date=…&venue=…&race=…` に移る(#185 でレース画面になった。#184 の時点では「準備中」の表示)。戻るボタンで一覧に戻れる(画面の状態は URL のハッシュ `#date=YYYYMMDD&venue=central|nar` に持つ)。
 - **取得の回数**: 一覧(`GET /api/races`。netkeiba に出うる)は (開催日, 区分) ごとに1回、状態(`GET /api/analyses/status`。DO の読み取りだけ)は開催日ごとに1回で、画面の往復では取り直さない。失敗は自動で再試行しない(「更新」だけ)。
 - **配信**: クライアントの TS(`client/`)を `build-client.ts` が esbuild で 1 ファイル(IIFE・minify)にし、`src/client-bundle.generated.ts`(**生成物。コミットする。手で編集しない**)にする。Worker が `GET /app.js` で、**認証の関門の後ろ**から文字列として返す(`[assets]` は使わない。`run_worker_first` を付け忘れると認証を素通りする配信になるため。wrangler 4.147.0 で、`run_worker_first = false` は未認証でも 200 が返ること・`true` は Worker に届くことを確かめた)。
   - **クライアントを変えたら**: cloud/ で `pnpm run build:client` を実行して生成物を更新する(忘れると `test/client-bundle.test.ts` のドリフトの検査が落ちる)。
@@ -161,6 +161,15 @@ Workers Logs(`observability` を有効にしてある)に、認証の経路が `
   - 型検査: `tsconfig.client.json`(DOM の型。workers-types とは別の設定)。`pnpm run typecheck` が両方を検査する。
 - **表示で未確認(#185 以降・実機確認で見る)**: スマホ実機でのレイアウト・タップ(自動検査できない。デプロイ後にユーザーが確認する)。
 - 検査: `test/client-*.test.ts`(route・date・api・api-contract〈実際の `handle()` の応答を通す〉・list・app・dom・bundle)、`test/handler.test.ts`、smoke(`/app.js`・CSP・`/check`)。
+
+## スマホ画面のレース画面・結果画面(Issue #185〈#165-c〉。読み取りのみ。**起動・ポーリングは #186**)
+- **使い方**: 一覧のレースをタップ → **レース画面**(`#date=…&venue=…&race=<12桁>`)。「朝の準備」「発走前」の 2 枚のカードに状態(未実行・待ち・取得済み・完了・失敗。失敗のときは原因の文を小さく)が出る。朝が完了していれば prior(3着内率)の順位、発走前が完了していれば「結果を見る」(押すと**結果画面**〈`#analysis=<id>`〉へ。自動では開かない)。下に過去の分析の一覧(新しい順。タップで結果画面)。「更新」で状態と過去の分析を取り直す。**分析の起動のボタンはまだ無い**(#186。今は exe・手動の POST で起動する)。
+- **結果画面**: 見出し・分析時刻(JST)・分析モデル(無ければ「LLM 未使用(統計のみ)」)・馬ごとのカード(馬番・馬名・3着内率・複勝オッズ下限・EV。EV プラスは強調、推定 EV は「(推定)」)・配分の提案(exe の表示と同じ文言)。印は `mark` があるときだけ。「AI補正後」は出さない。**配分は、資金・1レース上限を D1 の `cloud_settings` に入れるまで「見送り」と表示される**(編集の画面は範囲外)。
+- **取得の回数**: レース画面は、開いたとき `GET /api/analyses/status?kaisai_date=&race_id=`(DO の読み取りだけ)と `GET /api/analyses?race_id=&kaisai_date=&limit=20`(D1 だけ)を 1 回ずつ。**一覧(netkeiba に出る)は取らない**。結果画面は `GET /api/analyses/{id}` を開いたとき 1 回だけ(⚠️ R2 の Class B を +1 する。メモリにキャッシュし、往復で取り直さない。失敗したときだけ「更新」で取り直せる)。自動の再取得・ポーリングは無い。
+- **API の変更**: `GET /api/analyses/{id}` の `allocation` に `fallbackReason`・`betUnit` を追加(配分の注記を exe と揃えるため)。
+- **ビルド**: クライアントが exe の `renderer/allocation-proposal-view`・`renderer/format` を取り込む。renderer が import する core のサブパスは、`tsconfig.client.json` の paths で解決する(esbuild もこれを読む)(CI に各 package の node_modules が無くても動く)。**exe の renderer・core の ev を変えたら、`pnpm run build:client` で生成物を更新する**(忘れるとドリフトの検査が落ちる)。
+- **表示で未確認(実機確認で見る)**: スマホ実機でのレイアウト・タップ(自動検査できない。デプロイ後にユーザーが確認する)。
+- 検査: `test/client-*.test.ts`(api-analysis・api-analysis-contract〈ローカルの D1・R2 に保存した分析を `handle()` で読む〉・race・result・view・app・bundle)、`test/analysis-view.test.ts`。
 
 ## 確認ページの使い方(#162 段階2。本番での実機確認)
 netkeiba の取得が、本番(Cloudflare)で通ることを、出馬表1本で確かめるページ。**netkeiba へ実際にリクエストが出る**(1回の確認で1本。ゲートが 2 秒間隔・直列に絞る)。

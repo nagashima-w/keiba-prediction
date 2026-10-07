@@ -9,19 +9,52 @@ import type { VNode } from "../client/vnode";
  *  - 一覧(races)は (開催日, 区分) ごとに 1 回。画面の往復(一覧 → レース → 一覧、中央 → 地方 → 中央)で取り直さない
  *  - 板(status。race_id なし)は開催日ごとに 1 回。区分を切り替えても取り直さない
  *  - 失敗は自動で再試行しない(「更新」だけが取り直す)。同時に同じものを 2 本取らない
- *  - `/api/analyses/{id}`・`POST` は、この画面からは呼ばない(#185)
+ *  - `POST` は呼ばない(起動は #186)
+ * Issue #185: レース画面(`status?race_id=`・過去の分析の一覧を、開いたときに 1 回)・結果画面(`/api/analyses/{id}` を、開いたときに 1 回。メモリにキャッシュ)も同じ方針。
+ * レース画面・結果画面は、一覧(`/api/races`)と板(`status`〈race_id なし〉)を取らない(netkeiba に出ない・DO を余計に起こさない)。
  */
 
 const DATE = "20260628";
 const RACES_CENTRAL = `/api/races?kaisai_date=${DATE}&venue=central`;
 const RACES_NAR = `/api/races?kaisai_date=${DATE}&venue=nar`;
 const BOARD = `/api/analyses/status?kaisai_date=${DATE}`;
+const RACE_ID = "202603020211";
+const RACE_STATUS = `${BOARD}&race_id=${RACE_ID}`;
+const PAST = `/api/analyses?race_id=${RACE_ID}&kaisai_date=${DATE}&limit=20`;
+const ANALYSIS_5 = "/api/analyses/5";
 
 type Resp = { status: number; json: () => Promise<unknown> };
 const ok = (body: unknown): Resp => ({ status: 200, json: async () => body });
 const raceRow = (raceId: string, name: string) => ({ race_id: raceId, venue_name: "福島", race_number: Number(raceId.slice(-2)), race_name: name, course_type: "芝", distance: 1800, entry_count: 16, grade: null });
 const racesBody = (venue: string, rows: ReturnType<typeof raceRow>[]) => ({ ok: true, kaisai_date: DATE, venue, races: rows });
-const boardRow = (raceId: string, mode: string, status: string) => ({ race_id: raceId, mode, status, attempts: 0, error: null, queued_at: 1, updated_at: 2, prior: false, analysis_id: null, detail: null, children_ok: null });
+const boardRow = (raceId: string, mode: string, status: string, over: Record<string, unknown> = {}) => ({ race_id: raceId, mode, status, attempts: 0, error: null, queued_at: 1, updated_at: 2, prior: false, analysis_id: null, detail: null, children_ok: null, ...over });
+
+const priorBody = {
+  race_name: "福島民報杯",
+  venue_name: "福島",
+  date: "2026-06-28",
+  computed_at: 5000,
+  rows: [{ rank: 1, umaban: 3, horse_name: "アルファ", prior: 0.523 }],
+};
+const raceStatusBody = (rows: ReturnType<typeof boardRow>[], prior: unknown = null) => ({ ok: true, kaisai_date: DATE, races: rows, prior });
+const pastBody = (ids: number[]) => ({ ok: true, analyses: ids.map((id) => ({ id, raceId: RACE_ID, analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: DATE, evEstimated: false, model: null, promptVersion: null, horses: [], hasDetail: true })) });
+const analysisBody = (over: Record<string, unknown> = {}) => ({
+  ok: true,
+  analysis: {
+    id: 5,
+    raceId: RACE_ID,
+    analyzedAt: "2026-06-28T05:00:00.000Z",
+    kaisaiDate: DATE,
+    evEstimated: false,
+    model: null,
+    promptVersion: null,
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: null, courseType: null, distance: null, weather: null, trackCondition: null },
+    horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null }],
+    allocation: null,
+    detail: "present",
+    ...over,
+  },
+});
 
 function textOf(node: VNode | string): string {
   if (typeof node === "string") return node;
@@ -49,6 +82,9 @@ function harness(initialHash: string, now = new Date("2026-06-28T00:00:00Z")): H
     [RACES_CENTRAL, async () => ok(racesBody("central", [raceRow("202603020211", "福島民報杯"), raceRow("202603020212", "福島12R")]))],
     [RACES_NAR, async () => ok(racesBody("nar", [raceRow("202654062801", "地方1R")]))],
     [BOARD, async () => ok({ ok: true, kaisai_date: DATE, races: [boardRow("202603020211", "morning", "done")] })],
+    [RACE_STATUS, async () => ok(raceStatusBody([boardRow(RACE_ID, "morning", "done", { prior: true }), boardRow(RACE_ID, "pre_race", "done", { analysis_id: 5 })], priorBody))],
+    [PAST, async () => ok(pastBody([5]))],
+    [ANALYSIS_5, async () => ok(analysisBody())],
   ]);
   const calls: string[] = [];
   const hashes: string[] = [];
@@ -158,33 +194,186 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     expect(h.text()).toContain("開催はありません");
   });
 
-  it("レースの行(race 付きのハッシュ)へ進むと、準備中の画面になり、何も取得しない。一覧へ戻っても取り直さない", async () => {
+  it("一覧からレースの行へ進むと、レース画面の取得(状態・過去の分析)だけが増える。一覧へ戻っても取り直さない。レース画面は一覧のキャッシュから見出しを作る", async () => {
     const h = harness(`#date=${DATE}&venue=central`);
     h.app.start();
     await h.app.whenIdle();
     const before = h.calls.length;
-    h.go(`#date=${DATE}&venue=central&race=202603020211`);
+    h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     await h.app.whenIdle();
-    expect(h.text()).toContain("準備中");
-    h.go(`#date=${DATE}&venue=central&analysis=12`);
-    await h.app.whenIdle();
-    expect(h.text()).toContain("準備中");
+    expect(h.calls.slice(before).sort()).toEqual([PAST, RACE_STATUS].sort());
+    expect(h.text()).toContain("福島民報杯");
+    expect(h.text()).toContain("朝の準備");
     h.go(`#date=${DATE}&venue=central`);
     await h.app.whenIdle();
-    expect(h.calls).toHaveLength(before);
-    expect(h.text()).toContain("福島民報杯");
+    expect(h.calls).toHaveLength(before + 2);
+    expect(h.text()).toContain("福島12R");
+    h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await h.app.whenIdle();
+    expect(h.calls).toHaveLength(before + 2); // レース画面に戻っても取り直さない
   });
 
-  it("race 付きのハッシュで直接開いても、一覧は取らない(#185 のレース画面が必要としたときに取る)。画面から /api/analyses/{id} と POST は呼ばない", async () => {
-    const h = harness(`#date=${DATE}&venue=central&race=202603020211`);
+  it("race 付きのハッシュで直接開くと、状態(race_id つき)と過去の分析の 2 本だけを取る。一覧(netkeiba に出る)・板(race_id なし)・分析の詳細・POST は呼ばない", async () => {
+    const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     h.app.start();
     await h.app.whenIdle();
-    expect(h.calls).toEqual([]);
-    for (const hash of [`#date=${DATE}&venue=central`, `#analysis=5`, `#date=${DATE}&venue=nar`]) {
-      h.go(hash);
-      await h.app.whenIdle();
-    }
-    expect(h.calls.filter((u) => /\/api\/analyses\/\d/.test(u))).toEqual([]);
+    expect(h.calls.sort()).toEqual([PAST, RACE_STATUS].sort());
+    expect(h.text()).toContain("朝の準備");
+    expect(h.text()).toContain("発走前");
+    expect(h.text()).toContain("1位"); // 朝が完了・prior あり → 順位
+    expect(findAll(h.tree(), (n) => n.tag === "a" && textOf(n).includes("結果を見る"))[0]!.attrs?.["href"]).toBe(`#date=${DATE}&venue=central&analysis=5`);
+    expect(findAll(h.tree(), (n) => n.tag === "a" && n.attrs?.["class"] === "past-link").map((n) => n.attrs?.["href"])).toEqual([`#date=${DATE}&venue=central&analysis=5`]);
+    // 「結果を見る」は明示の操作(リンク)で、自動で結果画面を開かない
+    expect(h.calls.filter((u) => /^\/api\/analyses\/\d/.test(u))).toEqual([]);
+    expect(h.hashes).toEqual([]);
+  });
+
+  it("結果画面(#analysis=<id>)は、開いたとき /api/analyses/{id} を 1 回だけ取る。往復・再描画で取り直さない。一覧・板・レース画面の取得は起こさない", async () => {
+    const h = harness(`#analysis=5`);
+    h.app.start();
+    await h.app.whenIdle();
+    expect(h.calls).toEqual([ANALYSIS_5]);
+    expect(h.text()).toContain("福島11R テストステークス");
+    expect(h.text()).toContain("LLM 未使用(統計のみ)");
+    h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await h.app.whenIdle();
+    h.go(`#analysis=5`);
+    await h.app.whenIdle();
+    h.go(`#analysis=5`);
+    h.go(`#analysis=5`);
+    await h.app.whenIdle();
+    expect(h.calls.filter((u) => u === ANALYSIS_5)).toHaveLength(1);
+    expect(h.calls.filter((u) => u.startsWith("/api/races") || u === BOARD)).toEqual([]);
+  });
+
+  it("別の分析 id は別に 1 回取る。取得中に何度 hashchange しても 1 本", async () => {
+    const h = harness(`#analysis=5`);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.responders.set(ANALYSIS_5, async () => {
+      await gate;
+      return ok(analysisBody());
+    });
+    h.responders.set("/api/analyses/6", async () => ok(analysisBody({ id: 6 })));
+    h.app.start();
+    h.go(`#analysis=5`);
+    h.go(`#analysis=5`);
+    release();
+    await h.app.whenIdle();
+    expect(h.calls).toEqual([ANALYSIS_5]);
+    h.go(`#analysis=6`);
+    await h.app.whenIdle();
+    expect(h.calls).toEqual([ANALYSIS_5, "/api/analyses/6"]);
+  });
+
+  it("race と analysis が両方あるハッシュは、結果画面(analysis)を開く", async () => {
+    const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}&analysis=5`);
+    h.app.start();
+    await h.app.whenIdle();
+    expect(h.calls).toEqual([ANALYSIS_5]);
+    expect(h.text()).toContain("分析時刻");
+  });
+
+  it("結果の取得に失敗したら、固定の文言(サーバの文面でない)と「更新」。自動では再試行せず(戻っても取り直さない)、「更新」で 1 回だけ取り直す。成功した画面に「更新」は無い", async () => {
+    const h = harness(`#analysis=5`);
+    let failing = true;
+    h.responders.set(ANALYSIS_5, async () => (failing ? { status: 503, json: async () => ({ ok: false, error: { type: "d1-error", message: "秘密の文面" } }) } : ok(analysisBody())));
+    h.app.start();
+    await h.app.whenIdle();
+    expect(h.text()).toContain("サーバでエラー");
+    expect(h.text()).not.toContain("秘密の文面");
+    h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await h.app.whenIdle();
+    h.go(`#analysis=5`);
+    await h.app.whenIdle();
+    expect(h.calls.filter((u) => u === ANALYSIS_5)).toHaveLength(1); // 自動の再試行なし
+    failing = false;
+    const refresh = findAll(h.tree(), (n) => n.tag === "button" && textOf(n).includes("更新"))[0]!;
+    refresh.on!.click!();
+    refresh.on!.click!(); // 取得中の連打は 1 本
+    await h.app.whenIdle();
+    expect(h.calls.filter((u) => u === ANALYSIS_5)).toHaveLength(2);
+    expect(h.text()).toContain("福島11R テストステークス");
+    expect(findAll(h.tree(), (n) => n.tag === "button")).toHaveLength(0);
+  });
+
+  it("結果が 404(無い id)なら「見つかりません」の文言", async () => {
+    const h = harness(`#analysis=5`);
+    h.responders.set(ANALYSIS_5, async () => ({ status: 404, json: async () => ({ ok: false, error: { type: "not-found" } }) }));
+    h.app.start();
+    await h.app.whenIdle();
+    expect(h.text()).toContain("見つかりません");
+  });
+
+  it("結果画面の「戻る」は、分析の開催日のレース画面へ(ハッシュの日付が既定の今日でも)", async () => {
+    const h = harness(`#analysis=5`, new Date("2026-10-07T00:00:00Z"));
+    h.app.start();
+    await h.app.whenIdle();
+    const back = findAll(h.tree(), (n) => n.tag === "a" && n.attrs?.["class"] === "back")[0]!;
+    expect(back.attrs?.["href"]).toBe(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+  });
+});
+
+describe("レース画面の失敗・更新", () => {
+  it("状態の取得に失敗しても過去の分析は出る(逆も)。自動では再試行しない。「更新」は状態と過去の分析の 2 本を 1 回ずつ取り直す(取得中は押せない)", async () => {
+    const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    let failing = true;
+    h.responders.set(RACE_STATUS, async () => (failing ? { status: 503, json: async () => ({ ok: false, error: { type: "race-day-error" } }) } : ok(raceStatusBody([boardRow(RACE_ID, "morning", "queued")]))));
+    h.app.start();
+    await h.app.whenIdle();
+    expect(h.text()).toContain("サーバでエラー");
+    expect(findAll(h.tree(), (n) => n.attrs?.["class"] === "card")).toHaveLength(0);
+    expect(h.text()).toContain("過去の分析");
+    expect(findAll(h.tree(), (n) => n.attrs?.["class"] === "past-link")).toHaveLength(1);
+    h.go(`#date=${DATE}&venue=nar`);
+    await h.app.whenIdle();
+    h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await h.app.whenIdle();
+    expect(h.calls.filter((u) => u === RACE_STATUS)).toHaveLength(1);
+
+    failing = false;
+    const before = h.calls.length;
+    const refresh = findAll(h.tree(), (n) => n.tag === "button" && textOf(n).includes("更新"))[0]!;
+    refresh.on!.click!();
+    refresh.on!.click!();
+    await h.app.whenIdle();
+    expect(h.calls.slice(before).sort()).toEqual([PAST, RACE_STATUS].sort());
+    expect(findAll(h.tree(), (n) => n.attrs?.["class"] === "card")).toHaveLength(2);
+  });
+
+  it("同じ race_id でも日付が違えば別のキー(別の日のレース画面に、別の日の状態を混ぜない)", async () => {
+    const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    const OTHER = "20260627";
+    h.responders.set(`/api/analyses/status?kaisai_date=${OTHER}&race_id=${RACE_ID}`, async () => ok(raceStatusBody([boardRow(RACE_ID, "morning", "failed")])));
+    h.responders.set(`/api/analyses?race_id=${RACE_ID}&kaisai_date=${OTHER}&limit=20`, async () => ok(pastBody([])));
+    h.app.start();
+    await h.app.whenIdle();
+    h.go(`#date=${OTHER}&venue=central&race=${RACE_ID}`);
+    await h.app.whenIdle();
+    expect(h.calls).toHaveLength(4);
+    expect(h.text()).toContain("失敗");
+    expect(h.text()).not.toContain("1位");
+  });
+
+  it("取得中に別の画面へ移っても、遅れて届いた結果はキャッシュされ、今の画面を壊さない", async () => {
+    const h = harness(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.responders.set(RACE_STATUS, async () => {
+      await gate;
+      return ok(raceStatusBody([boardRow(RACE_ID, "morning", "queued")]));
+    });
+    h.app.start();
+    h.go(`#analysis=5`);
+    release();
+    await h.app.whenIdle();
+    expect(h.text()).toContain("分析時刻");
+    expect(h.text()).not.toContain("朝の準備");
+    const before = h.calls.length;
+    h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await h.app.whenIdle();
+    expect(h.calls).toHaveLength(before);
+    expect(h.text()).toContain("待ち");
   });
 });
 

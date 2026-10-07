@@ -1,0 +1,217 @@
+import { describe, expect, it } from "vitest";
+import type { BoardRow, MorningPriorView, RaceRow } from "../client/api";
+import { buildRaceModel, type RaceModelInput } from "../client/race";
+import type { Route } from "../client/route";
+
+/**
+ * Issue #185: レース画面の表示用データ(純関数)。朝の準備・発走前の 2 枚のカード(状態・失敗時のエラー文・「結果を見る」)・朝の prior の順位・過去の分析のリンク。
+ * この段階(#185)では起動のボタンは無い(#186)。**「結果を見る」は明示の操作(リンク)で、自動で開かない**。
+ */
+
+const RACE_ID = "202603020211";
+const OTHER_RACE_ID = "202603020212";
+const ROUTE: Route = { date: "20260628", venue: "central", race: RACE_ID, analysis: null };
+
+function row(raceId: string, mode: BoardRow["mode"], status: BoardRow["status"], over: Partial<BoardRow> = {}): BoardRow {
+  return { raceId, mode, status, attempts: 0, error: null, queuedAt: 1, updatedAt: 2, prior: false, analysisId: null, ...over };
+}
+
+const PRIOR: MorningPriorView = {
+  raceName: "福島民報杯",
+  venueName: "福島",
+  date: "2026-06-28",
+  computedAt: 5000,
+  rows: [
+    { rank: 1, umaban: 3, horseName: "アルファ", prior: 0.523 },
+    { rank: 2, umaban: 1, horseName: null, prior: 0.31 },
+  ],
+};
+
+function input(over: Partial<RaceModelInput> = {}): RaceModelInput {
+  return { route: ROUTE, status: { kind: "ready", rows: [], prior: null }, past: { kind: "ready", analyses: [] }, listRow: undefined, ...over };
+}
+
+function cards(model: ReturnType<typeof buildRaceModel>) {
+  expect(model.cards, "前提: カードが出る状態").not.toBeNull();
+  return model.cards!;
+}
+
+describe("カード(朝の準備・発走前)の状態: (race_id, mode) で板の行を引く", () => {
+  it("別のレース・別のモードの行を取り違えない(同じレースの 2 モード・別レースの行が混ざる板で、それぞれの状態になる)", () => {
+    const model = buildRaceModel(
+      input({
+        status: {
+          kind: "ready",
+          rows: [
+            row(OTHER_RACE_ID, "morning", "failed", { error: "別レースの失敗" }),
+            row(RACE_ID, "morning", "done", { prior: true }),
+            row(OTHER_RACE_ID, "pre_race", "done", { analysisId: 99 }),
+            row(RACE_ID, "pre_race", "queued"),
+          ],
+          prior: null,
+        },
+      }),
+    );
+    const [morning, preRace] = cards(model);
+    expect(morning!.title).toBe("朝の準備");
+    expect(morning!.badge).toEqual({ label: "完了", tone: "ok" });
+    expect(morning!.error).toBeNull();
+    expect(preRace!.title).toBe("発走前");
+    expect(preRace!.badge).toEqual({ label: "待ち", tone: "wait" });
+    expect(preRace!.resultHref).toBeNull(); // queued なので結果は無い。別レースの analysis_id(99)を拾わない
+  });
+
+  it("行が無ければ「未実行」。2 枚のカードは常に morning → pre_race の順", () => {
+    const [morning, preRace] = cards(buildRaceModel(input()));
+    expect([morning!.mode, preRace!.mode]).toEqual(["morning", "pre_race"]);
+    expect(morning!.badge.label).toBe("未実行");
+    expect(preRace!.badge.label).toBe("未実行");
+  });
+
+  const states: readonly [BoardRow["status"], string][] = [
+    ["queued", "待ち"],
+    ["fetched", "取得済み"],
+    ["done", "完了"],
+    ["failed", "失敗"],
+  ];
+  for (const [status, label] of states) {
+    it(`状態 ${status} は「${label}」(朝・発走前の両方)`, () => {
+      const [morning, preRace] = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", status), row(RACE_ID, "pre_race", status)], prior: null } })));
+      expect(morning!.badge.label).toBe(label);
+      expect(preRace!.badge.label).toBe(label);
+    });
+  }
+
+  it("失敗時だけエラー文(板の `error`)を出す。完了・待ちのときに error が残っていても出さない。長い文は 200 文字まで", () => {
+    const failed = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", "failed", { error: "ソケット接続に失敗しました" })], prior: null } })))[0]!;
+    expect(failed.error).toBe("ソケット接続に失敗しました");
+    for (const status of ["queued", "fetched", "done"] as const) {
+      const card = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", status, { error: "古い失敗の文面" })], prior: null } })))[0]!;
+      expect(card.error, status).toBeNull();
+    }
+    const long = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "pre_race", "failed", { error: "あ".repeat(500) })], prior: null } })))[1]!;
+    expect(long.error).toBe("あ".repeat(200));
+    const empty = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "pre_race", "failed", { error: "" })], prior: null } })))[1]!;
+    expect(empty.error).toBeNull(); // 空文字のエラー文は出さない
+  });
+});
+
+describe("「結果を見る」(発走前が完了し、分析 id があるときだけ。リンクの href は buildHash の結果)", () => {
+  it("発走前が done で analysisId があれば、結果の画面へのハッシュ(日付・区分を保つ)", () => {
+    const [, preRace] = cards(buildRaceModel(input({ route: { ...ROUTE, venue: "nar" }, status: { kind: "ready", rows: [row(RACE_ID, "pre_race", "done", { analysisId: 12 })], prior: null } })));
+    expect(preRace!.resultHref).toBe("#date=20260628&venue=nar&analysis=12");
+  });
+
+  it("完了でも analysisId が null なら出さない。完了以外(待ち・取得済み・失敗)で analysisId が残っていても出さない。朝のカードには出さない", () => {
+    const done = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "pre_race", "done", { analysisId: null })], prior: null } })))[1]!;
+    expect(done.resultHref).toBeNull();
+    for (const status of ["queued", "fetched", "failed"] as const) {
+      const card = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "pre_race", status, { analysisId: 5 })], prior: null } })))[1]!;
+      expect(card.resultHref, status).toBeNull();
+    }
+    const morning = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", "done", { analysisId: 5, prior: true })], prior: null } })))[0]!;
+    expect(morning.resultHref).toBeNull();
+  });
+});
+
+describe("朝の prior の順位: 朝が完了していて prior があるときだけ", () => {
+  const doneMorning = row(RACE_ID, "morning", "done", { prior: true });
+
+  it("完了・prior ありなら、サーバの順位(rank)のまま、3着内率をパーセントで出す。馬名が無ければ null", () => {
+    const [morning] = cards(buildRaceModel(input({ status: { kind: "ready", rows: [doneMorning], prior: PRIOR } })));
+    expect(morning!.prior).toEqual([
+      { rank: 1, umaban: 3, name: "アルファ", value: "52.3%" },
+      { rank: 2, umaban: 1, name: null, value: "31.0%" },
+    ]);
+  });
+
+  it("サーバが返した順を並べ替えない(クライアントで prior を再ソートしない)", () => {
+    const reversed: MorningPriorView = { ...PRIOR, rows: [...PRIOR.rows].reverse() };
+    const [morning] = cards(buildRaceModel(input({ status: { kind: "ready", rows: [doneMorning], prior: reversed } })));
+    expect(morning!.prior!.map((p) => p.rank)).toEqual([2, 1]);
+  });
+
+  it("完了でない(待ち・取得済み・失敗)、板の prior フラグが false、prior 本体が null のどれでも出さない(失敗した再実行が、古い prior を新しい結果のように見せない)", () => {
+    for (const status of ["queued", "fetched", "failed"] as const) {
+      const card = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", status, { prior: true })], prior: PRIOR } })))[0]!;
+      expect(card.prior, status).toBeNull();
+    }
+    const noFlag = cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", "done", { prior: false })], prior: PRIOR } })))[0]!;
+    expect(noFlag.prior).toBeNull();
+    const noBody = cards(buildRaceModel(input({ status: { kind: "ready", rows: [doneMorning], prior: null } })))[0]!;
+    expect(noBody.prior).toBeNull();
+  });
+
+  it("発走前のカードには prior を出さない", () => {
+    const [, preRace] = cards(buildRaceModel(input({ status: { kind: "ready", rows: [doneMorning, row(RACE_ID, "pre_race", "done", { prior: true })], prior: PRIOR } })));
+    expect(preRace!.prior).toBeNull();
+  });
+});
+
+describe("取得の状態(読み込み中・失敗)", () => {
+  it("状態の取得中はカードを出さず(読み込み中)、失敗なら注記を出す(カードは出さない=「未実行」と誤読させない)", () => {
+    const loading = buildRaceModel(input({ status: { kind: "loading" } }));
+    expect(loading.cards).toBeNull();
+    expect(loading.loading).toBe(true);
+    expect(loading.statusNotice).toBeNull();
+    const failed = buildRaceModel(input({ status: { kind: "error", message: "状態を取得できません" } }));
+    expect(failed.cards).toBeNull();
+    expect(failed.statusNotice).toBe("状態を取得できません");
+    expect(failed.loading).toBe(false);
+  });
+
+  it("過去の分析の取得中・失敗でも、カードは出る(互いに独立)。過去の分析の取得中も読み込み中として「更新」を無効にする", () => {
+    const pastLoading = buildRaceModel(input({ past: { kind: "loading" } }));
+    expect(pastLoading.cards).not.toBeNull();
+    expect(pastLoading.loading).toBe(true);
+    const pastFailed = buildRaceModel(input({ past: { kind: "error", message: "一覧を取得できません" } }));
+    expect(pastFailed.cards).not.toBeNull();
+    expect(pastFailed.past).toEqual({ kind: "error", message: "一覧を取得できません" });
+    expect(pastFailed.loading).toBe(false);
+  });
+});
+
+describe("過去の分析の一覧(結果の画面へのリンク)", () => {
+  it("サーバの並び(新しい順)のまま、JST の分析時刻を表示し、href は buildHash の結果(日付・区分・分析 id)", () => {
+    const model = buildRaceModel(
+      input({
+        route: { ...ROUTE, venue: "nar" },
+        past: {
+          kind: "ready",
+          analyses: [
+            { id: 9, analyzedAt: "2026-06-28T05:00:00.000Z", evEstimated: false, model: null },
+            { id: 4, analyzedAt: "2026-06-27T15:30:00.000Z", evEstimated: true, model: null },
+          ],
+        },
+      }),
+    );
+    expect(model.past).toEqual({
+      kind: "ready",
+      items: [
+        { id: 9, label: "2026-06-28 14:00", href: "#date=20260628&venue=nar&analysis=9" },
+        { id: 4, label: "2026-06-28 00:30", href: "#date=20260628&venue=nar&analysis=4" },
+      ],
+    });
+  });
+
+  it("0 件は空の一覧(ready の空配列)", () => {
+    expect(buildRaceModel(input()).past).toEqual({ kind: "ready", items: [] });
+  });
+});
+
+describe("見出し・戻るリンク", () => {
+  const listRow: RaceRow = { raceId: RACE_ID, venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
+
+  it("一覧の行があればそこから(場名・R・レース名)。無ければ朝の prior から。どちらも無ければレース ID", () => {
+    expect(buildRaceModel(input({ listRow })).title).toBe("福島11R 福島民報杯");
+    expect(buildRaceModel(input({ listRow: { ...listRow, venueName: null } })).title).toBe("11R 福島民報杯");
+    expect(buildRaceModel(input({ status: { kind: "ready", rows: [], prior: PRIOR } })).title).toBe("福島11R 福島民報杯");
+    expect(buildRaceModel(input({ status: { kind: "ready", rows: [], prior: { ...PRIOR, raceName: null, venueName: null } } })).title).toBe("11R");
+    expect(buildRaceModel(input()).title).toBe(`レース ${RACE_ID}`);
+    expect(buildRaceModel(input({ status: { kind: "loading" } })).title).toBe(`レース ${RACE_ID}`);
+  });
+
+  it("一覧へ戻るリンクは、日付・区分を保つ(race を含めない)", () => {
+    expect(buildRaceModel(input({ route: { ...ROUTE, date: "20261003", venue: "nar" } })).backHref).toBe("#date=20261003&venue=nar");
+  });
+});

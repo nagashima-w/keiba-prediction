@@ -1,7 +1,9 @@
 {
   // スマホ画面のクライアント(client/。Issue #184)の型検査。ブラウザで動くので DOM の型を使う。
   // Worker 側(tsconfig.json)は workers-types を使い、DOM の型と二重定義になるため、別の設定で検査する(types は空)。
-  // クライアントは client/ の中だけを import する(test/client-bundle.test.ts が固定)。
+  // クライアントは client/ の中と、許可リストの exe の renderer・shared だけを import する(test/client-bundle.test.ts が固定。Issue #185)。
+  // renderer が import する core のサブパス(`@keiba/core/ev/...`)は、packages/core/node_modules の無い CI でも解決できるよう、paths で実ファイルへ向ける
+  // (esbuild もこの paths を読む=型検査とバンドルの解決が揃う。tsconfig.json の paths と同じ対応。バレル `@keiba/core` は向けない)。
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -11,7 +13,10 @@
     "skipLibCheck": true,
     "noEmit": true,
     "lib": ["ES2022", "DOM"],
-    "types": []
+    "types": [],
+    "paths": {
+      "@keiba/core/*": ["../packages/core/src/*"]
+    }
   },
   "include": ["client"]
 }

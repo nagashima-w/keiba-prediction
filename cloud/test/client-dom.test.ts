@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mount, type DomDocument } from "../client/dom";
-import { buildListModel, buildPendingModel } from "../client/list";
+import { buildListModel } from "../client/list";
 import type { RaceRow } from "../client/api";
 import { renderScreen } from "../client/view";
 import { h, type VNode } from "../client/vnode";
@@ -193,13 +193,5 @@ describe("renderScreen(一覧の VNode)", () => {
     expect(allElements(loading).find((e) => e.tag === "button")!.attrs.has("disabled")).toBe(true);
     const empty = mounted(renderScreen(buildListModel({ route, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noop));
     expect(textNodes(empty).join(" ")).toContain("開催はありません");
-  });
-
-  it("準備中の画面: 文言と一覧へ戻るリンク", () => {
-    const el = mounted(renderScreen(buildPendingModel({ date: "20260628", venue: "nar", race: "202654062801", analysis: null }), noop));
-    expect(textNodes(el).join(" ")).toContain("準備中");
-    const back = allElements(el).filter((e) => e.tag === "a");
-    expect(back).toHaveLength(1);
-    expect(back[0]!.attrs.get("href")).toBe("#date=20260628&venue=nar");
   });
 });

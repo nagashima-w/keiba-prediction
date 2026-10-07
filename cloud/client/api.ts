@@ -1,5 +1,5 @@
 /**
- * スマホ画面の API 呼び出しと応答のパーサ(Issue #184。races と status〈race_id なし〉)。DOM に触れない純ロジックで、`fetch` は注入する。
+ * スマホ画面の API 呼び出しと応答のパーサ(Issue #184。races と status〈race_id なし〉。Issue #185 で status〈race_id つき〉を追加。分析の一覧・詳細は `api-analysis.ts`)。DOM に触れない純ロジックで、`fetch` は注入する。
  *
  * **応答を信用しない**: 型違い・欠損は「想定外の応答」(`unexpected`)にし、一部の行だけを黙って落として返さない。
  * サーバの文面(`error.message`・例外の文面)は画面に出さず、種類ごとの固定の文言(`failureMessage`)にする。
@@ -40,10 +40,33 @@ export type ApiFailure =
   | { readonly kind: "bad-request" }
   | { readonly kind: "netkeiba-unavailable"; readonly reason: "blocked" | "busy" | "failed" }
   | { readonly kind: "server-error" }
+  /** 404(分析 id が無い。`api-analysis.ts` だけが返す)。 */
+  | { readonly kind: "not-found" }
   | { readonly kind: "unexpected"; readonly httpStatus: number }
   | { readonly kind: "network" };
 
+/** 朝の prior の 1 行(`status?race_id=` の `prior.rows`。サーバが prior の高い順に並べ、`rank` を付ける)。 */
+export interface PriorRow {
+  readonly rank: number;
+  readonly umaban: number;
+  readonly horseName: string | null;
+  /** 3着内率(0〜1)。 */
+  readonly prior: number;
+}
+
+/** 朝の prior(朝の準備の結果)。DO に保存された JSON なので、レース名・場名・日付は null もありうる。 */
+export interface MorningPriorView {
+  readonly raceName: string | null;
+  readonly venueName: string | null;
+  readonly date: string | null;
+  readonly computedAt: number;
+  readonly rows: readonly PriorRow[];
+}
+
 export type RacesResult = { readonly ok: true; readonly races: RaceRow[] } | { readonly ok: false; readonly error: ApiFailure };
+export type RaceStatusResult =
+  | { readonly ok: true; readonly rows: BoardRow[]; readonly prior: MorningPriorView | null }
+  | { readonly ok: false; readonly error: ApiFailure };
 export type BoardResult = { readonly ok: true; readonly rows: BoardRow[] } | { readonly ok: false; readonly error: ApiFailure };
 
 /** 使う部分だけの fetch(`window.fetch` が満たす。Node のテストでは偽物を渡せる)。 */
@@ -52,13 +75,13 @@ export type FetchLike = (
   init: { method: "GET" | "POST"; headers?: Record<string, string>; credentials?: "same-origin"; body?: string },
 ) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const isStr = (v: unknown): v is string => typeof v === "string";
-const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-const strOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
+export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const isStr = (v: unknown): v is string => typeof v === "string";
+export const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+export const strOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 
 /** エラー応答(200 以外、または ok が true でない)を分類する。成功の形の検査は呼び出し側。 */
-function classify(status: number, body: unknown): ApiFailure {
+export function classify(status: number, body: unknown): ApiFailure {
   if (status === 403) {
     return { kind: "forbidden" };
   }
@@ -122,6 +145,27 @@ function parseRows<T>(status: number, body: unknown, parseRow: (row: unknown) =>
   return { ok: true, rows };
 }
 
+function parsePriorRow(row: unknown): PriorRow | null {
+  if (!isRecord(row)) return null;
+  const { rank, umaban, horse_name, prior } = row;
+  if (!isNum(rank) || !isNum(umaban) || !strOrNull(horse_name) || !isNum(prior)) return null;
+  return { rank, umaban, horseName: horse_name, prior };
+}
+
+function parsePrior(value: unknown): MorningPriorView | null | undefined {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const { race_name, venue_name, date, computed_at, rows } = value;
+  if (!strOrNull(race_name) || !strOrNull(venue_name) || !strOrNull(date) || !isNum(computed_at) || !Array.isArray(rows)) return undefined;
+  const parsed: PriorRow[] = [];
+  for (const raw of rows as unknown[]) {
+    const row = parsePriorRow(raw);
+    if (row === null) return undefined;
+    parsed.push(row);
+  }
+  return { raceName: race_name, venueName: venue_name, date, computedAt: computed_at, rows: parsed };
+}
+
 export function parseRacesResponse(status: number, body: unknown): RacesResult {
   const result = parseRows(status, body, parseRace);
   return result.ok ? { ok: true, races: result.rows } : result;
@@ -129,6 +173,20 @@ export function parseRacesResponse(status: number, body: unknown): RacesResult {
 
 export function parseStatusResponse(status: number, body: unknown): BoardResult {
   return parseRows(status, body, parseBoardRow);
+}
+
+/**
+ * `status?kaisai_date=&race_id=` の応答: 板の行(その日の全レース)と、そのレースの朝の prior。
+ * `prior` のキーが無い(race_id 付きの応答は必ず持つ)・形が違う場合は、板だけを返さず想定外の応答にする。
+ */
+export function parseRaceStatusResponse(status: number, body: unknown): RaceStatusResult {
+  const board = parseRows(status, body, parseBoardRow);
+  if (!board.ok) return board;
+  const prior = isRecord(body) && "prior" in body ? parsePrior(body["prior"]) : undefined;
+  if (prior === undefined) {
+    return { ok: false, error: { kind: "unexpected", httpStatus: status } };
+  }
+  return { ok: true, rows: board.rows, prior };
 }
 
 /** 失敗の固定の文言(サーバの文面・例外の文面は含めない)。 */
@@ -146,12 +204,14 @@ export function failureMessage(failure: ApiFailure): string {
       return "netkeiba からレース一覧を取得できませんでした。「更新」で再試行できます。";
     case "server-error":
       return "サーバでエラーが起きました。少し待ってから「更新」してください。";
+    case "not-found":
+      return "指定された分析が見つかりません。";
     case "unexpected":
       return `想定外の応答でした(HTTP ${failure.httpStatus})。`;
   }
 }
 
-async function getJson(fetchLike: FetchLike, url: string): Promise<{ status: number; body: unknown } | null> {
+export async function getJson(fetchLike: FetchLike, url: string): Promise<{ status: number; body: unknown } | null> {
   let response: Awaited<ReturnType<FetchLike>>;
   try {
     response = await fetchLike(url, { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
@@ -177,4 +237,13 @@ export async function fetchRaces(fetchLike: FetchLike, date: string, venue: Venu
 export async function fetchBoard(fetchLike: FetchLike, date: string): Promise<BoardResult> {
   const got = await getJson(fetchLike, `/api/analyses/status?kaisai_date=${date}`);
   return got === null ? { ok: false, error: { kind: "network" } } : parseStatusResponse(got.status, got.body);
+}
+
+/**
+ * `GET /api/analyses/status?kaisai_date=&race_id=`(Issue #185)。板(その日の全レースの行)と、そのレースの朝の prior を 1 回で返す。DO の読み取りだけ。
+ * レース画面を開いたときに 1 回だけ呼ぶ(自動の再取得はしない)。
+ */
+export async function fetchRaceStatus(fetchLike: FetchLike, date: string, raceId: string): Promise<RaceStatusResult> {
+  const got = await getJson(fetchLike, `/api/analyses/status?kaisai_date=${date}&race_id=${raceId}`);
+  return got === null ? { ok: false, error: { kind: "network" } } : parseRaceStatusResponse(got.status, got.body);
 }

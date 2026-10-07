@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardRow, RaceRow } from "../client/api";
-import { badgeOf, buildListModel, buildPendingModel, groupRaces, type ListModelInput } from "../client/list";
+import { badgeOf, buildListModel, groupRaces, type ListModelInput } from "../client/list";
 import type { Route } from "../client/route";
 
 /** Issue #184: 一覧の画面の表示用データ(純関数)。場ごとのまとまり・R 順・板の (race_id, mode) ごとのバッジ・各状態の表示。 */
@@ -126,20 +126,5 @@ describe("buildListModel", () => {
       { venue: "central", label: "中央", href: "#date=20261003&venue=central", current: false },
       { venue: "nar", label: "地方", href: "#date=20261003&venue=nar", current: true },
     ]);
-  });
-});
-
-describe("buildPendingModel(#185 で作るレース・分析の画面の代わり)", () => {
-  it("race のハッシュ: 準備中の文言と、一覧(日付・区分を保つ。race なし)へ戻るリンク", () => {
-    const model = buildPendingModel({ date: "20261003", venue: "nar", race: "202654071210", analysis: null });
-    expect(model.kind).toBe("pending");
-    expect(model.text).toContain("準備中");
-    expect(model.backHref).toBe("#date=20261003&venue=nar");
-  });
-  it("analysis のハッシュも準備中。race と analysis で文言が異なる", () => {
-    const race = buildPendingModel({ date: "20261003", venue: "nar", race: "202654071210", analysis: null });
-    const analysis = buildPendingModel({ date: "20261003", venue: "nar", race: null, analysis: 5 });
-    expect(analysis.text).toContain("準備中");
-    expect(analysis.text).not.toBe(race.text);
   });
 });

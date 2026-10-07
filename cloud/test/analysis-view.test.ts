@@ -99,7 +99,7 @@ describe("buildAnalysisView(Issue #183)", () => {
     expect(view.horses[0]).toEqual({ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠" });
   });
 
-  it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・fallbackReason・betUnit は、応答のどこにも現れない", () => {
+  it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
     expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "model", "promptVersion", "race", "raceId"]);
     expect(sorted(view.race)).toEqual(["courseType", "distance", "raceName", "raceNumber", "startTime", "trackCondition", "venueName", "weather"]);
@@ -107,14 +107,14 @@ describe("buildAnalysisView(Issue #183)", () => {
       expect(sorted(h)).toEqual(["adjustedProb", "ev", "isPositive", "mark", "name", "placeOddsMin", "prior", "reason", "umaban"]);
     }
     expect(sorted(view.allocation!)).toEqual([
-      "bankroll", "bets", "evThreshold", "includeBracketQuinella", "includeComboOdds", "includeExacta", "includeQuinella", "includeTrifecta", "includeTrio", "includeWide",
+      "bankroll", "betUnit", "bets", "evThreshold", "fallbackReason", "includeBracketQuinella", "includeComboOdds", "includeExacta", "includeQuinella", "includeTrifecta", "includeTrio", "includeWide",
       "kellyFraction", "oddsStatus", "perRaceCap", "route", "skipReasonCode", "unavailableReason",
     ]);
     for (const b of view.allocation!.bets) {
       expect(sorted(b)).toEqual(["betType", "comboKey", "ev", "odds", "stake"]);
     }
     const text = JSON.stringify(view);
-    for (const secret of [RAW_SECRET, CONTRIB_SECRET, JOCKEY_SECRET, COMBO_SECRET, "ADDITIONAL-INSTRUCTION-SECRET", "FALLBACK-SECRET", "777777", "historyCutoffDate"]) {
+    for (const secret of [RAW_SECRET, CONTRIB_SECRET, JOCKEY_SECRET, COMBO_SECRET, "ADDITIONAL-INSTRUCTION-SECRET", "historyCutoffDate"]) {
       expect(text, secret).not.toContain(secret);
     }
   });
@@ -125,6 +125,8 @@ describe("buildAnalysisView(Issue #183)", () => {
       route: "mixed",
       skipReasonCode: null,
       unavailableReason: null,
+      fallbackReason: "FALLBACK-SECRET",
+      betUnit: 777777,
       bankroll: 10000,
       perRaceCap: 3000,
       kellyFraction: 0.25,
@@ -143,6 +145,13 @@ describe("buildAnalysisView(Issue #183)", () => {
       ],
     });
     expect(buildAnalysisView(detail(analysis(), "present"), undefined).allocation).toBeNull();
+    // #185: fallbackReason・betUnit は値をそのまま写す(null も null のまま。0 や空文字に潰さない。exe の表示関数が「記録なし」と「値あり」を区別するため)
+    const nulls = buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, fallbackReason: null, betUnit: null }).allocation!;
+    expect(nulls.fallbackReason).toBeNull();
+    expect(nulls.betUnit).toBeNull();
+    const other = buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, fallbackReason: "no-combo-candidates", betUnit: 100 }).allocation!;
+    expect(other.fallbackReason).toBe("no-combo-candidates");
+    expect(other.betUnit).toBe(100);
     // 配分はあるが買い目が 0 件
     expect(buildAnalysisView(detail(analysis(), "present"), { ...ALLOCATION, bets: [] }).allocation!.bets).toEqual([]);
   });

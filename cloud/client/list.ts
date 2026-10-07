@@ -27,7 +27,7 @@ export function badgeOf(row: BoardRow | undefined): Badge {
 }
 
 /** 板から (race_id, mode) の行を探す(race_id だけで引くと、同じレースの 2 つのモードを取り違える)。 */
-function pick(board: readonly BoardRow[], raceId: string, mode: TaskMode): BoardRow | undefined {
+export function pick(board: readonly BoardRow[], raceId: string, mode: TaskMode): BoardRow | undefined {
   return board.find((r) => r.raceId === raceId && r.mode === mode);
 }
 
@@ -125,20 +125,5 @@ export function buildListModel(input: ListModelInput): ListModel {
         }),
       ),
     })),
-  };
-}
-
-export interface PendingModel {
-  readonly kind: "pending";
-  readonly text: string;
-  readonly backHref: string;
-}
-
-/** レース・分析の画面(#185)ができるまでの「準備中」の画面。一覧へ戻るリンクは日付・区分を保つ。 */
-export function buildPendingModel(route: Route): PendingModel {
-  return {
-    kind: "pending",
-    text: route.race !== null ? "レースの画面(分析の起動と結果)は準備中です。" : "分析の結果の画面は準備中です。",
-    backHref: buildHash({ date: route.date, venue: route.venue }),
   };
 }

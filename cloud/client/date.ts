@@ -42,3 +42,14 @@ export function inputToYmd(value: string): string | null {
   const ymd = `${m[1]}${m[2]}${m[3]}`;
   return isRealYmd(ymd) ? ymd : null;
 }
+
+/** ISO 8601 の日時 → JST の「YYYY-MM-DD HH:mm」(秒は出さない)。ブラウザのタイムゾーンに依存しない(UTC に 9 時間を足す)。解釈できなければ「日時不明」。 */
+export function formatJstDateTime(iso: string): string {
+  const time = Date.parse(iso);
+  if (Number.isNaN(time)) {
+    return "日時不明";
+  }
+  const jst = new Date(time + JST_OFFSET_MS);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${jst.getUTCFullYear()}-${pad(jst.getUTCMonth() + 1)}-${pad(jst.getUTCDate())} ${pad(jst.getUTCHours())}:${pad(jst.getUTCMinutes())}`;
+}

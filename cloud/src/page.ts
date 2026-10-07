@@ -102,6 +102,26 @@ export function renderPage(email: string): string {
   .badge.fail { color: var(--fail); }
   .badge.none { color: var(--muted); }
   .back { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
+  /* Issue #185: レース画面・結果画面(色だけに頼らない。強調は文字〈EVプラス〉も付ける) */
+  .controls .back { margin-right: auto; }
+  .title { font-size: 1.15rem; margin: 4px 0 8px; }
+  .card { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .card h2 { display: inline-block; margin: 0 8px 0 0; }
+  .card .badge { font-size: 0.85rem; }
+  .card-error { margin: 6px 0 0; font-size: 0.8rem; color: var(--fail); }
+  .prior, .past, .horse-list, .bets, .settings { list-style: none; margin: 8px 0 0; padding: 0; }
+  .prior-row, .bet { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--line); }
+  .result-link, .past-link { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; color: var(--accent); }
+  .past li { margin: 0; }
+  .past-link { margin-top: 0; }
+  .meta { margin: 0 0 4px; font-size: 0.9rem; color: var(--muted); }
+  .horse { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .horse.positive { border-color: var(--ok); border-width: 2px; }
+  .horse-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  .mark { font-weight: bold; }
+  .horse-line { font-size: 0.9rem; }
+  .ev-plus { margin-left: 8px; color: var(--ok); }
+  .settings small { color: var(--muted); }
 </style>
 </head>
 <body>

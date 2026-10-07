@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inputToYmd, isRealYmd, todayJst, ymdToInput } from "../client/date";
+import { inputToYmd, isRealYmd, todayJst, ymdToInput, formatJstDateTime } from "../client/date";
 
 /** Issue #184: スマホ画面の日付の純関数。開催日は JST の日付で、`<input type="date">` は YYYY-MM-DD。 */
 
@@ -49,5 +49,24 @@ describe("ymdToInput / inputToYmd", () => {
     for (const bad of ["", "2026-13-01", "2026-02-30", "20261003", "2026-1-3", "abc"]) {
       expect(inputToYmd(bad), bad).toBeNull();
     }
+  });
+});
+
+describe("formatJstDateTime(Issue #185。分析時刻は JST の固定表示。ブラウザのタイムゾーンに依存しない)", () => {
+  const cases: readonly [string, string][] = [
+    ["2026-06-28T05:00:00.000Z", "2026-06-28 14:00"],
+    ["2026-06-28T14:59:59.000Z", "2026-06-28 23:59"], // UTC 14:59 はまだ JST の同じ日
+    ["2026-06-28T15:00:00.000Z", "2026-06-29 00:00"], // UTC 15:00 から JST の翌日
+    ["2026-12-31T15:30:00.000Z", "2027-01-01 00:30"], // 年またぎ
+    ["2026-06-28T05:07:09Z", "2026-06-28 14:07"], // ゼロ埋め・秒は出さない
+  ];
+  for (const [iso, expected] of cases) {
+    it(`${iso} → ${expected}`, () => {
+      expect(formatJstDateTime(iso)).toBe(expected);
+    });
+  }
+  it("解釈できない文字列は「日時不明」(例外にしない。元の文字列を出さない)", () => {
+    expect(formatJstDateTime("")).toBe("日時不明");
+    expect(formatJstDateTime("昨日")).toBe("日時不明");
   });
 });

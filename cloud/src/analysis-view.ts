@@ -2,7 +2,8 @@
  * `GET /api/analyses/{id}` の応答の整形(Issue #183〈#165-a〉)。純関数だけで、D1・R2 には触れない。
  *
  * **画面に必要なものだけ**を、許可したキーで明示的に組み立てる(`...analysis` のような展開は使わない)。返さないもの:
- * `rawResponse`・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日・配分の `fallbackReason`・`betUnit`。
+ * `rawResponse`・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日。
+ * (配分の `fallbackReason`・`betUnit` は Issue #185 で返すようにした。exe の `buildAllocationProposalView` に渡すと、これが無いとフォールバックの注記が消え、`cap-too-small` が「単位額が記録されていません」と誤って表示されるため)。
  * 馬名・レース名・天候などは raceSnapshot(R2 の詳細。`detail` が `present` のときだけ入る)から、場名・R は raceId から導く。
  * **`detail` が present でないとき(柵に達した・R2 に無い・詳細なし)は、スナップショットを使わず**(馬名は null)、同じキーの形で返す。
  *
@@ -44,6 +45,10 @@ export interface AnalysisViewAllocation {
   readonly route: string;
   readonly skipReasonCode: string | null;
   readonly unavailableReason: string | null;
+  /** D-2 フォールバックの理由コード(複勝のみの配分になった理由。無ければ null)。 */
+  readonly fallbackReason: string | null;
+  /** 最小賭け金単位(円。記録が無ければ null)。`cap-too-small` の見送り文言に使う。 */
+  readonly betUnit: number | null;
   readonly bankroll: number;
   readonly perRaceCap: number;
   readonly kellyFraction: number;
@@ -130,6 +135,8 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
             route: allocation.route,
             skipReasonCode: allocation.skipReasonCode,
             unavailableReason: allocation.unavailableReason,
+            fallbackReason: allocation.fallbackReason,
+            betUnit: allocation.betUnit,
             bankroll: allocation.bankroll,
             perRaceCap: allocation.perRaceCap,
             kellyFraction: allocation.kellyFraction,
