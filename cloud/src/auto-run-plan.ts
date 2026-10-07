@@ -1,6 +1,6 @@
 /**
  * 定時の自動実行(Issue #166)の純関数(Issue #202〈#166-A〉)。**`cloudflare:workers` も DO・gate・D1 も import しない**ので、Node の vitest でそのままテストできる。
- * ここにあるのは「何を・いつ実行するか」の判断だけ。実際の予約・アラーム・取得は #203〜#206(DO の計画・発走前の予約・通知・cron)。
+ * ここにあるのは「何を・いつ実行するか」の判断だけ。実際の予約・アラーム・取得は #203〜#206(DO の計画・発走前の予約・通知・cron。#206 で cron が有効になり、`scheduled.ts` が `jstKaisaiDate` を呼ぶ)。
  *
  *  - {@link jstKaisaiDate}: cron の `scheduledTime`(UTC のエポックミリ秒)から、**JST の開催日**(YYYYMMDD)を求める。cron は UTC で動く(JST 9:00 = UTC 0:00)ので、
  *    UTC の日付をそのまま使うと、UTC 15:00〜23:59(= JST の翌日 0:00〜8:59)で1日ずれる。`Date.now()` ではなく `scheduledTime` を使うのは、cron の重複配信(at-least-once)でも同じ日になるため。

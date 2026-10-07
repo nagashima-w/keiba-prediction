@@ -60,6 +60,19 @@ function fakeRaceDay(): FakeRaceDay {
       getRaceList: () => {
         throw new Error("getRaceList は呼ばれない想定");
       },
+      // Issue #206: 計画の依頼・読み取りは cron と GET /api/plan の持ち分(handler-plan.test.ts)。ここでは呼ばれない。
+      requestPlan: () => {
+        throw new Error("requestPlan は呼ばれない想定");
+      },
+      getPlanProgress: () => {
+        throw new Error("getPlanProgress は呼ばれない想定");
+      },
+      getAutoRunResults: () => {
+        throw new Error("getAutoRunResults は呼ばれない想定");
+      },
+      getNotifications: () => {
+        throw new Error("getNotifications は呼ばれない想定");
+      },
     }),
   };
   return f;

@@ -102,6 +102,13 @@ GitHub Actions が Windows 向け exe を自動ビルドし、Releases に公開
 - **GitHub Actions ビルドの前倒し**: 仕様書では配布ビルドは Phase 5 の項目ですが、「UI 実装中は常に Releases から exe を入手できる状態を保つ」というユーザー指示により Phase 4 開始時点で先行整備しています。
 - **renderer は core を直接 import しない**: 仕様「UI はコアを直接 import して使う」に対し、`better-sqlite3` 等のネイティブ依存を renderer 側へ持ち込まないため、renderer は core を直接読まず **main プロセス経由(IPC)** で core の値を受け取る構成にしています。ネイティブ依存を扱う処理は main プロセスに集約する解釈です。
 
+## クラウド版の定時の自動実行(Cloudflare Worker。`cloud/`)
+クラウド版(Issue #166・#206)は、**毎朝 JST 9:00(UTC 0:00)に自動で実行を始める**(`cloud/wrangler.toml` の cron が 1 本)。
+- **何をするか**: その日の開催の一覧を取得して計画し、**中央は全レース、地方は交流重賞(Jpn1/2/3)だけ**を対象に、発走の 45 分前(設定で変更可)に分析する。結果は Discord に通知する(Webhook を登録した場合)。
+- **費用**: netkeiba への取得(中央の開催日は 1 日 700 本前後。間隔 1.5 秒以上)と、**Worker の secret `ANTHROPIC_API_KEY` を登録している場合は Claude API の呼び出し**(中央の開催日は最大 36 レース)が毎朝自動で行われる。API キーを登録しなければ LLM なしで保存する(課金なし)。
+- **確かめ方**: `GET /api/plan?kaisai_date=YYYYMMDD`(Access の後ろ)で、計画・各レースの結果・通知の状態を読める。
+- **止め方**: `cloud/wrangler.toml` を `crons = []` にしてデプロイする(`[triggers]` を消すだけでは止まらない)。ダッシュボードで消しても次のデプロイで戻る。課金だけ止めるなら `ANTHROPIC_API_KEY` を削除する(netkeiba への取得は続く)。詳しくは `cloud/README.md` の「定時の自動実行」。
+
 ## 開発コマンド
 
 ```bash

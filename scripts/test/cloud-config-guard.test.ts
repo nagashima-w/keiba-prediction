@@ -21,6 +21,11 @@ const tomlCode = toml
   .filter((l) => !l.trim().startsWith("#"))
   .join("\n");
 
+/** コメント(ブロック・行)を除いたコード。文字列中の `//`(URL)を壊さないよう、`:` の直後の `//` は除かない。 */
+function stripCode(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
 describe("wrangler.toml", () => {
   it("workers.dev に出し、独自ドメイン・routes・Version/Preview URL は使わない", () => {
     expect(tomlCode).toMatch(/^workers_dev = true$/m);
@@ -49,32 +54,120 @@ describe("wrangler.toml", () => {
     expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(2);
   });
 
-  it("Issue #180・#183: netkeiba への取得の起点は、認証の後ろの手動の操作だけ(POST の起動・GET の一覧・GET の確認)。Cron Trigger・scheduled ハンドラ・キューの consumer が無い。定時の起動は #166", () => {
-    expect(tomlCode).not.toMatch(/^\[triggers\]/m);
-    expect(tomlCode).not.toMatch(/^\s*crons\s*=/m);
+  it("Issue #206: cron はちょうど1本で `0 0 * * *`(UTC 0:00 = JST 9:00)。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
+    // 前提: [triggers] を実際に読めている(空振りでない)
+    expect((tomlCode.match(/^\[triggers\]$/gm) ?? []).length).toBe(1);
+    const crons = [...tomlCode.matchAll(/^crons\s*=\s*\[([^\]]*)\]\s*$/gm)];
+    expect(crons).toHaveLength(1);
+    const entries = crons[0]![1]!.split(",").map((e) => e.trim()).filter((e) => e !== "");
+    expect(entries).toEqual(['"0 0 * * *"']);
+    // [triggers] の中身は crons だけ(他の種類のトリガを足していない)
+    const triggersBlock = /^\[triggers\]\n((?:(?!\[)[^\n]*\n?)*)/m.exec(tomlCode)?.[1] ?? "";
+    expect(triggersBlock.trim()).toBe('crons = ["0 0 * * *"]');
+    // キュー: consumer も producer も無い
     expect(tomlCode).not.toMatch(/^\[\[queues\./m);
+    expect(tomlCode).not.toMatch(/^\[queues/m);
+    // 止め方(`[triggers]` を消すだけでは止まらない)がコメントに書いてある
+    expect(toml).toContain("crons = []");
+    expect(toml).toContain("消すだけでは止まらない");
+    // 検出の確認(空振りでない): 2本目や別の式は拾う形
+    expect('[triggers]\ncrons = ["0 0 * * *", "30 0 * * *"]\n'.match(/^crons\s*=\s*\[([^\]]*)\]\s*$/m)![1]!.split(",")).toHaveLength(2);
+  });
+
+  it("Issue #180・#183・#206: netkeiba への取得の起点は、手動の 3 つ(POST の予約・GET の一覧・GET の確認。認証の後ろ)と、定時の 1 つ(scheduled の requestPlan)の計 4 つだけ", () => {
     const worker = readTextLf("cloud", "src", "worker.ts");
+    const workerCode = stripCode(worker);
     expect(worker.length).toBeGreaterThan(100); // 前提: 読めている
-    expect(worker).not.toMatch(/\bscheduled\b/);
-    expect(worker).not.toMatch(/\bqueue\b\s*\(/);
+    // scheduled は worker.ts に 1 経路だけで、scheduled.ts の runScheduled に委譲する(netkeiba にも DO にも直接出ない)
+    expect((workerCode.match(/\bscheduled\s*\(/g) ?? []).length).toBe(1);
+    expect((workerCode.match(/\brunScheduled\(/g) ?? []).length).toBe(1);
+    expect(workerCode).not.toMatch(/\bqueue\b\s*\(/);
+    for (const forbidden of ["NETKEIBA_GATE", "RACE_DAY", "fetch(", ".fetchRaw(", ".getRaceList(", ".schedule(", ".requestPlan("]) {
+      // `fetch(` は export default の fetch ハンドラ(`async fetch(`)だけ: 呼び出しの形(`.fetch(` や `await fetch(`)を禁じる
+      const pattern = forbidden === "fetch(" ? /(\.|await\s+)fetch\(/ : new RegExp(forbidden.replace(/[.()]/g, "\\$&"));
+      expect(workerCode, `worker.ts に ${forbidden} が無い`).not.toMatch(pattern);
+    }
+    // scheduled.ts: DO の RPC は requestPlan の 1 つだけ。取得・予約・一覧の呼び出しを持たない
+    const scheduledCode = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
+    expect(scheduledCode.length).toBeGreaterThan(500); // 前提: コメント除去で本文を消していない
+    expect((scheduledCode.match(/\.requestPlan\(/g) ?? []).length).toBe(1);
+    for (const forbidden of [".schedule(", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "ANTHROPIC", "DISCORD"]) {
+      expect(scheduledCode, `scheduled.ts に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect(scheduledCode).not.toMatch(/(\.|await\s+)fetch\(/);
+    expect(scheduledCode).toContain("jstKaisaiDate(");
     // 手動の入口は、認証の後ろの POST /api/analyses/run だけ(handler.ts)。ここから日単位の DO の schedule を呼ぶ
     const handler = readTextLf("cloud", "src", "handler.ts");
     expect(handler).toContain('"/api/analyses/run"');
     expect(handler).toContain("originAllowed(request)");
     // Issue #183: GET の一覧(`/api/races`)も netkeiba に出うる。handler.ts から netkeiba に届く呼び出し(DO の予約・一覧・gate の取得)は、
     // **呼び出し箇所の数で固定する**(コメント除去後。新しい取得口を足すと、この数が変わってここで落ちる)。
-    const code = handler.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+    const code = stripCode(handler);
     expect(code.length).toBeGreaterThan(1000); // 前提: コメント除去で本文を消していない
     const count = (pattern: RegExp): number => (code.match(pattern) ?? []).length;
     expect(count(/\.schedule\(/g)).toBe(1); // handleRun(POST)
     expect(count(/\.getRaceList\(/g)).toBe(1); // handleRaces(GET。Sec-Fetch-Site・検証の後)
     expect(count(/\.fetchRaw\(/g)).toBe(1); // handleCheck(GET /api/netkeiba/check)
+    expect(count(/\.requestPlan\(/g)).toBe(0); // 計画の依頼は cron(scheduled.ts)だけ。手動の入口は呼ばない
     expect(handler).toContain('"/api/races"');
     // 一覧の入口は、DO を呼ぶ前に Sec-Fetch-Site を見る
     expect(code.indexOf("sec-fetch-site")).toBeGreaterThan(-1);
     expect(code.indexOf("sec-fetch-site")).toBeLessThan(code.indexOf(".getRaceList("));
+    // 起点の総数: handler.ts(手動 3)+ scheduled.ts(定時 1)= 4。worker.ts は 0
+    const originCalls = (c: string): number => (c.match(/\.(schedule|getRaceList|fetchRaw|requestPlan)\(/g) ?? []).length;
+    expect(originCalls(code)).toBe(3);
+    expect(originCalls(scheduledCode)).toBe(1);
+    expect(originCalls(workerCode)).toBe(0);
+    expect(originCalls(code) + originCalls(scheduledCode) + originCalls(workerCode)).toBe(4);
     // 対照(検出の確認。空振りでない): 取得口を1つ足した本文では、数が変わる
     expect(((code + "\ngate.fetchRaw(x);").match(/\.fetchRaw\(/g) ?? []).length).toBe(2);
+    expect(originCalls(scheduledCode + "\nstub.getRaceList(a, b);")).toBe(2);
+  });
+
+  it("Issue #206: binding の使用箇所を概念で走査する(cloud/src の全ファイル)。env.RACE_DAY・env.NETKEIBA_GATE に触れるファイルと回数が固定で、新しい経路は赤になる", () => {
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
+    expect(files.length).toBeGreaterThan(30); // 前提: 走査が空振りしていない
+    const found: Record<string, { RACE_DAY: number; NETKEIBA_GATE: number }> = {};
+    for (const f of files) {
+      const c = stripCode(readTextLf("cloud", "src", f));
+      const race = (c.match(/\benv\.RACE_DAY\b/g) ?? []).length;
+      const gate = (c.match(/\benv\.NETKEIBA_GATE\b/g) ?? []).length;
+      if (race + gate > 0) {
+        found[f] = { RACE_DAY: race, NETKEIBA_GATE: gate };
+      }
+    }
+    expect(found).toEqual({
+      // 手動の入口: raceDayStub の 1 行(get と idFromName の 2 回)+ 確認用・health の gate(2 箇所 × 2 回)
+      "handler.ts": { RACE_DAY: 2, NETKEIBA_GATE: 4 },
+      // 定時の入口: DO の stub を 1 行で引く(get と idFromName の 2 回)。NETKEIBA_GATE には触れない
+      "scheduled.ts": { RACE_DAY: 2, NETKEIBA_GATE: 0 },
+      // DO の中: 取得の出口(gate)を引く 1 行(get と idFromName の 2 回)
+      "race-day-do.ts": { RACE_DAY: 0, NETKEIBA_GATE: 2 },
+    });
+    // 対照(検出の確認。空振りでない): 余計な経路を足した本文は拾う
+    expect(("const s = env.RACE_DAY.get(x);").match(/\benv\.RACE_DAY\b/g)).toHaveLength(1);
+  });
+
+  it("Issue #206 G-E3: GET /api/plan の関数(handlePlan)は読み取りの RPC だけを呼ぶ。取得・予約・計画の依頼・gate・D1・R2・LLM・Webhook に触れない", () => {
+    const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = code.indexOf("async function handlePlan(");
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf("\n}\n", start);
+    const body = code.slice(start, end);
+    expect(body.length).toBeGreaterThan(500); // 前提: 本体を実際に読めている(空振りでない)
+    expect(body).toContain(".getPlanProgress(");
+    expect(body).toContain(".getAutoRunResults(");
+    expect(body).toContain(".getNotifications(");
+    expect(body).toContain("sec-fetch-site");
+    expect(body).toContain("raceDayStub(");
+    for (const forbidden of [".schedule(", ".requestPlan(", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "env.DB", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
+      expect(body, `handlePlan に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // DISCORD_WEBHOOK_URL を読むのは /api/health の「登録の有無」の 1 箇所だけ(値は返さない)
+    expect((code.match(/env\.DISCORD_WEBHOOK_URL/g) ?? []).length).toBe(1);
+    // 対照(検出の確認。空振りでない): 取得口を足した本文は拾う
+    expect((body + "\nstub.getRaceList(a, b);").includes(".getRaceList(")).toBe(true);
   });
 
   it("Issue #184: 静的アセット([assets])を使わない。クライアントの JS は Worker が認証の後ろで配る(run_worker_first を付け忘れると認証を素通りする配信の経路ができるため、そもそも置かない)", () => {

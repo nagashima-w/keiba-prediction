@@ -612,8 +612,9 @@ export class RaceDayCore {
   }
 
   /**
-   * 朝の計画を依頼する(Issue #203 段階2。cron〈#206〉から呼ぶ入口)。**依頼だけをして戻る**(一覧の取得・確定はアラームの中)。
-   * 会場2つ(中央・地方)を pending で作り、アラームを張る。**2回目以降(cron の重複配信)は受理せず、何も変えない**(`already-planned`)。
+   * 朝の計画を依頼する(Issue #203 段階2。cron の `scheduled`〈scheduled.ts。#206〉から呼ぶ入口)。**依頼だけをして戻る**(一覧の取得・確定はアラームの中)。
+   * 会場2つ(中央・地方)を pending で作り、アラームを張る。**2回目以降(cron の重複配信・scheduled の再試行)は受理せず、状態を変えない**(`already-planned`)。
+   * ただし**アラームは状態から張り直す**(Issue #206 G-E2。1回目が行を書いたあと `setAlarm` で失敗した場合に、再配信でアラームが戻る)。
    * @throws 無効な開催日、DO の開催日と違う日、発走前の分析の保存先・設定が無い構成(pre_race を予約できない計画は作らない)
    */
   async requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult> {
@@ -626,6 +627,9 @@ export class RaceDayCore {
       throw new Error("発走前の分析の保存先(D1・R2)・設定が、この構成にはありません");
     }
     if (this.plan.requested()) {
+      // Issue #206(G-E2。#203 の【記録】5): 依頼を書いたあとに `setAlarm` が失敗していると、アラームが無いまま止まる。cron の再配信(または再試行)が来たときに、
+      // 状態からアラームを張り直す。`rearm` は状態を変えず、候補が無ければ何もしない(冪等)。
+      await this.rearm();
       return { accepted: false, reason: "already-planned" };
     }
     if (pinned === null) {

@@ -17,7 +17,7 @@ import { CLIENT_JS } from "./client-bundle.generated";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
 import { loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
-import type { Board, MorningPrior, RaceListResult, RaceListVenue, ScheduleInput, ScheduleResult } from "./race-day-core";
+import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, ScheduleInput, ScheduleResult } from "./race-day-core";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -44,6 +44,14 @@ export interface RaceDayStubLike {
   getMorningPrior(raceId: string): Promise<MorningPrior | null>;
   /** 開催日のレース一覧(Issue #183)。 */
   getRaceList(kaisaiDate: string, venue: RaceListVenue): Promise<RaceListResult>;
+  /** 朝の計画の依頼(Issue #203・#206)。**呼ぶのは cron の `scheduled`(scheduled.ts)だけ**。手動の入口〈handler.ts〉は呼ばない(ガードテストが固定)。 */
+  requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult>;
+  /** 朝の計画の読み取り(Issue #206 `GET /api/plan`。状態は変えない)。 */
+  getPlanProgress(): Promise<PlanProgress>;
+  /** 自動実行の各レースの結果の読み取り(Issue #204・#206。状態は変えない)。 */
+  getAutoRunResults(): Promise<AutoRunResults>;
+  /** 通知の一覧の読み取り(Issue #205・#206。URL・例外の文面を含まない。状態は変えない)。 */
+  getNotifications(): Promise<NotificationRecord[]>;
 }
 
 /** 日単位の DO(RaceDay)の名前空間の、使う部分だけの型。名前は開催日(YYYYMMDD)。 */
@@ -207,6 +215,17 @@ export async function handle(
       });
     }
     return handleStatus(new URL(request.url), env);
+  }
+
+  if (pathname === "/api/plan") {
+    // 読み取り専用(DO の状態を読むだけ。netkeiba にも LLM にも D1・R2 にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #206。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handlePlan(request, env);
   }
 
   if (pathname === "/api/races") {
@@ -476,7 +495,7 @@ async function readJsonObjectBody(request: Request, maxBytes: number): Promise<J
  * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior(`morning`。省略時)または発走前の分析(`pre_race`。LLM を使う〈Issue #194。キー未登録なら LLM なしで保存〉。D1・R2 に保存。Issue #178)を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`。
  * 日単位の DO(RaceDay。名前は開催日)の `schedule` に予約を入れて **202** を返す(取得はアラームの中で始まる)。実行中の同じレースなら **409**(already-running)。
  * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503。文面は返さない)。
- * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。Cron・scheduled は無い。定時は #166。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
+ * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。ほかに、定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1 つ。Issue #206〉。手動 3 + 定時 1 の計 4 つ。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
  */
 async function handleRun(request: Request, env: Env): Promise<Response> {
   const guarded = await readJsonObjectBody(request, RUN_BODY_MAX_BYTES);
@@ -623,6 +642,92 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
           };
     return json({ ok: true, kaisai_date: kaisaiDate, races, prior });
   } catch {
+    return raceDayError();
+  }
+}
+
+/** 自由文(会場の失敗の理由・自動実行の失敗の文面)を返すときの長さの上限(文字)。`/api/analyses/status` の `error` と同じ。 */
+const PLAN_TEXT_MAX = STATUS_ERROR_MAX;
+const clipText = (text: string | null): string | null => (text === null ? null : text.slice(0, PLAN_TEXT_MAX));
+
+/**
+ * `GET /api/plan?kaisai_date=YYYYMMDD`(Issue #206〈#166-E〉G-E3): 定時の自動実行を外から観測する、読み取り専用の入口。
+ * 日単位の DO(RaceDay)の `getPlanProgress`(朝の計画)・`getAutoRunResults`(各レースの結果)・`getNotifications`(通知の一覧)を読んで返す。
+ * **netkeiba にも LLM にも D1・R2 にも出ない。状態も変えない**(この関数は `.schedule(`・`.requestPlan(`・`.getRaceList(`・gate を呼ばない。`cloud-config-guard.test.ts` が固定)。
+ * 理由: 対象が 0 件の日は通知が何も出ないので、自動実行が動いたのか壊れているのかを、外から確かめる手段が要る。
+ * 順序: `Sec-Fetch-Site`(別サイトなら 403。開催日を変えて DO を作らせる cross-site の GET を拒否)→ クエリの検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503・文面なし)。
+ * 応答は**明示のホワイトリスト**で作る(DO の返り値を展開しない)。通知の Webhook の URL は DO の通知の仕組みの中にだけあり、この応答にもこの関数にも現れない
+ * (この関数は `env.DISCORD_WEBHOOK_URL` を読まない)。自由文は 200 文字に切る。
+ */
+async function handlePlan(request: Request, env: Env): Promise<Response> {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => k !== "kaisai_date") || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは kaisai_date だけを1つ指定できます");
+  }
+  const kaisaiDate = url.searchParams.get("kaisai_date");
+  if (kaisaiDate === null) {
+    return badRequest("kaisai_date を YYYYMMDD の 8 桁で指定してください");
+  }
+  // 検証のメッセージに入力を写すので、長い入力は先頭だけにする(切っても、無効なままであることは変わらない)。
+  const dateCheck = checkKaisaiDate(kaisaiDate.slice(0, 32));
+  if (!dateCheck.ok) {
+    return badRequest(dateCheck.message);
+  }
+  try {
+    const stub = raceDayStub(env, kaisaiDate);
+    const [progress, auto, notifications] = await Promise.all([stub.getPlanProgress(), stub.getAutoRunResults(), stub.getNotifications()]);
+    return json({
+      ok: true,
+      kaisai_date: kaisaiDate,
+      plan: {
+        stage: progress.stage,
+        requested_at: progress.requestedAt,
+        finalized_at: progress.finalizedAt,
+        offset_minutes: progress.offsetMinutes,
+        offset_source: progress.offsetSource,
+        morning_all_terminal: progress.morningAllTerminal,
+        venues: progress.venues.map((v) => ({ venue: v.venue, state: v.state, attempts: v.attempts, reason: clipText(v.reason), listed: v.listed, targeted: v.targeted })),
+        rows: progress.rows.map((r) => ({
+          race_id: r.raceId,
+          venue: r.venue,
+          venue_name: r.venueName,
+          race_number: r.raceNumber,
+          race_name: r.raceName,
+          grade: r.grade,
+          start_time: r.startTime,
+          due_ms: r.dueMs,
+          disposition: r.disposition,
+          skip_reason: r.skipReason,
+          state: r.state,
+          morning: r.morning,
+        })),
+      },
+      results: auto.results.map((r) => ({
+        race_id: r.raceId,
+        venue: r.venue,
+        venue_name: r.venueName,
+        race_number: r.raceNumber,
+        race_name: r.raceName,
+        grade: r.grade,
+        start_time: r.startTime,
+        due_ms: r.dueMs,
+        outcome: {
+          kind: r.outcome.kind,
+          reason: r.outcome.kind === "failed" || r.outcome.kind === "skipped" ? r.outcome.reason : null,
+          analysis_id: r.outcome.kind === "completed" ? r.outcome.analysisId : null,
+          detail: r.outcome.kind === "completed" ? r.outcome.detail : null,
+          message: r.outcome.kind === "failed" ? clipText(r.outcome.message) : null,
+        },
+      })),
+      notifications: notifications.map((n) => ({ key: n.key, kind: n.kind, state: n.state, analysis_id: n.analysisId, error_class: n.errorClass, updated_at: n.updatedAt })),
+    });
+  } catch {
+    // 例外の文面・SQL は返さない。
     return raceDayError();
   }
 }

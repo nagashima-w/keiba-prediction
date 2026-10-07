@@ -19,6 +19,15 @@ preview_urls = false
 [observability]
 enabled = true
 
+# Issue #206(#166-E): 定時の自動実行の cron。**これを有効にすると、本番で毎朝 JST 9:00(UTC 0:00)に自動で次のことが起きる**:
+#   scheduled(src/scheduled.ts)→ その日の日単位の DO の requestPlan → 中央・地方の一覧の取得(netkeiba)→ 計画 → 朝の取得 → 発走前の分析(Claude API。ANTHROPIC_API_KEY が登録済みのとき)→ Discord 通知。
+# cron は 1 本だけ(UTC 0:00 = JST 9:00。ユーザー判断)。scripts/test/cloud-config-guard.test.ts が `["0 0 * * *"]` ちょうどを固定する。
+# ★止め方: `[triggers]` を**消すだけでは止まらない**(wrangler は crons が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、本番では未確認)。
+#   `crons = []`(空配列)にしてデプロイする。ダッシュボードで消しても、次のデプロイで、この toml の内容に戻る(wrangler deploy は toml の crons で schedule を上書きする)。
+#   課金だけを止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除する(netkeiba への取得は続く)。手順は cloud/README.md。
+[triggers]
+crons = ["0 0 * * *"]
+
 # SQLite バックエンドの Durable Object(Free プランで使えるのは SQLite バックエンドだけ)。
 # #162 で netkeiba への取得(TCP ソケット)と間隔制御・サーキットブレーカーを担う。クラス名は migration に固定されるため、変えるときは migration が要る。
 # メソッドや保存する値を足すだけなら migration は要らない(v1 のまま)。

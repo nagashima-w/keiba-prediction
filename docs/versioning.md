@@ -2975,6 +2975,28 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。DO の SQLite には新しい表を足しただけ(既存の表・列は変えていない)。D1 のスキーマも無変更。分析結果の数値・プロンプトも変わらない。`@keiba/core` は無変更。
 
+## 次の正式版が 1.21.5 である根拠(Issue #206〈#166-E〉での変更)
+
+**patch**(定時の自動実行〈#166〉の cron の有効化。**本番で毎朝 JST 9:00 に自動実行が始まる**が、exe のアプリコードは無変更。区分は #166 のゲート決定〈2026-10-07〉に従う)。
+
+### 変更内容
+
+- cloud: `wrangler.toml` に `[triggers] crons = ["0 0 * * *"]`(UTC 0:00 = JST 9:00。1 本だけ)。`scheduled`(`cloud/src/scheduled.ts`。worker.ts から 1 行で委譲)が、`scheduledTime` から JST の開催日(`jstKaisaiDate`)を決め、その日の日単位の DO の `requestPlan` だけを呼ぶ(netkeiba にも LLM にも直接は出ない)。失敗は有界の再試行(即時・10 秒後・30 秒後)をし、3 回とも失敗したら固定文言のエラーを投げる(ログは分類・開催日・エラーの name だけ)。
+- cloud: `requestPlan` の `already-planned` でも、アラームを状態から張り直す(G-E2。#203 の【記録】5: 依頼を書いたあとの `setAlarm` の失敗から、cron の再配信・再試行で回復する)。
+- cloud: `GET /api/plan?kaisai_date=YYYYMMDD`(読み取り専用の観測の入口。認証・Sec-Fetch-Site・クエリの検証・応答のキーの固定。`RaceDay` に `getPlanProgress` の RPC を足した)。
+- cloud: 設定画面の「発走の何分前に評価するか」の注記を「変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。」に変更(旧: 定時の自動実行を入れるまで効きません)。クライアントのバンドルを再生成。
+- テスト: `scripts/test/cloud-config-guard.test.ts` の「Cron・scheduled が無い」を反転し、cron がちょうど `["0 0 * * *"]`・netkeiba への取得の起点は手動 3 + 定時 1・binding の使用箇所の走査を固定した。smoke に構成 G(cron の手動発火)を足した。
+- 文書: README・`cloud/README.md`・`docs/current-spec.md` に、自動実行が始まったこと・時刻・対象・止め方(`crons = []`。`[triggers]` を消すだけでは止まらない)を記載。
+
+### patch である根拠
+
+- exe(`packages/app`)・`@keiba/core` のコードは無変更。exe の利用者から見て変わるものが無い。クラウド版は、#177〜#205 も patch で運用してきた(#166 のゲート決定 2026-10-07)。
+- ⚠️ ただし、**クラウド版の運用者から見れば、毎朝の自動実行(netkeiba への取得と、API キーが登録されていれば Claude API の呼び出し)が始まる大きな変化**である。区分を patch とするのは、版数が exe のファイル名(`keiba-ev-tool-<version>-portable.exe`)に使われるものだからで、クラウド版の動作の大きさを表すものではない。公開の前に、ユーザーの明示の承認を取る(課金が発生する操作のため)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1 のスキーマも無変更(migration は足していない)。DO の SQLite のスキーマも無変更。分析結果の数値・プロンプトも変わらない。`@keiba/core` は無変更。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

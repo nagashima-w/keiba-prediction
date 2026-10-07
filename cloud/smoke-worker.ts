@@ -260,4 +260,11 @@ export default {
     }
     return worker.fetch(request, env, ctx);
   },
+  /**
+   * Issue #206: 本番の `scheduled`(cron の入口)をそのまま呼ぶ転送。smoke が `/cdn-cgi/local/scheduled?time=...`(wrangler dev が提供する、cron の手動発火)で起動する。
+   * 本番では手動で scheduled を起動する手段が無いので、workerd と本物の DO・偽ソケットでの確認はここだけ。
+   */
+  async scheduled(controller: ScheduledController, env: SmokeEnv): Promise<void> {
+    await worker.scheduled(controller, env);
+  },
 } satisfies ExportedHandler<SmokeEnv>;

@@ -261,9 +261,9 @@ describe("buildSettingsModel", () => {
     expect(select.options!.find((o) => o.value === "default")!.label).toContain("既定");
   });
 
-  it("補助文: 追加指示・クリップ幅は、LLM を使うときに効き、API キーが未登録の間は変更しても結果が変わらないことを書く(キーの有無のどちらでも嘘にならない)。発走何分前は「定時の自動実行を入れるまで効きません」", () => {
+  it("補助文: 追加指示・クリップ幅は、LLM を使うときに効き、API キーが未登録の間は変更しても結果が変わらないことを書く(キーの有無のどちらでも嘘にならない)。発走何分前は「次の朝 9:00(日本時間)の計画から反映される。すでに計画した日の分は変わらない」(Issue #206。旧: 定時の自動実行を入れるまで効きません)", () => {
     const byKey = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.help ?? ""]));
-    expect(byKey["preRaceOffsetMinutes"]).toContain("定時の自動実行を入れるまで効きません");
+    expect(byKey["preRaceOffsetMinutes"]).toContain("変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。");
     for (const key of ["additionalInstruction", "clipVariant"]) {
       expect(byKey[key], key).toContain("LLM を使うときに効きます");
       expect(byKey[key], key).toContain("API キーが未登録の間は LLM を使わない");
@@ -275,6 +275,13 @@ describe("buildSettingsModel", () => {
     for (const key of ["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "includeComboOdds", "includeWideInAllocation"]) {
       expect(byKey[key], key).not.toContain("効きません");
       expect(byKey[key], key).not.toContain("LLM を使わない");
+    }
+    // Issue #206(AC-E3): 定時の自動実行が始まったので、**どの項目の補助文にも**「効きません」が残っていない(発走何分前を含む全項目)
+    expect(Object.keys(byKey).length).toBeGreaterThanOrEqual(14); // 前提: 全項目を走査している(空振りでない)
+    expect(Object.keys(byKey)).toContain("preRaceOffsetMinutes");
+    for (const [key, help] of Object.entries(byKey)) {
+      expect(help, key).not.toContain("効きません");
+      expect(help, key).not.toContain("定時の自動実行を入れるまで");
     }
   });
 

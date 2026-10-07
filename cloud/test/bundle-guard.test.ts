@@ -108,6 +108,15 @@ describe("本番のバンドル(deploy --dry-run)", () => {
       }
       // 本番の接続関数は cloudflare:sockets の connect
       expect(code).toContain("cloudflare:sockets");
+      // Issue #206: cron の入口(scheduled)が本番のバンドルの default export にある。
+      // ⚠️ 語 "scheduled" の grep は空振りする(計画の `disposition: "scheduled"` として既にバンドルに入っている)ので、メソッド定義の形で検査する。
+      const SCHEDULED_HANDLER = /\basync scheduled\(/;
+      expect(code, "本番のバンドルに async scheduled( がある").toMatch(SCHEDULED_HANDLER);
+      expect((code.match(/\basync scheduled\(/g) ?? []).length, "scheduled のハンドラは 1 つだけ").toBe(1);
+      // 対照(検出の確認。空振りでない): 語 scheduled だけは既にバンドルにある(だから語では検査できない)。fetch だけのハンドラは、この形に当たらない
+      expect(code.includes('"scheduled"'), "disposition の語としての scheduled は既にバンドルにある").toBe(true);
+      expect("export default { async fetch(request) { return new Response(); } }").not.toMatch(SCHEDULED_HANDLER);
+      expect("export default { async scheduled(controller, env) {} }").toMatch(SCHEDULED_HANDLER);
       const gzipBytes = gzipSync(code).length;
       expect(gzipBytes).toBeLessThan(3 * 1024 * 1024);
       expect(Buffer.byteLength(code)).toBeGreaterThan(100_000); // 前提: core が入っている(空振りでない)

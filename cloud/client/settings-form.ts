@@ -6,7 +6,7 @@
  * 並びとラベルは exe の設定画面(`packages/app/src/renderer/SettingsView.tsx`)に合わせる(ラベルは exe の共有定数を流用)。**補助文は cloud の実際の挙動に合わせて書き直した**:
  *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
  *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
- *  - 効かない(現在は): 発走何分前(定時の自動実行〈Issue #166〉で使う)
+ *  - 次の朝から効く: 発走何分前(定時の自動実行〈Issue #166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
  */
 import { ALLOCATION_BET_TYPE_LABELS, BET_ALLOCATION_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
 import {
@@ -219,7 +219,7 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   preRaceOffsetMinutes: {
     kind: "text",
     label: "発走の何分前に評価するか",
-    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。定時の自動実行を入れるまで効きません。`,
+    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。`,
     inputmode: "numeric",
   },
 };

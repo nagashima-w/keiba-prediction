@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.21.4)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.21.5)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.21.4`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.21.5`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1134,7 +1134,7 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST のため、gate が GET だけの間はクラウドでは取れない(#181)。
 
 ### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
-**本番から呼び出す入口はまだ無い**(入口は #180。定時の起動は #166)。`worker.ts` が `RaceDay` を export し(wrangler が binding のクラスを要求する)、ローカルの smoke だけが RPC を呼んで通す。
+**呼び出す入口は、手動の `POST /api/analyses/run`〈#180〉と、cron の `scheduled`〈#206。`requestPlan`〉**。`worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)。ローカルの smoke も RPC を呼んで通す。
 - **DO `RaceDay`**(`cloud/src/race-day-do.ts`。薄いラッパ。ロジックは `race-day-core.ts` の `RaceDayCore`〈純ロジック〉): `idFromName(kaisaiDate)` で、その日の全レースの朝の準備を直列に処理する。
   wrangler.toml は binding `RACE_DAY` と migration **v2**(`new_sqlite_classes = ["RaceDay"]`。v1 の NetkeibaGate には触れない)。DO は最初の予約の開催日に固定し、別の日・レースIDの年と違う日は拒否する。
 - **予約は予約だけ**(`schedule`: `setAlarm(now)` して戻る)。本処理はアラーム(`runNextStep`)で、**1回に1レースの1ステップ**。実行中(queued・fetched)の同じレースの二重の予約は受け付けない。
@@ -1153,7 +1153,7 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **限界**: Free の「1呼び出しあたりのサブリクエスト 50」に DO の中のソケット・DO への RPC が数えられるかは未確定のまま(ステップを分け、1ステップの gate への呼び出しを 19 本に抑えている)。本番の DO・アラームは未確認。
 
 ### 手動起動の入口(#180〈#164-e〉。v1.19.13)
-Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を置いた(`cloud/src/handler.ts`)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races`〈#183〉・`GET /api/netkeiba/check`。Cron・scheduled・キューは無い。`cloud-config-guard.test.ts` が固定し、#183 から呼び出し箇所の数〈`.schedule(`・`.getRaceList(`・`.fetchRaw(` が handler.ts に1つずつ〉も固定する。定時の起動は #166)。
+Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を置いた(`cloud/src/handler.ts`)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races`〈#183〉・`GET /api/netkeiba/check`。キューは無い。ほかに定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1つ。#206〉で、**手動 3 + 定時 1 の計 4 つ**。`cloud-config-guard.test.ts` が固定し、呼び出し箇所の数〈`.schedule(`・`.getRaceList(`・`.fetchRaw(` が handler.ts に1つずつ、`.requestPlan(` が scheduled.ts に1つで handler.ts に0〉と、binding の使用箇所〈`env.RACE_DAY`・`env.NETKEIBA_GATE` に触れるファイルと回数〉も固定する)。
 - **`POST /api/analyses/run`**: 本文は JSON `{ "race_id": "...", "kaisai_date": "YYYYMMDD", "mode": "morning" }`(`mode` は省略時と `morning`〈朝の取得と prior〉のみ。発走前の分析は #178)。
   順序: 認証(403・固定の本文)→ **Origin**(`Origin` ヘッダが**あって**、リクエストの origin と完全一致。無い・`null`・スキーム/ポート/サブドメインが違う・末尾にパスがあるものは 403〈origin-mismatch〉。`Sec-Fetch-Site` があれば `same-origin`)→
   Content-Type が `application/json`(415)→ 本文 1 KiB 以内(413)→ JSON・入力の検証(400。未知のキー・型・mode・race_id の検証〈中央 01〜10・地方 30〜64・帯広は対象外〉・開催日の形と実在・**レースIDと開催日の整合**: 年は全レース、**地方は月日も**〈中央の7〜10桁目は回次・日次〉)。ここまでで DO は呼ばない。
@@ -1163,7 +1163,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - 本番への反映は R2 の権限が付いてから(#174)。
 
 ### 発走前の分析・設定・保存(#178〈#164-c〉。v1.19.14。LLM は #194〈#179-b〉・v1.19.25 から)
-日単位の DO の `mode: "pre_race"`(手動の `POST /api/analyses/run` の本文 `mode: "pre_race"`。定時の起動は #166)。朝(`morning`)とは別のタスク((レースID, mode) ごと)で、**朝のタスクは D1・R2・設定に触れない**(朝の prior は DO にだけ置く)。
+日単位の DO の `mode: "pre_race"`(手動の `POST /api/analyses/run` の本文 `mode: "pre_race"`。定時の起動は #206 の cron)。朝(`morning`)とは別のタスク((レースID, mode) ごと)で、**朝のタスクは D1・R2・設定に触れない**(朝の prior は DO にだけ置く)。
 - **取得ステップ**: 設定(D1 の `cloud_settings` の1行)を**1回だけ**読み、スナップショットをタスクに保存する(途中で設定が変わっても、取得と計算は同じ設定)。`scrapeRace` で、出馬表(取消・天候・馬場を反映。TTL 10 分)・オッズ(**キャッシュを常に迂回**)・
   組合せオッズ(`includeComboOdds` が ON のときだけ。同じく迂回)を取り直す。戦績・調教は朝のキャッシュがあればそれを使う。朝のキャッシュがあるとき、取得は出馬表 1 + 単勝複勝 1(+ 組合せ ON で 6)= 2〜8 本。冷えた状態は 19 本(組合せ ON で 25 本)。
 - **計算・保存ステップ**: **netkeiba には出ず**(gate は0回)、キャッシュだけで prior → LLM(#194。v1.19.25 から。API キーが未登録なら LLM なしで、`promptVersion`・`model` は null)→ EV → 配分を作り、`AnalysisSink`(`D1AnalysisStore`)で D1(要約)・R2(詳細)に保存する。取消馬は出走馬から除かれる(#154)。
@@ -1178,13 +1178,13 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   R2 の put には 15 秒の上限時間を掛ける(`withPutTimeout`)。買い目の JSON は 1.5MB までで、超えたら D1 に何も書かずに拒否する(通常の最大は中央16頭・全券種 ON で 265 件・約 23KB)。
 - **子の行の確認**(#175 の申し送り): 保存後に、子の行(馬・買い目)の件数が保存したレコードと一致するかを確かめ、`children_ok` に記録する(不一致は警告。分析は保存済みなので `done`)。
   子の行は `(SELECT max(id) FROM analyses)` で親に紐づけているので、**最初の本番の実保存で `GET /api/analyses/status` の `children_ok` が true であること**を確かめる(ローカルの D1 では true。本番は未確認)。崩れた場合の代替は #175 の JSDoc(migration 0003 案)。
-- **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant、および cloud 専用の preRaceOffsetMinutes(発走何分前に評価するか。整数 10〜180・既定 45。定時の自動実行〈#166〉で使う。それまでは効かない)。**exe と共有する13項目の既定値は exe の既定値と同じ**
+- **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant、および cloud 専用の preRaceOffsetMinutes(発走何分前に評価するか。整数 10〜180・既定 45。定時の自動実行〈#166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。**変更は次の朝 9:00〈日本時間〉の計画から反映され、すでに計画した日の分は変わらない**)。**exe と共有する13項目の既定値は exe の既定値と同じ**
   (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集は `GET`/`POST /api/settings`(Issue #189)**: POST は全項目の置き換えで、欠け・未知のキー・範囲外は 400。範囲の述語は項目ごとに1か所(`CLOUD_SETTINGS_RULES`)で、書く側は読む側の部分集合(kellyFraction は書く側 0.05〜1・読む側 0〜1、追加指示は書く側 2,000 文字まで・読む側は上限なし)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有し、上限は run 1 KiB・settings 16 KiB。画面は段階2で追加。
 - **発走時刻の換算**(`cloud/src/pre-race-time.ts`): 出馬表の `startTime`(JST の HH:MM)から、UTC のエポックミリ秒と「発走の45分前」(既定。Issue #189 で 30 → 45。設定 `preRaceOffsetMinutes` の既定値と同じ定数)を求める(JST 0:00〜8:59 は UTC の前日)。アラームの予約に使うのは #166。
-- **定時の自動実行の純関数**(`cloud/src/auto-run-plan.ts`。Issue #202〈#166-A〉。**まだ production から呼ばれない**。呼ぶのは #203〜#206): `jstKaisaiDate(scheduledTimeMs)`(cron の `scheduledTime` から **JST の開催日**。UTC の日付をそのまま使うと UTC 15:00〜23:59 で1日ずれる)・
+- **定時の自動実行の純関数**(`cloud/src/auto-run-plan.ts`。Issue #202〈#166-A〉。`jstKaisaiDate` は #206 の `scheduled` が呼ぶ): `jstKaisaiDate(scheduledTimeMs)`(cron の `scheduledTime` から **JST の開催日**。UTC の日付をそのまま使うと UTC 15:00〜23:59 で1日ずれる)・
   `selectAutoRunTargets({ central, nar })`(**中央は全件、地方は Jpn1/2/3 だけ**。中央 → 地方の順・`venue` の印つき)・`planPreRaceDue({ kaisaiDate, startTime, offsetMinutes, nowMs })`
   (期限 = 発走 − offset 分。判定の順: `now ≥ start` → skip〈`started`〉/ `due ≥ now` → scheduled / 期限を過ぎていて発走まで 10 分(`MIN_AUTO_RUN_LEAD_MS`)以上 → immediate・未満 → skip〈`too-late`〉。発走時刻が無い・壊れているときは skip〈`no-start-time`〉)。
-- **朝の計画**(Issue #203 段階2。`cloud/src/race-day-core.ts`・`cloud/src/race-day-plan.ts`。**まだ呼ぶ入口が無い**: cron・`scheduled` は #206): `requestPlan({ kaisaiDate })`(RPC。依頼だけをして戻る。**2回目以降は `already-planned`で何も変えない**=cron の重複配信に強い)→
+- **朝の計画**(Issue #203 段階2。`cloud/src/race-day-core.ts`・`cloud/src/race-day-plan.ts`。呼ぶ入口は #206 の cron の `scheduled`): `requestPlan({ kaisaiDate })`(RPC。依頼だけをして戻る。**2回目以降は `already-planned`で状態を変えない**=cron の重複配信に強い。#206 で、`already-planned` のときも**アラームだけ状態から張り直す**ようにした〈依頼の行を書いたあとの `setAlarm` の失敗から、再配信・再試行で回復する〉)→
   アラームの中で、**計画の段階**(会場ごとに 1 ステップ = gate 1 本。中央 → 地方の一覧。失敗は 60 秒おきに最大 3 回、`blocked` は再試行しない。再試行の待ちは時刻 `next_try_at` で持つ)→ **確定**
   (offset を設定から決める。読めなければ 3 回再試行して**既定の 45 分**で確定し、`plan_offset_source = default-fallback` を残す。対象 = 中央の全件 + 地方の Jpn。各対象に `planPreRaceDue` で期限を計算して `race_day_plan` に書き、
   pre_race を走らせる行(planned)にだけ morning を積む。skip〈`no-start-time`・`started`・`too-late`・`cap`〉には積まない。**既にある morning は状態に関係なく積み直さない**。1日の上限(100)は、対象1件につき morning と pre_race の2行ぶん)。
@@ -1192,7 +1192,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   確定は**原子性に頼らない冪等**を目指している(確定の印は最後。計画の行は `ON CONFLICT DO NOTHING`・morning は無いときだけ・offset は最初の決定を残す)。#203 の時点では既知の穴が1つあった(計画の行を書いたあと morning を積む前に落ちると、再実行の先頭の昇格で期限切れの行が先に promoted になり、その行に morning が積まれず `morningAllTerminal` が偽のまま残る)が、**Issue #204 で塞いだ**: 昇格は確定済みの日だけ動き、確定の前の期限はアラームの候補にもしない(`PlanStore.nextDueMs` が確定前は null)。
   DO の表: `race_day_plan_venue`(会場の状態・取得した一覧の本体〈確定したら捨てる〉)・`race_day_plan`(期限と状態)・meta の `plan_*`。**掃除は、キャッシュの行と孤立した LLM の応答の記録だけを消す**(従来どおり。タスク・prior・計画の行は消さない)。
   `getPlanProgress()` は、朝のまとめ(#205)のための読み取り(`stage`・会場の状態と件数・各行の期限と morning の状態・`morningAllTerminal`〈確定済みで、積んだ morning がすべて done か failed。一部が failed でも true〉・`offsetSource`)。
-- **発走前の予約のガード**(Issue #204〈#166-C〉。`cloud/src/race-day-core.ts`・`race-day-plan.ts`・`auto-run-result.ts`。**まだ呼ぶ入口が無い**: cron は #206):
+- **発走前の予約のガード**(Issue #204〈#166-C〉。`cloud/src/race-day-core.ts`・`race-day-plan.ts`・`auto-run-result.ts`。呼ぶ入口は #206 の cron の `scheduled`):
   - **昇格の判定**(期限が来た planned の行。順に): 同じレースの pre_race が実行中なら、自動の印が今のタスクを指していれば(昇格で積んだあと promoted にする前に落ちた再実行)promoted にするだけ、そうでなければ手動なので積み直さず **skipped〈`manual`〉**
     → **時刻の判定**(`now ≥ 発走` の発走済み〈`started`〉だけ skipped。pre_race も netkeiba も出ない。**発走前なら、何分前でも昇格する**: `too-late`〈発走まで 10 分未満〉は計画の時点の判定にだけ残す。昇格の時点でも判定すると、offset = 10 分〈設定の最小値〉では、アラームが期限から 1ms 遅れただけで全レースがスキップになる。昇格が遅れて発走が近いときは走らせ、発走を過ぎたらステップの直前のガードが止める)→ **手動の分析との重複**(下記)→ 上限なら skipped〈`cap`〉→ pre_race を積み、自動の印を書き、promoted。
   - **手動の分析との重複**(ユーザー判断 2026-10-07): 同じレースの分析時刻が **[期限 − 15 分, 今]**(両端を含む)の分析のうち、**現行の prompt_version〈`resolveClipVariant(設定の clipVariant).promptVersion`〉で、LLM が実際に効いた〈`model` あり〉**ものがあれば、自動はスキップする(skipped〈`manual`〉)。
@@ -1202,7 +1202,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - **自動の印**(`race_day_auto_pre_race`。新しい表): 昇格が pre_race を積んだ同じ同期区間で書く。**手動の `schedule()` が pre_race を積み直すときに消す**(印が有る ⇔ 今の pre_race のインスタンスは自動。**削除が主で、読む側の `queued_at` との等値照合は多層防御**)。失敗の理由(`fail_reason`)は、自動の pre_race が failed になる箇所が書く。
   - **ステップの直前のガード**: 自動の pre_race は、取得・計算の各ステップの直前に `now ≥ 発走` なら、netkeiba にも LLM にも出ずに failed にする(固定のエラー文 `発走済みのため、自動実行しませんでした`・理由 `started`・試行回数は据え置き)。キューや再試行の待ちで発走を過ぎることがあるため。計算ステップは、分析が保存済み(`analysis_id` あり)なら failed にしない。**手動の pre_race は変えない**。
   - **結果の読み取り**(`getAutoRunResults()`。RPC あり。状態は変えない。#205 の通知が状態から作るため): 確定済みの日(`stage: "done"`)の各行について、`waiting`(期限待ち)・`running`・`completed`(`analysisId`・`detail`)・`failed`(理由は `started`〈ステップで発走済み〉・`blocked`〈ブレーカー・許可リスト外〉・`fetch-exhausted`・`compute-exhausted`)・`skipped`(理由は `no-start-time`・`started`・`too-late`・`cap`・`manual`)・`superseded`(昇格したが、その後に手動が pre_race を上書きした)を返す。分類は純関数 `classifyAutoRun`。通知に出すか・「送った印」は #205 の持ち分。
-- **通知(Discord)**(Issue #205〈#166-D〉。`cloud/src/notify-*.ts`・`race-day-core.ts`。**まだ呼ぶ入口が無い**: cron は #206。**実際の Discord への送信は、#206 の公開のあと、ユーザーが secret を登録して最初の自動実行の日に確かめる**。#205 の検証は偽の送信まで):
+- **通知(Discord)**(Issue #205〈#166-D〉。`cloud/src/notify-*.ts`・`race-day-core.ts`。**cron は #206 で有効になった**。**実際の Discord への送信は、#206 の公開のあと、ユーザーが secret を登録して最初の自動実行の日に確かめる**。#205 の検証は偽の送信まで):
   - **通知は状態から作る**(コールバックにしない)。`planNotifications`(純関数)が、`getAutoRunResults`・`getPlanProgress`・通知の表から、「いま送るもの(`sendNow`)」と「次にアラームを張る時刻(`nextAtMs`)」を**同じ関数が同じ状態から**返す。`rearm` は `nextAtMs` を(`AlarmInputs.notifyAtMs`)、送信のステップは `sendNow` を読む。
     不変条件: `nextAtMs ≤ now` なら `sendNow` がある(即時ループなし)/ webhook が無効なら両方 null / 送り終えたものは候補にならない / `sendNow` を実行すると必ず状態が変わる。fuzz(`race-day-notify.test.ts`)が、実際の実行で固定している。
   - **処理の順**: 昇格 → 計画(一覧・確定)→ **通知** → タスク(`pickNext`)。通知をタスクの前に置くのは、immediate の行が多い日に、pre_race の連続が時間に追われる通知を押しのけないため。送信の間隔(成功のあと 1 秒)・失敗のクールダウン(失敗のあと 60 秒。メタ `notify_pace_until`)があるので、通知がタスクを押しのけ続けることもない。
@@ -1226,6 +1226,20 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
     - offset が大きく、すぐ実行(immediate)の行が多い日は、pre_race が morning より先に処理される(`pickNext`)ので、まとめが「未完了 N 件」で、レースごとの通知より後に届くことがある。immediate の行の morning は無駄になりうる(#206 以降で扱う)。
     - 発走後に completed になった場合でも、通知は送る(`failIfStarted` は各ステップの入口でしか止めない)。
     - Discord が Cloudflare の共有 IP からの Webhook を受け付けるかは、実送信するまで確かめられない(未検証)。
+- **定時の自動実行の cron**(Issue #206〈#166-E〉。`cloud/wrangler.toml`・`cloud/src/scheduled.ts`・`worker.ts`。**これで本番の自動実行が始まる**):
+  - **時刻と対象**: `[triggers] crons = ["0 0 * * *"]`(UTC 0:00 = **JST 9:00**。1 本だけ。ユーザー判断)。対象は**中央は全レース、地方は交流重賞〈Jpn1/2/3〉だけ**(`selectAutoRunTargets`)。発走の `preRaceOffsetMinutes` 分前(既定 45)に発走前の分析を予約する(#203・#204)。
+  - **`scheduled`**: 薄い作り。`scheduledTime` から `jstKaisaiDate` で JST の開催日を決め(`Date.now()` は使わない。遅延・重複配信でも同じ日)、`RACE_DAY.idFromName(開催日)` の `requestPlan({ kaisaiDate })` だけを呼ぶ(netkeiba にも LLM にも直接は出ない)。`cloudflare:workers` を import しない純モジュール(`runScheduled`)で、worker.ts は 1 行で委譲する。
+    失敗は**有界の再試行**(即時・10 秒後・30 秒後の計 3 回。`requestPlan` が冪等で、`already-planned` のアラーム張り直し〈G-E2〉があるので安全)。3 回とも失敗したら、ログに分類(`request-plan-failed`・`bad-scheduled-time`)・開催日・試行番号・エラーの `name`(英数字に絞る)だけを残し、固定文言のエラーを投げる(メッセージ本文・値・秘密は出さない)。
+  - **`GET /api/plan?kaisai_date=YYYYMMDD`**(読み取り専用の観測の入口。Access の後ろ): GET だけ(HEAD などは 405)・`Sec-Fetch-Site` が別サイトなら 403・クエリは `kaisai_date` だけ(必須。重複・未知のキー・不正な日付は 400。DO を呼ばない)・DO の失敗は 503(文面なし)。
+    日単位の DO の `getPlanProgress`(朝の計画)・`getAutoRunResults`(各レースの結果)・`getNotifications`(通知の一覧)を読んで返す(`RaceDay` に `getPlanProgress` の RPC を足した)。**netkeiba にも LLM にも D1・R2 にも出ず、状態も変えない**。
+    応答は**明示のホワイトリスト**のキーだけ(`ok`・`kaisai_date`・`plan`・`results`・`notifications`。snake_case)。自由文(会場の失敗の理由・自動実行の失敗の文面)は 200 文字に切る。**Webhook の URL は含まない**(URL は通知の仕組みの中にだけあり、この関数は `env.DISCORD_WEBHOOK_URL` を読まない)。
+    理由: 対象が 0 件の日は通知が何も出ないので、自動実行が動いたのか壊れているのかを、外から確かめる手段が要る。画面での表示は範囲外。
+  - **止め方**: `wrangler.toml` を **`crons = []`(空配列)**にしてデプロイする。**`[triggers]` を消すだけでは止まらない**(wrangler は `crons` が未設定だと schedule を更新しない。コード読みで確認〈wrangler 4.147.0〉。**本番では確かめていない**)。ダッシュボードで消しても**次のデプロイで toml の内容に戻る**(`wrangler deploy` は toml の `crons` で schedule を上書きする)。課金だけ止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除する(統計のみで保存。**netkeiba への取得は続く**)。
+  - **検査**: `scripts/test/cloud-config-guard.test.ts`(cron がちょうど `["0 0 * * *"]`・取得の起点は手動 3 + 定時 1・binding の使用箇所の走査・`handlePlan` が読み取りの RPC だけを呼ぶ)・`bundle-guard`(本番のバンドルに `async scheduled(` がある)・smoke の構成 G(`wrangler dev` の `/cdn-cgi/local/scheduled` で cron を手動発火。偽ソケット・過去の開催日で全件 skip)。
+  - **【記録】**:
+    - cron が失敗時に再配信されるかは未確認(`scheduled` 内の再試行で補っている)。API トークンの権限で `schedules` の PUT が通るかも未確認(初回のデプロイのログで確かめる)。
+    - 本番では手動で `scheduled` を起動する手段が無い。最初の発火は**デプロイ後の最初の 9:00 JST**で、中央の開催日なら最初から全レースが対象になる。
+    - `requestPlan` の `already-planned` での `rearm` は、再試行待ちの間に重複配信が来ると、再試行の時刻を後ろへずらしうる(重複の遅れ分。極めてまれ)。
 - **アラームの合成と処理の順**(Issue #203 段階1。`cloud/src/race-day-core.ts`): DO のアラームは1つだけなので、`setAlarm` を呼ぶのは `rearm()` の1箇所だけにし、純関数 `nextAlarmAt` が
   「今すぐの仕事(now)・再試行待ち(now + 60 秒)・計画の次の試行/期限(段階2。`max(それ, now)`)・掃除の期限」のうち**最も早い時刻**を選ぶ(掃除の期限は、仕事〈即時・再試行待ち〉があるあいだは候補にしない)。
   予約が無いときの `setAlarm` の回数・値は従来と同じ。`pickNext` は **発走前(pre_race)を朝(morning)より先**に処理する(計算待ち → 取得待ちの順は従来どおり。取得待ちのうち**再試行待ち〈試行済み〉は最後**にして、再試行の間隔を保つ)。
@@ -1341,7 +1355,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 変更は `cloud/` のみ(exe のアプリコードは無変更)。詳細は `cloud/README.md` の「設定の API」「設定画面」。
 - **API**: `GET /api/settings`(`{ok, settings, source}`。`source` は default・d1・invalid〈JSON として読めない、またはオブジェクトでない〉)・`POST /api/settings`(全項目の置き換え。欠け・未知のキー・範囲外は 400)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有(`readJsonObjectBody`。上限は run 1 KiB・settings 16 KiB)。
 - **範囲の述語**: 項目ごとに1か所(`settings.ts` の `CLOUD_SETTINGS_RULES`)。書く側は読む側の部分集合(kelly は書く側 0.05〜1・読む側 0〜1、追加指示は書く側 2,000 文字まで・読む側は上限なし)。全境界値で「保存 → 読み戻し」の一致をテストで固定。
-- **新項目**: `preRaceOffsetMinutes`(発走何分前に評価するか。整数 10〜180・既定 45。cloud 専用。定時の自動実行〈#166〉で使う。それまでは効かない)。`DEFAULT_PRE_RACE_OFFSET_MINUTES` は 30 → 45 で、設定の既定値と同じ定数。
+- **新項目**: `preRaceOffsetMinutes`(発走何分前に評価するか。整数 10〜180・既定 45。cloud 専用。定時の自動実行〈#166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。**変更は次の朝 9:00〈日本時間〉の計画から反映され、すでに計画した日の分は変わらない**)。`DEFAULT_PRE_RACE_OFFSET_MINUTES` は 30 → 45 で、設定の既定値と同じ定数。
 - **画面**: `#settings`(完全一致のときだけ)。トップに「設定」リンク。並びは exe の設定画面、ラベルは exe の共有定数、補助文は cloud の挙動に合わせて書き直し。下書きは入力のたび(数値欄・追加指示は `input`、チェックボックス・選択は `change`)に書くだけ(再描画しない)・保存の押下時に項目ごとに検証・保存/再読込/失敗の直後は強制再描画・離れたら破棄。**追跡のポーリングなど画面外の原因の再描画は、画面に出ている内容(最後の強制描画時の写し)から木を作り、打っている欄を壊さない**。結果の画面の「未設定」の注記は、トップの「設定」を案内する。
 
 ### スマホ画面の土台と名前(#191〈#165-h〉。v1.19.21)

@@ -129,7 +129,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 | `ACCESS_AUD` | Access アプリケーションの AUD タグ |
 | `ACCESS_ALLOWED_EMAIL` | 許可するメールアドレス(1件) |
 | `ANTHROPIC_API_KEY` | 発走前の分析の LLM の API キー(Issue #194〈#179-b〉)。**登録は任意**: 未登録なら、LLM を使わず統計のみで保存し、理由「LLM の API キーが未登録のため…」を画面用に D1(`analyses.llm_note`)へ残す(分析は止まらない)。登録の手順は、この表の下の「`ANTHROPIC_API_KEY` の登録」 |
-| `DISCORD_WEBHOOK_URL` | 定時の自動実行(#166)の通知(Discord)の Webhook URL(Issue #205〈#166-D〉)。**登録は任意**: 未登録・形式不正なら、通知の仕組み全体が無効(通知の行も材料も積まず、通知のためのアラームも張らない。分析は止まらない)。**本番から計画を依頼する入口(cron)は #206 なので、登録しても今は何も送られない**。登録の手順は、この表の下の「`DISCORD_WEBHOOK_URL` の登録」 |
+| `DISCORD_WEBHOOK_URL` | 定時の自動実行(#166)の通知(Discord)の Webhook URL(Issue #205〈#166-D〉)。**登録は任意**: 未登録・形式不正なら、通知の仕組み全体が無効(通知の行も材料も積まず、通知のためのアラームも張らない。分析は止まらない)。**Issue #206 で cron が有効になった**ので、登録すれば、次の朝 9:00(日本時間)の自動実行から Discord に通知が届く。登録の手順は、この表の下の「`DISCORD_WEBHOOK_URL` の登録」 |
 
 未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作)。
 
@@ -336,8 +336,28 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **検査**: `test/client-prompt-preview.test.ts`・`client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`・`page.test.ts`・`race-day-llm.test.ts`(e10)・`client-bundle.test.ts`(許可リスト・閉包・実行スモーク)。
 - **実機(スマホ)で確かめること(自動検査できない)**: プレビューを開いたときの長文の読みやすさ(等幅・折り返し・ページのスクロール)・「入力中の内容を反映」を押したときのスクロール位置(DOM の全置換で位置が飛ばないか)・開閉ボタンのタップのしやすさ。
 
+## 定時の自動実行(Issue #206〈#166-E〉。**毎朝 JST 9:00 に自動で始まる**)
+`wrangler.toml` の `[triggers] crons = ["0 0 * * *"]`(UTC 0:00 = JST 9:00。1 本だけ)で、Worker の `scheduled`(`src/scheduled.ts`)が起動する。**これを公開すると、本番で毎朝、次のことが自動で起きる**:
+1. `scheduled` が `scheduledTime` から **JST の開催日**(YYYYMMDD)を決め、その日の日単位の DO(`RaceDay`)の `requestPlan` を呼ぶ(依頼だけ。netkeiba にも LLM にも `scheduled` は直接出ない)。
+2. DO が、アラームの中で中央・地方の開催日の一覧を取得(netkeiba。間隔 1.5 秒以上。gate が直列化)→ 計画 → **中央は全レース、地方は交流重賞(Jpn1/2/3)だけ**を対象に、朝の取得(morning)→ 発走の「設定の分前」(既定 45 分前)に発走前の分析(pre_race)を予約。
+3. 発走前の分析は、Worker の secret `ANTHROPIC_API_KEY` が**登録済みなら実際に Claude API を呼ぶ(課金が発生する)**。未登録なら LLM なしで保存する(課金なし)。中央の開催日は最大 36 レース。netkeiba への取得は 1 日 700 本前後。
+4. Discord の Webhook(`DISCORD_WEBHOOK_URL`)が登録済みなら、分析ごとの通知と朝のまとめが届く。
+
+- **設定の反映**: 「発走の何分前に評価するか」は、朝 9:00 の計画で読んで計画の行に固定する。**変更は、次の朝 9:00(日本時間)の計画から反映される**(すでに計画した日の分は変わらない)。そのほかの設定は、各レースの発走前の取得の開始時に読む。
+- **観測**: `GET /api/plan?kaisai_date=YYYYMMDD`(Access の後ろ。読み取り専用。netkeiba にも LLM にも D1・R2 にも出ない)。朝の計画(`plan`: 段階・offset・会場ごとの一覧の件数/失敗理由・計画の行)・各レースの結果(`results`: 待機/実行中/完了〈分析 id〉/失敗〈理由〉/スキップ〈理由〉)・通知の一覧(`notifications`: 送信の状態と失敗の分類)を返す。**Webhook の URL は含まない**(応答のキーは固定)。自由文は 200 文字まで。
+  対象が 0 件の日(平日で開催がない日など)は通知が何も出ないので、「動いたのか壊れているのか」はここで確かめる(`plan.stage` が `done`・会場の `state` が `ok` なら、動いて 0 件だった)。**9:30 を過ぎても朝のまとめが来ないときも、まずここを見る**。
+- **失敗したら**: `scheduled` は `requestPlan` が失敗すると、10 秒後・30 秒後に再試行する(`requestPlan` は冪等で、再配信でもアラームが張り直される)。3 回とも失敗したら、ログ(Workers Logs)に分類(`request-plan-failed`)・開催日・エラーの種類名だけを残し、固定文言のエラーでその回の cron を失敗にする(ダッシュボードの Cron のイベントで赤く見える)。メッセージ本文・値は出さない。cron が失敗時に再配信されるかは**未確認**。
+- **止め方**(どちらも、先に止めたい理由を決める):
+  1. **`wrangler.toml` を `crons = []`(空配列)にしてデプロイする**。⚠️ **`[triggers]` を消すだけでは止まらない**(wrangler は `crons` が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、**本番では確かめていない**)。`scripts/test/cloud-config-guard.test.ts` が `["0 0 * * *"]` ちょうどを固定しているので、止めるときはこのテストも直す。
+  2. ダッシュボードで cron を消す(Worker → Settings → Trigger Events の Cron Triggers。画面の位置は未確認)。⚠️ **次のデプロイで、`wrangler.toml` の内容に戻る**(`wrangler deploy` は toml の `crons` で schedule を上書きする)。止め続けるなら 1. も行う。
+  - **課金だけ止める**なら、Worker の secret `ANTHROPIC_API_KEY` を削除する(統計のみで保存する。**netkeiba への取得は続く**)。
+- **デプロイの確認**: CI の「Worker をデプロイ」のログに `Deployed keiba-cloud triggers` と `schedule: 0 0 * * *` が出る(`deploy:dry` は schedule を出さない)。登録に失敗すると `Trigger configuration ... was only partially updated` で赤になる(Worker のコードは既にアップロード済みで、cron だけ無い状態)。API トークンの権限で通るかは**未確認**(初回のデプロイの結果で確かめる)。
+- **初回の注意**: cron はデプロイ直後には発火せず、**次の 9:00 JST**に最初に発火する。本番では手動で `scheduled` を起動する手段が無い。金曜の夕方にデプロイすると最初の発火が土曜(中央の全レース)になる。平日(JRA の開催がない日)に最初の発火を観測する運用も選べる。
+- **ローカルでの確認**: `wrangler dev` の `/cdn-cgi/local/scheduled?cron=0+0+*+*+*&time=<エポックミリ秒>`(`--test-scheduled` は不要。実測)で cron を手動発火できる。`pnpm run smoke` の構成 G が、偽ソケットでこれを通す(過去の開催日なので全件 skip になり、Claude API にも netkeiba にも出ない)。
+- 検査: `test/scheduled.test.ts`・`test/handler-plan.test.ts`・`test/race-day-rpc-surface.test.ts`・`test/race-day-plan.test.ts`(G-E2)・`test/bundle-guard.test.ts`(`async scheduled(` が本番のバンドルにある)・`scripts/test/cloud-config-guard.test.ts`・smoke。
+
 ## 手動起動の入口(Issue #180)
-Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。定時の Cron は無い。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
+Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 3 + 定時 1 の計 4 つ〉。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
 - `POST /api/analyses/run` — 本文 JSON `{"race_id": "202603020211", "kaisai_date": "20260628", "mode": "morning"}`。`mode` は `morning`(省略時。朝の取得と prior。D1・R2 には書かない)か `pre_race`(発走前の分析。LLM を使う〈API キーが未登録なら LLM なしで保存〉。D1・R2 に保存)。**同じオリジンのページから**(`Origin` が必要。curl で試すときは `-H "Origin: https://<自分の Worker のホスト>"` と `-H "Content-Type: application/json"` を付ける)。202 で予約され、取得 → 計算はアラームの中で進む(中央16頭で約 40 秒)。
 - `GET /api/analyses/status?kaisai_date=20260628[&race_id=202603020211]` — 状態と、朝の prior の最小限。
 
@@ -362,7 +382,7 @@ Access の後ろの GET が2つ(仕様の詳細は `docs/current-spec.md` の「
 
 ### 設定画面(Issue #189。`#settings`)
 - **入口**: トップ(一覧の画面)の「設定」リンク(`#settings`)。`#settings` の**完全一致**のときだけ設定画面(`#settings&date=…` などは従来どおり)。戻るは `#`(今日・中央の一覧)。
-- **項目と並び**: exe の設定画面に合わせる(EV閾値 → 組合せオッズの取得 → 各券種を配分に含めるか〈ワイド・馬連・枠連・馬単・三連複・三連単〉→ 資金・1レースの上限・ケリー係数 → 追加指示 → クリップ幅)。末尾に cloud 専用の「発走の何分前に評価するか」(「定時の自動実行を入れるまで効きません」と注記)。ラベルは exe の共有定数を流用し、補助文は cloud の実際の挙動に合わせた(**追加指示・クリップ幅は、「発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません」**と注記。キーの有無のどちらでも嘘にならない書き方。画面に Issue 番号は出さない〈Issue #195〉)。
+- **項目と並び**: exe の設定画面に合わせる(EV閾値 → 組合せオッズの取得 → 各券種を配分に含めるか〈ワイド・馬連・枠連・馬単・三連複・三連単〉→ 資金・1レースの上限・ケリー係数 → 追加指示 → クリップ幅)。末尾に cloud 専用の「発走の何分前に評価するか」(「変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。」と注記。Issue #206 で、旧「定時の自動実行を入れるまで効きません」から変更)。ラベルは exe の共有定数を流用し、補助文は cloud の実際の挙動に合わせた(**追加指示・クリップ幅は、「発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません」**と注記。キーの有無のどちらでも嘘にならない書き方。画面に Issue 番号は出さない〈Issue #195〉)。
   API キーと Discord の Webhook は出さない(Worker の secret)。LLM の ON/OFF と上限は作らない。
 - **取得**: 開くと `GET /api/settings` だけ(一覧・板・レース・分析は取らない)。失敗は自動で再試行せず、「再読込」(未保存の入力は捨てる)だけ。`source` が `default` なら「まだ保存されていません(既定値を表示しています)」、`invalid` なら「保存済みの設定が読めないため、既定値を表示しています」。
 - **追跡中も入力中の欄を壊さない**: 設定画面の**強制なしの再描画**(追跡のポーリング・他の取得の完了など、設定画面の外の原因)は、最後に強制描画したときの内容(画面に出ている内容)から木を作る。打っている途中の下書きは、次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に出さない(木が同じなので DOM を置き換えず、フォーカス・スマホのキーボードが保たれる)。保存は最新の下書きを読む。

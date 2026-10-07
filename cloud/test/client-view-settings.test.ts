@@ -150,14 +150,15 @@ describe("設定画面の VNode", () => {
     expect(invalid).toEqual(["kellyFraction", "bankroll"].sort((a, b) => FIELD_ORDER.indexOf(a as never) - FIELD_ORDER.indexOf(b as never)));
   });
 
-  it("保存の結果: 成功は通知(role=alert でない)・失敗は role=alert。source の注記と、補助文(発走何分前の注記)が出る", () => {
+  it("保存の結果: 成功は通知(role=alert でない)・失敗は role=alert。source の注記と、補助文(発走何分前の注記。Issue #206 で「次の朝 9:00 の計画から反映」に変更)が出る", () => {
     const ok = tree({ save: { kind: "saved" } });
     expect(textOf(ok)).toContain("保存しました");
     expect(findAll(ok, (n) => n.attrs?.["role"] === "alert")).toEqual([]);
     const failed = tree({ save: { kind: "error", message: "保存できませんでした(固定)" } });
     expect(findAll(failed, (n) => n.attrs?.["role"] === "alert").map(textOf)).toEqual(["保存できませんでした(固定)"]);
     expect(textOf(tree({ load: { kind: "ready", source: "default" } }))).toContain("まだ保存されていません");
-    expect(textOf(tree())).toContain("定時の自動実行を入れるまで効きません");
+    expect(textOf(tree())).toContain("変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。");
+    expect(textOf(tree())).not.toContain("効きません");
   });
 
   it("外から来た文字列(追加指示の中身)は、テキストノードでなく value として入るだけ。HTML として解釈される経路を作らない(木にスクリプトの要素が無い)", () => {

@@ -278,7 +278,7 @@ describe("requestPlan(計画の依頼。cron から呼ぶ入口)", () => {
     expect(planRows(h)).toEqual([]);
   });
 
-  it("冪等: 2回目(cron の重複配信)は受理せず(already-planned)、何も変えない(行・アラーム・meta)", async () => {
+  it("冪等: 2回目(cron の重複配信)は受理せず(already-planned)、状態(行・meta)を変えない。アラームは状態から張り直す(Issue #206 G-E2。旧: アラームも触らない)", async () => {
     const h = harness();
     await h.core.requestPlan({ kaisaiDate: DATE });
     const before = JSON.stringify(venueRows(h));
@@ -287,7 +287,54 @@ describe("requestPlan(計画の依頼。cron から呼ぶ入口)", () => {
     expect(await h.core.requestPlan({ kaisaiDate: DATE })).toEqual({ accepted: false, reason: "already-planned" });
     expect(JSON.stringify(venueRows(h))).toBe(before);
     expect(meta(h, "plan_requested_at")).toBe(String(JST_0900)); // 最初の依頼の時刻のまま
-    expect(h.alarms).toHaveLength(alarmsBefore); // アラームも触らない
+    expect(taskRows(h)).toEqual([]);
+    // アラーム: 状態から計算し直した時刻(未完の会場の次の試行 = 9:00 は過去なので now)で、ちょうど1回張り直す
+    expect(h.alarms).toHaveLength(alarmsBefore + 1);
+    expect(h.alarm.at).toBe(JST_0900 + 5 * MIN);
+    expect(h.alarm.at).not.toBe(JST_0900); // 前提: 張り直しで時刻が動いている(「張り直した」ことが見える)
+  });
+
+  it("G-E2: アラームが無い依頼済みの DO に再び依頼すると、アラームが張られ、計画が確定まで進む(行・meta は変わらない)", async () => {
+    const h = harness();
+    await h.core.requestPlan({ kaisaiDate: DATE });
+    h.alarm.at = null; // アラームが失われた状態
+    const before = JSON.stringify(venueRows(h));
+    expect(await h.core.requestPlan({ kaisaiDate: DATE })).toEqual({ accepted: false, reason: "already-planned" });
+    expect(h.alarm.at).toBe(JST_0900);
+    expect(JSON.stringify(venueRows(h))).toBe(before);
+    expect(meta(h, "plan_requested_at")).toBe(String(JST_0900));
+    expect([await tick(h), await tick(h), await tick(h)]).toEqual(["central:plan:list:ok", "nar:plan:list:ok", "plan:plan:finalize:ok"]);
+  });
+
+  it("G-E2(#203 の【記録】5): 1回目の setAlarm が投げた(依頼の行は書かれた)あと、再配信の requestPlan が already-planned を返しつつアラームを張り、計画が確定まで進む", async () => {
+    let failNext = true;
+    let setAlarmCalls = 0;
+    const h: Harness = harness(CENTRAL_HTML, NAR_HTML_SYNTHETIC, {
+      setAlarm: (at) => {
+        setAlarmCalls += 1;
+        if (failNext) {
+          failNext = false;
+          throw new Error("setAlarm の失敗");
+        }
+        h.alarms.push(at);
+        h.alarm.at = at;
+      },
+    });
+    await expect(h.core.requestPlan({ kaisaiDate: DATE })).rejects.toThrow(/setAlarm の失敗/);
+    // 前提: 依頼の行は書かれているが、アラームは無い(これが「アラームが張られないまま止まる」状態)
+    expect(setAlarmCalls).toBe(1);
+    expect(meta(h, "plan_requested_at")).toBe(String(JST_0900));
+    expect(venueRows(h)).toHaveLength(2);
+    expect(h.alarm.at).toBeNull();
+    // 再配信
+    expect(await h.core.requestPlan({ kaisaiDate: DATE })).toEqual({ accepted: false, reason: "already-planned" });
+    expect(setAlarmCalls).toBe(2);
+    expect(h.alarm.at).toBe(JST_0900);
+    expect(venueRows(h).map((r) => [r.venue, r.state, r.attempts])).toEqual([
+      ["central", "pending", 0],
+      ["nar", "pending", 0],
+    ]);
+    expect([await tick(h), await tick(h), await tick(h)]).toEqual(["central:plan:list:ok", "nar:plan:list:ok", "plan:plan:finalize:ok"]);
   });
 
   it("冪等: 計画が確定し、朝の準備が済んだあとの重複配信でも、done の morning を作り直さず、計画の行・タスクも増えない", async () => {

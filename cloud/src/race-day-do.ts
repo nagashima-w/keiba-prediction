@@ -4,7 +4,7 @@
  * ロジックは `RaceDayCore`(純ロジック。Node でテストできる)にあり、ここは本物の `ctx.storage.sql`・時計・`setAlarm`・ゲート(`NetkeibaGate` の RPC)を
  * 配線するだけの薄いラッパ(`cloudflare:workers` を持つため、テストでは import できない)。
  *
- * 呼び出す入口は、手動の `POST /api/analyses/run`(#180。定時の起動は #166)。この DO は `worker.ts` から export される(wrangler が binding のクラスを要求する)。
+ * 呼び出す入口は、手動の `POST /api/analyses/run`(#180)と、cron の `scheduled`(#206。`requestPlan`)。この DO は `worker.ts` から export される(wrangler が binding のクラスを要求する)。
  * **朝のタスクは D1・R2 に触れない**(朝の prior は DO のストレージにだけ置く)。発走前の分析(`pre_race`。#178)だけが、D1(設定の読み出し・分析の要約)と
  * R2(詳細)を使う。
  *
@@ -18,7 +18,7 @@ import { createDiscordNotifier, webhookStatus } from "./notify-send";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
-import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type RaceListResult, type RaceListVenue, type RequestPlanResult, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type ScheduleInput, type ScheduleResult } from "./race-day-core";
 import { loadSettings } from "./settings";
 
 /** netkeiba への取得の出口(NetkeibaGate)の固定名。handler.ts の GATE_NAME と同じ(全取得をこの1つのインスタンスに通す)。 */
@@ -87,11 +87,16 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
   }
 
   /**
-   * 朝の計画を依頼する(RPC。Issue #203。cron〈#206〉から呼ぶ入口。依頼だけをして戻る。2回目以降は `already-planned`)。
-   * ★まだ本番から呼ぶ入口は無い(`scheduled` ハンドラ・cron は #206)。
+   * 朝の計画を依頼する(RPC。Issue #203。依頼だけをして戻る。2回目以降は `already-planned`で、アラームだけ状態から張り直す〈Issue #206 G-E2〉)。
+   * 呼ぶのは cron の `scheduled`(scheduled.ts。Issue #206)だけ。
    */
   requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult> {
     return this.core.requestPlan(input);
+  }
+
+  /** 朝の計画の読み取り(RPC。Issue #206 `GET /api/plan` が使う。状態は変えない)。 */
+  getPlanProgress(): PlanProgress {
+    return this.core.getPlanProgress();
   }
 
   /** 自動実行の各レースの結果(RPC。Issue #204。#205 の通知が状態から作るための読み取り。状態は変えない)。 */
