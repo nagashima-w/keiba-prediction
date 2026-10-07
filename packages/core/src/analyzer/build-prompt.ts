@@ -142,7 +142,7 @@
  * 出力に強調材料(highlights)と懸念事項(concerns)を足した(各最大3項目・1項目は全角30字以内の短い句・
  * 該当が無ければ空配列)。reason(総合の根拠の一文)は残し、言い換えはさせない。単勝オッズ・人気・参考EVは
  * この2つの項目の材料にさせない(既存のアンカリング禁止と揃える。印の判断材料としての既存指示は不変)。
- * 出力スキーマの例は mark の後ろにこの2つを置く。解析側は parse-response.ts の coerceItemList
+ * 出力スキーマの例は mark の後ろにこの2つを置く(項目は reason の例と同じ "..." にする。具体的な語を例に書くと、LLM がそのまま返して画面に出てしまうため)。解析側は parse-response.ts の coerceItemList
  * (欠落・形違いは `[]`。分析は止めない)。出力トークンが増える(馬1頭あたり reason に加えて最大6句)ので、
  * 費用・所要時間・切り詰めはクラウド版の usage 記録(#197 段2)で確かめる。この対照(default)の
  * PROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
@@ -874,9 +874,9 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push(
     '{"horses": [' +
       '{"number": 1, "place_prob": 0.42, "reason": "...", "mark": "◎", ' +
-      '"highlights": ["強み1", "強み2"], "concerns": ["懸念1"]}, ' +
+      '"highlights": ["...", "..."], "concerns": ["..."]}, ' +
       '{"number": 2, "place_prob": 0.30, "reason": "...", "mark": null, ' +
-      '"highlights": [], "concerns": ["懸念1", "懸念2"]}' +
+      '"highlights": [], "concerns": ["...", "..."]}' +
       "]}",
   );
 
