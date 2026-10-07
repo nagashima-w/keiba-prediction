@@ -77,6 +77,14 @@ describe("wrangler.toml", () => {
     expect(((code + "\ngate.fetchRaw(x);").match(/\.fetchRaw\(/g) ?? []).length).toBe(2);
   });
 
+  it("Issue #184: 静的アセット([assets])を使わない。クライアントの JS は Worker が認証の後ろで配る(run_worker_first を付け忘れると認証を素通りする配信の経路ができるため、そもそも置かない)", () => {
+    expect(tomlCode).not.toMatch(/^\[assets\]/m);
+    expect(tomlCode).not.toMatch(/^\s*run_worker_first\s*=/m);
+    expect(tomlCode).not.toMatch(/^\s*assets\s*=/m);
+    // 検出の確認(空振りでない): 書かれていれば拾える形
+    expect('[assets]\ndirectory = "./public"\n').toMatch(/^\[assets\]/m);
+  });
+
   it("設定値(チーム名・AUD・メール)を [vars] に置かず、secrets.required も使わない(未設定は Worker が 403 で受ける)", () => {
     expect(tomlCode).not.toMatch(/^\[vars\]/m);
     expect(tomlCode).not.toMatch(/ACCESS_(TEAM_NAME|AUD|ALLOWED_EMAIL)/);

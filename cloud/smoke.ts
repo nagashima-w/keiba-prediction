@@ -45,7 +45,7 @@ async function req(port: number, method: string, path: string, headers: Record<s
     headers,
     signal: AbortSignal.timeout(30_000),
   });
-  return { status: response.status, text: await response.text() };
+  return { status: response.status, text: await response.text(), headers: response.headers };
 }
 
 function parseJson(text: string): Record<string, unknown> {
@@ -132,7 +132,7 @@ function vars(email: string, aud: string): string[] {
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["POST", "/api/analyses/run"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["POST", "/api/analyses/run"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -159,6 +159,18 @@ async function main(): Promise<void> {
       const page = await req(port, "GET", "/");
       check("B: GET / が 200 でメールを表示する", page.status === 200 && page.text.includes(EMAIL), `${page.status}`);
       check("B: GET / に viewport(スマホ幅)がある", page.text.includes('name="viewport"'));
+      // Issue #184: スマホ画面。スクリプトは認証の後ろの /app.js だけ(インラインなし)。CSP は script-src 'self'・connect-src 'self'。
+      const csp = page.headers.get("content-security-policy") ?? "";
+      check("B: GET / の CSP が script-src 'self'・connect-src 'self'・default-src 'none'", csp.includes("script-src 'self'") && csp.includes("connect-src 'self'") && csp.includes("default-src 'none'") && !csp.includes("unsafe-eval"), csp);
+      const scripts = [...page.text.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+      check("B: GET / のスクリプトは <script src=\"/app.js\" defer> の 1 本だけ(インラインなし)", scripts.length === 1 && scripts[0]![1]!.includes('src="/app.js"') && scripts[0]![2] === "", `${scripts.length}`);
+      const appJs = await req(port, "GET", "/app.js");
+      check("B: GET /app.js が 200・text/javascript・no-store で、IIFE のバンドルを返す", appJs.status === 200 && (appJs.headers.get("content-type") ?? "").startsWith("text/javascript") && appJs.headers.get("cache-control") === "no-store" && appJs.text.length > 1000 && appJs.text.includes("/api/races"), `${appJs.status} ${appJs.headers.get("content-type")} ${appJs.text.length}`);
+      const tamperedJs = await req(port, "GET", "/app.js", { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" });
+      check("B: 不正な JWT が付いていれば GET /app.js も 403(認証の素通りがない)", tamperedJs.status === 403 && tamperedJs.text === "forbidden", `${tamperedJs.status}`);
+      check("B: HEAD /app.js は本文なしの 200。POST /app.js は 405", (await req(port, "HEAD", "/app.js")).status === 200 && (await req(port, "POST", "/app.js")).status === 405);
+      const check404 = await req(port, "GET", "/check");
+      check("B: GET /check は 200 で確認フォーム(旧 / の内容)を返す", check404.status === 200 && check404.text.includes('<form method="get" action="/api/netkeiba/check">'), `${check404.status}`);
       const health = await req(port, "GET", "/api/health");
       check("B: GET /api/health が 200 で DO の SQLite と D1(migration 適用済みの表・列)が動いている", health.status === 200 && health.text === JSON.stringify({ ok: true, durableObject: { sqlite: true }, d1: { ok: true } }), `${health.status} ${health.text.slice(0, 120)}`);
       // Issue #175: 読み取り専用の一覧(D1 だけ)。migration 適用済みの空の D1 では、空の配列が返る。
@@ -194,8 +206,8 @@ async function main(): Promise<void> {
     await withWorker(BASE_PORT + 4, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 4;
       const label = "E(偽ソケット)";
-      const page = await req(port, "GET", "/");
-      check(`${label}: GET / に確認フォーム(GET で /api/netkeiba/check へ。初期値 202603020211)がある`, page.status === 200 && page.text.includes('<form method="get" action="/api/netkeiba/check">') && page.text.includes('value="202603020211"'), `${page.status}`);
+      const page = await req(port, "GET", "/check");
+      check(`${label}: GET /check に確認フォーム(GET で /api/netkeiba/check へ。初期値 202603020211)がある`, page.status === 200 && page.text.includes('<form method="get" action="/api/netkeiba/check">') && page.text.includes('value="202603020211"'), `${page.status}`);
 
       // Issue #176: runAnalysis(クラウド版の入口)が workerd で、フィクスチャから最後まで通り、exe 側の golden と同じ出力になる。
       const analysis = await req(port, "GET", "/smoke/analysis");

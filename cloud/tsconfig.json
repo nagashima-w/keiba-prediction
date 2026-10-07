@@ -21,5 +21,5 @@
       "@keiba/core/*": ["../packages/core/src/*"]
     }
   },
-  "include": ["src", "test", "smoke.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts"]
+  "include": ["src", "test", "smoke.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts", "build-client.ts"]
 }

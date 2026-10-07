@@ -4,7 +4,8 @@
   "type": "module",
   "//": "Issue #161(#21-C)のクラウド版(Cloudflare Worker)の土台。pnpm workspace の外(ルートの pnpm-workspace.yaml は packages/* のみ)に置き、`pnpm install --ignore-workspace` で独立にインストールする。既存 CI(windows-latest の pnpm install --frozen-lockfile)に wrangler / workerd の巨大な依存(約 190MB)を持ち込まないため。型検査・テスト・デプロイの確認は .github/workflows/deploy-cloud.yml が行う。",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+    "build:client": "tsx build-client.ts",
     "test": "vitest run",
     "deploy:dry": "wrangler deploy --dry-run --outdir dist-dry",
     "smoke": "tsx smoke.ts"
@@ -17,12 +18,14 @@
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261004.1",
     "@types/node": "^22.0.0",
+    "esbuild": "0.28.2",
     "tsx": "^4.20.6",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9",
     "wrangler": "4.147.0"
   },
   "//deps": {
+    "esbuild": "スマホ画面(Issue #184)のクライアントの TS を、ブラウザ向けの 1 ファイル(IIFE)にバンドルし、出力を固定する(build-client.ts。生成物 src/client-bundle.generated.ts はコミットし、test/client-bundle.test.ts が再ビルドとの一致を固定する)。wrangler・tsx・vite が推移的に引く 0.28.1/0.28.2 のうち、tsx・vite と同じ 0.28.2 を直接の依存にして exact で固定(出力の決定性のため)",
     "jose": "Cloudflare Access の JWT(RS256)の署名・iss・aud・exp の検証に使う。署名検証を自前で書かず、検証済みの実装(Cloudflare 公式の例も同じ)に任せるため。依存ゼロで WebCrypto だけで動く。バージョン固定。",
     "wrangler": "デプロイ・ローカル検証(wrangler dev)。バージョン固定(スパイク #159 で確認した版)",
     "@cloudflare/workers-types": "Worker / Durable Object の型検査(ctx.access の型を含む)。バージョン固定",

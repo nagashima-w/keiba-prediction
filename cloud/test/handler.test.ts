@@ -5,7 +5,8 @@ import type { GateResult, GateStatus } from "../src/gate-core";
 import { D1_HEALTH_SQL } from "../src/d1-health";
 import { handle, type Env, type GateNamespaceLike, type GateStubLike } from "../src/handler";
 import { validateRaceId } from "../src/netkeiba-check";
-import { CHECK_DEFAULT_RACE_ID, renderPage } from "../src/page";
+import { CLIENT_JS } from "../src/client-bundle.generated";
+import { CHECK_DEFAULT_RACE_ID, renderCheckPage, renderPage } from "../src/page";
 import { AUD, EMAIL, GOOD_ENV, localKeys, makeKey, NOW, signToken, TEAM } from "./helpers";
 
 const EMPTY_STATUS: GateStatus = { consecutiveRefusals: 0, blockedUntil: null, lastStartAt: null, pending: 0 };
@@ -316,15 +317,17 @@ describe("ルート(認証後)", () => {
   });
 });
 
-describe("renderPage(メールの HTML エスケープ)", () => {
-  it("特殊文字をエスケープする", () => {
-    const html = renderPage(`"><script>alert(1)</script>&'@example.com`);
-    expect(html).not.toContain("<script>");
-    expect(html).toContain("&lt;script&gt;");
-    expect(html).toContain("&amp;");
-    expect(html).toContain("&quot;");
-    expect(html).toContain("&#39;");
-  });
+describe("renderPage・renderCheckPage(メールの HTML エスケープ)", () => {
+  for (const [name, render] of [["renderPage", renderPage], ["renderCheckPage", renderCheckPage]] as const) {
+    it(`${name}: 特殊文字をエスケープする(メールの中の <script> が要素にならない)`, () => {
+      const html = render(`"><script>alert(1)</script>&'@example.com`);
+      expect(html).not.toContain("<script>");
+      expect(html).toContain("&lt;script&gt;");
+      expect(html).toContain("&amp;");
+      expect(html).toContain("&quot;");
+      expect(html).toContain("&#39;");
+    });
+  }
 });
 
 describe("ログ(経路名と理由コードだけ。値は出さない)", () => {
@@ -551,10 +554,10 @@ describe("GET /api/netkeiba/check(Issue #162 段階2b。AC-14)", () => {
   });
 });
 
-describe("GET / の確認フォーム(Issue #162 段階2b)", () => {
+describe("GET /check の確認フォーム(Issue #162 段階2b。Issue #184 で `/` から `/check` へ移した)", () => {
   it("race_id を入れて GET で /api/netkeiba/check へ送るフォームがあり、初期値は 202603020211", async () => {
     const { deps, token } = await setup();
-    const response = await handle(req("/", { token }), envOf(), {}, deps);
+    const response = await handle(req("/check", { token }), envOf(), {}, deps);
     const html = await response.text();
     expect(html).toContain('<form method="get" action="/api/netkeiba/check">');
     expect(html).toContain('name="race_id"');
@@ -567,15 +570,15 @@ describe("GET / の確認フォーム(Issue #162 段階2b)", () => {
     expect(validateRaceId(CHECK_DEFAULT_RACE_ID)).toMatchObject({ ok: true, kind: "central" });
   });
 
-  it("CSP に form-action 'self' が加わる(ほかの指令は変えない)", async () => {
+  it("CSP は旧 `/` のまま(form-action 'self' を持ち、script-src・connect-src は無い)", async () => {
     const { deps, token } = await setup();
-    const csp = (await handle(req("/", { token }), envOf(), {}, deps)).headers.get("content-security-policy");
+    const csp = (await handle(req("/check", { token }), envOf(), {}, deps)).headers.get("content-security-policy");
     expect(csp).toBe("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
   });
 
   it("確認の使い方(初回は実在の ID で。実在しない ID はブレーカーを開きうる)の注意書きがある", async () => {
     const { deps, token } = await setup();
-    const html = await (await handle(req("/", { token }), envOf(), {}, deps)).text();
+    const html = await (await handle(req("/check", { token }), envOf(), {}, deps)).text();
     expect(html).toContain("実在");
     expect(html).toContain("30 分");
   });
@@ -728,5 +731,115 @@ describe("GET /api/analyses(Issue #175)", () => {
       expect((await handle(req(path, { token }), envOf({ DB: fake.db }), {}, deps)).status, path).toBe(404);
     }
     expect(fake.batches).toEqual([]);
+  });
+});
+
+/**
+ * Issue #184(#165-b): スマホ画面の配信。`GET /`(ページ)・`GET /app.js`(クライアントのバンドル)・`GET /check`(旧 `/` の確認フォーム)。
+ * すべて Access の関門の後ろ(Worker の中で配る。`[assets]` は使わない=認証を素通りする配信の経路を作らない)。
+ * CSP: インラインスクリプト禁止(`script-src 'self'`)・fetch は同じオリジンだけ(`connect-src 'self'`)・`default-src 'none'`。
+ */
+describe("GET /(新しいページ。Issue #184)", () => {
+  const APP_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+  it("CSP は script-src 'self'・connect-src 'self'・default-src 'none'(指令の完全一致)。script に unsafe-inline・unsafe-eval が無い", async () => {
+    const { deps, token } = await setup();
+    const csp = (await handle(req("/", { token }), envOf(), {}, deps)).headers.get("content-security-policy");
+    expect(csp).toBe(APP_CSP);
+    const directive = (name: string): string => csp!.split(";").map((d) => d.trim()).find((d) => d.startsWith(`${name} `)) ?? "";
+    expect(directive("script-src")).toBe("script-src 'self'");
+    expect(directive("connect-src")).toBe("connect-src 'self'");
+    expect(csp).not.toContain("unsafe-eval");
+  });
+
+  it("スクリプトは <script src=\"/app.js\" defer> の 1 本だけで、インラインのスクリプトが無い(すべての script 要素が src を持ち、本文が空)", async () => {
+    const { deps, token } = await setup();
+    const html = await (await handle(req("/", { token }), envOf(), {}, deps)).text();
+    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
+    expect(scripts).toHaveLength(1); // 前提: script 要素が実際にある(空振りでない)
+    expect(scripts[0]![1]).toContain('src="/app.js"');
+    expect(scripts[0]![1]).toContain("defer");
+    expect(scripts[0]![2]).toBe("");
+    // on* 属性・javascript: の URL も無い
+    expect(html).not.toMatch(/\son[a-z]+\s*=/i);
+    expect(html).not.toMatch(/javascript:/i);
+  });
+
+  it("描画先(#app)・スマホ幅の viewport・ログイン中のメール(エスケープ済み)・noscript の案内がある。旧ページの確認フォームは無い", async () => {
+    const { deps, token } = await setup();
+    const html = await (await handle(req("/", { token }), envOf(), {}, deps)).text();
+    expect(html).toContain('id="app"');
+    expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+    expect(html).toContain(EMAIL);
+    expect(html).toContain("<noscript>");
+    expect(html).not.toContain("/api/netkeiba/check");
+  });
+
+  it("認証なし・壊れた JWT は 403(本文は forbidden だけ)", async () => {
+    const { deps } = await setup();
+    for (const path of ["/", "/app.js", "/check"]) {
+      const none = await handle(req(path), envOf(), {}, deps);
+      expect(none.status, path).toBe(403);
+      expect(await none.text()).toBe("forbidden");
+      const bad = await handle(req(path, { token: "aaa.bbb.ccc" }), envOf(), {}, deps);
+      expect(bad.status, path).toBe(403);
+      expect(await bad.text()).toBe("forbidden");
+    }
+  });
+});
+
+describe("GET /app.js(Issue #184)", () => {
+  it("認証後は、生成物(CLIENT_JS)をそのまま返す。text/javascript・no-store・nosniff", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/app.js", { token }), envOf(), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    const body = await response.text();
+    expect(CLIENT_JS.length).toBeGreaterThan(1000); // 前提: 生成物が空でない
+    expect(body).toBe(CLIENT_JS);
+  });
+
+  it("HEAD は本文なしの 200。POST は 405(Allow: GET, HEAD)", async () => {
+    const { deps, token } = await setup();
+    const head = await handle(req("/app.js", { token, method: "HEAD" }), envOf(), {}, deps);
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    const post = await handle(req("/app.js", { token, method: "POST" }), envOf(), {}, deps);
+    expect(post.status).toBe(405);
+    expect(post.headers.get("allow")).toBe("GET, HEAD");
+  });
+
+  it("末尾のスラッシュ・別の名前のスクリプトは 404(配るのはこの 1 本だけ)", async () => {
+    const { deps, token } = await setup();
+    for (const path of ["/app.js/", "/app.js.map", "/main.js", "/client-bundle.generated.js"]) {
+      expect((await handle(req(path, { token }), envOf(), {}, deps)).status, path).toBe(404);
+    }
+  });
+
+  it("認証に失敗したときは、D1・DO に触れない(関門の前に何もしない)", async () => {
+    const prepared: string[] = [];
+    const { deps } = await setup();
+    const response = await handle(req("/app.js"), envOf({ DB: d1(async () => null, prepared) }), {}, deps);
+    expect(response.status).toBe(403);
+    expect(prepared).toEqual([]);
+  });
+});
+
+describe("GET /check(旧 `/` の確認フォーム。Issue #184 で移した)", () => {
+  it("認証後は 200 の HTML(メール・確認フォーム)。旧 CSP のまま、スクリプトは無い。HEAD は本文なし", async () => {
+    const { deps, token } = await setup();
+    const response = await handle(req("/check", { token }), envOf(), {}, deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).not.toContain("script-src");
+    const html = await response.text();
+    expect(html).toContain(EMAIL);
+    expect(html).toContain('<form method="get" action="/api/netkeiba/check">');
+    expect(html).not.toMatch(/<script\b/i);
+    const head = await handle(req("/check", { token, method: "HEAD" }), envOf(), {}, deps);
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
   });
 });

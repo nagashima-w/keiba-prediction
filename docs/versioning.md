@@ -2599,6 +2599,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない)
 
+## 次の正式版が 1.19.16 である根拠(Issue #184〈#165-b〉での変更)
+
+**patch**(クラウド版のスマホ画面〈#165-b〉の**配信の基盤と一覧の画面**。**変更は `cloud/`・`scripts/`・docs だけ**。exe のアプリコード・`@keiba/core` は無変更)。
+
+### 変更内容
+
+- cloud: `GET /` を新しいページ(スクリプトは `<script src="/app.js" defer>` の 1 本だけ。CSP は `script-src 'self'`・`connect-src 'self'`)にし、`GET /app.js`(クライアントのバンドル。認証の後ろで Worker が文字列として配る。静的アセット機能は使わない)と `GET /check`(旧 `/` の確認フォーム)を追加。クライアント(`cloud/client/`)は一覧の画面だけ(日付・中央/地方・場ごとのレース・板のバッジ)
+- ビルド: esbuild(`0.28.2` を exact で。クライアントの TS を 1 ファイルにバンドルし出力を固定する)で `cloud/build-client.ts` が生成物 `cloud/src/client-bundle.generated.ts` を作る(コミット。ドリフトのテストあり)
+- テスト: `cloud/test/client-*.test.ts`・`handler.test.ts` の調整・scripts の `cloud-config-guard.test.ts`(`[assets]` を置かないガード)、smoke(workerd で `/app.js`・CSP・`/check`)、docs
+
+### patch である根拠
+
+- exe に入る成果物・分析結果の数値・画面・保存データは変わらない(exe のアプリコードは無変更)
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない)
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

@@ -12,7 +12,8 @@ import { authenticate, type AccessContextLike } from "./authenticate";
 import type { GateResult, GateStatus } from "./gate-core";
 import { runShutubaCheck, validateRaceId } from "./netkeiba-check";
 import { buildAnalysisView } from "./analysis-view";
-import { renderPage } from "./page";
+import { CLIENT_JS } from "./client-bundle.generated";
+import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
 import type { Board, MorningPrior, RaceListResult, RaceListVenue, ScheduleInput, ScheduleResult } from "./race-day-core";
 import { toRaceListRows } from "./race-list";
@@ -124,13 +125,27 @@ export async function handle(
   const { pathname } = new URL(request.url);
 
   if (pathname === "/") {
+    // スマホ画面(Issue #184)。スクリプトは /app.js の 1 本だけ(インラインなし)。
     return new Response(method === "HEAD" ? null : renderPage(auth.email), {
       status: 200,
-      headers: {
-        ...SECURITY_HEADERS,
-        "content-type": "text/html; charset=utf-8",
-        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-      },
+      headers: { ...SECURITY_HEADERS, "content-type": "text/html; charset=utf-8", "content-security-policy": APP_CSP },
+    });
+  }
+
+  if (pathname === "/check") {
+    // 旧 `/` の確認フォーム(#162 の本番実機確認用。Issue #184 で移した)。
+    return new Response(method === "HEAD" ? null : renderCheckPage(auth.email), {
+      status: 200,
+      headers: { ...SECURITY_HEADERS, "content-type": "text/html; charset=utf-8", "content-security-policy": CHECK_CSP },
+    });
+  }
+
+  if (pathname === "/app.js") {
+    // クライアントのバンドル(cloud/client/ を esbuild で 1 ファイルにした生成物。Issue #184)。認証の関門(上)の後ろで、Worker の中から配る
+    // (静的アセット機能は使わない。run_worker_first の付け忘れで認証を素通りする経路を作らない)。
+    return new Response(method === "HEAD" ? null : CLIENT_JS, {
+      status: 200,
+      headers: { ...SECURITY_HEADERS, "content-type": "text/javascript; charset=utf-8" },
     });
   }
 

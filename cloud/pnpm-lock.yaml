@@ -24,6 +24,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.5
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       tsx:
         specifier: ^4.20.6
         version: 4.23.15

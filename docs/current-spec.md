@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.15)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.16)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.15`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.16`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -946,7 +946,7 @@ Cloudflare Worker による**クラウド版**(`cloud/`。pnpm workspace の外�
 
 ### 土台(#161)
 Cloudflare Access(Google ログイン)の JWT を Worker 自身も検証する認証の関門(許可したメール1件以外・設定が欠けているときは理由を含まない 403)、
-ログイン中のメールを表示する `GET /`、`GET /api/health`、承認印付き push のときだけ本番に出す `.github/workflows/deploy-cloud.yml`。
+スマホ画面の `GET /`・`GET /app.js`(#184)、確認フォームの `GET /check`、`GET /api/health`、承認印付き push のときだけ本番に出す `.github/workflows/deploy-cloud.yml`。
 
 ### netkeiba の取得の現状(#162 段階2。v1.19.5)
 **netkeiba への全取得は、Durable Object `NetkeibaGate`(SQLite バックエンド)の単一インスタンスを経由する。** Workers の `fetch` は CloudFront から
@@ -963,7 +963,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **core の取得処理への接続**(`cloud/src/gate-fetch.ts`): ゲートの `fetchRaw`(RPC)を core の `HttpClient` の fetch 注入口へ繋ぐ(`createGateHttpClient`: 間隔 0・再試行 0。間隔制御はゲートだけ)。
   core は `cloud/` から相対 import で取り込み、依存(cheerio・iconv-lite)は `wrangler.toml` の `[alias]`・`tsconfig.json` の `paths` で `cloud/node_modules` へ向ける。
 - **確認用エンドポイント**: `GET /api/netkeiba/check?race_id=...`(Access の関門のあと。GET のみ)。race_id を core の検証(中央 01〜10・地方 30〜64・帯広 65 は対象外)で確かめ、
-  出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/` にフォーム(初期値 202603020211)がある。
+  出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/check` にフォーム(Issue #184 で `/` から移した。初期値 202603020211)がある。
   **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
 - **未実装**: 保存の**呼び出し元**(#164。分析履歴のストア本体〈`D1AnalysisStore`〉は #175 で実装済み)・分析の実行(#164)・R2 の操作回数の安全柵(#173)・取得キャッシュ(#170)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
 
@@ -1179,6 +1179,17 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - **`/api/netkeiba/check` にも `Sec-Fetch-Site` の検査を入れるか**は未決(【記録】。一覧と同じく GET で netkeiba に出る)。
 - **検査**: `race-day-list.test.ts`(一覧の取得・キャッシュ・アラームの共有・失敗・空・同時取得。本物の SQLite)・`handler-races.test.ts`・`analysis-view.test.ts`(漏洩・書き込み側との drift)・`handler-analysis-detail.test.ts`(本物のローカルの D1・R2。柵・R2 欠落・配分の失敗)、smoke(workerd で、一覧と保存済みの分析1件)。
 - 本番での動作確認は #174 の R2 権限の追加後。
+
+### スマホ画面(#184〈#165-b〉。v1.19.16。配信の基盤と一覧の画面)
+`GET /` がスマホ向けの画面(**exe のアプリコードは無変更**)。範囲は「配信の基盤と一覧の画面」で、レース画面・分析の起動・ポーリング・結果の画面は #185(ユーザー判断 2026-10-06: 最初の範囲は「分析の起動と結果の閲覧だけ」を、#184・#185 に分けた)。
+
+- **配信**: `GET /` は HTML(`<script src="/app.js" defer>` の 1 本だけ。インラインスクリプトなし・描画先 `#app`・ログイン中のメール)。CSP は `default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`。`GET /app.js` は esbuild で作った 1 ファイル(`text/javascript`・`no-store`)を、**認証の関門の後ろで Worker が文字列として返す**(静的アセットは使わない。wrangler 4.147.0 の実測: `[assets]` の `run_worker_first = false` では未認証の要求にもファイルが 200 で返り、`true` では Worker〈認証〉に届く。`run_worker_first` の付け忘れで認証を素通りする経路を作らないため、そもそも使わず、`cloud-config-guard.test.ts` が `[assets]` を置かないことを固定している)。`GET /check` は旧 `/` の確認フォーム(内容・CSP とも旧 `/` のまま)。
+- **ビルド**: `cloud/client/`(TS)→ `cloud/build-client.ts`(esbuild `0.28.2`。IIFE・browser・es2020・**minify**〈外すと出力にパスコメントが入り cwd・OS で変わる〉)→ `cloud/src/client-bundle.generated.ts`(**コミットする生成物**。typecheck・test・deploy:dry・smoke・CI が同じものを使う。ドリフトは `test/client-bundle.test.ts`)。クライアントの型検査は `tsconfig.client.json`(DOM の型)。クライアントは `client/` の中だけを import する(core・exe の renderer の純関数は、#185 で必要になったときに足す)。
+- **画面(一覧)**: 開催日(`<input type="date">`。既定は今日〈JST〉)・中央/地方・場ごとのレース(R・レース名・コース距離頭数・グレード)・朝の準備と発走前の状態バッジ(板の `(race_id, mode)` ごと。未実行・待ち・取得済み・完了・失敗)・「更新」。URL のハッシュに `#date=YYYYMMDD&venue=central|nar[&race=<12桁>][&analysis=<id>]` を持ち(値は検証し、不正な項目は既定に落とす。`race` は有効な `date` があるときだけ)、戻る・進む・再読み込みが効く。`race`・`analysis` は今回は「準備中」の表示。
+- **取得の回数**: 一覧(`GET /api/races`。netkeiba に出うる)は (開催日, 区分) ごとに 1 回、板(`GET /api/analyses/status`。`race_id` なし。DO の読み取りだけ)は開催日ごとに 1 回で、画面の往復・区分の切り替えで取り直さない。失敗は自動で再試行せず、「更新」だけが取り直す(取得中は押せず、同時に同じものを 2 本取らない)。`/api/analyses/{id}`・`POST` は呼ばない(#185)。
+- **失敗の表示**: サーバの文面は出さず、種類ごとの固定の文言(403・通信失敗〈Access の期限切れの可能性〉・400・netkeiba の `blocked`/`busy`/`failed`・サーバのエラー・想定外の応答)。応答の形が想定と違えば、一部の行だけを黙って表示せず「想定外の応答」にする。
+- **#185 用に決めたこと(記録)**: 印・AI補正後・分析モデルは、`mark`・`model` が non-null のときだけ出す(cloud の発走前の分析は LLM なしなので、印は #179 まで常に空・「AI補正後」は 3着内率と同値・モデルは null)/ 配分の表示は exe の `buildAllocationProposalView` を流用し、そのために `GET /api/analyses/{id}` の配分に `fallbackReason`・`betUnit` を足す/ 発走前の完了後は「結果を見る」ボタンで利用者が開く(詳細の読み出しは D1 の書き込み1行を伴うため、自動で呼ばない)/ レース画面の表示時に `GET /api/analyses?race_id=&kaisai_date=` を1回だけ呼び、過去の分析へのリンクにする/ pre_race の再実行は新しい分析として保存される旨をボタンの文言に出す/ **配分は、資金・1レース上限を D1 の `cloud_settings` に入れるまで常に「見送り」**(編集画面は範囲外)。
+- **検査**: `test/client-route.test.ts`・`client-date.test.ts`・`client-api.test.ts`・`client-api-contract.test.ts`(実際の `handle()` の応答をクライアントのパーサに通す)・`client-list.test.ts`・`client-app.test.ts`・`client-dom.test.ts`(偽の document。XSS・要素/属性の許可リスト)・`client-bundle.test.ts`(ドリフト・決定性・静的ガード・生成物の実行スモーク)、`handler.test.ts`、smoke。**実機(スマホ)でのレイアウト・タップは自動検査できない**(デプロイ後にユーザーが確認する)。
 
 ## 主な当初仕様との差異(記録)
 
