@@ -13,6 +13,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { createAnalysisSink } from "./analysis-sink";
+import { createCloudLlm } from "./llm-sender";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
@@ -32,6 +33,11 @@ export const R2_PUT_TIMEOUT_MS = 15_000;
 export interface RaceDayEnv {
   DB: AnalysisDb & Pick<D1Database, "prepare">;
   ANALYSIS_DETAIL: AnalysisBucket;
+  /**
+   * 発走前の分析の LLM の API キー(Worker の secret。**ユーザーがダッシュボードまたは wrangler で登録する**。値はリポジトリ・チャットに書かない)。
+   * 未登録・空白だけなら、LLM を使わず統計のみで保存し、理由を残す(Issue #194)。
+   */
+  ANTHROPIC_API_KEY?: string;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
     get(id: any): GateLike & { status(): Promise<GateStatus> };
@@ -52,6 +58,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       onWarn: (message) => console.warn(message),
       // 発走前の分析の保存先(D1 の要約 + R2 の詳細。R2 の put には上限時間を掛ける)と、設定(D1 の1行)。
       sink: createAnalysisSink(new D1AnalysisStore({ db: env.DB, bucket: withPutTimeout(env.ANALYSIS_DETAIL, R2_PUT_TIMEOUT_MS) })),
+      // 発走前の分析の LLM(Issue #194)。キーが未登録なら undefined(LLM なしで保存し、理由を残す)。朝のタスクでは使わない。
+      llm: createCloudLlm(env.ANTHROPIC_API_KEY),
       loadSettings: async () => {
         const loaded = await loadSettings(env.DB);
         if (loaded.source === "invalid") {

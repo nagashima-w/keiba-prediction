@@ -1,5 +1,5 @@
 /**
- * クラウド版の LLM の呼び出しの土台(Issue #193〈#179-a〉)。**挙動は変えない**: 本番の入口(`worker.ts`)・`RaceDay` からは、まだ呼ばれない(呼び出し元は #194〈#179-b〉)。
+ * クラウド版の LLM の呼び出しの土台(Issue #193〈#179-a〉。#194〈#179-b〉で `RaceDay`〈`race-day-do.ts`〉が `createCloudLlm` を使う)。
  * このモジュールがあるのは、(1) #194 が使う設定値(再試行 0・上限時間あり)を、1か所に決めておくため、
  * (2) cloud/src から SDK(`@anthropic-ai/sdk`)までの import の閉包を実際に辿れる状態にして、`test/import-guard.test.ts`・型検査(CI の配置)・
  * バンドルのガードが SDK の経路を本当に検査できるようにするため。
@@ -21,22 +21,50 @@ export const LLM_LIST_TIMEOUT_MS = 30_000;
 /** SDK の内部再試行の回数(cloud はしない)。 */
 export const LLM_SDK_MAX_RETRIES = 0;
 
-/** メッセージ送信の関数を作る。`fetchImpl` はテスト用の差し替え(省略時は Workers のグローバル fetch)。 */
-export function createCloudLlmSender(apiKey: string, fetchImpl?: typeof fetch): MessageSender {
+/** テスト用の差し替え口(省略時は本番の値・Workers のグローバル fetch)。 */
+export interface CloudLlmOptions {
+  /** fetch の差し替え(実 API に出ずに検証する)。 */
+  readonly fetch?: typeof fetch;
+  /**
+   * 1リクエストの上限時間(ミリ秒)の差し替え。省略時は本番の値(sender は {@link LLM_REQUEST_TIMEOUT_MS}、モデル一覧は {@link LLM_LIST_TIMEOUT_MS})。
+   * 上限時間が SDK に実際に渡っていること(応答しない fetch が、この時間で打ち切られること)をテストで固定するための口(Issue #194)。
+   */
+  readonly timeoutMs?: number;
+}
+
+/** LLM の呼び出しの依存(`RaceDay` に渡す)。`lister` が無ければ、モデルの自動選択をせず、固定モデルで送る。 */
+export interface CloudLlm {
+  readonly sender: MessageSender;
+  readonly lister?: ModelLister;
+}
+
+/** メッセージ送信の関数を作る。 */
+export function createCloudLlmSender(apiKey: string, options: CloudLlmOptions = {}): MessageSender {
   return createSdkMessageSender({
     apiKey,
-    timeout: LLM_REQUEST_TIMEOUT_MS,
+    timeout: options.timeoutMs ?? LLM_REQUEST_TIMEOUT_MS,
     maxRetries: LLM_SDK_MAX_RETRIES,
-    ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
 }
 
-/** モデル一覧の取得関数を作る。`fetchImpl` はテスト用の差し替え。 */
-export function createCloudModelLister(apiKey: string, fetchImpl?: typeof fetch): ModelLister {
+/** モデル一覧の取得関数を作る。 */
+export function createCloudModelLister(apiKey: string, options: CloudLlmOptions = {}): ModelLister {
   return createSdkModelLister({
     apiKey,
-    timeout: LLM_LIST_TIMEOUT_MS,
+    timeout: options.timeoutMs ?? LLM_LIST_TIMEOUT_MS,
     maxRetries: LLM_SDK_MAX_RETRIES,
-    ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
+}
+
+/**
+ * API キー(Worker の secret `ANTHROPIC_API_KEY`)から、LLM の依存を作る。**キーが無い・空白だけなら undefined**(= LLM を使わない。呼び出し側は、理由を固定文言で残して prior で保存する)。
+ * キーはここで sender・lister に渡すだけで、保持も出力もしない。
+ */
+export function createCloudLlm(apiKey: string | undefined, options: CloudLlmOptions = {}): CloudLlm | undefined {
+  if (typeof apiKey !== "string" || apiKey.trim() === "") {
+    return undefined;
+  }
+  return { sender: createCloudLlmSender(apiKey, options), lister: createCloudModelLister(apiKey, options) };
 }

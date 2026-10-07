@@ -124,7 +124,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 | `ACCESS_TEAM_NAME` | Zero Trust のチーム名(`<チーム名>.cloudflareaccess.com` の左側。小文字・数字・ハイフンのみ) |
 | `ACCESS_AUD` | Access アプリケーションの AUD タグ |
 | `ACCESS_ALLOWED_EMAIL` | 許可するメールアドレス(1件) |
-| `ANTHROPIC_API_KEY` | (#164 で使う。今は登録しない) |
+| `ANTHROPIC_API_KEY` | 発走前の分析の LLM の API キー(Issue #194〈#179-b〉)。**登録は任意**: 未登録なら、LLM を使わず統計のみで保存し、理由「LLM の API キーが未登録…」を残す(分析は止まらない)。キーの値は**ユーザーが自分で**登録する(ダッシュボード、または `wrangler secret put ANTHROPIC_API_KEY` の対話入力)。リポジトリ・チャットには貼らない。費用の上限は Claude Console のワークスペースの spend limit に任せる(キーが、その上限を設定したワークスペースのものか確かめる) |
 | `DISCORD_WEBHOOK_URL` | (#166 で使う。今は登録しない) |
 
 未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作)。
@@ -243,8 +243,8 @@ netkeiba の取得が、本番(Cloudflare)で通ることを、出馬表1本で�
 workerd と nodejs_compat の実環境で、Worker → DO → ソケットクライアント → HttpClient → cheerio が通り、2 秒間隔・ブレーカーが効くことを確かめる。**本番の `main` は `src/worker.ts` で、偽ソケットは本番のバンドルに入らない**
 (`test/bundle-guard.test.ts` が、本番の `wrangler deploy --dry-run` のバンドルに偽ソケットの印が無いこと・core が入っていること・圧縮後 3 MB 以内を固定している)。
 
-## LLM の土台(Issue #193〈#179-a〉。**挙動は変えない**。実行本体は #194)
-発走前の分析で LLM(Anthropic の API)を使うための**依存と入口だけ**を足した。本番の入口(`worker.ts`)・`RaceDay` は、まだ LLM を呼ばない(呼び出し元は #194)。
+## LLM の土台(Issue #193〈#179-a〉。**この Issue は挙動を変えない**。実行本体は #194〈下の「発走前の分析の LLM」〉)
+発走前の分析で LLM(Anthropic の API)を使うための**依存と入口**を足した(#193)。#193 の時点では、本番の入口(`worker.ts`)・`RaceDay` は LLM を呼ばなかった。
 - **`@anthropic-ai/sdk` を cloud の依存に足した理由**: core の `anthropic-client.ts`(メッセージ送信)・`model-selection.ts`(Models API)が値で import する。cloud は workspace の外で `packages/core/node_modules` が CI に無いので、cheerio と同じく cloud/node_modules に入れ、**3か所の alias**(`wrangler.toml`・`tsconfig.json`・`vitest.config.ts`)で向ける。
   版は core の `package.json` の範囲(`^0.70.1`)と同じ **0.70.1 を exact で固定**(`scripts/test/cloud-config-guard.test.ts` が一致と、`pnpm-lock.yaml` への固定を検査)。推移的に増えるのは 3 パッケージ(json-schema-to-ts・@babel/runtime・ts-algebra)。
 - **`@keiba/core/llm`**(core の `src/llm.ts`): `analyze-race`・`anthropic-client`・`model-selection` の再 export だけの狭い入口。better-sqlite3 を値でも型でも経由しない(`packages/core/test/ev/native-free-modules.test.ts`)。`@keiba/core/pipeline` に足さない理由は、SDK がバンドルに入る経路を「この入口を import したとき」だけにするため(`test/bundle-guard.test.ts` が、pipeline だけの入口に SDK の文字列が無いことを検査)。
@@ -252,7 +252,17 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
   再試行を 0 にする理由: SDK の既定(2 回)と `analyzeRace` の再送(1 回)が重なると、1 レースの HTTP が最大 9 本になる。cloud は `analyzeRace` の再送だけに任せる。
 - **バンドルの実測**(`wrangler deploy --dry-run`): SDK + `analyzeRace` 一式の入口(NetkeibaGate の export を含む probe)で 309.94 KiB・gzip 63.10 KiB(本番の現状は 1952.76 KiB・gzip 512.63 KiB)(`test/bundle-guard.test.ts` が、本番との和が 3 MB に収まることと、単体 512 KiB 以内を検査)。
 - **Workers での実行**: 偽 fetch を注入した workerd(`wrangler dev --local`)で、Models API の取得 → メッセージ送信が通ること、`timeout` が効くこと、429 で `maxRetries` の既定が 3 本・0 が 1 本であることを確かめた。**実 API には出ていない。**
-- **API キーの secret(`ANTHROPIC_API_KEY`)は、この Issue ではまだ使わない**(登録の案内は #194 で行う。上の「Worker の secret」の表は更新しない)。
+
+## 発走前の分析の LLM(Issue #194〈#179-b〉。b1: 実行・記録と再生・追加指示の切り詰め・理由・ログ)
+発走前(`pre_race`)の分析は、**常に LLM を使う**(費用の上限・ON/OFF の設定は無い)。朝(`morning`)の準備は使わない。LLM の呼び出しは**計算ステップの中**(`analyze`)。計算ステップの前提「ネットワークに出ない」が守っているのは **netkeiba(gate)**で、gate は0回のまま。LLM は別の注入口(sender)から Anthropic に出る。
+- **キー**: Worker の secret `ANTHROPIC_API_KEY`(上の「Worker の secret」)。未登録・空白だけなら、`RaceDay` に LLM の依存を渡さず、LLM なしで保存する(理由は固定文言)。
+- **失敗しても止めない**: API のエラー(spend limit・認証・過負荷・タイムアウト)・切り詰め・拒否・応答の解析失敗でも、**prior のまま**保存する。モデル欄は null(LLM が実際に効いたときだけモデル名を残す)。理由は固定文言(core の `FALLBACK_REASON_*`・キー未登録・印の救済)で、保存先(D1)への永続化は b2。
+  **API のエラーの本文・診断メッセージは、画面・D1・タスク行・ログのどこにも出さない**(SDK の例外のメッセージにはレスポンスの本文が入る)。ログには `status=429` か `種別=timeout|connection|other` だけを出し、`sk-ant-` で始まる文字列は伏せる(`src/llm-run.ts`)。
+- **送信回数**: 1レースの sender の呼び出しは**最大3回**(`analyzeRace` の2試行 + モデルの降格1回)。SDK の内部再試行は0(`llm-sender.ts`)。
+- **冪等(アラームは少なくとも1回実行される)**: 成功した応答を、保存の**前**に DO の表 `race_day_llm_responses` に記録し(`src/llm-response-store.ts`)、計算ステップの再試行・再実行では**それを再生して送り直さない**。失敗(例外)は記録しない。記録は、done・failed・再予約(`schedule`)・掃除のときに消す。
+- **追加指示**: 設定の `additionalInstruction` は、読む側に上限が無いので、組み立て側で 2,000 UTF-16 単位に切る(サロゲートペアを割らない。切ったら警告)。`clipVariant` の id と `maxAdjust` は、1回の解決から両方に渡る。
+- **モデル**: 最新の Sonnet を Models API から選ぶ(取得失敗は固定モデル `claude-sonnet-5-5`)。HTTP 400/403/404 のときだけ固定モデルでやり直し、以後は固定モデル(DO の寿命の間)。
+- **プロンプトの入力**: 同日の傾向(結果の取込〈#182〉が未実装)と重賞の過去10年傾向(gate の POST〈#181〉が未実装)は、まだ入らない。それ以外(馬体重・脚質・調教・オッズなど)はキャッシュで揃う。追加の netkeiba 取得は0本。
 
 ## 手動起動の入口(Issue #180)
 Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。定時の Cron は無い。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。

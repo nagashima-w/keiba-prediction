@@ -412,6 +412,20 @@ describe("LLM の入口と SDK のバンドル(Issue #193)", () => {
   );
 
   it(
+    "Issue #194: 本番のバンドル(worker.ts)に、LLM の配線(記録の表・キーの secret の名前)と SDK が入っていて、better-sqlite3 は入っていない。圧縮後 3 MB 以内(SDK を含めた実測値)",
+    () => {
+      const code = bundle(null, "worker.js");
+      // 前提(空振り防止): LLM の配線が、実際に本番のバンドルにある(RaceDay が llm を使う)
+      for (const marker of ["race_day_llm_responses", "ANTHROPIC_API_KEY", ...SDK_MARKERS, ...LLM_CORE_MARKERS]) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+      expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);
+      expect(gzipSync(code).length).toBeLessThan(3 * 1024 * 1024);
+    },
+    120_000,
+  );
+
+  it(
     "対照: `@keiba/core/pipeline` だけを参照する入口(runAnalysis の入口)には、SDK の文字列が入らない(SDK がバンドルに入るのは、LLM の入口を import したときだけ)",
     () => {
       writeFileSync(

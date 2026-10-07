@@ -1219,7 +1219,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **検査**: `test/client-race.test.ts`・`client-view.test.ts`・`client-app.test.ts`・`client-app-run.test.ts`。**実機(スマホ)でのレイアウト・タップ・スクロール位置は自動検査できない**(デプロイ後にユーザーが確認する)。
 
 ### クラウド版の LLM の土台(#193〈#179-a〉。v1.19.24。**挙動は変えない**)
-変更は `cloud/` と core の依存の口だけ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「LLM の土台」。**本番の入口は、まだ LLM を呼ばない**(実行本体は #194〈#179-b〉、画面は #195〈#179-c〉)。
+変更は `cloud/` と core の依存の口だけ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「LLM の土台」。**#193 の時点では、本番の入口は LLM を呼ばなかった**(実行本体は #194〈#179-b〉、画面は #195〈#179-c〉。#194 の b1 で、発走前の分析が LLM を使うようになった。詳細は `cloud/README.md` の「発走前の分析の LLM」。公開は b2 の完了後)。
 - **依存**: `cloud/package.json` に `@anthropic-ai/sdk` 0.70.1(core と同じ版。exact)。alias は `wrangler.toml`・`tsconfig.json`・`vitest.config.ts` の3か所。
 - **入口**: core の `@keiba/core/llm`(`src/llm.ts`。`analyze-race`・`anthropic-client`・`model-selection` の再 export。better-sqlite3 を経由しない)。
 - **口**: `createSdkMessageSender`・`createSdkModelLister` の省略可の `timeout`・`maxRetries`(exe は渡さない。省略時は SDK の既定のまま)。cloud の `src/llm-sender.ts` が、再試行 0・sender 180 秒(暫定)・モデル一覧 30 秒を1か所に決める。

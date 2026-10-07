@@ -463,8 +463,10 @@ describe("朝の prior は DO にだけ置く(AC-b4)と、キャッシュの掃�
     await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
     await runAll(h);
     const tables = (h.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray() as { name: string }[]).map((t) => t.name).sort();
-    expect(tables).toEqual(["fetch_cache", "race_day_meta", "race_day_tasks", "race_day_morning_prior"].sort());
+    // Issue #194: `race_day_llm_responses`(発走前の LLM の応答の記録)が増えた。分析の保存先(analyses 系)の表は、引き続き無い。朝のタスクは、これにも書かない。
+    expect(tables).toEqual(["fetch_cache", "race_day_meta", "race_day_tasks", "race_day_morning_prior", "race_day_llm_responses"].sort());
     expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_morning_prior").toArray() as { n: number }[])[0]!.n).toBe(1);
+    expect((h.sql.exec("SELECT COUNT(*) AS n FROM race_day_llm_responses").toArray() as { n: number }[])[0]!.n).toBe(0);
   });
 });
 

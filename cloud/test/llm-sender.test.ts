@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AnthropicRequestParams } from "@keiba/core/llm";
-import { createCloudLlmSender, createCloudModelLister, LLM_LIST_TIMEOUT_MS, LLM_REQUEST_TIMEOUT_MS, LLM_SDK_MAX_RETRIES } from "../src/llm-sender";
+import { createCloudLlm, createCloudLlmSender, createCloudModelLister, LLM_LIST_TIMEOUT_MS, LLM_REQUEST_TIMEOUT_MS, LLM_SDK_MAX_RETRIES } from "../src/llm-sender";
 
 /**
  * Issue #193(#179-a): クラウド版の LLM の sender・モデル一覧の取得器の組み立て(土台。まだ本番の入口〈worker.ts〉からは呼ばれない。呼び出し元は #194)。
@@ -42,7 +42,7 @@ describe("クラウド版の LLM の呼び出しの設定値(Issue #193)", () =>
 describe("createCloudLlmSender", () => {
   it("429 でも HTTP は1本だけ(SDK の内部再試行をしない)。例外は status を持つ", async () => {
     const fetchImpl = rateLimited();
-    const sender = createCloudLlmSender("sk-ant-fake-test-key-not-real", fetchImpl as unknown as typeof fetch);
+    const sender = createCloudLlmSender("sk-ant-fake-test-key-not-real", { fetch: fetchImpl as unknown as typeof fetch });
     await expect(sender(REQUEST)).rejects.toMatchObject({ status: 429 });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
@@ -65,7 +65,7 @@ describe("createCloudLlmSender", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const sender = createCloudLlmSender("sk-ant-fake-test-key-not-real", fetchImpl as unknown as typeof fetch);
+    const sender = createCloudLlmSender("sk-ant-fake-test-key-not-real", { fetch: fetchImpl as unknown as typeof fetch });
     const res = await sender(REQUEST);
     expect(res.content).toEqual([{ type: "text", text: "応答" }]);
     expect(res.stop_reason).toBe("end_turn");
@@ -77,7 +77,7 @@ describe("createCloudLlmSender", () => {
 describe("createCloudModelLister", () => {
   it("429 でも HTTP は1本だけ。成功すれば id と created_at を返す", async () => {
     const limited = rateLimited();
-    const failing = createCloudModelLister("sk-ant-fake-test-key-not-real", limited as unknown as typeof fetch);
+    const failing = createCloudModelLister("sk-ant-fake-test-key-not-real", { fetch: limited as unknown as typeof fetch });
     await expect(failing()).rejects.toMatchObject({ status: 429 });
     expect(limited).toHaveBeenCalledTimes(1);
 
@@ -92,8 +92,57 @@ describe("createCloudModelLister", () => {
         { status: 200, headers: { "content-type": "application/json" } },
       );
     });
-    const lister = createCloudModelLister("sk-ant-fake-test-key-not-real", ok as unknown as typeof fetch);
+    const lister = createCloudModelLister("sk-ant-fake-test-key-not-real", { fetch: ok as unknown as typeof fetch });
     expect(await lister()).toEqual([{ id: "claude-sonnet-5-5", created_at: "2026-09-01T00:00:00Z" }]);
     expect(ok).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Issue #194(#179-b。#193 の code-reviewer の【記録】2): 上限時間(timeout)が、**実際に SDK に渡っている**ことを固定する。
+ * 定数(180 秒)の値だけを検査しても、`createSdkMessageSender` に渡し忘れれば、既定の 10 分のままになる。
+ * 注入口 `timeoutMs`(テスト用)に短い値を渡し、**応答しない fetch** が、その時間で打ち切られることで確かめる。
+ */
+function hangsUntilAborted() {
+  return vi.fn((_url: unknown, init?: { signal?: AbortSignal | null }) => {
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+  });
+}
+
+describe("timeout が SDK に実際に渡る(Issue #194。応答しない fetch と短い timeout の注入)", () => {
+  it("createCloudLlmSender: timeoutMs=50 なら、応答しないリクエストを 50ms で打ち切り、再送しない(HTTP は1本)", async () => {
+    const fetchImpl = hangsUntilAborted();
+    const sender = createCloudLlmSender("sk-ant-fake-test-key-not-real", { fetch: fetchImpl as unknown as typeof fetch, timeoutMs: 50 });
+    const started = Date.now();
+    await expect(sender(REQUEST)).rejects.toBeInstanceOf(Error);
+    expect(Date.now() - started).toBeLessThan(5_000); // 既定の 180 秒(や SDK の 10 分)ではなく、渡した 50ms で切れている
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("createCloudModelLister: timeoutMs=50 なら、応答しない一覧の取得を 50ms で打ち切り、再送しない", async () => {
+    const fetchImpl = hangsUntilAborted();
+    const lister = createCloudModelLister("sk-ant-fake-test-key-not-real", { fetch: fetchImpl as unknown as typeof fetch, timeoutMs: 50 });
+    const started = Date.now();
+    await expect(lister()).rejects.toBeInstanceOf(Error);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createCloudLlm(API キーから LLM の依存を作る。キーが無ければ作らない)", () => {
+  it.each([[undefined], [""], ["   "], ["\n\t"]])("キーが %j なら undefined(LLM を使わない)", (key) => {
+    expect(createCloudLlm(key as string | undefined)).toBeUndefined();
+  });
+
+  it("キーがあれば sender と lister を持つ。どちらも SDK の内部再試行はしない(429 でも HTTP は1本)", async () => {
+    const fetchImpl = rateLimited();
+    const llm = createCloudLlm("sk-ant-fake-test-key-not-real", { fetch: fetchImpl as unknown as typeof fetch });
+    expect(llm).toBeDefined();
+    await expect(llm!.sender(REQUEST)).rejects.toMatchObject({ status: 429 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await expect(llm!.lister!()).rejects.toMatchObject({ status: 429 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

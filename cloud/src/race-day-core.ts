@@ -7,9 +7,9 @@
  * 開催日(`idFromName(kaisaiDate)`)ごとに1つの DO が、その日の全レースの**朝の準備**を直列に処理する(gate の待ち行列の上限 8 に当たらない)。
  *  - **ステップ1(取得 `fetch`)**: `scrapeRace`(変更なし。組合せオッズは取らない。単勝・複勝のオッズを1本取る)でキャッシュを埋める。中央16頭の
  *    冷えた状態で gate への取得は **19 本**(出馬表 1・戦績 16・調教 1・単勝複勝 1)。
- *  - **ステップ2(計算 `compute`)**: **ネットワークに出ず**、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
+ *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
- *    取得のあとで TTL が切れても読めるよう、キャッシュの鮮度を実質無期限にして読む。キャッシュに戦績が無ければ(掃除された等)、ネットワークに出ず失敗にする
+ *    取得のあとで TTL が切れても読めるよう、キャッシュの鮮度を実質無期限にして読む。キャッシュに戦績が無ければ(掃除された等)、netkeiba に出ず失敗にする
  *    (`scrapeRace` は戦績の失敗を警告にして続けるので、戦績なしの prior を黙って作らないよう検出する)。
  *  - 2つのステップは**別々のアラーム呼び出し**で動かす(1呼び出しの中のサブリクエスト数〈Free は 50〉を抑える・再試行でネットワークを撃ち直さない)。
  *    1回の `runNextStep` は1レースの1ステップだけを行い、続きがあればアラームを設定して戻る。
@@ -41,8 +41,13 @@ import { checkRaceDate } from "./race-date";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { DoSqlCacheStore } from "./do-cache-store";
 import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fetch";
+import { resolveClipVariant } from "@keiba/core/pipeline";
+import type { ModelSelector } from "@keiba/core/llm";
+import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelector, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets } from "./llm-run";
+import { SqlLlmResponseStore } from "./llm-response-store";
+import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
-import { coerceCloudSettings, type CloudSettings } from "./settings";
+import { ADDITIONAL_INSTRUCTION_MAX_LENGTH, coerceCloudSettings, type CloudSettings } from "./settings";
 import type { SqlLike } from "./sql-like";
 
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
@@ -85,6 +90,11 @@ export type TaskStatus = "queued" | "fetched" | "done" | "failed";
 /** 朝の取得と prior(`morning`。D1・R2 には書かない)・発走前の分析(`pre_race`。LLM なし。D1・R2 に保存する。Issue #178)。 */
 export type TaskMode = "morning" | "pre_race";
 
+/** 保存のときに、分析のレコード(core の `AnalysisRecord`)とは別に渡す情報(Issue #194)。 */
+export interface AnalysisSaveExtra {
+  readonly llmNote: string | null;
+}
+
 /**
  * 発走前の分析の保存先(D1・R2。DO のラッパが `D1AnalysisStore` で実装する)。**朝(morning)のタスクでは呼ばない。**
  *  - `findByAnalyzedAt`: 同じレース・同じ分析時刻の分析が保存済みなら、その id(無ければ null)。計算ステップの再実行(アラームは at-least-once)で、
@@ -93,7 +103,8 @@ export type TaskMode = "morning" | "pre_race";
  *  - `countChildren`: 保存した分析の子の行(馬・買い目)の件数。子の行が正しい親 id に紐づいたかを、最初の実保存から確かめるため(#175 の `max(id)` の前提)。
  */
 export interface AnalysisSink {
-  save(record: AnalysisRecord): Promise<{ readonly id: number; readonly detail: "stored" | "failed" | "skipped" }>;
+  /** `extra.llmNote`(発走前の計算ステップは常に渡す): LLM が使われなかった・一部しか使われなかった理由(固定文言。問題なく効いたときは null)。保存先(D1)への永続化は #194 の b2。 */
+  save(record: AnalysisRecord, extra?: AnalysisSaveExtra): Promise<{ readonly id: number; readonly detail: "stored" | "failed" | "skipped" }>;
   findByAnalyzedAt(raceId: string, analyzedAt: string): Promise<number | null>;
   countChildren(analysisId: number): Promise<{ readonly horses: number; readonly bets: number }>;
 }
@@ -110,6 +121,11 @@ export interface RaceDayDeps {
   readonly sink?: AnalysisSink;
   /** 設定(D1 の1行)の読み出し。発走前の取得ステップで1回だけ呼び、スナップショットをタスクに保存する。 */
   readonly loadSettings?: () => Promise<CloudSettings>;
+  /**
+   * LLM の依存(Issue #194〈#179-b〉。sender・モデル一覧。DO のラッパが、Worker の secret `ANTHROPIC_API_KEY` から作る)。**キーが無ければ渡さない**: 発走前の分析は LLM なしで保存し、
+   * 理由(固定文言)を残す。朝のタスクでは使わない。`lister` が無ければ、モデルの自動選択をせず、固定モデルで送る。
+   */
+  readonly llm?: CloudLlm;
 }
 
 export interface ScheduleInput {
@@ -201,7 +217,7 @@ class StaleOddsError extends Error {
 /** 計算ステップで、キャッシュに無いものをネットワークに取りに行かないための取得器(呼ばれたら投げる)。 */
 class CacheMissError extends Error {
   constructor(url: string) {
-    super(`キャッシュに無い取得先です(計算ステップはネットワークに出ません): ${url}`);
+    super(`キャッシュに無い取得先です(計算ステップは netkeiba には出ません): ${url}`);
     this.name = "CacheMissError";
   }
 }
@@ -266,6 +282,9 @@ export class RaceDayCore {
   private readonly onWarn: (message: string) => void;
   private readonly sink: AnalysisSink | undefined;
   private readonly loadSettings: (() => Promise<CloudSettings>) | undefined;
+  private readonly llm: CloudLlm | undefined;
+  /** モデルの自動選択(取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined)。 */
+  private readonly modelSelector: ModelSelector | undefined;
   private readonly cache: DoSqlCacheStore;
   private readonly networkFetcher: CachedFetcher;
   private readonly cacheOnly: CachedFetcher;
@@ -279,6 +298,8 @@ export class RaceDayCore {
     this.onWarn = deps.onWarn;
     this.sink = deps.sink;
     this.loadSettings = deps.loadSettings;
+    this.llm = deps.llm;
+    this.modelSelector = deps.llm === undefined ? undefined : createCloudModelSelector(deps.llm, deps.onWarn);
     // ⚠️ スキーマ変更の仕組みは無い: DO の SQLite の表は `CREATE TABLE IF NOT EXISTS` だけで作る(既存の表に列を足す処理は無い)。
     // 本番の RaceDay は未デプロイなので、今は列を足してよい。**最初の本番デプロイのあとに列を足すときは、`ALTER TABLE ... ADD COLUMN` を
     // ここに足すこと**(足さないと、既に作られた表に列が無いまま INSERT/SELECT が落ちる)。
@@ -294,6 +315,8 @@ export class RaceDayCore {
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS race_day_morning_prior (race_id TEXT PRIMARY KEY, computed_at INTEGER NOT NULL, result_json TEXT NOT NULL)",
     );
+    // 発走前の分析の LLM の応答の記録(Issue #194。新しい表なので ALTER は不要)。
+    SqlLlmResponseStore.ensureTable(this.sql);
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     const httpClient = createGateHttpClient(serializeGate(deps.gate), { onWarn: deps.onWarn });
@@ -371,6 +394,8 @@ export class RaceDayCore {
       }
     }
     const now = this.now();
+    // 新しい実行: 前の実行の LLM の応答の記録も消す(新しい分析は、あらためて LLM に送る。前の記録を再生しない)。
+    SqlLlmResponseStore.clear(this.sql, raceId, mode);
     // 新しい実行: 発走前の分析の状態(分析時刻・設定のスナップショット・保存結果)も作り直す(前の実行の保存結果を、新しい実行の結果として扱わない)。
     this.sql.exec(
       `INSERT INTO race_day_tasks (race_id, mode, status, attempts, compute_attempts, queued_at, updated_at, error, analyzed_at, fetch_started_at, settings_json, analysis_id, detail, children_ok)
@@ -539,6 +564,8 @@ export class RaceDayCore {
       return { kind: "idle" };
     }
     this.sql.exec("DELETE FROM race_day_meta WHERE key = ?", PURGE_DUE_KEY);
+    // 進行中のタスクが無いので、残っている LLM の応答の記録は孤立している(消し損ねた分)。
+    SqlLlmResponseStore.clearOrphans(this.sql);
     return { kind: "idle", purged: this.purgeCache() };
   }
 
@@ -654,7 +681,7 @@ export class RaceDayCore {
   }
 
   /**
-   * キャッシュだけから `scrapeRace` する(ネットワークに出ない。鮮度は実質無期限)。戦績が1頭でも無ければ投げる(戦績なしの分析を黙って作らない)。
+   * キャッシュだけから `scrapeRace` する(netkeiba には出ない。鮮度は実質無期限)。戦績が1頭でも無ければ投げる(戦績なしの分析を黙って作らない)。
    * `oddsSince`(発走前の分析の取得ステップの開始時刻)を渡すと、**オッズ・組合せオッズは、その時刻以降に取得したキャッシュだけ**を使う
    * (それより古いもの〈前回の発走前の実行で残った、保持 26 時間のキャッシュ〉は、無いものとして扱う)。古い組合せが「今のオッズ」として配分に使われるのを防ぐ。
    * 無い組合せは、exe で組合せの取得が失敗したときと同じく、`scrapeRace` が警告にして、その券種を除く。単勝・複勝のオッズが古い(無い)ときは投げる(必須のデータ)。
@@ -733,10 +760,15 @@ export class RaceDayCore {
   }
 
   /**
-   * 発走前の計算・保存ステップ: **ネットワークに出ず**(gate は0回)、キャッシュだけで prior → EV → 配分を作り、`AnalysisSink` で D1・R2 に保存する。LLM なし(#179)。
+   * 発走前の計算・保存ステップ: **netkeiba には出ず**(gate は0回)、キャッシュだけで prior → LLM(Issue #194)→ EV → 配分を作り、`AnalysisSink` で D1・R2 に保存する。
+   * **LLM の呼び出し(Anthropic の API)はこのステップの中**(`analyze`)。「ネットワークに出ない」という前提が守っているのは gate・netkeiba(間隔制御・ブレーカー)で、LLM は別の注入口(sender)から出る。
+   * LLM は **常に使う**(`llm` が渡されていれば。費用の上限・ON/OFF の設定は無い)。失敗(API のエラー・切り詰め・拒否・解析失敗)でも止めず、prior で保存し、理由(固定文言)を `AnalysisSaveExtra.llmNote` で渡す。
+   * キーが無ければ(`llm` なし)LLM なしで保存し、理由は「API キーが未登録」。
    * 冪等(アラームは少なくとも1回は実行される): 分析時刻(`analyzed_at`)を最初の実行でタスクに永続化し、保存の前に「同じレース・同じ分析時刻の分析が
    * 保存済みか」を確かめる。保存結果(id・R2 の状態)は保存の直後にタスクへ書く。すでに id があれば、計算も保存もしない。
    * 保存先の失敗は、試行回数の上限(3)まで遅らせて再試行する(保存済みなら、再試行で2件目を作らない)。
+   * **LLM の二重送信を防ぐ**: 成功した応答を、保存の**前**に DO の表 `race_day_llm_responses` に記録し(`createRecordingSender`)、再試行・再実行ではそれを再生する。
+   * 記録は、done・failed・再予約(`schedule`)・掃除のときに消す。
    */
   private async runPreRaceCompute(task: TaskRow): Promise<StepOutcome> {
     const sink = this.sink!;
@@ -759,14 +791,37 @@ export class RaceDayCore {
       let scrapeWarnings: readonly { readonly kind: string; readonly message: string }[] = [];
       if (analysisId === null) {
         const raceId = parseRaceId(task.race_id);
+        // LLM(Issue #194)。clipVariant は1回だけ解決し、補正の最大幅(analyzeRace)と、プロンプト・promptVersion(runAnalysis の deps.clipVariant)の両方に同じ値を使う
+        // (文面の許容幅とクリップ幅の食い違いを構造的に防ぐ。exe の pipeline-deps.ts と同じ)。
+        const clipVariant = resolveClipVariant(settings.clipVariant);
+        // 追加指示は、読む側に上限が無い(D1 に直接入れた長い値)ので、組み立て側で 2,000 UTF-16 単位に切る(サロゲートペアを割らない)。
+        const instruction = clampAdditionalInstruction(settings.additionalInstruction);
+        if (instruction.clamped) {
+          this.onWarn(`発走前の分析(${task.race_id}): 追加指示が長いため、${ADDITIONAL_INSTRUCTION_MAX_LENGTH} 文字(UTF-16 の単位)に切りました`);
+        }
+        const cloudAnalyze =
+          this.llm === undefined
+            ? null
+            : createCloudAnalyze({
+                llm: this.llm,
+                selector: this.modelSelector,
+                store: new SqlLlmResponseStore(this.sql, task.race_id, task.mode),
+                maxAdjust: clipVariant.maxAdjust,
+                warn: this.onWarn,
+              });
         await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
           scrape: async (id) => {
             const race = await this.scrapeFromCache(id, settings.includeComboOdds, oddsSince);
             scrapeWarnings = race.meta.warnings;
             return race;
           },
-          analyze: null,
+          analyze: cloudAnalyze === null ? null : cloudAnalyze.analyze,
+          additionalInstruction: instruction.text,
+          clipVariant: clipVariant.id,
           saveAnalysis: async (record) => {
+            // LLM が実際に効いたとき(フォールバック・スキップでないとき)だけ、モデル名を残す(runAnalysis は、応答があればフォールバックでもモデル名を入れる)。
+            const outcome = outcomeOf(cloudAnalyze === null ? null : cloudAnalyze.lastResult());
+            const toSave = outcome.effective ? record : { ...record, model: null };
             expected = { horses: record.horses.length, bets: record.allocation?.bets.length ?? 0 };
             const existing = await sink.findByAnalyzedAt(record.raceId, record.analyzedAt);
             if (existing !== null) {
@@ -774,7 +829,7 @@ export class RaceDayCore {
               this.setTaskFields(task, { analysis_id: existing });
               return;
             }
-            const saved = await sink.save(record);
+            const saved = await sink.save(toSave, { llmNote: outcome.note });
             analysisId = saved.id;
             // 保存の直後に結果を書く(以降の再実行は、保存も計算もしない)。
             this.setTaskFields(task, { analysis_id: saved.id, detail: saved.detail });
@@ -793,10 +848,17 @@ export class RaceDayCore {
           },
           evConfig: { threshold: settings.evThreshold },
           now: () => new Date(analyzedAtMs),
-          // 当日傾向の読み出し(D1)は、結果の取込(#182)ができるまで空。LLM なしの経路では呼ばれない(#179 で LLM を使うときに効く)。
+          // 当日傾向の読み出し(D1)は、結果の取込(#182)ができるまで空(LLM のプロンプトに当日傾向のブロックは出ない)。重賞の過去10年傾向(#181)も、まだ注入しない。
           getRaceResultDetails: async () => new Map(),
-          llmSkipReason: "LLM は未対応(#179)",
+          llmSkipReason: LLM_NOTE_NO_KEY,
         });
+        // LLM が効かなかったとき(キー未登録・フォールバック)は、固定の理由だけを警告に残す(API のエラーの本文・診断メッセージは出さない)。
+        if (this.llm !== undefined && cloudAnalyze !== null) {
+          const outcome = outcomeOf(cloudAnalyze.lastResult());
+          if (!outcome.effective) {
+            this.onWarn(`発走前の分析(${task.race_id}): LLM を使えませんでした: ${outcome.note}`);
+          }
+        }
         // 取得時の警告(取消馬・組合せオッズの取得失敗〈その券種は配分に入っていない〉など)を、警告として残す。
         for (const warning of scrapeWarnings) {
           this.onWarn(`発走前の分析(${task.race_id}): ${warning.kind}: ${warning.message}`);
@@ -815,11 +877,14 @@ export class RaceDayCore {
         }
       }
       this.updateTask(task, "done", task.attempts, null);
+      // 完了した(保存済み)ので、LLM の応答の記録は要らない。
+      SqlLlmResponseStore.clear(this.sql, task.race_id, task.mode);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "ok" };
     } catch (error) {
-      const message = errorMessage(error);
+      const message = redactSecrets(errorMessage(error));
       if (computeAttempts >= MAX_ATTEMPTS) {
         this.updateTask(task, "failed", task.attempts, message);
+        SqlLlmResponseStore.clear(this.sql, task.race_id, task.mode); // 諦めたので、記録は要らない(再予約は新しい実行)
         this.onWarn(`発走前の計算・保存に失敗しました(${task.race_id}。試行 ${computeAttempts} 回): ${message}`);
         return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "compute", result: "failed" };
       }
