@@ -50,10 +50,11 @@ export const INSERT_ANALYSIS_SQL = `INSERT INTO ${ANALYSES_TABLE}
           model, raw_response, race_snapshot_json, history_cutoff_date, prompt_lookahead_guarded)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-/** analysis_horses への INSERT(10列)。束縛値は {@link horseParams}。 */
+/** analysis_horses への INSERT(12列)。束縛値は {@link horseParams}。 */
 export const INSERT_ANALYSIS_HORSE_SQL = `INSERT INTO ${ANALYSIS_HORSES_TABLE}
-         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+         (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason,
+          highlights_json, concerns_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 /** analysis_allocation_meta への INSERT(24列。配分提案〈Issue #59〉のレース単位メタ行)。束縛値は {@link allocationMetaParams}。 */
 export const INSERT_ALLOCATION_META_SQL = `INSERT INTO ${ANALYSIS_ALLOCATION_META_TABLE}
@@ -77,6 +78,28 @@ function orNull<T extends string | number>(value: T | null | undefined): T | nul
 /** JSON を保存する列の値。undefined・null は NULL(文字列 "null" にしない)、それ以外は JSON 文字列(0・false も JSON 化)。 */
 function toJsonOrNull(value: unknown): string | null {
   return value === undefined || value === null ? null : JSON.stringify(value);
+}
+
+/**
+ * 強調材料・懸念事項(Issue #197)を保存する列の値。省略・null・空配列は NULL(「項目なし」を NULL で表す)、
+ * それ以外は JSON 配列の文字列。
+ */
+function itemsToJsonOrNull(items: readonly string[] | null | undefined): string | null {
+  return items === undefined || items === null || items.length === 0 ? null : JSON.stringify(items);
+}
+
+/**
+ * 強調材料・懸念事項の列から項目の配列を復元する(Issue #197)。NULL・壊れた JSON・配列でない値は `[]`
+ * (例外にしない)。配列の文字列でない要素は捨てる。
+ */
+export function itemsFromJson(raw: string | null | undefined): readonly string[] {
+  if (raw === null || raw === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -119,6 +142,8 @@ export function horseParams(analysisId: number, h: AnalysisHorseRecord): SqlPara
     toJsonOrNull(h.contributions),
     h.mark,
     orNull(h.reason),
+    itemsToJsonOrNull(h.highlights),
+    itemsToJsonOrNull(h.concerns),
   ];
 }
 
@@ -210,7 +235,8 @@ export const SELECT_ANALYSES_SQL = `${SELECT_ANALYSES_HEAD} ORDER BY id`;
 export const SELECT_ANALYSES_BY_RACE_SQL = `${SELECT_ANALYSES_HEAD} WHERE race_id = ? ORDER BY id`;
 
 /** 分析1件の馬(馬番昇順。束縛値は analysis_id 1つ)。行は {@link HorseRow}。 */
-export const SELECT_ANALYSIS_HORSES_SQL = `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason
+export const SELECT_ANALYSIS_HORSES_SQL = `SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason,
+                highlights_json, concerns_json
          FROM ${ANALYSIS_HORSES_TABLE} WHERE analysis_id = ? ORDER BY umaban`;
 
 /** 配分メタ1行(束縛値は analysis_id 1つ)。行は {@link AllocationMetaRow}。 */
@@ -255,6 +281,8 @@ export interface HorseRow {
   contributions_json: string | null;
   mark: string | null;
   reason: string | null;
+  highlights_json: string | null;
+  concerns_json: string | null;
 }
 
 /** 配分メタ行の DB 表現({@link SELECT_ALLOCATION_META_SQL} の列別名どおり)。 */
@@ -293,6 +321,8 @@ export function toStoredHorse(row: HorseRow): StoredAnalysisHorse {
     // (未知の文字列が紛れ込む経路は無い。念のため未知値でも「印なし扱い」にはせず型どおり通す)。
     mark: row.mark as PredictionMark | null,
     reason: row.reason,
+    highlights: itemsFromJson(row.highlights_json),
+    concerns: itemsFromJson(row.concerns_json),
   };
 }
 

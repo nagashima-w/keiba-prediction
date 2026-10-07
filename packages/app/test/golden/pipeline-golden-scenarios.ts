@@ -135,6 +135,10 @@ export function stubAnalyze(captured: BuildPromptInput[]): (input: BuildPromptIn
           prior: h.prior,
           adjustedProb: Math.min(1, h.prior * (1 + 0.05 * ((h.umaban % 3) - 1))),
           reason: `スタブの根拠${h.umaban}`,
+          // 強調材料・懸念事項(Issue #197)。馬番で変化させ、「空」「1項目」「2項目」が golden に混ざるようにする
+          // (配線の取り違え・空の NULL 化の退行を golden が検出できる)。
+          highlights: Array.from({ length: h.umaban % 3 }, (_, i) => `スタブの強み${h.umaban}-${i + 1}`),
+          concerns: h.umaban % 2 === 0 ? [`スタブの懸念${h.umaban}`] : [],
           clipped: false,
           usedPrior: false,
           mark: marks[h.umaban % marks.length] ?? null,

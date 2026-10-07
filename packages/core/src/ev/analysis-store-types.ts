@@ -33,6 +33,13 @@ export interface AnalysisHorseRecord {
    * null を渡す想定。省略時も null(既存呼び出し元との後方互換のため任意項目とする)。
    */
   readonly reason?: string | null;
+  /**
+   * 強調材料(Issue #197・#196-a。各最大3項目の短い句)。空配列・省略は「項目なし」で、DB には NULL で保存する
+   * (既存呼び出し元との後方互換のため任意項目とする)。
+   */
+  readonly highlights?: readonly string[];
+  /** 懸念事項(Issue #197・#196-a。仕様は highlights と同じ)。 */
+  readonly concerns?: readonly string[];
 }
 
 /** 保存する分析(レース単位)。 */
@@ -353,6 +360,12 @@ export interface StoredAnalysisHorse {
    * LLMが返した和文根拠(Issue#10)。LLM未使用・旧レコード(列追加前の保存)は null。
    */
   readonly reason: string | null;
+  /**
+   * 強調材料(Issue #197)。NULL・壊れた値・旧レコード(列追加前の保存)は `[]`(必須。空配列が「項目なし」)。
+   */
+  readonly highlights: readonly string[];
+  /** 懸念事項(Issue #197。仕様は highlights と同じ)。 */
+  readonly concerns: readonly string[];
 }
 
 /** 復元した分析(レース単位)。 */

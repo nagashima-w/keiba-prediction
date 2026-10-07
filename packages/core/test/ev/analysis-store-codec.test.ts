@@ -69,6 +69,8 @@ const BASE_HORSE: AnalysisHorseRecord = {
   contributions: { a: 1 },
   mark: "◎",
   reason: "根拠",
+  highlights: ["追い切り好時計", "内枠有利"],
+  concerns: ["距離延長"],
 };
 
 const BASE_META: AnalysisAllocationMetaRecord = {
@@ -104,9 +106,9 @@ const BASE_RECORD: AnalysisRecord = {
 };
 
 describe("INSERT 文と束縛値の対応(列数・? の個数が一致する)", () => {
-  it("analyses は11列、analysis_horses は10列、allocation_meta は24列、analysis_bets は6列", () => {
+  it("analyses は11列、analysis_horses は12列、allocation_meta は24列、analysis_bets は6列", () => {
     expect(columnsOf(INSERT_ANALYSIS_SQL)).toHaveLength(11);
-    expect(columnsOf(INSERT_ANALYSIS_HORSE_SQL)).toHaveLength(10);
+    expect(columnsOf(INSERT_ANALYSIS_HORSE_SQL)).toHaveLength(12);
     expect(columnsOf(INSERT_ALLOCATION_META_SQL)).toHaveLength(24);
     expect(columnsOf(INSERT_ALLOCATION_BET_SQL)).toHaveLength(6);
   });
@@ -148,6 +150,8 @@ describe("INSERT 文と束縛値の対応(列数・? の個数が一致する)",
       contributions_json: '{"a":1}',
       mark: "◎",
       reason: "根拠",
+      highlights_json: '["追い切り好時計","内枠有利"]',
+      concerns_json: '["距離延長"]',
     });
     expect(byColumn(INSERT_ALLOCATION_META_SQL, allocationMetaParams(42, BASE_META))).toEqual({
       analysis_id: 42,
@@ -232,6 +236,14 @@ describe("horseParams: 省略・null・falsy の写し", () => {
     ["reason 省略 → NULL", { reason: undefined }, "reason", null],
     ["reason null → NULL", { reason: null }, "reason", null],
     ["reason 空文字 → 空文字", { reason: "" }, "reason", ""],
+    // 強調材料・懸念事項(Issue #197): 空配列・省略・null は NULL(「項目なし」を NULL で表す)。
+    ["highlights 省略 → NULL", { highlights: undefined }, "highlights_json", null],
+    ["highlights 空配列 → NULL", { highlights: [] }, "highlights_json", null],
+    ["highlights 1項目 → JSON 配列", { highlights: ["a"] }, "highlights_json", '["a"]'],
+    ["highlights 引用符・改行・日本語 → JSON としてエスケープ", { highlights: ['"q"\nあ'] }, "highlights_json", '["\\"q\\"\\nあ"]'],
+    ["concerns 省略 → NULL", { concerns: undefined }, "concerns_json", null],
+    ["concerns 空配列 → NULL", { concerns: [] }, "concerns_json", null],
+    ["concerns 3項目 → JSON 配列", { concerns: ["a", "b", "c"] }, "concerns_json", '["a","b","c"]'],
     ["isPositive false → 0", { isPositive: false }, "is_positive", 0],
     ["isPositive true → 1", { isPositive: true }, "is_positive", 1],
     ["mark null → NULL", { mark: null }, "mark", null],
@@ -367,6 +379,8 @@ describe("toStoredHorse / toStoredAnalysis / toStoredRaceSnapshot: NULL・0/1 �
     contributions_json: null,
     mark: null,
     reason: null,
+    highlights_json: null,
+    concerns_json: null,
     ...override,
   });
 
@@ -390,7 +404,32 @@ describe("toStoredHorse / toStoredAnalysis / toStoredRaceSnapshot: NULL・0/1 �
       contributions: { a: [1, 2] },
       mark: "◎",
       reason: "r",
+      highlights: [],
+      concerns: [],
     });
+  });
+
+  // 強調材料・懸念事項の復元(Issue #197): NULL・壊れた値・配列でない値は `[]`(例外にしない)。文字列でない要素は捨てる。
+  it.each([
+    ["NULL", null, []],
+    ["空文字", "", []],
+    ["壊れた JSON", "[壊れ", []],
+    ["オブジェクト(配列でない)", '{"a":1}', []],
+    ["文字列(配列でない)", '"x"', []],
+    ["数値", "3", []],
+    ["空配列", "[]", []],
+    ["文字列の配列", '["a","b"]', ["a", "b"]],
+    ["文字列でない要素は捨てる", '["a",1,null,"b",{"x":1}]', ["a", "b"]],
+  ])("highlights_json / concerns_json が %s のとき", (_label, raw, expected) => {
+    const horse = toStoredHorse(horseRow({ highlights_json: raw, concerns_json: raw }));
+    expect(horse.highlights).toStrictEqual(expected);
+    expect(horse.concerns).toStrictEqual(expected);
+  });
+
+  it("highlights_json と concerns_json は混ざらない(それぞれ自分の列を読む)", () => {
+    const horse = toStoredHorse(horseRow({ highlights_json: '["強"]', concerns_json: '["弱"]' }));
+    expect(horse.highlights).toStrictEqual(["強"]);
+    expect(horse.concerns).toStrictEqual(["弱"]);
   });
 
   it.each([

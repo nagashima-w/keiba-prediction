@@ -84,6 +84,8 @@ describe("isHighlightRow(EVプラス行のハイライト判定)", () => {
     ev: isPositive ? 1.2 : 0.8,
     isPositive,
     reason: null,
+    highlights: [],
+    concerns: [],
     careerRunCount: 10,
     mark: null,
     evEstimated: false,

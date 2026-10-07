@@ -37,6 +37,8 @@ const row = (over: Partial<AnalysisRow>): AnalysisRow => ({
   ev: 0.6,
   isPositive: false,
   reason: null,
+  highlights: [],
+  concerns: [],
   careerRunCount: 10,
   mark: null,
   evEstimated: false,

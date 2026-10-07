@@ -69,6 +69,9 @@ const FULL_RECORD: AnalysisRecord = {
       contributions: { a: 1 },
       mark: "◎",
       reason: "根拠",
+      // 注意: better-sqlite3 の verbose は長い文字列を `/*+N bytes*/` に省略するので、項目は短くしている。
+      highlights: ["好時計", "内枠"],
+      concerns: ["延長"],
     },
     {
       umaban: 2,
@@ -136,7 +139,7 @@ const MINIMAL_RECORD: AnalysisRecord = {
 const INSERT_ANALYSES =
   "INSERT INTO analyses (race_id, analyzed_at, ev_estimated, prompt_version, additional_instruction, kaisai_date, model, raw_response, race_snapshot_json, history_cutoff_date, prompt_lookahead_guarded) VALUES";
 const INSERT_HORSE =
-  "INSERT INTO analysis_horses (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason) VALUES";
+  "INSERT INTO analysis_horses (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason, highlights_json, concerns_json) VALUES";
 const INSERT_META =
   "INSERT INTO analysis_allocation_meta (analysis_id, route, unavailable_reason, fallback_reason, skip_reason_code, combo_odds_wide, combo_odds_trio, bankroll, per_race_cap, kelly_fraction, ev_threshold, include_combo_odds, include_wide, include_trio, include_quinella, include_exacta, include_trifecta, include_bracket_quinella, bet_unit, greedy_steps, candidate_cap, model_id, model_approximate, odds_status) VALUES";
 const INSERT_BET =
@@ -148,7 +151,7 @@ const SELECT_ALLOCATION_META_HEAD =
 const SELECT_ALLOCATION_BETS_HEAD =
   "SELECT bet_type AS betType, combo_key AS comboKey, stake, odds, ev FROM analysis_bets";
 const SELECT_HORSES_HEAD =
-  "SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason FROM analysis_horses";
+  "SELECT umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, contributions_json, mark, reason, highlights_json, concerns_json FROM analysis_horses";
 
 describe("AnalysisStore が発行する SQL 文の列(#168 AC-a7。切り出し前後で不変)", () => {
   it("saveAnalysis(配分あり): BEGIN → analyses → 馬×2 → allocation_meta → 買い目×2 → COMMIT の8文で、値の写しも固定", () => {
@@ -158,8 +161,8 @@ describe("AnalysisStore が発行する SQL 文の列(#168 AC-a7。切り出し�
     expect(sequence).toEqual([
       "BEGIN",
       `${INSERT_ANALYSES} ('202603020211', '2026-10-06T09:00:00.000Z', 0.0, NULL, NULL, NULL, NULL, NULL, '{"x":1}', NULL, NULL)`,
-      `${INSERT_HORSE} (1.0, 1.0, 0.1234567890123, 0.2, 1.5, 1.1, 1.0, '{"a":1}', '◎', '根拠')`,
-      `${INSERT_HORSE} (1.0, 2.0, 0.3, 0.3, NULL, NULL, 0.0, NULL, NULL, NULL)`,
+      `${INSERT_HORSE} (1.0, 1.0, 0.1234567890123, 0.2, 1.5, 1.1, 1.0, '{"a":1}', '◎', '根拠', '["好時計","内枠"]', '["延長"]')`,
+      `${INSERT_HORSE} (1.0, 2.0, 0.3, 0.3, NULL, NULL, 0.0, NULL, NULL, NULL, NULL, NULL)`,
       `${INSERT_META} (1.0, 'mixed', NULL, NULL, NULL, NULL, NULL, 10000.0, 3000.0, 0.25, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 100.0, 5.0, 50.0, 'm', NULL, 'kakutei')`,
       `${INSERT_BET} (1.0, 'place', '01', 300.0, 1.5, 1.1)`,
       `${INSERT_BET} (1.0, 'wide', '0102', 100.0, NULL, NULL)`,
@@ -173,7 +176,7 @@ describe("AnalysisStore が発行する SQL 文の列(#168 AC-a7。切り出し�
     expect(take()).toEqual([
       "BEGIN",
       `${INSERT_ANALYSES} ('202654071210', '2026-10-06T10:00:00.000Z', 0.0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)`,
-      `${INSERT_HORSE} (1.0, 3.0, 0.5, 0.5, NULL, NULL, 0.0, NULL, NULL, NULL)`,
+      `${INSERT_HORSE} (1.0, 3.0, 0.5, 0.5, NULL, NULL, 0.0, NULL, NULL, NULL, NULL, NULL)`,
       "COMMIT",
     ]);
   });

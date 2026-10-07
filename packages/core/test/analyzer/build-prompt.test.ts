@@ -388,8 +388,96 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("複勝圏内の標本数誤読解消(機能Bの小改善)追加版として 2026-07-28.2 が付与されていること", () => {
-    expect(PROMPT_VERSION).toBe("2026-07-28.2");
+  it("強調材料・懸念事項(highlights・concerns)の追加版として 2026-10-07.1 が付与されていること(Issue #197)", () => {
+    expect(PROMPT_VERSION).toBe("2026-10-07.1");
+  });
+});
+
+describe("buildPrompt(強調材料 highlights・懸念事項 concerns の指示と出力例。Issue #197・#196-a)", () => {
+  /** 【指示】セクション(【予想印】の手前まで)。 */
+  function instructionSection(p: string): string {
+    const start = p.indexOf("【指示】");
+    const end = p.indexOf("【予想印】");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    return p.slice(start, end);
+  }
+
+  /** 出力スキーマの JSON 例(【出力スキーマ…】の次の行)。 */
+  function schemaExample(p: string): { horses: Array<Record<string, unknown>> } {
+    const head = p.indexOf("【出力スキーマ");
+    expect(head).toBeGreaterThanOrEqual(0);
+    const line = p.slice(head).split("\n")[1]!;
+    return JSON.parse(line) as { horses: Array<Record<string, unknown>> };
+  }
+
+  it("【指示】に highlights・concerns の出力指示(各最大3項目・1項目は全角30字以内・無ければ空配列)があること", () => {
+    const sec = instructionSection(buildPrompt(baseInput()));
+    expect(sec).toContain("highlights");
+    expect(sec).toContain("concerns");
+    expect(sec).toContain("強調材料");
+    expect(sec).toContain("懸念事項");
+    expect(sec).toContain("最大3項目");
+    expect(sec).toContain("全角30字以内");
+    expect(sec).toContain("空配列");
+  });
+
+  it("highlights・concerns に、単勝オッズ・人気・参考EVを材料として挙げないよう指示すること(アンカリング禁止と揃える)", () => {
+    const sec = instructionSection(buildPrompt(baseInput()));
+    const line = sec.split("\n").find((l) => l.includes("highlights") && l.includes("オッズ"));
+    expect(line).toBeDefined();
+    expect(line).toContain("単勝オッズ");
+    expect(line).toContain("人気");
+    expect(line).toContain("参考EV");
+    expect(line).toMatch(/挙げないでください|材料にしないでください/);
+  });
+
+  it("オッズ禁止の指示は highlights・concerns の項目に限り、印の判断材料(単勝オッズ/人気・参考EV)の既存指示は変わらず残ること", () => {
+    const p = buildPrompt(baseInput());
+    expect(p).toContain(
+      "判断材料: 3着内率・参考EV・単勝オッズ/人気・脚質と展開想定、およびここまでの分析(各馬の place_prob と reason)を総合して判断してください。",
+    );
+    expect(p).toContain("単勝オッズ・人気・参考EVは、予想印の☆・注(人気薄判定)や妙味の把握に使ってください。");
+    // 限定の文言(印の判断には従来どおり使ってよい)が、禁止の指示と同じ行にあること。
+    const line = instructionSection(p)
+      .split("\n")
+      .find((l) => l.includes("highlights") && l.includes("オッズ"))!;
+    expect(line).toContain("印の判断");
+  });
+
+  it("highlights・concerns は reason の言い換えにせず、事前推定値は「3着内率」と書くよう指示すること(『prior』は使わない)", () => {
+    const p = buildPrompt(baseInput());
+    const sec = instructionSection(p);
+    expect(sec).toContain("言い換え");
+    const notation = sec.split("\n").find((l) => l.includes("highlights") && l.includes("3着内率"));
+    expect(notation).toBeDefined();
+    expect(p).not.toContain("prior");
+  });
+
+  it("出力スキーマの例は mark の後ろに highlights・concerns を持ち(キー順固定)、1頭は項目あり・1頭は空配列の例を示すこと", () => {
+    const ex = schemaExample(buildPrompt(baseInput()));
+    expect(ex.horses).toHaveLength(2);
+    for (const h of ex.horses) {
+      expect(Object.keys(h)).toEqual(["number", "place_prob", "reason", "mark", "highlights", "concerns"]);
+    }
+    const [a, b] = ex.horses as [Record<string, unknown>, Record<string, unknown>];
+    expect(Array.isArray(a["highlights"]) && (a["highlights"] as unknown[]).length > 0).toBe(true);
+    expect(Array.isArray(a["concerns"]) && (a["concerns"] as unknown[]).length > 0).toBe(true);
+    expect(b["highlights"]).toEqual([]);
+    expect(Array.isArray(b["concerns"])).toBe(true);
+  });
+
+  it("出力例の項目は、指示した上限(最大3項目・全角30字以内)に収まっていること", () => {
+    const ex = schemaExample(buildPrompt(baseInput()));
+    for (const h of ex.horses) {
+      for (const key of ["highlights", "concerns"] as const) {
+        const items = h[key] as string[];
+        expect(items.length).toBeLessThanOrEqual(3);
+        for (const item of items) {
+          expect(item.length).toBeLessThanOrEqual(30);
+        }
+      }
+    }
   });
 });
 
@@ -1410,7 +1498,7 @@ describe("buildPrompt(追加指示の注入口・Task#28 プロンプト改善C)
   // 【展開想定】末尾に共通の判断委譲行を追加した(baseInputはvenueKind未指定=中央相当のため
   // 地方限定行は出ない)。他セクションは不変。
   const UNCHANGED_BASE_PROMPT =
-    "あなたは競馬の複勝圏内(3着以内)確率を評価するアナリストです。\n\n【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】\n脚質分布: 逃げ1頭 / 先行0頭 / 差し1頭 / 追込0頭\n主導権候補: 馬番1\nペース想定: 平均(根拠: 逃げ馬1頭で平均ペース想定(逃げ1頭・主導権候補は馬番1))\n恵まれる脚質: 先行・差し\n損する脚質: 特になし\nコース形態(会場・回り・距離)による前後有利は、上記に加えてあなた自身でも判断してください。\n\n【出走馬(3着内率 は scorer が数値データから算出した複勝圏内〈3着以内〉確率の事前推定値)】\n馬番1 アルファ: 3着内率=0.42, 脚質=逃げ(安定度:不明), 過去ペース傾向=データ不足, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし\n馬番2 ブラボー: 3着内率=0.18, 脚質=差し(安定度:不明), 過去ペース傾向=データ不足, レース間隔=休み明け, 調教=情報なし, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし\n\n注記: 参考EVは 3着内率(LLM補正前の事前推定値)× 複勝オッズ下限 の参考値です。あなたが出す補正後確率(place_prob)で最終的なEVは別途再計算されるため、参考EV自体を出力する必要はありません。\n重要: 単勝オッズ・人気・参考EVは、予想印の☆・注(人気薄判定)や妙味の把握に使ってください。3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。補正の根拠はあくまで脚質・展開・調教・レース間隔・厩舎コメント等のデータに基づいてください。本ツールは市場から独立した確率推定と市場オッズを掛け合わせて妙味を見つけることが目的であり、確率推定が市場に迎合すると妙味が失われます。\n\n【指示】\n各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。\n補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。\n補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。\nreason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。\nplace_prob は 0 以上 1 以下の小数です。全馬について出力してください。\n\n【予想印】\n各馬に以下6種類の予想印(mark)のいずれか、または印なし(null)を1つ付けてください(1頭に複数の印を付けることはできません)。\n◎(本命): 1着になりそうな最有力の馬。必ずちょうど1頭。\n〇(対抗): 本命に対抗できそうな2番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n▲(単穴): 本命と対抗を差し置いて勝てる可能性がある3番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n△(連下): 上記3つの印よりは劣るが、2着や3着に入りそうな馬。0〜3頭(該当馬がいなければ付けなくてよい)。\n☆(星): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば勝てる可能性のある穴馬。0〜1頭。\n注(注意): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば3着に入る可能性のある穴馬。0〜1頭。\n判断材料: 3着内率・参考EV・単勝オッズ/人気・脚質と展開想定、およびここまでの分析(各馬の place_prob と reason)を総合して判断してください。\n本線印(◎〇▲△)の頭数制約: ◎は必ずちょうど1頭。それ以外は◎→〇→▲→△の順で上位から途切れなく付けてください(▲を付けるなら〇も必ず付ける、△を付けるなら〇と▲も必ず付ける)。上位を飛ばして下位だけに印を付けることは不可です。自信の持てる印がそこまでなら、それより下位の印は無理に付けず省略してください(例: ◎のみ、◎〇のみ、◎〇▲のみもすべて可)。\n☆・注は本線(◎〇▲△)とは独立した人気薄向けの印です。本線印の頭数や有無、☆と注のどちらを先に検討したかに関わらず、それぞれ単独で0〜1頭を判断してください(☆だけ・注だけ・両方・どちらもなし、いずれも可)。\n\n【出力スキーマ(この形式の JSON のみ)】\n{\"horses\": [{\"number\": 1, \"place_prob\": 0.42, \"reason\": \"...\", \"mark\": \"◎\"}, {\"number\": 2, \"place_prob\": 0.30, \"reason\": \"...\", \"mark\": null}]}";
+    "あなたは競馬の複勝圏内(3着以内)確率を評価するアナリストです。\n\n【レース情報】\nレース名: テスト特別\nコース: 芝2000m\n競馬場: 東京\n天候: 晴\n馬場状態: 良\n\n【展開想定】\n脚質分布: 逃げ1頭 / 先行0頭 / 差し1頭 / 追込0頭\n主導権候補: 馬番1\nペース想定: 平均(根拠: 逃げ馬1頭で平均ペース想定(逃げ1頭・主導権候補は馬番1))\n恵まれる脚質: 先行・差し\n損する脚質: 特になし\nコース形態(会場・回り・距離)による前後有利は、上記に加えてあなた自身でも判断してください。\n\n【出走馬(3着内率 は scorer が数値データから算出した複勝圏内〈3着以内〉確率の事前推定値)】\n馬番1 アルファ: 3着内率=0.42, 脚質=逃げ(安定度:不明), 過去ペース傾向=データ不足, レース間隔=中2週, 調教=評価「動き抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし\n馬番2 ブラボー: 3着内率=0.18, 脚質=差し(安定度:不明), 過去ペース傾向=データ不足, レース間隔=休み明け, 調教=情報なし, 厩舎コメント=なし, 単勝オッズ=不明, 人気=不明(オッズ値から判断), 複勝オッズ下限=複勝未発売, 参考EV=算出不可, 条件替わり=なし\n\n注記: 参考EVは 3着内率(LLM補正前の事前推定値)× 複勝オッズ下限 の参考値です。あなたが出す補正後確率(place_prob)で最終的なEVは別途再計算されるため、参考EV自体を出力する必要はありません。\n重要: 単勝オッズ・人気・参考EVは、予想印の☆・注(人気薄判定)や妙味の把握に使ってください。3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。補正の根拠はあくまで脚質・展開・調教・レース間隔・厩舎コメント等のデータに基づいてください。本ツールは市場から独立した確率推定と市場オッズを掛け合わせて妙味を見つけることが目的であり、確率推定が市場に迎合すると妙味が失われます。\n\n【指示】\n各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。\n補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。\n補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。\nreason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。\n各馬について、reason(総合の根拠の一文)とは別に、強調材料(highlights)と懸念事項(concerns)を短い句の配列で出力してください。highlights はその馬を高く評価できる材料、concerns は評価を下げる材料です。それぞれ最大3項目で、1項目は全角30字以内の短い句にしてください。該当する材料が無ければ空配列 [] にしてください。\nhighlights・concerns は reason の言い換えではなく、reason とは別の個々の材料を挙げてください。highlights・concerns の文中でも、事前推定値を指すときは必ず「3着内率」と日本語で表記してください。\nhighlights・concerns の各項目には、単勝オッズ・人気・参考EVを材料として挙げないでください(これらを予想印の判断に使うことは従来どおりで構いません)。\nplace_prob は 0 以上 1 以下の小数です。全馬について出力してください。\n\n【予想印】\n各馬に以下6種類の予想印(mark)のいずれか、または印なし(null)を1つ付けてください(1頭に複数の印を付けることはできません)。\n◎(本命): 1着になりそうな最有力の馬。必ずちょうど1頭。\n〇(対抗): 本命に対抗できそうな2番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n▲(単穴): 本命と対抗を差し置いて勝てる可能性がある3番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n△(連下): 上記3つの印よりは劣るが、2着や3着に入りそうな馬。0〜3頭(該当馬がいなければ付けなくてよい)。\n☆(星): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば勝てる可能性のある穴馬。0〜1頭。\n注(注意): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば3着に入る可能性のある穴馬。0〜1頭。\n判断材料: 3着内率・参考EV・単勝オッズ/人気・脚質と展開想定、およびここまでの分析(各馬の place_prob と reason)を総合して判断してください。\n本線印(◎〇▲△)の頭数制約: ◎は必ずちょうど1頭。それ以外は◎→〇→▲→△の順で上位から途切れなく付けてください(▲を付けるなら〇も必ず付ける、△を付けるなら〇と▲も必ず付ける)。上位を飛ばして下位だけに印を付けることは不可です。自信の持てる印がそこまでなら、それより下位の印は無理に付けず省略してください(例: ◎のみ、◎〇のみ、◎〇▲のみもすべて可)。\n☆・注は本線(◎〇▲△)とは独立した人気薄向けの印です。本線印の頭数や有無、☆と注のどちらを先に検討したかに関わらず、それぞれ単独で0〜1頭を判断してください(☆だけ・注だけ・両方・どちらもなし、いずれも可)。\n\n【出力スキーマ(この形式の JSON のみ)】\n{\"horses\": [{\"number\": 1, \"place_prob\": 0.42, \"reason\": \"...\", \"mark\": \"◎\", \"highlights\": [\"強み1\", \"強み2\"], \"concerns\": [\"懸念1\"]}, {\"number\": 2, \"place_prob\": 0.30, \"reason\": \"...\", \"mark\": null, \"highlights\": [], \"concerns\": [\"懸念1\", \"懸念2\"]}]}";
 
   it("回帰: additionalInstruction未指定なら既存プロンプトと完全一致すること", () => {
     const p = buildPrompt(baseInput());

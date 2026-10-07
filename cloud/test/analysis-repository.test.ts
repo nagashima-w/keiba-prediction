@@ -104,7 +104,8 @@ describe("AC-b4: 共有フィクスチャ(#168)の期待値と一致する", () 
     const expected = {
       ...expectedRest,
       id: saved.id,
-      horses: horses.map(({ contributions: _c, ...h }) => h),
+      // 一覧の要約の馬は、大きな列(contributions)に加えて、強調材料・懸念事項(Issue #197。詳細の画面だけが使う)も持たない。
+      horses: horses.map(({ contributions: _c, highlights: _h, concerns: _n, ...h }) => h),
       hasDetail: true,
       // Issue #194: 一覧の要約に、理由(固定文言。D1 の llm_note)が載る。フィクスチャの保存は理由なしなので null(理由ありの往復は analysis-llm-note.test.ts)。
       llmNote: null,
@@ -114,6 +115,7 @@ describe("AC-b4: 共有フィクスチャ(#168)の期待値と一致する", () 
     expect("rawResponse" in list[0]!).toBe(false);
     expect("raceSnapshot" in list[0]!).toBe(false);
     expect(list[0]!.horses.every((h) => !("contributions" in h))).toBe(true);
+    expect(list[0]!.horses.every((h) => !("highlights" in h) && !("concerns" in h))).toBe(true);
   });
 });
 
@@ -558,6 +560,33 @@ describe("AC-b6: json_each を通しても、文字列の内容が壊れない",
     "é 結合文字",
   ];
 
+  it("馬の highlights・concerns(Issue #197): 日本語・引用符・改行・絵文字・空文字を含む項目が、そのまま戻る。項目なし(空配列・省略)は D1 で NULL、読むと []", async () => {
+    const tricky = ["追い切り好時計 ◎", '引用"符"と\\バックスラッシュ', "改行\nと\tタブ", "絵文字 😀 🐎 𠮷", "'; DROP TABLE analyses; --", "x".repeat(300)];
+    const base = mkRecord(1, 1, null).horses[0]!;
+    const rec: AnalysisRecord = {
+      ...mkRecord(1, 3, null),
+      horses: [
+        { ...base, umaban: 1, highlights: tricky.slice(0, 3), concerns: tricky.slice(3) },
+        { ...base, umaban: 2, highlights: [], concerns: [] },
+        { ...base, umaban: 3 },
+      ],
+    };
+    const saved = await store().saveAnalysis(rec);
+    const horses = (await store().getAnalysisDetail(saved.id))!.analysis.horses;
+    expect(horses.map((h) => [h.highlights, h.concerns])).toEqual([
+      [tricky.slice(0, 3), tricky.slice(3)],
+      [[], []],
+      [[], []],
+    ]);
+    // D1 上の保存の形: 項目あり = JSON 配列の文字列、項目なし = NULL(空配列の文字列 "[]" で持たない)。
+    const raw = (await local.db.prepare("SELECT umaban, highlights_json AS h, concerns_json AS c FROM analysis_horses WHERE analysis_id = ? ORDER BY umaban").bind(saved.id).all<{ umaban: number; h: string | null; c: string | null }>()).results;
+    expect(raw.map((r) => r.umaban)).toEqual([1, 2, 3]);
+    expect(raw[0]!.h).toBe(JSON.stringify(tricky.slice(0, 3)));
+    expect(raw[0]!.c).toBe(JSON.stringify(tricky.slice(3)));
+    expect(raw[1]).toEqual({ umaban: 2, h: null, c: null });
+    expect(raw[2]).toEqual({ umaban: 3, h: null, c: null });
+  });
+
   it(`馬の reason・買い目の combo_key の ${strings.length} 通りの文字列が、そのまま戻る(空文字は空文字、"null" は文字列のまま)`, async () => {
     const rec: AnalysisRecord = {
       ...mkRecord(1, strings.length, null),
@@ -715,7 +744,12 @@ describe("listAnalysisSummaries(一覧。D1 だけ。問い合わせは 2 文で
       expect(sql).not.toMatch(/raw_response/);
       expect(sql).not.toMatch(/race_snapshot_json/);
       expect(sql.replace(/NULL AS contributions_json/g, "")).not.toMatch(/contributions_json/);
+      // Issue #197: 強調材料・懸念事項の列も、一覧では読まない(NULL AS の形だけ)。
+      expect(sql.replace(/NULL AS highlights_json/g, "").replace(/NULL AS concerns_json/g, "")).not.toMatch(/highlights_json|concerns_json/);
     }
+    // 前提: 馬の SQL には、上の置換で消える NULL AS の形が実際にある(列の名前ごと消えている状態でない)。
+    expect(db.prepared[1]).toMatch(/NULL AS highlights_json/);
+    expect(db.prepared[1]).toMatch(/NULL AS concerns_json/);
     // 前提: 検査対象の SQL が実際に取れている(空配列だと上の for が何も確かめない)
     expect(db.prepared).toHaveLength(2);
     expect(db.prepared[0]).toMatch(/FROM analyses/);

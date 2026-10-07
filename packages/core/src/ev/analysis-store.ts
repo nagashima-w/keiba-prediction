@@ -210,6 +210,8 @@ export class AnalysisStore {
         contributions_json TEXT,
         mark TEXT,
         reason TEXT,
+        highlights_json TEXT,
+        concerns_json TEXT,
         PRIMARY KEY (analysis_id, umaban),
         FOREIGN KEY (analysis_id) REFERENCES ${ANALYSES_TABLE} (id)
       );
@@ -320,6 +322,7 @@ export class AnalysisStore {
     this.migrateResultDetailColumns();
     this.migrateAnalysisExportColumns();
     this.migrateHorseReasonColumn();
+    this.migrateHorseItemsColumns();
     this.migrateAllocationQuinellaColumn();
     this.migrateAllocationExactaColumn();
     this.migrateAllocationTrifectaColumn();
@@ -453,6 +456,23 @@ export class AnalysisStore {
       .all() as Array<{ name: string }>;
     if (!columns.some((c) => c.name === "reason")) {
       this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN reason TEXT`);
+    }
+  }
+
+  /**
+   * 強調材料・懸念事項(highlights_json・concerns_json)列を後付けするマイグレーション(Issue #197・#196-a)。
+   * 旧バージョンで作成済みの analysis_horses には2列が無いため、無い列だけ追加する(既存行は NULL=項目なしとして
+   * `[]` で読める=後方互換)。列の並びは CREATE TABLE と同じ(reason の後ろ)で、クラウド版(D1)の migration 0006 の
+   * ALTER の並びとも一致する(構造の一致は scripts/test/cloud-d1-schema.test.ts が固定している)。
+   */
+  private migrateHorseItemsColumns(): void {
+    const columns = this.db
+      .prepare(`PRAGMA table_info(${ANALYSIS_HORSES_TABLE})`)
+      .all() as Array<{ name: string }>;
+    for (const name of ["highlights_json", "concerns_json"]) {
+      if (!columns.some((c) => c.name === name)) {
+        this.db.exec(`ALTER TABLE ${ANALYSIS_HORSES_TABLE} ADD COLUMN ${name} TEXT`);
+      }
     }
   }
 

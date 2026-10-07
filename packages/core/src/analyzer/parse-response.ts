@@ -182,6 +182,13 @@ export interface ParsedHorseResult {
   readonly adjustedProb: number;
   /** LLMが付けた根拠(prior採用・欠けなどで無い場合は null)。 */
   readonly reason: string | null;
+  /**
+   * 強調材料(Issue #197・#196-a。各最大 {@link MAX_ITEMS_PER_LIST} 項目の短い句)。
+   * 欠落・形違い・prior採用の馬(usedPrior)は `[]`。必須だが、空配列が「無い」を表す。
+   */
+  readonly highlights: readonly string[];
+  /** 懸念事項(Issue #197・#196-a。仕様は {@link ParsedHorseResult.highlights} と同じ)。 */
+  readonly concerns: readonly string[];
   /** ±10%(または[0,1])逸脱でクリップした場合 true。 */
   readonly clipped: boolean;
   /** LLM値が使えず(馬番欠け or 不正値)prior をそのまま採用した場合 true。 */
@@ -198,6 +205,27 @@ export interface ParseAnalyzerResult {
   readonly clippedCount: number;
   /** prior をそのまま採用した(欠け/不正)馬の数。 */
   readonly missingCount: number;
+}
+
+/** 強調材料・懸念事項の1馬あたりの最大項目数(Issue #197。プロンプトの指示と同じ値)。 */
+export const MAX_ITEMS_PER_LIST = 3;
+
+/**
+ * 強調材料・懸念事項の生の値を `string[]` に整える(例外を投げない。Issue #197)。
+ * 配列でなければ `[]`。文字列でない要素は捨て、各要素は trim して空なら捨て、**空を除いたあとに**先頭
+ * {@link MAX_ITEMS_PER_LIST} 個に切る。1項目の長さは切らない(全角30字はプロンプトの指示のみ)。
+ */
+function coerceItemList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const items: string[] = [];
+  for (const el of raw) {
+    if (typeof el !== "string") continue;
+    const t = el.trim();
+    if (t === "") continue;
+    items.push(t);
+    if (items.length >= MAX_ITEMS_PER_LIST) break;
+  }
+  return items;
 }
 
 /**
@@ -282,6 +310,8 @@ export function parseAnalyzerResponse(
   const byNumber = new Map<number, number>();
   const reasonByNumber = new Map<number, string | null>();
   const rawMarkByNumber = new Map<number, unknown>();
+  const highlightsByNumber = new Map<number, string[]>();
+  const concernsByNumber = new Map<number, string[]>();
   for (const entry of rawHorses) {
     if (typeof entry !== "object" || entry === null) continue;
     const rec = entry as Record<string, unknown>;
@@ -292,6 +322,9 @@ export function parseAnalyzerResponse(
     byNumber.set(num, typeof prob === "number" ? prob : NaN);
     const reason = rec["reason"];
     reasonByNumber.set(num, typeof reason === "string" ? reason : null);
+    // 強調材料・懸念事項(Issue #197)。欠落・形違いは `[]`(分析は止めない)。
+    highlightsByNumber.set(num, coerceItemList(rec["highlights"]));
+    concernsByNumber.set(num, coerceItemList(rec["concerns"]));
     // mark キー自体が無い場合(旧形式)は undefined のまま登録され、classifyMark で null 扱いになる。
     rawMarkByNumber.set(num, rec["mark"]);
   }
@@ -320,6 +353,8 @@ export function parseAnalyzerResponse(
         prior: p.prior,
         adjustedProb: p.prior,
         reason: null,
+        highlights: [],
+        concerns: [],
         clipped: false,
         usedPrior: true,
         mark,
@@ -348,6 +383,8 @@ export function parseAnalyzerResponse(
       prior: p.prior,
       adjustedProb: adjusted,
       reason: reasonByNumber.get(p.umaban) ?? null,
+      highlights: highlightsByNumber.get(p.umaban) ?? [],
+      concerns: concernsByNumber.get(p.umaban) ?? [],
       clipped,
       usedPrior: false,
       mark,

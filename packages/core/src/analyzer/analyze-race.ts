@@ -182,6 +182,8 @@ function priorFallbackHorses(priors: readonly PriorRef[]): ParsedHorseResult[] {
     prior: p.prior,
     adjustedProb: p.prior,
     reason: null,
+    highlights: [],
+    concerns: [],
     clipped: false,
     usedPrior: true,
     mark: null,

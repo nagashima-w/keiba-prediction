@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { D1_FREE_DB_BYTES, buildDetailText, seededRandom, yearsUntilFull } from "../measure-d1-size.js";
+import { D1_FREE_DB_BYTES, buildDetailText, seededRandom, syntheticItems, yearsUntilFull } from "../measure-d1-size.js";
 
 /**
  * Issue #171(#169-a): 容量の測定スクリプト(scripts/measure-d1-size.ts)の純関数の検査。
@@ -58,5 +58,28 @@ describe("buildDetailText(R2 の詳細オブジェクトの JSON。Issue #174 �
 
   it("同じ入力から同じ文字列を返す(乱数を使わない。CPU 測定の入力が実行ごとに変わらない)", () => {
     expect(buildDetailText()).toBe(buildDetailText());
+  });
+});
+
+describe("syntheticItems(強調材料・懸念事項の合成。Issue #197。実データではなく、上限寄りの大きさの見積もり用)", () => {
+  it("count 個の、ちょうど chars 文字(全角)の項目を返す。UTF-8 で 1 文字 3 バイトなので、1項目 = chars × 3 バイト", () => {
+    const items = syntheticItems(3, 30, "h", 7);
+    expect(items).toHaveLength(3);
+    for (const item of items) {
+      expect([...item]).toHaveLength(30);
+      expect(Buffer.byteLength(item, "utf-8")).toBe(90);
+    }
+  });
+
+  it("count が 0 なら空配列(項目なしの基準値。#197 より前の保存の大きさを再現する)", () => {
+    expect(syntheticItems(0, 30, "h", 7)).toEqual([]);
+  });
+
+  it("同じ入力から同じ値(乱数を使わない)。種類(強調・懸念)と馬番が違えば、違う文字列になる", () => {
+    expect(syntheticItems(3, 30, "h", 7)).toEqual(syntheticItems(3, 30, "h", 7));
+    expect(syntheticItems(3, 30, "h", 7)).not.toEqual(syntheticItems(3, 30, "c", 7));
+    expect(syntheticItems(3, 30, "h", 7)).not.toEqual(syntheticItems(3, 30, "h", 8));
+    // 同じ列の中の項目どうしも別の文字列(重複した行を作らない)
+    expect(new Set(syntheticItems(3, 30, "h", 7)).size).toBe(3);
   });
 });

@@ -8,7 +8,8 @@
  *  (2) 実際の SQLite(better-sqlite3。D1 と同じ SQLite)に N 件保存したときの、1分析あたりの大きさ(`dbstat` の内訳つき)
  *      - A: 大きな列は NULL(R2 へ出す。D1 に残るのは要約・馬・配分・買い目)
  *      - 全部 D1: 大きな列も D1 の列に入れる(exe と同じ保存)
- *      表は cloud/migrations(0001+0002)と同じ(exe の最終スキーマ + detail_key + 索引2つ)
+ *      表は cloud/migrations と同じ構造(exe の最終スキーマ + detail_key + 索引2つ。#197 の highlights_json・concerns_json は exe の最終スキーマに入っている。llm_note・r2_ops・cloud_settings は含めない)
+ *  (2') 強調材料・懸念事項(#197)は合成(馬ごとに各 --item-count 項目 × 全角 --item-chars 字。既定 3 × 30 = 上限どおり。実データではない)。--item-count 0 で、#197 より前の保存の大きさを再現する
  *  (3) 500MB(D1 の Free の DB 1個あたりの上限)が埋まる年数(年間件数ごと)
  *
  * 使い方(リポジトリのルートで):
@@ -62,6 +63,26 @@ export function seededRandom(seed: number): () => number {
 }
 
 const bytes = (s: string): number => Buffer.byteLength(s, "utf-8");
+
+/**
+ * 強調材料・懸念事項(Issue #197)の合成。**実データではなく**、`count` 個・各 `chars` 文字(全角)の文字列を返す
+ * (「3項目・全角30字」の上限どおりに満たした、上限寄りの見積もり。実際の LLM の出力は、これより短い項目・少ない項目になりうる。
+ * 公開後の実データで測り直す)。乱数は使わず、種類(`h`=強調・`c`=懸念)・馬番・項目の位置から決める(同じ入力なら同じ文字列)。
+ * `count` が 0 なら空配列(#197 より前の保存の大きさを再現する基準値)。
+ */
+export function syntheticItems(count: number, chars: number, kind: "h" | "c", umaban: number): string[] {
+  const alphabet = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほ"; // 全角(UTF-8 で 1 文字 3 バイト)
+  return Array.from({ length: count }, (_, i) => {
+    const seed = (kind === "h" ? 0 : 11) + umaban * 5 + i * 3;
+    return Array.from({ length: chars }, (_, j) => alphabet[(seed + j) % alphabet.length]!).join("");
+  });
+}
+
+/** 強調材料・懸念事項の合成の指定(`count` が 0 なら付けない)。 */
+interface ItemSpec {
+  readonly count: number;
+  readonly chars: number;
+}
 const fixture = (name: string): string => readFileSync(path.join(FIXTURES, name), "utf-8");
 
 const COMBO_FIXTURES: ReadonlyArray<readonly [ComboBetType, string]> = [
@@ -172,7 +193,7 @@ function measureColumns(responses: readonly string[]): void {
   console.log(`  R2 に置く詳細オブジェクト(snapshot 全部入り + raw + contributions ${columns.horseCount}頭): 平文 ${bytes(detail)} バイト, gzip ${gzipSync(detail).length} バイト`);
 }
 
-function makeRecord(i: number, full: boolean, nHorses: number, responses: readonly string[], rand: () => number): AnalysisRecord {
+function makeRecord(i: number, full: boolean, nHorses: number, responses: readonly string[], rand: () => number, items: ItemSpec): AnalysisRecord {
   const c = i % responses.length;
   const reasons = reasonsOf(responses[c]!);
   const marks = ["◎", "〇", "▲", null] as const;
@@ -181,6 +202,8 @@ function makeRecord(i: number, full: boolean, nHorses: number, responses: readon
     isPositive: rand() < 0.3, mark: marks[k % 4] ?? null,
     contributions: full ? Array.from({ length: 13 }, (_, j) => ({ biasName: `バイアス項目${j}`, applied: true, reason: `近走の着順から算出(サンプル${j})`, weight: rand(), correction: rand() * 0.02, sampleCount: j, targetRate: rand(), overallRate: rand() })) : null,
     reason: reasons[k % reasons.length] ?? null,
+    highlights: syntheticItems(items.count, items.chars, "h", k + 1),
+    concerns: syntheticItems(items.count, items.chars, "c", k + 1),
   }));
   return {
     raceId: String(202600000000 + i), analyzedAt: new Date(1.78e12 + i * 600000).toISOString(), kaisaiDate: "20260628",
@@ -195,13 +218,13 @@ function makeRecord(i: number, full: boolean, nHorses: number, responses: readon
   };
 }
 
-function measureDb(label: string, full: boolean, n: number, responses: readonly string[], dir: string): number {
+function measureDb(label: string, full: boolean, n: number, responses: readonly string[], dir: string, items: ItemSpec): number {
   const rand = seededRandom(20261006);
   const store = new AnalysisStore({ filename: path.join(dir, `${label}.db`) });
   const db = store.rawDatabase;
   db.exec(readFileSync(D1_EXTRA_MIGRATION, "utf-8")); // D1 専用の追加分(detail_key・索引2つ)。表は exe の最終スキーマと同じ
   for (let i = 0; i < n; i += 1) {
-    store.saveAnalysis(makeRecord(i, full, 16, responses, rand));
+    store.saveAnalysis(makeRecord(i, full, 16, responses, rand, items));
   }
   db.pragma("wal_checkpoint(TRUNCATE)");
   const pages = db.pragma("page_count", { simple: true }) as number;
@@ -223,13 +246,16 @@ function argNumber(flag: string, fallback: number): number {
 function main(): void {
   const nA = argNumber("--n-a", 1000);
   const nFull = argNumber("--n-full", 300);
+  // 強調材料・懸念事項(#197)の合成の指定。既定は上限(3項目・全角30字)。--item-count 0 で、#197 より前の保存の大きさ(基準値)を再現する。
+  const items: ItemSpec = { count: argNumber("--item-count", 3), chars: argNumber("--item-chars", 30) };
   const responses = loadResponses();
   measureColumns(responses);
   console.log("\n## (2) 1分析あたりの D1(SQLite)の大きさ(16頭・買い目 10 件・索引込み・固定の種)");
   const dir = mkdtempSync(path.join(tmpdir(), "keiba-d1-size-"));
   try {
-    const perA = measureDb("A(大きな列は NULL)", false, nA, responses, dir);
-    const perFull = measureDb("全部 D1(大きな列も入れる)", true, nFull, responses, dir);
+    console.log(`  強調材料・懸念事項: 馬ごとに各 ${items.count} 項目 × 全角 ${items.chars} 字(合成。実データではなく、上限寄りの見積もり)`);
+    const perA = measureDb("A(大きな列は NULL)", false, nA, responses, dir, items);
+    const perFull = measureDb("全部 D1(大きな列も入れる)", true, nFull, responses, dir, items);
     console.log("\n## (3) 500MB が埋まる年数(年間件数ごと)");
     for (const [name, per] of [["A", perA], ["全部 D1", perFull]] as const) {
       console.log(`  ${name}(${per.toFixed(0)} バイト/分析): ${[3500, 10000, 20000].map((y) => `${y}件/年 → ${yearsUntilFull(per, D1_FREE_DB_BYTES, y).toFixed(1)}年`).join(", ")}`);

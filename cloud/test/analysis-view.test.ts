@@ -16,7 +16,7 @@ const JOCKEY_SECRET = "JOCKEY-SECRET-cccc";
 const COMBO_SECRET = "COMBO-SECRET-dddd";
 
 function horse(umaban: number, over: Partial<StoredAnalysisHorse> = {}): StoredAnalysisHorse {
-  return { umaban, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, contributions: { secret: CONTRIB_SECRET }, mark: "◎", reason: "根拠", ...over };
+  return { umaban, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, contributions: { secret: CONTRIB_SECRET }, mark: "◎", reason: "根拠", highlights: [], concerns: [], ...over };
 }
 
 const SNAPSHOT = {
@@ -92,6 +92,32 @@ describe("buildAnalysisView の llmNote(Issue #194)", () => {
   });
 });
 
+describe("buildAnalysisView の highlights・concerns(Issue #197)", () => {
+  it("馬ごとの強調材料・懸念事項をそのまま載せる(馬を取り違えない)。項目なしは [] で、キーは常にある", () => {
+    const a = analysis({ horses: [horse(1, { highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] }), horse(2, { highlights: [], concerns: ["外枠"] }), horse(3)] });
+    const view = buildAnalysisView(detail(a, "present"), undefined);
+    expect(view.horses.map((h) => [h.umaban, h.highlights, h.concerns])).toEqual([
+      [1, ["追い切り好時計", "内枠有利"], ["距離延長"]],
+      [2, [], ["外枠"]],
+      [3, [], []],
+    ]);
+  });
+
+  it.each([["present"], ["missing"], ["none"]] as const)("詳細(R2)が %s でも載せる(D1 の馬の行にあるので、詳細の状態に依らない)", (status) => {
+    const a = analysis({ horses: [horse(1, { highlights: ["強み"], concerns: ["弱み"] })] });
+    const view = buildAnalysisView(detail(a, status), undefined);
+    expect(view.horses[0]!.highlights).toEqual(["強み"]);
+    expect(view.horses[0]!.concerns).toEqual(["弱み"]);
+  });
+
+  it("応答の配列は元のレコードの配列とは別物(後から書き換えても元に影響しない)", () => {
+    const h = horse(1, { highlights: ["強み"], concerns: ["弱み"] });
+    const view = buildAnalysisView(detail(analysis({ horses: [h] }), "present"), undefined);
+    expect(view.horses[0]!.highlights).not.toBe(h.highlights);
+    expect(view.horses[0]!.concerns).not.toBe(h.concerns);
+  });
+});
+
 describe("buildAnalysisView(Issue #183)", () => {
   it("present: 馬名・レース情報を raceSnapshot から結合し、場名・R は raceId から導く", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
@@ -111,8 +137,8 @@ describe("buildAnalysisView(Issue #183)", () => {
       [2, "ブラボー"],
       [3, null], // スナップショットに無い馬は null
     ]);
-    expect(view.horses[1]).toEqual({ umaban: 2, name: "ブラボー", prior: 0.2, adjustedProb: 0.18, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null });
-    expect(view.horses[0]).toEqual({ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠" });
+    expect(view.horses[1]).toEqual({ umaban: 2, name: "ブラボー", prior: 0.2, adjustedProb: 0.18, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [] });
+    expect(view.horses[0]).toEqual({ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠", highlights: [], concerns: [] });
   });
 
   it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
@@ -120,7 +146,7 @@ describe("buildAnalysisView(Issue #183)", () => {
     expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "llmNote", "model", "promptVersion", "race", "raceId"]);
     expect(sorted(view.race)).toEqual(["courseType", "distance", "raceName", "raceNumber", "startTime", "trackCondition", "venueName", "weather"]);
     for (const h of view.horses) {
-      expect(sorted(h)).toEqual(["adjustedProb", "ev", "isPositive", "mark", "name", "placeOddsMin", "prior", "reason", "umaban"]);
+      expect(sorted(h)).toEqual(["adjustedProb", "concerns", "ev", "highlights", "isPositive", "mark", "name", "placeOddsMin", "prior", "reason", "umaban"]);
     }
     expect(sorted(view.allocation!)).toEqual([
       "bankroll", "betUnit", "bets", "evThreshold", "fallbackReason", "includeBracketQuinella", "includeComboOdds", "includeExacta", "includeQuinella", "includeTrifecta", "includeTrio", "includeWide",

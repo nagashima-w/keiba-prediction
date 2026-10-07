@@ -53,7 +53,14 @@
               }
             },
             "mark": "◎",
-            "reason": "根拠その1"
+            "reason": "根拠その1",
+            "highlights": [
+              "追い切り好時計",
+              "内枠有利"
+            ],
+            "concerns": [
+              "距離延長"
+            ]
           },
           {
             "umaban": 2,
@@ -64,7 +71,11 @@
             "isPositive": false,
             "contributions": {},
             "mark": "注",
-            "reason": ""
+            "reason": "",
+            "highlights": [],
+            "concerns": [
+              "\"引用\"と改行\nを含む句"
+            ]
           },
           {
             "umaban": 10,
@@ -149,7 +160,14 @@
               }
             },
             "mark": "◎",
-            "reason": "根拠その1"
+            "reason": "根拠その1",
+            "highlights": [
+              "追い切り好時計",
+              "内枠有利"
+            ],
+            "concerns": [
+              "距離延長"
+            ]
           },
           {
             "umaban": 2,
@@ -160,7 +178,11 @@
             "isPositive": false,
             "contributions": {},
             "mark": "注",
-            "reason": ""
+            "reason": "",
+            "highlights": [],
+            "concerns": [
+              "\"引用\"と改行\nを含む句"
+            ]
           },
           {
             "umaban": 10,
@@ -171,7 +193,9 @@
             "isPositive": false,
             "contributions": null,
             "mark": null,
-            "reason": null
+            "reason": null,
+            "highlights": [],
+            "concerns": []
           }
         ],
         "evEstimated": true,
@@ -278,7 +302,9 @@
             "isPositive": false,
             "contributions": null,
             "mark": null,
-            "reason": null
+            "reason": null,
+            "highlights": [],
+            "concerns": []
           }
         ],
         "evEstimated": false,
@@ -360,7 +386,9 @@
               2
             ],
             "mark": "▲",
-            "reason": null
+            "reason": null,
+            "highlights": [],
+            "concerns": []
           }
         ],
         "evEstimated": false,

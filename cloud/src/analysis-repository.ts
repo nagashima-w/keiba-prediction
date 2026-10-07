@@ -105,7 +105,8 @@ export interface AnalysisDetailResult {
   readonly llmNote: string | null;
 }
 
-export type AnalysisSummaryHorse = Omit<StoredAnalysisHorse, "contributions">;
+/** 一覧の馬は、大きな列(contributions)と、強調材料・懸念事項(Issue #197。詳細の画面だけが使うので、一覧では読まない)を持たない。 */
+export type AnalysisSummaryHorse = Omit<StoredAnalysisHorse, "contributions" | "highlights" | "concerns">;
 
 /** 一覧の1件。`StoredAnalysis` から大きな列(rawResponse・raceSnapshot・馬の contributions)を除いたもの + R2 に詳細があるか。 */
 export interface AnalysisSummary extends Omit<StoredAnalysis, "horses" | "rawResponse" | "raceSnapshot"> {
@@ -219,7 +220,7 @@ function listStatements(db: AnalysisDb, filter: AnalysisListFilter, limit: numbe
   const where = conditions.length === 0 ? "" : ` WHERE ${conditions.join(" AND ")}`;
   const analysesSql = `SELECT ${SUMMARY_COLUMNS} FROM analyses${where} ORDER BY id DESC LIMIT ?`;
   const horsesSql = `SELECT analysis_id AS analysisId, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive,
-       NULL AS contributions_json, mark, reason
+       NULL AS contributions_json, mark, reason, NULL AS highlights_json, NULL AS concerns_json
   FROM analysis_horses
   WHERE analysis_id IN (SELECT id FROM analyses${where} ORDER BY id DESC LIMIT ?)
   ORDER BY analysis_id DESC, umaban`;
@@ -360,7 +361,7 @@ export class D1AnalysisStore implements AnalysisRepository {
     }
     return ((analyses?.results ?? []) as Array<AnalysisRow & { hasDetail: number; llmNote: string | null }>).map((row) => {
       const { rawResponse: _raw, raceSnapshot: _snapshot, horses: stored, ...rest } = toStoredAnalysis(row, horsesByAnalysis.get(row.id) ?? []);
-      return { ...rest, horses: stored.map(({ contributions: _c, ...horse }) => horse), hasDetail: row.hasDetail === 1, llmNote: row.llmNote ?? null };
+      return { ...rest, horses: stored.map(({ contributions: _c, highlights: _h, concerns: _n, ...horse }) => horse), hasDetail: row.hasDetail === 1, llmNote: row.llmNote ?? null };
     });
   }
 

@@ -1193,6 +1193,124 @@ describe("AnalysisStore(分析結果のSQLite保存)", () => {
     });
   });
 
+  describe("強調材料・懸念事項(highlights_json・concerns_json)の保存・復元・後付け列(Issue #197・#196-a)", () => {
+    const horse = (umaban: number, extra: Record<string, unknown>) => ({
+      umaban,
+      prior: 0.3,
+      adjustedProb: 0.3,
+      placeOddsMin: 2.0,
+      ev: 0.6,
+      isPositive: false,
+      contributions: null,
+      mark: null,
+      reason: null,
+      ...extra,
+    });
+    const columnNames = (db: InstanceType<typeof Database>): string[] =>
+      (db.prepare("PRAGMA table_info(analysis_horses)").all() as { name: string }[]).map((c) => c.name);
+
+    it("新規に作った DB の analysis_horses は highlights_json・concerns_json 列を持つ(CREATE に含まれる)", () => {
+      const db = new Database(":memory:");
+      new AnalysisStore({ database: db });
+      const names = columnNames(db);
+      expect(names).toContain("highlights_json");
+      expect(names).toContain("concerns_json");
+      // 並びは reason の後ろ(D1 の ALTER で足した列の並びと一致させる)。
+      expect(names.slice(-3)).toEqual(["reason", "highlights_json", "concerns_json"]);
+      db.close();
+    });
+
+    it("指定した配列がそのまま往復し、空配列・省略は DB 上 NULL で、読むと [] に戻る", () => {
+      const db = new Database(":memory:");
+      const store = new AnalysisStore({ database: db });
+      const id = store.saveAnalysis(
+        makeRecord({
+          raceId: "根拠細分化レース",
+          horses: [
+            horse(1, { highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] }),
+            horse(2, { highlights: [], concerns: [] }),
+            horse(3, {}),
+          ],
+        }),
+      );
+      const a = store.listAnalyses({ raceId: "根拠細分化レース" })[0]!;
+      const byUma = (n: number) => a.horses.find((h) => h.umaban === n)!;
+      expect(byUma(1).highlights).toEqual(["追い切り好時計", "内枠有利"]);
+      expect(byUma(1).concerns).toEqual(["距離延長"]);
+      expect(byUma(2).highlights).toEqual([]);
+      expect(byUma(3).concerns).toEqual([]);
+      // 保存の形(空は NULL)。
+      const raw = db
+        .prepare("SELECT umaban, highlights_json, concerns_json FROM analysis_horses WHERE analysis_id = ? ORDER BY umaban")
+        .all(id) as { umaban: number; highlights_json: string | null; concerns_json: string | null }[];
+      expect(raw).toEqual([
+        { umaban: 1, highlights_json: '["追い切り好時計","内枠有利"]', concerns_json: '["距離延長"]' },
+        { umaban: 2, highlights_json: null, concerns_json: null },
+        { umaban: 3, highlights_json: null, concerns_json: null },
+      ]);
+      store.close();
+    });
+
+    it("列が無い旧スキーマ(reason 列まである)の DB を開くと2列が後付けされ、旧行は [] で読め、新規保存で往復する", () => {
+      const db = new Database(":memory:");
+      db.exec(`
+        CREATE TABLE analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          race_id TEXT NOT NULL,
+          analyzed_at TEXT NOT NULL,
+          ev_estimated INTEGER,
+          prompt_version TEXT,
+          additional_instruction TEXT,
+          kaisai_date TEXT,
+          model TEXT,
+          raw_response TEXT,
+          race_snapshot_json TEXT,
+          history_cutoff_date TEXT,
+          prompt_lookahead_guarded INTEGER
+        );
+        CREATE TABLE analysis_horses (
+          analysis_id INTEGER NOT NULL,
+          umaban INTEGER NOT NULL,
+          prior REAL NOT NULL,
+          adjusted_prob REAL NOT NULL,
+          place_odds_min REAL,
+          ev REAL,
+          is_positive INTEGER NOT NULL,
+          contributions_json TEXT,
+          mark TEXT,
+          reason TEXT,
+          PRIMARY KEY (analysis_id, umaban),
+          FOREIGN KEY (analysis_id) REFERENCES analyses (id)
+        );
+      `);
+      const info = db
+        .prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated) VALUES (?, ?, ?)")
+        .run("旧レース3", "2026-01-01T00:00:00.000Z", 0);
+      db.prepare(
+        "INSERT INTO analysis_horses (analysis_id, umaban, prior, adjusted_prob, place_odds_min, ev, is_positive, reason) VALUES (?, 1, 0.4, 0.4, 2.0, 0.8, 0, '旧理由')",
+      ).run(Number(info.lastInsertRowid));
+      // 前提: 開く前は2列が無い。
+      expect(columnNames(db)).not.toContain("highlights_json");
+      expect(columnNames(db)).not.toContain("concerns_json");
+
+      const store = new AnalysisStore({ database: db });
+      expect(columnNames(db).slice(-3)).toEqual(["reason", "highlights_json", "concerns_json"]);
+      const old = store.listAnalyses({ raceId: "旧レース3" })[0]!;
+      expect(old.horses[0]!.reason).toBe("旧理由");
+      expect(old.horses[0]!.highlights).toEqual([]);
+      expect(old.horses[0]!.concerns).toEqual([]);
+
+      store.saveAnalysis(makeRecord({ raceId: "新レース3", horses: [horse(1, { highlights: ["強み"], concerns: ["弱み"] })] }));
+      const saved = store.listAnalyses({ raceId: "新レース3" })[0]!;
+      expect(saved.horses[0]!.highlights).toEqual(["強み"]);
+      expect(saved.horses[0]!.concerns).toEqual(["弱み"]);
+
+      // 冪等: 同じ DB の再オープンで ALTER が再実行されて落ちない。
+      expect(() => new AnalysisStore({ database: db })).not.toThrow();
+      db.close();
+    });
+  });
+
   describe("listUnimportedRaceIds(分析済みで結果未取込のレース列挙。Task#31)", () => {
     it("分析済みだが race_results に行が1件も無いレースを列挙すること", () => {
       const store = new AnalysisStore();

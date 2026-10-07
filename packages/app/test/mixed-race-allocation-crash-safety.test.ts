@@ -87,6 +87,8 @@ function row(overrides: Partial<AnalysisRowType> & { umaban: number }): Analysis
     ev: overrides.ev === undefined ? 1.5 : overrides.ev,
     isPositive: overrides.isPositive ?? true,
     reason: null,
+    highlights: [],
+    concerns: [],
     careerRunCount: overrides.careerRunCount === undefined ? 999 : overrides.careerRunCount,
     mark: null,
     evEstimated: overrides.evEstimated ?? false,

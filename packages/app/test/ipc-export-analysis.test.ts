@@ -100,6 +100,8 @@ function makeSource(overrides: Partial<AnalysisExportSource> = {}): AnalysisExpo
           contributions: null,
           mark: "◎",
           reason: "調教良化",
+          highlights: [],
+          concerns: [],
         },
       ],
     },

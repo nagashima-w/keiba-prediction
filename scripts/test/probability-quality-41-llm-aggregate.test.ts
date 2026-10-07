@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeMarketImpliedPlaceProbabilities } from "../../packages/core/src/ev/probability-quality-metrics.js";
+import { PROMPT_VERSION } from "../../packages/core/src/index.js";
 import {
   aggregateLlm,
   marketImpliedLowerBound,
@@ -94,7 +95,9 @@ function record(
     schemaVersion: LLM_OBSERVATION_SCHEMA_VERSION,
     raceId,
     caseId: `case-${raceId.slice(-2)}`,
-    promptVersion: "2026-07-28.2",
+    // 合成の記録。aggregateLlm は「記録の版 = 現行の PROMPT_VERSION」を検査する(版の違う記録を作らない)ので、現行の版に合わせる。
+    // (実在の #156 の観測 36 本は版 2026-07-28.2 のままで、#197 で PROMPT_VERSION を上げたため、この検査には通らなくなった。docs/investigations は書き換えない)
+    promptVersion: PROMPT_VERSION,
     maxAdjust: 0.1,
     promptSha256: "x",
     responseSha256: ["y"],
@@ -145,7 +148,7 @@ describe("aggregateLlm: 条件の同梱", () => {
     const r = aggregateLlm(ALL_OBS, allRecords());
     expect(r.conditions.bootstrap).toEqual(LLM_AGGREGATE_BOOTSTRAP);
     expect(r.conditions.permutation).toEqual(LLM_AGGREGATE_PERMUTATION);
-    expect(r.conditions.promptVersion).toBe("2026-07-28.2");
+    expect(r.conditions.promptVersion).toBe(PROMPT_VERSION);
     expect(r.conditions.maxAdjust).toBe(0.1);
   });
 });

@@ -138,6 +138,8 @@ async function run(
           prior: h.prior,
           adjustedProb: h.prior,
           reason: "テスト",
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: null,

@@ -39,6 +39,8 @@ function row(overrides: Partial<AnalysisRow> & { umaban: number }): AnalysisRow 
     ev: overrides.ev ?? 0.9,
     isPositive: overrides.isPositive ?? false,
     reason: null,
+    highlights: [],
+    concerns: [],
     careerRunCount: 5,
     mark: null,
     evEstimated: overrides.evEstimated ?? false,

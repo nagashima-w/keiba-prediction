@@ -518,6 +518,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: h.umaban === 1 ? "◎" : h.umaban === 2 ? "〇" : null,
@@ -560,6 +562,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: null,
@@ -587,6 +591,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -616,6 +622,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -699,6 +707,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: `馬番${h.umaban}の根拠`,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -726,6 +736,80 @@ describe("runAnalysis(分析パイプライン)", () => {
         onProgress,
       );
       expect(saved[0]!.horses.every((h) => h.reason === null)).toBe(true);
+    });
+
+    describe("強調材料・懸念事項(highlights・concerns)の配線(Issue #197・#196-a)", () => {
+      const analyzeWith = (omitUmaban: number | null) =>
+        vi.fn(
+          async (input: BuildPromptInput): Promise<AnalyzeRaceResult> => ({
+            horses: input.horses
+              .filter((h) => h.umaban !== omitUmaban)
+              .map((h) => ({
+                umaban: h.umaban,
+                prior: h.prior,
+                adjustedProb: h.prior,
+                reason: `根拠${h.umaban}`,
+                highlights: [`強み${h.umaban}-a`, `強み${h.umaban}-b`],
+                concerns: [`弱み${h.umaban}`],
+                clipped: false,
+                usedPrior: false,
+                mark: null,
+              })),
+            fallback: false,
+            retryCount: 0,
+            fallbackReason: null,
+            rawResponse: "raw",
+          }),
+        );
+
+      it("LLM有り: 各馬の highlights / concerns が rows(画面)と保存レコードの horses[] の両方に載ること", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(null) },
+          onProgress,
+        );
+        const row1 = result.rows.find((r) => r.umaban === 1)!;
+        const rec1 = saved[0]!.horses.find((h) => h.umaban === 1)!;
+        expect(row1.highlights).toEqual(["強み1-a", "強み1-b"]);
+        expect(row1.concerns).toEqual(["弱み1"]);
+        expect(rec1.highlights).toEqual(["強み1-a", "強み1-b"]);
+        expect(rec1.concerns).toEqual(["弱み1"]);
+        // 馬ごとに自分の値が載る(取り違えない)。
+        const row2 = result.rows.find((r) => r.umaban === 2)!;
+        expect(row2.highlights).toEqual(["強み2-a", "強み2-b"]);
+      });
+
+      it("LLMスキップ時は全馬の highlights / concerns が空配列(rows・保存レコードとも)", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          baseDeps(),
+          onProgress,
+        );
+        expect(result.rows.length).toBeGreaterThan(0);
+        expect(result.rows.every((r) => r.highlights.length === 0 && r.concerns.length === 0)).toBe(true);
+        expect(saved[0]!.horses.every((h) => (h.highlights ?? []).length === 0 && (h.concerns ?? []).length === 0)).toBe(true);
+        // 空配列で渡す(undefined にしない: 型が必須のため、画面側が常に配列を前提にできる)。
+        expect(result.rows.every((r) => Array.isArray(r.highlights) && Array.isArray(r.concerns))).toBe(true);
+      });
+
+      it("LLMの分析結果に含まれない馬番(欠けた馬)は空配列で、含まれる馬の値は保たれる", async () => {
+        const result = await runAnalysis(
+          parseRaceId(RACE_ID),
+          parseKaisaiDate(KAISAI),
+          { ...baseDeps(), analyze: analyzeWith(2) },
+          onProgress,
+        );
+        const row2 = result.rows.find((r) => r.umaban === 2)!;
+        const row1 = result.rows.find((r) => r.umaban === 1)!;
+        // 前提: 馬2は分析結果に無いので reason も null(prior 採用)。
+        expect(row2.reason).toBeNull();
+        expect(row2.highlights).toEqual([]);
+        expect(row2.concerns).toEqual([]);
+        expect(saved[0]!.horses.find((h) => h.umaban === 2)!.highlights ?? []).toEqual([]);
+        expect(row1.highlights).toEqual(["強み1-a", "強み1-b"]);
+      });
     });
 
     it("取得したレース情報のスナップショットをrace_snapshot_json保存用のraceSnapshotに記録すること(LLM有無に関わらず保存)", async () => {
@@ -758,6 +842,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -799,6 +885,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -842,6 +930,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -952,6 +1042,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1094,6 +1186,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1252,6 +1346,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1414,6 +1510,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1565,6 +1663,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1664,6 +1764,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -1797,6 +1899,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2089,6 +2193,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2186,6 +2292,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: 0.5,
           reason: `根拠${h.umaban}`,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: false,
           mark: null,
@@ -2232,6 +2340,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2272,6 +2382,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2317,6 +2429,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2362,6 +2476,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2458,6 +2574,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: null,
@@ -2494,6 +2612,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: true,
           mark: null,
@@ -2520,6 +2640,8 @@ describe("runAnalysis(分析パイプライン)", () => {
           prior: h.prior,
           adjustedProb: h.prior + 0.01,
           reason: "通常補正",
+          highlights: [],
+          concerns: [],
           clipped: false,
           usedPrior: false,
           mark: null,
@@ -2549,6 +2671,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: true,
             mark: null,
@@ -2586,6 +2710,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: "通常補正",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,
@@ -2613,6 +2739,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: "通常補正",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,
@@ -2654,6 +2782,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: "通常補正",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,
@@ -2683,6 +2813,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior + 0.05, // prior に戻さず、確率補正が有効なままであることを示す。
             reason: "調教良化",
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null, // A救済では全馬 mark=null。
@@ -2723,6 +2855,8 @@ describe("runAnalysis(分析パイプライン)", () => {
             prior: h.prior,
             adjustedProb: h.prior,
             reason: null,
+            highlights: [],
+            concerns: [],
             clipped: false,
             usedPrior: false,
             mark: null,

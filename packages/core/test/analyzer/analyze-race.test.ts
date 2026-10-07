@@ -605,3 +605,51 @@ describe("analyzeRace(使ったモデルの記録 modelUsed・Issue #157)", () =
     expect(llm.complete).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("analyzeRace(強調材料 highlights・懸念事項 concerns の伝播。Issue #197)", () => {
+  const withItems = JSON.stringify({
+    horses: [
+      { number: 1, place_prob: 0.45, reason: "調教良化", highlights: ["追い切り好時計"], concerns: ["距離延長"] },
+      { number: 2, place_prob: 0.15, reason: "展開不利", highlights: [], concerns: ["外枠"] },
+      ...fillerMarkHorses(),
+    ],
+  });
+
+  it("初回成功: 各馬の highlights / concerns が結果に載ること(キー欠落の馬は空配列)", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm(withItems) });
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    const h2 = r.horses.find((h) => h.umaban === 2)!;
+    const h3 = r.horses.find((h) => h.umaban === 3)!;
+    expect(r.fallback).toBe(false);
+    expect(h1.highlights).toEqual(["追い切り好時計"]);
+    expect(h1.concerns).toEqual(["距離延長"]);
+    expect(h2.highlights).toEqual([]);
+    expect(h2.concerns).toEqual(["外枠"]);
+    expect(h3.highlights).toEqual([]);
+    expect(h3.concerns).toEqual([]);
+  });
+
+  it("印関連違反のA救済(marksDropped:true)でも highlights / concerns を保持すること", async () => {
+    const bad = JSON.stringify({
+      horses: [
+        { number: 1, place_prob: 0.45, reason: "x", mark: "◎", highlights: ["強み"], concerns: ["弱み"] },
+        { number: 2, place_prob: 0.15, reason: "y", mark: "◎" }, // ◎が2頭で頭数違反。
+        ...fillerMarkHorses(),
+      ],
+    });
+    const r = await analyzeRace(input(), { llm: fixedLlm(bad, bad) });
+    const h1 = r.horses.find((h) => h.umaban === 1)!;
+    expect(r.marksDropped).toBe(true);
+    expect(h1.usedPrior).toBe(false);
+    expect(h1.highlights).toEqual(["強み"]);
+    expect(h1.concerns).toEqual(["弱み"]);
+  });
+
+  it("フォールバック(全馬 prior 採用)では全馬の highlights / concerns が空配列であること", async () => {
+    const r = await analyzeRace(input(), { llm: fixedLlm("こわれ1", "こわれ2") });
+    expect(r.fallback).toBe(true);
+    expect(r.horses).toHaveLength(6);
+    expect(r.horses.every((h) => h.highlights.length === 0 && h.concerns.length === 0)).toBe(true);
+    expect(r.horses.every((h) => Array.isArray(h.highlights) && Array.isArray(h.concerns))).toBe(true);
+  });
+});

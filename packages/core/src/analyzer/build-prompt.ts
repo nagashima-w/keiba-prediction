@@ -137,8 +137,17 @@
  * 一切変わらない。1行目・3行目、省略挙動(材料が無い部分の省略・両方null時のブロック省略)は
  * 不変。この対照(default)のPROMPT_VERSION更新に伴い、
  * CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
+ *
+ * "2026-10-07.1"(Issue #197・#196-a: 根拠の細分化。2026-10-07 着手前ゲート合意・ユーザー判断): 馬ごとの
+ * 出力に強調材料(highlights)と懸念事項(concerns)を足した(各最大3項目・1項目は全角30字以内の短い句・
+ * 該当が無ければ空配列)。reason(総合の根拠の一文)は残し、言い換えはさせない。単勝オッズ・人気・参考EVは
+ * この2つの項目の材料にさせない(既存のアンカリング禁止と揃える。印の判断材料としての既存指示は不変)。
+ * 出力スキーマの例は mark の後ろにこの2つを置く。解析側は parse-response.ts の coerceItemList
+ * (欠落・形違いは `[]`。分析は止めない)。出力トークンが増える(馬1頭あたり reason に加えて最大6句)ので、
+ * 費用・所要時間・切り詰めはクラウド版の usage 記録(#197 段2)で確かめる。この対照(default)の
+ * PROMPT_VERSION更新に伴い、CLIP_VARIANTS.wide15.promptVersion も同じ値+"-clip015"へ追随する(ユーザー確定事項A)。
  */
-export const PROMPT_VERSION = "2026-07-28.2";
+export const PROMPT_VERSION = "2026-10-07.1";
 
 export {
   CLIP_VARIANTS,
@@ -773,6 +782,23 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push(
     "reason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。",
   );
+  // 根拠の細分化(Issue #197・#196-a): reason(総合の根拠の一文)に加えて、強調材料(highlights)と
+  // 懸念事項(concerns)を馬ごとの短い句の配列で出させる。reason の言い換えにはさせない。
+  // 単勝オッズ・人気・参考EVはこの2つの項目の材料にさせない(アンカリング禁止と揃える。印の判断材料としての
+  // 既存指示〈【予想印】の判断材料・上の「重要」〉は変えない)。
+  lines.push(
+    "各馬について、reason(総合の根拠の一文)とは別に、強調材料(highlights)と懸念事項(concerns)を短い句の配列で出力してください。" +
+      "highlights はその馬を高く評価できる材料、concerns は評価を下げる材料です。" +
+      "それぞれ最大3項目で、1項目は全角30字以内の短い句にしてください。該当する材料が無ければ空配列 [] にしてください。",
+  );
+  lines.push(
+    "highlights・concerns は reason の言い換えではなく、reason とは別の個々の材料を挙げてください。" +
+      "highlights・concerns の文中でも、事前推定値を指すときは必ず「3着内率」と日本語で表記してください。",
+  );
+  lines.push(
+    "highlights・concerns の各項目には、単勝オッズ・人気・参考EVを材料として挙げないでください" +
+      "(これらを予想印の判断に使うことは従来どおりで構いません)。",
+  );
   if (wetScenario) {
     lines.push(
       "馬場悪化シナリオ: 天候・馬場から馬場が悪化する(または既に道悪の)可能性があります。" +
@@ -847,8 +873,10 @@ export function buildPrompt(input: BuildPromptInput): string {
   lines.push("【出力スキーマ(この形式の JSON のみ)】");
   lines.push(
     '{"horses": [' +
-      '{"number": 1, "place_prob": 0.42, "reason": "...", "mark": "◎"}, ' +
-      '{"number": 2, "place_prob": 0.30, "reason": "...", "mark": null}' +
+      '{"number": 1, "place_prob": 0.42, "reason": "...", "mark": "◎", ' +
+      '"highlights": ["強み1", "強み2"], "concerns": ["懸念1"]}, ' +
+      '{"number": 2, "place_prob": 0.30, "reason": "...", "mark": null, ' +
+      '"highlights": [], "concerns": ["懸念1", "懸念2"]}' +
       "]}",
   );
 

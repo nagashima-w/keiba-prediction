@@ -211,7 +211,7 @@ interface View {
   raceId: string;
   detail: string;
   race: Record<string, unknown>;
-  horses: { umaban: number; name: string | null }[];
+  horses: { umaban: number; name: string | null; highlights: string[]; concerns: string[] }[];
   allocation: { bets: unknown[] } | null;
   [key: string]: unknown;
 }
@@ -248,6 +248,26 @@ describe("GET /api/analyses/{id}: ローカルの D1・R2 で保存した分析�
     }
     expect(spy.calls.filter((c) => c.op === "get")).toHaveLength(1);
     expect(spy.calls.filter((c) => c.op === "put")).toHaveLength(0);
+  });
+
+  it("強調材料・懸念事項(Issue #197): 保存した馬ごとの highlights・concerns が応答の馬に載る。詳細(R2)の状態(present・missing・none)に依らない", async () => {
+    const base = await record();
+    const horses = base.horses.map((h, i) => (i === 0 ? { ...h, highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] } : i === 1 ? { ...h, highlights: [], concerns: ["外枠"] } : h));
+    expect(horses.length).toBeGreaterThan(2); // 前提: 3頭目以降(項目なし)がある
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const present = await store.saveAnalysis({ ...base, horses });
+    const view = (await getView(present.id, spyBucket(local.r2).bucket)).body.analysis;
+    expect(view.detail).toBe("present");
+    const items = (v: View) => v.horses.map((h) => [h.umaban, h.highlights, h.concerns] as const);
+    const expected = horses.map((h) => [h.umaban, h.highlights ?? [], h.concerns ?? []] as const);
+    expect(items(view)).toEqual(expected);
+    // R2 の詳細が無い(none。Class A の柵で R2 に書かなかった)分析でも、同じ値が D1 から読める。
+    await local.db.prepare("INSERT OR REPLACE INTO r2_ops (ym, class_a, class_b) VALUES (?, ?, ?)").bind(monthKey(new Date()), R2_FENCE_LIMITS.classA, 0).run();
+    const none = await store.saveAnalysis({ ...base, horses, analyzedAt: "2026-06-28T07:00:00.000Z" });
+    expect(none.detail).toBe("skipped");
+    const noneView = (await getView(none.id, spyBucket(local.r2).bucket)).body.analysis;
+    expect(noneView.detail).toBe("none");
+    expect(items(noneView)).toEqual(expected);
   });
 
   it("配分が無い分析は allocation: null(馬名は付く)", async () => {

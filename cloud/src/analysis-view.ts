@@ -26,6 +26,10 @@ export interface AnalysisViewHorse {
   readonly isPositive: boolean;
   readonly mark: string | null;
   readonly reason: string | null;
+  /** LLM が挙げた強調材料(Issue #197。各最大3項目の短い句。項目なし・旧い分析は `[]`。D1 の馬の行にあるので、詳細〈R2〉の状態に依らない)。 */
+  readonly highlights: readonly string[];
+  /** LLM が挙げた懸念事項(Issue #197。仕様は highlights と同じ)。 */
+  readonly concerns: readonly string[];
 }
 
 export interface AnalysisViewRace {
@@ -133,6 +137,8 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       isPositive: h.isPositive,
       mark: h.mark,
       reason: h.reason,
+      highlights: [...h.highlights],
+      concerns: [...h.concerns],
     })),
     allocation:
       allocation === undefined

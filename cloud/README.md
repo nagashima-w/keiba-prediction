@@ -11,7 +11,7 @@ Issue #161(#21-C)の土台と、#162(#21-D)段階2の netkeiba 取得の出口(�
 - `src/socket-fetch.ts` / `src/http1.ts` — ソケットで HTTP/1.1 を話す取得クライアント(`connect` を注入。送るヘッダは固定の4つ + `Host` + `Connection: close`、圧縮は要求しない、再試行・リダイレクト追従なし、サイズ上限 2 MiB・タイムアウト 20 秒)。調査(`spikes/cloudflare/`・`scripts/cloudflare-spike/`)の実装を本番用に作り直したもので、調査のコードは参照しない
 - `src/gate-fetch.ts` — ゲートの `fetchRaw`(RPC)を core の `HttpClient` の fetch 注入口へ繋ぐ(`createGateHttpClient`: 間隔 0・再試行 0。間隔制御はゲートだけが行う)。**Worker の `fetch` で netkeiba を取る経路は持ち込まない**(#160。CloudFront から HTTP 400 になる)
 - `src/netkeiba-check.ts` / `src/page.ts` — 確認用エンドポイント `GET /api/netkeiba/check` の処理(race_id の検証・出馬表の取得とパース)と、`/check` の確認フォーム(Issue #184 で `/` から移した。使い方は下の「確認ページの使い方」)
-- `migrations/` — D1 の migration(#171)。`0001_init.sql` は exe の最終スキーマのダンプ(**生成物。手で編集しない**。`pnpm tsx scripts/gen-cloud-d1-migration.ts` で再生成)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key`・索引2つ)、`0003_r2_ops.sql` は R2 の操作回数のカウンタの表(#173)、`0004_settings.sql` は設定の表(#178)、`0005_llm_note.sql` は `analyses.llm_note`(LLM が使われなかった・一部しか使われなかった理由の固定文言。Issue #194)。詳細は下の「D1(分析履歴)」・「分析履歴ストア」
+- `migrations/` — D1 の migration(#171)。`0001_init.sql` は exe の最終スキーマのダンプ(**凍結。書き換えない**。#197 までは生成物だった。下の「D1(分析履歴)」参照)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key`・索引2つ)、`0003_r2_ops.sql` は R2 の操作回数のカウンタの表(#173)、`0004_settings.sql` は設定の表(#178)、`0005_llm_note.sql` は `analyses.llm_note`(LLM が使われなかった・一部しか使われなかった理由の固定文言。Issue #194)、`0006_horse_items.sql` は `analysis_horses.highlights_json`・`concerns_json`(馬ごとの強調材料・懸念事項。exe の列と同じ。Issue #197)。詳細は下の「D1(分析履歴)」・「分析履歴ストア」
 - `src/d1-health.ts` — `GET /api/health` の D1 の疎通確認(`SELECT detail_key, llm_note FROM analyses LIMIT 1`。migration 0002・0005 の適用と binding を1回の読み取りで確かめる)
 - `smoke-worker.ts` / `smoke-modules.d.ts` — **ローカル smoke 専用**のエントリ(偽ソケット。本番の `main` ではない)
 - `src/undici-stub.ts` — core の `http-client.ts` が動的に import する `undici` の差し替え(バンドルに巨大な undici を入れない)
@@ -39,9 +39,13 @@ pnpm exec wrangler d1 migrations apply DB --local   # D1 の migration をロー
   **`remote = true` は付けない**(ローカルのテスト・開発が本番の D1 に繋がる。`scripts/test/cloud-config-guard.test.ts` が検査)。
 - **migration**(`cloud/migrations/`)は**追加のみ**(DROP・DELETE・UPDATE・TRUNCATE・REPLACE・ALTER の DROP/RENAME を含まない。静的ガードがある)。
   本番では、デプロイの前に反映される(適用からデプロイまでの間は旧 Worker が新しい表で動くため)。
-  - 0001 は exe の `new AnalysisStore()` 後の `sqlite_master` のダンプ(8表と `idx_analyses_race`)。exe のスキーマを変えたら `pnpm tsx scripts/gen-cloud-d1-migration.ts` で再生成する
-    (`--check` で最新かだけ確かめられる)。コミット済みの 0001 との一致と、「0001+0002 の構造 = exe の最終スキーマ + 宣言した追加分」は `scripts/test/cloud-d1-schema.test.ts`(ルートの `pnpm test`)が固定している。
-  - 後から足すときは 0003 以降の新しいファイルにする(適用済みのファイルを書き換えない)。
+  - **0001 は凍結した**(Issue #197)。以前は exe の `new AnalysisStore()` 後の `sqlite_master` のダンプ(8表と `idx_analyses_race`)を生成していたが、exe の `analysis_horses` に列を足すと、
+    生成物の 0001 にも同じ列が入り、後から足す 0006 の `ALTER` と重複して `duplicate column name` になる。適用済みの 0001 を書き換えても本番の D1 には効かない。
+    `pnpm tsx scripts/gen-cloud-d1-migration.ts --check` は、コミット済みの 0001 が凍結したハッシュ(SHA-256。CRLF は LF にそろえて計算)と一致するかだけを確かめる(書き出しはしない)。
+    **exe のスキーマ(`analysis-store.ts`)に列・表を足したら、新しい migration(0007 以降)を手で足す**。exe と D1 の構造の一致(「0001〜最新の構造 = exe の最終スキーマ + 宣言した追加分」)と、0001 の凍結は
+    `scripts/test/cloud-d1-schema.test.ts`(ルートの `pnpm test`)が固定している。**exe と同じ列を後から足す migration(0006)は、`D1_EXTRA_COLUMNS`(D1 専用の追加分の宣言)には書かない**(書くと二重に数えて不一致になる)。
+  - 後から足すときは新しいファイル(番号は連続)にする(適用済みのファイルを書き換えない)。
+  - **exe と cloud は `analysis-store-codec.ts` を共有している**: codec の INSERT が指す列は、本番の D1 に migration を適用してから使う(デプロイの前に migration を反映するのはこのため。`deploy-cloud.yml`)。
 - **RaceDay(DO の SQLite)の表にスキーマ変更の仕組みは無い**: `CREATE TABLE IF NOT EXISTS` だけで作る(`src/race-day-core.ts` のコンストラクタ)。本番の RaceDay は未デプロイなので、今は列を足してよい。**最初の本番デプロイのあとに列を足すときは `ALTER TABLE ... ADD COLUMN` が要る**(D1 の migration とは別。足さないと、作成済みの表に列が無く INSERT/SELECT が落ちる)。
 - **ローカルでの適用**: `pnpm exec wrangler d1 migrations apply DB --local`(資格情報なしで動く。再実行しても何も起きない)。`pnpm run smoke` は、起動の前に一時の保存先へ同じ migration を適用する。
 - **テスト**(`test/d1-schema.test.ts`): 実コマンドで migration を適用したローカル(workerd)の D1 を `getPlatformProxy` で開き、外部キーと索引(`EXPLAIN QUERY PLAN`)を確かめる。

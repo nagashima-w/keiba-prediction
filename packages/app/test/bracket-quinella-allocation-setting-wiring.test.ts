@@ -64,6 +64,8 @@ function row(umaban: number, wakuban: number): AnalysisRow {
     ev: 1.5,
     isPositive: true,
     reason: null,
+    highlights: [],
+    concerns: [],
     careerRunCount: 999,
     mark: null,
     evEstimated: false,

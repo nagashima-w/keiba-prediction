@@ -2810,6 +2810,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。サーバ・D1・core も変えていない(`GET /api/analyses/{id}` の応答は #194 から変わらない)。
 
+## 次の正式版が 1.20.0 である根拠(Issue #197〈#196-a〉での変更)
+
+**minor**(根拠の細分化の核。LLM のプロンプトと出力が変わる。保存先に列を足す)。
+
+### 変更内容
+
+- core: プロンプトに強調材料(`highlights`)・懸念事項(`concerns`)の指示と出力例を足した(各最大3項目・1項目は全角30字以内。オッズ・人気・参考 EV は材料にさせない)。`PROMPT_VERSION` は `2026-10-07.1`(`clip-variants` も追随)。`parse-response.ts` で解析する(欠落・形違いは `[]`。分析は止めない)。
+- exe: `analysis_horses` に `highlights_json`・`concerns_json` 列(CREATE と後付け migration)。codec・保存の入力・パイプライン(`AnalysisRow`・保存レコード)に配線した(画面・エクスポートは #199)。
+- cloud: D1 の migration `0006_horse_items.sql`(同じ2列。追加のみ)。**0001 は凍結した**(`scripts/gen-cloud-d1-migration.ts` は生成から凍結の確認に変えた)。`GET /api/analyses/{id}` の馬に `highlights`・`concerns` が載る(画面は #198)。一覧(`GET /api/analyses`)の馬には載せない。
+- golden を作り直した(出力は、`promptVersion`・プロンプト文面・馬ごとの `highlights`/`concerns` だけが変わる)。
+
+### minor である根拠
+
+- **分析結果が変わる**: プロンプトの文面が変わり(`promptVersion` が変わるため、版別の検証〈回収率比較〉は新しい版として別に集計される)、LLM の出力量が増える(推測で約 2〜2.3 倍。実測は公開後)。本書の基準では「分析結果の数値が変わる」は minor。
+- 利用者から見える機能は #198(クラウド版の画面)・#199(exe の表示とエクスポート)で増える。この版では、データが保存され API で読めるまで。
+
+### major ではない根拠
+
+- exe の DB は、NULL 可の列を2つ足しただけ(旧い分析は `[]` で読める。旧い版の exe がこの DB を開いても、知らない列は無視される)。設定・エクスポート JSON・IPC の後方非互換は無い(エクスポートへの追加は #199)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

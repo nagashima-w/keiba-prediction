@@ -261,6 +261,10 @@ export interface AnalysisPipelineDeps {
 interface AdjustedHorse {
   readonly adjustedProb: number;
   readonly reason: string | null;
+  /** 強調材料(Issue #197)。LLM未使用・prior採用・分析結果に含まれない馬は `[]`。 */
+  readonly highlights: readonly string[];
+  /** 懸念事項(Issue #197)。仕様は highlights と同じ。 */
+  readonly concerns: readonly string[];
   /** 予想印(Task#23)。LLM未使用・分析結果に含まれない馬番は null。 */
   readonly mark: PredictionMark | null;
 }
@@ -481,6 +485,8 @@ export async function runAnalysis(
       adjustedByUmaban.set(h.shutuba.umaban, {
         adjustedProb: priorByUmaban.get(h.shutuba.umaban)!.prior,
         reason: null,
+        highlights: [],
+        concerns: [],
         mark: null,
       });
     }
@@ -697,6 +703,8 @@ export async function runAnalysis(
       adjustedByUmaban.set(h.umaban, {
         adjustedProb: h.adjustedProb,
         reason: h.reason,
+        highlights: h.highlights,
+        concerns: h.concerns,
         mark: h.mark,
       });
     }
@@ -706,6 +714,8 @@ export async function runAnalysis(
         adjustedByUmaban.set(h.shutuba.umaban, {
           adjustedProb: priorByUmaban.get(h.shutuba.umaban)!.prior,
           reason: null,
+          highlights: [],
+          concerns: [],
           mark: null,
         });
       }
@@ -753,6 +763,8 @@ export async function runAnalysis(
         ev: ev.ev,
         isPositive: ev.isPositive,
         reason: adjusted.reason,
+        highlights: adjusted.highlights,
+        concerns: adjusted.concerns,
         // 戦績走数(低データ判定用)。戦績取得失敗(results=null)は不明として null にし、
         // 新馬(results=[] → 0走)と区別する(妙味スコアの低データ集計から除外させる)。
         careerRunCount: h.results === null ? null : h.results.length,
@@ -889,6 +901,9 @@ export async function runAnalysis(
         // LLMが返した和文根拠(Issue#10)。LLMスキップ時は adjusted.reason が既に null
         // (LLMスキップ経路の初期化ループ参照)のため、ここで追加のllmUsed分岐は不要。
         reason: adjusted.reason,
+        // 強調材料・懸念事項(Issue #197)。空配列は DB に NULL で保存される(codec)。
+        highlights: adjusted.highlights,
+        concerns: adjusted.concerns,
       };
     }),
     // 配分提案(Issue #59)。deps.allocationSettings===nullのときはキー自体を持たせない

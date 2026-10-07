@@ -266,6 +266,13 @@ export interface AnalysisRow {
   /** LLMの補正根拠。LLM未使用・prior採用なら null(表示は「-」)。 */
   readonly reason: string | null;
   /**
+   * LLM が挙げた強調材料(Issue #197。各最大3項目の短い句)。LLM 未使用・prior 採用・項目なしは `[]`。
+   * 表示は #199(exe の表示とエクスポート)で行う。
+   */
+  readonly highlights: readonly string[];
+  /** LLM が挙げた懸念事項(Issue #197。仕様は highlights と同じ)。 */
+  readonly concerns: readonly string[];
+  /**
    * この馬のキャリア走数(戦績 results.length)。0 は新馬相当(=判明した低データ)。
    * 戦績が取得できなかった(不明な)馬は null とし、低データ判定の集計から除外する
    * (取得失敗を新馬と混同しないため。スクレイピング警告は result.warnings に別途載る)。

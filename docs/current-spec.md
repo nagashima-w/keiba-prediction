@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.26)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.20.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.26`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.20.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -318,13 +318,19 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   ときだけ呼び出す(`parseShutuba` の `hasGradeBadge`。判定不能〈旧データ等〉なら fail-open で
   呼ぶ)。これにより非重賞レースへの無駄なリクエストを避ける(重賞判定はバッジの有無のみで、
   グレード番号は解釈しない)。地方(NAR)にも対応(`nar.netkeiba.com` の同一API)。
-- **プロンプト版の記録**: `PROMPT_VERSION`(現行 `"2026-07-28.2"`)を分析ごとに保存し、版別に検証比較する。
+- **プロンプト版の記録**: `PROMPT_VERSION`(現行 `"2026-10-07.1"`)を分析ごとに保存し、版別に検証比較する。
   設定画面の追加指示(`additionalInstruction`)も版とは別軸で記録する。
 - **クリップ幅の A/B(`clip-variants.ts`、単一の真実源 `CLIP_VARIANTS`)**: prior からの補正上限を
   版として切替。`default`=±10%(絶対値0.10、対照)、`wide15`=±15%(絶対値0.15)。版文字列に幅を内包
-  (例 `2026-07-28.2-clip015`)し、プロンプト文面・クリップ幅・版文字列をレジストリから機械導出して
+  (例 `2026-10-07.1-clip015`)し、プロンプト文面・クリップ幅・版文字列をレジストリから機械導出して
   食い違いを防ぐ。実際のクリップは `parseAnalyzerResponse` の `maxAdjust` で行う。
 - **予想印**: ◎〇▲△☆注(`PREDICTION_MARKS`)。◎はちょうど1頭必須、本線印は飛ばさない優先順位制約。
+- **強調材料・懸念事項**(Issue #197〈#196-a〉。`PROMPT_VERSION` `2026-10-07.1`): 馬ごとに、総合の根拠 `reason`(一文。残す)に加えて `highlights`(強調材料)・`concerns`(懸念事項)を出させる。
+  各最大3項目・1項目は全角30字以内の短い句・該当が無ければ `[]`。`reason` の言い換えにはさせず、**単勝オッズ・人気・参考 EV を材料にさせない**(印の判断材料としての既存の指示は変えない)。出力例は `mark` の後ろに置く。
+  解析(`parse-response.ts` の `coerceItemList`): 欠落・配列でない値は `[]`、文字列でない要素と空(trim 後)は捨てて trim した値を残し、**空を除いたあとに**先頭3つに切る(1項目の長さは切らない)。
+  `place_prob` が欠落・不正で prior 採用になった馬(`usedPrior`)は `[]`。**分析は止めない**(`clipped`・`missing`・フォールバックの判定に影響しない)。印の制約違反の救済でも保持する。
+  保存: exe の `analysis_horses.highlights_json`・`concerns_json`(JSON 配列の文字列。**項目なし〈空配列・省略〉は NULL**、読むと NULL・壊れた値は `[]`)、D1 は migration `0006`。`AnalysisRow`・保存レコードに載る(exe の画面・エクスポートは #199、クラウド版の画面は #198)。
+  出力量は増える(推測で約 2〜2.3 倍。**実測は公開後**)。
 - **フェイルセーフ**(`analyze-race.ts` / `parse-response.ts`): JSON 破損・切り詰め(`AnalyzerTruncationError`、
   stop_reason=max_tokens)・呼び出し失敗は 1 回リトライ後に**全馬 prior 採用**(`fallback:true`、理由を
   3 分類 `FALLBACK_REASON_TRUNCATED` / `_PARSE_ERROR` / `_INVOCATION_ERROR` で可視化)。印制約違反
@@ -970,9 +976,11 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 ### D1(分析履歴)の土台(#171〈#169-a〉。v1.19.7)
 クラウド版の分析履歴の保存先 D1 の**土台だけ**(migration・binding・CI・health)。保存・読み取りのロジック(`D1AnalysisStore`)と R2 は #172、R2 の操作回数の安全柵は #173
 (#169 を #171・#172・#173 に3分割。exe のアプリコードは無変更)。
-- **migration**(`cloud/migrations/`): `0001_init.sql` は exe の `new AnalysisStore()` 後の `sqlite_master` のダンプ(8表と `idx_analyses_race`。生成スクリプト
-  `scripts/gen-cloud-d1-migration.ts`)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key TEXT`〈R2 のキー〉・索引 `analyses(kaisai_date)`・`analyses(prompt_version, race_id)`)。
-  **追加のみ**(静的ガード)。スキーマ同値(0001+0002 = exe の最終スキーマ + 宣言した追加分)は `scripts/test/cloud-d1-schema.test.ts` が固定する。
+- **migration**(`cloud/migrations/`): `0001_init.sql` は exe の `new AnalysisStore()` 後の `sqlite_master` のダンプ(8表と `idx_analyses_race`。**#197 までは生成スクリプト
+  `scripts/gen-cloud-d1-migration.ts` の生成物。いまは凍結**)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key TEXT`〈R2 のキー〉・索引 `analyses(kaisai_date)`・`analyses(prompt_version, race_id)`)。
+  **追加のみ**(静的ガード)。スキーマ同値(0001〜最新 = exe の最終スキーマ + 宣言した追加分)は `scripts/test/cloud-d1-schema.test.ts` が固定する。
+  **0001 は #197 で凍結した**(`gen-cloud-d1-migration.ts` は生成から、凍結したハッシュとの一致の確認〈`--check`〉に変えた。exe の列を足すと生成物の 0001 に入って後続の ALTER と重複するため)。
+  `0006_horse_items.sql` は `analysis_horses.highlights_json`・`concerns_json`(exe と同じ列〈`D1_EXTRA_COLUMNS` には書かない〉)。
 - **binding**: `[[d1_databases]]`(binding `DB`・database_name `keiba-cloud-db`・`database_id` は公開してよい値でリポジトリに書いてある。`remote = true` は使わない)。
 - **CI**(`deploy-cloud.yml`): check ジョブは `wrangler d1 migrations apply DB --local`。deploy ジョブは `wrangler deploy` の前に、database_id が仮の値でないことの確認 →
   D1 の権限確認(ステータスコードだけを出力)→ `migrations apply DB --remote`。
@@ -1064,6 +1072,11 @@ Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 
   **73,080 バイトのダミー文字列**(実測した組合せ入りの大きさに合わせた合成。中身は実データでない)。contributions は実際の計算結果ではなく同じ13項目の形の合成(1頭 約 3.2KB。実測の平均 3,174 バイトに近づけた)。
 - **18頭立て**(三連単 4896 キーで snapshot は約 76KB に増える見込み。比例外挿で実測ではない)・**地方**(三連単なし)では大きさが変わる。R2 の詳細オブジェクトの gzip 後の大きさは
   zlib のバージョンで多少変わりうる。年間件数 3,500 は「中央の発走前だけ」の仮定(**私の記憶ベースの概算で未検証**)、10,000・20,000 は地方の手動分析を含む仮定。
+- **強調材料・懸念事項の追加(#197)**: `analysis_horses.highlights_json`・`concerns_json`(各馬の JSON 配列)を足したあとの測り直し。**実データではなく合成**(馬ごとに各 3 項目 × 全角 30 字 = 上限どおりに満たした、**上限寄りの見積もり**。実際の LLM の出力はこれより短い・少ないことが多い見込みだが、**未実測**。公開後の実データで測り直す)。
+  再現: `pnpm tsx scripts/measure-d1-size.ts`(既定が 3 項目・30 字。`--item-count`・`--item-chars` で変えられる。`--item-count 0` は項目なしの基準値。同じ N・固定の種で、2回実行して出力が同じことを確認済み)。
+  A(大きな列は NULL・N=1000): **項目なし(列だけ追加)で 6,701 バイト/分析**(#197 の前の 6,644 から +57 バイト。2列が NULL のぶん。#197 より前のコミットで同じスクリプトを実行して 6,644・144,957 を再現した上での差)、
+  **上限どおりの 3 項目 × 30 字で 17,535 バイト/分析**(`analysis_horses` が 5,476 → 16,310 バイト/分析。**約 2.6 倍**)。500MB が埋まる年数は、年間 3,500 件で 21.3 年 → **8.1 年**、10,000 件で 7.5 年 → 2.9 年、20,000 件で 3.7 年 → 1.4 年。
+  全部 D1(N=300)は 144,971 → 155,853 バイト/分析(R2 に出す構成の A が前提なので、参考)。**結論は変わらない**(大きな列を R2 に出す方針で足りるが、余裕は約 21 年 → 約 8 年に縮む。上限どおりに満たした場合の値なので、実際はこれより余裕がある見込み)。
 - **結論**: 大きな列を D1 に置くと 1分析約 145KB で、年間 3,500 件でも約 1.0 年で 500MB が埋まる。**contributions を含む大きな列を R2 に出せば 1分析約 6.6KB で、年間 3,500 件なら約 21 年もつ**
   (contributions だけを D1 に残す案は 1分析約 58KB〈A の 6,644 + 16頭分の contributions 51,289〉で約 2.5 年)。R2 の詳細オブジェクトは 1分析約 29KB(gzip)で、年間 3,500 件でも約 100MB/年(Free の 10GB に対して余裕)。
 - **D1 の書き込み行数**(#175 で確定・#173 で更新): 16頭・買い目 10 件・配分ありの1回の保存は **60 行**(文ごとに `r2_ops` のカウンタ 1〈#173〉・analyses 5〈表 + 索引 3 + sqlite_sequence〉・detail_key の UPDATE 1・馬 32〈16頭 × 2。複合主キーの自動索引で2倍〉・配分メタ 1・買い目 20)。
@@ -1170,7 +1183,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - 取得の失敗の直後に呼んでも、もう一度取りに行く。公開前の日・遠い未来・過去の日付で netkeiba が何を返すか(200 の空 HTML か別のステータスか)は**実測していない**(別のステータスなら 503 になり、「開催なし」と区別できる)。**本番での確認項目**。
   - 一覧の取得が、同じ日に走っている分析の取得(gate への呼び出しを RaceDay の中で直列にしている)の後ろに並ぶことがある(中央16頭の冷えた状態で約 40 秒。gate の呼び出しは 60 秒で諦める)。超えれば 503 `failed` で、再読み込みで回復する。
 - **`GET /api/analyses/{id}`**: 分析1件。`{ ok: true, analysis: {...} }`(**camelCase**。`GET /api/analyses` の形に揃えた。`/api/races`・`/status`・`/run` は snake_case で、API のキー名は**不統一のまま**)。
-  - 返す項目: `id`・`raceId`・`analyzedAt`・`kaisaiDate`・`evEstimated`・`model`・`promptVersion`・`detail`(`present`・`missing`・`none`)/ `race`(`venueName`〈raceId の場コードから〉・`raceNumber`〈raceId の末尾2桁から〉・`raceName`・`startTime`・`courseType`・`distance`・`weather`・`trackCondition`〈raceSnapshot から。取れなければ `null`〉)/ `horses`(`umaban`・**`name`**〈raceSnapshot から〉・`prior`・`adjustedProb`・`placeOddsMin`・`ev`・`isPositive`・`mark`・`reason`)/ `allocation`(`route`・`skipReasonCode`・`unavailableReason`・設定の要約〈`bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`include*`〉・`oddsStatus`・`bets`〈`betType`・`comboKey`・`stake`・`odds`・`ev`〉。配分の行が無ければ `null`。合計額は返さない)。
+  - 返す項目: `id`・`raceId`・`analyzedAt`・`kaisaiDate`・`evEstimated`・`model`・`promptVersion`・`detail`(`present`・`missing`・`none`)/ `race`(`venueName`〈raceId の場コードから〉・`raceNumber`〈raceId の末尾2桁から〉・`raceName`・`startTime`・`courseType`・`distance`・`weather`・`trackCondition`〈raceSnapshot から。取れなければ `null`〉)/ `horses`(`umaban`・**`name`**〈raceSnapshot から〉・`prior`・`adjustedProb`・`placeOddsMin`・`ev`・`isPositive`・`mark`・`reason`・**`highlights`・`concerns`**〈強調材料・懸念事項。文字列の配列。項目なし・旧い分析は `[]`。D1 の馬の行にあるので、詳細〈R2〉の状態に依らず載る。Issue #197。一覧 `GET /api/analyses` の馬には載せない〉)/ `allocation`(`route`・`skipReasonCode`・`unavailableReason`・設定の要約〈`bankroll`・`perRaceCap`・`kellyFraction`・`evThreshold`・`include*`〉・`oddsStatus`・`bets`〈`betType`・`comboKey`・`stake`・`odds`・`ev`〉。配分の行が無ければ `null`。合計額は返さない)。
   - **返さないもの**: `rawResponse`・馬の `contributions`・raceSnapshot の全体(騎手・調教師・オッズ・組合せオッズなど)・追加指示・戦績の基準日・配分の `fallbackReason`・`betUnit`。許可したキーを明示的に組み立てる(`analysis-view.ts`。キーの集合をテストが固定する)。
   - **`detail` が `present` でない**(R2 の操作回数の柵に達した・R2 に無い・壊れている・`detail_key` が無い)ときは、**スナップショットを使わず**、馬名なし(`name: null`)・レース情報は `venueName`・`raceNumber` だけ、で**同じキーの形**を返す。D1 の値(prior・印・配分)は残る。
   - id は 1〜2,147,483,647 の整数(先頭の 0 は 400)。不正・クエリつきは 400(D1・R2 に触れない)。無ければ 404 `{ ok: false, error: { type: "not-found" } }`。D1 の失敗は 503 `d1-error`(文面なし)。**配分の読み出しだけが失敗したときも全体を 503 にする**(配分だけ欠けた 200 は「買い目なし」と誤読される)。GET だけ(HEAD は 405)。`/api/analyses/status`・`/run` とは衝突しない(完全一致を先に処理する)。
