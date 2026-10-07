@@ -11,6 +11,7 @@
     "smoke": "tsx smoke.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.70.1",
     "cheerio": "1.2.0",
     "iconv-lite": "0.6.3",
     "jose": "6.2.12"
@@ -25,6 +26,7 @@
     "wrangler": "4.147.0"
   },
   "//deps": {
+    "@anthropic-ai/sdk": "発走前の分析の LLM 呼び出し(Issue #179〈#164-d〉。土台は #193)。core の anthropic-client.ts・model-selection.ts が値で import する(Models API と messages.create)。cloud は workspace の外で packages/core/node_modules が CI に無いため、wrangler.toml の alias・tsconfig の paths・vitest の alias でここから解決させる(cheerio と同じ)。版は core の package.json の範囲(^0.70.1)と同じ 0.70.1 で exact 固定(scripts/test/cloud-config-guard.test.ts が一致を検査)。Workers でバンドル・実行できることは、偽 fetch での workerd 実行とバンドルのガード(test/bundle-guard.test.ts)で確認した",
     "esbuild": "スマホ画面(Issue #184)のクライアントの TS を、ブラウザ向けの 1 ファイル(IIFE)にバンドルし、出力を固定する(build-client.ts。生成物 src/client-bundle.generated.ts はコミットし、test/client-bundle.test.ts が再ビルドとの一致を固定する)。wrangler・tsx・vite が推移的に引く 0.28.1/0.28.2 のうち、tsx・vite と同じ 0.28.2 を直接の依存にして exact で固定(出力の決定性のため)",
     "jose": "Cloudflare Access の JWT(RS256)の署名・iss・aud・exp の検証に使う。署名検証を自前で書かず、検証済みの実装(Cloudflare 公式の例も同じ)に任せるため。依存ゼロで WebCrypto だけで動く。バージョン固定。",
     "wrangler": "デプロイ・ローカル検証(wrangler dev)。バージョン固定(スパイク #159 で確認した版)",

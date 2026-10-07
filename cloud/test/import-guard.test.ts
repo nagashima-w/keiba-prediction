@@ -154,6 +154,8 @@ describe("cloud/src が core から値で import するもの(Issue #175・#176)
     expect(names).toContain("scraper/ids.ts");
     expect(names).toContain("scraper/parse-shutuba.ts");
     expect(names).toContain("pipeline.ts"); // runAnalysis(src/pipeline.ts 経由)が使う狭い入口まで辿れている
+    expect(names).toContain("llm.ts"); // LLM の狭い入口(src/llm-sender.ts 経由。Issue #193)まで辿れている
+    expect(names).toContain("analyzer/anthropic-client.ts"); // SDK を値で import するモジュールまで届いている(better-sqlite3 は無い、は下の検査)
     expect(coreFiles.size).toBeGreaterThan(5);
   });
 
@@ -184,10 +186,20 @@ describe("cloud/src が core から値で import するもの(Issue #175・#176)
   });
 });
 
+/** cloud が依存に持つもの(完全一致のパッケージ名・`node:`・`cloudflare:`・`@cloudflare/` の型)だけを許可する。Issue #193 で `@anthropic-ai/sdk`(完全一致)を足した。 */
+function isAllowedBareSpecifier(s: string): boolean {
+  return (
+    ["cheerio", "iconv-lite", "undici", "jose", "@anthropic-ai/sdk"].includes(s) ||
+    s.startsWith("node:") ||
+    s.startsWith("cloudflare:") ||
+    s.startsWith("@cloudflare/")
+  );
+}
+
 /**
  * Issue #176(#164-a): 型だけの import も含めた閉包の検査。cloud の型検査(tsc)は、CI では 各 package の node_modules が無い配置で動く。
- * 型だけの import(`import type`・`export type`)でも、better-sqlite3 や @anthropic-ai/sdk などを解決しに行くと TS2307 で失敗する。
- * だから、型を含めた閉包でも、cloud が持っている依存(cheerio・iconv-lite・jose・Node の組込み・cloudflare:*)の外を指さないこと。
+ * 型だけの import(`import type`・`export type`)でも、better-sqlite3 などを解決しに行くと TS2307 で失敗する(`@anthropic-ai/sdk` は Issue #193 で cloud の依存に足した)。
+ * だから、型を含めた閉包でも、cloud が持っている依存(cheerio・iconv-lite・jose・@anthropic-ai/sdk・Node の組込み・cloudflare:*)の外を指さないこと。
  */
 describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () => {
   const { coreFiles, appFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(cloudSources, { includeTypes: true });
@@ -220,14 +232,19 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
     expect([...unresolvedCoreSpecifiers]).toEqual([]);
   });
 
-  it("相対でない指定子は、cloud が依存に持つもの(cheerio・iconv-lite・undici〈スタブ〉・jose・Node の組込み・cloudflare:*・workers の型)だけ。electron・react・@anthropic-ai/sdk などを指さない", () => {
-    const allowed = (s: string): boolean =>
-      ["cheerio", "iconv-lite", "undici", "jose"].includes(s) ||
-      s.startsWith("node:") ||
-      s.startsWith("cloudflare:") ||
-      s.startsWith("@cloudflare/");
+  it("相対でない指定子は、cloud が依存に持つもの(cheerio・iconv-lite・undici〈スタブ〉・jose・@anthropic-ai/sdk〈Issue #193〉・Node の組込み・cloudflare:*・workers の型)だけ。electron・react・better-sqlite3 などを指さない", () => {
     expect([...bareSpecifiers]).toContain("cheerio"); // 前提(空振り防止): 指定子を実際に集めている
-    expect([...bareSpecifiers].filter((s) => !allowed(s)).sort()).toEqual([]);
+    expect([...bareSpecifiers]).toContain("@anthropic-ai/sdk"); // 前提(空振り防止): LLM の入口(src/llm-sender.ts → @keiba/core/llm)を実際に辿り、SDK まで届いている
+    expect([...bareSpecifiers].filter((s) => !isAllowedBareSpecifier(s)).sort()).toEqual([]);
+  });
+
+  it("許可の述語の自己検査(拒否側を維持する): 許可するのは cloud の依存だけで、SDK を許可しても electron・react・better-sqlite3・バレル・SDK の別パッケージは拒否する", () => {
+    for (const ok of ["cheerio", "iconv-lite", "undici", "jose", "@anthropic-ai/sdk", "node:fs", "cloudflare:workers", "@cloudflare/workers-types"]) {
+      expect(isAllowedBareSpecifier(ok), ok).toBe(true);
+    }
+    for (const ng of ["electron", "react", "better-sqlite3", "@keiba/core", "@anthropic-ai/bedrock-sdk", "@anthropic-ai/sdk-extra", "zod", "fs"]) {
+      expect(isAllowedBareSpecifier(ng), ng).toBe(false);
+    }
   });
 
   it("閉包が使う `@keiba/core/<サブパス>` は、すべて wrangler.toml の [alias] に1行ずつある(wrangler の alias は完全一致。無いと CI の配置でバンドルが解決に失敗する)。余分な行は無い", () => {

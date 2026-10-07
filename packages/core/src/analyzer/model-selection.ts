@@ -138,6 +138,10 @@ export interface SdkModelListerOptions {
   readonly apiKey?: string;
   /** fetch の差し替え(テスト用。実 API を呼ばずにリクエストを検証する)。 */
   readonly fetch?: typeof fetch;
+  /** 1リクエストの上限時間(ミリ秒。Issue #193)。省略時は SDK の既定(10 分)のまま(exe は渡さない)。 */
+  readonly timeout?: number;
+  /** SDK が内部で行う再試行の回数(Issue #193)。省略時は SDK の既定(2 回)のまま(exe は渡さない)。 */
+  readonly maxRetries?: number;
 }
 
 /**
@@ -151,6 +155,8 @@ export function createSdkModelLister(options: SdkModelListerOptions = {}): Model
       client = new Anthropic({
         ...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+        ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
       });
     }
     const out: ModelInfoLite[] = [];

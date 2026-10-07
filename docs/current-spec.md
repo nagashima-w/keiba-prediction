@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.19.23)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.19.24)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.19.23`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.19.24`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1217,6 +1217,13 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **「結果を見る」のリンクを廃止**。結果画面(`#analysis=<id>`)は、過去の分析の一覧のリンク用に残す。
 - **【記録】**: 板で `done` なのに `analysis_id` が無い(サーバ側では到達しない)ときは何も出さない/取得した分析の `raceId` が画面のレースと違う場合の検査はしない/ページを再読込するとキャッシュが消え、完了済みのレースを開くたびに id ごとに 1 回ずつ R2 を読む。
 - **検査**: `test/client-race.test.ts`・`client-view.test.ts`・`client-app.test.ts`・`client-app-run.test.ts`。**実機(スマホ)でのレイアウト・タップ・スクロール位置は自動検査できない**(デプロイ後にユーザーが確認する)。
+
+### クラウド版の LLM の土台(#193〈#179-a〉。v1.19.24。**挙動は変えない**)
+変更は `cloud/` と core の依存の口だけ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「LLM の土台」。**本番の入口は、まだ LLM を呼ばない**(実行本体は #194〈#179-b〉、画面は #195〈#179-c〉)。
+- **依存**: `cloud/package.json` に `@anthropic-ai/sdk` 0.70.1(core と同じ版。exact)。alias は `wrangler.toml`・`tsconfig.json`・`vitest.config.ts` の3か所。
+- **入口**: core の `@keiba/core/llm`(`src/llm.ts`。`analyze-race`・`anthropic-client`・`model-selection` の再 export。better-sqlite3 を経由しない)。
+- **口**: `createSdkMessageSender`・`createSdkModelLister` の省略可の `timeout`・`maxRetries`(exe は渡さない。省略時は SDK の既定のまま)。cloud の `src/llm-sender.ts` が、再試行 0・sender 180 秒(暫定)・モデル一覧 30 秒を1か所に決める。
+- **検査**: `packages/core/test/analyzer/anthropic-client.test.ts`・`llm-entry.test.ts`・`ev/native-free-modules.test.ts`、`cloud/test/llm-sender.test.ts`・`import-guard.test.ts`・`bundle-guard.test.ts`、`scripts/test/cloud-config-guard.test.ts`。
 
 ### ログイン中の表示名(#192〈#165-i〉。v1.19.23)
 変更は `cloud/client/` のクライアントだけ(exe・サーバ・CSP は無変更)。詳細は `cloud/README.md` の「スマホ画面の「ログイン中」の表示名」。

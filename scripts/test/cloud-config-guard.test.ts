@@ -239,19 +239,23 @@ describe("D1 の migration は追加のみ(Issue #171。AC-a7: 静的ガード)"
 });
 
 describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)", () => {
-  const ALIAS_KEYS = ["undici", "iconv-lite", "cheerio"];
+  // Issue #193(#179-a): `@anthropic-ai/sdk` を足した(core の anthropic-client.ts・model-selection.ts が値で import する。cheerio と同じく、cloud/node_modules へ向ける)。
+  const ALIAS_KEYS = ["undici", "iconv-lite", "cheerio", "@anthropic-ai/sdk"];
+  /** TOML の素のキーは英数字・`_`・`-` だけ。`@`・`/` を含むキーは引用符が要る。 */
+  const tomlKey = (key: string): string => (/^[A-Za-z0-9_-]+$/.test(key) ? key : `"${key}"`);
   /**
    * Issue #176(#164-a): runAnalysis(app)が import する core のサブパス。wrangler の alias は完全一致なので1行ずつ要る。
    * 行き先は packages/core/src の実ファイル(依存の行き先〈cloud/node_modules・スタブ〉とは違い、リポジトリに入っているソース。CI にも在る)。
    * tsconfig.json の paths は `@keiba/core/*` の前方一致、vitest.config.ts の alias は `@keiba/core` の前方一致。
    */
-  const CORE_SUBPATHS = ["pipeline", "scorer/snapshot-filter", "ev/bet-allocation", "ev/combo-bet-allocation"];
+  // Issue #193: `llm`(LLM 用の狭い入口。analyze-race・anthropic-client・model-selection)を足した。
+  const CORE_SUBPATHS = ["pipeline", "llm", "scorer/snapshot-filter", "ev/bet-allocation", "ev/combo-bet-allocation"];
 
   it("nodejs_compat を有効にしている(core の HttpClient・iconv-lite が Buffer を使う)", () => {
     expect(tomlCode).toMatch(/^compatibility_flags = \["nodejs_compat"\]$/m);
   });
 
-  it("wrangler.toml の [alias]・tsconfig.json の paths・vitest.config.ts の alias が、同じ3つの依存を同じ行き先へ向ける(CI にだけ効く設定の書き忘れを防ぐ)", () => {
+  it("wrangler.toml の [alias]・tsconfig.json の paths・vitest.config.ts の alias が、同じ4つの依存を同じ行き先へ向ける(CI にだけ効く設定の書き忘れを防ぐ)", () => {
     const aliasBlock = /^\[alias\]\n((?:[^\n[]+\n?)+)/m.exec(tomlCode)?.[1] ?? "";
     // 前提: [alias] を実際に読めている(空振りではない)
     expect(aliasBlock).not.toBe("");
@@ -261,9 +265,10 @@ describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)",
       undici: "./src/undici-stub.ts",
       "iconv-lite": "./node_modules/iconv-lite",
       cheerio: "./node_modules/cheerio",
+      "@anthropic-ai/sdk": "./node_modules/@anthropic-ai/sdk",
     };
     for (const key of ALIAS_KEYS) {
-      expect(aliasBlock, `[alias] に ${key}`).toContain(`${key} = "${target[key]}"`);
+      expect(aliasBlock, `[alias] に ${key}`).toContain(`${tomlKey(key)} = "${target[key]}"`);
       expect(tsconfig, `tsconfig の paths に ${key}`).toContain(`"${key}": ["${target[key]}"]`);
       expect(vitestConfig, `vitest の alias に ${key}`).toMatch(new RegExp(`"?${key}"?: here\\("${target[key]!.replace(/[./]/g, "\\$&")}"\\)`));
     }
@@ -276,7 +281,7 @@ describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)",
     // バレル(`@keiba/core` そのもの)は、どこにも向けていない(better-sqlite3 を巻き込む)
     expect(aliasBlock).not.toMatch(/^"@keiba\/core"\s*=/m);
     expect(tsconfig).not.toContain('"@keiba/core":');
-    // [alias] に余計な行き先が無い(依存3つ + core のサブパス)
+    // [alias] に余計な行き先が無い(依存4つ + core のサブパス)
     expect(aliasBlock.trim().split("\n")).toHaveLength(ALIAS_KEYS.length + CORE_SUBPATHS.length);
   });
 
@@ -298,15 +303,27 @@ describe("core の取り込み(Issue #162 段階2。alias の3か所の対応)",
     expect(existsSync(path.join(ROOT, "cloud", "src", "undici-stub.ts"))).toBe(true);
   });
 
-  it("cheerio・iconv-lite は固定版で、追加理由が //deps にある", () => {
+  it("cheerio・iconv-lite・@anthropic-ai/sdk は固定版で、追加理由が //deps にある", () => {
     const pkg = JSON.parse(readTextLf("cloud", "package.json")) as {
       dependencies: Record<string, string>;
       "//deps": Record<string, string>;
     };
-    for (const name of ["cheerio", "iconv-lite"]) {
+    for (const name of ["cheerio", "iconv-lite", "@anthropic-ai/sdk"]) {
       expect(pkg.dependencies[name], `${name} の版`).toMatch(/^\d+\.\d+\.\d+$/);
       expect(pkg["//deps"][name], `${name} の理由`).toBeTruthy();
     }
+  });
+
+  it("@anthropic-ai/sdk は core と同じ版(core の範囲 `^X.Y.Z` の X.Y.Z)で、cloud/pnpm-lock.yaml にその版で固定されている(CI の --frozen-lockfile が通る前提)", () => {
+    const cloudPkg = JSON.parse(readTextLf("cloud", "package.json")) as { dependencies: Record<string, string> };
+    const corePkg = JSON.parse(readTextLf("packages", "core", "package.json")) as { dependencies: Record<string, string> };
+    const version = cloudPkg.dependencies["@anthropic-ai/sdk"] ?? "";
+    // 前提(空振り防止): 両方の版を実際に読めている
+    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(corePkg.dependencies["@anthropic-ai/sdk"]).toMatch(/^\^\d+\.\d+\.\d+$/);
+    expect(corePkg.dependencies["@anthropic-ai/sdk"]).toBe(`^${version}`);
+    const lock = readTextLf("cloud", "pnpm-lock.yaml");
+    expect(lock).toMatch(new RegExp(`'@anthropic-ai/sdk':\\n\\s+specifier: ${version.replace(/\./g, "\\.")}\\n\\s+version: ${version.replace(/\./g, "\\.")}`));
   });
 });
 

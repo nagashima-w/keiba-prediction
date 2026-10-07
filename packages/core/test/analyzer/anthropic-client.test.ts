@@ -493,3 +493,103 @@ describe("createSdkModelLister(Models API。fetch を差し替え・実APIは呼
     expect(urls.every((u) => u.includes("/v1/models"))).toBe(true);
   });
 });
+
+/**
+ * Issue #193(#179-a): `createSdkMessageSender`・`createSdkModelLister` の省略可のオプション `timeout`・`maxRetries`。
+ * クラウド版(Worker の DO のアラーム)が、SDK の既定(再試行 2 回・10 分)に任せず、呼び出しの上限を自分で決めるための口。
+ * **exe はどちらも渡さない**ので、省略時は SDK の既定のまま(再試行は初回 + 2 回の計3本)であることも固定する。
+ * すべて fetch を差し替え、実 API には出ない。待ちは `retry-after-ms: 1`(SDK が従う非標準ヘッダ)で 1ms に縮める。
+ */
+describe("SDK の timeout・maxRetries の口(Issue #193)", () => {
+  const FAKE_KEY = "sk-ant-fake-test-key-not-real";
+  const REQUEST: AnthropicRequestParams = {
+    model: "claude-sonnet-5-5",
+    max_tokens: 10,
+    output_config: { effort: "low" },
+    messages: [{ role: "user", content: "p" }],
+  };
+
+  /** 常に 429(再試行の対象)を返し、呼び出し回数を数える fetch。 */
+  function alwaysRateLimited() {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "slow down" } }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after-ms": "1" },
+      });
+    });
+    return fetchImpl;
+  }
+
+  /** abort されるまで応答しない fetch(タイムアウトの対象)。呼び出し回数を数える。 */
+  function hangsUntilAborted() {
+    return vi.fn((_url: unknown, init?: { signal?: AbortSignal | null }) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      });
+    });
+  }
+
+  describe("createSdkMessageSender", () => {
+    it("省略時は SDK の既定の再試行(初回 + 2 回 = 3 本)のまま(exe の挙動を変えない)", async () => {
+      const fetchImpl = alwaysRateLimited();
+      const sender = createSdkMessageSender({ apiKey: FAKE_KEY, fetch: fetchImpl as unknown as typeof fetch });
+      await expect(sender(REQUEST)).rejects.toMatchObject({ status: 429 });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+
+    it.each([
+      [0, 1],
+      [1, 2],
+    ])("maxRetries=%i なら、429 でも HTTP は %i 本だけ(値がそのまま SDK に渡る。0 だけの特別扱いではない)", async (maxRetries, expectedCalls) => {
+      const fetchImpl = alwaysRateLimited();
+      const sender = createSdkMessageSender({ apiKey: FAKE_KEY, fetch: fetchImpl as unknown as typeof fetch, maxRetries });
+      await expect(sender(REQUEST)).rejects.toMatchObject({ status: 429 });
+      expect(fetchImpl).toHaveBeenCalledTimes(expectedCalls);
+    });
+
+    it("timeout(ミリ秒)を渡すと、応答が来ないリクエストをその時間で打ち切り、maxRetries=0 なら再送しない", async () => {
+      const fetchImpl = hangsUntilAborted();
+      const sender = createSdkMessageSender({
+        apiKey: FAKE_KEY,
+        fetch: fetchImpl as unknown as typeof fetch,
+        timeout: 50,
+        maxRetries: 0,
+      });
+      const started = Date.now();
+      // 打ち切りは例外になる(メッセージの中身は問わない。SDK の版で変わる)。
+      await expect(sender(REQUEST)).rejects.toBeInstanceOf(Error);
+      expect(Date.now() - started).toBeLessThan(5_000); // 既定の 10 分ではなく、渡した 50ms で切れている
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("createSdkModelLister(Models API。一覧の取得が、アラームの中で際限なく待たないための口)", () => {
+    it("省略時は SDK の既定の再試行(3 本)のまま", async () => {
+      const fetchImpl = alwaysRateLimited();
+      const lister = createSdkModelLister({ apiKey: FAKE_KEY, fetch: fetchImpl as unknown as typeof fetch });
+      await expect(lister()).rejects.toMatchObject({ status: 429 });
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    });
+
+    it("maxRetries=0 なら 1 本だけ", async () => {
+      const fetchImpl = alwaysRateLimited();
+      const lister = createSdkModelLister({ apiKey: FAKE_KEY, fetch: fetchImpl as unknown as typeof fetch, maxRetries: 0 });
+      await expect(lister()).rejects.toMatchObject({ status: 429 });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("timeout を渡すと、応答が来ない一覧の取得をその時間で打ち切る", async () => {
+      const fetchImpl = hangsUntilAborted();
+      const lister = createSdkModelLister({
+        apiKey: FAKE_KEY,
+        fetch: fetchImpl as unknown as typeof fetch,
+        timeout: 50,
+        maxRetries: 0,
+      });
+      const started = Date.now();
+      await expect(lister()).rejects.toBeInstanceOf(Error);
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
+});

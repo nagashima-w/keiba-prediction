@@ -16,3 +16,8 @@ pipeline-probe.generated.ts
 wrangler.pipeline-probe.generated.toml
 barrel-probe.generated.ts
 wrangler.barrel-probe.generated.toml
+# バンドルのガードの検査用(LLM の狭い入口を巻き込む入口・巻き込まない対照。Issue #193)が生成する一時ファイル
+llm-probe.generated.ts
+wrangler.llm-probe.generated.toml
+llm-absent-probe.generated.ts
+wrangler.llm-absent-probe.generated.toml

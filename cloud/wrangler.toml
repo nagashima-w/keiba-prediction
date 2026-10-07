@@ -60,7 +60,10 @@ migrations_dir = "migrations"
 binding = "ANALYSIS_DETAIL"
 bucket_name = "keiba-cloud-r2"
 
-# Issue #176: 末尾の `"@keiba/core/..."` の4行は、runAnalysis(packages/app の main/analysis-pipeline.ts。相対 import で取り込む)が import する
+# Issue #193(#179-a): `"@anthropic-ai/sdk"`(LLM の呼び出し。core の anthropic-client.ts・model-selection.ts が値で import する)も、cheerio と同じく
+# このディレクトリの node_modules から解決させる(CI には packages/core/node_modules が無い)。`"@keiba/core/llm"` は、その LLM の狭い入口
+# (analyze-race・anthropic-client・model-selection の再 export。better-sqlite3 を経由しない)。
+# Issue #176: 末尾の `"@keiba/core/..."` の行(4行 + #193 の llm で5行)は、runAnalysis(packages/app の main/analysis-pipeline.ts。相対 import で取り込む)が import する
 # core のサブパスを packages/core/src の実ファイルに向ける。★wrangler の alias は完全一致なので**サブパスごとに1行**要る(前方一致は無い。
 # CI のように各 package の node_modules が無い配置では、ここが無いと Could not resolve で失敗する)。runAnalysis の閉包が新しいサブパスを
 # import したら、ここに1行足す(tsconfig.json の paths は `@keiba/core/*` で前方一致、vitest.config.ts の alias も前方一致。
@@ -73,7 +76,9 @@ bucket_name = "keiba-cloud-r2"
 undici = "./src/undici-stub.ts"
 iconv-lite = "./node_modules/iconv-lite"
 cheerio = "./node_modules/cheerio"
+"@anthropic-ai/sdk" = "./node_modules/@anthropic-ai/sdk"
 "@keiba/core/pipeline" = "../packages/core/src/pipeline.ts"
+"@keiba/core/llm" = "../packages/core/src/llm.ts"
 "@keiba/core/scorer/snapshot-filter" = "../packages/core/src/scorer/snapshot-filter.ts"
 "@keiba/core/ev/bet-allocation" = "../packages/core/src/ev/bet-allocation.ts"
 "@keiba/core/ev/combo-bet-allocation" = "../packages/core/src/ev/combo-bet-allocation.ts"

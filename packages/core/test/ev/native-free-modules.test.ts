@@ -204,3 +204,38 @@ describe("狭い入口 @keiba/core/pipeline(Issue #176)", () => {
     );
   });
 });
+
+/**
+ * Issue #193(#179-a): クラウド版の LLM(`@anthropic-ai/sdk`)用の狭い入口 `@keiba/core/llm`(`src/llm.ts`)。
+ * `pipeline.ts` に足さない理由: SDK(`anthropic-client.ts`・`model-selection.ts` が値で import)を、runAnalysis の入口(型と純関数だけ)に巻き込まないため。
+ * この入口も、**型だけの import も含めて** better-sqlite3 に依存するモジュールを経由しない(cloud の型検査は CI で better-sqlite3 を解決できない)。
+ */
+describe("狭い入口 @keiba/core/llm(Issue #193)", () => {
+  const entry = path.join(SRC, "llm.ts");
+
+  it("src/llm.ts が実在し、閉包(型だけの import も辿る)に better-sqlite3 が無い。バレル・cache.ts・analysis-store.ts も経由しない", () => {
+    expect(existsSync(entry), "src/llm.ts が存在する").toBe(true);
+    const { visited, offenders } = closureOf(entry, { followTypes: true });
+    expect(visited.length).toBeGreaterThan(5); // 前提: 閉包を実際に辿れている(空振りでない)
+    expect(offenders).toEqual([]);
+    const names = visited.map((f) => path.relative(SRC, f));
+    for (const forbidden of ["index.ts", path.join("scraper", "cache.ts"), path.join("ev", "analysis-store.ts")]) {
+      expect(names, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("package.json の exports に ./llm があり、src/llm.ts を指す", () => {
+    const pkg = JSON.parse(readFileSync(path.join(SRC, "..", "package.json"), "utf-8")) as {
+      exports: Record<string, string>;
+    };
+    expect(pkg.exports["./llm"]).toBe("./src/llm.ts");
+  });
+
+  it("llm.ts は analyze-race・anthropic-client・model-selection を値で辿る(SDK の入口として、実際にそこへ届いている)", () => {
+    const { visited } = closureOf(entry);
+    const names = visited.map((f) => path.relative(SRC, f));
+    for (const required of ["analyzer/analyze-race.ts", "analyzer/anthropic-client.ts", "analyzer/model-selection.ts"]) {
+      expect(names, required).toContain(path.join(...required.split("/")));
+    }
+  });
+});

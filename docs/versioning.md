@@ -2756,6 +2756,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。名前は表示だけに使い、認可・保存には使わない(D1 の migration も追加しない)。
 
+## 次の正式版が 1.19.24 である根拠(Issue #193 での変更)
+
+**patch**(クラウド版の LLM の土台。**挙動は変えない**。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud: `@anthropic-ai/sdk` 0.70.1(core と同じ版)を依存に追加(`package.json`・`pnpm-lock.yaml`)、alias を3か所に追加、`src/llm-sender.ts`(設定値の置き場。本番の入口からはまだ呼ばない)。
+- core: 狭い入口 `src/llm.ts`(`@keiba/core/llm`)と exports の1行。`createSdkMessageSender`・`createSdkModelLister` に、省略可の `timeout`・`maxRetries` を追加(exe は渡さず、既定は SDK のまま)。
+- ガードテスト(import-guard・bundle-guard・cloud-config-guard)を追従(拒否側は維持)。本番のバンドル(`deploy:dry`)は 1952.76 KiB・gzip 512.63 KiB のまま変わらない。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い(クラウド版の土台だけ。クラウド版も、LLM を呼ぶのは #194 以降)。前例: #177〜#192 のクラウド版の変更も patch で運用してきた。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1 の migration も追加しない。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

@@ -249,6 +249,17 @@ export interface SdkMessageSenderOptions {
   readonly apiKey?: string;
   /** fetch の差し替え(テスト用。実 API を呼ばずにリクエスト本文を検証する)。 */
   readonly fetch?: typeof fetch;
+  /**
+   * 1リクエストの上限時間(ミリ秒。Issue #193)。省略時は SDK の既定(10 分)のまま(exe はこれを渡さない)。
+   * クラウド版(DO のアラーム)が、応答を際限なく待たないために渡す。
+   */
+  readonly timeout?: number;
+  /**
+   * SDK が内部で行う再試行の回数(Issue #193)。省略時は SDK の既定(2 回。つまり HTTP は最大3本)のまま
+   * (exe はこれを渡さない)。0 は再試行しない。`analyzeRace` がすでに1回再送するので、
+   * クラウド版は 0 を渡して HTTP の本数を抑える。
+   */
+  readonly maxRetries?: number;
 }
 
 /**
@@ -266,6 +277,8 @@ export function createSdkMessageSender(options: SdkMessageSenderOptions = {}): M
       client = new Anthropic({
         ...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        ...(options.timeout === undefined ? {} : { timeout: options.timeout }),
+        ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
       });
     }
     const body = {
