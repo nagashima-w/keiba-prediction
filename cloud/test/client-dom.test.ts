@@ -233,6 +233,40 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
     expect(root.replaced).toBe(2);
   });
 
+  it("force を渡すと、同じ木でも置き換える(日付の入力欄を画面の値に戻すため)。そのあと force なしの同じ木は置き換えない", () => {
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    render(tree("x"));
+    render(tree("x"));
+    expect(root.replaced).toBe(1); // 前提: 同じ木は置き換えない
+    const first = root.children[0];
+    render(tree("x"), true);
+    expect(root.replaced).toBe(2);
+    expect(root.children[0]).not.toBe(first); // 新しい DOM 要素になった
+    render(tree("x"));
+    expect(root.replaced).toBe(2);
+  });
+
+  it("日付の入力欄に不正な値・空を入れたとき、画面(createApp)は入力欄を、画面のデータの日付に戻す(段階1の【記録】1。旧版は同じ木の省略で、空のまま残った)", async () => {
+    const DATE = "20260628";
+    const fetchStub = async (url: string) => {
+      if (url.startsWith("/api/races")) return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [] }) };
+      return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, races: [] }) };
+    };
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    const app = createApp({ fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => `#date=${DATE}&venue=central`, setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
+    app.start();
+    await app.whenIdle();
+    const dateInput = () => allElements(root.children[0] as FakeElement).find((e) => e.tag === "input")!;
+    expect(dateInput().value).toBe("2026-06-28"); // 前提: 画面の日付
+    for (const typed of ["", "2026-02-30", "garbage"]) {
+      dateInput().value = typed; // 利用者が入力欄を書き換えた(DOM は画面のデータと食い違う)
+      dateInput().listeners.get("change")![0]!({ target: { value: typed } });
+      expect(dateInput().value, `入力「${typed}」のあと、入力欄は画面の日付に戻る`).toBe("2026-06-28");
+    }
+  });
+
   it("画面の制御(createApp)と繋ぐと、状態が変わらない再描画(同じハッシュの hashchange)で DOM を触らない。状態が変わる描画(場の開閉)では触る", async () => {
     const DATE = "20260628";
     const row = (raceId: string, venue: string) => ({ race_id: raceId, venue_name: venue, race_number: Number(raceId.slice(-2)), race_name: "レース", course_type: "芝", distance: 1800, entry_count: 16, grade: null });
@@ -243,7 +277,7 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
     const root = new FakeRoot();
     const render = createMounter(doc, root);
     const hashState = { hash: `#date=${DATE}&venue=central` };
-    const app = createApp({ fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => hashState.hash, setHash: () => {} });
+    const app = createApp({ fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => hashState.hash, setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
     app.start();
     await app.whenIdle();
     expect(root.children).toHaveLength(1);
@@ -262,7 +296,7 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
 });
 
 const RACE: RaceRow = { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
-const noop = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {} };
+const noop = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onRun: () => {}, onRetrack: () => {} };
 
 describe("renderScreen(一覧の VNode)", () => {
   const route = { date: "20260628", venue: "central", race: null, analysis: null } as const;
@@ -309,7 +343,7 @@ describe("renderScreen(一覧の VNode)", () => {
   it("入力・更新のハンドラは、actions に繋がる", () => {
     const seen: string[] = [];
     const model = buildListModel({ route, list: { kind: "ready", races: [] }, board: { kind: "none" } });
-    const el = mounted(renderScreen(model, { onDateChange: (v) => void seen.push(`date:${v}`), onRefresh: () => void seen.push("refresh"), onToggleGroup: () => {} }));
+    const el = mounted(renderScreen(model, { onDateChange: (v) => void seen.push(`date:${v}`), onRefresh: () => void seen.push("refresh"), onToggleGroup: () => {}, onRun: () => {}, onRetrack: () => {} }));
     allElements(el).find((e) => e.tag === "input")!.listeners.get("change")![0]!({ target: { value: "2026-06-27" } });
     allElements(el).find((e) => e.tag === "button")!.listeners.get("click")![0]!({ target: { value: "" } });
     expect(seen).toEqual(["date:2026-06-27", "refresh"]);

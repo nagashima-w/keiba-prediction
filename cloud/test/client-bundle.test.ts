@@ -213,19 +213,42 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   const flat = (n: FakeElement | FakeText): (FakeElement | FakeText)[] => (n instanceof FakeText ? [n] : [n, ...n.children.flatMap(flat)]);
   const textOf = (n: FakeElement | FakeText): string => flat(n).filter((x): x is FakeText => x instanceof FakeText).map((x) => x.data).join(" ");
 
+  /** 条件が成り立つまで、I/O の 1 巡ずつ待つ(上限つき。実時間の待ちを使わない=CI で不安定にならない)。 */
   async function until(cond: () => boolean): Promise<void> {
     for (let i = 0; i < 200 && !cond(); i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  /** 取得の後始末(マイクロタスク・I/O)を流す(上限つきの有限回)。 */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
     }
   }
 
   function run(initialHash = "") {
     const root = { children: [] as (FakeElement | FakeText)[], replaced: 0, replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; } };
     const listeners = new Map<string, (() => void)[]>();
-    const calls: { url: string; init: { method?: string; credentials?: string; body?: string } }[] = [];
+    const calls: { url: string; init: { method?: string; credentials?: string; referrerPolicy?: string; body?: string } }[] = [];
     const location = { hash: initialHash };
-    const fetchStub = async (url: string, init: { method?: string; credentials?: string; body?: string }) => {
+    // 追跡のタイマー(偽。時間は進めない=張られた数だけを見る)と、可視状態(偽の document)。
+    const timers = new Map<number, () => void>();
+    let timerId = 0;
+    const documentListeners = new Map<string, (() => void)[]>();
+    const doc = {
+      visibilityState: "visible",
+      getElementById: (id: string) => (id === "app" ? root : null),
+      createElement: (tag: string) => new FakeElement(tag),
+      createTextNode: (t: string) => new FakeText(t),
+      addEventListener: (type: string, fn: () => void) => void documentListeners.set(type, [...(documentListeners.get(type) ?? []), fn]),
+    };
+    const fetchStub = async (url: string, init: { method?: string; credentials?: string; referrerPolicy?: string; body?: string }) => {
       calls.push({ url, init });
+      if (init.method === "POST" && url === "/api/analyses/run") {
+        const body = JSON.parse(init.body!) as { race_id: string; kaisai_date: string; mode: string };
+        return { status: 202, json: async () => ({ ok: true, accepted: true, race_id: body.race_id, kaisai_date: body.kaisai_date, mode: body.mode, status: "queued" }) };
+      }
       if (url.startsWith("/api/races")) {
         return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }] }) };
       }
@@ -249,7 +272,13 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       }
     }
     const context = {
-      document: { getElementById: (id: string) => (id === "app" ? root : null), createElement: (tag: string) => new FakeElement(tag), createTextNode: (t: string) => new FakeText(t) },
+      document: doc,
+      setTimeout: (fn: () => void) => {
+        timerId += 1;
+        timers.set(timerId, fn);
+        return timerId;
+      },
+      clearTimeout: (id: number) => void timers.delete(id),
       window: { addEventListener: (type: string, fn: () => void) => void listeners.set(type, [...(listeners.get(type) ?? []), fn]) },
       location,
       fetch: fetchStub,
@@ -259,7 +288,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       console,
     };
     vm.runInNewContext(CLIENT_JS, context);
-    return { root, listeners, calls, location };
+    return { root, listeners, calls, location, timers, doc, documentListeners };
   }
 
   it("ロードで例外にならず、今日(JST)の一覧と板を 1 回ずつ取り(GET・同じオリジンの資格情報)、描画する。hashchange を購読する。ハッシュを書き換えない", async () => {
@@ -280,7 +309,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   it("同じ状態の再描画(同じハッシュの hashchange)では DOM を触らない(Issue #186 段階1。createMounter が main.ts に配線されている)", async () => {
     const { root, listeners, calls } = run();
     await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
-    await new Promise((resolve) => setTimeout(resolve, 20)); // 取得の後始末の再描画を待つ
+    await settle(); // 取得の後始末の再描画を待つ
     const settled = root.replaced;
     const shown = root.children[0];
     expect(settled).toBeGreaterThanOrEqual(1);
@@ -291,7 +320,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(root.children[0]).toBe(shown);
   });
 
-  it("「更新」を連打しても、取得は 1 回分(一覧と板で 2 本)だけ増える。POST は呼ばれない", async () => {
+  it("「更新」を連打しても、取得は 1 回分(一覧と板で 2 本)だけ増える。起動のボタンを押さない限り POST は呼ばれない", async () => {
     const { root, calls } = run();
     await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
     const before = calls.length;
@@ -301,7 +330,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     click(undefined);
     click(undefined);
     await until(() => calls.length >= before + 2);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
     expect(calls.length).toBe(before + 2);
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
   });
@@ -315,6 +344,35 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(text).toContain("朝の準備");
     expect(text).toContain("発走前");
     expect(text).toContain("3着内率 52.3%");
+  });
+
+  it("起動のボタン(生成物の実行): 押すと POST が 1 回(同じオリジンの資格情報・referrerPolicy: same-origin・fetch の mode なし)出て、「待ち」になり、追跡のタイマーが張られる。非表示でタイマーが止まる", async () => {
+    const { root, calls, timers, doc, documentListeners } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`);
+    await until(() => root.children.some((c) => textOf(c).includes("アルファ")));
+    expect((documentListeners.get("visibilitychange") ?? []).length).toBe(1); // 可視状態を購読している
+    expect(calls.filter((c) => c.init.method === "POST")).toHaveLength(0); // 前提: 押すまで POST は無い
+    expect(timers.size).toBe(0); // 前提: 実行中の行が無いので追跡していない
+    const buttons = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && n.attrs.get("data-mode") === "pre_race");
+    expect(buttons).toHaveLength(1);
+    expect(textOf(buttons[0]!)).toBe("発走前の分析を実行");
+    expect(buttons[0]!.attrs.get("data-race")).toBe(RACE_ID);
+    buttons[0]!.listeners.get("click")![0]!(undefined);
+    buttons[0]!.listeners.get("click")![0]!(undefined); // 二重押し
+    await until(() => calls.some((c) => c.init.method === "POST"));
+    await settle();
+    const posts = calls.filter((c) => c.init.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe("/api/analyses/run");
+    expect(JSON.parse(posts[0]!.init.body!)).toEqual({ race_id: RACE_ID, kaisai_date: DATE, mode: "pre_race" });
+    expect(posts[0]!.init.credentials).toBe("same-origin");
+    expect(posts[0]!.init.referrerPolicy).toBe("same-origin");
+    expect(Object.keys(posts[0]!.init)).not.toContain("mode"); // fetch の mode は入れない
+    const after = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && n.attrs.get("data-mode") === "pre_race")[0]!;
+    expect(textOf(after)).toBe("待ち");
+    expect(timers.size).toBe(1); // 追跡のタイマー
+    doc.visibilityState = "hidden";
+    documentListeners.get("visibilitychange")![0]!();
+    expect(timers.size).toBe(0); // 非表示で止まる
   });
 
   it("結果画面(#analysis=): /api/analyses/{id} を 1 回だけ取り、馬のカードと配分(exe の renderer の純関数を、Node の組込みの無い環境で実行)を描画する", async () => {

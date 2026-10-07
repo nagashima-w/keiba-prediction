@@ -3,6 +3,7 @@
  * 文字列の子は、アダプタ(`dom.ts`)がテキストノードにする(外から来た文字列が HTML として解釈されない)。
  * #185 で足した画面は、#184 の要素・属性の許可リスト(`dom.ts`)の範囲だけで組む(新しい要素・属性は足していない。一覧は `ul`、強調は class と文字)。
  */
+import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { RaceModel, TaskCard } from "./race";
 import type { HorseCard, ResultModel } from "./result";
@@ -14,6 +15,10 @@ export interface ViewActions {
   readonly onRefresh: () => void;
   /** 場の見出しのタップ(Issue #187)。`open` は押したあとの状態(今の逆)。 */
   readonly onToggleGroup: (key: string, open: boolean) => void;
+  /** 起動のボタン(Issue #186)。引数(開催日・レース・モード)は、ボタンの `data-*` と同じ値。 */
+  readonly onRun: (date: string, raceId: string, mode: TaskMode) => void;
+  /** 追跡の停止の注記の「状態を更新」(Issue #186)。 */
+  readonly onRetrack: () => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -49,6 +54,12 @@ function venueSection(group: RaceGroupItem, actions: ViewActions): VNode {
   return h("section", { class: "venue" }, [h("h2", {}, [toggle]), ...(group.open ? [h("ul", { class: "races" }, group.races.map(raceRow))] : [])]);
 }
 
+/** 追跡の停止の注記と「状態を更新」(Issue #186)。止まっていないとき(null)は何も出さない。 */
+function trackingNotice(message: string | null, actions: ViewActions): VNode[] {
+  if (message === null) return [];
+  return [h("div", { class: "tracking" }, [h("p", { class: "notice" }, [message]), h("button", { class: "retrack" }, ["状態を更新"], { click: actions.onRetrack })])];
+}
+
 function listScreen(model: ListModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("label", { class: "date" }, [h("span", {}, ["開催日"]), h("input", { type: "date", value: model.dateInput }, [], { change: actions.onDateChange })]),
@@ -73,7 +84,7 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
   for (const group of model.groups) {
     body.push(venueSection(group, actions));
   }
-  return h("div", { class: "screen" }, [controls, ...notices, ...body]);
+  return h("div", { class: "screen" }, [controls, ...trackingNotice(model.tracking, actions), ...notices, ...body]);
 }
 
 const loadingLabel = (loading: boolean, label: string): string => (loading ? "読み込み中…" : label);
@@ -87,13 +98,30 @@ function priorRow(item: { rank: number; umaban: number; name: string | null; val
   ]);
 }
 
-function taskCard(card: TaskCard): VNode {
+/**
+ * 起動のボタンは、クリック処理に渡す値(開催日・レース・モード)を `data-*` にも出す(`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されない。
+ * 引数が木に出ていないと、レースを移っても古い処理が残る)。`client-view.test.ts` が、処理を持つ要素に `data-*` があること(引数なしの処理を除く)を機械的に固定する。
+ */
+function runButton(button: TaskCard["button"], actions: ViewActions): VNode {
+  return h(
+    "button",
+    { class: "run", disabled: button.disabled, "data-date": button.date, "data-race": button.raceId, "data-mode": button.mode },
+    [button.label],
+    { click: () => actions.onRun(button.date, button.raceId, button.mode) },
+  );
+}
+
+function taskCard(card: TaskCard, actions: ViewActions): VNode {
   return h("section", { class: "card" }, [
     h("h2", {}, [card.title]),
     h("span", { class: `badge ${card.badge.tone}` }, [card.badge.label]),
     ...(card.error === null ? [] : [h("p", { class: "card-error" }, [card.error])]),
+    ...(card.runError === null ? [] : [h("p", { class: "card-error", role: "alert" }, [card.runError])]),
+    ...(card.runInfo === null ? [] : [h("p", { class: "card-note" }, [card.runInfo])]),
+    ...(card.priorNotice === null ? [] : [h("p", { class: "card-note" }, [card.priorNotice])]),
     ...(card.prior === null ? [] : [h("ul", { class: "prior" }, card.prior.map(priorRow))]),
     ...(card.resultHref === null ? [] : [h("a", { class: "result-link", href: card.resultHref }, ["結果を見る"])]),
+    runButton(card.button, actions),
   ]);
 }
 
@@ -108,7 +136,7 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   } else if (model.cards === null) {
     body.push(h("p", { class: "empty" }, ["状態を読み込み中…"]));
   } else {
-    body.push(...model.cards.map(taskCard));
+    body.push(...model.cards.map((card) => taskCard(card, actions)));
   }
   const past = model.past;
   const pastBody: VNode[] = [];
@@ -121,7 +149,7 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
   } else {
     pastBody.push(h("ul", { class: "past" }, past.items.map((item) => h("li", {}, [h("a", { class: "past-link", href: item.href }, [item.label])]))));
   }
-  return h("div", { class: "screen" }, [controls, h("h1", { class: "title" }, [model.title]), ...body, h("section", { class: "past-section" }, [h("h2", {}, ["過去の分析"]), ...pastBody])]);
+  return h("div", { class: "screen" }, [controls, ...trackingNotice(model.tracking, actions), h("h1", { class: "title" }, [model.title]), ...body, h("section", { class: "past-section" }, [h("h2", {}, ["過去の分析"]), ...pastBody])]);
 }
 
 function horseCard(horse: HorseCard): VNode {

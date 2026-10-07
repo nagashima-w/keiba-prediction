@@ -18,7 +18,11 @@ if (root !== null) {
     setHash: (hash) => {
       location.hash = hash;
     },
+    // 追跡(Issue #186)のタイマーと可視状態。非表示の間は追跡を止め、表示に戻ったら即時に 1 回取って再開する。
+    timers: { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle as number) },
+    isVisible: () => document.visibilityState !== "hidden",
   });
   window.addEventListener("hashchange", () => app.onHashChange());
+  document.addEventListener("visibilitychange", () => app.onVisibilityChange());
   app.start();
 }

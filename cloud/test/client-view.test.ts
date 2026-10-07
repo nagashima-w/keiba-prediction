@@ -2,19 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { AnalysisDetail } from "../client/api-analysis";
 import { mount, type DomDocument } from "../client/dom";
 import { buildListModel, type ListModelInput } from "../client/list";
-import { buildRaceModel, type RaceModelInput } from "../client/race";
+import { buildRaceModel, type RaceModelInput, type RunUi } from "../client/race";
 import { buildResultModel } from "../client/result";
 import { renderScreen, type ViewActions } from "../client/view";
-import type { VNode } from "../client/vnode";
+import { h, type VNode } from "../client/vnode";
 
 /**
  * Issue #185: レース画面・結果画面の VNode。モデル(純関数。race.test・result.test が検証)→ VNode の写し間違い(出し忘れ・出しすぎ)と、XSS の守り(外から来た文字列はテキストノードだけ。
  * 要素・属性は #184 の許可リストのまま=偽の document に mount して、許可リストに投げられないことを確かめる)。
- * **この段階(#185)のレース画面に起動のボタンは無い**(#186)。
+ * Issue #186: 起動のボタン・起動の失敗の注記・追跡の停止の注記(「状態を更新」)・クリック処理の引数が data-* に出ていること(`createMounter` が同じ木の DOM を触らないため)。
  */
 
 const RACE_ID = "202603020211";
-const noop: ViewActions = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {} };
+const noop: ViewActions = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onRun: () => {}, onRetrack: () => {} };
 
 function textOf(node: VNode | string): string {
   if (typeof node === "string") return node;
@@ -53,11 +53,12 @@ const raceInput = (over: Partial<RaceModelInput> = {}): RaceModelInput => ({
   ...over,
 });
 
+const PRIOR_VIEW = { raceName: "福島民報杯", venueName: "福島", date: "2026-06-28", computedAt: 5000, rows: [{ rank: 1, umaban: 3, horseName: "アルファ", prior: 0.523 }] };
 const row = (mode: "morning" | "pre_race", status: "queued" | "fetched" | "done" | "failed", over: Record<string, unknown> = {}) =>
   ({ raceId: RACE_ID, mode, status, attempts: 0, error: null, queuedAt: 1, updatedAt: 2, prior: false, analysisId: null, ...over }) as const;
 
 describe("レース画面の VNode", () => {
-  it("見出し・戻るリンク・2 枚のカード(朝の準備・発走前)・過去の分析。起動のボタンは無い(ボタンは「更新」だけ)", () => {
+  it("見出し・戻るリンク・2 枚のカード(朝の準備・発走前)・過去の分析。ボタンは「更新」と、各カードの起動のボタン(Issue #186。旧版は「更新」だけ)", () => {
     const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "done", { prior: true })], prior: null } })), noop);
     expect(textOf(tree)).toContain(`レース ${RACE_ID}`);
     expect(hrefs(tree)).toContain("#date=20260628&venue=central");
@@ -68,7 +69,7 @@ describe("レース画面の VNode", () => {
     expect(textOf(cards[1]!)).toContain("発走前");
     expect(textOf(cards[1]!)).toContain("未実行");
     const buttons = findAll(tree, (n) => n.tag === "button");
-    expect(buttons.map(textOf)).toEqual(["更新"]);
+    expect(buttons.map(textOf)).toEqual(["更新", "朝の準備をやり直す", "発走前の分析を実行"]);
     expect(textOf(tree)).toContain("過去の分析");
     expect(textOf(tree)).toContain("過去の分析はありません");
   });
@@ -138,6 +139,135 @@ describe("レース画面の VNode", () => {
     const tree = renderScreen(buildRaceModel(raceInput()), { ...noop, onRefresh: () => (count += 1) });
     findAll(tree, (n) => n.tag === "button")[0]!.on!.click!();
     expect(count).toBe(1);
+  });
+});
+
+describe("起動のボタン・注記の VNode(Issue #186)", () => {
+  const readyInput = (over: Partial<RaceModelInput> = {}) => raceInput({ status: { kind: "ready", rows: [], prior: null }, ...over });
+  const runButtons = (tree: VNode) => byClass(tree, "run");
+
+  it("各カードに起動のボタン(class=run)。文言・disabled はモデルのとおり。開催日・レース・モードを data-* に持つ", () => {
+    const tree = renderScreen(buildRaceModel(readyInput({ status: { kind: "ready", rows: [row("pre_race", "queued")], prior: null } })), noop);
+    const buttons = runButtons(tree);
+    expect(buttons).toHaveLength(2);
+    expect(buttons.every((b) => b.tag === "button")).toBe(true);
+    expect(buttons.map(textOf)).toEqual(["朝の準備を実行", "待ち"]);
+    expect(buttons.map((b) => b.attrs?.["disabled"])).toEqual([false, true]);
+    expect(buttons.map((b) => [b.attrs?.["data-date"], b.attrs?.["data-race"], b.attrs?.["data-mode"]])).toEqual([
+      ["20260628", RACE_ID, "morning"],
+      ["20260628", RACE_ID, "pre_race"],
+    ]);
+    // カードの中にある(それぞれのカードの子孫)
+    const cards = byClass(tree, "card");
+    expect(runButtons(cards[0]!)).toHaveLength(1);
+    expect(runButtons(cards[1]!)).toHaveLength(1);
+  });
+
+  it("クリックは onRun(開催日, レース, モード)に繋がる(data-* と同じ値)", () => {
+    const calls: [string, string, string][] = [];
+    const actions: ViewActions = { ...noop, onRun: (date, raceId, mode) => void calls.push([date, raceId, mode]) };
+    const buttons = runButtons(renderScreen(buildRaceModel(readyInput({ route: { date: "20260629", venue: "nar", race: "202654062801", analysis: null } })), actions));
+    expect(buttons).toHaveLength(2);
+    for (const b of buttons) b.on!.click!();
+    expect(calls).toEqual([
+      ["20260629", "202654062801", "morning"],
+      ["20260629", "202654062801", "pre_race"],
+    ]);
+    // data-* とクリックの引数が一致する
+    expect(buttons.map((b) => [b.attrs?.["data-date"], b.attrs?.["data-race"], b.attrs?.["data-mode"]])).toEqual(calls);
+  });
+
+  it("状態を取得できていないレース画面(読み込み中・失敗)には、起動のボタンが出ない", () => {
+    expect(runButtons(renderScreen(buildRaceModel(raceInput({ status: { kind: "loading" } })), noop))).toHaveLength(0);
+    expect(runButtons(renderScreen(buildRaceModel(raceInput({ status: { kind: "error", message: "x" } })), noop))).toHaveLength(0);
+  });
+
+  it("起動の失敗は role=alert の段落、すでに実行中・prior の注記は通常の段落で、そのカードの中に出る。外から来た文字列はテキストノード", () => {
+    const evil = `<img src=x onerror=alert(1)>`;
+    const runs = new Map<"morning" | "pre_race", RunUi>([
+      ["morning", { kind: "already" }],
+      ["pre_race", { kind: "error", message: evil }],
+    ]);
+    const tree = renderScreen(
+      buildRaceModel(readyInput({ status: { kind: "ready", rows: [row("morning", "queued")], prior: PRIOR_VIEW, priorNotice: "順位を取得できませんでした" }, runs })),
+      noop,
+    );
+    const [morning, preRace] = byClass(tree, "card");
+    const alerts = findAll(preRace!, (n) => n.attrs?.["role"] === "alert");
+    expect(alerts.map(textOf)).toEqual([evil]);
+    expect(findAll(morning!, (n) => n.attrs?.["role"] === "alert")).toHaveLength(0);
+    expect(textOf(morning!)).toContain("すでに実行中");
+    expect(textOf(preRace!)).not.toContain("すでに実行中");
+    // prior の注記は朝のカードにだけ出る
+    expect(textOf(preRace!)).not.toContain("順位を取得できませんでした");
+    expect(textOf(morning!)).toContain("順位を取得できませんでした");
+    expect(() => mountAll(tree)).not.toThrow();
+    expect(mountAll(tree).texts.some((t) => t.includes(evil))).toBe(true);
+    expect(mountAll(tree).tags.filter((t) => ["img", "script"].includes(t))).toEqual([]);
+  });
+
+  it("追跡の停止の注記: 文言と「状態を更新」ボタン(クリックは onRetrack)。一覧・レースの両方に出る。無ければ出ない", () => {
+    let count = 0;
+    const actions: ViewActions = { ...noop, onRetrack: () => (count += 1) };
+    const list = renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null }, list: { kind: "ready", races: [] }, board: { kind: "none" }, tracking: "自動更新を止めました" }), actions);
+    const race = renderScreen(buildRaceModel(readyInput({ tracking: "自動更新を止めました" })), actions);
+    for (const tree of [list, race]) {
+      const boxes = byClass(tree, "tracking");
+      expect(boxes).toHaveLength(1);
+      expect(textOf(boxes[0]!)).toContain("自動更新を止めました");
+      const button = byClass(boxes[0]!, "retrack");
+      expect(button).toHaveLength(1);
+      expect(textOf(button[0]!)).toBe("状態を更新");
+      button[0]!.on!.click!();
+    }
+    expect(count).toBe(2);
+    expect(byClass(renderScreen(buildRaceModel(readyInput()), noop), "tracking")).toHaveLength(0);
+    expect(byClass(renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null }, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noop), "tracking")).toHaveLength(0);
+  });
+});
+
+/**
+ * **`data-*` の契約(Issue #186 段階1 の【記録】→ 段階2で機械的に固定)**: `createMounter` は JSON が同じ木の DOM を触らない。関数(クリック処理)は JSON にならないので、
+ * 木が同じでクリック処理だけが違うと古い処理が残る。そこで「クリック処理に引数を渡すボタン」は、その引数を `data-*` にも出す。
+ * 引数を取らない処理(更新・状態を更新・日付の入力〈値はイベントから読む〉)は、許可リスト(class)で除外する。
+ */
+describe("data-* の契約: 引数を渡すクリック処理は、引数を data-* に出している", () => {
+  const NO_ARGUMENT_CLASSES = new Set(["refresh", "retrack"]);
+  const hasDataAttr = (n: VNode): boolean => Object.keys(n.attrs ?? {}).some((k) => k.startsWith("data-"));
+  const handlers = (tree: VNode): VNode[] => findAll(tree, (n) => n.on?.click !== undefined || n.on?.change !== undefined);
+  const exempt = (n: VNode): boolean => String(n.attrs?.["class"] ?? "").split(" ").some((c) => NO_ARGUMENT_CLASSES.has(c)) || (n.tag === "input" && n.attrs?.["type"] === "date");
+
+  const rr = (raceId: string, venueName: string) => ({ raceId, venueName, raceNumber: 1, raceName: "r", courseType: "芝", distance: 1800, entryCount: 16, grade: null }) as const;
+  const route = { date: "20260628", venue: "central", race: null, analysis: null } as const;
+  const trees = (): { name: string; tree: VNode }[] => [
+    { name: "一覧(場が 2 つ・閉)", tree: renderScreen(buildListModel({ route, list: { kind: "ready", races: [rr("202602010101", "函館"), rr("202603020211", "福島")] }, board: { kind: "none" }, tracking: "止めました" }), noop) },
+    { name: "レース画面(カード 2 枚・失敗の注記・追跡の注記つき)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "failed")], prior: null }, tracking: "止めました", runs: new Map([["morning", { kind: "error", message: "x" }]]) })), noop) },
+    { name: "結果画面(失敗の「更新」)", tree: renderScreen(buildResultModel({ route: { ...route, analysis: 5 }, source: { kind: "error", message: "失敗" } }), noop) },
+  ];
+
+  it("クリック・変更の処理を持つ要素は、data-* を持つか、引数を取らない許可リスト(更新・状態を更新・日付の入力)のどれか", () => {
+    let withData = 0;
+    let exemptCount = 0;
+    for (const { name, tree } of trees()) {
+      expect(handlers(tree).length, `前提: ${name} に処理を持つ要素がある`).toBeGreaterThan(0);
+      for (const n of handlers(tree)) {
+        if (exempt(n)) {
+          exemptCount += 1;
+          continue;
+        }
+        expect(hasDataAttr(n), `${name}: ${n.tag}.${String(n.attrs?.["class"])} に data-* が無い(引数を渡す処理は data-* に出す)`).toBe(true);
+        withData += 1;
+      }
+    }
+    // 空振り防止: 場の見出し(2)・起動のボタン(2)が data-* の対象として数えられ、除外も使われている
+    expect(withData).toBe(4);
+    expect(exemptCount).toBeGreaterThanOrEqual(4);
+  });
+
+  it("対照: 検査は、data-* の無いクリック処理(許可リスト外)を拾える(空振りでない)", () => {
+    const bad = h("div", {}, [h("button", { class: "run" }, ["x"], { click: () => {} }), h("button", { class: "refresh" }, ["更新"], { click: () => {} })]);
+    const offenders = handlers(bad).filter((n) => !exempt(n) && !hasDataAttr(n));
+    expect(offenders.map((n) => n.attrs?.["class"])).toEqual(["run"]);
   });
 });
 

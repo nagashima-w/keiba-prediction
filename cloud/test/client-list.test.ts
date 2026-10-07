@@ -114,6 +114,11 @@ describe("buildListModel", () => {
     expect(buildListModel(input({ list: { kind: "loading" }, boardLoading: false })).loading).toBe(true);
   });
 
+  it("追跡の停止の注記(tracking)は、渡した文言がそのまま出る。無ければ null(Issue #186)", () => {
+    expect(buildListModel(input({ tracking: "止めました" })).tracking).toBe("止めました");
+    expect(buildListModel(input()).tracking).toBeNull();
+  });
+
   it("読み込み中は loading で、更新ボタンを押せない状態を示す。エラー時は error の文言を持ち、レースは出さない", () => {
     const loading = buildListModel(input({ list: { kind: "loading" } }));
     expect(loading.loading).toBe(true);

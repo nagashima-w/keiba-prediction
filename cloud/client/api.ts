@@ -37,6 +37,8 @@ export interface BoardRow {
 
 export type ApiFailure =
   | { readonly kind: "forbidden" }
+  /** 403 で、本文の `error.type` が `origin-mismatch`(サーバの Origin の完全一致の検査に落ちた。Access の拒否〈本文が平文〉とは区別する。Issue #186)。 */
+  | { readonly kind: "origin-mismatch" }
   | { readonly kind: "bad-request" }
   | { readonly kind: "netkeiba-unavailable"; readonly reason: "blocked" | "busy" | "failed" }
   | { readonly kind: "server-error" }
@@ -72,7 +74,7 @@ export type BoardResult = { readonly ok: true; readonly rows: BoardRow[] } | { r
 /** 使う部分だけの fetch(`window.fetch` が満たす。Node のテストでは偽物を渡せる)。 */
 export type FetchLike = (
   url: string,
-  init: { method: "GET" | "POST"; headers?: Record<string, string>; credentials?: "same-origin"; body?: string },
+  init: { method: "GET" | "POST"; headers?: Record<string, string>; credentials?: "same-origin"; referrerPolicy?: "same-origin"; body?: string },
 ) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -83,7 +85,9 @@ export const strOrNull = (v: unknown): v is string | null => v === null || typeo
 /** エラー応答(200 以外、または ok が true でない)を分類する。成功の形の検査は呼び出し側。 */
 export function classify(status: number, body: unknown): ApiFailure {
   if (status === 403) {
-    return { kind: "forbidden" };
+    // `error.type` はサーバが決めた固定の識別子(`message` ではない)。原因の切り分け(Origin の不一致か、ログインの期限切れか)にだけ使う。
+    const error = isRecord(body) && isRecord(body["error"]) ? body["error"] : undefined;
+    return error !== undefined && error["type"] === "origin-mismatch" ? { kind: "origin-mismatch" } : { kind: "forbidden" };
   }
   if (status === 400) {
     return { kind: "bad-request" };
@@ -194,6 +198,8 @@ export function failureMessage(failure: ApiFailure): string {
   switch (failure.kind) {
     case "forbidden":
       return "アクセスできません。ログインの期限切れかもしれません。ページを再読み込みしてください。";
+    case "origin-mismatch":
+      return "リクエストの送信元の確認に失敗しました(Origin の不一致)。ページを再読み込みしてください。直らないときは、別のブラウザで開いてください。";
     case "network":
       return "通信に失敗しました。ログインの期限切れかもしれません。ページを再読み込みしてください。";
     case "bad-request":

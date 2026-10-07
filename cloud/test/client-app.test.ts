@@ -9,7 +9,7 @@ import type { VNode } from "../client/vnode";
  *  - 一覧(races)は (開催日, 区分) ごとに 1 回。画面の往復(一覧 → レース → 一覧、中央 → 地方 → 中央)で取り直さない
  *  - 板(status。race_id なし)は開催日ごとに 1 回。区分を切り替えても取り直さない
  *  - 失敗は自動で再試行しない(「更新」だけが取り直す)。同時に同じものを 2 本取らない
- *  - `POST` は呼ばない(起動は #186)
+ *  - 起動のボタンを押さない限り `POST` は呼ばない(起動は #186。client-app-run.test.ts。旧版は「POST は呼ばない」)
  * Issue #185: レース画面(`status?race_id=`・過去の分析の一覧を、開いたときに 1 回)・結果画面(`/api/analyses/{id}` を、開いたときに 1 回。メモリにキャッシュ)も同じ方針。
  * レース画面・結果画面は、一覧(`/api/races`)と板(`status`〈race_id なし〉)を取らない(netkeiba に出ない・DO を余計に起こさない)。
  */
@@ -118,6 +118,9 @@ function harness(initialHash: string, now = new Date("2026-06-28T00:00:00Z")): H
     setHash: (hash) => {
       hashes.push(hash);
     },
+    // 追跡(Issue #186)の検査は client-app-run.test.ts。ここでは、タイマーを張っても動かさない(偽)。
+    timers: { set: () => 0, clear: () => {} },
+    isVisible: () => true,
   });
   return h;
 }

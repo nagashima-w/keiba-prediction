@@ -81,12 +81,13 @@ export function mount(doc: DomDocument, root: DomRoot, vnode: VNode): void {
  * **比較は `JSON.stringify` なので、関数(`on` のクリック処理)は比較されない**。木が同じでクリック処理だけが違うと、DOM には古い処理が残る。
  * そのため呼び出し側(`view.ts`)は、クリック処理に渡す引数を必ず `data-*` 属性にも出す(引数が違えば木が違う)。
  * 組み立て(許可リストの検査を含む)が投げたときは root を変えず、「直前の木」も更新しない(画面に出ているのは直前に成功した木のまま)。
+ * **`force` が true のときは、同じ木でも置き換える**(Issue #186。日付の入力欄に不正な値を入れられたとき、入力欄を画面のデータの値に戻す。木は変わっていないので、省略すると入力欄が食い違ったまま残る)。
  */
-export function createMounter(doc: DomDocument, root: DomRoot): (vnode: VNode) => void {
+export function createMounter(doc: DomDocument, root: DomRoot): (vnode: VNode, force?: boolean) => void {
   let last: string | null = null;
-  return (vnode) => {
+  return (vnode, force = false) => {
     const serialized = JSON.stringify(vnode);
-    if (serialized === last) {
+    if (!force && serialized === last) {
       return;
     }
     root.replaceChildren(build(doc, vnode));

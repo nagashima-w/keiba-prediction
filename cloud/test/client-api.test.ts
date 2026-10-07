@@ -88,9 +88,10 @@ describe("エラー応答の分類(races・status 共通)", () => {
     ["status", (s: number, b: unknown) => parseStatusResponse(s, b)],
   ] as const;
   for (const [name, parse] of parsers) {
-    it(`${name}: 403 は本文が JSON でなくても forbidden(Worker の関門の応答は text/plain の forbidden)`, () => {
+    it(`${name}: 403 は本文が JSON でなくても forbidden(Worker の関門の応答は text/plain の forbidden)。本文の error.type が origin-mismatch のときだけ origin-mismatch(Issue #186 D6。旧版は本文によらず forbidden)`, () => {
       expect(parse(403, undefined)).toEqual({ ok: false, error: { kind: "forbidden" } });
-      expect(parse(403, { ok: false, error: { type: "origin-mismatch" } })).toEqual({ ok: false, error: { kind: "forbidden" } });
+      expect(parse(403, { ok: false, error: { type: "something-else", message: "x" } })).toEqual({ ok: false, error: { kind: "forbidden" } });
+      expect(parse(403, { ok: false, error: { type: "origin-mismatch" } })).toEqual({ ok: false, error: { kind: "origin-mismatch" } });
     });
     it(`${name}: 400 は bad-request(サーバの文面は持ち込まない)`, () => {
       const result = parse(400, { ok: false, error: { type: "bad-request", message: "秘密の文面<script>" } });
@@ -120,6 +121,7 @@ describe("エラー応答の分類(races・status 共通)", () => {
 describe("failureMessage(固定の文言。サーバの文面・例外の文面は出さない)", () => {
   const failures: ApiFailure[] = [
     { kind: "forbidden" },
+    { kind: "origin-mismatch" },
     { kind: "bad-request" },
     { kind: "netkeiba-unavailable", reason: "blocked" },
     { kind: "netkeiba-unavailable", reason: "busy" },

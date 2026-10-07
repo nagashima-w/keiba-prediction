@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { BoardRow, MorningPriorView, RaceRow } from "../client/api";
-import { buildRaceModel, type RaceModelInput } from "../client/race";
+import { buildRaceModel, runButtonLabel, type RaceModelInput, type RunUi } from "../client/race";
 import type { Route } from "../client/route";
 
 /**
  * Issue #185: レース画面の表示用データ(純関数)。朝の準備・発走前の 2 枚のカード(状態・失敗時のエラー文・「結果を見る」)・朝の prior の順位・過去の分析のリンク。
- * この段階(#185)では起動のボタンは無い(#186)。**「結果を見る」は明示の操作(リンク)で、自動で開かない**。
+ * **「結果を見る」は明示の操作(リンク)で、自動で開かない**。起動のボタン・失敗の注記は Issue #186(下の describe)。
  */
 
 const RACE_ID = "202603020211";
@@ -213,5 +213,92 @@ describe("見出し・戻るリンク", () => {
 
   it("一覧へ戻るリンクは、日付・区分を保つ(race を含めない)", () => {
     expect(buildRaceModel(input({ route: { ...ROUTE, date: "20261003", venue: "nar" } })).backHref).toBe("#date=20261003&venue=nar");
+  });
+});
+
+
+/** Issue #186: 起動のボタン(D16 の文言)・起動の失敗・すでに実行中・prior の注記・追跡の注記。 */
+describe("起動のボタン(文言・disabled・渡す値)", () => {
+  type Status = BoardRow["status"] | undefined;
+  const TABLE: readonly [BoardRow["mode"], Status, string, boolean][] = [
+    // [モード, 板の状態, ボタンの文言, disabled]
+    ["morning", undefined, "朝の準備を実行", false],
+    ["morning", "done", "朝の準備をやり直す", false],
+    ["morning", "failed", "再試行", false],
+    ["morning", "queued", "待ち", true],
+    ["morning", "fetched", "取得済み", true],
+    ["pre_race", undefined, "発走前の分析を実行", false],
+    ["pre_race", "done", "再実行(新しい分析として保存されます)", false],
+    ["pre_race", "failed", "再試行", false],
+    ["pre_race", "queued", "待ち", true],
+    ["pre_race", "fetched", "取得済み", true],
+  ];
+  for (const [mode, status, label, disabled] of TABLE) {
+    it(`${mode}・${status ?? "行なし"} → 「${label}」(disabled: ${disabled})`, () => {
+      const rows = status === undefined ? [] : [row(RACE_ID, mode, status)];
+      const card = cards(buildRaceModel(input({ status: { kind: "ready", rows, prior: null } }))).find((c) => c.mode === mode)!;
+      expect(card.button.label).toBe(label);
+      expect(card.button.disabled).toBe(disabled);
+      expect(runButtonLabel(mode, status, false)).toBe(label);
+    });
+  }
+
+  it("送信中は、板の状態によらず「送信中…」で disabled(二重押しを防ぐ)", () => {
+    for (const status of [undefined, "done", "failed"] as const) {
+      expect(runButtonLabel("morning", status, true)).toBe("送信中…");
+      expect(runButtonLabel("pre_race", status, true)).toBe("送信中…");
+    }
+    const runs = new Map<BoardRow["mode"], RunUi>([["morning", { kind: "sending" }]]);
+    const model = buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", "done", { prior: true })], prior: null }, runs }));
+    const [morning, preRace] = cards(model);
+    expect(morning!.button).toMatchObject({ label: "送信中…", disabled: true });
+    expect(preRace!.button).toMatchObject({ label: "発走前の分析を実行", disabled: false }); // もう一方のモードは別
+  });
+
+  it("ボタンが起動に渡す値(開催日・レース・モード)は、画面のレースと開催日・そのカードのモード(取り違えない)", () => {
+    const route: Route = { date: "20260629", venue: "nar", race: OTHER_RACE_ID, analysis: null };
+    const [morning, preRace] = cards(buildRaceModel(input({ route })));
+    expect(morning!.button).toMatchObject({ date: "20260629", raceId: OTHER_RACE_ID, mode: "morning" });
+    expect(preRace!.button).toMatchObject({ date: "20260629", raceId: OTHER_RACE_ID, mode: "pre_race" });
+  });
+
+  it("状態を取得できていない(cards が null)ときはボタンを出さない(「未実行」と誤読させて起動させない)", () => {
+    expect(buildRaceModel(input({ status: { kind: "loading" } })).cards).toBeNull();
+    expect(buildRaceModel(input({ status: { kind: "error", message: "x" } })).cards).toBeNull();
+  });
+});
+
+describe("起動の失敗・すでに実行中・prior の注記・追跡の注記", () => {
+  it("起動の失敗の文言は、そのカードだけに出る(もう一方のモードに出さない)。失敗しても、ボタンは押せる", () => {
+    const runs = new Map<BoardRow["mode"], RunUi>([["pre_race", { kind: "error", message: "起動に失敗した" }]]);
+    const [morning, preRace] = cards(buildRaceModel(input({ runs })));
+    expect(preRace!.runError).toBe("起動に失敗した");
+    expect(morning!.runError).toBeNull();
+    expect(preRace!.button.disabled).toBe(false);
+  });
+
+  it("「すでに実行中」の注記は、板の状態が実行中(queued・fetched)の間だけ出る。完了・失敗に変われば出さない", () => {
+    const runs = new Map<BoardRow["mode"], RunUi>([["morning", { kind: "already" }]]);
+    const withStatus = (status: BoardRow["status"]) => cards(buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", status)], prior: null }, runs })))[0]!.runInfo;
+    expect(withStatus("queued")).toContain("すでに実行中");
+    expect(withStatus("fetched")).toContain("すでに実行中");
+    expect(withStatus("done")).toBeNull();
+    expect(withStatus("failed")).toBeNull();
+    expect(cards(buildRaceModel(input()))[0]!.runInfo).toBeNull(); // 何も押していない
+  });
+
+  it("prior の取り直しに失敗した注記は、朝のカードにだけ付く(カードの状態・prior の順位は残る)", () => {
+    const model = buildRaceModel(input({ status: { kind: "ready", rows: [row(RACE_ID, "morning", "done", { prior: true })], prior: PRIOR, priorNotice: "順位を取得できませんでした" } }));
+    const [morning, preRace] = cards(model);
+    expect(morning!.priorNotice).toBe("順位を取得できませんでした");
+    expect(preRace!.priorNotice).toBeNull();
+    expect(morning!.badge).toEqual({ label: "完了", tone: "ok" });
+    expect(morning!.prior).toHaveLength(2); // 古い順位が残る
+    expect(cards(buildRaceModel(input()))[0]!.priorNotice).toBeNull();
+  });
+
+  it("追跡の停止の注記(tracking)は、渡した文言がそのまま出る。無ければ null", () => {
+    expect(buildRaceModel(input({ tracking: "止めました" })).tracking).toBe("止めました");
+    expect(buildRaceModel(input()).tracking).toBeNull();
   });
 });

@@ -125,6 +125,11 @@ export function renderPage(email: string): string {
   .horse-line { font-size: 0.9rem; }
   .ev-plus { margin-left: 8px; color: var(--ok); }
   .settings small { color: var(--muted); }
+  /* Issue #186: 起動のボタン・追跡の停止の注記(「状態を更新」)・カードの補足 */
+  .run { display: block; width: 100%; margin-top: 8px; }
+  .tracking { margin: 8px 0; }
+  .tracking .notice { margin-bottom: 8px; }
+  .card-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--muted); }
 </style>
 </head>
 <body>

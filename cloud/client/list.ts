@@ -83,7 +83,7 @@ export interface GroupSummary {
 /**
  * 板から、この場のレースのうち実行中・失敗のものの数を数える(Issue #187。閉じていても状態が分かるように)。
  * **行ではなくレースで数える**(同じレースの 2 モードがどちらも実行中でも 1)。朝が失敗・発走前が待ちのレースは、両方に 1 つずつ入る。
- * 板が取れていなければ null(件数だけを出す)。
+ * 板が取れていなければ null(要約を出さない=見出しは場名だけ)。
  */
 export function summarizeGroup(races: readonly RaceRow[], board: BoardSource): GroupSummary | null {
   if (board.kind !== "ready") return null;
@@ -106,6 +106,8 @@ export interface ListModelInput {
   readonly board: BoardSource;
   /** 板(`status`)を取得中か(Issue #186 段階1)。一覧が取得済みでも、板の取得中は「更新」を押せない。省略は false。 */
   readonly boardLoading?: boolean;
+  /** 追跡の停止の注記(止まっているときだけ。省略・null は出さない。Issue #186)。 */
+  readonly tracking?: string | null;
   /** 利用者が押した場の開閉(キーは `groupKeys`)。無い場は既定(場が 2 つ以上なら閉・1 つなら開)。省略は「何も押していない」。 */
   readonly choices?: ReadonlyMap<string, boolean>;
 }
@@ -145,6 +147,8 @@ export interface ListModel {
   readonly error: string | null;
   /** 板だけが失敗したときの注記(何の失敗かを示す前置きつき)。 */
   readonly boardNotice: string | null;
+  /** 追跡の停止の注記(「状態を更新」つき)。止まっていないとき null。 */
+  readonly tracking: string | null;
   /** 成功で、開催が 0 件。 */
   readonly empty: boolean;
   readonly groups: readonly RaceGroupItem[];
@@ -174,6 +178,7 @@ export function buildListModel(input: ListModelInput): ListModel {
     loading: list.kind === "loading" || input.boardLoading === true,
     error: list.kind === "error" ? list.message : null,
     boardNotice: board.kind === "error" ? `${BOARD_NOTICE_PREFIX}${board.message}` : null,
+    tracking: input.tracking ?? null,
     empty: list.kind === "ready" && list.races.length === 0,
     groups: rawGroups.map((g, i) => ({
       key: keys[i]!,
