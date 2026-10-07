@@ -8,6 +8,7 @@ import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import type { HorseCard, ResultContent, ResultModel } from "./result";
+import type { FieldModel, SettingsModel } from "./settings-form";
 import { h, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -22,6 +23,10 @@ export interface ViewActions {
   readonly onRun: (date: string, raceId: string, mode: TaskMode) => void;
   /** 追跡の停止の注記の「状態を更新」(Issue #186)。 */
   readonly onRetrack: () => void;
+  /** 設定の入力欄の変更(Issue #189)。`key` は入力欄の `data-field` と同じ項目名。真偽の欄は `"true"`・`"false"`。**下書きを書くだけで再描画しない**(`app.ts`)。 */
+  readonly onSettingsInput: (key: string, value: string) => void;
+  /** 設定の「保存」ボタン(Issue #189)。引数なし(入力は下書きから読む)。 */
+  readonly onSettingsSave: () => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -72,6 +77,7 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
       model.venueTabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label])),
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    h("a", { class: "settings-link", href: model.settingsHref }, ["設定"]),
   ]);
   const notices: VNode[] = [];
   if (model.error !== null) {
@@ -255,7 +261,70 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
   return h("div", { class: "screen" }, [controls, ...body]);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel, actions: ViewActions): VNode {
+/**
+ * 設定の1項目(Issue #189)。入力欄は `data-field` に項目名を持ち(`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されないので、引数を木に出す)、変更は `onSettingsInput(項目名, 値)`。
+ * ラベルが入力欄を包む(id を使わない)。エラーは項目の近くに `role="alert"`、入力欄に `aria-invalid`。補助文は小さい文字。
+ */
+function settingsField(field: FieldModel, actions: ViewActions): VNode {
+  const common = { "data-field": field.key, disabled: field.disabled, "aria-invalid": field.error === null ? undefined : "true" };
+  const on = { change: (value: string) => actions.onSettingsInput(field.key, value) };
+  let control: VNode;
+  switch (field.kind) {
+    case "checkbox":
+      control = h("input", { ...common, type: "checkbox", checked: field.value === true }, [], on);
+      break;
+    case "textarea":
+      control = h("textarea", { ...common, value: String(field.value), ...(field.maxlength === null ? {} : { maxlength: field.maxlength }) }, [], on);
+      break;
+    case "select":
+      control = h("select", { ...common, value: String(field.value) }, (field.options ?? []).map((o) => h("option", { value: o.value }, [o.label])), on);
+      break;
+    case "text":
+      control = h("input", { ...common, type: "text", value: String(field.value), ...(field.inputmode === null ? {} : { inputmode: field.inputmode }) }, [], on);
+      break;
+  }
+  const label =
+    field.kind === "checkbox"
+      ? h("label", { class: "field-check" }, [control, h("span", {}, [field.label])])
+      : h("label", { class: "field-label" }, [h("span", { class: "field-name" }, [field.label]), control]);
+  return h("div", { class: "field" }, [
+    label,
+    ...(field.help === null ? [] : [h("p", { class: "field-help" }, [field.help])]),
+    ...(field.error === null ? [] : [h("p", { class: "field-error", role: "alert" }, [field.error])]),
+  ]);
+}
+
+function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
+  const controls = h("div", { class: "controls" }, [
+    h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+    h("button", { class: "refresh", disabled: model.loading || model.saving }, [model.loading ? "読み込み中…" : "再読込"], { click: actions.onRefresh }),
+  ]);
+  const body: VNode[] = [];
+  if (model.loading) {
+    body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  }
+  if (model.error !== null) {
+    body.push(h("p", { class: "notice error", role: "alert" }, [model.error]));
+  }
+  if (model.sourceNote !== null) {
+    body.push(h("p", { class: "notice" }, [model.sourceNote]));
+  }
+  if (model.fields.length > 0) {
+    body.push(h("p", { class: "meta" }, ["保存した設定は、次に実行する発走前の分析から使われます(実行中の分析は、始めたときの設定のままです)。"]));
+    body.push(...model.fields.map((f) => settingsField(f, actions)));
+    body.push(h("button", { class: "settings-save", disabled: model.saving }, [model.saving ? "保存中…" : "保存"], { click: actions.onSettingsSave }));
+    if (model.saveNotice !== null) {
+      body.push(
+        model.saveNotice.tone === "error"
+          ? h("p", { class: "notice error", role: "alert" }, [model.saveNotice.text])
+          : h("p", { class: "notice" }, [model.saveNotice.text]),
+      );
+    }
+  }
+  return h("div", { class: "screen" }, [controls, h("h1", { class: "title" }, ["設定"]), ...body]);
+}
+
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -263,5 +332,7 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel, actions
       return raceScreen(model, actions);
     case "result":
       return resultScreen(model, actions);
+    case "settings":
+      return settingsScreen(model, actions);
   }
 }

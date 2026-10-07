@@ -164,7 +164,7 @@ Workers Logs(`observability` を有効にしてある)に、認証の経路が `
 
 ## スマホ画面のレース画面・結果画面(Issue #185〈#165-c〉。読み取りのみ。**起動・ポーリングは #186**)
 - **使い方**: 一覧のレースをタップ → **レース画面**(`#date=…&venue=…&race=<12桁>`)。「朝の準備」「発走前」の 2 枚のカードに状態(未実行・待ち・取得済み・完了・失敗。失敗のときは原因の文を小さく)が出る。朝が完了していれば prior(3着内率)の順位、発走前が完了していれば**最新の分析の結果がカードの中に最初から出る**(Issue #188。旧版の「結果を見る」のリンクは廃止。下の「発走前の結果をカードの中に出す」の節)。下に過去の分析の一覧(新しい順。タップで結果画面)。「更新」で状態と過去の分析を取り直す。**分析の起動のボタンはまだ無い**(#186。今は exe・手動の POST で起動する)。
-- **結果画面**: 見出し・分析時刻(JST)・分析モデル(無ければ「LLM 未使用(統計のみ)」)・馬ごとのカード(馬番・馬名・3着内率・複勝オッズ下限・EV。EV プラスは強調、推定 EV は「(推定)」)・配分の提案(exe の表示と同じ文言)。印は `mark` があるときだけ。「AI補正後」は出さない。**配分は、資金・1レース上限を D1 の `cloud_settings` に入れるまで、「配分の提案は出ていません。…未設定です」と表示される**(既定値は 0 なので、ほぼ全件がこの状態。**両方が未設定のとき**、exe の「設定画面で入力」ではなく cloud 専用の文言。片方だけ未設定のときは exe の注記。編集の画面は範囲外)。
+- **結果画面**: 見出し・分析時刻(JST)・分析モデル(無ければ「LLM 未使用(統計のみ)」)・馬ごとのカード(馬番・馬名・3着内率・複勝オッズ下限・EV。EV プラスは強調、推定 EV は「(推定)」)・配分の提案(exe の表示と同じ文言)。印は `mark` があるときだけ。「AI補正後」は出さない。**配分は、資金・1レース上限を設定する(トップの「設定」。Issue #189)まで、「配分の提案は出ていません。…未設定です」と表示される**(既定値は 0 なので、ほぼ全件がこの状態。**両方が未設定のとき**、exe の「設定画面で入力」ではなく cloud 専用の文言〈トップの「設定」を案内〉。片方だけ未設定のときは exe の注記)。
 - **取得の回数**: レース画面は、開いたとき `GET /api/analyses/status?kaisai_date=&race_id=`(DO の読み取りだけ)と `GET /api/analyses?race_id=&kaisai_date=&limit=20`(D1 だけ)を 1 回ずつ。**一覧(netkeiba に出る)は取らない**。結果画面は `GET /api/analyses/{id}` を開いたとき 1 回だけ(⚠️ R2 の Class B を +1 する。メモリにキャッシュし、往復で取り直さない。失敗したときだけ「更新」で取り直せる)。自動の再取得・ポーリングは無い。
 - **API の変更**: `GET /api/analyses/{id}` の `allocation` に `fallbackReason`・`betUnit` を追加(配分の注記を exe と揃えるため)。
 - **ビルド**: クライアントが exe の `renderer/allocation-proposal-view`・`renderer/format` を取り込む。renderer が import する core のサブパスは、`tsconfig.client.json` の paths で解決する(esbuild もこれを読む)(CI に各 package の node_modules が無くても動く)。**exe の renderer・core の ev を変えたら、`pnpm run build:client` で生成物を更新する**(忘れるとドリフトの検査が落ちる)。
@@ -242,12 +242,24 @@ Access の後ろの GET が2つ(仕様の詳細は `docs/current-spec.md` の「
 
 ## 設定(Issue #178)
 発走前の分析の設定(資金・1レース上限・ケリー係数・組合せオッズの取得・各券種の配分など)は D1 の `cloud_settings` の1行(`id = 1`)。**行が無ければ全項目が exe の既定値**(資金・1レース上限は 0 = 配分提案なし、組合せオッズの取得は OFF)。
-**編集の API は Issue #189**(下の「設定の API」)。画面は同じ Issue の段階2で足す。直接 D1 に入れてもよい: `wrangler d1 execute DB --remote --command "INSERT INTO cloud_settings (id, settings_json, updated_at) VALUES (1, '{\"bankroll\":1000000,\"perRaceCap\":100000}', datetime('now')) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at"` のように入れる(項目と検証は `cloud/src/settings.ts`)。
+**編集は Issue #189**(下の「設定の API」と「設定画面」)。直接 D1 に入れてもよい: `wrangler d1 execute DB --remote --command "INSERT INTO cloud_settings (id, settings_json, updated_at) VALUES (1, '{\"bankroll\":1000000,\"perRaceCap\":100000}', datetime('now')) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at"` のように入れる(項目と検証は `cloud/src/settings.ts`)。
 
 ### 設定の API(Issue #189)
-- `GET /api/settings` — `{ "ok": true, "settings": {…14項目。camelCase}, "source": "default"|"d1"|"invalid" }`。`default` は行が無い、`invalid` は行があるが JSON として読めない(どちらも既定値を返している)。**読む側**の範囲なので、D1 に手で入れた不正な項目は、その項目だけ既定値になって返る。D1 の失敗は 503(`d1-error`。文面なし)。GET だけ(HEAD・PUT 等は 405。`Allow: GET, POST`)。
+- `GET /api/settings` — `{ "ok": true, "settings": {…14項目。camelCase}, "source": "default"|"d1"|"invalid" }`。`default` は行が無い、`invalid` は行があるが JSON として読めない、またはオブジェクトでない(`null`・`[]`・`123` など。どちらも既定値を返している)。**読む側**の範囲なので、D1 に手で入れた不正な項目は、その項目だけ既定値になって返る。D1 の失敗は 503(`d1-error`。文面なし)。GET だけ(HEAD・PUT 等は 405。`Allow: GET, POST`)。
 - `POST /api/settings` — 本文は **14項目すべて**の JSON(全項目の置き換え。部分更新は受けない)。成功は 200 で `{ "ok": true, "settings": {…保存した設定} }`。**同じオリジンのページから**(`Origin` が必要。`POST /api/analyses/run` と同じ守りで、`readJsonObjectBody` を共有する)。順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413。上限は **16 KiB**。run は 1 KiB)→ JSON のオブジェクト(400)→ 項目の検証(400)→ 保存(D1 の失敗は 503)。
   - 項目が欠けている・未知のキーがある・範囲外の値があるときは 400(黙って既定値に戻さない)。本文は固定の message と、欠けた・範囲外の**既知の項目名**(`fields`)。入力の値・未知のキー名は返さない。
   - **範囲(書く側)**: bankroll 整数 0〜1億 / perRaceCap 整数 0〜1000万 / evThreshold > 0 / kellyFraction **0.05〜1**(読む側は 0〜1。exe の画面と同じ下限) / clipVariant `default`・`wide15` / include 系は真偽値 / **preRaceOffsetMinutes 整数 10〜180(既定 45。cloud 専用。定時の自動実行〈#166〉を入れるまで効かない)** / additionalInstruction **2,000 文字まで**(UTF-16 コード単位。読む側には上限が無い。#179 のプロンプトの組み立ては自分でも切り詰めること)。
   - 書く側は読む側の部分集合(書ける値は必ず読める)。述語は `cloud/src/settings.ts` の `CLOUD_SETTINGS_RULES` に項目ごとに1か所。
   - 検査: `test/settings.test.ts`(境界値の表・保存 → 読み戻し)・`test/handler-settings.test.ts`・`test/handler-json-guard.test.ts`(守りの順序を run と同じ表で)。
+
+### 設定画面(Issue #189。`#settings`)
+- **入口**: トップ(一覧の画面)の「設定」リンク(`#settings`)。`#settings` の**完全一致**のときだけ設定画面(`#settings&date=…` などは従来どおり)。戻るは `#`(今日・中央の一覧)。
+- **項目と並び**: exe の設定画面に合わせる(EV閾値 → 組合せオッズの取得 → 各券種を配分に含めるか〈ワイド・馬連・枠連・馬単・三連複・三連単〉→ 資金・1レースの上限・ケリー係数 → 追加指示 → クリップ幅)。末尾に cloud 専用の「発走の何分前に評価するか」(「定時の自動実行を入れるまで効きません」と注記)。ラベルは exe の共有定数を流用し、補助文は cloud の実際の挙動に合わせた(**追加指示・クリップ幅は、現在は LLM を使わないので効かない**〈#179〉と注記)。
+  API キーと Discord の Webhook は出さない(Worker の secret)。LLM の ON/OFF と上限は作らない。
+- **取得**: 開くと `GET /api/settings` だけ(一覧・板・レース・分析は取らない)。失敗は自動で再試行せず、「再読込」(未保存の入力は捨てる)だけ。`source` が `default` なら「まだ保存されていません(既定値を表示しています)」、`invalid` なら「保存済みの設定が読めないため、既定値を表示しています」。
+- **下書きと保存**: 入力の `change` は下書きを書くだけで再描画しない。保存・再読込・失敗の直後は強制的に再描画する。**保存の押下時**に項目ごとに検証し(エラーは項目の下)、OK なら全 14 項目を POST する。保存中は入力欄・保存ボタンが無効(二重に送らない)。サーバの失敗は固定の文言(入力は残る)。成功は「保存しました。次に実行する発走前の分析から使われます。」。画面を離れたら下書きを破棄する。
+- **検査**: `test/client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`・`client-api-settings.test.ts`・`client-api-settings-contract.test.ts`・`client-dom.test.ts`・`client-bundle.test.ts`(生成物を偽の DOM で実行)。
+- **実機(スマホ)で確かめること(自動検査できない)**:
+  - **change は入力欄を離れたとき(blur)に発火する**。入力の直後に「保存」をタップしたとき、直前の入力が保存に含まれること(タップで blur → change → click の順になるはず。**ブラウザによっては click が先になり、直前の入力が保存されない**可能性がある。そうなったら `input` イベントに変える)。
+  - 数値欄で数字のキーボードが出ること(`inputmode`)。textarea・select の見た目と、チェックボックスのタップのしやすさ(44px)。
+  - 保存のあとにページを再読み込みして、保存した値が出ること。画面を離れて戻ると、未保存の入力が消えること。

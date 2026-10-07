@@ -11,7 +11,7 @@ import type { Route } from "../client/route";
  */
 
 const RACE_ID = "202603020211";
-const ROUTE: Route = { date: "20260628", venue: "central", race: null, analysis: 7 };
+const ROUTE: Route = { date: "20260628", venue: "central", race: null, analysis: 7, settings: false };
 
 function horse(umaban: number, over: Partial<AnalysisHorse> = {}): AnalysisHorse {
   return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark: null, reason: null, ...over };
@@ -169,10 +169,17 @@ describe("配分(exe の buildAllocationProposalView を流用)", () => {
   describe("配分が unset(総資金・1レース上限が未設定。cloud の既定値は 0 なので、ほぼ全件がこの状態)", () => {
     const unset = (over: Record<string, unknown> = {}) => ({ ...ALLOCATION, bets: [], route: "unset", fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, ...over });
 
-    it("cloud 専用の文言をリテラルで 1 回固定する(文言を変えるときは、意図してここを直す)", () => {
+    it("cloud 専用の文言をリテラルで 1 回固定する(文言を変えるときは、意図してここを直す)。設定の画面(トップの「設定」)を案内し、「設定画面で」「D1」「今後追加」を含まない", () => {
       expect(UNSET_ALLOCATION_NOTE).toBe(
-        "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(設定画面は今後追加します。現在は D1 の cloud_settings に入れます)。",
+        "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(トップの「設定」から入れられます)。",
       );
+    });
+
+    it("案内する先は実在する設定の画面(Issue #189): 「設定」への入口を案内し、「今後追加」「D1」「cloud_settings」(旧文言の、画面が無い前提)を含まない", () => {
+      expect(UNSET_ALLOCATION_NOTE).toContain("トップの「設定」");
+      for (const old of ["今後追加", "D1", "cloud_settings", "設定画面で"]) {
+        expect(UNSET_ALLOCATION_NOTE, old).not.toContain(old);
+      }
     });
 
     it("両方が未設定(0)のときだけ、exe の「設定画面で…入力してください」を cloud 専用の文言に差し替える。「設定画面で」を含まない。実効設定の行は残る", () => {
@@ -245,7 +252,7 @@ describe("配分(exe の buildAllocationProposalView を流用)", () => {
 
 describe("取得の状態(読み込み中・失敗)と戻るリンク", () => {
   it("読み込み中・失敗は内容なし。失敗の文言をそのまま出し、一覧へ戻るリンクを持つ(日付・区分を保つ)", () => {
-    const route: Route = { date: "20261003", venue: "nar", race: null, analysis: 7 };
+    const route: Route = { date: "20261003", venue: "nar", race: null, analysis: 7, settings: false };
     const loading = buildResultModel({ route, source: { kind: "loading" } });
     expect(loading).toMatchObject({ kind: "result", loading: true, error: null, content: null, backHref: "#date=20261003&venue=nar" });
     const failed = buildResultModel({ route, source: { kind: "error", message: "取得できません" } });
@@ -253,12 +260,12 @@ describe("取得の状態(読み込み中・失敗)と戻るリンク", () => {
   });
 
   it("内容があるときの戻り先は、そのレースの画面。日付は分析の kaisaiDate を優先する(ハッシュの日付は既定の「今日」のことがある)", () => {
-    const route: Route = { date: "20261007", venue: "central", race: null, analysis: 7 };
+    const route: Route = { date: "20261007", venue: "central", race: null, analysis: 7, settings: false };
     expect(buildResultModel({ route, source: ready(analysis({ kaisaiDate: "20260628" })) }).backHref).toBe(`#date=20260628&venue=central&race=${RACE_ID}`);
   });
 
   it("kaisaiDate が null・実在しない日付なら、ハッシュの日付を使う。レース ID が 12 桁でなければ一覧へ", () => {
-    const route: Route = { date: "20261007", venue: "nar", race: null, analysis: 7 };
+    const route: Route = { date: "20261007", venue: "nar", race: null, analysis: 7, settings: false };
     expect(buildResultModel({ route, source: ready(analysis({ kaisaiDate: null })) }).backHref).toBe(`#date=20261007&venue=nar&race=${RACE_ID}`);
     expect(buildResultModel({ route, source: ready(analysis({ kaisaiDate: "20260230" })) }).backHref).toBe(`#date=20261007&venue=nar&race=${RACE_ID}`);
     expect(buildResultModel({ route, source: ready(analysis({ raceId: "短い" })) }).backHref).toBe("#date=20260628&venue=nar"); // 日付は分析の開催日、レースは付けない

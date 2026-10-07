@@ -135,6 +135,14 @@ describe("GET /api/settings", () => {
     expect(body).toEqual({ ok: true, settings: DEFAULT_CLOUD_SETTINGS, source: "invalid" });
   });
 
+  it("JSON として有効でもオブジェクトでない行(null・[]・123)は既定値(source: invalid)。「読めた」と出さない(Issue #189)", async () => {
+    const { deps, token } = await setup();
+    for (const json of ["null", "[]", "123"]) {
+      const body = await (await handle(get(token), envOf(fakeDb(json)), {}, deps)).json();
+      expect(body, json).toEqual({ ok: true, settings: DEFAULT_CLOUD_SETTINGS, source: "invalid" });
+    }
+  });
+
   it("D1 の読み出しが失敗したら 503(d1-error)。例外の文面・SQL を返さない", async () => {
     const { deps, token } = await setup();
     const f = fakeDb(null);

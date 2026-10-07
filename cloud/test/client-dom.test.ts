@@ -20,8 +20,18 @@ class FakeText {
 class FakeElement {
   readonly attrs = new Map<string, string>();
   readonly children: (FakeElement | FakeText)[] = [];
-  readonly listeners = new Map<string, ((event: { target: { value: string } }) => void)[]>();
-  value = "";
+  readonly listeners = new Map<string, ((event: { target: { value: string; checked?: boolean } }) => void)[]>();
+  /** `value` を代入した時点の子の数(select は option を入れてから value を設定しないと選ばれない)。 */
+  childrenAtValueSet: number | null = null;
+  checked = false;
+  private current = "";
+  get value(): string {
+    return this.current;
+  }
+  set value(v: string) {
+    this.current = v;
+    this.childrenAtValueSet = this.children.length;
+  }
   constructor(readonly tag: string) {}
   setAttribute(name: string, value: string): void {
     this.attrs.set(name, value);
@@ -30,7 +40,7 @@ class FakeElement {
     this.children.push(child);
     return child;
   }
-  addEventListener(type: string, listener: (event: { target: { value: string } }) => void): void {
+  addEventListener(type: string, listener: (event: { target: { value: string; checked?: boolean } }) => void): void {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
   // HTML 文字列として解釈させる経路は、触れたら失敗させる。
@@ -299,7 +309,7 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
 const RACE: RaceRow = { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
 
 describe("renderScreen(一覧の VNode)", () => {
-  const route = { date: "20260628", venue: "central", race: null, analysis: null } as const;
+  const route = { date: "20260628", venue: "central", race: null, analysis: null, settings: false } as const;
 
   it("外から来た文字列(レース名・会場名・エラー文)を含んでいても、描画した結果に script・img などの要素ができない(実際のアダプタを通す)", () => {
     const evil = `<img src=x onerror=alert(1)>`;
@@ -343,7 +353,7 @@ describe("renderScreen(一覧の VNode)", () => {
   it("入力・更新のハンドラは、actions に繋がる", () => {
     const seen: string[] = [];
     const model = buildListModel({ route, list: { kind: "ready", races: [] }, board: { kind: "none" } });
-    const el = mounted(renderScreen(model, { onDateChange: (v) => void seen.push(`date:${v}`), onRefresh: () => void seen.push("refresh"), onToggleGroup: () => {}, onToggleResult: () => {}, onRun: () => {}, onRetrack: () => {} }));
+    const el = mounted(renderScreen(model, { ...noopActions, onDateChange: (v) => void seen.push(`date:${v}`), onRefresh: () => void seen.push("refresh") }));
     allElements(el).find((e) => e.tag === "input")!.listeners.get("change")![0]!({ target: { value: "2026-06-27" } });
     allElements(el).find((e) => e.tag === "button")!.listeners.get("click")![0]!({ target: { value: "" } });
     expect(seen).toEqual(["date:2026-06-27", "refresh"]);
@@ -358,5 +368,82 @@ describe("renderScreen(一覧の VNode)", () => {
     expect(allElements(loading).find((e) => e.tag === "button")!.attrs.has("disabled")).toBe(true);
     const empty = mounted(renderScreen(buildListModel({ route, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noopActions));
     expect(textNodes(empty).join(" ")).toContain("開催はありません");
+  });
+});
+
+/**
+ * Issue #189: 設定画面のために許可リストへ足したもの(要素 `textarea`・`select`・`option`、属性 `checked`・`inputmode`・`maxlength`)。
+ * 既存の拒否のテスト(上の「要素・属性の許可リスト」)は変えていない。ここは、足した分の許可と、足した分の周りの拒否。
+ */
+describe("mount(Issue #189: 入力欄の許可)", () => {
+  it("textarea の value は属性ではなくプロパティで入る(改行を含む文字列もそのまま。HTML として解釈しない)", () => {
+    const text = `1行目\n<script>alert(1)</script>`;
+    const el = mounted(h("textarea", { value: text, maxlength: "2000" }, []));
+    expect(el.tag).toBe("textarea");
+    expect(el.value).toBe(text);
+    expect(el.attrs.has("value")).toBe(false);
+    expect(el.attrs.get("maxlength")).toBe("2000");
+    expect(el.children).toHaveLength(0);
+  });
+
+  it("select の value は、option を子に入れたあとにプロパティで設定する(先に設定すると選ばれない)。option の value は属性", () => {
+    const el = mounted(h("select", { value: "wide15" }, [h("option", { value: "default" }, ["対照"]), h("option", { value: "wide15" }, ["新版"])]));
+    expect(el.tag).toBe("select");
+    expect(el.value).toBe("wide15");
+    expect(el.attrs.has("value")).toBe(false);
+    expect(el.childrenAtValueSet).toBe(2);
+    const options = el.children.filter((c): c is FakeElement => c instanceof FakeElement);
+    expect(options.map((o) => [o.tag, o.attrs.get("value")])).toEqual([["option", "default"], ["option", "wide15"]]);
+  });
+
+  it("checked は input のプロパティ。true のときだけ設定し、false・undefined では設定しない。属性としては出さない", () => {
+    const on = mounted(h("input", { type: "checkbox", checked: true }, []));
+    expect(on.checked).toBe(true);
+    expect(on.attrs.has("checked")).toBe(false);
+    expect(mounted(h("input", { type: "checkbox", checked: false }, [])).checked).toBe(false);
+    expect(mounted(h("input", { type: "checkbox", checked: undefined }, [])).checked).toBe(false);
+  });
+
+  it("checked は input 以外には付けられない(投げる)", () => {
+    for (const tag of ["div", "button", "option", "select"]) {
+      expect(() => mounted(h(tag, { checked: true }, [])), tag).toThrow();
+    }
+  });
+
+  it("inputmode は numeric・decimal・text だけ。maxlength は 1〜5桁の数字だけ(それ以外は投げる)", () => {
+    for (const mode of ["numeric", "decimal", "text"]) {
+      expect(mounted(h("input", { type: "text", inputmode: mode }, [])).attrs.get("inputmode")).toBe(mode);
+    }
+    for (const bad of ["", "none", "url", "NUMERIC", "numeric "]) {
+      expect(() => mounted(h("input", { inputmode: bad }, [])), `inputmode=${bad}`).toThrow();
+    }
+    expect(mounted(h("textarea", { maxlength: "99999" }, [])).attrs.get("maxlength")).toBe("99999");
+    for (const bad of ["", "-1", "1.5", "abc", "123456", "1e3", " 5"]) {
+      expect(() => mounted(h("textarea", { maxlength: bad }, [])), `maxlength=${bad}`).toThrow();
+    }
+  });
+
+  it("足したのは textarea・select・option だけ: form・datalist・optgroup などの要素と、selected・name・pattern・autofocus・for・list の属性は、引き続き作れない(投げる)", () => {
+    for (const tag of ["form", "datalist", "optgroup", "textarea ", "SELECT"]) {
+      expect(() => mounted(h(tag, {}, [])), tag).toThrow();
+    }
+    for (const name of ["selected", "name", "pattern", "autofocus", "for", "list", "form", "multiple", "readonly", "placeholder"]) {
+      expect(() => mounted(h("input", { [name]: "x" }, [])), name).toThrow();
+    }
+  });
+
+  it("checkbox の change は、チェックの状態を \"true\"・\"false\" で渡す(イベントの value は常に \"on\" なので使わない)。それ以外の input・textarea・select は value を渡す", () => {
+    const seen: string[] = [];
+    const checkbox = mounted(h("input", { type: "checkbox" }, [], { change: (v) => void seen.push(v) }));
+    const fire = checkbox.listeners.get("change")![0]!;
+    fire({ target: { value: "on", checked: true } });
+    fire({ target: { value: "on", checked: false } });
+    const text = mounted(h("input", { type: "text" }, [], { change: (v) => void seen.push(v) }));
+    text.listeners.get("change")![0]!({ target: { value: "123", checked: false } });
+    const area = mounted(h("textarea", {}, [], { change: (v) => void seen.push(v) }));
+    area.listeners.get("change")![0]!({ target: { value: "a\nb" } });
+    const select = mounted(h("select", {}, [h("option", { value: "x" }, ["x"])], { change: (v) => void seen.push(v) }));
+    select.listeners.get("change")![0]!({ target: { value: "x" } });
+    expect(seen).toEqual(["true", "false", "123", "a\nb", "x"]);
   });
 });

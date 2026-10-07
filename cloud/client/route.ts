@@ -19,7 +19,12 @@ export interface Route {
   readonly race: string | null;
   /** 分析 id(正の整数。サーバの上限と同じ 2147483647 まで)。無ければ null。 */
   readonly analysis: number | null;
+  /** 設定画面(`#settings` の**完全一致**のときだけ true。Issue #189)。 */
+  readonly settings: boolean;
 }
+
+/** 設定画面のハッシュ(Issue #189)。一覧のトップの入口のリンク先。 */
+export const SETTINGS_HASH = "#settings";
 
 const ANALYSIS_ID_MAX = 2_147_483_647;
 
@@ -30,6 +35,10 @@ function single(params: URLSearchParams, key: string): string | null {
 }
 
 export function parseHash(hash: string, today: string): Route {
+  // 設定画面は `#settings` の完全一致だけ(`#settings&date=…` などは従来どおりの解析。日付・区分などを持たない画面なので、混ぜない)。
+  if (hash === SETTINGS_HASH) {
+    return { date: today, venue: "central", race: null, analysis: null, settings: true };
+  }
   let params: URLSearchParams;
   try {
     params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
@@ -47,6 +56,7 @@ export function parseHash(hash: string, today: string): Route {
     venue: venueValue === "nar" ? "nar" : "central",
     race: dateValid && raceValue !== null && /^[0-9]{12}$/.test(raceValue) ? raceValue : null,
     analysis: analysis !== null && analysis <= ANALYSIS_ID_MAX ? analysis : null,
+    settings: false,
   };
 }
 
@@ -62,14 +72,15 @@ export function buildHash(route: { readonly date: string; readonly venue: Venue;
 }
 
 /** 今の画面(Issue #191)。 */
-export type Screen = "list" | "race" | "result";
+export type Screen = "list" | "race" | "result" | "settings";
 
 /**
  * 「今どの画面か」の判定の**唯一の場所**(Issue #191。#188 の申し送り)。`app.ts` は、画面ごとの分岐をすべてこの関数の `switch` で行う
  * (`route.analysis !== null` のような直接の比較を散らさない。画面を足すときは、ここと、各 `switch` の `never` による網羅チェックが漏れを教える)。
- * 優先順位: analysis(結果画面)> race(レース画面)> 一覧。`race` と `analysis` が両方あれば結果画面。
+ * 優先順位: settings(設定画面。`#settings` の完全一致だけ。Issue #189)> analysis(結果画面)> race(レース画面)> 一覧。`race` と `analysis` が両方あれば結果画面。
  */
 export function screenOf(route: Route): Screen {
+  if (route.settings) return "settings";
   if (route.analysis !== null) return "result";
   if (route.race !== null) return "race";
   return "list";

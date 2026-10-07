@@ -4,6 +4,8 @@ import { mount, type DomDocument } from "../client/dom";
 import { buildListModel, type ListModelInput } from "../client/list";
 import { buildRaceModel, type RaceModelInput, type RunUi } from "../client/race";
 import { buildResultModel, type ResultSource } from "../client/result";
+import { buildSettingsModel, draftFromSettings } from "../client/settings-form";
+import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { renderScreen, type ViewActions } from "../client/view";
 import { h, type VNode } from "../client/vnode";
 import { noopActions } from "./client-fakes";
@@ -47,7 +49,7 @@ function mountAll(tree: VNode): { tags: string[]; texts: string[] } {
 }
 
 const raceInput = (over: Partial<RaceModelInput> = {}): RaceModelInput => ({
-  route: { date: "20260628", venue: "central", race: RACE_ID, analysis: null },
+  route: { date: "20260628", venue: "central", race: RACE_ID, analysis: null, settings: false },
   status: { kind: "ready", rows: [], prior: null },
   past: { kind: "ready", analyses: [] },
   listRow: undefined,
@@ -171,7 +173,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
   it("クリックは onRun(開催日, レース, モード)に繋がる(data-* と同じ値)", () => {
     const calls: [string, string, string][] = [];
     const actions: ViewActions = { ...noopActions, onRun: (date, raceId, mode) => void calls.push([date, raceId, mode]) };
-    const buttons = runButtons(renderScreen(buildRaceModel(readyInput({ route: { date: "20260629", venue: "nar", race: "202654062801", analysis: null } })), actions));
+    const buttons = runButtons(renderScreen(buildRaceModel(readyInput({ route: { date: "20260629", venue: "nar", race: "202654062801", analysis: null, settings: false } })), actions));
     expect(buttons).toHaveLength(2);
     for (const b of buttons) b.on!.click!();
     expect(calls).toEqual([
@@ -214,7 +216,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
   it("追跡の停止の注記: 文言と「状態を更新」ボタン(クリックは onRetrack)。一覧・レースの両方に出る。無ければ出ない", () => {
     let count = 0;
     const actions: ViewActions = { ...noopActions, onRetrack: () => (count += 1) };
-    const list = renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null }, list: { kind: "ready", races: [] }, board: { kind: "none" }, tracking: "自動更新を止めました" }), actions);
+    const list = renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null, settings: false }, list: { kind: "ready", races: [] }, board: { kind: "none" }, tracking: "自動更新を止めました" }), actions);
     const race = renderScreen(buildRaceModel(readyInput({ tracking: "自動更新を止めました" })), actions);
     for (const tree of [list, race]) {
       const boxes = byClass(tree, "tracking");
@@ -227,7 +229,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
     }
     expect(count).toBe(2);
     expect(byClass(renderScreen(buildRaceModel(readyInput()), noopActions), "tracking")).toHaveLength(0);
-    expect(byClass(renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null }, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noopActions), "tracking")).toHaveLength(0);
+    expect(byClass(renderScreen(buildListModel({ route: { date: "20260628", venue: "central", race: null, analysis: null, settings: false }, list: { kind: "ready", races: [] }, board: { kind: "none" } }), noopActions), "tracking")).toHaveLength(0);
   });
 });
 
@@ -237,18 +239,23 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
  * 引数を取らない処理(更新・状態を更新・日付の入力〈値はイベントから読む〉)は、許可リスト(class)で除外する。
  */
 describe("data-* の契約: 引数を渡すクリック処理は、引数を data-* に出している", () => {
-  const NO_ARGUMENT_CLASSES = new Set(["refresh", "retrack"]);
+  // Issue #189: 設定の「保存」ボタン(settings-save)も、引数を取らない処理。設定の入力欄は引数(項目名)を data-field に出すので、除外しない。
+  const NO_ARGUMENT_CLASSES = new Set(["refresh", "retrack", "settings-save"]);
   const hasDataAttr = (n: VNode): boolean => Object.keys(n.attrs ?? {}).some((k) => k.startsWith("data-"));
   const handlers = (tree: VNode): VNode[] => findAll(tree, (n) => n.on?.click !== undefined || n.on?.change !== undefined);
   const exempt = (n: VNode): boolean => String(n.attrs?.["class"] ?? "").split(" ").some((c) => NO_ARGUMENT_CLASSES.has(c)) || (n.tag === "input" && n.attrs?.["type"] === "date");
 
   const rr = (raceId: string, venueName: string) => ({ raceId, venueName, raceNumber: 1, raceName: "r", courseType: "芝", distance: 1800, entryCount: 16, grade: null }) as const;
-  const route = { date: "20260628", venue: "central", race: null, analysis: null } as const;
+  const route = { date: "20260628", venue: "central", race: null, analysis: null, settings: false } as const;
   const trees = (): { name: string; tree: VNode }[] => [
     { name: "一覧(場が 2 つ・閉)", tree: renderScreen(buildListModel({ route, list: { kind: "ready", races: [rr("202602010101", "函館"), rr("202603020211", "福島")] }, board: { kind: "none" }, tracking: "止めました" }), noopActions) },
     { name: "レース画面(カード 2 枚・失敗の注記・追跡の注記つき)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "failed")], prior: null }, tracking: "止めました", runs: new Map([["morning", { kind: "error", message: "x" }]]) })), noopActions) },
     { name: "レース画面(発走前の結果が ready。開閉の見出し)", tree: renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 5 })], prior: null }, result: { kind: "ready", analysis: analysis({ id: 5 }) } })), noopActions) },
     { name: "結果画面(失敗の「更新」)", tree: renderScreen(buildResultModel({ route: { ...route, analysis: 5 }, source: { kind: "error", message: "失敗" } }), noopActions) },
+    {
+      name: "設定画面(取得済み。入力欄 14 個・保存・再読込)",
+      tree: renderScreen(buildSettingsModel({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(DEFAULT_CLOUD_SETTINGS), errors: {}, save: { kind: "idle" } }), noopActions),
+    },
   ];
 
   it("クリック・変更の処理を持つ要素は、data-* を持つか、引数を取らない許可リスト(更新・状態を更新・日付の入力)のどれか", () => {
@@ -265,15 +272,17 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
         withData += 1;
       }
     }
-    // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)が data-* の対象として数えられ、除外も使われている
-    expect(withData).toBe(7);
-    expect(exemptCount).toBeGreaterThanOrEqual(4);
+    // 空振り防止: 場の見出し(2)・起動のボタン(2+2)・結果の開閉の見出し(1)・設定の入力欄(14)が data-* の対象として数えられ、除外も使われている(保存・再読込を含む)
+    expect(withData).toBe(7 + 14);
+    expect(exemptCount).toBeGreaterThanOrEqual(4 + 2);
   });
 
-  it("対照: 検査は、data-* の無いクリック処理(許可リスト外)を拾える(空振りでない)", () => {
+  it("対照: 検査は、data-* の無いクリック処理(許可リスト外)を拾える(空振りでない)。data-field の無い設定の入力欄も拾う", () => {
     const bad = h("div", {}, [h("button", { class: "run" }, ["x"], { click: () => {} }), h("button", { class: "refresh" }, ["更新"], { click: () => {} })]);
     const offenders = handlers(bad).filter((n) => !exempt(n) && !hasDataAttr(n));
     expect(offenders.map((n) => n.attrs?.["class"])).toEqual(["run"]);
+    const noField = h("div", {}, [h("input", { type: "text" }, [], { change: () => {} }), h("button", { class: "settings-save" }, ["保存"], { click: () => {} })]);
+    expect(handlers(noField).filter((n) => !exempt(n) && !hasDataAttr(n)).map((n) => n.tag)).toEqual(["input"]); // 保存ボタンだけが除外される
   });
 });
 
@@ -295,7 +304,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     ...over,
   };
 }
-const route = { date: "20260628", venue: "central" as const, race: null, analysis: 7 };
+const route = { date: "20260628", venue: "central" as const, race: null, analysis: 7, settings: false };
 const resultTree = (a: AnalysisDetail) => renderScreen(buildResultModel({ route, source: { kind: "ready", analysis: a } }), noopActions);
 
 describe("結果画面の VNode", () => {
@@ -477,10 +486,10 @@ describe("発走前のカードの結果(Issue #188)", () => {
   it("同じ見出し・別のレース(または別の日)は、data-* が違うので木が違う(同じ木なら DOM を触らない描画で、開閉の取り違えを隠さない)", () => {
     const a = JSON.stringify(raceTree(ready(analysis({ id: 7 }))));
     const otherRace = JSON.stringify(
-      renderScreen(buildRaceModel({ ...raceInput({ status: { kind: "ready", rows: [{ ...row("pre_race", "done", { analysisId: 7 }), raceId: "202603020212" }], prior: null }, result: ready(analysis({ id: 7 })) }), route: { date: "20260628", venue: "central", race: "202603020212", analysis: null } }), noopActions),
+      renderScreen(buildRaceModel({ ...raceInput({ status: { kind: "ready", rows: [{ ...row("pre_race", "done", { analysisId: 7 }), raceId: "202603020212" }], prior: null }, result: ready(analysis({ id: 7 })) }), route: { date: "20260628", venue: "central", race: "202603020212", analysis: null, settings: false } }), noopActions),
     );
     const otherDate = JSON.stringify(
-      renderScreen(buildRaceModel({ ...raceInput({ status: doneRows, result: ready(analysis({ id: 7 })) }), route: { date: "20260629", venue: "central", race: RACE_ID, analysis: null } }), noopActions),
+      renderScreen(buildRaceModel({ ...raceInput({ status: doneRows, result: ready(analysis({ id: 7 })) }), route: { date: "20260629", venue: "central", race: RACE_ID, analysis: null, settings: false } }), noopActions),
     );
     expect(a).not.toBe(otherRace);
     expect(a).not.toBe(otherDate);
@@ -586,7 +595,7 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
   const brow = (raceId: string, mode: "morning" | "pre_race", status: "queued" | "fetched" | "done" | "failed") =>
     ({ raceId, mode, status, attempts: 0, error: null, queuedAt: 1, updatedAt: 2, prior: false, analysisId: null }) as const;
   const listInput = (over: Partial<ListModelInput> = {}): ListModelInput => ({
-    route: { date: "20260628", venue: "central", race: null, analysis: null },
+    route: { date: "20260628", venue: "central", race: null, analysis: null, settings: false },
     list: { kind: "ready", races: [...FUKU, ...HAKO] },
     board: { kind: "none" },
     ...over,

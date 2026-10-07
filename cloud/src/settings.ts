@@ -170,7 +170,7 @@ export const SELECT_SETTINGS_SQL = "SELECT settings_json FROM cloud_settings WHE
 
 export interface LoadedSettings {
   readonly settings: CloudSettings;
-  /** `default`: 行が無い / `d1`: 行を読んだ / `invalid`: 行はあるが JSON として読めない(既定値で続ける)。 */
+  /** `default`: 行が無い / `d1`: 行を読んだ / `invalid`: 行はあるが JSON として読めない、またはオブジェクトでない(既定値で続ける)。 */
   readonly source: "default" | "d1" | "invalid";
 }
 
@@ -186,7 +186,12 @@ export async function loadSettings(db: SettingsDb): Promise<LoadedSettings> {
     return { settings: DEFAULT_CLOUD_SETTINGS, source: "default" };
   }
   try {
-    return { settings: coerceCloudSettings(JSON.parse(row.settings_json)), source: "d1" };
+    const parsed: unknown = JSON.parse(row.settings_json);
+    // JSON として有効でも、オブジェクトでない行(`null`・`[]`・`123` など)は「読めた」とは言えない(全項目が既定値になるので `invalid`。Issue #189)。
+    if (asRecord(parsed) === null) {
+      return { settings: DEFAULT_CLOUD_SETTINGS, source: "invalid" };
+    }
+    return { settings: coerceCloudSettings(parsed), source: "d1" };
   } catch {
     return { settings: DEFAULT_CLOUD_SETTINGS, source: "invalid" };
   }

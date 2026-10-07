@@ -129,6 +129,16 @@ describe("loadSettings(D1 の1行)", () => {
     expect(loaded).toEqual({ settings: DEFAULT_CLOUD_SETTINGS, source: "invalid" });
   });
 
+  it.each([["null"], ["[]"], ["123"], ['"文字列"'], ["true"]])("Issue #189: JSON としては有効でも、オブジェクトでない行(%s)は、既定値で続ける(source: invalid)。画面に「読めた」と出して全項目が既定値、という食い違いを作らない", async (json) => {
+    const loaded = await loadSettings(db({ settings_json: json }));
+    expect(loaded).toEqual({ settings: DEFAULT_CLOUD_SETTINGS, source: "invalid" });
+  });
+
+  it("Issue #189: 空のオブジェクト({})は、オブジェクトなので source: d1(全項目が既定値になるが、行は読めている)", async () => {
+    const loaded = await loadSettings(db({ settings_json: "{}" }));
+    expect(loaded).toEqual({ settings: DEFAULT_CLOUD_SETTINGS, source: "d1" });
+  });
+
   it("D1 の読み出しが失敗したら投げる(設定が読めないまま、既定値で配分を作らない)", async () => {
     const failing = {
       prepare: () => ({

@@ -4,6 +4,10 @@
  * **XSS・CSP の守り**: 外から来た文字列(レース名・馬名・エラー文など)は、必ずテキストノードとして入れる(HTML として解釈する API は使わない)。
  * 要素・属性は許可リストのものだけで、それ以外は投げる(`script`・`iframe`・`style` の要素、`on*`・`style`・`src` の属性を作れない)。
  * `href` は `#` で始まるものだけ(`javascript:`・外部の URL を作れない)。
+ * Issue #189(設定画面)で足した許可: 要素 `textarea`・`select`・`option`、属性 `checked`・`inputmode`・`maxlength`。足したものの扱い:
+ *  - `value`: `input`・`textarea` はプロパティ(HTML として解釈しない・改行をそのまま入れる)。`select` は **option を子に入れたあと**にプロパティで設定する(先だと選ばれない)。`option` は属性。
+ *  - `checked`: `input` のプロパティ(属性にはしない)。`input` 以外に付けると投げる。
+ *  - `inputmode`: `numeric`・`decimal`・`text` だけ。`maxlength`: 1〜5桁の数字だけ。それ以外は投げる。
  */
 import type { VNode } from "./vnode";
 
@@ -12,6 +16,7 @@ export interface DomElement {
   appendChild(child: any): unknown;
   addEventListener(type: string, listener: (event: any) => void): void;
   value?: string;
+  checked?: boolean;
 }
 
 export interface DomDocument {
@@ -23,8 +28,9 @@ export interface DomRoot {
   replaceChildren(...nodes: any[]): void;
 }
 
-const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small"]);
-const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role"]);
+const ALLOWED_TAGS = new Set(["div", "span", "p", "h1", "h2", "h3", "a", "button", "input", "label", "ul", "li", "section", "nav", "strong", "small", "textarea", "select", "option"]);
+const ALLOWED_ATTRS = new Set(["class", "type", "value", "disabled", "href", "role", "checked", "inputmode", "maxlength"]);
+const ALLOWED_INPUTMODES = new Set(["numeric", "decimal", "text"]);
 
 function attrAllowed(name: string): boolean {
   return ALLOWED_ATTRS.has(name) || /^aria-[a-z-]+$/.test(name) || /^data-[a-z0-9-]+$/.test(name);
@@ -38,6 +44,7 @@ function build(doc: DomDocument, node: VNode | string): unknown {
     throw new Error(`許可されていない要素です: ${node.tag}`);
   }
   const el = doc.createElement(node.tag);
+  let selectValue: string | undefined;
   for (const [name, value] of Object.entries(node.attrs ?? {})) {
     if (!attrAllowed(name)) {
       throw new Error(`許可されていない属性です: ${name}`);
@@ -48,14 +55,34 @@ function build(doc: DomDocument, node: VNode | string): unknown {
     if (name === "href" && (typeof value !== "string" || !value.startsWith("#"))) {
       throw new Error("href は # で始まるものだけです");
     }
-    if (name === "value" && node.tag === "input") {
+    if (name === "checked") {
+      if (node.tag !== "input") {
+        throw new Error("checked は input だけです");
+      }
+      el.checked = true; // true のときだけ(false・undefined は上で飛ばしている)
+      continue;
+    }
+    if (name === "inputmode" && !ALLOWED_INPUTMODES.has(String(value))) {
+      throw new Error(`許可されていない inputmode です: ${String(value)}`);
+    }
+    if (name === "maxlength" && !/^[0-9]{1,5}$/.test(String(value))) {
+      throw new Error("maxlength は 1〜5 桁の数字だけです");
+    }
+    if (name === "value" && (node.tag === "input" || node.tag === "textarea")) {
       el.value = String(value);
+      continue;
+    }
+    if (name === "value" && node.tag === "select") {
+      selectValue = String(value); // option を入れたあとに設定する
       continue;
     }
     el.setAttribute(name, value === true ? "" : value);
   }
   for (const child of node.children ?? []) {
     el.appendChild(build(doc, child));
+  }
+  if (selectValue !== undefined) {
+    el.value = selectValue;
   }
   const on = node.on;
   if (on?.click !== undefined) {
@@ -64,7 +91,11 @@ function build(doc: DomDocument, node: VNode | string): unknown {
   }
   if (on?.change !== undefined) {
     const change = on.change;
-    el.addEventListener("change", (event: { target?: { value?: unknown } }) => change(String(event.target?.value ?? "")));
+    // checkbox は value が常に "on" なので、チェックの状態を "true"・"false" で渡す(Issue #189)。
+    const isCheckbox = node.tag === "input" && node.attrs?.["type"] === "checkbox";
+    el.addEventListener("change", (event: { target?: { value?: unknown; checked?: unknown } }) =>
+      change(isCheckbox ? (event.target?.checked === true ? "true" : "false") : String(event.target?.value ?? "")),
+    );
   }
   return el;
 }

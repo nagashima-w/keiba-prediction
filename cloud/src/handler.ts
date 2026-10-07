@@ -511,7 +511,7 @@ const SETTINGS_BODY_MAX_BYTES = 16 * 1024;
 
 /**
  * `GET /api/settings`(Issue #189): 現在の設定を返す(D1 の `cloud_settings` の1行。`loadSettings`)。
- * 応答は `{ ok, settings, source }`。`source` は `default`(行が無い)・`d1`(行を読んだ)・`invalid`(行はあるが JSON として読めない。既定値で続けている)。
+ * 応答は `{ ok, settings, source }`。`source` は `default`(行が無い)・`d1`(行を読んだ)・`invalid`(行はあるが JSON として読めない、またはオブジェクトでない。既定値で続けている)。
  * 読む側の範囲(`coerceCloudSettings`)なので、手で入れた不正な項目は既定値になって返る。D1 の失敗は 503(文面なし)。GET だけ(HEAD で D1 を引かない)。
  */
 async function handleSettingsGet(env: Env): Promise<Response> {

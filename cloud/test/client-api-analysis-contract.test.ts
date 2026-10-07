@@ -167,7 +167,7 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(result.analysis.detail).toBe("present");
     expect(result.analysis.horses.every((h) => h.name !== null && h.name.length > 0)).toBe(true);
     expect(result.analysis.allocation).toMatchObject({ route: "place-only", skipReasonCode: "cap-too-small", fallbackReason: "no-combo-candidates", betUnit: 100 });
-    const model = buildResultModel({ route: { date: DATE, venue: "central", race: null, analysis: saved.id }, source: { kind: "ready", analysis: result.analysis } });
+    const model = buildResultModel({ route: { date: DATE, venue: "central", race: null, analysis: saved.id, settings: false }, source: { kind: "ready", analysis: result.analysis } });
     expect(model.content!.allocation.kind).toBe("skip");
     expect(model.content!.allocation.notices).toEqual(["1レースの上限が100円未満のため配分できません", "組合せ券種にEVプラスの候補が無かったため複勝のみの配分になっています。"]);
   });

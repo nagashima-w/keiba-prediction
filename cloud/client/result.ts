@@ -26,11 +26,11 @@ export type ResultSource =
 
 export const NO_ALLOCATION_NOTE = "この分析には配分の記録がありません。";
 /**
- * exe の `BET_ALLOCATION_UNSET_NOTE`(両方が未設定のときの注記。「設定画面で…入力してください」)の cloud 専用の代わり。cloud には設定画面が無い(D1 の `cloud_settings` に直接入れる)うえ、
- * 既定値は 0 なので cloud の分析はほぼ全件がこの状態になり、存在しない画面へ誘導してしまう。**両方が未設定のときの文**なので、片方だけ・判定不能には使わない。
+ * exe の `BET_ALLOCATION_UNSET_NOTE`(両方が未設定のときの注記。「設定画面で…入力してください」)の cloud 専用の代わり。exe の「設定画面」は cloud には無い(cloud の設定は、トップの「設定」〈`#settings`。Issue #189〉)うえ、
+ * 既定値は 0 なので cloud の分析はほぼ全件がこの状態になり、cloud の画面と違う場所・呼び名へ誘導してしまう。**両方が未設定のときの文**なので、片方だけ・判定不能には使わない。
  */
 export const UNSET_ALLOCATION_NOTE =
-  "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(設定画面は今後追加します。現在は D1 の cloud_settings に入れます)。";
+  "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(トップの「設定」から入れられます)。";
 export const MODEL_NONE_TEXT = "LLM 未使用(統計のみ)";
 export const DETAIL_MISSING_NOTE = "馬名などの詳細を取得できませんでした(取得の上限に達したか、保存された詳細が見つかりません)。";
 export const DETAIL_NONE_NOTE = "この分析には詳細が保存されていません(馬名は表示されません)。";

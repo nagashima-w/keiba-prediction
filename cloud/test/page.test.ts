@@ -30,6 +30,14 @@ describe("スマホ画面(renderPage)の名前と見出しのリンク", () => {
     expect(html).toMatch(/\.home\s*\{[^}]*min-height:\s*44px/);
   });
 
+  it("Issue #189: 設定の入口のリンク・入力欄・保存ボタンは、タップしやすい大きさ(44px 以上)。エラーの強調は色だけでなく太さ(border-width)も変える", () => {
+    expect(html).toMatch(/\.settings-link\s*\{[^}]*min-height:\s*44px/);
+    expect(html).toMatch(/\.field input\[type="text"\][^{]*\{[^}]*min-height:\s*44px/);
+    expect(html).toMatch(/\.field-check\s*\{[^}]*min-height:\s*44px/);
+    expect(html).toMatch(/\.field \[aria-invalid="true"\]\s*\{[^}]*border-width:\s*2px/);
+    expect(html).toMatch(/\.settings-save\s*\{[^}]*width:\s*100%/);
+  });
+
   it("CSP の対象になるものを足していない: インラインのスクリプトとイベント属性が無い。スクリプトは /app.js の1本だけ", () => {
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
     expect(html).not.toMatch(/\son[a-z]+\s*=/i);

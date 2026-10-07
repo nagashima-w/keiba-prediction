@@ -60,6 +60,9 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../../packages/app/src/renderer/bet-allocation-view",
   "../../packages/app/src/renderer/format",
   "../../packages/app/src/shared/analysis-types",
+  // Issue #189(設定画面): ラベルと版 ID は exe の共有定数(import なしの純モジュール)、範囲の述語は cloud/src の純モジュール(サーバと同じ述語を使う)。
+  "../../packages/app/src/shared/settings",
+  "../src/settings",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -144,7 +147,7 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/app/src/main/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types"]) {
+    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types", "../../packages/app/src/shared/settings", "../src/settings"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
@@ -191,6 +194,12 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     detail: "present",
   };
 
+  const SETTINGS = {
+    evThreshold: 1, additionalInstruction: "", clipVariant: "default", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, includeComboOdds: false,
+    includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true,
+    includeBracketQuinellaInAllocation: true, preRaceOffsetMinutes: 45,
+  };
+
   class FakeText {
     constructor(readonly data: string) {}
   }
@@ -199,6 +208,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     readonly children: (FakeElement | FakeText)[] = [];
     readonly listeners = new Map<string, ((event: unknown) => void)[]>();
     value = "";
+    checked: boolean | undefined = undefined;
     constructor(readonly tag: string) {}
     setAttribute(name: string, value: string): void {
       this.attrs.set(name, value);
@@ -248,6 +258,11 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       if (init.method === "POST" && url === "/api/analyses/run") {
         const body = JSON.parse(init.body!) as { race_id: string; kaisai_date: string; mode: string };
         return { status: 202, json: async () => ({ ok: true, accepted: true, race_id: body.race_id, kaisai_date: body.kaisai_date, mode: body.mode, status: "queued" }) };
+      }
+      if (url === "/api/settings") {
+        // Issue #189: 設定の取得(GET)と保存(POST は受けた本文をそのまま返す)
+        const settings = init.method === "POST" ? JSON.parse(init.body!) : SETTINGS;
+        return { status: 200, json: async () => (init.method === "POST" ? { ok: true, settings } : { ok: true, settings, source: "d1" }) };
       }
       if (url.startsWith("/api/races")) {
         return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [{ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null }] }) };
@@ -333,6 +348,30 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     await settle();
     expect(calls.length).toBe(before + 2);
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
+  });
+
+  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、14 個の入力欄(textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 14 項目の POST になる(一覧・板は取らない)", async () => {
+    const { root, calls } = run("#settings");
+    await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
+    const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
+    expect(fields.length).toBe(14);
+    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "select", "textarea"].sort());
+    const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
+    expect(field("bankroll").value).toBe("500000");
+    expect(field("clipVariant").value).toBe("default"); // select は option を入れたあとに value が設定される
+    expect(field("includeWideInAllocation").checked).toBe(true);
+    expect(field("includeComboOdds").checked).toBeFalsy();
+    field("bankroll").listeners.get("change")![0]!({ target: { value: "123456" } });
+    field("includeComboOdds").listeners.get("change")![0]!({ target: { value: "on", checked: true } });
+    const save = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "settings-save")!;
+    save.listeners.get("click")![0]!(undefined);
+    await until(() => calls.some((c) => c.init.method === "POST"));
+    const post = calls.find((c) => c.init.method === "POST")!;
+    expect(post.url).toBe("/api/settings");
+    expect(post.init.referrerPolicy).toBe("same-origin");
+    expect(JSON.parse(post.init.body!)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true });
+    await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
   });
 
   it("レース画面(#…&race=): 状態(race_id つき)と過去の分析の 2 本だけを取り、カードと朝の prior を描画する。一覧・板・分析の詳細・POST は呼ばない", async () => {

@@ -13,7 +13,7 @@ function row(raceId: string, mode: BoardRow["mode"], status: BoardRow["status"],
   return { raceId, mode, status, attempts: 0, error: null, queuedAt: 1, updatedAt: 2, prior: false, analysisId: null, ...over };
 }
 
-const ROUTE: Route = { date: "20260628", venue: "central", race: null, analysis: null };
+const ROUTE: Route = { date: "20260628", venue: "central", race: null, analysis: null, settings: false };
 
 function input(over: Partial<ListModelInput> = {}): ListModelInput {
   return { route: ROUTE, list: { kind: "ready", races: [] }, board: { kind: "none" }, ...over };
@@ -138,7 +138,7 @@ describe("buildListModel", () => {
   });
 
   it("日付(YYYYMMDD と input 用 YYYY-MM-DD)・区分のタブ(現在の区分が current。タップ先は日付を保ち race を持たない)", () => {
-    const model = buildListModel(input({ route: { date: "20261003", venue: "nar", race: null, analysis: null } }));
+    const model = buildListModel(input({ route: { date: "20261003", venue: "nar", race: null, analysis: null, settings: false } }));
     expect(model.date).toBe("20261003");
     expect(model.dateInput).toBe("2026-10-03");
     expect(model.venue).toBe("nar");

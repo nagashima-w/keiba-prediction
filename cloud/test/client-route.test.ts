@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { buildHash, parseHash, screenOf, type Route } from "../client/route";
+import { buildHash, parseHash, screenOf, SETTINGS_HASH, type Route } from "../client/route";
 
 /**
  * Issue #184(#165-b): スマホ画面の状態(URL のハッシュ)の解析と組み立て。純関数。
@@ -10,21 +10,21 @@ import { buildHash, parseHash, screenOf, type Route } from "../client/route";
  */
 
 const TODAY = "20261007";
-const DEFAULT: Route = { date: TODAY, venue: "central", race: null, analysis: null };
+const DEFAULT: Route = { date: TODAY, venue: "central", race: null, analysis: null, settings: false };
 const NAR_RACE = "202654071210";
 
 describe("parseHash(正常な値)", () => {
   const cases: readonly [string, string, Route][] = [
     ["空のハッシュは既定", "", DEFAULT],
     ["# だけは既定", "#", DEFAULT],
-    ["日付と区分(# 付き)", "#date=20261003&venue=nar", { date: "20261003", venue: "nar", race: null, analysis: null }],
-    ["# が無くても読める", "date=20261003&venue=nar", { date: "20261003", venue: "nar", race: null, analysis: null }],
-    ["区分だけなら日付は今日", "#venue=nar", { date: TODAY, venue: "nar", race: null, analysis: null }],
-    ["日付だけなら区分は central", "#date=20260628", { date: "20260628", venue: "central", race: null, analysis: null }],
-    ["race(日付と一緒)", `#date=20261003&venue=nar&race=${NAR_RACE}`, { date: "20261003", venue: "nar", race: NAR_RACE, analysis: null }],
-    ["analysis", "#analysis=123", { date: TODAY, venue: "central", race: null, analysis: 123 }],
-    ["analysis の上限(2147483647)", "#analysis=2147483647", { date: TODAY, venue: "central", race: null, analysis: 2147483647 }],
-    ["未知のキーは無視する", "#date=20261003&foo=bar&venue=nar", { date: "20261003", venue: "nar", race: null, analysis: null }],
+    ["日付と区分(# 付き)", "#date=20261003&venue=nar", { date: "20261003", venue: "nar", race: null, analysis: null, settings: false }],
+    ["# が無くても読める", "date=20261003&venue=nar", { date: "20261003", venue: "nar", race: null, analysis: null, settings: false }],
+    ["区分だけなら日付は今日", "#venue=nar", { date: TODAY, venue: "nar", race: null, analysis: null, settings: false }],
+    ["日付だけなら区分は central", "#date=20260628", { date: "20260628", venue: "central", race: null, analysis: null, settings: false }],
+    ["race(日付と一緒)", `#date=20261003&venue=nar&race=${NAR_RACE}`, { date: "20261003", venue: "nar", race: NAR_RACE, analysis: null, settings: false }],
+    ["analysis", "#analysis=123", { date: TODAY, venue: "central", race: null, analysis: 123, settings: false }],
+    ["analysis の上限(2147483647)", "#analysis=2147483647", { date: TODAY, venue: "central", race: null, analysis: 2147483647, settings: false }],
+    ["未知のキーは無視する", "#date=20261003&foo=bar&venue=nar", { date: "20261003", venue: "nar", race: null, analysis: null, settings: false }],
   ];
   for (const [name, hash, expected] of cases) {
     it(name, () => {
@@ -72,7 +72,7 @@ describe("parseHash(不正な値は項目ごとに既定へ落ちる。例外に
   });
 
   it("同じキーが重複していたら、そのキーは不正として既定に落ちる(どちらを採るかを曖昧にしない)", () => {
-    expect(parseHash("#date=20261003&date=20261004&venue=nar", TODAY)).toEqual({ date: TODAY, venue: "nar", race: null, analysis: null });
+    expect(parseHash("#date=20261003&date=20261004&venue=nar", TODAY)).toEqual({ date: TODAY, venue: "nar", race: null, analysis: null, settings: false });
     expect(parseHash("#venue=nar&venue=central", TODAY).venue).toBe("central");
   });
 
@@ -93,9 +93,9 @@ describe("buildHash", () => {
   });
   it("往復: parseHash(buildHash(route)) は元の route に戻る(既定と異なる値で確かめる)", () => {
     const routes: Route[] = [
-      { date: "20261003", venue: "nar", race: null, analysis: null },
-      { date: "20260628", venue: "central", race: "202603020211", analysis: null },
-      { date: "20261003", venue: "nar", race: NAR_RACE, analysis: 99 },
+      { date: "20261003", venue: "nar", race: null, analysis: null, settings: false },
+      { date: "20260628", venue: "central", race: "202603020211", analysis: null, settings: false },
+      { date: "20261003", venue: "nar", race: NAR_RACE, analysis: 99, settings: false },
     ];
     for (const route of routes) {
       expect(route.date).not.toBe(TODAY); // 前提: 既定の日付に頼って通っていない
@@ -109,17 +109,23 @@ describe("buildHash", () => {
  * 優先順位は既存のとおり analysis(結果画面)> race(レース画面)> 一覧。
  */
 describe("screenOf(今どの画面か)", () => {
-  const cases: readonly [string, Route, "list" | "race" | "result"][] = [
-    ["race も analysis も無ければ一覧", { date: TODAY, venue: "central", race: null, analysis: null }, "list"],
-    ["race があればレース画面", { date: TODAY, venue: "central", race: NAR_RACE, analysis: null }, "race"],
-    ["analysis があれば結果画面", { date: TODAY, venue: "central", race: null, analysis: 7 }, "result"],
-    ["race と analysis の両方があれば結果画面(analysis が優先)", { date: TODAY, venue: "nar", race: NAR_RACE, analysis: 7 }, "result"],
+  const cases: readonly [string, Route, "list" | "race" | "result" | "settings"][] = [
+    ["race も analysis も無ければ一覧", { date: TODAY, venue: "central", race: null, analysis: null, settings: false }, "list"],
+    ["race があればレース画面", { date: TODAY, venue: "central", race: NAR_RACE, analysis: null, settings: false }, "race"],
+    ["analysis があれば結果画面", { date: TODAY, venue: "central", race: null, analysis: 7, settings: false }, "result"],
+    ["race と analysis の両方があれば結果画面(analysis が優先)", { date: TODAY, venue: "nar", race: NAR_RACE, analysis: 7, settings: false }, "result"],
   ];
   for (const [name, route, expected] of cases) {
     it(name, () => {
       expect(screenOf(route)).toBe(expected);
     });
   }
+
+  it("Issue #189: settings が true なら設定画面(race・analysis があっても。ただし parseHash は #settings の完全一致でしか true にしない)", () => {
+    expect(screenOf({ date: TODAY, venue: "central", race: null, analysis: null, settings: true })).toBe("settings");
+    expect(screenOf({ date: TODAY, venue: "central", race: NAR_RACE, analysis: 7, settings: true })).toBe("settings");
+    expect(screenOf(parseHash("#settings", TODAY))).toBe("settings");
+  });
 
   it("ハッシュから導いた route でも同じ(日付だけ・race つき・analysis つき・両方)", () => {
     expect(screenOf(parseHash("#date=20261003&venue=nar", TODAY))).toBe("list");
@@ -155,5 +161,33 @@ describe("app.ts は、画面の判定を screenOf だけに任せる(Issue #191
 
   it("対照: 検出は、旧い直接比較を拾える(空振りでない)", () => {
     expect("if (route.analysis !== null) {".match(/route\.(analysis|race)\s*[!=]==\s*null/g)).toHaveLength(1);
+  });
+});
+
+/** Issue #189: `#settings`(完全一致のときだけ設定画面)。 */
+describe("設定画面のハッシュ(#settings)", () => {
+  it("SETTINGS_HASH は `#settings`", () => {
+    expect(SETTINGS_HASH).toBe("#settings");
+  });
+
+  it("`#settings` は設定画面の route(日付は今日・区分は central・race と analysis は null)", () => {
+    expect(parseHash("#settings", TODAY)).toEqual({ date: TODAY, venue: "central", race: null, analysis: null, settings: true });
+  });
+
+  it.each([["#settings&date=20261003"], ["#settings=1"], ["#Settings"], ["#settings "], ["#settings/"], ["#date=20261003&settings"], ["settings"], ["#"], [""], ["#setting"]])(
+    "完全一致でない %j は設定画面にしない(従来どおりの解析)",
+    (hash) => {
+      expect(parseHash(hash, TODAY).settings).toBe(false);
+    },
+  );
+
+  it("一覧・レース・結果のハッシュでは settings は false", () => {
+    for (const hash of ["", "#date=20261003&venue=nar", `#date=20261003&venue=nar&race=${NAR_RACE}`, "#analysis=5"]) {
+      expect(parseHash(hash, TODAY).settings, hash).toBe(false);
+    }
+  });
+
+  it("buildHash は settings を出さない(設定画面への入口は SETTINGS_HASH だけ)", () => {
+    expect(buildHash({ date: "20261003", venue: "nar" })).not.toContain("settings");
   });
 });

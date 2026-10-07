@@ -21,6 +21,13 @@
  *  - 完了への遷移(同じ完了は 1 回): 朝は prior(`status?race_id=`)、発走前は過去の分析を取り直す(そのレースの画面にいれば取り直し、いなければキャッシュを捨てて、開いたときに取る)。
  *  - `/api/analyses/{id}`・`/api/races`・`status?race_id=`(完了時の取り直しを除く)は、ポーリングの周期では呼ばない(`/api/analyses/{id}` は、レース画面で発走前の完了を検知したとき、新しい id を 1 回だけ。下の Issue #188)。
  *
+ * **Issue #189(設定画面。`#settings`)**: 開くと `GET /api/settings` だけを取る(一覧・板・レース・分析は取らない)。失敗は自動で再試行しない(「再読込」だけ。取得中・保存中は無視)。
+ *  - 状態は closure に持つ: 取得の状態・下書き(`settings-form.ts`。数値は入力した文字のまま)・検証エラー・保存の状態。**画面を離れたら破棄**し(`leaveSettings`)、戻ると取り直す。
+ *  - **入力の `change` は下書きを書くだけで、再描画しない**(入力中の欄・フォーカスを壊さない。保存中の入力は無視)。保存・再読込・取得・失敗の直後は **`render(true)`**
+ *    (木が前回と同じでも DOM を置き換える。change では描画しないので、DOM が下書きと食い違ったまま残るのを、強制の再描画で直す)。
+ *  - 保存の押下: 検証(項目ごと。保存の押下時に1回)→ NG なら POST せず項目ごとのエラー / OK なら全 14 項目を POST。保存中は二重に送らない。失敗しても入力は残る。成功したらサーバが返した設定で下書きを戻す。
+ *  - 世代(`settingsGen`): 離れる・取り直すたびに増やし、**古い世代の応答(離れる前に出した取得・保存)は今の画面に反映しない**。
+ *
  * **Issue #188(発走前の結果をレース画面のカードの中に出す)**:
  *  - 最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id(`race.ts` の `latestAnalysisIdOf`。取る・出すの判定は同じ関数)。
  *  - 取得は `loadAnalysis`(id ごとに 1 回。結果画面と**同じキャッシュ・同じ 3 つの門**〈`analyses`・`analysisErrors`・`analysisInflight`〉)。再描画・ポーリング・hashchange の連打では増えない。失敗は自動で再試行しない。
@@ -36,7 +43,9 @@ import { createBoardStore, type BoardCompletion } from "./board-state";
 import { inputToYmd, todayJst } from "./date";
 import { buildListModel, type BoardSource, type ListSource } from "./list";
 import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource, type RunUi } from "./race";
+import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
 import { buildResultModel, type ResultSource } from "./result";
+import { buildSettingsModel, draftFromSettings, setDraftValue, validateDraft, type FieldErrors, type FieldKey, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
 import { buildHash, parseHash, screenOf, type Route, type Venue } from "./route";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
 import { renderScreen } from "./view";
@@ -194,7 +203,17 @@ export function createApp(deps: AppDeps): App {
     return runs;
   }
 
-  const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack };
+  // ---- 設定画面(Issue #189) ----
+  /** 取得の状態。null は「まだ取っていない(この画面にいない)」。 */
+  let settingsLoad: SettingsLoadState | null = null;
+  let settingsDraft: SettingsDraft | null = null;
+  let settingsErrors: FieldErrors = {};
+  let settingsSave: SettingsSaveState = { kind: "idle" };
+  /** 世代。離れる・取り直すたびに増やし、古い世代の応答を捨てる。 */
+  let settingsGen = 0;
+  const settingsInflight = new Set<Promise<unknown>>();
+
+  const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack, onSettingsInput, onSettingsSave };
 
   function render(force = false): void {
     const screen = screenOf(route);
@@ -225,6 +244,10 @@ export function createApp(deps: AppDeps): App {
           ),
           force,
         );
+        return;
+      }
+      case "settings": {
+        deps.render(renderScreen(buildSettingsModel({ load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave }), actions), force);
         return;
       }
       case "list": {
@@ -399,9 +422,81 @@ export function createApp(deps: AppDeps): App {
         loadRaces(route.date, route.venue);
         loadBoard(route.date);
         return;
+      case "settings":
+        if (settingsLoad === null) startSettingsLoad();
+        return;
       default:
         return assertNever(screen);
     }
+  }
+
+  // ---- 設定 ----
+
+  /** 設定を取り直す(下書き・エラー・保存の状態を捨てる)。**呼び出し側が描画する**。 */
+  function startSettingsLoad(): void {
+    settingsGen += 1;
+    const gen = settingsGen;
+    settingsLoad = { kind: "loading" };
+    settingsDraft = null;
+    settingsErrors = {};
+    settingsSave = { kind: "idle" };
+    const promise = fetchSettings(deps.fetch).then((result) => {
+      settingsInflight.delete(promise);
+      if (gen !== settingsGen) return; // 離れた・取り直した(古い応答)
+      if (result.ok) {
+        settingsLoad = { kind: "ready", source: result.source };
+        settingsDraft = draftFromSettings(result.settings);
+      } else {
+        settingsLoad = { kind: "error", message: settingsFailureMessage(result.error, "load") };
+      }
+      render(true);
+    });
+    settingsInflight.add(promise);
+  }
+
+  /** 設定画面を離れる: 下書き・エラー・保存の状態を捨て、世代を進める(遅れて届く応答を捨てる)。戻ると取り直す。 */
+  function leaveSettings(): void {
+    settingsGen += 1;
+    settingsLoad = null;
+    settingsDraft = null;
+    settingsErrors = {};
+    settingsSave = { kind: "idle" };
+  }
+
+  /** 入力欄の変更。**下書きを書くだけで、再描画しない**(入力中の欄・フォーカスを壊さない)。保存中・取得前は無視。 */
+  function onSettingsInput(key: string, value: string): void {
+    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
+    settingsDraft = setDraftValue(settingsDraft, key as FieldKey, value);
+    // 「保存しました」の通知は、未保存の入力が生まれた時点で状態から外す(描画はしない。次の描画から出さない)。
+    if (settingsSave.kind === "saved") settingsSave = { kind: "idle" };
+  }
+
+  function onSettingsSave(): void {
+    if (screenOf(route) !== "settings" || settingsLoad?.kind !== "ready" || settingsDraft === null || settingsSave.kind === "saving") return;
+    const checked = validateDraft(settingsDraft);
+    if (!checked.ok) {
+      settingsErrors = checked.errors;
+      settingsSave = { kind: "idle" };
+      render(true);
+      return;
+    }
+    settingsErrors = {};
+    settingsSave = { kind: "saving" }; // 同期の印(await の前)。二重押しを防ぐ
+    const gen = settingsGen;
+    render(true);
+    const promise = postSettings(deps.fetch, checked.settings).then((result) => {
+      settingsInflight.delete(promise);
+      if (gen !== settingsGen) return; // 離れた・取り直した(古い応答)
+      if (result.ok) {
+        settingsDraft = draftFromSettings(result.settings);
+        settingsLoad = { kind: "ready", source: "d1" };
+        settingsSave = { kind: "saved" };
+      } else {
+        settingsSave = { kind: "error", message: settingsFailureMessage(result.error, "save") };
+      }
+      render(true);
+    });
+    settingsInflight.add(promise);
   }
 
   // ---- 追跡 ----
@@ -482,7 +577,9 @@ export function createApp(deps: AppDeps): App {
   // ---- 画面の操作 ----
 
   function onHashChange(): void {
+    const wasSettings = screenOf(route) === "settings";
     route = parseHash(deps.getHash(), todayJst(deps.now()));
+    if (wasSettings && screenOf(route) !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
     ensureLoaded();
     render();
   }
@@ -555,6 +652,13 @@ export function createApp(deps: AppDeps): App {
         render();
         return;
       }
+      case "settings": {
+        // 取得中・保存中は何もしない(同じものを同時に 2 本取らない・保存中の入力を捨てない)。未保存の入力は捨てて、サーバの値を取り直す。
+        if (settingsLoad?.kind === "loading" || settingsSave.kind === "saving") return;
+        startSettingsLoad();
+        render(true);
+        return;
+      }
       default:
         return assertNever(screen);
     }
@@ -569,7 +673,7 @@ export function createApp(deps: AppDeps): App {
     onVisibilityChange: () => tracker.onVisibilityChange(),
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。
-      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight];
+      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight];
       for (let i = 0; i < 10 && pending().length > 0; i += 1) {
         await Promise.all(pending());
       }

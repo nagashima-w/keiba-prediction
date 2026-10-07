@@ -2719,6 +2719,25 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない。要素・属性の許可リストも変更なし)
 
+## 次の正式版が 1.19.22 である根拠(Issue #189 での変更)
+
+**patch**(クラウド版の設定の API・設定画面・トップの入口。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud(サーバ): `GET`/`POST /api/settings`(`handler.ts`)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON 400)を `readJsonObjectBody` に抜き出して run と共有(上限は run 1 KiB・settings 16 KiB)。範囲の述語を項目ごとに1か所(`settings.ts` の `CLOUD_SETTINGS_RULES`。読む側 ⊃ 書く側)。`loadSettings` はオブジェクトでない行を `invalid` にする。
+- cloud(クライアント): 設定画面(`#settings`)・トップの入口・`dom.ts` の許可リスト(`textarea`・`select`・`option`、`checked`・`inputmode`・`maxlength`)・結果の画面の注記。生成物 `cloud/src/client-bundle.generated.ts` を再生成。
+- 設定の新項目 `preRaceOffsetMinutes`(発走何分前に評価するか。整数 10〜180・**既定 45 分**。cloud 専用)。`DEFAULT_PRE_RACE_OFFSET_MINUTES` を 30 → 45 にして設定の既定値と1か所にまとめた(production から呼ばれるのは定時の自動実行〈#166〉を入れてから)。
+- exe(`packages/app`)のアプリコード・画面・保存データ・分析結果は無変更(版数・テストの版数 literal だけ)。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い(クラウド版だけの変更)。前例: #184〜#188・#191 の画面の追加も patch で運用してきた。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更(D1 の migration も追加しない。`cloud_settings` の SQL は不変で、`settings_json` の中の項目が1つ増えるだけ。旧い行は、その項目だけ既定値になる)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

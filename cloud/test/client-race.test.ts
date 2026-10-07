@@ -12,7 +12,7 @@ import type { Route } from "../client/route";
 
 const RACE_ID = "202603020211";
 const OTHER_RACE_ID = "202603020212";
-const ROUTE: Route = { date: "20260628", venue: "central", race: RACE_ID, analysis: null };
+const ROUTE: Route = { date: "20260628", venue: "central", race: RACE_ID, analysis: null, settings: false };
 
 function row(raceId: string, mode: BoardRow["mode"], status: BoardRow["status"], over: Partial<BoardRow> = {}): BoardRow {
   return { raceId, mode, status, attempts: 0, error: null, queuedAt: 1, updatedAt: 2, prior: false, analysisId: null, ...over };
@@ -344,7 +344,7 @@ describe("起動のボタン(文言・disabled・渡す値)", () => {
   });
 
   it("ボタンが起動に渡す値(開催日・レース・モード)は、画面のレースと開催日・そのカードのモード(取り違えない)", () => {
-    const route: Route = { date: "20260629", venue: "nar", race: OTHER_RACE_ID, analysis: null };
+    const route: Route = { date: "20260629", venue: "nar", race: OTHER_RACE_ID, analysis: null, settings: false };
     const [morning, preRace] = cards(buildRaceModel(input({ route })));
     expect(morning!.button).toMatchObject({ date: "20260629", raceId: OTHER_RACE_ID, mode: "morning" });
     expect(preRace!.button).toMatchObject({ date: "20260629", raceId: OTHER_RACE_ID, mode: "pre_race" });

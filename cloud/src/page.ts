@@ -134,6 +134,18 @@ export function renderPage(email: string): string {
   .card-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--muted); }
   /* Issue #191: カードの説明(何をするか。1〜2行) */
   .card-desc { margin: 6px 0 0; font-size: 0.85rem; color: var(--muted); }
+  /* Issue #189: 設定画面(トップの入口のリンク・入力欄。タップしやすい高さ 44px 以上。色だけに頼らない=エラーは文字と role=alert) */
+  .settings-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .field { margin: 0 0 16px; }
+  .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.95rem; font-weight: bold; }
+  .field-check { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; font-size: 0.95rem; font-weight: bold; }
+  .field-check input { width: 24px; height: 24px; margin: 10px 0 0; flex: none; }
+  .field input[type="text"], .field textarea, .field select { width: 100%; min-height: 44px; padding: 8px; font-size: 1rem; font-weight: normal; font-family: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .field textarea { min-height: 120px; resize: vertical; }
+  .field [aria-invalid="true"] { border-color: var(--fail); border-width: 2px; }
+  .field-help { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
+  .field-error { margin: 4px 0 0; font-size: 0.85rem; font-weight: bold; color: var(--fail); }
+  .settings-save { display: block; width: 100%; margin: 8px 0 12px; font-weight: bold; }
   /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
   .card-result { margin-top: 8px; }
   .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }
