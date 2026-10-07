@@ -1189,7 +1189,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   (offset を設定から決める。読めなければ 3 回再試行して**既定の 45 分**で確定し、`plan_offset_source = default-fallback` を残す。対象 = 中央の全件 + 地方の Jpn。各対象に `planPreRaceDue` で期限を計算して `race_day_plan` に書き、
   pre_race を走らせる行(planned)にだけ morning を積む。skip〈`no-start-time`・`started`・`too-late`・`cap`〉には積まない。**既にある morning は状態に関係なく積み直さない**。1日の上限(100)は、対象1件につき morning と pre_race の2行ぶん)。
   期限が来た planned の行は、起床のたびに pre_race を積んで promoted にする(同じレースの pre_race が実行中なら、積み直さず行だけ promoted。上限なら skipped〈cap〉)。**アラームの候補になる行は、起きたときに必ず状態が変わる**(ループの防止)。
-  確定は**原子性に頼らない冪等**(確定の印は最後。計画の行は `ON CONFLICT DO NOTHING`・morning は無いときだけ・offset は最初の決定を残す。途中で落ちても再実行で足りない分だけが足される)。
+  確定は**原子性に頼らない冪等**を目指している(確定の印は最後。計画の行は `ON CONFLICT DO NOTHING`・morning は無いときだけ・offset は最初の決定を残す)。**ただし既知の穴が1つある**: 計画の行を書いたあと morning を積む前に落ちると、再実行の先頭の昇格で期限切れの行が先に promoted になり、その行には morning が積まれず、`morningAllTerminal` が偽のまま残る(DO の同期区間の途中の SQL 例外でだけ起きる。#204 で直す)。
   DO の表: `race_day_plan_venue`(会場の状態・取得した一覧の本体〈確定したら捨てる〉)・`race_day_plan`(期限と状態)・meta の `plan_*`。**掃除は、キャッシュの行と孤立した LLM の応答の記録だけを消す**(従来どおり。タスク・prior・計画の行は消さない)。
   `getPlanProgress()` は、朝のまとめ(#205)のための読み取り(`stage`・会場の状態と件数・各行の期限と morning の状態・`morningAllTerminal`〈確定済みで、積んだ morning がすべて done か failed。一部が failed でも true〉・`offsetSource`)。
 - **アラームの合成と処理の順**(Issue #203 段階1。`cloud/src/race-day-core.ts`): DO のアラームは1つだけなので、`setAlarm` を呼ぶのは `rearm()` の1箇所だけにし、純関数 `nextAlarmAt` が
