@@ -777,6 +777,17 @@ describe("カードの説明の VNode(Issue #191)", () => {
     });
   }
 
+  it("画面に出る説明の取り違えを検出する: 見出し「朝の準備」のカードの説明は戦績に、「発走前」のカードの説明は LLM に触れる(逆に引くと赤)", () => {
+    const tree = renderScreen(buildRaceModel(raceInput()), noopActions);
+    const byTitle = (title: string): VNode => sections(tree).find((c) => (c.children ?? []).some((k) => typeof k !== "string" && k.tag === "h2" && textOf(k) === title))!;
+    const morning = textOf(byClass(byTitle("朝の準備"), "card-desc")[0]!);
+    const preRace = textOf(byClass(byTitle("発走前"), "card-desc")[0]!);
+    expect(morning).toContain("戦績");
+    expect(morning).not.toContain("LLM");
+    expect(preRace).toContain("LLM");
+    expect(preRace).not.toContain("戦績");
+  });
+
   it("説明は見出し(h2)の後・起動のボタンの前に出る(カードの中の並び)", () => {
     const tree = renderScreen(buildRaceModel(raceInput()), noopActions);
     for (const card of sections(tree)) {

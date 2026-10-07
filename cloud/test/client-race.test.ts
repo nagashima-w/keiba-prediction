@@ -424,6 +424,23 @@ describe("カードの説明(Issue #191)", () => {
     }
   });
 
+  // 文言そのものは固定しない。ただし、次の「事実の印」は、モードごとに固有の語として固定する(取り違え・事実の削除で赤になる)。
+  it("朝の準備の説明は、戦績・調教を取得すること(調教は中央のみ)に触れ、LLM には触れない。発走前の説明は、現在は LLM を使わないこと(#179 で直す)と、配分の条件(資金・上限)に触れ、戦績には触れない", () => {
+    const [morning, preRace] = cards(buildRaceModel(input()));
+    expect(morning!.mode).toBe("morning");
+    expect(preRace!.mode).toBe("pre_race");
+    for (const word of ["戦績", "調教", "中央のみ"]) {
+      expect(morning!.description, `朝の説明に「${word}」`).toContain(word);
+    }
+    expect(morning!.description).not.toContain("LLM");
+    expect(preRace!.description).toContain("LLM");
+    expect(preRace!.description).toMatch(/LLM を使いません|LLM は使いません/);
+    for (const word of ["資金", "上限"]) {
+      expect(preRace!.description, `発走前の説明に「${word}」`).toContain(word);
+    }
+    expect(preRace!.description).not.toContain("戦績");
+  });
+
   it("状態を取得できていない(cards が null)ときは、説明も出ない(カードが無いので)", () => {
     expect(buildRaceModel(input({ status: { kind: "loading" } })).cards).toBeNull();
   });
