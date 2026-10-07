@@ -14,6 +14,7 @@ import { toSafeRaceSnapshot } from "../../packages/app/src/main/analysis-export"
 import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
 import type { StoredAllocation } from "../../packages/core/src/ev/analysis-store-types";
 import type { AnalysisDetailResult, DetailStatus } from "./analysis-repository";
+import type { LlmCallRecord } from "./llm-calls";
 
 export interface AnalysisViewHorse {
   readonly umaban: number;
@@ -81,6 +82,12 @@ export interface AnalysisView {
    * 画面(#195)が、モデル欄(`model` が null のとき)の近くに出す。API のエラーの本文は、そもそも保存していない。
    */
   readonly llmNote: string | null;
+  /**
+   * LLM を呼んだ1回ごとの記録(呼び出しの順。D1 の `llm_calls_json`。Issue #197 段2)。画面は #198。LLM を呼ばなかった(キー未登録)・旧い分析は null。
+   * 費用(トークン数)・所要時間・切り詰め(`stopReason` が `max_tokens`)を確かめるための値で、プロンプト・応答の本文・エラーの本文は含まない。
+   * 再生した呼び出し(`replayed:true`)の所要時間・トークンは元の呼び出しの値(課金は元の1回きり。合計に足すときは二重に数えない)。詳細(R2)の状態に依らず載る。
+   */
+  readonly llmCalls: readonly LlmCallRecord[] | null;
   readonly race: AnalysisViewRace;
   readonly horses: readonly AnalysisViewHorse[];
   /** 配分(D1 の配分の行が無ければ null)。 */
@@ -117,6 +124,11 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
     model: analysis.model,
     promptVersion: analysis.promptVersion,
     llmNote: result.llmNote,
+    // 許可したキーを明示して写す(保存した値の余計な項目は載せない)。配列も要素も複製する。
+    llmCalls:
+      result.llmCalls === null
+        ? null
+        : result.llmCalls.map((c) => ({ ok: c.ok, ms: c.ms, inputTokens: c.inputTokens, outputTokens: c.outputTokens, stopReason: c.stopReason, model: c.model, replayed: c.replayed, error: c.error })),
     race: {
       venueName: venueNameOf(analysis.raceId),
       raceNumber: raceNumberOf(analysis.raceId),

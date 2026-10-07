@@ -12,6 +12,7 @@ import {
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
+import type { LlmCallRecord } from "../src/llm-calls";
 import { LLM_NOTE_MARKS_DROPPED, LLM_NOTE_NO_KEY } from "../src/llm-run";
 import type { CloudLlm } from "../src/llm-sender";
 import { RaceDayCore, type AnalysisSink, type RaceDayDeps } from "../src/race-day-core";
@@ -60,7 +61,15 @@ function fakeGate(): FakeGate {
 
 interface SaveExtra {
   readonly llmNote: string | null;
+  /** LLM を呼んだ1回ごとの記録(Issue #197 段2)。キー未登録は null。 */
+  readonly llmCalls?: readonly LlmCallRecord[] | null;
 }
+
+/** 保存の追加情報のうち、理由(llmNote)だけを取り出す(llmCalls は別に確かめる。ほかのキーが増えたら、この比較が落ちる)。 */
+const noteOnly = (extra: SaveExtra | undefined): { readonly llmNote: string | null } => {
+  const { llmCalls: _calls, ...rest } = extra as SaveExtra;
+  return rest;
+};
 
 interface FakeSink extends AnalysisSink {
   readonly saved: AnalysisRecord[];
@@ -237,7 +246,10 @@ describe("e1: LLM が成功すると、補正後の確率・印・根拠・モ�
     expect(record.model).toBe(FIXED_MODEL);
     expect(record.promptVersion).not.toBeNull();
     expect(record.rawResponse).toContain('"place_prob"');
-    expect(h.sink.extras[0]).toEqual({ llmNote: null });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: null });
+    // LLM を呼んだ1回ごとの記録(Issue #197 段2): 1回・成功・再生ではない
+    expect(h.sink.extras[0]!.llmCalls).toHaveLength(1);
+    expect(h.sink.extras[0]!.llmCalls![0]).toMatchObject({ ok: true, stopReason: "end_turn", model: FIXED_MODEL, replayed: false, error: null });
     // 前提(空振り防止): 16 頭で、補正が実際に効いている(prior から動いている)
     expect(record.horses).toHaveLength(16);
     const moved = record.horses.filter((x) => x.adjustedProb !== x.prior);
@@ -273,7 +285,8 @@ describe("e2: API キーが未登録(llm なし)なら、LLM なしで保存し�
     expect(record.rawResponse).toBeNull();
     expect(record.horses.every((x) => x.adjustedProb === x.prior)).toBe(true);
     expect(record.horses.every((x) => x.mark === null)).toBe(true);
-    expect(h.sink.extras[0]).toEqual({ llmNote: LLM_NOTE_NO_KEY });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: LLM_NOTE_NO_KEY });
+    expect(h.sink.extras[0]!.llmCalls).toBeNull(); // LLM を呼んでいない(Issue #197 段2: 記録なし)
     expect(prRow(h)).toMatchObject({ status: "done", error: null });
   });
 });
@@ -291,7 +304,10 @@ describe("e3: API のエラー(spend limit・認証・過負荷・タイムア�
     expect(record.horses.every((x) => x.adjustedProb === x.prior)).toBe(true);
     expect(record.model).toBeNull();
     expect(record.rawResponse).toBeNull();
-    expect(h.sink.extras[0]).toEqual({ llmNote: FALLBACK_REASON_INVOCATION_ERROR });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: FALLBACK_REASON_INVOCATION_ERROR });
+    // 失敗した2回の呼び出しが、どちらも記録される(Issue #197 段2)。説明は status(または種別)だけ
+    expect(h.sink.extras[0]!.llmCalls!.map((c) => [c.ok, c.replayed])).toEqual([[false, false], [false, false]]);
+    expect(h.sink.extras[0]!.llmCalls!.every((c) => (status === undefined ? /^種別=/.test(c.error ?? "") : c.error === `status=${status}`))).toBe(true);
     expect(prRow(h)).toMatchObject({ status: "done", error: null });
     // 診断ログは status(または種別)だけ。鍵・本文は出ない
     expect(h.warnings.some((w) => (status === undefined ? w.includes("種別=") : w.includes(`status=${status}`)))).toBe(true);
@@ -332,7 +348,7 @@ describe("e5: 切り詰め・拒否・解析失敗・印の救済", () => {
     const record = h.sink.saved[0]!;
     expect(record.horses.every((x) => x.adjustedProb === x.prior)).toBe(true);
     expect(record.model).toBeNull();
-    expect(h.sink.extras[0]).toEqual({ llmNote: reason });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: reason });
     expect(prRow(h)).toMatchObject({ status: "done", error: null });
   });
 
@@ -342,7 +358,7 @@ describe("e5: 切り詰め・拒否・解析失敗・印の救済", () => {
     await runPreRace(h);
     expect(llm.calls).toHaveLength(2);
     expect(h.sink.saved[0]!.model).toBe(FIXED_MODEL);
-    expect(h.sink.extras[0]).toEqual({ llmNote: null });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: null });
     expect(h.sink.saved[0]!.horses.some((x) => x.adjustedProb !== x.prior)).toBe(true);
   });
 
@@ -355,7 +371,7 @@ describe("e5: 切り詰め・拒否・解析失敗・印の救済", () => {
     expect(record.model).toBe(FIXED_MODEL);
     expect(record.horses.every((x) => x.mark === null)).toBe(true);
     expect(record.horses.some((x) => x.adjustedProb !== x.prior)).toBe(true);
-    expect(h.sink.extras[0]).toEqual({ llmNote: LLM_NOTE_MARKS_DROPPED });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: LLM_NOTE_MARKS_DROPPED });
   });
 });
 
@@ -457,7 +473,7 @@ describe("e9: モデルの自動選択と降格(HTTP 400/403/404 のときだけ
     await runPreRace(h);
     expect(llm.calls.map((c) => c.model)).toEqual(["claude-sonnet-9-9", FIXED_MODEL]);
     expect(h.sink.saved[0]!.model).toBe(FIXED_MODEL);
-    expect(h.sink.extras[0]).toEqual({ llmNote: null });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: null });
     h.clock.now += 5 * 60_000;
     await runPreRace(h);
     expect(llm.calls.map((c) => c.model)).toEqual(["claude-sonnet-9-9", FIXED_MODEL, FIXED_MODEL]);
@@ -472,7 +488,9 @@ describe("e9: モデルの自動選択と降格(HTTP 400/403/404 のときだけ
     const h = harness(llm);
     await runPreRace(h);
     expect(llm.calls.map((c) => c.model)).toEqual(["claude-sonnet-9-9", FIXED_MODEL, FIXED_MODEL]);
-    expect(h.sink.extras[0]).toEqual({ llmNote: FALLBACK_REASON_PARSE_ERROR });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: FALLBACK_REASON_PARSE_ERROR });
+    // 3回の呼び出しがすべて記録される(降格前の 404 の失敗・固定モデルの2回。Issue #197 段2)
+    expect(h.sink.extras[0]!.llmCalls!.map((c) => [c.ok, c.error, c.model])).toEqual([[false, "status=404", null], [true, null, FIXED_MODEL], [true, null, FIXED_MODEL]]);
     expect(h.sink.saved[0]!.horses.every((x) => x.adjustedProb === x.prior)).toBe(true);
   });
 
@@ -484,7 +502,7 @@ describe("e9: モデルの自動選択と降格(HTTP 400/403/404 のときだけ
     const h = harness(llm);
     await runPreRace(h);
     expect(llm.calls.map((c) => c.model)).toEqual([FIXED_MODEL]);
-    expect(h.sink.extras[0]).toEqual({ llmNote: null });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: null });
     expect(h.warnings.some((w) => w.includes("モデル一覧") && w.includes("status=401"))).toBe(true);
     expect(everythingVisible(h)).not.toContain("sk-ant-");
     expect(everythingVisible(h)).not.toContain("SECRET");
@@ -622,7 +640,7 @@ describe("秘密: API のエラーの本文・鍵は、画面(board)・D1(保存
     const llm = fakeLlm(() => ok(`これは JSON ではありません ${SECRET}`));
     const h = harness(llm);
     await runPreRace(h);
-    expect(h.sink.extras[0]).toEqual({ llmNote: FALLBACK_REASON_PARSE_ERROR });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: FALLBACK_REASON_PARSE_ERROR });
     expect(h.warnings.join("\n")).not.toContain("sk-ant-");
     expect(h.warnings.join("\n")).not.toContain("SECRET");
     // 保存内容(rawResponse は prior 採用のときは null)にも出ない

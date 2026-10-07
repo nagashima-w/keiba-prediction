@@ -453,6 +453,44 @@ describe("createSdkMessageSender(SDK 既定 sender。fetch を差し替えて本
   });
 });
 
+describe("createSdkMessageSender の応答の usage(Issue #197・段2: LLM の使用量〈入力・出力トークン〉の記録の元)", () => {
+  /** usage と stop_reason を指定して返す fetch(実 API には出ない)。 */
+  function fetchWithUsage(usage: Record<string, unknown>, stopReason: string) {
+    return vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "msg_test",
+          type: "message",
+          role: "assistant",
+          model: "claude-sonnet-5-5",
+          content: [{ type: "text", text: "応答" }],
+          stop_reason: stopReason,
+          stop_sequence: null,
+          usage,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+  }
+
+  it("SDK の応答の usage(input_tokens・output_tokens)が、型 AnthropicMessageResponse.usage として、そのまま sender の戻り値に載る", async () => {
+    const fetchImpl = fetchWithUsage({ input_tokens: 12345, output_tokens: 6789, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, "end_turn");
+    const sender = createSdkMessageSender({ apiKey: "sk-ant-fake-test-key-not-real", fetch: fetchImpl as unknown as typeof fetch });
+    const res: AnthropicMessageResponse = await sender(buildRequestParams("p"));
+    expect(res.usage?.input_tokens).toBe(12345);
+    expect(res.usage?.output_tokens).toBe(6789);
+    expect(res.stop_reason).toBe("end_turn");
+  });
+
+  it("max_tokens で切り詰められた応答でも usage は返る(出力トークン数が上限に張り付くことを、切り詰めの診断に使う)", async () => {
+    const fetchImpl = fetchWithUsage({ input_tokens: 100, output_tokens: 16000 }, "max_tokens");
+    const sender = createSdkMessageSender({ apiKey: "sk-ant-fake-test-key-not-real", fetch: fetchImpl as unknown as typeof fetch });
+    const res = await sender(buildRequestParams("p"));
+    expect(res.stop_reason).toBe("max_tokens");
+    expect(res.usage).toMatchObject({ input_tokens: 100, output_tokens: 16000 });
+  });
+});
+
 describe("createSdkModelLister(Models API。fetch を差し替え・実APIは呼ばない)", () => {
   it("全ページを辿って id と created_at を返すこと", async () => {
     const pages = [

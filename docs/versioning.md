@@ -2820,6 +2820,7 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - exe: `analysis_horses` に `highlights_json`・`concerns_json` 列(CREATE と後付け migration)。codec・保存の入力・パイプライン(`AnalysisRow`・保存レコード)に配線した(画面・エクスポートは #199)。
 - cloud: D1 の migration `0006_horse_items.sql`(同じ2列。追加のみ)。**0001 は凍結した**(`scripts/gen-cloud-d1-migration.ts` は生成から凍結の確認に変えた)。`GET /api/analyses/{id}` の馬に `highlights`・`concerns` が載る(画面は #198)。一覧(`GET /api/analyses`)の馬には載せない。
 - golden を作り直した(出力は、`promptVersion`・プロンプト文面・馬ごとの `highlights`/`concerns` だけが変わる)。
+- cloud(段2): LLM を呼んだ1回ごとの記録(所要時間・usage・stop_reason・失敗の固定の説明)を、D1 の `analyses.llm_calls_json`(migration `0007`。cloud 専用・追加のみ)に残し、`GET /api/analyses/{id}` の `llmCalls` に載せる。応答の記録・再生に測定値を持たせ、再生分は `replayed`。`/api/health` の D1 の検査に 0006・0007 の列を足した。core の `AnthropicMessageResponse` に `usage?` を足した(型の追加のみ)。exe には記録を足していない。
 
 ### minor である根拠
 

@@ -17,7 +17,7 @@
  *    それでも失敗したら `detail_key` を NULL に戻し、**throw せず** `detail: "failed"` を返す(要約は残る)。
  *    カウンタは batch と一緒にコミット済みなので +1 のまま(再試行は数えない。1 回の保存を 1 回と数える)。
  *
- * 5. **理由(`llmNote`。Issue #194)**: 理由があるときだけ、`llm_note` の UPDATE を1文足す(配分ありで 7 文・なしで 5 文。理由なしは上のとおり)。core の codec の INSERT は変えない。
+ * 5. **理由(`llmNote`。Issue #194)・LLM 呼び出しの記録(`llmCalls`。Issue #197 段2)**: どちらかがあるときだけ、`llm_note`・`llm_calls_json` の UPDATE を**1文**足す(配分ありで 7 文・なしで 5 文。どちらも無ければ上のとおり)。core の codec の INSERT は変えない。
  *
  * ### 柵の限界
  * - 回数の確認(②)と +1(③)は別の呼び出しなので、同時に保存が走ると、柵を同時実行数ぶんだけ超えうる(柵は無料枠の 10% で、100 倍以上の余裕がある)。
@@ -71,6 +71,7 @@ import type {
   StoredAnalysisHorse,
 } from "../../packages/core/src/ev/analysis-store-types.js";
 import type { AnalysisSaveExtra } from "./analysis-save-extra";
+import { parseLlmCalls, serializeLlmCalls, type LlmCallRecord } from "./llm-calls";
 export type { AnalysisSaveExtra };
 import { contributionsOf, decodeDetail, DETAIL_KEY_SQL, detailKeyOf, encodeDetail } from "./analysis-detail";
 import { isReadAllowed, isWriteAllowed, monthKey, R2_FENCE_LIMITS, type R2Usage } from "./r2-fence";
@@ -103,6 +104,8 @@ export interface AnalysisDetailResult {
   readonly detail: DetailStatus;
   /** LLM が使われなかった・一部しか使われなかった理由(固定文言。D1 の `llm_note`。無ければ null)。詳細(R2)の状態に依らない。 */
   readonly llmNote: string | null;
+  /** LLM を呼んだ1回ごとの記録(D1 の `llm_calls_json`。Issue #197 段2。記録なし・壊れた値は null)。詳細(R2)の状態に依らない。一覧(要約)には載せない。 */
+  readonly llmCalls: readonly LlmCallRecord[] | null;
 }
 
 /** 一覧の馬は、大きな列(contributions)と、強調材料・懸念事項(Issue #197。詳細の画面だけが使うので、一覧では読まない)を持たない。 */
@@ -182,6 +185,9 @@ const INSERT_META_SQL = withNewIdSql(INSERT_ALLOCATION_META_SQL);
 const UPDATE_DETAIL_KEY_SQL = `UPDATE analyses SET detail_key = ${DETAIL_KEY_SQL} WHERE id = ${NEW_ID}`;
 /** 理由(固定文言。Issue #194)。core の codec の INSERT(exe と共有)には列を足さず、理由があるときだけ、直後に UPDATE する(`detail_key` の UPDATE と同じ形)。 */
 const UPDATE_LLM_NOTE_SQL = `UPDATE analyses SET llm_note = ? WHERE id = ${NEW_ID}`;
+/** LLM 呼び出しの記録(Issue #197 段2)。理由と同じ形で、記録があるときだけ UPDATE する。理由と記録の両方があるときは、1文にまとめる(文の数を増やさない)。 */
+const UPDATE_LLM_CALLS_SQL = `UPDATE analyses SET llm_calls_json = ? WHERE id = ${NEW_ID}`;
+const UPDATE_LLM_NOTE_AND_CALLS_SQL = `UPDATE analyses SET llm_note = ?, llm_calls_json = ? WHERE id = ${NEW_ID}`;
 const CLEAR_DETAIL_KEY_SQL = "UPDATE analyses SET detail_key = NULL WHERE id = ?";
 
 /** 今月の R2 の操作回数(柵の判定のための読み取り。書き込み行を増やさない)。 */
@@ -198,7 +204,7 @@ const SUMMARY_COLUMNS = `id, race_id AS raceId, analyzed_at AS analyzedAt, ev_es
        history_cutoff_date AS historyCutoffDate, prompt_lookahead_guarded AS promptLookaheadGuarded,
        detail_key IS NOT NULL AS hasDetail, llm_note AS llmNote`;
 
-const SELECT_ONE_SQL = `SELECT ${SUMMARY_COLUMNS}, detail_key AS detailKey FROM analyses WHERE id = ?`;
+const SELECT_ONE_SQL = `SELECT ${SUMMARY_COLUMNS}, detail_key AS detailKey, llm_calls_json AS llmCallsJson FROM analyses WHERE id = ?`;
 
 const SELECT_RACE_IDS_BY_VERSION_SQL = `SELECT DISTINCT race_id AS raceId
            FROM analyses
@@ -235,12 +241,13 @@ function listStatements(db: AnalysisDb, filter: AnalysisListFilter, limit: numbe
  *   analyses の INSERT・`detail_key` の UPDATE・馬・[配分メタ・買い目]。配分ありなら 6 文、なしなら 4 文。analyses の INSERT は `[1]`({@link analysesInsertIndex})。
  * - `ym` が null: R2 の柵を超えたときの保存(R2 に書かない)。カウンタも `detail_key` の UPDATE も無い。配分ありなら 4 文、なしなら 2 文。analyses の INSERT は `[0]`。
  *
- * **理由(`llmNote`。Issue #194)があるときだけ**、`llm_note` の UPDATE を1文足す(analyses の INSERT〈と `detail_key` の UPDATE〉の直後。馬・配分メタ・買い目の前)。
- * 理由なし(省略・null)は文を足さない(文の数・並びは上のとおり)。INSERT の位置({@link analysesInsertIndex})は変わらない。
+ * **理由(`llmNote`。Issue #194)か LLM 呼び出しの記録(`llmCallsJson`。Issue #197 段2。{@link serializeLlmCalls} の JSON 文字列)があるときだけ**、
+ * `llm_note`・`llm_calls_json` の UPDATE を**1文**足す(analyses の INSERT〈と `detail_key` の UPDATE〉の直後。馬・配分メタ・買い目の前。理由だけ・記録だけ・両方で SQL の列が変わるだけで、文は1つ)。
+ * どちらも無い(省略・null)は文を足さない(文の数・並びは上のとおり)。INSERT の位置({@link analysesInsertIndex})は変わらない。
  *
  * テストが「batch を使わず逐次実行したときの対照」にも使うため export している。
  */
-export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: number | null, llmNote: string | null = null): D1PreparedStatement[] {
+export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: number | null, llmNote: string | null = null, llmCallsJson: string | null = null): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   if (ym !== null) {
     statements.push(db.prepare(COUNT_WRITE_SQL).bind(ym));
@@ -249,8 +256,12 @@ export function buildSaveStatements(db: AnalysisDb, rec: AnalysisRecord, ym: num
   if (ym !== null) {
     statements.push(db.prepare(UPDATE_DETAIL_KEY_SQL));
   }
-  if (llmNote !== null) {
+  if (llmNote !== null && llmCallsJson !== null) {
+    statements.push(db.prepare(UPDATE_LLM_NOTE_AND_CALLS_SQL).bind(llmNote, llmCallsJson));
+  } else if (llmNote !== null) {
     statements.push(db.prepare(UPDATE_LLM_NOTE_SQL).bind(llmNote));
+  } else if (llmCallsJson !== null) {
+    statements.push(db.prepare(UPDATE_LLM_CALLS_SQL).bind(llmCallsJson));
   }
   // 馬: 1 文・bind 1 個(JSON の配列)。analysis_id(先頭)を除いた束縛値の並びは codec のもの。contributions は R2 なので null。
   statements.push(db.prepare(INSERT_HORSES_SQL).bind(JSON.stringify(rec.horses.map((h) => horseParams(0, { ...h, contributions: null }).slice(1)))));
@@ -322,7 +333,7 @@ export class D1AnalysisStore implements AnalysisRepository {
     // R2 の操作回数の柵(Class A)。達していたら、R2 に書かず D1 に要約だけを保存する(カウンタは増やさない)。
     const ym = monthKey(this.now());
     const writeYm = isWriteAllowed(await this.readUsage(ym)) ? ym : null;
-    const results = await this.db.batch(buildSaveStatements(this.db, record, writeYm, extra.llmNote));
+    const results = await this.db.batch(buildSaveStatements(this.db, record, writeYm, extra.llmNote, serializeLlmCalls(extra.llmCalls)));
     const id = results[analysesInsertIndex(writeYm)]?.meta.last_row_id;
     if (typeof id !== "number" || !(id > 0)) {
       throw new Error("analyses の採番 id を取得できませんでした");
@@ -372,24 +383,25 @@ export class D1AnalysisStore implements AnalysisRepository {
       this.db.prepare(SELECT_ANALYSIS_HORSES_SQL).bind(analysisId),
       this.db.prepare(SELECT_R2_USAGE_SQL).bind(ym),
     ]);
-    const row = analyses?.results[0] as (AnalysisRow & { detailKey: string | null; llmNote: string | null }) | undefined;
+    const row = analyses?.results[0] as (AnalysisRow & { detailKey: string | null; llmNote: string | null; llmCallsJson: string | null }) | undefined;
     if (row === undefined) {
       return undefined;
     }
     const horseRows = (horses?.results ?? []) as HorseRow[];
     const llmNote = row.llmNote ?? null;
+    const llmCalls = parseLlmCalls(row.llmCallsJson);
     if (row.detailKey === null) {
-      return { analysis: toStoredAnalysis(row, horseRows), detail: "none", llmNote };
+      return { analysis: toStoredAnalysis(row, horseRows), detail: "none", llmNote, llmCalls };
     }
     // R2 の操作回数の柵(Class B)。達していたら R2 を引かず、詳細の表示だけを拒否する(要約は出す。カウンタは増やさない)。
     const usage = (usageRows?.results[0] as R2Usage | undefined) ?? { classA: 0, classB: 0 };
     if (!isReadAllowed(usage)) {
-      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote };
+      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote, llmCalls };
     }
     const payload = await this.readDetail(row.detailKey, row.raceId);
     await this.countRead(ym);
     if (payload === null) {
-      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote };
+      return { analysis: toStoredAnalysis(row, horseRows), detail: "missing", llmNote, llmCalls };
     }
     const merged: AnalysisRow = {
       ...row,
@@ -400,7 +412,7 @@ export class D1AnalysisStore implements AnalysisRepository {
       const c = contributionsOf(payload, h.umaban);
       return { ...h, contributions_json: c === null ? null : JSON.stringify(c) };
     });
-    return { analysis: toStoredAnalysis(merged, mergedHorses), detail: "present", llmNote };
+    return { analysis: toStoredAnalysis(merged, mergedHorses), detail: "present", llmNote, llmCalls };
   }
 
   /** Class B(読み出し)を +1 する。**best-effort**: 失敗しても読み出しを妨げない(例外を握りつぶす)。 */

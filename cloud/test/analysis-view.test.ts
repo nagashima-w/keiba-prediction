@@ -3,6 +3,7 @@ import type { StoredAllocation, StoredAnalysis, StoredAnalysisHorse } from "../.
 import { buildRaceSnapshot } from "../../packages/app/src/main/analysis-export";
 import { buildAnalysisView } from "../src/analysis-view";
 import type { AnalysisDetailResult, DetailStatus } from "../src/analysis-repository";
+import type { LlmCallRecord } from "../src/llm-calls";
 import { scrapeFixtureRace } from "./pipeline-fixtures";
 
 /**
@@ -70,8 +71,8 @@ const ALLOCATION: StoredAllocation = {
   ],
 };
 
-function detail(a: StoredAnalysis, status: DetailStatus, note: string | null = null): AnalysisDetailResult {
-  return { analysis: a, detail: status, llmNote: note };
+function detail(a: StoredAnalysis, status: DetailStatus, note: string | null = null, llmCalls: readonly LlmCallRecord[] | null = null): AnalysisDetailResult {
+  return { analysis: a, detail: status, llmNote: note, llmCalls };
 }
 
 const sorted = (o: object): string[] => Object.keys(o).sort();
@@ -89,6 +90,43 @@ describe("buildAnalysisView の llmNote(Issue #194)", () => {
     for (const status of ["none", "missing"] as const) {
       expect(buildAnalysisView(detail(analysis(), status, NOTE), undefined).llmNote, status).toBe(NOTE);
     }
+  });
+});
+
+describe("buildAnalysisView の llmCalls(LLM 呼び出しの記録。Issue #197 段2)", () => {
+  const OK: LlmCallRecord = { ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null };
+  const FAILED: LlmCallRecord = { ok: false, ms: 180_001, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "種別=timeout" };
+
+  it("記録を呼び出しの順にそのまま載せる(失敗・成功・再生が混ざっても、1件も落とさず、並びを変えない)", () => {
+    const calls = [FAILED, OK, { ...OK, replayed: true }];
+    const view = buildAnalysisView(detail(analysis(), "present", null, calls), undefined);
+    expect(view.llmCalls).toEqual(calls);
+  });
+
+  it("記録なし(LLM を呼ばなかった・旧い分析)は null で、キーは常にある", () => {
+    expect(buildAnalysisView(detail(analysis(), "present"), undefined).llmCalls).toBeNull();
+    expect("llmCalls" in buildAnalysisView(detail(analysis(), "none"), undefined)).toBe(true);
+  });
+
+  it.each([["present"], ["missing"], ["none"]] as const)("詳細(R2)が %s でも載せる(D1 の列にあるので、詳細の状態に依らない)", (status) => {
+    expect(buildAnalysisView(detail(analysis(), status, null, [OK]), undefined).llmCalls).toEqual([OK]);
+  });
+
+  it("許可したキーだけを返す(1件のキーの集合を固定)。余分なキー・保存した値の余計な項目は、応答に載せない", () => {
+    const polluted = [{ ...OK, secret: "sk-ant-LEAK", body: "応答の本文" }] as unknown as readonly LlmCallRecord[];
+    const view = buildAnalysisView(detail(analysis(), "present", null, polluted), undefined);
+    for (const c of view.llmCalls!) {
+      expect(sorted(c)).toEqual(["error", "inputTokens", "model", "ms", "ok", "outputTokens", "replayed", "stopReason"]);
+    }
+    expect(JSON.stringify(view)).not.toContain("LEAK");
+    expect(JSON.stringify(view)).not.toContain("応答の本文");
+  });
+
+  it("応答の配列・要素は、元の記録とは別物(後から書き換えても元に影響しない)", () => {
+    const calls = [OK];
+    const view = buildAnalysisView(detail(analysis(), "present", null, calls), undefined);
+    expect(view.llmCalls).not.toBe(calls);
+    expect(view.llmCalls![0]).not.toBe(calls[0]);
   });
 });
 
@@ -143,7 +181,7 @@ describe("buildAnalysisView(Issue #183)", () => {
 
   it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
-    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "llmNote", "model", "promptVersion", "race", "raceId"]);
+    expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
     expect(sorted(view.race)).toEqual(["courseType", "distance", "raceName", "raceNumber", "startTime", "trackCondition", "venueName", "weather"]);
     for (const h of view.horses) {
       expect(sorted(h)).toEqual(["adjustedProb", "concerns", "ev", "highlights", "isPositive", "mark", "name", "placeOddsMin", "prior", "reason", "umaban"]);

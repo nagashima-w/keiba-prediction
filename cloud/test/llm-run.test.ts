@@ -11,6 +11,8 @@ import {
 } from "@keiba/core/llm";
 import {
   clampAdditionalInstruction,
+  createCallLog,
+  createMeteredSender,
   createRecordingSender,
   describeLlmErrorForLog,
   LLM_NOTE_MARKS_DROPPED,
@@ -274,6 +276,214 @@ describe("createRecordingSender(成功した応答を記録し、再実行では
     await createRecordingSender(inner, store, warn)(REQUEST);
     expect(inner).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+/** 進む時計(呼び出しごとに、決めた経過時間だけ進める)。 */
+function steppedClock(...deltas: number[]): { now: () => number; advance: () => void } {
+  let t = 1_000_000;
+  const queue = [...deltas];
+  return {
+    now: () => t,
+    advance: () => {
+      t += queue.shift() ?? 0;
+    },
+  };
+}
+
+describe("createMeteredSender(1呼び出しごとに、所要時間・usage・stop_reason・失敗の説明を記録する。Issue #197 段2)", () => {
+  const usage = { input_tokens: 15_001, output_tokens: 6_020 };
+  const reply = (extra: Partial<AnthropicMessageResponse> = {}): AnthropicMessageResponse => ({ content: [{ type: "text", text: "応答" }], stop_reason: "end_turn", model: "claude-sonnet-5-5", usage, ...extra });
+
+  it("成功: 所要時間(ミリ秒)・入力/出力トークン・stop_reason・モデルを1件記録し、応答はそのまま使える(内容は変えない)", async () => {
+    const clock = steppedClock(41_234);
+    const log = createCallLog();
+    const sender = createMeteredSender(
+      async () => {
+        clock.advance();
+        return reply();
+      },
+      log,
+      clock.now,
+    );
+    const res = await sender(REQUEST);
+    expect(res.content).toEqual([{ type: "text", text: "応答" }]);
+    expect(res.stop_reason).toBe("end_turn");
+    expect(log.calls()).toEqual([{ ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null }]);
+  });
+
+  it("【切り詰め】stop_reason=max_tokens の応答も、出力トークン数つきで記録する(sender の層で測るので、core が例外にする前に取れる)", async () => {
+    const clock = steppedClock(90_000);
+    const log = createCallLog();
+    const sender = createMeteredSender(
+      async () => {
+        clock.advance();
+        return reply({ stop_reason: "max_tokens", usage: { input_tokens: 100, output_tokens: 16_000 } });
+      },
+      log,
+      clock.now,
+    );
+    await sender(REQUEST);
+    expect(log.calls()).toEqual([{ ok: true, ms: 90_000, inputTokens: 100, outputTokens: 16_000, stopReason: "max_tokens", model: "claude-sonnet-5-5", replayed: false, error: null }]);
+  });
+
+  it("失敗: 同じ例外のまま投げ直し、所要時間と固定の説明(status=429)だけを記録する。メッセージ・鍵・本文は入らない", async () => {
+    const clock = steppedClock(180_001);
+    const log = createCallLog();
+    const error = Object.assign(new Error('429 {"message":"sk-ant-SECRET-BODY"}'), { status: 429 });
+    const sender = createMeteredSender(
+      async () => {
+        clock.advance();
+        throw error;
+      },
+      log,
+      clock.now,
+    );
+    await expect(sender(REQUEST)).rejects.toBe(error);
+    expect(log.calls()).toEqual([{ ok: false, ms: 180_001, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "status=429" }]);
+    expect(JSON.stringify(log.calls())).not.toContain("sk-ant-");
+    expect(JSON.stringify(log.calls())).not.toContain("SECRET");
+  });
+
+  it("失敗で status が無い(タイムアウト)ときは、種別だけ記録する", async () => {
+    const log = createCallLog();
+    const sender = createMeteredSender(async () => { throw new Error("Request timed out."); }, log, () => 5);
+    await expect(sender(REQUEST)).rejects.toThrow();
+    expect(log.calls()[0]).toMatchObject({ ok: false, ms: 0, error: "種別=timeout" });
+  });
+
+  it("usage が無い応答(旧いモック)・不正な usage は、トークン数 null で記録する(落とさない)", async () => {
+    const log = createCallLog();
+    const responses = [reply({ usage: undefined }), reply({ usage: { input_tokens: -1, output_tokens: Number.NaN } }), reply({ usage: { input_tokens: 0, output_tokens: 0 } })];
+    const sender = createMeteredSender(async () => responses.shift()!, log, () => 7);
+    for (let i = 0; i < 3; i += 1) {
+      await sender(REQUEST);
+    }
+    expect(log.calls().map((c) => [c.inputTokens, c.outputTokens])).toEqual([[null, null], [null, null], [0, 0]]);
+  });
+
+  it("時計が戻っても、所要時間は負にならない(0)。小数は丸める", async () => {
+    const times = [100, 40, 10, 12.6];
+    const log = createCallLog();
+    const sender = createMeteredSender(async () => reply(), log, () => times.shift()!);
+    await sender(REQUEST); // 100 → 40
+    await sender(REQUEST); // 10 → 12.6
+    expect(log.calls().map((c) => c.ms)).toEqual([0, 3]);
+  });
+
+  it("呼び出しの順に記録する(失敗・成功・成功の3回 → 3件。最大3回の送信を、省略しない)", async () => {
+    const log = createCallLog();
+    const queue: Array<() => AnthropicMessageResponse> = [
+      () => {
+        throw Object.assign(new Error("x"), { status: 529 });
+      },
+      () => reply({ stop_reason: "refusal" }),
+      () => reply(),
+    ];
+    const sender = createMeteredSender(async () => queue.shift()!(), log, () => 0);
+    await sender(REQUEST).catch(() => undefined);
+    await sender(REQUEST);
+    await sender(REQUEST);
+    expect(log.calls().map((c) => [c.ok, c.stopReason, c.error])).toEqual([[false, null, "status=529"], [true, "refusal", null], [true, "end_turn", null]]);
+  });
+
+  it("応答に測定値(meter)を付けて返す(応答の記録・再生が、再生のときにも元の所要時間を使えるように)", async () => {
+    const clock = steppedClock(250);
+    const sender = createMeteredSender(
+      async () => {
+        clock.advance();
+        return reply();
+      },
+      createCallLog(),
+      clock.now,
+    );
+    expect((await sender(REQUEST) as StoredLlmResponse).meter).toEqual({ ms: 250 });
+  });
+});
+
+describe("記録と再生 + 呼び出しの記録(再生した呼び出しは replayed。元の所要時間・トークンを使い、二重に数えない。Issue #197 段2)", () => {
+  const memoryStore = (): LlmResponseStore & { rows: Map<number, StoredLlmResponse> } => {
+    const rows = new Map<number, StoredLlmResponse>();
+    return { rows, get: (i) => rows.get(i), put: (i, r) => void rows.set(i, r) };
+  };
+  const reply = (extra: Partial<AnthropicMessageResponse> = {}): AnthropicMessageResponse => ({
+    content: [{ type: "text", text: "応答" }],
+    stop_reason: "end_turn",
+    model: "claude-sonnet-5-5",
+    usage: { input_tokens: 15_001, output_tokens: 6_020 },
+    ...extra,
+  });
+
+  /** 実送信 → 測定 → 記録・再生、の順に重ねた sender(本番の組み立てと同じ順)。 */
+  function chain(inner: (p: AnthropicRequestParams) => Promise<AnthropicMessageResponse>, store: LlmResponseStore, now: () => number) {
+    const log = createCallLog();
+    return { log, sender: createRecordingSender(createMeteredSender(inner, log, now), store, undefined, log) };
+  }
+
+  it("実送信の成功: 記録(store)に usage と所要時間が残り、呼び出しの記録には replayed:false で1件", async () => {
+    const store = memoryStore();
+    const clock = steppedClock(300);
+    const { sender, log } = chain(async () => { clock.advance(); return reply(); }, store, clock.now);
+    await sender(REQUEST);
+    expect(store.rows.get(0)).toEqual({ content: [{ type: "text", text: "応答" }], stop_reason: "end_turn", model: "claude-sonnet-5-5", usage: { input_tokens: 15_001, output_tokens: 6_020 }, meter: { ms: 300 } });
+    expect(log.calls()).toEqual([{ ok: true, ms: 300, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null }]);
+  });
+
+  it("再実行(新しい呼び出しの記録)は、記録した応答を再生し、元の所要時間・トークンを replayed:true で1件載せる。実送信は0回・件数は二重にならない", async () => {
+    const store = memoryStore();
+    const clock = steppedClock(300);
+    await chain(async () => { clock.advance(); return reply(); }, store, clock.now).sender(REQUEST);
+    const second = vi.fn(async () => reply());
+    const rerun = chain(second, store, () => 999_999);
+    await rerun.sender(REQUEST);
+    expect(second).not.toHaveBeenCalled();
+    expect(rerun.log.calls()).toEqual([{ ok: true, ms: 300, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: true, error: null }]);
+  });
+
+  it("記録の途中まで再生して、続きを実送信する: 再生分は replayed:true、実送信分は replayed:false(順序どおり)", async () => {
+    const store = memoryStore();
+    const c1 = steppedClock(100, 200);
+    const firstRun = chain(async () => { c1.advance(); return reply(); }, store, c1.now);
+    await firstRun.sender(REQUEST);
+    const c2 = steppedClock(555);
+    const rerun = chain(async () => { c2.advance(); return reply({ usage: { input_tokens: 1, output_tokens: 2 } }); }, store, c2.now);
+    await rerun.sender(REQUEST); // 再生(0 番)
+    await rerun.sender(REQUEST); // 実送信(1 番)
+    expect(rerun.log.calls().map((c) => [c.replayed, c.ms, c.inputTokens, c.outputTokens])).toEqual([[true, 100, 15_001, 6_020], [false, 555, 1, 2]]);
+  });
+
+  it("測定値のない旧い記録(この変更の前に記録された応答)の再生: 所要時間・トークンは null、stop_reason・モデルは記録から。落とさない", async () => {
+    const store = memoryStore();
+    store.rows.set(0, { content: [{ type: "text", text: "旧い記録" }], stop_reason: "max_tokens", model: "claude-sonnet-5-5" });
+    const { sender, log } = chain(async () => reply(), store, () => 0);
+    const res = await sender(REQUEST);
+    expect(res.stop_reason).toBe("max_tokens");
+    expect(log.calls()).toEqual([{ ok: true, ms: null, inputTokens: null, outputTokens: null, stopReason: "max_tokens", model: "claude-sonnet-5-5", replayed: true, error: null }]);
+  });
+
+  it("失敗(例外)は記録(store)に残さないが、呼び出しの記録には残る(失敗した呼び出し → 成功した呼び出しの順に2件)", async () => {
+    const store = memoryStore();
+    const queue: Array<() => AnthropicMessageResponse> = [
+      () => {
+        throw Object.assign(new Error("x"), { status: 500 });
+      },
+      () => reply(),
+    ];
+    const { sender, log } = chain(async () => queue.shift()!(), store, () => 0);
+    await sender(REQUEST).catch(() => undefined);
+    await sender(REQUEST);
+    expect(store.rows.size).toBe(1);
+    expect(log.calls().map((c) => [c.ok, c.replayed, c.error])).toEqual([[false, false, "status=500"], [true, false, null]]);
+  });
+
+  it("記録の保存(put)や usage の中身は、必要な部分だけ(cache 系・thinking・余分なキーは持たない)", async () => {
+    const store = memoryStore();
+    const noisy = { ...reply(), usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 9, service_tier: "standard" }, id: "msg_1" } as unknown as AnthropicMessageResponse;
+    const { sender } = chain(async () => noisy, store, () => 0);
+    await sender(REQUEST);
+    const stored = store.rows.get(0)!;
+    expect(Object.keys(stored).sort()).toEqual(["content", "meter", "model", "stop_reason", "usage"]);
+    expect(stored.usage).toEqual({ input_tokens: 1, output_tokens: 2 });
   });
 });
 

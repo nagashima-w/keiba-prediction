@@ -25,7 +25,7 @@ function gate(ping: () => Promise<{ sqlite: boolean }>, extra: Partial<GateStubL
 
 const HEALTHY = gate(async () => ({ sqlite: true }));
 
-/** D1 の疎通確認(`SELECT detail_key, llm_note FROM analyses LIMIT 1`)の偽物。発行された文を記録する。 */
+/** D1 の疎通確認(`D1_HEALTH_SQL`。analyses の detail_key・llm_note・llm_calls_json と、馬の列を読む)の偽物。発行された文を記録する。 */
 function d1(first: () => Promise<unknown>, prepared: string[] = [], binds: unknown[][] = []): Env["DB"] {
   return {
     prepare: (sql: string) => {
@@ -334,7 +334,7 @@ describe("ルート(認証後)", () => {
     const binds: unknown[][] = [];
     await handle(req("/api/health", { token }), envOf({ DB: d1(async () => null, prepared, binds) }), {}, deps);
     expect(prepared).toEqual([D1_HEALTH_SQL]);
-    expect(D1_HEALTH_SQL).toBe("SELECT detail_key, llm_note FROM analyses LIMIT 1"); // migration 0002(detail_key)と 0005(llm_note)の適用済みを確かめる(Issue #194)
+    expect(D1_HEALTH_SQL).toBe("SELECT detail_key, llm_note, llm_calls_json, (SELECT highlights_json FROM analysis_horses LIMIT 1) AS highlights_json, (SELECT concerns_json FROM analysis_horses LIMIT 1) AS concerns_json FROM analyses LIMIT 1"); // migration 0002(detail_key)・0005(llm_note)・0006(馬の highlights_json・concerns_json)・0007(llm_calls_json)の適用済みを確かめる(Issue #194・#197)
     expect(binds).toEqual([]);
   });
 

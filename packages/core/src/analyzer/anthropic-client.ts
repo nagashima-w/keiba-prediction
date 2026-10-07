@@ -101,6 +101,15 @@ export interface AnthropicMessageResponse {
    * 未提供(旧テストのモック等)の場合はリクエストしたモデルIDで代用する。
    */
   readonly model?: string;
+  /**
+   * 使用量(SDK のレスポンスが持つ値。Issue #197・段2)。入力・出力トークン数だけを型に持つ(SDK の usage にはほかに cache 系などがある)。
+   * **`output_tokens` は thinking を含む**(max_tokens=16000 の中に数えられるので、見える出力だけの量は分からない)。
+   * 未提供(旧テストのモック等)の場合もあるため optional。呼び出しの記録(cloud の `llm-run.ts`)が読む。
+   */
+  readonly usage?: {
+    readonly input_tokens: number;
+    readonly output_tokens: number;
+  };
 }
 
 /** パラメータを受け取り Anthropic へ送信してレスポンスを返す関数(注入・モック可能)。 */

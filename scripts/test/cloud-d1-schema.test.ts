@@ -133,10 +133,13 @@ function exeSchema(): Schema {
  * 追加するとき(列・索引)は、この宣言と 0002 を同時に直す。
  */
 const D1_EXTRA_COLUMNS: Readonly<Record<string, readonly ColumnInfo[]>> = {
-  // 0002 の detail_key(R2 のキー)と、0005 の llm_note(Issue #194。LLM が使われなかった・一部しか使われなかった理由の固定文言)。
+  // 0002 の detail_key(R2 のキー)と、0005 の llm_note(Issue #194。LLM が使われなかった・一部しか使われなかった理由の固定文言)と、
+  // 0007 の llm_calls_json(Issue #197 段2。LLM を呼んだ1回ごとの記録。JSON 配列の文字列)。
+  // ★0006 の analysis_horses.highlights_json・concerns_json は、exe にもある列なので、ここには書かない。
   analyses: [
     { name: "detail_key", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
     { name: "llm_note", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+    { name: "llm_calls_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
   ],
 };
 const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {
@@ -211,8 +214,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql の6本だけで、番号は 0001 から連続している(後から足すときは 0007 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql の7本だけで、番号は 0001 から連続している(後から足すときは 0008 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -269,10 +272,10 @@ describe("0001_init.sql は凍結されている(Issue #197。適用済みのフ
   });
 });
 
-describe("AC-a1: 0001〜0006 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
+describe("AC-a1: 0001〜0007 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
   const sqls = FILES.map(readMigration);
 
-  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・索引2つ・r2_ops 表・cloud_settings 表だけ)", () => {
+  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・llm_calls_json・索引2つ・r2_ops 表・cloud_settings 表だけ)", () => {
     const actual = schemaAfter(sqls);
     expect(diffSchemas(expectedD1Schema(exe), actual)).toEqual([]);
   });
@@ -327,6 +330,17 @@ describe("AC-a1: 0001〜0006 を流した構造が、exe の最終スキーマ +
     expect(code).toBe("ALTER TABLE analysis_horses ADD COLUMN highlights_json TEXT;\nALTER TABLE analysis_horses ADD COLUMN concerns_json TEXT;");
   });
 
+  it("Issue #197 段2: llm_calls_json 列(TEXT・NULL 可)は 0007 だけが足す。0001〜0006 までには無い。exe には無い D1 専用の列(D1_EXTRA_COLUMNS に宣言している)。追加のみ(ALTER TABLE ... ADD COLUMN だけの1文)", () => {
+    const before = schemaAfter(sqls.slice(0, 6));
+    expect(before["analyses"]!.columns.map((c) => c.name)).not.toContain("llm_calls_json");
+    const after = schemaAfter(sqls);
+    expect(after["analyses"]!.columns.find((c) => c.name === "llm_calls_json")).toEqual({ name: "llm_calls_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 });
+    expect(exe["analyses"]!.columns.find((c) => c.name === "llm_calls_json")).toBeUndefined();
+    expect(D1_EXTRA_COLUMNS["analyses"]!.map((c) => c.name)).toContain("llm_calls_json");
+    const code = sqls[6]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").trim();
+    expect(code).toBe("ALTER TABLE analyses ADD COLUMN llm_calls_json TEXT;");
+  });
+
   it("0002 の索引の列の順は (prompt_version, race_id)。逆順では dedup の文が索引を使えない", () => {
     const actual = schemaAfter(sqls);
     const pv = actual["analyses"]!.indexes.find((i) => i.name === "idx_analyses_prompt_version_race");
@@ -337,39 +351,43 @@ describe("AC-a1: 0001〜0006 を流した構造が、exe の最終スキーマ +
    * 対照(検出が空振りでないこと): 次の「壊れた migration」は、いずれも差分を検出する。
    * それぞれが、実際に起こりうる変異(0001 の写し間違い・0002 への無断の追加)に当たる。
    */
-  const [init, d1, ops, settings, note, horseItems] = sqls as [string, string, string, string, string, string];
-  const mutants: ReadonlyArray<readonly [string, string, string, string, string, string, string]> = [
-    ["列の型を変える", init.replace("umaban INTEGER NOT NULL,\n        prior REAL NOT NULL", "umaban TEXT NOT NULL,\n        prior REAL NOT NULL"), d1, ops, settings, note, horseItems],
-    ["NOT NULL を外す", init.replace("race_id TEXT NOT NULL,\n        analyzed_at TEXT NOT NULL", "race_id TEXT,\n        analyzed_at TEXT NOT NULL"), d1, ops, settings, note, horseItems],
-    ["列を落とす", init.replace("        prompt_lookahead_guarded INTEGER\n", "        history_cutoff_date_dummy INTEGER\n"), d1, ops, settings, note, horseItems],
-    ["外部キーを落とす", init.replace(/,\n\s+FOREIGN KEY \(analysis_id\) REFERENCES analyses \(id\)\n\s+\);\n\nCREATE TABLE analysis_horses/, "\n      );\n\nCREATE TABLE analysis_horses"), d1, ops, settings, note, horseItems],
-    ["宣言していない列を 0002 に足す", init, `${d1}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`, ops, settings, note, horseItems],
-    ["宣言していない索引を 0002 に足す", init, `${d1}\nCREATE INDEX idx_undeclared ON analyses (model);\n`, ops, settings, note, horseItems],
-    ["索引の列の順を逆にする", init, d1.replace("ON analyses (prompt_version, race_id);", "ON analyses (race_id, prompt_version);"), ops, settings, note, horseItems],
-    ["detail_key を落とす", init, d1.replace(/ALTER TABLE analyses ADD COLUMN detail_key TEXT;?/, ""), ops, settings, note, horseItems],
-    ["r2_ops の class_a の NOT NULL を外す(Issue #173)", init, d1, ops.replace("class_a INTEGER NOT NULL", "class_a INTEGER"), settings, note, horseItems],
-    ["r2_ops の class_b の型を変える(Issue #173)", init, d1, ops.replace("class_b INTEGER NOT NULL", "class_b TEXT NOT NULL"), settings, note, horseItems],
-    ["r2_ops の主キーを落とす(Issue #173)", init, d1, ops.replace("ym INTEGER PRIMARY KEY", "ym INTEGER"), settings, note, horseItems],
-    ["r2_ops に宣言していない列を足す(Issue #173)", init, d1, ops.replace("class_b INTEGER NOT NULL", "class_b INTEGER NOT NULL, undeclared INTEGER"), settings, note, horseItems],
-    ["0003 を丸ごと落とす(Issue #173)", init, d1, "", settings, note, horseItems],
-    ["cloud_settings の settings_json の NOT NULL を外す(Issue #178)", init, d1, ops, settings.replace("settings_json TEXT NOT NULL", "settings_json TEXT"), note, horseItems],
-    ["cloud_settings の id の主キーを落とす(Issue #178)", init, d1, ops, settings.replace("id INTEGER PRIMARY KEY CHECK (id = 1)", "id INTEGER"), note, horseItems],
-    ["cloud_settings に宣言していない列を足す(Issue #178)", init, d1, ops, settings.replace("updated_at TEXT NOT NULL", "updated_at TEXT NOT NULL, undeclared TEXT"), note, horseItems],
-    ["0004 を丸ごと落とす(Issue #178)", init, d1, ops, "", note, horseItems],
-    ["0005 を丸ごと落とす(Issue #194)", init, d1, ops, settings, "", horseItems],
-    ["llm_note の型を変える(Issue #194)", init, d1, ops, settings, note.replace("llm_note TEXT", "llm_note INTEGER"), horseItems],
-    ["llm_note を NOT NULL にする(Issue #194。旧い行・理由なしの保存が入らなくなる)", init, d1, ops, settings, note.replace("llm_note TEXT", "llm_note TEXT NOT NULL DEFAULT ''"), horseItems],
-    ["0005 に宣言していない列を足す(Issue #194)", init, d1, ops, settings, `${note}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`, horseItems],
-    ["0006 を丸ごと落とす(Issue #197)", init, d1, ops, settings, note, ""],
-    ["highlights_json の型を変える(Issue #197)", init, d1, ops, settings, note, horseItems.replace("highlights_json TEXT", "highlights_json INTEGER")],
-    ["concerns_json を NOT NULL にする(Issue #197。項目なしの保存が入らなくなる)", init, d1, ops, settings, note, horseItems.replace("concerns_json TEXT", "concerns_json TEXT NOT NULL DEFAULT ''")],
-    ["concerns_json を落とす(Issue #197)", init, d1, ops, settings, note, horseItems.replace(/ALTER TABLE analysis_horses ADD COLUMN concerns_json TEXT;?/, "")],
-    ["0006 に宣言していない列を足す(Issue #197)", init, d1, ops, settings, note, `${horseItems}\nALTER TABLE analysis_horses ADD COLUMN undeclared_extra TEXT;\n`],
+  const [init, d1, ops, settings, note, horseItems, llmCalls] = sqls as [string, string, string, string, string, string, string];
+  const mutants: ReadonlyArray<readonly [string, string, string, string, string, string, string, string]> = [
+    ["列の型を変える", init.replace("umaban INTEGER NOT NULL,\n        prior REAL NOT NULL", "umaban TEXT NOT NULL,\n        prior REAL NOT NULL"), d1, ops, settings, note, horseItems, llmCalls],
+    ["NOT NULL を外す", init.replace("race_id TEXT NOT NULL,\n        analyzed_at TEXT NOT NULL", "race_id TEXT,\n        analyzed_at TEXT NOT NULL"), d1, ops, settings, note, horseItems, llmCalls],
+    ["列を落とす", init.replace("        prompt_lookahead_guarded INTEGER\n", "        history_cutoff_date_dummy INTEGER\n"), d1, ops, settings, note, horseItems, llmCalls],
+    ["外部キーを落とす", init.replace(/,\n\s+FOREIGN KEY \(analysis_id\) REFERENCES analyses \(id\)\n\s+\);\n\nCREATE TABLE analysis_horses/, "\n      );\n\nCREATE TABLE analysis_horses"), d1, ops, settings, note, horseItems, llmCalls],
+    ["宣言していない列を 0002 に足す", init, `${d1}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`, ops, settings, note, horseItems, llmCalls],
+    ["宣言していない索引を 0002 に足す", init, `${d1}\nCREATE INDEX idx_undeclared ON analyses (model);\n`, ops, settings, note, horseItems, llmCalls],
+    ["索引の列の順を逆にする", init, d1.replace("ON analyses (prompt_version, race_id);", "ON analyses (race_id, prompt_version);"), ops, settings, note, horseItems, llmCalls],
+    ["detail_key を落とす", init, d1.replace(/ALTER TABLE analyses ADD COLUMN detail_key TEXT;?/, ""), ops, settings, note, horseItems, llmCalls],
+    ["r2_ops の class_a の NOT NULL を外す(Issue #173)", init, d1, ops.replace("class_a INTEGER NOT NULL", "class_a INTEGER"), settings, note, horseItems, llmCalls],
+    ["r2_ops の class_b の型を変える(Issue #173)", init, d1, ops.replace("class_b INTEGER NOT NULL", "class_b TEXT NOT NULL"), settings, note, horseItems, llmCalls],
+    ["r2_ops の主キーを落とす(Issue #173)", init, d1, ops.replace("ym INTEGER PRIMARY KEY", "ym INTEGER"), settings, note, horseItems, llmCalls],
+    ["r2_ops に宣言していない列を足す(Issue #173)", init, d1, ops.replace("class_b INTEGER NOT NULL", "class_b INTEGER NOT NULL, undeclared INTEGER"), settings, note, horseItems, llmCalls],
+    ["0003 を丸ごと落とす(Issue #173)", init, d1, "", settings, note, horseItems, llmCalls],
+    ["cloud_settings の settings_json の NOT NULL を外す(Issue #178)", init, d1, ops, settings.replace("settings_json TEXT NOT NULL", "settings_json TEXT"), note, horseItems, llmCalls],
+    ["cloud_settings の id の主キーを落とす(Issue #178)", init, d1, ops, settings.replace("id INTEGER PRIMARY KEY CHECK (id = 1)", "id INTEGER"), note, horseItems, llmCalls],
+    ["cloud_settings に宣言していない列を足す(Issue #178)", init, d1, ops, settings.replace("updated_at TEXT NOT NULL", "updated_at TEXT NOT NULL, undeclared TEXT"), note, horseItems, llmCalls],
+    ["0004 を丸ごと落とす(Issue #178)", init, d1, ops, "", note, horseItems, llmCalls],
+    ["0005 を丸ごと落とす(Issue #194)", init, d1, ops, settings, "", horseItems, llmCalls],
+    ["llm_note の型を変える(Issue #194)", init, d1, ops, settings, note.replace("llm_note TEXT", "llm_note INTEGER"), horseItems, llmCalls],
+    ["llm_note を NOT NULL にする(Issue #194。旧い行・理由なしの保存が入らなくなる)", init, d1, ops, settings, note.replace("llm_note TEXT", "llm_note TEXT NOT NULL DEFAULT ''"), horseItems, llmCalls],
+    ["0005 に宣言していない列を足す(Issue #194)", init, d1, ops, settings, `${note}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`, horseItems, llmCalls],
+    ["0006 を丸ごと落とす(Issue #197)", init, d1, ops, settings, note, "", llmCalls],
+    ["highlights_json の型を変える(Issue #197)", init, d1, ops, settings, note, horseItems.replace("highlights_json TEXT", "highlights_json INTEGER"), llmCalls],
+    ["concerns_json を NOT NULL にする(Issue #197。項目なしの保存が入らなくなる)", init, d1, ops, settings, note, horseItems.replace("concerns_json TEXT", "concerns_json TEXT NOT NULL DEFAULT ''"), llmCalls],
+    ["concerns_json を落とす(Issue #197)", init, d1, ops, settings, note, horseItems.replace(/ALTER TABLE analysis_horses ADD COLUMN concerns_json TEXT;?/, ""), llmCalls],
+    ["0006 に宣言していない列を足す(Issue #197)", init, d1, ops, settings, note, `${horseItems}\nALTER TABLE analysis_horses ADD COLUMN undeclared_extra TEXT;\n`, llmCalls],
+    ["0007 を丸ごと落とす(Issue #197 段2)", init, d1, ops, settings, note, horseItems, ""],
+    ["llm_calls_json の型を変える(Issue #197 段2)", init, d1, ops, settings, note, horseItems, llmCalls.replace("llm_calls_json TEXT", "llm_calls_json INTEGER")],
+    ["llm_calls_json を NOT NULL にする(Issue #197 段2。記録なし=キー未登録の保存が入らなくなる)", init, d1, ops, settings, note, horseItems, llmCalls.replace("llm_calls_json TEXT", "llm_calls_json TEXT NOT NULL DEFAULT ''")],
+    ["0007 に宣言していない列を足す(Issue #197 段2)", init, d1, ops, settings, note, horseItems, `${llmCalls}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`],
   ];
-  it.each(mutants)("対照: %s と、差分として検出される(置換が実際に効いていることも確かめる)", (_name, mutatedInit, mutatedD1, mutatedOps, mutatedSettings, mutatedNote, mutatedHorseItems) => {
+  it.each(mutants)("対照: %s と、差分として検出される(置換が実際に効いていることも確かめる)", (_name, mutatedInit, mutatedD1, mutatedOps, mutatedSettings, mutatedNote, mutatedHorseItems, mutatedLlmCalls) => {
     // 置換が空振りしていない(元のファイルから変わっている)
-    expect(mutatedInit === init && mutatedD1 === d1 && mutatedOps === ops && mutatedSettings === settings && mutatedNote === note && mutatedHorseItems === horseItems).toBe(false);
-    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([mutatedInit, mutatedD1, mutatedOps, mutatedSettings, mutatedNote, mutatedHorseItems])).length).toBeGreaterThan(0);
+    expect(mutatedInit === init && mutatedD1 === d1 && mutatedOps === ops && mutatedSettings === settings && mutatedNote === note && mutatedHorseItems === horseItems && mutatedLlmCalls === llmCalls).toBe(false);
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([mutatedInit, mutatedD1, mutatedOps, mutatedSettings, mutatedNote, mutatedHorseItems, mutatedLlmCalls])).length).toBeGreaterThan(0);
   });
 });
 

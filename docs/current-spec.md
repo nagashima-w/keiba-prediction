@@ -984,7 +984,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
 - **binding**: `[[d1_databases]]`(binding `DB`・database_name `keiba-cloud-db`・`database_id` は公開してよい値でリポジトリに書いてある。`remote = true` は使わない)。
 - **CI**(`deploy-cloud.yml`): check ジョブは `wrangler d1 migrations apply DB --local`。deploy ジョブは `wrangler deploy` の前に、database_id が仮の値でないことの確認 →
   D1 の権限確認(ステータスコードだけを出力)→ `migrations apply DB --remote`。
-- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic } }`(D1 は `SELECT detail_key, llm_note FROM analyses LIMIT 1` で、migration の適用と binding を確かめる。`secrets.anthropic` は Worker の secret `ANTHROPIC_API_KEY` が登録されているかの boolean だけで、値は返さず、`ok` には含めない。#194)。
+- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic } }`(D1 は `D1_HEALTH_SQL`〈`analyses` の `detail_key`・`llm_note`・`llm_calls_json` と、馬の `highlights_json`・`concerns_json` を読む〉で、migration 0002・0005・0006・0007 の適用と binding を確かめる。`secrets.anthropic` は Worker の secret `ANTHROPIC_API_KEY` が登録されているかの boolean だけで、値は返さず、`ok` には含めない。#194)。
 - **後続の設計(合意済み。2026-10-06 の着手前ゲート)**: 大きな列(`race_snapshot_json`・`raw_response`・馬ごとの `contributions_json`)は R2(分析ごとに1オブジェクトの JSON)に置き、
   D1 には要約と R2 のキー(`detail_key`)だけを置く。書く順序は D1 → R2(R2 が失敗した行は `detail_key` を NULL にして要約だけを残す)。安全柵(R2 の月ごとの操作回数が無料枠の 10% を超えたら R2 に書かず D1 の要約だけ)は #173。
   発走前の分析だけを保存し、朝の prior は D1 に保存しない。
@@ -1077,6 +1077,7 @@ Free の D1 は DB 1個あたり 500MB(公式の制限表 Maximum database size 
   A(大きな列は NULL・N=1000): **項目なし(列だけ追加)で 6,701 バイト/分析**(#197 の前の 6,644 から +57 バイト。2列が NULL のぶん。#197 より前のコミットで同じスクリプトを実行して 6,644・144,957 を再現した上での差)、
   **上限どおりの 3 項目 × 30 字で 17,535 バイト/分析**(`analysis_horses` が 5,476 → 16,310 バイト/分析。**約 2.6 倍**)。500MB が埋まる年数は、年間 3,500 件で 21.3 年 → **8.1 年**、10,000 件で 7.5 年 → 2.9 年、20,000 件で 3.7 年 → 1.4 年。
   全部 D1(N=300)は 144,971 → 155,853 バイト/分析(R2 に出す構成の A が前提なので、参考)。**結論は変わらない**(大きな列を R2 に出す方針で足りるが、余裕は約 21 年 → 約 8 年に縮む。上限どおりに満たした場合の値なので、実際はこれより余裕がある見込み)。
+- **LLM 呼び出しの記録の列(#197 段2。`analyses.llm_calls_json`)**: 1分析あたり、成功1件で 146 バイト、失敗→失敗→成功の3件(最大)で 420 バイト(UTF-8。上の `measure-d1-size` の値には含めていない。1行に1回。再現: `cd cloud && pnpm exec vitest run test/llm-calls.test.ts`〈代表的な記録のバイト数を固定したテスト〉)。A の 17.5KB(上限の合成)に対して約 2〜3%。
 - **結論**: 大きな列を D1 に置くと 1分析約 145KB で、年間 3,500 件でも約 1.0 年で 500MB が埋まる。**contributions を含む大きな列を R2 に出せば 1分析約 6.6KB で、年間 3,500 件なら約 21 年もつ**
   (contributions だけを D1 に残す案は 1分析約 58KB〈A の 6,644 + 16頭分の contributions 51,289〉で約 2.5 年)。R2 の詳細オブジェクトは 1分析約 29KB(gzip)で、年間 3,500 件でも約 100MB/年(Free の 10GB に対して余裕)。
 - **D1 の書き込み行数**(#175 で確定・#173 で更新): 16頭・買い目 10 件・配分ありの1回の保存は **60 行**(文ごとに `r2_ops` のカウンタ 1〈#173〉・analyses 5〈表 + 索引 3 + sqlite_sequence〉・detail_key の UPDATE 1・馬 32〈16頭 × 2。複合主キーの自動索引で2倍〉・配分メタ 1・買い目 20)。
@@ -1235,6 +1236,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 変更は `cloud/` のみ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「発走前の分析の LLM」「`ANTHROPIC_API_KEY` の登録」。画面は #195〈#179-c〉。
 - **常に LLM を使う**(発走前だけ。朝は使わない。費用の上限・ON/OFF の設定は無く、費用は Claude Console のワークスペースの spend limit に任せる)。Worker の secret `ANTHROPIC_API_KEY`(ユーザーがダッシュボードまたは `wrangler secret put` で登録)が無ければ、LLM なしで保存し、理由を残す。
 - **止めない**: API のエラー・切り詰め・拒否・解析失敗でも、prior のまま保存する。モデル欄は、LLM が実際に効いたときだけモデル名(それ以外は null)。**理由は固定文言**で `analyses.llm_note`(migration `0005`。追加のみ)に保存し、`GET /api/analyses`・`GET /api/analyses/{id}` の応答の `llmNote` に載る。API のエラーの本文は、画面・D1・タスク行・ログのどこにも出さない。
+  **LLM 呼び出しの記録**(#197 段2): LLM を呼んだ**1回ごと**に、所要時間(ms)・入力/出力トークン(出力は thinking を含む)・stop_reason・モデル・replayed・失敗の固定の説明を `analyses.llm_calls_json`(migration `0007`。cloud 専用)に残し、`GET /api/analyses/{id}` の `llmCalls` に載せる(一覧には載せない。画面は #198)。再送(最大3回)は全件を順に残す。再生した呼び出しは `replayed:true`(元の呼び出しの値。二重に数えない)。詳細は `cloud/README.md` の「呼び出しの記録」。
 - **冪等**: 成功した応答を DO の表 `race_day_llm_responses` に記録し、保存の失敗の再試行・再実行では再生して送り直さない。1レースの送信は最大3回(`analyzeRace` の2試行 + モデルの降格1回)。
 - **`GET /api/health` の `secrets.anthropic`**: キーが登録されているかの boolean(値は返さない。`ok` に含めない)。
 - **検査**: `cloud/test/race-day-llm.test.ts`・`race-day-llm-note.test.ts`・`analysis-llm-note.test.ts`・`llm-run.test.ts`・`llm-response-store.test.ts`・`handler.test.ts`・`analysis-view.test.ts`、`scripts/test/cloud-d1-schema.test.ts`。

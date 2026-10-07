@@ -69,14 +69,15 @@ describe("migration の適用(ローカルの D1)", () => {
     ].sort());
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("detail_key");
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("llm_note"); // Issue #194(0005)
+    expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("llm_calls_json"); // Issue #197 段2(0007。cloud 専用)
     // Issue #197(0006): 馬ごとの強調材料・懸念事項。exe の analysis_horses と同じ列(並びも reason の後ろ)。
     expect((await rows("PRAGMA table_info(analysis_horses)")).map((r) => r["name"]).slice(-3)).toEqual(["reason", "highlights_json", "concerns_json"]);
     const indexes = (await rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx\\_%' ESCAPE '\\' ORDER BY name")).map((r) => r["name"]);
     expect(indexes).toEqual(["idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race"]);
   });
 
-  it("migration は6本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql"]);
+  it("migration は7本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql"]);
   });
 });
 

@@ -2,6 +2,7 @@
  * クラウド版の発走前の分析で LLM を使うための部品(Issue #194〈#179-b〉)。**純ロジック**: `cloudflare:workers` も SQL も import しない(`RaceDayCore` と DO のラッパが配線する)。
  *
  *  - {@link clampAdditionalInstruction}: 追加指示を 2,000 UTF-16 単位に切る(サロゲートペアを割らない)。読む側(`coerceCloudSettings`)には上限が無いので、組み立て側で切る。
+ *  - {@link createMeteredSender}・{@link createCallLog}: **LLM を呼ぶたびに、所要時間・usage〈入力・出力トークン〉・stop_reason・失敗の説明を1件記録する**(Issue #197 段2。保存は `analyses.llm_calls_json`)。
  *  - {@link createRecordingSender}: **成功した応答を記録し、再実行では再生する**(冪等。アラームは少なくとも1回実行され、保存の失敗は計算ステップごと再試行される。そのたびに LLM へ送り直さない)。
  *  - {@link withErrorLog}・{@link sanitizeLister}・{@link describeLlmErrorForLog}・{@link redactSecrets}: **エラーの本文・鍵をどこにも出さない**。
  *    SDK の例外のメッセージには、レスポンスの本文がそのまま入る(workerd での実測)。ログには status と種別だけを出し、`sk-ant-` で始まる文字列は伏せる。
@@ -25,6 +26,7 @@ import {
   type ModelSelector,
 } from "@keiba/core/llm";
 import type { BuildPromptInput } from "@keiba/core/pipeline";
+import type { LlmCallRecord } from "./llm-calls";
 import type { CloudLlm } from "./llm-sender";
 import { ADDITIONAL_INSTRUCTION_MAX_LENGTH } from "./settings";
 
@@ -95,8 +97,16 @@ export function sanitizeLister(inner: ModelLister): ModelLister {
 
 // ---- 応答の記録と再生 ----
 
-/** 記録する応答(送信に必要な部分だけ: text ブロック・stop_reason・model。thinking などの他のブロックは持たない)。 */
-export type StoredLlmResponse = AnthropicMessageResponse;
+/**
+ * 記録する応答(送信に必要な部分: text ブロック・stop_reason・model。thinking などの他のブロックは持たない)に、
+ * **呼び出しの測定値**(usage の入力・出力トークンと、`meter.ms`=所要時間)を足したもの(Issue #197 段2)。
+ * 測定値は、再生のときに**元の呼び出しのときの値**を呼び出しの記録に載せるために持つ(再生の呼び出しは実際には送っていないので、測り直せない)。
+ * この変更の前に記録された応答は、測定値を持たない(optional)。
+ */
+export interface StoredLlmResponse extends AnthropicMessageResponse {
+  /** 実送信のときの所要時間(ミリ秒)。{@link createMeteredSender} が応答に付ける。 */
+  readonly meter?: { readonly ms: number };
+}
 
 /** 記録の保存先。番号は「成功した応答の通し番号」(0 から。失敗は数えない)。 */
 export interface LlmResponseStore {
@@ -104,11 +114,77 @@ export interface LlmResponseStore {
   put(index: number, response: StoredLlmResponse): void;
 }
 
-function toStored(response: AnthropicMessageResponse): StoredLlmResponse {
+/** 有限で 0 以上の数だけ(トークン数・所要時間)。それ以外は null。 */
+function nonNegative(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function toStored(response: StoredLlmResponse): StoredLlmResponse {
+  const input = nonNegative(response.usage?.input_tokens);
+  const output = nonNegative(response.usage?.output_tokens);
+  const ms = nonNegative(response.meter?.ms);
   return {
     content: response.content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => ({ type: "text", text: b.text as string })),
     ...(response.stop_reason === undefined ? {} : { stop_reason: response.stop_reason }),
     ...(response.model === undefined ? {} : { model: response.model }),
+    // usage は入力・出力トークンだけ(cache 系などの他の項目は持たない)。どちらかが読めなければ持たない。
+    ...(input === null || output === null ? {} : { usage: { input_tokens: input, output_tokens: output } }),
+    ...(ms === null ? {} : { meter: { ms } }),
+  };
+}
+
+// ---- 呼び出しの記録(所要時間・usage。Issue #197 段2) ----
+
+/** 1回の分析の間の、LLM の呼び出しの記録の入れ物(呼び出しの順)。 */
+export interface LlmCallLog {
+  push(record: LlmCallRecord): void;
+  calls(): readonly LlmCallRecord[];
+}
+
+export function createCallLog(): LlmCallLog {
+  const records: LlmCallRecord[] = [];
+  return {
+    push: (record) => void records.push(record),
+    calls: () => [...records],
+  };
+}
+
+/** 応答から呼び出しの記録(成功)を作る。`ms` は測れていなければ null(旧い記録の再生)。 */
+function successRecord(response: AnthropicMessageResponse, ms: number | null, replayed: boolean): LlmCallRecord {
+  return {
+    ok: true,
+    ms,
+    inputTokens: nonNegative(response.usage?.input_tokens),
+    outputTokens: nonNegative(response.usage?.output_tokens),
+    stopReason: typeof response.stop_reason === "string" ? response.stop_reason : null,
+    model: typeof response.model === "string" ? response.model : null,
+    replayed,
+    error: null,
+  };
+}
+
+/**
+ * 実送信を包んで、**呼び出しごとに1件**を記録する sender(Issue #197 段2)。実送信(SDK への1リクエスト)の層で測るので、
+ * 応答の切り詰め(`stop_reason=max_tokens`)・拒否(`refusal`)も、core が例外にする前に usage つきで取れる。
+ *  - 成功: 所要時間(`now` の差。ミリ秒に丸め、負にはしない)・入力/出力トークン(`usage`。**出力は thinking を含む**)・stop_reason・モデル。
+ *    応答には測定値(`meter.ms`)を付けて返す(記録・再生が、再生のときにも元の所要時間を使えるように。呼び出し元の解析は `meter` を見ない)。
+ *  - 失敗: 同じ例外のまま投げ直し、所要時間と**固定の説明**(`describeLlmErrorForLog`: `status=429`・`種別=timeout`)だけを記録する(メッセージ・本文・鍵は入れない)。
+ */
+export function createMeteredSender(inner: MessageSender, log: LlmCallLog, now: () => number): MessageSender {
+  return async (params) => {
+    const start = now();
+    const elapsed = (): number => Math.max(0, Math.round(now() - start));
+    let response: AnthropicMessageResponse;
+    try {
+      response = await inner(params);
+    } catch (error) {
+      log.push({ ok: false, ms: elapsed(), inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: describeLlmErrorForLog(error) });
+      throw error;
+    }
+    const ms = elapsed();
+    log.push(successRecord(response, ms, false));
+    const metered: StoredLlmResponse = { ...response, meter: { ms } };
+    return metered;
   };
 }
 
@@ -117,8 +193,11 @@ function toStored(response: AnthropicMessageResponse): StoredLlmResponse {
  * **返す前に**記録する。失敗(例外)は記録せず、番号も進めない(失敗は課金されない前提。再実行は、失敗した呼び出しを飛ばして、記録済みの成功から始める)。
  *  - stop_reason が max_tokens・refusal の応答も、課金されているので記録する(再生で同じ判定になる)。
  *  - 記録の読み書きの失敗は、分析を止めない(読めなければ記録なしとして送る・書けなければ応答はそのまま使う。警告だけ出す。**保護が効かなくなるだけ**)。
+ *  - `log` を渡すと、**再生した呼び出しを `replayed:true` で呼び出しの記録に載せる**(Issue #197 段2。所要時間・トークンは、記録に残した元の呼び出しの値。
+ *    課金・時間は元の1回きりなので、再実行の側では数え直さない。実送信の分は、内側の {@link createMeteredSender} が載せる)。
+ *    記録に測定値が無い(この変更の前の記録)ときは、所要時間・トークンは null。
  */
-export function createRecordingSender(inner: MessageSender, store: LlmResponseStore, warn?: (message: string) => void): MessageSender {
+export function createRecordingSender(inner: MessageSender, store: LlmResponseStore, warn?: (message: string) => void, log?: LlmCallLog): MessageSender {
   let next = 0;
   return async (params) => {
     let recorded: StoredLlmResponse | undefined;
@@ -129,6 +208,7 @@ export function createRecordingSender(inner: MessageSender, store: LlmResponseSt
     }
     if (recorded !== undefined) {
       next += 1;
+      log?.push(successRecord(recorded, nonNegative(recorded.meter?.ms), true));
       return recorded;
     }
     const response = await inner(params);
@@ -191,19 +271,24 @@ export interface CloudAnalyzeInput {
   /** 補正の最大幅(clipVariant を1回解決した値)。 */
   readonly maxAdjust: number;
   readonly warn: (message: string) => void;
+  /** 時計(ミリ秒。LLM の呼び出しの所要時間を測る。Issue #197 段2。DO の `now` を渡す)。 */
+  readonly now: () => number;
 }
 
 /**
  * `runAnalysis` の `analyze` に渡す関数と、その結果の取り出し口を作る。
- * sender は、外側から「記録・再生」→「失敗のログ(status・種別だけ)」→ 実送信の順に包む(再生のときはログも実送信も無い)。
+ * sender は、外側から「記録・再生」→「測定(呼び出しの記録)」→「失敗のログ(status・種別だけ)」→ 実送信の順に包む(再生のときは測定もログも実送信も無い。再生は記録・再生の層が呼び出しの記録に載せる)。
  * 結果(`AnalyzeRaceResult`)は `runAnalysis` が保存を呼ぶ**前**に取り出せる(保存のフックが、モデル欄・理由を決めるため)。
  */
 export function createCloudAnalyze(input: CloudAnalyzeInput): {
   readonly analyze: (promptInput: BuildPromptInput) => Promise<AnalyzeRaceResult>;
   readonly lastResult: () => AnalyzeRaceResult | null;
+  /** この分析の LLM の呼び出しの記録(呼び出しの順。再生した分は `replayed:true`。Issue #197 段2)。 */
+  readonly calls: () => readonly LlmCallRecord[];
 } {
   let last: AnalyzeRaceResult | null = null;
-  const sender = createRecordingSender(withErrorLog(input.llm.sender, input.warn), input.store, input.warn);
+  const log = createCallLog();
+  const sender = createRecordingSender(createMeteredSender(withErrorLog(input.llm.sender, input.warn), log, input.now), input.store, input.warn, log);
   const client = new AnthropicLlmClient({}, { sender, ...(input.selector === undefined ? {} : { modelSelector: input.selector }), onWarn: input.warn });
   return {
     analyze: async (promptInput) => {
@@ -212,5 +297,6 @@ export function createCloudAnalyze(input: CloudAnalyzeInput): {
       return result;
     },
     lastResult: () => last,
+    calls: () => log.calls(),
   };
 }
