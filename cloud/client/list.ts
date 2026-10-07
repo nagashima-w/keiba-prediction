@@ -104,6 +104,8 @@ export interface ListModelInput {
   readonly route: Route;
   readonly list: ListSource;
   readonly board: BoardSource;
+  /** 板(`status`)を取得中か(Issue #186 段階1)。一覧が取得済みでも、板の取得中は「更新」を押せない。省略は false。 */
+  readonly boardLoading?: boolean;
   /** 利用者が押した場の開閉(キーは `groupKeys`)。無い場は既定(場が 2 つ以上なら閉・1 つなら開)。省略は「何も押していない」。 */
   readonly choices?: ReadonlyMap<string, boolean>;
 }
@@ -138,13 +140,18 @@ export interface ListModel {
   readonly dateInput: string;
   readonly venue: Venue;
   readonly venueTabs: readonly { readonly venue: Venue; readonly label: string; readonly href: string; readonly current: boolean }[];
+  /** 一覧または板を取得中(「更新」を無効にする)。 */
   readonly loading: boolean;
   readonly error: string | null;
+  /** 板だけが失敗したときの注記(何の失敗かを示す前置きつき)。 */
   readonly boardNotice: string | null;
   /** 成功で、開催が 0 件。 */
   readonly empty: boolean;
   readonly groups: readonly RaceGroupItem[];
 }
+
+/** 板の失敗の注記の前置き(バッジが出ない理由を示す。Issue #186 段階1)。 */
+export const BOARD_NOTICE_PREFIX = "実行状態(バッジ)を取得できませんでした。";
 
 export function buildListModel(input: ListModelInput): ListModel {
   const { route, list, board } = input;
@@ -164,9 +171,9 @@ export function buildListModel(input: ListModelInput): ListModel {
       href: buildHash({ date: route.date, venue }),
       current: venue === route.venue,
     })),
-    loading: list.kind === "loading",
+    loading: list.kind === "loading" || input.boardLoading === true,
     error: list.kind === "error" ? list.message : null,
-    boardNotice: board.kind === "error" ? board.message : null,
+    boardNotice: board.kind === "error" ? `${BOARD_NOTICE_PREFIX}${board.message}` : null,
     empty: list.kind === "ready" && list.races.length === 0,
     groups: rawGroups.map((g, i) => ({
       key: keys[i]!,

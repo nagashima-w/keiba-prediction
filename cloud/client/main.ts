@@ -4,14 +4,16 @@
  * インラインスクリプトは使わない(CSP の `script-src 'self'`)。この 1 ファイルが、`/app.js` として Worker から配られる。
  */
 import { createApp } from "./app";
-import { mount } from "./dom";
+import { createMounter } from "./dom";
 
 const root = document.getElementById("app");
 if (root !== null) {
+  // 同じ木なら DOM を触らない(Issue #186。ポーリングの再描画がタップ・開閉・日付ピッカーを壊さない)。
+  const mount = createMounter(document, root);
   const app = createApp({
     fetch: (url, init) => fetch(url, init),
     now: () => new Date(),
-    render: (tree) => mount(document, root, tree),
+    render: mount,
     getHash: () => location.hash,
     setHash: (hash) => {
       location.hash = hash;

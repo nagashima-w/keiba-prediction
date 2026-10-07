@@ -464,6 +464,58 @@ describe("同時取得・失敗・更新", () => {
   });
 });
 
+describe("板の取得中・失敗(#184 の【記録】。Issue #186 段階1)", () => {
+  const refreshButton = (h: Harness) => findAll(h.tree(), (n) => n.tag === "button" && n.attrs?.["class"] === "refresh")[0]!;
+  const notices = (h: Harness) => findAll(h.tree(), (n) => n.attrs?.["class"] === "notice").map(textOf);
+
+  it("板の取得中は「更新」を押せない(一覧は取得済みでも)。押されても取得は増えない。板が届けば押せる", async () => {
+    const h = harness(`#date=${DATE}&venue=central`);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.responders.set(BOARD, async () => {
+      await gate;
+      return ok({ ok: true, kaisai_date: DATE, races: [] });
+    });
+    h.app.start();
+    // 一覧だけが先に届くまで待つ(板は保留のまま)
+    for (let i = 0; i < 20 && !h.text().includes("福島民報杯"); i += 1) await Promise.resolve();
+    expect(h.text()).toContain("福島民報杯"); // 前提: 一覧は取得済み・板は取得中
+    expect(h.calls.filter((u) => u === BOARD)).toHaveLength(1);
+    expect(h.calls.filter((u) => u === RACES_CENTRAL)).toHaveLength(1);
+    const during = refreshButton(h);
+    expect(textOf(during)).toBe("読み込み中…");
+    expect(during.attrs?.["disabled"]).toBe(true);
+    const before = h.calls.length;
+    during.on!.click!();
+    during.on!.click!();
+    expect(h.calls).toHaveLength(before);
+    release();
+    await h.app.whenIdle();
+    const after = refreshButton(h);
+    expect(textOf(after)).toBe("更新");
+    expect(after.attrs?.["disabled"]).toBe(false);
+  });
+
+  it("板だけが失敗したとき、一覧は出たまま、「実行状態を取得できなかった」注記が出る(一覧の失敗の文言とは別)。一覧だけが失敗したときは、その注記は出ない", async () => {
+    const h = harness(`#date=${DATE}&venue=central`);
+    h.responders.set(BOARD, async () => ({ status: 503, json: async () => ({ ok: false, error: { type: "race-day-error", message: "サーバの文面" } }) }));
+    h.app.start();
+    await h.app.whenIdle();
+    expect(h.text()).toContain("福島民報杯");
+    expect(notices(h)).toHaveLength(1);
+    expect(notices(h)[0]).toContain("実行状態");
+    expect(notices(h)[0]).toContain("サーバでエラーが起きました"); // 固定の文言(サーバの文面でない)
+    expect(h.text()).not.toContain("サーバの文面");
+
+    const e = harness(`#date=${DATE}&venue=central`);
+    e.responders.set(RACES_CENTRAL, async () => ({ status: 503, json: async () => ({ ok: false, error: { type: "netkeiba-unavailable", reason: "busy" } }) }));
+    e.app.start();
+    await e.app.whenIdle();
+    expect(e.text()).toContain("混み合っています");
+    expect(notices(e)).toEqual([]); // 板は取れている(注記は一覧の失敗の role=alert の方)
+  });
+});
+
 describe("日付の入力", () => {
   it("日付の入力(YYYY-MM-DD)は、区分を保ったハッシュへの遷移になる(再描画はハッシュの変化から)。不正・空は無視する", async () => {
     const h = harness(`#date=${DATE}&venue=nar`);
@@ -592,7 +644,7 @@ describe("場ごとの開閉(#187)", () => {
     expect(expanded(h)).toEqual(["false", "false"]); // 2 場になったので、押していない福島は既定(閉)に追従
   });
 
-  it("見出しの要約は板から出す(取得済み・待ち=実行中、失敗)。板の取得に失敗したときは件数だけ", async () => {
+  it("見出しの要約は板から出す(取得済み・待ち=実行中、失敗)。板の取得に失敗したときは要約を出さない(場名だけ。数字+R は出さない)", async () => {
     const h = await started(`#date=${DATE}&venue=central`);
     h.responders.set(BOARD, async () =>
       ok({ ok: true, kaisai_date: DATE, races: [boardRow("202602010101", "morning", "queued"), boardRow("202602010102", "pre_race", "failed"), boardRow("202603020211", "morning", "done")] }),
@@ -600,6 +652,7 @@ describe("場ごとの開閉(#187)", () => {
     refreshButton(h).on!.click!();
     await h.app.whenIdle();
     const [hako, fuku] = toggles(h).map(textOf);
+    expect(hako).toBe("▸ 函館・実行中 1・失敗 1");
     expect(hako).toContain("実行中 1");
     expect(hako).toContain("失敗 1");
     expect(fuku).not.toContain("実行中");
@@ -610,6 +663,7 @@ describe("場ごとの開閉(#187)", () => {
     await h.app.whenIdle();
     expect(toggles(h).map(textOf).join(" ")).not.toContain("実行中");
     expect(toggles(h).map(textOf).join(" ")).not.toContain("失敗");
-    expect(toggles(h).map(textOf)[0]).toContain("2R");
+    // Issue #186(ユーザーの依頼): 見出しにレース数(旧版は `2R`)は出さない。要約が無ければ「▸ 場名」だけ
+    expect(toggles(h).map(textOf)).toEqual(["▸ 函館", "▸ 福島"]);
   });
 });

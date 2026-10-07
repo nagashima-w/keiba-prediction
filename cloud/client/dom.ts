@@ -73,3 +73,23 @@ function build(doc: DomDocument, node: VNode | string): unknown {
 export function mount(doc: DomDocument, root: DomRoot, vnode: VNode): void {
   root.replaceChildren(build(doc, vnode));
 }
+
+/**
+ * 描画の関数を作る(Issue #186 段階1)。**直前に描いた木と JSON 直列化して同一なら、DOM を触らない**。
+ * ポーリング(段階2)の再描画が、タップ中のボタン・日付ピッカー・フォーカスを壊さないための土台。
+ *
+ * **比較は `JSON.stringify` なので、関数(`on` のクリック処理)は比較されない**。木が同じでクリック処理だけが違うと、DOM には古い処理が残る。
+ * そのため呼び出し側(`view.ts`)は、クリック処理に渡す引数を必ず `data-*` 属性にも出す(引数が違えば木が違う)。
+ * 組み立て(許可リストの検査を含む)が投げたときは root を変えず、「直前の木」も更新しない(画面に出ているのは直前に成功した木のまま)。
+ */
+export function createMounter(doc: DomDocument, root: DomRoot): (vnode: VNode) => void {
+  let last: string | null = null;
+  return (vnode) => {
+    const serialized = JSON.stringify(vnode);
+    if (serialized === last) {
+      return;
+    }
+    root.replaceChildren(build(doc, vnode));
+    last = serialized;
+  };
+}

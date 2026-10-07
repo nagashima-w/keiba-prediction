@@ -220,7 +220,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   }
 
   function run(initialHash = "") {
-    const root = { children: [] as (FakeElement | FakeText)[], replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.children = nodes; } };
+    const root = { children: [] as (FakeElement | FakeText)[], replaced: 0, replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; } };
     const listeners = new Map<string, (() => void)[]>();
     const calls: { url: string; init: { method?: string; credentials?: string; body?: string } }[] = [];
     const location = { hash: initialHash };
@@ -275,6 +275,20 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(textOf(root.children[0]!)).toContain("福島民報杯");
     expect((listeners.get("hashchange") ?? []).length).toBe(1);
     expect(location.hash).toBe("");
+  });
+
+  it("同じ状態の再描画(同じハッシュの hashchange)では DOM を触らない(Issue #186 段階1。createMounter が main.ts に配線されている)", async () => {
+    const { root, listeners, calls } = run();
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    await new Promise((resolve) => setTimeout(resolve, 20)); // 取得の後始末の再描画を待つ
+    const settled = root.replaced;
+    const shown = root.children[0];
+    expect(settled).toBeGreaterThanOrEqual(1);
+    expect((listeners.get("hashchange") ?? []).length).toBe(1); // 前提: hashchange を購読している
+    listeners.get("hashchange")![0]!();
+    listeners.get("hashchange")![0]!();
+    expect(root.replaced).toBe(settled);
+    expect(root.children[0]).toBe(shown);
   });
 
   it("「更新」を連打しても、取得は 1 回分(一覧と板で 2 本)だけ増える。POST は呼ばれない", async () => {

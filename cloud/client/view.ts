@@ -27,9 +27,12 @@ function raceRow(item: RaceItem): VNode {
   return h("li", {}, [h("a", { class: "race", href: item.href }, [head, detail, ...badges])]);
 }
 
-/** 見出しの文字(開閉が色だけに頼らず分かるよう ▾/▸ を付ける)。例: 「▸ 大井 12R・実行中 3・失敗 1」。0 の項目と、板が無いときの要約は出さない。 */
+/**
+ * 見出しの文字(開閉が色だけに頼らず分かるよう ▾/▸ を付ける)。例: 「▸ 大井・実行中 3・失敗 1」。0 の項目と、板が無いときの要約は出さない(板が無ければ「▸ 大井」だけ)。
+ * レース数(`12R`)は出さない(Issue #186。ユーザーの依頼「『12R』という表記は不要」)。
+ */
 function groupHeadingText(group: RaceGroupItem): string {
-  const parts = [`${group.open ? "▾" : "▸"} ${group.name} ${group.races.length}R`];
+  const parts = [`${group.open ? "▾" : "▸"} ${group.name}`];
   if (group.summary !== null) {
     if (group.summary.running > 0) parts.push(`実行中 ${group.summary.running}`);
     if (group.summary.failed > 0) parts.push(`失敗 ${group.summary.failed}`);
@@ -37,9 +40,12 @@ function groupHeadingText(group: RaceGroupItem): string {
   return parts.join("・");
 }
 
-/** 場のまとまり。見出しは h2 の中のボタン(`<details>` は使わない=描画のたびに DOM を作り直すので、開閉の状態を DOM に持てない)。閉じた場のレースの行は作らない。 */
+/**
+ * 場のまとまり。見出しは h2 の中のボタン(`<details>` は使わない=描画のたびに DOM を作り直すので、開閉の状態を DOM に持てない)。閉じた場のレースの行は作らない。
+ * **クリック処理に渡すキーは `data-key` にも出す**(Issue #186。`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されないので、引数が木に出ていないと古い処理が残る)。
+ */
 function venueSection(group: RaceGroupItem, actions: ViewActions): VNode {
-  const toggle = h("button", { class: "venue-toggle", "aria-expanded": group.open ? "true" : "false" }, [groupHeadingText(group)], { click: () => actions.onToggleGroup(group.key, !group.open) });
+  const toggle = h("button", { class: "venue-toggle", "aria-expanded": group.open ? "true" : "false", "data-key": group.key }, [groupHeadingText(group)], { click: () => actions.onToggleGroup(group.key, !group.open) });
   return h("section", { class: "venue" }, [h("h2", {}, [toggle]), ...(group.open ? [h("ul", { class: "races" }, group.races.map(raceRow))] : [])]);
 }
 

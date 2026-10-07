@@ -119,7 +119,7 @@ export function createApp(deps: AppDeps): App {
       const listRow = races.get(listKey(route.date, route.venue))?.find((r) => r.raceId === route.race);
       deps.render(renderScreen(buildRaceModel({ route, status: raceStatusSource(key), past: pastSource(key), listRow }), actions));
     } else {
-      deps.render(renderScreen(buildListModel({ route, list: listSource(), board: boardSource(), choices: openChoices.get(listKey(route.date, route.venue)) }), actions));
+      deps.render(renderScreen(buildListModel({ route, list: listSource(), board: boardSource(), boardLoading: boardInflight.has(route.date), choices: openChoices.get(listKey(route.date, route.venue)) }), actions));
     }
   }
 

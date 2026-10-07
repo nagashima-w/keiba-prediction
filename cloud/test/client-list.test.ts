@@ -95,8 +95,23 @@ describe("buildListModel", () => {
     expect(none.boardNotice).toBeNull();
     const err = buildListModel(input({ list: { kind: "ready", races: [race("202603020211")] }, board: { kind: "error", message: "板の失敗の文言" } }));
     expect(err.groups[0]!.races[0]!.badges).toBeNull();
-    expect(err.boardNotice).toBe("板の失敗の文言");
+    // Issue #186 段階1(#184 の【記録】3): 何の失敗かが分かるよう、失敗の文言の前に「実行状態を取得できなかった」ことを付ける(旧版は文言そのまま)
+    expect(err.boardNotice).toBe("実行状態(バッジ)を取得できませんでした。板の失敗の文言");
     expect(err.groups).toHaveLength(1);
+  });
+
+  it("板を取得中なら、一覧が取得済みでも loading(更新ボタンを押せない)。一覧の表示・注記は変わらない(Issue #186 段階1)", () => {
+    const ready = { kind: "ready", races: [race("202603020211")] } as const;
+    const idle = buildListModel(input({ list: ready, board: { kind: "none" } }));
+    expect(idle.loading).toBe(false); // 前提: 板を取得中でなければ、一覧が取得済みなら loading でない
+    const boardLoading = buildListModel(input({ list: ready, board: { kind: "none" }, boardLoading: true }));
+    expect(boardLoading.loading).toBe(true);
+    expect(boardLoading.error).toBeNull();
+    expect(boardLoading.boardNotice).toBeNull();
+    expect(boardLoading.empty).toBe(false);
+    expect(boardLoading.groups).toHaveLength(1);
+    // 一覧を取得中なら、板を取得中でなくても loading(従来どおり)
+    expect(buildListModel(input({ list: { kind: "loading" }, boardLoading: false })).loading).toBe(true);
   });
 
   it("読み込み中は loading で、更新ボタンを押せない状態を示す。エラー時は error の文言を持ち、レースは出さない", () => {

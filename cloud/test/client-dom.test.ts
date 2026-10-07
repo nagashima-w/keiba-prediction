@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mount, type DomDocument } from "../client/dom";
+import { createApp } from "../client/app";
+import { createMounter, mount, type DomDocument } from "../client/dom";
 import { buildListModel } from "../client/list";
 import type { RaceRow } from "../client/api";
 import { renderScreen } from "../client/view";
@@ -45,7 +46,10 @@ class FakeElement {
 
 class FakeRoot {
   children: unknown[] = [];
+  /** replaceChildren を呼んだ回数(DOM を触った回数)。 */
+  replaced = 0;
   replaceChildren(...nodes: unknown[]): void {
+    this.replaced += 1;
     this.children = nodes;
   }
 }
@@ -102,6 +106,13 @@ describe("mount(要素・属性の許可リスト)", () => {
     }
   });
 
+  it("data-* は小文字・数字・ハイフンの名前だけ(Issue #186 の data-key は通る。大文字・空・下線・記号の名前は投げる=on* などを data- で偽装できない)", () => {
+    expect(mounted(h("button", { "data-key": "福島#0" }, [])).attrs.get("data-key")).toBe("福島#0");
+    for (const name of ["data-", "data-Key", "data-a_b", "data-a b", "data-a.b", "data:key", "dataset-key"]) {
+      expect(() => mounted(h("button", { [name]: "x" }, [])), name).toThrow();
+    }
+  });
+
   it("href は # で始まるものだけ。javascript:・data:・https: は投げる", () => {
     expect(mounted(h("a", { href: "#date=20261003&venue=nar" }, ["x"])).attrs.get("href")).toBe("#date=20261003&venue=nar");
     for (const href of ["javascript:alert(1)", "data:text/html,x", "https://example.com/", "//example.com", " #x", ""]) {
@@ -140,6 +151,116 @@ describe("mount(イベントと置き換え)", () => {
   });
 });
 
+/**
+ * Issue #186 段階1: 同じ木なら DOM を触らない(`createMounter`)。ポーリング(段階2)の再描画が、タップ・場の開閉・日付ピッカーを壊さないための土台。
+ * 比較は `JSON.stringify`(関数は落ちる)なので、クリック処理が違っても JSON が同じなら置き換えない。
+ * **この契約を安全にするのは「クリック処理の引数は data-* にも出す」こと**(`view.ts`。`client-view.test.ts` が固定)。
+ */
+describe("createMounter(同じ木なら DOM を触らない)", () => {
+  const tree = (label: string, key = "a", clicks: string[] = []): VNode =>
+    h("div", {}, [h("button", { class: "t", "data-key": key }, [label], { click: () => void clicks.push(key) })]);
+
+  it("最初の描画は root に 1 つの要素を入れる。同じ木(JSON が等しい別のオブジェクト)は置き換えない(DOM の要素・呼び出し回数とも不変)", () => {
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    render(tree("x"));
+    expect(root.replaced).toBe(1);
+    expect(root.children).toHaveLength(1);
+    const first = root.children[0];
+    render(tree("x")); // 新しいオブジェクトだが JSON は同じ
+    render(tree("x"));
+    expect(root.replaced).toBe(1);
+    expect(root.children[0]).toBe(first); // 同じ DOM 要素のまま(フォーカス・開閉・入力は壊れない)
+  });
+
+  it("木が違えば置き換える(文字・属性・構造のどれが違っても)。置き換えたあとの同じ木は、また置き換えない", () => {
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    render(tree("x"));
+    expect(root.replaced).toBe(1); // 前提
+    render(tree("y")); // 文字
+    expect(root.replaced).toBe(2);
+    render(tree("y", "b")); // 属性(data-key)
+    expect(root.replaced).toBe(3);
+    render(h("div", {}, [])); // 構造
+    expect(root.replaced).toBe(4);
+    expect(root.children).toHaveLength(1);
+    render(h("div", {}, []));
+    expect(root.replaced).toBe(4);
+    // 違う木が、直前の木に戻ったときも置き換える(「2 つ前と同じ」でスキップしない)
+    render(tree("y", "b"));
+    render(h("div", {}, []));
+    expect(root.replaced).toBe(6);
+  });
+
+  it("置き換えた木のクリック処理は、最新の木のもの(data-key が違えば置き換わるので、古い引数の処理が残らない)", () => {
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    const clicks: string[] = [];
+    render(tree("x", "a", clicks));
+    render(tree("x", "b", clicks)); // 文字は同じで data-key だけが違う
+    expect(root.replaced).toBe(2); // 前提: 置き換わった(スキップされていない)
+    const button = allElements(root.children[0] as FakeElement).find((e) => e.tag === "button")!;
+    button.listeners.get("click")![0]!({ target: { value: "" } });
+    expect(clicks).toEqual(["b"]);
+  });
+
+  it("契約の確認(特性): data-* に出ない違い(クリック処理だけ)は、木が同じとみなされ置き換えない。だから引数は data-* に出す", () => {
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    const first: string[] = [];
+    const second: string[] = [];
+    render(tree("x", "a", first));
+    render(tree("x", "a", second));
+    expect(root.replaced).toBe(1);
+    const button = allElements(root.children[0] as FakeElement).find((e) => e.tag === "button")!;
+    button.listeners.get("click")![0]!({ target: { value: "" } });
+    expect(first).toEqual(["a"]); // 古い処理のまま
+    expect(second).toEqual([]);
+  });
+
+  it("許可リスト外の要素で組み立てに失敗したら投げ、画面(root)は変えない。その後の描画は、直前に成功した木を基準にする", () => {
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    render(tree("x"));
+    const shown = root.children[0];
+    expect(() => render(h("script", {}, []))).toThrow();
+    expect(root.replaced).toBe(1);
+    expect(root.children[0]).toBe(shown);
+    render(tree("x")); // 画面は「x」のままなので、置き換えない
+    expect(root.replaced).toBe(1);
+    render(tree("z"));
+    expect(root.replaced).toBe(2);
+  });
+
+  it("画面の制御(createApp)と繋ぐと、状態が変わらない再描画(同じハッシュの hashchange)で DOM を触らない。状態が変わる描画(場の開閉)では触る", async () => {
+    const DATE = "20260628";
+    const row = (raceId: string, venue: string) => ({ race_id: raceId, venue_name: venue, race_number: Number(raceId.slice(-2)), race_name: "レース", course_type: "芝", distance: 1800, entry_count: 16, grade: null });
+    const fetchStub = async (url: string) => {
+      if (url.startsWith("/api/races")) return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, venue: "central", races: [row("202602010101", "函館"), row("202603020211", "福島")] }) };
+      return { status: 200, json: async () => ({ ok: true, kaisai_date: DATE, races: [] }) };
+    };
+    const root = new FakeRoot();
+    const render = createMounter(doc, root);
+    const hashState = { hash: `#date=${DATE}&venue=central` };
+    const app = createApp({ fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => hashState.hash, setHash: () => {} });
+    app.start();
+    await app.whenIdle();
+    expect(root.children).toHaveLength(1);
+    const settled = root.replaced;
+    const shown = root.children[0];
+    const toggles = () => allElements(root.children[0] as FakeElement).filter((e) => e.attrs.get("class") === "venue-toggle");
+    expect(toggles()).toHaveLength(2); // 前提: 見出しが 2 つ(場が 2 つ以上なので既定は全部閉)
+    app.onHashChange();
+    app.onHashChange();
+    expect(root.replaced).toBe(settled); // 同じ状態の再描画では、DOM を触らない
+    expect(root.children[0]).toBe(shown);
+    toggles()[0]!.listeners.get("click")![0]!({ target: { value: "" } });
+    expect(root.replaced).toBe(settled + 1); // 開閉で木が変わるので置き換える
+    expect(toggles()[0]!.attrs.get("aria-expanded")).toBe("true");
+  });
+});
+
 const RACE: RaceRow = { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
 const noop = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {} };
 
@@ -173,6 +294,16 @@ describe("renderScreen(一覧の VNode)", () => {
     expect(current).toHaveLength(1);
     expect(textNodes(current[0]!)).toEqual(["中央"]);
     expect(allElements(el).some((e) => e.tag === "button" && textNodes(e).includes("更新"))).toBe(true);
+  });
+
+  it("場の見出しのボタンには、実際のアダプタを通しても data-key が付く(値は場のキー。外から来た会場名を含んでも属性値の文字列でしかない)", () => {
+    const evil = `"><img src=x onerror=alert(1)>`;
+    const model = buildListModel({ route, list: { kind: "ready", races: [{ ...RACE, venueName: evil }, { ...RACE, raceId: "202602010101", venueName: "函館" }] }, board: { kind: "none" } });
+    const el = mounted(renderScreen(model, noop));
+    const toggles = allElements(el).filter((e) => e.attrs.get("class") === "venue-toggle");
+    expect(toggles).toHaveLength(2); // 前提: 2 つの場
+    expect(toggles.map((t) => t.attrs.get("data-key"))).toEqual(model.groups.map((g) => g.key));
+    expect(allElements(el).some((e) => e.tag === "img")).toBe(false);
   });
 
   it("入力・更新のハンドラは、actions に繋がる", () => {

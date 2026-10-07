@@ -326,16 +326,33 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
     expect(byClass(oneOpen, "races")).toHaveLength(1);
   });
 
-  it("見出しのボタンには場名・レース数が出る。閉じていても出る", () => {
+  // Issue #186(ユーザーの依頼 2026-10-07): 見出しからレース数(`12R`)を外した。旧版の「場名・レース数が出る」(`toContain("2R")`)は意図して置き換える。
+  it("見出しの文字は「▸/▾ 場名」だけ(板が無いとき)。レース数(数字+R)は出さない。閉じていても場名は出る", () => {
     const tree = renderScreen(buildListModel(listInput()), noop);
-    const texts = toggles(tree).map(textOf);
-    expect(texts[0]).toContain("函館");
-    expect(texts[0]).toContain("2R");
-    expect(texts[1]).toContain("福島");
-    expect(texts[1]).toContain("2R");
+    // 前提: 函館・福島の 2 つの見出し(どちらもレースが 2 つある=旧版ならどちらも「2R」が付いた)
+    expect(toggles(tree)).toHaveLength(2);
+    expect(toggles(tree).map(textOf)).toEqual(["▸ 函館", "▸ 福島"]);
+    const keys = buildListModel(listInput()).groups.map((g) => g.key);
+    const open = renderScreen(buildListModel(listInput({ choices: new Map([[keys[1]!, true]]) })), noop);
+    expect(toggles(open).map(textOf)).toEqual(["▸ 函館", "▾ 福島"]);
+    for (const text of [...toggles(tree), ...toggles(open)].map(textOf)) {
+      expect(text).not.toMatch(/[0-9]+R/);
+    }
   });
 
-  it("要約: 実行中・失敗の数を見出しに出す。0 の項目は出さない。板が無ければ件数だけ", () => {
+  it("要約があっても、見出しは「▸ 場名・実行中 n・失敗 m」(数字+R を挟まない。0 の項目は出さない)", () => {
+    const board = [brow("202603020211", "morning", "queued"), brow("202603020212", "pre_race", "fetched"), brow("202603020212", "morning", "failed"), brow("202602010101", "morning", "done")];
+    const closed = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: board } })), noop)).map(textOf);
+    expect(closed).toEqual(["▸ 函館", "▸ 福島・実行中 2・失敗 1"]);
+    const only = (rows: ReturnType<typeof brow>[]) => toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows } })), noop)).map(textOf)[1];
+    expect(only([brow("202603020211", "morning", "failed")])).toBe("▸ 福島・失敗 1");
+    expect(only([brow("202603020211", "morning", "queued")])).toBe("▸ 福島・実行中 1");
+    for (const text of closed) {
+      expect(text).not.toMatch(/[0-9]+R/);
+    }
+  });
+
+  it("要約: 実行中・失敗の数を見出しに出す。0 の項目は出さない。板が無ければ要約を出さない", () => {
     const board = [brow("202603020211", "morning", "queued"), brow("202603020212", "pre_race", "fetched"), brow("202603020212", "morning", "failed"), brow("202602010101", "morning", "done")];
     const tree = renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: board } })), noop);
     const [hako, fuku] = toggles(tree).map(textOf);
@@ -357,6 +374,59 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
     const runningOnly = toggles(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [brow("202603020211", "morning", "queued")] } })), noop)).map(textOf);
     expect(runningOnly[1]).toContain("実行中 1");
     expect(runningOnly[1]).not.toContain("失敗");
+  });
+
+  // Issue #186 段階1: 「同じ木なら DOM を触らない」(createMounter)では、JSON にならない関数(クリック処理)が古いまま残りうる。
+  // そこで、クリック処理に渡す引数は必ず data-* にも出す(= 引数が違えば木が違う)。
+  it("見出しのボタンは、クリックで onToggleGroup に渡すキーと同じ値を data-key に持つ(同じ木なら DOM を触らない描画で、古い処理が残らないため)", () => {
+    const calls: string[] = [];
+    const actions: ViewActions = { ...noop, onToggleGroup: (key) => void calls.push(key) };
+    const model = buildListModel(listInput());
+    const buttons = toggles(renderScreen(model, actions));
+    expect(buttons).toHaveLength(2); // 前提: 2 つの見出し
+    expect(model.groups.map((g) => g.key)).toEqual(["函館#0", "福島#0"]); // 前提: キーは「場名#出現順」(値そのものを固定)
+    for (const b of buttons) {
+      b.on!.click!();
+    }
+    expect(calls).toHaveLength(2);
+    expect(buttons.map((b) => b.attrs?.["data-key"])).toEqual(calls);
+  });
+
+  it("同じ場名が離れて 2 組できても(見出しの文字は同じ)、data-key が違うので木が違う(開閉の取り違えを、描画のスキップに隠さない)", () => {
+    const rows = [rr("202601010101", "福島"), rr("202602010101", "函館"), rr("202603010101", "福島")];
+    const model = buildListModel(listInput({ list: { kind: "ready", races: rows } }));
+    expect(model.groups.map((g) => g.name)).toEqual(["福島", "函館", "福島"]); // 前提: 離れた同名が 2 組
+    const tree = renderScreen(model, noop);
+    const texts = toggles(tree).map(textOf);
+    expect(texts[0]).toBe(texts[2]); // 前提: 見出しの文字は同じ
+    const dataKeys = toggles(tree).map((b) => b.attrs?.["data-key"]);
+    expect(new Set(dataKeys).size).toBe(3);
+    // 「文字が同じ 2 つのボタン」の木は、data-key の違いだけで JSON が異なる
+    const [a, , c] = toggles(tree);
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(c));
+  });
+
+  // Issue #186 段階1(#184 の【記録】1・3): 板の取得中は「更新」を押せない/板だけが失敗したら、そのことが分かる注記を出す。
+  it("板だけを取得中(一覧は取得済み)でも「更新」は disabled で「読み込み中…」。取得中でなければ押せる", () => {
+    const refresh = (tree: VNode) => findAll(tree, (n) => n.tag === "button" && n.attrs?.["class"] === "refresh")[0]!;
+    const idle = refresh(renderScreen(buildListModel(listInput()), noop));
+    expect(textOf(idle)).toBe("更新"); // 前提: 取得中でなければ「更新」で押せる
+    expect(idle.attrs?.["disabled"]).toBe(false);
+    const boardLoading = refresh(renderScreen(buildListModel(listInput({ boardLoading: true })), noop));
+    expect(textOf(boardLoading)).toBe("読み込み中…");
+    expect(boardLoading.attrs?.["disabled"]).toBe(true);
+  });
+
+  it("板の取得に失敗したときは、「実行状態(バッジ)を取得できない」ことを示す注記が出る。一覧のレースは出たまま。板が取れているときは出ない", () => {
+    const notices = (tree: VNode) => byClass(tree, "notice").map(textOf);
+    const failed = renderScreen(buildListModel(listInput({ board: { kind: "error", message: "通信に失敗しました。" } })), noop);
+    expect(raceLinks(failed)).toHaveLength(0); // 既定は全部閉(前提: 一覧は描画されている=見出しが 2 つある)
+    expect(toggles(failed)).toHaveLength(2);
+    expect(notices(failed)).toHaveLength(1);
+    expect(notices(failed)[0]).toContain("実行状態");
+    expect(notices(failed)[0]).toContain("通信に失敗しました。");
+    expect(notices(renderScreen(buildListModel(listInput({ board: { kind: "ready", rows: [] } })), noop))).toEqual([]);
+    expect(notices(renderScreen(buildListModel(listInput()), noop))).toEqual([]);
   });
 
   it("タップは onToggleGroup(その場のキー, 反転した次の値)に繋がる(閉→開・開→閉)", () => {
