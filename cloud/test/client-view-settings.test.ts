@@ -74,6 +74,25 @@ describe("設定画面の VNode", () => {
     expect(calls).toEqual(FIELD_ORDER.map((k) => [k, `値:${k}`]));
   });
 
+  it("Issue #189: 文字を打つ欄(数値の text・textarea)は、change に加えて input でも onSettingsInput を呼ぶ(入力中の値を、保存の直前に取りこぼさない)。checkbox・select は change だけ", () => {
+    const calls: [string, string][] = [];
+    const actions: ViewActions = { ...noopActions, onSettingsInput: (key, value) => void calls.push([key, value]) };
+    const typed = new Set(["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "additionalInstruction", "preRaceOffsetMinutes"]);
+    const fields = inputs(tree({}, actions));
+    for (const n of fields) {
+      const key = String(n.attrs?.["data-field"]);
+      expect(n.on?.change, `${key} の change`).toBeDefined();
+      if (typed.has(key)) {
+        expect(n.on?.input, `${key} の input`).toBeDefined();
+        n.on!.input!(`入力:${key}`);
+      } else {
+        expect(n.on?.input, `${key} は input を持たない`).toBeUndefined();
+      }
+    }
+    expect(calls).toEqual(FIELD_ORDER.filter((k) => typed.has(k)).map((k) => [k, `入力:${k}`]));
+    expect(typed.size).toBe(6);
+  });
+
   it("保存ボタン(class=settings-save。文言は「保存」)のクリックは onSettingsSave。保存中は disabled・文言「保存中…」。入力欄も disabled", () => {
     let saves = 0;
     const actions: ViewActions = { ...noopActions, onSettingsSave: () => void (saves += 1) };

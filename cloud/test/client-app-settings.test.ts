@@ -46,6 +46,8 @@ interface Harness {
   go(hash: string): void;
   /** 入力欄に値を入れる(ブラウザの change イベント相当)。描画はしない。 */
   type(key: string, value: string): void;
+  /** 入力欄に値を打つ(ブラウザの input イベント相当。change は起きない=フォーカスがあるまま保存を押した状況)。描画はしない。 */
+  typeInput(key: string, value: string): void;
   clickSave(): void;
   clickRefresh(): void;
 }
@@ -82,6 +84,7 @@ function harness(initialHash: string): Harness {
       h.app.onHashChange();
     },
     type: (key, value) => h.field(key).on!.change!(value),
+    typeInput: (key, value) => h.field(key).on!.input!(value),
     clickSave: () => byClass(h.tree(), "settings-save")[0]!.on!.click!(),
     clickRefresh: () => byClass(h.tree(), "refresh")[0]!.on!.click!(),
     app: undefined as never,
@@ -219,6 +222,20 @@ describe("入力と描画(change は下書きを書くだけ)", () => {
     expect(h.posts).toHaveLength(1);
     expect(h.posts[0]).toMatchObject({ bankroll: 123456, includeComboOdds: false, additionalInstruction: "追加\n指示", clipVariant: "wide15", perRaceCap: 50_000 });
     await h.app.whenIdle();
+  });
+
+  it("input イベントだけ(change なし。フォーカスがあるまま保存をタップして、click が change より先に届いた状況)で保存しても、入力した値が POST の本文に入る。再描画はしない(入力中の欄を壊さない)", async () => {
+    const h = await started();
+    const before = h.renders.length;
+    h.typeInput("bankroll", "777000");
+    h.typeInput("additionalInstruction", "打ちかけの指示");
+    h.typeInput("kellyFraction", "0.3");
+    expect(h.renders.length).toBe(before);
+    h.clickSave(); // change は 1 度も起きていない
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0]).toMatchObject({ bankroll: 777_000, additionalInstruction: "打ちかけの指示", kellyFraction: 0.3, perRaceCap: 50_000 });
+    await h.app.whenIdle();
+    expect(h.field("bankroll").attrs?.["value"]).toBe("777000"); // 保存後の表示も、打った値(サーバが返した値)
   });
 
   it("保存の押下: 検証 OK なら、全 14 項目(数値は数値型)を 1 回 POST する。保存中は強制の再描画で、入力欄・保存ボタンが disabled", async () => {

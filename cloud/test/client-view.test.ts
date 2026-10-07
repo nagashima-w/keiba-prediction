@@ -242,7 +242,7 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
   // Issue #189: 設定の「保存」ボタン(settings-save)も、引数を取らない処理。設定の入力欄は引数(項目名)を data-field に出すので、除外しない。
   const NO_ARGUMENT_CLASSES = new Set(["refresh", "retrack", "settings-save"]);
   const hasDataAttr = (n: VNode): boolean => Object.keys(n.attrs ?? {}).some((k) => k.startsWith("data-"));
-  const handlers = (tree: VNode): VNode[] => findAll(tree, (n) => n.on?.click !== undefined || n.on?.change !== undefined);
+  const handlers = (tree: VNode): VNode[] => findAll(tree, (n) => n.on?.click !== undefined || n.on?.change !== undefined || n.on?.input !== undefined);
   const exempt = (n: VNode): boolean => String(n.attrs?.["class"] ?? "").split(" ").some((c) => NO_ARGUMENT_CLASSES.has(c)) || (n.tag === "input" && n.attrs?.["type"] === "date");
 
   const rr = (raceId: string, venueName: string) => ({ raceId, venueName, raceNumber: 1, raceName: "r", courseType: "芝", distance: 1800, entryCount: 16, grade: null }) as const;

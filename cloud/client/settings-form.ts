@@ -172,7 +172,7 @@ interface FieldSpec {
 }
 
 const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
-  evThreshold: { kind: "text", label: "EV閾値(この値を超える馬券を抽出。既定1.0)", help: "0より大きい数値。EV(3着内率 × 複勝オッズの下限)がこの値を超える馬券を、配分の候補にします。", inputmode: "decimal" },
+  evThreshold: { kind: "text", label: "EV閾値(この値を超える馬券を抽出。既定1.0)", help: "0より大きい数値。EV(的中確率 × オッズ)がこの値を超える馬券を、複勝と組合せの全券種で配分の候補にします。馬ごとの「EVプラス」の判定にも、同じ値を使います。", inputmode: "decimal" },
   includeComboOdds: {
     kind: "checkbox",
     label: INCLUDE_COMBO_ODDS_LABELS.checkbox,

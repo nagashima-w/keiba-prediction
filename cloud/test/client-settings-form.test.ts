@@ -273,6 +273,13 @@ describe("buildSettingsModel", () => {
     }
   });
 
+  it("補助文(EV閾値): 複勝だけでなく組合せを含む全券種の配分の候補に効くことが分かる(閾値は複勝の EV の定義だけに読めない書き方にしない)。馬ごとの「EVプラス」と同じ値であることも書く", () => {
+    const help = buildSettingsModel(READY_INPUT()).fields.find((f) => f.key === "evThreshold")!.help ?? "";
+    expect(help).toContain("複勝と組合せの全券種");
+    expect(help).toContain("EVプラス");
+    expect(help).not.toContain("複勝オッズの下限"); // 複勝の EV の定義(3着内率 × 複勝オッズの下限)だけに効くと読める書き方
+  });
+
   it("補助文: 各券種の配分は、組合せオッズの取得が OFF の間は効果がない旨と、既定が ON である旨。組合せの取得は、OFF の間は組合せの券種が配分に入らない旨と、三連単は中央のみ", () => {
     const byKey = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.help ?? ""]));
     for (const key of ["includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation"]) {

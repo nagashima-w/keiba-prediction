@@ -267,20 +267,24 @@ function resultScreen(model: ResultModel, actions: ViewActions): VNode {
  */
 function settingsField(field: FieldModel, actions: ViewActions): VNode {
   const common = { "data-field": field.key, disabled: field.disabled, "aria-invalid": field.error === null ? undefined : "true" };
-  const on = { change: (value: string) => actions.onSettingsInput(field.key, value) };
+  const onValue = (value: string): void => actions.onSettingsInput(field.key, value);
+  // 文字を打つ欄(text・textarea)は、`input`(打つたび)でも下書きを書く。**change は blur で発火する**ので、フォーカスがあるまま「保存」をタップして click が先に届くと、直前の入力を取りこぼす。
+  // どちらも下書きを書くだけで再描画しない(`app.ts`)。checkbox・select は選んだ時点で change が届く。
+  const on = { change: onValue };
+  const onTyped = { change: onValue, input: onValue };
   let control: VNode;
   switch (field.kind) {
     case "checkbox":
       control = h("input", { ...common, type: "checkbox", checked: field.value === true }, [], on);
       break;
     case "textarea":
-      control = h("textarea", { ...common, value: String(field.value), ...(field.maxlength === null ? {} : { maxlength: field.maxlength }) }, [], on);
+      control = h("textarea", { ...common, value: String(field.value), ...(field.maxlength === null ? {} : { maxlength: field.maxlength }) }, [], onTyped);
       break;
     case "select":
       control = h("select", { ...common, value: String(field.value) }, (field.options ?? []).map((o) => h("option", { value: o.value }, [o.label])), on);
       break;
     case "text":
-      control = h("input", { ...common, type: "text", value: String(field.value), ...(field.inputmode === null ? {} : { inputmode: field.inputmode }) }, [], on);
+      control = h("input", { ...common, type: "text", value: String(field.value), ...(field.inputmode === null ? {} : { inputmode: field.inputmode }) }, [], onTyped);
       break;
   }
   const label =

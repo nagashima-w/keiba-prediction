@@ -13,6 +13,8 @@ export interface VNode {
     readonly click?: () => void;
     /** 入力欄の value(文字列)を受け取る。 */
     readonly change?: (value: string) => void;
+    /** 入力のたび(`input` イベント)に、入力欄の value(文字列)を受け取る(Issue #189。文字を打つ欄で、保存の直前の入力を取りこぼさないため)。 */
+    readonly input?: (value: string) => void;
   };
 }
 

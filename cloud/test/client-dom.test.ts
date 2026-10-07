@@ -432,6 +432,19 @@ describe("mount(Issue #189: 入力欄の許可)", () => {
     }
   });
 
+  it("input イベント(入力のたび): handler に、対象の value を文字列で渡す。change とは別のリスナーで、片方だけ指定すればもう片方は付かない(Issue #189: 入力中の値を保存の直前に取りこぼさないため)", () => {
+    const seen: string[] = [];
+    const text = mounted(h("input", { type: "text" }, [], { input: (v) => void seen.push(`input:${v}`) }));
+    expect([...text.listeners.keys()]).toEqual(["input"]); // change は付かない
+    text.listeners.get("input")![0]!({ target: { value: "12" } });
+    const area = mounted(h("textarea", {}, [], { input: (v) => void seen.push(`input:${v}`), change: (v) => void seen.push(`change:${v}`) }));
+    expect([...area.listeners.keys()].sort()).toEqual(["change", "input"]);
+    area.listeners.get("input")![0]!({ target: { value: "a\nb" } });
+    area.listeners.get("change")![0]!({ target: { value: "a\nb!" } });
+    expect(seen).toEqual(["input:12", "input:a\nb", "change:a\nb!"]);
+    expect([...mounted(h("button", {}, ["x"], { click: () => {} })).listeners.keys()]).toEqual(["click"]);
+  });
+
   it("checkbox の change は、チェックの状態を \"true\"・\"false\" で渡す(イベントの value は常に \"on\" なので使わない)。それ以外の input・textarea・select は value を渡す", () => {
     const seen: string[] = [];
     const checkbox = mounted(h("input", { type: "checkbox" }, [], { change: (v) => void seen.push(v) }));

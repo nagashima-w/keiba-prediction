@@ -97,6 +97,10 @@ function build(doc: DomDocument, node: VNode | string): unknown {
       change(isCheckbox ? (event.target?.checked === true ? "true" : "false") : String(event.target?.value ?? "")),
     );
   }
+  if (on?.input !== undefined) {
+    const input = on.input;
+    el.addEventListener("input", (event: { target?: { value?: unknown } }) => input(String(event.target?.value ?? "")));
+  }
   return el;
 }
 
