@@ -276,3 +276,53 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
     expect([...closureOf([verify], { includeTypes: true }).coreFiles].map(relCore)).toContain("ev/analysis-store.ts");
   });
 });
+
+/** コメントを除いたコードに、Node のグローバル(`Buffer`)を使う箇所があるか。型検査(tsc)で、`types: []` の設定では `Cannot find name 'Buffer'` になる。 */
+export function usesNodeGlobal(source: string): boolean {
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  return /\bBuffer\b/.test(code);
+}
+
+/**
+ * Issue #201: **クライアント(cloud/client)の型検査の閉包**(型だけの import も含む)。`tsconfig.client.json` は `types: []`(Node の型なし)で、`paths` は `@keiba/core/*` だけ
+ * (undici・iconv-lite・cheerio への向け先も無い)。**esbuild は型だけの import を消し、木も刈る(バンドルは壊れない)が、tsc は閉包の全体を型検査する**ので、
+ * 型だけの import の先が node 依存(`undici`・`iconv-lite`・`node:zlib`・`Buffer`)に届くと、`packages/core/node_modules` の無い CI 相当の配置だけで TS2307・TS2591 になる
+ * (手元には `packages/core/node_modules` があり、型が解決してしまうので通る。#201 の最初のコミットで CI の「型検査」が落ちた実績。原因は build-prompt.ts → grade-winner-trend.ts〈型だけ〉→ fetch-grade-winner.ts → http-client.ts)。
+ * したがって、クライアントの閉包(型を含む)は、**相対でない指定子を1つも持たない**(`@keiba/core/<サブパス>` は paths で解決される)こと、core・app のモジュールが Node のグローバルを使わないこと。
+ */
+describe("cloud/client の閉包(型だけの import も含む。Issue #201)", () => {
+  const clientSources = readdirSync(path.join(CLOUD, "client"))
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => path.join(CLOUD, "client", f));
+  const { coreFiles, appFiles, bareSpecifiers, unresolvedCoreSpecifiers } = closureOf(clientSources, { includeTypes: true });
+  const relCore = (f: string): string => path.relative(CORE_SRC, f).split(path.sep).join("/");
+
+  it("前提(空振り防止): クライアントのファイルがあり、exe の renderer・core(build-prompt・配分)の閉包を実際に辿れている", () => {
+    expect(clientSources.length).toBeGreaterThan(5);
+    const names = [...coreFiles].map(relCore);
+    expect(names).toContain("analyzer/build-prompt.ts");
+    expect(names).toContain("analyzer/clip-variants.ts");
+    expect(names).toContain("ev/combo-bet-allocation.ts");
+    expect(appFiles.size).toBeGreaterThan(0);
+  });
+
+  it("相対でない指定子(undici・iconv-lite・cheerio・node:*・react など)を、型だけの import でも1つも持たない。`@keiba/core/<サブパス>` は exports にあるものだけ。バレルを経由しない", () => {
+    expect([...bareSpecifiers].sort()).toEqual([]);
+    expect([...unresolvedCoreSpecifiers]).toEqual([]);
+    expect([...coreFiles].map(relCore)).not.toContain("index.ts");
+  });
+
+  it("閉包の core・app のモジュールが、Node のグローバル(Buffer)を使わない", () => {
+    const offenders = [...coreFiles, ...appFiles].filter((f) => usesNodeGlobal(readFileSync(f, "utf-8")));
+    expect(offenders.map((f) => path.relative(path.join(CLOUD, ".."), f).split(path.sep).join("/"))).toEqual([]);
+  });
+
+  it("対照: 検査は、node 依存に届く入口を拾える(空振りでない)。grade-winner-trend.ts(値で fetch-grade-winner → http-client → undici・iconv-lite、parse-grade-winner → node:zlib)を入口にすると、指定子と Buffer が現れる", () => {
+    const entry = path.join(CORE_SRC, "analyzer", "grade-winner-trend.ts");
+    const closure = closureOf([entry], { includeTypes: true });
+    expect([...closure.bareSpecifiers]).toEqual(expect.arrayContaining(["undici", "iconv-lite", "node:zlib"]));
+    expect([...closure.coreFiles].some((f) => usesNodeGlobal(readFileSync(f, "utf-8")))).toBe(true);
+    expect(usesNodeGlobal("const b = Buffer.from(x);")).toBe(true);
+    expect(usesNodeGlobal("// Buffer の話\nconst x = 1;")).toBe(false);
+  });
+});

@@ -180,7 +180,7 @@ export {
 import type { CourseType } from "../scraper/types.js";
 import type { RaceIdVenueKind } from "../scraper/ids.js";
 import { classifyTrackWetness } from "../scorer/derive-features.js";
-import type { GradeWinnerTrendSummary } from "./grade-winner-trend.js";
+import type { GradeWinnerTrendSummary } from "./grade-winner-trend-types.js";
 import type { SameDayTrendSummary } from "./same-day-trend.js";
 import type { TurfWearHint } from "./turf-wear.js";
 import type { BodyWeightTrendSummary } from "./body-weight-trend.js";
