@@ -172,9 +172,9 @@ const ALLOCATION = {
     { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
   ],
 };
-const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠" };
+const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] };
 const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良" };
-const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
+const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
 
 describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
@@ -210,8 +210,134 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
     expect(read({ model: "claude-x", llmNote: null })).toEqual(["claude-x", null]);
   });
 
+  describe("強調材料・懸念事項(Issue #198)", () => {
+    const readHorse = (over: Record<string, unknown>) => parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [{ ...HORSE, ...over }] }));
+    const UNEXPECTED = { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
+
+    it("highlights・concerns は、文字列の配列をそのまま(順序・内容を保って)読む。空配列も読める。片方だけ空でも取り違えない", () => {
+      expect(HORSE.highlights, "前提: 2つの配列の中身が違う(取り違えを検出できる)").not.toEqual(HORSE.concerns);
+      const result = readHorse({ highlights: ["強い", "展開向く", "斤量減"], concerns: [] });
+      expect(result.ok && result.analysis.horses[0]!.highlights).toEqual(["強い", "展開向く", "斤量減"]);
+      expect(result.ok && result.analysis.horses[0]!.concerns).toEqual([]);
+      const swapped = readHorse({ highlights: [], concerns: ["弱い"] });
+      expect(swapped.ok && [swapped.analysis.horses[0]!.highlights, swapped.analysis.horses[0]!.concerns]).toEqual([[], ["弱い"]]);
+    });
+
+    it("項目の中身は加工しない(空文字・引用符・タグ風の文字列も、そのまま文字列として読む。表示側がテキストにする)", () => {
+      const tricky = ["", "<img src=x onerror=alert(1)>", '引用"符"', "改行\nと😀"];
+      const result = readHorse({ highlights: tricky, concerns: tricky });
+      expect(result.ok && result.analysis.horses[0]!.highlights).toEqual(tricky);
+      expect(result.ok && result.analysis.horses[0]!.concerns).toEqual(tricky);
+    });
+
+    const bad: readonly [string, unknown][] = [
+      ["null", null],
+      ["文字列", "追い切り好時計"],
+      ["数値", 3],
+      ["オブジェクト", { 0: "a" }],
+      ["数値の要素が混じる", ["a", 1]],
+      ["null の要素が混じる", ["a", null]],
+      ["配列の要素が混じる", ["a", ["b"]]],
+      ["オブジェクトの要素が混じる", [{ text: "a" }]],
+    ];
+    for (const key of ["highlights", "concerns"] as const) {
+      it(`${key} が欠けたら unexpected(サーバがキーを足し忘れた・名前を変えた)。同じ入力でキーがあれば読める`, () => {
+        expect(readHorse({ [key]: ["a"] }).ok, "前提: キーがあれば読める").toBe(true);
+        expect(readHorse({ [key]: undefined })).toEqual(UNEXPECTED);
+      });
+      for (const [name, value] of bad) {
+        it(`${key} が ${name} なら unexpected(黙って空にしない)`, () => {
+          expect(readHorse({ [key]: value })).toEqual(UNEXPECTED);
+        });
+      }
+    }
+
+    it("2頭目だけ不正でも unexpected(1頭目だけを黙って返さない)", () => {
+      const body = wrap({ ...ANALYSIS, horses: [HORSE, { ...HORSE, umaban: 2, concerns: "x" }] });
+      expect(parseAnalysisResponse(200, body)).toEqual(UNEXPECTED);
+      expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [HORSE, { ...HORSE, umaban: 2 }] })).ok, "前提: 2頭目が正常なら読める").toBe(true);
+    });
+  });
+
+  describe("llmCalls(Issue #198)", () => {
+    const CALL = { ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null };
+    const FAILED_CALL = { ok: false, ms: 180_001, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "種別=timeout" };
+    const readCalls = (llmCalls: unknown) => parseAnalysisResponse(200, wrap({ ...ANALYSIS, llmCalls }));
+    const UNEXPECTED = { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
+
+    it("null は null(LLM を呼ばなかった・旧い分析)。配列は、順序を保って全要素をそのまま読む(成功・失敗・再生)", () => {
+      const nul = readCalls(null);
+      expect(nul.ok && nul.analysis.llmCalls).toBeNull();
+      const calls = [FAILED_CALL, CALL, { ...CALL, replayed: true, ms: null, inputTokens: null, outputTokens: null }];
+      const result = readCalls(calls);
+      expect(result.ok && result.analysis.llmCalls).toEqual(calls);
+    });
+
+    it("空配列は受け付ける(読めて、空配列のまま。サーバは空配列を返さないが、想定外にはしない)", () => {
+      const result = readCalls([]);
+      expect(result.ok).toBe(true);
+      expect(result.ok && result.analysis.llmCalls).toEqual([]);
+    });
+
+    it("llmCalls のキーが欠けたら unexpected(サーバがキーを足し忘れた・名前を変えた)。null があれば読める", () => {
+      expect(readCalls(null).ok, "前提: null なら読める").toBe(true);
+      expect(readCalls(undefined)).toEqual(UNEXPECTED);
+    });
+
+    it("要素の余計なキーは持ち込まない(許可したキーだけを写す)", () => {
+      const result = readCalls([{ ...CALL, secret: "x" }]);
+      expect(result.ok && result.analysis.llmCalls).toEqual([CALL]);
+    });
+
+    const badTop: readonly [string, unknown][] = [
+      ["文字列", "[]"],
+      ["オブジェクト", { 0: CALL }],
+      ["数値", 1],
+      ["要素が null", [CALL, null]],
+      ["要素が配列", [CALL, []]],
+      ["要素が文字列", ["x"]],
+    ];
+    for (const [name, value] of badTop) {
+      it(`llmCalls が ${name} なら unexpected`, () => {
+        expect(readCalls(value)).toEqual(UNEXPECTED);
+      });
+    }
+
+    // 要素の各キー: 欠落・型違いは、どれも全体を unexpected にする(2件目だけ不正でも、1件目だけを黙って返さない)
+    const badKeys: readonly [string, unknown][] = [
+      ["ok", "true"],
+      ["ok", undefined],
+      ["ok", null],
+      ["ms", "41"],
+      ["ms", undefined],
+      ["ms", Number.NaN],
+      ["ms", Number.POSITIVE_INFINITY],
+      ["inputTokens", "1"],
+      ["inputTokens", undefined],
+      ["outputTokens", "1"],
+      ["outputTokens", undefined],
+      ["outputTokens", Number.NaN],
+      ["stopReason", 3],
+      ["stopReason", undefined],
+      ["model", 3],
+      ["model", undefined],
+      ["replayed", 1],
+      ["replayed", undefined],
+      ["replayed", null],
+      ["error", 3],
+      ["error", undefined],
+    ];
+    for (const [key, value] of badKeys) {
+      it(`2件目の ${key} が ${value === undefined ? "欠落" : JSON.stringify(value) ?? String(value)} なら unexpected(1件目だけを黙って返さない)`, () => {
+        const broken = { ...CALL, [key]: value };
+        expect(readCalls([CALL, CALL]).ok, "前提: 正常な2件なら読める").toBe(true);
+        expect(readCalls([CALL, broken])).toEqual(UNEXPECTED);
+      });
+    }
+  });
+
   it("配分なし(null)・馬の null(名前・オッズ・EV・印)・detail の 3 値を保つ", () => {
-    const horse = { ...HORSE, name: null, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null };
+    const horse = { ...HORSE, name: null, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [] };
     for (const detail of ["present", "missing", "none"] as const) {
       const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, allocation: null, horses: [horse], detail }));
       expect(result.ok && result.analysis.detail).toBe(detail);

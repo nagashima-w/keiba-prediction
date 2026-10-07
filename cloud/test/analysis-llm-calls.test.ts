@@ -5,7 +5,8 @@ import { createAnalysisSink } from "../src/analysis-sink";
 import type { LlmCallRecord } from "../src/llm-calls";
 import { R2_FENCE_LIMITS } from "../src/r2-fence";
 import { contractCases } from "./fixtures-contract";
-import { openLocalBindings, type LocalBindings } from "./local-bindings";
+import { detailKeyOf } from "../src/analysis-detail";
+import { openLocalBindings, spyBucket, type LocalBindings } from "./local-bindings";
 
 /**
  * Issue #197(#196-a 段2): LLM 呼び出しの記録(`analyses.llm_calls_json`。migration 0007。cloud 専用の列)の永続化。
@@ -181,6 +182,62 @@ describe("読み出し: 詳細に llmCalls が載る。一覧には載せない�
     const result = (await s.getAnalysisDetail(saved.id))!;
     expect(result.detail).toBe("none");
     expect(result.llmCalls).toEqual([OK]);
+  });
+
+  /**
+   * Issue #198(#197 の【記録】R1): `getAnalysisDetail` が `detail: "missing"` を返す経路は、Class B の柵に達した場合と、R2 の詳細が読めない場合(無い・壊れている・get が例外)。
+   * どの経路でも、`llmNote`・`llmCalls`・馬の `highlights`・`concerns` は **D1 の値のまま**返る(R2 の状態に依らない)。
+   * 保存する値はすべて null・空でない値にする(null・[] にされる変異を検出するため)。`missing` であること自体を、各ケースの先頭で無条件に固定する。
+   */
+  const MISSING_NOW = () => new Date("2026-10-06T12:00:00Z");
+  type Bucket = ConstructorParameters<typeof D1AnalysisStore>[0]["bucket"];
+  const MISSING_CASES: readonly [string, (id: number) => Promise<Bucket>][] = [
+    [
+      "(a) Class B の柵に達した(上限ちょうど)",
+      async () => {
+        await local.db.prepare("INSERT OR REPLACE INTO r2_ops (ym, class_a, class_b) VALUES (?, 1, ?)").bind(202610, R2_FENCE_LIMITS.classB).run();
+        return local.r2;
+      },
+    ],
+    [
+      "(b) R2 のオブジェクトが無い",
+      async (id) => {
+        await local.r2.delete(detailKeyOf(id));
+        return local.r2;
+      },
+    ],
+    [
+      "(c) R2 のオブジェクトが壊れている(復号できない)",
+      async (id) => {
+        await local.r2.put(detailKeyOf(id), new Uint8Array([1, 2, 3, 4, 5]));
+        return local.r2;
+      },
+    ],
+    ["(d) R2 の get が例外", async () => spyBucket(local.r2, { failGet: true }).bucket],
+  ];
+
+  it.each(MISSING_CASES)("detail: missing の経路 %s でも、llmNote・llmCalls・馬の highlights・concerns は D1 の値のまま返る", async (_name, prepare) => {
+    const base = mkRecord(1).horses[0]!;
+    const record: AnalysisRecord = {
+      ...mkRecord(1),
+      rawResponse: "R2 にだけある応答",
+      horses: [
+        { ...base, umaban: 1, highlights: ["追い切り好時計"], concerns: ["距離延長"] },
+        { ...base, umaban: 2, highlights: ["内枠有利", "展開向く"], concerns: [] },
+      ],
+    };
+    const saved = await store(MISSING_NOW).saveAnalysis(record, { llmNote: NOTE, llmCalls: [FAILED, REPLAYED] });
+    expect(saved.detail, "前提: R2 に詳細を保存した(その後に各経路を作る)").toBe("stored");
+    const bucket = await prepare(saved.id);
+    const result = (await new D1AnalysisStore({ db: local.db, bucket, now: MISSING_NOW }).getAnalysisDetail(saved.id))!;
+    expect(result.detail).toBe("missing");
+    expect(result.analysis.rawResponse, "前提: R2 にだけある中身(応答)は使っていない").toBeNull();
+    expect(result.llmNote).toBe(NOTE);
+    expect(result.llmCalls).toEqual([FAILED, REPLAYED]);
+    expect(result.analysis.horses.map((h) => [h.umaban, h.highlights, h.concerns])).toEqual([
+      [1, ["追い切り好時計"], ["距離延長"]],
+      [2, ["内枠有利", "展開向く"], []],
+    ]);
   });
 
   it("壊れた値(JSON でない・配列でない)が入っていても、例外にせず null(手で入れた値・旧い行)", async () => {

@@ -7,6 +7,8 @@
  *  - **補正後の3着内率・根拠は、LLM が効いたとき(モデル ID があるとき)だけ**出す(Issue #195。exe は LLM なしでも「3着内率」「AI補正後」を常に両方出すが、cloud はスマホの縦カードで、
  *    LLM なしでは補正後が 3着内率〈prior〉と同じ値になり同じ値が重なるだけなので省く。LLM を使うと EV は補正後の確率から計算されるので、効いたときは両方出して EV と噛み合わせる)。
  *    根拠が null・空の馬は、その行を出さない
+ *  - **強調材料・懸念事項は、根拠と同じく LLM が効いたとき(モデル ID があるとき)だけ**出す(Issue #198)。空(項目なし・空文字だけ)なら、その塊ごと出さない
+ *  - **LLM の所要時間・usage は、記録(`llmCalls`)があれば、モデルの有無に関係なく**出す(Issue #198。全回が失敗してフォールバックした分析でも、時間と失敗の回数を確かめたい)。集計は `llm-usage.ts`
  *  - 分析モデルが null(または空)なら「LLM 未使用(統計のみ)」。**理由(`llmNote`)は、モデルの有無に関係なく null でなければ出す**(キー未登録・フォールバック・印の制約違反。固定文言)
  *  - EV プラスの強調はサーバの `isPositive` に従う(クライアントで EV から再計算しない)。推定 EV(`evEstimated`)は接尾辞「(推定)」で区別する
  *  - 配分は exe の `buildAllocationProposalView` を流用する(文言・券種ラベル・実効設定を exe と揃える)。**配分の行が無い(null)ときは、exe の関数を呼ばず cloud 専用の文言**
@@ -20,10 +22,14 @@ import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-a
 import { formatEstimatedEvSuffix, formatEv, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_PRIOR, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
+import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
 import { buildHash, type Route } from "./route";
 
 /** 画面のラベル(exe の共有定数。`view.ts` は renderer を import しない=ここを通す)。 */
 export { LABEL_ADJUSTED_PROB, LABEL_PRIOR };
+/** 強調材料・懸念事項のラベル(Issue #198。exe の表示〈#199〉と揃えたくなったら、そのとき共有定数へ移す)。 */
+export const LABEL_HIGHLIGHTS = "強調材料";
+export const LABEL_CONCERNS = "懸念事項";
 
 export type ResultSource =
   | { readonly kind: "loading" }
@@ -52,6 +58,10 @@ export interface HorseCard {
   readonly adjusted: string | null;
   /** LLM の根拠。LLM が効いていて、根拠が空でないときだけ(null・空文字は null)。 */
   readonly reason: string | null;
+  /** LLM の強調材料(各最大3項目)。**LLM が効いたとき(モデル ID があるとき)だけ**。空文字・空白だけの項目は捨てる。無ければ `[]`(塊ごと出さない)。外から来た文字列(画面ではテキストとしてだけ入れる)。 */
+  readonly highlights: readonly string[];
+  /** LLM の懸念事項(仕様は highlights と同じ)。 */
+  readonly concerns: readonly string[];
   /** 複勝オッズの下限(欠損は「-」)。 */
   readonly odds: string;
   /** EV(欠損は「-」。推定なら接尾辞「(推定)」)。 */
@@ -73,6 +83,8 @@ export interface ResultContent {
   readonly model: string;
   /** LLM が使われなかった・一部しか使われなかった理由(サーバの固定文言)。モデルの有無に関係なく、null でなければ出す。 */
   readonly llmNote: string | null;
+  /** LLM の所要時間・usage(要約の1行と警告。記録が無い〈呼ばなかった・旧い分析・空配列〉ときは null)。モデルの有無に関係なく、記録があれば出す。 */
+  readonly llmUsage: LlmUsageView | null;
   /** 印の凡例(exe の `MARK_LEGEND`)。印が1頭でもあるときだけ。 */
   readonly markLegend: string | null;
   readonly detailNote: string | null;
@@ -111,6 +123,9 @@ function allocationOf(a: AnalysisDetail): AllocationSection {
   return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows };
 }
 
+/** 強調材料・懸念事項の項目(空文字・空白だけは捨てる。文字列は加工しない)。 */
+const pointsOf = (items: readonly string[]): readonly string[] => items.filter((item) => item.trim() !== "");
+
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。 */
 export function contentOf(a: AnalysisDetail): ResultContent {
   // LLM が効いたか = モデル ID があるか(exe の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
@@ -120,6 +135,7 @@ export function contentOf(a: AnalysisDetail): ResultContent {
     analyzedAt: formatJstDateTime(a.analyzedAt),
     model: llmEffective ? a.model! : MODEL_NONE_TEXT,
     llmNote: a.llmNote,
+    llmUsage: a.llmCalls !== null && a.llmCalls.length > 0 ? buildLlmUsage(a.llmCalls) : null,
     markLegend: a.horses.some((h) => h.mark !== null) ? MARK_LEGEND : null,
     detailNote: detailNoteOf(a.detail),
     horses: a.horses.map((h) => ({
@@ -129,6 +145,8 @@ export function contentOf(a: AnalysisDetail): ResultContent {
       prior: formatPercent(h.prior),
       adjusted: llmEffective ? formatPercent(h.adjustedProb) : null,
       reason: llmEffective && h.reason !== null && h.reason !== "" ? h.reason : null,
+      highlights: llmEffective ? pointsOf(h.highlights) : [],
+      concerns: llmEffective ? pointsOf(h.concerns) : [],
       odds: formatOdds(h.placeOddsMin),
       ev: h.ev === null ? formatEv(null) : `${formatEv(h.ev)}${formatEstimatedEvSuffix(a.evEstimated)}`,
       positive: h.isPositive,

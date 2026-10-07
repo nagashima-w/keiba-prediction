@@ -127,6 +127,13 @@ export function renderPage(email: string): string {
   .horse-line { font-size: 0.9rem; }
   .horse-reason { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
   .ev-plus { margin-left: 8px; color: var(--ok); }
+  /* Issue #198: 馬ごとの強調材料・懸念事項(ラベルと箇条書き。色だけに頼らない=ラベルの文字がある)と、LLM の所要時間・usage の警告 */
+  .horse-points { margin-top: 4px; padding-left: 8px; border-left: 3px solid var(--line); }
+  .horse-points.highlights { border-left-color: var(--ok); }
+  .horse-points.concerns { border-left-color: var(--wait); }
+  .points-label { display: block; font-size: 0.8rem; font-weight: bold; color: var(--muted); }
+  .points-list { margin: 0; padding-left: 1.2em; font-size: 0.85rem; overflow-wrap: anywhere; }
+  .notice.llm-usage-warn { margin: 4px 0; padding: 4px 12px; font-size: 0.85rem; border-color: var(--wait); color: var(--wait); }
   .settings small { color: var(--muted); }
   /* Issue #186: 起動のボタン・追跡の停止の注記(「状態を更新」)・カードの補足 */
   .run { display: block; width: 100%; margin-top: 8px; }

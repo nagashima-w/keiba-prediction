@@ -296,10 +296,11 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     evEstimated: false,
     model: null,
     llmNote: null,
+    llmCalls: null,
     race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
     horses: [
-      { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.25, isPositive: true, mark: "◎", reason: null },
-      { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null },
+      { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.25, isPositive: true, mark: "◎", reason: null, highlights: [], concerns: [] },
+      { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [] },
     ],
     allocation: null,
     detail: "present",
@@ -556,7 +557,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
     const a = analysis({
       id: 7,
       model: PAYLOAD,
-      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD }],
+      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD, highlights: [], concerns: [] }],
     });
     const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("pre_race", "done", { analysisId: 7 })], prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
     expect(byClass(tree, "horse")).toHaveLength(1); // 前提: カードの中に馬が出ている
@@ -569,7 +570,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
     const a = analysis({
       model: PAYLOAD,
       race: { venueName: PAYLOAD, raceNumber: 11, raceName: PAYLOAD },
-      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD }],
+      horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD, highlights: [], concerns: [] }],
     });
     const { tags, texts } = mountAll(resultTree(a));
     expect(tags.filter((t) => ["img", "script", "svg", "iframe", "style"].includes(t))).toEqual([]);
@@ -826,11 +827,11 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
   const NO_KEY = "LLM の API キーが未登録のため、LLM を使わず統計のみで分析しました";
   const MARKS = "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)";
   const llmHorses: AnalysisDetail["horses"] = [
-    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い" },
-    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: null },
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い", highlights: [], concerns: [] },
+    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: null, highlights: [], concerns: [] },
   ];
   const noLlmHorses: AnalysisDetail["horses"] = [
-    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 0.36, isPositive: false, mark: null, reason: null },
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 0.36, isPositive: false, mark: null, reason: null, highlights: [], concerns: [] },
   ];
   const cardTree = (a: AnalysisDetail): VNode => {
     const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
@@ -898,6 +899,128 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
         const { tags, texts } = mountAll(tree(a));
         expect(tags.filter((t) => ["img", "script", "svg", "iframe", "style"].includes(t))).toEqual([]);
         expect(texts.filter((t) => t.includes("<img")).length).toBeGreaterThanOrEqual(2); // 根拠・理由(モデル名なし。馬名は通常の文字)
+      });
+    });
+  }
+});
+
+/**
+ * Issue #198: 馬ごとの強調材料・懸念事項と、LLM の所要時間・usage。結果画面と発走前のカードの中(`resultSections`・`resultMeta` を共有)の**両方**で同じ表示になること。
+ *  - 強調材料・懸念事項は、根拠の行の下。ラベルと箇条書き(`ul`/`li`)。LLM が効いたとき(モデル ID があるとき)だけ。空ならその塊ごと出さない
+ *  - 所要時間・usage は、「分析モデル」の行の下(要約の1行。警告は該当するときだけ別の行)。理由(`llmNote`)より上
+ *  - 外から来た文字列は、テキストノードだけ(要素を作らない)
+ */
+describe("強調材料・懸念事項・LLM の usage の表示(Issue #198。結果画面とカードの中の両方)", () => {
+  const POINT_HORSES: AnalysisDetail["horses"] = [
+    { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.25, placeOddsMin: 1.8, ev: 1.35, isPositive: true, mark: "◎", reason: "調教の動きが良い", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] },
+    { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: 3, ev: 0.27, isPositive: false, mark: null, reason: "特筆なし", highlights: [], concerns: ["外枠", "休み明け"] },
+    { umaban: 3, name: "チャーリー", prior: 0.1, adjustedProb: 0.1, placeOddsMin: 4, ev: 0.4, isPositive: false, mark: null, reason: null, highlights: [], concerns: [] },
+  ];
+  const CALL = { ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null } as const;
+  const cardTree = (a: AnalysisDetail): VNode => {
+    const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
+    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a } })), noopActions);
+  };
+  const screens: readonly [string, (a: AnalysisDetail) => VNode][] = [
+    ["結果画面", resultTree],
+    ["発走前のカードの中", cardTree],
+  ];
+
+  for (const [name, tree] of screens) {
+    describe(name, () => {
+      it("LLM が効いたとき: 根拠の行の下に、強調材料・懸念事項のラベルと箇条書き(ul > li)。順序のまま。取り違えない", () => {
+        const cards = byClass(tree(analysis({ model: "claude-x", horses: POINT_HORSES })), "horse");
+        expect(cards).toHaveLength(3);
+        const first = cards[0]!;
+        const highlights = byClass(first, "highlights");
+        const concerns = byClass(first, "concerns");
+        expect(highlights).toHaveLength(1);
+        expect(concerns).toHaveLength(1);
+        expect(byClass(highlights[0]!, "points-label").map(textOf)).toEqual(["強調材料"]);
+        expect(byClass(concerns[0]!, "points-label").map(textOf)).toEqual(["懸念事項"]);
+        // ul の直下が li(項目ごとに1つ。順序のまま)
+        const hUl = findAll(highlights[0]!, (n) => n.tag === "ul");
+        expect(hUl).toHaveLength(1);
+        expect(hUl[0]!.children!.map((c) => (typeof c === "string" ? "text" : c.tag))).toEqual(["li", "li"]);
+        expect(hUl[0]!.children!.map(textOf)).toEqual(["追い切り好時計", "内枠有利"]);
+        const cUl = findAll(concerns[0]!, (n) => n.tag === "ul");
+        expect(cUl[0]!.children!.map(textOf)).toEqual(["距離延長"]);
+        // 根拠の行より下(馬のカードの中の並び)
+        const text = textOf(first);
+        expect(text.indexOf("根拠 調教の動きが良い")).toBeGreaterThan(-1);
+        expect(text.indexOf("強調材料")).toBeGreaterThan(text.indexOf("根拠 調教の動きが良い"));
+        expect(text.indexOf("懸念事項")).toBeGreaterThan(text.indexOf("強調材料"));
+      });
+
+      it("片方だけ空の馬は、空でない側だけ出す。両方空の馬は、塊を一切出さない(ラベルも出ない)", () => {
+        const cards = byClass(tree(analysis({ model: "claude-x", horses: POINT_HORSES })), "horse");
+        expect(byClass(cards[1]!, "highlights")).toHaveLength(0);
+        expect(byClass(cards[1]!, "concerns")).toHaveLength(1);
+        expect(textOf(cards[1]!)).not.toContain("強調材料");
+        expect(findAll(cards[1]!, (n) => n.tag === "ul")[0]!.children!.map(textOf)).toEqual(["外枠", "休み明け"]);
+        expect(byClass(cards[2]!, "horse-points")).toHaveLength(0);
+        expect(textOf(cards[2]!)).not.toMatch(/強調材料|懸念事項/);
+        expect(findAll(cards[2]!, (n) => n.tag === "ul")).toHaveLength(0);
+      });
+
+      it("LLM なし(モデル null)では、データに項目があっても塊は出ない(ラベルも項目の文字も)", () => {
+        const t = tree(analysis({ model: null, horses: POINT_HORSES }));
+        expect(POINT_HORSES[0]!.highlights.length, "前提: データに項目がある").toBeGreaterThan(0);
+        expect(byClass(t, "horse")).toHaveLength(3);
+        expect(byClass(t, "horse-points")).toHaveLength(0);
+        expect(textOf(t)).not.toMatch(/強調材料|懸念事項|追い切り好時計|距離延長|外枠/);
+      });
+
+      it("悪意のある文字列(強調材料・懸念事項)は、解釈されずテキストになる(要素を作らない)", () => {
+        const PAYLOAD = "<img src=x onerror=alert(1)>";
+        const horses: AnalysisDetail["horses"] = [{ ...POINT_HORSES[0]!, highlights: [PAYLOAD], concerns: [PAYLOAD] }];
+        const t = tree(analysis({ model: "claude-x", horses }));
+        expect(byClass(t, "horse-points")).toHaveLength(2); // 前提: 塊が出ている
+        const { tags, texts } = mountAll(t);
+        expect(tags.filter((x) => ["img", "script", "svg", "iframe", "style"].includes(x))).toEqual([]);
+        expect(texts.filter((x) => x === PAYLOAD)).toHaveLength(2);
+      });
+
+      it("LLM の usage: 記録があれば、分析モデルの行の下・理由の注記の上に、要約の1行。馬一覧より前", () => {
+        const NOTE = "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)";
+        const t = tree(analysis({ model: "claude-x", llmNote: NOTE, llmCalls: [CALL], horses: POINT_HORSES }));
+        const usage = byClass(t, "llm-usage");
+        expect(usage.map(textOf)).toEqual(["LLM: 1回・41秒・入力 15,001・出力(思考を含む) 6,020 トークン"]);
+        expect(byClass(t, "llm-usage-warn")).toHaveLength(0); // 警告なし(問題のない1回)
+        const all = textOf(t);
+        expect(all.indexOf("分析モデル")).toBeGreaterThan(-1);
+        expect(all.indexOf("LLM: 1回")).toBeGreaterThan(all.indexOf("分析モデル"));
+        expect(all.indexOf(NOTE)).toBeGreaterThan(all.indexOf("LLM: 1回"));
+        expect(all.indexOf("LLM: 1回")).toBeLessThan(all.indexOf("馬ごとの評価"));
+      });
+
+      it("LLM の usage: 警告は該当する行だけ(切り詰め・失敗・再生)。要約とは別の要素で、1件ずつ", () => {
+        const calls = [{ ...CALL, stopReason: "max_tokens", outputTokens: 16_000 }, { ok: false, ms: 5_000, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "種別=timeout" }, { ...CALL, replayed: true }];
+        const t = tree(analysis({ model: "claude-x", llmCalls: calls }));
+        expect(byClass(t, "llm-usage")).toHaveLength(1);
+        expect(byClass(t, "llm-usage-warn").map(textOf)).toEqual([
+          "出力の上限に達して途中で切れた呼び出しが 1 回ありました",
+          "失敗した呼び出しが 1 回ありました",
+          "うち 1 回は、前の実行で記録した応答を再生したものです(時間・トークン数は元の呼び出しの値)",
+        ]);
+      });
+
+      it("LLM の usage: 記録なし(null・空配列)なら要素が出ない。モデルが null でも、記録があれば出る(全回が失敗したフォールバック)", () => {
+        expect(byClass(tree(analysis({ model: "claude-x", llmCalls: null })), "llm-usage")).toHaveLength(0);
+        expect(byClass(tree(analysis({ model: "claude-x", llmCalls: [] })), "llm-usage")).toHaveLength(0);
+        const failed = { ok: false, ms: 180_001, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "種別=timeout" } as const;
+        const t = tree(analysis({ model: null, llmCalls: [failed, failed] }));
+        expect(byClass(t, "llm-usage").map(textOf)).toEqual(["LLM: 2回・6分00秒"]);
+        expect(byClass(t, "llm-usage-warn").map(textOf)).toEqual(["失敗した呼び出しが 2 回ありました"]);
+      });
+
+      it("LLM の usage: 記録の外から来た文字列(stopReason・model・error)は画面のどこにも出ない", () => {
+        const PAYLOAD = "<img src=x onerror=alert(1)>";
+        const t = tree(analysis({ model: "claude-x", llmCalls: [{ ...CALL, stopReason: PAYLOAD, model: PAYLOAD, error: PAYLOAD }] }));
+        expect(byClass(t, "llm-usage")).toHaveLength(1); // 前提: usage は出ている
+        const { tags, texts } = mountAll(t);
+        expect(tags.filter((x) => ["img", "script", "svg", "iframe", "style"].includes(x))).toEqual([]);
+        expect(texts.filter((x) => x.includes("<img"))).toEqual([]);
       });
     });
   }

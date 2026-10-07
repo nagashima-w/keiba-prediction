@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.20.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.20.1)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.20.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.20.1`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1247,6 +1247,13 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **取得関数**: `AnalysisDetail.llmNote`(`string | null`。欠けたら想定外の応答。過去の分析は null で通る)。
 - **文言**: カードの説明(発走前)は「API キーがあれば LLM が3着内率を補正して印と根拠を付け(EV は補正後の値で計算)、キーが無い間は統計のみ」(116 文字)。設定の追加指示・クリップ幅の補助文は「発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません」。**画面に Issue 番号は出さない。**
 - **検査**: `cloud/test/client-result.test.ts`・`client-view.test.ts`(結果画面とカードの両方)・`client-api-analysis.test.ts`・`client-api-analysis-contract.test.ts`・`client-race.test.ts`・`client-settings-form.test.ts`。
+
+### クラウド版の画面に強調材料・懸念事項と LLM の usage を出す(#198〈#196-c〉。v1.20.1)
+変更は `cloud/` のクライアントと `page.ts` の CSS だけ(サーバ・D1・core・exe は無変更)。詳細は `cloud/README.md` の「スマホ画面に強調材料・懸念事項と LLM の usage を出す」。
+- **強調材料・懸念事項**: 馬のカードの根拠の行の下に、ラベルと箇条書き。LLM が効いたとき(モデル ID があるとき)だけ。空の側は塊ごと出さない。
+- **LLM の所要時間・usage**: 「分析モデル」の行の下に「LLM: 2回・2分11秒・入力 …・出力(思考を含む) … トークン」の1行。記録があればモデルの有無に関係なく出す。件数・時間・トークンは再生分も含めて合計(再生の1件が元の呼び出しの唯一の記録)。切り詰め(`max_tokens`)・拒否・失敗・再生・記録の欠けは、該当するときだけ警告の行。
+- **取得関数**: `highlights`・`concerns`・`llmCalls` の欠落・型違いは想定外の応答(空配列の `llmCalls` は受け付ける)。
+- **検査**: `cloud/test/client-llm-usage.test.ts`・`client-result.test.ts`・`client-view.test.ts`(結果画面とカードの両方)・`client-api-analysis.test.ts`・`client-api-analysis-contract.test.ts`・`analysis-llm-calls.test.ts`(R1)。
 
 ### クラウド版の LLM の土台(#193〈#179-a〉。v1.19.24。**挙動は変えない**)
 変更は `cloud/` と core の依存の口だけ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「LLM の土台」。**#193 の時点では、本番の入口は LLM を呼ばなかった**(実行本体は #194〈#179-b〉、画面は #195〈#179-c〉。#194 の b1 で、発走前の分析が LLM を使うようになった。詳細は `cloud/README.md` の「発走前の分析の LLM」。公開は b2 の完了後)。

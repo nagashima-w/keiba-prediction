@@ -17,7 +17,7 @@ const RACE_ID = "202603020211";
 const ROUTE: Route = { date: "20260628", venue: "central", race: null, analysis: 7, settings: false };
 
 function horse(umaban: number, over: Partial<AnalysisHorse> = {}): AnalysisHorse {
-  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark: null, reason: null, ...over };
+  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], ...over };
 }
 
 const ALLOCATION = {
@@ -53,6 +53,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     evEstimated: false,
     model: null,
     llmNote: null,
+    llmCalls: null,
     race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
     horses: [horse(1), horse(2)],
     allocation: { ...ALLOCATION, bets: [...ALLOCATION.bets] },
@@ -130,6 +131,69 @@ describe("馬のカード", () => {
 
   it("根拠が空文字の馬は、根拠の行を出さない(null)", () => {
     expect(content(analysis({ model: "claude-x", horses: [horse(1, { reason: "" })] })).horses[0]!.reason).toBeNull();
+  });
+
+  describe("強調材料・懸念事項(Issue #198)。LLM が効いたとき(モデル ID があるとき)だけ", () => {
+    const withPoints = (over: Partial<AnalysisHorse> = {}) => horse(1, { highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], ...over });
+
+    it("LLM が効いたとき: 項目を順序のまま、強調材料と懸念事項を取り違えずに出す", () => {
+      const h = content(analysis({ model: "claude-x", horses: [withPoints()] })).horses[0]!;
+      expect(h.highlights).toEqual(["追い切り好時計", "内枠有利"]);
+      expect(h.concerns).toEqual(["距離延長"]);
+    });
+
+    it("LLM なし(モデル null・空文字): データに項目があっても、強調材料・懸念事項は空(画面のデータのどこにも無い)", () => {
+      for (const model of [null, ""]) {
+        const a = analysis({ model, horses: [withPoints()] });
+        expect(a.horses[0]!.highlights.length, "前提: データには項目がある(空でないと、出ていないことを検出できない)").toBeGreaterThan(0);
+        const model2 = buildResultModel({ route: ROUTE, source: ready(a) });
+        const h = model2.content!.horses[0]!;
+        expect([h.highlights, h.concerns], `model=${JSON.stringify(model)}`).toEqual([[], []]);
+        const text = JSON.stringify(model2);
+        expect(text).not.toContain("追い切り好時計");
+        expect(text).not.toContain("距離延長");
+      }
+    });
+
+    it("空文字・空白だけの項目は捨てる(空の箇条書きを出さない)。ほかの項目は文字列を加工せずそのまま", () => {
+      const h = content(analysis({ model: "claude-x", horses: [withPoints({ highlights: ["", "  ", " 前後に空白 ", "強み"], concerns: ["\t", ""] })] })).horses[0]!;
+      expect(h.highlights).toEqual([" 前後に空白 ", "強み"]);
+      expect(h.concerns).toEqual([]);
+    });
+
+    it("馬ごとに独立(項目のある馬・片方だけの馬・両方空の馬)", () => {
+      const c = content(analysis({ model: "claude-x", horses: [withPoints(), horse(2, { highlights: [], concerns: ["外枠"] }), horse(3)] }));
+      expect(c.horses.map((h) => [h.highlights.length, h.concerns.length])).toEqual([
+        [2, 1],
+        [0, 1],
+        [0, 0],
+      ]);
+    });
+  });
+
+  describe("LLM の所要時間・usage(Issue #198)", () => {
+    const CALL = { ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null } as const;
+    const FAILED = { ok: false, ms: 180_001, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "種別=timeout" } as const;
+
+    it("記録があれば、モデルの有無に関係なく出す(全回が失敗してフォールバックした分析は、モデルが null でも時間と失敗回数を見たい)", () => {
+      const effective = content(analysis({ model: "claude-x", llmCalls: [CALL] })).llmUsage;
+      expect(effective).toEqual({ summary: "LLM: 1回・41秒・入力 15,001・出力(思考を含む) 6,020 トークン", warnings: [] });
+      const failedAll = content(analysis({ model: null, llmCalls: [FAILED, FAILED] })).llmUsage;
+      expect(failedAll).toEqual({ summary: "LLM: 2回・6分00秒", warnings: ["失敗した呼び出しが 2 回ありました"] });
+    });
+
+    it("記録なし(null: LLM を呼ばなかった・旧い分析)・空配列は null(何も出さない)", () => {
+      expect(content(analysis({ model: null, llmCalls: null })).llmUsage).toBeNull();
+      expect(content(analysis({ model: "claude-x", llmCalls: null })).llmUsage).toBeNull();
+      expect(content(analysis({ model: "claude-x", llmCalls: [] })).llmUsage).toBeNull();
+    });
+
+    it("再生・切り詰めは合計に含めたうえで警告になる(buildLlmUsage の結果と同じ)", () => {
+      const calls = [{ ...CALL, stopReason: "max_tokens", outputTokens: 16_000 }, { ...CALL, replayed: true }];
+      const u = content(analysis({ model: "claude-x", llmCalls: calls })).llmUsage!;
+      expect(u.summary).toContain("LLM: 2回");
+      expect(u.warnings).toHaveLength(2);
+    });
   });
 
   it("オッズ・EV が null なら「-」(EV が null のときは推定の接尾辞も付けない)", () => {

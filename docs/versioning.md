@@ -2831,6 +2831,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB は、NULL 可の列を2つ足しただけ(旧い分析は `[]` で読める。旧い版の exe がこの DB を開いても、知らない列は無視される)。設定・エクスポート JSON・IPC の後方非互換は無い(エクスポートへの追加は #199)。
 
+## 次の正式版が 1.20.1 である根拠(Issue #198〈#196-c〉での変更)
+
+**patch**(クラウド版の画面に、強調材料・懸念事項と LLM の所要時間・usage を出す。exe のアプリコードは無変更)。
+
+### 変更内容
+
+- cloud: 結果の表示(結果画面と発走前のカードの中)に、馬ごとの強調材料・懸念事項(ラベルと箇条書き。LLM が効いたときだけ。空なら塊ごと出さない)と、LLM の所要時間・usage(「LLM: 2回・2分11秒・入力 …・出力(思考を含む) … トークン」の1行と、切り詰め・拒否・失敗・再生・記録の欠けの警告)を出す。`api-analysis.ts` の型とパーサに `highlights`・`concerns`・`llmCalls`(欠落・型違いは想定外の応答)。集計は `client/llm-usage.ts`。
+- cloud(テストのみ): #197 の【記録】R1。`getAnalysisDetail` が `detail: "missing"` を返す経路(Class B の柵・R2 のオブジェクトが無い・壊れている・get が例外)で、`llmNote`・`llmCalls`・馬の `highlights`・`concerns` が D1 の値のまま返ることを固定した。
+- 文書: `cloud/README.md`・`docs/current-spec.md`。
+
+### patch である根拠
+
+- exe の利用者から見て変わるものが無い(クラウド版の画面だけ)。サーバ・D1・core のコードは変えていない。前例: #177〜#195 のクラウド版の変更も patch で運用してきた(ゲート決定 2026-10-07。cloud の機能追加は patch で通す)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。`GET /api/analyses/{id}` の応答は #197 から変わらない。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

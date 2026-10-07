@@ -7,7 +7,7 @@
 import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
-import { LABEL_ADJUSTED_PROB, LABEL_PRIOR, type HorseCard, type ResultContent, type ResultModel } from "./result";
+import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type ResultContent, type ResultModel } from "./result";
 import type { FieldModel, SettingsModel } from "./settings-form";
 import { h, type VNode } from "./vnode";
 
@@ -196,15 +196,22 @@ function raceScreen(model: RaceModel, actions: ViewActions): VNode {
 
 /**
  * 結果の見出しの下(結果画面と、発走前のカードの中で共通。Issue #195): 分析時刻・分析モデル・LLM を使わなかった理由(`llmNote`。モデルの有無に関係なく、null でなければ)・詳細の注記。
- * 理由は「分析モデル」の行のすぐ下(モデル欄の近く)に置く。
+ * 理由は「分析モデル」の行のすぐ下(モデル欄の近く)に置く。Issue #198: LLM の所要時間・usage(記録があるとき)は、モデルの行と理由の間。
  */
 function resultMeta(content: ResultContent): VNode[] {
   return [
     h("p", { class: "meta" }, [`分析時刻: ${content.analyzedAt}`]),
     h("p", { class: "meta" }, [`分析モデル: ${content.model}`]),
+    // LLM の所要時間・usage(Issue #198)。要約の1行と、該当するときだけの警告(1件ずつ)。理由の注記より上。
+    ...(content.llmUsage === null ? [] : [h("p", { class: "meta llm-usage" }, [content.llmUsage.summary]), ...content.llmUsage.warnings.map((w) => h("p", { class: "notice llm-usage-warn" }, [w]))]),
     ...(content.llmNote === null ? [] : [h("p", { class: "notice llm-note" }, [content.llmNote])]),
     ...(content.detailNote === null ? [] : [h("p", { class: "notice" }, [content.detailNote])]),
   ];
+}
+
+/** 強調材料・懸念事項の1つの塊(Issue #198)。ラベルと箇条書き(`ul` > `li`)。項目は外から来た文字列(子の文字列は、アダプタがテキストノードにする)。空の側は呼び出し側が出さない。 */
+function pointsBlock(kind: "highlights" | "concerns", label: string, items: readonly string[]): VNode {
+  return h("div", { class: `horse-points ${kind}` }, [h("span", { class: "points-label" }, [label]), h("ul", { class: "points-list" }, items.map((item) => h("li", {}, [item])))]);
 }
 
 function horseCard(horse: HorseCard): VNode {
@@ -220,6 +227,9 @@ function horseCard(horse: HorseCard): VNode {
     h("span", { class: "horse-line" }, [`複勝オッズ下限 ${horse.odds}`]),
     h("span", { class: "horse-line" }, [`EV ${horse.ev}`, ...(horse.positive ? [h("strong", { class: "ev-plus" }, ["EVプラス"])] : [])]),
     ...(horse.reason === null ? [] : [h("span", { class: "horse-reason" }, [`根拠 ${horse.reason}`])]),
+    // 根拠の下に、強調材料・懸念事項(LLM が効いたときだけ中身がある。空の側は塊ごと出さない)。
+    ...(horse.highlights.length === 0 ? [] : [pointsBlock("highlights", LABEL_HIGHLIGHTS, horse.highlights)]),
+    ...(horse.concerns.length === 0 ? [] : [pointsBlock("concerns", LABEL_CONCERNS, horse.concerns)]),
   ]);
 }
 

@@ -189,6 +189,47 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(await read(legacy.id)).toEqual([null, null]);
   });
 
+  it("強調材料・懸念事項・llmCalls(Issue #198): 本物の応答をクライアントが読み、画面用データまで通る。旧い分析([]・null)も読める。馬ごとに取り違えない", async () => {
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const base = await record({}, []);
+    const calls = [
+      { ok: false, ms: 180_001, inputTokens: null, outputTokens: null, stopReason: null, model: null, replayed: false, error: "種別=timeout" },
+      { ok: true, ms: 41_234, inputTokens: 15_001, outputTokens: 6_020, stopReason: "end_turn", model: "claude-sonnet-5-5", replayed: false, error: null },
+    ];
+    const withPoints = await store.saveAnalysis(
+      {
+        ...base,
+        model: "claude-sonnet-5-5",
+        horses: base.horses.map((h, i) => (i === 0 ? { ...h, highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] } : i === 1 ? { ...h, highlights: [], concerns: ["外枠"] } : h)),
+      } as AnalysisRecord,
+      { llmNote: null, llmCalls: calls },
+    );
+    const legacy = await store.saveAnalysis({ ...base, analyzedAt: "2026-06-28T06:00:00.000Z" });
+    const { fetch } = await connect(realEnv());
+
+    const a = await fetchAnalysis(fetch, withPoints.id);
+    expect(a.ok, "前提: 読める(サーバのキー名・形がクライアントの検査を通る)").toBe(true);
+    if (!a.ok) return;
+    expect(a.analysis.horses.length, "前提: 3頭以上(0頭目・1頭目・それ以外を区別できる)").toBeGreaterThanOrEqual(3);
+    expect(a.analysis.horses.map((h) => [h.highlights, h.concerns]).slice(0, 3)).toEqual([
+      [["追い切り好時計", "内枠有利"], ["距離延長"]],
+      [[], ["外枠"]],
+      [[], []],
+    ]);
+    expect(a.analysis.llmCalls).toEqual(calls);
+    const model = buildResultModel({ route: { date: DATE, venue: "central", race: null, analysis: withPoints.id, settings: false }, source: { kind: "ready", analysis: a.analysis } });
+    expect(model.content!.horses.slice(0, 2).map((h) => [h.highlights, h.concerns])).toEqual([
+      [["追い切り好時計", "内枠有利"], ["距離延長"]],
+      [[], ["外枠"]],
+    ]);
+    expect(model.content!.llmUsage).toEqual({ summary: "LLM: 2回・3分41秒・入力 15,001・出力(思考を含む) 6,020 トークン", warnings: ["失敗した呼び出しが 1 回ありました"] });
+
+    const old = await fetchAnalysis(fetch, legacy.id);
+    expect(old.ok, "前提: 項目なし・記録なしの旧い分析も読める").toBe(true);
+    expect(old.ok && old.analysis.horses.every((h) => h.highlights.length === 0 && h.concerns.length === 0)).toBe(true);
+    expect(old.ok && old.analysis.llmCalls).toBeNull();
+  });
+
   it("配分あり(買い目)と、記録が無い分析(allocation: null)", async () => {
     const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
     const withBets = await store.saveAnalysis(

@@ -29,6 +29,25 @@ export interface AnalysisHorse {
   readonly isPositive: boolean;
   readonly mark: string | null;
   readonly reason: string | null;
+  /** LLM が挙げた強調材料(Issue #198。各最大3項目の短い句。項目なし・旧い分析は `[]`)。外から来た文字列なので、画面ではテキストとしてだけ入れる。 */
+  readonly highlights: readonly string[];
+  /** LLM が挙げた懸念事項(仕様は highlights と同じ)。 */
+  readonly concerns: readonly string[];
+}
+
+/**
+ * LLM を呼んだ1回の記録(Issue #198。サーバの `LlmCallRecord` と同じ形)。費用(トークン数)・時間・切り詰め(`stopReason` が `max_tokens`)を確かめるための値。
+ * `outputTokens` は **thinking を含む**。`replayed` の件の `ms`・トークンは元の呼び出しの値(測っていない旧い記録は null)。
+ */
+export interface LlmCall {
+  readonly ok: boolean;
+  readonly ms: number | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly stopReason: string | null;
+  readonly model: string | null;
+  readonly replayed: boolean;
+  readonly error: string | null;
 }
 
 export type DetailState = "present" | "missing" | "none";
@@ -45,6 +64,10 @@ export interface AnalysisDetail {
    * `model` とは独立(印の制約違反は、モデルがあって理由もある)。
    */
   readonly llmNote: string | null;
+  /**
+   * LLM を呼んだ1回ごとの記録(呼び出しの順。Issue #198)。LLM を呼ばなかった(キー未登録)・旧い分析は null。`model` とは独立(全回が失敗してフォールバックした分析は、モデルが null で記録がある)。
+   */
+  readonly llmCalls: readonly LlmCall[] | null;
   readonly race: { readonly venueName: string | null; readonly raceNumber: number | null; readonly raceName: string | null };
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
@@ -83,13 +106,28 @@ export function parsePastAnalysesResponse(status: number, body: unknown): PastAn
   return { ok: true, analyses };
 }
 
+/** 文字列だけの配列(キーの欠落・配列でない・文字列でない要素が1つでもあれば false。黙って落として空にしない)。 */
+const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(isStr);
+
 function parseHorse(row: unknown): AnalysisHorse | null {
   if (!isRecord(row)) return null;
-  const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason } = row;
+  const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns } = row;
   if (!isNum(umaban) || !strOrNull(name) || !isNum(prior) || !isNum(adjustedProb) || !numOrNull(placeOddsMin) || !numOrNull(ev) || !isBool(isPositive) || !strOrNull(mark) || !strOrNull(reason)) {
     return null;
   }
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason };
+  if (!isStrArray(highlights) || !isStrArray(concerns)) return null;
+  // 配列は複製して持つ(応答の本体と配列を共有しない)。
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns] };
+}
+
+/** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
+function parseLlmCall(row: unknown): LlmCall | null {
+  if (!isRecord(row)) return null;
+  const { ok, ms, inputTokens, outputTokens, stopReason, model, replayed, error } = row;
+  if (!isBool(ok) || !numOrNull(ms) || !numOrNull(inputTokens) || !numOrNull(outputTokens) || !strOrNull(stopReason) || !strOrNull(model) || !isBool(replayed) || !strOrNull(error)) {
+    return null;
+  }
+  return { ok, ms, inputTokens, outputTokens, stopReason, model, replayed, error };
 }
 
 function parseBet(row: unknown): StoredAllocationBetView | null {
@@ -154,8 +192,19 @@ function parseAllocation(value: unknown): StoredAllocationView | null {
 
 function parseDetail(value: unknown): AnalysisDetail | null {
   if (!isRecord(value)) return null;
-  const { id, raceId, analyzedAt, kaisaiDate, evEstimated, model, llmNote, race, horses, allocation, detail } = value;
+  const { id, raceId, analyzedAt, kaisaiDate, evEstimated, model, llmNote, llmCalls, race, horses, allocation, detail } = value;
   if (!isNum(id) || !isStr(raceId) || !isStr(analyzedAt) || !strOrNull(kaisaiDate) || !isBool(evEstimated) || !strOrNull(model) || !strOrNull(llmNote)) return null;
+  // llmCalls: キーが無い(undefined)は想定外。null(呼ばなかった・旧い分析)か、検査した配列(空配列も可)。
+  let parsedCalls: LlmCall[] | null = null;
+  if (llmCalls !== null) {
+    if (!Array.isArray(llmCalls)) return null;
+    parsedCalls = [];
+    for (const raw of llmCalls as unknown[]) {
+      const call = parseLlmCall(raw);
+      if (call === null) return null;
+      parsedCalls.push(call);
+    }
+  }
   if (detail !== "present" && detail !== "missing" && detail !== "none") return null;
   if (!isRecord(race) || !strOrNull(race["venueName"]) || !numOrNull(race["raceNumber"]) || !strOrNull(race["raceName"])) return null;
   if (!Array.isArray(horses)) return null;
@@ -178,6 +227,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     evEstimated,
     model,
     llmNote,
+    llmCalls: parsedCalls,
     race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"] },
     horses: parsedHorses,
     allocation: parsedAllocation,
