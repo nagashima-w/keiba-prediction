@@ -2997,6 +2997,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1 のスキーマも無変更(migration は足していない)。DO の SQLite のスキーマも無変更。分析結果の数値・プロンプトも変わらない。`@keiba/core` は無変更。
 
+## 次の正式版が 1.21.6 である根拠(Issue #207〈#182-A〉での変更)
+
+**patch**(クラウド版の結果ストア〈D1 への結果の書き込み・読み出し〉の追加と、そのための core の切り出し。**まだ production から呼ばれない**。exe の利用者から見て変わるものが無い)。
+
+### 変更内容
+
+- core: `saveResult` の SQL・束縛値の組み立て・`planComboWrites`・`toStoredPassing`・`toStoredCourseType`・`toRaceResultDetail` を `analysis-store-codec.ts` に出した(`AnalysisStore` はそれを使う。発行する SQL の列は変わらない)。
+  `toResultEntries`・`importRaceResult`・`summarizeImport` を app から core の `ev/result-import.ts` へ移し、app の `result-import.ts` は re-export にした。`ImportResultDeps.saveResult` の戻り値は `void | Promise<void>`(await する)。
+- cloud: `D1ResultStore`(`cloud/src/result-repository.ts`。`saveResult`・`getRaceResultDetails`・`listUnimportedRaces`)。1 回の batch・最大 5 文。**`worker.ts`・`race-day-do.ts` から import されていない**。
+- テスト・文書: 共有 golden(`packages/core/test/golden/race-result-contract.json`。生成は `scripts/gen-race-result-contract.ts`)、特性化テスト(`analysis-store-result-sql-sequence.test.ts`)、bundle の検査(`result-repository-bundle.test.ts`)。`docs/current-spec.md` に節を足した。
+
+### patch である根拠
+
+- exe の挙動は変わらない: 移したコードは同じ関数(app の呼び出し元・既存テストは無改変で通る)で、SQL の発行列は特性化テストが固定している。同じ入力で exe の 4 表のダンプが変更前後でバイト単位で同じことは、変更前のコードで golden を生成し直して確かめた。
+- クラウド版の本番の挙動は変わらない(結果ストアはどこからも呼ばれない。D1 のスキーマ・DO のスキーマも無変更で、migration は足していない)。クラウド版の変更は #177〜#206 も patch で運用してきた。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値・プロンプトも変わらない。利用者から見てできることは増えない(呼び出しは #208 以降)。`@keiba/core` は版数運用の対象外で、`package.json` の版は据え置き。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

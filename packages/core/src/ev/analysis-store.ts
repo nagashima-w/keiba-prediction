@@ -80,12 +80,8 @@
 
 import Database from "better-sqlite3";
 
-import {
-  buildComboOddsKeyFor,
-  COMBO_SIZE,
-  type ComboBetType,
-} from "../scraper/combo-odds-key.js";
-import type { CourseType, RaceComboPayoutResult } from "../scraper/types.js";
+import { type ComboBetType } from "../scraper/combo-odds-key.js";
+import type { CourseType } from "../scraper/types.js";
 import {
   ANALYSES_TABLE,
   ANALYSIS_ALLOCATION_META_TABLE,
@@ -93,24 +89,36 @@ import {
   ANALYSIS_HORSES_TABLE,
   buildChildParams,
   analysisParams,
+  comboPayoutParams,
+  DELETE_COMBO_PAYOUTS_SQL,
   INSERT_ALLOCATION_BET_SQL,
   INSERT_ALLOCATION_META_SQL,
   INSERT_ANALYSIS_HORSE_SQL,
   INSERT_ANALYSIS_SQL,
+  INSERT_COMBO_PAYOUT_SQL,
+  MARK_COMBO_IMPORTED_SQL,
+  planComboWrites,
   RACE_COMBO_PAYOUT_IMPORTS_TABLE,
   RACE_COMBO_PAYOUTS_TABLE,
   RACE_RESULT_META_TABLE,
   RACE_RESULTS_TABLE,
+  raceResultParams,
   SELECT_ALLOCATION_BETS_SQL,
   SELECT_ALLOCATION_META_SQL,
   SELECT_ANALYSES_BY_RACE_SQL,
   SELECT_ANALYSES_SQL,
   SELECT_ANALYSIS_HORSES_SQL,
+  SELECT_RESULT_DETAIL_SQL,
+  SELECT_RESULT_META_SQL,
+  toRaceResultDetail,
   toStoredAllocation,
   toStoredAnalysis,
+  UPSERT_RACE_RESULT_META_SQL,
+  UPSERT_RACE_RESULT_SQL,
   type AllocationMetaRow,
   type AnalysisRow,
   type HorseRow,
+  type ResultDetailRow,
 } from "./analysis-store-codec.js";
 import type {
   AnalysisFilter,
@@ -126,13 +134,6 @@ import type {
   StoredAnalysis,
   StoredComboPayout,
 } from "./analysis-store-types.js";
-
-/**
- * 組合せ払戻(ワイド・3連複)で扱う券種一覧(Issue #52)。
- * `COMBO_SIZE`(`combo-odds-key.ts`)のキーをそのまま使い、券種一覧を別の場所で
- * 二重に列挙しない(単一ソース。AC10)。
- */
-const COMBO_BET_TYPES = Object.keys(COMBO_SIZE) as ComboBetType[];
 
 // Issue #168(#163-a): 入出力の型は better-sqlite3 に依存しない analysis-store-types.ts へ切り出した。
 // 既存の import 元(`./analysis-store.js`・バレル)を壊さないよう、ここから再 export する。
@@ -672,34 +673,13 @@ export class AnalysisStore {
     courseType?: CourseType | null,
     comboPayouts?: RaceComboPayoutsSaveInput,
   ): void {
-    const upsertResult = this.db.prepare(
-      `INSERT INTO ${RACE_RESULTS_TABLE}
-         (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(race_id, umaban) DO UPDATE SET
-         finish_position = excluded.finish_position,
-         place_payout = excluded.place_payout,
-         win_payout = excluded.win_payout,
-         passing_json = excluded.passing_json,
-         last3f = excluded.last3f`,
-    );
-    const upsertMeta = this.db.prepare(
-      `INSERT INTO ${RACE_RESULT_META_TABLE} (race_id, course_type)
-       VALUES (?, ?)
-       ON CONFLICT(race_id) DO UPDATE SET course_type = excluded.course_type`,
-    );
-    const deleteCombo = this.db.prepare(
-      `DELETE FROM ${RACE_COMBO_PAYOUTS_TABLE} WHERE race_id = ? AND bet_type = ?`,
-    );
-    const insertCombo = this.db.prepare(
-      `INSERT INTO ${RACE_COMBO_PAYOUTS_TABLE} (race_id, bet_type, combo_key, payout)
-       VALUES (?, ?, ?, ?)`,
-    );
-    const markComboImported = this.db.prepare(
-      `INSERT INTO ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} (race_id, bet_type)
-       VALUES (?, ?)
-       ON CONFLICT(race_id, bet_type) DO NOTHING`,
-    );
+    // SQL と束縛値の組み立ては codec(クラウド版の D1 実装と共有。Issue #207)。文の発行は従来と同じ(同じ文・同じ回数・同じ順序。
+    // `analysis-store-result-sql-sequence.test.ts` が固定している)。
+    const upsertResult = this.db.prepare(UPSERT_RACE_RESULT_SQL);
+    const upsertMeta = this.db.prepare(UPSERT_RACE_RESULT_META_SQL);
+    const deleteCombo = this.db.prepare(DELETE_COMBO_PAYOUTS_SQL);
+    const insertCombo = this.db.prepare(INSERT_COMBO_PAYOUT_SQL);
+    const markComboImported = this.db.prepare(MARK_COMBO_IMPORTED_SQL);
     const tx = this.db.transaction(
       (
         rows: readonly RaceResultEntry[],
@@ -707,38 +687,17 @@ export class AnalysisStore {
         combo: RaceComboPayoutsSaveInput | undefined,
       ) => {
         for (const r of rows) {
-          upsertResult.run(
-            raceId,
-            r.umaban,
-            r.finishPosition,
-            r.placePayout ?? null,
-            r.winPayout ?? null,
-            JSON.stringify(r.passing ?? []),
-            r.last3f ?? null,
-          );
+          upsertResult.run(...raceResultParams(raceId, r));
         }
         if (meta !== undefined && meta !== null) {
           upsertMeta.run(raceId, meta);
         }
-        for (const betType of COMBO_BET_TYPES) {
-          const result = combo?.[betType];
-          if (result === undefined || result.state === "undetermined") {
-            // R-5・R-7: 判定不能(構造異常・払戻未公開)または未指定はDBに判定結果として
-            // 残さない。再取込で一過性の異常が起きても、既存の正しい値を保持する。
-            continue;
-          }
+        // R-5・R-7: 判定不能(undetermined)または未指定の券種は plan に含まれず、DBに判定結果として残さない
+        // (再取込で一過性の異常が起きても、既存の正しい値を保持する)。キーは betType 別の順序方針(codec の comboPayoutParams)。
+        for (const { betType, payouts } of planComboWrites(combo)) {
           deleteCombo.run(raceId, betType);
-          for (const entry of result.payouts) {
-            insertCombo.run(
-              raceId,
-              betType,
-              // betType別の順序方針でキー化する(Issue #106・#24-B): 馬単(exacta)は着順が
-              // 意味を持つため、betTypeを見ずに常にソートする`buildComboOddsKey`を直接
-              // 使うと「1着13・2着8」と「1着8・2着13」が同じキーに潰れ、UNIQUE制約違反
-              // (または黙った上書き)を起こす欠陥があった(着手前ゲートで発見)。
-              buildComboOddsKeyFor(betType, entry.umabans),
-              entry.payout,
-            );
+          for (const entry of payouts) {
+            insertCombo.run(...comboPayoutParams(raceId, betType, entry));
           }
           markComboImported.run(raceId, betType);
         }
@@ -909,34 +868,15 @@ export class AnalysisStore {
    * @param raceId レースID
    */
   getRaceResultDetail(raceId: string): RaceResultDetail | undefined {
-    const rows = this.db
-      .prepare(
-        `SELECT umaban, finish_position AS finishPosition, passing_json AS passingJson, last3f
-           FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`,
-      )
-      .all(raceId) as Array<{
-      umaban: number;
-      finishPosition: number | null;
-      passingJson: string | null;
-      last3f: number | null;
-    }>;
+    const rows = this.db.prepare(SELECT_RESULT_DETAIL_SQL).all(raceId) as ResultDetailRow[];
     if (rows.length === 0) {
       return undefined;
     }
-    const metaRow = this.db
-      .prepare(
-        `SELECT course_type AS courseType FROM ${RACE_RESULT_META_TABLE} WHERE race_id = ?`,
-      )
-      .get(raceId) as { courseType: string | null } | undefined;
-    return {
-      courseType: toStoredCourseType(metaRow?.courseType ?? null),
-      horses: rows.map((r) => ({
-        umaban: r.umaban,
-        finishPosition: r.finishPosition,
-        passing: toStoredPassing(r.passingJson),
-        last3f: r.last3f,
-      })),
-    };
+    const metaRow = this.db.prepare(SELECT_RESULT_META_SQL).get(raceId) as
+      | { courseType: string | null }
+      | undefined;
+    // 行 → 結果詳細の復元(通過順・面の防御的復元を含む)は codec(D1 実装と共有)が担う。
+    return toRaceResultDetail(rows, metaRow?.courseType ?? null);
   }
 
   /**
@@ -1081,40 +1021,5 @@ export class AnalysisStore {
   /** データベース接続を閉じる。 */
   close(): void {
     this.db.close();
-  }
-}
-
-/**
- * race_results.passing_json(JSON文字列)を数値配列へ復元する(タスク#27-A2)。
- * NULL・JSON parseの失敗・配列でない・要素が数値でない(想定外の書き込み混入)は、
- * silentにthrowせず空配列にフォールバックする(getRaceResultDetailの防御的復元方針)。
- */
-function toStoredPassing(raw: string | null): number[] {
-  if (raw === null) {
-    return [];
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.every((n) => typeof n === "number")
-      ? (parsed as number[])
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * race_result_meta.course_type(TEXT)をドメイン型へ復元する(タスク#27-A2)。
- * NULL(面行が無い=面不明)・未知の文字列(想定外の書き込み混入)は null にフォールバックする
- * (getRaceResultDetailの防御的復元方針。parse-race-resultのtoCourseTypeOrNullと同流儀)。
- */
-function toStoredCourseType(raw: string | null): CourseType | null {
-  switch (raw) {
-    case "芝":
-    case "ダ":
-    case "障":
-      return raw;
-    default:
-      return null;
   }
 }

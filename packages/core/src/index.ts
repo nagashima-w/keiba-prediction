@@ -283,6 +283,13 @@ export {
   type StoredComboPayout,
 } from "./ev/analysis-store.js";
 export {
+  importRaceResult,
+  summarizeImport,
+  toResultEntries,
+  type ImportResultDeps,
+  type ImportResultOutcome,
+} from "./ev/result-import.js";
+export {
   classifyLookaheadSuspicion,
   type LookaheadSuspicion,
   type LookaheadSuspicionInput,

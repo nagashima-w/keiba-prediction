@@ -147,6 +147,8 @@ const NATIVE_FREE_MODULES = [
   path.join("scraper", "cached-fetcher.ts"),
   path.join("ev", "analysis-store-types.ts"),
   path.join("ev", "analysis-store-codec.ts"),
+  // Issue #207(#182-A): 結果の取込フロー(app から core へ移した。クラウド版が相対 import で取り込む)。
+  path.join("ev", "result-import.ts"),
 ];
 
 describe("切り出した新モジュールは better-sqlite3 に依存しない(cloud のバンドルに入れられる)", () => {

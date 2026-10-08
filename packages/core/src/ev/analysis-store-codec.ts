@@ -15,11 +15,16 @@
  */
 
 import type { PredictionMark } from "../analyzer/parse-response.js";
+import { buildComboOddsKeyFor, COMBO_SIZE, type ComboBetType } from "../scraper/combo-odds-key.js";
+import type { CourseType, RaceComboPayoutEntry } from "../scraper/types.js";
 import type {
   AnalysisAllocationMetaRecord,
   AnalysisBetRecord,
   AnalysisHorseRecord,
   AnalysisRecord,
+  RaceComboPayoutsSaveInput,
+  RaceResultDetail,
+  RaceResultEntry,
   StoredAllocation,
   StoredAllocationBetDetail,
   StoredAnalysis,
@@ -69,6 +74,157 @@ export const INSERT_ALLOCATION_META_SQL = `INSERT INTO ${ANALYSIS_ALLOCATION_MET
 export const INSERT_ALLOCATION_BET_SQL = `INSERT INTO ${ANALYSIS_BETS_TABLE}
          (analysis_id, bet_type, combo_key, stake, odds, ev)
        VALUES (?, ?, ?, ?, ?, ?)`;
+
+// ---------------------------------------------------------------------------
+// レース結果(Issue #207〈#182-A〉。exe の saveResult・getRaceResultDetail と、クラウド版の D1 実装が共有する)
+// ---------------------------------------------------------------------------
+
+/**
+ * 組合せ払戻で扱う券種一覧(Issue #52)。`COMBO_SIZE`(`combo-odds-key.ts`)のキーをそのまま使い、券種一覧を別の場所で二重に列挙しない(単一ソース)。
+ * 並びは `COMBO_SIZE` の宣言順で、保存はこの順に券種を処理する({@link planComboWrites})。
+ */
+export const COMBO_BET_TYPES = Object.keys(COMBO_SIZE) as ComboBetType[];
+
+/** race_results への UPSERT(7列。(race_id, umaban) 主キーで再保存は上書き)。束縛値は {@link raceResultParams}。 */
+export const UPSERT_RACE_RESULT_SQL = `INSERT INTO ${RACE_RESULTS_TABLE}
+         (race_id, umaban, finish_position, place_payout, win_payout, passing_json, last3f)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(race_id, umaban) DO UPDATE SET
+         finish_position = excluded.finish_position,
+         place_payout = excluded.place_payout,
+         win_payout = excluded.win_payout,
+         passing_json = excluded.passing_json,
+         last3f = excluded.last3f`;
+
+/** race_result_meta への UPSERT(レース単位の面。束縛値は `[raceId, courseType]`)。 */
+export const UPSERT_RACE_RESULT_META_SQL = `INSERT INTO ${RACE_RESULT_META_TABLE} (race_id, course_type)
+       VALUES (?, ?)
+       ON CONFLICT(race_id) DO UPDATE SET course_type = excluded.course_type`;
+
+/** race_combo_payouts の、レース・券種ごとの DELETE(束縛値は `[raceId, betType]`)。 */
+export const DELETE_COMBO_PAYOUTS_SQL = `DELETE FROM ${RACE_COMBO_PAYOUTS_TABLE} WHERE race_id = ? AND bet_type = ?`;
+
+/** race_combo_payouts への INSERT(4列)。束縛値は {@link comboPayoutParams}。 */
+export const INSERT_COMBO_PAYOUT_SQL = `INSERT INTO ${RACE_COMBO_PAYOUTS_TABLE} (race_id, bet_type, combo_key, payout)
+       VALUES (?, ?, ?, ?)`;
+
+/** race_combo_payout_imports への取込マーカー(束縛値は `[raceId, betType]`。既にあれば何もしない)。 */
+export const MARK_COMBO_IMPORTED_SQL = `INSERT INTO ${RACE_COMBO_PAYOUT_IMPORTS_TABLE} (race_id, bet_type)
+       VALUES (?, ?)
+       ON CONFLICT(race_id, bet_type) DO NOTHING`;
+
+/** 結果の復元(馬ごと。束縛値は `[raceId]`)。行の型は {@link ResultDetailRow}。 */
+export const SELECT_RESULT_DETAIL_SQL = `SELECT umaban, finish_position AS finishPosition, passing_json AS passingJson, last3f
+           FROM ${RACE_RESULTS_TABLE} WHERE race_id = ? ORDER BY umaban`;
+
+/** 結果の復元(レース単位の面。束縛値は `[raceId]`)。 */
+export const SELECT_RESULT_META_SQL = `SELECT course_type AS courseType FROM ${RACE_RESULT_META_TABLE} WHERE race_id = ?`;
+
+/** {@link SELECT_RESULT_DETAIL_SQL} の1行。 */
+export interface ResultDetailRow {
+  readonly umaban: number;
+  readonly finishPosition: number | null;
+  readonly passingJson: string | null;
+  readonly last3f: number | null;
+}
+
+/**
+ * race_results 1行ぶんの束縛値({@link UPSERT_RACE_RESULT_SQL} の `?` の順)。
+ * placePayout・winPayout・last3f の省略は null、passing の省略は空配列の JSON(0 は 0 のまま。null に潰さない)。
+ */
+export function raceResultParams(raceId: string, r: RaceResultEntry): SqlParams {
+  return [
+    raceId,
+    r.umaban,
+    r.finishPosition,
+    r.placePayout ?? null,
+    r.winPayout ?? null,
+    JSON.stringify(r.passing ?? []),
+    r.last3f ?? null,
+  ];
+}
+
+/**
+ * race_combo_payouts 1行ぶんの束縛値({@link INSERT_COMBO_PAYOUT_SQL} の `?` の順)。
+ * キーは betType 別の順序方針でキー化する(Issue #106・#24-B): 馬単・三連単は着順が意味を持つので、betType を見ずに常にソートする
+ * `buildComboOddsKey` を直接使うと「1着13・2着8」と「1着8・2着13」が同じキーに潰れる欠陥があった(着手前ゲートで発見)。
+ */
+export function comboPayoutParams(raceId: string, betType: ComboBetType, entry: RaceComboPayoutEntry): SqlParams {
+  return [raceId, betType, buildComboOddsKeyFor(betType, entry.umabans), entry.payout];
+}
+
+/** {@link planComboWrites} の1券種ぶん。 */
+export interface ComboWritePlan {
+  readonly betType: ComboBetType;
+  /** 空配列は「払戻テーブルはあったがこの券種の行が無かった(未発売等)」。マーカーだけを書く。 */
+  readonly payouts: readonly RaceComboPayoutEntry[];
+}
+
+/**
+ * 保存する券種と払戻の一覧({@link COMBO_BET_TYPES} の順)。`state:"parsed"` の券種だけを返す。
+ * `state:"undetermined"`(構造異常・払戻未公開)・券種の省略・入力自体の省略は**含めない**(その券種の行・マーカーに触れない。boss裁定R-5・R-7:
+ * 一過性の構造異常での再取込が、正しい過去データを破壊しないため)。含めた券種は、既存の行を DELETE してから INSERT し直し、マーカーを書く。
+ */
+export function planComboWrites(combo: RaceComboPayoutsSaveInput | undefined): ComboWritePlan[] {
+  const plans: ComboWritePlan[] = [];
+  for (const betType of COMBO_BET_TYPES) {
+    const result = combo?.[betType];
+    if (result === undefined || result.state === "undetermined") {
+      continue;
+    }
+    plans.push({ betType, payouts: result.payouts });
+  }
+  return plans;
+}
+
+/**
+ * race_results.passing_json(JSON文字列)を数値配列へ復元する(タスク#27-A2)。
+ * NULL・JSON parseの失敗・配列でない・要素が数値でない(想定外の書き込み混入)は、
+ * silentにthrowせず空配列にフォールバックする(getRaceResultDetailの防御的復元方針)。
+ */
+export function toStoredPassing(raw: string | null): number[] {
+  if (raw === null) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.every((n) => typeof n === "number") ? (parsed as number[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * race_result_meta.course_type(TEXT)をドメイン型へ復元する(タスク#27-A2)。
+ * NULL(面行が無い=面不明)・未知の文字列(想定外の書き込み混入)は null にフォールバックする
+ * (getRaceResultDetailの防御的復元方針。parse-race-resultのtoCourseTypeOrNullと同流儀)。
+ */
+export function toStoredCourseType(raw: string | null): CourseType | null {
+  switch (raw) {
+    case "芝":
+    case "ダ":
+    case "障":
+      return raw;
+    default:
+      return null;
+  }
+}
+
+/**
+ * 結果の行(馬ごと)と面の生値から {@link RaceResultDetail} を復元する(行の並びはそのまま。呼び出し側が馬番昇順で読む)。
+ * 「結果が1件も無い」(undefined を返す)判断は呼び出し側の責務(行が0件なら呼ばない)。
+ */
+export function toRaceResultDetail(rows: readonly ResultDetailRow[], courseTypeRaw: string | null): RaceResultDetail {
+  return {
+    courseType: toStoredCourseType(courseTypeRaw),
+    horses: rows.map((r) => ({
+      umaban: r.umaban,
+      finishPosition: r.finishPosition,
+      passing: toStoredPassing(r.passingJson),
+      last3f: r.last3f,
+    })),
+  };
+}
 
 /** 未定義(undefined)・null を null に揃える(`?? null`)。空文字・0・false は保つ。 */
 function orNull<T extends string | number>(value: T | null | undefined): T | null {

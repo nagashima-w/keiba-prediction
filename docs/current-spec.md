@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.21.5)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.21.6)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.21.5`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.21.6`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1167,7 +1167,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **取得ステップ**: 設定(D1 の `cloud_settings` の1行)を**1回だけ**読み、スナップショットをタスクに保存する(途中で設定が変わっても、取得と計算は同じ設定)。`scrapeRace` で、出馬表(取消・天候・馬場を反映。TTL 10 分)・オッズ(**キャッシュを常に迂回**)・
   組合せオッズ(`includeComboOdds` が ON のときだけ。同じく迂回)を取り直す。戦績・調教は朝のキャッシュがあればそれを使う。朝のキャッシュがあるとき、取得は出馬表 1 + 単勝複勝 1(+ 組合せ ON で 6)= 2〜8 本。冷えた状態は 19 本(組合せ ON で 25 本)。
 - **計算・保存ステップ**: **netkeiba には出ず**(gate は0回)、キャッシュだけで prior → LLM(#194。v1.19.25 から。API キーが未登録なら LLM なしで、`promptVersion`・`model` は null)→ EV → 配分を作り、`AnalysisSink`(`D1AnalysisStore`)で D1(要約)・R2(詳細)に保存する。取消馬は出走馬から除かれる(#154)。
-  当日傾向の読み出し(`getRaceResultDetails`)は空(結果の取込は #182。LLM のプロンプトの「同日の傾向」ブロックは、#182 までは入らない)。
+  当日傾向の読み出し(`getRaceResultDetails`)は空(結果の取込は #182。D1 への結果の書き込み・読み出しの実装〈`D1ResultStore`〉は #207 で入ったが、まだ呼ばれていない。LLM のプロンプトの「同日の傾向」ブロックは、取り込みと配線〈#208・#209〉が入るまでは入らない)。
 - **前回の組合せオッズを使わない**(レビュー指摘): 取得ステップの開始時刻を、タスクに**最初の試行のときに1回だけ**永続化する(再試行では進めない。再実行の予約では作り直す)。計算ステップは、**オッズ・組合せオッズを、この時刻以降に取得したキャッシュだけ**から読む
   (前回の発走前の実行で残った、保持 26 時間のキャッシュは、無いものとして扱う)。今回の組合せの取得が失敗した券種は、exe で組合せの取得が失敗したときと同じく、配分から除かれ、警告(`onWarn`)に残る。単勝・複勝のオッズが古い(無い)ときは、分析せず再試行する。
   「オッズ」とみなす URL は、中央の `api_get_jra_odds` と、地方の `nar.netkeiba.com/odds/` 配下すべて(`index.html` の単勝複勝・馬連・ワイドほか、**`odds_get_form.html` の3連複・3連単の軸馬別**)。地方の軸馬別が漏れていて、前回の3連複が使われたことが再レビューで見つかり、直した(`cloud/test/odds-url-pattern.test.ts` が `urls.ts` の URL ビルダー全部を「オッズ」「オッズでない」に分類し、新しいビルダーが増えたら落ちる)。
@@ -1320,6 +1320,18 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **取得関数**: `AnalysisDetail.llmNote`(`string | null`。欠けたら想定外の応答。過去の分析は null で通る)。
 - **文言**: カードの説明(発走前)は「API キーがあれば LLM が3着内率を補正して印と根拠を付け(EV は補正後の値で計算)、キーが無い間は統計のみ」(116 文字)。設定の追加指示・クリップ幅の補助文は「発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません」。**画面に Issue 番号は出さない。**
 - **検査**: `cloud/test/client-result.test.ts`・`client-view.test.ts`(結果画面とカードの両方)・`client-api-analysis.test.ts`・`client-api-analysis-contract.test.ts`・`client-race.test.ts`・`client-settings-form.test.ts`。
+
+### クラウド版のレース結果ストア(#207〈#182-A〉。v1.21.6。**まだ production からは呼ばれない**)
+結果の取り込み(#182)の A: D1 への結果の**書き込み・読み出しの実装だけ**。netkeiba への取得・いつ取り込むか・cron・手動の入口は持たない(#208〈翌朝の cron・バックフィル・手動の取り込み〉と #209〈当日傾向〉が呼ぶ)。**`worker.ts`・`race-day-do.ts` のどこからも import されていない**ので、本番の挙動は変わらない。exe の挙動も変わらない。
+- **保存の形は exe と同じ**(将来の #167〈exe の DB を D1 へ移す〉との統合のため): 表は migration 0001 にある exe の最終スキーマのまま(`race_results`・`race_result_meta`・`race_combo_payouts`・`race_combo_payout_imports`)。**migration は足さない**(`scripts/test/cloud-d1-schema.test.ts` は無改変)。
+- **core(exe と共有)**: `saveResult` の SQL・束縛値の組み立て・`planComboWrites`(`undetermined`・省略の券種には触れない)・`toStoredPassing`・`toStoredCourseType`・`toRaceResultDetail` を `analysis-store-codec.ts` に出した(`AnalysisStore` はそれを使う。発行する SQL の列は従来と同じで、`analysis-store-result-sql-sequence.test.ts` が固定する)。
+  `toResultEntries`・`importRaceResult`・`summarizeImport` を app から core の `ev/result-import.ts` へ移した(app の `result-import.ts` は re-export。#168 と同じ型)。`ImportResultDeps.saveResult` の戻り値は `void | Promise<void>`(await する。reject は伝播)。
+- **`cloud/src/result-repository.ts` の `D1ResultStore`**:
+  - `saveResult(raceId, entries, courseType?, comboPayouts?)`: **1 回の `batch`・最大 5 文**(馬・面・組合せの DELETE・INSERT・マーカー。`json_each`)。文の数は馬・券種・払戻の行数に依らず一定で、**1 文のバインドの上限(100)を超えない**(18 頭 × 7 列 = 126 を超えるため馬を 1 行ずつ束縛しない)。`undetermined`・券種の省略は、その券種の行・マーカーに触れない。`parsed` で払戻 0 件はマーカーだけ。
+  - `getRaceResultDetails(ids)`: 前のレース分を **1 回の batch(馬・面の 2 文)**で読み、`Map` で返す(`runAnalysis` の `getRaceResultDetails` にそのまま渡せる形)。結果の行が無いレースは入れない。ids が空なら D1 に発行しない。
+  - `listUnimportedRaces({ from, to, limit })`: 分析済み(`analyses` に行がある)で結果の行が 1 件も無い(`NOT EXISTS`)レースを、開催日 `[from, to]`(両端を含む。`kaisai_date` が NULL の分析は入らない)で、(開催日, レースID)の昇順に最大 `limit` 件(1〜200)。全頭が中止・除外のレースは「取り込み済み」。
+- **検査**: 共有 golden(`packages/core/test/golden/race-result-contract.json`。生成は `scripts/gen-race-result-contract.ts`)で、同じ入力から exe の `AnalysisStore.saveResult` と D1 の 4 表のダンプ・`getRaceResultDetail` の復元結果が同じことを固定(7 ケース。18 頭・全 6 券種・再保存・全頭中止・`undetermined`・壊れた通過順と未知の面)。実フィクスチャ(中央 8・地方 6)を `importRaceResult` → `D1ResultStore` に通す往復。`result-repository-bundle.test.ts` が、まだ本番の入口に無いこのコードが Worker にバンドルできること(better-sqlite3 を巻き込まない)を固定する。
+- **既知の差分(記録)**: 値は JSON 文字列を経由して D1 に入る。NaN・Infinity は NULL になる(exe は REAL で束縛)。実データでは差は出ない。ローカルの D1 では 17 桁の浮動小数も一致した(本番の SQLite のビルドでの確認は最初の実保存)。ローカルの D1 は「1 回の呼び出しで 50 クエリ」を強制しない(bind 100 個は強制する)。
 
 ### 設定画面にプロンプトのプレビュー(#201。v1.20.2)
 変更は `cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。再 export)だけ(サーバ・D1・exe・core のプロンプト文面は無変更)。詳細は `cloud/README.md` の「設定画面にプロンプトのプレビューを出す」。
