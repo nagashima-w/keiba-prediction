@@ -527,9 +527,9 @@ describe("発走前のカードの結果(Issue #188)", () => {
   it("カードの結果の見出し(h3)は、カードの見出し(h2)の下。結果画面の見出し(h2)の階層は変えない", () => {
     const card = preRaceCard(raceTree(ready(analysis({ id: 7 }))));
     expect(findAll(card, (n) => n.tag === "h2").map(textOf)).toEqual(["発走前"]);
-    expect(findAll(card, (n) => n.tag === "h3").length).toBeGreaterThanOrEqual(3); // 開閉・馬ごとの評価・配分の提案
+    expect(findAll(card, (n) => n.tag === "h3").map(textOf)).toEqual(["▾ 分析の結果", "印の付いた馬", "馬ごとの評価", "配分の提案(分析時点)"]); // 開閉・印の付いた馬(#211)・馬ごとの評価・配分の提案
     const screen = resultTree(analysis());
-    expect(findAll(screen, (n) => n.tag === "h2").map(textOf)).toEqual(["馬ごとの評価", "配分の提案(分析時点)"]);
+    expect(findAll(screen, (n) => n.tag === "h2").map(textOf)).toEqual(["印の付いた馬", "馬ごとの評価", "配分の提案(分析時点)"]); // Issue #211: 既定の分析は印「◎」の馬がいる
   });
 });
 
@@ -888,9 +888,10 @@ describe("LLM の結果の表示(Issue #195。結果画面とカードの中の�
         expect(all.indexOf(NO_KEY)).toBeLessThan(all.indexOf("馬ごとの評価"));
       });
 
-      it("印の凡例: 印が1頭でもあるときだけ、馬ごとの評価に exe の凡例(MARK_LEGEND)を1行出す。印が無ければ出さない", () => {
+      it("印の凡例: 印が1頭でもあるときだけ、「印の付いた馬」の見出しの下に exe の凡例(MARK_LEGEND)を1行出す(馬ごとの評価の中には出さない)。印が無ければ出さない", () => {
         const withMark = byClass(tree(analysis({ model: "claude-x", horses: llmHorses })), "mark-legend");
         expect(withMark.map(textOf)).toEqual([MARK_LEGEND]);
+        expect(byClass(byClass(tree(analysis({ model: "claude-x", horses: llmHorses })), "marked-horses")[0]!, "mark-legend")).toHaveLength(1);
         expect(byClass(tree(analysis({ model: "claude-x", horses: [llmHorses[1]!] })), "mark-legend")).toHaveLength(0);
       });
 
@@ -1025,4 +1026,100 @@ describe("強調材料・懸念事項・LLM の usage の表示(Issue #198。結
       });
     });
   }
+});
+
+/**
+ * Issue #211: 「印の付いた馬」の section(印・馬番・馬名だけ。数値は出さない)。結果画面(h2)と発走前のカードの中(開いたときだけ。h3)の**両方**で、
+ * 「馬ごとの評価」より前に出る。凡例(`mark-legend`)は、この section の見出しの下に1回だけ(「馬ごとの評価」の中には出さない)。印が1頭も無ければ section ごと出さない。
+ */
+describe("印の付いた馬の section(Issue #211。結果画面とカードの中の両方)", () => {
+  const H = (umaban: number, name: string | null, mark: string | null) =>
+    ({ umaban, name, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark, reason: null, highlights: [], concerns: [] }) as AnalysisDetail["horses"][number];
+  const markedHorses: AnalysisDetail["horses"] = [H(5, "ゴー", null), H(3, "エートラックス", "◎"), H(2, null, "▲"), H(1, "アイ", "〇")];
+  const noMarkHorses: AnalysisDetail["horses"] = [H(1, "アイ", null), H(2, "ウー", null)];
+  const cardTree = (a: AnalysisDetail, resultOpen = true): VNode => {
+    const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
+    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, resultOpen })), noopActions);
+  };
+  const screens: readonly [string, "h2" | "h3", (a: AnalysisDetail) => VNode][] = [
+    ["結果画面", "h2", resultTree],
+    ["発走前のカードの中", "h3", (a) => cardTree(a)],
+  ];
+
+  for (const [name, heading, tree] of screens) {
+    describe(name, () => {
+      it(`見出し「印の付いた馬」(${heading})の section が、「馬ごとの評価」の section より前にある`, () => {
+        const t = tree(analysis({ model: "claude-x", horses: markedHorses }));
+        const sections = byClass(t, "marked-horses");
+        expect(sections).toHaveLength(1);
+        expect(findAll(sections[0]!, (n) => n.tag === heading).map(textOf)).toEqual(["印の付いた馬"]);
+        const all = findAll(t, (n) => n.tag === "section").map((n) => String(n.attrs?.["class"]));
+        expect(all.indexOf("marked-horses")).toBeGreaterThan(-1);
+        expect(all.indexOf("horses")).toBeGreaterThan(-1);
+        expect(all.indexOf("marked-horses")).toBeLessThan(all.indexOf("horses"));
+        expect(textOf(t).indexOf("印の付いた馬")).toBeLessThan(textOf(t).indexOf("馬ごとの評価"));
+      });
+
+      it("1行は印・馬番・馬名(馬名が無ければ印と馬番だけ)。印の順 → 馬番の昇順。数値(3着内率・EV)は出さない。馬のカード(horse)の数は変わらない", () => {
+        const t = tree(analysis({ model: "claude-x", horses: markedHorses }));
+        const items = byClass(byClass(t, "marked-horses")[0]!, "marked");
+        expect(items.map(textOf)).toEqual(["◎ 3 エートラックス", "〇 1 アイ", "▲ 2"]);
+        for (const li of items) {
+          expect(li.tag).toBe("li");
+          expect(textOf(li)).not.toMatch(/3着内率|EV|%|オッズ/);
+        }
+        expect(byClass(t, "horse")).toHaveLength(markedHorses.length); // 馬ごとの評価は全頭のまま
+      });
+
+      it("凡例は、この section の中に1回だけ(見出しの下、一覧の前)。「馬ごとの評価」の section の中には出さない", () => {
+        const t = tree(analysis({ model: "claude-x", horses: markedHorses }));
+        const legends = byClass(t, "mark-legend");
+        expect(legends.map(textOf)).toEqual([MARK_LEGEND]);
+        const section = byClass(t, "marked-horses")[0]!;
+        expect(byClass(section, "mark-legend")).toHaveLength(1);
+        expect(byClass(byClass(t, "horses")[0]!, "mark-legend")).toHaveLength(0);
+        const kids = (section.children ?? []).map((k) => (typeof k === "string" ? "" : String(k.attrs?.["class"] ?? k.tag)));
+        expect(kids.indexOf("meta mark-legend")).toBeGreaterThan(0); // 見出しの後
+        expect(kids.indexOf("meta mark-legend")).toBeLessThan(kids.indexOf("horse-list"));
+      });
+
+      it("印が1頭も無い分析では、section ごと出さない(凡例も出さない)。馬ごとの評価は出る", () => {
+        const t = tree(analysis({ model: "claude-x", horses: noMarkHorses }));
+        expect(byClass(t, "marked-horses")).toHaveLength(0);
+        expect(byClass(t, "mark-legend")).toHaveLength(0);
+        expect(textOf(t)).not.toContain("印の付いた馬");
+        expect(byClass(t, "horses")).toHaveLength(1);
+      });
+
+      it("LLM なし(モデル null)でも、印があれば出す(印の有無だけで決まる)", () => {
+        const t = tree(analysis({ model: null, horses: markedHorses }));
+        expect(byClass(byClass(t, "marked-horses")[0]!, "marked")).toHaveLength(3);
+      });
+
+      it("悪意のある文字列(印・馬名)は、解釈されずテキストになる(未知の印は落とさず出す)", () => {
+        const PAYLOAD = "<img src=x onerror=alert(1)>";
+        const t = tree(analysis({ horses: [H(1, PAYLOAD, PAYLOAD), H(2, "アイ", "◎")] }));
+        expect(byClass(byClass(t, "marked-horses")[0]!, "marked").map(textOf)).toEqual(["◎ 2 アイ", `${PAYLOAD} 1 ${PAYLOAD}`]);
+        const { tags } = mountAll(t);
+        expect(tags.filter((x) => ["img", "script", "svg", "iframe", "style"].includes(x))).toEqual([]);
+      });
+    });
+  }
+
+  it("カードを畳んでいるときは、section を描画しない。開いているときは出る(対照)", () => {
+    const a = analysis({ model: "claude-x", horses: markedHorses });
+    expect(byClass(cardTree(a, true), "marked-horses")).toHaveLength(1); // 前提: 開けば出る
+    expect(byClass(cardTree(a, false), "marked-horses")).toHaveLength(0);
+    expect(byClass(cardTree(a, false), "mark-legend")).toHaveLength(0);
+  });
+
+  it("結果画面とカードの中で、この section は同じ木(見出しの h2/h3 の違いだけ)", () => {
+    const strip = (n: VNode | string): unknown => (typeof n === "string" ? n : { ...n, tag: n.tag === "h2" || n.tag === "h3" ? "h" : n.tag, children: (n.children ?? []).map(strip), on: undefined });
+    const a = analysis({ id: 7, model: "claude-x", horses: markedHorses });
+    const inScreen = byClass(resultTree(a), "marked-horses");
+    const inCard = byClass(cardTree(a), "marked-horses");
+    expect(inScreen).toHaveLength(1);
+    expect(inCard).toHaveLength(1);
+    expect(strip(inCard[0]!)).toEqual(strip(inScreen[0]!));
+  });
 });

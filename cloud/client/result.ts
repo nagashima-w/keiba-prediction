@@ -3,7 +3,8 @@
  *
  * 見出し・分析時刻・分析モデル・馬ごとのカード(馬番・馬名・3着内率・複勝オッズの下限・EV)・配分。
  * 表示の決定(Issue #184 のゲート・#185):
- *  - **印は `mark` が non-null のときだけ**。印が1頭でもあれば、exe の凡例(`MARK_LEGEND`)を1行出す
+ *  - **印は `mark` が non-null のときだけ**。印が1頭でもあれば(Issue #211: 印の付いた馬の一覧が空でなければ)、exe の凡例(`MARK_LEGEND`)を1行出す(「印の付いた馬」の見出しの下)。
+ *    **印の付いた馬の一覧**(Issue #211): 印・馬番・馬名だけ。印の順(◎〇▲△☆注)→ 馬番の昇順。印の無い馬は含めず、未知の印は既知の印の後ろ
  *  - **補正後の3着内率・根拠は、LLM が効いたとき(モデル ID があるとき)だけ**出す(Issue #195。exe は LLM なしでも「3着内率」「AI補正後」を常に両方出すが、cloud はスマホの縦カードで、
  *    LLM なしでは補正後が 3着内率〈prior〉と同じ値になり同じ値が重なるだけなので省く。LLM を使うと EV は補正後の確率から計算されるので、効いたときは両方出して EV と噛み合わせる)。
  *    根拠が null・空の馬は、その行を出さない
@@ -67,6 +68,20 @@ export interface HorseCard {
   readonly positive: boolean;
 }
 
+/** 印の付いた馬の一覧の1行(Issue #211)。印・馬番・馬名だけ(数値は出さない)。 */
+export interface MarkedHorse {
+  readonly umaban: number;
+  /** 馬名。null・空文字は null(印と馬番だけを出す)。 */
+  readonly name: string | null;
+  readonly mark: string;
+}
+
+/**
+ * 印の並び順(Issue #211)。**正は core の `PREDICTION_MARKS`**(◎〇▲△☆注。「〇」は U+3007)。クライアントの束に core の parse-response を引き込まない(`test/client-bundle.test.ts` の許可リストを広げない)ため、
+ * ここに同じ順序を持ち、`test/client-result.test.ts` が `PREDICTION_MARKS` と一致することを固定する。
+ */
+export const KNOWN_MARK_ORDER: readonly string[] = ["◎", "〇", "▲", "△", "☆", "注"];
+
 export interface AllocationSection {
   readonly kind: AllocationProposalViewKind | "none";
   readonly notices: readonly string[];
@@ -82,7 +97,9 @@ export interface ResultContent {
   readonly llmNote: string | null;
   /** LLM の所要時間・usage(要約の1行と警告。記録が無い〈呼ばなかった・旧い分析・空配列〉ときは null)。モデルの有無に関係なく、記録があれば出す。 */
   readonly llmUsage: LlmUsageView | null;
-  /** 印の凡例(exe の `MARK_LEGEND`)。印が1頭でもあるときだけ。 */
+  /** 印の付いた馬の一覧(Issue #211)。印の順 → 馬番の昇順。印の無い馬(null・空白だけ)は含めない。未知の印は既知の印の後ろに馬番の昇順。 */
+  readonly markedHorses: readonly MarkedHorse[];
+  /** 印の凡例(exe の `MARK_LEGEND`)。**一覧が空でないときだけ**(「印の付いた馬」の見出しの下に出す)。 */
   readonly markLegend: string | null;
   readonly detailNote: string | null;
   readonly horses: readonly HorseCard[];
@@ -123,17 +140,32 @@ function allocationOf(a: AnalysisDetail): AllocationSection {
 /** 強調材料・懸念事項の項目(空文字・空白だけは捨てる。文字列は加工しない)。 */
 const pointsOf = (items: readonly string[]): readonly string[] => items.filter((item) => item.trim() !== "");
 
+/** 印の順位(既知の印は `KNOWN_MARK_ORDER` の添字、未知の印はその後ろ)。 */
+const markRank = (mark: string): number => {
+  const i = KNOWN_MARK_ORDER.indexOf(mark);
+  return i === -1 ? KNOWN_MARK_ORDER.length : i;
+};
+
+/** 印の付いた馬の一覧(Issue #211)。印の順 → 馬番の昇順(同じ印・同じ馬番は入力順。`Array.prototype.sort` は安定)。 */
+function markedHorsesOf(horses: AnalysisDetail["horses"]): MarkedHorse[] {
+  return horses
+    .flatMap((h) => (h.mark === null || h.mark.trim() === "" ? [] : [{ umaban: h.umaban, name: h.name === null || h.name === "" ? null : h.name, mark: h.mark }]))
+    .sort((a, b) => markRank(a.mark) - markRank(b.mark) || a.umaban - b.umaban);
+}
+
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。 */
 export function contentOf(a: AnalysisDetail): ResultContent {
   // LLM が効いたか = モデル ID があるか(exe の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
+  const markedHorses = markedHorsesOf(a.horses);
   return {
     title: titleOf(a),
     analyzedAt: formatJstDateTime(a.analyzedAt),
     model: llmEffective ? a.model! : MODEL_NONE_TEXT,
     llmNote: a.llmNote,
     llmUsage: a.llmCalls !== null && a.llmCalls.length > 0 ? buildLlmUsage(a.llmCalls) : null,
-    markLegend: a.horses.some((h) => h.mark !== null) ? MARK_LEGEND : null,
+    markedHorses,
+    markLegend: markedHorses.length > 0 ? MARK_LEGEND : null,
     detailNote: detailNoteOf(a.detail),
     horses: a.horses.map((h) => ({
       umaban: h.umaban,

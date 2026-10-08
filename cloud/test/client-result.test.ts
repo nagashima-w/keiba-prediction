@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
-import { buildResultModel, LABEL_CONCERNS, LABEL_HIGHLIGHTS, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
+import { buildResultModel, KNOWN_MARK_ORDER, LABEL_CONCERNS, LABEL_HIGHLIGHTS, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
 import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/app/src/renderer/bet-allocation-view";
@@ -223,6 +224,80 @@ describe("印の凡例(exe の MARK_LEGEND)", () => {
     expect(content(analysis({ model: "claude-x", horses: [horse(1, { mark: null }), horse(2, { mark: "◎" })] })).markLegend).toBe(MARK_LEGEND);
     expect(content(analysis({ model: "claude-x", horses: [horse(1, { mark: null }), horse(2, { mark: null })] })).markLegend).toBeNull();
     expect(content(analysis({ model: null, horses: [horse(1)] })).markLegend).toBeNull();
+  });
+});
+
+/**
+ * Issue #211: 印の付いた馬の一覧(`markedHorses`。印・馬番・馬名だけ。数値は出さない)。
+ * 並びは印の順(core の `PREDICTION_MARKS`)→ 同じ印の中は馬番の昇順。印の無い馬(null・空白だけ)は含めない。
+ * `PREDICTION_MARKS` に無い印(API は文字列としてしか検証していない)は既知の印の後ろに、馬番の昇順で置く(落とさない)。
+ * 凡例(`markLegend`)の出る条件は「一覧が空でない」と同じ。
+ */
+describe("印の付いた馬の一覧(Issue #211)", () => {
+  const marked = (horses: AnalysisHorse[]) => content(analysis({ horses })).markedHorses;
+
+  it("クライアントの印の順の定数は、core の PREDICTION_MARKS と(順序まで)一致する", () => {
+    expect(PREDICTION_MARKS.length).toBeGreaterThan(0); // 前提: 比較対象が空でない
+    expect([...KNOWN_MARK_ORDER]).toEqual([...PREDICTION_MARKS]);
+  });
+
+  it("印の順(◎〇▲△☆注)→ 同じ印の中は馬番の昇順。入力は意図的に逆順・混在にして、並べ替えが実際に起きていることを固定する", () => {
+    const input = [
+      horse(9, { mark: "注" }),
+      horse(8, { mark: "☆" }),
+      horse(7, { mark: "△" }),
+      horse(6, { mark: "△" }),
+      horse(5, { mark: "▲" }),
+      horse(4, { mark: "〇" }),
+      horse(3, { mark: "◎" }),
+      horse(2, { mark: "〇" }),
+    ];
+    const out = marked(input);
+    expect(out.map((m) => m.umaban)).not.toEqual(input.map((h) => h.umaban)); // 前提: 入力順のままではない(並べ替えが効いている)
+    expect(out.map((m) => `${m.mark}${m.umaban}`)).toEqual(["◎3", "〇2", "〇4", "▲5", "△6", "△7", "☆8", "注9"]);
+  });
+
+  it("印の無い馬は含めない(null・空文字・空白だけ)。1頭も無ければ空配列", () => {
+    const input = [horse(1, { mark: null }), horse(2, { mark: "◎" }), horse(3, { mark: "" }), horse(4, { mark: "  " })];
+    expect(marked(input).map((m) => m.umaban)).toEqual([2]);
+    expect(marked([horse(1), horse(2)])).toEqual([]);
+  });
+
+  it("未知の印(PREDICTION_MARKS に無い文字列)は、既知の印の後ろに馬番の昇順で置く。落とさない・クラッシュしない", () => {
+    const out = marked([horse(1, { mark: "?" }), horse(2, { mark: "注" }), horse(3, { mark: "<img src=x>" }), horse(4, { mark: "◎" }), horse(0, { mark: "★" })]);
+    expect(out.map((m) => m.umaban)).toEqual([4, 2, 0, 1, 3]);
+    expect(out.map((m) => m.mark)).toEqual(["◎", "注", "★", "?", "<img src=x>"]);
+  });
+
+  it("同じ印・同じ馬番(想定外の重複)は、入力の順を保つ(安定)", () => {
+    const out = marked([horse(5, { mark: "◎", name: "先" }), horse(5, { mark: "◎", name: "後" })]);
+    expect(out.map((m) => m.name)).toEqual(["先", "後"]);
+  });
+
+  it("1行は印・馬番・馬名だけ(数値を持たない)。馬名が null・空文字なら馬名は null", () => {
+    const out = marked([horse(1, { mark: "◎", name: "エートラックス" }), horse(2, { mark: "〇", name: null }), horse(3, { mark: "▲", name: "" })]);
+    expect(out).toEqual([
+      { umaban: 1, name: "エートラックス", mark: "◎" },
+      { umaban: 2, name: null, mark: "〇" },
+      { umaban: 3, name: null, mark: "▲" },
+    ]);
+  });
+
+  it("凡例は一覧が空でないときだけ(印が空白だけの馬しかいなければ、一覧も凡例も出ない)。LLM の有無によらない", () => {
+    const onlyBlank = content(analysis({ model: "claude-x", horses: [horse(1, { mark: "  " })] }));
+    expect(onlyBlank.markedHorses).toEqual([]);
+    expect(onlyBlank.markLegend).toBeNull();
+    for (const model of [null, "claude-x"]) {
+      const c = content(analysis({ model, horses: [horse(1, { mark: "◎" })] }));
+      expect(c.markedHorses).toHaveLength(1);
+      expect(c.markLegend).toBe(MARK_LEGEND);
+    }
+  });
+
+  it("馬ごとの評価(horses)の並び・印は変えない(既存の馬カードの印は mark のまま)", () => {
+    const c = content(analysis({ horses: [horse(3, { mark: "▲" }), horse(1, { mark: "◎" }), horse(2, { mark: "" })] }));
+    expect(c.horses.map((x) => x.umaban)).toEqual([3, 1, 2]);
+    expect(c.horses.map((x) => x.mark)).toEqual(["▲", "◎", ""]);
   });
 });
 

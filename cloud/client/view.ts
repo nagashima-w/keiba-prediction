@@ -7,7 +7,7 @@
 import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
-import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type ResultContent, type ResultModel } from "./result";
+import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel } from "./result";
 import type { FieldModel, PreviewModel, SettingsModel } from "./settings-form";
 import { h, type VNode } from "./vnode";
 
@@ -237,16 +237,34 @@ function horseCard(horse: HorseCard): VNode {
   ]);
 }
 
+/** 印の付いた馬の1行(Issue #211)。印・馬番・馬名。馬名が無ければ印と馬番だけ。数値は出さない。 */
+function markedHorseRow(m: MarkedHorse): VNode {
+  return h("li", { class: "marked" }, [
+    h("span", { class: "marked-mark" }, [m.mark]),
+    h("strong", {}, [`${m.umaban}`]),
+    ...(m.name === null ? [] : [h("span", { class: "marked-name" }, [m.name])]),
+  ]);
+}
+
 /**
- * 結果の「馬ごとの評価」と「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
+ * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
  */
 function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
   const allocation = content.allocation;
   return [
+    // 印の付いた馬(Issue #211)。印が1頭も無ければ section ごと出さない。凡例はここ(見出しの下)に1回だけ(「馬ごとの評価」の中には出さない)。
+    ...(content.markedHorses.length === 0
+      ? []
+      : [
+          h("section", { class: "marked-horses" }, [
+            h(heading, {}, ["印の付いた馬"]),
+            ...(content.markLegend === null ? [] : [h("p", { class: "meta mark-legend" }, [content.markLegend])]),
+            h("ul", { class: "horse-list" }, content.markedHorses.map(markedHorseRow)),
+          ]),
+        ]),
     h("section", { class: "horses" }, [
       h(heading, {}, ["馬ごとの評価"]),
-      ...(content.markLegend === null ? [] : [h("p", { class: "meta mark-legend" }, [content.markLegend])]),
       h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
     ]),
     h("section", { class: "allocation" }, [
