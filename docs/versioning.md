@@ -3122,6 +3122,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1・DO のスキーマも無変更(migration も ALTER も無い)。exe(`packages/app` の機能)・`@keiba/core` のコードも無変更。`prompt_version` は据え置き(クラウドの分析は #167 で移行するまで D1 の中だけに入り、exe の検証データと混ざらない)。
 
+## 次の正式版が 1.23.1 である根拠(Issue #200 での変更)
+
+**patch**(調査用スクリプトの引数追加だけ。利用者から見えるものは何も変わらない)。
+
+### 変更内容
+
+- `scripts/probability-quality-41-llm/aggregate.ts`: `aggregateLlm` が、照合するプロンプト版を `options.expectedPromptVersion` で受け取れるようにした(既定は従来どおり現行の `PROMPT_VERSION`。指定しても記録に別の版が混ざれば throw する)。CLI は `--prompt-version <版>`。`conditions.promptVersion` は指定した版になる。
+  #197 でプロンプトの版を上げたため、コミット済みの #156 の観測(36本。版 `2026-07-28.2`)が既定のままでは集計できなくなっていた。旧版を指定すれば、記録済みの `aggregate.json` と完全に一致する結果で集計し直せる(テストで固定)。
+- テスト: 実データの再集計が `aggregate.json` と一致することと、既定の版では従来どおり throw することを足した。
+- 版数: ルート・アプリ `1.23.1`。
+
+### patch である根拠
+
+- 変わったのは調査用スクリプト(`scripts/`)とそのテストだけ。exe(`packages/app` の機能)・`@keiba/core`・cloud のコード、プロンプト、分析の数値は無変更。利用者から見える変化は無い。
+- 既定の挙動(引数なし)は無変更で、既存の呼び出しはそのまま動く。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1・DO のスキーマも無変更。`prompt_version` も据え置き。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

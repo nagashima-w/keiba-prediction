@@ -1,12 +1,18 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { computeMarketImpliedPlaceProbabilities } from "../../packages/core/src/ev/probability-quality-metrics.js";
 import { PROMPT_VERSION } from "../../packages/core/src/index.js";
 import {
   aggregateLlm,
+  loadLlmRecords,
+  parseAggregateArgs,
   marketImpliedLowerBound,
   LLM_AGGREGATE_BOOTSTRAP,
   LLM_AGGREGATE_PERMUTATION,
 } from "../probability-quality-41-llm/aggregate.js";
+import { loadObservations } from "../probability-quality-41/aggregate.js";
 import {
   LLM_OBSERVATION_SCHEMA_VERSION,
   type LlmHorseRecord,
@@ -95,8 +101,9 @@ function record(
     schemaVersion: LLM_OBSERVATION_SCHEMA_VERSION,
     raceId,
     caseId: `case-${raceId.slice(-2)}`,
-    // 合成の記録。aggregateLlm は「記録の版 = 現行の PROMPT_VERSION」を検査する(版の違う記録を作らない)ので、現行の版に合わせる。
-    // (実在の #156 の観測 36 本は版 2026-07-28.2 のままで、#197 で PROMPT_VERSION を上げたため、この検査には通らなくなった。docs/investigations は書き換えない)
+    // 合成の記録。aggregateLlm は既定では「記録の版 = 現行の PROMPT_VERSION」を検査する(版の違う記録を作らない)ので、現行の版に合わせる。
+    // (実在の #156 の観測 36 本は版 2026-07-28.2 のままで、#197 で PROMPT_VERSION を上げたため、既定の版ではこの検査に通らない。
+    //  docs/investigations は書き換えず、旧版は `expectedPromptVersion` で指定して集計し直す。末尾の describe〈Issue #200〉が固定する)
     promptVersion: PROMPT_VERSION,
     maxAdjust: 0.1,
     promptSha256: "x",
@@ -423,5 +430,94 @@ describe("aggregateLlm: 整合性の検証(食い違えば失敗する)", () => 
     const excluded = { ...OBS_C1, raceId: "202606040888", status: "excluded" as const, reason: "scrape-error", detail: "x" } as unknown as import("../probability-quality-41/observation.js").RaceObservation;
     const r = aggregateLlm([...ALL_OBS, excluded], allRecords());
     expect(r.central.raceCount).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #200: 照合するプロンプト版を引数で受け取り、#156 の観測を旧版のまま集計し直せる
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const LLM_ROOT = path.join(REPO_ROOT, "docs", "investigations", "probability-quality-41-llm");
+const OBS_ROOT = path.join(REPO_ROOT, "docs", "investigations", "probability-quality-41", "observations");
+/** #156 の観測を記録したときのプロンプト版(`llm-observations/*.json` と `aggregate.json` の `conditions.promptVersion`)。 */
+const OLD_PROMPT_VERSION = "2026-07-28.2";
+
+describe("aggregateLlm: 照合するプロンプト版を指定できる(Issue #200)", () => {
+  it("前提: 旧版は現行の PROMPT_VERSION と違う(同じなら以下のテストは差を検出できない)", () => {
+    expect(OLD_PROMPT_VERSION).not.toBe(PROMPT_VERSION);
+  });
+
+  it("旧版の記録は、旧版を指定すれば通り、conditions.promptVersion も指定した版になる", () => {
+    const recs = allRecords().map((r) => ({ ...r, promptVersion: OLD_PROMPT_VERSION }));
+    const r = aggregateLlm(ALL_OBS, recs, { expectedPromptVersion: OLD_PROMPT_VERSION });
+    expect(r.conditions.promptVersion).toBe(OLD_PROMPT_VERSION);
+    expect(r.central.raceCount).toBe(3);
+    expect(r.nar.raceCount).toBe(2);
+  });
+
+  it("指定が無ければ既定は現行の PROMPT_VERSION(旧版の記録は今までどおり失敗する)", () => {
+    const recs = allRecords().map((r) => ({ ...r, promptVersion: OLD_PROMPT_VERSION }));
+    expect(() => aggregateLlm(ALL_OBS, recs)).toThrow(/promptVersion.*2026-07-28\.2/);
+    // 現行の版の記録は、指定なしでも、現行の版の指定でも同じ結果
+    const cur = allRecords();
+    expect(aggregateLlm(ALL_OBS, cur, { expectedPromptVersion: PROMPT_VERSION })).toEqual(aggregateLlm(ALL_OBS, cur));
+  });
+
+  it("旧版を指定しても、記録に別の版が1本混ざれば失敗する(混在を通さない)", () => {
+    const recs = allRecords().map((r) => ({ ...r, promptVersion: OLD_PROMPT_VERSION }));
+    recs[2] = { ...recs[2]!, promptVersion: PROMPT_VERSION };
+    expect(() => aggregateLlm(ALL_OBS, recs, { expectedPromptVersion: OLD_PROMPT_VERSION })).toThrow(
+      new RegExp(`${recs[2]!.raceId}.*promptVersion.*${PROMPT_VERSION.replace(/\./g, "\\.")}`),
+    );
+  });
+
+  it("現行の版を指定して旧版の記録を渡せば失敗する(指定と記録が食い違えば通さない)", () => {
+    const recs = allRecords().map((r) => ({ ...r, promptVersion: OLD_PROMPT_VERSION }));
+    expect(() => aggregateLlm(ALL_OBS, recs, { expectedPromptVersion: PROMPT_VERSION })).toThrow(/promptVersion/);
+  });
+});
+
+describe("parseAggregateArgs: CLI の引数(Issue #200)", () => {
+  it("引数なしなら版は未指定(既定の現行版を使う)", () => {
+    expect(parseAggregateArgs([])).toEqual({ promptVersion: undefined });
+  });
+
+  it("--prompt-version <版> で版を指定できる", () => {
+    expect(parseAggregateArgs(["--prompt-version", OLD_PROMPT_VERSION])).toEqual({ promptVersion: OLD_PROMPT_VERSION });
+  });
+
+  it("値が無い・別のオプションが続く・空文字・未知のオプションは失敗する", () => {
+    expect(() => parseAggregateArgs(["--prompt-version"])).toThrow(/--prompt-version/);
+    expect(() => parseAggregateArgs(["--prompt-version", "--other"])).toThrow(/--prompt-version/);
+    expect(() => parseAggregateArgs(["--prompt-version", ""])).toThrow(/--prompt-version/);
+    expect(() => parseAggregateArgs(["--unknown"])).toThrow(/--unknown/);
+  });
+});
+
+describe("実データ: コミット済みの #156 の観測を旧版のまま集計し直すと、記録した aggregate.json と一致する(Issue #200)", () => {
+  const llmDir = path.join(LLM_ROOT, "llm-observations");
+  const records = loadLlmRecords(llmDir);
+  const observations = loadObservations(OBS_ROOT);
+  const recorded = JSON.parse(readFileSync(path.join(LLM_ROOT, "aggregate.json"), "utf-8")) as ReturnType<typeof aggregateLlm>;
+
+  it("前提: 記録は36本で、すべて旧版(2026-07-28.2)。記録済みの aggregate.json の条件も旧版で、中央24・地方12レース", () => {
+    expect(existsSync(llmDir)).toBe(true);
+    expect(records).toHaveLength(36);
+    expect(records.filter((r) => r.promptVersion === OLD_PROMPT_VERSION)).toHaveLength(36);
+    expect(recorded.conditions.promptVersion).toBe(OLD_PROMPT_VERSION);
+    expect(recorded.central.raceCount).toBe(24);
+    expect(recorded.nar.raceCount).toBe(12);
+  });
+
+  it("既定(現行の版)のままでは、今までどおり promptVersion の不一致で失敗する", () => {
+    expect(() => aggregateLlm(observations, records)).toThrow(/promptVersion が 2026-07-28\.2/);
+  });
+
+  it("旧版を指定すると、aggregate.json(JSON 全体。中央・地方の Brier・対比較・補正量・方向性を含む)と完全に一致する", () => {
+    const again = aggregateLlm(observations, records, { expectedPromptVersion: OLD_PROMPT_VERSION });
+    expect(again.central.raceCount).toBe(24);
+    expect(again.nar.raceCount).toBe(12);
+    expect(JSON.parse(JSON.stringify(again))).toEqual(recorded);
   });
 });

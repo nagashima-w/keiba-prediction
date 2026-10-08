@@ -9,7 +9,10 @@
  * (補正量・方向性)だけ。
  *
  * ## 実行
- *   pnpm tsx scripts/probability-quality-41-llm/aggregate.ts
+ *   pnpm tsx scripts/probability-quality-41-llm/aggregate.ts [--prompt-version <版>]
+ * `--prompt-version` は、照合する記録のプロンプト版(省略なら現行の `PROMPT_VERSION`)。コミット済みの #156 の観測
+ * (版 `2026-07-28.2`)を集計し直すときは `--prompt-version 2026-07-28.2` を付ける(Issue #200。結果は `aggregate.json` と一致する)。
+ * 出力先は版にかかわらず下の `aggregate.json`(別の版の観測で実行すると上書きされる点に注意)。
  * 既定の入力は `docs/investigations/probability-quality-41/observations` と
  * `docs/investigations/probability-quality-41-llm/llm-observations`。出力は
  * `docs/investigations/probability-quality-41-llm/aggregate.json`。
@@ -391,8 +394,15 @@ function aggregateRegion(region: "central" | "nar", races: readonly JoinedRace[]
   };
 }
 
-/** 観測と LLM 記録を結合する。食い違いはすべて例外(集合の違う対・版の違う記録を作らない)。 */
-function join(observations: readonly RaceObservation[], records: readonly LlmRaceRecord[]): JoinedRace[] {
+/**
+ * 観測と LLM 記録を結合する。食い違いはすべて例外(集合の違う対・版の違う記録を作らない)。
+ * `expectedPromptVersion` は、全記録の promptVersion が一致すべき版(混在は通さない)。
+ */
+function join(
+  observations: readonly RaceObservation[],
+  records: readonly LlmRaceRecord[],
+  expectedPromptVersion: string,
+): JoinedRace[] {
   const ok = observations.filter((o): o is RaceObservationOk => o.status === "ok");
   const okIds = new Set(ok.map((o) => o.raceId));
   const byRace = new Map<string, LlmRaceRecord>();
@@ -405,8 +415,8 @@ function join(observations: readonly RaceObservation[], records: readonly LlmRac
     if (!okIds.has(rec.raceId)) {
       throw new Error(`${rec.raceId}: LLM 記録に対応する #41 の観測(status: ok)がない`);
     }
-    if (rec.promptVersion !== PROMPT_VERSION) {
-      throw new Error(`${rec.raceId}: LLM 記録の promptVersion が ${rec.promptVersion}(期待: ${PROMPT_VERSION})`);
+    if (rec.promptVersion !== expectedPromptVersion) {
+      throw new Error(`${rec.raceId}: LLM 記録の promptVersion が ${rec.promptVersion}(期待: ${expectedPromptVersion})`);
     }
     if (rec.maxAdjust !== CLIP_VARIANTS.default.maxAdjust) {
       throw new Error(`${rec.raceId}: LLM 記録の maxAdjust が ${rec.maxAdjust}(期待: ${CLIP_VARIANTS.default.maxAdjust})`);
@@ -438,17 +448,29 @@ function join(observations: readonly RaceObservation[], records: readonly LlmRac
     });
 }
 
+/** 集計の引数(Issue #200)。 */
+export interface AggregateLlmOptions {
+  /**
+   * 照合するプロンプト版(全記録の promptVersion がこれと一致しなければ throw)。`conditions.promptVersion` にも載る。
+   * 既定は現行の `PROMPT_VERSION`。旧版で記録した観測(#156 の `2026-07-28.2`)を集計し直すときに指定する。
+   * 指定しても、記録に別の版が混ざれば throw する。
+   */
+  readonly expectedPromptVersion?: string;
+}
+
 /**
  * 観測と LLM 記録から集計を作る。入力の並びに依らない。中央と地方は混ぜない。
  */
 export function aggregateLlm(
   observations: readonly RaceObservation[],
   records: readonly LlmRaceRecord[],
+  options: AggregateLlmOptions = {},
 ): LlmAggregateResult {
-  const joined = join(observations, records);
+  const promptVersion = options.expectedPromptVersion ?? PROMPT_VERSION;
+  const joined = join(observations, records, promptVersion);
   return {
     conditions: {
-      promptVersion: PROMPT_VERSION,
+      promptVersion,
       clipVariant: "default",
       maxAdjust: CLIP_VARIANTS.default.maxAdjust,
       minFieldSizeForMarket: MIN_FIELD_SIZE_FOR_PLACE_MARKET,
@@ -473,12 +495,37 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const LLM_OUT_ROOT = path.join(REPO_ROOT, "docs", "investigations", "probability-quality-41-llm");
 const OBS_DIR = path.join(REPO_ROOT, "docs", "investigations", "probability-quality-41", "observations");
 
+/**
+ * CLI の引数を読む。`--prompt-version <版>` だけ(照合するプロンプト版。省略なら現行の `PROMPT_VERSION`)。
+ * 値が無い・空文字・別のオプションが続く・未知のオプションは throw する。
+ */
+export function parseAggregateArgs(argv: readonly string[]): { readonly promptVersion: string | undefined } {
+  let promptVersion: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === "--prompt-version") {
+      const v = argv[i + 1];
+      if (v === undefined || v === "" || v.startsWith("--")) {
+        throw new Error("--prompt-version には版(例: 2026-07-28.2)が必要です");
+      }
+      promptVersion = v;
+      i += 1;
+    } else {
+      throw new Error(`未知のオプション: ${a}(使えるのは --prompt-version <版> だけ)`);
+    }
+  }
+  return { promptVersion };
+}
+
 function main(): void {
+  const args = parseAggregateArgs(process.argv.slice(2));
   const llmDir = path.join(LLM_OUT_ROOT, "llm-observations");
   if (!existsSync(llmDir)) {
     throw new Error(`${llmDir} がありません(段階3 apply.ts を先に実行してください)`);
   }
-  const result = aggregateLlm(loadObservations(OBS_DIR), loadLlmRecords(llmDir));
+  const result = aggregateLlm(loadObservations(OBS_DIR), loadLlmRecords(llmDir), {
+    expectedPromptVersion: args.promptVersion,
+  });
   const out = path.join(LLM_OUT_ROOT, "aggregate.json");
   writeFileSync(out, JSON.stringify(result, null, 2), "utf-8");
   for (const r of [result.central, result.nar]) {
