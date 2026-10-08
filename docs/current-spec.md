@@ -1140,7 +1140,7 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
   `kaisaiDate`(YYYYMMDD)は `runCloudAnalysis` が必須にする(渡らないと runAnalysis が当日日付〈Worker は UTC〉で近似するため)。
 - **検査**: `packages/app/test/analysis-pipeline-golden.test.ts`(exe の出力)・`analysis-pipeline-async-deps.test.ts`(非同期 deps・バッチ)、core の `native-free-modules.test.ts`、cloud の `import-guard.test.ts`(型を含む閉包・alias の一致)・`bundle-guard.test.ts`(runAnalysis がバンドルに入り better-sqlite3 が入らない)・
   `pipeline-run.test.ts`(golden との一致)、smoke(workerd で `runAnalysis` が最後まで通り、golden と SHA-256 まで一致)。
-- **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST のため、gate が GET だけの間はクラウドでは取れない(#181)。
+- **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST で取る。gate は #181 段階1(v1.22.2)で許可リスト付きの POST に対応したが、分析はまだ POST を呼ばないため、クラウドの分析には入らない(注入は #181 段階2)。
 
 ### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
 **呼び出す入口は、手動の `POST /api/analyses/run`〈#180〉と、cron の `scheduled`〈#206。`requestPlan`〉**。`worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)。ローカルの smoke も RPC を呼んで通す。
