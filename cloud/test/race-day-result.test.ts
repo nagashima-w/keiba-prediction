@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseRaceId } from "../../packages/core/src/scraper/ids";
 import { parseRaceResult } from "../../packages/core/src/scraper/parse-race-result";
 import { raceResultUrl } from "../../packages/core/src/scraper/urls";
-import type { RaceComboPayoutsSaveInput, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types";
+import type { RaceComboPayoutsSaveInput, RaceResultDetail, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types";
 import type { CourseType } from "../../packages/core/src/scraper/types";
 import type { DiscordNotifier } from "../src/notify-send";
 import type { GateResult } from "../src/gate-core";
@@ -116,6 +116,8 @@ interface FakeStore {
   /** 次の saveResult を、この回数だけ失敗させる。 */
   failures: number;
   saveResult(raceId: string, entries: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
+  /** Issue #209 で結果ストアの型に加わった読み出し(発走前の当日傾向)。このファイルの主題ではないので空を返す。 */
+  getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
 }
 function fakeStore(): FakeStore {
   const store: FakeStore = {
@@ -127,6 +129,9 @@ function fakeStore(): FakeStore {
         throw new Error("D1 の保存に失敗(SECRET-D1-MESSAGE)");
       }
       store.calls.push({ raceId, entries, courseType, comboPayouts });
+    },
+    async getRaceResultDetails() {
+      return new Map();
     },
   };
   return store;

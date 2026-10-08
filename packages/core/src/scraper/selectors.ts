@@ -147,6 +147,11 @@ export const RACE_RESULT_SELECTORS = {
    * 既存規約(RACE_LIST_SELECTORS/SHUTUBA_SELECTORS等の作法)に合わせ、ここにも独立して持つ。
    */
   raceData01: ".RaceData01",
+  /**
+   * 会場・条件・頭数(`<span>10頭</span>`)を含む行(Issue #209: 全頭の着順がそろったかの判定に使う頭数)。
+   * 結果テーブルとは独立に出る(結果の行が 0 件の発売前ページにも出ている)。
+   */
+  raceData02: ".RaceData02",
   /** 全着順テーブル(結果本体)。他テーブルの行と区別するため id で限定する。 */
   resultTable: "#All_Result_Table",
   /**

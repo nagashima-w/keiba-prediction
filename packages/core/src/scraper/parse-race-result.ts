@@ -611,3 +611,29 @@ export function parseRaceResult(html: string): RaceResult {
     courseType: parseCourseType($),
   };
 }
+
+/** 頭数の span の文言(`10頭`。余分な文字を含むものは拾わない)。 */
+const FIELD_SIZE_PATTERN = /^(\d{1,2})頭$/;
+
+/**
+ * 結果ページ自身が示す頭数(`.RaceData02` の `<span>N頭</span>`)を返す(Issue #209)。
+ * 当日の取り込みで、**払戻が先に出て全頭の着順が数分遅れる**ページ(地方で実測)を保存しないための判定に使う
+ * (結果の行数 ≥ N頭 になるまで保存しない)。`parseRaceResult` とは別の純関数にしてある(`RaceResult` の形・既存の golden を変えない)。
+ * 結果テーブルとは独立に出ており、結果の行が 0 件の発売前ページにも出る。
+ * 取れないとき(`.RaceData02` が無い・頭数の span が無い・0頭・数字でない)は null(呼び出し側は「判定不能」として扱う。例外は投げない)。
+ * 取消・除外・中止の馬が N頭 と結果の行にどう数えられるかは未検証(非数値の着順を含むフィクスチャが無い)。
+ */
+export function parseRaceFieldSize(html: string): number | null {
+  const $ = cheerio.load(html);
+  const spans = $(SEL.raceData02).find("span").toArray();
+  for (const span of spans) {
+    const m = FIELD_SIZE_PATTERN.exec(normalizeText($(span).text()));
+    if (m !== null) {
+      const n = Number(m[1]);
+      if (n > 0) {
+        return n;
+      }
+    }
+  }
+  return null;
+}

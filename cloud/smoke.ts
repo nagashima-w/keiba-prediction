@@ -483,6 +483,7 @@ async function main(): Promise<void> {
       check(`${label}: 計画の行 36 件はすべて skip(started)で、morning を積んでいない(発走が過去なので netkeiba にも LLM にも出ない)`, plan?.rows.length === 36 && plan.rows.every((r) => r.disposition === "skip" && r.skip_reason === "started" && r.morning === null), JSON.stringify(plan?.rows.slice(0, 2)));
       const results = done.body["results"] as { outcome: { kind: string; reason: string | null } }[] | undefined;
       check(`${label}: 自動実行の結果 36 件はすべて skipped(started)。通知は 0 件(Webhook なし)`, results?.length === 36 && results.every((r) => r.outcome.kind === "skipped" && r.outcome.reason === "started") && Array.isArray(done.body["notifications"]) && (done.body["notifications"] as unknown[]).length === 0, JSON.stringify(results?.slice(0, 2)));
+      check(`${label}: 期限を待つ planned の行が無い日(36 件すべて発走済み)は、当日中の結果の取り込みの行を積まない(result_import は 0 件。本物の DO を通る。Issue #209)`, JSON.stringify(done.body["result_import"]) === JSON.stringify({ total: 0, queued: 0, imported: 0, gave_up: 0, races: [] }), JSON.stringify(done.body["result_import"]));
       check(`${label}: GET /api/plan の応答に webhook の語が無い`, !/webhook/i.test(done.text), done.text.slice(0, 80));
       // 重複配信: 同じ scheduledTime を再度発火しても、状態は変わらない(already-planned)
       const second = await fire(t0628);

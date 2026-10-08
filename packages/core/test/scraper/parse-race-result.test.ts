@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  parseRaceFieldSize,
   parseRaceResult,
   RaceResultNotConfirmedError,
   RaceResultParseError,
@@ -1502,5 +1503,71 @@ describe("組合せ払戻(枠連、Issue #145・#26-F)", () => {
     }
     // 枠連の行が無い文書なので、枠連は「発売なし」の空配列(馬連の異常に巻き込まれない)。
     expect(result.bracketQuinellaPayouts).toEqual({ state: "parsed", payouts: [] });
+  });
+});
+
+describe("parseRaceFieldSize(Issue #209: 結果ページ自身の「N頭」。当日の取り込みで、全頭の着順がそろったかの判定に使う)", () => {
+  /** 結果の行を持つ確定フィクスチャ(中央9件・地方6件)。 */
+  const CONFIRMED_FIXTURES = [
+    "result_202602010605.html",
+    "result_202602010607.html",
+    "result_202603020203.html",
+    "result_202603020211.html",
+    "result_202606040810.html",
+    "result_202607020501.html",
+    "result_202607020502.html",
+    "result_202607020505.html",
+    "nar_result_202630062407.html",
+    "nar_result_202646071203.html",
+    "nar_result_202654071201.html",
+    "nar_result_202654071210.html",
+    "nar_result_202654092706.html",
+    "nar_result_202654092711.html",
+  ];
+
+  it("前提: 確定フィクスチャは 14 件で、中央・地方の両方を含む", () => {
+    expect(CONFIRMED_FIXTURES).toHaveLength(14);
+    expect(CONFIRMED_FIXTURES.filter((f) => f.startsWith("nar_"))).toHaveLength(6);
+    expect(CONFIRMED_FIXTURES.filter((f) => !f.startsWith("nar_"))).toHaveLength(8);
+  });
+
+  it.each(CONFIRMED_FIXTURES)("%s: N頭 が取れ、結果の行数と一致する(取消・除外・中止の行を含むフィクスチャは無い)", (name) => {
+    const html = loadFixture(name);
+    const size = parseRaceFieldSize(html);
+    expect(size).not.toBeNull();
+    expect(size).toBe(parseRaceResult(html).horses.length);
+  });
+
+  it("結果の行が 0 件の発売前ページでも、N頭(12頭)が取れる = N頭 は結果テーブルとは独立に出ている", () => {
+    const html = loadFixture("nar_result_presale_202642071612.html");
+    expect(() => parseRaceResult(html)).toThrow(RaceResultNotConfirmedError);
+    expect(parseRaceFieldSize(html)).toBe(12);
+  });
+
+  it("結果の行を一部だけ削っても N頭 は変わらない(上位 3 頭だけのページを合成した場合の前提)", () => {
+    const html = loadFixture("nar_result_202654092706.html");
+    expect(parseRaceFieldSize(html)).toBe(9);
+    const partial = buildResultHtml([buildResultRow({ rank: "1", umaban: "1" })]).replace(
+      "<html><body>",
+      '<html><body><div class="RaceData02"><span>1回</span><span>園田</span><span>9頭</span></div>',
+    );
+    expect(parseRaceResult(partial).horses).toHaveLength(1);
+    expect(parseRaceFieldSize(partial)).toBe(9);
+  });
+
+  it.each([
+    ["RaceData02 が無い", "<html><body></body></html>"],
+    ["頭数の span が無い", '<div class="RaceData02"><span>5回</span><span>高知</span></div>'],
+    ["0頭", '<div class="RaceData02"><span>0頭</span></div>'],
+    ["数字でない", '<div class="RaceData02"><span>多頭</span></div>'],
+    ["RaceData02 の外にだけある", '<div class="X"><span>10頭</span></div>'],
+    ["余分な文字がある(本賞金の行に混ざった数字)", '<div class="RaceData02"><span>本賞金:80.0万円 10頭立て</span></div>'],
+  ])("取れないときは null: %s", (_name, html) => {
+    expect(parseRaceFieldSize(html)).toBeNull();
+  });
+
+  it("RaceData02 の中の複数の span から「N頭」だけを拾う", () => {
+    const html = '<div class="RaceData02"><span>5回</span><span>高知</span><span>6日目</span><span>サラ系一般 C2</span><span>10頭</span><span>本賞金:80.0、32.0万円</span></div>';
+    expect(parseRaceFieldSize(html)).toBe(10);
   });
 });

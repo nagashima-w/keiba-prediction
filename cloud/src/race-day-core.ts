@@ -37,7 +37,13 @@
  * ## 結果の取り込み(Issue #208〈#182-B〉)
  * 過去の開催日の結果(着順・払戻)を、アラームの 1 ステップにつき **1 レース**だけ取り込む(`requestResultImport` で依頼 → {@link RaceDayCore.runResultStep})。状態は**専用の新しい表**(`race_day_result`。`race-day-result.ts`)。
  * 取得は gate 経由・キャッシュを通さない生の `HttpClient`(結果のページをキャッシュに溜めない)、保存は D1(`resultStore`)。**払戻のテーブルが出てから保存する**(審議中の暫定の着順を固めない)。
- * 優先度は最も低い: **タスク(queued・fetched)・計画の仕事が無いときだけ**動く({@link RaceDayCore.resultsRunnable}。アラームの候補を入れるかと、動くかの両方がこれを使う)。通知は {@link RaceDayCore.runNextStep} の順序で、送るべきものがあれば先に出る。
+ * 優先度は最も低い: **タスク(queued・fetched)が無く、計画の段階〈会場の一覧・確定〉が終わっているときだけ**動く({@link RaceDayCore.resultsRunnable}。アラームの候補を入れるかと、動くかの両方がこれを使う)。通知は {@link RaceDayCore.runNextStep} の順序で、送るべきものがあれば先に出る。
+ * **期限を待つ planned の行は止めない**ので、今日の DO でも、期限が来た行の昇格〈各ステップの先頭〉→ タスク → 結果の順で動く(Issue #209)。
+ *
+ * ## 当日中の結果の取り込みと当日傾向(Issue #209)
+ * 計画の確定時に、発走時刻のある計画の行(skip の行も含む)ごとに結果の行を積む({@link RaceDayCore.runPlanFinalize}。`requested_on` = 開催日。最初の試行は発走 + 15 分)。
+ * 当日の行は、**全頭の着順がそろったページだけ**保存する(結果ページ自身の「N頭」と、結果の行数を比べる。地方では払戻が先に出て、全頭の着順が数分遅れて出ることを実測)。
+ * 発走前の計算ステップは、保存済みの前のレースの結果(D1。gate は 0 回)から当日傾向を作る({@link RaceDayCore.runPreRaceCompute})。効くのは同じ場・同じ面で取り込み済みが 2 レース以上のときだけ(中央が中心: 地方の結果ページには通過順の列が無い)。
  *
  * ## 失敗と再試行
  * 取得ステップは、失敗(gate の拒否・通信の失敗・戦績の取りこぼし)なら試行回数 {@link MAX_ATTEMPTS} まで、{@link RETRY_DELAY_MS} 後に再試行する
@@ -55,7 +61,7 @@
 import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper/cached-fetcher";
 import { HttpError, type HttpClient } from "../../packages/core/src/scraper/http-client";
 import { importRaceResult } from "../../packages/core/src/ev/result-import";
-import { parseRaceResult, RaceResultNotConfirmedError } from "../../packages/core/src/scraper/parse-race-result";
+import { parseRaceFieldSize, parseRaceResult, RaceResultNotConfirmedError } from "../../packages/core/src/scraper/parse-race-result";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
@@ -73,9 +79,14 @@ import {
   MAX_RESULT_DEFERRALS,
   MAX_RESULT_RACES_PER_REQUEST,
   MAX_RESULT_ROWS_PER_DAY,
+  MAX_SAME_DAY_ATTEMPTS,
+  MAX_SAME_DAY_RESULT_ROWS,
+  MAX_SAME_DAY_UNKNOWN_SIZE_ATTEMPTS,
   RESULT_BUSY_DELAY_MS,
   RESULT_RETRY_DELAY_MS,
   ResultImportStore,
+  SAME_DAY_RESULT_DELAY_MS,
+  SAME_DAY_RETRY_DELAY_MS,
   type ResultClass,
   type ResultRow,
   type ResultState,
@@ -226,6 +237,9 @@ export interface AnalysisSink {
   countChildren(analysisId: number): Promise<{ readonly horses: number; readonly bets: number }>;
 }
 
+/** 結果の保存先のうち、日単位の DO が使う部分: 取り込みの保存(`saveResult`)と、発走前の分析の当日傾向の読み出し(`getRaceResultDetails`。Issue #209)。 */
+export type ResultStoreDeps = Pick<ResultRepository, "saveResult" | "getRaceResultDetails">;
+
 export interface RaceDayDeps {
   readonly sql: SqlLike;
   readonly now: () => number;
@@ -249,10 +263,10 @@ export interface RaceDayDeps {
    */
   readonly notifier?: DiscordNotifier;
   /**
-   * 結果の保存先(Issue #208。DO のラッパが `D1ResultStore` で実装する)。**無ければ `requestResultImport` を拒否する**(結果の仕組み全体が無効)。発走前の分析の保存先(`sink`)とは独立。
-   * 使うのは `saveResult` だけ(取り込みのステップ)。
+   * 結果の保存先(Issue #208。DO のラッパが `D1ResultStore` で実装する)。**無ければ `requestResultImport` を拒否し、計画の確定でも結果の行を積まない**(結果の仕組み全体が無効)。発走前の分析の保存先(`sink`)とは独立。
+   * 使うのは `saveResult`(取り込みのステップ)と `getRaceResultDetails`(Issue #209: 発走前の計算ステップが、前のレースの結果から当日傾向を作る。無い構成は当日傾向なし)。
    */
-  readonly resultStore?: Pick<ResultRepository, "saveResult">;
+  readonly resultStore?: ResultStoreDeps;
 }
 
 export interface ScheduleInput {
@@ -543,7 +557,7 @@ export class RaceDayCore {
   /** 結果の取り込みの表(Issue #208。新しい表だけ)。 */
   private readonly results: ResultImportStore;
   /** 結果の保存先。無ければ結果の仕組み全体が無効。 */
-  private readonly resultStore: Pick<ResultRepository, "saveResult"> | undefined;
+  private readonly resultStore: ResultStoreDeps | undefined;
   /** gate 経由・キャッシュなしの取得(結果のページ用。`networkFetcher` と同じ直列化した gate を使う)。 */
   private readonly httpClient: HttpClient;
   private readonly cache: DoSqlCacheStore;
@@ -1358,9 +1372,32 @@ export class RaceDayCore {
         this.plan.setTargeted(venue, targets.filter((t) => t.venue === venue).length);
       }
     }
+    this.enqueueSameDayResults(kaisaiDate, nowMs);
     this.plan.markFinalized(nowMs);
     this.plan.clearEntries();
     return { kind: "ran", raceId: "plan", mode: "plan", step: "finalize", result: "ok" };
+  }
+
+  /**
+   * 当日中の結果の取り込みの行を積む(Issue #209。{@link runPlanFinalize} の同期区間から呼ぶ)。発走時刻のある計画の行ごとに(skip の行も含む: 前のレースの傾向の材料になる)、
+   * 発走 + {@link SAME_DAY_RESULT_DELAY_MS} を最初の試行とする `queued` の行を積む。`requested_on` は**開催日**(確定が日付をまたいで遅れても、翌朝の依頼が「同じ日の依頼」と読まない)。
+   * 積まない: 結果ストアが無い構成 / 期限を待つ planned の行が 1 つも無い日(当日傾向を使う分析が起きない。全レースが発走済みの日の無駄な取得を避ける)/ 既に行があるレース(確定の再実行で作り直さない)。
+   * 上限 {@link MAX_SAME_DAY_RESULT_ROWS}(発走の早い順に取り、超えたぶんは積まない。確定は落とさない)。スキーマは変えない。
+   */
+  private enqueueSameDayResults(kaisaiDate: string, nowMs: number): void {
+    if (this.resultStore === undefined || this.plan.plannedCount() === 0) {
+      return;
+    }
+    let count = this.results.count();
+    for (const r of this.plan.rowsWithStartTime()) {
+      if (count >= MAX_SAME_DAY_RESULT_ROWS) {
+        break;
+      }
+      if (this.results.row(r.race_id) === null) {
+        this.results.enqueue(r.race_id, kaisaiDate, nowMs, r.start_ms + SAME_DAY_RESULT_DELAY_MS);
+        count += 1;
+      }
+    }
   }
 
   /** 1対象の計画の行を作る(期限・すぐ実行・スキップの判定と、上限)。 */
@@ -1514,7 +1551,8 @@ export class RaceDayCore {
   // ---- 結果の取り込み(Issue #208)----
 
   /**
-   * 結果の取り込みが動ける状態か: 結果ストアがあり、**タスク(queued・fetched)が無く、計画の仕事も無い**。アラームの候補を入れるか({@link rearm})と、動くか({@link runNextStep})の
+   * 結果の取り込みが動ける状態か: 結果ストアがあり、**タスク(queued・fetched)が無く、計画の段階が終わっている**({@link PlanStore.planStageSettled}: 会場の一覧・確定の途中でない。
+   * **期限を待つ planned の行は数えない** = 今日の DO でも動く。Issue #208 は `hasPlanWork`〈planned の行も数える〉だったので、当日中は一度も動かなかった)。アラームの候補を入れるか({@link rearm})と、動くか({@link runNextStep})の
    * **両方がこれを使う**(別々に書くと、アラームだけ張って動かない〈即時ループ〉か、動くのにアラームが無い〈停止〉が起きる)。
    * タスクの条件が要る理由: {@link pickNext} は queued を時刻を見ずに返すので、結果の候補で起きると、再試行待ちのタスクが間隔を無視して走る。
    */
@@ -1523,7 +1561,8 @@ export class RaceDayCore {
       return false;
     }
     const pending = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks WHERE status IN ('queued', 'fetched')").toArray() as { n: number }[])[0]?.n ?? 0;
-    return pending === 0 && !this.plan.hasPlanWork();
+    // Issue #209: 期限を待つ planned の行は「仕事」に数えない(今日の DO では最終レースまで残る)。会場の一覧・確定の途中は数える。
+    return pending === 0 && this.plan.planStageSettled();
   }
 
   /**
@@ -1540,7 +1579,9 @@ export class RaceDayCore {
     const outcomeOf_ = (result: "ok" | "retry" | "failed"): StepOutcome => ({ kind: "ran", raceId, mode: "result", step: "import", result });
     const attempts = row.attempts + 1;
     this.results.markAttempt(raceId, attempts, this.now());
-    const progress: { stage: "fetch" | "parse" | "save"; noPayout: boolean } = { stage: "fetch", noPayout: false };
+    // 当日の行(Issue #209): 計画の確定で積んだ行 = 依頼の日が開催日。全頭の着順がそろった確認と、5 分おき・10 回の再試行が加わる。過去日の行(翌朝の依頼)は従来どおり。
+    const sameDay = row.requested_on === this.metaGet("kaisai_date");
+    const progress: { stage: "fetch" | "parse" | "save"; noPayout: boolean; incomplete: "short" | "unknown-size" | null } = { stage: "fetch", noPayout: false, incomplete: null };
     let imported = false;
     let failure: unknown = null;
     try {
@@ -1554,6 +1595,15 @@ export class RaceDayCore {
             // 着順の行はあるが払戻のテーブルが出ていない(審議中の暫定の着順)。保存しない。
             progress.noPayout = true;
             throw new RaceResultNotConfirmedError("払戻のテーブルがまだありません(審議中の可能性があります)");
+          }
+          if (sameDay) {
+            // 払戻が先に出て、全頭の着順が数分遅れて出るページ(地方で実測)を保存しない。結果の行数(非数値の着順を含む)が、ページ自身の「N頭」に満たなければ未完了。
+            // 「N頭」が取れないときは判定できないので保存しない。
+            const fieldSize = parseRaceFieldSize(html);
+            if (fieldSize === null || parsed.horses.length < fieldSize) {
+              progress.incomplete = fieldSize === null ? "unknown-size" : "short";
+              throw new RaceResultNotConfirmedError("全頭の着順がまだそろっていません");
+            }
           }
           return parsed;
         },
@@ -1572,13 +1622,14 @@ export class RaceDayCore {
       return outcomeOf_("ok");
     }
     if (failure === null) {
-      return this.failResult(row, attempts, progress.noPayout ? "no-payout" : "not-confirmed", outcomeOf_);
+      const lastClass: ResultClass = progress.noPayout ? "no-payout" : progress.incomplete !== null ? "incomplete" : "not-confirmed";
+      return this.failResult(row, attempts, lastClass, outcomeOf_, sameDay, progress.incomplete === "unknown-size" ? MAX_SAME_DAY_UNKNOWN_SIZE_ATTEMPTS : undefined);
     }
     if (progress.stage === "parse") {
-      return this.failResult(row, attempts, "parse-error", outcomeOf_);
+      return this.failResult(row, attempts, "parse-error", outcomeOf_, sameDay);
     }
     if (progress.stage === "save") {
-      return this.failResult(row, attempts, "save-failed", outcomeOf_);
+      return this.failResult(row, attempts, "save-failed", outcomeOf_, sameDay);
     }
     // 取得の失敗: gate の拒否は保留または即座の諦め、それ以外は試行を数える再試行。
     if (failure instanceof HttpError && failure.cause instanceof GateRefusedError) {
@@ -1603,18 +1654,29 @@ export class RaceDayCore {
         return outcomeOf_("retry");
       }
     }
-    return this.failResult(row, attempts, "fetch-failed", outcomeOf_);
+    return this.failResult(row, attempts, "fetch-failed", outcomeOf_, sameDay);
   }
 
-  /** 試行を数える失敗: 上限までは {@link RESULT_RETRY_DELAY_MS} 後に再試行、上限で諦める。 */
-  private failResult(row: ResultRow, attempts: number, lastClass: ResultClass, outcomeOf_: (r: "ok" | "retry" | "failed") => StepOutcome): StepOutcome {
+  /**
+   * 試行を数える失敗: 上限までは再試行、上限で諦める。過去日の行は {@link RESULT_RETRY_DELAY_MS} 後に {@link MAX_RESULT_ATTEMPTS} 回まで。
+   * 当日の行(Issue #209)は {@link SAME_DAY_RETRY_DELAY_MS} おきに {@link MAX_SAME_DAY_ATTEMPTS} 回まで(`maxAttempts` で、判定不能のときの上限〈{@link MAX_SAME_DAY_UNKNOWN_SIZE_ATTEMPTS}〉に絞れる)。
+   */
+  private failResult(
+    row: ResultRow,
+    attempts: number,
+    lastClass: ResultClass,
+    outcomeOf_: (r: "ok" | "retry" | "failed") => StepOutcome,
+    sameDay: boolean,
+    maxAttempts?: number,
+  ): StepOutcome {
     const now = this.now();
-    if (attempts >= MAX_RESULT_ATTEMPTS) {
+    const limit = maxAttempts ?? (sameDay ? MAX_SAME_DAY_ATTEMPTS : MAX_RESULT_ATTEMPTS);
+    if (attempts >= limit) {
       this.results.markGaveUp(row.race_id, row.deferrals, lastClass, now);
       this.warnGaveUp(row.race_id, lastClass, attempts, row.deferrals);
       return outcomeOf_("failed");
     }
-    this.results.markRetry(row.race_id, now + RESULT_RETRY_DELAY_MS, lastClass, now);
+    this.results.markRetry(row.race_id, now + (sameDay ? SAME_DAY_RETRY_DELAY_MS : RESULT_RETRY_DELAY_MS), lastClass, now);
     return outcomeOf_("retry");
   }
 
@@ -1905,8 +1967,11 @@ export class RaceDayCore {
           },
           evConfig: { threshold: settings.evThreshold },
           now: () => new Date(analyzedAtMs),
-          // 当日傾向の読み出し(D1)は、結果の取込(#182)ができるまで空(LLM のプロンプトに当日傾向のブロックは出ない)。重賞の過去10年傾向(#181)も、まだ注入しない。
-          getRaceResultDetails: async () => new Map(),
+          // 当日傾向(Issue #209): 前のレース(自レースより前のレース番号だけ。#153)の結果を D1 から読む(netkeiba には出ない)。結果ストアが無い構成は空(当日傾向なし)。
+          // 読み出しの失敗は runAnalysis が握って当日傾向なしで続け、`onSameDayTrendError` に渡す(警告には redactSecrets を通した先頭 200 文字だけ)。
+          // 重賞の過去10年傾向(#181)は、まだ注入しない。
+          getRaceResultDetails: async (ids) => (this.resultStore === undefined ? new Map() : this.resultStore.getRaceResultDetails(ids)),
+          onSameDayTrendError: (info) => this.onWarn(`発走前の分析(${info.raceId}): 当日傾向を読み出せなかったため、当日傾向なしで続けます(${redactSecrets(info.message).slice(0, 200)})`),
           llmSkipReason: LLM_NOTE_NO_KEY,
         });
         // LLM が効かなかったとき(キー未登録・フォールバック)は、固定の理由だけを警告に残す(API のエラーの本文・診断メッセージは出さない)。

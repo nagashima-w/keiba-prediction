@@ -388,7 +388,7 @@ describe("Issue #201: プロンプトのプレビューの表示用データ(bui
     expect(changed.text).toContain("±10%(絶対値0.10)");
   });
 
-  it("注記: サンプルで作った例・実分析で置き換わるセクション・保存後の次回から反映・「入力中の内容を反映」で更新・同日の傾向と重賞の傾向を現在は送らない・プロンプト版", () => {
+  it("注記: サンプルで作った例・実分析で置き換わるセクション・保存後の次回から反映・「入力中の内容を反映」で更新・同日の傾向は前のレースが2つ以上あるときだけ(実質、中央)・重賞の傾向は送らない・プロンプト版", () => {
     const p = open();
     const notes = notesOf(p);
     expect(notes).toContain("サンプルレース");
@@ -397,8 +397,13 @@ describe("Issue #201: プロンプトのプレビューの表示用データ(bui
     expect(notes).toContain("馬場悪化シナリオ");
     expect(notes).toContain("入力中の内容を反映");
     expect(notes).toContain("保存後");
-    expect(notes).toContain("同日の傾向・重賞の傾向");
-    expect(notes).toContain("実際の分析でも送りません");
+    expect(notes).toContain("同日の傾向は、取り込み済みの前のレースが同じ場・同じ面で2つ以上あるときだけ、実際の分析でも送ります");
+    expect(notes).toContain("地方は結果ページに通過順が無いため、ほとんど効きません");
+    expect(notes).toContain("発走の何分前に評価するか");
+    expect(notes).toContain("重賞の傾向は送りません");
+    expect(notes).not.toContain("同日の傾向・重賞の傾向"); // 旧: 同日の傾向も送らないとする文
+    expect(notes).not.toContain("今後追加予定");
+    expect(notes).not.toContain("#"); // 画面の文に Issue 番号を書かない
     expect(notes).toContain(`プロンプト版: ${CLIP_VARIANTS.wide15.promptVersion}`);
     const d = open({ draft: setDraftValue(draftFromSettings(FULL), "clipVariant", "default") });
     expect(notesOf(d)).toContain(`プロンプト版: ${CLIP_VARIANTS.default.promptVersion}`);

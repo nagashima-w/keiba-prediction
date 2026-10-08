@@ -94,6 +94,7 @@ export {
 export { OddsParseError, parseOdds } from "./scraper/parse-odds.js";
 export { NarOddsParseError, parseNarOdds } from "./scraper/parse-nar-odds.js";
 export {
+  parseRaceFieldSize,
   parseRaceResult,
   RaceResultNotConfirmedError,
   RaceResultParseError,

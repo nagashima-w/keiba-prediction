@@ -254,6 +254,19 @@ export class PlanStore {
     return rows[0]?.at ?? null;
   }
 
+  /**
+   * 計画の段階が終わっているか(Issue #209): 計画が依頼されていない、または、全会場の一覧が終端で確定済み。
+   * `hasPlanWork` との違いは、**期限を待つ planned の行を「仕事」に数えない**こと。今日の DO では planned の行が最終レースまで残るので、
+   * 結果の取り込み({@link RaceDayCore.resultsRunnable})が `hasPlanWork` を条件にすると、当日中は一度も動かない。
+   * 期限が来た planned の行は、各ステップの先頭の昇格(`promoteDuePlans`)でタスクになり、タスクがあるあいだ結果は動かないので、発走前の分析を押しのけない。
+   */
+  planStageSettled(): boolean {
+    if (!this.requested()) {
+      return true;
+    }
+    return !this.venueRows().some((r) => r.state === "pending") && this.finalizedAt() !== null;
+  }
+
   /** 計画の仕事が残っているか(依頼済みで、会場が pending・確定待ち・planned の行がある)。掃除のアラームや一覧の掃除の予約の判定に使う。 */
   hasPlanWork(): boolean {
     if (!this.requested()) {
@@ -290,6 +303,13 @@ export class PlanStore {
       row.planned_at,
       row.promoted_at,
     );
+  }
+
+  /** 発走時刻のある計画の行(発走の早い順 → レースID 順)。当日中の結果の行を積むのに使う(Issue #209。skip の行も含む)。 */
+  rowsWithStartTime(): { readonly race_id: string; readonly start_ms: number }[] {
+    return this.sql
+      .exec("SELECT race_id, start_ms FROM race_day_plan WHERE start_ms IS NOT NULL ORDER BY start_ms, race_id")
+      .toArray() as { race_id: string; start_ms: number }[];
   }
 
   plannedCount(): number {
