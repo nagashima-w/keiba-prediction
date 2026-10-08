@@ -60,6 +60,9 @@
  */
 import { CachedFetcher, type TextFetcher } from "../../packages/core/src/scraper/cached-fetcher";
 import { HttpError, type HttpClient } from "../../packages/core/src/scraper/http-client";
+import { collectGradeWinnerTrend } from "../../packages/core/src/analyzer/grade-winner-trend";
+import { fetchGradeWinnerEntries, gradeWinnerCacheKey } from "../../packages/core/src/scraper/fetch-grade-winner";
+import { GradeWinnerParseError } from "../../packages/core/src/scraper/parse-grade-winner";
 import { importRaceResult } from "../../packages/core/src/ev/result-import";
 import { parseRaceFieldSize, parseRaceResult, RaceResultNotConfirmedError } from "../../packages/core/src/scraper/parse-race-result";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
@@ -92,6 +95,7 @@ import {
   type ResultState,
 } from "./race-day-result";
 import type { ResultRepository } from "./result-repository";
+import { requireCacheKeyForPost } from "./post-cache-guard";
 import { PLAN_VENUES, PlanStore, type PlanRowRecord, type PlanSkipReason, type PlanVenue } from "./race-day-plan";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import { DoSqlCacheStore } from "./do-cache-store";
@@ -1857,6 +1861,7 @@ export class RaceDayCore {
       if (missing.length > 0) {
         throw new Error(`戦績を取得できなかった馬が ${missing.length} 頭います(${missing[0]!.message})`);
       }
+      await this.prefetchGradeWinner(task, parseRaceId(task.race_id), race.race.hasGradeBadge);
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
     } catch (error) {
@@ -1869,6 +1874,31 @@ export class RaceDayCore {
       }
       this.updateTask(task, "queued", attempts, message);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "retry" };
+    }
+  }
+
+  /**
+   * 重賞の「同レース過去10年傾向」(Issue #181)を、取得ステップで先に取ってキャッシュに載せる。**POST はここだけ**(計算ステップはキャッシュだけを引く)。
+   * 出すのは、出馬表に重賞のバッジが無いと判定できなかったとき(`hasGradeBadge !== false`。exe の `runAnalysis` と同じ fail-open)で、
+   * かつ LLM を使う構成のときだけ(`llm` が無ければ `runAnalysis` は傾向を使わない)。キャッシュは無期限(確定データ)なので、同じレースの再実行では POST は増えない。
+   * **失敗しても取得ステップは失敗にしない**(傾向は補助材料。GET の拒否・`post-blocked`・通信の失敗・壊れた応答のいずれも)。原因つきの警告(`redactSecrets` を通した先頭 200 文字)を残して続ける。
+   * 壊れた応答(200 だが読めない)は、`CachedFetcher` が保存した後にパースで失敗するので、キャッシュの行を消す(次の取得ステップでやり直せるように)。
+   */
+  private async prefetchGradeWinner(task: TaskRow, raceId: ReturnType<typeof parseRaceId>, hasGradeBadge: boolean | undefined): Promise<void> {
+    if (this.llm === undefined || hasGradeBadge === false) {
+      return;
+    }
+    try {
+      await fetchGradeWinnerEntries(raceId, { fetcher: requireCacheKeyForPost(this.networkFetcher) });
+    } catch (error) {
+      if (error instanceof GradeWinnerParseError) {
+        try {
+          this.cache.delete(gradeWinnerCacheKey(raceId));
+        } catch {
+          // 消せなくても、取得ステップは失敗にしない。
+        }
+      }
+      this.onWarn(`発走前の取得(${task.race_id}): 重賞の過去10年傾向を取得できなかったため、傾向なしで続けます(${redactSecrets(errorMessage(error)).slice(0, 200)})`);
     }
   }
 
@@ -1975,7 +2005,10 @@ export class RaceDayCore {
           now: () => new Date(analyzedAtMs),
           // 当日傾向(Issue #209): 前のレース(自レースより前のレース番号だけ。#153)の結果を D1 から読む(netkeiba には出ない)。結果ストアが無い構成は空(当日傾向なし)。
           // 読み出しの失敗は runAnalysis が握って当日傾向なしで続け、`onSameDayTrendError` に渡す(警告には redactSecrets を通した先頭 200 文字だけ)。
-          // 重賞の過去10年傾向(#181)は、まだ注入しない。
+          // 重賞の過去10年傾向(#181): 取得ステップがキャッシュに載せたものだけを引く(`cacheOnly`。netkeiba には出ない)。基準日(分析日。#153)は runAnalysis が渡すものを素通しする。
+          // キャッシュに無い(取得ステップの POST が失敗した)ときは、`CacheMissError` で `onGradeWinnerTrendError` に渡り、傾向なしで続ける(警告は redactSecrets を通した先頭 200 文字だけ)。
+          getGradeWinnerTrend: (id, conditions, cutoffDate) => collectGradeWinnerTrend(id, conditions, cutoffDate, { fetcher: requireCacheKeyForPost(this.cacheOnly) }),
+          onGradeWinnerTrendError: (info) => this.onWarn(`発走前の分析(${info.raceId}): 重賞の過去10年傾向を使えなかったため、傾向なしで続けます(${redactSecrets(info.message).slice(0, 200)})`),
           getRaceResultDetails: async (ids) => (this.resultStore === undefined ? new Map() : this.resultStore.getRaceResultDetails(ids)),
           onSameDayTrendError: (info) => this.onWarn(`発走前の分析(${info.raceId}): 当日傾向を読み出せなかったため、当日傾向なしで続けます(${redactSecrets(info.message).slice(0, 200)})`),
           llmSkipReason: LLM_NOTE_NO_KEY,
