@@ -18,6 +18,8 @@ import oddsQuinellaJson from "../fixtures/odds_quinella_202603020211.json";
 import oddsExactaJson from "../fixtures/odds_exacta_202603020211.json";
 import oddsTrifectaJson from "../fixtures/odds_trifecta_202603020211.json";
 import oddsWakurenJson from "../fixtures/odds_wakuren_202603020211.json";
+import gradeWinnerJson from "../fixtures/grade_winner_202603020211.json";
+import gradeWinnerNarJson from "../fixtures/grade_winner_nar_202644070111.json";
 import results2023103386 from "../fixtures/horse_results_2023103386.json";
 import results2021105857 from "../fixtures/horse_results_2021105857.json";
 import results2021105727 from "../fixtures/horse_results_2021105727.json";
@@ -42,6 +44,40 @@ import worker from "./src/worker";
 const SMOKE_FAKE_SOCKET_MARKER = "keiba-smoke-fake-socket";
 
 const encoder = new TextEncoder();
+
+/**
+ * POST の応答(Issue #181。重賞の過去10年傾向の API)。実際に送られたバイト列を見て、ヘッダ(Content-Type・X-Requested-With・Referer・Origin)と
+ * `Content-Length`(本文のバイト長と一致)が揃っていなければ 400 を返す(workerd の実環境で、組み立てたリクエストが正しいことの確認)。
+ * 本文の race_id が中央 202603020211(race ホスト)・地方 202644070111(nar ホスト)なら fixture の JSON、202605010101 なら 403(POST のブレーカーの確認用)、それ以外は 404。
+ */
+function routePost(host: string, path: string, requestText: string): { status: number; body: string } {
+  const headEnd = requestText.indexOf("\r\n\r\n");
+  const head = requestText.slice(0, headEnd);
+  const body = requestText.slice(headEnd + 4);
+  const length = /\r\nContent-Length: (\d+)\r\n/i.exec(`${head}\r\n`)?.[1];
+  const wellFormed =
+    path === "/race_api/" &&
+    /\r\nContent-Type: application\/x-www-form-urlencoded; charset=UTF-8\r\n/.test(head) &&
+    /\r\nX-Requested-With: XMLHttpRequest\r\n/.test(head) &&
+    new RegExp(`\\r\\nReferer: https://${host.replace(/\./g, "\\.")}/race/past(?:10|5)\\.html\\?race_id=\\d{12}\\r\\n`).test(head) &&
+    head.includes(`\r\nOrigin: https://${host}\r\n`) &&
+    length === String(encoder.encode(body).length) &&
+    body.startsWith("input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=");
+  if (!wellFormed) {
+    return { status: 400, body: "malformed POST by fake socket" };
+  }
+  const raceId = /race_id=(\d{12})$/.exec(body)?.[1] ?? "";
+  if (host === "race.netkeiba.com" && raceId === "202603020211") {
+    return { status: 200, body: JSON.stringify(gradeWinnerJson) };
+  }
+  if (host === "nar.netkeiba.com" && raceId === "202644070111") {
+    return { status: 200, body: JSON.stringify(gradeWinnerNarJson) };
+  }
+  if (host === "race.netkeiba.com" && raceId === "202605010101") {
+    return { status: 403, body: "forbidden by fake socket" };
+  }
+  return { status: 404, body: "not found by fake socket" };
+}
 
 /** リクエストの Host とパスから、返す応答(ステータスと本文)を決める。 */
 function route(host: string, path: string): { status: number; body: string } {
@@ -98,9 +134,10 @@ const fakeConnect: ConnectFn = () => {
   let responded = false;
   const respond = (): void => {
     responded = true;
-    const requestLine = /^GET (\S+) HTTP\/1\.1\r\n/.exec(requestText);
+    const requestLine = /^(GET|POST) (\S+) HTTP\/1\.1\r\n/.exec(requestText);
     const host = /\r\nHost: ([^\r\n]+)\r\n/.exec(requestText)?.[1] ?? "";
-    const { status, body } = route(host, requestLine?.[1] ?? "");
+    const { status, body } =
+      requestLine?.[1] === "POST" ? routePost(host, requestLine[2] ?? "", requestText) : route(host, requestLine?.[2] ?? "");
     const bodyBytes = encoder.encode(body);
     const head = encoder.encode(
       `HTTP/1.1 ${status} X\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: ${bodyBytes.length}\r\nX-Smoke: ${SMOKE_FAKE_SOCKET_MARKER}\r\nConnection: close\r\n\r\n`,

@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.22.1)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.22.2)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.22.1`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.22.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -976,12 +976,21 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   (それ以外は接続せずに拒否)。**同時に1本**(プロミスの連鎖)で、**開始間隔は 2 秒以上**(最後の開始時刻を取得の前に永続化。DO が作り直されても守る)。
   **サーキットブレーカー**: 400/403/429 が **2 回連続**したら **30 分間**、すべての取得を接続せずに拒否する(手動リセットなし。解除後は1回通し、拒否されたら即座にまた開く)。
   ほかのステータス(404・5xx)は連続を途切れさせ、通信エラー・タイムアウトは数えず途切れさせもしない。待ち行列の上限は 8。
+  **POST**(`postRaw`。#181 段階1〈v1.22.2〉。重賞の過去10年傾向の API 〈`AplGradeWinner`〉だけ): 宛先は race / nar.netkeiba.com の `/race_api/`(クエリなし)、本文は
+  `input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=<12桁>` の形、Referer は宛先と同じホストの `/race/past10.html`(または `past5.html`)で `race_id` が本文と同じ、
+  Origin は `https://<宛先のホスト>` ちょうど、に合うものだけを通す(合わないものは接続せずに拒否)。ヘッダは固定の4つ + `Content-Type`・`X-Requested-With`(値は固定)・`Referer`・`Origin`、
+  `Content-Length` は本文のバイト長から組み立て側が付ける(`Connection: close` の後ろ。実測で通った順)。順番待ち(直列化・最小間隔・待ち行列の上限)は GET と同じ連鎖。
+  **POST のブレーカーは別系統**: POST が 400/403/429 で拒否されたら**1回で**、POST だけを 30 分止める(`postBlockedUntil`。その間の POST は接続せずに `post-blocked`)。
+  **POST の結果は GET の連続回数を変えない**(拒否も、成功によるリセットも)。GET のブレーカーが開いている間は POST も止まる(`blocked`)。POST の拒否で GET は止まらない(分析の本体を止めない)。
   永続化の限界: ストレージの書き込みの出力ゲートがソケットの送信まで保護するかは未確認(クラッシュの瞬間に間隔が1回だけ破れうる)。
 - **core の取得処理への接続**(`cloud/src/gate-fetch.ts`): ゲートの `fetchRaw`(RPC)を core の `HttpClient` の fetch 注入口へ繋ぐ(`createGateHttpClient`: 間隔 0・再試行 0。間隔制御はゲートだけ)。
   core は `cloud/` から相対 import で取り込み、依存(cheerio・iconv-lite)は `wrangler.toml` の `[alias]`・`tsconfig.json` の `paths` で `cloud/node_modules` へ向ける。
 - **確認用エンドポイント**: `GET /api/netkeiba/check?race_id=...`(Access の関門のあと。GET のみ)。race_id を core の検証(中央 01〜10・地方 30〜64・帯広 65 は対象外)で確かめ、
   出馬表を1本取得して `parseShutuba` で読み、`ok`・`status`・頭数・`kind`(central/nar)・`queuedMs`・`elapsedMs`・ゲートの状態を JSON で返す。`/check` にフォーム(Issue #184 で `/` から移した。初期値 202603020211)がある。
   **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
+  `type=grade-winner` を付けると、同じエンドポイントで**重賞の過去10年傾向の API へ POST を1本**試せる(#181 段階1。キャッシュを通さずゲートを直接使う。`/check` に「POST の確認」のフォームがある)。
+  結果は `ok`・`target: "grade-winner"`・`status`・`entries`(読めた過去回の数。非重賞は null)・`kind`・`queuedMs`・`elapsedMs`・ゲートの状態(`postBlockedUntil` を含む)。
+  `type` は `shutuba`(既定)か `grade-winner` で、重複・未知の値・余計なパラメータは 400。**この段階では分析は POST を使わない**(重賞の傾向を LLM に入れるのは段階2)。
 - **未実装**: 保存の**呼び出し元**(#164。分析履歴のストア本体〈`D1AnalysisStore`〉は #175 で実装済み)・分析の実行(#164)・R2 の操作回数の安全柵(#173)・取得キャッシュ(#170)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
 
 ### D1(分析履歴)の土台(#171〈#169-a〉。v1.19.7)

@@ -489,3 +489,90 @@ describe("本文の扱いで失敗しても、読めたステータスを持た�
     expect(((await rejection(createSocketFetcher(c.connect)(URL_RACE))) as SocketFetchError).status).toBeUndefined();
   });
 });
+
+describe("POST(Issue #181)", () => {
+  const POST_URL = "https://race.netkeiba.com/race_api/";
+  const BODY = "input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=202603020211";
+  const INIT = {
+    method: "POST",
+    body: BODY,
+    referer: "https://race.netkeiba.com/race/past10.html?race_id=202603020211",
+    origin: "https://race.netkeiba.com",
+  } as const;
+
+  it("送るバイト列は、実測(HTTP 200)で通ったリクエストと1バイトも違わない(固定の4ヘッダ → Content-Type・X-Requested-With・Referer・Origin → Connection: close → Content-Length → 本文)", async () => {
+    const c = connector(() => ({ chunks: [OK_BODY] }));
+    await createSocketFetcher(c.connect)(POST_URL, INIT);
+    // 期待値はリテラルで書く(定数からは導かない)。実測は Issue #181 の着手コメントと、そのときに捕まえた送信バイト列。
+    expect(writtenText(c.sockets[0]!.state)).toBe(
+      "POST /race_api/ HTTP/1.1\r\n" +
+        "Host: race.netkeiba.com\r\n" +
+        "User-Agent: keiba-ev-tool/0.1 (personal-use research; +https://github.com/keiba-ev-tool)\r\n" +
+        "accept: */*\r\n" +
+        "accept-language: *\r\n" +
+        "sec-fetch-mode: cors\r\n" +
+        "Content-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n" +
+        "X-Requested-With: XMLHttpRequest\r\n" +
+        "Referer: https://race.netkeiba.com/race/past10.html?race_id=202603020211\r\n" +
+        "Origin: https://race.netkeiba.com\r\n" +
+        "Connection: close\r\n" +
+        "Content-Length: 87\r\n\r\n" +
+        BODY,
+    );
+  });
+
+  it("地方(nar.netkeiba.com)でも、Host・Referer・Origin は渡された値になる。接続先のホストも nar", async () => {
+    const c = connector(() => ({ chunks: [OK_BODY] }));
+    await createSocketFetcher(c.connect)("https://nar.netkeiba.com/race_api/", {
+      ...INIT,
+      referer: "https://nar.netkeiba.com/race/past5.html?race_id=202644070111",
+      origin: "https://nar.netkeiba.com",
+    });
+    expect(c.calls.map((x) => x.address.hostname)).toEqual(["nar.netkeiba.com"]);
+    const text = writtenText(c.sockets[0]!.state);
+    expect(text).toContain("Host: nar.netkeiba.com\r\n");
+    expect(text).toContain("Referer: https://nar.netkeiba.com/race/past5.html?race_id=202644070111\r\n");
+    expect(text).toContain("Origin: https://nar.netkeiba.com\r\n");
+  });
+
+  it("応答は GET と同じに読む(ステータス・content-type・本文)", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 200 OK\nContent-Type: text/html; charset=UTF-8\nContent-Length: 2", bytes("ok"))] }));
+    const r = await createSocketFetcher(c.connect)(POST_URL, INIT);
+    expect(r.status).toBe(200);
+    expect(r.contentType).toBe("text/html; charset=UTF-8");
+    expect(new TextDecoder().decode(r.body)).toBe("ok");
+  });
+
+  it("拒否(403)の応答は、通常の応答として返す(GET と同じ。数えるのはゲート)", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 403 Forbidden\nContent-Length: 0")] }));
+    expect((await createSocketFetcher(c.connect)(POST_URL, INIT)).status).toBe(403);
+  });
+
+  it("圧縮された応答は、POST でも受信済みのステータスを持つ例外にする(ゲートが POST のブレーカーで数えられる)", async () => {
+    const c = connector(() => ({ chunks: [response("HTTP/1.1 403 X\nContent-Encoding: gzip\nContent-Length: 0")] }));
+    const error = await rejection(createSocketFetcher(c.connect)(POST_URL, INIT));
+    expect((error as SocketFetchError).kind).toBe("unsupported-encoding");
+    expect((error as SocketFetchError).status).toBe(403);
+  });
+
+  it.each([
+    ["Referer に CRLF(ヘッダの注入)", { ...INIT, referer: "https://race.netkeiba.com/x\r\nX: y" }],
+    ["Origin に非 ASCII", { ...INIT, origin: "https://race.netkeiba.com/あ" }],
+    ["本文に CRLF", { ...INIT, body: "a=b\r\nX: y" }],
+    ["method が POST でない", { ...INIT, method: "PUT" as unknown as "POST" }],
+  ])("接続しない(組み立てで拒否): %s", async (_label, init) => {
+    const c = connector(() => ({ chunks: [OK_BODY] }));
+    const error = await rejection(createSocketFetcher(c.connect)(POST_URL, init));
+    expect((error as SocketFetchError).kind).toBe("malformed");
+    expect(c.calls).toHaveLength(0);
+  });
+
+  it("init を渡さない呼び出しは GET のまま(POST の導入で GET の送るバイト列は変わらない)", async () => {
+    const c = connector(() => ({ chunks: [OK_BODY] }));
+    await createSocketFetcher(c.connect)(URL_RACE);
+    const text = writtenText(c.sockets[0]!.state);
+    expect(text.startsWith("GET /race/shutuba.html?race_id=202603020211 HTTP/1.1\r\n")).toBe(true);
+    expect(text).not.toContain("Content-Length");
+    expect(text).not.toContain("Content-Type");
+  });
+});

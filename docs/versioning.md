@@ -3083,6 +3083,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1・DO のスキーマも無変更。利用者ができることが増える変更ではなく、既にある情報(印)の並べ替えと再掲に留まる。
 
+## 次の正式版が 1.22.2 である根拠(Issue #181 段階1での変更)
+
+**patch**(クラウド版の取得の出口〈gate〉に POST を足し、確認ページから POST を1本試せるようにする。**分析は、まだこの POST を使わない**ので、LLM に入る内容・分析の数値・保存の形は変わらない)。段階2(分析への注入)で minor(1.23.0)に上げる。
+
+### 変更内容
+
+- cloud(gate): `postRaw` を足した。許可リスト(race / nar.netkeiba.com の `/race_api/`・本文の形・Referer と Origin の値)に合う POST だけを通し、順番待ちは GET と同じ連鎖に入れる。POST の拒否(400/403/429)は1回で POST だけを30分止め、GET の連続回数には数えない(`GateStatus.postBlockedUntil` を足した)。
+- cloud(ソケット): `http1.ts` が POST を組み立てられる(`Content-Length` は組み立て側が付ける。GET の出力は無変更)。
+- cloud(確認ページ): `GET /api/netkeiba/check?type=grade-winner` と、`/check` の「POST の確認」のフォーム。
+- 版数: ルート・アプリ `1.22.2`。
+
+### patch である根拠
+
+- 分析(`runAnalysis`)・プロンプト・配分・保存の形は無変更(段階1では、分析のコードは POST を呼ばない)。exe(`packages/app` の機能)・`@keiba/core` のコードも無変更。
+- 利用者が手で試せる確認ページの機能が1つ増えるだけで、通常の使い方(分析)から見える変化は無い。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1・DO のスキーマも無変更(DO の KV に `postBlockedUntil` のキーが増えるが、読み書きの形は互換)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

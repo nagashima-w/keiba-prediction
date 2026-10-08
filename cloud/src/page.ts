@@ -49,6 +49,15 @@ export function renderCheckPage(email: string): string {
 <button type="submit">確認する</button>
 </form>
 <p class="note">初回は、初期値の実在するレースで確認してください。<strong>実在しない race_id は、netkeiba に拒否(400 など)されることがあります。拒否が 2 回続くと、安全のため 30 分間、すべての取得を止めます。</strong></p>
+<h2>POST の確認</h2>
+<p class="note">重賞の「同レース過去10年傾向」の取得(POST)を1本だけ試し、読めた過去回の数などを JSON で返します。初期値は重賞のレースです(重賞でないレースは、過去回の数が null になります)。<strong>POST が拒否(400 など)されたら、安全のため、POST だけを 30 分間止めます(出馬表などの取得は止めません)。</strong></p>
+<form method="get" action="/api/netkeiba/check">
+<input type="hidden" name="type" value="grade-winner">
+<label>race_id(12桁)
+<input name="race_id" value="${CHECK_DEFAULT_RACE_ID}" inputmode="numeric" pattern="[0-9]{12}" maxlength="12" required>
+</label>
+<button type="submit">POST を試す</button>
+</form>
 </main>
 </body>
 </html>

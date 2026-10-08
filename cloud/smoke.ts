@@ -242,6 +242,27 @@ async function main(): Promise<void> {
       const head = await req(port, "HEAD", "/api/netkeiba/check?race_id=202603020211");
       check(`${label}: HEAD は 405(取得を起こさない)`, head.status === 405, `${head.status}`);
 
+      // Issue #181: POST(重賞の過去10年傾向の API)。偽ソケットは、送られたヘッダ(Content-Type・X-Requested-With・Referer・Origin)と Content-Length を検査し、揃っていなければ 400 を返す。
+      //   Worker → DO の RPC(構造化した指定)→ 許可リスト → ソケット → core の fetchGradeWinnerEntries(node:zlib の inflate を含む)が、workerd で通ることの確認。
+      const gradePost = await req(port, "GET", "/api/netkeiba/check?race_id=202603020211&type=grade-winner");
+      const gradePostJson = parseJson(gradePost.text);
+      check(`${label}: POST の確認(中央・type=grade-winner)が通り、過去回 10 が読め、POST のブレーカーは開いていない`, gradePost.status === 200 && gradePostJson["ok"] === true && gradePostJson["target"] === "grade-winner" && gradePostJson["kind"] === "central" && gradePostJson["status"] === 200 && gradePostJson["entries"] === 10 && gateOf(gradePostJson)["postBlockedUntil"] === null, `${gradePost.status} ${gradePost.text.slice(0, 300)}`);
+      const gradePostNar = await req(port, "GET", "/api/netkeiba/check?race_id=202644070111&type=grade-winner");
+      const gradePostNarJson = parseJson(gradePostNar.text);
+      check(`${label}: 地方(nar のホスト)の POST の確認も通り、過去回が読める`, gradePostNar.status === 200 && gradePostNarJson["ok"] === true && gradePostNarJson["kind"] === "nar" && typeof gradePostNarJson["entries"] === "number" && (gradePostNarJson["entries"] as number) > 0, `${gradePostNar.status} ${gradePostNar.text.slice(0, 300)}`);
+      const gradePostHead = await req(port, "HEAD", "/api/netkeiba/check?race_id=202603020211&type=grade-winner");
+      check(`${label}: HEAD の POST の確認は 405(取得を起こさない)`, gradePostHead.status === 405, `${gradePostHead.status}`);
+      // POST のブレーカー: 偽ソケットが 403 を返す race_id で 1 回拒否されたら、POST だけが止まる(GET の連続回数は 0 のまま・GET は通る)。
+      const post403 = await req(port, "GET", "/api/netkeiba/check?race_id=202605010101&type=grade-winner");
+      const post403Json = parseJson(post403.text);
+      check(`${label}: POST の拒否(403)は 502(http-error・status 403)。POST の解除時刻が入るが、GET の連続回数は 0 のまま・GET のブレーカーは開かない`, post403.status === 502 && post403Json["status"] === 403 && typeof gateOf(post403Json)["postBlockedUntil"] === "number" && gateOf(post403Json)["consecutiveRefusals"] === 0 && gateOf(post403Json)["blockedUntil"] === null, `${post403.status} ${post403.text.slice(0, 300)}`);
+      const postBlocked = await req(port, "GET", "/api/netkeiba/check?race_id=202603020211&type=grade-winner");
+      const postBlockedJson = parseJson(postBlocked.text);
+      check(`${label}: POST のブレーカーが開いている間は、通るはずの POST も接続せずに 503(gate-refused・post-blocked)`, postBlocked.status === 503 && postBlockedJson["ok"] === false && (postBlockedJson["error"] as Record<string, unknown> | undefined)?.["reason"] === "post-blocked", `${postBlocked.status} ${postBlocked.text.slice(0, 300)}`);
+      const getAfterPostBlock = await req(port, "GET", "/api/netkeiba/check?race_id=202603020211");
+      const getAfterPostBlockJson = parseJson(getAfterPostBlock.text);
+      check(`${label}: POST のブレーカーが開いていても、GET(出馬表)は通る`, getAfterPostBlock.status === 200 && getAfterPostBlockJson["ok"] === true && getAfterPostBlockJson["horses"] === 16, `${getAfterPostBlock.status} ${getAfterPostBlock.text.slice(0, 200)}`);
+
       // ブレーカー: 偽ソケットが 403 を返す race_id を 2 回 → 開く → 以降は(200 を返せる ID でも)接続せずに 503。
       const first403 = await req(port, "GET", "/api/netkeiba/check?race_id=202605010101");
       const first403Json = parseJson(first403.text);
@@ -253,7 +274,12 @@ async function main(): Promise<void> {
       const blockedJson = parseJson(blocked.text);
       check(`${label}: ブレーカーが開いている間は、取得できるはずの race_id でも 503(gate-refused・blocked)`, blocked.status === 503 && blockedJson["ok"] === false && (blockedJson["error"] as Record<string, unknown> | undefined)?.["reason"] === "blocked", `${blocked.status} ${blocked.text.slice(0, 200)}`);
 
-      const all = [central.text, nar.text, first403.text, blocked.text].join("\n");
+      // GET のブレーカーが開いている間は、POST も(POST のブレーカーとは別に)接続せずに止まる。reason は GET 側の blocked。
+      const postWhileGetBlocked = await req(port, "GET", "/api/netkeiba/check?race_id=202603020211&type=grade-winner");
+      const postWhileGetBlockedJson = parseJson(postWhileGetBlocked.text);
+      check(`${label}: GET のブレーカーが開いている間は、POST も 503(gate-refused・blocked)`, postWhileGetBlocked.status === 503 && (postWhileGetBlockedJson["error"] as Record<string, unknown> | undefined)?.["reason"] === "blocked", `${postWhileGetBlocked.status} ${postWhileGetBlocked.text.slice(0, 300)}`);
+
+      const all = [central.text, nar.text, gradePost.text, gradePostNar.text, post403.text, postBlocked.text, first403.text, blocked.text, postWhileGetBlocked.text].join("\n");
       for (const secret of [EMAIL, AUD, TEAM]) {
         check(`${label}: 応答に ${secret === EMAIL ? "メール" : secret === AUD ? "AUD" : "チーム名"} が含まれない`, !all.includes(secret));
       }

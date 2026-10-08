@@ -455,15 +455,21 @@ export interface ResultImportProgress {
   }[];
 }
 
-/** gate への呼び出しを直列にする(FIFO。前の呼び出しが失敗しても次は進む)。 */
+/**
+ * gate への呼び出しを直列にする(FIFO。前の呼び出しが失敗しても次は進む)。**GET(`fetchRaw`)と POST(`postRaw`。Issue #181)は同じ連鎖**に通す
+ * (POST だけが先に行かない)。元の gate に `postRaw` が無ければ、直列化した gate にも付けない(POST は未対応のまま)。
+ */
 export function serializeGate(gate: GateLike): GateLike {
   let tail: Promise<unknown> = Promise.resolve();
+  const chain = <T>(call: () => Promise<T>): Promise<T> => {
+    const run = tail.then(call);
+    tail = run.catch(() => undefined);
+    return run;
+  };
+  const inner = gate.postRaw?.bind(gate);
   return {
-    fetchRaw(url) {
-      const run = tail.then(() => gate.fetchRaw(url));
-      tail = run.catch(() => undefined);
-      return run;
-    },
+    fetchRaw: (url) => chain(() => gate.fetchRaw(url)),
+    ...(inner === undefined ? {} : { postRaw: (request) => chain(() => inner(request)) }),
   };
 }
 

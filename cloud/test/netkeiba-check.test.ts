@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { GateResult } from "../src/gate-core";
-import { runShutubaCheck, validateRaceId } from "../src/netkeiba-check";
+import type { GatePostRequest, GateResult } from "../src/gate-core";
+import { runGradeWinnerCheck, runShutubaCheck, validateRaceId } from "../src/netkeiba-check";
 import { parseRaceId } from "../../packages/core/src/scraper/ids.js";
 
 /**
@@ -165,5 +165,116 @@ describe("runShutubaCheck", () => {
     const gate = recorder(() => response(fixtureBytes("shutuba_202603020211.html")));
     const result = await runShutubaCheck(parseRaceId("202603020211"), gate.fetchRaw);
     expect(result.body.ok).toBe(true); // 文字化けしていればコース種別・距離を読めずに parse-error になる
+  });
+});
+
+describe("runGradeWinnerCheck(Issue #181。POST を1本試す)", () => {
+  function postRecorder(handler: (request: GatePostRequest) => GateResult | Promise<GateResult>) {
+    const requests: GatePostRequest[] = [];
+    return {
+      requests,
+      postRaw: async (request: GatePostRequest): Promise<GateResult> => {
+        requests.push(request);
+        return handler(request);
+      },
+    };
+  }
+
+  it("中央: POST を1本だけ送り(core が組み立てた宛先・Referer・Origin・本文)、過去回の数(10)・ステータス・kind・所要時間を返す", async () => {
+    const gate = postRecorder(() => response(fixtureBytes("grade_winner_202603020211.json"), { queuedMs: 2000, elapsedMs: 312 }));
+    const result = await runGradeWinnerCheck(parseRaceId("202603020211"), gate.postRaw);
+    expect(gate.requests).toEqual([
+      {
+        url: "https://race.netkeiba.com/race_api/",
+        referer: "https://race.netkeiba.com/race/past10.html?race_id=202603020211",
+        origin: "https://race.netkeiba.com",
+        body: "input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=202603020211",
+      },
+    ]);
+    expect(result.httpStatus).toBe(200);
+    expect(result.body).toEqual({
+      ok: true,
+      kind: "central",
+      raceId: "202603020211",
+      target: "grade-winner",
+      status: 200,
+      entries: 10,
+      queuedMs: 2000,
+      elapsedMs: 312,
+    });
+  });
+
+  it("地方: nar のホストへ POST し、kind=nar・過去回の数を返す(fixture: grade_winner_nar_202644070111)", async () => {
+    const gate = postRecorder(() => response(fixtureBytes("grade_winner_nar_202644070111.json")));
+    const result = await runGradeWinnerCheck(parseRaceId("202644070111"), gate.postRaw);
+    expect(gate.requests.map((r) => r.url)).toEqual(["https://nar.netkeiba.com/race_api/"]);
+    expect(result.body).toMatchObject({ ok: true, kind: "nar", target: "grade-winner", status: 200 });
+    const entries = result.body.ok ? (result.body as { entries: number | null }).entries : null;
+    expect(entries).toBeGreaterThan(0);
+  });
+
+  it("対象データなし(status:NG。非重賞)は、ok:true で過去回の数が null(通信とパースは成功した)", async () => {
+    const gate = postRecorder(() => response(fixtureBytes("grade_winner_ng_202602010607.json")));
+    const result = await runGradeWinnerCheck(parseRaceId("202602010607"), gate.postRaw);
+    expect(result.httpStatus).toBe(200);
+    expect(result.body).toMatchObject({ ok: true, target: "grade-winner", status: 200, entries: null });
+  });
+
+  it("取得は 1 回だけ(再試行しない)", async () => {
+    const gate = postRecorder(() => response(new Uint8Array(), { status: 503 }));
+    await runGradeWinnerCheck(parseRaceId("202603020211"), gate.postRaw);
+    expect(gate.requests).toHaveLength(1);
+  });
+
+  it.each([[400], [403], [404], [429], [500]])("HTTP %i は ok:false(http-error。ステータスと所要時間を添える)・502。target を添える", async (status) => {
+    const gate = postRecorder(() => response(new Uint8Array(), { status, queuedMs: 5, elapsedMs: 7 }));
+    const result = await runGradeWinnerCheck(parseRaceId("202603020211"), gate.postRaw);
+    expect(result.httpStatus).toBe(502);
+    expect(result.body).toMatchObject({ ok: false, kind: "central", raceId: "202603020211", target: "grade-winner", status, queuedMs: 5, elapsedMs: 7 });
+    expect(result.body.ok === false && result.body.error.type).toBe("http-error");
+  });
+
+  it.each([
+    ["blocked", 503],
+    ["post-blocked", 503],
+    ["queue-full", 503],
+    ["network-error", 502],
+    ["timeout", 502],
+    ["bad-response", 502],
+    ["disallowed-url", 502],
+  ] as const)("ゲートの拒否(%s)は ok:false(gate-refused。理由を添える)・HTTP %i", async (reason, httpStatus) => {
+    const gate = postRecorder(() => ({ kind: "refused", reason, message: `理由: ${reason}`, blockedUntil: 123 }));
+    const result = await runGradeWinnerCheck(parseRaceId("202603020211"), gate.postRaw);
+    expect(result.httpStatus).toBe(httpStatus);
+    expect(result.body).toMatchObject({ ok: false, target: "grade-winner" });
+    if (!result.body.ok) {
+      expect(result.body.error.type).toBe("gate-refused");
+      expect(result.body.error.reason).toBe(reason);
+      expect(result.body.error.message).toContain(`理由: ${reason}`);
+      expect(result.body.status).toBeUndefined();
+    }
+  });
+
+  it("ゲートの呼び出し自体が例外(RPC の失敗)でも、ok:false(fetch-failed)・502 で、例外を外へ投げない", async () => {
+    const result = await runGradeWinnerCheck(parseRaceId("202603020211"), async () => {
+      throw new Error("RPC が切れた");
+    });
+    expect(result.httpStatus).toBe(502);
+    expect(result.body.ok === false && result.body.error.type).toBe("fetch-failed");
+    expect(result.body.ok === false && result.body.error.message).toContain("RPC が切れた");
+  });
+
+  it("200 でも JSON として読めなければ ok:false(parse-error)・502。受信したステータスは添える", async () => {
+    const gate = postRecorder(() => response(new TextEncoder().encode("<html>not json</html>")));
+    const result = await runGradeWinnerCheck(parseRaceId("202603020211"), gate.postRaw);
+    expect(result.httpStatus).toBe(502);
+    expect(result.body).toMatchObject({ ok: false, status: 200, target: "grade-winner" });
+    expect(result.body.ok === false && result.body.error.type).toBe("parse-error");
+  });
+
+  it("出馬表の確認(runShutubaCheck)の本文には target が付かない(これまでの形のまま)", async () => {
+    const gate = recorder(() => response(fixtureBytes("shutuba_202603020211.html")));
+    const result = await runShutubaCheck(parseRaceId("202603020211"), gate.fetchRaw);
+    expect("target" in result.body).toBe(false);
   });
 });

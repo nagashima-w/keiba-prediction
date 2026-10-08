@@ -10,8 +10,8 @@ import { checkD1 } from "./d1-health";
 import { webhookStatus } from "./notify-send";
 import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
-import type { GateResult, GateStatus } from "./gate-core";
-import { runShutubaCheck, validateRaceId } from "./netkeiba-check";
+import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
+import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { buildAnalysisView } from "./analysis-view";
 import { CLIENT_JS } from "./client-bundle.generated";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
@@ -28,6 +28,8 @@ import type { JWTVerifyGetKey } from "jose";
 export interface GateStubLike {
   ping(): Promise<{ sqlite: boolean }>;
   fetchRaw(url: string): Promise<GateResult>;
+  /** POST を1本送る(Issue #181。確認ページの `type=grade-winner` が使う)。 */
+  postRaw(request: GatePostRequest): Promise<GateResult>;
   status(): Promise<GateStatus>;
 }
 
@@ -829,21 +831,31 @@ function badRequest(message: string): Response {
 }
 
 /**
- * `GET /api/netkeiba/check?race_id=...`: 出馬表を1本、ゲート経由のソケットで取得して頭数を返す(Issue #162 段階2b)。
- * パラメータは `race_id` ちょうど1つだけ(余計なパラメータ・重複は 400)。race_id が無効なら、ゲートを呼ばない。
+ * `GET /api/netkeiba/check?race_id=...[&type=...]`: 1本、ゲート経由で取得して結果を返す(Issue #162 段階2b。`type` は Issue #181)。
+ *  - `type` を省略または `shutuba`: 出馬表を GET で取得して頭数を返す。
+ *  - `type=grade-winner`: 重賞の過去10年傾向の API へ POST を 1 本送り、過去回の数を返す(Cloudflare の出口から POST が通るかの確認。キャッシュを通さない)。
+ * パラメータは `race_id`(必須)と `type`(省略可)だけで、それぞれ1つ(余計なパラメータ・重複・未知の `type` は 400)。race_id が無効なら、ゲートを呼ばない。
  */
 async function handleCheck(url: URL, env: Env): Promise<Response> {
   const keys = [...url.searchParams.keys()];
-  if (keys.length !== 1 || keys[0] !== "race_id") {
-    return badRequest("クエリは race_id だけを1つ指定してください");
+  if (keys.some((key) => key !== "race_id" && key !== "type") || new Set(keys).size !== keys.length || !keys.includes("race_id")) {
+    return badRequest("クエリは race_id(必須)と type(省略可。shutuba または grade-winner)だけを、それぞれ1つ指定してください");
   }
+  const typeParam = url.searchParams.get("type");
+  if (typeParam !== null && typeParam !== "shutuba" && typeParam !== "grade-winner") {
+    return badRequest("type は shutuba または grade-winner を指定してください");
+  }
+  const target: CheckTarget = typeParam ?? "shutuba";
   const checked = validateRaceId(url.searchParams.get("race_id"));
   if (!checked.ok) {
     return badRequest(checked.message);
   }
 
   const gate = env.NETKEIBA_GATE.get(env.NETKEIBA_GATE.idFromName(GATE_NAME));
-  const result = await runShutubaCheck(checked.raceId, (target) => gate.fetchRaw(target));
+  const result =
+    target === "grade-winner"
+      ? await runGradeWinnerCheck(checked.raceId, (request) => gate.postRaw(request))
+      : await runShutubaCheck(checked.raceId, (fetchTarget) => gate.fetchRaw(fetchTarget));
   let gateStatus: GateStatus | undefined;
   try {
     gateStatus = await gate.status();

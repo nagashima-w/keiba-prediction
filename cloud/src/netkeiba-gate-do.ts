@@ -11,7 +11,7 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import { connect } from "cloudflare:sockets";
-import { GateCore, type GateResult, type GateStatus } from "./gate-core";
+import { GateCore, type GatePostRequest, type GateResult, type GateStatus } from "./gate-core";
 import { createSocketFetcher, type ConnectFn } from "./socket-fetch";
 
 export class NetkeibaGate extends DurableObject {
@@ -52,7 +52,15 @@ export class NetkeibaGate extends DurableObject {
     return this.core.fetchRaw(url);
   }
 
-  /** ブレーカーの状態・最後の開始時刻・待ちの数(RPC)。 */
+  /**
+   * POST を1本送る(RPC。Issue #181。重賞の過去10年傾向の API だけ)。許可リスト・GET と同じ順番待ち・POST 専用のブレーカーは {@link GateCore.postRaw}。
+   * 引数は宛先・Referer・Origin・本文だけ(ヘッダの名前・順序・Content-Type などはソケット取得が固定の値を付ける)。期待される拒否は値で返す。
+   */
+  postRaw(request: GatePostRequest): Promise<GateResult> {
+    return this.core.postRaw(request);
+  }
+
+  /** ブレーカーの状態(GET・POST)・最後の開始時刻・待ちの数(RPC)。 */
   status(): GateStatus {
     return this.core.status();
   }

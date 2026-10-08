@@ -47,7 +47,7 @@ export interface RaceDayEnv {
   DISCORD_WEBHOOK_URL?: string;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
-    get(id: any): GateLike & { status(): Promise<GateStatus> };
+    get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
   };
 }
 
@@ -63,7 +63,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
     this.core = new RaceDayCore({
       sql: ctx.storage.sql,
       now: () => Date.now(),
-      gate: { fetchRaw: (url) => gate.fetchRaw(url) },
+      gate: { fetchRaw: (url) => gate.fetchRaw(url), postRaw: (request) => gate.postRaw(request) },
       setAlarm: (at) => ctx.storage.setAlarm(at),
       onWarn: (message) => console.warn(message),
       // 発走前の分析の保存先(D1 の要約 + R2 の詳細。R2 の put には上限時間を掛ける)と、設定(D1 の1行)。

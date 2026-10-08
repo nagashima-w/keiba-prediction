@@ -539,9 +539,9 @@ describe("応答の返し方", () => {
 });
 
 describe("status()", () => {
-  it("初期状態: カウント 0・解除時刻なし・最後の開始なし・待ち 0", () => {
+  it("初期状態: カウント 0・解除時刻なし・POST の解除時刻なし・最後の開始なし・待ち 0", () => {
     const h = harness();
-    expect(h.make().status()).toEqual({ consecutiveRefusals: 0, blockedUntil: null, lastStartAt: null, pending: 0 });
+    expect(h.make().status()).toEqual({ consecutiveRefusals: 0, blockedUntil: null, postBlockedUntil: null, lastStartAt: null, pending: 0 });
   });
 
   it("取得後は最後の開始時刻を返す。解除時刻が過去なら null", async () => {

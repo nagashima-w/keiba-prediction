@@ -59,6 +59,58 @@ describe("buildHttp1Request", () => {
   });
 });
 
+describe("buildHttp1Request の POST(Issue #181)", () => {
+  const BODY = "input=UTF-8&output=json&class=AplGradeWinner&method=get&compress=1&race_id=202603020211";
+  const HEADERS = [
+    { name: "User-Agent", value: "ua" },
+    { name: "Content-Type", value: "application/x-www-form-urlencoded; charset=UTF-8" },
+  ];
+
+  it("リクエスト行・Host・指定ヘッダ・Connection: close・Content-Length・空行・本文の順で組み立てる(Content-Length は Connection: close の後。実測で通った順)", () => {
+    const request = buildHttp1Request({ method: "POST", host: "race.netkeiba.com", path: "/race_api/", headers: HEADERS, body: BODY });
+    expect(request).toBe(
+      "POST /race_api/ HTTP/1.1\r\nHost: race.netkeiba.com\r\nUser-Agent: ua\r\n" +
+        "Content-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n" +
+        `Connection: close\r\nContent-Length: 87\r\n\r\n${BODY}`,
+    );
+  });
+
+  it("前提: 本文は 87 バイト(実測の Content-Length)", () => {
+    expect(new TextEncoder().encode(BODY).byteLength).toBe(87);
+  });
+
+  it("Content-Length は本文のバイト長から付ける(本文が変われば値も変わる。空の本文は 0)", () => {
+    const lengthOf = (body: string): string =>
+      /Content-Length: (\d+)\r\n/.exec(buildHttp1Request({ method: "POST", host: "a.com", path: "/", headers: [], body }))![1]!;
+    expect(lengthOf("a=b")).toBe("3");
+    expect(lengthOf("a=b&c=d")).toBe("7");
+    expect(lengthOf("")).toBe("0");
+  });
+
+  it("method 省略・GET の出力は、これまでと1バイトも違わない(GET に Content-Length・本文は付かない)", () => {
+    const base = { host: "race.netkeiba.com", path: "/race/shutuba.html?race_id=202603020211", headers: [{ name: "User-Agent", value: "ua" }] };
+    const expected = "GET /race/shutuba.html?race_id=202603020211 HTTP/1.1\r\nHost: race.netkeiba.com\r\nUser-Agent: ua\r\nConnection: close\r\n\r\n";
+    expect(buildHttp1Request(base)).toBe(expected);
+    expect(buildHttp1Request({ ...base, method: "GET" })).toBe(expected);
+  });
+
+  it.each([
+    ["GET に本文", { method: "GET" as const, host: "a.com", path: "/", headers: [], body: "x" }],
+    ["method 省略(GET)に本文", { host: "a.com", path: "/", headers: [], body: "x" }],
+    ["POST に本文なし", { method: "POST" as const, host: "a.com", path: "/", headers: [] }],
+    ["POST の本文に CRLF", { method: "POST" as const, host: "a.com", path: "/", headers: [], body: "a=b\r\nX: y" }],
+    ["POST の本文に非 ASCII(バイト長と文字数が食い違う)", { method: "POST" as const, host: "a.com", path: "/", headers: [], body: "a=あ" }],
+    ["POST で Content-Length を指定", { method: "POST" as const, host: "a.com", path: "/", headers: [{ name: "Content-Length", value: "1" }], body: "a" }],
+    ["POST で Connection を指定", { method: "POST" as const, host: "a.com", path: "/", headers: [{ name: "Connection", value: "keep-alive" }], body: "a" }],
+    ["POST で Host を指定", { method: "POST" as const, host: "a.com", path: "/", headers: [{ name: "Host", value: "b.com" }], body: "a" }],
+    ["POST で Transfer-Encoding を指定", { method: "POST" as const, host: "a.com", path: "/", headers: [{ name: "Transfer-Encoding", value: "chunked" }], body: "a" }],
+    ["POST で Expect を指定", { method: "POST" as const, host: "a.com", path: "/", headers: [{ name: "Expect", value: "100-continue" }], body: "a" }],
+    ["未知のメソッド", { method: "PUT" as unknown as "POST", host: "a.com", path: "/", headers: [], body: "a" }],
+  ])("不正な入力は例外にする: %s", (_label, input) => {
+    expect(() => buildHttp1Request(input)).toThrow(Http1Error);
+  });
+});
+
 describe("decodeChunked", () => {
   it("複数の chunk をつなぎ、終端の 0 とトレーラを読み飛ばす", () => {
     const out = decodeChunked(bytes("5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-Trailer: a\r\n\r\n"));

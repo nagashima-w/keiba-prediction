@@ -7,7 +7,9 @@
  * 解決できないため、DO のラッパ(`netkeiba-gate-do.ts`)だけが本物の `connect` を渡す。これで、偽ソケット(Web Streams)で
  * 読み取りループ・EOF・サイズ上限・タイムアウト・後始末をテストできる。
  *
- * 送るヘッダは**この集合だけ**({@link NETKEIBA_REQUEST_HEADERS})。呼び出し側からヘッダを渡す口は無い。段階1(#162)の実測で、
+ * 送るヘッダは**この集合だけ**({@link NETKEIBA_REQUEST_HEADERS})。呼び出し側からヘッダを渡す口は無い。
+ * POST(Issue #181。重賞の過去10年傾向の API)は、これに `Content-Type`・`X-Requested-With`(固定の値)・`Referer`・`Origin`(呼び出し側の値)の4つを足した形だけ
+ * ({@link SocketPostInit})。実測(Issue #181 の着手コメント)で HTTP 200 だった並びと同じにする。段階1(#162)の実測で、
  * この4つ + `Host` + `Connection: close`(`Accept-Encoding` なし)の形が、race・db・nar の9本すべて HTTP 200 だった。
  * **圧縮は要求しない**(gzip を要求しても圧縮されずに返ったため)。
  *
@@ -40,6 +42,12 @@ export const NETKEIBA_REQUEST_HEADERS: readonly HeaderEntry[] = [
   { name: "accept-language", value: "*" },
   { name: "sec-fetch-mode", value: "cors" },
 ];
+
+/** POST の `Content-Type`(`fetch-grade-winner.ts` が送るものと同じ。固定)。 */
+export const NETKEIBA_POST_CONTENT_TYPE = "application/x-www-form-urlencoded; charset=UTF-8";
+
+/** POST の `X-Requested-With`(固定)。 */
+export const NETKEIBA_POST_REQUESTED_WITH = "XMLHttpRequest";
 
 /** 受信バイト数の上限(超えたら打ち切る)。出馬表の実測は約 277 KB(#162 段階1)。 */
 export const SOCKET_MAX_BYTES = 2 * 1024 * 1024;
@@ -104,8 +112,20 @@ export interface SocketResponse {
   readonly body: Uint8Array;
 }
 
-/** URL を1本取得する。接続は1回だけ(再試行・リダイレクト追従なし)。 */
-export type SocketFetcher = (url: string) => Promise<SocketResponse>;
+/**
+ * POST の指定(Issue #181)。ヘッダの名前・順序・`Content-Type`・`X-Requested-With` の値はここでは選べない(固定)。
+ * `Content-Length` は本文のバイト長から組み立て側が付ける。許可リスト(宛先・本文の形・Referer と Origin の値)の検査は、ゲート(`gate-core.ts`)が行う。
+ */
+export interface SocketPostInit {
+  readonly method: "POST";
+  /** 本文(印字可能な ASCII)。 */
+  readonly body: string;
+  readonly referer: string;
+  readonly origin: string;
+}
+
+/** URL を1本取得する(`init` があれば POST)。接続は1回だけ(再試行・リダイレクト追従なし)。 */
+export type SocketFetcher = (url: string, init?: SocketPostInit) => Promise<SocketResponse>;
 
 export interface SocketFetchOptions {
   readonly maxBytes?: number;
@@ -170,7 +190,7 @@ export function createSocketFetcher(connect: ConnectFn, options: SocketFetchOpti
   const timeoutMs = options.timeoutMs ?? SOCKET_TIMEOUT_MS;
   const cleanupTimeoutMs = options.cleanupTimeoutMs ?? SOCKET_CLEANUP_TIMEOUT_MS;
 
-  return async (url) => {
+  return async (url, init) => {
     let parsedUrl: URL;
     try {
       parsedUrl = new URL(url);
@@ -184,12 +204,22 @@ export function createSocketFetcher(connect: ConnectFn, options: SocketFetchOpti
     // 接続の前に組み立てる(不正な値はここで拒否され、接続しない)。
     let request: Uint8Array;
     try {
+      const target = { host: parsedUrl.hostname, path: `${parsedUrl.pathname}${parsedUrl.search}` };
       request = new TextEncoder().encode(
-        buildHttp1Request({
-          host: parsedUrl.hostname,
-          path: `${parsedUrl.pathname}${parsedUrl.search}`,
-          headers: NETKEIBA_REQUEST_HEADERS,
-        }),
+        init === undefined
+          ? buildHttp1Request({ ...target, headers: NETKEIBA_REQUEST_HEADERS })
+          : buildHttp1Request({
+              ...target,
+              method: init.method,
+              headers: [
+                ...NETKEIBA_REQUEST_HEADERS,
+                { name: "Content-Type", value: NETKEIBA_POST_CONTENT_TYPE },
+                { name: "X-Requested-With", value: NETKEIBA_POST_REQUESTED_WITH },
+                { name: "Referer", value: init.referer },
+                { name: "Origin", value: init.origin },
+              ],
+              body: init.body,
+            }),
       );
     } catch (error) {
       throw new SocketFetchError("malformed", messageOf(error));

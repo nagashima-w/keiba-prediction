@@ -250,6 +250,40 @@ describe("gate は同時に1本だけ呼ぶ(AC-b3)", () => {
     expect(results.slice(1).every((r) => r.kind === "response")).toBe(true);
   });
 
+  it("serializeGate は POST(postRaw。Issue #181)も同じ連鎖に通す: GET と POST を混ぜて同時に呼んでも、gate の中は常に1本・呼んだ順・失敗した POST が後続を止めない", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const order: string[] = [];
+    const run = async (label: string, fail: boolean): Promise<GateResult> => {
+      order.push(label);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 3));
+        return fail
+          ? { kind: "refused", reason: "post-blocked", message: "止めています" }
+          : { kind: "response", status: 200, contentType: null, body: new ArrayBuffer(0), queuedMs: 0, elapsedMs: 1 };
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const post = { url: "https://race.netkeiba.com/race_api/", referer: "r", origin: "o", body: "b" };
+    const inner: GateLike = {
+      fetchRaw: (url) => run(`GET ${url}`, false),
+      postRaw: (request) => run(`POST ${request.url}`, true),
+    };
+    const serial = serializeGate(inner);
+    const results = await Promise.all([serial.fetchRaw("g1"), serial.postRaw!(post), serial.fetchRaw("g2"), serial.postRaw!(post), serial.fetchRaw("g3")]);
+    expect(maxInFlight).toBe(1);
+    expect(order).toEqual(["GET g1", "POST https://race.netkeiba.com/race_api/", "GET g2", "POST https://race.netkeiba.com/race_api/", "GET g3"]);
+    expect(results.map((r) => r.kind)).toEqual(["response", "refused", "response", "refused", "response"]);
+  });
+
+  it("serializeGate: 元の gate に postRaw が無ければ、直列化した gate にも付けない(POST は未対応のまま。GET の口へ流れない)", () => {
+    const serial = serializeGate({ fetchRaw: async () => ({ kind: "refused", reason: "queue-full", message: "x" }) });
+    expect(serial.postRaw).toBeUndefined();
+  });
+
   it("対照: 直列化しない素の gate は、同時に呼ぶと重なる(上のテストが空振りでないことの確認)", async () => {
     const inner = fakeGate(5);
     await Promise.all([1, 2, 3].map((n) => inner.fetchRaw(`https://race.netkeiba.com/race/shutuba.html?race_id=20260302021${n}`)));

@@ -2,7 +2,7 @@
  * ソケット(`cloudflare:sockets` の `connect()`)で HTTP/1.1 を自前で話すための純ロジック(Issue #162 段階2a)。
  * リクエストの組み立て・応答の解釈・chunked の解除だけを持ち、ネットワークにも Workers のランタイムにも依存しない。
  *
- * 範囲を絞っている: GET だけ、`Connection: close` で EOF まで読む前提、**圧縮は要求しない**(`Accept-Encoding` を送らない。
+ * 範囲を絞っている: GET と POST(Issue #181。本文つき)だけ、`Connection: close` で EOF まで読む前提、**圧縮は要求しない**(`Accept-Encoding` を送らない。
  * 呼び出し側が指定することも禁止する)、1xx の暫定応答・Upgrade・パイプラインは扱わない(不正な入力は例外にする)。
  *
  * 由来: 調査(#160・#162 段階1)の `scripts/cloudflare-spike/http1.ts` を土台に、本番用として作り直した。
@@ -57,26 +57,42 @@ function isForbiddenRequestHeader(name: string): boolean {
 }
 
 export interface BuildRequestInput {
+  /** メソッド。省略は GET(これまでの呼び出しは変わらない)。 */
+  readonly method?: "GET" | "POST";
   /** Host ヘッダに入れるホスト名(ポートなし)。 */
   readonly host: string;
   /** リクエスト対象(`/path?query`)。 */
   readonly path: string;
   /** 付けるヘッダ(この順序で送る)。 */
   readonly headers: readonly HeaderEntry[];
+  /** 本文(POST では必須、GET では指定できない)。印字可能な ASCII と空白だけ(`Content-Length` は組み立て側がバイト長から付ける)。 */
+  readonly body?: string;
 }
 
 /**
- * GET リクエストを組み立てる(ASCII の文字列)。順序は、リクエスト行 → `Host` → 指定ヘッダ(指定順)→ `Connection: close` → 空行。
+ * リクエストを組み立てる(ASCII の文字列)。順序は、リクエスト行 → `Host` → 指定ヘッダ(指定順)→ `Connection: close` →
+ * (POST のときだけ)`Content-Length` → 空行 → (POST のときだけ)本文。GET の出力は、本文・`Content-Length` が付かず、POST の導入前と同じ。
+ * `Content-Length` が `Connection: close` の後ろなのは、実測(Issue #181。HTTP 200)で通った順に合わせたため。
  * 禁止ヘッダ・CR/LF などの不正な入力は例外にする。
  */
 export function buildHttp1Request(input: BuildRequestInput): string {
+  const method = input.method ?? "GET";
+  if (method !== "GET" && method !== "POST") {
+    throw new Http1Error(`メソッドが不正です: ${JSON.stringify(method)}`);
+  }
+  if (method === "GET" && input.body !== undefined) {
+    throw new Http1Error("GET に本文は付けられません");
+  }
+  if (method === "POST" && (input.body === undefined || !/^[\x20-\x7e]*$/.test(input.body))) {
+    throw new Http1Error("POST の本文が必要です(印字可能な ASCII と空白だけ。改行・非 ASCII は不可)");
+  }
   if (!/^[A-Za-z0-9.-]+$/.test(input.host)) {
     throw new Http1Error(`ホスト名が不正です: ${JSON.stringify(input.host)}`);
   }
   if (!/^\/[\x21-\x7e]*$/.test(input.path)) {
     throw new Http1Error(`リクエストのパスが不正です: ${JSON.stringify(input.path)}`);
   }
-  const lines = [`GET ${input.path} HTTP/1.1`, `Host: ${input.host}`];
+  const lines = [`${method} ${input.path} HTTP/1.1`, `Host: ${input.host}`];
   for (const { name, value } of input.headers) {
     if (!isValidHeaderName(name)) {
       throw new Http1Error(`ヘッダ名が不正です: ${JSON.stringify(name)}`);
@@ -90,6 +106,11 @@ export function buildHttp1Request(input: BuildRequestInput): string {
     lines.push(`${name}: ${value}`);
   }
   lines.push("Connection: close");
+  if (method === "POST") {
+    const body = input.body!;
+    lines.push(`Content-Length: ${new TextEncoder().encode(body).byteLength}`);
+    return `${lines.join("\r\n")}\r\n\r\n${body}`;
+  }
   return `${lines.join("\r\n")}\r\n\r\n`;
 }
 

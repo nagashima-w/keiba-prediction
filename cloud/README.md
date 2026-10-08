@@ -7,10 +7,10 @@ Issue #161(#21-C)の土台と、#162(#21-D)段階2の netkeiba 取得の出口(�
 - `src/handler.ts` — リクエスト処理の本体。**すべてのルートの前に認証**を掛ける(`GET /`・`GET /app.js`・`GET /check`・`GET /api/health` ほか)
 - `src/access-jwt.ts` / `src/authenticate.ts` — Access の JWT の検証(署名・iss・aud・exp・許可メール1件)。取得元はヘッダ → クッキー、**JWT がどちらにも無いときだけ** `ctx.access`(JWT が付いていて不正なら `ctx.access` では救わず拒否)
 - `src/netkeiba-gate-do.ts` — **netkeiba への取得の出口**(SQLite バックエンドの Durable Object。#162 段階2a)。全取得を単一インスタンス(固定名)に通し、DO の中の TCP ソケットで取得する。`cloudflare:sockets` を import するのはここだけ(薄い配線)
-- `src/gate-core.ts` — ゲートの中身(**純ロジック**。Node でテストできる)。取得先の許可リスト(https の race / db / nar.netkeiba.com だけ)・直列化(同時に1本。プロミスの連鎖)・最小間隔 2 秒(最後の開始時刻を `ctx.storage.kv` に永続化)・サーキットブレーカー(400/403/429 が2回連続で30分、すべての取得を接続せずに拒否。手動リセットなし)・待ち行列の上限(8)
-- `src/socket-fetch.ts` / `src/http1.ts` — ソケットで HTTP/1.1 を話す取得クライアント(`connect` を注入。送るヘッダは固定の4つ + `Host` + `Connection: close`、圧縮は要求しない、再試行・リダイレクト追従なし、サイズ上限 2 MiB・タイムアウト 20 秒)。調査(`spikes/cloudflare/`・`scripts/cloudflare-spike/`)の実装を本番用に作り直したもので、調査のコードは参照しない
+- `src/gate-core.ts` — ゲートの中身(**純ロジック**。Node でテストできる)。取得先の許可リスト(https の race / db / nar.netkeiba.com だけ)・直列化(同時に1本。プロミスの連鎖)・最小間隔 2 秒(最後の開始時刻を `ctx.storage.kv` に永続化)・サーキットブレーカー(400/403/429 が2回連続で30分、すべての取得を接続せずに拒否。手動リセットなし)・待ち行列の上限(8)。**POST(`postRaw`。Issue #181。重賞の過去10年傾向の API だけ)**: 許可リスト(race / nar.netkeiba.com の `/race_api/`・本文の形・Referer と Origin の値まで固定)に合うものだけを通し、順番待ち(直列化・最小間隔・待ち行列の上限)は GET と同じ連鎖に入れる。ブレーカーは別系統で、**POST が拒否(400/403/429)されたら1回で、POST だけを30分止める**(`postBlockedUntil`。GET は止まらず、POST の結果は GET の連続回数を変えない)。GET のブレーカーが開いている間は POST も止まる
+- `src/socket-fetch.ts` / `src/http1.ts` — ソケットで HTTP/1.1 を話す取得クライアント(`connect` を注入。送るヘッダは固定の4つ + `Host` + `Connection: close`(POST は、これに `Content-Type`・`X-Requested-With`・`Referer`・`Origin` と、`Connection: close` の後ろの `Content-Length`)、圧縮は要求しない、再試行・リダイレクト追従なし、サイズ上限 2 MiB・タイムアウト 20 秒)。調査(`spikes/cloudflare/`・`scripts/cloudflare-spike/`)の実装を本番用に作り直したもので、調査のコードは参照しない
 - `src/gate-fetch.ts` — ゲートの `fetchRaw`(RPC)を core の `HttpClient` の fetch 注入口へ繋ぐ(`createGateHttpClient`: 間隔 0・再試行 0。間隔制御はゲートだけが行う)。**Worker の `fetch` で netkeiba を取る経路は持ち込まない**(#160。CloudFront から HTTP 400 になる)
-- `src/netkeiba-check.ts` / `src/page.ts` — 確認用エンドポイント `GET /api/netkeiba/check` の処理(race_id の検証・出馬表の取得とパース)と、`/check` の確認フォーム(Issue #184 で `/` から移した。使い方は下の「確認ページの使い方」)
+- `src/netkeiba-check.ts` / `src/page.ts` — 確認用エンドポイント `GET /api/netkeiba/check` の処理(race_id の検証・出馬表の取得とパース。`type=grade-winner` では POST を1本試して過去回の数を返す〈Issue #181〉)と、`/check` の確認フォーム(Issue #184 で `/` から移した。使い方は下の「確認ページの使い方」)
 - `migrations/` — D1 の migration(#171)。`0001_init.sql` は exe の最終スキーマのダンプ(**凍結。書き換えない**。#197 までは生成物だった。下の「D1(分析履歴)」参照)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key`・索引2つ)、`0003_r2_ops.sql` は R2 の操作回数のカウンタの表(#173)、`0004_settings.sql` は設定の表(#178)、`0005_llm_note.sql` は `analyses.llm_note`(LLM が使われなかった・一部しか使われなかった理由の固定文言。Issue #194)、`0006_horse_items.sql` は `analysis_horses.highlights_json`・`concerns_json`(馬ごとの強調材料・懸念事項。exe の列と同じ。Issue #197)、`0007_llm_calls.sql` は `analyses.llm_calls_json`(LLM を呼んだ1回ごとの記録。cloud 専用。Issue #197 段2)。詳細は下の「D1(分析履歴)」・「分析履歴ストア」
 - `src/d1-health.ts` — `GET /api/health` の D1 の疎通確認(`D1_HEALTH_SQL`。`analyses` の `detail_key`・`llm_note`・`llm_calls_json` と、馬の `highlights_json`・`concerns_json`〈スカラーの副問い合わせ〉を読む。migration 0002・0005・0006・0007 の適用と binding を1回の読み取りで確かめる。#197)
 - `smoke-worker.ts` / `smoke-modules.d.ts` — **ローカル smoke 専用**のエントリ(偽ソケット。本番の `main` ではない)
@@ -261,6 +261,10 @@ netkeiba の取得が、本番(Cloudflare)で通ることを、出馬表1本で�
 - 失敗の種類(`error.type`): `gate-refused`(ゲートが拒否。`reason` に blocked / queue-full / network-error / timeout / bad-response)・`http-error`(netkeiba が 2xx 以外。`status`)・
   `parse-error`(取得できたが出馬表として読めない)・`fetch-failed`(ゲートの呼び出し自体の失敗)。
 - 中身の確認は `GET /api/netkeiba/check?race_id=...` を直接開いても同じ(GET のみ。HEAD では取得しない)。
+- **POST の確認(Issue #181)**: `/check` の「POST の確認」のフォーム(`GET /api/netkeiba/check?race_id=...&type=grade-winner`)は、重賞の「同レース過去10年傾向」の API へ **POST を1本**送る(キャッシュを通さず、ゲートを直接使う)。
+  **本番で最初に、Cloudflare の出口からの POST が通るかを確かめるためのもの。** 初期値の `202603020211` は重賞。見ること: `ok: true`・`target: "grade-winner"`・`status: 200`・`entries`(読めた過去回の数。この重賞は 10)・`kind`・`gate.postBlockedUntil: null`。
+  重賞でないレースは `entries: null`(通信とパースは成功)。**POST が拒否(400/403/429)されたら、POST だけを30分止める**(出馬表などの GET は止まらない): `error.type: "http-error"`・`status`、次の POST は HTTP 503・`error.reason: "post-blocked"`・`gate.postBlockedUntil`(解除時刻)。
+  この段階では、**分析はまだ POST を使わない**(重賞の傾向は LLM に入らない。入れるのは Issue #181 の段階2)。
 - Worker での decode + parse の CPU が足りない場合(Free の Worker の CPU 上限)は、本番で `Error 1102` になりうる。その場合は、確認の処理(`src/netkeiba-check.ts`。`fetchRaw` を受け取る関数)を DO の中へ移す。
 
 ## ローカル smoke の偽ソケット(netkeiba へ出さない)
