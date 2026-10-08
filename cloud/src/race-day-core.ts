@@ -42,7 +42,7 @@
  *
  * ## 当日中の結果の取り込みと当日傾向(Issue #209)
  * 計画の確定時に、発走時刻のある計画の行(skip の行も含む)ごとに結果の行を積む({@link RaceDayCore.runPlanFinalize}。`requested_on` = 開催日。最初の試行は発走 + 15 分)。
- * 当日の行は、**全頭の着順がそろったページだけ**保存する(結果ページ自身の「N頭」と、結果の行数を比べる。地方では払戻が先に出て、全頭の着順が数分遅れて出ることを実測)。
+ * 当日の行は、**全頭の着順がそろったページだけ**保存する(結果ページ自身の「N頭」と、着順が確定している行の数〈着順が空の行は数えない〉を比べる。地方では払戻が先に出て、全頭の着順が数分遅れて出ることを実測)。
  * 発走前の計算ステップは、保存済みの前のレースの結果(D1。gate は 0 回)から当日傾向を作る({@link RaceDayCore.runPreRaceCompute})。効くのは同じ場・同じ面で取り込み済みが 2 レース以上のときだけ(中央が中心: 地方の結果ページには通過順の列が無い)。
  *
  * ## 失敗と再試行
@@ -163,7 +163,7 @@ export interface AlarmInputs {
    */
   readonly notifyAtMs?: number | null;
   /**
-   * 結果の取り込み(Issue #208)の次の試行の時刻(`queued` の行の最小)。**動けるとき**({@link RaceDayCore.resultsRunnable}: タスクと計画の仕事が無い)だけ入れる。
+   * 結果の取り込み(Issue #208)の次の試行の時刻(`queued` の行の最小)。**動けるとき**({@link RaceDayCore.resultsRunnable}: タスクが無く、計画の段階〈会場の一覧・確定〉が終わっている。期限を待つ planned の行は止めない。Issue #209)だけ入れる。
    * 省略・null は候補なし。タスクがあるあいだに入れない理由: `pickNext` は再試行待ちのタスクを時刻を見ずに返すので、結果の候補で起きると、再試行の間隔を無効にして撃ち直してしまう。
    */
   readonly resultAtMs?: number | null;
@@ -1019,7 +1019,7 @@ export class RaceDayCore {
 
   /**
    * 次のステップを1つだけ実行する(1レースの取得 or 計算)。続きの仕事があれば、アラームを設定してから戻る。
-   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (1.5)**通知**(時刻が来ていれば1件。Issue #205)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)→ (3)**結果の取り込み**(タスクも計画の仕事も無いときだけ、時刻が来ている 1 レース。Issue #208)。
+   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (1.5)**通知**(時刻が来ていれば1件。Issue #205)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)→ (3)**結果の取り込み**(タスクが無く、計画の段階が終わっているときだけ、時刻が来ている 1 レース。期限を待つ planned の行があっても動く。Issue #208・#209)。
    * 仕事が無ければ {@link wakeWithoutWork}。
    */
   async runNextStep(): Promise<StepOutcome> {
@@ -1597,10 +1597,10 @@ export class RaceDayCore {
             throw new RaceResultNotConfirmedError("払戻のテーブルがまだありません(審議中の可能性があります)");
           }
           if (sameDay) {
-            // 払戻が先に出て、全頭の着順が数分遅れて出るページ(地方で実測)を保存しない。結果の行数(非数値の着順を含む)が、ページ自身の「N頭」に満たなければ未完了。
-            // 「N頭」が取れないときは判定できないので保存しない。
+            // 払戻が先に出て、全頭の着順が数分遅れて出るページ(地方で実測)を保存しない。**着順が確定している行**(`finishPosition !== null`。数値の着順と、取消・除外・中止などの非数値の着順を含む。
+            // 着順のセルが空の行は数えない = 行は全頭分あっても着順が空のページも未完了)の数が、ページ自身の「N頭」に満たなければ未完了。「N頭」が取れないときは判定できないので保存しない。
             const fieldSize = parseRaceFieldSize(html);
-            if (fieldSize === null || parsed.horses.length < fieldSize) {
+            if (fieldSize === null || parsed.horses.filter((h) => h.finishPosition !== null).length < fieldSize) {
               progress.incomplete = fieldSize === null ? "unknown-size" : "short";
               throw new RaceResultNotConfirmedError("全頭の着順がまだそろっていません");
             }

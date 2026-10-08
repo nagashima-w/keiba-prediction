@@ -50,6 +50,16 @@ function withTopRows(html: string, n: number): string {
   $("#All_Result_Table tbody > tr").slice(n).remove();
   return $.html();
 }
+/** 結果の行は全頭分あるが、`fromIndex` 行目(0 始まり)以降の着順のセルを空にする(払戻は先に出て、着順の表示が後から埋まる形の模擬。実物があるかは未確認)。 */
+function withEmptyRanksFrom(html: string, fromIndex: number): string {
+  const $ = cheerio.load(html);
+  $("#All_Result_Table tbody > tr")
+    .slice(fromIndex)
+    .each((_, tr) => {
+      $(tr).find("td.Result_Num div.Rank").text("");
+    });
+  return $.html();
+}
 /** 頭数の span(`<span>16頭</span>`)を消す(「N頭」が取れないページ)。 */
 function withoutFieldSize(html: string): string {
   const $ = cheerio.load(html);
@@ -252,6 +262,13 @@ async function planned(h: Harness): Promise<void> {
   expect(h.core.getPlanProgress().stage).toBe("done"); // 前提: 確定した
 }
 
+/** `planned` と同じだが、時計の開始時刻(`h.clock.now`)に確定させる(開催日の前日・翌日の時計用)。 */
+async function planned2(h: Harness): Promise<void> {
+  expect(await h.core.requestPlan({ kaisaiDate: DATE })).toMatchObject({ accepted: true });
+  await driveUntil(h, h.clock.now);
+  expect(h.core.getPlanProgress().stage).toBe("done");
+}
+
 interface ResultRow {
   race_id: string;
   state: string;
@@ -298,6 +315,10 @@ describe("前提: 部分ページの合成", () => {
     expect(parsed.winPayouts.length).toBeGreaterThan(0);
     expect(parseRaceFieldSize(partial)).toBe(16);
     expect(parseRaceResult(FULL).horses).toHaveLength(16);
+    const emptyRanks = parseRaceResult(withEmptyRanksFrom(FULL, 3));
+    expect(emptyRanks.horses).toHaveLength(16); // 行は全頭分ある
+    expect(emptyRanks.horses.filter((x) => x.finishPosition === null)).toHaveLength(13); // 4 位以下の着順が空(null)
+    expect(emptyRanks.winPayouts.length).toBeGreaterThan(0);
     expect(parseRaceFieldSize(withoutFieldSize(FULL))).toBeNull();
     expect(parseRaceFieldSize(withFieldSize(FULL, 14))).toBe(14);
   });
@@ -379,6 +400,32 @@ describe("AC-C1: 計画の確定時に、発走時刻のある行ごとに、結
   });
 });
 
+describe("requested_on は開催日(今日の暦日ではない)", () => {
+  it("前日の夜に計画した日(今日 ≠ 開催日)でも、結果の行の requested_on は開催日で、当日の行として扱われる(全頭の判定・5 分おきの再試行が効く)", async () => {
+    const h = harness({ rows: [central(1, "10:00")], start: jst("21:00", "2026-09-26") });
+    expect(await h.core.requestPlan({ kaisaiDate: DATE })).toMatchObject({ accepted: true });
+    await driveUntil(h, jst("21:00", "2026-09-26"));
+    expect(h.core.getPlanProgress().stage).toBe("done"); // 前提: 確定した
+    expect(planRowStates(h)[rid(1)]).toBe("planned"); // 前提: 開催前なので planned
+    expect(rows(h)).toHaveLength(1);
+    expect(rows(h)[0]).toMatchObject({ requested_on: DATE, next_try_at: jst("10:15") });
+    expect(rows(h)[0]!.requested_on).not.toBe("20260926"); // DO の時計の今日(JST)ではない
+    // 当日の行として扱われる: 部分ページは保存せず、5 分後に再試行する(過去日の行なら 3 頭のまま保存される)
+    await driveUntil(h, jst("10:14"));
+    h.gate.pages.set(rid(1), withTopRows(FULL, 3));
+    expect(await tick(h)).toBe(`${rid(1)}:result:import:retry`);
+    expect(rowOf(h, rid(1))).toMatchObject({ last_class: "incomplete", next_try_at: jst("10:20") });
+    expect(h.store.calls).toEqual([]);
+  });
+
+  it("確定が日付をまたいで遅れた日(今日 = 開催日の翌日)は、全レースが発走済みなので結果の行を積まない(requested_on の取り違えが起きうる行が、そもそも作られない)", async () => {
+    const h = harness({ rows: [central(1, "10:00"), central(2, "21:30")], start: jst("00:30", "2026-09-28") });
+    await planned2(h);
+    expect(Object.values(planRowStates(h))).toEqual(["skipped", "skipped"]); // 前提
+    expect(rows(h)).toEqual([]);
+  });
+});
+
 describe("AC-C2: 全頭の着順がそろってから保存する(当日の行だけ)", () => {
   async function toFirstAttempt(h: Harness): Promise<void> {
     await planned(h);
@@ -420,13 +467,46 @@ describe("AC-C2: 全頭の着順がそろってから保存する(当日の行�
     expect(h.store.calls).toEqual([]);
   });
 
-  it("結果の行数 ≥ N頭 なら保存する(N頭 が行数より小さいとき = 取消・除外が N頭 に数えられない場合も、判定が止まらない)", async () => {
+  it("着順が確定している行の数 ≥ N頭 なら保存する(N頭 が行数より小さいとき = 取消・除外が N頭 に数えられない場合も、判定が止まらない)", async () => {
     const h = harness({ rows: [central(1, "10:00")] });
     await toFirstAttempt(h);
     h.gate.pages.set(rid(1), withFieldSize(FULL, 14)); // 16 行 ≥ 14
     expect(parseRaceFieldSize(h.gate.pages.get(rid(1))!)).toBe(14); // 前提
     expect(await tick(h)).toBe(`${rid(1)}:result:import:ok`);
     expect(h.store.calls[0]!.entries).toHaveLength(16);
+  });
+
+  it("★行は全頭分あるが 4 位以下の着順が空(finishPosition が null)のページは、行数が N頭 に届いていても保存しない(incomplete)。着順が空のまま取り込み済みになると直らない", async () => {
+    const h = harness({ rows: [central(1, "10:00")] });
+    await toFirstAttempt(h);
+    h.gate.pages.set(rid(1), withEmptyRanksFrom(FULL, 3));
+    expect(parseRaceResult(h.gate.pages.get(rid(1))!).horses).toHaveLength(16); // 前提: 行数は N頭 と同じ
+    expect(await tick(h)).toBe(`${rid(1)}:result:import:retry`);
+    expect(h.store.calls).toEqual([]);
+    expect(rowOf(h, rid(1))).toMatchObject({ state: "queued", attempts: 1, last_class: "incomplete", next_try_at: jst("10:20") });
+    h.gate.pages.set(rid(1), FULL); // 次の試行で全頭の着順がそろえば保存する
+    expect(await tick(h)).toBe(`${rid(1)}:result:import:ok`);
+    expect(h.store.calls[0]!.entries.filter((e) => e.finishPosition === null)).toEqual([]);
+  });
+
+  it("着順が空の行が 1 行でもあれば保存しない(境界: 16 行のうち最後の 1 行だけ空)。非数値の着順(中・除・取)は空でないので数える", async () => {
+    const h = harness({ rows: [central(1, "10:00")] });
+    await toFirstAttempt(h);
+    h.gate.pages.set(rid(1), withEmptyRanksFrom(FULL, 15));
+    expect(parseRaceResult(h.gate.pages.get(rid(1))!).horses.filter((x) => x.finishPosition === null)).toHaveLength(1); // 前提
+    expect(await tick(h)).toBe(`${rid(1)}:result:import:retry`);
+    expect(rowOf(h, rid(1)).last_class).toBe("incomplete");
+    // 非数値の着順(中止・除外・取消)を 3 行に入れたページは保存される(着順は null で保存される。パーサが null 以外で返す行なので完了と数える)
+    const $ = cheerio.load(FULL);
+    ["中", "除", "取"].forEach((text, i) => {
+      $("#All_Result_Table tbody > tr").eq(13 + i).find("td.Result_Num div.Rank").text(text);
+    });
+    h.gate.pages.set(rid(1), $.html());
+    const parsed = parseRaceResult($.html());
+    expect(parsed.horses.filter((x) => x.finishPosition !== null && x.finishPosition.kind === "非数値")).toHaveLength(3); // 前提
+    expect(await tick(h)).toBe(`${rid(1)}:result:import:ok`);
+    expect(h.store.calls[0]!.entries).toHaveLength(16);
+    expect(h.store.calls[0]!.entries.filter((e) => e.finishPosition === null)).toHaveLength(3);
   });
 
   it("着順が非数値の行(中止など)も 1 行として数える: 16 行のうち 1 行が中止でも保存され、その馬の着順は null", async () => {

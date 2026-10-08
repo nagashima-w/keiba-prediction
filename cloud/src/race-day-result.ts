@@ -60,7 +60,7 @@ export type ResultState = "queued" | "imported" | "gave_up";
  *  - `imported`: 保存した / `not-confirmed`: 結果の行が無い(未確定・中止) / `no-payout`: 着順はあるが払戻のテーブルが無い(審議中。保存しない)
  *  - `parse-error`: 構造の異常 / `fetch-failed`: 取得の失敗(HTTP エラー・通信の失敗・タイムアウト) / `save-failed`: D1 への保存の失敗
  *  - `blocked`: ブレーカーが開いている・許可リスト外 / `busy`: gate の待ち行列が上限
- *  - `incomplete`(Issue #209。当日の行だけ): 払戻のテーブルはあるが、全頭の着順がそろっていない(結果の行数 < 結果ページの「N頭」)、または「N頭」が取れず判定できない。保存しない
+ *  - `incomplete`(Issue #209。当日の行だけ): 払戻のテーブルはあるが、全頭の着順がそろっていない(着順が確定している行〈`finishPosition` が null でない行。非数値の着順を含み、空の行は含まない〉の数 < 結果ページの「N頭」)、または「N頭」が取れず判定できない。保存しない
  */
 export type ResultClass = "imported" | "not-confirmed" | "no-payout" | "incomplete" | "parse-error" | "fetch-failed" | "save-failed" | "blocked" | "busy";
 
