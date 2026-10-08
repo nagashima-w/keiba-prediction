@@ -135,7 +135,7 @@ function vars(email: string, aud: string): string[] {
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/api/results/import"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -184,9 +184,9 @@ async function main(): Promise<void> {
       const badLimit = await req(port, "GET", "/api/analyses?limit=0");
       check("B: GET /api/analyses?limit=0 は 400", badLimit.status === 400 && parseJson(badLimit.text)["ok"] === false, `${badLimit.status}`);
       check("B: HEAD /api/analyses は 405(D1 を引かない)", (await req(port, "HEAD", "/api/analyses")).status === 405);
-      // Issue #206: GET /api/plan(読み取り専用)。本物の DO の RPC(getPlanProgress・getAutoRunResults・getNotifications)を通す。依頼の前の日は stage none・空。
+      // Issue #206・#208: GET /api/plan(読み取り専用)。本物の DO の RPC(getPlanProgress・getAutoRunResults・getNotifications・getResultImportProgress)を通す。依頼の前の日は stage none・空。
       const planEmpty = await req(port, "GET", "/api/plan?kaisai_date=20261008");
-      check("B: GET /api/plan は 200 で、依頼の前の日は stage none・空の結果・空の通知(本物の DO の 3 つの RPC を通る)", planEmpty.status === 200 && planEmpty.text === JSON.stringify({ ok: true, kaisai_date: "20261008", plan: { stage: "none", requested_at: null, finalized_at: null, offset_minutes: null, offset_source: null, morning_all_terminal: false, venues: [], rows: [] }, results: [], notifications: [] }), `${planEmpty.status} ${planEmpty.text.slice(0, 200)}`);
+      check("B: GET /api/plan は 200 で、依頼の前の日は stage none・空の結果・空の通知・空の結果の取り込み(本物の DO の 4 つの RPC を通る)", planEmpty.status === 200 && planEmpty.text === JSON.stringify({ ok: true, kaisai_date: "20261008", plan: { stage: "none", requested_at: null, finalized_at: null, offset_minutes: null, offset_source: null, morning_all_terminal: false, venues: [], rows: [] }, results: [], notifications: [], result_import: { total: 0, queued: 0, imported: 0, gave_up: 0, races: [] } }), `${planEmpty.status} ${planEmpty.text.slice(0, 200)}`);
       check("B: GET /api/plan は HEAD で 405・日付なし/不正/未知のキーで 400・別サイト(cross-site)で 403", (await req(port, "HEAD", "/api/plan?kaisai_date=20261008")).status === 405 && (await req(port, "GET", "/api/plan")).status === 400 && (await req(port, "GET", "/api/plan?kaisai_date=20260230")).status === 400 && (await req(port, "GET", "/api/plan?kaisai_date=20261008&x=1")).status === 400 && (await req(port, "GET", "/api/plan?kaisai_date=20261008", { "Sec-Fetch-Site": "cross-site" })).status === 403);
       const tampered = await req(port, "GET", "/", { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" });
       check("B: 不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", tampered.status === 403 && tampered.text === "forbidden", `${tampered.status}`);
@@ -388,6 +388,63 @@ async function main(): Promise<void> {
       check(`${label}: GET /api/analyses/{id} が 200 で、16 頭すべてに馬名があり、レース名・場名(福島)・R(11)が付く(detail: present)`, detailRes.status === 200 && view?.id === detailId && view?.raceId === raceId && view?.detail === "present" && view.horses.length === 16 && view.horses.every((h) => typeof h.name === "string" && h.name.length > 0) && typeof view.race["raceName"] === "string" && view.race["venueName"] === "福島" && view.race["raceNumber"] === 11 && "allocation" in view, `${detailRes.status} ${detailRes.text.slice(0, 300)}`);
       check(`${label}: 応答に rawResponse・contributions・raceSnapshot の全体(騎手など)が含まれない`, !detailRes.text.includes("rawResponse") && !detailRes.text.includes("contributions") && !detailRes.text.includes("jockeyName") && !detailRes.text.includes("raceSnapshot"), detailRes.text.slice(0, 120));
       check(`${label}: 無い id は 404・不正な id は 400・HEAD は 405・クエリつきは 400`, (await req(port, "GET", "/api/analyses/999999")).status === 404 && (await req(port, "GET", "/api/analyses/abc")).status === 400 && (await req(port, "HEAD", `/api/analyses/${String(detailId)}`)).status === 405 && (await req(port, "GET", `/api/analyses/${String(detailId)}?x=1`)).status === 400);
+
+      // Issue #208(#182-B): 結果の取り込み。上で D1 に保存した発走前の分析(開催日 20260628)の結果を、cron の入口 `scheduled` から取り込む。
+      //   cron の時刻は 2026-06-29T00:00Z(JST 6/29 9:00)なので、窓は 20260622〜20260627 ではなく 20260622〜20260628(前日 = 20260628 を含む)。DO の「今日」は実時計なので、20260628 は過去。
+      //   取得は NetkeibaGate の偽ソケット(実フィクスチャの結果ページ)・保存はローカルの D1。D1 の列挙(ROW_NUMBER・DENSE_RANK を使う 1 クエリ)も workerd の実環境で通る。
+      const jstToday = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10).replace(/-/g, "");
+      const fireCron = async (time: number): Promise<{ status: number; text: string }> => {
+        const r = await fetch(`http://127.0.0.1:${port}/cdn-cgi/local/scheduled?cron=${encodeURIComponent("0 0 * * *")}&time=${String(time)}&format=json`, { signal: AbortSignal.timeout(60_000) });
+        return { status: r.status, text: await r.text() };
+      };
+      type ResultImportView = { total: number; queued: number; imported: number; gave_up: number; races: { race_id: string; state: string; attempts: number; deferrals: number; requested_on: string; next_try_at: number | null; last_class: string | null }[] };
+      const resultImportOf = async (day: string): Promise<{ status: number; view: ResultImportView | undefined; text: string }> => {
+        const r = await req(port, "GET", `/api/plan?kaisai_date=${day}`);
+        return { status: r.status, view: parseJson(r.text)["result_import"] as ResultImportView | undefined, text: r.text };
+      };
+      const beforeImport = await resultImportOf(date);
+      check(`${label}: 取り込みの前は result_import が空(total 0)で、D1 に結果が無い`, beforeImport.status === 200 && beforeImport.view?.total === 0 && parseJson((await req(port, "GET", `/smoke/results?race_id=${raceId}`)).text)["result"] === null, beforeImport.text.slice(0, 160));
+      const cronTime = Date.parse("2026-06-29T00:00:00Z");
+      const cron = await fireCron(cronTime);
+      check(`${label}: cron の発火(scheduledTime = 2026-06-29T00:00Z)が成功する(結果の依頼を含む)`, cron.status === 200 && parseJson(cron.text)["outcome"] === "ok", `${cron.status} ${cron.text.slice(0, 200)}`);
+      let imported: ResultImportView | undefined;
+      for (let i = 0; i < 60; i++) {
+        imported = (await resultImportOf(date)).view;
+        if (imported !== undefined && imported.total > 0 && imported.queued === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      const importedRow = imported?.races[0];
+      check(`${label}: 窓の未取込(上の分析)が 1 件だけ依頼され、アラームの中で 1 回の取得で取り込み済みになる(imported・試行 1・保留 0・分類 imported)`, imported?.total === 1 && imported.imported === 1 && importedRow?.race_id === raceId && importedRow.state === "imported" && importedRow.attempts === 1 && importedRow.deferrals === 0 && importedRow.last_class === "imported" && importedRow.next_try_at === null, JSON.stringify(imported));
+      check(`${label}: 依頼の日は DO の時計の JST の今日(${jstToday})`, importedRow?.requested_on === jstToday, String(importedRow?.requested_on));
+      const savedResult = parseJson((await req(port, "GET", `/smoke/results?race_id=${raceId}`)).text)["result"] as { horses: number; courseType: string | null; comboPayoutRows: number } | null;
+      check(`${label}: D1 に結果が保存された(16 頭・面は芝・組合せ払戻の行がある。払戻のテーブルが出ているページだけ保存する)`, savedResult !== null && savedResult.horses === 16 && savedResult.courseType === "芝" && savedResult.comboPayoutRows > 0, JSON.stringify(savedResult));
+      // 重複配信: 同じ scheduledTime を再度発火しても、状態は変わらない(D1 に結果があるので列挙に出ず、依頼もされない)
+      const afterOnce = (await resultImportOf(date)).text;
+      const again = await fireCron(cronTime);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      check(`${label}: 同じ scheduledTime の再発火(重複配信)も成功し、結果の取り込みの状態は変わらない`, again.status === 200 && parseJson(again.text)["outcome"] === "ok" && (await resultImportOf(date)).text === afterOnce, `${again.status}`);
+      //   手動の入口 POST /api/results/import: 検証(400/403)と、同じ日の重複(D1 の結果を消しても、DO は同じ日に取り込み済みなので積み直さない)
+      const importPost = (body: unknown, headers: Record<string, string> = { Origin: origin, "Content-Type": "application/json" }) =>
+        fetch(`http://127.0.0.1:${port}/api/results/import`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+      check(`${label}: POST /api/results/import は Origin が無いと 403・今日を含む範囲は 400・32 日の範囲は 400`, (await importPost({ from: "20260601", to: "20260628" }, { "Content-Type": "application/json" })).status === 403 && (await importPost({ from: "20260601", to: jstToday })).status === 400 && (await importPost({ from: "20260101", to: "20260628" })).status === 400);
+      const clear = await req(port, "GET", `/smoke/results/clear?race_id=${raceId}`);
+      const manualEmpty = await importPost({ from: "20260601", to: "20260628" });
+      check(`${label}: 手動 POST: D1 の結果を消すと未取込として列挙され(listed 1)、DO は同じ日に取り込み済みなので積み直さない(accepted 0)。202`, clear.status === 200 && manualEmpty.status === 202 && manualEmpty.text === JSON.stringify({ ok: true, listed: 1, days: 1, accepted: 0, failed_days: 0 }), `${manualEmpty.status} ${manualEmpty.text}`);
+      //   未確定(地方の発売前のページ): 保存せず、分類 not-confirmed で再試行待ち(10 分後)になる。直接 RPC(DO の依頼)で確かめる。
+      const narDate = "20260716";
+      const narRaceId = "202642071612";
+      const requestNar = await req(port, "GET", `/smoke/race-day/request-result?date=${narDate}&race_ids=${narRaceId}`);
+      check(`${label}: 地方の結果の依頼の RPC は受理される(accepted 1)`, requestNar.status === 200 && (parseJson(requestNar.text) as { accepted?: number }).accepted === 1, requestNar.text.slice(0, 160));
+      let narView: ResultImportView | undefined;
+      for (let i = 0; i < 40; i++) {
+        narView = (await resultImportOf(narDate)).view;
+        if (narView?.races[0]?.last_class !== null && narView?.races[0]?.last_class !== undefined) break; // 試行の数え(取得の前)ではなく、結果の分類が付くまで待つ
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      const narRow = narView?.races[0];
+      check(`${label}: 未確定のページは保存せず、分類 not-confirmed・試行 1・queued で再試行待ち(次の試行は未来)になる`, narRow?.race_id === narRaceId && narRow.state === "queued" && narRow.attempts === 1 && narRow.last_class === "not-confirmed" && typeof narRow.next_try_at === "number" && narRow.next_try_at > Date.now() && parseJson((await req(port, "GET", `/smoke/results?race_id=${narRaceId}`)).text)["result"] === null, JSON.stringify(narView));
+      const todayRequest = await req(port, "GET", `/smoke/race-day/request-result?date=${jstToday}&race_ids=${raceId}`);
+      check(`${label}: 今日の開催日の結果の依頼は DO が拒否する(当日中の取り込みは対象外。smoke の経路は 500)`, todayRequest.status === 500, `${todayRequest.status}`);
     });
 
     // G. (Issue #206)cron の入口 `scheduled` を、workerd の実環境(本物の DO・アラーム・NetkeibaGate への RPC・偽ソケット)で通す。

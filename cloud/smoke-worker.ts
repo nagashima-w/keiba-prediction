@@ -27,12 +27,15 @@ import { scrapeRace } from "../packages/core/src/scraper/scrape-race";
 import type { AnalysisRecord } from "../packages/core/src/ev/analysis-store-types";
 import narHtml from "../fixtures/nar_shutuba_202654071210.html";
 import centralListHtml from "../fixtures/race_list_sub_20260628.html";
+import resultCentralHtml from "../fixtures/result_202603020211.html";
+import resultNarPresaleHtml from "../fixtures/nar_result_presale_202642071612.html";
 import narListHtml from "../fixtures/nar_race_list_sub_20260927.html";
 import { NetkeibaGate as RealGate } from "./src/netkeiba-gate-do";
 import type { ConnectFn, SocketLike } from "./src/socket-fetch";
 import type { Env } from "./src/handler";
 import { runCloudAnalysis } from "./src/pipeline";
 import { RaceDay } from "./src/race-day-do";
+import { D1ResultStore } from "./src/result-repository";
 import worker from "./src/worker";
 
 /** 偽ソケットの印(本番のバンドルに入っていないことの検査に使う)。メインモジュールの export は Worker・DO のクラスだけにできるので、export しない。 */
@@ -69,6 +72,13 @@ function route(host: string, path: string): { status: number; body: string } {
   }
   if (host === "race.netkeiba.com" && path.startsWith("/api/api_get_jra_odds.html") && raceId === "202603020211" && /[?&]type=1(&|$)/.test(path)) {
     return { status: 200, body: JSON.stringify(oddsJson) };
+  }
+  // Issue #208: 結果ページ。中央は確定済みの実フィクスチャ(202603020211)、地方は発売前で結果の行が無い実フィクスチャ(202642071612。未確定の経路)。
+  if (host === "race.netkeiba.com" && path.startsWith("/race/result.html") && raceId === "202603020211") {
+    return { status: 200, body: resultCentralHtml };
+  }
+  if (host === "nar.netkeiba.com" && path.startsWith("/race/result.html") && raceId === "202642071612") {
+    return { status: 200, body: resultNarPresaleHtml };
   }
   // ブレーカーの確認用: この race_id は、netkeiba に拒否された(403)ことにする。
   if (host === "race.netkeiba.com" && raceId === "202605010101") {
@@ -218,6 +228,9 @@ type SmokeEnv = Env;
 async function smokeRaceDay(url: URL, env: SmokeEnv): Promise<Response> {
   const date = url.searchParams.get("date") ?? "";
   const stub = env.RACE_DAY.get(env.RACE_DAY.idFromName(date));
+  if (url.pathname === "/smoke/race-day/request-result") {
+    return Response.json(await stub.requestResultImport({ kaisaiDate: date, raceIds: (url.searchParams.get("race_ids") ?? "").split(",").filter((x) => x !== "") }));
+  }
   if (url.pathname === "/smoke/race-day/schedule") {
     return Response.json(await stub.schedule({ raceId: url.searchParams.get("race_id") ?? "", kaisaiDate: date }));
   }
@@ -241,9 +254,38 @@ async function smokeRaceDay(url: URL, env: SmokeEnv): Promise<Response> {
   );
 }
 
+/**
+ * Issue #208: 結果の取り込みの確認用（smoke 専用。認証の関門の前に置く。netkeiba にも Anthropic にも出ない）。
+ *  - `/smoke/race-day/request-result?date=...&race_ids=a,b`: 結果の取り込みの依頼（RPC。依頼だけをして戻る）
+ *  - `/smoke/results?race_id=...`: D1 に保存された結果（馬の頭数・面。無ければ null）
+ *  - `/smoke/results/clear?race_id=...`: D1 の結果の行を消す（ローカルの D1 だけ。DO の「取り込み済み」の行は残る）
+ */
+async function smokeResults(url: URL, env: SmokeEnv): Promise<Response> {
+  const raceId = url.searchParams.get("race_id") ?? "";
+  if (url.pathname === "/smoke/results/clear") {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM race_results WHERE race_id = ?").bind(raceId),
+      env.DB.prepare("DELETE FROM race_result_meta WHERE race_id = ?").bind(raceId),
+      env.DB.prepare("DELETE FROM race_combo_payouts WHERE race_id = ?").bind(raceId),
+      env.DB.prepare("DELETE FROM race_combo_payout_imports WHERE race_id = ?").bind(raceId),
+    ]);
+    return Response.json({ ok: true });
+  }
+  const detail = (await new D1ResultStore({ db: env.DB }).getRaceResultDetails([raceId])).get(raceId);
+  const combos = await env.DB.prepare("SELECT count(*) AS n FROM race_combo_payouts WHERE race_id = ?").bind(raceId).first<{ n: number }>();
+  return Response.json({ ok: true, result: detail === undefined ? null : { horses: detail.horses.length, courseType: detail.courseType ?? null, comboPayoutRows: combos?.n ?? 0 } });
+}
+
 export default {
   async fetch(request: Request, env: SmokeEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/smoke/results" || url.pathname === "/smoke/results/clear") {
+      try {
+        return await smokeResults(url, env);
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error) }, { status: 500 });
+      }
+    }
     if (url.pathname.startsWith("/smoke/race-day/")) {
       try {
         return await smokeRaceDay(url, env);

@@ -125,6 +125,33 @@ export const LIST_UNIMPORTED_SQL = `SELECT a.race_id AS raceId, MIN(a.kaisai_dat
            ORDER BY firstDate, a.race_id
            LIMIT ?`;
 
+/**
+ * {@link LIST_UNIMPORTED_SQL} と**同じ判定・同じ並びの基準**(分析済み・結果の行が 1 件も無い・`GROUP BY race_id` で最小の開催日)を、窓の全日にわたって **1 クエリ**で引く版(Issue #208 AC-C)。
+ * 手動の取り込み(最大 31 日)で、日ごとに D1 を引くと 31 クエリになるため(D1 の 1 回の呼び出しあたり 50 クエリの制約・DO RPC の数え方が未確定)。
+ *  - `ROW_NUMBER() OVER (PARTITION BY firstDate ORDER BY raceId)` が日ごとの上限(古い日が新しい日を押しのけない)
+ *  - `DENSE_RANK() OVER (ORDER BY firstDate DESC)` が日数の上限(**未取込のある日だけ**を、新しい日から数える。内側が未取込だけに絞っているため、取り込み済みの日・開催の無い日は数えない)
+ *  - 並びは **新しい日が先**、同じ日は レースID 昇順。`LIMIT` が合計の上限(古い日が切られる)
+ * 束縛値は `[from, to, perDay, maxDays, total]` の 5 個。
+ */
+export const LIST_UNIMPORTED_BY_DAY_SQL = `SELECT raceId, firstDate FROM (
+             SELECT raceId, firstDate,
+                    ROW_NUMBER() OVER (PARTITION BY firstDate ORDER BY raceId) AS rn,
+                    DENSE_RANK() OVER (ORDER BY firstDate DESC) AS dayRank
+             FROM (
+               SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+               FROM analyses a
+               WHERE a.kaisai_date >= ? AND a.kaisai_date <= ?
+                 AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+               GROUP BY a.race_id
+             )
+           )
+           WHERE rn <= ? AND dayRank <= ?
+           ORDER BY firstDate DESC, raceId
+           LIMIT ?`;
+
+/** {@link LIST_UNIMPORTED_BY_DAY_SQL} の日数の上限の最大(手動の取り込みの範囲の上限 31 日と同じ)。 */
+export const UNIMPORTED_BY_DAY_MAX_DAYS = 31;
+
 // ---------------------------------------------------------------------------
 // 保存の文の組み立て
 // ---------------------------------------------------------------------------
@@ -180,10 +207,24 @@ export interface ListUnimportedOptions {
   readonly limit: number;
 }
 
+export interface ListUnimportedByDayOptions {
+  /** 開催日の下限(YYYYMMDD。含む)。 */
+  readonly from: string;
+  /** 開催日の上限(YYYYMMDD。含む)。`from` 以上。 */
+  readonly to: string;
+  /** 1 日あたりの件数。1〜{@link UNIMPORTED_MAX_LIMIT} の整数。 */
+  readonly perDay: number;
+  /** 未取込のある日を、新しい日から数えて取る日数。1〜{@link UNIMPORTED_BY_DAY_MAX_DAYS} の整数。 */
+  readonly maxDays: number;
+  /** 合計の件数。1〜{@link UNIMPORTED_MAX_LIMIT} の整数。 */
+  readonly total: number;
+}
+
 export interface ResultRepository {
   saveResult(raceId: string, results: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
   getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
   listUnimportedRaces(options: ListUnimportedOptions): Promise<UnimportedRace[]>;
+  listUnimportedRacesByDay(options: ListUnimportedByDayOptions): Promise<UnimportedRace[]>;
 }
 
 export interface D1ResultStoreOptions {
@@ -267,6 +308,31 @@ export class D1ResultStore implements ResultRepository {
       throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
     }
     const { results } = await this.db.prepare(LIST_UNIMPORTED_SQL).bind(from, to, limit).all<{ raceId: string; firstDate: string }>();
+    return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
+  }
+
+  /**
+   * 分析済み・結果未取込のレースを、窓 `[from, to]` の全日にわたって **1 クエリ**で列挙する(Issue #208。上の {@link LIST_UNIMPORTED_BY_DAY_SQL})。
+   * 新しい日が先・1 日 `perDay` 件・未取込のある日を新しい順に `maxDays` 日・合計 `total` 件。
+   * @throws RangeError from・to が YYYYMMDD の8桁でない・from > to・perDay・total が 1〜{@link UNIMPORTED_MAX_LIMIT} の整数でない・maxDays が 1〜{@link UNIMPORTED_BY_DAY_MAX_DAYS} の整数でない(D1 には発行しない)
+   */
+  async listUnimportedRacesByDay(options: ListUnimportedByDayOptions): Promise<UnimportedRace[]> {
+    const { from, to, perDay, maxDays, total } = options;
+    if (typeof from !== "string" || typeof to !== "string" || !YYYYMMDD.test(from) || !YYYYMMDD.test(to)) {
+      throw new RangeError("from・to は YYYYMMDD の8桁の文字列でなければなりません");
+    }
+    if (from > to) {
+      throw new RangeError("from は to 以前でなければなりません");
+    }
+    for (const [name, value] of [["perDay", perDay], ["total", total]] as const) {
+      if (!Number.isInteger(value) || value < 1 || value > UNIMPORTED_MAX_LIMIT) {
+        throw new RangeError(`${name} は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
+      }
+    }
+    if (!Number.isInteger(maxDays) || maxDays < 1 || maxDays > UNIMPORTED_BY_DAY_MAX_DAYS) {
+      throw new RangeError(`maxDays は 1〜${UNIMPORTED_BY_DAY_MAX_DAYS} の整数でなければなりません`);
+    }
+    const { results } = await this.db.prepare(LIST_UNIMPORTED_BY_DAY_SQL).bind(from, to, perDay, maxDays, total).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
   }
 }

@@ -4,9 +4,9 @@
  * ロジックは `RaceDayCore`(純ロジック。Node でテストできる)にあり、ここは本物の `ctx.storage.sql`・時計・`setAlarm`・ゲート(`NetkeibaGate` の RPC)を
  * 配線するだけの薄いラッパ(`cloudflare:workers` を持つため、テストでは import できない)。
  *
- * 呼び出す入口は、手動の `POST /api/analyses/run`(#180)と、cron の `scheduled`(#206。`requestPlan`)。この DO は `worker.ts` から export される(wrangler が binding のクラスを要求する)。
+ * 呼び出す入口は、手動の `POST /api/analyses/run`(#180)と、cron の `scheduled`(#206。`requestPlan`)、結果の取り込みの依頼(#208。`requestResultImport`。cron の `scheduled` と手動の `POST /api/results/import` が `dispatchResultImports` 経由で呼ぶ)。この DO は `worker.ts` から export される(wrangler が binding のクラスを要求する)。
  * **朝のタスクは D1・R2 に触れない**(朝の prior は DO のストレージにだけ置く)。発走前の分析(`pre_race`。#178)だけが、D1(設定の読み出し・分析の要約)と
- * R2(詳細)を使う。
+ * R2(詳細)を使う。結果の取り込み(#208)は D1 に結果を保存する(`D1ResultStore`。取得は gate 経由・キャッシュなし)。
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v2)に固定される。
  */
@@ -18,7 +18,8 @@ import { createDiscordNotifier, webhookStatus } from "./notify-send";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
-import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type RequestResultImportResult, type ResultImportProgress, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { D1ResultStore } from "./result-repository";
 import { loadSettings } from "./settings";
 
 /** netkeiba への取得の出口(NetkeibaGate)の固定名。handler.ts の GATE_NAME と同じ(全取得をこの1つのインスタンスに通す)。 */
@@ -71,6 +72,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       llm: createCloudLlm(env.ANTHROPIC_API_KEY),
       // 通知(Issue #205)。Webhook が未登録・形式不正なら undefined(通知は無効)。
       notifier: createDiscordNotifier(env.DISCORD_WEBHOOK_URL),
+      // 結果の取り込み(Issue #208)。D1 に結果を保存する（exe の AnalysisStore.saveResult と同じ 4 表。1 レース 1 batch・最大 5 文）。
+      resultStore: new D1ResultStore({ db: env.DB }),
       loadSettings: async () => {
         const loaded = await loadSettings(env.DB);
         if (loaded.source === "invalid") {
@@ -92,6 +95,19 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
    */
   requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult> {
     return this.core.requestPlan(input);
+  }
+
+  /**
+   * 結果の取り込みを依頼する(RPC。Issue #208。依頼だけをして戻る。冪等)。呼ぶのは `dispatchResultImports`（result-dispatch.ts）だけ。
+   * 今日以降の開催日・無効な入力は例外（RPC 越しは型が落ちる）。
+   */
+  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[] }): Promise<RequestResultImportResult> {
+    return this.core.requestResultImport(input);
+  }
+
+  /** 結果の取り込みの観測（RPC。Issue #208 `GET /api/plan` が使う。状態は変えない。固定の語と数値だけ）。 */
+  getResultImportProgress(): ResultImportProgress {
+    return this.core.getResultImportProgress();
   }
 
   /** 朝の計画の読み取り(RPC。Issue #206 `GET /api/plan` が使う。状態は変えない)。 */

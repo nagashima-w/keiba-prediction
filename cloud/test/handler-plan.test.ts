@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { handle, type Env, type RaceDayStubLike } from "../src/handler";
-import type { AutoRunResults, NotificationRecord, PlanProgress } from "../src/race-day-core";
+import type { AutoRunResults, NotificationRecord, PlanProgress, ResultImportProgress } from "../src/race-day-core";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
  * Issue #206(#166-E G-E3): 本番での自動実行を外から観測する、読み取り専用の入口 `GET /api/plan?kaisai_date=YYYYMMDD`。
- * 返すもの: 朝の計画(`getPlanProgress`)・自動実行の各レースの結果(`getAutoRunResults`)・通知の一覧(`getNotifications`。Webhook の URL は含まない)。
- * netkeiba にも LLM にも出ない。状態も変えない(DO の読み取りの RPC 3 つだけを呼ぶ)。日単位の DO は偽物(呼び出しを記録する)。
+ * 返すもの: 朝の計画(`getPlanProgress`)・自動実行の各レースの結果(`getAutoRunResults`)・通知の一覧(`getNotifications`。Webhook の URL は含まない)・結果の取り込みの状態(`getResultImportProgress`。Issue #208)。
+ * netkeiba にも LLM にも出ない。状態も変えない(DO の読み取りの RPC 4 つだけを呼ぶ)。日単位の DO は偽物(呼び出しを記録する)。
  * 順序: メソッド(GET だけ。HEAD は 405)→ Sec-Fetch-Site(別サイトなら 403)→ クエリの検証(400)→ DO(失敗は 503・文面なし)。
  */
 
@@ -59,12 +59,25 @@ const NOTIFICATIONS: NotificationRecord[] = [
   { key: "summary", kind: "summary", state: "failed", analysisId: null, errorClass: "http-401", updatedAt: 9_500 },
 ];
 
+const RESULT_IMPORT: ResultImportProgress = {
+  total: 3,
+  queued: 1,
+  imported: 1,
+  gaveUp: 1,
+  races: [
+    { raceId: "202606040901", state: "imported", attempts: 1, deferrals: 0, requestedOn: "20260629", nextTryAt: null, lastClass: "imported", updatedAt: 11_000 },
+    { raceId: "202606040902", state: "queued", attempts: 2, deferrals: 1, requestedOn: "20260629", nextTryAt: 12_000, lastClass: "no-payout", updatedAt: 11_500 },
+    { raceId: "202606040903", state: "gave_up", attempts: 3, deferrals: 0, requestedOn: "20260629", nextTryAt: null, lastClass: "not-confirmed", updatedAt: 11_900 },
+  ],
+};
+
 interface FakePlanDay {
   readonly names: string[];
   readonly calls: string[];
   planImpl: () => Promise<PlanProgress>;
   resultsImpl: () => Promise<AutoRunResults>;
   notificationsImpl: () => Promise<NotificationRecord[]>;
+  resultImportImpl: () => Promise<ResultImportProgress>;
   readonly namespace: Env["RACE_DAY"];
 }
 
@@ -75,6 +88,7 @@ function fakePlanDay(): FakePlanDay {
     planImpl: async () => PLAN,
     resultsImpl: async () => RESULTS,
     notificationsImpl: async () => NOTIFICATIONS,
+    resultImportImpl: async () => RESULT_IMPORT,
     namespace: undefined as never,
   };
   const forbid = (name: string) => () => {
@@ -87,6 +101,11 @@ function fakePlanDay(): FakePlanDay {
     getMorningPrior: forbid("getMorningPrior"),
     getRaceList: forbid("getRaceList"),
     requestPlan: forbid("requestPlan"),
+    requestResultImport: forbid("requestResultImport"),
+    getResultImportProgress: () => {
+      f.calls.push("getResultImportProgress");
+      return f.resultImportImpl();
+    },
     getPlanProgress: () => {
       f.calls.push("getPlanProgress");
       return f.planImpl();
@@ -154,7 +173,7 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
     expect(f.calls).toEqual([]);
   });
 
-  it("開催日の DO(名前は開催日)の読み取りの RPC 3 つだけを呼び、200 で計画・結果・通知を返す。キャッシュしない", async () => {
+  it("開催日の DO(名前は開催日)の読み取りの RPC 4 つだけを呼び、200 で計画・結果・通知・結果の取り込みを返す。キャッシュしない", async () => {
     const { deps, token } = await setup();
     const f = fakePlanDay();
     const response = await handle(get(`/api/plan?kaisai_date=${DATE}`, token), envOf(f), {}, deps);
@@ -162,7 +181,7 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-type")).toContain("application/json");
     expect(f.names).toEqual([DATE]);
-    expect([...f.calls].sort()).toEqual(["getAutoRunResults", "getNotifications", "getPlanProgress"]);
+    expect([...f.calls].sort()).toEqual(["getAutoRunResults", "getNotifications", "getPlanProgress", "getResultImportProgress"]);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body["ok"]).toBe(true);
     expect(body["kaisai_date"]).toBe(DATE);
@@ -193,6 +212,18 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
       { key: "race:202606040902", kind: "analysis", state: "sent", analysis_id: 7, error_class: null, updated_at: 9_000 },
       { key: "summary", kind: "summary", state: "failed", analysis_id: null, error_class: "http-401", updated_at: 9_500 },
     ]);
+    // Issue #208: 結果の取り込み。件数(キューに入っている・取り込み済み・諦めた)と、各レースの状態を、固定の語と数値だけで返す
+    expect(body["result_import"]).toEqual({
+      total: 3,
+      queued: 1,
+      imported: 1,
+      gave_up: 1,
+      races: [
+        { race_id: "202606040901", state: "imported", attempts: 1, deferrals: 0, requested_on: "20260629", next_try_at: null, last_class: "imported", updated_at: 11_000 },
+        { race_id: "202606040902", state: "queued", attempts: 2, deferrals: 1, requested_on: "20260629", next_try_at: 12_000, last_class: "no-payout", updated_at: 11_500 },
+        { race_id: "202606040903", state: "gave_up", attempts: 3, deferrals: 0, requested_on: "20260629", next_try_at: null, last_class: "not-confirmed", updated_at: 11_900 },
+      ],
+    });
   });
 
   it("応答のキーは固定(ホワイトリスト)。DO の返り値に余計なキー(URL を含む)があっても、本文に出ない。env の Webhook の URL も出ない(カナリア)", async () => {
@@ -202,6 +233,7 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
     f.planImpl = async () => ({ ...PLAN, webhookUrl: CANARY, venues: PLAN.venues.map((v) => ({ ...v, secret: CANARY })), rows: PLAN.rows.map((r) => ({ ...r, token: CANARY })) }) as never;
     f.resultsImpl = async () => ({ ...RESULTS, webhookUrl: CANARY, results: RESULTS.results.map((r) => ({ ...r, secret: CANARY, outcome: { ...r.outcome, url: CANARY } })) }) as never;
     f.notificationsImpl = async () => NOTIFICATIONS.map((n) => ({ ...n, payloadJson: CANARY, webhookUrl: CANARY })) as never;
+    f.resultImportImpl = async () => ({ ...RESULT_IMPORT, webhookUrl: CANARY, races: RESULT_IMPORT.races.map((r) => ({ ...r, secret: CANARY, message: CANARY })) }) as never;
     const response = await handle(get(`/api/plan?kaisai_date=${DATE}`, token), envOf(f, { DISCORD_WEBHOOK_URL: CANARY }), {}, deps);
     expect(response.status).toBe(200);
     const text = await response.text();
@@ -209,7 +241,7 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
       expect(text.includes(leaked), leaked).toBe(false);
     }
     const body = JSON.parse(text) as Record<string, unknown>;
-    expect(sortedKeys(body)).toEqual(["kaisai_date", "notifications", "ok", "plan", "results"]);
+    expect(sortedKeys(body)).toEqual(["kaisai_date", "notifications", "ok", "plan", "result_import", "results"]);
     const plan = body["plan"] as Record<string, unknown>;
     expect(sortedKeys(plan)).toEqual(["finalized_at", "morning_all_terminal", "offset_minutes", "offset_source", "requested_at", "rows", "stage", "venues"]);
     expect(sortedKeys((plan["venues"] as unknown[])[0])).toEqual(["attempts", "listed", "reason", "state", "targeted", "venue"]);
@@ -219,6 +251,12 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
     for (const r of results) {
       expect(sortedKeys(r)).toEqual(["due_ms", "grade", "outcome", "race_id", "race_name", "race_number", "start_time", "venue", "venue_name"]);
       expect(sortedKeys(r.outcome)).toEqual(["analysis_id", "detail", "kind", "message", "reason"]);
+    }
+    const resultImport = body["result_import"] as { races: unknown[] };
+    expect(sortedKeys(resultImport)).toEqual(["gave_up", "imported", "queued", "races", "total"]);
+    expect(resultImport.races).toHaveLength(3); // 前提: 行がある(キーの検査が空振りしない)
+    for (const r of resultImport.races) {
+      expect(sortedKeys(r)).toEqual(["attempts", "deferrals", "last_class", "next_try_at", "race_id", "requested_on", "state", "updated_at"]);
     }
     const notifications = body["notifications"] as unknown[];
     expect(notifications).toHaveLength(2);
@@ -239,12 +277,13 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
     expect(body.plan.venues[0]!.reason).toBeNull();
   });
 
-  it("依頼の前の DO(stage none・空の結果)も 200 で返す。開いただけでは何も起きない(RPC は読み取りの 3 つだけ)", async () => {
+  it("依頼の前の DO(stage none・空の結果)も 200 で返す。開いただけでは何も起きない(RPC は読み取りの 4 つだけ)", async () => {
     const { deps, token } = await setup();
     const f = fakePlanDay();
     f.planImpl = async () => ({ stage: "none", requestedAt: null, finalizedAt: null, offsetMinutes: null, offsetSource: null, venues: [], rows: [], morningAllTerminal: false });
     f.resultsImpl = async () => ({ stage: "none", finalizedAt: null, results: [] });
     f.notificationsImpl = async () => [];
+    f.resultImportImpl = async () => ({ total: 0, queued: 0, imported: 0, gaveUp: 0, races: [] });
     const response = await handle(get(`/api/plan?kaisai_date=${DATE}`, token), envOf(f), {}, deps);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
@@ -253,6 +292,7 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
       plan: { stage: "none", requested_at: null, finalized_at: null, offset_minutes: null, offset_source: null, morning_all_terminal: false, venues: [], rows: [] },
       results: [],
       notifications: [],
+      result_import: { total: 0, queued: 0, imported: 0, gave_up: 0, races: [] },
     });
     expect(f.calls.some((c) => c.startsWith("FORBIDDEN:"))).toBe(false);
   });
@@ -315,7 +355,7 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
 
   it("DO のどれかの読み取りが失敗したら 503 race-day-error。例外の文面・SQL を返さない", async () => {
     const { deps, token } = await setup();
-    for (const which of ["planImpl", "resultsImpl", "notificationsImpl"] as const) {
+    for (const which of ["planImpl", "resultsImpl", "notificationsImpl", "resultImportImpl"] as const) {
       const f = fakePlanDay();
       f[which] = async () => {
         throw new Error("SQLITE_ERROR race_day_plan secret-value");

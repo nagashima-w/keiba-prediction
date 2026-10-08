@@ -74,7 +74,7 @@ describe("wrangler.toml", () => {
     expect('[triggers]\ncrons = ["0 0 * * *", "30 0 * * *"]\n'.match(/^crons\s*=\s*\[([^\]]*)\]\s*$/m)![1]!.split(",")).toHaveLength(2);
   });
 
-  it("Issue #180・#183・#206: netkeiba への取得の起点は、手動の 3 つ(POST の予約・GET の一覧・GET の確認。認証の後ろ)と、定時の 1 つ(scheduled の requestPlan)の計 4 つだけ", () => {
+  it("Issue #180・#183・#206・#208: netkeiba への取得の起点は、手動の 3 つ(POST の予約・GET の一覧・GET の確認。認証の後ろ)と、定時の 1 つ(scheduled の requestPlan)の呼び出し箇所 4 つに、結果の取り込みの依頼の呼び出し箇所 1 つ(result-dispatch.ts。cron と手動 POST が共有)を加えた計 5 つだけ", () => {
     const worker = readTextLf("cloud", "src", "worker.ts");
     const workerCode = stripCode(worker);
     expect(worker.length).toBeGreaterThan(100); // 前提: 読めている
@@ -91,9 +91,14 @@ describe("wrangler.toml", () => {
     const scheduledCode = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
     expect(scheduledCode.length).toBeGreaterThan(500); // 前提: コメント除去で本文を消していない
     expect((scheduledCode.match(/\.requestPlan\(/g) ?? []).length).toBe(1);
-    for (const forbidden of [".schedule(", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "ANTHROPIC", "DISCORD"]) {
+    for (const forbidden of [".schedule(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".requestResultImport(", "NETKEIBA_GATE", "ANTHROPIC", "DISCORD"]) {
       expect(scheduledCode, `scheduled.ts に ${forbidden} が無い`).not.toContain(forbidden);
     }
+    // Issue #208: 結果の依頼は dispatchResultImports に委譲する(1 箇所)。D1 は結果の未取込の列挙(D1ResultStore)にだけ使う(env.DB は 1 箇所)
+    expect((scheduledCode.match(/\bdispatchResultImports\(/g) ?? []).length).toBe(1);
+    expect((scheduledCode.match(/\benv\.DB\b/g) ?? []).length).toBe(1);
+    expect(scheduledCode).toContain("CRON_RESULT_MAX_DAYS");
+    expect(scheduledCode).toContain("resultWindowFor(");
     expect(scheduledCode).not.toMatch(/(\.|await\s+)fetch\(/);
     expect(scheduledCode).toContain("jstKaisaiDate(");
     // 手動の入口は、認証の後ろの POST /api/analyses/run だけ(handler.ts)。ここから日単位の DO の schedule を呼ぶ
@@ -109,19 +114,95 @@ describe("wrangler.toml", () => {
     expect(count(/\.getRaceList\(/g)).toBe(1); // handleRaces(GET。Sec-Fetch-Site・検証の後)
     expect(count(/\.fetchRaw\(/g)).toBe(1); // handleCheck(GET /api/netkeiba/check)
     expect(count(/\.requestPlan\(/g)).toBe(0); // 計画の依頼は cron(scheduled.ts)だけ。手動の入口は呼ばない
+    expect(count(/\.requestResultImport\(/g)).toBe(0); // 結果の依頼は result-dispatch.ts の 1 箇所だけ(handler.ts は dispatchResultImports に委譲する)
     expect(handler).toContain('"/api/races"');
     // 一覧の入口は、DO を呼ぶ前に Sec-Fetch-Site を見る
     expect(code.indexOf("sec-fetch-site")).toBeGreaterThan(-1);
     expect(code.indexOf("sec-fetch-site")).toBeLessThan(code.indexOf(".getRaceList("));
-    // 起点の総数: handler.ts(手動 3)+ scheduled.ts(定時 1)= 4。worker.ts は 0
-    const originCalls = (c: string): number => (c.match(/\.(schedule|getRaceList|fetchRaw|requestPlan)\(/g) ?? []).length;
+    // 起点の総数(呼び出し箇所): handler.ts(手動 3)+ scheduled.ts(定時 1)+ result-dispatch.ts(結果の依頼 1。cron と手動 POST が共有)= 5。worker.ts は 0
+    const originCalls = (c: string): number => (c.match(/\.(schedule|getRaceList|fetchRaw|requestPlan|requestResultImport)\(/g) ?? []).length;
+    const dispatchCode = stripCode(readTextLf("cloud", "src", "result-dispatch.ts"));
+    expect(dispatchCode.length).toBeGreaterThan(1000); // 前提: 読めている
     expect(originCalls(code)).toBe(3);
     expect(originCalls(scheduledCode)).toBe(1);
     expect(originCalls(workerCode)).toBe(0);
-    expect(originCalls(code) + originCalls(scheduledCode) + originCalls(workerCode)).toBe(4);
+    expect(originCalls(dispatchCode)).toBe(1);
+    expect((dispatchCode.match(/\.requestResultImport\(/g) ?? []).length).toBe(1);
+    expect(originCalls(code) + originCalls(scheduledCode) + originCalls(workerCode) + originCalls(dispatchCode)).toBe(5);
+    // 結果の依頼(`.requestResultImport(`)を持つファイルは、cloud/src で result-dispatch.ts(呼び出し 1)と race-day-do.ts(DO の RPC が core に委譲する 1)だけ
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
+    const resultCallSites: Record<string, number> = {};
+    const dispatchCallSites: Record<string, number> = {};
+    for (const f of srcFiles) {
+      const c = stripCode(readTextLf("cloud", "src", f));
+      const n = (c.match(/\.requestResultImport\(/g) ?? []).length;
+      if (n > 0) resultCallSites[f] = n;
+      // dispatchResultImports の呼び出し(関数の宣言 `function dispatchResultImports(` は数えない)
+      const d = (c.match(/(?<!function\s)\bdispatchResultImports\(/g) ?? []).length;
+      if (d > 0) dispatchCallSites[f] = d;
+    }
+    expect(resultCallSites).toEqual({ "race-day-do.ts": 1, "result-dispatch.ts": 1 });
+    // dispatchResultImports の呼び出し箇所は 2 つだけ: cron(scheduled.ts)と手動 POST(handler.ts)
+    expect(dispatchCallSites).toEqual({ "handler.ts": 1, "scheduled.ts": 1 });
     // 対照(検出の確認。空振りでない): 取得口を1つ足した本文では、数が変わる
     expect(((code + "\ngate.fetchRaw(x);").match(/\.fetchRaw\(/g) ?? []).length).toBe(2);
     expect(originCalls(scheduledCode + "\nstub.getRaceList(a, b);")).toBe(2);
+    expect(originCalls(scheduledCode + "\nstub.requestResultImport(a);")).toBe(2);
+    expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
+  });
+
+  it("Issue #208: 手動の POST を受けるルートは 3 つだけ(/api/settings・/api/analyses/run・/api/results/import)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+    const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
+    // POST の分岐は 3 つ(`method === "POST"`)
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(3);
+    const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
+    expect(routes).toEqual(["/api/analyses/run", "/api/results/import"]); // settings は pathname の分岐の中で method を見る
+    expect(code).toMatch(/pathname === "\/api\/settings"/);
+    // handleResultsImport の本体
+    const start = code.indexOf("async function handleResultsImport(");
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf("\n}\n", start);
+    const body = code.slice(start, end);
+    expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている(空振りでない)
+    expect(body).toContain("readJsonObjectBody(request");
+    expect(body.indexOf("readJsonObjectBody(")).toBeLessThan(body.indexOf("dispatchResultImports(")); // 守りが先
+    expect(body).toContain("dispatchResultImports(");
+    expect(body).toContain("MANUAL_RESULT_MAX_DAYS");
+    expect(body).toContain("jstKaisaiDate(");
+    for (const forbidden of [".schedule(", ".requestPlan(", ".getRaceList(", ".fetchRaw(", ".requestResultImport(", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD", "fetch("]) {
+      expect(body, `handleResultsImport に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 対照(検出の確認。空振りでない)
+    expect((body + "\nstub.requestResultImport(a);").includes(".requestResultImport(")).toBe(true);
+  });
+
+  it("Issue #208: 結果のページは、DO の中で gate 経由・キャッシュなしの HttpClient 1 本だけで取る(グローバルの fetch・bypassCache・CachedFetcher 経由では取らない)。D1 に出るのは 1 レースぶんの saveResult だけ", () => {
+    const core = stripCode(readTextLf("cloud", "src", "race-day-core.ts"));
+    expect(core.length).toBeGreaterThan(5000); // 前提: 読めている
+    const count = (pattern: RegExp): number => (core.match(pattern) ?? []).length;
+    expect(count(/createGateHttpClient\(/g)).toBe(1); // 取得のクライアントは 1 つ(gate 経由)
+    expect(count(/serializeGate\(deps\.gate\)/g)).toBe(1); // 直列化した gate は 1 つ(キャッシュ付きの取得と結果の取得が同じ待ち行列を使う)
+    expect(count(/this\.httpClient\.fetchText\(/g)).toBe(1); // 結果のページの取得は 1 箇所
+    expect(count(/(\.|await\s+)fetch\(/g)).toBe(0); // グローバルの fetch に出ない
+    expect(count(/bypassCache/g)).toBe(0); // キャッシュを通す取得(CachedFetcher)の bypassCache では取らない
+    expect(count(/this\.setAlarm\(/g)).toBe(1); // アラームを張るのは rearm の 1 箇所だけ
+    // runResultStep の本体は、キャッシュ付きの取得(networkFetcher・cacheOnly)を使わず、D1 は saveResult の 1 経路だけ
+    const start = core.indexOf("private async runResultStep(");
+    expect(start).toBeGreaterThan(-1);
+    const end = core.indexOf("\n  }\n", start);
+    const body = core.slice(start, end);
+    expect(body.length).toBeGreaterThan(1500); // 前提: 本体を実際に読めている
+    expect(body).toContain("this.httpClient.fetchText(");
+    expect(body).toContain("importRaceResult(");
+    expect(body).toContain("this.resultStore!.saveResult(");
+    expect(body).toContain("winPayouts.length === 0"); // 払戻のテーブルが出てから保存する
+    for (const forbidden of ["networkFetcher", "cacheOnly", "this.cache", "this.sink", "loadSettings", "fetch("]) {
+      expect(body.replace(/this\.httpClient\.fetchText\(/g, ""), `runResultStep に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 結果のステップを動かす条件(resultsRunnable)を、アラームの候補(rearm)と実行(runNextStep)の両方が使う
+    expect(count(/this\.resultsRunnable\(\)/g)).toBe(2);
   });
 
   it("Issue #206: binding の使用箇所を概念で走査する(cloud/src の全ファイル)。env.RACE_DAY・env.NETKEIBA_GATE に触れるファイルと回数が固定で、新しい経路は赤になる", () => {
@@ -159,9 +240,10 @@ describe("wrangler.toml", () => {
     expect(body).toContain(".getPlanProgress(");
     expect(body).toContain(".getAutoRunResults(");
     expect(body).toContain(".getNotifications(");
+    expect(body).toContain(".getResultImportProgress("); // Issue #208: 結果の取り込みの観測(読み取り)
     expect(body).toContain("sec-fetch-site");
     expect(body).toContain("raceDayStub(");
-    for (const forbidden of [".schedule(", ".requestPlan(", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "env.DB", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
+    for (const forbidden of [".schedule(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", "D1ResultStore", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "env.DB", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
       expect(body, `handlePlan に ${forbidden} が無い`).not.toContain(forbidden);
     }
     // DISCORD_WEBHOOK_URL を読むのは /api/health の「登録の有無」の 1 箇所だけ(値は返さない)

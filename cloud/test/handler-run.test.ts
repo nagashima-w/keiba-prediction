@@ -73,6 +73,13 @@ function fakeRaceDay(): FakeRaceDay {
       getNotifications: () => {
         throw new Error("getNotifications は呼ばれない想定");
       },
+      // Issue #208: 結果の取り込みの依頼・観測は、dispatchResultImports（cron・POST /api/results/import）と GET /api/plan の持ち分。ここでは呼ばれない。
+      requestResultImport: () => {
+        throw new Error("requestResultImport は呼ばれない想定");
+      },
+      getResultImportProgress: () => {
+        throw new Error("getResultImportProgress は呼ばれない想定");
+      },
     }),
   };
   return f;

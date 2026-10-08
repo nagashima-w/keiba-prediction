@@ -7,7 +7,7 @@ import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
  * Issue #189: JSON の POST の守り(`readJsonObjectBody`)の特性化テスト。
  * run(`POST /api/analyses/run`)の守りの各段の**応答(status と本文の完全一致)と、裏側(DO・D1)を呼ばないこと**を固定する。
  * 守りを関数に抜き出す前に、今のコードで緑にして書いた(抜き出しで run の挙動が変わらないことの根拠)。
- * 同じ表を settings(`POST /api/settings`)にも回す(守りの順序: Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON・オブジェクト 400)。
+ * 同じ表を settings(`POST /api/settings`)と、結果の取り込み(`POST /api/results/import`。Issue #208。上限は run と同じ 1 KiB)にも回す(守りの順序: Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON・オブジェクト 400)。
  */
 
 const ORIGIN = "https://cloud.invalid";
@@ -68,6 +68,23 @@ function settingsEnv(): { env: Env; touched: () => number } {
   return { env, touched: () => touched };
 }
 
+/** 結果の取り込み(Issue #208)。守りの内側では D1（列挙）にも DO にも触れない。 */
+function resultsImportEnv(): { env: Env; touched: () => number } {
+  let touched = 0;
+  const touch = (): never => {
+    touched += 1;
+    throw new Error("守りの内側では D1・DO に触れない想定");
+  };
+  const env: Env = {
+    ...GOOD_ENV,
+    NETKEIBA_GATE: { idFromName: NOT_CALLED, get: NOT_CALLED },
+    DB: { prepare: touch, batch: touch } as unknown as Env["DB"],
+    ANALYSIS_DETAIL: { get: NOT_CALLED, put: NOT_CALLED } as unknown as Env["ANALYSIS_DETAIL"],
+    RACE_DAY: { idFromName: touch, get: touch },
+  };
+  return { env, touched: () => touched };
+}
+
 const ROUTES: readonly GuardRoute[] = [
   {
     name: "run(POST /api/analyses/run)",
@@ -82,6 +99,13 @@ const ROUTES: readonly GuardRoute[] = [
     limit: 16 * 1024,
     unknownKeyBody: (padding) => JSON.stringify({ x: padding }),
     makeEnv: settingsEnv,
+  },
+  {
+    name: "results import(POST /api/results/import。上限は run と同じ: 1 KiB)",
+    path: "/api/results/import",
+    limit: 1024,
+    unknownKeyBody: (padding) => JSON.stringify({ x: padding }),
+    makeEnv: resultsImportEnv,
   },
 ];
 

@@ -356,8 +356,19 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **ローカルでの確認**: `wrangler dev` の `/cdn-cgi/local/scheduled?cron=0+0+*+*+*&time=<エポックミリ秒>`(`--test-scheduled` は不要。実測)で cron を手動発火できる。`pnpm run smoke` の構成 G が、偽ソケットでこれを通す(過去の開催日なので全件 skip になり、Claude API にも netkeiba にも出ない)。
 - 検査: `test/scheduled.test.ts`・`test/handler-plan.test.ts`・`test/race-day-rpc-surface.test.ts`・`test/race-day-plan.test.ts`(G-E2)・`test/bundle-guard.test.ts`(`async scheduled(` が本番のバンドルにある)・`scripts/test/cloud-config-guard.test.ts`・smoke。
 
+## 結果の自動取り込み(Issue #208〈#182-B〉。**公開すると、翌朝の cron から自動で始まる**)
+分析した過去のレースの結果(着順・払戻)を netkeiba から取得して D1 に保存する(保存の形は exe と同じ。仕様は `docs/current-spec.md` の「クラウド版の結果の自動取り込み」)。LLM・課金は増えない。**当日中の取り込みは対象外**(今日の結果は翌日以降)。
+- **いつ・どこまで**: 毎朝 JST 9:00 の cron が、`requestPlan`(朝の計画)のあとに、**前日までの 7 日**(今日は含めない)の分析済み・結果未取込のレースを、新しい日から**最大 2 日**、その日の日単位の DO に依頼する(1 日 60 レース・合計 120 レースまで)。取得は DO のアラームの中で、**1 ステップにつき 1 レース**、gate 経由(間隔 2 秒)で順に行う。
+- **保存するもの**: **払戻のテーブルが出ているときだけ**保存する(審議中の暫定の着順は保存しない)。未確定・中止のレースは、1 回の依頼につき 10 分おきに 3 回まで試し、取れなければその日は諦める(翌日の cron が、窓の 7 日のあいだ 1 日 1 回だけ試し直す)。失敗は Discord には出さず、ログ(Workers Logs)に分類だけが残る。
+- **窓より古いぶんを取り込む**: `POST /api/results/import`(Access の後ろ。同じオリジンのページから。本文 JSON `{"from": "20260901", "to": "20260930"}`。JST の開催日・両端を含む・**31 日以内**・`to` は昨日まで)。新しい日から**最大 3 日**ぶんを依頼して 202 で返る(`{ok, listed, days, accepted, failed_days}`)。溜まっていれば、**同じ範囲でもう一度呼ぶと続きから**進む(取り込み済み・進行中は積み直さない)。curl で試すときは `-H "Origin: https://<自分の Worker のホスト>"` と `-H "Content-Type: application/json"` を付ける。
+  - 依頼する日数を絞っているのは、過去日の DO が多数同時に gate に並ぶと、gate の待ち行列の上限(8)が埋まり、画面で開いた一覧まで混雑で拒否されるため。
+- **観測**: `GET /api/plan?kaisai_date=YYYYMMDD` の `result_import`(取り込み待ち・取り込み済み・諦めた件数と、各レースの状態・試行回数・直近の分類)。取り込まれないレースがあるときは、まずここの `last_class`(`not-confirmed`・`no-payout`・`parse-error`・`fetch-failed`・`save-failed`・`blocked`・`busy`)を見る。その日の朝の計画が止まっている(`plan.stage` が `done` でない)と、その日の結果は取り込まれない。
+- **止め方**: 取り込みだけを止める専用の設定は無い。cron ごと止めるなら上の「定時の自動実行」の止め方(`crons = []`)。手動の `POST /api/results/import` は、cron を止めても使える。
+- **ローカルでの確認**: `pnpm run smoke` の構成 F の末尾が、cron の手動発火 → 偽ソケットの結果ページ(実フィクスチャ)→ D1 に 16 頭が保存されることまでを通す。netkeiba にも出ない。
+- 検査: `test/race-day-result.test.ts`・`test/result-dispatch.test.ts`・`test/handler-results.test.ts`・`test/scheduled.test.ts`・`test/result-repository.test.ts`・`scripts/test/cloud-config-guard.test.ts`・smoke。
+
 ## 手動起動の入口(Issue #180)
-Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 3 + 定時 1 の計 4 つ〉。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
+Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 3 + 定時 1 の計 4 つ〉。さらに結果の取り込みの依頼〈Issue #208。cron と `POST /api/results/import` が共有する `dispatchResultImports` の中の 1 箇所〉で、呼び出し箇所は計 5 つ)。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
 - `POST /api/analyses/run` — 本文 JSON `{"race_id": "202603020211", "kaisai_date": "20260628", "mode": "morning"}`。`mode` は `morning`(省略時。朝の取得と prior。D1・R2 には書かない)か `pre_race`(発走前の分析。LLM を使う〈API キーが未登録なら LLM なしで保存〉。D1・R2 に保存)。**同じオリジンのページから**(`Origin` が必要。curl で試すときは `-H "Origin: https://<自分の Worker のホスト>"` と `-H "Content-Type: application/json"` を付ける)。202 で予約され、取得 → 計算はアラームの中で進む(中央16頭で約 40 秒)。
 - `GET /api/analyses/status?kaisai_date=20260628[&race_id=202603020211]` — 状態と、朝の prior の最小限。
 

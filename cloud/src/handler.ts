@@ -17,7 +17,10 @@ import { CLIENT_JS } from "./client-bundle.generated";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
 import { loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
-import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, ScheduleInput, ScheduleResult } from "./race-day-core";
+import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, RequestResultImportResult, ResultImportProgress, ScheduleInput, ScheduleResult } from "./race-day-core";
+import { jstKaisaiDate } from "./auto-run-plan";
+import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
+import { D1ResultStore } from "./result-repository";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -52,6 +55,10 @@ export interface RaceDayStubLike {
   getAutoRunResults(): Promise<AutoRunResults>;
   /** 通知の一覧の読み取り(Issue #205・#206。URL・例外の文面を含まない。状態は変えない)。 */
   getNotifications(): Promise<NotificationRecord[]>;
+  /** 結果の取り込みの依頼(Issue #208)。**呼ぶのは `dispatchResultImports`(result-dispatch.ts。cron の `scheduled` と手動の `POST /api/results/import`)だけ**。handler.ts は直接は呼ばない(ガードテストが固定)。 */
+  requestResultImport(input: { readonly kaisaiDate: string; readonly raceIds: readonly string[] }): Promise<RequestResultImportResult>;
+  /** 結果の取り込みの観測（Issue #208 `GET /api/plan`。状態は変えない）。 */
+  getResultImportProgress(): Promise<ResultImportProgress>;
 }
 
 /** 日単位の DO(RaceDay)の名前空間の、使う部分だけの型。名前は開催日(YYYYMMDD)。 */
@@ -142,6 +149,10 @@ export async function handle(
   // 手動起動の入口(Issue #180)。**POST を受けるのはここと `/api/settings` だけ**。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
+  }
+  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。**POST を受けるのは、ここと上の 2 つ(`/api/settings`・`/api/analyses/run`)だけ**。
+  if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
+    return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
   if (method !== "GET" && method !== "HEAD") {
     return new Response("method not allowed", {
@@ -495,7 +506,7 @@ async function readJsonObjectBody(request: Request, maxBytes: number): Promise<J
  * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior(`morning`。省略時)または発走前の分析(`pre_race`。LLM を使う〈Issue #194。キー未登録なら LLM なしで保存〉。D1・R2 に保存。Issue #178)を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`。
  * 日単位の DO(RaceDay。名前は開催日)の `schedule` に予約を入れて **202** を返す(取得はアラームの中で始まる)。実行中の同じレースなら **409**(already-running)。
  * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503。文面は返さない)。
- * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。ほかに、定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1 つ。Issue #206〉。手動 3 + 定時 1 の計 4 つ。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
+ * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。ほかに、定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1 つ。Issue #206〉。手動 3 + 定時 1 の計 4 つ。さらに結果の取り込みの依頼〈Issue #208。`dispatchResultImports`〈result-dispatch.ts〉の `requestResultImport` 1 箇所。cron と `POST /api/results/import` が共有〉で、呼び出し箇所は計 5 つ。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
  */
 async function handleRun(request: Request, env: Env): Promise<Response> {
   const guarded = await readJsonObjectBody(request, RUN_BODY_MAX_BYTES);
@@ -652,7 +663,7 @@ const clipText = (text: string | null): string | null => (text === null ? null :
 
 /**
  * `GET /api/plan?kaisai_date=YYYYMMDD`(Issue #206〈#166-E〉G-E3): 定時の自動実行を外から観測する、読み取り専用の入口。
- * 日単位の DO(RaceDay)の `getPlanProgress`(朝の計画)・`getAutoRunResults`(各レースの結果)・`getNotifications`(通知の一覧)を読んで返す。
+ * 日単位の DO(RaceDay)の `getPlanProgress`(朝の計画)・`getAutoRunResults`(各レースの結果)・`getNotifications`(通知の一覧)・`getResultImportProgress`(結果の取り込みの状態。Issue #208)を読んで返す。
  * **netkeiba にも LLM にも D1・R2 にも出ない。状態も変えない**(この関数は `.schedule(`・`.requestPlan(`・`.getRaceList(`・gate を呼ばない。`cloud-config-guard.test.ts` が固定)。
  * 理由: 対象が 0 件の日は通知が何も出ないので、自動実行が動いたのか壊れているのかを、外から確かめる手段が要る。
  * 順序: `Sec-Fetch-Site`(別サイトなら 403。開催日を変えて DO を作らせる cross-site の GET を拒否)→ クエリの検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503・文面なし)。
@@ -680,7 +691,7 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
   }
   try {
     const stub = raceDayStub(env, kaisaiDate);
-    const [progress, auto, notifications] = await Promise.all([stub.getPlanProgress(), stub.getAutoRunResults(), stub.getNotifications()]);
+    const [progress, auto, notifications, resultImport] = await Promise.all([stub.getPlanProgress(), stub.getAutoRunResults(), stub.getNotifications(), stub.getResultImportProgress()]);
     return json({
       ok: true,
       kaisai_date: kaisaiDate,
@@ -725,10 +736,91 @@ async function handlePlan(request: Request, env: Env): Promise<Response> {
         },
       })),
       notifications: notifications.map((n) => ({ key: n.key, kind: n.kind, state: n.state, analysis_id: n.analysisId, error_class: n.errorClass, updated_at: n.updatedAt })),
+      // 結果の取り込み(Issue #208)。固定の語と数値だけ(メッセージ・例外の文面は DO が持たない)。
+      result_import: {
+        total: resultImport.total,
+        queued: resultImport.queued,
+        imported: resultImport.imported,
+        gave_up: resultImport.gaveUp,
+        races: resultImport.races.map((r) => ({
+          race_id: r.raceId,
+          state: r.state,
+          attempts: r.attempts,
+          deferrals: r.deferrals,
+          requested_on: r.requestedOn,
+          next_try_at: r.nextTryAt,
+          last_class: r.lastClass,
+          updated_at: r.updatedAt,
+        })),
+      },
     });
   } catch {
     // 例外の文面・SQL は返さない。
     return raceDayError();
+  }
+}
+
+/** 手動の結果の取り込みの本文の上限(バイト)。入力は from・to だけ。 */
+const RESULTS_IMPORT_BODY_MAX_BYTES = 1024;
+const RESULTS_IMPORT_KEYS = new Set(["from", "to"]);
+/** 手動の結果の取り込みの範囲の上限（両端を含めた日数）。 */
+const RESULTS_IMPORT_MAX_SPAN_DAYS = 31;
+
+/**
+ * `POST /api/results/import`(Issue #208〈#182-B〉): 窓（cron の過去 7 日）より古いぶんの、結果の取り込みを依頼する。本文は JSON `{ from, to }`（JST の開催日 YYYYMMDD。両端を含む）。
+ * 範囲は 31 日以内で、**今日を含めない**（`to` は JST の前日以前。当日中の取り込みは対象外）。
+ * 中身は cron と同じ `dispatchResultImports`(窓の未取込を **1 クエリ**で列挙 → 新しい日から最大 {@link MANUAL_RESULT_MAX_DAYS} 日を、日ごとにその日の DO へ依頼)。**依頼だけをして戻る**（取得・保存は DO のアラームの中）。
+ * 取り込み済み・進行中のレースは DO が積み直さないので、続きは同じ範囲でもう一度呼べばよい（溜まった分を消化していく）。
+ * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで D1 も DO も呼ばない)→ 列挙・依頼。
+ * 応答は **202**: `{ ok, listed, days, accepted, failed_days }`（件数だけ）。列挙(D1)の失敗、または依頼した日のすべてで DO が失敗したときは **503**（文面は返さない）。一部の日だけ失敗なら 202（`failed_days`）。
+ */
+async function handleResultsImport(request: Request, env: Env, now: () => Date, log: (line: string) => void): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, RESULTS_IMPORT_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const record = guarded.body;
+  if (Object.keys(record).some((k) => !RESULTS_IMPORT_KEYS.has(k))) {
+    return badRequest("本文のキーは from・to だけです");
+  }
+  const from = record["from"];
+  const to = record["to"];
+  if (typeof from !== "string" || typeof to !== "string") {
+    return badRequest("from と to は YYYYMMDD の 8 桁の文字列で指定してください");
+  }
+  // 検証のメッセージに入力を写すので、長い入力は先頭だけにする(切っても、無効なままであることは変わらない)。
+  for (const value of [from, to]) {
+    const checked = checkKaisaiDate(value.slice(0, 32));
+    if (!checked.ok) {
+      return badRequest(checked.message);
+    }
+  }
+  if (from > to) {
+    return badRequest("from は to 以前にしてください");
+  }
+  const today = jstKaisaiDate(now().getTime());
+  if (to >= today) {
+    return badRequest(`to は今日(${today})より前にしてください(当日中の取り込みは対象外です)`);
+  }
+  if (addDaysToKaisaiDate(from, RESULTS_IMPORT_MAX_SPAN_DAYS - 1) < to) {
+    return badRequest(`範囲は両端を含めて ${RESULTS_IMPORT_MAX_SPAN_DAYS} 日以内にしてください`);
+  }
+  try {
+    const result = await dispatchResultImports({
+      from,
+      to,
+      maxDays: MANUAL_RESULT_MAX_DAYS,
+      store: new D1ResultStore({ db: env.DB }),
+      stubFor: (date) => raceDayStub(env, date),
+      log: (line) => log(line),
+    });
+    if (result.listFailed || (result.days > 0 && result.failedDays === result.days)) {
+      return json({ ok: false, error: { type: "result-import-error" } }, 503);
+    }
+    return json({ ok: true, listed: result.listed, days: result.days, accepted: result.accepted, failed_days: result.failedDays }, 202);
+  } catch {
+    // dispatchResultImports は投げない設計だが、準備(ストアの生成など)の例外も文面を出さない。
+    return json({ ok: false, error: { type: "result-import-error" } }, 503);
   }
 }
 

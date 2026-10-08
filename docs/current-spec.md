@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.21.6)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.21.7)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.21.6`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.21.7`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1153,7 +1153,7 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
 - **限界**: Free の「1呼び出しあたりのサブリクエスト 50」に DO の中のソケット・DO への RPC が数えられるかは未確定のまま(ステップを分け、1ステップの gate への呼び出しを 19 本に抑えている)。本番の DO・アラームは未確認。
 
 ### 手動起動の入口(#180〈#164-e〉。v1.19.13)
-Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を置いた(`cloud/src/handler.ts`)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races`〈#183〉・`GET /api/netkeiba/check`。キューは無い。ほかに定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1つ。#206〉で、**手動 3 + 定時 1 の計 4 つ**。`cloud-config-guard.test.ts` が固定し、呼び出し箇所の数〈`.schedule(`・`.getRaceList(`・`.fetchRaw(` が handler.ts に1つずつ、`.requestPlan(` が scheduled.ts に1つで handler.ts に0〉と、binding の使用箇所〈`env.RACE_DAY`・`env.NETKEIBA_GATE` に触れるファイルと回数〉も固定する)。
+Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を置いた(`cloud/src/handler.ts`)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races`〈#183〉・`GET /api/netkeiba/check`。キューは無い。ほかに定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1つ。#206〉で、**手動 3 + 定時 1 の計 4 つ**。#208 で、結果の取り込みの依頼(`requestResultImport`。cron と手動の `POST /api/results/import` が共有する `dispatchResultImports` の中の **1 箇所**〈result-dispatch.ts〉)が加わり、**呼び出し箇所は計 5 つ**。`cloud-config-guard.test.ts` が固定し、呼び出し箇所の数〈`.schedule(`・`.getRaceList(`・`.fetchRaw(` が handler.ts に1つずつ、`.requestPlan(` が scheduled.ts に1つで handler.ts に0、`.requestResultImport(` が result-dispatch.ts に1つ〈と race-day-do.ts の RPC の委譲に1つ〉で handler.ts・scheduled.ts に0、`dispatchResultImports(` の呼び出しが handler.ts と scheduled.ts に1つずつ〉と、binding の使用箇所〈`env.RACE_DAY`・`env.NETKEIBA_GATE` に触れるファイルと回数〉も固定する)。
 - **`POST /api/analyses/run`**: 本文は JSON `{ "race_id": "...", "kaisai_date": "YYYYMMDD", "mode": "morning" }`(`mode` は省略時と `morning`〈朝の取得と prior〉のみ。発走前の分析は #178)。
   順序: 認証(403・固定の本文)→ **Origin**(`Origin` ヘッダが**あって**、リクエストの origin と完全一致。無い・`null`・スキーム/ポート/サブドメインが違う・末尾にパスがあるものは 403〈origin-mismatch〉。`Sec-Fetch-Site` があれば `same-origin`)→
   Content-Type が `application/json`(415)→ 本文 1 KiB 以内(413)→ JSON・入力の検証(400。未知のキー・型・mode・race_id の検証〈中央 01〜10・地方 30〜64・帯広は対象外〉・開催日の形と実在・**レースIDと開催日の整合**: 年は全レース、**地方は月日も**〈中央の7〜10桁目は回次・日次〉)。ここまでで DO は呼ばない。
@@ -1235,7 +1235,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
     応答は**明示のホワイトリスト**のキーだけ(`ok`・`kaisai_date`・`plan`・`results`・`notifications`。snake_case)。自由文(会場の失敗の理由・自動実行の失敗の文面)は 200 文字に切る。**Webhook の URL は含まない**(URL は通知の仕組みの中にだけあり、この関数は `env.DISCORD_WEBHOOK_URL` を読まない)。
     理由: 対象が 0 件の日は通知が何も出ないので、自動実行が動いたのか壊れているのかを、外から確かめる手段が要る。画面での表示は範囲外。
   - **止め方**: `wrangler.toml` を **`crons = []`(空配列)**にしてデプロイする。**`[triggers]` を消すだけでは止まらない**(wrangler は `crons` が未設定だと schedule を更新しない。コード読みで確認〈wrangler 4.147.0〉。**本番では確かめていない**)。ダッシュボードで消しても**次のデプロイで toml の内容に戻る**(`wrangler deploy` は toml の `crons` で schedule を上書きする)。課金だけ止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除する(統計のみで保存。**netkeiba への取得は続く**)。
-  - **検査**: `scripts/test/cloud-config-guard.test.ts`(cron がちょうど `["0 0 * * *"]`・取得の起点は手動 3 + 定時 1・binding の使用箇所の走査・`handlePlan` が読み取りの RPC だけを呼ぶ)・`bundle-guard`(本番のバンドルに `async scheduled(` がある)・smoke の構成 G(`wrangler dev` の `/cdn-cgi/local/scheduled` で cron を手動発火。偽ソケット・過去の開催日で全件 skip)。
+  - **検査**: `scripts/test/cloud-config-guard.test.ts`(cron がちょうど `["0 0 * * *"]`・取得の起点は手動 3 + 定時 1 + 結果の依頼 1〈#208〉・binding の使用箇所の走査・`handlePlan` が読み取りの RPC だけを呼ぶ)・`bundle-guard`(本番のバンドルに `async scheduled(` がある)・smoke の構成 G(`wrangler dev` の `/cdn-cgi/local/scheduled` で cron を手動発火。偽ソケット・過去の開催日で全件 skip)。
   - **【記録】**:
     - cron が失敗時に再配信されるかは未確認(`scheduled` 内の再試行で補っている)。API トークンの権限で `schedules` の PUT が通るかも未確認(初回のデプロイのログで確かめる)。
     - 本番では手動で `scheduled` を起動する手段が無い。最初の発火は**デプロイ後の最初の 9:00 JST**で、中央の開催日なら最初から全レースが対象になる。
@@ -1321,8 +1321,8 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **文言**: カードの説明(発走前)は「API キーがあれば LLM が3着内率を補正して印と根拠を付け(EV は補正後の値で計算)、キーが無い間は統計のみ」(116 文字)。設定の追加指示・クリップ幅の補助文は「発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません」。**画面に Issue 番号は出さない。**
 - **検査**: `cloud/test/client-result.test.ts`・`client-view.test.ts`(結果画面とカードの両方)・`client-api-analysis.test.ts`・`client-api-analysis-contract.test.ts`・`client-race.test.ts`・`client-settings-form.test.ts`。
 
-### クラウド版のレース結果ストア(#207〈#182-A〉。v1.21.6。**まだ production からは呼ばれない**)
-結果の取り込み(#182)の A: D1 への結果の**書き込み・読み出しの実装だけ**。netkeiba への取得・いつ取り込むか・cron・手動の入口は持たない(#208〈翌朝の cron・バックフィル・手動の取り込み〉と #209〈当日傾向〉が呼ぶ)。**`worker.ts`・`race-day-do.ts` のどこからも import されていない**ので、本番の挙動は変わらない。exe の挙動も変わらない。
+### クラウド版のレース結果ストア(#207〈#182-A〉。v1.21.6。呼び出しは #208〈下の節〉)
+結果の取り込み(#182)の A: D1 への結果の**書き込み・読み出しの実装だけ**。netkeiba への取得・いつ取り込むか・cron・手動の入口は持たない(#208〈翌朝の cron・バックフィル・手動の取り込み。下の節〉と #209〈当日傾向〉が呼ぶ)。v1.21.6 の時点では `worker.ts`・`race-day-do.ts` のどこからも import されておらず、本番の挙動は変わらなかった(#208 の v1.21.7 で `race-day-do.ts` が配線した)。exe の挙動は変わらない。
 - **保存の形は exe と同じ**(将来の #167〈exe の DB を D1 へ移す〉との統合のため): 表は migration 0001 にある exe の最終スキーマのまま(`race_results`・`race_result_meta`・`race_combo_payouts`・`race_combo_payout_imports`)。**migration は足さない**(`scripts/test/cloud-d1-schema.test.ts` は無改変)。
 - **core(exe と共有)**: `saveResult` の SQL・束縛値の組み立て・`planComboWrites`(`undetermined`・省略の券種には触れない)・`toStoredPassing`・`toStoredCourseType`・`toRaceResultDetail` を `analysis-store-codec.ts` に出した(`AnalysisStore` はそれを使う。発行する SQL の列は従来と同じで、`analysis-store-result-sql-sequence.test.ts` が固定する)。
   `toResultEntries`・`importRaceResult`・`summarizeImport` を app から core の `ev/result-import.ts` へ移した(app の `result-import.ts` は re-export。#168 と同じ型)。`ImportResultDeps.saveResult` の戻り値は `void | Promise<void>`(await する。reject は伝播)。
@@ -1332,6 +1332,31 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - `listUnimportedRaces({ from, to, limit })`: 分析済み(`analyses` に行がある)で結果の行が 1 件も無い(`NOT EXISTS`)レースを、開催日 `[from, to]`(両端を含む。`kaisai_date` が NULL の分析は入らない)で、(開催日, レースID)の昇順に最大 `limit` 件(1〜200)。全頭が中止・除外のレースは「取り込み済み」。
 - **検査**: 共有 golden(`packages/core/test/golden/race-result-contract.json`。生成は `scripts/gen-race-result-contract.ts`)で、同じ入力から exe の `AnalysisStore.saveResult` と D1 の 4 表のダンプ・`getRaceResultDetail` の復元結果が同じことを固定(7 ケース。18 頭・全 6 券種・再保存・全頭中止・`undetermined`・壊れた通過順と未知の面)。実フィクスチャ(中央 8・地方 6)を `importRaceResult` → `D1ResultStore` に通す往復。`result-repository-bundle.test.ts` が、まだ本番の入口に無いこのコードが Worker にバンドルできること(better-sqlite3 を巻き込まない)を固定する。
 - **既知の差分(記録)**: 値は JSON 文字列を経由して D1 に入る。NaN・Infinity は NULL になる(exe は REAL で束縛)。実データでは差は出ない。ローカルの D1 では 17 桁の浮動小数も一致した(本番の SQLite のビルドでの確認は最初の実保存)。ローカルの D1 は「1 回の呼び出しで 50 クエリ」を強制しない(bind 100 個は強制する)。
+
+### クラウド版の結果の自動取り込み(#208〈#182-B〉。v1.21.7。**公開すると、翌朝の cron(JST 9:00)から本番で動く**)
+#182 の主目的(分析と結果を同じ DB にそろえる)。過去の開催日の結果(着順・払戻)を netkeiba から取得して D1 に保存する。保存の形は exe と同じ(#207)。**当日中の取り込みと、当日傾向をプロンプトに入れることは範囲外**(#209)。LLM・課金は増えない。
+- **取り込みの単位**(`RaceDayCore.runResultStep`): 日単位の DO(`RaceDay`)が、**アラームの 1 ステップにつき 1 レース**を取り込む。取得は gate 経由・**キャッシュを通さない**生の `HttpClient`(結果のページを DO の SQLite に溜めない)、保存は `D1ResultStore.saveResult`(1 レース 1 batch・最大 5 文)。core の `importRaceResult` を、`parse` を包んで使う。
+  **払戻のテーブルが出てから保存する**: 単勝の払戻が 0 件(着順の行はあるが払戻が無い = 審議中の暫定の着順)なら保存しない。未確定(結果の行が無い)・構造の異常・取得の失敗・保存の失敗も保存せず再試行する。**1 回の依頼につき 3 試行・間隔 10 分**で、上限で諦める(`gave_up`)。試行回数は取得の前に永続化する。
+  gate の拒否は試行に数えない**保留**: `queue-full`(待ち行列が上限)は 60 秒後、`blocked`(ブレーカー)は解除時刻の 1 秒後(分からなければ 60 秒後。待つのは最大 60 分)に再試行する。保留は 5 回まで(6 回目で諦める)。許可リスト外(`disallowed-url`)は即座に諦める。
+- **状態は新しい表**: `race_day_result`(1 レース 1 行。`state` は `queued`〈再試行待ちを含む〉・`imported`・`gave_up`。試行・保留・次の試行の時刻・依頼の日・直近の分類)。`race_day_tasks` には入れない(1 日の上限 100 を食うため)。1 日の行数の上限は 120。既存の表には ALTER しない。
+  分類は固定の語だけ(`imported`・`not-confirmed`・`no-payout`・`parse-error`・`fetch-failed`・`save-failed`・`blocked`・`busy`)。メッセージ・例外の文面は状態にもログにも出さない。**失敗は Discord に出さない**(諦めたときの警告ログだけ)。
+- **優先度とアラーム**: 結果の取り込みは**最も低い優先度**。`RaceDayCore.resultsRunnable()`(タスク〈queued・fetched〉が無く、計画の仕事も無い)のときだけ、アラームの候補(`nextAlarmAt` の `resultAtMs`)に入り、`runNextStep` の最後(`pickNext` の後)で動く。この条件をアラームの候補と実行の**両方**が同じ関数で判定する(別々に書くとアラームだけ張って動かない〈即時ループ〉か、動くのにアラームが無い〈停止〉が起きる)。
+  タスクが残るあいだに候補に入れない理由: `pickNext` は再試行待ちのタスクを時刻を見ずに返すので、結果の候補で起きると再試行の間隔を無効にして撃ち直してしまう。どの経路でも、起きたときに必ず状態(試行・保留・状態・次の時刻)が変わる。fuzz(`race-day-result.test.ts`。種 60 通り)で、即時ループ・停止が無いこと、タスクが残るあいだは結果を取らないことを固定している。
+- **依頼の RPC `requestResultImport({ kaisaiDate, raceIds })`**: 依頼だけをして戻る。冪等。**今日以降の開催日は拒否**(当日中は対象外)。依頼の日は DO の時計の JST の暦日。判定表: 行なし → 積む / `queued` → 無視 / `imported` かつ依頼日が今日 → 無視、**今日より前なら積み直す**(呼び出し側が D1 を正として未取込と判断している) / `gave_up` かつ依頼日が今日 → 無視(1 日 1 回)、今日より前なら積み直す(試行・保留を 0 に戻す)。
+  DO の開催日を pin する(別の日で pin 済みなら拒否)。1 回の依頼は 120 件まで。結果は件数だけ(`accepted`・`ignored`)。
+- **依頼の経路**(`cloud/src/result-dispatch.ts` の `dispatchResultImports`。**cron と手動 POST が同じ関数**): 窓の未取込を **1 クエリ**(`D1ResultStore.listUnimportedRacesByDay`。`ROW_NUMBER`・`DENSE_RANK`。1 日 60 件・合計 120 件・未取込のある日を新しい順)で列挙し、日ごとにその日の DO へ依頼する。
+  **依頼する日数を絞る**(cron は最大 2 日・手動は最大 3 日): 過去日の DO が多数同時に gate に並ぶと、gate の待ち行列の上限(8)が埋まり、画面で開いた一覧まで `queue-full` で拒否されるため。普段の未取込は前日の 1 日だけ。溜まった分は翌朝以降の cron か手動の再実行で、続きから消化される(取り込み済みは列挙から外れる)。1 日の件数の上限があるので、古い日の永久に取り込めないレース(中止など)が新しい日を押しのけない。**失敗は例外にしない**(件数と固定の分類のログだけ)。
+- **cron**(`scheduled.ts`): `requestPlan` のあとに、JST の今日の前日までの 7 日(**今日は含めない**)を窓にして `dispatchResultImports` を呼ぶ。**`requestPlan` の成否によらず走らせ、結果の依頼の失敗は `requestPlan` を失敗させない**(投げるのは `requestPlan` が 3 回失敗したときだけ)。D1 は列挙の読み取り 1 クエリだけ。
+- **手動の取り込み `POST /api/results/import`**: 本文 JSON `{ "from": "YYYYMMDD", "to": "YYYYMMDD" }`(JST の開催日。両端を含む)。窓(7 日)より古いぶんの取り込み用。認証・Origin・Content-Type(415)・本文 1 KiB(413)・JSON(400)は `/api/analyses/run` と同じ(`readJsonObjectBody`)。検証(400): 未知のキー・日付の形と実在・`from ≤ to`・**`to` は今日より前**・範囲は両端を含めて **31 日以内**。応答は **202** `{ ok, listed, days, accepted, failed_days }`(件数だけ)。D1 の列挙の失敗、または依頼した日のすべてで DO が失敗したときは **503**(文面なし)。続きが必要なら同じ範囲でもう一度呼ぶ。
+- **観測**: `GET /api/plan?kaisai_date=` の応答に `result_import: { total, queued, imported, gave_up, races: [{ race_id, state, attempts, deferrals, requested_on, next_try_at, last_class, updated_at }] }` を足した(許可リスト・固定の語と数値だけ)。RPC `getResultImportProgress`(読み取り専用)。
+- **D1 の「1 回の呼び出しで 50 クエリ」との関係**: Worker(cron・POST)の D1 は列挙の 1 クエリだけ(日ごとに引かない)。DO のアラームの 1 ステップの D1 は 1 レースの保存(最大 5 文)だけ。
+- **検査**: cloud `race-day-result.test.ts`(依頼の判定表・払戻なし/未確定/構造異常/取得失敗/保存失敗・3 試行で諦める・保留・優先度・fuzz)・`result-dispatch.test.ts`(窓の計算・日数の上限・失敗の扱い・同時に gate に並ぶ呼び出しの最大数)・`result-repository.test.ts`(1 クエリ版の列挙・EXPLAIN)・`scheduled.test.ts`・`handler-results.test.ts`・`handler-plan.test.ts`・`handler-json-guard.test.ts`・`race-day-rpc-surface.test.ts`、scripts `cloud-config-guard.test.ts`(取得の起点の呼び出し箇所 5 つ・POST のルート 3 つ・結果の取得が gate 経由の 1 本だけ)、smoke(構成 F の末尾: cron の発火 → 偽ソケットの結果ページ → 取り込み済み・D1 に 16 頭・重複配信で状態不変・手動 POST・地方の未確定)。
+- **【記録】**:
+  - 当日の計画が確定しないまま止まる(`hasPlanWork` が真のまま)と、その日の結果は取り込まれない。`GET /api/plan` の `plan.stage`・`result_import.queued` で見える。
+  - 中止などで永久に取り込めないレースは、窓の 7 日のあいだ、毎日 1 回(3 試行ずつ)再依頼される(最悪 21 リクエスト / レース)。
+  - 「着順あり・払戻なし」(審議中)の実物のフィクスチャは無い。テストは確定フィクスチャから払戻のテーブルを削った HTML で作っている。
+  - 同じレースが 2 つの開催日で分析されていると、両日の DO に依頼され 2 回取得される(UPSERT で冪等。害は無い)。
+  - 設定画面のプロンプトのプレビューの注記(#201。同日の傾向を送らない旨)は、当日傾向をプロンプトに入れる #209 で更新・削除する(#208 は送る内容を変えない)。
 
 ### 設定画面にプロンプトのプレビュー(#201。v1.20.2)
 変更は `cloud/` のクライアントと `page.ts` の CSS、`clampAdditionalInstruction` の置き場所(`llm-run.ts` → `settings.ts`。再 export)だけ(サーバ・D1・exe・core のプロンプト文面は無変更)。詳細は `cloud/README.md` の「設定画面にプロンプトのプレビューを出す」。

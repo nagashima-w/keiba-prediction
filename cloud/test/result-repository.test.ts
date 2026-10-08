@@ -6,6 +6,7 @@ import {
   D1ResultStore,
   jsonEachDeleteSql,
   jsonEachInsertSelectSql,
+  LIST_UNIMPORTED_BY_DAY_SQL,
   LIST_UNIMPORTED_SQL,
   UNIMPORTED_MAX_LIMIT,
   type ResultDb,
@@ -471,6 +472,145 @@ describe("AC-A6: listUnimportedRaces(分析済み・結果未取込のレース�
 
   it("クエリプラン: 開催日の索引(idx_analyses_kaisai_date)と、結果の主キーの索引(NOT EXISTS の探索)を使い、analyses を全走査しない", async () => {
     const plan = (await local.db.prepare(`EXPLAIN QUERY PLAN ${LIST_UNIMPORTED_SQL}`).bind("20261001", "20261003", 10).all()).results as Array<{ detail: string }>;
+    const text = plan.map((p) => p.detail).join("\n");
+    expect(text).toContain("idx_analyses_kaisai_date");
+    expect(text).toMatch(/SEARCH r USING (COVERING )?INDEX sqlite_autoindex_race_results_1 \(race_id=\?\)/);
+    expect(text).not.toMatch(/SCAN a\b/);
+  });
+});
+
+describe("Issue #208 AC-C: listUnimportedRacesByDay(窓の中の未取込を、日ごとの上限・日数の上限・合計の上限つきで 1 クエリで列挙する。新しい日が先)", () => {
+  async function addAnalysis(raceId: string, kaisaiDate: string | null, i = 0): Promise<void> {
+    await local.db
+      .prepare("INSERT INTO analyses (race_id, analyzed_at, ev_estimated, kaisai_date) VALUES (?, ?, 0, ?)")
+      .bind(raceId, `2026-10-06T00:00:${String(i % 60).padStart(2, "0")}.000Z`, kaisaiDate)
+      .run();
+  }
+  const opts = { from: "20261001", to: "20261007", perDay: 60, maxDays: 3, total: 120 };
+
+  it("窓は kaisai_date の [from, to](両端を含む)。窓の外・開催日が NULL・結果がある(全頭中止の行だけのものも)レースは含めない。並びは新しい日が先、同じ日は レースID 昇順", async () => {
+    await addAnalysis("B2", "20261003");
+    await addAnalysis("A2", "20261003");
+    await addAnalysis("C1", "20261004");
+    await addAnalysis("FROM", "20261001"); // 窓の下端(含む)
+    await addAnalysis("TO", "20261007"); // 窓の上端(含む)
+    await addAnalysis("OLD", "20260930"); // from の前日
+    await addAnalysis("NEW", "20261008"); // to の翌日
+    await addAnalysis("NULLDATE", null);
+    await addAnalysis("DONE", "20261004");
+    await addAnalysis("ALLNULL", "20261004");
+    await store().saveResult("DONE", [{ umaban: 1, finishPosition: 1 }]);
+    await store().saveResult("ALLNULL", [{ umaban: 1, finishPosition: null }]);
+    const list = await store().listUnimportedRacesByDay({ ...opts, maxDays: 31 });
+    expect(list).toStrictEqual([
+      { raceId: "TO", kaisaiDate: "20261007" },
+      { raceId: "C1", kaisaiDate: "20261004" },
+      { raceId: "A2", kaisaiDate: "20261003" },
+      { raceId: "B2", kaisaiDate: "20261003" },
+      { raceId: "FROM", kaisaiDate: "20261001" },
+    ]);
+    // 空振り防止: 除外したものも実際に D1 にある
+    expect((await local.db.prepare("SELECT count(*) AS c FROM analyses").first<{ c: number }>())!.c).toBe(10);
+  });
+
+  it("日数の上限: 未取込のある日だけを数え、新しい日から maxDays 日ぶん。未取込の無い日(開催なし・全件取り込み済み)は数えない", async () => {
+    await addAnalysis("D7", "20261007");
+    await addAnalysis("D6DONE", "20261006"); // 取り込み済みの日(列挙に出ず、日数にも数えない)
+    await store().saveResult("D6DONE", [{ umaban: 1, finishPosition: 1 }]);
+    await addAnalysis("D4", "20261004");
+    await addAnalysis("D3", "20261003");
+    await addAnalysis("D2", "20261002");
+    // 前提: 未取込のある日は 4 日(maxDays = 3 より多い)
+    const everything = await store().listUnimportedRacesByDay({ ...opts, maxDays: 31 });
+    expect([...new Set(everything.map((r) => r.kaisaiDate))]).toEqual(["20261007", "20261004", "20261003", "20261002"]);
+    const limited = await store().listUnimportedRacesByDay({ ...opts, maxDays: 3 });
+    expect(limited.map((r) => r.raceId)).toEqual(["D7", "D4", "D3"]);
+    const two = await store().listUnimportedRacesByDay({ ...opts, maxDays: 2 });
+    expect(two.map((r) => r.raceId)).toEqual(["D7", "D4"]);
+  });
+
+  it("日ごとの上限: 1 日の未取込が多くても perDay 件まで(その日の レースID 昇順の先頭)。古い日が新しい日を押しのけない", async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      await addAnalysis(`OLD${i}`, "20261002");
+    }
+    for (let i = 1; i <= 5; i += 1) {
+      await addAnalysis(`NEW${i}`, "20261006");
+    }
+    const list = await store().listUnimportedRacesByDay({ ...opts, perDay: 2, total: 120 });
+    expect(list.map((r) => r.raceId)).toEqual(["NEW1", "NEW2", "OLD1", "OLD2"]);
+  });
+
+  it("合計の上限: 新しい日から順に total 件で打ち切る(古い日が切られる)", async () => {
+    for (let i = 1; i <= 4; i += 1) {
+      await addAnalysis(`N${i}`, "20261006");
+    }
+    for (let i = 1; i <= 4; i += 1) {
+      await addAnalysis(`O${i}`, "20261003");
+    }
+    const all = await store().listUnimportedRacesByDay({ ...opts, total: 120 });
+    expect(all).toHaveLength(8); // 前提: total より多く存在する
+    const cut = await store().listUnimportedRacesByDay({ ...opts, total: 5 });
+    expect(cut).toStrictEqual(all.slice(0, 5));
+    expect(cut.map((r) => r.raceId)).toEqual(["N1", "N2", "N3", "N4", "O1"]);
+  });
+
+  it("日ごとの列挙(listUnimportedRaces を日ごとに呼んだもの)と、判定が一致する: 同じレースを複数日に分析した場合(最小の開催日に寄せる)・同じ日の複数回の分析を含む", async () => {
+    await addAnalysis("TWICE", "20261003", 1);
+    await addAnalysis("TWICE", "20261003", 2);
+    await addAnalysis("SPLIT", "20261003", 3); // 2 つの開催日で分析された
+    await addAnalysis("SPLIT", "20261004", 4);
+    await addAnalysis("SOLO", "20261004", 5);
+    await addAnalysis("DONE", "20261004", 6);
+    await store().saveResult("DONE", [{ umaban: 1, finishPosition: 1 }]);
+    const byDay = await store().listUnimportedRacesByDay({ ...opts, maxDays: 31 });
+    // 前提: 日ごとの列挙は(窓を 1 日に絞った)別の判定の経路
+    const perDay = [
+      ...(await store().listUnimportedRaces({ from: "20261004", to: "20261004", limit: 50 })),
+      ...(await store().listUnimportedRaces({ from: "20261003", to: "20261003", limit: 50 })),
+    ];
+    expect(perDay.length).toBeGreaterThan(0);
+    // 窓を広げた 1 クエリ版は、SPLIT を最小の開催日(20261003)に寄せる。日ごとの列挙は SPLIT を両日に出す(別の定義)
+    expect(byDay.map((r) => `${r.kaisaiDate}:${r.raceId}`)).toEqual(["20261004:SOLO", "20261003:SPLIT", "20261003:TWICE"]);
+    expect(perDay.filter((r) => r.raceId === "SPLIT")).toHaveLength(2);
+    // 日ごとの列挙の和集合(raceId の重複を除く)は、1 クエリ版のレースの集合と等しい
+    expect([...new Set(perDay.map((r) => r.raceId))].sort()).toEqual(byDay.map((r) => r.raceId).sort());
+  });
+
+  it("発行は 1 クエリだけ(束縛は from・to・perDay・maxDays・total の 5 個)", async () => {
+    await addAnalysis("A", "20261003");
+    const rec = recordingDb(local.db);
+    await store(rec.db).listUnimportedRacesByDay(opts);
+    expect(rec.statements).toHaveLength(1);
+    expect(rec.statements[0]!.binds).toBe(5);
+    expect(rec.batches).toEqual([]);
+  });
+
+  it("入力の検証: from・to は YYYYMMDD の 8 桁で from ≤ to、perDay・total は 1〜200、maxDays は 1〜31 の整数(違反は RangeError。D1 に発行しない)", async () => {
+    const rec = recordingDb(local.db);
+    const s = store(rec.db);
+    for (const bad of [
+      { ...opts, from: "2026-10-01" },
+      { ...opts, to: "20261" },
+      { ...opts, from: "20261008" },
+      { ...opts, perDay: 0 },
+      { ...opts, perDay: UNIMPORTED_MAX_LIMIT + 1 },
+      { ...opts, perDay: 1.5 },
+      { ...opts, maxDays: 0 },
+      { ...opts, maxDays: 32 },
+      { ...opts, total: 0 },
+      { ...opts, total: UNIMPORTED_MAX_LIMIT + 1 },
+      { ...opts, total: Number.NaN },
+    ]) {
+      await expect(s.listUnimportedRacesByDay(bad)).rejects.toBeInstanceOf(RangeError);
+    }
+    expect(rec.statements).toEqual([]);
+    // 境界は通る
+    await expect(s.listUnimportedRacesByDay({ from: "20261003", to: "20261003", perDay: 1, maxDays: 1, total: 1 })).resolves.toEqual([]);
+    await expect(s.listUnimportedRacesByDay({ ...opts, perDay: UNIMPORTED_MAX_LIMIT, maxDays: 31, total: UNIMPORTED_MAX_LIMIT })).resolves.toEqual([]);
+  });
+
+  it("クエリプラン: 開催日の索引(idx_analyses_kaisai_date)と結果の主キーの索引(NOT EXISTS の探索)を使い、analyses を全走査しない", async () => {
+    const plan = (await local.db.prepare(`EXPLAIN QUERY PLAN ${LIST_UNIMPORTED_BY_DAY_SQL}`).bind("20261001", "20261007", 60, 3, 120).all()).results as Array<{ detail: string }>;
     const text = plan.map((p) => p.detail).join("\n");
     expect(text).toContain("idx_analyses_kaisai_date");
     expect(text).toMatch(/SEARCH r USING (COVERING )?INDEX sqlite_autoindex_race_results_1 \(race_id=\?\)/);

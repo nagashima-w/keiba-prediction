@@ -3017,6 +3017,27 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。分析結果の数値・プロンプトも変わらない。利用者から見てできることは増えない(呼び出しは #208 以降)。`@keiba/core` は版数運用の対象外で、`package.json` の版は据え置き。
 
+## 次の正式版が 1.21.7 である根拠(Issue #208〈#182-B〉での変更)
+
+**patch**(クラウド版の結果の自動取り込みの追加。exe の利用者から見て変わるものが無い。クラウド版の変更は #177〜#207 も patch で運用してきた)。
+
+### 変更内容
+
+- cloud: 日単位の DO(`RaceDay`)に、結果の取り込みを足した。専用の新しい表 `race_day_result`(`race_day_tasks` には入れない)、RPC `requestResultImport`・`getResultImportProgress`、アラームの候補 `resultAtMs`(最も低い優先度。タスク・計画の仕事が無いときだけ動く)。
+  アラームの 1 ステップにつき 1 レースを、gate 経由・キャッシュなしの `HttpClient` で取得し、**単勝の払戻が出ているときだけ** `D1ResultStore.saveResult`(1 レース 1 batch・最大 5 文)で保存する。
+- cloud: `dispatchResultImports`(`result-dispatch.ts`)を cron の `scheduled`(JST 9:00。過去 7 日・前日まで。今日は含めない。最大 2 日)と、手動の `POST /api/results/import`(最大 31 日の範囲・最大 3 日)の両方が呼ぶ。
+  `D1ResultStore.listUnimportedRacesByDay`(1 クエリ。1 日 60・合計 120・未取込のある日を新しい順)。`GET /api/plan` に `result_import` を足した。
+- 版数: ルート・アプリ `1.21.7`。
+
+### patch である根拠
+
+- exe(`packages/app`)・`@keiba/core` のコードは無変更。exe の利用者から見て変わるものが無い。
+- ⚠️ ただし、**クラウド版の運用者から見れば、公開した翌朝の cron から、過去 7 日の分析済み・未取込のレースの結果を netkeiba から自動で取得して D1 に保存する**(netkeiba への取得が、朝の計画のあとに最大 120 本ほど増える。LLM・課金は増えない)。区分を patch とするのは、版数が exe のファイル名に使われるものだからで、クラウド版の動作の大きさを表すものではない(#206 と同じ扱い)。
+
+### major / minor ではない根拠
+
+- exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1 のスキーマも無変更(migration は足していない。結果の表は #207 までに 0001 にある)。DO の SQLite には新しい表を 1 つ足すだけ(既存の表は無変更。`CREATE TABLE IF NOT EXISTS`)。分析結果の数値・プロンプトも変わらない(当日傾向をプロンプトに入れるのは #209)。`@keiba/core` は無変更。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
