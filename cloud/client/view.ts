@@ -241,8 +241,10 @@ function horseCard(horse: HorseCard): VNode {
 function markedHorseRow(m: MarkedHorse): VNode {
   return h("li", { class: "marked" }, [
     h("span", { class: "marked-mark" }, [m.mark]),
+    // 要素の間の隙間は、空白のテキストノードで作る(`.marked` に CSS は無く、`dom.ts` は子をそのまま appendChild する。無いと実ブラウザでは「◎3エートラックス」と詰まる)。
+    " ",
     h("strong", {}, [`${m.umaban}`]),
-    ...(m.name === null ? [] : [h("span", { class: "marked-name" }, [m.name])]),
+    ...(m.name === null ? [] : [" ", h("span", { class: "marked-name" }, [m.name])]),
   ]);
 }
 

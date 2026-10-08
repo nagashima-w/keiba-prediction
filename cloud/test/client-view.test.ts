@@ -24,6 +24,11 @@ function textOf(node: VNode | string): string {
   if (typeof node === "string") return node;
   return (node.children ?? []).map(textOf).join(" ");
 }
+/** 実 DOM の `textContent` 相当(子の文字列を区切りなしで連結する)。`textOf` は子を空白で結ぶので、要素の間の空白が実 DOM に無くても成立してしまう(Issue #211 で見逃した)。 */
+function rawTextOf(node: VNode | string): string {
+  if (typeof node === "string") return node;
+  return (node.children ?? []).map(rawTextOf).join("");
+}
 function findAll(node: VNode | string, pred: (n: VNode) => boolean): VNode[] {
   if (typeof node === "string") return [];
   return [...(pred(node) ? [node] : []), ...(node.children ?? []).flatMap((c) => findAll(c, pred))];
@@ -1063,7 +1068,7 @@ describe("印の付いた馬の section(Issue #211。結果画面とカードの
       it("1行は印・馬番・馬名(馬名が無ければ印と馬番だけ)。印の順 → 馬番の昇順。数値(3着内率・EV)は出さない。馬のカード(horse)の数は変わらない", () => {
         const t = tree(analysis({ model: "claude-x", horses: markedHorses }));
         const items = byClass(byClass(t, "marked-horses")[0]!, "marked");
-        expect(items.map(textOf)).toEqual(["◎ 3 エートラックス", "〇 1 アイ", "▲ 2"]);
+        expect(items.map(rawTextOf)).toEqual(["◎ 3 エートラックス", "〇 1 アイ", "▲ 2"]); // 実 DOM の textContent 相当。要素の間に空白のテキストノードが要る
         for (const li of items) {
           expect(li.tag).toBe("li");
           expect(textOf(li)).not.toMatch(/3着内率|EV|%|オッズ/);
@@ -1099,7 +1104,7 @@ describe("印の付いた馬の section(Issue #211。結果画面とカードの
       it("悪意のある文字列(印・馬名)は、解釈されずテキストになる(未知の印は落とさず出す)", () => {
         const PAYLOAD = "<img src=x onerror=alert(1)>";
         const t = tree(analysis({ horses: [H(1, PAYLOAD, PAYLOAD), H(2, "アイ", "◎")] }));
-        expect(byClass(byClass(t, "marked-horses")[0]!, "marked").map(textOf)).toEqual(["◎ 2 アイ", `${PAYLOAD} 1 ${PAYLOAD}`]);
+        expect(byClass(byClass(t, "marked-horses")[0]!, "marked").map(rawTextOf)).toEqual(["◎ 2 アイ", `${PAYLOAD} 1 ${PAYLOAD}`]);
         const { tags } = mountAll(t);
         expect(tags.filter((x) => ["img", "script", "svg", "iframe", "style"].includes(x))).toEqual([]);
       });
