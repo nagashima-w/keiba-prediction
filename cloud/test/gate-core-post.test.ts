@@ -119,6 +119,15 @@ describe("POST の許可リスト", () => {
     });
   });
 
+  it("検査した値をそのまま送る(検査は正規化後の URL で行うので、送る Referer も正規化後の値にする): ホスト名の大文字小文字違いの Referer は、小文字の値で送られる", async () => {
+    const h = harness();
+    const request = { ...centralPost(), referer: "https://RACE.NETKEIBA.COM/race/past10.html?race_id=202603020211" };
+    const result = await post(h.make(), request);
+    expect(result.kind).toBe("response");
+    expect(h.calls[0]!.init!.referer).toBe("https://race.netkeiba.com/race/past10.html?race_id=202603020211");
+    expect(h.calls[0]!.init!.origin).toBe("https://race.netkeiba.com");
+  });
+
   it("地方(nar.netkeiba.com。Referer は past5.html)の標準の POST も通す", async () => {
     const h = harness();
     const result = await post(h.make(), narPost());

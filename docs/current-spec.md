@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.22.2)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.23.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.22.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.23.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -990,7 +990,7 @@ HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:socke
   **実在しない race_id は netkeiba に拒否(400 など)されてブレーカーを開きうる**ので、初回は実在するレースで確認する。
   `type=grade-winner` を付けると、同じエンドポイントで**重賞の過去10年傾向の API へ POST を1本**試せる(#181 段階1。キャッシュを通さずゲートを直接使う。`/check` に「POST の確認」のフォームがある)。
   結果は `ok`・`target: "grade-winner"`・`status`・`entries`(読めた過去回の数。非重賞は null)・`kind`・`queuedMs`・`elapsedMs`・ゲートの状態(`postBlockedUntil` を含む)。
-  `type` は `shutuba`(既定)か `grade-winner` で、重複・未知の値・余計なパラメータは 400。**この段階では分析は POST を使わない**(重賞の傾向を LLM に入れるのは段階2)。
+  `type` は `shutuba`(既定)か `grade-winner` で、重複・未知の値・余計なパラメータは 400。分析がこの POST を使うのは取得ステップ(下の「重賞の過去10年傾向」。#181 段階2〈v1.23.0〉)で、この確認とは別。
 - **未実装**: 保存の**呼び出し元**(#164。分析履歴のストア本体〈`D1AnalysisStore`〉は #175 で実装済み)・分析の実行(#164)・R2 の操作回数の安全柵(#173)・取得キャッシュ(#170)・スマホの画面(#165)・定時実行(#166)。ゲートを通した netkeiba の取得は、本番で実機確認済み(2026-10-06 15:03 UTC、ユーザーが本番の確認ページで 202603020211 を取得し、`ok: true`・status 200・16 頭・elapsedMs 504・ブレーカーは閉じたまま)。
 
 ### D1(分析履歴)の土台(#171〈#169-a〉。v1.19.7)
@@ -1140,7 +1140,7 @@ exe の出力は変わらない(`packages/app/test/golden/pipeline-golden.json` 
   `kaisaiDate`(YYYYMMDD)は `runCloudAnalysis` が必須にする(渡らないと runAnalysis が当日日付〈Worker は UTC〉で近似するため)。
 - **検査**: `packages/app/test/analysis-pipeline-golden.test.ts`(exe の出力)・`analysis-pipeline-async-deps.test.ts`(非同期 deps・バッチ)、core の `native-free-modules.test.ts`、cloud の `import-guard.test.ts`(型を含む閉包・alias の一致)・`bundle-guard.test.ts`(runAnalysis がバンドルに入り better-sqlite3 が入らない)・
   `pipeline-run.test.ts`(golden との一致)、smoke(workerd で `runAnalysis` が最後まで通り、golden と SHA-256 まで一致)。
-- **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST で取る。gate は #181 段階1(v1.22.2)で許可リスト付きの POST に対応したが、分析はまだ POST を呼ばないため、クラウドの分析には入らない(注入は #181 段階2)。
+- **限界**: 本番のエントリは `runCloudAnalysis` を参照しないので、本番のバンドルには入っていない(bundle-guard は、これを参照する一時の入口を本番と同じ `wrangler.toml` でバンドルして検査する)。重賞の「同レース過去10年傾向」は POST で取る。gate は #181 段階1(v1.22.2)で許可リスト付きの POST に対応し、段階2(v1.23.0)で発走前の取得ステップが POST を使うようになった(下の「重賞の過去10年傾向」)。
 
 ### 日単位の DO `RaceDay`・取得キャッシュ・朝の取得と prior(#177〈#164-b〉。v1.19.12)
 **呼び出す入口は、手動の `POST /api/analyses/run`〈#180〉と、cron の `scheduled`〈#206。`requestPlan`〉**。`worker.ts` が `RaceDay` を export する(wrangler が binding のクラスを要求する)。ローカルの smoke も RPC を呼んで通す。
@@ -1367,6 +1367,20 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - 同じレースが 2 つの開催日で分析されていると、両日の DO に依頼され 2 回取得される(UPSERT で冪等。害は無い)。
   - 設定画面のプロンプトのプレビューの注記(#201。同日の傾向を送らない旨)は、#209 で書き換えた(#208 は送る内容を変えない)。
 
+### クラウド版の重賞の過去10年傾向(#181 段階2。v1.23.0。**LLM への入力が変わる**)
+発走前の分析の LLM プロンプト(【レース情報】末尾)に、exe と同じ「同レース過去10年傾向」を入れる(`cloud/src/race-day-core.ts`)。
+- **POST は取得ステップの1本だけ**: 出馬表に重賞のバッジがあるレース(`hasGradeBadge !== false`。バッジの有無を判定できないときも撃つ fail-open で、exe の `runAnalysis` と同じ)で、LLM を使う構成のときだけ(キー未登録なら `runAnalysis` は傾向を使わないので撃たない)、
+  core の `fetchGradeWinnerEntries` を DO のキャッシュ付き取得器(`networkFetcher`)で呼ぶ。キャッシュのキーは `gradeWinnerCacheKey`(`race_api#AplGradeWinner#<race_id>`)・鮮度は無期限。**同じレースの再実行で POST は増えない。**
+  `cacheKey` の無い POST は `cloud/src/post-cache-guard.ts` が取得・キャッシュの前に拒否する。
+- **計算ステップは netkeiba に出ない**(gate は GET も POST も 0 回): `cacheOnly` から `collectGradeWinnerTrend` を引く。基準日は `runAnalysis` の分析日(#153。当該回自身・基準日以降の回は集計から除かれる)を素通しする。
+  条件に合う過去回が3回未満(core の `MIN_MATCHED_RACES = 3`)なら、ブロックごと入らない(exe と同じ)。
+- **POST の失敗は取得ステップの失敗にしない**: 拒否(400/403/429)・POST のブレーカー(`post-blocked`)・GET のブレーカー・通信の失敗・壊れた応答のいずれも、取得ステップが原因つきの警告(`redactSecrets` を通した先頭 200 文字)を残して続ける。
+  計算ステップはキャッシュに無いので傾向なしで保存まで進む(`onGradeWinnerTrendError` が警告にする。1 回の失敗で警告は 2 件)。壊れた応答(200 だが JSON として読めない)は、保存されたキャッシュの行を消して、次の取得ステップでやり直せるようにする。
+- **netkeiba への取得が増えるのは、重賞(バッジあり)のレースにつき POST 1 本**(取得ステップ。ゲートの最小間隔 2 秒を含むので、取得ステップが約 2 秒延びる)。
+- 画面の文言: 設定画面のプロンプトのプレビューの注記を、「重賞のレースでは、同じレースの過去10年の傾向も、取得できて条件に合う過去回が3回以上あるときだけ、実際の分析でも送ります」に書き換えた。レース画面のカードの説明は、プロンプトの中身を約束しないので変えていない。
+- `prompt_version` は据え置き(クラウドの分析は #167 で移行するまで D1 の中だけで、exe の検証データと混ざらない。Issue #181 の決定)。
+- 検査: `cloud/test/race-day-grade-winner.test.ts`(取得ステップの POST の本数・計算ステップの gate 0 回・基準日の素通し・失敗時に保存まで進む・再実行で増えない)・`post-cache-guard.test.ts`。
+
 ### クラウド版の当日中の結果の取り込みと当日傾向(#209。v1.22.0。**公開すると、公開後に計画が確定する開催日から本番で動く**)
 #182 から切り出した。LLM への入力が変わる(`prompt_version` は据え置き)ので minor(根拠と、前後を区別する方法は [`docs/versioning.md`](./versioning.md) の「次の正式版が 1.22.0 である根拠」)。
 - **積む行(AC-C1)**: 計画の確定(`RaceDayCore.runPlanFinalize` の同期区間)で、発走時刻のある計画の行(skip の行も含む。前のレースの傾向の材料になる)ごとに、`race_day_result` に `queued` の行を積む。最初の試行は**発走 + 15 分**(`next_try_at`)、`requested_on` は**開催日**。
@@ -1395,7 +1409,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **何を出すか**: 設定画面の末尾のボタンで開閉する、LLM へ送るプロンプトのプレビュー。exe の設定画面と同じ `buildPromptPreview`(固定のサンプルレース)を**クライアントで**呼ぶ(API は作らない。ネットワークには出ない)。
 - **送信と同じ文面**: 追加指示は 2,000 UTF-16 単位に切り(`clampAdditionalInstruction`)、クリップ幅は `resolveClipVariant` で解決する(送信と同じ手順)。`race-day-llm.test.ts` の e10 が、実際に LLM へ渡った prompt との一致を固定している。
 - **反映のタイミング**: 入力のたびには更新しない。開閉と「入力中の内容を反映」のボタンが強制描画(`render(true)`)で、写しを現在の下書きへ更新してから描く(#189 の設計と矛盾しない)。exe は入力の即時反映。
-- **注記**: 同日の傾向は、取り込み済みの前のレースが同じ場・同じ面で 2 つ以上あるときだけ実際の分析でも送る(中央が対象。地方は通過順が無くほとんど効かない)旨と、重賞の傾向は送らない旨(#209 で書き換え。重賞の傾向〈#181〉が入ったら更新する)。
+- **注記**: 同日の傾向は、取り込み済みの前のレースが同じ場・同じ面で 2 つ以上あるときだけ実際の分析でも送る(中央が対象。地方は通過順が無くほとんど効かない)旨と、重賞のレースでは同じレースの過去10年の傾向も、取得できて条件に合う過去回が3回以上あるときだけ送る旨(#209 で書き換え、#181 で重賞の傾向の文を書き換えた)。
 - **ビルド**: クライアントが core を直接 import する唯一の例外として `@keiba/core/analyzer/build-prompt` を許可。生成物 81,269 → 111,705 バイト、サイズの上限は 125,000 バイト。core のプロンプト文面を変えるとドリフトの検査が落ちる(`pnpm run build:client`)。
 
 ### クラウド版の画面に強調材料・懸念事項と LLM の usage を出す(#198〈#196-c〉。v1.20.1)

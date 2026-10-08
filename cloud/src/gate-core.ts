@@ -259,7 +259,8 @@ export function checkAllowedPost(request: GatePostRequest): PostCheck {
   return {
     ok: true,
     url: `${target.origin}${target.pathname}`,
-    init: { method: "POST", body: request.body, referer: request.referer, origin: request.origin },
+    // 検査は正規化後の URL で行ったので、送る値も検査した値にする(生の文字列は渡さない)。Origin は検査で `https://<宛先のホスト>` ちょうどと確認済み。
+    init: { method: "POST", body: request.body, referer: referer.href, origin: `https://${target.hostname}` },
   };
 }
 
