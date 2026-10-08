@@ -1571,3 +1571,27 @@ describe("parseRaceFieldSize(Issue #209: 結果ページ自身の「N頭」。�
     expect(parseRaceFieldSize(html)).toBe(10);
   });
 });
+
+describe("実物の地方の結果ページ(大井 2026-10-08 10R `202644100810`。Issue #209 の実測)", () => {
+  const partial = loadFixture("nar_result_partial_202644100810.html"); // 発走 + 11 分: 払戻は出ているが、着順は上位 3 頭だけ
+  const full = loadFixture("nar_result_202644100810.html"); // 発走 + 19 分: 全頭
+
+  it("途中のページ: 結果の行は 3 行(着順 1・2・3)・単勝の払戻あり・「N頭」は 15。全頭のページ: 15 行・単勝の払戻あり・「15頭」", () => {
+    const p = parseRaceResult(partial);
+    expect(p.horses.map((h) => h.finishPosition)).toEqual([
+      { kind: "順位", value: 1 },
+      { kind: "順位", value: 2 },
+      { kind: "順位", value: 3 },
+    ]);
+    expect(p.winPayouts.length).toBeGreaterThan(0);
+    const f = parseRaceResult(full);
+    expect(f.horses).toHaveLength(15);
+    expect(f.horses.every((h) => h.finishPosition !== null)).toBe(true);
+    expect(f.winPayouts.length).toBeGreaterThan(0);
+  });
+
+  it("parseRaceFieldSize は、途中のページでも全頭のページでも 15 を返す(途中のページにも「N頭」が出ている = 判定の前提の実物での確認)", () => {
+    expect(parseRaceFieldSize(partial)).toBe(15);
+    expect(parseRaceFieldSize(full)).toBe(15);
+  });
+});

@@ -607,6 +607,67 @@ describe("AC-C2: 全頭の着順がそろってから保存する(当日の行�
   });
 });
 
+describe("AC-C2(実物): 大井 2026-10-08 10R `202644100810` の実測ページ(発走 + 11 分の途中・発走 + 19 分の全頭)", () => {
+  const REAL_ID = "202644100810";
+  const REAL_DATE = "20261008";
+  const REAL_PARTIAL = fixture("nar_result_partial_202644100810.html");
+  const REAL_FULL = fixture("nar_result_202644100810.html");
+  const T = Date.parse("2026-10-08T19:45:00+09:00"); // 発走 19:30 + 15 分
+
+  /** 当日の行(requested_on = 開催日 = DO の開催日)を 1 行だけ、直接積む。 */
+  function realHarness(): Harness {
+    const h = harness({ start: T });
+    h.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('kaisai_date', ?)", REAL_DATE);
+    h.sql.exec(
+      "INSERT INTO race_day_result (race_id, state, attempts, deferrals, next_try_at, requested_on, last_class, queued_at, updated_at) VALUES (?, 'queued', 0, 0, ?, ?, NULL, ?, ?)",
+      REAL_ID,
+      T,
+      REAL_DATE,
+      T,
+      T,
+    );
+    h.alarm.at = T;
+    return h;
+  }
+
+  it("前提: 実物の途中のページは結果の行 3・単勝の払戻あり・N頭 15、全頭のページは 15 行", () => {
+    expect(parseRaceResult(REAL_PARTIAL).horses).toHaveLength(3);
+    expect(parseRaceResult(REAL_PARTIAL).winPayouts.length).toBeGreaterThan(0);
+    expect(parseRaceFieldSize(REAL_PARTIAL)).toBe(15);
+    expect(parseRaceResult(REAL_FULL).horses).toHaveLength(15);
+    expect(parseRaceFieldSize(REAL_FULL)).toBe(15);
+  });
+
+  it("(b) 途中のページは、当日の結果の手順で incomplete になり、保存されず、5 分後の再試行が予約される", async () => {
+    const h = realHarness();
+    h.gate.pages.set(REAL_ID, REAL_PARTIAL);
+    expect(await tick(h)).toBe(`${REAL_ID}:result:import:retry`);
+    expect(h.gate.resultUrls()).toEqual([`https://nar.netkeiba.com/race/result.html?race_id=${REAL_ID}`]); // 地方のレースは地方のホスト
+    expect(h.store.calls).toEqual([]);
+    expect(rowOf(h, REAL_ID)).toMatchObject({ state: "queued", attempts: 1, last_class: "incomplete", next_try_at: T + 5 * MIN });
+    expect(h.alarm.at).toBe(T + 5 * MIN);
+  });
+
+  it("(c) 全頭のページなら保存される(15 頭・着順はすべて入っている)。途中 → 全頭の順でも、2 回目で保存される", async () => {
+    const direct = realHarness();
+    direct.gate.pages.set(REAL_ID, REAL_FULL);
+    expect(await tick(direct)).toBe(`${REAL_ID}:result:import:ok`);
+    expect(direct.store.calls).toHaveLength(1);
+    expect(direct.store.calls[0]!.entries).toHaveLength(15);
+    expect(direct.store.calls[0]!.entries.every((e) => e.finishPosition !== null)).toBe(true);
+    expect(rowOf(direct, REAL_ID)).toMatchObject({ state: "imported", attempts: 1 });
+
+    const twice = realHarness();
+    twice.gate.script.push(okPage(REAL_PARTIAL));
+    twice.gate.pages.set(REAL_ID, REAL_FULL);
+    expect(await tick(twice)).toBe(`${REAL_ID}:result:import:retry`);
+    expect(await tick(twice)).toBe(`${REAL_ID}:result:import:ok`);
+    expect(twice.store.calls).toHaveLength(1);
+    expect(twice.store.calls[0]!.entries).toHaveLength(15);
+    expect(rowOf(twice, REAL_ID)).toMatchObject({ state: "imported", attempts: 2 });
+  });
+});
+
 describe("AC-C3: 今日の DO で動く(期限を待つ planned の行が残っていても)。発走前の分析・朝の準備を押しのけない", () => {
   it("planned の行(午後のレース)が残っていても、午前のレースの結果は発走 + 15 分に取り込まれる。次のアラームは「次の期限」と「次の結果の試行」の早い方", async () => {
     const h = harness({ rows: [central(1, "10:00"), central(2, "14:00")] });
