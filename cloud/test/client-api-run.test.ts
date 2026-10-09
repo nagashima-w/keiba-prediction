@@ -34,12 +34,12 @@ describe("postRun(リクエストの形)", () => {
     expect(f.calls).toHaveLength(1);
     expect(f.calls[0]!.url).toBe("/api/analyses/run");
     expect(f.calls[0]!.init.method).toBe("POST");
-    const body = JSON.parse(f.calls[0]!.init.body!);
+    const body = JSON.parse(f.calls[0]!.init.body as string);
     expect(body).toEqual({ race_id: "202603020211", kaisai_date: "20260628", mode: "pre_race" });
     expect(Object.keys(body).sort()).toEqual(["kaisai_date", "mode", "race_id"]);
     const morning = fake(async () => resp(202, { ...ACCEPTED, mode: "morning" }));
     await postRun(morning.fetch, { ...BASE, mode: "morning" });
-    expect(JSON.parse(morning.calls[0]!.init.body!).mode).toBe("morning"); // mode は常に明示して送る
+    expect(JSON.parse(morning.calls[0]!.init.body as string).mode).toBe("morning"); // mode は常に明示して送る
   });
 
   it("ヘッダ(content-type が application/json)・同じオリジンの資格情報・referrerPolicy: same-origin。fetch の mode は指定しない(または cors)", async () => {

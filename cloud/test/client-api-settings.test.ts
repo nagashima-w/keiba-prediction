@@ -96,7 +96,7 @@ describe("postSettings(POST /api/settings)", () => {
     expect(init.credentials).toBe("same-origin");
     expect(init.referrerPolicy).toBe("same-origin");
     expect(Object.keys(init as object)).not.toContain("mode");
-    const body = JSON.parse(init.body!) as Record<string, unknown>;
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body).toEqual(SAVED);
     expect([...Object.keys(body)].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
   });

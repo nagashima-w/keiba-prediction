@@ -74,7 +74,7 @@ export type BoardResult = { readonly ok: true; readonly rows: BoardRow[] } | { r
 /** 使う部分だけの fetch(`window.fetch` が満たす。Node のテストでは偽物を渡せる)。 */
 export type FetchLike = (
   url: string,
-  init: { method: "GET" | "POST"; headers?: Record<string, string>; credentials?: "same-origin"; referrerPolicy?: "same-origin"; body?: string },
+  init: { method: "GET" | "POST"; headers?: Record<string, string>; credentials?: "same-origin"; referrerPolicy?: "same-origin"; body?: string | Blob },
 ) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

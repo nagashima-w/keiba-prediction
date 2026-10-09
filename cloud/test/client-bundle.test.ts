@@ -1,9 +1,11 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { buildClientJs, CLIENT_DIR, GENERATED_PATH, listBundledInputs, renderGeneratedModule } from "../build-client";
 import { CLIENT_JS } from "../src/client-bundle.generated";
+import { GOLDEN_TEXT } from "./migration-fixture";
 
 /**
  * Issue #184: クライアントのバンドル(`client/` → `src/client-bundle.generated.ts`)の検査。
@@ -48,13 +50,15 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 125,000 バイト)", () => {
-    // Issue #201: 上限を 100,000 から 125,000 へ引き上げた。設定画面のプレビューが exe と同じ `buildPromptPreview`(`@keiba/core/analyzer/build-prompt` の閉包。
-    // build-prompt・clip-variants・condition-change・leg-style・derive-features の 5 ファイル)を取り込むため。プロンプトの文面は日本語が大半で、esbuild の既定の `\u` エスケープ
-    // (1 文字 6 バイト。`charset` は変えない)で出力されるので、大きく増える。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): 3d8a0b1(#198。プレビューなし)は 81,269、
-    // プレビューを入れた #201 の実装後は 111,705(+30,436)。上限 125,000 は実装後の約 12% 増(取り込み前の「81,269 / 100,000」の余裕は約 23%)。
+  it("生成物は小さい(肥大の検知。上限は 175,000 バイト)", () => {
+    // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
+    // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
+    // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
+    // 大半は日本語の文言で、esbuild の既定の `\u` エスケープ(1 文字 6 バイト。`charset` は変えない)で出力されるため大きい。上限 175,000 は実装後の約 11% 増。
+    // (経緯)Issue #201: 100,000 → 125,000。設定画面のプレビューが exe と同じ `buildPromptPreview`(build-prompt・clip-variants・condition-change・leg-style・derive-features の 5 ファイル)を取り込んだため。
+    // 実測: 3d8a0b1(#198)は 81,269、#201 の実装後は 111,705(+30,436)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(125_000);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(175_000);
   });
 });
 
@@ -72,6 +76,11 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   // 一致させるため(renderer に再 export の薄いモジュールを置くと、exe 側を触ることになる)。この入口は core の `exports` の宣言済みサブパスで、閉包に `node:`・`node_modules`・バレルは入らない
   // (下の閉包の検査と生成物の検査が固定する)。ほかの core のサブパス・バレルは引き続き拒否する(下の「対照」)。
   "@keiba/core/analyzer/build-prompt",
+  // Issue #222(移行画面): 移行ファイルの形式の検証(`parseMigrationLine`・`MigrationTally`)を、サーバ・exe と同じ実装で行うため。core を直接 import する 2 つ目の例外(上と同じ理由:
+  // `exports` の宣言済みサブパスで、**import が 1 つも無い**〈`node:`・`node_modules`・バレルが入らない〉モジュール。`packages/core/test/ev/native-free-modules.test.ts` も閉包を固定している)。
+  "@keiba/core/ev/cloud-migration-format",
+  // Issue #222: サーバと同じ行の分割(`readLines`。区切りは 0x0A だけ・U+2028/2029 を壊さない)。**import を持たない**ことを下のテストが固定する(Worker 専用のモジュールを引き込まない)。
+  "../src/migration-reader",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -86,7 +95,10 @@ function forbiddenInputs(inputs: readonly string[]): string[] {
       /packages\/core\/src\/index\.ts$/.test(f) ||
       /packages\/core\/src\/(?:ev\/analysis-store|scraper\/cache)\.ts$/.test(f) ||
       /packages\/app\/src\/main\//.test(f) ||
-      /^node:/.test(f),
+      /^node:/.test(f) ||
+      // Issue #222: 移行の取り込み(変換・DO・予算・サーバの検証)は Worker 専用。クライアントには「形式の検証」と「行の分割」だけを入れる。
+      /(^|\/)src\/migration-(?:core|do|convert|verify)\.ts$/.test(f) ||
+      /packages\/core\/src\/ev\/analysis-store-codec\.ts$/.test(f),
   );
 }
 
@@ -153,10 +165,10 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
   });
 
   it("対照: import の許可判定は、バレル・core の直接 import・bare specifier・許可外の renderer を拒否する(上の検査が空振りでない)", () => {
-    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/app/src/main/analysis-export"]) {
+    for (const bad of ["@keiba/core", "@keiba/core/ev/bet-allocation", "@keiba/core/analyzer/analyze-race", "@keiba/core/analyzer/build-prompt.js", "@keiba/core/ev/cloud-migration-format.js", "@keiba/core/ev/analysis-store", "../src/migration-core", "../src/migration-convert", "../src/migration-verify", "../src/migration-do", "@keiba/core/pipeline", "react", "node:fs", "../../packages/core/src/index", "../../packages/app/src/renderer/VerifyView", "../src/handler", "../../packages/app/src/main/analysis-export"]) {
       expect(importAllowed(bad), bad).toBe(false);
     }
-    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types", "../../packages/app/src/shared/settings", "../src/settings", "@keiba/core/analyzer/build-prompt"]) {
+    for (const good of ["./api", "../../packages/app/src/renderer/allocation-proposal-view", "../../packages/app/src/renderer/bet-allocation-view", "../../packages/app/src/renderer/format", "../../packages/app/src/shared/analysis-types", "../../packages/app/src/shared/settings", "../src/settings", "@keiba/core/analyzer/build-prompt", "@keiba/core/ev/cloud-migration-format", "../src/migration-reader"]) {
       expect(importAllowed(good), good).toBe(true);
     }
   });
@@ -168,6 +180,9 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     // Issue #201: プレビューが呼ぶ exe と同じ関数(`buildPromptPreview`)の閉包が入っている(入っていなければ、下の禁止の検査は何も見ていない)
     expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/build-prompt.ts")), "前提: build-prompt が閉包に入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("packages/core/src/analyzer/clip-variants.ts")), "前提: clip-variants が閉包に入っている").toBe(true);
+    // Issue #222: 移行ファイルの検証が使う 2 つ(形式の検証と、サーバと同じ行の分割)が閉包に入っている。入っていなければ、下の禁止の検査は何も見ていない。
+    expect(inputs.some((f) => f.endsWith("packages/core/src/ev/cloud-migration-format.ts")), "前提: 移行の形式の検証が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("src/migration-reader.ts")), "前提: 移行の行の分割が閉包に入っている").toBe(true);
     expect(forbiddenInputs(inputs)).toEqual([]);
   }, 60_000);
 
@@ -180,8 +195,34 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
       "node:zlib",
       "../packages/app/src/main/analysis-export.ts",
     ];
-    expect(forbiddenInputs(bad)).toEqual(bad);
-    expect(forbiddenInputs(["client/main.ts", "../packages/app/src/renderer/format.ts", "../packages/core/src/ev/bet-allocation.ts"])).toEqual([]);
+    expect(forbiddenInputs([...bad, "src/migration-core.ts", "src/migration-do.ts", "src/migration-convert.ts", "src/migration-verify.ts", "../packages/core/src/ev/analysis-store-codec.ts"])).toEqual([
+      ...bad,
+      "src/migration-core.ts",
+      "src/migration-do.ts",
+      "src/migration-convert.ts",
+      "src/migration-verify.ts",
+      "../packages/core/src/ev/analysis-store-codec.ts",
+    ]);
+    expect(forbiddenInputs(["client/main.ts", "../packages/app/src/renderer/format.ts", "../packages/core/src/ev/bet-allocation.ts", "src/migration-reader.ts", "../packages/core/src/ev/cloud-migration-format.ts"])).toEqual([]);
+  });
+});
+
+describe("移行画面がクライアントに取り込む Worker 側のモジュール(Issue #222)", () => {
+  it("migration-reader.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まないことを、クライアントの閉包に入れる前提として固定する)", () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "migration-reader.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(1000);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+  });
+
+  it("対照: 上の検出は、import が書かれていれば拾える(空振りでない)", () => {
+    expect('import { x } from "node:zlib";\nexport const y = 1;'.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g)).toHaveLength(1);
+  });
+
+  it("packages/core の cloud-migration-format.ts も import を持たない(閉包が自分だけで完結する)", () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "packages", "core", "src", "ev", "cloud-migration-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(5000);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
   });
 });
 
@@ -258,7 +299,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   function run(initialHash = "", identityReply: IdentityReply = NOT_FOUND) {
     const root = { children: [] as (FakeElement | FakeText)[], replaced: 0, replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; } };
     const listeners = new Map<string, (() => void)[]>();
-    const calls: { url: string; init: { method?: string; credentials?: string; referrerPolicy?: string; body?: string } }[] = [];
+    const calls: { url: string; init: { method?: string; credentials?: string; referrerPolicy?: string; body?: unknown; headers?: Record<string, string> } }[] = [];
     const location = { hash: initialHash };
     // Issue #192: get-identity の呼び出しは calls と別に数える(既存のテストが数える取得の本数に混ぜない)。表示の行は `.who .email`(偽の要素。textContent を持つ)。
     const identityCalls: { url: string; init: { method?: string; credentials?: string } }[] = [];
@@ -275,20 +316,26 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       createTextNode: (t: string) => new FakeText(t),
       addEventListener: (type: string, fn: () => void) => void documentListeners.set(type, [...(documentListeners.get(type) ?? []), fn]),
     };
-    const fetchStub = async (url: string, init: { method?: string; credentials?: string; referrerPolicy?: string; body?: string }) => {
+    const fetchStub = async (url: string, init: { method?: string; credentials?: string; referrerPolicy?: string; body?: unknown; headers?: Record<string, string> }) => {
       if (url === "/cdn-cgi/access/get-identity") {
         identityCalls.push({ url, init });
         if (identityReply === "network-error") throw new TypeError("Failed to fetch");
         return identityReply;
       }
       calls.push({ url, init });
+      if (url === "/api/migration" || url === "/api/migration/upload") {
+        // Issue #222: 移行の進捗(GET)と、アップロードの受け付け(POST は 202 で「検証中」の進捗を返す)
+        const state = init.method === "POST" ? "verifying" : "idle";
+        const body = { ok: true, state, upload: state === "idle" ? null : { size: 1, uploadedAt: "2026-06-28T00:00:00.000Z", exportedAt: null, appVersion: null }, analyses: { total: null, processed: 0, imported: 0, alreadyImported: 0, conflicts: 0 }, results: { total: null, processed: 0 }, resumeAt: null, failure: null, conflictSamples: [], attempts: 0, budget: { day: "20260628", usedRows: 0, limitRows: 60000 } };
+        return { status: init.method === "POST" ? 202 : 200, json: async () => body };
+      }
       if (init.method === "POST" && url === "/api/analyses/run") {
-        const body = JSON.parse(init.body!) as { race_id: string; kaisai_date: string; mode: string };
+        const body = JSON.parse(init.body as string) as { race_id: string; kaisai_date: string; mode: string };
         return { status: 202, json: async () => ({ ok: true, accepted: true, race_id: body.race_id, kaisai_date: body.kaisai_date, mode: body.mode, status: "queued" }) };
       }
       if (url === "/api/settings") {
         // Issue #189: 設定の取得(GET)と保存(POST は受けた本文をそのまま返す)
-        const settings = init.method === "POST" ? JSON.parse(init.body!) : SETTINGS;
+        const settings = init.method === "POST" ? JSON.parse(init.body as string) : SETTINGS;
         return { status: 200, json: async () => (init.method === "POST" ? { ok: true, settings } : { ok: true, settings, source: "d1" }) };
       }
       if (url.startsWith("/api/races")) {
@@ -327,6 +374,10 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
       Date: FixedDate,
       URLSearchParams,
       Promise,
+      // Issue #222: 移行ファイルのブラウザ検証が使うグローバル(生成物は new で呼ぶ)。vm の新しいコンテキストには無いので、Node のものを渡す。
+      TextDecoder,
+      TransformStream,
+      DecompressionStream,
       console,
     };
     vm.runInNewContext(CLIENT_JS, context);
@@ -436,7 +487,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const post = calls.find((c) => c.init.method === "POST")!;
     expect(post.url).toBe("/api/settings");
     expect(post.init.referrerPolicy).toBe("same-origin");
-    expect(JSON.parse(post.init.body!)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true, analysisModel: "opus" });
+    expect(JSON.parse(post.init.body as string)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true, analysisModel: "opus" });
     await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
   });
 
@@ -461,6 +512,47 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
     toggleOf().listeners.get("click")![0]!(undefined);
     expect(elements().some((n) => n.attrs.get("class") === "prompt-preview")).toBe(false);
+  });
+
+  it("Issue #222: 移行画面(#migration)(生成物の実行): GET /api/migration だけを取り、ファイルを選ぶとブラウザで検証して件数を出し、「取り込みを始める」で選んだファイルそのものを application/gzip で POST する(一覧・板・設定は取らない)", async () => {
+    const { root, calls } = run("#migration");
+    const elements = () => flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement);
+    /** 検証は gzip の展開(スレッドプール)を含むので、I/O の巡ではなく実時間の短い待ちで上限つきに待つ。 */
+    const waitFor = async (cond: () => boolean): Promise<void> => {
+      for (let i = 0; i < 400 && !cond(); i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    };
+    await waitFor(() => root.children.length > 0 && elements().some((n) => n.attrs.get("type") === "file"));
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/migration"]);
+    const picker = elements().find((n) => n.attrs.get("type") === "file")!;
+    expect(picker.attrs.get("accept")).toBe(".gz,application/gzip,application/x-gzip");
+    const fixture = Buffer.from(GOLDEN_TEXT, "utf-8"); // Windows のチェックアウトの CRLF は LF にそろえてある(`migration-fixture.ts`)
+    const file = Object.assign(new Blob([new Uint8Array(gzipSync(fixture))]), { name: "keiba-cloud-migration.ndjson.gz" });
+    picker.listeners.get("change")![0]!({ target: { files: [file], value: "C:\\fakepath\\keiba-cloud-migration.ndjson.gz" } });
+    await waitFor(() => root.children.some((c) => textOf(c).includes("分析 5 件・結果 5 レース")));
+    expect(textOf(root.children[0]!)).toContain("分析 5 件・結果 5 レース");
+    expect(calls.filter((c) => c.init.method === "POST")).toEqual([]); // 検証の間はアップロードしない
+    const start = elements().find((n) => n.attrs.get("class") === "migration-start")!;
+    start.listeners.get("click")![0]!(undefined);
+    await waitFor(() => calls.some((c) => c.init.method === "POST"));
+    const post = calls.find((c) => c.init.method === "POST")!;
+    expect(post.url).toBe("/api/migration/upload");
+    expect(post.init.body).toBe(file);
+    expect(post.init.headers).toEqual({ "content-type": "application/gzip" });
+    expect(post.init.credentials).toBe("same-origin");
+    expect(post.init.referrerPolicy).toBe("same-origin");
+    await waitFor(() => root.children.some((c) => textOf(c).includes("アップロードしました")));
+    expect(textOf(root.children[0]!)).toContain("サーバでファイルを検証しています");
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/migration", "POST /api/migration/upload"]);
+  });
+
+  it("Issue #222: 設定画面の「exe から移行」の節(生成物の実行)は #migration へのリンクを持ち、/api/migration は取らない", async () => {
+    const { root, calls } = run("#settings");
+    await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
+    const link = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "migration-link")!;
+    expect(link.attrs.get("href")).toBe("#migration");
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
   });
 
   it("レース画面(#…&race=): 状態(race_id つき)と過去の分析の 2 本だけを取り、カードと朝の prior を描画する。一覧・板・分析の詳細・POST は呼ばない", async () => {
@@ -491,7 +583,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const posts = calls.filter((c) => c.init.method === "POST");
     expect(posts).toHaveLength(1);
     expect(posts[0]!.url).toBe("/api/analyses/run");
-    expect(JSON.parse(posts[0]!.init.body!)).toEqual({ race_id: RACE_ID, kaisai_date: DATE, mode: "pre_race" });
+    expect(JSON.parse(posts[0]!.init.body as string)).toEqual({ race_id: RACE_ID, kaisai_date: DATE, mode: "pre_race" });
     expect(posts[0]!.init.credentials).toBe("same-origin");
     expect(posts[0]!.init.referrerPolicy).toBe("same-origin");
     expect(Object.keys(posts[0]!.init)).not.toContain("mode"); // fetch の mode は入れない

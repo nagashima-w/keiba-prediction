@@ -21,10 +21,18 @@ export interface Route {
   readonly analysis: number | null;
   /** 設定画面(`#settings` の**完全一致**のときだけ true。Issue #189)。 */
   readonly settings: boolean;
+  /**
+   * 移行画面(`#migration` の**完全一致**のときだけ true。Issue #222)。**省略は false**(`#migration` のときだけ true を付ける。
+   * 既存の route の組み立て〈テスト・画面の表示用データ〉を変えないための任意項目)。
+   */
+  readonly migration?: boolean;
 }
 
 /** 設定画面のハッシュ(Issue #189)。一覧のトップの入口のリンク先。 */
 export const SETTINGS_HASH = "#settings";
+
+/** 移行画面のハッシュ(Issue #222)。設定画面の「exe から移行」の節のリンク先。 */
+export const MIGRATION_HASH = "#migration";
 
 const ANALYSIS_ID_MAX = 2_147_483_647;
 
@@ -38,6 +46,10 @@ export function parseHash(hash: string, today: string): Route {
   // 設定画面は `#settings` の完全一致だけ(`#settings&date=…` などは従来どおりの解析。日付・区分などを持たない画面なので、混ぜない)。
   if (hash === SETTINGS_HASH) {
     return { date: today, venue: "central", race: null, analysis: null, settings: true };
+  }
+  // 移行画面も `#migration` の完全一致だけ(設定画面と同じ理由。日付・区分などを持たない画面)。
+  if (hash === MIGRATION_HASH) {
+    return { date: today, venue: "central", race: null, analysis: null, settings: false, migration: true };
   }
   let params: URLSearchParams;
   try {
@@ -72,15 +84,16 @@ export function buildHash(route: { readonly date: string; readonly venue: Venue;
 }
 
 /** 今の画面(Issue #191)。 */
-export type Screen = "list" | "race" | "result" | "settings";
+export type Screen = "list" | "race" | "result" | "settings" | "migration";
 
 /**
  * 「今どの画面か」の判定の**唯一の場所**(Issue #191。#188 の申し送り)。`app.ts` は、画面ごとの分岐をすべてこの関数の `switch` で行う
  * (`route.analysis !== null` のような直接の比較を散らさない。画面を足すときは、ここと、各 `switch` の `never` による網羅チェックが漏れを教える)。
- * 優先順位: settings(設定画面。`#settings` の完全一致だけ。Issue #189)> analysis(結果画面)> race(レース画面)> 一覧。`race` と `analysis` が両方あれば結果画面。
+ * 優先順位: settings(設定画面。`#settings` の完全一致だけ。Issue #189)> migration(移行画面。`#migration` の完全一致だけ。Issue #222)> analysis(結果画面)> race(レース画面)> 一覧。`race` と `analysis` が両方あれば結果画面。
  */
 export function screenOf(route: Route): Screen {
   if (route.settings) return "settings";
+  if (route.migration === true) return "migration";
   if (route.analysis !== null) return "result";
   if (route.race !== null) return "race";
   return "list";

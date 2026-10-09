@@ -129,7 +129,7 @@ function harness(initialHash: string): Harness {
   };
   const respondDefault = (method: string, url: string, init: Init): Resp => {
     if (method === "POST" && url === "/api/analyses/run") {
-      const body = JSON.parse(init.body!) as { race_id: string; kaisai_date: string; mode: string };
+      const body = JSON.parse(init.body as string) as { race_id: string; kaisai_date: string; mode: string };
       h.rows = [...h.rows.filter((r) => !(r.race_id === body.race_id && r.mode === body.mode)), jrow(body.race_id, body.mode, "queued", { queued_at: 10_000 + timers.now() })];
       return resp(202, { ok: true, accepted: true, race_id: body.race_id, kaisai_date: body.kaisai_date, mode: body.mode, status: "queued" });
     }
@@ -221,7 +221,7 @@ describe("起動(POST)の内容(A1・A2)", () => {
     await h.settle();
     const posts = h.posts();
     expect(posts).toHaveLength(2);
-    expect(posts.map((p) => JSON.parse(p.init.body!))).toEqual([
+    expect(posts.map((p) => JSON.parse(p.init.body as string))).toEqual([
       { race_id: RACE_ID, kaisai_date: DATE, mode: "morning" },
       { race_id: RACE_ID, kaisai_date: DATE, mode: "pre_race" },
     ]);
@@ -243,7 +243,7 @@ describe("起動(POST)の内容(A1・A2)", () => {
     });
     click(runButton(h, "morning"));
     await h.settle();
-    expect(JSON.parse(h.posts()[0]!.init.body!)).toEqual({ race_id: "202603020211", kaisai_date: "20260629", mode: "morning" });
+    expect(JSON.parse(h.posts()[0]!.init.body as string)).toEqual({ race_id: "202603020211", kaisai_date: "20260629", mode: "morning" });
   });
 });
 

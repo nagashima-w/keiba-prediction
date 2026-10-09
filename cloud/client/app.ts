@@ -33,6 +33,10 @@
  *    (`buildPreviewText`。送信と同じ手順)。**入力のたびには更新しない**(#189 の設計どおり)。開閉と「入力中の内容を反映」は `render(true)` で、写しを現在の下書きへ更新してから描く
  *    (強制なしだと古い写しで入力欄が作り直され、打った文字が消える)。ネットワークには出ない。保存中・下書きなしは無視。
  *
+ * **Issue #222(移行画面。`#migration`)**: 設定画面の「exe から移行」の節のリンク先の**別の画面**。状態・取得・ポーリング・検証・アップロードは `migration-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画・可視状態の中継だけ。
+ *  - 開くと `GET /api/migration` だけを取る(一覧・板・設定・レース・分析は取らない)。設定画面は `/api/migration` を取らない。**別の画面なので、移行の再描画・ポーリングが設定フォームの入力を壊さない**
+ *    (設定画面にいる間、移行のタイマー・取得は無い。移行画面を離れると状態を破棄し、遅れて届く応答は反映しない)。
+ *
  * **Issue #188(発走前の結果をレース画面のカードの中に出す)**:
  *  - 最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id(`race.ts` の `latestAnalysisIdOf`。取る・出すの判定は同じ関数)。
  *  - 取得は `loadAnalysis`(id ごとに 1 回。結果画面と**同じキャッシュ・同じ 3 つの門**〈`analyses`・`analysisErrors`・`analysisInflight`〉)。再描画・ポーリング・hashchange の連打では増えない。失敗は自動で再試行しない。
@@ -51,6 +55,7 @@ import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSou
 import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
 import { buildResultModel, type ResultSource } from "./result";
 import { buildSettingsModel, draftFromSettings, setDraftValue, validateDraft, type FieldErrors, type FieldKey, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
+import { createMigrationScreen } from "./migration-screen";
 import { buildHash, parseHash, screenOf, type Route, type Venue } from "./route";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
 import { renderScreen } from "./view";
@@ -67,6 +72,8 @@ export interface AppDeps {
   readonly timers: { readonly set: (fn: () => void, ms: number) => unknown; readonly clear: (handle: unknown) => void };
   /** ページが表示されているか(`document.visibilityState`)。非表示の間、追跡は一時停止する。 */
   readonly isVisible: () => boolean;
+  /** 画面に制御を返す(移行ファイルの検証が主スレッドを占有し続けないように。本番は `setTimeout(0)`。省略は何もしない)。Issue #222。 */
+  readonly yieldToUi?: () => Promise<void>;
 }
 
 export interface App {
@@ -227,7 +234,31 @@ export function createApp(deps: AppDeps): App {
   let settingsPreviewOpen = false;
   const settingsInflight = new Set<Promise<unknown>>();
 
-  const actions = { onDateChange, onRefresh, onToggleGroup, onToggleResult, onRun, onRetrack, onSettingsInput, onSettingsSave, onSettingsPreviewToggle, onSettingsPreviewRefresh };
+  // ---- 移行画面(Issue #222) ----
+  const migration = createMigrationScreen({
+    fetch: deps.fetch,
+    now: () => deps.now().getTime(),
+    timers: deps.timers,
+    isVisible: deps.isVisible,
+    yieldToUi: deps.yieldToUi ?? (async () => {}),
+    onChange: () => render(),
+  });
+
+  const actions = {
+    onDateChange,
+    onRefresh,
+    onToggleGroup,
+    onToggleResult,
+    onRun,
+    onRetrack,
+    onSettingsInput,
+    onSettingsSave,
+    onSettingsPreviewToggle,
+    onSettingsPreviewRefresh,
+    onMigrationFile: migration.onFile,
+    onMigrationStart: migration.onStart,
+    onMigrationCancelCheck: migration.onCancelCheck,
+  };
 
   function render(force = false): void {
     const screen = screenOf(route);
@@ -266,6 +297,10 @@ export function createApp(deps: AppDeps): App {
           settingsShown = { load: settingsLoad ?? { kind: "loading" }, draft: settingsDraft, errors: settingsErrors, save: settingsSave, previewOpen: settingsPreviewOpen };
         }
         deps.render(renderScreen(buildSettingsModel(settingsShown), actions), force);
+        return;
+      }
+      case "migration": {
+        deps.render(renderScreen(migration.model(), actions), force);
         return;
       }
       case "list": {
@@ -443,6 +478,9 @@ export function createApp(deps: AppDeps): App {
       case "settings":
         if (settingsLoad === null) startSettingsLoad();
         return;
+      case "migration":
+        migration.enter();
+        return;
       default:
         return assertNever(screen);
     }
@@ -615,8 +653,10 @@ export function createApp(deps: AppDeps): App {
 
   function onHashChange(): void {
     const wasSettings = screenOf(route) === "settings";
+    const wasMigration = screenOf(route) === "migration";
     route = parseHash(deps.getHash(), todayJst(deps.now()));
     if (wasSettings && screenOf(route) !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
+    if (wasMigration && screenOf(route) !== "migration") migration.leave(); // 移行の状態(検証・タイマー・遅れて届く応答)を破棄する
     ensureLoaded();
     render();
   }
@@ -689,6 +729,10 @@ export function createApp(deps: AppDeps): App {
         render();
         return;
       }
+      case "migration":
+        // 取得中は何もしない(`onReload` が見る)。画面の再描画は状態の変化(`onChange`)で行われる。
+        migration.onReload();
+        return;
       case "settings": {
         // 取得中・保存中は何もしない(同じものを同時に 2 本取らない・保存中の入力を捨てない)。未保存の入力は捨てて、サーバの値を取り直す。
         if (settingsLoad?.kind === "loading" || settingsSave.kind === "saving") return;
@@ -707,10 +751,13 @@ export function createApp(deps: AppDeps): App {
       render();
     },
     onHashChange,
-    onVisibilityChange: () => tracker.onVisibilityChange(),
+    onVisibilityChange: () => {
+      tracker.onVisibilityChange();
+      migration.onVisibilityChange();
+    },
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。
-      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight];
+      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...migration.pending()];
       for (let i = 0; i < 10 && pending().length > 0; i += 1) {
         await Promise.all(pending());
       }

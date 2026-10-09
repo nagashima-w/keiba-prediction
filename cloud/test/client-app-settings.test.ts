@@ -61,7 +61,7 @@ function harness(initialHash: string): Harness {
     calls.push(`${init.method} ${url}`);
     if (url === "/api/settings" && init.method === "GET") return h.getResponder();
     if (url === "/api/settings" && init.method === "POST") {
-      const body = JSON.parse(init.body!) as Record<string, unknown>;
+      const body = JSON.parse(init.body as string) as Record<string, unknown>;
       posts.push(body);
       return h.postResponder(body);
     }
@@ -421,7 +421,7 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
         if (url.startsWith("/api/analyses/status")) return ok(board); // いつまでも実行中(追跡が続く)
         if (url === "/api/settings" && init.method === "GET") return ok({ ok: true, settings: SERVER, source: "d1" });
         if (url === "/api/settings" && init.method === "POST") {
-          const body = JSON.parse(init.body!) as Record<string, unknown>;
+          const body = JSON.parse(init.body as string) as Record<string, unknown>;
           posts.push(body);
           return ok({ ok: true, settings: body });
         }

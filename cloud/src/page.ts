@@ -170,6 +170,15 @@ export function renderPage(email: string): string {
   .preview-note { margin: 8px 0 0; font-size: 0.8rem; color: var(--muted); }
   .preview-refresh { display: block; width: 100%; min-height: 44px; margin: 12px 0 8px; font-weight: bold; }
   .prompt-preview { padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  /* Issue #222: 移行(設定画面の「exe から移行」の節と、移行画面。ファイル選択・開始・取り消しはタップしやすい高さ 44px 以上。進捗は progress 要素+文字〈色だけに頼らない〉。横スクロールを出さない=幅は 100% に収める) */
+  .migration-section { margin: 20px 0 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .migration-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--accent); text-decoration: none; background: var(--card); }
+  .migration-file { display: block; width: 100%; max-width: 100%; min-height: 44px; padding: 8px; font-size: 1rem; font-family: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .migration-bar { display: block; width: 100%; height: 14px; margin: 8px 0; }
+  .migration-lines { margin: 8px 0; padding-left: 1.2em; font-size: 0.9rem; overflow-wrap: anywhere; }
+  .migration-start, .migration-cancel { display: block; width: 100%; margin: 8px 0; font-weight: bold; }
+  .notice.ok { border-color: var(--ok); color: var(--ok); }
+  .notice.wait { border-color: var(--wait); color: var(--wait); }
   /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
   .card-result { margin-top: 8px; }
   .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }

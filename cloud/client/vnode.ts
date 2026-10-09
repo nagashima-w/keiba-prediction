@@ -15,8 +15,13 @@ export interface VNode {
     readonly change?: (value: string) => void;
     /** 入力のたび(`input` イベント)に、入力欄の value(文字列)を受け取る(Issue #189。文字を打つ欄で、保存の直前の入力を取りこぼさないため)。 */
     readonly input?: (value: string) => void;
+    /** `input type="file"` の選択(`change`)。選ばれた最初のファイル(選択が空なら null)を受け取る(Issue #222。value〈パス〉は渡さない)。 */
+    readonly file?: (file: PickedFile | null) => void;
   };
 }
+
+/** 選ばれたファイル(`File` が満たす。Blob 互換で、名前を持つ)。Issue #222。 */
+export type PickedFile = Blob & { readonly name: string };
 
 export function h(tag: string, attrs: Readonly<Record<string, AttrValue>> = {}, children: readonly (VNode | string)[] = [], on?: VNode["on"]): VNode {
   return on === undefined ? { tag, attrs, children } : { tag, attrs, children, on };

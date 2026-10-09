@@ -392,7 +392,7 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - 検査: `test/race-day-result-sameday.test.ts`(積む行・全頭の判定・5 分おき 10 回・今日の DO で動く条件・fuzz)・`test/race-day-sameday-trend.test.ts`(配線・D1 の統合・リークの対照)・core の `parse-race-result.test.ts`(`parseRaceFieldSize`)。
 
 ## exe から移したファイルの取り込み(Issue #216〈#167-B1〉。v1.28.0)
-exe の「クラウド移行用に書き出す」(#215。gzip の NDJSON 1 ファイル)を受け取り、D1・R2 へ**少しずつ**取り込む。画面は #222(この Issue は API と取り込みの仕組みまで)。
+exe の「クラウド移行用に書き出す」(#215。gzip の NDJSON 1 ファイル)を受け取り、D1・R2 へ**少しずつ**取り込む。この節は API と取り込みの仕組み。**画面は次の節「移行画面」(#222)**。
 - **API**(どちらも Access の後ろ):
   - `POST /api/migration/upload` — 本文は gzip のバイト列(`Content-Type: application/gzip`。`Content-Length` 必須、上限 50MB)。**Worker は本文を解釈せず、R2 に `migration/<uuid>.ndjson.gz` としてそのまま置く**(Workers Free の CPU は 10ms)。
     Origin 確認(403)→ Content-Type(415)→ Content-Length(411・413)→ 取り込み中でないか(409。本文を読まずに断る)→ R2 の書き込みの柵(503)→ 置く → DO に取り込みを頼む(202。進捗を返す)。
@@ -420,6 +420,14 @@ exe の「クラウド移行用に書き出す」(#215。gzip の NDJSON 1 フ�
   移行の分析は `listAnalyzedRaceIdsByPromptVersion` にも入るため、同じ版で分析済みの当日のレースを cloud の自動実行が「分析済み」と見なすことがある。
 - **実測**: `pnpm tsx scripts/measure-migration-import.ts`(実際の規模に近い合成ファイルを workerd に流す。結果は `docs/current-spec.md` の「exe から移したファイルの取り込み」)。
 - テスト: `test/migration-convert.test.ts`・`migration-reader.test.ts`・`migration-store.test.ts`・`migration-core.test.ts`(本物のローカルの D1・R2)・`handler-migration.test.ts`・`analysis-list-order.test.ts`、smoke の H。
+
+## 移行画面(Issue #222〈#167-B2〉。v1.29.0)
+上の「exe から移したファイルの取り込み」(#216)の API を使う画面。**クライアント(`client/`)だけの変更で、サーバ・D1・DO・wrangler.toml は無変更**(仕様と実測は `docs/current-spec.md` の「クラウド版の移行画面」)。
+- **入口**: 設定画面の末尾の「exe から移行」の節(要点の説明とリンク)→ 別の画面 `#migration`(`#migration` の完全一致だけ)。別の画面にしたのは、移行の再描画・ポーリングが設定フォームの入力を壊さないため。
+- **使い方**: exe の「クラウド移行用に書き出す」で作ったファイル(`.ndjson.gz`)を選ぶ → ブラウザが全行を検証(分析の件数・結果のレース数を表示。壊れている・途中で切れている・形式の版が違うファイルは理由を出してアップロードさせない)→ 「取り込みを始める」→ 進捗が出る。取り込みは数日に分けて自動で進むので、画面を閉じてよい(開き直すと今の進捗が見える)。同じファイルをもう一度上げても重複しない。
+- **進捗の更新**: 画面を開いている間だけ。取り込み中は 10 秒(`verifying`・`importing`)・60 秒(`waiting-budget`・`waiting-r2`)おき、終端では止める。非表示の間は止め、通信の失敗が 3 回続いたら止める。
+- **クライアントを変えたら**: 上の「クライアントを変えたら」と同じ(`pnpm run build:client` で生成物を更新する)。クライアントのバンドルには core の `ev/cloud-migration-format` と `src/migration-reader.ts` が入る(`test/client-bundle.test.ts` が閉包を固定。**`migration-reader.ts` に import を足さない**=Worker 専用のモジュールを引き込まないため)。
+- **検査**: `test/client-api-migration.test.ts`・`client-api-migration-contract.test.ts`(実際の `handle()` を通す)・`client-migration-file.test.ts`(実物のフィクスチャ)・`client-migration-model.test.ts`・`client-migration-screen.test.ts`・`client-view-migration.test.ts`・`client-app-migration.test.ts`・`client-dom-migration.test.ts`・`client-route.test.ts`・`client-bundle.test.ts`(生成物を偽の DOM で実行)。
 
 ## 手動起動の入口(Issue #180)
 Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 3 + 定時 1 の計 4 つ〉。さらに結果の取り込みの依頼〈Issue #208。cron と `POST /api/results/import` が共有する `dispatchResultImports` の中の 1 箇所〉で、呼び出し箇所は計 5 つ)。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。

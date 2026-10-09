@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { buildHash, parseHash, screenOf, SETTINGS_HASH, type Route } from "../client/route";
+import { buildHash, MIGRATION_HASH, parseHash, screenOf, SETTINGS_HASH, type Route } from "../client/route";
 
 /**
  * Issue #184(#165-b): スマホ画面の状態(URL のハッシュ)の解析と組み立て。純関数。
@@ -109,7 +109,7 @@ describe("buildHash", () => {
  * 優先順位は既存のとおり analysis(結果画面)> race(レース画面)> 一覧。
  */
 describe("screenOf(今どの画面か)", () => {
-  const cases: readonly [string, Route, "list" | "race" | "result" | "settings"][] = [
+  const cases: readonly [string, Route, "list" | "race" | "result" | "settings" | "migration"][] = [
     ["race も analysis も無ければ一覧", { date: TODAY, venue: "central", race: null, analysis: null, settings: false }, "list"],
     ["race があればレース画面", { date: TODAY, venue: "central", race: NAR_RACE, analysis: null, settings: false }, "race"],
     ["analysis があれば結果画面", { date: TODAY, venue: "central", race: null, analysis: 7, settings: false }, "result"],
@@ -189,5 +189,40 @@ describe("設定画面のハッシュ(#settings)", () => {
 
   it("buildHash は settings を出さない(設定画面への入口は SETTINGS_HASH だけ)", () => {
     expect(buildHash({ date: "20261003", venue: "nar" })).not.toContain("settings");
+  });
+});
+
+/** Issue #222(#167-B2): `#migration`(完全一致のときだけ移行画面)。設定画面の「exe から移行」の節のリンク先。 */
+describe("移行画面のハッシュ(#migration)", () => {
+  it("MIGRATION_HASH は `#migration`", () => {
+    expect(MIGRATION_HASH).toBe("#migration");
+  });
+
+  it("`#migration` は移行画面の route(日付は今日・区分は central・race と analysis は null・settings は false)", () => {
+    expect(parseHash("#migration", TODAY)).toEqual({ date: TODAY, venue: "central", race: null, analysis: null, settings: false, migration: true });
+    expect(screenOf(parseHash("#migration", TODAY))).toBe("migration");
+  });
+
+  it.each([["#migration&date=20261003"], ["#migration=1"], ["#Migration"], ["#migration "], ["#migration/"], ["#date=20261003&migration"], ["migration"], ["#migrate"], ["#settings"], ["#"], [""]])(
+    "完全一致でない %j は移行画面にしない(従来どおりの解析)",
+    (hash) => {
+      expect(parseHash(hash, TODAY).migration ?? false).toBe(false);
+      expect(screenOf(parseHash(hash, TODAY))).not.toBe("migration");
+    },
+  );
+
+  it("移行画面は、設定画面とは別の画面(`#settings` は移行画面にならず、`#migration` は設定画面にならない)", () => {
+    expect(screenOf(parseHash("#settings", TODAY))).toBe("settings");
+    expect(screenOf(parseHash("#migration", TODAY))).toBe("migration");
+    expect(parseHash("#migration", TODAY).settings).toBe(false);
+  });
+
+  it("screenOf の優先順位: settings > migration > analysis > race > 一覧(migration が true なら race・analysis があっても移行画面)", () => {
+    expect(screenOf({ date: TODAY, venue: "central", race: NAR_RACE, analysis: 7, settings: false, migration: true })).toBe("migration");
+    expect(screenOf({ date: TODAY, venue: "central", race: null, analysis: null, settings: true, migration: true })).toBe("settings");
+  });
+
+  it("buildHash は migration を出さない(移行画面への入口は MIGRATION_HASH だけ)", () => {
+    expect(buildHash({ date: "20261003", venue: "nar" })).not.toContain("migration");
   });
 });
