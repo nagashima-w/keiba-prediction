@@ -81,16 +81,17 @@ export interface SyntheticVerifyOptions {
 const COMBO_TYPES: readonly ComboBetType[] = ["wide", "trio", "quinella", "exacta", "trifecta", "bracketQuinella"];
 const COMBO_SIZE: Record<string, number> = { wide: 2, trio: 3, quinella: 2, exacta: 2, trifecta: 3, bracketQuinella: 2 };
 
-/** 中央 70%・地方 30% のレース ID(12 桁)。`index` から決定的に作る。 */
+/** 中央 70%・地方 30% のレース ID(12 桁)。`index` から決定的に作る。**index が違えば別の ID**(中央は場・回次・日次・R の組、地方は月日・R の組を、重複なく数え上げる)。 */
 export function syntheticRaceId(index: number): string {
-  if (index % 10 < 7) {
-    const place = String(1 + (index % 10)).padStart(2, "0");
-    const day = String(1 + (index % 8)).padStart(2, "0");
-    const race = String(1 + (index % 12)).padStart(2, "0");
-    return `2025${place}0${1 + (Math.floor(index / 120) % 5)}${day}${race}`;
+  const group = Math.floor(index / 10);
+  const rem = index % 10;
+  const two = (n: number): string => String(n).padStart(2, "0");
+  if (rem < 7) {
+    const c = group * 7 + rem; // 中央の通し番号
+    return `2025${two(1 + (c % 10))}${two(1 + (Math.floor(c / 10) % 5))}${two(1 + (Math.floor(c / 50) % 12))}${two(1 + (Math.floor(c / 600) % 12))}`;
   }
-  const mmdd = `${String(1 + (Math.floor(index / 300) % 12)).padStart(2, "0")}${String(1 + (index % 28)).padStart(2, "0")}`;
-  return `202544${mmdd}${String(1 + (index % 12)).padStart(2, "0")}`;
+  const n = group * 3 + (rem - 7); // 地方の通し番号
+  return `202544${two(1 + (n % 12))}${two(1 + (Math.floor(n / 12) % 28))}${two(1 + (Math.floor(n / 336) % 12))}`;
 }
 
 /** 合成した分析の列。`results` 件のレースに分析を割り当てる(1 レースに複数回)。 */

@@ -10,6 +10,8 @@ import type { CardResult, RaceModel, TaskCard } from "./race";
 import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
+import type { VerifyModel, VerifyNotice } from "./verify-model";
+import type { VerifyVenue } from "./api-verify";
 import { h, type PickedFile, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -40,6 +42,8 @@ export interface ViewActions {
   readonly onMigrationStart: () => void;
   /** 移行画面の検証の取り消し(Issue #222)。 */
   readonly onMigrationCancelCheck: () => void;
+  /** 検証画面の区分の切替(Issue #219）。 */
+  readonly onVerifyVenue: (venue: VerifyVenue) => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -90,6 +94,7 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
       model.venueTabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label])),
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+    h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
     h("a", { class: "settings-link", href: model.settingsHref }, ["設定"]),
   ]);
   const notices: VNode[] = [];
@@ -524,7 +529,85 @@ function migrationScreen(model: MigrationModel, actions: ViewActions): VNode {
   return h("div", { class: "screen" }, [controls, ...body]);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel, actions: ViewActions): VNode {
+// ---- 検証画面(Issue #219) ----
+
+function verifyNotice(n: VerifyNotice): VNode {
+  return notice(n.tone, n.text);
+}
+
+function tilesNode(tiles: readonly { readonly label: string; readonly value: string; readonly strong: boolean }[]): VNode {
+  return h(
+    "div",
+    { class: "verify-tiles" },
+    tiles.map((t) => h("div", { class: t.strong ? "verify-tile strong" : "verify-tile" }, [h("span", { class: "verify-tile-label" }, [t.label]), h("strong", { class: "verify-tile-value" }, [t.value])])),
+  );
+}
+
+function rowsNode(rows: readonly { readonly label: string; readonly value: string }[]): VNode {
+  return h("ul", { class: "verify-rows" }, rows.map((r) => h("li", {}, [h("span", { class: "verify-row-label" }, [r.label]), h("span", { class: "verify-row-value" }, [r.value])])));
+}
+
+function typeRowsNode(rows: readonly { readonly label: string; readonly count: string; readonly rate: string }[]): VNode {
+  return h("ul", { class: "verify-rows" }, rows.map((r) => h("li", {}, [h("span", { class: "verify-row-label" }, [r.label]), h("span", { class: "verify-row-value" }, [`${r.count} / ${r.rate}`])])));
+}
+
+function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
+  const controls = h("div", { class: "controls" }, [
+    h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+    h("button", { class: "refresh", disabled: model.refreshDisabled }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+  ]);
+  const venues = h(
+    "div",
+    { class: "verify-venues", role: "group", "aria-label": "検証の地域フィルタ" },
+    model.venueTabs.map((t) => h("button", { class: "verify-venue", "aria-pressed": t.current ? "true" : "false" }, [t.label], { click: () => actions.onVerifyVenue(t.venue) })),
+  );
+  const body: VNode[] = [h("h1", { class: "title" }, ["検証"]), venues];
+  if (model.loading && model.bet === null) {
+    body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  }
+  if (model.error !== null) {
+    body.push(notice("error", model.error));
+  }
+  if (model.pollNotice !== null) {
+    body.push(notice("info", model.pollNotice));
+  }
+  if (model.unavailable !== null) {
+    body.push(verifyNotice(model.unavailable));
+  }
+  if (model.computedAt !== null) {
+    body.push(h("p", { class: "meta" }, [`集計時点: ${model.computedAt}`]));
+  }
+  for (const n of model.notices) {
+    body.push(verifyNotice(n));
+  }
+  if (model.bet !== null) {
+    const b = model.bet;
+    body.push(h("h2", {}, [b.heading]), h("p", { class: "meta" }, [b.description]));
+    if (b.empty !== null) {
+      body.push(h("p", { class: "empty" }, [b.empty]));
+    } else {
+      body.push(tilesNode(b.tiles));
+      if (b.payoutLine !== null) body.push(h("p", { class: "meta" }, [b.payoutLine]));
+    }
+    body.push(h("h3", {}, [b.exclusionHeading]), rowsNode(b.exclusions));
+    if (b.exclusionNote !== null) body.push(h("p", { class: "meta" }, [b.exclusionNote]));
+  }
+  if (model.proposed !== null) {
+    const p = model.proposed;
+    body.push(h("h2", {}, [p.heading]), h("p", { class: "meta" }, [p.description]));
+    if (p.empty !== null) {
+      body.push(h("p", { class: "empty" }, [p.empty]));
+    } else {
+      body.push(tilesNode(p.tiles), h("h3", {}, [p.typeHeading]), typeRowsNode(p.types));
+      if (p.unjudged !== null) body.push(h("h3", {}, [p.unjudged.heading]), rowsNode(p.unjudged.rows));
+      if (p.unknownNotice !== null) body.push(notice("wait", p.unknownNotice));
+    }
+    body.push(h("h3", {}, [p.populationHeading]), rowsNode(p.population));
+  }
+  return h("div", { class: "screen verify-screen" }, [controls, ...body]);
+}
+
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -536,5 +619,7 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return settingsScreen(model, actions);
     case "migration":
       return migrationScreen(model, actions);
+    case "verify":
+      return verifyScreen(model, actions);
   }
 }

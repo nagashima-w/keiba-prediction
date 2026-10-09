@@ -153,6 +153,21 @@ export function renderPage(email: string): string {
   .card-desc { margin: 6px 0 0; font-size: 0.85rem; color: var(--muted); }
   /* Issue #189: 設定画面(トップの入口のリンク・入力欄。タップしやすい高さ 44px 以上。色だけに頼らない=エラーは文字と role=alert) */
   .settings-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  /* Issue #219: 検証画面(一覧の入口のリンク・区分の切替・数値のタイル・内訳の行。スマホ幅で横に伸ばさない=タイルは 2 列・行は折り返す。色だけに頼らない=回収率は太字) */
+  .verify-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .verify-link + .settings-link { margin-left: 0; }
+  .verify-venues { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+  .verify-venue { min-width: 64px; }
+  .verify-venue[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .verify-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+  .verify-tile { display: flex; flex-direction: column; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .verify-tile.strong { border-color: var(--accent); }
+  .verify-tile-label { font-size: 0.8rem; color: var(--muted); }
+  .verify-tile-value { font-size: 1.1rem; }
+  .verify-rows { list-style: none; margin: 4px 0 12px; padding: 0; }
+  .verify-rows li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+  .verify-row-value { flex: none; font-variant-numeric: tabular-nums; }
+  .verify-screen h3 { font-size: 0.95rem; margin: 16px 0 4px; }
   .field { margin: 0 0 16px; }
   .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.95rem; font-weight: bold; }
   .field-check { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; font-size: 0.95rem; font-weight: bold; }

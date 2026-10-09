@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { buildHash, MIGRATION_HASH, parseHash, screenOf, SETTINGS_HASH, type Route } from "../client/route";
+import { buildHash, MIGRATION_HASH, parseHash, screenOf, SETTINGS_HASH, VERIFY_HASH, type Route } from "../client/route";
 
 /**
  * Issue #184(#165-b): スマホ画面の状態(URL のハッシュ)の解析と組み立て。純関数。
@@ -224,5 +224,44 @@ describe("移行画面のハッシュ(#migration)", () => {
 
   it("buildHash は migration を出さない(移行画面への入口は MIGRATION_HASH だけ)", () => {
     expect(buildHash({ date: "20261003", venue: "nar" })).not.toContain("migration");
+  });
+});
+
+/** Issue #219: `#verify`(完全一致のときだけ検証画面)。一覧の入口のリンク先。 */
+describe("検証画面のハッシュ(#verify)", () => {
+  it("VERIFY_HASH は `#verify`", () => {
+    expect(VERIFY_HASH).toBe("#verify");
+  });
+
+  it("`#verify` は検証画面の route(日付は今日・区分は central・race と analysis は null・settings は false)", () => {
+    expect(parseHash("#verify", TODAY)).toEqual({ date: TODAY, venue: "central", race: null, analysis: null, settings: false, verify: true });
+    expect(screenOf(parseHash("#verify", TODAY))).toBe("verify");
+  });
+
+  it.each([["#verify&date=20261003"], ["#verify=1"], ["#Verify"], ["#verify "], ["#verify/"], ["#date=20261003&verify"], ["verify"], ["#verifying"], ["#settings"], ["#migration"], ["#"], [""]])(
+    "完全一致でないハッシュ %j は検証画面にならない",
+    (hash) => {
+      expect(parseHash(hash, TODAY).verify ?? false).toBe(false);
+      expect(screenOf(parseHash(hash, TODAY))).not.toBe("verify");
+    },
+  );
+
+  it("検証画面は、設定画面・移行画面とは別の画面", () => {
+    expect(screenOf(parseHash("#settings", TODAY))).toBe("settings");
+    expect(screenOf(parseHash("#migration", TODAY))).toBe("migration");
+    expect(parseHash("#verify", TODAY).settings).toBe(false);
+    expect(parseHash("#verify", TODAY).migration ?? false).toBe(false);
+    expect(parseHash("#settings", TODAY).verify ?? false).toBe(false);
+  });
+
+  it("screenOf の優先順位: settings > migration > verify > analysis > race > 一覧", () => {
+    const base = { date: TODAY, venue: "central", race: NAR_RACE, analysis: 7, settings: false } as const;
+    expect(screenOf({ ...base, verify: true })).toBe("verify");
+    expect(screenOf({ ...base, verify: true, migration: true })).toBe("migration");
+    expect(screenOf({ ...base, verify: true, settings: true })).toBe("settings");
+  });
+
+  it("buildHash は verify を出さない(検証画面への入口は VERIFY_HASH だけ)", () => {
+    expect(buildHash({ date: "20261003", venue: "nar" })).not.toContain("verify");
   });
 });

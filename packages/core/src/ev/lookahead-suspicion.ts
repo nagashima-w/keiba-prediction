@@ -32,7 +32,7 @@
  */
 
 import { kaisaiDateFromNarRaceId, parseKaisaiDate } from "../scraper/ids.js";
-import type { StoredAnalysis } from "./analysis-store.js";
+import type { StoredAnalysis } from "./analysis-store-types.js";
 
 /** 分類の結果。 */
 export type LookaheadSuspicion = "clean" | "suspect" | "unknown";

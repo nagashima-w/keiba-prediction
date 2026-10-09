@@ -17,7 +17,7 @@
  *
  * ## 費用の柵(D1 の読み取り 500 万行/日)
  *  - 再計算は {@link VERIFY_MIN_INTERVAL_MS}(5 分)に 1 回まで、1 日(JST)に {@link VERIFY_DAILY_LIMIT} 回まで。キャッシュのヒット時の D1 の読みは、透かしと補完待ちの確認の 2 クエリだけ。
- *  - 数値の根拠は `docs/current-spec.md` の「クラウド版の検証画面」(ローカルでの実測)。
+ *  - 数値の根拠は {@link VERIFY_DAILY_LIMIT} の JSDoc と `docs/current-spec.md` の「クラウド版の検証画面」(ローカルでの実測)。
  *
  * ## 補完(`runBackfillTick`)
  * 1 回のアラームの問い合わせ数は {@link VERIFY_TICK_QUERY_LIMIT}(40)以内(Free の 1 呼び出し 50 クエリの手前。使用量 1 + 補完待ち 1 + 書き込みの batch 2 文 + R2 の get)。
@@ -36,9 +36,12 @@ export const VERIFY_TTL_MS = 60 * 60_000;
 /** 再計算の最短間隔。 */
 export const VERIFY_MIN_INTERVAL_MS = 5 * 60_000;
 /**
- * 1 日(JST)の再計算の上限。1 回あたりの D1 読み取りの実測(`docs/current-spec.md`)から、500 万行/日の一部(他の用途の分を残す)に収まるように決める。
+ * 1 日(JST)の再計算の上限。**根拠**: 1 回の再計算の D1 の読み取りは、読む表の行数の合計(ローカルの実測: 分析 2,225・馬 28,925・配分メタ 2,225・買い目 26,700・結果 20,814・組合せ払戻 10,408・取込印 7,806 の
+ * 計 99,103 行で、D1 が報告した `meta.rows_read` もちょうど 99,103。`scripts/measure-verify.ts`〈買い目は 1 分析 12 件の仮定。本番の実数は未確認〉)。
+ * 20 回 × 99,103 行 ≈ 198 万行で、Free の 500 万行/日の約 40%(他の用途〈一覧・詳細・移行・補完〉の分を残す)。本番の買い目が仮定より多ければ 1 回あたりが増える
+ * (買い目が 1 分析 40 件なら 1 回約 16 万行で、20 回は約 320 万行〈約 64%〉)。最初の本番の呼び出しの `diag.rowsRead` で実値を確かめ、必要ならこの定数を下げる。
  */
-export const VERIFY_DAILY_LIMIT = 24;
+export const VERIFY_DAILY_LIMIT = 20;
 /** 1 回のアラームの問い合わせ数(D1 の文+R2 の操作)の上限。`MIGRATION_TICK_QUERY_LIMIT` と同じ。 */
 export const VERIFY_TICK_QUERY_LIMIT = 40;
 /** 補完が続くときの、次のアラームまでの間隔。 */

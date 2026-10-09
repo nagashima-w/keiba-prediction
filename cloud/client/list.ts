@@ -4,7 +4,7 @@
  */
 import type { BoardRow, RaceRow, TaskMode } from "./api";
 import { ymdToInput } from "./date";
-import { buildHash, SETTINGS_HASH, type Route, type Venue } from "./route";
+import { buildHash, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
 
 export interface Badge {
   readonly label: string;
@@ -143,6 +143,8 @@ export interface ListModel {
   readonly venue: Venue;
   /** 設定画面への入口のリンク先(Issue #189)。 */
   readonly settingsHref: string;
+  /** 検証画面への入口のリンク先(Issue #219)。 */
+  readonly verifyHref: string;
   readonly venueTabs: readonly { readonly venue: Venue; readonly label: string; readonly href: string; readonly current: boolean }[];
   /** 一覧または板を取得中(「更新」を無効にする)。 */
   readonly loading: boolean;
@@ -172,6 +174,7 @@ export function buildListModel(input: ListModelInput): ListModel {
     dateInput: ymdToInput(route.date),
     venue: route.venue,
     settingsHref: SETTINGS_HASH,
+    verifyHref: VERIFY_HASH,
     venueTabs: (["central", "nar"] as const).map((venue) => ({
       venue,
       label: venue === "central" ? "中央" : "地方",
