@@ -388,8 +388,8 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("強調材料・懸念事項(highlights・concerns)の追加版として 2026-10-07.1 が付与されていること(Issue #197)", () => {
-    expect(PROMPT_VERSION).toBe("2026-10-07.1");
+  it("休み明け実績・ベスト体重の材料と解釈の指示の追加版として 2026-10-09.1 が付与されていること(Issue #212)", () => {
+    expect(PROMPT_VERSION).toBe("2026-10-09.1");
   });
 });
 
