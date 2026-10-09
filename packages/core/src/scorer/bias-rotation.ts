@@ -12,8 +12,10 @@
  *   全体複勝率の差分 × 重み を基本とする(叩き良化×休み明けのマイナス = n1率 − 全体率 の実測差分など)。
  * - タイプ判定の各比較は、比較に使うバケットが minSampleForBias(既定2走)以上あることを要求する
  *   (サンプル不足での分類を避ける、既存バイアスの「2走未満補正なし」に整合)。
- * - 休み明け実績(N=1)が2走未満で型判定できないときは「不明」とし、今回が休み明けの場合のみ
- *   弱いマイナス補正(config.rotation.unknownRestPenalty × 重み)を与える。2走目以降なら0。
+ * - 休み明け実績(N=1)が2走未満で型判定できないときは「不明」とし、補正なし(0)にする。
+ *   以前は今回が休み明けの場合に一律の弱いマイナス補正(unknownRestPenalty)を与えていたが、
+ *   Issue #213(#210-B)で撤去した。休み明けの良し悪しは、LLM がその馬の休み明け実績(Issue #212)と
+ *   照らして判断するため、実績の無い馬を一律に割り引くと二重に数える(実績に基づく補正は残す)。
  */
 
 import type { DerivedRaceFeature } from "./derive-features.js";
@@ -187,14 +189,9 @@ export function computeRotationBias(
 
   // 今回が休み明け(1走目)。
   if (n === 1) {
-    // 休み明け実績(N=1)が2走未満 → 不明。弱いマイナス補正のみ。
+    // 休み明け実績(N=1)が2走未満 → 不明。実績が無いものを一律に割り引かず、補正なし。
     if (curve.n1.sampleCount < config.minSampleForBias) {
-      return {
-        ...base,
-        applied: true,
-        reason: "休み明け実績2走未満(不明)のため弱いマイナス補正",
-        correction: -config.rotation.unknownRestPenalty * weight,
-      };
+      return none("休み明け実績2走未満(不明)のため補正なし");
     }
     // 叩き良化型×休み明け → マイナス補正(n1率 − 全体率)。
     if (types.improveWithRacing) {

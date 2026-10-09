@@ -39,6 +39,8 @@
  * PROMPT_VERSION が "2026-07-28.2" → "2026-10-07.1" に更新されたため、この対照(default)の値もここで追随した。
  * 休み明け実績・ベスト体重の材料と解釈の指示(Issue #212)で build-prompt.ts の PROMPT_VERSION が
  * "2026-10-07.1" → "2026-10-09.1" に更新されたため、この対照(default)の値もここで追随した。
+ * scorer の馬体重の減点と休み明けの一律減点の撤去(Issue #213。プロンプトの文面は不変で 3着内率の値が変わる)で
+ * build-prompt.ts の PROMPT_VERSION が "2026-10-09.1" → "2026-10-09.2" に更新されたため、この対照(default)の値もここで追随した。
  *
  * 新版(wide15)は幅0.15(絶対値)・PROMPT_VERSION="{対照のPROMPT_VERSION}-clip015"(版文字列に幅を
  * 内包し、対照と必ず異なる値にする。DB列は追加しない: analyses.prompt_version は既存の文字列カラムの
@@ -74,14 +76,14 @@ export const CLIP_VARIANTS: Readonly<Record<ClipVariantId, ClipVariant>> = {
   default: {
     id: "default",
     maxAdjust: 0.1,
-    // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(Issue #197 で追随)。
-    promptVersion: "2026-10-09.1",
+    // build-prompt.ts の PROMPT_VERSION と同一の値を手動同期する(Issue #213 で追随)。
+    promptVersion: "2026-10-09.2",
   },
   wide15: {
     id: "wide15",
     maxAdjust: 0.15,
-    // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(Issue #197 で追随)。
-    promptVersion: "2026-10-09.1-clip015",
+    // 対照(default)のPROMPT_VERSIONに"-clip015"を付けた値。対照更新時は必ず追随する(Issue #213 で追随)。
+    promptVersion: "2026-10-09.2-clip015",
   },
 };
 

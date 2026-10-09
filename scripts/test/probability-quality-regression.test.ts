@@ -85,13 +85,13 @@ const FIXTURES: readonly FixtureCase[] = [
     label: "中央16頭",
     fixtureFileName: "central-on.json",
     kaisaiDate: "20260628",
-    expected: { spearmanRho: -0.005886682977052603, sdRatio: 0.45869693887677404, klModel: 0.023594955525432157, klMarket: 0.10397453475016975 },
+    expected: { spearmanRho: -0.007358353721315753, sdRatio: 0.4521232078462746, klModel: 0.02292214278492964, klMarket: 0.10397453475016975 },
   },
   {
     label: "地方12頭",
     fixtureFileName: "nar-on.json",
     kaisaiDate: "20260712",
-    expected: { spearmanRho: 0.54641064530391, sdRatio: 1.0976534997240799, klModel: 0.06545167891448544, klMarket: 0.053251532406149917 },
+    expected: { spearmanRho: 0.5288974835954514, sdRatio: 0.9879264735332672, klModel: 0.06043880053025523, klMarket: 0.053251532406149917 },
   },
 ];
 
@@ -306,11 +306,13 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
       6,
     );
 
-    // 回帰: 自分で実行して得た値を固定する(受け入れ条件8。旧版と同じ値。リークあり側は参照実装から)。
-    expect(leakyReport.spearmanRho.value).toBeCloseTo(0.21044891642963054, 9);
-    expect(filteredReport.spearmanRho.value).toBeCloseTo(-0.005886682977052603, 9);
-    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.015556379406077249, 9);
-    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.023594955525432157, 9);
+    // 回帰: 自分で実行して得た値を固定する(受け入れ条件8。リークあり側は参照実装から)。
+    // Issue #213 で scorer の馬体重の減点・休み明けの一律減点を撤去したため、値を実測し直した
+    // (旧: リークあり ρ=0.2104489…・klModel=0.0155563…、遮断後 ρ=-0.0058866…・klModel=0.0235949…)。
+    expect(leakyReport.spearmanRho.value).toBeCloseTo(0.23693898982636727, 9);
+    expect(filteredReport.spearmanRho.value).toBeCloseTo(-0.007358353721315753, 9);
+    expect(leakyReport.normalizedJointKlModel.value).toBeCloseTo(0.015346756614944555, 9);
+    expect(filteredReport.normalizedJointKlModel.value).toBeCloseTo(0.02292214278492964, 9);
 
     // conditionsにリーク遮断の実際の診断値が反映されていること。
     // (leakFilter は計測側が渡す診断値。#39 以降 production は常に遮断するので、diagnostics を
@@ -351,16 +353,19 @@ describe("probability-quality × 実フィクスチャの回帰(#40)", () => {
     // 全馬careerRunCount=0(新馬相当)であること。
     expect(result.rows.every((row) => row.careerRunCount === 0)).toBe(true);
 
-    // Σpriorが目標(min(3,頭数)=3)付近に収まること(prior.tsの正規化仕様)。
+    // Σpriorが目標(min(3,頭数)=3)付近に収まること。
+    // Issue #213 以前は、馬体重の減点で raw 合計が下振れして頭数正規化(許容10%)が発動し、Σ=3 ちょうどに
+    // 揃っていた(固定値 3.000000000000001)。減点の撤去後は raw 合計が許容内(偏差 1.3%)に入り正規化は
+    // 発動しないので、Σ=3.04(コースレベル枠順バイアスの加算分)になる。
     const priorSum = result.rows.reduce((s, row) => s + row.prior, 0);
     expect(priorSum).toBeCloseTo(3, 1);
 
     // 回帰: 自分で実行して得た値を固定する(受け入れ条件8)。
-    expect(priorSum).toBeCloseTo(3.000000000000001, 9);
+    expect(priorSum).toBeCloseTo(3.04, 9);
     expect(result.rows.every((row) => row.prior > 0 && row.prior < 1)).toBe(true);
-    // 参考: boss実測(中継経由・#40会話)の範囲[0.1608, 0.2142]と一致する。
-    expect(Math.min(...result.rows.map((r) => r.prior))).toBeCloseTo(0.16079376854599414, 9);
-    expect(Math.max(...result.rows.map((r) => r.prior))).toBeCloseTo(0.214206231454006, 9);
+    // 参考: Issue #213 以前の範囲は [0.1608, 0.2142](boss実測。正規化後の値)。正規化が発動しなくなったので変わった。
+    expect(Math.min(...result.rows.map((r) => r.prior))).toBeCloseTo(0.1675, 9);
+    expect(Math.max(...result.rows.map((r) => r.prior))).toBeCloseTo(0.2075, 9);
 
     // eslint-disable-next-line no-console
     console.log(

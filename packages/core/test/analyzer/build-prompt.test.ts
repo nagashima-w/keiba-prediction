@@ -390,8 +390,8 @@ describe("PROMPT_VERSION(プロンプト版番号、Task#27)", () => {
     expect(PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
-  it("休み明け実績・ベスト体重の材料と解釈の指示の追加版として 2026-10-09.1 が付与されていること(Issue #212)", () => {
-    expect(PROMPT_VERSION).toBe("2026-10-09.1");
+  it("scorer の馬体重・休み明けの一律減点の撤去(3着内率の値が変わる)の版として 2026-10-09.2 が付与されていること(Issue #213。直前は Issue #212 の 2026-10-09.1)", () => {
+    expect(PROMPT_VERSION).toBe("2026-10-09.2");
   });
 });
 

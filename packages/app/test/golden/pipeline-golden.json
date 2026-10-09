@@ -21,11 +21,11 @@
           "umaban": 1,
           "wakuban": 1,
           "horseName": "ルージュボヤージュ",
-          "prior": 0.3952185792349726,
-          "adjustedProb": 0.3952185792349726,
+          "prior": 0.42721857923497264,
+          "adjustedProb": 0.42721857923497264,
           "placeOddsMin": 3.1,
           "winOdds": 9,
-          "ev": 1.2251775956284152,
+          "ev": 1.3243775956284152,
           "isPositive": true,
           "reason": null,
           "highlights": [],
@@ -39,11 +39,11 @@
           "umaban": 2,
           "wakuban": 1,
           "horseName": "クカイリモク",
-          "prior": 0.14737089118931126,
-          "adjustedProb": 0.14737089118931126,
+          "prior": 0.16337089118931128,
+          "adjustedProb": 0.16337089118931128,
           "placeOddsMin": 4.2,
           "winOdds": 18.6,
-          "ev": 0.6189577429951073,
+          "ev": 0.6861577429951075,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -89,11 +89,11 @@
           "umaban": 4,
           "wakuban": 2,
           "horseName": "サイモンシャリオ",
-          "prior": 0.3135,
-          "adjustedProb": 0.3135,
+          "prior": 0.3215,
+          "adjustedProb": 0.3215,
           "placeOddsMin": 9.5,
           "winOdds": 59.5,
-          "ev": 2.97825,
+          "ev": 3.05425,
           "isPositive": true,
           "reason": null,
           "highlights": [],
@@ -158,11 +158,11 @@
           "umaban": 7,
           "wakuban": 4,
           "horseName": "ショウナンガルフ",
-          "prior": 0.12965660547502555,
-          "adjustedProb": 0.12965660547502555,
+          "prior": 0.13765660547502556,
+          "adjustedProb": 0.13765660547502556,
           "placeOddsMin": 15.4,
           "winOdds": 79.2,
-          "ev": 1.9967117243153936,
+          "ev": 2.1199117243153935,
           "isPositive": true,
           "reason": null,
           "highlights": [],
@@ -181,11 +181,11 @@
           "umaban": 8,
           "wakuban": 4,
           "horseName": "ディールメーカー",
-          "prior": 0.12074751456593465,
-          "adjustedProb": 0.12074751456593465,
+          "prior": 0.13674751456593465,
+          "adjustedProb": 0.13674751456593465,
           "placeOddsMin": 3.6,
           "winOdds": 14,
-          "ev": 0.4346910524373647,
+          "ev": 0.49229105243736476,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -204,11 +204,11 @@
           "umaban": 9,
           "wakuban": 5,
           "horseName": "キンググローリー",
-          "prior": 0.14874751456593466,
-          "adjustedProb": 0.14874751456593466,
+          "prior": 0.15674751456593466,
+          "adjustedProb": 0.15674751456593466,
           "placeOddsMin": 4.5,
           "winOdds": 18.6,
-          "ev": 0.669363815546706,
+          "ev": 0.705363815546706,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -342,12 +342,12 @@
           "umaban": 15,
           "wakuban": 8,
           "horseName": "バドリナート",
-          "prior": 0.15056569638411646,
-          "adjustedProb": 0.15056569638411646,
+          "prior": 0.15856569638411647,
+          "adjustedProb": 0.15856569638411647,
           "placeOddsMin": 6.5,
           "winOdds": 29.1,
-          "ev": 0.978677026496757,
-          "isPositive": false,
+          "ev": 1.030677026496757,
+          "isPositive": true,
           "reason": null,
           "highlights": [],
           "concerns": [],
@@ -365,11 +365,11 @@
           "umaban": 16,
           "wakuban": 8,
           "horseName": "スペルーチェ",
-          "prior": 0.15965660547502555,
-          "adjustedProb": 0.15965660547502555,
+          "prior": 0.16765660547502556,
+          "adjustedProb": 0.16765660547502556,
           "placeOddsMin": 5,
           "winOdds": 21.7,
-          "ev": 0.7982830273751278,
+          "ev": 0.8382830273751278,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -9825,10 +9825,10 @@
       "horses": [
         {
           "umaban": 1,
-          "prior": 0.3952185792349726,
-          "adjustedProb": 0.3952185792349726,
+          "prior": 0.42721857923497264,
+          "adjustedProb": 0.42721857923497264,
           "placeOddsMin": 3.1,
-          "ev": 1.2251775956284152,
+          "ev": 1.3243775956284152,
           "isPositive": true,
           "contributions": [
             {
@@ -9872,11 +9872,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.0020000000000000018
+              "correction": 0.03
             },
             {
               "biasName": "コース枠順バイアス",
@@ -10010,10 +10010,10 @@
         },
         {
           "umaban": 2,
-          "prior": 0.14737089118931126,
-          "adjustedProb": 0.14737089118931126,
+          "prior": 0.16337089118931128,
+          "adjustedProb": 0.16337089118931128,
           "placeOddsMin": 4.2,
-          "ev": 0.6189577429951073,
+          "ev": 0.6861577429951075,
           "isPositive": false,
           "contributions": [
             {
@@ -10057,11 +10057,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.013999999999999999
+              "correction": 0.03
             },
             {
               "biasName": "コース枠順バイアス",
@@ -10242,9 +10242,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.01
             },
@@ -10380,10 +10380,10 @@
         },
         {
           "umaban": 4,
-          "prior": 0.3135,
-          "adjustedProb": 0.3135,
+          "prior": 0.3215,
+          "adjustedProb": 0.3215,
           "placeOddsMin": 9.5,
-          "ev": 2.97825,
+          "ev": 3.05425,
           "isPositive": true,
           "contributions": [
             {
@@ -10427,11 +10427,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.008
+              "correction": 0
             },
             {
               "biasName": "コース枠順バイアス",
@@ -10612,9 +10612,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -10797,9 +10797,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -10935,10 +10935,10 @@
         },
         {
           "umaban": 7,
-          "prior": 0.12965660547502555,
-          "adjustedProb": 0.12965660547502555,
+          "prior": 0.13765660547502556,
+          "adjustedProb": 0.13765660547502556,
           "placeOddsMin": 15.4,
-          "ev": 1.9967117243153936,
+          "ev": 2.1199117243153935,
           "isPositive": true,
           "contributions": [
             {
@@ -10982,11 +10982,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.018000000000000002
+              "correction": -0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -11120,10 +11120,10 @@
         },
         {
           "umaban": 8,
-          "prior": 0.12074751456593465,
-          "adjustedProb": 0.12074751456593465,
+          "prior": 0.13674751456593465,
+          "adjustedProb": 0.13674751456593465,
           "placeOddsMin": 3.6,
-          "ev": 0.4346910524373647,
+          "ev": 0.49229105243736476,
           "isPositive": false,
           "contributions": [
             {
@@ -11167,11 +11167,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.016
+              "correction": 0
             },
             {
               "biasName": "コース枠順バイアス",
@@ -11305,10 +11305,10 @@
         },
         {
           "umaban": 9,
-          "prior": 0.14874751456593466,
-          "adjustedProb": 0.14874751456593466,
+          "prior": 0.15674751456593466,
+          "adjustedProb": 0.15674751456593466,
           "placeOddsMin": 4.5,
-          "ev": 0.669363815546706,
+          "ev": 0.705363815546706,
           "isPositive": false,
           "contributions": [
             {
@@ -11352,11 +11352,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.012
+              "correction": 0.02
             },
             {
               "biasName": "コース枠順バイアス",
@@ -11537,9 +11537,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -11722,9 +11722,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -11907,9 +11907,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": -0.01
             },
@@ -12092,9 +12092,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0
             },
@@ -12277,9 +12277,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.01
             },
@@ -12415,11 +12415,11 @@
         },
         {
           "umaban": 15,
-          "prior": 0.15056569638411646,
-          "adjustedProb": 0.15056569638411646,
+          "prior": 0.15856569638411647,
+          "adjustedProb": 0.15856569638411647,
           "placeOddsMin": 6.5,
-          "ev": 0.978677026496757,
-          "isPositive": false,
+          "ev": 1.030677026496757,
+          "isPositive": true,
           "contributions": [
             {
               "biasName": "近走着順",
@@ -12462,11 +12462,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.018000000000000002
+              "correction": -0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -12600,10 +12600,10 @@
         },
         {
           "umaban": 16,
-          "prior": 0.15965660547502555,
-          "adjustedProb": 0.15965660547502555,
+          "prior": 0.16765660547502556,
+          "adjustedProb": 0.16765660547502556,
           "placeOddsMin": 5,
-          "ev": 0.7982830273751278,
+          "ev": 0.8382830273751278,
           "isPositive": false,
           "contributions": [
             {
@@ -12647,11 +12647,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.002
+              "correction": 0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -12814,1857 +12814,1962 @@
           {
             "betType": "win",
             "comboKey": "01",
-            "stake": 600,
+            "stake": 800,
             "odds": 9,
-            "ev": 1.2731926168776584
+            "ev": 1.3446278061471204
+          },
+          {
+            "betType": "place",
+            "comboKey": "01",
+            "stake": 200,
+            "odds": 3.1,
+            "ev": 1.3243775956284152
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0102",
-            "stake": 2700,
+            "stake": 2900,
             "odds": 38,
-            "ev": 3.737954251060305
+            "ev": 3.8681513098742233
+          },
+          {
+            "betType": "quinella",
+            "comboKey": "0102",
+            "stake": 400,
+            "odds": 63.8,
+            "ev": 1.069345868129831
           },
           {
             "betType": "trio",
             "comboKey": "010203",
             "stake": 500,
             "odds": 260.2,
-            "ev": 1.8064829980610244
+            "ev": 1.9848658484601562
           },
           {
             "betType": "trio",
             "comboKey": "010204",
             "stake": 500,
             "odds": 942.3,
-            "ev": 5.570888937664062
+            "ev": 6.340181754524171
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010207",
+            "stake": 100,
+            "odds": 1310.9,
+            "ev": 3.247919778262051
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010209",
+            "stake": 100,
+            "odds": 404.2,
+            "ev": 1.1559704266635784
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010210",
+            "stake": 100,
+            "odds": 2440,
+            "ev": 6.978149037751439
           },
           {
             "betType": "trio",
             "comboKey": "010211",
             "stake": 100,
             "odds": 932.9,
-            "ev": 2.5959669812519266
+            "ev": 2.876477272003033
           },
           {
             "betType": "trio",
             "comboKey": "010215",
-            "stake": 100,
+            "stake": 200,
             "odds": 730.5,
-            "ev": 1.8020516754504154
+            "ev": 2.1161727102905243
           },
           {
             "betType": "trio",
             "comboKey": "010216",
-            "stake": 100,
+            "stake": 200,
             "odds": 542.2,
-            "ev": 1.4280353762412257
+            "ev": 1.6718040270983434
           },
           {
             "betType": "wide",
             "comboKey": "0103",
-            "stake": 400,
+            "stake": 200,
             "odds": 17.5,
-            "ev": 1.931849872207655
+            "ev": 1.9572923590088447
           },
           {
             "betType": "trio",
             "comboKey": "010304",
             "stake": 1300,
             "odds": 682.8,
-            "ev": 11.631112015463108
+            "ev": 11.697073208819718
           },
           {
             "betType": "trio",
             "comboKey": "010306",
             "stake": 500,
             "odds": 162.1,
-            "ev": 1.2705698966129877
+            "ev": 1.2442411808173324
           },
           {
             "betType": "trio",
             "comboKey": "010307",
-            "stake": 400,
+            "stake": 500,
             "odds": 1141.3,
-            "ev": 6.881546977281522
+            "ev": 7.202300570044417
           },
           {
             "betType": "trio",
             "comboKey": "010308",
             "stake": 200,
             "odds": 221.9,
-            "ev": 1.2381020375204355
+            "ev": 1.3901920400406507
           },
           {
             "betType": "trio",
             "comboKey": "010309",
             "stake": 400,
             "odds": 302.2,
-            "ev": 2.119837662885081
+            "ev": 2.201203602532222
           },
           {
             "betType": "trio",
             "comboKey": "010310",
-            "stake": 400,
+            "stake": 500,
             "odds": 2263.9,
-            "ev": 16.835002077947948
+            "ev": 16.490088801365644
           },
           {
             "betType": "trio",
             "comboKey": "010311",
             "stake": 600,
             "odds": 608.8,
-            "ev": 4.882539776981527
+            "ev": 4.780842786687824
           },
           {
             "betType": "trio",
             "comboKey": "010312",
             "stake": 400,
             "odds": 174.8,
-            "ev": 1.125512924694249
+            "ev": 1.1030948389063024
           },
           {
             "betType": "trio",
             "comboKey": "010313",
             "stake": 400,
             "odds": 147.2,
-            "ev": 1.1017230831283071
+            "ev": 1.0791203164006358
           },
           {
             "betType": "trio",
             "comboKey": "010314",
             "stake": 600,
             "odds": 342.5,
-            "ev": 2.9503170723351806
+            "ev": 2.887825320393435
           },
           {
             "betType": "trio",
             "comboKey": "010315",
-            "stake": 500,
+            "stake": 600,
             "odds": 466.6,
-            "ev": 3.3175425209355534
+            "ev": 3.4426197421744993
           },
           {
             "betType": "trio",
             "comboKey": "010316",
             "stake": 600,
             "odds": 563.9,
-            "ev": 4.280522751286878
+            "ev": 4.428247778274087
           },
           {
             "betType": "quinella",
             "comboKey": "0104",
-            "stake": 1100,
+            "stake": 1000,
             "odds": 283.4,
-            "ev": 9.814362233709465
+            "ev": 10.296865573425922
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0104",
             "stake": 100,
             "odds": 32.8,
-            "ev": 1.0607759646266057
+            "ev": 1.2007658818614637
           },
           {
             "betType": "trio",
             "comboKey": "010405",
             "stake": 400,
             "odds": 411,
-            "ev": 2.5400932147213244
+            "ev": 2.57740472496447
           },
           {
             "betType": "trio",
             "comboKey": "010406",
             "stake": 500,
             "odds": 520.7,
-            "ev": 3.475478409383053
+            "ev": 3.525314938803398
           },
           {
             "betType": "trio",
             "comboKey": "010407",
             "stake": 400,
             "odds": 3551,
-            "ev": 18.23234718455475
+            "ev": 19.765450457232287
           },
           {
             "betType": "trio",
             "comboKey": "010408",
             "stake": 400,
             "odds": 1074.3,
-            "ev": 5.10421245116669
+            "ev": 5.9364599692742654
           },
           {
             "betType": "trio",
             "comboKey": "010409",
             "stake": 500,
             "odds": 1144.5,
-            "ev": 6.836485462938163
+            "ev": 7.35307827074644
           },
           {
             "betType": "trio",
             "comboKey": "010410",
             "stake": 500,
             "odds": 7142.1,
-            "ev": 45.2264116864865
+            "ev": 45.88590678680485
           },
           {
             "betType": "trio",
             "comboKey": "010411",
             "stake": 500,
             "odds": 1736.9,
-            "ev": 11.862001033285221
+            "ev": 12.03078399404808
           },
           {
             "betType": "trio",
             "comboKey": "010412",
             "stake": 400,
             "odds": 687.9,
-            "ev": 3.771737227624048
+            "ev": 3.82896462110112
           },
           {
             "betType": "trio",
             "comboKey": "010413",
             "stake": 500,
             "odds": 573.5,
-            "ev": 3.6551775542806615
+            "ev": 3.70837170119975
           },
           {
             "betType": "trio",
             "comboKey": "010414",
             "stake": 600,
             "odds": 1308.1,
-            "ev": 9.59539152737309
+            "ev": 9.728417327812657
           },
           {
             "betType": "trio",
             "comboKey": "010415",
             "stake": 500,
             "odds": 1875.7,
-            "ev": 11.356497207850602
+            "ev": 12.206625362394243
           },
           {
             "betType": "trio",
             "comboKey": "010416",
             "stake": 500,
             "odds": 1668.2,
-            "ev": 10.783346742734567
+            "ev": 11.55492766357937
           },
           {
             "betType": "trio",
             "comboKey": "010611",
             "stake": 100,
             "odds": 444,
-            "ev": 1.3949273706189929
+            "ev": 1.3775502026074764
           },
           {
             "betType": "trio",
             "comboKey": "010615",
             "stake": 200,
             "odds": 437.5,
-            "ev": 1.2185162479817109
+            "ev": 1.2752860469225387
           },
           {
             "betType": "trio",
             "comboKey": "010616",
             "stake": 100,
             "odds": 346,
-            "ev": 1.0288709256848294
+            "ev": 1.0734963290589794
           },
           {
             "betType": "quinella",
             "comboKey": "0107",
             "stake": 400,
             "odds": 437.8,
-            "ev": 5.5938002983396276
+            "ev": 6.100288098442434
           },
           {
             "betType": "wide",
             "comboKey": "0107",
-            "stake": 1500,
+            "stake": 1300,
             "odds": 109.9,
-            "ev": 4.118730778417594
+            "ev": 4.460803426928469
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010708",
+            "stake": 100,
+            "odds": 1678.7,
+            "ev": 3.415623098651923
           },
           {
             "betType": "trio",
             "comboKey": "010709",
             "stake": 100,
             "odds": 1811.9,
-            "ev": 3.8296265423699247
+            "ev": 4.286510230289411
           },
           {
             "betType": "trio",
             "comboKey": "010710",
             "stake": 100,
             "odds": 6248.6,
-            "ev": 14.001093257636644
+            "ev": 14.782652367672839
           },
           {
             "betType": "trio",
             "comboKey": "010711",
             "stake": 100,
             "odds": 3610.1,
-            "ev": 8.724208078386475
+            "ev": 9.208015391093136
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010713",
+            "stake": 100,
+            "odds": 1035.4,
+            "ev": 2.465330813150342
           },
           {
             "betType": "trio",
             "comboKey": "010714",
             "stake": 100,
             "odds": 1667.6,
-            "ev": 4.328602370738699
+            "ev": 4.567011517133033
           },
           {
             "betType": "trio",
             "comboKey": "010715",
             "stake": 100,
             "odds": 2730.9,
-            "ev": 5.850510025121265
+            "ev": 6.544194525715025
           },
           {
             "betType": "trio",
             "comboKey": "010716",
             "stake": 100,
             "odds": 2866.5,
-            "ev": 6.556518197411445
+            "ev": 7.31136980099401
+          },
+          {
+            "betType": "trifecta",
+            "comboKey": "010803",
+            "stake": 100,
+            "odds": 1513.2,
+            "ev": 1.6227732771695973
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010810",
+            "stake": 100,
+            "odds": 2833.9,
+            "ev": 6.655783881389196
           },
           {
             "betType": "trio",
             "comboKey": "010811",
             "stake": 100,
             "odds": 772.8,
-            "ev": 1.7281363825989013
+            "ev": 1.9568567300685136
           },
           {
             "betType": "trio",
             "comboKey": "010815",
             "stake": 100,
             "odds": 525.6,
-            "ev": 1.0419490601339871
+            "ev": 1.250405342112311
           },
           {
             "betType": "trio",
             "comboKey": "010816",
             "stake": 100,
             "odds": 609.8,
-            "ev": 1.2906617342019375
+            "ev": 1.5441139156260086
           },
           {
             "betType": "quinella",
             "comboKey": "0109",
             "stake": 200,
             "odds": 102.4,
-            "ev": 1.5164925708425414
+            "ev": 1.6409521498953499
           },
           {
             "betType": "exacta",
             "comboKey": "0109",
             "stake": 100,
             "odds": 184.6,
-            "ev": 1.4380002297038934
+            "ev": 1.562166766209543
           },
           {
             "betType": "wide",
             "comboKey": "0109",
-            "stake": 800,
+            "stake": 500,
             "odds": 26.6,
-            "ev": 1.1506124760405365
+            "ev": 1.2365444714208431
           },
           {
             "betType": "trio",
             "comboKey": "010910",
             "stake": 100,
             "odds": 2799.9,
-            "ev": 7.29899586524326
+            "ev": 7.645882588131541
           },
           {
             "betType": "trio",
             "comboKey": "010911",
             "stake": 100,
             "odds": 1028.9,
-            "ev": 2.8928111861439874
+            "ev": 3.0292432746817655
           },
           {
             "betType": "trio",
             "comboKey": "010914",
             "stake": 100,
             "odds": 416.1,
-            "ev": 1.2565866365675369
+            "ev": 1.3153788110328084
           },
           {
             "betType": "trio",
             "comboKey": "010915",
-            "stake": 100,
+            "stake": 200,
             "odds": 826.2,
-            "ev": 2.0592790419872693
+            "ev": 2.285340117155274
           },
           {
             "betType": "trio",
             "comboKey": "010916",
-            "stake": 100,
+            "stake": 200,
             "odds": 874.8,
-            "ev": 2.327936564631985
+            "ev": 2.5755486604058784
           },
           {
             "betType": "quinella",
             "comboKey": "0110",
             "stake": 600,
             "odds": 776.2,
-            "ev": 12.166659770595777
+            "ev": 12.438545495593463
           },
           {
             "betType": "wide",
             "comboKey": "0110",
-            "stake": 2000,
+            "stake": 1700,
             "odds": 192.6,
-            "ev": 8.80177916461148
+            "ev": 8.953325759235128
           },
           {
             "betType": "trio",
             "comboKey": "011011",
-            "stake": 100,
+            "stake": 200,
             "odds": 4986.6,
-            "ev": 14.8630067593066
+            "ev": 14.681333962025553
           },
           {
             "betType": "trio",
             "comboKey": "011014",
             "stake": 100,
             "odds": 2960.4,
-            "ev": 9.477631803004524
+            "ev": 9.358441317427364
           },
           {
             "betType": "trio",
             "comboKey": "011015",
-            "stake": 100,
+            "stake": 200,
             "odds": 5052.9,
-            "ev": 13.351397840254478
+            "ev": 13.976755117373374
           },
           {
             "betType": "trio",
             "comboKey": "011016",
-            "stake": 100,
+            "stake": 200,
             "odds": 4664.8,
-            "ev": 13.159851596501655
+            "ev": 13.733904196457868
           },
           {
             "betType": "quinella",
             "comboKey": "0111",
             "stake": 200,
             "odds": 174.1,
-            "ev": 2.9366743647804467
+            "ev": 3.0015048163578992
           },
           {
             "betType": "wide",
             "comboKey": "0111",
-            "stake": 1200,
+            "stake": 1300,
             "odds": 54,
-            "ev": 2.6488908716570956
+            "ev": 2.6939922594827586
           },
           {
             "betType": "trio",
             "comboKey": "011112",
             "stake": 100,
             "odds": 514.6,
-            "ev": 1.3280275926974636
+            "ev": 1.312552206381132
           },
           {
             "betType": "trio",
             "comboKey": "011113",
             "stake": 100,
             "odds": 448.6,
-            "ev": 1.3457703373875318
+            "ev": 1.329283120233168
           },
           {
             "betType": "trio",
             "comboKey": "011114",
             "stake": 200,
             "odds": 911.6,
-            "ev": 3.147590271154705
+            "ev": 3.1069329155568184
           },
           {
             "betType": "trio",
             "comboKey": "011115",
             "stake": 200,
             "odds": 1306.2,
-            "ev": 3.722390408244338
+            "ev": 3.895391316226669
           },
           {
             "betType": "trio",
             "comboKey": "011116",
             "stake": 200,
             "odds": 1176.5,
-            "ev": 3.579608435064057
+            "ev": 3.7344622289882796
           },
           {
             "betType": "trio",
             "comboKey": "011316",
             "stake": 100,
             "odds": 360.9,
-            "ev": 1.0247417428141548
-          },
-          {
-            "betType": "wide",
-            "comboKey": "0114",
-            "stake": 1500,
-            "odds": 23.8,
-            "ev": 1.2478940764293165
+            "ev": 1.0694121223632418
           },
           {
             "betType": "quinella",
             "comboKey": "0114",
             "stake": 100,
             "odds": 68.7,
-            "ev": 1.2418740433872437
+            "ev": 1.2689423444068426
+          },
+          {
+            "betType": "wide",
+            "comboKey": "0114",
+            "stake": 1400,
+            "odds": 23.8,
+            "ev": 1.2688977401738133
           },
           {
             "betType": "trio",
             "comboKey": "011415",
             "stake": 200,
             "odds": 581.8,
-            "ev": 1.7808758424374382
+            "ev": 1.8629755254198663
           },
           {
             "betType": "trio",
             "comboKey": "011416",
             "stake": 200,
             "odds": 490.4,
-            "ev": 1.6026591401289845
+            "ev": 1.6713908532131019
           },
           {
             "betType": "quinella",
             "comboKey": "0115",
             "stake": 100,
             "odds": 126.8,
-            "ev": 1.9026857632796248
+            "ev": 2.0575081677902376
           },
           {
             "betType": "wide",
             "comboKey": "0115",
-            "stake": 400,
+            "stake": 500,
             "odds": 36.4,
-            "ev": 1.594696151373934
+            "ev": 1.712692606438508
           },
           {
             "betType": "trio",
             "comboKey": "011516",
             "stake": 200,
             "odds": 1051.9,
-            "ev": 2.8372802039241467
+            "ev": 3.137009742412213
           },
           {
             "betType": "quinella",
             "comboKey": "0116",
             "stake": 400,
             "odds": 146.4,
-            "ev": 2.341123494320889
+            "ev": 2.5239535043928574
           },
           {
             "betType": "wide",
             "comboKey": "0116",
             "stake": 800,
             "odds": 40.4,
-            "ev": 1.8823039732711266
+            "ev": 2.0155053200574713
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0202",
-            "stake": 1600,
+            "stake": 1400,
             "odds": 295.8,
-            "ev": 8.834799213280355
+            "ev": 8.35981042288265
           },
           {
             "betType": "wide",
             "comboKey": "0203",
             "stake": 400,
             "odds": 34.5,
-            "ev": 1.2942483276539682
+            "ev": 1.3379661681998942
           },
           {
             "betType": "trio",
             "comboKey": "020304",
-            "stake": 200,
+            "stake": 400,
             "odds": 1361.3,
-            "ev": 6.853611646668721
+            "ev": 6.971347430363443
           },
           {
             "betType": "trio",
             "comboKey": "020307",
             "stake": 100,
             "odds": 1936.5,
-            "ev": 3.450425108629894
+            "ev": 3.6529365140740473
           },
           {
             "betType": "trio",
             "comboKey": "020309",
             "stake": 100,
             "odds": 610.6,
-            "ev": 1.2657519963872634
+            "ev": 1.3294952423143378
           },
           {
             "betType": "trio",
             "comboKey": "020310",
             "stake": 100,
             "odds": 3340.1,
-            "ev": 7.340149322695674
+            "ev": 7.272595903789911
           },
           {
             "betType": "trio",
             "comboKey": "020311",
             "stake": 100,
             "odds": 1207.3,
-            "ev": 2.8614315358021534
+            "ev": 2.834098129070462
           },
           {
             "betType": "trio",
             "comboKey": "020314",
             "stake": 100,
             "odds": 655.2,
-            "ev": 1.6679616028953197
+            "ev": 1.6514263446345085
           },
           {
             "betType": "trio",
             "comboKey": "020315",
             "stake": 100,
             "odds": 1135.9,
-            "ev": 2.3866947783884247
+            "ev": 2.505241667166774
           },
           {
             "betType": "trio",
             "comboKey": "020316",
             "stake": 100,
             "odds": 996.3,
-            "ev": 2.234994138170468
+            "ev": 2.3387823788560436
           },
           {
             "betType": "quinella",
             "comboKey": "0204",
             "stake": 400,
             "odds": 517.9,
-            "ev": 5.634616193761851
+            "ev": 6.001064912810341
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0204",
-            "stake": 800,
+            "stake": 900,
             "odds": 71.5,
-            "ev": 2.8238733454772
+            "ev": 2.915959304263091
           },
           {
             "betType": "trio",
             "comboKey": "020405",
             "stake": 100,
             "odds": 719.3,
-            "ev": 1.3140650284652053
+            "ev": 1.34867417479987
           },
           {
             "betType": "trio",
             "comboKey": "020406",
             "stake": 100,
             "odds": 1002.5,
-            "ev": 1.9779425627036678
+            "ev": 2.029333094293188
+          },
+          {
+            "betType": "trio",
+            "comboKey": "020408",
+            "stake": 100,
+            "odds": 1729,
+            "ev": 2.856593219061079
           },
           {
             "betType": "trio",
             "comboKey": "020409",
             "stake": 100,
             "odds": 1425.4,
-            "ev": 2.516814745269708
+            "ev": 2.7380863528412682
           },
           {
             "betType": "trio",
             "comboKey": "020411",
             "stake": 100,
             "odds": 2810.3,
-            "ev": 5.673342673479404
+            "ev": 5.820108062668852
           },
           {
             "betType": "trio",
             "comboKey": "020412",
             "stake": 100,
             "odds": 1230.2,
-            "ev": 1.9938161026130512
+            "ev": 2.0473094791399022
           },
           {
             "betType": "trio",
             "comboKey": "020413",
             "stake": 100,
             "odds": 1116.4,
-            "ev": 2.103270909697962
+            "ev": 2.158374829276888
           },
           {
             "betType": "trio",
             "comboKey": "020414",
             "stake": 100,
             "odds": 1767.2,
-            "ev": 3.8318916362341837
+            "ev": 3.929595775894118
           },
           {
             "betType": "trio",
             "comboKey": "020415",
             "stake": 100,
             "odds": 3869.5,
-            "ev": 6.9252251290186155
+            "ev": 7.529124831496743
           },
           {
             "betType": "trio",
             "comboKey": "020416",
             "stake": 100,
             "odds": 2304.4,
-            "ev": 4.403157907746431
+            "ev": 4.7723933457688155
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0205",
-            "stake": 1500,
+            "stake": 1300,
             "odds": 108.2,
-            "ev": 5.291424628176905
+            "ev": 5.0932115839790875
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0206",
-            "stake": 800,
+            "stake": 600,
             "odds": 38,
-            "ev": 1.8587874587524311
+            "ev": 1.7398509083101803
           },
           {
             "betType": "quinella",
             "comboKey": "0207",
             "stake": 200,
             "odds": 601.8,
-            "ev": 2.411167919274415
+            "ev": 2.6691787624595436
           },
           {
             "betType": "wide",
             "comboKey": "0207",
-            "stake": 100,
+            "stake": 200,
             "odds": 143.1,
-            "ev": 1.7967239721703607
+            "ev": 1.9859302762483892
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0207",
-            "stake": 800,
+            "stake": 600,
             "odds": 30,
-            "ev": 1.6291935126724162
+            "ev": 1.5244377784167547
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0208",
-            "stake": 1300,
+            "stake": 1200,
             "odds": 68.8,
-            "ev": 3.4211948583332727
+            "ev": 3.381799172547436
           },
           {
             "betType": "quinella",
             "comboKey": "0210",
             "stake": 100,
             "odds": 899.1,
-            "ev": 4.420357520208782
+            "ev": 4.587033441680263
           },
           {
             "betType": "wide",
             "comboKey": "0210",
             "stake": 400,
             "odds": 225.7,
-            "ev": 3.4601577396897922
+            "ev": 3.5907660269708566
           },
           {
             "betType": "quinella",
             "comboKey": "0211",
             "stake": 200,
             "odds": 344.2,
-            "ev": 1.8212261685536935
+            "ev": 1.8893998910834546
           },
           {
             "betType": "wide",
             "comboKey": "0211",
-            "stake": 400,
+            "stake": 500,
             "odds": 88.2,
-            "ev": 1.452212659932554
+            "ev": 1.5067652873009278
+          },
+          {
+            "betType": "trio",
+            "comboKey": "021115",
+            "stake": 100,
+            "odds": 2338.9,
+            "ev": 2.0868506824401685
           },
           {
             "betType": "quinella",
             "comboKey": "0215",
             "stake": 100,
             "odds": 256.7,
-            "ev": 1.2080933689211817
+            "ev": 1.32612223879834
           },
           {
             "betType": "wide",
             "comboKey": "0215",
             "stake": 400,
             "odds": 74,
-            "ev": 1.0872374100168791
-          },
-          {
-            "betType": "exacta",
-            "comboKey": "0301",
-            "stake": 100,
-            "odds": 138.1,
-            "ev": 2.7478724664148344
+            "ev": 1.191730243966258
           },
           {
             "betType": "wide",
             "comboKey": "0304",
-            "stake": 1600,
+            "stake": 1300,
             "odds": 63.4,
-            "ev": 5.372141478974494
+            "ev": 5.117388243206831
           },
           {
             "betType": "trio",
             "comboKey": "030406",
             "stake": 100,
             "odds": 518,
-            "ev": 2.9443294197392347
+            "ev": 2.669256965871757
           },
           {
             "betType": "trio",
             "comboKey": "030407",
             "stake": 200,
             "odds": 3799.8,
-            "ev": 16.6143511309526
+            "ev": 16.097887449969065
           },
           {
             "betType": "trio",
             "comboKey": "030408",
             "stake": 100,
             "odds": 954.6,
-            "ev": 3.8623836090004273
+            "ev": 4.014907476240865
           },
           {
             "betType": "trio",
             "comboKey": "030409",
             "stake": 200,
             "odds": 1084,
-            "ev": 5.514125829671724
+            "ev": 5.30070464777714
           },
           {
             "betType": "trio",
             "comboKey": "030410",
             "stake": 200,
             "odds": 5226.9,
-            "ev": 28.186449876091167
+            "ev": 25.559274099138683
           },
           {
             "betType": "trio",
             "comboKey": "030411",
-            "stake": 400,
+            "stake": 200,
             "odds": 1544.5,
-            "ev": 8.982567549499215
+            "ev": 8.142485246807802
           },
           {
             "betType": "trio",
             "comboKey": "030412",
             "stake": 100,
             "odds": 629,
-            "ev": 2.9369554839845797
+            "ev": 2.664764252337105
           },
           {
             "betType": "trio",
             "comboKey": "030413",
             "stake": 100,
             "odds": 499.7,
-            "ev": 2.712154015805479
+            "ev": 2.459291704917348
           },
           {
             "betType": "trio",
             "comboKey": "030414",
             "stake": 400,
             "odds": 1421.4,
-            "ev": 8.879056241973483
+            "ev": 8.045745576954673
           },
           {
             "betType": "trio",
             "comboKey": "030415",
             "stake": 200,
             "odds": 1626.2,
-            "ev": 8.384655152211206
+            "ev": 8.054841132270294
           },
           {
             "betType": "trio",
             "comboKey": "030416",
             "stake": 200,
             "odds": 1518.8,
-            "ev": 8.360570116284162
+            "ev": 8.006996822824014
           },
           {
             "betType": "trio",
             "comboKey": "030507",
             "stake": 100,
             "odds": 848.1,
-            "ev": 1.5797144591739807
+            "ev": 1.4910602611601589
           },
           {
             "betType": "trio",
             "comboKey": "030607",
             "stake": 100,
             "odds": 1327,
-            "ev": 2.6694907728219133
+            "ev": 2.518800592388613
           },
           {
             "betType": "trio",
             "comboKey": "030611",
             "stake": 100,
             "odds": 433.1,
-            "ev": 1.1589264821803698
+            "ev": 1.0230244289187058
           },
           {
             "betType": "quinella",
             "comboKey": "0307",
-            "stake": 400,
+            "stake": 200,
             "odds": 518.4,
-            "ev": 5.710446650934661
+            "ev": 5.615182310934921
           },
           {
             "betType": "trio",
             "comboKey": "030708",
             "stake": 100,
             "odds": 1708.9,
-            "ev": 2.4469265278105765
+            "ev": 2.6473853795123827
           },
           {
             "betType": "trio",
             "comboKey": "030709",
             "stake": 100,
             "odds": 1883.1,
-            "ev": 3.3900896392568085
+            "ev": 3.3918431831239193
           },
           {
             "betType": "trio",
             "comboKey": "030710",
             "stake": 100,
             "odds": 5899,
-            "ev": 11.258238444434104
+            "ev": 10.625289648583719
           },
           {
             "betType": "trio",
             "comboKey": "030711",
             "stake": 100,
             "odds": 3406.8,
-            "ev": 7.012328970550302
+            "ev": 6.6157605949421106
           },
           {
             "betType": "trio",
             "comboKey": "030712",
             "stake": 100,
             "odds": 973.1,
-            "ev": 1.608002878554902
+            "ev": 1.5184922233775788
           },
           {
             "betType": "trio",
             "comboKey": "030713",
             "stake": 100,
             "odds": 930.8,
-            "ev": 1.787960180804993
+            "ev": 1.6873906511271606
           },
           {
             "betType": "trio",
             "comboKey": "030714",
             "stake": 100,
             "odds": 2638.9,
-            "ev": 5.834228381475663
+            "ev": 5.502280855276641
           },
           {
             "betType": "trio",
             "comboKey": "030715",
             "stake": 100,
             "odds": 2648.5,
-            "ev": 4.832845204954397
+            "ev": 4.832168582249184
           },
           {
             "betType": "trio",
             "comboKey": "030716",
             "stake": 100,
             "odds": 3092.5,
-            "ev": 6.024802561647287
+            "ev": 6.005412598291205
           },
           {
             "betType": "trio",
             "comboKey": "030811",
             "stake": 100,
             "odds": 708.1,
-            "ev": 1.3487038015110848
+            "ev": 1.365127644954845
+          },
+          {
+            "betType": "trio",
+            "comboKey": "030816",
+            "stake": 100,
+            "odds": 708,
+            "ev": 1.3649348575455873
           },
           {
             "betType": "trio",
             "comboKey": "030911",
             "stake": 100,
             "odds": 910.2,
-            "ev": 2.1796534468780835
+            "ev": 2.040210729196494
           },
           {
             "betType": "trio",
             "comboKey": "030914",
             "stake": 100,
             "odds": 662.7,
-            "ev": 1.7045569855626026
+            "ev": 1.594927941046337
+          },
+          {
+            "betType": "trio",
+            "comboKey": "030915",
+            "stake": 100,
+            "odds": 726.6,
+            "ev": 1.5301824250647738
           },
           {
             "betType": "trio",
             "comboKey": "030916",
             "stake": 100,
             "odds": 855.8,
-            "ev": 1.939728949261425
+            "ev": 1.9182732828459232
           },
           {
             "betType": "quinella",
             "comboKey": "0310",
-            "stake": 600,
+            "stake": 500,
             "odds": 1020.6,
-            "ev": 13.792680507580991
+            "ev": 12.714545934221611
           },
           {
             "betType": "wide",
             "comboKey": "0310",
-            "stake": 1300,
+            "stake": 1200,
             "odds": 197.5,
-            "ev": 7.905097202091594
+            "ev": 7.333035111702134
           },
           {
             "betType": "trio",
             "comboKey": "031011",
             "stake": 100,
             "odds": 5333.4,
-            "ev": 13.539657082676376
+            "ev": 11.954801036142143
           },
           {
             "betType": "trio",
             "comboKey": "031014",
             "stake": 100,
             "odds": 3724.3,
-            "ev": 10.155275975542722
+            "ev": 8.963316932003732
           },
           {
             "betType": "trio",
             "comboKey": "031015",
             "stake": 100,
             "odds": 5403.6,
-            "ev": 12.161188767305463
+            "ev": 11.379705136361151
           },
           {
             "betType": "trio",
             "comboKey": "031016",
             "stake": 100,
             "odds": 5588.6,
-            "ev": 13.428421384401046
+            "ev": 12.526831115345557
           },
           {
             "betType": "quinella",
             "comboKey": "0311",
             "stake": 200,
             "odds": 174.5,
-            "ev": 2.537795935451843
+            "ev": 2.338835084199808
           },
           {
             "betType": "wide",
             "comboKey": "0311",
-            "stake": 900,
+            "stake": 800,
             "odds": 52,
-            "ev": 2.2343648697421474
+            "ev": 2.072449816111773
           },
           {
             "betType": "trio",
             "comboKey": "031114",
             "stake": 100,
             "odds": 997.5,
-            "ev": 2.933467340451466
+            "ev": 2.5882492233436305
           },
           {
             "betType": "trio",
             "comboKey": "031115",
             "stake": 100,
             "odds": 1141.4,
-            "ev": 2.7704689359196872
+            "ev": 2.5915260240196853
           },
           {
             "betType": "trio",
             "comboKey": "031116",
             "stake": 100,
             "odds": 1204.6,
-            "ev": 3.1216696584400414
+            "ev": 2.911056119134777
           },
           {
             "betType": "quinella",
             "comboKey": "0314",
             "stake": 200,
             "odds": 133.3,
-            "ev": 2.077610760272556
+            "ev": 1.9142292650337505
           },
           {
             "betType": "wide",
             "comboKey": "0314",
-            "stake": 1500,
+            "stake": 1200,
             "odds": 41.1,
-            "ev": 1.8879000546272025
+            "ev": 1.7509002359847239
           },
           {
             "betType": "trio",
             "comboKey": "031415",
             "stake": 100,
             "odds": 883.1,
-            "ev": 2.302338379578981
+            "ev": 2.152848249265738
           },
           {
             "betType": "trio",
             "comboKey": "031416",
             "stake": 100,
             "odds": 773.4,
-            "ev": 2.15274050688533
+            "ev": 2.0067688715127456
           },
           {
             "betType": "wide",
             "comboKey": "0315",
-            "stake": 600,
+            "stake": 500,
             "odds": 45,
-            "ev": 1.726572155817446
+            "ev": 1.691195765054085
           },
           {
             "betType": "trio",
             "comboKey": "031516",
             "stake": 100,
             "odds": 979.1,
-            "ev": 2.249368861091624
+            "ev": 2.2230270984034286
           },
           {
             "betType": "wide",
             "comboKey": "0316",
-            "stake": 1100,
+            "stake": 800,
             "odds": 48.4,
-            "ev": 1.975122716161132
+            "ev": 1.9289725211501887
           },
           {
             "betType": "win",
             "comboKey": "04",
-            "stake": 3300,
+            "stake": 3200,
             "odds": 59.5,
-            "ev": 6.375052384405759
+            "ev": 6.3070820159639185
           },
           {
             "betType": "exacta",
             "comboKey": "0401",
-            "stake": 100,
+            "stake": 200,
             "odds": 695.5,
-            "ev": 11.806848193986918
+            "ev": 12.320586338719005
           },
           {
             "betType": "trifecta",
             "comboKey": "040103",
             "stake": 100,
             "odds": 6528.2,
-            "ev": 18.187043556382182
+            "ev": 18.3810532630266
           },
           {
             "betType": "trifecta",
             "comboKey": "040301",
             "stake": 100,
             "odds": 6883.1,
-            "ev": 18.723348425245604
+            "ev": 18.604398728870002
           },
           {
-            "betType": "trifecta",
-            "comboKey": "040310",
-            "stake": 100,
-            "odds": 48359.6,
-            "ev": 46.4662573498506
+            "betType": "bracketQuinella",
+            "comboKey": "0405",
+            "stake": 200,
+            "odds": 96.6,
+            "ev": 1.6326480274614927
           },
           {
             "betType": "quinella",
             "comboKey": "0405",
             "stake": 200,
             "odds": 149.6,
-            "ev": 1.6994747345331511
-          },
-          {
-            "betType": "bracketQuinella",
-            "comboKey": "0405",
-            "stake": 100,
-            "odds": 96.6,
-            "ev": 1.5506856387751802
+            "ev": 1.6186892375694544
           },
           {
             "betType": "trio",
             "comboKey": "040509",
             "stake": 100,
             "odds": 661.1,
-            "ev": 1.2202707486733135
+            "ev": 1.1835957207434062
           },
           {
             "betType": "quinella",
             "comboKey": "0406",
             "stake": 400,
             "odds": 193.8,
-            "ev": 2.372576118668249
+            "ev": 2.2592210473078285
           },
           {
             "betType": "wide",
             "comboKey": "0406",
             "stake": 100,
             "odds": 48.6,
-            "ev": 1.7817735050878607
+            "ev": 1.7019838637277795
           },
           {
             "betType": "trio",
             "comboKey": "040609",
             "stake": 100,
             "odds": 891.8,
-            "ev": 1.7777838712678073
+            "ev": 1.7237563497661728
           },
           {
             "betType": "quinella",
             "comboKey": "0407",
             "stake": 500,
             "odds": 1472.4,
-            "ev": 13.959586304205153
+            "ev": 14.18202581868986
           },
           {
             "betType": "wide",
             "comboKey": "0407",
-            "stake": 900,
+            "stake": 800,
             "odds": 282.1,
-            "ev": 8.067219314328863
+            "ev": 8.206035841492204
+          },
+          {
+            "betType": "trio",
+            "comboKey": "040708",
+            "stake": 100,
+            "odds": 6516.8,
+            "ev": 8.906817674067748
           },
           {
             "betType": "trio",
             "comboKey": "040711",
             "stake": 100,
             "odds": 6974.8,
-            "ev": 12.228379296617788
+            "ev": 11.949432138016519
           },
           {
             "betType": "trio",
             "comboKey": "040714",
             "stake": 100,
             "odds": 7684.3,
-            "ev": 14.470490042133536
+            "ev": 14.13528011523463
           },
           {
             "betType": "trio",
             "comboKey": "040715",
             "stake": 100,
             "odds": 9241.7,
-            "ev": 14.364176661652518
+            "ev": 14.875719412128166
           },
           {
             "betType": "trio",
             "comboKey": "040716",
             "stake": 100,
             "odds": 8431,
-            "ev": 13.99058384760249
+            "ev": 14.444236731607683
           },
           {
             "betType": "quinella",
             "comboKey": "0408",
             "stake": 200,
             "odds": 392,
-            "ev": 3.4448410402864607
+            "ev": 3.7490112321454125
           },
           {
             "betType": "wide",
             "comboKey": "0408",
             "stake": 600,
             "odds": 93.3,
-            "ev": 2.477438263923492
+            "ev": 2.695295715443174
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0408",
-            "stake": 100,
+            "stake": 200,
             "odds": 65.8,
-            "ev": 1.0740492455220343
+            "ev": 1.1613278048718025
           },
           {
             "betType": "exacta",
             "comboKey": "0409",
             "stake": 100,
             "odds": 1043.7,
-            "ev": 5.920987711364301
+            "ev": 5.962251164463316
           },
           {
             "betType": "trio",
             "comboKey": "040911",
             "stake": 100,
             "odds": 2353.7,
-            "ev": 4.800866446746598
+            "ev": 4.654456642212372
           },
           {
             "betType": "trio",
             "comboKey": "040912",
             "stake": 100,
             "odds": 1079.5,
-            "ev": 1.7677235217254408
+            "ev": 1.7154156174974622
           },
           {
             "betType": "trio",
             "comboKey": "040913",
             "stake": 100,
             "odds": 870.3,
-            "ev": 1.6566341074549118
+            "ev": 1.6066280806687403
           },
           {
             "betType": "trio",
             "comboKey": "040914",
             "stake": 100,
             "odds": 1922,
-            "ev": 4.210784725779427
+            "ev": 4.080893605004136
           },
           {
             "betType": "trio",
             "comboKey": "040915",
             "stake": 100,
             "odds": 2717.2,
-            "ev": 4.913408922498867
+            "ev": 5.0483632874562
           },
           {
             "betType": "trio",
             "comboKey": "040916",
             "stake": 100,
             "odds": 2283,
-            "ev": 4.4075223628050635
+            "ev": 4.514646944882885
           },
           {
             "betType": "quinella",
             "comboKey": "0410",
             "stake": 600,
             "odds": 2330,
-            "ev": 27.102507703254723
+            "ev": 25.81217096795551
           },
           {
             "betType": "wide",
             "comboKey": "0410",
             "stake": 1600,
             "odds": 429.3,
-            "ev": 14.978421118921975
+            "ev": 14.309015769584617
           },
           {
             "betType": "trio",
             "comboKey": "041015",
             "stake": 100,
             "odds": 15462.5,
-            "ev": 29.64098920004638
+            "ev": 28.728219244918115
           },
           {
             "betType": "quinella",
             "comboKey": "0411",
             "stake": 400,
             "odds": 533.6,
-            "ev": 6.67952024120224
+            "ev": 6.359880639278967
           },
           {
             "betType": "wide",
             "comboKey": "0411",
-            "stake": 1100,
+            "stake": 1000,
             "odds": 134.3,
-            "ev": 5.030793886325734
+            "ev": 4.805305320713781
           },
           {
             "betType": "trio",
             "comboKey": "041114",
             "stake": 100,
             "odds": 2409,
-            "ev": 6.0341557674504
+            "ev": 5.514500957804781
           },
           {
             "betType": "trio",
             "comboKey": "041115",
             "stake": 100,
             "odds": 3110.8,
-            "ev": 6.431392890758521
+            "ev": 6.231164413999397
           },
           {
             "betType": "trio",
             "comboKey": "041116",
             "stake": 100,
             "odds": 2710,
-            "ev": 5.9817604734782694
+            "ev": 5.777700449047113
           },
           {
             "betType": "quinella",
             "comboKey": "0412",
             "stake": 100,
             "odds": 203,
-            "ev": 2.0521417817093237
+            "ev": 1.9552779415879105
           },
           {
             "betType": "quinella",
             "comboKey": "0413",
             "stake": 100,
             "odds": 171.2,
-            "ev": 2.003956909426292
+            "ev": 1.9085093812619411
           },
           {
             "betType": "quinella",
             "comboKey": "0414",
-            "stake": 500,
+            "stake": 400,
             "odds": 465.7,
-            "ev": 6.247644399460495
+            "ev": 5.94709318202359
           },
           {
             "betType": "wide",
             "comboKey": "0414",
-            "stake": 1200,
+            "stake": 1000,
             "odds": 113.9,
-            "ev": 4.561593205618781
+            "ev": 4.356527678682796
           },
           {
             "betType": "trio",
             "comboKey": "041415",
             "stake": 100,
             "odds": 2554.5,
-            "ev": 5.672570952805132
+            "ev": 5.493978810027965
           },
           {
             "betType": "trio",
             "comboKey": "041416",
             "stake": 100,
             "odds": 1952.9,
-            "ev": 4.629994986097344
+            "ev": 4.470431266291805
           },
           {
             "betType": "quinella",
             "comboKey": "0415",
             "stake": 200,
             "odds": 604.9,
-            "ev": 6.7356253311245755
+            "ev": 6.785500741478875
           },
           {
             "betType": "wide",
             "comboKey": "0415",
             "stake": 900,
             "odds": 149.5,
-            "ev": 4.999811095645885
+            "ev": 5.043825636146885
           },
           {
             "betType": "trio",
             "comboKey": "041516",
             "stake": 100,
             "odds": 2873,
-            "ev": 5.621972509184206
-          },
-          {
-            "betType": "exacta",
-            "comboKey": "0416",
-            "stake": 100,
-            "odds": 1249.5,
-            "ev": 7.64012400386072
+            "ev": 5.754833278070034
           },
           {
             "betType": "quinella",
             "comboKey": "0416",
             "stake": 200,
             "odds": 526.9,
-            "ev": 6.252758856734133
+            "ev": 6.280024566784272
           },
           {
             "betType": "wide",
             "comboKey": "0416",
             "stake": 900,
             "odds": 125.9,
-            "ev": 4.478693089256958
+            "ev": 4.504750110780827
+          },
+          {
+            "betType": "trifecta",
+            "comboKey": "041601",
+            "stake": 100,
+            "odds": 17999.6,
+            "ev": 19.587871565516878
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0506",
             "stake": 100,
             "odds": 65,
-            "ev": 1.2925500937081966
+            "ev": 1.233462191548513
           },
           {
             "betType": "quinella",
             "comboKey": "0507",
             "stake": 100,
             "odds": 309.4,
-            "ev": 1.2944245003726678
+            "ev": 1.2813553544503535
           },
           {
             "betType": "quinella",
             "comboKey": "0510",
             "stake": 100,
             "odds": 495,
-            "ev": 2.5411690568088248
+            "ev": 2.3580624634955885
           },
           {
             "betType": "quinella",
             "comboKey": "0607",
             "stake": 100,
             "odds": 455,
-            "ev": 2.0515461458829014
+            "ev": 2.0303072318712743
           },
           {
             "betType": "wide",
             "comboKey": "0607",
             "stake": 400,
             "odds": 123.5,
-            "ev": 1.7395399640447062
+            "ev": 1.7240295913558572
           },
           {
             "betType": "quinella",
             "comboKey": "0610",
             "stake": 100,
             "odds": 619.7,
-            "ev": 3.4286197900008113
+            "ev": 3.1807539360006176
           },
           {
             "betType": "wide",
             "comboKey": "0610",
             "stake": 200,
             "odds": 153.1,
-            "ev": 2.6329134973299837
+            "ev": 2.450096098853831
           },
           {
             "betType": "win",
             "comboKey": "07",
             "stake": 400,
             "odds": 79.2,
-            "ev": 3.240532567646127
+            "ev": 3.32800069254981
           },
           {
             "betType": "exacta",
             "comboKey": "0701",
             "stake": 100,
             "odds": 1042.5,
-            "ev": 6.291615085745744
+            "ev": 6.831837406187336
+          },
+          {
+            "betType": "exacta",
+            "comboKey": "0703",
+            "stake": 100,
+            "odds": 1207.4,
+            "ev": 6.267815113932104
           },
           {
             "betType": "quinella",
             "comboKey": "0708",
             "stake": 100,
             "odds": 613.8,
-            "ev": 1.9860730713765808
+            "ev": 2.2466370618196208
           },
           {
             "betType": "wide",
             "comboKey": "0708",
             "stake": 100,
             "odds": 152.9,
-            "ev": 1.5577238045069604
+            "ev": 1.7593062004591296
           },
           {
             "betType": "quinella",
             "comboKey": "0709",
             "stake": 200,
             "odds": 772.7,
-            "ev": 3.1271999421306234
+            "ev": 3.2764651449719517
           },
           {
             "betType": "wide",
             "comboKey": "0709",
             "stake": 200,
             "odds": 166,
-            "ev": 2.104795422333552
+            "ev": 2.205047566919598
           },
           {
             "betType": "quinella",
             "comboKey": "0710",
             "stake": 200,
             "odds": 2103.1,
-            "ev": 9.009404478186044
+            "ev": 8.917735015388264
           },
           {
             "betType": "wide",
             "comboKey": "0710",
             "stake": 200,
             "odds": 400,
-            "ev": 5.360562748986249
+            "ev": 5.313367631131562
           },
           {
             "betType": "exacta",
             "comboKey": "0711",
             "stake": 100,
             "odds": 2547,
-            "ev": 5.8320835068760895
+            "ev": 5.7805067072918455
           },
           {
             "betType": "quinella",
             "comboKey": "0711",
             "stake": 100,
             "odds": 962.1,
-            "ev": 4.4357045280737
+            "ev": 4.389423816053288
           },
           {
             "betType": "wide",
             "comboKey": "0711",
             "stake": 500,
             "odds": 246.5,
-            "ev": 3.547943923621252
+            "ev": 3.5161285254208177
           },
           {
             "betType": "quinella",
             "comboKey": "0712",
             "stake": 100,
             "odds": 285,
-            "ev": 1.0609297802437478
+            "ev": 1.0505941101733072
           },
           {
             "betType": "quinella",
             "comboKey": "0713",
             "stake": 100,
             "odds": 320.8,
-            "ev": 1.3829424165764734
+            "ev": 1.3688417944694622
           },
           {
             "betType": "quinella",
             "comboKey": "0714",
             "stake": 100,
             "odds": 626.2,
-            "ev": 3.0943313754573287
+            "ev": 3.0612177065918726
           },
           {
             "betType": "wide",
             "comboKey": "0714",
             "stake": 500,
             "odds": 166.6,
-            "ev": 2.5646317322580967
+            "ev": 2.5412054639714348
           },
           {
             "betType": "quinella",
             "comboKey": "0715",
             "stake": 100,
             "odds": 712.3,
-            "ev": 2.920941584351
+            "ev": 3.0583835824028562
           },
           {
             "betType": "wide",
             "comboKey": "0715",
-            "stake": 100,
+            "stake": 200,
             "odds": 164.8,
-            "ev": 2.1165531330623994
+            "ev": 2.215952742770699
           },
           {
             "betType": "quinella",
             "comboKey": "0716",
             "stake": 100,
             "odds": 754.4,
-            "ev": 3.297128084122103
+            "ev": 3.441826553196757
           },
           {
             "betType": "wide",
             "comboKey": "0716",
             "stake": 400,
             "odds": 196.2,
-            "ev": 2.681084749562042
+            "ev": 2.798638607251782
+          },
+          {
+            "betType": "exacta",
+            "comboKey": "0801",
+            "stake": 200,
+            "odds": 154.5,
+            "ev": 1.0051709232116828
           },
           {
             "betType": "quinella",
             "comboKey": "0810",
             "stake": 100,
             "odds": 898.8,
-            "ev": 3.56874097031376
+            "ev": 3.784197980810818
           },
           {
             "betType": "wide",
             "comboKey": "0810",
             "stake": 200,
             "odds": 220.5,
-            "ev": 2.743199102835434
+            "ev": 2.9087249759448617
           },
           {
             "betType": "exacta",
             "comboKey": "0901",
-            "stake": 100,
+            "stake": 200,
             "odds": 234.1,
-            "ev": 1.6433072518269813
+            "ev": 1.770376915646054
           },
           {
             "betType": "exacta",
             "comboKey": "0904",
             "stake": 100,
             "odds": 744.9,
-            "ev": 3.960322218505367
+            "ev": 3.9968167145726787
           },
           {
             "betType": "quinella",
             "comboKey": "0910",
             "stake": 200,
             "odds": 978.6,
-            "ev": 4.859857947844808
+            "ev": 4.7730927429600944
           },
           {
             "betType": "wide",
             "comboKey": "0910",
             "stake": 400,
             "odds": 227.4,
-            "ev": 3.520566702793242
+            "ev": 3.462891326352886
           },
           {
             "betType": "quinella",
             "comboKey": "0911",
             "stake": 100,
             "odds": 272.7,
-            "ev": 1.4574944612005263
+            "ev": 1.4310995165979432
           },
           {
             "betType": "wide",
             "comboKey": "0911",
             "stake": 400,
             "odds": 74.6,
-            "ev": 1.2403872036911767
+            "ev": 1.2198685275991437
           },
           {
             "betType": "quinella",
             "comboKey": "0915",
-            "stake": 200,
+            "stake": 100,
             "odds": 238.4,
-            "ev": 1.1333132412689364
+            "ev": 1.1774293208912114
           },
           {
             "betType": "quinella",
             "comboKey": "0916",
             "stake": 200,
             "odds": 246.5,
-            "ev": 1.24891394766341
+            "ev": 1.293604806899131
+          },
+          {
+            "betType": "wide",
+            "comboKey": "0916",
+            "stake": 200,
+            "odds": 61.3,
+            "ev": 1.0023852646357576
           },
           {
             "betType": "win",
             "comboKey": "10",
-            "stake": 1600,
+            "stake": 1400,
             "odds": 151.8,
-            "ev": 7.5854076795003795
+            "ev": 7.313608211647268
           },
           {
             "betType": "quinella",
             "comboKey": "1011",
             "stake": 200,
             "odds": 1393.2,
-            "ev": 7.881748040472876
+            "ev": 7.311359906579591
           },
           {
             "betType": "wide",
             "comboKey": "1011",
-            "stake": 600,
+            "stake": 500,
             "odds": 312.6,
-            "ev": 5.493345268846501
+            "ev": 5.1116742858913184
           },
           {
             "betType": "quinella",
             "comboKey": "1012",
             "stake": 100,
             "odds": 531.6,
-            "ev": 2.4283113938936354
+            "ev": 2.25413339079473
           },
           {
             "betType": "quinella",
             "comboKey": "1013",
             "stake": 100,
             "odds": 432.8,
-            "ev": 2.2894299838443004
+            "ev": 2.124251596704633
           },
           {
             "betType": "quinella",
             "comboKey": "1014",
             "stake": 100,
             "odds": 965.9,
-            "ev": 5.856640066528871
+            "ev": 5.4313533325854495
           },
           {
             "betType": "wide",
             "comboKey": "1014",
-            "stake": 800,
+            "stake": 600,
             "odds": 253.9,
-            "ev": 4.7717933302629625
+            "ev": 4.439575473481563
           },
           {
             "betType": "quinella",
             "comboKey": "1015",
-            "stake": 200,
+            "stake": 100,
             "odds": 1306.1,
-            "ev": 6.57217808438827
+            "ev": 6.450672969865819
           },
           {
             "betType": "wide",
             "comboKey": "1015",
             "stake": 400,
             "odds": 292,
-            "ev": 4.579015266506737
+            "ev": 4.501141445548901
           },
           {
             "betType": "quinella",
             "comboKey": "1016",
             "stake": 100,
             "odds": 1114.6,
-            "ev": 5.977544527139427
+            "ev": 5.8492978408509995
           },
           {
             "betType": "wide",
             "comboKey": "1016",
-            "stake": 600,
+            "stake": 500,
             "odds": 291.1,
-            "ev": 4.856860513191246
+            "ev": 4.760103597642236
           },
           {
             "betType": "win",
             "comboKey": "11",
-            "stake": 200,
+            "stake": 100,
             "odds": 27.2,
-            "ev": 1.4599205222117722
+            "ev": 1.407356064379388
           },
           {
             "betType": "quinella",
             "comboKey": "1114",
             "stake": 100,
             "odds": 211.6,
-            "ev": 1.3808004060686676
+            "ev": 1.280202047684504
           },
           {
             "betType": "wide",
             "comboKey": "1114",
-            "stake": 500,
+            "stake": 400,
             "odds": 65.4,
-            "ev": 1.3199925025330554
+            "ev": 1.227913621761346
           },
           {
             "betType": "quinella",
             "comboKey": "1115",
             "stake": 100,
             "odds": 278.7,
-            "ev": 1.5092910665581303
+            "ev": 1.4810009830553517
           },
           {
             "betType": "wide",
             "comboKey": "1115",
             "stake": 200,
             "odds": 79,
-            "ev": 1.330489310593804
+            "ev": 1.3076499941850075
           },
           {
             "betType": "quinella",
             "comboKey": "1116",
             "stake": 100,
             "odds": 273,
-            "ev": 1.5756806390011031
+            "ev": 1.5414727566452584
           },
           {
             "betType": "wide",
             "comboKey": "1116",
             "stake": 500,
             "odds": 81.4,
-            "ev": 1.4585671962468922
+            "ev": 1.4292797723117572
           },
           {
             "betType": "win",
             "comboKey": "15",
-            "stake": 1100,
+            "stake": 1000,
             "odds": 29.1,
-            "ev": 1.3934829555743993
+            "ev": 1.4192269446217416
           },
           {
             "betType": "exacta",
             "comboKey": "1501",
             "stake": 100,
             "odds": 310.7,
-            "ev": 2.210612298287295
+            "ev": 2.379986342642497
           },
           {
             "betType": "quinella",
             "comboKey": "1516",
             "stake": 100,
             "odds": 210.2,
-            "ev": 1.0791026556908134
+            "ev": 1.1169946416872438
           },
           {
             "betType": "win",
             "comboKey": "16",
             "stake": 400,
             "odds": 21.7,
-            "ev": 1.1057033819389914
+            "ev": 1.1227803895967912
           }
         ]
       }
@@ -14692,11 +14797,11 @@
           "umaban": 1,
           "wakuban": 1,
           "horseName": "ルージュボヤージュ",
-          "prior": 0.3952185792349726,
-          "adjustedProb": 0.3952185792349726,
+          "prior": 0.42721857923497264,
+          "adjustedProb": 0.42721857923497264,
           "placeOddsMin": 3.1,
           "winOdds": 9,
-          "ev": 1.2251775956284152,
+          "ev": 1.3243775956284152,
           "isPositive": true,
           "reason": "スタブの根拠1",
           "highlights": [
@@ -14712,11 +14817,11 @@
           "umaban": 2,
           "wakuban": 1,
           "horseName": "クカイリモク",
-          "prior": 0.14737089118931126,
-          "adjustedProb": 0.15473943574877683,
+          "prior": 0.16337089118931128,
+          "adjustedProb": 0.17153943574877686,
           "placeOddsMin": 4.2,
           "winOdds": 18.6,
-          "ev": 0.6499056301448627,
+          "ev": 0.7204656301448629,
           "isPositive": false,
           "reason": "スタブの根拠2",
           "highlights": [
@@ -14767,11 +14872,11 @@
           "umaban": 4,
           "wakuban": 2,
           "horseName": "サイモンシャリオ",
-          "prior": 0.3135,
-          "adjustedProb": 0.3135,
+          "prior": 0.3215,
+          "adjustedProb": 0.3215,
           "placeOddsMin": 9.5,
           "winOdds": 59.5,
-          "ev": 2.97825,
+          "ev": 3.05425,
           "isPositive": true,
           "reason": "スタブの根拠4",
           "highlights": [
@@ -14845,11 +14950,11 @@
           "umaban": 7,
           "wakuban": 4,
           "horseName": "ショウナンガルフ",
-          "prior": 0.12965660547502555,
-          "adjustedProb": 0.12965660547502555,
+          "prior": 0.13765660547502556,
+          "adjustedProb": 0.13765660547502556,
           "placeOddsMin": 15.4,
           "winOdds": 79.2,
-          "ev": 1.9967117243153936,
+          "ev": 2.1199117243153935,
           "isPositive": true,
           "reason": "スタブの根拠7",
           "highlights": [
@@ -14870,11 +14975,11 @@
           "umaban": 8,
           "wakuban": 4,
           "horseName": "ディールメーカー",
-          "prior": 0.12074751456593465,
-          "adjustedProb": 0.12678489029423137,
+          "prior": 0.13674751456593465,
+          "adjustedProb": 0.14358489029423138,
           "placeOddsMin": 3.6,
           "winOdds": 14,
-          "ev": 0.45642560505923296,
+          "ev": 0.516905605059233,
           "isPositive": false,
           "reason": "スタブの根拠8",
           "highlights": [
@@ -14898,11 +15003,11 @@
           "umaban": 9,
           "wakuban": 5,
           "horseName": "キンググローリー",
-          "prior": 0.14874751456593466,
-          "adjustedProb": 0.1413101388376379,
+          "prior": 0.15674751456593466,
+          "adjustedProb": 0.14891013883763793,
           "placeOddsMin": 4.5,
           "winOdds": 18.6,
-          "ev": 0.6358956247693706,
+          "ev": 0.6700956247693707,
           "isPositive": false,
           "reason": "スタブの根拠9",
           "highlights": [],
@@ -15052,11 +15157,11 @@
           "umaban": 15,
           "wakuban": 8,
           "horseName": "バドリナート",
-          "prior": 0.15056569638411646,
-          "adjustedProb": 0.14303741156491062,
+          "prior": 0.15856569638411647,
+          "adjustedProb": 0.15063741156491064,
           "placeOddsMin": 6.5,
           "winOdds": 29.1,
-          "ev": 0.9297431751719191,
+          "ev": 0.9791431751719192,
           "isPositive": false,
           "reason": "スタブの根拠15",
           "highlights": [],
@@ -15075,11 +15180,11 @@
           "umaban": 16,
           "wakuban": 8,
           "horseName": "スペルーチェ",
-          "prior": 0.15965660547502555,
-          "adjustedProb": 0.15965660547502555,
+          "prior": 0.16765660547502556,
+          "adjustedProb": 0.16765660547502556,
           "placeOddsMin": 5,
           "winOdds": 21.7,
-          "ev": 0.7982830273751278,
+          "ev": 0.8382830273751278,
           "isPositive": false,
           "reason": "スタブの根拠16",
           "highlights": [
@@ -19682,7 +19787,7 @@
       "raceId": "202603020211",
       "analyzedAt": "2026-06-28T12:00:00.000Z",
       "evEstimated": false,
-      "promptVersion": "2026-10-09.1",
+      "promptVersion": "2026-10-09.2",
       "additionalInstruction": null,
       "kaisaiDate": "20260628",
       "historyCutoffDate": "20260628",
@@ -24539,10 +24644,10 @@
       "horses": [
         {
           "umaban": 1,
-          "prior": 0.3952185792349726,
-          "adjustedProb": 0.3952185792349726,
+          "prior": 0.42721857923497264,
+          "adjustedProb": 0.42721857923497264,
           "placeOddsMin": 3.1,
-          "ev": 1.2251775956284152,
+          "ev": 1.3243775956284152,
           "isPositive": true,
           "contributions": [
             {
@@ -24586,11 +24691,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.0020000000000000018
+              "correction": 0.03
             },
             {
               "biasName": "コース枠順バイアス",
@@ -24726,10 +24831,10 @@
         },
         {
           "umaban": 2,
-          "prior": 0.14737089118931126,
-          "adjustedProb": 0.15473943574877683,
+          "prior": 0.16337089118931128,
+          "adjustedProb": 0.17153943574877686,
           "placeOddsMin": 4.2,
-          "ev": 0.6499056301448627,
+          "ev": 0.7204656301448629,
           "isPositive": false,
           "contributions": [
             {
@@ -24773,11 +24878,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.013999999999999999
+              "correction": 0.03
             },
             {
               "biasName": "コース枠順バイアス",
@@ -24963,9 +25068,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.01
             },
@@ -25101,10 +25206,10 @@
         },
         {
           "umaban": 4,
-          "prior": 0.3135,
-          "adjustedProb": 0.3135,
+          "prior": 0.3215,
+          "adjustedProb": 0.3215,
           "placeOddsMin": 9.5,
-          "ev": 2.97825,
+          "ev": 3.05425,
           "isPositive": true,
           "contributions": [
             {
@@ -25148,11 +25253,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.008
+              "correction": 0
             },
             {
               "biasName": "コース枠順バイアス",
@@ -25337,9 +25442,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -25525,9 +25630,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -25665,10 +25770,10 @@
         },
         {
           "umaban": 7,
-          "prior": 0.12965660547502555,
-          "adjustedProb": 0.12965660547502555,
+          "prior": 0.13765660547502556,
+          "adjustedProb": 0.13765660547502556,
           "placeOddsMin": 15.4,
-          "ev": 1.9967117243153936,
+          "ev": 2.1199117243153935,
           "isPositive": true,
           "contributions": [
             {
@@ -25712,11 +25817,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.018000000000000002
+              "correction": -0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -25852,10 +25957,10 @@
         },
         {
           "umaban": 8,
-          "prior": 0.12074751456593465,
-          "adjustedProb": 0.12678489029423137,
+          "prior": 0.13674751456593465,
+          "adjustedProb": 0.14358489029423138,
           "placeOddsMin": 3.6,
-          "ev": 0.45642560505923296,
+          "ev": 0.516905605059233,
           "isPositive": false,
           "contributions": [
             {
@@ -25899,11 +26004,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.016
+              "correction": 0
             },
             {
               "biasName": "コース枠順バイアス",
@@ -26042,10 +26147,10 @@
         },
         {
           "umaban": 9,
-          "prior": 0.14874751456593466,
-          "adjustedProb": 0.1413101388376379,
+          "prior": 0.15674751456593466,
+          "adjustedProb": 0.14891013883763793,
           "placeOddsMin": 4.5,
-          "ev": 0.6358956247693706,
+          "ev": 0.6700956247693707,
           "isPositive": false,
           "contributions": [
             {
@@ -26089,11 +26194,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.012
+              "correction": 0.02
             },
             {
               "biasName": "コース枠順バイアス",
@@ -26274,9 +26379,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -26463,9 +26568,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -26651,9 +26756,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": -0.01
             },
@@ -26838,9 +26943,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0
             },
@@ -27025,9 +27130,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.01
             },
@@ -27168,10 +27273,10 @@
         },
         {
           "umaban": 15,
-          "prior": 0.15056569638411646,
-          "adjustedProb": 0.14303741156491062,
+          "prior": 0.15856569638411647,
+          "adjustedProb": 0.15063741156491064,
           "placeOddsMin": 6.5,
-          "ev": 0.9297431751719191,
+          "ev": 0.9791431751719192,
           "isPositive": false,
           "contributions": [
             {
@@ -27215,11 +27320,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.018000000000000002
+              "correction": -0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -27353,10 +27458,10 @@
         },
         {
           "umaban": 16,
-          "prior": 0.15965660547502555,
-          "adjustedProb": 0.15965660547502555,
+          "prior": 0.16765660547502556,
+          "adjustedProb": 0.16765660547502556,
           "placeOddsMin": 5,
-          "ev": 0.7982830273751278,
+          "ev": 0.8382830273751278,
           "isPositive": false,
           "contributions": [
             {
@@ -27400,11 +27505,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.002
+              "correction": 0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -27571,1892 +27676,1962 @@
           {
             "betType": "win",
             "comboKey": "01",
-            "stake": 400,
+            "stake": 200,
             "odds": 9,
-            "ev": 1.2794052773038982
+            "ev": 1.3504831393365466
+          },
+          {
+            "betType": "place",
+            "comboKey": "01",
+            "stake": 400,
+            "odds": 3.1,
+            "ev": 1.3243775956284152
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0102",
-            "stake": 2800,
+            "stake": 3000,
             "odds": 38,
-            "ev": 3.6945410810574497
+            "ev": 3.823319136132116
           },
           {
-            "betType": "exacta",
+            "betType": "quinella",
             "comboKey": "0102",
-            "stake": 200,
-            "odds": 124.4,
-            "ev": 1.020397591846107
+            "stake": 500,
+            "odds": 63.8,
+            "ev": 1.1374215409050608
           },
           {
             "betType": "trio",
             "comboKey": "010203",
-            "stake": 400,
+            "stake": 500,
             "odds": 260.2,
-            "ev": 1.8056634641685183
+            "ev": 1.9835663408233504
           },
           {
             "betType": "trio",
             "comboKey": "010204",
             "stake": 500,
             "odds": 942.3,
-            "ev": 5.972672444148407
+            "ev": 6.78919360913716
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010207",
+            "stake": 100,
+            "odds": 1310.9,
+            "ev": 3.4754752935703546
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010209",
+            "stake": 100,
+            "odds": 404.2,
+            "ev": 1.1685464287449134
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010210",
+            "stake": 100,
+            "odds": 2440,
+            "ev": 7.467463098586765
           },
           {
             "betType": "trio",
             "comboKey": "010211",
-            "stake": 100,
+            "stake": 200,
             "odds": 932.9,
-            "ev": 2.939375466994328
+            "ev": 3.2523997446579602
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010214",
+            "stake": 100,
+            "odds": 272.8,
+            "ev": 1.0217560419002643
           },
           {
             "betType": "trio",
             "comboKey": "010215",
-            "stake": 100,
+            "stake": 200,
             "odds": 730.5,
-            "ev": 1.8237362343376224
+            "ev": 2.1390330243735525
           },
           {
             "betType": "trio",
             "comboKey": "010216",
-            "stake": 100,
+            "stake": 200,
             "odds": 542.2,
-            "ev": 1.5299048742331074
+            "ev": 1.789091421062795
           },
           {
             "betType": "wide",
             "comboKey": "0103",
             "stake": 500,
             "odds": 17.5,
-            "ev": 1.8370843741374776
+            "ev": 1.8603651159287424
           },
           {
             "betType": "trio",
             "comboKey": "010304",
             "stake": 1200,
             "odds": 682.8,
-            "ev": 11.020100581382845
+            "ev": 11.073398240125192
           },
           {
             "betType": "trio",
             "comboKey": "010306",
-            "stake": 500,
+            "stake": 400,
             "odds": 162.1,
-            "ev": 1.135675833054625
+            "ev": 1.1115965559773158
           },
           {
             "betType": "trio",
             "comboKey": "010307",
             "stake": 400,
             "odds": 1141.3,
-            "ev": 6.514399984522252
+            "ev": 6.813182404047897
           },
           {
             "betType": "trio",
             "comboKey": "010308",
             "stake": 200,
             "odds": 221.9,
-            "ev": 1.2359564478686655
+            "ev": 1.3875170037543423
           },
           {
             "betType": "trio",
             "comboKey": "010309",
-            "stake": 200,
+            "stake": 400,
             "odds": 302.2,
-            "ev": 1.896041177357752
+            "ev": 1.9671569089828693
           },
           {
             "betType": "trio",
             "comboKey": "010310",
             "stake": 400,
             "odds": 2263.9,
-            "ev": 15.93839791299801
+            "ev": 15.600123465923897
           },
           {
             "betType": "trio",
             "comboKey": "010311",
-            "stake": 600,
+            "stake": 500,
             "odds": 608.8,
-            "ev": 4.885461927263122
-          },
-          {
-            "betType": "trio",
-            "comboKey": "010312",
-            "stake": 200,
-            "odds": 174.8,
-            "ev": 1.0071493194136276
+            "ev": 4.778738715068456
           },
           {
             "betType": "trio",
             "comboKey": "010313",
             "stake": 400,
             "odds": 147.2,
-            "ev": 1.0430507600913124
+            "ev": 1.0208835221202932
           },
           {
             "betType": "trio",
             "comboKey": "010314",
-            "stake": 500,
+            "stake": 600,
             "odds": 342.5,
-            "ev": 2.9538419433331153
+            "ev": 2.88817145640964
           },
           {
             "betType": "trio",
             "comboKey": "010315",
             "stake": 500,
             "odds": 466.6,
-            "ev": 2.967074915950464
+            "ev": 3.076346557687076
           },
           {
             "betType": "trio",
             "comboKey": "010316",
-            "stake": 500,
+            "stake": 600,
             "odds": 563.9,
-            "ev": 4.052594286645917
+            "ev": 4.189407132676225
           },
           {
             "betType": "quinella",
             "comboKey": "0104",
             "stake": 1000,
             "odds": 283.4,
-            "ev": 9.91415841214786
+            "ev": 10.389695918240879
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0104",
-            "stake": 200,
+            "stake": 100,
             "odds": 32.8,
-            "ev": 1.1123650317466374
+            "ev": 1.2595184060311553
           },
           {
             "betType": "trio",
             "comboKey": "010405",
-            "stake": 400,
+            "stake": 500,
             "odds": 411,
-            "ev": 2.72411509061977
+            "ev": 2.7585901338810515
           },
           {
             "betType": "trio",
             "comboKey": "010406",
             "stake": 500,
             "odds": 520.7,
-            "ev": 3.332031218391264
+            "ev": 3.3747394007808227
           },
           {
             "betType": "trio",
             "comboKey": "010407",
             "stake": 400,
             "odds": 3551,
-            "ev": 18.51282762427454
+            "ev": 20.034938875582657
           },
           {
             "betType": "trio",
             "comboKey": "010408",
-            "stake": 400,
+            "stake": 500,
             "odds": 1074.3,
-            "ev": 5.465358094832613
+            "ev": 6.348836960374711
           },
           {
             "betType": "trio",
             "comboKey": "010409",
             "stake": 500,
             "odds": 1144.5,
-            "ev": 6.558700116939721
+            "ev": 7.041226478830062
           },
           {
             "betType": "trio",
             "comboKey": "010410",
             "stake": 500,
             "odds": 7142.1,
-            "ev": 45.92651926130605
+            "ev": 46.514168066989654
           },
           {
             "betType": "trio",
             "comboKey": "010411",
             "stake": 600,
             "odds": 1736.9,
-            "ev": 12.730860144986762
+            "ev": 12.88556087254825
           },
           {
             "betType": "trio",
             "comboKey": "010412",
             "stake": 400,
             "odds": 687.9,
-            "ev": 3.620139801852907
+            "ev": 3.669389617062589
           },
           {
             "betType": "trio",
             "comboKey": "010413",
             "stake": 500,
             "odds": 573.5,
-            "ev": 3.7117722606722916
+            "ev": 3.759156492640822
           },
           {
             "betType": "trio",
             "comboKey": "010414",
             "stake": 600,
             "odds": 1308.1,
-            "ev": 10.304348637221766
+            "ev": 10.425429872383091
           },
           {
             "betType": "trio",
             "comboKey": "010415",
             "stake": 500,
             "odds": 1875.7,
-            "ev": 10.894216478186575
+            "ev": 11.68804838121309
           },
           {
             "betType": "trio",
             "comboKey": "010416",
-            "stake": 500,
+            "stake": 600,
             "odds": 1668.2,
-            "ev": 10.950390438240893
+            "ev": 11.71353253789453
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0105",
             "stake": 100,
             "odds": 46,
-            "ev": 1.834182356996939
+            "ev": 1.9321343031798872
           },
           {
             "betType": "trio",
             "comboKey": "010611",
             "stake": 100,
             "odds": 444,
-            "ev": 1.412361534799302
+            "ev": 1.3923957642871119
           },
           {
             "betType": "trio",
             "comboKey": "010615",
             "stake": 100,
             "odds": 437.5,
-            "ev": 1.1027144448621713
+            "ev": 1.1523483778675603
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010616",
+            "stake": 100,
+            "odds": 346,
+            "ev": 1.0269734586014483
           },
           {
             "betType": "quinella",
             "comboKey": "0107",
-            "stake": 400,
+            "stake": 500,
             "odds": 437.8,
-            "ev": 5.647292059525965
+            "ev": 6.152151734872698
           },
           {
             "betType": "wide",
             "comboKey": "0107",
-            "stake": 1500,
+            "stake": 1300,
             "odds": 109.9,
-            "ev": 4.15037576346073
+            "ev": 4.491164302885114
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010708",
+            "stake": 100,
+            "odds": 1678.7,
+            "ev": 3.650290137230042
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010709",
+            "stake": 100,
+            "odds": 1811.9,
+            "ev": 4.101646400812396
           },
           {
             "betType": "trio",
             "comboKey": "010710",
             "stake": 100,
             "odds": 6248.6,
-            "ev": 14.205690289052535
+            "ev": 14.974142960488248
           },
           {
             "betType": "trio",
             "comboKey": "010711",
             "stake": 100,
             "odds": 3610.1,
-            "ev": 9.35541700506142
+            "ev": 9.85526046952748
           },
           {
             "betType": "trio",
             "comboKey": "010714",
             "stake": 100,
             "odds": 1667.6,
-            "ev": 4.644547537181731
+            "ev": 4.890769203955142
           },
           {
             "betType": "trio",
             "comboKey": "010715",
             "stake": 100,
             "odds": 2730.9,
-            "ev": 5.607464871198746
+            "ev": 6.26149103543046
           },
           {
             "betType": "trio",
             "comboKey": "010716",
             "stake": 100,
             "odds": 2866.5,
-            "ev": 6.652399909085097
+            "ev": 7.406333410478996
+          },
+          {
+            "betType": "quinella",
+            "comboKey": "0108",
+            "stake": 500,
+            "odds": 68.9,
+            "ev": 1.0130130228463234
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010810",
+            "stake": 100,
+            "odds": 2833.9,
+            "ev": 7.1134581227371365
           },
           {
             "betType": "trio",
             "comboKey": "010811",
             "stake": 100,
             "odds": 772.8,
-            "ev": 1.9542485936397902
+            "ev": 2.209796488694747
           },
           {
             "betType": "trio",
             "comboKey": "010815",
             "stake": 100,
             "odds": 525.6,
-            "ev": 1.053135660764398
+            "ev": 1.2623057429753177
           },
           {
             "betType": "trio",
             "comboKey": "010816",
             "stake": 100,
             "odds": 609.8,
-            "ev": 1.3809638628997645
+            "ev": 1.6503472501808973
           },
           {
             "betType": "quinella",
             "comboKey": "0109",
             "stake": 200,
             "odds": 102.4,
-            "ev": 1.448633640484824
+            "ev": 1.5657367416295704
           },
           {
             "betType": "exacta",
             "comboKey": "0109",
             "stake": 100,
             "odds": 184.6,
-            "ev": 1.375748756001082
+            "ev": 1.4928517571445725
           },
           {
             "betType": "wide",
             "comboKey": "0109",
-            "stake": 600,
+            "stake": 500,
             "odds": 26.6,
-            "ev": 1.0988789582360123
+            "ev": 1.1799005273340384
+          },
+          {
+            "betType": "trio",
+            "comboKey": "010910",
+            "stake": 100,
+            "odds": 2799.9,
+            "ev": 7.316575102360451
           },
           {
             "betType": "trio",
             "comboKey": "010911",
             "stake": 100,
             "odds": 1028.9,
-            "ev": 2.9309319711033917
+            "ev": 3.062857192144979
           },
           {
             "betType": "trio",
             "comboKey": "010914",
             "stake": 100,
             "odds": 416.1,
-            "ev": 1.2739051717528707
+            "ev": 1.3307206782033192
           },
           {
             "betType": "trio",
             "comboKey": "010915",
             "stake": 100,
             "odds": 826.2,
-            "ev": 1.8648200902327843
+            "ev": 2.065682894234491
           },
           {
             "betType": "trio",
             "comboKey": "010916",
-            "stake": 100,
+            "stake": 200,
             "odds": 874.8,
-            "ev": 2.2316443289263095
+            "ev": 2.464707468169257
           },
           {
             "betType": "quinella",
             "comboKey": "0110",
             "stake": 600,
             "odds": 776.2,
-            "ev": 12.283834841253082
+            "ev": 12.54480026370024
           },
           {
             "betType": "wide",
             "comboKey": "0110",
-            "stake": 2100,
+            "stake": 1700,
             "odds": 192.6,
-            "ev": 8.869521009955609
+            "ev": 9.014326527089434
           },
           {
             "betType": "trio",
             "comboKey": "011011",
             "stake": 200,
             "odds": 4986.6,
-            "ev": 15.939843673929627
+            "ev": 15.714171579406742
           },
           {
             "betType": "trio",
             "comboKey": "011014",
             "stake": 100,
             "odds": 2960.4,
-            "ev": 10.170345306904489
+            "ev": 10.02241565810116
           },
           {
             "betType": "trio",
             "comboKey": "011015",
             "stake": 100,
             "odds": 5052.9,
-            "ev": 12.798010361547679
+            "ev": 13.373767940861601
           },
           {
             "betType": "trio",
             "comboKey": "011016",
-            "stake": 100,
+            "stake": 200,
             "odds": 4664.8,
-            "ev": 13.353579329594258
+            "ev": 13.913084390518641
           },
           {
             "betType": "quinella",
             "comboKey": "0111",
-            "stake": 200,
+            "stake": 400,
             "odds": 174.1,
-            "ev": 3.1281684779060432
+            "ev": 3.193082877125487
           },
           {
             "betType": "wide",
             "comboKey": "0111",
             "stake": 1600,
             "odds": 54,
-            "ev": 2.8104702125172643
-          },
-          {
-            "betType": "trio",
-            "comboKey": "011112",
-            "stake": 100,
-            "odds": 514.6,
-            "ev": 1.3461470239098141
+            "ev": 2.855390930507372
           },
           {
             "betType": "trio",
             "comboKey": "011113",
             "stake": 100,
             "odds": 448.6,
-            "ev": 1.4432771816714407
+            "ev": 1.4228025552966241
           },
           {
             "betType": "trio",
             "comboKey": "011114",
             "stake": 200,
             "odds": 911.6,
-            "ev": 3.5698284733134544
+            "ev": 3.515685523640156
           },
           {
             "betType": "trio",
             "comboKey": "011115",
             "stake": 200,
             "odds": 1306.2,
-            "ev": 3.771153231349384
+            "ev": 3.938318342030734
           },
           {
             "betType": "trio",
             "comboKey": "011116",
             "stake": 200,
             "odds": 1176.5,
-            "ev": 3.838994022533815
+            "ev": 3.9973147776456943
+          },
+          {
+            "betType": "trifecta",
+            "comboKey": "011203",
+            "stake": 100,
+            "odds": 1098.2,
+            "ev": 1.0700756870764607
           },
           {
             "betType": "trio",
             "comboKey": "011316",
             "stake": 100,
             "odds": 360.9,
-            "ev": 1.0398305750937498
-          },
-          {
-            "betType": "wide",
-            "comboKey": "0114",
-            "stake": 1700,
-            "odds": 23.8,
-            "ev": 1.3243015976334704
+            "ev": 1.0833673159055113
           },
           {
             "betType": "quinella",
             "comboKey": "0114",
             "stake": 100,
             "odds": 68.7,
-            "ev": 1.323429149206966
+            "ev": 1.350486121073821
+          },
+          {
+            "betType": "wide",
+            "comboKey": "0114",
+            "stake": 1500,
+            "odds": 23.8,
+            "ev": 1.3451908446518832
           },
           {
             "betType": "trio",
             "comboKey": "011415",
             "stake": 200,
             "odds": 581.8,
-            "ev": 1.8052814257821554
+            "ev": 1.8845616210083642
           },
           {
             "betType": "trio",
             "comboKey": "011416",
             "stake": 200,
             "odds": 490.4,
-            "ev": 1.7198142793002817
+            "ev": 1.7900335563105376
           },
           {
             "betType": "quinella",
             "comboKey": "0115",
-            "stake": 100,
+            "stake": 200,
             "odds": 126.8,
-            "ev": 1.8174433004473711
+            "ev": 1.9630906624924078
           },
           {
             "betType": "wide",
             "comboKey": "0115",
             "stake": 400,
             "odds": 36.4,
-            "ev": 1.5229464900202319
+            "ev": 1.6341862902444269
           },
           {
             "betType": "trio",
             "comboKey": "011516",
             "stake": 200,
             "odds": 1051.9,
-            "ev": 2.7197110036027023
+            "ev": 3.001778962180369
           },
           {
             "betType": "quinella",
             "comboKey": "0116",
-            "stake": 400,
+            "stake": 500,
             "odds": 146.4,
-            "ev": 2.363688385138087
+            "ev": 2.545575175138349
           },
           {
             "betType": "wide",
             "comboKey": "0116",
-            "stake": 1000,
+            "stake": 800,
             "odds": 40.4,
-            "ev": 1.896793554011201
-          },
-          {
-            "betType": "exacta",
-            "comboKey": "0201",
-            "stake": 200,
-            "odds": 135.5,
-            "ev": 1.0030989132510884
+            "ev": 2.029245386676721
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0202",
-            "stake": 1500,
+            "stake": 1300,
             "odds": 295.8,
-            "ev": 8.358416259637359
+            "ev": 7.9054476129849265
           },
           {
             "betType": "wide",
             "comboKey": "0203",
             "stake": 400,
             "odds": 34.5,
-            "ev": 1.2934008587931076
+            "ev": 1.336747283875631
           },
           {
             "betType": "trio",
             "comboKey": "020304",
             "stake": 200,
             "odds": 1361.3,
-            "ev": 6.8467628375375815
+            "ev": 6.962446400725767
           },
           {
             "betType": "trio",
             "comboKey": "020307",
             "stake": 100,
             "odds": 1936.5,
-            "ev": 3.4443222368981905
+            "ev": 3.6458807064828087
           },
           {
             "betType": "trio",
             "comboKey": "020309",
             "stake": 100,
             "odds": 610.6,
-            "ev": 1.1937921495464452
+            "ev": 1.2535470217832418
           },
           {
             "betType": "trio",
             "comboKey": "020310",
             "stake": 100,
             "odds": 3340.1,
-            "ev": 7.327804575641169
+            "ev": 7.258926355839717
           },
           {
             "betType": "trio",
             "comboKey": "020311",
             "stake": 100,
             "odds": 1207.3,
-            "ev": 3.0191327746077756
+            "ev": 2.9888338628574367
           },
           {
             "betType": "trio",
             "comboKey": "020314",
             "stake": 100,
             "odds": 655.2,
-            "ev": 1.760926198154619
+            "ev": 1.7425563374667188
           },
           {
             "betType": "trio",
             "comboKey": "020315",
             "stake": 100,
             "odds": 1135.9,
-            "ev": 2.250834043175774
+            "ev": 2.3619492317046658
           },
           {
             "betType": "trio",
             "comboKey": "020316",
             "stake": 100,
             "odds": 996.3,
-            "ev": 2.231257092978837
+            "ev": 2.3344588551282226
           },
           {
             "betType": "quinella",
             "comboKey": "0204",
-            "stake": 400,
+            "stake": 500,
             "odds": 517.9,
-            "ev": 5.994974977139403
+            "ev": 6.380162610581662
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0204",
-            "stake": 800,
+            "stake": 900,
             "odds": 71.5,
-            "ev": 2.8235051527057844
+            "ev": 2.9182057843326397
           },
           {
             "betType": "trio",
             "comboKey": "020405",
             "stake": 100,
             "odds": 719.3,
-            "ev": 1.485868860063473
+            "ev": 1.5227816828775897
           },
           {
             "betType": "trio",
             "comboKey": "020406",
             "stake": 100,
             "odds": 1002.5,
-            "ev": 1.9993610538026256
+            "ev": 2.0493599993697753
           },
           {
             "betType": "trio",
             "comboKey": "020408",
             "stake": 100,
             "odds": 1729,
-            "ev": 2.741339294989605
+            "ev": 3.2228622962874134
           },
           {
             "betType": "trio",
             "comboKey": "020409",
             "stake": 100,
             "odds": 1425.4,
-            "ev": 2.5457702358279106
+            "ev": 2.7659786045714885
           },
           {
             "betType": "trio",
             "comboKey": "020411",
             "stake": 100,
             "odds": 2810.3,
-            "ev": 6.419866616857406
+            "ev": 6.576060112214014
           },
           {
             "betType": "trio",
             "comboKey": "020412",
             "stake": 100,
             "odds": 1230.2,
-            "ev": 2.017679421992353
+            "ev": 2.0697531676702323
           },
           {
             "betType": "trio",
             "comboKey": "020413",
             "stake": 100,
             "odds": 1116.4,
-            "ev": 2.25192311702545
+            "ev": 2.3081198646914234
           },
           {
             "betType": "trio",
             "comboKey": "020414",
             "stake": 100,
             "odds": 1767.2,
-            "ev": 4.338680688782916
+            "ev": 4.442468382027985
           },
           {
             "betType": "trio",
             "comboKey": "020415",
             "stake": 100,
             "odds": 3869.5,
-            "ev": 7.004361754264196
+            "ev": 7.605249069899274
           },
           {
             "betType": "trio",
             "comboKey": "020416",
             "stake": 100,
             "odds": 2304.4,
-            "ev": 4.7143927375861345
+            "ev": 5.103651811503154
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0205",
-            "stake": 1300,
+            "stake": 1200,
             "odds": 108.2,
-            "ev": 5.023750175117048
+            "ev": 4.830530729004917
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0206",
-            "stake": 600,
+            "stake": 500,
             "odds": 38,
-            "ev": 1.8240445678125774
+            "ev": 1.7068254130845486
           },
           {
             "betType": "quinella",
             "comboKey": "0207",
             "stake": 200,
             "odds": 601.8,
-            "ev": 2.5639026466019748
+            "ev": 2.8364379862799027
           },
           {
             "betType": "wide",
             "comboKey": "0207",
             "stake": 200,
             "odds": 143.1,
-            "ev": 1.9056775238126098
+            "ev": 2.1050707704801273
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0207",
-            "stake": 600,
+            "stake": 500,
             "odds": 30,
-            "ev": 1.6354749795460208
+            "ev": 1.529765298787535
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0208",
             "stake": 1200,
             "odds": 68.8,
-            "ev": 3.2483665786539104
+            "ev": 3.2100436501311673
           },
           {
             "betType": "quinella",
             "comboKey": "0210",
             "stake": 100,
             "odds": 899.1,
-            "ev": 4.70066382962178
+            "ev": 4.874653101871251
           },
           {
             "betType": "wide",
             "comboKey": "0210",
             "stake": 500,
             "odds": 225.7,
-            "ev": 3.669991491640749
+            "ev": 3.8061749618633685
+          },
+          {
+            "betType": "trio",
+            "comboKey": "021011",
+            "stake": 100,
+            "odds": 8315.5,
+            "ev": 8.270479643970171
           },
           {
             "betType": "quinella",
             "comboKey": "0211",
             "stake": 200,
             "odds": 344.2,
-            "ev": 2.0434815764671974
+            "ev": 2.1180986742758434
           },
           {
             "betType": "wide",
             "comboKey": "0211",
             "stake": 500,
             "odds": 88.2,
-            "ev": 1.6224481054551463
+            "ev": 1.6821211484897356
+          },
+          {
+            "betType": "trio",
+            "comboKey": "021115",
+            "stake": 100,
+            "odds": 2338.9,
+            "ev": 2.225737395947166
+          },
+          {
+            "betType": "trio",
+            "comboKey": "021116",
+            "stake": 100,
+            "odds": 1852.4,
+            "ev": 1.9863495430762657
           },
           {
             "betType": "quinella",
             "comboKey": "0215",
             "stake": 100,
             "odds": 256.7,
-            "ev": 1.215358153259147
+            "ev": 1.3331166267420307
           },
           {
             "betType": "wide",
             "comboKey": "0215",
             "stake": 400,
             "odds": 74,
-            "ev": 1.0924764604536628
+            "ev": 1.196678828419493
           },
           {
             "betType": "wide",
             "comboKey": "0304",
-            "stake": 1500,
+            "stake": 1900,
             "odds": 63.4,
-            "ev": 5.105344539271574
+            "ev": 4.860232262392819
           },
           {
             "betType": "trio",
             "comboKey": "030406",
             "stake": 100,
             "odds": 518,
-            "ev": 2.630286884564001
+            "ev": 2.3832131623506125
           },
           {
             "betType": "trio",
             "comboKey": "030407",
             "stake": 200,
             "odds": 3799.8,
-            "ev": 15.71937695859275
+            "ev": 15.218770173223758
           },
           {
             "betType": "trio",
             "comboKey": "030408",
             "stake": 100,
             "odds": 954.6,
-            "ev": 3.8536031313376506
+            "ev": 4.0047117048310215
           },
           {
             "betType": "trio",
             "comboKey": "030409",
             "stake": 100,
             "odds": 1084,
-            "ev": 4.929281505633115
+            "ev": 4.734157953788609
           },
           {
             "betType": "trio",
             "comboKey": "030410",
             "stake": 200,
             "odds": 5226.9,
-            "ev": 26.67065251492293
+            "ev": 24.164840631597308
           },
           {
             "betType": "trio",
             "comboKey": "030411",
-            "stake": 400,
+            "stake": 200,
             "odds": 1544.5,
-            "ev": 8.983001737270296
-          },
-          {
-            "betType": "trio",
-            "comboKey": "030412",
-            "stake": 100,
-            "odds": 629,
-            "ev": 2.6266558760669128
-          },
-          {
-            "betType": "trio",
-            "comboKey": "030413",
-            "stake": 100,
-            "odds": 499.7,
-            "ev": 2.5663096153003195
+            "ev": 8.13382665283762
           },
           {
             "betType": "trio",
             "comboKey": "030414",
-            "stake": 400,
+            "stake": 200,
             "odds": 1421.4,
-            "ev": 8.884756256717285
+            "ev": 8.04166996950541
           },
           {
             "betType": "trio",
             "comboKey": "030415",
             "stake": 200,
             "odds": 1626.2,
-            "ev": 7.4947802172533535
+            "ev": 7.193386885975369
           },
           {
             "betType": "trio",
             "comboKey": "030416",
             "stake": 200,
             "odds": 1518.8,
-            "ev": 7.9110436289843475
+            "ev": 7.570416863725962
           },
           {
             "betType": "trio",
             "comboKey": "030507",
             "stake": 100,
             "odds": 848.1,
-            "ev": 1.577395789797403
+            "ev": 1.4874581818734187
           },
           {
             "betType": "trio",
             "comboKey": "030607",
             "stake": 100,
             "odds": 1327,
-            "ev": 2.3828673427317697
-          },
-          {
-            "betType": "trio",
-            "comboKey": "030611",
-            "stake": 100,
-            "odds": 433.1,
-            "ev": 1.0934467158777257
+            "ev": 2.247367236658058
           },
           {
             "betType": "quinella",
             "comboKey": "0307",
-            "stake": 400,
+            "stake": 200,
             "odds": 518.4,
-            "ev": 5.398459251337397
+            "ev": 5.306528584539204
           },
           {
             "betType": "trio",
             "comboKey": "030708",
             "stake": 100,
             "odds": 1708.9,
-            "ev": 2.439497185214743
+            "ev": 2.6389458796278817
+          },
+          {
+            "betType": "trio",
+            "comboKey": "030709",
+            "stake": 100,
+            "odds": 1883.1,
+            "ev": 3.027285963613829
           },
           {
             "betType": "trio",
             "comboKey": "030710",
             "stake": 100,
             "odds": 5899,
-            "ev": 10.644464348696337
+            "ev": 10.038953682460615
           },
           {
             "betType": "trio",
             "comboKey": "030711",
             "stake": 100,
             "odds": 3406.8,
-            "ev": 7.007232706723067
+            "ev": 6.604386550496581
           },
           {
             "betType": "trio",
             "comboKey": "030712",
             "stake": 100,
             "odds": 973.1,
-            "ev": 1.4369796318707124
+            "ev": 1.3563293824610987
           },
           {
             "betType": "trio",
             "comboKey": "030713",
             "stake": 100,
             "odds": 930.8,
-            "ev": 1.6904897868917403
+            "ev": 1.5942793899596646
           },
           {
             "betType": "trio",
             "comboKey": "030714",
             "stake": 100,
             "odds": 2638.9,
-            "ev": 5.833432356254149
+            "ev": 5.495868838020843
           },
           {
             "betType": "trio",
             "comboKey": "030715",
             "stake": 100,
             "odds": 2648.5,
-            "ev": 4.3165121903120225
+            "ev": 4.312477778878399
           },
           {
             "betType": "trio",
             "comboKey": "030716",
             "stake": 100,
             "odds": 3092.5,
-            "ev": 5.696400129934369
+            "ev": 5.674193706019935
           },
           {
             "betType": "trio",
             "comboKey": "030811",
             "stake": 100,
             "odds": 708.1,
-            "ev": 1.4212295027550736
+            "ev": 1.4378501202450402
           },
           {
             "betType": "trio",
             "comboKey": "030816",
             "stake": 100,
             "odds": 708,
-            "ev": 1.2726048285671436
+            "ev": 1.3606958220452634
           },
           {
             "betType": "trio",
             "comboKey": "030911",
             "stake": 100,
             "odds": 910.2,
-            "ev": 2.0578863866048764
+            "ev": 1.9240722934167147
           },
           {
             "betType": "trio",
             "comboKey": "030914",
             "stake": 100,
             "odds": 662.7,
-            "ev": 1.6102835470661683
+            "ev": 1.5049729306040203
           },
           {
             "betType": "trio",
             "comboKey": "030916",
             "stake": 100,
             "odds": 855.8,
-            "ev": 1.7328001424406954
+            "ev": 1.7122443978477557
           },
           {
             "betType": "quinella",
             "comboKey": "0310",
             "stake": 500,
             "odds": 1020.6,
-            "ev": 13.040270661906007
+            "ev": 12.016299716466346
           },
           {
             "betType": "wide",
             "comboKey": "0310",
-            "stake": 1200,
+            "stake": 1000,
             "odds": 197.5,
-            "ev": 7.5054369766921685
+            "ev": 6.958360959046237
           },
           {
             "betType": "trio",
             "comboKey": "031011",
             "stake": 100,
             "odds": 5333.4,
-            "ev": 13.5310016735386
+            "ev": 11.934869894638563
           },
           {
             "betType": "trio",
             "comboKey": "031014",
             "stake": 100,
             "odds": 3724.3,
-            "ev": 10.154782336644724
+            "ev": 8.95333985236011
           },
           {
             "betType": "trio",
             "comboKey": "031015",
             "stake": 100,
             "odds": 5403.6,
-            "ev": 10.862895495119568
+            "ev": 10.15639077218196
           },
           {
             "betType": "trio",
             "comboKey": "031016",
             "stake": 100,
             "odds": 5588.6,
-            "ev": 12.697593301515196
+            "ev": 11.836565042476565
           },
           {
             "betType": "quinella",
             "comboKey": "0311",
             "stake": 200,
             "odds": 174.5,
-            "ev": 2.5315105918673946
+            "ev": 2.3316523515476697
           },
           {
             "betType": "wide",
             "comboKey": "0311",
-            "stake": 600,
+            "stake": 900,
             "odds": 52,
-            "ev": 2.2340347940803804
-          },
-          {
-            "betType": "trio",
-            "comboKey": "031113",
-            "stake": 100,
-            "odds": 396.4,
-            "ev": 1.0122086274833633
+            "ev": 2.0707764380051636
           },
           {
             "betType": "trio",
             "comboKey": "031114",
-            "stake": 200,
+            "stake": 100,
             "odds": 997.5,
-            "ev": 3.1001962528209432
+            "ev": 2.731656168236898
           },
           {
             "betType": "trio",
             "comboKey": "031115",
             "stake": 100,
             "odds": 1141.4,
-            "ev": 2.615494099449113
+            "ev": 2.443818944522174
           },
           {
             "betType": "trio",
             "comboKey": "031116",
             "stake": 100,
             "odds": 1204.6,
-            "ev": 3.119704734185148
+            "ev": 2.9062930935108366
+          },
+          {
+            "betType": "trifecta",
+            "comboKey": "031201",
+            "stake": 100,
+            "odds": 1326.8,
+            "ev": 1.1814960671493113
           },
           {
             "betType": "quinella",
             "comboKey": "0314",
             "stake": 200,
             "odds": 133.3,
-            "ev": 2.073387736389008
+            "ev": 1.909148719029794
           },
           {
             "betType": "wide",
             "comboKey": "0314",
-            "stake": 1500,
+            "stake": 1200,
             "odds": 41.1,
-            "ev": 1.888153029398655
+            "ev": 1.7499553073869376
           },
           {
             "betType": "trio",
             "comboKey": "031415",
             "stake": 100,
             "odds": 883.1,
-            "ev": 2.174835978090544
+            "ev": 2.031272290078296
           },
           {
             "betType": "trio",
             "comboKey": "031416",
             "stake": 100,
             "odds": 773.4,
-            "ev": 2.1526570806620926
+            "ev": 2.0045976479930725
           },
           {
             "betType": "wide",
             "comboKey": "0315",
-            "stake": 500,
+            "stake": 400,
             "odds": 45,
-            "ev": 1.5533437987639784
+            "ev": 1.5206017629729371
           },
           {
             "betType": "trio",
             "comboKey": "031516",
             "stake": 100,
             "odds": 979.1,
-            "ev": 2.009253190175743
+            "ev": 1.9841165239206964
           },
           {
             "betType": "wide",
             "comboKey": "0316",
-            "stake": 800,
+            "stake": 600,
             "odds": 48.4,
-            "ev": 1.8752933829023006
+            "ev": 1.8305041999331186
           },
           {
             "betType": "win",
             "comboKey": "04",
-            "stake": 3500,
+            "stake": 3200,
             "odds": 59.5,
-            "ev": 6.4042513315753355
+            "ev": 6.332396642479509
           },
           {
             "betType": "exacta",
             "comboKey": "0401",
-            "stake": 100,
+            "stake": 200,
             "odds": 695.5,
-            "ev": 11.92535677985443
+            "ev": 12.429819362510523
           },
           {
             "betType": "trifecta",
             "comboKey": "040103",
             "stake": 100,
             "odds": 6528.2,
-            "ev": 17.38950507988544
+            "ev": 17.551777764751947
           },
           {
             "betType": "trifecta",
             "comboKey": "040301",
             "stake": 100,
             "odds": 6883.1,
-            "ev": 17.729656994431323
-          },
-          {
-            "betType": "trifecta",
-            "comboKey": "040310",
-            "stake": 100,
-            "odds": 48359.6,
-            "ev": 43.9703587510973
+            "ev": 17.60165276009877
           },
           {
             "betType": "quinella",
             "comboKey": "0405",
             "stake": 200,
             "odds": 149.6,
-            "ev": 1.8085674697203225
+            "ev": 1.720325890885475
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0405",
-            "stake": 100,
+            "stake": 200,
             "odds": 96.6,
-            "ev": 1.562101428367763
-          },
-          {
-            "betType": "wide",
-            "comboKey": "0405",
-            "stake": 100,
-            "odds": 42,
-            "ev": 1.5192077914794588
+            "ev": 1.6433931312729122
           },
           {
             "betType": "trio",
             "comboKey": "040509",
             "stake": 100,
             "odds": 661.1,
-            "ev": 1.234684031251621
+            "ev": 1.1950694376697055
           },
           {
             "betType": "quinella",
             "comboKey": "0406",
-            "stake": 400,
+            "stake": 200,
             "odds": 193.8,
-            "ev": 2.2642451656447093
+            "ev": 2.154024209387762
           },
           {
             "betType": "trio",
             "comboKey": "040609",
             "stake": 100,
             "odds": 891.8,
-            "ev": 1.6080233597575637
+            "ev": 1.5566802477104706
           },
           {
             "betType": "quinella",
             "comboKey": "0407",
             "stake": 500,
             "odds": 1472.4,
-            "ev": 14.086934165503973
+            "ev": 14.295497840524863
           },
           {
             "betType": "wide",
             "comboKey": "0407",
-            "stake": 600,
+            "stake": 800,
             "odds": 282.1,
-            "ev": 8.128363971969769
+            "ev": 8.260953535188808
           },
           {
             "betType": "trio",
             "comboKey": "040708",
             "stake": 100,
             "odds": 6516.8,
-            "ev": 8.498325262786938
+            "ev": 9.512160614321154
           },
           {
             "betType": "trio",
             "comboKey": "040711",
             "stake": 100,
             "odds": 6974.8,
-            "ev": 13.105100572195235
-          },
-          {
-            "betType": "trio",
-            "comboKey": "040713",
-            "stake": 100,
-            "odds": 3117.2,
-            "ev": 5.1716866937704795
+            "ev": 12.780448719677347
           },
           {
             "betType": "trio",
             "comboKey": "040714",
             "stake": 100,
             "odds": 7684.3,
-            "ev": 15.51716743095834
+            "ev": 15.126737308416558
           },
           {
             "betType": "trio",
             "comboKey": "040715",
             "stake": 100,
             "odds": 9241.7,
-            "ev": 13.759357785239075
+            "ev": 14.223589537321619
           },
           {
             "betType": "trio",
             "comboKey": "040716",
             "stake": 100,
             "odds": 8431,
-            "ev": 14.186685917422173
+            "ev": 14.62186299905644
           },
           {
             "betType": "quinella",
             "comboKey": "0408",
             "stake": 200,
             "odds": 392,
-            "ev": 3.661707687721958
+            "ev": 3.982125032546954
           },
           {
             "betType": "wide",
             "comboKey": "0408",
             "stake": 500,
             "odds": 93.3,
-            "ev": 2.6262655837109232
+            "ev": 2.8553508195510506
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0408",
-            "stake": 100,
+            "stake": 200,
             "odds": 65.8,
-            "ev": 1.0820341116328471
+            "ev": 1.1699386135024834
           },
           {
-            "betType": "quinella",
+            "betType": "trio",
+            "comboKey": "040811",
+            "stake": 100,
+            "odds": 2064.1,
+            "ev": 3.9616667360394224
+          },
+          {
+            "betType": "trio",
+            "comboKey": "040814",
+            "stake": 100,
+            "odds": 1794.8,
+            "ev": 3.700749435357456
+          },
+          {
+            "betType": "trio",
+            "comboKey": "040816",
+            "stake": 100,
+            "odds": 2161.1,
+            "ev": 3.9258300340617756
+          },
+          {
+            "betType": "exacta",
             "comboKey": "0409",
-            "stake": 200,
-            "odds": 425.5,
-            "ev": 4.464797059137625
+            "stake": 100,
+            "odds": 1043.7,
+            "ev": 5.69411896113362
           },
           {
             "betType": "trio",
             "comboKey": "040911",
             "stake": 100,
             "odds": 2353.7,
-            "ev": 4.861197980841083
+            "ev": 4.70287622576132
           },
           {
             "betType": "trio",
             "comboKey": "040912",
             "stake": 100,
             "odds": 1079.5,
-            "ev": 1.6007222679398196
+            "ev": 1.5508215172636572
           },
           {
             "betType": "trio",
             "comboKey": "040913",
             "stake": 100,
             "odds": 870.3,
-            "ev": 1.5871604121306433
+            "ev": 1.536404930635357
           },
           {
             "betType": "trio",
             "comboKey": "040914",
             "stake": 100,
             "odds": 1922,
-            "ev": 4.266234325980202
+            "ev": 4.12564702751059
           },
           {
             "betType": "trio",
             "comboKey": "040915",
             "stake": 100,
             "odds": 2717.2,
-            "ev": 4.446853110036962
+            "ev": 4.560137183390764
           },
           {
             "betType": "trio",
             "comboKey": "040916",
             "stake": 100,
             "odds": 2283,
-            "ev": 4.222717206892607
+            "ev": 4.317455871225902
           },
           {
             "betType": "quinella",
             "comboKey": "0410",
             "stake": 600,
             "odds": 2330,
-            "ev": 27.351627656826278
+            "ev": 26.019763696402293
           },
           {
             "betType": "wide",
             "comboKey": "0410",
-            "stake": 1700,
+            "stake": 1600,
             "odds": 429.3,
-            "ev": 15.092272104167591
+            "ev": 14.404970901954455
           },
           {
             "betType": "trio",
             "comboKey": "041015",
             "stake": 100,
             "odds": 15462.5,
-            "ev": 28.39567563582179
+            "ev": 27.4704087288594
           },
           {
             "betType": "quinella",
             "comboKey": "0411",
             "stake": 400,
             "odds": 533.6,
-            "ev": 7.1121997748574675
+            "ev": 6.7627112918991985
           },
           {
             "betType": "wide",
             "comboKey": "0411",
-            "stake": 1200,
+            "stake": 1000,
             "odds": 134.3,
-            "ev": 5.338154686387521
+            "ev": 5.093807187580148
           },
           {
             "betType": "trio",
             "comboKey": "041114",
             "stake": 100,
             "odds": 2409,
-            "ev": 6.839362498739619
+            "ev": 6.235558507753563
           },
           {
             "betType": "trio",
             "comboKey": "041115",
             "stake": 100,
             "odds": 3110.8,
-            "ev": 6.511715845797549
+            "ev": 6.295511741072504
           },
           {
             "betType": "trio",
             "comboKey": "041116",
             "stake": 100,
             "odds": 2710,
-            "ev": 6.411294354906569
+            "ev": 6.180058806901016
+          },
+          {
+            "betType": "quinella",
+            "comboKey": "0412",
+            "stake": 100,
+            "odds": 203,
+            "ev": 1.8657262456518129
           },
           {
             "betType": "quinella",
             "comboKey": "0413",
             "stake": 100,
             "odds": 171.2,
-            "ev": 2.0223816644632597
+            "ev": 1.9238623107090405
           },
           {
             "betType": "quinella",
             "comboKey": "0414",
             "stake": 500,
             "odds": 465.7,
-            "ev": 6.655259901906329
+            "ev": 6.326378657640786
           },
           {
             "betType": "wide",
             "comboKey": "0414",
-            "stake": 1300,
+            "stake": 1200,
             "odds": 113.9,
-            "ev": 4.841440034951989
+            "ev": 4.619136871101383
           },
           {
             "betType": "trio",
             "comboKey": "041415",
             "stake": 100,
             "odds": 2554.5,
-            "ev": 5.7468295791300825
+            "ev": 5.553810332433031
           },
           {
             "betType": "trio",
             "comboKey": "041416",
             "stake": 100,
             "odds": 1952.9,
-            "ev": 4.965407938524632
+            "ev": 4.784416597626932
           },
           {
             "betType": "quinella",
             "comboKey": "0415",
             "stake": 200,
             "odds": 604.9,
-            "ev": 6.430893912447107
+            "ev": 6.470691263697565
           },
           {
             "betType": "wide",
             "comboKey": "0415",
             "stake": 800,
             "odds": 149.5,
-            "ev": 4.773657259125809
+            "ev": 4.811141404698233
           },
           {
             "betType": "trio",
             "comboKey": "041516",
             "stake": 100,
             "odds": 2873,
-            "ev": 5.385833848551756
+            "ev": 5.503059011177387
           },
           {
             "betType": "exacta",
             "comboKey": "0416",
             "stake": 100,
             "odds": 1249.5,
-            "ev": 7.711620745470702
+            "ev": 7.728465881970415
           },
           {
             "betType": "quinella",
             "comboKey": "0416",
             "stake": 200,
             "odds": 526.9,
-            "ev": 6.310281323962485
+            "ev": 6.330686150953032
           },
           {
             "betType": "wide",
             "comboKey": "0416",
-            "stake": 900,
+            "stake": 800,
             "odds": 125.9,
-            "ev": 4.512746195762416
+            "ev": 4.53499415287539
           },
           {
             "betType": "bracketQuinella",
             "comboKey": "0506",
             "stake": 100,
             "odds": 65,
-            "ev": 1.277887661751411
+            "ev": 1.2170673567028678
           },
           {
             "betType": "quinella",
             "comboKey": "0507",
             "stake": 100,
             "odds": 309.4,
-            "ev": 1.3767304465429833
+            "ev": 1.361154030195672
           },
           {
             "betType": "wide",
             "comboKey": "0507",
             "stake": 100,
             "odds": 92.1,
-            "ev": 1.2794758284988559
+            "ev": 1.2670356870702657
           },
           {
             "betType": "quinella",
             "comboKey": "0510",
             "stake": 100,
             "odds": 495,
-            "ev": 2.702920813516082
-          },
-          {
-            "betType": "wide",
-            "comboKey": "0510",
-            "stake": 100,
-            "odds": 125.1,
-            "ev": 2.1219866012455264
+            "ev": 2.505009232024054
           },
           {
             "betType": "quinella",
             "comboKey": "0607",
             "stake": 100,
             "odds": 455,
-            "ev": 1.9565576638327158
+            "ev": 1.934653330419155
           },
           {
             "betType": "wide",
             "comboKey": "0607",
             "stake": 200,
             "odds": 123.5,
-            "ev": 1.6595889099433676
+            "ev": 1.6435767408746584
           },
           {
             "betType": "quinella",
             "comboKey": "0610",
             "stake": 100,
             "odds": 619.7,
-            "ev": 3.27012316694669
+            "ev": 3.031039696790015
           },
           {
             "betType": "wide",
             "comboKey": "0610",
             "stake": 200,
             "odds": 153.1,
-            "ev": 2.5120611396795867
+            "ev": 2.335854572105737
           },
           {
             "betType": "win",
             "comboKey": "07",
-            "stake": 500,
+            "stake": 400,
             "odds": 79.2,
-            "ev": 3.2539807912984577
+            "ev": 3.3401372248413885
           },
           {
             "betType": "exacta",
             "comboKey": "0701",
             "stake": 100,
             "odds": 1042.5,
-            "ev": 6.349677412998308
+            "ev": 6.887711968578222
+          },
+          {
+            "betType": "exacta",
+            "comboKey": "0703",
+            "stake": 100,
+            "odds": 1207.4,
+            "ev": 5.946422445068459
           },
           {
             "betType": "quinella",
             "comboKey": "0708",
             "stake": 100,
             "odds": 613.8,
-            "ev": 2.1098706620807945
+            "ev": 2.385166260726436
           },
           {
             "betType": "wide",
             "comboKey": "0708",
-            "stake": 100,
+            "stake": 200,
             "odds": 152.9,
-            "ev": 1.6511939571184773
+            "ev": 1.863749108958133
           },
           {
             "betType": "quinella",
             "comboKey": "0709",
             "stake": 200,
             "odds": 772.7,
-            "ev": 2.983897308766005
+            "ev": 3.1228350811460674
           },
           {
             "betType": "wide",
             "comboKey": "0709",
             "stake": 200,
             "odds": 166,
-            "ev": 2.008708660823743
+            "ev": 2.102468300125925
           },
           {
             "betType": "quinella",
             "comboKey": "0710",
             "stake": 200,
             "odds": 2103.1,
-            "ev": 9.086584251517762
+            "ev": 8.984709970010453
           },
           {
             "betType": "wide",
             "comboKey": "0710",
             "stake": 200,
             "odds": 400,
-            "ev": 5.400044691699146
-          },
-          {
-            "betType": "trio",
-            "comboKey": "071014",
-            "stake": 100,
-            "odds": 12674.6,
-            "ev": 11.167936417701005
+            "ev": 5.347888657541046
           },
           {
             "betType": "exacta",
             "comboKey": "0711",
             "stake": 100,
             "odds": 2547,
-            "ev": 6.196638487816717
+            "ev": 6.13454966275811
           },
           {
             "betType": "quinella",
             "comboKey": "0711",
             "stake": 100,
             "odds": 962.1,
-            "ev": 4.720372682257403
+            "ev": 4.6652226864698205
           },
           {
             "betType": "wide",
             "comboKey": "0711",
             "stake": 500,
             "odds": 246.5,
-            "ev": 3.764907219093026
+            "ev": 3.727436228933925
           },
           {
             "betType": "quinella",
             "comboKey": "0713",
             "stake": 100,
             "odds": 320.8,
-            "ev": 1.3947929259578302
+            "ev": 1.3791250557816583
           },
           {
             "betType": "quinella",
             "comboKey": "0714",
-            "stake": 100,
+            "stake": 200,
             "odds": 626.2,
-            "ev": 3.2943729184762365
+            "ev": 3.254914903418869
           },
           {
             "betType": "wide",
             "comboKey": "0714",
-            "stake": 600,
+            "stake": 500,
             "odds": 166.6,
-            "ev": 2.722195682430886
+            "ev": 2.694610696672103
           },
           {
             "betType": "quinella",
             "comboKey": "0715",
             "stake": 100,
             "odds": 712.3,
-            "ev": 2.7869311715306027
+            "ev": 2.914815125274832
           },
           {
             "betType": "wide",
             "comboKey": "0715",
             "stake": 100,
             "odds": 164.8,
-            "ev": 2.019854062484166
+            "ev": 2.1127888829459214
           },
           {
             "betType": "quinella",
             "comboKey": "0716",
             "stake": 100,
             "odds": 754.4,
-            "ev": 3.32539939464505
+            "ev": 3.467762537890552
           },
           {
             "betType": "wide",
             "comboKey": "0716",
             "stake": 400,
             "odds": 196.2,
-            "ev": 2.7008412010467477
+            "ev": 2.816853750417199
           },
           {
             "betType": "quinella",
             "comboKey": "0810",
             "stake": 100,
             "odds": 898.8,
-            "ev": 3.791438407294421
+            "ev": 4.017687855016063
           },
           {
             "betType": "wide",
             "comboKey": "0810",
             "stake": 200,
             "odds": 220.5,
-            "ev": 2.9078324129553406
+            "ev": 3.0814124086605146
           },
           {
             "betType": "quinella",
             "comboKey": "0811",
             "stake": 100,
             "odds": 210.8,
-            "ev": 1.0097820332739396
+            "ev": 1.069523447639617
           },
           {
             "betType": "exacta",
             "comboKey": "0901",
             "stake": 100,
             "odds": 234.1,
-            "ev": 1.5671167656517162
+            "ev": 1.6863261475608948
+          },
+          {
+            "betType": "exacta",
+            "comboKey": "0904",
+            "stake": 100,
+            "odds": 744.9,
+            "ev": 3.8057707320775367
           },
           {
             "betType": "quinella",
             "comboKey": "0910",
-            "stake": 200,
+            "stake": 100,
             "odds": 978.6,
-            "ev": 4.637510808034019
+            "ev": 4.549497545593672
           },
           {
             "betType": "wide",
             "comboKey": "0910",
             "stake": 400,
             "odds": 227.4,
-            "ev": 3.360049649137151
+            "ev": 3.30192572418179
           },
           {
             "betType": "quinella",
             "comboKey": "0911",
             "stake": 100,
             "odds": 272.7,
-            "ev": 1.4674966683220123
+            "ev": 1.4389596835802956
           },
           {
             "betType": "wide",
             "comboKey": "0911",
-            "stake": 400,
+            "stake": 200,
             "odds": 74.6,
-            "ev": 1.2470381292755859
+            "ev": 1.2251063782290719
           },
           {
             "betType": "quinella",
             "comboKey": "0915",
-            "stake": 100,
+            "stake": 200,
             "odds": 238.4,
-            "ev": 1.0230825617023875
+            "ev": 1.0616204292900382
           },
           {
             "betType": "quinella",
             "comboKey": "0916",
             "stake": 200,
             "odds": 246.5,
-            "ev": 1.1917840996594822
+            "ev": 1.2330398872312536
           },
           {
             "betType": "win",
             "comboKey": "10",
             "stake": 1600,
             "odds": 151.8,
-            "ev": 7.6172542966162515
+            "ev": 7.340491276453344
           },
           {
             "betType": "quinella",
             "comboKey": "1011",
             "stake": 200,
             "odds": 1393.2,
-            "ev": 8.388096709086657
+            "ev": 7.771039763530712
           },
           {
             "betType": "wide",
             "comboKey": "1011",
-            "stake": 600,
+            "stake": 500,
             "odds": 312.6,
-            "ev": 5.829251207115529
+            "ev": 5.4188510126436205
           },
           {
             "betType": "quinella",
             "comboKey": "1012",
             "stake": 100,
             "odds": 531.6,
-            "ev": 2.3180040793731673
+            "ev": 2.1497689973155873
           },
           {
             "betType": "quinella",
             "comboKey": "1013",
             "stake": 100,
             "odds": 432.8,
-            "ev": 2.3092098389229423
+            "ev": 2.140299387122723
           },
           {
             "betType": "quinella",
             "comboKey": "1014",
             "stake": 100,
             "odds": 965.9,
-            "ev": 6.235645013555764
+            "ev": 5.775231511745163
           },
           {
             "betType": "wide",
             "comboKey": "1014",
             "stake": 800,
             "odds": 253.9,
-            "ev": 5.064921397536002
+            "ev": 4.707553383393301
           },
           {
             "betType": "quinella",
             "comboKey": "1015",
             "stake": 100,
             "odds": 1306.1,
-            "ev": 6.271130860714081
+            "ev": 6.14814600966155
           },
           {
             "betType": "wide",
             "comboKey": "1015",
             "stake": 400,
             "odds": 292,
-            "ev": 4.370077396300221
+            "ev": 4.291758973794742
           },
           {
             "betType": "quinella",
             "comboKey": "1016",
             "stake": 100,
             "odds": 1114.6,
-            "ev": 6.029220982242708
+            "ev": 5.893621862343686
           },
           {
             "betType": "wide",
             "comboKey": "1016",
-            "stake": 600,
+            "stake": 500,
             "odds": 291.1,
-            "ev": 4.892800614021924
+            "ev": 4.791175251928598
           },
           {
             "betType": "win",
             "comboKey": "11",
-            "stake": 200,
+            "stake": 100,
             "odds": 27.2,
-            "ev": 1.5444937281967346
+            "ev": 1.4878885063837919
           },
           {
             "betType": "quinella",
             "comboKey": "1114",
             "stake": 100,
             "odds": 211.6,
-            "ev": 1.5511882989606203
+            "ev": 1.4359800912498086
           },
           {
             "betType": "wide",
             "comboKey": "1114",
             "stake": 600,
             "odds": 65.4,
-            "ev": 1.475750876451601
+            "ev": 1.3712676978831728
           },
           {
             "betType": "quinella",
             "comboKey": "1115",
             "stake": 100,
             "odds": 278.7,
-            "ev": 1.5195612343036462
+            "ev": 1.4890509219289818
           },
           {
             "betType": "wide",
             "comboKey": "1115",
             "stake": 200,
             "odds": 79,
-            "ev": 1.337571132181933
+            "ev": 1.313214615960215
           },
           {
             "betType": "quinella",
             "comboKey": "1116",
             "stake": 100,
             "odds": 273,
-            "ev": 1.6769192225200487
+            "ev": 1.638424610537068
           },
           {
             "betType": "wide",
             "comboKey": "1116",
-            "stake": 500,
+            "stake": 400,
             "odds": 81.4,
-            "ev": 1.5477546757409175
-          },
-          {
-            "betType": "exacta",
-            "comboKey": "1204",
-            "stake": 100,
-            "odds": 319.1,
-            "ev": 1.4854604868772374
+            "ev": 1.515166684834037
           },
           {
             "betType": "win",
             "comboKey": "15",
-            "stake": 1000,
+            "stake": 900,
             "odds": 29.1,
-            "ev": 1.325565940920612
+            "ev": 1.3492887231945625
           },
           {
             "betType": "exacta",
             "comboKey": "1501",
             "stake": 100,
             "odds": 310.7,
-            "ev": 2.1079630793318276
+            "ev": 2.2668285926935403
           },
           {
             "betType": "quinella",
             "comboKey": "1516",
             "stake": 100,
             "odds": 210.2,
-            "ev": 1.0296817536705574
+            "ev": 1.0646385637696663
           },
           {
             "betType": "win",
             "comboKey": "16",
             "stake": 500,
             "odds": 21.7,
-            "ev": 1.110351587961549
+            "ev": 1.1269268889768043
           }
         ]
       }
@@ -29538,7 +29713,7 @@
         {
           "umaban": 1,
           "horseName": "ルージュボヤージュ",
-          "prior": 0.3952185792349726,
+          "prior": 0.42721857923497264,
           "oikiri": {
             "critic": "動き良化",
             "rank": "B"
@@ -29698,12 +29873,12 @@
           "winOdds": 9,
           "popularity": 5,
           "placeOddsMin": 3.1,
-          "referenceEv": 1.2251775956284152
+          "referenceEv": 1.3243775956284152
         },
         {
           "umaban": 2,
           "horseName": "クカイリモク",
-          "prior": 0.14737089118931126,
+          "prior": 0.16337089118931128,
           "oikiri": {
             "critic": "上積十分",
             "rank": "B"
@@ -30172,7 +30347,7 @@
           "winOdds": 18.6,
           "popularity": 10,
           "placeOddsMin": 4.2,
-          "referenceEv": 0.6189577429951073
+          "referenceEv": 0.6861577429951075
         },
         {
           "umaban": 3,
@@ -30497,7 +30672,7 @@
         {
           "umaban": 4,
           "horseName": "サイモンシャリオ",
-          "prior": 0.3135,
+          "prior": 0.3215,
           "oikiri": {
             "critic": "気配平凡",
             "rank": "C"
@@ -30581,7 +30756,7 @@
           "winOdds": 59.5,
           "popularity": 14,
           "placeOddsMin": 9.5,
-          "referenceEv": 2.97825
+          "referenceEv": 3.05425
         },
         {
           "umaban": 5,
@@ -31534,7 +31709,7 @@
         {
           "umaban": 7,
           "horseName": "ショウナンガルフ",
-          "prior": 0.12965660547502555,
+          "prior": 0.13765660547502556,
           "oikiri": {
             "critic": "一歩前進",
             "rank": "B"
@@ -32003,12 +32178,12 @@
           "winOdds": 79.2,
           "popularity": 15,
           "placeOddsMin": 15.4,
-          "referenceEv": 1.9967117243153936
+          "referenceEv": 2.1199117243153935
         },
         {
           "umaban": 8,
           "horseName": "ディールメーカー",
-          "prior": 0.12074751456593465,
+          "prior": 0.13674751456593465,
           "oikiri": {
             "critic": "動き上々",
             "rank": "B"
@@ -32477,12 +32652,12 @@
           "winOdds": 14,
           "popularity": 8,
           "placeOddsMin": 3.6,
-          "referenceEv": 0.4346910524373647
+          "referenceEv": 0.49229105243736476
         },
         {
           "umaban": 9,
           "horseName": "キンググローリー",
-          "prior": 0.14874751456593466,
+          "prior": 0.15674751456593466,
           "oikiri": {
             "critic": "気配上々",
             "rank": "B"
@@ -32951,7 +33126,7 @@
           "winOdds": 18.6,
           "popularity": 9,
           "placeOddsMin": 4.5,
-          "referenceEv": 0.669363815546706
+          "referenceEv": 0.705363815546706
         },
         {
           "umaban": 10,
@@ -35326,7 +35501,7 @@
         {
           "umaban": 15,
           "horseName": "バドリナート",
-          "prior": 0.15056569638411646,
+          "prior": 0.15856569638411647,
           "oikiri": {
             "critic": "やや良化",
             "rank": "C"
@@ -35795,12 +35970,12 @@
           "winOdds": 29.1,
           "popularity": 13,
           "placeOddsMin": 6.5,
-          "referenceEv": 0.978677026496757
+          "referenceEv": 1.030677026496757
         },
         {
           "umaban": 16,
           "horseName": "スペルーチェ",
-          "prior": 0.15965660547502555,
+          "prior": 0.16765660547502556,
           "oikiri": {
             "critic": "キビキビ",
             "rank": "B"
@@ -36269,12 +36444,12 @@
           "winOdds": 21.7,
           "popularity": 11,
           "placeOddsMin": 5,
-          "referenceEv": 0.7982830273751278
+          "referenceEv": 0.8382830273751278
         }
       ],
       "clipVariant": "default"
     },
-    "promptText": "あなたは競馬の複勝圏内(3着以内)確率を評価するアナリストです。\n\n【レース情報】\nレース名: ラジオNIKKEI賞\nコース: 芝1800m\n競馬場: 福島\n天候: 晴\n馬場状態: 良\n芝コースの開催進行: 中央2回2日目(柵A)。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。\n当日の同場・同面傾向(芝、確定10R): 脚質=顕著な傾向なし / 上がり=顕著な傾向なし\n同レース過去傾向(対象10回中 条件一致10回・除外0回): 頭数12〜16頭、馬場良7・稍重2・不良1、柵A10\n複勝圏内(延べ30頭)の傾向: 人気1〜11番人気(n=30、うち二桁人気1頭)、複勝配当130〜820円(中央値325円、n=30)\n複勝圏内の記述統計(ラベルなし・参考値): 通過順相対平均0.41(n=30)、上がり平均35.2秒(n=30)、馬番相対平均0.43(n=30)\n\n【展開想定】\n脚質分布: 逃げ0頭 / 先行2頭 / 差し13頭 / 追込1頭\n主導権候補: 馬番1\nペース想定: スロー(根拠: 逃げ馬不在でスロー(前残り)想定(逃げ0頭・主導権候補は馬番1))\n恵まれる脚質: 逃げ・先行\n損する脚質: 追込\nコース形態(会場・回り・距離)による前後有利は、上記に加えてあなた自身でも判断してください。\n\n【出走馬(3着内率 は scorer が数値データから算出した複勝圏内〈3着以内〉確率の事前推定値)】\n馬番1 ルージュボヤージュ: 3着内率=0.40, 脚質=先行(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)1回・後傾(先行有利)2回(上がり3F平均34.7秒), 馬体重推移=468→482→472kg(変動大)、当日464kg・前走比-8kg, ベスト体重=好走(3着以内)時の直近2走の体重は中央値470kg・範囲468〜472kg。今回464kg(範囲より4kg軽い)、前走472kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から71日の休み明け。過去の休み明け(前走から71日以上)は1走のみ(5着)でサンプル2走未満, 調教=評価「動き良化」ランクB, 厩舎コメント=なし, 単勝オッズ=9.0倍, 人気=5番人気, 複勝オッズ下限=3.1倍, 参考EV=1.23, 条件替わり=なし, 人気着順乖離=近3走で人気を上回る着順1回・下回る着順0回・相応2回(人気を上回る着順が多い), 騎手=北村宏(前走戸崎圭太から乗り替わり), 着差傾向=近3走で僅差の勝ち1回・ふつうの敗け1回・ふつうの勝ち1回(傾向一定せず)\n馬番2 クカイリモク: 3着内率=0.15, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日496kg・前走比-4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回496kg(範囲内)、前走500kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「上積十分」ランクB, 厩舎コメント=なし, 単勝オッズ=18.6倍, 人気=10番人気, 複勝オッズ下限=4.2倍, 参考EV=0.62, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=ゴンサルベ(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番3 ジーネキング: 3着内率=0.35, 脚質=先行(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均37.7秒), 馬体重推移=533→543→551kg(増加傾向)、当日494kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値533kg・範囲524〜551kg。今回494kg(範囲より30kg軽い)、前走490kg(範囲より34kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から91日の休み明け。過去の休み明け(前走から71日以上)は4走で1着4回・2着0回・3着0回・着外0回(3着内4/4。新しい順に1着・1着・1着・1着), 調教=評価「気配上々」ランクB, 厩舎コメント=なし, 単勝オッズ=11.1倍, 人気=6番人気, 複勝オッズ下限=3.2倍, 参考EV=1.13, 条件替わり=初芝・地方→中央, 人気着順乖離=近3走で人気を上回る着順0回・下回る着順0回・相応3回(人気相応(差なし)), 騎手=菊沢(前走坂井瑠星から乗り替わり), 着差傾向=近3走で僅差の勝ち3回(僅差の勝ちが多い)\n馬番4 サイモンシャリオ: 3着内率=0.31, 脚質=追込(安定度:不明), 過去ペース傾向=後傾(先行有利)1回(上がり3F平均33.8秒), 馬体重推移=454kg、当日488kg・前走比-2kg, ベスト体重=好走時の体重データなし(サンプル不足)。今回488kg, レース間隔=連闘〜中3週, 調教=評価「気配平凡」ランクC, 厩舎コメント=なし, 単勝オッズ=59.5倍, 人気=14番人気, 複勝オッズ下限=9.5倍, 参考EV=2.98, 条件替わり=距離延長(平均比+600m), 人気着順乖離=直近1走: 10頭中6番人気で4着(人気を上回る着順), 騎手=田口(前走小林美駒から乗り替わり), 着差傾向=直近1走: 前の馬と1.1差の敗戦\n馬番5 リッツパーティー: 3着内率=0.15, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日486kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回486kg(範囲内)、前走482kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「気配抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=5.6倍, 人気=2番人気, 複勝オッズ下限=1.9倍, 参考EV=0.29, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=横山武(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番6 コルテオソレイユ: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日456kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回456kg(範囲より10kg軽い)、前走452kg(範囲より14kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「更に上昇」ランクB, 厩舎コメント=なし, 単勝オッズ=7.8倍, 人気=4番人気, 複勝オッズ下限=2.5倍, 参考EV=0.41, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=荻野極(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番7 ショウナンガルフ: 3着内率=0.13, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日484kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回484kg(範囲内)、前走486kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「一歩前進」ランクB, 厩舎コメント=なし, 単勝オッズ=79.2倍, 人気=15番人気, 複勝オッズ下限=15.4倍, 参考EV=2.00, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=丸山(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番8 ディールメーカー: 3着内率=0.12, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日494kg・前走比-4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回494kg(範囲内)、前走498kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「動き上々」ランクB, 厩舎コメント=なし, 単勝オッズ=14.0倍, 人気=8番人気, 複勝オッズ下限=3.6倍, 参考EV=0.43, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=高杉(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番9 キンググローリー: 3着内率=0.15, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日464kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回464kg(範囲より2kg軽い)、前走466kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「気配上々」ランクB, 厩舎コメント=なし, 単勝オッズ=18.6倍, 人気=9番人気, 複勝オッズ下限=4.5倍, 参考EV=0.67, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=石川(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番10 ガリレア: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日450kg・前走比±0kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回450kg(範囲より16kg軽い)、前走450kg(範囲より16kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「キビキビ」ランクB, 厩舎コメント=なし, 単勝オッズ=151.8倍, 人気=16番人気, 複勝オッズ下限=21.2倍, 参考EV=3.32, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=石橋脩(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番11 コロナドブリッジ: 3着内率=0.17, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日524kg・前走比+6kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回524kg(範囲より22kg重い)、前走518kg(範囲より16kg重い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「態勢整う」ランクB, 厩舎コメント=なし, 単勝オッズ=27.2倍, 人気=12番人気, 複勝オッズ下限=8.3倍, 参考EV=1.39, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=三浦(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番12 ローベルクランツ: 3着内率=0.14, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日486kg・前走比+2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回486kg(範囲内)、前走484kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「好気配」ランクB, 厩舎コメント=なし, 単勝オッズ=6.3倍, 人気=3番人気, 複勝オッズ下限=2.0倍, 参考EV=0.28, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=松山(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番13 サノノグレーター: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日462kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回462kg(範囲より4kg軽い)、前走458kg(範囲より8kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「キビキビ」ランクB, 厩舎コメント=なし, 単勝オッズ=5.4倍, 人気=1番人気, 複勝オッズ下限=1.9倍, 参考EV=0.30, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=田辺(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番14 スカイスプレンダー: 3着内率=0.18, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日490kg・前走比+18kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回490kg(範囲内)、前走472kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「態勢整う」ランクB, 厩舎コメント=なし, 単勝オッズ=13.8倍, 人気=7番人気, 複勝オッズ下限=4.4倍, 参考EV=0.79, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=戸崎圭(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番15 バドリナート: 3着内率=0.15, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日490kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回490kg(範囲内)、前走492kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「やや良化」ランクC, 厩舎コメント=なし, 単勝オッズ=29.1倍, 人気=13番人気, 複勝オッズ下限=6.5倍, 参考EV=0.98, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=津村(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番16 スペルーチェ: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日448kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回448kg(範囲より18kg軽い)、前走450kg(範囲より16kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「キビキビ」ランクB, 厩舎コメント=なし, 単勝オッズ=21.7倍, 人気=11番人気, 複勝オッズ下限=5.0倍, 参考EV=0.80, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=Ｍデムーロ(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n\n注記: 参考EVは 3着内率(LLM補正前の事前推定値)× 複勝オッズ下限 の参考値です。あなたが出す補正後確率(place_prob)で最終的なEVは別途再計算されるため、参考EV自体を出力する必要はありません。\n重要: 単勝オッズ・人気・参考EVは、予想印の☆・注(人気薄判定)や妙味の把握に使ってください。3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。補正の根拠はあくまで脚質・展開・調教・レース間隔・厩舎コメント等のデータに基づいてください。本ツールは市場から独立した確率推定と市場オッズを掛け合わせて妙味を見つけることが目的であり、確率推定が市場に迎合すると妙味が失われます。\n\n【指示】\n各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。\n補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。\n補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。\nreason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。\n各馬について、reason(総合の根拠の一文)とは別に、強調材料(highlights)と懸念事項(concerns)を短い句の配列で出力してください。highlights はその馬を高く評価できる材料、concerns は評価を下げる材料です。それぞれ最大3項目で、1項目は全角30字以内の短い句にしてください。該当する材料が無ければ空配列 [] にしてください。\nhighlights・concerns は reason の言い換えではなく、reason とは別の個々の材料を挙げてください。highlights・concerns の文中でも、事前推定値を指すときは必ず「3着内率」と日本語で表記してください。\nhighlights・concerns の各項目には、単勝オッズ・人気・参考EVを材料として挙げないでください(これらを予想印の判断に使うことは従来どおりで構いません)。\n休み明け・馬体重の増減の扱い: レース間隔の「休み明け」や馬体重の増減を、それだけを理由に懸念事項にも強調材料にもしないでください。各馬の行の「休み明け実績」(その馬の過去の休み明けでの成績)と「ベスト体重」(その馬が好走したときの体重の範囲)と照らし、実績が良ければ強調材料、悪ければ懸念事項として挙げてください。\n実績が「サンプル2走未満」「サンプル不足」と書かれている場合は、実績が乏しいので中立に扱い、強調材料にも懸念事項にも挙げないでください。中央⇄地方の転入に伴う間隔は、放牧明けか移籍に伴う空きかを区別できません(条件替わりの表記も参考にし、間隔の長さだけで判断しないでください)。\nplace_prob は 0 以上 1 以下の小数です。全馬について出力してください。\n\n【予想印】\n各馬に以下6種類の予想印(mark)のいずれか、または印なし(null)を1つ付けてください(1頭に複数の印を付けることはできません)。\n◎(本命): 1着になりそうな最有力の馬。必ずちょうど1頭。\n〇(対抗): 本命に対抗できそうな2番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n▲(単穴): 本命と対抗を差し置いて勝てる可能性がある3番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n△(連下): 上記3つの印よりは劣るが、2着や3着に入りそうな馬。0〜3頭(該当馬がいなければ付けなくてよい)。\n☆(星): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば勝てる可能性のある穴馬。0〜1頭。\n注(注意): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば3着に入る可能性のある穴馬。0〜1頭。\n判断材料: 3着内率・参考EV・単勝オッズ/人気・脚質と展開想定、およびここまでの分析(各馬の place_prob と reason)を総合して判断してください。\n本線印(◎〇▲△)の頭数制約: ◎は必ずちょうど1頭。それ以外は◎→〇→▲→△の順で上位から途切れなく付けてください(▲を付けるなら〇も必ず付ける、△を付けるなら〇と▲も必ず付ける)。上位を飛ばして下位だけに印を付けることは不可です。自信の持てる印がそこまでなら、それより下位の印は無理に付けず省略してください(例: ◎のみ、◎〇のみ、◎〇▲のみもすべて可)。\n☆・注は本線(◎〇▲△)とは独立した人気薄向けの印です。本線印の頭数や有無、☆と注のどちらを先に検討したかに関わらず、それぞれ単独で0〜1頭を判断してください(☆だけ・注だけ・両方・どちらもなし、いずれも可)。\n\n【出力スキーマ(この形式の JSON のみ)】\n{\"horses\": [{\"number\": 1, \"place_prob\": 0.42, \"reason\": \"...\", \"mark\": \"◎\", \"highlights\": [\"...\", \"...\"], \"concerns\": [\"...\"]}, {\"number\": 2, \"place_prob\": 0.30, \"reason\": \"...\", \"mark\": null, \"highlights\": [], \"concerns\": [\"...\", \"...\"]}]}",
+    "promptText": "あなたは競馬の複勝圏内(3着以内)確率を評価するアナリストです。\n\n【レース情報】\nレース名: ラジオNIKKEI賞\nコース: 芝1800m\n競馬場: 福島\n天候: 晴\n馬場状態: 良\n芝コースの開催進行: 中央2回2日目(柵A)。開催が進むほど芝の状態(特に内側)は変化しうるが、内外・前後の有利は断定しない材料として扱うこと。\n当日の同場・同面傾向(芝、確定10R): 脚質=顕著な傾向なし / 上がり=顕著な傾向なし\n同レース過去傾向(対象10回中 条件一致10回・除外0回): 頭数12〜16頭、馬場良7・稍重2・不良1、柵A10\n複勝圏内(延べ30頭)の傾向: 人気1〜11番人気(n=30、うち二桁人気1頭)、複勝配当130〜820円(中央値325円、n=30)\n複勝圏内の記述統計(ラベルなし・参考値): 通過順相対平均0.41(n=30)、上がり平均35.2秒(n=30)、馬番相対平均0.43(n=30)\n\n【展開想定】\n脚質分布: 逃げ0頭 / 先行2頭 / 差し13頭 / 追込1頭\n主導権候補: 馬番1\nペース想定: スロー(根拠: 逃げ馬不在でスロー(前残り)想定(逃げ0頭・主導権候補は馬番1))\n恵まれる脚質: 逃げ・先行\n損する脚質: 追込\nコース形態(会場・回り・距離)による前後有利は、上記に加えてあなた自身でも判断してください。\n\n【出走馬(3着内率 は scorer が数値データから算出した複勝圏内〈3着以内〉確率の事前推定値)】\n馬番1 ルージュボヤージュ: 3着内率=0.43, 脚質=先行(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)1回・後傾(先行有利)2回(上がり3F平均34.7秒), 馬体重推移=468→482→472kg(変動大)、当日464kg・前走比-8kg, ベスト体重=好走(3着以内)時の直近2走の体重は中央値470kg・範囲468〜472kg。今回464kg(範囲より4kg軽い)、前走472kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から71日の休み明け。過去の休み明け(前走から71日以上)は1走のみ(5着)でサンプル2走未満, 調教=評価「動き良化」ランクB, 厩舎コメント=なし, 単勝オッズ=9.0倍, 人気=5番人気, 複勝オッズ下限=3.1倍, 参考EV=1.32, 条件替わり=なし, 人気着順乖離=近3走で人気を上回る着順1回・下回る着順0回・相応2回(人気を上回る着順が多い), 騎手=北村宏(前走戸崎圭太から乗り替わり), 着差傾向=近3走で僅差の勝ち1回・ふつうの敗け1回・ふつうの勝ち1回(傾向一定せず)\n馬番2 クカイリモク: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日496kg・前走比-4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回496kg(範囲内)、前走500kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「上積十分」ランクB, 厩舎コメント=なし, 単勝オッズ=18.6倍, 人気=10番人気, 複勝オッズ下限=4.2倍, 参考EV=0.69, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=ゴンサルベ(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番3 ジーネキング: 3着内率=0.35, 脚質=先行(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均37.7秒), 馬体重推移=533→543→551kg(増加傾向)、当日494kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値533kg・範囲524〜551kg。今回494kg(範囲より30kg軽い)、前走490kg(範囲より34kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から91日の休み明け。過去の休み明け(前走から71日以上)は4走で1着4回・2着0回・3着0回・着外0回(3着内4/4。新しい順に1着・1着・1着・1着), 調教=評価「気配上々」ランクB, 厩舎コメント=なし, 単勝オッズ=11.1倍, 人気=6番人気, 複勝オッズ下限=3.2倍, 参考EV=1.13, 条件替わり=初芝・地方→中央, 人気着順乖離=近3走で人気を上回る着順0回・下回る着順0回・相応3回(人気相応(差なし)), 騎手=菊沢(前走坂井瑠星から乗り替わり), 着差傾向=近3走で僅差の勝ち3回(僅差の勝ちが多い)\n馬番4 サイモンシャリオ: 3着内率=0.32, 脚質=追込(安定度:不明), 過去ペース傾向=後傾(先行有利)1回(上がり3F平均33.8秒), 馬体重推移=454kg、当日488kg・前走比-2kg, ベスト体重=好走時の体重データなし(サンプル不足)。今回488kg, レース間隔=連闘〜中3週, 調教=評価「気配平凡」ランクC, 厩舎コメント=なし, 単勝オッズ=59.5倍, 人気=14番人気, 複勝オッズ下限=9.5倍, 参考EV=3.05, 条件替わり=距離延長(平均比+600m), 人気着順乖離=直近1走: 10頭中6番人気で4着(人気を上回る着順), 騎手=田口(前走小林美駒から乗り替わり), 着差傾向=直近1走: 前の馬と1.1差の敗戦\n馬番5 リッツパーティー: 3着内率=0.15, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日486kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回486kg(範囲内)、前走482kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「気配抜群」ランクA, 厩舎コメント=なし, 単勝オッズ=5.6倍, 人気=2番人気, 複勝オッズ下限=1.9倍, 参考EV=0.29, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=横山武(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番6 コルテオソレイユ: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日456kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回456kg(範囲より10kg軽い)、前走452kg(範囲より14kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「更に上昇」ランクB, 厩舎コメント=なし, 単勝オッズ=7.8倍, 人気=4番人気, 複勝オッズ下限=2.5倍, 参考EV=0.41, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=荻野極(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番7 ショウナンガルフ: 3着内率=0.14, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日484kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回484kg(範囲内)、前走486kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「一歩前進」ランクB, 厩舎コメント=なし, 単勝オッズ=79.2倍, 人気=15番人気, 複勝オッズ下限=15.4倍, 参考EV=2.12, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=丸山(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番8 ディールメーカー: 3着内率=0.14, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日494kg・前走比-4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回494kg(範囲内)、前走498kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「動き上々」ランクB, 厩舎コメント=なし, 単勝オッズ=14.0倍, 人気=8番人気, 複勝オッズ下限=3.6倍, 参考EV=0.49, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=高杉(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番9 キンググローリー: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日464kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回464kg(範囲より2kg軽い)、前走466kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「気配上々」ランクB, 厩舎コメント=なし, 単勝オッズ=18.6倍, 人気=9番人気, 複勝オッズ下限=4.5倍, 参考EV=0.71, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=石川(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番10 ガリレア: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日450kg・前走比±0kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回450kg(範囲より16kg軽い)、前走450kg(範囲より16kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「キビキビ」ランクB, 厩舎コメント=なし, 単勝オッズ=151.8倍, 人気=16番人気, 複勝オッズ下限=21.2倍, 参考EV=3.32, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=石橋脩(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番11 コロナドブリッジ: 3着内率=0.17, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日524kg・前走比+6kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回524kg(範囲より22kg重い)、前走518kg(範囲より16kg重い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「態勢整う」ランクB, 厩舎コメント=なし, 単勝オッズ=27.2倍, 人気=12番人気, 複勝オッズ下限=8.3倍, 参考EV=1.39, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=三浦(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番12 ローベルクランツ: 3着内率=0.14, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日486kg・前走比+2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回486kg(範囲内)、前走484kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「好気配」ランクB, 厩舎コメント=なし, 単勝オッズ=6.3倍, 人気=3番人気, 複勝オッズ下限=2.0倍, 参考EV=0.28, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=松山(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番13 サノノグレーター: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日462kg・前走比+4kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回462kg(範囲より4kg軽い)、前走458kg(範囲より8kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「キビキビ」ランクB, 厩舎コメント=なし, 単勝オッズ=5.4倍, 人気=1番人気, 複勝オッズ下限=1.9倍, 参考EV=0.30, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=田辺(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番14 スカイスプレンダー: 3着内率=0.18, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日490kg・前走比+18kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回490kg(範囲内)、前走472kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「態勢整う」ランクB, 厩舎コメント=なし, 単勝オッズ=13.8倍, 人気=7番人気, 複勝オッズ下限=4.4倍, 参考EV=0.79, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=戸崎圭(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番15 バドリナート: 3着内率=0.16, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日490kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回490kg(範囲内)、前走492kg(範囲内), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「やや良化」ランクC, 厩舎コメント=なし, 単勝オッズ=29.1倍, 人気=13番人気, 複勝オッズ下限=6.5倍, 参考EV=1.03, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=津村(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n馬番16 スペルーチェ: 3着内率=0.17, 脚質=差し(安定度:概ね安定), 過去ペース傾向=前傾(差し追込有利)2回・平均的1回(上がり3F平均38.2秒), 馬体重推移=510→502→494kg(減少傾向)、当日448kg・前走比-2kg, ベスト体重=好走(3着以内)時の直近5走の体重は中央値482kg・範囲466〜502kg。今回448kg(範囲より18kg軽い)、前走450kg(範囲より16kg軽い), レース間隔=休み明け, 休み明け実績=今回は前走から78日の休み明け。過去の休み明け(前走から71日以上)は5走で1着0回・2着0回・3着1回・着外4回(3着内1/5。新しい順に12着・4着・5着・8着・3着), 調教=評価「キビキビ」ランクB, 厩舎コメント=なし, 単勝オッズ=21.7倍, 人気=11番人気, 複勝オッズ下限=5.0倍, 参考EV=0.84, 条件替わり=芝替わり(前走ダ), 人気着順乖離=近3走で人気を上回る着順0回・下回る着順1回・相応2回(人気を下回る着順が多い), 騎手=Ｍデムーロ(前走西村淳也から乗り替わり), 着差傾向=近3走でふつうの敗け3回(着差ふつうの敗戦が多い)\n\n注記: 参考EVは 3着内率(LLM補正前の事前推定値)× 複勝オッズ下限 の参考値です。あなたが出す補正後確率(place_prob)で最終的なEVは別途再計算されるため、参考EV自体を出力する必要はありません。\n重要: 単勝オッズ・人気・参考EVは、予想印の☆・注(人気薄判定)や妙味の把握に使ってください。3着内率の補正そのものを市場オッズに近づける(アンカリングする)目的で使うことは禁止します。補正の根拠はあくまで脚質・展開・調教・レース間隔・厩舎コメント等のデータに基づいてください。本ツールは市場から独立した確率推定と市場オッズを掛け合わせて妙味を見つけることが目的であり、確率推定が市場に迎合すると妙味が失われます。\n\n【指示】\n各馬の複勝圏内確率を JSON のみで出力してください。散文や説明文は出力しないでください。\n補正は各馬の 3着内率(データからの事前推定)から ±10%(絶対値0.10)以内に留めてください。3着内率から大きく離れた値は禁止です。\n補正には必ず根拠(調教・厩舎コメント・展開のいずれか)を reason に日本語で明記してください。\nreason の文中では、事前推定値を指すときは必ず「3着内率」と日本語で表記してください(英語の略称は使わないでください)。\n各馬について、reason(総合の根拠の一文)とは別に、強調材料(highlights)と懸念事項(concerns)を短い句の配列で出力してください。highlights はその馬を高く評価できる材料、concerns は評価を下げる材料です。それぞれ最大3項目で、1項目は全角30字以内の短い句にしてください。該当する材料が無ければ空配列 [] にしてください。\nhighlights・concerns は reason の言い換えではなく、reason とは別の個々の材料を挙げてください。highlights・concerns の文中でも、事前推定値を指すときは必ず「3着内率」と日本語で表記してください。\nhighlights・concerns の各項目には、単勝オッズ・人気・参考EVを材料として挙げないでください(これらを予想印の判断に使うことは従来どおりで構いません)。\n休み明け・馬体重の増減の扱い: レース間隔の「休み明け」や馬体重の増減を、それだけを理由に懸念事項にも強調材料にもしないでください。各馬の行の「休み明け実績」(その馬の過去の休み明けでの成績)と「ベスト体重」(その馬が好走したときの体重の範囲)と照らし、実績が良ければ強調材料、悪ければ懸念事項として挙げてください。\n実績が「サンプル2走未満」「サンプル不足」と書かれている場合は、実績が乏しいので中立に扱い、強調材料にも懸念事項にも挙げないでください。中央⇄地方の転入に伴う間隔は、放牧明けか移籍に伴う空きかを区別できません(条件替わりの表記も参考にし、間隔の長さだけで判断しないでください)。\nplace_prob は 0 以上 1 以下の小数です。全馬について出力してください。\n\n【予想印】\n各馬に以下6種類の予想印(mark)のいずれか、または印なし(null)を1つ付けてください(1頭に複数の印を付けることはできません)。\n◎(本命): 1着になりそうな最有力の馬。必ずちょうど1頭。\n〇(対抗): 本命に対抗できそうな2番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n▲(単穴): 本命と対抗を差し置いて勝てる可能性がある3番手の馬。0〜1頭(該当馬がいなければ付けなくてよい)。\n△(連下): 上記3つの印よりは劣るが、2着や3着に入りそうな馬。0〜3頭(該当馬がいなければ付けなくてよい)。\n☆(星): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば勝てる可能性のある穴馬。0〜1頭。\n注(注意): 人気はないが(単勝オッズ・人気を根拠に判断)、展開やペースがはまれば3着に入る可能性のある穴馬。0〜1頭。\n判断材料: 3着内率・参考EV・単勝オッズ/人気・脚質と展開想定、およびここまでの分析(各馬の place_prob と reason)を総合して判断してください。\n本線印(◎〇▲△)の頭数制約: ◎は必ずちょうど1頭。それ以外は◎→〇→▲→△の順で上位から途切れなく付けてください(▲を付けるなら〇も必ず付ける、△を付けるなら〇と▲も必ず付ける)。上位を飛ばして下位だけに印を付けることは不可です。自信の持てる印がそこまでなら、それより下位の印は無理に付けず省略してください(例: ◎のみ、◎〇のみ、◎〇▲のみもすべて可)。\n☆・注は本線(◎〇▲△)とは独立した人気薄向けの印です。本線印の頭数や有無、☆と注のどちらを先に検討したかに関わらず、それぞれ単独で0〜1頭を判断してください(☆だけ・注だけ・両方・どちらもなし、いずれも可)。\n\n【出力スキーマ(この形式の JSON のみ)】\n{\"horses\": [{\"number\": 1, \"place_prob\": 0.42, \"reason\": \"...\", \"mark\": \"◎\", \"highlights\": [\"...\", \"...\"], \"concerns\": [\"...\"]}, {\"number\": 2, \"place_prob\": 0.30, \"reason\": \"...\", \"mark\": null, \"highlights\": [], \"concerns\": [\"...\", \"...\"]}]}",
     "resultDetailLookups": [
       "202603020201",
       "202603020202",
@@ -36310,11 +36485,11 @@
           "umaban": 1,
           "wakuban": 1,
           "horseName": "ルージュボヤージュ",
-          "prior": 0.3952185792349726,
-          "adjustedProb": 0.3952185792349726,
+          "prior": 0.42721857923497264,
+          "adjustedProb": 0.42721857923497264,
           "placeOddsMin": 3.1,
           "winOdds": 9,
-          "ev": 1.2251775956284152,
+          "ev": 1.3243775956284152,
           "isPositive": true,
           "reason": null,
           "highlights": [],
@@ -36328,11 +36503,11 @@
           "umaban": 2,
           "wakuban": 1,
           "horseName": "クカイリモク",
-          "prior": 0.14737089118931126,
-          "adjustedProb": 0.14737089118931126,
+          "prior": 0.16337089118931128,
+          "adjustedProb": 0.16337089118931128,
           "placeOddsMin": 4.2,
           "winOdds": 18.6,
-          "ev": 0.6189577429951073,
+          "ev": 0.6861577429951075,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -36378,11 +36553,11 @@
           "umaban": 4,
           "wakuban": 2,
           "horseName": "サイモンシャリオ",
-          "prior": 0.3135,
-          "adjustedProb": 0.3135,
+          "prior": 0.3215,
+          "adjustedProb": 0.3215,
           "placeOddsMin": 9.5,
           "winOdds": 59.5,
-          "ev": 2.97825,
+          "ev": 3.05425,
           "isPositive": true,
           "reason": null,
           "highlights": [],
@@ -36447,11 +36622,11 @@
           "umaban": 7,
           "wakuban": 4,
           "horseName": "ショウナンガルフ",
-          "prior": 0.12965660547502555,
-          "adjustedProb": 0.12965660547502555,
+          "prior": 0.13765660547502556,
+          "adjustedProb": 0.13765660547502556,
           "placeOddsMin": 15.4,
           "winOdds": 79.2,
-          "ev": 1.9967117243153936,
+          "ev": 2.1199117243153935,
           "isPositive": true,
           "reason": null,
           "highlights": [],
@@ -36470,11 +36645,11 @@
           "umaban": 8,
           "wakuban": 4,
           "horseName": "ディールメーカー",
-          "prior": 0.12074751456593465,
-          "adjustedProb": 0.12074751456593465,
+          "prior": 0.13674751456593465,
+          "adjustedProb": 0.13674751456593465,
           "placeOddsMin": 3.6,
           "winOdds": 14,
-          "ev": 0.4346910524373647,
+          "ev": 0.49229105243736476,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -36493,11 +36668,11 @@
           "umaban": 9,
           "wakuban": 5,
           "horseName": "キンググローリー",
-          "prior": 0.14874751456593466,
-          "adjustedProb": 0.14874751456593466,
+          "prior": 0.15674751456593466,
+          "adjustedProb": 0.15674751456593466,
           "placeOddsMin": 4.5,
           "winOdds": 18.6,
-          "ev": 0.669363815546706,
+          "ev": 0.705363815546706,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -36631,12 +36806,12 @@
           "umaban": 15,
           "wakuban": 8,
           "horseName": "バドリナート",
-          "prior": 0.15056569638411646,
-          "adjustedProb": 0.15056569638411646,
+          "prior": 0.15856569638411647,
+          "adjustedProb": 0.15856569638411647,
           "placeOddsMin": 6.5,
           "winOdds": 29.1,
-          "ev": 0.978677026496757,
-          "isPositive": false,
+          "ev": 1.030677026496757,
+          "isPositive": true,
           "reason": null,
           "highlights": [],
           "concerns": [],
@@ -36654,11 +36829,11 @@
           "umaban": 16,
           "wakuban": 8,
           "horseName": "スペルーチェ",
-          "prior": 0.15965660547502555,
-          "adjustedProb": 0.15965660547502555,
+          "prior": 0.16765660547502556,
+          "adjustedProb": 0.16765660547502556,
           "placeOddsMin": 5,
           "winOdds": 21.7,
-          "ev": 0.7982830273751278,
+          "ev": 0.8382830273751278,
           "isPositive": false,
           "reason": null,
           "highlights": [],
@@ -46114,10 +46289,10 @@
       "horses": [
         {
           "umaban": 1,
-          "prior": 0.3952185792349726,
-          "adjustedProb": 0.3952185792349726,
+          "prior": 0.42721857923497264,
+          "adjustedProb": 0.42721857923497264,
           "placeOddsMin": 3.1,
-          "ev": 1.2251775956284152,
+          "ev": 1.3243775956284152,
           "isPositive": true,
           "contributions": [
             {
@@ -46161,11 +46336,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.0020000000000000018
+              "correction": 0.03
             },
             {
               "biasName": "コース枠順バイアス",
@@ -46299,10 +46474,10 @@
         },
         {
           "umaban": 2,
-          "prior": 0.14737089118931126,
-          "adjustedProb": 0.14737089118931126,
+          "prior": 0.16337089118931128,
+          "adjustedProb": 0.16337089118931128,
           "placeOddsMin": 4.2,
-          "ev": 0.6189577429951073,
+          "ev": 0.6861577429951075,
           "isPositive": false,
           "contributions": [
             {
@@ -46346,11 +46521,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.013999999999999999
+              "correction": 0.03
             },
             {
               "biasName": "コース枠順バイアス",
@@ -46531,9 +46706,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.01
             },
@@ -46669,10 +46844,10 @@
         },
         {
           "umaban": 4,
-          "prior": 0.3135,
-          "adjustedProb": 0.3135,
+          "prior": 0.3215,
+          "adjustedProb": 0.3215,
           "placeOddsMin": 9.5,
-          "ev": 2.97825,
+          "ev": 3.05425,
           "isPositive": true,
           "contributions": [
             {
@@ -46716,11 +46891,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.008
+              "correction": 0
             },
             {
               "biasName": "コース枠順バイアス",
@@ -46901,9 +47076,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -47086,9 +47261,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -47224,10 +47399,10 @@
         },
         {
           "umaban": 7,
-          "prior": 0.12965660547502555,
-          "adjustedProb": 0.12965660547502555,
+          "prior": 0.13765660547502556,
+          "adjustedProb": 0.13765660547502556,
           "placeOddsMin": 15.4,
-          "ev": 1.9967117243153936,
+          "ev": 2.1199117243153935,
           "isPositive": true,
           "contributions": [
             {
@@ -47271,11 +47446,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.018000000000000002
+              "correction": -0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -47409,10 +47584,10 @@
         },
         {
           "umaban": 8,
-          "prior": 0.12074751456593465,
-          "adjustedProb": 0.12074751456593465,
+          "prior": 0.13674751456593465,
+          "adjustedProb": 0.13674751456593465,
           "placeOddsMin": 3.6,
-          "ev": 0.4346910524373647,
+          "ev": 0.49229105243736476,
           "isPositive": false,
           "contributions": [
             {
@@ -47456,11 +47631,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.016
+              "correction": 0
             },
             {
               "biasName": "コース枠順バイアス",
@@ -47594,10 +47769,10 @@
         },
         {
           "umaban": 9,
-          "prior": 0.14874751456593466,
-          "adjustedProb": 0.14874751456593466,
+          "prior": 0.15674751456593466,
+          "adjustedProb": 0.15674751456593466,
           "placeOddsMin": 4.5,
-          "ev": 0.669363815546706,
+          "ev": 0.705363815546706,
           "isPositive": false,
           "contributions": [
             {
@@ -47641,11 +47816,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.012
+              "correction": 0.02
             },
             {
               "biasName": "コース枠順バイアス",
@@ -47826,9 +48001,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -48011,9 +48186,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.02
             },
@@ -48196,9 +48371,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": -0.01
             },
@@ -48381,9 +48556,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0
             },
@@ -48566,9 +48741,9 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
               "correction": 0.01
             },
@@ -48704,11 +48879,11 @@
         },
         {
           "umaban": 15,
-          "prior": 0.15056569638411646,
-          "adjustedProb": 0.15056569638411646,
+          "prior": 0.15856569638411647,
+          "adjustedProb": 0.15856569638411647,
           "placeOddsMin": 6.5,
-          "ev": 0.978677026496757,
-          "isPositive": false,
+          "ev": 1.030677026496757,
+          "isPositive": true,
           "contributions": [
             {
               "biasName": "近走着順",
@@ -48751,11 +48926,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": -0.018000000000000002
+              "correction": -0.01
             },
             {
               "biasName": "コース枠順バイアス",
@@ -48889,10 +49064,10 @@
         },
         {
           "umaban": 16,
-          "prior": 0.15965660547502555,
-          "adjustedProb": 0.15965660547502555,
+          "prior": 0.16765660547502556,
+          "adjustedProb": 0.16765660547502556,
           "placeOddsMin": 5,
-          "ev": 0.7982830273751278,
+          "ev": 0.8382830273751278,
           "isPositive": false,
           "contributions": [
             {
@@ -48936,11 +49111,11 @@
               "overallRate": 0.33
             },
             {
-              "biasName": "斤量・馬体重",
+              "biasName": "斤量",
               "applied": true,
-              "reason": "斤量増減・馬体重増減による小補正",
+              "reason": "斤量増減による小補正",
               "weight": 1,
-              "correction": 0.002
+              "correction": 0.01
             },
             {
               "biasName": "コース枠順バイアス",

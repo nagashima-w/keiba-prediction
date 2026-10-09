@@ -61,13 +61,6 @@ export interface RotationBiasConfig {
    * 既定0.1(複勝率差10ポイント)に設定。verifyの寄与度ログを見て調整する。
    */
   readonly clearlyLowerThreshold: number;
-  /**
-   * 休み明け実績が2走未満で型判定できない(不明)とき、今回が休み明けの場合に適用する
-   * 弱いマイナス補正の大きさ(正の値)。実際の補正は -unknownRestPenalty × 重み。
-   * 仕様「休み明け実績2走未満は不明として弱いマイナス補正のみ(休み明けは平均的に割引が妥当)」。
-   * 控えめに 0.05 を既定とする(チューニング対象)。
-   */
-  readonly unknownRestPenalty: number;
 }
 
 /** 競馬場適性(代替評価)の設定。 */
@@ -92,7 +85,10 @@ export interface BaseScoreWeights {
   readonly courseDistance: number;
   /** 騎手の当該コース複勝率。 */
   readonly jockey: number;
-  /** 斤量変化・馬体重増減。 */
+  /**
+   * 斤量変化。キー名は「斤量・馬体重」だった頃のまま据え置いている(設定に保存済みの値を黙って既定値に
+   * 戻さないため)。馬体重の減点は Issue #213 で撤去したので、今は斤量だけに効く。
+   */
   readonly weightChange: number;
   /** コースレベル枠順バイアス(定数テーブル・仕様の枠2層のうち①)。 */
   readonly courseFrameBias: number;
@@ -149,10 +145,6 @@ export interface BaseScoreConfig {
   readonly kinryoScale: number;
   /** 斤量変化の絶対値の上限(kg)。極端な値を抑える。既定3。 */
   readonly kinryoCapKg: number;
-  /** 馬体重減1kgあたりの補正スケール(減でマイナス方向)。既定0.004。 */
-  readonly bodyWeightDropScale: number;
-  /** 馬体重減補正の下限(kg、負値)。これより大きい減は同じ扱いにする。既定-20。 */
-  readonly bodyWeightDropCapKg: number;
 }
 
 /** prior(事前複勝確率)合成の設定。 */
@@ -246,7 +238,7 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
       last3f: 0.1,
       courseDistance: 0.15,
       jockey: 0.15,
-      // 斤量・馬体重・コース枠順は補正値自体が小さい(±0.05以内)ため重み1でよい。
+      // 斤量・コース枠順は補正値自体が小さい(±0.05以内)ため重み1でよい。
       weightChange: 1,
       courseFrameBias: 1,
     },
@@ -259,8 +251,6 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
     distanceBandMeters: 200,
     kinryoScale: 0.01,
     kinryoCapKg: 3,
-    bodyWeightDropScale: 0.004,
-    bodyWeightDropCapKg: -20,
   },
   prior: {
     minPrior: 0.02,
@@ -284,6 +274,5 @@ export const DEFAULT_SCORER_CONFIG: ScorerConfig = {
   },
   rotation: {
     clearlyLowerThreshold: 0.1,
-    unknownRestPenalty: 0.05,
   },
 };

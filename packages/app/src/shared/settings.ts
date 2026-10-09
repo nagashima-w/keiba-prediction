@@ -37,7 +37,7 @@ export interface BaseScoreWeightValues {
   readonly courseDistance: number;
   /** 騎手の当該コース複勝率。 */
   readonly jockey: number;
-  /** 斤量変化・馬体重増減。 */
+  /** 斤量変化(キー名は「斤量・馬体重」だった頃のまま据え置き。馬体重の減点は Issue #213 で撤去)。 */
   readonly weightChange: number;
   /** コースレベル枠順バイアス。 */
   readonly courseFrameBias: number;
@@ -302,7 +302,7 @@ export const BASE_SCORE_WEIGHT_LABELS: Record<BaseScoreWeightKey, string> = {
   last3f: "上がり3F",
   courseDistance: "コース・距離適性",
   jockey: "騎手成績",
-  weightChange: "斤量・馬体重",
+  weightChange: "斤量",
   courseFrameBias: "コース枠順バイアス",
 };
 
