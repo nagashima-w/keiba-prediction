@@ -756,7 +756,7 @@ describe("listAnalysisSummaries(一覧。D1 だけ。問い合わせは 2 文で
     expect(db.prepared[1]).toMatch(/FROM analysis_horses/);
   });
 
-  it("新しい順(id の降順)に limit 件。既定は 50 件・上限指定の 200 で全件・小さい limit はその件数の最新", async () => {
+  it("新しい順(saveMany は分析日時も id と同じ向きに増えるので、id の降順 = 分析日時の降順。向きが逆の場合は analysis-list-order.test.ts)に limit 件。既定は 50 件・上限指定の 200 で全件・小さい limit はその件数の最新", async () => {
     const ids = await saveMany(60);
     const byDefault = await store().listAnalysisSummaries({});
     expect(byDefault).toHaveLength(50);
@@ -875,7 +875,7 @@ describe("listAnalyzedRaceIdsByPromptVersion(版別の分析済みレース)", (
           .bind(...Array.from({ length: binds }, (_, k) => (k === binds - 1 ? 50 : "x")))
           .all<{ detail: string }>()
       ).results.map((r) => r.detail);
-      expect(details.some((d) => /^SEARCH analyses USING (COVERING )?INDEX idx_analyses_(race|kaisai_date)/.test(d)), JSON.stringify(filter) + " " + details.join(" / ")).toBe(true);
+      expect(details.some((d) => /^SEARCH analyses USING (COVERING )?INDEX idx_analyses_(race|kaisai)(_date|_analyzed)?/.test(d)), JSON.stringify(filter) + " " + details.join(" / ")).toBe(true);
       expect(details.some((d) => /^SCAN analyses/.test(d))).toBe(false);
     }
   });

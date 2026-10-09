@@ -7,6 +7,7 @@ import { runScheduled } from "./scheduled";
 
 export { NetkeibaGate } from "./netkeiba-gate-do";
 export { RaceDay } from "./race-day-do";
+export { CloudMigration } from "./migration-do";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

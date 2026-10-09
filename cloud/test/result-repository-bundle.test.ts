@@ -46,7 +46,10 @@ describe("結果ストアのバンドル(Issue #207)", () => {
       const base = readFileSync(path.join(CLOUD, "wrangler.toml"), "utf-8");
       const withoutRaceDay = base
         .replace(/\[\[durable_objects\.bindings\]\]\nname = "RACE_DAY"\nclass_name = "RaceDay"\n/, "")
-        .replace(/\[\[migrations\]\]\ntag = "v2"\nnew_sqlite_classes = \["RaceDay"\]\n/, "");
+        .replace(/\[\[migrations\]\]\ntag = "v2"\nnew_sqlite_classes = \["RaceDay"\]\n/, "")
+        // Issue #216: 移行の DO(CLOUD_MIGRATION・CloudMigration)と migration v3 も、この入口は export しないので除く。
+        .replace(/\[\[durable_objects\.bindings\]\]\nname = "CLOUD_MIGRATION"\nclass_name = "CloudMigration"\n/, "")
+        .replace(/\[\[migrations\]\]\ntag = "v3"\nnew_sqlite_classes = \["CloudMigration"\]\n/, "");
       expect(withoutRaceDay, "RACE_DAY の binding と migration v2 を除けている").not.toBe(base);
       const config = withoutRaceDay.replace('main = "src/worker.ts"', 'main = "result-store-probe.generated.ts"');
       expect(config).not.toBe(withoutRaceDay);

@@ -24,3 +24,5 @@ wrangler.llm-absent-probe.generated.toml
 # バンドルのガードの検査用(結果ストアと取込フローを巻き込む入口。Issue #207)が生成する一時ファイル
 result-store-probe.generated.ts
 wrangler.result-store-probe.generated.toml
+# 実測スクリプト(scripts/measure-migration-import.ts。Issue #216)が生成する一時設定
+wrangler.measure.generated.toml

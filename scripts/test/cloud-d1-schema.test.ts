@@ -140,12 +140,19 @@ const D1_EXTRA_COLUMNS: Readonly<Record<string, readonly ColumnInfo[]>> = {
     { name: "detail_key", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
     { name: "llm_note", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
     { name: "llm_calls_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+    // 0008 の exe_analysis_id(Issue #216。exe の keiba.db での分析 id。クラウド移行の冪等性の鍵。web で分析したものは NULL)。
+    { name: "exe_analysis_id", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
   ],
 };
 const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {
   analyses: [
     { origin: "c", unique: 0, columns: ["kaisai_date"], name: "idx_analyses_kaisai_date" },
     { origin: "c", unique: 0, columns: ["prompt_version", "race_id"], name: "idx_analyses_prompt_version_race" },
+    // 0008(Issue #216): 一覧を分析日時の順にするための索引3つと、exe の分析 id の一意の索引(部分索引。NULL の行は索引に入れない)。
+    { origin: "c", unique: 1, columns: ["exe_analysis_id"], name: "idx_analyses_exe_id" },
+    { origin: "c", unique: 0, columns: ["analyzed_at"], name: "idx_analyses_analyzed_at" },
+    { origin: "c", unique: 0, columns: ["race_id", "analyzed_at"], name: "idx_analyses_race_analyzed" },
+    { origin: "c", unique: 0, columns: ["kaisai_date", "analyzed_at"], name: "idx_analyses_kaisai_analyzed" },
   ],
 };
 
@@ -214,8 +221,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql の7本だけで、番号は 0001 から連続している(後から足すときは 0008 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql の8本だけで、番号は 0001 から連続している(後から足すときは 0009 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
@@ -272,10 +279,10 @@ describe("0001_init.sql は凍結されている(Issue #197。適用済みのフ
   });
 });
 
-describe("AC-a1: 0001〜0007 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
+describe("AC-a1: 0001〜0008 を流した構造が、exe の最終スキーマ + 宣言した追加分(列・索引・r2_ops 表)と一致する", () => {
   const sqls = FILES.map(readMigration);
 
-  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・llm_calls_json・索引2つ・r2_ops 表・cloud_settings 表だけ)", () => {
+  it("列の集合・型・NOT NULL・既定値・主キー・外部キー・索引が一致する(違いは detail_key・llm_note・llm_calls_json・exe_analysis_id・索引2つ+0008 の4つ・r2_ops 表・cloud_settings 表だけ)", () => {
     const actual = schemaAfter(sqls);
     expect(diffSchemas(expectedD1Schema(exe), actual)).toEqual([]);
   });
@@ -287,7 +294,7 @@ describe("AC-a1: 0001〜0007 を流した構造が、exe の最終スキーマ +
     expect(exe["analyses"]!.columns.find((c) => c.name === "detail_key")).toBeUndefined();
     const indexNames = actual["analyses"]!.indexes.filter((i) => i.origin === "c").map((i) => i.name);
     expect(indexNames).toEqual(expect.arrayContaining(["idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race"]));
-    expect(indexNames).toHaveLength(3);
+    expect(indexNames).toHaveLength(7);
   });
 
   it("Issue #173: r2_ops 表が実際に入っている(ym が主キー・class_a と class_b は NOT NULL。宣言だけして 0003 に書き忘れても気づける)", () => {
@@ -341,6 +348,36 @@ describe("AC-a1: 0001〜0007 を流した構造が、exe の最終スキーマ +
     expect(code).toBe("ALTER TABLE analyses ADD COLUMN llm_calls_json TEXT;");
   });
 
+  it("Issue #216: exe_analysis_id 列(INTEGER・NULL 可)と索引4つは 0008 だけが足す。0001〜0007 までには無い。exe には無い D1 専用(D1_EXTRA_COLUMNS・D1_EXTRA_INDEXES に宣言している)。追加のみ(ALTER 1文+CREATE INDEX 4文)。exe_analysis_id の索引は部分索引(NULL の行を入れない=web の分析の書き込み行を増やさない)", () => {
+    const before = schemaAfter(sqls.slice(0, 7));
+    expect(before["analyses"]!.columns.map((c) => c.name)).not.toContain("exe_analysis_id");
+    const after = schemaAfter(sqls);
+    expect(after["analyses"]!.columns.find((c) => c.name === "exe_analysis_id")).toEqual({ name: "exe_analysis_id", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 });
+    expect(exe["analyses"]!.columns.find((c) => c.name === "exe_analysis_id")).toBeUndefined();
+    const code = sqls[7]!.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n").trim();
+    expect(code.split(";").map((x) => x.trim()).filter((x) => x !== "")).toEqual([
+      "ALTER TABLE analyses ADD COLUMN exe_analysis_id INTEGER",
+      "CREATE UNIQUE INDEX idx_analyses_exe_id ON analyses (exe_analysis_id) WHERE exe_analysis_id IS NOT NULL",
+      "CREATE INDEX idx_analyses_analyzed_at ON analyses (analyzed_at)",
+      "CREATE INDEX idx_analyses_race_analyzed ON analyses (race_id, analyzed_at)",
+      "CREATE INDEX idx_analyses_kaisai_analyzed ON analyses (kaisai_date, analyzed_at)",
+    ]);
+  });
+
+  const m0008 = sqls[7] ?? "";
+  const noImportIds: ReadonlyArray<readonly [string, string]> = [
+    ["0008 を丸ごと落とす", ""],
+    ["exe_analysis_id の一意索引を一意でなくする", m0008.replace("CREATE UNIQUE INDEX", "CREATE INDEX")],
+    ["exe_analysis_id の列の型を変える", m0008.replace("exe_analysis_id INTEGER;", "exe_analysis_id TEXT;")],
+    ["analyzed_at の索引を落とす", m0008.replace(/CREATE INDEX idx_analyses_analyzed_at[^;]*;/, "")],
+    ["race の索引の列の順を逆にする", m0008.replace("(race_id, analyzed_at)", "(analyzed_at, race_id)")],
+    ["宣言していない列を足す", `${m0008}\nALTER TABLE analyses ADD COLUMN undeclared_extra TEXT;\n`],
+  ];
+  it.each(noImportIds)("Issue #216 対照: 0008 を壊す(%s)と、差分として検出される(置換が実際に効いていることも確かめる)", (_name, mutated) => {
+    expect(mutated).not.toBe(m0008);
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([...sqls.slice(0, 7), mutated])).length).toBeGreaterThan(0);
+  });
+
   it("0002 の索引の列の順は (prompt_version, race_id)。逆順では dedup の文が索引を使えない", () => {
     const actual = schemaAfter(sqls);
     const pv = actual["analyses"]!.indexes.find((i) => i.name === "idx_analyses_prompt_version_race");
@@ -351,7 +388,7 @@ describe("AC-a1: 0001〜0007 を流した構造が、exe の最終スキーマ +
    * 対照(検出が空振りでないこと): 次の「壊れた migration」は、いずれも差分を検出する。
    * それぞれが、実際に起こりうる変異(0001 の写し間違い・0002 への無断の追加)に当たる。
    */
-  const [init, d1, ops, settings, note, horseItems, llmCalls] = sqls as [string, string, string, string, string, string, string];
+  const [init, d1, ops, settings, note, horseItems, llmCalls, importIds] = sqls as [string, string, string, string, string, string, string, string];
   const mutants: ReadonlyArray<readonly [string, string, string, string, string, string, string, string]> = [
     ["列の型を変える", init.replace("umaban INTEGER NOT NULL,\n        prior REAL NOT NULL", "umaban TEXT NOT NULL,\n        prior REAL NOT NULL"), d1, ops, settings, note, horseItems, llmCalls],
     ["NOT NULL を外す", init.replace("race_id TEXT NOT NULL,\n        analyzed_at TEXT NOT NULL", "race_id TEXT,\n        analyzed_at TEXT NOT NULL"), d1, ops, settings, note, horseItems, llmCalls],
@@ -387,7 +424,7 @@ describe("AC-a1: 0001〜0007 を流した構造が、exe の最終スキーマ +
   it.each(mutants)("対照: %s と、差分として検出される(置換が実際に効いていることも確かめる)", (_name, mutatedInit, mutatedD1, mutatedOps, mutatedSettings, mutatedNote, mutatedHorseItems, mutatedLlmCalls) => {
     // 置換が空振りしていない(元のファイルから変わっている)
     expect(mutatedInit === init && mutatedD1 === d1 && mutatedOps === ops && mutatedSettings === settings && mutatedNote === note && mutatedHorseItems === horseItems && mutatedLlmCalls === llmCalls).toBe(false);
-    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([mutatedInit, mutatedD1, mutatedOps, mutatedSettings, mutatedNote, mutatedHorseItems, mutatedLlmCalls])).length).toBeGreaterThan(0);
+    expect(diffSchemas(expectedD1Schema(exe), schemaAfter([mutatedInit, mutatedD1, mutatedOps, mutatedSettings, mutatedNote, mutatedHorseItems, mutatedLlmCalls, importIds])).length).toBeGreaterThan(0);
   });
 });
 

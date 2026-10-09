@@ -49,10 +49,10 @@ async function rowsWritten(rec: AnalysisRecord): Promise<number[]> {
 }
 
 describe("1回の保存の D1 の書き込み行数(meta.rows_written)", () => {
-  it("16 頭・買い目 10 件・配分あり: 文ごとに [1, 5, 1, 32, 1, 20]、合計 60(カウンタ 1 行が加わり、#175 の 59 行から 60 行)", async () => {
+  it("16 頭・買い目 10 件・配分あり: 文ごとに [1, 8, 1, 32, 1, 20]、合計 63(#175 の 59 行 → カウンタ #173 で 60 行 → 0008 の索引3つ〈分析日時の順の一覧〉で 63 行)", async () => {
     const per = await rowsWritten(record(16, 10));
-    expect(per).toEqual([1, 5, 1, 32, 1, 20]);
-    expect(per.reduce((a, b) => a + b, 0)).toBe(60);
+    expect(per).toEqual([1, 8, 1, 32, 1, 20]);
+    expect(per.reduce((a, b) => a + b, 0)).toBe(63);
   });
 
   it("カウンタは、月の最初の保存(INSERT)でも、2 回目以降(UPDATE)でも 1 行", async () => {
@@ -65,19 +65,27 @@ describe("1回の保存の D1 の書き込み行数(meta.rows_written)", () => {
     expect(row).toEqual({ c: 1, a: 2 });
   });
 
-  it("一般式 1 + 5 + 1 + 2H + (配分ありなら 1 + 2B)に従う(H=18・B=60 は 164、配分なしの H=16 は 39)", async () => {
-    expect((await rowsWritten(record(18, 60))).reduce((a, b) => a + b, 0)).toBe(1 + 5 + 1 + 2 * 18 + 1 + 2 * 60);
+  it("一般式 1 + 8 + 1 + 2H + (配分ありなら 1 + 2B)に従う(H=18・B=60 は 167、配分なしの H=16 は 42)", async () => {
+    expect((await rowsWritten(record(18, 60))).reduce((a, b) => a + b, 0)).toBe(1 + 8 + 1 + 2 * 18 + 1 + 2 * 60);
     await local.reset();
-    expect((await rowsWritten(record(16, null))).reduce((a, b) => a + b, 0)).toBe(1 + 5 + 1 + 2 * 16);
+    expect((await rowsWritten(record(16, null))).reduce((a, b) => a + b, 0)).toBe(1 + 8 + 1 + 2 * 16);
     await local.reset();
     // 買い目 0 件でも配分メタの 1 行は書く(買い目の文は 0 行)
-    expect(await rowsWritten(record(16, 0))).toEqual([1, 5, 1, 32, 1, 0]);
+    expect(await rowsWritten(record(16, 0))).toEqual([1, 8, 1, 32, 1, 0]);
   });
 
-  it("R2 に書かない保存(柵でスキップ。カウンタ・detail_key の UPDATE なし): 5 + 2H + (配分ありなら 1 + 2B) = 16 頭・買い目 10 件で 58", async () => {
+  it("Issue #216: 移行の保存(exe の分析 id の UPDATE が1文増える): 16 頭・買い目 10 件で [1, 8, 1, 2, 32, 1, 20] = 65。web の保存(63)より 2 行多い(UPDATE した行 1 + 部分一意索引の行 1)", async () => {
+    const rec = record(16, 10);
+    const results = await local.db.batch(buildSaveStatements(local.db, rec, 202610, null, null, { exeAnalysisId: 4242, metaParams: null }));
+    const per = results.map((r) => r.meta.rows_written);
+    expect(per).toEqual([1, 8, 1, 2, 32, 1, 20]);
+    expect(per.reduce((a, b) => a + b, 0)).toBe(65);
+  });
+
+  it("R2 に書かない保存(柵でスキップ。カウンタ・detail_key の UPDATE なし): 8 + 2H + (配分ありなら 1 + 2B) = 16 頭・買い目 10 件で 61", async () => {
     const results = await local.db.batch(buildSaveStatements(local.db, record(16, 10), null));
     const per = results.map((r) => r.meta.rows_written);
-    expect(per).toEqual([5, 32, 1, 20]);
-    expect(per.reduce((a, b) => a + b, 0)).toBe(58);
+    expect(per).toEqual([8, 32, 1, 20]);
+    expect(per.reduce((a, b) => a + b, 0)).toBe(61);
   });
 });

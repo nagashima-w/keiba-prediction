@@ -73,11 +73,11 @@ describe("migration の適用(ローカルの D1)", () => {
     // Issue #197(0006): 馬ごとの強調材料・懸念事項。exe の analysis_horses と同じ列(並びも reason の後ろ)。
     expect((await rows("PRAGMA table_info(analysis_horses)")).map((r) => r["name"]).slice(-3)).toEqual(["reason", "highlights_json", "concerns_json"]);
     const indexes = (await rows("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx\\_%' ESCAPE '\\' ORDER BY name")).map((r) => r["name"]);
-    expect(indexes).toEqual(["idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race"]);
+    expect(indexes).toEqual(["idx_analyses_analyzed_at", "idx_analyses_exe_id", "idx_analyses_kaisai_analyzed", "idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race", "idx_analyses_race_analyzed"]);
   });
 
-  it("migration は7本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql"]);
+  it("migration は8本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql"]);
   });
 });
 
@@ -140,15 +140,16 @@ async function plan(sql: string): Promise<string[]> {
 }
 
 describe("AC-a3: 検索が索引を使う(EXPLAIN QUERY PLAN が SEARCH。落とすと SCAN になる対照つき)", () => {
-  it("race_id の絞り込みは idx_analyses_race を使う", async () => {
+  // Issue #216: race_id・kaisai_date を先頭にする索引が、0008 で (race_id, analyzed_at)・(kaisai_date, analyzed_at) の形でも足された。どちらの索引で SEARCH になってもよい。
+  it("race_id の絞り込みは idx_analyses_race(または 0008 の idx_analyses_race_analyzed)を使う", async () => {
     const details = await plan(BY_RACE_SQL);
-    expect(details.some((d) => /^SEARCH analyses USING (COVERING )?INDEX idx_analyses_race \(race_id=\?\)/.test(d))).toBe(true);
+    expect(details.some((d) => /^SEARCH analyses USING (COVERING )?INDEX idx_analyses_race(_analyzed)? \(race_id=\?\)/.test(d))).toBe(true);
     expect(details.some((d) => d.startsWith("SCAN"))).toBe(false);
   });
 
-  it("開催日の絞り込みは idx_analyses_kaisai_date を使う", async () => {
+  it("開催日の絞り込みは idx_analyses_kaisai_date(または 0008 の idx_analyses_kaisai_analyzed)を使う", async () => {
     const details = await plan(BY_KAISAI_DATE_SQL);
-    expect(details.some((d) => /^SEARCH analyses USING (COVERING )?INDEX idx_analyses_kaisai_date \(kaisai_date=\?\)/.test(d))).toBe(true);
+    expect(details.some((d) => /^SEARCH analyses USING (COVERING )?INDEX idx_analyses_kaisai_(date|analyzed) \(kaisai_date=\?\)/.test(d))).toBe(true);
     expect(details.some((d) => d.startsWith("SCAN"))).toBe(false);
   });
 
@@ -163,23 +164,24 @@ describe("AC-a3: 検索が索引を使う(EXPLAIN QUERY PLAN が SEARCH。落と
    * 対照: 索引を落とした(使えない)状態では、同じ文が SCAN になる。上の SEARCH の検査が、索引が無くても通る検査ではないことを示す。
    * 索引の落としと作り直しは、同じ D1 の中で行い、必ず元に戻す。
    */
-  const controls: ReadonlyArray<readonly [string, string, string, string]> = [
-    ["idx_analyses_race", BY_RACE_SQL, "CREATE INDEX idx_analyses_race ON analyses (race_id)", "race_id の絞り込み"],
-    ["idx_analyses_kaisai_date", BY_KAISAI_DATE_SQL, "CREATE INDEX idx_analyses_kaisai_date ON analyses (kaisai_date)", "開催日の絞り込み"],
-    ["idx_analyses_prompt_version_race", RACE_IDS_BY_PROMPT_VERSION_SQL, "CREATE INDEX idx_analyses_prompt_version_race ON analyses (prompt_version, race_id)", "版別のレース列挙"],
+  // 先頭が同じ列の索引は(0008 で)2つずつになったので、対照は、その列を先頭にする索引をすべて落とす。
+  const controls: ReadonlyArray<readonly [readonly string[], string, readonly string[], string]> = [
+    [["idx_analyses_race", "idx_analyses_race_analyzed"], BY_RACE_SQL, ["CREATE INDEX idx_analyses_race ON analyses (race_id)", "CREATE INDEX idx_analyses_race_analyzed ON analyses (race_id, analyzed_at)"], "race_id の絞り込み"],
+    [["idx_analyses_kaisai_date", "idx_analyses_kaisai_analyzed"], BY_KAISAI_DATE_SQL, ["CREATE INDEX idx_analyses_kaisai_date ON analyses (kaisai_date)", "CREATE INDEX idx_analyses_kaisai_analyzed ON analyses (kaisai_date, analyzed_at)"], "開催日の絞り込み"],
+    [["idx_analyses_prompt_version_race"], RACE_IDS_BY_PROMPT_VERSION_SQL, ["CREATE INDEX idx_analyses_prompt_version_race ON analyses (prompt_version, race_id)"], "版別のレース列挙"],
   ];
-  it.each(controls)("対照: %s を落とすと、%s は SCAN になる(元に戻す)", async (name, sql, recreate, _label) => {
+  it.each(controls)("対照: %s を落とすと、%s は SCAN になる(元に戻す)", async (names, sql, recreates, _label) => {
     const before = await plan(sql);
-    expect(before.some((d) => d.includes(name))).toBe(true);
-    await db.prepare(`DROP INDEX ${name}`).run();
+    expect(before.some((d) => names.some((n) => d.includes(n)))).toBe(true);
+    for (const name of names) await db.prepare(`DROP INDEX ${name}`).run();
     try {
       const without = await plan(sql);
       expect(without.some((d) => d.startsWith("SCAN"))).toBe(true);
-      expect(without.some((d) => d.includes(name))).toBe(false);
+      expect(without.some((d) => names.some((n) => d.includes(n)))).toBe(false);
     } finally {
-      await db.prepare(recreate).run();
+      for (const recreate of recreates) await db.prepare(recreate).run();
     }
-    expect((await plan(sql)).some((d) => d.includes(name))).toBe(true);
+    expect((await plan(sql)).some((d) => names.some((n) => d.includes(n)))).toBe(true);
   });
 
   it("対照: 列の順を逆にした索引 (race_id, prompt_version) では、版別の列挙は prompt_version の等価検索に使えない", async () => {

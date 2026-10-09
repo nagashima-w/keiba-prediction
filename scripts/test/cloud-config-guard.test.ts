@@ -41,17 +41,20 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177: 日単位の DO(RACE_DAY・RaceDay)は migration v2 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+  it("Issue #177・#216: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
     const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
     expect(migrations).toEqual([
       ["v1", '"NetkeibaGate"'],
       ["v2", '"RaceDay"'],
+      ["v3", '"CloudMigration"'],
     ]);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
+    expect(tomlCode).toMatch(/^name = "CLOUD_MIGRATION"$/m);
+    expect(tomlCode).toMatch(/^class_name = "CloudMigration"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
-    // DO のバインディングはちょうど2つ(NETKEIBA_GATE・RACE_DAY)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(2);
+    // DO のバインディングはちょうど3つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(3);
   });
 
   it("Issue #206: cron はちょうど1本で `0 0 * * *`(UTC 0:00 = JST 9:00)。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -152,13 +155,13 @@ describe("wrangler.toml", () => {
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208: 手動の POST を受けるルートは 3 つだけ(/api/settings・/api/analyses/run・/api/results/import)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#216: 手動の POST を受けるルートは 4 つだけ(/api/settings・/api/analyses/run・/api/results/import・/api/migration/upload)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
-    // POST の分岐は 3 つ(`method === "POST"`)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(3);
+    // POST の分岐は 4 つ(`method === "POST"`)
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(4);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/analyses/run", "/api/results/import"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/analyses/run", "/api/results/import", "/api/migration/upload"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // handleResultsImport の本体
     const start = code.indexOf("async function handleResultsImport(");
@@ -638,5 +641,49 @@ describe("公開リポジトリへの値の混入(実在のメール・チーム
     expect(`x ${sample} y`.match(AUD_LIKE_RE)).toEqual([sample]);
     expect(`x ${"a".repeat(63)} y`.match(AUD_LIKE_RE)).toBeNull();
     expect(`x ${"a".repeat(65)} y`.match(AUD_LIKE_RE)).toBeNull();
+  });
+});
+
+describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも LLM にも出ず、定時の自動実行(cron → RaceDay)と干渉しない", () => {
+  const migrationSources = ["migration-core.ts", "migration-do.ts", "migration-convert.ts", "migration-reader.ts", "migration-verify.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+
+  it("移行のソース(5 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch が無い", () => {
+    expect(migrationSources).toHaveLength(5);
+    for (const [name, code] of migrationSources) {
+      expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+  });
+
+  it("cron の scheduled・RaceDay・result-dispatch は、移行の DO を呼ばない(CLOUD_MIGRATION・CloudMigration・migration-* を参照しない)", () => {
+    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts"]) {
+      const code = stripCode(readTextLf("cloud", "src", f));
+      expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
+      expect(code, `${f} は移行を参照しない`).not.toMatch(/CLOUD_MIGRATION|CloudMigration|migration-core|migration-do/);
+    }
+  });
+
+  it("移行の DO の呼び出し(stub の start・getStatus)は handler.ts の移行の 2 つの API だけ。start の呼び出しは 1 箇所", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    expect((handler.match(/migrationStub\(env\)/g) ?? []).length).toBe(2); // GET /api/migration と POST /api/migration/upload
+    expect((handler.match(/\bstub\.start\(/g) ?? []).length).toBe(1);
+    // 検出の確認(空振りでない)
+    expect(("a stub.start(x);\nb stub.start(y);".match(/\bstub\.start\(/g) ?? []).length).toBe(2);
+  });
+
+  it("アップロードの本文は解釈しない: handleMigrationUpload は request.body をそのまま R2 の put に渡す(text()・json()・arrayBuffer()・getReader で読まない)", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handleMigrationUpload(");
+    expect(start).toBeGreaterThan(-1);
+    const end = handler.indexOf("\n}\n", start);
+    const body = handler.slice(start, end);
+    expect(body.length).toBeGreaterThan(1200); // 前提: 本体を実際に読めている
+    expect(body).toContain("bucket.put(key, request.body");
+    for (const forbidden of [".text()", ".json()", ".arrayBuffer()", ".blob()", "getReader(", "readLimitedText", "readJsonObjectBody"]) {
+      expect(body, `handleMigrationUpload に ${forbidden} が無い`).not.toContain(forbidden);
+    }
   });
 });

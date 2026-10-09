@@ -23,6 +23,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -135,7 +136,7 @@ function vars(email: string, aud: string): string[] {
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/api/results/import"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/api/results/import"], ["GET", "/api/migration"], ["POST", "/api/migration/upload"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -192,6 +193,55 @@ async function main(): Promise<void> {
       check("B: 不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", tampered.status === 403 && tampered.text === "forbidden", `${tampered.status}`);
       check("B: 未知のパスは 404", (await req(port, "GET", "/no-such-path")).status === 404);
       check("B: POST / は 405", (await req(port, "POST", "/")).status === 405);
+    });
+
+    // H. (Issue #216)移行ファイルの受け取りと取り込み(本番の worker.ts。偽ソケットは使わない=netkeiba・LLM に出る経路が無い)。
+    //    exe の書き出しの実物(core のテストが今の書き出しと一致を固定しているファイル)を gzip で upload → 本物の DO `CloudMigration` が workerd で
+    //    検証 → アラームで取り込み(D1・R2)→ 完了。同じファイルをもう一度 upload しても重複しない。一覧は分析日時の降順。
+    await withWorker(BASE_PORT + 7, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
+      const port = BASE_PORT + 7;
+      const label = "H(移行)";
+      const origin = `http://127.0.0.1:${port}`;
+      const golden = gzipSync(readFileSync(path.join("..", "packages", "core", "test", "fixtures", "cloud-migration-small.ndjson")));
+      const upload = (body: Uint8Array, headers: Record<string, string> = { Origin: origin, "Content-Type": "application/gzip" }) =>
+        fetch(`${origin}/api/migration/upload`, { method: "POST", headers, body, signal: AbortSignal.timeout(30_000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+      const waitState = async (done: (j: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> => {
+        let last: Record<string, unknown> = {};
+        for (let i = 0; i < 120; i += 1) {
+          last = parseJson((await req(port, "GET", "/api/migration")).text);
+          if (done(last)) return last;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        return last;
+      };
+      const idle = await req(port, "GET", "/api/migration");
+      check(`${label}: GET /api/migration は 200 で state idle(本物の DO を通る)`, idle.status === 200 && parseJson(idle.text)["state"] === "idle" && parseJson(idle.text)["ok"] === true, `${idle.status} ${idle.text.slice(0, 160)}`);
+      check(`${label}: POST は Origin 無しで 403・Content-Type が違えば 415・HEAD/POST の取り違え(GET /upload・POST /api/migration)は 405`, (await upload(golden, { "Content-Type": "application/gzip" })).status === 403 && (await upload(golden, { Origin: origin, "Content-Type": "application/json" })).status === 415 && (await req(port, "GET", "/api/migration/upload")).status === 405 && (await req(port, "POST", "/api/migration")).status === 405);
+
+      const broken = await upload(golden.subarray(0, Math.floor(golden.length / 2)));
+      check(`${label}: 途中で切れたファイルは 202 で受け付けたあと、検証で failed(phase verify)。D1 には何も書かれない`, broken.status === 202, `${broken.status} ${broken.text.slice(0, 160)}`);
+      const failed = await waitState((j) => j["state"] === "failed");
+      const failure = failed["failure"] as { phase?: string } | null;
+      check(`${label}: 検証の失敗が状態に出る(failure.phase が verify)`, failed["state"] === "failed" && failure?.phase === "verify", JSON.stringify(failed).slice(0, 300));
+      check(`${label}: 検証に失敗したので、分析の一覧は空のまま`, (await req(port, "GET", "/api/analyses?limit=200")).text === JSON.stringify({ ok: true, analyses: [] }));
+
+      const first = await upload(golden);
+      check(`${label}: 正しいファイルは 202(進捗が返る)`, first.status === 202 && parseJson(first.text)["ok"] === true, `${first.status} ${first.text.slice(0, 160)}`);
+      const completed = await waitState((j) => j["state"] === "completed" || j["state"] === "failed");
+      const analyses = completed["analyses"] as { total: number; processed: number; imported: number } | undefined;
+      const results = completed["results"] as { total: number; processed: number } | undefined;
+      check(`${label}: 取り込みが完了する(分析 5 件・結果 5 レース。すべて新規)`, completed["state"] === "completed" && analyses?.total === 5 && analyses.processed === 5 && analyses.imported === 5 && results?.total === 5 && results.processed === 5, JSON.stringify(completed).slice(0, 400));
+      const list = parseJson((await req(port, "GET", "/api/analyses?limit=200")).text);
+      const items = list["analyses"] as { id: number; raceId: string; analyzedAt: string }[];
+      check(`${label}: 一覧に 5 件。分析日時の降順(id の順ではない)`, items.length === 5 && items.every((a, i) => i === 0 || items[i - 1]!.analyzedAt >= a.analyzedAt) && items[0]!.analyzedAt === "2026-03-02T05:00:00.000Z", JSON.stringify(items.map((a) => [a.id, a.analyzedAt])));
+      const detail = await req(port, "GET", `/api/analyses/${items[items.length - 2]!.id}`);
+      check(`${label}: 詳細(D1 + R2)が読める(detail present)`, detail.status === 200 && detail.text.includes('"detail":"present"'), `${detail.status} ${detail.text.slice(0, 200)}`);
+
+      const second = await upload(golden);
+      check(`${label}: 同じファイルをもう一度 upload しても 202`, second.status === 202, `${second.status}`);
+      const again = await waitState((j) => (j["state"] === "completed" || j["state"] === "failed") && (j["analyses"] as { alreadyImported: number }).alreadyImported === 5);
+      check(`${label}: 2 回目は全件が取り込み済み(alreadyImported 5・imported 0)で完了。一覧は 5 件のまま`, again["state"] === "completed" && (again["analyses"] as { imported: number; alreadyImported: number }).imported === 0 && (parseJson((await req(port, "GET", "/api/analyses?limit=200")).text)["analyses"] as unknown[]).length === 5, JSON.stringify(again).slice(0, 300));
+      check(`${label}: 応答にメール・AUD・チーム名が含まれない`, ![first.text, second.text, JSON.stringify(completed)].join("\n").includes(EMAIL));
     });
 
     // C. メールだけ違う。

@@ -41,6 +41,12 @@ class_name = "NetkeibaGate"
 name = "RACE_DAY"
 class_name = "RaceDay"
 
+# exe から移したファイルの取り込みの Durable Object(Issue #216〈#167-B1〉)。`idFromName("main")` の単一インスタンスが、アップロードされたファイル(R2)の検証と、
+# アラームでの少しずつの取り込み(D1 の書き込みの 1 日の上限・R2 の柵を尊重)を行う。日単位の DO とは別のインスタンス・別のアラームで、netkeiba には出ない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "CLOUD_MIGRATION"
+class_name = "CloudMigration"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
@@ -49,6 +55,11 @@ new_sqlite_classes = ["NetkeibaGate"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["RaceDay"]
+
+# 追加だけ(v1・v2 には触れない)。Issue #216。
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CloudMigration"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

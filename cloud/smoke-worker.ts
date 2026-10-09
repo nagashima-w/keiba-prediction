@@ -252,6 +252,8 @@ async function smokeAnalysis(): Promise<Response> {
 
 /** 日単位の DO(Issue #177)。本番の入口(#180)はまだ無いので、smoke だけが RPC を呼ぶ。 */
 export { RaceDay };
+// Issue #216: 移行の DO(本番の worker.ts と同じもの。偽ソケットも netkeiba への経路も持たない)。wrangler は binding のクラスが入口から export されていることを要求する。
+export { CloudMigration } from "./src/migration-do";
 
 type SmokeEnv = Env;
 

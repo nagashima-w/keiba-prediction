@@ -46,6 +46,8 @@ import {
   UPSERT_RACE_RESULT_SQL,
   type ResultDetailRow,
 } from "../../packages/core/src/ev/analysis-store-codec.js";
+import { MIGRATION_TABLES, type MigrationTableName } from "../../packages/core/src/ev/cloud-migration-format";
+import type { ResultImport } from "./migration-convert";
 import type { RaceComboPayoutsSaveInput, RaceResultDetail, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
 import type { CourseType } from "../../packages/core/src/scraper/types.js";
 
@@ -152,6 +154,63 @@ export const LIST_UNIMPORTED_BY_DAY_SQL = `SELECT raceId, firstDate FROM (
 /** {@link LIST_UNIMPORTED_BY_DAY_SQL} の日数の上限の最大(手動の取り込みの範囲の上限 31 日と同じ)。 */
 export const UNIMPORTED_BY_DAY_MAX_DAYS = 31;
 
+
+// ---------------------------------------------------------------------------
+// 移行(Issue #216・#167-B1): exe の結果を、既存の行を優先して入れる
+// ---------------------------------------------------------------------------
+
+/** 移行の表の列(race_id を先頭に持つ表)。列の並びは `MIGRATION_TABLES` の定義順で、codec の INSERT 文の列の並びと一致することをテストが固定している。 */
+function migrationColumns(table: MigrationTableName): string[] {
+  return MIGRATION_TABLES[table].columns.map((c) => c.name);
+}
+
+/** `json_each` の要素 `$[i]` を取り出す式(先頭の race_id は定数の `?` なので、`$[0]` は 2 列目)。 */
+function picks(columnCount: number): string {
+  return Array.from({ length: columnCount - 1 }, (_, i) => `json_extract(value,'$[${i}]')`).join(", ");
+}
+
+/**
+ * 移行の結果の保存の文(束縛値は {@link buildMigratedResultStatements})。**既存の行を優先**(web が先に取り込んだものを上書きしない):
+ *  - 馬(race_results): そのレースに 1 行でもあれば**表ごと**飛ばす(行ごとの部分的な和集合にしない。「結果が 1 件も無い」が未取込の判定なので、それに合わせる)
+ *  - 面(race_result_meta): `INSERT OR IGNORE`
+ *  - 組合せ払戻: その券種の取込記録が既にあれば飛ばす(記録より**先**に書くので、同じ batch の記録に妨げられない)。記録の無い券種の行は `OR IGNORE`
+ *  - 取込記録: `INSERT OR IGNORE`
+ * 既存の UPSERT・DELETE → INSERT(codec の文。再取込で上書きするためのもの)は使えない。
+ */
+const RESULT_COLUMNS = migrationColumns("race_results");
+const COMBO_COLUMNS = migrationColumns("race_combo_payouts");
+const MARKER_COLUMNS = migrationColumns("race_combo_payout_imports");
+export const MIGRATED_RESULTS_SQL = `INSERT INTO race_results (${RESULT_COLUMNS.join(", ")}) SELECT ?, ${picks(RESULT_COLUMNS.length)} FROM json_each(?)
+           WHERE NOT EXISTS (SELECT 1 FROM race_results WHERE race_id = ?)`;
+export const MIGRATED_META_SQL = "INSERT OR IGNORE INTO race_result_meta (race_id, course_type) VALUES (?, ?)";
+export const MIGRATED_COMBOS_SQL = `INSERT OR IGNORE INTO race_combo_payouts (${COMBO_COLUMNS.join(", ")}) SELECT ?, ${picks(COMBO_COLUMNS.length)} FROM json_each(?)
+           WHERE NOT EXISTS (SELECT 1 FROM race_combo_payout_imports i WHERE i.race_id = ? AND i.bet_type = json_extract(value,'$[0]'))`;
+export const MIGRATED_MARKERS_SQL = `INSERT OR IGNORE INTO race_combo_payout_imports (${MARKER_COLUMNS.join(", ")}) SELECT ?, ${picks(MARKER_COLUMNS.length)} FROM json_each(?)`;
+
+/** 移行の結果 1 レースの文(最大 4 つ。馬・払戻の行数によらず一定)。書くものが無ければ空。 */
+export function buildMigratedResultStatements(db: ResultDb, imp: ResultImport): D1PreparedStatement[] {
+  const statements: D1PreparedStatement[] = [];
+  if (imp.resultsJson !== null) {
+    statements.push(db.prepare(MIGRATED_RESULTS_SQL).bind(imp.raceId, imp.resultsJson, imp.raceId));
+  }
+  if (imp.courseType !== null) {
+    statements.push(db.prepare(MIGRATED_META_SQL).bind(imp.raceId, imp.courseType));
+  }
+  if (imp.comboRowsJson !== null) {
+    statements.push(db.prepare(MIGRATED_COMBOS_SQL).bind(imp.raceId, imp.comboRowsJson, imp.raceId));
+  }
+  if (imp.markerRowsJson !== null) {
+    statements.push(db.prepare(MIGRATED_MARKERS_SQL).bind(imp.raceId, imp.markerRowsJson));
+  }
+  return statements;
+}
+
+/** {@link D1ResultStore.saveMigratedResult} の結果。`queries` は D1 の問い合わせ数(batch は文数で数える)、`rowsWritten` は `meta.rows_written` の合計。 */
+export interface MigratedResultOutcome {
+  readonly rowsWritten: number;
+  readonly queries: number;
+}
+
 // ---------------------------------------------------------------------------
 // 保存の文の組み立て
 // ---------------------------------------------------------------------------
@@ -255,6 +314,20 @@ export class D1ResultStore implements ResultRepository {
       return;
     }
     await this.db.batch(statements);
+  }
+
+
+  /**
+   * exe から移した結果を、**既存の行を優先して**保存する(Issue #216。上の {@link MIGRATED_RESULTS_SQL})。1 回の batch(最大 4 文)。冪等(同じ内容を2回渡しても、2回目の `rowsWritten` は 0)。
+   * 書くものが無いレースは D1 に何も発行しない。
+   */
+  async saveMigratedResult(imp: ResultImport): Promise<MigratedResultOutcome> {
+    const statements = buildMigratedResultStatements(this.db, imp);
+    if (statements.length === 0) {
+      return { rowsWritten: 0, queries: 0 };
+    }
+    const results = await this.db.batch(statements);
+    return { rowsWritten: results.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0), queries: statements.length };
   }
 
   /**

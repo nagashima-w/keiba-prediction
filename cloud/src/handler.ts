@@ -21,6 +21,7 @@ import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgr
 import { jstKaisaiDate } from "./auto-run-plan";
 import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
 import { D1ResultStore } from "./result-repository";
+import type { MigrationStatus, StartResult } from "./migration-core";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -69,10 +70,29 @@ export interface RaceDayNamespaceLike {
   get(id: any): RaceDayStubLike;
 }
 
+/** 移行の DO(CloudMigration)のスタブの、使う部分だけの型(RPC なので、同期のメソッドも Promise になる)。Issue #216。 */
+export interface MigrationStubLike {
+  /** アップロードされたファイル(R2 のキー)の取り込みを頼む。取り込み中なら `busy`。 */
+  start(input: { readonly key: string; readonly size: number }): Promise<StartResult>;
+  /** 進捗の読み取り(状態は変えない)。 */
+  getStatus(): Promise<MigrationStatus>;
+}
+
+/** 移行の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名)。 */
+export interface MigrationNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): MigrationStubLike;
+}
+
+/** 移行の DO の固定名(単一インスタンス)。 */
+const MIGRATION_NAME = "main";
+
 export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
   /** 日単位の DO(RaceDay。wrangler.toml の binding)。Issue #177・#180。 */
   RACE_DAY: RaceDayNamespaceLike;
+  /** exe から移したファイルの取り込みの DO(CloudMigration。wrangler.toml の binding)。Issue #216。本番では常にある。無い構成(binding の設定漏れ)では、移行の 2 つの API が 503 になる。 */
+  CLOUD_MIGRATION?: MigrationNamespaceLike;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
   DB: AnalysisDb;
   /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
@@ -156,6 +176,10 @@ export async function handle(
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
+  // 移行ファイルの受け取り(Issue #216)。**POST を受けるのは、ここを含めて 4 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload`)。
+  if (method === "POST" && new URL(request.url).pathname === "/api/migration/upload") {
+    return handleMigrationUpload(request, env, log);
+  }
   if (method !== "GET" && method !== "HEAD") {
     return new Response("method not allowed", {
       status: 405,
@@ -217,6 +241,25 @@ export async function handle(
       });
     }
     return handleCheck(new URL(request.url), env);
+  }
+
+  if (pathname === "/api/migration/upload") {
+    // POST だけ(上で処理済み)。GET・HEAD などは 405。
+    return new Response("method not allowed", {
+      status: 405,
+      headers: { ...SECURITY_HEADERS, allow: "POST", "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  if (pathname === "/api/migration") {
+    // 読み取り専用(移行の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #216。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleMigrationStatus(env);
   }
 
   if (pathname === "/api/analyses/status") {
@@ -285,6 +328,90 @@ export async function handle(
   }
 
   return json({ ok: false, error: "not found" }, 404);
+}
+
+
+/** 移行ファイルのアップロードの上限(バイト)。実データは gzip で約 15MB(分析 2,225 件・結果 1,301 レース)。 */
+export const MIGRATION_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const UPLOAD_CONTENT_TYPES: ReadonlySet<string> = new Set(["application/gzip", "application/x-gzip", "application/octet-stream"]);
+
+/** 移行の DO のスタブ(単一インスタンス)。 */
+function migrationStub(env: Env): MigrationStubLike {
+  const namespace = env.CLOUD_MIGRATION;
+  if (namespace === undefined) {
+    throw new Error("CLOUD_MIGRATION binding がありません");
+  }
+  return namespace.get(namespace.idFromName(MIGRATION_NAME));
+}
+
+/** `GET /api/migration`: 移行の進捗(状態・取り込んだ件数・全体の件数・予算・再開時刻・失敗の理由)。DO の失敗は 503(文面は返さない)。 */
+async function handleMigrationStatus(env: Env): Promise<Response> {
+  try {
+    return json({ ok: true, ...(await migrationStub(env).getStatus()) });
+  } catch {
+    return json({ ok: false, error: { type: "migration-error" } }, 503);
+  }
+}
+
+/** アップロードで R2 に置くファイルを消すときに使う窓口(本物のバケットは delete を持つ。型 `AnalysisBucket` は get/put だけ)。 */
+type UploadBucket = AnalysisBucket & Pick<R2Bucket, "delete">;
+
+/**
+ * `POST /api/migration/upload`(Issue #216〈#167-B1〉): exe の「クラウド移行用に書き出す」で作った gzip を受け取る。**本文は解釈せず、R2 にそのまま置く**
+ * (Workers Free の CPU は 10ms。検証・取り込みは移行の DO がアラームで少しずつ行う)。本文は gzip のバイト列(JSON ではない)。
+ * 順序: Origin(403)→ Content-Type(415)→ Content-Length(411。無い・不正なとき。413。上限 {@link MIGRATION_UPLOAD_MAX_BYTES} を超えるとき)→
+ * **取り込み中でないか**(409 `migration-busy`。**本文を読まずに断る**)→ R2 の書き込み(Class A)の柵(503 `r2-fence`)→ R2 に置く(キーは毎回別。取り込み中のファイルを上書きしない)→
+ * Class A を 1 回数える → DO に取り込みを頼む(受け付けなければ置いたファイルを消して 409。例外なら消して 503)。202 で進捗を返す。
+ * 失敗の応答に、例外の文面は含めない。
+ */
+async function handleMigrationUpload(request: Request, env: Env, log: (line: string) => void): Promise<Response> {
+  if (!originAllowed(request)) {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const contentType = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  if (!UPLOAD_CONTENT_TYPES.has(contentType)) {
+    return json({ ok: false, error: { type: "unsupported-media-type", message: "Content-Type は application/gzip にしてください" } }, 415);
+  }
+  const declared = request.headers.get("content-length");
+  if (declared === null || !/^[1-9][0-9]*$/.test(declared)) {
+    return json({ ok: false, error: { type: "length-required", message: "Content-Length が必要です" } }, 411);
+  }
+  const size = Number(declared);
+  if (size > MIGRATION_UPLOAD_MAX_BYTES) {
+    return json({ ok: false, error: { type: "payload-too-large", message: `ファイルは ${MIGRATION_UPLOAD_MAX_BYTES} バイトまでです` } }, 413);
+  }
+  if (request.body === null) {
+    return badRequest("本文がありません");
+  }
+
+  const bucket = env.ANALYSIS_DETAIL as UploadBucket;
+  const store = new D1AnalysisStore({ db: env.DB, bucket });
+  let key: string | null = null;
+  try {
+    const stub = migrationStub(env);
+    const status = await stub.getStatus();
+    if (status.state === "verifying" || status.state === "importing" || status.state === "waiting-budget" || status.state === "waiting-r2") {
+      return json({ ok: false, error: { type: "migration-busy", message: "取り込み中です。完了(または失敗)してから、もう一度アップロードしてください" } }, 409);
+    }
+    if (!(await store.getR2Usage()).writeAllowed) {
+      return json({ ok: false, error: { type: "r2-fence", message: "R2 の書き込み回数の上限に達しています。翌月に再開してください" } }, 503);
+    }
+    key = `migration/${crypto.randomUUID()}.ndjson.gz`;
+    await bucket.put(key, request.body, { httpMetadata: { contentType: "application/gzip" } });
+    await store.countR2Write().catch(() => undefined); // 数えられなくても、置いたファイルの取り込みは続ける(カウンタは best-effort)
+    const started = await stub.start({ key, size });
+    if (!started.accepted) {
+      await bucket.delete(key).catch(() => undefined);
+      return json({ ok: false, error: { type: "migration-busy", message: "取り込み中です。完了(または失敗)してから、もう一度アップロードしてください" } }, 409);
+    }
+    return json({ ok: true, ...(await stub.getStatus()) }, 202);
+  } catch {
+    log("migration: upload failed");
+    if (key !== null) {
+      await bucket.delete(key).catch(() => undefined);
+    }
+    return json({ ok: false, error: { type: "migration-error" } }, 503);
+  }
 }
 
 const ANALYSES_PARAMS = new Set(["race_id", "kaisai_date", "limit"]);

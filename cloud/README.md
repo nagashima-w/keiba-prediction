@@ -11,7 +11,7 @@ Issue #161(#21-C)の土台と、#162(#21-D)段階2の netkeiba 取得の出口(�
 - `src/socket-fetch.ts` / `src/http1.ts` — ソケットで HTTP/1.1 を話す取得クライアント(`connect` を注入。送るヘッダは固定の4つ + `Host` + `Connection: close`(POST は、これに `Content-Type`・`X-Requested-With`・`Referer`・`Origin` と、`Connection: close` の後ろの `Content-Length`)、圧縮は要求しない、再試行・リダイレクト追従なし、サイズ上限 2 MiB・タイムアウト 20 秒)。調査(`spikes/cloudflare/`・`scripts/cloudflare-spike/`)の実装を本番用に作り直したもので、調査のコードは参照しない
 - `src/gate-fetch.ts` — ゲートの `fetchRaw`(RPC)を core の `HttpClient` の fetch 注入口へ繋ぐ(`createGateHttpClient`: 間隔 0・再試行 0。間隔制御はゲートだけが行う)。**Worker の `fetch` で netkeiba を取る経路は持ち込まない**(#160。CloudFront から HTTP 400 になる)
 - `src/netkeiba-check.ts` / `src/page.ts` — 確認用エンドポイント `GET /api/netkeiba/check` の処理(race_id の検証・出馬表の取得とパース。`type=grade-winner` では POST を1本試して過去回の数を返す〈Issue #181〉)と、`/check` の確認フォーム(Issue #184 で `/` から移した。使い方は下の「確認ページの使い方」)
-- `migrations/` — D1 の migration(#171)。`0001_init.sql` は exe の最終スキーマのダンプ(**凍結。書き換えない**。#197 までは生成物だった。下の「D1(分析履歴)」参照)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key`・索引2つ)、`0003_r2_ops.sql` は R2 の操作回数のカウンタの表(#173)、`0004_settings.sql` は設定の表(#178)、`0005_llm_note.sql` は `analyses.llm_note`(LLM が使われなかった・一部しか使われなかった理由の固定文言。Issue #194)、`0006_horse_items.sql` は `analysis_horses.highlights_json`・`concerns_json`(馬ごとの強調材料・懸念事項。exe の列と同じ。Issue #197)、`0007_llm_calls.sql` は `analyses.llm_calls_json`(LLM を呼んだ1回ごとの記録。cloud 専用。Issue #197 段2)。詳細は下の「D1(分析履歴)」・「分析履歴ストア」
+- `migrations/` — D1 の migration(#171)。`0001_init.sql` は exe の最終スキーマのダンプ(**凍結。書き換えない**。#197 までは生成物だった。下の「D1(分析履歴)」参照)、`0002_d1.sql` は D1 専用の追加分(`analyses.detail_key`・索引2つ)、`0003_r2_ops.sql` は R2 の操作回数のカウンタの表(#173)、`0004_settings.sql` は設定の表(#178)、`0005_llm_note.sql` は `analyses.llm_note`(LLM が使われなかった・一部しか使われなかった理由の固定文言。Issue #194)、`0006_horse_items.sql` は `analysis_horses.highlights_json`・`concerns_json`(馬ごとの強調材料・懸念事項。exe の列と同じ。Issue #197)、`0007_llm_calls.sql` は `analyses.llm_calls_json`(LLM を呼んだ1回ごとの記録。cloud 専用。Issue #197 段2)、`0008_migration_import.sql` は `analyses.exe_analysis_id`(exe の分析 id。移行の冪等性の鍵)と一覧を分析日時の順にする索引(Issue #216)。詳細は下の「D1(分析履歴)」・「分析履歴ストア」
 - `src/d1-health.ts` — `GET /api/health` の D1 の疎通確認(`D1_HEALTH_SQL`。`analyses` の `detail_key`・`llm_note`・`llm_calls_json` と、馬の `highlights_json`・`concerns_json`〈スカラーの副問い合わせ〉を読む。migration 0002・0005・0006・0007 の適用と binding を1回の読み取りで確かめる。#197)
 - `smoke-worker.ts` / `smoke-modules.d.ts` — **ローカル smoke 専用**のエントリ(偽ソケット。本番の `main` ではない)
 - `src/undici-stub.ts` — core の `http-client.ts` が動的に import する `undici` の差し替え(バンドルに巨大な undici を入れない)
@@ -390,6 +390,35 @@ workerd と nodejs_compat の実環境で、Worker → DO → ソケットクラ
 - **発走前の分析を押しのけない**: 結果は最も低い優先度(各ステップの先頭で期限が来た行を昇格し、タスクがあるあいだは結果は動かない)。期限を待つ planned の行が残る今日の DO でも動く。
 - **止め方**: 取り込みだけを止める専用の設定は無い(cron ごと止めるなら「定時の自動実行」の止め方)。D1 の読み出しが失敗したときは、当日傾向なしで分析を続ける(警告ログだけ)。
 - 検査: `test/race-day-result-sameday.test.ts`(積む行・全頭の判定・5 分おき 10 回・今日の DO で動く条件・fuzz)・`test/race-day-sameday-trend.test.ts`(配線・D1 の統合・リークの対照)・core の `parse-race-result.test.ts`(`parseRaceFieldSize`)。
+
+## exe から移したファイルの取り込み(Issue #216〈#167-B1〉。v1.28.0)
+exe の「クラウド移行用に書き出す」(#215。gzip の NDJSON 1 ファイル)を受け取り、D1・R2 へ**少しずつ**取り込む。画面は #222(この Issue は API と取り込みの仕組みまで)。
+- **API**(どちらも Access の後ろ):
+  - `POST /api/migration/upload` — 本文は gzip のバイト列(`Content-Type: application/gzip`。`Content-Length` 必須、上限 50MB)。**Worker は本文を解釈せず、R2 に `migration/<uuid>.ndjson.gz` としてそのまま置く**(Workers Free の CPU は 10ms)。
+    Origin 確認(403)→ Content-Type(415)→ Content-Length(411・413)→ 取り込み中でないか(409。本文を読まずに断る)→ R2 の書き込みの柵(503)→ 置く → DO に取り込みを頼む(202。進捗を返す)。
+  - `GET /api/migration` — 進捗: `state`(`idle`・`verifying`・`importing`・`waiting-budget`〈予算待ち。`resumeAt` が次の再開時刻〉・`waiting-r2`〈R2 の柵。翌月に再開〉・`completed`・`failed`〈`failure` に phase と理由〉)、
+    `analyses`(全体・処理済み・取り込んだ・取り込み済みだった・衝突)、`results`、`budget`(今日の使用行数と上限)、`verified`(検証の実績)、`lastTick`(直近のアラームの実績)。
+- **DO `CloudMigration`**(`idFromName("main")` の単一インスタンス。wrangler.toml の migration **v3**。`RaceDay` とは別のインスタンス・別のアラームで、netkeiba・LLM には出ない。`scripts/test/cloud-config-guard.test.ts` が固定):
+  1. **検証**: 書き始める前に、ファイル全体を 1 回流して、フッタまで通す(`parseMigrationLine`・`MigrationTally`・取り込みの変換。壊れた・途中で切れたファイルは何も書かずに `failed`、ファイルは削除)。
+  2. **取り込み**: アラームごとに、毎回ファイルを先頭から展開し、前回の位置(展開後のバイトオフセット)までを**解釈せずに捨てて**続きから進む(塊に分けて R2 に置き直さない)。位置・件数は 1 件ごとに保存する。
+     - 分析は web と**同じ保存経路**(`buildSaveStatements` の 1 回の batch → R2 の put)。分析日時・開催日・版・モデル・追加指示・遮断の印は元の値のまま。配分メタは行から直接作る(record 経由だと NULL の設定列が 0 に潰れる)。
+     - 取り込み済み(`analyses.exe_analysis_id`。部分一意索引)は飛ばす。**exe の id が同じで race_id か分析日時が違うもの(exe の DB を作り直した等)は『衝突』として飛ばして数える**(失敗にしない・上書きしない)。
+     - 結果は**既存の行を優先**(web が先に取り込んだレースの馬・面・同じ券種の払戻は上書きしない)。
+  3. **完了**: アップロードされたファイルを R2 から削除する。状態の記録は次のアップロードまで残る。同じファイルをもう一度 upload しても重複しない(全件が取り込み済みとして飛ばされる)。
+- **予算**(定数は `src/migration-core.ts`):
+  - **D1 の書き込み**: 1 日 **6 万行**(`MIGRATION_DAILY_ROW_LIMIT`。Free は 10 万行/日で、通常の運用のぶんを残す)。**D1 が報告する `meta.rows_written` の合計**(索引を含む)で数える。達したら `waiting-budget` で、**翌 UTC 日の 00:05** に自動で再開する。
+    環境変数(var・secret)`MIGRATION_DAILY_ROW_LIMIT`(1〜100000 の整数)で上書きできる(測定・下げたいとき用。Free の枠を超える値は無視)。
+  - **1 回のアラームの問い合わせ数**: D1 の文(batch は文の数)+ R2 の操作が **40 以内**(`MIGRATION_TICK_QUERY_LIMIT`。環境変数 `MIGRATION_TICK_QUERY_LIMIT` で 1〜50 に上書き可)。Free の「1 回の呼び出しで 50 クエリ」を超えないため。
+    **本番の数え方〈batch を 1 と数えるか〉は未確認**で、ローカルでは強制されない。保守的に文ごとに数えている。数え方が分かったら定数を上げられる。
+  - **R2 の操作回数の柵**(#173): Class A(書き込み)か Class B(読み出し)が柵に達していたら、**「要約だけ保存」にせず**止めて `waiting-r2`、**翌月 1 日の 00:05 UTC** に再開する(詳細が永久に欠けるため)。
+- **中断・失敗**: DO が再起動しても続きから進む。アラームの途中で中断した次のアラームでは、取り込み済みの分析の詳細(R2)を作り直す(D1 の batch と R2 の put の間で止まった分の詳細が欠けないため)。
+  取り込み中のエラーは再試行する(30 秒・2 分・10 分・30 分・1 時間…)。連続 8 回で `failed`(ファイルは残す。再度アップロードすると、取り込み済みは飛ばして続きから進む)。例外の本文は状態に出さない。
+- **一覧の並び**: `GET /api/analyses`(とレース画面の過去の分析)は**分析日時の降順**(同時刻は id の降順)。migration `0008` の索引 3 つ(`idx_analyses_analyzed_at`・`_race_analyzed`・`_kaisai_analyzed`)で、並べ替えの一時領域を使わず先頭の N 件だけを読む。
+  web の保存 1 回の D1 の書き込みは 60 → **63 行**(索引 3 つぶん)。
+- **定時の自動実行との関係**: 別の DO のアラームで、D1 の batch は 1 つずつトランザクションなので、cron(`scheduled` → `RaceDay`)・発走前の分析の保存と同時に動いても子の行の取り違えは起きない(`(SELECT max(id) FROM analyses)` の前提は、本番の D1 では未検証の推論のまま)。
+  移行の分析は `listAnalyzedRaceIdsByPromptVersion` にも入るため、同じ版で分析済みの当日のレースを cloud の自動実行が「分析済み」と見なすことがある。
+- **実測**: `pnpm tsx scripts/measure-migration-import.ts`(実際の規模に近い合成ファイルを workerd に流す。結果は `docs/current-spec.md` の「exe から移したファイルの取り込み」)。
+- テスト: `test/migration-convert.test.ts`・`migration-reader.test.ts`・`migration-store.test.ts`・`migration-core.test.ts`(本物のローカルの D1・R2)・`handler-migration.test.ts`・`analysis-list-order.test.ts`、smoke の H。
 
 ## 手動起動の入口(Issue #180)
 Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 3 + 定時 1 の計 4 つ〉。さらに結果の取り込みの依頼〈Issue #208。cron と `POST /api/results/import` が共有する `dispatchResultImports` の中の 1 箇所〉で、呼び出し箇所は計 5 つ)。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
