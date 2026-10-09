@@ -209,7 +209,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   };
 
   const SETTINGS = {
-    evThreshold: 1, additionalInstruction: "", clipVariant: "default", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, includeComboOdds: false,
+    evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, includeComboOdds: false,
     includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true,
     includeBracketQuinellaInAllocation: true, preRaceOffsetMinutes: 45,
   };
@@ -420,13 +420,15 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
     const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
     expect(fields.length).toBe(15);
-    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "select", "textarea"].sort());
+    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)
     const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
     expect(field("bankroll").value).toBe("500000");
     expect(field("clipVariant").value).toBe("default"); // select は option を入れたあとに value が設定される
+    expect(field("analysisModel").value).toBe("auto"); // Issue #158: 分析モデルも select(既定 auto)
     expect(field("includeWideInAllocation").checked).toBe(true);
     expect(field("includeComboOdds").checked).toBeFalsy();
     field("bankroll").listeners.get("change")![0]!({ target: { value: "123456" } });
+    field("analysisModel").listeners.get("change")![0]!({ target: { value: "opus" } });
     field("includeComboOdds").listeners.get("change")![0]!({ target: { value: "on", checked: true } });
     const save = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "settings-save")!;
     save.listeners.get("click")![0]!(undefined);
@@ -434,7 +436,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     const post = calls.find((c) => c.init.method === "POST")!;
     expect(post.url).toBe("/api/settings");
     expect(post.init.referrerPolicy).toBe("same-origin");
-    expect(JSON.parse(post.init.body!)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true });
+    expect(JSON.parse(post.init.body!)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true, analysisModel: "opus" });
     await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
   });
 
