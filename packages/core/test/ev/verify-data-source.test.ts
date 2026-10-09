@@ -6,7 +6,7 @@ import {
   DEFAULT_VERIFY_CONFIG,
   PRODUCTION_VERIFY_CONFIG,
 } from "../../src/ev/verify.js";
-import { extractStartTime } from "../../src/ev/lookahead-suspicion.js";
+import { classifyLookaheadSuspicion, extractStartTime, isLookaheadGuarded, type LookaheadSuspicionInput } from "../../src/ev/lookahead-suspicion.js";
 
 /**
  * Issue #219: クラウド版(D1)が `computeVerifyReport` を使うための、core 側の入口の検査。
@@ -59,5 +59,38 @@ describe("extractStartTime(スナップショットの発走時刻)", () => {
   ];
   it.each(cases)("%s", (_name, snapshot, expected) => {
     expect(extractStartTime(snapshot)).toBe(expected);
+  });
+});
+
+describe("isLookaheadGuarded(遮断済みか。分類の第1段と同じ定義)", () => {
+  const base: LookaheadSuspicionInput = {
+    raceId: "202606030811",
+    analyzedAt: "2026-07-05T07:00:00.000Z",
+    kaisaiDate: "20260705",
+    promptVersion: "v1",
+    historyCutoffDate: "20260705",
+    promptLookaheadGuarded: true,
+    raceSnapshot: null,
+  };
+  const cases: ReadonlyArray<readonly [string, Partial<LookaheadSuspicionInput>, boolean]> = [
+    ["戦績側の印あり・LLM使用・プロンプト側も遮断済み", {}, true],
+    ["戦績側の印あり・LLM未使用(プロンプト側の印は見ない)", { promptVersion: null, promptLookaheadGuarded: null }, true],
+    ["戦績側の印あり・LLM使用・プロンプト側が false(明示的に未遮断)", { promptLookaheadGuarded: false }, false],
+    ["戦績側の印あり・LLM使用・プロンプト側が null(記録なし)", { promptLookaheadGuarded: null }, false],
+    ["戦績側の印なし(LLM未使用でも未遮断)", { historyCutoffDate: null, promptVersion: null }, false],
+    ["両方なし", { historyCutoffDate: null, promptLookaheadGuarded: null }, false],
+  ];
+  it.each(cases)("%s", (_name, overrides, expected) => {
+    expect(isLookaheadGuarded({ ...base, ...overrides })).toBe(expected);
+  });
+
+  it("遮断済みの行は、発走時刻・分析時刻・開催日にかかわらず clean(= 発走時刻の欠落が判定に影響しない)", () => {
+    for (const startTime of ["06:00", "23:59", null]) {
+      for (const analyzedAt of ["2026-07-04T00:00:00.000Z", "2026-07-06T00:00:00.000Z", "壊れた日時"]) {
+        const input = { ...base, analyzedAt, raceSnapshot: startTime === null ? null : { race: { startTime } } };
+        expect(isLookaheadGuarded(input)).toBe(true);
+        expect(classifyLookaheadSuspicion(input)).toBe("clean");
+      }
+    }
   });
 });

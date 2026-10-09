@@ -59,14 +59,27 @@ const START_TIME_PATTERN = /^(\d{1,2}):(\d{2})$/;
 const TIMEZONE_SUFFIX_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/;
 
 /**
+ * 遮断済みか(分類の第1段)。`historyCutoffDate !== null` かつ(LLM 未使用〈`promptVersion === null`〉または
+ * `promptLookaheadGuarded === true`)。true なら発走の前後・分析時刻・スナップショットを一切見ずに clean になる。
+ *
+ * Issue #219: クラウド版は、発走時刻の写しを確認できなかった行のうち**判定に影響しうるもの**(= この関数が false の行)を数えるために使う。
+ * 定義を分類と1か所で共有する(別々に書くと、数える対象と判定が食い違う)。
+ */
+export function isLookaheadGuarded(
+  analysis: Pick<LookaheadSuspicionInput, "historyCutoffDate" | "promptVersion" | "promptLookaheadGuarded">,
+): boolean {
+  const historyGuarded = analysis.historyCutoffDate !== null;
+  const promptGuarded = analysis.promptVersion === null || analysis.promptLookaheadGuarded === true;
+  return historyGuarded && promptGuarded;
+}
+
+/**
  * 保存済み分析を clean / suspect / unknown に分類する。
  * @param analysis 分類対象(`StoredAnalysis` の一部でよい)
  */
 export function classifyLookaheadSuspicion(analysis: LookaheadSuspicionInput): LookaheadSuspicion {
   // ステップ1: 遮断済みなら発走の前後を見ない。
-  const historyGuarded = analysis.historyCutoffDate !== null;
-  const promptGuarded = analysis.promptVersion === null || analysis.promptLookaheadGuarded === true;
-  if (historyGuarded && promptGuarded) {
+  if (isLookaheadGuarded(analysis)) {
     return "clean";
   }
 

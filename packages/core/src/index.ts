@@ -331,6 +331,7 @@ export {
 export {
   classifyLookaheadSuspicion,
   extractStartTime,
+  isLookaheadGuarded,
   type LookaheadSuspicion,
   type LookaheadSuspicionInput,
 } from "./ev/lookahead-suspicion.js";
