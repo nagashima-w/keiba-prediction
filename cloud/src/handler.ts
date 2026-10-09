@@ -168,11 +168,11 @@ export async function handle(
       headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
     });
   }
-  // 手動起動の入口(Issue #180)。**POST を受けるのはここと `/api/settings` だけ**。認証(上)の後で、Origin の確認・入力の検証を行う。
+  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload` の 4 本だけ**(下の 2 本は Issue #208・#216)。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
   }
-  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。**POST を受けるのは、ここと上の 2 つ(`/api/settings`・`/api/analyses/run`)だけ**。
+  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 4 本(上の 2 つ〈`/api/settings`・`/api/analyses/run`〉・ここ・下の `/api/migration/upload`)。
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }

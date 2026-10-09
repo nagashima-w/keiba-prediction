@@ -21,7 +21,10 @@
  *
  * ## 中断・失敗
  *  - 位置・件数は 1 件ごとに kv へ保存する。DO が再起動しても、続きから進む。
- *  - アラームの途中で中断した(`inflight`)ときの次のアラームでは、取り込み済みの分析の詳細(R2)を作り直す(D1 の batch と R2 の put の間で止まった分析の詳細が、永久に欠けないため)。
+ *  - **詳細(R2)が未完了の分析の記憶**(kv の `pending`。exe の分析 id の集合): 分析を D1 に書く**前**に加え、R2 の put の成功で外す。ジョブの状態(待機・失敗・新しいアップロード)とは**独立に残る**ので、
+ *    D1 の batch と R2 の put の間で止まった・put が失敗したままジョブが待機・失敗に入った分析も、次にその分析に当たったとき(取り込み済みとして飛ばす前に)詳細を作り直す。
+ *    記憶が無いと、`completed` なのに詳細が無音で永久に欠ける(レビューで再現した S1〜S3)。
+ *  - **アラームの自己回復**(`ensureAlarm`): 取り込み系の状態(検証中・取り込み中・予算待ち・R2 待ち)なのにアラームが無ければ張り直す。Cloudflare のアラームの再試行の上限を超えて落ちると、アラームが消えて 409 のまま回復手段が無くなるため。`GET /api/migration` と受付の `busy` で呼ぶ。
  *  - 取り込み中のエラーは再試行する({@link MIGRATION_RETRY_DELAYS_MS} の間隔)。連続 {@link MIGRATION_MAX_ATTEMPTS} 回で `failed`(ファイルは残す)。**例外の本文は状態に入れない**(固定の文言と種類名だけ)。
  *  - 形式違反(検証後に起きるのは内部の不整合)は再試行しても直らないので、すぐ `failed`。
  */
@@ -69,6 +72,8 @@ export interface MigrationCoreDeps {
   readonly now: () => number;
   /** アラームを張る(上書き。DO は 1 つしか張れない)。 */
   readonly setAlarm: (at: number) => void | Promise<void>;
+  /** 張られているアラームの時刻(無ければ null)。取り込み中なのにアラームが無い状態の自己回復に使う。 */
+  readonly getAlarm: () => Promise<number | null>;
   /** アップロードされたファイル(gzip)を R2 から開く。無ければ null。 */
   readonly openFile: (key: string) => Promise<ReadableStream<Uint8Array> | null>;
   readonly deleteFile: (key: string) => Promise<void>;
@@ -106,8 +111,6 @@ interface Job {
   failure: { phase: "verify" | "import"; message: string } | null;
   /** 連続して失敗したアラームの数。成功で 0。 */
   attempts: number;
-  /** アラームの処理の途中(正常に終わっていない)。次のアラームで取り込み済みの詳細を作り直す。 */
-  inflight: boolean;
   lastTick: { at: number; queries: number; rows: number; lines: number; ms: number } | null;
   /** 検証の実績(展開後のバイト数・行数・壁時計のミリ秒)。 */
   verified: { bytes: number; lines: number; ms: number } | null;
@@ -161,6 +164,10 @@ export type StartResult = { readonly accepted: true } | { readonly accepted: fal
 
 const KEY_JOB = "job";
 const KEY_BUDGET = "budget";
+const KEY_PENDING = "pending";
+
+/** 詳細(R2)が未完了の分析の記憶: exe の分析 id(文字列)→ 1。ジョブとは別のキーで、ジョブの状態遷移・新しいアップロードで消えない。 */
+type PendingDetails = Record<string, 1>;
 
 const BUSY_STATES: readonly MigrationState[] = ["verifying", "importing", "waiting-budget", "waiting-r2"];
 
@@ -218,6 +225,19 @@ export class MigrationCore {
     this.deps.kv.put(KEY_JOB, job);
   }
 
+  private loadPending(): PendingDetails {
+    return { ...(this.deps.kv.get<PendingDetails>(KEY_PENDING) ?? {}) };
+  }
+
+  private savePending(pending: PendingDetails): void {
+    this.deps.kv.put(KEY_PENDING, pending);
+  }
+
+  private clearPending(pending: PendingDetails, exeId: number): void {
+    delete pending[String(exeId)];
+    this.savePending(pending);
+  }
+
   private loadBudget(now: number): Budget {
     const stored = this.deps.kv.get<Budget>(KEY_BUDGET);
     const day = utcDay(now);
@@ -239,6 +259,7 @@ export class MigrationCore {
   async start(input: { readonly key: string; readonly size: number }): Promise<StartResult> {
     const previous = this.loadJob();
     if (previous !== null && BUSY_STATES.includes(previous.state)) {
+      await this.ensureAlarm();
       return { accepted: false, reason: "busy" };
     }
     if (previous !== null && previous.key !== input.key) {
@@ -264,13 +285,29 @@ export class MigrationCore {
       resumeAt: null,
       failure: null,
       attempts: 0,
-      inflight: false,
       lastTick: null,
       verified: null,
       updatedAt: now,
     });
     await this.deps.setAlarm(now);
     return { accepted: true };
+  }
+
+  /**
+   * 取り込み系の状態(検証中・取り込み中・予算待ち・R2 待ち)なのにアラームが無ければ、張り直す(自己回復)。Cloudflare のアラームの再試行の上限を超えて落ちると、アラームが消え、
+   * アップロードが 409 のまま回復手段が無くなるため。待機中は再開時刻(過ぎていれば今)に、それ以外は今に張る。アラームが既にあれば触らない。完了・失敗・idle では何もしない。
+   */
+  async ensureAlarm(): Promise<void> {
+    const job = this.loadJob();
+    if (job === null || !BUSY_STATES.includes(job.state)) {
+      return;
+    }
+    if ((await this.deps.getAlarm()) !== null) {
+      return;
+    }
+    const now = this.deps.now();
+    const waiting = (job.state === "waiting-budget" || job.state === "waiting-r2") && job.resumeAt !== null;
+    await this.deps.setAlarm(waiting ? Math.max(now, job.resumeAt!) : now);
   }
 
   /** 進捗(状態は変えない)。 */
@@ -341,7 +378,6 @@ export class MigrationCore {
     job.state = "failed";
     job.failure = { phase, message };
     job.resumeAt = null;
-    job.inflight = false;
     this.saveJob(job);
     if (deleteFile) {
       await this.deps.deleteFile(job.key).catch(() => undefined);
@@ -406,7 +442,6 @@ export class MigrationCore {
 
   private async importTick(job: Job): Promise<void> {
     const startedAt = this.deps.now();
-    const recovering = job.inflight;
     let queries = 0;
     let rows = 0;
     let lines = 0;
@@ -427,7 +462,6 @@ export class MigrationCore {
 
     job.state = "importing";
     job.resumeAt = null;
-    job.inflight = true;
     this.saveJob(job);
 
     // 3. ファイルを開き(R2 の読み出し 1)、読み出しを数え(D1 の書き込み 1 行・問い合わせ 1)、この回に処理する行を先読みする(問い合わせ数の上限に収まる範囲)。
@@ -448,6 +482,7 @@ export class MigrationCore {
     queries += exeIds.length === 0 ? 0 : 1;
 
     // 4. 1 行ずつ処理する。位置と件数は 1 件ごとに保存する。
+    const pending = this.loadPending();
     let stoppedEarly = false;
     let waiting = false;
     let failure: Error | null = null;
@@ -467,7 +502,7 @@ export class MigrationCore {
         stoppedEarly = true;
         break;
       }
-      const outcome = await this.processItem(job, item.line, existing, recovering);
+      const outcome = await this.processItem(job, item.line, existing, pending);
       queries += outcome.queries;
       rows += outcome.rows;
       budget.rows += outcome.rows;
@@ -479,7 +514,7 @@ export class MigrationCore {
         break;
       }
       if (outcome.error !== undefined) {
-        // D1 の行はできたが、続けられない(R2 への書き込みの失敗)。使った行数を記録して、ステップの失敗として再試行する(inflight が残るので、次は詳細を作り直す)。
+        // D1 の行はできたが、続けられない(R2 への書き込みの失敗)。使った行数を記録して、ステップの失敗として再試行する(未完了の記憶が残るので、次は詳細を作り直す)。
         failure = outcome.error;
         break;
       }
@@ -502,7 +537,6 @@ export class MigrationCore {
       return;
     }
     job.attempts = 0;
-    job.inflight = false;
     this.saveJob(job);
     await this.deps.setAlarm(this.deps.now() + MIGRATION_TICK_DELAY_MS);
   }
@@ -511,7 +545,6 @@ export class MigrationCore {
   private async waitFor(job: Job, state: "waiting-budget" | "waiting-r2", resumeAt: number): Promise<void> {
     job.state = state;
     job.resumeAt = resumeAt;
-    job.inflight = false;
     job.attempts = 0;
     this.saveJob(job);
     await this.deps.setAlarm(resumeAt);
@@ -522,7 +555,6 @@ export class MigrationCore {
     job.resumeAt = null;
     job.failure = null;
     job.attempts = 0;
-    job.inflight = false;
     this.saveJob(job);
     await this.deps.deleteFile(job.key).catch(() => undefined);
   }
@@ -557,7 +589,7 @@ export class MigrationCore {
     job: Job,
     line: MigrationLine,
     existing: ReadonlyMap<number, { readonly id: number; readonly raceId: string; readonly analyzedAt: string }>,
-    recovering: boolean,
+    pending: PendingDetails,
   ): Promise<{ queries: number; rows: number; stop?: "waiting-r2"; error?: Error }> {
     switch (line.type) {
       case "header":
@@ -577,8 +609,8 @@ export class MigrationCore {
           }
           let queries = 0;
           let rows = 0;
-          if (recovering) {
-            // 前回の処理が途中で止まった可能性: 詳細(R2)を作り直す(D1 の batch と R2 の put の間で止まった分析のため)。
+          if (pending[String(imp.exeId)] !== undefined) {
+            // 詳細(R2)が未完了の分析(D1 の batch と R2 の put の間で止まった・put が失敗した): 取り込み済みとして飛ばす前に、詳細を作り直す。
             const repaired = await this.deps.analyses.repairDetail(ref.id, imp.record);
             queries += repaired.queries;
             rows += repaired.kind === "fenced" ? 0 : 1; // Class A のカウンタの更新
@@ -588,19 +620,25 @@ export class MigrationCore {
             if (repaired.kind === "failed") {
               return { queries, rows, error: new Error("R2 への書き込みに失敗しました") };
             }
+            this.clearPending(pending, imp.exeId);
           }
           job.analysesAlreadyImported += 1;
           job.analysesProcessed += 1;
           return { queries, rows };
         }
+        // D1 に書く前に、未完了の記憶に加える(書いたあと・put の前に止まっても、次にこの分析に当たったとき詳細を作り直せる)。
+        pending[String(imp.exeId)] = 1;
+        this.savePending(pending);
         const saved = await this.deps.analyses.saveMigratedAnalysis(imp);
         if (saved.kind === "fenced") {
+          this.clearPending(pending, imp.exeId); // D1 にも R2 にも書いていない
           return { queries: saved.queries, rows: 0, stop: "waiting-r2" };
         }
         if (saved.detail === "failed") {
-          // D1 の行はできている。次のアラーム(inflight が残る)で、詳細を作り直す。
+          // D1 の行はできている。記憶が残るので、次にこの分析に当たったとき(ジョブが待機・失敗を挟んでも)詳細を作り直す。
           return { queries: saved.queries, rows: saved.rowsWritten, error: new Error("R2 への書き込みに失敗しました") };
         }
+        this.clearPending(pending, imp.exeId);
         job.analysesImported += 1;
         job.analysesProcessed += 1;
         return { queries: saved.queries, rows: saved.rowsWritten };

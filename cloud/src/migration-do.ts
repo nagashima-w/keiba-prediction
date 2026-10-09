@@ -43,6 +43,7 @@ export class CloudMigration extends DurableObject<CloudMigrationEnv> {
       kv: ctx.storage.kv,
       now: () => Date.now(),
       setAlarm: (at) => ctx.storage.setAlarm(at),
+      getAlarm: () => ctx.storage.getAlarm(),
       openFile: async (key) => {
         const object = await env.ANALYSIS_DETAIL.get(key);
         return object === null ? null : object.body;
@@ -63,8 +64,12 @@ export class CloudMigration extends DurableObject<CloudMigrationEnv> {
     return this.core.start(input);
   }
 
-  /** 進捗の読み取り(RPC。状態は変えない)。 */
-  getStatus(): MigrationStatus {
+  /**
+   * 進捗の読み取り(RPC)。状態は変えないが、取り込み中なのにアラームが無ければ張り直す(自己回復。Cloudflare のアラームの再試行の上限を超えて落ちたとき、
+   * 画面の更新やアップロードの受付で動き出す)。
+   */
+  async getStatus(): Promise<MigrationStatus> {
+    await this.core.ensureAlarm();
     return this.core.getStatus();
   }
 

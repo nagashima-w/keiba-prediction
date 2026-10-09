@@ -14,7 +14,8 @@ function horse(umaban: number, overrides: Partial<AnalysisHorseRecord> = {}): An
   return {
     umaban,
     prior: 0.1 * umaban,
-    adjustedProb: 0.1 * umaban,
+    // prior と値を分ける(adjusted_prob を prior から読む変異を、cloud 側の取り込みのテストが検出できるように。Issue #216)。
+    adjustedProb: 0.1 * umaban + 0.03,
     placeOddsMin: 1.5 + umaban,
     ev: 0.9 + umaban / 10,
     isPositive: umaban % 2 === 0,

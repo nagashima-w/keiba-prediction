@@ -42,6 +42,12 @@ describe("toAnalysisImport: 元の値を保つ", () => {
     expect(r.horses.map((h) => h.umaban)).toEqual([1, 2, 3]);
     expect(r.horses[0]).toMatchObject({ mark: "◎", reason: "内枠で先行できる\n二行目", highlights: ["近走好調"], concerns: ["斤量増", "間隔が短い"], contributions: { bias: [{ name: "枠", delta: -0.01 }] } });
     expect(r.horses[1]).toMatchObject({ mark: "△", reason: "", contributions: null });
+    // 3着内率: prior と AI 補正後(adjusted_prob)は別の列(検証画面のキャリブレーションに効く)。取り違えていない。
+    for (const [k, h] of line.horses.entries()) {
+      expect(r.horses[k]!.prior).toBe(h["prior"]);
+      expect(r.horses[k]!.adjustedProb).toBe(h["adjusted_prob"]);
+      expect(h["prior"]).not.toBe(h["adjusted_prob"]); // 前提: フィクスチャで値が分かれている(同値だと取り違えを検出できない)
+    }
     // 買い目
     expect(r.allocation!.bets).toEqual([
       { betType: "place", comboKey: "01", stake: 300, odds: 1.8, ev: 1.2 },

@@ -3,7 +3,7 @@ import { D1AnalysisStore } from "../src/analysis-repository";
 import { D1_FREE_DAILY_WRITE_ROWS, FREE_QUERIES_PER_INVOCATION, MigrationCore, MIGRATION_DAILY_ROW_LIMIT, parseLimitOverride, MIGRATION_MAX_ATTEMPTS, MIGRATION_TICK_QUERY_LIMIT, type MigrationCoreDeps, type MigrationStatus } from "../src/migration-core";
 import { R2_FENCE_LIMITS } from "../src/r2-fence";
 import { D1ResultStore } from "../src/result-repository";
-import { GOLDEN_TEXT, gz, streamOf } from "./migration-fixture";
+import { GOLDEN_ANALYSES, GOLDEN_TEXT, gz, streamOf } from "./migration-fixture";
 import { openLocalBindings, spyBucket, spyDb, type LocalBindings } from "./local-bindings";
 
 /**
@@ -68,6 +68,7 @@ function harness(h: HarnessOptions = {}): Harness {
       setAlarm: (at) => {
         alarm.at = at;
       },
+      getAlarm: async () => alarm.at,
       openFile: async (key) => {
         opens.n += 1;
         const bytes = files.get(key);
@@ -239,6 +240,28 @@ describe("冪等性", () => {
     expect(status.conflictSamples[0]).toContain("2");
     expect(await count("analyses")).toBe(5); // 既存の1件 + 取り込んだ4件
     expect((await local.db.prepare("SELECT race_id AS r FROM analyses WHERE exe_analysis_id = 2").first<{ r: string }>())!.r).toBe("OTHER-RACE");
+  });
+});
+
+describe("衝突の判定は race_id と analyzed_at の両方を見る", () => {
+  // 取り込み済みの exe の id 2(race 202603020211・2026-03-02T02:00:00.000Z)と、どちらか一方だけ違う行がある場合。
+  it.each([
+    ["race_id だけが違う(分析日時は同じ)", "OTHER-RACE", "2026-03-02T02:00:00.000Z"],
+    ["分析日時だけが違う(race_id は同じ)", "202603020211", "2025-01-01T00:00:00.000Z"],
+  ])("%s → 衝突として飛ばす", async (_name, raceId, analyzedAt) => {
+    await local.db.prepare("INSERT INTO analyses (race_id, analyzed_at, exe_analysis_id) VALUES (?, ?, 2)").bind(raceId, analyzedAt).run();
+    const h = harness();
+    await upload(h);
+    await h.run();
+    expect(h.core.getStatus().analyses).toMatchObject({ imported: 4, alreadyImported: 0, conflicts: 1 });
+  });
+
+  it("対照: race_id も分析日時も同じなら、取り込み済み(衝突ではない)", async () => {
+    await local.db.prepare("INSERT INTO analyses (race_id, analyzed_at, exe_analysis_id) VALUES ('202603020211', '2026-03-02T02:00:00.000Z', 2)").run();
+    const h = harness();
+    await upload(h);
+    await h.run();
+    expect(h.core.getStatus().analyses).toMatchObject({ imported: 4, alreadyImported: 1, conflicts: 0 });
   });
 });
 
@@ -464,22 +487,34 @@ describe("中断・失敗からの再開", () => {
   });
 });
 
-describe("中断(inflight)からの再開: 取り込み済みの分析の詳細(R2)を作り直す", () => {
-  it("D1 に入ったが R2 の詳細が無い分析(batch と put の間で止まった)は、中断のあとのアラームで詳細が作り直される。中断が無ければ(inflight でなければ)作り直さない", async () => {
+describe("詳細(R2)が未完了の分析の記憶: ジョブの状態遷移に依存せず、取り込み済みとして飛ばされても詳細を作り直す", () => {
+  /** 全分析の詳細(R2)が、D1 の detail_key の指すキーに実在する。 */
+  async function missingDetails(): Promise<string[]> {
+    const rows = (await local.db.prepare("SELECT id, detail_key AS k FROM analyses").all<{ id: number; k: string | null }>()).results;
+    const missing: string[] = [];
+    for (const r of rows) {
+      if (r.k === null || (await local.r2.get(r.k)) === null) missing.push(`analyses/${r.id}`);
+    }
+    return missing;
+  }
+
+  it("中断(D1 の batch のあと、R2 の put の前に止まった)の再現: 未完了の記憶(kv の pending)がある分析は、取り込み済みでも詳細が作り直される。記憶が無ければ触れない(対照)", async () => {
     const h = harness({ options: { tickQueryLimit: 14 } });
     await upload(h);
     await h.runUntil((s) => s.analyses.processed >= 1);
     const first = (await local.db.prepare("SELECT id, detail_key AS k FROM analyses ORDER BY id LIMIT 1").first<{ id: number; k: string }>())!;
     expect(await local.r2.get(first.k)).not.toBeNull();
-    // 中断を再現する: R2 の詳細を消し、位置を戻して(最初の分析の処理の途中で止まった状態)、inflight を立てる。
+    // 中断を再現する: R2 の詳細を消し、位置を戻して(最初の分析の処理の途中で止まった状態)、未完了の記憶を立てる。
     await local.r2.delete(first.k);
     const job = h.kv.get("job") as Record<string, unknown>;
-    h.kv.set("job", { ...job, offset: 0, analysesProcessed: 0, analysesImported: 0, analysesAlreadyImported: 0, inflight: true });
+    h.kv.set("job", { ...job, offset: 0, analysesProcessed: 0, analysesImported: 0, analysesAlreadyImported: 0 });
+    h.kv.set("pending", { [String(GOLDEN_ANALYSES[0]!.analysis["id"])]: 1 });
     await h.run();
     expect(h.core.getStatus().state).toBe("completed");
     expect(await local.r2.get(first.k)).not.toBeNull(); // 作り直された
     expect(await count("analyses")).toBe(5); // 重複しない
-    // 対照: inflight が立っていなければ、取り込み済みの分析の詳細には触れない(R2 の put を増やさない)。
+    expect(h.kv.get("pending")).toEqual({}); // 作り直したら、記憶から外れる
+    // 対照: 記憶が無ければ、取り込み済みの分析の詳細には触れない(R2 の put を増やさない)。
     await local.reset();
     const again = harness({ options: { tickQueryLimit: 14 } });
     await upload(again);
@@ -494,6 +529,119 @@ describe("中断(inflight)からの再開: 取り込み済みの分析の詳細(
     expect(second.puts()).toBe(0);
   });
 
+  it("正常に取り込めたあとは、未完了の記憶が空になる(分析ごとに、書く前に立て、put の成功で外す)", async () => {
+    const h = harness();
+    await upload(h);
+    await h.run();
+    expect(h.core.getStatus().state).toBe("completed");
+    expect(h.kv.get("pending")).toEqual({});
+    expect(await missingDetails()).toEqual([]);
+  });
+
+  it("S1: R2 の put が常に失敗 → 連続失敗で failed → R2 が直ってから再アップロードしても、詳細が欠けたままにならない", async () => {
+    const broken = harness({ bucketOptions: { failPut: () => true } });
+    await upload(broken);
+    await broken.run(80);
+    expect(broken.core.getStatus().state).toBe("failed");
+    expect(broken.core.getStatus().failure?.phase).toBe("import");
+    // 前提: D1 の行はできていて、詳細(R2)が欠けている(これを後で直せなければ、無音で欠ける)
+    expect(await count("analyses")).toBeGreaterThan(0);
+    expect((await missingDetails()).length).toBeGreaterThan(0);
+    // R2 が直った。再アップロード(README の案内どおり)。
+    const fixed = harness({ files: broken.files, kv: broken.kv, clock: broken.clock });
+    expect(await upload(fixed, GOLDEN_TEXT, "migration/retry.ndjson.gz")).toEqual({ accepted: true });
+    await fixed.run();
+    expect(fixed.core.getStatus().state).toBe("completed");
+    expect(await count("analyses")).toBe(5);
+    expect(await missingDetails()).toEqual([]);
+  });
+
+  it("S2: put が失敗したあとの再試行が日次予算に当たって waiting-budget になり、翌日に再開しても、詳細が欠けない", async () => {
+    const h = harness({ bucketOptions: { failPut: (n) => n <= 3 }, options: { dailyRowLimit: 10 } });
+    await upload(h);
+    const states = await h.run();
+    expect(states.some((s) => s.state === "waiting-budget")).toBe(true);
+    expect(states.some((s) => s.attempts > 0 && s.state === "importing")).toBe(true); // put の失敗が実際に起きた
+    expect(h.core.getStatus().state).toBe("completed");
+    expect(await count("analyses")).toBe(5);
+    expect(await missingDetails()).toEqual([]);
+  });
+
+  it("S3: put が失敗したあとの再試行が R2 の柵に当たって waiting-r2 になり、翌月に再開しても、詳細が欠けない", async () => {
+    const h = harness({ bucketOptions: { failPut: (n) => n <= 3 } });
+    await upload(h);
+    await h.runUntil((s) => s.attempts > 0); // 最初の分析の put が失敗した
+    expect(await count("analyses")).toBe(1);
+    expect((await missingDetails()).length).toBe(1);
+    await local.db.prepare("INSERT INTO r2_ops (ym, class_a, class_b) VALUES (202610, ?, 0) ON CONFLICT(ym) DO UPDATE SET class_a = excluded.class_a").bind(R2_FENCE_LIMITS.classA).run();
+    const states = await h.run();
+    expect(states.some((s) => s.state === "waiting-r2")).toBe(true);
+    expect(h.core.getStatus().state).toBe("completed");
+    expect(await count("analyses")).toBe(5);
+    expect(await missingDetails()).toEqual([]);
+  });
+});
+
+describe("アラームの自己回復: 取り込み中なのにアラームが無い(Cloudflare の再試行の上限を超えて落ちた)状態を、観測と受付で直す", () => {
+  it("検証中・取り込み中: アラームが無ければ、すぐのアラームを張り直す。アラームがあれば触らない", async () => {
+    for (const phase of ["verifying", "importing"] as const) {
+      const h = harness({ options: { tickQueryLimit: 14 } });
+      await upload(h);
+      if (phase === "importing") await h.runUntil((s) => s.state === "importing");
+      expect(h.core.getStatus().state).toBe(phase);
+      h.alarm.at = null; // hard crash で、アラームが失われた
+      await h.core.ensureAlarm();
+      expect(h.alarm.at, phase).not.toBeNull();
+      expect(h.alarm.at!).toBeLessThanOrEqual(h.clock.ms + 1);
+      // 対照: 既にあるアラームは上書きしない
+      h.alarm.at = h.clock.ms + 123_456;
+      await h.core.ensureAlarm();
+      expect(h.alarm.at).toBe(h.clock.ms + 123_456);
+    }
+  });
+
+  it("予算待ち・R2 待ち: アラームが無ければ、再開時刻(resumeAt)に張り直す", async () => {
+    const h = harness({ options: { dailyRowLimit: 40 } });
+    await upload(h);
+    const states = await h.runUntil((s) => s.state === "waiting-budget");
+    const resumeAt = Date.parse(states[states.length - 1]!.resumeAt!);
+    h.alarm.at = null;
+    await h.core.ensureAlarm();
+    expect(h.alarm.at).toBe(resumeAt);
+  });
+
+  it("完了・失敗・idle: アラームを張らない", async () => {
+    const idle = harness();
+    await idle.core.ensureAlarm();
+    expect(idle.alarm.at).toBeNull();
+    const done = harness();
+    await upload(done);
+    await done.run();
+    done.alarm.at = null;
+    await done.core.ensureAlarm();
+    expect(done.alarm.at).toBeNull();
+    const failed = harness();
+    await upload(failed, "壊れたファイル");
+    await failed.run();
+    expect(failed.core.getStatus().state).toBe("failed");
+    await failed.core.ensureAlarm();
+    expect(failed.alarm.at).toBeNull();
+  });
+
+  it("アップロードの受付(start)が busy で断るときも、アラームが無ければ張り直す(409 のまま回復手段が無い状態にしない)", async () => {
+    const h = harness({ options: { tickQueryLimit: 14 } });
+    await upload(h);
+    await h.runUntil((s) => s.state === "importing");
+    h.alarm.at = null;
+    expect(await h.core.start({ key: "migration/other.ndjson.gz", size: 1 })).toEqual({ accepted: false, reason: "busy" });
+    expect(h.alarm.at).not.toBeNull();
+    // 張り直したアラームで、取り込みは最後まで進む
+    await h.run();
+    expect(h.core.getStatus().state).toBe("completed");
+  });
+});
+
+describe("検証の実績", () => {
   it("検証の実績が status に出る(展開後のバイト数・行数・ミリ秒)", async () => {
     const h = harness();
     await upload(h);
