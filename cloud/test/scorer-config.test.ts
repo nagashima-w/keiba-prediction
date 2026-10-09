@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildScorerConfig, DEFAULT_APP_SETTINGS } from "../../packages/app/src/main/settings-store";
 import { DEFAULT_SCORER_CONFIG } from "../../packages/core/src/scorer/config";
 import { buildCloudScorerConfig } from "../src/scorer-config";
 import { DEFAULT_CLOUD_SETTINGS, SCORING_WEIGHT_FIELDS, type CloudSettings } from "../src/settings";
 
 /**
- * Issue #218: cloud の設定 → core の `ScorerConfig`。exe の `buildScorerConfig`(設定 → ScorerConfig のディープマージ)と同じ出力になる。
- * 重み13項目だけを上書きし、他の既定項目(prior・minSampleForBias・閾値など)は `DEFAULT_SCORER_CONFIG` のまま。
+ * Issue #218: cloud の設定 → core の `ScorerConfig`。重み13項目だけを上書きし、他の既定項目(prior・minSampleForBias・閾値など)は `DEFAULT_SCORER_CONFIG` のまま。
+ * **exe の `buildScorerConfig` との同値は、ここでは検査しない**: exe の設定ストアは core のバレル `@keiba/core` を import し、cloud だけを install する CI(workspace の外)では解決できない。
+ * 同値の検査はルートの `scripts/test/cloud-scorer-config.test.ts`(`cloud-settings-defaults.test.ts` と同じ置き場所)にある。
  */
 
 /** 13項目すべてを既定値とは別の値にした設定(取り違え・欠落を検出できる)。 */
@@ -56,18 +56,6 @@ describe("buildCloudScorerConfig", () => {
       const changed = [...Object.entries(bias).filter(([k, v]) => v !== (DEFAULT_SCORER_CONFIG.weights as unknown as Record<string, number>)[k]), ...Object.entries(base).filter(([k, v]) => v !== (DEFAULT_SCORER_CONFIG.baseScore.weights as unknown as Record<string, number>)[k])];
       expect(changed.map(([k]) => k), target.field).toEqual([target.exeKey]);
     }
-  });
-
-  it("exe の buildScorerConfig と同じ出力: 同じ重みの AppSettings を作って比べる(既定値・13項目すべてを変えた値の両方)", () => {
-    const exeOf = (s: CloudSettings) =>
-      buildScorerConfig({
-        ...DEFAULT_APP_SETTINGS,
-        biasWeights: Object.fromEntries(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "bias").map((f) => [f.exeKey, s[f.field]])) as unknown as typeof DEFAULT_APP_SETTINGS.biasWeights,
-        baseScoreWeights: Object.fromEntries(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "base").map((f) => [f.exeKey, s[f.field]])) as unknown as typeof DEFAULT_APP_SETTINGS.baseScoreWeights,
-      });
-    expect(buildCloudScorerConfig(DEFAULT_CLOUD_SETTINGS)).toEqual(exeOf(DEFAULT_CLOUD_SETTINGS));
-    expect(buildCloudScorerConfig(CHANGED)).toEqual(exeOf(CHANGED));
-    expect(buildCloudScorerConfig(CHANGED)).not.toEqual(buildCloudScorerConfig(DEFAULT_CLOUD_SETTINGS)); // 前提: 比較が自明に成り立たない
   });
 
   it("DEFAULT_SCORER_CONFIG を書き換えない(新しいオブジェクトを返す。重みのオブジェクトも共有しない)", () => {
