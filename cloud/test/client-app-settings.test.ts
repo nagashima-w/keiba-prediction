@@ -124,9 +124,9 @@ describe("設定画面を開く", () => {
     expect(h.calls).toEqual(["GET /api/settings"]);
   });
 
-  it("取得できたら、サーバの値で 14 個の入力欄を出す。source: default なら「まだ保存されていません」の注記", async () => {
+  it("取得できたら、サーバの値で 15 個の入力欄を出す。source: default なら「まだ保存されていません」の注記", async () => {
     const h = await started();
-    expect(findAll(h.tree(), (n) => n.attrs?.["data-field"] !== undefined).length).toBe(14);
+    expect(findAll(h.tree(), (n) => n.attrs?.["data-field"] !== undefined).length).toBe(15);
     expect(h.field("bankroll").attrs?.["value"]).toBe("500000");
     expect(h.field("includeComboOdds").attrs?.["checked"]).toBe(true);
     expect(h.field("preRaceOffsetMinutes").attrs?.["value"]).toBe("90");
@@ -239,13 +239,13 @@ describe("入力と描画(change は下書きを書くだけ)", () => {
     expect(h.field("bankroll").attrs?.["value"]).toBe("777000"); // 保存後の表示も、打った値(サーバが返した値)
   });
 
-  it("保存の押下: 検証 OK なら、全 14 項目(数値は数値型)を 1 回 POST する。保存中は強制の再描画で、入力欄・保存ボタンが disabled", async () => {
+  it("保存の押下: 検証 OK なら、全 15 項目(数値は数値型)を 1 回 POST する。保存中は強制の再描画で、入力欄・保存ボタンが disabled", async () => {
     const gate = deferred<Resp>();
     const h = await started({ postResponder: () => gate.promise });
     const before = h.renders.length;
     h.clickSave();
     expect(h.posts).toHaveLength(1);
-    expect(Object.keys(h.posts[0]!).length).toBe(14);
+    expect(Object.keys(h.posts[0]!).length).toBe(15);
     expect(h.posts[0]!["bankroll"]).toBe(500_000);
     expect(typeof h.posts[0]!["kellyFraction"]).toBe("number");
     expect(h.renders.length).toBe(before + 1);

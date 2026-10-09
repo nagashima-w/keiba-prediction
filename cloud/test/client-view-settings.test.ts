@@ -29,7 +29,7 @@ function mountAll(tree: VNode): void {
   mount(doc, { replaceChildren() {} }, tree);
 }
 
-const CUSTOM: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 500_000, perRaceCap: 50_000, includeComboOdds: true, includeTrioInAllocation: false, additionalInstruction: "1行目\n2行目", clipVariant: "wide15", preRaceOffsetMinutes: 90 };
+const CUSTOM: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 500_000, perRaceCap: 50_000, includeComboOdds: true, includeTrioInAllocation: false, additionalInstruction: "1行目\n2行目", clipVariant: "wide15", analysisModel: "haiku", preRaceOffsetMinutes: 90 };
 const input = (over: Partial<SettingsModelInput> = {}): SettingsModelInput => ({ load: { kind: "ready", source: "d1" }, draft: draftFromSettings(CUSTOM), errors: {}, save: { kind: "idle" }, ...over });
 const tree = (over: Partial<SettingsModelInput> = {}, actions: ViewActions = noopActions): VNode => renderScreen(buildSettingsModel(input(over)), actions);
 
@@ -41,9 +41,9 @@ describe("設定画面の VNode", () => {
     expect(() => mountAll(renderScreen(buildSettingsModel({ load: { kind: "loading" }, draft: null, errors: {}, save: { kind: "idle" } }), noopActions))).not.toThrow();
   });
 
-  it("入力欄は 14 個で、すべて data-field に項目名を持つ(FIELD_ORDER の順)", () => {
+  it("入力欄は 15 個で、すべて data-field に項目名を持つ(FIELD_ORDER の順)", () => {
     const fields = inputs(tree());
-    expect(fields.length).toBe(14);
+    expect(fields.length).toBe(15);
     expect(fields.map((n) => n.attrs?.["data-field"])).toEqual([...FIELD_ORDER]);
   });
 
@@ -57,6 +57,10 @@ describe("設定画面の VNode", () => {
     const select = byField["clipVariant"]!;
     expect([select.tag, select.attrs?.["value"]]).toEqual(["select", "wide15"]);
     expect((select.children ?? []).map((o) => (typeof o === "string" ? o : [o.tag, o.attrs?.["value"]]))).toEqual([["option", "default"], ["option", "wide15"]]);
+    // Issue #158: 分析モデルも select(value = 下書きの値、option は4つ)。クリップ幅の選択肢が混ざっていない
+    const model = byField["analysisModel"]!;
+    expect([model.tag, model.attrs?.["value"]]).toEqual(["select", "haiku"]);
+    expect((model.children ?? []).map((o) => (typeof o === "string" ? o : [o.tag, o.attrs?.["value"]]))).toEqual([["option", "auto"], ["option", "sonnet"], ["option", "opus"], ["option", "haiku"]]);
     const combo = byField["includeComboOdds"]!;
     expect([combo.tag, combo.attrs?.["type"], combo.attrs?.["checked"]]).toEqual(["input", "checkbox", true]);
     expect(byField["includeTrioInAllocation"]!.attrs?.["checked"]).toBeFalsy();

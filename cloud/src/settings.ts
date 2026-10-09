@@ -11,6 +11,10 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
  *  - 各券種の `include*InAllocation` は既定 ON。
  *  - `preRaceOffsetMinutes`(発走何分前に評価するか。Issue #189)は **cloud 専用の項目**(exe には無い)。既定 45 分は `pre-race-time.ts` の定数と同じ値(定義は1か所)。
  *    使うのは定時の自動実行(#166)で、それまでは値を保存しても何も起きない。
+ *  - `analysisModel`(LLM 分析のモデル。Issue #158)は **cloud 専用の項目**。保存するのは具体的なモデル ID でなく**系統**(`auto`・`sonnet`・`opus`・`haiku`)で、
+ *    分析のたびに Models API の一覧からその系統の最新を解決する(新しいモデルが出ても選び直しが要らない)。既定の `auto` は「アプリの推奨に任せる」で、今は最新の Sonnet
+ *    (`sonnet` と同じ挙動。#157 の自動選択と同じ)。選んだモデルが使えなければ、動作確認済みの固定モデルに切り替えて続ける(`llm-run.ts`・core の `model-selection.ts`)。
+ *    LLM を使うときだけ効く(API キーが未登録の間は効かない)。項目の無い旧い行・不正な値は `auto`(読む側は寛容)。
  * 値は `GET`/`POST /api/settings`(`handler.ts`)と設定画面(`#settings`)で編集する(`cloud_settings` 表。id = 1 の1行だけ)。直接 D1 に入れてもよい。
  *
  * **範囲の述語は項目ごとに1か所**(`CLOUD_SETTINGS_RULES`)。読む側(`coerceCloudSettings`)は `isReadable`、書く側(`validateCloudSettingsForSave`。`POST` が 400 にする基準)は `isWritable` を使う。
@@ -25,6 +29,17 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
 
 export type ClipVariantId = "default" | "wide15";
 
+/** 分析モデルの選択肢(画面の並び)。`auto` は既定(アプリの推奨に任せる。今は最新の Sonnet)。 */
+export const ANALYSIS_MODEL_IDS = ["auto", "sonnet", "opus", "haiku"] as const;
+export type AnalysisModelId = (typeof ANALYSIS_MODEL_IDS)[number];
+/** モデル一覧から最新を選ぶ系統(core の `ModelFamily` と同じ3つ。この純モジュールは core に依存しないので、同じ値を持つ。型の一致は `llm-run.ts` が確かめる)。 */
+export type AnalysisModelFamily = "sonnet" | "opus" | "haiku";
+
+/** 分析モデルの選択を、最新を選ぶ系統に直す(`auto` = 最新の Sonnet)。 */
+export function analysisModelFamily(id: AnalysisModelId): AnalysisModelFamily {
+  return id === "auto" ? "sonnet" : id;
+}
+
 export interface CloudSettings {
   /** EV の閾値(0 より大きい)。 */
   readonly evThreshold: number;
@@ -32,6 +47,8 @@ export interface CloudSettings {
   readonly additionalInstruction: string;
   /** クリップ幅の版(#179 の LLM で使う)。 */
   readonly clipVariant: ClipVariantId;
+  /** LLM 分析のモデル(系統。Issue #158。cloud 専用)。 */
+  readonly analysisModel: AnalysisModelId;
   /** 馬券用の総資金(円。整数 0〜1億)。0 は配分提案を出さない。 */
   readonly bankroll: number;
   /** 1レースの上限(円。整数 0〜1000万)。 */
@@ -54,6 +71,7 @@ export const DEFAULT_CLOUD_SETTINGS: CloudSettings = {
   evThreshold: 1.0,
   additionalInstruction: "",
   clipVariant: "default",
+  analysisModel: "auto",
   bankroll: 0,
   perRaceCap: 0,
   kellyFraction: 0.5,
@@ -113,6 +131,7 @@ const numberWhere =
 const isBoolean = (raw: unknown): raw is boolean => typeof raw === "boolean";
 const isString = (raw: unknown): raw is string => typeof raw === "string";
 const isClipVariant = (raw: unknown): raw is ClipVariantId => raw === "default" || raw === "wide15";
+const isAnalysisModel = (raw: unknown): raw is AnalysisModelId => typeof raw === "string" && (ANALYSIS_MODEL_IDS as readonly string[]).includes(raw);
 
 const D = DEFAULT_CLOUD_SETTINGS;
 
@@ -124,6 +143,7 @@ export const CLOUD_SETTINGS_RULES: { readonly [K in keyof CloudSettings]: FieldR
   evThreshold: rule(D.evThreshold, numberWhere((n) => n > 0)),
   additionalInstruction: rule(D.additionalInstruction, isString, (raw): raw is string => isString(raw) && raw.length <= ADDITIONAL_INSTRUCTION_MAX_LENGTH),
   clipVariant: rule(D.clipVariant, isClipVariant),
+  analysisModel: rule(D.analysisModel, isAnalysisModel),
   bankroll: rule(D.bankroll, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= BANKROLL_MAX)),
   perRaceCap: rule(D.perRaceCap, numberWhere((n) => Number.isInteger(n) && n >= 0 && n <= PER_RACE_CAP_MAX)),
   kellyFraction: rule(D.kellyFraction, numberWhere((n) => n >= 0 && n <= 1), numberWhere((n) => n >= KELLY_FRACTION_WRITE_MIN && n <= 1)),

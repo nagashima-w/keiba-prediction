@@ -25,6 +25,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  * Issue #194(#179-b。b1): 発走前の分析(`pre_race`)で LLM を使う。LLM の呼び出しは計算ステップの中(`analyze`)。ゲート・保存先・LLM(sender・モデル一覧)はすべて偽。
  * **実 API には出ない**(sender は偽の関数。SDK も呼ばない)。ストレージは `node:sqlite`。
  * AC: e1 成功 / e2 キー未登録 / e3 API エラー / e4 連続失敗 / e5 切り詰め・拒否・解析失敗・印の救済 / e6 clipVariant / e7 追加指示の切り詰め / e8 朝は LLM なし / e9 モデルの降格 /
+ *     e11 分析モデルの設定(Issue #158) /
  *     d4 回数 / d5 記録と再生 / c6 サブリクエスト / 秘密(エラーの本文はどこにも出ない)。
  */
 
@@ -564,6 +565,181 @@ describe("e9: モデルの自動選択と降格(HTTP 400/403/404 のときだけ
     await runPreRace(h);
     expect(llm.calls.map((c) => c.model)).toEqual([FIXED_MODEL]);
     expect(llm.listCalls).toBe(0);
+  });
+});
+
+/**
+ * e11(Issue #158): 設定画面で選んだ分析モデル(`analysisModel`)に従って、LLM のモデルを選ぶ。
+ * 保存するのは具体的な ID でなく系統(auto・sonnet・opus・haiku)で、分析のたびに Models API の一覧からその系統の最新を解決する。
+ * auto = 最新の Sonnet(今までと同じ)。選んだモデルが 400/403/404 で拒否されたら、固定モデル(Sonnet)に切り替えて続ける(止めない)。
+ * 実 API は使わない(sender・lister は偽)。**リクエストの形(max_tokens・effort・thinking)は系統によらず変えない**。
+ */
+describe("e11: 分析モデルの設定(auto・sonnet・opus・haiku)に従ってモデルを選ぶ", () => {
+  // 3 系統の最新(Opus・Haiku は Sonnet と別の ID)に、旧版・日付付きスナップショットを混ぜた一覧
+  const LIST: ModelInfoLite[] = [
+    { id: "claude-sonnet-5-5", created_at: "2026-01-01T00:00:00Z" },
+    { id: "claude-sonnet-4-6", created_at: "2025-09-01T00:00:00Z" },
+    { id: "claude-opus-5-5", created_at: "2026-02-01T00:00:00Z" },
+    { id: "claude-opus-4-1", created_at: "2025-08-05T00:00:00Z" },
+    { id: "claude-opus-4-1-20250805", created_at: "2025-08-05T00:00:00Z" },
+    { id: "claude-haiku-5-5", created_at: "2026-03-01T00:00:00Z" },
+    { id: "claude-haiku-4-5-20251001", created_at: "2025-10-01T00:00:00Z" },
+  ];
+  const withModel = (analysisModel: CloudSettings["analysisModel"]): CloudSettings => ({ ...ALL_ON, analysisModel });
+  const echo: Script = (_i, params) => ok(llmJson(0.99), { model: params.model });
+  const sentModels = (llm: FakeLlm): string[] => llm.calls.map((c) => c.model);
+
+  it.each([
+    ["auto", "claude-sonnet-5-5"],
+    ["sonnet", "claude-sonnet-5-5"],
+    ["opus", "claude-opus-5-5"],
+    ["haiku", "claude-haiku-5-5"],
+  ] as const)("%s を選ぶと、その系統の最新(%s)で送り、実際に応答したモデルが analyses.model に残る。理由は無し", async (id, expected) => {
+    const llm = fakeLlm(echo, LIST);
+    const h = harness(llm, withModel(id));
+    await runPreRace(h);
+    expect(sentModels(llm)).toEqual([expected]);
+    expect(h.sink.saved[0]!.model).toBe(expected);
+    expect(h.sink.extras[0]!.llmCalls![0]).toMatchObject({ ok: true, model: expected });
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: null });
+  });
+
+  it("後方互換: analysisModel が無い旧い設定(スナップショット)は auto = 最新の Sonnet で動く", async () => {
+    const llm = fakeLlm(echo, LIST);
+    const { analysisModel: _omit, ...old } = ALL_ON;
+    const h = harness(llm, old as CloudSettings);
+    expect("analysisModel" in h.settings).toBe(false); // 前提: 本当に項目が無い設定を渡している
+    await runPreRace(h);
+    expect(sentModels(llm)).toEqual(["claude-sonnet-5-5"]);
+    expect(h.sink.saved[0]!.model).toBe("claude-sonnet-5-5");
+  });
+
+  it("リクエストの形は系統によらず同じ(max_tokens 16000・effort low・user 1メッセージ。temperature・thinking は送らない)", async () => {
+    const shapes: unknown[] = [];
+    for (const id of ["auto", "opus", "haiku"] as const) {
+      const llm = fakeLlm(echo, LIST);
+      const h = harness(llm, withModel(id));
+      await runPreRace(h);
+      expect(llm.calls).toHaveLength(1);
+      const { model: _model, messages, ...rest } = llm.calls[0]!;
+      expect(messages).toHaveLength(1);
+      expect(Object.keys(llm.calls[0]!).sort()).toEqual(["max_tokens", "messages", "model", "output_config"]);
+      shapes.push(rest);
+    }
+    expect(shapes[0]).toEqual({ max_tokens: 16000, output_config: { effort: "low" } });
+    expect(shapes[1]).toEqual(shapes[0]);
+    expect(shapes[2]).toEqual(shapes[0]);
+  });
+
+  it("設定を変えると、次の分析から別の系統になる(同じ DO)。モデル一覧の取得は系統をまたいで1回だけ", async () => {
+    const llm = fakeLlm(echo, LIST);
+    const h = harness(llm, withModel("opus"));
+    await runPreRace(h);
+    for (const id of ["haiku", "sonnet", "opus"] as const) {
+      h.settings = withModel(id);
+      h.clock.now += 5 * 60_000;
+      await runPreRace(h);
+    }
+    expect(sentModels(llm)).toEqual(["claude-opus-5-5", "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]);
+    expect(llm.listCalls).toBe(1);
+    expect(h.sink.saved.map((r) => r.model)).toEqual(sentModels(llm));
+  });
+
+  it.each([400, 403, 404])("選んだ Opus が HTTP %i で拒否されたら、固定モデル(Sonnet)でやり直して分析を続ける。analyses.model には実際のモデルが残り、止まらない", async (status) => {
+    const llm = fakeLlm((_i, params) => {
+      if (params.model === "claude-opus-5-5") throw apiError(status);
+      return ok(llmJson(0.99), { model: params.model });
+    }, LIST);
+    const h = harness(llm, withModel("opus"));
+    await runPreRace(h);
+    expect(sentModels(llm)).toEqual(["claude-opus-5-5", FIXED_MODEL]);
+    expect(h.sink.saved).toHaveLength(1);
+    expect(h.sink.saved[0]!.model).toBe(FIXED_MODEL); // Opus ではなく、実際に応答した固定モデル
+    expect(h.sink.saved[0]!.horses.some((x) => x.adjustedProb !== x.prior)).toBe(true); // LLM が効いている(prior のままではない)
+    expect(h.sink.extras[0]!.llmCalls!.map((c) => [c.ok, c.model])).toEqual([[false, null], [true, FIXED_MODEL]]);
+    expect(h.warnings.some((w) => w.includes("claude-opus-5-5") && w.includes(String(status)) && w.includes("固定モデル"))).toBe(true);
+  });
+
+  it("降格は系統単位: Opus が拒否されたあと、Opus を選んだ分析は最初から固定モデル。Haiku を選べば Haiku は使える(Opus の降格が Haiku・Sonnet を巻き込まない)", async () => {
+    const llm = fakeLlm((_i, params) => {
+      if (params.model === "claude-opus-5-5") throw apiError(404);
+      return ok(llmJson(0.99), { model: params.model });
+    }, LIST);
+    const h = harness(llm, withModel("opus"));
+    await runPreRace(h); // opus 404 → 固定
+    h.clock.now += 5 * 60_000;
+    await runPreRace(h); // opus は降格済み → 最初から固定
+    h.settings = withModel("haiku");
+    h.clock.now += 5 * 60_000;
+    await runPreRace(h);
+    h.settings = withModel("auto");
+    h.clock.now += 5 * 60_000;
+    await runPreRace(h);
+    expect(sentModels(llm)).toEqual(["claude-opus-5-5", FIXED_MODEL, FIXED_MODEL, "claude-haiku-5-5", "claude-sonnet-5-5"]);
+    expect(h.sink.saved.map((r) => r.model)).toEqual([FIXED_MODEL, FIXED_MODEL, FIXED_MODEL, "claude-haiku-5-5", "claude-sonnet-5-5"]);
+    expect(llm.listCalls).toBe(1);
+  });
+
+  it("401・429・500 はモデルのせいではないので降格しない(Opus のまま。解析の再送を含めて Opus で送り、prior で保存する)", async () => {
+    for (const status of [401, 429, 500]) {
+      const llm = fakeLlm(() => {
+        throw apiError(status);
+      }, LIST);
+      const h = harness(llm, withModel("opus"));
+      await runPreRace(h);
+      expect(new Set(sentModels(llm)), String(status)).toEqual(new Set(["claude-opus-5-5"]));
+      expect(llm.calls.length, String(status)).toBeGreaterThanOrEqual(1);
+      expect(h.sink.saved[0]!.model, String(status)).toBeNull(); // LLM が効かなかった(モデルは残さない)
+      expect(noteOnly(h.sink.extras[0]), String(status)).toEqual({ llmNote: FALLBACK_REASON_INVOCATION_ERROR });
+    }
+  });
+
+  it("一覧にその系統が無い(Opus が無い)なら、固定モデルで送って続ける。警告に Opus の名前が出る", async () => {
+    const llm = fakeLlm(echo, [{ id: "claude-sonnet-5-5", created_at: "2026-01-01T00:00:00Z" }]);
+    const h = harness(llm, withModel("opus"));
+    await runPreRace(h);
+    expect(sentModels(llm)).toEqual([FIXED_MODEL]);
+    expect(h.sink.saved[0]!.model).toBe(FIXED_MODEL);
+    expect(h.warnings.some((w) => w.includes("Opus") && w.includes("固定モデル"))).toBe(true);
+  });
+
+  it("モデル一覧の取得が失敗しても、Opus を選んだ分析は固定モデルで続ける(止めない)。一覧の取得は系統をまたいで1回、本文・鍵はログに出ない", async () => {
+    const llm = fakeLlm(echo);
+    let listCalls = 0;
+    (llm as { lister: CloudLlm["lister"] }).lister = async () => {
+      listCalls += 1;
+      throw apiError(401);
+    };
+    const h = harness(llm, withModel("opus"));
+    await runPreRace(h);
+    h.settings = withModel("haiku");
+    h.clock.now += 5 * 60_000;
+    await runPreRace(h);
+    expect(sentModels(llm)).toEqual([FIXED_MODEL, FIXED_MODEL]);
+    expect(listCalls).toBe(1);
+    expect(h.sink.saved).toHaveLength(2);
+    expect(everythingVisible(h)).not.toContain("SECRET");
+  });
+
+  it("lister を持たない構成は、Opus を選んでいても一覧を取らず固定モデルで送る", async () => {
+    const llm = fakeLlm(echo, LIST);
+    const h = harness({ sender: llm.sender }, withModel("opus"));
+    await runPreRace(h);
+    expect(sentModels(llm)).toEqual([FIXED_MODEL]);
+    expect(llm.listCalls).toBe(0);
+  });
+
+  it("【記録の固定】Opus の応答が max_tokens で切れた場合は、Sonnet のときと同じく LLM が効かなかった扱い(モデルは残さず、理由は切り詰め)。呼び出しの記録には Opus と stop_reason が残る", async () => {
+    const llm = fakeLlm((_i, params) => ok("{", { stop_reason: "max_tokens", model: params.model }), LIST);
+    const h = harness(llm, withModel("opus"));
+    await runPreRace(h);
+    expect(new Set(sentModels(llm))).toEqual(new Set(["claude-opus-5-5"]));
+    expect(h.sink.saved[0]!.model).toBeNull();
+    expect(noteOnly(h.sink.extras[0])).toEqual({ llmNote: FALLBACK_REASON_TRUNCATED });
+    const calls = h.sink.extras[0]!.llmCalls!;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls.every((c) => c.stopReason === "max_tokens")).toBe(true);
+    expect(calls.every((c) => c.model === "claude-opus-5-5")).toBe(true);
   });
 });
 

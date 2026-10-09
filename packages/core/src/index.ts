@@ -464,7 +464,10 @@ export {
 export {
   createModelSelector,
   createSdkModelLister,
+  MODEL_FAMILIES,
+  pickLatestOfFamily,
   pickLatestSonnet,
+  type ModelFamily,
   type ModelInfoLite,
   type ModelLister,
   type ModelSelector,

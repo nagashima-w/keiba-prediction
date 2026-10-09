@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "../src/pre-race-time";
 import {
   ADDITIONAL_INSTRUCTION_MAX_LENGTH,
+  analysisModelFamily,
+  ANALYSIS_MODEL_IDS,
   CLOUD_SETTINGS_KEYS,
   CLOUD_SETTINGS_RULES,
   coerceCloudSettings,
@@ -24,6 +26,7 @@ describe("既定値", () => {
       evThreshold: 1.0,
       additionalInstruction: "",
       clipVariant: "default",
+      analysisModel: "auto",
       bankroll: 0,
       perRaceCap: 0,
       kellyFraction: 0.5,
@@ -41,6 +44,42 @@ describe("既定値", () => {
   it("Issue #189: 発走何分前の既定(preRaceOffsetMinutes)は 45 で、pre-race-time.ts の定数と同じ値(定義は1か所)", () => {
     expect(DEFAULT_PRE_RACE_OFFSET_MINUTES).toBe(45);
     expect(DEFAULT_CLOUD_SETTINGS.preRaceOffsetMinutes).toBe(DEFAULT_PRE_RACE_OFFSET_MINUTES);
+  });
+});
+
+describe("分析モデル(analysisModel。Issue #158)", () => {
+  it("既定は auto(自動 = 最新の Sonnet。今までと同じ挙動)。選べる値は auto・sonnet・opus・haiku の4つ", () => {
+    expect(DEFAULT_CLOUD_SETTINGS.analysisModel).toBe("auto");
+    expect([...ANALYSIS_MODEL_IDS]).toEqual(["auto", "sonnet", "opus", "haiku"]);
+  });
+
+  it("後方互換: 項目が無い旧い行(#158 より前に保存した設定・計画のスナップショット)は auto で読め、他の項目は壊れない", () => {
+    const old = coerceCloudSettings({ bankroll: 1_000_000, clipVariant: "wide15" });
+    expect(old.analysisModel).toBe("auto");
+    expect(old.bankroll).toBe(1_000_000);
+    expect(old.clipVariant).toBe("wide15");
+  });
+
+  it.each([["不正な文字列", "gpt"], ["具体的なモデル ID", "claude-opus-5-5"], ["大文字", "Opus"], ["数値", 1], ["null", null]])("読む側: %s は、その項目だけ auto に戻す(行が壊れていても分析を止めない)", (_n, raw) => {
+    const s = coerceCloudSettings({ analysisModel: raw, bankroll: 123 });
+    expect(s.analysisModel).toBe("auto");
+    expect(s.bankroll).toBe(123);
+  });
+
+  it.each(["sonnet", "opus", "haiku"] as const)("読む側: %s はそのまま採用する(前提: 既定の auto とは別の値)", (id) => {
+    expect(id).not.toBe(DEFAULT_CLOUD_SETTINGS.analysisModel);
+    expect(coerceCloudSettings({ analysisModel: id }).analysisModel).toBe(id);
+  });
+
+  it("書く側: 項目が欠けた保存は 400 相当(ok: false で fields に analysisModel)。範囲外も同じ。黙って auto に戻さない", () => {
+    const { analysisModel: _omit, ...withoutModel } = FULL;
+    expect(validateCloudSettingsForSave(withoutModel)).toEqual({ ok: false, fields: ["analysisModel"] });
+    expect(validateCloudSettingsForSave({ ...FULL, analysisModel: "gpt" })).toEqual({ ok: false, fields: ["analysisModel"] });
+    expect(validateCloudSettingsForSave({ ...FULL, analysisModel: "haiku" })).toMatchObject({ ok: true });
+  });
+
+  it("系統への対応: auto は sonnet(自動 = 最新の Sonnet)、sonnet・opus・haiku はそのまま", () => {
+    expect(ANALYSIS_MODEL_IDS.map((id) => [id, analysisModelFamily(id)])).toEqual([["auto", "sonnet"], ["sonnet", "sonnet"], ["opus", "opus"], ["haiku", "haiku"]]);
   });
 });
 
@@ -156,6 +195,7 @@ const FULL: CloudSettings = {
   evThreshold: 1.2,
   additionalInstruction: "人気薄は慎重に",
   clipVariant: "wide15",
+  analysisModel: "opus",
   bankroll: 500_000,
   perRaceCap: 50_000,
   kellyFraction: 0.25,
@@ -187,6 +227,9 @@ const BOUNDARIES: ReadonlyArray<{ key: keyof CloudSettings; raw: unknown; read: 
   ...[0, 9, 181, 10.5, "45", Number.NaN].map((raw) => ({ key: "preRaceOffsetMinutes" as const, raw, read: false, write: false })),
   ...["default", "wide15"].map((raw) => ({ key: "clipVariant" as const, raw, read: true, write: true })),
   ...["wide99", "", 1, null].map((raw) => ({ key: "clipVariant" as const, raw, read: false, write: false })),
+  // Issue #158: 分析モデルは4値の列挙。読む側も書く側も同じ(部分集合が真部分集合でない)
+  ...["auto", "sonnet", "opus", "haiku"].map((raw) => ({ key: "analysisModel" as const, raw, read: true, write: true })),
+  ...["", "Opus", "OPUS", "gpt", "claude-opus-5-5", "fable", 1, null, true].map((raw) => ({ key: "analysisModel" as const, raw, read: false, write: false })),
   ...["", "x", "あ".repeat(ADDITIONAL_INSTRUCTION_MAX_LENGTH)].map((raw) => ({ key: "additionalInstruction" as const, raw, read: true, write: true })),
   ...["あ".repeat(ADDITIONAL_INSTRUCTION_MAX_LENGTH + 1)].map((raw) => ({ key: "additionalInstruction" as const, raw, read: true, write: false })),
   ...[1, null].map((raw) => ({ key: "additionalInstruction" as const, raw, read: false, write: false })),

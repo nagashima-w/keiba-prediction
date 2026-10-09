@@ -11,7 +11,7 @@ import { CLOUD_SETTINGS_KEYS, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from 
 
 type Resp = { status: number; json: () => Promise<unknown> };
 const resp = (status: number, body: unknown): Resp => ({ status, json: async () => body });
-const SAVED: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 500_000, perRaceCap: 50_000, kellyFraction: 0.25, includeComboOdds: true, additionalInstruction: "慎重に", clipVariant: "wide15", preRaceOffsetMinutes: 60 };
+const SAVED: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, bankroll: 500_000, perRaceCap: 50_000, kellyFraction: 0.25, includeComboOdds: true, additionalInstruction: "慎重に", clipVariant: "wide15", analysisModel: "opus", preRaceOffsetMinutes: 60 };
 
 function fake(respond: () => Promise<Resp>): { fetch: FetchLike; calls: { url: string; init: Parameters<FetchLike>[1] }[] } {
   const calls: { url: string; init: Parameters<FetchLike>[1] }[] = [];
@@ -35,12 +35,12 @@ describe("fetchSettings(GET /api/settings)", () => {
     expect(f.calls[0]!.init.body).toBeUndefined();
   });
 
-  it("成功: 全 14 項目と source を、そのまま返す", async () => {
+  it("成功: 全 15 項目と source を、そのまま返す", async () => {
     for (const source of ["default", "d1", "invalid"] as const) {
       const f = fake(async () => resp(200, { ok: true, settings: SAVED, source }));
       expect(await fetchSettings(f.fetch)).toEqual({ ok: true, settings: SAVED, source });
     }
-    expect(CLOUD_SETTINGS_KEYS.length).toBe(14);
+    expect(CLOUD_SETTINGS_KEYS.length).toBe(15);
   });
 
   it.each([
@@ -85,7 +85,7 @@ describe("fetchSettings(GET /api/settings)", () => {
 });
 
 describe("postSettings(POST /api/settings)", () => {
-  it("リクエスト: POST /api/settings に、14 項目すべての JSON を送る(content-type: application/json・同じオリジンの資格情報・referrerPolicy: same-origin。mode は指定しない)", async () => {
+  it("リクエスト: POST /api/settings に、15 項目すべての JSON を送る(content-type: application/json・同じオリジンの資格情報・referrerPolicy: same-origin。mode は指定しない)", async () => {
     const f = fake(async () => resp(200, { ok: true, settings: SAVED }));
     await postSettings(f.fetch, SAVED);
     expect(f.calls).toHaveLength(1);

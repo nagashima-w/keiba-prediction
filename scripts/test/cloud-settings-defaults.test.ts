@@ -11,7 +11,7 @@ import { DEFAULT_APP_SETTINGS } from "../../packages/app/src/main/settings-store
  * exe に無い、cloud 専用の項目(Issue #189)。exe の設定は PC 上で手動の分析を行うので、「発走何分前に自動評価するか」を持たない。
  * 新しい cloud 専用の項目を足すときは、ここに明示する(足し忘れると、下の「項目集合」の検査が落ちる)。
  */
-const CLOUD_ONLY_KEYS = ["preRaceOffsetMinutes"] as const;
+const CLOUD_ONLY_KEYS = ["analysisModel", "preRaceOffsetMinutes"] as const;
 
 describe("クラウド版の設定の既定値が exe の既定値と一致する", () => {
   it("cloud の項目 = exe と共有する13項目 + cloud 専用の項目(CLOUD_ONLY_KEYS)。共有の13項目は、exe に同名の項目があり、既定値が同じ(項目の取りこぼし・意図しない追加もない)", () => {

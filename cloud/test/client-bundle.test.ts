@@ -414,12 +414,12 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
   });
 
-  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、14 個の入力欄(textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 14 項目の POST になる(一覧・板は取らない)", async () => {
+  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、15 個の入力欄(textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 15 項目の POST になる(一覧・板は取らない)", async () => {
     const { root, calls } = run("#settings");
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
     const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
-    expect(fields.length).toBe(14);
+    expect(fields.length).toBe(15);
     expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "select", "textarea"].sort());
     const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
     expect(field("bankroll").value).toBe("500000");

@@ -22,12 +22,15 @@ import {
   type AnalyzeRaceResult,
   type AnthropicMessageResponse,
   type MessageSender,
+  type ModelFamily,
+  type ModelInfoLite,
   type ModelLister,
   type ModelSelector,
 } from "@keiba/core/llm";
 import type { BuildPromptInput } from "@keiba/core/pipeline";
 import type { LlmCallRecord } from "./llm-calls";
 import type { CloudLlm } from "./llm-sender";
+import { analysisModelFamily, type AnalysisModelFamily, type AnalysisModelId } from "./settings";
 
 // ---- 追加指示の切り詰め ----
 
@@ -244,11 +247,40 @@ export function outcomeOf(result: AnalyzeRaceResult | null): LlmOutcome {
 
 // ---- 組み立て ----
 
-/** モデルの自動選択(最新の Sonnet。取得に失敗すれば固定モデル)を作る。`lister` が無ければ undefined(固定モデルで送る)。一覧の失敗のメッセージは、本文を含めない。 */
-export function createCloudModelSelector(llm: CloudLlm, warn: (message: string) => void): ModelSelector | undefined {
-  return llm.lister === undefined
-    ? undefined
-    : createModelSelector({ lister: sanitizeLister(llm.lister), fixedModel: DEFAULT_ANALYZER_CONFIG.model, onWarn: warn });
+// 設定の系統(`settings.ts`。依存を持たない純モジュール)と core の `ModelFamily` が同じ3つであることを、型で固定する(片方に系統を足すと、ここが型エラーになる)。
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+const FAMILIES_MATCH: Same<AnalysisModelFamily, ModelFamily> = true;
+void FAMILIES_MATCH;
+
+/** モデル一覧の取得を、最初の1回の結果(失敗も)で使い回す関数にする。系統ごとの selector が、同じ一覧を共有する(系統を切り替えるたびに Models API を叩かない)。 */
+export function memoizeLister(inner: ModelLister): ModelLister {
+  let memo: Promise<ReadonlyArray<ModelInfoLite>> | null = null;
+  return () => (memo ??= inner());
+}
+
+/** 分析モデルの選択(`analysisModel`)から、その分析で使うモデルの selector を返す関数。`lister` が無ければ undefined(= selector を作れない。固定モデルで送る)。 */
+export type ModelSelectorFor = (choice: AnalysisModelId) => ModelSelector;
+
+/**
+ * 系統ごとのモデルの自動選択(Issue #158。`auto` = 最新の Sonnet。取得に失敗すれば固定モデル)を作る。`lister` が無ければ undefined(固定モデルで送る)。
+ * 一覧の失敗のメッセージは、本文を含めない。selector は系統ごとに1つ(遅延生成)で、降格はその系統だけが覚える
+ * (Opus が拒否されても Sonnet・Haiku は影響を受けない)。一覧の取得は系統をまたいで1回(DO の寿命の間)。固定モデル(切り替え先)は系統によらず同じ。
+ */
+export function createCloudModelSelectors(llm: CloudLlm, warn: (message: string) => void): ModelSelectorFor | undefined {
+  if (llm.lister === undefined) {
+    return undefined;
+  }
+  const lister = memoizeLister(sanitizeLister(llm.lister));
+  const selectors = new Map<ModelFamily, ModelSelector>();
+  return (choice) => {
+    const family: ModelFamily = analysisModelFamily(choice);
+    let selector = selectors.get(family);
+    if (selector === undefined) {
+      selector = createModelSelector({ lister, fixedModel: DEFAULT_ANALYZER_CONFIG.model, family, onWarn: warn });
+      selectors.set(family, selector);
+    }
+    return selector;
+  };
 }
 
 export interface CloudAnalyzeInput {

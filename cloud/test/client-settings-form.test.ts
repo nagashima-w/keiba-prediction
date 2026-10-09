@@ -13,7 +13,7 @@ import {
   type SettingsModelInput,
 } from "../client/settings-form";
 import { buildPreviewText } from "../client/prompt-preview";
-import { CLOUD_SETTINGS_KEYS, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
+import { ANALYSIS_MODEL_IDS, CLOUD_SETTINGS_KEYS, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
 
 /**
  * Issue #189(段階2): 設定画面の下書き(文字列)・検証(書く側の述語 `isWritable` を使う)・表示用データ。純関数。
@@ -24,6 +24,7 @@ const FULL: CloudSettings = {
   evThreshold: 1.2,
   additionalInstruction: "人気薄は慎重に",
   clipVariant: "wide15",
+  analysisModel: "opus",
   bankroll: 500_000,
   perRaceCap: 50_000,
   kellyFraction: 0.25,
@@ -37,8 +38,8 @@ const FULL: CloudSettings = {
   preRaceOffsetMinutes: 60,
 };
 
-describe("FIELD_ORDER(exe の設定画面の並び。発走何分前は末尾)", () => {
-  it("EV閾値 → 組合せオッズ → 各券種(ワイド・馬連・枠連・馬単・三連複・三連単)→ 資金・上限・ケリー → 追加指示 → クリップ幅 → 発走何分前", () => {
+describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何分前は cloud 専用で後ろ)", () => {
+  it("EV閾値 → 組合せオッズ → 各券種(ワイド・馬連・枠連・馬単・三連複・三連単)→ 資金・上限・ケリー → 追加指示 → クリップ幅 → 分析モデル → 発走何分前", () => {
     expect(FIELD_ORDER).toEqual([
       "evThreshold",
       "includeComboOdds",
@@ -53,13 +54,14 @@ describe("FIELD_ORDER(exe の設定画面の並び。発走何分前は末尾)",
       "kellyFraction",
       "additionalInstruction",
       "clipVariant",
+      "analysisModel",
       "preRaceOffsetMinutes",
     ]);
   });
 
-  it("設定の全 14 項目を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
-    expect(FIELD_ORDER.length).toBe(14);
-    expect(new Set(FIELD_ORDER).size).toBe(14);
+  it("設定の全 15 項目を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
+    expect(FIELD_ORDER.length).toBe(15);
+    expect(new Set(FIELD_ORDER).size).toBe(15);
     expect([...FIELD_ORDER].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
   });
 });
@@ -134,6 +136,10 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     ["clipVariant 未知", "clipVariant", "wide99", false],
     ["clipVariant 空", "clipVariant", "", false],
     ["clipVariant default", "clipVariant", "default", true],
+    ["analysisModel 未知", "analysisModel", "gpt", false],
+    ["analysisModel 空", "analysisModel", "", false],
+    ["analysisModel 大文字", "analysisModel", "Opus", false],
+    ...(["auto", "sonnet", "opus", "haiku"] as const).map((id) => [`analysisModel ${id}`, "analysisModel", id, true] as const),
     ["追加指示 2000 文字", "additionalInstruction", "あ".repeat(2000), true],
     ["追加指示 2001 文字", "additionalInstruction", "あ".repeat(2001), false],
     ["追加指示 空", "additionalInstruction", "", true],
@@ -205,18 +211,19 @@ describe("buildSettingsModel", () => {
     expect(m.sourceNote).toBeNull();
   });
 
-  it("取得済み: 14 項目を FIELD_ORDER の順に、下書きの値で出す", () => {
+  it("取得済み: 15 項目を FIELD_ORDER の順に、下書きの値で出す", () => {
     const m = buildSettingsModel(READY_INPUT());
     expect(m.fields.map((f) => f.key)).toEqual([...FIELD_ORDER]);
     const byKey = Object.fromEntries(m.fields.map((f) => [f.key, f]));
     expect(byKey["bankroll"]!.value).toBe("500000");
     expect(byKey["includeComboOdds"]!.value).toBe(true);
     expect(byKey["clipVariant"]!.value).toBe("wide15");
+    expect(byKey["analysisModel"]!.value).toBe("opus");
     expect(byKey["additionalInstruction"]!.value).toBe("人気薄は慎重に");
     expect(m.loading).toBe(false);
   });
 
-  it("入力の種類: 真偽は checkbox・追加指示は textarea・クリップ幅は select・数値は text(inputmode で数字のキーボード)", () => {
+  it("入力の種類: 真偽は checkbox・追加指示は textarea・クリップ幅・分析モデルは select・数値は text(inputmode で数字のキーボード)", () => {
     const m = buildSettingsModel(READY_INPUT());
     const kinds = Object.fromEntries(m.fields.map((f) => [f.key, f.kind])) as Record<string, FieldKind>;
     for (const key of ["includeComboOdds", "includeWideInAllocation", "includeQuinellaInAllocation", "includeBracketQuinellaInAllocation", "includeExactaInAllocation", "includeTrioInAllocation", "includeTrifectaInAllocation"]) {
@@ -224,6 +231,7 @@ describe("buildSettingsModel", () => {
     }
     expect(kinds["additionalInstruction"]).toBe("textarea");
     expect(kinds["clipVariant"]).toBe("select");
+    expect(kinds["analysisModel"]).toBe("select");
     for (const key of ["evThreshold", "bankroll", "perRaceCap", "kellyFraction", "preRaceOffsetMinutes"]) {
       expect(kinds[key], key).toBe("text");
     }
@@ -261,6 +269,33 @@ describe("buildSettingsModel", () => {
     expect(select.options!.find((o) => o.value === "default")!.label).toContain("既定");
   });
 
+  it("分析モデルの選択肢(Issue #158): 自動(最新の Sonnet)・Sonnet・Opus・Haiku の4つがこの順。日付付きスナップショット等の個別の ID は並べない。ラベルに系統名が入る", () => {
+    const select = buildSettingsModel(READY_INPUT()).fields.find((f) => f.key === "analysisModel")!;
+    expect(select.options!.map((o) => o.value)).toEqual(["auto", "sonnet", "opus", "haiku"]);
+    expect([...ANALYSIS_MODEL_IDS]).toEqual(["auto", "sonnet", "opus", "haiku"]);
+    const label = Object.fromEntries(select.options!.map((o) => [o.value, o.label]));
+    expect(label["auto"]).toContain("自動");
+    expect(label["auto"]).toContain("最新の Sonnet");
+    expect(label["sonnet"]).toContain("Sonnet");
+    expect(label["opus"]).toContain("Opus");
+    expect(label["haiku"]).toContain("Haiku");
+    for (const option of select.options!) {
+      expect(option.label, option.value).not.toMatch(/\d{8}|claude-/); // 日付付きの ID・具体的な ID を並べない
+    }
+  });
+
+  it("分析モデルの補助文(Issue #158): 「自動」はアプリの推奨に任せる(今は最新の Sonnet)・費用は相対表現(金額・倍率を書かない)・使えないときは固定モデルで続ける・API キー未登録の間は効かない・次に始まる発走前の分析から", () => {
+    const help = buildSettingsModel(READY_INPUT()).fields.find((f) => f.key === "analysisModel")!.help ?? "";
+    expect(help).toContain("アプリの推奨に任せ");
+    expect(help).toContain("今は最新の Sonnet");
+    expect(help).toContain("Opus は Sonnet より費用が高く");
+    expect(help).toContain("Haiku は安く");
+    expect(help).not.toMatch(/[0-9]+\s*(円|ドル|倍)|\$|¥/); // 価格改定で嘘にならないよう、金額・倍率を書かない
+    expect(help).toContain("固定モデル");
+    expect(help).toContain("API キーが未登録の間は LLM を使わない");
+    expect(help).toContain("次に始まる発走前の分析から");
+  });
+
   it("補助文: 追加指示・クリップ幅は、LLM を使うときに効き、API キーが未登録の間は変更しても結果が変わらないことを書く(キーの有無のどちらでも嘘にならない)。発走何分前は「次の朝 9:00(日本時間)の計画から反映される。すでに計画した日の分は変わらない」(Issue #206。旧: 定時の自動実行を入れるまで効きません)", () => {
     const byKey = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.help ?? ""]));
     expect(byKey["preRaceOffsetMinutes"]).toContain("変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。");
@@ -277,7 +312,7 @@ describe("buildSettingsModel", () => {
       expect(byKey[key], key).not.toContain("LLM を使わない");
     }
     // Issue #206(AC-E3): 定時の自動実行が始まったので、**どの項目の補助文にも**「効きません」が残っていない(発走何分前を含む全項目)
-    expect(Object.keys(byKey).length).toBeGreaterThanOrEqual(14); // 前提: 全項目を走査している(空振りでない)
+    expect(Object.keys(byKey).length).toBeGreaterThanOrEqual(15); // 前提: 全項目を走査している(空振りでない)
     expect(Object.keys(byKey)).toContain("preRaceOffsetMinutes");
     for (const [key, help] of Object.entries(byKey)) {
       expect(help, key).not.toContain("効きません");
@@ -334,7 +369,7 @@ describe("buildSettingsModel", () => {
     expect(idle.fields.every((f) => !f.disabled)).toBe(true);
     const saving = buildSettingsModel(READY_INPUT({ save: { kind: "saving" } }));
     expect(saving.saving).toBe(true);
-    expect(saving.fields.length).toBe(14);
+    expect(saving.fields.length).toBe(15);
     expect(saving.fields.every((f) => f.disabled)).toBe(true);
     const saved = buildSettingsModel(READY_INPUT({ save: { kind: "saved" } }));
     expect(saved.saveNotice).toEqual({ tone: "ok", text: "保存しました。次に実行する発走前の分析から使われます。" });

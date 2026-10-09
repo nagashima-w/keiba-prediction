@@ -47,9 +47,11 @@ export type {
 export {
   createModelSelector,
   createSdkModelLister,
+  MODEL_FAMILIES,
 } from "./analyzer/model-selection.js";
 
 export type {
+  ModelFamily,
   ModelInfoLite,
   ModelLister,
   ModelSelector,
