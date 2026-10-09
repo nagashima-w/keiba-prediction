@@ -103,8 +103,7 @@ import { createGateHttpClient, GateRefusedError, type GateLike } from "./gate-fe
 import { resolveClipVariant } from "@keiba/core/pipeline";
 import type { AnalysisSaveExtra, RecentAnalysis } from "./analysis-save-extra";
 export type { AnalysisSaveExtra, RecentAnalysis };
-import type { ModelSelector } from "@keiba/core/llm";
-import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelector, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets, type LlmOutcome } from "./llm-run";
+import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelectors, LLM_NOTE_NO_KEY, outcomeOf, redactSecrets, type LlmOutcome, type ModelSelectorFor } from "./llm-run";
 import { SqlLlmResponseStore } from "./llm-response-store";
 import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
@@ -557,8 +556,8 @@ export class RaceDayCore {
   private readonly sink: AnalysisSink | undefined;
   private readonly loadSettings: (() => Promise<CloudSettings>) | undefined;
   private readonly llm: CloudLlm | undefined;
-  /** モデルの自動選択(取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined)。 */
-  private readonly modelSelector: ModelSelector | undefined;
+  /** 分析モデルの選択(`analysisModel`)に応じたモデルの自動選択(系統ごとの取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined。Issue #158)。 */
+  private readonly modelSelectorFor: ModelSelectorFor | undefined;
   private readonly plan: PlanStore;
   /** 通知の表(Issue #205。新しい表だけ)。 */
   private readonly notifyStore: NotifyStore;
@@ -584,7 +583,7 @@ export class RaceDayCore {
     this.sink = deps.sink;
     this.loadSettings = deps.loadSettings;
     this.llm = deps.llm;
-    this.modelSelector = deps.llm === undefined ? undefined : createCloudModelSelector(deps.llm, deps.onWarn);
+    this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, deps.onWarn);
     // ⚠️ スキーマ変更の仕組みは無い: DO の SQLite の表は `CREATE TABLE IF NOT EXISTS` だけで作る(既存の表に列を足す処理は無い)。
     // 本番の RaceDay は未デプロイなので、今は列を足してよい。**最初の本番デプロイのあとに列を足すときは、`ALTER TABLE ... ADD COLUMN` を
     // ここに足すこと**(足さないと、既に作られた表に列が無いまま INSERT/SELECT が落ちる)。
@@ -1954,7 +1953,7 @@ export class RaceDayCore {
             ? null
             : createCloudAnalyze({
                 llm: this.llm,
-                selector: this.modelSelector,
+                selector: this.modelSelectorFor?.(settings.analysisModel),
                 store: new SqlLlmResponseStore(this.sql, task.race_id, task.mode),
                 maxAdjust: clipVariant.maxAdjust,
                 warn: this.onWarn,

@@ -6,11 +6,13 @@
  * 並びとラベルは exe の設定画面(`packages/app/src/renderer/SettingsView.tsx`)に合わせる(ラベルは exe の共有定数を流用)。**補助文は cloud の実際の挙動に合わせて書き直した**:
  *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
  *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
+ *  - LLM を使うときだけ効く(分析モデル。Issue #158): 選んだ系統の最新のモデルで、保存後に次に始まる発走前の分析から使う
  *  - 次の朝から効く: 発走何分前(定時の自動実行〈Issue #166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
  */
 import { ALLOCATION_BET_TYPE_LABELS, BET_ALLOCATION_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
 import {
   ADDITIONAL_INSTRUCTION_MAX_LENGTH,
+  ANALYSIS_MODEL_IDS,
   CLOUD_SETTINGS_KEYS,
   CLOUD_SETTINGS_RULES,
   KELLY_FRACTION_WRITE_MIN,
@@ -43,6 +45,7 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "kellyFraction",
   "additionalInstruction",
   "clipVariant",
+  "analysisModel",
   "preRaceOffsetMinutes",
 ];
 
@@ -80,6 +83,7 @@ const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>>
   evThreshold: () => "0より大きい数値を入力してください(半角)。",
   additionalInstruction: (v) => `${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)}文字以内で入力してください(現在 ${typeof v === "string" ? v.length : 0} 文字)。`,
   clipVariant: () => "選択肢から選んでください。",
+  analysisModel: () => "選択肢から選んでください。",
   bankroll: () => "0以上100,000,000以下の整数を入力してください(半角。0は未設定を表し、配分提案を出しません)。",
   perRaceCap: () => "0以上10,000,000以下の整数を入力してください(半角。0は未設定を表し、配分提案を出しません)。",
   kellyFraction: () => `${KELLY_FRACTION_WRITE_MIN}以上1以下の数値を入力してください(半角)。`,
@@ -185,10 +189,31 @@ const CLIP_LABELS: Readonly<Record<(typeof CLIP_VARIANT_IDS)[number], string>> =
   wide15: "新版(±15%)",
 };
 
+/**
+ * 分析モデルの選択肢のラベル(Issue #158)。個別のモデル ID や日付付きの版は並べない(系統の最新を、分析のたびに解決する)。
+ * 「自動」は既定で、アプリの推奨に任せる設定(今は最新の Sonnet。Sonnet を選んだときと同じ)。
+ */
+const ANALYSIS_MODEL_LABELS: Readonly<Record<(typeof ANALYSIS_MODEL_IDS)[number], string>> = {
+  auto: "自動(最新の Sonnet、既定)",
+  sonnet: "Sonnet(最新版)",
+  opus: "Opus(最新版)",
+  haiku: "Haiku(最新版)",
+};
+
+/**
+ * 分析モデルの補助文。費用は相対表現にとどめる(金額・倍率は価格改定で嘘になるので書かない)。画面に出す文なので、Issue 番号は書かない。
+ * 「次に始まる発走前の分析から」: 計画・取得が済んだ分析は、取得時点の設定(スナップショット)のまま進むため。
+ */
+const ANALYSIS_MODEL_HELP =
+  `${LLM_ONLY_HELP}「自動」はアプリの推奨に任せる設定で、今は最新の Sonnet を使います(Sonnet を選んだときと同じです)。Opus は Sonnet より費用が高く、Haiku は安くなります。` +
+  "選んだモデルが使えなかったときは、動作確認済みの固定モデルに切り替えて分析を続けます。保存後、次に始まる発走前の分析から使われます。";
+
 interface FieldSpec {
   readonly kind: FieldKind;
   readonly label: string;
   readonly help: string | null;
+  /** select の選択肢(`kind: "select"` のとき)。 */
+  readonly options?: readonly { readonly value: string; readonly label: string }[];
   readonly inputmode?: "numeric" | "decimal";
   readonly maxlength?: string;
 }
@@ -215,7 +240,8 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
     help: `${LLM_ONLY_HELP}${withCommas(ADDITIONAL_INSTRUCTION_MAX_LENGTH)} 文字まで。市場オッズ(人気)に近づける方向の指示は、妙味検出を損なうため避けてください。`,
     maxlength: String(ADDITIONAL_INSTRUCTION_MAX_LENGTH),
   },
-  clipVariant: { kind: "select", label: "LLM補正の許容幅(クリップ幅の版。A/B比較用)", help: LLM_ONLY_HELP },
+  clipVariant: { kind: "select", label: "LLM補正の許容幅(クリップ幅の版。A/B比較用)", help: LLM_ONLY_HELP, options: CLIP_VARIANT_IDS.map((id) => ({ value: id, label: CLIP_LABELS[id] })) },
+  analysisModel: { kind: "select", label: "LLM分析のモデル", help: ANALYSIS_MODEL_HELP, options: ANALYSIS_MODEL_IDS.map((id) => ({ value: id, label: ANALYSIS_MODEL_LABELS[id] })) },
   preRaceOffsetMinutes: {
     kind: "text",
     label: "発走の何分前に評価するか",
@@ -278,7 +304,7 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
           disabled: saving,
           inputmode: spec.inputmode ?? null,
           maxlength: spec.maxlength ?? null,
-          ...(spec.kind === "select" ? { options: CLIP_VARIANT_IDS.map((id) => ({ value: id, label: CLIP_LABELS[id] })) } : {}),
+          ...(spec.options === undefined ? {} : { options: spec.options }),
         };
       })
     : [];
