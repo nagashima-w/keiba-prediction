@@ -25,7 +25,7 @@ import {
   createModelSelector,
   createSdkModelLister,
   DEFAULT_ANALYZER_CONFIG,
-  DEFAULT_VERIFY_CONFIG,
+  PRODUCTION_VERIFY_CONFIG,
   HttpClient,
   listNarRaces,
   listRaces,
@@ -45,7 +45,6 @@ import {
   type RaceId,
   type RaceListEntry,
   type ScorerConfig,
-  type VerifyConfig,
 } from "@keiba/core";
 
 import type {
@@ -61,17 +60,6 @@ import { pickLatestAnalysis, type AnalysisExportSource } from "./analysis-export
 import { buildRaceLedgerView } from "./race-ledger-view.js";
 import { importRaceResult } from "./result-import.js";
 import { venueNameFromRaceId } from "./venue-codes.js";
-
-/**
- * 検証画面の集計(全体・版別)に使う設定(Issue #152 B)。先読みリーク疑い(発走後に分析し、
- * 遮断の印が無い行)と、発走の前後を判定できない行を集計から除外する(ユーザー判断。画面に
- * 切り替えは設けない)。除外した件数は VerifyReport の2つのカウンタに載り、検証画面が表示する。
- * レース一覧(`computeRaceLedger`)とエクスポートには効かない(合意どおり対象外)。
- */
-const PRODUCTION_VERIFY_CONFIG: VerifyConfig = {
-  ...DEFAULT_VERIFY_CONFIG,
-  excludeLookaheadSuspects: true,
-};
 
 /** createPipelineDeps の設定。 */
 export interface PipelineWiringConfig {

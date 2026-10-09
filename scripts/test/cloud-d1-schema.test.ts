@@ -142,6 +142,8 @@ const D1_EXTRA_COLUMNS: Readonly<Record<string, readonly ColumnInfo[]>> = {
     { name: "llm_calls_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
     // 0008 の exe_analysis_id(Issue #216。exe の keiba.db での分析 id。クラウド移行の冪等性の鍵。web で分析したものは NULL)。
     { name: "exe_analysis_id", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+    // 0009 の start_time(Issue #219。発走時刻の写し。NULL=未確認・''=スナップショットに無い・'HH:MM'=値。検証画面の先読み判定が使う。検証の DO が R2 の詳細から遅延で埋める)。
+    { name: "start_time", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
   ],
 };
 const D1_EXTRA_INDEXES: Readonly<Record<string, readonly IndexInfo[]>> = {

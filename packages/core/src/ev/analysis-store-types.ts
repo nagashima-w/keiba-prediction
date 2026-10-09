@@ -8,6 +8,7 @@
  */
 
 import type { PredictionMark } from "../analyzer/parse-response.js";
+import type { ComboBetType } from "../scraper/combo-odds-key.js";
 import type { CourseType, RaceComboPayoutResult } from "../scraper/types.js";
 
 /** 保存する分析の1頭分。 */
@@ -594,4 +595,23 @@ export interface RaceResultDetail {
 export interface AnalysisFilter {
   /** レースIDで絞り込む。 */
   readonly raceId?: string;
+}
+
+/**
+ * 検証の集計(`computeVerifyReport` ほか)が読むデータの入口(Issue #219)。
+ *
+ * 集計が使う `AnalysisStore` のメソッドは次の4つだけ。型をここに切り出したのは、クラウド版(D1)が
+ * 行を読んで同期の読み取り口を作り、**exe と同じ集計をそのまま使う**ため。`verify.ts` が
+ * `better-sqlite3` に依存する `analysis-store.ts` の型を引くと、クラウドだけをインストールする CI の
+ * 型検査が解決に失敗する(#218 の教訓)。`AnalysisStore` はこの型を構造的に満たす(挙動は変わらない)。
+ */
+export interface VerifyDataSource {
+  /** 全分析(id 昇順)。 */
+  listAnalyses(filter?: AnalysisFilter): StoredAnalysis[];
+  /** レースの実着順と確定払戻。1件も無ければ undefined。 */
+  getResult(raceId: string): RaceResultEntry[] | undefined;
+  /** 組合せ払戻(ワイド・3連複・馬連ほか)。取込印が無ければ `not_imported`。 */
+  getComboPayouts(raceId: string, betType: ComboBetType): RaceComboPayoutsReadResult;
+  /** 配分提案の要約(母集団の分類と買い目の券種・キー・賭け金)。無ければ undefined。 */
+  getAllocationForVerify(analysisId: number): StoredAllocationSummary | undefined;
 }

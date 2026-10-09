@@ -330,6 +330,7 @@ export {
 } from "./ev/result-import.js";
 export {
   classifyLookaheadSuspicion,
+  extractStartTime,
   type LookaheadSuspicion,
   type LookaheadSuspicionInput,
 } from "./ev/lookahead-suspicion.js";
@@ -338,6 +339,7 @@ export {
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
   DEFAULT_VERIFY_CONFIG,
+  PRODUCTION_VERIFY_CONFIG,
   type AdjustmentDirection,
   type CalibrationBiasBin,
   type CalibrationBin,

@@ -188,13 +188,13 @@
  */
 
 import type {
-  AnalysisStore,
   RaceComboPayoutsReadResult,
   RaceResultEntry,
   StoredAllocationSummary,
   StoredAnalysis,
   StoredAnalysisHorse,
-} from "./analysis-store.js";
+  VerifyDataSource,
+} from "./analysis-store-types.js";
 import { PREDICTION_MARKS, type PredictionMark } from "../analyzer/parse-response.js";
 import { buildComboOddsKey, type ComboBetType } from "../scraper/combo-odds-key.js";
 import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper/ids.js";
@@ -253,6 +253,19 @@ export const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
   includeAllAnalyses: false,
   directionEpsilon: 0.005,
   excludeLookaheadSuspects: false,
+};
+
+/**
+ * 検証画面の集計(全体・版別)に使う本番の設定(Issue #152 B。Issue #219 で app の `pipeline-deps.ts` から移した)。
+ * 先読みリーク疑い(発走後に分析し、遮断の印が無い行)と、発走の前後を判定できない行を集計から除外する
+ * (ユーザー判断。画面に切り替えは設けない)。除外した件数は VerifyReport の2つのカウンタに載り、検証画面が表示する。
+ * レース一覧(`computeRaceLedger`)とエクスポートには効かない(合意どおり対象外)。
+ * exe(app の `pipeline-deps.ts`)とクラウド版(`cloud/src/verify-core.ts`)が**同じ定数を共有する**
+ * (別々に持つと、片方だけ設定が変わって同じデータで数値が食い違う)。
+ */
+export const PRODUCTION_VERIFY_CONFIG: VerifyConfig = {
+  ...DEFAULT_VERIFY_CONFIG,
+  excludeLookaheadSuspects: true,
 };
 
 /** キャリブレーション表の1帯。 */
@@ -690,11 +703,11 @@ export interface RaceLedgerEntry {
  * このビューには無い。統合リストの目的が「レースIDごとに最新の1件へまとめる」ことそのものであるため)。
  * 並び順は analyses の内部順序(id昇順→latestで絞り込んだ残り)のままで、開催日降順等の表示用の
  * 並び替えは呼び出し側(app層)に委ねる(private buildRaceBreakdownと同じ責務分担)。
- * @param store 分析・結果を保持する AnalysisStore
+ * @param store 分析・結果を読む入口(exe は AnalysisStore、クラウド版は D1 の行から作った実装。Issue #219)
  * @param config verify設定(stakePerBet・placeMaxRank。省略時は既定)
  */
 export function computeRaceLedger(
-  store: AnalysisStore,
+  store: VerifyDataSource,
   config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
 ): readonly RaceLedgerEntry[] {
   const analyses = store.listAnalyses();
@@ -735,14 +748,14 @@ interface BinCounter {
 
 /**
  * 保存済み分析と実結果から verifyレポートを算出する。
- * @param store 分析・結果を保持する AnalysisStore
+ * @param store 分析・結果を読む入口(exe は AnalysisStore、クラウド版は D1 の行から作った実装。Issue #219)
  * @param config verify設定(省略時は既定)
  * @param venueKind 開催区分フィルタ(Task#32、省略時は "all"=絞り込みなし)。
  *   "central"/"nar" を指定すると raceId から判定した開催区分が一致する分析のみを集計する
  *   (「中央+地方=全体」が不変条件として成り立つ。ファイル先頭コメント参照)。
  */
 export function computeVerifyReport(
-  store: AnalysisStore,
+  store: VerifyDataSource,
   config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
   venueKind: VerifyVenueFilter = "all",
 ): VerifyReport {
@@ -792,11 +805,11 @@ function raceIdVenueKindSafe(raceId: string): RaceIdVenueKind | null {
  * (=版をまたいだ「最新」判定は行わない。同一版内での重複分析のみ防止する)。
  *
  * 返す配列は版番号の昇順([...String比較])で並べ、版不明(null)は末尾に置く決定的な順序とする。
- * @param store 分析・結果を保持する AnalysisStore
+ * @param store 分析・結果を読む入口(exe は AnalysisStore、クラウド版は D1 の行から作った実装。Issue #219)
  * @param config verify設定(省略時は既定)
  */
 export function computeVerifyReportByPromptVersion(
-  store: AnalysisStore,
+  store: VerifyDataSource,
   config: VerifyConfig = DEFAULT_VERIFY_CONFIG,
 ): readonly PromptVersionVerifyReport[] {
   const analyses = store.listAnalyses();
@@ -840,7 +853,7 @@ export function computeVerifyReportByPromptVersion(
  * 最新選択の対象も従来どおり全分析(既存の集計を変えない)。
  */
 function selectIncludedAnalyses(
-  store: AnalysisStore,
+  store: VerifyDataSource,
   analyses: readonly StoredAnalysis[],
   config: VerifyConfig,
 ): {
@@ -1144,7 +1157,7 @@ function distinctAdditionalInstructions(
  * @param config verify設定
  */
 function computeVerifyReportForAnalyses(
-  store: AnalysisStore,
+  store: VerifyDataSource,
   analyses: readonly StoredAnalysis[],
   config: VerifyConfig,
 ): VerifyReport {
@@ -1437,7 +1450,7 @@ function finalizeProposedBetOverall(
  * (`combo_key`デコーダの新設は#71スコープ外。着手前ゲート決定)。
  */
 function computeProposedBetReport(
-  store: AnalysisStore,
+  store: VerifyDataSource,
   included: ReadonlyArray<{ analysis: StoredAnalysis; results: readonly RaceResultEntry[] }>,
 ): ProposedBetReport {
   let allocated = 0;

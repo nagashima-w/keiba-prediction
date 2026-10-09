@@ -141,10 +141,23 @@ function resolveKaisaiDate(analysis: LookaheadSuspicionInput): DateParts | null 
 }
 
 /**
+ * スナップショット(JSON 復元済みの未検証値)から発走時刻の文字列を取り出す(読める形のときだけ)。
+ * オブジェクトでない・`race.startTime` が文字列でない・時刻の形でない・範囲外は null(=時刻なし)。
+ *
+ * Issue #219: クラウド版は、スナップショットが R2 にしか無いため、この関数で取り出した文字列を
+ * D1 の `analyses.start_time` に写して先読み判定に使う。**判定(`classifyLookaheadSuspicion`)と写しの補完が
+ * 同じ受理条件を使う**ように、取り出しをここに一本化している(別々に正規表現を持つと、片方だけ受理する値で
+ * exe とクラウド版の判定が食い違う)。
+ */
+export function extractStartTime(snapshot: unknown): string | null {
+  return readStartTime(snapshot)?.text ?? null;
+}
+
+/**
  * スナップショット(JSON 復元済みの未検証値)から発走時刻 `HH:MM` を防御的に読む。
  * オブジェクトでない・`race.startTime` が文字列でない・時刻の形でない・範囲外は null(=時刻なし)。
  */
-function readStartTime(snapshot: unknown): { hour: number; minute: number } | null {
+function readStartTime(snapshot: unknown): { hour: number; minute: number; text: string } | null {
   if (typeof snapshot !== "object" || snapshot === null) {
     return null;
   }
@@ -165,7 +178,7 @@ function readStartTime(snapshot: unknown): { hour: number; minute: number } | nu
   if (hour > 23 || minute > 59) {
     return null;
   }
-  return { hour, minute };
+  return { hour, minute, text: startTime };
 }
 
 /**
