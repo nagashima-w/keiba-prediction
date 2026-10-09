@@ -3222,6 +3222,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - major ではない: 保存データ・設定の互換は壊れない。項目の無い旧い設定は `auto` で読め、`analyses` の列・exe の設定ファイルも変わらない。
 - exe のアプリコードは無変更だが、版数はルートとアプリで共通なので上げる(`dev-latest` に `keiba-ev-tool-1.23.4-portable.exe` が公開済みで、同名のまま承認印付きで push すると `version-bump-check` が block する)。
 
+## 次の正式版が 1.25.0 である根拠(Issue #212〈#210-A〉での変更)
+
+**minor**(LLM 分析の入力と出力が変わる。「分析結果の数値が変わる」変更に当たる)。
+
+### 変更内容
+
+- `packages/core`: `analyzer/rest-record.ts`(休み明け実績の要約。前走から71日以上を休み明けとし、初戦は数えない。着順の扱いは scorer の `isPlaced` と同じ)と `analyzer/best-weight.ts`(直近の好走〈3着以内〉5走の体重の中央値・範囲と、今回・前走の体重の位置)を足した。どちらも純関数で、プロンプト専用。scorer の計算には触れていない。
+- `build-prompt.ts`: 各馬の行に「休み明け実績=」「ベスト体重=」を足し(材料のない馬の行は従来とバイト一致)、【指示】に解釈の指示を足した(新しい見出しは作らない)。`PROMPT_VERSION` を `2026-10-07.1` → `2026-10-09.1`、`clip-variants.ts` の2版も追随した(検証画面は `promptVersion` ごとに集計するので、新旧は別の群になる)。
+- `packages/app`: `analysis-pipeline.ts` が2つの要約を `PromptHorse` に渡す。クラウド版は `runAnalysis` を共有するので同じに効く。
+- 版数: ルート・アプリ `1.25.0`(`@keiba/core` は対象外・据え置き)。
+
+### minor である根拠
+
+- LLM に渡す入力と指示が変わり、強調材料・懸念事項・補正後確率(したがって EV)が変わりうる。区分表の minor(「分析結果の数値が変わる」)。
+- 3着内率(prior)・scorer は変えていない。減点の撤去(馬体重の項・休み明けの一律減点)は #213 で行う。`pipeline-golden.json` の差分は、プロンプト本文・`promptVersion`・各馬の `restRecord`/`bestWeight` の追加だけで、3着内率・EV・配分は1件も変わらない。
+- major ではない: 保存データ・設定・DB スキーマの互換は壊れない。
+
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
