@@ -222,7 +222,10 @@ function buildBackfill(b: BackfillProgress): BackfillView | null {
     case "running":
       return { tone: "info", text: `結果の補完: いま取り込み中です。残り ${n(b.remaining)} レース(${counts})。`, note };
     case "paused":
-      return { tone: "wait", text: `結果の補完: 今夜は一時停止中です(netkeiba への負荷を避けるため)。明晩に再開します。残り ${n(b.remaining)} レース(${counts})。`, note };
+      // 原因は断定しない: 止まる経路は、gate の都合(ブレーカー・混雑)と、日単位の DO への依頼の失敗の両方。
+      return { tone: "wait", text: `結果の補完: 今夜は一時停止中です。明晩に再開します。残り ${n(b.remaining)} レース(${counts})。`, note };
+    case "disabled":
+      return { tone: "wait", text: `結果の補完: 無効に設定されています(自動では取り込みません)。残り ${n(b.remaining)} レース(${counts})。`, note };
     case "ready":
     case "waiting-window":
       return { tone: "info", text: `結果の補完: 移行した分析で結果が無いレースを、夜間(JST 1:00〜6:00)に少しずつ自動で取り込みます。残り ${n(b.remaining)} レース(${counts})。`, note };

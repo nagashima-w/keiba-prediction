@@ -128,6 +128,9 @@ async function withWorker(
 
 function vars(email: string, aud: string): string[] {
   return [
+    // Issue #217: 結果の補完を止める(`RESULT_BACKFILL_NIGHTLY_LIMIT=0`)。smoke(CI でも走る)が、時刻によって補完の窓(JST 1:00〜6:00)に当たっても、
+    // 本物の netkeiba に出ないことを保証する。補完の DO は kick もアラームも何もしない(`scripts/test/cloud-config-guard.test.ts` が、すべての構成でこの指定があることを固定する)。
+    "--var", "RESULT_BACKFILL_NIGHTLY_LIMIT:0",
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,
     "--var", `ACCESS_AUD:${aud}`,
     "--var", `ACCESS_ALLOWED_EMAIL:${email}`,
@@ -221,7 +224,7 @@ async function main(): Promise<void> {
       // Issue #217: 結果の補完の進捗(本物の DO `ResultBackfill` が、移行の DO `CloudMigration` の状態を RPC で読む)。移行が完了するまでは waiting-migration。
       const backfillIdle = await req(port, "GET", "/api/results/backfill");
       const backfillIdleJson = parseJson(backfillIdle.text);
-      check(`${label}: GET /api/results/backfill は 200 で state waiting-migration(移行は idle。本物の DO 同士の RPC を通る)・残り 0・開催日不明 0`, backfillIdle.status === 200 && backfillIdleJson["ok"] === true && backfillIdleJson["state"] === "waiting-migration" && backfillIdleJson["migrationState"] === "idle" && backfillIdleJson["remaining"] === 0 && backfillIdleJson["undated"] === 0, `${backfillIdle.status} ${backfillIdle.text.slice(0, 300)}`);
+      check(`${label}: GET /api/results/backfill は 200 で state disabled(smoke は補完を止めている)・移行の状態は idle(本物の DO 同士の RPC を通る)・残り 0・開催日不明 0・次の実行なし(アラームを張っていない)`, backfillIdle.status === 200 && backfillIdleJson["ok"] === true && backfillIdleJson["state"] === "disabled" && backfillIdleJson["migrationState"] === "idle" && backfillIdleJson["nextRunAt"] === null && backfillIdleJson["remaining"] === 0 && backfillIdleJson["undated"] === 0, `${backfillIdle.status} ${backfillIdle.text.slice(0, 300)}`);
       check(`${label}: POST /api/results/backfill は 405(GET だけ)`, (await req(port, "POST", "/api/results/backfill")).status === 405);
 
       const broken = await upload(golden.subarray(0, Math.floor(golden.length / 2)));
@@ -237,16 +240,10 @@ async function main(): Promise<void> {
       const analyses = completed["analyses"] as { total: number; processed: number; imported: number } | undefined;
       const results = completed["results"] as { total: number; processed: number } | undefined;
       check(`${label}: 取り込みが完了する(分析 5 件・結果 5 レース。すべて新規)`, completed["state"] === "completed" && analyses?.total === 5 && analyses.processed === 5 && analyses.imported === 5 && results?.total === 5 && results.processed === 5, JSON.stringify(completed).slice(0, 400));
-      // 移行の完了後の補完の進捗。**窓(JST 1:00〜6:00)の中では確認しない**: この構成は本番の worker.ts(偽ソケットなし)で、移行の完了後に補完が動くと、未取込のレースの結果を実際に netkeiba へ取りに行く
-      // (この smoke は netkeiba に出ない前提)。窓の外では次の窓の開始までアラームが張られるだけで、取得は起きない。
-      const jstHour = (new Date().getUTCHours() + 9) % 24;
-      if (jstHour >= 1 && jstHour < 6) {
-        check(`${label}: (JST ${String(jstHour)} 時は補完の窓の中なので、移行の完了後の補完の進捗の確認は省略する。実際の取得を起こさないため)`, true);
-      } else {
-        const backfillDone = parseJson((await req(port, "GET", "/api/results/backfill")).text);
-        // golden の 202603020213 は、結果の行に馬の行が無い(組合せの取込記録だけ)ので、`race_results` に行が無く「未取込」と数えられる(残り 1)。開催日不明は 0(同じレースの別の分析に開催日がある)。
-        check(`${label}: 移行の完了後は migrationState completed・状態 waiting-window(窓の外)・残り 1・開催日不明 0・取得済み 0・取得できなかった 0(golden の馬の行が無い 1 レースが未取込として数えられる。本物の DO 同士の RPC)`, backfillDone["migrationState"] === "completed" && backfillDone["state"] === "waiting-window" && backfillDone["remaining"] === 1 && backfillDone["undated"] === 0 && backfillDone["imported"] === 0 && (backfillDone["abandoned"] as { total: number }).total === 0, JSON.stringify(backfillDone).slice(0, 400));
-      }
+      // 移行の完了後の補完の進捗。smoke は補完を止めているので、窓(JST 1:00〜6:00)の中で実行しても netkeiba に出ない(state は disabled のまま、アラームは張られない)。
+      const backfillDone = parseJson((await req(port, "GET", "/api/results/backfill")).text);
+      // golden の 202603020213 は、結果の行に馬の行が無い(組合せの取込記録だけ)ので、`race_results` に行が無く「未取込」と数えられる(残り 1)。開催日不明は 0(同じレースの別の分析に開催日がある)。
+      check(`${label}: 移行の完了後は migrationState completed・状態 disabled・残り 1・開催日不明 0・取得済み 0・取得できなかった 0・次の実行なし(golden の馬の行が無い 1 レースが未取込として数えられる。本物の DO 同士の RPC)`, backfillDone["migrationState"] === "completed" && backfillDone["state"] === "disabled" && backfillDone["remaining"] === 1 && backfillDone["undated"] === 0 && backfillDone["imported"] === 0 && (backfillDone["abandoned"] as { total: number }).total === 0 && backfillDone["nextRunAt"] === null, JSON.stringify(backfillDone).slice(0, 400));
       const list = parseJson((await req(port, "GET", "/api/analyses?limit=200")).text);
       const items = list["analyses"] as { id: number; raceId: string; analyzedAt: string }[];
       check(`${label}: 一覧に 5 件。分析日時の降順(id の順ではない)`, items.length === 5 && items.every((a, i) => i === 0 || items[i - 1]!.analyzedAt >= a.analyzedAt) && items[0]!.analyzedAt === "2026-03-02T05:00:00.000Z", JSON.stringify(items.map((a) => [a.id, a.analyzedAt])));

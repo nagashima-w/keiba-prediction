@@ -78,9 +78,9 @@ export function parseMigrationStatus(body: unknown): MigrationProgress | null {
   };
 }
 
-export type BackfillState = "waiting-migration" | "ready" | "running" | "paused" | "waiting-window" | "done";
+export type BackfillState = "disabled" | "waiting-migration" | "ready" | "running" | "paused" | "waiting-window" | "done";
 
-const BACKFILL_STATES: ReadonlySet<string> = new Set<BackfillState>(["waiting-migration", "ready", "running", "paused", "waiting-window", "done"]);
+const BACKFILL_STATES: ReadonlySet<string> = new Set<BackfillState>(["disabled", "waiting-migration", "ready", "running", "paused", "waiting-window", "done"]);
 
 /** 結果の補完の進捗(`GET /api/results/backfill` の応答のうち、画面が読む項目。Issue #217〈#167-C〉)。 */
 export interface BackfillProgress {

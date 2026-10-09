@@ -232,9 +232,9 @@ describe("移行画面の VNode: 結果の補完(Issue #217)", () => {
     expect(byClass(paused, "wait").length + byClass(paused, "notice").length).toBeGreaterThan(0);
   });
 
-  it("許可リスト(dom.ts)の範囲で組める(補完の全 5 状態 + 開催日不明の注記)", () => {
-    const states = ["ready", "running", "paused", "waiting-window", "done"] as const;
-    expect(states).toHaveLength(5);
+  it("許可リスト(dom.ts)の範囲で組める(補完の全 6 状態 + 開催日不明の注記)", () => {
+    const states = ["disabled", "ready", "running", "paused", "waiting-window", "done"] as const;
+    expect(states).toHaveLength(6);
     for (const state of states) expect(() => mountAll(withBackfill({ ...BACKFILL, state, undated: 3 })), state).not.toThrow();
   });
 });

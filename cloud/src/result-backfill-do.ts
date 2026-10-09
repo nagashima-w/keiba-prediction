@@ -9,7 +9,7 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import type { GateStatus } from "./gate-core";
-import { BACKFILL_NIGHTLY_LIMIT, ResultBackfillCore, type BackfillDayStub, type BackfillStatus } from "./result-backfill-core";
+import { BACKFILL_NIGHTLY_LIMIT, isBackfillDisabled, ResultBackfillCore, type BackfillDayStub, type BackfillStatus } from "./result-backfill-core";
 import { parseLimitOverride, type MigrationState } from "./migration-core";
 import { D1ResultStore, type ResultDb } from "./result-repository";
 
@@ -28,7 +28,7 @@ export interface ResultBackfillEnv {
   CLOUD_MIGRATION: { idFromName(name: string): any; get(id: any): { getStatus(): Promise<{ readonly state: MigrationState }> } };
   /**
    * 任意(Worker の var・secret)。1 晩に依頼するレースの数の上限を**下げる**ための上書き(1〜150 の整数。それ以外・150 を超える値は無視して既定の 150)。
-   * Free の枠を超える値は受け付けない(`parseLimitOverride` の流儀)。
+   * Free の枠を超える値は受け付けない(`parseLimitOverride` の流儀)。**`"0"` は補完を止める**(`isBackfillDisabled`。アラームを張らず、起きても何もしない。state は `disabled`)。
    */
   RESULT_BACKFILL_NIGHTLY_LIMIT?: string;
 }
@@ -55,7 +55,7 @@ export class ResultBackfill extends DurableObject<ResultBackfillEnv> {
         log: (line, level) => (level === "error" ? console.error(line) : console.log(line)),
         onWarn: (message) => console.warn(message),
       },
-      nightlyLimit === null ? {} : { nightlyLimit },
+      { ...(nightlyLimit === null ? {} : { nightlyLimit }), ...(isBackfillDisabled(env.RESULT_BACKFILL_NIGHTLY_LIMIT) ? { disabled: true } : {}) },
     );
   }
 

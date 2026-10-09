@@ -221,8 +221,10 @@ describe("parseBackfillStatus(結果の補完の進捗の応答の検査。Issue
     expect(parseBackfillStatus(BACKFILL_BODY)).toEqual({ state: "ready", remaining: 321, undated: 12, imported: 100, abandoned: 4 });
   });
 
-  it("状態の 6 種をすべて読める。未知の状態は想定外", () => {
-    for (const state of ["waiting-migration", "ready", "running", "paused", "waiting-window", "done"]) {
+  it("状態の 7 種をすべて読める。未知の状態は想定外", () => {
+    const states = ["disabled", "waiting-migration", "ready", "running", "paused", "waiting-window", "done"];
+    expect(states).toHaveLength(7);
+    for (const state of states) {
       expect(parseBackfillStatus({ ...BACKFILL_BODY, state })?.state, state).toBe(state);
     }
     expect(parseBackfillStatus({ ...BACKFILL_BODY, state: "unknown" })).toBeNull();

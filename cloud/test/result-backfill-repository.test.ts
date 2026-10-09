@@ -119,6 +119,15 @@ describe("countBackfill: 残り(開催日あり・to 以前・除外を除く)�
     expect(counts).toStrictEqual({ dated: 3, undated: 2 }); // dated = D1, D2, MIX / undated = U1, U2
   });
 
+  it("境界: 開催日がちょうど to(= 昨日)のレースは dated に入る(含む)。to の翌日(= 今日)は入らない。列挙(listBackfillRaces)と同じ境界", async () => {
+    await addAnalysis("EDGE", "20261004");
+    await addAnalysis("TODAY", "20261005");
+    const counts = await store().countBackfill({ to: "20261004", exclude: [] });
+    expect(counts).toStrictEqual({ dated: 1, undated: 0 });
+    expect((await store().listBackfillRaces({ to: "20261004", exclude: [], limit: 50 })).map((r) => r.raceId)).toEqual(["EDGE"]);
+    expect((await store().countBackfill({ to: "20261003", exclude: [] })).dated).toBe(0); // to を 1 日前にすると入らない
+  });
+
   it("何も無ければ 0 と 0(SUM が NULL にならない)", async () => {
     expect(await store().countBackfill({ to: "20261004", exclude: [] })).toStrictEqual({ dated: 0, undated: 0 });
   });

@@ -283,6 +283,27 @@ describe("wrangler.toml", () => {
     expect(existsSync(path.join(ROOT, "cloud", "smoke-worker.ts"))).toBe(true);
   });
 
+  it("Issue #217: smoke は結果の補完を止めて動かす(CI の smoke が補完の窓〈JST 1:00〜6:00〉に当たっても、netkeiba に出ない)。設定を持つ(--config)すべての構成が vars() を通り、vars() が RESULT_BACKFILL_NIGHTLY_LIMIT:0 を渡す", () => {
+    const smoke = stripCode(readTextLf("cloud", "smoke.ts"));
+    expect(smoke.length).toBeGreaterThan(5000); // 前提: 読めている
+    const start = smoke.indexOf("function vars(");
+    expect(start).toBeGreaterThan(-1);
+    const body = smoke.slice(start, smoke.indexOf("\n}\n", start));
+    expect(body).toContain('"--var", "RESULT_BACKFILL_NIGHTLY_LIMIT:0"');
+    // withWorker の呼び出しのうち、設定ファイル(--config)を使うもの(認証の設定を持つ構成)は、すべて ...vars( を含む
+    const calls = [...smoke.matchAll(/await withWorker\([^\n]*\n/g)].map((m) => m[0]);
+    const withConfig = calls.filter((c) => c.includes("--config"));
+    expect(calls.length).toBeGreaterThanOrEqual(8); // 前提: 検出が空振りでない(構成は 1 つの無設定 + 7 つの設定つき)
+    expect(withConfig.length).toBe(calls.length - 1);
+    for (const c of withConfig) {
+      expect(c, c.trim()).toContain("...vars(");
+    }
+    // 無設定の構成(認証の設定が無く、全リクエストが 403)は DO に届かない
+    expect(calls.filter((c) => !c.includes("--config"))).toHaveLength(1);
+    // 対照(検出の確認。空振りでない)
+    expect(("await withWorker(1, [\"--config\", P], async () => {\n").includes("...vars(")).toBe(false);
+  });
+
   it("本番の設定に [access.dev](ローカルの ctx.access 注入)を置かない。注入はスモークが一時ファイルで行う", () => {
     expect(tomlCode).not.toMatch(/^\[access/m);
     expect(readTextLf("cloud", "smoke.ts")).toContain("[access.dev]");

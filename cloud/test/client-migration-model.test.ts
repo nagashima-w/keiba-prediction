@@ -323,6 +323,23 @@ describe("buildMigrationModel: 結果の補完(Issue #217)", () => {
     expect(view.text).toContain("取得できなかった 4");
   });
 
+  it("paused の文言は原因を断定しない(gate の都合だけでなく、日単位の DO への依頼の失敗でも止まる)。『一時停止』と『明晩に再開』は伝える", () => {
+    const text = backfillOf({ ...BACKFILL, state: "paused" })!.text;
+    expect(text).toContain("一時停止");
+    expect(text).toContain("明晩");
+    for (const cause of ["netkeiba", "負荷", "混雑", "ブレーカー", "失敗"]) {
+      expect(text, `原因(${cause})を断定しない`).not.toContain(cause);
+    }
+  });
+
+  it("disabled(止める設定): 無効であることを伝え、夜間に自動で取り込むとは言わない。完了時の残り 0 も出さない", () => {
+    const view = backfillOf({ ...BACKFILL, state: "disabled" })!;
+    expect(view.tone).toBe("wait");
+    expect(view.text).toContain("無効");
+    expect(view.text).not.toContain("夜間");
+    expect(view.text).toContain("残り 321 レース");
+  });
+
   it("waiting-migration(移行が完了と読めない)は出さない", () => {
     expect(backfillOf({ ...BACKFILL, state: "waiting-migration" })).toBeNull();
   });

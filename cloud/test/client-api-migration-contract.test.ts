@@ -212,10 +212,10 @@ describe("GET /api/results/backfill の契約(Issue #217)", () => {
     expect(await fetchBackfill(s.fetch)).toEqual({ ok: true, progress: { state: "running", remaining: 321, undated: 12, imported: 100, abandoned: 4 } });
   });
 
-  it("サーバの状態 6 種をすべて読める", async () => {
+  it("サーバの状態 7 種をすべて読める", async () => {
     const s = await connect();
-    const states = ["waiting-migration", "ready", "running", "paused", "waiting-window", "done"] as const;
-    expect(states).toHaveLength(6);
+    const states = ["disabled", "waiting-migration", "ready", "running", "paused", "waiting-window", "done"] as const;
+    expect(states).toHaveLength(7);
     for (const state of states) {
       s.backfill = { ...BACKFILL, state };
       const result = await fetchBackfill(s.fetch);

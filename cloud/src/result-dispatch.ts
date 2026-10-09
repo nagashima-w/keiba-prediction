@@ -1,5 +1,7 @@
 /**
- * 結果の取り込みの依頼(Issue #208〈#182-B〉)。cron の `scheduled`(JST 9:00。過去 7 日)と、手動の `POST /api/results/import`(窓より古いぶんの取り込み)が**同じ関数**を呼ぶ。
+ * 結果の取り込みの依頼(Issue #208〈#182-B〉)。cron の `scheduled`(JST 9:00。過去 7 日)・手動の `POST /api/results/import`(窓より古いぶんの取り込み)・結果の補完(Issue #217〈#167-C〉。`result-backfill-core.ts`。
+ * 移行の完了後、夜間に古いレースを少しずつ)の**3 箇所が同じ関数**を呼ぶ(`dispatchResultImports(` の呼び出し箇所は `scheduled.ts`・`handler.ts`・`result-backfill-core.ts` の 1 つずつ。`scripts/test/cloud-config-guard.test.ts` が固定する)。補完は列挙(`DispatchStore`)だけを自分のもの
+ * (最も新しい未取込の日を 1 日・除外つき)に差し替え、依頼の仕方は同じ。
  * `cloudflare:workers` を import しない(Node でそのままテストできる)。ここは「どの日の・どのレースを、その日の DO に依頼するか」だけで、netkeiba にも LLM にも直接は出ない
  * (取得・保存は、依頼を受けた日単位の DO がアラームの中で行う)。**`requestResultImport` の呼び出し箇所はこのファイルの 1 つだけ**(`scripts/test/cloud-config-guard.test.ts` が固定する)。
  *

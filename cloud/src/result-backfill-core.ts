@@ -27,6 +27,8 @@
  *  - 永続的な分類(`not-confirmed`〈中止・未確定〉・`no-payout`・`parse-error`・`incomplete`・`invalid-race`): 1 サイクルで**永久に除外**。
  *    `invalid-race` は日単位の DO に依頼する前の検査(`checkRaceDate`: 12 桁の中央/地方のレースID・年の一致・地方の月日の一致)で落ちたもの。日単位の DO は不正なレースが 1 つでもあると依頼全体を拒否するので、
  *    チャンクの有効なレースを巻き込まないよう、依頼の前に除外する(exe の分析の開催日が手入力と食い違う、など)。
+ *    **ただし系統的な障害**(チャンクで取り込みが 0 件で、失敗が全件、同じ永続的な分類。netkeiba が夜間に 200 のメンテナンス画面を返す等)は、一時的な扱い(下)にする。
+ *    取り込めたレースが 1 つでもあれば、ページは読めているので分類を信用する。
  *  - 一時的な分類(`fetch-failed`・`save-failed`・`stalled`〈{@link BACKFILL_INFLIGHT_MAX_MS} たっても queued のまま〉): 1 晩に 1 回だけ。{@link BACKFILL_MAX_NIGHTS} 晩目で永久に除外。
  *  - gate の都合(`blocked`・`busy`・日単位の DO への依頼の失敗〈`dispatch-failed`〉): 晩数に数えず、**その晩は止める**。{@link BACKFILL_MAX_DEFER_NIGHTS} 晩続いたら永久に除外(上限があるので無限にならない)。
  * その晩に試したレースは列挙から除外する(日単位の DO は同じ日の `gave_up` を積み直さないので、除外しないと同じレースを延々と列挙する)。
@@ -88,7 +90,17 @@ const PERMANENT_CLASSES: ReadonlySet<string> = new Set(["not-confirmed", "no-pay
 const DEFERRAL_CLASSES: ReadonlySet<string> = new Set(["blocked", "busy", "dispatch-failed"]);
 const BUSY_MIGRATION_STATES: readonly MigrationState[] = ["verifying", "importing", "waiting-budget", "waiting-r2"];
 
+/**
+ * 補完を止める設定の判定(Worker の var `RESULT_BACKFILL_NIGHTLY_LIMIT`)。**文字列 `"0"`(前後の空白は無視)だけ**が「無効」。それ以外(未設定・空・数でない値・`"00"` など)は無効にしない
+ * (1〜150 の値は上限を下げる指定として別に解釈する。誤記で止まったまま気づかない、または誤記で全開になる、のどちらも避けるため、完全一致にする)。
+ */
+export function isBackfillDisabled(value: string | undefined): boolean {
+  return value !== undefined && value.trim() === "0";
+}
+
 export interface BackfillOptions {
+  /** 補完を止める(`kick` はアラームを張らず、アラームが起きても何もしない)。状態は `disabled`。smoke・CI で netkeiba に出ないことを保証する、または利用者が止めるため。 */
+  readonly disabled?: boolean;
   /** 1 晩の上限(下げる方向の上書き)。 */
   readonly nightlyLimit?: number;
   readonly chunkSize?: number;
@@ -123,11 +135,11 @@ export interface BackfillDeps {
   readonly onWarn: (message: string) => void;
 }
 
-export type BackfillState = "waiting-migration" | "ready" | "running" | "paused" | "waiting-window" | "done";
+export type BackfillState = "disabled" | "waiting-migration" | "ready" | "running" | "paused" | "waiting-window" | "done";
 
 export interface BackfillStatus {
   /**
-   * `waiting-migration`: 移行が完了していない(移行の状態を読めないときを含む) / `running`: チャンクが飛行中 / `done`: 残りが 0 /
+   * `disabled`: 止める設定(`RESULT_BACKFILL_NIGHTLY_LIMIT=0`)。自動では何も取り込まない / `waiting-migration`: 移行が完了していない(移行の状態を読めないときを含む) / `running`: チャンクが飛行中 / `done`: 残りが 0 /
    * `paused`: その晩は止めている(gate の都合・依頼の失敗) / `waiting-window`: 窓の外、または 1 晩の上限に達した / `ready`: 窓の中で、次の依頼を待っている。
    */
   readonly state: BackfillState;
@@ -194,6 +206,7 @@ export class ResultBackfillCore {
   private readonly chunkSize: number;
   private readonly startHour: number;
   private readonly endHour: number;
+  private readonly disabled: boolean;
 
   constructor(deps: BackfillDeps, options: BackfillOptions = {}) {
     this.deps = deps;
@@ -201,6 +214,7 @@ export class ResultBackfillCore {
     this.chunkSize = options.chunkSize ?? BACKFILL_CHUNK_SIZE;
     this.startHour = options.windowStartHour ?? BACKFILL_WINDOW_START_HOUR_JST;
     this.endHour = options.windowEndHour ?? BACKFILL_WINDOW_END_HOUR_JST;
+    this.disabled = options.disabled === true;
     deps.sql.exec("CREATE TABLE IF NOT EXISTS backfill_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     deps.sql.exec(
       `CREATE TABLE IF NOT EXISTS backfill_race (
@@ -255,12 +269,12 @@ export class ResultBackfillCore {
   }
 
   /** 取得できなかったレースを記録する(上の「取得できないレース」の規則)。 */
-  private recordFailure(raceId: string, cls: string, night: string): void {
+  private recordFailure(raceId: string, cls: string, night: string, systemic = false): void {
     const prev = (this.deps.sql.exec("SELECT * FROM backfill_race WHERE race_id = ?", raceId).toArray() as RaceRecord[])[0];
     const deferral = DEFERRAL_CLASSES.has(cls);
     const nights = (prev?.nights ?? 0) + (deferral ? 0 : 1);
     const defers = (prev?.defers ?? 0) + (deferral ? 1 : 0);
-    const abandon = PERMANENT_CLASSES.has(cls) || nights >= BACKFILL_MAX_NIGHTS || defers >= BACKFILL_MAX_DEFER_NIGHTS;
+    const abandon = (PERMANENT_CLASSES.has(cls) && !systemic) || nights >= BACKFILL_MAX_NIGHTS || defers >= BACKFILL_MAX_DEFER_NIGHTS;
     this.deps.sql.exec(
       `INSERT INTO backfill_race (race_id, nights, defers, last_night, last_class, state) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(race_id) DO UPDATE SET nights = excluded.nights, defers = excluded.defers, last_night = excluded.last_night, last_class = excluded.last_class, state = excluded.state`,
@@ -281,7 +295,7 @@ export class ResultBackfillCore {
 
   /** アラームが無ければ張る(cron から毎日 1 回・状態の読み取りから)。飛行中のチャンクがあれば今(進行を見る)、無ければ次の窓の開始(窓の中なら今)。 */
   async kick(): Promise<void> {
-    if ((await this.deps.getAlarm()) !== null) {
+    if (this.disabled || (await this.deps.getAlarm()) !== null) {
       return;
     }
     const now = this.deps.now();
@@ -292,6 +306,9 @@ export class ResultBackfillCore {
 
   /** アラーム: 次のステップを 1 つ実行する。例外は投げない(失敗は 10 分後の再試行)。 */
   async runNextStep(): Promise<void> {
+    if (this.disabled) {
+      return; // 止める設定: 何も読まず・書かず、アラームも張り直さない(止める前に張られていたアラームは、これで連鎖が終わる)
+    }
     try {
       await this.step();
     } catch (error) {
@@ -432,6 +449,7 @@ export class ResultBackfillCore {
     }
     let imported = 0;
     let pause = false;
+    const failures: Array<{ raceId: string; cls: string }> = [];
     for (const raceId of inflight.raceIds) {
       const row = byId.get(raceId);
       if (row?.state === "imported") {
@@ -443,7 +461,15 @@ export class ResultBackfillCore {
       if (DEFERRAL_CLASSES.has(cls)) {
         pause = true;
       }
-      this.recordFailure(raceId, cls, inflight.night);
+      failures.push({ raceId, cls });
+    }
+    // 系統的な障害(netkeiba が 200 のメンテナンス画面を返す等): チャンクで取り込みが 0 件で、失敗が全件、同じ永続的な分類。
+    // 永続的な分類を鵜呑みにすると、その晩のレースが一括で永久に除外され二度と取り込まれないので、一時的な扱い(晩数に数える。BACKFILL_MAX_NIGHTS 晩目で除外)にする。
+    // 本当に未確定・払戻なしのレースも、数晩後には除外される(無限には再試行しない)。取り込めたレースが 1 つでもあれば、ページは読めているので分類を信用する。
+    const classes = new Set(failures.map((f) => f.cls));
+    const systemic = imported === 0 && failures.length > 0 && classes.size === 1 && PERMANENT_CLASSES.has(failures[0]!.cls);
+    for (const f of failures) {
+      this.recordFailure(f.raceId, f.cls, inflight.night, systemic);
     }
     this.metaPut("imported", String(this.count("imported") + imported));
     if (pause) {
@@ -476,7 +502,9 @@ export class ResultBackfillCore {
       total += row.n;
     }
     let state: BackfillState;
-    if (migrationState !== "completed") {
+    if (this.disabled) {
+      state = "disabled";
+    } else if (migrationState !== "completed") {
       state = "waiting-migration";
     } else if (inflight !== null) {
       state = "running";

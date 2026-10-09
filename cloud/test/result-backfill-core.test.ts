@@ -14,6 +14,7 @@ import {
   BACKFILL_WINDOW_END_HOUR_JST,
   BACKFILL_WINDOW_START_HOUR_JST,
   inBackfillWindow,
+  isBackfillDisabled,
   nextBackfillWindowStart,
   ResultBackfillCore,
   type BackfillDayStub,
@@ -447,11 +448,16 @@ describe("取得できなかったレースの記録(無限に再試行しない
   }
 
   const permanent: ResultClass[] = ["not-confirmed", "no-payout", "parse-error", "incomplete"];
-  it.each(permanent)("%s: 1 サイクルで永久に除外する(翌晩以降も依頼しない)", async (cls) => {
+  it.each(permanent)("%s: 同じチャンクに取り込めたレースがあれば、1 サイクルで永久に除外する(翌晩以降も依頼しない)", async (cls) => {
     const w = new World();
-    w.unimported = races(YESTERDAY, 1);
+    w.unimported = races(YESTERDAY, 2);
     const { core } = make(w);
-    await failOnce(w, core, cls);
+    await core.runNextStep(); // 依頼(2 レース)
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 1))!.state = "imported"; // 1 つは取り込めた(系統的な障害ではない)
+    w.unimported = w.unimported.filter((r) => r.raceId !== idOf(YESTERDAY, 1));
+    w.settleGaveUp(YESTERDAY, cls);
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep(); // 回収
     expect(w.day(YESTERDAY).requests.length).toBe(1);
     expect((await core.getStatus()).abandoned).toEqual({ total: 1, byClass: { [cls]: 1 } });
     for (const day of [11, 12, 13]) {
@@ -459,7 +465,50 @@ describe("取得できなかったレースの記録(無限に再試行しない
       await core.runNextStep();
     }
     expect(w.day(YESTERDAY).requests.length).toBe(1); // 追加の依頼なし
-    expect(w.listCalls.at(-1)!.exclude).toEqual([idOf(YESTERDAY, 1)]);
+    expect(w.listCalls.at(-1)!.exclude).toEqual([idOf(YESTERDAY, 2)]);
+  });
+
+  // 系統的な障害(netkeiba が 200 のメンテナンス画面を返す等)で、その晩のレースが一括で永久に除外されない。
+  it.each(permanent)(`%s: チャンクで取り込みが 0 件かつ全件が同じ分類なら、系統的な障害とみなして一時的な扱い(晩数に数える)。${BACKFILL_MAX_NIGHTS} 晩目で除外する`, async (cls) => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 30);
+    const { core } = make(w);
+    for (let night = 1; night <= BACKFILL_MAX_NIGHTS; night += 1) {
+      w.now = jst(10, 9 + night, 2);
+      await failOnce(w, core, cls);
+      const status = await core.getStatus();
+      expect(w.day(YESTERDAY).requests.length, `${night} 晩目の依頼`).toBe(night);
+      expect(w.day(YESTERDAY).requests[night - 1]!.length).toBe(30);
+      expect(status.abandoned.total, `${night} 晩目の除外`).toBe(night === BACKFILL_MAX_NIGHTS ? 30 : 0);
+      expect(status.remaining).toBe(night === BACKFILL_MAX_NIGHTS ? 0 : 30);
+    }
+    w.now = jst(10, 13, 2);
+    await core.runNextStep();
+    expect(w.day(YESTERDAY).requests.length).toBe(BACKFILL_MAX_NIGHTS); // 無限には再試行しない
+  });
+
+  it("系統的な障害の判定は『取り込み 0 件かつ全件が同じ分類』だけ: 分類が混ざる(no-payout と parse-error)チャンクは従来どおり永久に除外する", async () => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 2);
+    const { core } = make(w);
+    await core.runNextStep();
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 1))!.state = "gave_up";
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 1))!.lastClass = "no-payout";
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 2))!.state = "gave_up";
+    w.day(YESTERDAY).rows.get(idOf(YESTERDAY, 2))!.lastClass = "parse-error";
+    w.now += BACKFILL_POLL_MS;
+    await core.runNextStep();
+    expect((await core.getStatus()).abandoned).toEqual({ total: 2, byClass: { "no-payout": 1, "parse-error": 1 } });
+  });
+
+  it("系統的な障害のとき、その晩のほかのチャンクも(その晩に試したレースは除外されるので)同じレースを再び取得しない。1 晩 1 回だけ", async () => {
+    const w = new World();
+    w.unimported = [...races(YESTERDAY, 30), ...races("20261001", 5)];
+    const { core } = make(w);
+    await failOnce(w, core, "not-confirmed"); // 新しい日の 30 レースが全滅 → 一時的な扱い
+    // 同じ tick で次のチャンク(古い日の 5 レース)が依頼されている。新しい日のレースは再び依頼されない。
+    expect(w.day(YESTERDAY).requests.length).toBe(1);
+    expect(w.day("20261001").requests.length).toBe(1);
   });
 
   const transient: ResultClass[] = ["fetch-failed", "save-failed"];
@@ -564,6 +613,87 @@ describe("取得できなかったレースの記録(無限に再試行しない
     expect(w.days.size).toBe(0);
     expect(w.alarm).toBe(T0 + BACKFILL_ERROR_RETRY_MS);
     expect(w.warns.join("\n")).not.toContain("SECRET");
+  });
+});
+
+describe("補完を止める設定(disabled): 何もせず、アラームも張らない", () => {
+  it("kick はアラームを張らず、runNextStep は列挙も依頼もせず、アラームも張らない。残りがあって窓の中でも同じ", async () => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 3);
+    const { core } = make(w, { disabled: true });
+    await core.kick();
+    await core.runNextStep();
+    expect(w.alarm).toBeNull();
+    expect(w.setAlarmCalls).toEqual([]);
+    expect(w.listCalls).toEqual([]);
+    expect(w.days.size).toBe(0);
+  });
+
+  it("既にアラームがあっても(止める前に張られたもの)、起きたときは何もせず張り直さない", async () => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 3);
+    w.alarm = T0;
+    const { core } = make(w, { disabled: true });
+    w.alarm = null; // 起きた(アラームは消費された)
+    await core.runNextStep();
+    expect(w.alarm).toBeNull();
+    expect(w.days.size).toBe(0);
+  });
+
+  it("getStatus は state が disabled(移行の状態・残りは読める)。止めていなければ disabled にならない", async () => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 3);
+    w.undated = 2;
+    const status = await make(w, { disabled: true }).core.getStatus();
+    expect(status).toMatchObject({ state: "disabled", migrationState: "completed", remaining: 3, undated: 2 });
+    expect((await make(new World()).core.getStatus()).state).not.toBe("disabled");
+  });
+
+  const cases: Array<[string | undefined, boolean]> = [
+    [undefined, false],
+    ["", false],
+    ["150", false],
+    ["1", false],
+    ["abc", false],
+    ["-1", false],
+    ["0", true],
+    [" 0 ", true],
+    ["00", false],
+  ];
+  it.each(cases)("isBackfillDisabled(%j) → %s(\"0\" だけが無効。前後の空白は無視)", (value, expected) => {
+    expect(isBackfillDisabled(value)).toBe(expected);
+  });
+});
+
+describe("dispatch-failed は gate の都合と同じ defer(晩数に数えない): 1 回の失敗で 30 レースを永久に除外しない", () => {
+  it(`依頼の失敗が ${BACKFILL_MAX_DEFER_NIGHTS - 1} 晩続いても除外せず、${BACKFILL_MAX_DEFER_NIGHTS} 晩目で除外する。晩数(nights)は増えない`, async () => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 30);
+    w.day(YESTERDAY).failRequest = true;
+    const { core, sql } = make(w);
+    for (let night = 1; night <= BACKFILL_MAX_DEFER_NIGHTS; night += 1) {
+      w.now = jst(10, 9 + night, 2);
+      await core.runNextStep();
+      const rows = sql.exec("SELECT nights, defers, last_class, state FROM backfill_race").toArray() as Array<{ nights: number; defers: number; last_class: string; state: string }>;
+      expect(rows).toHaveLength(30);
+      expect(rows.every((r) => r.nights === 0 && r.defers === night && r.last_class === "dispatch-failed"), `${night} 晩目の記録`).toBe(true);
+      expect(rows.every((r) => r.state === (night === BACKFILL_MAX_DEFER_NIGHTS ? "abandoned" : "tried"))).toBe(true);
+      expect((await core.getStatus()).abandoned.total).toBe(night === BACKFILL_MAX_DEFER_NIGHTS ? 30 : 0);
+    }
+  });
+
+  it("1 回の失敗のあと、翌晩は同じレースを再び依頼する(永久に除外されていない)", async () => {
+    const w = new World();
+    w.unimported = races(YESTERDAY, 30);
+    w.day(YESTERDAY).failRequest = true;
+    const { core } = make(w);
+    await core.runNextStep();
+    expect(w.day(YESTERDAY).requests).toEqual([]);
+    w.day(YESTERDAY).failRequest = false;
+    w.now = jst(10, 11, 2);
+    await core.runNextStep();
+    expect(w.day(YESTERDAY).requests.length).toBe(1);
+    expect(w.day(YESTERDAY).requests[0]!.length).toBe(30);
   });
 });
 

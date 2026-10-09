@@ -1,6 +1,7 @@
 /**
  * cron の `scheduled`(Issue #206〈#166-E〉・Issue #208〈#182-B〉)。**薄い作り**: `scheduledTime`(UTC のエポックミリ秒)から JST の開催日を決め、(1)その日の日単位の DO(`RaceDay`)の
- * `requestPlan` を呼び、(2)**そのあとに**、過去 7 日(前日まで。今日は含めない)の分析済み・結果未取込のレースを、日ごとにその日の DO へ依頼する(`dispatchResultImports`。`result-dispatch.ts`)。
+ * `requestPlan` を呼び、(2)**そのあとに**、過去 7 日(前日まで。今日は含めない)の分析済み・結果未取込のレースを、日ごとにその日の DO へ依頼し(`dispatchResultImports`。`result-dispatch.ts`)、
+ * (3)**最後に**、結果の補完の DO(`ResultBackfill`。Issue #217〈#167-C〉)の `kick()` を 1 回呼ぶ(アラームが無ければ張るだけ。補完は JST 1:00〜6:00 に、移行の完了後だけ動く。取得は一切しない)。
  * **netkeiba にも LLM にも直接は出ない**(取得・予約・分析・結果の取り込みは、依頼を受けた DO がアラームの中で行う)。D1 は結果の未取込の**列挙(読み取り 1 クエリ)**だけ。
  * `cloudflare:workers` を import しない(型だけ import する)ので、Node の vitest でそのままテストできる。worker.ts は、これに 1 行で委譲する。
  *
@@ -11,7 +12,8 @@
  *    **結果の依頼は、`requestPlan` の成否によらず走らせ(朝の計画の失敗が結果を止めない)、その失敗は朝の計画を失敗させない**(分類だけをログに出す。投げるのは `requestPlan` の失敗だけ)。
  *  - **ログ**: 固定の分類名・開催日・試行番号・エラーの `name`(文字種を絞る)だけ。メッセージ本文・値・秘密は出さない。
  *
- * 呼び出す DO の RPC は `requestPlan` の 1 つ(ここに直接)と、`dispatchResultImports` 経由の `requestResultImport`(`scripts/test/cloud-config-guard.test.ts` が、呼び出し箇所の数と、取得に出る呼び出しが無いことを固定する)。
+ * 呼び出す DO の RPC は `requestPlan` の 1 つ(ここに直接)と、`dispatchResultImports` 経由の `requestResultImport`、補完の `kick` の 1 つ(`scripts/test/cloud-config-guard.test.ts` が、呼び出し箇所の数と、取得に出る呼び出しが無いことを固定する)。
+ * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。朝の計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate } from "./auto-run-plan";
 import type { BackfillNamespaceLike, RaceDayNamespaceLike } from "./handler";
