@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -199,11 +200,26 @@ describe("狭い入口 @keiba/core/pipeline(Issue #176)", () => {
 
   it("対照: 型だけの import を辿る設定では、バレル(index.ts)・analysis-store.ts を経由する入口で better-sqlite3 が現れる(followTypes が実物で効く)", () => {
     expect(closureOf(path.join(SRC, "index.ts"), { followTypes: true }).offenders.length).toBeGreaterThan(0);
-    // `import type` だけで analysis-store.ts を指す verify.ts は、既定では NG にならないが、followTypes では NG になる
-    expect(closureOf(path.join(SRC, "ev", "verify.ts")).offenders).toEqual([]);
-    expect(closureOf(path.join(SRC, "ev", "verify.ts"), { followTypes: true }).offenders).toContain(
-      path.join("ev", "analysis-store.ts"),
-    );
+    // `import type` だけで analysis-store.ts を指すファイルは、既定では NG にならないが、followTypes では NG になる。
+    // 実在の core のファイルには、もうその形のものが無い(verify.ts・lookahead-suspicion.ts は #219 で analysis-store-types.ts に切り替えた)ので、一時ファイルで作る。
+    const dir = mkdtempSync(path.join(tmpdir(), "keiba-native-free-"));
+    try {
+      const entry = path.join(dir, "type-only.ts");
+      const specifier = path.relative(dir, path.join(SRC, "ev", "analysis-store.js")).split(path.sep).join("/");
+      writeFileSync(entry, `import type { AnalysisStore } from "${specifier}";\nexport type T = AnalysisStore;\n`);
+      expect(closureOf(entry).offenders).toEqual([]);
+      expect(closureOf(entry, { followTypes: true }).offenders).toContain(path.join("ev", "analysis-store.ts"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("Issue #219: 検証の集計(verify.ts)・先読みの判定(lookahead-suspicion.ts)・型の入口(analysis-store-types.ts)は、型だけの import も含めて better-sqlite3 に依存するモジュールを経由しない(クラウドだけを install する CI の型検査が通る)", () => {
+    for (const file of ["verify.ts", "lookahead-suspicion.ts", "analysis-store-types.ts"]) {
+      const closure = closureOf(path.join(SRC, "ev", file), { followTypes: true });
+      expect(closure.visited.length, `${file} の閉包を辿れている`).toBeGreaterThan(1);
+      expect(closure.offenders, file).toEqual([]);
+    }
   });
 });
 

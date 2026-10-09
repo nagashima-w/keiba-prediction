@@ -36,7 +36,7 @@ describe("率・金額の整形は exe と同じ", () => {
 describe("文言は exe と同じ", () => {
   const bet = { actualPayoutCount: 20, approximatePayoutCount: 1 };
   it("払戻内訳", () => {
-    expect(formatPayoutBreakdown(bet)).toBe(exeFormatPayoutBreakdown({ ...bet, betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, unjudgedOddsCount: 0 }));
+    expect(formatPayoutBreakdown(bet)).toBe(exeFormatPayoutBreakdown({ ...bet, betCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null }));
   });
 
   it("集計の内訳 6 項目を ` / ` で連ねると、exe の formatExclusionSummary と一致する(順序・文言・件数)", () => {

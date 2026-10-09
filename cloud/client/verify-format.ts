@@ -3,7 +3,21 @@
  * (率は小数第 1 位のパーセント、金額は 3 桁区切りの円)。exe の renderer は app の閉包(React ほか)で cloud から引けないため、同じ関数をここに持ち、
  * ルートの `scripts/test/cloud-verify-format.test.ts` が exe 版との出力の一致を固定する。
  */
-import type { ProposedBetType, VerifyReportView } from "./api-verify";
+/**
+ * 型は api-verify.ts から引かず、ここで構造的に宣言する(ルートの `scripts/test/` が exe の整形と比べるためにこのファイルを import する。api-verify.ts を引くと、
+ * ルートの型検査〈moduleResolution: nodenext〉が cloud/client の拡張子なしの import を解決できず落ちる)。`api-verify.ts` の型はこれを満たす。
+ */
+export type ProposedBetType = "place" | "win" | "wide" | "trio" | "quinella" | "exacta" | "trifecta" | "bracketQuinella";
+
+/** 集計の内訳に要る 6 つの件数。 */
+export interface ExclusionCounts {
+  readonly includedAnalysisCount: number;
+  readonly excludedAnalysisCount: number;
+  readonly supersededAnalysisCount: number;
+  readonly excludedEstimatedCount: number;
+  readonly excludedLookaheadSuspectCount: number;
+  readonly excludedLookaheadUnknownCount: number;
+}
 
 /** 0〜1 の割合を小数第 1 位のパーセント文字列にする。null は "-"。 */
 export function formatRate(rate: number | null): string {
@@ -21,7 +35,7 @@ export function formatPayoutBreakdown(bet: { readonly actualPayoutCount: number;
 }
 
 /** 集計の内訳(集計件数と、除外した件数の理由別)の行。exe の `formatExclusionSummary` を ` / ` で区切る前の項目に分けたもの(順序・文言は同じ)。 */
-export function exclusionRows(report: VerifyReportView): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+export function exclusionRows(report: ExclusionCounts): ReadonlyArray<{ readonly label: string; readonly value: string }> {
   return [
     { label: "集計", value: `${report.includedAnalysisCount}件` },
     { label: "結果未取込で除外", value: `${report.excludedAnalysisCount}件` },
