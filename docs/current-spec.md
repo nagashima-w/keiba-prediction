@@ -795,8 +795,8 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   `keiba-cloud-migration-YYYYMMDD.ndjson.gz`)→ 書き出し中はボタン無効+「書き出し中…」→ 完了で
   分析の件数・結果のレース数・ファイルの大きさ・保存先を表示。キャンセルは何もしない。失敗時はメッセージ+ログのコピーボタン。
   書き出しの二重実行は main 側で拒否する(設定タブの再マウントで画面側の状態が消えても防ぐ)。
-- **ファイル**: gzip 圧縮の NDJSON(1 行 = 1 つの JSON。区切りは `\n` だけ。JSON.stringify は値中の改行・U+2028 を必ずエスケープするので
-  1 行に収まる)。形式は core の `ev/cloud-migration-format.ts`(ブラウザと Worker でも動く。`node:` も `better-sqlite3` も import しない。
+- **ファイル**: gzip 圧縮の NDJSON(1 行 = 1 つの JSON。区切りは `\n` だけ。JSON.stringify は値中の改行〈`\n`・`\r`〉をエスケープするので
+  1 行に収まる。**U+2028・U+2029 はエスケープされず生のまま入る**〈2026-10-09 に node で確認〉ので、取り込み側は Unicode の行区切りではなく `\n` だけで分割すること)。形式は core の `ev/cloud-migration-format.ts`(ブラウザと Worker でも動く。`node:` も `better-sqlite3` も import しない。
   取り込み側は `@keiba/core/ev/cloud-migration-format` から import する)。
   1. ヘッダ 1 行: `{"type":"header","format":"keiba-cloud-migration","version":1,"exportedAt":<ISO UTC>,"appVersion":<アプリの版>}`
   2. 分析の行(0 行以上。`analysis.id` の昇順・重複なし): `{"type":"analysis","analysis":{analyses の全列},"horses":[analysis_horses の全列…],
