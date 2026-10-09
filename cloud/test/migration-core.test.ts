@@ -329,6 +329,9 @@ describe("D1 の 1 日の書き込み上限(予算)", () => {
     const done = (await count("analyses"));
     expect(done).toBeGreaterThan(0);
     expect(done).toBeLessThan(5);
+    // 1 回のアラームの途中でも止まる: 実物の分析 1(16 行)・分析 2(23 行)で、読み出しの計上 1 行を足して 40 行に達するので、同じアラームの 3 件目(15 行)は取り込まない。
+    expect(done).toBe(2);
+    expect(waiting.budget.usedRows).toBe(1 + 16 + 23);
     // 早すぎるアラーム(再開時刻の前)は何もしない
     h.clock.ms = resumeAt - 60_000;
     h.alarm.at = null;
