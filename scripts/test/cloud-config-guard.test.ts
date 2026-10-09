@@ -41,13 +41,14 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216・#217: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+  it("Issue #177・#216・#217・#219: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
     const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
     expect(migrations).toEqual([
       ["v1", '"NetkeibaGate"'],
       ["v2", '"RaceDay"'],
       ["v3", '"CloudMigration"'],
       ["v4", '"ResultBackfill"'],
+      ["v5", '"VerifyReportDO"'],
     ]);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
@@ -55,9 +56,11 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "CloudMigration"$/m);
     expect(tomlCode).toMatch(/^name = "RESULT_BACKFILL"$/m);
     expect(tomlCode).toMatch(/^class_name = "ResultBackfill"$/m);
+    expect(tomlCode).toMatch(/^name = "VERIFY_REPORT"$/m);
+    expect(tomlCode).toMatch(/^class_name = "VerifyReportDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
-    // DO のバインディングはちょうど4つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(4);
+    // DO のバインディングはちょうど5つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(5);
   });
 
   it("Issue #206: cron はちょうど1本で `0 0 * * *`(UTC 0:00 = JST 9:00)。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -761,6 +764,70 @@ describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも L
     expect(body).toContain("bucket.put(key, request.body");
     for (const forbidden of [".text()", ".json()", ".arrayBuffer()", ".blob()", "getReader(", "readLimitedText", "readJsonObjectBody"]) {
       expect(body, `handleMigrationUpload に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+  });
+});
+
+describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM にも出ず、他の DO・cron と干渉せず、Worker は D1・R2 に触れない", () => {
+  const verifySources = ["verify-core.ts", "verify-do.ts", "verify-store.ts", "verify-read.ts"].map((f) => [f, stripCode(readTextLf("cloud", "src", f))] as const);
+
+  it("検証のソース(4 ファイル)に、netkeiba の取得口・RaceDay・LLM・Discord・グローバルの fetch・他の DO が無い", () => {
+    expect(verifySources).toHaveLength(4);
+    for (const [name, code] of verifySources) {
+      expect(code.length, `${name} を読めている`).toBeGreaterThan(500);
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "ANTHROPIC", "DISCORD", "createCloudLlm", "createDiscordNotifier", "createGateHttpClient", "socket"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+  });
+
+  it("D1・R2 の読み書きは verify-store.ts だけ。R2 は get だけ(put・list・head・delete を使わない)、D1 の書き込みは analyses.start_time の補完と r2_ops の Class B の加算の 2 文だけ", () => {
+    const store = verifySources.find(([n]) => n === "verify-store.ts")![1];
+    expect(store).toContain("this.bucket.get(");
+    for (const forbidden of [".put(", ".list(", ".head(", ".delete(", "DELETE FROM", "INSERT INTO analyses", "INSERT INTO race_", "UPDATE race_", "UPDATE analysis_"]) {
+      expect(store, `verify-store.ts に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    expect((store.match(/UPDATE analyses SET start_time/g) ?? []).length).toBe(1);
+    expect((store.match(/INSERT INTO r2_ops/g) ?? []).length).toBe(1);
+    // 型 VerifyBucket は get だけを許す
+    expect(store).toMatch(/type VerifyBucket = Pick<R2Bucket, "get">/);
+    // ほかの検証のソースは D1・R2 に直接触れない(core は注入された窓口だけを使う)
+    for (const [name, code] of verifySources.filter(([n]) => n === "verify-core.ts" || n === "verify-read.ts")) {
+      for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", ".prepare(", ".batch("]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it("GET /api/verify の関数(handleVerify)は、検証の DO の getReport だけを呼ぶ。D1・R2・取得・LLM・Webhook に触れない", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handleVerify(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている
+    expect(body).toContain(".getReport(");
+    expect(body).toContain("sec-fetch-site");
+    for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", "NETKEIBA_GATE", "RACE_DAY", "RESULT_BACKFILL", "CLOUD_MIGRATION", ".kick(", ".start(", ".fetchRaw(", ".prepare(", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "fetch("]) {
+      expect(body, `handleVerify に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 検証の DO の binding に触れるのは handler.ts の 1 行(namespace 変数への代入)だけ(cloud/src の全ファイルを概念で走査)
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const sites: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((x) => x.endsWith(".ts") && x !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(/\benv\.VERIFY_REPORT\b|\bVerifyReportDO\b|\bVERIFY_REPORT\b/g) ?? []).length;
+      if (n > 0) sites[f] = n;
+    }
+    // handler.ts(Env の型・env.VERIFY_REPORT・binding なしのエラー文)・worker.ts(export の VerifyReportDO)・verify-do.ts(クラス定義の VerifyReportDO)だけ
+    expect(Object.keys(sites).sort()).toEqual(["handler.ts", "verify-do.ts", "worker.ts"]);
+    expect((handler.match(/\benv\.VERIFY_REPORT\b/g) ?? []).length).toBe(1);
+  });
+
+  it("cron の scheduled・RaceDay・result-dispatch・他の DO は、検証の DO を参照しない", () => {
+    for (const f of ["scheduled.ts", "race-day-do.ts", "race-day-core.ts", "result-dispatch.ts", "netkeiba-gate-do.ts", "migration-do.ts", "migration-core.ts", "result-backfill-do.ts", "result-backfill-core.ts"]) {
+      const code = stripCode(readTextLf("cloud", "src", f));
+      expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
+      expect(code, `${f} は検証を参照しない`).not.toMatch(/VERIFY_REPORT|VerifyReport|verify-core|verify-do|verify-store/);
     }
   });
 });

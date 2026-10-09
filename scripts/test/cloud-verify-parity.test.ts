@@ -162,7 +162,7 @@ function build(seed: number): Dataset {
   return { store, db };
 }
 
-function makeBets(next: () => number, headCount: number): AnalysisRecord["allocation"] extends infer A ? NonNullable<A>["bets"] : never {
+function makeBets(next: () => number, headCount: number): NonNullable<AnalysisRecord["allocation"]>["bets"] {
   const bets: Array<{ betType: string; comboKey: string; stake: number; odds: number | null; ev: number | null }> = [];
   const count = Math.floor(next() * 8);
   for (let i = 0; i < count; i += 1) {
@@ -274,7 +274,7 @@ describe("前提: 入力が一致の検査を空振りさせない(各カウン�
   });
 
   it("start_time の写しに、値・''(時刻なし)の両方がある(NULL=未確認は残っていない)", () => {
-    const values = (rows.analyses as Array<{ raceSnapshotJson: string | null }>).map((r) => r.raceSnapshotJson === null);
+    const values = rows.analyses.map((r) => r.raceSnapshotJson === null);
     expect(values.some((v) => v)).toBe(true);
     expect(values.some((v) => !v)).toBe(true);
     const nullCount = (dataset.db.prepare("SELECT count(*) AS n FROM analyses WHERE start_time IS NULL").get() as { n: number }).n;
@@ -312,7 +312,8 @@ describe("発走時刻の写し(start_time)が先読み判定を変える(補完
     const withTimes = (dataset.db.prepare("SELECT count(*) AS n FROM analyses WHERE start_time <> ''").get() as { n: number }).n;
     expect(withTimes).toBeGreaterThan(0);
     const cleared = readRows(dataset.db);
-    const clearedSource = buildVerifySource({ ...cleared, analyses: cleared.analyses.map((a) => ({ ...(a as object), raceSnapshotJson: null })) as never });
+    // 時刻の写しだけを失った行(SQL が組み立てるスナップショットが無い状態)にする。
+    const clearedSource = buildVerifySource({ ...cleared, analyses: cleared.analyses.map((a) => ({ ...a, raceSnapshotJson: null })) });
     const exe = computeVerifyReport(dataset.store, PRODUCTION_VERIFY_CONFIG, "all");
     const broken = computeVerifyReport(clearedSource, PRODUCTION_VERIFY_CONFIG, "all");
     expect(json(broken)).not.toEqual(json(exe));

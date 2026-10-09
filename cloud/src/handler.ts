@@ -23,6 +23,7 @@ import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } fr
 import { D1ResultStore } from "./result-repository";
 import type { MigrationStatus, StartResult } from "./migration-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
+import type { GetReportOptions, VerifyResponse } from "./verify-core";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -102,6 +103,21 @@ export interface BackfillNamespaceLike {
   get(id: any): BackfillStubLike;
 }
 
+/** 検証の DO(VerifyReportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #219。 */
+export interface VerifyStubLike {
+  /** 検証の集計(キャッシュ・補完の確認を含む)。区分は `all`・`central`・`nar`。 */
+  getReport(venue: "all" | "central" | "nar", options?: GetReportOptions): Promise<VerifyResponse>;
+}
+
+/** 検証の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link VERIFY_NAME})。 */
+export interface VerifyNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): VerifyStubLike;
+}
+
+/** 検証の DO の固定名(単一インスタンス)。 */
+const VERIFY_NAME = "main";
+
 export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
   /** 日単位の DO(RaceDay。wrangler.toml の binding)。Issue #177・#180。 */
@@ -110,6 +126,8 @@ export interface Env extends AccessEnv {
   CLOUD_MIGRATION?: MigrationNamespaceLike;
   /** 結果の補完の DO(ResultBackfill。wrangler.toml の binding)。Issue #217。本番では常にある。無い構成では `GET /api/results/backfill` が 503 になり、cron は kick を呼ばない。 */
   RESULT_BACKFILL?: BackfillNamespaceLike;
+  /** 検証の集計の DO(VerifyReportDO。wrangler.toml の binding)。Issue #219。本番では常にある。無い構成では `GET /api/verify` が 503 になる。 */
+  VERIFY_REPORT?: VerifyNamespaceLike;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
   DB: AnalysisDb;
   /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
@@ -279,6 +297,17 @@ export async function handle(
     return handleMigrationStatus(env);
   }
 
+  if (pathname === "/api/verify") {
+    // 読み取り専用(検証の DO の集計を読むだけ。netkeiba にも LLM にも出ない。Worker は D1・R2 に触れない)。GET だけ(HEAD で DO を開かない)。Issue #219。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleVerify(request, env);
+  }
+
   if (pathname === "/api/results/backfill") {
     // 読み取り専用(補完の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #217。
     if (method !== "GET") {
@@ -391,6 +420,45 @@ async function handleBackfillStatus(env: Env): Promise<Response> {
     return json({ ok: true, ...(await namespace.get(namespace.idFromName(RESULT_BACKFILL_NAME)).getStatus()) });
   } catch {
     return json({ ok: false, error: { type: "backfill-error" } }, 503);
+  }
+}
+
+const VERIFY_PARAMS = new Set(["venue", "refresh"]);
+const VERIFY_VENUES = new Set(["all", "central", "nar"]);
+
+/**
+ * `GET /api/verify?venue=all|central|nar[&refresh=1]`(Issue #219〈#219 web の検証画面(1)〉): 検証の集計(累積回収率・配分ベースの回収率ほか。core の `computeVerifyReport`)。
+ * 集計は DO(`VerifyReportDO`)がキャッシュ付きで行い、Worker は呼ぶだけ(Workers Free の CPU は 10ms。D1・R2 に触れない)。応答の `status`: `ready`(集計。`stale` なら古い)・
+ * `preparing`(発走時刻の補完中)・`throttled`(1 日の再計算の上限に達していて、出せる集計が無い)。`refresh=1` は再計算の要求(DO の最短間隔・1 日の上限は守られる)。
+ * **別サイトからの要求は 403**(`Sec-Fetch-Site`。D1 を数万行読む再計算を外から起こされないため)。入力の検証が先(400。DO は呼ばない)。DO の失敗・binding なしは 503(固定の種類名)。
+ */
+async function handleVerify(request: Request, env: Env): Promise<Response> {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null && site !== "same-origin" && site !== "none") {
+    return json({ ok: false, error: { type: "origin-mismatch" } }, 403);
+  }
+  const url = new URL(request.url);
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((k) => !VERIFY_PARAMS.has(k)) || new Set(keys).size !== keys.length) {
+    return badRequest("クエリは venue(all・central・nar)と refresh(1 または 0)だけを、それぞれ1つまで指定できます");
+  }
+  const venue = url.searchParams.get("venue") ?? "all";
+  if (!VERIFY_VENUES.has(venue)) {
+    return badRequest("venue は all・central・nar のどれかで指定してください");
+  }
+  const refreshValue = url.searchParams.get("refresh");
+  if (refreshValue !== null && refreshValue !== "0" && refreshValue !== "1") {
+    return badRequest("refresh は 1 または 0 で指定してください");
+  }
+  try {
+    const namespace = env.VERIFY_REPORT;
+    if (namespace === undefined) {
+      throw new Error("VERIFY_REPORT binding がありません");
+    }
+    const response = await namespace.get(namespace.idFromName(VERIFY_NAME)).getReport(venue as "all" | "central" | "nar", { refresh: refreshValue === "1" });
+    return json({ ok: true, ...response });
+  } catch {
+    return json({ ok: false, error: { type: "verify-error" } }, 503);
   }
 }
 

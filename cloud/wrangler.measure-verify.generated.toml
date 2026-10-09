@@ -125,3 +125,9 @@ cheerio = "./node_modules/cheerio"
 "@keiba/core/scorer/snapshot-filter" = "../packages/core/src/scorer/snapshot-filter.ts"
 "@keiba/core/ev/bet-allocation" = "../packages/core/src/ev/bet-allocation.ts"
 "@keiba/core/ev/combo-bet-allocation" = "../packages/core/src/ev/combo-bet-allocation.ts"
+
+[access.dev]
+aud = "measure-aud"
+
+[access.dev.identity]
+email = "owner@example.com"
