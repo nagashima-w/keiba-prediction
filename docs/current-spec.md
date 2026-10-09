@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.23.2)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.23.3)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.23.2`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.23.3`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -379,7 +379,7 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
   - **オッズが使えない買い目は「規則U」で判定不能として除外**(Issue #50): `isUsableOdds` を
     通らない `placeOddsMin` の馬は、点数・賭け金・払戻の**いずれにも計上せず** `unjudgedOddsCount`
     に別に数える。現行の本番経路では到達しない防御的堅牢化
-- **キャリブレーション**: 推定確率帯(既定 10 分割)ごとの実複勝率(`CalibrationBin`)と、過信バイアス
+- **キャリブレーション**: 推定確率帯(既定 20 分割 = 5% 刻み。Issue #37 で 10 から変更)ごとの実複勝率(`CalibrationBin`)と、過信バイアス
   (`CalibrationBiasBin`、代表予測値 − 実複勝率)。
   - **「3着以内(`isInTopThree`)」と「複勝の払戻対象(`isPlaceHit`)」は別概念**(Issue #70)。
     キャリブレーション・補正傾向・印別的中率・`RaceBreakdownHorse.isPlaced` は**前者だけ**を使い、
@@ -943,7 +943,10 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - **確率の質の測定(#41「#35-1b」。着順が必要な指標)**: `ev/probability-quality.ts` の
   `buildBrierQualityReport`(二値事象〈3着以内〉の Brier・Murphy 分解〈REL/RES/UNC と、帯内分散−2×帯内共分散の
   残差〉・気候値/市場に対する skill・レース単位ブートストラップ・レース内ラベル並べ替えによる resolution の参照値)。
-  帯は検証画面と共有する `ev/calibration-bins.ts`(`binIndexFor`)。市場比較は出走8頭以上・確定オッズ・
+  **帯の切り方**(`binIndexFor`・`calibrationBinBounds`)は検証画面と `ev/calibration-bins.ts` で共有する
+  (同じ帯数を渡せば同じ帯になる)。**既定の帯数は用途ごとに分かれている**(#37): 検証画面は 20(5% 刻み。
+  表示の解像度。`DEFAULT_VERIFY_BIN_COUNT`)、確率の質の測定は 10(`DEFAULT_QUALITY_BIN_COUNT`。コミット済みの
+  #41・#156 の測定記録を既定で再現するため据え置く)。検証画面と同じ帯で集計したいときは帯数を明示して渡す。市場比較は出走8頭以上・確定オッズ・
   市場含意確率が1以下のレースの同じ集合の対に限る。低レベル関数は `probability-quality-metrics.ts`(内部)。
 - **#41 の測定スクリプト**: `scripts/probability-quality-41/`(`fetch.ts`=ネットワーク・観測 JSON を保存、
   `aggregate.ts`=オフライン集計)。選定ルール・指標・読み方は

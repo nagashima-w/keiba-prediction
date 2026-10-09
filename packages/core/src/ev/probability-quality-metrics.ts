@@ -51,7 +51,7 @@ import { isUsableOdds } from "./allocation-primitives.js";
 import {
   binIndexFor,
   calibrationBinBounds,
-  DEFAULT_CALIBRATION_BIN_COUNT,
+  DEFAULT_QUALITY_BIN_COUNT,
 } from "./calibration-bins.js";
 
 // ---------------------------------------------------------------------------
@@ -670,11 +670,12 @@ export type BrierDecompositionResult =
 
 /**
  * 二値事象の Brier スコアを Murphy 分解する。帯は検証画面のキャリブレーションと同じ
- * (`calibration-bins.ts` の `binIndexFor` を共有。既定10帯)。
+ * (`calibration-bins.ts` の `binIndexFor` を共有する。**同じ帯数を渡せば**検証画面と同じ帯になる。
+ * 既定は `DEFAULT_QUALITY_BIN_COUNT`=10帯で、検証画面の既定〈20帯〉とは別。#37)。
  */
 export function computeBrierDecomposition(
   observations: readonly BrierObservation[],
-  binCount: number = DEFAULT_CALIBRATION_BIN_COUNT,
+  binCount: number = DEFAULT_QUALITY_BIN_COUNT,
 ): BrierDecompositionResult {
   if (!Number.isInteger(binCount) || binCount < 1) {
     return { decomposition: null, reason: `帯数が正の整数でない(値=${String(binCount)})` };
@@ -896,7 +897,7 @@ export type PermutationResolutionResult =
 export function withinRacePermutationResolution(
   races: readonly (readonly BrierObservation[])[],
   options: BootstrapOptions,
-  binCount: number = DEFAULT_CALIBRATION_BIN_COUNT,
+  binCount: number = DEFAULT_QUALITY_BIN_COUNT,
 ): PermutationResolutionResult {
   const { iterations, seed } = options;
   const raceCount = races.length;

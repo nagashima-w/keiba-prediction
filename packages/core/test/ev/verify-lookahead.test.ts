@@ -299,11 +299,11 @@ describe("verify の先読みリーク疑い除外(Issue #152 A)", () => {
       // 前提: ON と OFF で回収率が実際に異なる(同じなら除外の効果をこのテストで検出できない)。
       expect(on.bet.recoveryRate).not.toBe(off.bet.recoveryRate);
 
-      // キャリブレーション: 予測 0.5 は帯5。ON は 7件中7件的中、OFF は 15件中7件的中。
-      expect(on.calibration[5]!.predictedCount).toBe(7);
-      expect(on.calibration[5]!.placedCount).toBe(7);
-      expect(off.calibration[5]!.predictedCount).toBe(15);
-      expect(off.calibration[5]!.placedCount).toBe(7);
+      // キャリブレーション: 予測 0.5 は帯10(50-55%。20帯)。ON は 7件中7件的中、OFF は 15件中7件的中。
+      expect(on.calibration[10]!.predictedCount).toBe(7);
+      expect(on.calibration[10]!.placedCount).toBe(7);
+      expect(off.calibration[10]!.predictedCount).toBe(15);
+      expect(off.calibration[10]!.placedCount).toBe(7);
 
       // 配分ベース: 母集団(allocated)と賭け金・払戻が同じ母集団に追随する。
       expect(on.proposedBet.population.allocated).toBe(7);

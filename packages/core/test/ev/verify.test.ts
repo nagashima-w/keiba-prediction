@@ -231,38 +231,61 @@ describe("computeVerifyReport(verify集計)", () => {
   });
 
   describe("キャリブレーション表(推定確率帯ごとの実際の複勝率)", () => {
-    it("10個の確率帯(0-10%..90-100%)を返すこと", () => {
+    it("20個の確率帯(0-5%..95-100%。5% 刻み)を返すこと", () => {
       const store = new AnalysisStore();
       const report = computeVerifyReport(store);
-      expect(report.calibration).toHaveLength(10);
+      expect(report.calibration).toHaveLength(20);
       expect(report.calibration[0]!.lowerBound).toBeCloseTo(0, 10);
-      expect(report.calibration[0]!.upperBound).toBeCloseTo(0.1, 10);
-      expect(report.calibration[9]!.lowerBound).toBeCloseTo(0.9, 10);
-      expect(report.calibration[9]!.upperBound).toBeCloseTo(1.0, 10);
+      expect(report.calibration[0]!.upperBound).toBeCloseTo(0.05, 10);
+      expect(report.calibration[1]!.lowerBound).toBeCloseTo(0.05, 10);
+      expect(report.calibration[19]!.lowerBound).toBeCloseTo(0.95, 10);
+      expect(report.calibration[19]!.upperBound).toBeCloseTo(1.0, 10);
     });
 
-    it("確率帯の下限は含み上限は含まない(10%ちょうどは10-20%帯、100%は90-100%帯)", () => {
+    it("確率帯の下限は含み上限は含まない(5%・10%ちょうどは上の帯、100%は95-100%帯)", () => {
       const store = new AnalysisStore();
       store.saveAnalysis({
         raceId: "R1",
         analyzedAt: "t",
         horses: [
-          horse(1, 0.1, 2.0, 0.2, false), // → 10-20% 帯
-          horse(2, 0.2, 2.0, 0.4, false), // → 20-30% 帯
-          horse(3, 1.0, 2.0, 2.0, true), // → 90-100% 帯
+          horse(1, 0.05, 2.0, 0.1, false), // → 5-10% 帯(index 1)
+          horse(2, 0.1, 2.0, 0.2, false), // → 10-15% 帯(index 2)
+          horse(3, 0.0999, 2.0, 0.2, false), // → 5-10% 帯(index 1。10% 未満)
+          horse(4, 1.0, 2.0, 2.0, true), // → 95-100% 帯(index 19)
         ],
       });
       store.saveResult("R1", [
         { umaban: 1, finishPosition: 1 },
         { umaban: 2, finishPosition: 8 },
-        { umaban: 3, finishPosition: 2 },
+        { umaban: 3, finishPosition: 9 },
+        { umaban: 4, finishPosition: 2 },
       ]);
       const report = computeVerifyReport(store);
-      expect(report.calibration[1]!.predictedCount).toBe(1); // 10-20%
-      expect(report.calibration[2]!.predictedCount).toBe(1); // 20-30%
-      expect(report.calibration[9]!.predictedCount).toBe(1); // 90-100%
-      // 0-10% 帯には誰も入らない。
+      expect(report.calibration[1]!.predictedCount).toBe(2); // 5-10%(0.05 と 0.0999)
+      expect(report.calibration[2]!.predictedCount).toBe(1); // 10-15%(0.1 ちょうど)
+      expect(report.calibration[19]!.predictedCount).toBe(1); // 95-100%
+      // 0-5% 帯には誰も入らない。
       expect(report.calibration[0]!.predictedCount).toBe(0);
+      // 全件がどこかの帯に入っている(件数の合計が入力頭数と一致)。
+      expect(report.calibration.reduce((sum, b) => sum + b.predictedCount, 0)).toBe(4);
+      store.close();
+    });
+
+    it("設定で帯数を上書きできる(10帯なら 0.05 は先頭帯。既定の20帯とは別の振り分けになる)", () => {
+      const store = new AnalysisStore();
+      store.saveAnalysis({
+        raceId: "R1",
+        analyzedAt: "t",
+        horses: [horse(1, 0.05, 2.0, 0.1, false)],
+      });
+      store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]);
+      const coarse = computeVerifyReport(store, { ...DEFAULT_VERIFY_CONFIG, calibrationBins: 10 });
+      const fine = computeVerifyReport(store);
+      expect(coarse.calibration).toHaveLength(10);
+      expect(fine.calibration).toHaveLength(20);
+      expect(coarse.calibration[0]!.predictedCount).toBe(1); // 0-10%
+      expect(fine.calibration[0]!.predictedCount).toBe(0); // 0-5% には入らない
+      expect(fine.calibration[1]!.predictedCount).toBe(1); // 5-10%
       store.close();
     });
 
@@ -272,8 +295,8 @@ describe("computeVerifyReport(verify集計)", () => {
         raceId: "R1",
         analyzedAt: "t",
         horses: [
-          horse(1, 0.45, 2.0, 0.9, false), // 40-50%、複勝圏内
-          horse(2, 0.42, 2.0, 0.84, false), // 40-50%、圏外
+          horse(1, 0.45, 2.0, 0.9, false), // 45-50%、複勝圏内
+          horse(2, 0.47, 2.0, 0.94, false), // 45-50%、圏外
         ],
       });
       store.saveResult("R1", [
@@ -281,7 +304,7 @@ describe("computeVerifyReport(verify集計)", () => {
         { umaban: 2, finishPosition: 5 },
       ]);
       const report = computeVerifyReport(store);
-      const bin = report.calibration[4]!; // 40-50%
+      const bin = report.calibration[9]!; // 45-50%
       expect(bin.predictedCount).toBe(2);
       expect(bin.placedCount).toBe(1);
       expect(bin.actualPlaceRate).toBeCloseTo(0.5, 10);
@@ -303,7 +326,10 @@ describe("computeVerifyReport(verify集計)", () => {
       });
       store.saveResult("R1", [{ umaban: 1, finishPosition: null }]);
       const report = computeVerifyReport(store);
-      expect(report.calibration[4]!.predictedCount).toBe(0);
+      // 0.45 が入る帯(45-50%、index 9)は空。どの帯にも数えられていない(帯の取り違えで空振りしない)。
+      expect(report.calibration).toHaveLength(20);
+      expect(report.calibration[9]!.predictedCount).toBe(0);
+      expect(report.calibration.every((b) => b.predictedCount === 0)).toBe(true);
       store.close();
     });
   });
@@ -509,8 +535,8 @@ describe("computeVerifyReport(verify集計)", () => {
       const report = computeVerifyReport(store);
 
       // --- isInTopThree側(3着以内)の指標: umaban3(prob=0.55)は3着なので的中として計上される ---
-      // 前提固定: 50-60%帯にはumaban3しかいない(他は0.05/0.15/0.25/0.35/0.45で別帯)。
-      const bin = report.calibration[5]!;
+      // 前提固定: 55-60%帯(index 11)にはumaban3しかいない(他は0.05/0.15/0.25/0.35/0.45で別帯)。
+      const bin = report.calibration[11]!;
       expect(bin.predictedCount).toBe(1);
       expect(bin.placedCount).toBe(1); // isInTopThree=true(finish3<=3)として計上
       expect(bin.actualPlaceRate).toBeCloseTo(1, 10);
@@ -767,16 +793,17 @@ describe("computeVerifyReport(verify集計)", () => {
     });
 
     describe("(2) キャリブレーションの過信バイアス", () => {
-      it("代表予測値は帯の中央値であること(例 20-30%帯→0.25)、予測0件の帯はoverconfidenceGapがnullであること", () => {
+      it("代表予測値は帯の中央値であること(例 20-25%帯→0.225)、予測0件の帯はoverconfidenceGapがnullであること", () => {
         const store = new AnalysisStore();
         const report = computeVerifyReport(store);
-        expect(report.trend.calibrationBias).toHaveLength(10);
-        expect(report.trend.calibrationBias[2]!.representativeProb).toBeCloseTo(
-          0.25,
+        expect(report.trend.calibrationBias).toHaveLength(20);
+        // 20-25%帯(index 4)の代表値は 0.225。
+        expect(report.trend.calibrationBias[4]!.representativeProb).toBeCloseTo(
+          0.225,
           10,
         );
-        expect(report.trend.calibrationBias[2]!.predictedCount).toBe(0);
-        expect(report.trend.calibrationBias[2]!.overconfidenceGap).toBeNull();
+        expect(report.trend.calibrationBias[4]!.predictedCount).toBe(0);
+        expect(report.trend.calibrationBias[4]!.overconfidenceGap).toBeNull();
         store.close();
       });
 
@@ -786,8 +813,8 @@ describe("computeVerifyReport(verify集計)", () => {
           raceId: "R1",
           analyzedAt: "t",
           horses: [
-            trendHorse(1, 0.25, 0.25, null), // 20-30%帯、圏外
-            trendHorse(2, 0.25, 0.25, null), // 20-30%帯、圏外
+            trendHorse(1, 0.225, 0.225, null), // 20-25%帯、圏外
+            trendHorse(2, 0.225, 0.225, null), // 20-25%帯、圏外
           ],
         });
         store.saveResult("R1", [
@@ -795,12 +822,12 @@ describe("computeVerifyReport(verify集計)", () => {
           { umaban: 2, finishPosition: 9 },
         ]);
         const report = computeVerifyReport(store);
-        const bin = report.trend.calibrationBias[2]!;
+        const bin = report.trend.calibrationBias[4]!;
         expect(bin.predictedCount).toBe(2);
         expect(bin.actualPlaceRate).toBeCloseTo(0, 10);
-        expect(bin.representativeProb).toBeCloseTo(0.25, 10);
-        // 予測0.25 − 実績0 = +0.25(過信)。
-        expect(bin.overconfidenceGap).toBeCloseTo(0.25, 10);
+        expect(bin.representativeProb).toBeCloseTo(0.225, 10);
+        // 予測0.225 − 実績0 = +0.225(過信)。
+        expect(bin.overconfidenceGap).toBeCloseTo(0.225, 10);
         store.close();
       });
 
@@ -809,14 +836,14 @@ describe("computeVerifyReport(verify集計)", () => {
         store.saveAnalysis({
           raceId: "R1",
           analyzedAt: "t",
-          horses: [trendHorse(1, 0.05, 0.05, null)], // 0-10%帯
+          horses: [trendHorse(1, 0.02, 0.02, null)], // 0-5%帯
         });
         store.saveResult("R1", [{ umaban: 1, finishPosition: 1 }]); // 的中→実績1
         const report = computeVerifyReport(store);
         const bin = report.trend.calibrationBias[0]!;
-        expect(bin.representativeProb).toBeCloseTo(0.05, 10);
+        expect(bin.representativeProb).toBeCloseTo(0.025, 10);
         expect(bin.actualPlaceRate).toBeCloseTo(1, 10);
-        expect(bin.overconfidenceGap).toBeCloseTo(0.05 - 1, 10);
+        expect(bin.overconfidenceGap).toBeCloseTo(0.025 - 1, 10);
         store.close();
       });
     });

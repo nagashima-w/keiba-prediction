@@ -4,7 +4,7 @@
  *
  * 保存済み分析(AnalysisStore)×実結果から次を算出する:
  * - 累積回収率: EVプラス馬券を複勝100円ずつ買ったと仮定した回収率。
- * - キャリブレーション表: 推定確率帯(0-10%..90-100%)ごとの予測件数と実際の複勝率。
+ * - キャリブレーション表: 推定確率帯(既定は5%刻みの20帯: 0-5%..95-100%)ごとの予測件数と実際の複勝率。
  *
  * 同一レースの複数分析の扱い(二重計上防止):
  * - 同一レースは発走前と発走直前(オッズ再取得)で複数回分析されうる。すべてを独立に集計すると、
@@ -116,7 +116,7 @@
  *   件数・実複勝率(finish<=placeMaxRank)・平均補正幅(diffの単純平均)を算出する。
  *   ε(directionEpsilon)は VerifyConfig で調整可能(既定0.005)。
  * - (2) 過信バイアス: 既存キャリブレーション表の各帯について、代表予測値(帯の中央値。
- *   例 20-30%帯→0.25)と actualPlaceRate の差(overconfidenceGap = 代表予測値 − 実績。
+ *   例 20-25%帯→0.225)と actualPlaceRate の差(overconfidenceGap = 代表予測値 − 実績。
  *   正なら過信、負なら過小評価)を算出する。予測0件の帯は null。
  * - (3) 印別的中率: mark(◎〇▲△☆注)ごとに件数・複勝率(finish<=placeMaxRank)・
  *   勝率(finish=1)を算出する。mark=null(印なし)も1群として必ず含める。
@@ -201,7 +201,7 @@ import { parseRaceId, venueKindOfRaceId, type RaceIdVenueKind } from "../scraper
 import {
   binIndexFor,
   calibrationBinBounds,
-  DEFAULT_CALIBRATION_BIN_COUNT,
+  DEFAULT_VERIFY_BIN_COUNT,
 } from "./calibration-bins.js";
 import { isUsableOdds } from "./allocation-primitives.js";
 import { classifyLookaheadSuspicion } from "./lookahead-suspicion.js";
@@ -219,7 +219,7 @@ export interface VerifyConfig {
   readonly stakePerBet: number;
   /** 複勝圏(的中)とみなす上限着順(既定3)。 */
   readonly placeMaxRank: number;
-  /** キャリブレーション表の分割数(既定10 → 0-10%..90-100%)。 */
+  /** キャリブレーション表の分割数(既定20 → 0-5%..95-100%。#37 で10から変更)。 */
   readonly calibrationBins: number;
   /**
    * true のとき同一レースの全分析を独立に集計する(旧挙動のオプトイン)。既定 false(latestモード:
@@ -249,7 +249,7 @@ export interface VerifyConfig {
 export const DEFAULT_VERIFY_CONFIG: VerifyConfig = {
   stakePerBet: 100,
   placeMaxRank: 3,
-  calibrationBins: DEFAULT_CALIBRATION_BIN_COUNT,
+  calibrationBins: DEFAULT_VERIFY_BIN_COUNT,
   includeAllAnalyses: false,
   directionEpsilon: 0.005,
   excludeLookaheadSuspects: false,
@@ -290,7 +290,7 @@ export interface CalibrationBiasBin {
   readonly lowerBound: number;
   /** 帯の上限(含まない。最終帯のみ 1.0 を含む)。 */
   readonly upperBound: number;
-  /** 代表予測値(帯の中央値。例 20-30%帯→0.25)。 */
+  /** 代表予測値(帯の中央値。例 20-25%帯→0.225)。 */
   readonly representativeProb: number;
   /** この帯に入った予測件数。 */
   readonly predictedCount: number;

@@ -8,14 +8,15 @@ import {
   type BrierObservation,
   type RaceSquaredErrorPair,
 } from "../../src/ev/probability-quality-metrics.js";
-import { binIndexFor } from "../../src/ev/calibration-bins.js";
+import { binIndexFor, DEFAULT_QUALITY_BIN_COUNT } from "../../src/ev/calibration-bins.js";
 import { AnalysisStore } from "../../src/ev/analysis-store.js";
-import { computeVerifyReport } from "../../src/ev/verify.js";
+import { computeVerifyReport, DEFAULT_VERIFY_CONFIG } from "../../src/ev/verify.js";
 
 /**
  * 二値事象(3着以内に入ったか)の Brier スコアと Murphy 分解(#41「#35-1b」)。
  *
- * 帯は検証画面のキャリブレーションと同じ10帯(`calibration-bins.ts` を共有)。帯で丸めた分解は
+ * 帯の切り方は検証画面のキャリブレーションと共有(`calibration-bins.ts`。同じ帯数を渡せば同じ帯になる)。
+ * 既定の帯数は10(`DEFAULT_QUALITY_BIN_COUNT`。検証画面の既定は20で、別。#37)。帯で丸めた分解は
  * `BS = REL − RES + UNC` が**近似でしか成り立たない**ため、残差(帯内分散の項と帯内共分散の項)を
  * REL/RES/UNC とは**独立に**算出し、恒等式
  * `BS = REL − RES + UNC + (帯内分散 − 2×帯内共分散)` が残差込みで一致することを固定する
@@ -208,6 +209,13 @@ describe("computeBrierDecomposition: 退化・境界ケースの手計算", () =
     }
   });
 
+  it("帯数を省略すると既定は10帯(DEFAULT_QUALITY_BIN_COUNT。検証画面の既定20とは別。#37)", () => {
+    const d = computeBrierDecomposition([obs(0.5, true)]).decomposition!;
+    expect(DEFAULT_QUALITY_BIN_COUNT).toBe(10);
+    expect(DEFAULT_VERIFY_CONFIG.calibrationBins).not.toBe(DEFAULT_QUALITY_BIN_COUNT); // 前提: 2つの既定は別
+    expect(d.bins).toHaveLength(10);
+  });
+
   it("帯数を引数で変えられる(5帯なら 0.2 は第2帯)", () => {
     const d = computeBrierDecomposition([obs(0.2, true)], 5).decomposition!;
     expect(d.bins).toHaveLength(5);
@@ -379,8 +387,13 @@ describe("bootstrapBrierDifferenceByRace: レース単位の再標本化(固定�
   });
 });
 
-describe("Murphy 分解の帯は検証画面のキャリブレーションと同じ集計になる(突合)", () => {
-  it("境界値(0・0.1・0.3・0.7・0.9・1.0)を含む同じ入力で、帯ごとの件数・実績率が一致する", () => {
+describe("Murphy 分解の帯は、同じ帯数を渡せば検証画面のキャリブレーションと同じ集計になる(突合。#37)", () => {
+  // 既定の帯数は用途ごとに分かれた(検証画面20・測定10)ので、帯数を明示して揃えた場合の一致を固定する。
+  // 埋まる帯の数は入力(下の cases)と帯数から決まる(10帯なら7、20帯なら10。cases の確率を帯に写して数えた)。
+  it.each([
+    { binCount: 10, filledBins: 7 },
+    { binCount: 20, filledBins: 10 },
+  ])("境界値(0・0.05・0.1・0.3・0.7・0.9・1.0)を含む同じ入力で、$binCount帯の件数・実績率が一致する", ({ binCount, filledBins }) => {
     // 3着以内=着順3以下。境界の確率を意図的に混ぜる。
     const cases: ReadonlyArray<{ readonly prob: number; readonly finish: number }> = [
       { prob: 0, finish: 9 },
@@ -419,17 +432,21 @@ describe("Murphy 分解の帯は検証画面のキャリブレーションと同
       "R1",
       cases.map((c, i) => ({ umaban: i + 1, finishPosition: c.finish })),
     );
-    const verifyBins = computeVerifyReport(store).calibration;
+    const verifyBins = computeVerifyReport(store, { ...DEFAULT_VERIFY_CONFIG, calibrationBins: binCount })
+      .calibration;
     store.close();
 
     const decomposition = computeBrierDecomposition(
       cases.map((c) => obs(c.prob, c.finish <= 3)),
+      binCount,
     ).decomposition!;
 
     // 前提(空振り防止): 件数の合計が一致し、複数の帯が埋まっている。
     expect(verifyBins.reduce((s, b) => s + b.predictedCount, 0)).toBe(cases.length);
-    expect(decomposition.bins.filter((b) => b.count > 0).length).toBe(7);
-    for (let k = 0; k < 10; k++) {
+    expect(verifyBins).toHaveLength(binCount);
+    expect(decomposition.bins).toHaveLength(binCount);
+    expect(decomposition.bins.filter((b) => b.count > 0).length).toBe(filledBins);
+    for (let k = 0; k < binCount; k++) {
       expect(decomposition.bins[k]!.lowerBound).toBeCloseTo(verifyBins[k]!.lowerBound, 12);
       expect(decomposition.bins[k]!.upperBound).toBeCloseTo(verifyBins[k]!.upperBound, 12);
       expect(decomposition.bins[k]!.count).toBe(verifyBins[k]!.predictedCount);
