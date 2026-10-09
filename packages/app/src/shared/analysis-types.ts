@@ -860,6 +860,26 @@ export type LogExportOutcome =
   | { readonly status: "canceled" };
 
 /**
+ * クラウド移行用の書き出し(Issue #215・#167-A。main→renderer に invoke の戻り値として返す)。
+ * - "saved": 保存先ダイアログでファイルを選び、gzip 圧縮の NDJSON を書き出した。
+ *   件数は**実際に書いた行数**(分析は 1 分析 1 行、結果は 1 レース 1 行)。
+ * - "canceled": 保存先ダイアログをキャンセルした(何も書き込んでいない)。
+ * 失敗は例外(reject)で伝える(ログエクスポートと同じ流儀。メッセージに「どの表・どの id/race_id・どの列か」を含みうる)。
+ */
+export type CloudMigrationExportOutcome =
+  | {
+      readonly status: "saved";
+      readonly filePath: string;
+      /** 書き出した分析の数。 */
+      readonly analysisCount: number;
+      /** 書き出した結果のレース数。 */
+      readonly resultRaceCount: number;
+      /** ファイルの大きさ(バイト)。 */
+      readonly fileBytes: number;
+    }
+  | { readonly status: "canceled" };
+
+/**
  * 分析データのエクスポート(第一版、GitHub Issue#10。main→renderer に invoke の戻り値として返す)。
  * - "saved": 保存先ダイアログでJSONの保存先を選び、schemaVersion=1のJSON+馬別CSVの2ファイルを
  *   書き出した(CSVパスはJSON保存先から拡張子を置き換えて自動決定。log-exportとの契約差分は

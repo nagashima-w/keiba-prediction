@@ -92,6 +92,12 @@ export const IPC_CHANNELS = {
    * 書き出す。保存先はJSON側をダイアログで選ばせ、CSVは同じ場所へ拡張子違いで自動保存する。
    */
   exportAnalysis: "analysis:export",
+  /**
+   * クラウド版(Cloudflare D1+R2)への移行用の書き出し(Issue #215・#167-A)。分析と結果の 8 表を、
+   * gzip 圧縮の NDJSON 1 ファイルへ書き出す(取得キャッシュは含めない)。保存先はダイアログで選ばせる。
+   * 取り込みは web の画面から(Issue #216)。
+   */
+  exportCloudMigration: "migration:export-cloud",
 } as const;
 
 /** IPC_CHANNELS の値(実際のチャネル名文字列)のユニオン型。 */

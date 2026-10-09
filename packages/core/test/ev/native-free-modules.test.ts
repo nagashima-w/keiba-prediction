@@ -241,3 +241,49 @@ describe("狭い入口 @keiba/core/llm(Issue #193)", () => {
     }
   });
 });
+
+/**
+ * Issue #215(#167-A): クラウド移行ファイルの形式。取り込み側(#216。ブラウザと Worker)が import するのは
+ * サブパス `@keiba/core/ev/cloud-migration-format` だけで、**この閉包に better-sqlite3・`node:` の組込み・
+ * 実 DB の読み出し側(cloud-migration-reader.ts)・バレルが入ってはならない**(過去に `node:zlib` の混入で renderer の CI が落ちた)。
+ * 生成器(cloud-migration-lines.ts)も同じ条件を満たす(読み出しはインターフェース越しで、実 DB を知らない)。
+ */
+describe("移行ファイルの形式 @keiba/core/ev/cloud-migration-format(Issue #215)", () => {
+  const FORMAT = path.join("ev", "cloud-migration-format.ts");
+  const LINES = path.join("ev", "cloud-migration-lines.ts");
+  const READER = path.join("ev", "cloud-migration-reader.ts");
+
+  it.each([FORMAT, LINES])("%s は実在し、閉包(型だけの import も辿る)に better-sqlite3・読み出し側・バレル・analysis-store.ts が無い", (relative) => {
+    const entry = path.join(SRC, relative);
+    expect(existsSync(entry), `${relative} が存在する`).toBe(true);
+    const { visited, offenders } = closureOf(entry, { followTypes: true });
+    expect(visited.length).toBeGreaterThanOrEqual(1);
+    expect(offenders).toEqual([]);
+    const names = visited.map((f) => path.relative(SRC, f));
+    for (const forbidden of ["index.ts", READER, path.join("scraper", "cache.ts"), path.join("ev", "analysis-store.ts")]) {
+      expect(names, `${relative} → ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it.each([FORMAT, LINES])("%s の閉包の import は、すべて相対指定子(node: の組込み・パッケージを一切含まない)", (relative) => {
+    const { visited } = closureOf(path.join(SRC, relative), { followTypes: true });
+    expect(visited.length).toBeGreaterThanOrEqual(1);
+    for (const file of visited) {
+      for (const ref of importRefs(readFileSync(file, "utf-8"))) {
+        expect(ref.specifier.startsWith("."), `${path.relative(SRC, file)} の import ${ref.specifier}`).toBe(true);
+      }
+    }
+  });
+
+  it("package.json の exports に ./ev/cloud-migration-format があり、src/ev/cloud-migration-format.ts を指す", () => {
+    const pkg = JSON.parse(readFileSync(path.join(SRC, "..", "package.json"), "utf-8")) as {
+      exports: Record<string, string>;
+    };
+    expect(pkg.exports["./ev/cloud-migration-format"]).toBe("./src/ev/cloud-migration-format.ts");
+  });
+
+  it("対照: 読み出し側(cloud-migration-reader.ts)は better-sqlite3 を import している(検出器が実物で効く)", () => {
+    expect(existsSync(path.join(SRC, READER))).toBe(true);
+    expect(closureOf(path.join(SRC, READER), { followTypes: true }).offenders).toContain(READER);
+  });
+});

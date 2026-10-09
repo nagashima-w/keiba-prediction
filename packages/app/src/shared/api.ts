@@ -1,6 +1,7 @@
 import type { AppInfo } from "./app-info-types.js";
 import type {
   AnalysisExportOutcome,
+  CloudMigrationExportOutcome,
   BatchProgress,
   BatchRaceOutcome,
   BulkImportProgress,
@@ -227,4 +228,13 @@ export interface KeibaApi {
    * @param raceId 対象レースID(12桁)
    */
   exportAnalysis(raceId: string): Promise<AnalysisExportOutcome>;
+
+  /**
+   * クラウド移行用の書き出し(Issue #215・#167-A)。分析と結果の 8 表(取得キャッシュは除く)を、
+   * gzip 圧縮の NDJSON 1 ファイルとして、ユーザーが選んだ保存先へ書き出す。保存先は main 側の
+   * ダイアログで選ばせる(既定名 keiba-cloud-migration-YYYYMMDD.ndjson.gz)。キャンセル時は "canceled" を返し、
+   * 何も書き込まない。書き出し中に再度呼ぶ・形式に合わない値がある・書き込みに失敗した場合は例外(reject)になり、
+   * 保存先に途中のファイルは残らない。
+   */
+  exportCloudMigration(): Promise<CloudMigrationExportOutcome>;
 }

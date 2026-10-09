@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.26.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.27.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.26.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.27.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -783,6 +783,51 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - 画面(一括分析の結果表): 「LLM根拠」列のセルに reason → 強調材料 → 懸念事項(ラベルは「強調材料」「懸念事項」。
   cloud と共有の定数 `LABEL_HIGHLIGHTS`・`LABEL_CONCERNS`)の順で出す。項目の無い塊は出さない。
   ハイライト表(EV プラスの馬の要約表)には出さない。
+
+### クラウド移行用の書き出し(#215〈#167-A〉。v1.27.0)
+
+手元の `keiba.db`(取得キャッシュが大半を占める)から、**分析と結果の 8 表だけ**(`analyses`・`analysis_horses`・
+`analysis_bets`・`analysis_allocation_meta`・`race_results`・`race_result_meta`・`race_combo_payouts`・
+`race_combo_payout_imports`)を、クラウド版(D1+R2)へ移すための 1 ファイルに書き出す。取得キャッシュの表は含めない。
+取り込みはクラウド版の画面から(#216。このタスクの範囲外)。
+
+- **画面**: 設定画面の「クラウドへの移行」→「クラウド移行用に書き出す」。保存ダイアログ(既定名
+  `keiba-cloud-migration-YYYYMMDD.ndjson.gz`)→ 書き出し中はボタン無効+「書き出し中…」→ 完了で
+  分析の件数・結果のレース数・ファイルの大きさ・保存先を表示。キャンセルは何もしない。失敗時はメッセージ+ログのコピーボタン。
+  書き出しの二重実行は main 側で拒否する(設定タブの再マウントで画面側の状態が消えても防ぐ)。
+- **ファイル**: gzip 圧縮の NDJSON(1 行 = 1 つの JSON。区切りは `\n` だけ。JSON.stringify は値中の改行・U+2028 を必ずエスケープするので
+  1 行に収まる)。形式は core の `ev/cloud-migration-format.ts`(ブラウザと Worker でも動く。`node:` も `better-sqlite3` も import しない。
+  取り込み側は `@keiba/core/ev/cloud-migration-format` から import する)。
+  1. ヘッダ 1 行: `{"type":"header","format":"keiba-cloud-migration","version":1,"exportedAt":<ISO UTC>,"appVersion":<アプリの版>}`
+  2. 分析の行(0 行以上。`analysis.id` の昇順・重複なし): `{"type":"analysis","analysis":{analyses の全列},"horses":[analysis_horses の全列…],
+     "bets":[analysis_bets の全列…],"allocationMeta":{analysis_allocation_meta の全列}|null}`。
+     **exe の分析 id は `analysis.id`**(取り込み側が冪等性の鍵に使う)。`race_snapshot_json`・`raw_response`・馬ごとの
+     `contributions_json` も含む(web では分析ごとに R2 に置く。将来、過去のレースでプロンプト・統計モデルを試し直すため)。
+  3. 結果の行(0 行以上。`raceId` の昇順・重複なし): `{"type":"result","raceId":…,"results":[race_results の全列…],"meta":{race_result_meta の全列}|null,
+     "comboPayouts":[race_combo_payouts の全列…],"comboPayoutImports":[race_combo_payout_imports の全列…]}`。
+     4 表のどれかに現れる `race_id` ごとに 1 行(分析が無い・結果の行が無い〈取込記録だけ・メタだけ〉レースも含む)。
+  4. フッタ 1 行: `{"type":"footer","counts":{8 表の行数},"analysisLines":N,"resultLines":M}`。
+- **値**: 列名は DB のまま(snake_case)。NULL は `null`、文字列の JSON 列は文字列のまま。D1 専用の列(`analyses.detail_key`)は
+  exe の行に無く、取り込み側が埋める。
+- **取り込み側の約束**:
+  - **フッタが無いファイルは途中で切れている**。フッタの件数と、読んだ行の数が一致することを確かめる
+    (`MigrationTally`: 行の並び〈ヘッダ → 分析 → 結果 → フッタ。ヘッダは最初の 1 行だけ、フッタのあとに行なし〉と件数の突き合わせ)。
+  - 各行は `parseMigrationLine`(JSON → 検証)で読む。**列の集合は表ごとに完全一致**(余分な列も不足も拒否)、型(整数・有限の実数・文字列)と
+    NOT NULL を検査し、子の行の `analysis_id`/`race_id` は親と一致しなければならない。違反は「どの表・どの id/race_id・どの列か」を含む
+    `MigrationFormatError`。exe の表に列が足されたら、形式の版(`version`)を上げる。
+  - 書き出し側も、各行を書く前に同じ検証を通す。実 DB に有限でない数値(Infinity)や型の揺れ(実数列に文字列など)があれば、
+    書き出しがその行を指して失敗する(`JSON.stringify` は Infinity を黙って null にするため、検証が先)。
+- **書き出しの実装**(`packages/core/src/ev/cloud-migration-{format,lines,reader}.ts`・`packages/app/src/main/cloud-migration-export.ts`):
+  - 読み出しはキーセット・ページング(`WHERE id > ? ORDER BY id LIMIT n`。分析は 50 件ずつ、結果は 200 レースずつ)。
+    **定義表の列を明示して SELECT する**(長い期間の migration を経た DB に古い列が残っていても、書き出しは形式に合う)。
+    1 ページは `await` をはさまず同期の `.all()` で読み、better-sqlite3 の `.iterate()` を await をまたいで持たない
+    (他の IPC〈分析の保存など〉が走っても「connection is busy」にならない)。書き出し全体は `resourceManager.runExclusive` で包み、
+    設定保存で DB が閉じられない。
+  - **全体のスナップショットは取らない**: ページの中は整合しているが、ページの間に他の保存が入りうる。フッタの件数は「実際に書いた行数」で、
+    静止した DB では各表の `COUNT(*)` と一致する。親の無い孤児の子行(外部キーが ON なので通常は存在しない)は書き出されない(件数が一致しなくなる)。
+  - gzip・ファイル書き込みは main だけ。保存先と同じディレクトリの一時ファイル(`<保存先>.tmp`)に書き、成功したら rename。
+    失敗したら一時ファイルを消し、保存先に途中のファイルを残さない(既存のファイルがあれば失敗時もそのまま残る)。
+    行は 1 行ずつ引いて pipeline(Readable.from → gzip → ファイル)に流すので、全件を一度にメモリに載せない。
 
 ## 7. Discord 通知(notify/discord)
 

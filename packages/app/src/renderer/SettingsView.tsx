@@ -10,6 +10,7 @@ import {
   resolveEffectivePerRaceCap,
 } from "@keiba/core/ev/bet-allocation";
 
+import { CloudMigrationSection } from "./CloudMigrationSection.js";
 import { CopyErrorButton } from "./CopyErrorButton.js";
 import {
   BASE_SCORE_WEIGHT_KEYS,
@@ -788,6 +789,9 @@ export function SettingsView(): React.JSX.Element {
           </p>
         )}
       </div>
+
+      {/* クラウド版(Cloudflare D1+R2)への移行用の書き出し(Issue #215・#167-A)。 */}
+      <CloudMigrationSection />
     </section>
   );
 }

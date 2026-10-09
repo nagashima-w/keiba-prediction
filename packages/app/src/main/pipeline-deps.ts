@@ -21,6 +21,7 @@ import {
   computeRaceLedger,
   computeVerifyReport,
   computeVerifyReportByPromptVersion,
+  createCloudMigrationSource,
   createModelSelector,
   createSdkModelLister,
   DEFAULT_ANALYZER_CONFIG,
@@ -34,6 +35,7 @@ import {
   scrapeRace,
   type BuildPromptInput,
   type ClipVariantId,
+  type CloudMigrationSource,
   type EvConfig,
   type FetchLike,
   type GradeWinnerConditions,
@@ -250,6 +252,12 @@ export interface PipelineResources {
    * buildAnalysisExportDocument へ渡す。
    */
   readonly getAnalysisExportInput: (raceId: RaceId) => AnalysisExportSource | null;
+  /**
+   * クラウド移行用の書き出し元(Issue #215・#167-A)。同じ DB 接続に対するキーセット・ページングの読み出し
+   * (ページごとに同期で `.all()` し、イテレータを await をまたいで持たない)。行の生成・gzip・書き込みは
+   * 呼び出し側(main/ipc.ts → cloud-migration-export.ts)が担う。
+   */
+  readonly cloudMigrationSource: CloudMigrationSource;
   /** DB接続などを閉じる。 */
   readonly close: () => void;
 }
@@ -440,6 +448,7 @@ export function createPipelineDeps(
         resultDetail: store.getRaceResultDetail(raceId),
       };
     },
+    cloudMigrationSource: createCloudMigrationSource(store.rawDatabase),
     close: () => db.close(),
   };
 }
