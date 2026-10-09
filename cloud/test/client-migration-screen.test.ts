@@ -37,6 +37,21 @@ const BASE = {
 const UPLOAD = { size: 1000, uploadedAt: "2026-10-09T01:02:03.000Z", exportedAt: null, appVersion: null };
 const status = (state: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({ ...BASE, state, upload: state === "idle" ? null : UPLOAD, ...over });
 
+/** 結果の補完の進捗(Issue #217。`GET /api/results/backfill`)。 */
+const BACKFILL_BODY = {
+  ok: true,
+  state: "ready",
+  migrationState: "completed",
+  remaining: 321,
+  undated: 0,
+  imported: 100,
+  abandoned: { total: 4, byClass: { "no-payout": 4 } },
+  tonight: { night: "20261010", dispatched: 0, limit: 150 },
+  inflight: null,
+  nextRunAt: null,
+  window: { startHour: 1, endHour: 6 },
+};
+
 type Resp = { status: number; json: () => Promise<unknown> };
 const reply = (code: number, body: unknown): Resp => ({ status: code, json: async () => body });
 
@@ -46,11 +61,18 @@ interface Harness {
   readonly calls: { method: string; url: string; body?: unknown }[];
   /** GET /api/migration の応答(呼ばれるたびに先頭から消費する。残りが無ければ最後のものを繰り返す)。 */
   statuses: (Resp | "throw")[];
+  /** GET /api/results/backfill の応答(Issue #217。移行が完了していたときだけ取る)。 */
+  backfill: Resp | "throw";
+  /** 次の 1 回の補完の進捗の取得だけ、この Promise で返す(遅れて届く応答の再現。使うと null に戻る)。 */
+  backfillOnce: Promise<Resp> | null;
   /** POST /api/migration/upload の応答。 */
   uploadResponder: () => Promise<Resp>;
   visible: boolean;
   changes: number;
+  /** GET /api/migration の回数(結果の補完の進捗の取得は数えない)。 */
   gets(): number;
+  /** GET /api/results/backfill の回数。 */
+  backfillGets(): number;
   posts(): number;
   settle(): Promise<void>;
 }
@@ -62,10 +84,13 @@ function harness(): Harness {
     timers,
     calls,
     statuses: [reply(200, status("idle"))],
+    backfill: reply(200, BACKFILL_BODY),
+    backfillOnce: null,
     uploadResponder: async () => reply(202, status("verifying")),
     visible: true,
     changes: 0,
-    gets: () => calls.filter((c) => c.method === "GET").length,
+    gets: () => calls.filter((c) => c.method === "GET" && c.url === "/api/migration").length,
+    backfillGets: () => calls.filter((c) => c.method === "GET" && c.url === "/api/results/backfill").length,
     posts: () => calls.filter((c) => c.method === "POST").length,
     // 取得・検証・アップロードの完了を待つ(検証は gzip の展開がスレッドプールで走るので、固定回数の I/O の巡では足りないことがある)。
     settle: async () => {
@@ -82,6 +107,15 @@ function harness(): Harness {
       const next = h.statuses.length > 1 ? h.statuses.shift()! : h.statuses[0]!;
       if (next === "throw") throw new TypeError("Failed to fetch");
       return next;
+    }
+    if (url === "/api/results/backfill" && init.method === "GET") {
+      if (h.backfillOnce !== null) {
+        const once = h.backfillOnce;
+        h.backfillOnce = null;
+        return once;
+      }
+      if (h.backfill === "throw") throw new TypeError("Failed to fetch");
+      return h.backfill;
     }
     if (url === "/api/migration/upload" && init.method === "POST") return h.uploadResponder();
     throw new Error(`想定外の取得: ${init.method} ${url}`);
@@ -579,5 +613,76 @@ describe("アップロード", () => {
     await h.timers.advance(10_000);
     expect(h.screen.model().progress!.headline).toContain("完了");
     expect(h.screen.model().uploadNotice).toBeNull();
+  });
+});
+
+describe("結果の補完の進捗(Issue #217)。移行が完了していたときだけ GET /api/results/backfill を 1 回取り、付随の 1 行として出す", () => {
+  it("completed: 進捗の取得のあとに補完の進捗を 1 回取り、model().backfill に出す。ポーリングのタイマーは張らない", async () => {
+    const h = harness();
+    h.statuses = [reply(200, status("completed"))];
+    await open(h);
+    expect(h.gets()).toBe(1);
+    expect(h.backfillGets()).toBe(1);
+    const view = h.screen.model().backfill;
+    expect(view).not.toBeNull();
+    expect(view!.text).toContain("残り 321 レース");
+    expect(h.timers.pending()).toBe(0);
+  });
+
+  it("completed 以外(idle・取り込み中の 4 状態・failed)では取らない(model().backfill は null)", async () => {
+    const states = ["idle", "verifying", "importing", "waiting-budget", "waiting-r2", "failed"];
+    expect(states).toHaveLength(6);
+    for (const state of states) {
+      const h = harness();
+      h.statuses = [reply(200, status(state))];
+      await open(h);
+      expect(h.gets(), state).toBe(1);
+      expect(h.backfillGets(), state).toBe(0);
+      expect(h.screen.model().backfill, state).toBeNull();
+    }
+  });
+
+  it("補完の進捗の取得が失敗(通信・503・形が違う)しても、移行の進捗は ready のまま・エラーを出さない。補完の行だけ出ない", async () => {
+    for (const backfill of ["throw", reply(503, { ok: false, error: { type: "backfill-error" } }), reply(200, { ok: true, state: "ready" })] as const) {
+      const h = harness();
+      h.statuses = [reply(200, status("completed"))];
+      h.backfill = backfill;
+      await open(h);
+      expect(h.backfillGets()).toBe(1);
+      const m = h.screen.model();
+      expect(m.error).toBeNull();
+      expect(m.loading).toBe(false);
+      expect(m.progress!.headline).toContain("完了");
+      expect(m.backfill).toBeNull();
+    }
+  });
+
+  it("「再読込」で移行の進捗と一緒に取り直す(補完の進捗も 1 回増える)", async () => {
+    const h = harness();
+    h.statuses = [reply(200, status("completed"))];
+    await open(h);
+    h.backfill = reply(200, { ...BACKFILL_BODY, remaining: 200 });
+    h.screen.onReload();
+    await h.settle();
+    expect(h.backfillGets()).toBe(2);
+    expect(h.screen.model().backfill!.text).toContain("残り 200 レース");
+  });
+
+  it("補完の進捗の取得中に画面を離れたら、遅れて届いた応答は(開き直した画面にも)反映しない", async () => {
+    const h = harness();
+    h.statuses = [reply(200, status("completed"))];
+    const late = deferred<Resp>();
+    h.backfillOnce = late.promise; // 1 回目の補完の取得だけ保留する。
+    h.backfill = reply(200, { ...BACKFILL_BODY, remaining: 7 });
+    h.screen.enter();
+    await h.timers.flush();
+    h.screen.leave();
+    expect(h.screen.model().backfill).toBeNull();
+    late.resolve(reply(200, { ...BACKFILL_BODY, remaining: 999 }));
+    await h.settle();
+    expect(h.screen.model().backfill).toBeNull(); // 古い世代の応答は採らない(画面を離れている)
+    h.screen.enter();
+    await h.settle();
+    expect(h.screen.model().backfill!.text).toContain("残り 7 レース");
   });
 });

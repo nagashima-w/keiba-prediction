@@ -434,3 +434,115 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
     expect(f.resultRequests).toEqual([{ kaisaiDate: "20260627", raceIds: ["202603020211"] }]);
   });
 });
+
+describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、補完の DO の kick を呼ぶ。失敗しても朝の計画・既存の結果の取り込みを失敗させない", () => {
+  /** 補完の DO の偽物。kick の呼び出しとその順を `events`(他の DO の呼び出しと共有)に記録する。 */
+  function fakeBackfill(events: string[], behavior: () => Promise<void> = async () => undefined) {
+    const names: string[] = [];
+    let kicks = 0;
+    return {
+      names,
+      kicks: () => kicks,
+      namespace: {
+        idFromName: (name: string) => {
+          names.push(name);
+          return name;
+        },
+        get: () => ({
+          kick: async () => {
+            kicks += 1;
+            events.push("kick");
+            await behavior();
+          },
+          getStatus: NOT_CALLED,
+        }),
+      },
+    };
+  }
+  const emptyStore: DispatchStore = { listUnimportedRacesByDay: async () => [] };
+
+  it("計画・結果の依頼のあとに、固定名 main の補完の DO の kick を 1 回呼ぶ", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const b = fakeBackfill(f.events);
+    const store: DispatchStore = { listUnimportedRacesByDay: async () => [{ raceId: "202603020211", kaisaiDate: "20260627" }] };
+    await runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store });
+    expect(f.events).toEqual(["plan:20260628", "result:20260627", "kick"]);
+    expect(b.names).toEqual(["main"]);
+    expect(b.kicks()).toBe(1);
+  });
+
+  it("kick が失敗(同期の例外・非同期の reject)しても、朝の計画は成功のまま・結果の依頼は済んでいる。分類だけをログに出し、例外の文面を出さない", async () => {
+    for (const behavior of [
+      async (): Promise<void> => {
+        throw new Error("補完の詳細 SECRET-CANARY-KICK");
+      },
+      (): Promise<void> => {
+        throw new Error("補完の詳細(同期) SECRET-CANARY-KICK");
+      },
+    ]) {
+      const f = fakeNamespace();
+      const h = harness();
+      const b = fakeBackfill(f.events, behavior);
+      const store: DispatchStore = { listUnimportedRacesByDay: async () => [{ raceId: "202603020211", kaisaiDate: "20260627" }] };
+      await expect(runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store })).resolves.toBeUndefined();
+      expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+      expect(f.resultRequests).toHaveLength(1);
+      expect(b.kicks()).toBe(1);
+      expect(h.text()).toContain("backfill-kick-failed");
+      expect(h.text()).not.toContain("SECRET-CANARY");
+    }
+  });
+
+  it("スタブの取得そのもの(idFromName・get)が投げても、朝の計画は成功のまま", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const broken = {
+      idFromName: () => {
+        throw new Error("binding SECRET-CANARY-BIND");
+      },
+      get: NOT_CALLED,
+    };
+    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: broken as never }, { ...h.deps, store: emptyStore })).resolves.toBeUndefined();
+    expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+    expect(h.text()).toContain("backfill-kick-failed");
+    expect(h.text()).not.toContain("SECRET-CANARY");
+  });
+
+  it("requestPlan が 3 回とも失敗しても kick は呼ぶ(補完は朝の計画に依らない)。最後は従来どおり固定文言で投げる", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    f.script = [() => Promise.reject(new Error("x")), () => Promise.reject(new Error("x")), () => Promise.reject(new Error("x"))];
+    const b = fakeBackfill(f.events);
+    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store: emptyStore })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    expect(b.kicks()).toBe(1);
+  });
+
+  it("結果の依頼(列挙)が失敗しても kick は呼ぶ", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const b = fakeBackfill(f.events);
+    const store: DispatchStore = {
+      listUnimportedRacesByDay: async () => {
+        throw new Error("D1");
+      },
+    };
+    await runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store });
+    expect(b.kicks()).toBe(1);
+  });
+
+  it("binding が無い構成(RESULT_BACKFILL 省略)は、kick せずに従来どおり動く", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store: emptyStore })).resolves.toBeUndefined();
+    expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+  });
+
+  it("scheduledTime が不正なら kick も呼ばない(従来どおり何も呼ばない)", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const b = fakeBackfill(f.events);
+    await expect(runScheduled({ scheduledTime: Number.NaN }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store: emptyStore })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    expect(b.kicks()).toBe(0);
+  });
+});

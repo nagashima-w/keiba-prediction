@@ -8,7 +8,7 @@
  * 説明文は、サーバでの検証(取り込みの変換)で止まりうること(クライアントの検証は形式まで)にも触れる。
  */
 import { formatJstDateTime } from "./date";
-import type { MigrationProgress } from "./api-migration";
+import type { BackfillProgress, MigrationProgress } from "./api-migration";
 import type { ValidatedSummary } from "./migration-file";
 
 /** 進捗の取得の状態。 */
@@ -38,6 +38,8 @@ export interface MigrationModelInput {
   readonly upload: MigrationUploadState;
   /** 進捗の自動更新を止めている(通信の失敗が続いた)。 */
   readonly pollStopped: boolean;
+  /** 結果の補完の進捗(Issue #217。移行が完了していて、取得できたときだけ。省略・null は出さない)。 */
+  readonly backfill?: BackfillProgress | null;
 }
 
 export type Tone = "info" | "ok" | "error" | "wait";
@@ -56,6 +58,14 @@ export interface ProgressView {
   readonly failure: { readonly heading: string; readonly reason: string; readonly hint: string } | null;
 }
 
+/** 結果の補完の 1 行(Issue #217)。 */
+export interface BackfillView {
+  readonly tone: "info" | "ok" | "wait";
+  readonly text: string;
+  /** 開催日が不明で対象外のレースがあるときの注記。 */
+  readonly note: string | null;
+}
+
 export interface CheckView {
   readonly tone: Tone;
   readonly lines: readonly string[];
@@ -70,6 +80,8 @@ export interface MigrationModel {
   readonly error: string | null;
   readonly pollNotice: string | null;
   readonly progress: ProgressView | null;
+  /** 結果の補完の 1 行(移行が完了していて、補完の進捗を取得できたときだけ)。 */
+  readonly backfill: BackfillView | null;
   readonly reloadDisabled: boolean;
   /** ファイル選択を出す(押せる)か。 */
   readonly canPick: boolean;
@@ -200,6 +212,23 @@ function buildProgress(p: MigrationProgress): ProgressView {
   return { tone, headline, lines, bar, conflicts, failure };
 }
 
+function buildBackfill(b: BackfillProgress): BackfillView | null {
+  if (b.state === "waiting-migration") return null; // 移行が完了と読めない(サーバ側の判定。画面は completed のときだけ呼ぶ)
+  const counts = `取得済み ${n(b.imported)}${b.abandoned > 0 ? `・取得できなかった ${n(b.abandoned)}` : ""}`;
+  const note = b.undated > 0 ? `開催日が不明のため補完できないレース: ${n(b.undated)} 件(exe の古い分析など。結果は自動では取り込まれません)。` : null;
+  switch (b.state) {
+    case "done":
+      return { tone: "ok", text: `結果の補完が完了しました(${counts})。`, note };
+    case "running":
+      return { tone: "info", text: `結果の補完: いま取り込み中です。残り ${n(b.remaining)} レース(${counts})。`, note };
+    case "paused":
+      return { tone: "wait", text: `結果の補完: 今夜は一時停止中です(netkeiba への負荷を避けるため)。明晩に再開します。残り ${n(b.remaining)} レース(${counts})。`, note };
+    case "ready":
+    case "waiting-window":
+      return { tone: "info", text: `結果の補完: 移行した分析で結果が無いレースを、夜間(JST 1:00〜6:00)に少しずつ自動で取り込みます。残り ${n(b.remaining)} レース(${counts})。`, note };
+  }
+}
+
 function buildCheck(check: MigrationCheckState): CheckView | null {
   switch (check.kind) {
     case "idle":
@@ -241,6 +270,7 @@ export function buildMigrationModel(input: MigrationModelInput): MigrationModel 
     error: load.kind === "error" ? load.message : null,
     pollNotice: input.pollStopped ? "進捗の自動更新を止めました(通信の失敗が続きました)。「再読込」で最新の状態を取得できます。取り込みは、サーバ側で続いている場合があります。" : null,
     progress: progress === null ? null : buildProgress(progress),
+    backfill: progress !== null && progress.state === "completed" && input.backfill != null ? buildBackfill(input.backfill) : null,
     reloadDisabled: load.kind === "loading",
     canPick,
     pickNote: busyOnServer ? "取り込み中のため、ファイルは選べません。完了(または失敗)してから、もう一度アップロードしてください。" : null,

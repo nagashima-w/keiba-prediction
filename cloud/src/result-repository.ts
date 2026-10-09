@@ -154,6 +154,39 @@ export const LIST_UNIMPORTED_BY_DAY_SQL = `SELECT raceId, firstDate FROM (
 /** {@link LIST_UNIMPORTED_BY_DAY_SQL} の日数の上限の最大(手動の取り込みの範囲の上限 31 日と同じ)。 */
 export const UNIMPORTED_BY_DAY_MAX_DAYS = 31;
 
+/**
+ * 結果の補完(Issue #217〈#167-C〉。`result-backfill-core.ts`)の列挙。判定は {@link LIST_UNIMPORTED_BY_DAY_SQL} と同じ(分析済み・`race_results` に行が 1 件も無い・`GROUP BY race_id` で最小の開催日)。
+ * 違いは、窓の下限が無い(開催日が `to` 以下の全部。開催日が NULL の分析は `<=` の比較に入らない)・**未取込のある最も新しい日を 1 日だけ**(その日のレースID 昇順で `limit` 件)・
+ * 除外するレース ID(永久に諦めたもの・その晩に試したもの)を JSON 配列 1 つで渡せる(`NOT IN (SELECT value FROM json_each(?))`。束縛は 1 つで、除外の数に依らない)。
+ * 束縛値は `[to, excludeJson, limit]`。
+ */
+export const LIST_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE a.kaisai_date <= ?
+               AND NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+               AND a.race_id NOT IN (SELECT value FROM json_each(?))
+             GROUP BY a.race_id
+           )
+           SELECT raceId, firstDate FROM u
+           WHERE firstDate = (SELECT MAX(firstDate) FROM u)
+           ORDER BY raceId
+           LIMIT ?`;
+
+/**
+ * 結果の補完の残りの数。`dated` = 未取込で開催日が `to` 以前のレース(除外を除く)、`undated` = 未取込で開催日がすべて NULL のレース(日単位の DO の宛先が決まらないので補完の対象外。数だけ見せる)。
+ * `GROUP BY race_id` の最小の開催日が NULL なのは、そのレースの分析の開催日がすべて NULL のとき。束縛値は `[to, excludeJson]`。
+ */
+export const COUNT_BACKFILL_SQL = `WITH u AS (
+             SELECT a.race_id AS raceId, MIN(a.kaisai_date) AS firstDate
+             FROM analyses a
+             WHERE NOT EXISTS (SELECT 1 FROM race_results r WHERE r.race_id = a.race_id)
+             GROUP BY a.race_id
+           )
+           SELECT COALESCE(SUM(CASE WHEN firstDate IS NOT NULL AND firstDate <= ? AND raceId NOT IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END), 0) AS dated,
+                  COALESCE(SUM(CASE WHEN firstDate IS NULL THEN 1 ELSE 0 END), 0) AS undated
+           FROM u`;
+
 
 // ---------------------------------------------------------------------------
 // 移行(Issue #216・#167-B1): exe の結果を、既存の行を優先して入れる
@@ -279,6 +312,26 @@ export interface ListUnimportedByDayOptions {
   readonly total: number;
 }
 
+export interface ListBackfillOptions {
+  /** 開催日の上限(YYYYMMDD。含む)。 */
+  readonly to: string;
+  /** 除外するレース ID。 */
+  readonly exclude: readonly string[];
+  /** 件数。1〜{@link UNIMPORTED_MAX_LIMIT} の整数。 */
+  readonly limit: number;
+}
+
+export interface CountBackfillOptions {
+  readonly to: string;
+  readonly exclude: readonly string[];
+}
+
+/** {@link COUNT_BACKFILL_SQL} の結果。 */
+export interface BackfillCounts {
+  readonly dated: number;
+  readonly undated: number;
+}
+
 export interface ResultRepository {
   saveResult(raceId: string, results: readonly RaceResultEntry[], courseType?: CourseType | null, comboPayouts?: RaceComboPayoutsSaveInput): Promise<void>;
   getRaceResultDetails(raceIds: readonly string[]): Promise<Map<string, RaceResultDetail>>;
@@ -291,6 +344,16 @@ export interface D1ResultStoreOptions {
 }
 
 const YYYYMMDD = /^\d{8}$/;
+
+/** 補完の列挙・集計の入力の検査(to が YYYYMMDD・exclude が文字列の配列)。 */
+function checkBackfillInput(to: unknown, exclude: unknown): void {
+  if (typeof to !== "string" || !YYYYMMDD.test(to)) {
+    throw new RangeError("to は YYYYMMDD の8桁の文字列でなければなりません");
+  }
+  if (!Array.isArray(exclude) || exclude.some((id) => typeof id !== "string")) {
+    throw new RangeError("exclude は文字列の配列でなければなりません");
+  }
+}
 
 export class D1ResultStore implements ResultRepository {
   private readonly db: ResultDb;
@@ -407,5 +470,30 @@ export class D1ResultStore implements ResultRepository {
     }
     const { results } = await this.db.prepare(LIST_UNIMPORTED_BY_DAY_SQL).bind(from, to, perDay, maxDays, total).all<{ raceId: string; firstDate: string }>();
     return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
+  }
+
+  /**
+   * 結果の補完の列挙(Issue #217。上の {@link LIST_BACKFILL_SQL}): 未取込のある最も新しい日(`to` 以前)を、その日のぶんだけ。
+   * @throws RangeError to が YYYYMMDD の8桁でない・limit が 1〜{@link UNIMPORTED_MAX_LIMIT} の整数でない・exclude が文字列の配列でない(D1 には発行しない)
+   */
+  async listBackfillRaces(options: ListBackfillOptions): Promise<UnimportedRace[]> {
+    const { to, exclude, limit } = options;
+    checkBackfillInput(to, exclude);
+    if (!Number.isInteger(limit) || limit < 1 || limit > UNIMPORTED_MAX_LIMIT) {
+      throw new RangeError(`limit は 1〜${UNIMPORTED_MAX_LIMIT} の整数でなければなりません`);
+    }
+    const { results } = await this.db.prepare(LIST_BACKFILL_SQL).bind(to, JSON.stringify(exclude), limit).all<{ raceId: string; firstDate: string }>();
+    return results.map((r) => ({ raceId: r.raceId, kaisaiDate: r.firstDate }));
+  }
+
+  /**
+   * 結果の補完の残りの数(Issue #217。上の {@link COUNT_BACKFILL_SQL})。
+   * @throws RangeError to が YYYYMMDD の8桁でない・exclude が文字列の配列でない
+   */
+  async countBackfill(options: CountBackfillOptions): Promise<BackfillCounts> {
+    const { to, exclude } = options;
+    checkBackfillInput(to, exclude);
+    const row = await this.db.prepare(COUNT_BACKFILL_SQL).bind(to, JSON.stringify(exclude)).first<{ dated: number; undated: number }>();
+    return { dated: row?.dated ?? 0, undated: row?.undated ?? 0 };
   }
 }

@@ -22,6 +22,7 @@ import { jstKaisaiDate } from "./auto-run-plan";
 import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
 import { D1ResultStore } from "./result-repository";
 import type { MigrationStatus, StartResult } from "./migration-core";
+import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
 import { toRaceListRows } from "./race-list";
 import type { JWTVerifyGetKey } from "jose";
 
@@ -87,12 +88,28 @@ export interface MigrationNamespaceLike {
 /** 移行の DO の固定名(単一インスタンス)。 */
 const MIGRATION_NAME = "main";
 
+/** 結果の補完の DO(ResultBackfill)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #217。 */
+export interface BackfillStubLike {
+  /** アラームが無ければ張る(cron の `scheduled` から毎日 1 回)。 */
+  kick(): Promise<void>;
+  /** 進捗の読み取り(状態は変えない。アラームが無ければ張り直す)。 */
+  getStatus(): Promise<BackfillStatus>;
+}
+
+/** 結果の補完の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link RESULT_BACKFILL_NAME})。 */
+export interface BackfillNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): BackfillStubLike;
+}
+
 export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
   /** 日単位の DO(RaceDay。wrangler.toml の binding)。Issue #177・#180。 */
   RACE_DAY: RaceDayNamespaceLike;
   /** exe から移したファイルの取り込みの DO(CloudMigration。wrangler.toml の binding)。Issue #216。本番では常にある。無い構成(binding の設定漏れ)では、移行の 2 つの API が 503 になる。 */
   CLOUD_MIGRATION?: MigrationNamespaceLike;
+  /** 結果の補完の DO(ResultBackfill。wrangler.toml の binding)。Issue #217。本番では常にある。無い構成では `GET /api/results/backfill` が 503 になり、cron は kick を呼ばない。 */
+  RESULT_BACKFILL?: BackfillNamespaceLike;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
   DB: AnalysisDb;
   /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
@@ -262,6 +279,17 @@ export async function handle(
     return handleMigrationStatus(env);
   }
 
+  if (pathname === "/api/results/backfill") {
+    // 読み取り専用(補完の DO の状態を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で DO を開かない)。Issue #217。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return handleBackfillStatus(env);
+  }
+
   if (pathname === "/api/analyses/status") {
     // 読み取り専用(DO の状態を読むだけ)。GET だけ。
     if (method !== "GET") {
@@ -350,6 +378,19 @@ async function handleMigrationStatus(env: Env): Promise<Response> {
     return json({ ok: true, ...(await migrationStub(env).getStatus()) });
   } catch {
     return json({ ok: false, error: { type: "migration-error" } }, 503);
+  }
+}
+
+/** `GET /api/results/backfill`: 結果の補完の進捗(状態・残り・取得済み・取得できなかった数・開催日不明の数・今夜の依頼数・次の実行)。DO の失敗・binding なしは 503(文面は返さない)。Issue #217。 */
+async function handleBackfillStatus(env: Env): Promise<Response> {
+  try {
+    const namespace = env.RESULT_BACKFILL;
+    if (namespace === undefined) {
+      throw new Error("RESULT_BACKFILL binding がありません");
+    }
+    return json({ ok: true, ...(await namespace.get(namespace.idFromName(RESULT_BACKFILL_NAME)).getStatus()) });
+  } catch {
+    return json({ ok: false, error: { type: "backfill-error" } }, 503);
   }
 }
 

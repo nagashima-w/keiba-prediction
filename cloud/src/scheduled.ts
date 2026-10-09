@@ -14,7 +14,8 @@
  * 呼び出す DO の RPC は `requestPlan` の 1 つ(ここに直接)と、`dispatchResultImports` 経由の `requestResultImport`(`scripts/test/cloud-config-guard.test.ts` が、呼び出し箇所の数と、取得に出る呼び出しが無いことを固定する)。
  */
 import { jstKaisaiDate } from "./auto-run-plan";
-import type { RaceDayNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, RaceDayNamespaceLike } from "./handler";
+import { RESULT_BACKFILL_NAME } from "./result-backfill-core";
 import { CRON_RESULT_MAX_DAYS, dispatchResultImports, errorKind, resultWindowFor, type DispatchStore } from "./result-dispatch";
 import { D1ResultStore, type ResultDb } from "./result-repository";
 
@@ -28,6 +29,8 @@ export interface ScheduledEnv {
   readonly RACE_DAY: RaceDayNamespaceLike;
   /** D1（結果の未取込の列挙だけに使う。読み取り）。 */
   readonly DB: ResultDb;
+  /** 結果の補完の DO(Issue #217)。無い構成では kick を呼ばない。 */
+  readonly RESULT_BACKFILL?: BackfillNamespaceLike;
 }
 
 export interface ScheduledDeps {
@@ -85,6 +88,16 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     await dispatchResultImports({ ...resultWindowFor(kaisaiDate), maxDays: CRON_RESULT_MAX_DAYS, store, stubFor, log });
   } catch (error) {
     log(`scheduled: failed class=result-dispatch-failed error=${errorKind(error)}`, "error");
+  }
+
+  // 結果の補完の起動(Issue #217)。アラームが無ければ張るだけ(補完は JST 1:00〜6:00 に、移行の完了後だけ動く。ここでは何も取得しない)。
+  // 計画・結果の依頼の成否によらず走らせ、失敗しても投げない(朝の計画・既存の結果の取り込みを失敗させない)。
+  if (env.RESULT_BACKFILL !== undefined) {
+    try {
+      await env.RESULT_BACKFILL.get(env.RESULT_BACKFILL.idFromName(RESULT_BACKFILL_NAME)).kick();
+    } catch (error) {
+      log(`scheduled: failed class=backfill-kick-failed error=${errorKind(error)}`, "error");
+    }
   }
 
   if (!planned) {

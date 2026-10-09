@@ -50,10 +50,14 @@ function withoutRaceDay(toml: string): string {
     .replace(/\[\[migrations\]\]\ntag = "v2"\nnew_sqlite_classes = \["RaceDay"\]\n/, "")
     // Issue #216: 移行の DO(CLOUD_MIGRATION・CloudMigration)も、probe の入口は export しないので除く(migration v3 も)。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "CLOUD_MIGRATION"\nclass_name = "CloudMigration"\n/, "")
-    .replace(/\[\[migrations\]\]\ntag = "v3"\nnew_sqlite_classes = \["CloudMigration"\]\n/, "");
+    .replace(/\[\[migrations\]\]\ntag = "v3"\nnew_sqlite_classes = \["CloudMigration"\]\n/, "")
+    // Issue #217: 結果の補完の DO(RESULT_BACKFILL・ResultBackfill)も同じく除く(migration v4 も)。
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "RESULT_BACKFILL"\nclass_name = "ResultBackfill"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v4"\nnew_sqlite_classes = \["ResultBackfill"\]\n/, "");
   expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
   expect(stripped).not.toContain("RaceDay");
   expect(stripped, "CLOUD_MIGRATION の binding と migration v3 を除けている").not.toContain("CloudMigration");
+  expect(stripped, "RESULT_BACKFILL の binding と migration v4 を除けている").not.toContain("ResultBackfill");
   return stripped;
 }
 
@@ -390,6 +394,39 @@ describe("本番のバンドルと移行の DO(Issue #216)", () => {
     () => {
       const code = bundle(null, "worker.js");
       for (const marker of MIGRATION_MARKERS) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+      expect(code.includes("better-sqlite3"), "better-sqlite3 が無い").toBe(false);
+      expect(code.includes("node:sqlite"), "テスト専用の node:sqlite が無い").toBe(false);
+      for (const marker of FAKE_SOCKET_MARKERS) {
+        expect(code.includes(marker), `偽ソケットの印 ${marker} が無い`).toBe(false);
+      }
+      expect(gzipSync(code).length).toBeLessThan(3 * 1024 * 1024);
+    },
+    120_000,
+  );
+});
+
+/**
+ * Issue #217(#167-C): 結果の補完の DO `ResultBackfill`(と、その状態機械・列挙の SQL)が**本番のバンドル**(`src/worker.ts`)に入ること。
+ * **前提(空振り防止)**: 検出する ASCII の識別子がソースにあり、バンドルにある。better-sqlite3・node:sqlite・偽ソケットは入らない。
+ */
+const BACKFILL_MARKERS = ["backfill_race", "backfill_meta", "ResultBackfillCore", "RESULT_BACKFILL_NIGHTLY_LIMIT", "json_each(?)", "dispatch-failed"];
+
+describe("本番のバンドルと結果の補完の DO(Issue #217)", () => {
+  it("前提: 検出する文字列は、ソースに実際にある。worker.ts は ResultBackfill を export する", () => {
+    const source = ["result-backfill-core.ts", "result-backfill-do.ts", "result-repository.ts"].map((f) => readFileSync(path.join(CLOUD, "src", f), "utf-8")).join("\n");
+    for (const marker of BACKFILL_MARKERS) {
+      expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
+    }
+    expect(readFileSync(path.join(CLOUD, "src", "worker.ts"), "utf-8")).toMatch(/export \{ ResultBackfill \} from "\.\/result-backfill-do"/);
+  });
+
+  it(
+    "本番のバンドルに補完の識別子が入っていて、better-sqlite3・node:sqlite・偽ソケットは入っていない。圧縮後 3 MB 以内",
+    () => {
+      const code = bundle(null, "worker.js");
+      for (const marker of BACKFILL_MARKERS) {
         expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
       }
       expect(code.includes("better-sqlite3"), "better-sqlite3 が無い").toBe(false);

@@ -197,3 +197,44 @@ describe("設定画面の「exe から移行」の節", () => {
     expect(() => mountAll(settings("error"))).not.toThrow();
   });
 });
+
+// ---- Issue #217(#167-C): 結果の補完の 1 行 ----
+
+describe("移行画面の VNode: 結果の補完(Issue #217)", () => {
+  const COMPLETED: MigrationProgress = { ...WORKING, state: "completed" };
+  const BACKFILL = { state: "ready", remaining: 321, undated: 0, imported: 100, abandoned: 4 } as const;
+  const withBackfill = (backfill: Parameters<typeof buildMigrationModel>[0]["backfill"], progress: MigrationProgress = COMPLETED): VNode => tree({ load: { kind: "ready", progress }, backfill });
+
+  it("移行が完了していて補完の進捗があれば、進捗の下に 1 つの節(notice)で出す。モデルの文言そのまま", () => {
+    const t = withBackfill(BACKFILL);
+    const sections = byClass(t, "migration-backfill");
+    expect(sections).toHaveLength(1);
+    const model = buildMigrationModel(input({ load: { kind: "ready", progress: COMPLETED }, backfill: BACKFILL }));
+    expect(model.backfill).not.toBeNull();
+    expect(textOf(sections[0]!)).toContain(model.backfill!.text);
+    expect(textOf(sections[0]!)).toContain("残り 321 レース");
+    // 進捗の節より後ろ
+    expect(textOf(t).indexOf("取り込みの進捗")).toBeLessThan(textOf(t).indexOf("結果の補完"));
+  });
+
+  it("出さない: 補完の進捗が無い・移行が完了していない", () => {
+    expect(byClass(withBackfill(null), "migration-backfill")).toHaveLength(0);
+    expect(byClass(withBackfill(BACKFILL, WORKING), "migration-backfill")).toHaveLength(0);
+    expect(byClass(tree(), "migration-backfill")).toHaveLength(0);
+  });
+
+  it("開催日不明の注記は、あるときだけ補足(meta)として足す。状態 paused は wait の通知", () => {
+    expect(byClass(withBackfill({ ...BACKFILL, undated: 12 }), "migration-backfill")[0]!.children).toHaveLength(2);
+    expect(textOf(byClass(withBackfill({ ...BACKFILL, undated: 12 }), "migration-backfill")[0]!)).toContain("12 件");
+    expect(byClass(withBackfill(BACKFILL), "migration-backfill")[0]!.children).toHaveLength(1);
+    const paused = byClass(withBackfill({ ...BACKFILL, state: "paused" }), "migration-backfill")[0]!;
+    expect(textOf(paused)).toContain("一時停止");
+    expect(byClass(paused, "wait").length + byClass(paused, "notice").length).toBeGreaterThan(0);
+  });
+
+  it("許可リスト(dom.ts)の範囲で組める(補完の全 5 状態 + 開催日不明の注記)", () => {
+    const states = ["ready", "running", "paused", "waiting-window", "done"] as const;
+    expect(states).toHaveLength(5);
+    for (const state of states) expect(() => mountAll(withBackfill({ ...BACKFILL, state, undated: 3 })), state).not.toThrow();
+  });
+});

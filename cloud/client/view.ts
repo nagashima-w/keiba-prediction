@@ -8,7 +8,7 @@ import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel } from "./result";
-import type { CheckView, MigrationModel, ProgressView } from "./migration-model";
+import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel } from "./settings-form";
 import { h, type PickedFile, type VNode } from "./vnode";
 
@@ -440,6 +440,11 @@ function progressSection(p: ProgressView): VNode {
   ]);
 }
 
+/** 結果の補完の 1 行(Issue #217)。 */
+function backfillSection(b: BackfillView): VNode {
+  return h("section", { class: "migration-backfill" }, [notice(b.tone, b.text), ...(b.note === null ? [] : [h("p", { class: "meta" }, [b.note])])]);
+}
+
 function checkSection(check: CheckView, cancelable: boolean, actions: ViewActions): VNode[] {
   // エラーは理由まで 1 つの role=alert にまとめる(読み上げが途切れない)。それ以外は 1 行目を通知、残りを補足にする。
   const [first, ...rest] = check.tone === "error" ? [check.lines.join(" ")] : check.lines;
@@ -468,6 +473,9 @@ function migrationScreen(model: MigrationModel, actions: ViewActions): VNode {
   }
   if (model.progress !== null) {
     body.push(progressSection(model.progress));
+  }
+  if (model.backfill !== null) {
+    body.push(backfillSection(model.backfill));
   }
   if (model.canPick || model.file !== null || model.pickNote !== null) {
     body.push(h("h2", {}, ["ファイルを選ぶ"]));

@@ -78,6 +78,51 @@ export function parseMigrationStatus(body: unknown): MigrationProgress | null {
   };
 }
 
+export type BackfillState = "waiting-migration" | "ready" | "running" | "paused" | "waiting-window" | "done";
+
+const BACKFILL_STATES: ReadonlySet<string> = new Set<BackfillState>(["waiting-migration", "ready", "running", "paused", "waiting-window", "done"]);
+
+/** 結果の補完の進捗(`GET /api/results/backfill` の応答のうち、画面が読む項目。Issue #217〈#167-C〉)。 */
+export interface BackfillProgress {
+  readonly state: BackfillState;
+  /** 残り: 開催日があり、昨日以前で、結果が無く、永久に除外していないレース。 */
+  readonly remaining: number;
+  /** 開催日が分からず、補完の対象外のレース。 */
+  readonly undated: number;
+  /** 補完で取り込めたレースの累計。 */
+  readonly imported: number;
+  /** 取得できず、永久に除外したレース。 */
+  readonly abandoned: number;
+}
+
+/** 補完の進捗の応答を検査する。読む項目の型・範囲を満たさなければ null(一部だけを採用しない)。余計なキーは無視する。 */
+export function parseBackfillStatus(body: unknown): BackfillProgress | null {
+  if (!isRecord(body) || body["ok"] !== true) return null;
+  const state = body["state"];
+  if (!isStr(state) || !BACKFILL_STATES.has(state)) return null;
+  const abandoned = body["abandoned"];
+  if (!isCount(body["remaining"]) || !isCount(body["undated"]) || !isCount(body["imported"]) || !isRecord(abandoned) || !isCount(abandoned["total"])) return null;
+  return { state: state as BackfillState, remaining: body["remaining"], undated: body["undated"], imported: body["imported"], abandoned: abandoned["total"] };
+}
+
+export type BackfillFetchResult = { readonly ok: true; readonly progress: BackfillProgress } | { readonly ok: false };
+
+/**
+ * `GET /api/results/backfill`。補完の進捗は移行画面の付随の情報なので、失敗の種類は分けず(`ok: false`)、画面には何も出さない。
+ * 例外(同期・非同期とも)・200 以外・本文の形が違うものは、すべて `ok: false`(例外の文面を持ち込まない)。
+ */
+export async function fetchBackfill(fetchLike: FetchLike): Promise<BackfillFetchResult> {
+  let response: Awaited<ReturnType<FetchLike>>;
+  try {
+    response = await fetchLike("/api/results/backfill", { method: "GET", credentials: "same-origin", headers: { accept: "application/json" } });
+  } catch {
+    return { ok: false };
+  }
+  if (response.status !== 200) return { ok: false };
+  const progress = parseBackfillStatus(await readBody(response));
+  return progress === null ? { ok: false } : { ok: true, progress };
+}
+
 async function readBody(response: { json: () => Promise<unknown> }): Promise<unknown> {
   try {
     return await response.json();

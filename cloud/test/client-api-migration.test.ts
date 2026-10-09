@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../client/api";
-import { fetchMigration, migrationFetchFailureMessage, parseMigrationStatus, postMigrationUpload, uploadFailureMessage, type UploadFailure } from "../client/api-migration";
+import { fetchBackfill, fetchMigration, migrationFetchFailureMessage, parseBackfillStatus, parseMigrationStatus, postMigrationUpload, uploadFailureMessage, type UploadFailure } from "../client/api-migration";
 
 /**
  * Issue #222(#167-B2): 移行の進捗 `GET /api/migration` と、アップロード `POST /api/migration/upload` のクライアント側の呼び出しと応答の分類。
@@ -197,5 +197,80 @@ describe("postMigrationUpload(POST /api/migration/upload)", () => {
     expect(texts[1]).toContain("50MB");
     expect(texts[2]).toContain("R2");
     expect(texts[8]).toContain("500");
+  });
+});
+
+// ---- Issue #217(#167-C): 結果の補完の進捗 ----
+
+const BACKFILL_BODY = {
+  ok: true,
+  state: "ready",
+  migrationState: "completed",
+  remaining: 321,
+  undated: 12,
+  imported: 100,
+  abandoned: { total: 4, byClass: { "no-payout": 3, "fetch-failed": 1 } },
+  tonight: { night: "20261010", dispatched: 30, limit: 150 },
+  inflight: null,
+  nextRunAt: "2026-10-10T17:00:00.000Z",
+  window: { startHour: 1, endHour: 6 },
+};
+
+describe("parseBackfillStatus(結果の補完の進捗の応答の検査。Issue #217)", () => {
+  it("読む項目(状態・残り・開催日不明・取得済み・取得できなかった合計)を読める。余計なキーは無視する", () => {
+    expect(parseBackfillStatus(BACKFILL_BODY)).toEqual({ state: "ready", remaining: 321, undated: 12, imported: 100, abandoned: 4 });
+  });
+
+  it("状態の 6 種をすべて読める。未知の状態は想定外", () => {
+    for (const state of ["waiting-migration", "ready", "running", "paused", "waiting-window", "done"]) {
+      expect(parseBackfillStatus({ ...BACKFILL_BODY, state })?.state, state).toBe(state);
+    }
+    expect(parseBackfillStatus({ ...BACKFILL_BODY, state: "unknown" })).toBeNull();
+  });
+
+  const bad: Array<[string, unknown]> = [
+    ["null", null],
+    ["ok が true でない", { ...BACKFILL_BODY, ok: false }],
+    ["remaining が負", { ...BACKFILL_BODY, remaining: -1 }],
+    ["remaining が小数", { ...BACKFILL_BODY, remaining: 1.5 }],
+    ["remaining が文字列", { ...BACKFILL_BODY, remaining: "3" }],
+    ["undated が欠損", { ...BACKFILL_BODY, undated: undefined }],
+    ["imported が NaN", { ...BACKFILL_BODY, imported: Number.NaN }],
+    ["abandoned が無い", { ...BACKFILL_BODY, abandoned: undefined }],
+    ["abandoned.total が負", { ...BACKFILL_BODY, abandoned: { total: -1, byClass: {} } }],
+  ];
+  it.each(bad)("想定外(%s)は null(一部だけを採用しない)", (_label, body) => {
+    expect(parseBackfillStatus(body)).toBeNull();
+  });
+});
+
+describe("fetchBackfill(GET /api/results/backfill)", () => {
+  it("GET・same-origin の資格情報で取り、200 の本文を読む", async () => {
+    const seen: Array<{ url: string; init: unknown }> = [];
+    const fetchLike: FetchLike = async (url, init) => {
+      seen.push({ url, init });
+      return reply(200, BACKFILL_BODY);
+    };
+    const result = await fetchBackfill(fetchLike);
+    expect(result).toEqual({ ok: true, progress: { state: "ready", remaining: 321, undated: 12, imported: 100, abandoned: 4 } });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("/api/results/backfill");
+    expect(seen[0]!.init).toMatchObject({ method: "GET", credentials: "same-origin" });
+  });
+
+  it("503・403・通信の失敗・本文の形が違う・JSON でない は、いずれも ok:false(例外にしない。補完の進捗は付随の情報)", async () => {
+    const cases: FetchLike[] = [
+      async () => reply(503, { ok: false, error: { type: "backfill-error" } }),
+      async () => reply(403, {}),
+      async () => {
+        throw new TypeError("Failed to fetch");
+      },
+      async () => reply(200, { ok: true, state: "ready" }),
+      async () => ({ status: 200, json: async () => Promise.reject(new SyntaxError("bad json")) }),
+    ];
+    for (const fetchLike of cases) {
+      expect(await fetchBackfill(fetchLike)).toEqual({ ok: false });
+    }
+    expect(cases).toHaveLength(5);
   });
 });

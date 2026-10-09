@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MigrationProgress } from "../client/api-migration";
+import type { BackfillProgress, MigrationProgress } from "../client/api-migration";
 import { buildMigrationModel, MIGRATION_SETTINGS_SECTION, type MigrationModelInput } from "../client/migration-model";
 
 /**
@@ -267,5 +267,69 @@ describe("buildMigrationModel: ファイルの選択・検証・開始", () => {
     const m = buildMigrationModel(input({ upload: { kind: "sent" } }));
     expect(m.uploadNotice!.tone).toBe("ok");
     expect(m.uploadNotice!.text).toContain("アップロードしました");
+  });
+});
+
+// ---- Issue #217(#167-C): 結果の補完の 1 行 ----
+
+const COMPLETED: MigrationProgress = { ...WORKING, state: "completed" };
+const BACKFILL: BackfillProgress = { state: "ready", remaining: 321, undated: 0, imported: 100, abandoned: 4 };
+const backfillOf = (backfill: BackfillProgress | null, progress: MigrationProgress = COMPLETED) => buildMigrationModel(input({ load: { kind: "ready", progress }, backfill })).backfill;
+
+describe("buildMigrationModel: 結果の補完(Issue #217)", () => {
+  it("取得していない(null)・指定なしは出さない", () => {
+    expect(buildMigrationModel(input({ load: { kind: "ready", progress: COMPLETED } })).backfill).toBeNull();
+    expect(backfillOf(null)).toBeNull();
+  });
+
+  it("移行が完了(completed)のときだけ出す。それ以外の状態(idle・取り込み中・失敗)では、補完の進捗があっても出さない", () => {
+    expect(backfillOf(BACKFILL)).not.toBeNull();
+    const others = ["idle", "verifying", "importing", "waiting-budget", "waiting-r2", "failed"] as const;
+    expect(others).toHaveLength(6);
+    for (const state of others) {
+      expect(backfillOf(BACKFILL, { ...WORKING, state }), state).toBeNull();
+    }
+    expect(buildMigrationModel(input({ load: { kind: "loading" }, backfill: BACKFILL })).backfill).toBeNull();
+  });
+
+  it("残り・取得済み・取得できなかった数を 1 行にする(3 桁区切り)。夜間に自動で進むことを伝える", () => {
+    const view = backfillOf({ ...BACKFILL, remaining: 1321 })!;
+    expect(view.tone).toBe("info");
+    expect(view.text).toContain("結果の補完");
+    expect(view.text).toContain("残り 1,321 レース");
+    expect(view.text).toContain("取得済み 100");
+    expect(view.text).toContain("取得できなかった 4");
+    expect(view.text).toContain("夜間");
+    expect(view.note).toBeNull(); // 開催日不明が 0 なら注記なし
+  });
+
+  const states: Array<[BackfillProgress["state"], "info" | "ok" | "wait", string]> = [
+    ["ready", "info", "夜間"],
+    ["waiting-window", "info", "夜間"],
+    ["running", "info", "取り込み中"],
+    ["paused", "wait", "一時停止"],
+    ["done", "ok", "完了"],
+  ];
+  it.each(states)("状態 %s: トーン %s・文言に「%s」を含む", (state, tone, word) => {
+    const view = backfillOf({ ...BACKFILL, state, remaining: state === "done" ? 0 : 321 })!;
+    expect(view.tone).toBe(tone);
+    expect(view.text).toContain(word);
+  });
+
+  it("done では残りを出さず、取得済みと取得できなかった数を出す", () => {
+    const view = backfillOf({ ...BACKFILL, state: "done", remaining: 0 })!;
+    expect(view.text).not.toContain("残り");
+    expect(view.text).toContain("取得済み 100");
+    expect(view.text).toContain("取得できなかった 4");
+  });
+
+  it("waiting-migration(移行が完了と読めない)は出さない", () => {
+    expect(backfillOf({ ...BACKFILL, state: "waiting-migration" })).toBeNull();
+  });
+
+  it("開催日が不明で対象外のレースがあれば、注記を足す(件数つき)", () => {
+    const view = backfillOf({ ...BACKFILL, undated: 12 })!;
+    expect(view.note).toContain("12");
+    expect(view.note).toContain("開催日");
   });
 });

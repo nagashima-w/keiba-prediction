@@ -41,20 +41,23 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+  it("Issue #177・#216・#217: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
     const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
     expect(migrations).toEqual([
       ["v1", '"NetkeibaGate"'],
       ["v2", '"RaceDay"'],
       ["v3", '"CloudMigration"'],
+      ["v4", '"ResultBackfill"'],
     ]);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
     expect(tomlCode).toMatch(/^name = "CLOUD_MIGRATION"$/m);
     expect(tomlCode).toMatch(/^class_name = "CloudMigration"$/m);
+    expect(tomlCode).toMatch(/^name = "RESULT_BACKFILL"$/m);
+    expect(tomlCode).toMatch(/^class_name = "ResultBackfill"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
-    // DO のバインディングはちょうど3つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(3);
+    // DO のバインディングはちょうど4つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(4);
   });
 
   it("Issue #206: cron はちょうど1本で `0 0 * * *`(UTC 0:00 = JST 9:00)。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -146,8 +149,8 @@ describe("wrangler.toml", () => {
       if (d > 0) dispatchCallSites[f] = d;
     }
     expect(resultCallSites).toEqual({ "race-day-do.ts": 1, "result-dispatch.ts": 1 });
-    // dispatchResultImports の呼び出し箇所は 2 つだけ: cron(scheduled.ts)と手動 POST(handler.ts)
-    expect(dispatchCallSites).toEqual({ "handler.ts": 1, "scheduled.ts": 1 });
+    // dispatchResultImports の呼び出し箇所は 3 つだけ: cron(scheduled.ts)・手動 POST(handler.ts)・結果の補完(result-backfill-core.ts。Issue #217。列挙だけを補完用に差し替えて同じ関数に委譲する)
+    expect(dispatchCallSites).toEqual({ "handler.ts": 1, "result-backfill-core.ts": 1, "scheduled.ts": 1 });
     // 対照(検出の確認。空振りでない): 取得口を1つ足した本文では、数が変わる
     expect(((code + "\ngate.fetchRaw(x);").match(/\.fetchRaw\(/g) ?? []).length).toBe(2);
     expect(originCalls(scheduledCode + "\nstub.getRaceList(a, b);")).toBe(2);
@@ -228,6 +231,8 @@ describe("wrangler.toml", () => {
       "scheduled.ts": { RACE_DAY: 2, NETKEIBA_GATE: 0 },
       // DO の中: 取得の出口(gate)を引く 1 行(get と idFromName の 2 回)
       "race-day-do.ts": { RACE_DAY: 0, NETKEIBA_GATE: 2 },
+      // 結果の補完の DO(Issue #217): 日単位の DO を引く 1 行・gate の状態(status)を読む 1 行(それぞれ get と idFromName の 2 回)。取得(fetchRaw・postRaw)は呼ばない(下の専用の検査)
+      "result-backfill-do.ts": { RACE_DAY: 2, NETKEIBA_GATE: 2 },
     });
     // 対照(検出の確認。空振りでない): 余計な経路を足した本文は拾う
     expect(("const s = env.RACE_DAY.get(x);").match(/\benv\.RACE_DAY\b/g)).toHaveLength(1);
@@ -664,6 +669,57 @@ describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも L
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は移行を参照しない`).not.toMatch(/CLOUD_MIGRATION|CloudMigration|migration-core|migration-do/);
     }
+  });
+
+  it("Issue #217: 結果の補完は netkeiba に直接は出ない(取得は日単位の DO が行う)。補完の DO の呼び出し箇所は固定(kick は scheduled.ts の 1 つ、handler.ts は getStatus だけ)。補完のコードは gate の status() だけを読む", () => {
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const core = stripCode(readTextLf("cloud", "src", "result-backfill-core.ts"));
+    const doCode = stripCode(readTextLf("cloud", "src", "result-backfill-do.ts"));
+    const scheduled = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    for (const [name, code] of [["result-backfill-core.ts", core], ["result-backfill-do.ts", doCode]] as const) {
+      expect(code.length, `${name} を読めている`).toBeGreaterThan(1500);
+      // 取得口(gate の fetchRaw・postRaw・一覧・予約・計画の依頼)も、LLM・通知・R2 も持たない
+      for (const forbidden of [".fetchRaw(", ".postRaw(", ".schedule(", ".getRaceList(", ".requestPlan(", ".requestResultImport(", "ANTHROPIC", "DISCORD", "ANALYSIS_DETAIL", "HttpClient", "CachedFetcher"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+    // 補完が日単位の DO に呼ぶのは、dispatchResultImports 経由の依頼と、進行の読み取り(getResultImportProgress)だけ
+    expect((core.match(/\.getResultImportProgress\(/g) ?? []).length).toBe(1);
+    expect((core.match(/(?<!function\s)\bdispatchResultImports\(/g) ?? []).length).toBe(1);
+    // DO の中: gate は status()、移行の DO は getStatus() を 1 回ずつ読むだけ
+    expect((doCode.match(/\.status\(\)/g) ?? []).length).toBe(1);
+    expect((doCode.match(/CLOUD_MIGRATION\.idFromName\(MIGRATION_NAME\)\)\.getStatus\(\)/g) ?? []).length).toBe(1);
+    expect(doCode).not.toMatch(/\.start\(/); // 移行の取り込みを始めさせない
+    // 補完の DO の呼び出し箇所(cloud/src の全ファイルを概念で走査)
+    const kickSites: Record<string, number> = {};
+    const bindingSites: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((x) => x.endsWith(".ts") && x !== "client-bundle.generated.ts")) {
+      const c = stripCode(readTextLf("cloud", "src", f));
+      const k = (c.match(/\.kick\(\)/g) ?? []).length;
+      if (k > 0) kickSites[f] = k;
+      const b = (c.match(/\benv\.RESULT_BACKFILL\b/g) ?? []).length;
+      if (b > 0) bindingSites[f] = b;
+    }
+    // kick を呼ぶのは scheduled.ts(毎日の起動)と result-backfill-do.ts(DO 自身が getStatus・kick の RPC から core に委譲する 2 つ)だけ
+    expect(kickSites).toEqual({ "result-backfill-do.ts": 2, "scheduled.ts": 1 });
+    // env.RESULT_BACKFILL に触れるのは scheduled.ts(有無の確認・get・idFromName の 3 回)と handler.ts(namespace 変数への代入の 1 回)だけ
+    expect(bindingSites).toEqual({ "handler.ts": 1, "scheduled.ts": 3 });
+    // handler.ts: 補完の DO は getStatus だけ(kick・start は呼ばない)。GET /api/results/backfill の 1 本
+    const start = handler.indexOf("async function handleBackfillStatus(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(300); // 前提: 本体を実際に読めている
+    expect(body).toContain(".getStatus()");
+    for (const forbidden of [".kick(", ".start(", ".requestResultImport(", "dispatchResultImports(", "NETKEIBA_GATE", "RACE_DAY", "env.DB", "ANALYSIS_DETAIL", "fetch("]) {
+      expect(body, `handleBackfillStatus に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // scheduled.ts は kick だけ(getStatus・start を呼ばない)
+    expect(scheduled).not.toMatch(/\.getStatus\(/);
+    // 対照(検出の確認。空振りでない)
+    expect(("a.kick();\nb.kick();".match(/\.kick\(\)/g) ?? []).length).toBe(2);
+    expect((core + "\nstub.fetchRaw(x);").includes(".fetchRaw(")).toBe(true);
   });
 
   it("移行の DO の呼び出し(stub の start・getStatus)は handler.ts の移行の 2 つの API だけ。start の呼び出しは 1 箇所", () => {

@@ -8,9 +8,10 @@
  *    **非表示の間は止め**(タイマーを消す)、表示に戻ったら即時に 1 回取って再開する。通信の失敗が {@link MAX_FAILURES} 回続いたら止めて「再読込」を促す(最後に取れた進捗は残す)。
  *  - 検証: ファイルを選んだらブラウザで全行を検証する(`migration-file.ts`)。再描画は {@link PROGRESS_RENDER_MS} ごとに間引く。通れば開始できる。通らなければ理由を出して、アップロードさせない。
  *  - アップロード: 検証したファイルそのものを POST。押した瞬間に同期で「送信中」の印を立てる(二重押しを防ぐ)。取り込み中は選べず・始められない(`migration-model.ts`)。
+ *  - 結果の補完の進捗(Issue #217): 移行が `completed` だったときだけ、進捗の取得のあとに `GET /api/results/backfill` を 1 回取る(付随の情報の 1 行。ポーリングはしない。「再読込」で取り直す)。失敗は黙って出さないだけ。
  *  - 世代(`gen`): 離れる・開き直すたびに増やし、**古い世代の応答・検証の結果は反映しない**。
  */
-import { fetchMigration, migrationFetchFailureMessage, postMigrationUpload, uploadFailureMessage, type MigrationProgress } from "./api-migration";
+import { fetchBackfill, fetchMigration, migrationFetchFailureMessage, postMigrationUpload, uploadFailureMessage, type BackfillProgress, type MigrationProgress } from "./api-migration";
 import type { FetchLike } from "./api";
 import { validateMigrationFile } from "./migration-file";
 import { buildMigrationModel, type MigrationCheckState, type MigrationLoadState, type MigrationModel, type MigrationUploadState } from "./migration-model";
@@ -60,6 +61,7 @@ export function createMigrationScreen(deps: MigrationScreenDeps): MigrationScree
   let file: PickedFile | null = null;
   let check: MigrationCheckState = { kind: "idle" };
   let upload: MigrationUploadState = { kind: "idle" };
+  let backfill: BackfillProgress | null = null;
   let pollStopped = false;
   let failures = 0;
   let timer: unknown = null;
@@ -124,6 +126,8 @@ export function createMigrationScreen(deps: MigrationScreenDeps): MigrationScree
         failures = 0;
         pollStopped = false;
         if (upload.kind === "sent" && !BUSY_STATES.has(result.progress.state)) upload = { kind: "idle" }; // 取り込みが終わったら「アップロードしました」の通知は要らない
+        if (result.progress.state === "completed") fetchBackfillOnce(g);
+        else backfill = null;
       } else if (mode === "first") {
         load = { kind: "error", message: migrationFetchFailureMessage(result.error) };
       } else {
@@ -131,6 +135,16 @@ export function createMigrationScreen(deps: MigrationScreenDeps): MigrationScree
         if (failures >= MAX_FAILURES) pollStopped = true;
       }
       schedule();
+      deps.onChange();
+    });
+    track(promise);
+  }
+
+  /** 結果の補完の進捗を 1 回取る(Issue #217)。失敗・古い世代の応答は反映しない。 */
+  function fetchBackfillOnce(g: number): void {
+    const promise = fetchBackfill(deps.fetch).then((result) => {
+      if (g !== gen) return;
+      backfill = result.ok ? result.progress : null;
       deps.onChange();
     });
     track(promise);
@@ -150,6 +164,7 @@ export function createMigrationScreen(deps: MigrationScreenDeps): MigrationScree
     file = null;
     check = { kind: "idle" };
     upload = { kind: "idle" };
+    backfill = null;
     pollStopped = false;
     failures = 0;
     fetching = false;
@@ -162,6 +177,7 @@ export function createMigrationScreen(deps: MigrationScreenDeps): MigrationScree
       check,
       upload,
       pollStopped,
+      backfill,
     });
   }
 

@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.29.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.30.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.29.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.30.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1470,6 +1470,25 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - 中央の結果ページで、払戻と全頭の着順がどういう順に出るかは未測定(地方の 1 レースの実測のみ)。判定は「N頭」との比較なので中央・地方の両方で成り立つ作りで、成り立たなければ保存せず諦めて翌朝に回る(安全側)。実物の部分ページのフィクスチャは、確定フィクスチャから行を削った合成で代用している。
   - D1 の書き込み行数は 1 日あたり数千行程度の見込み(`rows-written.test.ts` の一般式からの概算で、実測はしていない。Free の 10 万行/日に対して数%)。
 
+### クラウド版の結果の補完(#217〈#167-C〉。v1.30.0。**公開すると、移行の完了後の夜間から本番で動く**)
+exe から移した分析のうち、exe で結果を取り込まなかったレース(`race_results` に行が無い)の結果を、クラウド版が**自動で**取り込む(ユーザー指定 2026-10-09:「レース結果の取り込みは自動でやっておいてほしい」。手動のボタンは無い)。運用の詳細・API の形は `cloud/README.md` の「結果の補完」。ここには決めたことと実測を残す。
+
+- **担当は新しい DO `ResultBackfill`**(wrangler.toml の migration v4。単一インスタンス)。検討した案: (A)`CloudMigration` に補完のフェーズを足す → DO のアラームは 1 つで、移行の状態機械(`BUSY_STATES`・`ensureAlarm`・再アップロード)と時刻を多重化することになり、不採用。(B)`RaceDay`/cron に足す → 朝の cron(JST 9:00)は朝の準備(36 レース超の取得)と重なり、「毎日の自動実行を妨げない」に反する。`requestResultImport` は取得の遅延時刻を渡せない。不採用。(C)新設 → 独立したアラームと時間帯を持てる。移行の側は無変更。採用。
+- **取得と保存は新しく書かない**: 既存の `dispatchResultImports`(`result-dispatch.ts`)に、列挙だけを補完用に差し替えた `DispatchStore` を渡して、その日の日単位の DO に `requestResultImport` で依頼する。日単位の DO が `runResultStep`(gate 経由・キャッシュなし・1 ステップ 1 レース・払戻のテーブルが出ているときだけ保存・最低の優先度・3 試行で諦める)で取得・保存する。中央/地方のホストは `raceResultUrl(raceId)` が場コードで選ぶ。**`requestResultImport` の呼び出し箇所は `result-dispatch.ts` の 1 つのまま**。`dispatchResultImports` の呼び出し箇所が 2 → 3(cron・手動 POST・補完)。
+- **未取込の判定**: 既存どおり `NOT EXISTS (SELECT 1 FROM race_results …)`(行の有無。全頭が中止・除外のレースも行はあるので「取り込み済み」)。`race_result_meta`・`race_combo_payout_imports` は判定に使わない。移行ファイルの結果も `race_results` に入るので、移行の結果と重複して取得しない。
+  補完用の列挙 `LIST_BACKFILL_SQL`(`result-repository.ts`): 窓の下限なし・開催日が昨日(JST)以前・**未取込のある最も新しい日を 1 日だけ**・レースID 昇順・除外するレース ID を JSON 配列 1 つの束縛で渡す(`NOT IN (SELECT value FROM json_each(?))`)。残りの数は `COUNT_BACKFILL_SQL`(`dated`・`undated`)。
+- **対象外**: 開催日(`kaisai_date`)が NULL の分析。日単位の DO の宛先が決まらず、中央の race_id から開催日は導出できない(`race-date.ts`)。**件数を `undated` で見せる**(本番の件数は D1 を見ないと分からない。見てから、地方だけ月日から導出する案などを別 Issue で判断する)。
+- **動く条件**: ①移行が `completed`(`idle`・`failed` は何もしない・取り込み中は 30 分おきに見直す) ②JST 01:00〜06:00 ③1 晩 150 レース・1 回 30 レース(1 つの開催日だけ) ④飛行中のチャンクは常に 1 つ ⑤依頼の前に gate の `status()` を読み、ブレーカーが開いていれば解除の 1 分後、待ちが 4 以上なら 5 分待つ。
+  **gate との協調**: 日単位の DO は `serializeGate` で gate への呼び出しを 1 本に直列化するので、補完が gate に並べるのは同時に 1 本。当日の DO・cron が依頼した前日の DO と合わせても、待ち行列の上限(8)に届かない。1 レースの取得は 1 リクエスト(結果ページ 1 枚に払戻の全券種がある)で、150 レースは gate の最小間隔 2 秒で約 5 分。
+- **取得できないレース(無限に再試行しない)**: `backfill_race`(DO の SQLite)に記録する。永続的な分類(`not-confirmed`・`no-payout`・`parse-error`・`incomplete`)は 1 サイクルで永久に除外。一時的な分類(`fetch-failed`・`save-failed`・`stalled`)は 1 晩に 1 回で 3 晩目に除外。gate の都合(`blocked`・`busy`)・日単位の DO への依頼の失敗(`dispatch-failed`)は晩数に数えず、その晩は止め、5 晩続いたら除外。その晩に試したレースは列挙から除外する(日単位の DO は同じ日の `gave_up` を積み直さないので、除外しないと同じレースを延々と列挙する)。
+  **既知の費用**: 古い地方のレースで結果ページが無い(404)と、HTTP エラーは `fetch-failed` に丸められるので、3 晩 × 3 試行 = 9 リクエストで除外される。
+- **D1 の書き込み(実測。再現: `cd cloud && pnpm exec vitest run test/result-rows-written.test.ts`)**: 結果 1 レースの新規保存は、保存済みの結果ページ 14 本(中央 8・地方 6)で **38〜62 行**(最大は 16 頭の 2 本)。文ごとの内訳は `[2H, 面 2, 削除 0, 2C, 2M]`(H = 馬の数、C = 組合せ払戻の行数、M = parsed の券種の数。`race_results` などは複合主キーの自動索引で行が 2 倍)。150 レース/晩なら多くとも約 **9,300 行**(Free の 10 万行/日の約 9%)。ローカルの workerd の D1 が報告する値で、本番の値と同じとは限らない(最初の本番の実保存で確かめる)。
+- **起動**: cron の `scheduled` が毎日、`requestPlan`・結果の依頼のあとに `kick()` を呼ぶ(アラームが無ければ張るだけ。失敗しても朝の計画・既存の結果の取り込みを失敗させない)。`GET /api/results/backfill`(読み取りの API)でも、アラームが無ければ張り直す。移行の完了を push で通知する経路は作らない(`CloudMigration` を無変更に保つため)。最悪で完了の翌日まで始まりが遅れるが、「数日かけて自動で進む」要件には支障がない。
+- **API と画面**: `GET /api/results/backfill`(`state`・`migrationState`・`remaining`・`undated`・`imported`・`abandoned`・`tonight`・`inflight`・`nextRunAt`・`window`)。移行画面(`#migration`)には、移行が `completed` だったときだけ 1 行(`GET /api/results/backfill` を 1 回取る。ポーリングはしない。「再読込」で取り直す)。失敗は黙って出さないだけで、移行の進捗は壊れない。
+- **クライアントのバンドル**: 157,309 → **159,936 バイト**(+2,627。`pnpm run build:client` が出力する。移行画面の 1 行の API・文言・節だけ。サーバ側のコードはクライアントに入らない)。
+- **ガード**: `scripts/test/cloud-config-guard.test.ts` — DO の binding は 4 つ・migration は v1〜v4。補完のコードは gate の `fetchRaw`・`postRaw`・LLM・通知・R2 を持たない。`.kick()` は `scheduled.ts` と補完の DO の中だけ。`dispatchResultImports(` の呼び出しは `handler.ts`・`result-backfill-core.ts`・`scheduled.ts` の 1 つずつ。
+- **変わらないもの**: exe・`packages/core` のコード・D1 のスキーマ(migration 0009 は無い)・既存の DO(`NetkeibaGate`・`RaceDay`・`CloudMigration`)・`prompt_version`。
+
 ### クラウド版の移行画面(#222〈#167-B2〉。v1.29.0)
 変更は `cloud/` のクライアント(`client/`)と `page.ts` の CSS、生成物 `client-bundle.generated.ts` だけ(**サーバ・D1・DO・wrangler.toml・exe・core は無変更**)。API は #216 のまま(上の「exe から移したファイルの取り込み」)。運用の詳細は `cloud/README.md` の「移行画面」。
 
@@ -1494,7 +1513,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   (Playwright のスクリプトはコミットしていない。再現するには、cloud/ で `wrangler dev --local` + `[access.dev]` を立て、Chromium で `#migration` を開いて `scripts/measure-migration-import.ts` の合成ファイル〈`--keep-file`〉を選ばせる。)
 
 ### exe から移したファイルの取り込み(#216〈#167-B1〉。v1.28.0)
-exe の「クラウド移行用に書き出す」(上の「クラウド移行用の書き出し」。gzip の NDJSON 1 ファイル)を、クラウド版が受け取り、D1・R2 へ**少しずつ**取り込む。API と取り込みの仕組みまで(画面は #222。移行した分析の未取込の結果を netkeiba から取る処理は #217)。
+exe の「クラウド移行用に書き出す」(上の「クラウド移行用の書き出し」。gzip の NDJSON 1 ファイル)を、クラウド版が受け取り、D1・R2 へ**少しずつ**取り込む。API と取り込みの仕組みまで(画面は #222。移行した分析の未取込の結果を netkeiba から取る処理は #217〈v1.30.0。上の「クラウド版の結果の補完」〉)。
 運用の詳細・API の形・予算の定数は `cloud/README.md` の同名の節。ここには決めたことと実測を残す。
 
 - **受け取り**: `POST /api/migration/upload`。gzip を**解釈せず R2 に置く**(`migration/<uuid>.ndjson.gz`。Workers Free の CPU 10ms のため)。Origin 確認・`Content-Length` 必須・上限 50MB・取り込み中は 409(本文を読まずに断る)・R2 の書き込みの柵。

@@ -254,6 +254,7 @@ async function smokeAnalysis(): Promise<Response> {
 export { RaceDay };
 // Issue #216: 移行の DO(本番の worker.ts と同じもの。偽ソケットも netkeiba への経路も持たない)。wrangler は binding のクラスが入口から export されていることを要求する。
 export { CloudMigration } from "./src/migration-do";
+export { ResultBackfill } from "./src/result-backfill-do";
 
 type SmokeEnv = Env;
 

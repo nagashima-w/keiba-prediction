@@ -3315,6 +3315,25 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - 分析結果の数値は変わらない(移行画面は既存の API を呼ぶだけ)。
 - major ではない: 保存データ・設定の互換は壊れない(サーバ・D1 は無変更)。
 
+## 次の正式版が 1.30.0 である根拠(Issue #217〈#167-C〉での変更)
+
+**minor**(クラウド版(web)の利用者から見てできることが増える。区分表の minor「利用者から見てできることが増える」に当たる)。
+
+### 変更内容
+
+- `cloud/`: 移行した分析のうち結果が未取込のレースの結果を、**夜間に自動で**取り込む仕組み(結果の補完)を足した。
+  - 新しい Durable Object `ResultBackfill`(wrangler.toml の binding `RESULT_BACKFILL`・migration **v4**。単一インスタンス)。移行が `completed` のときだけ、JST 1:00〜6:00 に、1 晩 150 レース・1 回 30 レースまで、既存の `dispatchResultImports` で日単位の DO に結果の取り込みを依頼する。gate の状態を読んで、混んでいれば引く。取得できないレースは記録して、無限には再試行しない。
+  - `GET /api/results/backfill`(進捗。GET だけ)、cron の `scheduled` から毎日 `kick()`、移行画面(`#migration`)に 1 行(クライアントの生成物を更新)。
+  - `result-repository.ts` に補完用の列挙・集計の SQL を追加。D1 のスキーマは無変更(migration 0009 は無い)。
+- `packages/core`・`packages/app`(exe)のコードは変更なし(版数のみ)。
+- 版数: ルート・アプリ `1.30.0`(`@keiba/core` は対象外・据え置き)。
+
+### minor である根拠
+
+- cloud の利用者が、exe で結果を取り込まなかった過去のレースの結果が、手動の操作なしに web に入るようになる(これまでは #208 の窓〈前日までの 7 日〉より古いレースは、手動の `POST /api/results/import` でしか取り込めなかった)。
+- 分析結果の数値(EV・配分)は変わらない(保存するのは netkeiba の確定した着順・払戻で、既存の分析のプロンプト・スコアは触れない)。
+- major ではない: 保存データ・設定の互換は壊れない(D1 のスキーマ・exe の `keiba.db`・エクスポートの JSON・IPC は無変更。新しい DO の追加だけで、既存の 3 つの DO は無変更)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

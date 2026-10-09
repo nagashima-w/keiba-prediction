@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../client/api";
-import { fetchMigration, postMigrationUpload } from "../client/api-migration";
+import { fetchBackfill, fetchMigration, postMigrationUpload } from "../client/api-migration";
 import { handle, MIGRATION_UPLOAD_MAX_BYTES, type Env } from "../src/handler";
 import type { MigrationStatus } from "../src/migration-core";
+import type { BackfillStatus } from "../src/result-backfill-core";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
@@ -31,8 +32,24 @@ const WORKING: MigrationStatus = {
   updatedAt: "2026-10-09T01:02:03.000Z",
 };
 
+/** 結果の補完の進捗(Issue #217)。型 `BackfillStatus` で検査する(サーバの項目名・状態名が変わると、ここで型エラーになる)。 */
+const BACKFILL: BackfillStatus = {
+  state: "running",
+  migrationState: "completed",
+  remaining: 321,
+  undated: 12,
+  imported: 100,
+  abandoned: { total: 4, byClass: { "no-payout": 3, "fetch-failed": 1 } },
+  tonight: { night: "20261010", dispatched: 30, limit: 150 },
+  inflight: { day: "20261009", races: 30, since: "2026-10-09T17:00:00.000Z" },
+  nextRunAt: "2026-10-09T17:00:30.000Z",
+  window: { startHour: 1, endHour: 6 },
+};
+
 interface Connected {
   readonly fetch: FetchLike;
+  backfill: BackfillStatus;
+  backfillFails: boolean;
   status: MigrationStatus;
   statusFails: boolean;
   classA: number;
@@ -44,7 +61,7 @@ async function connect(): Promise<Connected> {
   const key = await makeKey("k1");
   const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
   const token = await signToken(key);
-  const state: Connected = { fetch: undefined as never, status: WORKING, statusFails: false, classA: 0, puts: [], starts: [] };
+  const state: Connected = { fetch: undefined as never, backfill: BACKFILL, backfillFails: false, status: WORKING, statusFails: false, classA: 0, puts: [], starts: [] };
   const env: Env = {
     ...GOOD_ENV,
     NETKEIBA_GATE: { idFromName: NOT_CALLED, get: NOT_CALLED },
@@ -67,6 +84,16 @@ async function connect(): Promise<Connected> {
       },
       delete: async () => {},
     } as unknown as Env["ANALYSIS_DETAIL"],
+    RESULT_BACKFILL: {
+      idFromName: (name: string) => name,
+      get: () => ({
+        kick: NOT_CALLED,
+        getStatus: async () => {
+          if (state.backfillFails) throw new Error("DO の秘密");
+          return state.backfill;
+        },
+      }),
+    },
     CLOUD_MIGRATION: {
       idFromName: (name: string) => name,
       get: () => ({
@@ -176,5 +203,30 @@ describe("POST /api/migration/upload の契約", () => {
     const s = await connect();
     s.statusFails = true;
     expect(await postMigrationUpload(s.fetch, blob(10))).toEqual({ ok: false, error: { kind: "server-error" } });
+  });
+});
+
+describe("GET /api/results/backfill の契約(Issue #217)", () => {
+  it("サーバの BackfillStatus を、クライアントの補完の進捗に読める(状態名・残り・開催日不明・取得済み・取得できなかった合計)", async () => {
+    const s = await connect();
+    expect(await fetchBackfill(s.fetch)).toEqual({ ok: true, progress: { state: "running", remaining: 321, undated: 12, imported: 100, abandoned: 4 } });
+  });
+
+  it("サーバの状態 6 種をすべて読める", async () => {
+    const s = await connect();
+    const states = ["waiting-migration", "ready", "running", "paused", "waiting-window", "done"] as const;
+    expect(states).toHaveLength(6);
+    for (const state of states) {
+      s.backfill = { ...BACKFILL, state };
+      const result = await fetchBackfill(s.fetch);
+      expect(result.ok, state).toBe(true);
+      if (result.ok) expect(result.progress.state).toBe(state);
+    }
+  });
+
+  it("DO が失敗したときの 503 は ok:false(サーバの文面は出ない)", async () => {
+    const s = await connect();
+    s.backfillFails = true;
+    expect(await fetchBackfill(s.fetch)).toEqual({ ok: false });
   });
 });
