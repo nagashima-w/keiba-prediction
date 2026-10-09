@@ -378,6 +378,17 @@ export {
   type SummarizeBodyWeightTrendOptions,
 } from "./analyzer/body-weight-trend.js";
 export {
+  summarizeRestRecord,
+  type RestRecordSummary,
+} from "./analyzer/rest-record.js";
+export {
+  summarizeBestWeight,
+  type BestWeightPastRun,
+  type BestWeightPlacement,
+  type BestWeightPosition,
+  type BestWeightSummary,
+} from "./analyzer/best-weight.js";
+export {
   summarizeMarketGap,
   type MarketGapJudgement,
   type MarketGapPastRun,

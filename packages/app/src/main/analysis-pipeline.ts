@@ -52,10 +52,12 @@ import {
   DEFAULT_ESTIMATED_PLACE_CONFIG,
   DEFAULT_EV_CONFIG,
   resolveClipVariant,
+  summarizeBestWeight,
   summarizeBodyWeightTrend,
   summarizeJockeyChange,
   summarizeMarginTrend,
   summarizeMarketGap,
+  summarizeRestRecord,
   precedingRaceIdsSameDay,
   venueKindOfRaceId,
   type AnalysisAllocationRecord,
@@ -663,6 +665,19 @@ export async function runAnalysis(
           ),
           // 直近走から開催日までの間隔(仕様L100「レース間隔」)。判定不能なら未指定(「不明」表記)。
           restInterval: restIntervalOf(horseData.results ?? [], analysisDate),
+          // 休み明け実績(Issue #212・#210-A): 今回が前走から71日以上のときだけ、その馬の過去の休み明けでの
+          // 成績(初戦は数えない)を写す。results は #39 の基準日フィルタ済み(先読みなし)。
+          // 休み明けでない馬・戦績なしは null(プロンプトにこの項目を出さない)。scorer には影響しない。
+          restRecord: summarizeRestRecord(horseData.results ?? [], analysisDate),
+          // ベスト体重(Issue #212・#210-A): 過去の好走(3着以内)時の体重の中央値・範囲と、今回・前走の体重の
+          // 位置。今回の馬体重が未発表なら null。scorer には影響しない。
+          bestWeight: summarizeBestWeight(
+            (horseData.results ?? []).map((r) => ({
+              bodyWeight: r.bodyWeight,
+              finishPosition: r.finishPosition,
+            })),
+            horseData.shutuba.bodyWeight,
+          ),
           winOdds,
           popularity,
           placeOddsMin,

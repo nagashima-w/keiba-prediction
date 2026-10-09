@@ -21,6 +21,14 @@ export {
 } from "./analyzer/body-weight-trend.js";
 
 export {
+  summarizeBestWeight,
+} from "./analyzer/best-weight.js";
+
+export {
+  summarizeRestRecord,
+} from "./analyzer/rest-record.js";
+
+export {
   computeReferenceEv,
   resolveClipVariant,
 } from "./analyzer/build-prompt.js";

@@ -6,10 +6,12 @@ import {
   parseKaisaiDate,
   parseRaceId,
   PROMPT_VERSION,
+  summarizeBestWeight,
   summarizeBodyWeightTrend,
   summarizeJockeyChange,
   summarizeMarginTrend,
   summarizeMarketGap,
+  summarizeRestRecord,
   type AnalyzeRaceResult,
   type BuildPromptInput,
   type CourseType,
@@ -1170,6 +1172,183 @@ describe("runAnalysis(分析パイプライン)", () => {
 
       const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
       expect(horse1.bodyWeightTrend).toBeNull();
+    });
+  });
+
+  describe("休み明け実績・ベスト体重(Issue #212・#210-A)の配線", () => {
+    /** analyze をキャプチャして BuildPromptInput をそのまま記録するスタブ(他の配線テストと同型)。 */
+    function analyzeCapturing(
+      captured: { value: BuildPromptInput | null },
+    ): (input: BuildPromptInput) => Promise<AnalyzeRaceResult> {
+      return async (input: BuildPromptInput) => {
+        captured.value = input;
+        return {
+          horses: input.horses.map((h) => ({
+            umaban: h.umaban,
+            prior: h.prior,
+            adjustedProb: h.prior,
+            reason: null,
+            highlights: [],
+            concerns: [],
+            clipped: false,
+            usedPrior: true,
+            mark: null,
+          })),
+          fallback: false,
+          retryCount: 0,
+          fallbackReason: null,
+        };
+      };
+    }
+
+    /** 分析日(KAISAI=2026/07/09)に対し、前走から111日あく戦績(新しい順)。休み明けの走が2つ(5着・1着)ある。 */
+    const restResults = (): HorseRaceResult[] => [
+      fakeResult("2026/03/20", [1, 1], { finishPosition: { kind: "順位", value: 5 }, bodyWeight: { weight: 486, diff: 6 } }), // 前走(休み明け・5着)
+      fakeResult("2025/12/01", [2, 2], { finishPosition: { kind: "順位", value: 2 }, bodyWeight: { weight: 470, diff: -2 } }), // 前走の前(通常・2着)
+      fakeResult("2025/11/01", [3, 3], { finishPosition: { kind: "順位", value: 1 }, bodyWeight: { weight: 474, diff: 2 } }), // 休み明け(1着)
+      fakeResult("2025/06/01", [4, 4], { finishPosition: { kind: "順位", value: 8 }, bodyWeight: { weight: 472, diff: 0 } }), // 初戦(数えない)
+    ];
+
+    it("今回が前走から71日以上の馬に、戦績と分析日から summarizeRestRecord を写した restRecord が載ること(休み明け2走: 5着・1着)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID, { 1: restResults() })),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      // 手計算の期待値(純関数に依存しない): 前走(5着)は2025/12/01から109日あき、2025/11/01の走は初戦から153日あき。
+      expect(horse1.restRecord).not.toBeNull();
+      expect(horse1.restRecord!.今回間隔日数).toBe(111);
+      expect(horse1.restRecord!.走数).toBe(2);
+      expect(horse1.restRecord!.一着).toBe(1);
+      expect(horse1.restRecord!.着外).toBe(1);
+      expect(horse1.restRecord!.着順).toEqual([5, 1]);
+      // 純関数の出力とも一致する(配線のずれ防止)。
+      expect(horse1.restRecord).toEqual(summarizeRestRecord(restResults(), "2026/07/09"));
+    });
+
+    it("今回が休み明けでない馬(戦績なし・前走が近い)には restRecord が載らない(null)こと", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, { 2: [fakeResult("2026/06/25", [1, 1], { finishPosition: { kind: "順位", value: 1 } })] }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      const horses = captured.value!.horses;
+      expect(horses.find((h) => h.umaban === 2)!.restRecord).toBeNull(); // 前走から14日。
+      expect(horses.find((h) => h.umaban === 3)!.restRecord).toBeNull(); // 戦績なし。
+    });
+
+    it("horseData.results が null(戦績取得失敗)でも例外にならず restRecord は null になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, {});
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) => (h.shutuba.umaban === 1 ? { ...h, results: null } : h)),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await expect(
+        runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress),
+      ).resolves.toBeDefined();
+      expect(captured.value!.horses.find((h) => h.umaban === 1)!.restRecord).toBeNull();
+    });
+
+    it("過去走の bodyWeight・着順と当日 shutuba.bodyWeight から summarizeBestWeight を写した bestWeight が載ること(好走2走: 470・474)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID, { 1: restResults() })),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      // 手計算: 好走(3着以内)は2025/12/01(2着・470kg)と2025/11/01(1着・474kg)。5着・8着は除く。
+      // fakeHorse(1) の当日 bodyWeight は {480, 0} → 範囲470〜474に対して6kg重い。前走比0なので前走も480kg。
+      expect(horse1.bestWeight).not.toBeNull();
+      expect(horse1.bestWeight!.好走時体重).toEqual([470, 474]);
+      expect(horse1.bestWeight!.中央値).toBe(472);
+      expect(horse1.bestWeight!.今回).toEqual({ 体重: 480, 位置: "重い", 範囲外差: 6 });
+      expect(horse1.bestWeight).toEqual(
+        summarizeBestWeight(
+          restResults().map((r) => ({ bodyWeight: r.bodyWeight, finishPosition: r.finishPosition })),
+          { weight: 480, diff: 0 },
+        ),
+      );
+    });
+
+    it("当日の馬体重が未発表(null)の馬は bestWeight が null になること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => {
+          const raceData = fakeRaceData(RACE_ID, { 1: restResults() });
+          return {
+            ...raceData,
+            horses: raceData.horses.map((h) =>
+              h.shutuba.umaban === 1 ? { ...h, shutuba: { ...h.shutuba, bodyWeight: null } } : h,
+            ),
+          };
+        }),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      expect(captured.value!.horses.find((h) => h.umaban === 1)!.bestWeight).toBeNull();
+    });
+
+    it("プロンプト行に「休み明け実績=」「ベスト体重=」が実際に描画され、各 note と一致すること", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () => fakeRaceData(RACE_ID, { 1: restResults() })),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      const line1 = buildPrompt(captured.value!)
+        .split("\n")
+        .find((l) => l.startsWith("馬番1 "))!;
+      expect(line1).toContain(`休み明け実績=${horse1.restRecord!.note}`);
+      expect(line1).toContain(`ベスト体重=${horse1.bestWeight!.note}`);
+      // 休み明けでない馬2の行には休み明け実績が出ない(ベスト体重は当日体重があるので好走0走として出る)。
+      const line2 = buildPrompt(captured.value!)
+        .split("\n")
+        .find((l) => l.startsWith("馬番2 "))!;
+      expect(line2).not.toContain("休み明け実績");
+      expect(line2).toContain("ベスト体重=好走時の体重データなし(サンプル不足)");
+    });
+
+    it("基準日以降の走(先読み)は休み明け実績・ベスト体重に混入しないこと(既存の基準日フィルタ越しに計算される)", async () => {
+      const captured: { value: BuildPromptInput | null } = { value: null };
+      const deps: AnalysisPipelineDeps = {
+        ...baseDeps(),
+        scrape: vi.fn(async () =>
+          fakeRaceData(RACE_ID, {
+            1: [
+              // 分析日(2026/07/09)より後の走: 先読みなので除外される。
+              fakeResult("2026/08/15", [1, 1], { finishPosition: { kind: "順位", value: 1 }, bodyWeight: { weight: 500, diff: 0 } }),
+              ...restResults(),
+            ],
+          }),
+        ),
+        analyze: analyzeCapturing(captured),
+      };
+      await runAnalysis(parseRaceId(RACE_ID), parseKaisaiDate(KAISAI), deps, onProgress);
+      const horse1 = captured.value!.horses.find((h) => h.umaban === 1)!;
+      expect(horse1.restRecord!.着順).toEqual([5, 1]);
+      expect(horse1.bestWeight!.好走時体重).toEqual([470, 474]);
     });
   });
 
