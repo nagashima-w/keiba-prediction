@@ -8,7 +8,7 @@ import type { ViewActions } from "../client/view";
  * 何もしない `ViewActions`(Issue #191。#188 の申し送り)。`ViewActions` に項目を足すたびに、各テストの noop を書き換えずに済む
  * (型を付けてあるので、項目を足して漏れると、ここで型エラーになる)。個別の処理を見たいテストは `{ ...noopActions, onRefresh: … }` で上書きする。
  */
-export const noopActions: ViewActions = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onToggleResult: () => {}, onRun: () => {}, onRetrack: () => {}, onSettingsInput: () => {}, onSettingsSave: () => {}, onSettingsPreviewToggle: () => {}, onSettingsPreviewRefresh: () => {}, onMigrationFile: () => {}, onMigrationStart: () => {}, onMigrationCancelCheck: () => {} };
+export const noopActions: ViewActions = { onDateChange: () => {}, onRefresh: () => {}, onToggleGroup: () => {}, onToggleResult: () => {}, onRun: () => {}, onRetrack: () => {}, onSettingsInput: () => {}, onSettingsSave: () => {}, onSettingsPreviewToggle: () => {}, onSettingsPreviewRefresh: () => {}, onSettingsWeightsReset: () => {}, onMigrationFile: () => {}, onMigrationStart: () => {}, onMigrationCancelCheck: () => {} };
 
 /** 手で時間を進める偽のタイマー。`advance` は、期限の来たタイマーを時刻順に実行し、そのたびに非同期の後始末(マイクロタスク・I/O の 1 巡)を流す。 */
 export function createFakeTimers() {

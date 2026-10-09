@@ -9,7 +9,7 @@ import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
-import type { FieldModel, PreviewModel, SettingsModel } from "./settings-form";
+import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import { h, type PickedFile, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -32,6 +32,8 @@ export interface ViewActions {
   readonly onSettingsPreviewToggle: (open: boolean) => void;
   /** プロンプトのプレビューの「入力中の内容を反映」ボタン(Issue #201。開いているときだけ出る)。引数なし。 */
   readonly onSettingsPreviewRefresh: () => void;
+  /** 「重みを既定値に戻す」(Issue #218): 下書きの重み13項目だけを既定値に戻す(保存はしない)。 */
+  readonly onSettingsWeightsReset: () => void;
   /** 移行画面のファイル選択(Issue #222)。選ばれた File(選択が空なら null)。 */
   readonly onMigrationFile: (file: PickedFile | null) => void;
   /** 移行画面の「取り込みを始める」(Issue #222)。引数なし(検証したファイルは `migration-screen.ts` が持つ)。 */
@@ -376,6 +378,19 @@ function previewSection(preview: PreviewModel, saving: boolean, actions: ViewAct
   return h("section", { class: "preview" }, [h("h3", {}, [toggle]), ...opened]);
 }
 
+/**
+ * スコアリングの重みの節(Issue #218)。見出し(h2)・説明・小見出し(h3)ごとの入力欄(通常の項目と同じ部品 `settingsField`)・「重みを既定値に戻す」ボタン。
+ * 開閉はしない(常に表示。`<details>` は使わない=#187・#188 と同じ理由。状態も増やさない)。スマホ幅では、入力欄は通常の項目と同じ縦並び(幅 100%・高さ 44px 以上)。
+ */
+function weightsSection(weights: WeightsModel, actions: ViewActions): VNode {
+  return h("section", { class: "weights" }, [
+    h("h2", {}, [weights.heading]),
+    ...weights.help.map((line) => h("p", { class: "weights-help" }, [line])),
+    ...weights.groups.map((group) => h("div", { class: "weights-group" }, [h("h3", {}, [group.heading]), ...group.fields.map((f) => settingsField(f, actions))])),
+    h("button", { class: "weights-reset", disabled: weights.resetDisabled }, [weights.resetLabel], { click: actions.onSettingsWeightsReset }),
+  ]);
+}
+
 function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
@@ -394,6 +409,9 @@ function settingsScreen(model: SettingsModel, actions: ViewActions): VNode {
   if (model.fields.length > 0) {
     body.push(h("p", { class: "meta" }, ["保存した設定は、次に実行する発走前の分析から使われます(実行中の分析は、始めたときの設定のままです)。"]));
     body.push(...model.fields.map((f) => settingsField(f, actions)));
+    if (model.weights !== null) {
+      body.push(weightsSection(model.weights, actions));
+    }
     body.push(h("button", { class: "settings-save", disabled: model.saving }, [model.saving ? "保存中…" : "保存"], { click: actions.onSettingsSave }));
     if (model.saveNotice !== null) {
       body.push(

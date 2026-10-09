@@ -163,6 +163,12 @@ export function renderPage(email: string): string {
   .field-help { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
   .field-error { margin: 4px 0 0; font-size: 0.85rem; font-weight: bold; color: var(--fail); }
   .settings-save { display: block; width: 100%; margin: 8px 0 12px; font-weight: bold; }
+  /* Issue #218: スコアリングの重みの節(入力欄は通常の項目と同じ縦並び。ボタンは幅 100%・高さ 44px 以上) */
+  .weights { margin: 24px 0 16px; padding-top: 8px; border-top: 1px solid var(--line); }
+  .weights h2 { margin: 8px 0 4px; font-size: 1.05rem; }
+  .weights h3 { margin: 16px 0 8px; font-size: 0.95rem; }
+  .weights-help { margin: 4px 0; font-size: 0.8rem; color: var(--muted); }
+  .weights-reset { display: block; width: 100%; min-height: 44px; margin: 8px 0 0; font-weight: bold; }
   /* Issue #201: 設定画面のプロンプトのプレビュー(開閉の見出しは h3 の中のボタン。文面は div。改行・折り返しは CSS。内側のスクロールは付けない=スマホで操作しづらいため、ページのスクロールに任せる) */
   .preview { margin: 16px 0; }
   .preview h3 { margin: 8px 0 4px; font-size: 1rem; }

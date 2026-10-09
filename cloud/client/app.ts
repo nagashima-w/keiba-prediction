@@ -54,7 +54,7 @@ import { buildListModel, type BoardSource, type ListSource } from "./list";
 import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource, type RunUi } from "./race";
 import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
 import { buildResultModel, type ResultSource } from "./result";
-import { buildSettingsModel, draftFromSettings, setDraftValue, validateDraft, type FieldErrors, type FieldKey, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
+import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
 import { createMigrationScreen } from "./migration-screen";
 import { buildHash, parseHash, screenOf, type Route, type Venue } from "./route";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
@@ -255,6 +255,7 @@ export function createApp(deps: AppDeps): App {
     onSettingsSave,
     onSettingsPreviewToggle,
     onSettingsPreviewRefresh,
+    onSettingsWeightsReset,
     onMigrationFile: migration.onFile,
     onMigrationStart: migration.onStart,
     onMigrationCancelCheck: migration.onCancelCheck,
@@ -543,6 +544,21 @@ export function createApp(deps: AppDeps): App {
   /** 「入力中の内容を反映」(Issue #201): 開いているときだけ。強制描画で写しを現在の下書きへ更新し、プレビューの文面を入力に追いつかせる。 */
   function onSettingsPreviewRefresh(): void {
     if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving" || !settingsPreviewOpen) return;
+    render(true);
+  }
+
+  /**
+   * 「重みを既定値に戻す」(Issue #218): 下書きの重み13項目だけを既定値に戻す(保存はしない。ネットワークには出ない)。重みの欄のエラーも消す(戻した値は有効)。
+   * `render(true)`: 強制なしの描画は古い写し(`settingsShown`)から木を作るので、そのままだと欄が古い値のまま残る(プレビューの開閉と同じ)。
+   * 下書きが無い(取得前・失敗)・保存中は無視する。
+   */
+  function onSettingsWeightsReset(): void {
+    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
+    settingsDraft = resetWeightsInDraft(settingsDraft);
+    const remaining: Partial<Record<FieldKey, string>> = { ...settingsErrors };
+    for (const key of WEIGHT_FIELD_ORDER) delete remaining[key];
+    settingsErrors = remaining;
+    if (settingsSave.kind === "saved") settingsSave = { kind: "idle" }; // 未保存の変更が生まれたので、「保存しました」を外す
     render(true);
   }
 

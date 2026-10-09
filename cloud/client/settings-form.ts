@@ -7,17 +7,20 @@
  *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
  *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
  *  - LLM を使うときだけ効く(分析モデル。Issue #158): 選んだ系統の最新のモデルで、保存後に次に始まる発走前の分析から使う
+ *  - 朝の準備と発走前の分析の両方で効く: スコアリングの重み13項目(Issue #218。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
  *  - 次の朝から効く: 発走何分前(定時の自動実行〈Issue #166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
  */
-import { ALLOCATION_BET_TYPE_LABELS, BET_ALLOCATION_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
+import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
 import {
   ADDITIONAL_INSTRUCTION_MAX_LENGTH,
   ANALYSIS_MODEL_IDS,
   CLOUD_SETTINGS_KEYS,
   CLOUD_SETTINGS_RULES,
+  DEFAULT_CLOUD_SETTINGS,
   KELLY_FRACTION_WRITE_MIN,
   PRE_RACE_OFFSET_MAX,
   PRE_RACE_OFFSET_MIN,
+  SCORING_WEIGHT_FIELDS,
   type CloudSettings,
 } from "../src/settings";
 import type { SettingsSource } from "./api-settings";
@@ -50,6 +53,9 @@ export const FIELD_ORDER: readonly FieldKey[] = [
   "preRaceOffsetMinutes",
 ];
 
+/** スコアリングの重み13項目の並び(Issue #218。対応表 `SCORING_WEIGHT_FIELDS` の並び = exe の設定画面の並び: バイアス7 → 基礎6)。画面では `fields` とは別の節に出す。 */
+export const WEIGHT_FIELD_ORDER: readonly FieldKey[] = SCORING_WEIGHT_FIELDS.map((f) => f.field);
+
 const BOOLEAN_KEYS: ReadonlySet<FieldKey> = new Set(CLOUD_SETTINGS_KEYS.filter((k) => typeof CLOUD_SETTINGS_RULES[k].fallback === "boolean"));
 const KNOWN_KEYS: ReadonlySet<string> = new Set(CLOUD_SETTINGS_KEYS);
 
@@ -61,6 +67,15 @@ export function draftFromSettings(settings: CloudSettings): SettingsDraft {
     draft[key] = typeof value === "number" ? String(value) : value;
   }
   return draft as SettingsDraft;
+}
+
+/** 「重みを既定値に戻す」(Issue #218): 重み13項目の下書きだけを既定値(文字列)に戻した新しい下書きを返す(保存はしない。元は変えない。重み以外の項目は変えない)。 */
+export function resetWeightsInDraft(draft: SettingsDraft): SettingsDraft {
+  const next: Record<string, DraftValue> = { ...draft };
+  for (const key of WEIGHT_FIELD_ORDER) {
+    next[key] = String(DEFAULT_CLOUD_SETTINGS[key]);
+  }
+  return next as SettingsDraft;
 }
 
 /** 下書きの1項目を更新した新しい下書きを返す(元は変えない)。真偽の項目は `"true"`・`"false"`。未知の項目は無視する。 */
@@ -96,6 +111,8 @@ const ERROR_TEXT: Readonly<Record<FieldKey, (draftValue: DraftValue) => string>>
   includeTrifectaInAllocation: () => "チェックの状態が不正です。",
   includeBracketQuinellaInAllocation: () => "チェックの状態が不正です。",
   preRaceOffsetMinutes: () => `${PRE_RACE_OFFSET_MIN}以上${PRE_RACE_OFFSET_MAX}以下の整数(分)を入力してください(半角)。`,
+  // スコアリングの重み13項目(Issue #218): exe の isValidWeight(有限な数で 0 以上。上限なし)と同じ範囲
+  ...(Object.fromEntries(WEIGHT_FIELD_ORDER.map((key) => [key, () => "0以上の数値を入力してください(半角)。"])) as Record<(typeof SCORING_WEIGHT_FIELDS)[number]["field"], () => string>),
 };
 
 export type DraftValidation = { readonly ok: true; readonly settings: CloudSettings } | { readonly ok: false; readonly errors: FieldErrors };
@@ -161,6 +178,18 @@ export interface FieldModel {
   readonly options?: readonly { readonly value: string; readonly label: string }[];
 }
 
+/** スコアリングの重みの節の表示用データ(Issue #218)。 */
+export interface WeightsModel {
+  readonly heading: string;
+  /** 節の説明(段落ごと)。 */
+  readonly help: readonly string[];
+  /** 小見出し付きの入力欄(exe と同じ: 環境・状態バイアス補正 7 → 基礎スコア 6)。 */
+  readonly groups: readonly { readonly heading: string; readonly fields: readonly FieldModel[] }[];
+  /** 「重みを既定値に戻す」ボタンの文言と、押せないか(保存中)。 */
+  readonly resetLabel: string;
+  readonly resetDisabled: boolean;
+}
+
 export interface SettingsModel {
   readonly kind: "settings";
   /** 戻り先(トップ=一覧)。 */
@@ -172,6 +201,8 @@ export interface SettingsModel {
   readonly saving: boolean;
   readonly saveNotice: { readonly tone: "ok" | "error"; readonly text: string } | null;
   readonly fields: readonly FieldModel[];
+  /** スコアリングの重みの節(Issue #218)。下書きを取得できていないとき(項目が出ないとき)は null。 */
+  readonly weights: WeightsModel | null;
   /** プロンプトのプレビュー(Issue #201)。下書きを取得できていないとき(項目が出ないとき)は null。 */
   readonly preview: PreviewModel | null;
   /** 「exe から移行」の節(Issue #222。要点と移行の画面へのリンク。設定の取得の成否によらず出す)。 */
@@ -210,6 +241,17 @@ const ANALYSIS_MODEL_LABELS: Readonly<Record<(typeof ANALYSIS_MODEL_IDS)[number]
 const ANALYSIS_MODEL_HELP =
   `${LLM_ONLY_HELP}「自動」はアプリの推奨に任せる設定で、今は最新の Sonnet を使います(Sonnet を選んだときと同じです)。Opus は Sonnet より費用が高く、Haiku は安くなります。` +
   "選んだモデルが使えなかったときは、動作確認済みの固定モデルに切り替えて分析を続けます。保存後、次に始まる発走前の分析から使われます。";
+
+const WEIGHTS_HEADING = "スコアリングの重み";
+/** 節の説明(画面に出る文なので、Issue 番号は書かない)。重みはバイアス補正・基礎スコアの補正の倍率。朝の準備と発走前の分析の両方で使う。 */
+const WEIGHTS_HELP: readonly string[] = [
+  "各項目の補正の強さの倍率です(0 以上の数値。上限はありません)。既定値は exe と同じです。大きくしすぎると補正が過剰になり、確率が極端に偏ることがあるので、少しずつ変えてください。",
+  "朝の準備と発走前の分析の両方で使われます。保存後に始まる準備・分析から反映され、すでに始まったタスクは始めたときの設定のままです。",
+];
+const WEIGHT_GROUP_HEADINGS: Readonly<Record<"bias" | "base", string>> = { bias: "環境・状態バイアス補正", base: "基礎スコア" };
+const WEIGHTS_RESET_LABEL = "重みを既定値に戻す";
+/** 騎手成績の重みの補助文: 分析のパイプライン(exe の runAnalysis と同じコード)が騎手の当該コース成績を渡さないため、今は結果に効かない。 */
+const JOCKEY_WEIGHT_HELP = "現在の分析では騎手の当該コース成績を取得していないため、この値を変えても結果は変わりません(exe と同じです)。";
 
 interface FieldSpec {
   readonly kind: FieldKind;
@@ -251,6 +293,18 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
     help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。`,
     inputmode: "numeric",
   },
+  // スコアリングの重み13項目(Issue #218)。ラベルは exe の共有定数。
+  ...(Object.fromEntries(
+    SCORING_WEIGHT_FIELDS.map((f): [string, FieldSpec] => [
+      f.field,
+      {
+        kind: "text",
+        label: f.group === "bias" ? BIAS_WEIGHT_LABELS[f.exeKey] : BASE_SCORE_WEIGHT_LABELS[f.exeKey],
+        help: f.field === "baseScoreWeightJockey" ? JOCKEY_WEIGHT_HELP : null,
+        inputmode: "decimal",
+      },
+    ]),
+  ) as Record<(typeof SCORING_WEIGHT_FIELDS)[number]["field"], FieldSpec>),
 };
 
 const PREVIEW_TOGGLE_OPEN = "LLMへ送るプロンプトのプレビューを開く";
@@ -294,23 +348,34 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
   const { load, draft, errors, save } = input;
   const ready = load.kind === "ready" && draft !== null;
   const saving = save.kind === "saving";
-  const fields: FieldModel[] = ready
-    ? FIELD_ORDER.map((key): FieldModel => {
-        const spec = SPECS[key];
-        return {
-          key,
-          kind: spec.kind,
-          label: spec.label,
-          help: spec.help,
-          value: draft[key],
-          error: errors[key] ?? null,
-          disabled: saving,
-          inputmode: spec.inputmode ?? null,
-          maxlength: spec.maxlength ?? null,
-          ...(spec.options === undefined ? {} : { options: spec.options }),
-        };
-      })
-    : [];
+  const fieldOf = (key: FieldKey, draftNow: SettingsDraft): FieldModel => {
+    const spec = SPECS[key];
+    return {
+      key,
+      kind: spec.kind,
+      label: spec.label,
+      help: spec.help,
+      value: draftNow[key],
+      error: errors[key] ?? null,
+      disabled: saving,
+      inputmode: spec.inputmode ?? null,
+      maxlength: spec.maxlength ?? null,
+      ...(spec.options === undefined ? {} : { options: spec.options }),
+    };
+  };
+  const fields: FieldModel[] = ready ? FIELD_ORDER.map((key) => fieldOf(key, draft)) : [];
+  const weights: WeightsModel | null = ready
+    ? {
+        heading: WEIGHTS_HEADING,
+        help: WEIGHTS_HELP,
+        groups: (["bias", "base"] as const).map((group) => ({
+          heading: WEIGHT_GROUP_HEADINGS[group],
+          fields: SCORING_WEIGHT_FIELDS.filter((f) => f.group === group).map((f) => fieldOf(f.field, draft)),
+        })),
+        resetLabel: WEIGHTS_RESET_LABEL,
+        resetDisabled: saving,
+      }
+    : null;
   return {
     kind: "settings",
     backHref: "#",
@@ -320,6 +385,7 @@ export function buildSettingsModel(input: SettingsModelInput): SettingsModel {
     saving,
     saveNotice: save.kind === "saved" ? { tone: "ok", text: SAVED_NOTICE } : save.kind === "error" ? { tone: "error", text: save.message } : null,
     fields,
+    weights,
     preview: ready ? buildPreviewModel(draft, input.previewOpen === true) : null,
     migration: MIGRATION_SETTINGS_SECTION,
   };

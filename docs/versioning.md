@@ -3334,6 +3334,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - 分析結果の数値(EV・配分)は変わらない(保存するのは netkeiba の確定した着順・払戻で、既存の分析のプロンプト・スコアは触れない)。
 - major ではない: 保存データ・設定の互換は壊れない(D1 のスキーマ・exe の `keiba.db`・エクスポートの JSON・IPC は無変更。新しい DO の追加だけで、既存の 3 つの DO は無変更)。
 
+## 次の正式版が 1.31.0 である根拠(Issue #218 での変更)
+
+**minor**(クラウド版(web)の利用者から見てできることが増える。**かつ、重みを変えれば分析結果の数値が変わる**。区分表の minor の両方に当たる)。
+
+### 変更内容
+
+- `cloud/`: 設定に**スコアリングの重み13項目**(exe の `biasWeights` 7・`baseScoreWeights` 6)を足した。
+  - `cloud/src/settings.ts`: 平坦な接頭辞つきの13キー(`biasWeightTrackCondition`・`baseScoreWeightRecentForm` など。exe のキーとの対応表は `SCORING_WEIGHT_FIELDS`)。既定値は core の `DEFAULT_SCORER_CONFIG`(= exe)の写しで、exe・core との一致は `scripts/test/cloud-settings-defaults.test.ts` が固定する。検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。上限なし)。保存済みの設定に重みが無い行(今の本番)は、13項目とも既定値で読む(今までと同じ結果)。
+  - `cloud/src/scorer-config.ts`(新規): 設定 → core の `ScorerConfig`(exe の `buildScorerConfig` と同じ出力)。
+  - `cloud/src/race-day-core.ts`: 発走前の分析の `runCloudAnalysis` に `scorerConfig` を渡す。**朝の準備も設定を読むようになった**(取得ステップで読んで `task.settings_json` に固定し、計算ステップはそのスナップショットを使う。読めなければ再試行 → 尽きたら failed)。
+  - 設定画面に「スコアリングの重み」の節(13欄・「重みを既定値に戻す」ボタン)。クライアントの生成物を更新。
+- `packages/core`・`packages/app`(exe)のコードは変更なし(版数のみ)。D1 のスキーマも無変更(migration は無い)。
+- 版数: ルート・アプリ `1.31.0`(`@keiba/core` は対象外・据え置き)。
+
+### minor である根拠
+
+- cloud の利用者が、画面から重みを変えられるようになる(これまでは既定値に固定)。
+- 重みを既定値から変えて保存すると、以後の分析の prior・EV・配分が変わる(**変えなければ、今までと同じ結果**)。
+- major ではない: 保存データ・設定の互換は壊れない(既存の設定の行は、重みの項目が無くても既定値で読める。exe の `settings.json`・DB・エクスポートの JSON は無変更)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

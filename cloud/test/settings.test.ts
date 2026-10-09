@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { BASE_SCORE_WEIGHT_KEYS, BIAS_WEIGHT_KEYS } from "../../packages/app/src/shared/settings";
+import { DEFAULT_SCORER_CONFIG } from "../../packages/core/src/scorer/config";
 import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "../src/pre-race-time";
 import {
   ADDITIONAL_INSTRUCTION_MAX_LENGTH,
@@ -10,6 +12,7 @@ import {
   DEFAULT_CLOUD_SETTINGS,
   loadSettings,
   saveSettings,
+  SCORING_WEIGHT_FIELDS,
   SELECT_SETTINGS_SQL,
   UPSERT_SETTINGS_SQL,
   validateCloudSettingsForSave,
@@ -21,7 +24,7 @@ import {
  * 行が無い・読めない・一部の値が不正なときは、exe の `coerceSettings` と同じく、その項目だけ既定値にする(起動を壊さない)。
  */
 describe("既定値", () => {
-  it("exe と同じ既定値: 資金・1レース上限は 0(配分提案を出さない opt-in)、ケリー 0.5、組合せオッズの取得は OFF、各券種の配分は ON、EV 閾値 1.0、クリップ幅は default", () => {
+  it("exe と同じ既定値: スコアリングの重みは core の既定値(Issue #218)、資金・1レース上限は 0(配分提案を出さない opt-in)、ケリー 0.5、組合せオッズの取得は OFF、各券種の配分は ON、EV 閾値 1.0、クリップ幅は default", () => {
     expect(DEFAULT_CLOUD_SETTINGS).toEqual({
       evThreshold: 1.0,
       additionalInstruction: "",
@@ -38,6 +41,20 @@ describe("既定値", () => {
       includeTrifectaInAllocation: true,
       includeBracketQuinellaInAllocation: true,
       preRaceOffsetMinutes: 45,
+      // Issue #218: スコアリングの重み13項目の既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)。ここは数値を直書きして、実装の取り違えを検出する
+      biasWeightTrackCondition: 1,
+      biasWeightVenue: 1,
+      biasWeightSeason: 1,
+      biasWeightFrame: 1,
+      biasWeightSummerFatigue: 1,
+      biasWeightTransport: 1,
+      biasWeightRotation: 1,
+      baseScoreWeightRecentForm: 0.2,
+      baseScoreWeightLast3f: 0.1,
+      baseScoreWeightCourseDistance: 0.15,
+      baseScoreWeightJockey: 0.15,
+      baseScoreWeightWeightChange: 1,
+      baseScoreWeightCourseFrameBias: 1,
     });
   });
 
@@ -80,6 +97,63 @@ describe("分析モデル(analysisModel。Issue #158)", () => {
 
   it("系統への対応: auto は sonnet(自動 = 最新の Sonnet)、sonnet・opus・haiku はそのまま", () => {
     expect(ANALYSIS_MODEL_IDS.map((id) => [id, analysisModelFamily(id)])).toEqual([["auto", "sonnet"], ["sonnet", "sonnet"], ["opus", "opus"], ["haiku", "haiku"]]);
+  });
+});
+
+describe("スコアリングの重み13項目(Issue #218。exe のバイアス7・基礎6。キーは平坦な接頭辞つき)", () => {
+  const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+  it("対応表は13行: exe のキー(BIAS_WEIGHT_KEYS 7 → BASE_SCORE_WEIGHT_KEYS 6)と同じ順・同じ集合で、cloud のキー名 = 接頭辞(biasWeight / baseScoreWeight)+ exe のキー(先頭大文字)。cloud のキーは重複しない", () => {
+    expect(SCORING_WEIGHT_FIELDS.length).toBe(13);
+    expect(BIAS_WEIGHT_KEYS.length + BASE_SCORE_WEIGHT_KEYS.length).toBe(13);
+    expect(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "bias").map((f) => f.exeKey)).toEqual([...BIAS_WEIGHT_KEYS]);
+    expect(SCORING_WEIGHT_FIELDS.filter((f) => f.group === "base").map((f) => f.exeKey)).toEqual([...BASE_SCORE_WEIGHT_KEYS]);
+    for (const f of SCORING_WEIGHT_FIELDS) {
+      expect(f.field, f.exeKey).toBe(`${f.group === "bias" ? "biasWeight" : "baseScoreWeight"}${cap(f.exeKey)}`);
+    }
+    expect(new Set(SCORING_WEIGHT_FIELDS.map((f) => f.field)).size).toBe(13);
+    // 表の並びは、CloudSettings の項目(CLOUD_SETTINGS_KEYS)にそのまま含まれる
+    for (const f of SCORING_WEIGHT_FIELDS) {
+      expect(CLOUD_SETTINGS_KEYS.includes(f.field), f.field).toBe(true);
+    }
+  });
+
+  it("既定値は core の DEFAULT_SCORER_CONFIG(= exe の既定値)と、13項目すべて同じ。既定値は1種類ではない(0.2 などを含む=取り違えを検出できる)", () => {
+    for (const f of SCORING_WEIGHT_FIELDS) {
+      const expected = f.group === "bias" ? (DEFAULT_SCORER_CONFIG.weights as unknown as Record<string, number>)[f.exeKey] : (DEFAULT_SCORER_CONFIG.baseScore.weights as unknown as Record<string, number>)[f.exeKey];
+      expect(typeof expected, f.exeKey).toBe("number");
+      expect(DEFAULT_CLOUD_SETTINGS[f.field], f.field).toBe(expected);
+    }
+    expect(new Set(SCORING_WEIGHT_FIELDS.map((f) => DEFAULT_CLOUD_SETTINGS[f.field])).size).toBeGreaterThan(3);
+  });
+
+  it("後方互換: 重みの項目が無い旧い行(今の本番)は、13項目すべて既定値で読め、他の項目は壊れない", () => {
+    const old = coerceCloudSettings({ bankroll: 1_000_000, evThreshold: 1.5 });
+    for (const f of SCORING_WEIGHT_FIELDS) expect(old[f.field], f.field).toBe(DEFAULT_CLOUD_SETTINGS[f.field]);
+    expect(old.bankroll).toBe(1_000_000);
+    expect(old.evThreshold).toBe(1.5);
+  });
+
+  it("読む側: 1項目が不正でも、その項目だけ既定値に戻り、他の12項目の保存値は残る(exe の coerceBiasWeights と同じ粒度)", () => {
+    for (const target of SCORING_WEIGHT_FIELDS) {
+      const raw: Record<string, unknown> = { ...FULL, [target.field]: -1 };
+      const read = coerceCloudSettings(raw);
+      expect(read[target.field], target.field).toBe(DEFAULT_CLOUD_SETTINGS[target.field]);
+      for (const other of SCORING_WEIGHT_FIELDS.filter((f) => f.field !== target.field)) {
+        expect(FULL[other.field], `前提: ${other.field} は既定値と別の値`).not.toBe(DEFAULT_CLOUD_SETTINGS[other.field]);
+        expect(read[other.field], `${target.field} が不正でも ${other.field} は残る`).toBe(FULL[other.field]);
+      }
+    }
+  });
+
+  it("書く側: 重みが欠けた保存は不可(fields にその項目名だけ)。負の値も不可。0 は可(exe と同じ >= 0)", () => {
+    for (const f of SCORING_WEIGHT_FIELDS) {
+      const body: Record<string, unknown> = { ...FULL };
+      delete body[f.field];
+      expect(validateCloudSettingsForSave(body), `欠け ${f.field}`).toEqual({ ok: false, fields: [f.field] });
+      expect(validateCloudSettingsForSave({ ...FULL, [f.field]: -0.01 }), `負 ${f.field}`).toEqual({ ok: false, fields: [f.field] });
+      expect(validateCloudSettingsForSave({ ...FULL, [f.field]: 0 }), `0 ${f.field}`).toMatchObject({ ok: true });
+    }
   });
 });
 
@@ -207,7 +281,25 @@ const FULL: CloudSettings = {
   includeTrifectaInAllocation: true,
   includeBracketQuinellaInAllocation: false,
   preRaceOffsetMinutes: 60,
+  // Issue #218: 重み13項目は、すべて既定値とは別の値(保存・読み戻しで取り違えないことの確認に使う)
+  biasWeightTrackCondition: 0.5,
+  biasWeightVenue: 0.6,
+  biasWeightSeason: 0.7,
+  biasWeightFrame: 0.8,
+  biasWeightSummerFatigue: 0.9,
+  biasWeightTransport: 1.1,
+  biasWeightRotation: 1.2,
+  baseScoreWeightRecentForm: 0.25,
+  baseScoreWeightLast3f: 0.35,
+  baseScoreWeightCourseDistance: 0.45,
+  baseScoreWeightJockey: 0.55,
+  baseScoreWeightWeightChange: 0.65,
+  baseScoreWeightCourseFrameBias: 0.75,
 };
+
+/** スコアリングの重みの境界値(Issue #218。exe の `isValidWeight` と同じ: 有限な数で 0 以上。上限は無い)。読む側も書く側も同じ。 */
+const WEIGHT_OK: readonly unknown[] = [0, 0.05, 0.15, 1, 100, 1e300, Number.MAX_VALUE];
+const WEIGHT_NG: readonly unknown[] = [-0.0001, -1, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, Number.NaN, "1", "", null, true, [1], {}];
 
 /**
  * 項目ごとの境界値の表(Issue #189)。`read`・`write` は、その値を読む側・書く側が受け入れるか。
@@ -233,6 +325,10 @@ const BOUNDARIES: ReadonlyArray<{ key: keyof CloudSettings; raw: unknown; read: 
   ...["", "x", "あ".repeat(ADDITIONAL_INSTRUCTION_MAX_LENGTH)].map((raw) => ({ key: "additionalInstruction" as const, raw, read: true, write: true })),
   ...["あ".repeat(ADDITIONAL_INSTRUCTION_MAX_LENGTH + 1)].map((raw) => ({ key: "additionalInstruction" as const, raw, read: true, write: false })),
   ...[1, null].map((raw) => ({ key: "additionalInstruction" as const, raw, read: false, write: false })),
+  ...SCORING_WEIGHT_FIELDS.flatMap(({ field }) => [
+    ...WEIGHT_OK.map((raw) => ({ key: field, raw, read: true, write: true })),
+    ...WEIGHT_NG.map((raw) => ({ key: field, raw, read: false, write: false })),
+  ]),
   ...(
     [
       "includeComboOdds",
@@ -304,7 +400,7 @@ describe("validateCloudSettingsForSave(全項目の置き換え。キーの欠�
     expect(checked).toEqual({ ok: true, settings: FULL });
   });
 
-  it("既定値そのもの(14項目)も通る", () => {
+  it("既定値そのもの(全項目)も通る", () => {
     expect(validateCloudSettingsForSave({ ...DEFAULT_CLOUD_SETTINGS })).toEqual({ ok: true, settings: DEFAULT_CLOUD_SETTINGS });
   });
 
@@ -368,7 +464,8 @@ describe("saveSettings(D1 の1行に UPSERT)", () => {
     expect(record[0]!.args.length).toBe(2);
     expect(record[0]!.args[1]).toBe("2026-10-07T01:02:03.000Z");
     expect(JSON.parse(record[0]!.args[0] as string)).toEqual(FULL);
-    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(15);
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(28); // 既存の15項目 + 重み13項目
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(Object.keys(DEFAULT_CLOUD_SETTINGS).length);
   });
 
   it("UPSERT の文は id = 1 の1行だけを対象にする(CHECK 制約と同じ。id を引数にしない)", () => {

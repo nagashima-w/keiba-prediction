@@ -7,7 +7,7 @@ import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
  * Issue #189(段階2): 契約テスト。クライアントの `fetchSettings`・`postSettings` が送るリクエストを、実際の `handle()`(偽の D1)に通し、本物の応答をクライアントの分類に通す。
- * サーバ側のキー名・状態(15 項目の camelCase・source・Content-Type・Origin の検査・200/400/403/503 の形)が変わると、ここで検出する。
+ * サーバ側のキー名・状態(28 項目の camelCase・source・Content-Type・Origin の検査・200/400/403/503 の形)が変わると、ここで検出する。
  * ブラウザが付けるヘッダ(Origin・Sec-Fetch-Site)は、ブラウザが付ける値を模して付ける。
  */
 
@@ -85,7 +85,7 @@ describe("契約: GET・POST /api/settings の本物の応答をクライアン�
     expect(await fetchSettings(c.fetch)).toEqual({ ok: true, settings: DEFAULT_CLOUD_SETTINGS, source: "default" });
   });
 
-  it("POST → GET: クライアントの本文(15 項目の camelCase・Content-Type)をサーバが受け付け、保存した設定を返し、読み戻すと同じ(source: d1)。D1 への書き込みは1回", async () => {
+  it("POST → GET: クライアントの本文(28 項目の camelCase・Content-Type)をサーバが受け付け、保存した設定を返し、読み戻すと同じ(source: d1)。D1 への書き込みは1回", async () => {
     const c = await connect();
     expect(await postSettings(c.fetch, CHANGED)).toEqual({ ok: true, settings: CHANGED });
     expect(c.writes).toBe(1);

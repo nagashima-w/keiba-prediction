@@ -15,6 +15,11 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
  *    分析のたびに Models API の一覧からその系統の最新を解決する(新しいモデルが出ても選び直しが要らない)。既定の `auto` は「アプリの推奨に任せる」で、今は最新の Sonnet
  *    (`sonnet` と同じ挙動。#157 の自動選択と同じ)。選んだモデルが使えなければ、動作確認済みの固定モデルに切り替えて続ける(`llm-run.ts`・core の `model-selection.ts`)。
  *    LLM を使うときだけ効く(API キーが未登録の間は効かない)。項目の無い旧い行・不正な値は `auto`(読む側は寛容)。
+ *  - スコアリングの重み13項目(Issue #218。exe の設定の `biasWeights` 7・`baseScoreWeights` 6)は **exe と共有する項目**。cloud の設定は平坦なキーなので、キー名は接頭辞つき
+ *    (`biasWeight` + exe のキーの先頭大文字。例 `biasWeightTrackCondition`・`baseScoreWeightRecentForm`)。対応は {@link SCORING_WEIGHT_FIELDS} の表が唯一の定義元で、
+ *    exe のキーとの対応・既定値の一致(exe の `DEFAULT_APP_SETTINGS`・core の `DEFAULT_SCORER_CONFIG`)は `cloud/test/settings.test.ts`・`scripts/test/cloud-settings-defaults.test.ts` が固定する。
+ *    検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。**上限は無い**)。読む側と書く側で同じ述語。分析(朝の準備・発走前の分析)の ScorerConfig は `scorer-config.ts` が作る。
+ *    項目の無い旧い行(今の本番)は、13項目とも既定値(= 今までと同じ結果)。
  * 値は `GET`/`POST /api/settings`(`handler.ts`)と設定画面(`#settings`)で編集する(`cloud_settings` 表。id = 1 の1行だけ)。直接 D1 に入れてもよい。
  *
  * **範囲の述語は項目ごとに1か所**(`CLOUD_SETTINGS_RULES`)。読む側(`coerceCloudSettings`)は `isReadable`、書く側(`validateCloudSettingsForSave`。`POST` が 400 にする基準)は `isWritable` を使う。
@@ -40,7 +45,30 @@ export function analysisModelFamily(id: AnalysisModelId): AnalysisModelFamily {
   return id === "auto" ? "sonnet" : id;
 }
 
-export interface CloudSettings {
+/**
+ * スコアリングの重み13項目の対応表(Issue #218。並びは exe の設定画面と同じ: バイアス7 → 基礎6)。`field` が cloud の設定のキー、`group`・`exeKey` が exe の
+ * `biasWeights`(`bias`)・`baseScoreWeights`(`base`)のキー。`field` = 接頭辞(`biasWeight`・`baseScoreWeight`)+ `exeKey` の先頭大文字(テストが固定)。
+ */
+export const SCORING_WEIGHT_FIELDS = [
+  { field: "biasWeightTrackCondition", group: "bias", exeKey: "trackCondition" },
+  { field: "biasWeightVenue", group: "bias", exeKey: "venue" },
+  { field: "biasWeightSeason", group: "bias", exeKey: "season" },
+  { field: "biasWeightFrame", group: "bias", exeKey: "frame" },
+  { field: "biasWeightSummerFatigue", group: "bias", exeKey: "summerFatigue" },
+  { field: "biasWeightTransport", group: "bias", exeKey: "transport" },
+  { field: "biasWeightRotation", group: "bias", exeKey: "rotation" },
+  { field: "baseScoreWeightRecentForm", group: "base", exeKey: "recentForm" },
+  { field: "baseScoreWeightLast3f", group: "base", exeKey: "last3f" },
+  { field: "baseScoreWeightCourseDistance", group: "base", exeKey: "courseDistance" },
+  { field: "baseScoreWeightJockey", group: "base", exeKey: "jockey" },
+  { field: "baseScoreWeightWeightChange", group: "base", exeKey: "weightChange" },
+  { field: "baseScoreWeightCourseFrameBias", group: "base", exeKey: "courseFrameBias" },
+] as const;
+
+/** スコアリングの重みの設定のキー(13個)。 */
+export type ScoringWeightField = (typeof SCORING_WEIGHT_FIELDS)[number]["field"];
+
+export interface CloudSettings extends Readonly<Record<ScoringWeightField, number>> {
   /** EV の閾値(0 より大きい)。 */
   readonly evThreshold: number;
   /** プロンプト追加指示(#179 の LLM で使う)。 */
@@ -65,6 +93,7 @@ export interface CloudSettings {
   readonly includeBracketQuinellaInAllocation: boolean;
   /** 発走の何分前に評価するか(整数 10〜180。cloud 専用。定時の自動実行〈#166〉で使う。それまでは効かない)。 */
   readonly preRaceOffsetMinutes: number;
+  // スコアリングの重み13項目(Issue #218)は {@link ScoringWeightField} のキーで、上の `extends` が足す(各 0 以上の有限な数)。
 }
 
 export const DEFAULT_CLOUD_SETTINGS: CloudSettings = {
@@ -83,6 +112,20 @@ export const DEFAULT_CLOUD_SETTINGS: CloudSettings = {
   includeTrifectaInAllocation: true,
   includeBracketQuinellaInAllocation: true,
   preRaceOffsetMinutes: DEFAULT_PRE_RACE_OFFSET_MINUTES,
+  // スコアリングの重み(Issue #218)。core の `DEFAULT_SCORER_CONFIG`(= exe の既定値)の写し。一致は scripts/test/cloud-settings-defaults.test.ts が固定する。
+  biasWeightTrackCondition: 1,
+  biasWeightVenue: 1,
+  biasWeightSeason: 1,
+  biasWeightFrame: 1,
+  biasWeightSummerFatigue: 1,
+  biasWeightTransport: 1,
+  biasWeightRotation: 1,
+  baseScoreWeightRecentForm: 0.2,
+  baseScoreWeightLast3f: 0.1,
+  baseScoreWeightCourseDistance: 0.15,
+  baseScoreWeightJockey: 0.15,
+  baseScoreWeightWeightChange: 1,
+  baseScoreWeightCourseFrameBias: 1,
 };
 
 const BANKROLL_MAX = 100_000_000;
@@ -135,6 +178,12 @@ const isAnalysisModel = (raw: unknown): raw is AnalysisModelId => typeof raw ===
 
 const D = DEFAULT_CLOUD_SETTINGS;
 
+/** スコアリングの重み13項目の述語(`field` → ルール)。型は `Record<ScoringWeightField, FieldRule<number>>`(表に足して述語を忘れると、`CLOUD_SETTINGS_RULES` の型が通らない)。 */
+function scoringWeightRules(): Record<ScoringWeightField, FieldRule<number>> {
+  const isWeight = numberWhere((n) => n >= 0);
+  return Object.fromEntries(SCORING_WEIGHT_FIELDS.map(({ field }) => [field, rule<number>(D[field], isWeight)])) as Record<ScoringWeightField, FieldRule<number>>;
+}
+
 /**
  * 全項目の範囲の述語(項目の定義順。`CloudSettings` のキーを網羅する型なので、項目を足して述語を書き忘れると型エラー)。
  * 読む側(`coerceCloudSettings`)と書く側(`validateCloudSettingsForSave`)の両方がこの表を使う。
@@ -155,6 +204,8 @@ export const CLOUD_SETTINGS_RULES: { readonly [K in keyof CloudSettings]: FieldR
   includeTrifectaInAllocation: rule(D.includeTrifectaInAllocation, isBoolean),
   includeBracketQuinellaInAllocation: rule(D.includeBracketQuinellaInAllocation, isBoolean),
   preRaceOffsetMinutes: rule(D.preRaceOffsetMinutes, numberWhere((n) => Number.isInteger(n) && n >= PRE_RACE_OFFSET_MIN && n <= PRE_RACE_OFFSET_MAX)),
+  // スコアリングの重み13項目(Issue #218): exe の `isValidWeight`(有限な数で 0 以上。上限なし)と同じ。読む側と書く側で同じ述語。
+  ...scoringWeightRules(),
 };
 
 /** 設定の項目名(`CLOUD_SETTINGS_RULES` の定義順)。 */

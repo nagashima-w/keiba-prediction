@@ -253,6 +253,9 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     evThreshold: 1, additionalInstruction: "", clipVariant: "default", analysisModel: "auto", bankroll: 500000, perRaceCap: 50000, kellyFraction: 0.5, includeComboOdds: false,
     includeWideInAllocation: true, includeTrioInAllocation: true, includeQuinellaInAllocation: true, includeExactaInAllocation: true, includeTrifectaInAllocation: true,
     includeBracketQuinellaInAllocation: true, preRaceOffsetMinutes: 45,
+    // Issue #218: スコアリングの重み13項目(既定値)
+    biasWeightTrackCondition: 1, biasWeightVenue: 1, biasWeightSeason: 1, biasWeightFrame: 1, biasWeightSummerFatigue: 1, biasWeightTransport: 1, biasWeightRotation: 1,
+    baseScoreWeightRecentForm: 0.2, baseScoreWeightLast3f: 0.1, baseScoreWeightCourseDistance: 0.15, baseScoreWeightJockey: 0.15, baseScoreWeightWeightChange: 1, baseScoreWeightCourseFrameBias: 1,
   };
 
   class FakeText {
@@ -465,13 +468,13 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
   });
 
-  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、15 個の入力欄(textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 15 項目の POST になる(一覧・板は取らない)", async () => {
+  it("Issue #189: 設定画面(#settings): GET /api/settings だけを取り、28 個の入力欄(既存の 15 + スコアリングの重み 13。textarea・select・checkbox を含む)を描画する。入力して保存すると、DOM のイベントの値が 28 項目の POST になる(一覧・板は取らない)", async () => {
     const { root, calls } = run("#settings");
     await until(() => root.children.some((c) => flat(c).some((n) => n instanceof FakeElement && n.attrs.has("data-field"))));
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(["GET /api/settings"]);
     const fields = flat(root.children[0]!).filter((n): n is FakeElement => n instanceof FakeElement && n.attrs.has("data-field"));
-    expect(fields.length).toBe(15);
-    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)
+    expect(fields.length).toBe(28);
+    expect(fields.map((n) => n.tag).sort()).toEqual([...Array(7).fill("input"), "input", "input", "input", "input", "input", ...Array(13).fill("input"), "select", "select", "textarea"].sort()); // select は クリップ幅と分析モデルの2つ(Issue #158)。重み13項目は input(Issue #218)
     const field = (key: string) => fields.find((n) => n.attrs.get("data-field") === key)!;
     expect(field("bankroll").value).toBe("500000");
     expect(field("clipVariant").value).toBe("default"); // select は option を入れたあとに value が設定される
@@ -481,13 +484,14 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     field("bankroll").listeners.get("change")![0]!({ target: { value: "123456" } });
     field("analysisModel").listeners.get("change")![0]!({ target: { value: "opus" } });
     field("includeComboOdds").listeners.get("change")![0]!({ target: { value: "on", checked: true } });
+    field("biasWeightVenue").listeners.get("input")![0]!({ target: { value: "0.75" } }); // Issue #218: 重みの欄(生成物の実行)
     const save = flat(root.children[0]!).find((n): n is FakeElement => n instanceof FakeElement && n.attrs.get("class") === "settings-save")!;
     save.listeners.get("click")![0]!(undefined);
     await until(() => calls.some((c) => c.init.method === "POST"));
     const post = calls.find((c) => c.init.method === "POST")!;
     expect(post.url).toBe("/api/settings");
     expect(post.init.referrerPolicy).toBe("same-origin");
-    expect(JSON.parse(post.init.body as string)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true, analysisModel: "opus" });
+    expect(JSON.parse(post.init.body as string)).toEqual({ ...SETTINGS, bankroll: 123456, includeComboOdds: true, analysisModel: "opus", biasWeightVenue: 0.75 });
     await until(() => root.children.some((c) => textOf(c).includes("保存しました")));
   });
 

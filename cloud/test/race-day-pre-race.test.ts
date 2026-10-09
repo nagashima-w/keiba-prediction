@@ -717,7 +717,7 @@ describe("朝と発走前の共存・入口(Issue #178)", () => {
     expect(h.core.getBoard().races.map((r) => [r.raceId, r.mode])).toEqual([[RACE, "morning"], [RACE, "pre_race"]]);
   });
 
-  it("朝のタスクだけのときは、保存先・設定を一切呼ばない(朝の prior は D1・R2 に書かない)", async () => {
+  it("朝のタスクだけのときは、保存先を一切呼ばない(朝の prior は D1・R2 に書かない)。設定(スコアリングの重み。Issue #218)は、取得ステップで1回だけ読み、計算ステップでは読まない", async () => {
     const throwing: AnalysisSink = {
       save: async () => {
         throw new Error("朝に保存先が呼ばれた");
@@ -732,14 +732,21 @@ describe("朝と発走前の共存・入口(Issue #178)", () => {
         throw new Error("朝に保存先が呼ばれた");
       },
     };
+    let settingsReads = 0;
     const h = harness({
       sink: throwing,
       loadSettings: async () => {
-        throw new Error("朝に設定が読まれた");
+        settingsReads += 1;
+        return DEFAULT_CLOUD_SETTINGS;
       },
     });
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "fetch", result: "ok" });
+    expect(settingsReads).toBe(1); // 取得ステップで読む
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "compute", result: "ok" });
+    expect(settingsReads).toBe(1); // 計算ステップでは読まない(スナップショットを使う)
     await drive(h);
+    expect(settingsReads).toBe(1);
     expect(h.core.getBoard().races[0]).toMatchObject({ mode: "morning", status: "done" });
   });
 

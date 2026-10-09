@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.30.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.31.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.30.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.31.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1237,7 +1237,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - 本番への反映は R2 の権限が付いてから(#174)。
 
 ### 発走前の分析・設定・保存(#178〈#164-c〉。v1.19.14。LLM は #194〈#179-b〉・v1.19.25 から)
-日単位の DO の `mode: "pre_race"`(手動の `POST /api/analyses/run` の本文 `mode: "pre_race"`。定時の起動は #206 の cron)。朝(`morning`)とは別のタスク((レースID, mode) ごと)で、**朝のタスクは D1・R2・設定に触れない**(朝の prior は DO にだけ置く)。
+日単位の DO の `mode: "pre_race"`(手動の `POST /api/analyses/run` の本文 `mode: "pre_race"`。定時の起動は #206 の cron)。朝(`morning`)とは別のタスク((レースID, mode) ごと)で、**朝のタスクは D1・R2 に書かない**(朝の prior は DO にだけ置く)。**朝のタスクが設定を読むのは、取得ステップでの1回だけ**(スコアリングの重み用。Issue #218〈v1.31.0〉から。それまでは設定にも触れなかった)。
 - **取得ステップ**: 設定(D1 の `cloud_settings` の1行)を**1回だけ**読み、スナップショットをタスクに保存する(途中で設定が変わっても、取得と計算は同じ設定)。`scrapeRace` で、出馬表(取消・天候・馬場を反映。TTL 10 分)・オッズ(**キャッシュを常に迂回**)・
   組合せオッズ(`includeComboOdds` が ON のときだけ。同じく迂回)を取り直す。戦績・調教は朝のキャッシュがあればそれを使う。朝のキャッシュがあるとき、取得は出馬表 1 + 単勝複勝 1(+ 組合せ ON で 6)= 2〜8 本。冷えた状態は 19 本(組合せ ON で 25 本)。
 - **計算・保存ステップ**: **netkeiba には出ず**(gate は0回)、キャッシュだけで prior → LLM(#194。v1.19.25 から。API キーが未登録なら LLM なしで、`promptVersion`・`model` は null)→ EV → 配分を作り、`AnalysisSink`(`D1AnalysisStore`)で D1(要約)・R2(詳細)に保存する。取消馬は出走馬から除かれる(#154)。
@@ -1252,7 +1252,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   R2 の put には 15 秒の上限時間を掛ける(`withPutTimeout`)。買い目の JSON は 1.5MB までで、超えたら D1 に何も書かずに拒否する(通常の最大は中央16頭・全券種 ON で 265 件・約 23KB)。
 - **子の行の確認**(#175 の申し送り): 保存後に、子の行(馬・買い目)の件数が保存したレコードと一致するかを確かめ、`children_ok` に記録する(不一致は警告。分析は保存済みなので `done`)。
   子の行は `(SELECT max(id) FROM analyses)` で親に紐づけているので、**最初の本番の実保存で `GET /api/analyses/status` の `children_ok` が true であること**を確かめる(ローカルの D1 では true。本番は未確認)。崩れた場合の代替は #175 の JSDoc(migration 0003 案)。
-- **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant、および cloud 専用の preRaceOffsetMinutes(発走何分前に評価するか。整数 10〜180・既定 45。定時の自動実行〈#166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。**変更は次の朝 9:00〈日本時間〉の計画から反映され、すでに計画した日の分は変わらない**)。**exe と共有する13項目の既定値は exe の既定値と同じ**
+- **設定**(`cloud/src/settings.ts`。D1 の `cloud_settings`〈migration 0004。`id = 1` の1行〉): bankroll・perRaceCap・kellyFraction・includeComboOdds・各 include・evThreshold・additionalInstruction・clipVariant、**スコアリングの重み13項目**(#218。下の「クラウド版のスコアリングの重み」)、および cloud 専用の preRaceOffsetMinutes(発走何分前に評価するか。整数 10〜180・既定 45。定時の自動実行〈#166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。**変更は次の朝 9:00〈日本時間〉の計画から反映され、すでに計画した日の分は変わらない**)。**exe と同名で共有する13項目〈配分・EV・クリップ幅など〉と、スコアリングの重み13項目〈キー名は接頭辞つき〉の既定値は exe の既定値と同じ**
   (`scripts/test/cloud-settings-defaults.test.ts` が一致を固定): 資金・1レース上限は 0(配分提案を出さない)、組合せオッズの取得は OFF、各券種の配分は ON。不正な値は、その項目だけ既定値に戻す。**編集は `GET`/`POST /api/settings`(Issue #189)**: POST は全項目の置き換えで、欠け・未知のキー・範囲外は 400。範囲の述語は項目ごとに1か所(`CLOUD_SETTINGS_RULES`)で、書く側は読む側の部分集合(kellyFraction は書く側 0.05〜1・読む側 0〜1、追加指示は書く側 2,000 文字まで・読む側は上限なし)。POST の守り(Origin 403 → Content-Type 415 → 本文の大きさ 413 → 400)は run と共有し、上限は run 1 KiB・settings 16 KiB。画面は段階2で追加。
 - **発走時刻の換算**(`cloud/src/pre-race-time.ts`): 出馬表の `startTime`(JST の HH:MM)から、UTC のエポックミリ秒と「発走の45分前」(既定。Issue #189 で 30 → 45。設定 `preRaceOffsetMinutes` の既定値と同じ定数)を求める(JST 0:00〜8:59 は UTC の前日)。アラームの予約に使うのは #166。
 - **定時の自動実行の純関数**(`cloud/src/auto-run-plan.ts`。Issue #202〈#166-A〉。`jstKaisaiDate` は #206 の `scheduled` が呼ぶ): `jstKaisaiDate(scheduledTimeMs)`(cron の `scheduledTime` から **JST の開催日**。UTC の日付をそのまま使うと UTC 15:00〜23:59 で1日ずれる)・
@@ -1469,6 +1469,18 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 - **【記録】**:
   - 中央の結果ページで、払戻と全頭の着順がどういう順に出るかは未測定(地方の 1 レースの実測のみ)。判定は「N頭」との比較なので中央・地方の両方で成り立つ作りで、成り立たなければ保存せず諦めて翌朝に回る(安全側)。実物の部分ページのフィクスチャは、確定フィクスチャから行を削った合成で代用している。
   - D1 の書き込み行数は 1 日あたり数千行程度の見込み(`rows-written.test.ts` の一般式からの概算で、実測はしていない。Free の 10 万行/日に対して数%)。
+
+### クラウド版のスコアリングの重み(#218〈#167 の洗い出しから〉。v1.31.0)
+exe の設定にある重み13項目(バイアス7: 馬場状態・競馬場・季節・枠順・夏負け・輸送・ローテ / 基礎6: 近走着順・上がり3F・コース距離・騎手・斤量・コース枠順バイアス)を、クラウド版の設定画面で変えられる。変更は `cloud/` のみ(exe・core のコードは無変更)。
+- **設定のキー**: 平坦な接頭辞つきの13キー(`biasWeight` + exe のキーの先頭大文字: `biasWeightTrackCondition`・`biasWeightVenue`・`biasWeightSeason`・`biasWeightFrame`・`biasWeightSummerFatigue`・`biasWeightTransport`・`biasWeightRotation`、`baseScoreWeight` + 同: `baseScoreWeightRecentForm`・`baseScoreWeightLast3f`・`baseScoreWeightCourseDistance`・`baseScoreWeightJockey`・`baseScoreWeightWeightChange`・`baseScoreWeightCourseFrameBias`)。exe のキーとの対応は `cloud/src/settings.ts` の `SCORING_WEIGHT_FIELDS`(唯一の定義元)。設定の項目は全部で28(既存の15 + 13)。
+- **既定値・検証**: 既定値は core の `DEFAULT_SCORER_CONFIG`(= exe の `DEFAULT_APP_SETTINGS`)の写しで、一致は `scripts/test/cloud-settings-defaults.test.ts`(exe・core の両方と13項目すべて)が固定する。検証は exe の `isValidWeight`/`coerceSettings` と同じ(**有限な数で 0 以上。上限は無い**。読む側と書く側で同じ述語)。同じ値を exe の `coerceSettings` と cloud の述語に通して採否が一致することもテストで固定した。保存済みの設定に重みの項目が無い行(今の本番)は、13項目とも既定値で読む(**今までと同じ結果**)。1項目だけ不正な行は、その項目だけ既定値に戻る。画面の入力の違い: 16 進(`0x10`)など、exe の `Number()` が受ける一部の書き方を cloud の数値欄は受けない(既存の数値欄と同じ流儀)。
+- **ScorerConfig**: `cloud/src/scorer-config.ts` の `buildCloudScorerConfig(settings)` が、`DEFAULT_SCORER_CONFIG` へ重み2グループだけをマージする(exe の `buildScorerConfig` と同じ出力。テストで固定)。
+- **分析への配線**(`runCloudAnalysis` の呼び出し箇所は2つ): 発走前の分析(`runPreRaceCompute`)と朝の prior(`runCompute`)の両方が `scorerConfig` を渡す。**どちらも、取得ステップで固定した設定のスナップショット(`race_day_tasks.settings_json`)の重みを使う**ので、各タスクの中で重みが変わらない(取得のあとに設定を保存しても、そのタスクは取得時の重み)。朝の取得ステップは、このために設定を1回読むようになった(読めなければ再試行 → 尽きたら `failed`。既定値の重みで黙って prior を作らない。`loadSettings` を渡さない構成では読まず、既定値の重み)。スナップショットの無い(この変更の前に取得まで済んだ)朝のタスク、重みの項目が無い旧いスナップショットの発走前のタスクは、既定値の重みで計算する。
+  - 朝の prior(画面表示用)と発走前の分析は別のタスクなので、**朝の計算のあとに重みを保存すると、その日の朝の prior と発走前の prior は別の重みで作られる**(朝の prior を後から再計算はしない)。同じ設定のもとでは両者の prior は一致する(テストで固定)。
+  - 本番の DO(`race-day-do.ts`)が `loadSettings` を渡していることは、`test/race-day-weights.test.ts` の静的な検査が固定する。
+- **効かない重み(既存の挙動。【記録】)**: `baseScoreWeightJockey`(騎手成績)は、分析のパイプライン(`runAnalysis`。exe と同じコード)が騎手の当該コース成績(`jockeyCourseStats`)を scorer に渡していない(`grep -rn jockeyCourseStats packages/app/src` は 0 件)ため、変えても結果が変わらない。exe でも同じ。画面の補助文にその旨を書いた。ほかに、`biasWeightTrackCondition`(道悪のときだけ発動)・`biasWeightSummerFatigue`(夏負けの判定に当たる馬がいるときだけ)は、レースの条件によっては効かない(`test/race-day-weights.test.ts` に、16頭の良馬場のフィクスチャで13項目のうち10項目が prior を動かす実測を固定)。
+- **画面**(`#settings`): 「スコアリングの重み」の節(常時表示。小見出し「環境・状態バイアス補正」7欄・「基礎スコア」6欄。ラベルは exe の `BIAS_WEIGHT_LABELS`・`BASE_SCORE_WEIGHT_LABELS` と同じ。数値欄〈type=text・inputmode=decimal〉。通常の項目と同じ縦並びなのでスマホ幅で崩れない)と「重みを既定値に戻す」ボタン(**下書きだけ**を戻す。保存はしない。重みの欄のエラーも消える)。節の説明に「朝の準備と発走前の分析の両方で使われ、すでに始まったタスクは始めたときの設定のまま」「過剰補正に注意」を書いた。保存は全28項目の POST。クライアントの生成物を更新した。
+- **検査**: `test/settings.test.ts`・`scripts/test/cloud-settings-defaults.test.ts`・`test/scorer-config.test.ts`・`test/race-day-weights.test.ts`・`test/race-day-pre-race.test.ts`(朝が設定を1回だけ読む)・`test/client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`・`client-bundle.test.ts`(生成物の実行)。
 
 ### クラウド版の結果の補完(#217〈#167-C〉。v1.30.0。**公開すると、移行の完了後の夜間から本番で動く**)
 exe から移した分析のうち、exe で結果を取り込まなかったレース(`race_results` に行が無い)の結果を、クラウド版が**自動で**取り込む(ユーザー指定 2026-10-09:「レース結果の取り込みは自動でやっておいてほしい」。手動のボタンは無い)。運用の詳細・API の形は `cloud/README.md` の「結果の補完」。ここには決めたことと実測を残す。

@@ -429,6 +429,13 @@ exe の「クラウド移行用に書き出す」(#215。gzip の NDJSON 1 フ�
 - **クライアントを変えたら**: 上の「クライアントを変えたら」と同じ(`pnpm run build:client` で生成物を更新する)。クライアントのバンドルには core の `ev/cloud-migration-format` と `src/migration-reader.ts` が入る(`test/client-bundle.test.ts` が閉包を固定。**`migration-reader.ts` に import を足さない**=Worker 専用のモジュールを引き込まないため)。
 - **検査**: `test/client-api-migration.test.ts`・`client-api-migration-contract.test.ts`(実際の `handle()` を通す)・`client-migration-file.test.ts`(実物のフィクスチャ)・`client-migration-model.test.ts`・`client-migration-screen.test.ts`・`client-view-migration.test.ts`・`client-app-migration.test.ts`・`client-dom-migration.test.ts`・`client-route.test.ts`・`client-bundle.test.ts`(生成物を偽の DOM で実行)。
 
+## スコアリングの重み(Issue #218。v1.31.0。**保存した重みは、保存後に始まる朝の準備・発走前の分析から使われる**)
+- **何をするか**: exe の設定にある重み13項目(バイアス7・基礎6)を、設定(`cloud_settings`)と設定画面に足した。分析の `scorerConfig` に渡す(これまでは渡さず、core の既定値で動いていた)。キーは平坦な接頭辞つき(`biasWeightVenue`・`baseScoreWeightRecentForm` など。exe のキーとの対応は `src/settings.ts` の `SCORING_WEIGHT_FIELDS`)。
+- **既定値・検証**: 既定値は core の `DEFAULT_SCORER_CONFIG`(= exe)と同じ(一致をテストで固定)。検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。上限なし)。D1 の行に重みが無ければ(今の本番)既定値で動くので、**重みを変えなければ今までと同じ結果**。D1 のスキーマは無変更(migration は無い)。
+- **どのタイミングの重みか**: 朝の準備も発走前の分析も、**取得ステップで読んだ設定のスナップショット**の重みで計算する(`race_day_tasks.settings_json`)。取得のあとに設定を保存しても、実行中のタスクは取得時の重みのまま。朝の取得ステップが設定を1回読むようになった(読めなければ再試行 → 尽きたら failed)。朝の prior と発走前の分析は別のタスクなので、朝のあとに重みを保存すると、その日の両者は別の重みになる(朝の prior は画面表示用で、発走前の分析は自分で prior を計算する)。
+- **画面**: 設定画面に「スコアリングの重み」の節(13欄・「重みを既定値に戻す」ボタン〈下書きだけ戻す。保存はしない〉)。**騎手成績の重みは、今の分析が騎手の当該コース成績を scorer に渡さないため、変えても結果が変わらない**(exe も同じ。補助文に書いた)。
+- **検査**: `test/settings.test.ts`・`test/scorer-config.test.ts`・`test/race-day-weights.test.ts`・`scripts/test/cloud-settings-defaults.test.ts`、画面は `test/client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`。**実機(スマホ)での13欄の見た目・入力は自動検査できない**(デプロイ後にユーザーが確認する)。
+
 ## 結果の補完(Issue #217〈#167-C〉。v1.30.0。**公開すると、移行の完了後の夜間から自動で始まる**)
 exe から移した分析のうち、exe で結果を取り込まなかったレースは、移行後も `race_results` に行が無いまま残る。毎朝の自動取り込み(上の「結果の自動取り込み」)は前日までの 7 日だけなので、それより古いレースの結果を、**夜間に少しずつ自動で**取り込む(手動のボタンは無い)。仕様と実測は `docs/current-spec.md` の「クラウド版の結果の補完」。
 - **担当**: 新しい DO `ResultBackfill`(`src/result-backfill-do.ts`。wrangler.toml の migration **v4**・binding `RESULT_BACKFILL`・単一インスタンス)。状態機械は純ロジックの `src/result-backfill-core.ts`。**取得と保存は新しく書かず、既存の `dispatchResultImports` で日単位の DO(`RaceDay`)に依頼する**(`requestResultImport` の呼び出し箇所は `result-dispatch.ts` の 1 つのまま)。netkeiba には、依頼を受けた日単位の DO が gate 経由・1 レースずつ・最低の優先度で出る(中央/地方のホストの違いは `raceResultUrl` が場コードで選ぶ)。
@@ -460,8 +467,8 @@ Access の後ろの GET が2つ(仕様の詳細は `docs/current-spec.md` の「
 **編集は Issue #189**(下の「設定の API」と「設定画面」)。直接 D1 に入れてもよい: `wrangler d1 execute DB --remote --command "INSERT INTO cloud_settings (id, settings_json, updated_at) VALUES (1, '{\"bankroll\":1000000,\"perRaceCap\":100000}', datetime('now')) ON CONFLICT(id) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at"` のように入れる(項目と検証は `cloud/src/settings.ts`)。
 
 ### 設定の API(Issue #189)
-- `GET /api/settings` — `{ "ok": true, "settings": {…15項目。camelCase}, "source": "default"|"d1"|"invalid" }`。`default` は行が無い、`invalid` は行があるが JSON として読めない、またはオブジェクトでない(`null`・`[]`・`123` など。どちらも既定値を返している)。**読む側**の範囲なので、D1 に手で入れた不正な項目は、その項目だけ既定値になって返る。D1 の失敗は 503(`d1-error`。文面なし)。GET だけ(HEAD・PUT 等は 405。`Allow: GET, POST`)。
-- `POST /api/settings` — 本文は **15項目すべて**の JSON(全項目の置き換え。部分更新は受けない)。成功は 200 で `{ "ok": true, "settings": {…保存した設定} }`。**同じオリジンのページから**(`Origin` が必要。`POST /api/analyses/run` と同じ守りで、`readJsonObjectBody` を共有する)。順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413。上限は **16 KiB**。run は 1 KiB)→ JSON のオブジェクト(400)→ 項目の検証(400)→ 保存(D1 の失敗は 503)。
+- `GET /api/settings` — `{ "ok": true, "settings": {…28項目。camelCase}, "source": "default"|"d1"|"invalid" }`。`default` は行が無い、`invalid` は行があるが JSON として読めない、またはオブジェクトでない(`null`・`[]`・`123` など。どちらも既定値を返している)。**読む側**の範囲なので、D1 に手で入れた不正な項目は、その項目だけ既定値になって返る。D1 の失敗は 503(`d1-error`。文面なし)。GET だけ(HEAD・PUT 等は 405。`Allow: GET, POST`)。
+- `POST /api/settings` — 本文は **28項目すべて**の JSON(既存の15項目 + スコアリングの重み13項目)(全項目の置き換え。部分更新は受けない)。成功は 200 で `{ "ok": true, "settings": {…保存した設定} }`。**同じオリジンのページから**(`Origin` が必要。`POST /api/analyses/run` と同じ守りで、`readJsonObjectBody` を共有する)。順序: Origin(403)→ Content-Type(415)→ 本文の大きさ(413。上限は **16 KiB**。run は 1 KiB)→ JSON のオブジェクト(400)→ 項目の検証(400)→ 保存(D1 の失敗は 503)。
   - 項目が欠けている・未知のキーがある・範囲外の値があるときは 400(黙って既定値に戻さない)。本文は固定の message と、欠けた・範囲外の**既知の項目名**(`fields`)。入力の値・未知のキー名は返さない。
   - **範囲(書く側)**: bankroll 整数 0〜1億 / perRaceCap 整数 0〜1000万 / evThreshold > 0 / kellyFraction **0.05〜1**(読む側は 0〜1。exe の画面と同じ下限) / clipVariant `default`・`wide15` / **analysisModel `auto`・`sonnet`・`opus`・`haiku`(既定 `auto`。cloud 専用。読む側も書く側も同じ列挙。項目が無い・不正な値を読むと `auto`)** / include 系は真偽値 / **preRaceOffsetMinutes 整数 10〜180(既定 45。cloud 専用。定時の自動実行〈#166〉を入れるまで効かない)** / additionalInstruction **2,000 文字まで**(UTF-16 コード単位。読む側には上限が無い。#179 のプロンプトの組み立ては自分でも切り詰めること)。
   - 書く側は読む側の部分集合(書ける値は必ず読める)。述語は `cloud/src/settings.ts` の `CLOUD_SETTINGS_RULES` に項目ごとに1か所。
@@ -470,10 +477,10 @@ Access の後ろの GET が2つ(仕様の詳細は `docs/current-spec.md` の「
 ### 設定画面(Issue #189。`#settings`)
 - **入口**: トップ(一覧の画面)の「設定」リンク(`#settings`)。`#settings` の**完全一致**のときだけ設定画面(`#settings&date=…` などは従来どおり)。戻るは `#`(今日・中央の一覧)。
 - **項目と並び**: exe の設定画面に合わせる(EV閾値 → 組合せオッズの取得 → 各券種を配分に含めるか〈ワイド・馬連・枠連・馬単・三連複・三連単〉→ 資金・1レースの上限・ケリー係数 → 追加指示 → クリップ幅)。続けて cloud 専用の「LLM分析のモデル」(選択肢は「自動(最新の Sonnet、既定)」「Sonnet(最新版)」「Opus(最新版)」「Haiku(最新版)」。補助文は、発走前の分析で LLM を使うときだけ効くこと・「自動」はアプリの推奨に任せる設定で今は最新の Sonnet・Opus は Sonnet より費用が高く Haiku は安くなる〈金額・倍率は書かない〉・使えないときは固定モデルで続ける・保存後は次に始まる発走前の分析から、と注記。Issue #158)。末尾に cloud 専用の「発走の何分前に評価するか」(「変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。」と注記。Issue #206 で、旧「定時の自動実行を入れるまで効きません」から変更)。ラベルは exe の共有定数を流用し、補助文は cloud の実際の挙動に合わせた(**追加指示・クリップ幅は、「発走前の分析で LLM を使うときに効きます。API キーが未登録の間は LLM を使わないので、変更しても分析の結果は変わりません」**と注記。キーの有無のどちらでも嘘にならない書き方。画面に Issue 番号は出さない〈Issue #195〉)。
-  API キーと Discord の Webhook は出さない(Worker の secret)。LLM の ON/OFF と上限は作らない。
+  その後ろ(保存ボタンの前)に「スコアリングの重み」の節(Issue #218。下の「スコアリングの重み」)。API キーと Discord の Webhook は出さない(Worker の secret)。LLM の ON/OFF と上限は作らない。
 - **取得**: 開くと `GET /api/settings` だけ(一覧・板・レース・分析は取らない)。失敗は自動で再試行せず、「再読込」(未保存の入力は捨てる)だけ。`source` が `default` なら「まだ保存されていません(既定値を表示しています)」、`invalid` なら「保存済みの設定が読めないため、既定値を表示しています」。
 - **追跡中も入力中の欄を壊さない**: 設定画面の**強制なしの再描画**(追跡のポーリング・他の取得の完了など、設定画面の外の原因)は、最後に強制描画したときの内容(画面に出ている内容)から木を作る。打っている途中の下書きは、次の強制描画(保存・再読込・取得完了・検証エラー・失敗)まで木に出さない(木が同じなので DOM を置き換えず、フォーカス・スマホのキーボードが保たれる)。保存は最新の下書きを読む。
-- **下書きと保存**: 入力は下書きを書くだけで再描画しない(数値欄・追加指示は `input`〈打つたび〉と `change`、チェックボックス・選択は `change`)。保存・再読込・失敗の直後は強制的に再描画する。**保存の押下時**に項目ごとに検証し(エラーは項目の下)、OK なら全 15 項目を POST する。保存中は入力欄・保存ボタンが無効(二重に送らない)。サーバの失敗は固定の文言(入力は残る)。成功は「保存しました。次に実行する発走前の分析から使われます。」。画面を離れたら下書きを破棄する。
+- **下書きと保存**: 入力は下書きを書くだけで再描画しない(数値欄・追加指示は `input`〈打つたび〉と `change`、チェックボックス・選択は `change`)。保存・再読込・失敗の直後は強制的に再描画する。**保存の押下時**に項目ごとに検証し(エラーは項目の下)、OK なら全 28 項目を POST する。保存中は入力欄・保存ボタンが無効(二重に送らない)。サーバの失敗は固定の文言(入力は残る)。成功は「保存しました。次に実行する発走前の分析から使われます。」。画面を離れたら下書きを破棄する。
 - **検査**: `test/client-settings-form.test.ts`・`client-view-settings.test.ts`・`client-app-settings.test.ts`・`client-api-settings.test.ts`・`client-api-settings-contract.test.ts`・`client-dom.test.ts`・`client-bundle.test.ts`(生成物を偽の DOM で実行)。
 - **実機(スマホ)で確かめること(自動検査できない)**:
   - **入力の直後(キーボードを閉じずに)「保存」をタップしたとき、直前の入力が保存に含まれること**。`change` は入力欄を離れたとき(blur)に発火し、click との順序はブラウザ次第で観測できないので、**数値欄・追加指示は `input`(打つたび)でも下書きを書く**ようにした(blur の順序に頼らない)。実機で、打った直後に保存して、保存後の表示が打った値であることを確かめる。チェックボックス・選択は選んだ時点で `change` が届く。

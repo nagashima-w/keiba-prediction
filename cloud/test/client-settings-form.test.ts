@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { CLIP_VARIANTS } from "@keiba/core/analyzer/clip-variants";
-import { ALLOCATION_BET_TYPE_LABELS, BET_ALLOCATION_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
+import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS, isValidWeight } from "../../packages/app/src/shared/settings";
 import {
   buildSettingsModel,
   draftFromSettings,
   FIELD_ORDER,
+  resetWeightsInDraft,
   setDraftValue,
   SOURCE_NOTE_DEFAULT,
   SOURCE_NOTE_INVALID,
   validateDraft,
+  WEIGHT_FIELD_ORDER,
   type FieldKind,
   type SettingsModelInput,
 } from "../client/settings-form";
 import { buildPreviewText } from "../client/prompt-preview";
-import { ANALYSIS_MODEL_IDS, CLOUD_SETTINGS_KEYS, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "../src/settings";
+import { ANALYSIS_MODEL_IDS, CLOUD_SETTINGS_KEYS, DEFAULT_CLOUD_SETTINGS, SCORING_WEIGHT_FIELDS, type CloudSettings } from "../src/settings";
 
 /**
  * Issue #189(段階2): 設定画面の下書き(文字列)・検証(書く側の述語 `isWritable` を使う)・表示用データ。純関数。
@@ -36,6 +38,20 @@ const FULL: CloudSettings = {
   includeTrifectaInAllocation: true,
   includeBracketQuinellaInAllocation: false,
   preRaceOffsetMinutes: 60,
+  // Issue #218: 重み13項目は、すべて既定値とは別の値
+  biasWeightTrackCondition: 0.5,
+  biasWeightVenue: 0.6,
+  biasWeightSeason: 0.7,
+  biasWeightFrame: 0.8,
+  biasWeightSummerFatigue: 0.9,
+  biasWeightTransport: 1.1,
+  biasWeightRotation: 1.2,
+  baseScoreWeightRecentForm: 0.25,
+  baseScoreWeightLast3f: 0.35,
+  baseScoreWeightCourseDistance: 0.45,
+  baseScoreWeightJockey: 0.55,
+  baseScoreWeightWeightChange: 0.65,
+  baseScoreWeightCourseFrameBias: 0.75,
 };
 
 describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何分前は cloud 専用で後ろ)", () => {
@@ -59,10 +75,17 @@ describe("FIELD_ORDER(exe の設定画面の並び。分析モデル・発走何
     ]);
   });
 
-  it("設定の全 15 項目を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
+  it("設定の全項目 = FIELD_ORDER(15項目)+ WEIGHT_FIELD_ORDER(スコアリングの重み13項目。Issue #218)を、重複なく過不足なく含む(項目を足したらここで落ちる)", () => {
     expect(FIELD_ORDER.length).toBe(15);
-    expect(new Set(FIELD_ORDER).size).toBe(15);
-    expect([...FIELD_ORDER].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
+    expect(WEIGHT_FIELD_ORDER.length).toBe(13);
+    const all = [...FIELD_ORDER, ...WEIGHT_FIELD_ORDER];
+    expect(new Set(all).size).toBe(28);
+    expect(all.length).toBe(CLOUD_SETTINGS_KEYS.length);
+    expect([...all].sort()).toEqual([...CLOUD_SETTINGS_KEYS].sort());
+  });
+
+  it("WEIGHT_FIELD_ORDER は対応表(SCORING_WEIGHT_FIELDS)の並び = exe の設定画面の並び(バイアス7 → 基礎6)", () => {
+    expect([...WEIGHT_FIELD_ORDER]).toEqual(SCORING_WEIGHT_FIELDS.map((f) => f.field));
   });
 });
 
@@ -77,6 +100,10 @@ describe("draftFromSettings / setDraftValue", () => {
     expect(draft.clipVariant).toBe("wide15");
     expect(draft.includeComboOdds).toBe(true);
     expect(draft.includeWideInAllocation).toBe(false);
+    // Issue #218: 重みも文字列(入力した文字のまま)
+    expect(draft.biasWeightTrackCondition).toBe("0.5");
+    expect(draft.baseScoreWeightCourseFrameBias).toBe("0.75");
+    expect(WEIGHT_FIELD_ORDER.every((k) => typeof draft[k] === "string")).toBe(true);
   });
 
   it("setDraftValue: 真偽の項目は \"true\"・\"false\" を真偽値に、それ以外は文字列のまま。元の下書きは変えない", () => {
@@ -143,6 +170,16 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
     ["追加指示 2000 文字", "additionalInstruction", "あ".repeat(2000), true],
     ["追加指示 2001 文字", "additionalInstruction", "あ".repeat(2001), false],
     ["追加指示 空", "additionalInstruction", "", true],
+    // Issue #218: スコアリングの重み(有限な数で 0 以上。上限なし)。13項目すべてで同じ境界を、下の it.each が回す
+    ["重み 0", "biasWeightVenue", "0", true],
+    ["重み 小数", "baseScoreWeightRecentForm", "0.05", true],
+    ["重み 大きい値(上限なし)", "biasWeightSeason", "1000000", true],
+    ["重み 負", "biasWeightFrame", "-0.01", false],
+    ["重み 空", "biasWeightRotation", "", false],
+    ["重み 文字", "baseScoreWeightJockey", "abc", false],
+    ["重み Infinity", "baseScoreWeightLast3f", "Infinity", false],
+    ["重み 全角数字", "baseScoreWeightCourseDistance", "１", false],
+    ["重み カンマ区切り", "biasWeightTransport", "1,5", false],
   ];
   it.each(CASES)("%s", (_name, key, text, ok) => {
     const result = validateDraft(setDraftValue(draftFromSettings(DEFAULT_CLOUD_SETTINGS), key, text));
@@ -151,6 +188,27 @@ describe("validateDraft(書く側の範囲。保存の押下時に1回)", () => 
       expect(Object.keys(result.errors)).toEqual([key]); // 他の項目は有効なので、その項目だけが失敗
       expect(result.errors[key]!.length).toBeGreaterThan(5);
     }
+  });
+
+  it.each(WEIGHT_FIELD_ORDER.flatMap((key) => [[key, "0", true], [key, "0.5", true], [key, "12", true], [key, "-0.5", false], [key, "", false], [key, "x", false]] as const))("Issue #218: 重み %s = %j は ok=%s(13項目すべて同じ境界。不正なら、その項目だけがエラー)", (key, text, ok) => {
+    const result = validateDraft(setDraftValue(draftFromSettings(DEFAULT_CLOUD_SETTINGS), key, text));
+    expect(result.ok).toBe(ok);
+    if (!result.ok) {
+      expect(Object.keys(result.errors)).toEqual([key]);
+      expect(result.errors[key]).toContain("0以上の数値");
+    }
+  });
+
+  it("Issue #218: 重みの入力の検証は exe の isValidWeight と一致する(同じ文字列で同じ判定)。違うのは、cloud が 16 進(0x10)・カンマなどを数値として受けない点だけ(既存の数値欄と同じ流儀)", () => {
+    const inputs = ["0", "0.0", "0.05", "1", "3", "10", "1e3", " 2 ", "-0.1", "-1", "", "   ", "abc", "Infinity", "-Infinity", "NaN", "1,5", "１", "1.2.3", "0x10"];
+    const differences: string[] = [];
+    for (const text of inputs) {
+      const cloud = validateDraft(setDraftValue(draftFromSettings(DEFAULT_CLOUD_SETTINGS), "biasWeightVenue", text)).ok;
+      if (cloud !== isValidWeight(text)) differences.push(text);
+    }
+    expect(inputs.filter((t) => isValidWeight(t)).length).toBeGreaterThan(5); // 前提: 有効な入力が十分ある(空振りでない)
+    expect(inputs.filter((t) => !isValidWeight(t)).length).toBeGreaterThan(5);
+    expect(differences).toEqual(["0x10"]);
   });
 
   it("複数の項目が不正なら、項目ごとにエラー。有効な項目にはエラーを付けない", () => {
@@ -462,5 +520,116 @@ describe("Issue #201: プロンプトのプレビューの表示用データ(bui
     for (const s of [p.toggleLabel, p.refreshLabel ?? "", ...p.notes]) {
       expect(s).not.toMatch(/#\d/);
     }
+  });
+});
+
+describe("Issue #218: スコアリングの重みの節(buildSettingsModel の weights)", () => {
+  const weights = (over: Partial<SettingsModelInput> = {}) => buildSettingsModel(READY_INPUT(over)).weights!;
+  const allFields = (w: NonNullable<ReturnType<typeof buildSettingsModel>["weights"]>) => w.groups.flatMap((g) => g.fields);
+
+  it("下書きを取得できていないとき(読み込み中・取得の失敗)は節自体を出さない。取得済みなら出る(前提)", () => {
+    for (const load of [{ kind: "loading" }, { kind: "error", message: "失敗" }] as const) {
+      expect(buildSettingsModel({ load, draft: null, errors: {}, save: { kind: "idle" } }).weights, load.kind).toBeNull();
+    }
+    expect(buildSettingsModel(READY_INPUT()).weights).not.toBeNull();
+  });
+
+  it("重みの13項目は fields(既存の15項目)に混ざらず、節の groups にだけある: 見出しは exe と同じ「環境・状態バイアス補正」(7)→「基礎スコア」(6)", () => {
+    const m = buildSettingsModel(READY_INPUT());
+    expect(m.fields.map((f) => f.key)).toEqual([...FIELD_ORDER]);
+    const w = m.weights!;
+    expect(w.groups.map((g) => [g.heading, g.fields.length])).toEqual([["環境・状態バイアス補正", 7], ["基礎スコア", 6]]);
+    expect(allFields(w).map((f) => f.key)).toEqual([...WEIGHT_FIELD_ORDER]);
+  });
+
+  it("ラベルは exe と同じ日本語(BIAS_WEIGHT_LABELS・BASE_SCORE_WEIGHT_LABELS)。13項目すべて、対応表の exe のキーのラベル", () => {
+    const byKey = Object.fromEntries(allFields(weights()).map((f) => [f.key, f.label]));
+    expect(Object.keys(byKey).length).toBe(13);
+    for (const f of SCORING_WEIGHT_FIELDS) {
+      const expected = f.group === "bias" ? BIAS_WEIGHT_LABELS[f.exeKey] : BASE_SCORE_WEIGHT_LABELS[f.exeKey];
+      expect(expected.length, f.field).toBeGreaterThan(1); // 前提: exe 側にラベルがある
+      expect(byKey[f.field], f.field).toBe(expected);
+    }
+    expect(byKey["biasWeightTrackCondition"]).toBe("馬場状態適性(道悪)");
+    expect(byKey["baseScoreWeightWeightChange"]).toBe("斤量");
+  });
+
+  it("入力の種類: 13項目とも text で、小数のキーボード(decimal)。値は下書きの文字のまま。maxlength なし", () => {
+    const fields = allFields(weights());
+    expect(fields.length).toBe(13);
+    for (const f of fields) {
+      expect(f.kind, f.key).toBe("text");
+      expect(f.inputmode, f.key).toBe("decimal");
+      expect(f.maxlength, f.key).toBeNull();
+    }
+    expect(Object.fromEntries(fields.map((f) => [f.key, f.value]))).toEqual({
+      biasWeightTrackCondition: "0.5",
+      biasWeightVenue: "0.6",
+      biasWeightSeason: "0.7",
+      biasWeightFrame: "0.8",
+      biasWeightSummerFatigue: "0.9",
+      biasWeightTransport: "1.1",
+      biasWeightRotation: "1.2",
+      baseScoreWeightRecentForm: "0.25",
+      baseScoreWeightLast3f: "0.35",
+      baseScoreWeightCourseDistance: "0.45",
+      baseScoreWeightJockey: "0.55",
+      baseScoreWeightWeightChange: "0.65",
+      baseScoreWeightCourseFrameBias: "0.75",
+    });
+  });
+
+  it("エラーは渡した項目だけに付く。保存中は13項目とも disabled(通常は disabled でない)", () => {
+    const w = weights({ errors: { biasWeightVenue: "エラーA", baseScoreWeightJockey: "エラーB", bankroll: "別の項目" } });
+    expect(Object.fromEntries(allFields(w).filter((f) => f.error !== null).map((f) => [f.key, f.error]))).toEqual({ biasWeightVenue: "エラーA", baseScoreWeightJockey: "エラーB" });
+    expect(allFields(weights()).every((f) => !f.disabled)).toBe(true);
+    const saving = weights({ save: { kind: "saving" } });
+    expect(allFields(saving).length).toBe(13);
+    expect(allFields(saving).every((f) => f.disabled)).toBe(true);
+  });
+
+  it("節の見出しと説明: 朝の準備と発走前の分析の両方で使われること・すでに始まったタスクは始めたときの設定のままであること・過剰補正に注意・「既定値に戻す」ボタン(保存中は無効)", () => {
+    const w = weights();
+    expect(w.heading).toBe("スコアリングの重み");
+    const text = w.help.join("\n");
+    expect(text).toContain("朝の準備と発走前の分析の両方で使われ");
+    expect(text).toContain("すでに始まったタスクは始めたときの設定のまま");
+    expect(text).toContain("過剰");
+    expect(text).toContain("0 以上");
+    expect(w.resetLabel).toBe("重みを既定値に戻す");
+    expect(w.resetDisabled).toBe(false);
+    expect(weights({ save: { kind: "saving" } }).resetDisabled).toBe(true);
+  });
+
+  it("補助文: 騎手成績の重みは「現在の分析では効かない」旨を書く(分析が騎手の当該コース成績を渡さないため。exe も同じ)。ほかの12項目には書かない。画面に出る文に Issue 番号を書かない", () => {
+    const w = weights();
+    const byKey = Object.fromEntries(allFields(w).map((f) => [f.key, f.help ?? ""]));
+    expect(byKey["baseScoreWeightJockey"]).toContain("変えても結果は変わりません");
+    for (const f of SCORING_WEIGHT_FIELDS.filter((x) => x.field !== "baseScoreWeightJockey")) {
+      expect(byKey[f.field], f.field).not.toContain("変わりません");
+    }
+    for (const [key, help] of Object.entries(byKey)) expect(help, key).not.toMatch(/#\d/);
+    expect(w.heading).not.toMatch(/#\d/);
+    expect(w.help.join("\n")).not.toMatch(/#\d/);
+    for (const g of w.groups) expect(g.heading).not.toMatch(/#\d/);
+  });
+});
+
+describe("Issue #218: resetWeightsInDraft(「重みを既定値に戻す」。下書きだけを戻す)", () => {
+  it("13項目の下書きを既定値(文字列)に戻し、重み以外の15項目は変えない。元の下書きは変えない", () => {
+    const draft = draftFromSettings(FULL);
+    for (const k of WEIGHT_FIELD_ORDER) expect(draft[k], `前提: ${k} は既定値と別の値`).not.toBe(String(DEFAULT_CLOUD_SETTINGS[k]));
+    const reset = resetWeightsInDraft(draft);
+    for (const k of WEIGHT_FIELD_ORDER) expect(reset[k], k).toBe(String(DEFAULT_CLOUD_SETTINGS[k]));
+    for (const k of FIELD_ORDER) expect(reset[k], k).toBe(draft[k]);
+    expect(draft.biasWeightVenue).toBe("0.6");
+  });
+
+  it("不正な入力(文字・空・負)も既定値に戻る。戻した下書きは検証を通る(その他が有効なら)", () => {
+    let draft = draftFromSettings(DEFAULT_CLOUD_SETTINGS);
+    draft = setDraftValue(setDraftValue(setDraftValue(draft, "biasWeightVenue", "abc"), "baseScoreWeightJockey", ""), "biasWeightSeason", "-3");
+    expect(validateDraft(draft).ok).toBe(false);
+    const result = validateDraft(resetWeightsInDraft(draft));
+    expect(result).toEqual({ ok: true, settings: DEFAULT_CLOUD_SETTINGS });
   });
 });

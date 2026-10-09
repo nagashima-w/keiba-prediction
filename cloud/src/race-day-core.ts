@@ -107,7 +107,8 @@ import { clampAdditionalInstruction, createCloudAnalyze, createCloudModelSelecto
 import { SqlLlmResponseStore } from "./llm-response-store";
 import type { CloudLlm } from "./llm-sender";
 import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
-import { ADDITIONAL_INSTRUCTION_MAX_LENGTH, coerceCloudSettings, type CloudSettings } from "./settings";
+import { buildCloudScorerConfig } from "./scorer-config";
+import { ADDITIONAL_INSTRUCTION_MAX_LENGTH, coerceCloudSettings, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "./settings";
 import type { SqlLike } from "./sql-like";
 
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
@@ -1700,6 +1701,12 @@ export class RaceDayCore {
     // 試行回数は取得の前に永続化する(取得の途中でクラッシュしても、再実行が無限に続かない)。
     this.updateTask(task, "queued", attempts, task.error);
     try {
+      // 設定(スコアリングの重み。Issue #218)を読んでタスクに固定する(発走前の取得と同じ流儀。取得〜計算で重みが変わらない。再試行では読み直さない)。
+      // 読めなければ投げる(下の catch が再試行し、尽きたら failed。既定値の重みで黙って prior を作らない)。`loadSettings` の無い構成は読まない(計算は既定値の重み)。
+      if (task.settings_json === null && this.loadSettings !== undefined) {
+        const settings = await this.loadSettings();
+        this.setTaskFields(task, { settings_json: JSON.stringify(settings) });
+      }
       const race = await scrapeRace(
         parseRaceId(task.race_id),
         { fetcher: this.networkFetcher, now: () => new Date(this.now()) },
@@ -1730,12 +1737,15 @@ export class RaceDayCore {
         throw new Error("開催日が未確定です");
       }
       const raceId = parseRaceId(task.race_id);
+      // 取得ステップが固定した設定のスナップショットの重みを使う(Issue #218)。スナップショットの無いタスク(設定を読まない構成・この変更の前に取得まで済んだタスク)は既定値の重み(今までと同じ結果)。
+      const settings = task.settings_json === null ? DEFAULT_CLOUD_SETTINGS : coerceCloudSettings(JSON.parse(task.settings_json));
       const result = await runCloudAnalysis(raceId, parseKaisaiDate(kaisaiDate), {
         scrape: (id) => this.scrapeFromCache(id, false),
         analyze: null,
         // 朝の prior は D1・R2 に保存しない(DO のストレージにだけ置く)。ここは何も書かない。
         saveAnalysis: () => undefined,
         allocationSettings: null,
+        scorerConfig: buildCloudScorerConfig(settings),
         now: () => new Date(this.now()),
         llmSkipReason: "朝の prior(LLM は発走前だけ)",
       });
@@ -2001,6 +2011,7 @@ export class RaceDayCore {
             includeBracketQuinellaInAllocation: settings.includeBracketQuinellaInAllocation,
           },
           evConfig: { threshold: settings.evThreshold },
+          scorerConfig: buildCloudScorerConfig(settings), // スコアリングの重み(Issue #218)。取得ステップのスナップショットの値
           now: () => new Date(analyzedAtMs),
           // 当日傾向(Issue #209): 前のレース(自レースより前のレース番号だけ。#153)の結果を D1 から読む(netkeiba には出ない)。結果ストアが無い構成は空(当日傾向なし)。
           // 読み出しの失敗は runAnalysis が握って当日傾向なしで続け、`onSameDayTrendError` に渡す(警告には redactSecrets を通した先頭 200 文字だけ)。
