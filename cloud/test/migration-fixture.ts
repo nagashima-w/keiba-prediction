@@ -10,7 +10,8 @@ import { parseMigrationLine, type MigrationAnalysisLine, type MigrationLine, typ
 const GOLDEN_PATH = fileURLToPath(new URL("../../packages/core/test/fixtures/cloud-migration-small.ndjson", import.meta.url));
 
 /** 実物の NDJSON(非圧縮。末尾に改行)。 */
-export const GOLDEN_TEXT: string = readFileSync(GOLDEN_PATH, "utf-8");
+// Windows のチェックアウトは改行を CRLF にすることがあるので、行末を LF にそろえる(値の中の改行・CR は JSON でエスケープされるので、情報は失われない)。
+export const GOLDEN_TEXT: string = readFileSync(GOLDEN_PATH, "utf-8").replace(/\r\n/g, "\n");
 export const GOLDEN_LINES: readonly MigrationLine[] = GOLDEN_TEXT.trimEnd().split("\n").map((l) => parseMigrationLine(l));
 export const GOLDEN_ANALYSES = GOLDEN_LINES.filter((l): l is MigrationAnalysisLine => l.type === "analysis");
 export const GOLDEN_RESULTS = GOLDEN_LINES.filter((l): l is MigrationResultLine => l.type === "result");

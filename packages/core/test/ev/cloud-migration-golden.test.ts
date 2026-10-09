@@ -36,7 +36,9 @@ describe("cloud-migration-small.ndjson(cloud/ のテストが読む書き出し�
       writeFileSync(GOLDEN_PATH, text, "utf-8");
     }
     expect(existsSync(GOLDEN_PATH)).toBe(true);
-    expect(readFileSync(GOLDEN_PATH, "utf-8")).toBe(text);
+    // Windows のチェックアウトは改行を CRLF にすることがあるので、行末を LF にそろえて比べる(リポジトリ内のファイルを読むテストの流儀。Issue #18)。
+    // 値の中の改行・CR は JSON でエスケープされるので、行末の正規化で情報は失われない。
+    expect(readFileSync(GOLDEN_PATH, "utf-8").replace(/\r\n/g, "\n")).toBe(text);
   });
 
   it("前提(空振り防止): 分析5件・結果5レース・NULL の設定列を持つ旧分析・U+2028 を含む値が入っている", () => {
