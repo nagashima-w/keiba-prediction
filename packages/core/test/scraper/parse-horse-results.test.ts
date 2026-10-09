@@ -5,6 +5,7 @@ import {
   HorseResultsParseError,
   parseHorseResults,
 } from "../../src/scraper/parse-horse-results.js";
+import { summarizeMarketGap } from "../../src/analyzer/market-gap.js";
 import type { HorseRaceResult } from "../../src/scraper/types.js";
 
 /** フィクスチャ(JSON文字列)を読み込む(実ネットワークは使わない)。 */
@@ -240,6 +241,46 @@ describe("parseHorseResults(単勝オッズ列の桁区切りカンマ。Issue #
   });
 });
 
+describe("parseHorseResults(人気セルの値域外。Issue #75)", () => {
+  // 人気は1始まりの整数。0・負・小数は値域外であり、生成側(ここ)で null にする
+  // (#34 の原則。0 のまま返すと market-gap の judgeRun が負の相対人気から判定結果を返す)。
+  it.each<[string, number | null, string]>([
+    ["0", null, '"0"は値域外のためnull'],
+    [" 0 ", null, "前後空白付きの0もnull"],
+    ["00", null, '"00"は数値化すると0のためnull'],
+    ["-3", null, "負の人気はnull"],
+    ["5.5", null, "小数の人気はnull"],
+    ["", null, "空セルはnull(既存契約の維持)"],
+    ["-", null, "ハイフンはnull(既存契約の維持)"],
+    ["&nbsp;", null, "nbspのみのセルはnull(既存契約の維持)"],
+    ["1", 1, "人気1は1(値域の下端)"],
+    ["13", 13, "二桁の人気は数値化される"],
+  ])("人気セル %j は %j になること(%s)", (cell, expected) => {
+    const json = buildResultsJson([buildRow({ ninki: cell })]);
+    expect(parseHorseResults(json)[0]!.ninki).toBe(expected);
+  });
+
+  it("人気セルが0の走は、market-gap の判定結果に入らず、遡って次の有効走が使われること", () => {
+    // 新しい順: 人気0(壊れた走)→ 人気10・6着/21頭 → 人気10・7着/21頭。
+    // 人気0 が素通りすると相対人気 -1/(頭数-1) の走が先頭の判定結果になる。
+    const json = buildResultsJson([
+      buildRow({ ninki: "0", chakujun: "1" }),
+      buildRow({ ninki: "10", chakujun: "6" }),
+      buildRow({ ninki: "10", chakujun: "7" }),
+    ]);
+    const runs = parseHorseResults(json);
+    // 前提: 3走ともパースされ、先頭の人気だけが null になっている
+    expect(runs).toHaveLength(3);
+    expect(runs[0]!.ninki).toBeNull();
+    expect(runs[1]!.ninki).toBe(10);
+    const summary = summarizeMarketGap(runs);
+    expect(summary).not.toBeNull();
+    // 先頭(着順1)の走は除外され、後ろの2走だけが判定結果になる
+    expect(summary!.過去走.map((r) => r.着順)).toEqual([6, 7]);
+    expect(summary!.過去走.map((r) => r.人気)).toEqual([10, 10]);
+  });
+});
+
 describe("parseHorseResults(JSON・status検証)", () => {
   it("JSONとして解釈できない入力は HorseResultsParseError になること", () => {
     expect(() => parseHorseResults("これはJSONではない")).toThrow(
@@ -321,6 +362,7 @@ function buildRow(
     raceLink?: boolean;
     raceCellHtml?: string;
     odds?: string;
+    ninki?: string;
   } = {},
 ): string {
   const chakujun = opts.chakujun ?? "1";
@@ -330,6 +372,7 @@ function buildRow(
   const weight = opts.weight ?? "496(+2)";
   const raceLink = opts.raceLink ?? true;
   const odds = opts.odds ?? "34.1";
+  const ninki = opts.ninki ?? "7";
   // raceCellHtml が指定されればそれを最優先(不正IDリンク等の検証用)。
   const raceCell =
     opts.raceCellHtml ??
@@ -347,7 +390,7 @@ function buildRow(
     "1", // 枠番
     "1", // 馬番
     odds, // オッズ
-    "7", // 人気
+    ninki, // 人気
     chakujun, // 着順
     '<a href="https://db.netkeiba.com/jockey/result/recent/01221/">舟山瑠泉</a>', // 騎手
     "55", // 斤量

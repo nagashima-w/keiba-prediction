@@ -3142,6 +3142,26 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 
 - exe の DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変更。D1・DO のスキーマも無変更。`prompt_version` も据え置き。
 
+## 次の正式版が 1.23.2 である根拠(Issue #75 での変更)
+
+**patch**(値域外の人気を、判定結果ではなく「判定不能(null)」にする。実データでの発生は未観測で、既存の分析結果は変わらない)。
+
+### 変更内容
+
+- `packages/core/src/scraper/parse-horse-results.ts`: 過去走の `ninki` を、汎用の `numberOrNull` から `scraper/ninki.ts` の `toNinki` に移した。0・負・小数の人気は null になる(従来は 0 などがそのまま通り、`market-gap.ts` の `judgeRun` が負の相対人気から判定結果を返す経路があった)。
+- `packages/core/src/scraper/parse-grade-winner.ts`: 重賞の過去10年結果の `ninki`・`fukuNinki1..3` を、同じ契約の `toNinkiFromJson`(`ninki.ts` に追加。number / 数字文字列を受ける)に移した。消費側 `grade-winner-trend.ts` の `isPositiveFinite` は残した(二重防御)。
+- テスト: 人気セルの値域外の表駆動、パース結果を `summarizeMarketGap` に通して人気 0 の走が判定結果に入らないこと、`toNinkiFromJson` の表駆動、重賞の過去10年結果の値域外の表駆動を足した。コミット済みのフィクスチャには人気 0 のセルが無く、既存のテスト・golden の期待値は変わらない。
+- 版数: ルート・アプリ `1.23.2`。
+
+### patch である根拠
+
+- 利用者から見える変化は、過去走や重賞の過去10年結果に人気 0 などの値域外の値が現れたときだけ(その走を市場乖離の判定結果に含めなくなる)。コミット済みの全フィクスチャでは発生せず、実データでの発生も未観測。既存の分析結果は変わらない。
+- exe の機能・画面・DB スキーマ・設定・エクスポート JSON・IPC・プロンプト・`prompt_version` は無変更。`@keiba/core` のコードは変わるが、`@keiba/core` は版数運用の対象外(上述)で、cloud にも同じコードが入る(挙動の変化は同じ条件に限る)。
+
+### major / minor ではない根拠
+
+- 公開インターフェース(型・関数の署名)は無変更。`ninki.ts` に関数を1つ足しただけで、既存の呼び出しはそのまま動く。D1・DO のスキーマも無変更。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

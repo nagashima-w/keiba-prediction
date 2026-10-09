@@ -15,6 +15,13 @@
  * - 前後空白を trim した結果が `/^[0-9]+$/` に一致しない(空文字・非数値・"---.-"等) → `null`
  * - 数値化した結果が `0` → `null`(人気は1始まりの値域であり、`0` は値域外の欠損表現)
  *
+ * ## 過去走・重賞の過去10年の人気にも同じ契約を使う(Issue #75)
+ * 当日オッズ由来ではない人気 — 過去走の `HorseRaceResult.ninki`(`parse-horse-results.ts`。
+ * HTML のセル文字列なので `toNinki`)と、重賞の過去10年結果APIの `ninki`・`fukuNinki1..3`
+ * (`parse-grade-winner.ts`。JSON の number / 数字文字列なので `toNinkiFromJson`)— も、
+ * 値域外(0・負・小数)は生成側で null にする。消費側(`market-gap.ts` の `judgeRun`)は
+ * 0 を弾かず、通すと負の相対人気から判定結果を返してしまうため。
+ *
  * ## 上限は課さない
  * 馬番(1〜18)とは異なり、人気に上限は設けない。ワイド・3連複の人気は
  * 「その組合せの人気順位」であり、出走頭数から作られる組合せ数まで達しうる
@@ -53,4 +60,24 @@ export function toNinki(raw: unknown): number | null {
   }
   const n = Number(trimmed);
   return n === 0 ? null : n;
+}
+
+/**
+ * JSON の値(number または数字文字列)の人気を数値化する(Issue #75)。
+ *
+ * 重賞の過去10年結果API(`parse-grade-winner.ts`)の人気は、number のファイルと数字文字列の
+ * ファイルの両方がある(コミット済みの `fixtures/grade_winner_*.json` を復号して確認)ため、
+ * 文字列専用の `toNinki` とは別に、両方を受けて**同じ契約**(1以上の整数のみ。それ以外は null)
+ * に揃える。契約を `toNinki` と二重に書かないよう、文字列は `toNinki` に委譲する。
+ * 上限は課さない(`toNinki` と同じ)。
+ *
+ * - number → 1以上の整数ならそのまま、0・負・小数・NaN・Infinity は null
+ * - string → `toNinki` に委譲
+ * - それ以外(null・undefined・真偽値・配列・オブジェクト) → null
+ */
+export function toNinkiFromJson(raw: unknown): number | null {
+  if (typeof raw === "number") {
+    return Number.isSafeInteger(raw) && raw >= 1 ? raw : null;
+  }
+  return toNinki(raw);
 }

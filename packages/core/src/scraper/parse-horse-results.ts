@@ -13,9 +13,11 @@
  *
  * ## 単勝オッズ列(COL.odds)の数値化(Issue #73 R1。boss メタレビュー2026-09-03指摘)
  * `types.ts` が「単勝オッズ」と明記する `odds` フィールドは、`raceNumber`/`entryCount`/
- * `wakuban`/`umaban`/`ninki`/`kinryo`/`margin`/`last3f` と共用の汎用ヘルパ `numberOrNull`
+ * `wakuban`/`umaban`/`kinryo`/`margin`/`last3f` と共用の汎用ヘルパ `numberOrNull`
  * (`Number(t)`直呼び)ではなく、共有ヘルパ `scraper/odds-number.ts` の `toOddsNumber`
- * に委譲する(odds列だけを切り出す。他8フィールドは引き続き `numberOrNull` のまま。再現
+ * に委譲する(odds列だけを切り出す。他7フィールドは引き続き `numberOrNull` のまま。
+ * 〈Issue #75 で `ninki` は `numberOrNull` から `scraper/ninki.ts` の `toNinki` に移した。
+ * 当時は他8フィールドだった〉。再現
  * (コメント行を構造的に除外する。単一ファイルを `grep -n`(`-r` なし)で走査する場合、
  * 出力は `NN:内容` 形式で先頭にファイル名が付かないため、`parse-combo-odds.ts` が使う
  * `:[0-9]+: *\*`〈`grep -rn` の複数ファイル出力 `path:NN: *…` を前提〉ではコメント行を
@@ -23,8 +25,9 @@
  * ではなく10になることで発覚した〉。単一ファイル出力の形式 `^NN: *…` に合わせたパターンを
  * 使う。この行自体が `*` で始まるコメント行のため自己参照で数が変わらない):
  * `grep -n "numberOrNull(" packages/core/src/scraper/parse-horse-results.ts | grep -vE '^[0-9]+: *\*' | grep -v "function numberOrNull"`
- * → 8行〈raceNumber・entryCount・wakuban・umaban・ninki・kinryo・margin・last3f〉。
- * 第2段(コメント行除外)までは9行〈定義1+呼び出し8〉であることも実測済み)。
+ * → 7行〈raceNumber・entryCount・wakuban・umaban・kinryo・margin・last3f〉
+ * (Issue #75 で `ninki` が抜けた。`ninki` を含む旧版は8行)。
+ * 第2段(コメント行除外)までは8行〈定義1+呼び出し7〉であることも実測済み)。
  *
  * 判断: **(a) odds列だけを共有ヘルパへ委譲する**を選択した。理由は #73 の趣旨
  * 「同一概念(単勝オッズの数値化)が同一リポジトリ内で異なる契約を持つ状態を残さない」
@@ -44,6 +47,7 @@
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
 import { parseRaceId, type RaceId } from "./ids.js";
+import { toNinki } from "./ninki.js";
 import { toOddsNumber } from "./odds-number.js";
 import { HORSE_RESULTS_SELECTORS as SEL, PATTERNS } from "./selectors.js";
 import type {
@@ -318,7 +322,8 @@ function parseRow(
     wakuban: numberOrNull(text(COL.wakuban)),
     umaban: numberOrNull(text(COL.umaban)),
     odds: toOddsNumber(text(COL.odds)),
-    ninki: numberOrNull(text(COL.ninki)),
+    // 人気は1始まりの整数。0・負・小数は値域外なので生成側で null にする(Issue #75)。
+    ninki: toNinki(text(COL.ninki)),
     finishPosition: toFinishPosition(text(COL.finish)),
     jockeyName: textOrNull($jockey.text()),
     jockeyId,
