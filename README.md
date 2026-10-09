@@ -1,6 +1,6 @@
 # keiba-ev-tool
 
-netkeibaのデータから**複勝の期待値がプラスの馬券**を抽出する分析ツール。
+netkeibaのデータから**期待値がプラスの馬券**(複勝を軸に、単勝・ワイド・馬連・馬単・三連複・三連単・枠連まで)を抽出する分析ツール。
 
 ## 個人利用専用(重要)
 
@@ -12,25 +12,35 @@ netkeibaのデータから**複勝の期待値がプラスの馬券**を抽出�
 
 ## 概要
 
-**v1.0** の Windows デスクトップアプリ(Electron + React)。1レース分のデータ取得から、
-複勝期待値の算出、LLM(Claude API)による補正・根拠出し、結果の検証(予実)、Discord 通知までを
-一貫して行えます。主な機能:
+Windows デスクトップアプリ(Electron + React。最新版は GitHub の Releases を参照)。1レース分のデータ取得から、
+期待値の算出、LLM(Claude API)による補正・根拠出し、馬券配分の提案、結果の検証(予実・回収率)、
+Discord 通知までを一貫して行えます。主な機能:
 
-- **取得**: netkeiba から出馬表・全戦績・調教評価・単勝/複勝オッズを取得(1.5秒間隔・SQLite キャッシュ)。中央/地方、期間指定の一括取得に対応。
+- **取得**: netkeiba から出馬表・全戦績・調教評価・単勝/複勝オッズ(設定でワイド・馬連・馬単・三連複・三連単・枠連などの組合せオッズも)を取得(1.5秒間隔・SQLite キャッシュ)。中央/地方、期間指定の一括取得に対応。
 - **スコアリング**: 複勝圏内確率(prior)を各種バイアス(コース形態・季節・輸送・脚質など)込みで算出し、複勝オッズから期待値を計算。
 - **LLM 分析**: 展開想定・馬場や当日傾向・馬体重推移・人気着順乖離・乗り替わり・着差など多数の材料をプロンプト化し、Claude が補正後確率と根拠を返す(プロンプト版を記録し A/B・キャリブレーションを計測)。
-- **検証**: 結果を取り込み、予測と実績のブレークダウン(中央/地方別・版別)を表示。
+- **馬券配分の提案**: 設定した総資金・1レース上限・ケリー係数のもとで、EV プラスの買い目への配分を券種横断で提案(複勝・単勝・組合せ券。券種ごとに配分へ含めるか選べる)。
+- **検証**: 結果を取り込み、予測と実績のブレークダウン(中央/地方別・版別)を表示。提案した配分どおりに賭けた場合の回収率も券種別に集計。
 - **通知**: EVプラス馬を Discord へ embed 送信(手動/自動)。
 
-仕様は [`keiba-ev-tool-spec.md`](./keiba-ev-tool-spec.md)、開発ルールは [`CLAUDE.md`](./CLAUDE.md) を参照。
+現状の仕様は [`docs/current-spec.md`](./docs/current-spec.md)、当初の設計・計画(Phase 1→6)の記録は
+[`keiba-ev-tool-spec.md`](./keiba-ev-tool-spec.md)、開発ルールは [`CLAUDE.md`](./CLAUDE.md) を参照。
+
+**Uma Driller(クラウド版)**: Cloudflare Worker 上で動くスマホ向けの web 画面(`cloud/`)。
+開催日のレース一覧と、朝の準備・発走前の分析結果(3着内率・EV・配分提案)を見られ、設定の編集、
+毎朝の自動実行(中央は全レース、地方は交流重賞のみ)と Discord 通知にも対応します。
+Cloudflare Access(Google ログイン)で保護され、利用者自身が Cloudflare に構築して使います
+(手順は [`cloud/README.md`](./cloud/README.md))。デスクトップアプリとは独立しています。
 
 構成(pnpm ワークスペース):
 
 ```
 packages/core   … スクレイパ・パーサ・スコアラ・ファサード(@keiba/core)
-packages/app    … Electron + React デスクトップアプリ(@keiba/app、Phase 4)
+packages/app    … Electron + React デスクトップアプリ(@keiba/app)
 scripts         … CLI等の起動シェル
 fixtures        … テスト用の保存済みHTML/JSON(実サイトへはアクセスしない)
+docs            … 現状の仕様・運用規約・調査記録
+cloud           … クラウド版 Uma Driller(Cloudflare Worker。pnpm ワークスペースの外)
 ```
 
 ## CLI: レースデータのJSONダンプ(開発補助)
@@ -70,15 +80,13 @@ pnpm tsx scripts/dump-race.ts --date 20260628
 
 ## Releases からのダウンロード(Windows)
 
-GitHub Actions が Windows 向け exe を自動ビルドし、Releases に公開します。用途に応じて2種類あります。
+GitHub Actions が Windows 向け exe を自動ビルドし、Releases に公開します。
 
-- **正式版(推奨)**: `v*` タグ(例 `v1.0.0`)を打つと、その時点の exe を通常リリースとして公開します。
-  安定して使いたい場合はこちらを入手してください。
-  - 入手先: **Releases → 最新の `v1.x.x`**
 - **開発版**: 開発ブランチへの push のうちレビュー完了とみなされたものについて、プレリリース
   **`dev-latest`** を差し替え公開します(レビュー中のコミットでは更新されません)。
   常に最新の実装を試せますが、予告なく内容が変わります。
   - 入手先: **Releases → `開発版(最新ビルド)`(タグ `dev-latest`)**
+- 正式リリース(`v*` タグ)は現時点で公開していません。最新版は上記の開発版(Releases)を参照してください。
 
 共通:
 
@@ -113,11 +121,13 @@ GitHub Actions が Windows 向け exe を自動ビルドし、Releases に公開
 
 ```bash
 pnpm install                       # 依存インストール
-pnpm test                          # 全パッケージのテスト(vitest)
+pnpm test                          # packages/core・packages/app・scripts/ のテスト(vitest。cloud/ は含まない)
 pnpm typecheck                     # 型検査(packages/core・packages/app と scripts/)
 
 pnpm --filter @keiba/app build     # Electron アプリのビルド(renderer + main/preload)
 pnpm --filter @keiba/app build:win # Windows 向け exe を生成(Windows 上でのみ実行可)
 ```
+
+`cloud/` は pnpm ワークスペースの外にあり、依存の導入もテストも `cloud/` で別に実行します(手順は [`cloud/README.md`](./cloud/README.md))。
 
 開発は**テスト駆動(Red→Green→Refactor)**で進めます。scraperのテストは `fixtures/` の保存済みデータに対して行い、実ネットワークへのリクエストはテストに含めません。詳細は [`CLAUDE.md`](./CLAUDE.md) を参照。
