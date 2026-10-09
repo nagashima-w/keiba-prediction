@@ -14,7 +14,7 @@ import { D1_HEALTH_SQL } from "../src/d1-health";
 
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 const read = (name: string): string => readFileSync(path.join(MIGRATIONS, name), "utf-8");
-const ALL = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql"];
+const ALL = ["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql"];
 
 describe("migration 0007: 行のある DB への適用", () => {
   it("0001〜0006 のあとに分析の行(馬の子つき・理由つき)を入れ、0007 を適用すると、行は残り、llm_calls_json は NULL。以後は JSON 文字列を書ける", () => {
@@ -56,7 +56,7 @@ describe("D1_HEALTH_SQL(/api/health の D1 の検査): 必要な列が1つでも
     return db;
   }
 
-  it("全 migration(0001〜0007)を適用した空の D1(行が1つも無い)で成功する(行が無くても、列の有無は文の準備で検査される)", () => {
+  it("全 migration(0001〜0009)を適用した空の D1(行が1つも無い)で成功する(行が無くても、列の有無は文の準備で検査される)", () => {
     const db = dbWith(ALL);
     expect(() => db.prepare(D1_HEALTH_SQL).get()).not.toThrow();
     db.close();
@@ -76,6 +76,8 @@ describe("D1_HEALTH_SQL(/api/health の D1 の検査): 必要な列が1つでも
     ["0005(llm_note)", ALL.filter((f) => !f.startsWith("0005")), /llm_note/],
     ["0006(highlights_json・concerns_json)", ALL.filter((f) => !f.startsWith("0006")), /highlights_json|concerns_json/],
     ["0007(llm_calls_json)", ALL.filter((f) => !f.startsWith("0007")), /llm_calls_json/],
+    // Issue #219: 検証の DO が読む start_time。未適用のまま新しい Worker が出ると、検証の集計が壊れる。
+    ["0009(start_time)", ALL.filter((f) => !f.startsWith("0009")), /start_time/],
   ];
   it.each(missing)("%s が未適用の D1 では失敗する(migration の反映漏れを、/api/health が d1.ok=false にできる)", (_name, files, column) => {
     const db = dbWith(files);
