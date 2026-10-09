@@ -368,7 +368,7 @@ describe("本番のバンドルと日単位の DO(Issue #177)", () => {
 /**
  * Issue #193(#179-a): LLM の狭い入口 `@keiba/core/llm`(`@anthropic-ai/sdk` を値で import する)が、cloud のバンドルに入ること(SDK が Workers でバンドルできる)。
  * 本番のエントリ(worker.ts)は、まだこの入口を使わない(呼び出し元は #194)ので、入口を参照する一時ファイルを、本番と同じ wrangler.toml([alias] を含む)でバンドルして検査する。
- *  - **前提(空振り防止)**: SDK 固有の文字列(`AnthropicError`・`api.anthropic.com`・`anthropic-version`)と、入口が運ぶ core の識別子(`pickLatestSonnet`・`createSdkMessageSender`)が
+ *  - **前提(空振り防止)**: SDK 固有の文字列(`AnthropicError`・`api.anthropic.com`・`anthropic-version`)と、入口が運ぶ core の識別子(`pickLatestOfFamily`・`createSdkMessageSender`)が
  *    ソース(SDK の実体・core)にあり、バンドルにある。対照: `@keiba/core/pipeline` だけを参照する入口には、SDK の文字列が無い(= SDK が入るのは LLM の入口を import したときだけ)。
  *  - better-sqlite3・electron は入らない。
  *  - **サイズ**: probe 単体と、本番(worker.ts)の圧縮後サイズの和が Free の上限(圧縮後 3 MB)に収まる(和は重なりを数えない上限側の見積り)。
@@ -377,7 +377,8 @@ describe("本番のバンドルと日単位の DO(Issue #177)", () => {
 const SDK_MARKERS = ["AnthropicError", "api.anthropic.com", "anthropic-version"];
 /** `race-day-do.ts` の、RaceDay に LLM の依存を渡す行(Issue #194)。バンドルでも同じ文字列で残る(wrangler は識別子を変えない)。 */
 const WIRING_LINE = "llm: createCloudLlm(env.ANTHROPIC_API_KEY)";
-const LLM_CORE_MARKERS = ["pickLatestSonnet", "createSdkMessageSender"];
+// Issue #158: モデルの選別は `pickLatestOfFamily`(系統を受ける)に一般化した。`pickLatestSonnet` はその薄い別名で、cloud は使わないので tree-shaking で消える(識別子の対応が変わっただけ。検査の強さは同じ)。
+const LLM_CORE_MARKERS = ["pickLatestOfFamily", "createSdkMessageSender"];
 
 describe("LLM の入口と SDK のバンドル(Issue #193)", () => {
   it("前提: 検出する文字列は、SDK と core のソースに実際にある。cloud の wrangler.toml の [alias] は SDK を cloud/node_modules に向けている", () => {
@@ -456,7 +457,7 @@ describe("LLM の入口と SDK のバンドル(Issue #193)", () => {
       writeFileSync(LLM_ABSENT_CONFIG, probeConfig);
       const code = bundle(LLM_ABSENT_CONFIG, "llm-absent-probe.generated.js");
       expect(code.includes("runCloudAnalysis"), "前提: runAnalysis の入口は入っている").toBe(true);
-      for (const marker of [...SDK_MARKERS, "pickLatestSonnet"]) {
+      for (const marker of [...SDK_MARKERS, "pickLatestOfFamily"]) {
         expect(code.includes(marker), `LLM の入口を import しないバンドルに ${marker} が無い`).toBe(false);
       }
     },

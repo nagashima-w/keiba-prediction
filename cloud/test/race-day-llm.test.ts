@@ -676,7 +676,7 @@ describe("e11: 分析モデルの設定(auto・sonnet・opus・haiku)に従っ�
     h.clock.now += 5 * 60_000;
     await runPreRace(h);
     expect(sentModels(llm)).toEqual(["claude-opus-5-5", FIXED_MODEL, FIXED_MODEL, "claude-haiku-5-5", "claude-sonnet-5-5"]);
-    expect(h.sink.saved.map((r) => r.model)).toEqual([FIXED_MODEL, FIXED_MODEL, FIXED_MODEL, "claude-haiku-5-5", "claude-sonnet-5-5"]);
+    expect(h.sink.saved.map((r) => r.model)).toEqual([FIXED_MODEL, FIXED_MODEL, "claude-haiku-5-5", "claude-sonnet-5-5"]); // 分析は4回(送信は、最初の Opus の 404 を含めて5回)
     expect(llm.listCalls).toBe(1);
   });
 
