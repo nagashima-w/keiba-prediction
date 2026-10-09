@@ -50,15 +50,17 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 175,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 200,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
     // 大半は日本語の文言で、esbuild の既定の `\u` エスケープ(1 文字 6 バイト。`charset` は変えない)で出力されるため大きい。上限 175,000 は実装後の約 11% 増。
     // (経緯)Issue #201: 100,000 → 125,000。設定画面のプレビューが exe と同じ `buildPromptPreview`(build-prompt・clip-variants・condition-change・leg-style・derive-features の 5 ファイル)を取り込んだため。
     // 実測: 3d8a0b1(#198)は 81,269、#201 の実装後は 111,705(+30,436)。
+    // Issue #219: 上限を 175,000 から 200,000 へ引き上げた。検証画面(取得・区分の切替・タイル/行の描画・整形・固定の文言)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #219 の前
+    // (6654946。#218 の承認後)は 164,764、実装後は 182,708(+17,944)。上限 200,000 は実装後の約 9.5% 増。大半は日本語の文言(`\u` エスケープ)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(175_000);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(200_000);
   });
 });
 

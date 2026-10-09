@@ -429,6 +429,13 @@ exe の「クラウド移行用に書き出す」(#215。gzip の NDJSON 1 フ�
 - **クライアントを変えたら**: 上の「クライアントを変えたら」と同じ(`pnpm run build:client` で生成物を更新する)。クライアントのバンドルには core の `ev/cloud-migration-format` と `src/migration-reader.ts` が入る(`test/client-bundle.test.ts` が閉包を固定。**`migration-reader.ts` に import を足さない**=Worker 専用のモジュールを引き込まないため)。
 - **検査**: `test/client-api-migration.test.ts`・`client-api-migration-contract.test.ts`(実際の `handle()` を通す)・`client-migration-file.test.ts`(実物のフィクスチャ)・`client-migration-model.test.ts`・`client-migration-screen.test.ts`・`client-view-migration.test.ts`・`client-app-migration.test.ts`・`client-dom-migration.test.ts`・`client-route.test.ts`・`client-bundle.test.ts`(生成物を偽の DOM で実行)。
 
+## 検証画面(Issue #219。v1.32.0。**デプロイ後の最初の `GET /api/verify` で、D1 の読み取り行数の実値を確かめる**)
+exe の検証画面のうち、累積回収率と配分ベースの回収率を、一覧の「検証」リンク(`#verify`)から見られる。集計は新しい DO `VerifyReportDO`(migration v5・binding `VERIFY_REPORT`)が、core の `computeVerifyReport`(exe と同じ関数・同じ設定)で行い、結果を 3 区分(全体/中央のみ/地方のみ)同時にキャッシュする。仕様と実測は `docs/current-spec.md` の「クラウド版の検証画面(回収率)」。
+- **API**: `GET /api/verify?venue=all|central|nar[&refresh=1]`(GET だけ。Worker は DO を呼ぶだけで D1・R2 に触れない)。応答の `status`: `ready`・`preparing`(旧い分析の発走時刻を確認中。画面が 3 秒ごとに取り直す)・`throttled`。
+- **D1 migration 0009**(`analyses.start_time`。追加のみ): 先読み疑いの判定に要る発走時刻の写し。**デプロイの前に migration を適用する**(deploy-cloud.yml が順序を保つ。`/api/health` の D1 の検査が 0009 の列を読むので、未適用のまま新しい Worker が出ると `d1.ok=false` で気づける)。既存の分析(移行した旧い行を含む)の列は NULL で、**最初に画面を開いたときから、DO がアラームで R2 の詳細を読んで少しずつ埋める**(2,225 件で、ローカルの実測は約 1 分。R2 の読み出しは Class B の柵の内側)。埋まるまで集計は出ない(「準備中」)。
+- **費用の柵**: 再計算は 5 分に 1 回・1 日 20 回まで。1 回の D1 の読み取りは表の行数の合計(ローカルの合成データで 99,103 行)。Free の 500 万行/日の約 40% が上限になる。応答の `diag.rowsRead` が実値なので、**本番の最初の呼び出しの値を見て、買い目が多くて 1 回が大きければ `cloud/src/verify-core.ts` の `VERIFY_DAILY_LIMIT` を下げる**。
+- **測定の再現**: `pnpm tsx scripts/measure-verify.ts [--bets 12] [--repeat 5]`(リポジトリのルートで。Linux のみ。ローカルの workerd だけを使い、本番には触れない)。
+
 ## スコアリングの重み(Issue #218。v1.31.0。**保存した重みは、保存後に始まる朝の準備・発走前の分析から使われる**)
 - **何をするか**: exe の設定にある重み13項目(バイアス7・基礎6)を、設定(`cloud_settings`)と設定画面に足した。分析の `scorerConfig` に渡す(これまでは渡さず、core の既定値で動いていた)。キーは平坦な接頭辞つき(`biasWeightVenue`・`baseScoreWeightRecentForm` など。exe のキーとの対応は `src/settings.ts` の `SCORING_WEIGHT_FIELDS`)。
 - **既定値・検証**: 既定値は core の `DEFAULT_SCORER_CONFIG`(= exe)と同じ(一致をテストで固定)。検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。上限なし)。D1 の行に重みが無ければ(今の本番)既定値で動くので、**重みを変えなければ今までと同じ結果**。D1 のスキーマは無変更(migration は無い)。

@@ -53,11 +53,15 @@ function withoutRaceDay(toml: string): string {
     .replace(/\[\[migrations\]\]\ntag = "v3"\nnew_sqlite_classes = \["CloudMigration"\]\n/, "")
     // Issue #217: 結果の補完の DO(RESULT_BACKFILL・ResultBackfill)も同じく除く(migration v4 も)。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "RESULT_BACKFILL"\nclass_name = "ResultBackfill"\n/, "")
-    .replace(/\[\[migrations\]\]\ntag = "v4"\nnew_sqlite_classes = \["ResultBackfill"\]\n/, "");
+    .replace(/\[\[migrations\]\]\ntag = "v4"\nnew_sqlite_classes = \["ResultBackfill"\]\n/, "")
+    // Issue #219: 検証の集計の DO(VERIFY_REPORT・VerifyReportDO)も同じく除く(migration v5 も)。
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "VERIFY_REPORT"\nclass_name = "VerifyReportDO"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v5"\nnew_sqlite_classes = \["VerifyReportDO"\]\n/, "");
   expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
   expect(stripped).not.toContain("RaceDay");
   expect(stripped, "CLOUD_MIGRATION の binding と migration v3 を除けている").not.toContain("CloudMigration");
   expect(stripped, "RESULT_BACKFILL の binding と migration v4 を除けている").not.toContain("ResultBackfill");
+  expect(stripped, "VERIFY_REPORT の binding と migration v5 を除けている").not.toContain("VerifyReportDO");
   return stripped;
 }
 
@@ -162,7 +166,7 @@ describe("本番のバンドルと D1(Issue #171)", () => {
     () => {
       const code = bundle(null, "worker.js");
       // 前提: D1 を呼ぶコードが入っている(空振りでない)
-      expect(code.includes("SELECT detail_key, llm_note, llm_calls_json, (SELECT highlights_json FROM analysis_horses LIMIT 1) AS highlights_json, (SELECT concerns_json FROM analysis_horses LIMIT 1) AS concerns_json FROM analyses LIMIT 1"), "D1 の疎通確認の文(migration 0002・0005・0006・0007 の列を読む。Issue #194・#197)がバンドルにある").toBe(true);
+      expect(code.includes("SELECT detail_key, llm_note, llm_calls_json, (SELECT highlights_json FROM analysis_horses LIMIT 1) AS highlights_json, (SELECT concerns_json FROM analysis_horses LIMIT 1) AS concerns_json, start_time FROM analyses LIMIT 1"), "D1 の疎通確認の文(migration 0002・0005・0006・0007・0009 の列を読む。Issue #194・#197・#219)がバンドルにある").toBe(true);
       expect(code.includes("env.DB"), "D1 の binding(env.DB)を参照するコードがバンドルにある").toBe(true);
       // 本題
       expect(code.includes("better-sqlite3"), "バンドルに better-sqlite3 が無い").toBe(false);
@@ -427,6 +431,39 @@ describe("本番のバンドルと結果の補完の DO(Issue #217)", () => {
     () => {
       const code = bundle(null, "worker.js");
       for (const marker of BACKFILL_MARKERS) {
+        expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
+      }
+      expect(code.includes("better-sqlite3"), "better-sqlite3 が無い").toBe(false);
+      expect(code.includes("node:sqlite"), "テスト専用の node:sqlite が無い").toBe(false);
+      for (const marker of FAKE_SOCKET_MARKERS) {
+        expect(code.includes(marker), `偽ソケットの印 ${marker} が無い`).toBe(false);
+      }
+      expect(gzipSync(code).length).toBeLessThan(3 * 1024 * 1024);
+    },
+    120_000,
+  );
+});
+
+/**
+ * Issue #219: 検証の集計の DO `VerifyReportDO`(と、集計用の SQL・core の `computeVerifyReport`)が**本番のバンドル**(`src/worker.ts`)に入ること。
+ * **前提(空振り防止)**: 検出する ASCII の識別子がソースにあり、バンドルにある。better-sqlite3・node:sqlite・偽ソケットは入らない(core の検証の集計は、型の入口 `analysis-store-types` だけを引く)。
+ */
+const VERIFY_MARKERS = ["VerifyReportDO", "COUNT(*) OVER ()", "UPDATE analyses SET start_time", "excludedLookaheadSuspectCount", "unknownBetType"];
+
+describe("本番のバンドルと検証の集計の DO(Issue #219)", () => {
+  it("前提: 検出する文字列は、ソースに実際にある。worker.ts は VerifyReportDO を export する", () => {
+    const source = [path.join(CLOUD, "src", "verify-store.ts"), path.join(CLOUD, "src", "verify-do.ts"), path.join(CLOUD, "..", "packages", "core", "src", "ev", "verify.ts")].map((f) => readFileSync(f, "utf-8")).join("\n");
+    for (const marker of VERIFY_MARKERS) {
+      expect(source.includes(marker), `ソースに ${marker}`).toBe(true);
+    }
+    expect(readFileSync(path.join(CLOUD, "src", "worker.ts"), "utf-8")).toMatch(/export \{ VerifyReportDO \} from "\.\/verify-do"/);
+  });
+
+  it(
+    "本番のバンドルに検証の識別子が入っていて、better-sqlite3・node:sqlite・偽ソケットは入っていない。圧縮後 3 MB 以内",
+    () => {
+      const code = bundle(null, "worker.js");
+      for (const marker of VERIFY_MARKERS) {
         expect(code.includes(marker), `本番のバンドルに ${marker} がある`).toBe(true);
       }
       expect(code.includes("better-sqlite3"), "better-sqlite3 が無い").toBe(false);

@@ -250,6 +250,23 @@ async function main(): Promise<void> {
       const detail = await req(port, "GET", `/api/analyses/${items[items.length - 2]!.id}`);
       check(`${label}: 詳細(D1 + R2)が読める(detail present)`, detail.status === 200 && detail.text.includes('"detail":"present"'), `${detail.status} ${detail.text.slice(0, 200)}`);
 
+      // Issue #219: 検証の集計(本物の DO `VerifyReportDO`)。移行した 5 件は start_time が NULL なので、DO がアラームで R2 の詳細から写してから(preparing → ready)、本物の D1 を読んで集計する。
+      let verifyJson: Record<string, unknown> = {};
+      let verifyPolls = 0;
+      for (; verifyPolls < 120; verifyPolls += 1) {
+        verifyJson = parseJson((await req(port, "GET", "/api/verify?venue=all")).text);
+        if (verifyJson["status"] !== "preparing") break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const verifyReport = verifyJson["report"] as Record<string, number> | undefined;
+      const verifyCounters = verifyReport === undefined ? -1 : ["includedAnalysisCount", "excludedAnalysisCount", "supersededAnalysisCount", "excludedEstimatedCount", "excludedLookaheadSuspectCount", "excludedLookaheadUnknownCount"].reduce((n, k) => n + (verifyReport[k] ?? 0), 0);
+      check(`${label}: GET /api/verify は ready(発走時刻の補完のあと。本物の DO・D1・R2)。除外 6 カウンタの和が分析の総数 5 に一致し、D1 の読み取り行数が診断に出る`, verifyJson["ok"] === true && verifyJson["status"] === "ready" && verifyCounters === 5 && typeof (verifyJson["diag"] as { rowsRead?: number } | undefined)?.rowsRead === "number" && (verifyJson["diag"] as { rowsRead: number }).rowsRead > 0, `${verifyPolls} ${JSON.stringify(verifyJson).slice(0, 400)}`);
+      const verifyCentral = parseJson((await req(port, "GET", "/api/verify?venue=central")).text);
+      const verifyNar = parseJson((await req(port, "GET", "/api/verify?venue=nar")).text);
+      const sumOf = (j: Record<string, unknown>): number => ((j["report"] as Record<string, number> | undefined)?.["includedAnalysisCount"] ?? -1);
+      check(`${label}: 区分の切替(central・nar)はキャッシュから返り、中央 + 地方 = 全体(集計した分析の件数)`, sumOf(verifyCentral) + sumOf(verifyNar) === sumOf(verifyJson) && (verifyCentral["computedAt"] === verifyJson["computedAt"]), `${sumOf(verifyCentral)} ${sumOf(verifyNar)} ${sumOf(verifyJson)}`);
+      check(`${label}: GET /api/verify は不正な区分で 400・POST は 405`, (await req(port, "GET", "/api/verify?venue=both")).status === 400 && (await req(port, "POST", "/api/verify")).status === 405);
+
       const second = await upload(golden);
       check(`${label}: 同じファイルをもう一度 upload しても 202`, second.status === 202, `${second.status}`);
       const again = await waitState((j) => (j["state"] === "completed" || j["state"] === "failed") && (j["analyses"] as { alreadyImported: number }).alreadyImported === 5);
