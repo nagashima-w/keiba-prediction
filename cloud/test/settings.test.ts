@@ -368,7 +368,7 @@ describe("saveSettings(D1 の1行に UPSERT)", () => {
     expect(record[0]!.args.length).toBe(2);
     expect(record[0]!.args[1]).toBe("2026-10-07T01:02:03.000Z");
     expect(JSON.parse(record[0]!.args[0] as string)).toEqual(FULL);
-    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(14);
+    expect(Object.keys(JSON.parse(record[0]!.args[0] as string) as object).length).toBe(15);
   });
 
   it("UPSERT の文は id = 1 の1行だけを対象にする(CHECK 制約と同じ。id を引数にしない)", () => {

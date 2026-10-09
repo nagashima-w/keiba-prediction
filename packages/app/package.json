@@ -1,6 +1,6 @@
 {
   "name": "@keiba/app",
-  "version": "1.23.4",
+  "version": "1.24.0",
   "private": true,
   "type": "module",
   "description": "競馬期待値分析ツールの Electron デスクトップアプリ",

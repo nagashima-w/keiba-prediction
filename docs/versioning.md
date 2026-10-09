@@ -3204,6 +3204,24 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - 据え置きではなく実際に上げる理由は、#45 の根拠と同じ。dev-latest には `keiba-ev-tool-1.23.3-portable.exe` が公開済みで、同名のまま承認印付きで push すると `version-bump-check` が block する。
 - major / minor ではない: 保存データ・設定の互換に関わる変更も、できることの増加もない。
 
+## 次の正式版が 1.24.0 である根拠(Issue #158 での変更)
+
+**minor**(クラウド版で、利用者が LLM 分析のモデルを選べるようになる)。
+
+### 変更内容
+
+- `cloud/`: 設定に `analysisModel`(`auto`・`sonnet`・`opus`・`haiku`。既定 `auto` = 最新の Sonnet = 今までと同じ挙動)を足し(cloud 専用。保存するのは具体的な ID でなく系統)、設定画面に「LLM分析のモデル」の選択と補助文(費用は相対表現)を足した。発走前の分析は、選んだ系統の最新のモデルで LLM を呼ぶ。モデルが使えないとき(400/403/404・一覧の取得失敗・その系統が0件)は、固定モデルに切り替えて続ける(降格は系統ごと)。migration は無し(設定は D1 の JSON の1行)。
+- `packages/core`: `pickLatestOfFamily`(`pickLatestSonnet` を系統に一般化。`pickLatestSonnet` は互換のため残す)と、`createModelSelector` の省略可の `family` を加算で足した。省略時は sonnet で、**exe の挙動は変わらない**。
+- docs: `cloud/README.md`・`docs/current-spec.md` のモデルの記述を更新した。
+- 版数: ルート・アプリ `1.24.0`(`@keiba/core` は対象外・据え置き)。
+
+### minor である根拠
+
+- 利用者から見てできることが増える(区分表の minor)。設定画面に選択肢が増え、LLM のモデルを変えられる。
+- 既定の `auto` は今までと同じ(最新の Sonnet)なので、設定を触らない限り分析結果の数値は変わらない。
+- major ではない: 保存データ・設定の互換は壊れない。項目の無い旧い設定は `auto` で読め、`analyses` の列・exe の設定ファイルも変わらない。
+- exe のアプリコードは無変更だが、版数はルートとアプリで共通なので上げる(`dev-latest` に `keiba-ev-tool-1.23.4-portable.exe` が公開済みで、同名のまま承認印付きで push すると `version-bump-check` が block する)。
+
 ## 関連
 
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・

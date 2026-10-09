@@ -280,14 +280,14 @@ describe("Issue #201: プロンプトのプレビュー(VNode)", () => {
     expect(refresh(normal)[0]!.attrs?.["disabled"]).toBeFalsy();
   });
 
-  it("プレビューは保存ボタンより後ろ(画面の末尾)にある。入力欄(data-field)は増えない(14 個のまま)", () => {
+  it("プレビューは保存ボタンより後ろ(画面の末尾)にある。入力欄(data-field)は増えない(15 個のまま)", () => {
     const t = tree({ previewOpen: true });
     const top = t.children as VNode[];
     const saveIndex = top.findIndex((c) => typeof c !== "string" && (c.attrs?.["class"] === "settings-save"));
     const previewIndex = top.findIndex((c) => typeof c !== "string" && byClass(c, "preview-toggle").length > 0);
     expect(saveIndex).toBeGreaterThan(0);
     expect(previewIndex).toBeGreaterThan(saveIndex);
-    expect(inputs(t).length).toBe(14);
+    expect(inputs(t).length).toBe(15);
   });
 
   it("読み込み中・取得の失敗では、プレビューのボタンも出ない", () => {

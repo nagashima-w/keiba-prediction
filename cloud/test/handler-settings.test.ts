@@ -112,12 +112,12 @@ describe("GET /api/settings", () => {
     expect(f.sqls).toEqual([SELECT_SETTINGS_SQL]);
   });
 
-  it("行があれば、その設定(source: d1)。camelCase の全 14 項目", async () => {
+  it("行があれば、その設定(source: d1)。camelCase の全 15 項目", async () => {
     const { deps, token } = await setup();
     const f = fakeDb(JSON.stringify(FULL));
     const body = (await (await handle(get(token), envOf(f), {}, deps)).json()) as { ok: boolean; settings: CloudSettings; source: string };
     expect(body).toEqual({ ok: true, settings: FULL, source: "d1" });
-    expect(Object.keys(body.settings).length).toBe(14);
+    expect(Object.keys(body.settings).length).toBe(15);
   });
 
   it("手で入れた不正な値の行は、その項目だけ既定値(読む側)。kelly の 0 は読む側では有効で、そのまま返る", async () => {

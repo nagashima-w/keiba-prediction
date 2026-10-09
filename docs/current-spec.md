@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.23.4)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.24.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.23.4`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.24.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -284,7 +284,8 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
     スナップショット・preview 等は除外。minor を1〜2桁に限るのは `claude-sonnet-4-20250514` が minor=20250514
     の最新版として選ばれるのを防ぐため)、(major, minor) の降順、同順位は `created_at` の新しい順で選ぶ。
     一覧は**分析の初回に遅延取得**し、`createPipelineDeps` 単位でメモ化する(失敗もメモ化・TTL なし)。
-    取得失敗・Sonnet 0件のときは固定モデル。自動選択モデルが **HTTP 400/403/404** を返したら固定モデルで
+    取得失敗・Sonnet 0件のときは固定モデル(Issue #158 で `pickLatestOfFamily` に一般化し、Opus・Haiku も同じ規則で選べる。
+    クラウド版の設定画面で系統を選ぶ。exe は系統を渡さず sonnet のまま)。自動選択モデルが **HTTP 400/403/404** を返したら固定モデルで
     1回やり直し(以降その deps の間は固定モデル。切り替えは `onWarn` に記録)、401・429・5xx・
     ネットワーク・refusal・max_tokens では切り替えない。`analyzeRace` のリトライ構造は変えない。
   - **リクエスト**: `max_tokens=16000`(thinking を含む。非ストリーミングのまま。SDK 0.70.1 は 21333 超で
@@ -1320,6 +1321,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 ### クラウド版の発走前の分析で LLM を使う(#194〈#179-b〉。v1.19.25)
 変更は `cloud/` のみ(exe のアプリコード・画面・保存データ・分析結果は無変更)。詳細は `cloud/README.md` の「発走前の分析の LLM」「`ANTHROPIC_API_KEY` の登録」。画面は #195〈#179-c〉。
 - **常に LLM を使う**(発走前だけ。朝は使わない。費用の上限・ON/OFF の設定は無く、費用は Claude Console のワークスペースの spend limit に任せる)。Worker の secret `ANTHROPIC_API_KEY`(ユーザーがダッシュボードまたは `wrangler secret put` で登録)が無ければ、LLM なしで保存し、理由を残す。
+- **分析モデルを設定画面で選べる**(Issue #158。クラウド版だけ。exe は無変更): 設定 `analysisModel`(`auto`・`sonnet`・`opus`・`haiku`。既定 `auto`)。保存するのは具体的な ID でなく**系統**で、分析のたびに Models API の一覧からその系統の最新を解決する(core の `pickLatestOfFamily`。ID が `claude-<系統>-<major>(-<minor>)?` のものだけ。`createModelSelector` の `family` 省略は sonnet で exe の挙動は不変)。`auto` は最新の Sonnet(= `sonnet`)。取得失敗・その系統が0件・400/403/404 の拒否は、固定モデル `claude-sonnet-5-5` に切り替えて続ける(止めない。降格は系統ごと。一覧の取得は系統をまたいで1回)。リクエストの形(max_tokens・effort・thinking)は系統によらず同じ。実際に応答したモデルが `analyses.model` に残る。画面の補助文に費用の相対表現(Opus は Sonnet より高く Haiku は安い。金額・倍率は書かない)。**実 API での Opus・Haiku の動作は未確認**。
 - **止めない**: API のエラー・切り詰め・拒否・解析失敗でも、prior のまま保存する。モデル欄は、LLM が実際に効いたときだけモデル名(それ以外は null)。**理由は固定文言**で `analyses.llm_note`(migration `0005`。追加のみ)に保存し、`GET /api/analyses`・`GET /api/analyses/{id}` の応答の `llmNote` に載る。API のエラーの本文は、画面・D1・タスク行・ログのどこにも出さない。
   **LLM 呼び出しの記録**(#197 段2): LLM を呼んだ**1回ごと**に、所要時間(ms)・入力/出力トークン(出力は thinking を含む)・stop_reason・モデル・replayed・失敗の固定の説明を `analyses.llm_calls_json`(migration `0007`。cloud 専用)に残し、`GET /api/analyses/{id}` の `llmCalls` に載せる(一覧には載せない。画面は #198)。再送(最大3回)は全件を順に残す。再生した呼び出しは `replayed:true`(元の呼び出しの値。二重に数えない)。詳細は `cloud/README.md` の「呼び出しの記録」。
 - **冪等**: 成功した応答を DO の表 `race_day_llm_responses` に記録し、保存の失敗の再試行・再実行では再生して送り直さない。1レースの送信は最大3回(`analyzeRace` の2試行 + モデルの降格1回)。
