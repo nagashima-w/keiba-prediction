@@ -146,7 +146,11 @@ export const CREATE_TODAY_CAUTION =
 /** 依頼したが日報が作られずに終わったときの固定文言。 */
 export const NO_REPORT_NOTICE = "この日は分析したレースが無いため、日報は作られませんでした。";
 
-/** 依頼のあと、日報の進行状況を取得できなかったとき(Issue #245)。「作られなかった」と断定せず、確認を続けることを伝える固定の文言。 */
+/**
+ * 日報の進行状況を取得できなかったとき(Issue #245)。「作られなかった」と断定せず、確認を続けることを伝える固定の文言。
+ * 出るのは次の 2 つの場合(Issue #246): (1) 作成を依頼したあと(`run` が `requested`)、(2) 作成中(running)を見て確認を続けている途中(`watching`。依頼はしていない)。
+ * どちらでも、進行状況を取得できなかった(`jobUnavailable`)応答のときだけ出る。
+ */
 export const JOB_UNAVAILABLE_NOTICE = "作成の状況を確認できませんでした。確認を続けます(この画面は自動で更新します)。";
 
 function chipsOf(input: ReportModelInput): DateChip[] {

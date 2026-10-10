@@ -311,7 +311,12 @@ describe("Issue #246 項目 6: watching(running を見て確認を続けてい�
     expect(idle.notice!.text).toContain("まだありません");
     expect(idle.create).not.toBeNull();
     const ok = buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, watching: true }));
-    expect(ok.notice!.text).not.toBe(JOB_UNAVAILABLE_NOTICE);
+    // 取れている(jobUnavailable でない)なら、watching でも『まだありません』の通常の案内(文言を固定する。『依頼しました』など別の案内に化けない)とボタン
+    expect(ok.notice).toEqual({
+      tone: "info",
+      text: "この日の日報はまだありません。その日に分析したレースがあれば、分析と結果が揃ったあとに自動で作られます(分析したレースが無い日は作られません)。すぐに作るときは、下のボタンで依頼できます。",
+    });
+    expect(ok.create).toMatchObject({ label: "この日の日報を作る", disabled: false });
   });
 
   it("watching で止めたあとは、止めた旨の案内が優先される", () => {

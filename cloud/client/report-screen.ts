@@ -7,6 +7,9 @@
  *  - 「この日の日報を作る」(`onRun`): `POST /api/reports/run`(表示中の日)。受け付けたら作成中の表示にして、{@link REPORT_POLL_MS} おきに本文を取り直す。
  *    日報が現れたら止める(一覧も取り直す)。作成が失敗(`failed`)したら止める。{@link REPORT_MAX_POLLS} 回で止める。
  *  - 作成中(サーバの `job` が running)の日を開いたときも、同じく自動で取り直す。**非表示の間は止め**、表示に戻ったら(作成中なら)即時に 1 回取って再開する。`setInterval` は使わない。
+ *  - 確認を続けている状態(`watching`。Issue #246): 取得の結果が running のとき立て、日報が現れた・作成が失敗(running 以外の job)・進行状況が無いと分かった(`job_status` が `ok` で job なし)・
+ *    最初の取得(`first`)が通信の失敗、のいずれかで下ろす。**進行状況を取得できなかった(`unavailable`)応答と、確認中(`poll`)の通信の失敗では変えない**。立っている間に `unavailable` が返っても、
+ *    `waiting()` は true のままで、確認を止めず、固定の案内(`JOB_UNAVAILABLE_NOTICE`)を出す。日付の切替・画面を離れると捨てる。「更新」では保つ。開いた直後の最初の取得が `unavailable` のときは、running を見ていないので立てない。
  *  - 世代(`gen`)と取得の通し番号(`seq`): 離れる・開き直す・日付を替えるたびに進め、**古い応答は反映しない**。
  */
 import { fetchReport, fetchReportList, postReportRun, reportFetchFailureMessage, reportRunFailureMessage } from "./api-report";

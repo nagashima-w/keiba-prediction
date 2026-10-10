@@ -432,6 +432,32 @@ describe("Issue #246 項目 6: 画面を開いた時点で running のため確�
     expect(timers.nextIn()).toBe(REPORT_POLL_MS);
   });
 
+  it("running → 作成が失敗(failed)→「更新」→ unavailable: 確認を続ける状態は残っておらず、『確認を続けます』は出さない。通常の表示(まだありません・ボタン)で、確認も続けない", async () => {
+    const { screen, timers } = await openRunning([ok({ report: null, job: RUNNING }), ok({ report: null, job: { phase: "save", status: "failed", attempts: 3 } }), unavailable]);
+    await timers.advance(REPORT_POLL_MS); // failed
+    expect(screen.model().notice!.tone).toBe("error"); // 前提: 失敗の表示になっている
+    expect(timers.pending()).toBe(0);
+    screen.onRefresh();
+    await timers.flush();
+    expect(screen.model().notice!.text).not.toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(screen.model().notice!.text).toContain("まだありません");
+    expect(screen.model().create).not.toBeNull();
+    expect(timers.pending()).toBe(0);
+  });
+
+  it("running → 「更新」の最初の取得が通信の失敗 →「更新」→ unavailable: 通信の失敗で確認を続ける状態は捨てられ、確認を続けない", async () => {
+    const { screen, timers } = await openRunning([ok({ report: null, job: RUNNING }), "throw", unavailable]);
+    screen.onRefresh(); // 最初の取得(first)が通信の失敗
+    await timers.flush();
+    expect(screen.model().error).toContain("通信に失敗"); // 前提: 失敗の表示になっている
+    expect(timers.pending()).toBe(0);
+    screen.onRefresh();
+    await timers.flush();
+    expect(screen.model().notice!.text).not.toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(screen.model().notice!.text).toContain("まだありません");
+    expect(timers.pending()).toBe(0);
+  });
+
   it("日付を替える・離れると、確認を続ける状態は捨てる(別の日・開き直しの最初の取得が unavailable でも確認を始めない)", async () => {
     const { n, screen, timers } = await openRunning([ok({ report: null, job: RUNNING })]);
     n.script["GET /api/reports/20261009"] = [unavailable];
