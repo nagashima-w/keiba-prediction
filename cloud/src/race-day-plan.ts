@@ -1,5 +1,5 @@
 /**
- * 朝の計画の保存層(Issue #203 段階2。親 #166)。日単位の DO(`RaceDayCore`)の SQLite に、**新しい表だけ**を足す(既存の表には ALTER しない。`CREATE TABLE IF NOT EXISTS`)。
+ * 事前分析の計画の保存層(Issue #203 段階2。親 #166)。日単位の DO(`RaceDayCore`)の SQLite に、**新しい表だけ**を足す(既存の表には ALTER しない。`CREATE TABLE IF NOT EXISTS`)。
  * 純ロジック: `cloudflare:workers` を import しない。時計・gate・アラームは持たない(呼び出し側の `RaceDayCore` が持つ)。ここは SQL の読み書きだけ。
  *
  *  - `race_day_plan_venue`: 計画の段階。会場(中央 `central`・地方 `nar`)ごとの一覧の取得の状態(pending → ok / failed)。再試行の待ちは時刻(`next_try_at`)で持つ。

@@ -527,7 +527,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   it("Issue #238: レース画面は、管理者には起動のボタンが 2 つ、閲覧者には 0 個(生成物の実行)", async () => {
     const buttonsOf = async (role: string): Promise<number> => {
       const { root, calls } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`, NOT_FOUND, role);
-      await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("朝の準備")));
+      await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("事前分析")));
       await settle();
       return root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && (n.attrs.get("class") ?? "") === "run").length;
     };
@@ -661,7 +661,7 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(calls.map((c) => c.url).sort()).toEqual([`/api/analyses/status?kaisai_date=${DATE}&race_id=${RACE_ID}`, `/api/analyses?race_id=${RACE_ID}&kaisai_date=${DATE}&limit=20`].sort());
     expect(calls.filter((c) => c.init.method !== "GET")).toEqual([]);
     const text = textOf(root.children[0]!);
-    expect(text).toContain("朝の準備");
+    expect(text).toContain("事前分析");
     expect(text).toContain("発走前");
     expect(text).toContain("3着内率 52.3%");
   });

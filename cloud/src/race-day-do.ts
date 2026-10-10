@@ -120,13 +120,13 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
     });
   }
 
-  /** レースの朝の準備を予約する(RPC。予約だけをして戻る)。 */
+  /** レースの事前分析を予約する(RPC。予約だけをして戻る)。 */
   schedule(input: ScheduleInput): Promise<ScheduleResult> {
     return this.core.schedule(input);
   }
 
   /**
-   * 事前分析(旧「朝の準備」)の計画を依頼する(RPC。Issue #203。依頼だけをして戻る。2回目以降は `already-planned`で、アラームだけ状態から張り直す〈Issue #206 G-E2〉)。
+   * 事前分析(旧「事前分析」)の計画を依頼する(RPC。Issue #203。依頼だけをして戻る。2回目以降は `already-planned`で、アラームだけ状態から張り直す〈Issue #206 G-E2〉)。
    * `rescue: true`(Issue #249。23 時の再実行)は、21 時に失敗した一覧・事前分析を **1 回だけ** 救済し、救済の後の失敗の判定・通知を有効にする(2 回目以降は何も変えない)。
    * 呼ぶのは cron の `scheduled`(scheduled.ts。Issue #206)だけ。
    */
@@ -147,7 +147,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
     return this.core.getResultImportProgress();
   }
 
-  /** 朝の計画の読み取り(RPC。Issue #206 `GET /api/plan` が使う。状態は変えない)。 */
+  /** 事前分析の計画の読み取り(RPC。Issue #206 `GET /api/plan` が使う。状態は変えない)。 */
   getPlanProgress(): PlanProgress {
     return this.core.getPlanProgress();
   }

@@ -7,8 +7,8 @@
  *  - 効いている: EV 閾値・資金・1レースの上限・ケリー係数・組合せオッズの取得・各券種を配分に含めるか(発走前の分析が使う。`race-day-core.ts` の `allocationSettings`・`evConfig`)
  *  - LLM を使うときだけ効く: 追加指示・クリップ幅(発走前の分析の LLM〈Issue #194〉で使う。Worker の API キーが未登録の間は LLM を使わないので効かない。補助文はキーの有無のどちらでも嘘にならない書き方)
  *  - LLM を使うときだけ効く(分析モデル。Issue #158): 選んだ系統の最新のモデルで、保存後に次に始まる発走前の分析から使う
- *  - 朝の準備と発走前の分析の両方で効く: スコアリングの重み13項目(Issue #218。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
- *  - 次の朝から効く: 発走何分前(定時の自動実行〈Issue #166・#206〉の朝 9:00 の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
+ *  - 事前分析と発走前の分析の両方で効く: スコアリングの重み13項目(Issue #218。`WEIGHT_FIELD_ORDER`。`fields` ではなく専用の節〈`weights`〉に出す)。取得ステップで固定した設定のスナップショットで計算する
+ *  - 次の計画から効く: 発走何分前(定時の自動実行〈Issue #166・#206・#249〉の毎晩 21:00 の翌日分の計画で読み、計画の行に固定する。すでに計画した日の分は変わらない)
  */
 import { ALLOCATION_BET_TYPE_LABELS, BASE_SCORE_WEIGHT_LABELS, BET_ALLOCATION_LABELS, BIAS_WEIGHT_LABELS, CLIP_VARIANT_IDS, INCLUDE_COMBO_ODDS_LABELS } from "../../packages/app/src/shared/settings";
 import {
@@ -243,10 +243,10 @@ const ANALYSIS_MODEL_HELP =
   "選んだモデルが使えなかったときは、動作確認済みの固定モデルに切り替えて分析を続けます。保存後、次に始まる発走前の分析から使われます。";
 
 const WEIGHTS_HEADING = "スコアリングの重み";
-/** 節の説明(画面に出る文なので、Issue 番号は書かない)。重みはバイアス補正・基礎スコアの補正の倍率。朝の準備と発走前の分析の両方で使う。 */
+/** 節の説明(画面に出る文なので、Issue 番号は書かない)。重みはバイアス補正・基礎スコアの補正の倍率。事前分析と発走前の分析の両方で使う。 */
 const WEIGHTS_HELP: readonly string[] = [
   "各項目の補正の強さの倍率です(0 以上の数値。上限はありません)。既定値は exe と同じです。大きくしすぎると補正が過剰になり、確率が極端に偏ることがあるので、少しずつ変えてください。",
-  "朝の準備と発走前の分析の両方で使われます。保存後に始まる準備・分析から反映され、すでに始まったタスクは始めたときの設定のままです。",
+  "事前分析と発走前の分析の両方で使われます。保存後に始まる準備・分析から反映され、すでに始まったタスクは始めたときの設定のままです。",
 ];
 const WEIGHT_GROUP_HEADINGS: Readonly<Record<"bias" | "base", string>> = { bias: "環境・状態バイアス補正", base: "基礎スコア" };
 const WEIGHTS_RESET_LABEL = "重みを既定値に戻す";
@@ -290,7 +290,7 @@ const SPECS: Readonly<Record<FieldKey, FieldSpec>> = {
   preRaceOffsetMinutes: {
     kind: "text",
     label: "発走の何分前に評価するか",
-    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。`,
+    help: `${PRE_RACE_OFFSET_MIN}〜${PRE_RACE_OFFSET_MAX} 分の整数(既定 45)。変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。`,
     inputmode: "numeric",
   },
   // スコアリングの重み13項目(Issue #218)。ラベルは exe の共有定数。

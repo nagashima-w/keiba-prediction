@@ -58,7 +58,7 @@ export interface PriorRow {
   readonly prior: number;
 }
 
-/** 朝の prior(朝の準備の結果)。DO に保存された JSON なので、レース名・場名・日付は null もありうる。 */
+/** 朝の prior(事前分析の結果)。DO に保存された JSON なので、レース名・場名・日付は null もありうる。 */
 export interface MorningPriorView {
   readonly raceName: string | null;
   readonly venueName: string | null;

@@ -5,7 +5,7 @@
  * 配線するだけの薄いラッパ(`cloudflare:workers` を持つため、テストでは import できない)。netkeiba には出ない(結果の取り込みは日単位の DO `RaceDay` の仕事)。
  *
  * 呼び出す入口(RPC)は `requestReport`(日報の作成の依頼)と `getStatus`(進行状況)の 2 つ。依頼するのは、日単位の DO `RaceDay`(その日が静かになったとき。`mode: "auto"`)、
- * 朝の cron(`scheduled.ts`。取り残しの補完。`mode: "catchup"`)、手動の `POST /api/reports/run`(`mode: "manual"`)。1 回のアラームで 1 段階だけ進める(`alarm`)。
+ * 23 時の cron(`scheduled.ts`。取り残しの補完。`mode: "catchup"`)、手動の `POST /api/reports/run`(`mode: "manual"`)。1 回のアラームで 1 段階だけ進める(`alarm`)。
  *
  * クラス名は migration(wrangler.toml の `new_sqlite_classes`。タグ v6)に固定される。binding は `DAILY_REPORT`。
  */

@@ -168,7 +168,7 @@ async function drive(h: Harness, max = 20): Promise<string[]> {
   throw new Error("アラームが止まらない(上限超過)");
 }
 
-/** 朝の準備(取得 → 計算)を手動で2ステップ回す。`drive` は掃除専用のアラーム(26 時間後)まで進めてキャッシュを消すので、朝のキャッシュを残したいテストでは使わない。 */
+/** 事前分析(取得 → 計算)を手動で2ステップ回す。`drive` は掃除専用のアラーム(26 時間後)まで進めてキャッシュを消すので、朝のキャッシュを残したいテストでは使わない。 */
 async function runMorning(h: Harness): Promise<void> {
   await h.core.schedule({ raceId: RACE, kaisaiDate: DATE });
   await h.core.runNextStep();
@@ -225,7 +225,7 @@ describe("発走前の分析: 取得ステップ(AC-c2)", () => {
     expect(count(fetched, "shutuba.html")).toBe(0); // 出馬表は TTL(10 分)の内側なのでキャッシュ
   });
 
-  it("朝の準備が無い(キャッシュなし)ときも動く: 冷えた状態では、取得は 25 本(出馬表 1・戦績 16・調教 1・単勝複勝 1・組合せ 6)", async () => {
+  it("事前分析が無い(キャッシュなし)ときも動く: 冷えた状態では、取得は 25 本(出馬表 1・戦績 16・調教 1・単勝複勝 1・組合せ 6)", async () => {
     const h = harness();
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
     await h.core.runNextStep();
@@ -254,9 +254,9 @@ describe("発走前の取得の失敗の文面は、保存する時点で sk-ant
 
 /**
  * Issue #228: 初出走馬(新馬戦)を含むレース。戦績 API が「戦績テーブルの無い正常な応答」を返す馬が出走歴なし(`[]`)として扱われ、
- * 朝の準備・発走前の分析が「戦績を取得できなかった馬」で失敗しない。フィクスチャ 202603020211 の馬番1〜4を初出走馬(実応答 fixtures/horse_results_2024105003.json)に差し替える。
+ * 事前分析・発走前の分析が「戦績を取得できなかった馬」で失敗しない。フィクスチャ 202603020211 の馬番1〜4を初出走馬(実応答 fixtures/horse_results_2024105003.json)に差し替える。
  */
-describe("初出走馬を含むレースでも、朝の準備・発走前の分析が失敗しない(Issue #228)", () => {
+describe("初出走馬を含むレースでも、事前分析・発走前の分析が失敗しない(Issue #228)", () => {
   const DEBUT_HORSES = ["2023103386", "2023105684", "2023104885", "2023101569"];
   const debutResponse = (): string => readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures", "horse_results_2024105003.json"), "utf-8");
 
@@ -277,7 +277,7 @@ describe("初出走馬を含むレースでも、朝の準備・発走前の分�
     expect(new Set(DEBUT_HORSES).size).toBe(4);
   });
 
-  it("朝の準備: 取得も計算も成功し、16頭の prior が置かれる(1回で通る。再試行にならない)", async () => {
+  it("事前分析: 取得も計算も成功し、16頭の prior が置かれる(1回で通る。再試行にならない)", async () => {
     const h = harness();
     withDebutHorses(h);
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE });
@@ -303,7 +303,7 @@ describe("初出走馬を含むレースでも、朝の準備・発走前の分�
     expect(h.sink.saved[0]!.horses).toHaveLength(16);
   });
 
-  it("発走前の分析だけを(朝の準備なしで)実行しても成功する。初出走馬4頭を含む16頭ぶんの戦績を取得し、取得失敗の警告にならない", async () => {
+  it("発走前の分析だけを(事前分析なしで)実行しても成功する。初出走馬4頭を含む16頭ぶんの戦績を取得し、取得失敗の警告にならない", async () => {
     const h = harness();
     withDebutHorses(h);
     await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });

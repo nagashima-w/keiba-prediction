@@ -49,7 +49,7 @@ export const WEB_DARK: WebPalette = {
 
 /** Discord の embed の帯の色(0xRRGGBB)。 */
 export const DISCORD_COLORS = {
-  /** 狙い目あり・朝の準備が全て完了・回収率 100% 以上。 */
+  /** 狙い目あり・事前分析が全て完了・回収率 100% 以上。 */
   ok: 0x009e73,
   /** 一部の失敗・未完了。 */
   warn: 0xe69f00,

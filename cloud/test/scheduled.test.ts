@@ -385,7 +385,7 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
     expect(h.text()).not.toContain("SECRET-CANARY");
   });
 
-  it("requestPlan が 3 回とも失敗しても、結果の依頼は走る。最後に、従来どおり固定文言のエラーを投げる(朝の計画の失敗は隠さない)", async () => {
+  it("requestPlan が 3 回とも失敗しても、結果の依頼は走る。最後に、従来どおり固定文言のエラーを投げる(事前分析の計画の失敗は隠さない)", async () => {
     const f = fakeNamespace();
     const h = harness();
     const failing = async (): Promise<RequestPlanResult> => {
@@ -438,7 +438,7 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
   });
 });
 
-describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、補完の DO の kick を呼ぶ。失敗しても朝の計画・既存の結果の取り込みを失敗させない", () => {
+describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、補完の DO の kick を呼ぶ。失敗しても事前分析の計画・既存の結果の取り込みを失敗させない", () => {
   /** 補完の DO の偽物。kick の呼び出しとその順を `events`(他の DO の呼び出しと共有)に記録する。 */
   function fakeBackfill(events: string[], behavior: () => Promise<void> = async () => undefined) {
     const names: string[] = [];
@@ -475,7 +475,7 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
     expect(b.kicks()).toBe(1);
   });
 
-  it("kick が失敗(同期の例外・非同期の reject)しても、朝の計画は成功のまま・結果の依頼は済んでいる。分類だけをログに出し、例外の文面を出さない", async () => {
+  it("kick が失敗(同期の例外・非同期の reject)しても、事前分析の計画は成功のまま・結果の依頼は済んでいる。分類だけをログに出し、例外の文面を出さない", async () => {
     for (const behavior of [
       async (): Promise<void> => {
         throw new Error("補完の詳細 SECRET-CANARY-KICK");
@@ -497,7 +497,7 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
     }
   });
 
-  it("スタブの取得そのもの(idFromName・get)が投げても、朝の計画は成功のまま", async () => {
+  it("スタブの取得そのもの(idFromName・get)が投げても、事前分析の計画は成功のまま", async () => {
     const f = fakeNamespace();
     const h = harness();
     const broken = {
@@ -512,7 +512,7 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
     expect(h.text()).not.toContain("SECRET-CANARY");
   });
 
-  it("requestPlan が 3 回とも失敗しても kick は呼ぶ(補完は朝の計画に依らない)。最後は従来どおり固定文言で投げる", async () => {
+  it("requestPlan が 3 回とも失敗しても kick は呼ぶ(補完は事前分析の計画に依らない)。最後は従来どおり固定文言で投げる", async () => {
     const f = fakeNamespace();
     const h = harness();
     f.script = [() => Promise.reject(new Error("x")), () => Promise.reject(new Error("x")), () => Promise.reject(new Error("x"))];

@@ -154,9 +154,9 @@ describe("起動と取得", () => {
     expect(h.text()).toContain("福島12R");
     const rows = findAll(h.tree(), (n) => n.attrs?.["class"] === "race");
     expect(rows).toHaveLength(2);
-    expect(textOf(rows[0]!)).toContain("朝: 完了");
+    expect(textOf(rows[0]!)).toContain("事前: 完了");
     expect(textOf(rows[0]!)).toContain("発走前: 未実行");
-    expect(textOf(rows[1]!)).toContain("朝: 未実行");
+    expect(textOf(rows[1]!)).toContain("事前: 未実行");
   });
 
   it("板の取得に失敗しても一覧は出る(注記つき)。一覧の取得に失敗したら、失敗の文言を出す", async () => {
@@ -166,7 +166,7 @@ describe("起動と取得", () => {
     await h.app.whenIdle();
     expect(h.text()).toContain("福島民報杯");
     expect(findAll(h.tree(), (n) => n.attrs?.["class"] === "notice").length).toBeGreaterThan(0);
-    expect(h.text()).not.toContain("朝: 完了");
+    expect(h.text()).not.toContain("事前: 完了");
 
     const e = harness(`#date=${DATE}&venue=central`);
     e.responders.set(RACES_CENTRAL, async () => ({ status: 503, json: async () => ({ ok: false, error: { type: "netkeiba-unavailable", reason: "busy" } }) }));
@@ -217,7 +217,7 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     await h.app.whenIdle();
     expect(h.calls.slice(before).sort()).toEqual([ANALYSIS_5, PAST, RACE_STATUS].sort());
     expect(h.text()).toContain("福島民報杯");
-    expect(h.text()).toContain("朝の準備");
+    expect(h.text()).toContain("事前分析");
     h.go(`#date=${DATE}&venue=central`);
     await h.app.whenIdle();
     expect(h.calls).toHaveLength(before + 3);
@@ -232,7 +232,7 @@ describe("メモリキャッシュ(画面の往復で取り直さない)", () =>
     h.app.start();
     await h.app.whenIdle();
     expect(h.calls.sort()).toEqual([ANALYSIS_5, PAST, RACE_STATUS].sort());
-    expect(h.text()).toContain("朝の準備");
+    expect(h.text()).toContain("事前分析");
     expect(h.text()).toContain("発走前");
     expect(h.text()).toContain("1位"); // 朝が完了・prior あり → 順位
     // 結果は最初からカードの中に出る(「結果を見る」のリンクは無い)。結果画面(analysis=)へのリンクは過去の分析の一覧だけ
@@ -387,7 +387,7 @@ describe("レース画面の失敗・更新", () => {
     release();
     await h.app.whenIdle();
     expect(h.text()).toContain("分析時刻");
-    expect(h.text()).not.toContain("朝の準備");
+    expect(h.text()).not.toContain("事前分析");
     const before = h.calls.length;
     h.go(`#date=${DATE}&venue=central&race=${RACE_ID}`);
     await h.app.whenIdle();

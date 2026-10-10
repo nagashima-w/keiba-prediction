@@ -6,7 +6,7 @@ import { buildResultModel, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLO
 import type { Route } from "../client/route";
 
 /**
- * Issue #185: レース画面の表示用データ(純関数)。朝の準備・発走前の 2 枚のカード(状態・失敗時のエラー文)・朝の prior の順位・過去の分析のリンク。
+ * Issue #185: レース画面の表示用データ(純関数)。事前分析・発走前の 2 枚のカード(状態・失敗時のエラー文)・朝の prior の順位・過去の分析のリンク。
  * Issue #188: 発走前のカードに、最新の分析の結果(`card.result`)を最初から出す(旧「結果を見る」のリンクは廃止)。起動のボタン・失敗の注記は Issue #186(下の describe)。
  */
 
@@ -38,7 +38,7 @@ function cards(model: ReturnType<typeof buildRaceModel>) {
   return model.cards!;
 }
 
-describe("カード(朝の準備・発走前)の状態: (race_id, mode) で板の行を引く", () => {
+describe("カード(事前分析・発走前)の状態: (race_id, mode) で板の行を引く", () => {
   it("別のレース・別のモードの行を取り違えない(同じレースの 2 モード・別レースの行が混ざる板で、それぞれの状態になる)", () => {
     const model = buildRaceModel(
       input({
@@ -55,7 +55,7 @@ describe("カード(朝の準備・発走前)の状態: (race_id, mode) で板�
       }),
     );
     const [morning, preRace] = cards(model);
-    expect(morning!.title).toBe("朝の準備");
+    expect(morning!.title).toBe("事前分析");
     expect(morning!.badge).toEqual({ label: "完了", tone: "ok" });
     expect(morning!.error).toBeNull();
     expect(preRace!.title).toBe("発走前");
@@ -339,8 +339,8 @@ describe("起動のボタン(文言・disabled・渡す値)", () => {
   type Status = BoardRow["status"] | undefined;
   const TABLE: readonly [BoardRow["mode"], Status, string, boolean][] = [
     // [モード, 板の状態, ボタンの文言, disabled]
-    ["morning", undefined, "朝の準備を実行", false],
-    ["morning", "done", "朝の準備をやり直す", false],
+    ["morning", undefined, "事前分析を実行", false],
+    ["morning", "done", "事前分析をやり直す", false],
     ["morning", "failed", "再試行", false],
     ["morning", "queued", "待ち", true],
     ["morning", "fetched", "取得済み", true],
@@ -433,7 +433,7 @@ describe("カードの説明(Issue #191)", () => {
   ];
 
   for (const [name, rows] of states) {
-    it(`${name}でも、朝の準備・発走前の両方のカードに、空でない説明がある。2枚の説明は違う文`, () => {
+    it(`${name}でも、事前分析・発走前の両方のカードに、空でない説明がある。2枚の説明は違う文`, () => {
       const [morning, preRace] = cards(buildRaceModel(input({ status: { kind: "ready", rows, prior: PRIOR } })));
       expect(morning!.mode).toBe("morning");
       expect(preRace!.mode).toBe("pre_race");
@@ -454,7 +454,7 @@ describe("カードの説明(Issue #191)", () => {
   });
 
   // 文言そのものは固定しない。ただし、次の「事実の印」は、モードごとに固有の語として固定する(取り違え・事実の削除で赤になる)。
-  it("朝の準備の説明は、戦績・調教を取得すること(調教は中央のみ)に触れ、LLM には触れない。発走前の説明は、LLM(キーの有無での違い・補正・印と根拠・EV)と配分の条件(資金・上限)に触れ、戦績には触れない。「現在は LLM を使いません」とは言わない", () => {
+  it("事前分析の説明は、戦績・調教を取得すること(調教は中央のみ)に触れ、LLM には触れない。発走前の説明は、LLM(キーの有無での違い・補正・印と根拠・EV)と配分の条件(資金・上限)に触れ、戦績には触れない。「現在は LLM を使いません」とは言わない", () => {
     const [morning, preRace] = cards(buildRaceModel(input()));
     expect(morning!.mode).toBe("morning");
     expect(preRace!.mode).toBe("pre_race");

@@ -22,7 +22,7 @@
  * 計画の確定時に、`requested_on` = **開催日**の行を積む(`RaceDayCore.runPlanFinalize`)。`requested_on` が開催日と同じ行を「当日の行」と呼ぶ(過去日の依頼の行は `requested_on` が開催日より後)。
  * 当日の行だけ、(1) 最初の試行は発走 + {@link SAME_DAY_RESULT_DELAY_MS}、(2) 保存の条件に「全頭の着順がそろった」が加わる(分類 `incomplete`)、
  * (3) 再試行は {@link SAME_DAY_RETRY_DELAY_MS} おきに {@link MAX_SAME_DAY_ATTEMPTS} 回まで。**スキーマは変えない**(列を足さない: 稼働中の DO の表に ALTER が要るため)。
- * 判定表は変わらない: 当日に `gave_up` になった行は、翌朝(`requested_on` < 今日)の依頼で 1 回だけ積み直され、過去日の方式(3 試行・10 分おき)で取り込まれる。
+ * 判定表は変わらない: 当日に `gave_up` になった行は、翌日以降の cron(`requested_on` < 今日)の依頼で 1 回だけ積み直され、過去日の方式(3 試行・10 分おき)で取り込まれる。
  *
  * **起きたときに必ず状態が変わる**(アラームの候補になる行は、起きた処理が必ず状態を変える): `queued` の行 → 試行回数か保留の回数・状態({@link RaceDayCore} の結果のステップ)。
  */
@@ -39,14 +39,14 @@ export const MAX_RESULT_DEFERRALS = 5;
 /**
  * 当日中の取り込み(Issue #209)。計画の確定時に積む行(`requested_on` = 開催日。過去日の行は `requested_on` が開催日より後)に使う。
  * 最初の試行は発走の 15 分後(地方の実測: 払戻は発走 +9.7 分で出るが、全頭の着順は +13.7 分にそろった。1 レースの実測)、
- * 再試行は 5 分おきに最大 10 回(最後の試行は発走 + 60 分)。上限に達したら諦め、翌朝の取り込み(#208)が拾う。
+ * 再試行は 5 分おきに最大 10 回(最後の試行は発走 + 60 分)。上限に達したら諦め、翌日以降の cron の取り込み(#208)が拾う。
  */
 export const SAME_DAY_RESULT_DELAY_MS = 15 * 60_000;
 export const SAME_DAY_RETRY_DELAY_MS = 5 * 60_000;
 export const MAX_SAME_DAY_ATTEMPTS = 10;
 /** 結果ページの「N頭」が取れず、全頭の着順がそろったか判定できないときの試行の上限(構造が変わったときに、全行が 10 回ずつ無駄に再試行しないための歯止め)。 */
 export const MAX_SAME_DAY_UNKNOWN_SIZE_ATTEMPTS = 2;
-/** 当日中の取り込みとして積む結果の行の上限(1 日の上限 120 のうち、翌朝の依頼が足す新しい行のために 20 を残す)。 */
+/** 当日中の取り込みとして積む結果の行の上限(1 日の上限 120 のうち、翌日以降の cron の依頼が足す新しい行のために 20 を残す)。 */
 export const MAX_SAME_DAY_RESULT_ROWS = 100;
 /** 1 日(1 つの DO)の結果の行の上限。`race_day_tasks` の上限(100)とは別枠。 */
 export const MAX_RESULT_ROWS_PER_DAY = 120;

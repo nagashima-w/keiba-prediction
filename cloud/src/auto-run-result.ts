@@ -81,7 +81,7 @@ export function classifyAutoRun(input: ClassifyInput): AutoRunOutcome {
 export type SkipStage = "plan" | "promotion";
 
 /**
- * スキップの行が計画の時点か昇格の時点かを、計画の行の期限(`dueMs`)から読む(Issue #205 G-D3。通知は、昇格の時点のスキップだけをレースごとに送り、計画の時点のスキップは朝のまとめにだけ載せる)。
+ * スキップの行が計画の時点か昇格の時点かを、計画の行の期限(`dueMs`)から読む(Issue #205 G-D3。通知は、昇格の時点のスキップだけをレースごとに送り、計画の時点のスキップは事前分析のまとめにだけ載せる)。
  * 根拠(2つの書き手の事実。`race-day-core.ts`): 計画の時点でスキップにする行は `due_ms: null` で書かれる(`buildPlanRow`)/ 昇格の時点のスキップ(`markSkipped`)は `due_ms` を更新しない
  * (planned だった行の期限が残る)。`disposition` は両方とも `skip` になるので判別に使えない。テスト(`race-day-notify.test.ts`)が、実際の確定と昇格を通して、この関係を固定している。
  */

@@ -5,7 +5,7 @@ import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
 
 /**
  * Issue #206(#166-E G-E3): 本番での自動実行を外から観測する、読み取り専用の入口 `GET /api/plan?kaisai_date=YYYYMMDD`。
- * 返すもの: 朝の計画(`getPlanProgress`)・自動実行の各レースの結果(`getAutoRunResults`)・通知の一覧(`getNotifications`。Webhook の URL は含まない)・結果の取り込みの状態(`getResultImportProgress`。Issue #208)。
+ * 返すもの: 事前分析の計画(`getPlanProgress`)・自動実行の各レースの結果(`getAutoRunResults`)・通知の一覧(`getNotifications`。Webhook の URL は含まない)・結果の取り込みの状態(`getResultImportProgress`。Issue #208)。
  * netkeiba にも LLM にも出ない。状態も変えない(DO の読み取りの RPC 4 つだけを呼ぶ)。日単位の DO は偽物(呼び出しを記録する)。
  * 順序: メソッド(GET だけ。HEAD は 405)→ Sec-Fetch-Site(別サイトなら 403)→ クエリの検証(400)→ DO(失敗は 503・文面なし)。
  */

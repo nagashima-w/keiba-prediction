@@ -59,7 +59,7 @@ function badge(prefix: string, b: Badge): VNode {
 function raceRow(item: RaceItem): VNode {
   const head = h("span", { class: "race-head" }, [h("strong", {}, [item.label]), h("span", { class: "race-name" }, [item.name]), ...(item.grade === null ? [] : [h("span", { class: "grade" }, [item.grade])])]);
   const detail = h("span", { class: "race-detail" }, [item.detail]);
-  const badges = item.badges === null ? [] : [h("span", { class: "badges" }, [badge("朝", item.badges.morning), badge("発走前", item.badges.preRace)])];
+  const badges = item.badges === null ? [] : [h("span", { class: "badges" }, [badge("事前", item.badges.morning), badge("発走前", item.badges.preRace)])];
   return h("li", {}, [h("a", { class: "race", href: item.href }, [head, detail, ...badges])]);
 }
 

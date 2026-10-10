@@ -4,7 +4,7 @@
  *  - 分析の完了: core の `buildAnalysisEmbed` を流用する({@link buildAnalysisNotificationEmbed})。材料は、計算ステップの保存と同じ同期区間で、保存する `AnalysisRecord` から作る
  *    (馬名・コース・距離は `record.raceSnapshot` にある。D1 の要約には馬名もコースも無い。R2 に頼ると、R2 が使えないときに通知が劣化する)。LLM が効かなかったときは、固定の理由文を末尾に足す。
  *  - 失敗(赤)・手動スキップ(灰色): 理由ごとの**固定文だけ**を載せる(タスクのエラー文の生の値は載せない)。
- *  - 朝のまとめ: 中央は場ごとの field、地方は「地方 交流重賞」の field。**上限(AC-D4)は {@link fitEmbed} が最後に保証する**。
+ *  - 事前分析のまとめ: 中央は場ごとの field、地方は「地方 交流重賞」の field。**上限(AC-D4)は {@link fitEmbed} が最後に保証する**。
  *
  * `fields` は core の `DiscordEmbed` に無い(title・description・color だけ)ので、ここで {@link CloudEmbed} として拡張する(core には触らない)。
  * `sendDiscordNotification` は `JSON.stringify` するだけなので、そのまま通る。
@@ -523,7 +523,7 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   return fitEmbed({ ...base, title, color, ...(description === undefined ? {} : { description }), fields });
 }
 
-// ---- 朝のまとめ ----
+// ---- 事前分析のまとめ ----
 
 type PlanRow = PlanProgress["rows"][number];
 type PlanVenueState = PlanProgress["venues"][number];
@@ -551,7 +551,7 @@ function rowTag(row: PlanRow): string {
     return `スキップ(${row.skipReason === null ? "理由不明" : SKIP_LABELS[row.skipReason]})`;
   }
   const status = rowStatus(row);
-  return status === "ok" ? "準備OK" : status === "failed" ? "準備失敗" : "未完了";
+  return status === "ok" ? "事前分析OK" : status === "failed" ? "事前分析失敗" : "未完了";
 }
 
 function rowLine(row: PlanRow, withVenue: boolean): string {
@@ -569,8 +569,8 @@ export interface SummaryInput {
 }
 
 /**
- * 朝のまとめ(AC-D3・AC-D5)。中央は場ごとの field、地方は「地方 交流重賞」の field。一覧の取得に失敗した会場は、description と field に出す。
- * 準備の成否は morning タスクの状態(done=準備OK・failed=準備失敗・それ以外=未完了)。上限超過(cap)のスキップは失敗として数える。
+ * 事前分析のまとめ(AC-D3・AC-D5)。中央は場ごとの field、地方は「地方 交流重賞」の field。一覧の取得に失敗した会場は、description と field に出す。
+ * 準備の成否は morning タスクの状態(done=事前分析OK・failed=事前分析失敗・それ以外=未完了)。上限超過(cap)のスキップは失敗として数える。
  * 長さの保証は {@link fitEmbed}。
  */
 export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
@@ -599,7 +599,7 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
 
   const lines = [
     `対象 ${progress.rows.length} 件(中央 ${central.length}・地方 交流重賞 ${narRows.length})`,
-    `準備OK ${ok} / 失敗 ${failed}${cap > 0 ? `(うち上限超過 ${cap})` : ""} / 未完了 ${incomplete}`,
+    `事前分析OK ${ok} / 失敗 ${failed}${cap > 0 ? `(うち上限超過 ${cap})` : ""} / 未完了 ${incomplete}`,
   ];
   const skipParts = SKIP_BREAKDOWN_ORDER.filter((reason) => (skipCounts[reason] ?? 0) > 0).map((reason) => `${SKIP_LABELS[reason]} ${skipCounts[reason]}`);
   if (skipParts.length > 0) {
@@ -648,7 +648,7 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
   }
 
   const color = failedVenues.length > 0 || (ok === 0 && failed > 0) ? COLOR_RED : failed > 0 || incomplete > 0 ? COLOR_ORANGE : COLOR_GREEN;
-  return fitEmbed({ title: `朝の準備 ${slashDate(input.kaisaiDate)}`, description: lines.join("\n"), color, fields });
+  return fitEmbed({ title: `事前分析 ${slashDateWithWeekday(input.kaisaiDate)} 開催分`, description: lines.join("\n"), color, fields });
 }
 
 // ---- 23 時の再実行後も事前分析が失敗しているときの通知(Issue #249)----

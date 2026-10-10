@@ -18,7 +18,7 @@ import { DEFAULT_PRE_RACE_OFFSET_MINUTES } from "./pre-race-time.js";
  *  - スコアリングの重み13項目(Issue #218。exe の設定の `biasWeights` 7・`baseScoreWeights` 6)は **exe と共有する項目**。cloud の設定は平坦なキーなので、キー名は接頭辞つき
  *    (`biasWeight` + exe のキーの先頭大文字。例 `biasWeightTrackCondition`・`baseScoreWeightRecentForm`)。対応は {@link SCORING_WEIGHT_FIELDS} の表が唯一の定義元で、
  *    exe のキーとの対応・既定値の一致(exe の `DEFAULT_APP_SETTINGS`・core の `DEFAULT_SCORER_CONFIG`)は `cloud/test/settings.test.ts`・`scripts/test/cloud-settings-defaults.test.ts` が固定する。
- *    検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。**上限は無い**)。読む側と書く側で同じ述語。分析(朝の準備・発走前の分析)の ScorerConfig は `scorer-config.ts` が作る。
+ *    検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。**上限は無い**)。読む側と書く側で同じ述語。分析(事前分析・発走前の分析)の ScorerConfig は `scorer-config.ts` が作る。
  *    項目の無い旧い行(今の本番)は、13項目とも既定値(= 今までと同じ結果)。
  * 値は `GET`/`POST /api/settings`(`handler.ts`)と設定画面(`#settings`)で編集する(`cloud_settings` 表。id = 1 の1行だけ)。直接 D1 に入れてもよい。
  *

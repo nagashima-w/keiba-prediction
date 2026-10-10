@@ -61,9 +61,9 @@ export interface RaceDayStubLike {
   getMorningPrior(raceId: string): Promise<MorningPrior | null>;
   /** 開催日のレース一覧(Issue #183)。 */
   getRaceList(kaisaiDate: string, venue: RaceListVenue): Promise<RaceListResult>;
-  /** 朝の計画の依頼(Issue #203・#206)。**呼ぶのは cron の `scheduled`(scheduled.ts)だけ**。手動の入口〈handler.ts〉は呼ばない(ガードテストが固定)。 */
+  /** 事前分析の計画の依頼(Issue #203・#206)。**呼ぶのは cron の `scheduled`(scheduled.ts)だけ**。手動の入口〈handler.ts〉は呼ばない(ガードテストが固定)。 */
   requestPlan(input: { readonly kaisaiDate: string; readonly rescue?: boolean }): Promise<RequestPlanResult>;
-  /** 朝の計画の読み取り(Issue #206 `GET /api/plan`。状態は変えない)。 */
+  /** 事前分析の計画の読み取り(Issue #206 `GET /api/plan`。状態は変えない)。 */
   getPlanProgress(): Promise<PlanProgress>;
   /** 自動実行の各レースの結果の読み取り(Issue #204・#206。状態は変えない)。 */
   getAutoRunResults(): Promise<AutoRunResults>;
@@ -986,7 +986,7 @@ const clipText = (text: string | null): string | null => (text === null ? null :
 
 /**
  * `GET /api/plan?kaisai_date=YYYYMMDD`(Issue #206〈#166-E〉G-E3): 定時の自動実行を外から観測する、読み取り専用の入口。
- * 日単位の DO(RaceDay)の `getPlanProgress`(朝の計画)・`getAutoRunResults`(各レースの結果)・`getNotifications`(通知の一覧)・`getResultImportProgress`(結果の取り込みの状態。Issue #208)を読んで返す。
+ * 日単位の DO(RaceDay)の `getPlanProgress`(事前分析の計画)・`getAutoRunResults`(各レースの結果)・`getNotifications`(通知の一覧)・`getResultImportProgress`(結果の取り込みの状態。Issue #208)を読んで返す。
  * **netkeiba にも LLM にも D1・R2 にも出ない。状態も変えない**(この関数は `.schedule(`・`.requestPlan(`・`.getRaceList(`・gate を呼ばない。`cloud-config-guard.test.ts` が固定)。
  * 理由: 対象が 0 件の日は通知が何も出ないので、自動実行が動いたのか壊れているのかを、外から確かめる手段が要る。
  * 順序: `Sec-Fetch-Site`(別サイトなら 403。開催日を変えて DO を作らせる cross-site の GET を拒否)→ クエリの検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503・文面なし)。

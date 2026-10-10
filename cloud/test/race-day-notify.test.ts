@@ -324,7 +324,7 @@ describe("AC-D1: 発走前の分析が保存されると、分析の embed が1�
   it("通る: 14:50 に昇格 → 取得 → 計算・保存 → 通知。送信は1通で、行は sent・kind=analysis・analysis_id つき。embed は core の形(タイトル・メタ行・LLM 補正の行)", async () => {
     const h = await completedDay();
     expect(h.sink.saved).toHaveLength(1);
-    expect(h.notifier.sent).toHaveLength(2); // 朝のまとめ + 分析
+    expect(h.notifier.sent).toHaveLength(2); // 事前分析のまとめ + 分析
     const rows = notifyRows(h);
     expect(rows.map((r) => [r.key, r.kind, r.state])).toEqual([
       [`race:${RACE}`, "analysis", "sent"],
@@ -446,7 +446,7 @@ describe("G-D6: webhook が無効(notifier が無い)なら、材料も行も積
 });
 
 describe("G-D6: webhook を後から登録した場合", () => {
-  it("登録前に完了したレースは通知しない(材料を積んでいない)。登録後は、未送信の朝のまとめだけが送られる。分析・タスクの状態は変わらない", async () => {
+  it("登録前に完了したレースは通知しない(材料を積んでいない)。登録後は、未送信の事前分析のまとめだけが送られる。分析・タスクの状態は変わらない", async () => {
     const h = harness([fixtureRace("15:35")], { notifier: false });
     h.gate.others = "fixture";
     await planned(h);
@@ -500,9 +500,9 @@ describe("Issue #230: 分析の通知のタイトルのリンク(送信の直前
     return h;
   }
 
-  it("APP_BASE_URL がある: 分析の embed のタイトルに url(オリジン/#date=…&venue=central&race=…&analysis=<保存した分析 id>)が付く。朝のまとめには付かない", async () => {
+  it("APP_BASE_URL がある: 分析の embed のタイトルに url(オリジン/#date=…&venue=central&race=…&analysis=<保存した分析 id>)が付く。事前分析のまとめには付かない", async () => {
     const h = await dayWith(BASE);
-    expect(h.notifier.sent).toHaveLength(2); // 前提: 朝のまとめ + 分析
+    expect(h.notifier.sent).toHaveLength(2); // 前提: 事前分析のまとめ + 分析
     expect(analysisEmbed(h).url).toBe(`${BASE}/#date=${DATE}&venue=central&race=${RACE}&analysis=1`);
     const summary = h.notifier.sent.map(embedOf).find((e) => !e.title!.includes("福島"))!;
     expect(summary.url).toBeUndefined();
@@ -560,7 +560,7 @@ describe("G-D3: 失敗・スキップの通知(固定文)", () => {
   it("failed(blocked): 赤の通知が1通。本文は固定の理由文で、タスクのエラー文(ブレーカーの文面)は載せない。行は sent・kind=failed", async () => {
     const h = harness([central(1, "15:35")]);
     await planned(h);
-    await drive(h, jst("14:49")); // 朝のまとめを先に送り終える(このテストの主題ではない)
+    await drive(h, jst("14:49")); // 事前分析のまとめを先に送り終える(このテストの主題ではない)
     await wakeAt(h, jst("14:50")); // 昇格 + 取得 → blocked で failed
     expect(h.core.getAutoRunResults().results[0]!.outcome).toMatchObject({ kind: "failed", reason: "blocked" });
     await drive(h, jst("16:00"));
@@ -606,7 +606,7 @@ describe("G-D3: 失敗・スキップの通知(固定文)", () => {
     expect(notifyRows(h).find((r) => r.key === `race:${R1}`)).toMatchObject({ kind: "skipped-manual", state: "sent" });
   });
 
-  it("計画の時点の skipped(started・too-late・no-start-time): レースごとの通知は送らず、朝のまとめにだけ載る。期限は無い(due_ms が null = 計画の時点)", async () => {
+  it("計画の時点の skipped(started・too-late・no-start-time): レースごとの通知は送らず、事前分析のまとめにだけ載る。期限は無い(due_ms が null = 計画の時点)", async () => {
     // 計画は 12:00 に行う。中央 1R は 11:00 発走(started)、2R は 12:05 発走(期限は過ぎ、発走まで 5 分 = too-late)、3R は時刻なし。
     const h = harness([central(1, "11:00"), central(2, "12:05"), central(3, null)]);
     h.clock.now = jst("12:00");
@@ -627,7 +627,7 @@ describe("G-D3: 失敗・スキップの通知(固定文)", () => {
   it("superseded: 失敗のあと、通知の前に利用者が手動で再実行したら、通知しない(利用者が自分で再実行している)", async () => {
     const h = harness([central(1, "15:35")]);
     await planned(h);
-    await drive(h, jst("14:49")); // 朝のまとめを先に送り終える
+    await drive(h, jst("14:49")); // 事前分析のまとめを先に送り終える
     h.clock.now = jst("14:50");
     h.alarm.at = h.clock.now;
     expect(await tick(h)).toBe(`${R1}:pre_race:fetch:failed`); // 次の起床で通知を送る前
@@ -647,20 +647,20 @@ describe("G-D3: 失敗・スキップの通知(固定文)", () => {
   });
 });
 
-describe("AC-D3・G-D5: 朝のまとめ(1日に1回)", () => {
+describe("AC-D3・G-D5: 事前分析のまとめ(1日に1回)", () => {
   it("全 morning が終端になったら送る: 中央の場ごとの field と「地方 交流重賞」の field が並ぶ。1通だけで、その後の起床で増えない", async () => {
     const h = harness([central(1, "15:35"), central(2, "15:40")], { nar: listHtml([nar(11, "20:10", "Jpn3")]) });
     await planned(h, false); // morning を実際に回す(gate は blocked → 取得で失敗。終端になる)
     await drive(h, jst("14:00"));
-    const summaries = h.notifier.sent.map(embedOf).filter((e) => e.title!.startsWith("朝の準備"));
+    const summaries = h.notifier.sent.map(embedOf).filter((e) => e.title!.startsWith("事前分析"));
     expect(summaries).toHaveLength(1);
     expect(summaries[0]!.fields!.map((f) => f.name)).toEqual(["中山", "地方 交流重賞"]);
-    expect(summaries[0]!.fields![0]!.value).toBe("1R 中央1R 15:35 準備失敗\n2R 中央2R 15:40 準備失敗");
-    expect(summaries[0]!.fields![1]!.value).toBe("水沢 11R 地方11R 20:10 準備失敗");
+    expect(summaries[0]!.fields![0]!.value).toBe("1R 中央1R 15:35 事前分析失敗\n2R 中央2R 15:40 事前分析失敗");
+    expect(summaries[0]!.fields![1]!.value).toBe("水沢 11R 地方11R 20:10 事前分析失敗");
     expect(summaries[0]!.color).toBe(DISCORD_COLORS.fail); // 全レース失敗でも送る(赤)
     // 以後の起床で増えない
     await drive(h, jst("16:00"));
-    expect(h.notifier.sent.map(embedOf).filter((e) => e.title!.startsWith("朝の準備"))).toHaveLength(1);
+    expect(h.notifier.sent.map(embedOf).filter((e) => e.title!.startsWith("事前分析"))).toHaveLength(1);
   });
 
   it("未完了のまま保険の時刻(確定 + 60 分)になったら、「未完了 N 件」として送る。確定の 60 分後より前には送らない", async () => {
@@ -726,7 +726,7 @@ describe("AC-D2・G-D1: 送信の失敗・多くとも1回・URL を出さない
   it("送信が失敗しても、分析のタスクは done のまま。失敗は状態から読める(行は failed・分類 http-404)。再送しない", async () => {
     const h = harness([fixtureRace("15:35")]);
     h.gate.others = "fixture";
-    h.notifier.script = ["ok", failing()]; // 1通目(朝のまとめ)は成功、2通目(分析)が失敗
+    h.notifier.script = ["ok", failing()]; // 1通目(事前分析のまとめ)は成功、2通目(分析)が失敗
     await planned(h);
     await drive(h, jst("16:00"));
     const task = h.sql.exec("SELECT status FROM race_day_tasks WHERE mode = 'pre_race'").toArray() as { status: string }[];
@@ -757,9 +757,9 @@ describe("AC-D2・G-D1: 送信の失敗・多くとも1回・URL を出さない
     expect(h.warnings.some((w) => w.includes("Discord"))).toBe(true); // 失敗は警告に残る(分類だけ)
   });
 
-  it("多くとも1回: 送信の途中で落ちて(sending のまま)再起動しても、同じ通知(朝のまとめ)を再送しない。ほかの通知は送られる", async () => {
+  it("多くとも1回: 送信の途中で落ちて(sending のまま)再起動しても、同じ通知(事前分析のまとめ)を再送しない。ほかの通知は送られる", async () => {
     const h = harness([central(1, "15:35")]);
-    h.notifier.script = ["hang"]; // 最初の送信(朝のまとめ)が、応答の返らないまま止まる
+    h.notifier.script = ["hang"]; // 最初の送信(事前分析のまとめ)が、応答の返らないまま止まる
     await planned(h);
     void h.core.runNextStep(); // 送信で止まる(DO が落ちた状況)
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -782,7 +782,7 @@ describe("AC-D2・G-D1: 送信の失敗・多くとも1回・URL を出さない
       h.clock.now = Math.max(h.clock.now + 5 * MIN, jst("14:50") * (i === 1 ? 1 : 0));
       await restarted.runNextStep();
     }
-    expect(h.notifier.at).toHaveLength(2); // 1 通目は止まった朝のまとめ。増えたのは失敗の通知 1 通だけ(まとめの再送は無い)
+    expect(h.notifier.at).toHaveLength(2); // 1 通目は止まった事前分析のまとめ。増えたのは失敗の通知 1 通だけ(まとめの再送は無い)
     const rows = notifyRows(h);
     expect(rows.find((r) => r.key === "summary")!.state).toBe("sending"); // 再送せず、sending のまま残る(欠落を選ぶ)
     expect(rows.find((r) => r.key === `race:${R1}`)!.state).toBe("sent");
@@ -790,7 +790,7 @@ describe("AC-D2・G-D1: 送信の失敗・多くとも1回・URL を出さない
 
   it("失敗のクールダウン: 失敗した送信の 60 秒後まで、次の通知を送らない(Discord が止まっているときに、タスクを押しのけない)", async () => {
     const h = harness([central(1, "15:35"), central(2, "15:35")]); // 同じ発走(期限も同じ 14:50)
-    h.notifier.script = ["ok", failing(), "ok"]; // 朝のまとめ(成功)→ 1R(失敗)→ 2R(成功)
+    h.notifier.script = ["ok", failing(), "ok"]; // 事前分析のまとめ(成功)→ 1R(失敗)→ 2R(成功)
     await planned(h);
     await drive(h, jst("14:49"));
     await wakeAt(h, jst("14:50"));
@@ -830,7 +830,7 @@ describe("G-D2: 順序とアラーム", () => {
   it("通知はタスク(pickNext)の前に動く: 取得待ちの pre_race が残っていても、時刻が来た通知が先に送られる", async () => {
     const h = harness([central(1, "15:35"), central(2, "15:35")]);
     await planned(h); // morning は done
-    await drive(h, jst("14:49")); // 朝のまとめを送る
+    await drive(h, jst("14:49")); // 事前分析のまとめを送る
     await wakeAt(h, jst("14:50")); // 昇格(両方)+ 1R の取得が failed
     const queued = h.sql.exec("SELECT race_id FROM race_day_tasks WHERE mode = 'pre_race' AND status = 'queued'").toArray();
     expect(queued).toHaveLength(1); // 前提: 2R の取得待ちが残っている

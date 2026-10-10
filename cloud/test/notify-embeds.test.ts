@@ -598,7 +598,7 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 買い目の field)", () =>
   });
 });
 
-// ---- 朝のまとめ ----
+// ---- 事前分析のまとめ ----
 
 type Row = PlanProgress["rows"][number];
 type Venue = PlanProgress["venues"][number];
@@ -634,7 +634,7 @@ function progress(over: Partial<PlanProgress> = {}): PlanProgress {
   };
 }
 
-describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
+describe("buildSummaryEmbed(AC-D3・AC-D5: 事前分析のまとめ)", () => {
   it("中央は場ごとに field、地方は「地方 交流重賞」の field。1つの embed に並ぶ。全部 OK なら緑", () => {
     const rows = [
       row({ raceId: "202606040901", raceNumber: 1, raceName: "中山1", venueName: "中山", startTime: "10:05" }),
@@ -642,15 +642,15 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
       row({ raceId: "202636092711", venue: "nar", venueName: "水沢", raceNumber: 11, raceName: "地方Jpn", grade: "Jpn3", startTime: "20:10" }),
     ];
     const out = buildSummaryEmbed({ kaisaiDate: "20260927", progress: progress({ rows, venues: [venue({ venue: "central", listed: 2, targeted: 2 }), venue({ venue: "nar", listed: 12, targeted: 1 })] }) });
-    expect(out.title).toBe("朝の準備 2026/09/27");
+    expect(out.title).toBe("事前分析 2026/09/27(日) 開催分"); // 前日の夜に届くので、どの日の分か曜日つきで分かる(Issue #249)
     expect(out.fields!.map((f) => f.name)).toEqual(["中山", "阪神", "地方 交流重賞"]);
-    expect(out.fields![0]!.value).toBe("1R 中山1 10:05 準備OK");
-    expect(out.fields![2]!.value).toBe("水沢 11R 地方Jpn 20:10 準備OK");
+    expect(out.fields![0]!.value).toBe("1R 中山1 10:05 事前分析OK");
+    expect(out.fields![2]!.value).toBe("水沢 11R 地方Jpn 20:10 事前分析OK");
     expect(out.color).toBe(DISCORD_COLORS.ok);
     expect(out.description).toContain("対象 3 件(中央 2・地方 交流重賞 1)");
   });
 
-  it("準備の成否: morning done=準備OK・failed=準備失敗・未完了(null・queued・fetched)。失敗があれば橙、未完了の件数は description に出る", () => {
+  it("準備の成否: morning done=事前分析OK・failed=事前分析失敗・未完了(null・queued・fetched)。失敗があれば橙、未完了の件数は description に出る", () => {
     const rows = [
       row({ raceId: "202606040901", raceNumber: 1, morning: "done" }),
       row({ raceId: "202606040902", raceNumber: 2, morning: "failed" }),
@@ -660,8 +660,8 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
     ];
     const out = buildSummaryEmbed({ kaisaiDate: "20260927", progress: progress({ rows }) });
     const lines = out.fields![0]!.value.split("\n");
-    expect(lines.map((l) => l.split(" ").at(-1))).toEqual(["準備OK", "準備失敗", "未完了", "未完了", "未完了"]);
-    expect(out.description).toContain("準備OK 1 / 失敗 1 / 未完了 3");
+    expect(lines.map((l) => l.split(" ").at(-1))).toEqual(["事前分析OK", "事前分析失敗", "未完了", "未完了", "未完了"]);
+    expect(out.description).toContain("事前分析OK 1 / 失敗 1 / 未完了 3");
     expect(out.color).toBe(DISCORD_COLORS.warn);
   });
 
@@ -679,7 +679,7 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
     const out = buildSummaryEmbed({ kaisaiDate: "20260927", progress: progress({ rows }) });
     expect(out.color).toBe(DISCORD_COLORS.fail);
     expect(out.fields![0]!.value).toContain("スキップ(上限超過)");
-    expect(out.description).toContain("失敗 2"); // 準備失敗 1 + 上限超過 1
+    expect(out.description).toContain("失敗 2"); // 事前分析失敗 1 + 上限超過 1
   });
 
   it("スキップ(計画の時点): 理由ごとの件数が description に出る。行にも理由が出る", () => {

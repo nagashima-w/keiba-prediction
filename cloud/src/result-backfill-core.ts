@@ -12,7 +12,7 @@
  * ## いつ動くか
  *  - **移行が `completed` のときだけ**。`idle`(一度も移行していない)・`failed` は何もしない(アラームも張らない。cron の `kick` が翌日に張り直す)。`verifying`・`importing`・`waiting-*` は 30 分おきに見直す。
  *    移行中に取ると、移行ファイルに入っている結果と重複して取得する無駄が出る・移行の D1 の書き込み予算と競合するため。
- *  - **JST 01:00〜06:00 の間だけ**({@link BACKFILL_WINDOW_START_HOUR_JST}〜{@link BACKFILL_WINDOW_END_HOUR_JST}。開始を含み終了を含まない)。朝の cron(JST 9:00)・発走前の分析の時間帯を避ける。
+ *  - **JST 01:00〜06:00 の間だけ**({@link BACKFILL_WINDOW_START_HOUR_JST}〜{@link BACKFILL_WINDOW_END_HOUR_JST}。開始を含み終了を含まない)。事前分析の cron(21:00・23:00 JST)・発走前の分析の時間帯を避ける。
  *    D1 の日次の書き込み枠(UTC 0:00 = JST 9:00 に戻る)の終わりに近いが、移行の予算(同じ UTC 日)が使い終わった後に動くので競合しない。
  *  - **1 晩 {@link BACKFILL_NIGHTLY_LIMIT} レースまで**、**1 回 {@link BACKFILL_CHUNK_SIZE} レースまで**(1 つの開催日だけ)。飛行中のチャンクは常に 1 つ: 日単位の DO は gate への呼び出しを 1 本に直列化するので、
  *    補完が gate に並べるのは同時に 1 本。当日の DO・cron が依頼した前日の DO と合わせても、gate の待ち行列の上限(8)に届かない。

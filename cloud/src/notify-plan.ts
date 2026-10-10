@@ -1,27 +1,27 @@
 /**
  * 通知の計画(Issue #205〈#166-D〉G-D1・G-D2)。**純関数**: DO・SQL・時計・送信を持たない。
  *
- * 通知は、コールバックではなく**状態から作る**(#204 G-C2): 自動実行の結果(`getAutoRunResults`)・朝の計画(`getPlanProgress`)・通知の表の行から、
+ * 通知は、コールバックではなく**状態から作る**(#204 G-C2): 自動実行の結果(`getAutoRunResults`)・事前分析の計画(`getPlanProgress`)・通知の表の行から、
  * 「いま何を送るか(`sendNow`)」と「次にアラームを張る時刻(`nextAtMs`)」を、**同じ関数が同じ状態から**返す。`rearm` は `nextAtMs` を、送信のステップは `sendNow` を読む。
  * 別々に計算すると、アラームは鳴るのに何も送らない(即時ループ)・送るものがあるのにアラームが無い(停止)が起きうる。
  *
  * 不変条件:
  *  - I1: `nextAtMs ≤ now` なら `sendNow` がある(鳴ったアラームは必ず仕事をする)。逆に `sendNow` があれば `nextAtMs ≤ now`。
  *  - I2: webhook が無効(`enabled=false`)なら、`sendNow` も `nextAtMs` も null(材料を積まず、アラームも張らない)。
- *  - I3: 通知の行が `sending`・`sent`・`failed` のレース(と朝のまとめ)は二度と候補にならない(多くとも1回。`sending` のまま落ちたものも再送しない)。
+ *  - I3: 通知の行が `sending`・`sent`・`failed` のレース(と事前分析のまとめ)は二度と候補にならない(多くとも1回。`sending` のまま落ちたものも再送しない)。
  *  - I4: `sendNow` を実行すると必ず状態が変わる(送信のステップが、`await` の前に `sending` の行を書く)。→ `race-day-notify.test.ts` が、実際の実行で固定する。
  *
  * 送るものの決め方(G-D3):
  *  - `completed` → 材料の行(`ready`。計算ステップが保存と同じ同期区間で書く)があるときだけ。材料が無い completed(webhook を後から登録した等)は送らない。
  *  - `failed` → 赤い通知 / 昇格の時点の `skipped`(started・cap・no-start-time)→ 赤 / 昇格の時点の `skipped(manual)` → 灰色。
- *  - 計画の時点の `skipped`・`superseded`・`waiting`・`running` → レースごとの通知は送らない(計画の時点のスキップは朝のまとめにだけ載る)。
- *  - 朝のまとめ → {@link summaryEligibility}。1日に1回。レースごとの通知が先。
+ *  - 計画の時点の `skipped`・`superseded`・`waiting`・`running` → レースごとの通知は送らない(計画の時点のスキップは事前分析のまとめにだけ載る)。
+ *  - 事前分析のまとめ → {@link summaryEligibility}。1日に1回。レースごとの通知が先。
  */
 import { skipStage } from "./auto-run-result";
 import type { AutoRunResults, PlanProgress } from "./race-day-core";
 
 /**
- * 通知の種類。`analysis` = 分析の embed(緑・灰)/ `failed` = 赤 / `skipped-manual` = 灰色 / `summary` = 事前分析のまとめ(旧「朝のまとめ」)/
+ * 通知の種類。`analysis` = 分析の embed(緑・灰)/ `failed` = 赤 / `skipped-manual` = 灰色 / `summary` = 事前分析のまとめ(旧「事前分析のまとめ」)/
  * `plan-failure` = 23 時の再実行の後も翌日の事前分析に失敗が残っているときの通知(Issue #249。1 日に高々 1 通。材料は判定の時点で積む)。
  */
 export type NotifyKind = "analysis" | "failed" | "skipped-manual" | "summary" | "plan-failure";
@@ -43,7 +43,7 @@ export type NotifyItem =
 export const SEND_SPACING_MS = 1000;
 /** 送信に失敗したあとのクールダウン(ミリ秒)。Discord が止まっているとき、残りの通知を毎回 5 秒待たせてタスクを押しのけない。失敗した通知は再送しない。 */
 export const FAILURE_COOLDOWN_MS = 60_000;
-/** 朝のまとめの保険の時刻: 確定からこの時間が過ぎたら、未完了があっても送る(確定 + 60 分。すぐ実行の行は期限が確定と同時なので、「最初の期限」にはできない)。 */
+/** 事前分析のまとめの保険の時刻: 確定からこの時間が過ぎたら、未完了があっても送る(確定 + 60 分。すぐ実行の行は期限が確定と同時なので、「最初の期限」にはできない)。 */
 export const SUMMARY_INSURANCE_MS = 60 * 60_000;
 
 /** 計画の時点のスキップは、レースごとには送らない。結果から、送る通知の種類を決める(`completed` は材料の行があるときだけなので、ここでは null)。 */
@@ -64,7 +64,7 @@ export function notifyKindFor(r: AutoRunResults["results"][number]): "failed" | 
 }
 
 /**
- * 朝のまとめを送る資格と、保険の時刻。
+ * 事前分析のまとめを送る資格と、保険の時刻。
  *  - 確定済み(`stage === "done"`)でなければ資格なし・保険の時刻なし。
  *  - **対象が 0 件で、取得に失敗した会場も無い日は送らない**(ユーザー判断。`morningAllTerminal` は rows が 0 件でも真になるので、空の `every` には頼らず、明示の規則にする)。
  *    取得に失敗した会場がある日は、0 件でも送る(自動実行が壊れていることを知らせる)。
@@ -105,7 +105,7 @@ export function planNotifications(input: PlanNotificationsInput): NotificationPl
     return { sendNow: null, nextAtMs: null };
   }
   const { nowMs, rows, paceUntilMs } = input;
-  // 送れる項目(ペースを無視した順序つきの一覧)。レースごとの通知が先、朝のまとめは最後。
+  // 送れる項目(ペースを無視した順序つきの一覧)。レースごとの通知が先、事前分析のまとめは最後。
   const eligible: NotifyItem[] = [];
   for (const r of input.auto.results) {
     const key = `race:${r.raceId}` as const;

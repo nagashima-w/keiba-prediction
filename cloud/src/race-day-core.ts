@@ -3,8 +3,13 @@
  * ストレージ(`ctx.storage.sql`)・時計・ゲート・アラームの設定を引数で受けるので、Node の vitest で(本物の SQLite の意味論で)テストできる。
  * DO のラッパ(`race-day-do.ts`)は、これらを本物に配線するだけ。
  *
+ * ## 用語(Issue #249)
+ * 「事前分析」= mode `morning`(旧「朝の準備」)。画面・Discord・docs の表示名だけを変えた。内部の識別子(`morning`・D1・DO の状態・API の値)と、コメントの「朝の prior」「朝のタスク」は旧称のまま。
+ * 事前分析は**前日の 21:00 JST**(cron の 1 本目)に、翌日の開催日の DO で始まる。23:00 JST(2 本目)の再実行は `requestPlan({ rescue: true })` で、失敗した分を 1 回だけ救済し({@link RaceDayCore.requestPlan})、
+ * 救済の後も失敗が残れば Discord に通知する({@link judgePlanRescue}・`judgeRescue`)。
+ *
  * ## 役割
- * 開催日(`idFromName(kaisaiDate)`)ごとに1つの DO が、その日の全レースの**朝の準備**を直列に処理する(gate の待ち行列の上限 8 に当たらない)。
+ * 開催日(`idFromName(kaisaiDate)`)ごとに1つの DO が、その日の全レースの**事前分析**を直列に処理する(gate の待ち行列の上限 8 に当たらない)。
  *  - **ステップ1(取得 `fetch`)**: `scrapeRace`(変更なし。組合せオッズは取らない。単勝・複勝のオッズを1本取る)でキャッシュを埋める。中央16頭の
  *    冷えた状態で gate への取得は **19 本**(出馬表 1・戦績 16・調教 1・単勝複勝 1)。
  *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
@@ -22,7 +27,7 @@
  * DO のアラームは1つだけ。**`setAlarm` を呼ぶのは {@link RaceDayCore.rearm} の1箇所だけ**で、起こしたい理由(今すぐの仕事・再試行待ち・計画・掃除)の最も早い時刻に張る({@link nextAlarmAt})。
  * 計画(段階2)の候補が入っても、掃除や一覧の取得が未来の予約を潰さない。`pickNext` は**発走前(pre_race)を朝(morning)より先**に処理する(再試行待ちは最後)。
  *
- * ## 朝の計画(Issue #203 段階2)
+ * ## 事前分析の計画(Issue #203 段階2)
  * `requestPlan` → 計画の段階(会場の一覧)→ 確定(計画の表と morning の投入)→ 期限が来たら pre_race の投入。仕組みと冪等性の規則は {@link RaceDayCore.requestPlan}・`runPlanFinalize`・`promoteDuePlans`、表は `race-day-plan.ts`。
  * ## 発走前の予約のガード(Issue #204 段階C)
  * 昇格は**確定済みの日だけ**。昇格の判定は {@link RaceDayCore.promoteRow}(実行中の手動・時刻・手動の分析との重複・上限)、自動で積んだ pre_race は印(`race_day_auto_pre_race`)で手動と区別し、
@@ -318,11 +323,11 @@ export type StepOutcome =
       readonly result: "ok" | "retry" | "failed";
     }
   /**
-   * 朝の計画の段階の1ステップ(Issue #203。`mode: "plan"`)。`step: "list"` は1会場の一覧の取得(`raceId` は会場 `central`・`nar`)、`step: "finalize"` は確定(`raceId` は `plan`)。
+   * 事前分析の計画の段階の1ステップ(Issue #203。`mode: "plan"`)。`step: "list"` は1会場の一覧の取得(`raceId` は会場 `central`・`nar`)、`step: "finalize"` は確定(`raceId` は `plan`)。
    * 既存の `ran` と同じ形にしてあるのは、結果を `${raceId}:${mode}:${step}:${result}` のように読む呼び出し側を壊さないため。
    */
   | { readonly kind: "ran"; readonly raceId: string; readonly mode: "plan"; readonly step: "list" | "finalize"; readonly result: "ok" | "retry" | "failed" }
-  /** 通知の送信(Issue #205。`mode: "notify"`)。`raceId` は、レースごとの通知ではそのレース、朝のまとめでは `summary`。`failed` は送信の失敗(再送しない)。 */
+  /** 通知の送信(Issue #205。`mode: "notify"`)。`raceId` は、レースごとの通知ではそのレース、事前分析のまとめでは `summary`。`failed` は送信の失敗(再送しない)。 */
   | { readonly kind: "ran"; readonly raceId: string; readonly mode: "notify"; readonly step: "send"; readonly result: "ok" | "failed" }
   /**
    * 結果の取り込みの 1 ステップ(Issue #208。`mode: "result"`)。`raceId` は取り込んだレース。`ok` は D1 に保存した、`retry` は再試行(保留を含む)、`failed` はこの依頼としては諦めた。
@@ -386,7 +391,7 @@ export interface MorningPrior {
 /** 計画の依頼の結果。受理(`accepted: true`)か、すでに依頼済み(`already-planned`。cron の重複配信など)。 */
 export type RequestPlanResult = { readonly accepted: true } | { readonly accepted: false; readonly reason: "already-planned" };
 
-/** 朝のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */
+/** 事前分析のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */
 export interface PlanProgress {
   /** `none`: 依頼の前 / `pending`: 依頼後〜確定の前 / `done`: 確定済み。 */
   readonly stage: "none" | "pending" | "done";
@@ -394,7 +399,7 @@ export interface PlanProgress {
   readonly finalizedAt: number | null;
   /** 計画時点で決めた offset(分)。確定の前は null。 */
   readonly offsetMinutes: number | null;
-  /** `default-fallback` は、設定を読めず既定値で計画したことを表す(朝のまとめに「既定値で計画した」と出すため)。 */
+  /** `default-fallback` は、設定を読めず既定値で計画したことを表す(事前分析のまとめに「既定値で計画した」と出すため)。 */
   readonly offsetSource: "settings" | "default-fallback" | null;
   readonly venues: readonly {
     readonly venue: PlanVenue;
@@ -422,7 +427,7 @@ export interface PlanProgress {
     readonly morning: TaskStatus | null;
   }[];
   /**
-   * 朝の準備がすべて終わったか: 確定済みで、計画の行に対する morning がすべて終端(done・failed)。**一部が failed でも true**。morning を積んでいない行(skipped)は数えない。
+   * 事前分析がすべて終わったか: 確定済みで、計画の行に対する morning がすべて終端(done・failed)。**一部が failed でも true**。morning を積んでいない行(skipped)は数えない。
    * 確定の前は false。
    */
   readonly morningAllTerminal: boolean;
@@ -628,7 +633,7 @@ export class RaceDayCore {
     );
     // 発走前の分析の LLM の応答の記録(Issue #194。新しい表なので ALTER は不要)。
     SqlLlmResponseStore.ensureTable(this.sql);
-    // 朝の計画の表(Issue #203。新しい表だけ。既存の表には ALTER しない)。
+    // 事前分析の計画の表(Issue #203。新しい表だけ。既存の表には ALTER しない)。
     this.plan = new PlanStore(this.sql);
     // 通知の表(Issue #205。新しい表だけ。既存の表には ALTER しない)。
     this.notifyStore = new NotifyStore(this.sql);
@@ -681,7 +686,7 @@ export class RaceDayCore {
   // ---- 公開(RPC)----
 
   /**
-   * レースの朝の準備(`morning`。既定)または発走前の分析(`pre_race`)を予約する。予約だけをして戻る(取得はしない)。
+   * レースの事前分析(`morning`。既定)または発走前の分析(`pre_race`)を予約する。予約だけをして戻る(取得はしない)。
    * @throws 無効な raceId・開催日・mode、DO の開催日と違う日、raceId の年と開催日の年が違う(地方は月日も)、1日の上限、発走前の分析の保存先が無い構成
    */
   async schedule(input: ScheduleInput): Promise<ScheduleResult> {
@@ -749,7 +754,7 @@ export class RaceDayCore {
   }
 
   /**
-   * 朝の計画を依頼する(Issue #203 段階2。cron の `scheduled`〈scheduled.ts。#206〉から呼ぶ入口)。**依頼だけをして戻る**(一覧の取得・確定はアラームの中)。
+   * 事前分析の計画を依頼する(Issue #203 段階2。cron の `scheduled`〈scheduled.ts。#206〉から呼ぶ入口)。**依頼だけをして戻る**(一覧の取得・確定はアラームの中)。
    * 会場2つ(中央・地方)を pending で作り、アラームを張る。**2回目以降(cron の重複配信・scheduled の再試行)は受理せず、状態を変えない**(`already-planned`)。
    * ただし**アラームは状態から張り直す**(Issue #206 G-E2。1回目が行を書いたあと `setAlarm` で失敗した場合に、再配信でアラームが戻る)。
    * @throws 無効な開催日、DO の開催日と違う日、発走前の分析の保存先・設定が無い構成(pre_race を予約できない計画は作らない)
@@ -808,7 +813,7 @@ export class RaceDayCore {
     }
   }
 
-  /** 朝のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */
+  /** 事前分析のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */
   getPlanProgress(): PlanProgress {
     const requestedAt = this.plan.requestedAt();
     const finalizedAt = this.plan.finalizedAt();
@@ -1088,13 +1093,13 @@ export class RaceDayCore {
 
   /**
    * 次のステップを1つだけ実行する(1レースの取得 or 計算)。続きの仕事があれば、アラームを設定してから戻る。
-   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (1.5)**通知**(時刻が来ていれば1件。Issue #205)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)→ (3)**結果の取り込み**(タスクが無く、計画の段階が終わっているときだけ、時刻が来ている 1 レース。期限を待つ planned の行があっても動く。Issue #208・#209)。
+   * 順序: (0)期限が来た計画の行を昇格(確定済みの日だけ。手動の分析との重複の確認で D1 に出ることがある)→ (1)計画の段階(次の試行の時刻が来た会場・確定)→ (1.4)救済の後の失敗の判定(`judgeRescue`。Issue #249)→ (1.5)**通知**(時刻が来ていれば1件。Issue #205)→ (2)タスク({@link pickNext}。取得済みで計算待ち、なければ取得待ち。発走前が朝より先)→ (3)**結果の取り込み**(タスクが無く、計画の段階が終わっているときだけ、時刻が来ている 1 レース。期限を待つ planned の行があっても動く。Issue #208・#209)。
    * 仕事が無ければ {@link wakeWithoutWork}。
    */
   async runNextStep(): Promise<StepOutcome> {
     // 期限が来た計画の行を昇格する(同期。pre_race を積む)。続けて、同じ起床の中で、積んだ pre_race を処理できる。
     await this.promoteDuePlans();
-    // 朝の計画の段階(会場の一覧の取得・確定)。次の試行の時刻が来ているものだけ(再試行の待ちは、時刻で守る)。
+    // 事前分析の計画の段階(会場の一覧の取得・確定)。次の試行の時刻が来ているものだけ(再試行の待ちは、時刻で守る)。
     const venue = this.plan.nextListVenue(this.now());
     if (venue !== null) {
       const outcome = await this.runPlanList(venue);
@@ -1312,7 +1317,7 @@ export class RaceDayCore {
     this.notifyStore.putReady(`race:${task.race_id}`, JSON.stringify(embed), analysisId, this.now());
   }
 
-  // ---- 朝の計画(Issue #203 段階2)----
+  // ---- 事前分析の計画(Issue #203 段階2)----
 
   /**
    * 期限が来た計画の行(planned で `due_ms ≤ now`)を昇格する。**確定済みの日だけ**(Issue #204 G-C3: 確定の途中で落ちた状態で先に昇格すると、その行には morning が積まれず、
@@ -1370,7 +1375,7 @@ export class RaceDayCore {
       const current = resolveClipVariant(settings.clipVariant).promptVersion;
       return candidates.some((a) => a.promptVersion === current);
     } catch (error) {
-      this.onWarn(`朝の計画: ${row.race_id} の手動の分析の確認に失敗したため、重複なしとして続けます(${redactSecrets(errorMessage(error))})`);
+      this.onWarn(`事前分析の計画: ${row.race_id} の手動の分析の確認に失敗したため、重複なしとして続けます(${redactSecrets(errorMessage(error))})`);
       return false;
     }
   }
@@ -1436,7 +1441,7 @@ export class RaceDayCore {
       }
       result = await this.getRaceList(kaisaiDate, venue);
     } catch (error) {
-      this.onWarn(`朝の計画: ${venue} の一覧の取得で想定外の失敗(${errorMessage(error)})`);
+      this.onWarn(`事前分析の計画: ${venue} の一覧の取得で想定外の失敗(${errorMessage(error)})`);
       result = { ok: false, reason: "failed" };
     }
     const now = this.now();
@@ -1447,7 +1452,7 @@ export class RaceDayCore {
     }
     if (result.reason === "blocked" || attempts >= MAX_ATTEMPTS) {
       this.plan.markListFailed(venue, result.reason, now);
-      this.onWarn(`朝の計画: ${venue} の一覧を取得できませんでした(試行 ${attempts} 回。理由: ${result.reason})`);
+      this.onWarn(`事前分析の計画: ${venue} の一覧を取得できませんでした(試行 ${attempts} 回。理由: ${result.reason})`);
       this.afterPlanVenueSettled(now);
       return { kind: "ran", raceId: venue, mode: "plan", step: "list", result: "failed" };
     }
@@ -1481,11 +1486,11 @@ export class RaceDayCore {
       } catch (error) {
         if (attempts < MAX_ATTEMPTS) {
           this.plan.setFinalizeNextTryAt(this.now() + RETRY_DELAY_MS);
-          this.onWarn(`朝の計画: 設定を読めませんでした(試行 ${attempts} 回。再試行します): ${errorMessage(error)}`);
+          this.onWarn(`事前分析の計画: 設定を読めませんでした(試行 ${attempts} 回。再試行します): ${errorMessage(error)}`);
           return { kind: "ran", raceId: "plan", mode: "plan", step: "finalize", result: "retry" };
         }
         this.plan.decideOffset(DEFAULT_PRE_RACE_OFFSET_MINUTES, "default-fallback");
-        this.onWarn(`朝の計画: 設定を読めなかったため、既定の ${DEFAULT_PRE_RACE_OFFSET_MINUTES} 分で計画しました(試行 ${attempts} 回): ${errorMessage(error)}`);
+        this.onWarn(`事前分析の計画: 設定を読めなかったため、既定の ${DEFAULT_PRE_RACE_OFFSET_MINUTES} 分で計画しました(試行 ${attempts} 回): ${errorMessage(error)}`);
       }
     }
     // ここから await なし(同期の区間)。
@@ -1525,7 +1530,7 @@ export class RaceDayCore {
 
   /**
    * 当日中の結果の取り込みの行を積む(Issue #209。{@link runPlanFinalize} の同期区間から呼ぶ)。発走時刻のある計画の行ごとに(skip の行も含む: 前のレースの傾向の材料になる)、
-   * 発走 + {@link SAME_DAY_RESULT_DELAY_MS} を最初の試行とする `queued` の行を積む。`requested_on` は**開催日**(確定が日付をまたいで遅れても、翌朝の依頼が「同じ日の依頼」と読まない)。
+   * 発走 + {@link SAME_DAY_RESULT_DELAY_MS} を最初の試行とする `queued` の行を積む。`requested_on` は**開催日**(確定が日付をまたいで遅れても、後日の cron の依頼が「同じ日の依頼」と読まない)。
    * 積まない: 結果ストアが無い構成 / 期限を待つ planned の行が 1 つも無い日(当日傾向を使う分析が起きない。全レースが発走済みの日の無駄な取得を避ける)/ 既に行があるレース(確定の再実行で作り直さない)。
    * 上限 {@link MAX_SAME_DAY_RESULT_ROWS}(発走の早い順に取り、超えたぶんは積まない。確定は落とさない)。スキーマは変えない。
    */
@@ -1760,7 +1765,7 @@ export class RaceDayCore {
     const outcomeOf_ = (result: "ok" | "retry" | "failed"): StepOutcome => ({ kind: "ran", raceId, mode: "result", step: "import", result });
     const attempts = row.attempts + 1;
     this.results.markAttempt(raceId, attempts, this.now());
-    // 当日の行(Issue #209): 計画の確定で積んだ行 = 依頼の日が開催日。全頭の着順がそろった確認と、5 分おき・10 回の再試行が加わる。過去日の行(翌朝の依頼)は従来どおり。
+    // 当日の行(Issue #209): 計画の確定で積んだ行 = 依頼の日が開催日。全頭の着順がそろった確認と、5 分おき・10 回の再試行が加わる。過去日の行(後日の cron の依頼)は従来どおり。
     const sameDay = row.requested_on === this.metaGet("kaisai_date");
     const progress: { stage: "fetch" | "parse" | "save"; noPayout: boolean; incomplete: "short" | "unknown-size" | null } = { stage: "fetch", noPayout: false, incomplete: null };
     let imported = false;

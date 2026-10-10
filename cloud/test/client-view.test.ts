@@ -68,18 +68,18 @@ const row = (mode: "morning" | "pre_race", status: "queued" | "fetched" | "done"
   ({ raceId: RACE_ID, mode, status, attempts: 0, error: null, queuedAt: 1, updatedAt: 2, prior: false, analysisId: null, ...over }) as const;
 
 describe("レース画面の VNode", () => {
-  it("見出し・戻るリンク・2 枚のカード(朝の準備・発走前)・過去の分析。ボタンは「更新」と、各カードの起動のボタン(Issue #186。旧版は「更新」だけ)", () => {
+  it("見出し・戻るリンク・2 枚のカード(事前分析・発走前)・過去の分析。ボタンは「更新」と、各カードの起動のボタン(Issue #186。旧版は「更新」だけ)", () => {
     const tree = renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows: [row("morning", "done", { prior: true })], prior: null } })), noopActions);
     expect(textOf(tree)).toContain(`レース ${RACE_ID}`);
     expect(hrefs(tree)).toContain("#date=20260628&venue=central");
     const cards = byClass(tree, "card");
     expect(cards).toHaveLength(2);
-    expect(textOf(cards[0]!)).toContain("朝の準備");
+    expect(textOf(cards[0]!)).toContain("事前分析");
     expect(textOf(cards[0]!)).toContain("完了");
     expect(textOf(cards[1]!)).toContain("発走前");
     expect(textOf(cards[1]!)).toContain("未実行");
     const buttons = findAll(tree, (n) => n.tag === "button");
-    expect(buttons.map(textOf)).toEqual(["更新", "朝の準備をやり直す", "発走前の分析を実行"]);
+    expect(buttons.map(textOf)).toEqual(["更新", "事前分析をやり直す", "発走前の分析を実行"]);
     expect(textOf(tree)).toContain("過去の分析");
     expect(textOf(tree)).toContain("過去の分析はありません");
   });
@@ -165,7 +165,7 @@ describe("起動のボタン・注記の VNode(Issue #186)", () => {
     const buttons = runButtons(tree);
     expect(buttons).toHaveLength(2);
     expect(buttons.every((b) => b.tag === "button")).toBe(true);
-    expect(buttons.map(textOf)).toEqual(["朝の準備を実行", "待ち"]);
+    expect(buttons.map(textOf)).toEqual(["事前分析を実行", "待ち"]);
     expect(buttons.map((b) => b.attrs?.["disabled"])).toEqual([false, true]);
     expect(buttons.map((b) => [b.attrs?.["data-date"], b.attrs?.["data-race"], b.attrs?.["data-mode"]])).toEqual([
       ["20260628", RACE_ID, "morning"],
@@ -807,10 +807,10 @@ describe("カードの説明の VNode(Issue #191)", () => {
     });
   }
 
-  it("画面に出る説明の取り違えを検出する: 見出し「朝の準備」のカードの説明は戦績に、「発走前」のカードの説明は LLM に触れる(逆に引くと赤)", () => {
+  it("画面に出る説明の取り違えを検出する: 見出し「事前分析」のカードの説明は戦績に、「発走前」のカードの説明は LLM に触れる(逆に引くと赤)", () => {
     const tree = renderScreen(buildRaceModel(raceInput()), noopActions);
     const byTitle = (title: string): VNode => sections(tree).find((c) => (c.children ?? []).some((k) => typeof k !== "string" && k.tag === "h2" && textOf(k) === title))!;
-    const morning = textOf(byClass(byTitle("朝の準備"), "card-desc")[0]!);
+    const morning = textOf(byClass(byTitle("事前分析"), "card-desc")[0]!);
     const preRace = textOf(byClass(byTitle("発走前"), "card-desc")[0]!);
     expect(morning).toContain("戦績");
     expect(morning).not.toContain("LLM");

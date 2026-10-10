@@ -12,10 +12,10 @@ import { fixtureForUrl } from "./pipeline-fixtures";
 import { openNodeSql, type NodeSql } from "./node-sql";
 
 /**
- * Issue #218: スコアリングの重み(13項目)が、朝の準備(prior)と発走前の分析の両方で使われる。
+ * Issue #218: スコアリングの重み(13項目)が、事前分析(prior)と発走前の分析の両方で使われる。
  * AC: w1 発走前の分析が保存済みの重みを使う / w2 朝の prior も同じ重みを使い、同じ設定なら発走前の prior と一致する / w3 各タスクは取得時の設定のスナップショットで計算する(取得後に設定を保存しても、
  * そのタスクの重みは変わらない。朝・発走前とも) / w4 朝の取得で設定を読めなければ再試行し、尽きたら failed(既定値の重みで prior を作らない) / w5 loadSettings が無い構成は既定値で続ける /
- * w6 スナップショットが無い・重みの項目が無い旧いタスクは既定値の重み(今までと同じ結果) / w7 本番の DO は loadSettings を渡す(朝の準備が既定値に黙って落ちない) / w8 極端に大きい重みでもクラッシュ・NaN にならない。
+ * w6 スナップショットが無い・重みの項目が無い旧いタスクは既定値の重み(今までと同じ結果) / w7 本番の DO は loadSettings を渡す(事前分析が既定値に黙って落ちない) / w8 極端に大きい重みでもクラッシュ・NaN にならない。
  * ゲート・保存先は偽。ストレージは `node:sqlite`。
  */
 
@@ -162,7 +162,7 @@ const HEAVY: CloudSettings = { ...DEFAULT_CLOUD_SETTINGS, baseScoreWeightRecentF
 
 const priorsOf = (record: AnalysisRecord): number[] => [...record.horses].sort((a, b) => a.umaban - b.umaban).map((h) => h.prior);
 
-/** 朝の準備(取得 → 計算)を2ステップ回し、朝の prior を返す。 */
+/** 事前分析(取得 → 計算)を2ステップ回し、朝の prior を返す。 */
 async function morningPriors(h: Harness): Promise<number[]> {
   await h.core.schedule({ raceId: RACE, kaisaiDate: DATE });
   expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "fetch", result: "ok" });
@@ -301,7 +301,7 @@ describe("w3: 取得時の設定のスナップショットで計算する(取�
     expect([...h.core.getMorningPrior(RACE)!.result.rows].sort((a, b) => a.umaban - b.umaban).map((r) => r.prior)).toEqual(expected);
   });
 
-  it("再予約(朝の準備をもう一度積む)すると、スナップショットは作り直す: 2回目は新しい設定(HEAVY)の重みで prior を作る", async () => {
+  it("再予約(事前分析をもう一度積む)すると、スナップショットは作り直す: 2回目は新しい設定(HEAVY)の重みで prior を作る", async () => {
     const h = harness();
     h.settings = DEFAULT_CLOUD_SETTINGS;
     const first = await morningPriors(h);
@@ -357,7 +357,7 @@ describe("w4: 朝の取得で設定を読めなかったとき(既定値の重�
 });
 
 describe("w5・w6: 設定が無い・旧いタスクは既定値の重み(今までと同じ結果)", () => {
-  it("w5: loadSettings が無い構成の朝の準備は、既定値の重みで動く(設定を読まない)", async () => {
+  it("w5: loadSettings が無い構成の事前分析は、既定値の重みで動く(設定を読まない)", async () => {
     const ref = harness();
     ref.settings = DEFAULT_CLOUD_SETTINGS;
     const expected = await morningPriors(ref);
@@ -396,7 +396,7 @@ describe("w5・w6: 設定が無い・旧いタスクは既定値の重み(今ま
   });
 });
 
-describe("w7: 本番の DO は loadSettings を渡す(朝の準備が、設定を読まずに既定値の重みへ黙って落ちない)", () => {
+describe("w7: 本番の DO は loadSettings を渡す(事前分析が、設定を読まずに既定値の重みへ黙って落ちない)", () => {
   it("race-day-do.ts の RaceDayCore の構築に loadSettings(D1 の設定を読む)が含まれ、`loadSettings(env.DB)` を呼ぶ", () => {
     const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/race-day-do.ts"), "utf8");
     const start = source.indexOf("new RaceDayCore({");

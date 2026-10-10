@@ -356,7 +356,7 @@ describe("buildSettingsModel", () => {
 
   it("補助文: 追加指示・クリップ幅は、LLM を使うときに効き、API キーが未登録の間は変更しても結果が変わらないことを書く(キーの有無のどちらでも嘘にならない)。発走何分前は「次の朝 9:00(日本時間)の計画から反映される。すでに計画した日の分は変わらない」(Issue #206。旧: 定時の自動実行を入れるまで効きません)", () => {
     const byKey = Object.fromEntries(buildSettingsModel(READY_INPUT()).fields.map((f) => [f.key, f.help ?? ""]));
-    expect(byKey["preRaceOffsetMinutes"]).toContain("変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。");
+    expect(byKey["preRaceOffsetMinutes"]).toContain("変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。");
     for (const key of ["additionalInstruction", "clipVariant"]) {
       expect(byKey[key], key).toContain("LLM を使うときに効きます");
       expect(byKey[key], key).toContain("API キーが未登録の間は LLM を使わない");
@@ -588,11 +588,11 @@ describe("Issue #218: スコアリングの重みの節(buildSettingsModel の w
     expect(allFields(saving).every((f) => f.disabled)).toBe(true);
   });
 
-  it("節の見出しと説明: 朝の準備と発走前の分析の両方で使われること・すでに始まったタスクは始めたときの設定のままであること・過剰補正に注意・「既定値に戻す」ボタン(保存中は無効)", () => {
+  it("節の見出しと説明: 事前分析と発走前の分析の両方で使われること・すでに始まったタスクは始めたときの設定のままであること・過剰補正に注意・「既定値に戻す」ボタン(保存中は無効)", () => {
     const w = weights();
     expect(w.heading).toBe("スコアリングの重み");
     const text = w.help.join("\n");
-    expect(text).toContain("朝の準備と発走前の分析の両方で使われ");
+    expect(text).toContain("事前分析と発走前の分析の両方で使われ");
     expect(text).toContain("すでに始まったタスクは始めたときの設定のまま");
     expect(text).toContain("過剰");
     expect(text).toContain("0 以上");

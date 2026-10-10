@@ -8,7 +8,7 @@ import { REPORT_CATCHUP_DAYS, runScheduled, SCHEDULED_FAILURE_MESSAGE, type Sche
 
 /**
  * Issue #235: cron の `scheduled` の、日報の取り残しの補完。前日以前の最大 REPORT_CATCHUP_DAYS 日で、分析があるのに日報が無い日を、日報の DO に `catchup` で依頼する。
- * **今日は依頼しない**(今日は日単位の DO が「静かになった」ときに依頼する。cron の時刻・曜日には依存しない)。補完の失敗は朝の計画・結果の取り込みを止めない。
+ * **今日は依頼しない**(今日は日単位の DO が「静かになった」ときに依頼する。cron の時刻・曜日には依存しない)。補完の失敗は事前分析の計画・結果の取り込みを止めない。
  */
 
 const JST_2300 = Date.parse("2026-10-10T14:00:00Z"); // JST 2026-10-10 23:00(再実行。日報の補完はこの実行だけ。Issue #249)
@@ -131,7 +131,7 @@ describe("日報の取り残しの補完(cron)", () => {
     expect(h.requests).toEqual([]);
   });
 
-  it("D1 の列挙が失敗しても、朝の計画を失敗させない(分類だけをログに出し、例外の文面は出さない)", async () => {
+  it("D1 の列挙が失敗しても、事前分析の計画を失敗させない(分類だけをログに出し、例外の文面は出さない)", async () => {
     const h = harness();
     h.dbFails = true;
     await expect(runScheduled({ scheduledTime: JST_2300 }, h.env(), deps(h))).resolves.toBeUndefined();
@@ -139,7 +139,7 @@ describe("日報の取り残しの補完(cron)", () => {
     expect(h.logs.join("\n")).not.toContain("SECRET-D1");
   });
 
-  it("1 日の依頼が失敗しても、残りの日の依頼を続け、朝の計画を失敗させない", async () => {
+  it("1 日の依頼が失敗しても、残りの日の依頼を続け、事前分析の計画を失敗させない", async () => {
     const h = harness();
     h.dates = ["20261007", "20261008", "20261009"];
     h.requestImpl = async (d) => {
@@ -152,7 +152,7 @@ describe("日報の取り残しの補完(cron)", () => {
     expect(h.logs.join("\n")).not.toContain("SECRET-DO");
   });
 
-  it("朝の計画の依頼が失敗して例外になる日でも、日報の補完は走る(補完は計画の成否によらない)", async () => {
+  it("事前分析の計画の依頼が失敗して例外になる日でも、日報の補完は走る(補完は計画の成否によらない)", async () => {
     const h = harness();
     h.dates = ["20261009"];
     h.planFails = true;

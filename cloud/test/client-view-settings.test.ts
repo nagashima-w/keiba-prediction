@@ -162,7 +162,7 @@ describe("設定画面の VNode", () => {
     const failed = tree({ save: { kind: "error", message: "保存できませんでした(固定)" } });
     expect(findAll(failed, (n) => n.attrs?.["role"] === "alert").map(textOf)).toEqual(["保存できませんでした(固定)"]);
     expect(textOf(tree({ load: { kind: "ready", source: "default" } }))).toContain("まだ保存されていません");
-    expect(textOf(tree())).toContain("変更は、次の朝 9:00(日本時間)の計画から反映されます。すでに計画した日の分は変わりません。");
+    expect(textOf(tree())).toContain("変更は、毎晩 21:00(日本時間)に行う翌日分の事前分析の計画から反映されます。その時刻より前に保存した変更は、翌日の分から効きます。すでに計画した日の分は変わりません。");
     expect(textOf(tree())).not.toContain("効きません");
   });
 
@@ -197,7 +197,7 @@ describe("Issue #218: スコアリングの重みの節(VNode)", () => {
     expect(inputs(s).map((n) => n.attrs?.["data-field"])).toEqual([...WEIGHT_FIELD_ORDER]);
     const groups = byClass(s, "weights-group");
     expect(groups.map((g) => inputs(g).length)).toEqual([7, 6]);
-    expect(byClass(s, "weights-help").map(textOf).join("\n")).toContain("朝の準備と発走前の分析の両方で使われ");
+    expect(byClass(s, "weights-help").map(textOf).join("\n")).toContain("事前分析と発走前の分析の両方で使われ");
   });
 
   it("重みの入力欄は type=text・inputmode=decimal・値は下書きの文字・ラベルは exe と同じ日本語。ラベルが入力欄を包む(通常の項目と同じ部品)", () => {

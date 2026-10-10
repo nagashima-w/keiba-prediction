@@ -16,7 +16,7 @@ import { openNodeSql, type NodeSql } from "./node-sql";
 import type { SqlLike } from "../src/sql-like";
 
 /**
- * Issue #203 段階2(B2。親 #166): 日単位の DO の朝の計画。`requestPlan` → 計画の段階(中央・地方の一覧 → 確定)→ 計画の表(期限)と morning の投入 → 期限が来たら pre_race の投入。
+ * Issue #203 段階2(B2。親 #166): 日単位の DO の事前分析の計画。`requestPlan` → 計画の段階(中央・地方の一覧 → 確定)→ 計画の表(期限)と morning の投入 → 期限が来たら pre_race の投入。
  * ゲートは偽(一覧は HTML を返し、それ以外は拒否か既存のフィクスチャ)、ストレージは `node:sqlite`(本物の SQLite)。実 netkeiba には触れない。
  * 混在日のフィクスチャ: 中央 20260927(実測)+ 地方は**合成**(`synthetic_nar_race_list_sub_20260927_jpn3.html`。実測の地方一覧に Jpn3 を1件足したもの)。
  */
@@ -337,7 +337,7 @@ describe("requestPlan(計画の依頼。cron から呼ぶ入口)", () => {
     expect([await tick(h), await tick(h), await tick(h)]).toEqual(["central:plan:list:ok", "nar:plan:list:ok", "plan:plan:finalize:ok"]);
   });
 
-  it("冪等: 計画が確定し、朝の準備が済んだあとの重複配信でも、done の morning を作り直さず、計画の行・タスクも増えない", async () => {
+  it("冪等: 計画が確定し、事前分析が済んだあとの重複配信でも、done の morning を作り直さず、計画の行・タスクも増えない", async () => {
     const h = harness();
     await planThrough(h);
     h.sql.exec("UPDATE race_day_tasks SET status = 'done' WHERE mode = 'morning'");
@@ -701,7 +701,7 @@ describe("計画の段階: planPreRaceDue の結果が行に写る(期限・す�
     expect(planRows(g)[0]).toMatchObject({ disposition: "skip", skip_reason: "too-late" });
   });
 
-  it("skip の行も、一覧の情報(会場名・R・レース名・グレード・発走時刻)を持つ(朝のまとめ用)", async () => {
+  it("skip の行も、一覧の情報(会場名・R・レース名・グレード・発走時刻)を持つ(事前分析のまとめ用)", async () => {
     const h = harness(listHtml([central(7, null, { name: "テスト特別" })]), listHtml([nar(10, "20:00", "Jpn2", { name: "テスト記念" })]));
     await planThrough(h);
     const rows = h.sql.exec("SELECT race_id, venue_name, race_number, race_name, grade, start_time FROM race_day_plan ORDER BY race_id").toArray();
@@ -929,7 +929,7 @@ describe("期限が来たら pre_race を投入する(planned → promoted)と�
   });
 });
 
-describe("getPlanProgress(朝のまとめ #205 のための読み取り)", () => {
+describe("getPlanProgress(事前分析のまとめ #205 のための読み取り)", () => {
   it("依頼の前: stage none。依頼後〜確定の前: pending(会場の状態を持つ)。確定後: done", async () => {
     const h = harness();
     expect(h.core.getPlanProgress()).toMatchObject({ stage: "none", venues: [], rows: [], morningAllTerminal: false, requestedAt: null, finalizedAt: null });
@@ -978,7 +978,7 @@ describe("getPlanProgress(朝のまとめ #205 のための読み取り)", () =>
   });
 });
 
-describe("朝の準備と発走前: 掃除の扱い(今の掃除は、キャッシュの行と孤立した LLM の応答の記録だけを消す。タスク・prior・計画は消さない)", () => {
+describe("事前分析と発走前: 掃除の扱い(今の掃除は、キャッシュの行と孤立した LLM の応答の記録だけを消す。タスク・prior・計画は消さない)", () => {
   it("掃除のアラームが鳴ると、キャッシュの行は消えるが、計画の行・会場の状態・タスク・meta の計画のキーは残る(タスクの扱いと同じ)", async () => {
     const h = harness(listHtml([central(1, "10:00")]), EMPTY_HTML);
     await planThrough(h);

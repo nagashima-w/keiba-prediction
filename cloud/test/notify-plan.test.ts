@@ -60,7 +60,7 @@ const input = (over: Partial<PlanNotificationsInput> = {}): PlanNotificationsInp
   enabled: true,
   nowMs: NOW,
   auto: { stage: "done", finalizedAt: FIN, results: [] },
-  // 既定は「対象 0 件で、取得に失敗した会場も無い日」(朝のまとめの資格が無い)。まとめを見るテストは、自分で progress を渡す。
+  // 既定は「対象 0 件で、取得に失敗した会場も無い日」(事前分析のまとめの資格が無い)。まとめを見るテストは、自分で progress を渡す。
   progress: progress({ rows: [] }),
   rows: new Map(),
   paceUntilMs: 0,
@@ -91,7 +91,7 @@ describe("notifyKindFor(結果 → 送る通知の種類。G-D3 の表)", () => 
   });
 });
 
-describe("summaryEligibility(AC-D3・G-D5: 朝のまとめを送る時点)", () => {
+describe("summaryEligibility(AC-D3・G-D5: 事前分析のまとめを送る時点)", () => {
   const FIN_AT = 5_000_000;
   const base = (over: Partial<PlanProgress> = {}): PlanProgress => progress({ finalizedAt: FIN_AT, ...over });
 
@@ -179,14 +179,14 @@ describe("planNotifications(いま送るもの・次に起きる時刻)", () => 
     expect(second.sendNow?.key).toBe("race:b");
   });
 
-  it("レースごとの通知が先、朝のまとめは後(両方送れるとき)", () => {
+  it("レースごとの通知が先、事前分析のまとめは後(両方送れるとき)", () => {
     const plan = planNotifications(input({ auto: withResults(result("a", { kind: "failed", reason: "started", message: null })), progress: progress({ morningAllTerminal: true }) }));
     expect(plan.sendNow?.key).toBe("race:a");
     const after = planNotifications(input({ auto: withResults(result("a", { kind: "failed", reason: "started", message: null })), progress: progress({ morningAllTerminal: true }), rows: new Map([row("race:a", "failed", "sent")]) }));
     expect(after.sendNow).toEqual({ key: "summary", kind: "summary" });
   });
 
-  it("朝のまとめは1日に1回: summary の行があれば(sending・sent・failed のどれでも)送らず、保険の時刻も出さない", () => {
+  it("事前分析のまとめは1日に1回: summary の行があれば(sending・sent・failed のどれでも)送らず、保険の時刻も出さない", () => {
     for (const state of ["sending", "sent", "failed"] as const) {
       const plan = planNotifications(input({ progress: progress({ morningAllTerminal: true }), rows: new Map([row("summary", "summary", state)]) }));
       expect(plan, state).toEqual({ sendNow: null, nextAtMs: null });

@@ -20,7 +20,7 @@ preview_urls = false
 enabled = true
 
 # Issue #206(#166-E)・#249: 定時の自動実行の cron。**これを有効にすると、本番で毎晩 JST 21:00 と 23:00(UTC 12:00 と 14:00)に自動で次のことが起きる**(朝 9 時の定時実行は無い):
-#   - 21:00 JST: scheduled(src/scheduled.ts)→ **翌日**の日単位の DO の requestPlan → 中央・地方の一覧の取得(netkeiba)→ 計画 → 事前分析(旧「朝の準備」。出馬表・戦績・調教の取得と統計の順位)→ Discord にまとめ。
+#   - 21:00 JST: scheduled(src/scheduled.ts)→ **翌日**の日単位の DO の requestPlan → 中央・地方の一覧の取得(netkeiba)→ 計画 → 事前分析(旧「事前分析」。出馬表・戦績・調教の取得と統計の順位)→ Discord にまとめ。
 #   - 23:00 JST: 翌日の requestPlan を rescue つきで再実行(21 時に失敗した一覧・事前分析を 1 回だけ救済し、それでも失敗が残れば翌日の DO が Discord で通知する)+ 結果の取り込み(過去 7 日)+ 結果の補完の起動 + 日報の補完。
 #     さらに 23 時の依頼自体が 3 回とも失敗したときは、scheduled.ts が Discord に固定文を 1 通送る(利用者の決定)。
 #   発走前の分析(Claude API。ANTHROPIC_API_KEY が登録済みのとき)は、翌日の各レースの発走の N 分前に、日単位の DO のアラームが行う。
@@ -39,7 +39,7 @@ crons = ["0 12 * * *", "0 14 * * *"]
 name = "NETKEIBA_GATE"
 class_name = "NetkeibaGate"
 
-# 日単位の Durable Object(Issue #177〈#164-b〉)。`idFromName(kaisaiDate)` で、その日の全レースの朝の準備(取得 → prior)を直列に処理し、
+# 日単位の Durable Object(Issue #177〈#164-b〉)。`idFromName(kaisaiDate)` で、その日の全レースの事前分析(取得 → prior)を直列に処理し、
 # 取得キャッシュ・朝の prior・状態を自分の SQLite に置く。クラス名は migration に固定される。呼び出す入口は #180(本番)・smoke(ローカル)。
 [[durable_objects.bindings]]
 name = "RACE_DAY"
@@ -65,7 +65,7 @@ name = "VERIFY_REPORT"
 class_name = "VerifyReportDO"
 
 # 日報の Durable Object(Issue #235)。`idFromName("main")` の単一インスタンスが、その日の発走前の分析と結果から日報(統計 + LLM の振り返り)を作り、D1(daily_reports)に保存して、Discord に要約を送る。
-# 起動は 3 経路: 日単位の DO が「その日が静かになった」とき(時刻・曜日の決め打ちなし)・朝の cron の取り残しの補完(前日以前の最大 3 日)・手動(POST /api/reports/run)。
+# 起動は 3 経路: 日単位の DO が「その日が静かになった」とき(時刻・曜日の決め打ちなし)・23 時の cron の取り残しの補完(前日以前の最大 3 日)・手動(POST /api/reports/run)。
 # LLM を呼ぶのは 1 日 1 回(ANTHROPIC_API_KEY が登録済みのとき。未登録なら統計だけの日報)。netkeiba には出ない。クラス名は migration に固定される。
 [[durable_objects.bindings]]
 name = "DAILY_REPORT"

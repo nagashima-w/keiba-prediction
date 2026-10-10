@@ -1,7 +1,7 @@
 /**
  * レース画面の表示用データ(Issue #185。純関数)。`view.ts` がこれを VNode にする。
  *
- * 見出しの下に「朝の準備」「発走前」の 2 枚のカード(状態・失敗時のエラー文・起動のボタン〈Issue #186〉)。朝が完了していれば prior の順位、発走前が完了していれば**最新の分析の結果を最初からカードの中に出す**
+ * 見出しの下に「事前分析」「発走前」の 2 枚のカード(状態・失敗時のエラー文・起動のボタン〈Issue #186〉)。朝が完了していれば prior の順位、発走前が完了していれば**最新の分析の結果を最初からカードの中に出す**
  * (Issue #188。旧「結果を見る」のリンクは廃止。結果の画面〈`#analysis=<id>`〉は過去の分析の一覧のリンク用に残る)。
  * **最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id**(`latestAnalysisIdOf`。取得するかどうか〈`app.ts`〉と表示するかどうかの唯一の判定)。実行中・失敗・未実行のときは出さない(再実行で前の結果を見せない)。
  * その下に過去の分析の一覧(結果の画面へのリンク)。
@@ -94,7 +94,7 @@ export interface TaskCard {
   readonly runInfo: string | null;
   /** 朝のカードだけ: prior の取り直しに失敗した注記。 */
   readonly priorNotice: string | null;
-  readonly title: "朝の準備" | "発走前";
+  readonly title: "事前分析" | "発走前";
   readonly badge: Badge;
   /** 失敗のときだけ、板の `error`(サーバが 200 文字に切った診断。テキストノードで描く)。 */
   readonly error: string | null;
@@ -128,7 +128,7 @@ const ERROR_MAX = 200;
 
 /**
  * カードの説明(Issue #191)。**実際の挙動に合わせた文言**(根拠は #189 の着手前確認 §6。**画面に出す文には、Issue 番号を書かない**):
- *  - 朝の準備: 取得するのは出馬表・オッズ・各馬の戦績・調教(`race-day-core.ts` の `runFetch`。組合せオッズは取らない)。**調教は中央だけ**(`scrape-race.ts` の `if (!isNar)`。地方にはページが無く、取得を試みない)
+ *  - 事前分析: 取得するのは出馬表・オッズ・各馬の戦績・調教(`race-day-core.ts` の `runFetch`。組合せオッズは取らない)。**調教は中央だけ**(`scrape-race.ts` の `if (!isNar)`。地方にはページが無く、取得を試みない)
  *    なので、地方のレースにも出るこのカードでは「調教(調教は中央のみ)」と書く。所要時間は gate の最小間隔(`GATE_MIN_INTERVAL_MS`)× 取得の本数(中央は頭数 N なら N+3 本〈出馬表1・戦績N・調教1・オッズ1。
  *    16頭で19本〉、地方は調教が無いので N+2 本)なので、頭数により1分弱(実測はしていない)。発走前で使い回されるのは戦績・調教
  *    (キャッシュの鮮度は戦績・調教とも 24 時間〈調教は #191 で 6 時間から延ばした〉。出馬表 10 分・オッズは取り直す)。朝の prior は DO にだけ置き、D1・R2 の分析の履歴には残さない。
@@ -172,9 +172,9 @@ export function runButtonLabel(mode: TaskMode, status: TaskStatus | undefined, s
     case "failed":
       return "再試行";
     case "done":
-      return mode === "morning" ? "朝の準備をやり直す" : "再実行(新しい分析として保存されます)";
+      return mode === "morning" ? "事前分析をやり直す" : "再実行(新しい分析として保存されます)";
     case undefined:
-      return mode === "morning" ? "朝の準備を実行" : "発走前の分析を実行";
+      return mode === "morning" ? "事前分析を実行" : "発走前の分析を実行";
   }
 }
 
@@ -218,7 +218,7 @@ function card(
     runError: run?.kind === "error" ? run.message : null,
     runInfo: run?.kind === "already" && isRunning(found?.status) ? "すでに実行中です。状態を追跡します。" : null,
     priorNotice: mode === "morning" ? priorNotice : null,
-    title: mode === "morning" ? "朝の準備" : "発走前",
+    title: mode === "morning" ? "事前分析" : "発走前",
     badge: badgeOf(found),
     error: failedError,
     result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly) : null,

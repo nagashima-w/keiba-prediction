@@ -253,7 +253,7 @@ describe("二重押し(A3)", () => {
     const gate = deferred<Resp>();
     const h = await started(RACE_HASH, (x) => x.responders.set("POST /api/analyses/run", () => gate.promise));
     const button = runButton(h, "morning");
-    expect(textOf(button)).toBe("朝の準備を実行"); // 前提: 押す前は押せる
+    expect(textOf(button)).toBe("事前分析を実行"); // 前提: 押す前は押せる
     expect(button.attrs?.["disabled"]).toBe(false);
     click(button);
     click(button); // 同期で続けて押す(await の前に印が立っていないと 2 回目も POST になる)
@@ -318,10 +318,10 @@ describe("202(A4): 待ちを重ね、追跡を始める", () => {
     expect(h.gets().filter((u) => u === BOARD_URL)).toHaveLength(1);
     click(runButton(h, "morning")); // 朝のやり直しを起動する。この POST は、保留中のポーリングより後
     await h.settle();
-    expect(cardText(h, "朝の準備")).toContain("待ち"); // 前提: 朝の待ちが重なっている(板の行は完了のまま)
+    expect(cardText(h, "事前分析")).toContain("待ち"); // 前提: 朝の待ちが重なっている(板の行は完了のまま)
     gate.resolve(ok({ ok: true, kaisai_date: DATE, races: staleRows }));
     await h.settle();
-    expect(cardText(h, "朝の準備")).toContain("待ち"); // 古い応答(朝は完了)で消えない
+    expect(cardText(h, "事前分析")).toContain("待ち"); // 古い応答(朝は完了)で消えない
     expect(textOf(runButton(h, "morning"))).toBe("待ち");
     expect(cardText(h, "発走前")).toContain("待ち"); // 板の行(pre_race の queued)は反映される
   });
@@ -333,8 +333,8 @@ describe("409(A5・A6)", () => {
     click(runButton(h, "morning"));
     await h.settle();
     expect(byClass(h.tree(), "card").flatMap((c) => findAll(c, (n) => n.attrs?.["role"] === "alert"))).toHaveLength(0); // 失敗の表示(alert)が出ない
-    expect(cardText(h, "朝の準備")).toContain("すでに実行中");
-    expect(cardText(h, "朝の準備")).toContain("取得済み");
+    expect(cardText(h, "事前分析")).toContain("すでに実行中");
+    expect(cardText(h, "事前分析")).toContain("取得済み");
     expect(textOf(runButton(h, "morning"))).toBe("取得済み");
     expect(h.timers.pending()).toBe(1);
     const gets = h.gets().length;
@@ -350,7 +350,7 @@ describe("409(A5・A6)", () => {
       const alerts = byClass(h.tree(), "card").flatMap((c) => findAll(c, (n) => n.attrs?.["role"] === "alert")).map(textOf);
       expect(alerts).toHaveLength(1);
       expect(alerts[0]).toContain("HTTP 409");
-      expect(cardText(h, "朝の準備")).not.toContain("すでに実行中");
+      expect(cardText(h, "事前分析")).not.toContain("すでに実行中");
       expect(h.timers.pending()).toBe(0);
     }
   });
@@ -377,7 +377,7 @@ describe("失敗の表示(A7・A9)", () => {
       expect(textOf(alerts[0]!)).toContain(expected);
       expect(h.text()).not.toContain("サーバの文面");
       expect(h.text()).not.toContain("秘密");
-      expect(cardText(h, "朝の準備")).not.toContain(expected); // もう一方のカードには出ない
+      expect(cardText(h, "事前分析")).not.toContain(expected); // もう一方のカードには出ない
       expect(runButton(h, "pre_race").attrs?.["disabled"]).toBe(false); // 再試行できる
       expect(textOf(runButton(h, "pre_race"))).toBe("発走前の分析を実行");
       expect(h.timers.pending()).toBe(0);
@@ -421,8 +421,8 @@ describe("失敗の表示(A7・A9)", () => {
     await h.settle();
     const rows = byClass(h.tree(), "race");
     expect(rows).toHaveLength(2); // 前提: 場が 1 つ(福島)なので開いている
-    expect(textOf(rows[0]!)).toContain("朝: 待ち");
-    expect(textOf(rows[1]!)).toContain("朝: 未実行");
+    expect(textOf(rows[0]!)).toContain("事前: 待ち");
+    expect(textOf(rows[1]!)).toContain("事前: 未実行");
   });
 });
 
@@ -479,7 +479,7 @@ describe("追跡(B1〜B3・B8・B10・B13)", () => {
     h.rows = [jrow(RACE_ID, "morning", "failed", { error: "x" })];
     await h.timers.advance(3000);
     expect(heading()).toBe("▾ 福島・失敗 1");
-    expect(textOf(byClass(h.tree(), "race")[0]!)).toContain("朝: 失敗");
+    expect(textOf(byClass(h.tree(), "race")[0]!)).toContain("事前: 失敗");
   });
 
   it("全部終わったら追跡をやめる(タイマーも残らない)。そのあと取らない", async () => {
@@ -498,7 +498,7 @@ describe("追跡(B1〜B3・B8・B10・B13)", () => {
     h.responders.set(`GET ${BOARD_URL}`, async () => resp(503, { ok: false, error: { type: "race-day-error" } }));
     await h.timers.advance(3000);
     expect(byClass(h.tree(), "notice").map(textOf).join(" ")).not.toContain("実行状態");
-    expect(textOf(byClass(h.tree(), "race")[0]!)).toContain("朝: 待ち"); // バッジが残っている
+    expect(textOf(byClass(h.tree(), "race")[0]!)).toContain("事前: 待ち"); // バッジが残っている
     // 取得中(保留)でも「更新」は disabled でない
     const gate = deferred<Resp>();
     h.responders.set(`GET ${BOARD_URL}`, () => gate.promise);
@@ -526,7 +526,7 @@ describe("手動の取得とポーリングの関係(B13)", () => {
     expect(byClass(h.tree(), "notice").map(textOf).join(" ")).not.toContain("実行状態");
     manual.resolve(ok({ ok: true, kaisai_date: DATE, races: [jrow(RACE_ID, "morning", "queued")] }));
     await h.settle();
-    expect(textOf(byClass(h.tree(), "race")[0]!)).toContain("朝: 待ち");
+    expect(textOf(byClass(h.tree(), "race")[0]!)).toContain("事前: 待ち");
   });
 });
 
@@ -534,13 +534,13 @@ describe("完了への遷移(B11・B12・D5)", () => {
   it("朝の完了: レース画面にいれば、status?race_id= を 1 回だけ取り直し、prior の順位が出る。ポーリングはそのあと止まる", async () => {
     const h = await started(RACE_HASH, (x) => (x.rows = [jrow(RACE_ID, "morning", "queued")]));
     expect(h.gets().filter((u) => u === STATUS_URL)).toHaveLength(1); // 前提: 開いたとき 1 回
-    expect(cardText(h, "朝の準備")).not.toContain("アルファ");
+    expect(cardText(h, "事前分析")).not.toContain("アルファ");
     h.rows = [jrow(RACE_ID, "morning", "done", { prior: true })];
     h.prior = PRIOR_BODY;
     await h.timers.advance(3000);
     expect(h.gets().filter((u) => u === STATUS_URL)).toHaveLength(2); // 取り直しは 1 回
-    expect(cardText(h, "朝の準備")).toContain("アルファ");
-    expect(cardText(h, "朝の準備")).toContain("52.3%");
+    expect(cardText(h, "事前分析")).toContain("アルファ");
+    expect(cardText(h, "事前分析")).toContain("52.3%");
     await h.timers.advance(60_000);
     expect(h.gets().filter((u) => u === STATUS_URL)).toHaveLength(2);
     expect(h.gets().filter((u) => u === PAST_URL)).toHaveLength(1); // 朝の完了では過去の分析を取り直さない
@@ -575,7 +575,7 @@ describe("完了への遷移(B11・B12・D5)", () => {
     h.go(RACE_HASH);
     await h.settle();
     expect(h.gets().filter((u) => u === STATUS_URL)).toHaveLength(2); // 開いたときに取り直した
-    expect(cardText(h, "朝の準備")).toContain("アルファ");
+    expect(cardText(h, "事前分析")).toContain("アルファ");
   });
 
   it("レース画面の「更新」で完了を初めて見たときは、prior の取り直しを重ねない(更新の取得が、prior を一緒に持ってくる)", async () => {
@@ -585,7 +585,7 @@ describe("完了への遷移(B11・B12・D5)", () => {
     click(refreshButton(h));
     await h.settle();
     expect(h.gets().filter((u) => u === STATUS_URL)).toHaveLength(2); // 開いたとき + 更新(完了の取り直しで 3 回目にならない)
-    expect(cardText(h, "朝の準備")).toContain("アルファ");
+    expect(cardText(h, "事前分析")).toContain("アルファ");
   });
 
   it("再実行の完了も 1 回(同じ完了を重ねて数えない)。最初から完了している板を開いても、取り直さない", async () => {
@@ -611,11 +611,11 @@ describe("完了への遷移(B11・B12・D5)", () => {
     h.responders.set(`GET ${STATUS_URL}`, async () => resp(503, { ok: false, error: { type: "race-day-error", message: "サーバの文面" } }));
     await h.timers.advance(3000);
     expect(byClass(h.tree(), "card")).toHaveLength(2);
-    expect(cardText(h, "朝の準備")).toContain("完了");
-    expect(cardText(h, "朝の準備")).toContain("順位");
-    expect(cardText(h, "朝の準備")).toContain("取得できませんでした");
+    expect(cardText(h, "事前分析")).toContain("完了");
+    expect(cardText(h, "事前分析")).toContain("順位");
+    expect(cardText(h, "事前分析")).toContain("取得できませんでした");
     expect(h.text()).not.toContain("サーバの文面");
-    expect(textOf(runButton(h, "morning"))).toBe("朝の準備をやり直す");
+    expect(textOf(runButton(h, "morning"))).toBe("事前分析をやり直す");
   });
 });
 
