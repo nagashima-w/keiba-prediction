@@ -36,8 +36,8 @@ describe("resolveAppBaseUrl(Issue #230 Q7: https のオリジンだけを受け�
     ["data:", "data:text/html,<script>alert(1)</script>"],
     ["ftp:", "ftp://keiba.example.test"],
     ["スキームなし", "keiba.example.test"],
-    ["ユーザー名つき(userinfo)", "https://user@keiba.example.test"],
-    ["ユーザー名・パスワードつき", "https://user:pass@keiba.example.test"],
+    ["ユーザー名つき(userinfo)", "https://user@example.com"],
+    ["ユーザー名・パスワードつき", "https://user:pass@example.com"],
     ["パスつき", "https://keiba.example.test/app"],
     ["パスが // ", "https://keiba.example.test//"],
     ["クエリつき", "https://keiba.example.test?x=1"],
@@ -53,9 +53,9 @@ describe("resolveAppBaseUrl(Issue #230 Q7: https のオリジンだけを受け�
   });
 
   it("invalid の結果に、入力の値(の一部)が含まれない(ログ・応答に値を出す経路を作らない)", () => {
-    const bad = "https://user:SECRET-PASS@keiba.example.test/app";
+    const bad = "https://user:SECRET-PASS@example.com/app";
     expect(JSON.stringify(resolveAppBaseUrl(bad))).not.toContain("SECRET-PASS");
-    expect(JSON.stringify(resolveAppBaseUrl(bad))).not.toContain("keiba.example.test");
+    expect(JSON.stringify(resolveAppBaseUrl(bad))).not.toContain("example.com");
   });
 });
 

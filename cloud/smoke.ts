@@ -179,7 +179,7 @@ async function main(): Promise<void> {
       const check404 = await req(port, "GET", "/check");
       check("B: GET /check は 200 で確認フォーム(旧 / の内容)を返す", check404.status === 200 && check404.text.includes('<form method="get" action="/api/netkeiba/check">'), `${check404.status}`);
       const health = await req(port, "GET", "/api/health");
-      check("B: GET /api/health が 200 で DO の SQLite と D1(migration 適用済みの表・列)が動き、API キー・Webhook は未登録(secrets.anthropic:false・secrets.discord:false。smoke はどちらも持たない)", health.status === 200 && health.text === JSON.stringify({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false } }), `${health.status} ${health.text.slice(0, 120)}`);
+      check("B: GET /api/health が 200 で DO の SQLite と D1(migration 適用済みの表・列)が動き、API キー・Webhook・サイトの URL は未登録(secrets.anthropic:false・secrets.discord:false・secrets.appBaseUrl:false。smoke はどれも持たない)", health.status === 200 && health.text === JSON.stringify({ ok: true, durableObject: { sqlite: true }, d1: { ok: true }, secrets: { anthropic: false, discord: false, appBaseUrl: false } }), `${health.status} ${health.text.slice(0, 160)}`);
       // Issue #175: 読み取り専用の一覧(D1 だけ)。migration 適用済みの空の D1 では、空の配列が返る。
       const analyses = await req(port, "GET", "/api/analyses");
       check("B: GET /api/analyses が 200 で、空の D1 では { ok: true, analyses: [] }", analyses.status === 200 && analyses.text === JSON.stringify({ ok: true, analyses: [] }), `${analyses.status} ${analyses.text.slice(0, 120)}`);

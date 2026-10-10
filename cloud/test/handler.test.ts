@@ -360,7 +360,7 @@ describe("ルート(認証後)", () => {
       expect(text).not.toContain("https");
     });
 
-    it.each([["http://keiba.example.test"], ["keiba.example.test"], ["https://keiba.example.test/app"], ["https://user:pass@keiba.example.test"], ["javascript:alert(1)"], ["https://keiba.example.test/?x=1"]])(
+    it.each([["http://keiba.example.test"], ["keiba.example.test"], ["https://keiba.example.test/app"], ["https://user:pass@example.com"], ["javascript:alert(1)"], ["https://keiba.example.test/?x=1"]])(
       "登録されていても、形式が https のオリジンでない(%j)なら appBaseUrl:false(リンクに使われないものを true にしない)",
       async (value) => {
         const { deps, token } = await setup();
