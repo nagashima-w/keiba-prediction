@@ -5,7 +5,7 @@ Issue #161(#21-C)の土台と、#162(#21-D)段階2の netkeiba 取得の出口(�
 
 ## 構成
 - `src/handler.ts` — リクエスト処理の本体。**すべてのルートの前に認証**を掛ける(`GET /`・`GET /app.js`・`GET /check`・`GET /api/health` ほか)
-- `src/access-jwt.ts` / `src/authenticate.ts` — Access の JWT の検証(署名・iss・aud・exp・許可メール1件)。取得元はヘッダ → クッキー、**JWT がどちらにも無いときだけ** `ctx.access`(JWT が付いていて不正なら `ctx.access` では救わず拒否)
+- `src/access-jwt.ts` / `src/authenticate.ts` — Access の JWT の検証(署名・iss・aud・exp。**Issue #238 以降、検証に通ったアカウントはすべて閲覧者として受け入れ、secret `ADMIN_USER` に載ったアドレスだけが管理者**。役割の判定はここ 1 か所)。取得元はヘッダ → クッキー、**JWT がどちらにも無いときだけ** `ctx.access`(JWT が付いていて不正なら `ctx.access` では救わず拒否)
 - `src/netkeiba-gate-do.ts` — **netkeiba への取得の出口**(SQLite バックエンドの Durable Object。#162 段階2a)。全取得を単一インスタンス(固定名)に通し、DO の中の TCP ソケットで取得する。`cloudflare:sockets` を import するのはここだけ(薄い配線)
 - `src/gate-core.ts` — ゲートの中身(**純ロジック**。Node でテストできる)。取得先の許可リスト(https の race / db / nar.netkeiba.com だけ)・直列化(同時に1本。プロミスの連鎖)・最小間隔 2 秒(最後の開始時刻を `ctx.storage.kv` に永続化)・サーキットブレーカー(400/403/429 が2回連続で30分、すべての取得を接続せずに拒否。手動リセットなし)・待ち行列の上限(8)。**POST(`postRaw`。Issue #181。重賞の過去10年傾向の API だけ)**: 許可リスト(race / nar.netkeiba.com の `/race_api/`・本文の形・Referer と Origin の値まで固定)に合うものだけを通し、順番待ち(直列化・最小間隔・待ち行列の上限)は GET と同じ連鎖に入れる。ブレーカーは別系統で、**POST が拒否(400/403/429)されたら1回で、POST だけを30分止める**(`postBlockedUntil`。GET は止まらず、POST の結果は GET の連続回数を変えない)。GET のブレーカーが開いている間は POST も止まる
 - `src/socket-fetch.ts` / `src/http1.ts` — ソケットで HTTP/1.1 を話す取得クライアント(`connect` を注入。送るヘッダは固定の4つ + `Host` + `Connection: close`(POST は、これに `Content-Type`・`X-Requested-With`・`Referer`・`Origin` と、`Connection: close` の後ろの `Content-Length`)、圧縮は要求しない、再試行・リダイレクト追従なし、サイズ上限 2 MiB・タイムアウト 20 秒)。調査(`spikes/cloudflare/`・`scripts/cloudflare-spike/`)の実装を本番用に作り直したもので、調査のコードは参照しない
@@ -17,7 +17,8 @@ Issue #161(#21-C)の土台と、#162(#21-D)段階2の netkeiba 取得の出口(�
 - `src/undici-stub.ts` — core の `http-client.ts` が動的に import する `undici` の差し替え(バンドルに巨大な undici を入れない)
 - **core(`packages/core`)は相対 import で取り込む**(workspace の外のため `@keiba/core` は解決できない。バレルは使わず `scraper/*.js` を個別に import する)。core の依存(cheerio・iconv-lite・`@anthropic-ai/sdk`〈Issue #193〉)は `packages/core/node_modules` が CI に無いので、**`wrangler.toml` の `[alias]`・`tsconfig.json` の `paths`・`vitest.config.ts` の `alias` の3か所**でこのディレクトリの `node_modules` へ向ける(`scripts/test/cloud-config-guard.test.ts` が3か所の対応を固定)。**core のサブパス(`@keiba/core/pipeline`・`@keiba/core/llm` など)は `[alias]` に1行ずつ**(wrangler の alias は完全一致)。
   ★ローカルには `packages/core/node_modules` があるので、`tsconfig.json` の `paths`(型検査)か `wrangler.toml` の `[alias]`(バンドル。core を Worker から import した時点で効く)を書き忘れても、ローカルでは通り、**CI だけが落ちる**(実測: `packages/core/node_modules` の無い配置で、`paths` を外すと tsc が TS2307、`[alias]` を外すと wrangler の dry-run が `Could not resolve`)。vitest の `alias` は、無くても通ったが(Vite の解決が `cloud/node_modules` へ辿り着く)、解決の挙動に依存しないよう明示している。変更したら、`packages/core/node_modules` を持たない配置(リポジトリから `node_modules`・`.git` を除いたコピー)で `pnpm install --ignore-workspace --frozen-lockfile` から確かめる
-- 認証に失敗したとき、設定が欠けているときは、理由を含まない固定の 403(`forbidden`)を返す(フェイルクローズ)。理由コードと経路名だけをログに出す
+- `src/route-policy.ts` — **ルート × 役割の表**(Issue #238)。閲覧者に開くルートはここに列挙したものだけで、表に無い組み合わせは管理者専用に倒れる(フェイルクローズ)。`handler.ts` が認証の直後に 1 回だけ適用する
+- 認証に失敗したとき、設定が欠けているときは、理由を含まない固定の 403(`forbidden`)を返す(フェイルクローズ)。理由コードと経路名と役割だけをログに出す(メールは出さない)
 
 ## コマンド(cloud/ で)
 ```
@@ -127,12 +128,13 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 |---|---|
 | `ACCESS_TEAM_NAME` | Zero Trust のチーム名(`<チーム名>.cloudflareaccess.com` の左側。小文字・数字・ハイフンのみ) |
 | `ACCESS_AUD` | Access アプリケーションの AUD タグ |
-| `ACCESS_ALLOWED_EMAIL` | 許可するメールアドレス(1件) |
+| `ACCESS_ALLOWED_EMAIL` | **必須**(欠けていれば全拒否)。Issue #238 以降は、サイトに入れる人を決めるものではなく(それは Access のポリシーだけ)、**`ADMIN_USER` が未登録のあいだだけ管理者として扱うアドレス**(1件。移行期間のフォールバック)。`ADMIN_USER` を登録した後は、管理者の判定には使われない(値は残しておく) |
+| `ADMIN_USER` | 管理者のメールアドレス(Issue #238。**カンマ区切りで複数可**。大文字小文字・前後の空白は無視)。**登録は任意**: 未登録・空・空白だけなら `ACCESS_ALLOWED_EMAIL` が管理者(移行期間)。登録したら管理者はこのアドレスだけ。登録の手順は、下の「閲覧者と管理者」 |
 | `ANTHROPIC_API_KEY` | 発走前の分析の LLM の API キー(Issue #194〈#179-b〉)。**登録は任意**: 未登録なら、LLM を使わず統計のみで保存し、理由「LLM の API キーが未登録のため…」を画面用に D1(`analyses.llm_note`)へ残す(分析は止まらない)。登録の手順は、この表の下の「`ANTHROPIC_API_KEY` の登録」 |
 | `DISCORD_WEBHOOK_URL` | 定時の自動実行(#166)の通知(Discord)の Webhook URL(Issue #205〈#166-D〉)。**登録は任意**: 未登録・形式不正なら、通知の仕組み全体が無効(通知の行も材料も積まず、通知のためのアラームも張らない。分析は止まらない)。**Issue #206 で cron が有効になった**ので、登録すれば、次の朝 9:00(日本時間)の自動実行から Discord に通知が届く。登録の手順は、この表の下の「`DISCORD_WEBHOOK_URL` の登録」 |
 | `APP_BASE_URL` | 通知のタイトルのリンク(分析画面)の基点となる、このサイトの URL(Issue #230)。**登録は任意**: 未登録・形式不正なら、通知にリンクが付かないだけ(通知自体は送られる。分析も止まらない)。**https のオリジンだけ**有効(例は `https://<あなたのサイトのホスト名>`。パス・クエリ・`#`・ユーザー名とパスワードを含むものは「形式不正」)。登録の手順は、この表の下の「`APP_BASE_URL` の登録」 |
 
-未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作)。
+未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作。`ADMIN_USER` を除く 3 つのどれかが欠けている場合)。
 
 ### `ANTHROPIC_API_KEY` の登録(発走前の分析の LLM。ユーザーが自分で行う)
 - **キーの値は、チャット・Issue・コミット・リポジトリのどこにも貼らない**(貼らせる手順は無い。下の2つの方法は、どちらもキーをユーザー自身の画面・端末で入力する)。Claude や CI に渡す必要は無い。
@@ -162,9 +164,48 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 - **方法1: ダッシュボード**: Workers & Pages > 対象の Worker(`keiba-cloud`)> 設定 > 変数とシークレット > 追加。**名前は `APP_BASE_URL`**、**種類は「シークレット」**(「テキスト」にすると次のデプロイで上書きされる)、値の欄に URL を入力して保存・デプロイする。
 - **方法2: wrangler**: ユーザーが自分の端末で、`cloud/` に移って `pnpm exec wrangler secret put APP_BASE_URL` を実行し、**対話の入力欄**に URL を入力する(コマンドの引数や環境変数に URL を書かない)。
 - **確認**: Access でログインしたブラウザで `/api/health` を開き、`secrets.appBaseUrl` が `true` になっていること(値は表示されない)。**`false` は「未登録」か「形式が不正」のどちらか**(区別は返さない。形式が不正なときは、DO の起動時に警告が1行出る。値は出さない)。**secret は `wrangler deploy` で消えない**。登録・更新・削除すると、Worker に新しいデプロイが作られ、次に DO が起きたときから反映される。
-- **反映のされ方**: リンクは**送信の直前**に付ける(通知の材料には URL を保存しない)。そのため、登録した**あと**に送られる通知には、登録前に作られた(まだ送っていない)通知にもリンクが付く。**すでに送った通知は変わらない**。リンクが付くのは発走前の分析の通知だけ(失敗・手動の分析で見送り・朝のまとめには付かない)。サイトを開くときは Cloudflare Access のログインが要る(リンクを知っていても、許可されたメールアドレス以外は開けない)。
+- **反映のされ方**: リンクは**送信の直前**に付ける(通知の材料には URL を保存しない)。そのため、登録した**あと**に送られる通知には、登録前に作られた(まだ送っていない)通知にもリンクが付く。**すでに送った通知は変わらない**。リンクが付くのは発走前の分析の通知だけ(失敗・手動の分析で見送り・朝のまとめには付かない)。サイトを開くときは Cloudflare Access のログインが要る(リンクを知っていても、Access のポリシーに登録されたアドレス以外は開けない)。
 - **削除**(リンクを付けたくないとき): ダッシュボードで `APP_BASE_URL` を削除する(または `wrangler secret delete APP_BASE_URL`)。以後の通知は、リンクなしで送られる。
 - **GitHub Actions の「Secrets の存在を確認」とは別物**: 上の `ANTHROPIC_API_KEY` と同じ(Worker の secret は CI から見えない・触らない)。
+
+## 閲覧者と管理者(Issue #238。**Access のポリシーに入れた人は、閲覧者としてサイトを見られる**)
+
+### 仕組み
+- **誰がログインできるかは、Cloudflare Access のポリシーだけで決まる。** Worker は、Access の JWT の検証(署名・チーム・AUD・期限)に通ったアカウントを**すべて閲覧者として受け入れる**(閲覧者の一覧は Worker に持たない)。
+- **管理者は secret `ADMIN_USER` に載ったアドレスだけ**(カンマ区切りで複数可)。`ADMIN_USER` が**未登録・空・空白だけ**のあいだは、`ACCESS_ALLOWED_EMAIL` を管理者として扱う(移行期間。デプロイ直後にオーナーが締め出されないため)。
+  `ADMIN_USER` を登録したら、管理者は `ADMIN_USER` のアドレスだけになる。
+- **閲覧者は読み取りだけ。** LLM を呼ぶ操作・状態を変える操作・設定は、すべて管理者だけ(サーバーが 403 を返す。画面でボタンを隠すのは補助)。判定できないとき(`ADMIN_USER` の書き間違いなど)は、**管理者ではなく閲覧者に倒れる**。
+
+| 閲覧者にも許す(読み取りだけ) | 管理者だけ |
+|---|---|
+| `GET /`(画面)・`GET /app.js`<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報) | 設定(`/api/settings`。GET も)<br>検証(`/api/verify`)<br>手動の分析(`POST /api/analyses/run`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>移行(`/api/migration`・`/api/migration/upload`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
+
+- 閲覧者の画面には、「設定」「検証」への入口・分析の実行ボタン・日報の作成ボタン・移行と結果の取り込みの操作が出ない。`#settings`・`#verify`・`#migration` を直接開くと「管理者だけが使えます」と出る。「ログイン中」の行に「閲覧専用」と出る。
+- **`GET /api/races` は、閲覧者でも netkeiba への取得を起こしうる**(開催日の一覧を見るために必要。DO のキャッシュ 6 時間と gate〈取得の間隔・ブレーカー〉が効くが、友人が日付を次々に変えれば、そのぶんの取得が走る)。
+- 表は `src/route-policy.ts`。`test/route-policy.test.ts` が手書きの表と突き合わせ、`handler.ts` のルーティングを走査して、表に無いルートが増えたら落とす。
+
+### 友人を閲覧者にする手順(ユーザー作業。ダッシュボード)
+**閲覧者の追加は、Access のポリシーにアドレスを 1 件ずつ登録する。Worker 側の設定(secret)は変えない。**
+1. 相手から Gmail のアドレスを受け取る(Google ログインで Access が返すアドレスと**同じ表記**であること。別名・ドットの有無で別のアカウントになることがある)。
+2. Zero Trust(Cloudflare One)> Access コントロール > ポリシー > このサイトのアプリが使っているポリシー > 「含める」の **Emails** に、相手のアドレスを**追加**して保存する(1 件ずつ。例は `friend@example.com`)。
+   アプリが「Allow」のポリシーでそのポリシーを使っていること、ログイン方法が Google であること(初回セットアップの 5.)を確かめる。
+3. 相手にサイトの URL を伝える。相手は Google でログインすると、閲覧者として一覧・分析結果・日報を見られる。
+4. 外すときは、同じポリシーの Emails から消す。すでに発行されたセッションは、期限まで有効なことがある(すぐ止めたいときの操作の正確な名称・場所は未確認。ダッシュボードで既存のセッションを取り消す操作を探す)。
+
+**ポリシーを「Google アカウントなら誰でも」「ドメイン一括(Email domain)」「Everyone」にしてはいけない。** Worker は Access を通った人をすべて閲覧者として受け入れるので、ポリシーが広いと、**知らない人が分析結果・日報・過去の買い目を見られる**。
+Worker 側にはもう「許可した 1 件のメール」という二重の守りは無い(閲覧者の関門は Access のポリシーだけ)。だから、ポリシーは**アドレスの個別登録**にとどめる。
+
+### `ADMIN_USER` の登録(ユーザー作業。値はリポジトリ・チャットに書かない)
+- **方法1: ダッシュボード**: Workers & Pages > 対象の Worker(`keiba-cloud`)> 設定 > 変数とシークレット > 追加。**名前は `ADMIN_USER`**、**種類は「シークレット」**、値に管理者のメールアドレスを入れる(複数ならカンマ区切り。例: `admin1@example.com,admin2@example.com`)。
+- **方法2: wrangler**: 自分の端末で `cloud/` に移って `pnpm exec wrangler secret put ADMIN_USER` を実行し、対話の入力欄に入力する。
+- **書き方**: カンマ区切り。大文字小文字・前後の空白・末尾のカンマは問わない。**区切りはカンマだけ**(セミコロン・空白・改行で区切ると、1 項目として読まれて管理者にならない)。アドレスは Access が返す表記と同じにする。
+- **登録したのに有効なアドレスが 1 件も無い**(区切りの誤りなど)ときは、**管理者なし**になる(全員が閲覧者。`ACCESS_ALLOWED_EMAIL` にもフォールバックしない)。誤設定が意図しない人を管理者にしないため。直すには `ADMIN_USER` を書き直す。
+- **確認**: 管理者でログインして、画面に「閲覧専用」が出ないこと、「設定」「検証」の入口が出ることを見る。Workers Logs に `access: ok via=header role=admin admins=configured` が出る(`admins=` は `fallback`〈`ADMIN_USER` 未登録〉・`configured`〈登録済み〉・`none`〈登録済みで有効 0 件〉のいずれか。アドレスは出ない)。
+  secret は `wrangler deploy` で消えない。登録・更新・削除すると新しいデプロイが作られ、次のリクエストから反映される。
+
+### デプロイ前の確認(**必ず**)
+この変更を公開すると、**Access のポリシーを通ったアカウントはすべて閲覧者になる**(それまでは `ACCESS_ALLOWED_EMAIL` の 1 件しか入れなかった)。**デプロイの前に、今の Access のポリシー(Emails・Email domain・Everyone など)に、利用者以外が入っていないかを確認する。** 入っていたら、デプロイの前に外す。
+`ADMIN_USER` は公開と同時に登録しなくてよい(未登録のあいだは `ACCESS_ALLOWED_EMAIL` の人が管理者のまま)。
 
 ## 初回セットアップ(ユーザー作業)
 公式ドキュメントで確認できなかった箇所は「未確認」と書いている。
@@ -172,19 +213,19 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 2. **Google の OAuth クライアントを作る**(Google Cloud): プロジェクト作成 → APIs & Services > Credentials > 同意画面(External)→ OAuth クライアント(Web application)。
    承認済みの JavaScript 生成元に `https://<チーム名>.cloudflareaccess.com`、リダイレクト URI に `https://<チーム名>.cloudflareaccess.com/cdn-cgi/access/callback`。同意画面がテスト状態のときのテストユーザー登録の要否は未確認。
 3. **Google の IdP を登録する**: Zero Trust > Integrations > Identity providers > Add new identity provider > Google。Client ID と Client secret を入れて保存し、Test で確かめる。
-4. **先に、許可するメール1件のポリシーを作る**: Zero Trust(Cloudflare One)> Access コントロール > ポリシー > ポリシーを追加。
-   アクション = Allow、含める = Emails(許可する1件)、要求 = Login Method(Google)。
+4. **先に、許可するメールのポリシーを作る**: Zero Trust(Cloudflare One)> Access コントロール > ポリシー > ポリシーを追加。
+   アクション = Allow、含める = Emails(最初は自分の 1 件。**Issue #238 以降、友人を閲覧者にするときは、このポリシーにアドレスを 1 件ずつ足す**。上の「閲覧者と管理者」)、要求 = Login Method(Google)。
 5. **初回デプロイの後に、Worker に Access を掛ける**: Workers & Pages > 対象の Worker > Access タブ > Protect this Worker behind Access > **All traffic**。
    ポリシーは「Cloudflare account」「Email domain」ではなく、**既存のポリシー**(4. で作ったもの)を選ぶ(公式ドキュメントに「select an existing policy」とある)。
    **★アプリのログイン方法は、既定で「利用可能なすべての IdP を許可」になる**(2026-10-06 に実機で確認)。このままだとログイン画面に「Cloudflare」
    (Cloudflare アカウントでのログイン)も出るので、Zero Trust > Access コントロール > アプリケーション > 対象のアプリ > ログイン方法 で **Google だけ**にする。
    AUD タグは同じアプリの画面で控える。
-6. **secret を登録する**(上の表)。Workers & Pages > 対象の Worker > 設定 > 変数とシークレット > 追加 で、環境は「プロダクション」、3つとも「シークレット」にチェックを入れる。
+6. **secret を登録する**(上の表)。Workers & Pages > 対象の Worker > 設定 > 変数とシークレット > 追加 で、環境は「プロダクション」、`ACCESS_TEAM_NAME`・`ACCESS_AUD`・`ACCESS_ALLOWED_EMAIL` の 3つとも「シークレット」にチェックを入れる(`ADMIN_USER` は任意。上の「閲覧者と管理者」)。
 7. Access の設定のための API トークンの権限の追加は不要(ユーザー本人のダッシュボード操作)。**D1 を使う #171 以降は、デプロイ用の API トークンに D1 の編集権限が要る**(上の「D1(分析履歴)」)。
 
 ## 初回の実機確認で見ること
 Workers Logs(`observability` を有効にしてある)に、認証の経路が `access: ok via=header` / `via=cookie` / `via=ctx-access` で出る。
-どれで通ったかで、Worker レベルの Access が JWT ヘッダ・クッキーを渡すかが分かる(公式ドキュメントには明記がない)。
+どれで通ったかで、Worker レベルの Access が JWT ヘッダ・クッキーを渡すかが分かる(公式ドキュメントには明記がない)。Issue #238 以降は `access: ok via=header role=admin admins=fallback` のように、**役割と管理者の出どころ**(`fallback`・`configured`・`none`)が続く(アドレスは出ない)。
 **2026-10-06 の初回確認では `via=header`** だった(Worker 単位の Access は JWT を `Cf-Access-Jwt-Assertion` ヘッダで渡す。#161)。
 拒否は `access: denied reason=<経路:理由コード>` で出る(トークン・メール・チーム名・AUD は出ない)。
 
@@ -483,12 +524,12 @@ exe から移した分析のうち、exe で結果を取り込まなかったレ
 - **検査**: `test/result-backfill-core.test.ts`(状態機械・窓・上限・gate・除外・永続)・`test/result-backfill-repository.test.ts`(ローカルの D1)・`test/result-rows-written.test.ts`・`test/handler-backfill.test.ts`・`test/scheduled.test.ts`(kick)・`test/client-*`(移行画面の 1 行)・`test/bundle-guard.test.ts`・`scripts/test/cloud-config-guard.test.ts`・smoke(構成 H)。
 
 ## 手動起動の入口(Issue #180)
-Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 3 + 定時 1 の計 4 つ〉。さらに結果の取り込みの依頼〈Issue #208。cron と `POST /api/results/import` が共有する `dispatchResultImports` の中の 1 箇所〉で、呼び出し箇所は計 5 つ)。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
+**管理者だけ**(Issue #238。閲覧者は 403)。Access の後ろの2つのルート(使い方・仕様は `docs/current-spec.md` の「手動起動の入口」)。**netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・下の `GET /api/races`・`GET /api/netkeiba/check`。ほかに、定時の起点は cron の `scheduled` の `requestPlan` 1 つ〈Issue #206。手動 3 + 定時 1 の計 4 つ〉。さらに結果の取り込みの依頼〈Issue #208。cron と `POST /api/results/import` が共有する `dispatchResultImports` の中の 1 箇所〉で、呼び出し箇所は計 5 つ)。呼び出し箇所の数は `scripts/test/cloud-config-guard.test.ts` が固定)。
 - `POST /api/analyses/run` — 本文 JSON `{"race_id": "202603020211", "kaisai_date": "20260628", "mode": "morning"}`。`mode` は `morning`(省略時。朝の取得と prior。D1・R2 には書かない)か `pre_race`(発走前の分析。LLM を使う〈API キーが未登録なら LLM なしで保存〉。D1・R2 に保存)。**同じオリジンのページから**(`Origin` が必要。curl で試すときは `-H "Origin: https://<自分の Worker のホスト>"` と `-H "Content-Type: application/json"` を付ける)。202 で予約され、取得 → 計算はアラームの中で進む(中央16頭で約 40 秒)。
 - `GET /api/analyses/status?kaisai_date=20260628[&race_id=202603020211]` — 状態と、朝の prior の最小限。
 
 ## 読み取りの API(Issue #183)
-Access の後ろの GET が2つ(仕様の詳細は `docs/current-spec.md` の「スマホ画面のための読み取り API」)。
+**閲覧者にも許す**(Issue #238)。Access の後ろの GET が2つ(仕様の詳細は `docs/current-spec.md` の「スマホ画面のための読み取り API」)。
 - `GET /api/races?kaisai_date=20260628&venue=central|nar` — 開催日のレース一覧(場 → R の順)。`venue` は必須。開催日の DO(RaceDay)が、gate 経由・DO のキャッシュ(6 時間)で取る。**netkeiba に出うる GET**(HEAD は 405。`Sec-Fetch-Site` が `same-origin`・`none` 以外なら 403)。開催なしの日は `races: []`。取得の失敗は 503 `netkeiba-unavailable`(`reason`: `blocked`・`busy`・`failed`)。
   **デプロイ後の実機確認**: Access でログインしたブラウザで、開催のある日と開催のない日を開く。公開前の日・遠い未来・過去の日付で netkeiba が何を返すかは、まだ実測していない。
 - `GET /api/analyses/{id}` — 分析1件(馬名つき・配分つき)。`rawResponse`・`contributions`・raceSnapshot の全体は返さない。R2 の柵に達した・R2 に無いときは、馬名なしの同じ形(`detail: "missing"`)。**詳細が present のとき、D1 の書き込みが1行ある**(`r2_ops` の Class B の +1)ので、画面から自動で繰り返し呼ばない。

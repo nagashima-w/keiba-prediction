@@ -13,6 +13,7 @@ import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./se
 import type { StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
 import type { RaceRowView, ReportBodyView, ReportModel } from "./report-model";
+import type { AdminOnlyModel } from "./admin-only";
 import { h, type PickedFile, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -99,9 +100,10 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
       model.venueTabs.map((t) => h("a", { class: "tab", href: t.href, "aria-current": t.current ? "page" : undefined }, [t.label])),
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
-    h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
+    // 検証・設定への入口は管理者だけ(Issue #238。閲覧者は href が null)。日報は閲覧者にも出す。
+    ...(model.verifyHref === null ? [] : [h("a", { class: "verify-link", href: model.verifyHref }, ["検証"])]),
     h("a", { class: "report-link", href: model.reportHref }, ["日報"]),
-    h("a", { class: "settings-link", href: model.settingsHref }, ["設定"]),
+    ...(model.settingsHref === null ? [] : [h("a", { class: "settings-link", href: model.settingsHref }, ["設定"])]),
   ]);
   const notices: VNode[] = [];
   if (model.error !== null) {
@@ -135,7 +137,7 @@ function priorRow(item: { rank: number; umaban: number; name: string | null; val
  * 起動のボタンは、クリック処理に渡す値(開催日・レース・モード)を `data-*` にも出す(`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されない。
  * 引数が木に出ていないと、レースを移っても古い処理が残る)。`client-view.test.ts` が、処理を持つ要素に `data-*` があること(引数なしの処理を除く)を機械的に固定する。
  */
-function runButton(button: TaskCard["button"], actions: ViewActions): VNode {
+function runButton(button: NonNullable<TaskCard["button"]>, actions: ViewActions): VNode {
   return h(
     "button",
     { class: "run", disabled: button.disabled, "data-date": button.date, "data-race": button.raceId, "data-mode": button.mode },
@@ -187,7 +189,8 @@ function taskCard(card: TaskCard, actions: ViewActions): VNode {
     ...(card.priorNotice === null ? [] : [h("p", { class: "card-note" }, [card.priorNotice])]),
     ...(card.prior === null ? [] : [h("ul", { class: "prior" }, card.prior.map(priorRow))]),
     ...(card.result === null ? [] : [cardResult(card.result, actions)]),
-    runButton(card.button, actions),
+    // 起動のボタンは管理者だけ(Issue #238。閲覧者は null)。
+    ...(card.button === null ? [] : [runButton(card.button, actions)]),
   ]);
 }
 
@@ -749,7 +752,16 @@ function reportScreen(model: ReportModel, actions: ViewActions): VNode {
   return h("div", { class: "screen report-screen" }, [controls, ...body]);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel, actions: ViewActions): VNode {
+/** 管理者だけの画面を閲覧者が開いたときの案内(Issue #238)。固定文言と、一覧へ戻るリンクだけ。 */
+function adminOnlyScreen(model: AdminOnlyModel): VNode {
+  return h("div", { class: "screen" }, [
+    h("div", { class: "controls" }, [h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"])]),
+    h("h1", { class: "title" }, [model.heading]),
+    h("p", { class: "notice" }, [model.message]),
+  ]);
+}
+
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel | AdminOnlyModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -765,5 +777,7 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return verifyScreen(model, actions);
     case "report":
       return reportScreen(model, actions);
+    case "admin-only":
+      return adminOnlyScreen(model);
   }
 }

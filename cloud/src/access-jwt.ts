@@ -2,8 +2,12 @@
  * Cloudflare Access の JWT の検証(Issue #161〈#21-C〉)。純ロジック(Workers のランタイムに依存しない)。
  *
  * Worker は Access の外側の守りに頼らず、自分でも JWT を検証する(多層防御)。検証するのは
- * 署名(RS256 に固定)・iss・aud・exp・nbf と、**許可したメールアドレス1件との一致**。
+ * 署名(RS256 に固定)・iss・aud・exp・nbf と、email クレームがあること。
  * 設定の欠落・形式の不正・検証の失敗・鍵の取得の失敗は、すべて「通さない」側に倒す(フェイルクローズ)。
+ *
+ * **Issue #238(閲覧者の受け入れ)**: 誰がログインできるかは Cloudflare Access のポリシーだけで決める。検証に通ったアカウントはすべて
+ * 閲覧者(viewer)として受け入れ、secret `ADMIN_USER` に載ったアドレスだけが管理者(admin)になる。メールの一致は「通す・通さない」ではなく
+ * **役割を決める**ためだけに使う({@link roleOf})。管理者を判定できないときは、管理者にせず閲覧者に倒す。
  *
  * 失敗の理由コードはログにだけ使う。**クライアントへの応答には出さない**(handler.ts)。
  */
@@ -15,15 +19,32 @@ export interface AccessEnv {
   ACCESS_TEAM_NAME?: string;
   /** Access アプリケーションの AUD タグ。 */
   ACCESS_AUD?: string;
-  /** 許可するメールアドレス(1件)。 */
+  /**
+   * 必須の設定(欠けていれば全拒否)。Issue #238 以降は**サイトの関門ではなく**、`ADMIN_USER` が未登録のあいだだけ管理者として扱う
+   * アドレス(移行期間のフォールバック。デプロイ直後にオーナーが締め出されないように)。
+   */
   ACCESS_ALLOWED_EMAIL?: string;
+  /**
+   * 管理者のメールアドレス(カンマ区切りで複数可。Issue #238)。**未登録・空・空白だけのときは `ACCESS_ALLOWED_EMAIL` を管理者とする**。
+   * 登録済みで有効なアドレスが 1 件も無いときは、管理者なし(全員が閲覧者)。解釈は {@link parseAdminUsers}。
+   */
+  ADMIN_USER?: string;
 }
+
+/** 役割(Issue #238)。admin = 設定・検証・状態を変える操作・LLM を呼ぶ操作まで。viewer = 読み取りだけ。 */
+export type Role = "admin" | "viewer";
+
+/** 管理者の一覧の出どころ(ログ用の固定トークン。アドレスは含まない)。 */
+export type AdminSource = "configured" | "fallback" | "none";
 
 export interface AccessConfig {
   readonly teamName: string;
   readonly aud: string;
-  /** 小文字化・前後の空白除去済み。 */
+  /** 小文字化・前後の空白除去済み。`ADMIN_USER` が未登録のときだけ管理者になる(移行期間のフォールバック)。 */
   readonly allowedEmail: string;
+  /** 管理者のメール(正規化済み・重複なし)。`ADMIN_USER` が登録済みならその有効な項目、未登録なら `[allowedEmail]`、登録済みで有効 0 件なら `[]`。 */
+  readonly adminEmails: readonly string[];
+  readonly adminSource: AdminSource;
 }
 
 export type ConfigResult =
@@ -44,6 +65,47 @@ export function normalizeEmail(value: unknown): string | null {
   }
   const normalized = value.trim().replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
   return normalized === "" ? null : normalized;
+}
+
+/** 管理者の 1 項目の形。空白・`@` 以外の 1 個の `@`・区切り文字(`,` `;`)を含まない。実在のアドレスかどうかは見ない(照合に使うだけ)。 */
+const ADMIN_ENTRY_PATTERN = /^[^\s@,;]+@[^\s@,;]+$/;
+
+/**
+ * `ADMIN_USER` を管理者の一覧にする(Issue #238)。
+ *  - **未登録**(`undefined`、または `trim()` が空)のときだけ、`fallbackEmail`(`ACCESS_ALLOWED_EMAIL`)を管理者にする(`fallback`)。
+ *  - 登録済みなら、カンマで分割して各項目を {@link normalizeEmail} で正規化し、形が正しい項目だけを管理者にする(空の項目・重複は捨てる)(`configured`)。
+ *  - 登録済みで有効な項目が 0 件(区切りの誤り・文字列でない値など)なら、**管理者なし**(`none`)。フォールバックしない(fail-closed:
+ *    誤設定が、意図しない人を管理者にする方向へ倒れない)。
+ * 例外を投げない。
+ */
+export function parseAdminUsers(raw: unknown, fallbackEmail: string): { readonly emails: readonly string[]; readonly source: AdminSource } {
+  if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) {
+    return { emails: [fallbackEmail], source: "fallback" };
+  }
+  if (typeof raw !== "string") {
+    return { emails: [], source: "none" };
+  }
+  const emails: string[] = [];
+  for (const part of raw.split(",")) {
+    const email = normalizeEmail(part);
+    if (email !== null && ADMIN_ENTRY_PATTERN.test(email) && !emails.includes(email)) {
+      emails.push(email);
+    }
+  }
+  return emails.length === 0 ? { emails: [], source: "none" } : { emails, source: "configured" };
+}
+
+/**
+ * 検証済みのメールから役割を決める(Issue #238)。**管理者の一覧との完全一致**(正規化後)だけが admin。
+ * JWT のメールは分割も部分一致もしない。メールが文字列でない・判定中に例外が起きたら viewer(管理者にしない)。
+ */
+export function roleOf(email: unknown, config: Pick<AccessConfig, "adminEmails">): Role {
+  try {
+    const normalized = normalizeEmail(email);
+    return normalized !== null && config.adminEmails.includes(normalized) ? "admin" : "viewer";
+  } catch {
+    return "viewer";
+  }
 }
 
 function present(value: unknown): value is string {
@@ -73,7 +135,9 @@ export function parseAccessConfig(env: AccessEnv): ConfigResult {
   if (!TEAM_NAME_PATTERN.test(teamName) || allowedEmail === null || !allowedEmail.includes("@")) {
     return { ok: false, reason: "config-invalid" };
   }
-  return { ok: true, config: { teamName, aud: aud.trim(), allowedEmail } };
+  // ADMIN_USER の不備は設定全体を無効にしない(閲覧者まで締め出さない)。管理者が決まらないだけ。
+  const admins = parseAdminUsers(env.ADMIN_USER, allowedEmail);
+  return { ok: true, config: { teamName, aud: aud.trim(), allowedEmail, adminEmails: admins.emails, adminSource: admins.source } };
 }
 
 export function issuerOf(teamName: string): string {
@@ -126,7 +190,6 @@ export type VerifyDenyReason =
   | "iss-mismatch"
   | "claim-missing"
   | "email-missing"
-  | "email-mismatch"
   | "keys-unavailable";
 
 export type VerifyResult =
@@ -168,8 +231,8 @@ function reasonOf(error: unknown): VerifyDenyReason {
 }
 
 /**
- * Access の JWT を検証する。通るのは、署名・iss・aud・exp・nbf がすべて正しく、かつ email が許可した1件と
- * 一致するときだけ。`now` は現在時刻(テストで固定する)。
+ * Access の JWT を検証する。通るのは、署名・iss・aud・exp・nbf がすべて正しく、かつ email クレームがあるときだけ。
+ * **メールが誰であるかでは拒否しない**(Issue #238。役割は {@link roleOf} が決める)。`now` は現在時刻(テストで固定する)。
  */
 export async function verifyAccessJwt(
   token: string,
@@ -198,9 +261,6 @@ export async function verifyAccessJwt(
   const normalized = normalizeEmail(email);
   if (normalized === null) {
     return { ok: false, reason: "email-missing" };
-  }
-  if (normalized !== config.allowedEmail) {
-    return { ok: false, reason: "email-mismatch" };
   }
   return { ok: true, email: normalized };
 }

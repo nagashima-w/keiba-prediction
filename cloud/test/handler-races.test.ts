@@ -140,11 +140,13 @@ describe("GET /api/races(Issue #183)", () => {
       expect(raceDay.calls()).toBe(0);
     });
 
-    it("許可メール以外は 403 で、DO を呼ばない", async () => {
+    // Issue #238(契約変更): 旧「許可メール以外は 403 で DO を呼ばない」は、「管理者でないアカウント(閲覧者)は一覧を読める」に変わった(一覧は閲覧者に許す読み取り)
+    it("管理者でないアカウント(閲覧者)は一覧を読める(403 にならず、DO の一覧を呼ぶ)", async () => {
       const { deps, stranger } = await setup();
       const raceDay = fakeRaceDay();
-      expect((await handle(get(GOOD, { token: stranger }), envOf(raceDay), {}, deps)).status).toBe(403);
-      expect(raceDay.calls()).toBe(0);
+      const response = await handle(get(GOOD, { token: stranger }), envOf(raceDay), {}, deps);
+      expect(response.status).not.toBe(403);
+      expect(raceDay.calls()).toBeGreaterThan(0);
     });
   });
 

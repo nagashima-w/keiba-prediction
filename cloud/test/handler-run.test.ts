@@ -190,12 +190,13 @@ describe("POST /api/analyses/run(Issue #180)", () => {
       expect(raceDay.calls()).toBe(0);
     });
 
-    it("許可メール以外の JWT は 403 で、DO を呼ばない", async () => {
+    // Issue #238(契約変更): 本文は認証なしの `forbidden` ではなく、管理者専用の固定の本文(`admin-only`)。DO を呼ばないことは同じ。
+    it("管理者でないアカウント(閲覧者)の JWT は 403(admin-only)で、DO を呼ばない", async () => {
       const { deps, stranger } = await setup();
       const raceDay = fakeRaceDay();
       const response = await handle(post(GOOD_BODY, { token: stranger }), envOf(raceDay), {}, deps);
       expect(response.status).toBe(403);
-      expect(await response.text()).toBe("forbidden");
+      expect(await response.text()).toBe(JSON.stringify({ ok: false, error: { type: "admin-only" } }));
       expect(raceDay.calls()).toBe(0);
     });
   });
@@ -373,15 +374,22 @@ describe("GET /api/analyses/status(Issue #180)", () => {
     ],
   };
 
-  it("認証なし・別メールは 403 で、DO を呼ばない", async () => {
+  it("認証なしは 403 で、DO を呼ばない", async () => {
+    const { deps } = await setup();
+    const raceDay = fakeRaceDay();
+    const response = await handle(get(`/api/analyses/status?kaisai_date=${DATE}`, undefined), envOf(raceDay), {}, deps);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("forbidden");
+    expect(raceDay.calls()).toBe(0);
+  });
+
+  // Issue #238(契約変更): 旧「別メールは 403 で DO を呼ばない」は、「別メール(閲覧者)は状態(読み取り)を見られる」に変わった
+  it("別メール(閲覧者)は状態を読める(403 にならず、DO の読み取りを呼ぶ)", async () => {
     const { deps, stranger } = await setup();
     const raceDay = fakeRaceDay();
-    for (const token of [undefined, stranger]) {
-      const response = await handle(get(`/api/analyses/status?kaisai_date=${DATE}`, token), envOf(raceDay), {}, deps);
-      expect(response.status).toBe(403);
-      expect(await response.text()).toBe("forbidden");
-    }
-    expect(raceDay.calls()).toBe(0);
+    const response = await handle(get(`/api/analyses/status?kaisai_date=${DATE}`, stranger), envOf(raceDay), {}, deps);
+    expect(response.status).not.toBe(403);
+    expect(raceDay.calls()).toBeGreaterThan(0);
   });
 
   it("開催日の DO の状態を返す: 各レースの状態・試行回数・エラー(200 文字まで)・朝の prior の有無。朝の prior の中身は返さない", async () => {

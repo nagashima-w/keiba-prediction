@@ -215,3 +215,38 @@ describe("読み込み・エラー・日付の並び", () => {
     expect(chips.length).toBeLessThanOrEqual(MAX_CHIPS + 1);
   });
 });
+
+describe("Issue #238: 閲覧者(readOnly)の日報画面: 作成のボタンと、ボタンに言及する案内を出さない", () => {
+  const empty = { detail: { kind: "ready", report: null, job: null } } as const;
+
+  it("日報の無い日: 管理者には作成のボタン(create)と『下のボタン』の案内、閲覧者には create が無く、案内からボタンの文が消える", () => {
+    const admin = buildReportModel(input(empty));
+    expect(admin.create).not.toBeNull();
+    expect(admin.notice!.text).toContain("下のボタンで依頼できます");
+    const viewer = buildReportModel(input({ ...empty, readOnly: true }));
+    expect(viewer.create).toBeNull();
+    expect(viewer.notice!.tone).toBe("info");
+    expect(viewer.notice!.text).toContain("まだありません");
+    expect(viewer.notice!.text).toContain("自動で作られます");
+    expect(viewer.notice!.text).not.toContain("ボタン");
+    expect(viewer.notice!.text).not.toContain("依頼");
+  });
+
+  it("作成に失敗した日: 管理者には『もう一度作成を依頼できます』、閲覧者には依頼に触れない固定文言。create は無い", () => {
+    const failed = { detail: { kind: "ready", report: null, job: { phase: "gather", status: "failed", attempts: 3 } } } as const;
+    const admin = buildReportModel(input(failed));
+    expect(admin.notice).toStrictEqual({ tone: "error", text: "日報の作成に失敗しました。もう一度作成を依頼できます。" });
+    expect(admin.create).not.toBeNull();
+    const viewer = buildReportModel(input({ ...failed, readOnly: true }));
+    expect(viewer.notice).toStrictEqual({ tone: "error", text: "日報の作成に失敗しました。" });
+    expect(viewer.create).toBeNull();
+  });
+
+  it("日報がある日・作成中の日は、閲覧者も管理者と同じ表示(本文・『作成中です』)", () => {
+    const withReport = buildReportModel(input({ readOnly: true }));
+    expect(withReport.body).toEqual(buildReportModel(input()).body);
+    expect(withReport.create).toBeNull();
+    const running = { detail: { kind: "ready", report: null, job: { phase: "gather", status: "running", attempts: 0 } } } as const;
+    expect(buildReportModel(input({ ...running, readOnly: true })).notice).toEqual(buildReportModel(input(running)).notice);
+  });
+});

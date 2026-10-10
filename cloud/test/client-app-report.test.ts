@@ -87,6 +87,7 @@ async function harness(initialHash: string): Promise<Harness> {
     },
   };
   (h as { app: App }).app = createApp({
+    role: "admin",
     fetch: fetchLike,
     now: () => new Date("2026-06-28T00:00:00Z"),
     render: (tree, force) => {

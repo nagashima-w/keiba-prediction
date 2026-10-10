@@ -3,6 +3,9 @@
  *
  * **すべてのルートの前に認証を掛ける**(`/api/health` も含む)。認証できなければ、設定の有無・失敗の理由・ルートの
  * 存在を一切含まない 403 を返す。理由コードはログにだけ出す(トークン・メール・チーム名・AUD は出さない)。
+ *
+ * **Issue #238**: 認証に通ったアカウントはすべて受け入れ、役割(admin / viewer)を付ける(authenticate.ts)。認証の直後・どのハンドラよりも前に、
+ * ルート × 役割の表(route-policy.ts)で 1 回だけ判定し、閲覧者が管理者専用に当たったら 403 `admin-only` で止める(表に無い組み合わせは管理者専用)。
  */
 import type { AccessEnv } from "./access-jwt";
 import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
@@ -11,6 +14,7 @@ import { webhookStatus } from "./notify-send";
 import { resolveAppBaseUrl } from "./notify-link";
 import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
+import { ANALYSIS_DETAIL_PATTERN, REPORTS_PREFIX, requiredRole } from "./route-policy";
 import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { buildAnalysisView } from "./analysis-view";
@@ -172,6 +176,14 @@ const SECURITY_HEADERS = {
   "referrer-policy": "no-referrer",
 };
 
+/**
+ * 管理者専用への閲覧者のアクセスの拒否(Issue #238)。認証には通った利用者への応答なので、理由は固定の種類名 `admin-only` だけを返す
+ * (入力・メール・設定は写さない)。認証の拒否({@link forbidden})とは本文で区別する。
+ */
+function adminOnly(): Response {
+  return json({ ok: false, error: { type: "admin-only" } }, 403);
+}
+
 /** 拒否の応答。本文もヘッダも、拒否の原因によらず固定。 */
 function forbidden(): Response {
   return new Response("forbidden", {
@@ -209,9 +221,15 @@ export async function handle(
     log(`access: denied reason=${auth.reason}`);
     return forbidden();
   }
-  log(`access: ok via=${auth.via}`);
+  log(`access: ok via=${auth.via} role=${auth.role} admins=${auth.admins}`);
 
   const method = request.method;
+  const { pathname } = new URL(request.url);
+  // 役割の関門(Issue #238)。**どのハンドラ・描画・バインディングの利用よりも前に、ここで 1 回だけ**判定する(route-policy.ts の表。表に無い組み合わせは管理者専用)。
+  // 閲覧者が管理者専用に当たったら、リクエスト本文を読まずに 403。管理者でない/判定できない場合は閲覧者として扱われている(authenticate.ts)。
+  if (requiredRole(method, pathname) === "admin" && auth.role !== "admin") {
+    return adminOnly();
+  }
   // 設定の入口(Issue #189)。GET(読む)と POST(全項目の置き換え)だけ。他のメソッドは 405(Allow: GET, POST)。D1 を引かない。
   if (new URL(request.url).pathname === "/api/settings") {
     if (method === "GET") {
@@ -247,11 +265,10 @@ export async function handle(
       headers: { ...SECURITY_HEADERS, allow: "GET, HEAD", "content-type": "text/plain; charset=utf-8" },
     });
   }
-  const { pathname } = new URL(request.url);
 
   if (pathname === "/") {
     // スマホ画面(Issue #184)。スクリプトは /app.js の 1 本だけ(インラインなし)。
-    return new Response(method === "HEAD" ? null : renderPage(auth.email), {
+    return new Response(method === "HEAD" ? null : renderPage(auth.email, auth.role), {
       status: 200,
       headers: { ...SECURITY_HEADERS, "content-type": "text/html; charset=utf-8", "content-security-policy": APP_CSP },
     });
@@ -334,7 +351,7 @@ export async function handle(
     });
   }
 
-  if (pathname === "/api/reports" || pathname.startsWith("/api/reports/")) {
+  if (pathname === "/api/reports" || pathname.startsWith(REPORTS_PREFIX)) {
     // 読み取り専用(D1 の daily_reports を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で D1 を引かない)。Issue #235。
     if (method !== "GET") {
       return new Response("method not allowed", {
@@ -342,7 +359,7 @@ export async function handle(
         headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
       });
     }
-    return pathname === "/api/reports" ? handleReportList(new URL(request.url), env) : handleReportDetail(new URL(request.url), pathname.slice("/api/reports/".length), env);
+    return pathname === "/api/reports" ? handleReportList(new URL(request.url), env) : handleReportDetail(new URL(request.url), pathname.slice(REPORTS_PREFIX.length), env);
   }
 
   if (pathname === "/api/verify") {
@@ -420,7 +437,7 @@ export async function handle(
   }
 
   // `/api/analyses/{id}`(Issue #183)。`status`・`run` は上で完全一致で処理済み(ここに来るのは、それ以外の1階層下だけ)。末尾スラッシュ・さらに下位は 404。
-  const detailMatch = /^\/api\/analyses\/([^/]+)$/.exec(pathname);
+  const detailMatch = ANALYSIS_DETAIL_PATTERN.exec(pathname);
   if (detailMatch !== null) {
     // 読み取り専用(D1 + R2 の GET)。GET だけ(HEAD で D1・R2 を引かない)。
     if (method !== "GET") {

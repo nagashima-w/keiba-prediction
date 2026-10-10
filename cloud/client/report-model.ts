@@ -44,6 +44,8 @@ export interface ReportModelInput {
   readonly run: ReportRunState;
   /** 自動の更新(作成中の確認)を止めている。 */
   readonly pollStopped: boolean;
+  /** 閲覧者(Issue #238)。作成のボタンと、ボタンに言及する案内を出さない。省略は false(管理者)。 */
+  readonly readOnly?: boolean;
 }
 
 export type Tone = "info" | "ok" | "error" | "wait";
@@ -240,20 +242,24 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
     } else if (run.kind === "no-report") {
       notice = { tone: "info", text: NO_REPORT_NOTICE };
     } else {
+      const readOnly = input.readOnly === true;
       if (detail.job !== null && detail.job.status === "failed") {
-        notice = { tone: "error", text: "日報の作成に失敗しました。もう一度作成を依頼できます。" };
+        notice = { tone: "error", text: readOnly ? "日報の作成に失敗しました。" : "日報の作成に失敗しました。もう一度作成を依頼できます。" };
       } else {
         notice = {
           tone: "info",
-          text: "この日の日報はまだありません。その日に分析したレースがあれば、分析と結果が揃ったあとに自動で作られます(分析したレースが無い日は作られません)。すぐに作るときは、下のボタンで依頼できます。",
+          text: `この日の日報はまだありません。その日に分析したレースがあれば、分析と結果が揃ったあとに自動で作られます(分析したレースが無い日は作られません)。${readOnly ? "" : "すぐに作るときは、下のボタンで依頼できます。"}`,
         };
       }
-      create = {
-        label: run.kind === "posting" ? "依頼中…" : "この日の日報を作る",
-        disabled: run.kind === "posting",
-        caution: CREATE_CAUTION,
-        todayCaution: input.shownDate === input.today ? CREATE_TODAY_CAUTION : null,
-      };
+      // 閲覧者(Issue #238)には作成のボタンを出さない(作成は管理者だけ。サーバも 403)。
+      create = readOnly
+        ? null
+        : {
+            label: run.kind === "posting" ? "依頼中…" : "この日の日報を作る",
+            disabled: run.kind === "posting",
+            caution: CREATE_CAUTION,
+            todayCaution: input.shownDate === input.today ? CREATE_TODAY_CAUTION : null,
+          };
     }
   }
   if (run.kind === "error") {

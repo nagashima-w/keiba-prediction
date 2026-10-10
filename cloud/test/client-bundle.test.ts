@@ -66,6 +66,7 @@ describe("生成物のドリフトと決定性", () => {
     // 実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数。計り方: 18a2b55〈#236 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った): 18a2b55 は 192,635、
     // 実装後は 214,711(+22,076)。上限 235,000 は実装後の約 9.5% 増(余裕は 20,289 バイト)。大半は日本語の文言(`\u` エスケープ)。
     // Issue #240: 上限は 235,000 のまま据え置き。結果の「3着内率の上位5頭」(並べ替え・見出し・描画)を足した増分は +851(214,711 → 215,562。上限までの余裕は 19,438 バイト)。
+    // Issue #238: 上限は据え置き。閲覧者の画面(役割の読み取り `role.ts`・管理者だけの案内 `admin-only.ts`・入口とボタンの出し分け)を足した増分は +1,336(214,711 → 216,047。`pnpm run build:client` の出力。上限までの余裕は 18,953 バイト)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(235_000);
   });
@@ -308,8 +309,14 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
   type IdentityReply = { status: number; json: () => Promise<unknown> } | "network-error";
   const NOT_FOUND: IdentityReply = { status: 404, json: async () => { throw new SyntaxError("Unexpected token <"); } };
 
-  function run(initialHash = "", identityReply: IdentityReply = NOT_FOUND) {
-    const root = { children: [] as (FakeElement | FakeText)[], replaced: 0, replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; } };
+  /** `role`: `#app` の `data-role`(Issue #238。サーバが渡す)。既定は admin(従来のテストは管理者の画面を見る)。null は属性が無い場合(閲覧者に倒れる)。 */
+  function run(initialHash = "", identityReply: IdentityReply = NOT_FOUND, role: string | null = "admin") {
+    const root = {
+      children: [] as (FakeElement | FakeText)[],
+      replaced: 0,
+      replaceChildren(...nodes: (FakeElement | FakeText)[]) { this.replaced += 1; this.children = nodes; },
+      getAttribute: (name: string): string | null => (name === "data-role" ? role : null),
+    };
     const listeners = new Map<string, (() => void)[]>();
     const calls: { url: string; init: { method?: string; credentials?: string; referrerPolicy?: string; body?: unknown; headers?: Record<string, string> } }[] = [];
     const location = { hash: initialHash };
@@ -446,6 +453,49 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     expect(textOf(root.children[0]!)).toContain("福島民報杯");
     expect((listeners.get("hashchange") ?? []).length).toBe(1);
     expect(location.hash).toBe("");
+  });
+
+  // Issue #238: 役割(サーバが `#app` の `data-role` で渡す)が、生成物の実行(main.ts の配線)で効く。閲覧者・属性なし・未知の値は、管理者の入口を出さず、管理者だけの画面では取得しない。
+  const linkClasses = (root: { children: (FakeElement | FakeText)[] }): string[] =>
+    root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "a").map((n) => n.attrs.get("class") ?? "");
+
+  it("Issue #238: 管理者(data-role=admin)の一覧には「検証」「設定」「日報」の入口が出る(対照)", async () => {
+    const { root, calls } = run("", NOT_FOUND, "admin");
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    expect(linkClasses(root)).toEqual(expect.arrayContaining(["verify-link", "report-link", "settings-link"]));
+  });
+
+  it.each([
+    ["viewer", "viewer"],
+    ["属性なし", null],
+    ["未知の値", "root"],
+    ["大文字の ADMIN(完全一致でない)", "ADMIN"],
+  ] as [string, string | null][])("Issue #238: data-role が %s のとき、一覧に「検証」「設定」の入口が出ない(日報は出る)", async (_label, role) => {
+    const { root, calls } = run("", NOT_FOUND, role);
+    await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("福島民報杯")));
+    const classes = linkClasses(root);
+    expect(classes).toContain("report-link"); // 前提: 一覧が描画されている
+    expect(classes).not.toContain("verify-link");
+    expect(classes).not.toContain("settings-link");
+  });
+
+  it.each([["設定", "#settings"], ["検証", "#verify"], ["移行", "#migration"]])("Issue #238: 閲覧者が %s の画面(%s)を直接開いても、API を取らず「管理者だけが使えます」を出す(生成物の実行)", async (_label, hash) => {
+    const { root, calls } = run(hash, NOT_FOUND, "viewer");
+    await until(() => root.children.some((c) => textOf(c).includes("管理者だけが使えます")));
+    await settle();
+    expect(root.children.some((c) => textOf(c).includes("管理者だけが使えます"))).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("Issue #238: レース画面は、管理者には起動のボタンが 2 つ、閲覧者には 0 個(生成物の実行)", async () => {
+    const buttonsOf = async (role: string): Promise<number> => {
+      const { root, calls } = run(`#date=${DATE}&venue=central&race=${RACE_ID}`, NOT_FOUND, role);
+      await until(() => calls.length >= 2 && root.children.some((c) => textOf(c).includes("朝の準備")));
+      await settle();
+      return root.children.flatMap(flat).filter((n): n is FakeElement => n instanceof FakeElement && n.tag === "button" && (n.attrs.get("class") ?? "") === "run").length;
+    };
+    expect(await buttonsOf("admin")).toBe(2);
+    expect(await buttonsOf("viewer")).toBe(0);
   });
 
   it("同じ状態の再描画(同じハッシュの hashchange)では DOM を触らない(Issue #186 段階1。createMounter が main.ts に配線されている)", async () => {

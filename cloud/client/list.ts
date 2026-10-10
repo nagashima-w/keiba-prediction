@@ -110,6 +110,8 @@ export interface ListModelInput {
   readonly tracking?: string | null;
   /** 利用者が押した場の開閉(キーは `groupKeys`)。無い場は既定(場が 2 つ以上なら閉・1 つなら開)。省略は「何も押していない」。 */
   readonly choices?: ReadonlyMap<string, boolean>;
+  /** 閲覧者(Issue #238)。設定・検証への入口を出さない。省略は false(管理者)。 */
+  readonly readOnly?: boolean;
 }
 
 export interface RaceItem {
@@ -141,10 +143,10 @@ export interface ListModel {
   readonly date: string;
   readonly dateInput: string;
   readonly venue: Venue;
-  /** 設定画面への入口のリンク先(Issue #189)。 */
-  readonly settingsHref: string;
-  /** 検証画面への入口のリンク先(Issue #219)。 */
-  readonly verifyHref: string;
+  /** 設定画面への入口のリンク先(Issue #189)。閲覧者(`readOnly`)は null(入口を出さない。Issue #238)。 */
+  readonly settingsHref: string | null;
+  /** 検証画面への入口のリンク先(Issue #219)。閲覧者(`readOnly`)は null(入口を出さない。Issue #238)。 */
+  readonly verifyHref: string | null;
   /** 日報画面への入口のリンク先(Issue #235)。 */
   readonly reportHref: string;
   readonly venueTabs: readonly { readonly venue: Venue; readonly label: string; readonly href: string; readonly current: boolean }[];
@@ -175,8 +177,8 @@ export function buildListModel(input: ListModelInput): ListModel {
     date: route.date,
     dateInput: ymdToInput(route.date),
     venue: route.venue,
-    settingsHref: SETTINGS_HASH,
-    verifyHref: VERIFY_HASH,
+    settingsHref: input.readOnly === true ? null : SETTINGS_HASH,
+    verifyHref: input.readOnly === true ? null : VERIFY_HASH,
     reportHref: REPORT_HASH,
     venueTabs: (["central", "nar"] as const).map((venue) => ({
       venue,

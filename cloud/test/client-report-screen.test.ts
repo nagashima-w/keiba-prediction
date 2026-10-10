@@ -289,3 +289,23 @@ describe("手動の作成と作成中のポーリング", () => {
     expect(n.calls.length - before).toBe(2);
   });
 });
+
+describe("Issue #238: 閲覧者(readOnly)は日報を作成しない(POST /api/reports/run を出さない)", () => {
+  it("readOnly の画面で onRun を呼んでも POST は出ない。対照: 同じ状態で管理者の onRun は POST を出す", async () => {
+    for (const readOnly of [false, true]) {
+      const n = net();
+      const timers = createFakeTimers();
+      const screen = createReportScreen({ fetch: n.fetch, timers, isVisible: () => true, today: () => TODAY, onChange: () => {}, readOnly });
+      n.script["GET /api/reports"] = [ok({ reports: [] })];
+      n.script["GET /api/reports/20261010"] = [ok({ report: null, job: null })];
+      n.script["POST /api/reports/run"] = [{ status: 202, body: { ok: true, accepted: true, date: TODAY } }];
+      screen.enter("20261010");
+      await timers.flush();
+      expect(screen.model().body, "前提: 日報の無い日の画面が開いている").toBeNull();
+      expect(screen.model().create === null, `作成のボタン readOnly=${readOnly}`).toBe(readOnly);
+      screen.onRun();
+      await timers.flush();
+      expect(n.calls.includes("POST /api/reports/run"), `POST readOnly=${readOnly}`).toBe(!readOnly);
+    }
+  });
+});

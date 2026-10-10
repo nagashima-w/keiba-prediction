@@ -28,6 +28,8 @@ export interface ReportScreenDeps {
   readonly today: () => string;
   /** 画面の再描画の要求。 */
   readonly onChange: () => void;
+  /** 閲覧者(Issue #238)。作成のボタンを出さず、`onRun` も何もしない(日報の作成は管理者だけ。サーバも 403)。省略は false(管理者)。 */
+  readonly readOnly?: boolean;
 }
 
 export interface ReportScreen {
@@ -207,7 +209,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
   }
 
   function onRun(): void {
-    if (!active || run.kind === "posting" || run.kind === "requested" || run.kind === "no-report" || detail === null || detail.kind !== "ready" || detail.report !== null) return;
+    if (deps.readOnly === true || !active || run.kind === "posting" || run.kind === "requested" || run.kind === "no-report" || detail === null || detail.kind !== "ready" || detail.report !== null) return;
     if (detail.job !== null && detail.job.status === "running") return;
     const g = gen;
     const date = shown;
@@ -258,7 +260,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     onRun,
     onRefresh,
     onVisibilityChange,
-    model: () => buildReportModel({ today: deps.today(), shownDate: shown, list, detail, run, pollStopped }),
+    model: () => buildReportModel({ today: deps.today(), shownDate: shown, list, detail, run, pollStopped, readOnly: deps.readOnly === true }),
     pending: () => [...inflight],
   };
 }

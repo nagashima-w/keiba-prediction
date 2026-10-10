@@ -8,7 +8,11 @@
  *  (どの構成も、起動の前に D1 の migration を一時の保存先へ適用する〈wrangler d1 migrations apply DB --local〉。Issue #171)
  *  A. 設定なし(secret が無い本番の初回デプロイ直後と同じ)→ すべて 403(JWT が付いていても)
  *  B. `[access.dev]` で ctx.access を注入し、secret 相当を --var で渡す(正しい構成)→ 200。ただし不正な JWT が付けば 403
- *  C. B からメールだけを変える → 403
+ *  C. (Issue #238)B から ACCESS_ALLOWED_EMAIL だけを変える(ログインするアカウントは管理者でなくなる)→ **閲覧者として通る**(旧: 403)。
+ *     閲覧者は読み取りの画面・API だけ(200)、管理者専用(設定・検証・移行・health・確認・POST のすべて)は 403(本文は admin-only の固定)。
+ *  J. (Issue #238)ADMIN_USER を別の人に登録する → ACCESS_ALLOWED_EMAIL の人は(フォールバックせず)閲覧者。
+ *  K. (Issue #238)ADMIN_USER に複数(大文字・空白つき)を登録し、ログインするアカウントがその 1 人 → 管理者(ACCESS_ALLOWED_EMAIL とは別でも)。
+ *  L. (Issue #238)ADMIN_USER が不正な区切り(登録済みで有効 0 件)→ 管理者なし。ACCESS_ALLOWED_EMAIL の人も閲覧者(フォールバックしない)。
  *  D. B から AUD だけを変える → 403
  *  E. (#162 段階2b)B と同じ認証の構成で、`main` を `smoke-worker.ts`(DO の接続関数を**偽ソケット**に差し替えた smoke 専用エントリ)に
  *     した一時設定で起動し、`GET /api/netkeiba/check` を通す。workerd と nodejs_compat の実環境で、
@@ -126,7 +130,10 @@ async function withWorker(
   }
 }
 
-function vars(email: string, aud: string): string[] {
+/** 管理者専用への閲覧者のアクセスの拒否の本文(handler.ts の `adminOnly()`)。 */
+const ADMIN_ONLY_BODY = JSON.stringify({ ok: false, error: { type: "admin-only" } });
+
+function vars(email: string, aud: string, adminUser?: string): string[] {
   return [
     // Issue #217: 結果の補完を止める(`RESULT_BACKFILL_NIGHTLY_LIMIT=0`)。smoke(CI でも走る)が、時刻によって補完の窓(JST 1:00〜6:00)に当たっても、
     // 本物の netkeiba に出ないことを保証する。補完の DO は kick もアラームも何もしない(`scripts/test/cloud-config-guard.test.ts` が、すべての構成でこの指定があることを固定する)。
@@ -134,7 +141,47 @@ function vars(email: string, aud: string): string[] {
     "--var", `ACCESS_TEAM_NAME:${TEAM}`,
     "--var", `ACCESS_AUD:${aud}`,
     "--var", `ACCESS_ALLOWED_EMAIL:${email}`,
+    // Issue #238: 管理者(カンマ区切り)。未指定は未登録(ACCESS_ALLOWED_EMAIL が管理者になる移行期間)。
+    ...(adminUser === undefined ? [] : ["--var", `ADMIN_USER:${adminUser}`]),
   ];
+}
+
+/**
+ * Issue #238: ログインしているアカウントが**閲覧者**であることの確認。読み取りの画面・API は通り、管理者専用は 403(admin-only)で止まる。
+ * 管理者専用の確認は、netkeiba・LLM・DO に届く前に止まるので、偽ソケットでない本物の Worker でも安全に叩ける(`/api/races` は日付なしで 400 を見るだけ)。
+ */
+async function expectViewer(port: number, label: string, email: string): Promise<void> {
+  const page = await req(port, "GET", "/");
+  check(`${label}: GET / は 200 で、閲覧者の印(data-role="viewer"・閲覧専用)と自分のメールが出る`, page.status === 200 && page.text.includes('data-role="viewer"') && page.text.includes("閲覧専用") && page.text.includes(email) && !page.text.includes('data-role="admin"'), `${page.status}`);
+  check(`${label}: GET /app.js は 200`, (await req(port, "GET", "/app.js")).status === 200);
+  const analyses = await req(port, "GET", "/api/analyses");
+  check(`${label}: GET /api/analyses は 200(読み取り)`, analyses.status === 200 && parseJson(analyses.text)["ok"] === true, `${analyses.status} ${analyses.text.slice(0, 80)}`);
+  const plan = await req(port, "GET", "/api/plan?kaisai_date=20261008");
+  check(`${label}: GET /api/plan は 200(読み取り)`, plan.status === 200 && parseJson(plan.text)["ok"] === true, `${plan.status} ${plan.text.slice(0, 80)}`);
+  const reports = await req(port, "GET", "/api/reports");
+  check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
+  check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/verify?venue=all"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
+  for (const [method, path] of adminOnly) {
+    const r = await req(port, method, path);
+    check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
+  }
+  check(`${label}: HEAD /api/plan は 403(表の外の method は管理者専用)`, (await req(port, "HEAD", "/api/plan?kaisai_date=20261008")).status === 403);
+}
+
+/** Issue #238: ログインしているアカウントが**管理者**であることの確認。管理者専用の API が 200・POST は役割の関門を通って各ハンドラの守り(Origin)に届く。 */
+async function expectAdmin(port: number, label: string, email: string): Promise<void> {
+  const page = await req(port, "GET", "/");
+  check(`${label}: GET / は 200 で、管理者の印(data-role="admin")が出て、閲覧専用の文言は出ない`, page.status === 200 && page.text.includes('data-role="admin"') && !page.text.includes("閲覧専用") && page.text.includes(email), `${page.status}`);
+  const health = await req(port, "GET", "/api/health");
+  check(`${label}: GET /api/health は 200(管理者だけ)`, health.status === 200 && parseJson(health.text)["ok"] === true, `${health.status} ${health.text.slice(0, 80)}`);
+  const settings = await req(port, "GET", "/api/settings");
+  check(`${label}: GET /api/settings は 200(管理者だけ)`, settings.status === 200 && parseJson(settings.text)["ok"] === true, `${settings.status} ${settings.text.slice(0, 80)}`);
+  const migration = await req(port, "GET", "/api/migration");
+  check(`${label}: GET /api/migration は 200(管理者だけ)`, migration.status === 200 && parseJson(migration.text)["ok"] === true, `${migration.status} ${migration.text.slice(0, 80)}`);
+  check(`${label}: GET /api/verify?venue=bad は 400(役割の関門を通って、入力の検証に届く)・GET /check は 200`, (await req(port, "GET", "/api/verify?venue=bad")).status === 400 && (await req(port, "GET", "/check")).status === 200);
+  const post = await req(port, "POST", "/api/analyses/run");
+  check(`${label}: POST /api/analyses/run は(Origin が無いので)origin-mismatch の 403。admin-only ではない(役割の関門を通って、ハンドラの守りに届く)`, post.status === 403 && post.text !== ADMIN_ONLY_BODY && post.text.includes("origin-mismatch"), `${post.status} ${post.text.slice(0, 80)}`);
 }
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
@@ -196,6 +243,8 @@ async function main(): Promise<void> {
       check("B: 不正な JWT が付いていれば、ctx.access が正しくても 403(別の経路で救わない)", tampered.status === 403 && tampered.text === "forbidden", `${tampered.status}`);
       check("B: 未知のパスは 404", (await req(port, "GET", "/no-such-path")).status === 404);
       check("B: POST / は 405", (await req(port, "POST", "/")).status === 405);
+      // Issue #238: ADMIN_USER が未登録(この構成)では、ACCESS_ALLOWED_EMAIL の人が管理者(移行期間のフォールバック)。
+      await expectAdmin(port, "B(ADMIN_USER 未登録 = ACCESS_ALLOWED_EMAIL が管理者)", EMAIL);
     });
 
     // H. (Issue #216)移行ファイルの受け取りと取り込み(本番の worker.ts。偽ソケットは使わない=netkeiba・LLM に出る経路が無い)。
@@ -274,9 +323,24 @@ async function main(): Promise<void> {
       check(`${label}: 応答にメール・AUD・チーム名が含まれない`, ![first.text, second.text, JSON.stringify(completed)].join("\n").includes(EMAIL));
     });
 
-    // C. メールだけ違う。
+    // C. (Issue #238)ACCESS_ALLOWED_EMAIL と違うアカウントでログインする = 閲覧者。旧: 全リクエストが 403。
     await withWorker(BASE_PORT + 2, ["--config", CONFIG_PATH, ...vars("stranger@example.com", AUD)], async () => {
-      await expectAllForbidden(BASE_PORT + 2, "C(許可メールが違う)");
+      await expectViewer(BASE_PORT + 2, "C(ACCESS_ALLOWED_EMAIL と違うアカウント = 閲覧者)", EMAIL);
+    });
+
+    // J. (Issue #238)ADMIN_USER を別の人に登録する: ACCESS_ALLOWED_EMAIL の人(ログインしているアカウント)は閲覧者になる(フォールバックしない)。
+    await withWorker(BASE_PORT + 8, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD, "admin2@example.com")], async () => {
+      await expectViewer(BASE_PORT + 8, "J(ADMIN_USER が別の人 = ACCESS_ALLOWED_EMAIL の人も閲覧者)", EMAIL);
+    });
+
+    // K. (Issue #238)ADMIN_USER に複数(大文字・空白つき)を登録し、ログインしているアカウントがその 1 人: 管理者(ACCESS_ALLOWED_EMAIL とは別でも)。
+    await withWorker(BASE_PORT + 9, ["--config", CONFIG_PATH, ...vars("stranger@example.com", AUD, " Owner@Example.COM , admin2@example.com")], async () => {
+      await expectAdmin(BASE_PORT + 9, "K(ADMIN_USER に複数 = 載っている人が管理者)", EMAIL);
+    });
+
+    // L. (Issue #238)ADMIN_USER が不正な区切り(登録済みで有効 0 件): 管理者なし。ACCESS_ALLOWED_EMAIL の人も閲覧者(フォールバックしない)。閲覧は止まらない。
+    await withWorker(BASE_PORT + 10, ["--config", CONFIG_PATH, ...vars(EMAIL, AUD, "owner@example.com;admin2@example.com")], async () => {
+      await expectViewer(BASE_PORT + 10, "L(ADMIN_USER が不正な区切り = 管理者なし)", EMAIL);
     });
 
     // D. AUD だけ違う。

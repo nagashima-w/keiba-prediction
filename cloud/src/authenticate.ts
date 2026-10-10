@@ -2,11 +2,15 @@
  * リクエストの認証(Issue #161〈#21-C〉)。JWT の取得元は、ヘッダ → クッキーの順に試し、どちらかが通れば通る。
  * **`ctx.access` を使うのは、ヘッダにもクッキーにも JWT が無いときだけ**(ゲートの確定)。JWT が付いていて不正なら、
  * 改ざんの疑いがあるので `ctx.access` では救わず、拒否する(`ctx.access` は参照もしない)。
- * どの経路でも、許可した1件のメールとの一致(`ctx.access` は aud の一致も)を確かめる。
+ * どの経路でも、署名・iss・aud(`ctx.access` は aud の一致)・exp とメールがあることを確かめる。
  * 設定(secret)が欠けていれば、どの取得元が有効でも通さない。
+ *
+ * **Issue #238(閲覧者の受け入れ)**: 認証に通ったアカウントはすべて受け入れ、**役割**(admin / viewer)を付けて返す。役割の判定は
+ * ここ 1 か所(access-jwt.ts の `roleOf`)。管理者は `ADMIN_USER`(未登録のうちは `ACCESS_ALLOWED_EMAIL`)に載ったアドレスだけで、
+ * 判定できなければ viewer。ルートごとの許可は route-policy.ts の表で、handler.ts が認証の直後に適用する。
  */
 import type { JWTVerifyGetKey } from "jose";
-import { extractTokens, normalizeEmail, parseAccessConfig, verifyAccessJwt, type AccessConfig, type AccessEnv } from "./access-jwt";
+import { extractTokens, normalizeEmail, parseAccessConfig, roleOf, verifyAccessJwt, type AccessConfig, type AccessEnv, type AdminSource, type Role } from "./access-jwt";
 
 /** `ctx.access`(Access が認証した呼び出しでだけ存在する)の、使う部分だけの型。 */
 export interface AccessContextLike {
@@ -17,7 +21,15 @@ export interface AccessContextLike {
 export type AuthVia = "header" | "cookie" | "ctx-access";
 
 export type AuthResult =
-  | { readonly ok: true; readonly email: string; readonly via: AuthVia }
+  | {
+      readonly ok: true;
+      readonly email: string;
+      readonly via: AuthVia;
+      /** 役割(Issue #238)。判定できなければ viewer。 */
+      readonly role: Role;
+      /** 管理者の一覧の出どころ(ログ用の固定トークン。アドレスは含まない)。 */
+      readonly admins: AdminSource;
+    }
   | { readonly ok: false; readonly reason: string };
 
 export interface AuthDeps {
@@ -42,9 +54,6 @@ async function viaCtxAccess(
   const email = normalizeEmail(identity?.["email"]);
   if (email === null) {
     return { ok: false, reason: "email-missing" };
-  }
-  if (email !== config.allowedEmail) {
-    return { ok: false, reason: "email-mismatch" };
   }
   return { ok: true, email };
 }
@@ -71,7 +80,7 @@ export async function authenticate(
       result = { ok: false as const, reason: "keys-unavailable" as const };
     }
     if (result.ok) {
-      return { ok: true, email: result.email, via: source };
+      return { ok: true, email: result.email, via: source, role: roleOf(result.email, config), admins: config.adminSource };
     }
     failures.push(`${source}:${result.reason}`);
   }
@@ -81,7 +90,7 @@ export async function authenticate(
   if (ctxAccess !== undefined) {
     const result = await viaCtxAccess(ctxAccess, config);
     if (result.ok) {
-      return { ok: true, email: result.email, via: "ctx-access" };
+      return { ok: true, email: result.email, via: "ctx-access", role: roleOf(result.email, config), admins: config.adminSource };
     }
     failures.push(`ctx-access:${result.reason}`);
   }

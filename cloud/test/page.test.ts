@@ -11,7 +11,7 @@ const titleOf = (html: string): string => /<title>([^<]*)<\/title>/.exec(html)?.
 const h1Of = (html: string): string => /<h1>([\s\S]*?)<\/h1>/.exec(html)?.[1] ?? "";
 
 describe("スマホ画面(renderPage)の名前と見出しのリンク", () => {
-  const html = renderPage(EMAIL);
+  const html = renderPage(EMAIL, "admin");
 
   it("<title> は「Uma Driller」", () => {
     expect(titleOf(html)).toBe("Uma Driller");
@@ -68,5 +68,40 @@ describe("確認ページ(renderCheckPage)の名前", () => {
   it("確認フォームの中身(netkeiba の取得の確認)は変わっていない", () => {
     expect(html).toContain("netkeiba の取得の確認");
     expect(html).toContain('action="/api/netkeiba/check"');
+  });
+});
+
+describe("Issue #238: 役割の印(サーバが画面に渡す。画面で隠すのは補助で、拒否はサーバ側)", () => {
+  const roleOf = (html: string): string | undefined => /<div id="app"[^>]*\sdata-role="([^"]*)"/.exec(html)?.[1];
+
+  it("管理者: #app に data-role=\"admin\"。「閲覧専用」の文言は出ない", () => {
+    const html = renderPage(EMAIL, "admin");
+    expect(roleOf(html)).toBe("admin");
+    expect(html).not.toContain("閲覧専用");
+    expect(html).not.toContain('class="role"');
+  });
+
+  it("閲覧者: #app に data-role=\"viewer\"。「ログイン中」の行に「閲覧専用」が固定文言で出る(メールの span の外)", () => {
+    const html = renderPage(EMAIL, "viewer");
+    expect(roleOf(html)).toBe("viewer");
+    expect(html).toMatch(/<p class="who">ログイン中: <span class="email">owner@example\.com<\/span> <span class="role">閲覧専用<\/span><\/p>/);
+    // メールの span(.who .email。表示名の書き換え先)は 1 つのまま
+    expect(html.match(/class="email"/g)).toHaveLength(1);
+  });
+
+  it("役割が admin でも viewer でもない値(型を破った呼び出し)は、閲覧者として描く(管理者の印を出さない)", () => {
+    for (const bad of ["root", "ADMIN", "", undefined, null]) {
+      const html = renderPage(EMAIL, bad as never);
+      expect(roleOf(html), String(bad)).toBe("viewer");
+      expect(html).not.toContain('data-role="admin"');
+    }
+  });
+
+  it("役割の印は 1 つだけ(data-role を持つ要素は #app だけ)で、インラインのスクリプトは増えない", () => {
+    for (const role of ["admin", "viewer"] as const) {
+      const html = renderPage(EMAIL, role);
+      expect(html.match(/data-role=/g)).toHaveLength(1);
+      expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
+    }
   });
 });

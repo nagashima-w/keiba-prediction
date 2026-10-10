@@ -109,13 +109,12 @@ describe("認証の関門(すべてのルートの前。認証できなければ
 
   it("拒否の原因が違っても、応答(ステータス・本文・ヘッダ)は完全に同じで、設定の有無や理由は一切含まれない", async () => {
     const { key, deps, token } = await setup();
-    const stranger = await signToken(key, { email: "stranger@example.com" });
     const expired = await signToken(key, { exp: 1 });
+    // Issue #238(契約変更): 旧「別のメール」の行は拒否ではなくなった(別のメールは閲覧者として通る。下の「閲覧者」のテストと handler-roles.test.ts で固定)。
     const cases: Array<[string, Request, Env]> = [
       ["JWT なし", req("/"), envOf()],
       ["壊れた JWT", req("/", { token: "a.b.c" }), envOf()],
       ["期限切れ", req("/", { token: expired }), envOf()],
-      ["別のメール", req("/", { token: stranger }), envOf()],
       ["チーム名が未設定", req("/", { token }), envOf({ ACCESS_TEAM_NAME: undefined })],
       ["AUD が未設定", req("/", { token }), envOf({ ACCESS_AUD: undefined })],
       ["許可メールが未設定", req("/", { token }), envOf({ ACCESS_ALLOWED_EMAIL: undefined })],
@@ -127,7 +126,7 @@ describe("認証の関門(すべてのルートの前。認証できなければ
     for (const [, request, env] of cases) {
       snapshots.push(await snapshot(await handle(request, env, {}, deps)));
     }
-    expect(snapshots).toHaveLength(8);
+    expect(snapshots).toHaveLength(7);
     for (const s of snapshots) {
       expect(s.status).toBe(403);
       expect(s.body).toBe("forbidden");
@@ -212,14 +211,17 @@ describe("認証の関門(すべてのルートの前。認証できなければ
     expect(lines.at(-1)).toBe("access: denied reason=header:malformed");
   });
 
-  it("JWT が無くても、ctx.access が aud・メールとも一致すれば通る。一致しなければ 403", async () => {
+  it("JWT が無くても、ctx.access が aud・メールがそろえば通る。aud が違えば 403。管理者でないメールは閲覧者として通る(Issue #238。旧: 一致しなければ 403)", async () => {
     const { deps } = await setup();
     const good = { access: { aud: AUD, getIdentity: async () => ({ email: EMAIL }) } };
     const badAud = { access: { aud: "other", getIdentity: async () => ({ email: EMAIL }) } };
     const badEmail = { access: { aud: AUD, getIdentity: async () => ({ email: "stranger@example.com" }) } };
     expect((await handle(req("/"), envOf(), good, deps)).status).toBe(200);
     expect((await handle(req("/"), envOf(), badAud, deps)).status).toBe(403);
-    expect((await handle(req("/"), envOf(), badEmail, deps)).status).toBe(403);
+    // Issue #238(契約変更): 管理者でないメールは 403 ではなく、閲覧者として画面を見られる(管理者専用は handler-roles.test.ts)
+    const viewerResponse = await handle(req("/"), envOf(), badEmail, deps);
+    expect(viewerResponse.status).toBe(200);
+    expect(await viewerResponse.text()).toContain('data-role="viewer"');
     // 設定が欠けていれば ctx.access が正しくても 403
     expect((await handle(req("/"), envOf({ ACCESS_AUD: undefined }), good, deps)).status).toBe(403);
   });
@@ -450,7 +452,12 @@ describe("ルート(認証後)", () => {
 });
 
 describe("renderPage・renderCheckPage(メールの HTML エスケープ)", () => {
-  for (const [name, render] of [["renderPage", renderPage], ["renderCheckPage", renderCheckPage]] as const) {
+  const renders: readonly (readonly [string, (email: string) => string])[] = [
+    ["renderPage(admin)", (email) => renderPage(email, "admin")],
+    ["renderPage(viewer)", (email) => renderPage(email, "viewer")],
+    ["renderCheckPage", renderCheckPage],
+  ];
+  for (const [name, render] of renders) {
     it(`${name}: 特殊文字をエスケープする(メールの中の <script> が要素にならない)`, () => {
       const html = render(`"><script>alert(1)</script>&'@example.com`);
       expect(html).not.toContain("<script>");
@@ -468,19 +475,28 @@ describe("ログ(経路名と理由コードだけ。値は出さない)", () =>
     await handle(req("/", { token }), envOf(), {}, deps);
     await handle(req("/", { headers: { cookie: `CF_Authorization=${token}` } }), envOf(), {}, deps);
     await handle(req("/"), envOf(), { access: { aud: AUD, getIdentity: async () => ({ email: EMAIL }) } }, deps);
-    expect(lines).toEqual(["access: ok via=header", "access: ok via=cookie", "access: ok via=ctx-access"]);
+    // Issue #238: 経路名に加えて、役割と管理者の出どころの固定トークンが付く(アドレスは出ない)
+    expect(lines).toEqual([
+      "access: ok via=header role=admin admins=fallback",
+      "access: ok via=cookie role=admin admins=fallback",
+      "access: ok via=ctx-access role=admin admins=fallback",
+    ]);
   });
 
   it("拒否時は理由コードだけが出る。トークン・メール・チーム名・AUD は出ない", async () => {
     const { key, deps, lines, token } = await setup();
     const stranger = await signToken(key, { email: "stranger@example.com" });
-    await handle(req("/", { token: stranger }), envOf(), {}, deps);
+    const expired = await signToken(key, { exp: 1 });
+    await handle(req("/", { token: expired }), envOf(), {}, deps);
     await handle(req("/", { token }), envOf({ ACCESS_AUD: undefined }), {}, deps);
     await handle(req("/"), envOf(), {}, deps);
+    // Issue #238(契約変更): 旧 `header:email-mismatch` の行は、別のメールが閲覧者として通るようになったので無い(ok の行になる)
+    await handle(req("/", { token: stranger }), envOf(), {}, deps);
     expect(lines).toEqual([
-      "access: denied reason=header:email-mismatch",
+      "access: denied reason=header:expired",
       "access: denied reason=config-missing",
       "access: denied reason=no-credentials",
+      "access: ok via=header role=viewer admins=fallback",
     ]);
     const all = lines.join("\n");
     for (const secret of [token, stranger, EMAIL, "stranger@example.com", TEAM, AUD]) {

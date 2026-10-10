@@ -186,13 +186,14 @@ describe("POST /api/results/import: 正常系", () => {
 });
 
 describe("POST /api/results/import: 認証・Origin・形式（/api/analyses/run と同じ守り）", () => {
-  it("認証なし・別メールは 403 で、D1 も DO も呼ばない", async () => {
+  // Issue #238(契約変更): 別メール(閲覧者)の本文は、認証なしの `forbidden` ではなく管理者専用の固定の本文(`admin-only`)で 403。D1 も DO も呼ばないことは同じ。
+  it("認証なし・別メール(閲覧者)は 403 で、D1 も DO も呼ばない", async () => {
     const { deps, stranger } = await setup();
-    for (const token of [undefined, stranger]) {
+    for (const [token, body] of [[undefined, "forbidden"], [stranger, JSON.stringify({ ok: false, error: { type: "admin-only" } })]] as const) {
       const h = harness();
       const response = await handle(post(GOOD, { token }), h.env(), {}, deps);
       expect(response.status).toBe(403);
-      expect(await response.text()).toBe("forbidden");
+      expect(await response.text()).toBe(body);
       expect(h.binds).toEqual([]);
       expect(h.names).toEqual([]);
     }

@@ -171,6 +171,7 @@ function harness(initialHash: string): Harness {
     return Promise.resolve(respondDefault(init.method, url, init));
   };
   (h as { app: App }).app = createApp({
+    role: "admin",
     fetch: fetchLike,
     now: () => new Date(Date.parse("2026-06-28T00:00:00Z") + timers.now()),
     render: (t, force) => {

@@ -170,13 +170,14 @@ describe("GET /api/settings", () => {
     expect(text).not.toContain("SELECT");
   });
 
-  it("認証なし・許可メール以外は 403(forbidden)で、D1 を引かない", async () => {
+  // Issue #238(契約変更): 管理者でないアカウント(閲覧者)の本文は、認証なしの `forbidden` ではなく管理者専用の固定の本文(`admin-only`)。D1 を引かないことは同じ(設定は GET も管理者だけ)。
+  it("認証なし・管理者でないアカウント(閲覧者)は 403 で、D1 を引かない", async () => {
     const { deps, stranger } = await setup();
-    for (const token of [undefined, stranger]) {
+    for (const [token, body] of [[undefined, "forbidden"], [stranger, JSON.stringify({ ok: false, error: { type: "admin-only" } })]] as const) {
       const f = fakeDb(null);
       const response = await handle(get(token), envOf(f), {}, deps);
       expect(response.status).toBe(403);
-      expect(await response.text()).toBe("forbidden");
+      expect(await response.text()).toBe(body);
       expect(f.sqls).toEqual([]);
     }
   });
@@ -309,13 +310,13 @@ describe("POST /api/settings", () => {
     expect(text).not.toContain("INSERT");
   });
 
-  it("認証なし・許可メール以外は 403(forbidden)で、D1 に触れない(Origin・本文が正しくても)", async () => {
+  it("認証なし・管理者でないアカウント(閲覧者)は 403 で、D1 に触れない(Origin・本文が正しくても。閲覧者の本文は admin-only。Issue #238)", async () => {
     const { deps, stranger } = await setup();
-    for (const token of [undefined, stranger]) {
+    for (const [token, body] of [[undefined, "forbidden"], [stranger, JSON.stringify({ ok: false, error: { type: "admin-only" } })]] as const) {
       const f = fakeDb(null);
       const response = await handle(post(token, FULL), envOf(f), {}, deps);
       expect(response.status).toBe(403);
-      expect(await response.text()).toBe("forbidden");
+      expect(await response.text()).toBe(body);
       expect(f.sqls).toEqual([]);
     }
   });

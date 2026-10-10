@@ -163,9 +163,16 @@ describe("書き込み先(renderPage の出力との対応。page.ts の改名�
   });
 
   it("renderPage の出力に、class=who の p の中の class=email の span があり、そこにメールアドレス(エスケープ済み)が入る", () => {
-    const html = renderPage("taro@example.com");
+    const html = renderPage("taro@example.com", "admin");
     expect(html).toMatch(/<p class="who">[^<]*<span class="email">taro@example\.com<\/span><\/p>/);
     // 該当する span は 1 つだけ(querySelector が別の要素を拾わない)
+    expect(html.match(/class="email"/g)).toHaveLength(1);
+    expect(html.match(/class="who"/g)).toHaveLength(1);
+  });
+
+  it("Issue #238: 閲覧者の出力でも、書き込み先(.who .email)は 1 つだけで、メールの span の中身はメールアドレスのまま(「閲覧専用」は別の span)", () => {
+    const html = renderPage("taro@example.com", "viewer");
+    expect(html).toMatch(/<p class="who">[^<]*<span class="email">taro@example\.com<\/span> <span class="role">閲覧専用<\/span><\/p>/);
     expect(html.match(/class="email"/g)).toHaveLength(1);
     expect(html.match(/class="who"/g)).toHaveLength(1);
   });

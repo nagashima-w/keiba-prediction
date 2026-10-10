@@ -1,7 +1,7 @@
 # Issue #161(#21-C)のクラウド版の Worker の設定。
 #
 # ★公開リポジトリのため、メールアドレス・Access のチーム名・AUD はここにも書かない。
-#   これらは Worker の secret(ACCESS_TEAM_NAME / ACCESS_AUD / ACCESS_ALLOWED_EMAIL)として、
+#   これらは Worker の secret(ACCESS_TEAM_NAME / ACCESS_AUD / ACCESS_ALLOWED_EMAIL と、任意の ADMIN_USER〈管理者。Issue #238〉)として、
 #   ユーザーがダッシュボードで登録する。secret は wrangler deploy で消えない
 #   (vars にするとダッシュボードの値は次のデプロイで上書きされる)。
 #   したがって [vars] も `secrets.required` も置かない(未設定なら Worker が全リクエストに 403 を返す)。

@@ -1035,8 +1035,30 @@ Cloudflare Worker による**クラウド版**(`cloud/`。pnpm workspace の外�
 [`cloud/README.md`](../cloud/README.md))。exe(Windows アプリ)とは独立で、既存の動作は変わらない。
 
 ### 土台(#161)
-Cloudflare Access(Google ログイン)の JWT を Worker 自身も検証する認証の関門(許可したメール1件以外・設定が欠けているときは理由を含まない 403)、
+Cloudflare Access(Google ログイン)の JWT を Worker 自身も検証する認証の関門(署名・iss・aud・exp とメールの有無。設定が欠けているときは理由を含まない 403。**#238 以降、検証に通ったアカウントは閲覧者として受け入れ、管理者だけを secret で指定する**。下の「閲覧者と管理者」)、
 スマホ画面の `GET /`・`GET /app.js`(#184)、確認フォームの `GET /check`、`GET /api/health`、承認印付き push のときだけ本番に出す `.github/workflows/deploy-cloud.yml`。
+
+### 閲覧者と管理者(#238。認証の節)
+**誰がログインできるかは Cloudflare Access のポリシーだけで決まる。** Worker は JWT の検証(`access-jwt.ts`: RS256 固定・iss・aud・exp・nbf・email クレームの存在)に通ったアカウントを**すべて閲覧者(viewer)として受け入れ**、
+secret `ADMIN_USER` に載ったアドレスだけを**管理者(admin)**にする。閲覧者の一覧は Worker に持たない。旧仕様(`ACCESS_ALLOWED_EMAIL` の 1 件と一致しなければ全ルート 403。`email-mismatch`)は廃止した。
+Worker 側のメール照合という二重の守りは無くなり、**閲覧者の関門は Access のポリシーだけ**になる(ポリシーを「誰でも」にしない。README の「閲覧者と管理者」)。AUD の検証は残る(同じチームの別アプリの JWT は通らない)。
+- **管理者の決め方**(`parseAdminUsers`・`roleOf`。`access-jwt.ts`):
+  - `ADMIN_USER` が**未登録**(`undefined`、または `trim()` が空)のあいだ: 管理者は `ACCESS_ALLOWED_EMAIL`(移行期間のフォールバック。`admins=fallback`)。
+  - 登録済み: カンマで分割し、各項目を `normalizeEmail`(ASCII だけ小文字化・前後の空白除去)して、形が正しい項目(空白・`@`・`,`・`;` を含まない文字列で挟んだ 1 個の `@`)だけを管理者にする。空の項目・重複は捨てる(`admins=configured`)。
+  - **登録済みで有効な項目が 0 件**(セミコロン・空白・改行区切り、文字列でない値など)なら**管理者なし**(全員が閲覧者。`ACCESS_ALLOWED_EMAIL` にもフォールバックしない。`admins=none`)。`ADMIN_USER` の不備は設定全体を無効にしない(閲覧者を締め出さない)。
+  - `ACCESS_ALLOWED_EMAIL` は**必須のまま**(欠落・`@` なしは `config-missing`/`config-invalid` で全拒否)。`ADMIN_USER` が有効なときは、管理者の判定には使われない。
+  - 役割は**検証済みのメールと管理者の一覧の完全一致**だけで決める(JWT のメールは分割も部分一致もしない)。メールが文字列でない・判定中に例外が起きたら viewer。ヘッダ・クッキー・`ctx.access` のどの経路でも同じ判定。
+- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 18 + パターン 2 = 20 ルート)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
+  **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
+  - 閲覧者に許す(9 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`。
+  - 管理者だけ(11 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/verify`。
+  - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
+  - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
+- **画面**: サーバが `renderPage(email, role)` で `#app` に `data-role="admin|viewer"` を渡す(インラインスクリプトは使えないため属性。`client/main.ts` が `roleFromAttribute` で読み、欠落・不明は viewer)。
+  閲覧者には「ログイン中」の行に「閲覧専用」、一覧の「検証」「設定」の入口、レース画面の分析の実行ボタン、日報の作成ボタン(と、ボタンに言及する案内)を出さない。`#settings`・`#verify`・`#migration` を直接開いても API を取らず、
+  固定文言「管理者だけが使えます」と一覧へ戻るリンクだけを出す。**画面で隠すのは補助で、拒否はサーバ側**。`test/client-app-viewer.test.ts` が、閲覧者の画面(と押せる操作)が出す要求がすべて表で viewer に足りることを、表(`requiredRole`)に直接つないで固定する。
+- **ログ**: `access: ok via=<経路> role=<admin|viewer> admins=<fallback|configured|none>`(アドレスは出さない)。拒否の `access: denied reason=…` は不変(`email-mismatch` の理由コードは無くなった)。
+- 検査: `test/access-jwt.test.ts`(`ADMIN_USER` の解釈・役割の判定のテーブル)・`test/authenticate.test.ts`・`test/route-policy.test.ts`(手書きの表と静的ガード)・`test/handler-roles.test.ts`(`handle()` を実際に呼ぶ)・`test/client-*.test.ts`・smoke(B・C・J・K・L)。
 
 ### netkeiba の取得の現状(#162 段階2。v1.19.5)
 **netkeiba への全取得は、Durable Object `NetkeibaGate`(SQLite バックエンド)の単一インスタンスを経由する。** Workers の `fetch` は CloudFront から

@@ -50,6 +50,8 @@ export interface RaceModelInput {
   readonly result?: ResultSource;
   /** 発走前のカードの結果が開いているか(Issue #188)。省略は開(既定)。 */
   readonly resultOpen?: boolean;
+  /** 閲覧者(Issue #238)。分析の実行ボタンを出さない(カードと状態は同じ)。省略は false(管理者)。 */
+  readonly readOnly?: boolean;
 }
 
 /**
@@ -83,7 +85,8 @@ export interface TaskCard {
   readonly mode: TaskMode;
   /** そのカードが何をするかの説明(1〜2行。定数。板の状態に依らず出す。Issue #191)。 */
   readonly description: string;
-  readonly button: RunButton;
+  /** 起動のボタン。閲覧者(`readOnly`。Issue #238)は null(ボタンを出さない)。 */
+  readonly button: RunButton | null;
   /** 起動の失敗の固定の文言(そのカードだけ)。 */
   readonly runError: string | null;
   /** 「すでに実行中」の注記(409 のあと、板が実行中の間だけ)。 */
@@ -199,6 +202,7 @@ function card(
   priorNotice: string | null,
   result: ResultSource | undefined,
   resultOpen: boolean,
+  readOnly: boolean,
 ): TaskCard {
   const raceId = route.race!;
   const found = pick(rows, raceId, mode);
@@ -208,7 +212,7 @@ function card(
   return {
     mode,
     description: CARD_DESCRIPTIONS[mode],
-    button: { label: runButtonLabel(mode, found?.status, sending), disabled: sending || isRunning(found?.status), date: route.date, raceId, mode },
+    button: readOnly ? null : { label: runButtonLabel(mode, found?.status, sending), disabled: sending || isRunning(found?.status), date: route.date, raceId, mode },
     runError: run?.kind === "error" ? run.message : null,
     runInfo: run?.kind === "already" && isRunning(found?.status) ? "すでに実行中です。状態を追跡します。" : null,
     priorNotice: mode === "morning" ? priorNotice : null,
@@ -225,7 +229,7 @@ export function buildRaceModel(input: RaceModelInput): RaceModel {
   const prior = status.kind === "ready" ? status.prior : null;
   const cards =
     status.kind === "ready"
-      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true))
+      ? (["morning", "pre_race"] as const).map((mode) => card(route, status.rows, status.prior, mode, input.runs?.get(mode), status.priorNotice ?? null, input.result, input.resultOpen ?? true, input.readOnly === true))
       : null;
   return {
     kind: "race",

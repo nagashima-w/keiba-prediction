@@ -91,6 +91,7 @@ function harness(initialHash: string): Harness {
     app: undefined as never,
   };
   (h as { app: App }).app = createApp({
+    role: "admin",
     fetch: fetchLike,
     now: () => new Date("2026-06-28T00:00:00Z"),
     render: (tree, force) => void renders.push({ tree, force: force === true }),
@@ -180,6 +181,7 @@ describe("設定画面を開く", () => {
     let hash = "";
     let latest: VNode | null = null;
     const app = createApp({
+      role: "admin",
       fetch: async (url, init) => {
         calls.push(`${init.method} ${url}`);
         if (url.startsWith("/api/races")) return ok({ ok: true, kaisai_date: "20260628", venue: "central", races: [] });
@@ -512,6 +514,7 @@ describe("追跡のポーリング中も、打っている欄を壊さない", (
     let hash = "";
     const board = { ok: true, kaisai_date: "20260628", races: [{ race_id: "202603020211", mode: "morning", status: "queued", attempts: 0, error: null, queued_at: 1, updated_at: 2, prior: false, analysis_id: null, detail: null, children_ok: null }] };
     const app = createApp({
+      role: "admin",
       fetch: async (url, init) => {
         calls.push(`${init.method} ${url}`);
         if (url.startsWith("/api/races")) return ok({ ok: true, kaisai_date: "20260628", venue: "central", races: [] });

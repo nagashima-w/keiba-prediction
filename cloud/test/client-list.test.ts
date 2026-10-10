@@ -291,3 +291,19 @@ describe("見出しの要約(summarizeGroup。レース単位)", () => {
     expect(buildListModel(input({ list: { kind: "ready", races: [R1] }, board: { kind: "none" } })).groups[0]!.summary).toBeNull();
   });
 });
+
+describe("Issue #238: 閲覧者(readOnly)の一覧: 検証・設定への入口を出さない(日報への入口は残す)", () => {
+  it("管理者(既定)は 3 つの入口のリンク先を持つ。readOnly は検証・設定が null で、日報は残る。一覧そのもの(場・レース)は同じ", () => {
+    const races = [race("202603020211")];
+    const admin = buildListModel(input({ list: { kind: "ready", races } }));
+    expect(admin.settingsHref).toBe("#settings");
+    expect(admin.verifyHref).toBe("#verify");
+    expect(admin.reportHref).toBe("#report");
+    const viewer = buildListModel(input({ list: { kind: "ready", races }, readOnly: true }));
+    expect(viewer.settingsHref).toBeNull();
+    expect(viewer.verifyHref).toBeNull();
+    expect(viewer.reportHref).toBe("#report");
+    expect(viewer.groups).toEqual(admin.groups);
+    expect(viewer.groups).toHaveLength(1);
+  });
+});

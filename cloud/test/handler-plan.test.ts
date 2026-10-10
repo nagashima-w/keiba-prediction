@@ -161,16 +161,24 @@ function get(path: string, token?: string, init: { method?: string; headers?: Re
 const sortedKeys = (o: unknown): string[] => Object.keys(o as Record<string, unknown>).sort();
 
 describe("GET /api/plan(Issue #206 G-E3)", () => {
-  it("認証なし・別メールは 403 で、DO を呼ばない(開く = 表を作ることもしない)", async () => {
-    const { deps, stranger } = await setup();
+  it("認証なしは 403 で、DO を呼ばない(開く = 表を作ることもしない)", async () => {
+    const { deps } = await setup();
     const f = fakePlanDay();
-    for (const token of [undefined, stranger]) {
-      const response = await handle(get(`/api/plan?kaisai_date=${DATE}`, token), envOf(f), {}, deps);
-      expect(response.status).toBe(403);
-      expect(await response.text()).toBe("forbidden");
-    }
+    const response = await handle(get(`/api/plan?kaisai_date=${DATE}`, undefined), envOf(f), {}, deps);
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("forbidden");
     expect(f.names).toEqual([]);
     expect(f.calls).toEqual([]);
+  });
+
+  // Issue #238(契約変更): 旧「別メールは 403 で DO を呼ばない」は、「別メール(閲覧者)は読み取りの GET /api/plan を使える」に変わった(閲覧者の読み取りの許可。管理者専用の拒否は handler-roles.test.ts)
+  it("別メール(閲覧者)は GET /api/plan を読める(200。読み取りの RPC 4 つだけ)", async () => {
+    const { deps, stranger } = await setup();
+    const f = fakePlanDay();
+    const response = await handle(get(`/api/plan?kaisai_date=${DATE}`, stranger), envOf(f), {}, deps);
+    expect(response.status).toBe(200);
+    expect(f.names).toEqual([DATE]);
+    expect([...f.calls].sort()).toEqual(["getAutoRunResults", "getNotifications", "getPlanProgress", "getResultImportProgress"]);
   });
 
   it("開催日の DO(名前は開催日)の読み取りの RPC 4 つだけを呼び、200 で計画・結果・通知・結果の取り込みを返す。キャッシュしない", async () => {

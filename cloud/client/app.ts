@@ -64,7 +64,9 @@ import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftVal
 import { createMigrationScreen } from "./migration-screen";
 import { createVerifyScreen } from "./verify-screen";
 import { createReportScreen } from "./report-screen";
-import { buildHash, parseHash, screenOf, type Route, type Venue } from "./route";
+import { buildHash, parseHash, screenOf, type Route, type Screen, type Venue } from "./route";
+import { buildAdminOnlyModel } from "./admin-only";
+import { isAdmin, type Role } from "./role";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
 import { renderScreen } from "./view";
 import type { VNode } from "./vnode";
@@ -82,6 +84,11 @@ export interface AppDeps {
   readonly isVisible: () => boolean;
   /** 画面に制御を返す(移行ファイルの検証が主スレッドを占有し続けないように。本番は `setTimeout(0)`。省略は何もしない)。Issue #222。 */
   readonly yieldToUi?: () => Promise<void>;
+  /**
+   * 役割(Issue #238。サーバが `#app` の `data-role` で渡す)。**閲覧者(`admin` 以外のすべて)には、設定・検証への入口・分析の実行ボタン・日報の作成ボタンを出さず、
+   * 設定・検証・移行の画面を直接開いても API を取らずに案内だけを出す**。画面で隠すのは補助で、拒否はサーバ側(403)。
+   */
+  readonly role: Role;
 }
 
 export interface App {
@@ -111,8 +118,25 @@ function assertNever(screen: never): never {
 /** prior の取り直しに失敗したときの注記の前置き(カードは残す)。 */
 const PRIOR_NOTICE_PREFIX = "順位を取得できませんでした。";
 
+/** 管理者だけの画面(Issue #238)。閲覧者が開いたときは、API を取らずに案内だけを出す(`admin-only`)。 */
+const ADMIN_SCREENS: ReadonlySet<Screen> = new Set<Screen>(["settings", "migration", "verify"]);
+
+/** 今の画面(Issue #238)。route から決まる画面に、役割で決まる `admin-only` を足したもの。 */
+type AppScreen = Screen | "admin-only";
+
 export function createApp(deps: AppDeps): App {
   let route: Route = parseHash(deps.getHash(), todayJst(deps.now()));
+  /** 管理者か(`admin` の完全一致だけ。それ以外の値は閲覧者)。 */
+  const admin = isAdmin(deps.role);
+
+  /**
+   * 今の画面の判定の**唯一の場所**(Issue #191 の `screenOf` に、Issue #238 の役割を足したもの)。閲覧者が管理者だけの画面(設定・移行・検証)の route に居るときは
+   * `admin-only` を返す。**app.ts の画面ごとの分岐は、すべてこの関数を通す**(`screenOf(route)` を直接使わない)ので、閲覧者は設定・移行・検証の取得も下書きも始めない。
+   */
+  function currentScreen(): AppScreen {
+    const screen = screenOf(route);
+    return !admin && ADMIN_SCREENS.has(screen) ? "admin-only" : screen;
+  }
 
   const races = new Map<string, readonly RaceRow[]>();
   const raceErrors = new Map<string, string>();
@@ -267,6 +291,7 @@ export function createApp(deps: AppDeps): App {
     isVisible: deps.isVisible,
     today: () => todayJst(deps.now()),
     onChange: () => render(),
+    readOnly: !admin,
   });
 
   const actions = {
@@ -290,8 +315,12 @@ export function createApp(deps: AppDeps): App {
   };
 
   function render(force = false): void {
-    const screen = screenOf(route);
+    const screen = currentScreen();
     switch (screen) {
+      case "admin-only": {
+        deps.render(renderScreen(buildAdminOnlyModel(), actions), force);
+        return;
+      }
       case "result": {
         deps.render(renderScreen(buildResultModel({ route, source: analysisSource(route.analysis!) }), actions), force);
         return;
@@ -313,6 +342,7 @@ export function createApp(deps: AppDeps): App {
               tracking: trackingNotice(),
               ...(latestId === null ? {} : { result: analysisSource(latestId) }),
               resultOpen: resultOpenChoices.get(key) ?? true,
+              readOnly: !admin,
             }),
             actions,
           ),
@@ -343,7 +373,7 @@ export function createApp(deps: AppDeps): App {
       case "list": {
         deps.render(
           renderScreen(
-            buildListModel({ route, list: listSource(), board: boardSource(), boardLoading: boardInflight.has(route.date), tracking: trackingNotice(), choices: openChoices.get(listKey(route.date, route.venue)) }),
+            buildListModel({ route, list: listSource(), board: boardSource(), boardLoading: boardInflight.has(route.date), tracking: trackingNotice(), choices: openChoices.get(listKey(route.date, route.venue)), readOnly: !admin }),
             actions,
           ),
           force,
@@ -371,7 +401,7 @@ export function createApp(deps: AppDeps): App {
 
   function onCompleted(c: BoardCompletion): void {
     const key = raceKey(c.date, c.raceId);
-    const onThisRace = screenOf(route) === "race" && route.race === c.raceId && route.date === c.date;
+    const onThisRace = currentScreen() === "race" && route.race === c.raceId && route.date === c.date;
     if (c.mode === "morning") {
       if (raceStatusInflight.has(key)) statusRefetchPending.add(key);
       else if (onThisRace) startStatusFetch(c.date, c.raceId, "refresh");
@@ -486,7 +516,7 @@ export function createApp(deps: AppDeps): App {
    * 呼ぶのは `ensureLoaded` と `applyBoard` だけ(`render()` からは呼ばない)。
    */
   function syncLatestAnalysis(): void {
-    if (screenOf(route) !== "race") return;
+    if (currentScreen() !== "race") return;
     const raceId = route.race!;
     const status = raceStatusSource(raceKey(route.date, raceId), route.date);
     if (status.kind !== "ready") return;
@@ -496,8 +526,10 @@ export function createApp(deps: AppDeps): App {
 
   /** 今の画面に必要なものを、無ければ取りに行く。結果画面は分析 1 本だけ・レース画面は状態と過去の分析だけ(一覧・板は取らない)。 */
   function ensureLoaded(): void {
-    const screen = screenOf(route);
+    const screen = currentScreen();
     switch (screen) {
+      case "admin-only":
+        return; // 閲覧者が管理者だけの画面を開いた: 何も取らない(案内だけ)
       case "result":
         loadAnalysis(route.analysis!);
         return;
@@ -566,7 +598,7 @@ export function createApp(deps: AppDeps): App {
 
   /** 入力欄の変更。**下書きを書くだけで、再描画しない**(入力中の欄・フォーカスを壊さない)。保存中・取得前は無視。 */
   function onSettingsInput(key: string, value: string): void {
-    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
+    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
     settingsDraft = setDraftValue(settingsDraft, key as FieldKey, value);
     // 「保存しました」の通知は、未保存の入力が生まれた時点で状態から外す(描画はしない。次の描画から出さない)。
     if (settingsSave.kind === "saved") settingsSave = { kind: "idle" };
@@ -578,14 +610,14 @@ export function createApp(deps: AppDeps): App {
    * 下書きが無い(取得前・失敗)・保存中は無視する(入力を無視するのと同じ)。
    */
   function onSettingsPreviewToggle(open: boolean): void {
-    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
+    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
     settingsPreviewOpen = open;
     render(true);
   }
 
   /** 「入力中の内容を反映」(Issue #201): 開いているときだけ。強制描画で写しを現在の下書きへ更新し、プレビューの文面を入力に追いつかせる。 */
   function onSettingsPreviewRefresh(): void {
-    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving" || !settingsPreviewOpen) return;
+    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving" || !settingsPreviewOpen) return;
     render(true);
   }
 
@@ -595,7 +627,7 @@ export function createApp(deps: AppDeps): App {
    * 下書きが無い(取得前・失敗)・保存中は無視する。
    */
   function onSettingsWeightsReset(): void {
-    if (screenOf(route) !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
+    if (currentScreen() !== "settings" || settingsDraft === null || settingsSave.kind === "saving") return;
     settingsDraft = resetWeightsInDraft(settingsDraft);
     const remaining: Partial<Record<FieldKey, string>> = { ...settingsErrors };
     for (const key of WEIGHT_FIELD_ORDER) delete remaining[key];
@@ -605,7 +637,7 @@ export function createApp(deps: AppDeps): App {
   }
 
   function onSettingsSave(): void {
-    if (screenOf(route) !== "settings" || settingsLoad?.kind !== "ready" || settingsDraft === null || settingsSave.kind === "saving") return;
+    if (currentScreen() !== "settings" || settingsLoad?.kind !== "ready" || settingsDraft === null || settingsSave.kind === "saving") return;
     const checked = validateDraft(settingsDraft);
     if (!checked.ok) {
       settingsErrors = checked.errors;
@@ -664,6 +696,7 @@ export function createApp(deps: AppDeps): App {
   // ---- 起動 ----
 
   function onRun(date: string, raceId: string, mode: TaskMode): void {
+    if (!admin) return; // 閲覧者(Issue #238)には起動のボタンが無い。万一呼ばれても POST しない(サーバも 403)
     const key = runKey(date, raceId, mode);
     if (runStates.get(key)?.kind === "sending") return; // 同期の印(await の前)。二重押しを防ぐ
     runStates.set(key, { kind: "sending" });
@@ -710,15 +743,15 @@ export function createApp(deps: AppDeps): App {
   // ---- 画面の操作 ----
 
   function onHashChange(): void {
-    const wasSettings = screenOf(route) === "settings";
-    const wasMigration = screenOf(route) === "migration";
-    const wasVerify = screenOf(route) === "verify";
-    const wasReport = screenOf(route) === "report";
+    const wasSettings = currentScreen() === "settings";
+    const wasMigration = currentScreen() === "migration";
+    const wasVerify = currentScreen() === "verify";
+    const wasReport = currentScreen() === "report";
     route = parseHash(deps.getHash(), todayJst(deps.now()));
-    if (wasSettings && screenOf(route) !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
-    if (wasMigration && screenOf(route) !== "migration") migration.leave(); // 移行の状態(検証・タイマー・遅れて届く応答)を破棄する
-    if (wasVerify && screenOf(route) !== "verify") verify.leave(); // 検証の状態(タイマー・遅れて届く応答)を破棄する
-    if (wasReport && screenOf(route) !== "report") report.leave(); // 日報の状態(タイマー・遅れて届く応答)を破棄する
+    if (wasSettings && currentScreen() !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
+    if (wasMigration && currentScreen() !== "migration") migration.leave(); // 移行の状態(検証・タイマー・遅れて届く応答)を破棄する
+    if (wasVerify && currentScreen() !== "verify") verify.leave(); // 検証の状態(タイマー・遅れて届く応答)を破棄する
+    if (wasReport && currentScreen() !== "report") report.leave(); // 日報の状態(タイマー・遅れて届く応答)を破棄する
     ensureLoaded();
     render();
   }
@@ -749,8 +782,10 @@ export function createApp(deps: AppDeps): App {
   }
 
   function onRefresh(): void {
-    const screen = screenOf(route);
+    const screen = currentScreen();
     switch (screen) {
+      case "admin-only":
+        return; // 取るものが無い(案内だけ)
       case "result": {
         // 失敗した分析だけを取り直す(成功した分析は再取得しない=R2 の操作回数を使わない)。取得中は何もしない。
         const id = route.analysis!;

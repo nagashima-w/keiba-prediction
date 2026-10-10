@@ -266,7 +266,7 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
     };
     const root = new FakeRoot();
     const render = createMounter(doc, root);
-    const app = createApp({ fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => `#date=${DATE}&venue=central`, setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
+    const app = createApp({ role: "admin", fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => `#date=${DATE}&venue=central`, setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
     app.start();
     await app.whenIdle();
     const dateInput = () => allElements(root.children[0] as FakeElement).find((e) => e.tag === "input")!;
@@ -288,7 +288,7 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
     const root = new FakeRoot();
     const render = createMounter(doc, root);
     const hashState = { hash: `#date=${DATE}&venue=central` };
-    const app = createApp({ fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => hashState.hash, setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
+    const app = createApp({ role: "admin", fetch: fetchStub, now: () => new Date("2026-06-28T00:00:00Z"), render, getHash: () => hashState.hash, setHash: () => {}, timers: { set: () => 0, clear: () => {} }, isVisible: () => true });
     app.start();
     await app.whenIdle();
     expect(root.children).toHaveLength(1);

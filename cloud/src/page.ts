@@ -70,7 +70,13 @@ export const APP_CSP = "default-src 'none'; script-src 'self'; connect-src 'self
 /** 確認ページ(`GET /check`)の CSP(旧 `/` のまま。スクリプトは無い)。 */
 export const CHECK_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
-export function renderPage(email: string): string {
+/**
+ * スマホ画面(`GET /`)。**役割(Issue #238)は `#app` の `data-role` で画面に渡す**(インラインスクリプトは使えないので、`main.ts` が読む)。
+ * admin 以外はすべて viewer として描く(型を破った呼び出しでも、管理者の印は出さない)。閲覧者には「ログイン中」の行に固定文言「閲覧専用」を出す
+ * (ボタンが無い理由が分かるように。管理者には何も足さない)。**画面で隠すのは補助で、拒否はサーバ側(route-policy.ts と handler.ts)が行う**。
+ */
+export function renderPage(email: string, role: "admin" | "viewer"): string {
+  const viewer = role !== "admin";
   return `<!doctype html>
 <html lang="ja">
 <head>
@@ -90,6 +96,8 @@ export function renderPage(email: string): string {
   .home { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-decoration: none; }
   .who { margin: 0 0 12px; font-size: 0.85rem; color: var(--muted); }
   .email { font-weight: bold; }
+  /* Issue #238: 閲覧者の印(ボタンが無い理由。色だけに頼らず文字で出す) */
+  .role { margin-left: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; font-size: 0.8rem; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
   .date { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--muted); }
   input[type="date"] { font-size: 1rem; min-height: 44px; padding: 0 8px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
@@ -233,8 +241,8 @@ export function renderPage(email: string): string {
 <body>
 <main>
 <h1><a class="home" href="#">Uma Driller</a></h1>
-<p class="who">ログイン中: <span class="email">${escapeHtml(email)}</span></p>
-<div id="app" aria-live="polite">読み込み中…</div>
+<p class="who">ログイン中: <span class="email">${escapeHtml(email)}</span>${viewer ? ' <span class="role">閲覧専用</span>' : ""}</p>
+<div id="app" data-role="${viewer ? "viewer" : "admin"}" aria-live="polite">読み込み中…</div>
 <noscript><p>この画面には JavaScript が必要です。JavaScript を有効にしてください。</p></noscript>
 </main>
 <script src="/app.js" defer></script>

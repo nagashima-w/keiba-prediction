@@ -337,8 +337,8 @@ describe("起動のボタン(文言・disabled・渡す値)", () => {
     it(`${mode}・${status ?? "行なし"} → 「${label}」(disabled: ${disabled})`, () => {
       const rows = status === undefined ? [] : [row(RACE_ID, mode, status)];
       const card = cards(buildRaceModel(input({ status: { kind: "ready", rows, prior: null } }))).find((c) => c.mode === mode)!;
-      expect(card.button.label).toBe(label);
-      expect(card.button.disabled).toBe(disabled);
+      expect(card.button!.label).toBe(label);
+      expect(card.button!.disabled).toBe(disabled);
       expect(runButtonLabel(mode, status, false)).toBe(label);
     });
   }
@@ -374,7 +374,7 @@ describe("起動の失敗・すでに実行中・prior の注記・追跡の注�
     const [morning, preRace] = cards(buildRaceModel(input({ runs })));
     expect(preRace!.runError).toBe("起動に失敗した");
     expect(morning!.runError).toBeNull();
-    expect(preRace!.button.disabled).toBe(false);
+    expect(preRace!.button!.disabled).toBe(false);
   });
 
   it("「すでに実行中」の注記は、板の状態が実行中(queued・fetched)の間だけ出る。完了・失敗に変われば出さない", () => {
@@ -462,5 +462,18 @@ describe("カードの説明(Issue #191)", () => {
 
   it("状態を取得できていない(cards が null)ときは、説明も出ない(カードが無いので)", () => {
     expect(buildRaceModel(input({ status: { kind: "loading" } })).cards).toBeNull();
+  });
+});
+
+describe("Issue #238: 閲覧者(readOnly)のレース画面: 分析の実行ボタンを出さない(カードと状態は同じ)", () => {
+  it("管理者(既定)のカードにはボタンがある。readOnly は 2 枚とも button が null で、ほかの項目は管理者と同じ", () => {
+    const status = { kind: "ready" as const, rows: [row(RACE_ID, "morning", "done", { prior: true }), row(RACE_ID, "pre_race", "failed", { error: "失敗" })], prior: PRIOR };
+    const admin = cards(buildRaceModel(input({ status })));
+    expect(admin).toHaveLength(2);
+    expect(admin.every((c) => c.button !== null)).toBe(true);
+    const viewer = cards(buildRaceModel(input({ status, readOnly: true })));
+    expect(viewer).toHaveLength(2);
+    expect(viewer.every((c) => c.button === null)).toBe(true);
+    expect(viewer.map(({ button: _b, ...rest }) => rest)).toEqual(admin.map(({ button: _b, ...rest }) => rest));
   });
 });
