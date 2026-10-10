@@ -103,6 +103,9 @@ describe("Issue #238: 役割の印(サーバが画面に渡す。画面で隠す
       const html = renderPage(EMAIL, role);
       expect(html.match(/data-role=/g)).toHaveLength(1);
       expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
+    }
+  });
+});
 
 /**
  * Issue #239: 色だけで状態を伝えない。文字のない所(通知の枠・カードのエラー文・警告)には、CSS の `::before` で記号を添える。

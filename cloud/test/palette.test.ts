@@ -135,18 +135,21 @@ describe("Issue #239 R2: 色の直書きが無い(<style> 全体で、16 進・r
   const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "");
   const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/;
 
-  const style = (): string => {
-    const css = /<style>([\s\S]*?)<\/style>/.exec(renderPage("owner@example.com"))?.[1];
+  const style = (role: "admin" | "viewer"): string => {
+    const css = /<style>([\s\S]*?)<\/style>/.exec(renderPage("owner@example.com", role))?.[1];
     expect(css, "<style> が1つある").toBeDefined();
     return css!;
   };
 
-  it("paletteCss() の出力を除くと、色のリテラルが1つも残らない(後ろに `:root { --fail: #…; }` や直書きの色を足すと赤くなる)", () => {
-    const css = style();
-    expect(css).toContain(paletteCss()); // 前提: 取り除く対象が実際に含まれている(含まれなければ下の検査が空振りする)
-    const rest = withoutComments(css.replace(paletteCss(), ""));
-    expect(rest.match(new RegExp(COLOR_LITERAL, "g")) ?? []).toEqual([]);
-  });
+  // Issue #238 以降、画面は役割(admin・viewer)で HTML が変わる(「閲覧専用」の `.role` など)。<style> は同じはずだが、役割ごとに検査する。
+  for (const role of ["admin", "viewer"] as const) {
+    it(`${role}: paletteCss() の出力を除くと、色のリテラルが1つも残らない(後ろに \`:root { --fail: #…; }\` や直書きの色を足すと赤くなる)`, () => {
+      const css = style(role);
+      expect(css).toContain(paletteCss()); // 前提: 取り除く対象が実際に含まれている(含まれなければ下の検査が空振りする)
+      const rest = withoutComments(css.replace(paletteCss(), ""));
+      expect(rest.match(new RegExp(COLOR_LITERAL, "g")) ?? []).toEqual([]);
+    });
+  }
 
   it("検査が効く: 色のリテラルの検出が、16 進・rgb()・hsl() を拾う", () => {
     for (const sample of ["a { color: #b3261e; }", ":root { --fail: #f00; }", "a { color: rgb(1,2,3); }", "a { color: hsl(0 50% 50%); }"]) {

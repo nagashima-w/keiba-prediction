@@ -3425,3 +3425,8 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - 変更は `cloud/` だけ(認証の役割の判定・ルート × 役割の表・画面の出し分け・smoke・README)。exe(packages/app)・core の挙動と数値は変わらない。D1 のスキーマ・API の応答の形は変えていない(major ではない)。
 - **互換**: `ADMIN_USER` が未登録のあいだは `ACCESS_ALLOWED_EMAIL` の人が管理者のまま(既存の構成は、閲覧者が 0 人のときと同じ動作)。`ACCESS_ALLOWED_EMAIL` は必須のまま。変わる点は、**Access のポリシーを通ったアカウントがすべて閲覧者になる**こと(Worker 側のメール照合という二重の守りは無くなる)ので、公開前に Access のポリシーに利用者以外が入っていないことの確認が要る(`cloud/README.md` の「閲覧者と管理者」)。
 - bundle は 215,562(#240 の後)から再計測した値を `cloud/test/client-bundle.test.ts` に書いた。上限 235,000 は据え置き。
+
+## 次の正式版が 1.40.0 である根拠(Issue #239 での変更)
+- **分類: minor**。クラウド版の配色を、P 型・D 型・T 型の色覚でも状態(完了・待機・失敗、Discord の帯の緑・橙・赤・灰)の区別が残るカラーユニバーサルデザインにした。web の状態色(`--ok --wait --fail`。ライト・ダーク)と Discord の帯の色(ok・warn・fail)を置き換え、色だけで状態を伝えていた所に記号(web の通知枠・カードのエラー・警告に「⚠ ✓ …」)と語(Discord の日報の成績に「(黒字)(赤字)(収支±0)」)を足した。**cloud の利用者に見える表示が変わる**ので minor(新しい機能の追加ではなく既存表示の変更だが、機能追加の minor と同じく「利用者から見て挙動が変わる」ため。patch ではない)。
+- 変更は `cloud/` だけ(`src/palette.ts` 新設・`page.ts`・`notify-embeds.ts`・`daily-report-embed.ts`・テスト)と `docs/current-spec.md`。exe(packages/app)・core の挙動と数値は変わらない(exe の Discord の通知の色は旧配色のまま)。クライアントの束・API の応答・D1 のスキーマ・設定の互換も変えていない(major ではない)。
+- bundle は #238 の後の 217,221 バイトのまま増分 0(クライアントの TS は無変更。`build:client` で再生成して生成物に差分が無いことを確認した)。上限 235,000 までの余裕は 17,779 バイト。
