@@ -10,7 +10,9 @@
  * `sendDiscordNotification` は `JSON.stringify` するだけなので、そのまま通る。
  */
 import { buildAnalysisEmbed, truncate, type DiscordEmbed, type EmbedHorse, type EmbedRaceInfo } from "../../packages/core/src/notify/discord";
-import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
+import type { AnalysisAllocationMetaRecord, AnalysisAllocationRecord, AnalysisBetRecord, AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
+import type { SkipReasonCode } from "../../packages/core/src/ev/combo-bet-allocation";
+import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
 import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
 import type { PlanProgress } from "./race-day-core";
@@ -24,6 +26,11 @@ export interface EmbedField {
 /** core の `DiscordEmbed` に `fields` を足したもの。 */
 export interface CloudEmbed extends DiscordEmbed {
   readonly fields?: readonly EmbedField[];
+  /**
+   * タイトルのリンク先(Issue #230。分析画面)。**文字数の上限の対象外**で、{@link fitEmbed} の切り詰めでも落ちない(description の末尾に書くと、収まらないときに失われる)。
+   * 材料(`payload_json`)には入れず、**送信の直前に**足す(サイトの URL を DO の状態に残さない・secret を後から登録しても未送信分に反映される)。
+   */
+  readonly url?: string;
 }
 
 /** Discord の embed の上限(文字数。UTF-16 の `.length` で数える。コードポイントより保守側)。 */
@@ -114,8 +121,9 @@ export function fitEmbed(embed: CloudEmbed): CloudEmbed {
   while (total() > EMBED_LIMITS.total && fields.length > 0) {
     fields.pop();
   }
-  const out: { title?: string; description?: string; color?: number; fields?: EmbedField[] } = {};
+  const out: { title?: string; url?: string; description?: string; color?: number; fields?: EmbedField[] } = {};
   if (title !== undefined) out.title = title;
+  if (embed.url !== undefined) out.url = embed.url;
   if (description !== undefined) out.description = description;
   if (embed.color !== undefined) out.color = embed.color;
   if (embed.fields !== undefined) {
@@ -208,6 +216,157 @@ export function buildMinimalAnalysisEmbed(label: RaceLabel): CloudEmbed {
   });
 }
 
+// ---- 印の付いた馬・買い目の field(Issue #230)----
+
+/**
+ * 印の並び順。**正は core の `PREDICTION_MARKS`**(◎〇▲△☆注。「〇」は U+3007)。web の画面(`cloud/client/result.ts` の `KNOWN_MARK_ORDER`)と同じ順で、
+ * `test/notify-embeds.test.ts` が値を固定する(core の parse-response をここに引き込まない)。
+ */
+export const MARK_ORDER: readonly string[] = ["◎", "〇", "▲", "△", "☆", "注"];
+
+/** 馬名の上限(core の embed の馬の行と同じ 32 コードポイント)。 */
+const MARK_NAME_MAX = 32;
+
+const NO_MARKS_TEXT = "印の付いた馬はありません";
+
+const markRank = (mark: string): number => {
+  const i = MARK_ORDER.indexOf(mark);
+  return i === -1 ? MARK_ORDER.length : i;
+};
+
+/** 印の付いた馬の field。印の順 → 馬番の昇順(web の結果画面の一覧と同じ)。印の無い馬(null・空白だけ)は載せない。 */
+function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, string | null>): EmbedField {
+  const marked = record.horses
+    .flatMap((h) => (h.mark === null || h.mark.trim() === "" ? [] : [{ umaban: h.umaban, mark: h.mark as string }]))
+    .sort((a, b) => markRank(a.mark) - markRank(b.mark) || a.umaban - b.umaban);
+  if (marked.length === 0) {
+    return { name: "印", value: NO_MARKS_TEXT };
+  }
+  const lines = marked.map((h) => {
+    const name = names.get(h.umaban);
+    return name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${truncate(name, MARK_NAME_MAX)}`;
+  });
+  return { name: "印", value: lines.join("\n") };
+}
+
+/** 配分の状態(exe の `buildAllocationProposalView` の `kind` と同じ分類。パリティは `test/notify-allocation-parity.test.ts`)。 */
+export type AllocationKind = "no-record" | "unset" | "yoso" | "unavailable" | "invalid" | "skip" | "allocated" | "indeterminate";
+
+export function allocationKindOf(allocation: AnalysisAllocationRecord | undefined): AllocationKind {
+  if (allocation === undefined) return "no-record";
+  switch (allocation.meta.route) {
+    case "unset":
+      return "unset";
+    case "yoso":
+      return "yoso";
+    case "unavailable":
+      return "unavailable";
+    case "invalid":
+      return "invalid";
+    case "place-only":
+    case "mixed":
+      if (allocation.meta.skipReasonCode !== null) return "skip";
+      return allocation.bets.length === 0 ? "indeterminate" : "allocated";
+    default:
+      return "indeterminate";
+  }
+}
+
+/** 未設定(unset)の内訳。exe の注記の選び方(`unsetNotices`)と同じ: 総資金・上限が 0 以下か。 */
+export function unsetKindOf(meta: Pick<AnalysisAllocationMetaRecord, "bankroll" | "perRaceCap">): "both" | "bankroll" | "cap" | "indeterminate" {
+  const bankrollUnset = meta.bankroll <= 0;
+  const capUnset = meta.perRaceCap <= 0;
+  return bankrollUnset && capUnset ? "both" : bankrollUnset ? "bankroll" : capUnset ? "cap" : "indeterminate";
+}
+
+const UNSET_TEXTS = {
+  both: "総資金と1レースの上限が未設定のため、配分の提案は出ていません",
+  bankroll: "総資金が未設定のため、配分の提案は出ていません",
+  cap: "1レースの上限が未設定のため、配分の提案は出ていません",
+  indeterminate: "配分の提案は出ていません(未設定の状態を判定できません)",
+} as const;
+
+/** 見送りの理由(core の `SkipReasonCode` の 6 分類。`Record` なので、分類が増えると型検査が落ちる)。文は core の見送りの文言の短縮。 */
+const SKIP_REASON_TEXTS: Readonly<Record<SkipReasonCode, string>> = {
+  "bankroll-unset": "総資金が未設定です",
+  "cap-unset": "1レースの上限が未設定です",
+  "cap-too-small": "1レースの上限が最小賭け金単位を下回ります",
+  "kelly-zero": "ケリー係数が0です",
+  "no-candidates": "EVプラスの買い目がありません",
+  "no-edge": "妙味が小さく、賭ける価値のある配分が見つかりませんでした",
+};
+
+function skipText(code: string | null): string {
+  const reason = code === null ? undefined : (SKIP_REASON_TEXTS as Readonly<Record<string, string | undefined>>)[code];
+  return reason === undefined ? "見送り(買い目はありません)" : `見送り(${reason})`;
+}
+
+/** 券種のラベル(exe の `betTypeLabel` と同じ。8 券種。未知はそのまま)。 */
+const BET_TYPE_LABELS: Readonly<Record<string, string>> = {
+  place: "複勝",
+  win: "単勝",
+  wide: "ワイド",
+  quinella: "馬連",
+  bracketQuinella: "枠連",
+  exacta: "馬単",
+  trio: "三連複",
+  trifecta: "三連単",
+};
+
+/** 券種の表示順(同額のときの並び。exe の `BET_TYPE_ORDER` と同じ。未知は末尾)。 */
+const BET_TYPE_ORDER: Readonly<Record<string, number>> = { place: 0, win: 1, wide: 2, quinella: 3, bracketQuinella: 4, exacta: 5, trio: 6, trifecta: 7 };
+
+/** 組合せの表記(exe の `comboLabelOf`・`formatComboBetLabel` と同じ)。読めない comboKey はそのまま。 */
+function comboLabelOf(comboKey: string, betType: string): string {
+  const numbers = parseComboOddsKey(comboKey);
+  if (numbers === null) return comboKey;
+  if (betType === "exacta" || betType === "trifecta") return numbers.join("→");
+  if (betType === "bracketQuinella") return `枠${numbers.join("-")}`;
+  return numbers.length === 1 ? `${numbers[0]}番` : numbers.join("-");
+}
+
+export interface AllocationBetRow {
+  readonly betTypeLabel: string;
+  readonly comboLabel: string;
+  readonly stake: number;
+  /** 「1,000円」(exe の `formatYen` と同じ)。 */
+  readonly stakeText: string;
+}
+
+/** 買い目の行。**金額の大きい順**(同額は券種の表示順 → comboKey の昇順)。web の画面は券種順だが、Discord は収まらないときに末尾から落とすので、大きい金額を先に出す。 */
+export function allocationBetRows(bets: readonly AnalysisBetRecord[]): AllocationBetRow[] {
+  const rank = (betType: string): number => BET_TYPE_ORDER[betType] ?? 99;
+  return [...bets]
+    .sort((a, b) => b.stake - a.stake || rank(a.betType) - rank(b.betType) || (a.betType < b.betType ? -1 : a.betType > b.betType ? 1 : 0) || (a.comboKey < b.comboKey ? -1 : a.comboKey > b.comboKey ? 1 : 0))
+    .map((b) => ({ betTypeLabel: BET_TYPE_LABELS[b.betType] ?? b.betType, comboLabel: comboLabelOf(b.comboKey, b.betType), stake: b.stake, stakeText: `${b.stake.toLocaleString("en-US")}円` }));
+}
+
+/** 買い目の field。配分があれば name に点数と合計(行が落ちても合計は欠けない)、無ければ状態ごとの固定文。 */
+function buildAllocationField(allocation: AnalysisAllocationRecord | undefined): EmbedField {
+  const kind = allocationKindOf(allocation);
+  switch (kind) {
+    case "allocated": {
+      const rows = allocationBetRows(allocation!.bets);
+      const total = rows.reduce((sum, r) => sum + r.stake, 0);
+      return { name: `買い目(${rows.length}点・合計${total.toLocaleString("en-US")}円)`, value: rows.map((r) => `${r.betTypeLabel} ${r.comboLabel} ${r.stakeText}`).join("\n") };
+    }
+    case "unset":
+      return { name: "買い目", value: UNSET_TEXTS[unsetKindOf(allocation!.meta)] };
+    case "yoso":
+      return { name: "買い目", value: "オッズが未発売のため、配分の提案は出ていません" };
+    case "unavailable":
+      return { name: "買い目", value: "複勝が配分の対象外のため、配分の提案は出ていません" };
+    case "invalid":
+      return { name: "買い目", value: "配分の計算でエラーが起きたため、配分の提案は出ていません" };
+    case "skip":
+      return { name: "買い目", value: skipText(allocation!.meta.skipReasonCode) };
+    case "no-record":
+      return { name: "買い目", value: "配分の記録がありません" };
+    case "indeterminate":
+      return { name: "買い目", value: "配分の状態を判定できません" };
+  }
+}
+
 // ---- 分析の完了 ----
 
 const ODDS_STATUSES: readonly string[] = ["result", "middle", "yoso"];
@@ -281,7 +440,9 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   }));
   const base = buildAnalysisEmbed(raceInfo, horses);
   const description = outcome.note === null ? base.description : `${base.description ?? ""}\nLLM補正の注記: ${outcome.note}`;
-  return fitEmbed({ ...base, ...(description === undefined ? {} : { description }) });
+  // 印の付いた馬 → 買い目の順(収まらないときは末尾の買い目から縮める)。EV プラスの馬の行(description)は core のまま残す。
+  const fields: EmbedField[] = [buildMarksField(record, snapshot.names), buildAllocationField(record.allocation)];
+  return fitEmbed({ ...base, ...(description === undefined ? {} : { description }), fields });
 }
 
 // ---- 朝のまとめ ----

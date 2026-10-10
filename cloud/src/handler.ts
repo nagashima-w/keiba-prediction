@@ -8,6 +8,7 @@ import type { AccessEnv } from "./access-jwt";
 import { D1AnalysisStore, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT, type AnalysisBucket, type AnalysisDb } from "./analysis-repository";
 import { checkD1 } from "./d1-health";
 import { webhookStatus } from "./notify-send";
+import { resolveAppBaseUrl } from "./notify-link";
 import { remoteKeys } from "./access-jwt";
 import { authenticate, type AccessContextLike } from "./authenticate";
 import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
@@ -136,6 +137,8 @@ export interface Env extends AccessEnv {
   ANTHROPIC_API_KEY?: string;
   /** 通知(Discord。Issue #205)の Webhook URL(Worker の secret。ユーザーが登録する)。ここでは「通知に使える形で登録されているか」だけを `/api/health` に返す(値は返さない)。 */
   DISCORD_WEBHOOK_URL?: string;
+  /** 通知のタイトルのリンク(分析画面)の基点(Worker の secret。ユーザーが登録する。Issue #230)。https のオリジンだけ有効。ここでは「リンクに使える形で登録されているか」だけを `/api/health` に返す(値は返さない)。 */
+  APP_BASE_URL?: string;
 }
 
 export interface HandlerDeps {
@@ -264,7 +267,10 @@ export async function handle(
     // Issue #205: Webhook(Worker の secret DISCORD_WEBHOOK_URL)が**通知に使える形で登録されているか**だけを返す(値・長さ・一部は返さない)。形式が Discord の Webhook でないものは false
     // (通知が送られないものを true にしない。false は「未登録」か「形式が不正」)。ok には含めない(通知が無くても、分析は動く)。
     const discord = webhookStatus(env.DISCORD_WEBHOOK_URL) === "valid";
-    return json({ ok, durableObject: { sqlite }, d1: { ok: d1.ok }, secrets: { anthropic, discord } }, ok ? 200 : 503);
+    // Issue #230: 通知のリンクの基点(Worker の secret APP_BASE_URL)が**リンクに使える形(https のオリジン)で登録されているか**だけを返す(値・長さ・一部は返さない)。形式が不正なものは false
+    // (リンクに使われないものを true にしない。false は「未登録」か「形式が不正」)。ok には含めない(リンクが無くても、通知は送られる)。
+    const appBaseUrl = resolveAppBaseUrl(env.APP_BASE_URL).status === "valid";
+    return json({ ok, durableObject: { sqlite }, d1: { ok: d1.ok }, secrets: { anthropic, discord, appBaseUrl } }, ok ? 200 : 503);
   }
 
   if (pathname === "/api/netkeiba/check") {

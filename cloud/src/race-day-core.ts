@@ -72,6 +72,7 @@ import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scrap
 import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
+import { buildAnalysisLink } from "./notify-link";
 import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
 import { FAILURE_COOLDOWN_MS, planNotifications, SEND_SPACING_MS, type NotificationPlan, type NotifyItem, type NotifyKind, type NotifyState } from "./notify-plan";
 import { classifyNotifyError, type DiscordNotifier } from "./notify-send";
@@ -266,6 +267,11 @@ export interface RaceDayDeps {
    * **webhook が未登録・形式不正なら渡さない**: 通知の行も材料も積まず、通知のためのアラームも張らない。
    */
   readonly notifier?: DiscordNotifier;
+  /**
+   * 通知のリンクの基点(Issue #230。検証済みのオリジン。Worker の secret `APP_BASE_URL` を DO のラッパが {@link resolveAppBaseUrl} で検証して渡す)。**無ければ、リンクなしで通知する**。
+   * **材料(`payload_json`)には入れず、送信の直前にだけ使う**(サイトの URL を DO の状態に残さない・後から登録しても、未送信の材料にリンクが付く)。値はログに出さない。
+   */
+  readonly appBaseUrl?: string;
   /**
    * 結果の保存先(Issue #208。DO のラッパが `D1ResultStore` で実装する)。**無ければ `requestResultImport` を拒否し、計画の確定でも結果の行を積まない**(結果の仕組み全体が無効)。発走前の分析の保存先(`sink`)とは独立。
    * 使うのは `saveResult`(取り込みのステップ)と `getRaceResultDetails`(Issue #209: 発走前の計算ステップが、前のレースの結果から当日傾向を作る。無い構成は当日傾向なし)。
@@ -564,6 +570,7 @@ export class RaceDayCore {
   private readonly notifyStore: NotifyStore;
   /** Discord への送信。無ければ(webhook が無効)通知の仕組み全体が無効。 */
   private readonly notifier: DiscordNotifier | undefined;
+  private readonly appBaseUrl: string | undefined;
   /** 結果の取り込みの表(Issue #208。新しい表だけ)。 */
   private readonly results: ResultImportStore;
   /** 結果の保存先。無ければ結果の仕組み全体が無効。 */
@@ -607,6 +614,7 @@ export class RaceDayCore {
     // 通知の表(Issue #205。新しい表だけ。既存の表には ALTER しない)。
     this.notifyStore = new NotifyStore(this.sql);
     this.notifier = deps.notifier;
+    this.appBaseUrl = deps.appBaseUrl;
     // 結果の取り込みの表(Issue #208。新しい表だけ。既存の表には ALTER しない)。
     this.results = new ResultImportStore(this.sql);
     this.resultStore = deps.resultStore;
@@ -1136,7 +1144,7 @@ export class RaceDayCore {
     }
     let errorClass: string | null = null;
     try {
-      await this.notifier!.send({ embeds: [JSON.parse(payloadJson) as CloudEmbed] });
+      await this.notifier!.send({ embeds: [this.withAnalysisLink(JSON.parse(payloadJson) as CloudEmbed, item, analysisId)] });
     } catch (error) {
       errorClass = classifyNotifyError(error);
     }
@@ -1147,6 +1155,24 @@ export class RaceDayCore {
       this.onWarn(`Discord への通知に失敗しました(${item.key}。分類: ${errorClass}。再送しません)`);
     }
     return outcomeOf_(errorClass === null ? "ok" : "failed");
+  }
+
+  /**
+   * 分析の通知の embed に、タイトルのリンク(分析画面)を足す(Issue #230)。**送信の直前**に足す(材料には URL を入れない)。
+   * 足すのは分析の通知(`kind: "analysis"`)で、基点(`appBaseUrl`)があり、分析 id が分かるときだけ。それ以外は embed のまま(リンクなしで通知する)。
+   * 開催日は日のメタ(`kaisai_date`)、会場区分は計画の行(`venue`。行が無ければ中央)から取る。
+   */
+  private withAnalysisLink(embed: CloudEmbed, item: NotifyItem, analysisId: number | null): CloudEmbed {
+    if (this.appBaseUrl === undefined || item.kind !== "analysis" || analysisId === null) {
+      return embed;
+    }
+    const link = buildAnalysisLink(this.appBaseUrl, {
+      date: this.metaGet("kaisai_date") ?? "",
+      venue: this.plan.planRow(item.raceId)?.venue === "nar" ? "nar" : "central",
+      raceId: item.raceId,
+      analysisId,
+    });
+    return link === undefined ? embed : { ...embed, url: link };
   }
 
   /**

@@ -51,7 +51,7 @@ pnpm exec wrangler d1 migrations apply DB --local   # D1 の migration をロー
 - **テスト**(`test/d1-schema.test.ts`): 実コマンドで migration を適用したローカル(workerd)の D1 を `getPlatformProxy` で開き、外部キーと索引(`EXPLAIN QUERY PLAN`)を確かめる。
   ★**同じ SQL の文字列で `EXPLAIN QUERY PLAN` を繰り返すと、索引を DROP した後も古い実行計画が返る**(ローカルの D1 で実測)ので、テストは毎回文字列を変えている。
   ローカルの D1 は「1回の呼び出しで 50 クエリ」の制限を**強制しない**(bind 変数 100 個の制限は強制する)。本番の D1 とは別ビルドの SQLite でありうるので、`/api/health`(下)と最初の本番の実保存(#164 以降)で本番の挙動を確かめる。
-- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic, discord } }`。DO と D1 は独立に確認し、どちらかが駄目なら 503(理由・例外の文面は返さない)。`secrets.anthropic` は、Worker の secret `ANTHROPIC_API_KEY` が**登録されているか**(空白だけは未登録)の boolean だけで、**値・長さ・一部は返さない**。`ok` の判定には含めない(キーが無くても、分析は LLM なしで動く)。`secrets.discord`(Issue #205)は、Worker の secret `DISCORD_WEBHOOK_URL` が**通知に使える形(Discord の Webhook の URL)で登録されているか**の boolean だけ(値・長さ・一部は返さない。`false` は「未登録」か「形式が不正」。`ok` には含めない)。**デプロイ後の実機確認**: Access でログインしたブラウザで `/api/health` を開き、`d1.ok` が `true` であること(キーを登録したあとは `secrets.anthropic` も `true`)
+- **`GET /api/health`**: `{ ok, durableObject: { sqlite }, d1: { ok }, secrets: { anthropic, discord, appBaseUrl } }`。DO と D1 は独立に確認し、どちらかが駄目なら 503(理由・例外の文面は返さない)。`secrets.anthropic` は、Worker の secret `ANTHROPIC_API_KEY` が**登録されているか**(空白だけは未登録)の boolean だけで、**値・長さ・一部は返さない**。`ok` の判定には含めない(キーが無くても、分析は LLM なしで動く)。`secrets.discord`(Issue #205)は、Worker の secret `DISCORD_WEBHOOK_URL` が**通知に使える形(Discord の Webhook の URL)で登録されているか**の boolean だけ(値・長さ・一部は返さない。`false` は「未登録」か「形式が不正」。`ok` には含めない)。`secrets.appBaseUrl`(Issue #230)は、Worker の secret `APP_BASE_URL` が**通知のリンクに使える形(https のオリジン)で登録されているか**の boolean だけ(値・長さ・一部は返さない。`false` は「未登録」か「形式が不正」。`ok` には含めない)。**デプロイ後の実機確認**: Access でログインしたブラウザで `/api/health` を開き、`d1.ok` が `true` であること(キーを登録したあとは `secrets.anthropic` も `true`)
   (`false` なら、migration が本番の D1 に適用されていないか、binding が繋がっていない。ワークフローのログの「D1 の migration を本番に適用」を見る)。
 - **容量の見積もり**: `pnpm tsx scripts/measure-d1-size.ts`(結果と N は `docs/current-spec.md` の「クラウド版の D1 の容量の見積もり」)。
 
@@ -130,6 +130,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 | `ACCESS_ALLOWED_EMAIL` | 許可するメールアドレス(1件) |
 | `ANTHROPIC_API_KEY` | 発走前の分析の LLM の API キー(Issue #194〈#179-b〉)。**登録は任意**: 未登録なら、LLM を使わず統計のみで保存し、理由「LLM の API キーが未登録のため…」を画面用に D1(`analyses.llm_note`)へ残す(分析は止まらない)。登録の手順は、この表の下の「`ANTHROPIC_API_KEY` の登録」 |
 | `DISCORD_WEBHOOK_URL` | 定時の自動実行(#166)の通知(Discord)の Webhook URL(Issue #205〈#166-D〉)。**登録は任意**: 未登録・形式不正なら、通知の仕組み全体が無効(通知の行も材料も積まず、通知のためのアラームも張らない。分析は止まらない)。**Issue #206 で cron が有効になった**ので、登録すれば、次の朝 9:00(日本時間)の自動実行から Discord に通知が届く。登録の手順は、この表の下の「`DISCORD_WEBHOOK_URL` の登録」 |
+| `APP_BASE_URL` | 通知のタイトルのリンク(分析画面)の基点となる、このサイトの URL(Issue #230)。**登録は任意**: 未登録・形式不正なら、通知にリンクが付かないだけ(通知自体は送られる。分析も止まらない)。**https のオリジンだけ**有効(例は `https://<あなたのサイトのホスト名>`。パス・クエリ・`#`・ユーザー名とパスワードを含むものは「形式不正」)。登録の手順は、この表の下の「`APP_BASE_URL` の登録」 |
 
 未設定の間は、Worker が全リクエストに 403 を返す(これが正しい動作)。
 
@@ -150,8 +151,19 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 - **方法2: wrangler**: ユーザーが自分の端末で、`cloud/` に移って `pnpm exec wrangler secret put DISCORD_WEBHOOK_URL` を実行し、**対話の入力欄**に URL を入力する(コマンドの引数や環境変数に URL を書かない)。
 - **形式**: `https://discord.com/api/webhooks/` か `https://discordapp.com/api/webhooks/` で始まる URL だけが有効(それ以外は「形式不正」で、通知は送られない)。前後の空白・末尾の改行(貼り付けで付く)は、Worker が取り除いて使う。空白だけの値は「未登録」と同じ扱い。
 - **確認**: Access でログインしたブラウザで `/api/health` を開き、`secrets.discord` が `true` になっていること(値は表示されない)。**`false` は「未登録」か「形式が不正」のどちらか**(区別は返さない)。**secret は `wrangler deploy` で消えない**。登録・更新・削除すると、Worker に新しいデプロイが作られ、次に DO が起きたときから反映される。
-- **反映のされ方**: 登録した**あと**に完了した発走前の分析から通知される(登録前に完了したレースは通知しない)。通知は、発走前の分析の結果(狙い目あり・なし・LLM なしの理由つき)・失敗(赤)・手動の分析があって自動を見送ったとき(灰色)と、朝のまとめ(1日に1回)。**手動の分析では通知しない**。送信が失敗しても自動では再送しない(分析は失敗にならない)。
+- **反映のされ方**: 登録した**あと**に完了した発走前の分析から通知される(登録前に完了したレースは通知しない)。通知は、発走前の分析の結果(狙い目あり・なし・LLM なしの理由つき。**印の付いた馬の一覧と買い目〈配分〉も載る**: Issue #230。買い目は金額の大きい順で、収まらない分は「…ほか N 件」。配分が未設定のときは、その旨の一文)・失敗(赤)・手動の分析があって自動を見送ったとき(灰色)と、朝のまとめ(1日に1回)。**手動の分析では通知しない**。送信が失敗しても自動では再送しない(分析は失敗にならない)。
 - **削除**(通知を止めたいとき): ダッシュボードで `DISCORD_WEBHOOK_URL` を削除する(または `wrangler secret delete DISCORD_WEBHOOK_URL`)。Webhook を Discord 側で削除・再作成したときも、古い URL は 404 で失敗する(通知は failed になるだけ)ので、新しい URL に更新する。
+- **GitHub Actions の「Secrets の存在を確認」とは別物**: 上の `ANTHROPIC_API_KEY` と同じ(Worker の secret は CI から見えない・触らない)。
+
+### `APP_BASE_URL` の登録(通知のリンクの基点。ユーザーが自分で行う)
+- **サイトの URL は、チャット・Issue・コミット・リポジトリのどこにも書かない**(公開リポジトリのため。下の2つの方法は、どちらも URL をユーザー自身の画面・端末で入力する)。Claude や CI に渡す必要は無い。
+- **何のために使うか**: Discord の「発走前の分析」の通知のタイトルが、その分析の画面へのリンクになる(`<サイトの URL>/#date=…&venue=…&race=…&analysis=…`)。印の付いた馬の一覧と買い目(配分)は通知に載るが、詳しい根拠(LLM の根拠・強調材料・懸念事項・全馬の数値)は、リンク先の画面で見る。
+- **入れる値**: このサイトを開くときの URL の、**オリジン**(`https://` から、ホスト名まで。ポートがあれば含む)。例は `https://<あなたのサイトのホスト名>`。末尾の `/`、前後の空白・改行(貼り付けで付く)は Worker が取り除く。`http://`、パス(`/app` など)、クエリ(`?…`)、`#…`、ユーザー名とパスワード(`https://user:pass@…`)を含むものは**形式不正**で、リンクは付かない。
+- **方法1: ダッシュボード**: Workers & Pages > 対象の Worker(`keiba-cloud`)> 設定 > 変数とシークレット > 追加。**名前は `APP_BASE_URL`**、**種類は「シークレット」**(「テキスト」にすると次のデプロイで上書きされる)、値の欄に URL を入力して保存・デプロイする。
+- **方法2: wrangler**: ユーザーが自分の端末で、`cloud/` に移って `pnpm exec wrangler secret put APP_BASE_URL` を実行し、**対話の入力欄**に URL を入力する(コマンドの引数や環境変数に URL を書かない)。
+- **確認**: Access でログインしたブラウザで `/api/health` を開き、`secrets.appBaseUrl` が `true` になっていること(値は表示されない)。**`false` は「未登録」か「形式が不正」のどちらか**(区別は返さない。形式が不正なときは、DO の起動時に警告が1行出る。値は出さない)。**secret は `wrangler deploy` で消えない**。登録・更新・削除すると、Worker に新しいデプロイが作られ、次に DO が起きたときから反映される。
+- **反映のされ方**: リンクは**送信の直前**に付ける(通知の材料には URL を保存しない)。そのため、登録した**あと**に送られる通知には、登録前に作られた(まだ送っていない)通知にもリンクが付く。**すでに送った通知は変わらない**。リンクが付くのは発走前の分析の通知だけ(失敗・手動の分析で見送り・朝のまとめには付かない)。サイトを開くときは Cloudflare Access のログインが要る(リンクを知っていても、許可されたメールアドレス以外は開けない)。
+- **削除**(リンクを付けたくないとき): ダッシュボードで `APP_BASE_URL` を削除する(または `wrangler secret delete APP_BASE_URL`)。以後の通知は、リンクなしで送られる。
 - **GitHub Actions の「Secrets の存在を確認」とは別物**: 上の `ANTHROPIC_API_KEY` と同じ(Worker の secret は CI から見えない・触らない)。
 
 ## 初回セットアップ(ユーザー作業)

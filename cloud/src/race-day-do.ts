@@ -15,6 +15,7 @@ import { D1AnalysisStore, type AnalysisBucket, type AnalysisDb } from "./analysi
 import { createAnalysisSink } from "./analysis-sink";
 import { createCloudLlm } from "./llm-sender";
 import { createDiscordNotifier, webhookStatus } from "./notify-send";
+import { resolveAppBaseUrl } from "./notify-link";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
@@ -45,6 +46,11 @@ export interface RaceDayEnv {
    * 未登録・形式不正なら通知の仕組み全体を無効にする(材料も行も積まず、通知のためのアラームも張らない)。URL は `createDiscordNotifier` のクロージャの中にだけあり、`RaceDayCore` には渡らない。
    */
   DISCORD_WEBHOOK_URL?: string;
+  /**
+   * 通知のタイトルのリンク(分析画面)の基点(Issue #230。Worker の secret。**ユーザーがダッシュボードまたは wrangler で登録する**。サイトの URL はリポジトリ・チャットに書かない)。
+   * https のオリジンだけ有効。未登録・形式不正ならリンクを付けない(通知は送る)。検証済みの値だけを `RaceDayCore` に渡し、材料(`payload_json`)には入れない(送信の直前に足す)。値はログに出さない。
+   */
+  APP_BASE_URL?: string;
   NETKEIBA_GATE: {
     idFromName(name: string): any;
     get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
@@ -60,6 +66,10 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
     if (webhookStatus(env.DISCORD_WEBHOOK_URL) === "invalid") {
       console.warn("DISCORD_WEBHOOK_URL の形式が Discord の Webhook ではないため、通知は送りません(値は出しません)");
     }
+    const appBase = resolveAppBaseUrl(env.APP_BASE_URL);
+    if (appBase.status === "invalid") {
+      console.warn("APP_BASE_URL の形式が https のオリジン(パス・クエリ・認証情報なし)ではないため、通知にリンクは付けません(値は出しません)");
+    }
     this.core = new RaceDayCore({
       sql: ctx.storage.sql,
       now: () => Date.now(),
@@ -72,6 +82,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       llm: createCloudLlm(env.ANTHROPIC_API_KEY),
       // 通知(Issue #205)。Webhook が未登録・形式不正なら undefined(通知は無効)。
       notifier: createDiscordNotifier(env.DISCORD_WEBHOOK_URL),
+      // 通知のリンクの基点(Issue #230)。検証済みのオリジンだけを渡す(未登録・形式不正は undefined = リンクなしで通知する)。
+      appBaseUrl: appBase.status === "valid" ? appBase.origin : undefined,
       // 結果の取り込み(Issue #208)。D1 に結果を保存する（exe の AnalysisStore.saveResult と同じ 4 表。1 レース 1 batch・最大 5 文）。
       resultStore: new D1ResultStore({ db: env.DB }),
       loadSettings: async () => {

@@ -578,6 +578,27 @@ describe("LLM の入口と SDK のバンドル(Issue #193)", () => {
 });
 
 /**
+ * Issue #230: 通知のリンク(APP_BASE_URL)の配線。本番のバンドル(worker.ts)に、RaceDay が検証済みのオリジンを `RaceDayCore` に渡す行そのものが入っている。
+ * 文字列 "APP_BASE_URL" だけの検査では handler.ts の health の参照に当たるので、配線が外れても気づけない。配線の行そのものを検査する。
+ */
+describe("通知のリンクのバンドル(Issue #230)", () => {
+  // 末尾の `undefined` は含めない(esbuild が `void 0` に書き換えるため。配線の行の前半は、バンドルにそのまま残る)。
+  const LINK_WIRING_LINE = 'appBaseUrl: appBase.status === "valid" ? appBase.origin :';
+
+  it(
+    "本番のバンドルに、RaceDay のリンクの配線の行があり、handler.ts には無い(health の参照とは別の文字列)",
+    () => {
+      const doSource = readFileSync(path.join(CLOUD, "src", "race-day-do.ts"), "utf-8");
+      const handlerSource = readFileSync(path.join(CLOUD, "src", "handler.ts"), "utf-8");
+      expect(doSource.includes(LINK_WIRING_LINE), "race-day-do.ts に配線の行がある").toBe(true);
+      expect(handlerSource.includes(LINK_WIRING_LINE), "handler.ts には配線の行が無い").toBe(false);
+      expect(bundle(null, "worker.js").includes(LINK_WIRING_LINE), "本番のバンドルに配線の行がある").toBe(true);
+    },
+    120_000,
+  );
+});
+
+/**
  * Issue #205(#166-D): 通知(Discord)の配線。本番のバンドル(worker.ts)に、RaceDay の通知の配線(`notifier: createDiscordNotifier(env.DISCORD_WEBHOOK_URL)` の行そのもの)・通知の表・core の Discord クライアントが入っていて、
  * better-sqlite3 と本物の undici は入っていない(undici はスタブ。Worker では必ずグローバルの fetch を注入する)。
  * 文字列 "DISCORD_WEBHOOK_URL" だけの検査では、handler.ts の health の参照に当たるので、配線が外れても気づけない。配線の行そのものを検査する。

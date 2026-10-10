@@ -469,6 +469,90 @@ describe("G-D6: webhook を後から登録した場合", () => {
   });
 });
 
+describe("Issue #230: 分析の通知のタイトルのリンク(送信の直前に付ける)", () => {
+  /** 文書用のダミー(example.test は実在しないホスト)。 */
+  const BASE = "https://keiba.example.test";
+  const withBase = (h: Harness, appBaseUrl: string | undefined): RaceDayCore =>
+    new RaceDayCore({
+      sql: h.sql,
+      now: () => h.clock.now,
+      gate: h.gate,
+      setAlarm: (at) => {
+        h.alarm.at = at;
+      },
+      onWarn: (m) => h.warnings.push(m),
+      sink: h.sink,
+      loadSettings: async () => h.settings,
+      notifier: h.notifier,
+      ...(appBaseUrl === undefined ? {} : { appBaseUrl }),
+    });
+  const analysisEmbed = (h: Harness): CloudEmbed => h.notifier.sent.map(embedOf).find((e) => e.title!.includes("福島"))!;
+
+  async function dayWith(appBaseUrl: string | undefined, mutate?: (h: Harness) => void): Promise<Harness> {
+    const h = harness([fixtureRace("15:35")], { overrides: appBaseUrl === undefined ? {} : { appBaseUrl } });
+    h.gate.others = "fixture";
+    await planned(h);
+    mutate?.(h);
+    await drive(h, jst("16:00"));
+    return h;
+  }
+
+  it("APP_BASE_URL がある: 分析の embed のタイトルに url(オリジン/#date=…&venue=central&race=…&analysis=<保存した分析 id>)が付く。朝のまとめには付かない", async () => {
+    const h = await dayWith(BASE);
+    expect(h.notifier.sent).toHaveLength(2); // 前提: 朝のまとめ + 分析
+    expect(analysisEmbed(h).url).toBe(`${BASE}/#date=${DATE}&venue=central&race=${RACE}&analysis=1`);
+    const summary = h.notifier.sent.map(embedOf).find((e) => !e.title!.includes("福島"))!;
+    expect(summary.url).toBeUndefined();
+  });
+
+  it("サイトの URL は、材料(payload_json)にも DO のどの表にも残らない(送信の直前に足すだけ)。分析の id は材料の行(analysis_id)にある", async () => {
+    const h = await dayWith(BASE);
+    expect(notifyRows(h).find((r) => r.key === `race:${RACE}`)!.analysis_id).toBe(1);
+    expect(dumpAllTables(h)).not.toContain("keiba.example.test");
+    expect(h.warnings.join("\n")).not.toContain("keiba.example.test");
+  });
+
+  it("APP_BASE_URL が無い: url は付かない(キーも無い)が、通知は送られる(分析の embed は 2 つの field を持つ)", async () => {
+    const h = await dayWith(undefined);
+    const embed = analysisEmbed(h);
+    expect("url" in embed).toBe(false);
+    expect(embed.fields?.map((f) => f.name.split("(")[0])).toEqual(["印", "買い目"]);
+  });
+
+  it("後から登録した: 登録前に積まれた未送信の材料(ready)にも、登録後の送信ではリンクが付く(材料は URL を持たない)", async () => {
+    const h = harness([fixtureRace("15:35")]);
+    h.gate.others = "fixture";
+    await planned(h);
+    const analysisRow = (): { state: string } | undefined => notifyRows(h).find((r) => r.key === `race:${RACE}`);
+    for (let i = 0; i < 60 && analysisRow()?.state !== "ready"; i += 1) await tick(h);
+    expect(analysisRow()?.state, "前提: 分析の材料が積まれ、まだ送られていない").toBe("ready");
+    expect(h.notifier.sent.map(embedOf).some((e) => e.title!.includes("福島"))).toBe(false);
+    const restarted = withBase(h, BASE); // 登録した(DO が新しいデプロイで起き直した)
+    for (let i = 0; i < 20 && h.alarm.at !== null && h.alarm.at <= jst("16:00"); i += 1) {
+      h.clock.now = Math.max(h.clock.now, h.alarm.at);
+      h.alarm.at = null;
+      await restarted.runNextStep();
+    }
+    expect(analysisRow()?.state).toBe("sent");
+    expect(analysisEmbed(h).url).toBe(`${BASE}/#date=${DATE}&venue=central&race=${RACE}&analysis=1`);
+    expect(dumpAllTables(h)).not.toContain("keiba.example.test");
+  });
+
+  it("地方のレース(計画の行の venue が nar)は venue=nar のリンクになる", async () => {
+    const h = await dayWith(BASE, (x) => x.sql.exec("UPDATE race_day_plan SET venue = 'nar'"));
+    expect(analysisEmbed(h).url).toBe(`${BASE}/#date=${DATE}&venue=nar&race=${RACE}&analysis=1`);
+  });
+
+  it("配分が未設定(既定)の分析: 買い目の field は固定文。印の field もある(印はキー未登録の LLM なしのため『ありません』)", async () => {
+    const h = await dayWith(BASE);
+    const embed = analysisEmbed(h);
+    expect(embed.fields).toEqual([
+      { name: "印", value: "印の付いた馬はありません" },
+      { name: "買い目", value: "総資金と1レースの上限が未設定のため、配分の提案は出ていません" },
+    ]);
+  });
+});
+
 describe("G-D3: 失敗・スキップの通知(固定文)", () => {
   it("failed(blocked): 赤の通知が1通。本文は固定の理由文で、タスクのエラー文(ブレーカーの文面)は載せない。行は sent・kind=failed", async () => {
     const h = harness([central(1, "15:35")]);

@@ -12,6 +12,9 @@ import {
   EMBED_LIMITS,
   failureText,
   fitEmbed,
+  allocationBetRows,
+  allocationKindOf,
+  MARK_ORDER,
   MANUAL_SKIP_TEXT,
   NO_START_TIME_TEXT,
   notificationText,
@@ -19,6 +22,7 @@ import {
   type RaceLabel,
 } from "../src/notify-embeds";
 import type { PlanProgress } from "../src/race-day-core";
+import { allocationRecord, betRecord } from "./allocation-fixtures";
 
 /**
  * Issue #205(#166-D): Discord の通知の embed を組み立てる純関数。
@@ -139,6 +143,26 @@ describe("fitEmbed(AC-D4: 上限の境界値)", () => {
     expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out.description!)).toBe(false);
   });
 });
+
+describe("fitEmbed(Issue #230: タイトルのリンク `url`)", () => {
+  const URL_TEXT = "https://keiba.example.test/#date=20260628&venue=central&race=202603020211&analysis=42";
+
+  it("url は出力に通る。無ければ出力にも無い(undefined のキーを作らない)", () => {
+    expect(fitEmbed({ title: "t", url: URL_TEXT }).url).toBe(URL_TEXT);
+    expect("url" in fitEmbed({ title: "t" })).toBe(false);
+  });
+
+  it("url は embed の長さに数えない(Discord の 6000 の対象は title・description・field の name と value)", () => {
+    expect(embedLength({ title: "t", url: URL_TEXT })).toBe(1);
+  });
+
+  it("全体が 6000 を超えて、description を切り・field を落としても、url は残る(description の末尾に書くとここで失われる)", () => {
+    const out = fitEmbed({ title: "t", url: URL_TEXT, description: "あ".repeat(4096), fields: Array.from({ length: 3 }, (_, i) => ({ name: `f${i}`, value: "い".repeat(1024) })) });
+    expect(embedLength(out)).toBeLessThanOrEqual(6000);
+    expect(out.url).toBe(URL_TEXT);
+  });
+});
+
 
 describe("失敗・手動スキップの通知(G-D3。本文は理由ごとの固定文だけ)", () => {
   it("失敗の embed: 赤。タイトルは「会場 N R レース名」。本文は発走時刻と固定の理由文", () => {
@@ -280,6 +304,162 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
   it("開催日が無い(kaisaiDate が null)ときは、日付を空にせず落ちもしない(メタ行は会場・コースだけ)", () => {
     const out = buildAnalysisNotificationEmbed(record({ kaisaiDate: null }), effective, label());
     expect(out.description).toContain("中山 / 芝1600m");
+  });
+});
+
+// ---- 印の一覧・買い目の field(Issue #230)----
+
+describe("buildAnalysisNotificationEmbed(Issue #230: 印の付いた馬の field)", () => {
+  const effective = { effective: true, note: null } as const;
+  const markedHorse = (umaban: number, mark: string | null): AnalysisRecord["horses"][number] =>
+    ({ umaban, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 2, ev: 0.8, isPositive: false, contributions: null, mark }) as AnalysisRecord["horses"][number];
+  const snapshotOf = (names: readonly (string | null)[]): unknown => ({
+    race: { raceName: "R", courseType: "芝", distance: 1600, oddsStatus: "result" },
+    horses: names.map((name, i) => ({ umaban: i + 1, name })),
+  });
+  const marksField = (out: CloudEmbed): { name: string; value: string } | undefined => out.fields?.find((f) => f.name === "印");
+
+  it("前提: 印の並びは core の PREDICTION_MARKS と同じ(◎〇▲△☆注。クライアントの KNOWN_MARK_ORDER と同じ順)", () => {
+    expect([...MARK_ORDER]).toEqual(["◎", "〇", "▲", "△", "☆", "注"]);
+  });
+
+  it("印の順(◎〇▲△☆注)→ 馬番の昇順。行は「印 馬番 馬名」。EV プラスでない馬・名前の無い馬も載る(名前が無ければ「N番」だけ)", () => {
+    const horses = [markedHorse(1, "△"), markedHorse(2, "◎"), markedHorse(3, "△"), markedHorse(4, null), markedHorse(5, "注"), markedHorse(6, "〇"), markedHorse(7, "☆"), markedHorse(8, "▲")];
+    const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(["ア", "ブ", "チ", "デ", "エ", null, "ジ", "ハ"])), effective, label());
+    expect(marksField(out)?.value.split("\n")).toEqual(["◎ 2番 ブ", "〇 6番", "▲ 8番 ハ", "△ 1番 ア", "△ 3番 チ", "☆ 7番 ジ", "注 5番 エ"]);
+  });
+
+  it("未知の印は既知の印の後ろ(馬番の昇順)。空文字・空白だけ・null の印は載せない", () => {
+    const horses = [markedHorse(1, "★"), markedHorse(2, "  "), markedHorse(3, "◎"), markedHorse(4, ""), markedHorse(5, null), markedHorse(6, "★")];
+    const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(["a", "b", "c", "d", "e", "f"])), effective, label());
+    expect(marksField(out)?.value.split("\n")).toEqual(["◎ 3番 c", "★ 1番 a", "★ 6番 f"]);
+  });
+
+  it("印の付いた馬がいない(LLM なし・印の制約違反): 固定文の field を出す(欄ごと消さない)", () => {
+    const horses = [markedHorse(1, null), markedHorse(2, null)];
+    const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(["a", "b"])), effective, label());
+    expect(marksField(out)?.value).toBe("印の付いた馬はありません");
+  });
+
+  it("馬名は 32 文字(コードポイント)に切る(サロゲートペアを割らない)", () => {
+    const long = "𠮷".repeat(40);
+    const out = buildAnalysisNotificationEmbed(record({ horses: [markedHorse(1, "◎")] }, snapshotOf([long])), effective, label());
+    expect(marksField(out)?.value).toBe(`◎ 1番 ${"𠮷".repeat(31)}…`);
+  });
+
+  it("18 頭すべてに印があっても、field の値は 1024 以内に収まり、embed 全体も 6000 以内", () => {
+    const horses = Array.from({ length: 18 }, (_, i) => markedHorse(i + 1, "△"));
+    const names = Array.from({ length: 18 }, () => "あ".repeat(32));
+    const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(names)), effective, label());
+    expect(marksField(out)!.value.split("\n")).toHaveLength(18); // 前提: 1 頭も落ちていない(退化させない)
+    expect(marksField(out)!.value.length).toBeLessThanOrEqual(1024);
+    expect(embedLength(out)).toBeLessThanOrEqual(6000);
+  });
+
+  it("既存の description(EV プラスの馬の行・メタ・LLM 補正)は、そのまま残る(core の embed を変えない)", () => {
+    const out = buildAnalysisNotificationEmbed(record(), effective, label());
+    expect(out.description).toContain("◎ 1番 アルファ AI補正後42.0% 複勝下限2.5 EV1.05");
+    expect(out.description).toContain("LLM補正: 実行");
+  });
+});
+
+describe("buildAnalysisNotificationEmbed(Issue #230: 買い目の field)", () => {
+  const effective = { effective: true, note: null } as const;
+  const betsField = (out: CloudEmbed): { name: string; value: string } | undefined => out.fields?.find((f) => f.name.startsWith("買い目"));
+  const withAllocation = (allocation: AnalysisRecord["allocation"]): AnalysisRecord => record({ allocation });
+
+  it("field の並びは「印 → 買い目」(収まらないとき、末尾の買い目から縮める)", () => {
+    const out = buildAnalysisNotificationEmbed(withAllocation(allocationRecord({}, [betRecord("place", "01", 500)])), effective, label());
+    expect(out.fields?.map((f) => f.name.split("(")[0])).toEqual(["印", "買い目"]);
+  });
+
+  it("配分あり: 金額の大きい順。name に点数と合計、行は「券種 組合せ 金額」。同額は券種の表示順 → comboKey の昇順", () => {
+    const bets = [
+      betRecord("trio", "010305", 300),
+      betRecord("place", "05", 500),
+      betRecord("wide", "0307", 300),
+      betRecord("place", "03", 300),
+      betRecord("exacta", "1308", 1000),
+    ];
+    const out = buildAnalysisNotificationEmbed(withAllocation(allocationRecord({}, bets)), effective, label());
+    expect(betsField(out)?.name).toBe("買い目(5点・合計2,400円)");
+    expect(betsField(out)?.value.split("\n")).toEqual(["馬単 13→8 1,000円", "複勝 5番 500円", "複勝 3番 300円", "ワイド 3-7 300円", "三連複 1-3-5 300円"]);
+  });
+
+  it("全8券種の表記: 複勝・単勝は「N番」、馬連・ワイド・三連複は「-」、馬単・三連単は「→」(着順を保つ)、枠連は「枠N-M」(同枠も)", () => {
+    const bets = [
+      betRecord("place", "05", 800),
+      betRecord("win", "05", 700),
+      betRecord("wide", "0307", 600),
+      betRecord("quinella", "0307", 500),
+      betRecord("bracketQuinella", "0407", 400),
+      betRecord("bracketQuinella", "0202", 390),
+      betRecord("exacta", "0813", 300),
+      betRecord("trio", "010305", 200),
+      betRecord("trifecta", "130801", 100),
+    ];
+    const rows = allocationBetRows(bets);
+    expect(rows.map((r) => `${r.betTypeLabel} ${r.comboLabel}`)).toEqual(["複勝 5番", "単勝 5番", "ワイド 3-7", "馬連 3-7", "枠連 枠4-7", "枠連 枠2-2", "馬単 8→13", "三連複 1-3-5", "三連単 13→8→1"]);
+  });
+
+  it("未知の券種・読めない comboKey は、そのまま出す(落とさない・投げない)", () => {
+    const rows = allocationBetRows([betRecord("mystery", "xx", 100)]);
+    expect(rows).toEqual([{ betTypeLabel: "mystery", comboLabel: "xx", stake: 100, stakeText: "100円" }]);
+  });
+
+  it("買い目が 1 点だけでも name は「1点・合計…」", () => {
+    const out = buildAnalysisNotificationEmbed(withAllocation(allocationRecord({}, [betRecord("place", "01", 1200)])), effective, label());
+    expect(betsField(out)?.name).toBe("買い目(1点・合計1,200円)");
+    expect(betsField(out)?.value).toBe("複勝 1番 1,200円");
+  });
+
+  it("買い目が 1024 を超えるとき: 末尾(金額の小さい側)から落として「…ほか N 件」。残った行数 + N = 点数。name の合計は落ちた分も含む", () => {
+    const count = 80;
+    const bets = Array.from({ length: count }, (_, i) => betRecord("trifecta", `${String(1 + (i % 8)).padStart(2, "0")}${String(9 + Math.floor(i / 8)).padStart(2, "0")}18`, 1000 - i));
+    const out = buildAnalysisNotificationEmbed(withAllocation(allocationRecord({}, bets)), effective, label());
+    const field = betsField(out)!;
+    const full = allocationBetRows(bets).map((r) => `${r.betTypeLabel} ${r.comboLabel} ${r.stakeText}`).join("\n");
+    expect(full.length, "前提: 全部並べると 1024 を超える(退化させない)").toBeGreaterThan(1024);
+    const lines = field.value.split("\n");
+    const dropped = Number(/^…ほか (\d+) 件$/.exec(lines[lines.length - 1]!)?.[1]);
+    expect(dropped, "落ちた行がある").toBeGreaterThan(0);
+    expect(lines.length - 1 + dropped).toBe(count);
+    expect(field.value.length).toBeLessThanOrEqual(1024);
+    expect(field.name).toBe(`買い目(${count}点・合計${(count * 1000 - (count - 1) * (count / 2)).toLocaleString("en-US")}円)`);
+    expect(lines[0]).toBe("三連単 1→9→18 1,000円"); // 先頭は最大の金額
+  });
+
+  describe("配分が無い・買い目が無い状態: 固定文の field を出す(欄ごと消さない)", () => {
+    it.each([
+      ["記録なし(allocation が無い)", undefined, "no-record", "配分の記録がありません"],
+      ["総資金・上限が両方未設定", allocationRecord({ route: "unset", bankroll: 0, perRaceCap: 0 }), "unset", "総資金と1レースの上限が未設定のため、配分の提案は出ていません"],
+      ["総資金だけ未設定", allocationRecord({ route: "unset", bankroll: 0, perRaceCap: 2000 }), "unset", "総資金が未設定のため、配分の提案は出ていません"],
+      ["1レース上限だけ未設定", allocationRecord({ route: "unset", bankroll: 10000, perRaceCap: 0 }), "unset", "1レースの上限が未設定のため、配分の提案は出ていません"],
+      ["未設定の理由を判定できない(両方とも設定済みなのに unset)", allocationRecord({ route: "unset", bankroll: 10000, perRaceCap: 2000 }), "unset", "配分の提案は出ていません(未設定の状態を判定できません)"],
+      ["オッズ未発売(yoso)", allocationRecord({ route: "yoso" }), "yoso", "オッズが未発売のため、配分の提案は出ていません"],
+      ["複勝が配分の対象外(unavailable)", allocationRecord({ route: "unavailable", unavailableReason: "not-sold" }), "unavailable", "複勝が配分の対象外のため、配分の提案は出ていません"],
+      ["配分の計算でエラー(invalid)", allocationRecord({ route: "invalid" }), "invalid", "配分の計算でエラーが起きたため、配分の提案は出ていません"],
+      ["見送り: 期待値の見込める買い目なし", allocationRecord({ route: "mixed", skipReasonCode: "no-edge" }), "skip", "見送り(妙味が小さく、賭ける価値のある配分が見つかりませんでした)"],
+      ["見送り: 理由コードが未知", allocationRecord({ route: "mixed", skipReasonCode: "something-new" }), "skip", "見送り(買い目はありません)"],
+      ["判定不能: 見送りの印も買い目も無い", allocationRecord({ route: "place-only" }), "indeterminate", "配分の状態を判定できません"],
+      ["判定不能: 未知の route", allocationRecord({ route: "future-route" }), "indeterminate", "配分の状態を判定できません"],
+    ] as const)("%s", (_name, allocation, kind, text) => {
+      const rec = withAllocation(allocation as AnalysisRecord["allocation"]);
+      expect(allocationKindOf(rec.allocation)).toBe(kind);
+      const out = buildAnalysisNotificationEmbed(rec, effective, label());
+      expect(betsField(out)).toEqual({ name: "買い目", value: text });
+    });
+
+    it("見送りの理由コード(既知の 6 分類)は、それぞれ別の短い固定文になる", () => {
+      const texts = (["bankroll-unset", "cap-unset", "cap-too-small", "kelly-zero", "no-candidates", "no-edge"] as const).map((code) => {
+        const out = buildAnalysisNotificationEmbed(withAllocation(allocationRecord({ skipReasonCode: code })), effective, label());
+        return betsField(out)!.value;
+      });
+      expect(new Set(texts).size).toBe(6);
+      for (const t of texts) {
+        expect(t.startsWith("見送り(") && t.endsWith(")")).toBe(true);
+      }
+    });
   });
 });
 
