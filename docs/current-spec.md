@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.40.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.41.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.40.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.41.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1056,7 +1056,7 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
 - **画面**: サーバが `renderPage(email, role)` で `#app` に `data-role="admin|viewer"` を渡す(インラインスクリプトは使えないため属性。`client/main.ts` が `roleFromAttribute` で読み、欠落・不明は viewer)。
   閲覧者には、結果の「配分が未設定」の注記から設定への案内の括弧書きを外した固定文言(`UNSET_ALLOCATION_NOTE_VIEWER`。結果画面とレース画面のカードの両方)を出す。総資金・1レース上限・買い目・日報の賭け金や払戻などの数値は閲覧者にもそのまま見せる(利用者の判断)。
-  閲覧者には「ログイン中」の行に「閲覧専用」、一覧の「検証」「設定」の入口、レース画面の分析の実行ボタン、日報の作成ボタン(と、ボタンに言及する案内)を出さない。`#settings`・`#verify`・`#migration` を直接開いても API を取らず、
+  閲覧者には(「ログイン中」の行の役割の表示「閲覧専用」は #238 で足し、#243〈v1.41.0〉で外した)、一覧の「検証」「設定」の入口、レース画面の分析の実行ボタン、日報の作成ボタン(と、ボタンに言及する案内)を出さない。`#settings`・`#verify`・`#migration` を直接開いても API を取らず、
   固定文言「管理者だけが使えます」と一覧へ戻るリンクだけを出す。**画面で隠すのは補助で、拒否はサーバ側**。`test/client-app-viewer.test.ts` が、閲覧者の画面(と押せる操作)が出す要求がすべて表で viewer に足りることを、表(`requiredRole`)に直接つないで固定する。
 - **ログ**: `access: ok via=<経路> role=<admin|viewer> admins=<fallback|configured|none>`(アドレスは出さない)。拒否の `access: denied reason=…` は不変(`email-mismatch` の理由コードは無くなった)。
 - 検査: `test/access-jwt.test.ts`(`ADMIN_USER` の解釈・役割の判定のテーブル)・`test/authenticate.test.ts`・`test/route-policy.test.ts`(手書きの表と静的ガード)・`test/handler-roles.test.ts`(`handle()` を実際に呼ぶ)・`test/client-*.test.ts`・smoke(B・C・J・K・L)。

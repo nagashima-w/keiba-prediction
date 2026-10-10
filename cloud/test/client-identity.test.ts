@@ -170,9 +170,10 @@ describe("書き込み先(renderPage の出力との対応。page.ts の改名�
     expect(html.match(/class="who"/g)).toHaveLength(1);
   });
 
-  it("Issue #238: 閲覧者の出力でも、書き込み先(.who .email)は 1 つだけで、メールの span の中身はメールアドレスのまま(「閲覧専用」は別の span)", () => {
+  it("Issue #238: 閲覧者の出力でも、書き込み先(.who .email)は 1 つだけで、メールの span の中身はメールアドレスのまま(Issue #243 以降、「閲覧専用」の span は無い)", () => {
     const html = renderPage("taro@example.com", "viewer");
-    expect(html).toMatch(/<p class="who">[^<]*<span class="email">taro@example\.com<\/span> <span class="role">閲覧専用<\/span><\/p>/);
+    expect(html).toMatch(/<p class="who">[^<]*<span class="email">taro@example\.com<\/span><\/p>/);
+    expect(html).not.toContain("閲覧専用");
     expect(html.match(/class="email"/g)).toHaveLength(1);
     expect(html.match(/class="who"/g)).toHaveLength(1);
   });

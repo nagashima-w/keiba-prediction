@@ -75,19 +75,32 @@ describe("確認ページ(renderCheckPage)の名前", () => {
 describe("Issue #238: 役割の印(サーバが画面に渡す。画面で隠すのは補助で、拒否はサーバ側)", () => {
   const roleOf = (html: string): string | undefined => /<div id="app"[^>]*\sdata-role="([^"]*)"/.exec(html)?.[1];
 
-  it("管理者: #app に data-role=\"admin\"。「閲覧専用」の文言は出ない", () => {
+  it("管理者: #app に data-role=\"admin\"。「閲覧専用」の文言も .role の要素・CSS も出ない", () => {
     const html = renderPage(EMAIL, "admin");
     expect(roleOf(html)).toBe("admin");
     expect(html).not.toContain("閲覧専用");
     expect(html).not.toContain('class="role"');
+    expect(html).not.toContain(".role");
   });
 
-  it("閲覧者: #app に data-role=\"viewer\"。「ログイン中」の行に「閲覧専用」が固定文言で出る(メールの span の外)", () => {
+  it("閲覧者: #app に data-role=\"viewer\"。Issue #243 以降は「閲覧専用」の文言も .role の要素・CSS も出ず、「ログイン中」の行はメールだけ", () => {
     const html = renderPage(EMAIL, "viewer");
     expect(roleOf(html)).toBe("viewer");
-    expect(html).toMatch(/<p class="who">ログイン中: <span class="email">owner@example\.com<\/span> <span class="role">閲覧専用<\/span><\/p>/);
-    // メールの span(.who .email。表示名の書き換え先)は 1 つのまま
+    expect(html).not.toContain("閲覧専用");
+    expect(html).not.toContain('class="role"');
+    expect(html).not.toContain(".role");
+    // 「ログイン中」の行は、管理者と同じ形(メールの span だけ)。メールの span(.who .email。表示名の書き換え先)は 1 つのまま
+    expect(html).toMatch(/<p class="who">ログイン中: <span class="email">owner@example\.com<\/span><\/p>/);
     expect(html.match(/class="email"/g)).toHaveLength(1);
+  });
+
+  it("Issue #243: 管理者と閲覧者で、「ログイン中」の行(<p class=\"who\">…</p>)は同じ(役割の違いは data-role だけに出る)", () => {
+    const whoOf = (html: string): string | undefined => /<p class="who">[^]*?<\/p>/.exec(html)?.[0];
+    const admin = whoOf(renderPage(EMAIL, "admin"));
+    const viewer = whoOf(renderPage(EMAIL, "viewer"));
+    expect(admin).toBeDefined(); // 前提: 行が実際に取れている(取れなければ下の比較が undefined 同士で空振りする)
+    expect(viewer).toBe(admin);
+    expect(renderPage(EMAIL, "viewer")).not.toBe(renderPage(EMAIL, "admin")); // 前提: 役割で HTML 全体は変わる(data-role)
   });
 
   it("役割が admin でも viewer でもない値(型を破った呼び出し)は、閲覧者として描く(管理者の印を出さない)", () => {

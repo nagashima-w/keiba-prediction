@@ -154,13 +154,13 @@ describe("閲覧者(viewer): 許された (path, method) は関門を通る(管�
     expect(result.kind === "response" && denial(result.status, result.body)).toBe(false);
   });
 
-  it("GET / は 200(画面)で、閲覧者向けの印がある。GET /app.js は 200", async () => {
+  it("GET / は 200(画面)で、閲覧者向けの印(data-role)がある。「閲覧専用」の文言は出ない(Issue #243)。GET /app.js は 200", async () => {
     const { deps, viewerToken } = await setup();
     const page = await handle(request("GET", "/", viewerToken), trackedEnv(throwingBackends()).env, {}, deps);
     expect(page.status).toBe(200);
     const html = await page.text();
     expect(html).toContain('data-role="viewer"');
-    expect(html).toContain("閲覧専用");
+    expect(html).not.toContain("閲覧専用");
     expect(html).toContain(VIEWER_EMAIL);
     const js = await handle(request("GET", "/app.js", viewerToken), trackedEnv(throwingBackends()).env, {}, deps);
     expect(js.status).toBe(200);
@@ -186,7 +186,7 @@ describe("管理者(admin): すべてのルートが関門を通る(管理者専
     expect(result.kind === "response" && denial(result.status, result.body)).toBe(false);
   });
 
-  it("管理者の GET / は 200 で、管理者向けの印(閲覧専用の文言なし)", async () => {
+  it("管理者の GET / は 200 で、管理者向けの印(data-role。閲覧専用の文言なし)", async () => {
     const { deps, adminToken } = await setup();
     const page = await handle(request("GET", "/", adminToken), trackedEnv(throwingBackends()).env, {}, deps);
     expect(page.status).toBe(200);

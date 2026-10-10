@@ -141,7 +141,7 @@ describe("Issue #239 R2: 色の直書きが無い(<style> 全体で、16 進・r
     return css!;
   };
 
-  // Issue #238 以降、画面は役割(admin・viewer)で HTML が変わる(「閲覧専用」の `.role` など)。<style> は同じはずだが、役割ごとに検査する。
+  // Issue #238 以降、画面は役割(admin・viewer)で HTML が変わる(`data-role` など)。<style> は同じはずだが、役割ごとに検査する。
   for (const role of ["admin", "viewer"] as const) {
     it(`${role}: paletteCss() の出力を除くと、色のリテラルが1つも残らない(後ろに \`:root { --fail: #…; }\` や直書きの色を足すと赤くなる)`, () => {
       const css = style(role);

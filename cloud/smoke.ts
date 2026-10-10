@@ -152,7 +152,7 @@ function vars(email: string, aud: string, adminUser?: string): string[] {
  */
 async function expectViewer(port: number, label: string, email: string): Promise<void> {
   const page = await req(port, "GET", "/");
-  check(`${label}: GET / は 200 で、閲覧者の印(data-role="viewer"・閲覧専用)と自分のメールが出る`, page.status === 200 && page.text.includes('data-role="viewer"') && page.text.includes("閲覧専用") && page.text.includes(email) && !page.text.includes('data-role="admin"'), `${page.status}`);
+  check(`${label}: GET / は 200 で、閲覧者の印(data-role="viewer")と自分のメールが出て、閲覧専用の文言は出ない(Issue #243)`, page.status === 200 && page.text.includes('data-role="viewer"') && !page.text.includes("閲覧専用") && page.text.includes(email) && !page.text.includes('data-role="admin"'), `${page.status}`);
   check(`${label}: GET /app.js は 200`, (await req(port, "GET", "/app.js")).status === 200);
   const analyses = await req(port, "GET", "/api/analyses");
   check(`${label}: GET /api/analyses は 200(読み取り)`, analyses.status === 200 && parseJson(analyses.text)["ok"] === true, `${analyses.status} ${analyses.text.slice(0, 80)}`);
