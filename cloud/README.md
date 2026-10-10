@@ -178,7 +178,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 
 | 閲覧者にも許す(読み取りだけ) | 管理者だけ |
 |---|---|
-| `GET /`(画面)・`GET /app.js`<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報) | 設定(`/api/settings`。GET も)<br>検証(`/api/verify`)<br>手動の分析(`POST /api/analyses/run`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>移行(`/api/migration`・`/api/migration/upload`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
+| `GET /`(画面)・`GET /app.js`<br>アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244)<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報) | 設定(`/api/settings`。GET も)<br>検証(`/api/verify`)<br>手動の分析(`POST /api/analyses/run`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>移行(`/api/migration`・`/api/migration/upload`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
 
 - 閲覧者の画面には、「設定」「検証」への入口・分析の実行ボタン・日報の作成ボタン・移行と結果の取り込みの操作が出ない。結果の「配分が未設定」の注記と日報の案内文からも、設定・ボタンへの案内の文は外れる(総資金・1レース上限・買い目・日報の賭け金や払戻などの数値は、閲覧者にもそのまま見せる)。`#settings`・`#verify`・`#migration` を直接開くと「管理者だけが使えます」と出る。「ログイン中」の行には、管理者と同じくメールアドレスだけを出す(「閲覧専用」などの役割の表示は出さない。Issue #243)。
 - **`GET /api/races` は、閲覧者でも netkeiba への取得を起こしうる**(開催日の一覧を見るために必要。DO のキャッシュ 6 時間と gate〈取得の間隔・ブレーカー〉が効くが、友人が日付を次々に変えれば、そのぶんの取得が走る)。
@@ -235,10 +235,24 @@ Workers Logs(`observability` を有効にしてある)に、認証の経路が `
 - **取得の回数**: 一覧(`GET /api/races`。netkeiba に出うる)は (開催日, 区分) ごとに1回、状態(`GET /api/analyses/status`。DO の読み取りだけ)は開催日ごとに1回で、画面の往復では取り直さない。失敗は自動で再試行しない(「更新」だけ)。
 - **配信**: クライアントの TS(`client/`)を `build-client.ts` が esbuild で 1 ファイル(IIFE・minify)にし、`src/client-bundle.generated.ts`(**生成物。コミットする。手で編集しない**)にする。Worker が `GET /app.js` で、**認証の関門の後ろ**から文字列として返す(`[assets]` は使わない。`run_worker_first` を付け忘れると認証を素通りする配信になるため。wrangler 4.147.0 で、`run_worker_first = false` は未認証でも 200 が返ること・`true` は Worker に届くことを確かめた)。
   - **クライアントを変えたら**: cloud/ で `pnpm run build:client` を実行して生成物を更新する(忘れると `test/client-bundle.test.ts` のドリフトの検査が落ちる)。
-  - **CSP**: `default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; …`(インラインスクリプトなし。`connect-src` が無いと fetch が止まる)。外から来た文字列(レース名など)は、テキストノードとしてだけ DOM に入れる(HTML として解釈する API は使わない。静的ガードあり)。
+  - **CSP**: `default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; …`(インラインスクリプトなし。`connect-src` が無いと fetch が、`img-src` が無いと見出しの画像〈Issue #244〉が止まる)。外から来た文字列(レース名など)は、テキストノードとしてだけ DOM に入れる(HTML として解釈する API は使わない。静的ガードあり)。
   - 型検査: `tsconfig.client.json`(DOM の型。workers-types とは別の設定)。`pnpm run typecheck` が両方を検査する。
 - **表示で未確認(#185 以降・実機確認で見る)**: スマホ実機でのレイアウト・タップ(自動検査できない。デプロイ後にユーザーが確認する)。
 - 検査: `test/client-*.test.ts`(route・date・api・api-contract〈実際の `handle()` の応答を通す〉・list・app・dom・bundle)、`test/handler.test.ts`、smoke(`/app.js`・CSP・`/check`)。
+
+## アイコン(Issue #244。v1.42.0)
+見出し `Uma Driller` の横の画像・ブラウザのタブの favicon・apple-touch-icon。元画像(利用者が作った「穴馬」のアイコン。1850×1758 の JPEG)から作った PNG と ICO を、`src/icons.generated.ts`(**コミットする生成物**。手で編集しない)に base64 で入れ、Worker が認証の後ろで配る(`GET|HEAD`・閲覧者にも開く。7 本)。仕様は `docs/current-spec.md` の「アイコン」の節。
+- **元画像はリポジトリに入れていない**。差し替える(あるいは同じ手順を再現する)ときは、元画像を手元に用意して、cloud/ で次を実行する。**Python と Pillow はこの作業のときだけ使う**(リポジトリに依存を入れない。CI も使わない)。
+  ```
+  python3 -m venv /tmp/iconvenv && /tmp/iconvenv/bin/pip install pillow
+  /tmp/iconvenv/bin/python gen-icons.py <元画像のパス> [--dump <確認用に PNG を書き出すフォルダ>]
+  pnpm test    # test/icons.test.ts が、寸法・形式・大きさを確かめる
+  ```
+  `src/icons.generated.ts` が書き換わるので、コミットする。生成された各画像のバイト数は `gen-icons.py` が表示する(`test/icons.test.ts` の大きさの上限は、その 2〜2.5 倍。上限を超えたら、画像が肥大していないかを確かめてから上限を見直す)。
+  元画像の大きさが 1850×1758 でなければ `gen-icons.py` は止まる(切り抜きの座標がこの大きさの前提のため。別の大きさの画像にするときは、スクリプトの座標を直す)。
+- **切り抜き・縮小の方法**(元画像のピクセルで): A(全体)は `crop(46, 0, 1804, 1758)` → 32・64・96・180px。C(「穴」だけ)は `crop(100, 520, 830, 1220)` を背景色(元画像の外周の中央値。`#ff7802`)で正方形に埋めて → 16・32・48px。縮小は `Image.LANCZOS`。16px では全体の絵だと「馬」の横線やドリル・火花がつぶれるので、タブの favicon だけ「穴」にしている。
+- **アイコンを足すとき**: `src/icons.ts` の `ICON_PATHS` に足す(route-policy.ts の表と handler はこの一覧を共有する。**足し忘れると表に無いので閲覧者に 403 になる**)。
+- CI は cloud だけを install し Python を使わないので、**生成物とスクリプトの一致は CI では検査しない**。`test/icons.test.ts` が結果の形(寸法・形式・大きさ)を固定している。
 
 ## スマホ画面のレース画面・結果画面(Issue #185〈#165-c〉。読み取りのみ。**起動・ポーリングは #186**)
 - **使い方**: 一覧のレースをタップ → **レース画面**(`#date=…&venue=…&race=<12桁>`)。「朝の準備」「発走前」の 2 枚のカードに状態(未実行・待ち・取得済み・完了・失敗。失敗のときは原因の文を小さく)が出る。朝が完了していれば prior(3着内率)の順位、発走前が完了していれば**最新の分析の結果がカードの中に最初から出る**(Issue #188。旧版の「結果を見る」のリンクは廃止。下の「発走前の結果をカードの中に出す」の節)。下に過去の分析の一覧(新しい順。タップで結果画面)。「更新」で状態と過去の分析を取り直す。**分析の起動のボタンはまだ無い**(#186。今は exe・手動の POST で起動する)。

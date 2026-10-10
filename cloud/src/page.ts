@@ -66,8 +66,11 @@ export function renderCheckPage(email: string): string {
 `;
 }
 
-/** スマホ画面(`GET /`)の CSP。スクリプトは同じオリジンの `/app.js` だけ・fetch は同じオリジンだけ(`default-src 'none'` では fetch も止まるため `connect-src` が要る)。 */
-export const APP_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+/**
+ * スマホ画面(`GET /`)の CSP。スクリプトは同じオリジンの `/app.js` だけ・fetch は同じオリジンだけ(`default-src 'none'` では fetch も止まるため `connect-src` が要る)。
+ * 画像は同じオリジンだけ(Issue #244。`default-src 'none'` では `<img>` も止まるため `img-src 'self'` が要る。`data:` は許さない)。
+ */
+export const APP_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 /** 確認ページ(`GET /check`)の CSP(旧 `/` のまま。スクリプトは無い)。 */
 export const CHECK_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
@@ -86,6 +89,9 @@ export function renderPage(email: string, role: "admin" | "viewer"): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Uma Driller</title>
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
 ${paletteCss()}
   * { box-sizing: border-box; }
@@ -94,7 +100,9 @@ ${paletteCss()}
   h1 { font-size: 1.25rem; margin: 0 0 4px; }
   h2 { font-size: 1.05rem; margin: 20px 0 8px; }
   /* Issue #191: 見出しのリンク(押すとトップ=一覧の画面。見出しの見た目のまま・タップしやすい高さ) */
-  .home { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-decoration: none; }
+  .home { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: inherit; text-decoration: none; }
+  /* Issue #244: 見出しの横の画像(装飾。幅・高さを固定して、読み込み中もレイアウトを動かさない) */
+  .logo { width: 32px; height: 32px; flex: none; border-radius: 6px; }
   .who { margin: 0 0 12px; font-size: 0.85rem; color: var(--muted); }
   .email { font-weight: bold; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
@@ -243,7 +251,7 @@ ${paletteCss()}
 </head>
 <body>
 <main>
-<h1><a class="home" href="#">Uma Driller</a></h1>
+<h1><a class="home" href="#"><img class="logo" src="/icons/header-32.png" srcset="/icons/header-64.png 2x, /icons/header-96.png 3x" width="32" height="32" alt="">Uma Driller</a></h1>
 <p class="who">ログイン中: <span class="email">${escapeHtml(email)}</span></p>
 <div id="app" data-role="${viewer ? "viewer" : "admin"}" aria-live="polite">読み込み中…</div>
 <noscript><p>この画面には JavaScript が必要です。JavaScript を有効にしてください。</p></noscript>

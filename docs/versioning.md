@@ -3435,3 +3435,8 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - **分類: minor**。クラウド版 web の閲覧者の「ログイン中」の行から、#238 で足した「閲覧専用」の表示(`.role` の span とその CSS)を外した(利用者の要望:「わざわざ明示しなくてもいい」)。**cloud の利用者に見える表示が変わる**ので minor(#239 と同じ基準。新しい機能の追加ではなく既存表示の変更だが、「利用者から見て挙動が変わる」ため patch ではない)。
 - 変更は `cloud/` だけ(`src/page.ts`・テスト・`smoke.ts`・`README.md`)と `docs/current-spec.md`。`#app` の `data-role`・役割による出し分け(操作の非表示・管理者専用画面の案内)・サーバ側の 403 は変えていない。exe(packages/app)・core の挙動と数値、API の応答、D1 のスキーマ、設定の互換も変わらない(major ではない)。
 - bundle は 217,221 バイトのまま増分 0(クライアントの TS は無変更。`build:client` で再生成して生成物に差分が無いことを確認した)。
+
+## 次の正式版が 1.42.0 である根拠(Issue #244 での変更)
+- **分類: minor**。クラウド版 web に、利用者が作ったアイコン(「穴馬」)を、見出しの横の画像とブラウザのタブの favicon・apple-touch-icon として出す(`/favicon.ico` と `/icons/…` など 7 本を Worker から配る)。**cloud の利用者に見える表示が増える**ので minor(#240 の「見える表示が増える」と同じ基準。patch ではない)。
+- 変更は `cloud/` だけ(`src/icons.ts`・`src/icons.generated.ts`〈生成物〉・`gen-icons.py`〈生成スクリプト〉・`src/handler.ts`・`src/route-policy.ts`・`src/page.ts`・テスト・`smoke.ts`・`README.md`)と `docs/current-spec.md`。CSP に `img-src 'self'` を足したが、ほかの指令は変えていない。exe(packages/app)・core の挙動と数値、API の応答、D1 のスキーマ、設定の互換は変わらない(major ではない)。
+- bundle(`/app.js`)は 217,221 バイトのまま増分 0(クライアントの TS は無変更。`build:client` で再生成して生成物に差分が無いことを確認した)。画像は別の生成物 `src/icons.generated.ts`(80,007 バイト)で、`renderPage` の HTML は +566 バイト。

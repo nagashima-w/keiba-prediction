@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { renderCheckPage, renderPage } from "../src/page";
 import { CLIENT_JS } from "../src/client-bundle.generated";
+import { ICON_PATHS } from "../src/icons";
+import { requiredRole } from "../src/route-policy";
 
 /**
  * Issue #191: web 画面の名前は「Uma Driller」(exe の名前は変えない。#190)。
@@ -18,9 +20,10 @@ describe("スマホ画面(renderPage)の名前と見出しのリンク", () => {
     expect(titleOf(html)).toBe("Uma Driller");
   });
 
-  it("<h1> は1つだけで、中身は href が # だけのリンク(押すとトップ=一覧の画面に戻る)。リンクの文字は「Uma Driller」", () => {
+  it("<h1> は1つだけで、中身は href が # だけのリンク(押すとトップ=一覧の画面に戻る)。リンクの文字は「Uma Driller」(Issue #244 以降は、文字の前に装飾の画像が1つ入る)", () => {
     expect((html.match(/<h1[\s>]/g) ?? []).length).toBe(1);
-    expect(h1Of(html)).toBe('<a class="home" href="#">Uma Driller</a>');
+    const withoutLogo = h1Of(html).replace(/<img\b[^>]*>/g, "");
+    expect(withoutLogo).toBe('<a class="home" href="#">Uma Driller</a>');
   });
 
   it("旧い名前(競馬期待値ツール)は残っていない", () => {
@@ -155,5 +158,65 @@ describe("Issue #239: 状態の記号(色だけに頼らない)", () => {
     for (const name of ["card-error", "llm-usage-warn", "notice error"]) {
       expect(CLIENT_JS, name).toContain(name);
     }
+  });
+});
+
+/**
+ * Issue #244: アイコン。見出しの文字の横に画像(全体の絵 A)を置き、タブの favicon(「穴」だけの C)と apple-touch-icon を `<head>` で宣言する。
+ *  - 画像は `/icons/…`(route-policy.ts の表で閲覧者にも開く)。CSP の `img-src 'self'` は handler.test.ts が固定している。
+ *  - 色の直書きを足さない(palette.test.ts の R2 が `<style>` を走査する)。`<link>`・`<img>` の属性にも色は無い。
+ *  - `/favicon.ico` は `<link>` に書かない(ブラウザが ICO を優先して PNG を使わなくなることがあるため)。配信だけして、`<link>` が効かない文脈の保険にする。
+ */
+describe("Issue #244: アイコン(favicon・見出しの画像)", () => {
+  const roles = ["admin", "viewer"] as const;
+
+  it.each(roles)("<head> の <link>(%s): rel=icon の PNG が 16×16 と 32×32 の 2 本、apple-touch-icon が 1 本。/favicon.ico は <link> に書かない", (role) => {
+    const html = renderPage(EMAIL, role);
+    const head = /<head>([\s\S]*?)<\/head>/.exec(html)![1]!;
+    const links = [...head.matchAll(/<link\b[^>]*>/g)].map((m) => m[0]);
+    expect(links).toEqual([
+      '<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">',
+      '<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">',
+      '<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
+    ]);
+    expect(head).not.toContain("/favicon.ico");
+  });
+
+  it.each(roles)("見出しの <img>(%s): <h1> の中のリンクの中に 1 つ。装飾なので alt は空。幅と高さ(32)を指定。2x・3x の srcset", (role) => {
+    const h1 = h1Of(renderPage(EMAIL, role));
+    const imgs = [...h1.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+    expect(imgs).toEqual(['<img class="logo" src="/icons/header-32.png" srcset="/icons/header-64.png 2x, /icons/header-96.png 3x" width="32" height="32" alt="">']);
+    // リンクの中・文字の前
+    expect(h1).toMatch(/^<a class="home" href="#"><img [^>]*>Uma Driller<\/a>$/);
+  });
+
+  it.each(roles)("ページが参照する画像(<link> の href・<img> の src・srcset の URL)はすべて、配る 7 本のどれかで、閲覧者(GET)に開いている(%s)", (role) => {
+    const html = renderPage(EMAIL, role);
+    const urls = new Set<string>();
+    for (const m of html.matchAll(/<link\b[^>]*\bhref="([^"]+)"/g)) urls.add(m[1]!);
+    for (const m of html.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/g)) urls.add(m[1]!);
+    for (const m of html.matchAll(/\bsrcset="([^"]+)"/g)) for (const part of m[1]!.split(",")) urls.add(part.trim().split(/\s+/)[0]!);
+    // 前提: 参照は 6 本(favicon 2 + apple-touch-icon 1 + 見出し 3)。/favicon.ico は参照しない
+    expect(urls.size).toBe(6);
+    for (const url of urls) {
+      expect(ICON_PATHS, url).toContain(url);
+      expect(requiredRole("GET", url), url).toBe("viewer");
+    }
+  });
+
+  it("画像の大きさがレイアウトを動かさない: .logo は幅・高さ 32px で縮まない。リンクの高さ 44px は維持する", () => {
+    const html = renderPage(EMAIL, "admin");
+    const rule = /\.logo\s*\{([^}]*)\}/.exec(html);
+    expect(rule, "前提: .logo の規則がある").not.toBeNull();
+    expect(rule![1]).toMatch(/width:\s*32px/);
+    expect(rule![1]).toMatch(/height:\s*32px/);
+    expect(rule![1]).toMatch(/flex:\s*none|flex-shrink:\s*0/);
+    expect(html).toMatch(/\.home\s*\{[^}]*min-height:\s*44px/);
+  });
+
+  it("確認ページ(/check)にはアイコンを付けない(管理者専用で、CSP も変えない)", () => {
+    const html = renderCheckPage(EMAIL);
+    expect(html).not.toMatch(/<link\b/);
+    expect(html).not.toMatch(/<img\b/);
   });
 });

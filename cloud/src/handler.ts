@@ -19,6 +19,7 @@ import type { GatePostRequest, GateResult, GateStatus } from "./gate-core";
 import { runGradeWinnerCheck, runShutubaCheck, validateRaceId, type CheckTarget } from "./netkeiba-check";
 import { buildAnalysisView } from "./analysis-view";
 import { CLIENT_JS } from "./client-bundle.generated";
+import { ICON_CACHE_CONTROL, iconAsset } from "./icons";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
 import { loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
@@ -288,6 +289,16 @@ export async function handle(
     return new Response(method === "HEAD" ? null : CLIENT_JS, {
       status: 200,
       headers: { ...SECURITY_HEADERS, "content-type": "text/javascript; charset=utf-8" },
+    });
+  }
+
+  // アイコン(Issue #244。タブの favicon・見出しの画像・apple-touch-icon)。認証の関門・役割の関門(閲覧者にも GET・HEAD を開く。route-policy.ts)の後ろで、Worker の中から配る。
+  // 変わらない画像なので `no-store` ではなく private・1 日のキャッシュ(ほかの応答の SECURITY_HEADERS は引き継ぎ、cache-control だけ上書きする)。
+  const icon = iconAsset(pathname);
+  if (icon !== undefined) {
+    return new Response(method === "HEAD" ? null : icon.bytes, {
+      status: 200,
+      headers: { ...SECURITY_HEADERS, "cache-control": ICON_CACHE_CONTROL, "content-type": icon.contentType },
     });
   }
 

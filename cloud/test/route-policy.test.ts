@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ICON_PATHS } from "../src/icons";
 import { ANALYSIS_DETAIL_PATTERN, REPORTS_PREFIX, requiredRole, ROUTE_RULES } from "../src/route-policy";
 
 /**
@@ -23,9 +24,9 @@ interface Expected {
   readonly viewer: readonly string[];
 }
 
-/** ルート × 役割の最終表(手書き)。閲覧者に許すのは GET(と、画面の `/`・`/app.js` の HEAD)だけ。 */
+/** ルート × 役割の最終表(手書き)。閲覧者に許すのは GET(と、画面の `/`・`/app.js`・アイコン 7 本〈Issue #244〉の HEAD)だけ。 */
 const EXPECTED: readonly Expected[] = [
-  // ---- 閲覧者にも許す(9) ----
+  // ---- 閲覧者にも許す(16。画面と API が 9、アイコン〈Issue #244〉が 7) ----
   { name: "/", sample: "/", viewer: ["GET", "HEAD"] },
   { name: "/app.js", sample: "/app.js", viewer: ["GET", "HEAD"] },
   { name: "/api/races", sample: "/api/races", viewer: ["GET"] },
@@ -35,6 +36,14 @@ const EXPECTED: readonly Expected[] = [
   { name: "/api/analyses/{id}", sample: "/api/analyses/123", viewer: ["GET"] },
   { name: "/api/reports", sample: "/api/reports", viewer: ["GET"] },
   { name: "/api/reports/{date}", sample: "/api/reports/20261010", viewer: ["GET"] },
+  // アイコン(Issue #244。タブの favicon・見出しの画像・apple-touch-icon。読み取りだけの静的な画像なので、閲覧者にも開く)
+  { name: "/favicon.ico", sample: "/favicon.ico", viewer: ["GET", "HEAD"] },
+  { name: "/apple-touch-icon.png", sample: "/apple-touch-icon.png", viewer: ["GET", "HEAD"] },
+  { name: "/icons/favicon-16.png", sample: "/icons/favicon-16.png", viewer: ["GET", "HEAD"] },
+  { name: "/icons/favicon-32.png", sample: "/icons/favicon-32.png", viewer: ["GET", "HEAD"] },
+  { name: "/icons/header-32.png", sample: "/icons/header-32.png", viewer: ["GET", "HEAD"] },
+  { name: "/icons/header-64.png", sample: "/icons/header-64.png", viewer: ["GET", "HEAD"] },
+  { name: "/icons/header-96.png", sample: "/icons/header-96.png", viewer: ["GET", "HEAD"] },
   // ---- 管理者だけ(11)。method を問わず ----
   { name: "/check", sample: "/check", viewer: [] },
   { name: "/api/health", sample: "/api/health", viewer: [] },
@@ -50,11 +59,13 @@ const EXPECTED: readonly Expected[] = [
 ];
 
 describe("ルート × 役割の表(手書きの期待値と、実装の requiredRole を全 method で突き合わせる)", () => {
-  it("前提: 表は 20 ルート(閲覧者に開くもの 9・管理者だけ 11)で、閲覧者に開く method の組は 11 通り(GET が 9・HEAD が 2)", () => {
-    expect(EXPECTED).toHaveLength(20);
-    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(9);
+  it("前提: 表は 27 ルート(閲覧者に開くもの 16・管理者だけ 11)で、閲覧者に開く method の組は 25 通り(GET が 16・HEAD が 9)", () => {
+    expect(EXPECTED).toHaveLength(27);
+    expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(16);
     expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(11);
-    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(11);
+    expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(25);
+    expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(16);
+    expect(EXPECTED.filter((e) => e.viewer.includes("HEAD"))).toHaveLength(9);
     expect(ROUTE_RULES).toHaveLength(EXPECTED.length);
     expect(ROUTE_RULES.map((r) => r.path).sort()).toEqual(EXPECTED.map((e) => e.name).sort());
   });
@@ -64,10 +75,10 @@ describe("ルート × 役割の表(手書きの期待値と、実装の require
     expect(requiredRole(method, sample)).toBe(expected);
   });
 
-  it("method の組み合わせの数: 20 ルート × 7 method = 140 通りのうち、閲覧者でよいのは 11 通りだけ", () => {
-    expect(cases).toHaveLength(140);
-    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(11);
-    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(129);
+  it("method の組み合わせの数: 27 ルート × 7 method = 189 通りのうち、閲覧者でよいのは 25 通りだけ", () => {
+    expect(cases).toHaveLength(189);
+    expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(25);
+    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(164);
   });
 
   it("リクエストの method が小文字などの未知の表記でも、閲覧者に開かない(完全一致の大文字だけを認める)", () => {
@@ -132,12 +143,18 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
     expect(handleBody.length).toBeGreaterThan(2_000);
   });
 
-  it("pathname と完全一致で比べている path は 18 個で、表の完全一致のルート(18)と過不足なく一致する", () => {
+  it("pathname と完全一致で比べている path は 18 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(25)と過不足なく一致する", () => {
     const literals = [...new Set([...code.matchAll(/\bpathname === "([^"]+)"/g)].map((m) => m[1]!))].sort();
     const exactRules = ROUTE_RULES.filter((r) => r.exact).map((r) => r.path).sort();
     expect(literals).toHaveLength(18);
-    expect(exactRules).toHaveLength(18);
-    expect(literals).toEqual(exactRules);
+    expect(ICON_PATHS).toHaveLength(7);
+    expect(exactRules).toHaveLength(25);
+    expect([...literals, ...ICON_PATHS].sort()).toEqual(exactRules);
+    // アイコンの path が handler.ts に直書きされていない(表と共有する定数だけで振り分ける)
+    for (const iconPath of ICON_PATHS) {
+      expect(code, iconPath).not.toContain(iconPath);
+    }
+    expect(code).toContain("iconAsset(pathname)");
   });
 
   it("パターンのルート 2 つ({id}・{date})は、表と共有する定数(ANALYSIS_DETAIL_PATTERN・REPORTS_PREFIX)で振り分けている(正規表現・接頭辞のリテラルを直書きしない)", () => {
@@ -160,6 +177,7 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
       .replace(/pathname\.startsWith\(REPORTS_PREFIX\)/g, "")
       .replace(/pathname\.slice\(REPORTS_PREFIX\.length\)/g, "")
       .replace(/ANALYSIS_DETAIL_PATTERN\.exec\(pathname\)/g, "")
+      .replace(/iconAsset\(pathname\)/g, "")
       .replace(/requiredRole\(method, pathname\)/g, "");
     const rest = [...leftover.matchAll(/.*\bpathname\b.*/g)].map((m) => m[0].trim());
     expect(rest).toEqual([]);

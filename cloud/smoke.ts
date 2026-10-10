@@ -53,7 +53,14 @@ async function req(port: number, method: string, path: string, headers: Record<s
     headers,
     signal: AbortSignal.timeout(30_000),
   });
-  return { status: response.status, text: await response.text(), headers: response.headers };
+  // 本文はバイト列で読み(画像の署名を見るため)、text は同じバイト列の UTF-8 復号(従来の response.text() と同じ)。
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return { status: response.status, text: new TextDecoder().decode(bytes), bytes, headers: response.headers };
+}
+
+/** Issue #244: 先頭の 4 バイトが PNG の署名(89 50 4E 47)か。 */
+function isPng(bytes: Uint8Array): boolean {
+  return bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
 }
 
 function parseJson(text: string): Record<string, unknown> {
@@ -154,6 +161,12 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const page = await req(port, "GET", "/");
   check(`${label}: GET / は 200 で、閲覧者の印(data-role="viewer")と自分のメールが出て、閲覧専用の文言は出ない(Issue #243)`, page.status === 200 && page.text.includes('data-role="viewer"') && !page.text.includes("閲覧専用") && page.text.includes(email) && !page.text.includes('data-role="admin"'), `${page.status}`);
   check(`${label}: GET /app.js は 200`, (await req(port, "GET", "/app.js")).status === 200);
+  // Issue #244: アイコンは閲覧者にも開く(表に足してある)。見出しの画像・favicon の取得が 403 にならない。POST は管理者専用(403)。
+  const icon = await req(port, "GET", "/icons/header-32.png");
+  check(`${label}: GET /icons/header-32.png は 200・image/png・PNG の署名(閲覧者にも開く。Issue #244)`, icon.status === 200 && icon.headers.get("content-type") === "image/png" && isPng(icon.bytes), `${icon.status} ${icon.headers.get("content-type")}`);
+  const favicon = await req(port, "GET", "/favicon.ico");
+  check(`${label}: GET /favicon.ico は 200・image/x-icon(閲覧者にも開く)`, favicon.status === 200 && favicon.headers.get("content-type") === "image/x-icon" && favicon.bytes[2] === 1, `${favicon.status}`);
+  check(`${label}: HEAD /favicon.ico は 200。POST /favicon.ico は 403(admin-only)`, (await req(port, "HEAD", "/favicon.ico")).status === 200 && (await req(port, "POST", "/favicon.ico")).status === 403);
   const analyses = await req(port, "GET", "/api/analyses");
   check(`${label}: GET /api/analyses は 200(読み取り)`, analyses.status === 200 && parseJson(analyses.text)["ok"] === true, `${analyses.status} ${analyses.text.slice(0, 80)}`);
   const plan = await req(port, "GET", "/api/plan?kaisai_date=20261008");
@@ -220,6 +233,15 @@ async function main(): Promise<void> {
       check("B: GET / のスクリプトは <script src=\"/app.js\" defer> の 1 本だけ(インラインなし)", scripts.length === 1 && scripts[0]![1]!.includes('src="/app.js"') && scripts[0]![2] === "", `${scripts.length}`);
       const appJs = await req(port, "GET", "/app.js");
       check("B: GET /app.js が 200・text/javascript・no-store で、IIFE のバンドルを返す", appJs.status === 200 && (appJs.headers.get("content-type") ?? "").startsWith("text/javascript") && appJs.headers.get("cache-control") === "no-store" && appJs.text.length > 1000 && appJs.text.includes("/api/races"), `${appJs.status} ${appJs.headers.get("content-type")} ${appJs.text.length}`);
+      // Issue #244: アイコン。CSP に img-src 'self'・<head> に <link rel="icon">・見出しの <img>。配信は image/png・private のキャッシュ・PNG の署名。不正な JWT なら 403。
+      check("B: GET / の CSP に img-src 'self'(data: は無い)", csp.includes("img-src 'self'") && !csp.includes("data:"), csp);
+      check("B: GET / の <head> に <link rel=\"icon\">(PNG 2 本)と apple-touch-icon、見出しに装飾の <img>(alt 空)", page.text.includes('rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png"') && page.text.includes('rel="apple-touch-icon"') && page.text.includes('class="logo" src="/icons/header-32.png"') && page.text.includes('alt=""'));
+      const iconRes = await req(port, "GET", "/icons/header-96.png");
+      check("B: GET /icons/header-96.png が 200・image/png・cache-control: private, max-age=86400・PNG の署名", iconRes.status === 200 && iconRes.headers.get("content-type") === "image/png" && iconRes.headers.get("cache-control") === "private, max-age=86400" && isPng(iconRes.bytes), `${iconRes.status} ${iconRes.headers.get("content-type")} ${iconRes.headers.get("cache-control")}`);
+      const icoRes = await req(port, "GET", "/favicon.ico");
+      check("B: GET /favicon.ico が 200・image/x-icon・ICO のヘッダ(種類 1・画像 3 枚)", icoRes.status === 200 && icoRes.headers.get("content-type") === "image/x-icon" && icoRes.bytes[2] === 1 && icoRes.bytes[4] === 3, `${icoRes.status}`);
+      const tamperedIcon = await req(port, "GET", "/favicon.ico", { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" });
+      check("B: 不正な JWT が付いていれば GET /favicon.ico も 403(認証の素通りがない)", tamperedIcon.status === 403 && tamperedIcon.text === "forbidden", `${tamperedIcon.status}`);
       const tamperedJs = await req(port, "GET", "/app.js", { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" });
       check("B: 不正な JWT が付いていれば GET /app.js も 403(認証の素通りがない)", tamperedJs.status === 403 && tamperedJs.text === "forbidden", `${tamperedJs.status}`);
       check("B: HEAD /app.js は本文なしの 200。POST /app.js は 405", (await req(port, "HEAD", "/app.js")).status === 200 && (await req(port, "POST", "/app.js")).status === 405);

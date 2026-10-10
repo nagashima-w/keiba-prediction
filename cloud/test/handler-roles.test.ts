@@ -78,6 +78,14 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/api/analyses/123", viewer: ["GET"] },
   { sample: "/api/reports", viewer: ["GET"] },
   { sample: "/api/reports/20261010", viewer: ["GET"] },
+  // アイコン 7 本(Issue #244)。閲覧者にも GET・HEAD を開く
+  { sample: "/favicon.ico", viewer: ["GET", "HEAD"] },
+  { sample: "/apple-touch-icon.png", viewer: ["GET", "HEAD"] },
+  { sample: "/icons/favicon-16.png", viewer: ["GET", "HEAD"] },
+  { sample: "/icons/favicon-32.png", viewer: ["GET", "HEAD"] },
+  { sample: "/icons/header-32.png", viewer: ["GET", "HEAD"] },
+  { sample: "/icons/header-64.png", viewer: ["GET", "HEAD"] },
+  { sample: "/icons/header-96.png", viewer: ["GET", "HEAD"] },
   { sample: "/check", viewer: [] },
   { sample: "/api/health", viewer: [] },
   { sample: "/api/netkeiba/check", viewer: [] },
@@ -107,10 +115,10 @@ async function call(env: Env, deps: Parameters<typeof handle>[3], req: Request):
 describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-only。裏側にもリクエスト本文にも触れない", () => {
   const cases = ROUTES.flatMap((r) => METHODS.filter((m) => !r.viewer.includes(m)).map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者が管理者専用に当たる組は 109 通り(20 ルート × 6 method = 120 から、閲覧者に許す 11 を引く)", () => {
-    expect(ROUTES).toHaveLength(20);
-    expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(11);
-    expect(cases).toHaveLength(109);
+  it("前提: 閲覧者が管理者専用に当たる組は 137 通り(27 ルート × 6 method = 162 から、閲覧者に許す 25 を引く)", () => {
+    expect(ROUTES).toHaveLength(27);
+    expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(25);
+    expect(cases).toHaveLength(137);
   });
 
   it.each(cases)("%s %s → 403(本文は admin-only の固定)。バインディングに触れず、本文を読まない", async (method, path) => {
@@ -143,8 +151,8 @@ describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-onl
 describe("閲覧者(viewer): 許された (path, method) は関門を通る(管理者専用の 403 にならない)", () => {
   const allowed = ROUTES.flatMap((r) => r.viewer.map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者に許す組は 11 通り", () => {
-    expect(allowed).toHaveLength(11);
+  it("前提: 閲覧者に許す組は 25 通り(画面と API の 11 + アイコン 7 本の GET・HEAD で 14)", () => {
+    expect(allowed).toHaveLength(25);
   });
 
   it.each(allowed)("%s %s → 管理者専用の 403 ではない", async (method, path) => {
@@ -164,6 +172,22 @@ describe("閲覧者(viewer): 許された (path, method) は関門を通る(管�
     expect(html).toContain(VIEWER_EMAIL);
     const js = await handle(request("GET", "/app.js", viewerToken), trackedEnv(throwingBackends()).env, {}, deps);
     expect(js.status).toBe(200);
+  });
+
+  it("アイコン(Issue #244): 閲覧者の GET は 7 本とも 200 で画像(PNG の署名か ICO のヘッダ)。裏側(バインディング)には触れない。HEAD も 200", async () => {
+    const { deps, viewerToken } = await setup();
+    const icons = ROUTES.filter((r) => r.sample === "/favicon.ico" || r.sample === "/apple-touch-icon.png" || r.sample.startsWith("/icons/"));
+    expect(icons).toHaveLength(7);
+    for (const { sample } of icons) {
+      const tracked = trackedEnv(throwingBackends());
+      const response = await handle(request("GET", sample, viewerToken), tracked.env, {}, deps);
+      expect(response.status, sample).toBe(200);
+      const head = new Uint8Array(await response.arrayBuffer()).slice(0, 4);
+      expect(Array.from(head), sample).toEqual(sample === "/favicon.ico" ? [0, 0, 1, 0] : [0x89, 0x50, 0x4e, 0x47]);
+      expect(tracked.touched(), sample).toEqual([]);
+      const headResponse = await handle(request("HEAD", sample, viewerToken), trackedEnv(throwingBackends()).env, {}, deps);
+      expect(headResponse.status, sample).toBe(200);
+    }
   });
 
   it("入力の検証(400)の応答が返る: 閲覧者の GET /api/races・/api/plan・/api/analyses/status は、日付なしで 400(関門を通って各ハンドラの検証に届いている)", async () => {

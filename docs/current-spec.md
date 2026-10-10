@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.41.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.42.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.41.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.42.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1048,9 +1048,10 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   - **登録済みで有効な項目が 0 件**(セミコロン・空白・改行区切り、文字列でない値など)なら**管理者なし**(全員が閲覧者。`ACCESS_ALLOWED_EMAIL` にもフォールバックしない。`admins=none`)。`ADMIN_USER` の不備は設定全体を無効にしない(閲覧者を締め出さない)。
   - `ACCESS_ALLOWED_EMAIL` は**必須のまま**(欠落・`@` なしは `config-missing`/`config-invalid` で全拒否)。`ADMIN_USER` が有効なときは、管理者の判定には使われない。
   - 役割は**検証済みのメールと管理者の一覧の完全一致**だけで決める(JWT のメールは分割も部分一致もしない)。メールが文字列でない・判定中に例外が起きたら viewer。ヘッダ・クッキー・`ctx.access` のどの経路でも同じ判定。
-- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 18 + パターン 2 = 20 ルート)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
+- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 25 + パターン 2 = 27 ルート。#244 でアイコン 7 本を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
   **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
-  - 閲覧者に許す(9 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`。
+  - 閲覧者に許す(16 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`、
+    アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png`。#244。下の「アイコン」の節)。
   - 管理者だけ(11 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/verify`。
   - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
   - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
@@ -1060,6 +1061,25 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   固定文言「管理者だけが使えます」と一覧へ戻るリンクだけを出す。**画面で隠すのは補助で、拒否はサーバ側**。`test/client-app-viewer.test.ts` が、閲覧者の画面(と押せる操作)が出す要求がすべて表で viewer に足りることを、表(`requiredRole`)に直接つないで固定する。
 - **ログ**: `access: ok via=<経路> role=<admin|viewer> admins=<fallback|configured|none>`(アドレスは出さない)。拒否の `access: denied reason=…` は不変(`email-mismatch` の理由コードは無くなった)。
 - 検査: `test/access-jwt.test.ts`(`ADMIN_USER` の解釈・役割の判定のテーブル)・`test/authenticate.test.ts`・`test/route-policy.test.ts`(手書きの表と静的ガード)・`test/handler-roles.test.ts`(`handle()` を実際に呼ぶ)・`test/client-*.test.ts`・smoke(B・C・J・K・L)。
+
+### アイコン(#244。v1.42.0。見出しの横の画像・タブの favicon・apple-touch-icon)
+利用者が作ったアイコン(「穴馬」の文字・ドリル・火花。背景はオレンジ)を、クラウド版 web に出す。**API・D1・exe・core は無変更**。変わるのは `cloud/` の配信・`renderPage`・CSP だけ。
+- **見た目**: `renderPage` の見出し `Uma Driller` の左に、全体の絵(A)の `<img class="logo">`(`width="32" height="32"`。`srcset` で 2x=64px・3x=96px)。装飾なので `alt=""`(隣の文字と同じ内容を二重に読ませない。リンクの名前は隣の文字から付く)。
+  `<head>` に `<link rel="icon" type="image/png" sizes="16x16|32x32">`(タブ。「穴」だけの絵 C)と `<link rel="apple-touch-icon">`(A の 180px)。**`/favicon.ico` は `<link>` に書かない**(ブラウザが ICO を優先して PNG を使わなくなることがあるため。配信だけして、`<link>` が効かない文脈の保険にする)。`/check`(確認ページ)には付けない。
+- **配信**(`src/icons.ts`・`src/handler.ts`): `/favicon.ico`(ICO。C の 16・32・48 を PNG 圧縮のまま束ねた 1 本)・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png` の **7 本**。
+  `GET|HEAD`。`Content-Type: image/png`(`/favicon.ico` は `image/x-icon`)・**`Cache-Control: private, max-age=86400`**(ほかの応答の `no-store` は使わない。変わらない画像を毎回取り直させない。差し替えたときは最長 1 日、古い表示が残りうる)・`X-Content-Type-Options: nosniff`・`Referrer-Policy: no-referrer`。
+  生成物 `src/icons.generated.ts`(base64。**コミットする生成物。手で編集しない**)を、初回だけバイト列に復号して isolate の中で使い回す。`/app.js` と同じく、**認証の関門の後ろ**で Worker の中から返す(静的アセットは使わない)。
+- **ルート × 役割の表**(`route-policy.ts`): 7 本すべてを **閲覧者にも `GET|HEAD` で開く**(表に足し忘れると、友人の画面でアイコンが 403 になる)。表は完全一致 25 + パターン 2 = 27 ルート(閲覧者に開くもの 16・管理者だけ 11)。パスの一覧は `icons.ts` の `ICON_PATHS` で表と handler が共有する(handler.ts には直書きしない)。
+  閲覧者の POST などは 403(admin-only)、管理者の POST は 405(Allow: GET, HEAD)。未知のアイコンのパス(別の大きさ・大文字・末尾のスラッシュ)は表に無いので、閲覧者は 403・管理者は 404。
+- **CSP**: `APP_CSP` に **`img-src 'self'`** を足した(`default-src 'none'` のままだと `<img>` が止まる。`data:` は許さない)。`CHECK_CSP` は変えていない。
+- **元画像と作り方**(`cloud/gen-icons.py`。Pillow `12.3.0` で作った。手順は `cloud/README.md`): 元画像は 1850×1758 の JPEG(**リポジトリには入れない**。生成物だけをコミットする)。座標は元画像のピクセル。
+  - **A(全体)**: `crop(46, 0, 1804, 1758)`(左右を 46px ずつ落として 1758×1758 の正方形)→ 32・64・96・180px。
+  - **C(「穴」だけ)**: `crop(100, 520, 830, 1220)`(730×700)を、背景色で 730×730 の正方形に埋める(縦の中央に置く)→ 16・32・48px。16px では、全体の絵だと「馬」の横線やドリル・火花がつぶれるため、タブは「穴」だけにした。
+  - **背景色**: 元画像の外周(4 辺のすべての画素)のチャンネルごとの中央値。**採用した値は `#ff7802`**(元画像の角の画素は `#ff7802`・`#ff7903`・`#fe7701` など、JPEG のノイズで `#ff7803` から 1 ずれることがある)。
+  - **縮小**: Pillow の `Image.LANCZOS`。PNG は RGB・`optimize=True`(同じ入力・同じ Pillow なら出力はバイト単位で同じ)。
+- **大きさ**: 生成物 `src/icons.generated.ts` は 80,007 バイト(7 本の画像の合計 59,205 バイトの base64)。`renderPage` の HTML は +566 バイト(admin 15,864 → 16,430。viewer 15,865 → 16,431)。クライアントのバンドル(`/app.js`)は無変更。
+- **検査**: `test/icons.test.ts`(7 本の形式〈PNG の署名・先頭が IHDR・ICO のヘッダ〉・寸法・大きさの上限・空白でないこと・`handle()` の応答〈両役割の GET・HEAD・ヘッダ・本文がバイト列そのもの・認証の拒否・未知のパス〉)・`test/page.test.ts`(`<link>`・`<img>`・参照する URL がすべて表で閲覧者に開いていること)・`test/handler.test.ts`(CSP)・`test/route-policy.test.ts`(手書きの表と静的ガード)・`test/handler-roles.test.ts`(役割 × method のマトリクス)・smoke(B と閲覧者の確認)。
+  CI は cloud だけを install し Python を使わないので、**生成物と `gen-icons.py` の一致は CI では検査しない**(代わりに、寸法・形式・大きさをテストで固定している)。
 
 ### netkeiba の取得の現状(#162 段階2。v1.19.5)
 **netkeiba への全取得は、Durable Object `NetkeibaGate`(SQLite バックエンド)の単一インスタンスを経由する。** Workers の `fetch` は CloudFront から

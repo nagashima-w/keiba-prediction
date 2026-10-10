@@ -1061,15 +1061,18 @@ describe("GET /api/analyses(Issue #175)", () => {
  * CSP: インラインスクリプト禁止(`script-src 'self'`)・fetch は同じオリジンだけ(`connect-src 'self'`)・`default-src 'none'`。
  */
 describe("GET /(新しいページ。Issue #184)", () => {
-  const APP_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+  // Issue #244: 見出しの画像(同じオリジンの /icons/…)のために img-src 'self' を足した。default-src 'none' のままだと <img> は表示されない。
+  const APP_CSP = "default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
-  it("CSP は script-src 'self'・connect-src 'self'・default-src 'none'(指令の完全一致)。script に unsafe-inline・unsafe-eval が無い", async () => {
+  it("CSP は script-src 'self'・connect-src 'self'・img-src 'self'・default-src 'none'(指令の完全一致)。script に unsafe-inline・unsafe-eval が無く、img-src に data:・* が無い", async () => {
     const { deps, token } = await setup();
     const csp = (await handle(req("/", { token }), envOf(), {}, deps)).headers.get("content-security-policy");
     expect(csp).toBe(APP_CSP);
     const directive = (name: string): string => csp!.split(";").map((d) => d.trim()).find((d) => d.startsWith(`${name} `)) ?? "";
     expect(directive("script-src")).toBe("script-src 'self'");
     expect(directive("connect-src")).toBe("connect-src 'self'");
+    expect(directive("img-src")).toBe("img-src 'self'");
+    expect(csp).not.toContain("data:");
     expect(csp).not.toContain("unsafe-eval");
   });
 

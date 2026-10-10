@@ -8,12 +8,14 @@
  * **表に無い (method, path) は管理者専用に倒れる(fail-closed)**。新しいルートを足して表に書き忘れても、閲覧者に開く方向には倒れない。
  * 表との突き合わせ(`test/route-policy.test.ts`)は、handler.ts の `pathname` の比較を走査し、表に無いルートが増えたら落とす。
  *
- * 閲覧者に開くもの(9 ルート):
+ * 閲覧者に開くもの(16 ルート):
  *   画面 `GET|HEAD /`・`GET|HEAD /app.js`、一覧 `GET /api/races`(netkeiba への取得を起こしうるが、キャッシュと gate が効く)、
- *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)。
+ *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、
+ *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
  * それ以外(設定・検証・移行・結果の補完と取り込み・分析の手動実行・日報の手動作成・確認ページと確認 API・health)は管理者だけ。
  * 閲覧者が表の外の method(HEAD・POST など)を送ったときは、405 ではなく 403 になる(副作用の有無に関わらず管理者専用)。
  */
+import { ICON_PATHS } from "./icons";
 
 export type RouteRole = "viewer" | "admin";
 
@@ -42,7 +44,7 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 18、パターンのルートが 2(`/api/analyses/{id}`・`/api/reports/{date}`)。
+ * 表。完全一致のルートが 25(画面・API・管理者専用が 18、アイコンが 7)、パターンのルートが 2(`/api/analyses/{id}`・`/api/reports/{date}`)。
  * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
@@ -66,6 +68,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
     matches: (pathname) => pathname !== "/api/reports/run" && pathname.startsWith(REPORTS_PREFIX),
     viewerMethods: GET,
   },
+  // アイコン(Issue #244)。handler.ts は `iconAsset(pathname)` で配る。パスの一覧は icons.ts と共有する(ここに直書きしない)
+  ...ICON_PATHS.map((iconPath) => exact(iconPath, PAGE)),
   // ---- 管理者だけ(method を問わない) ----
   exact("/check", ADMIN_ONLY),
   exact("/api/health", ADMIN_ONLY), // 設定の有無(API キー・Webhook・サイトの URL)が見える
