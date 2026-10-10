@@ -230,6 +230,36 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     expect(old.ok && old.analysis.llmCalls).toBeNull();
   });
 
+  it("単勝の想定・実際のオッズ(Issue #247): 本物の応答をクライアントが読み、カードの画面用データまで通る。実際は保存したスナップショットの winOdds、想定は adjustedProb から。旧い分析(詳細あり・勝率の推定が可能な入力)でも読める", async () => {
+    const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
+    const { race } = await scrapeFixtureRace();
+    const base = await record({}, []);
+    // 16頭の補正後の3着内率(順位に応じて 0.5 から 0.025 刻みで下げる。Σ>3 でも固定馬が出ない)
+    const horses = base.horses.map((h, i) => ({ ...h, prior: 0.5 - i * 0.025, adjustedProb: 0.5 - i * 0.025 }));
+    const saved = await store.saveAnalysis({ ...base, horses } as AnalysisRecord);
+    const { fetch } = await connect(realEnv());
+    const result = await fetchAnalysis(fetch, saved.id);
+    expect(result.ok, "前提: 読める(サーバのキー名・形がクライアントの検査を通る)").toBe(true);
+    if (!result.ok) return;
+    expect(result.analysis.horses).toHaveLength(16);
+    expect(result.analysis.race.oddsStatus).toBe(race.odds.oddsStatus);
+    const expectedActual = race.horses.map((h) => race.odds.win[h.shutuba.umaban]?.odds ?? null);
+    expect(expectedActual.filter((o) => o !== null).length, "前提: 実際のオッズが取れている馬がいる").toBeGreaterThan(8);
+    expect(result.analysis.horses.map((h) => h.winOdds)).toEqual(expectedActual.map((o) => (o !== null && o >= 1 ? o : null)));
+    expect(result.analysis.horses.every((h) => h.fairWinOdds !== null && h.winProb !== null)).toBe(true);
+    const winProbSum = result.analysis.horses.reduce((s, h) => s + h.winProb!, 0);
+    expect(winProbSum).toBeCloseTo(1, 9);
+    // 3着内率の高い馬ほど想定は低い(単調)。均等(16.0 倍/0.8÷(1/16))に潰れていない
+    const fairs = result.analysis.horses.map((h) => h.fairWinOdds!);
+    expect(fairs[0]!).toBeLessThan(fairs[15]!);
+    expect(fairs[0]!).toBeLessThan(0.8 * 16 - 1);
+    const model = buildResultModel({ route: { date: DATE, venue: "central", race: null, analysis: saved.id, settings: false }, source: { kind: "ready", analysis: result.analysis } });
+    const cards = model.content!.horses;
+    expect(cards[0]!.winOdds.fair).toMatch(/^\d+\.\d倍$|^1000倍超$/);
+    expect(cards.every((c) => c.winOdds.fair !== "-")).toBe(true);
+    expect(model.content!.winOddsNote).not.toBeNull();
+  });
+
   it("配分あり(買い目)と、記録が無い分析(allocation: null)", async () => {
     const store = new D1AnalysisStore({ db: local.db, bucket: local.r2 });
     const withBets = await store.saveAnalysis(

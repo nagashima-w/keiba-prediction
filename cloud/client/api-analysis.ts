@@ -33,6 +33,14 @@ export interface AnalysisHorse {
   readonly highlights: readonly string[];
   /** LLM が挙げた懸念事項(仕様は highlights と同じ)。 */
   readonly concerns: readonly string[];
+  /**
+   * 勝率の推定(Issue #247。0〜1)。補正後の3着内率から推定した目安で、LLM が直接判断した値ではない。**画面には出さない**(利用者の決定)。判定不能は null。
+   */
+  readonly winProb: number | null;
+  /** 想定単勝オッズ(払戻率 0.8 ÷ 勝率。地方も 0.8 と仮定した概算)。勝率が 0・判定不能は null。 */
+  readonly fairWinOdds: number | null;
+  /** 分析時点の実際の単勝オッズ(詳細なし・未確定・不正は null)。 */
+  readonly winOdds: number | null;
 }
 
 /**
@@ -68,7 +76,8 @@ export interface AnalysisDetail {
    * LLM を呼んだ1回ごとの記録(呼び出しの順。Issue #198)。LLM を呼ばなかった(キー未登録)・旧い分析は null。`model` とは独立(全回が失敗してフォールバックした分析は、モデルが null で記録がある)。
    */
   readonly llmCalls: readonly LlmCall[] | null;
-  readonly race: { readonly venueName: string | null; readonly raceNumber: number | null; readonly raceName: string | null };
+  /** `oddsStatus`(Issue #247)は分析時点のオッズの状態(result / middle / yoso。詳細なしは null)。実際の単勝オッズのラベル(確定・暫定・予想)に使う。 */
+  readonly race: { readonly venueName: string | null; readonly raceNumber: number | null; readonly raceName: string | null; readonly oddsStatus: string | null };
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -111,13 +120,15 @@ const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(is
 
 function parseHorse(row: unknown): AnalysisHorse | null {
   if (!isRecord(row)) return null;
-  const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns } = row;
+  const { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights, concerns, winProb, fairWinOdds, winOdds } = row;
   if (!isNum(umaban) || !strOrNull(name) || !isNum(prior) || !isNum(adjustedProb) || !numOrNull(placeOddsMin) || !numOrNull(ev) || !isBool(isPositive) || !strOrNull(mark) || !strOrNull(reason)) {
     return null;
   }
   if (!isStrArray(highlights) || !isStrArray(concerns)) return null;
+  // Issue #247: 勝率・想定・実際は、キーが欠けたら(undefined)想定外。有限の数か null だけ(黙って null にしない)。
+  if (!numOrNull(winProb) || !numOrNull(fairWinOdds) || !numOrNull(winOdds)) return null;
   // 配列は複製して持つ(応答の本体と配列を共有しない)。
-  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns] };
+  return { umaban, name, prior, adjustedProb, placeOddsMin, ev, isPositive, mark, reason, highlights: [...highlights], concerns: [...concerns], winProb, fairWinOdds, winOdds };
 }
 
 /** LLM の呼び出し1件。許可したキーだけを写す(余計なキーは持ち込まない)。どれか1つでも型が違えば null。 */
@@ -206,7 +217,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     }
   }
   if (detail !== "present" && detail !== "missing" && detail !== "none") return null;
-  if (!isRecord(race) || !strOrNull(race["venueName"]) || !numOrNull(race["raceNumber"]) || !strOrNull(race["raceName"])) return null;
+  if (!isRecord(race) || !strOrNull(race["venueName"]) || !numOrNull(race["raceNumber"]) || !strOrNull(race["raceName"]) || !strOrNull(race["oddsStatus"])) return null;
   if (!Array.isArray(horses)) return null;
   const parsedHorses: AnalysisHorse[] = [];
   for (const raw of horses as unknown[]) {
@@ -228,7 +239,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     model,
     llmNote,
     llmCalls: parsedCalls,
-    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"] },
+    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], oddsStatus: race["oddsStatus"] },
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,

@@ -151,6 +151,7 @@ ${paletteCss()}
   .horse-line { font-size: 0.9rem; }
   .horse-reason { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
   .ev-plus { margin-left: 8px; color: var(--ok); }
+  .odds-higher { margin-left: 8px; }
   /* Issue #198: 馬ごとの強調材料・懸念事項(ラベルと箇条書き。色だけに頼らない=ラベルの文字がある)と、LLM の所要時間・usage の警告 */
   .horse-points { margin-top: 4px; padding-left: 8px; border-left: 3px solid var(--line); }
   .horse-points.highlights { border-left-color: var(--ok); }

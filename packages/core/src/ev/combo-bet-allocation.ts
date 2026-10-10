@@ -113,6 +113,7 @@ import {
   type ComboElementKind,
   type ComboKeyOrder,
 } from "../scraper/combo-odds-key.js";
+import { aggregateWinProbabilities } from "./win-odds-estimate.js";
 import {
   CONDITIONAL_BERNOULLI_MODEL,
   isOrderedPlaceJointModel,
@@ -2438,16 +2439,10 @@ export function buildWinCandidates(
   }
 
   // 各馬の1着確率(周辺確率)を、順序付きoutcome空間からorder[0]で集計して導出する。
-  const winProbByUmaban = new Map<number, number>();
-  for (const outcome of orderedRaw) {
-    const winner = outcome.order[0];
-    if (winner === undefined) {
-      // horses.length===0の縮退(空の着順)。この場合はhorsesが空なので下記ループ自体が
-      // 回らず、この分岐に実害は無い(horses.length===0のテスト参照)。
-      continue;
-    }
-    winProbByUmaban.set(winner, (winProbByUmaban.get(winner) ?? 0) + outcome.probability);
-  }
+  // 集計は`aggregateWinProbabilities`(win-odds-estimate.ts)に置き、画面の想定単勝オッズ
+  // (Issue #247。`estimateWinProbabilities`)と同じ実装を共有する(horses.length===0の縮退
+  // 〈空の着順〉の読み飛ばしも同関数が行う。この場合はhorsesが空なので下記ループ自体が回らない)。
+  const winProbByUmaban = aggregateWinProbabilities(orderedRaw);
 
   const candidates: AllocationCandidate[] = [];
   let notPositiveCount = 0;

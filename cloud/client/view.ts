@@ -7,7 +7,7 @@
 import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
-import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
+import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
@@ -253,6 +253,11 @@ function horseCard(horse: HorseCard): VNode {
     ...(horse.adjusted === null ? [] : [h("span", { class: "horse-line" }, [`${LABEL_ADJUSTED_PROB} ${horse.adjusted}`])]),
     h("span", { class: "horse-line" }, [`複勝オッズ下限 ${horse.odds}`]),
     h("span", { class: "horse-line" }, [`EV ${horse.ev}`, ...(horse.positive ? [h("strong", { class: "ev-plus" }, ["EVプラス"])] : [])]),
+    // 単勝の想定(目安)と実際(Issue #247)。実際が想定より高いときは文字で示す(色に頼らない)。欠損は「-」。
+    h("span", { class: "horse-line win-odds" }, [
+      `単勝 ${FAIR_WIN_ODDS_LABEL} ${horse.winOdds.fair} / ${horse.winOdds.actualLabel} ${horse.winOdds.actual}`,
+      ...(horse.winOdds.higher ? [h("strong", { class: "odds-higher" }, [ACTUAL_HIGHER_MARK])] : []),
+    ]),
     ...(horse.reason === null ? [] : [h("span", { class: "horse-reason" }, [`根拠 ${horse.reason}`])]),
     // 根拠の下に、強調材料・懸念事項(LLM が効いたときだけ中身がある。空の側は塊ごと出さない)。
     ...(horse.highlights.length === 0 ? [] : [pointsBlock("highlights", LABEL_HIGHLIGHTS, horse.highlights)]),
@@ -304,6 +309,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
     ...(content.topProbs === null ? [] : [h("section", { class: "top-probs" }, [h(heading, {}, [content.topProbs.heading]), h("ul", { class: "horse-list" }, content.topProbs.rows.map(topProbRow))])]),
     h("section", { class: "horses" }, [
       h(heading, {}, ["馬ごとの評価"]),
+      // 単勝の想定の説明文(Issue #247)。カードごとには出さず、見出しの下に1回。
+      ...(content.winOddsNote === null ? [] : [h("p", { class: "meta win-odds-note" }, [content.winOddsNote])]),
       h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
     ]),
     h("section", { class: "allocation" }, [

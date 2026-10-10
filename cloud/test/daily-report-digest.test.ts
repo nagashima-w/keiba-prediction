@@ -6,13 +6,13 @@ import { buildDayStats, buildRaceDigest, DIGEST_MAX_HORSES, REASON_MAX_CHARS } f
 /** Issue #235: 日報の 1 レースのダイジェストと、1 日の統計(決定的に計算して LLM に渡す・画面にも出す)。 */
 
 function horse(umaban: number, over: Partial<AnalysisViewHorse> = {}): AnalysisViewHorse {
-  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], ...over };
+  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, ...over };
 }
 
 function view(raceId: string, horses: AnalysisViewHorse[], over: Partial<AnalysisView> = {}): AnalysisView {
   return {
     id: 10, raceId, analyzedAt: "2026-10-10T05:00:00.000Z", kaisaiDate: "20261010", evEstimated: false, model: "claude-sonnet-5-5", promptVersion: "v1", llmNote: null, llmCalls: null,
-    race: { venueName: "東京", raceNumber: 11, raceName: "テストS", startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良" },
+    race: { venueName: "東京", raceNumber: 11, raceName: "テストS", startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
     horses, allocation: null, detail: "present", ...over,
   };
 }

@@ -12,9 +12,12 @@
 import { buildAnalysisEmbed, truncate, type DiscordEmbed, type EmbedHorse, type EmbedRaceInfo } from "../../packages/core/src/notify/discord";
 import type { AnalysisAllocationMetaRecord, AnalysisAllocationRecord, AnalysisBetRecord, AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
 import type { SkipReasonCode } from "../../packages/core/src/ev/combo-bet-allocation";
+import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
+import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
 import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
 import { DISCORD_COLORS } from "./palette";
+import { ACTUAL_HIGHER_MARK, buildWinOddsLine } from "./win-odds-format";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
 import type { PlanProgress } from "./race-day-core";
 
@@ -236,19 +239,45 @@ const markRank = (mark: string): number => {
   return i === -1 ? MARK_ORDER.length : i;
 };
 
-/** 印の付いた馬の field。印の順 → 馬番の昇順(web の結果画面の一覧と同じ)。印の無い馬(null・空白だけ)は載せない。 */
-function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, string | null>): EmbedField {
+/** 印の field の末尾に1行だけ足す説明(想定の行が1頭でもあるとき。Issue #247)。目安であること・払戻率の仮定・EV との違い。web の説明文(`WIN_ODDS_NOTE`)の短縮。 */
+export const WIN_ODDS_FIELD_NOTE = "※想定は3着内率から推定した勝率で払戻率80%(地方も80%と仮定)を割った目安。実際が想定を上回ってもEV>1とは限りません";
+
+/** 印の馬の行に添える単勝の想定・実際の材料(Issue #247)。 */
+interface WinOddsInfo {
+  /** 馬番 → 想定単勝オッズ(配分と同じ関数。判定不能・勝率0は null)。 */
+  readonly fair: ReadonlyMap<number, number | null>;
+  /** 馬番 → 分析時点の実際の単勝オッズ(`isUsableOdds` の基準。欠損・不正は無し)。 */
+  readonly actual: ReadonlyMap<number, number | null>;
+  /** 分析時点のオッズの状態(ラベルの出し分け)。 */
+  readonly oddsStatus: string;
+}
+
+/**
+ * 印の付いた馬の field。印の順 → 馬番の昇順(web の結果画面の一覧と同じ)。印の無い馬(null・空白だけ)は載せない。
+ * 行には単勝の想定・実際を添える(Issue #247): `◎ 3番 馬名 想定8.5倍/実際12.3倍`(実際が高いときは ` ↑想定より高い`)。想定も実際も無い馬の行には何も足さない。
+ * 1頭でも足したときは、末尾に説明の1行(収まらないときは、既存の行の切り詰めで末尾=説明から落ちる)。
+ */
+function buildMarksField(record: AnalysisRecord, names: ReadonlyMap<number, string | null>, winOdds: WinOddsInfo): EmbedField {
   const marked = record.horses
     .flatMap((h) => (h.mark === null || h.mark.trim() === "" ? [] : [{ umaban: h.umaban, mark: h.mark as string }]))
     .sort((a, b) => markRank(a.mark) - markRank(b.mark) || a.umaban - b.umaban);
   if (marked.length === 0) {
     return { name: "印", value: NO_MARKS_TEXT };
   }
+  let withOdds = 0;
   const lines = marked.map((h) => {
     const name = names.get(h.umaban);
-    return name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${truncate(name, MARK_NAME_MAX)}`;
+    const head = name === null || name === undefined || name === "" ? `${h.mark} ${h.umaban}番` : `${h.mark} ${h.umaban}番 ${truncate(name, MARK_NAME_MAX)}`;
+    const fair = winOdds.fair.get(h.umaban) ?? null;
+    const actual = winOdds.actual.get(h.umaban) ?? null;
+    if (fair === null && actual === null) {
+      return head;
+    }
+    withOdds += 1;
+    const line = buildWinOddsLine(fair, actual, winOdds.oddsStatus);
+    return `${head} 想定${line.fair}/${line.actualLabel}${line.actual}${line.higher ? ` ${ACTUAL_HIGHER_MARK}` : ""}`;
   });
-  return { name: "印", value: lines.join("\n") };
+  return { name: "印", value: [...lines, ...(withOdds > 0 ? [WIN_ODDS_FIELD_NOTE] : [])].join("\n") };
 }
 
 /** 配分の状態(exe の `buildAllocationProposalView` の `kind` と同じ分類。パリティは `test/notify-allocation-parity.test.ts`)。 */
@@ -379,6 +408,8 @@ interface SnapshotView {
   readonly distance: number;
   readonly oddsStatus: EmbedRaceInfo["oddsStatus"];
   readonly names: ReadonlyMap<number, string | null>;
+  /** 馬番 → 分析時点の実際の単勝オッズ(Issue #247。欠損・不正〈有限でない・1.0 未満〉は null)。 */
+  readonly winOdds: ReadonlyMap<number, number | null>;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -397,9 +428,12 @@ function readSnapshot(raw: unknown): SnapshotView {
     throw new Error("レース情報のスナップショットのコース・距離・オッズ状態が想定の形ではありません");
   }
   const names = new Map<number, string | null>();
+  const winOdds = new Map<number, number | null>();
   for (const horse of raw["horses"] as unknown[]) {
     if (isObject(horse) && typeof horse["umaban"] === "number") {
       names.set(horse["umaban"], typeof horse["name"] === "string" ? horse["name"] : null);
+      const odds = horse["winOdds"];
+      winOdds.set(horse["umaban"], typeof odds === "number" && isUsableOdds(odds) ? odds : null);
     }
   }
   return {
@@ -408,6 +442,7 @@ function readSnapshot(raw: unknown): SnapshotView {
     distance,
     oddsStatus: oddsStatus as EmbedRaceInfo["oddsStatus"],
     names,
+    winOdds,
   };
 }
 
@@ -445,7 +480,9 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   // 発走時刻(Issue #236)は、失敗・手動スキップ・最小の通知と同じ書き方(`startLine`)で、description の先頭に置く(先頭なので、収まらないときの切り詰めで失われない)。時刻が無ければ何も足さない。
   const description = body === undefined ? undefined : [...startLine(label), body].join("\n");
   // 印の付いた馬 → 買い目の順(収まらないときは末尾の買い目から縮める)。EV プラスの馬の行(description)は core のまま残す。
-  const fields: EmbedField[] = [buildMarksField(record, snapshot.names), buildAllocationField(record.allocation)];
+  // 印の馬の行に単勝の想定(配分と同じ関数。補正後の3着内率から)と実際(スナップショットの winOdds)を添える(Issue #247)。
+  const fair = new Map(estimateFairWinOdds(record.horses.map((h) => ({ umaban: h.umaban, placeProb: h.adjustedProb }))).map((e) => [e.umaban, e.fairWinOdds]));
+  const fields: EmbedField[] = [buildMarksField(record, snapshot.names, { fair, actual: snapshot.winOdds, oddsStatus: snapshot.oddsStatus }), buildAllocationField(record.allocation)];
   // タイトルは失敗・手動スキップ・最小の通知と同じ関数で作る(Issue #230。「会場 NR レース名」)。core のタイトルは番号を持たない(core は変えない)。
   // 番号は計画の行(`label.raceNumber`)から。無ければ番号なしの今の形(「会場 レース名」)になる。レース名は、スナップショットにあればそれを優先する(従来どおり)。
   const title = raceTitle({ ...label, raceName: snapshot.raceName ?? label.raceName });

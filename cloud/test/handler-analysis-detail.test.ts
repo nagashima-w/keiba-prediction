@@ -250,6 +250,24 @@ describe("GET /api/analyses/{id}: ローカルの D1・R2 で保存した分析�
     expect(spy.calls.filter((c) => c.op === "put")).toHaveLength(0);
   });
 
+  it("単勝の想定・実際のオッズ(Issue #247): 実際は保存したスナップショットの winOdds(16頭ぶん)、想定は補正後の3着内率から(全馬が同じ 0.1 なら 16頭の均等 = 勝率 1/16 → 想定 12.8 倍)。oddsStatus も載る", async () => {
+    const rec = await record();
+    const { race } = await scrapeFixtureRace();
+    const saved = await new D1AnalysisStore({ db: local.db, bucket: local.r2 }).saveAnalysis(rec);
+    const view = (await getView(saved.id, spyBucket(local.r2).bucket)).body.analysis as unknown as {
+      race: { oddsStatus: string | null };
+      horses: { umaban: number; winProb: number | null; fairWinOdds: number | null; winOdds: number | null }[];
+    };
+    expect(view.horses).toHaveLength(16);
+    expect(view.race.oddsStatus).toBe(race.odds.oddsStatus);
+    for (const h of view.horses) {
+      expect(h.winOdds, `馬番${h.umaban}`).toBe(race.odds.win[h.umaban]?.odds ?? null);
+      expect(h.winProb!, `馬番${h.umaban}`).toBeCloseTo(1 / 16, 9);
+      expect(h.fairWinOdds!, `馬番${h.umaban}`).toBeCloseTo(12.8, 6);
+    }
+    expect(view.horses.filter((h) => h.winOdds !== null).length, "前提: 実際のオッズが取れている馬がいる").toBeGreaterThan(8);
+  });
+
   it("強調材料・懸念事項(Issue #197): 保存した馬ごとの highlights・concerns が応答の馬に載る。詳細(R2)の状態(present・missing・none)に依らない", async () => {
     const base = await record();
     const horses = base.horses.map((h, i) => (i === 0 ? { ...h, highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] } : i === 1 ? { ...h, highlights: [], concerns: ["外枠"] } : h));

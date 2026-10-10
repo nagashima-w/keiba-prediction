@@ -25,11 +25,14 @@ import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-a
 import { formatEstimatedEvSuffix, formatEv, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
+import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
 import { buildHash, type Route } from "./route";
 
 /** 画面のラベル(exe の共有定数。`view.ts` は renderer を import しない=ここを通す)。 */
 export { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR };
+/** 単勝の想定・実際の表示の固定文言(Issue #247。Worker の Discord の通知と共有する `src/win-odds-format.ts`)。 */
+export { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL };
 
 export type ResultSource =
   | { readonly kind: "loading" }
@@ -74,6 +77,11 @@ export interface HorseCard {
   readonly ev: string;
   /** EV プラスの強調(サーバの `isPositive`)。 */
   readonly positive: boolean;
+  /**
+   * 単勝の想定(目安)と実際(Issue #247)。LLM の有無に依らず出す(想定は補正後の3着内率から。LLM なしでは prior と同じ値)。勝率そのものは画面に出さない。
+   * 実際のラベルは分析時点のオッズの状態(確定・暫定・予想)で変わる。強調(`higher`)は丸めた値どうしの比較。
+   */
+  readonly winOdds: WinOddsLine;
 }
 
 /** 印の付いた馬の一覧の1行(Issue #211)。印・馬番・馬名だけ(数値は出さない)。 */
@@ -132,6 +140,8 @@ export interface ResultContent {
   /** 3着内率の上位5頭(Issue #240。印の付いた馬の直後)。率が有限な馬が1頭も無ければ null(節ごと出さない)。 */
   readonly topProbs: TopProbs | null;
   readonly detailNote: string | null;
+  /** 単勝の想定の説明文(Issue #247。「馬ごとの評価」の見出しの下に1回)。想定か実際が1頭でもあるときだけ(全頭が「-」なら null)。 */
+  readonly winOddsNote: string | null;
   readonly horses: readonly HorseCard[];
   readonly allocation: AllocationSection;
 }
@@ -218,6 +228,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
     markLegend: markedHorses.length > 0 ? MARK_LEGEND : null,
     topProbs: topProbsOf(a.horses, llmEffective),
     detailNote: detailNoteOf(a.detail),
+    winOddsNote: a.horses.some((h) => h.fairWinOdds !== null || h.winOdds !== null) ? WIN_ODDS_NOTE : null,
     horses: a.horses.map((h) => ({
       umaban: h.umaban,
       name: h.name,
@@ -230,6 +241,7 @@ export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
       odds: formatOdds(h.placeOddsMin),
       ev: h.ev === null ? formatEv(null) : `${formatEv(h.ev)}${formatEstimatedEvSuffix(a.evEstimated)}`,
       positive: h.isPositive,
+      winOdds: buildWinOddsLine(h.fairWinOdds, h.winOdds, a.race.oddsStatus),
     })),
     allocation: allocationOf(a, readOnly),
   };

@@ -172,8 +172,8 @@ const ALLOCATION = {
     { betType: "wide", comboKey: "0102", stake: 200, odds: null, ev: null },
   ],
 };
-const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"] };
-const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良" };
+const HORSE = { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: true, mark: "◎", reason: "根拠", highlights: ["追い切り好時計", "内枠有利"], concerns: ["距離延長"], winProb: 0.12, fairWinOdds: 6.7, winOdds: 8.4 };
+const RACE = { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: "15:45", courseType: "芝", distance: 1800, weather: "晴", trackCondition: "良", oddsStatus: "result" };
 const ANALYSIS = { id: 7, raceId: "202603020211", analyzedAt: "2026-06-28T05:00:00.000Z", kaisaiDate: "20260628", evEstimated: false, model: null, promptVersion: null, llmNote: null, llmCalls: null, race: RACE, horses: [HORSE], allocation: ALLOCATION, detail: "present" };
 const wrap = (analysis: unknown) => ({ ok: true, analysis });
 
@@ -191,7 +191,7 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       model: null,
       llmNote: null,
       detail: "present",
-      race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
+      race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result" },
     });
     expect(result.analysis.horses).toEqual([HORSE]);
     expect(result.analysis.allocation).toEqual(ALLOCATION);
@@ -256,6 +256,46 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       const body = wrap({ ...ANALYSIS, horses: [HORSE, { ...HORSE, umaban: 2, concerns: "x" }] });
       expect(parseAnalysisResponse(200, body)).toEqual(UNEXPECTED);
       expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [HORSE, { ...HORSE, umaban: 2 }] })).ok, "前提: 2頭目が正常なら読める").toBe(true);
+    });
+  });
+
+  describe("単勝の勝率・想定オッズ・実際のオッズ・オッズの状態(Issue #247)", () => {
+    const readHorse = (over: Record<string, unknown>) => parseAnalysisResponse(200, wrap({ ...ANALYSIS, horses: [{ ...HORSE, ...over }] }));
+    const UNEXPECTED = { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
+
+    it("winProb・fairWinOdds・winOdds は値を保って読む(3つの値が違うので取り違えを検出できる)。race.oddsStatus も読む", () => {
+      expect(new Set([HORSE.winProb, HORSE.fairWinOdds, HORSE.winOdds]).size, "前提: 3つの値が違う").toBe(3);
+      const result = parseAnalysisResponse(200, wrap(ANALYSIS));
+      expect(result.ok && [result.analysis.horses[0]!.winProb, result.analysis.horses[0]!.fairWinOdds, result.analysis.horses[0]!.winOdds]).toEqual([0.12, 6.7, 8.4]);
+      expect(result.ok && result.analysis.race.oddsStatus).toBe("result");
+    });
+
+    it("3つとも null(判定不能・詳細なし)でも読める。勝率 0 は 0 のまま(null に潰さない)。oddsStatus が null(詳細なし)も読める", () => {
+      const nulls = readHorse({ winProb: null, fairWinOdds: null, winOdds: null });
+      expect(nulls.ok && [nulls.analysis.horses[0]!.winProb, nulls.analysis.horses[0]!.fairWinOdds, nulls.analysis.horses[0]!.winOdds]).toEqual([null, null, null]);
+      const zero = readHorse({ winProb: 0, fairWinOdds: null });
+      expect(zero.ok && zero.analysis.horses[0]!.winProb).toBe(0);
+      const noStatus = parseAnalysisResponse(200, wrap({ ...ANALYSIS, race: { ...RACE, oddsStatus: null } }));
+      expect(noStatus.ok && noStatus.analysis.race.oddsStatus).toBeNull();
+    });
+
+    for (const key of ["winProb", "fairWinOdds", "winOdds"] as const) {
+      it(`${key} が欠けたら unexpected(サーバがキーを足し忘れた・名前を変えた)。同じ入力でキーがあれば読める`, () => {
+        expect(readHorse({ [key]: 1.5 }).ok, "前提: キーがあれば読める").toBe(true);
+        expect(readHorse({ [key]: undefined })).toEqual(UNEXPECTED);
+      });
+      for (const [name, value] of [["文字列", "8.5"], ["NaN", Number.NaN], ["Infinity", Number.POSITIVE_INFINITY], ["真偽値", true], ["オブジェクト", {}]] as const) {
+        it(`${key} が ${name} なら unexpected(黙って null にしない)`, () => {
+          expect(readHorse({ [key]: value })).toEqual(UNEXPECTED);
+        });
+      }
+    }
+
+    it("race.oddsStatus が欠けたら unexpected。文字列でも null でもなければ unexpected", () => {
+      const { oddsStatus: _drop, ...noKey } = RACE;
+      expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, race: noKey }))).toEqual(UNEXPECTED);
+      expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, race: { ...RACE, oddsStatus: 3 } }))).toEqual(UNEXPECTED);
+      expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, race: { ...RACE, oddsStatus: "yoso" } })).ok, "前提: 文字列なら読める").toBe(true);
     });
   });
 
@@ -337,7 +377,7 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
   });
 
   it("配分なし(null)・馬の null(名前・オッズ・EV・印)・detail の 3 値を保つ", () => {
-    const horse = { ...HORSE, name: null, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [] };
+    const horse = { ...HORSE, name: null, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null };
     for (const detail of ["present", "missing", "none"] as const) {
       const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, allocation: null, horses: [horse], detail }));
       expect(result.ok && result.analysis.detail).toBe(detail);

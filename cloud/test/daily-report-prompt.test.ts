@@ -7,12 +7,12 @@ import { buildReportPrompt, formatComboKey, NARRATIVE_LIMITS, parseNarrative } f
 /** Issue #235: 日報のプロンプトの組み立てと、LLM の応答(JSON)の解釈。 */
 
 function horse(umaban: number, over: Partial<AnalysisViewHorse> = {}): AnalysisViewHorse {
-  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], ...over };
+  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, ...over };
 }
 function view(raceId: string, raceNumber: number, horses: AnalysisViewHorse[], bets: Array<[string, string, number]> = []): AnalysisView {
   return {
     id: raceNumber, raceId, analyzedAt: "2026-10-10T05:00:00.000Z", kaisaiDate: "20261010", evEstimated: false, model: "claude-sonnet-5-5", promptVersion: "v1", llmNote: null, llmCalls: null,
-    race: { venueName: "東京", raceNumber, raceName: `テスト${raceNumber}S`, startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良" },
+    race: { venueName: "東京", raceNumber, raceName: `テスト${raceNumber}S`, startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
     horses, detail: "present",
     allocation: bets.length === 0 ? null : { route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok", bets: bets.map(([betType, comboKey, stake]) => ({ betType, comboKey, stake, odds: 3, ev: 1.1 })) },
   };

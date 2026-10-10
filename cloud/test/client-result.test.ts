@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
+import { WIN_ODDS_NOTE } from "../src/win-odds-format";
 import { buildResultModel, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, type ResultSource } from "../client/result";
 import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
@@ -18,7 +19,7 @@ const RACE_ID = "202603020211";
 const ROUTE: Route = { date: "20260628", venue: "central", race: null, analysis: 7, settings: false };
 
 function horse(umaban: number, over: Partial<AnalysisHorse> = {}): AnalysisHorse {
-  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], ...over };
+  return { umaban, name: `馬${umaban}`, prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, ...over };
 }
 
 const ALLOCATION = {
@@ -55,7 +56,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     model: null,
     llmNote: null,
     llmCalls: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result" },
     horses: [horse(1), horse(2)],
     allocation: { ...ALLOCATION, bets: [...ALLOCATION.bets] },
     detail: "present",
@@ -74,9 +75,9 @@ function content(a: AnalysisDetail, route: Route = ROUTE) {
 describe("見出し・分析時刻・分析モデル", () => {
   it("見出し: 場名・R・レース名。null の部分は省き、全部無ければレース ID", () => {
     expect(content(analysis()).title).toBe("福島11R テストステークス");
-    expect(content(analysis({ race: { venueName: null, raceNumber: 11, raceName: "テストステークス" } })).title).toBe("11R テストステークス");
-    expect(content(analysis({ race: { venueName: "福島", raceNumber: null, raceName: null } })).title).toBe("福島");
-    expect(content(analysis({ race: { venueName: null, raceNumber: null, raceName: null } })).title).toBe(`レース ${RACE_ID}`);
+    expect(content(analysis({ race: { venueName: null, raceNumber: 11, raceName: "テストステークス", oddsStatus: null } })).title).toBe("11R テストステークス");
+    expect(content(analysis({ race: { venueName: "福島", raceNumber: null, raceName: null, oddsStatus: null } })).title).toBe("福島");
+    expect(content(analysis({ race: { venueName: null, raceNumber: null, raceName: null, oddsStatus: null } })).title).toBe(`レース ${RACE_ID}`);
   });
 
   it("分析時刻は JST(UTC の 15:00 以降は翌日)", () => {
@@ -644,5 +645,60 @@ describe("Issue #238: 閲覧者(readOnly)の配分の注記: 設定への案内�
       }
     }
     expect(NO_ALLOCATION_NOTE).not.toContain("設定");
+  });
+});
+
+describe("単勝の想定・実際のオッズ(Issue #247)", () => {
+  const withOdds = (umaban: number, fairWinOdds: number | null, winOdds: number | null, winProb: number | null = 0.1) => horse(umaban, { winProb, fairWinOdds, winOdds });
+  const oddsOf = (a: AnalysisDetail) => content(a).horses.map((h) => h.winOdds);
+
+  it("馬ごとに想定・実際を『8.5倍』『12.3倍』で出し、ラベルは『実際』(確定)。実際が想定より高い馬だけ higher=true", () => {
+    const a = analysis({ horses: [withOdds(1, 8.5, 12.3), withOdds(2, 4.0, 3.0)] });
+    expect(oddsOf(a)).toEqual([
+      { fair: "8.5倍", actual: "12.3倍", actualLabel: "実際", higher: true },
+      { fair: "4.0倍", actual: "3.0倍", actualLabel: "実際", higher: false },
+    ]);
+  });
+
+  it("オッズの状態でラベルが変わる(middle=実際(暫定)・yoso=実際(予想))。強調の判定は状態に依らない", () => {
+    for (const [status, label] of [["middle", "実際(暫定)"], ["yoso", "実際(予想)"], ["result", "実際"]] as const) {
+      const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", oddsStatus: status }, horses: [withOdds(1, 8.5, 12.3)] });
+      expect(oddsOf(a)[0], status).toEqual({ fair: "8.5倍", actual: "12.3倍", actualLabel: label, higher: true });
+    }
+  });
+
+  it("欠損は『-』(想定だけ・実際だけ・両方)。強調なし", () => {
+    const a = analysis({ horses: [withOdds(1, null, 12.3), withOdds(2, 8.5, null), withOdds(3, null, null, null)] });
+    expect(oddsOf(a)).toEqual([
+      { fair: "-", actual: "12.3倍", actualLabel: "実際", higher: false },
+      { fair: "8.5倍", actual: "-", actualLabel: "実際", higher: false },
+      { fair: "-", actual: "-", actualLabel: "実際", higher: false },
+    ]);
+  });
+
+  it("LLM の有無に依らず出る(想定は補正後の3着内率から。LLM なしでは prior と同じ値)", () => {
+    for (const model of [null, "claude-x"]) {
+      const a = analysis({ model, horses: [withOdds(1, 8.5, 12.3)] });
+      expect(oddsOf(a)[0]!.fair, String(model)).toBe("8.5倍");
+    }
+  });
+
+  it("説明文は、想定か実際が1頭でもあるときだけ出す(全頭が『-』なら出さない)", () => {
+    expect(content(analysis({ horses: [withOdds(1, 8.5, null)] })).winOddsNote).toBe(WIN_ODDS_NOTE);
+    expect(content(analysis({ horses: [withOdds(1, null, 12.3)] })).winOddsNote).toBe(WIN_ODDS_NOTE);
+    expect(content(analysis({ horses: [withOdds(1, null, null, null), withOdds(2, null, null, null)] })).winOddsNote).toBeNull();
+  });
+
+  it("勝率(winProb)は画面に出さない(カードのデータに勝率の項目が無く、勝率の数値もどこにも現れない)", () => {
+    const c = content(analysis({ horses: [withOdds(1, 8.5, 12.3, 0.093817)] }));
+    expect(Object.keys(c.horses[0]!)).not.toContain("winProb");
+    const text = JSON.stringify(c);
+    expect(text).not.toContain("0.093817");
+    expect(text).not.toContain("9.4%");
+  });
+
+  it("閲覧者(readOnly)でも同じ内容", () => {
+    const a = analysis({ horses: [withOdds(1, 8.5, 12.3)] });
+    expect(buildResultModel({ route: ROUTE, source: ready(a), readOnly: true }).content!.horses[0]!.winOdds).toEqual(oddsOf(a)[0]);
   });
 });

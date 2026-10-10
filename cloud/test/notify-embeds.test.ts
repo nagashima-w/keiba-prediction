@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types";
+import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import {
   buildAnalysisNotificationEmbed,
   buildFailureEmbed,
@@ -392,6 +393,13 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 印の付いた馬の field
     horses: names.map((name, i) => ({ umaban: i + 1, name })),
   });
   const marksField = (out: CloudEmbed): { name: string; value: string } | undefined => out.fields?.find((f) => f.name === "印");
+  // Issue #247: 印の馬の行には単勝の想定・実際(` 想定…/実際…`)と説明の行(`※…`)が付きうる。この describe が固定するのは「印・馬番・馬名」の部分なので、その部分だけを取り出す
+  // (付く内容の検査は `notify-embeds-win-odds.test.ts`)。印・馬番・馬名・並び・除外の検査は旧版と同じ強さのまま。
+  const headLines = (out: CloudEmbed): string[] =>
+    marksField(out)!
+      .value.split("\n")
+      .filter((l) => !l.startsWith("※"))
+      .map((l) => l.replace(/ 想定.*$/, ""));
 
   it("前提: 印の並びは core の PREDICTION_MARKS と同じ(◎〇▲△☆注。クライアントの KNOWN_MARK_ORDER と同じ順)", () => {
     expect([...MARK_ORDER]).toEqual(["◎", "〇", "▲", "△", "☆", "注"]);
@@ -400,13 +408,13 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 印の付いた馬の field
   it("印の順(◎〇▲△☆注)→ 馬番の昇順。行は「印 馬番 馬名」。EV プラスでない馬・名前の無い馬も載る(名前が無ければ「N番」だけ)", () => {
     const horses = [markedHorse(1, "△"), markedHorse(2, "◎"), markedHorse(3, "△"), markedHorse(4, null), markedHorse(5, "注"), markedHorse(6, "〇"), markedHorse(7, "☆"), markedHorse(8, "▲")];
     const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(["ア", "ブ", "チ", "デ", "エ", null, "ジ", "ハ"])), effective, label());
-    expect(marksField(out)?.value.split("\n")).toEqual(["◎ 2番 ブ", "〇 6番", "▲ 8番 ハ", "△ 1番 ア", "△ 3番 チ", "☆ 7番 ジ", "注 5番 エ"]);
+    expect(headLines(out)).toEqual(["◎ 2番 ブ", "〇 6番", "▲ 8番 ハ", "△ 1番 ア", "△ 3番 チ", "☆ 7番 ジ", "注 5番 エ"]);
   });
 
   it("未知の印は既知の印の後ろ(馬番の昇順)。空文字・空白だけ・null の印は載せない", () => {
     const horses = [markedHorse(1, "★"), markedHorse(2, "  "), markedHorse(3, "◎"), markedHorse(4, ""), markedHorse(5, null), markedHorse(6, "★")];
     const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(["a", "b", "c", "d", "e", "f"])), effective, label());
-    expect(marksField(out)?.value.split("\n")).toEqual(["◎ 3番 c", "★ 1番 a", "★ 6番 f"]);
+    expect(headLines(out)).toEqual(["◎ 3番 c", "★ 1番 a", "★ 6番 f"]);
   });
 
   it("印の付いた馬がいない(LLM なし・印の制約違反): 固定文の field を出す(欄ごと消さない)", () => {
@@ -418,11 +426,14 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 印の付いた馬の field
   it("馬名は 32 文字(コードポイント)に切る(サロゲートペアを割らない)", () => {
     const long = "𠮷".repeat(40);
     const out = buildAnalysisNotificationEmbed(record({ horses: [markedHorse(1, "◎")] }, snapshotOf([long])), effective, label());
-    expect(marksField(out)?.value).toBe(`◎ 1番 ${"𠮷".repeat(31)}…`);
+    expect(headLines(out)).toEqual([`◎ 1番 ${"𠮷".repeat(31)}…`]);
   });
 
   it("18 頭すべてに印があっても、field の値は 1024 以内に収まり、embed 全体も 6000 以内", () => {
-    const horses = Array.from({ length: 18 }, (_, i) => markedHorse(i + 1, "△"));
+    // Issue #247: 想定・実際が付くと 1 行が長くなり 18 行は収まらない(その場合は `notify-embeds-win-odds.test.ts` が固定)。ここは旧版と同じ「想定が付かない入力」のまま、
+    // 18 行が 1 行も落ちずに収まることを固定するため、固定馬が2頭になる確率(1.0 が2頭 = 判定不能)にして、想定が付かないことを前提として確かめる。
+    const horses = Array.from({ length: 18 }, (_, i) => ({ ...markedHorse(i + 1, "△"), adjustedProb: i < 2 ? 1 : 0.05 }) as AnalysisRecord["horses"][number]);
+    expect(estimateFairWinOdds(horses.map((h) => ({ umaban: h.umaban, placeProb: h.adjustedProb }))).every((e) => e.fairWinOdds === null), "前提: 想定が付かない入力").toBe(true);
     const names = Array.from({ length: 18 }, () => "あ".repeat(32));
     const out = buildAnalysisNotificationEmbed(record({ horses }, snapshotOf(names)), effective, label());
     expect(marksField(out)!.value.split("\n")).toHaveLength(18); // 前提: 1 頭も落ちていない(退化させない)

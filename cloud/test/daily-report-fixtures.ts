@@ -12,7 +12,7 @@ import type { MessageSender } from "@keiba/core/llm";
 export const FIXTURE_DATE = "20261010";
 
 function horse(umaban: number, name: string, over: Partial<AnalysisViewHorse> = {}): AnalysisViewHorse {
-  return { umaban, name, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], ...over };
+  return { umaban, name, prior: 0.2, adjustedProb: 0.25, placeOddsMin: 2, ev: 1.0, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null, ...over };
 }
 
 /** 偽の 3 レース(結果あり 2・結果なし 1)。買い目は単勝・複勝・ワイド・馬連(未取込)。 */
@@ -24,7 +24,7 @@ export function fixtureRaceInputs(): RaceInput[] {
   });
   const view = (n: number, id: number, raceName: string, horses: AnalysisViewHorse[], bets: Array<[string, string, number, number]>): AnalysisView => ({
     id, raceId: `2026050308${String(n).padStart(2, "0")}`, analyzedAt: "2026-10-10T05:00:00.000Z", kaisaiDate: FIXTURE_DATE, evEstimated: false, model: "claude-sonnet-5-5", promptVersion: "v-fixture", llmNote: null, llmCalls: null,
-    race: { venueName: "東京", raceNumber: n, raceName, startTime: `${10 + n}:00`, courseType: n === 2 ? "ダ" : "芝", distance: n === 2 ? 1400 : 1600, weather: "晴", trackCondition: "良" },
+    race: { venueName: "東京", raceNumber: n, raceName, startTime: `${10 + n}:00`, courseType: n === 2 ? "ダ" : "芝", distance: n === 2 ? 1400 : 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
     horses, allocation: allocation(bets), detail: "present",
   });
   const result = (rows: Array<[number, number | null, number | null, number | null]>, combos: RaceResultData["combos"] = {}): RaceResultData => ({

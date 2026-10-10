@@ -68,6 +68,9 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #240: 上限は 235,000 のまま据え置き。結果の「3着内率の上位5頭」(並べ替え・見出し・描画)を足した増分は +851(214,711 → 215,562。上限までの余裕は 19,438 バイト)。
     // Issue #238: 上限は据え置き。閲覧者の画面(役割の読み取り `role.ts`・管理者だけの案内 `admin-only.ts`・入口とボタンの出し分け・閲覧者向けの配分の注記)を足した増分は +1,659(215,562 → 217,221。
     // 計り方: 51541b0〈#240 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。今の値は `pnpm run build:client` の出力。上限までの余裕は 17,779 バイト)。
+    // Issue #247: 上限は据え置き。馬のカードの単勝の想定・実際の表示(API の検証 `api-analysis.ts` の3項目と `oddsStatus`・カードの表示用データ `result.ts`・VNode `view.ts`・表示の整形 `src/win-odds-format.ts`)を足した増分は +1,686
+    // (218,081 → 219,767。計り方: cd78fc2〈#246 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。上限までの余裕は 15,233 バイト)。勝率の計算はサーバで行い、クライアントに Plackett-Luce を入れていない
+    // (クライアントが推定を呼ぶと束に Plackett-Luce が入って増える。下の「Plackett-Luce が入っていない」テストが、生成物にモデルの文言が無いことで固定する)。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
     expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(235_000);
   });
@@ -94,6 +97,8 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "../src/migration-reader",
   // Issue #245: 回収率の表示(`formatRecoveryPercent`)。Discord の日報(Worker)と日報の画面が同じ丸めを使うため。**import を持たない**ことを下のテストが固定する。
   "../src/recovery-format",
+  // Issue #247: 単勝の想定・実際のオッズの表示(丸め・「1000倍超」・ラベル・強調の判定・説明文)。Discord の通知(Worker)と馬のカードが同じ表示を使うため。**import を持たない**ことを下のテストが固定する。
+  "../src/win-odds-format",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -231,6 +236,24 @@ describe("日報の画面がクライアントに取り込む Worker 側のモ�
   });
 });
 
+describe("馬のカードがクライアントに取り込む Worker 側のモジュール(Issue #247)", () => {
+  it("win-odds-format.ts は import を 1 つも持たない(core の Plackett-Luce・Worker 専用のモジュール・node: を引き込まない)。クライアントの閉包に入っている", async () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "win-odds-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(300);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/win-odds-format")).toBe(true);
+    const inputs = await listBundledInputs();
+    expect(inputs.some((f) => f.endsWith("src/win-odds-format.ts")), "前提: 単勝の想定の表示が閉包に入っている").toBe(true);
+  }, 60_000);
+
+  it("クライアントの束に Plackett-Luce(勝率の推定)が入っていない: 勝率の計算はサーバで行う(束の増加を抑える)。入ると、モデルの実行時の文言(エラーの文)が生成物に残る", () => {
+    // 閉包(metafile)には combo-bet-allocation 経由で PL のファイルが載るが、使われないので tree-shaking で出力には残らない。クライアントが推定を呼ぶと、下の文言が出力に現れる。
+    expect(CLIENT_JS).not.toContain("PLACKETT_LUCE_MODEL.");
+    expect(CLIENT_JS).not.toContain("winProbabilitiesFromStrengths");
+  });
+});
+
 describe("移行画面がクライアントに取り込む Worker 側のモジュール(Issue #222)", () => {
   it("migration-reader.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まないことを、クライアントの閉包に入れる前提として固定する)", () => {
     const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "migration-reader.ts"), "utf-8"));
@@ -263,8 +286,8 @@ describe("生成物の実行スモーク(偽の DOM・偽の fetch。node:vm)", 
     model: null,
     llmNote: null,
     llmCalls: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス" },
-    horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [] }],
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result" },
+    horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null }],
     allocation: {
       route: "mixed", unavailableReason: null, fallbackReason: "no-combo-candidates", skipReasonCode: null, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1.1,
       includeComboOdds: true, includeWide: true, includeTrio: false, includeQuinella: null, includeExacta: true, includeTrifecta: false, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result",
