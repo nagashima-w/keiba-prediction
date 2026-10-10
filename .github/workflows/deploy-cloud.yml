@@ -5,7 +5,7 @@
 #            Secrets を持たない。
 #   - deploy: check が通ったうえで、下の条件を満たすときだけ本番にデプロイする。
 #
-# ★デプロイの条件(deploy ジョブの if:。ここ1箇所にだけ書く。build-windows.yml の公開ゲートと同じ形):
+# ★デプロイの条件(deploy ジョブの if:。ここ1箇所にだけ書く。Issue #248 で廃止した exe の公開ゲートと同じ形):
 #   許可した作業ブランチ(下の1本)の上で、
 #     - 先端コミットのメッセージに承認印 `[PUBLISH-APPROVED]` を含み、かつ「レビュー継続中」を含まない push、または
 #     - 手動実行(workflow_dispatch。付け忘れからの回復レバー)。
@@ -27,8 +27,10 @@
 #   URL をログに出すより前に ::add-mask:: で隠す。メールアドレス・Access のチーム名・AUD は Worker の secret にあり、
 #   ここには一切現れない。
 #
-# ★既存の exe 公開(build-windows.yml)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd などの依存は
-#   cloud/(pnpm workspace の外)にだけ入れる。承認印付き push は両方のワークフローを起動する。
+# ★ci.yml(ルートの型検査・テスト・app のビルドの関門)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd などの
+#   依存は cloud/(pnpm workspace の外)にだけ入れる。承認印付き push は両方のワークフローを起動するが、デプロイは ci.yml の結果を待たない。
+#   承認印付きの push の後は、ci.yml の成否と、この deploy ジョブが実際に走った(スキップされていない)ことの両方を確かめる。
+#   exe の公開は Issue #248 で止めた(旧 build-windows.yml は削除済み)。承認印は、このデプロイの関門としてだけ残っている。
 name: クラウド版の検査と本番デプロイ
 
 on:

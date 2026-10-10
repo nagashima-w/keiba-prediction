@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.44.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.44.0 = exe の最終版。版数は Issue #248 で凍結した)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.44.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.44.0`(exe の最終版。Issue #248 で凍結。以後は上げない)、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -844,9 +844,26 @@ scorer の prior と多数のテキスト材料をプロンプト化し、Claude
 - 設定画面の Webhook URL に送信、手動「Discordに送信」ボタン + 自動送信 ON/OFF。レート制限(429)は
   Retry-After を尊重して 1 回だけ待機リトライ。送信失敗は分析結果表示に影響しない。
 
-## 8. 配布(GitHub Actions / electron-builder)
+## 8. 配布(exe 版はアーカイブ済み。Issue #248)
 
-ワークフロー: `.github/workflows/build-windows.yml`(`windows-latest` でビルド、ビルド前にテスト全通過を関門)。
+**exe 版の公開は止めた(2026-10-10 の利用者の決定)。** 最後の exe は GitHub Releases の `dev-latest`
+(`keiba-ev-tool-1.44.0-portable.exe`)に残してある。exe のビルドと `dev-latest` への公開をしていた
+`.github/workflows/build-windows.yml` は削除した(内容は版管理の履歴にある)。以後の機能追加と統計モデルの
+見直しは web(cloud)だけを対象にする。
+
+- **現在の CI**(いずれも `ubuntu-latest`。作業ブランチ 1 本への push と `workflow_dispatch` で起動):
+  - `.github/workflows/ci.yml`: `pnpm typecheck`・`pnpm test`(packages/core・packages/app・scripts のテスト)・
+    `pnpm --filter @keiba/app build` の関門。公開はしない(`scripts/test/ci-workflow.test.ts` が固定)。
+    cloud は packages/core と packages/app のソースを相対 import しているので、app のテストと build は残した。
+  - `.github/workflows/deploy-cloud.yml`: cloud の型検査・テスト・dry-run・スモークと、本番デプロイ(10 節)。
+    **承認印 `[PUBLISH-APPROVED]` は、この本番デプロイの関門として残っている**(先端コミットに承認印があり、
+    「レビュー継続中」を含まない push、または許可ブランチでの手動実行)。
+- **版数は 1.44.0(exe の最終版)で凍結**した。以後は上げない([`docs/versioning.md`](./versioning.md))。
+- **残してあるもの**: `packages/app` のコードとテスト(web が `cloud/client`・`cloud/src` から import している)。
+  exe 専用のコード(`packages/app/electron-builder.yml`・`scripts/release-gate.ts`・`scripts/artifact-gate.ts`・
+  `scripts/gen-icon.mjs` ほか)は削除していない。CI からは呼ばれない。
+
+**以下の「開発版」から「配布 exe の可動性検査」までは、1.44.0 までの exe の配布の記録である。現在は動いていない。**
 
 - **Windows portable exe**(`keiba-ev-tool-<version>-portable.exe`、インストール不要)。
 - **開発版**: 開発ブランチ(`claude/keiba-ev-tool-dev-cvagiu`・`claude/handover-next-session-x5ki6o`・

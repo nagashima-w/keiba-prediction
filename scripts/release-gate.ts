@@ -1,6 +1,11 @@
 /**
  * dev-latest 公開ゲートの機械検査(Issue #45)。
  *
+ * 【アーカイブ(Issue #248)】exe 版の公開を止め、このゲート(`version-bump-check`・`tag-version`)を呼んでいた
+ * build-windows.yml は削除した。このファイルは CI から呼ばれない。「exe 専用のコードの削除は別の Issue」という
+ * 方針で、削除せずに残している(対応するテストは `pnpm test` で引き続き走る)。版数は 1.44.0 で凍結した
+ * (docs/versioning.md)。
+ *
  * #44-D-1(docs/versioning.md)が定めた「公開1回につき必ず1回、版数を上げる」運用を、
  * 人の目視ではなく CI 上の機械検査で強制する。判定核はすべて純関数として切り出し、
  * 依存(アセット一覧取得・exe ファイル一覧・package.json 読み取り)は注入可能にすることで、

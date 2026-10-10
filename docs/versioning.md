@@ -3,6 +3,25 @@
 本書は root(`package.json`)・`packages/app`(`@keiba/app`)の版数(semver)をいつ・誰が・どの区分で
 上げるかを定める(Issue #44-D-1)。
 
+## 版数の凍結(Issue #248。exe の最終版は 1.44.0)
+
+2026-10-10 の利用者の決定で、exe 版の公開(ビルドと `dev-latest` の更新)を止めた。以後、root(`package.json`)と
+`packages/app` の版数は **exe の最終版 1.44.0 で凍結し、以後は上げない。** 最後の exe は `dev-latest` の
+`keiba-ev-tool-1.44.0-portable.exe` として残してある。
+
+- **凍結する理由**: 版数の用途は、exe のファイル名(`artifactName`)と、その公開の関門(`version-bump-check`・
+  `tag-version`)だった。web(cloud)は自分の版数を持たず、デプロイの区別はコミットと Issue 番号で行う。exe を出さないのに
+  版を上げ続けると、同時更新チェックリストの 8 項目と根拠セクションの儀式だけが残り、web の変更のたびに
+  アーカイブ済みの `packages/app` の版数を上げることになる。
+- **凍結中の扱い**: 「公開1回につき必ず1回上げる」は適用しない。同時更新チェックリストと、根拠セクションの追加も要らない。
+  `version-policy.test.ts` の `EXPECTED_APP_VERSION` と `release-gate.test.ts` の版数 literal は 1.44.0 のまま変えない。
+- **変わらないもの**: 承認印 `[PUBLISH-APPROVED]` は、cloud の本番デプロイの関門として残る(版数とは無関係)。
+  `scripts/release-gate.ts`(`version-bump-check`・`tag-version`)と `scripts/artifact-gate.ts` は CI から呼ばれなくなったが、
+  削除していない。
+- **再開の条件**: 版数を再び運用するとき(例: web 専用の版数を `cloud/package.json` に置く)は、別の Issue で決定し、
+  本節と `EXPECTED_APP_VERSION` を改める。
+- 以下の本文は、1.44.0 までの運用の記録である。
+
 ## 背景: なぜこの規約が要るか
 
 exe のファイル名は `packages/app/electron-builder.yml` の

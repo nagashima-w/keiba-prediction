@@ -28,7 +28,7 @@
 #   実行ごとにランダムな共有秘密を生成して Worker に渡し、一致しないリクエストは 403 にする。
 #   さらに、ジョブの最後に(失敗時も)Worker を削除し、残っていないことを一覧で確認する。
 #
-# ★既存の CI(build-windows.yml)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd
+# ★ほかの CI(ci.yml・deploy-cloud.yml)とは独立: このワークフローは ubuntu-latest で動き、wrangler / workerd
 #   などの依存は spikes/cloudflare/(pnpm workspace の外)にだけ入れる。
 name: Cloudflare 移行スパイク
 

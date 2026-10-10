@@ -12,7 +12,7 @@ netkeibaのデータから**期待値がプラスの馬券**(複勝を軸に、�
 
 ## 概要
 
-Windows デスクトップアプリ(Electron + React。最新版は GitHub の Releases を参照)。1レース分のデータ取得から、
+Windows デスクトップアプリ(Electron + React。**アーカイブ済み**。最後の版は GitHub の Releases の `dev-latest`)と、web 版(下記の Uma Driller)。1レース分のデータ取得から、
 期待値の算出、LLM(Claude API)による補正・根拠出し、馬券配分の提案、結果の検証(予実・回収率)、
 Discord 通知までを一貫して行えます。主な機能:
 
@@ -78,24 +78,16 @@ pnpm tsx scripts/dump-race.ts --date 20260628
 - **optionalデータ**(調教)の失敗はその項目を `null` にして警告を標準エラーに出し、処理は継続します。
 - **戦績**は馬単位で握るため、1頭の取得失敗では全体を落とさず、その馬のみ `results: null` + 警告になります。
 
-## Releases からのダウンロード(Windows)
+## Windows 版(exe)はアーカイブ済み
 
-GitHub Actions が Windows 向け exe を自動ビルドし、Releases に公開します。
+**exe 版の公開は止めました**(2026-10-10。Issue #248)。以後の機能追加と統計モデルの見直しは web 版(Uma Driller。`cloud/`)だけが対象です。
 
-- **開発版**: 開発ブランチへの push のうちレビュー完了とみなされたものについて、プレリリース
-  **`dev-latest`** を差し替え公開します(レビュー中のコミットでは更新されません)。
-  常に最新の実装を試せますが、予告なく内容が変わります。
-  - 入手先: **Releases → `開発版(最新ビルド)`(タグ `dev-latest`)**
-- 正式リリース(`v*` タグ)は現時点で公開していません。最新版は上記の開発版(Releases)を参照してください。
-
-共通:
-
-- ファイル: `keiba-ev-tool-<version>-portable.exe`(portable 版・インストール不要)
-- 使い方: ダウンロードした exe をダブルクリックで起動します。
+- **最後の版**: GitHub の Releases → `開発版(最新ビルド)`(タグ `dev-latest`)に、`keiba-ev-tool-1.44.0-portable.exe`(portable 版・インストール不要。ダブルクリックで起動)を残してあります。これ以上は更新されません。
+- **版数は 1.44.0 で凍結**しました([`docs/versioning.md`](./docs/versioning.md))。
+- exe のビルドと `dev-latest` への公開をしていたワークフローは削除しました。いまの CI は [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)(型検査・テスト・`@keiba/app` のビルドの関門。公開はしない)と [`.github/workflows/deploy-cloud.yml`](./.github/workflows/deploy-cloud.yml)(web 版の検査と本番デプロイ)です。
+- `packages/app` のコードとテストは残してあります(web 版が一部を import しています)。パッケージングの設定(`packages/app/electron-builder.yml`)も削除していません。
 - **個人利用専用**である点は本ツール全体と同様です。
-
-ワークフロー定義: [`.github/workflows/build-windows.yml`](./.github/workflows/build-windows.yml)。
-ビルド構成(パッケージング)は [`packages/app/electron-builder.yml`](./packages/app/electron-builder.yml) を参照。
+- exe に残っている過去の分析・結果を web 版へ移す手順は、`cloud/README.md` と、web 版の設定画面の「exe から移行」を参照してください。
 
 ### トラブルシュート
 
@@ -107,7 +99,7 @@ GitHub Actions が Windows 向け exe を自動ビルドし、Releases に公開
 
 ### 仕様との差異(記録)
 
-- **GitHub Actions ビルドの前倒し**: 仕様書では配布ビルドは Phase 5 の項目ですが、「UI 実装中は常に Releases から exe を入手できる状態を保つ」というユーザー指示により Phase 4 開始時点で先行整備しています。
+- **GitHub Actions ビルドの前倒し(記録)**: 仕様書では配布ビルドは Phase 5 の項目ですが、「UI 実装中は常に Releases から exe を入手できる状態を保つ」というユーザー指示により Phase 4 開始時点で先行整備していました。exe の公開は 2026-10-10 に止めました(上記)。
 - **renderer は core を直接 import しない**: 仕様「UI はコアを直接 import して使う」に対し、`better-sqlite3` 等のネイティブ依存を renderer 側へ持ち込まないため、renderer は core を直接読まず **main プロセス経由(IPC)** で core の値を受け取る構成にしています。ネイティブ依存を扱う処理は main プロセスに集約する解釈です。
 
 ## クラウド版の定時の自動実行(Cloudflare Worker。`cloud/`)
@@ -124,8 +116,8 @@ pnpm install                       # 依存インストール
 pnpm test                          # packages/core・packages/app・scripts/ のテスト(vitest。cloud/ は含まない)
 pnpm typecheck                     # 型検査(packages/core・packages/app と scripts/)
 
-pnpm --filter @keiba/app build     # Electron アプリのビルド(renderer + main/preload)
-pnpm --filter @keiba/app build:win # Windows 向け exe を生成(Windows 上でのみ実行可)
+pnpm --filter @keiba/app build     # Electron アプリのビルド(renderer + main/preload。ci.yml の関門にも含まれる)
+pnpm --filter @keiba/app build:win # Windows 向け exe を生成(Windows 上でのみ実行可。アーカイブ済みで、CI では使わない)
 ```
 
 `cloud/` は pnpm ワークスペースの外にあり、依存の導入もテストも `cloud/` で別に実行します(手順は [`cloud/README.md`](./cloud/README.md))。

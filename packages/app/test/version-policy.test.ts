@@ -214,7 +214,7 @@ describe("純関数: hasVersionRationaleSection(版数根拠セクションの�
 // 配線テスト(実ファイルへの適用)
 // ---------------------------------------------------------------------------
 
-/** 本タスクが是正する対象の版数。次回の版数運用(公開1回につき1回上げる)で更新する。 */
+/** exe の最終版の版数。Issue #248 で凍結した(以後は上げない)。版を上げる運用に戻すときに限って更新する。 */
 const EXPECTED_APP_VERSION = "1.44.0";
 /** packages/core は版数運用の対象外・据え置き(理由は docs/versioning.md 参照)。 */
 const EXPECTED_CORE_VERSION = "0.2.0";
@@ -234,30 +234,15 @@ describe("配線: package.json のバージョン", () => {
     expect(versionsInSync(rootPkg.version, appPkg.version)).toBe(true);
   });
 
-  it("root と app の version が 1.44.0(Issue #246: 【記録】の回収(2)〈日報の確認の継続: 作成中を見て確認を続けている途中に進行状況を取得できなかった応答が返っても確認を止めない。ほかはテストの追加〉。cloud の利用者に見える表示が変わる。API・D1・exe・core の挙動は無変更。minor。直前の 1.43.0 は Issue #245: 【記録】の回収(1)〈日報の「作られませんでした」の誤判定の修正・閲覧者に見える失敗の文面の鍵の形の伏せ字・回収率の丸め〉。cloud の利用者に見える表示が変わる。API の応答に job_status を足すだけ〈追加のみ〉。D1・exe・core の挙動は無変更。minor。直前の 1.42.0 は Issue #244: クラウド版 web に、利用者が作ったアイコン(「穴馬」)を、見出しの横の画像とブラウザのタブの favicon・apple-touch-icon として出す〈cloud の利用者に見える表示が増える。Worker から認証の後ろで配る。閲覧者にも開く。CSP に img-src 'self' を足す。API・D1・exe・core の挙動は無変更〉。minor。直前の 1.41.0 は Issue #243: クラウド版 web の閲覧者の「ログイン中」の行から「閲覧専用」の表示を外す〈利用者の要望。cloud の利用者に見える表示が変わる。data-role・役割による出し分け・サーバ側の 403 は無変更。API・D1・exe・core の挙動は無変更〉。minor。直前の 1.40.0 は Issue #239: クラウド版の配色を、P・D・T 型の色覚でも状態が区別できるカラーユニバーサルデザインにし、色だけで状態を伝えていた所に記号と語を足す〈cloud の利用者に見える表示が変わる。web の状態色と Discord の帯の色を替え、通知の embed に語を足す。API・D1・exe・core の挙動は無変更〉。minor。直前の 1.39.0 は Issue #238: クラウド版が、Cloudflare Access のポリシーに入れた人を閲覧者として受け入れ、secret ADMIN_USER の管理者だけに設定・検証・LLM を呼ぶ操作・状態を変える操作を許す〈cloud の利用者にできることが増える。API の互換・D1・exe・core の挙動は無変更〉。minor。直前の 1.38.0 は Issue #240: クラウド版 web のレース画面の「印の付いた馬」の直後に、3着内率の上位5頭〈LLM が効いた分析は補正後の3着内率、効いていない分析は3着内率〉を出す〈cloud の利用者に見える表示が増える。API・D1・exe・core の挙動は無変更〉。minor。直前の 1.37.0 は Issue #235: クラウド版に、その日に発走前の分析をした全レースの予想と結果から統計と LLM の振り返りの「日報」を作り、web に日付ごとに保存して Discord に要約を送る機能を足す〈cloud の利用者にできることが増える。D1 に表 daily_reports を足す〈追加のみ〉・新しい DO を足す。exe・core の挙動は無変更〉。minor。直前の 1.36.0 は Issue #236: クラウドの Discord の分析完了の通知と web のレース一覧・レース画面の見出しに発走予定時刻を出す〈cloud の利用者に見える表示が増える。D1・exe・core の挙動は無変更〉。minor。直前の 1.35.0 は Issue #220: クラウド版の検証画面(2)に、補正方向×結果・キャリブレーション・印別的中率・プロンプト版別の比較を足す〈cloud の利用者にできることが増える。D1・exe・core の挙動は無変更。exe の検証画面の挙動は不変〉。minor。直前の 1.34.0 は Issue #230: クラウドの Discord の発走前の分析の通知に、印のついた馬の一覧・買い目・分析画面へのリンク・レース番号を載せる〈minor〉。直前の 1.33.0 は Issue #228: 初出走馬の戦績ページを出走歴なしとして扱い、クラウドで新馬戦を分析できるようにする〈minor〉。直前の 1.32.0 は Issue #219: クラウド版に検証画面〈累積回収率・配分ベースの回収率〉を足す〈cloud の利用者にできることが増える。D1 に列 start_time を追加するだけで既存の列・設定の互換は無変更。exe の検証画面の挙動は不変〉。minor)であり、公開1回につき1回上げる運用で据え置かれていない", () => {
-    // #44-D-1(このファイルの本来の対象)は 1.1.0 → 1.2.0、#45 が 1.2.1、#31 が 1.2.2、#71 が 1.5.0、
-    // #55 が 1.6.0、#34 が 1.6.1、#73 が 1.6.2、#74 が 1.6.3、#76 が 1.6.4、#77(#20-A)が 1.6.5、
-    // #80(#78-A)が 1.6.6、#81(#78-B)が 1.7.0、#88(#23-B0)が 1.7.1、#91(#23-B1a)が 1.7.2、
-    // #92(#23-B1b)が 1.7.3、#90(#23-B2)が 1.8.0、#96 が 1.8.1、#100(#23-C)が 1.9.0、
-    // #103(#24-A)が 1.9.1。
-    // 本回は #106(#24-B)。**patch**(内部改善。利用者から見てできることは増えず、
-    // 分析結果の数値も変わらない)。
-    // 変更内容: `ComboBetType` に `exacta`(馬単)を追加し、キー生成・検証・オッズ取得・
-    // 払戻保存の全経路を betType 別の順序方針(`COMBO_KEY_ORDER`)に対応させた。
-    // **patch である根拠(production から到達しないこと)**:
-    // - `scrape-race.ts` の `fetchComboBetTypeOdds` 呼び出しは wide/trio のハードコード2箇所のみで、
-    //   **馬単のライブ取得は配線されていない**(配線は #24-D / #24-E)。
-    // - `result-import.ts` の `saveResult` 呼び出しは `{ wide, trio }` しか渡さず、
-    //   `saveResult` のループは `combo?.[betType] === undefined` で `continue` するため、
-    //   **production では exacta 行が1件も書き込まれない**。
-    // - `AllocationBetType`(配分側の型。`combo-bet-allocation.ts`)は**無変更**であり、
-    //   馬単が配分提案・UI・回収率検証に現れる経路は存在しない。
-    // したがって利用者から見える変化は無い。
-    // major/minor ではない根拠: DB スキーマは無変更(`race_combo_payouts` の PK が
-    // `(race_id, bet_type, combo_key)` なので順序付きキーをそのまま保持でき、列追加もしていない)。
-    // 設定・エクスポート JSON・IPC の後方非互換も無い。
-    // 公開1回につき1回上げる運用により、EXPECTED_APP_VERSION 据え置きのままにならないことを
-    // 固定する。
+  it("root と app の version が 1.44.0(exe の最終版)で凍結されている(Issue #248: exe の公開を止めた。以後は上げない)", () => {
+    // Issue #248 で exe 版をアーカイブし、版数を exe の最終版 1.44.0 で凍結した(利用者の決定・2026-10-10)。
+    // 凍結の理由: 版数の用途は exe のファイル名(electron-builder.yml の artifactName)と、その公開の関門
+    // (version-bump-check・tag-version)だった。web(cloud)は自分の版数を持たず、公開の区別はコミットと Issue 番号で行う。
+    // この検査は、凍結が破られていない(誰かが版を上げて、チェックリストの同時更新を始めていない)ことを固定する。
+    // 版を再び上げる運用に戻すときは、EXPECTED_APP_VERSION と docs/versioning.md の凍結節を、決定とともに改める。
+    // 1.44.0 までの各版の区分(major/minor/patch)の判断根拠は、docs/versioning.md の「次の正式版が X.Y.Z である根拠」節に残してある
+    // (1.32.0 から 1.44.0 までの各節がある。以前はこの it 名に履歴を積んでいたが、版を上げない運用では更新されないため、
+    // 履歴は versioning.md だけに置く)。
     expect(rootPkg.version).toBe(EXPECTED_APP_VERSION);
     expect(appPkg.version).toBe(EXPECTED_APP_VERSION);
   });
@@ -283,8 +268,9 @@ describe("配線: electron-builder.yml の artifactName(版数が exe 名に出�
       throw new Error("artifactName の定義行が見つかりません");
     }
 
-    // ここがベタ書きの exe 名に変えられると、版数運用そのものと CI の孤児掃除ステップ
-    // (現行ファイル名以外を削除する)の前提が静かに死ぬ。
+    // ここがベタ書きの exe 名に変えられると、版数と exe 名の対応(最後の exe が
+    // keiba-ev-tool-1.44.0-portable.exe であること)が静かに崩れる。exe 専用のコードは削除せず残す
+    // 方針(Issue #248)のため、この前提のピン留めも残してある。
     expect(captured.trim()).toBe(
       "keiba-ev-tool-${version}-portable.${ext}",
     );
@@ -436,6 +422,29 @@ describe("配線: docs/versioning.md(版数運用規約)", () => {
     expect(doc).toContain("7. ");
     expect(doc).toContain("次の正式版が");
     expect(doc).toMatch(/7\.[\s\S]{0,80}根拠セクション/);
+  });
+});
+
+describe("配線: 版数の凍結(Issue #248。exe の最終版 1.44.0)", () => {
+  it("docs/versioning.md の先頭に凍結の節があり、凍結する版数・以後は上げないこと・理由・再開の条件が書かれている", () => {
+    const doc = readNormalized(VERSIONING_DOC_PATH);
+    const m = doc.match(/^## 版数の凍結[^\n]*\n([\s\S]*?)(?=\n## )/m);
+    // 前提固定: 節が見つかること、かつ本文が空でないこと(空振りで以降の検査が自明に通らない)。
+    expect(m).not.toBeNull();
+    const section = m![1] ?? "";
+    expect(section.length).toBeGreaterThan(200);
+    expect(section).toContain(EXPECTED_APP_VERSION);
+    expect(section).toContain("exe の最終版");
+    expect(section).toMatch(/以後は上げない/);
+    expect(section).toContain("version-bump-check");
+    expect(section).toMatch(/再開/);
+    // 凍結の節は、規約の本文(「背景」)より前にある(読み手が最初に当たる)。
+    expect(doc.indexOf("## 版数の凍結")).toBeLessThan(doc.indexOf("## 背景: なぜこの規約が要るか"));
+  });
+
+  it("CLAUDE.md と docs/current-spec.md が、版数の凍結(exe の最終版)に触れている", () => {
+    expect(readNormalized(path.join(REPO_ROOT, "CLAUDE.md"))).toMatch(/版数は 1\.44\.0.{0,20}で凍結/);
+    expect(readNormalized(CURRENT_SPEC_PATH)).toMatch(/exe の最終版[\s\S]{0,80}凍結/);
   });
 });
 

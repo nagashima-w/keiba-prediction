@@ -1,3 +1,5 @@
+# 【アーカイブ(Issue #248)】exe 版の公開を止めた。この設定は CI から使われない(削除せずに残してある)。
+#
 # electron-builder 設定(Windows 向け配布)。
 #
 # ターゲットに portable を選択した理由:

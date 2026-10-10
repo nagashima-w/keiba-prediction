@@ -99,6 +99,9 @@
 - **検証要件には、CI の check ジョブが実行するコマンドを全部入れる。** #205 では、ゲートの
   検証要件が `typecheck`・`test`・`deploy:dry` だけだった。そのため、`pnpm run smoke`(workerd を
   起動して health などを完全一致で確かめる)が漏れ、health にキーを足した変更が CI で初めて落ちた。
+  ルートの CI(`ci.yml`)は、`pnpm typecheck`・`pnpm test`・`pnpm --filter @keiba/app build` を実行する
+  (Issue #248 で exe の公開を止めたあとも、この関門は残してある。cloud の check ジョブは packages/core・
+  packages/app・scripts のテストを走らせないので、**cloud に触れない変更でも、ルートの3コマンドは検証要件に入れる**)。
   `deploy-cloud.yml` の check ジョブは、typecheck・test・deploy:dry・
   `wrangler d1 migrations apply DB --local`・smoke を実行する。ブリーフを書く前に
   ワークフローの `run:` を列挙する。**smoke は固定のポートと同じレースIDを使うので、2つの
@@ -191,7 +194,7 @@ boss が具体的な値や条件を AC に書き込むと、実装者と code-re
 ## 禁止事項
 - **プロダクトコード・テストコードの編集**(オーケストレーターは実装しない。`CLAUDE.md` の
   エージェント体制どおり、実装は tdd-implementer に委譲する)。編集してよいのは
-  `docs/`・`CLAUDE.md`・`.claude/agents/*.md`・Issue・版数まわりの定型更新まで
+  `docs/`・`CLAUDE.md`・`.claude/agents/*.md`・Issue まで(版数は Issue #248 で 1.44.0 に凍結したので、定型更新は無い)
 - 差分を読まずにcode-reviewerの報告だけで承認すること
 - 些末な言い回しの差し戻しを乱発すること(差し戻しは「レビューとして見落としと言える実質的な抜け」に限る)
 - 着手前ゲートで、解消可能な曖昧点を残したまま安易に【Go】を出すこと

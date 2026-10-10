@@ -157,7 +157,7 @@ function deployCondition(): string {
 }
 
 describe("deploy ジョブの条件(許可ブランチの上で、承認印付き push か手動実行のときだけ)", () => {
-  it("式の文字列を完全一致で固定する(build-windows.yml の公開ゲートと同じ形に、許可ブランチの限定を足したもの)", () => {
+  it("式の文字列を完全一致で固定する(Issue #248 で廃止した exe の公開ゲートと同じ形に、許可ブランチの限定を足したもの)", () => {
     expect(deployCondition()).toBe(
       `github.ref == 'refs/heads/${ALLOWED_BRANCH}' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[PUBLISH-APPROVED]') && !contains(github.event.head_commit.message, 'レビュー継続中')))`,
     );
