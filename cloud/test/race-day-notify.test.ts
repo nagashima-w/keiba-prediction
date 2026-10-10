@@ -331,6 +331,7 @@ describe("AC-D1: 発走前の分析が保存されると、分析の embed が1�
     ]);
     expect(rows[0]!.analysis_id).toBe(1);
     const analysis = h.notifier.sent.map(embedOf).find((e) => e.title!.includes("福島"))!;
+    expect(analysis.title).toBe("福島 11R ラジオNIKKEI賞"); // Issue #230: レース番号つき(計画の行から)。レース名はスナップショットの実名
     expect(analysis.description).toContain("2026/06/28 / 福島 /"); // メタ行(日付・会場・コース距離)
     expect(analysis.description).toContain("LLM補正:");
     expect([0x2ecc71, 0x95a5a6]).toContain(analysis.color); // 緑(狙い目あり)か灰色(なし)

@@ -442,7 +442,10 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   const description = outcome.note === null ? base.description : `${base.description ?? ""}\nLLM補正の注記: ${outcome.note}`;
   // 印の付いた馬 → 買い目の順(収まらないときは末尾の買い目から縮める)。EV プラスの馬の行(description)は core のまま残す。
   const fields: EmbedField[] = [buildMarksField(record, snapshot.names), buildAllocationField(record.allocation)];
-  return fitEmbed({ ...base, ...(description === undefined ? {} : { description }), fields });
+  // タイトルは失敗・手動スキップ・最小の通知と同じ関数で作る(Issue #230。「会場 NR レース名」)。core のタイトルは番号を持たない(core は変えない)。
+  // 番号は計画の行(`label.raceNumber`)から。無ければ番号なしの今の形(「会場 レース名」)になる。レース名は、スナップショットにあればそれを優先する(従来どおり)。
+  const title = raceTitle({ ...label, raceName: snapshot.raceName ?? label.raceName });
+  return fitEmbed({ ...base, title, ...(description === undefined ? {} : { description }), fields });
 }
 
 // ---- 朝のまとめ ----

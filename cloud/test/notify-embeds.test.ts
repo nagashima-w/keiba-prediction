@@ -244,14 +244,48 @@ function record(over: Partial<AnalysisRecord> = {}, snapshot: unknown = undefine
 describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰・LLM なし=理由の固定文)", () => {
   const effective = { effective: true, note: null } as const;
 
-  it("狙い目あり(isPositive の馬がいる): 緑。馬番・馬名・補正後確率・複勝下限・EV の行がある。タイトルは「会場 レース名」、メタ行に日付・コース・距離", () => {
+  it("狙い目あり(isPositive の馬がいる): 緑。馬番・馬名・補正後確率・複勝下限・EV の行がある。タイトルは「会場 NR レース名」、メタ行に日付・コース・距離", () => {
     const out = buildAnalysisNotificationEmbed(record(), effective, label());
     expect(out.color).toBe(0x2ecc71);
-    expect(out.title).toBe("中山 テストステークス");
+    expect(out.title).toBe("中山 11R テストステークス"); // Issue #230: レース番号を入れる(失敗の通知と同じ形)
     expect(out.description).toContain("2026/09/27 / 中山 / 芝1600m");
     expect(out.description).toContain("◎ 1番 アルファ AI補正後42.0% 複勝下限2.5 EV1.05");
     expect(out.description).not.toContain("ブラボー"); // EV プラスでない馬は出さない
     expect(out.description).toContain("LLM補正: 実行");
+  });
+
+  describe("Issue #230: タイトルは失敗・手動スキップ・最小の通知と同じ関数(raceTitle)で作る「会場 NR レース名」", () => {
+    it.each([
+      ["通常", label()],
+      ["レース番号が無い(計画の行に無い): 今の形「会場 レース名」にフォールバック", label({ raceNumber: null })],
+      ["会場名が無い(レース ID から補う)", label({ venueName: null })],
+      ["レース名が無い", label({ raceName: null })],
+      ["地方(会場名・番号つき)", label({ raceId: "202636062811", venueName: "水沢", raceNumber: 3, raceName: "交流重賞" })],
+    ] as const)("%s: 分析の完了の title は、同じ label の失敗・手動スキップ・最小の通知の title と一致する", (_name, lb) => {
+      // スナップショットのレース名と label のレース名が同じ(通常)ときの比較。レース名が無い label では、スナップショット側の名前を使うので、スナップショットも名前なしにして比べる
+      const snapshot = { race: { raceName: lb.raceName, courseType: "芝", distance: 1600, oddsStatus: "result" }, horses: [{ umaban: 1, name: "アルファ" }] };
+      const out = buildAnalysisNotificationEmbed(record({}, snapshot), effective, lb);
+      expect(out.title).toBe(buildFailureEmbed(lb, "x").title);
+      expect(out.title).toBe(buildManualSkipEmbed(lb).title);
+      expect(out.title).toBe(buildMinimalAnalysisEmbed(lb).title);
+    });
+
+    it("前提(空振り防止): 通常の label では、title にレース番号(11R)が入っている。番号が無いときは入らない", () => {
+      expect(buildAnalysisNotificationEmbed(record(), effective, label()).title).toBe("中山 11R テストステークス");
+      expect(buildAnalysisNotificationEmbed(record(), effective, label({ raceNumber: null })).title).toBe("中山 テストステークス");
+    });
+
+    it("スナップショットにレース名があれば、それを使う(label のレース名より優先。従来どおり)。番号は label から", () => {
+      const snapshot = { race: { raceName: "スナップショットの名前", courseType: "芝", distance: 1600, oddsStatus: "result" }, horses: [] };
+      expect(buildAnalysisNotificationEmbed(record({}, snapshot), effective, label()).title).toBe("中山 11R スナップショットの名前");
+    });
+
+    it("title は 256 文字以内(長いレース名でも)", () => {
+      const snapshot = { race: { raceName: "あ".repeat(400), courseType: "芝", distance: 1600, oddsStatus: "result" }, horses: [] };
+      const out = buildAnalysisNotificationEmbed(record({}, snapshot), effective, label());
+      expect(out.title!.length).toBeLessThanOrEqual(256);
+      expect(out.title!.startsWith("中山 11R ")).toBe(true);
+    });
   });
 
   it("狙い目なし(isPositive の馬がいない): 灰色。「該当なし」", () => {
