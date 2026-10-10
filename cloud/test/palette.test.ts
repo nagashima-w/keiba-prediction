@@ -5,7 +5,10 @@
  *  - 状態の色どうし(ok・wait・fail)と、強調の色(accent)と状態の色の組が、P・D・T 型の色覚シミュレーション後も ΔE2000 ≥ 10 で離れていること。
  *  - Discord の帯の4色(ok・warn・fail・none)も同じ基準。
  *
- * **web は `renderPage` の出力から CSS 変数を実際に読み取って検査する**(palette.ts の定数だけを見ない)。page.ts が定数と違う値を直書きしても検出するため。
+ * **web は `renderPage` の出力から CSS 変数を実際に読み取って検査する**(palette.ts の定数だけを見ない)。ただし読むのは**最初の `:root` とダークの `@media` だけ**なので、
+ * `page.ts` の後ろに別の `:root { --fail: …; }` や色の直書きを足す退行は、これだけでは検出できない。それは「Issue #239 R2」のテストが、
+ * `<style>` 全体から `paletteCss()` の出力とコメントを除いた残りに、16 進・rgb()・hsl() などの色のリテラルが無いことで検出する。
+ * 色の意味の割り当て(ok・fail を入れ替えても閾値は通る)は、「Issue #239 R1」のテストが採用した値のリテラルで固定する。
  * 色の計算(色覚シミュレーション・ΔE2000・コントラスト比)は color-science.ts。その正しさは color-science.test.ts が別に固定している。
  *
  * ΔE2000 の閾値 10 は経験則: 約 1 が知覚できる最小差、2〜5 が並べて見比べて分かる差、10 以上は離れて見ても別の色と分かる差、という目安に基づく(厳密な標準ではない)。
@@ -102,6 +105,61 @@ describe("web の配色: 実際に配信される CSS と palette.ts の一致",
   it("ライトとダークは別の値(ダークにも同じ値を入れて通るのを防ぐ)", () => {
     for (const key of ["fg", "bg", "ok", "wait", "fail"] as const) {
       expect(WEB_LIGHT[key], key).not.toBe(WEB_DARK[key]);
+    }
+  });
+});
+
+describe("Issue #239 R1: 意味の割り当て(どの状態にどの色か)を、採用した値のリテラルで固定する", () => {
+  // 定数どうしを比べる検査(`toBe(DISCORD_COLORS.ok)` など)は、ok と fail の値を入れ替えても通ってしまう。
+  // 緑系=成功・赤系=失敗という意味は、ここで値そのものに結び付ける。色を変える変更では、このリテラルも意図して書き換える。
+  it("Discord の帯: ok=青みの緑・warn=橙・fail=赤寄りの朱・none=灰", () => {
+    expect(DISCORD_COLORS).toEqual({ ok: 0x009e73, warn: 0xe69f00, fail: 0xd02040, none: 0x95a5a6 });
+  });
+
+  it("web ライト: ok=青緑寄りの緑・wait=黄土・fail=煉瓦色", () => {
+    expect({ ok: WEB_LIGHT.ok, wait: WEB_LIGHT.wait, fail: WEB_LIGHT.fail }).toEqual({ ok: "#177c55", wait: "#8e6610", fail: "#922b2b" });
+  });
+
+  it("web ダーク: ok=緑・wait=琥珀・fail=サーモン", () => {
+    expect({ ok: WEB_DARK.ok, wait: WEB_DARK.wait, fail: WEB_DARK.fail }).toEqual({ ok: "#7cd9ac", wait: "#e3b548", fail: "#ec7971" });
+  });
+
+  it("実際に配信される CSS でも同じ割り当て(palette.ts の定数ではなく、<style> から読んだ値)", () => {
+    expect({ ok: PAGE.light["ok"], wait: PAGE.light["wait"], fail: PAGE.light["fail"] }).toEqual({ ok: "#177c55", wait: "#8e6610", fail: "#922b2b" });
+    expect({ ok: PAGE.dark["ok"], wait: PAGE.dark["wait"], fail: PAGE.dark["fail"] }).toEqual({ ok: "#7cd9ac", wait: "#e3b548", fail: "#ec7971" });
+  });
+});
+
+describe("Issue #239 R2: 色の直書きが無い(<style> 全体で、16 進・rgb()・hsl() の色は paletteCss() の出力の中だけ)", () => {
+  /** CSS のコメントを除く(コメントには `Issue #239` のように 16 進に見える文字列がある)。 */
+  const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/;
+
+  const style = (): string => {
+    const css = /<style>([\s\S]*?)<\/style>/.exec(renderPage("owner@example.com"))?.[1];
+    expect(css, "<style> が1つある").toBeDefined();
+    return css!;
+  };
+
+  it("paletteCss() の出力を除くと、色のリテラルが1つも残らない(後ろに `:root { --fail: #…; }` や直書きの色を足すと赤くなる)", () => {
+    const css = style();
+    expect(css).toContain(paletteCss()); // 前提: 取り除く対象が実際に含まれている(含まれなければ下の検査が空振りする)
+    const rest = withoutComments(css.replace(paletteCss(), ""));
+    expect(rest.match(new RegExp(COLOR_LITERAL, "g")) ?? []).toEqual([]);
+  });
+
+  it("検査が効く: 色のリテラルの検出が、16 進・rgb()・hsl() を拾う", () => {
+    for (const sample of ["a { color: #b3261e; }", ":root { --fail: #f00; }", "a { color: rgb(1,2,3); }", "a { color: hsl(0 50% 50%); }"]) {
+      expect(COLOR_LITERAL.test(sample), sample).toBe(true);
+    }
+    // コメント内の Issue 番号は除かれる
+    expect(COLOR_LITERAL.test(withoutComments("/* Issue #239 */ a { margin: 0; }"))).toBe(false);
+  });
+
+  it("palette.ts の色の値は、paletteCss() の出力に全部現れる(CSS 変数の一部が出力から抜けていない)", () => {
+    const css = paletteCss();
+    for (const value of [...Object.values(WEB_LIGHT), ...Object.values(WEB_DARK)]) {
+      expect(css).toContain(value);
     }
   });
 });
