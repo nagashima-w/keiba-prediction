@@ -285,6 +285,35 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
     expect(body.plan.venues[0]!.reason).toBeNull();
   });
 
+  it("Issue #245: 自由文(会場の reason・失敗の message)は、保存済みの値でも sk-ant- の鍵の形を伏せてから 200 文字に切る", async () => {
+    const { deps, token } = await setup();
+    const f = fakePlanDay();
+    const KEY = "sk-ant-api03-SECRET_BODY-0123456789";
+    const stored = `${"r".repeat(190)}${KEY}${"r".repeat(50)}`;
+    // 前提: 鍵は 200 文字目をまたぐ位置にある(切ってから伏せると、鍵の先頭の断片が残る)
+    expect(stored.indexOf(KEY)).toBeLessThan(200);
+    expect(stored.indexOf(KEY) + KEY.length).toBeGreaterThan(200);
+    f.planImpl = async () => ({ ...PLAN, venues: [{ venue: "nar", state: "failed", attempts: 3, reason: stored, listed: null, targeted: null }] });
+    f.resultsImpl = async () => ({
+      ...RESULTS,
+      results: [
+        { raceId: "202606040903", venue: "central", venueName: "中山", raceNumber: 3, raceName: "3歳1勝クラス", grade: null, startTime: "10:50", dueMs: 5_000, outcome: { kind: "failed", reason: "fetch-exhausted", message: `${stored}` } },
+        { raceId: "202606040904", venue: "central", venueName: "中山", raceNumber: 4, raceName: "4歳以上", grade: null, startTime: "11:20", dueMs: 6_000, outcome: { kind: "failed", reason: "blocked", message: `取得に失敗 ${KEY}` } },
+      ],
+    });
+    const response = await handle(get(`/api/plan?kaisai_date=${DATE}`, token), envOf(f), {}, deps);
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    const body = JSON.parse(text) as { plan: { venues: { reason: string }[] }; results: { outcome: { message: string } }[] };
+    expect(body.results).toHaveLength(2); // 前提: 2 件とも検査される
+    expect(body.plan.venues[0]!.reason).toBe(`${"r".repeat(190)}sk-ant-***`);
+    expect(body.results[0]!.outcome.message).toBe(`${"r".repeat(190)}sk-ant-***`);
+    expect(body.results[1]!.outcome.message).toBe("取得に失敗 sk-ant-***");
+    expect(text).not.toContain("SECRET_BODY");
+    expect(text).not.toContain("sk-ant-api03");
+    expect(text).not.toContain("sk-ant-a");
+  });
+
   it("依頼の前の DO(stage none・空の結果)も 200 で返す。開いただけでは何も起きない(RPC は読み取りの 4 つだけ)", async () => {
     const { deps, token } = await setup();
     const f = fakePlanDay();

@@ -8,7 +8,8 @@
 import type { ReportDetail, ReportJob, ReportListItem, ReportRace } from "./api-report";
 import { formatJstDateTime } from "./date";
 import { buildReportHash } from "./route";
-import { formatRate, formatYen, PROPOSED_BET_LABELS } from "./verify-format";
+import { formatRecoveryPercent } from "../src/recovery-format";
+import { formatYen, PROPOSED_BET_LABELS } from "./verify-format";
 
 /** 一覧(日付の並び)の状態。 */
 export type ReportListState =
@@ -20,7 +21,8 @@ export type ReportListState =
 export type ReportDetailState =
   | { readonly kind: "loading" }
   | { readonly kind: "error"; readonly message: string }
-  | { readonly kind: "ready"; readonly report: ReportDetail | null; readonly job: ReportJob | null };
+  /** `jobUnavailable`(Issue #245): 日報の進行状況を**取得できなかった**(`job` が null なのは「ジョブが無い」のではなく「分からない」)。省略は false。 */
+  | { readonly kind: "ready"; readonly report: ReportDetail | null; readonly job: ReportJob | null; readonly jobUnavailable?: boolean };
 
 /**
  * 「この日の日報を作る」の状態。`requested`: 依頼を受け付けた(作成中の表示に切り替わるまでの間)。
@@ -142,6 +144,9 @@ export const CREATE_TODAY_CAUTION =
 /** 依頼したが日報が作られずに終わったときの固定文言。 */
 export const NO_REPORT_NOTICE = "この日は分析したレースが無いため、日報は作られませんでした。";
 
+/** 依頼のあと、日報の進行状況を取得できなかったとき(Issue #245)。「作られなかった」と断定せず、確認を続けることを伝える固定の文言。 */
+export const JOB_UNAVAILABLE_NOTICE = "作成の状況を確認できませんでした。確認を続けます(この画面は自動で更新します)。";
+
 function chipsOf(input: ReportModelInput): DateChip[] {
   const dates: string[] = [input.today];
   if (input.list.kind === "ready") {
@@ -176,7 +181,7 @@ function bodyOf(report: ReportDetail): ReportBodyView {
   const tiles: TileView[] = [
     { label: "賭け金", value: formatYen(s.totalStake), strong: false },
     { label: "払戻", value: formatYen(s.totalReturn), strong: false },
-    { label: "回収率", value: formatRate(s.recoveryRate), strong: true },
+    { label: "回収率", value: s.recoveryRate === null ? "-" : formatRecoveryPercent(s.recoveryRate), strong: true },
     { label: "的中", value: `${s.judgedBetCount} 点中 ${s.hitBetCount} 点`, strong: false },
   ];
   const typeRows: RowView[] = PROPOSED_BET_LABELS.filter(({ type }) => s.byBetType[type] !== undefined).map(({ type, label }) => {
@@ -238,7 +243,10 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
     } else if (detail.job !== null && detail.job.status === "running") {
       notice = { tone: "wait", text: "日報を作成中です。しばらくすると表示されます(この画面は自動で更新します)。" };
     } else if (run.kind === "requested") {
-      notice = { tone: "wait", text: "日報の作成を依頼しました。しばらくすると表示されます(この画面は自動で更新します)。" };
+      notice =
+        detail.jobUnavailable === true
+          ? { tone: "wait", text: JOB_UNAVAILABLE_NOTICE }
+          : { tone: "wait", text: "日報の作成を依頼しました。しばらくすると表示されます(この画面は自動で更新します)。" };
     } else if (run.kind === "no-report") {
       notice = { tone: "info", text: NO_REPORT_NOTICE };
     } else {

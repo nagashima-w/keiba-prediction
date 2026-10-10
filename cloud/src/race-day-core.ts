@@ -1795,7 +1795,7 @@ export class RaceDayCore {
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "fetch", result: "ok" };
     } catch (error) {
-      const message = errorMessage(error);
+      const message = redactSecrets(errorMessage(error)); // 保存する文面は鍵の形を伏せる(閲覧者にも見える。Issue #245)
       if (isFatalFetchError(error) || attempts >= MAX_ATTEMPTS) {
         this.updateTask(task, "failed", attempts, message);
         this.onWarn(`朝の取得に失敗しました(${task.race_id}。試行 ${attempts} 回): ${message}`);
@@ -1835,7 +1835,7 @@ export class RaceDayCore {
       this.updateTask(task, "done", task.attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "ok" };
     } catch (error) {
-      const message = errorMessage(error);
+      const message = redactSecrets(errorMessage(error)); // 保存する文面は鍵の形を伏せる(閲覧者にも見える。Issue #245)
       this.updateTask(task, "failed", task.attempts, message);
       this.onWarn(`朝の prior の計算に失敗しました(${task.race_id}): ${message}`);
       return { kind: "ran", raceId: task.race_id, mode: "morning", step: "compute", result: "failed" };
@@ -1950,7 +1950,7 @@ export class RaceDayCore {
       this.updateTask(task, "fetched", attempts, null);
       return { kind: "ran", raceId: task.race_id, mode: "pre_race", step: "fetch", result: "ok" };
     } catch (error) {
-      const message = errorMessage(error);
+      const message = redactSecrets(errorMessage(error)); // 保存する文面は鍵の形を伏せる(閲覧者にも見える。Issue #245)
       if (isFatalFetchError(error) || attempts >= MAX_ATTEMPTS) {
         this.updateTask(task, "failed", attempts, message);
         this.recordAutoFail(task, isFatalFetchError(error) ? "blocked" : "fetch-exhausted");

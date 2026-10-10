@@ -392,6 +392,33 @@ describe("GET /api/analyses/status(Issue #180)", () => {
     expect(raceDay.calls()).toBeGreaterThan(0);
   });
 
+  it("Issue #245: 閲覧者に見える error は、保存済みの値でも sk-ant- の鍵の形を伏せる(伏せてから 200 文字に切る)", async () => {
+    const { deps, token } = await setup();
+    const raceDay = fakeRaceDay();
+    const KEY = "sk-ant-api03-SECRET_BODY-0123456789";
+    // 前提: 鍵は 200 文字目をまたぐ位置にある(切ってから伏せると、鍵の先頭の断片が残る)
+    const stored = `${"x".repeat(190)}${KEY}${"y".repeat(50)}`;
+    expect(stored.indexOf(KEY)).toBeLessThan(200);
+    expect(stored.indexOf(KEY) + KEY.length).toBeGreaterThan(200);
+    raceDay.boardImpl = async () => ({
+      kaisaiDate: DATE,
+      races: [
+        { raceId: RACE, mode: "pre_race", status: "failed", attempts: 3, error: stored, queuedAt: 1500, updatedAt: 2500, computedAt: null, analysisId: null, detail: null, childrenOk: null },
+        { raceId: RACE, mode: "morning", status: "failed", attempts: 1, error: `取得に失敗 ${KEY}`, queuedAt: 1500, updatedAt: 2500, computedAt: null, analysisId: null, detail: null, childrenOk: null },
+      ],
+    });
+    const response = await handle(get(`/api/analyses/status?kaisai_date=${DATE}`, token), envOf(raceDay), {}, deps);
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    const json = JSON.parse(text) as { races: { error: string }[] };
+    expect(json.races).toHaveLength(2); // 前提: 2 件とも検査される
+    expect(json.races[1]!.error).toBe("取得に失敗 sk-ant-***");
+    expect(json.races[0]!.error).toBe(`${"x".repeat(190)}sk-ant-***`.slice(0, 200)); // 伏せた後に切る(「sk-ant-***」は 10 文字で 200 文字に収まる)
+    expect(text).not.toContain("SECRET_BODY");
+    expect(text).not.toContain("sk-ant-api03");
+    expect(text).not.toContain("sk-ant-a");
+  });
+
   it("開催日の DO の状態を返す: 各レースの状態・試行回数・エラー(200 文字まで)・朝の prior の有無。朝の prior の中身は返さない", async () => {
     const { deps, token } = await setup();
     const raceDay = fakeRaceDay();

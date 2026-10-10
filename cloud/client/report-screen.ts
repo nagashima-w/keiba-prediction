@@ -122,7 +122,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
         if (g !== gen || mySeq !== seq) return; // 離れた・日付を替えた・取り直した(古い応答)
         busy = false;
         if (result.ok) {
-          detail = { kind: "ready", report: result.report, job: result.job };
+          detail = { kind: "ready", report: result.report, job: result.job, jobUnavailable: result.jobStatus === "unavailable" };
           failures = 0;
           if (result.report !== null) {
             run = { kind: "idle" };
@@ -130,8 +130,10 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
             if (list.kind === "ready" && !list.items.some((i) => i.date === date)) refreshList();
           } else if (run.kind === "requested" && result.job !== null && result.job.status === "failed") {
             run = { kind: "idle" };
-          } else if (run.kind === "requested" && result.job === null) {
+          } else if (run.kind === "requested" && result.job === null && result.jobStatus === "ok") {
             // 依頼は受け付けられた(ジョブは依頼の時点で作られる)のに、日報も進行状況も無い = 作られずに終わった(その日の分析が無い)。固定の案内を出して確認を止める。
+            // **進行状況を取得できなかった(`unavailable`)ときは、ここに入らない**(Issue #245): ジョブが無いのではなく分からないので、`requested` のまま確認を続ける
+            // (失敗の連続にも数えない。止まるのは日報が現れたとき・作成が失敗したとき・REPORT_MAX_POLLS 回のとき)。
             run = { kind: "no-report" };
           }
         } else if (mode === "first") {

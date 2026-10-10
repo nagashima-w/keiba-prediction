@@ -114,8 +114,14 @@ export interface ReportJob {
 }
 
 export type ReportListResult = { readonly ok: true; readonly reports: readonly ReportListItem[] } | { readonly ok: false; readonly error: ApiFailure };
+/**
+ * 進行状況の取得の結果(Issue #245。サーバの `job_status`)。`ok`: 取得できた(`job` が null なら「ジョブが無い」)。
+ * `unavailable`: 日報の DO の取得に失敗した(`job` は null だが、ジョブが無いのではなく**分からない**)。
+ */
+export type ReportJobStatus = "ok" | "unavailable";
+
 export type ReportDetailResult =
-  | { readonly ok: true; readonly report: ReportDetail | null; readonly job: ReportJob | null }
+  | { readonly ok: true; readonly report: ReportDetail | null; readonly job: ReportJob | null; readonly jobStatus: ReportJobStatus }
   | { readonly ok: false; readonly error: ApiFailure };
 
 const isCount = (v: unknown): v is number => isNum(v) && Number.isInteger(v) && v >= 0;
@@ -259,7 +265,7 @@ export async function fetchReportList(fetchLike: FetchLike): Promise<ReportListR
   return { ok: true, reports };
 }
 
-/** `GET /api/reports/{date}`。日報が無い日は `report: null`(進行状況が `job`)。 */
+/** `GET /api/reports/{date}`。日報が無い日は `report: null`(進行状況が `job`。取れなかったときは `jobStatus: "unavailable"`。Issue #245)。 */
 export async function fetchReport(fetchLike: FetchLike, date: string): Promise<ReportDetailResult> {
   let response: Awaited<ReturnType<FetchLike>>;
   try {
@@ -273,12 +279,13 @@ export async function fetchReport(fetchLike: FetchLike, date: string): Promise<R
     return { ok: false, error: classify(response.status, body) };
   }
   const job = parseJob(body["job"]);
+  const jobStatus = body["job_status"];
   const raw = body["report"];
   const report = raw === null ? null : parseDetail(raw);
-  if (job === undefined || (raw !== null && report === null) || raw === undefined) {
+  if (job === undefined || (jobStatus !== "ok" && jobStatus !== "unavailable") || (jobStatus === "unavailable" && job !== null) || (raw !== null && report === null) || raw === undefined) {
     return { ok: false, error: { kind: "unexpected", httpStatus: response.status } };
   }
-  return { ok: true, report, job };
+  return { ok: true, report, job, jobStatus };
 }
 
 export type ReportRunOutcome =

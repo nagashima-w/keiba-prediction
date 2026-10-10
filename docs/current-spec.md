@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.42.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.43.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.42.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.43.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1081,6 +1081,15 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
 - **検査**: `test/icons.test.ts`(7 本の形式〈PNG の署名・先頭が IHDR・ICO のヘッダ〉・寸法・大きさの上限・空白でないこと・`handle()` の応答〈両役割の GET・HEAD・ヘッダ・本文がバイト列そのもの・認証の拒否・未知のパス〉)・`test/page.test.ts`(`<link>`・`<img>`・参照する URL がすべて表で閲覧者に開いていること)・`test/handler.test.ts`(CSP)・`test/route-policy.test.ts`(手書きの表と静的ガード)・`test/handler-roles.test.ts`(役割 × method のマトリクス)・smoke(B と閲覧者の確認)。
   CI は cloud だけを install し Python を使わないので、**生成物と `gen-icons.py` の一致は CI では検査しない**(代わりに、寸法・形式・大きさをテストで固定している)。
 
+### 【記録】の回収(1)(#245。v1.43.0。利用者に見えうる小さな誤りと docs の不正確さ)
+#237・#241・#242 に積んだ【記録】のうち、利用者に見えうるものを直した。**D1・exe・core は無変更**。変わるのは `cloud/` の応答 1 項目の追加と表示だけ。
+- **日報の「作られなかった」の誤判定**: `GET /api/reports/{date}` の応答に **`job_status: "ok" | "unavailable"`** を足した(追加のみ)。従来は、日報の DO の取得(`getStatus` の RPC)が失敗しても「ジョブが無い」と同じ `job: null` になり、依頼の直後に実行中でも「分析したレースが無いため、日報は作られませんでした」と出て確認が止まった。`unavailable` は「日報が無い日に、DO の取得が失敗した」だけを指す(DO が「ジョブなし」と答えたとき・binding が無い構成・日報があるときは `ok`)。画面(`report-screen.ts`)は、依頼の直後に `job: null` かつ `ok` のときだけ「作られずに終わった」と判断する。`unavailable` のときは固定文言「作成の状況を確認できませんでした。確認を続けます(この画面は自動で更新します)。」を出し、**確認(ポーリング)を止めない**(失敗の連続にも数えない。止まるのは日報が現れたとき・作成が失敗したとき・`REPORT_MAX_POLLS` 回のとき)。クライアントは `job_status` を必須とし、欠落・未知の値・`unavailable` なのに `job` がある応答は `unexpected` にする。
+- **閲覧者に見える例外文**: `/api/analyses/status` の `error` と `/api/plan` の `venues[].reason`・`results[].outcome.message` は、DO が保存した失敗の文面を返す。これを **`handler.ts` の `safeText`(`redactSecrets` で `sk-ant-` の鍵の形を伏せてから 200 文字に切る)1 関数**に通すようにした(保存済みの過去の値も守るため、応答の時点で通す)。加えて、保存の時点でも、朝の取得・朝の計算・発走前の取得の失敗の文面(`race-day-core.ts`)を `redactSecrets` に通す(発走前の計算は従来から通していた)。伏せるのは `sk-ant-` で始まる文字列だけ(`redactSecrets` の仕様のまま)。
+- **回収率の丸め**: 小数第 1 位に丸めると「100.0%」になる値(0.9995 以上 1 未満、1 超 1.0005 未満)は、実際には 1 ちょうどではない(赤字・黒字)のに「100.0%(赤字)」と出ていた。`cloud/src/recovery-format.ts` の `formatRecoveryPercent` で、**「100.0%」と出すのは `rate === 1` のときだけ**にした(1 未満は小数 2 桁で上限 99.99%、1 超は小数 2 桁で下限 100.01%)。判定は丸めた文字列で行う。**対象**: 日報の画面の「回収率」のタイル・Discord の日報の成績(色と「赤字/黒字/収支±0」の語は元の値で判定するので変わらない)・日報の LLM のプロンプトの回収率(3 着内率は従来の書き方のまま)。**対象外**: 検証画面(`#verify`)の回収率は、exe の検証画面と同じ出力を `scripts/test/cloud-verify-format.test.ts` が固定しているので変えていない(「赤字」の語が無く、矛盾が見える場所でもない)。
+- **docs の訂正**: 版別の parity テストの保証範囲(上の#220の【検査】)・`CACHE_VERSION` を上げた日の `throttled`(上の#220の「キャッシュ」)・日報の【記録】(5) の `too-old`・`cloud/README.md` の「書き込みは 1 行」・古い CSP の文字列(#184 の「配信」)。
+- **【記録】**: (1) 検証画面の `throttled` の文言は「1 日の集計の上限に達していて」だが、理由が最短間隔(5 分)のときも同じ文言が出る(#242 に積む)。(2) 検証画面の累積回収率は、丸めると 100.0% になる値でも従来の表示のまま(上のとおり exe と揃えている)。(3) `onWarn`(ログ)に例外の文面をそのまま書く箇所が他にある(`race-day-core.ts` の通知・一覧・設定・掃除の警告)。ログだけに出て閲覧者には見えないので、今回は変えていない。
+- **検査**: `test/handler-run.test.ts`・`handler-plan.test.ts`(鍵の形を 200 文字目にまたがせた保存済みの値で、応答に鍵の断片が残らない)・`race-day-core.test.ts`・`race-day-pre-race.test.ts`(保存の時点)・`recovery-format.test.ts`(0.99949 / 0.9995 / 0.9999 / 1 / 1.00001 などの表と 1e-6 刻みの走査)・`client-report-model.test.ts`・`daily-report-embed.test.ts`・`daily-report-prompt.test.ts`・`handler-reports.test.ts`・`client-api-report*.test.ts`(本物の `handle()` が `job_status` を返す契約)・`client-report-screen.test.ts`・`verify-core.test.ts`(版を上げた直後の `throttled`)・`client-bundle.test.ts`。
+
 ### netkeiba の取得の現状(#162 段階2。v1.19.5)
 **netkeiba への全取得は、Durable Object `NetkeibaGate`(SQLite バックエンド)の単一インスタンスを経由する。** Workers の `fetch` は CloudFront から
 HTTP 400 になるため(#160)、DO の中の TCP ソケット(`cloudflare:sockets`)で HTTP/1.1 の GET を自前で組み立てて取得する。
@@ -1396,7 +1405,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 ### スマホ画面(#184〈#165-b〉。v1.19.16。配信の基盤と一覧の画面)
 `GET /` がスマホ向けの画面(**exe のアプリコードは無変更**)。範囲は「配信の基盤と一覧の画面」で、レース画面・分析の起動・ポーリング・結果の画面は #185(ユーザー判断 2026-10-06: 最初の範囲は「分析の起動と結果の閲覧だけ」を、#184・#185 に分けた)。
 
-- **配信**: `GET /` は HTML(`<script src="/app.js" defer>` の 1 本だけ。インラインスクリプトなし・描画先 `#app`・ログイン中のメール)。CSP は `default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`。`GET /app.js` は esbuild で作った 1 ファイル(`text/javascript`・`no-store`)を、**認証の関門の後ろで Worker が文字列として返す**(静的アセットは使わない。wrangler 4.147.0 の実測: `[assets]` の `run_worker_first = false` では未認証の要求にもファイルが 200 で返り、`true` では Worker〈認証〉に届く。`run_worker_first` の付け忘れで認証を素通りする経路を作らないため、そもそも使わず、`cloud-config-guard.test.ts` が `[assets]` を置かないことを固定している)。`GET /check` は旧 `/` の確認フォーム(内容・CSP とも旧 `/` のまま)。
+- **配信**: `GET /` は HTML(`<script src="/app.js" defer>` の 1 本だけ。インラインスクリプトなし・描画先 `#app`・ログイン中のメール)。CSP は `default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`(`img-src 'self'` は #244 でアイコンのために足した。実物は `cloud/src/page.ts` の `APP_CSP`)。`GET /app.js` は esbuild で作った 1 ファイル(`text/javascript`・`no-store`)を、**認証の関門の後ろで Worker が文字列として返す**(静的アセットは使わない。wrangler 4.147.0 の実測: `[assets]` の `run_worker_first = false` では未認証の要求にもファイルが 200 で返り、`true` では Worker〈認証〉に届く。`run_worker_first` の付け忘れで認証を素通りする経路を作らないため、そもそも使わず、`cloud-config-guard.test.ts` が `[assets]` を置かないことを固定している)。`GET /check` は旧 `/` の確認フォーム(内容・CSP とも旧 `/` のまま)。
 - **ビルド**: `cloud/client/`(TS)→ `cloud/build-client.ts`(esbuild `0.28.2`。IIFE・browser・es2020・**minify**〈外すと出力にパスコメントが入り cwd・OS で変わる〉)→ `cloud/src/client-bundle.generated.ts`(**コミットする生成物**。typecheck・test・deploy:dry・smoke・CI が同じものを使う。ドリフトは `test/client-bundle.test.ts`)。クライアントの型検査は `tsconfig.client.json`(DOM の型)。クライアントは `client/` の中を import する(#185 で、exe の renderer の純関数だけを許可リストで足した。下の「スマホ画面(#185)」)。
 - **画面(一覧)**: 開催日(`<input type="date">`。既定は今日〈JST〉)・中央/地方・場ごとのレース(R・レース名・コース距離頭数・グレード。発走予定時刻があれば、コース距離頭数の行の先頭に「15:40 発走・」〈#236。無い行は出さない。**発走後に取得した中央の一覧では、始まったレースの時刻が空になる。そのため同じ場の中で、時刻のある行と無い行が混在しうる**〉)・朝の準備と発走前の状態バッジ(板の `(race_id, mode)` ごと。未実行・待ち・取得済み・完了・失敗)・「更新」。URL のハッシュに `#date=YYYYMMDD&venue=central|nar[&race=<12桁>][&analysis=<id>]` を持ち(値は検証し、不正な項目は既定に落とす。`race` は有効な `date` があるときだけ)、戻る・進む・再読み込みが効く。`race`・`analysis` は #185 でレース画面・結果画面になった(#184 の時点では「準備中」の表示)。
 - **取得の回数**: 一覧(`GET /api/races`。netkeiba に出うる)は (開催日, 区分) ごとに 1 回、板(`GET /api/analyses/status`。`race_id` なし。DO の読み取りだけ)は開催日ごとに 1 回で、画面の往復・区分の切り替えで取り直さない。失敗は自動で再試行せず、「更新」だけが取り直す(取得中は押せず、同時に同じものを 2 本取らない)。`/api/analyses/{id}`・`POST` は一覧の画面からは呼ばない(#185 のレース画面・結果画面の取得は下の節)。
@@ -1544,7 +1553,7 @@ exe の検証画面のうち、**累積回収率**と**配分ベースの回収�
 exe の検証画面の残りの表を web に持ってきた(#219 の続き): **補正方向×結果**・**キャリブレーション**(5% 刻み 20 帯。過信バイアス付き)・**印別的中率**(◎〇▲△☆注+印なしの 7 群)・**プロンプト版別の比較**(版ごとの累積回収率と、開閉できる版別キャリブレーション)。集計は #219 と同じく **core の関数**(`computeVerifyReport` の `calibration`・`trend`、`computeVerifyReportByPromptVersion`)で、設定も `PRODUCTION_VERIFY_CONFIG`。exe の挙動・数値は変わらない。
 - **画面**: 補正方向・キャリブレーション・印別は、区分(全体/中央のみ/地方のみ)の切替に連動する。表・横スクロールは使わず、行ごとに「名前 値」の項目を折り返して並べる(スマホ幅で横に伸びない)。キャリブレーションの各帯には実複勝率の帯グラフ(`progress`)を付けた。版別比較は版ごとのカード(累積回収率のタイル+集計件数+追加指示の要約〈30 文字〉)で、「キャリブレーションを表示」のボタンで帯を開閉する(開いたときだけ追加指示の全文を出す)。**版別は区分に依らず全体**(exe の版別比較と同じ。core の関数に区分の引数が無い)で、画面にもそう書いてある。「版不明」は版記録導入前の旧データと API キー未設定の分析の両方を含む(区別できない)旨の注記も exe と同じ。
 - **API**: `GET /api/verify` の `ready` 応答に `promptVersions`(`PromptVersionSummary[]`)を足した。**完全な版別レポート(1 版約 7KB)は持たず**、画面が使う項目(版・追加指示〈全文〉・集計件数・累積回収率の 4 値・キャリブレーションの帯・帯ごとの過信バイアス)だけに射影する(`cloud/src/verify-versions.ts` の `summarizePromptVersions`)。`report` 側は既にキャリブレーションと `trend` を含んでいたので、クライアントの解釈を足しただけ。クライアントの解釈は群の数・重複・順序を core の契約どおりに検査し、崩れていれば応答ごと不正として扱う。
-- **キャッシュ**: 版別は 3 区分と同じ再計算の中で計算して kv の `cache` に入れる(D1 は追加で読まない)。**kv の `cache` の形式の版 `CACHE_VERSION` を 1 → 2 に上げた**ので、デプロイ後の最初の `GET /api/verify` が 1 回再計算する(1 日の再計算の回数に数える)。`diag` に `promptVersionsMs`(版別の集計の所要時間)を足した。
+- **キャッシュ**: 版別は 3 区分と同じ再計算の中で計算して kv の `cache` に入れる(D1 は追加で読まない)。**kv の `cache` の形式の版 `CACHE_VERSION` を 1 → 2 に上げた**ので、デプロイ後の最初の `GET /api/verify` が 1 回再計算する(1 日の再計算の回数に数える)。**形式の版を上げた日の副作用(#245)**: 版の違う古い集計は使わない(`readCache` が null を返す)ので、古い集計を「古い」と断って出す道がない。デプロイ後の最初の要求が最短間隔(5 分)か 1 日の上限(20 回)に当たると、`stale` の集計ではなく `throttled`(表示できる集計がない)になる。`runs` は kv に残るので、デプロイの直前に再計算していれば最大 5 分、その日の上限に達していれば次の JST 0:00 まで集計が出ない。デプロイは、再計算の直後と、その日の再計算が上限に近い日を避ける。`diag` に `promptVersionsMs`(版別の集計の所要時間)を足した。
 - **実測**(`pnpm tsx scripts/measure-verify.ts --versions N --instruction-length L --repeat 5`。#219 と同じ条件〈分析 2,225・結果 1,301 レース・馬 13 頭・買い目 12 件/分析〉に、**版の種類 N** と**追加指示の文字数 L**〈4 件に 1 件に付け、版ごとに別の文面〉を足した。各構成 1 回の実行〈N=1。他のプロセスの影響を受けうるので、下位桁に意味を読まないこと〉。この機械・ローカルの D1 での値で、本番とは一致する保証がない):
 
   | 構成 | 版の数(版不明を含む) | `promptVersions` の JSON | ready 応答の本文(区分 all) | kv の概算(3 区分の report + promptVersions) | 版別の集計 | 再計算 1 回の壁時計 | workerd の CPU |
@@ -1557,7 +1566,7 @@ exe の検証画面の残りの表を web に持ってきた(#219 の続き): **
   - **追加指示の長さが応答の大きさを決める**: 追加指示の上限は cloud の設定で 2,000 文字(`ADDITIONAL_INSTRUCTION_MAX_LENGTH`。読む側は上限なし)。`--versions 12 --instruction-length 2000` は、**13 版すべてに上限いっぱいの追加指示が付く最悪寄りの構成**で、応答の本文は 117,740 バイト、kv の概算は 131,904 バイト。DO の SQLite の 1 行の上限(約 2MB。公式ドキュメントの値で、行の内訳までは確認していない)に対して約 6%。**版の数が 13 を大きく超える・同じ版に追加指示が何種類も付く場合は線形に増える**(未測定)。
   - キャッシュのヒット: 壁時計 11〜24ms、workerd の CPU 0〜20ms(3 構成の最小〜最大)。
 - **【記録】**: (1) 版別の追加指示は全文を持って配信し、画面で 30 文字に要約する(開いたときに全文を出すため)。追加指示が長い版が多いと応答が大きくなる(上の実測)。要約だけを配り全文は別取得にする案は、現状の大きさでは不要として採らなかった。(2) 帯グラフの `progress` の見た目・開閉ボタンの操作・スマホ幅での折り返しは**自動検査できない**(デプロイ後に実機で確認する)。(3) 本番の版の数・追加指示の実際の長さは未確認(デプロイ後の `GET /api/verify` の応答の大きさで確かめる)。
-- **検査**: `client-api-verify-contract.test.ts`(本物の `VerifyReport` と版別の射影を通し、群の数・重複・順序の検査を固定)・`client-verify-model.test.ts`・`client-view-verify.test.ts`・`client-verify-screen.test.ts`(版別の開閉)・`client-app-verify.test.ts`・`verify-versions.test.ts`・`verify-core.test.ts`(版別の kv・`CACHE_VERSION`)、ルートの `scripts/test/cloud-verify-format.test.ts`(整形が exe の関数と一致)・`cloud-verify-parity.test.ts`(版別の射影が exe の `computeVerifyReportByPromptVersion` と一致)・`measure-verify.test.ts`(合成データの版・追加指示)。
+- **検査**: `client-api-verify-contract.test.ts`(本物の `VerifyReport` と版別の射影を通し、群の数・重複・順序の検査を固定)・`client-verify-model.test.ts`・`client-view-verify.test.ts`・`client-verify-screen.test.ts`(版別の開閉)・`client-app-verify.test.ts`・`verify-versions.test.ts`・`verify-core.test.ts`(版別の kv・`CACHE_VERSION`)、ルートの `scripts/test/cloud-verify-format.test.ts`(整形が exe の関数と一致)・`cloud-verify-parity.test.ts`(exe と cloud の**完全な版別レポート〈射影の前。core の `computeVerifyReportByPromptVersion`〉が一致**することと、**同じ射影関数 `computePromptVersionSummaries` を両側に適用した結果が一致**することを比べる。同じ射影を両側に通すので、**射影が何を残すか〈項目の取捨選択〉はこのテストでは保証しない**。それは `verify-versions.test.ts` が固定する)・`measure-verify.test.ts`(合成データの版・追加指示)。
 
 ### クラウド版の日報(#235。v1.37.0。**公開すると、その日が静かになった時点で自動で LLM を 1 回呼び、Discord に要約を送る**)
 その日に発走前の分析をした全レースの予想と結果から、**統計(決定的に計算)+ LLM による振り返り(良かった点・改善点)**の「日報」を作り、web に日付ごとに保存して、Discord に要約を送る。**日報は記録と振り返りの材料で、プロンプトを自動で変えない**(`docs/prompt-improvement-plan.md`)。
@@ -1570,9 +1579,9 @@ exe の検証画面の残りの表を web に持ってきた(#219 の続き): **
 - **保存**: D1 の新しい表 `daily_reports`(migration 0010。1 日 1 行。`body_json` に統計・レースごとの行・文章、`llm_calls_json` に LLM の呼び出しの記録)。応答は成功した直後にジョブへ書き、保存の失敗の再試行で LLM を呼び直さない。
 - **Discord**: embed を 1 件(タイトル「日報 日付」・説明は LLM の総括・成績/レース/良かった点/改善点の field・リンクは `APP_BASE_URL` があるとき `<オリジン>/#report=YYYYMMDD`)。**多くとも 1 回**(送る前に `sending` を書く。落ちたら再送しない)。通知の失敗は日報を巻き戻さない。
 - **手動の作成の注意(画面に固定文言で出す)**: 手動の作成は、押した時点の分析と結果で日報を作り、**1 日 1 回で確定して作り直せない**(`INSERT OR IGNORE`)。ボタンの手前に「押した時点の分析と結果で日報を作り、その日は作り直せません」を常に出し、表示中の日が今日のときは「まだ分析していないレース(夜の地方など)や結果の取り込みが終わっていないレースがあるうちに押すと、それらを含まないまま確定します。通常は…自動で作られるので、急がなければ待ってください」を足す。分析が 0 件の日に押したときは、依頼の確認(進行状況が無く日報も無い)で「この日は分析したレースが無いため、日報は作られませんでした」を出して確認を止める(10 分待たせない)。
-- **画面**: 一覧の「日報」リンク → `#report`(日付の並びと最新の日報)・`#report=YYYYMMDD`(その日)。API: `GET /api/reports`(一覧)・`GET /api/reports/{YYYYMMDD}`(本文 + 日報が無い日は進行状況 `job`)・`POST /api/reports/run`。作成中は 5 秒ごとに取り直す(最大 10 分)。LLM の文章以外の文言はクライアントの固定の文言。
+- **画面**: 一覧の「日報」リンク → `#report`(日付の並びと最新の日報)・`#report=YYYYMMDD`(その日)。API: `GET /api/reports`(一覧)・`GET /api/reports/{YYYYMMDD}`(本文 + 日報が無い日は進行状況 `job`。取得の可否は `job_status`〈#245〉)・`POST /api/reports/run`。作成中は 5 秒ごとに取り直す(最大 10 分)。LLM の文章以外の文言はクライアントの固定の文言。
 - **費用**: LLM は 1 日 1 回。入力は、36 レースで約 1.3 万文字(偽データの実測。`pnpm run report:prompt -- --races 36`)。実データは根拠・強調材料・懸念事項が長く、その数倍になりうる(**実トークン数・所要時間は実 API で未測定**)。止め方: Worker の secret `ANTHROPIC_API_KEY` を削除すれば統計だけの日報になる。Discord を止めるなら `DISCORD_WEBHOOK_URL` を削除する。
-- **【記録】** (1) 作成後に取り込まれた結果・追加の分析は反映しない(再作成は別 Issue)。(2) 分析の読み出しで R2 の詳細が読めなければ(柵・欠落)、馬名は番号だけになる。(3) 手動で分析した計画外のレースは結果の取り込みの行が無く、静かになったかの判定には入らない(日報の対象には入る)。(4) 買い目の的中判定は core の private 関数の複製。(5) 依頼が `in-progress`・`exists` で断られたときは、日単位の DO は完了として扱う。
+- **【記録】** (1) 作成後に取り込まれた結果・追加の分析は反映しない(再作成は別 Issue)。(2) 分析の読み出しで R2 の詳細が読めなければ(柵・欠落)、馬名は番号だけになる。(3) 手動で分析した計画外のレースは結果の取り込みの行が無く、静かになったかの判定には入らない(日報の対象には入る)。(4) 買い目の的中判定は core の private 関数の複製。(5) 依頼が `in-progress`・`exists`・`too-old` で断られたときは、日単位の DO は完了として扱う(`too-old` の理由は上の「古さの上限」の段落)。
 - **検査**: `test/daily-report-bets.test.ts`(core との一致)・`daily-report-digest.test.ts`・`daily-report-prompt.test.ts`・`daily-report-embed.test.ts`・`daily-report-core.test.ts`(段階・冪等・失敗)・`daily-report-repository.test.ts`(ローカル workerd の D1・R2)・`day-quiet.test.ts`・`race-day-report-request.test.ts`・`scheduled-report.test.ts`・`handler-reports.test.ts`・`client-api-report*.test.ts`(本物の日報を通す契約)・`client-report-*.test.ts`・`client-app-report.test.ts`・`client-route-report.test.ts`、ルートの `scripts/test/cloud-config-guard.test.ts`(Issue #235 の節: LLM・Discord を使う場所と依頼の呼び出し箇所の固定)。
 
 ### クラウド版のスコアリングの重み(#218〈#167 の洗い出しから〉。v1.31.0)

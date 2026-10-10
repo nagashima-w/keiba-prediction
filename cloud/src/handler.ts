@@ -23,6 +23,7 @@ import { ICON_CACHE_CONTROL, iconAsset } from "./icons";
 import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
 import { loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
+import { redactSecrets } from "./llm-run";
 import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, RequestResultImportResult, ResultImportProgress, ScheduleInput, ScheduleResult } from "./race-day-core";
 import { jstKaisaiDate } from "./auto-run-plan";
 import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
@@ -728,6 +729,15 @@ const RUN_KEYS = new Set(["race_id", "kaisai_date", "mode"]);
 /** エラーとして返す文面の最大長(状態の確認)。 */
 const STATUS_ERROR_MAX = 200;
 
+/**
+ * 閲覧者にも見える自由文(DO が保存したタスクの失敗の文面・会場の失敗の理由)を返すときの唯一の窓口(Issue #245)。
+ * **`sk-ant-` で始まる鍵の形を伏せてから**、{@link STATUS_ERROR_MAX} 文字に切る(切ってから伏せると、200 文字目をまたぐ鍵の先頭の断片が残る)。
+ * 保存の時点でも伏せているが、保存済みの過去の値も守るため、**応答の時点で必ず通す**。自由文を返す口を足すときはここを通す。
+ */
+function safeText(text: string): string {
+  return redactSecrets(text).slice(0, STATUS_ERROR_MAX);
+}
+
 /** 日単位の DO を開催日で引く。 */
 function raceDayStub(env: Env, kaisaiDate: string): RaceDayStubLike {
   return env.RACE_DAY.get(env.RACE_DAY.idFromName(kaisaiDate));
@@ -941,7 +951,7 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
       mode: r.mode,
       status: r.status,
       attempts: r.attempts,
-      error: r.error === null ? null : r.error.slice(0, STATUS_ERROR_MAX),
+      error: r.error === null ? null : safeText(r.error),
       queued_at: r.queuedAt,
       updated_at: r.updatedAt,
       prior: r.computedAt !== null,
@@ -971,9 +981,8 @@ async function handleStatus(url: URL, env: Env): Promise<Response> {
   }
 }
 
-/** 自由文(会場の失敗の理由・自動実行の失敗の文面)を返すときの長さの上限(文字)。`/api/analyses/status` の `error` と同じ。 */
-const PLAN_TEXT_MAX = STATUS_ERROR_MAX;
-const clipText = (text: string | null): string | null => (text === null ? null : text.slice(0, PLAN_TEXT_MAX));
+/** 自由文(会場の失敗の理由・自動実行の失敗の文面)を返すとき。`/api/analyses/status` の `error` と同じ窓口 {@link safeText}(鍵の形を伏せてから 200 文字に切る)を通す。 */
+const clipText = (text: string | null): string | null => (text === null ? null : safeText(text));
 
 /**
  * `GET /api/plan?kaisai_date=YYYYMMDD`(Issue #206〈#166-E〉G-E3): 定時の自動実行を外から観測する、読み取り専用の入口。
@@ -982,7 +991,7 @@ const clipText = (text: string | null): string | null => (text === null ? null :
  * 理由: 対象が 0 件の日は通知が何も出ないので、自動実行が動いたのか壊れているのかを、外から確かめる手段が要る。
  * 順序: `Sec-Fetch-Site`(別サイトなら 403。開催日を変えて DO を作らせる cross-site の GET を拒否)→ クエリの検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503・文面なし)。
  * 応答は**明示のホワイトリスト**で作る(DO の返り値を展開しない)。通知の Webhook の URL は DO の通知の仕組みの中にだけあり、この応答にもこの関数にも現れない
- * (この関数は `env.DISCORD_WEBHOOK_URL` を読まない)。自由文は 200 文字に切る。
+ * (この関数は `env.DISCORD_WEBHOOK_URL` を読まない)。自由文は鍵の形を伏せてから 200 文字に切る({@link safeText}。Issue #245)。
  */
 async function handlePlan(request: Request, env: Env): Promise<Response> {
   const site = request.headers.get("sec-fetch-site");
@@ -1162,6 +1171,10 @@ async function handleReportList(url: URL, env: Env): Promise<Response> {
 /**
  * `GET /api/reports/{YYYYMMDD}`(Issue #235): 1 日の日報(本文つき)。無い日は `report: null` で、日報の DO の進行状況(作成中・失敗)を `job` に付ける
  * (DO が失敗・binding なしでも 200 で `job: null`。画面を壊さない)。日報があるときは DO を呼ばない。開催日の形が違えば 404(D1 を引かない)。クエリは受け付けない(400)。
+ *
+ * **`job_status`(Issue #245)**: `job: null` の意味を区別する。`"ok"`: 取得できた(日報があるとき・DO が「ジョブなし」と答えたとき・binding が無い構成〈ジョブが存在しえない〉)。
+ * `"unavailable"`: 日報が無い日に、日報の DO の取得(RPC)が**失敗した**(ジョブがあるかどうか分からない)。画面は、依頼の直後に `job: null` かつ `ok` のときだけ
+ * 「日報は作られずに終わった」と判断し、`unavailable` のときは確認を続ける(従来は失敗も `job: null` で、実行中でも「作られなかった」と出て確認が止まった)。
  */
 async function handleReportDetail(url: URL, dateText: string, env: Env): Promise<Response> {
   if (!/^[0-9]{8}$/.test(dateText) || !checkKaisaiDate(dateText).ok) {
@@ -1190,9 +1203,11 @@ async function handleReportDetail(url: URL, dateText: string, env: Env): Promise
         body: report.body,
       },
       job: null,
+      job_status: "ok",
     });
   }
   let job: ReportStatus | null = null;
+  let jobStatus: "ok" | "unavailable" = "ok";
   try {
     const namespace = env.DAILY_REPORT;
     if (namespace !== undefined) {
@@ -1202,8 +1217,9 @@ async function handleReportDetail(url: URL, dateText: string, env: Env): Promise
     }
   } catch {
     job = null;
+    jobStatus = "unavailable";
   }
-  return json({ ok: true, report: null, job });
+  return json({ ok: true, report: null, job, job_status: jobStatus });
 }
 
 const REPORT_RUN_BODY_MAX_BYTES = 1024;

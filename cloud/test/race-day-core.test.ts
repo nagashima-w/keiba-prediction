@@ -412,6 +412,44 @@ describe("入口の検証の最後の守り(Issue #180)", () => {
   });
 });
 
+describe("失敗の文面は、保存する時点で sk-ant- の鍵の形を伏せる(Issue #245)", () => {
+  const KEY = "sk-ant-api03-SECRET_BODY";
+
+  it("朝の取得が失敗して終わる(gate の拒否の文面に鍵の形がある)と、タスクの error にも警告にも鍵の形が残らない", async () => {
+    const gate = fakeGate();
+    gate.failWhen = () => ({ kind: "refused", reason: "blocked", message: `止めています ${KEY}` });
+    const h = harness({}, gate);
+    await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "fetch", result: "failed" });
+    const race = h.core.getBoard().races[0]!;
+    expect(race.status).toBe("failed"); // 前提: 失敗の文面が保存される経路を通った
+    expect(race.error).toContain("止めています");
+    expect(race.error).toContain("sk-ant-***");
+    expect(race.error).not.toContain("SECRET_BODY");
+    const warning = h.warnings.find((w) => w.includes("朝の取得に失敗しました"));
+    expect(warning, "失敗の警告が出ている").toBeDefined();
+    expect(warning).not.toContain("SECRET_BODY");
+  });
+
+  it("朝の計算が失敗する(例外の文面に鍵の形がある)と、タスクの error にも警告にも鍵の形が残らない", async () => {
+    const h = harness();
+    await h.core.schedule({ raceId: RACE_A, kaisaiDate: DATE });
+    expect(await h.core.runNextStep()).toMatchObject({ step: "fetch", result: "ok" });
+    // 取得ステップが固定した設定の控えが壊れていた状況の模擬: JSON.parse の例外の文面に、入力の文字列が写る
+    const broken = "sk-ant-SECRET_BODY";
+    expect(() => JSON.parse(broken)).toThrow(/SECRET_BODY/); // 前提: 例外の文面に鍵の形が入る
+    h.sql.exec("UPDATE race_day_tasks SET settings_json = ? WHERE race_id = ?", broken, RACE_A);
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "compute", result: "failed" });
+    const race = h.core.getBoard().races[0]!;
+    expect(race.status).toBe("failed");
+    expect(race.error).toContain("sk-ant-***");
+    expect(race.error).not.toContain("SECRET_BODY");
+    const warning = h.warnings.find((w) => w.includes("朝の prior の計算に失敗しました"));
+    expect(warning, "失敗の警告が出ている").toBeDefined();
+    expect(warning).not.toContain("SECRET_BODY");
+  });
+});
+
 describe("失敗と再試行(Issue #177)", () => {
   it("取得の失敗(gate が拒否)はタスクを queued のまま再試行用のアラーム(遅れて)にし、試行回数が上限に達したら failed にして、アラームを止める", async () => {
     const gate = fakeGate();

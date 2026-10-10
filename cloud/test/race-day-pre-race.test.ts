@@ -233,6 +233,25 @@ describe("発走前の分析: 取得ステップ(AC-c2)", () => {
   });
 });
 
+describe("発走前の取得の失敗の文面は、保存する時点で sk-ant- の鍵の形を伏せる(Issue #245)", () => {
+  it("発走前の取得が失敗して終わる(gate の拒否の文面に鍵の形がある)と、タスクの error にも警告にも鍵の形が残らない", async () => {
+    const h = harness();
+    const KEY = "sk-ant-api03-SECRET_BODY";
+    (h.gate as { fetchRaw: GateLike["fetchRaw"] }).fetchRaw = async () => ({ kind: "refused", reason: "blocked", message: `止めています ${KEY}`, blockedUntil: 1, retryAfterMs: 1 });
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    h.clock.now = h.alarm.at!;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "failed" });
+    const row = h.sql.exec("SELECT status, error FROM race_day_tasks WHERE race_id = ? AND mode = 'pre_race'", RACE).toArray()[0] as { status: string; error: string };
+    expect(row.status).toBe("failed"); // 前提: 失敗の文面が保存される経路を通った
+    expect(row.error).toContain("止めています");
+    expect(row.error).toContain("sk-ant-***");
+    expect(row.error).not.toContain("SECRET_BODY");
+    const warning = h.warnings.find((w) => w.includes("発走前の取得に失敗しました"));
+    expect(warning, "失敗の警告が出ている").toBeDefined();
+    expect(warning).not.toContain("SECRET_BODY");
+  });
+});
+
 /**
  * Issue #228: 初出走馬(新馬戦)を含むレース。戦績 API が「戦績テーブルの無い正常な応答」を返す馬が出走歴なし(`[]`)として扱われ、
  * 朝の準備・発走前の分析が「戦績を取得できなかった馬」で失敗しない。フィクスチャ 202603020211 の馬番1〜4を初出走馬(実応答 fixtures/horse_results_2024105003.json)に差し替える。

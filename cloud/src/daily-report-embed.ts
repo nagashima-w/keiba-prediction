@@ -2,7 +2,8 @@
  * 日報(Issue #235)の Discord の要約(embed)。**純関数**。全文は web に保存してあり、ここは総括・成績・良かった点/改善点の先頭だけ。
  * 上限(説明 4096・field 1024・合計 6000)は {@link fitEmbed} が最後に保証する。リンク(`url`)は文字数の対象外で、基点があるときだけ付ける。
  */
-import { dateLabel, percent, yen, type Narrative } from "./daily-report-prompt";
+import { dateLabel, yen, type Narrative } from "./daily-report-prompt";
+import { formatRecoveryPercent } from "./recovery-format";
 import type { DayStats } from "./daily-report-digest";
 import { DISCORD_COLORS } from "./palette";
 import { fitEmbed, type CloudEmbed, type EmbedField } from "./notify-embeds";
@@ -38,7 +39,7 @@ function profitWord(recoveryRate: number): string {
 
 export function buildReportEmbed(input: ReportEmbedInput): CloudEmbed {
   const { stats, narrative } = input;
-  const roi = stats.recoveryRate === null ? "なし" : `${percent(stats.recoveryRate)}${profitWord(stats.recoveryRate)}`;
+  const roi = stats.recoveryRate === null ? "なし" : `${formatRecoveryPercent(stats.recoveryRate)}${profitWord(stats.recoveryRate)}`;
   const fields: EmbedField[] = [
     { name: "成績", value: `賭け金 ${yen(stats.totalStake)}・払戻 ${yen(stats.totalReturn)}・回収率 ${roi}\n${stats.judgedBetCount} 点中 ${stats.hitBetCount} 点的中` },
     { name: "レース", value: `${stats.raceCount} 件を分析(結果あり ${stats.resultRaceCount} 件・結果なし ${stats.noResultRaceCount} 件)` },

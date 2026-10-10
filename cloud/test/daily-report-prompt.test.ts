@@ -45,6 +45,16 @@ describe("buildReportPrompt", () => {
     expect(p).toContain("回収率 350.0%");
   });
 
+  it("Issue #245: 回収率は、丸めると 100.0% になる 1 以外の値を 100.0% と出さない(LLM が赤字を収支ゼロと書かない)。3 着内率の書き方は変えない", () => {
+    const base = input();
+    const prompt = (recoveryRate: number): string => buildReportPrompt({ ...base, stats: { ...base.stats, recoveryRate } });
+    expect(`${(0.9999 * 100).toFixed(1)}%`).toBe("100.0%"); // 前提: 旧表示では 100.0% だった
+    expect(prompt(0.9999)).toContain("回収率 99.99%");
+    expect(prompt(1)).toContain("回収率 100.0%");
+    expect(prompt(1.00001)).toContain("回収率 100.01%");
+    expect(prompt(0.9999)).toContain("補正後の3着内率 25.0%"); // 前提: 3 着内率の行が出ている(percent のまま)
+  });
+
   it("結果のあるレースは着順と各馬の着順を、結果のないレースは『結果なし』と判定不能の買い目を出す", () => {
     const p = buildReportPrompt(input());
     expect(p).toContain("1着 1番 馬1");

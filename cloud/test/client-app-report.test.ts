@@ -66,7 +66,7 @@ async function harness(initialHash: string): Promise<Harness> {
     if (url === "/api/reports" && init.method === "GET") return ok({ ok: true, reports: h.list });
     const m = /^\/api\/reports\/(\d{8})$/.exec(url);
     if (m !== null && init.method === "GET") {
-      const queue = h.details[m[1]!] ?? [{ ok: true, report: null, job: null }];
+      const queue = h.details[m[1]!] ?? [{ ok: true, job_status: "ok", report: null, job: null }];
       return ok(queue.length > 1 ? queue.shift()! : queue[0]!);
     }
     if (url === "/api/reports/run" && init.method === "POST") return { status: 202, json: async () => ({ ok: true, accepted: true, date: JSON.parse(init.body as string).date }) };
@@ -78,7 +78,7 @@ async function harness(initialHash: string): Promise<Harness> {
     calls,
     timers,
     hash: initialHash,
-    details: { "20260627": [{ ok: true, report: reportBody, job: null }] },
+    details: { "20260627": [{ ok: true, job_status: "ok", report: reportBody, job: null }] },
     list: [LIST_ROW("20260627")],
     tree: () => latest!,
     go: (hash) => {
@@ -130,7 +130,7 @@ describe("日報画面を開く", () => {
   it("ボタンで作成を依頼し、作成中は 5 秒ごとに取り直し、日報が現れたら止まる", async () => {
     const h = await harness("#report=20260628");
     const created = { ...(h.details["20260627"]![0]!["report"] as object), date: "20260628" };
-    h.details["20260628"] = [{ ok: true, report: null, job: null }, { ok: true, report: null, job: { phase: "gather", status: "running", attempts: 0 } }, { ok: true, report: created, job: null }];
+    h.details["20260628"] = [{ ok: true, job_status: "ok", report: null, job: null }, { ok: true, job_status: "ok", report: null, job: { phase: "gather", status: "running", attempts: 0 } }, { ok: true, job_status: "ok", report: created, job: null }];
     h.app.start();
     await h.app.whenIdle();
     byClass(h.tree(), "report-run")[0]!.on!.click!();
@@ -175,7 +175,7 @@ describe("日報画面を開く", () => {
 
   it("離れると止まり(タイマー・取得)、他の画面は /api/reports を取らない。戻ると取り直す", async () => {
     const h = await harness("#report=20260628");
-    h.details["20260628"] = [{ ok: true, report: null, job: { phase: "gather", status: "running", attempts: 0 } }];
+    h.details["20260628"] = [{ ok: true, job_status: "ok", report: null, job: { phase: "gather", status: "running", attempts: 0 } }];
     h.app.start();
     await h.app.whenIdle();
     expect(h.timers.pending()).toBe(1);

@@ -20,7 +20,7 @@ interface Connected {
   readonly requests: Array<{ kaisaiDate: string; mode: string }>;
 }
 
-async function connect(record: ReportRecord): Promise<Connected> {
+async function connect(record: ReportRecord, options: { readonly statusFails?: boolean } = {}): Promise<Connected> {
   const key = await makeKey("k1");
   const token = await signToken(key);
   const deps = { keys: () => localKeys(key), now: () => NOW, log: () => {} };
@@ -45,7 +45,10 @@ async function connect(record: ReportRecord): Promise<Connected> {
           requests.push(input);
           return { accepted: true as const };
         },
-        getStatus: async () => ({ phase: "gather" as const, status: "running" as const, attempts: 0 }),
+        getStatus: async () => {
+          if (options.statusFails === true) throw new Error("日報の DO の RPC の失敗");
+          return { phase: "gather" as const, status: "running" as const, attempts: 0 };
+        },
       }),
     },
   };
@@ -87,6 +90,7 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
     expect(r.narrative).toStrictEqual({ summary: record.body.narrative!.summary, good: [...record.body.narrative!.good], improve: [...record.body.narrative!.improve] });
     expect(r.note).toBeNull();
     expect(detail.job).toBeNull();
+    expect(detail.jobStatus).toBe("ok");
   });
 
   it("文章が無い日報(LLM なし)・生の文章の日報も読める", async () => {
@@ -102,7 +106,16 @@ describe("契約: 本物の日報(DailyReportCore の出力)を、クライア�
   it("日報が無い日は report: null と進行状況(job)が読める", async () => {
     const { fetch } = await connect(await buildSavedRecord());
     const detail = await fetchReport(fetch, "20200101");
-    expect(detail).toStrictEqual({ ok: true, report: null, job: { phase: "gather", status: "running", attempts: 0 } });
+    expect(detail).toStrictEqual({ ok: true, report: null, job: { phase: "gather", status: "running", attempts: 0 }, jobStatus: "ok" });
+  });
+
+  it("Issue #245: 日報が無い日に日報の DO の取得が失敗すると、jobStatus: unavailable で読める(ジョブが無い〈ok〉とは別の値)", async () => {
+    const { fetch } = await connect(await buildSavedRecord(), { statusFails: true });
+    const detail = await fetchReport(fetch, "20200101");
+    expect(detail).toStrictEqual({ ok: true, report: null, job: null, jobStatus: "unavailable" });
+    // 対照: 取得できる構成では ok(上のテストが job つきで固定している)
+    const healthy = await fetchReport((await connect(await buildSavedRecord())).fetch, "20200101");
+    expect(healthy).toMatchObject({ ok: true, jobStatus: "ok" });
   });
 
   it("手動の作成: 202 を accepted と分類し、日報の DO へ manual で依頼が届く", async () => {

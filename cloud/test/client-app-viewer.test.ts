@@ -60,7 +60,7 @@ function respond(method: string, url: string): Resp {
   if (method === "GET" && path === "/api/analyses/5") return ok(ANALYSIS_5);
   if (method === "GET" && path === "/api/analyses") return ok({ ok: true, analyses: [] });
   if (method === "GET" && path === "/api/reports") return ok({ ok: true, reports: [] });
-  if (method === "GET" && /^\/api\/reports\/\d{8}$/.test(path)) return ok({ ok: true, report: null, job: null });
+  if (method === "GET" && /^\/api\/reports\/\d{8}$/.test(path)) return ok({ ok: true, job_status: "ok", report: null, job: null });
   if (method === "GET" && path === "/api/settings") return ok({ ok: true, settings: DEFAULT_CLOUD_SETTINGS, source: "d1" });
   return ok({ ok: true });
 }

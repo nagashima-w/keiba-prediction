@@ -47,19 +47,30 @@ describe("fetchReportList", () => {
 
 describe("fetchReport", () => {
   it("日報が無い日: report null と job を読む。job が壊れていれば unexpected", async () => {
-    expect(await fetchReport(reply(200, { ok: true, report: null, job: null }), "20261005")).toStrictEqual({ ok: true, report: null, job: null });
-    expect(await fetchReport(reply(200, { ok: true, report: null, job: { phase: "save", status: "failed", attempts: 3 } }), "20261005")).toStrictEqual({
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: null, job_status: "ok" }), "20261005")).toStrictEqual({ ok: true, report: null, job: null, jobStatus: "ok" });
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: { phase: "save", status: "failed", attempts: 3 }, job_status: "ok" }), "20261005")).toStrictEqual({
       ok: true,
       report: null,
       job: { phase: "save", status: "failed", attempts: 3 },
+      jobStatus: "ok",
     });
-    expect(await fetchReport(reply(200, { ok: true, report: null, job: { phase: "weird", status: "running", attempts: 0 } }), "20261005")).toMatchObject({ ok: false });
-    expect(await fetchReport(reply(200, { ok: true, report: null }), "20261005")).toMatchObject({ ok: false }); // job の欠落
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: { phase: "weird", status: "running", attempts: 0 }, job_status: "ok" }), "20261005")).toMatchObject({ ok: false });
+    expect(await fetchReport(reply(200, { ok: true, report: null, job_status: "ok" }), "20261005")).toMatchObject({ ok: false }); // job の欠落
+  });
+
+  it("Issue #245: job_status は ok / unavailable のどちらか。欠落・未知の値・unavailable なのに job がある、は unexpected(一部だけを採用しない)", async () => {
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: null, job_status: "unavailable" }), "20261005")).toStrictEqual({ ok: true, report: null, job: null, jobStatus: "unavailable" });
+    const unexpected = { ok: false, error: { kind: "unexpected", httpStatus: 200 } };
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: null }), "20261005")).toStrictEqual(unexpected); // 欠落
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: null, job_status: "weird" }), "20261005")).toStrictEqual(unexpected);
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: null, job_status: true }), "20261005")).toStrictEqual(unexpected);
+    // 取れなかった(unavailable)のに進行状況の本体がある、は矛盾
+    expect(await fetchReport(reply(200, { ok: true, report: null, job: { phase: "save", status: "failed", attempts: 3 }, job_status: "unavailable" }), "20261005")).toStrictEqual(unexpected);
   });
 
   it("本文が壊れていれば(統計・レースの型違い)一部だけ採用せず unexpected", async () => {
     const bad = { date: "20261005", created_at: "x", model: null, race_count: 1, total_stake: 1, total_return: 1, summary: null, body: { stats: {}, races: [], narrative: null, narrativeRaw: null, note: null } };
-    expect(await fetchReport(reply(200, { ok: true, report: bad, job: null }), "20261005")).toStrictEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
+    expect(await fetchReport(reply(200, { ok: true, report: bad, job: null, job_status: "ok" }), "20261005")).toStrictEqual({ ok: false, error: { kind: "unexpected", httpStatus: 200 } });
   });
 
   it("404 は not-found、通信の失敗は network", async () => {
@@ -71,7 +82,7 @@ describe("fetchReport", () => {
     const urls: string[] = [];
     const spy: FetchLike = async (url) => {
       urls.push(url);
-      return { status: 200, json: async () => ({ ok: true, report: null, job: null }) };
+      return { status: 200, json: async () => ({ ok: true, report: null, job: null, job_status: "ok" }) };
     };
     await fetchReport(spy, "20261005");
     expect(urls).toEqual(["/api/reports/20261005"]);

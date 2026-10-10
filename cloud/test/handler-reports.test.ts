@@ -176,23 +176,29 @@ describe("GET /api/reports/{YYYYMMDD}: 1 日の日報", () => {
       ok: true,
       report: { date: "20261005", created_at: "2026-10-05T11:00:00.000Z", model: "claude-sonnet-5-5", race_count: 24, total_stake: 12000, total_return: 15600, summary: "総括A", body: { format: 1, kaisaiDate: "20261005", races: [], note: null } },
       job: null,
+      job_status: "ok",
     });
     expect(h.names).toEqual([]);
   });
 
-  it("日報が無ければ report は null で、日報の DO の進行状況(作成中・失敗)を返す。DO が失敗しても 200 で job は null(画面を壊さない)", async () => {
+  it("日報が無ければ report は null で、日報の DO の進行状況(作成中・失敗)を返す。DO が失敗しても 200 で job は null(画面を壊さない)。ただし失敗は job_status が unavailable で、ジョブが無い(ok)と区別する(Issue #245)", async () => {
     const { deps, token } = await setup();
     const h = harness();
     h.status = { phase: "gather", status: "running", attempts: 1 };
     const res = await handle(get("/api/reports/20261003", token), h.env(), {}, deps);
     expect(res.status).toBe(200);
-    expect(await res.json()).toStrictEqual({ ok: true, report: null, job: { phase: "gather", status: "running", attempts: 1 } });
+    expect(await res.json()).toStrictEqual({ ok: true, report: null, job: { phase: "gather", status: "running", attempts: 1 }, job_status: "ok" });
     expect(h.names).toEqual(["main"]);
     h.statusFails = true;
     const again = await handle(get("/api/reports/20261003", token), h.env(), {}, deps);
-    expect(await again.json()).toStrictEqual({ ok: true, report: null, job: null });
+    expect(await again.json()).toStrictEqual({ ok: true, report: null, job: null, job_status: "unavailable" });
+    // 前提: DO が応答して「ジョブが無い」(null)のときは ok。失敗(例外)とは別の値になる
+    h.statusFails = false;
+    h.status = null;
+    const none = await handle(get("/api/reports/20261003", token), h.env(), {}, deps);
+    expect(await none.json()).toStrictEqual({ ok: true, report: null, job: null, job_status: "ok" });
     const noBinding = await handle(get("/api/reports/20261003", token), h.env(false), {}, deps);
-    expect(await noBinding.json()).toStrictEqual({ ok: true, report: null, job: null });
+    expect(await noBinding.json()).toStrictEqual({ ok: true, report: null, job: null, job_status: "ok" }); // binding が無い構成には、ジョブが存在しえない
   });
 
   it("開催日の形が 8 桁の実在の日でなければ 404(D1 を引かない)", async () => {

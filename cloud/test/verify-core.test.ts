@@ -322,6 +322,21 @@ describe("getReport: 計算とキャッシュ", () => {
     await core.getReport("all");
     expect(store.calls).toContain("readAll");
   });
+
+  it("Issue #245: 形式の版を上げた直後の要求が最短間隔の内側だと、古い集計を stale で出さず throttled になる(docs/current-spec.md の『形式の版を上げた日の副作用』)", async () => {
+    const { core, store, kv, clock } = setup();
+    expect((await core.getReport("all")).status).toBe("ready");
+    const cache = kv.get<Record<string, unknown>>("cache")!;
+    kv.put("cache", { ...cache, v: 1 }); // 直前の形式(版が違う)のキャッシュが残っている状況の模擬
+    store.calls.length = 0;
+    clock.now += 60_000; // 最短間隔(5 分)の内側
+    const res = await core.getReport("all");
+    expect(res.status).toBe("throttled"); // 前提と結論: 古い集計は使われず、出せる集計が無い
+    expect(store.calls).not.toContain("readAll"); // 再計算もしていない
+    // 対照: 同じ状況で、版が同じキャッシュなら stale の集計か最新の集計が出る(throttled にならない)
+    kv.put("cache", cache);
+    expect((await core.getReport("all")).status).toBe("ready");
+  });
 });
 
 /** `verify-read.ts` の SQL が `start_time` から組み立てる発走時刻つきのスナップショット(JSON 文字列)。 */

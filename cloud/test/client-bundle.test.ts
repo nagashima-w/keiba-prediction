@@ -92,6 +92,8 @@ const ALLOWED_EXTERNAL_IMPORTS = new Set([
   "@keiba/core/ev/cloud-migration-format",
   // Issue #222: サーバと同じ行の分割(`readLines`。区切りは 0x0A だけ・U+2028/2029 を壊さない)。**import を持たない**ことを下のテストが固定する(Worker 専用のモジュールを引き込まない)。
   "../src/migration-reader",
+  // Issue #245: 回収率の表示(`formatRecoveryPercent`)。Discord の日報(Worker)と日報の画面が同じ丸めを使うため。**import を持たない**ことを下のテストが固定する。
+  "../src/recovery-format",
 ]);
 
 function importAllowed(specifier: string): boolean {
@@ -194,6 +196,7 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
     // Issue #222: 移行ファイルの検証が使う 2 つ(形式の検証と、サーバと同じ行の分割)が閉包に入っている。入っていなければ、下の禁止の検査は何も見ていない。
     expect(inputs.some((f) => f.endsWith("packages/core/src/ev/cloud-migration-format.ts")), "前提: 移行の形式の検証が閉包に入っている").toBe(true);
     expect(inputs.some((f) => f.endsWith("src/migration-reader.ts")), "前提: 移行の行の分割が閉包に入っている").toBe(true);
+    expect(inputs.some((f) => f.endsWith("src/recovery-format.ts")), "前提: 回収率の表示(Issue #245)が閉包に入っている").toBe(true);
     expect(forbiddenInputs(inputs)).toEqual([]);
   }, 60_000);
 
@@ -215,6 +218,16 @@ describe("静的ガード(クライアントのソースと生成物)", () => {
       "../packages/core/src/ev/analysis-store-codec.ts",
     ]);
     expect(forbiddenInputs(["client/main.ts", "../packages/app/src/renderer/format.ts", "../packages/core/src/ev/bet-allocation.ts", "src/migration-reader.ts", "../packages/core/src/ev/cloud-migration-format.ts"])).toEqual([]);
+  });
+});
+
+describe("日報の画面がクライアントに取り込む Worker 側のモジュール(Issue #245)", () => {
+  it("recovery-format.ts は import を 1 つも持たない(Worker 専用のモジュール・node: を引き込まない)。クライアントの閉包に入っている", () => {
+    const code = stripComments(readFileSync(path.join(ROOT, "cloud", "src", "recovery-format.ts"), "utf-8"));
+    expect(code.length, "前提: 本体を読めている").toBeGreaterThan(300);
+    expect(code.match(/(?:^|\n)\s*(?:import|export)\s+[^;]*?\bfrom\s*["'][^"']+["']/g) ?? []).toEqual([]);
+    expect(/\brequire\s*\(|\bimport\s*\(/.test(code)).toBe(false);
+    expect(importAllowed("../src/recovery-format")).toBe(true);
   });
 });
 

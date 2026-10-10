@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ReportDetail, ReportListItem } from "../client/api-report";
-import { buildReportModel, CREATE_CAUTION, CREATE_TODAY_CAUTION, dateLabel, MAX_CHIPS, NO_REPORT_NOTICE, type ReportModelInput } from "../client/report-model";
+import { buildReportModel, CREATE_CAUTION, CREATE_TODAY_CAUTION, dateLabel, JOB_UNAVAILABLE_NOTICE, MAX_CHIPS, NO_REPORT_NOTICE, type ReportModelInput } from "../client/report-model";
 
 /** Issue #235: 日報画面の表示用データ。文言は固定(LLM の文章以外にサーバの文は出さない)・数値の整形・状態ごとの出し分け。 */
 
@@ -101,6 +101,14 @@ describe("日報がある日", () => {
     expect(races("買い目なし(見送り: no-ev)")[0]!.bets).toBe("買い目なし(見送り: no-ev)");
   });
 
+  it("Issue #245: 回収率のタイルは、丸めると 100.0% になる 1 以外の値を 100.0% と出さない(99.99% / 100.01%)。ちょうど 1 は 100.0%", () => {
+    const r = report();
+    const tile = (recoveryRate: number): string => buildReportModel(input({ detail: { kind: "ready", report: report({ stats: { ...r.stats, recoveryRate } }), job: null } })).body!.tiles.find((t) => t.label === "回収率")!.value;
+    // 前提: 従来の表示(小数第 1 位)では、これらはすべて「100.0%」だった
+    for (const rate of [0.9999, 1, 1.00001]) expect(`${(rate * 100).toFixed(1)}%`).toBe("100.0%");
+    expect([tile(0.9999), tile(1), tile(1.00001), tile(1.3)]).toEqual(["99.99%", "100.0%", "100.01%", "130.0%"]);
+  });
+
   it("賭け金が 0 の日の回収率は『-』(NaN を出さない)", () => {
     const r = report();
     const m = buildReportModel(input({ detail: { kind: "ready", report: report({ stats: { ...r.stats, totalStake: 0, totalReturn: 0, recoveryRate: null } }), job: null } }));
@@ -157,6 +165,23 @@ describe("日報が無い日", () => {
     const m = buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "requested" } }));
     expect(m.notice!.text).toContain("依頼しました");
     expect(m.create).toBeNull();
+  });
+
+  it("Issue #245: 依頼のあとに進行状況が取れなかった(jobUnavailable)なら、固定の『確認できませんでした。確認を続けます』を出す。作成中の表示は変えず、ボタンは出さない", () => {
+    const m = buildReportModel(input({ detail: { kind: "ready", report: null, job: null, jobUnavailable: true }, run: { kind: "requested" } }));
+    expect(m.notice).toEqual({ tone: "wait", text: JOB_UNAVAILABLE_NOTICE });
+    expect(JOB_UNAVAILABLE_NOTICE).toContain("確認を続けます");
+    expect(m.create).toBeNull();
+    // 対照: 取れていれば(jobUnavailable でない)従来の『作成を依頼しました』
+    const ok = buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "requested" } }));
+    expect(ok.notice!.text).toContain("作成を依頼しました");
+    expect(ok.notice!.text).not.toBe(JOB_UNAVAILABLE_NOTICE);
+    // 依頼していないとき(最初に開いたとき)は、取れなくても従来の案内とボタン
+    const idle = buildReportModel(input({ detail: { kind: "ready", report: null, job: null, jobUnavailable: true } }));
+    expect(idle.notice!.text).toContain("まだありません");
+    expect(idle.create).not.toBeNull();
+    // 作成中の自動更新を止めたあとは、止めた旨の案内が優先される
+    expect(buildReportModel(input({ detail: { kind: "ready", report: null, job: null, jobUnavailable: true }, run: { kind: "requested" }, pollStopped: true })).notice!.text).toContain("自動更新を止めました");
   });
 
   it("作成に失敗(job が failed)は失敗の案内と、もう一度作るボタン", () => {

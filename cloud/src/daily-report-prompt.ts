@@ -9,6 +9,7 @@
  *  - 応答は JSON。コードフェンス・前後の説明文があっても、最初の `{` から最後の `}` までを読む。読めなければ null(呼び出し側が生テキストを本文にする)。
  */
 import type { DayStats, RaceDigest } from "./daily-report-digest";
+import { formatRecoveryPercent } from "./recovery-format";
 
 /** 応答の最大トークン数(thinking を含む)。非ストリーミングの上限(21333)未満。日報の JSON は数千トークンの見込み。 */
 export const REPORT_MAX_TOKENS = 12000;
@@ -117,7 +118,7 @@ function raceBlock(d: RaceDigest): string {
 function statsBlock(s: DayStats): string {
   const lines = [
     `分析したレース: ${s.raceCount} 件(結果あり ${s.resultRaceCount} 件・結果なし ${s.noResultRaceCount} 件・買い目のあるレース ${s.betRaceCount} 件)`,
-    `買い目の成績(判定できたもの): 賭け金 ${yen(s.totalStake)}・払戻 ${yen(s.totalReturn)}・回収率 ${s.recoveryRate === null ? "なし(賭け金 0)" : percent(s.recoveryRate)}・${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中`,
+    `買い目の成績(判定できたもの): 賭け金 ${yen(s.totalStake)}・払戻 ${yen(s.totalReturn)}・回収率 ${s.recoveryRate === null ? "なし(賭け金 0)" : formatRecoveryPercent(s.recoveryRate)}・${s.judgedBetCount} 点中 ${s.hitBetCount} 点的中`,
   ];
   if (s.unjudgedBetCount > 0) {
     lines.push(`判定不能の買い目: ${s.unjudgedBetCount} 点(賭け金 ${yen(s.unjudgedStake)}。結果が無い・払戻が未取得のため成績に含めない)`);

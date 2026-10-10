@@ -86,6 +86,32 @@ describe("buildReportEmbed", () => {
       expect(["(黒字)", "(赤字)", "(収支±0)"].filter((w) => value.includes(w))).toEqual([word]);
     });
 
+    // Issue #245: 表示は、色・語と矛盾しない。「100.0%」と出るのは rate === 1(収支±0)のときだけ。
+    // [回収率, 成績の field に出る回収率の部分]。期待値は実装前に `(rate*100).toFixed(1)`・`Math.round(rate*10000)` を実行して測り直した。
+    const DISPLAY: readonly (readonly [number, string])[] = [
+      [0.99, "回収率 99.0%(赤字)"],
+      [0.9995, "回収率 99.95%(赤字)"],
+      [0.9999, "回収率 99.99%(赤字)"],
+      [0.99999, "回収率 99.99%(赤字)"],
+      [1, "回収率 100.0%(収支±0)"],
+      [1.00001, "回収率 100.01%(黒字)"],
+      [1.3, "回収率 130.0%(黒字)"],
+    ];
+
+    it.each(DISPLAY)("Issue #245: 回収率 %f の表示は「%s」", (rate, expected) => {
+      const value = stat(rate).fields!.find((f) => f.name === "成績")!.value;
+      expect(value).toContain(expected);
+    });
+
+    it("Issue #245: 前提: 旧表示(小数第 1 位)では 1 以外の 3 値(0.9995・0.9999・1.00001)が『100.0%』と出て、語と矛盾していた。新表では『100.0%』は rate === 1 だけ", () => {
+      const contradicted = DISPLAY.filter(([r]) => r === 0.9995 || r === 0.9999 || r === 1.00001);
+      expect(contradicted).toHaveLength(3);
+      for (const [rate] of contradicted) {
+        expect(`${(rate * 100).toFixed(1)}%`).toBe("100.0%");
+      }
+      expect(DISPLAY.filter(([rate, text]) => text.includes("100.0%") && rate !== 1)).toEqual([]);
+    });
+
     it("前提: 表に3つの語がすべて現れ、色は緑・赤の両方が現れる(表が片寄っていない)", () => {
       expect(new Set(TABLE.map((r) => r[1]))).toEqual(new Set(["(黒字)", "(赤字)", "(収支±0)"]));
       expect(new Set(TABLE.map((r) => r[2]))).toEqual(new Set([DISCORD_COLORS.ok, DISCORD_COLORS.fail]));

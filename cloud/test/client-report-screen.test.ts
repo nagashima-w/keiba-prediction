@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../client/api";
+import { JOB_UNAVAILABLE_NOTICE, NO_REPORT_NOTICE } from "../client/report-model";
 import { createReportScreen, REPORT_MAX_FAILURES, REPORT_MAX_POLLS, REPORT_POLL_MS, type ReportScreen } from "../client/report-screen";
 import { buildSavedRecord } from "./daily-report-fixtures";
 import { createFakeTimers, deferred } from "./client-fakes";
@@ -47,7 +48,8 @@ function net(): Net {
   return n;
 }
 
-const ok = (body: Record<string, unknown>): Reply => ({ status: 200, body: { ok: true, ...body } });
+// job_status は既定で ok(日報の DO が応答した。Issue #245)。取れなかった応答は { job_status: "unavailable" } で上書きする。
+const ok = (body: Record<string, unknown>): Reply => ({ status: 200, body: { ok: true, job_status: "ok", ...body } });
 
 function setup(visible = { value: true }) {
   const n = net();
@@ -194,6 +196,52 @@ describe("手動の作成と作成中のポーリング", () => {
     screen.onRefresh();
     await timers.flush();
     expect(screen.model().create).not.toBeNull();
+  });
+
+  it("Issue #245: 依頼のあと日報の DO の状況が取れなかった(job_status が unavailable)なら、『作られずに終わった』にせず、固定の案内を出して確認を続ける。回復すれば作成中・日報の表示に進む", async () => {
+    const unavailable = ok({ report: null, job: null, job_status: "unavailable" });
+    const { n, screen, timers } = await openEmptyDay(
+      [ok({ report: null, job: null }), unavailable, unavailable, ok({ report: null, job: { phase: "gather", status: "running", attempts: 0 } }), ok({ report: await reportJson("20261010"), job: null })],
+      [{ status: 202, body: { ok: true, accepted: true, date: "20261010" } }],
+    );
+    screen.onRun();
+    await timers.flush();
+    // 依頼の直後の確認が unavailable: 作られずに終わった案内にしない(従来はここで no-report になり、確認が止まっていた)
+    expect(screen.model().notice!.text).toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(screen.model().notice!.text).not.toBe(NO_REPORT_NOTICE);
+    expect(screen.model().create).toBeNull();
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS); // 確認は止まらない
+    await timers.advance(REPORT_POLL_MS); // 2 回目も unavailable
+    expect(screen.model().notice!.text).toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS);
+    await timers.advance(REPORT_POLL_MS); // 回復: 作成中
+    expect(screen.model().notice!.text).toContain("日報を作成中です");
+    await timers.advance(REPORT_POLL_MS); // 日報が現れる
+    expect(screen.model().body).not.toBeNull();
+    expect(timers.pending()).toBe(0);
+    expect(n.calls.filter((c) => c === "GET /api/reports/20261010")).toHaveLength(5);
+  });
+
+  it("Issue #245: unavailable は失敗の連続に数えない(REPORT_MAX_FAILURES 回を超えても確認を続ける)。上限は REPORT_MAX_POLLS", async () => {
+    const unavailable = ok({ report: null, job: null, job_status: "unavailable" });
+    const { screen, timers } = await openEmptyDay([ok({ report: null, job: null }), unavailable], [{ status: 202, body: { ok: true, accepted: true, date: "20261010" } }]);
+    screen.onRun();
+    await timers.flush();
+    for (let i = 0; i < REPORT_MAX_FAILURES + 2; i++) {
+      expect(timers.nextIn(), `unavailable の ${i + 1} 回目のあと`).toBe(REPORT_POLL_MS);
+      await timers.advance(REPORT_POLL_MS);
+    }
+    expect(screen.model().notice!.text).toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS);
+    expect(REPORT_MAX_POLLS).toBeGreaterThan(REPORT_MAX_FAILURES + 3); // 前提: ここまでは上限に達していない
+  });
+
+  it("Issue #245: 対照: job_status が ok で job が null なら、従来どおり『作られずに終わった』(確認を止める)", async () => {
+    const { screen, timers } = await openEmptyDay([ok({ report: null, job: null }), ok({ report: null, job: null })], [{ status: 202, body: { ok: true, accepted: true, date: "20261010" } }]);
+    screen.onRun();
+    await timers.flush();
+    expect(screen.model().notice!.text).toBe(NO_REPORT_NOTICE);
+    expect(timers.pending()).toBe(0);
   });
 
   it("押した直後に二重に POST しない(依頼中・作成中)", async () => {
