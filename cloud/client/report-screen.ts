@@ -56,6 +56,8 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
   let run: ReportRunState = { kind: "idle" };
   let busy = false;
   let pollStopped = false;
+  /** 作成中(running)を見て確認を続けている(Issue #246)。進行状況を取れなかった(`unavailable`)ときに、確認を止めない根拠。`unavailable`・通信の失敗では変えない。 */
+  let watching = false;
   let failures = 0;
   let polls = 0;
   let timer: unknown = null;
@@ -75,9 +77,17 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     void promise.finally(() => inflight.delete(promise));
   }
 
-  /** 作成中(確認を続けるべき)か: サーバの job が running、または依頼を受け付けた直後。 */
+  /**
+   * 作成中(確認を続けるべき)か: サーバの job が running、依頼を受け付けた直後、または**確認を続けている途中で進行状況を取れなかった**(Issue #246。
+   * running を見たあとの `unavailable` は「ジョブが無い」ではなく「分からない」ので、止めない)。
+   */
   function waiting(): boolean {
-    return detail !== null && detail.kind === "ready" && detail.report === null && ((detail.job !== null && detail.job.status === "running") || run.kind === "requested");
+    return (
+      detail !== null &&
+      detail.kind === "ready" &&
+      detail.report === null &&
+      ((detail.job !== null && detail.job.status === "running") || run.kind === "requested" || (watching && detail.jobUnavailable === true))
+    );
   }
 
   function schedule(): void {
@@ -124,6 +134,9 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
         if (result.ok) {
           detail = { kind: "ready", report: result.report, job: result.job, jobUnavailable: result.jobStatus === "unavailable" };
           failures = 0;
+          // 確認を続ける状態(Issue #246): running を見たら立て、日報が現れた・失敗した・進行状況が無いと分かった(`ok` で job なし)ら下ろす。`unavailable` では変えない。
+          if (result.report !== null || (result.job !== null && result.job.status !== "running") || (result.job === null && result.jobStatus === "ok")) watching = false;
+          else if (result.job !== null) watching = true;
           if (result.report !== null) {
             run = { kind: "idle" };
             // 新しく現れた日報を日付の並びに入れる。
@@ -138,6 +151,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
           }
         } else if (mode === "first") {
           detail = { kind: "error", message: reportFetchFailureMessage(result.error) };
+          watching = false;
         } else {
           failures += 1;
           if (failures >= REPORT_MAX_FAILURES) pollStopped = true;
@@ -183,6 +197,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
       gen += 1;
       list = { kind: "loading" };
       run = { kind: "idle" };
+      watching = false;
       shown = date ?? deps.today();
       fetchList(true);
       if (date !== null) fetchDetail("first"); // 日付の指定が無いときは、一覧が届いてから(最新の日が決まってから)本文を取る
@@ -191,6 +206,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     // 同じ画面の中で日付が変わった: 本文だけ取り直す(一覧はそのまま)。
     gen += 1;
     run = { kind: "idle" };
+    watching = false;
     shown = resolveShown();
     fetchDetail("first");
   }
@@ -206,6 +222,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     run = { kind: "idle" };
     busy = false;
     pollStopped = false;
+    watching = false;
     failures = 0;
     polls = 0;
   }
@@ -262,7 +279,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
     onRun,
     onRefresh,
     onVisibilityChange,
-    model: () => buildReportModel({ today: deps.today(), shownDate: shown, list, detail, run, pollStopped, readOnly: deps.readOnly === true }),
+    model: () => buildReportModel({ today: deps.today(), shownDate: shown, list, detail, run, pollStopped, watching, readOnly: deps.readOnly === true }),
     pending: () => [...inflight],
   };
 }

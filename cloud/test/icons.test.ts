@@ -3,6 +3,7 @@ import { handle, type Env } from "../src/handler";
 import { ICON_CACHE_CONTROL, ICON_PATHS, iconAsset } from "../src/icons";
 import { requiredRole } from "../src/route-policy";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
+import { decodePng, encodePngForTest, meanLuminance } from "./png-pixels";
 
 /**
  * Issue #244: アイコン(見出しの横の画像・ブラウザのタブの favicon・apple-touch-icon)の生成物と、その配信。
@@ -131,6 +132,83 @@ describe("生成物の形式・寸法(/favicon.ico)", () => {
     const e = EXPECTED.find((x) => x.path === "/favicon.ico")!;
     expect(ico().length).toBeLessThanOrEqual(e.maxBytes);
     expect(ico().length).toBeGreaterThan(300);
+  });
+});
+
+/**
+ * Issue #246(#244 の【記録】): 見出し用(A=全体の絵)と favicon(C=「穴」だけ)の取り違えを、画素で検出する。
+ * 寸法・形式・大きさの検査(上)は、**同じ 32px の header-32 と favicon-32 を入れ替えても通る**(どちらも 32×32 の PNG で、大きさの上限も近い)。
+ * 絵が違えば画素の平均輝度が違う(A は全体の絵で、C は切り抜きなので、平均が離れる)ことを使う。画素は PNG を復号して読む(`png-pixels.ts`)。
+ *
+ * **閾値は、今の絵(コミット済みの生成物。`gen-icons.py` が決定的に作る)に対する値。絵を差し替えるとき(元画像・切り抜きの変更)は、
+ * ここの閾値〈族内の差の上限と、族の間の差の下限〉を見直すこと。** 今の絵の平均輝度は、A の族が互いに 1 未満の差で、C の族も 1 未満の差、A と C の間はその 20 倍以上の差
+ * (値は下のテストが `meanLuminance` で計算する。全画素の単純平均で、画素数 N は各画像の 幅 × 高さ。生成物は決定的なので実行間のばらつきは無い)。
+ */
+describe("A(見出し)と C(favicon)の取り違えの検出(画素の平均輝度)", () => {
+  const A_PATHS = ["/icons/header-32.png", "/icons/header-64.png", "/icons/header-96.png", "/apple-touch-icon.png"] as const;
+  const C_PATHS = ["/icons/favicon-16.png", "/icons/favicon-32.png"] as const;
+  const lum = (p: string): number => meanLuminance(decodePng(bytesOf(p)));
+  const spread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+
+  it("復号器の自己検査: 5 種のフィルタ(なし・Sub・Up・Average・Paeth)を行ごとに使って符号化した既知の画像が、元の画素に戻る", () => {
+    const width = 7;
+    const height = 5;
+    const rgb = new Uint8Array(width * height * 3).map((_, i) => (i * 37 + (i % 5) * 91) & 255); // 値が大きく動く(フィルタの差が出る)
+    const png = decodePng(encodePngForTest(width, height, rgb, [0, 1, 2, 3, 4]));
+    expect({ w: png.width, h: png.height }).toEqual({ w: width, h: height });
+    const back = new Uint8Array(width * height * 3);
+    for (let i = 0; i < width * height; i += 1) {
+      back.set([png.rgba[i * 4]!, png.rgba[i * 4 + 1]!, png.rgba[i * 4 + 2]!], i * 3);
+      expect(png.rgba[i * 4 + 3], "RGB の PNG は不透明").toBe(255);
+    }
+    expect(Array.from(back)).toEqual(Array.from(rgb));
+    // 前提: 画像が単色でない(単色なら、どのフィルタでも通ってしまう)
+    expect(new Set(rgb).size).toBeGreaterThan(20);
+    // 行ごとのフィルタを入れ替えても(すべて Paeth)戻る
+    const paeth = decodePng(encodePngForTest(width, height, rgb, [4, 4, 4, 4, 4]));
+    expect(Array.from(paeth.rgba.filter((_, i) => i % 4 !== 3))).toEqual(Array.from(rgb));
+  });
+
+  it("配るすべての PNG が復号でき、寸法が IHDR と一致し、不透明(平均輝度が意味を持つ)", () => {
+    for (const p of [...A_PATHS, ...C_PATHS]) {
+      const png = decodePng(bytesOf(p));
+      const expected = EXPECTED.find((e) => e.path === p)!.size!;
+      expect({ w: png.width, h: png.height }, p).toEqual({ w: expected, h: expected });
+      let opaque = 0;
+      for (let i = 0; i < png.width * png.height; i += 1) opaque += png.rgba[i * 4 + 3] === 255 ? 1 : 0;
+      expect(opaque, p).toBe(png.width * png.height);
+    }
+  });
+
+  it("A の族(header-32・64・96・apple-touch-icon)の平均輝度は互いに 3 未満の差、C の族(favicon-16・32)も 3 未満の差", () => {
+    expect(spread(A_PATHS.map(lum))).toBeLessThan(3);
+    expect(spread(C_PATHS.map(lum))).toBeLessThan(3);
+  });
+
+  it("A と C は別の絵: 同じ 32px どうし(header-32 と favicon-32)の平均輝度が 15 以上離れ、A の族のどれと C の族のどれを比べても 15 以上離れる", () => {
+    const gap = Math.abs(lum("/icons/header-32.png") - lum("/icons/favicon-32.png"));
+    expect(gap, "header-32 と favicon-32 の平均輝度の差").toBeGreaterThanOrEqual(15);
+    for (const a of A_PATHS) {
+      for (const c of C_PATHS) {
+        expect(Math.abs(lum(a) - lum(c)), `${a} と ${c}`).toBeGreaterThanOrEqual(15);
+      }
+    }
+    // 前提: 差が 0 に張り付いていない(取り違えがあれば、族内の検査〈上〉と族間の検査のどちらかが必ず落ちる)
+    expect(gap).toBeGreaterThan(0);
+  });
+
+  it("/favicon.ico の中の 16・32px の PNG は、favicon-16・favicon-32 とバイト列が同じ(ICO は C の束)。48px は C の族の平均輝度", () => {
+    const ico = bytesOf("/favicon.ico");
+    const inner = (index: number): Uint8Array => {
+      const entry = 6 + index * 16;
+      const offset = u32le(ico, entry + 12);
+      return ico.subarray(offset, offset + u32le(ico, entry + 8));
+    };
+    expect(Buffer.from(inner(0)).equals(Buffer.from(bytesOf("/icons/favicon-16.png")))).toBe(true);
+    expect(Buffer.from(inner(1)).equals(Buffer.from(bytesOf("/icons/favicon-32.png")))).toBe(true);
+    const c48 = meanLuminance(decodePng(inner(2)));
+    expect(Math.abs(c48 - lum("/icons/favicon-32.png"))).toBeLessThan(3);
+    expect(Math.abs(c48 - lum("/icons/header-32.png"))).toBeGreaterThanOrEqual(15);
   });
 });
 

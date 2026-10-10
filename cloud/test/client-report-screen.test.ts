@@ -357,3 +357,121 @@ describe("Issue #238: 閲覧者(readOnly)は日報を作成しない(POST /api/r
     }
   });
 });
+
+describe("Issue #246 項目 6: 画面を開いた時点で running のため確認を続けている途中の unavailable", () => {
+  const RUNNING = { phase: "gather", status: "running", attempts: 0 } as const;
+  const unavailable = ok({ report: null, job: null, job_status: "unavailable" });
+
+  async function openRunning(detail: Reply[]) {
+    const s = setup();
+    s.n.script["GET /api/reports"] = [ok({ reports: [] })];
+    s.n.script["GET /api/reports/20261010"] = detail;
+    s.screen.enter("20261010");
+    await s.timers.flush();
+    return s;
+  }
+
+  it("running で開いて確認を続けている途中に unavailable が返っても止めず、固定の案内(JOB_UNAVAILABLE_NOTICE)を出して確認を続ける。回復すれば作成中・日報の表示に進む", async () => {
+    const { n, screen, timers } = await openRunning([ok({ report: null, job: RUNNING }), unavailable, unavailable, ok({ report: null, job: RUNNING }), ok({ report: await reportJson("20261010"), job: null })]);
+    expect(screen.model().notice!.text).toContain("日報を作成中です"); // 前提: running で開いた(依頼はしていない)
+    await timers.advance(REPORT_POLL_MS); // 1 回目の確認が unavailable
+    expect(screen.model().notice).toEqual({ tone: "wait", text: JOB_UNAVAILABLE_NOTICE });
+    expect(screen.model().create).toBeNull(); // 「まだありません」のボタンに戻らない
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS); // 確認は止まらない
+    await timers.advance(REPORT_POLL_MS); // 2 回目も unavailable
+    expect(screen.model().notice!.text).toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS);
+    await timers.advance(REPORT_POLL_MS); // 回復: running
+    expect(screen.model().notice!.text).toContain("日報を作成中です");
+    await timers.advance(REPORT_POLL_MS); // 日報が現れる
+    expect(screen.model().body).not.toBeNull();
+    expect(timers.pending()).toBe(0);
+    expect(n.calls.filter((c) => c === "GET /api/reports/20261010")).toHaveLength(5);
+  });
+
+  it("unavailable は失敗の連続に数えない(REPORT_MAX_FAILURES 回を超えても続ける)。上限は REPORT_MAX_POLLS のまま", async () => {
+    const { n, screen, timers } = await openRunning([ok({ report: null, job: RUNNING }), unavailable]);
+    expect(REPORT_MAX_POLLS).toBeGreaterThan(REPORT_MAX_FAILURES + 3); // 前提: ここまでは上限に達していない
+    for (let i = 0; i < REPORT_MAX_FAILURES + 2; i += 1) {
+      expect(timers.nextIn(), `unavailable の ${i} 回目のあと`).toBe(REPORT_POLL_MS);
+      await timers.advance(REPORT_POLL_MS);
+    }
+    expect(screen.model().notice!.text).toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS);
+    // 上限で止まる: 最初の取得 1 回 + 確認 REPORT_MAX_POLLS 回
+    for (let i = REPORT_MAX_FAILURES + 2; i < REPORT_MAX_POLLS + 5; i += 1) await timers.advance(REPORT_POLL_MS);
+    expect(n.calls.filter((c) => c === "GET /api/reports/20261010")).toHaveLength(1 + REPORT_MAX_POLLS);
+    expect(timers.pending()).toBe(0);
+  });
+
+  it("対照: running を一度も見ていない最初の取得が unavailable なら、確認を始めない(従来の『まだありません』とボタン)", async () => {
+    const { screen, timers } = await openRunning([unavailable]);
+    expect(timers.pending()).toBe(0);
+    expect(screen.model().notice!.text).toContain("まだありません");
+    expect(screen.model().create).not.toBeNull();
+  });
+
+  it("対照: running のあと job_status が ok で job が null(進行状況が無いと分かった)なら、確認を続けない。『まだありません』とボタンに戻る", async () => {
+    const { screen, timers } = await openRunning([ok({ report: null, job: RUNNING }), ok({ report: null, job: null }), unavailable]);
+    await timers.advance(REPORT_POLL_MS);
+    expect(timers.pending()).toBe(0);
+    expect(screen.model().notice!.text).toContain("まだありません");
+    expect(screen.model().create).not.toBeNull();
+    // 確認を続ける状態が残っていないこと: そのあとの「更新」が unavailable でも、確認を始めない(残っていると、更新のたびに誤って確認を再開する)
+    screen.onRefresh();
+    await timers.flush();
+    expect(timers.pending()).toBe(0);
+    expect(screen.model().notice!.text).toContain("まだありません");
+  });
+
+  it("「更新」でも確認を続ける状態を保つ: 更新の結果が unavailable でも、固定の案内を出して確認を続ける", async () => {
+    const { screen, timers } = await openRunning([ok({ report: null, job: RUNNING }), unavailable]);
+    screen.onRefresh();
+    await timers.flush();
+    expect(screen.model().notice!.text).toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS);
+  });
+
+  it("日付を替える・離れると、確認を続ける状態は捨てる(別の日・開き直しの最初の取得が unavailable でも確認を始めない)", async () => {
+    const { n, screen, timers } = await openRunning([ok({ report: null, job: RUNNING })]);
+    n.script["GET /api/reports/20261009"] = [unavailable];
+    screen.enter("20261009");
+    await timers.flush();
+    expect(screen.model().notice!.text).toContain("まだありません");
+    expect(timers.pending()).toBe(0);
+    screen.leave();
+    n.script["GET /api/reports/20261010"] = [unavailable];
+    screen.enter("20261010");
+    await timers.flush();
+    expect(screen.model().notice!.text).toContain("まだありません");
+    expect(timers.pending()).toBe(0);
+  });
+
+  it("通信の失敗(unavailable でない失敗)をはさんでも、確認を続ける状態は保たれる(失敗の上限に達する前に unavailable が返れば続ける)", async () => {
+    const { screen, timers } = await openRunning([ok({ report: null, job: RUNNING }), "throw", ok({ report: null, job: null, job_status: "unavailable" })]);
+    await timers.advance(REPORT_POLL_MS); // 通信の失敗(1 回)
+    await timers.advance(REPORT_POLL_MS); // unavailable
+    expect(screen.model().notice!.text).toBe(JOB_UNAVAILABLE_NOTICE);
+    expect(timers.nextIn()).toBe(REPORT_POLL_MS);
+  });
+
+  it("K2: 依頼(requested)のあと結果が running でも requested のまま残る: そのあと job が無い(ok)と分かると『作られずに終わった』になる。対照: 依頼せず running で開いた場合は『まだありません』とボタン", async () => {
+    const s = setup();
+    s.n.script["GET /api/reports"] = [ok({ reports: [] })];
+    s.n.script["GET /api/reports/20261010"] = [ok({ report: null, job: null }), ok({ report: null, job: RUNNING }), ok({ report: null, job: null })];
+    s.n.script["POST /api/reports/run"] = [{ status: 202, body: { ok: true, accepted: true, date: "20261010" } }];
+    s.screen.enter("20261010");
+    await s.timers.flush();
+    s.screen.onRun();
+    await s.timers.flush();
+    expect(s.screen.model().notice!.text).toContain("日報を作成中です"); // 前提: 依頼の直後の確認が running
+    expect(s.timers.nextIn()).toBe(REPORT_POLL_MS);
+    await s.timers.advance(REPORT_POLL_MS); // running が消えた(日報も無い)
+    expect(s.screen.model().notice!.text).toBe(NO_REPORT_NOTICE); // requested が残っていたから
+    expect(s.screen.model().create).toBeNull();
+    const ctl = await openRunning([ok({ report: null, job: RUNNING }), ok({ report: null, job: null })]);
+    await ctl.timers.advance(REPORT_POLL_MS);
+    expect(ctl.screen.model().notice!.text).toContain("まだありません");
+    expect(ctl.screen.model().create).not.toBeNull();
+  });
+});

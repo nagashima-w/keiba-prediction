@@ -136,3 +136,80 @@ describe("judgeBets: core の computeVerifyReport(proposedBet)との一致", () 
     expect(judged.length).toBe(overall.betCount);
   });
 });
+
+/**
+ * Issue #246 B4・B10: core との突き合わせを、枠連・三連単と「払戻はあるが取込印なし」にも広げる。
+ * 上の describe の入力(`RESULT`・`mixedBets`)は変えず、別の入力で同じ突き合わせをする(既存の固定を弱めない)。
+ */
+describe("Issue #246: judgeBets と core の computeVerifyReport(proposedBet)の一致: 枠連・三連単・払戻はあるが取込印なし", () => {
+  const raceId = "202606030812";
+  const RESULT2: RaceResultData = {
+    horses: RESULT.horses,
+    combos: {
+      trifecta: { imported: true, payouts: [{ comboKey: "010203", payout: 15000 }] },
+      bracketQuinella: { imported: true, payouts: [{ comboKey: "0102", payout: 1100 }] },
+      // 払戻の行はあるが、取込印が無い(imported:false)。キーが一致する買い目があっても的中にせず、判定不能にする
+      trio: { imported: false, payouts: [{ comboKey: "010203", payout: 2400 }] },
+      wide: { imported: true, payouts: [{ comboKey: "0102", payout: 800 }] },
+    },
+  };
+  const bets2: DayBet[] = [
+    bet("trifecta", "010203", 100), // 的中(順序つきのキーが一致)
+    bet("trifecta", "020103", 100), // はずれ(着順が違う)
+    bet("bracketQuinella", "0102", 200), // 的中
+    bet("bracketQuinella", "0203", 100), // はずれ
+    bet("trio", "010203", 100), // 払戻はあるが取込印なし → 判定不能
+    bet("wide", "0102", 100), // 的中(対照: 取込印があれば同じ形のキーで判定できる)
+  ];
+
+  function coreSource2(): VerifyDataSource {
+    const results: RaceResultEntry[] = RESULT2.horses.map((h) => ({ umaban: h.umaban, finishPosition: h.finishPosition, placePayout: h.placePayout, winPayout: h.winPayout }));
+    const analysis = {
+      id: 1, raceId, analyzedAt: "2026-06-07T05:00:00.000Z", evEstimated: false, promptVersion: "v1", additionalInstruction: null, kaisaiDate: "20260607",
+      model: null, rawResponse: null, raceSnapshot: null, historyCutoffDate: "20260607", promptLookaheadGuarded: true,
+      horses: RESULT2.horses.map((h) => ({ umaban: h.umaban, prior: 0.3, adjustedProb: 0.3, placeOddsMin: 2, ev: 1.2, isPositive: true, contributions: null, mark: null, reason: null, highlights: [], concerns: [] })),
+    } as unknown as StoredAnalysis;
+    return {
+      listAnalyses: () => [analysis],
+      getResult: (id: string) => (id === raceId ? results : undefined),
+      getComboPayouts: (id: string, betType: string): RaceComboPayoutsReadResult => {
+        const c = id === raceId ? RESULT2.combos[betType] : undefined;
+        return c === undefined || !c.imported ? { state: "not_imported" } : { state: "imported", payouts: c.payouts };
+      },
+      getAllocationForVerify: () => ({ route: "mixed", skipReasonCode: null, bets: bets2.map((b) => ({ betType: b.betType, comboKey: b.comboKey, stake: b.stake })) }),
+    } as unknown as VerifyDataSource;
+  }
+
+  it("前提(空振り防止): 枠連・三連単の的中とはずれ、取込印なしの判定不能が、それぞれ含まれる", () => {
+    const o = judgeBets(bets2, RESULT2);
+    expect(o.map((x) => [x.betType, x.status])).toEqual([
+      ["trifecta", "hit"], ["trifecta", "miss"], ["bracketQuinella", "hit"], ["bracketQuinella", "miss"], ["trio", "unjudged"], ["wide", "hit"],
+    ]);
+    expect(o[0]!.payout).toBe(15000);
+    expect(o[2]!.payout).toBe(2200);
+  });
+
+  it("賭け金・払戻の合計・判定不能の数・判定できた点数が、core の proposedBet と一致する(全体と、枠連・三連単・3 連複の券種別)", () => {
+    const report = computeVerifyReport(coreSource2(), { ...PRODUCTION_VERIFY_CONFIG, excludeLookaheadSuspects: false });
+    const pb = report.proposedBet;
+    const outcomes = judgeBets(bets2, RESULT2);
+    const judged = outcomes.filter((o) => o.status !== "unjudged");
+    expect(pb.overall.totalStake).toBeGreaterThan(0);
+    expect(judged.reduce((s, o) => s + o.stake, 0)).toBe(pb.overall.totalStake);
+    expect(judged.reduce((s, o) => s + o.payout, 0)).toBeCloseTo(pb.overall.totalReturn, 6);
+    expect(outcomes.filter((o) => o.status === "unjudged").length).toBe(pb.overall.unjudgedCount);
+    expect(judged.length).toBe(pb.overall.betCount);
+    for (const type of ["trifecta", "bracketQuinella", "trio"] as const) {
+      const mine = outcomes.filter((o) => o.betType === type);
+      const j = mine.filter((o) => o.status !== "unjudged");
+      expect(mine.length, `${type} の買い目が入力にある`).toBeGreaterThan(0);
+      expect(j.length, `${type} の判定できた点数`).toBe(pb[type].betCount);
+      expect(j.reduce((s, o) => s + o.payout, 0), `${type} の払戻`).toBeCloseTo(pb[type].totalReturn, 6);
+      expect(mine.length - j.length, `${type} の判定不能`).toBe(pb[type].unjudgedCount);
+    }
+    // 前提: 券種別の比較が空振りでない(三連単・枠連に払戻があり、3 連複は判定不能が出ている)
+    expect(pb.trifecta.totalReturn).toBeGreaterThan(0);
+    expect(pb.bracketQuinella.totalReturn).toBeGreaterThan(0);
+    expect(pb.trio.unjudgedCount).toBe(1);
+  });
+});

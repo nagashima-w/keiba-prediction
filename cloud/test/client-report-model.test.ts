@@ -81,6 +81,14 @@ describe("日報がある日", () => {
     expect(buildReportModel(input()).body!.markRows).toEqual([{ label: "◎", value: "2 頭 / 1 / 1" }]);
   });
 
+  it("Issue #246 M3: 印別は 1着 と 3着内 を取り違えない(1 着が 0 で 3 着内が 2 の印、1 着が 1 で 3 着内が 3 の印)", () => {
+    const r = report();
+    const byMark = [{ mark: "◎", count: 3, win: 1, top3: 3 }, { mark: "〇", count: 2, win: 0, top3: 2 }];
+    const rows = buildReportModel(input({ detail: { kind: "ready", report: report({ stats: { ...r.stats, byMark } }), job: null } })).body!.markRows;
+    expect(rows).toEqual([{ label: "◎", value: "3 頭 / 1 / 3" }, { label: "〇", value: "2 頭 / 0 / 2" }]);
+    expect(buildReportModel(input()).body!.markHeading).toBe("印別の成績(結果のあるレース。頭数 / 1着 / 3着内)");
+  });
+
   it("レースごと: 着順(馬名なしは番だけ)・印の馬と着順(着順不明は着順を省く)・買い目の成績・一言。結果なしは固定の文、判定不能だけの買い目はその旨", () => {
     const [r1, r2] = buildReportModel(input()).body!.races;
     expect(r1!.result).toBe("1着 1番 アルファ / 2着 3番");
@@ -144,6 +152,21 @@ describe("日報が無い日", () => {
     // 失敗(job が failed)・依頼中・依頼の失敗のときも、ボタンが出るなら注意は付く
     expect(buildReportModel(input({ detail: { kind: "ready", report: null, job: { phase: "save", status: "failed", attempts: 3 } } })).create!.caution).toBe(CREATE_CAUTION);
     expect(buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "posting" } })).create!.caution).toBe(CREATE_CAUTION);
+  });
+
+  it("Issue #246 K11: 確定の注意と、今日の強い注意の文言をリテラルで固定する(定数どうしの比較では、文面を弱めても通ってしまう)", () => {
+    expect(CREATE_CAUTION).toBe("押した時点の分析と結果で日報を作り、その日は作り直せません。");
+    expect(CREATE_TODAY_CAUTION).toBe(
+      "今日の日報は、まだ分析していないレース(夜の地方など)や、結果の取り込みが終わっていないレースがあるうちに押すと、それらを含まないまま確定します。通常は、その日の分析と結果が揃うと自動で作られるので、急がなければ待ってください。",
+    );
+    // 画面のモデルが、その文言をそのまま出す(今日だけ強い注意。ほかの日は null)
+    const today = buildReportModel(input({ shownDate: "20261010", detail: { kind: "ready", report: null, job: null } })).create!;
+    expect(today.caution).toBe("押した時点の分析と結果で日報を作り、その日は作り直せません。");
+    expect(today.todayCaution).toContain("まだ分析していないレース");
+    expect(today.todayCaution).toContain("結果の取り込みが終わっていないレース");
+    expect(today.todayCaution).toContain("含まないまま確定します");
+    expect(today.todayCaution).toContain("急がなければ待ってください");
+    expect(buildReportModel(input({ shownDate: "20261009", detail: { kind: "ready", report: null, job: null } })).create!.todayCaution).toBeNull();
   });
 
   it("R1: 依頼したが作られずに終わった(no-report)なら、固定の案内を出し、ボタンも『作成中』も出さない", () => {
@@ -273,5 +296,26 @@ describe("Issue #238: 閲覧者(readOnly)の日報画面: 作成のボタンと�
     expect(withReport.create).toBeNull();
     const running = { detail: { kind: "ready", report: null, job: { phase: "gather", status: "running", attempts: 0 } } } as const;
     expect(buildReportModel(input({ ...running, readOnly: true })).notice).toEqual(buildReportModel(input(running)).notice);
+  });
+});
+
+describe("Issue #246 項目 6: watching(running を見て確認を続けている途中)", () => {
+  it("watching で進行状況が取れなかった(jobUnavailable)なら、依頼していなくても固定の『確認できませんでした』を出し、ボタンは出さない", () => {
+    const m = buildReportModel(input({ detail: { kind: "ready", report: null, job: null, jobUnavailable: true }, watching: true }));
+    expect(m.notice).toEqual({ tone: "wait", text: JOB_UNAVAILABLE_NOTICE });
+    expect(m.create).toBeNull();
+  });
+
+  it("対照: watching でなければ従来どおり(『まだありません』とボタン)。watching でも取れていれば(jobUnavailable でない)この案内は出さない", () => {
+    const idle = buildReportModel(input({ detail: { kind: "ready", report: null, job: null, jobUnavailable: true }, watching: false }));
+    expect(idle.notice!.text).toContain("まだありません");
+    expect(idle.create).not.toBeNull();
+    const ok = buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, watching: true }));
+    expect(ok.notice!.text).not.toBe(JOB_UNAVAILABLE_NOTICE);
+  });
+
+  it("watching で止めたあとは、止めた旨の案内が優先される", () => {
+    const m = buildReportModel(input({ detail: { kind: "ready", report: null, job: null, jobUnavailable: true }, watching: true, pollStopped: true }));
+    expect(m.notice!.text).toContain("自動更新を止めました");
   });
 });

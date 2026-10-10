@@ -46,6 +46,8 @@ export interface ReportModelInput {
   readonly run: ReportRunState;
   /** 自動の更新(作成中の確認)を止めている。 */
   readonly pollStopped: boolean;
+  /** 作成中(running)を見て確認を続けている(Issue #246)。進行状況を取れなかった(`jobUnavailable`)ときに、依頼していなくても固定の案内を出す。省略は false。 */
+  readonly watching?: boolean;
   /** 閲覧者(Issue #238)。作成のボタンと、ボタンに言及する案内を出さない。省略は false(管理者)。 */
   readonly readOnly?: boolean;
 }
@@ -242,7 +244,7 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
       body = bodyOf(detail.report);
     } else if (detail.job !== null && detail.job.status === "running") {
       notice = { tone: "wait", text: "日報を作成中です。しばらくすると表示されます(この画面は自動で更新します)。" };
-    } else if (run.kind === "requested") {
+    } else if (run.kind === "requested" || (input.watching === true && detail.jobUnavailable === true)) {
       notice =
         detail.jobUnavailable === true
           ? { tone: "wait", text: JOB_UNAVAILABLE_NOTICE }

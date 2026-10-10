@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.43.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.44.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.43.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.44.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1089,6 +1089,15 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
 - **docs の訂正**: 版別の parity テストの保証範囲(上の#220の【検査】)・`CACHE_VERSION` を上げた日の `throttled`(上の#220の「キャッシュ」)・日報の【記録】(5) の `too-old`・`cloud/README.md` の「書き込みは 1 行」・古い CSP の文字列(#184 の「配信」)。
 - **【記録】**: (1) 検証画面の `throttled` の文言は「1 日の集計の上限に達していて」だが、理由が最短間隔(5 分)のときも同じ文言が出る(#242 に積む)。(2) 検証画面の累積回収率は、丸めると 100.0% になる値でも従来の表示のまま(上のとおり exe と揃えている)。(3) `onWarn`(ログ)に例外の文面をそのまま書く箇所が他にある(`race-day-core.ts` の通知・一覧・設定・掃除の警告)。ログだけに出て閲覧者には見えないので、今回は変えていない。
 - **検査**: `test/handler-run.test.ts`・`handler-plan.test.ts`(鍵の形を 200 文字目にまたがせた保存済みの値で、応答に鍵の断片が残らない)・`race-day-core.test.ts`・`race-day-pre-race.test.ts`(保存の時点)・`recovery-format.test.ts`(0.99949 / 0.9995 / 0.9999 / 1 / 1.00001 などの表と 1e-6 刻みの走査)・`client-report-model.test.ts`・`daily-report-embed.test.ts`・`daily-report-prompt.test.ts`・`handler-reports.test.ts`・`client-api-report*.test.ts`(本物の `handle()` が `job_status` を返す契約)・`client-report-screen.test.ts`・`verify-core.test.ts`(版を上げた直後の `throttled`)・`client-bundle.test.ts`。
+
+### 【記録】の回収(2)(#246。v1.44.0。テストの穴と、日報の確認の継続)
+#241・#242 に積んだ【記録】のうち、テストの穴と、日報の画面の小さな挙動を回収した。**D1・exe・core・API は無変更**。変わるのは日報の画面の挙動 1 点だけ。
+- **日報の確認の継続**: 画面を開いた時点で `running` のため確認を続けている途中に、進行状況を取得できなかった(`job_status: "unavailable"`)応答が返っても、確認を止めない。画面は #245 と同じ固定の案内(「作成の状況を確認できませんでした。確認を続けます」)を出し、作成のボタンは出さない。従来は「まだありません」とボタンに戻り、確認が静かに止まっていた。
+  - 実装: `client/report-screen.ts` に「確認を続けている」状態(`watching`)を足した。`running` を見たら立て、日報が現れた・作成が失敗した・進行状況が無いと分かった(`job_status` が `ok` で `job` なし)ら下ろす。`unavailable` と通信の失敗では変えない。日付の切替・画面を開き直すと捨てる。「更新」では保つ。
+  - **開いた直後の最初の取得**が `unavailable` のときは、`running` を一度も見ていないので確認を始めない(従来どおり「まだありません」とボタン)。
+  - `unavailable` は失敗の連続に数えない。上限は従来どおり `REPORT_MAX_POLLS`。
+- **テストの穴**(いずれも現状のコードは正しく、将来の編集ミスを防ぐ): 日報の VNode(総括・良かった点・改善点・一言・印。`client-view-report.test.ts` 新設)/ 印別の集計(2・3 着以下の馬に印を付けた入力)/ core との的中判定の突き合わせ(枠連・三連単・払戻はあるが取込印なし)/ 配分を読む分析の取り違え / `requested` と running の組み合わせ・今日の強い注意の文言(リテラル)/ `::before` の規則が意図した 5 つだけ / アイコン A(見出し)と C(favicon)の取り違え(PNG を復号して平均輝度で族を比べる。`png-pixels.ts` 新設。**絵を差し替えるときは閾値を見直す**)/ `route-policy` の未知の `/icons/x` / `page.test.ts` の `.role` の検査を CSS の規則の形に限定。
+- **【記録】**: 印別の集計の `hasResult` の絞り込みは、`buildRaceDigest` が作った digest からは到達できない(`hasResult` が false なら `finishPosition` は必ず null)ため、等価な変異として扱い、テストを書いていない。
 
 ### netkeiba の取得の現状(#162 段階2。v1.19.5)
 **netkeiba への全取得は、Durable Object `NetkeibaGate`(SQLite バックエンド)の単一インスタンスを経由する。** Workers の `fetch` は CloudFront から

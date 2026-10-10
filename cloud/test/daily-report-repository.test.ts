@@ -170,6 +170,31 @@ describe("D1ReportSource", () => {
     expect(two!.result).toBeUndefined();
   });
 
+  it("Issue #246 P9: readRaces は配分を、そのレースの分析から読む(別の分析の配分を読まない)。配分が互いに異なる 3 つの分析で、渡した順にも依らない", async () => {
+    const a = analyses();
+    const meta = contractCases[0]!.record.allocation!.meta;
+    const withBets = (n: number, bets: Array<[string, string, number]>) =>
+      analysisRecord(n, `2026-10-10T04:0${n}:00.000Z`, { allocation: { meta, bets: bets.map(([betType, comboKey, stake]) => ({ betType, comboKey, stake, odds: 4, ev: 1.2 })) } } as Partial<AnalysisRecord>);
+    const s1 = await a.saveAnalysis(withBets(1, [["win", "01", 100]]));
+    const s2 = await a.saveAnalysis(withBets(2, [["place", "02", 200], ["wide", "0203", 300]]));
+    const s3 = await a.saveAnalysis(withBets(3, [["trio", "010203", 400]]));
+    const shape = (r: { view: { allocation: { bets: ReadonlyArray<{ betType: string; comboKey: string; stake: number }> } | null } } | null) => r!.view.allocation!.bets.map((b) => `${b.betType}:${b.comboKey}:${b.stake}`).sort();
+    const forward = await source().readRaces([
+      { raceId: raceIdOf(1), analysisId: s1.id },
+      { raceId: raceIdOf(2), analysisId: s2.id },
+      { raceId: raceIdOf(3), analysisId: s3.id },
+    ]);
+    // 前提: 3 つの配分は互いに異なる(取り違えると結果が変わる)
+    expect(new Set(forward.map((r) => shape(r).join(","))).size).toBe(3);
+    expect(forward.map(shape)).toEqual([["win:01:100"], ["place:02:200", "wide:0203:300"], ["trio:010203:400"]]);
+    const reversed = await source().readRaces([
+      { raceId: raceIdOf(3), analysisId: s3.id },
+      { raceId: raceIdOf(1), analysisId: s1.id },
+    ]);
+    expect(reversed.map(shape)).toEqual([["trio:010203:400"], ["win:01:100"]]);
+    expect(reversed.map((r) => r!.view.raceId)).toEqual([raceIdOf(3), raceIdOf(1)]);
+  });
+
   it("readRaces: 存在しない分析 id は null。空の入力は D1 を引かない", async () => {
     const { db, prepared } = spyDb(local.db);
     const s = new D1ReportSource({ db, analyses: new D1AnalysisStore({ db, bucket: local.r2 }) });

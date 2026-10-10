@@ -13,6 +13,11 @@ const EMAIL = "owner@example.com";
 const titleOf = (html: string): string => /<title>([^<]*)<\/title>/.exec(html)?.[1] ?? "";
 const h1Of = (html: string): string => /<h1>([\s\S]*?)<\/h1>/.exec(html)?.[1] ?? "";
 
+/** `<style>` の中身(CSS のコメントを除く)。 */
+const cssOf = (html: string): string => (/<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "").replace(/\/\*[\s\S]*?\*\//g, "");
+/** CSS の規則の頭(`{` の前のセレクタの並び)を、カンマで分けて 1 つずつ返す(`@media` の中の規則も含む。本体〈`{ … }` の中〉は含まない)。 */
+const selectorsOf = (css: string): string[] => [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].flatMap((m) => m[1]!.split(",").map((x) => x.trim()).filter((x) => x !== ""));
+
 describe("スマホ画面(renderPage)の名前と見出しのリンク", () => {
   const html = renderPage(EMAIL, "admin");
 
@@ -76,6 +81,24 @@ describe("確認ページ(renderCheckPage)の名前", () => {
 });
 
 describe("Issue #238: 役割の印(サーバが画面に渡す。画面で隠すのは補助で、拒否はサーバ側)", () => {
+  /**
+   * Issue #246(#243 の【記録】): CSS に `.role` クラスのセレクタの規則が無い。旧版は HTML 全体に文字列 `.role` が無いこと(`.roles` などの無関係な CSS でも赤になる)を見ていた。
+   * 新版は、コメントを除いた `<style>` の規則の頭(セレクタ)に、クラス `role`(直後が識別子の文字でない)があるかだけを見る。
+   */
+  const hasRoleSelector = (html: string): boolean => selectorsOf(cssOf(html)).some((sel) => /\.role(?![\w-])/.test(sel));
+
+  it("Issue #246: hasRoleSelector は .role の規則の形だけを検出する(.roles・.role-x・コメント・規則の本体の文字列では反応しない)", () => {
+    const page = (css: string): string => `<html><head><style>${css}</style></head></html>`;
+    for (const css of [".role { color: red; }", ".who .role::before { content: 'x'; }", ".a, .role { margin: 0; }", ".role:hover { top: 0; }", "@media (min-width: 600px) { .role { top: 0; } }"]) {
+      expect(hasRoleSelector(page(css)), css).toBe(true);
+    }
+    for (const css of [".roles { color: red; }", ".role-x { margin: 0; }", ".my-role { margin: 0; }", "/* .role は外した */ .a { margin: 0; }", '.a { content: ".role"; }']) {
+      expect(hasRoleSelector(page(css)), css).toBe(false);
+    }
+    // 対照: 旧版の検査(文字列 `.role` を含むか)は、反応してほしくない例でも赤になる
+    expect(page(".roles { color: red; }")).toContain(".role");
+  });
+
   const roleOf = (html: string): string | undefined => /<div id="app"[^>]*\sdata-role="([^"]*)"/.exec(html)?.[1];
 
   it("管理者: #app に data-role=\"admin\"。「閲覧専用」の文言も .role の要素・CSS も出ない", () => {
@@ -83,7 +106,7 @@ describe("Issue #238: 役割の印(サーバが画面に渡す。画面で隠す
     expect(roleOf(html)).toBe("admin");
     expect(html).not.toContain("閲覧専用");
     expect(html).not.toContain('class="role"');
-    expect(html).not.toContain(".role");
+    expect(hasRoleSelector(html)).toBe(false);
   });
 
   it("閲覧者: #app に data-role=\"viewer\"。Issue #243 以降は「閲覧専用」の文言も .role の要素・CSS も出ず、「ログイン中」の行はメールだけ", () => {
@@ -91,7 +114,7 @@ describe("Issue #238: 役割の印(サーバが画面に渡す。画面で隠す
     expect(roleOf(html)).toBe("viewer");
     expect(html).not.toContain("閲覧専用");
     expect(html).not.toContain('class="role"');
-    expect(html).not.toContain(".role");
+    expect(hasRoleSelector(html)).toBe(false);
     // 「ログイン中」の行は、管理者と同じ形(メールの span だけ)。メールの span(.who .email。表示名の書き換え先)は 1 つのまま
     expect(html).toMatch(/<p class="who">ログイン中: <span class="email">owner@example\.com<\/span><\/p>/);
     expect(html.match(/class="email"/g)).toHaveLength(1);
@@ -152,6 +175,22 @@ describe("Issue #239: 状態の記号(色だけに頼らない)", () => {
     expect(new Set(EXPECTED.map((e) => e[1]))).toEqual(new Set(["⚠ ", "✓ ", "… "]));
     expect(beforeContent(".notice.ok")).not.toBe(beforeContent(".notice.error"));
     expect(beforeContent(".notice.wait")).not.toBe(beforeContent(".notice.error"));
+  });
+
+  it("Issue #246 R3: ::before の規則は、意図した 5 つのセレクタ以外に無い(コメントを除いた <style> の全規則を走査する。:before の旧記法も数える)", () => {
+    const beforeSelectors = (css: string): string[] =>
+      selectorsOf(css)
+        .filter((sel) => /::?before/.test(sel))
+        .map((sel) => sel.replace(/::?before.*$/, ""))
+        .sort();
+    const found = beforeSelectors(cssOf(html));
+    expect(found).toEqual(EXPECTED.map((e) => e[0]).sort());
+    expect(found).toHaveLength(5);
+    // 対照(検出が空振りでない): 余分な規則・旧記法・@media の中の規則・グループの中の規則は、見つかる
+    const probe = `${cssOf(html)} .badge::before { content: "x"; } .tab:before { content: "y"; } @media (min-width: 600px) { .card::before { content: "z"; } } .a, .extra::before { content: "w"; }`;
+    expect(beforeSelectors(probe)).toEqual([...found, ".badge", ".tab", ".card", ".extra"].sort());
+    // コメントの中の ::before は数えない
+    expect(beforeSelectors(cssOf('<style>/* .x::before { content: "q"; } */ .y { margin: 0; }</style>'))).toEqual([]);
   });
 
   it("記号を足す対象のクラスは、クライアントが実際に使っているクラス(CSS だけ足して、使われない状態を防ぐ)", () => {

@@ -93,6 +93,7 @@ describe("表に無い path は管理者専用(fail-closed。新しいルート�
   // 前提: 同じ表の中に viewer になる path がある(下の表がすべて admin になる退化を防ぐ)
   it("前提: 既知の viewer の path は viewer", () => {
     expect(requiredRole("GET", "/api/analyses/1")).toBe("viewer");
+    for (const iconPath of ICON_PATHS) expect(requiredRole("GET", iconPath), iconPath).toBe("viewer"); // アイコン 7 本(Issue #246: 下の /icons/x の行が、これらの完全一致だけを開けていることを確かめる前提)
     expect(requiredRole("GET", "/api/reports/20261010")).toBe("viewer");
   });
 
@@ -111,6 +112,13 @@ describe("表に無い path は管理者専用(fail-closed。新しいルート�
     ["{id} の下位(2 階層)", "/api/analyses/1/2"],
     ["/api/health の下位", "/api/health/x"],
     ["空の path", ""],
+    // Issue #246(#244 の【記録】): アイコンは完全一致の 7 本だけを開ける。/icons/ 配下を前方一致に広げても、ここで落ちる
+    ["/icons/ の下の未知のパス", "/icons/x"],
+    ["/icons/ の下の未知の PNG", "/icons/x.png"],
+    ["未知の大きさのアイコン", "/icons/header-33.png"],
+    ["アイコンの path の末尾にスラッシュ", "/icons/favicon-32.png/"],
+    ["/icons/ の下位(2 階層)", "/icons/sub/header-32.png"],
+    ["/icons/ だけ", "/icons/"],
     ["/index.html", "/index.html"],
     ["クエリ文字列を含む形(pathname には入らない)", "/api/plan?x=1"],
   ])("%s(%s)は、どの method でも admin", (_name, pathname) => {

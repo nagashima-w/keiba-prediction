@@ -167,6 +167,30 @@ describe("buildDayStats", () => {
     ]);
   });
 
+  it("Issue #246 D1・D2・M3: 印別の 1 着・3 着内は、2・3 着・4 着以下の馬に印が付いたレースで数える(1 着だけの入力では win と top3 が同値で、判定の取り違えが見えない)", () => {
+    // R1: ◎=1 着, 〇=2 着, ▲=3 着, △=4 着, ☆=5 着。R2: ◎=2 着, 〇=3 着, ▲=1 着。R3: 結果なし(印は数えない)
+    const r1 = buildRaceDigest(
+      view(raceId(1), [horse(1, { mark: "◎" }), horse(2, { mark: "〇" }), horse(3, { mark: "▲" }), horse(4, { mark: "△" }), horse(5, { mark: "☆" })]),
+      result([[1, 1, 400, 150], [2, 2, null, 200], [3, 3, null, 120], [4, 4, null, null], [5, 5, null, null]]),
+    );
+    const r2 = buildRaceDigest(view(raceId(2), [horse(1, { mark: "◎" }), horse(2, { mark: "〇" }), horse(3, { mark: "▲" })]), result([[3, 1, 500, 160], [1, 2, null, 130], [2, 3, null, 140], [4, 4, null, null]]));
+    const r3 = buildRaceDigest(view(raceId(3), [horse(1, { mark: "◎" })]), undefined);
+    const byMark = buildDayStats([r1, r2, r3]).byMark;
+    // 前提(空振り防止): 2 着・3 着の馬に印が付き、着順が実際に digest に載っている
+    expect(r1.horses.map((h) => [h.mark, h.finishPosition])).toEqual([["◎", 1], ["〇", 2], ["▲", 3], ["△", 4], ["☆", 5]]);
+    expect(r2.horses.map((h) => [h.mark, h.finishPosition])).toEqual([["◎", 2], ["〇", 3], ["▲", 1]]);
+    expect(byMark).toEqual([
+      { mark: "◎", count: 2, win: 1, top3: 2 }, // 1 着・2 着
+      { mark: "〇", count: 2, win: 0, top3: 2 }, // 2 着・3 着: 1 着は 0 だが 3 着内は 2
+      { mark: "▲", count: 2, win: 1, top3: 2 }, // 3 着・1 着
+      { mark: "△", count: 1, win: 0, top3: 0 }, // 4 着: 3 着内に入らない(境界の外)
+      { mark: "☆", count: 1, win: 0, top3: 0 },
+    ]);
+    // win と top3 が同値でない印がある(取り違えると変わる)
+    expect(byMark.some((m) => m.win !== m.top3)).toBe(true);
+    expect(byMark.filter((m) => m.top3 > m.win).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("レースが 0 件でも落ちない", () => {
     const s = buildDayStats([]);
     expect(s).toMatchObject({ raceCount: 0, resultRaceCount: 0, totalStake: 0, totalReturn: 0, recoveryRate: null, byMark: [], byBetType: {} });
