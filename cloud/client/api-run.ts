@@ -50,7 +50,7 @@ function parseAlreadyRunning(body: unknown): "queued" | "fetched" | null {
 }
 
 /** 失敗(200・202・409 以外)を、起動用の分類にする。400・413・415 は bad-request、503 は(netkeiba の形でも)server-error。 */
-function classifyRunFailure(status: number, body: unknown): RunFailure {
+export function classifyRunFailure(status: number, body: unknown): RunFailure {
   if (status === 400 || status === 413 || status === 415) return { kind: "bad-request" };
   const failure = classify(status, body);
   return failure.kind === "netkeiba-unavailable" ? { kind: "server-error" } : failure;

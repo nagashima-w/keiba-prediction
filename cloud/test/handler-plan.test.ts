@@ -97,6 +97,7 @@ function fakePlanDay(): FakePlanDay {
   };
   const stub: RaceDayStubLike = {
     schedule: forbid("schedule"),
+    scheduleMany: forbid("scheduleMany"),
     getBoard: forbid("getBoard"),
     getMorningPrior: forbid("getMorningPrior"),
     getRaceList: forbid("getRaceList"),

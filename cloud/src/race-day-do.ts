@@ -19,7 +19,7 @@ import { resolveAppBaseUrl } from "./notify-link";
 import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
-import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type RequestResultImportResult, type ResultImportProgress, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type RequestResultImportResult, type ResultImportProgress, type ScheduleInput, type ScheduleManyInput, type ScheduleManyResult, type ScheduleResult } from "./race-day-core";
 import { DAILY_REPORT_NAME, isRequestSettled, type RequestReportResult } from "./daily-report-core";
 import { D1ResultStore } from "./result-repository";
 import { loadSettings } from "./settings";
@@ -123,6 +123,14 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
   /** レースの事前分析を予約する(RPC。予約だけをして戻る)。 */
   schedule(input: ScheduleInput): Promise<ScheduleResult> {
     return this.core.schedule(input);
+  }
+
+  /**
+   * 同じ開催日の複数のレースに、同じ種類のタスクを一括で予約する(RPC。Issue #251。予約だけをして戻る。1 日の上限は全か無か)。
+   * 呼ぶのは `POST /api/analyses/run/bulk`(handler.ts の `handleRunBulk`)だけ。
+   */
+  scheduleMany(input: ScheduleManyInput): Promise<ScheduleManyResult> {
+    return this.core.scheduleMany(input);
   }
 
   /**

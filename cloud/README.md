@@ -178,7 +178,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 
 | 閲覧者にも許す(読み取りだけ) | 管理者だけ |
 |---|---|
-| `GET /`(画面)・`GET /app.js`<br>アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244)<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報) | 設定(`/api/settings`。GET も)<br>検証(`/api/verify`)<br>手動の分析(`POST /api/analyses/run`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>移行(`/api/migration`・`/api/migration/upload`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
+| `GET /`(画面)・`GET /app.js`<br>アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244)<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報) | 設定(`/api/settings`。GET も)<br>検証(`/api/verify`)<br>手動の分析(`POST /api/analyses/run`・一括の `POST /api/analyses/run/bulk`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>移行(`/api/migration`・`/api/migration/upload`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
 
 - 閲覧者の画面には、「設定」「検証」への入口・分析の実行ボタン・日報の作成ボタン・移行と結果の取り込みの操作が出ない。結果の「配分が未設定」の注記と日報の案内文からも、設定・ボタンへの案内の文は外れる(総資金・1レース上限・買い目・日報の賭け金や払戻などの数値は、閲覧者にもそのまま見せる)。`#settings`・`#verify`・`#migration` を直接開くと「管理者だけが使えます」と出る。「ログイン中」の行には、管理者と同じくメールアドレスだけを出す(「閲覧専用」などの役割の表示は出さない。Issue #243)。
 - **`GET /api/races` は、閲覧者でも netkeiba への取得を起こしうる**(開催日の一覧を見るために必要。DO のキャッシュ 6 時間と gate〈取得の間隔・ブレーカー〉が効くが、友人が日付を次々に変えれば、そのぶんの取得が走る)。
@@ -314,6 +314,17 @@ Workers Logs(`observability` を有効にしてある)に、認証の経路が `
   - **スクロール位置**: 見出しをタップして場が縮む・伸びるとき、画面が意図せず飛ばないか(画面は描画のたびに DOM を全置換するので、実機で見る)。
   - 「更新」を押したあと、開いていた場が開いたままか。
 - **【記録】**: ボタンを押すとフォーカスが `body` に戻る・`#app` が `aria-live="polite"` のため開閉で画面全体が読み上げ直される可能性がある(#186 で「同じ木なら DOM を触らない」ようにしたが、木が変わる描画では同じ。下の節の【記録】)。
+
+## 競馬場ごとの一括実行(Issue #251。管理者だけ)
+- **使い方**: 一覧で競馬場を開くと、中の上部にボタンが 2 つ出る(「事前分析を一括実行(N)」「発走前の分析を一括実行(N)」。N は対象のレース数)。押すと**確認画面**(画面内の 2 段階)が開き、「実行する」で `POST /api/analyses/run/bulk` を 1 回送る。閉じている競馬場・閲覧者には出ない。
+- **対象**: その競馬場のレースのうち、**実行中(queued・fetched)と完了済み(done)を除く**(失敗は含める)。発走前の分析では、さらに**発走済みと発走時刻が不明のレース**を除く(開催日が今日のときだけ。未来の開催日は時刻を見ない)。除いた件数は確認画面に出す。発走済みの判定は画面だけで、サーバは強制しない(単独の起動と同じ)。
+- **確認画面に出すもの**: 対象の件数。事前分析は「LLM は使いません」と取得の目安。発走前の分析は LLM の呼び出し回数(通常 N 回・失敗時の再試行を含めて最大 2N 回。API キーが登録されているときだけ LLM を呼ぶ)と、**2 つの注意書き**(自動の分析〈発走の N 分前〉は別に走り、二重に課金されうる/一括で積むと 1 レースずつ順に処理されるため、自動の分析の開始が遅れうる)。円換算は出さない。
+- **押せない場合**: 過去の開催日・実行状態(板)が取れていないとき・対象が 0 件のときは、ボタンが無効(理由の注記つき)。「実行する」を押した時点で対象を取り直し、**確認した対象との共通部分だけを送る**(確認のあとで実行中・完了・発走済みになったものは外れる。増えることはない)。
+- **サーバ**: `POST /api/analyses/run/bulk`(管理者専用。route-policy の表に `run` の下の階層で置く。同じ階層の名前にすると `/api/analyses/{id}` に当たる)。本文 JSON `{"kaisai_date": "20260628", "mode": "pre_race", "race_ids": ["202603020201", …]}`(3 項目とも必須。`mode` に既定は無い。`race_ids` は 1〜24 件・重複なし・各 ID を単独の run と同じ検証)。守りの順序は単独の run と同じ(Origin 403 → 415 → 413〈上限 4 KiB〉→ 400)。日単位の DO の `scheduleMany` を 1 回呼ぶ(予約だけをして戻る。取得はアラームの中で 1 レースずつ直列。gate の間隔・DO の直列は単独の run と同じ)。
+  - **202** `{ok, accepted, kaisai_date, mode, results: [{race_id, result: "accepted"} | {race_id, result: "already-running", status}]}`(実行中のレースは積まない)。
+  - **409 `day-cap`** `{ok: false, error: {type, limit, used, needed}}`: 新しい行の数がその日の上限(100)を超えるので、**何も積まない**(全か無か)。完了済み・失敗の再予約は新しい行を増やさない。
+  - DO の失敗・想定外の形は 503(文面なし)。
+- **画面の制御**: `client/bulk.ts`(対象の選別・文言。純関数)、`client/api-bulk.ts`(POST と応答の分類)、`app.ts` の `onBulkOpen`・`onBulkGo`・`onBulkDismiss`。送信中の印は `await` の前に同期で立てる(二重押しを防ぐ)。受理されたら板にオーバーレイ(待ち)を重ねて追跡を始める。
 
 ## スマホ画面の起動と状態の追跡(Issue #186〈#165-d〉。v1.19.19)
 - **使い方**: レース画面の各カードの起動のボタン(事前分析「事前分析を実行」・発走前「発走前の分析を実行」。完了後は「やり直す」「再実行(新しい分析として保存されます)」)を押すと、`POST /api/analyses/run`。**netkeiba へ実際に取得に行く**ので、確認ダイアログは出さないが二重押しは防ぐ(送信中は押せない)。押すと「待ち」→「取得済み」→「完了」と、バッジが自動で変わる。

@@ -91,6 +91,7 @@ const ROUTES: readonly { readonly sample: string; readonly viewer: readonly stri
   { sample: "/api/netkeiba/check", viewer: [] },
   { sample: "/api/settings", viewer: [] },
   { sample: "/api/analyses/run", viewer: [] },
+  { sample: "/api/analyses/run/bulk", viewer: [] }, // Issue #251
   { sample: "/api/results/import", viewer: [] },
   { sample: "/api/results/backfill", viewer: [] },
   { sample: "/api/migration", viewer: [] },
@@ -115,10 +116,10 @@ async function call(env: Env, deps: Parameters<typeof handle>[3], req: Request):
 describe("閲覧者(viewer): 管理者専用の (path, method) は 403 admin-only。裏側にもリクエスト本文にも触れない", () => {
   const cases = ROUTES.flatMap((r) => METHODS.filter((m) => !r.viewer.includes(m)).map((method) => [method, r.sample] as const));
 
-  it("前提: 閲覧者が管理者専用に当たる組は 137 通り(27 ルート × 6 method = 162 から、閲覧者に許す 25 を引く)", () => {
-    expect(ROUTES).toHaveLength(27);
+  it("前提: 閲覧者が管理者専用に当たる組は 143 通り(28 ルート × 6 method = 168 から、閲覧者に許す 25 を引く)", () => {
+    expect(ROUTES).toHaveLength(28);
     expect(ROUTES.reduce((n, r) => n + r.viewer.filter((m) => (METHODS as readonly string[]).includes(m)).length, 0)).toBe(25);
-    expect(cases).toHaveLength(137);
+    expect(cases).toHaveLength(143);
   });
 
   it.each(cases)("%s %s → 403(本文は admin-only の固定)。バインディングに触れず、本文を読まない", async (method, path) => {

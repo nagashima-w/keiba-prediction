@@ -66,6 +66,7 @@ function harness(): Harness {
               return h.requestImpl(input);
             },
             schedule: NOT_CALLED,
+            scheduleMany: NOT_CALLED,
             getBoard: NOT_CALLED,
             getMorningPrior: NOT_CALLED,
             getRaceList: NOT_CALLED,

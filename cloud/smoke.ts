@@ -174,7 +174,7 @@ async function expectViewer(port: number, label: string, email: string): Promise
   const reports = await req(port, "GET", "/api/reports");
   check(`${label}: GET /api/reports は 200(日報は閲覧できる)`, reports.status === 200 && parseJson(reports.text)["ok"] === true, `${reports.status} ${reports.text.slice(0, 80)}`);
   check(`${label}: GET /api/analyses/status(日付なし)は 400・GET /api/races(日付なし)は 400(役割の関門を通って、各ハンドラの入力の検証に届く。403 ではない)`, (await req(port, "GET", "/api/analyses/status")).status === 400 && (await req(port, "GET", "/api/races")).status === 400);
-  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/verify?venue=all"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
+  const adminOnly = [["GET", "/api/health"], ["GET", "/check"], ["GET", "/api/settings"], ["GET", "/api/verify?venue=all"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["GET", "/api/netkeiba/check?race_id=202603020211"], ["POST", "/api/settings"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["GET", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["POST", "/api/migration/upload"], ["POST", "/api/reports/run"], ["GET", "/no-such-path"]] as const;
   for (const [method, path] of adminOnly) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path.split("?")[0]} は 403(本文は admin-only の固定。メール・AUD・チーム名を含まない)`, r.status === 403 && r.text === ADMIN_ONLY_BODY, `${r.status} ${r.text.slice(0, 80)}`);
@@ -195,11 +195,13 @@ async function expectAdmin(port: number, label: string, email: string): Promise<
   check(`${label}: GET /api/verify?venue=bad は 400(役割の関門を通って、入力の検証に届く)・GET /check は 200`, (await req(port, "GET", "/api/verify?venue=bad")).status === 400 && (await req(port, "GET", "/check")).status === 200);
   const post = await req(port, "POST", "/api/analyses/run");
   check(`${label}: POST /api/analyses/run は(Origin が無いので)origin-mismatch の 403。admin-only ではない(役割の関門を通って、ハンドラの守りに届く)`, post.status === 403 && post.text !== ADMIN_ONLY_BODY && post.text.includes("origin-mismatch"), `${post.status} ${post.text.slice(0, 80)}`);
+  const bulk = await req(port, "POST", "/api/analyses/run/bulk");
+  check(`${label}: POST /api/analyses/run/bulk(Issue #251)も(Origin が無いので)origin-mismatch の 403。admin-only ではない`, bulk.status === 403 && bulk.text !== ADMIN_ONLY_BODY && bulk.text.includes("origin-mismatch"), `${bulk.status} ${bulk.text.slice(0, 80)}`);
 }
 
 async function expectAllForbidden(port: number, label: string): Promise<void> {
   const bogus = { "Cf-Access-Jwt-Assertion": "aaa.bbb.ccc" };
-  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/api/results/import"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["POST", "/api/migration/upload"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
+  for (const [method, path] of [["GET", "/"], ["GET", "/app.js"], ["GET", "/check"], ["GET", "/api/health"], ["GET", "/api/analyses"], ["GET", "/api/analyses/status?kaisai_date=20260628"], ["GET", "/api/analyses/1"], ["GET", "/api/races?kaisai_date=20260628&venue=central"], ["GET", "/api/plan?kaisai_date=20260628"], ["POST", "/api/analyses/run"], ["POST", "/api/analyses/run/bulk"], ["POST", "/api/results/import"], ["GET", "/api/migration"], ["GET", "/api/results/backfill"], ["POST", "/api/migration/upload"], ["POST", "/"], ["GET", "/no-such-path"]] as const) {
     const r = await req(port, method, path);
     check(`${label}: ${method} ${path} は 403(本文は forbidden だけ)`, r.status === 403 && r.text === "forbidden", `${r.status} ${r.text.slice(0, 80)}`);
   }
@@ -519,6 +521,33 @@ async function main(): Promise<void> {
       const secondBoard = await waitDone();
       const secondMs = Date.now() - secondStarted;
       check(`${label}: 2回目はキャッシュに当たり、gate の取得が無い(10 秒以内に done)`, (secondBoard["races"] as { status: string }[])[0]?.status === "done" && secondMs < 10_000, `${secondMs}ms`);
+
+      // Issue #251: 一括の手動起動(POST /api/analyses/run/bulk)。本物の DO の RPC(scheduleMany)を通す。守り(Origin・415・400)→ 予約(202。レースごとの結果)→ アラームで done。
+      //   朝(morning)のキャッシュが効くので速い。morning は D1 に書かない(下の「D1 には何も書かれない」の確認が引き続き成り立つ)。
+      const bulk = (body: unknown, headers: Record<string, string> = { Origin: origin, "Content-Type": "application/json" }) =>
+        fetch(`http://127.0.0.1:${port}/api/analyses/run/bulk`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) }).then(async (r) => ({ status: r.status, text: await r.text() }));
+      const bulkBody = { kaisai_date: date, mode: "morning", race_ids: [raceId] };
+      const bulkNoOrigin = await bulk(bulkBody, { "Content-Type": "application/json" });
+      check(`${label}: 一括の POST は Origin が無いと 403(origin-mismatch)`, bulkNoOrigin.status === 403 && bulkNoOrigin.text.includes("origin-mismatch"), `${bulkNoOrigin.status} ${bulkNoOrigin.text.slice(0, 120)}`);
+      const bulkWrongType = await bulk(bulkBody, { Origin: origin, "Content-Type": "text/plain" });
+      check(`${label}: 一括の POST は Content-Type が application/json でないと 415`, bulkWrongType.status === 415, `${bulkWrongType.status}`);
+      const bulkBad = await bulk({ ...bulkBody, race_ids: [] });
+      check(`${label}: 一括の POST は race_ids が空だと 400(DO を呼ばない)`, bulkBad.status === 400, `${bulkBad.status} ${bulkBad.text.slice(0, 160)}`);
+      const bulkNoMode = await bulk({ kaisai_date: date, race_ids: [raceId] });
+      check(`${label}: 一括の POST は mode が無いと 400(既定の種類を持たない)`, bulkNoMode.status === 400, `${bulkNoMode.status}`);
+      const queuedBefore = ((parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}`)).text)["races"] as Record<string, unknown>[]).find((r) => r["mode"] === "morning"))?.["queued_at"];
+      const bulkRun = await bulk(bulkBody);
+      const bulkJson = parseJson(bulkRun.text);
+      const bulkResults = (bulkJson["results"] as { race_id: string; result: string }[] | undefined) ?? [];
+      check(`${label}: 一括の POST は 202 で、レースごとの結果(完了済みの朝は accepted)を返す`, bulkRun.status === 202 && bulkJson["accepted"] === true && bulkJson["mode"] === "morning" && bulkResults.length === 1 && bulkResults[0]!.race_id === raceId && bulkResults[0]!.result === "accepted", `${bulkRun.status} ${bulkRun.text.slice(0, 200)}`);
+      let bulkRow: Record<string, unknown> | undefined;
+      for (let i = 0; i < 60; i++) {
+        const b = parseJson((await req(port, "GET", `/api/analyses/status?kaisai_date=${date}`)).text);
+        bulkRow = (b["races"] as Record<string, unknown>[] | undefined)?.find((r) => r["mode"] === "morning");
+        if (bulkRow !== undefined && bulkRow["queued_at"] !== queuedBefore && (bulkRow["status"] === "done" || bulkRow["status"] === "failed")) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      check(`${label}: 一括で積んだ朝がアラームで done になる(積み直されたので queued_at が新しい。キャッシュで速い)`, bulkRow?.["status"] === "done" && bulkRow["queued_at"] !== queuedBefore && bulkRow["error"] === null, JSON.stringify(bulkRow).slice(0, 300));
 
       // D1 に何も書かれていない(朝の prior は DO にだけ置く)
       const analyses = await req(port, "GET", "/api/analyses");

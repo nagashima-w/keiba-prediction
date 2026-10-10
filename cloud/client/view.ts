@@ -5,6 +5,7 @@
  * #185 で足した画面は、#184 の要素・属性の許可リスト(`dom.ts`)の範囲だけで組む(新しい要素・属性は足していない。一覧は `ul`、強調は class と文字)。
  */
 import type { TaskMode } from "./api";
+import type { BulkModel, BulkPanel } from "./bulk";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
 import { ACTUAL_HIGHER_MARK, FAIR_WIN_ODDS_LABEL, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
@@ -26,6 +27,12 @@ export interface ViewActions {
   readonly onToggleResult: (date: string, raceId: string, open: boolean) => void;
   /** 起動のボタン(Issue #186)。引数(開催日・レース・モード)は、ボタンの `data-*` と同じ値。 */
   readonly onRun: (date: string, raceId: string, mode: TaskMode) => void;
+  /** 場ごとの一括実行のボタン(Issue #251)。引数(場のキー・モード)は、ボタンの `data-key`・`data-mode` と同じ値。押すと確認画面を開く。 */
+  readonly onBulkOpen: (groupKey: string, mode: TaskMode) => void;
+  /** 一括実行の確認画面の「実行する」(Issue #251)。引数(場のキー)は `data-key` と同じ値。 */
+  readonly onBulkGo: (groupKey: string) => void;
+  /** 一括実行の確認画面の「やめる」・結果の「閉じる」(Issue #251)。引数(場のキー)は `data-key` と同じ値。 */
+  readonly onBulkDismiss: (groupKey: string) => void;
   /** 追跡の停止の注記の「状態を更新」(Issue #186)。 */
   readonly onRetrack: () => void;
   /** 設定の入力欄の変更(Issue #189)。`key` は入力欄の `data-field` と同じ項目名。真偽の欄は `"true"`・`"false"`。**下書きを書くだけで再描画しない**(`app.ts`)。 */
@@ -80,9 +87,46 @@ function groupHeadingText(group: RaceGroupItem): string {
  * 場のまとまり。見出しは h2 の中のボタン(`<details>` は使わない=描画のたびに DOM を作り直すので、開閉の状態を DOM に持てない)。閉じた場のレースの行は作らない。
  * **クリック処理に渡すキーは `data-key` にも出す**(Issue #186。`createMounter` は JSON が同じ木の DOM を触らない=関数は比較されないので、引数が木に出ていないと古い処理が残る)。
  */
+function bulkPanel(key: string, panel: BulkPanel, actions: ViewActions): VNode {
+  switch (panel.kind) {
+    case "confirm":
+      return h("div", { class: "bulk-panel", role: "group", "aria-label": panel.title }, [
+        h("h3", {}, [panel.title]),
+        h("ul", { class: "bulk-lines" }, panel.lines.map((line) => h("li", {}, [line]))),
+        ...(panel.notes.length === 0 ? [] : [h("ul", { class: "bulk-notes" }, panel.notes.map((note) => h("li", { class: "bulk-note-line notice" }, [note])))]),
+        h("div", { class: "bulk-actions" }, [
+          h("button", { class: "bulk-go", "data-key": key, "data-mode": panel.mode }, [panel.goLabel], { click: () => actions.onBulkGo(key) }),
+          h("button", { class: "bulk-cancel", "data-key": key }, [panel.cancelLabel], { click: () => actions.onBulkDismiss(key) }),
+        ]),
+      ]);
+    case "sending":
+      return h("p", { class: "bulk-sending notice", role: "status" }, [panel.text]);
+    case "result":
+      return h("div", { class: `bulk-result notice${panel.tone === "error" ? " error" : ""}`, role: panel.tone === "error" ? "alert" : "status" }, [
+        h("p", {}, [panel.text]),
+        h("button", { class: "bulk-close", "data-key": key }, ["閉じる"], { click: () => actions.onBulkDismiss(key) }),
+      ]);
+  }
+}
+
+/** 場ごとの一括実行(Issue #251。管理者だけ=閲覧者は `bulk` が null で呼ばれない)。ボタン 2 つ・無効の理由・確認画面/送信中/結果。 */
+function bulkSection(key: string, bulk: BulkModel, actions: ViewActions): VNode {
+  return h("div", { class: "bulk", "data-key": key }, [
+    h(
+      "div",
+      { class: "bulk-buttons" },
+      bulk.buttons.map((b) => h("button", { class: "bulk-run", disabled: b.disabled, "data-key": key, "data-mode": b.mode }, [b.label], { click: () => actions.onBulkOpen(key, b.mode) })),
+    ),
+    ...(bulk.note === null ? [] : [h("p", { class: "bulk-note meta" }, [bulk.note])]),
+    ...(bulk.panel === null ? [] : [bulkPanel(key, bulk.panel, actions)]),
+  ]);
+}
+
 function venueSection(group: RaceGroupItem, actions: ViewActions): VNode {
   const toggle = h("button", { class: "venue-toggle", "aria-expanded": group.open ? "true" : "false", "data-key": group.key }, [groupHeadingText(group)], { click: () => actions.onToggleGroup(group.key, !group.open) });
-  return h("section", { class: "venue" }, [h("h2", {}, [toggle]), ...(group.open ? [h("ul", { class: "races" }, group.races.map(raceRow))] : [])]);
+  // 一括実行(Issue #251)は、場を開いているときだけ、見出しとレースの一覧の間に置く(管理者だけ=閲覧者は group.bulk が null)。
+  const bulk = group.open && group.bulk !== null ? [bulkSection(group.key, group.bulk, actions)] : [];
+  return h("section", { class: "venue" }, [h("h2", {}, [toggle]), ...bulk, ...(group.open ? [h("ul", { class: "races" }, group.races.map(raceRow))] : [])]);
 }
 
 /** 追跡の停止の注記と「状態を更新」(Issue #186)。止まっていないとき(null)は何も出さない。 */

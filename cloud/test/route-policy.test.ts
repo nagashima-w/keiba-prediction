@@ -44,12 +44,13 @@ const EXPECTED: readonly Expected[] = [
   { name: "/icons/header-32.png", sample: "/icons/header-32.png", viewer: ["GET", "HEAD"] },
   { name: "/icons/header-64.png", sample: "/icons/header-64.png", viewer: ["GET", "HEAD"] },
   { name: "/icons/header-96.png", sample: "/icons/header-96.png", viewer: ["GET", "HEAD"] },
-  // ---- 管理者だけ(11)。method を問わず ----
+  // ---- 管理者だけ(12)。method を問わず ----
   { name: "/check", sample: "/check", viewer: [] },
   { name: "/api/health", sample: "/api/health", viewer: [] },
   { name: "/api/netkeiba/check", sample: "/api/netkeiba/check", viewer: [] },
   { name: "/api/settings", sample: "/api/settings", viewer: [] },
   { name: "/api/analyses/run", sample: "/api/analyses/run", viewer: [] },
+  { name: "/api/analyses/run/bulk", sample: "/api/analyses/run/bulk", viewer: [] }, // Issue #251: 一括実行(LLM を呼ぶ)
   { name: "/api/results/import", sample: "/api/results/import", viewer: [] },
   { name: "/api/results/backfill", sample: "/api/results/backfill", viewer: [] },
   { name: "/api/migration", sample: "/api/migration", viewer: [] },
@@ -59,10 +60,10 @@ const EXPECTED: readonly Expected[] = [
 ];
 
 describe("ルート × 役割の表(手書きの期待値と、実装の requiredRole を全 method で突き合わせる)", () => {
-  it("前提: 表は 27 ルート(閲覧者に開くもの 16・管理者だけ 11)で、閲覧者に開く method の組は 25 通り(GET が 16・HEAD が 9)", () => {
-    expect(EXPECTED).toHaveLength(27);
+  it("前提: 表は 28 ルート(閲覧者に開くもの 16・管理者だけ 12)で、閲覧者に開く method の組は 25 通り(GET が 16・HEAD が 9)", () => {
+    expect(EXPECTED).toHaveLength(28);
     expect(EXPECTED.filter((e) => e.viewer.length > 0)).toHaveLength(16);
-    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(11);
+    expect(EXPECTED.filter((e) => e.viewer.length === 0)).toHaveLength(12);
     expect(EXPECTED.reduce((n, e) => n + e.viewer.length, 0)).toBe(25);
     expect(EXPECTED.filter((e) => e.viewer.includes("GET"))).toHaveLength(16);
     expect(EXPECTED.filter((e) => e.viewer.includes("HEAD"))).toHaveLength(9);
@@ -75,10 +76,10 @@ describe("ルート × 役割の表(手書きの期待値と、実装の require
     expect(requiredRole(method, sample)).toBe(expected);
   });
 
-  it("method の組み合わせの数: 27 ルート × 7 method = 189 通りのうち、閲覧者でよいのは 25 通りだけ", () => {
-    expect(cases).toHaveLength(189);
+  it("method の組み合わせの数: 28 ルート × 7 method = 196 通りのうち、閲覧者でよいのは 25 通りだけ", () => {
+    expect(cases).toHaveLength(196);
     expect(cases.filter((c) => c[3] === "viewer")).toHaveLength(25);
-    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(164);
+    expect(cases.filter((c) => c[3] === "admin")).toHaveLength(171);
   });
 
   it("リクエストの method が小文字などの未知の表記でも、閲覧者に開かない(完全一致の大文字だけを認める)", () => {
@@ -132,6 +133,12 @@ describe("表に無い path は管理者専用(fail-closed。新しいルート�
     expect(requiredRole("GET", "/api/analyses/1%2F2")).toBe("viewer"); // pathname はデコードされない。1 つの区切りなしの文字列
     expect(requiredRole("GET", "/api/analyses/run")).toBe("admin"); // 前提: run は {id} に化けない
     expect(requiredRole("GET", "/api/analyses/run/")).toBe("admin"); // 末尾のスラッシュ: 2 つの区切り → {id} に当たらない
+    // Issue #251: 一括実行は run の下の階層(`run/bulk`)。{id} は 1 つの区切りなしの文字列だけなので当たらない。同じ階層の名前(`run-bulk`・`bulk`)にすると {id} に化けて、閲覧者に GET が開く
+    expect(requiredRole("GET", "/api/analyses/run/bulk")).toBe("admin");
+    expect(requiredRole("POST", "/api/analyses/run/bulk")).toBe("admin");
+    expect(ANALYSIS_DETAIL_PATTERN.test("/api/analyses/run/bulk")).toBe(false); // 前提: {id} のパターンには当たらない(表の完全一致の行が管理者専用に倒している)
+    expect(ROUTE_RULES.find((r) => r.matches("/api/analyses/run/bulk"))?.path).toBe("/api/analyses/run/bulk"); // 完全一致の行が先に当たる
+    expect(requiredRole("GET", "/api/analyses/run-bulk")).toBe("viewer"); // 対照: 同じ階層の名前は {id} に当たる(この名前を使わない理由)
     expect(requiredRole("GET", "/api/reports/run")).toBe("admin"); // run は {date} に化けない
     expect(requiredRole("GET", "/api/reports/run/x")).toBe("viewer"); // ハンドラの startsWith("/api/reports/") と同じ規則で、日付の検証が 400 を返す読み取り専用の経路
     expect(requiredRole("GET", "/api/reports/")).toBe("viewer"); // 同上(空の日付は 400)
@@ -151,12 +158,12 @@ describe("handler.ts の静的ガード(ルーティングの構文を走査す�
     expect(handleBody.length).toBeGreaterThan(2_000);
   });
 
-  it("pathname と完全一致で比べている path は 18 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(25)と過不足なく一致する", () => {
+  it("pathname と完全一致で比べている path は 19 個。これにアイコン 7 本(ICON_PATHS。handler は iconAsset(pathname) で振り分ける)を足すと、表の完全一致のルート(26)と過不足なく一致する", () => {
     const literals = [...new Set([...code.matchAll(/\bpathname === "([^"]+)"/g)].map((m) => m[1]!))].sort();
     const exactRules = ROUTE_RULES.filter((r) => r.exact).map((r) => r.path).sort();
-    expect(literals).toHaveLength(18);
+    expect(literals).toHaveLength(19);
     expect(ICON_PATHS).toHaveLength(7);
-    expect(exactRules).toHaveLength(25);
+    expect(exactRules).toHaveLength(26);
     expect([...literals, ...ICON_PATHS].sort()).toEqual(exactRules);
     // アイコンの path が handler.ts に直書きされていない(表と共有する定数だけで振り分ける)
     for (const iconPath of ICON_PATHS) {

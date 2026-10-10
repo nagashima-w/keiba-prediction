@@ -24,7 +24,8 @@ import { APP_CSP, CHECK_CSP, renderCheckPage, renderPage } from "./page";
 import { checkKaisaiDate, checkRaceDate } from "./race-date";
 import { loadSettings, saveSettings, validateCloudSettingsForSave } from "./settings";
 import { redactSecrets } from "./llm-run";
-import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, RequestResultImportResult, ResultImportProgress, ScheduleInput, ScheduleResult } from "./race-day-core";
+import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgress, RaceListResult, RaceListVenue, RequestPlanResult, RequestResultImportResult, ResultImportProgress, ScheduleInput, ScheduleManyInput, ScheduleManyResult, ScheduleResult } from "./race-day-core";
+import { BULK_BODY_MAX_BYTES, MAX_BULK_RACES } from "./bulk-limits";
 import { jstKaisaiDate } from "./auto-run-plan";
 import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
 import { D1ResultStore } from "./result-repository";
@@ -57,6 +58,8 @@ const GATE_NAME = "gate";
 /** 日単位の DO(RaceDay)のスタブの、使う部分だけの型(RPC なので、同期のメソッドも Promise になる)。 */
 export interface RaceDayStubLike {
   schedule(input: ScheduleInput): Promise<ScheduleResult>;
+  /** 一括の予約(Issue #251。`POST /api/analyses/run/bulk`。同じ開催日の複数のレースに、同じ種類のタスクを積む。1 日の上限は全か無か)。呼ぶのは `handleRunBulk` だけ(ガードテストが固定)。 */
+  scheduleMany(input: ScheduleManyInput): Promise<ScheduleManyResult>;
   getBoard(): Promise<Board>;
   getMorningPrior(raceId: string): Promise<MorningPrior | null>;
   /** 開催日のレース一覧(Issue #183)。 */
@@ -245,11 +248,15 @@ export async function handle(
       headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
     });
   }
-  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run` の 5 本だけ**(下の 3 本は Issue #208・#216・#235)。認証(上)の後で、Origin の確認・入力の検証を行う。
+  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run` の 6 本だけ**(`run/bulk` は Issue #251、下の 3 本は Issue #208・#216・#235)。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
   }
-  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 5 本(上の 2 つ〈`/api/settings`・`/api/analyses/run`〉・ここ・下の `/api/migration/upload`・`/api/reports/run`〈Issue #235〉)。
+  // 一括の手動起動(Issue #251)。競馬場ごとに、事前分析か発走前の分析をまとめて予約する。管理者専用(route-policy.ts の表。LLM を呼ぶ)。単独の run と同じ守り(Origin → 415 → 413 → 400)を通る。
+  if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run/bulk") {
+    return handleRunBulk(request, env);
+  }
+  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 6 本(上の 3 つ〈`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`〉・ここ・下の `/api/migration/upload`・`/api/reports/run`〈Issue #235〉)。
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
@@ -257,7 +264,7 @@ export async function handle(
   if (method === "POST" && new URL(request.url).pathname === "/api/migration/upload") {
     return handleMigrationUpload(request, env, log);
   }
-  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 5 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`)。
+  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 6 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/analyses/run/bulk`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`)。
   if (method === "POST" && new URL(request.url).pathname === "/api/reports/run") {
     return handleReportRun(request, env, deps.now ?? (() => new Date()));
   }
@@ -429,7 +436,7 @@ export async function handle(
     return handleRaces(request, env);
   }
 
-  if (pathname === "/api/analyses/run") {
+  if (pathname === "/api/analyses/run" || pathname === "/api/analyses/run/bulk") {
     // POST だけ(上で処理済み)。GET・HEAD などは 405。
     return new Response("method not allowed", {
       status: 405,
@@ -830,7 +837,7 @@ async function readJsonObjectBody(request: Request, maxBytes: number): Promise<J
  * `POST /api/analyses/run`(Issue #180〈#164-e〉): レースの朝の取得と prior(`morning`。省略時)または発走前の分析(`pre_race`。LLM を使う〈Issue #194。キー未登録なら LLM なしで保存〉。D1・R2 に保存。Issue #178)を予約する。本文は JSON `{ race_id, kaisai_date, mode? }`。
  * 日単位の DO(RaceDay。名前は開催日)の `schedule` に予約を入れて **202** を返す(取得はアラームの中で始まる)。実行中の同じレースなら **409**(already-running)。
  * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO(失敗は 503。文面は返さない)。
- * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・`GET /api/races` の一覧・`GET /api/netkeiba/check`。ほかに、定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1 つ。Issue #206〉。手動 3 + 定時 1 の計 4 つ。さらに結果の取り込みの依頼〈Issue #208。`dispatchResultImports`〈result-dispatch.ts〉の `requestResultImport` 1 箇所。cron と `POST /api/results/import` が共有〉で、呼び出し箇所は計 5 つ。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
+ * **netkeiba への取得の起点は、認証の後ろの手動の操作だけ**(この POST の予約・一括の予約〈`POST /api/analyses/run/bulk`。Issue #251。`handleRunBulk` の `scheduleMany` 1 箇所〉・`GET /api/races` の一覧・`GET /api/netkeiba/check`。ほかに、定時の起点が cron の `scheduled`〈scheduled.ts の `requestPlan` 1 つ。Issue #206〉。手動 4 + 定時 1 の計 5 つ。さらに結果の取り込みの依頼〈Issue #208。`dispatchResultImports`〈result-dispatch.ts〉の `requestResultImport` 1 箇所。cron と `POST /api/results/import` が共有〉で、呼び出し箇所は計 6 つ。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定)。
  */
 async function handleRun(request: Request, env: Env): Promise<Response> {
   const guarded = await readJsonObjectBody(request, RUN_BODY_MAX_BYTES);
@@ -865,6 +872,100 @@ async function handleRun(request: Request, env: Env): Promise<Response> {
       return json({ ok: false, error: { type: "already-running", status: result.status } }, 409);
     }
     return json({ ok: true, accepted: true, race_id: result.raceId, kaisai_date: kaisaiDate, mode: result.mode, status: result.status }, 202);
+  } catch {
+    return raceDayError();
+  }
+}
+
+/** 一括の手動起動の本文のキー(Issue #251)。単独の run のキー(race_id・mode の省略)とは混ぜない。 */
+const BULK_KEYS = new Set(["kaisai_date", "mode", "race_ids"]);
+
+/**
+ * 一括の入力の検証(DO を呼ぶ前)。成功なら、検証して正規化した開催日・mode・レース ID(入力の順)。失敗は 400 の応答。
+ * 件数は 1〜{@link MAX_BULK_RACES}、重複なし、各 ID は単独の run と同じ検証(`validateRaceId`・`checkRaceDate`)。`mode` は必須(課金を伴うので、既定の種類を持たない)。
+ */
+function parseBulkBody(record: Record<string, unknown>): { readonly ok: true; readonly kaisaiDate: string; readonly mode: "morning" | "pre_race"; readonly raceIds: string[] } | { readonly ok: false; readonly response: Response } {
+  const fail = (message: string): { readonly ok: false; readonly response: Response } => ({ ok: false, response: badRequest(message) });
+  if (Object.keys(record).some((k) => !BULK_KEYS.has(k))) {
+    return fail("本文のキーは kaisai_date・mode・race_ids だけです");
+  }
+  const kaisaiDate = record["kaisai_date"];
+  const mode = record["mode"];
+  const rawIds = record["race_ids"];
+  if (typeof kaisaiDate !== "string") {
+    return fail("kaisai_date は文字列で指定してください");
+  }
+  if (mode !== "morning" && mode !== "pre_race") {
+    return fail('mode は "morning"(事前分析)か "pre_race"(発走前の分析。LLM を使う)で指定してください');
+  }
+  if (!Array.isArray(rawIds) || rawIds.length < 1 || rawIds.length > MAX_BULK_RACES || rawIds.some((id) => typeof id !== "string")) {
+    return fail(`race_ids は文字列の配列で、1〜${MAX_BULK_RACES} 件にしてください`);
+  }
+  const raceIds: string[] = [];
+  for (const raw of rawIds as string[]) {
+    // 検証のメッセージに入力を写すので、長い入力は先頭だけにする(切っても、無効なままであることは変わらない)。
+    const checkedRace = validateRaceId(raw.slice(0, 32));
+    if (!checkedRace.ok) {
+      return fail(checkedRace.message);
+    }
+    const consistent = checkRaceDate(checkedRace.raceId, kaisaiDate.slice(0, 32));
+    if (!consistent.ok) {
+      return fail(consistent.message);
+    }
+    raceIds.push(checkedRace.raceId);
+  }
+  if (new Set(raceIds).size !== raceIds.length) {
+    return fail("race_ids に重複があります");
+  }
+  return { ok: true, kaisaiDate, mode, raceIds };
+}
+
+/**
+ * `POST /api/analyses/run/bulk`(Issue #251): 同じ開催日の複数のレース(画面では 1 つの競馬場のレース)に、事前分析(`morning`)または発走前の分析(`pre_race`。LLM を使う)をまとめて予約する。**管理者専用**。
+ * 本文は JSON `{ kaisai_date, mode, race_ids }`(3 つとも必須)。日単位の DO の `scheduleMany` を **1 回** 呼ぶ(予約だけをして戻る。取得はアラームの中で 1 レースずつ直列。gate には触れない)。
+ * 応答: **202** `{ ok, accepted, kaisai_date, mode, results: [{ race_id, result: "accepted" } | { race_id, result: "already-running", status }] }`(実行中のレースは積まない。レースごとの結果を返す)。
+ * **409 `day-cap`**: 1 日の上限(新しい行の数)を超えるので、**何も積んでいない**(全か無か。`limit`・`used`・`needed` を返す)。DO の失敗・想定外の形は 503(文面は返さない)。
+ * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413〈{@link BULK_BODY_MAX_BYTES}〉→ JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO。
+ * netkeiba への取得の起点は増えない(予約が取得を起こすのは、単独の run と同じ DO のアラームの中)。呼び出し箇所の数は `cloud-config-guard.test.ts` が固定。
+ */
+async function handleRunBulk(request: Request, env: Env): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, BULK_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const parsed = parseBulkBody(guarded.body);
+  if (!parsed.ok) {
+    return parsed.response;
+  }
+  const { kaisaiDate, mode, raceIds } = parsed;
+  try {
+    const result = await raceDayStub(env, kaisaiDate).scheduleMany({ kaisaiDate, mode, raceIds });
+    if (!result.accepted) {
+      if (result.reason === "day-cap" && Number.isInteger(result.limit) && Number.isInteger(result.used) && Number.isInteger(result.needed)) {
+        return json({ ok: false, error: { type: "day-cap", limit: result.limit, used: result.used, needed: result.needed } }, 409);
+      }
+      return raceDayError();
+    }
+    // 応答の形を信用しない: 入力と同じ件数・同じ順序で、固定の語だけを写す。
+    const entries = Array.isArray(result.results) ? result.results : [];
+    if (entries.length !== raceIds.length) {
+      return raceDayError();
+    }
+    const results: { race_id: string; result: "accepted" | "already-running"; status?: "queued" | "fetched" }[] = [];
+    for (let i = 0; i < raceIds.length; i++) {
+      const entry = entries[i];
+      if (entry === undefined || entry.raceId !== raceIds[i]) {
+        return raceDayError();
+      }
+      if (entry.result === "accepted") {
+        results.push({ race_id: entry.raceId, result: "accepted" });
+      } else if (entry.result === "already-running" && (entry.status === "queued" || entry.status === "fetched")) {
+        results.push({ race_id: entry.raceId, result: "already-running", status: entry.status });
+      } else {
+        return raceDayError();
+      }
+    }
+    return json({ ok: true, accepted: true, kaisai_date: kaisaiDate, mode, results }, 202);
   } catch {
     return raceDayError();
   }

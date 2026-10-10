@@ -3,6 +3,7 @@
  * `view.ts` がこれを VNode にする。
  */
 import type { BoardRow, RaceRow, TaskMode } from "./api";
+import { buildBulkModel, type BulkModel, type BulkUi } from "./bulk";
 import { ymdToInput } from "./date";
 import { gradeLabelForDisplay } from "./grade";
 import { buildHash, REPORT_HASH, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
@@ -113,6 +114,11 @@ export interface ListModelInput {
   readonly choices?: ReadonlyMap<string, boolean>;
   /** 閲覧者(Issue #238)。設定・検証への入口を出さない。省略は false(管理者)。 */
   readonly readOnly?: boolean;
+  /**
+   * 場ごとの一括実行(Issue #251)の入力。`now` は発走済みの判定に使う現在時刻、`states` は場のまとまりのキー(`groupKeys`)→ 操作の状態。
+   * **省略、または閲覧者(`readOnly`)のときは、どの場も `bulk` を作らない(null)**。
+   */
+  readonly bulk?: { readonly now: Date; readonly states: ReadonlyMap<string, BulkUi> };
 }
 
 export interface RaceItem {
@@ -137,6 +143,8 @@ export interface RaceGroupItem {
   readonly summary: GroupSummary | null;
   /** 閉じていても持つ(隠すのは描画の側)。 */
   readonly races: readonly RaceItem[];
+  /** 場ごとの一括実行(Issue #251。管理者だけ。閲覧者・入力なしは null)。描画は場を開いているときだけ。 */
+  readonly bulk: BulkModel | null;
 }
 
 export interface ListModel {
@@ -197,6 +205,10 @@ export function buildListModel(input: ListModelInput): ListModel {
       name: g.name,
       open: input.choices?.get(keys[i]!) ?? defaultOpen,
       summary: summarizeGroup(g.races, board),
+      bulk:
+        input.bulk === undefined || input.readOnly === true
+          ? null
+          : buildBulkModel({ date: route.date, groupName: g.name, races: g.races, board: board.kind === "ready" ? board.rows : null, now: input.bulk.now, ui: input.bulk.states.get(keys[i]!) }),
       races: g.races.map(
         (r): RaceItem => ({
           raceId: r.raceId,

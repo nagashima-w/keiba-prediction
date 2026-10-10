@@ -12,7 +12,7 @@
  *   画面 `GET|HEAD /`・`GET|HEAD /app.js`、一覧 `GET /api/races`(netkeiba への取得を起こしうるが、キャッシュと gate が効く)、
  *   `GET /api/plan`、`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`、`GET /api/reports`・`/api/reports/{date}`(日報は見せる)、
  *   アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/…`。Issue #244。{@link ICON_PATHS}。表に無いと閲覧者の画面でアイコンが 403 になる)。
- * それ以外(設定・検証・移行・結果の補完と取り込み・分析の手動実行・日報の手動作成・確認ページと確認 API・health)は管理者だけ。
+ * それ以外(設定・検証・移行・結果の補完と取り込み・分析の手動実行〈単独と一括。Issue #251〉・日報の手動作成・確認ページと確認 API・health)は管理者だけ。
  * 閲覧者が表の外の method(HEAD・POST など)を送ったときは、405 ではなく 403 になる(副作用の有無に関わらず管理者専用)。
  */
 import { ICON_PATHS } from "./icons";
@@ -44,7 +44,7 @@ function exact(path: string, viewerMethods: readonly string[]): RouteRule {
 }
 
 /**
- * 表。完全一致のルートが 25(画面・API・管理者専用が 18、アイコンが 7)、パターンのルートが 2(`/api/analyses/{id}`・`/api/reports/{date}`)。
+ * 表。完全一致のルートが 26(画面・API・管理者専用が 19、アイコンが 7)、パターンのルートが 2(`/api/analyses/{id}`・`/api/reports/{date}`)。
  * パターンは、同じ階層の固定の path(`/api/analyses/run`・`/api/reports/run`)に化けないよう、`run` を除く。
  */
 export const ROUTE_RULES: readonly RouteRule[] = [
@@ -76,6 +76,8 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   exact("/api/netkeiba/check", ADMIN_ONLY), // netkeiba への取得を起こす確認
   exact("/api/settings", ADMIN_ONLY), // GET も含む(設定の中身を見せない)
   exact("/api/analyses/run", ADMIN_ONLY), // 手動の分析(LLM を呼ぶ)
+  // 一括の手動の分析(Issue #251。LLM を呼ぶ)。**run の下の階層(`run/bulk`)にしてある**: 同じ階層の名前(`run-bulk`・`bulk` など)にすると `/api/analyses/{id}` のパターンに当たり、閲覧者に GET が開く
+  exact("/api/analyses/run/bulk", ADMIN_ONLY),
   exact("/api/results/import", ADMIN_ONLY),
   exact("/api/results/backfill", ADMIN_ONLY),
   exact("/api/migration", ADMIN_ONLY),

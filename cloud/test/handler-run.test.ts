@@ -56,6 +56,10 @@ function fakeRaceDay(): FakeRaceDay {
         f.priors.push(raceId);
         return f.priorImpl(raceId);
       },
+      // Issue #251: 一括の予約は handler-run-bulk.test.ts の持ち分。ここでは呼ばれない。
+      scheduleMany: () => {
+        throw new Error("scheduleMany は呼ばれない想定");
+      },
       // この偽物のファイルは一覧の入口を検査しない(handler-races.test.ts)。呼ばれたら失敗する。
       getRaceList: () => {
         throw new Error("getRaceList は呼ばれない想定");

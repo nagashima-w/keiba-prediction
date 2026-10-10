@@ -41,9 +41,9 @@ describe("RaceDayStubLike の RPC は RaceDay クラスに実在する", () => {
   const rpcNames = interfaceMethods(handler, "RaceDayStubLike");
   const classNames = classMethods(doSource, "RaceDay");
 
-  it("前提: 宣言と実体の両方を読めている(空振りでない)。Issue #206 で足した 4 つ(requestPlan・getPlanProgress・getAutoRunResults・getNotifications)と、Issue #208 で足した 2 つ(requestResultImport・getResultImportProgress)を含む", () => {
+  it("前提: 宣言と実体の両方を読めている(空振りでない)。Issue #206 で足した 4 つ(requestPlan・getPlanProgress・getAutoRunResults・getNotifications)と、Issue #208 で足した 2 つ(requestResultImport・getResultImportProgress)、Issue #251 で足した 1 つ(scheduleMany)を含む", () => {
     expect(rpcNames.length).toBeGreaterThanOrEqual(10);
-    for (const name of ["schedule", "getBoard", "getMorningPrior", "getRaceList", "requestPlan", "getPlanProgress", "getAutoRunResults", "getNotifications", "requestResultImport", "getResultImportProgress"]) {
+    for (const name of ["schedule", "scheduleMany", "getBoard", "getMorningPrior", "getRaceList", "requestPlan", "getPlanProgress", "getAutoRunResults", "getNotifications", "requestResultImport", "getResultImportProgress"]) {
       expect(rpcNames, `RaceDayStubLike に ${name}`).toContain(name);
     }
     expect(classNames).toContain("alarm");

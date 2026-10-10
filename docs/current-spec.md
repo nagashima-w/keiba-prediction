@@ -1065,11 +1065,11 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
   - **登録済みで有効な項目が 0 件**(セミコロン・空白・改行区切り、文字列でない値など)なら**管理者なし**(全員が閲覧者。`ACCESS_ALLOWED_EMAIL` にもフォールバックしない。`admins=none`)。`ADMIN_USER` の不備は設定全体を無効にしない(閲覧者を締め出さない)。
   - `ACCESS_ALLOWED_EMAIL` は**必須のまま**(欠落・`@` なしは `config-missing`/`config-invalid` で全拒否)。`ADMIN_USER` が有効なときは、管理者の判定には使われない。
   - 役割は**検証済みのメールと管理者の一覧の完全一致**だけで決める(JWT のメールは分割も部分一致もしない)。メールが文字列でない・判定中に例外が起きたら viewer。ヘッダ・クッキー・`ctx.access` のどの経路でも同じ判定。
-- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 25 + パターン 2 = 27 ルート。#244 でアイコン 7 本を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
+- **ルート × 役割の表**(`route-policy.ts` の `ROUTE_RULES`。完全一致 26 + パターン 2 = 28 ルート。#244 でアイコン 7 本、#251 で `/api/analyses/run/bulk` を足した)。`handler.ts` が認証の直後に `requiredRole(method, pathname)` を **1 回だけ**呼び、管理者専用で役割が admin でなければ、
   **リクエスト本文を読まず・DO/D1/R2/gate に触れず**に 403 `{"ok":false,"error":{"type":"admin-only"}}`(固定。認証の拒否の `forbidden` とは本文で区別する)を返す。**表に無い (method, path) は管理者専用**(フェイルクローズ)。
   - 閲覧者に許す(16 ルート。method は表のとおり): `GET|HEAD /`・`GET|HEAD /app.js`・`GET /api/races`・`GET /api/plan`・`GET /api/analyses`・`GET /api/analyses/status`・`GET /api/analyses/{id}`・`GET /api/reports`・`GET /api/reports/{date}`、
     アイコン 7 本 `GET|HEAD`(`/favicon.ico`・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png`。#244。下の「アイコン」の節)。
-  - 管理者だけ(11 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/verify`。
+  - 管理者だけ(12 ルート): `/check`・`/api/health`・`/api/netkeiba/check`・`/api/settings`(GET も)・`/api/analyses/run`・`/api/analyses/run/bulk`(#251)・`/api/results/import`・`/api/results/backfill`・`/api/migration`・`/api/migration/upload`・`/api/reports/run`・`/api/verify`。
   - 閲覧者が表の外の method(HEAD・POST など)を送ると、405 ではなく 403 になる。`{id}`・`{date}` のパターンは `run` に化けない(`/api/analyses/run`・`/api/reports/run` は管理者専用)。
   - `GET /api/races` は閲覧者でも netkeiba への取得を起こしうる(DO のキャッシュと gate が効く)。利用者の決定(2026-10-10)で許可した。
 - **画面**: サーバが `renderPage(email, role)` で `#app` に `data-role="admin|viewer"` を渡す(インラインスクリプトは使えないため属性。`client/main.ts` が `roleFromAttribute` で読み、欠落・不明は viewer)。
@@ -1086,7 +1086,7 @@ Worker 側のメール照合という二重の守りは無くなり、**閲覧�
 - **配信**(`src/icons.ts`・`src/handler.ts`): `/favicon.ico`(ICO。C の 16・32・48 を PNG 圧縮のまま束ねた 1 本)・`/apple-touch-icon.png`・`/icons/favicon-16.png`・`/icons/favicon-32.png`・`/icons/header-32.png`・`/icons/header-64.png`・`/icons/header-96.png` の **7 本**。
   `GET|HEAD`。`Content-Type: image/png`(`/favicon.ico` は `image/x-icon`)・**`Cache-Control: private, max-age=86400`**(ほかの応答の `no-store` は使わない。変わらない画像を毎回取り直させない。差し替えたときは最長 1 日、古い表示が残りうる)・`X-Content-Type-Options: nosniff`・`Referrer-Policy: no-referrer`。
   生成物 `src/icons.generated.ts`(base64。**コミットする生成物。手で編集しない**)を、初回だけバイト列に復号して isolate の中で使い回す。`/app.js` と同じく、**認証の関門の後ろ**で Worker の中から返す(静的アセットは使わない)。
-- **ルート × 役割の表**(`route-policy.ts`): 7 本すべてを **閲覧者にも `GET|HEAD` で開く**(表に足し忘れると、友人の画面でアイコンが 403 になる)。表は完全一致 25 + パターン 2 = 27 ルート(閲覧者に開くもの 16・管理者だけ 11)。パスの一覧は `icons.ts` の `ICON_PATHS` で表と handler が共有する(handler.ts には直書きしない)。
+- **ルート × 役割の表**(`route-policy.ts`): 7 本すべてを **閲覧者にも `GET|HEAD` で開く**(表に足し忘れると、友人の画面でアイコンが 403 になる)。表は完全一致 26 + パターン 2 = 28 ルート(閲覧者に開くもの 16・管理者だけ 12)。パスの一覧は `icons.ts` の `ICON_PATHS` で表と handler が共有する(handler.ts には直書きしない)。
   閲覧者の POST などは 403(admin-only)、管理者の POST は 405(Allow: GET, HEAD)。未知のアイコンのパス(別の大きさ・大文字・末尾のスラッシュ)は表に無いので、閲覧者は 403・管理者は 404。
 - **CSP**: `APP_CSP` に **`img-src 'self'`** を足した(`default-src 'none'` のままだと `<img>` が止まる。`data:` は許さない)。`CHECK_CSP` は変えていない。
 - **元画像と作り方**(`cloud/gen-icons.py`。Pillow `12.3.0` で作った。手順は `cloud/README.md`): 元画像は 1850×1758 の JPEG(**リポジトリには入れない**。生成物だけをコミットする)。座標は元画像のピクセル。
@@ -1782,6 +1782,14 @@ upload(26.2MB を R2 にそのまま置く): 532ms
 - **場の識別キー**: 「場名 + 同名の何組目か」(`大井#0`)。`groupRaces` は離れた同名の行を別の組に分けるので、名前だけだと 2 組の開閉が連動してしまう。race_id は使わない(更新で先頭のレースが消えてもキーが変わらない)。
 - **見出しの要約**(板から。閉じていても状態が分かる): **レース単位**で数える。朝・発走前のどちらかが待ち(queued)・取得済み(fetched)のレースが「実行中」、どちらかが失敗(failed)のレースが「失敗」。**朝が失敗・発走前が待ちのレースは、両方に 1 つずつ入る**。0 の項目は出さない。板が取れていないとき(取得前・失敗)は要約を出さず、場名だけ(`▸ 大井`)。閉じた場のレースの行(`a.race`・`ul.races`)は描画しない。
 - **検査**: `test/client-list.test.ts`(既定・選択・キー・要約のテーブル)・`client-view.test.ts`(見出しのボタン・`aria-expanded`・閉じた場に行が無い・要約の文字・タップのハンドラ・XSS)・`client-app.test.ts`(既定・タップ・(開催日, 区分) ごとの状態・更新で保たれる・取得が増えない)。**実機(スマホ)でのレイアウト・タップ・スクロール位置は自動検査できない**(デプロイ後にユーザーが確認する)。
+
+### 競馬場ごとの一括実行(#251。管理者だけ)
+一覧の競馬場ごとに、事前分析(`morning`)または発走前の分析(`pre_race`)をまとめて予約する。画面の挙動・確認画面の文言・サーバの契約(`POST /api/analyses/run/bulk`)は `cloud/README.md` の「競馬場ごとの一括実行」。要点:
+- **管理者だけ**: 画面は閲覧者・閉じた競馬場にボタンを出さない。サーバは `route-policy.ts` の表で管理者専用(`/api/analyses/run/bulk`。`run` の下の階層なので `/api/analyses/{id}` に当たらない)。
+- **対象**: 実行中・完了済みを除く。発走前は、今日の開催日のとき発走済み・発走時刻が不明も除く(課金を増やす側に倒さない)。過去の開催日・板が取れていないときは無効。
+- **確認画面**(画面内の 2 段階): 件数と LLM の呼び出し回数(円換算なし)。発走前は「自動の分析との二重課金」「直列処理による自動の分析の遅れ」の 2 つの注意書きを必ず出す。実行の直前に対象を取り直し、確認した対象との共通部分だけを送る。
+- **サーバ**: 日単位の DO の `scheduleMany`(予約だけ。上限は全か無かで、超えると 409 `day-cap`)。実行中のレースは積まず `already-running`。入力は 1〜24 件・重複なし。
+- 費用の根拠: 発走前の分析の LLM は `analyzeRace` が通常 1 回(失敗時に 1 回だけ再試行するので最大 2 回)。事前分析は LLM を使わない。
 
 ### スマホ画面の起動と状態の追跡(#186〈#165-d〉。v1.19.19)
 **exe のアプリコード・core・サーバ(`cloud/src/*`。`page.ts` の CSS だけ)は無変更**。実装は 2 段階(段階1: 描画まわり、段階2: 起動と追跡)で、公開は 1 回。

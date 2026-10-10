@@ -114,7 +114,7 @@ describe("wrangler.toml", () => {
     expect(jstHours.every((h) => h < 24)).toBe(true);
   });
 
-  it("Issue #180・#183・#206・#208: netkeiba への取得の起点は、手動の 3 つ(POST の予約・GET の一覧・GET の確認。認証の後ろ)と、定時の 1 つ(scheduled の requestPlan)の呼び出し箇所 4 つに、結果の取り込みの依頼の呼び出し箇所 1 つ(result-dispatch.ts。cron と手動 POST が共有)を加えた計 5 つだけ", () => {
+  it("Issue #180・#183・#206・#208・#251: netkeiba への取得の起点は、手動の 4 つ(POST の予約・POST の一括の予約・GET の一覧・GET の確認。認証の後ろ)と、定時の 1 つ(scheduled の requestPlan)の呼び出し箇所 5 つに、結果の取り込みの依頼の呼び出し箇所 1 つ(result-dispatch.ts。cron と手動 POST が共有)を加えた計 6 つだけ", () => {
     const worker = readTextLf("cloud", "src", "worker.ts");
     const workerCode = stripCode(worker);
     expect(worker.length).toBeGreaterThan(100); // 前提: 読めている
@@ -122,7 +122,7 @@ describe("wrangler.toml", () => {
     expect((workerCode.match(/\bscheduled\s*\(/g) ?? []).length).toBe(1);
     expect((workerCode.match(/\brunScheduled\(/g) ?? []).length).toBe(1);
     expect(workerCode).not.toMatch(/\bqueue\b\s*\(/);
-    for (const forbidden of ["NETKEIBA_GATE", "RACE_DAY", "fetch(", ".fetchRaw(", ".getRaceList(", ".schedule(", ".requestPlan("]) {
+    for (const forbidden of ["NETKEIBA_GATE", "RACE_DAY", "fetch(", ".fetchRaw(", ".getRaceList(", ".schedule(", ".scheduleMany(", ".requestPlan("]) {
       // `fetch(` は export default の fetch ハンドラ(`async fetch(`)だけ: 呼び出しの形(`.fetch(` や `await fetch(`)を禁じる
       const pattern = forbidden === "fetch(" ? /(\.|await\s+)fetch\(/ : new RegExp(forbidden.replace(/[.()]/g, "\\$&"));
       expect(workerCode, `worker.ts に ${forbidden} が無い`).not.toMatch(pattern);
@@ -131,7 +131,7 @@ describe("wrangler.toml", () => {
     const scheduledCode = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
     expect(scheduledCode.length).toBeGreaterThan(500); // 前提: コメント除去で本文を消していない
     expect((scheduledCode.match(/\.requestPlan\(/g) ?? []).length).toBe(1);
-    for (const forbidden of [".schedule(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".requestResultImport(", "NETKEIBA_GATE", "ANTHROPIC"]) {
+    for (const forbidden of [".schedule(", ".scheduleMany(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".requestResultImport(", "NETKEIBA_GATE", "ANTHROPIC"]) {
       expect(scheduledCode, `scheduled.ts に ${forbidden} が無い`).not.toContain(forbidden);
     }
     // Issue #249(利用者の決定): scheduled.ts は Discord を参照しない、という従来の制約を、「**送信の部品を使うのは、23 時の再実行で計画の依頼が 3 回とも失敗したときの失敗通知の 1 箇所だけ**」に改めた。
@@ -168,6 +168,7 @@ describe("wrangler.toml", () => {
     expect(code.length).toBeGreaterThan(1000); // 前提: コメント除去で本文を消していない
     const count = (pattern: RegExp): number => (code.match(pattern) ?? []).length;
     expect(count(/\.schedule\(/g)).toBe(1); // handleRun(POST)
+    expect(count(/\.scheduleMany\(/g)).toBe(1); // handleRunBulk(POST /api/analyses/run/bulk。Issue #251)
     expect(count(/\.getRaceList\(/g)).toBe(1); // handleRaces(GET。Sec-Fetch-Site・検証の後)
     expect(count(/\.fetchRaw\(/g)).toBe(1); // handleCheck(GET /api/netkeiba/check)
     expect(count(/\.requestPlan\(/g)).toBe(0); // 計画の依頼は cron(scheduled.ts)だけ。手動の入口は呼ばない
@@ -176,16 +177,16 @@ describe("wrangler.toml", () => {
     // 一覧の入口は、DO を呼ぶ前に Sec-Fetch-Site を見る
     expect(code.indexOf("sec-fetch-site")).toBeGreaterThan(-1);
     expect(code.indexOf("sec-fetch-site")).toBeLessThan(code.indexOf(".getRaceList("));
-    // 起点の総数(呼び出し箇所): handler.ts(手動 3)+ scheduled.ts(定時 1)+ result-dispatch.ts(結果の依頼 1。cron と手動 POST が共有)= 5。worker.ts は 0
-    const originCalls = (c: string): number => (c.match(/\.(schedule|getRaceList|fetchRaw|requestPlan|requestResultImport)\(/g) ?? []).length;
+    // 起点の総数(呼び出し箇所): handler.ts(手動 4)+ scheduled.ts(定時 1)+ result-dispatch.ts(結果の依頼 1。cron と手動 POST が共有)= 6。worker.ts は 0
+    const originCalls = (c: string): number => (c.match(/\.(schedule|scheduleMany|getRaceList|fetchRaw|requestPlan|requestResultImport)\(/g) ?? []).length;
     const dispatchCode = stripCode(readTextLf("cloud", "src", "result-dispatch.ts"));
     expect(dispatchCode.length).toBeGreaterThan(1000); // 前提: 読めている
-    expect(originCalls(code)).toBe(3);
+    expect(originCalls(code)).toBe(4);
     expect(originCalls(scheduledCode)).toBe(1);
     expect(originCalls(workerCode)).toBe(0);
     expect(originCalls(dispatchCode)).toBe(1);
     expect((dispatchCode.match(/\.requestResultImport\(/g) ?? []).length).toBe(1);
-    expect(originCalls(code) + originCalls(scheduledCode) + originCalls(workerCode) + originCalls(dispatchCode)).toBe(5);
+    expect(originCalls(code) + originCalls(scheduledCode) + originCalls(workerCode) + originCalls(dispatchCode)).toBe(6);
     // 結果の依頼(`.requestResultImport(`)を持つファイルは、cloud/src で result-dispatch.ts(呼び出し 1)と race-day-do.ts(DO の RPC が core に委譲する 1)だけ
     const srcDir = path.join(ROOT, "cloud", "src");
     const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
@@ -206,16 +207,17 @@ describe("wrangler.toml", () => {
     expect(((code + "\ngate.fetchRaw(x);").match(/\.fetchRaw\(/g) ?? []).length).toBe(2);
     expect(originCalls(scheduledCode + "\nstub.getRaceList(a, b);")).toBe(2);
     expect(originCalls(scheduledCode + "\nstub.requestResultImport(a);")).toBe(2);
+    expect(originCalls(scheduledCode + "\nstub.scheduleMany(a);")).toBe(2); // 一括の予約口も数える(`.schedule(` の正規表現だけでは、`.scheduleMany(` が数えられずにすり抜ける)
     expect(("await dispatchResultImports(x);\nexport async function dispatchResultImports(i) {}").match(/(?<!function\s)\bdispatchResultImports\(/g)).toHaveLength(1);
   });
 
-  it("Issue #208・#216: 手動の POST を受けるルートは 4 つだけ(/api/settings・/api/analyses/run・/api/results/import・/api/migration/upload)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
+  it("Issue #208・#216・#251: 手動の POST を受けるルートは 5 つだけ(/api/settings・/api/analyses/run・/api/analyses/run/bulk・/api/results/import・/api/migration/upload)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
-    // POST の分岐は 5 つ(`method === "POST"`)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(5);
+    // POST の分岐は 6 つ(`method === "POST"`)
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(6);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/analyses/run", "/api/results/import", "/api/migration/upload", "/api/reports/run"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/analyses/run", "/api/analyses/run/bulk", "/api/results/import", "/api/migration/upload", "/api/reports/run"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // handleResultsImport の本体
     const start = code.indexOf("async function handleResultsImport(");
@@ -228,11 +230,44 @@ describe("wrangler.toml", () => {
     expect(body).toContain("dispatchResultImports(");
     expect(body).toContain("MANUAL_RESULT_MAX_DAYS");
     expect(body).toContain("jstKaisaiDate(");
-    for (const forbidden of [".schedule(", ".requestPlan(", ".getRaceList(", ".fetchRaw(", ".requestResultImport(", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD", "fetch("]) {
+    for (const forbidden of [".schedule(", ".scheduleMany(", ".requestPlan(", ".getRaceList(", ".fetchRaw(", ".requestResultImport(", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD", "fetch("]) {
       expect(body, `handleResultsImport に ${forbidden} が無い`).not.toContain(forbidden);
     }
     // 対照(検出の確認。空振りでない)
     expect((body + "\nstub.requestResultImport(a);").includes(".requestResultImport(")).toBe(true);
+  });
+
+  it("Issue #251: 一括の手動起動(POST /api/analyses/run/bulk)は、単独の run と同じ守り(readJsonObjectBody)の後で、日単位の DO の scheduleMany を 1 回だけ呼ぶ。scheduleMany を呼ぶ箇所は handler.ts と DO の委譲の 2 つだけ。netkeiba・LLM・D1・Discord には触れない", () => {
+    const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = code.indexOf("async function handleRunBulk(");
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf("\n}\n", start);
+    const body = code.slice(start, end);
+    expect(body.length).toBeGreaterThan(800); // 前提: 本体を実際に読めている(空振りでない)
+    expect(body).toContain("readJsonObjectBody(request, BULK_BODY_MAX_BYTES)");
+    expect(body.indexOf("readJsonObjectBody(")).toBeLessThan(body.indexOf("parseBulkBody(")); // 守りが先
+    expect(body.indexOf("parseBulkBody(")).toBeLessThan(body.indexOf(".scheduleMany(")); // 検証が先(検証を通ったものだけが DO に届く)
+    expect((body.match(/\.scheduleMany\(/g) ?? []).length).toBe(1);
+    for (const forbidden of [".schedule(", ".requestPlan(", ".getRaceList(", ".fetchRaw(", ".requestResultImport(", "NETKEIBA_GATE", "ANALYSIS_DETAIL", "env.DB", "ANTHROPIC", "DISCORD", "fetch("]) {
+      expect(body, `handleRunBulk に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    // 入力の検証(parseBulkBody)は、単独の run と同じ検証関数を使い、件数の上限は共有の定数を使う
+    const parseStart = code.indexOf("function parseBulkBody(");
+    expect(parseStart).toBeGreaterThan(-1);
+    const parseBody = code.slice(parseStart, code.indexOf("\n}\n", parseStart));
+    expect(parseBody).toContain("validateRaceId(");
+    expect(parseBody).toContain("checkRaceDate(");
+    expect(parseBody).toContain("MAX_BULK_RACES");
+    // scheduleMany の呼び出し(`.scheduleMany(`)を持つファイルは、handler.ts(1)と race-day-do.ts(DO の RPC が core に委譲する 1)だけ
+    const srcDir = path.join(ROOT, "cloud", "src");
+    const sites: Record<string, number> = {};
+    for (const f of readdirSync(srcDir).filter((name) => name.endsWith(".ts") && name !== "client-bundle.generated.ts")) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(/\.scheduleMany\(/g) ?? []).length;
+      if (n > 0) sites[f] = n;
+    }
+    expect(sites).toEqual({ "handler.ts": 1, "race-day-do.ts": 1 });
+    // 対照(検出の確認。空振りでない)
+    expect(((body + "\nstub.scheduleMany(a);").match(/\.scheduleMany\(/g) ?? []).length).toBe(2);
   });
 
   it("Issue #208: 結果のページは、DO の中で gate 経由・キャッシュなしの HttpClient 1 本だけで取る(グローバルの fetch・bypassCache・CachedFetcher 経由では取らない)。D1 に出るのは 1 レースぶんの saveResult だけ", () => {
@@ -302,7 +337,7 @@ describe("wrangler.toml", () => {
     expect(body).toContain(".getResultImportProgress("); // Issue #208: 結果の取り込みの観測(読み取り)
     expect(body).toContain("sec-fetch-site");
     expect(body).toContain("raceDayStub(");
-    for (const forbidden of [".schedule(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", "D1ResultStore", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "env.DB", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
+    for (const forbidden of [".schedule(", ".scheduleMany(", ".requestPlan(", ".requestResultImport(", "dispatchResultImports(", "D1ResultStore", ".getRaceList(", ".fetchRaw(", ".getBoard(", "NETKEIBA_GATE", "env.DB", "ANALYSIS_DETAIL", "ANTHROPIC", "DISCORD_WEBHOOK_URL", "webhook", "fetch("]) {
       expect(body, `handlePlan に ${forbidden} が無い`).not.toContain(forbidden);
     }
     // DISCORD_WEBHOOK_URL を読むのは /api/health の「登録の有無」の 1 箇所だけ(値は返さない)
@@ -752,7 +787,7 @@ describe("Issue #216: 移行の取り込み(CloudMigration)は netkeiba にも L
     for (const [name, code] of [["result-backfill-core.ts", core], ["result-backfill-do.ts", doCode]] as const) {
       expect(code.length, `${name} を読めている`).toBeGreaterThan(1500);
       // 取得口(gate の fetchRaw・postRaw・一覧・予約・計画の依頼)も、LLM・通知・R2 も持たない
-      for (const forbidden of [".fetchRaw(", ".postRaw(", ".schedule(", ".getRaceList(", ".requestPlan(", ".requestResultImport(", "ANTHROPIC", "DISCORD", "ANALYSIS_DETAIL", "HttpClient", "CachedFetcher"]) {
+      for (const forbidden of [".fetchRaw(", ".postRaw(", ".schedule(", ".scheduleMany(", ".getRaceList(", ".requestPlan(", ".requestResultImport(", "ANTHROPIC", "DISCORD", "ANALYSIS_DETAIL", "HttpClient", "CachedFetcher"]) {
         expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
       }
       expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);

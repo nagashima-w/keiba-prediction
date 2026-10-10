@@ -48,6 +48,7 @@ function fakeNamespace(): FakeNamespace {
   };
   const stub: RaceDayStubLike = {
     schedule: NOT_CALLED,
+    scheduleMany: NOT_CALLED,
     getBoard: NOT_CALLED,
     getMorningPrior: NOT_CALLED,
     getRaceList: NOT_CALLED,

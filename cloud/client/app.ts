@@ -53,10 +53,12 @@
  */
 import { failureMessage, fetchBoard, fetchRaces, fetchRaceStatus, type BoardRow, type FetchLike, type MorningPriorView, type RaceRow, type TaskMode } from "./api";
 import { fetchAnalysis, fetchPastAnalyses, type AnalysisDetail, type PastAnalysis } from "./api-analysis";
+import { bulkFailureMessage, postBulk, type BulkOutcome } from "./api-bulk";
 import { postRun, runFailureMessage, type RunOutcome } from "./api-run";
+import { bulkAcceptedText, bulkDayCapText, selectBulkTargets, type BulkUi } from "./bulk";
 import { createBoardStore, type BoardCompletion } from "./board-state";
 import { inputToYmd, todayJst } from "./date";
-import { buildListModel, type BoardSource, type ListSource } from "./list";
+import { buildListModel, groupKeys, groupRaces, type BoardSource, type ListSource } from "./list";
 import { buildRaceModel, latestAnalysisIdOf, type PastSource, type RaceStatusSource, type RunUi } from "./race";
 import { fetchSettings, postSettings, settingsFailureMessage } from "./api-settings";
 import { buildResultModel, type ResultSource } from "./result";
@@ -176,6 +178,9 @@ export function createApp(deps: AppDeps): App {
 
   /** 起動の操作の表示((開催日, レース, モード)ごと)。送信中の印は `await` の前に同期で立てる(二重押しを防ぐ)。 */
   const runStates = new Map<string, RunUi>();
+
+  /** 場ごとの一括実行(Issue #251)の操作の状態。(開催日, 区分) → 場のまとまりのキー(`groupKeys`)→ 状態。メモリだけ(「更新」では消さない)。送信中の印は `await` の前に同期で立てる。 */
+  const bulkStates = new Map<string, Map<string, BulkUi>>();
 
   function trackedDates(): string[] {
     return [...new Set([...store.activeDates(), ...forceDates.keys()])].sort();
@@ -300,6 +305,9 @@ export function createApp(deps: AppDeps): App {
     onToggleGroup,
     onToggleResult,
     onRun,
+    onBulkOpen,
+    onBulkGo,
+    onBulkDismiss,
     onRetrack,
     onSettingsInput,
     onSettingsSave,
@@ -373,7 +381,16 @@ export function createApp(deps: AppDeps): App {
       case "list": {
         deps.render(
           renderScreen(
-            buildListModel({ route, list: listSource(), board: boardSource(), boardLoading: boardInflight.has(route.date), tracking: trackingNotice(), choices: openChoices.get(listKey(route.date, route.venue)), readOnly: !admin }),
+            buildListModel({
+              route,
+              list: listSource(),
+              board: boardSource(),
+              boardLoading: boardInflight.has(route.date),
+              tracking: trackingNotice(),
+              choices: openChoices.get(listKey(route.date, route.venue)),
+              readOnly: !admin,
+              bulk: { now: deps.now(), states: bulkStates.get(listKey(route.date, route.venue)) ?? new Map<string, BulkUi>() },
+            }),
             actions,
           ),
           force,
@@ -734,6 +751,115 @@ export function createApp(deps: AppDeps): App {
         runStates.set(key, { kind: "error", message: runFailureMessage(outcome.failure) });
         return;
     }
+  }
+
+  // ---- 場ごとの一括実行(Issue #251。管理者だけ)----
+
+  function bulkStatesFor(key: string): Map<string, BulkUi> {
+    const found = bulkStates.get(key);
+    if (found !== undefined) return found;
+    const created = new Map<string, BulkUi>();
+    bulkStates.set(key, created);
+    return created;
+  }
+
+  /** いま表示中の一覧の、場のまとまり(キー)のレース。一覧が取れていない・キーが無いときは null。 */
+  function racesOfGroup(groupKey: string): readonly RaceRow[] | null {
+    const source = listSource();
+    if (source.kind !== "ready") return null;
+    const index = groupKeys(source.races).indexOf(groupKey);
+    return index < 0 ? null : groupRaces(source.races)[index]!.races;
+  }
+
+  function boardRowsOrNull(): readonly BoardRow[] | null {
+    const source = boardSource();
+    return source.kind === "ready" ? source.rows : null;
+  }
+
+  /** ボタン: 確認画面を開く(この時点では POST しない)。過去の開催日・板が取れていない・対象が 0 件・送信中は何もしない(ボタンも無効)。 */
+  function onBulkOpen(groupKey: string, mode: TaskMode): void {
+    if (!admin) return; // 閲覧者(Issue #238)にはボタンが無い。万一呼ばれても何もしない(サーバも 403)
+    if (currentScreen() !== "list") return;
+    const date = route.date;
+    const now = deps.now();
+    if (date < todayJst(now)) return;
+    const board = boardRowsOrNull();
+    const races = racesOfGroup(groupKey);
+    if (board === null || races === null) return;
+    const states = bulkStatesFor(listKey(date, route.venue));
+    if (states.get(groupKey)?.kind === "sending") return;
+    const selection = selectBulkTargets({ mode, races, board, date, now });
+    if (selection.raceIds.length === 0) return;
+    states.set(groupKey, { kind: "confirm", mode, raceIds: selection.raceIds, excluded: selection.excluded });
+    render();
+  }
+
+  /**
+   * 確認画面の「実行する」: **実行の直前に対象を取り直し、確認した対象との共通部分だけを送る**(確認のあとで実行中・完了・発走済みになったものは外れる。増えることはない)。
+   * 共通部分が空なら POST しない。送信中の印は `await` の前に同期で立てる(二重押しを防ぐ。確認画面の状態でなければ何もしない)。
+   */
+  function onBulkGo(groupKey: string): void {
+    if (!admin) return;
+    const date = route.date;
+    const key = listKey(date, route.venue);
+    const states = bulkStatesFor(key);
+    const ui = states.get(groupKey);
+    if (ui === undefined || ui.kind !== "confirm") return;
+    const now = deps.now();
+    const board = boardRowsOrNull();
+    const races = racesOfGroup(groupKey);
+    const current = board !== null && races !== null && date >= todayJst(now) ? new Set(selectBulkTargets({ mode: ui.mode, races, board, date, now }).raceIds) : new Set<string>();
+    const raceIds = ui.raceIds.filter((id) => current.has(id));
+    if (raceIds.length === 0) {
+      states.set(groupKey, { kind: "result", tone: "error", text: "対象のレースがなくなったため、何も予約していません。" });
+      render();
+      return;
+    }
+    states.set(groupKey, { kind: "sending", mode: ui.mode });
+    render();
+    const mode = ui.mode;
+    const promise = postBulk(deps.fetch, { date, mode, raceIds }).then((outcome) => {
+      finishBulk(states, groupKey, date, mode, outcome);
+      render();
+    });
+    runInflight.add(promise);
+    void promise.finally(() => runInflight.delete(promise));
+  }
+
+  function finishBulk(states: Map<string, BulkUi>, groupKey: string, date: string, mode: TaskMode, outcome: BulkOutcome): void {
+    const nowMs = deps.now().getTime();
+    switch (outcome.kind) {
+      case "accepted":
+        for (const entry of outcome.results) {
+          store.setOverlay(date, entry.raceId, mode, entry.result === "accepted" ? "queued" : entry.status, nowMs);
+        }
+        forceDates.set(date, store.nextSeq());
+        tracker.begin({ immediate: false });
+        states.set(groupKey, { kind: "result", tone: "ok", text: bulkAcceptedText(outcome.results) });
+        return;
+      case "accepted-malformed":
+        // サーバは受け付けている(202)が、本文が想定外。失敗の文言を出し、追跡は始める(板が真実を教える)。
+        forceDates.set(date, store.nextSeq());
+        tracker.begin({ immediate: false });
+        states.set(groupKey, { kind: "result", tone: "error", text: runFailureMessage({ kind: "unexpected", httpStatus: 202 }) });
+        return;
+      case "day-cap":
+        states.set(groupKey, { kind: "result", tone: "error", text: bulkDayCapText(outcome) });
+        return;
+      case "failed":
+        states.set(groupKey, { kind: "result", tone: "error", text: bulkFailureMessage(outcome.failure) });
+        return;
+    }
+  }
+
+  /** 確認画面の「やめる」・結果の「閉じる」。送信中は消せない(結果が届くまで)。 */
+  function onBulkDismiss(groupKey: string): void {
+    if (!admin) return;
+    const states = bulkStatesFor(listKey(route.date, route.venue));
+    const ui = states.get(groupKey);
+    if (ui === undefined || ui.kind === "sending") return;
+    states.delete(groupKey);
+    render();
   }
 
   function onRetrack(): void {

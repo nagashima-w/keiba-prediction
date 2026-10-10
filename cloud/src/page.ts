@@ -121,6 +121,19 @@ ${paletteCss()}
   .venue-toggle { display: block; width: 100%; min-height: 44px; padding: 8px 12px; text-align: left; font-size: 1.05rem; font-weight: bold; }
   .races { list-style: none; margin: 0; padding: 0; }
   .races li { margin: 0 0 8px; }
+  /* Issue #251: 場ごとの一括実行(管理者だけ。場を開いたときの上部。ボタンは横に並べ、狭い幅では折り返す。確認画面は枠で囲む) */
+  .bulk { margin: 0 0 12px; }
+  .bulk-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bulk-run { flex: 1 1 12rem; }
+  .bulk-note { margin: 4px 0 0; }
+  .bulk-panel { margin: 8px 0 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .bulk-panel h3 { margin: 0 0 4px; font-size: 1rem; }
+  .bulk-lines { margin: 4px 0; padding-left: 1.2em; font-size: 0.9rem; }
+  .bulk-notes { list-style: none; margin: 4px 0; padding: 0; }
+  .bulk-notes .notice { margin: 4px 0; }
+  .bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .bulk-go { border-color: var(--accent); color: var(--accent); font-weight: bold; }
+  .bulk-result p { margin: 0 0 8px; }
   .race { display: block; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); text-decoration: none; }
   .race-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
   .race-detail { display: block; font-size: 0.85rem; color: var(--muted); }

@@ -74,6 +74,7 @@ import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceF
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
+import { MAX_BULK_RACES } from "./bulk-limits";
 import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
 import { isDayQuiet } from "./day-quiet";
@@ -136,6 +137,9 @@ const PURGE_DUE_KEY = "purge_due_at";
  * 手動起動の入口(#180)から、netkeiba への取得が際限なく積まれないための歯止め(すでにあるレースの再予約は数えない)。
  */
 export const MAX_TASKS_PER_DAY = 100;
+
+// 一括予約(`scheduleMany`。Issue #251)で 1 回に受け付けるレース数の上限は `bulk-limits.ts`(入口・DO・画面が共有する)。テストが DO のモジュールから読めるよう再 export する。
+export { MAX_BULK_RACES };
 
 /** 取得ステップの試行回数の上限。 */
 export const MAX_ATTEMPTS = 3;
@@ -311,6 +315,24 @@ export interface ScheduleInput {
 export type ScheduleResult =
   | { readonly accepted: true; readonly raceId: string; readonly mode: TaskMode; readonly status: "queued" }
   | { readonly accepted: false; readonly raceId: string; readonly mode: TaskMode; readonly status: TaskStatus };
+
+/** 一括予約(Issue #251)の入力。`mode` は必須(省略時の既定を持たない=課金を伴う操作で、意図しない種類を積まない)。 */
+export interface ScheduleManyInput {
+  readonly kaisaiDate: string;
+  readonly mode: TaskMode;
+  /** 1〜{@link MAX_BULK_RACES} 件、重複なし。順序は結果に保つ。 */
+  readonly raceIds: readonly string[];
+}
+
+/** 一括予約のレースごとの結果。実行中(queued・fetched)は積まず、いまの状態を返す。 */
+export type ScheduleManyEntry =
+  | { readonly raceId: string; readonly result: "accepted" }
+  | { readonly raceId: string; readonly result: "already-running"; readonly status: "queued" | "fetched" };
+
+export type ScheduleManyResult =
+  | { readonly accepted: true; readonly mode: TaskMode; readonly results: readonly ScheduleManyEntry[] }
+  /** 1 日の上限({@link MAX_TASKS_PER_DAY})を超えるので、**何も積まなかった**(全か無か)。`used` はいまの行数、`needed` は新しく必要な行数。 */
+  | { readonly accepted: false; readonly reason: "day-cap"; readonly limit: number; readonly used: number; readonly needed: number };
 
 export type StepOutcome =
   /** 実行する仕事が無かった。`purged` は、掃除専用のアラームで消したキャッシュの行数(掃除をしたときだけ)。 */
@@ -690,24 +712,7 @@ export class RaceDayCore {
    * @throws 無効な raceId・開催日・mode、DO の開催日と違う日、raceId の年と開催日の年が違う(地方は月日も)、1日の上限、発走前の分析の保存先が無い構成
    */
   async schedule(input: ScheduleInput): Promise<ScheduleResult> {
-    const mode = input.mode ?? "morning";
-    if (!TASK_MODES.includes(mode)) {
-      throw new Error(`mode は morning か pre_race です(渡された値: ${String(mode).slice(0, 32)})`);
-    }
-    const raceId = parseRaceId(input.raceId);
-    const kaisaiDate = parseKaisaiDate(input.kaisaiDate);
-    const pinned = this.metaGet("kaisai_date");
-    if (pinned !== null && pinned !== kaisaiDate) {
-      throw new Error(`この DO は開催日 ${pinned} 専用です(渡された開催日: ${kaisaiDate})`);
-    }
-    // 年(どのレースでも)・月日(地方のレースID。中央は日付を含まない)の整合。入口(handler.ts)でも確かめているが、RPC を直接呼ばれても守る。
-    const consistent = checkRaceDate(raceId, kaisaiDate);
-    if (!consistent.ok) {
-      throw new Error(consistent.message);
-    }
-    if (mode === "pre_race" && (this.sink === undefined || this.loadSettings === undefined)) {
-      throw new Error("発走前の分析の保存先(D1・R2)・設定が、この構成にはありません");
-    }
+    const { raceId, kaisaiDate, mode, pinned } = this.checkScheduleTarget(input.mode ?? "morning", input.raceId, input.kaisaiDate);
     if (pinned === null) {
       this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('kaisai_date', ?)", kaisaiDate);
     }
@@ -716,7 +721,7 @@ export class RaceDayCore {
       return { accepted: false, raceId, mode, status: existing.status };
     }
     if (existing === null) {
-      const count = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks").toArray() as { n: number }[])[0]?.n ?? 0;
+      const count = this.taskCount();
       if (count >= MAX_TASKS_PER_DAY) {
         throw new Error(`この開催日に受け付けられるレース数の上限(${MAX_TASKS_PER_DAY})に達しています`);
       }
@@ -728,6 +733,82 @@ export class RaceDayCore {
     this.enqueueTask(raceId, mode, this.now());
     await this.rearm();
     return { accepted: true, raceId, mode, status: "queued" };
+  }
+
+  /**
+   * 一括予約(Issue #251。管理者の「競馬場ごとに一括実行」が `POST /api/analyses/run/bulk` 経由で呼ぶ)。同じ開催日の複数のレースに、同じ種類(`mode`)のタスクを積む。予約だけをして戻る(取得はアラームの中)。
+   * レースごとの規則は {@link RaceDayCore.schedule} と同じ: 実行中(queued・fetched)は積まずに `already-running`(いまの状態つき)、完了済み・失敗・新規は queued で積む(作り直す)。
+   * pre_race を積み直すレースは、自動の印を消す。
+   * **1 日の上限は全か無か**: 新しく必要な行(その (レース, mode) の行がまだ無い、積むレース)の数 + いまの行数が {@link MAX_TASKS_PER_DAY} を超えるなら、**何も積まず** `day-cap` を返す。
+   * **検証(件数・重複・各 ID・開催日・mode・保存先)は、何かを書く前にすべて行う**(途中の無効な ID で、手前のレースだけが積まれることがない)。アラームを張るのは最後に 1 回(`rearm`)。
+   * @throws 空の一覧・{@link MAX_BULK_RACES} 超過・重複、`schedule` が拒否する入力(無効な raceId・開催日・mode、DO の開催日と違う日、年の不整合、pre_race の保存先が無い構成)
+   */
+  async scheduleMany(input: ScheduleManyInput): Promise<ScheduleManyResult> {
+    const ids = input.raceIds;
+    if (ids.length === 0) {
+      throw new Error("race_ids は 1 件以上で指定してください");
+    }
+    if (ids.length > MAX_BULK_RACES) {
+      throw new Error(`一括で受け付けるレース数は ${MAX_BULK_RACES} 件以下です(渡された件数: ${ids.length})`);
+    }
+    // 検証は書き込みの前に全件分。各レースの検証は schedule と同じ関数(mode・開催日・DO の固定日・年の整合・保存先)。
+    const targets = ids.map((raw) => this.checkScheduleTarget(input.mode, raw, input.kaisaiDate));
+    const { mode, kaisaiDate, pinned } = targets[0]!;
+    const raceIds = targets.map((t) => t.raceId);
+    if (new Set(raceIds).size !== raceIds.length) {
+      throw new Error("race_ids に重複があります");
+    }
+    const existing = raceIds.map((raceId) => this.task(raceId, mode));
+    const needed = existing.filter((row) => row === null).length;
+    const used = this.taskCount();
+    if (used + needed > MAX_TASKS_PER_DAY) {
+      // 何も書かない(開催日の固定も)。
+      return { accepted: false, reason: "day-cap", limit: MAX_TASKS_PER_DAY, used, needed };
+    }
+    if (pinned === null) {
+      this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('kaisai_date', ?)", kaisaiDate);
+    }
+    const now = this.now();
+    const results: ScheduleManyEntry[] = [];
+    raceIds.forEach((raceId, i) => {
+      const row = existing[i]!;
+      if (row !== null && (row.status === "queued" || row.status === "fetched")) {
+        results.push({ raceId, result: "already-running", status: row.status });
+        return;
+      }
+      if (mode === "pre_race") {
+        this.plan.clearAuto(raceId);
+      }
+      this.enqueueTask(raceId, mode, now);
+      results.push({ raceId, result: "accepted" });
+    });
+    await this.rearm();
+    return { accepted: true, mode, results };
+  }
+
+  /**
+   * `schedule`・`scheduleMany` が共有する入力の検証(**何も書かない**)。mode → raceId → 開催日 → DO の固定された開催日との一致 → 年(地方は月日)の整合 → pre_race の保存先、の順。
+   * 入口(handler.ts)でも確かめているが、RPC を直接呼ばれても守る。`pinned` は、固定済みの開催日(未固定なら null。固定は呼び出し側が検証のあとに行う)。
+   */
+  private checkScheduleTarget(mode: TaskMode, rawRaceId: string, rawKaisaiDate: string): { raceId: string; kaisaiDate: string; mode: TaskMode; pinned: string | null } {
+    if (!TASK_MODES.includes(mode)) {
+      throw new Error(`mode は morning か pre_race です(渡された値: ${String(mode).slice(0, 32)})`);
+    }
+    const raceId = parseRaceId(rawRaceId);
+    const kaisaiDate = parseKaisaiDate(rawKaisaiDate);
+    const pinned = this.metaGet("kaisai_date");
+    if (pinned !== null && pinned !== kaisaiDate) {
+      throw new Error(`この DO は開催日 ${pinned} 専用です(渡された開催日: ${kaisaiDate})`);
+    }
+    // 年(どのレースでも)・月日(地方のレースID。中央は日付を含まない)の整合。
+    const consistent = checkRaceDate(raceId, kaisaiDate);
+    if (!consistent.ok) {
+      throw new Error(consistent.message);
+    }
+    if (mode === "pre_race" && (this.sink === undefined || this.loadSettings === undefined)) {
+      throw new Error("発走前の分析の保存先(D1・R2)・設定が、この構成にはありません");
+    }
+    return { raceId, kaisaiDate, mode, pinned };
   }
 
   /**
