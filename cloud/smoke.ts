@@ -473,14 +473,19 @@ async function main(): Promise<void> {
       const centralBody = parseJson(racesCentral.text);
       const centralRows = (centralBody["races"] as { race_id: string; race_number: number; race_name: string; grade: string | null }[] | undefined) ?? [];
       check(`${label}: GET /api/races(中央)が 200 で、フィクスチャと同じ件数(${expectedCentral})を、race_id の昇順(場 → R)で返す`, racesCentral.status === 200 && expectedCentral > 0 && centralRows.length === expectedCentral && centralRows.every((r, i) => i === 0 || centralRows[i - 1]!.race_id < r.race_id), `${racesCentral.status} ${racesCentral.text.slice(0, 200)}`);
-      check(`${label}: 一覧の各行は固定のキー(race_id・venue_name・race_number・race_name・course_type・distance・entry_count・grade)だけ`, centralRows.length > 0 && Object.keys(centralRows[0]!).sort().join(",") === "course_type,distance,entry_count,grade,race_id,race_name,race_number,venue_name", JSON.stringify(centralRows[0]));
+      check(`${label}: 一覧の各行は固定のキー(race_id・venue_name・race_number・race_name・course_type・distance・entry_count・grade・start_time)だけ`, centralRows.length > 0 && Object.keys(centralRows[0]!).sort().join(",") === "course_type,distance,entry_count,grade,race_id,race_name,race_number,start_time,venue_name", JSON.stringify(centralRows[0]));
+      // Issue #236: 発走予定時刻。中央の 1 行目は HH:MM の文字列(フィクスチャ race_list_sub_20260628 は発走前の取得で、先頭の行に時刻がある)。すべての行が「HH:MM か null」。
+      const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+      const centralTimes = (centralBody["races"] as { start_time?: unknown }[] | undefined) ?? [];
+      check(`${label}: 一覧(中央)の 1 行目の start_time は HH:MM の文字列で、全行が HH:MM か null`, centralTimes.length > 0 && typeof centralTimes[0]!.start_time === "string" && HHMM.test(centralTimes[0]!.start_time as string) && centralTimes.every((r) => r.start_time === null || (typeof r.start_time === "string" && HHMM.test(r.start_time))), JSON.stringify(centralTimes.slice(0, 2)));
       const cachedStarted = Date.now();
       const racesCentral2 = await req(port, "GET", `/api/races?kaisai_date=${date}&venue=central`);
       const cachedMs = Date.now() - cachedStarted;
       check(`${label}: 2回目の一覧はキャッシュに当たり、gate の間隔(2 秒)を待たない(同じ内容・1 秒未満)`, racesCentral2.status === 200 && racesCentral2.text === racesCentral.text && cachedMs < 1000, `${cachedMs}ms`);
       const racesNar = await req(port, "GET", "/api/races?kaisai_date=20260927&venue=nar");
-      const narRows = (parseJson(racesNar.text)["races"] as { race_id: string }[] | undefined) ?? [];
+      const narRows = (parseJson(racesNar.text)["races"] as { race_id: string; start_time?: unknown }[] | undefined) ?? [];
       check(`${label}: GET /api/races(地方。nar のホスト)が 200 で、フィクスチャと同じ件数(${expectedNar})。帯広(場コード65)を含まない`, racesNar.status === 200 && expectedNar > 0 && narRows.length === expectedNar && narRows.every((r) => r.race_id.slice(4, 6) !== "65"), `${racesNar.status} ${racesNar.text.slice(0, 200)}`);
+      check(`${label}: 一覧(地方)も start_time のキーを持ち、1 行目は HH:MM の文字列(全行が HH:MM か null)`, narRows.length > 0 && typeof narRows[0]!.start_time === "string" && HHMM.test(narRows[0]!.start_time) && narRows.every((r) => r.start_time === null || (typeof r.start_time === "string" && HHMM.test(r.start_time))), JSON.stringify(narRows.slice(0, 2)));
       const racesEmpty = await req(port, "GET", "/api/races?kaisai_date=20260101&venue=central");
       check(`${label}: 開催なしの日は 200 で races: []`, racesEmpty.status === 200 && racesEmpty.text === JSON.stringify({ ok: true, kaisai_date: "20260101", venue: "central", races: [] }), `${racesEmpty.status} ${racesEmpty.text.slice(0, 160)}`);
       check(`${label}: GET /api/races の venue が無い・未知は 400`, (await req(port, "GET", `/api/races?kaisai_date=${date}`)).status === 400 && (await req(port, "GET", `/api/races?kaisai_date=${date}&venue=foo`)).status === 400);
