@@ -8,6 +8,8 @@
  *  (ii) 集計の再計算(`refresh=1`)の繰り返し: 1 回あたりの D1 の読み取り行数(D1 が報告する `meta.rows_read` の合計。DO が応答の `diag.rowsRead` に出す)・表ごとの行数・
  *       D1 の読みの壁時計(`diag.readMs`)・3 区分の集計の壁時計(`diag.computeMs`)・workerd の CPU 時間(`/proc/<pid>/stat` の utime+stime。刻み 10ms)
  *  (iii) キャッシュのヒット時の呼び出し: 壁時計・CPU(D1 は透かしと補完待ちの確認の 2 クエリ)
+ *  (iv) 版別比較(Issue #220): 版の数・集計の所要時間(`diag.promptVersionsMs`。3 区分の `computeMs` とは別)・ready 応答の本文のバイト数と、そのうち `promptVersions` のバイト数・
+ *       kv に保存する値の概算(3 区分の `report` の JSON + `promptVersions` の JSON。構造化複製の実サイズではなく JSON の長さ)
  *
  * 合成データ: 詳細(race_snapshot_json・contributions_json・raw_response)は `scripts/measure-d1-size.ts` と同じ実フィクスチャ(中央 16 頭の 202603020211・LLM の実応答 36 本)から作り、
  * 小数の値を固定の種で別の値にする(`measure-migration-import.ts` と同じ)。**乱数は固定の種で、同じ引数なら同じデータ**。分析の `historyCutoffDate` は `--legacy-ratio`(既定 0.7)の割合で NULL
@@ -15,7 +17,8 @@
  * 買い目の件数は **本番の `analysis_bets` の実数が未確認**なので `--bets`(既定 12)で変えて測る(読み取り行数の最大の不確定要素)。
  *
  * 使い方(リポジトリのルートで。Linux のみ。/proc を使う):
- *   pnpm tsx scripts/measure-verify.ts [--analyses 2225] [--results 1301] [--horses 13] [--bets 12] [--legacy-ratio 0.7] [--repeat 5] [--port 8942]
+ *   pnpm tsx scripts/measure-verify.ts [--analyses 2225] [--results 1301] [--horses 13] [--bets 12] [--legacy-ratio 0.7] [--versions 1] [--instruction-length 0] [--repeat 5] [--port 8942]
+ *   版別比較(Issue #220)の実測: `--versions N`(プロンプト版の種類の数。既定 1=#219 のとおり 'v8' だけ)・`--instruction-length L`(追加指示の文字数。0 ならなし。0 より大きいと 4 件に 1 件に付く)
  *
  * 限界:
  *  - **この機械の CPU の速度・ローカルの D1(miniflare の SQLite)での値**。Cloudflare の本番の CPU・D1 の遅延とは一致しない。ローカルの workerd は CPU 上限を強制しない(使う量の測定であり、本番の上限の判定ではない)。
@@ -76,6 +79,24 @@ export interface SyntheticVerifyOptions {
   readonly horses: number;
   readonly bets: number;
   readonly legacyRatio: number;
+  /** プロンプト版の種類の数(Issue #220。版別比較の実測用。1 なら #219 のとおり 'v8' だけ)。 */
+  readonly versions: number;
+  /** 追加指示の文字数(Issue #220。0 なら追加指示なし。0 より大きいと 4 件に 1 件に、版ごとに別の文面を付ける)。 */
+  readonly instructionLength: number;
+}
+
+/** 合成した分析 `i`(1 始まり)のプロンプト版。6 件に 1 件が版不明(null)。残りは `versions` 種類に均等に割り当てる(1 種類なら #219 のとおり 'v8')。 */
+export function syntheticPromptVersion(i: number, versions: number): string | null {
+  if (i % 6 === 0) return null;
+  if (versions <= 1) return "v8";
+  const nonNullIndex = i - Math.floor(i / 6); // 版不明の分を詰めた通し番号(版が偏らないようにする)
+  return `v${String(nonNullIndex % versions).padStart(2, "0")}`;
+}
+
+/** 合成した分析 `i` の追加指示。`length` が 0 ならなし。0 より大きいと 4 件に 1 件に、版ごとに別の文面(`length` 文字ちょうど)を付ける。 */
+export function syntheticAdditionalInstruction(i: number, versions: number, length: number): string | null {
+  if (length <= 0 || i % 4 !== 0) return null;
+  return `[${syntheticPromptVersion(i, versions) ?? "unknown"}]${"あ".repeat(length)}`.slice(0, length);
 }
 
 const COMBO_TYPES: readonly ComboBetType[] = ["wide", "trio", "quinella", "exacta", "trifecta", "bracketQuinella"];
@@ -112,8 +133,8 @@ export function* syntheticAnalyses(options: SyntheticVerifyOptions): Generator<A
       raceId,
       analyzedAt: new Date(analyzedAtMs).toISOString(),
       evEstimated: i % 40 === 0,
-      promptVersion: i % 6 === 0 ? null : "v8",
-      additionalInstruction: null,
+      promptVersion: syntheticPromptVersion(i, options.versions),
+      additionalInstruction: syntheticAdditionalInstruction(i, options.versions, options.instructionLength),
       kaisaiDate: i % 25 === 0 ? null : kaisai,
       model: "claude-sonnet-5-5",
       rawResponse: responses[i % responses.length]!,
@@ -207,7 +228,8 @@ interface VerifyView {
   staleReason?: string | null;
   computedAt?: string;
   report?: { includedAnalysisCount: number; excludedLookaheadSuspectCount: number; excludedLookaheadUnknownCount: number; proposedBet: { overall: { betCount: number } } };
-  diag?: { rowsRead: number; counts: Record<string, number>; readMs: number; computeMs: number; startTimeGaps: { lost: number; affecting: number } };
+  promptVersions?: unknown[];
+  diag?: { rowsRead: number; counts: Record<string, number>; readMs: number; computeMs: number; promptVersionsMs?: number; startTimeGaps: { lost: number; affecting: number } };
 }
 
 const range = (xs: readonly number[]): string => (xs.length === 0 ? "-" : `${Math.min(...xs)}〜${Math.max(...xs)}`);
@@ -220,6 +242,8 @@ async function main(): Promise<void> {
     horses: argNumber("--horses", 13),
     bets: argNumber("--bets", 12),
     legacyRatio: argNumber("--legacy-ratio", 0.7),
+    versions: argNumber("--versions", 1),
+    instructionLength: argNumber("--instruction-length", 0),
   };
   const repeat = argNumber("--repeat", 5);
   const port = argNumber("--port", 8942);
@@ -305,13 +329,14 @@ async function main(): Promise<void> {
     }
     const pid = child.pid!;
     const origin = `http://127.0.0.1:${port}`;
-    const call = async (query: string): Promise<{ view: VerifyView; wallMs: number; cpuMs: number }> => {
+    const call = async (query: string): Promise<{ view: VerifyView; wallMs: number; cpuMs: number; bodyBytes: number }> => {
       const c0 = workerdTicks(pid);
       const t0 = Date.now();
       const res = await fetch(`${origin}/api/verify${query}`, { signal: AbortSignal.timeout(300_000) });
-      const view = (await res.json()) as VerifyView;
+      const text = await res.text();
+      const view = JSON.parse(text) as VerifyView;
       const t1 = Date.now();
-      return { view, wallMs: t1 - t0, cpuMs: (workerdTicks(pid) - c0) * msPerTick };
+      return { view, wallMs: t1 - t0, cpuMs: (workerdTicks(pid) - c0) * msPerTick, bodyBytes: Buffer.byteLength(text) };
     };
 
     // 3. (i) 発走時刻の補完: 準備中でなくなるまで 500ms ごとに呼ぶ。
@@ -344,6 +369,7 @@ async function main(): Promise<void> {
     const computes: number[] = [];
     const walls: number[] = [];
     const cpus: number[] = [];
+    const versionMs: number[] = [];
     let lastView: VerifyView | null = null;
     for (let i = 0; i < repeat; i += 1) {
       const { view, wallMs, cpuMs } = await call("?venue=all&refresh=1");
@@ -351,6 +377,7 @@ async function main(): Promise<void> {
       rows.push(view.diag.rowsRead);
       reads.push(view.diag.readMs);
       computes.push(view.diag.computeMs);
+      versionMs.push(view.diag.promptVersionsMs ?? Number.NaN);
       walls.push(wallMs);
       cpus.push(cpuMs);
       lastView = view;
@@ -358,8 +385,19 @@ async function main(): Promise<void> {
     }
     console.log(`\n## (ii) 集計の再計算(refresh=1)を ${repeat} 回`);
     console.log(`  D1 の読み取り行数(meta.rows_read の合計): ${range(rows)} 行/回。表ごとの行数: ${JSON.stringify(lastView?.diag?.counts)}`);
-    console.log(`  D1 の読み ${range(reads)}ms、3 区分の集計 ${range(computes)}ms、呼び出し全体の壁時計 ${range(walls)}ms、workerd の CPU ${range(cpus.map((c) => Math.round(c)))}ms(10ms 刻み)`);
+    console.log(`  D1 の読み ${range(reads)}ms、3 区分の集計 ${range(computes)}ms、版別比較の集計 ${range(versionMs)}ms、呼び出し全体の壁時計 ${range(walls)}ms、workerd の CPU ${range(cpus.map((c) => Math.round(c)))}ms(10ms 刻み)`);
     console.log(`  集計の中身(区分 all): 集計 ${lastView?.report?.includedAnalysisCount} 件・先読み疑いで除外 ${lastView?.report?.excludedLookaheadSuspectCount} 件・判定不能で除外 ${lastView?.report?.excludedLookaheadUnknownCount} 件・配分ベースの点数 ${lastView?.report?.proposedBet.overall.betCount}`);
+
+    // 4b. (iv) 版別比較の大きさ(区分 all の ready 応答と、central・nar の report の JSON の長さから、kv に保存する値を概算する)。
+    const reportBytes = (view: VerifyView): number => Buffer.byteLength(JSON.stringify(view.report));
+    const allCall = await call("?venue=all");
+    const centralCall = await call("?venue=central");
+    const narCall = await call("?venue=nar");
+    const versionsBytes = Buffer.byteLength(JSON.stringify(allCall.view.promptVersions));
+    console.log(`\n## (iv) 版別比較(--versions ${options.versions}・--instruction-length ${options.instructionLength})`);
+    console.log(`  版の数 ${allCall.view.promptVersions?.length}(版不明を含む)。promptVersions の JSON ${versionsBytes} バイト、ready 応答の本文 ${allCall.bodyBytes} バイト(区分 all)`);
+    console.log(`  report の JSON: all ${reportBytes(allCall.view)}・central ${reportBytes(centralCall.view)}・nar ${reportBytes(narCall.view)} バイト`);
+    console.log(`  kv に保存する値の概算(3 区分の report + promptVersions の JSON の長さ。diag は含まない): ${reportBytes(allCall.view) + reportBytes(centralCall.view) + reportBytes(narCall.view) + versionsBytes} バイト`);
 
     // 5. (iii) キャッシュのヒット(最短間隔 1ms でも、透かしが同じで TTL 内ならヒット)。
     const hitWalls: number[] = [];

@@ -6,8 +6,26 @@
  * **サーバ由来の文は読まない**: 出す文言はすべてクライアントの固定の文言(サーバが返す日時・件数・券種コードは、整形して埋め込むだけ)。
  */
 import { formatJstDateTime } from "./date";
-import type { ProposedSummaryView, VerifyOutcome, VerifyReportView, VerifyVenue } from "./api-verify";
-import { exclusionRows, formatPayoutBreakdown, formatRate, formatUnknownBetTypeNotice, formatYen, PROPOSED_BET_LABELS, venueLabel } from "./verify-format";
+import type { CalibrationBinView, ProposedSummaryView, PromptVersionView, VerifyOutcome, VerifyReportView, VerifyVenue } from "./api-verify";
+import {
+  additionalInstructionsFullText,
+  additionalInstructionsSummary,
+  calibrationBarWidthPercent,
+  directionLabel,
+  exclusionRows,
+  formatAdjustment,
+  formatBinRange,
+  formatPayoutBreakdown,
+  formatRate,
+  formatUnknownBetTypeNotice,
+  formatYen,
+  markLabel,
+  overconfidenceLabel,
+  PROPOSED_BET_LABELS,
+  promptVersionCalibrationHeading,
+  promptVersionLabel,
+  venueLabel,
+} from "./verify-format";
 
 /** 取得の状態。 */
 export type VerifyLoadState =
@@ -22,6 +40,8 @@ export interface VerifyModelInput {
   readonly busy: boolean;
   /** 自動更新を止めている(通信の失敗が続いた・回数の上限)。 */
   readonly pollStopped: boolean;
+  /** キャリブレーションを開いている版のキー(`versionKey`)。 */
+  readonly expandedVersions: readonly string[];
 }
 
 export type Tone = "info" | "ok" | "error" | "wait";
@@ -70,6 +90,66 @@ export interface ProposedSection {
   readonly population: readonly RowView[];
 }
 
+/** 1 つの項目の値(名前つき)。名前と値を並べて折り返せるように、「/」区切りの 1 行にはしない。 */
+export interface StatCell {
+  readonly name: string;
+  readonly value: string;
+}
+
+/** 帯グラフ(`progress`。`value`/`max` は整数。実複勝率を ×1000 で丸めた値)。 */
+export interface BarView {
+  readonly value: number;
+  readonly max: number;
+  readonly label: string;
+}
+
+/** 補正方向・キャリブレーションの帯・印・(版別の)帯の 1 行。 */
+export interface StatRow {
+  readonly label: string;
+  readonly cells: readonly StatCell[];
+  readonly bar: BarView | null;
+}
+
+/** 補正方向×結果・印別的中率の節。 */
+export interface StatSection {
+  readonly heading: string;
+  readonly description: string;
+  readonly rows: readonly StatRow[];
+}
+
+/** キャリブレーションの節。帯が 0 本のときは `empty` に文を入れる。 */
+export interface CalibrationSection extends StatSection {
+  readonly empty: string | null;
+}
+
+/** 版別比較の 1 版のカード。キャリブレーションは開いたときだけ行を持つ。 */
+export interface VersionCard {
+  /** 開閉の識別子(`versionKey`)。 */
+  readonly key: string;
+  readonly title: string;
+  /** 「追加指示: 要約」。 */
+  readonly instructions: string;
+  readonly included: string;
+  readonly tiles: readonly Tile[];
+  readonly expanded: boolean;
+  readonly toggleLabel: string;
+  /** 開いたときだけ: 見出し(版+追加指示の要約)・追加指示の全文・帯の行(帯が 0 本なら `calibrationEmpty`)。 */
+  readonly calibrationHeading: string | null;
+  readonly fullInstructions: string | null;
+  readonly calibrationEmpty: string | null;
+  readonly calibrationRows: readonly StatRow[];
+}
+
+export interface VersionsSection {
+  readonly heading: string;
+  readonly description: string;
+  /** 版不明の行があるときの、その内訳の注記。 */
+  readonly unknownNote: string | null;
+  /** 版別が 0 件のときの文。 */
+  readonly empty: string | null;
+  readonly cards: readonly VersionCard[];
+}
+
 export interface VerifyNotice {
   readonly tone: Tone;
   readonly text: string;
@@ -91,6 +171,14 @@ export interface VerifyModel {
   readonly notices: readonly VerifyNotice[];
   readonly bet: BetSection | null;
   readonly proposed: ProposedSection | null;
+  /** プロンプト版別の比較(Issue #220。区分に依らず全体)。 */
+  readonly versions: VersionsSection | null;
+  /** 補正方向×結果(Issue #220)。 */
+  readonly direction: StatSection | null;
+  /** キャリブレーション(Issue #220)。 */
+  readonly calibration: CalibrationSection | null;
+  /** 印別的中率(Issue #220)。 */
+  readonly marks: StatSection | null;
 }
 
 const POLL_STOPPED_NOTICE = "自動更新を止めました。「更新」で取り直せます。";
@@ -143,6 +231,109 @@ function proposedSection(report: VerifyReportView): ProposedSection {
       { label: "未到達", value: `${p.population.unreached}件` },
       { label: "記録なし", value: `${p.population.noRecord}件` },
     ],
+  };
+}
+
+/** 実複勝率の帯グラフ。`progress` の value/max は整数なので、実複勝率(0〜1)を ×1000 で丸める。 */
+function rateBar(rate: number | null): BarView {
+  const value = Math.min(1000, Math.max(0, Math.round(calibrationBarWidthPercent(rate) * 10)));
+  return { value, max: 1000, label: `実複勝率 ${formatRate(rate)}` };
+}
+
+/**
+ * キャリブレーションの行。過信バイアスは帯と**同じ添字**で対応づける(exe の `CalibrationTable` と同じ。無ければ「予測−実績」は -)。
+ * 版別のキャリブレーション(`verify-versions` の射影)は帯に過信バイアスを含むので、`gaps` を帯と同じ長さで渡す。
+ */
+export function calibrationRows(bins: readonly CalibrationBinView[], gaps: readonly (number | null)[]): readonly StatRow[] {
+  return bins.map((bin, index) => {
+    const gap = gaps[index] ?? null;
+    return {
+      label: formatBinRange(bin),
+      bar: rateBar(bin.actualPlaceRate),
+      cells: [
+        { name: "予測件数", value: `${bin.predictedCount}件` },
+        { name: "複勝件数", value: `${bin.placedCount}件` },
+        { name: "実複勝率", value: formatRate(bin.actualPlaceRate) },
+        { name: "予測−実績", value: gap === null ? "-" : `${formatAdjustment(gap)}(${overconfidenceLabel(gap)})` },
+      ],
+    };
+  });
+}
+
+/** 版別の開閉のキー。版不明(null)と、文字列の版が衝突しない形にする。 */
+export function versionKey(promptVersion: string | null): string {
+  return promptVersion === null ? "unknown" : `v:${promptVersion}`;
+}
+
+const UNKNOWN_VERSION_NOTE = "「版不明」は版記録導入前の旧データと、APIキー未設定で実行したLLM未使用の分析の両方を含みます(区別できません)。";
+
+function versionCard(v: PromptVersionView, expandedKeys: ReadonlySet<string>): VersionCard {
+  const key = versionKey(v.promptVersion);
+  const expanded = expandedKeys.has(key);
+  return {
+    key,
+    title: promptVersionLabel(v.promptVersion),
+    instructions: `追加指示: ${additionalInstructionsSummary(v.additionalInstructions)}`,
+    included: `集計件数 ${v.includedAnalysisCount}件`,
+    tiles: tiles(v.bet.betCount, v.bet.totalStake, v.bet.totalReturn, v.bet.recoveryRate),
+    expanded,
+    toggleLabel: expanded ? "キャリブレーションを閉じる" : "キャリブレーションを表示",
+    calibrationHeading: expanded ? promptVersionCalibrationHeading(v.promptVersion, v.additionalInstructions) : null,
+    fullInstructions: expanded ? `追加指示(全文): ${additionalInstructionsFullText(v.additionalInstructions)}` : null,
+    calibrationEmpty: expanded && v.calibration.length === 0 ? "データがありません。" : null,
+    calibrationRows: expanded ? calibrationRows(v.calibration, v.overconfidenceGaps) : [],
+  };
+}
+
+function versionsSection(versions: readonly PromptVersionView[], expandedVersions: readonly string[]): VersionsSection {
+  const expandedKeys = new Set(expandedVersions);
+  return {
+    heading: "プロンプト版別比較",
+    description: "プロンプトの版ごとの累積回収率とキャリブレーション。版別は全体の集計です(上の区分の切替には連動しません)。同じ版でも追加指示が違えば別条件です。",
+    unknownNote: versions.some((v) => v.promptVersion === null) ? UNKNOWN_VERSION_NOTE : null,
+    empty: versions.length === 0 ? "集計対象がありません。" : null,
+    cards: versions.map((v) => versionCard(v, expandedKeys)),
+  };
+}
+
+function directionSection(report: VerifyReportView): StatSection {
+  return {
+    heading: "補正方向×結果",
+    description: "AI が確率を上げた馬・下げた馬・据え置いた馬が、実際に複勝圏に来たか。",
+    rows: report.trend.directionGroups.map((g) => ({
+      label: directionLabel(g.direction),
+      bar: null,
+      cells: [
+        { name: "件数", value: `${g.count}件` },
+        { name: "実複勝率", value: formatRate(g.actualPlaceRate) },
+        { name: "平均補正幅", value: formatAdjustment(g.averageAdjustment) },
+      ],
+    })),
+  };
+}
+
+function calibrationSection(report: VerifyReportView): CalibrationSection {
+  return {
+    heading: "キャリブレーション(推定確率帯ごとの実複勝率・過信バイアス)",
+    description: "予測−実績が正なら過信、負なら過小評価。",
+    empty: report.calibration.length === 0 ? "データがありません。" : null,
+    rows: calibrationRows(report.calibration, report.trend.calibrationBias.map((b) => b.overconfidenceGap)),
+  };
+}
+
+function marksSection(report: VerifyReportView): StatSection {
+  return {
+    heading: "印別的中率",
+    description: "印付けが機能しているか(複勝率は 3 着以内、勝率は 1 着)。",
+    rows: report.trend.markStats.map((m) => ({
+      label: markLabel(m.mark),
+      bar: null,
+      cells: [
+        { name: "件数", value: `${m.count}件` },
+        { name: "複勝率", value: formatRate(m.placeRate) },
+        { name: "勝率", value: formatRate(m.winRate) },
+      ],
+    })),
   };
 }
 
@@ -214,5 +405,9 @@ export function buildVerifyModel(input: VerifyModelInput): VerifyModel {
     notices,
     bet: ready === null ? null : betSection(ready.report),
     proposed: ready === null ? null : proposedSection(ready.report),
+    versions: ready === null ? null : versionsSection(ready.promptVersions, input.expandedVersions),
+    direction: ready === null ? null : directionSection(ready.report),
+    calibration: ready === null ? null : calibrationSection(ready.report),
+    marks: ready === null ? null : marksSection(ready.report),
   };
 }

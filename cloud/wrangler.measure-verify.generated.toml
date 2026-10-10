@@ -1,0 +1,133 @@
+# Issue #161(#21-C)のクラウド版の Worker の設定。
+#
+# ★公開リポジトリのため、メールアドレス・Access のチーム名・AUD はここにも書かない。
+#   これらは Worker の secret(ACCESS_TEAM_NAME / ACCESS_AUD / ACCESS_ALLOWED_EMAIL)として、
+#   ユーザーがダッシュボードで登録する。secret は wrangler deploy で消えない
+#   (vars にするとダッシュボードの値は次のデプロイで上書きされる)。
+#   したがって [vars] も `secrets.required` も置かない(未設定なら Worker が全リクエストに 403 を返す)。
+name = "keiba-cloud"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+# nodejs_compat: core の HttpClient(Buffer)と iconv-lite(Buffer)が使う。
+compatibility_flags = ["nodejs_compat"]
+
+# workers.dev に出す(Cloudflare Access を workers.dev に掛けるため)。独自ドメイン・routes は使わない。
+workers_dev = true
+# Version URL / Preview URL は無効にする(Access の掛け忘れ以前に、入口を増やさない)。
+preview_urls = false
+
+[observability]
+enabled = true
+
+# Issue #206(#166-E): 定時の自動実行の cron。**これを有効にすると、本番で毎朝 JST 9:00(UTC 0:00)に自動で次のことが起きる**:
+#   scheduled(src/scheduled.ts)→ その日の日単位の DO の requestPlan → 中央・地方の一覧の取得(netkeiba)→ 計画 → 朝の取得 → 発走前の分析(Claude API。ANTHROPIC_API_KEY が登録済みのとき)→ Discord 通知。
+# cron は 1 本だけ(UTC 0:00 = JST 9:00。ユーザー判断)。scripts/test/cloud-config-guard.test.ts が `["0 0 * * *"]` ちょうどを固定する。
+# ★止め方: `[triggers]` を**消すだけでは止まらない**(wrangler は crons が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、本番では未確認)。
+#   `crons = []`(空配列)にしてデプロイする。ダッシュボードで消しても、次のデプロイで、この toml の内容に戻る(wrangler deploy は toml の crons で schedule を上書きする)。
+#   課金だけを止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除する(netkeiba への取得は続く)。手順は cloud/README.md。
+[triggers]
+crons = ["0 0 * * *"]
+
+# SQLite バックエンドの Durable Object(Free プランで使えるのは SQLite バックエンドだけ)。
+# #162 で netkeiba への取得(TCP ソケット)と間隔制御・サーキットブレーカーを担う。クラス名は migration に固定されるため、変えるときは migration が要る。
+# メソッドや保存する値を足すだけなら migration は要らない(v1 のまま)。
+[[durable_objects.bindings]]
+name = "NETKEIBA_GATE"
+class_name = "NetkeibaGate"
+
+# 日単位の Durable Object(Issue #177〈#164-b〉)。`idFromName(kaisaiDate)` で、その日の全レースの朝の準備(取得 → prior)を直列に処理し、
+# 取得キャッシュ・朝の prior・状態を自分の SQLite に置く。クラス名は migration に固定される。呼び出す入口は #180(本番)・smoke(ローカル)。
+[[durable_objects.bindings]]
+name = "RACE_DAY"
+class_name = "RaceDay"
+
+# exe から移したファイルの取り込みの Durable Object(Issue #216〈#167-B1〉)。`idFromName("main")` の単一インスタンスが、アップロードされたファイル(R2)の検証と、
+# アラームでの少しずつの取り込み(D1 の書き込みの 1 日の上限・R2 の柵を尊重)を行う。日単位の DO とは別のインスタンス・別のアラームで、netkeiba には出ない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "CLOUD_MIGRATION"
+class_name = "CloudMigration"
+
+# 移行したあとに結果が無いレースの結果を、自動で少しずつ取り込む Durable Object(Issue #217〈#167-C〉)。`idFromName("main")` の単一インスタンス。
+# 移行が完了してから、JST 1:00〜6:00 の間だけ、1 晩 150 レースまで、日単位の DO に結果の取り込みを依頼する(gate が混んでいれば引く)。cron の `scheduled` が毎日 kick してアラームを張る。
+# 取得は日単位の DO が行い、この DO は netkeiba に直接は出ない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "RESULT_BACKFILL"
+class_name = "ResultBackfill"
+
+# 検証の集計の Durable Object(Issue #219〈web の検証画面(1)〉)。`idFromName("main")` の単一インスタンスが、分析・結果の全件を D1 から読んで core の検証の集計を行い、結果をキャッシュする
+# (Workers Free の CPU 10ms に収まらないため DO で行う)。アラームで、旧い分析の発走時刻を R2 の詳細から D1 へ少しずつ写す。netkeiba にも LLM にも出ない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "VERIFY_REPORT"
+class_name = "VerifyReportDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NetkeibaGate"]
+
+# 追加だけ(v1 の NetkeibaGate には触れない)。
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RaceDay"]
+
+# 追加だけ(v1・v2 には触れない)。Issue #216。
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CloudMigration"]
+
+# 追加だけ(v1・v2・v3 には触れない)。Issue #217。
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["ResultBackfill"]
+
+# 追加だけ(v1〜v4 には触れない)。Issue #219。
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["VerifyReportDO"]
+
+# D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
+# ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。
+# migration(migrations/)は、CI がデプロイの前に `wrangler d1 migrations apply DB --remote` で適用する。追加のみ(反映までの間は旧 Worker が動くため)。
+# ★`remote = true` は付けない(ローカルのテスト・開発が本番の D1 に繋がってしまう)。
+[[d1_databases]]
+binding = "DB"
+database_name = "keiba-cloud-db"
+database_id = "c52e97fc-d495-4395-8141-80d20ef57a16"
+migrations_dir = "migrations"
+
+# R2(分析の詳細オブジェクト。Issue #174〈#172-a〉)。大きな列(race_snapshot_json・raw_response・馬ごとの contributions)の置き場(方式 A。#169)。
+# バケットはユーザーがダッシュボードで作成した(ロケーションは アジア太平洋。管轄〈jurisdiction〉の指定は無い=既定)。
+# ★この Issue は binding だけ(使うコードは #172-b 以降)。デプロイ(deploy-cloud.yml)は、wrangler deploy の前に R2 の権限を確認する。
+# ★`remote = true`・`preview_bucket_name`・`jurisdiction` は付けない(ローカルのテスト・開発が本番のバケットに繋がってしまう。
+#   管轄付きのバケットは binding に jurisdiction が要る〈公式ドキュメントの記述。未確認〉が、このバケットは指定なしで作られた)。
+[[r2_buckets]]
+binding = "ANALYSIS_DETAIL"
+bucket_name = "keiba-cloud-r2"
+
+# Issue #193(#179-a): `"@anthropic-ai/sdk"`(LLM の呼び出し。core の anthropic-client.ts・model-selection.ts が値で import する)も、cheerio と同じく
+# このディレクトリの node_modules から解決させる(CI には packages/core/node_modules が無い)。`"@keiba/core/llm"` は、その LLM の狭い入口
+# (analyze-race・anthropic-client・model-selection の再 export。better-sqlite3 を経由しない)。
+# Issue #176: 末尾の `"@keiba/core/..."` の行(4行 + #193 の llm で5行)は、runAnalysis(packages/app の main/analysis-pipeline.ts。相対 import で取り込む)が import する
+# core のサブパスを packages/core/src の実ファイルに向ける。★wrangler の alias は完全一致なので**サブパスごとに1行**要る(前方一致は無い。
+# CI のように各 package の node_modules が無い配置では、ここが無いと Could not resolve で失敗する)。runAnalysis の閉包が新しいサブパスを
+# import したら、ここに1行足す(tsconfig.json の paths は `@keiba/core/*` で前方一致、vitest.config.ts の alias も前方一致。
+# test/import-guard.test.ts が、閉包のサブパスとここの行の一致を検査する)。★バレル(`@keiba/core` そのもの)は向けない
+# (better-sqlite3 を巻き込む。型だけの import でも CI で解決に失敗する)。
+# core(workspace の外。相対 import で取り込む)をバンドルするための解決。CI では packages/core/node_modules が無いので、
+# 依存はこのディレクトリの node_modules から解決させる。undici はスタブに差し替える(src/undici-stub.ts)。
+# tsconfig.json の paths・vitest.config.ts の alias と同じ対応。
+[alias]
+undici = "./src/undici-stub.ts"
+iconv-lite = "./node_modules/iconv-lite"
+cheerio = "./node_modules/cheerio"
+"@anthropic-ai/sdk" = "./node_modules/@anthropic-ai/sdk"
+"@keiba/core/pipeline" = "../packages/core/src/pipeline.ts"
+"@keiba/core/llm" = "../packages/core/src/llm.ts"
+"@keiba/core/scorer/snapshot-filter" = "../packages/core/src/scorer/snapshot-filter.ts"
+"@keiba/core/ev/bet-allocation" = "../packages/core/src/ev/bet-allocation.ts"
+"@keiba/core/ev/combo-bet-allocation" = "../packages/core/src/ev/combo-bet-allocation.ts"
+
+[access.dev]
+aud = "measure-aud"
+
+[access.dev.identity]
+email = "owner@example.com"

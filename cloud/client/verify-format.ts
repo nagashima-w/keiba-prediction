@@ -77,3 +77,95 @@ export function venueLabel(venue: "all" | "central" | "nar"): string {
       return "地方のみ";
   }
 }
+
+// ---------------------------------------------------------------------------
+// Issue #220: 補正方向×結果・キャリブレーション・印別的中率・プロンプト版別比較の整形(exe の同名の関数と同じ出力。一致は scripts/test/cloud-verify-format.test.ts)
+// ---------------------------------------------------------------------------
+
+/** 補正方向。 */
+export type AdjustmentDirectionName = "raised" | "lowered" | "unchanged";
+
+/** 補正方向を日本語ラベルにする。 */
+export function directionLabel(direction: AdjustmentDirectionName): string {
+  switch (direction) {
+    case "raised":
+      return "上げ";
+    case "lowered":
+      return "下げ";
+    case "unchanged":
+      return "据え置き";
+  }
+}
+
+/** 補正幅・過信バイアス(0〜1 スケールの確率差)を符号付きポイント表示にする(例: 0.052 → "+5.2pt"、-0.031 → "-3.1pt")。null は "-"。 */
+export function formatAdjustment(value: number | null): string {
+  if (value === null) {
+    return "-";
+  }
+  const pt = value * 100;
+  const sign = pt >= 0 ? "+" : "";
+  return `${sign}${pt.toFixed(1)}pt`;
+}
+
+/** 過信バイアス(代表予測値−実複勝率)の符号のラベル。正は「過信」、負は「過小評価」、0 ちょうどは「一致」、null は "-"。 */
+export function overconfidenceLabel(gap: number | null): string {
+  if (gap === null) {
+    return "-";
+  }
+  if (gap > 0) {
+    return "過信";
+  }
+  if (gap < 0) {
+    return "過小評価";
+  }
+  return "一致";
+}
+
+/** 印別的中率の印表示。印なし(null)は「印なし」。 */
+export function markLabel(mark: string | null): string {
+  return mark === null ? "印なし" : mark;
+}
+
+/** 確率帯ラベル(例: 下限 0.4・上限 0.5 → "40〜50%")。 */
+export function formatBinRange(bin: { readonly lowerBound: number; readonly upperBound: number }): string {
+  const lower = Math.round(bin.lowerBound * 100);
+  const upper = Math.round(bin.upperBound * 100);
+  return `${lower}〜${upper}%`;
+}
+
+/** 帯グラフの幅(%)。複勝率(0〜1)を 0〜100 に写す。null は 0。 */
+export function calibrationBarWidthPercent(rate: number | null): number {
+  return rate === null ? 0 : rate * 100;
+}
+
+/** プロンプト版番号の表示。版不明(null)は「版不明」。 */
+export function promptVersionLabel(promptVersion: string | null): string {
+  return promptVersion === null ? "版不明" : promptVersion;
+}
+
+/** 追加指示の 1 件を 30 文字までに切り詰める(超過分は「…」)。 */
+function truncateInstruction(instruction: string): string {
+  const LIMIT = 30;
+  return instruction.length > LIMIT ? `${instruction.slice(0, LIMIT)}…` : instruction;
+}
+
+/** 版内で使われた追加指示の要約。空配列・[null] は「なし」、各要素は 30 文字で切り、複数は「 / 」で連ねる(null は「なし」)。 */
+export function additionalInstructionsSummary(instructions: readonly (string | null)[]): string {
+  if (instructions.length === 0) {
+    return "なし";
+  }
+  return instructions.map((instruction) => (instruction === null ? "なし" : truncateInstruction(instruction))).join(" / ");
+}
+
+/** 版内で使われた追加指示の全文(切り詰めなし。null は「なし」)。 */
+export function additionalInstructionsFullText(instructions: readonly (string | null)[]): string {
+  if (instructions.length === 0) {
+    return "なし";
+  }
+  return instructions.map((instruction) => (instruction === null ? "なし" : instruction)).join(" / ");
+}
+
+/** 版別キャリブレーションの見出し(版番号+追加指示の要約)。 */
+export function promptVersionCalibrationHeading(promptVersion: string | null, additionalInstructions: readonly (string | null)[]): string {
+  return `${promptVersionLabel(promptVersion)} (追加指示: ${additionalInstructionsSummary(additionalInstructions)})`;
+}

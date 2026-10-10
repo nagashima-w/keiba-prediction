@@ -272,6 +272,7 @@ export function createApp(deps: AppDeps): App {
     onMigrationStart: migration.onStart,
     onMigrationCancelCheck: migration.onCancelCheck,
     onVerifyVenue: verify.onVenue,
+    onVerifyVersionToggle: verify.onVersionToggle,
   };
 
   function render(force = false): void {

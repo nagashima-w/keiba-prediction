@@ -12,7 +12,7 @@
  * 2. **補完待ちがあれば集計しない**(発走時刻を失ったまま計算すると、先読み疑いの判定が exe とずれる)。集計があれば、それを「補完中」の印つきで返し、無ければ `preparing`(残り件数)。
  *    補完は `runBackfillTick`(アラーム)が少しずつ行う。
  * 3. 集計が新しい(透かしが同じで TTL 内)ならそのまま返す。そうでなければ再計算するが、**費用の柵**(最短間隔・1 日の回数)に当たったら古い集計を返す(`stale`)。
- * 4. 再計算: `readAll`(7 文の batch)→ `buildVerifySource` → 3 区分の `computeVerifyReport`(`PRODUCTION_VERIFY_CONFIG` = exe の検証画面と同じ設定)。
+ * 4. 再計算: `readAll`(7 文の batch)→ `buildVerifySource` → 3 区分の `computeVerifyReport`(`PRODUCTION_VERIFY_CONFIG` = exe の検証画面と同じ設定)と、プロンプト版別の比較(`computePromptVersionSummaries`。全体のみ・画面が使う項目だけ。D1 は追加で読まない。Issue #220)。
  *    読んだ行に NULL の行が混ざっていたら(確認と読みの間に保存された)、キャッシュせず `preparing`(集計は exe と一致するときだけ出す)。
  *
  * ## 費用の柵(D1 の読み取り 500 万行/日)
@@ -29,6 +29,7 @@
 import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
 import { isReadAllowed, type R2Usage } from "./r2-fence";
 import { buildVerifySource, countStartTimeGaps } from "./verify-read";
+import { computePromptVersionSummaries, type PromptVersionSummary } from "./verify-versions";
 import type { PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "./verify-store";
 
 /** 集計の有効期間(透かしが同じ間)。既存の行の更新〈`race_results` の UPSERT〉は透かしに出ないため、この時間で拾う。 */
@@ -64,8 +65,11 @@ const RESUME_MARGIN_MS = 5 * 60_000;
 /** 補完の 1 tick の問い合わせ数のうち、R2 の get 以外(使用量 1・補完待ち 1・書き込みの batch 2 文)。 */
 const TICK_OVERHEAD_QUERIES = 4;
 const JST_OFFSET_MS = 9 * 60 * 60_000;
-/** kv に保存する集計の形式の版。形が変わったら上げる(古い集計は使わず再計算する)。 */
-const CACHE_VERSION = 1;
+/**
+ * kv に保存する集計の形式の版。形が変わったら上げる(古い集計は使わず再計算する)。
+ * 2: 版別比較(`promptVersions`。Issue #220)を足した。版 1 の集計は使わず、デプロイ後の最初の要求で再計算する(1 日の再計算の回数に数える)。
+ */
+const CACHE_VERSION = 2;
 
 /** `ctx.storage.kv`(同期 API)のうち、ここで使う部分。 */
 export interface VerifyKv {
@@ -110,8 +114,10 @@ export interface VerifyDiag {
   readonly counts: Readonly<Record<string, number>>;
   /** D1 の読みにかかった壁時計(ミリ秒)。 */
   readonly readMs: number;
-  /** 3 区分の集計にかかった壁時計(ミリ秒)。 */
+  /** 3 区分の集計にかかった壁時計(ミリ秒)。Issue #220 以降も意味は同じ(版別は `promptVersionsMs` に分ける)。 */
   readonly computeMs: number;
+  /** プロンプト版別の比較の集計にかかった壁時計(ミリ秒。Issue #220)。 */
+  readonly promptVersionsMs: number;
   /**
    * 発走時刻を確認できなかった分析(詳細が無い・壊れている)。`lost` はその数、`affecting` はそのうち**先読み判定が時刻に依る**(遮断済みでない)もの。
    * `affecting` > 0 のとき、exe には時刻があった旧い行が、web では「時刻なし」として判定される可能性がある。
@@ -124,6 +130,8 @@ interface CacheEntry {
   readonly computedAt: number;
   readonly watermark: Watermark;
   readonly reports: Readonly<Record<VerifyVenueFilter, VerifyReport>>;
+  /** プロンプト版別の比較(全体のみ。区分に依らない。画面が使う項目だけ)。Issue #220。 */
+  readonly promptVersions: readonly PromptVersionSummary[];
   readonly diag: VerifyDiag;
 }
 
@@ -150,6 +158,8 @@ export type VerifyResponse =
       readonly status: "ready";
       readonly venue: VerifyVenueFilter;
       readonly report: VerifyReport;
+      /** プロンプト版別の比較(Issue #220)。**区分(venue)に依らず全体**(exe の版別比較と同じ)。画面が使う項目だけを持つ。 */
+      readonly promptVersions: readonly PromptVersionSummary[];
       /** 集計した時刻(ISO)。 */
       readonly computedAt: string;
       /** データの更新に追いついていない集計か(費用の柵・補完中)。 */
@@ -277,6 +287,7 @@ export class VerifyCore {
       status: "ready",
       venue,
       report: cache.reports[venue],
+      promptVersions: cache.promptVersions,
       computedAt: new Date(cache.computedAt).toISOString(),
       stale: reason !== null,
       staleReason: reason,
@@ -319,17 +330,20 @@ export class VerifyCore {
       nar: computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG, "nar"),
     };
     const t2 = now();
+    const promptVersions = computePromptVersionSummaries(source);
+    const t3 = now();
     const entry: CacheEntry = {
       v: CACHE_VERSION,
-      computedAt: t2,
+      computedAt: t3,
       watermark,
       reports,
-      diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
+      promptVersions,
+      diag: { rowsRead: read.rowsRead, counts: read.counts, readMs: t1 - t0, computeMs: t2 - t1, promptVersionsMs: t3 - t2, startTimeGaps: countStartTimeGaps(read.rows.analyses) },
     };
     kv.put("cache", entry);
     const prev = kv.get<Runs>("runs");
-    const day = jstDay(t2);
-    kv.put("runs", { day, count: prev !== undefined && prev.day === day ? prev.count + 1 : 1, lastAt: t2 } satisfies Runs);
+    const day = jstDay(t3);
+    kv.put("runs", { day, count: prev !== undefined && prev.day === day ? prev.count + 1 : 1, lastAt: t3 } satisfies Runs);
     return entry;
   }
 

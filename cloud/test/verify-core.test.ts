@@ -164,6 +164,38 @@ describe("getReport: 計算とキャッシュ", () => {
     expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1);
   });
 
+  it("版別比較(Issue #220): 同時に計算して返し、kv に保存する。区分に依らず全体(中央のみ・地方のみでも同じ)で、画面が使う項目だけを持つ", async () => {
+    const rows = rowsOf([analysisRow(1, CENTRAL, { promptVersion: "v1" }), analysisRow(2, NAR, { kaisaiDate: null, promptVersion: "v2", additionalInstruction: "逃げ馬を重視" }), analysisRow(3, "202606030812", { promptVersion: "v2" })]);
+    const { core, store, kv } = setup();
+    store.state.rows = rows;
+    const all = await core.getReport("all");
+    const central = await core.getReport("central");
+    const nar = await core.getReport("nar");
+    if (all.status !== "ready" || central.status !== "ready" || nar.status !== "ready") throw new Error("ready のはず");
+    // 前提(空振り防止): 区分で絞ると集計件数が変わる(全体 3・中央 2・地方 1)のに、版別は全体のまま
+    expect([all.report.includedAnalysisCount, central.report.includedAnalysisCount, nar.report.includedAnalysisCount]).toEqual([3, 2, 1]);
+    expect(all.promptVersions.map((v) => [v.promptVersion, v.includedAnalysisCount])).toEqual([["v1", 1], ["v2", 2]]);
+    expect(central.promptVersions).toEqual(all.promptVersions);
+    expect(nar.promptVersions).toEqual(all.promptVersions);
+    expect(all.promptVersions[1]!.additionalInstructions).toEqual(["逃げ馬を重視", null]);
+    expect(Object.keys(all.promptVersions[0]!).sort()).toEqual(["additionalInstructions", "bet", "calibration", "includedAnalysisCount", "overconfidenceGaps", "promptVersion"]);
+    const cache = kv.get<{ v: number; promptVersions: unknown }>("cache")!;
+    expect(cache.promptVersions).toEqual(JSON.parse(JSON.stringify(all.promptVersions)));
+    expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1); // D1 の読みは増えない
+  });
+
+  it("診断: 版別比較の所要時間(promptVersionsMs)は、3 区分の集計(computeMs)とは別に出す(computeMs の意味を変えない)", async () => {
+    const { core, clock } = setup();
+    let ticks = 0;
+    Object.defineProperty(clock, "now", { get: () => T0 + 7 * (ticks += 1) }); // now() を呼ぶたびに 7ms 進む時計
+    const res = await core.getReport("all");
+    if (res.status !== "ready") throw new Error("ready のはず");
+    // recompute の now() は t0(読む前)・t1(読んだ後)・t2(3 区分の後)・t3(版別の後)の 4 回。3 区分と版別の間に別の now() は無い
+    expect(res.diag.readMs).toBe(7);
+    expect(res.diag.computeMs).toBe(7);
+    expect(res.diag.promptVersionsMs).toBe(7);
+  });
+
   it("透かしが同じで TTL 内なら、キャッシュを返す(D1 の集計用の読みは 0 回。発行するのは透かしと補完の確認の 2 クエリ)", async () => {
     const { core, store, clock } = setup();
     await core.getReport("all");
@@ -265,6 +297,19 @@ describe("getReport: 計算とキャッシュ", () => {
     store.state.failReadAll = false;
     const res = await core.getReport("all");
     expect(res.status).toBe("ready");
+  });
+
+  it("版別比較を持たない旧い形式のキャッシュ(版 1)は使わず、再計算する(promptVersions の無い ready を返さない)", async () => {
+    const { core, store, kv, clock } = setup();
+    await core.getReport("all");
+    const { promptVersions: _drop, ...rest } = kv.get<Record<string, unknown>>("cache")!;
+    kv.put("cache", { ...rest, v: 1 });
+    store.calls.length = 0;
+    clock.now += 6 * 60_000; // 最短間隔を過ぎている
+    const res = await core.getReport("all");
+    expect(store.calls).toContain("readAll");
+    expect(res.status === "ready" && Array.isArray(res.promptVersions)).toBe(true);
+    expect(kv.get<{ v: number }>("cache")!.v).toBeGreaterThanOrEqual(2);
   });
 
   it("古い形式のキャッシュ(版が違う)は使わず、再計算する", async () => {

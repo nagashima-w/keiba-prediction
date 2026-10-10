@@ -13,11 +13,12 @@ const READY: VerifyResponse = {
   status: "ready",
   venue: "all",
   report: { includedAnalysisCount: 3 } as never,
+  promptVersions: [],
   computedAt: "2026-10-10T03:00:00.000Z",
   stale: false,
   staleReason: null,
   nextRecomputeAt: null,
-  diag: { rowsRead: 10, counts: {}, readMs: 1, computeMs: 2, startTimeGaps: { lost: 0, affecting: 0 } },
+  diag: { rowsRead: 10, counts: {}, readMs: 1, computeMs: 2, promptVersionsMs: 1, startTimeGaps: { lost: 0, affecting: 0 } },
 };
 
 const NOT_CALLED = (): never => {

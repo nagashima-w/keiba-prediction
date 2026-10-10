@@ -40,6 +40,8 @@ export interface VerifyScreen {
   onVenue(venue: VerifyVenue): void;
   /** 「更新」。取得中は無視。 */
   onRefresh(): void;
+  /** 版別のキャリブレーションの開閉(Issue #220)。`open` は押したあとの状態。画面に居ないときは何もしない。取得は増えない。 */
+  onVersionToggle(key: string, open: boolean): void;
   onVisibilityChange(): void;
   model(): VerifyModel;
   /** 取得中のもの(テスト用の待ち)。 */
@@ -61,6 +63,8 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
   let failures = 0;
   let polls = 0;
   let timer: unknown = null;
+  /** キャリブレーションを開いている版のキー(Issue #220。区分の切替・更新をまたいで保つ。画面を離れたら捨てる)。 */
+  const expandedVersions = new Set<string>();
   let gen = 0;
   let seq = 0;
   const inflight = new Set<Promise<unknown>>();
@@ -143,6 +147,7 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
     clearTimer();
     load = null;
     venue = "all";
+    expandedVersions.clear();
     busy = false;
     pollStopped = false;
     failures = 0;
@@ -158,6 +163,13 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
   function onRefresh(): void {
     if (load === null || busy || load.kind === "loading") return;
     fetchOnce("first", true);
+  }
+
+  function onVersionToggle(key: string, open: boolean): void {
+    if (load === null) return;
+    if (open) expandedVersions.add(key);
+    else expandedVersions.delete(key);
+    deps.onChange();
   }
 
   function onVisibilityChange(): void {
@@ -177,8 +189,9 @@ export function createVerifyScreen(deps: VerifyScreenDeps): VerifyScreen {
     leave,
     onVenue,
     onRefresh,
+    onVersionToggle,
     onVisibilityChange,
-    model: () => buildVerifyModel({ load: load ?? { kind: "loading" }, venue, busy, pollStopped }),
+    model: () => buildVerifyModel({ load: load ?? { kind: "loading" }, venue, busy, pollStopped, expandedVersions: [...expandedVersions] }),
     pending: () => [...inflight],
   };
 }

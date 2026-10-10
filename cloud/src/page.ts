@@ -168,6 +168,20 @@ export function renderPage(email: string): string {
   .verify-rows li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
   .verify-row-value { flex: none; font-variant-numeric: tabular-nums; }
   .verify-screen h3 { font-size: 0.95rem; margin: 16px 0 4px; }
+  /* Issue #220: 補正方向・キャリブレーション・印別(ラベル+「名前 値」の項目。狭い幅では折り返す=表も横スクロールも使わない)。帯グラフは progress */
+  .verify-stats { list-style: none; margin: 4px 0 12px; padding: 0; }
+  .verify-stat { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+  .verify-stat-label { font-weight: bold; }
+  .verify-stat-cells { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; }
+  .verify-stat-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .verify-stat-name { margin-right: 4px; color: var(--muted); font-size: 0.8rem; }
+  /* Issue #220: 版別比較のカード(タイル+開閉ボタン。開閉のボタンはタップしやすい高さ 44px 以上) */
+  .verify-version { margin: 12px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .verify-version h3 { margin: 0 0 4px; overflow-wrap: anywhere; }
+  .verify-version .meta { overflow-wrap: anywhere; }
+  .verify-version-toggle { display: block; width: 100%; min-height: 44px; margin: 8px 0 0; padding: 8px 12px; text-align: left; font-weight: bold; }
+  .verify-version-calibration-heading { margin: 12px 0 4px; font-size: 0.9rem; font-weight: bold; overflow-wrap: anywhere; }
+  .verify-stat-bar { display: block; width: 100%; height: 8px; margin-top: 4px; }
   .field { margin: 0 0 16px; }
   .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.95rem; font-weight: bold; }
   .field-check { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; font-size: 0.95rem; font-weight: bold; }

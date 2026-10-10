@@ -5,6 +5,7 @@ import { createMounter, type DomDocument } from "../client/dom";
 import type { VNode } from "../client/vnode";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { createFakeTimers } from "./client-fakes";
+import { calibrationFixture, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /**
  * Issue #219: アプリ全体の中の検証画面(`#verify`)。画面の出入り・他の画面との分離・区分の切替・更新・可視状態。
@@ -20,6 +21,8 @@ const SUMMARY = { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 
 const REPORT = {
   includedAnalysisCount: 3, excludedAnalysisCount: 0, supersededAnalysisCount: 0, excludedEstimatedCount: 0, excludedLookaheadSuspectCount: 0, excludedLookaheadUnknownCount: 0,
   bet: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, actualPayoutCount: 1, approximatePayoutCount: 0 },
+  calibration: calibrationFixture(),
+  trend: trendFixture(),
   proposedBet: {
     population: { allocated: 1, skipped: 0, unreached: 0, noRecord: 0 },
     overall: SUMMARY, place: SUMMARY, win: SUMMARY, wide: SUMMARY, trio: SUMMARY, quinella: SUMMARY, exacta: SUMMARY, trifecta: SUMMARY, bracketQuinella: SUMMARY,
@@ -27,7 +30,7 @@ const REPORT = {
   },
 };
 const readyFor = (venue: string): Record<string, unknown> => ({
-  ok: true, status: "ready", venue, report: REPORT, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } },
+  ok: true, status: "ready", venue, report: REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null, diag: { startTimeGaps: { lost: 0, affecting: 0 } },
 });
 
 function findAll(node: VNode | string, pred: (n: VNode) => boolean): VNode[] {
@@ -128,6 +131,23 @@ describe("検証画面を開く", () => {
     await h.app.whenIdle();
     expect(h.calls).toEqual(["GET /api/verify?venue=all", "GET /api/verify?venue=nar", "GET /api/verify?venue=nar&refresh=1"]);
     expect(byClass(h.tree(), "verify-venue").map((n) => n.attrs?.["aria-pressed"])).toEqual(["false", "false", "true"]);
+  });
+
+  it("版別のキャリブレーションの開閉のボタンが app まで届き、取得は増えずに再描画される(区分を替えても開いたまま)", async () => {
+    const h = harness("#verify");
+    h.app.start();
+    await h.app.whenIdle();
+    expect(byClass(h.tree(), "verify-version")).toHaveLength(3);
+    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(20); // 前提(空振り防止): 主表の 20 帯だけ(版別は閉じている)
+    byClass(h.tree(), "verify-version-toggle")[0]!.on!.click!();
+    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(40);
+    expect(byClass(h.tree(), "verify-version-toggle")[0]!.attrs?.["aria-expanded"]).toBe("true");
+    expect(h.calls).toEqual(["GET /api/verify?venue=all"]);
+    byClass(h.tree(), "verify-venue")[1]!.on!.click!();
+    await h.app.whenIdle();
+    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(40);
+    byClass(h.tree(), "verify-version-toggle")[0]!.on!.click!();
+    expect(byClass(h.tree(), "verify-stat-bar")).toHaveLength(20);
   });
 
   it("準備中は 3 秒ごとに取り直し、離れると止まる。戻ると取り直す(区分は全体に戻る)", async () => {

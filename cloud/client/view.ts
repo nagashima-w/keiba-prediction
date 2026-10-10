@@ -10,7 +10,7 @@ import type { CardResult, RaceModel, TaskCard } from "./race";
 import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
-import type { VerifyModel, VerifyNotice } from "./verify-model";
+import type { StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
 import { h, type PickedFile, type VNode } from "./vnode";
 
@@ -44,6 +44,8 @@ export interface ViewActions {
   readonly onMigrationCancelCheck: () => void;
   /** 検証画面の区分の切替(Issue #219）。 */
   readonly onVerifyVenue: (venue: VerifyVenue) => void;
+  /** 検証画面の版別キャリブレーションの開閉(Issue #220)。`key` は版のキー、`open` は押したあとの状態。 */
+  readonly onVerifyVersionToggle: (key: string, open: boolean) => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -551,6 +553,61 @@ function typeRowsNode(rows: readonly { readonly label: string; readonly count: s
   return h("ul", { class: "verify-rows" }, rows.map((r) => h("li", {}, [h("span", { class: "verify-row-label" }, [r.label]), h("span", { class: "verify-row-value" }, [`${r.count} / ${r.rate}`])])));
 }
 
+/** 補正方向・キャリブレーションの帯・印の行(Issue #220)。ラベルと「名前 値」の項目を、狭い幅では折り返す(表は使わない)。帯グラフは `progress`(style を使わない)。 */
+function statRowsNode(rows: readonly StatRow[]): VNode {
+  return h(
+    "ul",
+    { class: "verify-stats" },
+    rows.map((r) =>
+      h("li", { class: "verify-stat" }, [
+        h("span", { class: "verify-stat-label" }, [r.label]),
+        h(
+          "div",
+          { class: "verify-stat-cells" },
+          r.cells.map((c) => h("span", { class: "verify-stat-cell" }, [h("span", { class: "verify-stat-name" }, [c.name]), h("strong", { class: "verify-stat-value" }, [c.value])])),
+        ),
+        ...(r.bar === null ? [] : [h("progress", { class: "verify-stat-bar", value: String(r.bar.value), max: String(r.bar.max), "aria-label": r.bar.label }, [])]),
+      ]),
+    ),
+  );
+}
+
+function statSectionNodes(section: StatSection): VNode[] {
+  return [h("h2", {}, [section.heading]), h("p", { class: "meta" }, [section.description]), statRowsNode(section.rows)];
+}
+
+/** 版別比較の 1 版のカード(Issue #220)。キャリブレーションは開いたときだけ。開閉の値は `data-*` にも出す(`createMounter` は関数を比較しない=`result-toggle` と同じ流儀)。 */
+function versionCardNode(card: VersionCard, actions: ViewActions): VNode {
+  const toggle = h(
+    "button",
+    { class: "verify-version-toggle", "aria-expanded": card.expanded ? "true" : "false", "data-version-key": card.key, "data-open-after": card.expanded ? "false" : "true" },
+    [card.toggleLabel],
+    { click: () => actions.onVerifyVersionToggle(card.key, !card.expanded) },
+  );
+  const opened: VNode[] = [];
+  if (card.expanded) {
+    if (card.calibrationHeading !== null) opened.push(h("p", { class: "verify-version-calibration-heading" }, [card.calibrationHeading]));
+    if (card.fullInstructions !== null) opened.push(h("p", { class: "meta verify-version-instructions-full" }, [card.fullInstructions]));
+    opened.push(card.calibrationEmpty !== null ? h("p", { class: "empty" }, [card.calibrationEmpty]) : statRowsNode(card.calibrationRows));
+  }
+  return h("section", { class: "verify-version" }, [
+    h("h3", { class: "verify-version-title" }, [card.title]),
+    h("p", { class: "meta verify-version-instructions" }, [card.instructions]),
+    h("p", { class: "meta" }, [card.included]),
+    tilesNode(card.tiles),
+    toggle,
+    ...opened,
+  ]);
+}
+
+function versionsNodes(section: VersionsSection, actions: ViewActions): VNode[] {
+  const nodes: VNode[] = [h("h2", {}, [section.heading]), h("p", { class: "meta" }, [section.description])];
+  if (section.unknownNote !== null) nodes.push(h("p", { class: "meta" }, [section.unknownNote]));
+  if (section.empty !== null) nodes.push(h("p", { class: "empty" }, [section.empty]));
+  nodes.push(...section.cards.map((card) => versionCardNode(card, actions)));
+  return nodes;
+}
+
 function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
   const controls = h("div", { class: "controls" }, [
     h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
@@ -603,6 +660,20 @@ function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
       if (p.unknownNotice !== null) body.push(notice("wait", p.unknownNotice));
     }
     body.push(h("h3", {}, [p.populationHeading]), rowsNode(p.population));
+  }
+  if (model.versions !== null) {
+    body.push(...versionsNodes(model.versions, actions));
+  }
+  if (model.direction !== null) {
+    body.push(...statSectionNodes(model.direction));
+  }
+  if (model.calibration !== null) {
+    const c = model.calibration;
+    body.push(h("h2", {}, [c.heading]), h("p", { class: "meta" }, [c.description]));
+    body.push(c.empty !== null ? h("p", { class: "empty" }, [c.empty]) : statRowsNode(c.rows));
+  }
+  if (model.marks !== null) {
+    body.push(...statSectionNodes(model.marks));
   }
   return h("div", { class: "screen verify-screen" }, [controls, ...body]);
 }

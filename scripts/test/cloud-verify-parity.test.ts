@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { AnalysisStore } from "../../packages/core/src/ev/analysis-store.js";
 import type { AnalysisRecord, RaceComboPayoutsSaveInput, RaceResultEntry } from "../../packages/core/src/ev/analysis-store-types.js";
 import { extractStartTime } from "../../packages/core/src/ev/lookahead-suspicion.js";
-import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
+import { computeVerifyReport, computeVerifyReportByPromptVersion, PRODUCTION_VERIFY_CONFIG, type VerifyReport, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
 import { buildComboOddsKeyFor, type ComboBetType } from "../../packages/core/src/scraper/combo-odds-key.js";
 import { buildVerifySource, VERIFY_READ_SQL, type VerifyReadRows } from "../../cloud/src/verify-read.js";
+import { computePromptVersionSummaries } from "../../cloud/src/verify-versions.js";
 
 /**
  * Issue #219: クラウド版の検証の集計(D1 の行 → `buildVerifySource` → core の `computeVerifyReport`)は、同じデータの exe(`AnalysisStore` → `computeVerifyReport`)と
@@ -317,5 +318,44 @@ describe("発走時刻の写し(start_time)が先読み判定を変える(補完
     const exe = computeVerifyReport(dataset.store, PRODUCTION_VERIFY_CONFIG, "all");
     const broken = computeVerifyReport(clearedSource, PRODUCTION_VERIFY_CONFIG, "all");
     expect(json(broken)).not.toEqual(json(exe));
+  });
+});
+
+/**
+ * Issue #220: プロンプト版別の比較も exe と一致する。クラウド版が保存・配信するのは `computePromptVersionSummaries`(画面が使う項目だけの射影)なので、
+ * **同じ射影を exe の結果にも適用して**、JSON 往復込みで比べる。射影の前の完全な版別レポート(core の `computeVerifyReportByPromptVersion`)も比べる(射影が差を隠していないことの確認)。
+ */
+describe("プロンプト版別の比較は exe の結果と JSON 往復込みで一致する", () => {
+  const exeFull = computeVerifyReportByPromptVersion(dataset.store, PRODUCTION_VERIFY_CONFIG);
+  const cloudFull = computeVerifyReportByPromptVersion(source, PRODUCTION_VERIFY_CONFIG);
+  const exeSummaries = computePromptVersionSummaries(dataset.store);
+  const cloudSummaries = computePromptVersionSummaries(source);
+
+  it("前提(空振り防止): 版が 3 つ以上(v1・v2・版不明)で、どの版にも集計対象・賭け・帯の件数があり、追加指示が複数の版がある", () => {
+    expect(exeSummaries.map((s) => s.promptVersion)).toEqual(["v1", "v2", null]);
+    for (const s of exeSummaries) {
+      expect(s.includedAnalysisCount, `${s.promptVersion} の集計件数`).toBeGreaterThan(0);
+      expect(s.bet.betCount, `${s.promptVersion} の賭け数`).toBeGreaterThan(0);
+      expect(s.calibration.some((b) => b.predictedCount > 0), `${s.promptVersion} の帯`).toBe(true);
+      expect(s.overconfidenceGaps.some((g) => g !== null), `${s.promptVersion} の過信バイアス`).toBe(true);
+    }
+    expect(exeSummaries.some((s) => s.additionalInstructions.length >= 2)).toBe(true);
+    // 版ごとに回収率・集計件数が違う(版を取り違えても一致してしまう入力ではない)
+    expect(new Set(exeSummaries.map((s) => s.bet.recoveryRate)).size).toBeGreaterThan(1);
+    expect(new Set(exeSummaries.map((s) => s.includedAnalysisCount)).size).toBeGreaterThan(1);
+  });
+
+  it("前提(空振り防止): 最新の選択は版の中で行われる(版ごとの集計件数の合計が、全体の集計件数より多い)", () => {
+    const all = computeVerifyReport(source, PRODUCTION_VERIFY_CONFIG, "all");
+    const sum = exeSummaries.reduce((n, s) => n + s.includedAnalysisCount, 0);
+    expect(sum).toBeGreaterThan(all.includedAnalysisCount);
+  });
+
+  it("完全な版別レポート(射影の前)が一致する", () => {
+    expect(JSON.parse(JSON.stringify(cloudFull))).toEqual(JSON.parse(JSON.stringify(exeFull)));
+  });
+
+  it("射影(保存・配信する形)が一致する", () => {
+    expect(JSON.parse(JSON.stringify(cloudSummaries))).toEqual(JSON.parse(JSON.stringify(exeSummaries)));
   });
 });

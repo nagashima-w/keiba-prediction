@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../client/api";
 import { createVerifyScreen, VERIFY_BACKFILL_POLL_MS, VERIFY_MAX_POLLS, VERIFY_PREPARING_POLL_MS, type VerifyScreen } from "../client/verify-screen";
 import { createFakeTimers, deferred } from "./client-fakes";
+import { calibrationFixture, trendFixture, versionsFixture } from "./verify-fixtures";
 
 /**
  * Issue #219: 検証画面の制御(取得・区分の切替・更新・ポーリング)。偽の fetch・偽のタイマー・偽の可視状態。
@@ -19,6 +20,8 @@ const SUMMARY = { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 
 const REPORT = {
   includedAnalysisCount: 3, excludedAnalysisCount: 0, supersededAnalysisCount: 0, excludedEstimatedCount: 0, excludedLookaheadSuspectCount: 0, excludedLookaheadUnknownCount: 0,
   bet: { betCount: 1, totalStake: 100, totalReturn: 150, recoveryRate: 1.5, actualPayoutCount: 1, approximatePayoutCount: 0 },
+  calibration: calibrationFixture(),
+  trend: trendFixture(),
   proposedBet: {
     population: { allocated: 1, skipped: 0, unreached: 0, noRecord: 0 },
     overall: SUMMARY, place: SUMMARY, win: SUMMARY, wide: SUMMARY, trio: SUMMARY, quinella: SUMMARY, exacta: SUMMARY, trifecta: SUMMARY, bracketQuinella: SUMMARY,
@@ -26,7 +29,7 @@ const REPORT = {
   },
 };
 const ready = (venue: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
-  ok: true, status: "ready", venue, report: REPORT, computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null,
+  ok: true, status: "ready", venue, report: REPORT, promptVersions: versionsFixture(), computedAt: "2026-10-10T03:00:00.000Z", stale: false, staleReason: null, nextRecomputeAt: null,
   diag: { startTimeGaps: { lost: 0, affecting: 0 } }, ...over,
 });
 const preparing = (remaining: number, blocked: string | null = null): Record<string, unknown> => ({ ok: true, status: "preparing", remaining, blocked, resumeAt: null });
@@ -294,5 +297,66 @@ describe("離れる", () => {
     await open(h);
     expect(h.urls.at(-1)).toBe("/api/verify?venue=all");
     expect(h.screen.model().venueTabs.find((t) => t.current)?.venue).toBe("all");
+  });
+});
+
+describe("版別キャリブレーションの開閉(Issue #220)", () => {
+  const KEY = "v:2026-10-09.2";
+  const card = (h: Harness, key = KEY) => h.screen.model().versions?.cards.find((c) => c.key === key);
+
+  it("開く/閉じる: 取得は増えず、再描画を要求する。開いた版だけが行を持つ", async () => {
+    const h = harness();
+    await open(h);
+    expect(card(h)?.expanded).toBe(false); // 前提(空振り防止): 既定は閉じている
+    const urls = h.urls.length;
+    const changes = h.changes;
+    h.screen.onVersionToggle(KEY, true);
+    expect(card(h)?.expanded).toBe(true);
+    expect(card(h)?.calibrationRows).toHaveLength(20);
+    expect(card(h, "unknown")?.expanded).toBe(false);
+    expect(h.changes).toBe(changes + 1);
+    h.screen.onVersionToggle(KEY, false);
+    expect(card(h)?.expanded).toBe(false);
+    expect(h.changes).toBe(changes + 2);
+    expect(h.urls).toHaveLength(urls);
+  });
+
+  it("2 つの版を同時に開ける。同じ状態を重ねて指示しても壊れない", async () => {
+    const h = harness();
+    await open(h);
+    h.screen.onVersionToggle(KEY, true);
+    h.screen.onVersionToggle(KEY, true);
+    h.screen.onVersionToggle("unknown", true);
+    expect(h.screen.model().versions?.cards.map((c) => c.expanded)).toEqual([true, false, true]);
+    h.screen.onVersionToggle(KEY, false);
+    h.screen.onVersionToggle(KEY, false);
+    expect(h.screen.model().versions?.cards.map((c) => c.expanded)).toEqual([false, false, true]);
+  });
+
+  it("区分の切替・更新をまたいで開いたまま(版別は区分に依らないので、取り直しても同じ版を開いておく)", async () => {
+    const h = harness();
+    await open(h);
+    h.screen.onVersionToggle(KEY, true);
+    h.screen.onVenue("nar");
+    await h.settle();
+    expect(card(h)?.expanded).toBe(true);
+    h.screen.onRefresh();
+    await h.settle();
+    expect(card(h)?.expanded).toBe(true);
+  });
+
+  it("画面を離れると閉じた状態に戻る。画面に居ない間の指示は何もしない(再描画も要求しない)", async () => {
+    const h = harness();
+    const before = h.changes;
+    h.screen.onVersionToggle(KEY, true); // enter 前
+    expect(h.changes).toBe(before);
+    await open(h);
+    h.screen.onVersionToggle(KEY, true);
+    h.screen.leave();
+    const afterLeave = h.changes;
+    h.screen.onVersionToggle(KEY, true); // leave 後
+    expect(h.changes).toBe(afterLeave);
+    await open(h);
+    expect(card(h)?.expanded).toBe(false);
   });
 });
