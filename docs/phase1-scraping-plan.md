@@ -131,6 +131,10 @@ fixtures/
 | `horse_results_2021105857.json` | 戦績22走(フル構造・古馬) |
 | `horse_results_2024104976.json` | 戦績2走(サンプル不足境界: チカバリエンテ 牝2) |
 | `horse_results_2021105727.json` | 戦績15走(**地方交流・海外遠征の変則行を含む**: フォーエバーヤング。地方=船橋/大井/門別/川崎、海外=メイダン/デルマー等) |
+| `horse_results_2024105003.json` | **初出走馬(出走歴なし)の実応答**(Issue #228。2026-10-10 東京4R新馬戦のプルメリアビーチ)。`status:"OK"` だが戦績テーブル(`db_h_race_results`)が無く、`<div class="contents">競走データがありません</div>` が入る。`parseHorseResults` は空配列を返す |
+| `horse_results_2024100357.json` | 同上(東京4R新馬戦の別の1頭。判定が1頭に依らないことの確認用) |
+| `horse_results_nonexistent_2099999999.json` | 存在しない馬IDの実応答。初出走馬と同じ形だが見出しの馬名が空(`<h2>の競走成績</h2>`)。`parseHorseResults` は壊れた応答として失敗させる |
+| `horse_results_broken_noid.json` | 馬IDなしで叩いた実応答(45バイト)。`status:"OK"` だがブロックの中身が無い(見出しも本文も戦績テーブルも無い)。`parseHorseResults` は失敗させる |
 | `odds_202603020211.json` | 単勝+複勝(下限/上限)+人気、official_datetime付き(`status:"result"` 確定) |
 | `odds_middle_202603020611.json` | `status:"middle"` 発売中。単勝16頭+複勝16頭で構造は result と同一。単勝セル第2要素が `"0"`(result の `"0.0"` と揺れる) |
 | `odds_yoso_202602011011.json` | `status:"yoso"` 前売り前の予想オッズ。**`odds["1"]`(単勝)のみで `odds["2"]`(複勝)が存在しない**。単勝セル第2要素は空文字 `""`。複勝未発売のためEV計算対象外 |

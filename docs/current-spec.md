@@ -176,6 +176,14 @@ netkeiba から 1 レース分の完全データ(`RaceData`)を組み立てる�
   **レース一覧(`parseRaceList`)の各行は、発走時刻 `startTime`(JST の `HH:MM`。ゼロ詰め)を持つ**(Issue #202。中央は `span.RaceList_Itemtime`・地方は `div.RaceData` 直下の先頭の `<span>`。
   発走後に取得した中央の一覧では時刻が空の行があり〈実測 race_list_sub_20260926.html は 24 行中 17 行〉、その行と範囲外の値の行は **キー自体を持たない**)。
 
+  **初出走馬(新馬戦など)の戦績は空配列(`results: []`)になり、警告は出ない**(Issue #228)。戦績 API は
+  出走歴の無い馬にも `status:"OK"` を返すが、戦績テーブル(`db_h_race_results`)が無く、見出し
+  `<h2>{馬名}の競走成績</h2>` と本文 `<div class="contents">競走データがありません</div>` だけが入る
+  (実測: 2026-10-10 東京4R の初出走馬3頭すべて・出走歴のある馬27頭〈既存フィクスチャ5 + 地方2歳戦22〉は0頭)。`parseHorseResults` は
+  **見出しの馬名が空でなく、かつ `div.contents` がすべてこの文言と一致する**ときだけ空配列を返す。
+  それ以外のテーブル無しの応答(ブロックの中身が無い・存在しない馬ID〈馬名が空〉・見知らぬ構造)は
+  従来どおり `HorseResultsParseError` で、`scrapeRace` が `results: null` + 警告(`kind:"戦績"`)にする。
+  地方(NAR)の初出走馬は未実測(同じ `db.netkeiba.com` のエンドポイントで馬IDの体系も同じため、同じ形のはず)。
   馬個別プロフィールページ(db.netkeiba.com/horse)は**取得しない**(厩舎所在地は出馬表に、全戦績は
   Ajax API に含まれるため。1 レースの GET 数を「出馬表1 + 戦績N + 調教1 + オッズ1」に抑える設計)。
 - **中央/地方(NAR)両対応**: `venueKindOfRaceId`(場コード 01〜10 が中央、30〜64 が NAR)で分岐。

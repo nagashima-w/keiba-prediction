@@ -233,6 +233,81 @@ describe("発走前の分析: 取得ステップ(AC-c2)", () => {
   });
 });
 
+/**
+ * Issue #228: 初出走馬(新馬戦)を含むレース。戦績 API が「戦績テーブルの無い正常な応答」を返す馬が出走歴なし(`[]`)として扱われ、
+ * 朝の準備・発走前の分析が「戦績を取得できなかった馬」で失敗しない。フィクスチャ 202603020211 の馬番1〜4を初出走馬(実応答 fixtures/horse_results_2024105003.json)に差し替える。
+ */
+describe("初出走馬を含むレースでも、朝の準備・発走前の分析が失敗しない(Issue #228)", () => {
+  const DEBUT_HORSES = ["2023103386", "2023105684", "2023104885", "2023101569"];
+  const debutResponse = (): string => readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures", "horse_results_2024105003.json"), "utf-8");
+
+  function withDebutHorses(h: Harness): void {
+    h.gate.body = (url) => {
+      if (url.includes("ajax_horse_results") && DEBUT_HORSES.some((id) => url.includes(`id=${id}`))) {
+        return debutResponse();
+      }
+      return fixtureForUrl(url);
+    };
+  }
+
+  it("前提: 差し替えた応答は戦績テーブルを持たない正常な応答で、差し替え対象の馬は出馬表の4頭である(旧版ならこの4頭が「戦績の取得失敗」になる)", () => {
+    expect(debutResponse().includes("db_h_race_results")).toBe(false);
+    for (const id of DEBUT_HORSES) {
+      expect(fixtureForUrl(`https://db.netkeiba.com/horse/ajax_horse_results.html?input=UTF-8&output=json&id=${id}`)).not.toBe(debutResponse());
+    }
+    expect(new Set(DEBUT_HORSES).size).toBe(4);
+  });
+
+  it("朝の準備: 取得も計算も成功し、16頭の prior が置かれる(1回で通る。再試行にならない)", async () => {
+    const h = harness();
+    withDebutHorses(h);
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "fetch", result: "ok" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "morning", step: "compute", result: "ok" });
+    expect(h.core.getBoard().races[0]).toMatchObject({ raceId: RACE, status: "done", attempts: 1 });
+    expect(h.core.getMorningPrior(RACE)!.result.rows).toHaveLength(16);
+    expect(h.warnings).toHaveLength(0);
+  });
+
+  it("発走前の分析: 朝のキャッシュ(初出走馬の応答を含む)を読んで取得も計算も成功し、1件保存される。戦績は取り直さない", async () => {
+    const h = harness();
+    withDebutHorses(h);
+    await runMorning(h);
+    h.clock.now += 20 * 60_000;
+    const before = h.gate.urls.length;
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    h.clock.now = h.alarm.at!;
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    expect(count(urlsOf(h.gate, before), "ajax_horse_results")).toBe(0);
+    expect(h.sink.saved).toHaveLength(1);
+    expect(h.sink.saved[0]!.horses).toHaveLength(16);
+  });
+
+  it("発走前の分析だけを(朝の準備なしで)実行しても成功する。初出走馬4頭を含む16頭ぶんの戦績を取得し、取得失敗の警告にならない", async () => {
+    const h = harness();
+    withDebutHorses(h);
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "fetch", result: "ok" });
+    expect(count(h.gate.urls, "ajax_horse_results")).toBe(16);
+    expect(await h.core.runNextStep()).toMatchObject({ mode: "pre_race", step: "compute", result: "ok" });
+    expect(h.sink.saved).toHaveLength(1);
+  });
+
+  it("本当に取れなかった馬(404)は、初出走馬と同じレースにいても従来どおり取得失敗(再試行)になる", async () => {
+    const h = harness();
+    h.gate.body = (url) => {
+      if (url.includes("ajax_horse_results") && url.includes("id=2023103386")) return null; // 404
+      if (url.includes("ajax_horse_results") && url.includes("id=2023105684")) return debutResponse(); // 初出走馬
+      return fixtureForUrl(url);
+    };
+    await h.core.schedule({ raceId: RACE, kaisaiDate: DATE, mode: "pre_race" });
+    const outcome = await h.core.runNextStep();
+    expect(outcome).toMatchObject({ mode: "pre_race", step: "fetch", result: "retry" });
+    expect(h.core.getBoard().races[0]!.error ?? "").toContain("1 頭");
+  });
+});
+
 describe("発走前の分析: 取得ステップの失敗と再試行", () => {
   it("戦績の一部が取れなかった(scrapeRace は警告にして続ける)ときは、取得ステップを成功にせず再試行する。再試行では取れなかった馬だけを取り直し、取れていた馬・出馬表はキャッシュから読む", async () => {
     const h = harness();

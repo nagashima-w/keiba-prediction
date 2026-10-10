@@ -131,7 +131,17 @@ export const HORSE_RESULTS_SELECTORS = {
   headerCell: "th",
   /** データセル。 */
   dataCell: "td",
+  /** 見出しのバー(馬名入りの `<h2>{馬名}の競走成績</h2>` を持つ)。出走歴なしの判定に使う(Issue #228)。 */
+  heading: "div.cate_bar h2",
+  /** 戦績が無い馬の本文ブロック(`<div class="contents">競走データがありません</div>`。出走歴のある馬の応答には無い)。 */
+  emptyNoticeBlock: "div.contents",
 } as const;
+
+/**
+ * 初出走馬(出走歴なし)の応答が `emptyNoticeBlock` に入れる文言(Issue #228)。
+ * 実測(2026-10-10。中央の初出走馬3頭の応答すべてに有り、出走歴のある馬の応答27件〈既存フィクスチャ5 + 地方2歳戦の22頭〉すべてに無い)。
+ */
+export const HORSE_RESULTS_EMPTY_NOTICE = "競走データがありません";
 
 /**
  * レース結果(result.html)のセレクタ。

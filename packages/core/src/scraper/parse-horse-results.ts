@@ -49,7 +49,11 @@ import type { CheerioAPI } from "cheerio";
 import { parseRaceId, type RaceId } from "./ids.js";
 import { toNinki } from "./ninki.js";
 import { toOddsNumber } from "./odds-number.js";
-import { HORSE_RESULTS_SELECTORS as SEL, PATTERNS } from "./selectors.js";
+import {
+  HORSE_RESULTS_EMPTY_NOTICE,
+  HORSE_RESULTS_SELECTORS as SEL,
+  PATTERNS,
+} from "./selectors.js";
 import type {
   BodyWeight,
   CourseType,
@@ -239,11 +243,41 @@ function classifyRace($cell: ReturnType<CheerioAPI>): RaceClassification {
   return { raceId: null, raceIdRaw: raw, venueKind: "地方" };
 }
 
+/** 空白(全角・改行を含む)を1個にまとめてトリムする。 */
+function normalizeText(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * 戦績テーブルの無い応答が「出走歴の無い馬(初出走)の正常な応答」かを判定する(Issue #228)。
+ *
+ * 次の**両方**を満たすときだけ真にする(どちらかが欠けた応答は壊れた応答として扱う):
+ * - 見出し `div.cate_bar h2` が `{馬名}の競走成績` で、馬名が空でない
+ *   (存在しない馬IDの応答は見出しの馬名が空で、本文の文言は初出走馬と同じになるため、これで区別する)
+ * - 本文ブロック `div.contents` が1個以上あり、**すべて**の本文が文言 {@link HORSE_RESULTS_EMPTY_NOTICE} と
+ *   完全一致する(他の文言が混じる・文言が別の場所にあるだけ・ブロックが無い、は壊れた応答)
+ *
+ * 空白・改行はテンプレートの揺れ(実応答でも取得時期で空白の入り方が違った)に備えて無視する。
+ */
+function isNoRaceHistoryPage($: CheerioAPI): boolean {
+  const heading = normalizeText($(SEL.heading).first().text());
+  // `.+` が1文字以上を要求する(見出しは正規化・トリム済みなので、馬名が空白だけの見出しも「の競走成績」になり一致しない)。
+  if (!/^.+の競走成績$/.test(heading)) {
+    return false;
+  }
+  const $blocks = $(SEL.emptyNoticeBlock);
+  return (
+    $blocks.length > 0 &&
+    $blocks.toArray().every((el) => normalizeText($(el).text()) === HORSE_RESULTS_EMPTY_NOTICE)
+  );
+}
+
 /**
  * 全戦績のAPI JSON文字列をパースする。
  *
  * @param json ajax_horse_results のJSON文字列
- * @returns 1走ずつの戦績配列(HTML上の並び=新しい順)
+ * @returns 1走ずつの戦績配列(HTML上の並び=新しい順)。初出走馬(正常な応答で出走歴が無い)は空配列
+ *   (取得失敗=`null` とは別。判定は {@link isNoRaceHistoryPage})。
  */
 export function parseHorseResults(json: string): HorseRaceResult[] {
   let parsed: ResultsResponse;
@@ -265,6 +299,11 @@ export function parseHorseResults(json: string): HorseRaceResult[] {
   const $ = cheerio.load(parsed.data);
   const $table = $(SEL.table).first();
   if ($table.length === 0) {
+    // 戦績テーブルが無い応答は2種類ある。初出走馬(正常な応答で、出走歴が無い)は空配列、
+    // それ以外(ブロックの中身が無い・見知らぬ構造)は壊れた応答として失敗させる。
+    if (isNoRaceHistoryPage($)) {
+      return [];
+    }
     throw new HorseResultsParseError(
       "戦績テーブル(db_h_race_results)が見つかりませんでした",
     );

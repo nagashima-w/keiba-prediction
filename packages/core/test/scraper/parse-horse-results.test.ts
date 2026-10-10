@@ -312,6 +312,149 @@ describe("parseHorseResults(壊れた行はsilentに捨てない)", () => {
   });
 });
 
+/**
+ * 実フィクスチャの `data`(HTMLフラグメント)を加工して、JSON文字列に組み直す。
+ * 「実物の応答の一部だけを変えた」入力を作り、判定が何に依っているかを1要素ずつ確かめるために使う。
+ */
+function withData(name: string, edit: (data: string) => string): string {
+  const parsed = JSON.parse(loadFixture(name)) as { status: string; data: string };
+  return JSON.stringify({ ...parsed, data: edit(parsed.data) });
+}
+
+/** 初出走馬の応答が持つ、出走歴なしを示す目印(fixtures の実応答に含まれる文言)。 */
+const NO_RESULTS_NOTICE = "競走データがありません";
+
+describe("parseHorseResults(出走歴なし=初出走馬。Issue #228)", () => {
+  // 2026-10-10 の東京4R(新馬戦)の実応答。戦績テーブルが無く、`<div class="contents">競走データがありません</div>` が入る。
+  const debutFixtures = [
+    ["プルメリアビーチ", "horse_results_2024105003.json"],
+    ["2024100357", "horse_results_2024100357.json"],
+  ] as const;
+
+  it.each(debutFixtures)(
+    "初出走馬(%s)の実応答は、例外にせず出走歴0件の空配列を返すこと",
+    (_name, file) => {
+      // 前提: 実応答は status が OK で、戦績テーブルを持たず、目印の文言を持つ(= 旧版が「テーブルなし」で落とした入力)。
+      const raw = JSON.parse(loadFixture(file)) as { status: string; data: string };
+      expect(raw.status).toBe("OK");
+      expect(raw.data.includes("db_h_race_results")).toBe(false);
+      expect(raw.data.includes(NO_RESULTS_NOTICE)).toBe(true);
+
+      const results = parseHorseResults(loadFixture(file));
+      expect(Array.isArray(results)).toBe(true);
+      expect(results).toHaveLength(0);
+    },
+  );
+
+  it("目印の周りの空白・改行が実応答と違っても(テンプレートの揺れ)、出走歴なしと判定できること", () => {
+    const original = JSON.parse(loadFixture("horse_results_2024105003.json")) as { data: string };
+    const spaced = withData("horse_results_2024105003.json", (d) =>
+      d.replace(
+        /<div class="contents">\s*競走データがありません\s*<\/div>/,
+        `<div  class="contents" >\n\n\t  ${NO_RESULTS_NOTICE}  \n\n  </div>`,
+      ),
+    );
+    // 前提: 加工が実際に効いている(入力が実応答と変わっている)。
+    expect(JSON.parse(spaced).data).not.toBe(original.data);
+    expect(parseHorseResults(spaced)).toHaveLength(0);
+  });
+
+  it("戦績テーブルがある応答に目印の文言が同居していても、テーブルを優先して全走をパースすること", () => {
+    // 前提: 元のフィクスチャは4走を持ち、目印を持たない。
+    const base = parseHorseResults(loadFixture("horse_results_2023103386.json"));
+    expect(base).toHaveLength(4);
+    const withNotice = withData("horse_results_2023103386.json", (d) => {
+      expect(d.includes(NO_RESULTS_NOTICE)).toBe(false);
+      return `${d}<div class="contents">${NO_RESULTS_NOTICE}</div>`;
+    });
+    expect(parseHorseResults(withNotice)).toHaveLength(4);
+  });
+});
+
+describe("parseHorseResults(出走歴なしと見分ける: 本当に壊れた応答は失敗させる。Issue #228)", () => {
+  it("ブロックの中身が無い実応答(馬IDなしで叩いた応答。status は OK)は HorseResultsParseError になること", () => {
+    const raw = JSON.parse(loadFixture("horse_results_broken_noid.json")) as { status: string; data: string };
+    // 前提: status は OK で、テーブルも目印も無い(旧版と同じ「テーブルなし」で落ちる入力)。
+    expect(raw.status).toBe("OK");
+    expect(raw.data.includes("db_h_race_results")).toBe(false);
+    expect(raw.data.includes(NO_RESULTS_NOTICE)).toBe(false);
+    expect(() => parseHorseResults(loadFixture("horse_results_broken_noid.json"))).toThrow(
+      HorseResultsParseError,
+    );
+  });
+
+  it("馬名が空の見出し(存在しない馬IDの実応答。目印の文言は入っている)は HorseResultsParseError になること", () => {
+    const raw = JSON.parse(loadFixture("horse_results_nonexistent_2099999999.json")) as {
+      status: string;
+      data: string;
+    };
+    // 前提: status は OK、テーブル無し、目印の文言あり、見出しは「の競走成績」(馬名が空)。
+    expect(raw.status).toBe("OK");
+    expect(raw.data.includes("db_h_race_results")).toBe(false);
+    expect(raw.data.includes(NO_RESULTS_NOTICE)).toBe(true);
+    expect(raw.data.includes("<h2>の競走成績</h2>")).toBe(true);
+    expect(() =>
+      parseHorseResults(loadFixture("horse_results_nonexistent_2099999999.json")),
+    ).toThrow(HorseResultsParseError);
+  });
+
+  it("初出走馬の実応答から目印の文言だけを別の文言に変えると HorseResultsParseError になること(文言が判定の根拠)", () => {
+    const changed = withData("horse_results_2024105003.json", (d) => {
+      expect(d.includes(NO_RESULTS_NOTICE)).toBe(true);
+      return d.replace(NO_RESULTS_NOTICE, "ただいま混み合っています");
+    });
+    expect(JSON.parse(changed).data.includes(NO_RESULTS_NOTICE)).toBe(false);
+    expect(() => parseHorseResults(changed)).toThrow(HorseResultsParseError);
+  });
+
+  it("初出走馬の実応答から馬名だけを消すと HorseResultsParseError になること(馬名が判定の根拠)", () => {
+    const noName = withData("horse_results_2024105003.json", (d) => {
+      expect(d.includes("<h2>プルメリアビーチの競走成績</h2>")).toBe(true);
+      return d.replace("<h2>プルメリアビーチの競走成績</h2>", "<h2>の競走成績</h2>");
+    });
+    expect(JSON.parse(noName).data.includes("プルメリアビーチ")).toBe(false);
+    expect(() => parseHorseResults(noName)).toThrow(HorseResultsParseError);
+  });
+
+  it("目印の文言が div.contents の外(本文のどこか)にあるだけの応答は HorseResultsParseError になること", () => {
+    const stray = JSON.stringify({
+      status: "OK",
+      data: `<div class="cate_bar"><h2>テスト馬の競走成績</h2></div><p>${NO_RESULTS_NOTICE}</p>`,
+    });
+    expect(() => parseHorseResults(stray)).toThrow(HorseResultsParseError);
+  });
+
+  it("div.contents に目印以外の文言が混じる応答は HorseResultsParseError になること(文言の完全一致)", () => {
+    const mixed = JSON.stringify({
+      status: "OK",
+      data: `<div class="cate_bar"><h2>テスト馬の競走成績</h2></div><div class="contents">${NO_RESULTS_NOTICE}。エラーが発生しました</div>`,
+    });
+    expect(() => parseHorseResults(mixed)).toThrow(HorseResultsParseError);
+  });
+
+  it("div.contents が複数あり、目印と一致しないものが1つでも混じる応答は HorseResultsParseError になること(すべて一致が条件)", () => {
+    const twoBlocks = JSON.stringify({
+      status: "OK",
+      data: `<div class="cate_bar"><h2>テスト馬の競走成績</h2></div><div class="contents">${NO_RESULTS_NOTICE}</div><div class="contents">別の内容</div>`,
+    });
+    expect(() => parseHorseResults(twoBlocks)).toThrow(HorseResultsParseError);
+    // 対照: 一致するブロックだけなら出走歴なし(上の応答との差は2つ目のブロックだけ)。
+    const onlyNotice = JSON.stringify({
+      status: "OK",
+      data: `<div class="cate_bar"><h2>テスト馬の競走成績</h2></div><div class="contents">${NO_RESULTS_NOTICE}</div>`,
+    });
+    expect(parseHorseResults(onlyNotice)).toHaveLength(0);
+  });
+
+  it('status が "OK" でない応答は、目印の文言を含んでいても HorseResultsParseError になること', () => {
+    const raw = JSON.parse(loadFixture("horse_results_2024105003.json")) as { data: string };
+    expect(raw.data.includes(NO_RESULTS_NOTICE)).toBe(true);
+    expect(() =>
+      parseHorseResults(JSON.stringify({ status: "NG", data: raw.data })),
+    ).toThrow(HorseResultsParseError);
+  });
+});
+
 /** 戦績テーブルのヘッダ33列。実データと同じ列構成を再現する。 */
 const HEADER_LABELS = [
   "日付",

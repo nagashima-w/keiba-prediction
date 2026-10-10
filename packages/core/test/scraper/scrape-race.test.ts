@@ -248,6 +248,48 @@ describe("scrapeRace(レース完全データの統合取得)", () => {
     expect(warns[0]!.horseId).toBe(FIRST_HORSE_ID);
   });
 
+  it("初出走馬(戦績テーブルの無い正常な応答)は results:[] になり、戦績の警告も出ないこと。取得失敗(results:null+警告)とは区別されること(Issue #228)", async () => {
+    // 初出走馬の実応答(2026-10-10 東京4Rの新馬戦)。status は OK で、戦績テーブルは無い。
+    const debutResponse = loadFixture("horse_results_2024105003.json");
+    expect(debutResponse.includes("db_h_race_results")).toBe(false);
+    const fetcher = new RecordingFetcher((url) => {
+      if (url.includes("ajax_horse_results") && url.includes(FIRST_HORSE_ID)) {
+        return debutResponse;
+      }
+      return defaultHandler(url);
+    });
+    const data = await scrapeRace(RACE_ID, { fetcher, now: FIXED_NOW });
+
+    const debut = data.horses.find((h) => h.shutuba.horseId === FIRST_HORSE_ID)!;
+    expect(debut.results).not.toBeNull();
+    expect(debut.results).toHaveLength(0);
+    // 戦績の警告は1件も出ない(出走歴なしは取得失敗ではない)。
+    expect(data.meta.warnings.filter((w) => w.kind === "戦績")).toHaveLength(0);
+    // 他馬の戦績は影響を受けない(割り当て済みの馬は件数どおり)。
+    for (const [horseId, { count }] of Object.entries(RESULTS_BY_HORSE)) {
+      if (horseId === FIRST_HORSE_ID) continue;
+      const horse = data.horses.find((h) => h.shutuba.horseId === horseId)!;
+      expect(horse.results, `馬ID ${horseId}`).toHaveLength(count);
+    }
+  });
+
+  it("戦績の応答が壊れている(ブロックの中身が無い)馬は、初出走とは扱わず results:null+警告になること(Issue #228)", async () => {
+    const broken = loadFixture("horse_results_broken_noid.json");
+    const fetcher = new RecordingFetcher((url) => {
+      if (url.includes("ajax_horse_results") && url.includes(FIRST_HORSE_ID)) {
+        return broken;
+      }
+      return defaultHandler(url);
+    });
+    const data = await scrapeRace(RACE_ID, { fetcher, now: FIXED_NOW });
+
+    const horse = data.horses.find((h) => h.shutuba.horseId === FIRST_HORSE_ID)!;
+    expect(horse.results).toBeNull();
+    const warns = data.meta.warnings.filter((w) => w.kind === "戦績");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.horseId).toBe(FIRST_HORSE_ID);
+  });
+
   it("必須データ(出馬表)の取得失敗はthrowすること", async () => {
     const fetcher = new RecordingFetcher((url) => {
       if (url.includes("shutuba.html")) throw new Error("出馬表取得失敗");
