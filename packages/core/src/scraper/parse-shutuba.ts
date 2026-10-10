@@ -15,6 +15,7 @@
 
 import * as cheerio from "cheerio";
 import type { CheerioAPI } from "cheerio";
+import { centralGradeFromClassNames } from "./grade-label.js";
 import { parseHorseId } from "./ids.js";
 import { PATTERNS, SHUTUBA_SELECTORS as SEL } from "./selectors.js";
 import type {
@@ -87,6 +88,12 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
   // 重賞グレードバッジの有無(タスク機能B 要修正2)。RaceName配下のIcon_GradeType要素の
   // 有無のみで判定し、番号(グレード)は解釈しない(中央h1/地方divのタグ違いはセレクタ側で吸収)。
   const hasGradeBadge = $(SEL.gradeBadge).length > 0;
+  // グレード(Issue #250)。地方はアイコン内のテキストをそのまま(例: "Jpn1")、中央は `h1.RaceName` 内のアイコンの
+  // 番号から(実測した重賞だけ=grade-label.ts)。どちらでも読めない(非重賞・未測定の番号)ときはキー自体を持たない。
+  const textGrade = $(SEL.gradeText).first().text().trim() || undefined;
+  const grade =
+    textGrade ??
+    centralGradeFromClassNames($(SEL.gradeIconCentral).map((_, el) => $(el).attr("class") ?? "").get());
 
   return {
     raceName,
@@ -97,6 +104,7 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
     ...(trackCondition !== undefined ? { trackCondition } : {}),
     ...(fence !== undefined ? { fence } : {}),
     hasGradeBadge,
+    ...(grade !== undefined ? { grade } : {}),
   };
 }
 

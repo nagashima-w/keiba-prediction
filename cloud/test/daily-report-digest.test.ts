@@ -12,7 +12,7 @@ function horse(umaban: number, over: Partial<AnalysisViewHorse> = {}): AnalysisV
 function view(raceId: string, horses: AnalysisViewHorse[], over: Partial<AnalysisView> = {}): AnalysisView {
   return {
     id: 10, raceId, analyzedAt: "2026-10-10T05:00:00.000Z", kaisaiDate: "20261010", evEstimated: false, model: "claude-sonnet-5-5", promptVersion: "v1", llmNote: null, llmCalls: null,
-    race: { venueName: "東京", raceNumber: 11, raceName: "テストS", startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
+    race: { venueName: "東京", raceNumber: 11, raceName: "テストS", grade: null, startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
     horses, allocation: null, detail: "present", ...over,
   };
 }

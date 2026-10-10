@@ -182,7 +182,7 @@ describe("buildAnalysisView(Issue #183)", () => {
   it("【漏洩】許可したキーの集合だけ。rawResponse・contributions・馬の騎手名・組合せオッズ・追加指示・戦績の基準日は、応答のどこにも現れない(fallbackReason・betUnit は #185 で意図して返す)", () => {
     const view = buildAnalysisView(detail(analysis(), "present"), ALLOCATION);
     expect(sorted(view)).toEqual(["allocation", "analyzedAt", "detail", "evEstimated", "horses", "id", "kaisaiDate", "llmCalls", "llmNote", "model", "promptVersion", "race", "raceId"]);
-    expect(sorted(view.race)).toEqual(["courseType", "distance", "oddsStatus", "raceName", "raceNumber", "startTime", "trackCondition", "venueName", "weather"]);
+    expect(sorted(view.race)).toEqual(["courseType", "distance", "grade", "oddsStatus", "raceName", "raceNumber", "startTime", "trackCondition", "venueName", "weather"]);
     for (const h of view.horses) {
       expect(sorted(h)).toEqual(["adjustedProb", "concerns", "ev", "fairWinOdds", "highlights", "isPositive", "mark", "name", "placeOddsMin", "prior", "reason", "umaban", "winOdds", "winProb"]);
     }
@@ -243,11 +243,37 @@ describe("buildAnalysisView(Issue #183)", () => {
     expect(sorted(view)).toEqual(sorted(present));
     expect(sorted(view.race)).toEqual(sorted(present.race));
     expect(view.horses.map((h) => h.name)).toEqual([null, null, null]);
-    expect(view.race).toEqual({ venueName: "福島", raceNumber: 11, raceName: null, startTime: null, courseType: null, distance: null, weather: null, trackCondition: null, oddsStatus: null });
+    expect(view.race).toEqual({ venueName: "福島", raceNumber: 11, raceName: null, grade: null, startTime: null, courseType: null, distance: null, weather: null, trackCondition: null, oddsStatus: null });
     // D1 の値(馬の prior・印・配分)は残る
     expect(view.horses.map((h) => [h.umaban, h.prior, h.mark])).toEqual([[1, 0.2, "◎"], [2, 0.2, null], [3, 0.2, "◎"]]);
     expect(view.allocation).not.toBeNull();
     expect(JSON.stringify(view)).not.toContain("アルファ");
+  });
+
+  describe("グレード(Issue #250。スナップショットの race.grade から)", () => {
+    const withGrade = (grade: unknown) => analysis({ raceSnapshot: { ...SNAPSHOT, race: { ...SNAPSHOT.race, grade } } });
+
+    it.each(["G3", "J・G1", "Jpn1", "重賞"])("スナップショットの grade=%s を、そのまま返す", (grade) => {
+      expect(buildAnalysisView(detail(withGrade(grade), "present"), undefined).race.grade).toBe(grade);
+    });
+
+    it("グレードを持たない(過去の)スナップショットは null(補い値を作らない)", () => {
+      // 前提: 既定のスナップショットは grade のキーを持たない
+      expect("grade" in SNAPSHOT.race).toBe(false);
+      expect(buildAnalysisView(detail(analysis(), "present"), undefined).race.grade).toBeNull();
+    });
+
+    it("文字列でない grade(数値・オブジェクト・null)は null", () => {
+      for (const grade of [3, { a: 1 }, null, true]) {
+        expect(buildAnalysisView(detail(withGrade(grade), "present"), undefined).race.grade, JSON.stringify(grade)).toBeNull();
+      }
+    });
+
+    it.each([["missing"], ["none"]] as const)("detail が %s のときは、スナップショットに grade があっても使わない(null)", (status) => {
+      // 前提: 同じスナップショットで present なら取れる
+      expect(buildAnalysisView(detail(withGrade("G3"), "present"), undefined).race.grade).toBe("G3");
+      expect(buildAnalysisView(detail(withGrade("G3"), status), undefined).race.grade).toBeNull();
+    });
   });
 
   it("壊れたスナップショットで例外を投げない(null・文字列・horses が配列でない・race が数値・名前が文字列でない・umaban が文字列)。取れないものは null", () => {

@@ -16,6 +16,7 @@ import { isUsableOdds } from "../../packages/core/src/ev/allocation-primitives";
 import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimate";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
 import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
+import { nameWithGrade } from "../client/grade";
 import { DISCORD_COLORS } from "./palette";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine } from "./win-odds-format";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
@@ -146,17 +147,19 @@ export interface RaceLabel {
   readonly raceNumber: number | null;
   readonly raceName: string | null;
   readonly startTime: string | null;
+  /** グレード(Issue #250。計画の行の `grade`。重賞だけがタイトルに出る〈`client/grade.ts`〉)。省略は null と同じ。 */
+  readonly grade?: string | null;
 }
 
 function venueOf(label: Pick<RaceLabel, "raceId" | "venueName">): string {
   return label.venueName ?? venueNameFromRaceId(label.raceId);
 }
 
-/** 「会場 NR レース名」(無い部分は省く)。 */
+/** 「会場 NR レース名(グレード)」(無い部分は省く。グレードは重賞だけ。Issue #250)。 */
 export function raceTitle(label: RaceLabel): string {
   const parts = [venueOf(label)];
   if (label.raceNumber !== null) parts.push(`${label.raceNumber}R`);
-  if (label.raceName !== null && label.raceName !== "") parts.push(label.raceName);
+  if (label.raceName !== null && label.raceName !== "") parts.push(nameWithGrade(label.raceName, label.grade));
   return cut(parts.join(" "), EMBED_LIMITS.title);
 }
 
@@ -404,6 +407,8 @@ const ODDS_STATUSES: readonly string[] = ["result", "middle", "yoso"];
 
 interface SnapshotView {
   readonly raceName: string | null;
+  /** スナップショットのグレード(Issue #250。過去の分析・文字列でないときは null)。 */
+  readonly grade: string | null;
   readonly courseType: string;
   readonly distance: number;
   readonly oddsStatus: EmbedRaceInfo["oddsStatus"];
@@ -438,6 +443,7 @@ function readSnapshot(raw: unknown): SnapshotView {
   }
   return {
     raceName: typeof race["raceName"] === "string" ? race["raceName"] : null,
+    grade: typeof race["grade"] === "string" ? race["grade"] : null,
     courseType: race["courseType"],
     distance,
     oddsStatus: oddsStatus as EmbedRaceInfo["oddsStatus"],
@@ -485,7 +491,8 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   const fields: EmbedField[] = [buildMarksField(record, snapshot.names, { fair, actual: snapshot.winOdds, oddsStatus: snapshot.oddsStatus }), buildAllocationField(record.allocation)];
   // タイトルは失敗・手動スキップ・最小の通知と同じ関数で作る(Issue #230。「会場 NR レース名」)。core のタイトルは番号を持たない(core は変えない)。
   // 番号は計画の行(`label.raceNumber`)から。無ければ番号なしの今の形(「会場 レース名」)になる。レース名は、スナップショットにあればそれを優先する(従来どおり)。
-  const title = raceTitle({ ...label, raceName: snapshot.raceName ?? label.raceName });
+  // グレードは、スナップショット(分析時に取れた値)を優先し、無ければ計画の行から(Issue #250)。
+  const title = raceTitle({ ...label, raceName: snapshot.raceName ?? label.raceName, grade: snapshot.grade ?? label.grade });
   // 帯の色は cloud 側で決める(Issue #239。カラーユニバーサルデザイン)。core の `buildAnalysisEmbed` も色を返すが、その定数は exe の Discord と共有で変えられない(exe は対象外)。
   // 条件は core と同じ「EV プラスの馬がいるか」(`record.horses` を `EmbedHorse` に 1:1 で写しており、isPositive をそのまま渡している)。
   const color = record.horses.some((h) => h.isPositive) ? COLOR_GREEN : COLOR_GRAY;

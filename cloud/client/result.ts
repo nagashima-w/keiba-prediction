@@ -25,6 +25,7 @@ import { BET_ALLOCATION_UNSET_NOTE } from "../../packages/app/src/renderer/bet-a
 import { formatEstimatedEvSuffix, formatEv, formatOdds, formatPercent, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import type { AnalysisDetail } from "./api-analysis";
 import { formatJstDateTime, isRealYmd } from "./date";
+import { nameWithGrade } from "./grade";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine, FAIR_WIN_ODDS_LABEL, WIN_ODDS_NOTE, type WinOddsLine } from "../src/win-odds-format";
 import { buildLlmUsage, type LlmUsageView } from "./llm-usage";
 import { buildHash, type Route } from "./route";
@@ -157,9 +158,10 @@ export interface ResultModel {
 }
 
 function titleOf(a: AnalysisDetail): string {
-  const { venueName, raceNumber, raceName } = a.race;
+  const { venueName, raceNumber, raceName, grade } = a.race;
   const head = `${venueName ?? ""}${raceNumber === null ? "" : `${raceNumber}R`}`;
-  const parts = [head, raceName ?? ""].filter((p) => p !== "");
+  // 重賞は、レース名の直後に「(G3)」を付ける(Issue #250。レース名が無いときはグレードだけを付けない)。
+  const parts = [head, nameWithGrade(raceName, grade)].filter((p) => p !== "");
   return parts.length === 0 ? `レース ${a.raceId}` : parts.join(" ");
 }
 

@@ -332,7 +332,7 @@ describe("AC-D1: 発走前の分析が保存されると、分析の embed が1�
     ]);
     expect(rows[0]!.analysis_id).toBe(1);
     const analysis = h.notifier.sent.map(embedOf).find((e) => e.title!.includes("福島"))!;
-    expect(analysis.title).toBe("福島 11R ラジオNIKKEI賞"); // Issue #230: レース番号つき(計画の行から)。レース名はスナップショットの実名
+    expect(analysis.title).toBe("福島 11R ラジオNIKKEI賞(G3)"); // Issue #230: レース番号つき(計画の行から)。レース名はスナップショットの実名。Issue #250: 実際の出馬表〈shutuba_202603020211〉のグレード(G3)が、スナップショット経由でタイトルに付く
     expect(analysis.description).toMatch(/^発走 15:35\n\n2026\/06\/28 \/ 福島 \//); // Issue #236: 計画の行の発走時刻(15:35)が、成功の通知の先頭に出る(DO の計画の行 → embed の配線)
     expect(analysis.description).toContain("2026/06/28 / 福島 /"); // メタ行(日付・会場・コース距離)
     expect(analysis.description).toContain("LLM補正:");

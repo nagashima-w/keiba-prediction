@@ -56,7 +56,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     model: null,
     llmNote: null,
     llmCalls: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result" },
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result" },
     horses: [horse(1), horse(2)],
     allocation: { ...ALLOCATION, bets: [...ALLOCATION.bets] },
     detail: "present",
@@ -72,12 +72,35 @@ function content(a: AnalysisDetail, route: Route = ROUTE) {
   return model.content!;
 }
 
+describe("見出しのグレード(Issue #250)", () => {
+  const withRace = (over: Partial<AnalysisDetail["race"]>) => analysis({ race: { venueName: "東京", raceNumber: 11, raceName: "アイルランドT", grade: null, oddsStatus: null, ...over } });
+
+  it.each([
+    ["中央の G3", "G3", "東京11R アイルランドT(G3)"],
+    ["障害の J・G2", "J・G2", "東京11R アイルランドT(J・G2)"],
+    ["地方の Jpn1", "Jpn1", "東京11R アイルランドT(Jpn1)"],
+    ["地方の重賞", "重賞", "東京11R アイルランドT(重賞)"],
+    ["OP は付けない", "OP", "東京11R アイルランドT"],
+    ["L は付けない", "L", "東京11R アイルランドT"],
+    ["グレードなし(過去の分析・null)", null, "東京11R アイルランドT"],
+  ] as const)("%s", (_name, grade, expected) => {
+    expect(content(withRace({ grade })).title).toBe(expected);
+  });
+
+  it("レース名が無い(null。地方の分析など)ときは、グレードだけを後ろに付けない", () => {
+    // 前提: レース名があれば付く
+    expect(content(withRace({ grade: "G3" })).title).toBe("東京11R アイルランドT(G3)");
+    expect(content(withRace({ raceName: null, grade: "G3" })).title).toBe("東京11R");
+    expect(content(withRace({ raceName: "", grade: "G3" })).title).toBe("東京11R");
+  });
+});
+
 describe("見出し・分析時刻・分析モデル", () => {
   it("見出し: 場名・R・レース名。null の部分は省き、全部無ければレース ID", () => {
     expect(content(analysis()).title).toBe("福島11R テストステークス");
-    expect(content(analysis({ race: { venueName: null, raceNumber: 11, raceName: "テストステークス", oddsStatus: null } })).title).toBe("11R テストステークス");
-    expect(content(analysis({ race: { venueName: "福島", raceNumber: null, raceName: null, oddsStatus: null } })).title).toBe("福島");
-    expect(content(analysis({ race: { venueName: null, raceNumber: null, raceName: null, oddsStatus: null } })).title).toBe(`レース ${RACE_ID}`);
+    expect(content(analysis({ race: { venueName: null, raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: null } })).title).toBe("11R テストステークス");
+    expect(content(analysis({ race: { venueName: "福島", raceNumber: null, raceName: null, grade: null, oddsStatus: null } })).title).toBe("福島");
+    expect(content(analysis({ race: { venueName: null, raceNumber: null, raceName: null, grade: null, oddsStatus: null } })).title).toBe(`レース ${RACE_ID}`);
   });
 
   it("分析時刻は JST(UTC の 15:00 以降は翌日)", () => {
@@ -662,7 +685,7 @@ describe("単勝の想定・実際のオッズ(Issue #247)", () => {
 
   it("オッズの状態でラベルが変わる(middle=実際(暫定)・yoso=実際(予想))。強調の判定は状態に依らない", () => {
     for (const [status, label] of [["middle", "実際(暫定)"], ["yoso", "実際(予想)"], ["result", "実際"]] as const) {
-      const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", oddsStatus: status }, horses: [withOdds(1, 8.5, 12.3)] });
+      const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: status }, horses: [withOdds(1, 8.5, 12.3)] });
       expect(oddsOf(a)[0], status).toEqual({ fair: "8.5倍", actual: "12.3倍", actualLabel: label, higher: true });
     }
   });

@@ -107,7 +107,7 @@ const ANALYSIS: AnalysisDetail = {
   model: null,
   llmNote: null,
   llmCalls: null,
-  race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result" },
+  race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result" },
   horses: [
     { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
     { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.1, placeOddsMin: null, ev: null, isPositive: false, mark: "◎", reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
@@ -309,6 +309,23 @@ describe("見出し・戻るリンク", () => {
     // 一覧のキャッシュが無い経路(prior・ID だけ)は、時刻を持たないので出さない
     expect(buildRaceModel(input({ status: { kind: "ready", rows: [], prior: PRIOR } })).title).toBe("福島11R 福島民報杯");
     expect(buildRaceModel(input()).title).toBe(`レース ${RACE_ID}`);
+  });
+
+  it.each([
+    ["中央の G3(発走時刻つき)", "G3", "15:45", "福島11R 福島民報杯(G3) 15:45発走"],
+    ["障害の J・G1", "J・G1", null, "福島11R 福島民報杯(J・G1)"],
+    ["地方の Jpn1", "Jpn1", "20:05", "福島11R 福島民報杯(Jpn1) 20:05発走"],
+    ["OP は付けない", "OP", "15:45", "福島11R 福島民報杯 15:45発走"],
+    ["L は付けない", "L", null, "福島11R 福島民報杯"],
+    ["グレードなし(null)", null, "15:45", "福島11R 福島民報杯 15:45発走"],
+  ] as const)("Issue #250: 一覧の行から作る見出しは、重賞だけレース名の直後に「(グレード)」を付ける — %s", (_name, grade, startTime, expected) => {
+    expect(buildRaceModel(input({ listRow: { ...listRow, grade, startTime } })).title).toBe(expected);
+  });
+
+  it("Issue #250: 一覧のキャッシュが無い経路(prior・ID だけ)の見出しには、グレードを付けない(持っていない)", () => {
+    // 前提: 同じ一覧の行ならグレードが付く
+    expect(buildRaceModel(input({ listRow: { ...listRow, grade: "G3" } })).title).toBe("福島11R 福島民報杯(G3)");
+    expect(buildRaceModel(input({ status: { kind: "ready", rows: [], prior: PRIOR } })).title).toBe("福島11R 福島民報杯");
   });
 
   it("一覧へ戻るリンクは、日付・区分を保つ(race を含めない)", () => {

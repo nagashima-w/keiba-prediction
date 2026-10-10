@@ -56,6 +56,11 @@ export interface RaceSnapshotRace {
   readonly fence: string | null;
   readonly oddsStatus: string | null;
   readonly officialDatetime: string | null;
+  /**
+   * グレード(Issue #250。"G1"〜"G3"・"J・G1"〜"J・G3"・地方の "Jpn1" や "重賞" など。出馬表の `grade` の写し)。
+   * **値があるときだけキーを持つ任意項目**: グレードの無いレース・グレードを保存する前に作った過去のスナップショットはキー自体が無い。
+   */
+  readonly grade?: string;
 }
 
 /** レース情報スナップショットの「馬」部分(Issue#10)。過去戦績は含めない。 */
@@ -163,6 +168,7 @@ export function buildRaceSnapshot(race: RaceData): RaceSnapshot {
       fence: race.race.fence ?? null,
       oddsStatus: race.odds.oddsStatus,
       officialDatetime: race.odds.officialDatetime,
+      ...(race.race.grade !== undefined ? { grade: race.race.grade } : {}),
     },
     horses: race.horses.map((h) => {
       const umaban = h.shutuba.umaban;

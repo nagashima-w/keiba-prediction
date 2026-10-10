@@ -6,6 +6,8 @@
  *
  * **golden は、runAnalysis を変更する前のコミット(b821c97〈v1.19.9〉)で生成した。** 変更後のコードで再生成して
  * 差分が出たら、それは exe の出力が変わったことを意味する(意図した変更でない限り golden を更新してはいけない)。
+ * **Issue #250 で一度だけ再生成した**: スナップショットの race にグレード(`grade`)を足したため、G3 のレース(ラジオNIKKEI賞)の
+ * raceSnapshot.race に `"grade": "G3"` が加わった(差分はその 3 か所のみ。`git diff` で確認済み)。
  * 入力はすべてリポジトリ内のフィクスチャと固定の合成値(実ネットワーク・実 API には触れない。時刻は固定)。
  * 検証は `packages/app/test/analysis-pipeline-golden.test.ts`。
  */

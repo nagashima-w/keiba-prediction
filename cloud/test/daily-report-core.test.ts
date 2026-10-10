@@ -51,7 +51,7 @@ function raceInput(n: number, withResult = true): RaceInput {
   const raceId = raceIdOf(n);
   const view: AnalysisView = {
     id: 100 + n, raceId, analyzedAt: "2026-10-10T05:00:00.000Z", kaisaiDate: DATE, evEstimated: false, model: "claude-sonnet-5-5", promptVersion: "v1", llmNote: null, llmCalls: null,
-    race: { venueName: "東京", raceNumber: n, raceName: `テスト${n}S`, startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
+    race: { venueName: "東京", raceNumber: n, raceName: `テスト${n}S`, grade: null, startTime: "15:45", courseType: "芝", distance: 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
     horses: [horse(1, { mark: "◎" }), horse(2, { mark: "〇" })], detail: "present",
     allocation: { route: "mixed", skipReasonCode: null, unavailableReason: null, fallbackReason: null, betUnit: 100, bankroll: 10000, perRaceCap: 3000, kellyFraction: 0.25, evThreshold: 1, includeComboOdds: true, includeWide: true, includeTrio: true, includeQuinella: true, includeExacta: true, includeTrifecta: true, includeBracketQuinella: true, oddsStatus: "ok", bets: [{ betType: "win", comboKey: "01", stake: 200, odds: 3, ev: 1.1 }] },
   };

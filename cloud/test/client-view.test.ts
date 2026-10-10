@@ -305,7 +305,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     model: null,
     llmNote: null,
     llmCalls: null,
-    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", oddsStatus: "result" },
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", grade: null, oddsStatus: "result" },
     horses: [
       { umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.18, placeOddsMin: 1.8, ev: 1.25, isPositive: true, mark: "◎", reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
       { umaban: 2, name: "ブラボー", prior: 0.1, adjustedProb: 0.09, placeOddsMin: null, ev: null, isPositive: false, mark: null, reason: null, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null },
@@ -577,7 +577,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
   it("結果画面(馬名・レース名・モデル名・印)", () => {
     const a = analysis({
       model: PAYLOAD,
-      race: { venueName: PAYLOAD, raceNumber: 11, raceName: PAYLOAD, oddsStatus: PAYLOAD },
+      race: { venueName: PAYLOAD, raceNumber: 11, raceName: PAYLOAD, grade: null, oddsStatus: PAYLOAD },
       horses: [{ umaban: 1, name: PAYLOAD, prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: PAYLOAD, reason: PAYLOAD, highlights: [], concerns: [], winProb: null, fairWinOdds: null, winOdds: null }],
     });
     const { tags, texts } = mountAll(resultTree(a));
@@ -1291,7 +1291,7 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
 
       it("オッズの状態: 発売中は『実際(暫定)』・発売前は『実際(予想)』", () => {
         for (const [status, label] of [["middle", "実際(暫定)"], ["yoso", "実際(予想)"]] as const) {
-          const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", oddsStatus: status }, horses: [oddsHorse(1, 8.5, 12.3)] });
+          const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: status }, horses: [oddsHorse(1, 8.5, 12.3)] });
           expect(byClass(tree(a), "win-odds").map(textOf), status).toEqual([`単勝 想定(目安) 8.5倍 / ${label} 12.3倍 ↑想定より高い`]);
         }
       });
@@ -1317,7 +1317,7 @@ describe("単勝の想定・実際のオッズの表示(Issue #247。結果画�
       });
 
       it("外から来た文字列はテキストのみ(オッズの状態が奇妙な文字列でも要素を作らない)", () => {
-        const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", oddsStatus: '<img src=x onerror=alert(1)>' }, horses: [oddsHorse(1, 8.5, 12.3)] });
+        const a = analysis({ race: { venueName: "福島", raceNumber: 11, raceName: "テスト", grade: null, oddsStatus: '<img src=x onerror=alert(1)>' }, horses: [oddsHorse(1, 8.5, 12.3)] });
         const cards = byClass(tree(a), "horse");
         expect(textOf(cards[0]!)).toContain("単勝 想定(目安) 8.5倍 / 実際 12.3倍");
         expect(findAll(cards[0]!, (n) => n.tag === "img")).toEqual([]);

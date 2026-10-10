@@ -4985,7 +4985,8 @@
           "startTime": "15:45",
           "fence": "A",
           "oddsStatus": "result",
-          "officialDatetime": "2026-06-28 15:52:30"
+          "officialDatetime": "2026-06-28 15:52:30",
+          "grade": "G3"
         },
         "horses": [
           {
@@ -19804,7 +19805,8 @@
           "startTime": "15:45",
           "fence": "A",
           "oddsStatus": "result",
-          "officialDatetime": "2026-06-28 15:52:30"
+          "officialDatetime": "2026-06-28 15:52:30",
+          "grade": "G3"
         },
         "horses": [
           {
@@ -41449,7 +41451,8 @@
           "startTime": "15:45",
           "fence": "A",
           "oddsStatus": "result",
-          "officialDatetime": "2026-06-28 15:52:30"
+          "officialDatetime": "2026-06-28 15:52:30",
+          "grade": "G3"
         },
         "horses": [
           {

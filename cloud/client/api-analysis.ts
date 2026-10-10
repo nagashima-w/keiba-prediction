@@ -76,8 +76,8 @@ export interface AnalysisDetail {
    * LLM を呼んだ1回ごとの記録(呼び出しの順。Issue #198)。LLM を呼ばなかった(キー未登録)・旧い分析は null。`model` とは独立(全回が失敗してフォールバックした分析は、モデルが null で記録がある)。
    */
   readonly llmCalls: readonly LlmCall[] | null;
-  /** `oddsStatus`(Issue #247)は分析時点のオッズの状態(result / middle / yoso。詳細なしは null)。実際の単勝オッズのラベル(確定・暫定・予想)に使う。 */
-  readonly race: { readonly venueName: string | null; readonly raceNumber: number | null; readonly raceName: string | null; readonly oddsStatus: string | null };
+  /** `grade`(Issue #250)はスナップショットのグレードの生の値(表示するかは `grade.ts`)。過去の分析・キー無し(古いサーバの応答)は null。`oddsStatus`(Issue #247)は分析時点のオッズの状態(result / middle / yoso。詳細なしは null)。実際の単勝オッズのラベル(確定・暫定・予想)に使う。 */
+  readonly race: { readonly venueName: string | null; readonly raceNumber: number | null; readonly raceName: string | null; readonly grade: string | null; readonly oddsStatus: string | null };
   readonly horses: readonly AnalysisHorse[];
   readonly allocation: StoredAllocationView | null;
   readonly detail: DetailState;
@@ -218,6 +218,9 @@ function parseDetail(value: unknown): AnalysisDetail | null {
   }
   if (detail !== "present" && detail !== "missing" && detail !== "none") return null;
   if (!isRecord(race) || !strOrNull(race["venueName"]) || !numOrNull(race["raceNumber"]) || !strOrNull(race["raceName"]) || !strOrNull(race["oddsStatus"])) return null;
+  // グレード(Issue #250): キー無し(古いサーバの応答)は null。文字列・null 以外の型は応答ごと不正にする。
+  const grade = race["grade"] ?? null;
+  if (!strOrNull(grade)) return null;
   if (!Array.isArray(horses)) return null;
   const parsedHorses: AnalysisHorse[] = [];
   for (const raw of horses as unknown[]) {
@@ -239,7 +242,7 @@ function parseDetail(value: unknown): AnalysisDetail | null {
     model,
     llmNote,
     llmCalls: parsedCalls,
-    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], oddsStatus: race["oddsStatus"] },
+    race: { venueName: race["venueName"], raceNumber: race["raceNumber"], raceName: race["raceName"], grade, oddsStatus: race["oddsStatus"] },
     horses: parsedHorses,
     allocation: parsedAllocation,
     detail,

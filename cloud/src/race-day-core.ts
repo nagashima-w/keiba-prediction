@@ -1139,7 +1139,7 @@ export class RaceDayCore {
         if (result === undefined) {
           throw new Error("結果が見つかりません");
         }
-        const label: RaceLabel = { raceId: result.raceId, venueName: result.venueName, raceNumber: result.raceNumber, raceName: result.raceName, startTime: result.startTime };
+        const label: RaceLabel = { raceId: result.raceId, venueName: result.venueName, raceNumber: result.raceNumber, raceName: result.raceName, startTime: result.startTime, grade: result.grade };
         const embed = item.kind === "skipped-manual" ? buildManualSkipEmbed(label) : buildFailureEmbed(label, notificationText(result.outcome));
         payloadJson = JSON.stringify(embed);
       }
@@ -1206,6 +1206,7 @@ export class RaceDayCore {
       raceNumber: row?.race_number ?? null,
       raceName: row?.race_name ?? null,
       startTime: row?.start_time ?? null,
+      grade: row?.grade ?? null,
     };
     let embed: CloudEmbed;
     try {

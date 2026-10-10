@@ -38,11 +38,13 @@ export interface RaceListEntry {
    */
   readonly startTime?: string;
   /**
-   * グレードラベル(生テキストのまま)。交流重賞(例: Jpn1)・地方重賞(例: 重賞)・OP等。
-   * 実測(2026-06-24 浦和さきたま杯): アラビア数字の "Jpn1"(ローマ数字ではない)。
-   * 中央は画像アイコン方式で内テキストが常に空のため、常に undefined になる
-   * (中央の数値クラス→gradeマッピングは今回スコープ外)。
-   * grade span が存在しない/内テキストが空の行は undefined(空文字では拾わない)。
+   * グレードラベル。
+   * - 地方(テキスト方式): 生テキストのまま。交流重賞(例: Jpn1)・地方重賞(例: 重賞)・OP等。
+   *   実測(2026-06-24 浦和さきたま杯): アラビア数字の "Jpn1"(ローマ数字ではない)。
+   * - 中央(画像アイコン方式。内テキストは空): レース名の横のアイコンのクラス番号から読む(Issue #250)。
+   *   **実測した重賞だけ**: "G1"/"G2"/"G3"/"J・G1"/"J・G2"/"J・G3"(番号の表は grade-label.ts)。
+   *   OP・L・条件クラス・未測定の番号は undefined。
+   * グレードの無い行・読めない行は undefined(空文字では拾わない)。
    */
   readonly grade?: string;
 }
@@ -149,13 +151,20 @@ export interface ShutubaRaceInfo {
   /**
    * 重賞グレードバッジの有無(タスク機能B 要修正2。selectors.ts SHUTUBA_SELECTORS.gradeBadge
    * で判定)。RaceName配下にIcon_GradeType要素があれば true、無ければ false。
-   * グレード番号(G1〜G3・Jpn1〜3等)の解釈は一切行わない=有無のみの判定であり、OP等の
+   * この判定ではグレード番号(G1〜G3・Jpn1〜3等)を解釈しない=有無のみの判定であり(グレードそのものは
+   * 下の `grade` が別に持つ)、OP等の
    * バッジ付きレースでも true になり得る(その場合は同レース過去10年結果APIが
    * status:NGを返すだけで、呼び出し自体は無害。判定不能な場合まで false にはせず、
    * 呼び出し側〈analysis-pipeline.ts〉はこのフィールドが無い〈undefined〉場合も
    * true と同様に「呼ぶ」側へフォールセーフする=fail-open。取りこぼしゼロを優先する)。
    */
   readonly hasGradeBadge?: boolean;
+  /**
+   * グレードラベル(Issue #250)。一覧の `RaceListEntry.grade` と同じ規則: 地方はアイコン内の生テキスト
+   * (例: "Jpn1"・"重賞"・"OP")、中央は `h1.RaceName` 内のアイコンの番号から実測した重賞だけ("G1"〜"G3"・
+   * "J・G1"〜"J・G3")。グレードが無い・読めない(OP・L・条件クラス・未測定の番号)ときは**キー自体を持たない**。
+   */
+  readonly grade?: string;
 }
 
 /** 出馬表のパース結果(レース情報+出走馬)。 */

@@ -4,6 +4,7 @@
  */
 import type { BoardRow, RaceRow, TaskMode } from "./api";
 import { ymdToInput } from "./date";
+import { gradeLabelForDisplay } from "./grade";
 import { buildHash, REPORT_HASH, SETTINGS_HASH, VERIFY_HASH, type Route, type Venue } from "./route";
 
 export interface Badge {
@@ -202,7 +203,7 @@ export function buildListModel(input: ListModelInput): ListModel {
           label: `${r.raceNumber}R`,
           name: r.raceName,
           detail: `${r.startTime === null ? "" : `${r.startTime} 発走・`}${r.courseType} ${r.distance}m・${r.entryCount}頭`,
-          grade: r.grade,
+          grade: gradeLabelForDisplay(r.grade), // 重賞だけ(Issue #250。OP・L などは出さない)
           href: buildHash({ date: route.date, venue: route.venue, race: r.raceId }),
           badges:
             board.kind === "ready"

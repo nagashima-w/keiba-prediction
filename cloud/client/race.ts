@@ -12,6 +12,7 @@ import { formatPercent } from "../../packages/app/src/renderer/format";
 import type { BoardRow, MorningPriorView, RaceRow, TaskMode, TaskStatus } from "./api";
 import type { PastAnalysis } from "./api-analysis";
 import { formatJstDateTime } from "./date";
+import { nameWithGrade } from "./grade";
 import { badgeOf, pick, type Badge } from "./list";
 import { contentOf, type ResultContent, type ResultSource } from "./result";
 import { buildHash, type Route } from "./route";
@@ -148,7 +149,8 @@ function titleOf(route: Route, listRow: RaceRow | undefined, prior: MorningPrior
   const raceId = route.race!;
   if (listRow !== undefined) {
     // 発走予定時刻(Issue #236)は、一覧の行から作るときだけ(prior・レース ID だけの経路は時刻を持たない。見出しのために取得を足さない)。
-    return `${listRow.venueName ?? ""}${listRow.raceNumber}R ${listRow.raceName}${listRow.startTime === null ? "" : ` ${listRow.startTime}発走`}`;
+    // 重賞は、レース名の直後に「(G3)」を付ける(Issue #250。一覧の行のグレードから。prior・ID だけの経路はグレードを持たない)。
+    return `${listRow.venueName ?? ""}${listRow.raceNumber}R ${nameWithGrade(listRow.raceName, listRow.grade)}${listRow.startTime === null ? "" : ` ${listRow.startTime}発走`}`;
   }
   if (prior !== null) {
     const number = Number(raceId.slice(10));

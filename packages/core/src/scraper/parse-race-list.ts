@@ -6,7 +6,8 @@
  */
 
 import * as cheerio from "cheerio";
-import { InvalidIdError, parseRaceId } from "./ids.js";
+import { centralGradeFromClassNames } from "./grade-label.js";
+import { InvalidIdError, parseRaceId, venueKindOfRaceId } from "./ids.js";
 import { PATTERNS, RACE_LIST_SELECTORS as SEL } from "./selectors.js";
 import type { CourseType, RaceListEntry } from "./types.js";
 
@@ -109,9 +110,16 @@ export function parseRaceList(html: string): RaceListEntry[] {
       // レース名(切り詰められている場合あり)。
       const name = $item.find(SEL.itemTitle).text().trim();
 
-      // グレードラベル(生テキストのまま)。存在しない/複数存在する場合は先頭のspanを採用し、
-      // 内テキストが空(中央の画像アイコン方式)なら undefined にする(空文字を拾わない)。
-      const grade = $item.find(SEL.grade).first().text().trim() || undefined;
+      // グレードラベル。地方(テキスト方式)は生テキストのまま: 存在しない/複数存在する場合は先頭のspanを採用し、
+      // 内テキストが空なら undefined にする(空文字を拾わない)。
+      // 中央は画像アイコン方式で内テキストが空のため、レース名の横のアイコンのクラス番号から読む(Issue #250。
+      // 実測した重賞の番号だけがラベルになる=grade-label.ts)。番号の表は中央専用なので、地方の行には当てない。
+      const textGrade = $item.find(SEL.grade).first().text().trim() || undefined;
+      const grade =
+        textGrade ??
+        (venueKindOfRaceId(raceId) === "central"
+          ? centralGradeFromClassNames($item.find(SEL.gradeIcon).map((___, el) => $(el).attr("class") ?? "").get())
+          : undefined);
 
       entries.push({
         raceId,

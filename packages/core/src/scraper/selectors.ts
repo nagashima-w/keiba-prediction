@@ -36,10 +36,15 @@ export const RACE_LIST_SELECTORS = {
    * NARは `Icon_Grade_None_Text Icon_GradeType Icon_GradeType{N} Icon_GradePos01` の内テキストに
    * "Jpn1"/"重賞"/"OP" 等がそのまま入ることを確認済み(class番号も併記されるがテキストを優先採用)。
    * 中央は同じ枠が `Icon_GradeType` のみ(Icon_Grade_None_Text クラス無し)で内テキストが常に空の
-   * 画像アイコン方式のため、このセレクタではマッチせず自然に undefined になる。
+   * 画像アイコン方式のため、このセレクタではマッチしない(中央は下の `gradeIcon` の番号から読む。Issue #250)。
    * 詳細: docs/nar-scraping-plan.md。
    */
   grade: ".Icon_Grade_None_Text",
+  /**
+   * 中央のグレードアイコン(画像アイコン方式。Issue #250)。**レース名の横**(`.RaceList_ItemTitle` 内)のものだけを見る。
+   * データ枠(`.RaceData`)の中にも別のアイコン(番号 13)があり、グレードではない。番号→ラベルは grade-label.ts。
+   */
+  gradeIcon: ".RaceList_ItemTitle .Icon_GradeType",
 } as const;
 
 /** 出馬表(shutuba.html)のセレクタ。 */
@@ -49,7 +54,8 @@ export const SHUTUBA_SELECTORS = {
   /**
    * 重賞グレードバッジ(タスク機能B 要修正2: 非重賞への無駄なAPI呼び出しを避ける事前判定)。
    * RaceName配下にIcon_GradeTypeクラスを持つ要素があるかどうかで判定する(有無のみ。
-   * グレード番号〈Icon_GradeType{N}〉は中央・地方で体系が異なるため一切解釈しない)。
+   * このセレクタによる判定では番号を解釈しない。グレードそのもの〈`ShutubaRaceInfo.grade`〉は下の
+   * `gradeIconCentral`〈中央の番号〉・`gradeText`〈地方のテキスト〉で別に読む。Issue #250)。
    * 中央は<h1 class="RaceName">…<span class="Icon_GradeType Icon_GradeType3">、
    * 地方(NAR)は<div class="RaceName">…<span class="Icon_Grade_None_Text Icon_GradeType
    * Icon_GradeType19 …">Jpn1</span>とタグ名(h1/div)が異なるため、raceNameセレクタ
@@ -57,6 +63,14 @@ export const SHUTUBA_SELECTORS = {
    * (実測: 2026-07-28 boss着手前ゲート裁定)。
    */
   gradeBadge: ".RaceName .Icon_GradeType",
+  /**
+   * 中央のグレードアイコン(Issue #250)。`h1.RaceName` に限る: 地方は `div.RaceName` でアイコンの番号が別体系
+   * (Jpn1=19 など)のため、中央の番号の表を地方に当てないよう、タグ名で構造的に分ける。
+   * グレードの隣に別のアイコン(番号 13)が並ぶレースがあり、番号の表に無い番号は無視される。
+   */
+  gradeIconCentral: "h1.RaceName .Icon_GradeType",
+  /** 地方のグレードのテキスト(`Icon_Grade_None_Text` の内テキスト。例: "Jpn1"。Issue #250)。一覧の `grade` と同じクラス。 */
+  gradeText: ".RaceName .Icon_Grade_None_Text",
   /** 発走時刻・距離・コース・天候・馬場を含む行。 */
   raceData01: ".RaceData01",
   /** 会場・条件・頭数などを含む行。 */
@@ -370,6 +384,8 @@ export const OIKIRI_SELECTORS = {
 
 /** パースに用いる正規表現。 */
 export const PATTERNS = {
+  /** グレードアイコンのクラス属性から番号を取り出す(例: `Icon_GradeType Icon_GradeType3 Icon_GradePos01` → 3。番号の無い `Icon_GradeType` だけではマッチしない)。 */
+  gradeTypeNumber: /(?:^|\s)Icon_GradeType(\d+)(?:\s|$)/,
   /** href から race_id(12桁)を取り出す。 */
   raceIdFromHref: /race_id=(\d+)/,
   /** テキストからコース種別と距離を取り出す(例: 芝1800m / ダ1700m / 障2750m)。 */

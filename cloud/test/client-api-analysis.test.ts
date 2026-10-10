@@ -291,6 +291,21 @@ describe("parseAnalysisResponse(GET /api/analyses/{id})", () => {
       }
     }
 
+    it("Issue #250 race.grade: 文字列はそのまま・null は null・キー無し(古いサーバの応答)は null で読む。文字列でも null でもなければ unexpected", () => {
+      const read = (race: unknown) => {
+        const result = parseAnalysisResponse(200, wrap({ ...ANALYSIS, race }));
+        return result.ok ? result.analysis.race.grade : "unexpected";
+      };
+      expect(read({ ...RACE, grade: "G3" })).toBe("G3");
+      expect(read({ ...RACE, grade: "J・G1" })).toBe("J・G1");
+      expect(read({ ...RACE, grade: null })).toBeNull();
+      // 前提: RACE 自体は grade のキーを持たない(キー無しの読みを検証している)
+      expect("grade" in RACE).toBe(false);
+      expect(read(RACE)).toBeNull();
+      expect(read({ ...RACE, grade: 3 })).toBe("unexpected");
+      expect(read({ ...RACE, grade: { a: 1 } })).toBe("unexpected");
+    });
+
     it("race.oddsStatus が欠けたら unexpected。文字列でも null でもなければ unexpected", () => {
       const { oddsStatus: _drop, ...noKey } = RACE;
       expect(parseAnalysisResponse(200, wrap({ ...ANALYSIS, race: noKey }))).toEqual(UNEXPECTED);

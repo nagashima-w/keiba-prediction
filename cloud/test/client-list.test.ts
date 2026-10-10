@@ -89,6 +89,18 @@ describe("buildListModel", () => {
     expect(model.groups[0]!.races[0]!.grade).toBeNull();
   });
 
+  it.each([
+    ["中央の重賞", "G1", "G1"],
+    ["障害の重賞", "J・G2", "J・G2"],
+    ["地方の交流重賞", "Jpn3", "Jpn3"],
+    ["地方の重賞", "重賞", "重賞"],
+    ["地方の OP は出さない(重賞ではない。Issue #250)", "OP", null],
+    ["リステッドは出さない(重賞ではない)", "L", null],
+  ] as const)("Issue #250 グレードのバッジ — %s", (_name, grade, expected) => {
+    const model = buildListModel(input({ list: { kind: "ready", races: [race("202603020211", { grade })] } }));
+    expect(model.groups[0]!.races[0]!.grade).toBe(expected);
+  });
+
   it("バッジは板の (race_id, mode) ごと: 同じレースの morning と pre_race を別々に、別のレースの行を取り違えずに写す", () => {
     const board: BoardRow[] = [
       row("202603020211", "morning", "done"),

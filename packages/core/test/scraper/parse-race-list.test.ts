@@ -388,7 +388,8 @@ describe("parseRaceList(発走時刻 startTime の抽出。Issue #202)", () => {
     expect(e.entryCount).toBe(16);
     expect(e.venue).toBe("福島");
     expect(e.raceNumber).toBe(11);
-    expect(e.grade).toBeUndefined();
+    // 中央のグレードはアイコンの番号から読むようになった(Issue #250。番号 3 = G3)。他のフィールドは従来どおり。
+    expect(e.grade).toBe("G3");
   });
 
   it("合成フィクスチャ(20260927 の地方に Jpn3 を1件足したもの): 水沢 10R(202636092710)だけが Jpn3 で、実測の地方重賞(202636092711)は 重賞 のまま", () => {

@@ -54,6 +54,8 @@ export interface AnalysisViewRace {
   /** レース番号(raceId の末尾2桁から)。導けなければ null。 */
   readonly raceNumber: number | null;
   readonly raceName: string | null;
+  /** グレード(Issue #250。raceSnapshot の `race.grade`。"G1"〜"G3"・"J・G1"〜"J・G3"・地方の "Jpn1" や "重賞" など生の値。何を表示するかは画面側〈client/grade.ts〉が決める)。過去の分析・詳細なし・文字列でないときは null。 */
+  readonly grade: string | null;
   readonly startTime: string | null;
   readonly courseType: string | null;
   readonly distance: number | null;
@@ -158,6 +160,7 @@ export function buildAnalysisView(result: AnalysisDetailResult, allocation: Stor
       venueName: venueNameOf(analysis.raceId),
       raceNumber: raceNumberOf(analysis.raceId),
       raceName: str(race?.raceName),
+      grade: str(race?.grade),
       startTime: str(race?.startTime),
       courseType: str(race?.courseType),
       distance: num(race?.distance),

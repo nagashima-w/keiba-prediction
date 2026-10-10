@@ -234,7 +234,9 @@ describe("GET /api/analyses/{id}: ローカルの D1・R2 で保存した分析�
     expect(status).toBe(200);
     expect(body.ok).toBe(true);
     const view = body.analysis;
-    expect(view).toMatchObject({ id: saved.id, raceId: RACE_ID, kaisaiDate: "20260628", detail: "present", race: { venueName: "福島", raceNumber: 11, raceName: race.race.raceName } });
+    // Issue #250: 実物の出馬表(shutuba_202603020211。G3)から取ったグレードが、保存したスナップショット経由で応答に載る
+    expect(race.race.grade, "前提: 出馬表のパースでグレードが取れている").toBe("G3");
+    expect(view).toMatchObject({ id: saved.id, raceId: RACE_ID, kaisaiDate: "20260628", detail: "present", race: { venueName: "福島", raceNumber: 11, raceName: race.race.raceName, grade: "G3" } });
     const expectedNames = view.horses.map((h) => race.horses.find((x) => x.shutuba.umaban === h.umaban)!.shutuba.name);
     expect(view.horses.map((h) => h.name)).toEqual(expectedNames);
     expect(view.horses.length).toBe(race.horses.length);

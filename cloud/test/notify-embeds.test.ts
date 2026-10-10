@@ -317,6 +317,56 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
     });
   });
 
+  describe("Issue #250: 重賞のタイトルは、レース名の直後に「(グレード)」を付ける(失敗・手動スキップ・最小・分析完了で同じ)", () => {
+    const snapshotOf = (name: string, grade?: unknown) => ({
+      race: { raceName: name, courseType: "芝", distance: 1600, oddsStatus: "result", ...(grade === undefined ? {} : { grade }) },
+      horses: [{ umaban: 1, name: "アルファ" }],
+    });
+
+    it.each([
+      ["中央の G3", "G3", "中山 11R テストステークス(G3)"],
+      ["障害の J・G1", "J・G1", "中山 11R テストステークス(J・G1)"],
+      ["地方の Jpn2", "Jpn2", "中山 11R テストステークス(Jpn2)"],
+      ["地方の重賞", "重賞", "中山 11R テストステークス(重賞)"],
+      ["OP は付けない", "OP", "中山 11R テストステークス"],
+      ["L は付けない", "L", "中山 11R テストステークス"],
+      ["グレードなし(null)", null, "中山 11R テストステークス"],
+    ] as const)("計画の行のグレード — %s", (_name, grade, expected) => {
+      const lb = label({ grade });
+      expect(buildFailureEmbed(lb, "x").title).toBe(expected);
+      expect(buildManualSkipEmbed(lb).title).toBe(expected);
+      expect(buildMinimalAnalysisEmbed(lb).title).toBe(expected);
+      // 分析の完了: スナップショットにグレードが無ければ、計画の行のグレードを使う
+      expect(buildAnalysisNotificationEmbed(record({}, snapshotOf("テストステークス")), effective, lb).title).toBe(expected);
+    });
+
+    it("label にグレードのキーが無い(従来の呼び出し)は、グレードなしと同じ", () => {
+      // 前提: label() は grade のキーを持たない
+      expect("grade" in label()).toBe(false);
+      expect(buildFailureEmbed(label(), "x").title).toBe("中山 11R テストステークス");
+    });
+
+    it("分析の完了: スナップショットのグレードを、計画の行のグレードより優先する。スナップショットが文字列でないときは計画の行を使う", () => {
+      const lb = label({ grade: "G2" });
+      expect(buildAnalysisNotificationEmbed(record({}, snapshotOf("テストステークス", "G1")), effective, lb).title).toBe("中山 11R テストステークス(G1)");
+      expect(buildAnalysisNotificationEmbed(record({}, snapshotOf("テストステークス", 3)), effective, lb).title).toBe("中山 11R テストステークス(G2)");
+      expect(buildAnalysisNotificationEmbed(record({}, snapshotOf("テストステークス", null)), effective, lb).title).toBe("中山 11R テストステークス(G2)");
+    });
+
+    it("スナップショットのグレードが重賞でない(OP)ときは、計画の行が重賞でも付けない(新しい方を信じる)", () => {
+      expect(buildAnalysisNotificationEmbed(record({}, snapshotOf("テストステークス", "OP")), effective, label({ grade: "G3" })).title).toBe("中山 11R テストステークス");
+    });
+
+    it("レース名が無いときは、グレードだけを付けない", () => {
+      expect(buildFailureEmbed(label({ raceName: null, grade: "G3" }), "x").title).toBe("中山 11R");
+    });
+
+    it("title は 256 文字以内(長いレース名でも)", () => {
+      const out = buildFailureEmbed(label({ raceName: "あ".repeat(400), grade: "G3" }), "x");
+      expect(out.title!.length).toBeLessThanOrEqual(256);
+    });
+  });
+
   it("Issue #239: 帯の色は cloud 側のパレットで決める。core の既定色(緑 0x2ecc71・灰 0x95a5a6)の定数をそのまま通していない", () => {
     // 狙い目あり: palette の ok。core が返す旧い緑(0x2ecc71)ではない(前提: 両者は別の値)
     expect(DISCORD_COLORS.ok).not.toBe(0x2ecc71);

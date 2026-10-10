@@ -243,6 +243,10 @@ describe("契約: GET /api/analyses・GET /api/analyses/{id} の本物の応答(
     if (!result.ok) return;
     expect(result.analysis.horses).toHaveLength(16);
     expect(result.analysis.race.oddsStatus).toBe(race.odds.oddsStatus);
+    // Issue #250: 実物の出馬表(G3)から取ったグレードが、本物の応答 → クライアントの検査を通って、結果画面の見出しまで届く
+    expect(race.race.grade, "前提: 出馬表のパースでグレードが取れている").toBe("G3");
+    expect(result.analysis.race.grade).toBe("G3");
+    expect(buildResultModel({ route: { date: DATE, venue: "central", race: null, analysis: saved.id, settings: false }, source: { kind: "ready", analysis: result.analysis } }).content!.title).toBe(`福島11R ${race.race.raceName}(G3)`);
     const expectedActual = race.horses.map((h) => race.odds.win[h.shutuba.umaban]?.odds ?? null);
     expect(expectedActual.filter((o) => o !== null).length, "前提: 実際のオッズが取れている馬がいる").toBeGreaterThan(8);
     expect(result.analysis.horses.map((h) => h.winOdds)).toEqual(expectedActual.map((o) => (o !== null && o >= 1 ? o : null)));

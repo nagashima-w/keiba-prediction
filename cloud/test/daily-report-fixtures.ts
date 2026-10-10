@@ -24,7 +24,7 @@ export function fixtureRaceInputs(): RaceInput[] {
   });
   const view = (n: number, id: number, raceName: string, horses: AnalysisViewHorse[], bets: Array<[string, string, number, number]>): AnalysisView => ({
     id, raceId: `2026050308${String(n).padStart(2, "0")}`, analyzedAt: "2026-10-10T05:00:00.000Z", kaisaiDate: FIXTURE_DATE, evEstimated: false, model: "claude-sonnet-5-5", promptVersion: "v-fixture", llmNote: null, llmCalls: null,
-    race: { venueName: "東京", raceNumber: n, raceName, startTime: `${10 + n}:00`, courseType: n === 2 ? "ダ" : "芝", distance: n === 2 ? 1400 : 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
+    race: { venueName: "東京", raceNumber: n, raceName, grade: null, startTime: `${10 + n}:00`, courseType: n === 2 ? "ダ" : "芝", distance: n === 2 ? 1400 : 1600, weather: "晴", trackCondition: "良", oddsStatus: "result" },
     horses, allocation: allocation(bets), detail: "present",
   });
   const result = (rows: Array<[number, number | null, number | null, number | null]>, combos: RaceResultData["combos"] = {}): RaceResultData => ({
