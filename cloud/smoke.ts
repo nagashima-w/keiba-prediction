@@ -19,8 +19,8 @@
  *     Worker → DO → ソケットクライアント → HttpClient → cheerio が fixture で通り、頭数が返ること、2 秒間隔(DO の kv と実際の
  *     タイマー)・ブレーカー(403 の連続)が効くことを、netkeiba へ出さずに確かめる。
  *  F. (#177・#180ほか)日単位の DO `RaceDay` を、偽ソケットの実環境で通す(手動の起動・朝の取得・発走前の分析・一覧・分析の詳細)。
- *  G. (#206)cron の入口 `scheduled` を、`/cdn-cgi/local/scheduled`(cron の手動発火)で起動し、計画が確定すること・重複配信で状態が変わらないこと・
- *     `GET /api/plan` で観測できることを確かめる。Webhook は入れない(外へ出さない)。
+ *  G. (#206・#249)cron の入口 `scheduled` を、`/cdn-cgi/local/scheduled`(cron の手動発火)で起動し、21 時(1 本目)で翌日の計画が確定すること・重複配信で状態が変わらないこと・
+ *     23 時(2 本目)の再実行(rescue)が正常な日を変えないこと・JST の日付の境界(23:59 と翌 0:00・年またぎ)・`GET /api/plan` で観測できることを確かめる。Webhook は入れない(外へ出さない)。
  * ローカルでは Access の JWT(本物の鍵での署名)は作れないため、200 になる経路は ctx.access だけである。
  * JWT の検証そのものは単体テスト(test/)が担う。値はすべて文書用のダミー。
  */
@@ -587,11 +587,11 @@ async function main(): Promise<void> {
       check(`${label}: 無い id は 404・不正な id は 400・HEAD は 405・クエリつきは 400`, (await req(port, "GET", "/api/analyses/999999")).status === 404 && (await req(port, "GET", "/api/analyses/abc")).status === 400 && (await req(port, "HEAD", `/api/analyses/${String(detailId)}`)).status === 405 && (await req(port, "GET", `/api/analyses/${String(detailId)}?x=1`)).status === 400);
 
       // Issue #208(#182-B): 結果の取り込み。上で D1 に保存した発走前の分析(開催日 20260628)の結果を、cron の入口 `scheduled` から取り込む。
-      //   cron の時刻は 2026-06-29T00:00Z(JST 6/29 9:00)なので、窓は 20260622〜20260627 ではなく 20260622〜20260628(前日 = 20260628 を含む)。DO の「今日」は実時計なので、20260628 は過去。
+      //   cron の時刻は 2026-06-29T14:00Z(JST 6/29 23:00。Issue #249 で結果の取り込みは 23 時の再実行だけ)なので、窓は 20260622〜20260627 ではなく 20260622〜20260628(前日 = 20260628 を含む)。DO の「今日」は実時計なので、20260628 は過去。
       //   取得は NetkeibaGate の偽ソケット(実フィクスチャの結果ページ)・保存はローカルの D1。D1 の列挙(ROW_NUMBER・DENSE_RANK を使う 1 クエリ)も workerd の実環境で通る。
       const jstToday = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10).replace(/-/g, "");
       const fireCron = async (time: number): Promise<{ status: number; text: string }> => {
-        const r = await fetch(`http://127.0.0.1:${port}/cdn-cgi/local/scheduled?cron=${encodeURIComponent("0 0 * * *")}&time=${String(time)}&format=json`, { signal: AbortSignal.timeout(60_000) });
+        const r = await fetch(`http://127.0.0.1:${port}/cdn-cgi/local/scheduled?cron=${encodeURIComponent("0 14 * * *")}&time=${String(time)}&format=json`, { signal: AbortSignal.timeout(60_000) });
         return { status: r.status, text: await r.text() };
       };
       type ResultImportView = { total: number; queued: number; imported: number; gave_up: number; races: { race_id: string; state: string; attempts: number; deferrals: number; requested_on: string; next_try_at: number | null; last_class: string | null }[] };
@@ -601,9 +601,9 @@ async function main(): Promise<void> {
       };
       const beforeImport = await resultImportOf(date);
       check(`${label}: 取り込みの前は result_import が空(total 0)で、D1 に結果が無い`, beforeImport.status === 200 && beforeImport.view?.total === 0 && parseJson((await req(port, "GET", `/smoke/results?race_id=${raceId}`)).text)["result"] === null, beforeImport.text.slice(0, 160));
-      const cronTime = Date.parse("2026-06-29T00:00:00Z");
+      const cronTime = Date.parse("2026-06-29T14:00:00Z"); // UTC 14:00 = JST 6/29 23:00(2 本目の cron。翌日 20260630 の再実行 + 結果の取り込み)
       const cron = await fireCron(cronTime);
-      check(`${label}: cron の発火(scheduledTime = 2026-06-29T00:00Z)が成功する(結果の依頼を含む)`, cron.status === 200 && parseJson(cron.text)["outcome"] === "ok", `${cron.status} ${cron.text.slice(0, 200)}`);
+      check(`${label}: cron の発火(scheduledTime = 2026-06-29T14:00Z = JST 23:00 の再実行)が成功する(結果の依頼を含む)`, cron.status === 200 && parseJson(cron.text)["outcome"] === "ok", `${cron.status} ${cron.text.slice(0, 200)}`);
       let imported: ResultImportView | undefined;
       for (let i = 0; i < 60; i++) {
         imported = (await resultImportOf(date)).view;
@@ -646,13 +646,15 @@ async function main(): Promise<void> {
 
     // G. (Issue #206)cron の入口 `scheduled` を、workerd の実環境(本物の DO・アラーム・NetkeibaGate への RPC・偽ソケット)で通す。
     //    wrangler dev の `/cdn-cgi/local/scheduled?cron=...&time=<ms>` で cron を手動発火する(本番では手動で scheduled を起動する手段が無い)。
+    //    Issue #249: cron は 21:00 JST(1 本目。翌日の計画)と 23:00 JST(2 本目。翌日の計画の再実行 + 結果の取り込み + 補完)。計画する開催日は scheduledTime の JST の今日 + 1。
     //    scheduledTime が過去の開催日(2026-06-28)なので、発走時刻はすべて過去: 中央の一覧 36 件は全件 skip(started)になり、morning も pre_race も積まれない
     //    (netkeiba への追加の取得も Claude API の呼び出しも起きない。取得は偽ソケットの一覧 2 本だけ)。Webhook は入れない(外へ出さない)。
     await withWorker(BASE_PORT + 6, ["--config", FAKE_CONFIG_PATH, ...vars(EMAIL, AUD)], async () => {
       const port = BASE_PORT + 6;
       const label = "G(scheduled)";
-      const fire = async (time: number): Promise<{ status: number; text: string }> => {
-        const r = await fetch(`http://127.0.0.1:${port}/cdn-cgi/local/scheduled?cron=${encodeURIComponent("0 0 * * *")}&time=${String(time)}&format=json`, { signal: AbortSignal.timeout(60_000) });
+      // cron 引数は情報だけ(runScheduled は使わない。scheduledTime の JST の時刻で 21 時 / 23 時を判別する)。
+      const fire = async (time: number, cron = "0 12 * * *"): Promise<{ status: number; text: string }> => {
+        const r = await fetch(`http://127.0.0.1:${port}/cdn-cgi/local/scheduled?cron=${encodeURIComponent(cron)}&time=${String(time)}&format=json`, { signal: AbortSignal.timeout(60_000) });
         return { status: r.status, text: await r.text() };
       };
       const waitPlanDone = async (date: string): Promise<{ status: number; text: string; body: Record<string, unknown> }> => {
@@ -668,14 +670,14 @@ async function main(): Promise<void> {
         return last;
       };
 
-      const t0628 = Date.parse("2026-06-28T00:00:00Z"); // UTC 0:00 = JST 9:00(2026-06-28)
+      const t0628 = Date.parse("2026-06-27T12:00:00Z"); // UTC 12:00 = JST 6/27 21:00(1 本目)→ 計画する開催日は翌日の 20260628
       const before = await req(port, "GET", "/api/plan?kaisai_date=20260628");
       check(`${label}: 発火の前は stage none`, before.status === 200 && (parseJson(before.text)["plan"] as { stage?: string }).stage === "none", `${before.status} ${before.text.slice(0, 160)}`);
       const first = await fire(t0628);
-      check(`${label}: cron の発火(scheduledTime = 2026-06-28T00:00Z)が成功する`, first.status === 200 && parseJson(first.text)["outcome"] === "ok", `${first.status} ${first.text.slice(0, 200)}`);
+      check(`${label}: cron の発火(scheduledTime = 2026-06-27T12:00Z = JST 6/27 21:00。翌日 20260628 の計画)が成功する`, first.status === 200 && parseJson(first.text)["outcome"] === "ok", `${first.status} ${first.text.slice(0, 200)}`);
       const done = await waitPlanDone("20260628");
       const plan = done.body["plan"] as { stage: string; requested_at: number | null; finalized_at: number | null; offset_minutes: number | null; venues: { venue: string; state: string; listed: number | null; targeted: number | null }[]; rows: { disposition: string; skip_reason: string | null; morning: string | null }[] } | undefined;
-      check(`${label}: 計画が確定する(stage done。開催日は scheduledTime の JST の日付 20260628)`, done.status === 200 && done.body["kaisai_date"] === "20260628" && plan?.stage === "done" && typeof plan.requested_at === "number" && typeof plan.finalized_at === "number", `${done.status} ${done.text.slice(0, 300)}`);
+      check(`${label}: 計画が確定する(stage done。開催日は scheduledTime の JST の今日 + 1 = 20260628)`, done.status === 200 && done.body["kaisai_date"] === "20260628" && plan?.stage === "done" && typeof plan.requested_at === "number" && typeof plan.finalized_at === "number", `${done.status} ${done.text.slice(0, 300)}`);
       check(`${label}: 中央の一覧 36 件・地方は 0 件(偽ソケットの一覧)。対象はどちらも会場の取得に成功(ok)`, plan?.venues.length === 2 && plan.venues.every((v) => v.state === "ok") && plan.venues.find((v) => v.venue === "central")?.listed === 36 && plan.venues.find((v) => v.venue === "nar")?.listed === 0, JSON.stringify(plan?.venues));
       check(`${label}: 計画の行 36 件はすべて skip(started)で、morning を積んでいない(発走が過去なので netkeiba にも LLM にも出ない)`, plan?.rows.length === 36 && plan.rows.every((r) => r.disposition === "skip" && r.skip_reason === "started" && r.morning === null), JSON.stringify(plan?.rows.slice(0, 2)));
       const results = done.body["results"] as { outcome: { kind: string; reason: string | null } }[] | undefined;
@@ -688,15 +690,24 @@ async function main(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 3000));
       const after = await req(port, "GET", "/api/plan?kaisai_date=20260628");
       check(`${label}: 重複配信のあとも、計画・結果・通知の本文が 1 バイトも変わらない`, after.status === 200 && after.text === done.text, `${after.status} ${after.text.slice(0, 120)}`);
-      // 開催のない日: 一覧が空でも stage done になり、行は 0 件
-      const emptyDay = await fire(Date.parse("2026-01-01T00:00:00Z"));
-      check(`${label}: 開催のない日(2026-01-01)の発火も成功する`, emptyDay.status === 200 && parseJson(emptyDay.text)["outcome"] === "ok", `${emptyDay.status} ${emptyDay.text.slice(0, 200)}`);
+      // 23 時の再実行(2 本目): 同じ翌日 20260628 に rescue つきの requestPlan を呼ぶ。正常に計画済みの日は何も変わらない(救済する失敗が無い)
+      const t0627retry = Date.parse("2026-06-27T14:00:00Z"); // UTC 14:00 = JST 6/27 23:00
+      const retry = await fire(t0627retry, "0 14 * * *");
+      check(`${label}: 23 時の再実行(scheduledTime = 2026-06-27T14:00Z)も成功する(同じ翌日 20260628 への rescue つきの依頼。結果の取り込み・補完の起動も含む)`, retry.status === 200 && parseJson(retry.text)["outcome"] === "ok", `${retry.status} ${retry.text.slice(0, 200)}`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const afterRetry = await req(port, "GET", "/api/plan?kaisai_date=20260628");
+      check(`${label}: 正常に計画済みの日の 23 時の再実行(救済)は、計画・結果・通知の本文を 1 バイトも変えない(冪等)。通知は 0 件のまま`, afterRetry.status === 200 && afterRetry.text === done.text, `${afterRetry.status} ${afterRetry.text.slice(0, 120)}`);
+      // 開催のない日: 一覧が空でも stage done になり、行は 0 件。年またぎ(JST 12/31 21:00 → 翌年 1/1 の開催日)
+      const emptyDay = await fire(Date.parse("2025-12-31T12:00:00Z"));
+      check(`${label}: 開催のない日(JST 2025/12/31 21:00 の発火 → 翌年 2026-01-01 の開催日。年またぎ)の発火も成功する`, emptyDay.status === 200 && parseJson(emptyDay.text)["outcome"] === "ok", `${emptyDay.status} ${emptyDay.text.slice(0, 200)}`);
       const emptyDone = await waitPlanDone("20260101");
       const emptyPlan = emptyDone.body["plan"] as { stage: string; rows: unknown[]; venues: { listed: number | null; targeted: number | null }[] } | undefined;
       check(`${label}: 開催のない日は、stage done・行 0 件・結果 0 件(会場の一覧は 0 件)`, emptyPlan?.stage === "done" && emptyPlan.rows.length === 0 && (emptyDone.body["results"] as unknown[]).length === 0 && emptyPlan.venues.every((v) => v.listed === 0), emptyDone.text.slice(0, 300));
-      // UTC 15:00 以降の scheduledTime は JST の翌日の開催日になる(開催日は UTC でなく JST で決まる)
+      // 日付の境界: JST 23:59(UTC 14:59。2 本目と同じ日)は翌日 20260701、JST 翌 0:00(UTC 15:00)は日付が進んで 20260702 の DO に入る(開催日は UTC でなく JST で決まる)
+      const lateNight = await fire(Date.parse("2026-06-30T14:59:00Z"), "0 14 * * *");
+      check(`${label}: scheduledTime = 2026-06-30T14:59Z(JST 6/30 23:59)は開催日 20260701 の DO に入る`, lateNight.status === 200 && parseJson(lateNight.text)["outcome"] === "ok" && (await waitPlanDone("20260701")).body["kaisai_date"] === "20260701", `${lateNight.status} ${lateNight.text.slice(0, 200)}`);
       const nextDay = await fire(Date.parse("2026-06-30T15:00:00Z"));
-      check(`${label}: scheduledTime = 2026-06-30T15:00Z(JST 7/1 0:00)は開催日 20260701 の DO に入る`, nextDay.status === 200 && parseJson(nextDay.text)["outcome"] === "ok" && (await waitPlanDone("20260701")).body["kaisai_date"] === "20260701", `${nextDay.status} ${nextDay.text.slice(0, 200)}`);
+      check(`${label}: scheduledTime = 2026-06-30T15:00Z(JST 7/1 0:00)は日付が進み、開催日 20260702 の DO に入る`, nextDay.status === 200 && parseJson(nextDay.text)["outcome"] === "ok" && (await waitPlanDone("20260702")).body["kaisai_date"] === "20260702", `${nextDay.status} ${nextDay.text.slice(0, 200)}`);
     });
   } finally {
     rmSync(CONFIG_PATH, { force: true });
