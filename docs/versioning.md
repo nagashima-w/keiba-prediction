@@ -3359,3 +3359,22 @@ DB スキーマ・設定・エクスポート JSON・IPC のいずれも無変�
 - 承認印([PUBLISH-APPROVED])と CI の公開ゲートの詳細は `CLAUDE.md`・
   `.github/workflows/build-windows.yml`(Issue #43)を参照。
 - 本規約の不変条件テストは `packages/app/test/version-policy.test.ts`。
+
+## 次の正式版が 1.32.0 である根拠(Issue #219 での変更)
+
+**minor**(クラウド版(web)の利用者から見てできることが増える。区分表の minor に当たる)。
+
+### 変更内容
+
+- `cloud/`: 検証画面(`#verify`)を足した。累積回収率と配分ベースの回収率を、exe と同じ core の集計(`computeVerifyReport`)で表示する。
+  - 新しい DO `VerifyReportDO`(migration v5・binding `VERIFY_REPORT`)が D1 の全件を読んで集計し、3 区分(全体/中央のみ/地方のみ)をキャッシュする。`GET /api/verify` が呼ぶ。
+  - D1 の migration 0009(`analyses.start_time` を追加するだけ。先読み疑いの判定に要る発走時刻の写し。DO が R2 から遅延で埋める)。
+  - 一覧に「検証」リンク、検証の画面(区分の切替・更新・集計時点)。クライアントの生成物を更新。
+- `packages/core`: 型の小変更のみ(`VerifyDataSource`・`PRODUCTION_VERIFY_CONFIG`・`extractStartTime`・`isLookaheadGuarded` の export。`verify.ts`・`lookahead-suspicion.ts` の型の import 先を `analysis-store-types.ts` に替えた)。`packages/app`(exe)は `PRODUCTION_VERIFY_CONFIG` を core から import するよう変えただけで、**挙動は不変**(exe の検証の既存テストは全緑)。
+- 版数: ルート・アプリ `1.32.0`(`@keiba/core` は対象外・据え置き)。
+
+### minor である根拠
+
+- minor である: 利用者から見てできることが増える(web で検証が見られる)。
+- major ではない: 保存データ・設定の互換は壊れない(D1 は列の追加のみ。exe の `keiba.db`・エクスポートの JSON・IPC は無変更。新しい DO の追加だけで、既存の DO は無変更)。
+- patch ではない: 新しい機能・画面・API を足している。
