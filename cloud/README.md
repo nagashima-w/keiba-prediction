@@ -446,7 +446,8 @@ exe の検証画面のうち、累積回収率と配分ベースの回収率を�
 - **API**: `GET /api/verify?venue=all|central|nar[&refresh=1]`(GET だけ。Worker は DO を呼ぶだけで D1・R2 に触れない)。応答の `status`: `ready`・`preparing`(旧い分析の発走時刻を確認中。画面が 3 秒ごとに取り直す)・`throttled`。
 - **D1 migration 0009**(`analyses.start_time`。追加のみ): 先読み疑いの判定に要る発走時刻の写し。**デプロイの前に migration を適用する**(deploy-cloud.yml が順序を保つ。`/api/health` の D1 の検査が 0009 の列を読むので、未適用のまま新しい Worker が出ると `d1.ok=false` で気づける)。既存の分析(移行した旧い行を含む)の列は NULL で、**最初に画面を開いたときから、DO がアラームで R2 の詳細を読んで少しずつ埋める**(2,225 件で、ローカルの実測は約 1 分。R2 の読み出しは Class B の柵の内側)。埋まるまで集計は出ない(「準備中」)。
 - **費用の柵**: 再計算は 5 分に 1 回・1 日 20 回まで。1 回の D1 の読み取りは表の行数の合計(ローカルの合成データで 99,103 行)。Free の 500 万行/日の約 40% が上限になる。応答の `diag.rowsRead` が実値なので、**本番の最初の呼び出しの値を見て、買い目が多くて 1 回が大きければ `cloud/src/verify-core.ts` の `VERIFY_DAILY_LIMIT` を下げる**。
-- **測定の再現**: `pnpm tsx scripts/measure-verify.ts [--bets 12] [--repeat 5]`(リポジトリのルートで。Linux のみ。ローカルの workerd だけを使い、本番には触れない)。
+- **測定の再現**: `pnpm tsx scripts/measure-verify.ts [--bets 12] [--versions 1] [--instruction-length 0] [--repeat 5]`(リポジトリのルートで。Linux のみ。ローカルの workerd だけを使い、本番には触れない。実行中に `cloud/wrangler.measure-verify.generated.toml` を作る〈`.gitignore` 済み〉)。
+- **検証画面(2)(Issue #220。v1.35.0)**: 補正方向×結果・キャリブレーション(5% 刻み 20 帯)・印別的中率・プロンプト版別の比較(版別のキャリブレーションは開閉)を足した。`GET /api/verify` の `ready` 応答に `promptVersions`(版別は区分に依らず全体。画面が使う項目だけに射影)が加わり、**DO の kv のキャッシュの形式の版を 1 → 2 に上げた**ので、デプロイ後の最初の `GET /api/verify` が 1 回再計算する(1 日 20 回の数に入る)。版別の応答の大きさは追加指示の長さで決まる(追加指示が 2,000 文字の版が 13 個あるとき、ローカルの合成データで応答の本文が約 118KB)。**デプロイ後の応答の大きさで実際の版の数・追加指示の長さを確かめる**。実測の表と手順は `docs/current-spec.md` の「クラウド版の検証画面(2)」。
 
 ## スコアリングの重み(Issue #218。v1.31.0。**保存した重みは、保存後に始まる朝の準備・発走前の分析から使われる**)
 - **何をするか**: exe の設定にある重み13項目(バイアス7・基礎6)を、設定(`cloud_settings`)と設定画面に足した。分析の `scorerConfig` に渡す(これまでは渡さず、core の既定値で動いていた)。キーは平坦な接頭辞つき(`biasWeightVenue`・`baseScoreWeightRecentForm` など。exe のキーとの対応は `src/settings.ts` の `SCORING_WEIGHT_FIELDS`)。
