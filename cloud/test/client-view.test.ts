@@ -533,9 +533,9 @@ describe("発走前のカードの結果(Issue #188)", () => {
   it("カードの結果の見出し(h3)は、カードの見出し(h2)の下。結果画面の見出し(h2)の階層は変えない", () => {
     const card = preRaceCard(raceTree(ready(analysis({ id: 7 }))));
     expect(findAll(card, (n) => n.tag === "h2").map(textOf)).toEqual(["発走前"]);
-    expect(findAll(card, (n) => n.tag === "h3").map(textOf)).toEqual(["▾ 分析の結果", "印の付いた馬", "馬ごとの評価", "配分の提案(分析時点)"]); // 開閉・印の付いた馬(#211)・馬ごとの評価・配分の提案
+    expect(findAll(card, (n) => n.tag === "h3").map(textOf)).toEqual(["▾ 分析の結果", "印の付いた馬", "3着内率 上位5頭", "馬ごとの評価", "配分の提案(分析時点)"]); // 開閉・印の付いた馬(#211)・3着内率の上位5頭(#240。既定の分析はモデル null)・馬ごとの評価・配分の提案
     const screen = resultTree(analysis());
-    expect(findAll(screen, (n) => n.tag === "h2").map(textOf)).toEqual(["印の付いた馬", "馬ごとの評価", "配分の提案(分析時点)"]); // Issue #211: 既定の分析は印「◎」の馬がいる
+    expect(findAll(screen, (n) => n.tag === "h2").map(textOf)).toEqual(["印の付いた馬", "3着内率 上位5頭", "馬ごとの評価", "配分の提案(分析時点)"]); // Issue #211: 既定の分析は印「◎」の馬がいる
   });
 });
 
@@ -1134,6 +1134,105 @@ describe("印の付いた馬の section(Issue #211。結果画面とカードの
     const a = analysis({ id: 7, model: "claude-x", horses: markedHorses });
     const inScreen = byClass(resultTree(a), "marked-horses");
     const inCard = byClass(cardTree(a), "marked-horses");
+    expect(inScreen).toHaveLength(1);
+    expect(inCard).toHaveLength(1);
+    expect(strip(inCard[0]!)).toEqual(strip(inScreen[0]!));
+  });
+});
+
+/**
+ * Issue #240: 「3着内率の上位5頭」の section。結果画面(h2)と発走前のカードの中(h3)の**両方**で、「印の付いた馬」の section の直後・「馬ごとの評価」の前に出る。
+ * 印が1頭も無くても出る(印の付いた馬の section の有無とは独立)。率が有限な馬が1頭も無ければ section ごと出さない。
+ */
+describe("3着内率の上位5頭の section(Issue #240。結果画面とカードの中の両方)", () => {
+  const H = (umaban: number, name: string | null, mark: string | null, prior: number, adjustedProb: number) =>
+    ({ umaban, name, prior, adjustedProb, placeOddsMin: 1.8, ev: 1.05, isPositive: false, mark, reason: null, highlights: [], concerns: [] }) as AnalysisDetail["horses"][number];
+  // prior の順位 = 馬1,2,3,4,5,6、adjustedProb の順位 = 馬6,5,4,3,2,1(食い違わせて、見出しと並べる値の取り違えを検出する)
+  const sixHorses: AnalysisDetail["horses"] = [
+    H(1, "アイ", "◎", 0.6, 0.1),
+    H(2, null, null, 0.5, 0.2),
+    H(3, "スリー", "▲", 0.4, 0.3),
+    H(4, "フォー", null, 0.3, 0.4),
+    H(5, "ファイブ", "  ", 0.2, 0.5),
+    H(6, "シックス", null, 0.1, 0.6),
+  ];
+  const noMarkHorses: AnalysisDetail["horses"] = [H(1, "アイ", null, 0.3, 0.3), H(2, "ウー", null, 0.2, 0.2)];
+  const nanHorses: AnalysisDetail["horses"] = [H(1, "アイ", "◎", Number.NaN, Number.NaN), H(2, "ウー", null, Number.NaN, Number.NaN)];
+  const cardTree = (a: AnalysisDetail, resultOpen = true): VNode => {
+    const rows = [row("morning", "done", { prior: true }), row("pre_race", "done", { analysisId: 7 })];
+    return renderScreen(buildRaceModel(raceInput({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: a }, resultOpen })), noopActions);
+  };
+  const screens: readonly [string, "h2" | "h3", (a: AnalysisDetail) => VNode][] = [
+    ["結果画面", "h2", resultTree],
+    ["発走前のカードの中", "h3", (a) => cardTree(a)],
+  ];
+
+  for (const [name, heading, tree] of screens) {
+    describe(name, () => {
+      it(`見出し(${heading})と行: LLM あり → 「AI補正後の3着内率 上位5頭」で補正後の率の降順・5頭まで。1行は「馬番 馬名 率 印」(馬名・印が無ければ省く)`, () => {
+        const t = tree(analysis({ model: "claude-x", horses: sixHorses }));
+        const sections = byClass(t, "top-probs");
+        expect(sections).toHaveLength(1);
+        expect(findAll(sections[0]!, (n) => n.tag === heading).map(textOf)).toEqual(["AI補正後の3着内率 上位5頭"]);
+        const items = byClass(sections[0]!, "top-prob");
+        for (const li of items) expect(li.tag).toBe("li");
+        expect(items.map(rawTextOf)).toEqual(["6 シックス 60.0%", "5 ファイブ 50.0%", "4 フォー 40.0%", "3 スリー 30.0% ▲", "2 20.0%"]); // 実 DOM の textContent 相当(要素の間に空白のテキストノードが要る)
+      });
+
+      it("LLM なし(モデル null)→ 「3着内率 上位5頭」で prior の降順。印は ◎ の馬1に付く", () => {
+        const t = tree(analysis({ model: null, horses: sixHorses }));
+        const section = byClass(t, "top-probs")[0]!;
+        expect(findAll(section, (n) => n.tag === heading).map(textOf)).toEqual(["3着内率 上位5頭"]);
+        expect(byClass(section, "top-prob").map(rawTextOf)).toEqual(["1 アイ 60.0% ◎", "2 50.0%", "3 スリー 40.0% ▲", "4 フォー 30.0%", "5 ファイブ 20.0%"]);
+      });
+
+      it("section の位置: 「印の付いた馬」の直後・「馬ごとの評価」の前。凡例は足さない(印の付いた馬の1回だけ)", () => {
+        const t = tree(analysis({ model: "claude-x", horses: sixHorses }));
+        const all = findAll(t, (n) => n.tag === "section").map((n) => String(n.attrs?.["class"]));
+        expect(all.indexOf("marked-horses")).toBeGreaterThan(-1); // 前提: 印の付いた馬がある
+        expect(all.indexOf("top-probs")).toBe(all.indexOf("marked-horses") + 1);
+        expect(all.indexOf("horses")).toBe(all.indexOf("top-probs") + 1);
+        expect(byClass(t, "mark-legend")).toHaveLength(1);
+        expect(byClass(byClass(t, "top-probs")[0]!, "mark-legend")).toHaveLength(0);
+        expect(byClass(t, "horse")).toHaveLength(sixHorses.length); // 馬ごとの評価は全頭のまま
+      });
+
+      it("印が1頭も無くても出る(「印の付いた馬」の section は出ない)", () => {
+        const t = tree(analysis({ model: "claude-x", horses: noMarkHorses }));
+        expect(byClass(t, "marked-horses")).toHaveLength(0);
+        expect(byClass(byClass(t, "top-probs")[0]!, "top-prob").map(rawTextOf)).toEqual(["1 アイ 30.0%", "2 ウー 20.0%"]);
+        const all = findAll(t, (n) => n.tag === "section").map((n) => String(n.attrs?.["class"]));
+        expect(all.indexOf("top-probs")).toBeLessThan(all.indexOf("horses"));
+      });
+
+      it("率が有限な馬が1頭も無ければ、section ごと出さない(馬ごとの評価は出る)", () => {
+        const t = tree(analysis({ model: "claude-x", horses: nanHorses }));
+        expect(byClass(t, "top-probs")).toHaveLength(0);
+        expect(textOf(t)).not.toContain("上位5頭");
+        expect(byClass(t, "horses")).toHaveLength(1);
+      });
+
+      it("悪意のある文字列(馬名・印)は、解釈されずテキストになる", () => {
+        const PAYLOAD = "<img src=x onerror=alert(1)>";
+        const t = tree(analysis({ horses: [H(1, PAYLOAD, PAYLOAD, 0.3, 0.3)] }));
+        expect(byClass(byClass(t, "top-probs")[0]!, "top-prob").map(rawTextOf)).toEqual([`1 ${PAYLOAD} 30.0% ${PAYLOAD}`]);
+        const { tags } = mountAll(t);
+        expect(tags.filter((x) => ["img", "script", "svg", "iframe", "style"].includes(x))).toEqual([]);
+      });
+    });
+  }
+
+  it("カードを畳んでいるときは、section を描画しない。開いているときは出る(対照)", () => {
+    const a = analysis({ model: "claude-x", horses: sixHorses });
+    expect(byClass(cardTree(a, true), "top-probs")).toHaveLength(1); // 前提: 開けば出る
+    expect(byClass(cardTree(a, false), "top-probs")).toHaveLength(0);
+  });
+
+  it("結果画面とカードの中で、この section は同じ木(見出しの h2/h3 の違いだけ)", () => {
+    const strip = (n: VNode | string): unknown => (typeof n === "string" ? n : { ...n, tag: n.tag === "h2" || n.tag === "h3" ? "h" : n.tag, children: (n.children ?? []).map(strip), on: undefined });
+    const a = analysis({ id: 7, model: "claude-x", horses: sixHorses });
+    const inScreen = byClass(resultTree(a), "top-probs");
+    const inCard = byClass(cardTree(a), "top-probs");
     expect(inScreen).toHaveLength(1);
     expect(inCard).toHaveLength(1);
     expect(strip(inCard[0]!)).toEqual(strip(inScreen[0]!));

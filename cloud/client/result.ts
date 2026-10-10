@@ -16,6 +16,8 @@
  *    (exe の「記録なし」は「Issue #59より前の分析です」と言い、cloud では事実と違うため)
  *  - 配分が `unset` で**両方(総資金・1レース上限)が未設定**のときも、注記だけ cloud 専用にする(exe の `BET_ALLOCATION_UNSET_NOTE` は「設定画面で入力」と言うが、cloud に設定画面は無い)。
  *    片方だけ・判定不能の注記(設定画面に触れていない)は exe のまま。差し替えは、exe から import した定数との一致で行う(文言を変えても追従する。exe の判定の二重持ちを避ける)
+ *  - **3着内率の上位5頭**(Issue #240。「印の付いた馬」の直後。印が無くても出す): 馬番・馬名・率・印。**LLM が効いたとき(モデル ID があるとき)は補正後の3着内率(`adjustedProb`)で並べ、見出しは「AI補正後の3着内率 上位5頭」、
+ *    効いていないときは3着内率(`prior`)で並べ、見出しは「3着内率 上位5頭」**(率がどちらの値かを見出しで取り違えない)。並びは率(生の数値)の降順 → 同率は馬番の昇順。5頭未満なら全頭。率が非有限の馬は除き、全頭が欠けていれば出さない
  * ⚠️ このファイルが exe の renderer を import する唯一の層(`format.ts`・`allocation-proposal-view.ts`)。許可リストは `test/client-bundle.test.ts`。
  */
 import { buildAllocationProposalView, type AllocationBetRowView, type AllocationProposalViewKind } from "../../packages/app/src/renderer/allocation-proposal-view";
@@ -82,6 +84,26 @@ export interface MarkedHorse {
  */
 export const KNOWN_MARK_ORDER: readonly string[] = ["◎", "〇", "▲", "△", "☆", "注"];
 
+/** 3着内率の上位5頭の1行(Issue #240)。 */
+export interface TopProbHorse {
+  readonly umaban: number;
+  /** 馬名。null・空文字は null(馬番と率と印だけを出す)。 */
+  readonly name: string | null;
+  /** 率(`formatPercent`。カードと同じ書式)。見出しが言う値(LLM が効いたときは補正後、効いていないときは 3着内率)。 */
+  readonly rate: string;
+  /** 印。`markedHorses` と同じ基準(null・空白だけは null、他は未知の印もそのまま)。 */
+  readonly mark: string | null;
+}
+
+/** 3着内率の上位5頭(Issue #240)。見出しと行。 */
+export interface TopProbs {
+  readonly heading: string;
+  readonly rows: readonly TopProbHorse[];
+}
+
+/** 上位に出す頭数(Issue #240)。 */
+export const TOP_PROB_COUNT = 5;
+
 export interface AllocationSection {
   readonly kind: AllocationProposalViewKind | "none";
   readonly notices: readonly string[];
@@ -101,6 +123,8 @@ export interface ResultContent {
   readonly markedHorses: readonly MarkedHorse[];
   /** 印の凡例(exe の `MARK_LEGEND`)。**一覧が空でないときだけ**(「印の付いた馬」の見出しの下に出す)。 */
   readonly markLegend: string | null;
+  /** 3着内率の上位5頭(Issue #240。印の付いた馬の直後)。率が有限な馬が1頭も無ければ null(節ごと出さない)。 */
+  readonly topProbs: TopProbs | null;
   readonly detailNote: string | null;
   readonly horses: readonly HorseCard[];
   readonly allocation: AllocationSection;
@@ -153,6 +177,26 @@ function markedHorsesOf(horses: AnalysisDetail["horses"]): MarkedHorse[] {
     .sort((a, b) => markRank(a.mark) - markRank(b.mark) || a.umaban - b.umaban);
 }
 
+/**
+ * 3着内率の上位5頭(Issue #240)。LLM が効いたとき(`llmEffective`)は `adjustedProb`、効いていないときは `prior` で並べる。率の降順 → 同率(生の数値が等しい)は馬番の昇順。
+ * 非有限の率の馬は除く(API の解析が弾くので production では届かないが、純関数の契約として固定する)。
+ */
+function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): TopProbs | null {
+  const rateOf = (h: AnalysisDetail["horses"][number]): number => (llmEffective ? h.adjustedProb : h.prior);
+  const rows = horses
+    .filter((h) => Number.isFinite(rateOf(h)))
+    .sort((a, b) => rateOf(b) - rateOf(a) || a.umaban - b.umaban)
+    .slice(0, TOP_PROB_COUNT)
+    .map((h) => ({
+      umaban: h.umaban,
+      name: h.name === null || h.name === "" ? null : h.name,
+      rate: formatPercent(rateOf(h)),
+      mark: h.mark === null || h.mark.trim() === "" ? null : h.mark,
+    }));
+  if (rows.length === 0) return null;
+  return { heading: llmEffective ? `${LABEL_ADJUSTED_PROB}の3着内率 上位${TOP_PROB_COUNT}頭` : `${LABEL_PRIOR} 上位${TOP_PROB_COUNT}頭`, rows };
+}
+
 /** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。 */
 export function contentOf(a: AnalysisDetail): ResultContent {
   // LLM が効いたか = モデル ID があるか(exe の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
@@ -166,6 +210,7 @@ export function contentOf(a: AnalysisDetail): ResultContent {
     llmUsage: a.llmCalls !== null && a.llmCalls.length > 0 ? buildLlmUsage(a.llmCalls) : null,
     markedHorses,
     markLegend: markedHorses.length > 0 ? MARK_LEGEND : null,
+    topProbs: topProbsOf(a.horses, llmEffective),
     detailNote: detailNoteOf(a.detail),
     horses: a.horses.map((h) => ({
       umaban: h.umaban,

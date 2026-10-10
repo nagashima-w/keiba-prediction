@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
-import { buildResultModel, KNOWN_MARK_ORDER, LABEL_CONCERNS, LABEL_HIGHLIGHTS, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
+import { buildResultModel, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
 import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/app/src/renderer/bet-allocation-view";
@@ -472,5 +472,126 @@ describe("強調材料・懸念事項のラベル(Issue #199。exe の結果表�
     expect(EXE_LABEL_CONCERNS).toBe("懸念事項");
     expect(LABEL_HIGHLIGHTS).toBe(EXE_LABEL_HIGHLIGHTS);
     expect(LABEL_CONCERNS).toBe(EXE_LABEL_CONCERNS);
+  });
+});
+
+/**
+ * Issue #240: 3着内率の上位5頭(`topProbs`。馬番・馬名・率・印)。
+ * LLM が効いた分析(モデル ID あり)は補正後の3着内率(`adjustedProb`)、効いていない分析は3着内率(`prior`)で並べ、見出しで取り違えない。
+ * 並びは率(生の数値)の降順 → 同率は馬番の昇順。5頭未満なら全頭。率が欠けた(非有限の)馬は除く。全頭が欠けていれば null。
+ */
+describe("3着内率の上位5頭(Issue #240)", () => {
+  /** 馬番と率だけを指定する(prior と adjustedProb を別々に与えて、どちらで並べたかを区別できるようにする)。 */
+  const h = (umaban: number, prior: number, adjustedProb: number, over: Partial<AnalysisHorse> = {}) => horse(umaban, { prior, adjustedProb, ...over });
+  const top = (horses: AnalysisHorse[], model: string | null) => content(analysis({ model, horses })).topProbs;
+  const umabans = (horses: AnalysisHorse[], model: string | null) => (top(horses, model)?.rows ?? []).map((r) => r.umaban);
+
+  it("見出しは LLM の有無で変わる(あり: 「AI補正後の3着内率 上位5頭」、なし: 「3着内率 上位5頭」。exe の共有ラベルから組み立てる)", () => {
+    expect(top([h(1, 0.3, 0.3)], "claude-x")?.heading).toBe(`${LABEL_ADJUSTED_PROB}の3着内率 上位5頭`);
+    expect(top([h(1, 0.3, 0.3)], null)?.heading).toBe(`${LABEL_PRIOR} 上位5頭`);
+    expect(top([h(1, 0.3, 0.3)], "")?.heading).toBe(`${LABEL_PRIOR} 上位5頭`); // 空文字も「効いていない」
+    expect(top([h(1, 0.3, 0.3)], "claude-x")?.heading).toBe("AI補正後の3着内率 上位5頭");
+    expect(top([h(1, 0.3, 0.3)], null)?.heading).toBe("3着内率 上位5頭");
+  });
+
+  it("LLM の有無で並べる値が変わる(prior と adjustedProb の順位が食い違う入力。表示する率も並べた値と同じ)", () => {
+    const input = [h(1, 0.3, 0.1), h(2, 0.2, 0.2), h(3, 0.1, 0.3)];
+    // 前提: 2つの値の順位は食い違っている(同じ順位だと、取り違えても検出できない)
+    const byPrior = [...input].sort((a, b) => b.prior - a.prior).map((x) => x.umaban);
+    const byAdjusted = [...input].sort((a, b) => b.adjustedProb - a.adjustedProb).map((x) => x.umaban);
+    expect(byPrior).toEqual([1, 2, 3]);
+    expect(byAdjusted).toEqual([3, 2, 1]);
+    expect(umabans(input, "claude-x")).toEqual([3, 2, 1]);
+    expect(umabans(input, null)).toEqual([1, 2, 3]);
+    expect(top(input, "claude-x")?.rows.map((r) => r.rate)).toEqual(["30.0%", "20.0%", "10.0%"]);
+    expect(top(input, null)?.rows.map((r) => r.rate)).toEqual(["30.0%", "20.0%", "10.0%"]);
+    expect(top(input, "claude-x")?.rows[0]).toMatchObject({ umaban: 3, rate: "30.0%" }); // adjustedProb(馬3=0.3)を表示している
+    expect(top(input, null)?.rows[0]).toMatchObject({ umaban: 1, rate: "30.0%" });
+    expect(top([h(1, 0.31, 0.12)], "claude-x")?.rows[0]?.rate).toBe("12.0%");
+    expect(top([h(1, 0.31, 0.12)], null)?.rows[0]?.rate).toBe("31.0%");
+  });
+
+  // 頭数の境界: 入力は馬番の昇順だが率は馬番の逆順(並べ替えが実際に起きる)。上位5頭は率の高い順に5頭まで。
+  const RATES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]; // 馬番 1..6 の率(馬6が最高)
+  for (const [頭数, expected] of [
+    [4, [4, 3, 2, 1]],
+    [5, [5, 4, 3, 2, 1]],
+    [6, [6, 5, 4, 3, 2]],
+  ] as const) {
+    it(`${頭数}頭: 率の降順で ${expected.length} 頭(5頭まで)`, () => {
+      const input = RATES.slice(0, 頭数).map((r, i) => h(i + 1, r, r));
+      expect(input).toHaveLength(頭数);
+      for (const model of [null, "claude-x"]) {
+        expect(umabans(input, model)).toEqual(expected);
+      }
+    });
+  }
+
+  it("同率は馬番の昇順(入力は馬番の逆順にして、並べ替えが効いていることを固定する)", () => {
+    const input = [h(5, 0.2, 0.2), h(3, 0.4, 0.4), h(2, 0.2, 0.2), h(4, 0.4, 0.4)];
+    for (const model of [null, "claude-x"]) {
+      expect(umabans(input, model)).toEqual([3, 4, 2, 5]);
+    }
+  });
+
+  it("5位と6位が同率なら、馬番の小さい方を残す(切れ目は同率の中の馬番順)", () => {
+    const input = [h(9, 0.1, 0.1), h(8, 0.1, 0.1), h(1, 0.5, 0.5), h(2, 0.4, 0.4), h(3, 0.3, 0.3), h(4, 0.2, 0.2)];
+    expect(input).toHaveLength(6);
+    for (const model of [null, "claude-x"]) {
+      expect(umabans(input, model)).toEqual([1, 2, 3, 4, 8]); // 馬9ではなく馬8が5位
+    }
+  });
+
+  it("同率の判定は生の数値(表示は同じ「20.0%」でも、生の値が大きい方が先)", () => {
+    const input = [h(1, 0.2, 0.2), h(2, 0.2004, 0.2004)];
+    expect(top(input, null)?.rows.map((r) => r.rate)).toEqual(["20.0%", "20.0%"]); // 前提: 表示は同じ
+    expect(umabans(input, null)).toEqual([2, 1]);
+  });
+
+  it("率が欠けた(非有限の)馬は一覧から除く。並べる値の側が欠けているときだけ(prior が NaN でも LLM ありなら adjustedProb で出る)", () => {
+    const input = [h(1, 0.3, Number.NaN), h(2, 0.2, 0.2), h(3, Number.POSITIVE_INFINITY, 0.1), h(4, Number.NaN, 0.4)];
+    expect(umabans(input, "claude-x")).toEqual([4, 2, 3]); // adjustedProb が NaN の馬1だけ除く
+    expect(umabans(input, null)).toEqual([1, 2]); // prior が NaN の馬4・Infinity の馬3を除く(残りは prior の降順: 馬1=0.3 > 馬2=0.2)
+  });
+
+  it("全頭の率が欠けていれば null(節ごと出さない)。馬が0頭でも null", () => {
+    expect(top([h(1, Number.NaN, Number.NaN), h(2, Number.NaN, Number.NaN)], null)).toBeNull();
+    expect(top([h(1, Number.NaN, Number.NaN)], "claude-x")).toBeNull();
+    expect(top([], "claude-x")).toBeNull();
+    expect(top([h(1, 0.1, 0.1)], null)).not.toBeNull(); // 対照: 1頭あれば出る
+  });
+
+  it("1行は馬番・馬名・率・印。馬名が null・空文字なら null。印は markedHorses と同じ基準(null・空白だけは null、他は未知の印もそのまま)", () => {
+    const input = [
+      h(1, 0.6, 0.6, { name: "エコー", mark: "◎" }),
+      h(2, 0.5, 0.5, { name: null, mark: "▲" }),
+      h(3, 0.4, 0.4, { name: "", mark: null }),
+      h(4, 0.3, 0.3, { name: "デルタ", mark: "  " }),
+      h(5, 0.2, 0.2, { name: "ファイブ", mark: "?" }),
+    ];
+    expect(top(input, null)?.rows).toEqual([
+      { umaban: 1, name: "エコー", rate: "60.0%", mark: "◎" },
+      { umaban: 2, name: null, rate: "50.0%", mark: "▲" },
+      { umaban: 3, name: null, rate: "40.0%", mark: null },
+      { umaban: 4, name: "デルタ", rate: "30.0%", mark: null },
+      { umaban: 5, name: "ファイブ", rate: "20.0%", mark: "?" },
+    ]);
+  });
+
+  it("率の書式はカードと同じ(formatPercent: 小数第1位)。カードの prior・adjusted と同じ文字列", () => {
+    const input = [h(1, 0.52345, 0.25049)];
+    const c = content(analysis({ model: "claude-x", horses: input }));
+    expect(c.topProbs?.rows[0]?.rate).toBe(c.horses[0]?.adjusted);
+    const c2 = content(analysis({ model: null, horses: input }));
+    expect(c2.topProbs?.rows[0]?.rate).toBe(c2.horses[0]?.prior);
+    expect(c2.topProbs?.rows[0]?.rate).toBe("52.3%");
+  });
+
+  it("馬ごとの評価(horses)・印の付いた馬(markedHorses)は変えない", () => {
+    const input = [h(3, 0.1, 0.1, { mark: "▲" }), h(1, 0.5, 0.5, { mark: "◎" }), h(2, 0.3, 0.3)];
+    const c = content(analysis({ horses: input }));
+    expect(c.horses.map((x) => x.umaban)).toEqual([3, 1, 2]);
+    expect(c.markedHorses.map((m) => m.umaban)).toEqual([1, 3]);
+    expect(c.topProbs?.rows.map((r) => r.umaban)).toEqual([1, 2, 3]);
   });
 });

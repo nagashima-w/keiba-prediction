@@ -7,7 +7,7 @@
 import type { TaskMode } from "./api";
 import type { Badge, ListModel, RaceGroupItem, RaceItem } from "./list";
 import type { CardResult, RaceModel, TaskCard } from "./race";
-import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel } from "./result";
+import { LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, type HorseCard, type MarkedHorse, type ResultContent, type ResultModel, type TopProbHorse } from "./result";
 import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./migration-model";
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
@@ -268,8 +268,20 @@ function markedHorseRow(m: MarkedHorse): VNode {
   ]);
 }
 
+/** 3着内率の上位5頭の1行(Issue #240)。馬番・馬名・率・印。馬名・印が無ければ省く。 */
+function topProbRow(r: TopProbHorse): VNode {
+  return h("li", { class: "top-prob" }, [
+    h("strong", {}, [`${r.umaban}`]),
+    // 要素の間の隙間は、空白のテキストノードで作る(印の付いた馬の行と同じ理由。無いと実ブラウザでは「5エコー45.0%◎」と詰まる)。
+    ...(r.name === null ? [] : [" ", h("span", { class: "top-prob-name" }, [r.name])]),
+    " ",
+    h("span", { class: "top-prob-rate" }, [r.rate]),
+    ...(r.mark === null ? [] : [" ", h("span", { class: "top-prob-mark" }, [r.mark])]),
+  ]);
+}
+
 /**
- * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
+ * 結果の「印の付いた馬」(Issue #211。「馬ごとの評価」より前)・「3着内率の上位5頭」(Issue #240。印の付いた馬の直後)・「馬ごとの評価」・「配分の提案」(結果画面と、レース画面の発走前のカード〈Issue #188〉で共通。重複して実装しない)。
  * `heading` は見出しの要素(結果画面は h2、カードの中はカードの見出し h2 の下なので h3)。
  */
 function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
@@ -285,6 +297,8 @@ function resultSections(content: ResultContent, heading: "h2" | "h3"): VNode[] {
             h("ul", { class: "horse-list" }, content.markedHorses.map(markedHorseRow)),
           ]),
         ]),
+    // 3着内率の上位5頭(Issue #240)。印の有無と独立。率が有限な馬が1頭も無ければ section ごと出さない。凡例は足さない(印の付いた馬の凡例が1回出ている)。
+    ...(content.topProbs === null ? [] : [h("section", { class: "top-probs" }, [h(heading, {}, [content.topProbs.heading]), h("ul", { class: "horse-list" }, content.topProbs.rows.map(topProbRow))])]),
     h("section", { class: "horses" }, [
       h(heading, {}, ["馬ごとの評価"]),
       h("ul", { class: "horse-list" }, content.horses.map(horseCard)),
