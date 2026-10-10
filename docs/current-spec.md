@@ -1,6 +1,6 @@
 # 現状の実装済み仕様(v1)
 
-本書は **実際に実装されている現状(v1.35.0)** をまとめたもの。当初の設計・計画は
+本書は **実際に実装されている現状(v1.36.0)** をまとめたもの。当初の設計・計画は
 [`keiba-ev-tool-spec.md`](../keiba-ev-tool-spec.md)(中央競馬前提)と
 [`docs/nar-scraping-plan.md`](./nar-scraping-plan.md)(地方競馬拡張)に残してあり、本書はそれらとの
 乖離を含め「今どう動くか」を実コードに基づいて記述する。数値・定数は実装の既定値であり、多くは
@@ -129,7 +129,7 @@
     では比例的に約76KB程度に増える見込み(**この18頭側の数値は上記実測からの比例外挿であり、
     実測ではない**)。圧縮・保存方針の見直しは既存Issue #53の範疇として扱う(本Issueでは
     `trifectaCombo`追加自体を妨げない)
-- バージョン: ルート/アプリ `1.35.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
+- バージョン: ルート/アプリ `1.36.0`、`@keiba/core` `0.2.0`(`@keiba/core` は版数運用の対象外・据え置き。
   private かつ npm 未公開で、app からは `workspace:*` 参照のみのため版数が意味を持たない。詳細は
   [`docs/versioning.md`](./versioning.md))
 - 思想: 的中率ではなく回収率(期待値)最大化。「市場(オッズ)が過小評価している馬」を、市場から
@@ -1355,7 +1355,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
 
 - **配信**: `GET /` は HTML(`<script src="/app.js" defer>` の 1 本だけ。インラインスクリプトなし・描画先 `#app`・ログイン中のメール)。CSP は `default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`。`GET /app.js` は esbuild で作った 1 ファイル(`text/javascript`・`no-store`)を、**認証の関門の後ろで Worker が文字列として返す**(静的アセットは使わない。wrangler 4.147.0 の実測: `[assets]` の `run_worker_first = false` では未認証の要求にもファイルが 200 で返り、`true` では Worker〈認証〉に届く。`run_worker_first` の付け忘れで認証を素通りする経路を作らないため、そもそも使わず、`cloud-config-guard.test.ts` が `[assets]` を置かないことを固定している)。`GET /check` は旧 `/` の確認フォーム(内容・CSP とも旧 `/` のまま)。
 - **ビルド**: `cloud/client/`(TS)→ `cloud/build-client.ts`(esbuild `0.28.2`。IIFE・browser・es2020・**minify**〈外すと出力にパスコメントが入り cwd・OS で変わる〉)→ `cloud/src/client-bundle.generated.ts`(**コミットする生成物**。typecheck・test・deploy:dry・smoke・CI が同じものを使う。ドリフトは `test/client-bundle.test.ts`)。クライアントの型検査は `tsconfig.client.json`(DOM の型)。クライアントは `client/` の中を import する(#185 で、exe の renderer の純関数だけを許可リストで足した。下の「スマホ画面(#185)」)。
-- **画面(一覧)**: 開催日(`<input type="date">`。既定は今日〈JST〉)・中央/地方・場ごとのレース(R・レース名・コース距離頭数・グレード。発走予定時刻があれば、コース距離頭数の行の先頭に「15:40 発走・」〈#236。無い行は出さない〉)・朝の準備と発走前の状態バッジ(板の `(race_id, mode)` ごと。未実行・待ち・取得済み・完了・失敗)・「更新」。URL のハッシュに `#date=YYYYMMDD&venue=central|nar[&race=<12桁>][&analysis=<id>]` を持ち(値は検証し、不正な項目は既定に落とす。`race` は有効な `date` があるときだけ)、戻る・進む・再読み込みが効く。`race`・`analysis` は #185 でレース画面・結果画面になった(#184 の時点では「準備中」の表示)。
+- **画面(一覧)**: 開催日(`<input type="date">`。既定は今日〈JST〉)・中央/地方・場ごとのレース(R・レース名・コース距離頭数・グレード。発走予定時刻があれば、コース距離頭数の行の先頭に「15:40 発走・」〈#236。無い行は出さない。**発走後に取得した中央の一覧では、始まったレースの時刻が空になる。そのため同じ場の中で、時刻のある行と無い行が混在しうる**〉)・朝の準備と発走前の状態バッジ(板の `(race_id, mode)` ごと。未実行・待ち・取得済み・完了・失敗)・「更新」。URL のハッシュに `#date=YYYYMMDD&venue=central|nar[&race=<12桁>][&analysis=<id>]` を持ち(値は検証し、不正な項目は既定に落とす。`race` は有効な `date` があるときだけ)、戻る・進む・再読み込みが効く。`race`・`analysis` は #185 でレース画面・結果画面になった(#184 の時点では「準備中」の表示)。
 - **取得の回数**: 一覧(`GET /api/races`。netkeiba に出うる)は (開催日, 区分) ごとに 1 回、板(`GET /api/analyses/status`。`race_id` なし。DO の読み取りだけ)は開催日ごとに 1 回で、画面の往復・区分の切り替えで取り直さない。失敗は自動で再試行せず、「更新」だけが取り直す(取得中は押せず、同時に同じものを 2 本取らない)。`/api/analyses/{id}`・`POST` は一覧の画面からは呼ばない(#185 のレース画面・結果画面の取得は下の節)。
 - **失敗の表示**: サーバの文面は出さず、種類ごとの固定の文言(403・通信失敗〈Access の期限切れの可能性〉・400・netkeiba の `blocked`/`busy`/`failed`・サーバのエラー・想定外の応答)。応答の形が想定と違えば、一部の行だけを黙って表示せず「想定外の応答」にする。
 - **#185 用に決めたこと(記録)**: 印・AI補正後・分析モデルは、`mark`・`model` が non-null のときだけ出す(当時の cloud の発走前の分析は LLM なしなので、印は常に空・「AI補正後」は 3着内率と同値・モデルは null。**LLM を使うようになった #195 で、補正後・根拠は「モデル ID があるとき」だけ出し、印の凡例・`llmNote` の注記を足した**。下の「結果画面」)/ 配分の表示は exe の `buildAllocationProposalView` を流用し、そのために `GET /api/analyses/{id}` の配分に `fallbackReason`・`betUnit` を足す/ 発走前の完了後は「結果を見る」ボタンで利用者が開く(詳細の読み出しは D1 の書き込み1行を伴うため、自動で呼ばない)/ レース画面の表示時に `GET /api/analyses?race_id=&kaisai_date=` を1回だけ呼び、過去の分析へのリンクにする/ pre_race の再実行は新しい分析として保存される旨をボタンの文言に出す/ **配分は、資金・1レース上限を D1 の `cloud_settings` に入れるまで、ほぼ全件が「未設定」(`unset`)の注記になる**(既定値は 0。**両方が未設定のとき**、結果画面は exe の「設定画面で…入力してください」の代わりに cloud 専用の文言を出す。片方だけ未設定・判定不能は exe の注記のまま。編集画面は範囲外)。
