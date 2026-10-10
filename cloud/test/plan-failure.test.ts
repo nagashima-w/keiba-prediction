@@ -119,6 +119,27 @@ describe("judgePlanRescue: 落ち着いていないときは待つ(実行中は�
     expect(judge(running, deadline).kind).toBe("failed");
   });
 
+  it("F4 だけが原因の失敗: 事前分析が実行中のまま期限を過ぎ、ほかに失敗(会場・failed・cap・未確定)が無いとき → failed(未完了の件数だけが立つ)。期限の 1 ミリ秒前は wait", () => {
+    const only = progress({ rows: [row({ raceId: "a", morning: "queued" }), row({ raceId: "b", morning: "fetched" }), row({ raceId: "c", morning: "done" })] });
+    // 前提: 実行中以外の失敗の材料が無い(あれば、F4 だけの検査にならない)
+    expect(only.rows.some((r) => r.morning === "failed")).toBe(false);
+    expect(only.venues.every((v) => v.state === "ok")).toBe(true);
+    expect(only.stage).toBe("done");
+    expect(judge(only, deadline - 1)).toEqual({ kind: "wait", dueMs: deadline });
+    expect(judge(only, deadline)).toEqual({ kind: "failed", reasons: { planNotFinal: false, venueFailures: [], morningFailed: 0, capSkipped: 0, morningIncomplete: 2 } });
+    expect(judge(only, deadline + 60_000).kind).toBe("failed"); // 期限を過ぎたあとも同じ
+  });
+
+  it("確定が再試行待ち(stage = pending)で、会場はすべて ok・事前分析に実行中も無い → 期限前は wait(落ち着いたと誤認して、F1 の失敗を早く返さない)。期限後に初めて F1 の failed", () => {
+    const waiting = progress({ stage: "pending", finalizedAt: null, rows: [row({ raceId: "a", morning: "done" })] });
+    // 前提: 会場は終端で、実行中の事前分析が無い(この 2 つだけでは settled にならないことを固定する)
+    expect(waiting.venues.every((v) => v.state === "ok")).toBe(true);
+    expect(waiting.rows.some((r) => r.morning === "queued" || r.morning === "fetched")).toBe(false);
+    expect(judge(waiting, RESCUE_AT + 5 * 60_000)).toEqual({ kind: "wait", dueMs: deadline });
+    expect(judge(waiting, deadline - 1)).toEqual({ kind: "wait", dueMs: deadline });
+    expect(judge(waiting, deadline)).toEqual({ kind: "failed", reasons: { planNotFinal: true, venueFailures: [], morningFailed: 0, capSkipped: 0, morningIncomplete: 0 } });
+  });
+
   it("実行中でも、期限の前に落ち着けば(全部 done)ok になる", () => {
     expect(judge(progress({ rows: [row({ raceId: "a", morning: "done" })] }), RESCUE_AT + 10 * 60_000)).toEqual({ kind: "ok" });
   });
@@ -160,11 +181,25 @@ describe("buildPlanFailureEmbed(23 時の再実行後も事前分析が失敗し
     expect(e.description).not.toContain("発走前の分析は予定どおり行われます");
   });
 
-  it("F3 だけ: 件数の行と「発走前の分析は予定どおり行われます」。会場の案内は出さない", () => {
+  it("F3(上限超過を含む)・F4 だけ: 件数の行(うち上限超過)を出す。会場の案内は出さない。上限超過があるので「予定どおり」は出さず、cap の案内を出す", () => {
     const e = buildPlanFailureEmbed({ kaisaiDate: "20260927", progress: progress({ rows: [row({ raceId: "202606040901", morning: "failed" })] }), reasons: reasons({ morningFailed: 3, capSkipped: 1, morningIncomplete: 2 }) });
     expect(e.description).toContain("事前分析: 失敗 4 件(うち上限超過 1) / 未完了 2 件");
+    expect(e.description).toContain("上限超過でスキップされたレースは、自動では分析されません。");
+    expect(e.description).not.toContain("一覧を取得できなかった会場");
+  });
+
+  it("上限超過(cap)のスキップがあるとき: 「発走前の分析は予定どおり行われます」を出さない(cap のレースは分析されない)。事実に合う文で、手動の案内を出す", () => {
+    for (const r of [reasons({ capSkipped: 1 }), reasons({ capSkipped: 2, morningFailed: 3, morningIncomplete: 1 })]) {
+      const e = buildPlanFailureEmbed({ kaisaiDate: "20260927", progress: progress({ rows: [row({ raceId: "202606040901", state: "skipped", skipReason: "cap", disposition: "skip", dueMs: null, morning: null })] }), reasons: r });
+      expect(e.description).not.toContain("発走前の分析は予定どおり行われます");
+      expect(e.description).toContain("上限超過でスキップされたレースは、自動では分析されません。画面から手動で実行してください。");
+    }
+  });
+
+  it("cap が無い F3 だけのときは、従来どおり「予定どおり」の文を出す(対照: 上の検査が、文を常に消しているだけでない)", () => {
+    const e = buildPlanFailureEmbed({ kaisaiDate: "20260927", progress: progress(), reasons: reasons({ morningFailed: 1 }) });
     expect(e.description).toContain("発走前の分析は予定どおり行われます。");
-    expect(e.description).not.toContain("手動で実行してください");
+    expect(e.description).not.toContain("上限超過でスキップ");
   });
 
   it("F1: 計画が確定していないことを出し、手動の案内を出す", () => {

@@ -663,7 +663,7 @@ export interface PlanFailureInput {
 
 /**
  * 23 時の再実行の後も、翌日の事前分析に失敗が残っているときの通知(日単位の DO が、判定の時点で材料を作る)。**色(失敗色)に頼らず、文字(【失敗】・⚠・件数)で伝える。**
- * 会場の失敗(F2)・計画が確定していない(F1)があれば「手動で実行してください」、事前分析の失敗・未完了だけ(F3・F4)なら「発走前の分析は予定どおり行われます」。
+ * 会場の失敗(F2)・計画が確定していない(F1)・上限超過(cap)のスキップがあれば、そのレースは自動では分析されないので「手動で実行してください」、それらが無く事前分析の失敗・未完了だけ(F3・F4)なら「発走前の分析は予定どおり行われます」。
  * 失敗・未完了のレースは fields に出す(成功・スキップは出さない)。長さの保証は {@link fitEmbed}。
  */
 export function buildPlanFailureEmbed(input: PlanFailureInput): CloudEmbed {
@@ -681,11 +681,17 @@ export function buildPlanFailureEmbed(input: PlanFailureInput): CloudEmbed {
   if (failedTotal > 0 || reasons.morningIncomplete > 0) {
     lines.push(`事前分析: 失敗 ${failedTotal} 件${reasons.capSkipped > 0 ? `(うち上限超過 ${reasons.capSkipped})` : ""} / 未完了 ${reasons.morningIncomplete} 件`);
   }
-  lines.push(
-    reasons.planNotFinal || reasons.venueFailures.length > 0
-      ? "一覧を取得できなかった会場のレースは、自動では分析されません。画面から手動で実行してください。"
-      : "発走前の分析は予定どおり行われます。",
-  );
+  // 影響の文は事実に合わせる: 会場の失敗・計画の未確定 → その会場のレースは自動では分析されない / 上限超過(cap)のスキップ → そのレースは分析されない / どちらでもなければ予定どおり。
+  const venueLost = reasons.planNotFinal || reasons.venueFailures.length > 0;
+  if (venueLost) {
+    lines.push("一覧を取得できなかった会場のレースは、自動では分析されません。画面から手動で実行してください。");
+  }
+  if (reasons.capSkipped > 0) {
+    lines.push("上限超過でスキップされたレースは、自動では分析されません。画面から手動で実行してください。");
+  }
+  if (!venueLost && reasons.capSkipped === 0) {
+    lines.push("発走前の分析は予定どおり行われます。");
+  }
 
   // 失敗(上限超過を含む)・未完了のレース。中央は場名つき、地方も場名つき(rowLine の withVenue)。
   const problem = progress.rows.filter((r) => rowStatus(r) === "failed" || rowStatus(r) === "incomplete" || (r.state === "skipped" && r.skipReason === "cap"));

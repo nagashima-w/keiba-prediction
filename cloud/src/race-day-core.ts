@@ -1518,7 +1518,10 @@ export class RaceDayCore {
     }
     for (const venue of PLAN_VENUES) {
       // 取得できた会場だけ(取得できなかった会場の「0 件」は、対象が無かったのか取れなかったのかが区別できない)。
-      if (this.plan.venueRow(venue)?.state === "ok") {
+      // さらに、**今回の確定が一覧の本体(`entries_json`)を持っている会場だけ**数え直す: 一覧の本体は確定のたびに捨てるので、救済の再確定(Issue #249)で、成功済みの会場は本体が無く、
+      // 数え直すと対象 0 件に巻き戻る(一覧は 0 件で ok の会場も本体は "[]" で持つので、最初の確定では必ず数える)。
+      const venueRow = this.plan.venueRow(venue);
+      if (venueRow?.state === "ok" && venueRow.entries_json !== null) {
         this.plan.setTargeted(venue, targets.filter((t) => t.venue === venue).length);
       }
     }

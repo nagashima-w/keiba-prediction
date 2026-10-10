@@ -21,7 +21,7 @@ import { skipStage } from "./auto-run-result";
 import type { AutoRunResults, PlanProgress } from "./race-day-core";
 
 /**
- * 通知の種類。`analysis` = 分析の embed(緑・灰)/ `failed` = 赤 / `skipped-manual` = 灰色 / `summary` = 事前分析のまとめ(旧「事前分析のまとめ」)/
+ * 通知の種類。`analysis` = 分析の embed(緑・灰)/ `failed` = 赤 / `skipped-manual` = 灰色 / `summary` = 事前分析のまとめ(旧「朝のまとめ」)/
  * `plan-failure` = 23 時の再実行の後も翌日の事前分析に失敗が残っているときの通知(Issue #249。1 日に高々 1 通。材料は判定の時点で積む)。
  */
 export type NotifyKind = "analysis" | "failed" | "skipped-manual" | "summary" | "plan-failure";
