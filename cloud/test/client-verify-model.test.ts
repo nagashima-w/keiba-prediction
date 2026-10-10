@@ -177,6 +177,9 @@ describe("buildVerifyModel: 注記", () => {
     expect(affecting.notices[0]?.tone).toBe("wait");
     expect(affecting.notices[0]?.text).toContain("5件");
     expect(affecting.notices[0]?.text).toContain("2件");
+    // 原因を断定しない(詳細が無いとは限らない。書き込み中・壊れている場合もある)
+    expect(affecting.notices[0]?.text).not.toContain("保存されていません");
+    expect(affecting.notices[0]?.text).toContain("読めませんでした");
     const harmless = buildVerifyModel(input({ load: { kind: "ready", outcome: ready({ startTimeGaps: { lost: 5, affecting: 0 } }) } }));
     expect(harmless.notices[0]?.tone).toBe("info");
     expect(harmless.notices[0]?.text).toContain("影響しません");

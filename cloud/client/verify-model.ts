@@ -168,7 +168,7 @@ function gapNotice(gaps: { readonly lost: number; readonly affecting: number }):
   if (gaps.affecting > 0) {
     return {
       tone: "wait",
-      text: `発走時刻を確認できなかった旧い分析が ${gaps.lost}件あります(分析の詳細が保存されていません)。うち ${gaps.affecting}件は、先読みの判定が発走時刻に依るため、exe とは判定が違う可能性があります。`,
+      text: `発走時刻を確認できなかった旧い分析が ${gaps.lost}件あります(分析の詳細を読めませんでした。詳細が無い・壊れている・まだ書き込み中などの理由があります)。うち ${gaps.affecting}件は、先読みの判定が発走時刻に依るため、exe とは判定が違う可能性があります。`,
     };
   }
   if (gaps.lost > 0) {

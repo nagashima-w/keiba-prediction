@@ -22,7 +22,7 @@
  * ## 補完(`runBackfillTick`)
  * 1 回のアラームの問い合わせ数は {@link VERIFY_TICK_QUERY_LIMIT}(40)以内(Free の 1 呼び出し 50 クエリの手前。使用量 1 + 補完待ち 1 + 書き込みの batch 2 文 + R2 の get)。
  * R2 の Class B が柵に達していたら止めて、翌月 1 日の 00:05 UTC に再開する(`waiting-r2` 相当)。get の失敗・例外は退避の間隔で再試行し、連続 {@link VERIFY_MAX_ATTEMPTS} 回で止まる
- * (次の `getReport` が、最後の失敗から 10 分以上経っていれば張り直す)。保留(保存直後で詳細がまだ無い)は失敗に数えない。
+ * (次の `getReport` が、最後の失敗から 10 分以上経っていれば張り直す)。保留(R2 に詳細が無い行を、初めて見てから {@link VERIFY_MISSING_GRACE_MS} 待つ)は失敗に数えない。
  * カーソル(kv の `cursor`)は「これ以下の id はすべて補完済み」を表し、補完待ちの確認が全件の走査にならないようにする(解決した行の先頭からの連続した範囲まで進める)。
  */
 
@@ -52,6 +52,11 @@ export const VERIFY_DEFER_RETRY_MS = 60_000;
 export const VERIFY_MAX_ATTEMPTS = 8;
 /** 失敗後の再試行までの待ち。n 回目の失敗の後は `[n-1]`(最後の値を繰り返す)。 */
 export const VERIFY_BACKOFF_MS: readonly number[] = [30_000, 120_000, 600_000, 1_800_000, 3_600_000];
+/**
+ * R2 に詳細が無い行を '?' にするまでの猶予(その行を**初めて見てから**の時間)。保存は D1 が先・R2 が後(移行の保存も同じ)なので、「D1 に行があり R2 にまだ無い」瞬間がある。
+ * 分析日時では判定できない(移行した分析の分析日時は exe の古い日時)ので、DO が初めて見た時刻(kv の `missingSince`)から数える。'?' は書くと直らないため、長めに待つ。
+ */
+export const VERIFY_MISSING_GRACE_MS = 30 * 60_000;
 /** 失敗で止まったあと、`getReport` が張り直すまでに空ける時間。 */
 const VERIFY_REARM_AFTER_MS = 10 * 60_000;
 /** R2 の柵から再開する時刻を、月の変わり目からずらす分。 */
@@ -235,7 +240,10 @@ export class VerifyCore {
       kv.put("cursor", watermark.analyses);
     }
 
-    const fresh = cache !== null && sameWatermark(cache.watermark, watermark) && now() - cache.computedAt < this.ttlMs && options.refresh !== true;
+    // 透かしが同じなら、データは変わっていない=集計は最新(`stale` にしない)。TTL 切れ・「更新」で再計算を試みるが、柵に拒まれても古い集計とは言わない
+    // (既存行の更新は透かしに出ないので、TTL で拾う試みをしているだけ)。柵に当たって `stale` になるのは、透かしが変わった(データが更新された)ときだけ。
+    const unchanged = cache !== null && sameWatermark(cache.watermark, watermark);
+    const fresh = unchanged && now() - cache.computedAt < this.ttlMs && options.refresh !== true;
     if (cache !== null && fresh) {
       return this.ready(cache, venue, null, null);
     }
@@ -243,7 +251,7 @@ export class VerifyCore {
     const gate = this.gate();
     if (!gate.ok) {
       if (cache !== null) {
-        return this.ready(cache, venue, gate.reason, gate.nextAt);
+        return unchanged ? this.ready(cache, venue, null, null) : this.ready(cache, venue, gate.reason, gate.nextAt);
       }
       return { status: "throttled", nextAt: new Date(gate.nextAt).toISOString() };
     }
@@ -387,10 +395,25 @@ export class VerifyCore {
         return;
       }
       const outcome = await store.resolveStartTimes(page.rows);
-      await store.commitStartTimes(outcome.resolved, outcome.gets);
+      // R2 に詳細が無かった行: 初めて見てから猶予(30 分)を過ぎていれば '?'、それまでは保留(NULL のまま)。このページの行の記録は作り直し、ほかの行の記録は残す。
+      const since = { ...(kv.get<Record<string, number>>("missingSince") ?? {}) };
+      for (const row of page.rows) delete since[String(row.id)];
+      const resolved = [...outcome.resolved];
+      const deferred: number[] = [];
+      for (const id of outcome.missing) {
+        const first = kv.get<Record<string, number>>("missingSince")?.[String(id)] ?? t;
+        if (t - first >= VERIFY_MISSING_GRACE_MS) {
+          resolved.push({ id, value: "?" });
+        } else {
+          since[String(id)] = first;
+          deferred.push(id);
+        }
+      }
+      await store.commitStartTimes(resolved, outcome.gets);
+      kv.put("missingSince", since); // 書き込みが成功してから記録を更新する(失敗して再試行しても、初回観測時刻を失わない)
 
       // カーソル: 先頭から連続して解決できた行の末尾まで(保留・失敗の行の手前で止める)。
-      const resolvedIds = new Set(outcome.resolved.map((r) => r.id));
+      const resolvedIds = new Set(resolved.map((r) => r.id));
       let newCursor = cursor;
       for (const row of page.rows) {
         if (!resolvedIds.has(row.id)) break;
@@ -403,11 +426,11 @@ export class VerifyCore {
         return;
       }
       kv.put("backfill", { attempts: 0, lastFailureAt: state.lastFailureAt, resumeAt: null } satisfies Backfill);
-      const remaining = page.total - outcome.resolved.length;
+      const remaining = page.total - resolved.length;
       if (remaining > 0) {
-        // 残りが(このページの)保留だけなら間隔を空ける(保存直後の詳細を待つ)。他に進められる行があれば、すぐ続ける。
-        const unresolvedInPage = page.rows.length - outcome.resolved.length;
-        const onlyDeferred = page.total === page.rows.length && unresolvedInPage > 0 && unresolvedInPage === outcome.deferred.length;
+        // 残りが(このページの)保留だけなら間隔を空ける(詳細が R2 に現れるのを待つ)。他に進められる行があれば、すぐ続ける。
+        const unresolvedInPage = page.rows.length - resolved.length;
+        const onlyDeferred = page.total === page.rows.length && unresolvedInPage > 0 && unresolvedInPage === deferred.length;
         await setAlarm(t + (onlyDeferred ? VERIFY_DEFER_RETRY_MS : VERIFY_TICK_DELAY_MS));
       }
     } catch {

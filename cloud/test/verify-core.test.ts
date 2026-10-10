@@ -12,6 +12,8 @@ import {
 import type { PendingPage, PendingRow, ReadAllResult, ResolveOutcome, StartTimeResolution, Watermark } from "../src/verify-store";
 import type { VerifyAnalysisRow, VerifyReadRows } from "../src/verify-read";
 import { R2_FENCE_LIMITS, type R2Usage } from "../src/r2-fence";
+import { computeVerifyReport, PRODUCTION_VERIFY_CONFIG, type VerifyVenueFilter } from "../../packages/core/src/ev/verify.js";
+import { buildVerifySource } from "../src/verify-read";
 
 /**
  * Issue #219: 検証の DO の純ロジック(`VerifyCore`)。D1・R2・時計・アラームは偽物で、キャッシュ・費用の柵・単一飛行・発走時刻の補完の進め方を確かめる。
@@ -90,7 +92,7 @@ function fakeStore() {
       calls.push("resolve");
       if (state.failResolve === true) throw new Error("D1_ERROR");
       if (state.resolve !== undefined) return state.resolve(rows);
-      return { resolved: rows.map((r) => ({ id: r.id, value: "" })), deferred: [], failed: [], gets: rows.length };
+      return { resolved: rows.map((r) => ({ id: r.id, value: "" })), missing: [], failed: [], gets: rows.length };
     },
     async commitStartTimes(resolved, gets) {
       calls.push("commit");
@@ -200,12 +202,16 @@ describe("getReport: 計算とキャッシュ", () => {
     expect(store.calls.filter((c) => c === "readAll")).toHaveLength(2);
   });
 
-  it("refresh を指定すると、透かしが同じ・TTL 内でも再計算する。ただし最短間隔(5 分)は守る", async () => {
+  it("refresh を指定すると、透かしが同じ・TTL 内でも再計算する。ただし最短間隔(5 分)は守る。守られている間は、透かしが同じなので集計は最新=stale にしない(『データが更新されています』と偽らない。レビュー指摘)", async () => {
     const { core, store, clock } = setup();
     await core.getReport("all");
     clock.now += 60_000;
     const early = await core.getReport("all", { refresh: true });
-    expect(early.status === "ready" && early.staleReason).toBe("min-interval");
+    expect(early.status).toBe("ready");
+    if (early.status !== "ready") throw new Error("unreachable");
+    expect(early.stale).toBe(false);
+    expect(early.staleReason).toBeNull();
+    expect(early.nextRecomputeAt).toBeNull();
     expect(store.calls.filter((c) => c === "readAll")).toHaveLength(1);
     clock.now += 5 * 60_000;
     await core.getReport("all", { refresh: true });
@@ -270,6 +276,67 @@ describe("getReport: 計算とキャッシュ", () => {
     clock.now += 6 * 60_000; // 最短間隔を過ぎている
     await core.getReport("all");
     expect(store.calls).toContain("readAll");
+  });
+});
+
+/** `verify-read.ts` の SQL が `start_time` から組み立てる発走時刻つきのスナップショット(JSON 文字列)。 */
+const SNAP_1545 = JSON.stringify({ race: { startTime: "15:45" } });
+const SNAP_2050 = JSON.stringify({ race: { startTime: "20:50" } });
+
+describe("getReport: exe と同じ集計の設定・区分の割り当て(レビュー指摘: これが無いと、設定や区分の取り違えが全緑のまま残る)", () => {
+  /** 先読み疑い(遮断なし・発走後に分析)・clean・結果なしを、中央と地方の両方に入れた入力。 */
+  function mixedRows(): VerifyReadRows {
+    const unguarded = { historyCutoffDate: null, promptLookaheadGuarded: null } as const;
+    const analyses = [
+      analysisRow(1, CENTRAL), // 遮断済み(clean)
+      analysisRow(2, "202606030812", { ...unguarded, startTime: "15:45", raceSnapshotJson: SNAP_1545, analyzedAt: "2026-07-05T07:00:00.000Z" }), // 中央: 遮断なし・15:45 発走の後(JST 16:00)に分析 = suspect
+      analysisRow(3, "202606030810", { ...unguarded, startTime: "15:45", raceSnapshotJson: SNAP_1545, analyzedAt: "2026-07-05T05:00:00.000Z" }), // 中央: 遮断なし・発走前 = clean
+      analysisRow(4, NAR, { kaisaiDate: null }), // 地方: 遮断済み
+      analysisRow(5, "202644071412", { ...unguarded, startTime: "20:50", raceSnapshotJson: SNAP_2050, analyzedAt: "2026-07-14T12:00:00.000Z", kaisaiDate: null }), // 地方: 遮断なし・20:50 の後 = suspect
+    ];
+    return rowsOf(analyses);
+  }
+
+  it("3 区分とも、core の computeVerifyReport(PRODUCTION_VERIFY_CONFIG, 区分)の直接の呼び出しと完全に一致する(先読み疑いの除外あり・区分は取り違えない)", async () => {
+    const { core, store } = setup();
+    store.state.rows = mixedRows();
+    const direct = (venue: VerifyVenueFilter) => JSON.parse(JSON.stringify(computeVerifyReport(buildVerifySource(store.state.rows), PRODUCTION_VERIFY_CONFIG, venue)));
+    const got = async (venue: VerifyVenueFilter) => {
+      const res = await core.getReport(venue);
+      if (res.status !== "ready") throw new Error(`ready のはず: ${res.status}`);
+      return JSON.parse(JSON.stringify(res.report));
+    };
+    for (const venue of ["all", "central", "nar"] as const) {
+      expect(await got(venue), venue).toEqual(direct(venue));
+    }
+    // 前提(空振り防止): 入力が先読みの除外と区分の違いを実際に動かす
+    const all = direct("all");
+    const central = direct("central");
+    const nar = direct("nar");
+    expect(all.excludedLookaheadSuspectCount).toBe(2);
+    expect(central.excludedLookaheadSuspectCount).toBe(1);
+    expect(nar.excludedLookaheadSuspectCount).toBe(1);
+    expect(central.includedAnalysisCount).toBe(2);
+    expect(nar.includedAnalysisCount).toBe(1);
+    expect(all.includedAnalysisCount).toBe(central.includedAnalysisCount + nar.includedAnalysisCount);
+    // 除外を外すと別の値になる(設定の取り違えを検出できる)
+    const off = JSON.parse(JSON.stringify(computeVerifyReport(buildVerifySource(store.state.rows), { ...PRODUCTION_VERIFY_CONFIG, excludeLookaheadSuspects: false }, "all")));
+    expect(off.excludedLookaheadSuspectCount).toBe(0);
+    expect(off).not.toEqual(all);
+    expect(JSON.stringify(central)).not.toBe(JSON.stringify(nar));
+  });
+
+  it("透かしの各項目(analyses・results・comboPayouts・comboImports)のどれが動いても再計算が走る(1 つでも比較から漏れると、更新が反映されない)", async () => {
+    for (const key of ["analyses", "results", "comboPayouts", "comboImports"] as const) {
+      const { core, store, clock } = setup();
+      await core.getReport("all");
+      expect(store.calls.filter((c) => c === "readAll"), `${key}: 初回`).toHaveLength(1);
+      clock.now += 6 * 60_000; // 最短間隔を過ぎる
+      store.state.watermark = { ...store.state.watermark, [key]: (store.state.watermark[key] ?? 0) + 1 };
+      const res = await core.getReport("all");
+      expect(res.status === "ready" && res.stale, `${key}: 再計算した集計は最新`).toBe(false);
+      expect(store.calls.filter((c) => c === "readAll"), `${key}: 透かしが動いたら再計算`).toHaveLength(2);
+    }
   });
 });
 
@@ -377,22 +444,52 @@ describe("runBackfillTick(アラーム: 発走時刻の補完を少しずつ)", 
     expect(t.store.calls).toContain("resolve");
   });
 
-  it("保留(保存直後で詳細がまだ無い)だけが残るときは、カーソルをその行の手前で止め、60 秒後に再試行する。失敗の回数には数えない", async () => {
-    const { core, store, alarms, kv } = setup();
+  it("R2 に詳細が無い行(missing)は、初めて見てから 30 分は '?' にせず保留する(60 秒後に再試行・失敗に数えない・カーソルは手前で止める)。分析日時は見ない。30 分たっても現れなければ '?'。途中で現れたら本当の値(レビュー指摘: 移行中の分析は D1 に行があり R2 にまだ無い瞬間がある)", async () => {
+    const { core, store, alarms, kv, clock } = setup();
     store.state.pending = [pendingRow(1), pendingRow(2), pendingRow(3)];
-    store.state.resolve = (rows) => ({ resolved: [{ id: rows[0]!.id, value: "15:45" }], deferred: rows.slice(1).map((r) => r.id), failed: [], gets: rows.length });
+    // 1 は読めた。2・3 は R2 に無い(分析日時は古い=pendingRow の analyzedAt は 2026-07-05)
+    store.state.resolve = (rows) => ({ resolved: [{ id: rows[0]!.id, value: "15:45" }], missing: rows.slice(1).map((r) => r.id), failed: [], gets: rows.length });
     await core.runBackfillTick();
+    expect(store.committed[0]!.resolved).toEqual([{ id: 1, value: "15:45" }]);
     expect(alarms).toEqual([T0 + 60_000]);
     expect(kv.get<{ attempts: number }>("backfill")!.attempts).toBe(0);
+    // 29 分 59 秒後もまだ '?' にしない
+    clock.now = T0 + 30 * 60_000 - 1000;
+    store.state.resolve = (rows) => ({ resolved: [], missing: rows.map((r) => r.id), failed: [], gets: rows.length });
     await core.runBackfillTick();
-    // 1 は済み、2・3 は保留のまま。カーソルは 1 まで
-    expect(store.listPendingArgs[1]).toEqual([1, VERIFY_TICK_QUERY_LIMIT - 4]);
+    expect(store.committed[1]!.resolved).toEqual([]);
+    expect(store.listPendingArgs[1]).toEqual([1, VERIFY_TICK_QUERY_LIMIT - 4]); // カーソルは 1 まで(2・3 の手前)
+    // 3 は現れた(本当の値)。2 は 30 分に達して '?'
+    clock.now = T0 + 30 * 60_000;
+    store.state.resolve = (rows) => ({ resolved: [{ id: 3, value: "16:00" }], missing: rows.filter((r) => r.id === 2).map((r) => r.id), failed: [], gets: rows.length });
+    await core.runBackfillTick();
+    expect(store.committed[2]!.resolved).toEqual([{ id: 3, value: "16:00" }, { id: 2, value: "?" }]);
+    expect(store.state.pending).toEqual([]);
+    // 状態は片づく(解決した行の初回観測時刻は残さない)
+    expect(kv.get<Record<string, number>>("missingSince")).toEqual({});
+  });
+
+  it("初回観測時刻は行ごとに持つ(新しく見えた行は、先に見えていた行の時刻を引き継がない)", async () => {
+    const { core, store, clock, kv } = setup();
+    store.state.pending = [pendingRow(1)];
+    store.state.resolve = (rows) => ({ resolved: [], missing: rows.map((r) => r.id), failed: [], gets: rows.length });
+    await core.runBackfillTick();
+    expect(kv.get<Record<string, number>>("missingSince")).toEqual({ "1": T0 });
+    clock.now = T0 + 20 * 60_000;
+    store.state.pending = [pendingRow(1), pendingRow(2)];
+    await core.runBackfillTick();
+    expect(kv.get<Record<string, number>>("missingSince")).toEqual({ "1": T0, "2": T0 + 20 * 60_000 });
+    clock.now = T0 + 31 * 60_000;
+    await core.runBackfillTick();
+    // 1 は 31 分(>=30)で '?'。2 は 11 分なので保留のまま
+    expect(store.committed.at(-1)!.resolved).toEqual([{ id: 1, value: "?" }]);
+    expect(kv.get<Record<string, number>>("missingSince")).toEqual({ "2": T0 + 20 * 60_000 });
   });
 
   it("get の失敗(failed)があれば、解決できた行は書いたうえで、失敗の回数を数えて退避の間隔で再試行する。連続 MAX 回で止まる(アラームを張らない)", async () => {
     const { core, store, alarms, kv } = setup();
     store.state.pending = [pendingRow(1), pendingRow(2)];
-    store.state.resolve = (rows) => ({ resolved: [{ id: rows[0]!.id, value: "" }], deferred: [], failed: [rows[1]!.id], gets: rows.length });
+    store.state.resolve = (rows) => ({ resolved: [{ id: rows[0]!.id, value: "" }], missing: [], failed: [rows[1]!.id], gets: rows.length });
     await core.runBackfillTick();
     expect(store.committed[0]!.resolved).toEqual([{ id: 1, value: "" }]);
     expect(alarms).toEqual([T0 + VERIFY_BACKOFF_MS[0]!]);

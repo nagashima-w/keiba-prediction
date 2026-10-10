@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { encodeDetail } from "../src/analysis-detail";
 import { D1AnalysisStore } from "../src/analysis-repository";
 import { D1ResultStore } from "../src/result-repository";
-import { D1VerifyStore, VERIFY_DEFER_MS, type VerifyBucket } from "../src/verify-store";
+import { D1VerifyStore, type VerifyBucket } from "../src/verify-store";
 import { buildVerifySource } from "../src/verify-read";
 import type { AnalysisRecord } from "../../packages/core/src/ev/analysis-store-types.js";
 import { openLocalBindings, spyBucket, spyDb, type LocalBindings } from "./local-bindings";
@@ -104,7 +104,7 @@ describe("resolveStartTimes(R2 の詳細から発走時刻を取り出す)", () 
     const s = verifyStore(spy.bucket as unknown as VerifyBucket);
     const out = await s.resolveStartTimes((await s.listPending(0, 10)).rows);
     expect(out.resolved).toEqual([{ id: 1, value: "15:45" }, { id: 2, value: "" }, { id: 3, value: "" }, { id: 4, value: "" }]);
-    expect(out.deferred).toEqual([]);
+    expect(out.missing).toEqual([]);
     expect(out.failed).toEqual([]);
     expect(out.gets).toBe(4);
     expect(spy.calls.filter((c) => c.op === "get")).toHaveLength(4);
@@ -121,19 +121,17 @@ describe("resolveStartTimes(R2 の詳細から発走時刻を取り出す)", () 
     expect(spy.calls).toEqual([]);
   });
 
-  it("R2 に詳細が無い: 分析から 10 分以上経っていれば '?'、10 分未満なら保留(保存直後の D1 先・R2 後の窓で、誤って '?' にしない)", async () => {
-    const recent = new Date(NOW.getTime() - (VERIFY_DEFER_MS - 1000)).toISOString();
-    const border = new Date(NOW.getTime() - VERIFY_DEFER_MS).toISOString();
-    await analyses().saveAnalysis(mkRecord(1)); // 古い
-    await analyses().saveAnalysis(mkRecord(2, { analyzedAt: recent }));
-    await analyses().saveAnalysis(mkRecord(3, { analyzedAt: border }));
+  it("R2 に詳細が無い行は、分析日時に依らず `missing`(最終判定をしない)。移行した分析のように分析日時が古くても '?' にしない(D1 に detail_key を書いてから R2 に put するので、「D1 にあり R2 にまだ無い」瞬間がある。レビュー指摘)", async () => {
+    await analyses().saveAnalysis(mkRecord(1)); // 分析日時は 9 日前(移行した分析のように古い)
+    await analyses().saveAnalysis(mkRecord(2, { analyzedAt: new Date(NOW.getTime() - 1000).toISOString() })); // 直前
     // 詳細を消せない(delete は型で禁止)ので、キーを別の存在しないものに付け替える。
-    await local.db.prepare("UPDATE analyses SET detail_key = 'analyses/none-' || id WHERE id IN (1, 2, 3)").run();
+    await local.db.prepare("UPDATE analyses SET detail_key = 'analyses/none-' || id WHERE id IN (1, 2)").run();
     const s = verifyStore();
     const out = await s.resolveStartTimes((await s.listPending(0, 10)).rows);
-    expect(out.resolved).toEqual([{ id: 1, value: "?" }, { id: 3, value: "?" }]);
-    expect(out.deferred).toEqual([2]);
+    expect(out.resolved).toEqual([]);
+    expect(out.missing).toEqual([1, 2]);
     expect(out.failed).toEqual([]);
+    expect(out.gets).toBe(2);
   });
 
   it("壊れた詳細・別のレースの詳細は '?'(新しくても保留しない。R2 の put は原子的で、壊れたものは待っても直らない)", async () => {
@@ -145,7 +143,7 @@ describe("resolveStartTimes(R2 の詳細から発走時刻を取り出す)", () 
     const s = verifyStore();
     const out = await s.resolveStartTimes((await s.listPending(0, 10)).rows);
     expect(out.resolved).toEqual([{ id: 1, value: "?" }, { id: 2, value: "?" }]);
-    expect(out.deferred).toEqual([]);
+    expect(out.missing).toEqual([]);
   });
 
   it("get が例外: その行は failed(NULL のまま。'?' にしない)で、成功した行の結果は返す", async () => {

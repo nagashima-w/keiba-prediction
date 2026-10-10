@@ -6,7 +6,8 @@
  * 先読み疑いの判定(`classifyLookaheadSuspicion`)は `raceSnapshot.race.startTime` を読むが、スナップショットは R2 の詳細にしか無い。集計のたびに 2,000 件超の R2 を読めないので、
  * 発走時刻だけを D1 に写す。**保存の経路は変えず、検証の DO が遅延で埋める**(NULL の行を拾って R2 の詳細から取り出す)。印:
  *  - NULL = 未確認 / '' = 詳細はあるが発走時刻が無い / '?' = 確認できなかった(詳細が無い・壊れている・別のレースのもの) / 'HH:MM' = 値。
- *  - 詳細が無い(R2 に無い)行は、**分析から {@link VERIFY_DEFER_MS}(10 分)未満なら保留**(NULL のまま)。保存は D1 が先・R2 が後なので、保存直後の窓で '?' にしてしまわないため。
+ *  - 詳細が R2 に無い行は、**ここでは '?' にせず `missing` として返す**(最終判定は呼び出し側〈`VerifyCore`〉が、その行を**初めて見てからの経過時間**で行う)。保存は D1 が先・R2 が後
+ *    (移行の `saveMigratedAnalysis`・`repairDetail` も同じ)なので、「D1 に行があり R2 にまだ無い」瞬間がある。分析日時では判定できない(移行した分析の分析日時は exe の古い日時で、書いた直後でも古い)。
  *  - get の例外は、その行を NULL のまま(`failed`)にする。一過性の障害で '?' にしない。
  *  - 壊れた詳細・別のレースの詳細は新しくても '?' にする(R2 の put は原子的で、待っても直らない)。
  * **R2 の Class B(読み出し)は、取得を試みた回数を 1 回の batch でまとめて数える**(保留・失敗の取得も R2 への要求)。柵の判定(`isReadAllowed`)は呼び出し側(`VerifyCore`)が `readUsage` で行う。
@@ -28,8 +29,6 @@ export type VerifyDb = Pick<D1Database, "prepare" | "batch">;
 /** R2 のうち使う部分。**get だけ**。 */
 export type VerifyBucket = Pick<R2Bucket, "get">;
 
-/** 詳細が R2 に無い行を保留する、分析からの経過時間(ミリ秒)。 */
-export const VERIFY_DEFER_MS = 10 * 60_000;
 /** R2 の get の同時実行数。 */
 const GET_CONCURRENCY = 6;
 
@@ -61,8 +60,8 @@ export interface StartTimeResolution {
 
 export interface ResolveOutcome {
   readonly resolved: StartTimeResolution[];
-  /** 保存直後で詳細がまだ無い(NULL のまま、次回に回す)行の id。 */
-  readonly deferred: number[];
+  /** R2 に詳細が無かった行の id(NULL のまま。'?' にするかどうかは呼び出し側が、初めて見てからの経過時間で決める)。 */
+  readonly missing: number[];
   /** get が例外になった行の id(NULL のまま)。 */
   readonly failed: number[];
   /** R2 の get を試みた回数(Class B に数える)。 */
@@ -134,11 +133,10 @@ export class D1VerifyStore {
   /** 行ごとに、R2 の詳細から発走時刻の印を決める(D1 には書かない。書くのは {@link commitStartTimes})。 */
   async resolveStartTimes(rows: readonly PendingRow[]): Promise<ResolveOutcome> {
     const resolved: Array<StartTimeResolution | null> = new Array<StartTimeResolution | null>(rows.length).fill(null);
-    const deferred: number[] = [];
+    const missing: number[] = [];
     const failed: number[] = [];
     let gets = 0;
-    const nowMs = this.now().getTime();
-    const one = async (index: number): Promise<"resolved" | "deferred" | "failed"> => {
+    const one = async (index: number): Promise<"resolved" | "missing" | "failed"> => {
       const row = rows[index]!;
       if (row.detailKey === null) {
         resolved[index] = { id: row.id, value: START_TIME_LOST };
@@ -153,12 +151,7 @@ export class D1VerifyStore {
         return "failed";
       }
       if (bytes === null) {
-        const analyzedMs = Date.parse(row.analyzedAt);
-        if (!Number.isNaN(analyzedMs) && nowMs - analyzedMs < VERIFY_DEFER_MS) {
-          return "deferred";
-        }
-        resolved[index] = { id: row.id, value: START_TIME_LOST };
-        return "resolved";
+        return "missing";
       }
       const payload = decodeDetail(bytes);
       if (payload === null || payload.raceId !== row.raceId) {
@@ -172,11 +165,11 @@ export class D1VerifyStore {
       const indexes = Array.from({ length: Math.min(GET_CONCURRENCY, rows.length - start) }, (_, k) => start + k);
       const outcomes = await Promise.all(indexes.map(one));
       outcomes.forEach((outcome, k) => {
-        if (outcome === "deferred") deferred.push(rows[indexes[k]!]!.id);
+        if (outcome === "missing") missing.push(rows[indexes[k]!]!.id);
         if (outcome === "failed") failed.push(rows[indexes[k]!]!.id);
       });
     }
-    return { resolved: resolved.filter((r): r is StartTimeResolution => r !== null), deferred, failed, gets };
+    return { resolved: resolved.filter((r): r is StartTimeResolution => r !== null), missing, failed, gets };
   }
 
   /**
