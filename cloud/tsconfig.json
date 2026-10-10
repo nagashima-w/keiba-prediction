@@ -23,5 +23,5 @@
       "@keiba/core/*": ["../packages/core/src/*"]
     }
   },
-  "include": ["src", "test", "smoke.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts", "build-client.ts", "print-report-prompt.ts"]
+  "include": ["src", "test", "smoke.ts", "smoke-worker.ts", "smoke-modules.d.ts", "vitest.config.ts", "build-client.ts", "print-report-prompt.ts", "print-palette-report.ts"]
 }

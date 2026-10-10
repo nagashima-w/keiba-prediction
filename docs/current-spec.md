@@ -1311,7 +1311,7 @@ Access の後ろに、日単位の DO(`RaceDay`)を手動で動かす入口を�
   - **通知は状態から作る**(コールバックにしない)。`planNotifications`(純関数)が、`getAutoRunResults`・`getPlanProgress`・通知の表から、「いま送るもの(`sendNow`)」と「次にアラームを張る時刻(`nextAtMs`)」を**同じ関数が同じ状態から**返す。`rearm` は `nextAtMs` を(`AlarmInputs.notifyAtMs`)、送信のステップは `sendNow` を読む。
     不変条件: `nextAtMs ≤ now` なら `sendNow` がある(即時ループなし)/ webhook が無効なら両方 null / 送り終えたものは候補にならない / `sendNow` を実行すると必ず状態が変わる。fuzz(`race-day-notify.test.ts`)が、実際の実行で固定している。
   - **処理の順**: 昇格 → 計画(一覧・確定)→ **通知** → タスク(`pickNext`)。通知をタスクの前に置くのは、immediate の行が多い日に、pre_race の連続が時間に追われる通知を押しのけないため。送信の間隔(成功のあと 1 秒)・失敗のクールダウン(失敗のあと 60 秒。メタ `notify_pace_until`)があるので、通知がタスクを押しのけ続けることもない。
-  - **送るもの(レースごと)**: `completed` → 分析の embed(core の `buildAnalysisEmbed`。狙い目あり=緑・なし=灰色。LLM が効かなかった・一部だけのときは、固定の理由文を `LLM補正の注記:` の行で足す)/ `failed`(started・blocked・fetch-exhausted・compute-exhausted・unknown)→ 赤 / 昇格の時点の `skipped`(started・cap・no-start-time)→ 赤 / 昇格の時点の `skipped(manual)` → 灰色。
+  - **送るもの(レースごと)**: `completed` → 分析の embed(core の `buildAnalysisEmbed`。狙い目あり=緑・なし=灰色〔色の値は #239 でクラウド側のパレットに差し替えた。「クラウド版の配色」の節〕。LLM が効かなかった・一部だけのときは、固定の理由文を `LLM補正の注記:` の行で足す)/ `failed`(started・blocked・fetch-exhausted・compute-exhausted・unknown)→ 赤 / 昇格の時点の `skipped`(started・cap・no-start-time)→ 赤 / 昇格の時点の `skipped(manual)` → 灰色。
     **送らない**: 計画の時点の `skipped`(まとめにだけ載る)・`superseded`(利用者が自分で再実行している)・`waiting`・`running`・手動の pre_race の結果。スキップが計画の時点か昇格の時点かは、行の期限(`dueMs`)で読む(`skipStage`。計画の時点のスキップは `due_ms: null` で書かれ、`markSkipped` は `due_ms` を更新しない。`disposition` は両方 `skip` なので判別に使えない)。
     本文は理由ごとの**固定文だけ**(タスクのエラー文の生の値は載せない)。
     **発走時刻(#236)**: 個別レースの通知は、計画の行の発走時刻(`HH:MM`)があれば、本文の**先頭**に「発走 HH:MM」+空行を出す(`notify-embeds.ts` の `startLine` を共用)。対象は分析の完了(緑・灰色)・最小の完了・失敗(赤)・手動スキップ(灰色)の4種(#236 の前は、分析の完了だけが出していなかった)。時刻が無い(null)ときは何も足さない。朝のまとめは行ごとに時刻(無ければ `--:--`)を出す。
@@ -1766,6 +1766,35 @@ upload(26.2MB を R2 にそのまま置く): 532ms
   - 場の開閉・日付ピッカーが、ポーリングの更新で壊れないこと(木が変わらない周期では DOM を触らない)。
   - 画面を非表示にして戻したとき、すぐ更新されること。
 - **【記録】**: 木が変わる描画(バッジの変化・開閉)では、これまでどおり画面全体が置き換わる=押した要素が消えてフォーカスが `body` に戻る・`#app` の `aria-live="polite"` が画面全体を読み上げ直す可能性(ユーザー判断 2026-10-07: 今回は【記録】のまま。直すなら、`data-*` のキーでフォーカスを戻す・ライブ領域を狭くする)/ 取得のタイムアウトが無い / 場のキーは「場名 + 同名の出現順」(更新で別のレースが現れると選択が入れ替わりうる)。
+
+### クラウド版の配色(カラーユニバーサルデザイン。#239。版数は公開時に付く)
+色覚(P 型・D 型・T 型)によって赤と緑・赤と茶が見分けにくくなる問題に対応した。**範囲は web とクラウド版の Discord 通知だけ**(exe は対象外)。全体の雰囲気は変えず、見分けにくい組み合わせだけを置き換え、色だけに頼る箇所には文字・記号を足した。
+
+- **色の正は `cloud/src/palette.ts` の1箇所**。web の CSS 変数(`page.ts` が `paletteCss()` で `:root` と `prefers-color-scheme: dark` を作る)と、Discord の帯の色(`notify-embeds.ts`・`daily-report-embed.ts`)がここから作る。`page.ts` に 16 進の直書きは無い。
+- **採用した色**(旧 → 新。変えなかった `--fg --bg --muted --line --card --accent` は旧のまま。4.5:1 を満たすことを実測した):
+
+  | 用途 | 旧 | 新 |
+  |---|---|---|
+  | web ライト `--ok` / `--wait` / `--fail` | #146c2e / #8a5a00 / #b3261e | #177c55 / #8e6610 / #922b2b |
+  | web ダーク `--ok` / `--wait` / `--fail` | #6fcf8a / #e0b24a / #ff8a80 | #7cd9ac / #e3b548 / #ec7971 |
+  | Discord ok(狙い目あり・全準備OK・黒字)| 0x2ecc71 | 0x009E73(Okabe-Ito の青みの緑)|
+  | Discord warn(一部失敗・未完了)| 0xe67e22 | 0xE69F00(Okabe-Ito の橙)|
+  | Discord fail(失敗・赤字)| 0xe74c3c | 0xD02040(赤寄りの朱。Okabe-Ito の朱 #D55E00 は橙と近く、D 型で warn との色差が縮むため赤寄りにした)|
+  | Discord none(狙い目なし・手動スキップ・結果なし)| 0x95a5a6 | 0x95a5a6(変更なし)|
+
+- **根拠**: P・D 型で残る手がかりは「青↔黄」の軸と明度なので、状態の3色は色相だけでなく明度も離した(緑は青みの緑、赤は煉瓦〜朱に寄せ、茶は黄土に寄せた)。**旧配色の色覚シミュレーション後の ΔE2000 の最小は、web ライト 1.5(wait–fail、D 型)・web ダーク 3.5(ok–fail、D 型)・Discord 7.5(warn–fail、D 型)**だった(再現は下の `print-palette-report.ts` の「旧配色」の行。`test/palette.test.ts` は旧配色が閾値 10 を満たさないことを固定する)。
+- **閾値**: 色覚シミュレーション(P・D・T 型)後も **ΔE2000 ≥ 10**、文字色のコントラスト比は **WCAG AA の 4.5:1 以上**。10 は**経験則**(ΔE2000 は約 1 が知覚できる最小差、2〜5 が並べて見比べて分かる差、10 以上が離れて見ても別の色と分かる差、という目安。厳密な標準ではない)。文字・記号を併記するので、色差は唯一の手がかりではなく補強。
+  - 検査する組: web は {ok, wait, fail} の3組と {accent}×{ok, wait, fail} の3組(ライト・ダーク)。Discord は4色の全6組。**`--muted`(未実行のバッジと補助的な文字の色)は ΔE の組に含めない**(未実行には文字のラベルがあるため)。
+  - コントラスト比は `--fg --muted --accent --ok --wait --fail` を `--bg` と `--card` の上で、ライト・ダーク両方。
+  - 実測の最小(再現: `cd cloud && pnpm exec tsx print-palette-report.ts`): ΔE2000 はライト 11.6(wait–fail、D 型)・ダーク 10.7(accent–ok、T 型。**余裕は 0.7 と小さい**)・Discord 14.1(ok–none、D 型)。コントラスト比の最小は 4.75(ライトの ok と wait の `--card` 上)。
+- **色覚シミュレーションと色差の実装**: テスト専用の `cloud/test/color-science.ts`(依存パッケージは足していない)。Machado, Oliveira & Fernandes (2009)「A Physiologically-based Model for Simulation of Color Vision Deficiency」(IEEE TVCG 15(6))の行列(重篤度 1.0)を線形 RGB に掛ける。色差は CIEDE2000(Sharma, Wu & Dalal 2005 の実装ノート)。正しさは `test/color-science.test.ts` が、Sharma の公開テストデータ・行列の行和・黒白灰の不変・独立実装(Python の colorspacious の出力。`sRGB1+CVD` の severity=100)の出力との一致(採用色10色 × P・D・T)で固定する。
+- **web の検査は実際の出力から**: `test/palette.test.ts` は `renderPage` の `<style>` から CSS 変数を読み取って検査する(palette.ts の定数だけを見ない)ので、`page.ts` が定数と違う値を直書きしても検出する。
+- **発走前の分析の通知の色**: core の `buildAnalysisEmbed` が返す色(緑・灰)は exe の Discord と共有なので変えない。`buildAnalysisNotificationEmbed` が `color` を上書きする(条件は core と同じ「EV プラスの馬がいるか」)。**exe の Discord 通知の色は旧配色のまま**(web・クラウド版の Discord と色が違う。exe は対象外という決定による)。
+- **色だけで伝えていないかの洗い出しと対応**:
+  - 文字のラベルがあるので変更なし: 一覧・カードのバッジ(未実行・待ち・取得済み・完了・失敗)、馬の「EVプラス」、強調材料・懸念事項のラベル、入力エラー(太字の文章と太い枠)、選択中のタブ・切替(太字)、Discord の分析(馬の行・「該当なし」)・失敗・手動スキップ(固定文)、朝のまとめ(「準備OK n / 失敗 n / 未完了 n」の件数)。
+  - **記号を足した(CSS の `::before` のみ。DOM・クライアントの束は不変)**: `.notice.error`・`.card-error`・`.notice.llm-usage-warn` に「⚠ 」、`.notice.ok` に「✓ 」、`.notice.wait` に「… 」。
+  - **語を足した**: Discord の日報の「成績」の回収率に、帯の色(緑・赤)と同じ境界で「(黒字)」(100% 超)・「(収支±0)」(ちょうど 100%。帯は緑)・「(赤字)」(100% 未満。帯は赤)。回収率が出せない日は「なし」のまま。丸めて「100.0%」と表示される 1 未満の値は「(赤字)」になる(帯と同じ判定)。
+- **検査**: `test/color-science.test.ts`(ヘルパ)・`test/palette.test.ts`(コントラスト・色差・CSS との一致・旧配色が閾値を満たさないこと)・`test/page.test.ts`(記号)・`test/notify-embeds.test.ts`(分析の色の上書き)・`test/daily-report-embed.test.ts`(語と色の境界)。既存の embed のテストは、旧色のリテラルをパレットの定数に置き換えた(意味の対応は変えていない)。
 
 ## 主な当初仕様との差異(記録)
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDayStats, type DayStats } from "../src/daily-report-digest";
 import { buildReportEmbed } from "../src/daily-report-embed";
+import { DISCORD_COLORS } from "../src/palette";
 import { EMBED_LIMITS, embedLength } from "../src/notify-embeds";
 
 /** Issue #235: Discord に送る日報の要約(embed)。上限を守り、リンクは基点があるときだけ付ける。 */
@@ -56,9 +57,45 @@ describe("buildReportEmbed", () => {
 
   it("色: 回収率 100% 以上は緑、未満は赤、賭け金なしは灰色", () => {
     const color = (stats: DayStats) => buildReportEmbed({ kaisaiDate: "20261010", stats, narrative: NARRATIVE, note: null, link: undefined }).color;
-    expect(color({ ...STATS, recoveryRate: 1 })).toBe(0x2ecc71);
-    expect(color({ ...STATS, recoveryRate: 0.99 })).toBe(0xe74c3c);
-    expect(color({ ...STATS, recoveryRate: null, totalStake: 0 })).toBe(0x95a5a6);
+    expect(color({ ...STATS, recoveryRate: 1 })).toBe(DISCORD_COLORS.ok);
+    expect(color({ ...STATS, recoveryRate: 0.99 })).toBe(DISCORD_COLORS.fail);
+    expect(color({ ...STATS, recoveryRate: null, totalStake: 0 })).toBe(DISCORD_COLORS.none);
+  });
+
+  describe("Issue #239: 帯の色(緑・赤)だけに頼らず、成績に「黒字・赤字・収支±0」の語を添える", () => {
+    const stat = (recoveryRate: number | null) =>
+      buildReportEmbed({ kaisaiDate: "20261010", stats: { ...STATS, recoveryRate, totalStake: recoveryRate === null ? 0 : STATS.totalStake }, narrative: NARRATIVE, note: null, link: undefined });
+    // [回収率, 添える語, 帯の色]。境界(0.99・1・1.0001)と両端(0)を含める。色の条件(`recoveryRate >= 1` で緑)と語の境界が一致していること
+    const TABLE: readonly (readonly [number, string, number])[] = [
+      [0, "(赤字)", DISCORD_COLORS.fail],
+      [0.5, "(赤字)", DISCORD_COLORS.fail],
+      [0.99, "(赤字)", DISCORD_COLORS.fail],
+      [0.9999, "(赤字)", DISCORD_COLORS.fail],
+      [1, "(収支±0)", DISCORD_COLORS.ok],
+      [1.0001, "(黒字)", DISCORD_COLORS.ok],
+      [1.3, "(黒字)", DISCORD_COLORS.ok],
+    ];
+
+    it.each(TABLE)("回収率 %f: 成績の field に「%s」を添え、帯は同じ意味の色", (rate, word, color) => {
+      const e = stat(rate);
+      const value = e.fields!.find((f) => f.name === "成績")!.value;
+      expect(value).toMatch(/回収率 [0-9.]+%/);
+      expect(value).toContain(word);
+      expect(e.color).toBe(color);
+      // 添える語は、ちょうど1つだけ(黒字と赤字が同時に出ない)
+      expect(["(黒字)", "(赤字)", "(収支±0)"].filter((w) => value.includes(w))).toEqual([word]);
+    });
+
+    it("前提: 表に3つの語がすべて現れ、色は緑・赤の両方が現れる(表が片寄っていない)", () => {
+      expect(new Set(TABLE.map((r) => r[1]))).toEqual(new Set(["(黒字)", "(赤字)", "(収支±0)"]));
+      expect(new Set(TABLE.map((r) => r[2]))).toEqual(new Set([DISCORD_COLORS.ok, DISCORD_COLORS.fail]));
+    });
+
+    it("回収率が出せない日(null)は『なし』のまま。黒字・赤字の語は添えない", () => {
+      const value = stat(null).fields!.find((f) => f.name === "成績")!.value;
+      expect(value).toContain("回収率 なし");
+      expect(["黒字", "赤字", "収支±0"].filter((w) => value.includes(w))).toEqual([]);
+    });
   });
 
   it("賭け金が 0 の日の回収率は『なし』と出す(NaN・Infinity を出さない)", () => {

@@ -14,6 +14,7 @@ import type { AnalysisAllocationMetaRecord, AnalysisAllocationRecord, AnalysisBe
 import type { SkipReasonCode } from "../../packages/core/src/ev/combo-bet-allocation";
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
 import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
+import { DISCORD_COLORS } from "./palette";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
 import type { PlanProgress } from "./race-day-core";
 
@@ -36,10 +37,11 @@ export interface CloudEmbed extends DiscordEmbed {
 /** Discord の embed の上限(文字数。UTF-16 の `.length` で数える。コードポイントより保守側)。 */
 export const EMBED_LIMITS = { title: 256, description: 4096, fieldName: 256, fieldValue: 1024, fields: 25, total: 6000 } as const;
 
-const COLOR_GREEN = 0x2ecc71;
-const COLOR_GRAY = 0x95a5a6;
-const COLOR_RED = 0xe74c3c;
-const COLOR_ORANGE = 0xe67e22;
+// 帯の色は palette.ts(Issue #239。カラーユニバーサルデザイン)。
+const COLOR_GREEN = DISCORD_COLORS.ok;
+const COLOR_GRAY = DISCORD_COLORS.none;
+const COLOR_RED = DISCORD_COLORS.fail;
+const COLOR_ORANGE = DISCORD_COLORS.warn;
 
 // ---- 上限を守る ----
 
@@ -447,7 +449,10 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
   // タイトルは失敗・手動スキップ・最小の通知と同じ関数で作る(Issue #230。「会場 NR レース名」)。core のタイトルは番号を持たない(core は変えない)。
   // 番号は計画の行(`label.raceNumber`)から。無ければ番号なしの今の形(「会場 レース名」)になる。レース名は、スナップショットにあればそれを優先する(従来どおり)。
   const title = raceTitle({ ...label, raceName: snapshot.raceName ?? label.raceName });
-  return fitEmbed({ ...base, title, ...(description === undefined ? {} : { description }), fields });
+  // 帯の色は cloud 側で決める(Issue #239。カラーユニバーサルデザイン)。core の `buildAnalysisEmbed` も色を返すが、その定数は exe の Discord と共有で変えられない(exe は対象外)。
+  // 条件は core と同じ「EV プラスの馬がいるか」(`record.horses` を `EmbedHorse` に 1:1 で写しており、isPositive をそのまま渡している)。
+  const color = record.horses.some((h) => h.isPositive) ? COLOR_GREEN : COLOR_GRAY;
+  return fitEmbed({ ...base, title, color, ...(description === undefined ? {} : { description }), fields });
 }
 
 // ---- 朝のまとめ ----

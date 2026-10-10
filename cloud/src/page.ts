@@ -4,6 +4,8 @@
  *  - `renderCheckPage`(`GET /check`): 旧 `/` の確認フォーム(#162 の本番実機確認用。Issue #184 で `/` から移した。CSP は旧 `/` のまま。見出しは Issue #191 で「Uma Driller(確認ページ)」)。
  */
 
+import { paletteCss } from "./palette";
+
 export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -85,8 +87,7 @@ export function renderPage(email: string, role: "admin" | "viewer"): string {
 <meta name="color-scheme" content="light dark">
 <title>Uma Driller</title>
 <style>
-  :root { --fg: #1c1c1e; --bg: #ffffff; --muted: #6b6b70; --line: #d8d8dc; --card: #f5f5f7; --accent: #0a58ca; --ok: #146c2e; --wait: #8a5a00; --fail: #b3261e; }
-  @media (prefers-color-scheme: dark) { :root { --fg: #f2f2f5; --bg: #151517; --muted: #a0a0a8; --line: #3a3a3f; --card: #212125; --accent: #7cacf8; --ok: #6fcf8a; --wait: #e0b24a; --fail: #ff8a80; } }
+${paletteCss()}
   * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; line-height: 1.5; color: var(--fg); background: var(--bg); overflow-wrap: anywhere; }
   main { max-width: 40rem; margin: 0 auto; min-width: 0; }
@@ -232,6 +233,10 @@ export function renderPage(email: string, role: "admin" | "viewer"): string {
   .migration-start, .migration-cancel { display: block; width: 100%; margin: 8px 0; font-weight: bold; }
   .notice.ok { border-color: var(--ok); color: var(--ok); }
   .notice.wait { border-color: var(--wait); color: var(--wait); }
+  /* Issue #239: 色だけで状態を伝えない(カラーユニバーサルデザイン)。文字のない所には記号を添える: 失敗・警告=⚠、成功=✓、待機=…。バッジ(未実行・待ち・取得済み・完了・失敗)は文字のラベルがあるので足さない */
+  .notice.error::before, .card-error::before, .notice.llm-usage-warn::before { content: "⚠ "; }
+  .notice.ok::before { content: "✓ "; }
+  .notice.wait::before { content: "… "; }
   /* Issue #188: 発走前のカードの中の結果(開閉の見出しは h3 の中のボタン。文字の ▾/▸ でも開閉が分かる) */
   .card-result { margin-top: 8px; }
   .card-result h3 { margin: 8px 0 4px; font-size: 1rem; }

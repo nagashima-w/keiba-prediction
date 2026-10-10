@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderCheckPage, renderPage } from "../src/page";
+import { CLIENT_JS } from "../src/client-bundle.generated";
 
 /**
  * Issue #191: web 画面の名前は「Uma Driller」(exe の名前は変えない。#190)。
@@ -102,6 +103,41 @@ describe("Issue #238: 役割の印(サーバが画面に渡す。画面で隠す
       const html = renderPage(EMAIL, role);
       expect(html.match(/data-role=/g)).toHaveLength(1);
       expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
+
+/**
+ * Issue #239: 色だけで状態を伝えない。文字のない所(通知の枠・カードのエラー文・警告)には、CSS の `::before` で記号を添える。
+ * DOM・クライアントの束は変えない(CSS だけ)。バッジ(未実行・待ち・取得済み・完了・失敗)と「EVプラス」「印」は、もともと文字のラベルがあるので足さない。
+ */
+describe("Issue #239: 状態の記号(色だけに頼らない)", () => {
+  const html = renderPage(EMAIL, "admin");
+  /** `selector::before { content: "..." }` の content を返す(無ければ null)。 */
+  const beforeContent = (selector: string): string | null => {
+    const escaped = selector.replace(/[.\\[\]"=]/g, "\\$&");
+    const rule = new RegExp(`${escaped}::before[^{}]*\\{([^}]*)\\}`).exec(html);
+    return rule === null ? null : (/content:\s*"([^"]*)"/.exec(rule[1]!)?.[1] ?? null);
+  };
+
+  const EXPECTED: readonly (readonly [string, string])[] = [
+    [".notice.error", "⚠ "],
+    [".card-error", "⚠ "],
+    [".notice.llm-usage-warn", "⚠ "],
+    [".notice.ok", "✓ "],
+    [".notice.wait", "… "],
+  ];
+
+  it.each(EXPECTED)("%s の先頭に記号「%s」を添える", (selector, symbol) => {
+    expect(beforeContent(selector)).toBe(symbol);
+  });
+
+  it("記号は成功(✓)・警告/失敗(⚠)・待機(…)の3種で、成功と警告は別の記号", () => {
+    expect(new Set(EXPECTED.map((e) => e[1]))).toEqual(new Set(["⚠ ", "✓ ", "… "]));
+    expect(beforeContent(".notice.ok")).not.toBe(beforeContent(".notice.error"));
+    expect(beforeContent(".notice.wait")).not.toBe(beforeContent(".notice.error"));
+  });
+
+  it("記号を足す対象のクラスは、クライアントが実際に使っているクラス(CSS だけ足して、使われない状態を防ぐ)", () => {
+    for (const name of ["card-error", "llm-usage-warn", "notice error"]) {
+      expect(CLIENT_JS, name).toContain(name);
     }
   });
 });

@@ -22,6 +22,7 @@ import {
   type RaceLabel,
 } from "../src/notify-embeds";
 import type { PlanProgress } from "../src/race-day-core";
+import { DISCORD_COLORS } from "../src/palette";
 import { allocationRecord, betRecord } from "./allocation-fixtures";
 
 /**
@@ -167,7 +168,7 @@ describe("fitEmbed(Issue #230: タイトルのリンク `url`)", () => {
 describe("失敗・手動スキップの通知(G-D3。本文は理由ごとの固定文だけ)", () => {
   it("失敗の embed: 赤。タイトルは「会場 N R レース名」。本文は発走時刻と固定の理由文", () => {
     const out = buildFailureEmbed(label(), failureText("blocked"));
-    expect(out.color).toBe(0xe74c3c);
+    expect(out.color).toBe(DISCORD_COLORS.fail);
     expect(out.title).toBe("中山 11R テストステークス");
     expect(out.description).toContain("発走 15:40");
     expect(out.description).toContain(failureText("blocked"));
@@ -195,7 +196,7 @@ describe("失敗・手動スキップの通知(G-D3。本文は理由ごとの�
   it("手動スキップの embed: 灰色。固定文「手動の分析があるため、自動の分析は行いませんでした」", () => {
     expect(MANUAL_SKIP_TEXT).toBe("手動の分析があるため、自動の分析は行いませんでした");
     const out = buildManualSkipEmbed(label());
-    expect(out.color).toBe(0x95a5a6);
+    expect(out.color).toBe(DISCORD_COLORS.none);
     expect(out.description).toContain(MANUAL_SKIP_TEXT);
   });
 
@@ -246,7 +247,7 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
 
   it("狙い目あり(isPositive の馬がいる): 緑。馬番・馬名・補正後確率・複勝下限・EV の行がある。タイトルは「会場 NR レース名」、メタ行に日付・コース・距離", () => {
     const out = buildAnalysisNotificationEmbed(record(), effective, label());
-    expect(out.color).toBe(0x2ecc71);
+    expect(out.color).toBe(DISCORD_COLORS.ok);
     expect(out.title).toBe("中山 11R テストステークス"); // Issue #230: レース番号を入れる(失敗の通知と同じ形)
     expect(out.description).toContain("2026/09/27 / 中山 / 芝1600m");
     expect(out.description).toContain("◎ 1番 アルファ AI補正後42.0% 複勝下限2.5 EV1.05");
@@ -275,7 +276,7 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
     it("狙い目なし(灰色)・LLM 注記つきでも、時刻は先頭に出る", () => {
       const noPositive = record({ horses: record().horses.map((h) => ({ ...h, isPositive: false })) });
       const out = buildAnalysisNotificationEmbed(noPositive, { effective: false, note: "理由の固定文" }, label({ startTime: "09:05" }));
-      expect(out.color).toBe(0x95a5a6);
+      expect(out.color).toBe(DISCORD_COLORS.none);
       expect(out.description!.startsWith("発走 09:05\n\n")).toBe(true);
       expect(out.description).toContain("LLM補正の注記: 理由の固定文");
     });
@@ -315,10 +316,22 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
     });
   });
 
+  it("Issue #239: 帯の色は cloud 側のパレットで決める。core の既定色(緑 0x2ecc71・灰 0x95a5a6)の定数をそのまま通していない", () => {
+    // 狙い目あり: palette の ok。core が返す旧い緑(0x2ecc71)ではない(前提: 両者は別の値)
+    expect(DISCORD_COLORS.ok).not.toBe(0x2ecc71);
+    const positive = buildAnalysisNotificationEmbed(record(), effective, label());
+    expect(positive.color).toBe(DISCORD_COLORS.ok);
+    expect(positive.color).not.toBe(0x2ecc71);
+    // 狙い目なし: palette の none。ok とは別の値
+    const none = buildAnalysisNotificationEmbed(record({ horses: record().horses.map((h) => ({ ...h, isPositive: false })) }), effective, label());
+    expect(none.color).toBe(DISCORD_COLORS.none);
+    expect(none.color).not.toBe(positive.color);
+  });
+
   it("狙い目なし(isPositive の馬がいない): 灰色。「該当なし」", () => {
     const none = record({ horses: record().horses.map((h) => ({ ...h, isPositive: false })) });
     const out = buildAnalysisNotificationEmbed(none, effective, label());
-    expect(out.color).toBe(0x95a5a6);
+    expect(out.color).toBe(DISCORD_COLORS.none);
     expect(out.description).toContain("該当なし");
   });
 
@@ -327,7 +340,7 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
     const out = buildAnalysisNotificationEmbed(record(), { effective: false, note }, label());
     expect(out.description).toContain("LLM補正: スキップ");
     expect(out.description).toContain(`LLM補正の注記: ${note}`);
-    expect(out.color).toBe(0x2ecc71);
+    expect(out.color).toBe(DISCORD_COLORS.ok);
     const marksDropped = buildAnalysisNotificationEmbed(record(), { effective: true, note: "印の制約違反のため、印は付けていません(3着内率の補正は反映しています)" }, label());
     expect(marksDropped.description).toContain("LLM補正: 実行"); // 補正は効いている
     expect(marksDropped.description).toContain("LLM補正の注記: 印の制約違反");
@@ -572,7 +585,7 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
     expect(out.fields!.map((f) => f.name)).toEqual(["中山", "阪神", "地方 交流重賞"]);
     expect(out.fields![0]!.value).toBe("1R 中山1 10:05 準備OK");
     expect(out.fields![2]!.value).toBe("水沢 11R 地方Jpn 20:10 準備OK");
-    expect(out.color).toBe(0x2ecc71);
+    expect(out.color).toBe(DISCORD_COLORS.ok);
     expect(out.description).toContain("対象 3 件(中央 2・地方 交流重賞 1)");
   });
 
@@ -588,7 +601,7 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
     const lines = out.fields![0]!.value.split("\n");
     expect(lines.map((l) => l.split(" ").at(-1))).toEqual(["準備OK", "準備失敗", "未完了", "未完了", "未完了"]);
     expect(out.description).toContain("準備OK 1 / 失敗 1 / 未完了 3");
-    expect(out.color).toBe(0xe67e22);
+    expect(out.color).toBe(DISCORD_COLORS.warn);
   });
 
   it("未完了があるのに送るとき(保険の時刻)は、「未完了 N 件」を明示する。全部終端のときは言わない", () => {
@@ -603,7 +616,7 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
       row({ raceId: "202606040902", raceNumber: 2, state: "skipped", skipReason: "cap", disposition: "skip", dueMs: null, morning: null }),
     ];
     const out = buildSummaryEmbed({ kaisaiDate: "20260927", progress: progress({ rows }) });
-    expect(out.color).toBe(0xe74c3c);
+    expect(out.color).toBe(DISCORD_COLORS.fail);
     expect(out.fields![0]!.value).toContain("スキップ(上限超過)");
     expect(out.description).toContain("失敗 2"); // 準備失敗 1 + 上限超過 1
   });
@@ -632,7 +645,7 @@ describe("buildSummaryEmbed(AC-D3・AC-D5: 朝のまとめ)", () => {
     const nar = out.fields!.find((f) => f.name === "地方 交流重賞")!;
     expect(nar.value).toContain("取得できませんでした");
     expect(nar.value).toContain("取得制限");
-    expect(out.color).toBe(0xe74c3c);
+    expect(out.color).toBe(DISCORD_COLORS.fail);
   });
 
   it("中央の一覧の取得失敗(対象 0 件の日): 「中央」の field に取得失敗を出す", () => {

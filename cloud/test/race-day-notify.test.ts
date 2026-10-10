@@ -5,6 +5,7 @@ import { CLIP_VARIANTS } from "../../packages/core/src/analyzer/clip-variants";
 import { DiscordNotifyError, type DiscordPayload } from "../../packages/core/src/notify/discord";
 import { failureText, MANUAL_SKIP_TEXT } from "../src/notify-embeds";
 import type { CloudEmbed } from "../src/notify-embeds";
+import { DISCORD_COLORS } from "../src/palette";
 import type { DiscordNotifier } from "../src/notify-send";
 import { FAILURE_COOLDOWN_MS, SEND_SPACING_MS, SUMMARY_INSURANCE_MS } from "../src/notify-plan";
 import type { RecentAnalysis } from "../src/analysis-save-extra";
@@ -335,8 +336,8 @@ describe("AC-D1: 発走前の分析が保存されると、分析の embed が1�
     expect(analysis.description).toMatch(/^発走 15:35\n\n2026\/06\/28 \/ 福島 \//); // Issue #236: 計画の行の発走時刻(15:35)が、成功の通知の先頭に出る(DO の計画の行 → embed の配線)
     expect(analysis.description).toContain("2026/06/28 / 福島 /"); // メタ行(日付・会場・コース距離)
     expect(analysis.description).toContain("LLM補正:");
-    expect([0x2ecc71, 0x95a5a6]).toContain(analysis.color); // 緑(狙い目あり)か灰色(なし)
-    expect(analysis.color === 0x2ecc71 ? !analysis.description!.includes("該当なし") : analysis.description!.includes("該当なし")).toBe(true); // 色と本文が一致
+    expect([DISCORD_COLORS.ok, DISCORD_COLORS.none]).toContain(analysis.color); // 緑(狙い目あり)か灰色(なし)
+    expect(analysis.color === DISCORD_COLORS.ok ? !analysis.description!.includes("該当なし") : analysis.description!.includes("該当なし")).toBe(true); // 色と本文が一致
   });
 
   it("LLM が効かなかった(キー未登録)ときは、固定の理由文が embed に載る(AC-D1 の「LLM なし」)", async () => {
@@ -564,7 +565,7 @@ describe("G-D3: 失敗・スキップの通知(固定文)", () => {
     expect(h.core.getAutoRunResults().results[0]!.outcome).toMatchObject({ kind: "failed", reason: "blocked" });
     await drive(h, jst("16:00"));
     const embeds = h.notifier.sent.map(embedOf);
-    const red = embeds.find((e) => e.color === 0xe74c3c)!;
+    const red = embeds.find((e) => e.color === DISCORD_COLORS.fail)!;
     expect(red.title).toBe("中山 1R 中央1R");
     expect(red.description).toContain(failureText("blocked"));
     expect(red.description).toContain("発走 15:35");
@@ -579,7 +580,7 @@ describe("G-D3: 失敗・スキップの通知(固定文)", () => {
     expect(planRows(h)[0]).toMatchObject({ state: "skipped", skip_reason: "started" });
     expect(planRows(h)[0]!.due_ms).not.toBeNull(); // 昇格の時点のスキップは、期限が残る
     await drive(h, jst("16:00"));
-    const red = h.notifier.sent.map(embedOf).filter((e) => e.color === 0xe74c3c);
+    const red = h.notifier.sent.map(embedOf).filter((e) => e.color === DISCORD_COLORS.fail);
     expect(red).toHaveLength(1);
     expect(red[0]!.description).toContain(failureText("started"));
   });
@@ -601,7 +602,7 @@ describe("G-D3: 失敗・スキップの通知(固定文)", () => {
     await drive(h, jst("16:00"));
     const gray = h.notifier.sent.map(embedOf).filter((e) => e.description?.includes(MANUAL_SKIP_TEXT));
     expect(gray).toHaveLength(1);
-    expect(gray[0]!.color).toBe(0x95a5a6);
+    expect(gray[0]!.color).toBe(DISCORD_COLORS.none);
     expect(notifyRows(h).find((r) => r.key === `race:${R1}`)).toMatchObject({ kind: "skipped-manual", state: "sent" });
   });
 
@@ -656,7 +657,7 @@ describe("AC-D3・G-D5: 朝のまとめ(1日に1回)", () => {
     expect(summaries[0]!.fields!.map((f) => f.name)).toEqual(["中山", "地方 交流重賞"]);
     expect(summaries[0]!.fields![0]!.value).toBe("1R 中央1R 15:35 準備失敗\n2R 中央2R 15:40 準備失敗");
     expect(summaries[0]!.fields![1]!.value).toBe("水沢 11R 地方11R 20:10 準備失敗");
-    expect(summaries[0]!.color).toBe(0xe74c3c); // 全レース失敗でも送る(赤)
+    expect(summaries[0]!.color).toBe(DISCORD_COLORS.fail); // 全レース失敗でも送る(赤)
     // 以後の起床で増えない
     await drive(h, jst("16:00"));
     expect(h.notifier.sent.map(embedOf).filter((e) => e.title!.startsWith("朝の準備"))).toHaveLength(1);
@@ -704,7 +705,7 @@ describe("AC-D3・G-D5: 朝のまとめ(1日に1回)", () => {
     expect(h.notifier.sent).toHaveLength(1);
     expect(summary.description).toContain("中央の一覧を取得できませんでした");
     expect(summary.description).toContain("地方の一覧を取得できませんでした");
-    expect(summary.color).toBe(0xe74c3c);
+    expect(summary.color).toBe(DISCORD_COLORS.fail);
   });
 
   it("地方の一覧だけ失敗: 中央のレースと一緒に1通。「地方 交流重賞」の field に取得失敗が載る(AC-D5)", async () => {
