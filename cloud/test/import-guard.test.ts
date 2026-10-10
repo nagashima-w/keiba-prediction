@@ -1,5 +1,4 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -272,10 +271,14 @@ describe("cloud/src の閉包(型だけの import も含む。Issue #176)", () =
   });
 
   it("対照: 型を含めて辿ると、型だけで better-sqlite3 に依存するモジュール(analysis-store.ts)に届く入口では、そのモジュールが現れる(includeTypes が実物で効く)。実在する core のファイルには、もうその形のものが無い(verify.ts・lookahead-suspicion.ts は #219 で analysis-store-types.ts に切り替えた)ので、一時ファイルで作る", () => {
-    const dir = mkdtempSync(path.join(tmpdir(), "keiba-import-guard-"));
+    // 一時ファイルはリポジトリの中(このテストの隣)に作る。os の一時ディレクトリだと、Windows ではドライブが別になりうる(相対パスが作れない。core の native-free-modules.test.ts と同じ事情)。
+    const dir = mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), ".tmp-import-guard-"));
     try {
       const entry = path.join(dir, "type-only.ts");
-      const specifier = path.relative(dir, path.join(CORE_SRC, "ev", "analysis-store.js")).split(path.sep).join("/");
+      const relative = path.relative(dir, path.join(CORE_SRC, "ev", "analysis-store.js"));
+      expect(path.isAbsolute(relative), "同じドライブで相対パスが作れる").toBe(false);
+      const specifier = relative.split(path.sep).join("/");
+      expect(specifier.startsWith("."), "指定子は相対パス").toBe(true);
       writeFileSync(entry, `import type { AnalysisStore } from "${specifier}";\nexport type T = AnalysisStore;\n`);
       expect([...closureOf([entry]).coreFiles].map(relCore)).not.toContain("ev/analysis-store.ts");
       expect([...closureOf([entry], { includeTypes: true }).coreFiles].map(relCore)).toContain("ev/analysis-store.ts");

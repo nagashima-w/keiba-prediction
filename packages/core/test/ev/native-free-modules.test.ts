@@ -1,5 +1,4 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -98,6 +97,21 @@ export function closureOf(
     }
   }
   return { visited, offenders };
+}
+
+/**
+ * 一時ファイルから対象への import の指定子を、POSIX 区切りの相対パスで作る(Windows でも `closureOf` が辿れる形)。
+ * 異なるドライブ(Windows の `C:\\` と `D:\\` など)では相対パスが作れない(`path.relative` が絶対パスを返す)ので、投げる。
+ * GitHub の Windows ランナーでは、一時ディレクトリ(C:)とリポジトリ(D:)が別のドライブになりうるため、**一時ファイルはリポジトリの中に作る**(下の対照のテスト)。
+ * `pathApi` を差し替えられるのは、Linux 上で Windows のパス(`path.win32`)の挙動を模擬して検査するため。
+ */
+export function relativeSpecifier(fromDir: string, target: string, pathApi: Pick<typeof path, "relative" | "sep" | "isAbsolute"> = path): string {
+  const relative = pathApi.relative(fromDir, target);
+  if (pathApi.isAbsolute(relative)) {
+    throw new Error(`相対パスを作れません(別のドライブ?): ${fromDir} → ${target}`);
+  }
+  const posix = relative.split(pathApi.sep).join("/");
+  return posix.startsWith(".") ? posix : `./${posix}`;
 }
 
 describe("検出器の自己検査(空振りを防ぐ)", () => {
@@ -202,16 +216,33 @@ describe("狭い入口 @keiba/core/pipeline(Issue #176)", () => {
     expect(closureOf(path.join(SRC, "index.ts"), { followTypes: true }).offenders.length).toBeGreaterThan(0);
     // `import type` だけで analysis-store.ts を指すファイルは、既定では NG にならないが、followTypes では NG になる。
     // 実在の core のファイルには、もうその形のものが無い(verify.ts・lookahead-suspicion.ts は #219 で analysis-store-types.ts に切り替えた)ので、一時ファイルで作る。
-    const dir = mkdtempSync(path.join(tmpdir(), "keiba-native-free-"));
+    // 一時ファイルは**リポジトリの中**(このテストの隣)に作る。os の一時ディレクトリだと、Windows の CI ではドライブが別(C: と D:)で相対パスが作れず、辿れない(f98ec2d の CI で失敗した)。
+    const dir = mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), ".tmp-native-free-"));
     try {
       const entry = path.join(dir, "type-only.ts");
-      const specifier = path.relative(dir, path.join(SRC, "ev", "analysis-store.js")).split(path.sep).join("/");
+      const specifier = relativeSpecifier(dir, path.join(SRC, "ev", "analysis-store.js"));
+      expect(specifier.startsWith("."), "指定子が相対パスで、POSIX 区切りで、バックスラッシュを含まない").toBe(true);
+      expect(specifier).not.toContain("\\");
       writeFileSync(entry, `import type { AnalysisStore } from "${specifier}";\nexport type T = AnalysisStore;\n`);
       expect(closureOf(entry).offenders).toEqual([]);
       expect(closureOf(entry, { followTypes: true }).offenders).toContain(path.join("ev", "analysis-store.ts"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("relativeSpecifier: POSIX 区切りの相対パスを作る。Windows のパス(path.win32 で模擬)でも同じドライブなら作れ、別のドライブなら投げる", () => {
+    // Linux のパス
+    expect(relativeSpecifier("/repo/packages/core/test/ev/.tmp-x", "/repo/packages/core/src/ev/analysis-store.js")).toBe("../../../src/ev/analysis-store.js");
+    expect(relativeSpecifier("/repo/a", "/repo/a/b.js")).toBe("./b.js");
+    // Windows のパス(path.win32 は Linux でも動く。区切りは \\、ドライブ文字あり)
+    const win = path.win32;
+    expect(relativeSpecifier("D:\\a\\repo\\packages\\core\\test\\ev\\.tmp-x", "D:\\a\\repo\\packages\\core\\src\\ev\\analysis-store.js", win)).toBe("../../../src/ev/analysis-store.js");
+    // 別のドライブ(C: の一時ディレクトリ → D: のリポジトリ)は相対パスにならない=投げる(静かに壊れた指定子を作らない)
+    expect(() => relativeSpecifier("C:\\Users\\runner\\AppData\\Local\\Temp\\keiba-x", "D:\\a\\repo\\packages\\core\\src\\ev\\analysis-store.js", win)).toThrow("別のドライブ");
+    // 前提(空振り防止): 旧い作り方(os の一時ディレクトリ + split/join)は、別ドライブだと絶対パスのままで、"." で始まらない=辿れない指定子になる
+    const old = win.relative("C:\\Temp\\x", "D:\\a\\repo\\src\\ev\\analysis-store.js").split(win.sep).join("/");
+    expect(old.startsWith(".")).toBe(false);
   });
 
   it("Issue #219: 検証の集計(verify.ts)・先読みの判定(lookahead-suspicion.ts)・型の入口(analysis-store-types.ts)は、型だけの import も含めて better-sqlite3 に依存するモジュールを経由しない(クラウドだけを install する CI の型検査が通る)", () => {
