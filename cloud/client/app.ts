@@ -322,7 +322,7 @@ export function createApp(deps: AppDeps): App {
         return;
       }
       case "result": {
-        deps.render(renderScreen(buildResultModel({ route, source: analysisSource(route.analysis!) }), actions), force);
+        deps.render(renderScreen(buildResultModel({ route, source: analysisSource(route.analysis!), readOnly: !admin }), actions), force);
         return;
       }
       case "race": {

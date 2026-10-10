@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BoardRow, MorningPriorView, RaceRow } from "../client/api";
 import type { AnalysisDetail } from "../client/api-analysis";
 import { buildRaceModel, latestAnalysisIdOf, runButtonLabel, type RaceModelInput, type RunUi } from "../client/race";
-import { buildResultModel, NO_ALLOCATION_NOTE } from "../client/result";
+import { buildResultModel, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER } from "../client/result";
 import type { Route } from "../client/route";
 
 /**
@@ -475,5 +475,23 @@ describe("Issue #238: 閲覧者(readOnly)のレース画面: 分析の実行ボ�
     expect(viewer).toHaveLength(2);
     expect(viewer.every((c) => c.button === null)).toBe(true);
     expect(viewer.map(({ button: _b, ...rest }) => rest)).toEqual(admin.map(({ button: _b, ...rest }) => rest));
+  });
+});
+
+describe("Issue #238: 閲覧者(readOnly)のレース画面のカードの結果: 配分の注記に設定への案内を出さない", () => {
+  const unset = { ...ANALYSIS, allocation: { route: "unset", unavailableReason: null, fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, kellyFraction: 0.25, evThreshold: 1.1, includeComboOdds: false, includeWide: true, includeTrio: true, includeQuinella: null, includeExacta: null, includeTrifecta: null, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result", bets: [] } } as unknown as AnalysisDetail;
+  const rows = [row(RACE_ID, "morning", "done", { prior: true, analysisId: 3 }), row(RACE_ID, "pre_race", "done", { analysisId: 12 })];
+  const notices = (readOnly: boolean): readonly string[] => {
+    const model = buildRaceModel(input({ status: { kind: "ready", rows, prior: null }, result: { kind: "ready", analysis: unset }, ...(readOnly ? { readOnly: true } : {}) }));
+    const result = cards(model).find((c) => c.mode === "pre_race")!.result;
+    expect(result?.kind, "前提: 結果が出る状態").toBe("ready");
+    if (result?.kind !== "ready") throw new Error("前提が崩れた");
+    return result.content.allocation.notices;
+  };
+
+  it("管理者には「トップの「設定」から入れられます」、閲覧者には案内の無い文言", () => {
+    expect(notices(false)).toEqual([UNSET_ALLOCATION_NOTE]);
+    expect(notices(true)).toEqual([UNSET_ALLOCATION_NOTE_VIEWER]);
+    expect(notices(false)).not.toEqual(notices(true));
   });
 });

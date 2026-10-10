@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PREDICTION_MARKS } from "../../packages/core/src/analyzer/parse-response";
 import type { AnalysisDetail, AnalysisHorse } from "../client/api-analysis";
-import { buildResultModel, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, type ResultSource } from "../client/result";
+import { buildResultModel, KNOWN_MARK_ORDER, LABEL_ADJUSTED_PROB, LABEL_CONCERNS, LABEL_HIGHLIGHTS, LABEL_PRIOR, NO_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE, UNSET_ALLOCATION_NOTE_VIEWER, type ResultSource } from "../client/result";
 import { LABEL_CONCERNS as EXE_LABEL_CONCERNS, LABEL_HIGHLIGHTS as EXE_LABEL_HIGHLIGHTS, MARK_LEGEND } from "../../packages/app/src/renderer/format";
 import { UNSET_BANKROLL_ONLY_NOTE, UNSET_INDETERMINATE_NOTE, UNSET_PER_RACE_CAP_ONLY_NOTE } from "../../packages/app/src/renderer/allocation-proposal-view";
 import { BET_ALLOCATION_UNSET_NOTE, placeBetUnavailableMessage } from "../../packages/app/src/renderer/bet-allocation-view";
@@ -593,5 +593,56 @@ describe("3着内率の上位5頭(Issue #240)", () => {
     expect(c.horses.map((x) => x.umaban)).toEqual([3, 1, 2]);
     expect(c.markedHorses.map((m) => m.umaban)).toEqual([1, 3]);
     expect(c.topProbs?.rows.map((r) => r.umaban)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("Issue #238: 閲覧者(readOnly)の配分の注記: 設定への案内を出さない(閲覧者は設定に入れない)", () => {
+  const unsetAllocation = (over: Record<string, unknown> = {}) => ({ ...ALLOCATION, bets: [], route: "unset", fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, ...over });
+  const section = (a: AnalysisDetail, readOnly: boolean) => {
+    const model = buildResultModel({ route: ROUTE, source: ready(a), ...(readOnly ? { readOnly: true } : {}) });
+    expect(model.content, "前提: 内容が出る状態").not.toBeNull();
+    return model.content!.allocation;
+  };
+
+  it("両方が未設定: 管理者には従来の文言(トップの「設定」への案内つき)、閲覧者には案内の括弧書きを外した固定文言。リテラルで 1 回ずつ固定する", () => {
+    expect(UNSET_ALLOCATION_NOTE).toBe("配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(トップの「設定」から入れられます)。");
+    expect(UNSET_ALLOCATION_NOTE_VIEWER).toBe("配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です。");
+    const a = analysis({ allocation: unsetAllocation() });
+    expect(section(a, false).notices).toEqual([UNSET_ALLOCATION_NOTE]);
+    expect(section(a, true).notices).toEqual([UNSET_ALLOCATION_NOTE_VIEWER]);
+  });
+
+  it("閲覧者の文言に、設定への案内(「設定」「入れられます」「トップの」)が無い。実効設定の行・買い目・種別は管理者と同じ(値は閲覧者にもそのまま見せる)", () => {
+    const a = analysis({ allocation: unsetAllocation() });
+    const viewer = section(a, true);
+    for (const word of ["「設定」", "設定から", "設定画面", "入れられます", "トップの", "ボタン"]) { // 「未設定」の語は含んでよい(案内の語だけを禁じる)
+      expect(JSON.stringify(viewer.notices), word).not.toContain(word);
+    }
+    const admin = section(a, false);
+    expect({ ...viewer, notices: null }).toEqual({ ...admin, notices: null });
+    expect(viewer.settingsRows).toContain("総資金: 0円");
+  });
+
+  it("両方未設定以外の注記(配分なし・片方だけ未設定・判定不能・通常の配分)は、役割で変わらない", () => {
+    const cases: readonly [string, AnalysisDetail][] = [
+      ["配分の記録なし", analysis({ allocation: null })],
+      ["総資金だけ 0", analysis({ allocation: unsetAllocation({ bankroll: 0, perRaceCap: 3000 }) })],
+      ["1レース上限だけ 0", analysis({ allocation: unsetAllocation({ bankroll: 1_000_000, perRaceCap: 0 }) })],
+      ["通常の配分", analysis({ allocation: ALLOCATION })],
+    ];
+    for (const [name, a] of cases) {
+      expect(section(a, true), name).toEqual(section(a, false));
+    }
+  });
+
+  it("ほかの案内(『設定から〜』『ボタンで〜』)が配分の注記に残らない: 閲覧者に出る注記すべてに、設定・ボタンへの案内の語が無い", () => {
+    const inputs = [unsetAllocation(), unsetAllocation({ bankroll: 0, perRaceCap: 3000 }), unsetAllocation({ bankroll: 1_000_000, perRaceCap: 0 }), ALLOCATION];
+    for (const allocation of inputs) {
+      const notices = section(analysis({ allocation }), true).notices;
+      for (const word of ["設定から", "設定画面", "トップの", "ボタン"]) {
+        expect(JSON.stringify(notices), word).not.toContain(word);
+      }
+    }
+    expect(NO_ALLOCATION_NOTE).not.toContain("設定");
   });
 });

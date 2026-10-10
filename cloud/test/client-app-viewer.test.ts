@@ -29,6 +29,26 @@ function findAll(node: VNode | string, pred: (n: VNode) => boolean): VNode[] {
 const textOf = (node: VNode | string): string => (typeof node === "string" ? node : (node.children ?? []).map(textOf).join(" "));
 const byClass = (tree: VNode, cls: string): VNode[] => findAll(tree, (n) => String(n.attrs?.["class"] ?? "").split(" ").includes(cls));
 
+/** 配分が unset(総資金・1レース上限が未設定。cloud の既定値なので、ほぼ全件がこの状態)の分析。 */
+const ANALYSIS_5 = {
+  ok: true,
+  analysis: {
+    id: 5,
+    raceId: RACE_ID,
+    analyzedAt: "2026-06-28T05:00:00.000Z",
+    kaisaiDate: DATE,
+    evEstimated: false,
+    model: null,
+    llmNote: null,
+    llmCalls: null,
+    promptVersion: null,
+    race: { venueName: "福島", raceNumber: 11, raceName: "テストステークス", startTime: null, courseType: null, distance: null, weather: null, trackCondition: null },
+    horses: [{ umaban: 1, name: "アルファ", prior: 0.2, adjustedProb: 0.2, placeOddsMin: 1.8, ev: 1.2, isPositive: true, mark: null, reason: null, highlights: [], concerns: [] }],
+    allocation: { route: "unset", unavailableReason: null, fallbackReason: null, skipReasonCode: null, bankroll: 0, perRaceCap: 0, kellyFraction: 0.25, evThreshold: 1.1, includeComboOdds: false, includeWide: true, includeTrio: true, includeQuinella: null, includeExacta: null, includeTrifecta: null, includeBracketQuinella: null, betUnit: 100, oddsStatus: "result", bets: [] },
+    detail: "present",
+  },
+};
+
 /** 偽の fetch の応答。管理者専用の API にも、画面が読める形の応答を返す(閲覧者が叩いたかどうかは、応答ではなく記録した要求で判定する)。 */
 function respond(method: string, url: string): Resp {
   const path = url.split("?")[0]!;
@@ -37,6 +57,7 @@ function respond(method: string, url: string): Resp {
     const rows = [boardRow(RACE_ID, "morning", "done", { prior: true }), boardRow(RACE_ID, "pre_race", "done", { analysis_id: 5 })];
     return url.includes("race_id=") ? ok({ ok: true, kaisai_date: DATE, races: rows, prior: null }) : ok({ ok: true, kaisai_date: DATE, races: rows });
   }
+  if (method === "GET" && path === "/api/analyses/5") return ok(ANALYSIS_5);
   if (method === "GET" && path === "/api/analyses") return ok({ ok: true, analyses: [] });
   if (method === "GET" && path === "/api/reports") return ok({ ok: true, reports: [] });
   if (method === "GET" && /^\/api\/reports\/\d{8}$/.test(path)) return ok({ ok: true, report: null, job: null });
@@ -216,5 +237,25 @@ describe("閲覧者の画面から、管理者の入口・ボタンが消える(
     await direct.app.whenIdle();
     expect(direct.calls).toEqual([]);
     expect(textOf(direct.tree())).toContain("管理者だけが使えます");
+  });
+});
+
+describe("閲覧者の画面に、設定・ボタンへの案内の文が残らない(結果画面とレース画面のカードの配分の注記)", () => {
+  const SETTINGS_GUIDE = "トップの「設定」から入れられます";
+
+  it.each([
+    ["結果画面", `#date=${DATE}&venue=central&race=${RACE_ID}&analysis=5`],
+    ["レース画面のカードの結果", `#date=${DATE}&venue=central&race=${RACE_ID}`],
+  ])("%s: 管理者には「トップの「設定」から入れられます」、閲覧者にはその案内が無い(同じ注記の本文は残る)", async (_name, hash) => {
+    const admin = harness("admin", hash);
+    admin.app.start();
+    await admin.app.whenIdle();
+    expect(textOf(admin.tree())).toContain(SETTINGS_GUIDE);
+    const viewer = harness("viewer", hash);
+    viewer.app.start();
+    await viewer.app.whenIdle();
+    expect(textOf(viewer.tree())).toContain("配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です。");
+    expect(textOf(viewer.tree())).not.toContain(SETTINGS_GUIDE);
+    expect(textOf(viewer.tree())).not.toContain("入れられます");
   });
 });

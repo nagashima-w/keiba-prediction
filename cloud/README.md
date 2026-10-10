@@ -180,7 +180,7 @@ Workers & Pages > 対象の Worker > Settings > Variables and Secrets > Add。**
 |---|---|
 | `GET /`(画面)・`GET /app.js`<br>`GET /api/races`(一覧)<br>`GET /api/plan`<br>`GET /api/analyses`・`/api/analyses/status`・`/api/analyses/{id}`<br>`GET /api/reports`・`/api/reports/{date}`(日報) | 設定(`/api/settings`。GET も)<br>検証(`/api/verify`)<br>手動の分析(`POST /api/analyses/run`)・日報の手動作成(`POST /api/reports/run`)<br>結果の取り込み(`POST /api/results/import`)・補完の状況(`GET /api/results/backfill`)<br>移行(`/api/migration`・`/api/migration/upload`)<br>`/api/health`(設定の有無が見える)・`/check`・`/api/netkeiba/check`<br>**表に無いルートと、表の外の method(HEAD・POST など)** |
 
-- 閲覧者の画面には、「設定」「検証」への入口・分析の実行ボタン・日報の作成ボタン・移行と結果の取り込みの操作が出ない。`#settings`・`#verify`・`#migration` を直接開くと「管理者だけが使えます」と出る。「ログイン中」の行に「閲覧専用」と出る。
+- 閲覧者の画面には、「設定」「検証」への入口・分析の実行ボタン・日報の作成ボタン・移行と結果の取り込みの操作が出ない。結果の「配分が未設定」の注記と日報の案内文からも、設定・ボタンへの案内の文は外れる(総資金・1レース上限・買い目・日報の賭け金や払戻などの数値は、閲覧者にもそのまま見せる)。`#settings`・`#verify`・`#migration` を直接開くと「管理者だけが使えます」と出る。「ログイン中」の行に「閲覧専用」と出る。
 - **`GET /api/races` は、閲覧者でも netkeiba への取得を起こしうる**(開催日の一覧を見るために必要。DO のキャッシュ 6 時間と gate〈取得の間隔・ブレーカー〉が効くが、友人が日付を次々に変えれば、そのぶんの取得が走る)。
 - 表は `src/route-policy.ts`。`test/route-policy.test.ts` が手書きの表と突き合わせ、`handler.ts` のルーティングを走査して、表に無いルートが増えたら落とす。
 

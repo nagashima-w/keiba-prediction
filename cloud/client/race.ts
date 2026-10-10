@@ -185,12 +185,12 @@ export function latestAnalysisIdOf(rows: readonly BoardRow[], raceId: string): n
   return found !== undefined && found.status === "done" ? found.analysisId : null;
 }
 
-function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean): CardResult | null {
+function cardResult(route: Route, rows: readonly BoardRow[], result: ResultSource | undefined, open: boolean, readOnly: boolean): CardResult | null {
   const raceId = route.race!;
   if (latestAnalysisIdOf(rows, raceId) === null) return null;
   if (result === undefined || result.kind === "loading") return { kind: "loading" };
   if (result.kind === "error") return { kind: "error", message: result.message };
-  return { kind: "ready", content: contentOf(result.analysis), open, date: route.date, raceId };
+  return { kind: "ready", content: contentOf(result.analysis, readOnly), open, date: route.date, raceId };
 }
 
 function card(
@@ -219,7 +219,7 @@ function card(
     title: mode === "morning" ? "朝の準備" : "発走前",
     badge: badgeOf(found),
     error: failedError,
-    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen) : null,
+    result: mode === "pre_race" ? cardResult(route, rows, result, resultOpen, readOnly) : null,
     prior: showPrior ? prior.rows.map((r) => ({ rank: r.rank, umaban: r.umaban, name: r.horseName, value: formatPercent(r.prior) })) : null,
   };
 }

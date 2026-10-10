@@ -43,6 +43,12 @@ export const NO_ALLOCATION_NOTE = "この分析には配分の記録がありま
  */
 export const UNSET_ALLOCATION_NOTE =
   "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です(トップの「設定」から入れられます)。";
+/**
+ * 閲覧者(Issue #238)向けの同じ注記。**設定への案内(括弧書き)を外した**固定文言。閲覧者は設定に入れない(設定は管理者だけ)ので、入れない場所へ誘導しない。
+ * 総資金・1レース上限の値そのものは閲覧者にも見せてよい(利用者の判断)ので、直下の実効設定の行は役割で変えない。
+ */
+export const UNSET_ALLOCATION_NOTE_VIEWER =
+  "配分の提案は出ていません。クラウド版の「馬券用の総資金」と「1レースの上限」が未設定です。";
 export const MODEL_NONE_TEXT = "LLM 未使用(統計のみ)";
 export const DETAIL_MISSING_NOTE = "馬名などの詳細を取得できませんでした(取得の上限に達したか、保存された詳細が見つかりません)。";
 export const DETAIL_NONE_NOTE = "この分析には詳細が保存されていません(馬名は表示されません)。";
@@ -151,13 +157,13 @@ function detailNoteOf(detail: AnalysisDetail["detail"]): string | null {
   return detail === "missing" ? DETAIL_MISSING_NOTE : detail === "none" ? DETAIL_NONE_NOTE : null;
 }
 
-function allocationOf(a: AnalysisDetail): AllocationSection {
+function allocationOf(a: AnalysisDetail, readOnly: boolean): AllocationSection {
   if (a.allocation === null) {
     return { kind: "none", notices: [NO_ALLOCATION_NOTE], bets: [], settingsRows: [] };
   }
   const view = buildAllocationProposalView(a.allocation);
   // exe の「両方未設定」の注記(import した定数と一致するもの)だけを差し替える。片方だけ・判定不能・フォールバックなどの他の注記と、注記の並び・件数は変えない。
-  const notices = view.notices.map((n) => (n === BET_ALLOCATION_UNSET_NOTE ? UNSET_ALLOCATION_NOTE : n));
+  const notices = view.notices.map((n) => (n === BET_ALLOCATION_UNSET_NOTE ? (readOnly ? UNSET_ALLOCATION_NOTE_VIEWER : UNSET_ALLOCATION_NOTE) : n));
   return { kind: view.kind, notices, bets: view.bets, settingsRows: view.settingsRows };
 }
 
@@ -197,8 +203,8 @@ function topProbsOf(horses: AnalysisDetail["horses"], llmEffective: boolean): To
   return { heading: llmEffective ? `${LABEL_ADJUSTED_PROB}の3着内率 上位${TOP_PROB_COUNT}頭` : `${LABEL_PRIOR} 上位${TOP_PROB_COUNT}頭`, rows };
 }
 
-/** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。 */
-export function contentOf(a: AnalysisDetail): ResultContent {
+/** 結果の内容(結果画面と、レース画面の発走前のカード〈Issue #188〉が同じ変換を使う)。`readOnly`(閲覧者。Issue #238)は設定への案内を外す。省略は管理者。 */
+export function contentOf(a: AnalysisDetail, readOnly = false): ResultContent {
   // LLM が効いたか = モデル ID があるか(exe の `analysisModelText` と同じ扱い: null・空文字は「効いていない」)。サーバは、効かなかったときは model を null にして保存する。
   const llmEffective = a.model !== null && a.model !== "";
   const markedHorses = markedHorsesOf(a.horses);
@@ -225,7 +231,7 @@ export function contentOf(a: AnalysisDetail): ResultContent {
       ev: h.ev === null ? formatEv(null) : `${formatEv(h.ev)}${formatEstimatedEvSuffix(a.evEstimated)}`,
       positive: h.isPositive,
     })),
-    allocation: allocationOf(a),
+    allocation: allocationOf(a, readOnly),
   };
 }
 
@@ -236,11 +242,12 @@ function backToRace(route: Route, a: AnalysisDetail): string {
   return buildHash({ date, venue: route.venue, race });
 }
 
-export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource }): ResultModel {
+export function buildResultModel(input: { readonly route: Route; readonly source: ResultSource; readonly readOnly?: boolean }): ResultModel {
   const { route, source } = input;
+  const readOnly = input.readOnly === true;
   const listHref = buildHash({ date: route.date, venue: route.venue });
   if (source.kind === "ready") {
-    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis), backHref: backToRace(route, source.analysis) };
+    return { kind: "result", loading: false, error: null, content: contentOf(source.analysis, readOnly), backHref: backToRace(route, source.analysis) };
   }
   return {
     kind: "result",
