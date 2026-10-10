@@ -757,6 +757,10 @@ export class RaceDayCore {
       throw new Error("発走前の分析の保存先(D1・R2)・設定が、この構成にはありません");
     }
     if (this.plan.requested()) {
+      // Issue #249: 23 時の再実行(rescue)は、21 時に失敗した分を **1 回だけ** 救う。2 回目以降(cron の重複配信)・rescue を渡さない呼び出しは、何もしない(従来の冪等性のまま)。
+      if (input.rescue === true) {
+        this.rescuePlan();
+      }
       // Issue #206(G-E2。#203 の【記録】5): 依頼を書いたあとに `setAlarm` が失敗していると、アラームが無いまま止まる。cron の再配信(または再試行)が来たときに、
       // 状態からアラームを張り直す。`rearm` は状態を変えず、候補が無ければ何もしない(冪等)。
       await this.rearm();
@@ -766,8 +770,35 @@ export class RaceDayCore {
       this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES ('kaisai_date', ?)", kaisaiDate);
     }
     this.plan.request(this.now());
+    if (input.rescue === true) {
+      // 21 時の依頼が全滅していて、23 時の再実行が最初の依頼になった場合。通常どおり受理し、救済の要求(失敗の判定の起点)も記録する。救済する失敗はまだ無い。
+      this.plan.markRescueRequested(this.now());
+    }
     await this.rearm();
     return { accepted: true };
+  }
+
+  /**
+   * 救済(Issue #249。{@link requestPlan} の `rescue`)。**同期**(`await` なし。途中で落ちても、記録が最後に書かれる前に落ちれば次の呼び出しがやり直し、書かれたあとなら完了している)。
+   *  1. 記録(`plan_rescue_at`)が既にあれば何もしない(1 回だけ)。
+   *  2. 一覧の取得に失敗した会場を pending に戻し、確定の印を外す(確定は冪等: 既にある計画の行は変わらず、足りない行と morning だけが足される。最初に決めた offset も残る)。
+   *  3. 計画中(planned)のレースの failed の morning を、新しい実行として積み直す(試行 0)。実行中(queued・fetched)・done・スキップの行は触れない。
+   * 戻した会場の取得と再確定・積み直した morning の実行は、いつもどおりアラームの中で行う(呼び出し側が `rearm` する)。
+   */
+  private rescuePlan(): void {
+    const now = this.now();
+    // 先に記録を書く: 同期の区間なので、途中で例外になっても記録だけが残ることはない(DO の入力ゲートが、書き込みの途中で別の呼び出しを割り込ませない)。
+    if (!this.plan.markRescueRequested(now)) {
+      return;
+    }
+    if (this.plan.resetFailedVenues(now) > 0) {
+      this.plan.reopenFinalize();
+    }
+    for (const row of this.plan.rowsWithMorning()) {
+      if (row.state === "planned" && row.morning === "failed") {
+        this.enqueueTask(row.race_id, "morning", now);
+      }
+    }
   }
 
   /** 朝のまとめ(#205)のための、計画の読み取り(状態は変えない)。 */

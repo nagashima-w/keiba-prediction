@@ -7,7 +7,7 @@
  *  - `race_day_plan`: 対象レースごとの期限(計画時点の offset で固定)。state: `planned`(期限を待つ)→ `promoted`(pre_race を投入した)/ `skipped`(理由は `skip_reason`)。
  *  - `race_day_auto_pre_race`(Issue #204): **自動で積んだ pre_race の印**。昇格が pre_race を積んだ同じ同期区間で書き、手動の `schedule()` が pre_race を積み直すときに消す
  *    (印が有る ⇔ 今の pre_race のインスタンスは自動。**削除が主**で、到達できる経路では削除だけで足りる)。`enqueued_at` はそのタスクの `queued_at` と同じ値で、読む側が `queued_at` との等値も確かめる(**多層防御**。削除が漏れても、別の実行のタスクを自動と読まない)。`fail_reason` は、自動の pre_race が failed になる箇所が書く。
- *  - meta(`race_day_meta`)のキー: `plan_requested_at`・`plan_finalized_at`・`plan_offset`・`plan_offset_source`・`plan_finalize_attempts`・`plan_finalize_next_try_at`。
+ *  - meta(`race_day_meta`)のキー: `plan_requested_at`・`plan_finalized_at`・`plan_offset`・`plan_offset_source`・`plan_finalize_attempts`・`plan_finalize_next_try_at`・`plan_rescue_at`(Issue #249。23 時の再実行による救済を要求した時刻。**書くのは最初の 1 回だけ**)。
  *
  * **起きたときに必ず状態が変わる**(アラームの候補になる行は、起きた処理が必ず状態を変える。変わらないと、期限が過去のまま即時に起き続ける): pending の会場 → 試行回数・状態、
  * 確定待ち → 試行回数・確定、planned の期限 → promoted か skipped。
@@ -65,6 +65,7 @@ const META_OFFSET = "plan_offset";
 const META_OFFSET_SOURCE = "plan_offset_source";
 const META_FINALIZE_ATTEMPTS = "plan_finalize_attempts";
 const META_FINALIZE_NEXT_TRY = "plan_finalize_next_try_at";
+const META_RESCUE = "plan_rescue_at";
 
 export class PlanStore {
   constructor(private readonly sql: SqlLike) {
@@ -160,6 +161,42 @@ export class PlanStore {
       );
     }
     this.metaSetIfAbsent(META_REQUESTED, String(now));
+  }
+
+  // ---- 救済(Issue #249。23 時の再実行)----
+
+  /** 救済を要求した時刻(要求が無ければ null)。 */
+  rescueRequestedAt(): number | null {
+    const text = this.metaGet(META_RESCUE);
+    return text === null ? null : Number(text);
+  }
+
+  /** 救済の要求を記録する。**最初の 1 回だけ記録して true を返す**(2 回目以降は何も書かず false。救済を 1 回に限る印)。 */
+  markRescueRequested(now: number): boolean {
+    if (this.metaGet(META_RESCUE) !== null) {
+      return false;
+    }
+    this.metaSetIfAbsent(META_RESCUE, String(now));
+    return true;
+  }
+
+  /** 一覧の取得に失敗した(failed)会場を pending に戻す(試行 0・今すぐ)。戻した会場の数を返す。ok の会場には触れない。 */
+  resetFailedVenues(now: number): number {
+    const failed = this.venueRows().filter((r) => r.state === "failed");
+    for (const row of failed) {
+      this.sql.exec(
+        "UPDATE race_day_plan_venue SET state = 'pending', attempts = 0, next_try_at = ?, reason = NULL, listed = NULL, targeted = NULL, entries_json = NULL, updated_at = ? WHERE venue = ? AND state = 'failed'",
+        now,
+        now,
+        row.venue,
+      );
+    }
+    return failed.length;
+  }
+
+  /** 確定をやり直せる状態に戻す(確定の印・確定の試行回数・次の試行の時刻を消す)。確定は冪等なので、既にある計画の行は変わらず、足りない行・morning だけが足される。 */
+  reopenFinalize(): void {
+    this.sql.exec("DELETE FROM race_day_meta WHERE key IN (?, ?, ?)", META_FINALIZED, META_FINALIZE_ATTEMPTS, META_FINALIZE_NEXT_TRY);
   }
 
   // ---- 会場(計画の段階)----
