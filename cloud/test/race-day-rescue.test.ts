@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { GateResult } from "../src/gate-core";
 import type { GateLike } from "../src/gate-fetch";
+import type { DiscordNotifier } from "../src/notify-send";
 import { RaceDayCore, type AnalysisSink, type StepOutcome } from "../src/race-day-core";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { openNodeSql, type NodeSql } from "./node-sql";
@@ -84,6 +85,10 @@ interface Harness {
   readonly gate: FakeGate;
   readonly clock: { now: number };
   readonly alarm: { at: number | null };
+  /** Discord に送ったペイロード(embeds)の記録。 */
+  readonly sent: { title?: string; description?: string; color?: number; fields?: { name: string; value: string }[] }[];
+  /** 送信の挙動(省略時は成功)。 */
+  readonly sendBehavior: { fail: boolean };
 }
 
 const opened: NodeSql[] = [];
@@ -91,12 +96,20 @@ afterEach(() => {
   for (const sql of opened.splice(0)) sql.close();
 });
 
-function harness(): Harness {
+function harness(options: { notifier?: boolean } = {}): Harness {
   const sql = openNodeSql();
   opened.push(sql);
   const clock = { now: T_2100 };
   const alarm: { at: number | null } = { at: null };
   const gate = fakeGate();
+  const sent: Harness["sent"] = [];
+  const sendBehavior = { fail: false };
+  const notifier: DiscordNotifier = {
+    send: async (payload) => {
+      if (sendBehavior.fail) throw new Error("送信の失敗 SECRET-CANARY");
+      sent.push(...(payload.embeds as Harness["sent"]));
+    },
+  };
   const core = new RaceDayCore({
     sql,
     now: () => clock.now,
@@ -107,8 +120,9 @@ function harness(): Harness {
     onWarn: () => undefined,
     sink: unusedSink,
     loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
+    ...(options.notifier === true ? { notifier } : {}),
   });
-  return { core, sql, gate, clock, alarm };
+  return { core, sql, gate, clock, alarm, sent, sendBehavior };
 }
 
 const label = (o: StepOutcome): string => (o.kind === "idle" ? "idle" : `${o.raceId}:${o.mode}:${o.step}:${o.result}`);
@@ -353,5 +367,145 @@ describe("救済の冪等性: 正常な日・rescue を渡さない呼び出し�
     await plan2100(h);
     await expect(h.core.requestPlan({ kaisaiDate: "20260928", rescue: true })).rejects.toThrow();
     expect(meta(h, "plan_rescue_at")).toBeNull();
+  });
+});
+
+describe("23 時の再実行の後の失敗の判定と Discord 通知(日単位の DO。多くとも 1 回)", () => {
+  const failureMessages = (h: Harness) => h.sent.filter((m) => m.title?.startsWith("事前分析の失敗"));
+  const verdict = (h: Harness): string | null => meta(h, "plan_rescue_verdict");
+  const notifyRow = (h: Harness): { state: string; kind: string; error_class: string | null } | undefined =>
+    (h.sql.exec("SELECT state, kind, error_class FROM race_day_notify WHERE key = 'plan-failure'").toArray() as { state: string; kind: string; error_class: string | null }[])[0];
+
+  it("救済しても会場の失敗が残る(F2)→ 判定は failed。固定の見出しの通知を 1 通だけ送る(会場の失敗を ⚠ の行で、手動で実行する案内つき)", async () => {
+    const h = harness({ notifier: true });
+    h.gate.failures.central = [blocked(), blocked()]; // 21 時と 23 時の両方で失敗
+    await plan2100(h);
+    expect(failureMessages(h)).toEqual([]); // 21 時の時点では送らない(救済の要求が無い)
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(verdict(h)).toBe("failed");
+    const messages = failureMessages(h);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.title).toBe("事前分析の失敗 2026/09/27(日)");
+    expect(messages[0]!.description).toContain("⚠ 中央の一覧を取得できませんでした(取得制限中)");
+    expect(messages[0]!.description).toContain("画面から手動で実行してください");
+    expect(notifyRow(h)).toMatchObject({ state: "sent", kind: "plan-failure", error_class: null });
+  });
+
+  it("多くとも 1 回: 判定のあとに何度アラームが鳴っても・rescue が重複しても、通知は増えない", async () => {
+    const h = harness({ notifier: true });
+    h.gate.failures.central = [blocked(), blocked()];
+    await plan2100(h);
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(failureMessages(h)).toHaveLength(1);
+    // cron の重複配信
+    h.clock.now = T_2300 + 3 * 60 * 60_000;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 6 * 60 * 60_000);
+    // 再起動に相当する余分な起床
+    h.alarm.at = h.clock.now;
+    await tick(h);
+    expect(failureMessages(h)).toHaveLength(1);
+  });
+
+  it("救済で一覧は直ったが、事前分析が failed のまま(F3)→ 判定は failed。「発走前の分析は予定どおり」の通知(会場の案内は出ない)", async () => {
+    const h = harness({ notifier: true });
+    h.gate.failures.central = [blocked()]; // 21 時だけ失敗。23 時で救済される(事前分析は、この偽ゲートでは常に失敗)
+    await plan2100(h);
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(verdict(h)).toBe("failed");
+    const messages = failureMessages(h);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.description).toContain("事前分析: 失敗");
+    expect(messages[0]!.description).toContain("発走前の分析は予定どおり行われます。");
+    expect(messages[0]!.description).not.toContain("⚠ 中央の一覧");
+  });
+
+  it("すべて成功(会場が ok・事前分析が done)→ 判定は ok。通知は送らない", async () => {
+    const h = harness({ notifier: true });
+    await plan2100(h);
+    h.sql.exec("UPDATE race_day_tasks SET status = 'done' WHERE mode = 'morning'");
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(verdict(h)).toBe("ok");
+    expect(failureMessages(h)).toEqual([]);
+    expect(notifyRow(h)).toBeUndefined();
+  });
+
+  it("落ち着くのを待つ: 救済で再取得した一覧が再試行待ち(pending)のあいだは判定しない(通知も送らない)。再試行が尽きて failed になったら判定して送る", async () => {
+    const h = harness({ notifier: true });
+    h.gate.failures.central = [blocked()]; // 21 時
+    await plan2100(h);
+    // 23 時の救済: 取り直しは HTTP 500(再試行される失敗)を 3 回続ける
+    const http500 = (): GateResult => ({ kind: "response", status: 500, contentType: "text/html; charset=UTF-8", body: bytes("error"), queuedMs: 0, elapsedMs: 1 });
+    h.gate.failures.central = [http500(), http500(), http500()];
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    // 1 回目の取り直しだけ進める(再試行待ち = pending)
+    await tick(h);
+    expect(venueRows(h).find((v) => v.venue === "central")?.state).toBe("pending");
+    expect(verdict(h)).toBeNull();
+    expect(failureMessages(h)).toEqual([]);
+    // 再試行を進める: 3 回目で failed → 確定 → 判定
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(venueRows(h).find((v) => v.venue === "central")?.state).toBe("failed");
+    expect(verdict(h)).toBe("failed");
+    expect(failureMessages(h)).toHaveLength(1);
+  });
+
+  it("救済の要求が無い日(21 時だけ。rescue なし)は、失敗が残っていても判定せず、通知も送らない", async () => {
+    const h = harness({ notifier: true });
+    h.gate.failures.central = [blocked()];
+    await plan2100(h);
+    await runDue(h, T_2300 + 24 * 60 * 60_000 - 1);
+    expect(verdict(h)).toBeNull();
+    expect(failureMessages(h)).toEqual([]);
+    expect(notifyRow(h)).toBeUndefined();
+  });
+
+  it("送信が失敗(例外)しても握る: 通知の行は failed(分類つき)で、再送しない。例外の文面は状態に残さない", async () => {
+    const h = harness({ notifier: true });
+    h.gate.failures.central = [blocked(), blocked()];
+    h.sendBehavior.fail = true;
+    await plan2100(h);
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(notifyRow(h)).toMatchObject({ state: "failed", kind: "plan-failure" });
+    expect(JSON.stringify(notifyRow(h))).not.toContain("SECRET-CANARY");
+    h.sendBehavior.fail = false;
+    await runDue(h, T_2300 + 6 * 60 * 60_000);
+    expect(failureMessages(h)).toEqual([]); // 失敗した通知は再送しない
+  });
+
+  it("Webhook が無効(notifier なし)→ 判定しない・材料も行も積まない・そのためのアラームも張らない(通知の仕組み全体が無効)", async () => {
+    const h = harness({ notifier: false });
+    h.gate.failures.central = [blocked(), blocked()];
+    await plan2100(h);
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(verdict(h)).toBeNull();
+    expect(notifyRow(h)).toBeUndefined();
+    // 以後に鳴るアラームは、発走前の期限(翌日)以降だけ: 判定のための起床は無い
+    expect(h.alarm.at === null || h.alarm.at > T_2300 + 2 * 60 * 60_000).toBe(true);
+  });
+
+  it("判定の済んだ日は、判定のためのアラームを張らない(鳴ったアラームは必ず仕事をする。空回りしない)", async () => {
+    const h = harness({ notifier: true });
+    await plan2100(h);
+    h.sql.exec("UPDATE race_day_tasks SET status = 'done' WHERE mode = 'morning'");
+    h.clock.now = T_2300;
+    await h.core.requestPlan({ kaisaiDate: DATE, rescue: true });
+    await runDue(h, T_2300 + 2 * 60 * 60_000);
+    expect(verdict(h)).toBe("ok");
+    // 残るアラームは、発走前の期限(翌日の朝以降)だけ
+    expect(h.alarm.at === null || h.alarm.at > Date.parse("2026-09-27T00:00:00+09:00")).toBe(true);
   });
 });

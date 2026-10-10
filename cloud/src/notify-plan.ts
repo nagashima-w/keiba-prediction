@@ -20,8 +20,11 @@
 import { skipStage } from "./auto-run-result";
 import type { AutoRunResults, PlanProgress } from "./race-day-core";
 
-/** 通知の種類。`analysis` = 分析の embed(緑・灰)/ `failed` = 赤 / `skipped-manual` = 灰色 / `summary` = 朝のまとめ。 */
-export type NotifyKind = "analysis" | "failed" | "skipped-manual" | "summary";
+/**
+ * 通知の種類。`analysis` = 分析の embed(緑・灰)/ `failed` = 赤 / `skipped-manual` = 灰色 / `summary` = 事前分析のまとめ(旧「朝のまとめ」)/
+ * `plan-failure` = 23 時の再実行の後も翌日の事前分析に失敗が残っているときの通知(Issue #249。1 日に高々 1 通。材料は判定の時点で積む)。
+ */
+export type NotifyKind = "analysis" | "failed" | "skipped-manual" | "summary" | "plan-failure";
 /** 通知の状態。`ready` = 材料だけ積んである(送る前)/ `sending` = 送信中(送る前に書く)/ `sent` / `failed`。 */
 export type NotifyState = "ready" | "sending" | "sent" | "failed";
 
@@ -33,7 +36,8 @@ export interface NotifyRowState {
 /** 送る項目。`key` は通知の表の主キー(`race:<raceId>` か `summary`)。 */
 export type NotifyItem =
   | { readonly key: `race:${string}`; readonly kind: "analysis" | "failed" | "skipped-manual"; readonly raceId: string }
-  | { readonly key: "summary"; readonly kind: "summary" };
+  | { readonly key: "summary"; readonly kind: "summary" }
+  | { readonly key: "plan-failure"; readonly kind: "plan-failure" };
 
 /** 送信の間隔(ミリ秒)。連続する通知を 1 秒空ける(Discord の Webhook のレート制限に当たりにくくし、その間にタスクの step が走る余地を残す)。 */
 export const SEND_SPACING_MS = 1000;
@@ -122,6 +126,11 @@ export function planNotifications(input: PlanNotificationsInput): NotificationPl
     if (kind !== null) {
       eligible.push({ key, kind, raceId: r.raceId });
     }
+  }
+  // 23 時の再実行の後の失敗の通知(Issue #249)。材料(`ready`)が積まれているときだけ。sending・sent・failed は二度と候補にならない(I3)。レースごとの通知のあと・まとめの前。
+  const planFailureRow = rows.get("plan-failure");
+  if (planFailureRow !== undefined && planFailureRow.kind === "plan-failure" && planFailureRow.state === "ready") {
+    eligible.push({ key: "plan-failure", kind: "plan-failure" });
   }
   const summaryRow = rows.get("summary");
   let summaryDueMs: number | null = null;

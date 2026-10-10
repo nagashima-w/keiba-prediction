@@ -21,6 +21,7 @@ import { kaisaiDateWeekday } from "./auto-run-plan";
 import { DISCORD_COLORS } from "./palette";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine } from "./win-odds-format";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
+import type { PlanFailureReasons } from "./plan-failure";
 import type { PlanProgress } from "./race-day-core";
 
 export interface EmbedField {
@@ -648,4 +649,55 @@ export function buildSummaryEmbed(input: SummaryInput): CloudEmbed {
 
   const color = failedVenues.length > 0 || (ok === 0 && failed > 0) ? COLOR_RED : failed > 0 || incomplete > 0 ? COLOR_ORANGE : COLOR_GREEN;
   return fitEmbed({ title: `朝の準備 ${slashDate(input.kaisaiDate)}`, description: lines.join("\n"), color, fields });
+}
+
+// ---- 23 時の再実行後も事前分析が失敗しているときの通知(Issue #249)----
+
+export interface PlanFailureInput {
+  /** 開催日(YYYYMMDD。翌日の開催日)。 */
+  readonly kaisaiDate: string;
+  readonly progress: PlanProgress;
+  /** {@link judgePlanRescue} が返した理由(判定の時点の件数)。 */
+  readonly reasons: PlanFailureReasons;
+}
+
+/**
+ * 23 時の再実行の後も、翌日の事前分析に失敗が残っているときの通知(日単位の DO が、判定の時点で材料を作る)。**色(失敗色)に頼らず、文字(【失敗】・⚠・件数)で伝える。**
+ * 会場の失敗(F2)・計画が確定していない(F1)があれば「手動で実行してください」、事前分析の失敗・未完了だけ(F3・F4)なら「発走前の分析は予定どおり行われます」。
+ * 失敗・未完了のレースは fields に出す(成功・スキップは出さない)。長さの保証は {@link fitEmbed}。
+ */
+export function buildPlanFailureEmbed(input: PlanFailureInput): CloudEmbed {
+  const { progress, reasons } = input;
+  const label = slashDateWithWeekday(input.kaisaiDate);
+  const lines = [`【失敗】23 時の再実行後も、事前分析が完了していません(対象: ${label}開催分)`];
+  if (reasons.planNotFinal) {
+    lines.push("⚠ 計画が確定していません");
+  }
+  for (const failure of reasons.venueFailures) {
+    const state = progress.venues.find((v) => v.venue === failure.venue);
+    lines.push(`⚠ ${failure.venue === "central" ? "中央" : "地方"}の${listFailureText(state ?? { venue: failure.venue, state: "failed", attempts: 0, reason: failure.reason, listed: null, targeted: null })}`);
+  }
+  const failedTotal = reasons.morningFailed + reasons.capSkipped;
+  if (failedTotal > 0 || reasons.morningIncomplete > 0) {
+    lines.push(`事前分析: 失敗 ${failedTotal} 件${reasons.capSkipped > 0 ? `(うち上限超過 ${reasons.capSkipped})` : ""} / 未完了 ${reasons.morningIncomplete} 件`);
+  }
+  lines.push(
+    reasons.planNotFinal || reasons.venueFailures.length > 0
+      ? "一覧を取得できなかった会場のレースは、自動では分析されません。画面から手動で実行してください。"
+      : "発走前の分析は予定どおり行われます。",
+  );
+
+  // 失敗(上限超過を含む)・未完了のレース。中央は場名つき、地方も場名つき(rowLine の withVenue)。
+  const problem = progress.rows.filter((r) => rowStatus(r) === "failed" || rowStatus(r) === "incomplete" || (r.state === "skipped" && r.skipReason === "cap"));
+  const fields: EmbedField[] = [];
+  if (problem.length > 0) {
+    fields.push({ name: "失敗・未完了のレース", value: [...problem].sort(byRaceNumber).map((r) => rowLine(r, true)).join("\n") });
+  }
+  return fitEmbed({ title: `事前分析の失敗 ${label}`, description: lines.join("\n"), color: COLOR_RED, fields });
+}
+
+/** {@link buildPlanFailureEmbed} を組み立てられなかったときの最小の通知(固定文と日付だけ)。通知の失敗が判定を止めないための代わり。 */
+export function buildPlanFailureMinimalEmbed(kaisaiDate: string): CloudEmbed {
+  const label = slashDateWithWeekday(kaisaiDate);
+  return fitEmbed({ title: `事前分析の失敗 ${label}`, description: `【失敗】23 時の再実行後も、事前分析が完了していません(対象: ${label}開催分)。画面で確認してください。`, color: COLOR_RED });
 }

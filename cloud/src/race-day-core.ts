@@ -74,7 +74,8 @@ import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-
 import { isDayQuiet } from "./day-quiet";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
 import { buildAnalysisLink } from "./notify-link";
-import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
+import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildPlanFailureEmbed, buildPlanFailureMinimalEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
+import { judgePlanRescue } from "./plan-failure";
 import { FAILURE_COOLDOWN_MS, planNotifications, SEND_SPACING_MS, type NotificationPlan, type NotifyItem, type NotifyKind, type NotifyState } from "./notify-plan";
 import { classifyNotifyError, type DiscordNotifier } from "./notify-send";
 import { NotifyStore } from "./notify-store";
@@ -112,6 +113,12 @@ import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
 import { buildCloudScorerConfig } from "./scorer-config";
 import { ADDITIONAL_INSTRUCTION_MAX_LENGTH, coerceCloudSettings, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "./settings";
 import type { SqlLike } from "./sql-like";
+
+/**
+ * 23 時の再実行(救済)の後の失敗の判定の結果(`ok` か `failed`)を永続化するキー(Issue #249)。**判定は 1 回だけ**: 書かれたら二度と判定しない(後から手動で事前分析を再実行しても、通知は変わらない)。
+ * webhook が無効(`notifier` なし)の構成では判定しない(書かない)。
+ */
+const RESCUE_VERDICT_KEY = "plan_rescue_verdict";
 
 /** 日報の作成を依頼済みの印(Issue #235。依頼した時刻〈エポックミリ秒〉)を永続化するキー。 */
 const REPORT_REQUESTED_KEY = "report_requested";
@@ -1099,6 +1106,8 @@ export class RaceDayCore {
       await this.armAlarm();
       return outcome;
     }
+    // 23 時の再実行(救済)の後の失敗の判定(Issue #249。同期。落ち着くか期限が来たら、結果を永続化し、失敗なら通知の材料を積む)。通知の計画より前(同じ起床で送れる)。
+    this.judgeRescue();
     // 通知(Issue #205)。**タスクより前**: 発走前の通知は時間に追われる(immediate の行が多い日に、pre_race の連続が通知を押しのけない)。
     // 送信の間隔(1 秒)と失敗のクールダウン(60 秒)があるので、通知がタスクを押しのけ続けることもない。
     const notice = this.notifyPlan().sendNow;
@@ -1126,6 +1135,59 @@ export class RaceDayCore {
 
   // ---- 通知(Issue #205 段階D)----
 
+  private earliest(a: number | null, b: number | null): number | null {
+    return a === null ? b : b === null ? a : Math.min(a, b);
+  }
+
+  /** 失敗の判定の入力(今の状態から作る。状態は変えない)。 */
+  private rescueVerdictNow(): ReturnType<typeof judgePlanRescue> {
+    const rescueAtMs = this.plan.rescueRequestedAt();
+    if (rescueAtMs === null) {
+      return { kind: "none" }; // 救済の要求が無い日(21 時だけ・手動)は、計画の写しを作らない(毎回のアラームの張り直しを重くしない)
+    }
+    return judgePlanRescue({ progress: this.getPlanProgress(), rescueAtMs, nowMs: this.now() });
+  }
+
+  /**
+   * 失敗の判定のためにアラームを張る時刻(Issue #249)。webhook が無効・判定済み・救済の要求が無いときは null(判定のための起床を作らない)。
+   * 落ち着いた(ok・failed が決まる)なら今、落ち着くのを待つ(wait)なら判定の期限。**起きたら必ず {@link judgeRescue} が状態を変える**(空回りしない)。
+   */
+  private rescueJudgeAtMs(): number | null {
+    if (this.notifier === undefined || this.metaGet(RESCUE_VERDICT_KEY) !== null) {
+      return null;
+    }
+    const verdict = this.rescueVerdictNow();
+    return verdict.kind === "none" ? null : verdict.kind === "wait" ? verdict.dueMs : this.now();
+  }
+
+  /**
+   * 23 時の再実行(救済)の後の失敗の判定(Issue #249。同期)。落ち着いた・期限が来たときに 1 回だけ、結果(`ok`・`failed`)を {@link RESCUE_VERDICT_KEY} に永続化する。
+   * `failed` なら、通知の材料(`plan-failure` の `ready` の行)を同じ同期区間で積む(送るのは {@link runNotifyStep}。`sending` を先に書くので多くとも 1 回)。
+   * 材料の組み立てが失敗しても判定は止めず、最小の通知に代える。webhook が無効・判定済み・救済の要求が無い・待つ(wait)あいだは何もしない。
+   */
+  private judgeRescue(): void {
+    if (this.notifier === undefined || this.metaGet(RESCUE_VERDICT_KEY) !== null) {
+      return;
+    }
+    const verdict = this.rescueVerdictNow();
+    if (verdict.kind === "none" || verdict.kind === "wait") {
+      return;
+    }
+    const now = this.now();
+    if (verdict.kind === "failed") {
+      const kaisaiDate = this.metaGet("kaisai_date") ?? "";
+      let embed: CloudEmbed;
+      try {
+        embed = buildPlanFailureEmbed({ kaisaiDate, progress: this.getPlanProgress(), reasons: verdict.reasons });
+      } catch (error) {
+        this.onWarn(`事前分析の失敗の通知の材料を組み立てられませんでした(最小の通知に代えます): ${errorMessage(error)}`);
+        embed = buildPlanFailureMinimalEmbed(kaisaiDate);
+      }
+      this.notifyStore.putReady("plan-failure", JSON.stringify(embed), null, now, "plan-failure");
+    }
+    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", RESCUE_VERDICT_KEY, verdict.kind);
+  }
+
   /** 通知の計画。webhook が無効(`notifier` なし)なら何もしない(行も材料も積まず、アラームの候補も出さない)。 */
   private notifyPlan(): NotificationPlan {
     if (this.notifier === undefined) {
@@ -1147,12 +1209,13 @@ export class RaceDayCore {
    * **URL・例外のメッセージ・応答の本文は、状態にもログにも出さない**(`classifyNotifyError` の分類だけ)。
    */
   private async runNotifyStep(item: NotifyItem): Promise<StepOutcome> {
-    const raceId = item.kind === "summary" ? "summary" : item.raceId;
+    const raceId = item.kind === "summary" ? "summary" : item.kind === "plan-failure" ? "plan-failure" : item.raceId;
     const outcomeOf_ = (result: "ok" | "failed"): StepOutcome => ({ kind: "ran", raceId, mode: "notify", step: "send", result });
     let payloadJson: string;
     let analysisId: number | null = null;
     try {
-      if (item.kind === "analysis") {
+      if (item.kind === "analysis" || item.kind === "plan-failure") {
+        // 材料(`ready` の行)から送る。分析は計算ステップが、23 時の失敗の通知は {@link judgeRescue} が、積んだもの。
         const row = this.notifyStore.row(item.key);
         if (row === null || row.payload_json === null) {
           throw new Error("通知の材料がありません");
@@ -1614,7 +1677,7 @@ export class RaceDayCore {
       planNextTryAtMs: this.plan.nextTryAtMs(),
       planNextDueMs: this.plan.nextDueMs(),
       purgeDueMs: purgeText === null ? null : Number(purgeText),
-      notifyAtMs: this.notifyPlan().nextAtMs,
+      notifyAtMs: this.earliest(this.notifyPlan().nextAtMs, this.rescueJudgeAtMs()),
       resultAtMs: this.resultsRunnable() ? this.results.nextTryAtMs() : null,
     });
     if (at !== null) {
