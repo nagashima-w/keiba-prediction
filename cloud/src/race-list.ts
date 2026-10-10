@@ -19,6 +19,8 @@ export interface RaceListRow {
   readonly distance: number;
   readonly entry_count: number;
   readonly grade: string | null;
+  /** 発走予定時刻(JST の `HH:MM`。Issue #236)。取れなかった行(発走後に取得した中央の一覧など)は null。 */
+  readonly start_time: string | null;
 }
 
 export function toRaceListRows(entries: readonly RaceListEntry[]): RaceListRow[] {
@@ -33,6 +35,7 @@ export function toRaceListRows(entries: readonly RaceListEntry[]): RaceListRow[]
         distance: e.distance,
         entry_count: e.entryCount,
         grade: e.grade ?? null,
+        start_time: e.startTime ?? null,
       }),
     )
     .sort((a, b) => (a.race_id < b.race_id ? -1 : a.race_id > b.race_id ? 1 : 0));

@@ -7,7 +7,7 @@ import { failureMessage, fetchBoard, fetchRaces, parseRacesResponse, parseStatus
  * 応答の形のドリフトは client-api-contract.test.ts(実際の handle() の応答を通す)が検出する。
  */
 
-const RACE_ROW = { race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null };
+const RACE_ROW = { race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "福島民報杯", course_type: "芝", distance: 1800, entry_count: 16, grade: null, start_time: "15:40" };
 const BOARD_ROW = { race_id: "202603020211", mode: "morning", status: "done", attempts: 1, error: null, queued_at: 1000, updated_at: 2000, prior: true, analysis_id: null, detail: null, children_ok: null };
 
 describe("parseRacesResponse", () => {
@@ -16,10 +16,19 @@ describe("parseRacesResponse", () => {
     expect(result).toEqual({
       ok: true,
       races: [
-        { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null },
-        { raceId: "202603020212", venueName: null, raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: "Jpn1" },
+        { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: "15:40" },
+        { raceId: "202603020212", venueName: null, raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: "Jpn1", startTime: "15:40" },
       ],
     });
+  });
+
+  it("Issue #236: start_time が null・キー無し(古いサーバの応答)は startTime: null。文字列はそのまま", () => {
+    const { start_time: _omit, ...withoutKey } = RACE_ROW;
+    void _omit;
+    const result = parseRacesResponse(200, { ok: true, races: [{ ...RACE_ROW, start_time: null }, withoutKey, RACE_ROW] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.races.map((r) => r.startTime)).toEqual([null, null, "15:40"]);
   });
 
   it("開催なし(races: [])は成功の空配列", () => {
@@ -37,6 +46,7 @@ describe("parseRacesResponse", () => {
     ["distance が NaN 相当(null)", { ok: true, races: [{ ...RACE_ROW, distance: null }] }],
     ["venue_name が数値", { ok: true, races: [{ ...RACE_ROW, venue_name: 5 }] }],
     ["grade が数値", { ok: true, races: [{ ...RACE_ROW, grade: 1 }] }],
+    ["start_time が数値(Issue #236。時刻だけ捨てず、行ごと不正)", { ok: true, races: [{ ...RACE_ROW, start_time: 1540 }] }],
     ["2 行目だけ不正(1 行目だけを黙って返さない)", { ok: true, races: [RACE_ROW, { ...RACE_ROW, race_name: null }] }],
   ];
   for (const [name, body] of malformed) {

@@ -306,7 +306,7 @@ describe("createMounter(同じ木なら DOM を触らない)", () => {
   });
 });
 
-const RACE: RaceRow = { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
+const RACE: RaceRow = { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: null };
 
 describe("renderScreen(一覧の VNode)", () => {
   const route = { date: "20260628", venue: "central", race: null, analysis: null, settings: false } as const;

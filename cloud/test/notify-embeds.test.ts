@@ -254,6 +254,33 @@ describe("buildAnalysisNotificationEmbed(AC-D1: 狙い目あり=緑・なし=灰
     expect(out.description).toContain("LLM補正: 実行");
   });
 
+  describe("Issue #236: 発走時刻は失敗の通知と同じ書き方(startLine を共用)で、description の先頭に出す", () => {
+    it("時刻あり: description は「発走 15:40」+空行で始まり、そのあとにメタ行が続く(先頭=切り詰めで落ちない側)", () => {
+      const out = buildAnalysisNotificationEmbed(record(), effective, label({ startTime: "15:40" }));
+      expect(out.description!.startsWith("発走 15:40\n\n2026/09/27 / 中山 / 芝1600m")).toBe(true);
+      // 失敗の通知と同じ書き方(行の形が一致する)
+      expect(buildFailureEmbed(label({ startTime: "15:40" }), "x").description!.startsWith("発走 15:40\n\n")).toBe(true);
+    });
+
+    it("時刻なし(null): 何も足さず、時刻ありの description から先頭の 2 行を除いたものと同一(従来の文字列のまま)", () => {
+      const withTime = buildAnalysisNotificationEmbed(record(), effective, label({ startTime: "15:40" }));
+      const without = buildAnalysisNotificationEmbed(record(), effective, label({ startTime: null }));
+      expect(without.description).not.toContain("発走");
+      expect(without.description!.startsWith("2026/09/27 / 中山 / 芝1600m")).toBe(true);
+      // 前提: 両者は異なる(差が 0 でない)うえで、差は先頭の 2 行(「発走 15:40」と空行)だけ
+      expect(withTime.description).not.toBe(without.description);
+      expect(withTime.description).toBe(`発走 15:40\n\n${without.description}`);
+    });
+
+    it("狙い目なし(灰色)・LLM 注記つきでも、時刻は先頭に出る", () => {
+      const noPositive = record({ horses: record().horses.map((h) => ({ ...h, isPositive: false })) });
+      const out = buildAnalysisNotificationEmbed(noPositive, { effective: false, note: "理由の固定文" }, label({ startTime: "09:05" }));
+      expect(out.color).toBe(0x95a5a6);
+      expect(out.description!.startsWith("発走 09:05\n\n")).toBe(true);
+      expect(out.description).toContain("LLM補正の注記: 理由の固定文");
+    });
+  });
+
   describe("Issue #230: タイトルは失敗・手動スキップ・最小の通知と同じ関数(raceTitle)で作る「会場 NR レース名」", () => {
     it.each([
       ["通常", label()],

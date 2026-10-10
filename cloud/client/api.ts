@@ -16,6 +16,8 @@ export interface RaceRow {
   readonly distance: number;
   readonly entryCount: number;
   readonly grade: string | null;
+  /** 発走予定時刻(JST の `HH:MM`。Issue #236)。サーバが取れなかった行・古いサーバの応答(キー無し)は null。 */
+  readonly startTime: string | null;
 }
 
 export type TaskMode = "morning" | "pre_race";
@@ -106,10 +108,12 @@ export function classify(status: number, body: unknown): ApiFailure {
 function parseRace(row: unknown): RaceRow | null {
   if (!isRecord(row)) return null;
   const { race_id, venue_name, race_number, race_name, course_type, distance, entry_count, grade } = row;
-  if (!isStr(race_id) || !strOrNull(venue_name) || !isNum(race_number) || !isStr(race_name) || !isStr(course_type) || !isNum(distance) || !isNum(entry_count) || !strOrNull(grade)) {
+  // 発走時刻(Issue #236): キー無しは null(古いサーバの応答)。文字列・null 以外の型は、ほかの項目と同じく行ごと不正にする。
+  const start_time = row["start_time"] === undefined ? null : row["start_time"];
+  if (!isStr(race_id) || !strOrNull(venue_name) || !isNum(race_number) || !isStr(race_name) || !isStr(course_type) || !isNum(distance) || !isNum(entry_count) || !strOrNull(grade) || !strOrNull(start_time)) {
     return null;
   }
-  return { raceId: race_id, venueName: venue_name, raceNumber: race_number, raceName: race_name, courseType: course_type, distance, entryCount: entry_count, grade };
+  return { raceId: race_id, venueName: venue_name, raceNumber: race_number, raceName: race_name, courseType: course_type, distance, entryCount: entry_count, grade, startTime: start_time };
 }
 
 function parseBoardRow(row: unknown): BoardRow | null {

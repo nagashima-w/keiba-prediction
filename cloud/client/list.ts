@@ -117,7 +117,7 @@ export interface RaceItem {
   /** 「11R」。 */
   readonly label: string;
   readonly name: string;
-  /** 「芝 1800m・16頭」。 */
+  /** 「芝 1800m・16頭」。発走予定時刻があれば先頭に「15:40 発走・」(Issue #236)。 */
   readonly detail: string;
   readonly grade: string | null;
   readonly href: string;
@@ -196,7 +196,7 @@ export function buildListModel(input: ListModelInput): ListModel {
           raceId: r.raceId,
           label: `${r.raceNumber}R`,
           name: r.raceName,
-          detail: `${r.courseType} ${r.distance}m・${r.entryCount}頭`,
+          detail: `${r.startTime === null ? "" : `${r.startTime} 発走・`}${r.courseType} ${r.distance}m・${r.entryCount}頭`,
           grade: r.grade,
           href: buildHash({ date: route.date, venue: route.venue, race: r.raceId }),
           badges:

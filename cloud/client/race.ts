@@ -144,7 +144,8 @@ export const CARD_DESCRIPTIONS: Readonly<Record<TaskMode, string>> = {
 function titleOf(route: Route, listRow: RaceRow | undefined, prior: MorningPriorView | null): string {
   const raceId = route.race!;
   if (listRow !== undefined) {
-    return `${listRow.venueName ?? ""}${listRow.raceNumber}R ${listRow.raceName}`;
+    // 発走予定時刻(Issue #236)は、一覧の行から作るときだけ(prior・レース ID だけの経路は時刻を持たない。見出しのために取得を足さない)。
+    return `${listRow.venueName ?? ""}${listRow.raceNumber}R ${listRow.raceName}${listRow.startTime === null ? "" : ` ${listRow.startTime}発走`}`;
   }
   if (prior !== null) {
     const number = Number(raceId.slice(10));

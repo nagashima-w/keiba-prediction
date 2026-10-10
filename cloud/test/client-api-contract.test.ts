@@ -53,16 +53,16 @@ describe("契約: GET /api/races の本物の応答をクライアントが読�
     const { fetch } = await connect({
       list: async () => ({
         ok: true,
-        races: [entry("202603020212", { grade: "G3" }), entry("202603020211", { grade: undefined }), entry("202610020301", { venue: undefined, courseType: "ダ", distance: 1200, entryCount: 9 })] as RaceListEntry[],
+        races: [entry("202603020212", { grade: "G3", startTime: "15:40" }), entry("202603020211", { grade: undefined }), entry("202610020301", { venue: undefined, courseType: "ダ", distance: 1200, entryCount: 9 })] as RaceListEntry[],
       }),
     });
     const result = await fetchRaces(fetch, DATE, "central");
     expect(result).toEqual({
       ok: true,
       races: [
-        { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "レース11", courseType: "芝", distance: 1600, entryCount: 16, grade: null },
-        { raceId: "202603020212", venueName: "福島", raceNumber: 12, raceName: "レース12", courseType: "芝", distance: 1600, entryCount: 16, grade: "G3" },
-        { raceId: "202610020301", venueName: null, raceNumber: 1, raceName: "レース01", courseType: "ダ", distance: 1200, entryCount: 9, grade: null },
+        { raceId: "202603020211", venueName: "福島", raceNumber: 11, raceName: "レース11", courseType: "芝", distance: 1600, entryCount: 16, grade: null, startTime: null },
+        { raceId: "202603020212", venueName: "福島", raceNumber: 12, raceName: "レース12", courseType: "芝", distance: 1600, entryCount: 16, grade: "G3", startTime: "15:40" }, // Issue #236: 本物のサーバのキー名(start_time)をクライアントが読める
+        { raceId: "202610020301", venueName: null, raceNumber: 1, raceName: "レース01", courseType: "ダ", distance: 1200, entryCount: 9, grade: null, startTime: null },
       ],
     });
   });

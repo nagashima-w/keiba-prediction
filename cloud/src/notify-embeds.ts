@@ -439,7 +439,9 @@ export function buildAnalysisNotificationEmbed(record: AnalysisRecord, outcome: 
     evEstimated: record.evEstimated === true,
   }));
   const base = buildAnalysisEmbed(raceInfo, horses);
-  const description = outcome.note === null ? base.description : `${base.description ?? ""}\nLLM補正の注記: ${outcome.note}`;
+  const body = outcome.note === null ? base.description : `${base.description ?? ""}\nLLM補正の注記: ${outcome.note}`;
+  // 発走時刻(Issue #236)は、失敗・手動スキップ・最小の通知と同じ書き方(`startLine`)で、description の先頭に置く(先頭なので、収まらないときの切り詰めで失われない)。時刻が無ければ何も足さない。
+  const description = body === undefined ? undefined : [...startLine(label), body].join("\n");
   // 印の付いた馬 → 買い目の順(収まらないときは末尾の買い目から縮める)。EV プラスの馬の行(description)は core のまま残す。
   const fields: EmbedField[] = [buildMarksField(record, snapshot.names), buildAllocationField(record.allocation)];
   // タイトルは失敗・手動スキップ・最小の通知と同じ関数で作る(Issue #230。「会場 NR レース名」)。core のタイトルは番号を持たない(core は変えない)。

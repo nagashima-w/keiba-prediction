@@ -6,7 +6,7 @@ import type { Route } from "../client/route";
 /** Issue #184: 一覧の画面の表示用データ(純関数)。場ごとのまとまり・R 順・板の (race_id, mode) ごとのバッジ・各状態の表示。 */
 
 function race(raceId: string, over: Partial<RaceRow> = {}): RaceRow {
-  return { raceId, venueName: "福島", raceNumber: Number(raceId.slice(-2)), raceName: `レース${raceId.slice(-2)}`, courseType: "芝", distance: 1800, entryCount: 16, grade: null, ...over };
+  return { raceId, venueName: "福島", raceNumber: Number(raceId.slice(-2)), raceName: `レース${raceId.slice(-2)}`, courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: null, ...over };
 }
 
 function row(raceId: string, mode: BoardRow["mode"], status: BoardRow["status"], over: Partial<BoardRow> = {}): BoardRow {
@@ -69,6 +69,19 @@ describe("buildListModel", () => {
     expect(r.detail).toBe("ダ 1200m・9頭");
     expect(r.grade).toBe("Jpn1");
     expect(r.href).toBe("#date=20260628&venue=central&race=202603020211");
+  });
+
+  it.each([
+    ["時刻あり: detail の先頭に「HH:MM 発走・」", "15:40", "15:40 発走・芝 1800m・16頭"],
+    ["時刻なし(null。発走後に取得した一覧など): 時刻の部分を出さない=従来の表示のまま", null, "芝 1800m・16頭"],
+  ] as const)("Issue #236 発走予定時刻 — %s", (_name, startTime, expected) => {
+    const model = buildListModel(input({ list: { kind: "ready", races: [race("202603020211", { startTime })] } }));
+    expect(model.groups[0]!.races[0]!.detail).toBe(expected);
+  });
+
+  it("Issue #236: 時刻はレースごと。同じ場の中で、ある行は出て、ある行は出ない", () => {
+    const model = buildListModel(input({ list: { kind: "ready", races: [race("202603020211", { startTime: "15:40" }), race("202603020212", { startTime: null })] } }));
+    expect(model.groups[0]!.races.map((r) => r.detail)).toEqual(["15:40 発走・芝 1800m・16頭", "芝 1800m・16頭"]);
   });
 
   it("グレードが null の行は grade も null(表示しない)", () => {

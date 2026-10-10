@@ -100,7 +100,7 @@ describe("GET /api/races(Issue #183)", () => {
     const { deps, token } = await setup();
     const raceDay = fakeRaceDay();
     const a = entry("202603020211", { grade: undefined, venue: "福島" });
-    const b = entry("202603020212", { grade: "G3", venue: "福島" });
+    const b = entry("202603020212", { grade: "G3", venue: "福島", startTime: "15:40" });
     const c = entry("202610020301", { venue: undefined, courseType: "ダ", distance: 1200, entryCount: 9 });
     const d = entry("202602010109", { venue: "函館" });
     // 入れ替わった順(場も R も)で返す
@@ -108,12 +108,13 @@ describe("GET /api/races(Issue #183)", () => {
     const response = await handle(get(GOOD, { token }), envOf(raceDay), {}, deps);
     const body = (await response.json()) as { races: Record<string, unknown>[] };
     expect(body.races.map((r) => r["race_id"])).toEqual(["202602010109", "202603020211", "202603020212", "202610020301"]);
-    expect(body.races[1]).toEqual({ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "レース11", course_type: "芝", distance: 1600, entry_count: 16, grade: null });
+    expect(body.races[1]).toEqual({ race_id: "202603020211", venue_name: "福島", race_number: 11, race_name: "レース11", course_type: "芝", distance: 1600, entry_count: 16, grade: null, start_time: null });
     expect(body.races[2]!["grade"]).toBe("G3");
-    expect(body.races[3]).toEqual({ race_id: "202610020301", venue_name: null, race_number: 1, race_name: "レース01", course_type: "ダ", distance: 1200, entry_count: 9, grade: null });
+    expect(body.races[2]!["start_time"]).toBe("15:40"); // Issue #236: 発走時刻(HH:MM)はそのまま。無い行(上の a・c)は undefined ではなく null
+    expect(body.races[3]).toEqual({ race_id: "202610020301", venue_name: null, race_number: 1, race_name: "レース01", course_type: "ダ", distance: 1200, entry_count: 9, grade: null, start_time: null });
     // 余計なキーを返さない(RaceListEntry をそのまま写していない)
     for (const row of body.races) {
-      expect(Object.keys(row).sort()).toEqual(["course_type", "distance", "entry_count", "grade", "race_id", "race_name", "race_number", "venue_name"]);
+      expect(Object.keys(row).sort()).toEqual(["course_type", "distance", "entry_count", "grade", "race_id", "race_name", "race_number", "start_time", "venue_name"]);
     }
   });
 

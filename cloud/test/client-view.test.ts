@@ -253,7 +253,7 @@ describe("data-* の契約: 引数を渡すクリック処理は、引数を dat
   const handlers = (tree: VNode): VNode[] => findAll(tree, (n) => n.on?.click !== undefined || n.on?.change !== undefined || n.on?.input !== undefined);
   const exempt = (n: VNode): boolean => String(n.attrs?.["class"] ?? "").split(" ").some((c) => NO_ARGUMENT_CLASSES.has(c)) || (n.tag === "input" && n.attrs?.["type"] === "date");
 
-  const rr = (raceId: string, venueName: string) => ({ raceId, venueName, raceNumber: 1, raceName: "r", courseType: "芝", distance: 1800, entryCount: 16, grade: null }) as const;
+  const rr = (raceId: string, venueName: string) => ({ raceId, venueName, raceNumber: 1, raceName: "r", courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: null }) as const;
   const route = { date: "20260628", venue: "central", race: null, analysis: null, settings: false } as const;
   const trees = (): { name: string; tree: VNode }[] => [
     { name: "一覧(場が 2 つ・閉)", tree: renderScreen(buildListModel({ route, list: { kind: "ready", races: [rr("202602010101", "函館"), rr("202603020211", "福島")] }, board: { kind: "none" }, tracking: "止めました" }), noopActions) },
@@ -599,7 +599,7 @@ describe("XSS: 馬名・レース名・エラー文・モデル名・注記の�
 /** Issue #187: 一覧の場ごとの見出し(開閉のボタン)。開閉・aria-expanded・要約の表示と、閉じた場の行を描画しないこと。 */
 describe("一覧の場の見出し(開閉ボタン)", () => {
   const rr = (raceId: string, venueName: string, over: Record<string, unknown> = {}) =>
-    ({ raceId, venueName, raceNumber: Number(raceId.slice(-2)), raceName: `レース${raceId.slice(-2)}`, courseType: "芝", distance: 1800, entryCount: 16, grade: null, ...over }) as const;
+    ({ raceId, venueName, raceNumber: Number(raceId.slice(-2)), raceName: `レース${raceId.slice(-2)}`, courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: null, ...over }) as const;
   const FUKU = [rr("202603020211", "福島"), rr("202603020212", "福島")];
   const HAKO = [rr("202602010101", "函館"), rr("202602010102", "函館")];
   const brow = (raceId: string, mode: "morning" | "pre_race", status: "queued" | "fetched" | "done" | "failed") =>
@@ -628,6 +628,16 @@ describe("一覧の場の見出し(開閉ボタン)", () => {
     // 見出し(h2)の中にある
     const headings = findAll(tree, (n) => n.tag === "h2" && byClass(n, "venue-toggle").length === 1);
     expect(headings).toHaveLength(2);
+  });
+
+  it("Issue #236: 開いた場の行に、発走予定時刻が見える。時刻なしの行には出ない", () => {
+    const races = [rr("202603020211", "福島", { startTime: "15:40" }), rr("202603020212", "福島", { startTime: null })];
+    const tree = renderScreen(buildListModel(listInput({ list: { kind: "ready", races } })), noopActions);
+    const links = raceLinks(tree);
+    expect(links).toHaveLength(2); // 前提: 場が 1 つなので開いている
+    expect(textOf(links[0]!)).toContain("15:40 発走・芝 1800m・16頭");
+    expect(textOf(links[1]!)).toContain("芝 1800m・16頭");
+    expect(textOf(links[1]!)).not.toContain("発走");
   });
 
   it("閉じた場のレースの行(a.race と ul.races)は描画しない。開いた場の行だけが出る", () => {

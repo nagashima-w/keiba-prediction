@@ -290,7 +290,7 @@ describe("過去の分析の一覧(結果の画面へのリンク)", () => {
 });
 
 describe("見出し・戻るリンク", () => {
-  const listRow: RaceRow = { raceId: RACE_ID, venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null };
+  const listRow: RaceRow = { raceId: RACE_ID, venueName: "福島", raceNumber: 11, raceName: "福島民報杯", courseType: "芝", distance: 1800, entryCount: 16, grade: null, startTime: null };
 
   it("一覧の行があればそこから(場名・R・レース名)。無ければ朝の prior から。どちらも無ければレース ID", () => {
     expect(buildRaceModel(input({ listRow })).title).toBe("福島11R 福島民報杯");
@@ -299,6 +299,16 @@ describe("見出し・戻るリンク", () => {
     expect(buildRaceModel(input({ status: { kind: "ready", rows: [], prior: { ...PRIOR, raceName: null, venueName: null } } })).title).toBe("11R");
     expect(buildRaceModel(input()).title).toBe(`レース ${RACE_ID}`);
     expect(buildRaceModel(input({ status: { kind: "loading" } })).title).toBe(`レース ${RACE_ID}`);
+  });
+
+  it("Issue #236: 一覧の行から作る見出しだけ、末尾に「 HH:MM発走」を付ける(時刻なしの行・prior・ID だけの経路では付けない)", () => {
+    expect(buildRaceModel(input({ listRow: { ...listRow, startTime: "15:40" } })).title).toBe("福島11R 福島民報杯 15:40発走");
+    expect(buildRaceModel(input({ listRow: { ...listRow, venueName: null, startTime: "09:05" } })).title).toBe("11R 福島民報杯 09:05発走");
+    // 前提: 時刻なし(null)の一覧の行は従来のまま
+    expect(buildRaceModel(input({ listRow })).title).toBe("福島11R 福島民報杯");
+    // 一覧のキャッシュが無い経路(prior・ID だけ)は、時刻を持たないので出さない
+    expect(buildRaceModel(input({ status: { kind: "ready", rows: [], prior: PRIOR } })).title).toBe("福島11R 福島民報杯");
+    expect(buildRaceModel(input()).title).toBe(`レース ${RACE_ID}`);
   });
 
   it("一覧へ戻るリンクは、日付・区分を保つ(race を含めない)", () => {
