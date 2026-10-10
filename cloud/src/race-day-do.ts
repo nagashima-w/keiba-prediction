@@ -20,6 +20,7 @@ import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
 import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type RequestResultImportResult, type ResultImportProgress, type ScheduleInput, type ScheduleResult } from "./race-day-core";
+import { DAILY_REPORT_NAME } from "./daily-report-core";
 import { D1ResultStore } from "./result-repository";
 import { loadSettings } from "./settings";
 
@@ -55,7 +56,16 @@ export interface RaceDayEnv {
     idFromName(name: string): any;
     get(id: any): Required<GateLike> & { status(): Promise<GateStatus> };
   };
+  /**
+   * 日報の DO(`DailyReportDO`。Issue #235)。その日が静かになったとき(`isDayQuiet`)、`RaceDayCore` が `requestReport` を 1 回呼ぶ。無い構成(binding の設定漏れ)では依頼しない。
+   * 日報の DO は単一インスタンス(固定名 `main`)。
+   */
+  DAILY_REPORT?: {
+    idFromName(name: string): any;
+    get(id: any): { requestReport(input: { readonly kaisaiDate: string; readonly mode: "auto" }): Promise<{ readonly accepted: boolean; readonly reason?: string }> };
+  };
 }
+
 
 export class RaceDay extends DurableObject<RaceDayEnv> {
   private readonly core: RaceDayCore;
@@ -70,6 +80,18 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
     if (appBase.status === "invalid") {
       console.warn("APP_BASE_URL の形式が https のオリジン(パス・クエリ・認証情報なし)ではないため、通知にリンクは付けません(値は出しません)");
     }
+    // 日報の作成の依頼(Issue #235)。その日が静かになったとき、`RaceDayCore` が 1 回だけ呼ぶ。作成済み・進行中は日報の DO が断る(それも完了として扱う)。
+    const reportNamespace = env.DAILY_REPORT;
+    const requestReport =
+      reportNamespace === undefined
+        ? undefined
+        : async (kaisaiDate: string): Promise<void> => {
+            const result = await reportNamespace.get(reportNamespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate, mode: "auto" });
+            // 日付が不正・未来のとき(日付の食い違い)だけは失敗として扱う(依頼済みにしない)。
+            if (!result.accepted && result.reason !== "exists" && result.reason !== "in-progress") {
+              throw new Error("日報の依頼が断られました");
+            }
+          };
     this.core = new RaceDayCore({
       sql: ctx.storage.sql,
       now: () => Date.now(),
@@ -86,6 +108,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
       appBaseUrl: appBase.status === "valid" ? appBase.origin : undefined,
       // 結果の取り込み(Issue #208)。D1 に結果を保存する（exe の AnalysisStore.saveResult と同じ 4 表。1 レース 1 batch・最大 5 文）。
       resultStore: new D1ResultStore({ db: env.DB }),
+      // 日報の作成の依頼(Issue #235)。DAILY_REPORT が無い構成では渡さない(依頼しない)。
+      ...(requestReport === undefined ? {} : { requestReport }),
       loadSettings: async () => {
         const loaded = await loadSettings(env.DB);
         if (loaded.source === "invalid") {

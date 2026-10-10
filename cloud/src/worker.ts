@@ -10,6 +10,7 @@ export { RaceDay } from "./race-day-do";
 export { CloudMigration } from "./migration-do";
 export { ResultBackfill } from "./result-backfill-do";
 export { VerifyReportDO } from "./verify-do";
+export { DailyReportDO } from "./daily-report-do";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

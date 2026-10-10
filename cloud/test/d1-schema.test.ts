@@ -66,6 +66,7 @@ describe("migration の適用(ローカルの D1)", () => {
       "race_results",
       "r2_ops",
       "cloud_settings",
+      "daily_reports", // Issue #235(0010。日報)
     ].sort());
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("detail_key");
     expect((await rows("PRAGMA table_info(analyses)")).map((r) => r["name"])).toContain("llm_note"); // Issue #194(0005)
@@ -77,8 +78,8 @@ describe("migration の適用(ローカルの D1)", () => {
     expect(indexes).toEqual(["idx_analyses_analyzed_at", "idx_analyses_exe_id", "idx_analyses_kaisai_analyzed", "idx_analyses_kaisai_date", "idx_analyses_prompt_version_race", "idx_analyses_race", "idx_analyses_race_analyzed"]);
   });
 
-  it("migration は9本とも適用済みとして記録されている(d1_migrations)", async () => {
-    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql"]);
+  it("migration は10本とも適用済みとして記録されている(d1_migrations)", async () => {
+    expect((await rows("SELECT name FROM d1_migrations ORDER BY id")).map((r) => r["name"])).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql"]);
   });
 });
 

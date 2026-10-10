@@ -60,6 +60,13 @@ class_name = "ResultBackfill"
 name = "VERIFY_REPORT"
 class_name = "VerifyReportDO"
 
+# 日報の Durable Object(Issue #235)。`idFromName("main")` の単一インスタンスが、その日の発走前の分析と結果から日報(統計 + LLM の振り返り)を作り、D1(daily_reports)に保存して、Discord に要約を送る。
+# 起動は 3 経路: 日単位の DO が「その日が静かになった」とき(時刻・曜日の決め打ちなし)・朝の cron の取り残しの補完(前日以前の最大 3 日)・手動(POST /api/reports/run)。
+# LLM を呼ぶのは 1 日 1 回(ANTHROPIC_API_KEY が登録済みのとき。未登録なら統計だけの日報)。netkeiba には出ない。クラス名は migration に固定される。
+[[durable_objects.bindings]]
+name = "DAILY_REPORT"
+class_name = "DailyReportDO"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NetkeibaGate"]
@@ -83,6 +90,11 @@ new_sqlite_classes = ["ResultBackfill"]
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["VerifyReportDO"]
+
+# 追加だけ(v1〜v5 には触れない)。Issue #235。
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["DailyReportDO"]
 
 # D1(分析履歴。Issue #171〈#169-a〉)。database_id は公開してよい値(ユーザーと合意済み。D1 はダッシュボードでユーザーが作成した)。
 # ★デプロイ(deploy-cloud.yml)は、この値が仮の値(ゼロ UUID)のままなら失敗する。--local の migration 適用と dry-run は資格情報なしで動く。

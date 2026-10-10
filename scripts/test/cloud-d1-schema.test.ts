@@ -182,6 +182,22 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [],
   },
+  // 0010 の中身(Issue #235)。日報(1 日 1 行。開催日が主キー)。`kaisai_date TEXT PRIMARY KEY` は rowid の別名ではない(TEXT)ので、主キーの自動索引(origin `pk`・名前なし)ができる。
+  daily_reports: {
+    columns: [
+      { name: "body_json", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "created_at", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "kaisai_date", type: "TEXT", notnull: 0, dflt_value: null, pk: 1 },
+      { name: "llm_calls_json", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "model", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "race_count", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "summary", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+      { name: "total_return", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "total_stake", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["kaisai_date"], name: null }],
+  },
 };
 
 /** exe のスキーマに、宣言した D1 専用の追加分(列・索引・表)を足した「期待する D1 の構造」。 */
@@ -223,8 +239,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql の9本だけで、番号は 0001 から連続している(後から足すときは 0010 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql の10本だけで、番号は 0001 から連続している(後から足すときは 0011 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {

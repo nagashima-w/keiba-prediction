@@ -56,12 +56,16 @@ function withoutRaceDay(toml: string): string {
     .replace(/\[\[migrations\]\]\ntag = "v4"\nnew_sqlite_classes = \["ResultBackfill"\]\n/, "")
     // Issue #219: 検証の集計の DO(VERIFY_REPORT・VerifyReportDO)も同じく除く(migration v5 も)。
     .replace(/\[\[durable_objects\.bindings\]\]\nname = "VERIFY_REPORT"\nclass_name = "VerifyReportDO"\n/, "")
-    .replace(/\[\[migrations\]\]\ntag = "v5"\nnew_sqlite_classes = \["VerifyReportDO"\]\n/, "");
+    .replace(/\[\[migrations\]\]\ntag = "v5"\nnew_sqlite_classes = \["VerifyReportDO"\]\n/, "")
+    // Issue #235: 日報の DO(DAILY_REPORT・DailyReportDO)も同じく除く(migration v6 も)。
+    .replace(/\[\[durable_objects\.bindings\]\]\nname = "DAILY_REPORT"\nclass_name = "DailyReportDO"\n/, "")
+    .replace(/\[\[migrations\]\]\ntag = "v6"\nnew_sqlite_classes = \["DailyReportDO"\]\n/, "");
   expect(stripped, "RACE_DAY の binding と migration v2 を除けている").not.toBe(toml);
   expect(stripped).not.toContain("RaceDay");
   expect(stripped, "CLOUD_MIGRATION の binding と migration v3 を除けている").not.toContain("CloudMigration");
   expect(stripped, "RESULT_BACKFILL の binding と migration v4 を除けている").not.toContain("ResultBackfill");
   expect(stripped, "VERIFY_REPORT の binding と migration v5 を除けている").not.toContain("VerifyReportDO");
+  expect(stripped, "DAILY_REPORT の binding と migration v6 を除けている").not.toContain("DailyReportDO");
   return stripped;
 }
 

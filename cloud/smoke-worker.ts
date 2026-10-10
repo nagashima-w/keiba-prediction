@@ -256,6 +256,8 @@ export { RaceDay };
 export { CloudMigration } from "./src/migration-do";
 export { ResultBackfill } from "./src/result-backfill-do";
 export { VerifyReportDO } from "./src/verify-do";
+// Issue #235: 日報の DO(本番の worker.ts と同じもの。binding のクラスが入口から export されている必要がある)。
+export { DailyReportDO } from "./src/daily-report-do";
 
 type SmokeEnv = Env;
 

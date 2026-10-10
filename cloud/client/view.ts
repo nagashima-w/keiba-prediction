@@ -12,6 +12,7 @@ import type { BackfillView, CheckView, MigrationModel, ProgressView } from "./mi
 import type { FieldModel, PreviewModel, SettingsModel, WeightsModel } from "./settings-form";
 import type { StatRow, StatSection, VerifyModel, VerifyNotice, VersionCard, VersionsSection } from "./verify-model";
 import type { VerifyVenue } from "./api-verify";
+import type { RaceRowView, ReportBodyView, ReportModel } from "./report-model";
 import { h, type PickedFile, type VNode } from "./vnode";
 
 export interface ViewActions {
@@ -46,6 +47,8 @@ export interface ViewActions {
   readonly onVerifyVenue: (venue: VerifyVenue) => void;
   /** 検証画面の版別キャリブレーションの開閉(Issue #220)。`key` は版のキー、`open` は押したあとの状態。 */
   readonly onVerifyVersionToggle: (key: string, open: boolean) => void;
+  /** 日報画面の「この日の日報を作る」ボタン(Issue #235)。引数なし(表示中の日は `report-screen.ts` が持つ)。 */
+  readonly onReportRun: () => void;
 }
 
 function badge(prefix: string, b: Badge): VNode {
@@ -97,6 +100,7 @@ function listScreen(model: ListModel, actions: ViewActions): VNode {
     ),
     h("button", { class: "refresh", disabled: model.loading }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
     h("a", { class: "verify-link", href: model.verifyHref }, ["検証"]),
+    h("a", { class: "report-link", href: model.reportHref }, ["日報"]),
     h("a", { class: "settings-link", href: model.settingsHref }, ["設定"]),
   ]);
   const notices: VNode[] = [];
@@ -678,7 +682,57 @@ function verifyScreen(model: VerifyModel, actions: ViewActions): VNode {
   return h("div", { class: "screen verify-screen" }, [controls, ...body]);
 }
 
-export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel, actions: ViewActions): VNode {
+// ---- 日報画面(Issue #235) ----
+
+function bulletList(items: readonly string[]): VNode {
+  return h("ul", { class: "report-list" }, items.map((t) => h("li", {}, [t])));
+}
+
+function reportRaceNode(r: RaceRowView): VNode {
+  return h("section", { class: "report-race", "data-race": r.raceId }, [
+    h("h3", {}, [r.title]),
+    h("p", { class: "report-result" }, [r.result]),
+    ...(r.marks === null ? [] : [h("p", { class: "report-marks" }, [r.marks])]),
+    h("p", { class: "report-bets" }, [r.bets]),
+    ...(r.comment === null ? [] : [h("p", { class: "report-comment" }, [`一言: ${r.comment}`])]),
+  ]);
+}
+
+function reportBodyNodes(b: ReportBodyView): VNode[] {
+  const nodes: VNode[] = [h("h2", {}, [b.heading]), h("p", { class: "meta" }, [b.meta]), tilesNode(b.tiles)];
+  if (b.textNote !== null) nodes.push(notice("info", b.textNote));
+  if (b.summary !== null) nodes.push(h("h3", {}, ["総括"]), h("p", { class: "report-summary" }, [b.summary]));
+  if (b.good.length > 0) nodes.push(h("h3", {}, ["良かった点"]), bulletList(b.good));
+  if (b.improve.length > 0) nodes.push(h("h3", {}, ["改善点"]), bulletList(b.improve));
+  if (b.raw !== null) nodes.push(h("p", { class: "report-raw" }, [b.raw]));
+  if (b.typeRows.length > 0) nodes.push(h("h3", {}, [b.typeHeading]), rowsNode(b.typeRows));
+  if (b.markRows.length > 0) nodes.push(h("h3", {}, [b.markHeading]), rowsNode(b.markRows));
+  nodes.push(h("h2", {}, [b.racesHeading]), ...b.races.map(reportRaceNode));
+  return nodes;
+}
+
+function reportScreen(model: ReportModel, actions: ViewActions): VNode {
+  const controls = h("div", { class: "controls" }, [
+    h("a", { class: "back", href: model.backHref }, ["一覧へ戻る"]),
+    h("button", { class: "refresh", disabled: model.refreshDisabled }, [model.loading ? "読み込み中…" : "更新"], { click: actions.onRefresh }),
+  ]);
+  const chips = h(
+    "nav",
+    { class: "tabs", "aria-label": "日報の日付" },
+    model.dateChips.map((c) => h("a", { class: "tab", href: c.href, "aria-current": c.current ? "page" : undefined }, [c.label])),
+  );
+  const body: VNode[] = [h("h1", { class: "title" }, [model.heading]), chips];
+  if (model.loading && model.body === null) body.push(h("p", { class: "empty" }, ["読み込み中…"]));
+  if (model.error !== null) body.push(notice("error", model.error));
+  if (model.notice !== null) body.push(notice(model.notice.tone, model.notice.text));
+  if (model.create !== null) {
+    body.push(h("button", { class: "report-run", disabled: model.create.disabled }, [model.create.label], { click: actions.onReportRun }));
+  }
+  if (model.body !== null) body.push(...reportBodyNodes(model.body));
+  return h("div", { class: "screen report-screen" }, [controls, ...body]);
+}
+
+export function renderScreen(model: ListModel | RaceModel | ResultModel | SettingsModel | MigrationModel | VerifyModel | ReportModel, actions: ViewActions): VNode {
   switch (model.kind) {
     case "list":
       return listScreen(model, actions);
@@ -692,5 +746,7 @@ export function renderScreen(model: ListModel | RaceModel | ResultModel | Settin
       return migrationScreen(model, actions);
     case "verify":
       return verifyScreen(model, actions);
+    case "report":
+      return reportScreen(model, actions);
   }
 }

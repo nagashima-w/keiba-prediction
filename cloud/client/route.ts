@@ -28,6 +28,11 @@ export interface Route {
   readonly migration?: boolean;
   /** 検証画面(`#verify` の**完全一致**のときだけ true。Issue #219)。**省略は false**(`migration` と同じ流儀)。 */
   readonly verify?: boolean;
+  /**
+   * 日報画面(Issue #235)。`#report`(完全一致。`date` は null = 最新)と `#report=YYYYMMDD`(実在の日付の完全一致)のときだけ付く。**省略は日報画面ではない**
+   * (`migration`・`verify` と同じ流儀)。
+   */
+  readonly report?: { readonly date: string | null };
 }
 
 /** 設定画面のハッシュ(Issue #189)。一覧のトップの入口のリンク先。 */
@@ -38,6 +43,14 @@ export const MIGRATION_HASH = "#migration";
 
 /** 検証画面のハッシュ(Issue #219)。一覧のトップの入口のリンク先。 */
 export const VERIFY_HASH = "#verify";
+
+/** 日報画面のハッシュ(Issue #235)。`#report`(日付の一覧と最新の日報)と `#report=YYYYMMDD`(その日の日報)。 */
+export const REPORT_HASH = "#report";
+
+/** その日の日報のハッシュ(`#report=YYYYMMDD`)。通知のリンクにも使う。 */
+export function buildReportHash(date: string): string {
+  return `${REPORT_HASH}=${date}`;
+}
 
 const ANALYSIS_ID_MAX = 2_147_483_647;
 
@@ -59,6 +72,14 @@ export function parseHash(hash: string, today: string): Route {
   // 検証画面も `#verify` の完全一致だけ(日付・区分などを持たない画面)。
   if (hash === VERIFY_HASH) {
     return { date: today, venue: "central", race: null, analysis: null, settings: false, verify: true };
+  }
+  // 日報画面は `#report` と `#report=YYYYMMDD`(実在の日付)の完全一致だけ(日付以外・区分などを持たない画面)。
+  if (hash === REPORT_HASH) {
+    return { date: today, venue: "central", race: null, analysis: null, settings: false, report: { date: null } };
+  }
+  const reportMatch = /^#report=([0-9]{8})$/.exec(hash);
+  if (reportMatch !== null && isRealYmd(reportMatch[1]!)) {
+    return { date: today, venue: "central", race: null, analysis: null, settings: false, report: { date: reportMatch[1]! } };
   }
   let params: URLSearchParams;
   try {
@@ -93,7 +114,7 @@ export function buildHash(route: { readonly date: string; readonly venue: Venue;
 }
 
 /** 今の画面(Issue #191)。 */
-export type Screen = "list" | "race" | "result" | "settings" | "migration" | "verify";
+export type Screen = "list" | "race" | "result" | "settings" | "migration" | "verify" | "report";
 
 /**
  * 「今どの画面か」の判定の**唯一の場所**(Issue #191。#188 の申し送り)。`app.ts` は、画面ごとの分岐をすべてこの関数の `switch` で行う
@@ -104,6 +125,7 @@ export function screenOf(route: Route): Screen {
   if (route.settings) return "settings";
   if (route.migration === true) return "migration";
   if (route.verify === true) return "verify";
+  if (route.report !== undefined) return "report";
   if (route.analysis !== null) return "result";
   if (route.race !== null) return "race";
   return "list";

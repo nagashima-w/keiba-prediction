@@ -8,7 +8,8 @@
     "build:client": "tsx build-client.ts",
     "test": "vitest run",
     "deploy:dry": "wrangler deploy --dry-run --outdir dist-dry",
-    "smoke": "tsx smoke.ts"
+    "smoke": "tsx smoke.ts",
+    "report:prompt": "tsx print-report-prompt.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.70.1",

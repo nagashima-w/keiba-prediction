@@ -41,7 +41,7 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "NetkeibaGate"$/m);
   });
 
-  it("Issue #177・#216・#217・#219: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
+  it("Issue #177・#216・#217・#219・#235: 日単位の DO(RACE_DAY・RaceDay)は migration v2、移行の DO(CLOUD_MIGRATION・CloudMigration)は migration v3、結果の補完の DO(RESULT_BACKFILL・ResultBackfill)は migration v4、検証の集計の DO(VERIFY_REPORT・VerifyReportDO)は migration v5、日報の DO(DAILY_REPORT・DailyReportDO)は migration v6 で追加するだけ。v1(NetkeibaGate)は無変更で、new_classes・renamed・deleted は使わない", () => {
     const migrations = [...tomlCode.matchAll(/^\[\[migrations\]\]\ntag = "(v\d+)"\n(?:[^\n]*\n)*?new_sqlite_classes = \[([^\]]*)\]/gm)].map((m) => [m[1], m[2]]);
     expect(migrations).toEqual([
       ["v1", '"NetkeibaGate"'],
@@ -49,6 +49,7 @@ describe("wrangler.toml", () => {
       ["v3", '"CloudMigration"'],
       ["v4", '"ResultBackfill"'],
       ["v5", '"VerifyReportDO"'],
+      ["v6", '"DailyReportDO"'],
     ]);
     expect(tomlCode).toMatch(/^name = "RACE_DAY"$/m);
     expect(tomlCode).toMatch(/^class_name = "RaceDay"$/m);
@@ -58,9 +59,11 @@ describe("wrangler.toml", () => {
     expect(tomlCode).toMatch(/^class_name = "ResultBackfill"$/m);
     expect(tomlCode).toMatch(/^name = "VERIFY_REPORT"$/m);
     expect(tomlCode).toMatch(/^class_name = "VerifyReportDO"$/m);
+    expect(tomlCode).toMatch(/^name = "DAILY_REPORT"$/m);
+    expect(tomlCode).toMatch(/^class_name = "DailyReportDO"$/m);
     expect(tomlCode).not.toMatch(/^(renamed_classes|deleted_classes|transferred_classes)\s*=/m);
-    // DO のバインディングはちょうど5つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT)
-    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(5);
+    // DO のバインディングはちょうど6つ(NETKEIBA_GATE・RACE_DAY・CLOUD_MIGRATION・RESULT_BACKFILL・VERIFY_REPORT・DAILY_REPORT)
+    expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(6);
   });
 
   it("Issue #206: cron はちょうど1本で `0 0 * * *`(UTC 0:00 = JST 9:00)。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
@@ -105,7 +108,8 @@ describe("wrangler.toml", () => {
     }
     // Issue #208: 結果の依頼は dispatchResultImports に委譲する(1 箇所)。D1 は結果の未取込の列挙(D1ResultStore)にだけ使う(env.DB は 1 箇所)
     expect((scheduledCode.match(/\bdispatchResultImports\(/g) ?? []).length).toBe(1);
-    expect((scheduledCode.match(/\benv\.DB\b/g) ?? []).length).toBe(1);
+    // Issue #235: 日報の取り残しの列挙（D1ReportStore。読み取り 1 クエリ）にも env.DB を渡す。計 2 箇所（結果の未取込の列挙・日報の取り残しの列挙）。
+    expect((scheduledCode.match(/\benv\.DB\b/g) ?? []).length).toBe(2);
     expect(scheduledCode).toContain("CRON_RESULT_MAX_DAYS");
     expect(scheduledCode).toContain("resultWindowFor(");
     expect(scheduledCode).not.toMatch(/(\.|await\s+)fetch\(/);
@@ -164,10 +168,10 @@ describe("wrangler.toml", () => {
   it("Issue #208・#216: 手動の POST を受けるルートは 4 つだけ(/api/settings・/api/analyses/run・/api/results/import・/api/migration/upload)。結果の取り込みの POST は、run と同じ守り(readJsonObjectBody)を通り、D1 の列挙 → 日ごとの依頼を dispatchResultImports に任せる", () => {
     const code = stripCode(readTextLf("cloud", "src", "handler.ts"));
     expect(code.length).toBeGreaterThan(1000); // 前提: 読めている
-    // POST の分岐は 4 つ(`method === "POST"`)
-    expect((code.match(/method === "POST"/g) ?? []).length).toBe(4);
+    // POST の分岐は 5 つ(`method === "POST"`)
+    expect((code.match(/method === "POST"/g) ?? []).length).toBe(5);
     const routes = [...code.matchAll(/method === "POST" && new URL\(request\.url\)\.pathname === "([^"]+)"/g)].map((m) => m[1]);
-    expect(routes).toEqual(["/api/analyses/run", "/api/results/import", "/api/migration/upload"]); // settings は pathname の分岐の中で method を見る
+    expect(routes).toEqual(["/api/analyses/run", "/api/results/import", "/api/migration/upload", "/api/reports/run"]); // settings は pathname の分岐の中で method を見る
     expect(code).toMatch(/pathname === "\/api\/settings"/);
     // handleResultsImport の本体
     const start = code.indexOf("async function handleResultsImport(");
@@ -829,5 +833,84 @@ describe("Issue #219: 検証の集計(VerifyReportDO)は netkeiba にも LLM に
       expect(code.length, `${f} を読めている`).toBeGreaterThan(500);
       expect(code, `${f} は検証を参照しない`).not.toMatch(/VERIFY_REPORT|VerifyReport|verify-core|verify-do|verify-store/);
     }
+  });
+});
+
+describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discord を使う場所と、依頼の呼び出し箇所が固定されている", () => {
+  const srcDir = path.join(ROOT, "cloud", "src");
+  const srcFiles = readdirSync(srcDir).filter((f) => f.endsWith(".ts") && f !== "client-bundle.generated.ts");
+  const reportSources = ["daily-report-core.ts", "daily-report-digest.ts", "daily-report-bets.ts", "daily-report-prompt.ts", "daily-report-embed.ts", "daily-report-repository.ts", "daily-report-do.ts", "day-quiet.ts"].map(
+    (f) => [f, stripCode(readTextLf("cloud", "src", f))] as const,
+  );
+  /** コメントを除いた cloud/src の全ファイルで、パターンの出現数をファイルごとに数える(関数の宣言は数えない呼び出しの走査用)。 */
+  const sites = (pattern: RegExp): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const f of srcFiles) {
+      const n = (stripCode(readTextLf("cloud", "src", f)).match(pattern) ?? []).length;
+      if (n > 0) out[f] = n;
+    }
+    return out;
+  };
+
+  it("日報のソース(8 ファイル)に、netkeiba の取得口・日単位の DO・他の DO・グローバルの fetch・socket が無い", () => {
+    expect(reportSources).toHaveLength(8);
+    for (const [name, code] of reportSources) {
+      expect(code.length, `${name} を読めている`).toBeGreaterThan(300);
+      for (const forbidden of ["NETKEIBA_GATE", "fetchRaw", "postRaw", "RACE_DAY", "RaceDay", "CLOUD_MIGRATION", "RESULT_BACKFILL", "VERIFY_REPORT", "createGateHttpClient", "socket"]) {
+        expect(code, `${name} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+      expect((code.match(/(^|[^.\w])fetch\(/g) ?? []).length, `${name} にグローバルの fetch が無い`).toBe(0);
+    }
+  });
+
+  it("LLM の依存(createCloudLlm)を作るのは、発走前の分析の DO(race-day-do.ts)と日報の DO(daily-report-do.ts)の 2 箇所だけ。Discord の送信(createDiscordNotifier)も同じ 2 箇所", () => {
+    expect(sites(/(?<!function\s)\bcreateCloudLlm\(/g)).toEqual({ "daily-report-do.ts": 1, "race-day-do.ts": 1 });
+    expect(sites(/(?<!function\s)\bcreateDiscordNotifier\(/g)).toEqual({ "daily-report-do.ts": 1, "race-day-do.ts": 1 });
+  });
+
+  it("日報の作成の依頼(.requestReport( の呼び出し)の箇所: 手動 POST(handler.ts)・取り残しの補完(scheduled.ts)・日単位の DO の配線(race-day-do.ts)・その中の呼び出し(race-day-core.ts)・DO の RPC の委譲(daily-report-do.ts)だけ", () => {
+    expect(sites(/\.requestReport\(/g)).toEqual({ "daily-report-do.ts": 1, "handler.ts": 1, "race-day-core.ts": 1, "race-day-do.ts": 1, "scheduled.ts": 1 });
+    // 日報の DO の binding に触れるファイル: handler.ts（手動 POST・進行状況）・scheduled.ts（補完）・race-day-do.ts（日単位の DO の配線）・worker.ts（export）・daily-report-do.ts（クラス）
+    expect(Object.keys(sites(/\bDAILY_REPORT\b|\bDailyReportDO\b/g)).sort()).toEqual(["daily-report-do.ts", "handler.ts", "race-day-do.ts", "scheduled.ts", "worker.ts"]);
+    // 依頼の mode は 3 種類（auto は日単位の DO・catchup は cron・manual は手動 POST）で、呼び出し側が固定している
+    expect(stripCode(readTextLf("cloud", "src", "race-day-do.ts"))).toContain('mode: "auto"');
+    expect(stripCode(readTextLf("cloud", "src", "scheduled.ts"))).toContain('mode: "catchup"');
+    expect(stripCode(readTextLf("cloud", "src", "handler.ts"))).toContain('mode: "manual"');
+  });
+
+  it("日報の D1 の書き込みは daily-report-repository.ts の INSERT OR IGNORE INTO daily_reports の 1 文だけ(上書き・削除・他の表への書き込みが無い)。Worker の GET は読むだけ", () => {
+    const repo = reportSources.find(([n]) => n === "daily-report-repository.ts")![1];
+    expect((repo.match(/INSERT OR IGNORE INTO daily_reports/g) ?? []).length).toBe(1);
+    for (const forbidden of ["DELETE FROM", "UPDATE ", "REPLACE INTO", "INSERT INTO", "DROP ", "ALTER "]) {
+      expect(repo, `daily-report-repository.ts に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    for (const fn of ["handleReportList", "handleReportDetail"]) {
+      const start = handler.indexOf(`async function ${fn}(`);
+      expect(start, `${fn} がある`).toBeGreaterThan(-1);
+      const body = handler.slice(start, handler.indexOf("\n}\n", start));
+      expect(body.length, `${fn} の本体を読めている`).toBeGreaterThan(300);
+      for (const forbidden of [".saveReport(", ".requestReport(", "ANALYSIS_DETAIL", "NETKEIBA_GATE", "RACE_DAY", "ANTHROPIC", "DISCORD", "fetch(", ".prepare("]) {
+        expect(body, `${fn} に ${forbidden} が無い`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it("手動の作成（handleReportRun）は run と同じ守り(readJsonObjectBody)を先に通り、日報の DO の requestReport だけを呼ぶ。D1・R2・LLM・取得に触れない", () => {
+    const handler = stripCode(readTextLf("cloud", "src", "handler.ts"));
+    const start = handler.indexOf("async function handleReportRun(");
+    expect(start).toBeGreaterThan(-1);
+    const body = handler.slice(start, handler.indexOf("\n}\n", start));
+    expect(body.length).toBeGreaterThan(800);
+    expect(body.indexOf("readJsonObjectBody(")).toBeGreaterThan(-1);
+    expect(body.indexOf("readJsonObjectBody(")).toBeLessThan(body.indexOf(".requestReport("));
+    for (const forbidden of ["env.DB", "ANALYSIS_DETAIL", "NETKEIBA_GATE", "RACE_DAY", "ANTHROPIC", "DISCORD", "fetch(", ".prepare("]) {
+      expect(body, `handleReportRun に ${forbidden} が無い`).not.toContain(forbidden);
+    }
+  });
+
+  it("cron は 1 本のまま(日報のために cron を足していない)。起動は日単位の DO のイベント（静かになったとき）と、朝の cron の補完・手動", () => {
+    expect((tomlCode.match(/^crons\s*=\s*\[[^\]]*\]\s*$/gm) ?? []).length).toBe(1);
+    expect(tomlCode).toContain('crons = ["0 0 * * *"]');
   });
 });

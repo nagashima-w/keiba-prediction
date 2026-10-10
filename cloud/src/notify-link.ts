@@ -6,7 +6,7 @@
  *    結果に入力の値は入れない(invalid のとき、値の一部もログ・応答に出ない)。
  *  - {@link buildAnalysisLink}: 分析画面へのリンク。ハッシュの形は、クライアントの `buildHash`(`cloud/client/route.ts`。`parseHash` が読む)をそのまま使う(形を二重に持たない)。
  */
-import { buildHash } from "../client/route";
+import { buildHash, buildReportHash } from "../client/route";
 
 export type AppBaseUrlResolution =
   | { readonly status: "absent" }
@@ -63,4 +63,9 @@ export function buildAnalysisLink(origin: string, input: AnalysisLinkInput): str
   }
   const race = /^[0-9]{12}$/.test(input.raceId) ? input.raceId : null;
   return `${origin}/${buildHash({ date: input.date, venue: input.venue, race, analysis: analysisId })}`;
+}
+
+/** その日の日報へのリンク(`<オリジン>/#report=YYYYMMDD`。Issue #235)。開催日が 8 桁の数字でなければ undefined(リンクを作らない)。 */
+export function buildReportLink(origin: string, kaisaiDate: string): string | undefined {
+  return /^[0-9]{8}$/.test(kaisaiDate) ? `${origin}/${buildReportHash(kaisaiDate)}` : undefined;
 }

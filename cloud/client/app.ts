@@ -40,6 +40,9 @@
  * **Issue #219(検証画面。`#verify`)**: 一覧の入口のリンク先の**別の画面**。状態・取得・区分の切替・更新・ポーリングは `verify-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画・可視状態の中継だけ。
  *  - 開くと `GET /api/verify?venue=all` だけを取る(一覧・板・設定・レース・分析は取らない)。他の画面は `/api/verify` を取らない。補完中だけ自動で取り直し(3〜5 秒)、離れると状態・タイマー・遅れて届く応答を捨てる。
  *
+ * **Issue #235(日報画面。`#report`・`#report=YYYYMMDD`)**: 一覧の入口のリンク先の**別の画面**。状態・取得・日付の切替・手動の作成・作成中のポーリングは `report-screen.ts` が持ち、ここは出入り(`enter`・`leave`)・描画・可視状態を渡すだけ。
+ *  - 開くと `GET /api/reports`(日付の一覧)と、表示する日の `GET /api/reports/{date}` だけを取る(一覧・板・設定・レース・分析・検証は取らない)。他の画面は `/api/reports` を取らない。作成中だけ自動で取り直し(5 秒)、離れると状態・タイマーを捨てる。
+ *
  * **Issue #188(発走前の結果をレース画面のカードの中に出す)**:
  *  - 最新の分析 = 板の発走前の行が `done` で `analysisId` を持つときのその id(`race.ts` の `latestAnalysisIdOf`。取る・出すの判定は同じ関数)。
  *  - 取得は `loadAnalysis`(id ごとに 1 回。結果画面と**同じキャッシュ・同じ 3 つの門**〈`analyses`・`analysisErrors`・`analysisInflight`〉)。再描画・ポーリング・hashchange の連打では増えない。失敗は自動で再試行しない。
@@ -60,6 +63,7 @@ import { buildResultModel, type ResultSource } from "./result";
 import { buildSettingsModel, draftFromSettings, resetWeightsInDraft, setDraftValue, validateDraft, WEIGHT_FIELD_ORDER, type FieldErrors, type FieldKey, type SettingsDraft, type SettingsLoadState, type SettingsSaveState } from "./settings-form";
 import { createMigrationScreen } from "./migration-screen";
 import { createVerifyScreen } from "./verify-screen";
+import { createReportScreen } from "./report-screen";
 import { buildHash, parseHash, screenOf, type Route, type Venue } from "./route";
 import { createTracker, trackingMessage, type CycleResult } from "./tracker";
 import { renderScreen } from "./view";
@@ -256,6 +260,15 @@ export function createApp(deps: AppDeps): App {
     onChange: () => render(),
   });
 
+  // ---- 日報画面(Issue #235) ----
+  const report = createReportScreen({
+    fetch: deps.fetch,
+    timers: deps.timers,
+    isVisible: deps.isVisible,
+    today: () => todayJst(deps.now()),
+    onChange: () => render(),
+  });
+
   const actions = {
     onDateChange,
     onRefresh,
@@ -273,6 +286,7 @@ export function createApp(deps: AppDeps): App {
     onMigrationCancelCheck: migration.onCancelCheck,
     onVerifyVenue: verify.onVenue,
     onVerifyVersionToggle: verify.onVersionToggle,
+    onReportRun: report.onRun,
   };
 
   function render(force = false): void {
@@ -320,6 +334,10 @@ export function createApp(deps: AppDeps): App {
       }
       case "verify": {
         deps.render(renderScreen(verify.model(), actions), force);
+        return;
+      }
+      case "report": {
+        deps.render(renderScreen(report.model(), actions), force);
         return;
       }
       case "list": {
@@ -502,6 +520,9 @@ export function createApp(deps: AppDeps): App {
         return;
       case "verify":
         verify.enter();
+        return;
+      case "report":
+        report.enter(route.report?.date ?? null); // 同じ画面の中の日付の切替も、ここ(重ねて呼んでも同じ日の取得は増えない)
         return;
       default:
         return assertNever(screen);
@@ -692,10 +713,12 @@ export function createApp(deps: AppDeps): App {
     const wasSettings = screenOf(route) === "settings";
     const wasMigration = screenOf(route) === "migration";
     const wasVerify = screenOf(route) === "verify";
+    const wasReport = screenOf(route) === "report";
     route = parseHash(deps.getHash(), todayJst(deps.now()));
     if (wasSettings && screenOf(route) !== "settings") leaveSettings(); // 画面を離れたら下書きを破棄する
     if (wasMigration && screenOf(route) !== "migration") migration.leave(); // 移行の状態(検証・タイマー・遅れて届く応答)を破棄する
     if (wasVerify && screenOf(route) !== "verify") verify.leave(); // 検証の状態(タイマー・遅れて届く応答)を破棄する
+    if (wasReport && screenOf(route) !== "report") report.leave(); // 日報の状態(タイマー・遅れて届く応答)を破棄する
     ensureLoaded();
     render();
   }
@@ -776,6 +799,10 @@ export function createApp(deps: AppDeps): App {
         // 取得中は何もしない(`onRefresh` が見る)。再計算の要求(refresh=1)。画面の再描画は状態の変化(`onChange`)で行われる。
         verify.onRefresh();
         return;
+      case "report":
+        // 取得中は何もしない(`onRefresh` が見る)。一覧と本文を取り直す。画面の再描画は状態の変化(`onChange`)で行われる。
+        report.onRefresh();
+        return;
       case "settings": {
         // 取得中・保存中は何もしない(同じものを同時に 2 本取らない・保存中の入力を捨てない)。未保存の入力は捨てて、サーバの値を取り直す。
         if (settingsLoad?.kind === "loading" || settingsSave.kind === "saving") return;
@@ -798,10 +825,11 @@ export function createApp(deps: AppDeps): App {
       tracker.onVisibilityChange();
       migration.onVisibilityChange();
       verify.onVisibilityChange();
+      report.onVisibilityChange();
     },
     async whenIdle() {
       // 取得が終わるたびに新しい取得は始まらない(失敗の自動再試行なし。追跡のタイマーは偽・実物とも待たない)ので、数回の確認で必ず止まる。
-      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...migration.pending(), ...verify.pending()];
+      const pending = () => [...raceInflight.values(), ...boardInflight.values(), ...raceStatusInflight.values(), ...pastInflight.values(), ...analysisInflight.values(), ...pollInflight, ...runInflight, ...settingsInflight, ...migration.pending(), ...verify.pending(), ...report.pending()];
       for (let i = 0; i < 10 && pending().length > 0; i += 1) {
         await Promise.all(pending());
       }

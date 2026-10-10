@@ -156,6 +156,16 @@ export function renderPage(email: string): string {
   /* Issue #219: 検証画面(一覧の入口のリンク・区分の切替・数値のタイル・内訳の行。スマホ幅で横に伸ばさない=タイルは 2 列・行は折り返す。色だけに頼らない=回収率は太字) */
   .verify-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; margin-left: auto; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
   .verify-link + .settings-link { margin-left: 0; }
+  /* Issue #235: 日報画面(一覧の入口のリンク・レースごとのカード・箇条書き・生の文章。スマホ幅で横に伸ばさない=改行で折り返す) */
+  .report-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--card); }
+  .report-link + .settings-link { margin-left: 0; }
+  .report-run { min-height: 44px; margin: 8px 0; }
+  .report-list { margin: 4px 0 8px; padding-left: 1.3em; }
+  .report-summary { margin: 4px 0 8px; overflow-wrap: anywhere; }
+  .report-raw { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+  .report-race { margin: 10px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .report-race h3 { margin: 0 0 4px; font-size: 1rem; }
+  .report-race p { margin: 2px 0; overflow-wrap: anywhere; font-size: 0.9rem; }
   .verify-venues { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
   .verify-venue { min-width: 64px; }
   .verify-venue[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: bold; }

@@ -16,9 +16,11 @@
  * **`kick` の失敗は握る**(分類 `backfill-kick-failed` だけをログに出す)。朝の計画・既存の結果の依頼を失敗させない。
  */
 import { jstKaisaiDate } from "./auto-run-plan";
-import type { BackfillNamespaceLike, RaceDayNamespaceLike } from "./handler";
+import type { BackfillNamespaceLike, DailyReportNamespaceLike, RaceDayNamespaceLike } from "./handler";
+import { DAILY_REPORT_NAME } from "./daily-report-core";
+import { D1ReportStore } from "./daily-report-repository";
 import { RESULT_BACKFILL_NAME } from "./result-backfill-core";
-import { CRON_RESULT_MAX_DAYS, dispatchResultImports, errorKind, resultWindowFor, type DispatchStore } from "./result-dispatch";
+import { addDaysToKaisaiDate, CRON_RESULT_MAX_DAYS, dispatchResultImports, errorKind, resultWindowFor, type DispatchStore } from "./result-dispatch";
 import { D1ResultStore, type ResultDb } from "./result-repository";
 
 /** 失敗したときの再試行の前の待ち(ミリ秒)。試行は最初の即時と合わせて `長さ + 1` 回。 */
@@ -33,6 +35,8 @@ export interface ScheduledEnv {
   readonly DB: ResultDb;
   /** 結果の補完の DO(Issue #217)。無い構成では kick を呼ばない。 */
   readonly RESULT_BACKFILL?: BackfillNamespaceLike;
+  /** 日報の DO(Issue #235)。無い構成では日報の取り残しの補完をしない。 */
+  readonly DAILY_REPORT?: DailyReportNamespaceLike;
 }
 
 export interface ScheduledDeps {
@@ -41,6 +45,9 @@ export interface ScheduledDeps {
   /** 結果の未取込の列挙（省略時は `env.DB` から `D1ResultStore` を作る）。テストで差し替える。 */
   readonly store?: DispatchStore;
 }
+
+/** 日報の取り残しをさかのぼる日数(今日の前日まで。Issue #235)。 */
+export const REPORT_CATCHUP_DAYS = 3;
 
 const defaultLog = (line: string, level: "info" | "error"): void => {
   if (level === "error") {
@@ -102,8 +109,38 @@ export async function runScheduled(controller: { readonly scheduledTime: number 
     }
   }
 
+  // 日報の取り残しの補完(Issue #235)。前日以前の最大 REPORT_CATCHUP_DAYS 日で、分析があるのに日報が無い日を、日報の DO へ依頼する(今日は依頼しない: 今日は日単位の DO が、
+  // その日が静かになったときに依頼する。cron の時刻・曜日には依存しない)。計画・結果の依頼の成否によらず走らせ、失敗しても投げない(分類だけをログに出す)。
+  if (env.DAILY_REPORT !== undefined) {
+    await requestReportCatchup(env.DAILY_REPORT, env.DB, kaisaiDate, log);
+  }
+
   if (!planned) {
     log(`scheduled: failed class=request-plan-failed date=${kaisaiDate}`, "error");
     throw new Error(SCHEDULED_FAILURE_MESSAGE);
+  }
+}
+
+/** 日報の取り残しを列挙して、1 日ずつ日報の DO へ依頼する。投げない(失敗は分類だけをログに出し、残りの日を続ける)。 */
+async function requestReportCatchup(
+  namespace: DailyReportNamespaceLike,
+  db: ScheduledEnv["DB"],
+  today: string,
+  log: (line: string, level: "info" | "error") => void,
+): Promise<void> {
+  let dates: string[];
+  try {
+    dates = await new D1ReportStore({ db }).listDatesNeedingReport(addDaysToKaisaiDate(today, -REPORT_CATCHUP_DAYS), addDaysToKaisaiDate(today, -1));
+  } catch (error) {
+    log(`scheduled: failed class=report-catchup-failed error=${errorKind(error)}`, "error");
+    return;
+  }
+  for (const kaisaiDate of dates) {
+    try {
+      const result = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate, mode: "catchup" });
+      log(`scheduled: report-catchup date=${kaisaiDate} accepted=${String(result.accepted)}${result.accepted ? "" : ` reason=${result.reason}`}`, "info");
+    } catch (error) {
+      log(`scheduled: failed class=report-catchup-failed date=${kaisaiDate} error=${errorKind(error)}`, "error");
+    }
   }
 }

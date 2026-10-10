@@ -71,6 +71,7 @@ import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { checkRaceDate } from "./race-date";
 import { jstKaisaiDate, planPreRaceDue, selectAutoRunTargets } from "./auto-run-plan";
+import { isDayQuiet } from "./day-quiet";
 import { AUTO_RUN_STARTED_ERROR, classifyAutoRun, type AutoFailReason, type AutoRunOutcome } from "./auto-run-result";
 import { buildAnalysisLink } from "./notify-link";
 import { buildAnalysisNotificationEmbed, buildFailureEmbed, buildManualSkipEmbed, buildMinimalAnalysisEmbed, buildSummaryEmbed, notificationText, type CloudEmbed, type RaceLabel } from "./notify-embeds";
@@ -111,6 +112,9 @@ import { runCloudAnalysis, type CloudAnalysisResult } from "./pipeline";
 import { buildCloudScorerConfig } from "./scorer-config";
 import { ADDITIONAL_INSTRUCTION_MAX_LENGTH, coerceCloudSettings, DEFAULT_CLOUD_SETTINGS, type CloudSettings } from "./settings";
 import type { SqlLike } from "./sql-like";
+
+/** 日報の作成を依頼済みの印(Issue #235。依頼した時刻〈エポックミリ秒〉)を永続化するキー。 */
+const REPORT_REQUESTED_KEY = "report_requested";
 
 /** 掃除の時刻(エポックミリ秒)を永続化するキー。 */
 const PURGE_DUE_KEY = "purge_due_at";
@@ -277,6 +281,12 @@ export interface RaceDayDeps {
    * 使うのは `saveResult`(取り込みのステップ)と `getRaceResultDetails`(Issue #209: 発走前の計算ステップが、前のレースの結果から当日傾向を作る。無い構成は当日傾向なし)。
    */
   readonly resultStore?: ResultStoreDeps;
+  /**
+   * 日報の作成の依頼(Issue #235。DO のラッパが、日報の DO〈`DailyReportDO`〉の `requestReport` を呼ぶ関数を渡す)。**無ければ依頼しない**。
+   * その日が静かになった({@link isDayQuiet}: 計画が確定し、計画中のレースも発走前のタスクも結果の取り込み待ちも無い)とき、1 回だけ開催日を渡して呼ぶ。
+   * 成功したら依頼済みの印を書く(以降は呼ばない)。失敗は固定の警告だけを残し、印を書かない(次の起床で再び依頼する)。
+   */
+  readonly requestReport?: (kaisaiDate: string) => Promise<void>;
 }
 
 export interface ScheduleInput {
@@ -575,6 +585,8 @@ export class RaceDayCore {
   private readonly results: ResultImportStore;
   /** 結果の保存先。無ければ結果の仕組み全体が無効。 */
   private readonly resultStore: ResultStoreDeps | undefined;
+  /** 日報の作成の依頼(Issue #235)。無ければ依頼しない。 */
+  private readonly requestReport: ((kaisaiDate: string) => Promise<void>) | undefined;
   /** gate 経由・キャッシュなしの取得(結果のページ用。`networkFetcher` と同じ直列化した gate を使う)。 */
   private readonly httpClient: HttpClient;
   private readonly cache: DoSqlCacheStore;
@@ -618,6 +630,7 @@ export class RaceDayCore {
     // 結果の取り込みの表(Issue #208。新しい表だけ。既存の表には ALTER しない)。
     this.results = new ResultImportStore(this.sql);
     this.resultStore = deps.resultStore;
+    this.requestReport = deps.requestReport;
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     // 結果のページは同じ HttpClient(同じ直列化した gate)を、キャッシュを通さずに使う(DO の SQLite に結果のページを溜めない。Issue #208)。
@@ -1069,6 +1082,7 @@ export class RaceDayCore {
       const due = this.resultsRunnable() ? this.results.nextDue(this.now()) : null;
       if (due !== null) {
         const outcome = await this.runResultStep(due);
+        await this.maybeRequestReport();
         await this.armAlarm();
         return outcome;
       }
@@ -1490,6 +1504,8 @@ export class RaceDayCore {
    * まだ掃除の時刻前なら、何も消さず、同じ時刻にアラームを設定し直す(早く起きても掃除を取りこぼさない)。掃除の予約が無ければ何もしない。
    */
   private async wakeWithoutWork(): Promise<StepOutcome> {
+    // 日報の依頼が失敗していたら、この起床(掃除専用のアラームを含む)で再び依頼する(Issue #235)。
+    await this.maybeRequestReport();
     const dueText = this.metaGet(PURGE_DUE_KEY);
     if (dueText === null) {
       await this.rearm();
@@ -1585,6 +1601,40 @@ export class RaceDayCore {
   }
 
   // ---- 結果の取り込み(Issue #208)----
+
+  /**
+   * 日報の作成を依頼する(Issue #235)。**その日が静かになった**({@link isDayQuiet})とき、1 回だけ。呼ぶのは、結果の 1 レースを取り込んだ直後と、仕事が無い起床。
+   * 依頼先が無い(`requestReport` なし)・開催日が未確定・依頼済み(meta の `report_requested`)・静かでないときは何もしない。
+   * 失敗(依頼先の例外)は握る: 例外の本文は残さず、固定の警告だけを出す。印を書かないので、次の起床で再び依頼する(日報の作成は冪等で、作成済み・進行中は依頼先が断る)。
+   */
+  private async maybeRequestReport(): Promise<void> {
+    if (this.requestReport === undefined || this.metaGet(REPORT_REQUESTED_KEY) !== null) {
+      return;
+    }
+    const kaisaiDate = this.metaGet("kaisai_date");
+    if (kaisaiDate === null) {
+      return;
+    }
+    const pending = (this.sql.exec("SELECT COUNT(*) AS n FROM race_day_tasks WHERE status IN ('queued', 'fetched')").toArray() as { n: number }[])[0]?.n ?? 0;
+    const resultRows = this.results.rows();
+    const quiet = isDayQuiet({
+      planFinalized: this.plan.finalizedAt() !== null,
+      plannedRows: this.plan.plannedCount(),
+      pendingTasks: pending,
+      resultRows: resultRows.length,
+      queuedResults: resultRows.filter((r) => r.state === "queued").length,
+    });
+    if (!quiet) {
+      return;
+    }
+    try {
+      await this.requestReport(kaisaiDate);
+    } catch {
+      this.onWarn(`日報の作成の依頼に失敗しました(${kaisaiDate}。次の起床で再び依頼します)`);
+      return;
+    }
+    this.sql.exec("INSERT INTO race_day_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", REPORT_REQUESTED_KEY, String(this.now()));
+  }
 
   /**
    * 結果の取り込みが動ける状態か: 結果ストアがあり、**タスク(queued・fetched)が無く、計画の段階が終わっている**({@link PlanStore.planStageSettled}: 会場の一覧・確定の途中でない。

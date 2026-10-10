@@ -449,6 +449,16 @@ exe の検証画面のうち、累積回収率と配分ベースの回収率を�
 - **測定の再現**: `pnpm tsx scripts/measure-verify.ts [--bets 12] [--versions 1] [--instruction-length 0] [--repeat 5]`(リポジトリのルートで。Linux のみ。ローカルの workerd だけを使い、本番には触れない。実行中に `cloud/wrangler.measure-verify.generated.toml` を作る〈`.gitignore` 済み〉)。
 - **検証画面(2)(Issue #220。v1.35.0)**: 補正方向×結果・キャリブレーション(5% 刻み 20 帯)・印別的中率・プロンプト版別の比較(版別のキャリブレーションは開閉)を足した。`GET /api/verify` の `ready` 応答に `promptVersions`(版別は区分に依らず全体。画面が使う項目だけに射影)が加わり、**DO の kv のキャッシュの形式の版を 1 → 2 に上げた**ので、デプロイ後の最初の `GET /api/verify` が 1 回再計算する(1 日 20 回の数に入る)。版別の応答の大きさは追加指示の長さで決まる(追加指示が 2,000 文字の版が 13 個あるとき、ローカルの合成データで応答の本文が約 118KB)。**デプロイ後の応答の大きさで実際の版の数・追加指示の長さを確かめる**。実測の表と手順は `docs/current-spec.md` の「クラウド版の検証画面(2)」。
 
+## 日報(Issue #235。**公開すると、その日が静かになった時点で LLM を 1 回呼び、Discord に要約を送る**)
+
+その日に発走前の分析をした全レースの予想と結果から、統計(決定的に計算)と LLM の振り返り(良かった点・改善点)の「日報」を作り、web に保存して Discord に要約を送る。仕組み・条件・記録は `docs/current-spec.md` の「クラウド版の日報」。
+
+- **いつ作るか**: 時刻・曜日の決め打ちなし。日単位の DO が、計画が確定し・計画中のレースも発走前のタスクも結果の取り込み待ちも無くなったとき(`src/day-quiet.ts`)に、日報の DO(`DAILY_REPORT`。`src/daily-report-do.ts`)へ 1 回だけ依頼する。朝の cron は前日以前の最大 3 日の取り残しを補う。手動は画面の「この日の日報を作る」(`POST /api/reports/run`)。**cron は増やしていない**。
+- **画面**: トップの「日報」→ `#report`。日付ごとに、成績のタイル・良かった点・改善点・券種別/印別・レースごとの着順と買い目の結果。
+- **確認**: `pnpm run report:prompt`(`-- --races 36` で 36 レース)は、偽のデータで LLM に渡す最終プロンプトと Discord の embed を表示する。**実 API・netkeiba には出ない**。
+- **止め方**: LLM を止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除(統計だけの日報になる)。Discord を止めるなら `DISCORD_WEBHOOK_URL` を削除。日報の作成そのものを止める必要があるときは、`wrangler.toml` の `DAILY_REPORT` の binding を外してデプロイする(日単位の DO は日報の DO が無い構成では依頼しない)。
+- **コスト**: LLM は 1 日 1 回(`analysisModel` の設定に従う)。D1 の読み取りは 1 日あたり数十クエリ、書き込みは 1 行。R2 の読み出しは 1 レースにつき 1 回(柵の対象)。
+
 ## スコアリングの重み(Issue #218。v1.31.0。**保存した重みは、保存後に始まる朝の準備・発走前の分析から使われる**)
 - **何をするか**: exe の設定にある重み13項目(バイアス7・基礎6)を、設定(`cloud_settings`)と設定画面に足した。分析の `scorerConfig` に渡す(これまでは渡さず、core の既定値で動いていた)。キーは平坦な接頭辞つき(`biasWeightVenue`・`baseScoreWeightRecentForm` など。exe のキーとの対応は `src/settings.ts` の `SCORING_WEIGHT_FIELDS`)。
 - **既定値・検証**: 既定値は core の `DEFAULT_SCORER_CONFIG`(= exe)と同じ(一致をテストで固定)。検証は exe の `isValidWeight` と同じ(有限な数で 0 以上。上限なし)。D1 の行に重みが無ければ(今の本番)既定値で動くので、**重みを変えなければ今までと同じ結果**。D1 のスキーマは無変更(migration は無い)。

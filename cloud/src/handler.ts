@@ -22,6 +22,8 @@ import type { AutoRunResults, Board, MorningPrior, NotificationRecord, PlanProgr
 import { jstKaisaiDate } from "./auto-run-plan";
 import { addDaysToKaisaiDate, dispatchResultImports, MANUAL_RESULT_MAX_DAYS } from "./result-dispatch";
 import { D1ResultStore } from "./result-repository";
+import { D1ReportStore } from "./daily-report-repository";
+import { DAILY_REPORT_NAME, type ReportMode, type ReportStatus, type RequestReportResult } from "./daily-report-core";
 import type { MigrationStatus, StartResult } from "./migration-core";
 import { RESULT_BACKFILL_NAME, type BackfillStatus } from "./result-backfill-core";
 import type { GetReportOptions, VerifyResponse } from "./verify-core";
@@ -119,6 +121,21 @@ export interface VerifyNamespaceLike {
 /** 検証の DO の固定名(単一インスタンス)。 */
 const VERIFY_NAME = "main";
 
+/** 日報の DO(DailyReportDO)のスタブの、使う部分だけの型(RPC なので Promise)。Issue #235。 */
+export interface DailyReportStubLike {
+  /** 日報の作成の依頼(冪等。進行中・作成済みは断る)。 */
+  requestReport(input: { readonly kaisaiDate: string; readonly mode: ReportMode }): Promise<RequestReportResult>;
+  /** 進行状況(無ければ null)。 */
+  getStatus(kaisaiDate: string): Promise<ReportStatus | null>;
+}
+
+/** 日報の DO の名前空間の、使う部分だけの型。単一インスタンス(固定名 {@link DAILY_REPORT_NAME})。 */
+export interface DailyReportNamespaceLike {
+  idFromName(name: string): any;
+  get(id: any): DailyReportStubLike;
+}
+
+
 export interface Env extends AccessEnv {
   NETKEIBA_GATE: GateNamespaceLike;
   /** 日単位の DO(RaceDay。wrangler.toml の binding)。Issue #177・#180。 */
@@ -129,6 +146,8 @@ export interface Env extends AccessEnv {
   RESULT_BACKFILL?: BackfillNamespaceLike;
   /** 検証の集計の DO(VerifyReportDO。wrangler.toml の binding)。Issue #219。本番では常にある。無い構成では `GET /api/verify` が 503 になる。 */
   VERIFY_REPORT?: VerifyNamespaceLike;
+  /** 日報の DO(DailyReportDO。wrangler.toml の binding)。Issue #235。本番では常にある。無い構成では `POST /api/reports/run` が 503 になり、cron は日報の取り残しの補完をしない(一覧・本文の GET は D1 を読むだけなので動く)。 */
+  DAILY_REPORT?: DailyReportNamespaceLike;
   /** D1(分析履歴。wrangler.toml の `[[d1_databases]]` の binding)。Issue #171。 */
   DB: AnalysisDb;
   /** R2(分析の詳細オブジェクト。wrangler.toml の `[[r2_buckets]]` の binding)。Issue #174・#175。get と put だけを使う。 */
@@ -206,17 +225,21 @@ export async function handle(
       headers: { ...SECURITY_HEADERS, allow: "GET, POST", "content-type": "text/plain; charset=utf-8" },
     });
   }
-  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload` の 4 本だけ**(下の 2 本は Issue #208・#216)。認証(上)の後で、Origin の確認・入力の検証を行う。
+  // 手動起動の入口(Issue #180)。**POST を受けるのは、`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run` の 5 本だけ**(下の 3 本は Issue #208・#216・#235)。認証(上)の後で、Origin の確認・入力の検証を行う。
   if (method === "POST" && new URL(request.url).pathname === "/api/analyses/run") {
     return handleRun(request, env);
   }
-  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 4 本(上の 2 つ〈`/api/settings`・`/api/analyses/run`〉・ここ・下の `/api/migration/upload`)。
+  // 手動の結果の取り込み(Issue #208)。窓（cron の過去 7 日）より古いぶんの取り込み用。POST の入口は全部で 5 本(上の 2 つ〈`/api/settings`・`/api/analyses/run`〉・ここ・下の `/api/migration/upload`・`/api/reports/run`〈Issue #235〉)。
   if (method === "POST" && new URL(request.url).pathname === "/api/results/import") {
     return handleResultsImport(request, env, deps.now ?? (() => new Date()), log);
   }
-  // 移行ファイルの受け取り(Issue #216)。**POST を受けるのは、ここを含めて 4 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload`)。
+  // 移行ファイルの受け取り(Issue #216)。
   if (method === "POST" && new URL(request.url).pathname === "/api/migration/upload") {
     return handleMigrationUpload(request, env, log);
+  }
+  // 日報の手動の作成(Issue #235)。**POST を受けるのは、ここを含めて 5 つだけ**(`/api/settings`・`/api/analyses/run`・`/api/results/import`・`/api/migration/upload`・`/api/reports/run`)。
+  if (method === "POST" && new URL(request.url).pathname === "/api/reports/run") {
+    return handleReportRun(request, env, deps.now ?? (() => new Date()));
   }
   if (method !== "GET" && method !== "HEAD") {
     return new Response("method not allowed", {
@@ -301,6 +324,25 @@ export async function handle(
       });
     }
     return handleMigrationStatus(env);
+  }
+
+  if (pathname === "/api/reports/run") {
+    // POST だけ(上で処理済み)。GET・HEAD などは 405。
+    return new Response("method not allowed", {
+      status: 405,
+      headers: { ...SECURITY_HEADERS, allow: "POST", "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  if (pathname === "/api/reports" || pathname.startsWith("/api/reports/")) {
+    // 読み取り専用(D1 の daily_reports を読むだけ。netkeiba にも LLM にも出ない)。GET だけ(HEAD で D1 を引かない)。Issue #235。
+    if (method !== "GET") {
+      return new Response("method not allowed", {
+        status: 405,
+        headers: { ...SECURITY_HEADERS, allow: "GET", "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return pathname === "/api/reports" ? handleReportList(new URL(request.url), env) : handleReportDetail(new URL(request.url), pathname.slice("/api/reports/".length), env);
   }
 
   if (pathname === "/api/verify") {
@@ -1065,6 +1107,125 @@ async function handleResultsImport(request: Request, env: Env, now: () => Date, 
   } catch {
     // dispatchResultImports は投げない設計だが、準備(ストアの生成など)の例外も文面を出さない。
     return json({ ok: false, error: { type: "result-import-error" } }, 503);
+  }
+}
+
+/** 日報の一覧の件数(画面が最近の日付を並べる数。D1 の本文は読まない)。 */
+const REPORT_LIST_LIMIT = 60;
+
+/**
+ * `GET /api/reports`(Issue #235): 日報の一覧(開催日の新しい順。本文を含まない)。クエリは受け付けない(400)。D1 の失敗は 503(固定の型だけ。例外の文面は返さない)。
+ */
+async function handleReportList(url: URL, env: Env): Promise<Response> {
+  if ([...url.searchParams.keys()].length > 0) {
+    return badRequest("このパスにクエリは指定できません");
+  }
+  try {
+    const rows = await new D1ReportStore({ db: env.DB }).listReports(REPORT_LIST_LIMIT);
+    return json({
+      ok: true,
+      reports: rows.map((r) => ({ date: r.kaisaiDate, created_at: r.createdAt, model: r.model, race_count: r.raceCount, total_stake: r.totalStake, total_return: r.totalReturn, summary: r.summary })),
+    });
+  } catch {
+    return json({ ok: false, error: { type: "report-error" } }, 503);
+  }
+}
+
+/**
+ * `GET /api/reports/{YYYYMMDD}`(Issue #235): 1 日の日報(本文つき)。無い日は `report: null` で、日報の DO の進行状況(作成中・失敗)を `job` に付ける
+ * (DO が失敗・binding なしでも 200 で `job: null`。画面を壊さない)。日報があるときは DO を呼ばない。開催日の形が違えば 404(D1 を引かない)。クエリは受け付けない(400)。
+ */
+async function handleReportDetail(url: URL, dateText: string, env: Env): Promise<Response> {
+  if (!/^[0-9]{8}$/.test(dateText) || !checkKaisaiDate(dateText).ok) {
+    return json({ ok: false, error: { type: "not-found" } }, 404);
+  }
+  if ([...url.searchParams.keys()].length > 0) {
+    return badRequest("このパスにクエリは指定できません");
+  }
+  let report;
+  try {
+    report = await new D1ReportStore({ db: env.DB }).getReport(dateText);
+  } catch {
+    return json({ ok: false, error: { type: "report-error" } }, 503);
+  }
+  if (report !== null) {
+    return json({
+      ok: true,
+      report: {
+        date: report.kaisaiDate,
+        created_at: report.createdAt,
+        model: report.model,
+        race_count: report.raceCount,
+        total_stake: report.totalStake,
+        total_return: report.totalReturn,
+        summary: report.summary,
+        body: report.body,
+      },
+      job: null,
+    });
+  }
+  let job: ReportStatus | null = null;
+  try {
+    const namespace = env.DAILY_REPORT;
+    if (namespace !== undefined) {
+      const status = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).getStatus(dateText);
+      // 固定の形だけを写す(DO から別の値が来ても、そのまま返さない)。
+      job = status === null ? null : { phase: status.phase, status: status.status, attempts: status.attempts };
+    }
+  } catch {
+    job = null;
+  }
+  return json({ ok: true, report: null, job });
+}
+
+const REPORT_RUN_BODY_MAX_BYTES = 1024;
+const REPORT_RUN_KEYS = new Set(["date"]);
+
+/**
+ * `POST /api/reports/run`(Issue #235): 指定した開催日の日報を、日報の DO に依頼する(202)。本文は JSON `{ date }`(JST の開催日 8 桁。今日以前)。
+ * 順序: 守り(`readJsonObjectBody`。Origin 403 → Content-Type 415 → 本文の大きさ 413 → JSON のオブジェクト 400)→ 入力の検証(400。ここまでで DO は呼ばない)→ DO。
+ * 作成済み・作成中は 409(`already-exists`・`in-progress`)。DO の失敗・binding なしは 503 `report-error`(文面を返さない)。Worker は LLM も netkeiba も呼ばない(作るのは DO のアラーム)。
+ */
+async function handleReportRun(request: Request, env: Env, now: () => Date): Promise<Response> {
+  const guarded = await readJsonObjectBody(request, REPORT_RUN_BODY_MAX_BYTES);
+  if (!guarded.ok) {
+    return guarded.response;
+  }
+  const record = guarded.body;
+  if (Object.keys(record).some((k) => !REPORT_RUN_KEYS.has(k))) {
+    return badRequest("本文のキーは date だけです");
+  }
+  const date = record["date"];
+  if (typeof date !== "string") {
+    return badRequest("date は YYYYMMDD の 8 桁の文字列で指定してください");
+  }
+  const checked = checkKaisaiDate(date.slice(0, 32));
+  if (!checked.ok) {
+    return badRequest(checked.message);
+  }
+  const today = jstKaisaiDate(now().getTime());
+  if (date > today) {
+    return badRequest(`date は今日(${today})以前にしてください`);
+  }
+  try {
+    const namespace = env.DAILY_REPORT;
+    if (namespace === undefined) {
+      throw new Error("DAILY_REPORT binding がありません");
+    }
+    const result = await namespace.get(namespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate: date, mode: "manual" });
+    if (!result.accepted) {
+      if (result.reason === "exists") {
+        return json({ ok: false, error: { type: "already-exists" } }, 409);
+      }
+      if (result.reason === "in-progress") {
+        return json({ ok: false, error: { type: "in-progress" } }, 409);
+      }
+      // 検証で弾いたはずの理由(不正・未来の日付)が DO から来た: 食い違いなので 503。
+      return json({ ok: false, error: { type: "report-error" } }, 503);
+    }
+    return json({ ok: true, accepted: true, date }, 202);
+  } catch {
+    return json({ ok: false, error: { type: "report-error" } }, 503);
   }
 }
 
