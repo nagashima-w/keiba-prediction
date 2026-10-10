@@ -20,7 +20,7 @@ import { withPutTimeout } from "./bucket-timeout";
 import type { GateStatus } from "./gate-core";
 import type { GateLike } from "./gate-fetch";
 import { RaceDayCore, type AutoRunResults, type Board, type NotificationRecord, type MorningPrior, type PlanProgress, type RaceListResult, type RaceListVenue, type RequestPlanResult, type RequestResultImportResult, type ResultImportProgress, type ScheduleInput, type ScheduleResult } from "./race-day-core";
-import { DAILY_REPORT_NAME } from "./daily-report-core";
+import { DAILY_REPORT_NAME, isRequestSettled, type RequestReportResult } from "./daily-report-core";
 import { D1ResultStore } from "./result-repository";
 import { loadSettings } from "./settings";
 
@@ -62,7 +62,7 @@ export interface RaceDayEnv {
    */
   DAILY_REPORT?: {
     idFromName(name: string): any;
-    get(id: any): { requestReport(input: { readonly kaisaiDate: string; readonly mode: "auto" }): Promise<{ readonly accepted: boolean; readonly reason?: string }> };
+    get(id: any): { requestReport(input: { readonly kaisaiDate: string; readonly mode: "auto" }): Promise<RequestReportResult> };
   };
 }
 
@@ -87,8 +87,8 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
         ? undefined
         : async (kaisaiDate: string): Promise<void> => {
             const result = await reportNamespace.get(reportNamespace.idFromName(DAILY_REPORT_NAME)).requestReport({ kaisaiDate, mode: "auto" });
-            // 日付が不正・未来のとき(日付の食い違い)だけは失敗として扱う(依頼済みにしない)。
-            if (!result.accepted && result.reason !== "exists" && result.reason !== "in-progress") {
+            // 受理・作成済み・進行中・古すぎる日(too-old)は完了として扱う。日付が不正・未来のとき(日付の食い違い)だけは失敗として扱う(依頼済みにしない)。
+            if (!isRequestSettled(result)) {
               throw new Error("日報の依頼が断られました");
             }
           };

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { MessageSender } from "@keiba/core/llm";
+import type { MessageSender, ModelInfoLite } from "@keiba/core/llm";
 import type { AnalysisView, AnalysisViewHorse } from "../src/analysis-view";
 import type { RaceResultData } from "../src/daily-report-bets";
 import {
   DailyReportCore,
+  isRequestSettled,
   REPORT_MAX_LLM_ATTEMPTS,
   REPORT_MAX_STEP_ATTEMPTS,
   REPORT_NOTE_FAILED,
@@ -19,7 +20,7 @@ import {
   type ReportStore,
   type StepOutcome,
 } from "../src/daily-report-core";
-import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
+import { DEFAULT_CLOUD_SETTINGS, type AnalysisModelId } from "../src/settings";
 import type { DiscordPayload } from "../../packages/core/src/notify/discord";
 
 /**
@@ -72,20 +73,23 @@ interface Harness {
   readonly saved: ReportRecord[];
   readonly sent: DiscordPayload[];
   readonly prompts: string[];
+  /** LLM に送ったリクエストのモデル ID(送った順)。 */
+  readonly models: string[];
   readonly readCalls: number[];
-  readonly state: { analyses: { raceId: string; analysisId: number }[]; inputs: Map<number, RaceInput>; failRead: number; failSave: number; hasReport: boolean; llmFailures: number; llmText: string; notifyFails: boolean; saveResult: "saved" | "exists" };
+  readonly state: { analyses: { raceId: string; analysisId: number }[]; inputs: Map<number, RaceInput>; failRead: number; failSave: number; hasReport: boolean; llmFailures: number; llmText: string; notifyFails: boolean; saveResult: "saved" | "exists"; allMissing: boolean; hasReportCalls: number };
   step(): Promise<StepOutcome>;
   drain(max?: number): Promise<StepOutcome[]>;
 }
 
-function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolean; appBaseUrl?: string; kv?: ReturnType<typeof memoryKv> } = {}): Harness {
+function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolean; appBaseUrl?: string; kv?: ReturnType<typeof memoryKv>; analysisModel?: AnalysisModelId; lister?: () => Promise<ReadonlyArray<ModelInfoLite>>; start?: number } = {}): Harness {
   const kv = options.kv ?? memoryKv();
-  const clock = { t: T0 };
+  const clock = { t: options.start ?? T0 };
   const alarms: number[] = [];
   const warns: string[] = [];
   const saved: ReportRecord[] = [];
   const sent: DiscordPayload[] = [];
   const prompts: string[] = [];
+  const models: string[] = [];
   const readCalls: number[] = [];
   const raceCount = options.raceCount ?? 20;
   const state: Harness["state"] = {
@@ -98,6 +102,8 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
     llmText: NARRATIVE_JSON(),
     notifyFails: false,
     saveResult: "saved",
+    allMissing: false,
+    hasReportCalls: 0,
   };
   const source: ReportSource = {
     listDayAnalyses: async () => state.analyses,
@@ -107,11 +113,14 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
         state.failRead -= 1;
         throw new Error("D1 が落ちた");
       }
-      return items.map((i) => state.inputs.get(i.analysisId) ?? null);
+      return items.map((i) => (state.allMissing ? null : (state.inputs.get(i.analysisId) ?? null)));
     },
   };
   const store: ReportStore = {
-    hasReport: async () => state.hasReport,
+    hasReport: async () => {
+      state.hasReportCalls += 1;
+      return state.hasReport;
+    },
     saveReport: async (record) => {
       if (state.failSave > 0) {
         state.failSave -= 1;
@@ -127,6 +136,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   };
   const sender: MessageSender = async (params) => {
     prompts.push(params.messages[0]!.content);
+    models.push(params.model);
     if (state.llmFailures > 0) {
       state.llmFailures -= 1;
       throw Object.assign(new Error("boom"), { status: 529 });
@@ -140,8 +150,8 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
     onWarn: (m) => void warns.push(m),
     source,
     store,
-    loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
-    ...(options.llm === false ? {} : { llm: { sender } }),
+    loadSettings: async () => ({ ...DEFAULT_CLOUD_SETTINGS, analysisModel: options.analysisModel ?? DEFAULT_CLOUD_SETTINGS.analysisModel }),
+    ...(options.llm === false ? {} : { llm: { sender, ...(options.lister === undefined ? {} : { lister: options.lister }) } }),
     ...(options.notifier === false
       ? {}
       : {
@@ -158,7 +168,7 @@ function harness(options: { raceCount?: number; llm?: boolean; notifier?: boolea
   };
   const core = new DailyReportCore(deps);
   return {
-    core, kv, clock, alarms, warns, saved, sent, prompts, readCalls, state,
+    core, kv, clock, alarms, warns, saved, sent, prompts, models, readCalls, state,
     step: () => core.runNextStep(),
     async drain(max = 60) {
       const outcomes: StepOutcome[] = [];
@@ -454,5 +464,191 @@ describe("getStatus", () => {
     expect(h.core.getStatus(DATE)).toStrictEqual({ phase: "list", status: "running", attempts: 0 });
     await h.step();
     expect(h.core.getStatus(DATE)).toMatchObject({ phase: "gather", status: "running" });
+  });
+});
+
+describe("R2: auto・catchup の依頼は、JST の今日から 3 日前までの開催日に限る(manual は上限なし)", () => {
+  // 基準: JST 2026-10-10 20:00(T0)。今日 = 20261010、3 日前 = 20261007。
+  it.each([
+    ["今日", "20261010", "auto", true],
+    ["3 日前(受ける)", "20261007", "auto", true],
+    ["4 日前(断る)", "20261006", "auto", false],
+    ["ずっと前(断る)", "20200101", "auto", false],
+    ["3 日前(catchup も受ける)", "20261007", "catchup", true],
+    ["4 日前(catchup も断る)", "20261006", "catchup", false],
+    ["4 日前でも manual は受ける", "20261006", "manual", true],
+    ["ずっと前でも manual は受ける", "20200101", "manual", true],
+  ] as const)("%s: %s を %s で依頼 → 受理=%s", async (_name, kaisaiDate, mode, accepted) => {
+    const h = harness();
+    const result = await h.core.requestReport({ kaisaiDate, mode });
+    expect(result).toStrictEqual(accepted ? { accepted: true } : { accepted: false, reason: "too-old" });
+    // 断ったときは状態もアラームも作らない(LLM・D1 に出ない)
+    expect(h.kv.data.size).toBe(accepted ? 2 : 0);
+    expect(h.alarms.length).toBe(accepted ? 1 : 0);
+  });
+
+  it("JST の日付の切り替わりで境界が動く: 23:59:59(JST 10/10)は 10/7 を受け、0:00(JST 10/11)は 10/7 を断って 10/8 を受ける", async () => {
+    const before = harness({ start: Date.parse("2026-10-10T14:59:59.000Z") });
+    expect(await before.core.requestReport({ kaisaiDate: "20261007", mode: "auto" })).toStrictEqual({ accepted: true });
+    expect(await before.core.requestReport({ kaisaiDate: "20261006", mode: "auto" })).toStrictEqual({ accepted: false, reason: "too-old" });
+    const after = harness({ start: Date.parse("2026-10-10T15:00:00.000Z") });
+    expect(await after.core.requestReport({ kaisaiDate: "20261007", mode: "auto" })).toStrictEqual({ accepted: false, reason: "too-old" });
+    expect(await after.core.requestReport({ kaisaiDate: "20261008", mode: "auto" })).toStrictEqual({ accepted: true });
+  });
+
+  it("月またぎ: 10/2 の 3 日前は 9/29(受ける)、その前の 9/28 は断る", async () => {
+    const h = harness({ start: Date.parse("2026-10-02T03:00:00.000Z") });
+    expect(await h.core.requestReport({ kaisaiDate: "20260929", mode: "auto" })).toStrictEqual({ accepted: true });
+    expect(await h.core.requestReport({ kaisaiDate: "20260928", mode: "auto" })).toStrictEqual({ accepted: false, reason: "too-old" });
+  });
+
+  it("古さの判定は、作成済みの判定(D1 の hasReport)より前: 古い日の依頼は D1 を引かない。新しい日は引く(対照)", async () => {
+    const h = harness();
+    await h.core.requestReport({ kaisaiDate: "20261006", mode: "auto" });
+    expect(h.state.hasReportCalls).toBe(0);
+    await h.core.requestReport({ kaisaiDate: "20261007", mode: "auto" });
+    expect(h.state.hasReportCalls).toBe(1);
+  });
+});
+
+describe("L1〜L4: 日報の LLM は設定の analysisModel を使う", () => {
+  const LIST: ModelInfoLite[] = [
+    { id: "claude-sonnet-4-5", created_at: "2025-09-29T00:00:00Z" },
+    { id: "claude-sonnet-5-5", created_at: "2026-09-01T00:00:00Z" },
+    { id: "claude-sonnet-6", created_at: "2026-10-01T00:00:00Z" }, // 固定モデル(claude-sonnet-5-5)より新しい Sonnet(自動選択と固定を区別するため)
+    { id: "claude-opus-4-1", created_at: "2025-08-05T00:00:00Z" },
+    { id: "claude-opus-4-7", created_at: "2026-04-01T00:00:00Z" },
+    { id: "claude-haiku-4-5", created_at: "2025-10-01T00:00:00Z" },
+    { id: "claude-haiku-4-8", created_at: "2026-06-01T00:00:00Z" },
+  ];
+  const run = async (analysisModel: AnalysisModelId | undefined, withLister: boolean) => {
+    const h = harness({ raceCount: 2, ...(analysisModel === undefined ? {} : { analysisModel }), ...(withLister ? { lister: async () => LIST } : {}) });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    return h;
+  };
+
+  it.each([
+    ["L1: opus を設定したら、一覧の最新の Opus で送る", "opus", "claude-opus-4-7"],
+    ["L2: haiku を設定したら、一覧の最新の Haiku で送る", "haiku", "claude-haiku-4-8"],
+    ["L3: sonnet を設定したら、一覧の最新の Sonnet で送る", "sonnet", "claude-sonnet-6"],
+    ["L4: auto を設定したら自動選択(最新の Sonnet)で送る", "auto", "claude-sonnet-6"],
+  ] as const)("%s", async (_name, analysisModel, expected) => {
+    const h = await run(analysisModel, true);
+    expect(h.models).toEqual([expected]);
+  });
+
+  it("系統の最新が一覧に無い(opus を設定したが一覧に Opus が無い)ときは、固定モデルで送る", async () => {
+    const h = harness({ raceCount: 2, analysisModel: "opus", lister: async () => LIST.filter((m) => !m.id.includes("opus")) });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    expect(h.models).toEqual(["claude-sonnet-5-5"]);
+  });
+
+  it("モデル一覧を取れない(lister が無い・失敗する)ときは、固定モデルで送る(日報は止まらない)", async () => {
+    const none = await run("opus", false);
+    expect(none.models).toEqual(["claude-sonnet-5-5"]);
+    const failing = harness({ raceCount: 2, analysisModel: "opus", lister: async () => { throw new Error("list failed"); } });
+    await failing.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await failing.drain();
+    expect(failing.models).toEqual(["claude-sonnet-5-5"]);
+    expect(failing.saved).toHaveLength(1);
+  });
+});
+
+describe("C9: 通知は送る前に sending を書く(送信の途中で落ちても二度送らない)", () => {
+  it("send が呼ばれた時点で、ジョブの notify はすでに sending(送る前に書いている)", async () => {
+    const kv = memoryKv();
+    const h = harness({ raceCount: 2, kv, notifier: false });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    for (let i = 0; i < 4; i += 1) await h.step(); // list, gather, generate, save → notify の直前
+    const before = kv.get<Record<string, unknown>>(`job:${DATE}`)!;
+    expect(before["phase"]).toBe("notify");
+    expect(before["notify"]).toBe("pending"); // 前提(空振り防止): 送る前は pending
+    const seenDuringSend: unknown[] = [];
+    const core = new DailyReportCore({
+      kv,
+      now: () => h.clock.t,
+      setAlarm: () => {},
+      onWarn: () => {},
+      source: { listDayAnalyses: async () => [], readRaces: async () => [] },
+      store: { hasReport: async () => false, saveReport: async () => "saved" },
+      loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
+      notifier: { send: async () => void seenDuringSend.push(kv.get<Record<string, unknown>>(`job:${DATE}`)?.["notify"]) },
+    });
+    await core.runNextStep();
+    expect(seenDuringSend).toEqual(["sending"]);
+  });
+
+  it("送信の途中で落ちた(send の最中に別のインスタンスが同じジョブを引き継いだ)想定で再実行しても、二度送らない", async () => {
+    const kv = memoryKv();
+    const h = harness({ raceCount: 2, kv, notifier: false });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    for (let i = 0; i < 4; i += 1) await h.step();
+    const sentByRestarted: DiscordPayload[] = [];
+    const build = (send: (p: DiscordPayload) => Promise<void>) =>
+      new DailyReportCore({
+        kv,
+        now: () => h.clock.t,
+        setAlarm: () => {},
+        onWarn: () => {},
+        source: { listDayAnalyses: async () => [], readRaces: async () => [] },
+        store: { hasReport: async () => false, saveReport: async () => "saved" },
+        loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
+        notifier: { send },
+      });
+    // 1 つ目のインスタンスは、送信の途中(応答待ち)で止まる。そのあいだに 2 つ目のインスタンス(再起動後)が同じジョブを実行する。
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const first = build(async () => {
+      await gate;
+    });
+    const firstRun = first.runNextStep();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const second = build(async (p) => {
+      sentByRestarted.push(p);
+    });
+    await second.runNextStep();
+    release();
+    await firstRun;
+    expect(sentByRestarted).toHaveLength(0); // sending を見て、再送しない
+  });
+});
+
+describe("Z2: 分析は列挙されたが詳細が全件読めなかった(ダイジェスト 0 件)ときは、LLM を呼ばず・保存せず・通知せずに終える", () => {
+  it("読み出しが全件 null なら no-analyses で終わり、ジョブは消える", async () => {
+    const h = harness({ raceCount: 3 });
+    h.state.allMissing = true;
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    const outcomes = await h.drain();
+    const gather = outcomes.filter((o) => o.kind === "ran" && o.phase === "gather");
+    expect(gather.map((o) => (o as { result: string }).result)).toEqual(["no-analyses"]);
+    expect(h.prompts).toHaveLength(0);
+    expect(h.saved).toHaveLength(0);
+    expect(h.sent).toHaveLength(0);
+    expect(h.kv.data.size).toBe(0);
+  });
+
+  it("一部が null でも、1 件でも読めれば続ける(対照)", async () => {
+    const h = harness({ raceCount: 3 });
+    h.state.inputs.delete(101);
+    h.state.inputs.delete(102);
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.drain();
+    expect(h.saved).toHaveLength(1);
+    expect(h.saved[0]!.raceCount).toBe(1);
+  });
+});
+
+describe("isRequestSettled: 日単位の DO が依頼を完了として扱うか(too-old は完了=印を書いて再依頼しない)", () => {
+  it.each([
+    [{ accepted: true }, true],
+    [{ accepted: false, reason: "exists" }, true],
+    [{ accepted: false, reason: "in-progress" }, true],
+    [{ accepted: false, reason: "too-old" }, true],
+    [{ accepted: false, reason: "invalid-date" }, false],
+    [{ accepted: false, reason: "future-date" }, false],
+  ] as const)("%j → %s", (result, expected) => {
+    expect(isRequestSettled(result as never)).toBe(expected);
   });
 });

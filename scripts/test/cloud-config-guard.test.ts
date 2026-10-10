@@ -876,6 +876,8 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     expect(stripCode(readTextLf("cloud", "src", "race-day-do.ts"))).toContain('mode: "auto"');
     expect(stripCode(readTextLf("cloud", "src", "scheduled.ts"))).toContain('mode: "catchup"');
     expect(stripCode(readTextLf("cloud", "src", "handler.ts"))).toContain('mode: "manual"');
+    // 日単位の DO は、依頼の結果の「完了」の判定を isRequestSettled に任せる（too-old を完了として扱う。個別の条件を持たない）
+    expect(stripCode(readTextLf("cloud", "src", "race-day-do.ts"))).toContain("isRequestSettled(result)");
   });
 
   it("日報の D1 の書き込みは daily-report-repository.ts の INSERT OR IGNORE INTO daily_reports の 1 文だけ(上書き・削除・他の表への書き込みが無い)。Worker の GET は読むだけ", () => {

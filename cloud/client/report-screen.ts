@@ -128,6 +128,9 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
             if (list.kind === "ready" && !list.items.some((i) => i.date === date)) refreshList();
           } else if (run.kind === "requested" && result.job !== null && result.job.status === "failed") {
             run = { kind: "idle" };
+          } else if (run.kind === "requested" && result.job === null) {
+            // 依頼は受け付けられた(ジョブは依頼の時点で作られる)のに、日報も進行状況も無い = 作られずに終わった(その日の分析が無い)。固定の案内を出して確認を止める。
+            run = { kind: "no-report" };
           }
         } else if (mode === "first") {
           detail = { kind: "error", message: reportFetchFailureMessage(result.error) };
@@ -204,7 +207,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
   }
 
   function onRun(): void {
-    if (!active || run.kind === "posting" || run.kind === "requested" || detail === null || detail.kind !== "ready" || detail.report !== null) return;
+    if (!active || run.kind === "posting" || run.kind === "requested" || run.kind === "no-report" || detail === null || detail.kind !== "ready" || detail.report !== null) return;
     if (detail.job !== null && detail.job.status === "running") return;
     const g = gen;
     const date = shown;
@@ -233,7 +236,7 @@ export function createReportScreen(deps: ReportScreenDeps): ReportScreen {
 
   function onRefresh(): void {
     if (!active || busy || detail === null || detail.kind === "loading") return;
-    run = run.kind === "error" ? { kind: "idle" } : run;
+    run = run.kind === "error" || run.kind === "no-report" ? { kind: "idle" } : run;
     fetchList(false);
     fetchDetail("first");
   }

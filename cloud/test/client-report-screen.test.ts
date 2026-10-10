@@ -179,6 +179,23 @@ describe("手動の作成と作成中のポーリング", () => {
     expect(n.calls.filter((c) => c === "GET /api/reports").length).toBe(2); // 開いたときと、日報が現れたあと
   });
 
+  it("R1: 分析が 0 件の日: 依頼が受け付けられても日報も進行状況も無ければ、作られずに終わった案内を出して確認を止める(10 分待たせない)", async () => {
+    const { n, screen, timers } = await openEmptyDay([ok({ report: null, job: null })], [{ status: 202, body: { ok: true, accepted: true, date: "20261010" } }]);
+    screen.onRun();
+    await timers.flush();
+    const m = screen.model();
+    expect(m.notice!.text).toContain("分析したレースが無いため、日報は作られませんでした");
+    expect(m.create).toBeNull();
+    expect(timers.pending()).toBe(0); // 確認の自動更新は張られない
+    const before = n.calls.length;
+    await timers.advance(REPORT_POLL_MS * 5);
+    expect(n.calls.length).toBe(before);
+    // 更新ボタンで状態を戻し、もう一度依頼できる
+    screen.onRefresh();
+    await timers.flush();
+    expect(screen.model().create).not.toBeNull();
+  });
+
   it("押した直後に二重に POST しない(依頼中・作成中)", async () => {
     const { n, screen, timers } = await openEmptyDay([ok({ report: null, job: null })], [{ status: 202, body: { ok: true, accepted: true, date: "20261010" } }]);
     const hold = deferred<void>();

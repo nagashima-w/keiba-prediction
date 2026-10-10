@@ -42,6 +42,13 @@ import type { RaceResultData } from "./daily-report-bets";
 /** 日報の DO の固定名(単一インスタンス)。依頼する側(handler.ts・scheduled.ts・race-day-do.ts)が同じ名前を使う。 */
 export const DAILY_REPORT_NAME = "main";
 
+/**
+ * auto・catchup の依頼を受ける開催日の古さの上限(日)。JST の今日から、この日数前まで(含む)。それより古い日は `too-old` で断る(LLM・D1 に出ない)。
+ * 理由: 日単位の DO は、過去日でも(結果の補完・掃除のアラームで)静かな状態で起こされると日報を依頼するので、上限が無いと古い日の日報が次々に作られ、LLM の費用が増える。
+ * manual(利用者が日付を指定して押す)は上限なし。
+ */
+export const REPORT_MAX_AGE_DAYS = 3;
+
 /** 1 回のアラームで読むレース数。1 レース約 4 サブリクエスト + 結果の読み出し 1 で約 33(Free の 50 の手前)。 */
 export const REPORT_READ_CHUNK = 8;
 /** 失敗後の再試行までの待ち(ミリ秒)。 */
@@ -152,7 +159,15 @@ export type ReportMode = "auto" | "catchup" | "manual";
 
 export type RequestReportResult =
   | { readonly accepted: true }
-  | { readonly accepted: false; readonly reason: "invalid-date" | "future-date" | "in-progress" | "exists" };
+  | { readonly accepted: false; readonly reason: "invalid-date" | "future-date" | "too-old" | "in-progress" | "exists" };
+
+/**
+ * 日単位の DO(auto の依頼)が、依頼の結果を「完了」として扱うか(依頼済みの印を書き、再依頼しない)。受理・作成済み(exists)・進行中(in-progress)・古すぎる日(too-old)は完了。
+ * 日付が不正・未来(invalid-date・future-date)は、日付の食い違いなので完了にしない(警告を残し、次の起床で再び依頼する)。
+ */
+export function isRequestSettled(result: RequestReportResult): boolean {
+  return result.accepted || result.reason === "exists" || result.reason === "in-progress" || result.reason === "too-old";
+}
 
 export type ReportPhase = "list" | "gather" | "generate" | "save" | "notify";
 
@@ -218,6 +233,12 @@ function cut(text: string, max: number): string {
   return `${head}…`;
 }
 
+/** 開催日(YYYYMMDD)を日数だけずらす(JST の暦日。`Date.UTC` の正規化で月またぎも合う)。 */
+function shiftKaisaiDate(kaisaiDate: string, deltaDays: number): string {
+  const d = new Date(Date.UTC(Number(kaisaiDate.slice(0, 4)), Number(kaisaiDate.slice(4, 6)) - 1, Number(kaisaiDate.slice(6, 8))) + deltaDays * 86_400_000);
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
 function errorText(error: unknown): string {
   return redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 200);
 }
@@ -236,8 +257,12 @@ export class DailyReportCore {
     if (!/^[0-9]{8}$/.test(kaisaiDate) || !isRealYmd(kaisaiDate)) {
       return { accepted: false, reason: "invalid-date" };
     }
-    if (kaisaiDate > jstKaisaiDate(this.deps.now())) {
+    const today = jstKaisaiDate(this.deps.now());
+    if (kaisaiDate > today) {
       return { accepted: false, reason: "future-date" };
+    }
+    if (input.mode !== "manual" && kaisaiDate < shiftKaisaiDate(today, -REPORT_MAX_AGE_DAYS)) {
+      return { accepted: false, reason: "too-old" };
     }
     const existing = this.deps.kv.get<Job>(jobKey(kaisaiDate));
     if (existing !== undefined && existing.status === "running") {

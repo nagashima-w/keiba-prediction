@@ -726,6 +726,9 @@ function reportScreen(model: ReportModel, actions: ViewActions): VNode {
   if (model.error !== null) body.push(notice("error", model.error));
   if (model.notice !== null) body.push(notice(model.notice.tone, model.notice.text));
   if (model.create !== null) {
+    // 確定の注意は、ボタンの手前(押す前に読める位置)に出す。今日の日付のときは、強めの注意を足す。
+    body.push(h("p", { class: "meta report-caution" }, [model.create.caution]));
+    if (model.create.todayCaution !== null) body.push(notice("wait", model.create.todayCaution));
     body.push(h("button", { class: "report-run", disabled: model.create.disabled }, [model.create.label], { click: actions.onReportRun }));
   }
   if (model.body !== null) body.push(...reportBodyNodes(model.body));

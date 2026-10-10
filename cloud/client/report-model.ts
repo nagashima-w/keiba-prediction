@@ -22,11 +22,15 @@ export type ReportDetailState =
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "ready"; readonly report: ReportDetail | null; readonly job: ReportJob | null };
 
-/** 「この日の日報を作る」の状態。`requested`: 依頼を受け付けた(作成中の表示に切り替わるまでの間)。 */
+/**
+ * 「この日の日報を作る」の状態。`requested`: 依頼を受け付けた(作成中の表示に切り替わるまでの間)。
+ * `no-report`: 依頼は受け付けられたが、日報は作られずに終わった(サーバの進行状況が無く、日報も無い = その日の分析が無い)。
+ */
 export type ReportRunState =
   | { readonly kind: "idle" }
   | { readonly kind: "posting" }
   | { readonly kind: "requested" }
+  | { readonly kind: "no-report" }
   | { readonly kind: "error"; readonly message: string };
 
 export interface ReportModelInput {
@@ -107,8 +111,11 @@ export interface ReportModel {
   /** 表示している日の見出し(`2026年10月10日(土)`)。 */
   readonly shownLabel: string;
   readonly notice: { readonly tone: Tone; readonly text: string } | null;
-  /** 「この日の日報を作る」。日報が無く、作成中でもない日だけ出す。 */
-  readonly create: { readonly label: string; readonly disabled: boolean } | null;
+  /**
+   * 「この日の日報を作る」。日報が無く、作成中でもない日だけ出す。`caution` は常に出す確定の注意(押した時点の分析と結果で作り、その日は作り直せない)。
+   * `todayCaution` は表示中の日が今日のときだけ(まだ自動の作成条件を満たしていない可能性があるため、強めの注意)。
+   */
+  readonly create: { readonly label: string; readonly disabled: boolean; readonly caution: string; readonly todayCaution: string | null } | null;
   readonly body: ReportBodyView | null;
 }
 
@@ -124,6 +131,14 @@ export function dateLabel(ymd: string): string {
 
 /** 日付の並び(今日 → 日報のある日の新しい順)。表示中の日が並びに無くても(古い日・日報が無い日)先頭側に足す。最大 {@link MAX_CHIPS} 個。 */
 export const MAX_CHIPS = 14;
+
+/** 手動の作成の確定の注意(固定文言)。1 日 1 回で確定し、上書きしないため。 */
+export const CREATE_CAUTION = "押した時点の分析と結果で日報を作り、その日は作り直せません。";
+/** 今日の日付のときの強めの注意(固定文言)。 */
+export const CREATE_TODAY_CAUTION =
+  "今日の日報は、まだ分析していないレース(夜の地方など)や、結果の取り込みが終わっていないレースがあるうちに押すと、それらを含まないまま確定します。通常は、その日の分析と結果が揃うと自動で作られるので、急がなければ待ってください。";
+/** 依頼したが日報が作られずに終わったときの固定文言。 */
+export const NO_REPORT_NOTICE = "この日は分析したレースが無いため、日報は作られませんでした。";
 
 function chipsOf(input: ReportModelInput): DateChip[] {
   const dates: string[] = [input.today];
@@ -222,13 +237,23 @@ export function buildReportModel(input: ReportModelInput): ReportModel {
       notice = { tone: "wait", text: "日報を作成中です。しばらくすると表示されます(この画面は自動で更新します)。" };
     } else if (run.kind === "requested") {
       notice = { tone: "wait", text: "日報の作成を依頼しました。しばらくすると表示されます(この画面は自動で更新します)。" };
+    } else if (run.kind === "no-report") {
+      notice = { tone: "info", text: NO_REPORT_NOTICE };
     } else {
       if (detail.job !== null && detail.job.status === "failed") {
         notice = { tone: "error", text: "日報の作成に失敗しました。もう一度作成を依頼できます。" };
       } else {
-        notice = { tone: "info", text: "この日の日報はまだありません。その日の分析と結果が揃うと自動で作られます。すぐに作るときは、下のボタンで依頼できます。" };
+        notice = {
+          tone: "info",
+          text: "この日の日報はまだありません。その日に分析したレースがあれば、分析と結果が揃ったあとに自動で作られます(分析したレースが無い日は作られません)。すぐに作るときは、下のボタンで依頼できます。",
+        };
       }
-      create = { label: run.kind === "posting" ? "依頼中…" : "この日の日報を作る", disabled: run.kind === "posting" };
+      create = {
+        label: run.kind === "posting" ? "依頼中…" : "この日の日報を作る",
+        disabled: run.kind === "posting",
+        caution: CREATE_CAUTION,
+        todayCaution: input.shownDate === input.today ? CREATE_TODAY_CAUTION : null,
+      };
     }
   }
   if (run.kind === "error") {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ReportDetail, ReportListItem } from "../client/api-report";
-import { buildReportModel, dateLabel, MAX_CHIPS, type ReportModelInput } from "../client/report-model";
+import { buildReportModel, CREATE_CAUTION, CREATE_TODAY_CAUTION, dateLabel, MAX_CHIPS, NO_REPORT_NOTICE, type ReportModelInput } from "../client/report-model";
 
 /** Issue #235: 日報画面の表示用データ。文言は固定(LLM の文章以外にサーバの文は出さない)・数値の整形・状態ごとの出し分け。 */
 
@@ -114,7 +114,36 @@ describe("日報が無い日", () => {
     expect(m.body).toBeNull();
     expect(m.notice!.tone).toBe("info");
     expect(m.notice!.text).toContain("まだありません");
-    expect(m.create).toStrictEqual({ label: "この日の日報を作る", disabled: false });
+    expect(m.create).toMatchObject({ label: "この日の日報を作る", disabled: false });
+  });
+
+  it("案内は事実に合う: 分析したレースが無い日は作られない旨を書き、『分析と結果が揃うと自動で作られる』と無条件には言わない(R1)", () => {
+    const text = buildReportModel(input({ detail: { kind: "ready", report: null, job: null } })).notice!.text;
+    expect(text).toContain("分析したレースが無い日は作られません");
+    expect(text).toContain("分析したレースがあれば");
+    expect(text).not.toContain("その日の分析と結果が揃うと自動で作られます");
+  });
+
+  it("R3: ボタンには確定の注意(押した時点で作り、作り直せない)が常に付く。今日の日付のときだけ強めの注意も付く", () => {
+    const other = buildReportModel(input({ shownDate: "20261009", detail: { kind: "ready", report: null, job: null } })).create!;
+    expect(other.caution).toBe(CREATE_CAUTION);
+    expect(other.caution).toContain("作り直せません");
+    expect(other.todayCaution).toBeNull();
+    const today = buildReportModel(input({ shownDate: "20261010", detail: { kind: "ready", report: null, job: null } })).create!;
+    expect(today.caution).toBe(CREATE_CAUTION);
+    expect(today.todayCaution).toBe(CREATE_TODAY_CAUTION);
+    expect(today.todayCaution).toContain("含まないまま確定");
+    // 失敗(job が failed)・依頼中・依頼の失敗のときも、ボタンが出るなら注意は付く
+    expect(buildReportModel(input({ detail: { kind: "ready", report: null, job: { phase: "save", status: "failed", attempts: 3 } } })).create!.caution).toBe(CREATE_CAUTION);
+    expect(buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "posting" } })).create!.caution).toBe(CREATE_CAUTION);
+  });
+
+  it("R1: 依頼したが作られずに終わった(no-report)なら、固定の案内を出し、ボタンも『作成中』も出さない", () => {
+    const m = buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "no-report" } }));
+    expect(m.notice).toStrictEqual({ tone: "info", text: NO_REPORT_NOTICE });
+    expect(NO_REPORT_NOTICE).toContain("分析したレースが無いため");
+    expect(m.create).toBeNull();
+    expect(m.notice!.text).not.toContain("作成中");
   });
 
   it("作成中(job が running)は『作成中』の案内で、ボタンは出さない", () => {
@@ -138,7 +167,7 @@ describe("日報が無い日", () => {
 
   it("依頼中(posting)はボタンを押せない・『依頼中…』。依頼の失敗はその固定の文言を出し、ボタンは残る", () => {
     const posting = buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "posting" } }));
-    expect(posting.create).toStrictEqual({ label: "依頼中…", disabled: true });
+    expect(posting.create).toMatchObject({ label: "依頼中…", disabled: true });
     expect(posting.refreshDisabled).toBe(true);
     const failed = buildReportModel(input({ detail: { kind: "ready", report: null, job: null }, run: { kind: "error", message: "失敗の文言" } }));
     expect(failed.notice).toStrictEqual({ tone: "error", text: "失敗の文言" });

@@ -6,6 +6,7 @@ import type { VNode } from "../client/vnode";
 import { DEFAULT_CLOUD_SETTINGS } from "../src/settings";
 import { buildSavedRecord } from "./daily-report-fixtures";
 import { createFakeTimers } from "./client-fakes";
+import { CREATE_CAUTION, CREATE_TODAY_CAUTION } from "../client/report-model";
 
 /**
  * Issue #235: アプリ全体の中の日報画面(`#report`・`#report=YYYYMMDD`)。画面の出入り・他の画面との分離・日付の切替・手動の作成・作成中のポーリング・離れたときの停止。
@@ -139,6 +140,35 @@ describe("日報画面を開く", () => {
     await h.timers.advance(5_000);
     await h.app.whenIdle();
     expect(textOf(h.tree())).toContain("2026年6月28日(日)の日報");
+    expect(h.timers.pending()).toBe(0);
+  });
+
+  it("R3: 作成のボタンの手前に確定の注意が出る。今日の日付のときだけ強めの注意も出る", async () => {
+    const today = await harness("#report=20260628"); // 今日 = 2026-06-28
+    today.app.start();
+    await today.app.whenIdle();
+    const text = textOf(today.tree());
+    expect(text).toContain(CREATE_CAUTION);
+    expect(text).toContain(CREATE_TODAY_CAUTION);
+    // 注意は、ボタンより前(押す前に読める位置)にある
+    const flat = findAll(today.tree(), () => true).map((n) => String(n.attrs?.["class"] ?? ""));
+    expect(flat.indexOf("meta report-caution")).toBeGreaterThan(-1);
+    expect(flat.indexOf("meta report-caution")).toBeLessThan(flat.indexOf("report-run"));
+    const past = await harness("#report=20260620");
+    past.app.start();
+    await past.app.whenIdle();
+    expect(textOf(past.tree())).toContain(CREATE_CAUTION);
+    expect(textOf(past.tree())).not.toContain(CREATE_TODAY_CAUTION);
+  });
+
+  it("R1: 分析が 0 件の日にボタンを押すと、作られずに終わった案内が出て、確認の自動更新は止まる", async () => {
+    const h = await harness("#report=20260628");
+    h.app.start();
+    await h.app.whenIdle();
+    byClass(h.tree(), "report-run")[0]!.on!.click!();
+    await h.app.whenIdle();
+    expect(textOf(h.tree())).toContain("分析したレースが無いため、日報は作られませんでした");
+    expect(byClass(h.tree(), "report-run")).toHaveLength(0);
     expect(h.timers.pending()).toBe(0);
   });
 
