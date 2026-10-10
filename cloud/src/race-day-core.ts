@@ -747,7 +747,7 @@ export class RaceDayCore {
    * ただし**アラームは状態から張り直す**(Issue #206 G-E2。1回目が行を書いたあと `setAlarm` で失敗した場合に、再配信でアラームが戻る)。
    * @throws 無効な開催日、DO の開催日と違う日、発走前の分析の保存先・設定が無い構成(pre_race を予約できない計画は作らない)
    */
-  async requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult> {
+  async requestPlan(input: { readonly kaisaiDate: string; readonly rescue?: boolean }): Promise<RequestPlanResult> {
     const kaisaiDate = parseKaisaiDate(input.kaisaiDate);
     const pinned = this.metaGet("kaisai_date");
     if (pinned !== null && pinned !== kaisaiDate) {

@@ -66,24 +66,52 @@ describe("wrangler.toml", () => {
     expect((tomlCode.match(/^\[\[durable_objects\.bindings\]\]$/gm) ?? []).length).toBe(6);
   });
 
-  it("Issue #206: cron はちょうど1本で `0 0 * * *`(UTC 0:00 = JST 9:00)。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
+  it("Issue #206・#249: cron はちょうど2本で `0 12 * * *`(UTC 12:00 = JST 21:00)と `0 14 * * *`(UTC 14:00 = JST 23:00)。朝 9 時の定時実行は無い。止め方(`crons = []`)をコメントに残す。キューの consumer・producer は無い", () => {
     // 前提: [triggers] を実際に読めている(空振りでない)
     expect((tomlCode.match(/^\[triggers\]$/gm) ?? []).length).toBe(1);
     const crons = [...tomlCode.matchAll(/^crons\s*=\s*\[([^\]]*)\]\s*$/gm)];
     expect(crons).toHaveLength(1);
     const entries = crons[0]![1]!.split(",").map((e) => e.trim()).filter((e) => e !== "");
-    expect(entries).toEqual(['"0 0 * * *"']);
+    expect(entries).toEqual(['"0 12 * * *"', '"0 14 * * *"']);
+    // 朝 9 時(UTC 0:00)の cron は無い
+    expect(entries).not.toContain('"0 0 * * *"');
     // [triggers] の中身は crons だけ(他の種類のトリガを足していない)
     const triggersBlock = /^\[triggers\]\n((?:(?!\[)[^\n]*\n?)*)/m.exec(tomlCode)?.[1] ?? "";
-    expect(triggersBlock.trim()).toBe('crons = ["0 0 * * *"]');
+    expect(triggersBlock.trim()).toBe('crons = ["0 12 * * *", "0 14 * * *"]');
     // キュー: consumer も producer も無い
     expect(tomlCode).not.toMatch(/^\[\[queues\./m);
     expect(tomlCode).not.toMatch(/^\[queues/m);
     // 止め方(`[triggers]` を消すだけでは止まらない)がコメントに書いてある
     expect(toml).toContain("crons = []");
     expect(toml).toContain("消すだけでは止まらない");
-    // 検出の確認(空振りでない): 2本目や別の式は拾う形
-    expect('[triggers]\ncrons = ["0 0 * * *", "30 0 * * *"]\n'.match(/^crons\s*=\s*\[([^\]]*)\]\s*$/m)![1]!.split(",")).toHaveLength(2);
+    // 検出の確認(空振りでない): 3本目や別の式は拾う形
+    expect('[triggers]\ncrons = ["0 12 * * *", "0 14 * * *", "30 0 * * *"]\n'.match(/^crons\s*=\s*\[([^\]]*)\]\s*$/m)![1]!.split(",")).toHaveLength(3);
+  });
+
+  it("Issue #249: toml の cron の時刻(UTC → JST に直した時)は、scheduled の判別が使う定数(auto-run-plan.ts の FIRST_RUN_JST_HOUR・RETRY_RUN_JST_HOUR)と一致する。再実行の判別の境界(RETRY_RUN_FROM_JST_HOUR)は 2 本の間にある", () => {
+    const plan = readTextLf("cloud", "src", "auto-run-plan.ts");
+    const constant = (name: string): number => {
+      const m = new RegExp(`export const ${name} = (\\d+);`).exec(plan);
+      expect(m, `${name} を auto-run-plan.ts から読めた`).not.toBeNull();
+      return Number(m![1]);
+    };
+    const first = constant("FIRST_RUN_JST_HOUR");
+    const retry = constant("RETRY_RUN_JST_HOUR");
+    const from = constant("RETRY_RUN_FROM_JST_HOUR");
+    const crons = [...tomlCode.matchAll(/^crons\s*=\s*\[([^\]]*)\]\s*$/gm)][0]![1]!.split(",").map((e) => e.trim().replace(/"/g, "")).filter((e) => e !== "");
+    // cron は「分 時 * * *」の形で、分は 0。UTC の時 + 9 = JST の時(夏時間なし。24 を超えない時刻だけを使う)
+    const jstHours = crons.map((c) => {
+      const m = /^0 (\d{1,2}) \* \* \*$/.exec(c);
+      expect(m, `cron ${c} は「0 時 * * *」の形`).not.toBeNull();
+      return Number(m![1]) + 9;
+    });
+    expect(jstHours).toEqual([first, retry]);
+    expect(first).toBe(21);
+    expect(retry).toBe(23);
+    expect(first).toBeLessThan(from);
+    expect(from).toBeLessThanOrEqual(retry);
+    // 21 時と 23 時は同じ JST の日(日付をまたがない): 計画する翌日が同じになる前提
+    expect(jstHours.every((h) => h < 24)).toBe(true);
   });
 
   it("Issue #180・#183・#206・#208: netkeiba への取得の起点は、手動の 3 つ(POST の予約・GET の一覧・GET の確認。認証の後ろ)と、定時の 1 つ(scheduled の requestPlan)の呼び出し箇所 4 つに、結果の取り込みの依頼の呼び出し箇所 1 つ(result-dispatch.ts。cron と手動 POST が共有)を加えた計 5 つだけ", () => {
@@ -103,9 +131,25 @@ describe("wrangler.toml", () => {
     const scheduledCode = stripCode(readTextLf("cloud", "src", "scheduled.ts"));
     expect(scheduledCode.length).toBeGreaterThan(500); // 前提: コメント除去で本文を消していない
     expect((scheduledCode.match(/\.requestPlan\(/g) ?? []).length).toBe(1);
-    for (const forbidden of [".schedule(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".requestResultImport(", "NETKEIBA_GATE", "ANTHROPIC", "DISCORD"]) {
+    for (const forbidden of [".schedule(", ".getRaceList(", ".fetchRaw(", ".getBoard(", ".requestResultImport(", "NETKEIBA_GATE", "ANTHROPIC"]) {
       expect(scheduledCode, `scheduled.ts に ${forbidden} が無い`).not.toContain(forbidden);
     }
+    // Issue #249(利用者の決定): scheduled.ts は Discord を参照しない、という従来の制約を、「**送信の部品を使うのは、23 時の再実行で計画の依頼が 3 回とも失敗したときの失敗通知の 1 箇所だけ**」に改めた。
+    // (DO に届かない状況では、DO の状態から通知を作れないため。first〈21 時〉の失敗では送らない。)
+    //  - DISCORD の語は、Worker の secret の名前 DISCORD_WEBHOOK_URL だけ(型の宣言 1 + 読む 1 の計 2 箇所)
+    expect(scheduledCode.match(/DISCORD\w*/g)).toEqual(["DISCORD_WEBHOOK_URL", "DISCORD_WEBHOOK_URL"]);
+    expect((scheduledCode.match(/\benv\.DISCORD_WEBHOOK_URL\b/g) ?? []).length).toBe(1);
+    //  - 送信の部品(createDiscordNotifier)の呼び出しは 1 箇所、送信(`.send(`)も 1 箇所
+    expect((scheduledCode.match(/(?<!function\s)\bcreateDiscordNotifier\(/g) ?? []).length).toBe(1);
+    expect((scheduledCode.match(/\.send\(/g) ?? []).length).toBe(1);
+    //  - その入口(notifyPlanRequestFailed)の呼び出しは 1 箇所で、retry のときの失敗(!planned)の中だけ
+    expect((scheduledCode.match(/(?<!function\s)\bnotifyPlanRequestFailed\(/g) ?? []).length).toBe(1);
+    expect(scheduledCode).toMatch(/if \(!planned\) \{[\s\S]*?if \(isRetry\) \{\s*await notifyPlanRequestFailed\(/);
+    //  - 固定文の embed だけを送る(日単位の DO の embed・分析の embed は使わない)
+    expect(scheduledCode).toContain("buildPlanRequestFailedEmbed(");
+    expect(scheduledCode).not.toMatch(/buildSummaryEmbed|buildAnalysisNotificationEmbed|buildFailureEmbed/);
+    // 対照(検出の確認。空振りでない): 余計な送信を足した本文は拾う
+    expect(("await x.send(y); await z.send(w);").match(/\.send\(/g)).toHaveLength(2);
     // Issue #208: 結果の依頼は dispatchResultImports に委譲する(1 箇所)。D1 は結果の未取込の列挙(D1ResultStore)にだけ使う(env.DB は 1 箇所)
     expect((scheduledCode.match(/\bdispatchResultImports\(/g) ?? []).length).toBe(1);
     // Issue #235: 日報の取り残しの列挙（D1ReportStore。読み取り 1 クエリ）にも env.DB を渡す。計 2 箇所（結果の未取込の列挙・日報の取り残しの列挙）。
@@ -863,9 +907,10 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     }
   });
 
-  it("LLM の依存(createCloudLlm)を作るのは、発走前の分析の DO(race-day-do.ts)と日報の DO(daily-report-do.ts)の 2 箇所だけ。Discord の送信(createDiscordNotifier)も同じ 2 箇所", () => {
+  it("LLM の依存(createCloudLlm)を作るのは、発走前の分析の DO(race-day-do.ts)と日報の DO(daily-report-do.ts)の 2 箇所だけ。Discord の送信(createDiscordNotifier)は、この 2 箇所と、scheduled.ts の失敗通知の 1 箇所(Issue #249)だけ", () => {
     expect(sites(/(?<!function\s)\bcreateCloudLlm\(/g)).toEqual({ "daily-report-do.ts": 1, "race-day-do.ts": 1 });
-    expect(sites(/(?<!function\s)\bcreateDiscordNotifier\(/g)).toEqual({ "daily-report-do.ts": 1, "race-day-do.ts": 1 });
+    // Issue #249: scheduled.ts の 1 箇所が加わった(23 時の再実行で計画の依頼が 3 回とも失敗したときの固定文の通知だけ。上の scheduled.ts の検査が固定する)
+    expect(sites(/(?<!function\s)\bcreateDiscordNotifier\(/g)).toEqual({ "daily-report-do.ts": 1, "race-day-do.ts": 1, "scheduled.ts": 1 });
   });
 
   it("日報の作成の依頼(.requestReport( の呼び出し)の箇所: 手動 POST(handler.ts)・取り残しの補完(scheduled.ts)・日単位の DO の配線(race-day-do.ts)・その中の呼び出し(race-day-core.ts)・DO の RPC の委譲(daily-report-do.ts)だけ", () => {
@@ -911,8 +956,8 @@ describe("Issue #235: 日報(DailyReportDO)は netkeiba に出ず、LLM・Discor
     }
   });
 
-  it("cron は 1 本のまま(日報のために cron を足していない)。起動は日単位の DO のイベント（静かになったとき）と、朝の cron の補完・手動", () => {
+  it("cron の行は 1 行のまま(日報のために cron を足していない。Issue #249 で 21 時・23 時の 2 本になったが、日報は 23 時の再実行が補完する)。起動は日単位の DO のイベント（静かになったとき）と、23 時の cron の補完・手動", () => {
     expect((tomlCode.match(/^crons\s*=\s*\[[^\]]*\]\s*$/gm) ?? []).length).toBe(1);
-    expect(tomlCode).toContain('crons = ["0 0 * * *"]');
+    expect(tomlCode).toContain('crons = ["0 12 * * *", "0 14 * * *"]');
   });
 });

@@ -10,6 +10,7 @@
 import { filterJpnOnlyEntries } from "../../packages/core/src/scraper/jpn-grade";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { preRaceAlarmAt, startTimeEpochMs } from "./pre-race-time";
+import { addDaysToKaisaiDate } from "./result-dispatch";
 
 /** JST は UTC+9(夏時間なし)。 */
 const JST_OFFSET_MS = 9 * 3600_000;
@@ -27,6 +28,55 @@ export function jstKaisaiDate(scheduledTimeMs: number): string {
   const month = String(jst.getUTCMonth() + 1).padStart(2, "0");
   const day = String(jst.getUTCDate()).padStart(2, "0");
   return `${year}${month}${day}`;
+}
+
+/** 事前分析の定時実行の時刻(JST の時)。1 本目 = 21 時(UTC 12:00)・2 本目 = 23 時(UTC 14:00)。`wrangler.toml` の cron と一致する(`scripts/test/cloud-config-guard.test.ts` が固定する)。 */
+export const FIRST_RUN_JST_HOUR = 21;
+export const RETRY_RUN_JST_HOUR = 23;
+/** この時(JST)以降の実行を再実行(retry)とみなす。21 時の実行が大きく遅れても、名目の時刻(`scheduledTime`)は変わらないので、判別は揺れない。 */
+export const RETRY_RUN_FROM_JST_HOUR = 22;
+
+/** 定時の実行の種類。`first` = 21 時(翌日の事前分析を始める)/ `retry` = 23 時(再実行。失敗の救済・結果の取り込み・日報の補完・失敗の通知)。 */
+export type ScheduledRunKind = "first" | "retry";
+
+/**
+ * cron の `scheduledTime` の **JST の時刻**で、実行の種類を決める({@link RETRY_RUN_FROM_JST_HOUR} 以上 = retry。それ以外 = first)。
+ * `event.cron` の文字列は使わない(開催日の決定と同じ入力だけで決まり、テスト・smoke・手動起動でも `scheduledTime` だけで動かせる)。
+ * @throws RangeError 時刻が不正(`jstKaisaiDate` と同じ)
+ */
+export function scheduledRunKind(scheduledTimeMs: number): ScheduledRunKind {
+  jstKaisaiDate(scheduledTimeMs); // 不正な時刻をここで弾く(同じ検査)
+  const hour = new Date(scheduledTimeMs + JST_OFFSET_MS).getUTCHours();
+  return hour >= RETRY_RUN_FROM_JST_HOUR ? "retry" : "first";
+}
+
+/**
+ * 事前分析で**計画する開催日** = `scheduledTime` の JST の今日 + 1(暦日の足し算。月末・年末・うるう日を正しく繰り上げる)。21 時と 23 時は JST で同じ日なので、同じ開催日になる。
+ * @throws RangeError 時刻が不正、または翌日が 4 桁の年に収まらない
+ */
+export function planTargetDate(scheduledTimeMs: number): string {
+  const next = addDaysToKaisaiDate(jstKaisaiDate(scheduledTimeMs), 1);
+  if (!/^\d{8}$/.test(next)) {
+    throw new RangeError(`翌日の開催日が 4 桁の年に収まりません(渡された時刻: ${String(scheduledTimeMs).slice(0, 32)})`);
+  }
+  return next;
+}
+
+const WEEKDAYS_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+/** 開催日(YYYYMMDD)の曜日(「日」〜「土」)。形が不正・実在しない日付なら null。 */
+export function kaisaiDateWeekday(kaisaiDate: string): string | null {
+  if (!/^\d{8}$/.test(kaisaiDate)) {
+    return null;
+  }
+  const y = Number(kaisaiDate.slice(0, 4));
+  const m = Number(kaisaiDate.slice(4, 6));
+  const d = Number(kaisaiDate.slice(6, 8));
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) {
+    return null;
+  }
+  return WEEKDAYS_JA[date.getUTCDay()] ?? null;
 }
 
 /** 自動実行の対象の会場の区分(中央 = race.netkeiba.com・地方 = nar.netkeiba.com の一覧の由来)。 */

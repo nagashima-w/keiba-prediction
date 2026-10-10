@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RaceDayNamespaceLike, RaceDayStubLike } from "../src/handler";
+import { DISCORD_COLORS } from "../src/palette";
 import { RaceDayCore, type AnalysisSink, type RequestPlanResult, type RequestResultImportResult } from "../src/race-day-core";
 import type { DispatchStore } from "../src/result-dispatch";
 import type { ResultDb } from "../src/result-repository";
@@ -14,7 +15,8 @@ import { openNodeSql, type NodeSql } from "./node-sql";
  * 日単位の DO は偽物(呼び出しを記録する)。ただし再試行の効きめを見るテストだけは、本物の `RaceDayCore`(`node:sqlite`)を通す。
  */
 
-const JST_0900_0628 = Date.parse("2026-06-28T00:00:00Z"); // UTC 0:00 = JST 9:00(2026-06-28)
+const FIRST_0627_2100 = Date.parse("2026-06-27T12:00:00Z"); // UTC 12:00 = JST 21:00(2026-06-27)。計画する開催日は 20260628
+const RETRY_0628_2300 = Date.parse("2026-06-28T14:00:00Z"); // UTC 14:00 = JST 23:00(2026-06-28)。計画する開催日は 20260629。結果の窓は 20260621〜20260627
 const MIN = 60_000;
 
 interface FakeNamespace {
@@ -103,33 +105,34 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("runScheduled: 開催日は scheduledTime から JST の日付で決める", () => {
+describe("runScheduled: 計画する開催日は scheduledTime の JST の今日 + 1(Issue #249)", () => {
   const cases: [string, number, string][] = [
-    ["UTC 0:00(cron の時刻 = JST 9:00)", Date.parse("2026-06-28T00:00:00Z"), "20260628"],
-    ["UTC 0:00:00.999(同じ日)", Date.parse("2026-06-28T00:00:00.999Z"), "20260628"],
-    ["UTC 14:59:59(JST 23:59:59。同じ日)", Date.parse("2026-06-28T14:59:59Z"), "20260628"],
-    ["UTC 15:00:00(JST 翌日 0:00。cron を将来 0 15 * * * に変えた場合の足場)", Date.parse("2026-06-28T15:00:00Z"), "20260629"],
-    ["月またぎ(UTC 6/30 15:00 = JST 7/1 0:00)", Date.parse("2026-06-30T15:00:00Z"), "20260701"],
+    ["21 時の cron(UTC 12:00 = JST 6/27 21:00)", Date.parse("2026-06-27T12:00:00Z"), "20260628"],
+    ["23 時の cron(UTC 14:00 = JST 6/27 23:00。21 時と同じ開催日)", Date.parse("2026-06-27T14:00:00Z"), "20260628"],
+    ["UTC 14:59:59(JST 23:59:59。まだ同じ日の翌日)", Date.parse("2026-06-27T14:59:59Z"), "20260628"],
+    ["UTC 15:00:00(JST 翌日 0:00。日付が進む)", Date.parse("2026-06-27T15:00:00Z"), "20260629"],
+    ["月末(UTC 6/30 12:00 = JST 6/30 21:00 → 7/1)", Date.parse("2026-06-30T12:00:00Z"), "20260701"],
+    ["年末(UTC 12/31 14:00 = JST 12/31 23:00 → 翌年 1/1)", Date.parse("2026-12-31T14:00:00Z"), "20270101"],
   ];
   for (const [name, scheduledTime, expected] of cases) {
     it(`${name} → 開催日 ${expected} の DO の requestPlan だけを 1 回呼ぶ`, async () => {
       const f = fakeNamespace();
       const h = harness();
       await runScheduled({ scheduledTime }, envOf(f), h.deps);
-      expect(f.names).toEqual([expected]);
-      expect(f.requests).toEqual([{ kaisaiDate: expected }]);
+      expect(f.names[0]).toBe(expected);
+      expect(f.requests.map((r) => r.kaisaiDate)).toEqual([expected]);
       expect(h.sleeps).toEqual([]);
     });
   }
 
   it("遅延配信: 現在時刻が別の日(スケジュールの 15 時間後)でも、開催日は scheduledTime で決まる(Date.now を使わない)", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(JST_0900_0628 + 15 * 60 * MIN);
+    vi.setSystemTime(FIRST_0627_2100 + 15 * 60 * MIN);
     // 前提: 今の時刻の JST の日付は scheduledTime の日付と違う(同じなら、この検査は何も区別しない)
-    expect(new Date(Date.now() + 9 * 60 * MIN).getUTCDate()).not.toBe(new Date(JST_0900_0628 + 9 * 60 * MIN).getUTCDate());
+    expect(new Date(Date.now() + 9 * 60 * MIN).getUTCDate()).not.toBe(new Date(FIRST_0627_2100 + 9 * 60 * MIN).getUTCDate());
     const f = fakeNamespace();
     const h = harness();
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), h.deps);
+    await runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps);
     expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
   });
 
@@ -152,8 +155,8 @@ describe("runScheduled: 重複配信・結果のログ", () => {
     const f = fakeNamespace();
     const h = harness();
     f.script = [async () => ({ accepted: true }), async () => ({ accepted: false, reason: "already-planned" })];
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), h.deps);
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), h.deps);
+    await runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps);
+    await runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps);
     expect(f.requests).toHaveLength(2);
     expect(h.sleeps).toEqual([]);
     const lines = h.logs.map((l) => l.line);
@@ -176,7 +179,7 @@ describe("runScheduled: 失敗は有界の再試行(即時・10 秒後・30 秒�
         throw new TypeError("内部の詳細 SECRET-CANARY-1");
       },
     ];
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), h.deps);
+    await runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps);
     expect(f.requests).toEqual([{ kaisaiDate: "20260628" }, { kaisaiDate: "20260628" }]);
     expect(h.sleeps).toEqual([10_000]);
     const text = h.text();
@@ -193,7 +196,7 @@ describe("runScheduled: 失敗は有界の再試行(即時・10 秒後・30 秒�
       throw new Error(`https://discord.com/api/webhooks/1/SECRET-CANARY-${n}`);
     };
     f.script = [failing(1), failing(2), failing(3)];
-    const error = await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), h.deps).catch((e: unknown) => e);
+    const error = await runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe(SCHEDULED_FAILURE_MESSAGE);
     expect(f.requests).toHaveLength(3);
@@ -221,7 +224,7 @@ describe("runScheduled: 失敗は有界の再試行(即時・10 秒後・30 秒�
         throw weird;
       },
     ];
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), h.deps)).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps)).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
     expect(h.text()).not.toContain("SECRET-CANARY");
     expect(h.text()).not.toContain("discord.com");
   });
@@ -255,7 +258,7 @@ describe("runScheduled と requestPlan の冪等性(本物の RaceDayCore): 1 �
     const alarms: number[] = [];
     const core = new RaceDayCore({
       sql,
-      now: () => JST_0900_0628,
+      now: () => FIRST_0627_2100,
       gate: {
         fetchRaw: async () => {
           throw new Error("scheduled は取得しない");
@@ -283,12 +286,12 @@ describe("runScheduled と requestPlan の冪等性(本物の RaceDayCore): 1 �
       },
     ];
     const h = harness();
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), h.deps);
+    await runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps);
     expect(f.requests).toHaveLength(2);
     expect(h.sleeps).toEqual([10_000]);
     // 2 回目は already-planned(1 回目が依頼の行を書いていた)で、アラームが張られた
     expect(results).toEqual([{ accepted: false, reason: "already-planned" }]);
-    expect(alarms).toEqual([JST_0900_0628]);
+    expect(alarms).toEqual([FIRST_0627_2100]);
     const venues = sql.exec("SELECT venue, state FROM race_day_plan_venue ORDER BY venue").toArray();
     expect(venues).toEqual([
       { venue: "central", state: "pending" },
@@ -316,14 +319,14 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
     const f = fakeNamespace();
     const h = harness();
     const store = fakeStore();
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store });
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store });
     expect(store.calls).toEqual([{ from: "20260621", to: "20260627", perDay: 60, maxDays: 2, total: 120 }]);
-    // 月・年をまたぐ窓、UTC 15:00 以降(JST の翌日)の窓
+    // 月・年をまたぐ窓、日付が進んだ日(6/29 23:00)の窓
     const jan = fakeStore();
-    await runScheduled({ scheduledTime: Date.parse("2026-01-05T00:00:00Z") }, envOf(f), { ...h.deps, store: jan });
+    await runScheduled({ scheduledTime: Date.parse("2026-01-05T14:00:00Z") }, envOf(f), { ...h.deps, store: jan });
     expect(jan.calls).toEqual([{ from: "20251229", to: "20260104", perDay: 60, maxDays: 2, total: 120 }]);
     const late = fakeStore();
-    await runScheduled({ scheduledTime: Date.parse("2026-06-28T15:00:00Z") }, envOf(f), { ...h.deps, store: late });
+    await runScheduled({ scheduledTime: Date.parse("2026-06-29T14:00:00Z") }, envOf(f), { ...h.deps, store: late });
     expect(late.calls).toEqual([{ from: "20260622", to: "20260628", perDay: 60, maxDays: 2, total: 120 }]);
   });
 
@@ -334,13 +337,13 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
       { raceId: "202603020211", kaisaiDate: "20260627" },
       { raceId: "202603020111", kaisaiDate: "20260625" },
     ]);
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store });
-    expect(f.events).toEqual(["plan:20260628", "result:20260627", "result:20260625"]);
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store });
+    expect(f.events).toEqual(["plan:20260629", "result:20260627", "result:20260625"]);
     expect(f.resultRequests).toEqual([
       { kaisaiDate: "20260627", raceIds: ["202603020211"] },
       { kaisaiDate: "20260625", raceIds: ["202603020111"] },
     ]);
-    expect(f.names).toEqual(["20260628", "20260627", "20260625"]);
+    expect(f.names).toEqual(["20260629", "20260627", "20260625"]);
   });
 
   it("D1 の列挙が失敗しても、requestPlan は成功のまま(例外にしない)。分類だけをログに出し、メッセージ本文を出さない", async () => {
@@ -348,8 +351,8 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
     const h = harness();
     const store = fakeStore();
     store.failWith = new Error("D1 の詳細 SECRET-CANARY-D1");
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store })).resolves.toBeUndefined();
-    expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store })).resolves.toBeUndefined();
+    expect(f.requests).toEqual([{ kaisaiDate: "20260629", rescue: true }]);
     expect(h.text()).toContain("result-list-failed");
     expect(h.text()).not.toContain("SECRET-CANARY");
   });
@@ -366,7 +369,7 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
       { raceId: "202603020211", kaisaiDate: "20260627" },
       { raceId: "202603020111", kaisaiDate: "20260626" },
     ]);
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store })).resolves.toBeUndefined();
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store })).resolves.toBeUndefined();
     expect(f.resultRequests.map((r) => r.kaisaiDate)).toEqual(["20260627", "20260626"]);
     expect(h.text()).toContain("result-request-failed");
     expect(h.text()).not.toContain("SECRET-CANARY");
@@ -376,8 +379,8 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
     const f = fakeNamespace();
     const h = harness();
     const brokenEnv = { RACE_DAY: f.namespace, get DB(): ResultDb { throw new Error("binding SECRET-CANARY-BINDING"); } } as ScheduledEnv;
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, brokenEnv, h.deps)).resolves.toBeUndefined();
-    expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, brokenEnv, h.deps)).resolves.toBeUndefined();
+    expect(f.requests).toEqual([{ kaisaiDate: "20260629", rescue: true }]);
     expect(h.text()).toContain("result-dispatch-failed");
     expect(h.text()).not.toContain("SECRET-CANARY");
   });
@@ -390,8 +393,8 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
     };
     f.script = [failing, failing, failing];
     const store = fakeStore([{ raceId: "202603020211", kaisaiDate: "20260627" }]);
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
-    expect(f.events).toEqual(["plan:20260628", "plan:20260628", "plan:20260628", "result:20260627"]);
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    expect(f.events).toEqual(["plan:20260629", "plan:20260629", "plan:20260629", "result:20260627"]);
     expect(h.sleeps).toEqual([10_000, 30_000]);
     expect(h.text()).toContain("request-plan-failed");
   });
@@ -400,8 +403,8 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
     const f = fakeNamespace();
     const h = harness();
     const store = fakeStore([{ raceId: "202603020211", kaisaiDate: "20260627" }]);
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store });
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store });
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store });
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store });
     expect(f.resultRequests).toHaveLength(2);
     expect(f.resultRequests[0]).toEqual(f.resultRequests[1]);
     expect(store.calls[0]).toEqual(store.calls[1]);
@@ -429,7 +432,7 @@ describe("runScheduled: 結果の取り込みの依頼(Issue #208)。requestPlan
       }),
       batch: async () => [],
     } as unknown as ResultDb;
-    await runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f, db), h.deps);
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f, db), h.deps);
     expect(binds).toEqual([["20260621", "20260627", 60, 2, 120]]);
     expect(f.resultRequests).toEqual([{ kaisaiDate: "20260627", raceIds: ["202603020211"] }]);
   });
@@ -466,8 +469,8 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
     const h = harness();
     const b = fakeBackfill(f.events);
     const store: DispatchStore = { listUnimportedRacesByDay: async () => [{ raceId: "202603020211", kaisaiDate: "20260627" }] };
-    await runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store });
-    expect(f.events).toEqual(["plan:20260628", "result:20260627", "kick"]);
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store });
+    expect(f.events).toEqual(["plan:20260629", "result:20260627", "kick"]);
     expect(b.names).toEqual(["main"]);
     expect(b.kicks()).toBe(1);
   });
@@ -485,8 +488,8 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
       const h = harness();
       const b = fakeBackfill(f.events, behavior);
       const store: DispatchStore = { listUnimportedRacesByDay: async () => [{ raceId: "202603020211", kaisaiDate: "20260627" }] };
-      await expect(runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store })).resolves.toBeUndefined();
-      expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+      await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store })).resolves.toBeUndefined();
+      expect(f.requests).toEqual([{ kaisaiDate: "20260629", rescue: true }]);
       expect(f.resultRequests).toHaveLength(1);
       expect(b.kicks()).toBe(1);
       expect(h.text()).toContain("backfill-kick-failed");
@@ -503,8 +506,8 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
       },
       get: NOT_CALLED,
     };
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: broken as never }, { ...h.deps, store: emptyStore })).resolves.toBeUndefined();
-    expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...envOf(f), RESULT_BACKFILL: broken as never }, { ...h.deps, store: emptyStore })).resolves.toBeUndefined();
+    expect(f.requests).toEqual([{ kaisaiDate: "20260629", rescue: true }]);
     expect(h.text()).toContain("backfill-kick-failed");
     expect(h.text()).not.toContain("SECRET-CANARY");
   });
@@ -514,7 +517,7 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
     const h = harness();
     f.script = [() => Promise.reject(new Error("x")), () => Promise.reject(new Error("x")), () => Promise.reject(new Error("x"))];
     const b = fakeBackfill(f.events);
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store: emptyStore })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store: emptyStore })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
     expect(b.kicks()).toBe(1);
   });
 
@@ -527,15 +530,15 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
         throw new Error("D1");
       },
     };
-    await runScheduled({ scheduledTime: JST_0900_0628 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store });
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store });
     expect(b.kicks()).toBe(1);
   });
 
   it("binding が無い構成(RESULT_BACKFILL 省略)は、kick せずに従来どおり動く", async () => {
     const f = fakeNamespace();
     const h = harness();
-    await expect(runScheduled({ scheduledTime: JST_0900_0628 }, envOf(f), { ...h.deps, store: emptyStore })).resolves.toBeUndefined();
-    expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store: emptyStore })).resolves.toBeUndefined();
+    expect(f.requests).toEqual([{ kaisaiDate: "20260629", rescue: true }]);
   });
 
   it("scheduledTime が不正なら kick も呼ばない(従来どおり何も呼ばない)", async () => {
@@ -544,5 +547,197 @@ describe("runScheduled: 結果の補完の起動(Issue #217)。毎日 1 回、�
     const b = fakeBackfill(f.events);
     await expect(runScheduled({ scheduledTime: Number.NaN }, { ...envOf(f), RESULT_BACKFILL: b.namespace }, { ...h.deps, store: emptyStore })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
     expect(b.kicks()).toBe(0);
+  });
+});
+
+describe("runScheduled: 21 時(first)と 23 時(retry)の割り振り(Issue #249)", () => {
+  const store = (calls: unknown[]): DispatchStore => ({
+    listUnimportedRacesByDay: async (options) => {
+      calls.push(options);
+      return [{ raceId: "202603020211", kaisaiDate: "20260627" }];
+    },
+  });
+  function backfill(events: string[]) {
+    return {
+      idFromName: (n: string) => n,
+      get: () => ({
+        kick: async () => {
+          events.push("kick");
+        },
+        getStatus: NOT_CALLED,
+      }),
+    };
+  }
+
+  it("21 時(first): 翌日の requestPlan だけ。rescue は渡さない。結果の取り込み(列挙も依頼も)・kick は行わない", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const calls: unknown[] = [];
+    await runScheduled({ scheduledTime: FIRST_0627_2100 }, { ...envOf(f), RESULT_BACKFILL: backfill(f.events) as never }, { ...h.deps, store: store(calls) });
+    expect(f.events).toEqual(["plan:20260628"]);
+    expect(f.requests).toEqual([{ kaisaiDate: "20260628" }]);
+    expect(Object.keys(f.requests[0]!)).toEqual(["kaisaiDate"]); // rescue のキー自体が無い
+    expect(calls).toEqual([]);
+  });
+
+  it("23 時(retry): 同じ翌日の requestPlan を rescue つきで呼び、結果の取り込み・kick を行う(順は plan → result → kick)", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const calls: unknown[] = [];
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...envOf(f), RESULT_BACKFILL: backfill(f.events) as never }, { ...h.deps, store: store(calls) });
+    expect(f.events).toEqual(["plan:20260629", "result:20260627", "kick"]);
+    expect(f.requests).toEqual([{ kaisaiDate: "20260629", rescue: true }]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("21 時と 23 時は同じ JST の日なので、計画する開催日は同じ(21 時: 6/28 21:00 と 23 時: 6/28 23:00 → どちらも 20260629)", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    await runScheduled({ scheduledTime: Date.parse("2026-06-28T12:00:00Z") }, envOf(f), h.deps);
+    await runScheduled({ scheduledTime: Date.parse("2026-06-28T14:00:00Z") }, envOf(f), h.deps);
+    expect(f.requests.map((r) => r.kaisaiDate)).toEqual(["20260629", "20260629"]);
+    expect(f.requests.map((r) => (r as { rescue?: boolean }).rescue)).toEqual([undefined, true]);
+  });
+
+  it("結果の取り込みの窓の基準は cron の JST の今日(翌日ではない): 23 時でも、窓の終わりは今日の前日", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const calls: unknown[] = [];
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, envOf(f), { ...h.deps, store: store(calls) });
+    expect(calls).toEqual([{ from: "20260621", to: "20260627", perDay: 60, maxDays: 2, total: 120 }]);
+  });
+
+  it("1 日 2 回(21 時と 23 時)とも成功すれば、requestPlan の呼び出しは 1 回の実行につき 1 回(再試行は失敗したときだけ)", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    await runScheduled({ scheduledTime: FIRST_0627_2100 }, envOf(f), h.deps);
+    await runScheduled({ scheduledTime: Date.parse("2026-06-27T14:00:00Z") }, envOf(f), h.deps);
+    expect(f.requests).toHaveLength(2);
+    expect(h.sleeps).toEqual([]);
+  });
+});
+
+describe("runScheduled: 23 時の再実行で翌日の事前分析を依頼できなかったときの Discord 通知(Issue #249。利用者の決定)", () => {
+  const VALID_URL = "https://discord.com/api/webhooks/123456789012345678/SECRET-CANARY-WEBHOOK-TOKEN";
+  const failing = async (): Promise<RequestPlanResult> => {
+    throw new Error("plan failed");
+  };
+
+  interface SentRequest {
+    readonly url: string;
+    readonly body: { embeds: { title: string; description: string; color: number }[] };
+  }
+  /** 送信の偽物。`fetch` に注入する。応答のステータスを指定できる。 */
+  function fakeFetch(status = 204) {
+    const sent: SentRequest[] = [];
+    const fn = async (url: string, init: { body: string }) => {
+      sent.push({ url, body: JSON.parse(init.body) as SentRequest["body"] });
+      return { status, ok: status >= 200 && status < 300, headers: { get: () => null }, text: async () => "" };
+    };
+    return { sent, fn: fn as never };
+  }
+  /** url = null は secret 未登録(キー自体を持たない)。 */
+  const env = (f: FakeNamespace, url: string | null = VALID_URL): ScheduledEnv => ({ ...envOf(f), ...(url === null ? {} : { DISCORD_WEBHOOK_URL: url }) });
+
+  it("retry で requestPlan が 3 回とも失敗 → 固定文を 1 通だけ送り、そのあと従来どおり固定文言で投げる(帯は失敗色)", async () => {
+    const f = fakeNamespace();
+    f.script = [failing, failing, failing];
+    const h = harness();
+    const net = fakeFetch();
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, env(f), { ...h.deps, fetch: net.fn })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    expect(f.requests).toHaveLength(3);
+    expect(net.sent).toHaveLength(1);
+    const embed = net.sent[0]!.body.embeds[0]!;
+    expect(embed.description).toBe("【失敗】23 時の再実行で、翌日(2026/06/29(月)開催分)の事前分析を依頼できませんでした。画面から手動で実行してください。");
+    expect(embed.color).toBe(DISCORD_COLORS.fail);
+    expect(net.sent[0]!.url).toBe(VALID_URL);
+  });
+
+  it("first(21 時)で 3 回とも失敗 → 送らない(23 時に救済されるため)。従来どおり投げる", async () => {
+    const f = fakeNamespace();
+    f.script = [failing, failing, failing];
+    const h = harness();
+    const net = fakeFetch();
+    await expect(runScheduled({ scheduledTime: FIRST_0627_2100 }, env(f), { ...h.deps, fetch: net.fn })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    expect(net.sent).toEqual([]);
+  });
+
+  it("retry で成功(1 回失敗して 2 回目で受理も含む)→ 送らない", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const net = fakeFetch();
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, env(f), { ...h.deps, fetch: net.fn });
+    f.script = [failing];
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, env(f), { ...h.deps, fetch: net.fn });
+    expect(f.requests).toHaveLength(3); // 前提: 2 回目の実行は 1 回失敗して 2 回目で受理された
+    expect(net.sent).toEqual([]);
+  });
+
+  it("scheduledTime が不正(retry か first か判別できない)なら、送らない(DO も呼ばない)", async () => {
+    const f = fakeNamespace();
+    const h = harness();
+    const net = fakeFetch();
+    await expect(runScheduled({ scheduledTime: Number.NaN }, env(f), { ...h.deps, fetch: net.fn })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    expect(net.sent).toEqual([]);
+  });
+
+  it.each([
+    ["未登録", null],
+    ["空白だけ", "   "],
+    ["形式不正(Discord の Webhook ではない)", "https://example.com/api/webhooks/1/SECRET-CANARY-BAD"],
+  ])("Webhook が%s → 送らず、例外も増えない(従来の固定文言のエラーだけ)。URL の値をログに出さない", async (_name, url) => {
+    const f = fakeNamespace();
+    f.script = [failing, failing, failing];
+    const h = harness();
+    const net = fakeFetch();
+    await expect(runScheduled({ scheduledTime: RETRY_0628_2300 }, env(f, url), { ...h.deps, fetch: net.fn })).rejects.toThrow(SCHEDULED_FAILURE_MESSAGE);
+    expect(net.sent).toEqual([]);
+    expect(h.text()).not.toContain("SECRET-CANARY");
+    expect(h.text()).toContain("plan-failure-notice");
+  });
+
+  it("送信が失敗(HTTP 500・ネットワークエラー)しても握る: 従来の固定文言のエラーだけを投げ、ログは分類だけで URL・本文を出さない", async () => {
+    for (const mode of ["http500", "throw"] as const) {
+      const f = fakeNamespace();
+      f.script = [failing, failing, failing];
+      const h = harness();
+      const sent: unknown[] = [];
+      const fn = async () => {
+        sent.push(1);
+        if (mode === "throw") {
+          throw new Error(`fetch failed ${VALID_URL}`);
+        }
+        return { status: 500, ok: false, headers: { get: () => null }, text: async () => `${VALID_URL} 本文` };
+      };
+      const error = await runScheduled({ scheduledTime: RETRY_0628_2300 }, env(f), { ...h.deps, fetch: fn as never }).catch((e: unknown) => e);
+      expect((error as Error).message, mode).toBe(SCHEDULED_FAILURE_MESSAGE);
+      expect(sent.length, mode).toBeGreaterThanOrEqual(1);
+      expect(h.text(), mode).toContain("plan-failure-notice");
+      expect(h.text(), mode).not.toContain("SECRET-CANARY");
+      expect(h.text(), mode).not.toContain("discord.com");
+      expect(h.text(), mode).not.toContain("本文");
+    }
+  });
+
+  it("通知は結果の取り込み・kick・日報の補完のあとに送る(通知の送信待ちが、他の仕事を遅らせない)", async () => {
+    const f = fakeNamespace();
+    f.script = [failing, failing, failing];
+    const h = harness();
+    const order: string[] = [];
+    const fn = async () => {
+      order.push("discord");
+      return { status: 204, ok: true, headers: { get: () => null }, text: async () => "" };
+    };
+    const backfill = {
+      idFromName: (n: string) => n,
+      get: () => ({
+        kick: async () => {
+          order.push("kick");
+        },
+        getStatus: NOT_CALLED,
+      }),
+    };
+    await runScheduled({ scheduledTime: RETRY_0628_2300 }, { ...env(f), RESULT_BACKFILL: backfill as never }, { ...h.deps, fetch: fn as never }).catch(() => undefined);
+    expect(order).toEqual(["kick", "discord"]);
   });
 });

@@ -62,7 +62,7 @@ export interface RaceDayStubLike {
   /** 開催日のレース一覧(Issue #183)。 */
   getRaceList(kaisaiDate: string, venue: RaceListVenue): Promise<RaceListResult>;
   /** 朝の計画の依頼(Issue #203・#206)。**呼ぶのは cron の `scheduled`(scheduled.ts)だけ**。手動の入口〈handler.ts〉は呼ばない(ガードテストが固定)。 */
-  requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult>;
+  requestPlan(input: { readonly kaisaiDate: string; readonly rescue?: boolean }): Promise<RequestPlanResult>;
   /** 朝の計画の読み取り(Issue #206 `GET /api/plan`。状態は変えない)。 */
   getPlanProgress(): Promise<PlanProgress>;
   /** 自動実行の各レースの結果の読み取り(Issue #204・#206。状態は変えない)。 */

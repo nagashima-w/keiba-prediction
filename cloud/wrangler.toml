@@ -19,14 +19,18 @@ preview_urls = false
 [observability]
 enabled = true
 
-# Issue #206(#166-E): 定時の自動実行の cron。**これを有効にすると、本番で毎朝 JST 9:00(UTC 0:00)に自動で次のことが起きる**:
-#   scheduled(src/scheduled.ts)→ その日の日単位の DO の requestPlan → 中央・地方の一覧の取得(netkeiba)→ 計画 → 朝の取得 → 発走前の分析(Claude API。ANTHROPIC_API_KEY が登録済みのとき)→ Discord 通知。
-# cron は 1 本だけ(UTC 0:00 = JST 9:00。ユーザー判断)。scripts/test/cloud-config-guard.test.ts が `["0 0 * * *"]` ちょうどを固定する。
+# Issue #206(#166-E)・#249: 定時の自動実行の cron。**これを有効にすると、本番で毎晩 JST 21:00 と 23:00(UTC 12:00 と 14:00)に自動で次のことが起きる**(朝 9 時の定時実行は無い):
+#   - 21:00 JST: scheduled(src/scheduled.ts)→ **翌日**の日単位の DO の requestPlan → 中央・地方の一覧の取得(netkeiba)→ 計画 → 事前分析(旧「朝の準備」。出馬表・戦績・調教の取得と統計の順位)→ Discord にまとめ。
+#   - 23:00 JST: 翌日の requestPlan を rescue つきで再実行(21 時に失敗した一覧・事前分析を 1 回だけ救済し、それでも失敗が残れば翌日の DO が Discord で通知する)+ 結果の取り込み(過去 7 日)+ 結果の補完の起動 + 日報の補完。
+#     さらに 23 時の依頼自体が 3 回とも失敗したときは、scheduled.ts が Discord に固定文を 1 通送る(利用者の決定)。
+#   発走前の分析(Claude API。ANTHROPIC_API_KEY が登録済みのとき)は、翌日の各レースの発走の N 分前に、日単位の DO のアラームが行う。
+# cron は 2 本(UTC 12:00 = JST 21:00 と UTC 14:00 = JST 23:00。ユーザー判断)。scripts/test/cloud-config-guard.test.ts が `["0 12 * * *", "0 14 * * *"]` ちょうどを固定し、
+# 時刻が scheduled の判別の定数(src/auto-run-plan.ts の FIRST_RUN_JST_HOUR=21・RETRY_RUN_JST_HOUR=23)と一致することも検査する(cron を変えるときは両方を直す)。
 # ★止め方: `[triggers]` を**消すだけでは止まらない**(wrangler は crons が未設定だと schedule を更新せず、登録済みの cron が残る。wrangler 4.147.0 の実装を読んだ結果で、本番では未確認)。
 #   `crons = []`(空配列)にしてデプロイする。ダッシュボードで消しても、次のデプロイで、この toml の内容に戻る(wrangler deploy は toml の crons で schedule を上書きする)。
 #   課金だけを止めるなら Worker の secret `ANTHROPIC_API_KEY` を削除する(netkeiba への取得は続く)。手順は cloud/README.md。
 [triggers]
-crons = ["0 0 * * *"]
+crons = ["0 12 * * *", "0 14 * * *"]
 
 # SQLite バックエンドの Durable Object(Free プランで使えるのは SQLite バックエンドだけ)。
 # #162 で netkeiba への取得(TCP ソケット)と間隔制御・サーキットブレーカーを担う。クラス名は migration に固定されるため、変えるときは migration が要る。

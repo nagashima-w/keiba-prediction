@@ -129,7 +129,7 @@ export class RaceDay extends DurableObject<RaceDayEnv> {
    * 朝の計画を依頼する(RPC。Issue #203。依頼だけをして戻る。2回目以降は `already-planned`で、アラームだけ状態から張り直す〈Issue #206 G-E2〉)。
    * 呼ぶのは cron の `scheduled`(scheduled.ts。Issue #206)だけ。
    */
-  requestPlan(input: { readonly kaisaiDate: string }): Promise<RequestPlanResult> {
+  requestPlan(input: { readonly kaisaiDate: string; readonly rescue?: boolean }): Promise<RequestPlanResult> {
     return this.core.requestPlan(input);
   }
 

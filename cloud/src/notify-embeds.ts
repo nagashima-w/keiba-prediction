@@ -17,6 +17,7 @@ import { estimateFairWinOdds } from "../../packages/core/src/ev/win-odds-estimat
 import { parseComboOddsKey } from "../../packages/core/src/scraper/combo-odds-key";
 import { venueNameFromRaceId } from "../../packages/app/src/main/venue-codes";
 import { nameWithGrade } from "../client/grade";
+import { kaisaiDateWeekday } from "./auto-run-plan";
 import { DISCORD_COLORS } from "./palette";
 import { ACTUAL_HIGHER_MARK, buildWinOddsLine } from "./win-odds-format";
 import type { AutoFailReason, AutoRunOutcome } from "./auto-run-result";
@@ -454,6 +455,28 @@ function readSnapshot(raw: unknown): SnapshotView {
 
 function slashDate(kaisaiDate: string | null | undefined): string {
   return typeof kaisaiDate === "string" && /^\d{8}$/.test(kaisaiDate) ? `${kaisaiDate.slice(0, 4)}/${kaisaiDate.slice(4, 6)}/${kaisaiDate.slice(6, 8)}` : "日付不明";
+}
+
+/**
+ * 開催日の見出し「2026/10/11(日)」(Issue #249)。事前分析の通知は前日の夜に届くので、どの日の分か分かるよう曜日を付ける。
+ * 形が不正・実在しない日付は「日付不明」(曜日を捏造しない)。
+ */
+export function slashDateWithWeekday(kaisaiDate: string | null | undefined): string {
+  const weekday = typeof kaisaiDate === "string" ? kaisaiDateWeekday(kaisaiDate) : null;
+  return weekday === null ? "日付不明" : `${slashDate(kaisaiDate)}(${weekday})`;
+}
+
+/**
+ * 23 時の再実行で、翌日の事前分析を日単位の DO へ依頼できなかったときの固定文(Issue #249。利用者の決定)。`scheduled.ts` が送る(DO に届かない状況なので、DO の状態からは作れない)。
+ * 固定文と日付だけで、URL・例外の文面は含まない。色(失敗色)に頼らず、文字(【失敗】)でも伝える。
+ */
+export function buildPlanRequestFailedEmbed(kaisaiDate: string): CloudEmbed {
+  const label = slashDateWithWeekday(kaisaiDate);
+  return fitEmbed({
+    title: `事前分析の失敗 ${label}`,
+    description: `【失敗】23 時の再実行で、翌日(${label}開催分)の事前分析を依頼できませんでした。画面から手動で実行してください。`,
+    color: COLOR_RED,
+  });
 }
 
 /**
