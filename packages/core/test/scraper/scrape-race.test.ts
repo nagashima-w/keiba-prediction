@@ -366,6 +366,13 @@ function narHandler(url: string): string {
 }
 
 describe("scrapeRace(地方(NAR)対応)", () => {
+  it("地方のレース名(div.RaceName)が空にならず race.raceName に載ること(Issue #252。分析のスナップショット・プロンプトへ流れる値)", async () => {
+    const fetcher = new RecordingFetcher(narHandler);
+    const data = await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW });
+
+    expect(data.race.raceName).toBe("ファイナルレース(C1)");
+  });
+
   it("oikiriを取得試行せず、警告も出さずに全馬oikiri:nullで返すこと(NAR対象外)", async () => {
     const fetcher = new RecordingFetcher(narHandler);
     const data = await scrapeRace(NAR_RACE_ID, { fetcher, now: FIXED_NOW });

@@ -49,8 +49,15 @@ export const RACE_LIST_SELECTORS = {
 
 /** 出馬表(shutuba.html)のセレクタ。 */
 export const SHUTUBA_SELECTORS = {
-  /** レース名(ページ上部)。 */
-  raceName: "h1.RaceName",
+  /**
+   * レース名(ページ上部)。中央は `<h1 class="RaceName">`、地方は `<div class="RaceName">` とタグ名が異なる
+   * ため、タグ名を問わないクラスセレクタにする(Issue #252: `h1.RaceName` 限定だと地方が常に空文字になっていた)。
+   * 地方はこの要素の内側にグレードのテキスト(`<span class="Icon_Grade_None_Text …">Jpn1</span>`)が同居するので、
+   * レース名を読むときは下の `raceNameGradeIcon` を除いてから読む。
+   */
+  raceName: ".RaceName",
+  /** レース名の要素の内側にあるグレードのアイコン(中央はテキスト無し、地方は "Jpn1" 等のテキスト入り)。レース名からは除く。 */
+  raceNameGradeIcon: ".Icon_GradeType",
   /**
    * 重賞グレードバッジ(タスク機能B 要修正2: 非重賞への無駄なAPI呼び出しを避ける事前判定)。
    * RaceName配下にIcon_GradeTypeクラスを持つ要素があるかどうかで判定する(有無のみ。

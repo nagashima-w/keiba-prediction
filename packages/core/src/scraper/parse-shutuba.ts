@@ -69,7 +69,11 @@ function parseFence(courseType: CourseType, data01: string): string | null | und
 
 /** レース情報(ページ上部)を抽出する。 */
 function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
-  const raceName = $(SEL.raceName).first().text().trim();
+  // レース名(Issue #252)。地方の `div.RaceName` はグレードのテキスト("Jpn1" 等)を内側に持つので、
+  // 要素を複製してアイコンを除いてから読む(元の DOM は後続のグレード読み取りに使うため変えない)。
+  const $raceName = $(SEL.raceName).first().clone();
+  $raceName.find(SEL.raceNameGradeIcon).remove();
+  const raceName = $raceName.text().trim();
   const data01 = $(SEL.raceData01).first().text();
 
   const cdMatch = PATTERNS.courseAndDistance.exec(data01);
