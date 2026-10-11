@@ -488,12 +488,43 @@ describe("D1 の migration は追加のみ(Issue #171。AC-a7: 静的ガード)"
   const dir = path.join(ROOT, "cloud", "migrations");
   const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
 
-  it("ファイル名は NNNN_名前.sql(小文字・数字・アンダースコア)で、番号は 0001 から欠番なく連続している", () => {
+  /**
+   * 番号が 1 から欠番なく連続しているか。ただし `reserved` に挙げた番号は、まだこの枝に無くてよい(別の Issue が使う予約。あれば普通に連続の一部)。
+   * 予約: 0011 は #259 が使う。Issue #226 は 0012 を使う(番号は決め打ち。取り込み順で調整する)ので、#259 が取り込まれるまでこの枝には 0011 が無い。
+   */
+  const isContinuousExceptReserved = (numbers: readonly number[], reserved: ReadonlySet<number>): boolean => {
+    let expected = 1;
+    for (const n of numbers) {
+      while (reserved.has(expected) && expected !== n) {
+        expected += 1;
+      }
+      if (n !== expected) {
+        return false;
+      }
+      expected += 1;
+    }
+    return true;
+  };
+  const RESERVED_NUMBERS: ReadonlySet<number> = new Set([11]);
+
+  it("ファイル名は NNNN_名前.sql(小文字・数字・アンダースコア)で、番号は 0001 から欠番なく連続している(予約された 0011 だけは、まだ無くてよい)", () => {
     expect(files.length).toBeGreaterThan(0);
-    files.forEach((f, i) => {
+    files.forEach((f) => {
       expect(f, `${f} の名前`).toMatch(/^\d{4}_[a-z0-9_]+\.sql$/);
-      expect(Number(f.slice(0, 4)), `${f} の番号`).toBe(i + 1);
     });
+    expect(isContinuousExceptReserved(files.map((f) => Number(f.slice(0, 4))), RESERVED_NUMBERS), files.join(",")).toBe(true);
+  });
+
+  it("検出の確認(空振りでない): 予約の 0011 以外の欠番・重複・順序の乱れは拾い、予約の 0011 が無いこと・有ることは許す", () => {
+    const ok = (nums: number[]): boolean => isContinuousExceptReserved(nums, RESERVED_NUMBERS);
+    expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12])).toBe(true); // 0011 が無い(今の枝)
+    expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])).toBe(true); // 0011 がある(#259 の取り込み後)
+    expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])).toBe(true);
+    expect(ok([1, 2, 4])).toBe(false); // 予約でない欠番
+    expect(ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13])).toBe(false); // 0011 の予約を理由に、0012 を飛ばしてよいことにはならない
+    expect(ok([2, 3])).toBe(false); // 0001 から始まらない
+    expect(ok([1, 2, 2])).toBe(false); // 重複
+    expect(ok([1, 3, 2])).toBe(false); // 順序の乱れ
   });
 
   it("破壊的な文(DROP・DELETE・UPDATE・TRUNCATE・REPLACE・ALTER TABLE の DROP/RENAME)が1つも無い", () => {

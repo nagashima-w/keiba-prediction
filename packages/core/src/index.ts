@@ -96,6 +96,11 @@ export {
   isNonStartResult,
   parseHorseResults,
 } from "./scraper/parse-horse-results.js";
+export type {
+  JockeyResultsSaveEntry,
+  JockeyResultsStore,
+  StoredJockeyResults,
+} from "./scraper/jockey-results-store.js";
 export {
   JockeyResultsParseError,
   parseJockeyResults,
@@ -111,6 +116,7 @@ export {
 } from "./scraper/parse-race-result.js";
 export { OikiriParseError, parseOikiri } from "./scraper/parse-oikiri.js";
 export {
+  DEFAULT_JOCKEY_REQUEST_LIMIT,
   DEFAULT_JOCKEY_TTL_MS,
   DEFAULT_ODDS_TTL_MS,
   DEFAULT_OIKIRI_TTL_MS,

@@ -32,6 +32,7 @@ import {
 } from "./fetch-combo-odds.js";
 import type { HorseId, KaisaiDate, RaceId } from "./ids.js";
 import { parseJockeyId, venueKindOfRaceId } from "./ids.js";
+import type { JockeyResultsSaveEntry, JockeyResultsStore, StoredJockeyResults } from "./jockey-results-store.js";
 import { excludeNonStartResults, parseHorseResults } from "./parse-horse-results.js";
 import { parseJockeyResults, type JockeyYearRecord } from "./parse-jockey-results.js";
 import { parseNarOdds } from "./parse-nar-odds.js";
@@ -94,12 +95,27 @@ export const DEFAULT_RESULTS_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_OIKIRI_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
- * 騎手の年度別成績のキャッシュ許容鮮度(ミリ秒。Issue #226)。既定24時間(戦績と同じ)。
- * 年度別の成績は開催日ごとに増えるだけで、分析に使う窓(前年+当年)の数百走に対して1日の変化は小さく、
- * 前日の夜に取った成績を翌日の発走前の分析でも使い回してよい(取り直しのリクエストを増やさない)。
- * 鮮度は読み取り側で判定する(`cache.ts`の`maxAgeMs`)。
+ * 騎手の年ごとの成績の許容鮮度(ミリ秒。Issue #226)。**既定 7 日**(ユーザー決定 2026-10-11: 騎手の成績の更新は週に 1 回で十分)。
+ * 年度別の成績は開催日ごとに増えるだけで、分析に使う窓(前年+当年)の数百走に対して 1 日の変化は小さい。
+ *
+ * 2 か所に効く(どちらも読み取り側で判定する):
+ *  - **`ScrapeDeps.jockeyStore`(日をまたいで共有する保存先。クラウド版は D1)の取得日時**: この値以内なら netkeiba に出ずに使う。
+ *    日をまたいで再利用できるのはこちらだけ。
+ *  - `RaceFetcher` のキャッシュ(`maxAgeMs`): クラウド版は開催日ごとの DO の SQLite で、日をまたがない(翌日の DO は空から始まる)。
+ *    保存先が無い構成(exe 等)・保存先が失敗したときの、同じ日の中の予備。
  */
-export const DEFAULT_JOCKEY_TTL_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_JOCKEY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 1 回の `scrapeRace` が `RaceFetcher.fetchText` を呼ぶ回数の、騎手の取得に対する上限(既定 40)。騎手を 1 人取るたびに、
+ * それまでの呼び出しの合計(出馬表・戦績・調教・オッズ・組合せオッズ・取得済みの騎手。**キャッシュに当たる呼び出しも数える**=
+ * 悲観側)がこの値に達していれば、残りの騎手は取らずに警告を 1 件残して補正なしで続行する。
+ *
+ * 理由: クラウド版は 1 回の処理(DO のアラーム)の中のサブリクエストが Free で 50 まで。騎手を足す前の最悪は、地方 15 頭以上・組合せ ON・
+ * 冷えた状態で 2N+4(N=15 で 34 本)になり、騎手 M 人を足すと 50 を超えうる(レビュー指摘: 49〜52 本)。保存先(D1)から読んだ騎手は
+ * 呼び出しに数えない。D1 化で通常は 0〜数本で済むが、最初の週・冷えた状態のための保険として入れる。
+ */
+export const DEFAULT_JOCKEY_REQUEST_LIMIT = 40;
 
 /**
  * オッズのキャッシュ許容鮮度(ミリ秒)。既定60秒。
@@ -156,6 +172,12 @@ export interface ScrapeDeps {
   readonly now?: () => Date;
   /** TTLの上書き(指定したカテゴリのみ差し替え)。 */
   readonly ttl?: Partial<ScrapeTtlConfig>;
+  /**
+   * 騎手の年ごとの成績を、日をまたいで共有する保存先(Issue #226。クラウド版は D1)。`options.includeJockeyStats` が true のときだけ使う。
+   * 取得の前に読み、`ttl.jockeyMs`(既定 7 日)以内なら netkeiba に出ない。取得したぶんは取得の後にまとめて保存する。
+   * 読み書きの失敗は投げずに警告にして取得へフォールバックする。省略時(exe 等)は保存先なしで、従来どおり取得する。
+   */
+  readonly jockeyStore?: JockeyResultsStore;
 }
 
 /** scrapeRace の呼び出しオプション。 */
@@ -185,6 +207,11 @@ export interface ScrapeRaceOptions {
    * 呼び出し側は、騎手の重みが 0 のときはこれを true にしない(取得しても使わないため)。
    */
   readonly includeJockeyStats?: boolean;
+  /**
+   * 騎手の取得に対する、この `scrapeRace` の fetcher 呼び出しの合計の上限(既定 {@link DEFAULT_JOCKEY_REQUEST_LIMIT}=40)。
+   * テストが小さい値で上限の挙動を確かめるための上書き。`includeJockeyStats` が false なら無関係。
+   */
+  readonly jockeyRequestLimit?: number;
 }
 
 /** 取得中に発生した非致命的な問題の種別。 */
@@ -549,11 +576,19 @@ export async function scrapeRace(
   const fetchedAt = now().toISOString();
   const warnings: ScrapeWarning[] = [];
   const isNar = venueKindOfRaceId(raceId) === "nar";
+  // fetcher の呼び出しの回数を数える(騎手の取得の上限〈DEFAULT_JOCKEY_REQUEST_LIMIT〉の判定用)。キャッシュに当たる呼び出しも数える(悲観側)。
+  let fetchCalls = 0;
+  const fetcher: RaceFetcher = {
+    fetchText: (url, fetchOptions) => {
+      fetchCalls += 1;
+      return deps.fetcher.fetchText(url, fetchOptions);
+    },
+  };
 
   // (1) 出馬表(必須): 失敗は throw。
   // shutubaUrl は race_id の場コードに応じて race.netkeiba.com / nar.netkeiba.com を
   // 自動選択するため、中央・地方でこのステップの呼び出し自体は変わらない。
-  const shutubaText = await deps.fetcher.fetchText(shutubaUrl(raceId), {
+  const shutubaText = await fetcher.fetchText(shutubaUrl(raceId), {
     maxAgeMs: ttl.shutubaMs,
   });
   const parsedShutuba = parseShutuba(shutubaText);
@@ -595,7 +630,7 @@ export async function scrapeRace(
   const results = new Map<string, HorseRaceResult[]>();
   for (const horse of shutuba.horses) {
     try {
-      const text = await deps.fetcher.fetchText(
+      const text = await fetcher.fetchText(
         horseResultsApiUrl(horse.horseId),
         { maxAgeMs: ttl.resultsMs },
       );
@@ -619,7 +654,7 @@ export async function scrapeRace(
   const oikiriByHorse = new Map<string, OikiriEntry>();
   if (!isNar) {
     try {
-      const oikiriText = await deps.fetcher.fetchText(oikiriUrl(raceId), {
+      const oikiriText = await fetcher.fetchText(oikiriUrl(raceId), {
         maxAgeMs: ttl.oikiriMs,
       });
       for (const entry of parseOikiri(oikiriText).entries) {
@@ -641,10 +676,10 @@ export async function scrapeRace(
   };
   const baseOdds = isNar
     ? parseNarOdds(
-        await deps.fetcher.fetchText(narOddsPageUrl(raceId), oddsFetchOptions),
+        await fetcher.fetchText(narOddsPageUrl(raceId), oddsFetchOptions),
       )
     : parseOdds(
-        await deps.fetcher.fetchText(oddsApiUrl(raceId), oddsFetchOptions),
+        await fetcher.fetchText(oddsApiUrl(raceId), oddsFetchOptions),
       );
   // オッズ取得直後の時刻。着手時刻(fetchedAt)とは別に記録する。
   // 組合せオッズ(下記(5))はこの後に取得するが、既存の意味(「単勝・複勝オッズ取得直後」)を
@@ -695,7 +730,7 @@ export async function scrapeRace(
       "wide",
       raceId,
       startingUmabans,
-      deps.fetcher,
+      fetcher,
       oddsFetchOptions,
       warnings,
     );
@@ -703,7 +738,7 @@ export async function scrapeRace(
       "trio",
       raceId,
       startingUmabans,
-      deps.fetcher,
+      fetcher,
       oddsFetchOptions,
       warnings,
     );
@@ -711,7 +746,7 @@ export async function scrapeRace(
       "quinella",
       raceId,
       startingUmabans,
-      deps.fetcher,
+      fetcher,
       oddsFetchOptions,
       warnings,
     );
@@ -719,7 +754,7 @@ export async function scrapeRace(
       "exacta",
       raceId,
       startingUmabans,
-      deps.fetcher,
+      fetcher,
       oddsFetchOptions,
       warnings,
     );
@@ -731,7 +766,7 @@ export async function scrapeRace(
           "trifecta",
           raceId,
           startingUmabans,
-          deps.fetcher,
+          fetcher,
           oddsFetchOptions,
           warnings,
         );
@@ -739,7 +774,7 @@ export async function scrapeRace(
     const bracketQuinellaOutcome = await fetchBracketQuinellaOutcome(
       raceId,
       shutuba.horses.map((h) => h.wakuban),
-      deps.fetcher,
+      fetcher,
       oddsFetchOptions,
       warnings,
     );
@@ -759,31 +794,79 @@ export async function scrapeRace(
     };
   }
 
-  // (6) 騎手の年度別成績(optional・オプトイン。Issue #226)。既存の取得がすべて済んだ後ろで、騎手IDで一意にして
-  // 1人1本を順に取る。失敗は騎手単位で握る(警告にして、その騎手は載せない)。騎手IDの無い馬(騎手未定・
-  // リンク欠損)は取得せず、警告も出さない(補正なし=「データなし」で十分に伝わる)。
+  // (6) 騎手の年ごとの成績(optional・オプトイン。Issue #226)。既存の取得がすべて済んだ後ろで、騎手IDで一意にして処理する。
+  //   1. 保存先(`deps.jockeyStore`。クラウド版は D1)があれば、**取得の前にまとめて 1 回読む**。取得日時から ttl.jockeyMs(既定 7 日)以内なら
+  //      その値を使い、netkeiba に出ない(週に 1 回の更新)。読めなかったら警告を 1 件残して、全員を取得へ回す(フォールバック)。
+  //   2. 保存先に無い・古い騎手を netkeiba から順に取る(キャッシュ〈maxAgeMs=ttl.jockeyMs〉に当たれば取得しない)。1 人の失敗は騎手単位で握る
+  //      (警告にして、その騎手は載せない)。**fetcher の呼び出しの合計が上限(既定 40)に達していれば、残りは取らず**、警告を 1 件残して補正なしで続行する。
+  //   3. 取得できたぶんを、**まとめて 1 回**保存先へ書く。書けなくても投げない(警告を 1 件残す)。
+  // 騎手IDの無い馬(騎手未定・リンク欠損)は取得せず、警告も出さない(補正なし=「データなし」で十分に伝わる)。
   let jockeyStats: Record<string, readonly JockeyYearRecord[]> | undefined;
   if (options.includeJockeyStats) {
     jockeyStats = {};
     const kind = isNar ? "nar" : "central";
-    const seen = new Set<string>();
+    const jockeyIds: string[] = [];
     for (const horse of shutuba.horses) {
-      const jockeyId = horse.jockeyId;
-      if (jockeyId === null || seen.has(jockeyId)) {
+      if (horse.jockeyId !== null && !jockeyIds.includes(horse.jockeyId)) {
+        jockeyIds.push(horse.jockeyId);
+      }
+    }
+
+    let stored: ReadonlyMap<string, StoredJockeyResults> = new Map();
+    if (deps.jockeyStore !== undefined && jockeyIds.length > 0) {
+      try {
+        stored = await deps.jockeyStore.loadMany(jockeyIds, kind);
+      } catch (error) {
+        warnings.push({
+          kind: "騎手",
+          message: `騎手の成績の保存先を読めなかったため、netkeiba から取得します: ${errorMessage(error)}`,
+        });
+      }
+    }
+
+    const nowMs = now().getTime();
+    const requestLimit = options.jockeyRequestLimit ?? DEFAULT_JOCKEY_REQUEST_LIMIT;
+    const toSave: JockeyResultsSaveEntry[] = [];
+    let notFetched = 0;
+    for (const jockeyId of jockeyIds) {
+      const hit = stored.get(jockeyId);
+      if (hit !== undefined && nowMs - hit.fetchedAtMs <= ttl.jockeyMs) {
+        jockeyStats[jockeyId] = hit.years;
         continue;
       }
-      seen.add(jockeyId);
+      if (fetchCalls >= requestLimit) {
+        notFetched += 1;
+        continue;
+      }
       try {
-        const text = await deps.fetcher.fetchText(
+        const text = await fetcher.fetchText(
           jockeyResultsUrl(parseJockeyId(jockeyId), kind),
           { maxAgeMs: ttl.jockeyMs },
         );
-        jockeyStats[jockeyId] = parseJockeyResults(text);
+        const years = parseJockeyResults(text);
+        jockeyStats[jockeyId] = years;
+        toSave.push({ jockeyId, years, fetchedAtMs: nowMs });
       } catch (error) {
         warnings.push({
           kind: "騎手",
           jockeyId,
           message: `騎手ID ${jockeyId} の年度別成績の取得に失敗しました: ${errorMessage(error)}`,
+        });
+      }
+    }
+    if (notFetched > 0) {
+      warnings.push({
+        kind: "騎手",
+        message: `この取得の呼び出しが上限(${requestLimit}本)に達したため、騎手 ${notFetched} 人の成績は取得せず、補正なしで続行します`,
+      });
+    }
+    if (deps.jockeyStore !== undefined && toSave.length > 0) {
+      try {
+        await deps.jockeyStore.saveMany(kind, toSave);
+      } catch (error) {
+        warnings.push({
+          kind: "騎手",
+          message: `騎手の成績を保存先に保存できなかったため、次回も取得します: ${errorMessage(error)}`,
         });
       }
     }

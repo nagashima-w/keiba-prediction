@@ -11,8 +11,10 @@
  * ## 役割
  * 開催日(`idFromName(kaisaiDate)`)ごとに1つの DO が、その日の全レースの**事前分析**を直列に処理する(gate の待ち行列の上限 8 に当たらない)。
  *  - **ステップ1(取得 `fetch`)**: `scrapeRace`(変更なし。組合せオッズは取らない。単勝・複勝のオッズを1本取る)でキャッシュを埋める。中央16頭の
- *    冷えた状態で gate への取得は **19 本**(出馬表 1・戦績 16・調教 1・単勝複勝 1)。**騎手の重みが 0 より大きいとき(既定 0.15)は、騎手の年度別成績
- *    (Issue #226)を騎手 ID で一意にして 1 人 1 本、その後ろに足す**(16 頭・騎手 16 人で 35 本。中央 18 頭・騎手 18 人で最大 39 本)。重みが 0 なら 19 本のまま。
+ *    冷えた状態で gate への取得は **19 本**(出馬表 1・戦績 16・調教 1・単勝複勝 1)。**騎手の重みが 0 より大きいとき(既定 0.15)は、騎手の年ごとの成績
+ *    (Issue #226)も騎手 ID で一意にして取る**: まず保存先(`jockeyStore`。本番は D1。日をまたいで共有)から読み、取得日時から 7 日以内なら netkeiba に
+ *    出ない(週に 1 回の更新)。保存先に無い・古い騎手だけを 1 人 1 本、その後ろに足す(16 頭・騎手 16 人で最大 35 本。保存先が空の最初の週と冷えた状態だけ)。
+ *    1 回の取得の fetcher 呼び出しの合計は上限 40(`DEFAULT_JOCKEY_REQUEST_LIMIT`)で、届いたら残りの騎手は取らず補正なしで続ける。重みが 0 なら 19 本のまま。
  *  - **ステップ2(計算 `compute`)**: **netkeiba には出ず**(gate は0回)、キャッシュだけで `runCloudAnalysis(analyze: null, allocationSettings: null)` を走らせ、
  *    朝の prior(`AnalysisResult`)を **DO のストレージにだけ**置く(**D1・R2 には書かない**。ユーザー判断 2026-10-06: 保存するのは発走前の分析だけ)。
  *    取得のあとで TTL が切れても読めるよう、キャッシュの鮮度を実質無期限にして読む。キャッシュに戦績が無ければ(掃除された等)、netkeiba に出ず失敗にする
@@ -73,6 +75,7 @@ import { importRaceResult } from "../../packages/core/src/ev/result-import";
 import { parseRaceFieldSize, parseRaceResult, RaceResultNotConfirmedError } from "../../packages/core/src/scraper/parse-race-result";
 import { DEFAULT_RESULTS_TTL_MS, listNarRaces, listRaces, scrapeRace, type RaceFetcher, type ScrapeTtlConfig } from "../../packages/core/src/scraper/scrape-race";
 import { parseKaisaiDate, parseRaceId } from "../../packages/core/src/scraper/ids";
+import type { JockeyResultsStore } from "../../packages/core/src/scraper/jockey-results-store";
 import type { RaceListEntry } from "../../packages/core/src/scraper/types";
 import { narRaceListSubUrl, raceListSubUrl } from "../../packages/core/src/scraper/urls";
 import { MAX_BULK_RACES } from "./bulk-limits";
@@ -288,6 +291,12 @@ export interface RaceDayDeps {
   readonly sink?: AnalysisSink;
   /** 設定(D1 の1行)の読み出し。発走前の取得ステップで1回だけ呼び、スナップショットをタスクに保存する。 */
   readonly loadSettings?: () => Promise<CloudSettings>;
+  /**
+   * 騎手の年ごとの成績の保存先(Issue #226。本番は D1 の `jockey_results`)。日をまたいで共有し、取得日時から 7 日以内なら netkeiba に出ない
+   * (騎手の成績の更新は週に 1 回で十分。ユーザー決定 2026-10-11)。省略時は保存先なし(取得キャッシュだけ=同じ日の DO の中だけ)。
+   * 取得ステップ・発走前の取得・計算ステップ(キャッシュだけ。許容鮮度は実質無期限)のすべてに同じものを渡す。
+   */
+  readonly jockeyStore?: JockeyResultsStore;
   /**
    * LLM の依存(Issue #194〈#179-b〉。sender・モデル一覧。DO のラッパが、Worker の secret `ANTHROPIC_API_KEY` から作る)。**キーが無ければ渡さない**: 発走前の分析は LLM なしで保存し、
    * 理由(固定文言)を残す。朝のタスクでは使わない。`lister` が無ければ、モデルの自動選択をせず、固定モデルで送る。
@@ -617,6 +626,7 @@ export class RaceDayCore {
   private readonly onWarn: (message: string) => void;
   private readonly sink: AnalysisSink | undefined;
   private readonly loadSettings: (() => Promise<CloudSettings>) | undefined;
+  private readonly jockeyStore: JockeyResultsStore | undefined;
   private readonly llm: CloudLlm | undefined;
   /** 分析モデルの選択(`analysisModel`)に応じたモデルの自動選択(系統ごとの取得結果・降格を、この DO の寿命の間だけ覚える。`llm.lister` が無ければ undefined。Issue #158)。 */
   private readonly modelSelectorFor: ModelSelectorFor | undefined;
@@ -650,6 +660,7 @@ export class RaceDayCore {
     this.onWarn = onWarn;
     this.sink = deps.sink;
     this.loadSettings = deps.loadSettings;
+    this.jockeyStore = deps.jockeyStore;
     this.llm = deps.llm;
     this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, onWarn);
     // ⚠️ スキーマ変更の仕組みは無い: DO の SQLite の表は `CREATE TABLE IF NOT EXISTS` だけで作る(既存の表に列を足す処理は無い)。
@@ -1571,7 +1582,7 @@ export class RaceDayCore {
    *
    * **原子性に頼らない冪等性**(確定の途中で落ちても、再実行で正しく続く): 確定の印(`plan_finalized_at`)は最後に書く。計画の行は `ON CONFLICT DO NOTHING`(最初の計画を変えない)、
    * morning は**行がまだ無いときだけ**積む(状態に関係なく、既にあれば積み直さない)、offset は最初に決めた値を残す。再実行は、既にある行を飛ばして、足りない行・morning だけを足す。
-   * skip の行には morning を積まない(pre_race が走らないので、取得のための 19 本を無駄にしない)。
+   * skip の行には morning を積まない(pre_race が走らないので、取得のための本数を無駄にしない。中央 16 頭で戦績などの 19 本。騎手の成績を取るときは、保存先〈D1〉に無い騎手のぶん〈最大 M 本〉がさらに掛かる)。
    * 上限: 対象1件は morning と pre_race の2行を使うので、`既存のタスク行 + 計画済み(planned)の行 + 今回の行ぶん(2、または morning が既にあれば 1)> MAX_TASKS_PER_DAY` なら skipped(cap)。
    */
   private async runPlanFinalize(): Promise<StepOutcome> {
@@ -1997,7 +2008,7 @@ export class RaceDayCore {
       // 騎手の年度別成績(Issue #226)は、ここ(netkeiba に出る取得ステップ)で取っておく。計算ステップはキャッシュだけを読む。
       const race = await scrapeRace(
         parseRaceId(task.race_id),
-        { fetcher: this.networkFetcher, now: () => new Date(this.now()) },
+        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore },
         { includeComboOdds: false, includeJockeyStats: wantsJockeyStats(settings) },
       );
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");
@@ -2082,7 +2093,7 @@ export class RaceDayCore {
           };
     const race = await scrapeRace(
       raceId,
-      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL },
+      { fetcher, now: () => new Date(this.now()), ttl: CACHE_ONLY_TTL, jockeyStore: this.jockeyStore },
       options,
     );
     // 騎手の成績(種別=騎手)はキャッシュに無くても失敗にしない(その騎手は補正なし。戦績は無いと prior が作れないので失敗にする)。
@@ -2156,7 +2167,7 @@ export class RaceDayCore {
       }
       const race = await scrapeRace(
         parseRaceId(task.race_id),
-        { fetcher: this.networkFetcher, now: () => new Date(this.now()) },
+        { fetcher: this.networkFetcher, now: () => new Date(this.now()), jockeyStore: this.jockeyStore },
         { includeComboOdds: settings.includeComboOdds, includeJockeyStats: wantsJockeyStats(settings), bypassOddsCache: true },
       );
       const missing = race.meta.warnings.filter((w) => w.kind === "戦績");

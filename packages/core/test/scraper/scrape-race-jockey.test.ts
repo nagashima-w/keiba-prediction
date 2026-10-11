@@ -113,8 +113,8 @@ describe("scrapeRace + includeJockeyStats(中央)", () => {
     expect(JSON.parse(JSON.stringify(stats))).toEqual(stats);
   });
 
-  it("キャッシュの許容鮮度は24時間(既定)で、ttl.jockeyMs で上書きできる", async () => {
-    expect(DEFAULT_JOCKEY_TTL_MS).toBe(24 * 60 * 60 * 1000);
+  it("キャッシュの許容鮮度は7日(既定。週に1回の更新。旧: 24時間)で、ttl.jockeyMs で上書きできる", async () => {
+    expect(DEFAULT_JOCKEY_TTL_MS).toBe(7 * 24 * 60 * 60 * 1000);
     const dflt = new RecordingFetcher(centralHandler());
     await scrapeRace(CENTRAL_RACE_ID, { fetcher: dflt, now: FIXED_NOW }, { includeJockeyStats: true });
     expect(dflt.jockeyCalls.every((c) => c.options?.maxAgeMs === DEFAULT_JOCKEY_TTL_MS)).toBe(true);

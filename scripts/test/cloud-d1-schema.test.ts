@@ -203,6 +203,18 @@ const D1_EXTRA_TABLES: Readonly<Record<string, TableSchema>> = {
     foreignKeys: [],
     indexes: [{ origin: "pk", unique: 1, columns: ["kaisai_date"], name: null }],
   },
+  // 0012 の中身(Issue #226。0011 は #259 が使う)。騎手の年ごとの成績(1 騎手・1 区分で 1 行。年ごとの成績は years_json に `[[年, 騎乗数, 3着内], ...]`)。
+  // 主キーは (jockey_id, kind) の複合(TEXT なので rowid の別名ではなく、自動索引〈origin `pk`・名前なし〉ができる)。kind の CHECK は table_info に出ない。
+  jockey_results: {
+    columns: [
+      { name: "fetched_at", type: "INTEGER", notnull: 1, dflt_value: null, pk: 0 },
+      { name: "jockey_id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
+      { name: "kind", type: "TEXT", notnull: 1, dflt_value: null, pk: 2 },
+      { name: "years_json", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
+    ],
+    foreignKeys: [],
+    indexes: [{ origin: "pk", unique: 1, columns: ["jockey_id", "kind"], name: null }],
+  },
 };
 
 /** exe のスキーマに、宣言した D1 専用の追加分(列・索引・表)を足した「期待する D1 の構造」。 */
@@ -244,8 +256,8 @@ const FILES = migrationFiles();
 const exe = exeSchema();
 
 describe("migration のファイル構成", () => {
-  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql の11本だけで、番号は 0001 から連続している(後から足すときは 0012 以降)", () => {
-    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql"]);
+  it("0001_init.sql・0002_d1.sql・0003_r2_ops.sql・0004_settings.sql・0005_llm_note.sql・0006_horse_items.sql・0007_llm_calls.sql・0008_migration_import.sql・0009_start_time.sql・0010_daily_reports.sql・0011_win_odds.sql・0012_jockey_results.sql の12本だけで、番号は 0001 から連続している(後から足すときは 0013 以降)", () => {
+    expect(FILES).toEqual(["0001_init.sql", "0002_d1.sql", "0003_r2_ops.sql", "0004_settings.sql", "0005_llm_note.sql", "0006_horse_items.sql", "0007_llm_calls.sql", "0008_migration_import.sql", "0009_start_time.sql", "0010_daily_reports.sql", "0011_win_odds.sql", "0012_jockey_results.sql"]);
   });
 
   it("前提: exe のスキーマは 8 表で、列・外部キー・索引を実際に読めている(空振りでない)", () => {
