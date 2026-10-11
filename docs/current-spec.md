@@ -1628,7 +1628,7 @@ exe の検証画面の残りの表を web に持ってきた(#219 の続き): **
 - **`throttled` の文言(#255 からの申し送り)**: 応答に `reason`(`min-interval`/`daily-limit`)を足し、画面の文言を出し分ける(最短間隔のときに「1 日の集計の上限」と出さない)。
 - **回収率の丸め(#255 からの申し送り)**: 累積回収率・配分ベースの回収率(タイルと券種別の行)は、丸めると 100.0% になる値を 100.0% と出さない(`src/recovery-format.ts` の `formatRecoveryPercent`。#245 と同じ)。実複勝率・的中率は従来どおり `formatRate`(exe と同じ。ルートの `scripts/test/cloud-verify-format.test.ts` が一致を固定)。
 - **件数の見込み(D1 の実データは未確認。docs の数からの見積もり)**: ユーザーの実データは結果のあるレース最大約 1,300(1 レース 12〜13 頭)なので馬で最大約 16,000 頭、除外される分析の割合は不明。10〜40% の帯は数千件ずつで区間は十分に狭い見込みだが、50% を超える帯は 1 帯あたり数十〜百程度で区間が広い見込み(根拠の標本は `docs/investigations/probability-quality-41/report.md` の 24 レース・321 頭で小さい)。実際の件数は画面の「予測件数」で分かる。
-- **クライアントの束**: 上限 235,000 バイトのまま(230,093 → 233,976。余裕 1,024 バイト)。次にクライアントへ機能を足すときは上限の引き上げが要る見込み。
+- **クライアントの束**: 上限を 235,000 から **245,000 バイトへ引き上げた**。#254 だけの増分は +3,883(d99276a の 230,093 → 233,976。その時点では上限に収まっていた)。その後 main に入った #261・#260・#262(プロンプトの文面。設定画面のプレビューで client にも入る)で 24e3325 が 231,913(+1,820)になり、#254 を載せた生成物が **235,792**(24e3325 から +3,879)で旧上限を 792 バイト超えたため。余裕は 9,208 バイト。次にクライアントへ機能を足すときは、実測値をここと `client-bundle.test.ts` に書く。
 - **検査**: `packages/core/test/ev/binomial-interval.test.ts`・`verify.test.ts`(`meanPredictedProb`・`priorCalibration`)・`native-free-modules.test.ts`(import を持たない)、cloud の `verify-core.test.ts`(`CACHE_VERSION`・`throttled` の `reason`)・`client-api-verify-contract.test.ts`・`client-verify-model.test.ts`・`client-verify-screen.test.ts`・`client-view-verify.test.ts`・`client-app-verify.test.ts`・`client-bundle.test.ts`。
 
 ### クラウド版の日報(#235。v1.37.0。**公開すると、その日が静かになった時点で自動で LLM を 1 回呼び、Discord に要約を送る**)

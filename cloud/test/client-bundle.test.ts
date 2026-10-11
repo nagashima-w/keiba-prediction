@@ -50,7 +50,7 @@ describe("生成物のドリフトと決定性", () => {
     expect(unminified).not.toBe(CLIENT_JS);
   }, 60_000);
 
-  it("生成物は小さい(肥大の検知。上限は 235,000 バイト)", () => {
+  it("生成物は小さい(肥大の検知。上限は 245,000 バイト)", () => {
     // Issue #222: 上限を 125,000 から 175,000 へ引き上げた。移行画面(ファイルのブラウザ検証・アップロード・進捗の表示)を足したため。実測(`pnpm run build:client` が出力する CLIENT_JS のバイト数): #222 の前
     // (421c99c)は 117,977、実装後は 157,309(+39,332)。増分の内訳(esbuild の metafile の `bytesInOutput`): 移行の形式の検証 `cloud-migration-format.ts` 10,437・画面の文言を作る `migration-model.ts` 10,318・
     // API の分類と固定の失敗文言 `api-migration.ts` 7,829・制御 `migration-screen.ts` 2,565・検証 `migration-file.ts` 2,020・行の分割 `src/migration-reader.ts` 1,475、残りは `view.ts`・`dom.ts` の増分。
@@ -71,11 +71,14 @@ describe("生成物のドリフトと決定性", () => {
     // Issue #247: 上限は据え置き。馬のカードの単勝の想定・実際の表示(API の検証 `api-analysis.ts` の3項目と `oddsStatus`・カードの表示用データ `result.ts`・VNode `view.ts`・表示の整形 `src/win-odds-format.ts`)を足した増分は +1,686
     // (218,081 → 219,767。計り方: cd78fc2〈#246 の承認後〉の生成物と今の生成物を、それぞれ import して `Buffer.byteLength` を取った。上限までの余裕は 15,233 バイト)。勝率の計算はサーバで行い、クライアントに Plackett-Luce を入れていない
     // (クライアントが推定を呼ぶと束に Plackett-Luce が入って増える。下の「Plackett-Luce が入っていない」テストが、生成物にモデルの文言が無いことで固定する)。
-    // Issue #254: 上限は 235,000 のまま据え置き(引き上げなし)。検証画面の対応表の信頼区間(Wilson 区間と判定 `@keiba/core/ev/binomial-interval`・補正後/補正前の切替・平均予測/95%区間/判定の cell・
-    // 説明文・throttled の文言の出し分け・回収率の丸め〈`src/recovery-format`〉)を足した増分は +3,883(230,093 → 233,976。計り方: d99276a〈#255 の承認後〉の生成物と今の生成物を、それぞれ
-    // import して `Buffer.byteLength(CLIENT_JS)` を取った。今の値は `pnpm run build:client` の出力)。上限までの余裕は 1,024 バイト(約 0.4%)なので、**次にクライアントへ機能を足す Issue は、ここで上限の引き上げが要る見込み**。
+    // Issue #254: 上限を 235,000 から 245,000 へ引き上げた。検証画面の対応表の信頼区間(Wilson 区間と判定 `@keiba/core/ev/binomial-interval`・補正後/補正前の切替・平均予測/95%区間/判定の cell・
+    // 説明文・throttled の文言の出し分け・回収率の丸め〈`src/recovery-format`〉)を足した増分は、#254 だけで見ると +3,883(230,093 → 233,976。d99276a〈#255 の承認後〉の生成物との比較)で、
+    // その時点では上限 235,000 に収まっていた(余裕 1,024 バイト)。その後 main に入った #261・#260・#262(設定画面のプレビューで client にも入るプロンプトの文面の増加)が重なり、
+    // 24e3325 の生成物が 231,913(d99276a から +1,820)、それに #254 を載せた今の生成物が **235,792**(24e3325 から +3,879)で、235,000 を 792 バイト超えた。
+    // 計り方: 各コミットの `cloud/src/client-bundle.generated.ts` を import して `Buffer.byteLength(CLIENT_JS)` を取った(今の値は `pnpm run build:client` の出力)。
+    // 新しい上限 245,000 は今の大きさの約 3.9% 増(余裕は 9,208 バイト)。増えたのは日本語の文言(`\u` エスケープ)とロジックで、Plackett-Luce などの重い依存は入っていない。
     // **さらに上げるときは、増える理由と実測値をここに書く。**
-    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(235_000);
+    expect(Buffer.byteLength(CLIENT_JS)).toBeLessThan(245_000);
   });
 });
 
