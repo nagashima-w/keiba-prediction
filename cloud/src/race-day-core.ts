@@ -633,11 +633,14 @@ export class RaceDayCore {
     this.sql = deps.sql;
     this.now = deps.now;
     this.setAlarm = deps.setAlarm;
-    this.onWarn = deps.onWarn;
+    // ログ(onWarn)に出る文面は、すべて鍵の形(`sk-ant-`)を伏せてから渡す(Issue #255)。例外文をそのまま載せる警告が複数あり(`errorMessage(error)`)、
+    // 個々の呼び出しで伏せ忘れないよう、ここで 1 箇所だけ包む。下位へ渡す onWarn(モデル選択・キャッシュ・ゲートの HTTP クライアント)も、この包んだ関数を使う。
+    const onWarn = (message: string): void => deps.onWarn(redactSecrets(message));
+    this.onWarn = onWarn;
     this.sink = deps.sink;
     this.loadSettings = deps.loadSettings;
     this.llm = deps.llm;
-    this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, deps.onWarn);
+    this.modelSelectorFor = deps.llm === undefined ? undefined : createCloudModelSelectors(deps.llm, onWarn);
     // ⚠️ スキーマ変更の仕組みは無い: DO の SQLite の表は `CREATE TABLE IF NOT EXISTS` だけで作る(既存の表に列を足す処理は無い)。
     // 本番の RaceDay は未デプロイなので、今は列を足してよい。**最初の本番デプロイのあとに列を足すときは、`ALTER TABLE ... ADD COLUMN` を
     // ここに足すこと**(足さないと、既に作られた表に列が無いまま INSERT/SELECT が落ちる)。
@@ -668,7 +671,7 @@ export class RaceDayCore {
     this.cache = new DoSqlCacheStore({ sql: this.sql, now: this.now, onWarn: this.onWarn });
     // RaceDay から gate への呼び出しは直列(同時に1本)。HttpClient は間隔 0・再試行 0(間隔制御は gate だけが行う)。
     // 結果のページは同じ HttpClient(同じ直列化した gate)を、キャッシュを通さずに使う(DO の SQLite に結果のページを溜めない。Issue #208)。
-    const httpClient = createGateHttpClient(serializeGate(deps.gate), { onWarn: deps.onWarn });
+    const httpClient = createGateHttpClient(serializeGate(deps.gate), { onWarn });
     this.httpClient = httpClient;
     this.networkFetcher = new CachedFetcher({ fetcher: httpClient, cache: this.cache });
     this.cacheOnly = new CachedFetcher({ fetcher: cacheOnlyFetcher, cache: this.cache });

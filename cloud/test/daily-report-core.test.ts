@@ -615,6 +615,71 @@ describe("C9: 通知は送る前に sending を書く(送信の途中で落ち�
   });
 });
 
+describe("C7(Issue #255): LLM の試行は、呼ぶ前に永続化する(呼び出しの最中に落ちても、試行の数が戻らず、無限に続かない)", () => {
+  it("応答を待っている最中(別インスタンスから見て)に llmAttempts が 1 になっている。再起動後の失敗で上限(2 回)に達し、統計だけの日報で終える", async () => {
+    expect(REPORT_MAX_LLM_ATTEMPTS).toBe(2); // 前提: 上限は 2 回(1 回落ちたあとの 1 回で上限に達する)
+    const kv = memoryKv();
+    const h = harness({ raceCount: 2, kv, notifier: false });
+    await h.core.requestReport({ kaisaiDate: DATE, mode: "auto" });
+    await h.step(); // list
+    await h.step(); // gather
+    const before = kv.get<Record<string, unknown>>(`job:${DATE}`)!;
+    expect(before["phase"]).toBe("generate"); // 前提(空振り防止): 次は生成の段階
+    expect(before["llmAttempts"]).toBe(0);
+    expect(before["llmText"]).toBeNull();
+
+    const saved: ReportRecord[] = [];
+    const build = (sender: MessageSender) =>
+      new DailyReportCore({
+        kv,
+        now: () => h.clock.t,
+        setAlarm: () => {},
+        onWarn: () => {},
+        source: { listDayAnalyses: async () => [], readRaces: async () => [] },
+        store: {
+          hasReport: async () => false,
+          saveReport: async (r) => {
+            saved.push(r);
+            return "saved";
+          },
+        },
+        loadSettings: async () => DEFAULT_CLOUD_SETTINGS,
+        llm: { sender },
+      });
+
+    // 1 つ目のインスタンス: LLM の応答を待ったまま戻らない(DO が落ちた・追い出された想定。応答は来ない)。
+    let senderCalled!: () => void;
+    const called = new Promise<void>((resolve) => (senderCalled = resolve));
+    const hung = build(
+      () =>
+        new Promise(() => {
+          senderCalled();
+        }),
+    );
+    void hung.runNextStep();
+    await called;
+    const during = kv.get<Record<string, unknown>>(`job:${DATE}`)!;
+    expect(during["phase"]).toBe("generate");
+    expect(during["llmText"]).toBeNull(); // 前提: まだ応答は無い
+    expect(during["llmAttempts"]).toBe(1); // 呼ぶ前に書いてある(これを呼んだあとに書く実装だと 0 のまま)
+
+    // 2 つ目のインスタンス(再起動後): 同じジョブを引き継ぐ。試行は 1 から数え続け、この呼び出しの失敗で上限に達する。
+    let secondCalls = 0;
+    const restarted = build(async () => {
+      secondCalls += 1;
+      throw Object.assign(new Error("boom"), { status: 529 });
+    });
+    for (let i = 0; i < 4 && saved.length === 0; i += 1) {
+      await restarted.runNextStep();
+      h.clock.t += REPORT_RETRY_DELAY_MS;
+    }
+    expect(secondCalls).toBe(1); // 試行は積み上がっているので、再起動後の呼び出しは 1 回だけで諦める(0 から数え直すと 2 回呼ぶ)
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.body.narrative).toBeNull();
+    expect(saved[0]!.body.note).toBe(REPORT_NOTE_FAILED);
+  });
+});
+
 describe("Z2: 分析は列挙されたが詳細が全件読めなかった(ダイジェスト 0 件)ときは、LLM を呼ばず・保存せず・通知せずに終える", () => {
   it("読み出しが全件 null なら no-analyses で終わり、ジョブは消える", async () => {
     const h = harness({ raceCount: 3 });

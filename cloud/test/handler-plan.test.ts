@@ -286,12 +286,12 @@ describe("GET /api/plan(Issue #206 G-E3)", () => {
     expect(body.plan.venues[0]!.reason).toBeNull();
   });
 
-  it("Issue #245: 自由文(会場の reason・失敗の message)は、保存済みの値でも sk-ant- の鍵の形を伏せてから 200 文字に切る", async () => {
+  it("Issue #245: 自由文(会場の reason・失敗の message)は、保存済みの値でも sk-ant- の鍵の形を伏せる(200 文字に切っても鍵の本体は出ない)", async () => {
     const { deps, token } = await setup();
     const f = fakePlanDay();
     const KEY = "sk-ant-api03-SECRET_BODY-0123456789";
     const stored = `${"r".repeat(190)}${KEY}${"r".repeat(50)}`;
-    // 前提: 鍵は 200 文字目をまたぐ位置にある(切ってから伏せると、鍵の先頭の断片が残る)
+    // 前提: 鍵は 200 文字目をまたぐ位置にある(途中で切れた鍵でも本体が出ないことを確かめる。伏せる順と切る順は、このテストでは区別できない=どちらの順でも本体は出ない)
     expect(stored.indexOf(KEY)).toBeLessThan(200);
     expect(stored.indexOf(KEY) + KEY.length).toBeGreaterThan(200);
     f.planImpl = async () => ({ ...PLAN, venues: [{ venue: "nar", state: "failed", attempts: 3, reason: stored, listed: null, targeted: null }] });

@@ -634,6 +634,28 @@ describe("計画の段階: 空の日・上限・既存のタスク・offset", ()
     expect(h.core.getPlanProgress().offsetSource).toBe("default-fallback");
   });
 
+  it("Issue #255: onWarn のログに出る例外文は、sk-ant- で始まる鍵の形を伏せる(再試行の警告と、既定で確定する警告の両方。コンストラクタで 1 箇所だけ包む)", async () => {
+    const KEY = "sk-ant-api03-ABCdef_123-xyz";
+    const h = harness(CENTRAL_HTML, NAR_HTML_SYNTHETIC, {
+      loadSettings: async () => {
+        throw new Error(`D1 の失敗 ${KEY} のあとに続く文`);
+      },
+    });
+    await h.core.requestPlan({ kaisaiDate: DATE });
+    await tick(h);
+    await tick(h);
+    expect(await tick(h)).toBe("plan:plan:finalize:retry"); // 再試行の警告(1 回目)
+    expect(await tick(h)).toBe("plan:plan:finalize:retry");
+    expect(await tick(h)).toBe("plan:plan:finalize:ok"); // 既定で確定する警告(3 回目)
+    // 前提(空振り防止): 例外文を載せる 2 種類の警告が実際に出ていて、伏せ字と、鍵のあとの文は残っている(文ごと消していない)
+    const withError = h.warnings.filter((w) => w.includes("D1 の失敗"));
+    expect(withError.some((w) => w.includes("再試行します"))).toBe(true);
+    expect(withError.some((w) => w.includes("既定の"))).toBe(true);
+    expect(withError.every((w) => w.includes("sk-ant-*** のあとに続く文"))).toBe(true);
+    // 鍵の本体はどの警告にも出ない
+    expect(h.warnings.some((w) => w.includes("api03") || w.includes("ABCdef"))).toBe(false);
+  });
+
   it("設定が2回目で読めれば、その値で確定する(source は settings)", async () => {
     const h = harness();
     h.settings = { ...DEFAULT_CLOUD_SETTINGS, preRaceOffsetMinutes: 90 };

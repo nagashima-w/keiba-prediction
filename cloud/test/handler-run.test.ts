@@ -396,11 +396,11 @@ describe("GET /api/analyses/status(Issue #180)", () => {
     expect(raceDay.calls()).toBeGreaterThan(0);
   });
 
-  it("Issue #245: 閲覧者に見える error は、保存済みの値でも sk-ant- の鍵の形を伏せる(伏せてから 200 文字に切る)", async () => {
+  it("Issue #245: 閲覧者に見える error は、保存済みの値でも sk-ant- の鍵の形を伏せる(200 文字に切っても鍵の本体は出ない)", async () => {
     const { deps, token } = await setup();
     const raceDay = fakeRaceDay();
     const KEY = "sk-ant-api03-SECRET_BODY-0123456789";
-    // 前提: 鍵は 200 文字目をまたぐ位置にある(切ってから伏せると、鍵の先頭の断片が残る)
+    // 前提: 鍵は 200 文字目をまたぐ位置にある(途中で切れた鍵でも本体が出ないことを確かめる。伏せる順と切る順は、このテストでは区別できない=どちらの順でも本体は出ない)
     const stored = `${"x".repeat(190)}${KEY}${"y".repeat(50)}`;
     expect(stored.indexOf(KEY)).toBeLessThan(200);
     expect(stored.indexOf(KEY) + KEY.length).toBeGreaterThan(200);

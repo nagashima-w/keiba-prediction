@@ -324,6 +324,10 @@ describe("発走時刻の写し(start_time)が先読み判定を変える(補完
 /**
  * Issue #220: プロンプト版別の比較も exe と一致する。クラウド版が保存・配信するのは `computePromptVersionSummaries`(画面が使う項目だけの射影)なので、
  * **同じ射影を exe の結果にも適用して**、JSON 往復込みで比べる。射影の前の完全な版別レポート(core の `computeVerifyReportByPromptVersion`)も比べる(射影が差を隠していないことの確認)。
+ *
+ * **このテストが保証する範囲(Issue #255)**: 射影の**前**(完全な版別レポート)が exe と cloud で一致すること、そして、同じ関数 `computePromptVersionSummaries` を両側に適用した結果が
+ * 一致すること(= 入力が同じなら出力も同じ、という決定性)。**射影が何を残し、どの値を取り出すか**(項目の取捨選択・添字の取り違え)は、同じ射影を両側に通すので、ここでは検出できない
+ * (過信バイアスの添字を +1 する変異で、このファイルのテストが全緑だった〈Issue #237 の記録〉)。それは `cloud/test/verify-versions.test.ts` が固定する。
  */
 describe("プロンプト版別の比較は exe の結果と JSON 往復込みで一致する", () => {
   const exeFull = computeVerifyReportByPromptVersion(dataset.store, PRODUCTION_VERIFY_CONFIG);
@@ -355,7 +359,7 @@ describe("プロンプト版別の比較は exe の結果と JSON 往復込み�
     expect(JSON.parse(JSON.stringify(cloudFull))).toEqual(JSON.parse(JSON.stringify(exeFull)));
   });
 
-  it("射影(保存・配信する形)が一致する", () => {
+  it("同じ射影を両側に適用した結果が一致する(決定性。射影が何を残すかは verify-versions.test.ts の仕事)", () => {
     expect(JSON.parse(JSON.stringify(cloudSummaries))).toEqual(JSON.parse(JSON.stringify(exeSummaries)));
   });
 });

@@ -445,11 +445,14 @@ describe("buildAnalysisNotificationEmbed(Issue #230: 印の付いた馬の field
   const marksField = (out: CloudEmbed): { name: string; value: string } | undefined => out.fields?.find((f) => f.name === "印");
   // Issue #247: 印の馬の行には単勝の想定・実際(` 想定…/実際…`)と説明の行(`※…`)が付きうる。この describe が固定するのは「印・馬番・馬名」の部分なので、その部分だけを取り出す
   // (付く内容の検査は `notify-embeds-win-odds.test.ts`)。印・馬番・馬名・並び・除外の検査は旧版と同じ強さのまま。
+  // Issue #255: 落とす部分は、`想定X/実際Y`(`win-odds-format.ts` の書式: 「8.5倍」「1000倍超」「-」、実際のラベルは「実際」「実際(暫定)」「実際(予想)」、強調は ` ↑想定より高い`)の形に限る。
+  // 以前は ` 想定` 以降を丸ごと落としていたので、その後ろに余計な文字が付いても(例: 末尾に ZZ)この describe では見えなかった。形に合わない余りは残り、比較で落ちる。
+  const ODDS_SUFFIX = / 想定(?:\d+\.\d倍|1000倍超|-)\/実際(?:\((?:暫定|予想)\))?(?:\d+\.\d倍|1000倍超|-)(?: ↑想定より高い)?$/;
   const headLines = (out: CloudEmbed): string[] =>
     marksField(out)!
       .value.split("\n")
       .filter((l) => !l.startsWith("※"))
-      .map((l) => l.replace(/ 想定.*$/, ""));
+      .map((l) => l.replace(ODDS_SUFFIX, ""));
 
   it("前提: 印の並びは core の PREDICTION_MARKS と同じ(◎〇▲△☆注。クライアントの KNOWN_MARK_ORDER と同じ順)", () => {
     expect([...MARK_ORDER]).toEqual(["◎", "〇", "▲", "△", "☆", "注"]);

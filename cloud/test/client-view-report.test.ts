@@ -141,6 +141,34 @@ describe("日報画面の VNode: レースごと(一言・印)と印別の成績
     expect(rows).toEqual([["◎", "3 頭 / 1 / 3"], ["〇", "2 頭 / 0 / 2"]]);
   });
 
+  it("Issue #255 境界: 印別の成績は 1 行だけでも節(見出しと行)を出す。0 行のときは見出しごと出さない", () => {
+    const MARK_HEADING = "印別の成績(結果のあるレース。頭数 / 1着 / 3着内)";
+    const withMarks = (byMark: ReportDetail["stats"]["byMark"]): ReportDetail => {
+      const base = report();
+      return report({ stats: { ...base.stats, byMark } });
+    };
+    // 前提(空振り防止): 見出しは固定の文字列で、基準の日報(2 行)には出ている
+    expect(headings(tree())).toContain(MARK_HEADING);
+    // 1 行だけ(`markRows.length > 0` の境界。`> 1` に変えると落ちる)
+    const one = tree(withMarks([{ mark: "◎", count: 1, win: 1, top3: 1 }]));
+    const list = after(one, "h3", MARK_HEADING);
+    expect(list?.tag).toBe("ul");
+    expect(findAll(list!, (n) => n.tag === "li").map((li) => findAll(li, (n) => n.tag === "span").map(textOf))).toEqual([["◎", "1 頭 / 1 / 1"]]);
+    // 0 行: 見出しも出ない
+    expect(headings(tree(withMarks([])))).not.toContain(MARK_HEADING);
+  });
+
+  it("Issue #255: 文章が無い日報には、理由の注記(notice)を出す。文章がある日報には出さない", () => {
+    const NOTE = "LLM の文章はありません(キーが未登録、または LLM を使えなかったため、統計だけの日報です)。";
+    const noticeTexts = (t: VNode): string[] => byClass(t, "notice").map(textOf);
+    // 前提(空振り防止): 文章のある日報の画面には、この注記が無い
+    expect(noticeTexts(tree())).not.toContain(NOTE);
+    const none = tree(report({ narrative: null, narrativeRaw: null, model: null }));
+    expect(noticeTexts(none)).toContain(NOTE);
+    const raw = tree(report({ narrative: null, narrativeRaw: "生の文章です" }));
+    expect(noticeTexts(raw)).toContain("LLM の応答を構造として読めなかったため、生の文章を載せています。");
+  });
+
   it("生の文章(構造として読めなかった日報)は report-raw に出し、総括の節は出さない", () => {
     const t = tree(report({ narrative: null, narrativeRaw: "生の文章です" }));
     expect(textOf(byClass(t, "report-raw")[0]!)).toBe("生の文章です");

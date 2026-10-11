@@ -103,6 +103,8 @@ function predictor(filter: number, left: number, up: number, upLeft: number): nu
 
 /**
  * 復号器の自己検査用の符号化(RGB・8 ビット)。行ごとのフィルタの種類を `filters`(行数と同じ長さ)で指定する。CRC は 0 のまま(`decodePng` は見ない)。
+ * **復号と同じ `predictor` を使う**ので、フィルタの取り違え(Sub と Up の入れ替え、Average の丸めの違い)では往復が崩れない。往復の検査でしかない
+ * (`pngFromFilteredRows` の既知のベクトルが、`predictor` の中身を独立に固定する)。
  */
 export function encodePngForTest(width: number, height: number, rgb: Uint8Array, filters: readonly number[]): Uint8Array {
   const channels = 3;
@@ -118,6 +120,29 @@ export function encodePngForTest(width: number, height: number, rgb: Uint8Array,
       raw[y * (stride + 1) + 1 + x] = (cur - predictor(filters[y]!, left, up, upLeft)) & 255;
     }
   }
+  return assemblePng(width, height, raw);
+}
+
+/**
+ * **フィルタをかけたあとの値**(ファイルに入っているバイト)を、そのまま並べた PNG(RGB・8 ビット)を作る。`predictor` を通さないので、
+ * 復号の結果と比べる期待値を、PNG の仕様から手計算(または別実装)で求めておけば、`predictor` と独立した検査になる(Issue #255)。
+ * `rows` の各行は、フィルタの種類と、その行の保存値(幅 × 3 バイト)。
+ */
+export function pngFromFilteredRows(width: number, rows: readonly { readonly filter: number; readonly stored: readonly number[] }[]): Uint8Array {
+  const stride = width * 3;
+  const raw = new Uint8Array(rows.length * (stride + 1));
+  rows.forEach((row, y) => {
+    if (row.stored.length !== stride) {
+      throw new Error(`行 ${y} の保存値が ${row.stored.length} バイト(期待 ${stride})`);
+    }
+    raw[y * (stride + 1)] = row.filter;
+    raw.set(row.stored, y * (stride + 1) + 1);
+  });
+  return assemblePng(width, rows.length, raw);
+}
+
+/** IHDR・IDAT・IEND を並べる(CRC は 0 のまま)。`raw` は行ごとの「フィルタ種別 + 保存値」。 */
+function assemblePng(width: number, height: number, raw: Uint8Array): Uint8Array {
   const chunk = (type: string, data: Uint8Array): number[] => {
     const len = data.length;
     return [(len >>> 24) & 255, (len >>> 16) & 255, (len >>> 8) & 255, len & 255, ...[...type].map((c) => c.charCodeAt(0)), ...data, 0, 0, 0, 0];

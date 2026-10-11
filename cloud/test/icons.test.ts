@@ -3,7 +3,7 @@ import { handle, type Env } from "../src/handler";
 import { ICON_CACHE_CONTROL, ICON_PATHS, iconAsset } from "../src/icons";
 import { requiredRole } from "../src/route-policy";
 import { GOOD_ENV, localKeys, makeKey, NOW, signToken } from "./helpers";
-import { decodePng, encodePngForTest, meanLuminance } from "./png-pixels";
+import { decodePng, encodePngForTest, meanLuminance, pngFromFilteredRows } from "./png-pixels";
 
 /**
  * Issue #244: アイコン(見出しの横の画像・ブラウザのタブの favicon・apple-touch-icon)の生成物と、その配信。
@@ -150,7 +150,7 @@ describe("A(見出し)と C(favicon)の取り違えの検出(画素の平均輝�
   const lum = (p: string): number => meanLuminance(decodePng(bytesOf(p)));
   const spread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
 
-  it("復号器の自己検査: 5 種のフィルタ(なし・Sub・Up・Average・Paeth)を行ごとに使って符号化した既知の画像が、元の画素に戻る", () => {
+  it("復号器の自己検査(往復。Issue #255: 符号化と復号が同じ predictor を使うので、フィルタの取り違えは検出しない): 5 種のフィルタを行ごとに使って符号化した画像が、元の画素に戻る", () => {
     const width = 7;
     const height = 5;
     const rgb = new Uint8Array(width * height * 3).map((_, i) => (i * 37 + (i % 5) * 91) & 255); // 値が大きく動く(フィルタの差が出る)
@@ -167,6 +167,35 @@ describe("A(見出し)と C(favicon)の取り違えの検出(画素の平均輝�
     // 行ごとのフィルタを入れ替えても(すべて Paeth)戻る
     const paeth = decodePng(encodePngForTest(width, height, rgb, [4, 4, 4, 4, 4]));
     expect(Array.from(paeth.rgba.filter((_, i) => i % 4 !== 3))).toEqual(Array.from(rgb));
+  });
+
+  it("復号器の自己検査(独立した既知のベクトル。Issue #255): フィルタ後の値を手で並べた PNG が、PNG の仕様から求めた画素に復号される", () => {
+    // 期待値は、PNG の仕様(Sub=左・Up=上・Average=floor((左+上)/2)・Paeth=最も近い左/上/左上)から手計算し、別の実装(仕様どおりに書いた Python)でも同じ値を確かめた。
+    // `predictor` を通さずに保存値を直接書くので、フィルタの取り違え・Average の丸め(+1)・Paeth の選び方の誤りでは、この期待値と食い違う。
+    // 画素は幅 2 の RGB(1 行 6 バイト)。「左」は 3 バイト前、「左上」は前の行の 3 バイト前。
+    const png = decodePng(
+      pngFromFilteredRows(2, [
+        { filter: 0, stored: [100, 110, 40, 100, 200, 60] }, // なし
+        { filter: 4, stored: [0, 166, 10, 0, 0, 1] }, // Paeth: 先頭の 3 バイトは「上」・以降は左(同値)・左上・上を、それぞれ選ぶ
+        { filter: 1, stored: [10, 20, 30, 3, 5, 10] }, // Sub
+        { filter: 2, stored: [10, 251, 247, 37, 35, 30] }, // Up(256 を超えて折り返す値を含む)
+        { filter: 3, stored: [5, 4, 3, 6, 7, 8] }, // Average(奇数の和を含む=切り捨ての向きが出る)
+      ]),
+    );
+    const rows = [
+      [100, 110, 40, 100, 200, 60],
+      [100, 20, 50, 100, 110, 61],
+      [10, 20, 30, 13, 25, 40],
+      [20, 15, 21, 50, 60, 70],
+      [15, 11, 13, 38, 42, 49],
+    ];
+    expect({ w: png.width, h: png.height }).toEqual({ w: 2, h: 5 });
+    const decoded = rows.map((_, y) => {
+      const row: number[] = [];
+      for (let x = 0; x < 2; x += 1) row.push(png.rgba[(y * 2 + x) * 4]!, png.rgba[(y * 2 + x) * 4 + 1]!, png.rgba[(y * 2 + x) * 4 + 2]!);
+      return row;
+    });
+    expect(decoded).toEqual(rows);
   });
 
   it("配るすべての PNG が復号でき、寸法が IHDR と一致し、不透明(平均輝度が意味を持つ)", () => {

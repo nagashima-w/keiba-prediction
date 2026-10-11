@@ -90,7 +90,8 @@ function parseRaceInfo($: CheerioAPI): ShutubaRaceInfo {
   const trackCondition = PATTERNS.trackCondition.exec(data01)?.[1];
   const fence = parseFence(courseType, data01);
   // 重賞グレードバッジの有無(タスク機能B 要修正2)。RaceName配下のIcon_GradeType要素の
-  // 有無のみで判定し、番号(グレード)は解釈しない(中央h1/地方divのタグ違いはセレクタ側で吸収)。
+  // 有無のみで判定し、この判定では番号(グレード)は解釈しない(中央h1/地方divのタグ違いはセレクタ側で吸収)。
+  // グレードそのものは、下の `grade` が別に読む(Issue #250)。
   const hasGradeBadge = $(SEL.gradeBadge).length > 0;
   // グレード(Issue #250)。地方はアイコン内のテキストをそのまま(例: "Jpn1")、中央は `h1.RaceName` 内のアイコンの
   // 番号から(実測した重賞だけ=grade-label.ts)。どちらでも読めない(非重賞・未測定の番号)ときはキー自体を持たない。

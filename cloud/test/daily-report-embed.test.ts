@@ -30,7 +30,9 @@ describe("buildReportEmbed", () => {
     expect(stat.value).toContain("払戻 15,600円");
     expect(stat.value).toContain("回収率 130.0%");
     expect(stat.value).toContain("60 点中 14 点的中");
-    expect(e.fields!.find((f) => f.name === "レース")!.value).toContain("36 件");
+    // Issue #255: 結果あり・結果なしの件数も固定する(前提: 3 つの件数が互いに違う値なので、取り違えても同じ文面にならない)。
+    expect(new Set([STATS.raceCount, STATS.resultRaceCount, STATS.noResultRaceCount]).size).toBe(3);
+    expect(e.fields!.find((f) => f.name === "レース")!.value).toBe("36 件を分析(結果あり 34 件・結果なし 2 件)");
   });
 
   it("良かった点・改善点は先頭の 3 件までを field に出す。空なら field ごと出さない", () => {

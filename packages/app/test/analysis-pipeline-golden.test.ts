@@ -43,10 +43,16 @@ describe("runAnalysis の golden(exe の出力が変わらないこと。Issue #
     expect(golden.noLlmNoAllocationNoDate.record.allocation).toBeUndefined();
   });
 
+  // 個別のタイムアウト(Issue #255)。既定の 5000ms は、負荷のあるときに足りない。
+  // 時間の大半は `computeGolden()`(3 シナリオの runAnalysis。16 頭立ての全券種の組合せオッズを含む)で、`toEqual` の比較は約 40ms にすぎない
+  // (単独の実行で computeGolden 約 2.75 秒・toEqual 約 0.04 秒。4 コアの環境、N=2 回の実測。N が小さいので桁の目安)。
+  // 再現(旧の既定 5000ms のとき): packages/app で `for i in 1 2 3 4; do (timeout 60 node -e "while(true){}" &); done; pnpm exec vitest run`
+  // (4 コアに 4 プロセスの負荷をかけると、このテストだけが 5.8 秒で落ちた。N=1。負荷なしでは約 3 秒)。
+  // 全テストの timeout を延ばす・直列にする案は、ほかのテストの異常(無限ループなど)の検知を鈍らせるので採らない。
   it("3シナリオとも、今の runAnalysis の出力が golden と完全に一致する", async () => {
     const actual = await computeGolden();
     expect(actual.noLlmAllBets).toEqual(golden.noLlmAllBets);
     expect(actual.llmStubSameDayGrade).toEqual(golden.llmStubSameDayGrade);
     expect(actual.noLlmNoAllocationNoDate).toEqual(golden.noLlmNoAllocationNoDate);
-  });
+  }, 30_000);
 });

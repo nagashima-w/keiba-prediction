@@ -12,6 +12,7 @@
  *
  * 検証する不変条件:
  * 1. 起動条件: push は作業ブランチ 1 本だけ。タグ・ワイルドカードを含まず、workflow_dispatch を併設する。
+ *    トップレベルの `on:` のキーは push と workflow_dispatch だけ(pull_request 系・schedule などを足せない。Issue #255)。
  * 2. 権限は contents: read のみ(リリースへ書き込まない)。
  * 3. runner は ubuntu-latest(Windows ではない)。
  * 4. 全ステップの名前と出現順序が期待する配列と完全一致する(挿入・削除・並べ替えを一括で検出する)。
@@ -70,6 +71,24 @@ function extractRunLine(stepBlock: string): string {
   return m[1].trim();
 }
 
+/**
+ * トップレベルの `on:` の直下のキー(2 スペースインデントの `push:`・`workflow_dispatch:` など)を、出現順に返す。
+ * 次のトップレベルのキー(インデント 0)で止まる。`on:` が無ければ空配列。コメント除去済みの本文を渡す。
+ */
+function extractOnKeys(code: string): string[] {
+  const lines = code.split("\n");
+  const start = lines.indexOf("on:");
+  if (start < 0) return [];
+  const keys: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === "") continue;
+    if (!line.startsWith(" ")) break;
+    const m = /^ {2}([^\s:]+):/.exec(line);
+    if (m?.[1] !== undefined) keys.push(m[1]);
+  }
+  return keys;
+}
+
 const STEP_NAMES = {
   checkout: "リポジトリを取得",
   pnpm: "pnpm をセットアップ",
@@ -108,6 +127,12 @@ describe("検査する側の自己検証(正の対照。検出器が空振りし
     expect(extractRunLine(extractStep(sample, "一つ目"))).toBe("pnpm one");
     expect(extractRunLine(extractStep(sample, "二つ目"))).toBe("pnpm two");
   });
+
+  it("extractOnKeys は on: 直下のキーだけを出現順に返す(深い階層のキー・次のトップレベルのキー・コメントは数えない。on: が無ければ空)", () => {
+    const yml = ["name: x", "on:", "  push:", "    branches:", "      - main", "  # pull_request:", "  pull_request:", "  workflow_dispatch:", "", "permissions:", "  contents: read"].join("\n");
+    expect(extractOnKeys(withoutComments(yml))).toEqual(["push", "pull_request", "workflow_dispatch"]);
+    expect(extractOnKeys("name: x\njobs:\n  a:\n")).toEqual([]);
+  });
 });
 
 describe("ci.yml(テストの関門。exe は公開しない)", () => {
@@ -127,6 +152,11 @@ describe("ci.yml(テストの関門。exe は公開しない)", () => {
     expect(branches).toEqual([ALLOWED_BRANCH]);
     expect(code).not.toMatch(/\n {4}tags:/);
     expect(code).toContain("\n  workflow_dispatch:");
+  });
+
+  it("起動条件(Issue #255): トップレベルの on: のキーは push と workflow_dispatch だけ(pull_request・pull_request_target・schedule などを足せない)", () => {
+    // push の形は上のテストが固定している。ここは「ほかのトリガが無い」ことを、on: 直下のキーの全数で固定する。
+    expect(extractOnKeys(code)).toEqual(["push", "workflow_dispatch"]);
   });
 
   it("権限は contents: read のみで、書き込み権限が無い", () => {

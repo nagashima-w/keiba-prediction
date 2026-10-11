@@ -259,8 +259,17 @@ describe("読み込み・エラー・日付の並び", () => {
 
   it(`日付の並びは最大 ${MAX_CHIPS} 個(表示中の日は別に足す)`, () => {
     const items = Array.from({ length: 40 }, (_, i) => item(`2026${String(Math.floor(i / 28) + 8).padStart(2, "0")}${String((i % 28) + 1).padStart(2, "0")}`));
-    const chips = buildReportModel(input({ list: { kind: "ready", items }, shownDate: "20261010" })).dateChips;
-    expect(chips.length).toBeLessThanOrEqual(MAX_CHIPS + 1);
+    // 前提(Issue #255。空振り防止): 日付は今日と重ならない 40 個で、並びの上限より多い。
+    expect(items).toHaveLength(40);
+    expect(items.some((i) => i.date === "20261010")).toBe(false);
+    expect(items.length).toBeGreaterThan(MAX_CHIPS);
+    // 表示中の日が並びに入っている(今日)ときは、ちょうど MAX_CHIPS 個(上界だけの検査だと 0 個や MAX_CHIPS + 1 個でも通る)。
+    const inside = buildReportModel(input({ list: { kind: "ready", items }, shownDate: "20261010" })).dateChips;
+    expect(inside).toHaveLength(MAX_CHIPS);
+    // 表示中の日が切り捨てられる日(並びの外)のときは、別に 1 つ足して MAX_CHIPS + 1 個。足した日が current。
+    const outside = buildReportModel(input({ list: { kind: "ready", items }, shownDate: "20200101" })).dateChips;
+    expect(outside).toHaveLength(MAX_CHIPS + 1);
+    expect(outside.filter((c) => c.current).map((c) => c.href)).toEqual(["#report=20200101"]);
   });
 });
 
